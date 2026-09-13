@@ -6,7 +6,7 @@ import { ensureSessionFolder, rootDirName, sanitizeTitle, sessionFolder, sourceT
 import { uniqueFileName } from './workspaceManager'
 import { extractPdfRange, extractPptxPages } from './docsReader'
 import { visionChat, findVisionModel } from './llmService'
-import { convertToPdf } from './sofficeConvert'
+import { convertToPdf, probeSoffice, resetSofficeCache } from './sofficeConvert'
 import { probeWeb, crawlQueue, type ProbeResult, type TocChapter } from './webCrawler'
 import { appendAudit, countMonthVisionTokens, countMonthVisionPages } from './pluginAudit'
 
@@ -786,6 +786,12 @@ export function registerAiTeachingSourceHandlers(getSetting: (key: string) => un
   ipcMain.handle('aiTeachSrc:add', (_e, sessionId: string, input: AddSourceInput) => addSource(String(sessionId ?? ''), input, getSetting))
   ipcMain.handle('aiTeachSrc:remove', (_e, sessionId: string, no: number) => removeSource(String(sessionId ?? ''), Number(no), getSetting))
   ipcMain.handle('aiTeachSrc:extract', (_e, sessionId: string, no: number) => extractRange(String(sessionId ?? ''), Number(no), getSetting))
+  // LibreOffice 探测（设置页「检测」按钮）：先清缓存再重探 —— 保证「刚装好 / 刚改路径」立刻拿到真值
+  // （旧行为是进程级钉死 null，装完不重启永远找不到，见 sofficeConvert.ts 的 TTL 注释）
+  ipcMain.handle('aiTeachSrc:sofficeProbe', (_e, settingPath?: string) => {
+    resetSofficeCache()
+    return probeSoffice(typeof settingPath === 'string' && settingPath.trim() ? settingPath : getSetting('sofficePath'))
+  })
   // 3-21 视觉转写（手动档）：原件字节交给渲染层栅格化；转写结果并入提取稿
   ipcMain.handle('aiTeachSrc:pdfBytes', (_e, sessionId: string, no: number) => readSourceBytes(String(sessionId ?? ''), Number(no), getSetting))
   ipcMain.handle('aiTeachSrc:transcribe', async (_e, sessionId: string, no: number, pages: { n: number; dataUrl: string }[], modelSpec?: string) => {

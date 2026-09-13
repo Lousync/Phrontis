@@ -1,6 +1,11 @@
 /**
- * 验证「稍后（打盹）」写入链路：schedule:updateTodo → vaultUpdateTodo 是否真的把
- * snoozeUntil 落到行上。
+ * 验证日程写入链路（scheduleVaultRepo 的真实实现，非复刻品）。
+ *
+ * 覆盖两件事：
+ *  1) 「稍后（打盹）」写入：schedule:updateTodo → vaultUpdateTodo 是否真的把 snoozeUntil 落到行上
+ *  2) 级联删除：vaultDeleteTodoCascade 是否真的删父行 + 子任务，且不误删无关行
+ *     （2026-09-13 扩展：UI 的 schedule:deleteTodo 与 AI 的 schedule.delete-todo 共用同一函数，
+ *      两者都是级联删且**无回收站快照**，删错不可逆 —— 所以这条必须有回归）
  *
  * 背景（2026-09-12 报障）：提醒条「稍后」点击无反应。渲染层链路完好
  * （snooze → updateScheduleTodo → notifyDataChanged('schedule') → useDataChanged → load），
@@ -21,16 +26,28 @@ const REPO = process.argv[2] ?? 'E:/Projects/KnowledgeRecorder'
 const SRC = path.resolve(REPO, 'electron/lib/kbStore/scheduleVaultRepo.ts')
 const src = fs.readFileSync(SRC, 'utf8')
 
-/** 按大括号配平切出完整函数定义 */
-function sliceBalanced(text, from) {
-  const start = text.indexOf('{', from)
-  if (start < 0) throw new Error('未找到函数体起始大括号')
+/**
+ * 切出「export function <name>」的完整定义（含 export 前缀）。
+ * 不能按第一个 '{' 直接配平：参数的返回类型可能是对象字面量（如 `: { a: string }`），
+ * 那样会在返回类型处提前收尾，切出一个没有函数体的残块（import 时不报错、导出键直接消失）。
+ * 正确做法：先配平参数表的 ')'，其后的第一个 '{' 才是函数体。
+ */
+function sliceFn(text, from) {
+  let i = text.indexOf('(', from)
+  if (i < 0) throw new Error('未找到参数表起始括号')
+  let paren = 0
+  for (; i < text.length; i++) {
+    if (text[i] === '(') paren++
+    else if (text[i] === ')') { paren--; if (paren === 0) { i++; break } }
+  }
+  const bodyAt = text.indexOf('{', i)
+  if (bodyAt < 0) throw new Error('未找到函数体起始大括号')
   let depth = 0
-  for (let i = start; i < text.length; i++) {
-    if (text[i] === '{') depth++
-    else if (text[i] === '}') {
+  for (let j = bodyAt; j < text.length; j++) {
+    if (text[j] === '{') depth++
+    else if (text[j] === '}') {
       depth--
-      if (depth === 0) return text.slice(from, i + 1)
+      if (depth === 0) return text.slice(from, j + 1)
     }
   }
   throw new Error('大括号未配平')
@@ -38,11 +55,13 @@ function sliceBalanced(text, from) {
 
 const colTypeAt = src.indexOf('type TodoColumn')
 if (colTypeAt < 0) throw new Error('未找到 type TodoColumn（白名单类型）')
-const fnAt = src.indexOf('function vaultUpdateTodo')
+const fnAt = src.indexOf('export function vaultUpdateTodo')
 if (fnAt < 0) throw new Error('未找到 vaultUpdateTodo')
+const delAt = src.indexOf('export function vaultDeleteTodoCascade')
+if (delAt < 0) throw new Error('未找到 vaultDeleteTodoCascade')
 
-// 切片 = 白名单类型 + TODO_COLUMNS + camelToSnake + isTodoColumn + vaultUpdateTodo
-const code = src.slice(colTypeAt, fnAt) + sliceBalanced(src, fnAt)
+// 切片 = 白名单类型 + TODO_COLUMNS + camelToSnake + isTodoColumn + vaultUpdateTodo + vaultDeleteTodoCascade
+const code = src.slice(colTypeAt, fnAt) + sliceFn(src, fnAt) + '\n' + sliceFn(src, delAt)
 
 const stubs = `
 let __rows = []
@@ -51,7 +70,7 @@ function vaultTodosSave(rows) { __rows = rows }
 export function __seed(rows) { __rows = rows }
 export function __dump() { return __rows }
 `
-// vaultUpdateTodo 在源文件里已是 `export function`，这里只补 TODO_COLUMNS
+// vaultUpdateTodo / vaultDeleteTodoCascade 在源文件里已是 `export function`，这里只补 TODO_COLUMNS
 const exportsList = 'export { TODO_COLUMNS }'
 const js = stripTypeScriptTypes(stubs + code + '\n' + exportsList, {
   mode: 'strip',
@@ -71,6 +90,7 @@ const baseRow = () => ({
   created_at: '2026-07-01T00:00:00.000Z', updated_at: '2026-07-01T00:00:00.000Z',
 })
 const seed = () => { mod.__seed([baseRow()]); return mod.__dump()[0] }
+const subRow = (id, parentId) => ({ ...baseRow(), id, parent_id: parentId, title: `子任务 ${id}` })
 
 // ---------- 1. 核心：snoozeUntil 必须真正落到行上 ----------
 {
@@ -145,6 +165,42 @@ check('白名单共 13 列（12 + snooze_until）', mod.TODO_COLUMNS.length === 
   seed()
   const out = mod.vaultUpdateTodo('todo-1', { snoozeUntil: '2026-09-12 15:00' }, NOW)
   check('updated_at 被刷新', out?.updated_at === NOW, String(out?.updated_at))
+}
+
+// ---------- 6. 级联删除（ui schedule:deleteTodo 与 AI schedule.delete-todo 共用） ----------
+{
+  mod.__seed([
+    baseRow(),
+    subRow('sub-1', 'todo-1'),
+    subRow('sub-2', 'todo-1'),
+    { ...baseRow(), id: 'other', parent_id: null, title: '无关任务' },
+  ])
+  mod.vaultDeleteTodoCascade('todo-1')
+  const left = mod.__dump().map((r) => r.id)
+  check('级联删除：父行被删', !left.includes('todo-1'), left.join(','))
+  check('级联删除：两个子任务一并被删', !left.includes('sub-1') && !left.includes('sub-2'), left.join(','))
+  check('级联删除：无关行保留（parent_id 为 null 不被误删）', left.includes('other'), left.join(','))
+}
+{
+  // 只删子任务：父行与兄弟子任务保留（删除入口可命中子任务）
+  mod.__seed([baseRow(), subRow('sub-1', 'todo-1'), subRow('sub-2', 'todo-1')])
+  mod.vaultDeleteTodoCascade('sub-1')
+  const left = mod.__dump().map((r) => r.id)
+  check('删除子任务：父行与兄弟子任务保留',
+    left.includes('todo-1') && left.includes('sub-2') && !left.includes('sub-1'), left.join(','))
+}
+{
+  // id 不存在 = 空操作（与 sqlite DELETE 影响 0 行一致）
+  seed()
+  const before = JSON.stringify(mod.__dump())
+  mod.vaultDeleteTodoCascade('not-exist')
+  check('删除不存在的 id：数据不变', JSON.stringify(mod.__dump()) === before)
+}
+{
+  // 无子任务：整行消失，不留空壳
+  seed()
+  mod.vaultDeleteTodoCascade('todo-1')
+  check('无子任务时删除：整行消失', mod.__dump().length === 0, `剩 ${mod.__dump().length} 行`)
 }
 
 // ---------- 汇总 ----------

@@ -1595,6 +1595,8 @@ export interface ElectronAPI {
   aiTeachSrcPick: () => Promise<{ ok: boolean; path: string | null; error?: string }>
   aiTeachSrcPickDir: () => Promise<{ ok: boolean; path: string | null; error?: string }>
   aiTeachSrcVisionCheck: () => Promise<{ ok: boolean; model?: string; error?: string }>
+  /** LibreOffice 探测（设置页「检测」按钮）；source 说明路径命中来源，便于给用户可读解释 */
+  aiTeachSrcSofficeProbe: (settingPath?: string) => Promise<{ ok: boolean; path?: string; source?: string }>
   aiTeachSrcPdfBytes: (id: string, no: number) => Promise<{ ok: boolean; base64?: string; error?: string }>
   aiTeachSrcTranscribe: (id: string, no: number, pages: { n: number; dataUrl: string }[], modelSpec?: string) => Promise<{ ok: boolean; relPath?: string; model?: string; done?: number[]; skipped?: number[]; failed?: number[]; error?: string }>
   aiTeachSrcWebProbe: (id: string, no: number, anchorUrl?: string) => Promise<WebProbeResult>

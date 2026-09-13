@@ -7,7 +7,7 @@ import { Collapsible } from '../../../components/shared/Collapsible'
 import {
   llmListProviders, llmSaveProvider, llmRemoveProvider, llmToggleProvider,
   llmTestConnection, llmRefreshModels, llmSetDefaultModel, llmGetUsage, llmAddModel, llmTestModel,
-  llmCcSwitchList, llmCcSwitchImport, openExternal, llmUsageBreakdown,
+  llmCcSwitchList, llmCcSwitchImport, openExternal, llmUsageBreakdown, aiTeachSrcSofficeProbe,
 } from '../../../lib/ipc'
 import type { LlmProviderInfo, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, CcSwitchItem, LlmUsageBreakdownEntry } from '../../../types'
 import { prettyModelName, isOpenCodeFree } from '../../../lib/modelNames'
@@ -31,6 +31,15 @@ const TYPE_LABEL: Record<LlmProviderType, string> = {
   anthropic: 'Anthropic',
 }
 
+/** soffice 探测命中来源 → 可读文案（对应 main 侧 SofficeSource） */
+const SOFFICE_SOURCE_LABEL: Record<string, string> = {
+  setting: '此处填写的路径',
+  env: '环境变量 SOFFICE_PATH',
+  registry: 'Windows 注册表（安装器写入）',
+  candidate: '常见安装位置',
+  path: '系统 PATH',
+}
+
 /** 设置 → AI 工具 → 模型：供应商管理 + 默认模型 + token 预算 */
 export function AiModelsTab() {
   const { s, update } = useSettings()
@@ -44,6 +53,21 @@ export function AiModelsTab() {
   // 模型级可用性测试(选中具体模型后实测,区别于供应商探活)
   const [modelTesting, setModelTesting] = useState(false)
   const [modelTestResult, setModelTestResult] = useState<LlmModelTestResultInfo | null>(null)
+  // LibreOffice 探测结果：纯即时反馈，不持久化（路径本身存在设置里）
+  const [sofficeProbe, setSofficeProbe] = useState<{ ok: boolean; path?: string; source?: string } | null>(null)
+  const [sofficeTesting, setSofficeTesting] = useState(false)
+
+  const testSoffice = async () => {
+    if (sofficeTesting) return
+    setSofficeTesting(true)
+    try {
+      setSofficeProbe(await aiTeachSrcSofficeProbe(s.sofficePath ?? ''))
+    } catch (e) {
+      showToast({ type: 'error', message: `检测失败：${(e as Error).message}` })
+    } finally {
+      setSofficeTesting(false)
+    }
+  }
 
   const testSelectedModel = async () => {
     if (!defaultModel || modelTesting) return
@@ -131,6 +155,36 @@ export function AiModelsTab() {
             </div>
             <SettingSwitch checked={s.aiShowThinking !== false} onChange={v => { void update('aiShowThinking', v) }} aria-label="显示思考过程" />
           </div>
+        </div>
+      </div>
+
+      {/* LibreOffice 路径：pptx 视觉转写的前置（原 ui:false 无任何入口，只能手改 settings.json） */}
+      <div data-setting-anchor="aiTools.sofficePath">
+        <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">LibreOffice 路径</h2>
+        <p className="text-[12px] text-[var(--text-muted)] mb-4">AI 教学素材的 pptx 视觉转写需先经本机 LibreOffice 转 PDF。留空 = 自动探测（注册表 / 常见安装位 / PATH）；装在自定义目录（如 D 盘）时手动填写 soffice.exe 绝对路径。</p>
+        <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md">
+          <div className="flex items-center gap-2">
+            <input
+              value={s.sofficePath ?? ''}
+              onChange={e => { void update('sofficePath', e.target.value); setSofficeProbe(null) }}
+              placeholder="D:\tools\LibreOffice\program\soffice.exe"
+              spellCheck={false}
+              className="flex-1 min-w-0 px-2.5 py-1.5 rounded border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-[var(--accent)]"
+            />
+            <button onClick={() => { void testSoffice() }} disabled={sofficeTesting}
+              className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[12px] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+              {sofficeTesting ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 检测
+            </button>
+          </div>
+          {sofficeProbe
+            ? (
+              <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                {sofficeProbe.ok
+                  ? <>已找到：<span className="text-[var(--text-secondary)] break-all">{sofficeProbe.path}</span>（来源：{SOFFICE_SOURCE_LABEL[sofficeProbe.source ?? ''] ?? sofficeProbe.source}）</>
+                  : '未找到：确认已安装 LibreOffice，或在上方填入 soffice.exe 完整路径后重新检测'}
+              </p>
+            )
+            : <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-muted)]">点「检测」立即验证路径可用性 —— 刚装完或刚改路径都无需重启应用。</p>}
         </div>
       </div>
 

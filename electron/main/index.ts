@@ -10,6 +10,7 @@ import { join, basename, resolve, sep } from 'path'
 import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdirSync, statSync, readdirSync, appendFileSync } from 'fs'
 import { Readable } from 'stream'
 import { getAttachmentsDir } from '../lib/globalPaths'
+import { assertSecretBoxRoundTrip } from '../lib/secretBox'
 import { registerPomodoroBroadcast } from './pomodoroState'
 import { registerEntryHandlers } from '../database/repositories/entryRepo'
 import { registerTagHandlers } from '../database/repositories/tagRepo'
@@ -645,6 +646,12 @@ app.whenReady().then(async () => {
 
   // Initialize settings cache once at startup
   settingsCache = loadSettingsFromDisk()
+
+  // 加密自检：确认 safeStorage 密文格式与 secretBox 的假设一致（只告警不阻断，见 secretBox.ts）
+  // 目的：把「密文格式变化 / 被误改」这类问题暴露在启动期，而非用户发现「密码全空」时
+  try {
+    assertSecretBoxRoundTrip()
+  } catch { /* 自检自身异常不应影响启动 */ }
 
   // UI 插件页面协议:plugin://{id}/{file}
   // 安全:CSP 锁死网络(none),只允许插件自身源的内联资源;配合渲染层 iframe sandbox 使用

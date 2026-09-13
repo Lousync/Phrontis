@@ -4,7 +4,7 @@ import { exists, readJson, writeJson } from './jsonStore'
  * 密码本 vault 数据仓库（P5b / D4）：`.knowbase/secret/passwords.json`
  *
  * 行结构与 toolbox_passwords 表一致（snake_case 原样保留，与迁移器/回收站快照兼容）；
- * password 字段始终存 DPAPI 密文（'enc1:' 前缀，secretBox 同格式），加解密归 passwordRepo 管。
+ * password 字段始终存 'enc1:' 密文（secretBox 同格式，密文机制见 lib/secretBox.ts 头注释），加解密归 passwordRepo 管。
  * 跨机器导入后解密失败 → 读取端返回空串，由 UI 引导重录（R1 口径）。
  */
 export interface SecretPwdRow {

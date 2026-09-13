@@ -290,6 +290,8 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   'builtin.blog.create-entry': '新建日记',
   'builtin.schedule.list-todos': '查看待办',
   'builtin.schedule.create-todo': '创建待办',
+  'builtin.schedule.update-todo': '修改待办',
+  'builtin.schedule.delete-todo': '删除待办',
   'builtin.checkin.check-habit': '习惯打卡',
   'builtin.habits.stats': '统计习惯',
   'builtin.pomodoro.summary': '统计番茄',
@@ -315,6 +317,8 @@ const CHANGE_LABELS: Record<string, string> = {
   'builtin.knowledge.create-page': '新建知识页',
   'builtin.blog.create-entry': '新建日记',
   'builtin.schedule.create-todo': '创建待办',
+  'builtin.schedule.update-todo': '修改待办',
+  'builtin.schedule.delete-todo': '删除待办',
   'builtin.checkin.check-habit': '习惯打卡',
   'visual.html': '生成示意图',
 }
@@ -744,7 +748,9 @@ async function runAgentLoop(
             ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
             : realName === 'visual.html' ? String(data?.relPath ?? '').trim() : ''
           const file = realName !== 'builtin.vault.trash' && vaultPath ? vaultPath : undefined
-          const target = vaultPath || String(args?.title ?? args?.date ?? args?.name ?? '').trim().slice(0, 120)
+          // 参数里取不到可读目标时，回落到工具结果自带的标题（如 schedule.delete-todo
+          // 只收 id，摘要里的 title 是唯一人能看懂的目标）—— 否则删除不会出现在「本次改动」清单里
+          const target = vaultPath || String(args?.title ?? args?.date ?? args?.name ?? data?.title ?? '').trim().slice(0, 120)
           if (target) changes.push({ tool: realName, action: label, target, ...(file ? { file } : {}) })
         }
       }

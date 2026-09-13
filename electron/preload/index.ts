@@ -271,6 +271,7 @@ const api = {
   aiTeachSrcPick: () => ipcRenderer.invoke('aiTeachSrc:pick'),
   aiTeachSrcPickDir: () => ipcRenderer.invoke('aiTeachSrc:pickDir'),
   aiTeachSrcVisionCheck: () => ipcRenderer.invoke('aiTeachSrc:visionCheck'),
+  aiTeachSrcSofficeProbe: (settingPath?: string) => ipcRenderer.invoke('aiTeachSrc:sofficeProbe', settingPath),
   aiTeachSrcPdfBytes: (id: string, no: number) => ipcRenderer.invoke('aiTeachSrc:pdfBytes', id, no),
   aiTeachSrcTranscribe: (id: string, no: number, pages: { n: number; dataUrl: string }[], modelSpec?: string) => ipcRenderer.invoke('aiTeachSrc:transcribe', id, no, pages, modelSpec),
   /** 网页素材：探测目录/单文章/门户候选 → 批量抓取（进度走 onAiTeachWebProgress）→ 取消 */

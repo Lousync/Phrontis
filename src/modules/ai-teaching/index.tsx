@@ -165,6 +165,7 @@ const TOOL_CN: Record<string, string> = {
   'builtin.vault.trash': '移回收站', 'builtin.vault.resolve-ref': '校验引用',
   'builtin.knowledge.search': '搜知识库', 'builtin.knowledge.create-page': '建知识页',
   'builtin.blog.create-entry': '写日记', 'builtin.schedule.create-todo': '建待办',
+  'builtin.schedule.update-todo': '改待办', 'builtin.schedule.delete-todo': '删待办',
   'builtin.checkin.check-habit': '打卡', 'builtin.habits.stats': '习惯查询统计',
   'builtin.pomodoro.summary': '专注统计', 'builtin.schedule.list-todos': '查待办',
   'builtin.web.search': '联网搜索', 'builtin.web.read': '读网页',
@@ -906,7 +907,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                      pptx（2026-09-09 B 方案）由主进程 soffice 转 PDF 后同链路栅格化 */
                   <button onClick={() => { void doTranscribe(e.no) }} disabled={!!visionBusy}
                     title={visionBusy?.no === e.no ? visionBusy.label : e.type === 'pptx'
-                      ? '视觉转写：pptx 先经本机 LibreOffice 转 PDF 再逐页转写（需已安装 LibreOffice，可在设置→AI 模型→LibreOffice 路径指定）；文本提取对多数 PPT 公式已够用'
+                      ? '视觉转写：pptx 先经本机 LibreOffice 转 PDF 再逐页转写（需已安装 LibreOffice；装在自定义目录时可在「设置 → AI 工具 → 模型 → LibreOffice 路径」手动指定，无需重启）；文本提取对多数 PPT 公式已够用'
                       : '视觉转写：把登记区间的页面交给视觉模型转写（>12 页自动分批、断点续转），并入提取稿后可编辑。点击可中途停止'}
                     className="flex items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50 transition-colors">
                     {visionBusy?.no === e.no ? <Loader2 size={9} className="animate-spin" /> : <Eye size={9} />}

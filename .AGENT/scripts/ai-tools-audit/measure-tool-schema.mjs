@@ -38,6 +38,34 @@ const findClose = (from) => {
   return lines.length - 1
 }
 
+/**
+ * 单工具 inputSchema 的**真实发包体积**（去掉换行/缩进/注释行后的字符数）。
+ * AGENTS.md#16 的铁律是「单工具 schema ≤800 字符」—— 量的应是发给模型的 inputSchema，
+ * 而不是源码块：源码块含 handler 实现，动辄上千字符，拿它当尺子红线就成了摆设。
+ * 注释行必须剔除：schema 里的 `//` 说明不会进 payload，若算进去会冤枉合规的工具。
+ * 从 `inputSchema:` 起按大括号配平取到 schema 结束（描述串里没有裸大括号）。
+ */
+const schemaChars = (text) => {
+  const at = text.indexOf('inputSchema:')
+  if (at < 0) return 0
+  const start = text.indexOf('{', at)
+  let depth = 0
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === '{') depth++
+    else if (text[i] === '}') {
+      depth--
+      if (depth === 0) {
+        return text.slice(start, i + 1)
+          .split(/\r?\n/)
+          .filter((l) => !/^\s*\/\//.test(l))
+          .map((l) => l.trim())
+          .join('').length
+      }
+    }
+  }
+  return 0
+}
+
 const blocks = starts.map((s) => {
   const end = findClose(s)
   const text = lines.slice(s, end + 1).join('\n')
@@ -48,6 +76,7 @@ const blocks = starts.map((s) => {
     requires: pick(/requires:\s*'(\w+)'/) ?? 'read',
     module: pick(/module:\s*'([^']+)'/) ?? '-',
     chars: text.length,
+    schema: schemaChars(text),
     cjk: (text.match(/[\u4e00-\u9fa5]/g) || []).length,
   }
 })
@@ -59,6 +88,11 @@ const sum = (arr, f) => arr.reduce((a, b) => a + f(b), 0)
 const core = blocks.filter((b) => b.tier === 'core')
 const ondemand = blocks.filter((b) => b.tier === 'ondemand')
 
+/** 铁律（AGENTS.md#16）：单工具 schema ≤800 字符 —— 超线意味着每次装载都在为这一个工具多付 token */
+const SCHEMA_CHAR_LIMIT = 800
+const overLimit = blocks.filter((b) => b.schema > SCHEMA_CHAR_LIMIT).sort((a, b) => b.schema - a.schema)
+const biggest = blocks.slice().sort((a, b) => b.schema - a.schema)[0]
+
 const rows = [
   `源文件: ${SRC}`,
   `工具总数: ${blocks.length}`,
@@ -66,20 +100,26 @@ const rows = [
   `【core —— 每轮常驻注入】${core.length} 个`,
   ...core
     .sort((a, b) => b.chars - a.chars)
-    .map((b) => `  ${b.name.padEnd(34)} ${String(b.chars).padStart(5)} 字符  ~${String(estTokens(b)).padStart(4)} tok  [${b.requires}/${b.module}]`),
+    .map((b) => `  ${b.name.padEnd(34)} ${String(b.chars).padStart(5)} 字符  ~${String(estTokens(b)).padStart(4)} tok  schema ${String(b.schema).padStart(4)}  [${b.requires}/${b.module}]`),
   `  小计: ${sum(core, (b) => b.chars)} 字符  ~${sum(core, estTokens)} tok`,
   '',
   `【ondemand —— 默认折叠，tool.request 后才注入】${ondemand.length} 个`,
   ...ondemand
     .sort((a, b) => b.chars - a.chars)
-    .map((b) => `  ${b.name.padEnd(34)} ${String(b.chars).padStart(5)} 字符  ~${String(estTokens(b)).padStart(4)} tok  [${b.requires}/${b.module}]`),
+    .map((b) => `  ${b.name.padEnd(34)} ${String(b.chars).padStart(5)} 字符  ~${String(estTokens(b)).padStart(4)} tok  schema ${String(b.schema).padStart(4)}  [${b.requires}/${b.module}]`),
   `  小计: ${sum(ondemand, (b) => b.chars)} 字符  ~${sum(ondemand, estTokens)} tok`,
   '',
   `合计若全部装载: ~${sum(blocks, estTokens)} tok`,
   `实际常驻(默认权限 read 态): ~${sum(core, estTokens)} tok / 轮`,
   '',
+  `【单工具 schema 红线（≤${SCHEMA_CHAR_LIMIT} 字符，AGENTS.md#16 铁律）】`,
+  overLimit.length
+    ? `  ⚠️ 超线 ${overLimit.length} 个：` + overLimit.map((b) => `${b.name} ${b.schema}`).join('；')
+    : `  全部合规（最大 ${biggest.schema} 字符：${biggest.name}）`,
+  '',
   '注：字符数含 TS 源码语法噪声（缩进/逗号/类型标注），实际 JSON payload 略小；',
-  '    token 为估算值，用于横向比较而非精确计费。',
+  '    token 为估算值，用于横向比较而非精确计费；',
+  `    红线一节量的是 inputSchema 去换行/缩进后的真实发包字符数（不含 name/description）。`,
 ]
 
 const out = rows.join('\n')

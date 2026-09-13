@@ -7,7 +7,7 @@ import { scanCcSwitch, importCcSwitchIds, bindCcSwitchSaver } from './ccSwitchIm
 /**
  * Model Gateway —— LLM API 统一接入层（方案 .claude/plans/model-gateway.md）。
  *
- * 职责：Provider 抽象（openai-compatible / ollama）、Key DPAPI 加密落盘、
+ * 职责：Provider 抽象（openai-compatible / ollama）、Key 加密落盘（secretBox）、
  * 连通性测试与模型发现、月度 token 预算硬限制、调用审计（不含消息正文）、tools 参数透传。
  * 边界：网关不代执行工具——tool_calls 原样回传给调用方（AgentRunner 决定执行）。
  */
@@ -21,11 +21,11 @@ export interface ProviderConfig {
   name: string
   type: ProviderType
   baseUrl: string
-  /** DPAPI 密文（enc1: 前缀），永不出主进程 */
+  /** 'enc1:' 密文（secretBox 机制），永不出主进程 */
   apiKeyEncrypted: string
   enabled: boolean
   models: string[]
-  /** 自定义请求头（明文存设置，勿放 API Key 类敏感值——密钥走 apiKey 字段走 DPAPI）。
+  /** 自定义请求头（明文存设置，勿放 API Key 类敏感值——密钥走 apiKey 字段走 secretBox）。
    *  2026-09-08：opencode 等网关要求 x-opencode-session 之类的会话/路由头，按服务商在设置里配 */
   headers?: Record<string, string>
   /** 嵌入模型名（知识语义索引用，knowledge-index-design §6）；不配 = 该供应商不参与嵌入 */

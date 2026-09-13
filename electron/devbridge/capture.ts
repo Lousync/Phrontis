@@ -7,7 +7,7 @@ import { Ring, type RingItem } from './ring'
  * 两条硬性约束：
  * 1. 网络只记录元数据，**绝不读 body**。Response 流只能消费一次，读取会破坏原有业务逻辑。
  * 2. 一律脱敏。URL 去掉 query（其中可能带 API Key），请求头只保留 content-type。
- *    项目用 secretBox 对密钥做 DPAPI 加密，不能因调试工具造成泄露。
+ *    项目用 secretBox 加密密钥（Electron safeStorage），不能因调试工具造成泄露。
  */
 
 export interface NetItem extends RingItem {

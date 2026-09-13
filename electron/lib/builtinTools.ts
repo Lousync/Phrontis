@@ -14,7 +14,11 @@ import { searchKnowledge } from './knowledgeSearch'
 import { searchHelp } from './helpService'
 import { vaultCreateEntry } from './kbStore/blogVaultRepo'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
-import { vaultTodosAll, vaultCreateTodo } from './kbStore/scheduleVaultRepo'
+import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, type TodoRow } from './kbStore/scheduleVaultRepo'
+// 日程「标记完成」要触发与 UI 完全相同的副作用：习惯跨模块联动 + 插件事件。
+// 依赖方向已核：habitLinkService / pluginEvents 的依赖树不反向 import 本模块，无循环。
+import { recordActivity } from './habitLinkService'
+import { emitPluginEvent } from './pluginEvents'
 import { extractDocText } from './docsReader'
 import {
   quizRecordList,
@@ -293,6 +297,119 @@ const SEARCH_LIMIT_SCHEMA = {
   required: ['query'],
 } satisfies ToolJsonSchema
 
+// ---- 日程 AI 写工具的参数归一化（纯函数，供 .AGENT/scripts 抽取验证） ----
+
+/** 待办状态白名单（与 UI 待办勾选同口径：pending ↔ done） */
+const TODO_STATUSES = ['pending', 'done'] as const
+/** 任务类型白名单（与 create-todo / TodoRow.task_type 同口径） */
+const TODO_TASK_TYPES = ['plan', 'deadline', 'daily'] as const
+
+/**
+ * 把 `schedule.update-todo` 的入参归一化为交给 repo 的 patch（camelCase，
+ * 列白名单由 vaultUpdateTodo 负责，本函数不重复一份字段映射 —— AGENTS.md#14）。
+ *
+ * 纯函数：只依赖入参 + 该行当前 task_type，不读盘、无副作用。
+ *
+ * 不变量（与 create-todo 同口径，防脏数据）：
+ * - `time`（截止时刻）只对 deadline 类有意义 —— 非 deadline 即使误传也置 null；
+ *   本次把 taskType 改成非 deadline 时，顺带清掉行上残留的旧截止时刻
+ * - `scheduledStart/End` 是「当天分钟数」0..1440（1440 = 24:00 收尾），非整数/越界直接拒
+ * - `status` / `taskType` 只接受白名单值，避免 AI 手滑写成 'complete' 之类
+ * - `description` / `endCriteria` 的处理保留在此（口径统一、便于将来放开 schema），
+ *   但 update-todo 的 inputSchema **不暴露**这两列：list-todos 不回传它们，
+ *   AI 看不到现值，放行就是盲改覆盖用户写过的内容（静默数据丢失）
+ * 抛错 = 参数非法，调用方原样回给模型（exec.ok=false），不落盘。
+ */
+export function normalizeTodoPatch(args: Record<string, unknown>, currentTaskType: string): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+
+  if (args.title !== undefined) {
+    const t = str(args.title).trim()
+    if (!t) throw new Error('title 不能为空字符串')
+    patch.title = t
+  }
+  // description / endCriteria 允许空串（= 清空该项）
+  for (const key of ['description', 'endCriteria'] as const) {
+    if (args[key] === undefined) continue
+    if (typeof args[key] !== 'string') throw new Error(`${key} 必须是字符串`)
+    patch[key] = args[key]
+  }
+  if (args.date !== undefined) {
+    const d = str(args.date).trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error('date 必须是 YYYY-MM-DD')
+    patch.date = d
+  }
+  if (args.quadrant !== undefined) {
+    if (typeof args.quadrant !== 'number' || !Number.isFinite(args.quadrant)) throw new Error('quadrant 必须是 0..3 的数字')
+    patch.quadrant = clamp(Math.floor(args.quadrant), 0, 3)
+  }
+  if (args.status !== undefined) {
+    const s = str(args.status).trim()
+    if (!(TODO_STATUSES as readonly string[]).includes(s)) throw new Error(`status 只支持 ${TODO_STATUSES.join(' / ')}`)
+    patch.status = s
+  }
+  if (args.taskType !== undefined) {
+    const t = str(args.taskType).trim()
+    if (!(TODO_TASK_TYPES as readonly string[]).includes(t)) throw new Error(`taskType 只支持 ${TODO_TASK_TYPES.join(' / ')}`)
+    patch.taskType = t
+  }
+  if (args.tagId !== undefined) {
+    // null / 空串 = 清掉标签（与 UI 的 tagId: null 同口径）
+    const t = args.tagId === null ? '' : str(args.tagId).trim()
+    patch.tagId = t || null
+  }
+  for (const key of ['scheduledStart', 'scheduledEnd'] as const) {
+    if (args[key] === undefined) continue
+    const v = args[key]
+    if (v === null) { patch[key] = null; continue }
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 1440) {
+      throw new Error(`${key} 必须是 0..1440 的整数分钟数（09:00 = 540；null = 取消排期）`)
+    }
+    patch[key] = v
+  }
+
+  // 截止时刻：只对 deadline 类有意义（与 create-todo 的 finalTime 同口径）
+  const effectiveTaskType = (patch.taskType as string | undefined) ?? currentTaskType
+  if (args.time !== undefined) {
+    const raw = str(args.time).trim().replace('T', ' ')
+    if (!raw) {
+      patch.time = null
+    } else {
+      if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(raw)) throw new Error("time 必须是完整时刻 'YYYY-MM-DD HH:mm'")
+      patch.time = effectiveTaskType === 'deadline' ? raw : null
+    }
+  } else if (patch.taskType !== undefined && effectiveTaskType !== 'deadline') {
+    // 类型改成非 deadline：清掉旧截止时刻，避免 UI 继续按一个语义已失效的时刻排序/提醒
+    patch.time = null
+  }
+
+  if (Object.keys(patch).length === 0) {
+    throw new Error('没有可修改的字段：至少传一个（title/description/date/time/quadrant/taskType/tagId/status/endCriteria/scheduledStart/scheduledEnd）')
+  }
+  return patch
+}
+
+/**
+ * 删除前摘出被删行摘要（标题/日期/时段 + 将被子任务数）—— 误删后的重建线索。
+ * 纯函数：vaultDeleteTodoCascade 是**级联删除且无回收站快照**，行一删就再也读不回来，
+ * 所以摘要必须在删除前算好并回给模型。
+ */
+export function summarizeDeletedTodos(target: TodoRow, rows: TodoRow[]): {
+  id: string; title: string; date: string; time: string
+  scheduledStart: number | null; scheduledEnd: number | null; subtasks: number
+} {
+  const subtasks = rows.filter(r => r.parent_id === target.id).length
+  return {
+    id: target.id,
+    title: target.title,
+    date: target.date,
+    time: target.time ?? '',
+    scheduledStart: target.scheduled_start ?? null,
+    scheduledEnd: target.scheduled_end ?? null,
+    subtasks,
+  }
+}
+
 export function registerBuiltinTools(): void {
 
   // 1. builtin.knowledge.search —— 知识库混合检索（关键词 + 语义，knowledge-index-design §9）
@@ -472,6 +589,15 @@ export function registerBuiltinTools(): void {
         quadrant: q,
         quadrantLabel: QUADRANT[q] ?? '重要不紧急',
         status: str(r.status, 'pending'),
+        // 以下 5 项是 schedule.update-todo 的「编辑正确性」前提（2026-09-13 补齐）：
+        // 看不到已占时段 → 排新任务会撞车；看不到 parentId → 会误编辑/误删子任务；
+        // 看不到 taskType → 分不清 time 字段（deadline 才带）是否还有语义；
+        // 看不到 tagId → create/update 的 tagId 参数根本没有取值来源。
+        taskType: str(r.task_type, 'plan'),
+        tagId: r.tag_id ?? null,
+        scheduledStart: r.scheduled_start ?? null,
+        scheduledEnd: r.scheduled_end ?? null,
+        parentId: r.parent_id ?? null,
       }
     })
   })
@@ -614,6 +740,89 @@ export function registerBuiltinTools(): void {
     return { ok: true, id, date, quadrant }
   })
 
+  // 11b. builtin.schedule.update-todo —— 按 id 编辑待办（改期/改时段/改象限/标记完成）
+  //      补写闭环：此前 AI 只有 list-todos(读) + create-todo(写)，建错了改不了、只能人工修。
+  registerTool({
+    name: 'builtin.schedule.update-todo',
+    title: '修改日程待办',
+    description: '按 id 修改待办：改标题/日期/截止时刻/象限/任务类型/标签/完成状态/排期时段。id 必须先由 list-todos 取到。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '待办 id' },
+        title: { type: 'string', description: '标题' },
+        date: { type: 'string', description: '日期 YYYY-MM-DD' },
+        time: { type: 'string', description: "截止时刻 'YYYY-MM-DD HH:mm'，仅 deadline 类" },
+        quadrant: { type: 'number', description: '象限 0紧急重要/1重要不紧急/2紧急不重要/3不紧急不重要' },
+        taskType: { type: 'string', enum: ['plan', 'deadline', 'daily'], description: '任务类型' },
+        tagId: { type: 'string', description: '标签 id，空串=清空' },
+        status: { type: 'string', enum: ['pending', 'done'], description: 'pending 未完成 / done 已完成' },
+        scheduledStart: { type: 'number', description: '排期起点（当天分钟数，09:00=540）' },
+        scheduledEnd: { type: 'number', description: '排期终点（当天分钟数）' },
+        // 刻意不暴露 description / end_criteria：list-todos 不回传这两列，
+        // AI 看不到现值 → 允许改就是「盲改覆盖用户写过的备注」，属静默数据丢失。
+        // （单工具 schema 有 800 字符红线，AGENTS.md#16；这两项省下的正好也是大头）
+      },
+      required: ['id'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    const existing = vaultFindTodo(id)
+    if (!existing) throw new Error(`未找到待办 id=${id}：请先用 list-todos 确认（id 可能已被删除或本就输错）`)
+    // 归一化交给纯函数（含「非 deadline 不带截止时刻」「排期分钟数范围」等不变量），
+    // 字段白名单由 vaultUpdateTodo 兜底 —— 这里不重复一份映射表
+    const patch = normalizeTodoPatch(args, existing.task_type)
+    const updated = vaultUpdateTodo(id, patch, new Date().toISOString())
+    if (!updated) throw new Error(`待办 id=${id} 更新失败（写入期间已被删除？）`)
+    // 与 UI 的 schedule:updateTodo 同口径：只有 pending → done 才算「完成」事件。
+    // 漏了这步的后果是「AI 标记完成的任务不计入习惯联动 / 插件收不到 schedule:todoCompleted」。
+    if (existing.status !== 'done' && updated.status === 'done') {
+      void recordActivity({ source: 'schedule', date: updated.date })
+      emitPluginEvent('schedule:todoCompleted', { todoId: id, title: updated.title ?? '' })
+    }
+    // 主进程写盘后必须广播：日程模块保活（切 Tab 不重载），不通知界面看不到
+    broadcastDataChanged('schedule')
+    return { ok: true, id, title: updated.title, date: updated.date, status: updated.status, fields: Object.keys(patch) }
+  })
+
+  // 11c. builtin.schedule.delete-todo —— 按 id 删除待办（级联删子任务，无回收站）
+  registerTool({
+    name: 'builtin.schedule.delete-todo',
+    title: '删除日程待办',
+    description: '按 id 删除待办（不可恢复，且会连同其全部子任务一起删除）。必须先 list-todos 确认 id 与标题相符再调用，禁止凭记忆或推测删除。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '待办 id（来自 list-todos）' },
+      },
+      required: ['id'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    const rows = vaultTodosAll()
+    const target = rows.find(r => r.id === id)
+    if (!target) throw new Error(`未找到待办 id=${id}：请先用 list-todos 确认（可能已被删除，不要重复删除）`)
+    // 摘要必须在删除前算：cascade 删完行就没了，且 UI 的 schedule:deleteTodo 同样无回收站快照
+    const summary = summarizeDeletedTodos(target, rows)
+    vaultDeleteTodoCascade(id)
+    broadcastDataChanged('schedule')
+    return { ok: true, ...summary }
+  })
+
   // 12. builtin.checkin.check-habit
   registerTool({
     name: 'builtin.checkin.check-habit',
@@ -707,7 +916,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.create-entry / schedule.create-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper）默认不在工具列表中。需要执行写操作时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper）默认不在工具列表中。需要执行写操作时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
