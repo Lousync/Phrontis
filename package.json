@@ -95,6 +95,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
-    "npmRebuild": false
+    "npmRebuild": false,
+    "electronDist": "node_modules/electron/dist"
   }
 }
