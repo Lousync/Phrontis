@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
-  agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels,
+  agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceListDir,
   agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachAssignSession, aiTeachUnassignSession, aiTeachSetLastWorkspace,
   aiTeachSrcRead, aiTeachSrcAdd, aiTeachSrcRemove, aiTeachSrcExtract, aiTeachSrcPick, aiTeachSrcPickDir, aiTeachSrcVisionCheck,
-  aiTeachSrcPdfBytes, aiTeachSrcTranscribe,
+  aiTeachSrcPdfBytes, aiTeachSrcTranscribe, aiTeachSrcPromote,
   aiTeachProfileEnsureGlobal, aiTeachProfileEnsureSession, aiTeachProfileEnsureWorkspace,
   aiTeachProfileWriteGlobal, aiTeachProfileWriteSession, aiTeachProfileWriteWorkspace,
 } from '../../lib/ipc'
@@ -15,17 +15,19 @@ import { AiTeachFileTree } from './AiTeachFileTree'
 import { ArtifactsPane } from './ArtifactsPane'
 import type { ArtTab } from './artifacts'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
+import { Collapsible } from '../../components/shared/Collapsible'
 import { QuizMode } from '../../components/shared/QuizMode'
-import { extractQuizzes } from '../../components/shared/QuizParser'
+import { extractQuizzes, looseJsonParse } from '../../components/shared/QuizParser'
 import { showToast } from '../../lib/toast'
 import { handleChatCommand } from '../../lib/chatCommands'
+import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../../components/shared/SlashCommandMenu'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { registerSelectionAskHost } from '../../lib/assistantContext'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { WebSourceDialog } from './components/WebSourceDialog'
-import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourceEntry } from '../../types'
+import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourceEntry, SkillInfo } from '../../types'
 
 /**
  * 「AI教学」模块（原 id immersive / 沉浸式 Agent；总纲 docs/ai-teaching-module-rework.md，
@@ -46,9 +48,10 @@ import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange,
  * P7 题目视图（§3.2-7/3-9）：中栏「对话 ⇄ 题目」切换器；AI 按 quiz 围栏协议出题（注入格式规则），
  * 题目自动收录进题目视图，答题复用知识库 QuizMode（判分/解析/错题），交卷后成绩报告落会话文件夹 `测验·*.md`，
  * 逐题记录经 quizRecord:report（aiTeach: 命名空间）入知识库错题体系（3-10）。
- * P6 素材库（§3.13 结构 v3）：右栏「素材库」展示 SOURCE.md 条目（工作区 SOURCES/{对话夹}/），「＋素材」表单登记
+ * P6 素材库（v3.1.1 上移工作区层）：右栏「素材库」= **工作区主库** `SOURCES/SOURCE.md`（跨对话共用，未建对话也可登记）
+ * + 本对话历史登记（存量，合并视图重编号 1..N，标「对话」角标，一键「上收」并入主库）；「＋素材」表单登记
  * （类型/存放/页码区间仅 pdf·pptx 拆起止，3-28 程序解析写入）、pdf/pptx 一键区间提取为同级可编辑提取稿（3-20/3-26），
- * SOURCE.md 与提取稿经 AgentRunner 素材目录注入供 AI 编号引用（3-29，每轮重读）。
+ * SOURCE.md 与提取稿经 AgentRunner 素材目录注入供 AI 编号引用（3-29，每轮重读）——新对话因此能看到工作区已有素材。
   * 3-21 视觉转写（手动档）：pdf/pptx 条目「转写」按钮→主进程转 PDF（pptx 经 soffice）→渲染层 pdf.js 区间栅格化→视觉模型逐页转写→并入提取稿。
  * P8 用户画像（§3.14）：全局画像（userData/AI教学/PROFILE.md）+ 会话 PROFILE.md 两层每轮注入；
  * 更新走 Plan B——AI 输出 ```profile 建议块 → 输入框上方建议卡片「接受（本主题/全局）/忽略」，接受才写文件（3-33）；
@@ -254,8 +257,10 @@ type AskSingle = { kind: 'single'; id: string; question: string; options: string
 type AskExam = { kind: 'exam'; id: string; questions: Array<{ question: string; options: string[] }> }
 type AskBlock = AskSingle | AskExam
 function parseAskBlock(raw: string, id: string): AskBlock | null {
+  // 条目13：宽容解析（全角瑕疵 + 字符串内未转义引号反向修复）——翻车主形态「题干内 "底分"」在修复层兜住
+  const p: unknown = looseJsonParse(raw)
+  if (p === null) return null
   try {
-    const p: unknown = JSON.parse(raw.trim())
     const normOpts = (o: unknown): string[] =>
       Array.isArray(o) ? o.map(x => String(x)).filter(s => s.trim()).slice(0, 6) : []
     if (Array.isArray(p)) {
@@ -293,6 +298,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   const [template, setTemplate] = useState<Template>(TEMPLATES[0])
   const [messages, setMessages] = useState<UiMsg[]>([])
   const [input, setInput] = useState('')
+  // v3.1.1 条目10：/ 弹层（指令 + 已装 Skill）、Skill 显式调用 chip、压缩进行时占位
+  const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
+  const [slashActive, setSlashActive] = useState(0)
+  const [pickedSkill, setPickedSkill] = useState<SkillInfo | null>(null)
+  const [compressing, setCompressing] = useState(false)
   /** 划词引用片段列表（「问 AI」收进输入区上方引用胶囊，不自动发送；随消息一起发出后一次性消费） */
   const [quotes, setQuotes] = useState<string[]>([])
   const [quotesOpen, setQuotesOpen] = useState(false)
@@ -417,6 +427,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     void openArtFile(tab.rel, { name: tab.name, title: tab.title })
   }, [openArtFile])
   useEffect(() => { void getSettingRaw('aiTeachRootDir').then(v => { const s = String(v ?? '').trim(); if (s) setAiTeachRoot(s) }).catch(() => {}) }, [])
+  // / 弹层 Skill 组候选（v3.1.1 条目10）：模块挂载时拉一次（安装/停用在设置页，低频变化）
+  useEffect(() => { aiToolsListSkills().then(r => setSlashSkills(r.skills)).catch(() => setSlashSkills([])) }, [])
 
   // ---------- P5 工作区两层（§3.2-6；3-6/3-8 按建议：元数据入仓库 .knowbase、跟随当前激活仓库） ----------
   const [wsList, setWsList] = useState<AiTeachWorkspaceInfo[]>([])
@@ -636,7 +648,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     if (nav.midView === 'quiz') setMidView('quiz')
   }, [refreshMessages, sessions, loadConstraints, openArtFile])
 
-  const sendText = useCallback(async (raw: string, cid: string, withQuote = false): Promise<AgentChatResult | null> => {
+  const sendText = useCallback(async (raw: string, cid: string, withQuote = false, skillName?: string): Promise<AgentChatResult | null> => {
     setPending(true); setLiveSteps([]); beginStream()
     const sid = activeIdRef.current
     if (!sid) { setPending(false); return null }
@@ -650,7 +662,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
       : raw
     setMessages(prev => [...prev, { role: 'user', content: text, createdAt: new Date().toISOString() }]) // 条目4：乐观时间存 ISO（原纯时刻串必 Invalid Date）
     const ov = convoLlm.current.get(sid)
-    const r = await agentChat(sid, text, undefined, cid, 'aiTeaching', ov?.modelId, ov?.effort)
+    const r = await agentChat(sid, text, undefined, cid, 'aiTeaching', ov?.modelId, ov?.effort, skillName)
     // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
     if (r?.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要（/compress 可手动触发）` })
     // V-2：失败提示下沉到 sendText——模板开场/ask 发送/PPT 逐页讲解等 5 处 void sendText 路径统一覆盖（原先只有 doSend 有 toast）
@@ -667,23 +679,65 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     return r
   }, [refreshMessages, beginStream, endStream])
 
-  const doSend = useCallback(async () => {
-    const text = input.trim()
-    if (!text || pending) return
+  const doSend = useCallback(async (override?: string) => {
+    const text = (override ?? input).trim()
+    if (!text || pending || compressing) return
     // 斜杠指令（/compress 等）：命中即拦截执行，不进对话（无会话时也拦截并提示）
     if (text.startsWith('/')) {
       const sid0 = activeIdRef.current
       const ov0 = sid0 ? convoLlm.current.get(sid0) : undefined
-      if (await handleChatCommand(text, { sessionId: sid0 ?? '', surface: 'aiTeaching', modelId: ov0?.modelId, effort: ov0?.effort })) {
+      if (await handleChatCommand(text, {
+        sessionId: sid0 ?? '',
+        surface: 'aiTeaching',
+        modelId: ov0?.modelId,
+        effort: ov0?.effort,
+        onProgress: p => setCompressing(p.active),
+      })) {
         setInput('')
         return
       }
     }
     setInput('')
+    // Skill chip 一次性消费：随本条消息显式注入，发出即清（v3.1.1 条目10）
+    const sk = pickedSkill
+    setPickedSkill(null)
     const cid = crypto.randomUUID()
     chatIdRef.current = cid
-    await sendText(text, cid, true) // 失败 toast 已下沉 sendText（V-2），此处不再重复提示
-  }, [input, pending, sendText])
+    await sendText(text, cid, true, sk?.registryName) // 失败 toast 已下沉 sendText（V-2），此处不再重复提示
+  }, [input, pending, compressing, sendText, pickedSkill])
+
+  // ---- / 弹层派生态（v3.1.1 条目10）：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
+  const slashQuery = input.startsWith('/') && !/[\s\n]/.test(input.slice(1)) && input.length > 1 ? input.slice(1) : (input === '/' ? '' : null)
+  const slashItems = useMemo(
+    () => filterSlashItems(buildSlashItems(slashSkills), slashQuery ?? ''),
+    [slashSkills, slashQuery],
+  )
+  const slashOpen = slashQuery !== null
+  /** 弹层选中：指令 → 补全到输入框（回车执行走既有拦截链）；Skill → 挂 chip、清输入继续写正文 */
+  const pickSlash = (it: SlashMenuItem) => {
+    if (it.kind === 'command') {
+      setInput('/' + it.name + ' ')
+      setSlashActive(0)
+      inputRef.current?.focus()
+      return
+    }
+    const sk = slashSkills.find(s => s.registryName === it.name)
+    if (sk) { setPickedSkill(sk); setInput(''); setSlashActive(0) }
+  }
+  /** 弹层键控：局部拦截并 stopPropagation，不进本模块全局 Esc 浮层链（TDZ 敏感区零改动） */
+  const onSlashKeys = (e: { key: string; shiftKey: boolean; nativeEvent: { isComposing: boolean }; preventDefault: () => void; stopPropagation: () => void; defaultPrevented: boolean }) => {
+    if (!slashOpen || slashItems.length === 0) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSlashActive(i => (i + 1) % slashItems.length); return }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setSlashActive(i => (i - 1 + slashItems.length) % slashItems.length); return }
+    if (e.key === 'Tab') { e.preventDefault(); pickSlash(slashItems[slashActive]); return }
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); pickSlash(slashItems[slashActive]); return }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setInput(''); setSlashActive(0) }
+  }
+
+  /** 条目13：quiz 解析失败占位卡的「让 AI 重出新题」——填入重试 prompt 直接发送（V-2 失败 toast 下沉同理路径） */
+  const retryQuiz = useCallback(() => {
+    void doSend('上一条回答里的 ```quiz 题目 JSON 解析失败（可能存在未转义英文双引号），请把那道题重新输出一遍：围栏语言 quiz，字符串内部需要引用时用中文引号『』或“”，确保 JSON 可解析。')
+  }, [doSend])
 
   // 场景启动：不落任何用户消息，用虚拟首轮触发（主进程 allowEmptyHistory）
   // ——聊天区第一条即 AI 回复，不再出现程序伪造的开场白气泡
@@ -870,7 +924,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   /** 素材卡片（两行 DOM 不变；第二行包 grid-rows 折叠壳：紧凑收起=0fr+opacity，只动 grid-rows/padding，方案 2.2/落地4） */
   const renderSrcCard = (e: AiTeachSourceEntry) => {
     const extMatch = /^✓\s*→\s*(.+)$/.exec(e.extracted)
-    const dirRel = srcFileRel ? srcFileRel.slice(0, srcFileRel.lastIndexOf('/')) : ''
+    // v3.1.1 两层合并：提取稿/原件相对「条目所属层」的素材夹（工作区主库 vs 对话私有存量），
+    // 逐条目携带（e.dirRel），不能再用主库 srcFileRel 统一推导 —— 会话存量会被拼到错误目录
+    const dirRel = e.dirRel || (srcFileRel ? srcFileRel.slice(0, srcFileRel.lastIndexOf('/')) : '')
     const extractable = (e.type === 'pdf' || e.type === 'pptx' || e.type === 'code') && !extMatch && e.range && e.range !== '-' // 条目10：code 按行号区间提取
     const inRepo = e.path.startsWith('./') || (srcFileRel && !/^[a-zA-Z]:|^https?:|^\//.test(e.path))
     return (
@@ -878,6 +934,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
         <div className="flex items-center gap-1.5">
           <span className="shrink-0 text-[10px] font-medium text-[var(--text-muted)]">#{e.no}</span>
           <span className="flex-1 min-w-0 truncate text-[11.5px] text-[var(--text-primary)]" title={e.note || e.name}>{e.name}</span>
+          {e.scope === 'session' && (
+            <span className="shrink-0 px-1 rounded text-[9.5px] text-[var(--warning)] border border-[var(--warning)]/40" title="对话私有补充（历史登记）：可经右上「上收」并入工作区主库，跨对话共用">对话</span>
+          )}
           <span className="shrink-0 px-1 rounded text-[9.5px] uppercase text-[var(--text-muted)] border border-[var(--border-color)]">{e.type}</span>
         </div>
         <div className={`grid kb-group-anim transition-[grid-template-rows,opacity] duration-[320ms] ${SRC_EASE} ${srcCompact ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] opacity-100'}`}>
@@ -935,11 +994,19 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     )
   }
   const [srcAnom, setSrcAnom] = useState<{ unnamed: number; dupNo: number; noPath?: number } | null>(null)
+  /** v3.1.1：对话级补充文件路径（非空 = 该对话还有存量「对话私有补充」条目，显示上收入口） */
+  const [srcSessionRel, setSrcSessionRel] = useState<string | null>(null)
+  /**
+   * v3.1.1：素材库 = **工作区主库 + 本对话存量**合并；sid 为空也照常读（工作区库脱离对话常驻，
+   * 无对话也能浏览/登记/移除——解开「导素材要先建对话」的冷启动死结）。
+   */
   const refreshSources = useCallback(async (sid: string | null) => {
-    if (!sid) { setSrcEntries([]); setSrcFileRel(null); setSrcAnom(null); return }
-    const r = await aiTeachSrcRead(sid).catch(() => null)
-    if (r?.ok) { setSrcEntries(r.entries ?? []); setSrcFileRel(r.relPath ?? null); setSrcAnom(r.anomalies ?? null) }
-    else { setSrcEntries([]); setSrcFileRel(null); setSrcAnom(null) }
+    const r = await aiTeachSrcRead(sid ?? '').catch(() => null)
+    if (r?.ok) {
+      setSrcEntries(r.entries ?? []); setSrcFileRel(r.relPath ?? null); setSrcAnom(r.anomalies ?? null)
+      setSrcSessionRel(r.sessionRel ?? null)
+    }
+    else { setSrcEntries([]); setSrcFileRel(null); setSrcAnom(null); setSrcSessionRel(null) }
   }, [])
   useEffect(() => { void refreshSources(activeId) }, [activeId, refreshSources])
   /** UI 优化条目5.3（真机 B1/B6 同根因）：SOURCE.md / CONSTRAINTS.md 变更后右栏与弹层即时回读。
@@ -951,9 +1018,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   useEffect(() => { instrStateRef.current = { open: instrOpen, draft: instrDraft } }, [instrOpen, instrDraft])
   const syncSessionFiles = useCallback((opts: { sources: boolean; constraints: boolean; doc?: string | null }) => {
     const sid = activeIdRef.current
-    if (!sid) return
+    // v3.1.1：素材库常驻工作区层 —— 无对话也要回读（sid=null 时读的是工作区主库）；约束文件仍属对话私有，无对话跳过
     if (opts.sources) void refreshSources(sid)
-    if (opts.constraints) {
+    if (opts.constraints && sid) {
       void aiTeachReadConstraints(sid).then(r => {
         if (!r?.ok || !r.relPath || activeIdRef.current !== sid) return
         const text = (r.text ?? '').trim()
@@ -996,7 +1063,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   useEffect(() => { if (isActive) syncSessionFiles({ sources: true, constraints: true }) }, [isActive, syncSessionFiles])
   const openSrcFile = (rel: string) => window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: rel, from: 'aiTeaching' } }))
   const submitSrcForm = async () => {
-    if (!activeId || !srcForm) return
+    if (!srcForm) return
     const name = srcForm.name.trim()
     if (!name) { showToast({ type: 'warning', message: '素材名称必填' }); return }
     // 「再加区间」条目自动派生名：区间有效且名称未手动区分（不含 ·p 标记）时补「·p{起}-{终}」——
@@ -1004,7 +1071,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     const rf = srcForm.rangeFrom.trim()
     const rt = srcForm.rangeTo.trim()
     const finalName = rf && !/·p\d+/.test(name) ? `${name}·p${rf}${rt && rt !== rf ? `-${rt}` : ''}` : name
-    const r = await aiTeachSrcAdd(activeId, {
+    // v3.1.1：登记一律落工作区主库（activeId 只用于定位工作区层，无对话也能登记）
+    const r = await aiTeachSrcAdd(activeId ?? '', {
       name: finalName, path: srcForm.path.trim(), storage: srcForm.storage,
       rangeFrom: srcForm.rangeFrom.trim() || undefined, rangeTo: srcForm.rangeTo.trim() || undefined, note: srcForm.note.trim(),
     }).catch((e: Error) => ({ ok: false as const, error: e.message }))
@@ -1030,9 +1098,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     else if (!r.ok) showToast({ type: 'error', message: r.error ?? '选择目录失败' })
   }
   const doExtract = async (no: number) => {
-    if (!activeId) return
     setSrcBusy(no)
-    const r = await aiTeachSrcExtract(activeId, no).catch((e: Error) => ({ ok: false as const, error: e.message }))
+    const r = await aiTeachSrcExtract(activeId ?? '', no).catch((e: Error) => ({ ok: false as const, error: e.message }))
     setSrcBusy(null)
     if (r.ok && r.relPath) { await refreshSources(activeId); showToast({ type: 'info', message: `提取完成：${r.relPath.split('/').pop()}` }); openSrcFile(r.relPath) }
     else showToast({ type: 'error', message: `提取失败：${(r as { error?: string }).error ?? '未知错误'}` })
@@ -1042,7 +1109,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
    *  跳过提取稿中已有页（重发同区间零重复消耗）。 */
   const transcribeStopRef = useRef(false)
   const doTranscribe = async (no: number) => {
-    if (!activeId || visionBusy) return
+    if (visionBusy) return
     const e = srcEntries.find(x => x.no === no)
     if (!e) return
     const rm = /^(\d+)\s*(?:-\s*(\d+))?$/.exec(e.range.trim())
@@ -1066,7 +1133,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     setVisionBusy({ no, label: `读取原件…（视觉模型：${vc.model}）` })
     transcribeStopRef.current = false
     try {
-      const b = await aiTeachSrcPdfBytes(activeId, no)
+      const b = await aiTeachSrcPdfBytes(activeId ?? '', no)
       if (!b?.ok || !b.base64) { showToast({ type: 'error', message: `视觉转写失败：${b?.error ?? '原件不可读'}` }); return }
       const pdfjs = await import('pdfjs-dist')
       const workerUrl = (await import('pdfjs-dist/build/pdf.worker.min.js?url')).default
@@ -1104,7 +1171,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
         }
         if (pages.length === 0) continue
         setVisionBusy({ no, label: `第 ${bi}/${totalBatches} 批 · 视觉模型转写 ${pages.length} 页…（已转 ${doneTotal} 页）`, done: doneTotal, total: to - from + 1 })
-        const r = await aiTeachSrcTranscribe(activeId, no, pages, visionModel || undefined).catch((err: Error) => ({ ok: false as const, error: err.message }))
+        const r = await aiTeachSrcTranscribe(activeId ?? '', no, pages, visionModel || undefined).catch((err: Error) => ({ ok: false as const, error: err.message }))
         if (!r?.ok) { failMsg = `视觉转写失败：${(r as { error?: string }).error ?? ''}（已完成 ${doneTotal} 页保留，可重发续转）`; break }
         lastRel = r.relPath ?? lastRel
         lastModel = r.model ?? lastModel
@@ -1131,12 +1198,29 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     }
   }
   const doRemoveSrc = async (no: number, nm: string) => {
-    if (!activeId) return
     const yes = await showGlobalConfirm({ title: '移除素材登记', message: `从 SOURCE.md 删除条目 #${no}「${nm}」？素材原件与提取稿文件不会被删除。`, confirmLabel: '移除', variant: 'danger' })
     if (!yes) return
-    const r = await aiTeachSrcRemove(activeId, no).catch((e: Error) => ({ ok: false as const, error: e.message }))
+    const r = await aiTeachSrcRemove(activeId ?? '', no).catch((e: Error) => ({ ok: false as const, error: e.message }))
     if (r?.ok) { await refreshSources(activeId); showToast({ type: 'info', message: '已移除登记' }) }
     else showToast({ type: 'error', message: `移除失败：${(r as { error?: string })?.error ?? ''}` })
+  }
+  /** v3.1.1 上收：对话私有存量（含已入库原件与提取稿）并入工作区主库，之后所有对话共用。
+   *  部分失败时主库已迁入的条目保留、失败项留在对话级可重试（promoteSessionSources 原子语义）。 */
+  const doPromoteSources = async () => {
+    if (!activeId) return
+    const n = srcEntries.filter(e => e.scope === 'session').length
+    const yes = await showGlobalConfirm({
+      title: '上收素材到工作区主库',
+      message: `把本对话登记的 ${n} 条素材并入工作区主库？原件与提取稿一并复制过去，此后所有对话都能直接引用，本对话不再单独保留登记。`,
+      confirmLabel: '上收',
+    })
+    if (!yes) return
+    const r = await aiTeachSrcPromote(activeId).catch((e: Error) => ({ ok: false as const, error: e.message }))
+    if (r?.ok) {
+      await refreshSources(activeId)
+      showToast({ type: 'info', message: (r as { promoted?: number }).promoted ? `已上收 ${(r as { promoted?: number }).promoted} 条到工作区主库` : '对话级没有需要上收的登记' })
+    }
+    else showToast({ type: 'error', message: `上收失败：${(r as { error?: string })?.error ?? ''}` })
   }
 
   // ---------- P8 用户画像（§3.14；三层 = 三份仓库内 PROFILE.md，编辑一律跳编辑区——第三轮「C 移入仓库」拍板） ----------
@@ -1158,7 +1242,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   const [askCustomOpen, setAskCustomOpen] = useState(false)
   const [askCustom, setAskCustom] = useState('')
   const askVisible = !!askPending && askDismissed !== askPending.id
-  useEffect(() => { setAskPicks({}); setAskPage(0); setAskCustomOpen(false); setAskCustom('') }, [askPending?.id]) // 换 ask 重置整卷点选/翻页/补充
+  /** 条目9：提问卡收起二态（不丢 askPending 与点选状态；换 ask 重置） */
+  const [askCollapsed, setAskCollapsed] = useState(false)
+  useEffect(() => { setAskPicks({}); setAskPage(0); setAskCustomOpen(false); setAskCustom(''); setAskCollapsed(false) }, [askPending?.id]) // 换 ask 重置整卷点选/翻页/补充/收起
 
   const [profDismissed, setProfDismissed] = useState(false)
   useEffect(() => { setProfDismissed(false) }, [messages])
@@ -1168,7 +1254,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     if (!isActive) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      if (askVisible && askPending) { setAskDismissed(askPending.id); return } // 条目12：提问卡 → 退回自由输入
+      if (askVisible && askPending) {
+        // 条目9：Esc 两段式——先收起（轻操作，可随时展开），已收起再按 = 忽略（退回自由输入）
+        if (!askCollapsed) { setAskCollapsed(true); return }
+        setAskDismissed(askPending.id)
+        return
+      }
       if (srcForm) { setSrcForm(null); return }
       if (wsModal) { setWsModal(null); return }
       if (instrOpen) { setInstrOpen(false); return }
@@ -1181,7 +1272,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, srcForm, wsModal, instrOpen, tokenOpen, showNewMenu, modelMenuOpen])
+  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, srcForm, wsModal, instrOpen, tokenOpen, showNewMenu, modelMenuOpen])
   /** 最新一条 assistant 回答里的 ```profile 围栏 = 画像更新建议（接受才写文件） */
   const profileSuggestion = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -1684,6 +1775,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                 </div>
                 <textarea
                   value={instrDraft}
+                  spellCheck={false}
                   onChange={e => setInstrDraft(e.target.value)}
                   maxLength={2000}
                   placeholder={'把长期要求写在这里，例如：\n· 只用中文回答\n· 这个对话只聊 Linux 内核\n· 每次先给结论再展开\n（留空保存 = 清除）'}
@@ -1867,15 +1959,27 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                   <div className="h-full flex items-center justify-center text-[12px] text-[var(--text-muted)]">开始对话</div>
                 )}
                 {messages.map((m, idx) => (
-                  <div key={m.id ?? idx} data-msg-idx={idx} className={m.role === 'user' ? 'flex justify-end' : 'min-w-0'}>
+                  <div key={m.id ?? idx} data-msg-idx={idx} className={m.role === 'user' ? 'group relative flex justify-end' : 'min-w-0'}>
                     {m.role === 'user' ? (
-                      /* 用户消息保留右侧气泡（§3.8-3：仅 AI 回复去气泡） */
-                      <div className="max-w-[86%] min-w-0 bg-[var(--accent)] text-white rounded-xl rounded-br-sm px-3.5 py-2 text-[13px] leading-relaxed break-words whitespace-pre-wrap">{m.content}</div>
+                      /* 用户消息保留右侧气泡（§3.8-3：仅 AI 回复去气泡）；v3.1.1 条目6：
+                         select-text = 全局 body user-select:none（防误选 UI）下对气泡的局部白名单恢复，
+                         悬停时气泡左侧空白区浮出「复制」chip（绝对定位不挤布局，复制原始 m.content） */
+                      <>
+                        <div className="max-w-[86%] min-w-0 select-text bg-[var(--accent)] text-white rounded-xl rounded-br-sm px-3.5 py-2 text-[13px] leading-relaxed break-words whitespace-pre-wrap">{m.content}</div>
+                        <button onClick={() => { void navigator.clipboard.writeText(m.content).then(() => showToast({ type: 'info', message: '已复制本条消息' })).catch(() => null) }}
+                          title="复制本条消息"
+                          className="absolute right-full top-1/2 -translate-y-1/2 mr-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded-md whitespace-nowrap text-[11.5px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-opacity">
+                          <Copy size={11} />复制
+                        </button>
+                      </>
                     ) : (
                       /* P3a 去气泡：助手回复平铺 markdown 原生排版；P3b 轻量操作条（§3.8-3：整理成文档/复制/轨迹折叠） */
                       <div className="min-w-0">
                         {/* P8：```profile 建议块不直显；条目11/12：```plan / ```ask 协议块同样收敛（plan→侧栏、ask→提问卡） */}
-                        <MarkdownPreview content={m.content.replace(/```(profile|plan|ask)[^\n]*\n[\s\S]*?```/g, '')} />
+                        <MarkdownPreview
+                          content={m.content.replace(/```(profile|plan|ask)[^\n]*\n[\s\S]*?```/g, '')}
+                          onQuizRetry={retryQuiz}
+                        />
                         {/* 工件栏方案 §2：visual.html 工件卡（对话流唯一形态，HTML 正文永不进流）——数据源=trace 里的 artifact step */}
                         {(m.trace ?? []).some(s => s.artifact) && (
                           <div className="mt-1.5 space-y-1">
@@ -2024,23 +2128,37 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                   const customMode = askCustomOpen || (exam && pickedCur !== undefined && !curOpts.includes(pickedCur))
                   return (
                     <div className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3.5 pt-3 pb-2.5">
-                      {/* 头行：题干 + ‹k/n› + ✕ */}
-                      <div className="flex items-start gap-2">
-                        <div className="flex-1 min-w-0 text-[13px] leading-relaxed text-[var(--text-primary)]">{curQ}</div>
-                        {n > 1 && (
-                          <div className="flex items-center gap-0.5 shrink-0 text-[var(--text-muted)]">
-                            <button onClick={() => setAskPage(p => Math.max(0, p - 1))} disabled={page === 0}
-                              className="p-0.5 rounded hover:bg-[var(--bg-hover)] disabled:opacity-30 transition-colors"><ChevronLeft size={13} /></button>
-                            <span className="text-[11px] tabular-nums px-0.5">{page + 1} / {n}</span>
-                            <button onClick={() => setAskPage(p => Math.min(n - 1, p + 1))} disabled={page === n - 1}
-                              className="p-0.5 rounded hover:bg-[var(--bg-hover)] disabled:opacity-30 transition-colors"><ChevronRight size={13} /></button>
-                          </div>
-                        )}
-                        <button onClick={() => setAskDismissed(askPending.id)} title="关闭提问卡，自由打字回答"
-                          className="p-0.5 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors shrink-0"><X size={13} /></button>
-                      </div>
-                      {/* 选项：序号横条（单题点选即发；整卷点选记录、翻页作答） */}
-                      <div className="mt-2 space-y-0.5">
+                      {/* 头行（条目9 双态把手）：展开 = 题干 + ‹k/n› + 收起钮 + ✕；收起 = 细 chip（点击展开，✕ 仍可直接忽略） */}
+                      {askCollapsed ? (
+                        <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => setAskCollapsed(false)} title="展开提问卡（Esc 再按 = 忽略）">
+                          <ChevronDown size={13} className="shrink-0 text-[var(--text-muted)]" />
+                          <span className="flex-1 min-w-0 truncate text-[12.5px] text-[var(--text-secondary)]">待回答：{curQ}</span>
+                          {exam && <span className="shrink-0 text-[10.5px] text-[var(--text-muted)] tabular-nums">已答 {pickedCount}/{n}</span>}
+                          <button onClick={e => { e.stopPropagation(); setAskDismissed(askPending.id) }} title="关闭提问卡，自由打字回答"
+                            className="p-0.5 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors shrink-0"><X size={13} /></button>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1 min-w-0 text-[13px] leading-relaxed text-[var(--text-primary)]">{curQ}</div>
+                          {n > 1 && (
+                            <div className="flex items-center gap-0.5 shrink-0 text-[var(--text-muted)]">
+                              <button onClick={() => setAskPage(p => Math.max(0, p - 1))} disabled={page === 0}
+                                className="p-0.5 rounded hover:bg-[var(--bg-hover)] disabled:opacity-30 transition-colors"><ChevronLeft size={13} /></button>
+                              <span className="text-[11px] tabular-nums px-0.5">{page + 1} / {n}</span>
+                              <button onClick={() => setAskPage(p => Math.min(n - 1, p + 1))} disabled={page === n - 1}
+                                className="p-0.5 rounded hover:bg-[var(--bg-hover)] disabled:opacity-30 transition-colors"><ChevronRight size={13} /></button>
+                            </div>
+                          )}
+                          <button onClick={() => setAskCollapsed(true)} title="收起提问卡（Esc 亦可），点选状态保留"
+                            className="p-0.5 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors shrink-0"><ChevronDown size={13} /></button>
+                          <button onClick={() => setAskDismissed(askPending.id)} title="关闭提问卡，自由打字回答"
+                            className="p-0.5 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors shrink-0"><X size={13} /></button>
+                        </div>
+                      )}
+                      {/* 选项 + 底部：收起动效走 .kb-collapse（grid-rows 折叠壳，条目9）；选项区 40vh 兜底内滚，整卷多题不再无限撑高 */}
+                      <Collapsible open={!askCollapsed}>
+                      {() => (<>
+                      <div className="pt-2 max-h-[40vh] overflow-y-auto space-y-0.5">
                         {curOpts.map((o, oi) => {
                           const picked = exam ? pickedCur === o : false
                           return (
@@ -2082,6 +2200,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                           <ArrowUp size={15} />
                         </button>
                       </div>
+                      </>)}
+                      </Collapsible>
                     </div>
                   )
                 })() : (
@@ -2117,14 +2237,37 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                         )}
                       </div>
                     )}
-                    <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void doSend() } }}
-                      rows={2} placeholder={quotes.length > 0 ? '针对引用内容提问…（Enter 发送）' : '粘贴资料或输入指令…（Enter 发送）'}
-                      className="w-full px-3 py-2 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] resize-none outline-none focus:border-[var(--accent)]" />
+                    {compressing && (
+                      <div className="mb-1.5 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)] kb-pop">
+                        <Loader2 size={12} className="animate-spin shrink-0 text-[var(--accent)]" />
+                        正在压缩对话历史…（可能数十秒，期间暂不能发送）
+                      </div>
+                    )}
+                    {pickedSkill && (
+                      <div className="mb-1.5">
+                        <span className="inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
+                          <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
+                          <span className="truncate">Skill：{pickedSkill.title} · 本轮显式生效</span>
+                          <button type="button" onClick={() => setPickedSkill(null)} title="移除该 Skill"
+                            className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={10} /></button>
+                        </span>
+                      </div>
+                    )}
+                    <div className="relative">
+                      {slashOpen && (
+                        <SlashCommandMenu items={slashItems} activeIndex={slashActive} onHover={setSlashActive} onPick={pickSlash} />
+                      )}
+                      <textarea ref={inputRef} spellCheck={false} value={input} onChange={e => { setInput(e.target.value); setSlashActive(0) }}
+                        onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void doSend() } }}
+                        rows={2} placeholder={quotes.length > 0 ? '针对引用内容提问…（Enter 发送）' : '粘贴资料或输入指令…（Enter 发送，/ 唤起指令）'}
+                        className="w-full px-3 py-2 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] resize-none outline-none focus:border-[var(--accent)]" />
+                    </div>
                   </>
                 )}
                 <div className="flex items-center gap-2 mt-1.5">
-                  <div className="flex-1" />
+                  {/* 条目7：AI 生成内容合规提示——常驻左端空白处（原 flex-1 空占位），弱化小字不新增行高；
+                      静态渲染与流式/停止两种右端状态正交，布局零跳动（AGENTS.md#12 帮助披露：禁醒目标签轰炸） */}
+                  <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
                   {/* 模型 + 思考强度合一菜单（P3b R12/R14）：仅本对话生效 */}
                   <div className="relative">
                     <button onClick={openModelMenu}
@@ -2371,8 +2514,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
           <div className="h-full min-h-0 flex flex-col">
           <div className="shrink-0">
             <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
-              <span title="工作区 SOURCES/{对话}/SOURCE.md（§3.13 素材库结构 v3）">素材库{srcEntries.length > 0 ? `（${srcEntries.length}）` : ''}</span>
+              <span title="素材库 = 工作区主库 SOURCES/SOURCE.md（跨对话共用）+ 本对话历史登记（存量，标记「对话」）">素材库{srcEntries.length > 0 ? `（${srcEntries.length}）` : ''}</span>
               <div className="ml-auto flex items-center gap-1">
+                {srcSessionRel && activeId && (
+                  <button onClick={() => { void doPromoteSources() }} title="把本对话历史登记的素材（含原件与提取稿）并入工作区主库，之后所有对话共用"
+                    className="px-1 py-0.5 rounded-md text-[var(--warning)] hover:bg-[var(--bg-hover)] transition-colors">上收</button>
+                )}
                 {srcEntries.length > 0 && (
                   <button onClick={() => setSrcCompact(!srcCompact)} title={srcCompact ? '展开卡片：恢复每条两行完整信息' : '收起卡片：全部压成单行细条（再点展开）'}
                     className={`px-1 py-0.5 rounded-md transition-colors ${srcCompact ? 'text-[var(--accent)] bg-[var(--accent)]/10 font-medium' : 'hover:bg-[var(--bg-hover)]'}`}>{srcCompact ? '展开卡片' : '收起卡片'}</button>
@@ -2381,16 +2528,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                   <button onClick={() => { void openArtFile(srcFileRel) }} title="工件栏阅读 SOURCE.md"
                     className="px-1 py-0.5 rounded-md hover:bg-[var(--bg-hover)] transition-colors">SOURCE</button>
                 )}
-                {/* 素材随对话登记：未选/未建会话时不渲染添加入口（点了也只会被引导，徒增噪音——2026-09-08 用户拍板） */}
-                {activeId && (
-                  <button onClick={() => {
+                {/* v3.1.1 登记入口进工作区主库：未选/未建会话也能登记（主库脱离对话常驻）——
+                    解开「导素材要先建对话」的冷启动死结（更新计划第 5 项痛点） */}
+                <button onClick={() => {
                     setSrcForm({ name: '', type: 'pdf', path: '', storage: '已入库', rangeFrom: '', rangeTo: '', note: '' })
                   }}
-                    title="添加素材（写入 SOURCE.md）"
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                    <Plus size={11} /> 素材
-                  </button>
-                )}
+                  title="添加素材（写入工作区主库 SOURCE.md）"
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                  <Plus size={11} /> 素材
+                </button>
               </div>
             </div>
           </div>
@@ -2779,7 +2925,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
       {/* UI 优化第三轮：画像编辑不再用弹层——三层=三份仓库内 PROFILE.md，入口直接跳编辑区打开
           （ensure 落骨架 → kb-open-in-editor from:aiTeaching → 编辑器「← 返回 AI教学」回跳）；弹层 JSX 已删除 */}
       {webDlg && activeId && (
-        <WebSourceDialog sessionId={activeId} entry={webDlg} onClose={() => setWebDlg(null)} onDone={() => { void refreshSources(activeId) }} />
+        <WebSourceDialog sessionId={activeId ?? ''} entry={webDlg} onClose={() => setWebDlg(null)} onDone={() => { void refreshSources(activeId) }} />
       )}
     </div>
   )

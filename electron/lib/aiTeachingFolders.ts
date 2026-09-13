@@ -139,19 +139,9 @@ export function ensureSessionFolder(sessionId: string, getSetting: (key: string)
     writeFileSync(join(folderAbs, ANCHOR_FILE), JSON.stringify(anchor, null, 2), 'utf-8')
     // P2（§2.3）建夹即播种会话专属 CONSTRAINTS.md；P5 起优先工作区层模板，回退产物根层
     seedConstraintsFromTemplate(folderAbs, wsId && join(vault.rootPath, baseRel, ...CONSTRAINTS_TEMPLATE_REL_SEGMENTS), join(vault.rootPath, rootDir, ...CONSTRAINTS_TEMPLATE_REL_SEGMENTS))
-    // 素材目录预建 + SOURCE.md 播种（2026-09-08 用户拍板）：建对话即建 `{父层}/SOURCES/{夹名}/`
-    // 并落空白登记模板（用户填空/表单登记）。幂等：已存在不覆盖。
-    // 模板唯一真相源 = 本文件 sourceTemplateText()（2026-09-09 收尾合并：此前与 aiTeachingSources.emptyTemplate
-    // 双份内联拷贝，改模板必须两处同改，已踩过不同步的坑；懒建兜底保留：老对话/播种失败时首次登记素材仍会自动建）。
-    try {
-      const srcDirAbs = join(join(baseAbs, 'SOURCES'), name)
-      mkdirSync(srcDirAbs, { recursive: true })
-      const srcFile = join(srcDirAbs, 'SOURCE.md')
-      if (!existsSync(srcFile)) {
-        const wsSeg = baseRel !== rootDir && baseRel.startsWith(`${rootDir}/`) ? baseRel.slice(rootDir.length + 1) : ''
-        writeFileSync(srcFile, sourceTemplateText(wsSeg, name), 'utf-8')
-      }
-    } catch { /* 素材预建失败不阻断建夹（懒建兜底仍在） */ }
+    // v3.1.1 素材库上移工作区层：**不再**为新对话预建 `SOURCES/{夹名}/SOURCE.md`（旧版会制造
+    // 对话私有素材层，新对话看不到工作区已有素材，还得手工搬）。登记入口收敛到工作区主库
+    // `{父层}/SOURCES/SOURCE.md`，由 readSources 懒建；本函数不再触碰素材目录。
     broadcastTreeRefresh(baseRel)
     return { ok: true, relPath: `${baseRel}/${name}` }
   } catch (e) {

@@ -24,6 +24,8 @@ interface Props {
   subtasks?: ScheduleTodo[]
   onToggleSubtask?: (id: string) => void
   onDeleteSubtask?: (id: string) => void
+  /** 删除主任务（仅编辑已有任务时提供）。级联删子任务、无回收站，由调用方确认口径 */
+  onDelete?: () => void
   onCreateSubtask?: (data: { title: string; date: string; taskType: 'daily' }) => void
   /** 四象限图标方案（设置项 scheduleQuadrantIcon） */
   quadrantIcon?: QuadrantIcon
@@ -36,7 +38,7 @@ interface Props {
 }
 
 export function TodoEditModal({
-  open, initial, tags, onSave, onClose, subtasks, onToggleSubtask, onDeleteSubtask, onCreateSubtask,
+  open, initial, tags, onSave, onClose, subtasks, onToggleSubtask, onDeleteSubtask, onCreateSubtask, onDelete,
   quadrantIcon = 'bars', quadrantOrder = 'ladder', quadrantText = 'show', allowDaily = true,
 }: Props) {
   const [form, setForm] = useState<TodoForm>(initial)
@@ -364,8 +366,19 @@ export function TodoEditModal({
           </Field>
         </div>
 
-        <div className="flex justify-end gap-2 px-5 py-3 border-t border-[var(--border-color)]">
-          <button onClick={onClose} className="px-4 py-1.5 text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">取消</button>
+        <div className="flex items-center gap-2 px-5 py-3 border-t border-[var(--border-color)]">
+          {/* 删除主任务：仅编辑已有任务时出现（新建时 initial.title 为空）。
+              红字弱化、常态透明 —— 与「删除子任务」同源口径，避免误点 */}
+          {onDelete && initial.title && (
+            <button
+              onClick={() => { onClose(); onDelete() }}
+              title="删除这个任务（含其全部子任务，不可恢复）"
+              className="flex items-center gap-1 px-2 py-1.5 rounded text-[12.5px] text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
+            >
+              <Trash2 size={13} /> 删除任务
+            </button>
+          )}
+          <button onClick={onClose} className="ml-auto px-4 py-1.5 text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">取消</button>
           <button onClick={handleSave} disabled={!canSave}
             className="px-4 py-1.5 text-[13px] bg-[var(--accent)] text-white rounded hover:bg-[var(--accent-hover)] disabled:opacity-40"
           >保存</button>

@@ -59,6 +59,8 @@ interface Props {
   pageId?: string
   /** 来源页面标题（用于错题本快照） */
   pageTitle?: string
+  /** quiz 围栏解析失败重试（v3.1.1 条目13）：传入后失败占位卡显示「让 AI 重出新题」按钮 */
+  onQuizRetry?: () => void
 }
 
 /** Unified markdown preview component. Links open via system handler (files → system app, URLs → browser). */
@@ -116,7 +118,22 @@ function FenceWithFallback({ info, code, pageId, pageTitle, children }: {
   )
 }
 
-function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitles, draftWikiTitles, pageId, pageTitle }: Props) {
+/** quiz 围栏解析失败占位卡（条目13）：不再裸显原始 JSON，可一键让 AI 重出 */
+function QuizFailCard({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <div className="my-2.5 px-3 py-2.5 rounded-lg border border-dashed border-[var(--warning)]/40 bg-[var(--bg-secondary)] flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+      <span className="min-w-0 flex-1">题目数据解析失败（AI 输出的 JSON 格式有误，已隐藏原始内容）</span>
+      {onRetry && (
+        <button onClick={onRetry}
+          className="shrink-0 px-2 py-0.5 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+          让 AI 重出新题
+        </button>
+      )}
+    </div>
+  )
+}
+
+function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitles, draftWikiTitles, pageId, pageTitle, onQuizRetry }: Props) {
   // 旧 408 选择题格式 → ```quiz 围栏（供 pre 组件渲染判题卡片）；非选择题块原样保留
   const processedContent = useMemo(() => preprocessContent(content), [content])
 
@@ -158,13 +175,15 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
       const child = Array.isArray(children) ? children[0] : children
       const cls = (React.isValidElement(child) && ((child.props as { className?: string }).className || '')) || ''
       if (/language-(spoiler|anim)/.test(cls)) return <>{children}</>
-      // ```quiz 围栏（新规范或旧格式预处理产物）→ 判题卡片；解析失败回退普通代码块
+      // ```quiz 围栏（新规范或旧格式预处理产物）→ 判题卡片；宽容修复仍失败 → 占位卡（条目13，不再裸显 JSON）
       if (/language-(quiz|json)/.test(cls)) {
-        const quiz = parseQuizFence(extractText(children))
+        const src = extractText(children)
+        const quiz = parseQuizFence(src)
         if (quiz) return <QuizCard quiz={quiz} pageId={pageId} pageTitle={pageTitle} />
         if (/language-quiz/.test(cls)) {
-          const fixed = parseQuizFenceLoose(extractText(children))
+          const fixed = parseQuizFenceLoose(src)
           if (fixed) return <QuizCard quiz={fixed} pageId={pageId} pageTitle={pageTitle} />
+          return <QuizFailCard onRetry={onQuizRetry} />
         }
       }
       // 插件渲染器（plugin-phase1-design C6）：命中 lang 且插件已启用 → 内容只读沙箱；失败回退普通代码块
@@ -290,7 +309,7 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
       const text = extractText(children)
       return <h6 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, draftWikiTitles)}</h6>
     },
-  }), [handleLinkClick, onWikiLink, knownWikiTitles, draftWikiTitles, pageId, pageTitle, fenceRenderers])
+  }), [handleLinkClick, onWikiLink, knownWikiTitles, draftWikiTitles, pageId, pageTitle, fenceRenderers, onQuizRetry])
 
   return (
     <div className="prose-content">

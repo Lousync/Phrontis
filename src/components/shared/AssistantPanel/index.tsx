@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
   Sparkles, X, Menu, Plus, Trash2, Wrench, FileText, Check, ArrowUpRight, Maximize2,
   Languages, Loader2, Bot, Quote,
@@ -10,15 +11,16 @@ import { useSettings } from '../../../lib/SettingsContext'
 import { getAssistantContext, getSelectionAskHost } from '../../../lib/assistantContext'
 import { showToast } from '../../../lib/toast'
 import { handleChatCommand } from '../../../lib/chatCommands'
+import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
 import { TranslateCard } from '../TranslateCard'
 import { MessageList, fmtTime, type UiMessage } from './MessageList'
 import { useAgentStream } from './useAgentStream'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentRegenerate, agentEditMessage, agentDeleteMessage,
-  llmListProviders, agentAbort,
+  llmListProviders, agentAbort, aiToolsListSkills,
 } from '../../../lib/ipc'
-import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, TabName } from '../../../types'
+import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, TabName, SkillInfo } from '../../../types'
 
 /**
  * 全局 AI 助手侧栏（方案 B）：任意界面 Ctrl+J / 右下角按钮唤起，
@@ -86,6 +88,11 @@ export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [input, setInput] = useState('')
   const [pending, setPending] = useState(false)
+  // v3.1.1 条目10：/ 弹层（指令 + 已装 Skill）与 Skill 显式调用 chip、压缩进行时占位
+  const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
+  const [slashActive, setSlashActive] = useState(0)
+  const [pickedSkill, setPickedSkill] = useState<SkillInfo | null>(null)
+  const [compressing, setCompressing] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [dragW, setDragW] = useState<number | null>(null)
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
@@ -250,6 +257,8 @@ export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
     llmListProviders()
       .then(r => setProvidersOk(r.providers.some(p => p.enabled && p.models.length > 0)))
       .catch(() => setProvidersOk(false))
+    // 弹层 Skill 组候选（v3.1.1 条目10）：面板打开时刷新一次即可
+    aiToolsListSkills().then(r => setSlashSkills(r.skills)).catch(() => setSlashSkills([]))
   }, [open])
 
     const refreshSessions = useCallback(async () => {
@@ -366,6 +375,34 @@ useEffect(() => { if (open) void refreshSessions() }, [open, refreshSessions])
     setTransFloat({ rect: pos.rect, text })
   }, [])
 
+  // ---- / 弹层派生态（v3.1.1 条目10）：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
+  const slashQuery = input.startsWith('/') && !/[\s\n]/.test(input.slice(1)) && input.length > 1 ? input.slice(1) : (input === '/' ? '' : null)
+  const slashItems = useMemo(
+    () => filterSlashItems(buildSlashItems(slashSkills), slashQuery ?? ''),
+    [slashSkills, slashQuery],
+  )
+  const slashOpen = slashQuery !== null
+  /** 弹层选中：指令 → 补全到输入框（回车执行走既有拦截链）；Skill → 挂 chip、清输入继续写正文 */
+  const pickSlash = (it: SlashMenuItem) => {
+    if (it.kind === 'command') {
+      setInput('/' + it.name + ' ')
+      setSlashActive(0)
+      inputRef.current?.focus()
+      return
+    }
+    const sk = slashSkills.find(s => s.registryName === it.name)
+    if (sk) { setPickedSkill(sk); setInput(''); setSlashActive(0) }
+  }
+  /** 弹层键控：局部拦截并 stopPropagation，不进全局 Esc 浮层链 */
+  const onSlashKeys = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (!slashOpen || slashItems.length === 0) return
+    if (e.key === 'ArrowDown') { e.preventDefault(); setSlashActive(i => (i + 1) % slashItems.length); return }
+    if (e.key === 'ArrowUp') { e.preventDefault(); setSlashActive(i => (i - 1 + slashItems.length) % slashItems.length); return }
+    if (e.key === 'Tab') { e.preventDefault(); pickSlash(slashItems[slashActive]); return }
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); pickSlash(slashItems[slashActive]); return }
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setInput(''); setSlashActive(0) }
+  }
+
   const send = useCallback(async (override?: string) => {
     // 划词引用（会话引用形式）：以可见的 markdown 引用块并入消息正文，随发随清（单条截断 600 字防刷屏）
     const qs = [...selQuotesRef.current]
@@ -382,7 +419,11 @@ useEffect(() => { if (open) void refreshSessions() }, [open, refreshSessions])
     }
     // 斜杠指令（/compress 等）：命中即拦截执行，不进对话（置于 pending 检查后，避免生成中并发压缩）
     if (body.startsWith('/')) {
-      if (await handleChatCommand(body, { sessionId: activeId ?? '', surface: full ? 'aiLearn' : 'assistant' })) {
+      if (await handleChatCommand(body, {
+        sessionId: activeId ?? '',
+        surface: full ? 'aiLearn' : 'assistant',
+        onProgress: p => setCompressing(p.active),
+      })) {
         if (!override) setInput('')
         return
       }
@@ -407,7 +448,10 @@ useEffect(() => { if (open) void refreshSessions() }, [open, refreshSessions])
     const cid = crypto.randomUUID()
     chatIdRef.current = cid
     try {
-      const r = await agentChat(sid, text, ctx ?? undefined, cid)
+      // v3.1.1 条目10：显式指定 Skill（chip 随消息一次性消费，发出即清）
+      const sk = pickedSkill
+      setPickedSkill(null)
+      const r = await agentChat(sid, text, ctx ?? undefined, cid, undefined, undefined, undefined, sk?.registryName)
       // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
       if (r.ok && r.compressed) showToastSafe(`上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要`, 'info')
       // 用户在等待期间切换了会话：回复已落库，但不注入当前视图
@@ -430,7 +474,7 @@ useEffect(() => { if (open) void refreshSessions() }, [open, refreshSessions])
       setPending(false)
       void refreshSessions()
     }
-  }, [input, pending, activeId, refreshSessions, refreshMessages, full, learn.last])
+  }, [input, pending, activeId, refreshSessions, refreshMessages, full, learn.last, pickedSkill])
 
   /** 重新生成最后一条回复（末条为助手消息时可用） */
   const runRegenerate = useCallback(async () => {
@@ -769,22 +813,44 @@ useEffect(() => { if (open) void refreshSessions() }, [open, refreshSessions])
                     </div>
                   )}
 
-                  {/* 输入区 */}
-                  <div className="p-2.5 shrink-0 flex items-end gap-2 border-t border-[var(--border-color)]">
-                    <textarea
-                      ref={inputRef}
-                      value={input}
-                      onChange={e => setInput(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
-                      rows={2}
-                      placeholder="问问任何事…(Enter 发送)"
-                      className="flex-1 px-2.5 py-2 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] resize-none outline-none focus:border-[var(--accent)]"
-                    />
-                    <button onClick={() => { void send() }} disabled={pending || !input.trim()}
-                      className="p-2 rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-40 transition-opacity">
-                      {pending ? <Loader2 size={14} className="animate-spin" /> : <SendIcon />}
-                    </button>
+                  {/* 输入区（v3.1.1 条目10：/ 弹层 + 压缩占位 + Skill chip） */}
+                  <div className="p-2.5 shrink-0 border-t border-[var(--border-color)] space-y-1.5">
+                    {compressing && (
+                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)] kb-pop">
+                        <Loader2 size={12} className="animate-spin shrink-0 text-[var(--accent)]" />
+                        正在压缩对话历史…（可能数十秒，期间暂不能发送）
+                      </div>
+                    )}
+                    {pickedSkill && (
+                      <span className="inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
+                        <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
+                        <span className="truncate">Skill：{pickedSkill.title} · 本轮显式生效</span>
+                        <button onClick={() => setPickedSkill(null)} title="移除该 Skill"
+                          className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={10} /></button>
+                      </span>
+                    )}
+                    <div className="relative flex items-end gap-2">
+                      {slashOpen && (
+                        <SlashCommandMenu items={slashItems} activeIndex={slashActive} onHover={setSlashActive} onPick={pickSlash} />
+                      )}
+                      <textarea
+                        ref={inputRef}
+                        spellCheck={false}
+                        value={input}
+                        onChange={e => { setInput(e.target.value); setSlashActive(0) }}
+                        onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
+                        rows={2}
+                        placeholder="问问任何事…(Enter 发送，/ 唤起指令)"
+                        className="flex-1 px-2.5 py-2 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] resize-none outline-none focus:border-[var(--accent)]"
+                      />
+                      <button onClick={() => { void send() }} disabled={pending || compressing || !input.trim()}
+                        className="p-2 rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-40 transition-opacity">
+                        {pending ? <Loader2 size={14} className="animate-spin" /> : <SendIcon />}
+                      </button>
+                    </div>
                   </div>
+                  {/* 条目7：AI 生成内容合规提示——常驻一行弱化小字（AGENTS.md#12：禁醒目标签/图标轰炸）；本组件多模块共用，改一处全局生效 */}
+                  <div className="px-3 pb-1.5 -mt-0.5 shrink-0 text-[10.5px] leading-none text-[var(--text-disabled)] select-none">AI 生成内容，请注意甄别</div>
                 </>
               )}
             </div>

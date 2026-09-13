@@ -3,6 +3,7 @@ import { join, basename, isAbsolute, relative } from 'path'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { ensureSessionFolder, rootDirName, sanitizeTitle, sessionFolder, sourceTemplateText } from './aiTeachingFolders'
+import { listWorkspaces, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { uniqueFileName } from './workspaceManager'
 import { extractPdfRange, extractPptxPages } from './docsReader'
 import { visionChat, findVisionModel } from './llmService'
@@ -13,19 +14,32 @@ import { appendAudit, countMonthVisionTokens, countMonthVisionPages } from './pl
 /**
  * AI教学模块 · 素材库（总纲 docs/ai-teaching-module-rework.md §3.13 结构 v3，P6）
  *
- * 权威结构（第四轮拍板，取代 §3.11/3.12）：
- * - 每个会话文件夹的**父目录**（工作区层；未归一=产物根层）下有 `SOURCES/` 大文件夹；
- * - 每对话一个**与会话文件夹同名**的子文件夹：`SOURCES/{对话夹名}/SOURCE.md`（登记文档）
- *   + 素材原件（3-22「已入库」拷贝）+ 同级区间提取稿 `{素材名}-p{起}-{终}.md`（3-30 命名拍板）；
+ * 权威结构（v3.1.1 起：**素材归属上移工作区层**）：
+ * - 主登记库 = **工作区级** `SOURCES/SOURCE.md`（工作区层 = 会话文件夹的父目录；未归一=产物根层）。
+ *   教材/讲义是课程资产，天然跨对话复用——之前登记在对话级，导致新建对话即空手，
+ *   每开一个「教我学」都从「资料还没登记」开始。
+ * - 对话级 `SOURCES/{对话夹名}/SOURCE.md` **降级为「对话私有补充」**（路径与格式不变，
+ *   存量数据原地保留）；读接口把两层**合并**呈现并统一重编号，「存量迁移 = 合并读展示」。
+ * - 素材原件（3-22「已入库」）+ 区间提取稿 `{素材名}-p{起}-{终}.md`（3-30 命名拍板）
+ *   跟各自素材夹同层存放；`visuals/`（visual.html 工具产物）仍属对话级——它是本对话的示意图，不是素材。
  * - SOURCE.md = YAML frontmatter + 条目小节（3-28 拍板）：`### N. 名称` + 固定字段行
  *   （类型/路径/页码区间/存放方式/已提取/备注），程序按小节解析——三种录入方式（3-19 表单/对话 AI 登记/
  *   直接编辑文件）都收敛到同一份文件的解析与重写；
- * - 「已提取」程序维护（3-26），✓ 防重复提取；对话改名/删除联动在 aiTeachingFolders（3-31 跟随同设置）；
+ * - 「已提取」程序维护（3-26），✓ 防重复提取；对话改名/删除联动在 aiTeachingFolders（3-31 跟随同设置），
+ *   **工作区库不受对话改名/删除影响**（这正是上移的目的）；
  * - 提取稿是 .md 且在仓库内 → AI 用现有 vault 读工具即可读（3-20 区间指定经目录注入达成，无新读取通道）。
  */
 
 const SOURCE_FILE = 'SOURCE.md'
 const SOURCES_DIR = 'SOURCES'
+
+/**
+ * 素材库作用域：
+ * - `workspace` 工作区级主库 → `{工作区层}/SOURCES/SOURCE.md`（跨对话共用，默认）
+ * - `session` 对话私有补充 → `{工作区层}/SOURCES/{对话夹名}/SOURCE.md`（存量保留，不再作为登记入口）
+ */
+export type SourcesScope = 'workspace' | 'session'
+
 const TYPE_ENUM = ['url', 'pptx', 'pdf', 'image', 'md', 'code', 'dir', 'other'] as const
 export type SourceType = (typeof TYPE_ENUM)[number]
 
@@ -46,10 +60,15 @@ export interface SourceEntry {
 
 export interface SourcesResult {
   ok: boolean
+  /** 工作区主库 `SOURCE.md` 的仓库相对路径（登记入口落这里） */
   relPath?: string | null
-  entries?: SourceEntry[]
+  /** 合并后的条目（带 scope / dirRel / origNo，见 MergedSource） */
+  entries?: MergedSource[]
   /** 条目5.3：手编/AI 直写的异常统计（缺编号的小节、编号重复被丢弃数、缺路径未登记数） */
   anomalies?: { unnamed: number; dupNo: number; noPath?: number }
+  /** 两层各自的文件路径（渲染层展示「登记文件在哪」用；对话级无文件时为 null） */
+  workspaceRel?: string | null
+  sessionRel?: string | null
   error?: string
 }
 
@@ -61,9 +80,80 @@ interface SourcesLayout {
   dirAbs: string
   /** SOURCE.md 相对路径 */
   fileRel: string
-  /** 会话夹名（=素材子夹名）与工作区段名（未归一为空串） */
+  /** 会话夹名（=素材子夹名）；工作区级库为空串 */
   convName: string
+  /** 工作区段名（未归一为空串） */
   wsName: string
+  scope: SourcesScope
+}
+
+/** 工作区段名：`{rootDir}/X/...` → X；根层 → '' */
+function wsNameOf(parentRel: string, rootDir: string): string {
+  return parentRel !== rootDir && parentRel.startsWith(`${rootDir}/`) ? parentRel.slice(rootDir.length + 1) : ''
+}
+
+/**
+ * 工作区层相对路径。**无会话也要能定位**（工作区级库要支持开局即登记），三级回退：
+ * ① 会话夹实际父目录（最可靠：兼容「扁平 {root}/{会话}」与「两层 {root}/{工作区}/{会话}」两种落点，
+ *    且不依赖 meta 与磁盘一致）；② meta 的 `lastWorkspaceId`（无会话/会话夹尚未创建时）；
+ * ③ 产物根层（未归一层，此时工作区库 = `{rootDir}/SOURCES/SOURCE.md`）。
+ */
+function parentRelOf(sessionId: string, getSetting: (key: string) => unknown): { rootPath: string; rootId: string; parentRel: string; wsName: string } | { error: string } {
+  const vault = getCurrentVault()
+  if (!vault) return { error: '尚未打开仓库' }
+  const rootDir = rootDirName(getSetting)
+  const sid = String(sessionId ?? '').trim()
+  if (sid) {
+    const rel = sessionFolder(sid, getSetting).relPath
+    if (rel) {
+      const lastSlash = rel.lastIndexOf('/')
+      const parentRel = lastSlash > 0 ? rel.slice(0, lastSlash) : rootDir
+      return { rootPath: vault.rootPath, rootId: vault.rootId, parentRel, wsName: wsNameOf(parentRel, rootDir) }
+    }
+  }
+  const lastWs = listWorkspaces(getSetting).lastWorkspaceId
+  const wsRel = lastWs ? workspaceFolderRel(lastWs, getSetting) : null
+  const parentRel = wsRel ?? rootDir
+  return { rootPath: vault.rootPath, rootId: vault.rootId, parentRel, wsName: wsNameOf(parentRel, rootDir) }
+}
+
+/**
+ * 由会话 id 解析素材夹布局。
+ * - `scope='workspace'`（默认）：`{工作区层}/SOURCES/SOURCE.md`，sessionId 只用于定位工作区，可为空
+ * - `scope='session'`：`{工作区层}/SOURCES/{对话夹名}/SOURCE.md`（对话私有补充，需有效会话）
+ * create=true 懒建目录（工作区级只建 SOURCES/；对话级沿用会话夹懒建）；false 只探测，不产生副作用。
+ */
+function layout(sessionId: string, getSetting: (key: string) => unknown, create: boolean, scope: SourcesScope = 'workspace'): SourcesLayout | { error: string } {
+  if (scope === 'workspace') {
+    const p = parentRelOf(sessionId, getSetting)
+    if ('error' in p) return p
+    const dirRel = `${p.parentRel}/${SOURCES_DIR}`
+    return {
+      rootPath: p.rootPath, rootId: p.rootId,
+      dirRel, dirAbs: join(p.rootPath, dirRel),
+      fileRel: `${dirRel}/${SOURCE_FILE}`,
+      convName: '', wsName: p.wsName, scope,
+    }
+  }
+  const sid = String(sessionId ?? '').trim()
+  if (!sid) return { error: '尚未选择对话' }
+  const vault = getCurrentVault()
+  if (!vault) return { error: '尚未打开仓库' }
+  const probe = create ? ensureSessionFolder(sid, getSetting) : sessionFolder(sid, getSetting)
+  const rel = probe.relPath
+  if (!rel) return { error: probe.ok ? '会话文件夹不存在' : (probe.error ?? '会话文件夹不可用') }
+  const lastSlash = rel.lastIndexOf('/')
+  const rootDir = rootDirName(getSetting)
+  const parentRel = lastSlash > 0 ? rel.slice(0, lastSlash) : rootDir
+  const convName = lastSlash > 0 ? rel.slice(lastSlash + 1) : rel
+  const dirRel = `${parentRel}/${SOURCES_DIR}/${convName}`
+  return { rootPath: vault.rootPath, rootId: vault.rootId, dirRel, dirAbs: join(vault.rootPath, dirRel), fileRel: `${dirRel}/${SOURCE_FILE}`, convName, wsName: wsNameOf(parentRel, rootDir), scope }
+}
+
+/** 懒建兜底模板：唯一真相源 = aiTeachingFolders.sourceTemplateText（2026-09-09 收尾合并，勿在此内联） */
+function emptyTemplate(l: SourcesLayout): string {
+  // 工作区级库的 frontmatter 用「（工作区级）」标出归属——文件里一眼能区分主库与对话私有补充
+  return sourceTemplateText(l.wsName, l.convName || '（工作区级·跨对话共用）')
 }
 
 function broadcastTreeRefresh(dirRel: string): void {
@@ -76,27 +166,6 @@ function today(): string {
   const d = new Date()
   const p = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-}
-
-/** 由会话 id 解析素材文件夹布局：create=true 懒建会话文件夹；false 只探测（读注入/删除用，不side-effect建夹） */
-function layout(sessionId: string, getSetting: (key: string) => unknown, create: boolean): SourcesLayout | { error: string } {
-  const vault = getCurrentVault()
-  if (!vault) return { error: '尚未打开仓库' }
-  const probe = create ? ensureSessionFolder(sessionId, getSetting) : sessionFolder(sessionId, getSetting)
-  const rel = probe.relPath
-  if (!rel) return { error: probe.ok ? '会话文件夹不存在' : (probe.error ?? '会话文件夹不可用') }
-  const lastSlash = rel.lastIndexOf('/')
-  const rootDir = rootDirName(getSetting)
-  const parentRel = lastSlash > 0 ? rel.slice(0, lastSlash) : rootDir
-  const convName = lastSlash > 0 ? rel.slice(lastSlash + 1) : rel
-  const wsName = parentRel !== rootDir && parentRel.startsWith(`${rootDir}/`) ? parentRel.slice(rootDir.length + 1) : ''
-  const dirRel = `${parentRel}/${SOURCES_DIR}/${convName}`
-  return { rootPath: vault.rootPath, rootId: vault.rootId, dirRel, dirAbs: join(vault.rootPath, dirRel), fileRel: `${dirRel}/${SOURCE_FILE}`, convName, wsName }
-}
-
-/** 懒建兜底模板：唯一真相源 = aiTeachingFolders.sourceTemplateText（2026-09-09 收尾合并，勿在此内联） */
-function emptyTemplate(l: SourcesLayout): string {
-  return sourceTemplateText(l.wsName, l.convName)
 }
 
 /** 解析 SOURCE.md → 条目数组（宽容：缺字段回退默认，编号重复保留先到者）
@@ -199,7 +268,7 @@ function rewriteEntries(l: SourcesLayout, entries: SourceEntry[]): { ok: boolean
     const fileAbs = join(l.rootPath, l.fileRel)
     const old = existsSync(fileAbs) ? readFileSync(fileAbs, 'utf-8') : emptyTemplate(l)
     const fm = /^---\n([\s\S]*?)\n---\n?/.exec(old)
-    let head = '---\n' + (fm ? fm[1].split('\n').map(x => x.startsWith('updated:') ? `updated: ${today()}` : x).join('\n') : `workspace: ${l.wsName || '（未归一层）'}\nconversation: ${l.convName}\nupdated: ${today()}`) + '\n---\n'
+    let head = '---\n' + (fm ? fm[1].split('\n').map(x => x.startsWith('updated:') ? `updated: ${today()}` : x).join('\n') : `workspace: ${l.wsName || '（未归一层）'}\nconversation: ${l.convName || '（工作区级·跨对话共用）'}\nupdated: ${today()}`) + '\n---\n'
     const body = entries.map(entryToBlock).join('\n')
     mkdirSync(l.dirAbs, { recursive: true })
     writeFileSync(fileAbs, `${head}\n# 素材来源登记\n\n${body}`, 'utf-8')
@@ -216,26 +285,99 @@ function readEntries(l: SourcesLayout): SourceEntry[] {
   try { return parseSourceMd(readFileSync(p, 'utf-8')) } catch { return [] }
 }
 
+// ===== 两层合并（v3.1.1：工作区主库 + 对话私有补充）=====
+
+/** 合并读的条目：带来源作用域与所属素材夹（提取稿/原件都相对该目录），并保留重编号前的原编号 */
+export interface MergedSource extends SourceEntry {
+  scope: SourcesScope
+  /** 该条目所属素材夹的仓库相对路径（拼提取稿 / 原件路径用） */
+  dirRel: string
+  /** 在所属 SOURCE.md 内的原始编号（写操作按它定位小节） */
+  origNo: number
+}
+
+interface MergedRead {
+  entries: MergedSource[]
+  ws: SourcesLayout | null
+  conv: SourcesLayout | null
+}
+
+/**
+ * 合并两层登记，**统一重编号 1..N**（工作区主库在前、本对话存量在后）。
+ *
+ * 为什么要重编号而不是各留各的：条目编号是 AI 引用（`[2] p.15`）与右栏按钮定位的唯一键。
+ * 两层各自编号必然撞车，撞车之后「提取第 2 条」这类操作就有了歧义。重编号让编号全局唯一，
+ * 写操作再用 `origNo` 反查回所属那一层（见 locateByNo）——这也是「存量迁移 = 合并读展示」的落地：
+ * 对话里的历史登记原地不动，读出来即与新登记的条目共处同一编号空间。
+ *
+ * sessionId 为空 = 只读工作区主库（无对话也能浏览素材库）。
+ */
+function readMerged(sessionId: string, getSetting: (key: string) => unknown): MergedRead {
+  const flat: MergedSource[] = []
+  let ws: SourcesLayout | null = null
+  let conv: SourcesLayout | null = null
+  const seen = new Set<string>()
+  const key = (e: SourceEntry): string => `${e.name}\u0000${e.path}`
+  const wl = layout(sessionId, getSetting, false, 'workspace')
+  if (!('error' in wl)) {
+    ws = wl
+    for (const e of readEntries(wl)) {
+      flat.push({ ...e, scope: 'workspace', dirRel: wl.dirRel, origNo: e.no })
+      seen.add(key(e))
+    }
+  }
+  if (String(sessionId ?? '').trim()) {
+    const cl = layout(sessionId, getSetting, false, 'session')
+    if (!('error' in cl)) {
+      conv = cl
+      for (const e of readEntries(cl)) {
+        // 已上收（或手工重复登记）的同名同路径条目不再重复列出
+        if (seen.has(key(e))) continue
+        flat.push({ ...e, scope: 'session', dirRel: cl.dirRel, origNo: e.no })
+      }
+    }
+  }
+  return { entries: flat.map((e, i) => ({ ...e, no: i + 1 })), ws, conv }
+}
+
+/** 按合并后的编号反查「条目 + 它所属的那一层」；编号不存在返回 null（写操作前必查） */
+function locateByNo(sessionId: string, no: number, getSetting: (key: string) => unknown): { l: SourcesLayout; entry: SourceEntry } | null {
+  const m = readMerged(sessionId, getSetting)
+  const hit = m.entries.find(e => e.no === Number(no))
+  if (!hit) return null
+  const l = hit.scope === 'workspace' ? m.ws : m.conv
+  if (!l) return null
+  const entry = readEntries(l).find(e => e.no === hit.origNo)
+  return entry ? { l, entry } : null
+}
+
 // ===== 对外能力 =====
 
-/** 读素材登记（首次读取自动生成空模板——3.13「创建对话时自动生成」的懒实现） */
+/**
+ * 读素材登记：**工作区主库 + 本对话存量合并**（主库不存在则懒建空模板）。
+ * sessionId 可为空 —— 无对话时读到的是工作区主库，这是「素材库面板脱离对话常驻」的前提。
+ * entries 带 `scope` / `dirRel`（渲染层按各自素材夹拼提取稿与原件路径），`relPath` = 工作区主库路径。
+ */
 export function readSources(sessionId: string, getSetting: (key: string) => unknown): SourcesResult {
   try {
-    const l = layout(sessionId, getSetting, false)
-    if ('error' in l) return { ok: false, error: l.error }
-    const fileAbs = join(l.rootPath, l.fileRel)
+    const ws = layout(sessionId, getSetting, false, 'workspace')
+    if ('error' in ws) return { ok: false, error: ws.error }
+    const fileAbs = join(ws.rootPath, ws.fileRel)
     if (!existsSync(fileAbs)) {
-      mkdirSync(l.dirAbs, { recursive: true })
-      writeFileSync(fileAbs, emptyTemplate(l), 'utf-8')
-      broadcastTreeRefresh(l.dirRel)
+      mkdirSync(ws.dirAbs, { recursive: true })
+      writeFileSync(fileAbs, emptyTemplate(ws), 'utf-8')
+      broadcastTreeRefresh(ws.dirRel)
     }
     let anomalies: SourcesResult['anomalies']
     try {
-      const text = readFileSync(fileAbs, 'utf-8')
-      const a = sourceAnomalies(text)
+      const a = sourceAnomalies(readFileSync(fileAbs, 'utf-8'))
       if (a.unnamed || a.dupNo) anomalies = a
     } catch { /* 统计失败不影响列表 */ }
-    return { ok: true, relPath: l.fileRel, entries: readEntries(l), anomalies }
+    const m = readMerged(sessionId, getSetting)
+    return {
+      ok: true, relPath: ws.fileRel, entries: m.entries, anomalies,
+      workspaceRel: ws.fileRel, sessionRel: m.conv?.fileRel ?? null,
+    }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -283,7 +425,9 @@ export function addSource(sessionId: string, input: AddSourceInput, getSetting: 
       : null
     let type: SourceType | string = explicitType ?? 'other'
     const storage = input?.storage === '已入库' ? '已入库' : '仅引用'
-    const l = layout(sessionId, getSetting, true)
+    // v3.1.1：登记一律落**工作区主库**（教材/讲义是课程资产，跨对话复用）；
+    // sessionId 只用于定位工作区层，可为空 —— 无对话也能登记，解开「导素材要先建对话」的冷启动死结
+    const l = layout(sessionId, getSetting, true, 'workspace')
     if ('error' in l) return { ok: false, error: l.error }
     mkdirSync(l.dirAbs, { recursive: true })
     let path = String(input.path ?? '').trim()
@@ -327,23 +471,25 @@ export function addSource(sessionId: string, input: AddSourceInput, getSetting: 
     const e: SourceEntry = { no, name, type, path, range, storage, extracted: '-', note: String(input.note ?? '').trim() }
     const w = rewriteEntries(l, [...entries, e])
     if (!w.ok) return { ok: false, error: w.error }
-    return { ok: true, relPath: l.fileRel, entries: readEntries(l), no, corrected }
+    const m = readMerged(sessionId, getSetting)
+    // no = 主库内的条目编号（供「再加区间」等场景定位原件）；entries 回合并视图供渲染层直接刷新
+    return { ok: true, relPath: l.fileRel, entries: m.entries, no, corrected, workspaceRel: m.ws?.fileRel ?? null, sessionRel: m.conv?.fileRel ?? null }
   } catch (err) {
     return { ok: false, error: (err as Error).message }
   }
 }
 
-/** 删除条目（编号定位；历史引用可能变化——保守只删该小节，其余编号不动） */
+/** 删除条目（按合并编号定位到所属层；只删该小节、其余编号不动）。返回合并后的完整列表供渲染层直接刷新 */
 export function removeSource(sessionId: string, no: number, getSetting: (key: string) => unknown): SourcesResult {
   try {
-    const l = layout(sessionId, getSetting, false)
-    if ('error' in l) return { ok: false, error: l.error }
-    const entries = readEntries(l)
-    const next = entries.filter(e => e.no !== no)
-    if (next.length === entries.length) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    const hit = locateByNo(sessionId, no, getSetting)
+    if (!hit) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    const { l, entry } = hit
+    const next = readEntries(l).filter(e => e.no !== entry.no)
     const w = rewriteEntries(l, next)
     if (!w.ok) return { ok: false, error: w.error }
-    return { ok: true, relPath: l.fileRel, entries: next }
+    const m = readMerged(sessionId, getSetting)
+    return { ok: true, relPath: l.fileRel, entries: m.entries, workspaceRel: m.ws?.fileRel ?? null, sessionRel: m.conv?.fileRel ?? null }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -365,7 +511,8 @@ export function writeVisual(
     const body = String(html ?? '')
     if (!body.trim()) return { ok: false, error: 'html 参数为空' }
     if (body.length > 512 * 1024) return { ok: false, error: 'html 超过 512KB，拒绝写入' }
-    const l = layout(sessionId, getSetting, true)
+    // v3.1.1：示意图是**本对话**的产物（不是课程素材），固定落对话私有层，不随主库上移
+    const l = layout(sessionId, getSetting, true, 'session')
     if ('error' in l) return { ok: false, error: l.error }
     const visualsAbs = join(l.dirAbs, 'visuals')
     mkdirSync(visualsAbs, { recursive: true })
@@ -380,8 +527,9 @@ export function writeVisual(
   }
 }
 
-/** 解析条目路径 → 素材原件绝对路径（./名=素材夹；绝对路径原样；其余按仓库相对） */
-function resolveMaterialAbs(l: SourcesLayout, p: string): string {
+/** 解析条目路径 → 素材原件绝对路径（./名=素材夹；绝对路径原样；其余按仓库相对）。
+ *  只依赖素材夹与仓库根 —— 注入侧对合并条目只有这两个信息也能复用 */
+function resolveMaterialAbs(l: { dirAbs: string; rootPath: string }, p: string): string {
   const clean = p.trim()
   if (clean.startsWith('./')) return join(l.dirAbs, clean.slice(2))
   if (isAbsolute(clean) || /^[a-zA-Z]:[\\/]/.test(clean)) return clean
@@ -414,11 +562,11 @@ function parseRange(r: string): { from: number; to: number } | null {
  */
 export async function extractRange(sessionId: string, no: number, getSetting: (key: string) => unknown): Promise<{ ok: boolean; relPath?: string; error?: string }> {
   try {
-    const l = layout(sessionId, getSetting, false)
-    if ('error' in l) return { ok: false, error: l.error }
+    // v3.1.1：按合并编号定位到条目所属的那一层（工作区主库 / 对话私有），提取稿与「已提取」都写回该层
+    const hit = locateByNo(sessionId, no, getSetting)
+    if (!hit) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    const { l, entry: e } = hit
     const entries = readEntries(l)
-    const e = entries.find(x => x.no === no)
-    if (!e) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
     // 3-26 程序防重复：已 ✓ 直接返回现有提取稿（UI 也不出提取按钮，双保险）
     const ext = /^✓\s*→\s*(.+)$/.exec(e.extracted)
     if (ext) return { ok: true, relPath: `${l.dirRel}/${ext[1].trim()}` }
@@ -486,10 +634,9 @@ export async function extractRange(sessionId: string, no: number, getSetting: (k
  */
 export async function readSourceBytes(sessionId: string, no: number, getSetting: (key: string) => unknown): Promise<{ ok: boolean; base64?: string; error?: string }> {
   try {
-    const l = layout(sessionId, getSetting, false)
-    if ('error' in l) return { ok: false, error: l.error }
-    const e = readEntries(l).find(x => x.no === no)
-    if (!e) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    const hit = locateByNo(sessionId, no, getSetting)
+    if (!hit) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    const { l, entry: e } = hit
     if (e.type !== 'pdf' && e.type !== 'pptx') return { ok: false, error: '视觉转写支持 pdf/pptx 原件（其余类型请走文本提取/手工整理）' }
     const abs = resolveMaterialAbs(l, e.path)
     if (!e.path || e.path === '-' || !existsSync(abs)) return { ok: false, error: `素材原件不可用：${e.path || '（未登记路径）'}` }
@@ -515,11 +662,11 @@ const VISION_SYSTEM = '你是教材视觉转写助手。把你收到的教材页
  *  渲染层按 12 页/批逐批发送，中断后重发同区间即可续转，已完成批次零消耗。 */
 export async function transcribeVision(sessionId: string, no: number, pages: { n: number; dataUrl: string }[], getSetting: (key: string) => unknown, modelSpec?: string): Promise<{ ok: boolean; relPath?: string; model?: string; done?: number[]; skipped?: number[]; failed?: number[]; error?: string }> {
   try {
-    const l = layout(sessionId, getSetting, false)
-    if ('error' in l) return { ok: false, error: l.error }
+    const hit = locateByNo(sessionId, no, getSetting)
+    if (!hit) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    const { l, entry: e } = hit
     const entries = readEntries(l)
-    const e = entries.find(x => x.no === no)
-    if (!e) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    // 提取稿与「已提取」都写回条目所属的那一层（提取可能由对话内按钮触发，但条目可能已在工作区主库）
     // 断点续转：提取稿里已有的 p{n}（新建模式 `## p{n}` / 追加模式 `### p{n}`）不再重转
     const already = new Set<number>()
     const extPtr = /^✓\s*→\s*(.+)$/.exec(e.extracted)
@@ -608,10 +755,9 @@ function urlStemName(u: string): string {
 /** 探测：门户（候选锚点）/ 目录（章节清单）/ 单文章 三形态；anchorUrl=用户点选候选后二次探测 */
 export async function webProbeSource(sessionId: string, no: number, getSetting: (key: string) => unknown, anchorUrl?: string): Promise<ProbeResult> {
   try {
-    const l = layout(sessionId, getSetting, false)
-    if ('error' in l) return { ok: false, error: l.error }
-    const e = readEntries(l).find(x => x.no === no)
-    if (!e) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    const hit = locateByNo(sessionId, no, getSetting)
+    if (!hit) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    const { entry: e } = hit
     if (e.type !== 'url') return { ok: false, error: '仅 url 类型素材支持展开网页' }
     const target = String(anchorUrl ?? '').trim() || e.path
     if (!target || target === '-') return { ok: false, error: '素材未登记网址' }
@@ -624,11 +770,11 @@ export async function webProbeSource(sessionId: string, no: number, getSetting: 
 /** 批量抓取勾选章节 → 落盘 web/{slug}/NN-*.md + 00-目录.md → 回写「已提取」。断点续抓=已存在文件跳过 */
 export async function webCrawlSource(sessionId: string, no: number, urls: unknown, getSetting: (key: string) => unknown): Promise<{ ok: boolean; dirRel?: string; done?: number; failed?: Array<{ url: string; title: string; reason: string }>; skipped?: number; error?: string }> {
   try {
-    const l = layout(sessionId, getSetting, true)
-    if ('error' in l) return { ok: false, error: l.error }
-    const e = readEntries(l).find(x => x.no === no)
-    if (!e) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    const hit = locateByNo(sessionId, no, getSetting)
+    if (!hit) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
+    const { l, entry: e } = hit
     if (e.type !== 'url') return { ok: false, error: '仅 url 类型素材支持批量抓取' }
+    const abortKey = String(sessionId ?? '').trim() || '__workspace__' // 空会话（工作区级抓取）也要有独立的中止槽，避免互相误取消
     const list = (Array.isArray(urls) ? urls : []).map(u => String(u).trim()).filter(u => /^https?:\/\//i.test(u)).slice(0, 200)
     if (list.length === 0) return { ok: false, error: '没有要抓取的页面（请先在勾选清单选择章节）' }
     const slug = sanitizeTitle(e.name) || `url-${e.no}`
@@ -639,7 +785,7 @@ export async function webCrawlSource(sessionId: string, no: number, urls: unknow
     const delayMs = Math.max(0, Number(getSetting('webCrawlDelayMs')) || 300)
     const chapters: TocChapter[] = list.map((u, i) => ({ no: i + 1, title: '', url: u, group: '', defaultChecked: true }))
     const abort = new AbortController()
-    crawlAborts.set(sessionId, abort)
+    crawlAborts.set(abortKey, abort)
     let outcome
     try {
       outcome = await crawlQueue(chapters, {
@@ -650,7 +796,7 @@ export async function webCrawlSource(sessionId: string, no: number, urls: unknow
         onProgress: info => broadcastWebProgress({ sessionId, no, done: info.done, total: info.total, current: info.current }),
       })
     } finally {
-      crawlAborts.delete(sessionId)
+      crawlAborts.delete(abortKey)
     }
     // 00-目录.md：列全部已落盘章节（含历史续抓），标题/源链从文件头解析；失败项如实列出
     const filesNow = readdirSync(webAbs).filter(f => /\.md$/i.test(f) && f !== '00-目录.md').sort()
@@ -679,7 +825,7 @@ export async function webCrawlSource(sessionId: string, no: number, urls: unknow
     ].join('\n')
     writeFileSync(join(webAbs, '00-目录.md'), tocMd, 'utf-8')
     const entries = readEntries(l)
-    const w = rewriteEntries(l, entries.map(x => x.no === no ? { ...x, extracted: `✓ → ${webRel}/` } : x))
+    const w = rewriteEntries(l, entries.map(x => x.no === e.no ? { ...x, extracted: `✓ → ${webRel}/` } : x))
     if (!w.ok) return { ok: false, error: w.error }
     return { ok: true, dirRel: `${l.dirRel}/${webRel}`, done: outcome.done.length, failed: outcome.failed, skipped: outcome.skipped.length }
   } catch (err) {
@@ -689,7 +835,7 @@ export async function webCrawlSource(sessionId: string, no: number, urls: unknow
 
 /** 取消当前会话进行中的网页抓取 */
 export function webCrawlCancel(sessionId: string): { ok: boolean; error?: string } {
-  const a = crawlAborts.get(sessionId)
+  const a = crawlAborts.get(String(sessionId ?? '').trim() || '__workspace__')
   if (!a) return { ok: false, error: '没有进行中的抓取' }
   a.abort()
   return { ok: true }
@@ -723,28 +869,37 @@ function listDirFilesRecursive(dirAbs: string, out: { rel: string; bin: boolean 
   }
 }
 
+/**
+ * AgentRunner 注入（每轮重读，与 CONSTRAINTS 同哲学）：素材目录 + 编号制引用规则（3-29）。
+ * v3.1.1：**工作区主库 + 本对话私有补充合并注入**（readMerged 统一编号）——新建对话也能看到
+ * 工作区已登记的教材，不再「每次都喊没素材」；零条目 → 空串（零注入）。
+ * dir 条目（2026-09-08 用户需求）自动展开目录内文件清单：文本文件 AI 直接按路径读；
+ * 非文本（扫描 pdf/图片等）标注「读取会得到空内容，先询问用户处理方式」。
+ */
 export function resolveSourcesForInjection(sessionId: string, getSetting: (key: string) => unknown): string {
   try {
-    const l = layout(sessionId, getSetting, false)
-    if ('error' in l) return ''
-    const entries = readEntries(l)
-    if (entries.length === 0) return ''
-    const lines = entries.slice(0, 60).map(e => {
+    const m = readMerged(sessionId, getSetting)
+    if (m.entries.length === 0) return ''
+    const rootPath = m.ws?.rootPath ?? m.conv?.rootPath
+    if (!rootPath) return ''
+    const renderOne = (e: MergedSource): string => {
+      // 每个条目按**自己所属素材夹**拼路径（工作区库与对话补充的提取稿/原件不同目录）
+      const dirAbs = join(rootPath, e.dirRel)
       const bits = [`类型 ${e.type}`, `路径 ${e.path || '-'}`]
       if (e.range && e.range !== '-') bits.push(`${e.type === 'code' ? '行号区间' : '页码区间'} ${e.range}`)
       const ext = /^✓\s*→\s*(.+)$/.exec(e.extracted)
-      bits.push(ext ? `**提取稿 ${l.dirRel}/${ext[1].trim()}（优先读此文件）**` : '未提取')
+      bits.push(ext ? `**提取稿 ${e.dirRel}/${ext[1].trim()}（优先读此文件）**` : '未提取')
       const base = `- [${e.no}] ${e.name}（${bits.join(' · ')}）${e.note ? ` 备注：${e.note}` : ''}`
       // 网页素材（P2）：url 且已提取 → web/{slug}/ 目录；展开章节文件清单，AI 按需 vault.read 单章
       if (e.type === 'url' && ext && ext[1].trim().startsWith('web/')) {
         const relDir = ext[1].trim()
-        const webAbs = join(l.dirAbs, relDir)
+        const webAbs = join(dirAbs, relDir)
         const files: { rel: string; bin: boolean }[] = []
         try { listDirFilesRecursive(webAbs, files) } catch { return `${base}\n  ⚠ 抓取目录不可读：${relDir}` }
         const chapters = files.filter(f => !f.bin && !/00-目录/.test(f.rel)).sort((a, b) => a.rel.localeCompare(b.rel))
         if (chapters.length === 0) return base
         const shown = chapters.slice(0, 120)
-        const items = shown.map(f => `  - ${l.dirRel}/${relDir}${f.rel}`)
+        const items = shown.map(f => `  - ${e.dirRel}/${relDir}${f.rel}`)
         if (chapters.length > shown.length) items.push(`  - …（其余 ${chapters.length - shown.length} 章，见 00-目录.md）`)
         return `${base}\n  章节清单（${chapters.length} 章，路径相对仓库根，按需读单章，勿一次读全部）：\n${items.join('\n')}`
       }
@@ -754,34 +909,153 @@ export function resolveSourcesForInjection(sessionId: string, getSetting: (key: 
       }
       // 目录素材：展开文件清单（文本可读；非文本标注需询问用户），上限 120 条防注入爆炸
       if (e.type === 'dir' && e.path && e.path !== '-') {
-        const dirAbs = resolveMaterialAbs(l, e.path)
+        const matAbs = resolveMaterialAbs({ dirAbs, rootPath }, e.path)
         const files: { rel: string; bin: boolean }[] = []
-        try { listDirFilesRecursive(dirAbs, files) } catch { return `${base}\n  ⚠ 目录不可读或不存在：${e.path}` }
+        try { listDirFilesRecursive(matAbs, files) } catch { return `${base}\n  ⚠ 目录不可读或不存在：${e.path}` }
         if (files.length === 0) return `${base}\n  （目录为空）`
+        // f.rel 相对素材目录本身；给 AI 的路径要拼成仓库相对（否则 vault 读工具按仓库根解析会落空——
+        // 旧版直接给 f.rel 却声称「相对仓库根」，是同一处隐藏 bug，本次一并修）
+        const matRel = relative(rootPath, matAbs).replace(/\\/g, '/')
+        if (matRel.startsWith('..')) return `${base}\n  ⚠ 目录在仓库外（${matAbs}），vault 读工具无法访问；建议用户把目录拷入仓库后重新登记`
         const shown = files.slice(0, 120)
-        const items = shown.map(f => `  - ${f.rel}${f.bin ? '（非文本：直接读会得到空内容，需要内容时先询问用户是否转写/整理）' : ''}`)
+        const items = shown.map(f => `  - ${matRel}/${f.rel}${f.bin ? '（非文本：直接读会得到空内容，需要内容时先询问用户是否转写/整理）' : ''}`)
         if (files.length > shown.length) items.push(`  - …（其余 ${files.length - shown.length} 个文件，可用读取工具按需列出）`)
         return `${base}\n  目录内 ${files.length} 个文件，路径均相对仓库根，可直接读取：\n${items.join('\n')}`
       }
       return base
-    })
+    }
+    const wsOnes = m.entries.filter(e => e.scope === 'workspace').slice(0, 60)
+    const convOnes = m.entries.filter(e => e.scope === 'session').slice(0, 20)
     const hint = [
-      '【素材目录（本对话 SOURCE.md，实时读取）】用户登记的素材如下。需要使用素材内容时：',
+      '【素材目录（实时读取；方括号编号即引用键）】用户登记的素材如下。需要使用素材内容时：',
       '有「提取稿」的条目优先 vault 读提取稿（文本已按页码/行号区间抽取、可编辑）；未提取的 pdf/pptx（按页码区间）或 code（按行号区间）可提示用户',
       '在右栏「素材库」点提取，或仅按登记信息回答；code 素材未提取时也可按登记路径与行号区间直接读文件。',
       '引用素材内容时行内标注编号与页码/行号，形如 [1] p.15（code 写作 [1] L120）；',
-      '每条回答末尾附「本次引用素材」清单（仅列实际用到的：编号. 名称 · 页码/URL）。用户要求登记素材时，',
-      `按模板直接编辑 ${l.fileRel}（### 编号. 名称 + 固定字段行）。`,
-      ...lines,
-    ].join('\n')
-    return hint.length > 3500 ? hint.slice(0, 3500) + '\n…（素材目录过长已截断，全量见 SOURCE.md）' : hint
+      '每条回答末尾附「本次引用素材」清单（仅列实际用到的：编号. 名称 · 页码/URL）。',
+      `工作区素材库（跨对话共用；登记文件 ${m.ws?.fileRel ?? ''}）：`,
+      ...(wsOnes.length ? wsOnes.map(renderOne) : ['（尚无条目）']),
+    ]
+    if (convOnes.length) {
+      hint.push(`本对话私有补充（仅本对话可见；登记文件 ${m.conv?.fileRel ?? ''}）：`, ...convOnes.map(renderOne))
+    }
+    // 登记指引只指向工作区主库（新素材默认是课程资产）；编号是合并视图编号，直接按它改文件会对不上，
+    // 所以要求 AI「新增条目接着文件内现有最大编号 +1」，不要试图按注入编号去改既有小节
+    hint.push(`用户要求登记素材时：默认登记进工作区素材库——按模板直接编辑 ${m.ws?.fileRel ?? ''}（### 编号. 名称 + 固定字段行，编号接着文件内现有最大值 +1），登记后其内容下一轮注入即可见。`)
+    const full = hint.join('\n')
+    return full.length > 3500 ? full.slice(0, 3500) + '\n…（素材目录过长已截断，全量见 SOURCE.md）' : full
   } catch {
     return ''
   }
 }
 
+// ===== 存量上收（v3.1.1 可选项的落地）=====
+
+/** 递归复制文件/目录到目标目录下（名字冲突自动加 (n)；源不动 —— 与「移除登记不删文件」同一口径） */
+function copyInto(srcAbs: string, dstDir: string): { name: string; error?: string } {
+  try {
+    const name = uniqueFileName(dstDir, basename(srcAbs))
+    const target = join(dstDir, name)
+    if (statSync(srcAbs).isDirectory()) {
+      mkdirSync(target, { recursive: true })
+      const walk = (from: string, to: string): void => {
+        for (const de of readdirSync(from, { withFileTypes: true })) {
+          const f = join(to, de.name)
+          if (de.isDirectory()) { mkdirSync(f, { recursive: true }); walk(join(from, de.name), f) }
+          else copyFileSync(join(from, de.name), f)
+        }
+      }
+      walk(srcAbs, target)
+    } else {
+      copyFileSync(srcAbs, target)
+    }
+    return { name }
+  } catch (e) {
+    return { name: '', error: (e as Error).message }
+  }
+}
+
+/**
+ * 存量上收：把某对话登记的素材条目搬进工作区主库（原件/提取稿一并**复制**过去，
+ * 对话夹原样保留 —— 失败可重来，且「登记 ≠ 文件」的项目口径不变）。
+ * 上收成功的条目从对话级 SOURCE.md 移除（合并视图里已由主库承载，留着会重复）；
+ * 原件缺失等异常条目原地保留。未提取的 URL/引用条目只迁登记、零文件操作。
+ */
+export function promoteSessionSources(sessionId: string, getSetting: (key: string) => unknown): SourcesResult & { promoted?: number } {
+  try {
+    const cl = layout(sessionId, getSetting, false, 'session')
+    if ('error' in cl) return { ok: false, error: cl.error }
+    const convEntries = readEntries(cl)
+    if (convEntries.length === 0) return { ok: true, promoted: 0 }
+    const ws = layout(sessionId, getSetting, true, 'workspace')
+    if ('error' in ws) return { ok: false, error: ws.error }
+    mkdirSync(ws.dirAbs, { recursive: true })
+    const wsEntries = readEntries(ws)
+    let no = wsEntries.reduce((m, e) => Math.max(m, e.no), 0)
+    const promoted: SourceEntry[] = []
+    const kept: SourceEntry[] = []
+    for (const e of convEntries) {
+      let path = e.path
+      let extracted = e.extracted
+      let ok = true
+      // ① 已入库原件：./名 → 复制进主库（唯一名），登记改为新层内相对路径
+      if (path.startsWith('./')) {
+        const srcAbs = join(cl.dirAbs, path.slice(2))
+        if (existsSync(srcAbs)) {
+          const c = copyInto(srcAbs, ws.dirAbs)
+          if (c.error) ok = false
+          else path = `./${c.name}`
+        }
+        // 原件缺失：登记照迁（用户可后续改路径），不因此放弃
+      }
+      // ② 提取稿指针：文件/网页目录一并复制，指针指向主库内新位置
+      const ext = /^✓\s*→\s*(.+)$/.exec(e.extracted)
+      if (ok && ext) {
+        const rel = ext[1].trim()
+        if (rel.startsWith('web/')) {
+          const srcAbs = join(cl.dirAbs, rel)
+          if (existsSync(srcAbs)) {
+            const c = copyInto(srcAbs, join(ws.dirAbs, 'web'))
+            if (c.error) ok = false
+            else extracted = `✓ → web/${c.name}/`
+          }
+        } else {
+          const srcAbs = join(cl.dirAbs, rel)
+          if (existsSync(srcAbs)) {
+            const c = copyInto(srcAbs, ws.dirAbs)
+            if (c.error) ok = false
+            else extracted = `✓ → ${c.name}`
+          }
+        }
+      }
+      if (ok) promoted.push({ ...e, no: ++no, path, extracted })
+      else kept.push(e)
+    }
+    if (promoted.length > 0) {
+      const w = rewriteEntries(ws, [...wsEntries, ...promoted])
+      if (!w.ok) return { ok: false, error: w.error }
+      // 全部上收成功才清对话级小节；有失败项时保留原状（合并视图仍可见，重试即可）
+      if (kept.length === 0) {
+        const wc = rewriteEntries(cl, [])
+        if (!wc.ok) return { ok: false, error: `主库已迁入，但清理对话级登记失败：${wc.error}` }
+      } else {
+        const wc = rewriteEntries(cl, kept)
+        if (!wc.ok) return { ok: false, error: `主库已迁入，但清理对话级登记失败：${wc.error}` }
+      }
+    }
+    const m = readMerged(sessionId, getSetting)
+    return {
+      ok: true, promoted: promoted.length, relPath: ws.fileRel, entries: m.entries,
+      workspaceRel: m.ws?.fileRel ?? null, sessionRel: m.conv?.fileRel ?? null,
+      ...(kept.length > 0 ? { error: `${kept.length} 条因文件异常留在对话级（可重试）` } : {}),
+    }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
 /** IPC 注册（main/index.ts settingsCache 注入） */
 export function registerAiTeachingSourceHandlers(getSetting: (key: string) => unknown): void {
+  // v3.1.1：sessionId 允许为空 —— 空会话 = 工作区级主库（素材库面板脱离对话常驻的前提）
   ipcMain.handle('aiTeachSrc:read', (_e, sessionId: string) => readSources(String(sessionId ?? ''), getSetting))
   ipcMain.handle('aiTeachSrc:add', (_e, sessionId: string, input: AddSourceInput) => addSource(String(sessionId ?? ''), input, getSetting))
   ipcMain.handle('aiTeachSrc:remove', (_e, sessionId: string, no: number) => removeSource(String(sessionId ?? ''), Number(no), getSetting))
@@ -804,6 +1078,8 @@ export function registerAiTeachingSourceHandlers(getSetting: (key: string) => un
   ipcMain.handle('aiTeachSrc:webCrawl', (_e, sessionId: string, no: number, urls: string[]) =>
     webCrawlSource(String(sessionId ?? ''), Number(no), urls, getSetting))
   ipcMain.handle('aiTeachSrc:webCancel', (_e, sessionId: string) => webCrawlCancel(String(sessionId ?? '')))
+  // 存量上收：对话级登记（含原件/提取稿复制）迁入工作区主库
+  ipcMain.handle('aiTeachSrc:promote', (_e, sessionId: string) => promoteSessionSources(String(sessionId ?? ''), getSetting))
   // 入库浏览：系统文件选择器（表单「已入库」用；返回绝对路径给 add 拷贝）
   ipcMain.handle('aiTeachSrc:pick', async () => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null

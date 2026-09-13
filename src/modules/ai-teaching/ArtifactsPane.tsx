@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2 } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame } from 'lucide-react'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { ArtHtmlView } from './ArtHtmlView'
 import type { ArtTab } from './artifacts'
@@ -30,6 +30,17 @@ export function ArtifactsPane({ tabs, activeId, widthPx, htmlSeq, expanded, onTo
   const mdScrollRef = useRef<HTMLDivElement>(null)
   const mdScrollPos = useRef<Record<string, number>>({})
   const [outline, setOutline] = useState<Array<{ id: string; text: string; lv: number }>>([])
+  // v3.1.1 条目11：示意图手动缩放——manualMap 存用户手动值（缺省 = fit 自动），effMap 存有效值（工具条展示）
+  const [manualMap, setManualMap] = useState<Record<string, number | null>>({})
+  const [effMap, setEffMap] = useState<Record<string, number>>({})
+  const setManualZoom = useCallback((rel: string, z: number | null) => setManualMap(m => ({ ...m, [rel]: z })), [])
+  const reportEffZoom = useCallback((rel: string, z: number) => setEffMap(m => (Math.abs((m[rel] ?? 0) - z) < 0.001 ? m : { ...m, [rel]: z })), [])
+  /** 工具条 −/+：从当前有效值步进，落为手动值（覆盖 fit） */
+  const stepZoom = useCallback((rel: string, dir: 1 | -1) => {
+    const cur = effMap[rel] ?? 1
+    const next = Math.round(Math.max(0.5, Math.min(6, cur * (dir > 0 ? 1.25 : 1 / 1.25))) * 100) / 100
+    setManualZoom(rel, next)
+  }, [effMap, setManualZoom])
   // 放大态 Esc 退出（捕获层拦截，不进模块 Esc 链——勿连带退禅/关弹层）
   useEffect(() => {
     if (!expanded) return
@@ -102,6 +113,20 @@ export function ArtifactsPane({ tabs, activeId, widthPx, htmlSeq, expanded, onTo
             <button onClick={() => onReload(tab)} title="重读磁盘文件刷新"
               className="shrink-0 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">⟳</button>
           )}
+          {/* 缩放小工具条（v3.1.1 条目11，仅 html 示意图）：− / 百分比 / + / 适应——快捷键 Ctrl+=/-/0/Ctrl+滚轮 同效 */}
+          {!tab.generating && tab.kind === 'html' && tab.rel && (
+            <span className="shrink-0 flex items-center gap-0.5 text-[var(--text-secondary)]">
+              <button onClick={() => stepZoom(tab.rel, -1)} title="缩小（Ctrl+- 或 Ctrl+滚轮）"
+                className="shrink-0 p-0.5 rounded-md hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><ZoomOut size={10} /></button>
+              <span className="tabular-nums w-[52px] text-center text-[10px] text-[var(--text-muted)]" title={`缩放比例（手动值覆盖自动铺满，范围 50%–600%）`}>
+                {manualMap[tab.rel] == null ? '适应' : `${Math.round((effMap[tab.rel] ?? 1) * 100)}%`}
+              </span>
+              <button onClick={() => stepZoom(tab.rel, 1)} title="放大（Ctrl+= 或 Ctrl+滚轮）"
+                className="shrink-0 p-0.5 rounded-md hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><ZoomIn size={10} /></button>
+              <button onClick={() => setManualZoom(tab.rel, null)} disabled={manualMap[tab.rel] == null} title="回到自动铺满（Ctrl+0）"
+                className="shrink-0 p-0.5 rounded-md hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-30 transition-colors"><Frame size={10} /></button>
+            </span>
+          )}
           {!tab.generating && (
             <button onClick={() => onClose(tab.id)} title="关闭页签"
               className="shrink-0 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">✕</button>
@@ -142,7 +167,16 @@ export function ArtifactsPane({ tabs, activeId, widthPx, htmlSeq, expanded, onTo
             )}
           </>
         ) : tab.kind === 'html' ? (
-          <div className="kb-art-in flex-1 min-h-0"><ArtHtmlView relPath={tab.rel} reloadSeq={htmlSeq[tab.rel] ?? 0} fit={expanded} /></div>
+          <div className="kb-art-in flex-1 min-h-0">
+            <ArtHtmlView
+              relPath={tab.rel}
+              reloadSeq={htmlSeq[tab.rel] ?? 0}
+              fit={expanded}
+              manualZoom={manualMap[tab.rel] ?? null}
+              onManualZoom={z => setManualZoom(tab.rel, z)}
+              onEffectiveZoom={z => reportEffZoom(tab.rel, z)}
+            />
+          </div>
         ) : (
           /* pptx 逐页阅读并入页签（§1.4：页码即内容） */
           <div className="kb-art-in flex-1 min-h-0 flex flex-col">

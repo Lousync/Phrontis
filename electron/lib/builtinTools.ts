@@ -1402,7 +1402,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'visual.html',
     title: '生成 HTML 示意图',
-    description: '生成单文件 HTML 示意图辅助讲解，写入本会话 SOURCES/<对话>/visuals/<slug>.html 并自动在右栏工件栏打开。html 为完整自包含单文件：CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）、建议 ≤150 行、画幅 680×400 比例 SVG 为主、中文标注。重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
+    description: '生成单文件 HTML 示意图辅助讲解，写入本会话 SOURCES/<对话>/visuals/<slug>.html 并自动在右栏工件栏打开。html 为完整自包含单文件：CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）、建议 ≤150 行、画幅 680×400 比例 SVG 为主、中文标注。配色：文字与背景对比度 ≥4.5:1（深底近白字、浅底深字，禁同色系深浅叠加）。重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
     inputSchema: {
       type: 'object',
       properties: {

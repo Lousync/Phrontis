@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ChevronLeft, ChevronRight, Check } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Check, Trash2 } from 'lucide-react'
 import type { ScheduleTodo, ScheduleTag } from '../../../types'
 import { getScheduleWeekTodos, updateScheduleTodo } from '../../../lib/ipc'
 import { localToday } from '../../../lib/date'
@@ -48,6 +48,8 @@ interface Props {
   onRequestCreate: (dateStr: string, start: number, end: number) => void
   /** 网格卡片拖回待安排栏 = 取消排期 */
   onUnschedule: (id: string) => void
+  /** 网格卡片右上角删除钮（悬停显现）。本视图先播退场动效再回调 */
+  onDeleteTodo: (todo: ScheduleTodo) => void
   /** 排期/改时长落盘成功后通知上层刷新（待安排栏、月历打点） */
   onChanged: () => void
 }
@@ -61,10 +63,13 @@ function snapshotOf(todo: ScheduleTodo): DragTodoSnapshot {
   }
 }
 
+/** 与 `.kb-item-out` 的过渡时长一致（styles/index.css） */
+const EXIT_MS = 180
+
 export function TimetableView({
   isActive, tags, iconSize, quadrantIcon, quadrantText, refreshSignal,
   weekOffset, setWeekOffset,
-  onOpenTodo, onToggleDone, onRequestCreate, onUnschedule, onChanged,
+  onOpenTodo, onToggleDone, onRequestCreate, onUnschedule, onDeleteTodo, onChanged,
 }: Props) {
   const today = localToday()
   const { s: appSettings, update } = useSettings()
@@ -88,6 +93,8 @@ export function TimetableView({
   const [drop, setDrop] = useState<{ day: number; start: number; duration: number } | null>(null)
   const [resize, setResize] = useState<{ id: string; start: number; end: number } | null>(null)
   const [blank, setBlank] = useState<{ day: number; start: number; end: number } | null>(null)
+  /** 正在退场的卡片 id（播完 `.kb-item-out` 才真正落盘删除） */
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
@@ -472,6 +479,18 @@ export function TimetableView({
     onOpenTodo(t)
   }, [onOpenTodo])
 
+  /**
+   * 卡片删除：先标记退场（卡片加 `.kb-item-out` 淡出右移），动画播完再落盘。
+   * 不能直接调 onDeleteTodo —— 它会立刻刷新 rows，卡片在动画播完前就被移除，动效看不见。
+   */
+  const deleteTodoAnimated = useCallback((t: ScheduleTodo) => {
+    setDeletingId(prev => (prev ? prev : t.id))
+    window.setTimeout(() => {
+      setDeletingId(null)
+      onDeleteTodo(t)
+    }, EXIT_MS)
+  }, [onDeleteTodo])
+
   return (
     <div className="flex h-full flex-col bg-[var(--bg-primary)]">
       {/* 工具行 */}
@@ -660,6 +679,7 @@ export function TimetableView({
                       lane={lane} lanes={lanes} iconSize={iconSize} quadrantIcon={quadrantIcon} quadrantText={quadrantText}
                       onOpen={openTodoGuarded} onToggleDone={onToggleDone}
                       onStartDrag={onBlockPointerDown}
+                      onDelete={deleteTodoAnimated} deleting={deletingId === item.id}
                       onResizeDown={onResizeDown} resize={live} />
                   )
                 })}
@@ -691,7 +711,7 @@ export function TimetableView({
 
 function Block({
   todo, pxPerMin, dayStartMin, lane, lanes, ghost = false, iconSize, quadrantIcon, quadrantText,
-  onOpen, onToggleDone, onStartDrag, onResizeDown, resize,
+  onOpen, onToggleDone, onStartDrag, onResizeDown, onDelete, deleting = false, resize,
 }: {
   todo: ScheduleTodo & { tag?: ScheduleTag | null }
   pxPerMin: number
@@ -706,6 +726,10 @@ function Block({
   onToggleDone: (t: ScheduleTodo) => void
   onStartDrag: (t: ScheduleTodo, e: React.PointerEvent) => void
   onResizeDown: (t: ScheduleTodo, edge: 'top' | 'bot', e: React.PointerEvent) => void
+  /** 删除（悬停右上角显现）。ghost 卡（延后虚影）与过矮卡不提供 —— 后者走编辑弹窗删除 */
+  onDelete?: (t: ScheduleTodo) => void
+  /** 正在退场：加 `.kb-item-out` 淡出右移 */
+  deleting?: boolean
   resize: { start: number; end: number } | null
 }) {
   const start = resize ? resize.start : todo.scheduledStart!
@@ -727,7 +751,7 @@ function Block({
       data-block
       onPointerDown={ghost ? undefined : e => onStartDrag(todo, e)}
       onClick={() => onOpen(todo)}
-      className={`absolute rounded-md overflow-hidden transition-shadow z-[2] hover:z-[6] hover:shadow-[0_3px_10px_rgba(0,0,0,.16)] ${ghost ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'} ${isDone ? 'opacity-50' : ''}`}
+      className={`absolute group rounded-md overflow-hidden transition-shadow z-[2] hover:z-[6] hover:shadow-[0_3px_10px_rgba(0,0,0,.16)] ${ghost ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'} ${isDone ? 'opacity-50' : ''} ${deleting ? 'kb-item-out' : ''}`}
       style={{
         top, height,
         left: `calc(${leftPct}% + 2px)`,
@@ -748,6 +772,18 @@ function Block({
           className={`absolute right-1 top-1 z-[3] w-[13px] h-[13px] rounded-[3px] border flex items-center justify-center transition-colors ${isDone ? 'bg-[var(--success)] border-[var(--success)]' : 'border-[var(--border-color)] bg-[var(--bg-primary)]/70 hover:border-[var(--success)]'}`}
         >
           {isDone && <Check size={9} strokeWidth={3.5} className="text-white" />}
+        </button>
+      )}
+
+      {/* 删除按钮（悬停显现，与完成钮并排；tiny 卡不提供 —— 走编辑弹窗删除） */}
+      {!ghost && !tiny && onDelete && (
+        <button
+          onClick={e => { e.stopPropagation(); onDelete(todo) }}
+          onMouseDown={e => { e.preventDefault(); e.stopPropagation() }}
+          title="删除任务"
+          className="absolute right-[19px] top-1 z-[3] w-[13px] h-[13px] rounded-[3px] border border-[var(--border-color)] bg-[var(--bg-primary)]/70 flex items-center justify-center text-[var(--text-muted)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-[var(--danger)] hover:border-[var(--danger)] transition-all"
+        >
+          <Trash2 size={9} />
         </button>
       )}
 

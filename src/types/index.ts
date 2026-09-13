@@ -908,6 +908,12 @@ export interface AiTeachSourceEntry {
   /** '-' 或 '✓ → 提取稿文件名'（3-26 程序维护） */
   extracted: string
   note: string
+  /** v3.1.1：条目所属层 —— workspace=工作区主库（跨对话共用），session=对话私有补充（存量） */
+  scope?: 'workspace' | 'session'
+  /** v3.1.1：条目所属素材夹的仓库相对路径（提取稿/原件都相对它；两层合并后必须逐条目携带） */
+  dirRel?: string
+  /** v3.1.1：所属 SOURCE.md 内的原始编号（合并视图编号 ≠ 层内编号时，写操作按它定位） */
+  origNo?: number
 }
 
 /** P6 素材库：登记表单入参（storage=已入库 时 path 为待拷贝原件的来源路径） */
@@ -924,9 +930,15 @@ export interface AiTeachSourceInput {
 
 export interface AiTeachSourcesResult {
   ok: boolean
+  /** 工作区主库 SOURCE.md 的仓库相对路径（登记入口落这里） */
   relPath?: string | null
   entries?: AiTeachSourceEntry[]
   no?: number
+  /** v3.1.1：两层各自的文件路径（对话级无文件时为 null） */
+  workspaceRel?: string | null
+  sessionRel?: string | null
+  /** v3.1.1：aiTeachSrcPromote 的结果（上收到主库的条目数） */
+  promoted?: number
   /** UI 优化条目5.3：手编/AI 直写 SOURCE.md 的形状异常统计（unnamed=缺编号的小节，dupNo=编号重复被丢弃数） */
   anomalies?: { unnamed: number; dupNo: number }
   error?: string
@@ -1553,7 +1565,7 @@ export interface ElectronAPI {
   pdfExport: (payload: { data: Uint8Array; defaultName: string; kind?: 'pdf' | 'txt' }) => Promise<PdfExportResult>
   /** 界面逐页阅读：当前仓库内 .pptx → [{n,text}] */
   docsPptxPages: (relPath: string) => Promise<{ ok: boolean; pages?: Array<{ n: number; text: string }>; total?: number; error?: string }>
-  agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
+  agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string }) => Promise<AgentChatResult>
   agentRegenerate: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string }) => Promise<AgentChatResult>
   agentStartScene: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string }) => Promise<AgentChatResult>
   agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: AgentContextInfo; chatId?: string }) => Promise<AgentChatResult>
@@ -1602,6 +1614,8 @@ export interface ElectronAPI {
   aiTeachSrcWebProbe: (id: string, no: number, anchorUrl?: string) => Promise<WebProbeResult>
   aiTeachSrcWebCrawl: (id: string, no: number, urls: string[]) => Promise<WebCrawlResult>
   aiTeachSrcWebCancel: (id: string) => Promise<{ ok: boolean; error?: string }>
+  /** v3.1.1：把对话级登记（含原件/提取稿复制）上收到工作区主库 */
+  aiTeachSrcPromote: (id: string) => Promise<AiTeachSourcesResult>
   aiTeachProfileReadGlobal: () => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>
   aiTeachProfileWriteGlobal: (text: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachProfileReadSession: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>

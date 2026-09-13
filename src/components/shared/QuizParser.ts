@@ -122,27 +122,72 @@ export function preprocessContent(content: string): string {
   })
 }
 
+/** 结构校验（解析与宽容修复共用）：有 options≥2 且 answer 非空才算题 */
+function asQuizItem(raw: unknown): QuizItem | null {
+  if (typeof raw !== 'object' || raw === null) return null
+  const q = raw as QuizItem
+  if (
+    !Array.isArray(q.options) || q.options.length < 2 ||
+    typeof q.answer !== 'string' || !q.answer
+  ) return null
+  return q
+}
+
 /** 解析 ```quiz 围栏内的 JSON → QuizItem；非法返回 null */
 export function parseQuizFence(text: string): QuizItem | null {
   try {
-    const raw = JSON.parse(text.trim()) as QuizItem
-    if (
-      typeof raw !== 'object' || raw === null ||
-      !Array.isArray(raw.options) || raw.options.length < 2 ||
-      typeof raw.answer !== 'string' || !raw.answer
-    ) return null
-    return raw
+    return asQuizItem(JSON.parse(text.trim()))
   } catch {
     return null
   }
 }
 
-/** 宽容解析：AI 输出常见 JSON 瑕疵修复（全角引号/逗号→半角、尾逗号去除）后二次尝试 */
+/**
+ * 反向修复（v3.1.1 条目13）：字符串**内部**未转义英文双引号（如题干写 "底分" → JSON 被截断）。
+ * 字符级状态机：在字符串内遇到 `"` 时看其后第一个非空白字符——
+ * 是合法结构字符（, } ] :）则视为正常收尾；否则判定为内容引号，替换为中文引号后保持字符串状态重试。
+ * 已合法的 JSON 不进本函数（调用方先 JSON.parse 成功即返回），不会被误改。
+ */
+export function repairJsonQuotes(text: string): string {
+  let out = ''
+  let inStr = false
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (!inStr) {
+      if (c === '"') inStr = true
+      out += c
+      continue
+    }
+    if (c === '\\') { out += c + (text[i + 1] ?? ''); i++; continue } // 转义对原样保留
+    if (c === '"') {
+      let j = i + 1
+      while (j < text.length && /\s/.test(text[j])) j++
+      const nxt = text[j]
+      if (nxt === undefined || ',}]:'.includes(nxt)) { inStr = false; out += c }
+      else out += '”'
+      continue
+    }
+    out += c
+  }
+  return out
+}
+
+/**
+ * 宽容 JSON 解析（quiz/ask 围栏共用）：直解 → 全角瑕疵修复（引号/逗号→半角、尾逗号去除）→
+ * 字符串内引号反向修复，逐级降级。失败返回 null。
+ */
+export function looseJsonParse(text: string): unknown {
+  const t0 = text.trim()
+  if (!t0) return null
+  try { return JSON.parse(t0) } catch { /* 降级 */ }
+  const t = t0.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[，,]\s*([}\]])/g, '$1')
+  try { return JSON.parse(t) } catch { /* 降级 */ }
+  try { return JSON.parse(repairJsonQuotes(t)) } catch { return null }
+}
+
+/** 宽容解析：AI 输出常见 JSON 瑕疵修复（全角引号/逗号→半角、尾逗号、字符串内未转义引号） */
 export function parseQuizFenceLoose(text: string): QuizItem | null {
-  let t = text.trim()
-  if (!t) return null
-  t = t.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[，,]\s*([}\]])/g, '$1')
-  return parseQuizFence(t)
+  return asQuizItem(looseJsonParse(text))
 }
 
 /** 从页面 Markdown 中提取全部可判题选择题（供刷题模式与卡片渲染共用） */

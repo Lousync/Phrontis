@@ -73,4 +73,46 @@ for (const [name, ok] of checks) {
   if (!ok) pass = false
 }
 console.log(pass ? 'PASS: 围栏格式与 QuizParser 契约一致' : 'FAIL: 字段不符')
+
+// ===== v3.1.1 条目13：字符串内未转义引号反向修复 + 合法 JSON 不被误改 =====
+const { parseQuizFenceLoose, repairJsonQuotes } = await import('../../../src/components/shared/QuizParser.ts')
+
+console.log('\n--- 条目13：解析层反向修复 ---')
+// 翻车原文：题干字符串内含未转义英文双引号（实测形态，"底分" 把 JSON 截断）
+const breakJson = '{"no":1,"points":"2","question":"鲁滨逊在木筏上说的\\"底分\\"是什么","options":[{"key":"A","text":"选项一"},{"key":"B","text":"选项二"}],"answer":"A","explanation":"解析"}'
+  .replace(/\\"/g, '"')
+const fixed = parseQuizFenceLoose(breakJson)
+const fwDelimJson = '{"no":1,"points":"","question":"题干","options":[{"key":"A","text":"甲"},{"key":"B","text":"乙"}],"answer":"B","explanation":""}'.replace(/"/g, '“')
+const repairChecks = [
+  ['字符串内英文引号翻车原文 → 修复后解析出题', fixed !== null && fixed.question.includes('底分') && fixed.answer === 'A'],
+  ['合法 JSON 原文不被误改', repairJsonQuotes('{"a":"x, y","b":"}"}') === '{"a":"x, y","b":"}"}'],
+  ['正常收尾引号（后随 , } ] :）保持结构', repairJsonQuotes('{"a":"v","b":1}') === '{"a":"v","b":1}'],
+  ['转义对 \" 原样保留不重复修复', repairJsonQuotes('{"a":"说\\"你好\\""}') === '{"a":"说\\"你好\\""}'],
+  ['全角引号瑕疵旧路径不回归', (() => { const q = parseQuizFenceLoose(fwDelimJson); return q !== null && q.answer === 'B' })()],
+  ['无效输入仍返回 null（不误报成题）', parseQuizFenceLoose('｛｝不是 JSON') === null],
+]
+for (const [name, ok] of repairChecks) {
+  console.log(`${ok ? '  ok  ' : ' fail '} ${name}`)
+  if (!ok) pass = false
+}
+
+// ===== v3.1.1 条目15：分值字段不渲染 =====
+// 2026-09-13 志岩拍板：分值徽章整个移除（此前是「2分 分」归一化）。契约 = QuizCard 不再渲染 points；
+// 解析层/类型仍容忍该字段（存量数据兼容），gen-paper 落盘 points:'' 不变（不可见）。
+console.log('\n--- 条目15：分值徽章已移除 ---')
+const { readFileSync } = await import('node:fs')
+const { fileURLToPath } = await import('node:url')
+const { dirname, join } = await import('node:path')
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..') // .AGENT/scripts/quiz-tools → 仓库根
+const cardSrc = readFileSync(join(repoRoot, 'src', 'components', 'shared', 'QuizCard.tsx'), 'utf8')
+const svcSrc = readFileSync(join(repoRoot, 'electron', 'lib', 'agentService.ts'), 'utf8')
+const pointsChecks = [
+  ['QuizCard 不再渲染分值徽章（points 不出现在 JSX）', !/quiz\.points/.test(cardSrc)],
+  ['提示词示例已去掉 points 字段（agentService quizRuleHint）', !/"points":"2/.test(svcSrc.match(/【出题格式规则[\s\S]*?'/)?.[0] ?? '')],
+]
+for (const [name, ok] of pointsChecks) {
+  console.log(`${ok ? '  ok  ' : ' fail '} ${name}`)
+  if (!ok) pass = false
+}
+console.log(pass ? 'PASS: 条目15 归一化契约一致' : 'FAIL: 归一化不符')
 process.exit(pass ? 0 : 1)

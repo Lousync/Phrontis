@@ -53,7 +53,11 @@ const SHELL_SCRIPT = [
   'var rep=function(){try{var w=window.__kbWrap||document.body;var h=Math.ceil(w?w.getBoundingClientRect().height:0)||document.documentElement.scrollHeight||0;parent.postMessage({__kbArtH:Math.max(1,Math.min(12000,h)),__kbArtBox:{h:Math.max(1,h),sw:document.documentElement.scrollWidth||0,vw:window.innerWidth||0}},\'*\')}catch(e){}};',
   'document.addEventListener(\'DOMContentLoaded\',function(){try{var b=document.body;if(b&&b.children.length){var wrap=document.createElement(\'div\');wrap.className=\'__kbWrap\';wrap.style.cssText=\'display:block;width:100%;max-width:100%;box-sizing:border-box\';while(b.firstChild){wrap.appendChild(b.firstChild)}b.appendChild(wrap);window.__kbWrap=wrap}try{new ResizeObserver(rep).observe(window.__kbWrap||document.documentElement)}catch(e){}rep();setTimeout(rep,80);setTimeout(rep,400)}catch(e){}});',
   'window.addEventListener(\'message\',function(e){var d=e.data;if(!d)return;if(d.__kbArtTheme){var r=document.documentElement,s=d.__kbArtTheme;for(var k in s){try{r.style.setProperty(k,s[k])}catch(x){}}}',
-  'if(typeof d.__kbArtZoom==="number"){var z=Math.max(1,Math.min(6,d.__kbArtZoom||1)),r2=document.documentElement;r2.style.zoom=z;r2.style.overflowX=z>1?"auto":"hidden";r2.style.overflowY=z>1?"auto":"hidden";setTimeout(rep,60)}});',
+  'if(typeof d.__kbArtZoom==="number"){var z=Math.max(0.5,Math.min(6,d.__kbArtZoom||1)),r2=document.documentElement;r2.style.zoom=z;r2.style.overflowX=z>1?"auto":"hidden";r2.style.overflowY=z>1?"auto":"hidden";setTimeout(rep,60)}});',
+  // v3.1.1 条目11：手动缩放入口——沙箱捕获 Ctrl+滚轮 / Ctrl+=/-/0（iframe 内的输入宿主收不到，必须在这里拦）转报宿主；
+  // 宿主换算后经 {__kbArtZoom} 下发，走同一条 zoom 通道（宿主 iframe 元素 zoom 空转，见 ArtHtmlView 头注释）
+  'window.addEventListener(\'wheel\',function(e){if(!e.ctrlKey&&!e.metaKey)return;e.preventDefault();parent.postMessage({__kbArtZoomWheel:{dy:e.deltaY}},\'*\')},{passive:false});',
+  'document.addEventListener(\'keydown\',function(e){if(!(e.ctrlKey||e.metaKey))return;var k=e.key;if(k===\'=\'||k===\'+\'){e.preventDefault();parent.postMessage({__kbArtZoomReq:\'in\'},\'*\')}else if(k===\'-\'||k===\'_\'){e.preventDefault();parent.postMessage({__kbArtZoomReq:\'out\'},\'*\')}else if(k===\'0\'){e.preventDefault();parent.postMessage({__kbArtZoomReq:\'reset\'},\'*\')}},true);',
   'window.addEventListener(\'error\',function(e){parent.postMessage({__kbArtErr:String((e&&e.message)||\'脚本错误\').slice(0,300)},\'*\')});',
   'rep();setTimeout(rep,120);setTimeout(rep,500);parent.postMessage({__kbArtReady:true},\'*\');',
   '})();',

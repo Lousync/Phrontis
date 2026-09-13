@@ -4,11 +4,29 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：38
+ * 版本数：39
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.1.1",
+    "date": "",
+    "summary": "/ 命令通道打通 Skill 显式调用：AI 输入框斜杠命令从单一 `/compress` 升级为候选补全面板，已安装 Skill 一并列出、选中即注入，重流程技能不再依赖模型自主触发。",
+    "groups": [
+      {
+        "title": "AI 助手",
+        "kind": "feature",
+        "items": [
+          {
+            "lead": "/ 命令补全",
+            "rest": "AI 输入框敲 `/` 弹出命令候选补全（现含 `/compress` 等），已安装 Skill 支持显式调用——候选菜单直接选中 Skill 并带入主题参数，该 Skill 的提示词确定性注入本轮对话，不再依赖模型「恰好对应」的自主判断；声明为手动的 Skill 不再注册进模型工具表与每轮提示，省下常驻 token",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.1.0",
     "date": "2026-09-12",

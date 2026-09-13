@@ -28,17 +28,17 @@
   builtin.quiz.tag                    1584 字符  ~ 519 tok  schema  437  [write/quiz]
   builtin.quiz.collect                1411 字符  ~ 421 tok  schema  276  [write/quiz]
   builtin.knowledge.create-page       1403 字符  ~ 439 tok  schema  229  [write/knowledge]
+  visual.html                         1220 字符  ~ 480 tok  schema  310  [write/-]
   builtin.blog.create-entry           1186 字符  ~ 369 tok  schema  227  [write/blog]
-  visual.html                         1180 字符  ~ 450 tok  schema  310  [write/-]
   builtin.checkin.check-habit         1177 字符  ~ 351 tok  schema  103  [write/checkin]
   builtin.vault.trash                 1120 字符  ~ 368 tok  schema  102  [write/-]
   builtin.schedule.delete-todo         964 字符  ~ 323 tok  schema  109  [write/schedule]
   builtin.quiz.remove                  936 字符  ~ 311 tok  schema  118  [write/quiz]
   builtin.quiz.favorite                856 字符  ~ 264 tok  schema  187  [write/quiz]
   builtin.quiz.set-note                774 字符  ~ 239 tok  schema  203  [write/quiz]
-  小计: 29114 字符  ~9527 tok
+  小计: 29154 字符  ~9557 tok
 
-合计若全部装载: ~17258 tok
+合计若全部装载: ~17288 tok
 实际常驻(默认权限 read 态): ~7731 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】

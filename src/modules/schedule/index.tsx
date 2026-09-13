@@ -364,11 +364,19 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
 
   const [showDone, setShowDone] = useState(false)
 
+  /**
+   * 删除任务（级联删子任务、无回收站）。
+   * 删除前先数一次子任务 —— 级联是静默的，一条「已删除（含 n 条子任务）」
+   * 是用户唯一能察觉「连带删了子任务」的反馈。
+   */
   async function handleDelete(id: string) {
+    let subCount = 0
+    try { subCount = (await getScheduleSubtasks(id)).length } catch { /* 计数失败不阻断删除 */ }
     await deleteScheduleTodo(id)
     notifyDataChanged('schedule')
     await refreshAll()
     setWeekRefresh(v => v + 1)
+    showToast({ type: 'info', message: subCount > 0 ? `已删除（含 ${subCount} 条子任务）` : '已删除' })
   }
 
   /** 日程表：卡片拖回「待安排」栏 = 取消排期（清空时段、保留日期） */
@@ -664,6 +672,7 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
                 quadrantIcon={quadrantIcon}
                 quadrantText={quadrantText}
                 onOpen={openEdit}
+                onDelete={todo => { void handleDelete(todo.id) }}
                 emptyHint={trayMode === 'week' ? <>本周暂无任务<br />在右侧网格排期或勾选完成</> : undefined}
               />
             ) : (
@@ -699,6 +708,7 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
               onToggleDone={handleToggleDone}
               onRequestCreate={(dateStr, start, end) => openCreate({ date: dateStr, start, end })}
               onUnschedule={handleUnschedule}
+              onDeleteTodo={todo => { void handleDelete(todo.id) }}
               onChanged={handleScheduleChanged}
             />
           </div>
@@ -913,6 +923,7 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
       <TodoEditModal
         open={modalOpen} initial={modalInitial} tags={tags} onSave={handleSave}
         onClose={() => { setModalOpen(false); setEditTarget(null) }}
+        onDelete={editTarget ? () => { void handleDelete(editTarget.id) } : undefined}
         subtasks={editSubtasks}
         onToggleSubtask={handleToggleSubtask}
         onDeleteSubtask={handleDeleteSubtask}

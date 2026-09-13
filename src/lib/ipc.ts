@@ -472,7 +472,7 @@ export const pdfExport = (payload: { data: Uint8Array; defaultName: string; kind
 /** 界面逐页阅读：当前仓库内 .pptx → [{n,text}] */
 export const docsPptxPages = (relPath: string): Promise<{ ok: boolean; pages?: Array<{ n: number; text: string }>; total?: number; error?: string }> => a().docsPptxPages(relPath)
 
-export const agentChat = (sessionId: string, message: string, context?: AgentContextInfo, chatId?: string, source?: string, modelId?: string, effort?: 'off' | 'low' | 'medium' | 'high'): Promise<AgentChatResult> => a().agentChat({ sessionId, message, context, chatId, source, modelId, effort })
+export const agentChat = (sessionId: string, message: string, context?: AgentContextInfo, chatId?: string, source?: string, modelId?: string, effort?: 'off' | 'low' | 'medium' | 'high', skillName?: string): Promise<AgentChatResult> => a().agentChat({ sessionId, message, context, chatId, source, modelId, effort, skillName })
 export const agentRegenerate = (sessionId: string, context?: AgentContextInfo, chatId?: string): Promise<AgentChatResult> => a().agentRegenerate({ sessionId, context, chatId })
 /** 场景/模板启动：不落任何用户消息，用虚拟首轮触发（聊天区第一条即 AI 回复） */
 export const agentStartScene = (sessionId: string, chatId?: string, source?: string, modelId?: string): Promise<AgentChatResult> => a().agentStartScene({ sessionId, chatId, source, modelId })
@@ -536,6 +536,8 @@ export const aiTeachSrcTranscribe = (id: string, no: number, pages: { n: number;
 export const aiTeachSrcWebProbe = (id: string, no: number, anchorUrl?: string) => a().aiTeachSrcWebProbe(id, no, anchorUrl)
 export const aiTeachSrcWebCrawl = (id: string, no: number, urls: string[]) => a().aiTeachSrcWebCrawl(id, no, urls)
 export const aiTeachSrcWebCancel = (id: string) => a().aiTeachSrcWebCancel(id)
+/** v3.1.1：对话级登记上收到工作区主库（原件/提取稿一并复制，对话夹保留） */
+export const aiTeachSrcPromote = (id: string) => a().aiTeachSrcPromote(id)
 export const onAiTeachWebProgress = (cb: (p: { sessionId: string; no: number; done: number; total: number; current: string }) => void) => window.api.onAiTeachWebProgress(cb)
 // P8 用户画像（§3.14 两层 PROFILE.md）；UI 优化条目8.2.2 加工作区第三层（全局/工作区/会话）
 export const aiTeachProfileReadGlobal = () => a().aiTeachProfileReadGlobal()
