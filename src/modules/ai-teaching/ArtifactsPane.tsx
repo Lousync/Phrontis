@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame } from 'lucide-react'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { ArtHtmlView } from './ArtHtmlView'
@@ -11,7 +11,7 @@ import type { ArtTab } from './artifacts'
  * expanded（宿主管状态）= 原位占满内容区放大阅读（仿编辑器全屏，非弹窗），页签行 ⤢/⤡ 切换、Esc 退出；
  * 页签列表为会话内存态（切会话清空），阅读位置记忆 per-rel 保存在本组件（跨会话不失效）。
  */
-export function ArtifactsPane({ tabs, activeId, widthPx, htmlSeq, expanded, onToggleExpanded, onActivate, onClose, onReload, onPptxPage, onTalkPage, pending, onEdit }: {
+function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggleExpanded, onActivate, onClose, onReload, onPptxPage, onTalkPage, pending, onEdit }: {
   tabs: ArtTab[]
   activeId: string | null
   widthPx: number
@@ -208,3 +208,9 @@ export function ArtifactsPane({ tabs, activeId, widthPx, htmlSeq, expanded, onTo
     </div>
   )
 }
+
+/**
+ * 性能（v3.1.2）：`React.memo` 边界。工件栏内含 `MarkdownPreview`（md 页签），输入框击键触发父级重渲染时，
+ * props 浅比较未变即整棵跳过 —— 同时避免其内部 Markdown 被重复解析。
+ */
+export const ArtifactsPane = memo(ArtifactsPaneImpl)

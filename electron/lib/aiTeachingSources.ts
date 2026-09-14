@@ -11,6 +11,7 @@ import { visionChat, findVisionModel } from './llmService'
 import { convertToPdf, probeSoffice, resetSofficeCache } from './sofficeConvert'
 import { probeWeb, crawlQueue, type ProbeResult, type TocChapter } from './webCrawler'
 import { appendAudit, countMonthVisionTokens, countMonthVisionPages } from './pluginAudit'
+import { getAgentSession } from './agentSessionRepo'
 
 /**
  * AI教学模块 · 素材库（总纲 docs/ai-teaching-module-rework.md §3.13 结构 v3，P6）
@@ -117,6 +118,25 @@ function parentRelOf(sessionId: string, getSetting: (key: string) => unknown): {
   const wsRel = lastWs ? workspaceFolderRel(lastWs, getSetting) : null
   const parentRel = wsRel ?? rootDir
   return { rootPath: vault.rootPath, rootId: vault.rootId, parentRel, wsName: wsNameOf(parentRel, rootDir) }
+}
+
+/**
+ * v3.1.2 条目11：把「支线会话」折算回它的**归属主线会话**（素材继承 α 方案）。
+ *
+ * 支线不 assign 工作区、也没有自己的会话夹（`aiTeachAssignSession` 只在新建主会话时调用），
+ * 若直接拿支线 id 走 `parentRelOf`，会话夹探测必然落空、一路掉到 `lastWorkspaceId`
+ * ——那是「最后进过的工作区」，跟这条支线挂在哪条主线上可能毫无关系。
+ *
+ * 统一先折算成主线 id → 支线自然继承主线的「工作区主库 + 该对话私有补充」，
+ * 与「支线 = 主线某条回答的分叉」语义一致。
+ */
+function ownerSessionId(sessionId: string): string {
+  const sid = String(sessionId ?? '').trim()
+  if (!sid) return ''
+  try {
+    const row = getAgentSession(sid)
+    return row?.parentSessionId ? row.parentSessionId : sid
+  } catch { return sid }
 }
 
 /**
@@ -886,7 +906,9 @@ function listDirFilesRecursive(dirAbs: string, out: { rel: string; bin: boolean 
  */
 export function resolveSourcesForInjection(sessionId: string, getSetting: (key: string) => unknown): string {
   try {
-    const m = readMerged(sessionId, getSetting)
+    // v3.1.2 条目11：支线按**主线**解析素材（工作区主库 + 主线对话私有补充）——支线自己既无
+    // 工作区归属也无会话夹，直接解析会掉到 lastWorkspaceId 兜底，读到的是一个无关工作区。
+    const m = readMerged(ownerSessionId(sessionId), getSetting)
     if (m.entries.length === 0) return ''
     const rootPath = m.ws?.rootPath ?? m.conv?.rootPath
     if (!rootPath) return ''

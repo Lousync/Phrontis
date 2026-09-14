@@ -251,8 +251,6 @@ const api = {
     ipcRenderer.invoke('agent:createSideLane', payload),
   agentListSideLanes: (parentSessionId: string) => ipcRenderer.invoke('agent:listSideLanes', parentSessionId),
   agentPromoteSideLane: (laneSessionId: string) => ipcRenderer.invoke('agent:promoteSideLane', laneSessionId),
-  /** P3 带回主线：把支线结论作为普通消息追加到主线（不调 LLM） */
-  agentAppendNote: (payload: { sessionId: string; content: string }) => ipcRenderer.invoke('agent:appendNote', payload),
   // AI教学 P1：会话 ⇄ 文件夹绑定
   aiTeachEnsureSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:ensureSessionFolder', id),
   aiTeachSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:sessionFolder', id),

@@ -499,8 +499,6 @@ export const agentCreateSideLane = (payload: { parentSessionId: string; anchorMe
 export const agentListSideLanes = (parentSessionId: string): Promise<AgentSessionInfo[]> => a().agentListSideLanes(parentSessionId)
 /** 升格支线为正式会话（单向，不可降级） */
 export const agentPromoteSideLane = (laneSessionId: string): Promise<boolean> => a().agentPromoteSideLane(laneSessionId)
-/** P3 带回主线：把支线结论作为普通消息追加到主线（不调 LLM，不打断主线节奏） */
-export const agentAppendNote = (payload: { sessionId: string; content: string }): Promise<{ ok: boolean; error?: string }> => a().agentAppendNote(payload)
 // ===== AI教学 P1：会话 ⇄ 文件夹绑定 =====
 export interface AiTeachFolderResult { ok: boolean; relPath?: string | null; error?: string }
 /** 幂等确保会话文件夹存在（新建对话确认 / P3 产物落盘懒创建共用） */

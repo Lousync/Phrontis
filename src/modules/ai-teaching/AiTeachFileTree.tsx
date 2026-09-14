@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import {
   workspaceGetCurrent, workspaceListDir, workspaceReadFile, workspaceCreateFile,
@@ -32,7 +32,7 @@ interface Props {
 interface CtxState { x: number; y: number; node: TreeNode | null }
 interface InputModal { title: string; placeholder: string; initial: string; submitLabel: string; onSubmit: (v: string) => void }
 
-export function AiTeachFileTree({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenExternal }: Props) {
+function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenExternal }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [rootDir, setRootDir] = useState('AI教学')
   const [dirCache, setDirCache] = useState<DirCache>({})
@@ -242,3 +242,9 @@ export function AiTeachFileTree({ activeRel, subRel = '', onOpenMd, onOpenHtml, 
     </div>
   )
 }
+
+/**
+ * 性能（v3.1.2）：`React.memo` 边界 —— 输入框击键 / 会话列表等父级重渲染时，
+ * 若 props 浅比较未变（调用方已用 `useCallback` 稳定回调 + 传值型 props）则整棵文件树跳过重渲染。
+ */
+export const AiTeachFileTree = memo(AiTeachFileTreeImpl)

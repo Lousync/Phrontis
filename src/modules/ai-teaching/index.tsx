@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
-  agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentAppendNote, agentPromoteSideLane, agentListSideLanes,
+  agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceListDir,
   agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachAssignSession, aiTeachUnassignSession, aiTeachSetLastWorkspace,
@@ -28,11 +28,16 @@ import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubbl
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { WebSourceDialog } from './components/WebSourceDialog'
 import { SideLanePanel } from './SideLanePanel'
+import { useFloatingWindow } from './useFloatingWindow'
 
-/** v3.1.2 条目11 P3：带回主线的消息前缀（渲染层据此把该条用户消息渲染成「支线结论」锚点） */
-const BRINGBACK_PREFIX = '◧ 已从支线带回结论：'
-/** 带回锚点 → 支线映射（localStorage）：让「查看支线 →」在重启后依然能重新打开原支线 */
-const BRINGBACK_KEY = 'aiTeach.broughtBack'
+/**
+ * 锚点回答 → 支线映射（localStorage）：被追问的那条回答下方据此出现「支线追问 · 已开」，
+ * 重启后依然能重新打开原支线。
+ *
+ * v3.1.2 条目11（2026-09-14 改）：登记时机由「用户手动带回主线时」改为**开窗即自动登记**
+ * ——关掉浮窗不再失联：那条被追问的回答自己就是入口，不必再往主线里塞一条"带回消息"。
+ */
+const ANCHOR_LANES_KEY = 'aiTeach.anchorLanes'
 import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourceEntry, SkillInfo } from '../../types'
 
 /**
@@ -325,6 +330,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   const [template, setTemplate] = useState<Template>(TEMPLATES[0])
   const [messages, setMessages] = useState<UiMsg[]>([])
   const [input, setInput] = useState('')
+  /**
+   * input 的实时镜像（v3.1.2 性能修复）。根因：`doSend` 若直接闭包 `input`，则**每次击键**它都换新引用
+   * → `retryQuiz`（deps=[doSend]）跟着换 → 每条 AI 消息的 `MarkdownPreview`（`React.memo`）**浅比较失败
+   * → 整段 Markdown 全量重解析**（实测长回答 17.8ms/条：katex 16.4 + highlight 7.5；10 条会话 ≈55ms/击键、
+   * 20 条 ≈110ms）。改读 ref 后 `doSend` 与输入解耦 → `retryQuiz` 稳定 → memo 恢复生效。
+   * 安全性：`doSend()` 只从**用户事件**（Enter / 发送按钮）调用，必然晚于上一次 render+effect，
+   * 故 ref 一定是最新值；无「setInput(x) 后同步 doSend()」的踩空路径（三处调用要么传显式文本、要么现读）。
+   */
+  const inputValueRef = useRef('')
+  useEffect(() => { inputValueRef.current = input }, [input])
   // v3.1.1 条目10：/ 弹层（指令 + 已装 Skill）、Skill 显式调用 chip、压缩进行时占位
   const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
   const [slashActive, setSlashActive] = useState(0)
@@ -481,6 +496,18 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     return wsActive.folderRel.startsWith(p) ? wsActive.folderRel.slice(p.length) : wsActive.folderRel
   })()
   const treeBase = wsTreeSeg ? `${aiTeachRoot}/${wsTreeSeg}` : aiTeachRoot
+  /**
+   * 性能（v3.1.2）：左栏文件树 / 工件栏的打开回调**提到 useCallback**——它们原来是调用点的内联箭头，
+   * 每次渲染都是新引用，会让下面两个子组件的 `React.memo` 恒失效（输入框击键时整棵树/工件栏白重渲染）。
+   * 依赖仅为 `treeBase`（字符串，按值稳定）与 `openArtFile`（useCallback）。
+   */
+  const treeOpenArt = useCallback((rel: string) => { void openArtFile(`${treeBase}/${rel}`) }, [openArtFile, treeBase])
+  const treeOpenExternal = useCallback((rel: string) => {
+    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: `${treeBase}/${rel}`, from: 'aiTeaching' } }))
+  }, [treeBase])
+  const artOpenInEditor = useCallback((rel: string) => {
+    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: rel, from: 'aiTeaching' } }))
+  }, [])
   const wsSessions = useMemo(
     () => sessions.filter(s => (wsSessionMap[s.id] ?? '__none__') === (activeWs ?? '__none__')),
     [sessions, wsSessionMap, activeWs],
@@ -558,9 +585,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   // parentSessionId 在打开瞬间锁定——面板开着时切主线会话不会把支线挪到别的会话下。
   const [sideLane, setSideLane] = useState<{ parentSessionId: string; anchorMessageId: string; parentTitle: string; openLaneId?: string } | null>(null)
   const [sideLaneWide, setSideLaneWide] = useState(false)
-  /** 带回锚点映射：主线消息 id → 支线（用于「查看支线 →」重新打开） */
-  const [broughtBack, setBroughtBack] = useState<Record<string, { laneId: string; laneTitle: string }>>(() => {
-    try { return JSON.parse(localStorage.getItem(BRINGBACK_KEY) || '{}') as Record<string, { laneId: string; laneTitle: string }> } catch { return {} }
+  /** 锚点回答 → 支线映射：被追问的回答消息 id → 支线（回答下方按钮据此重开） */
+  const [anchorLanes, setAnchorLanes] = useState<Record<string, { laneId: string; laneTitle: string }>>(() => {
+    try { return JSON.parse(localStorage.getItem(ANCHOR_LANES_KEY) || '{}') as Record<string, { laneId: string; laneTitle: string }> } catch { return {} }
   })
   // PPT 逐页阅读已并入工件栏 pptx 页签（工件栏方案 §1.4，原 reader 中栏互斥态退役）
   // UI 优化条目6B：中栏导航状态（对话/题目 · 工件栏激活页签）随变化落到本会话持久化键
@@ -668,27 +695,39 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   }, [])
 
   /**
-   * v3.1.2 条目11 P3：把支线结论带回主线。
-   * 作为一条普通用户消息追加（**不调 LLM**，不打断主线节奏）；前缀 BRINGBACK_PREFIX 让渲染层
-   * 把这条渲染成「支线结论」锚点而非普通气泡，并记住映射以便「查看支线 →」重新打开。
+   * v3.1.2 条目11：支线**首条消息发出时**自动登记锚点回执。
+   *
+   * 被追问的那条回答就是这条支线的入口——登记后按钮变「支线追问 · 已开」，点击即可重开；
+   * 关窗 / 切形态都不再失联（原「带回主线」的人工通道已于 2026-09-14 移除，支线不再往主线塞消息）。
+   * 登记时点选在**首条消息**而非开窗瞬间：一句没发的空支线不该在主线留下「已开」入口
+   * （空支线由面板卸载时回收，两面互为补集，不存在「有内容却无入口」的空档）。
    */
-  const bringBackToMain = useCallback(async (laneId: string, laneTitle: string, text: string) => {
-    const sid = activeIdRef.current
-    if (!sid) return
-    const r = await agentAppendNote({ sessionId: sid, content: `${BRINGBACK_PREFIX}${laneTitle}\n\n${text}` })
-    if (!r.ok) { showToast({ type: 'error', message: r.error || '带回主线失败' }); return }
-    await refreshMessages(sid)
-    // 记录映射：刚追加的那条 = 当前最后一条
-    const rows = await agentMessages(sid).catch(() => [] as AgentStoredMessage[])
-    const lastId = rows.length > 0 ? rows[rows.length - 1].id : ''
-    if (lastId) {
-      setBroughtBack(prev => {
-        const next = { ...prev, [lastId]: { laneId, laneTitle } }
-        try { localStorage.setItem(BRINGBACK_KEY, JSON.stringify(next)) } catch { /* ignore */ }
-        return next
-      })
-    }
-  }, [refreshMessages])
+  /** 当前打开支线的会话 id（首条消息后才有值）——供切换浮层/宽轨形态时承接，避免重挂时重建会话丢内容 */
+  const activeLaneIdRef = useRef('')
+  const noteLaneReady = useCallback((anchorMessageId: string, laneId: string, laneTitle: string) => {
+    activeLaneIdRef.current = laneId
+    if (!anchorMessageId) return
+    setAnchorLanes(prev => {
+      const next = { ...prev, [anchorMessageId]: { laneId, laneTitle } }
+      try { localStorage.setItem(ANCHOR_LANES_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+      return next
+    })
+  }, [])
+
+  /**
+   * 切换支线形态（浮层 ⇄ 右栏宽轨）——两者是**不同挂载点**，重挂时若不带 `openLaneId` 会重新建会话
+   * （旧支线连同已追问内容变孤儿）。已发过消息的支线带上 `activeLaneIdRef` 作 `openLaneId`
+   * → 新形态**载入同一条**（不丢内容）；未发送的支线不带（新形态重建无损失，旧空支线由面板卸载回收）。
+   */
+  const toggleSideLaneWide = useCallback((wide: boolean) => {
+    setSideLaneWide(wide)
+    const lid = activeLaneIdRef.current
+    if (lid) setSideLane(prev => (prev && !prev.openLaneId ? { ...prev, openLaneId: lid } : prev))
+  }, [])
+  // 换锚点 / 关面板时清掉上一次的承接 id，避免切形态承载到错误的支线
+  useEffect(() => {
+    activeLaneIdRef.current = sideLane?.openLaneId ?? ''
+  }, [sideLane?.anchorMessageId, sideLane?.openLaneId])
 
   // 打开 AI教学 Tab 时同步会话
   useEffect(() => { void refreshSessions() }, [refreshSessions, isActive])
@@ -793,7 +832,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   }, [refreshMessages, beginStream, endStream])
 
   const doSend = useCallback(async (override?: string) => {
-    const text = (override ?? input).trim()
+    const text = (override ?? inputValueRef.current).trim()
     if (!text || pending || compressing) return
     // 斜杠指令（/compress 等）：命中即拦截执行，不进对话（无会话时也拦截并提示）
     if (text.startsWith('/')) {
@@ -817,7 +856,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     const cid = crypto.randomUUID()
     chatIdRef.current = cid
     await sendText(text, cid, true, sk?.registryName) // 失败 toast 已下沉 sendText（V-2），此处不再重复提示
-  }, [input, pending, compressing, sendText, pickedSkill])
+  }, [pending, compressing, sendText, pickedSkill])
 
   // ---- / 弹层派生态（v3.1.1 条目10）：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
   const slashQuery = input.startsWith('/') && !/[\s\n]/.test(input.slice(1)) && input.length > 1 ? input.slice(1) : (input === '/' ? '' : null)
@@ -1675,6 +1714,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   }, [activeWs])
   /** 双窗口判定：工件栏有页签即在（内容驱动，无折叠态；空栏不挤占素材库） */
   const artExpanded = artTabs.length > 0
+  // 支线旁问浮窗力学（v3.1.2 补强，2026-09-14 志岩拍板）：可拖动 + 八向缩放 + 拖近右缘自动停靠。
+  // 舞台 = 三栏工作区行（rowRef，已是 position:relative）→ 拖拽范围 = 顶栏以下整个模块工作区；
+  // 位置尺寸全局记忆（不随工作区/会话变）；双击顶栏复位。宽轨态交给 ResizablePanel，本 hook 只管浮层态。
+  const floatWin = useFloatingWindow({
+    storageKey: 'aiTeach.sideLaneWin',
+    stageRef: rowRef,
+    enabled: !!sideLane && !sideLaneWide,
+    defaultW: 380, defaultH: 560, minW: 300, minH: 260,
+    onDock: () => setSideLaneWide(true),
+  })
   /** 窄窗兜底（§1.3）：<1100px 工件栏降宽至 40% */
   const artPctEff = rowW > 0 && rowW < 1100 ? Math.min(artPct, 40) : artPct
   // 工件栏展开 → 素材库自动收起（一次折叠动画，不改意图态）；工件栏关闭 → 不自动弹出素材库（2026-09-09 用户拍板），
@@ -2104,9 +2153,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                 <AiTeachFileTree
                   subRel={wsTreeSeg}
                   activeRel={(() => { const r = artTabs.find(t => t.id === artActive && !t.generating)?.rel ?? null; return r && r.startsWith(`${treeBase}/`) ? r.slice(treeBase.length + 1) : null })()}
-                  onOpenMd={(rel) => { void openArtFile(`${treeBase}/${rel}`) }}
-                  onOpenHtml={(rel) => { void openArtFile(`${treeBase}/${rel}`) }}
-                  onOpenExternal={(rel) => { window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: `${treeBase}/${rel}`, from: 'aiTeaching' } })) }}
+                  onOpenMd={treeOpenArt}
+                  onOpenHtml={treeOpenArt}
+                  onOpenExternal={treeOpenExternal}
                 />
               </div>
             </div>
@@ -2219,22 +2268,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                 </div>
               )}
               <div className="relative flex-1 min-h-0">
-              {/* v3.1.2 条目11：支线旁问浮层（右上角浮出，不压输入区）；宽轨形态在 section 之外（真不遮挡中栏） */}
-              {sideLane && !sideLaneWide && (
-                <div className="absolute top-3 right-3 z-40 w-[380px] h-[min(560px,74%)] rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl overflow-hidden kb-pop">
-                  <SideLanePanel
-                    key={sideLane.openLaneId ?? sideLane.anchorMessageId}
-                    parentSessionId={sideLane.parentSessionId}
-                    parentTitle={sideLane.parentTitle}
-                    anchorMessageId={sideLane.anchorMessageId}
-                    openLaneId={sideLane.openLaneId}
-                    onClose={() => setSideLane(null)}
-                    onToggleWide={() => setSideLaneWide(true)}
-                    onBringBack={bringBackToMain}
-                    onPromote={promoteLane}
-                  />
-                </div>
-              )}
+              {/* v3.1.2 补强：支线旁问浮层已提到**行容器末尾**（见 rowRef 那一段）——
+                  原先挂在这里只能在中栏里浮，现在要能跨左栏/中栏/工件栏自由拖动。 */}
               <div ref={scrollRef} onScroll={onConvScroll} className="absolute inset-0 overflow-y-auto pl-4 pr-8 py-3 space-y-3 min-h-0">
                 {messages.length === 0 && !pending && (
                   !prepStarted && prepTemplate ? (
@@ -2274,21 +2309,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                 {messages.map((m, idx) => (
                   <div key={m.id ?? idx} data-msg-idx={idx} className={m.role === 'user' ? 'group relative flex justify-end' : 'min-w-0'}>
                     {m.role === 'user' ? (
-                      m.content.startsWith(BRINGBACK_PREFIX) ? (
-                        /* v3.1.2 条目11 P3：支线结论锚点——不是用户手打的字，而是「带回」回来的支线结论，
-                           与普通气泡区分；右侧「查看支线 →」可重新打开原支线（映射持久化，重启仍在） */
-                        <div className="max-w-[86%] min-w-0 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3.5 py-2 kb-item-in">
-                          <div className="flex items-center gap-1.5 text-[11px] text-[var(--accent)]">
-                            <GitBranch size={11} className="shrink-0" />
-                            <span className="truncate">已从支线带回结论：{m.content.split('\n')[0].slice(BRINGBACK_PREFIX.length)}</span>
-                            {(() => { const bb = m.id ? broughtBack[m.id] : undefined; return bb ? (
-                              <button onClick={() => { setSideLaneWide(false); setSideLane({ parentSessionId: activeId ?? '', anchorMessageId: '', parentTitle: activeTitle, openLaneId: bb.laneId }) }}
-                                className="ml-auto shrink-0 hover:underline">查看支线 →</button>
-                            ) : null })()}
-                          </div>
-                          <div className="mt-1 text-[12.5px] leading-relaxed text-[var(--text-primary)] select-text break-words whitespace-pre-wrap">{m.content.split('\n').slice(1).join('\n').trim()}</div>
-                        </div>
-                      ) : (
                       /* 用户消息保留右侧气泡（§3.8-3：仅 AI 回复去气泡）；v3.1.1 条目6：
                          select-text = 全局 body user-select:none（防误选 UI）下对气泡的局部白名单恢复，
                          悬停时气泡左侧空白区浮出「复制」chip（绝对定位不挤布局，复制原始 m.content） */
@@ -2300,7 +2320,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                           <Copy size={11} />复制
                         </button>
                       </>
-                      )
                     ) : (
                       /* P3a 去气泡：助手回复平铺 markdown 原生排版；P3b 轻量操作条（§3.8-3：整理成文档/复制/轨迹折叠） */
                       <div className="min-w-0">
@@ -2330,12 +2349,19 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                         )}
                         {/* UI 优化条目4：操作条升格为轻 chip 条（11.5px+图标，对齐顶栏 chip 规范）；时间戳坏数据不渲染 */}
                         <div className="text-[11.5px] mt-1.5 flex items-center gap-1.5 -ml-1.5">
-                          {/* v3.1.2 条目11：支线旁问入口（与整理成文档/复制/轨迹同簇） */}
-                          <button onClick={() => { setSideLaneWide(false); setSideLane({ parentSessionId: activeId ?? '', anchorMessageId: m.id ?? '', parentTitle: activeTitle }) }}
-                            title="就这条回答的某一点开独立深挖线，不打断主线节奏"
-                            className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                            <GitBranch size={12} />就这点追问
-                          </button>
+                          {/* v3.1.2 条目11：支线旁问入口（与整理成文档/复制/轨迹同簇）。
+                              已开过支线的回答 → 按钮变「支线追问 · 已开」并高亮，点击**重开原支线**：
+                              锚点回答自己就是入口，关掉浮窗也不失联（映射落 localStorage，重启仍在）。 */}
+                          {(() => {
+                            const al = m.id ? anchorLanes[m.id] : undefined
+                            return (
+                              <button onClick={() => { setSideLaneWide(false); setSideLane({ parentSessionId: activeId ?? '', anchorMessageId: m.id ?? '', parentTitle: activeTitle, openLaneId: al?.laneId }) }}
+                                title={al ? '这条回答已开过支线，点击重新打开' : '就这条回答的某一点开独立深挖线，不打断主线节奏'}
+                                className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${al ? 'text-[var(--accent)] hover:bg-[var(--bg-hover)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                                <GitBranch size={12} />{al ? '支线追问 · 已开' : '就这点追问'}
+                              </button>
+                            )
+                          })()}
                           <button onClick={() => { void organizeDocFor(m.content, idx, m.id) }}
                             className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${organized[m.id ?? `idx${idx}`] ? 'text-[var(--accent)] ring-1 ring-inset ring-[var(--accent)]/40' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
                             <FileOutput size={12} />{organized[m.id ?? `idx${idx}`] ? '✓ 已生成文档 →' : '整理成文档'}
@@ -2918,8 +2944,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
               openLaneId={sideLane.openLaneId}
               wide
               onClose={() => setSideLane(null)}
-              onToggleWide={() => setSideLaneWide(false)}
-              onBringBack={bringBackToMain}
+              onToggleWide={() => toggleSideLaneWide(false)}
+              onLaneReady={(lid, ltitle) => noteLaneReady(sideLane.anchorMessageId, lid, ltitle)}
               onPromote={promoteLane}
             />
           </ResizablePanel>
@@ -2953,7 +2979,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
               onPptxPage={setArtPptxPage}
               onTalkPage={talkArtPage}
               pending={pending}
-              onEdit={(rel) => window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: rel, from: 'aiTeaching' } }))}
+              onEdit={artOpenInEditor}
             />
           </div>
         )}
@@ -3167,6 +3193,37 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
           >
             <div className="absolute top-0 bottom-0 right-0 w-1 bg-[var(--accent)]/0 group-hover:bg-[var(--accent)]/60 transition-colors duration-150" />
           </div>
+        )}
+
+        {/* 支线旁问浮窗（v3.1.2 补强，2026-09-14）：挂在**行容器末尾**，`absolute` 于整行
+            （舞台 = rowRef，见 useFloatingWindow）。原先挂在中栏内部只能在中栏里浮，
+            现在可跨左栏/中栏/工件栏自由拖动 + 八向缩放（热区见 floatWin.handles）。
+            把它推到最右缘推不动时出现落位提示，松手自动转宽轨 —— 与宽轨态统一为「同一个窗口的两态」。 */}
+        {sideLane && !sideLaneWide && floatWin.ready && (
+          <div className="absolute z-40 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl overflow-hidden kb-pop"
+            style={floatWin.style}>
+            <SideLanePanel
+              key={sideLane.openLaneId ?? sideLane.anchorMessageId}
+              parentSessionId={sideLane.parentSessionId}
+              parentTitle={sideLane.parentTitle}
+              anchorMessageId={sideLane.anchorMessageId}
+              openLaneId={sideLane.openLaneId}
+              onClose={() => setSideLane(null)}
+              onToggleWide={() => toggleSideLaneWide(true)}
+              onLaneReady={(lid, ltitle) => noteLaneReady(sideLane.anchorMessageId, lid, ltitle)}
+              onPromote={promoteLane}
+              titleDrag={{ onPointerDown: floatWin.onTitlePointerDown, onDoubleClick: floatWin.onTitleDoubleClick }}
+            />
+            {/* 八向缩放热区：内贴外壳内缘，`kb-pop` 进场动画只管外壳，热区随之内外一致 */}
+            {floatWin.handles.map(h => (
+              <div key={h.dir} className="absolute z-20" style={h.style}
+                onPointerDown={e => floatWin.onHandlePointerDown(e, h.dir)} />
+            ))}
+          </div>
+        )}
+        {/* 停靠落位提示：拖近右缘时在右栏位置浮现（`pointer-events-none` 不吃掉拖拽手势） */}
+        {floatWin.dockHint && (
+          <div className="absolute inset-y-3 right-3 w-16 z-30 pointer-events-none rounded-lg border border-[var(--accent)]/50 bg-[var(--accent)]/12 kb-dock-hint" />
         )}
       </div>
       </>

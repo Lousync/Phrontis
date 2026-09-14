@@ -41,6 +41,26 @@ import { findSkillPrompt } from './skillService'
  */
 const MAX_SESSION_WRITES = 7
 
+/**
+ * 支线旁问纪律（v3.1.2 条目11 · 2026-09-14 定稿）。
+ *
+ * 定位：支线**唯一职责 = 解答主线某条回答里没讲透的零碎小知识点**。它不是「平行会话」——
+ * 因此不承担重讲、不产生产物、不出题；疑问多说明主线本身没讲透，合合理的做法是回主线重讲。
+ * 三条硬边界 = 不改文件 / 不出题 / 只答这一点，外加「回答要精简」。
+ *
+ * 声明为**最高优先级**：用于盖过工作区 CONSTRAINTS 骨架里「每节课结尾附 3 道自测题」这类
+ * 针对主线课程的一般性要求（那类要求对支线不但无意义，还会把职责带偏）。
+ * 与工具层的硬拦截（`buildToolsPayload` 对支线过滤写类工具）配套——提示词管「想不到」，
+ * 工具层管「想到了也做不到」。
+ */
+const SIDE_LANE_DISCIPLINE =
+  '\n\n【支线旁问纪律（最高优先级，覆盖下文一切与之冲突的要求）】本条对话是从主线会话某条回答分叉出来的**独立支线**。'
+  + '你的唯一职责：解答用户就那一点提出的**零碎小知识点**问题。三条硬边界：'
+  + '① **不改文件**——不调用任何写入类工具（你也确实未被授予），不产出文档 / 图示 / 题目；'
+  + '② **不出题**——即使内容适合测验也不输出题卡；用户想做题时，提示回主线出题；'
+  + '③ **只答这一点**——聚焦被追问的内容，不重讲主线、不展开主线其他部分、不做流程规划。'
+  + '回答要**精简**：直给要点，不铺垫、不复述上下文、不写长篇；举例也用最短的。'
+
 /** 注册表名含点号，OpenAI function name 仅允许 [a-zA-Z0-9_-] —— 双向映射 */
 function toFnName(registryName: string): string {
   return registryName.replace(/\./g, '__')
@@ -350,6 +370,9 @@ function buildToolsPayload(sessionId?: string): {
   skills: Array<{ registryName: string; title: string; description: string }>
 } {
   const reader = getSettingReader()
+  // v3.1.2 条目11：本会话是否为支线旁问——决定写类工具是否进入模型视野
+  const laneSession = sessionId ? getAgentSession(sessionId) : undefined
+  const isSideLaneSession = !!(laneSession?.parentSessionId && laneSession.lane === 'side')
   // 本会话已启用的 ondemand 工具（tool.request 申请，会话内持久）
   const extraTools = sessionId ? enabledOnDemand.get(sessionId) : undefined
   // 按模块权限预过滤：AI 无权使用的操作不进入其视野（invoke 处另有硬校验兜底）
@@ -358,6 +381,10 @@ function buildToolsPayload(sessionId?: string): {
   let deniedVaultFile = false
   let hasOnDemandHidden = false
   const tools: ToolDescription[] = all.filter(t => {
+    // v3.1.2 条目11：支线旁问**只解答、不改文件**——写类工具一律不进支线视野（硬拦截，非提示词约定）。
+    // 与铁律 3 同一机制：requires==='write' 的工具被预过滤出模型视野。这条判定放在最前面，
+    // 是为了让 tool.request 也绕不过（即便申请过写工具，支线这边照样 return false）。
+    if (isSideLaneSession && t.requires === 'write') return false
     const denied = checkModulePermission(t, reader)
     if (denied && t.module) deniedModules.add(t.module)
     if (!denied && t.vaultFile && checkVaultFilePermission(t, reader)) {
@@ -521,6 +548,15 @@ async function runAgentLoop(
   let toolsState = buildToolsPayload(sessionId)
   let toolPayload = toolsState.payload
   const { nameMap, deniedModules, deniedVaultFile, skills } = toolsState
+  // v3.1.2 条目11：支线写类工具**硬拦截**。模型视野里已经没有写工具（buildToolsPayload 已过滤），
+  // 但 nameMap 命中不到时会 fallback 把 `__` 还原成 `.`——模型幻觉出的 builtin.vault.write 会被还原成
+  // 真名并**真的落盘**。所以这里再兜一道：支线 + 写工具 → 直接拒绝，不执行。
+  const runSessionRow = source === 'aiTeaching' ? getAgentSession(sessionId) : undefined
+  const runIsSideLane = !!(runSessionRow?.parentSessionId && runSessionRow.lane === 'side')
+  // 只在支线会话构造（不依赖可见性的写工具全集）——非支线时为 undefined，零开销
+  const writeToolUniverse = runIsSideLane
+    ? new Set(listTools().filter(t => t.requires === 'write').map(t => t.name))
+    : undefined
   const deniedHint = deniedModules.size > 0
     ? `\n\n【权限提示】以下模块用户尚未授权 AI 操作：${[...deniedModules].join('、')}。若用户请求这些模块的操作，请如实说明当前未授权，并提示可在 设置 → AI 工具 → 权限 中开启后重试。`
     : ''
@@ -579,12 +615,17 @@ async function runAgentLoop(
   const globalInstHint = globalInst.trim()
     ? `\n\n【全局要求】（用户设定于 AI教学产物根的 CONSTRAINTS.md，跨工作区所有会话共同遵守，是约束链中最粗、优先级最低的一层；与更细颗粒层或用户当下消息冲突时以更细层为准）\n${globalInst}`
     : ''
+  // v3.1.2 条目11：支线判定**提前**到规则装配之前——「不出题」与「写工具不可见」都要先知道是不是支线。
+  // （原先在下面 laneRow 处才算，晚于本段的 quizRuleHint → 支线照常拿到出题协议。）
+  const laneRow = source === 'aiTeaching' ? getAgentSession(sessionId) : undefined
+  const isSideLane = !!(laneRow?.parentSessionId && laneRow.lane === 'side')
   // P3a（§3.8-2 标题规则，3-13 拍板）：AI教学会话每条回答首行带三级标题，供快速定位条取锚点标题
   const titleRuleHint = source === 'aiTeaching'
     ? '\n\n【回答标题规则（AI教学）】每条回答的第一行必须是一个简短标题，形如 `### 这里写标题`（不超过 20 字，概括本回答核心内容），标题后换行写正文；标题行之前不得有任何其他文字。该标题用于用户在对话流中快速定位每条回答。'
     : ''
-  // P7（§3.2-7 题目视图）：AI教学出题走知识库 quiz 围栏协议，题目面板/答题组件直接解析复用
-  const quizRuleHint = source === 'aiTeaching'
+  // P7（§3.2-7 题目视图）：AI教学出题走知识库 quiz 围栏协议，题目面板/答题组件直接解析复用。
+  // v3.1.2 条目11：**支线不出题**（硬边界）——支线只解答零碎小知识点，出题是主线的职责。
+  const quizRuleHint = source === 'aiTeaching' && !isSideLane
     ? '\n\n【出题格式规则（AI教学）】当用户要求出题/测验/练习时，除开场说明与收尾提示外，每道题单独输出一个 ```quiz 围栏代码块，块内是一个 JSON 对象（不要注释、不要多个对象）：{"no":1,"question":"题干（支持 markdown）","options":[{"key":"A","text":"选项一"},{"key":"B","text":"选项二"},{"key":"C","text":"选项三"},{"key":"D","text":"选项四"}],"answer":"A","explanation":"答案解析（支持 markdown）"}。不要输出 points 分值字段（客户端不渲染分值）。answer 的值必须是 options 中某个 key；默认四选一。围栏块之间可换行连续排列，客户端会自动收集进「题目」视图供答题。注意：围栏语言必须是 quiz（\u0060\u0060\u0060quiz），写成 json 或不带语言都不会被渲染成题卡。JSON 字符串值内部禁止出现未转义的英文双引号——题干/选项/解析里需要引用术语时一律用中文引号『』或“”，否则 JSON 被截断、题目渲染失败。'
     : ''
   // UI 优化条目11A（任务规划激活）：阶段推进时输出 ```plan 围栏 → 左栏「任务规划」渲染为带状态进度列表
@@ -647,13 +688,10 @@ async function runAgentLoop(
   })() : ''
   // v3.1.2 条目11：支线旁问上下文（仅带 sideContext 的会话注入）。快照在建支线时固化，跨轮稳定 → 不扰动缓存前缀。
   // 升格为正式会话（lane='main'）后仍保留来源快照，只是不再套「支线纪律」措辞。
-  const laneRow = source === 'aiTeaching' ? getAgentSession(sessionId) : undefined
-  const isSideLane = !!(laneRow?.parentSessionId && laneRow.lane === 'side')
+  // laneRow / isSideLane 已在前面规则装配处算好（纪律必须早于出题协议，故提前）。
   const sideLaneHint = laneRow?.sideContext
     ? (isSideLane
-        ? '\n\n【支线旁问上下文（快照）】本条对话是从主线会话的某条回答分叉出来的**独立支线**，以下是分叉那一刻的上下文快照（被追问的回答 + 主线前若干轮）。'
-          + '注意：① 你只掌握这份快照，**不知道**主线在分叉之后的任何进展；② 回答聚焦被追问的那一点，不要展开主线内容；'
-          + '③ 不要调用会写入主线产物的工具，避免污染主线；④ 快照不足以回答时如实说明，并建议用户回到主线补充。\n'
+        ? SIDE_LANE_DISCIPLINE + '\n\n【支线上下文快照（分叉时刻固化）】被追问的回答 + 主线前若干轮：\n'
         : '\n\n【来源上下文（快照）】本条对话由主线会话的一条回答升格而来，以下是其来源快照（仅供参考背景；后续进展以本对话自身历史为准）。\n')
       + laneRow.sideContext
     : ''
@@ -853,6 +891,18 @@ async function runAgentLoop(
 
     /** 串行件：写上限判定 + visual 时序事件 + 执行 + 记账（原逐条路径，行为不变） */
     const runSingleToolCall = async (tc: { id: string }, realName: string, args: Record<string, unknown>): Promise<void> => {
+      // v3.1.2 条目11：支线拒绝一切写入（含模型幻觉调用）——不执行、不落盘，直接回喂让模型改用文字回答
+      if (writeToolUniverse?.has(realName)) {
+        const laneDenyStep: AgentTraceStep = { kind: 'tool', name: realName, ok: false, durationMs: 0, summary: '支线旁问不允许写入' }
+        trace.push(laneDenyStep)
+        stepEmitters.get(signal)?.(laneDenyStep)
+        convo.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: JSON.stringify({ ok: false, error: '支线旁问不改文件：本条对话只解答问题、不执行任何写入操作。请直接用文字回答用户。' }),
+        })
+        return
+      }
       // 会话写上限：单次请求内写入类工具最多 MAX_SESSION_WRITES 次（防失控循环刷盘）。
       // 动态读 toolsState.writeTools——tool.request 启用新写工具后重建的集合要立即生效
       if (toolsState.writeTools.has(realName)) {
@@ -1105,9 +1155,10 @@ export function registerAgentHandlers(): void {
   })
   ipcMain.handle('agent:deleteSession', (_e, id: string) => {
     const sid = String(id ?? '')
-    // v3.1.2 条目11：级联删除挂在该会话下的支线（连同各自 .jsonl 消息文件）。
+    // v3.1.2 条目11：级联删除挂在该会话下的**未升格**支线（连同各自 .jsonl 消息文件）。
+    // 已升格（lane='main'）的支线是用户明确要留下来的正式会话，不该跟着主线陪葬。
     // 渲染层在删除前用 agent:listSideLanes 取支线数做确认文案，确认后才调到这里。
-    for (const lane of listSideLanes(sid)) deleteAgentSession(lane.id)
+    for (const lane of listSideLanes(sid)) if (lane.lane === 'side') deleteAgentSession(lane.id)
     deleteAgentSession(sid)
     return true
   })
@@ -1138,14 +1189,4 @@ export function registerAgentHandlers(): void {
   // 升格支线为正式会话（单向）：lane 置 'main' → 进左栏列表
   ipcMain.handle('agent:promoteSideLane', (_e, laneSessionId: string) =>
     promoteSideLane(String(laneSessionId ?? '')))
-  // 把支线结论作为一条**普通用户消息**追加到主线（P3「带回主线」）——**不调 LLM**：
-  // 结论进入主线上下文（下一轮 assembleAgentHistory 自然带上），但不打断主线节奏、不强制新回答。
-  ipcMain.handle('agent:appendNote', (_e, payload: { sessionId?: unknown; content?: unknown }) => {
-    const p = (payload ?? {}) as { sessionId?: unknown; content?: unknown }
-    const sid = String(p.sessionId ?? '')
-    const content = String(p.content ?? '')
-    if (!sid || !sessionExists(sid) || !content.trim()) return { ok: false, error: '参数非法' }
-    appendAgentMessage(sid, 'user', content)
-    return { ok: true }
-  })
 }

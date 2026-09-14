@@ -5,7 +5,7 @@ import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubbl
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { showToast } from '../../lib/toast'
 import type { AgentStoredMessage, AgentTraceStep } from '../../types'
-import { ArrowLeft, ArrowUp, Check, ChevronDown, Copy, Loader2, Maximize2, Minimize2, Send, Sparkles, X } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Copy, Loader2, Maximize2, Minimize2, Send, Sparkles, X } from 'lucide-react'
 
 /**
  * 支线旁问面板（v3.1.2 条目11）。
@@ -17,6 +17,9 @@ import { ArrowLeft, ArrowUp, Check, ChevronDown, Copy, Loader2, Maximize2, Minim
  * - **物理隔离**：支线 = 独立 sessionId + 独立 .jsonl，主线消息数与上下文**完全不变**。
  * - **轮数可调**：1 / 3 / 5，默认 3；**仅发送前生效**（发送后锁定，避免快照与既有对话不一致）。
  * - 双形态由父级容器决定（浮层 / 右栏宽轨），本组件只负责内容，填满容器高度。
+ * - **浮层形态可拖动 / 可缩放**（v3.1.2 补强）：力学在 `useFloatingWindow` hook 里，本组件只把
+ *   父级传来的指针处理器挂到顶栏上（`titleDrag`）；顶栏内的按钮由 hook 的 INTERACTIVE 豁免规则
+ *   自动跳过，双击顶栏空白 = 复位。
  */
 
 const TURNS_KEY = 'aiTeach.sideLaneTurns'
@@ -41,14 +44,18 @@ export interface SideLanePanelProps {
   onClose: () => void
   /** 切换形态：浮层 ⇄ 右栏宽轨（两种呈现同一条支线，不重建会话、不丢内容） */
   onToggleWide?: () => void
-  /** 支线就绪（拿到 laneSessionId 与标题）——父级用于「查看支线」映射与升格 */
+  /** 支线就绪（拿到 laneSessionId 与标题）——父级据此**自动登记锚点回执**（关窗不失联）与升格 */
   onLaneReady?: (laneSessionId: string, laneTitle: string) => void
-  /** P3 带回主线：用户在编辑框确认后的最终文本 */
-  onBringBack?: (laneSessionId: string, laneTitle: string, text: string) => void
   /** P4 升格为正式会话 */
   onPromote?: (laneSessionId: string) => void
   /** 宽轨形态（父级容器已决定宽度，这里只影响留白与折行） */
   wide?: boolean
+  /** 浮层形态的拖拽手柄：父级（`useFloatingWindow`）提供，挂到顶栏 → 拖动移动、双击复位。
+   *  宽轨形态不传（顶栏不可拖）。顶栏内按钮由 hook 的 INTERACTIVE 豁免规则自动跳过。 */
+  titleDrag?: {
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void
+    onDoubleClick: (e: React.MouseEvent<HTMLDivElement>) => void
+  }
 }
 
 interface PanelMsg {
@@ -58,12 +65,11 @@ interface PanelMsg {
   createdAt?: string
 }
 
-export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, openLaneId, onClose, onToggleWide, onLaneReady, onBringBack, onPromote, wide }: SideLanePanelProps) {
+export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, openLaneId, onClose, onToggleWide, onLaneReady, onPromote, wide, titleDrag }: SideLanePanelProps) {
   const chatIdRef = useRef('')
   const { draft: streamDraft, begin: beginStream, end: endStream } = useAgentStream(chatIdRef)
 
   const [laneId, setLaneId] = useState<string | null>(openLaneId ?? null)
-  const [laneTitle, setLaneTitle] = useState('')
   const [snapshot, setSnapshot] = useState('')
   const [turns, setTurns] = useState<number>(() => readTurns())
   const [messages, setMessages] = useState<PanelMsg[]>([])
@@ -72,13 +78,19 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
   const [loading, setLoading] = useState(true)
   const [ctxOpen, setCtxOpen] = useState(false)
   const [err, setErr] = useState('')
-  const [backOpen, setBackOpen] = useState(false)
-  const [backDraft, setBackDraft] = useState('')
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   /** 已发送过消息 = 上下文锁定（轮数不可再调、快照不再重建） */
   const lockedRef = useRef(false)
+  /** 本会话内**新建**的支线（`openLaneId` 载入的既有支线不算）——卸载回收的判据 */
+  const createdRef = useRef(false)
+  /** 支线标题（首条消息后回执给父级用） */
+  const laneTitleRef = useRef('')
+  /** 是否已向父级回执（避免重复登记锚点） */
+  const notifiedRef = useRef(false)
+  /** 当前支线 id 的实时镜像（卸载清理的闭包读不到最新 state，故用 ref 同步） */
+  const laneIdRef = useRef<string | null>(openLaneId ?? null)
 
   const refresh = useCallback(async (sid: string) => {
     const rows = await agentMessages(sid).catch(() => [] as AgentStoredMessage[])
@@ -97,7 +109,8 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
         if (!alive) return
         if (!row) { setErr('支线已不存在'); setLoading(false); return }
         setLaneId(openLaneId)
-        setLaneTitle(row.title)
+        laneTitleRef.current = row.title ?? ''
+        notifiedRef.current = true // 既有支线的锚点早已登记过，不再重复回执
         setSnapshot(row.sideContext ?? '')
         lockedRef.current = (await agentMessages(openLaneId).catch(() => [])).length > 0
         await refresh(openLaneId)
@@ -112,12 +125,13 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
         return
       }
       setLaneId(r.laneSessionId)
-      setLaneTitle(r.title ?? '')
+      createdRef.current = true
+      laneTitleRef.current = r.title ?? ''
       setSnapshot(r.snapshotText ?? '')
       lockedRef.current = false
       await refresh(r.laneSessionId)
       setLoading(false)
-      onLaneReady?.(r.laneSessionId, r.title ?? '')
+      // 锚点回执**不在此登记**：一句没发的空支线不该在主线留下「已开」入口（改到 doSend 首条消息时）
       inputRef.current?.focus()
     })()
     return () => { alive = false }
@@ -130,6 +144,17 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
     if (el) el.scrollTop = el.scrollHeight
   }, [messages.length, streamDraft?.text, streamDraft?.items.length])
 
+  // laneId 实时镜像（卸载清理读不到最新 state）
+  useEffect(() => { laneIdRef.current = laneId }, [laneId])
+
+  // 关窗回收（v3.1.2 收尾）：本会话**新建**、且一句没发（未锁定）的支线，连同空会话行一起删掉——
+  // 否则「开了窗没发就关」会累积出无入口的空支线。回执登记已移到首条消息时，故此处删掉不会丢入口。
+  useEffect(() => () => {
+    if (createdRef.current && !lockedRef.current && laneIdRef.current) {
+      void agentDeleteSession(laneIdRef.current)
+    }
+  }, [])
+
   /** 切轮数：仅**新建支线且未发送**时生效（既有支线的快照已固化，不再重建） */
   const changeTurns = useCallback(async (t: number) => {
     if (openLaneId || lockedRef.current || pending) return
@@ -139,6 +164,9 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
     const r = await agentCreateSideLane({ parentSessionId, anchorMessageId, contextTurns: t })
     if (r.ok && r.laneSessionId) {
       setLaneId(r.laneSessionId)
+      createdRef.current = true
+      laneTitleRef.current = r.title ?? ''
+      notifiedRef.current = false // 换了新支线，首条消息后重新回执
       setSnapshot(r.snapshotText ?? '')
       if (old && old !== r.laneSessionId) void agentDeleteSession(old)
     }
@@ -148,6 +176,8 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
     const text = input.trim()
     if (!text || pending || !laneId) return
     lockedRef.current = true
+    // 首条消息即回执锚点：此后关窗 / 切形态都能回到这条支线（空支线则不留入口、卸载时回收）
+    if (!notifiedRef.current) { notifiedRef.current = true; onLaneReady?.(laneId, laneTitleRef.current) }
     const cid = crypto.randomUUID()
     chatIdRef.current = cid
     setInput('')
@@ -166,8 +196,13 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[var(--bg-primary)]">
-      {/* 顶栏：支线标识 + 轮数切换 + 关闭 */}
-      <div className="shrink-0 flex items-center gap-2 px-3 h-9 border-b border-[var(--border-color)]">
+      {/* 顶栏：支线标识 + 轮数切换 + 关闭。浮层形态下整条顶栏 = 拖拽手柄
+          （`cursor-grab` + `select-none`；按钮由 hook 的 INTERACTIVE 豁免，照常可点） */}
+      <div
+        className={`shrink-0 flex items-center gap-2 px-3 h-9 border-b border-[var(--border-color)]${titleDrag ? ' cursor-grab active:cursor-grabbing select-none' : ''}`}
+        onPointerDown={titleDrag?.onPointerDown}
+        onDoubleClick={titleDrag?.onDoubleClick}
+      >
         <Sparkles size={13} className="shrink-0 text-[var(--accent)]" />
         <span className="shrink-0 text-[12px] font-medium text-[var(--text-primary)]">支线旁问</span>
         <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" title={parentTitle}>来自「{parentTitle}」</span>
@@ -182,7 +217,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
           ))}
         </div>
         {onToggleWide && (
-          <button onClick={onToggleWide} title={wide ? '收回为浮层' : '贴到右栏（宽轨，并列占宽不遮挡中栏）'}
+          <button onClick={onToggleWide} title={wide ? '浮出为可拖动的小窗' : '停靠到右栏（宽轨，并列占宽不遮挡中栏；也可直接把窗口拖到右缘松手）'}
             className="shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
             {wide ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
           </button>
@@ -259,47 +294,21 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
         ))}
       </div>
 
-      {/* 底部动作条（v3.1.2 条目11）：带回主线（P3）/ 升格为正式会话（P4）。
-          两条都要有支线内容才有意义；带回归属「手动决定」——预填结论摘要，用户编辑确认才追加。 */}
-      {laneId && !pending && (onBringBack || onPromote) && (
+      {/* 底部动作条（v3.1.2 条目11）：升格为正式会话（P4）。
+          「带回主线」已于 2026-09-14 移除——支线定位收窄为「只解答小知识点」，结论不再需要
+          一条人工"带回"通道；支线与其锚点回答的关联改为**自动回执**（见 index.tsx 的 anchorLanes），
+          直接关窗也不再失联。 */}
+      {laneId && !pending && onPromote && (
         <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 border-t border-[var(--border-color)]">
-          {onBringBack && (
-            <button onClick={() => {
-              const last = [...messages].reverse().find(m => m.role === 'assistant')
-              setBackDraft((last?.content ?? '').trim().slice(0, 4000))
-              setBackOpen(true)
-            }} disabled={!messages.some(m => m.role === 'assistant')}
-              title="把这条支线的结论带回主线（确认前不会写入主线）"
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-              <ArrowLeft size={11} />带回主线
-            </button>
-          )}
-          {onPromote && (
-            <button onClick={() => onPromote(laneId)}
-              title="把支线升格为正式会话（进左栏会话列表，可独立续聊；单向不可逆）"
-              className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-              <ArrowUp size={11} />升格为会话
-            </button>
-          )}
+          <button onClick={() => onPromote(laneId)}
+            title="把支线升格为正式会话（进左栏会话列表，可独立续聊；单向不可逆）"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+            <ArrowUp size={11} />升格为会话
+          </button>
         </div>
       )}
 
-      {/* 输入区（带回编辑框打开时原地替换输入框） */}
-      {backOpen ? (
-        <div className="shrink-0 border-t border-[var(--border-color)] p-2.5 kb-pop">
-          <div className="mb-1 text-[10.5px] text-[var(--text-muted)]">确认后追加到主线（原对话不受影响，可在上方直接改写）</div>
-          <textarea value={backDraft} onChange={e => setBackDraft(e.target.value)} rows={5} spellCheck={false}
-            onKeyDown={e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setBackOpen(false) } }}
-            className="w-full px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] leading-relaxed text-[var(--text-primary)] outline-none focus:border-[var(--accent)]/60 resize-none" />
-          <div className="mt-1.5 flex items-center justify-end gap-1.5">
-            <button onClick={() => setBackOpen(false)}
-              className="px-2 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">取消</button>
-            <button onClick={() => { if (laneId && backDraft.trim()) { onBringBack?.(laneId, laneTitle, backDraft.trim()); setBackOpen(false); showToast({ type: 'info', message: '已带回主线' }) } }}
-              disabled={!backDraft.trim()}
-              className="px-2 py-0.5 rounded-md text-[11px] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-40 transition-colors">确认带回</button>
-          </div>
-        </div>
-      ) : (
+      {/* 输入区 */}
       <div className="shrink-0 border-t border-[var(--border-color)] p-2.5">
         <div className="flex items-end gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] px-2.5 py-1.5 focus-within:border-[var(--accent)]/60 transition-colors">
           <textarea
@@ -329,7 +338,6 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
           )}
         </div>
       </div>
-      )}
     </div>
   )
 }

@@ -54,6 +54,7 @@
 | `.kb-item-in` | `opacity + translateY(4px)` 200ms，`--ease-kb` | 列表项进场（新增行） |
 | `.kb-item-out` | `opacity→0 + scale(0.98) + 高度塌缩`，180ms | 列表项退场（普通删除，区别于吞噬特效） |
 | `.kb-micro-pop` | `scale 1→0.85→1` 180ms spring | 星标、勾选、开关点击反馈 |
+| `.kb-dock-hint` | `opacity 0→1 + translateX(12px→0)` 170ms | 可拖动浮窗拖近停靠区时的落位预览块（G 类） |
 | `.kb-theme-vt` | `::view-transition-old/new(root)` 交叉淡化 220ms | 主题切换（View Transition），降级走容器级过渡 |
 
 > 所有类统一包一段 `@media (prefers-reduced-motion: reduce)` 关闭。
@@ -101,6 +102,12 @@
 实测（见 §五）：`html.theme-transitioning * { transition: color/background }` 在 4290 节点下会让主线程卡住 133ms 单帧——**该方案作废**。
 改为 `document.startViewTransition`（Electron 33 = Chromium 130，原生支持）：快照交叉淡化 220ms，逐节点 recalc 成本为零，帧分布与「瞬时切换」完全一致。
 降级路径（不支持时）：只对少数大面积容器（根容器 / 侧栏 / 内容壳）加 200ms 背景过渡，绝不使用 `*` 通配。
+
+### G. 拖拽辅助投影 → `.kb-dock-hint`（2026-09-14 新增）
+可拖动浮窗（AI 教学「支线旁问」）在拖近停靠区时，于落点位置浮现一个预览块，提示「松手会停在这里」。
+只做 `opacity + translateX(12px→0)`，方向与停靠侧一致（从停靠侧滑入）。
+调用方须给元素 `pointer-events-none`——提示压在舞台右缘，不能吃掉正在进行的拖拽手势。
+与「跟手无动画」的边界见 §五-6：跟手的是窗口本体（无动画），提示是状态翻转（有动画）。
 
 ---
 
@@ -152,7 +159,10 @@ wildcard 方案在 420ms 采样窗口内只渲染出 2 帧 = 界面明显冻结�
 2. 不给列表项、卡片、弹层加常驻 `will-change`（confetti.ts 那次性使用是正确姿势）；
 3. 主题切换禁用通配选择器过渡，统一 View Transition + 容器级降级；
 4. 遮罩层与 backdrop-filter 层解耦；
-5. 所有新增动画仍需在 `prefers-reduced-motion: reduce` 下退化为瞬时。
+5. 所有新增动画仍需在 `prefers-reduced-motion: reduce` 下退化为瞬时；
+6. **拖拽跟手过程一律无动画**（元素本体不许有 transition；位置由 pointer 位移直写内联样式）。
+   唯一允许的例外是「拖拽的辅助投影」——如浮窗拖近停靠区的落位提示（`.kb-dock-hint`，G 类），
+   它不跟手、只是状态翻转提示，故可以有进场动画。
 
 ---
 

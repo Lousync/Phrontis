@@ -651,6 +651,16 @@ input:focus, textarea:focus, select:focus {
 }
 .kb-micro-pop { animation: 180ms kb-micro-pop var(--ease-kb-spring); }
 
+/* --- G 停靠落位提示：可拖动浮窗拖近停靠区时浮现「会落到这里」的预览块 ---
+   只在拖拽（跟手）过程出现，位移方向即出现方向 → 用 translateX 从停靠侧滑入；
+   元素本身 `pointer-events:none`（调用方给），不会吃掉正在进行的拖拽手势。
+   与 H 类「拖拽跟手」的区别：这是**拖拽的辅助投影**，可以有动画；跟手的窗口本体不许有。 */
+@keyframes kb-dock-hint-in {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: none; }
+}
+.kb-dock-hint { animation: kb-dock-hint-in calc(var(--dur-micro) + 30ms) var(--ease-kb) both; }
+
 /* --- F 主题切换：View Transition 交叉淡化 ---
    落码不用通配 `*` 过渡（实测 4290 节点下单帧 133ms，见计划文档 §五）。 */
 ::view-transition-old(root),
@@ -663,7 +673,7 @@ input:focus, textarea:focus, select:focus {
 @media (prefers-reduced-motion: reduce) {
   .kb-view-in, .kb-view-fade, .kb-overlay, .kb-overlay-out,
   .kb-modal-in, .kb-modal-out, .kb-pop, .kb-toast-in, .kb-toast-out,
-  .kb-item-in, .kb-micro-pop,
+  .kb-item-in, .kb-micro-pop, .kb-dock-hint,
   .kb-overlay > :first-child, .kb-overlay-out > :first-child,
   .kb-pop-layer > :first-child { animation: none; }
   .kb-collapse { transition: none; }

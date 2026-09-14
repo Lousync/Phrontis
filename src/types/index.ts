@@ -1613,8 +1613,6 @@ export interface ElectronAPI {
   agentListSideLanes: (parentSessionId: string) => Promise<AgentSessionInfo[]>
   /** 升格支线为正式会话（单向） */
   agentPromoteSideLane: (laneSessionId: string) => Promise<boolean>
-  /** P3 带回主线：把支线结论作为普通消息追加到主线（不调 LLM） */
-  agentAppendNote: (payload: { sessionId: string; content: string }) => Promise<{ ok: boolean; error?: string }>
   // ===== AI教学 P1：会话 ⇄ 文件夹绑定（docs/ai-teaching-module-rework.md §二）=====
   aiTeachEnsureSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
