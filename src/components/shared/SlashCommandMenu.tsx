@@ -77,7 +77,7 @@ export function SlashCommandMenu({ items, activeIndex, onHover, onPick }: Props)
 
   if (items.length === 0) {
     return (
-      <div className="absolute bottom-full left-0 right-0 mb-1.5 z-30 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-lg kb-pop p-3 text-[12px] text-[var(--text-muted)]">
+      <div className="absolute bottom-full left-0 right-0 mb-1.5 z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop p-3 text-[12px] text-[var(--text-muted)]">
         没有匹配的指令或 Skill
       </div>
     )
@@ -85,7 +85,7 @@ export function SlashCommandMenu({ items, activeIndex, onHover, onPick }: Props)
 
   return (
     <div
-      className="absolute bottom-full left-0 right-0 mb-1.5 z-30 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] shadow-lg kb-pop overflow-hidden"
+      className="absolute bottom-full left-0 right-0 mb-1.5 z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop overflow-hidden"
       role="listbox"
     >
       <div className="max-h-[38vh] overflow-y-auto py-1">
@@ -134,7 +134,7 @@ export function SlashCommandMenu({ items, activeIndex, onHover, onPick }: Props)
           </div>
         ))}
       </div>
-      <div className="px-3 py-1.5 border-t border-[var(--border)] text-[10px] text-[var(--text-muted)] flex items-center gap-2 select-none">
+      <div className="px-3 py-1.5 border-t border-[var(--border-color)] text-[10px] text-[var(--text-muted)] flex items-center gap-2 select-none">
         <span>↑↓ 选择</span><span>Enter 选中</span><span>Tab 补全</span><span>Esc 关闭</span>
       </div>
     </div>

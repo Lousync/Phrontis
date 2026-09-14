@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain, screen, globalShortcut, shell } from 'electron'
 import { join } from 'path'
+import { broadcast, BROADCAST_CHANNEL } from './windowBus'
 
 /**
  * 日程与打卡侧边栏管理器
@@ -64,13 +65,8 @@ let lastAppliedW = 0
 /** 本次 detached 是否已收到首次内容尺寸（决定开窗是否仍需等待） */
 let firstSizeSet = false
 
-function broadcast(channel: string, payload?: unknown): void {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send(channel, payload)
-  }
-}
 function broadcastState(): void {
-  broadcast('daypanel:state-changed', { detached: isPopoutOpen(), mode, collapsed, widgetInteractive })
+  broadcast(BROADCAST_CHANNEL.dayPanelStateChanged, { detached: isPopoutOpen(), mode, collapsed, widgetInteractive })
 }
 export function isPopoutOpen(): boolean {
   return !!popout && !popout.isDestroyed()
@@ -117,7 +113,7 @@ export function setPanelMode(m: PanelMode, opts?: { explicit?: boolean }): void 
   }
   collapsed = false
   if (isPopoutOpen()) applyMode(popout!, m)
-  broadcast('daypanel:mode-changed', { mode: m })
+  broadcast(BROADCAST_CHANNEL.dayPanelModeChanged, { mode: m })
   onModeChangedCb?.()
 }
 
@@ -172,7 +168,7 @@ function applyMode(win: BrowserWindow, m: PanelMode): void {
     win.setResizable(false)
     win.setMinimumSize(WIDGET_W, WIDGET_H)
     win.setMaximumSize(WIDGET_W, WIDGET_H)
-    broadcast('daypanel:widget-interactive-changed', { interactive: false })
+    broadcast(BROADCAST_CHANNEL.dayPanelWidgetInteractiveChanged, { interactive: false })
   }
   // 位置（动画到目标 x/y；尺寸由 applyContentSize 决定）
   const target = computeTargetPos(m)
@@ -447,7 +443,7 @@ export function initDayPanel(opts: {
 
 function togglePanel(): void {
   if (isPopoutOpen()) destroyPopout()
-  else broadcast('daypanel:toggle-visibility')
+  else broadcast(BROADCAST_CHANNEL.dayPanelToggleVisibility)
 }
 
 function registerHandlers(): void {
@@ -485,7 +481,7 @@ function registerHandlers(): void {
       collapsed = false
       const target = lastAppliedH || expandedHeightOf()
       animateHeight(target)
-      broadcast('daypanel:collapsed-changed', { collapsed: false })
+      broadcast(BROADCAST_CHANNEL.dayPanelCollapsedChanged, { collapsed: false })
     }
   })
   ipcMain.handle('daypanel:topdock-collapse-intent', () => {
@@ -496,7 +492,7 @@ function registerHandlers(): void {
       if (!isPopoutOpen() || topDockAnimating || collapsed) return
       collapsed = true
       animateHeight(TOUCH_STRIP_H)
-      broadcast('daypanel:collapsed-changed', { collapsed: true })
+      broadcast(BROADCAST_CHANNEL.dayPanelCollapsedChanged, { collapsed: true })
     }, COLLAPSE_DELAY_MS)
   })
   ipcMain.handle('daypanel:topdock-cancel-collapse', () => {
@@ -508,7 +504,7 @@ function registerHandlers(): void {
     if (mode !== 'desktop-widget' || !isPopoutOpen()) return
     widgetInteractive = !!active
     popout?.setIgnoreMouseEvents(!widgetInteractive, { forward: true })
-    broadcast('daypanel:widget-interactive-changed', { interactive: widgetInteractive })
+    broadcast(BROADCAST_CHANNEL.dayPanelWidgetInteractiveChanged, { interactive: widgetInteractive })
     return widgetInteractive
   })
 

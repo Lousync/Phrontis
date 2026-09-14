@@ -782,6 +782,10 @@ export interface LlmModelTestResultInfo {
 
 export interface LlmUsageInfo {
   monthTokens: number
+  /** 本月输入 tokens（↑）——与 monthTokens 同源审计聚合，供用量 UI 展示拆分 */
+  monthPromptTokens?: number
+  /** 本月输出 tokens（↓） */
+  monthCompletionTokens?: number
   /** 月度预算上限（已随 faf1b0f 移除限额概念；可选保留兼容沉浸面板） */
   budget?: number
   /** 视觉转写月度 tokens（与回答模型分开统计，2026-09-08） */
@@ -880,6 +884,26 @@ export interface AgentSessionInfo {
   instructions?: string
   createdAt: string
   updatedAt: string
+  /** 支线旁问（v3.1.2 条目11）：挂靠的主线会话 id（缺省=非支线）。与主线物理隔离 */
+  parentSessionId?: string
+  /** 支线旁问：分叉点的主线消息 id */
+  branchFromMessageId?: string
+  /** 支线旁问：'side' 默认不进左栏列表；缺省/'main' 可见（升格后置 'main'） */
+  lane?: 'main' | 'side'
+  /** 支线旁问：固化上下文快照（分叉回答 + 主线前 K 轮） */
+  sideContext?: string
+}
+
+/** 建支线结果（agent:createSideLane）：只装上下文不调 LLM */
+export interface AgentSideLaneCreateResult {
+  ok: boolean
+  laneSessionId?: string
+  title?: string
+  /** 就地装载并展示给用户核对的上下文快照 */
+  snapshotText?: string
+  /** 实际采用的轮数（1/3/5 夹取后） */
+  turns?: number
+  error?: string
 }
 
 /** P5 工作区（AI教学两层结构；主进程 aiTeachingWorkspaces.ts 同构） */
@@ -897,7 +921,7 @@ export interface AiTeachWorkspaceInfo {
 export interface AiTeachSourceEntry {
   no: number
   name: string
-  /** url / pptx / pdf / image / md / other（3-27 枚举） */
+  /** url / pptx / pdf / docx / image / md / code / dir / other（3-27 枚举；docx 为 v3.1.2 条目5 新增） */
   type: string
   /** ./文件名（已入库）/ 仓库相对 / 绝对路径 / URL */
   path: string
@@ -1583,6 +1607,14 @@ export interface ElectronAPI {
   agentRenameSession: (id: string, title: string) => Promise<boolean>
   agentSetSessionInstructions: (id: string, instructions: string) => Promise<{ ok: boolean; error?: string }>
   agentDeleteSession: (id: string) => Promise<boolean>
+  // ===== v3.1.2 条目11：支线旁问（createSideLane 只装上下文、不调 LLM）=====
+  agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) => Promise<AgentSideLaneCreateResult>
+  /** 列某主线下的支线（含已升格）；删除前计数亦用它 */
+  agentListSideLanes: (parentSessionId: string) => Promise<AgentSessionInfo[]>
+  /** 升格支线为正式会话（单向） */
+  agentPromoteSideLane: (laneSessionId: string) => Promise<boolean>
+  /** P3 带回主线：把支线结论作为普通消息追加到主线（不调 LLM） */
+  agentAppendNote: (payload: { sessionId: string; content: string }) => Promise<{ ok: boolean; error?: string }>
   // ===== AI教学 P1：会话 ⇄ 文件夹绑定（docs/ai-teaching-module-rework.md §二）=====
   aiTeachEnsureSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
@@ -1590,6 +1622,8 @@ export interface ElectronAPI {
   aiTeachDeleteSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachReadConstraints: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; error?: string }>
   aiTeachGlobalEnsureConstraints: () => Promise<{ ok: boolean; text?: string; relPath?: string | null; created?: boolean; error?: string }>
+  /** v3.1.2 条目6：工作区约束文档（{工作区}/CONSTRAINTS.md）——ensure 落骨架并返回 relPath 跳编辑区；本工作区会话每轮注入 */
+  aiTeachWorkspaceEnsureConstraints: (wsId: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; created?: boolean; error?: string }>
   aiTeachWriteConstraints: (id: string, text: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; error?: string }>
   aiTeachOrganizeDoc: (id: string, title: string, content: string, prefix?: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   // P5 工作区两层（§3.2-6；元数据入 .knowbase/modules/aiTeaching/workspaces.json）

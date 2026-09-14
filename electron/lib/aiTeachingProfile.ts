@@ -1,9 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
-import { rootDirName } from './aiTeachingFolders'
-import { ensureSessionFolder } from './aiTeachingFolders'
+import { broadcastTreeRefresh, rootDirName, ensureSessionFolder } from './aiTeachingFolders'
 import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 
 /**
@@ -118,9 +117,7 @@ export function writeGlobalProfile(text: string, getSetting: (key: string) => un
     mkdirSync(join(p, '..'), { recursive: true })
     const body = String(text ?? '').replace(/\r\n/g, '\n')
     writeFileSync(p, body, 'utf-8')
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('aiTeach:tree-refresh', { dirRel: rootDirName(getSetting) })
-    }
+    broadcastTreeRefresh(rootDirName(getSetting))
     return { ok: true, text: body, relPath: `${rootDirName(getSetting)}/${PROFILE_FILE}` }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
@@ -198,9 +195,7 @@ export function writeWorkspaceProfile(wsId: string, text: string, getSetting: (k
     mkdirSync(dirAbs, { recursive: true })
     const body = String(text ?? '').replace(/\r\n/g, '\n')
     writeFileSync(join(dirAbs, PROFILE_FILE), body, 'utf-8')
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('aiTeach:tree-refresh', { dirRel: folderRel })
-    }
+    broadcastTreeRefresh(folderRel)
     return { ok: true, text: body, relPath: `${folderRel}/${PROFILE_FILE}` }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
@@ -230,9 +225,7 @@ export function writeSessionProfile(sessionId: string, text: string, getSetting:
     const body = String(text ?? '').replace(/\r\n/g, '\n')
     writeFileSync(join(vault.rootPath, ensured.relPath, PROFILE_FILE), body, 'utf-8')
     // 画像文件即时可见：广播树刷新（与 CONSTRAINTS/SOURCE 同通道语义）
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('aiTeach:tree-refresh', { dirRel: ensured.relPath })
-    }
+    broadcastTreeRefresh(ensured.relPath)
     return { ok: true, text: body, relPath: `${ensured.relPath}/${PROFILE_FILE}` }
   } catch (e) {
     return { ok: false, error: (e as Error).message }

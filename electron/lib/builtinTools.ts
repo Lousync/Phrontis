@@ -2,9 +2,11 @@ import { randomUUID } from 'crypto'
 import { readdirSync, lstatSync, readFileSync, statSync, mkdirSync } from 'fs'
 import { join, relative, extname, sep, dirname } from 'path'
 import { listTools, registerTool, getSettingReader, checkModulePermission } from './aiTools'
-import { broadcastDataChanged } from '../main/windowBus'
+import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { webSearch, webReadPage } from './webSearch'
 import { writeVisual } from './aiTeachingSources'
+import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
+import type { ToolInvokeCtx } from './aiTools'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault } from './workspaceManager'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { pomoSessionsAll } from './kbStore/pomoVaultRepo'
@@ -277,12 +279,55 @@ export function assertAiWritable(root: string, abs: string, expectedMtimeMs: unk
 /** 写入成功后广播「外部变更」（编辑器若正打开该文件会弹三选），沿用 plugin:installed-changed 模式 */
 function broadcastExternalWrite(relPath: string, mtimeMs?: number): void {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { BrowserWindow } = require('electron') as typeof import('electron')
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('ws:external-change', { relPath, mtimeMs })
-    }
+    // v3.1.2 收敛：不再内联 for + require('electron')，走 windowBus 统一出口
+    broadcast(BROADCAST_CHANNEL.wsExternalChange, { relPath, mtimeMs })
   } catch { /* 广播失败不影响写入结果 */ }
+}
+
+/**
+ * v3.1.2 条目9：AI 落盘后的编辑区树联动（此前只有 organizeDoc / writeVisual 做对了）。
+ * vault.write / edit / rename / trash 的成功分支统一调用——广播**受影响文件的父目录**，
+ * 编辑区树与 AI教学自绘树据此重拉，新建/改名/删除的文件无需模块重挂载或手动展开目录即刻出现。
+ * @param rel     变更后的仓库相对路径（trash 传原路径）
+ * @param prevRel rename 专用：源路径的父目录也要刷新（旧条目消失）
+ */
+function notifyVaultTreeChange(rel: string, prevRel?: string): void {
+  const parentOf = (p: string): string => {
+    const norm = p.replace(/\\/g, '/')
+    const i = norm.lastIndexOf('/')
+    return i > 0 ? norm.slice(0, i) : ''
+  }
+  try {
+    broadcastTreeRefresh(parentOf(rel))
+    if (prevRel) broadcastTreeRefresh(parentOf(prevRel))
+  } catch { /* 联动失败不影响写入结果 */ }
+}
+
+/**
+ * v3.1.2 条目10：AI 教学会话的产物落点归一化（工具层兜底，防模型不听话）。
+ *
+ * 判据（两条任一命中即改写为 `{本会话文件夹}/{basename}`）：
+ *  ① 无目录前缀 —— 裸文件名会直接落仓库顶层（用户实际报障现象）；
+ *  ② 首段为 `SOURCES` —— 那是给 AI 读的素材目录，不放产物。
+ * 其余路径（含模型/AI 给出的工作区夹内路径）原样保留；**非教学会话或会话夹不可解析时不改写**
+ * （侧边助手/轻问答没有会话夹概念，强加归一化只会制造怪路径）。
+ * 语义是纯函数（同一 path 反复调用结果一致），不打乱 prompt cache 前缀；会话夹不存在 = 懒建。
+ */
+function normalizeAiTeachingWritePath(rel: string, ctx?: ToolInvokeCtx): string {
+  if (!ctx || ctx.source !== 'aiTeaching') return rel
+  const sid = String(ctx.sessionId ?? '')
+  if (!sid) return rel
+  const norm = rel.replace(/\\/g, '/').replace(/^\/+/, '')
+  const segs = norm.split('/').filter(Boolean)
+  if (!segs.length) return rel
+  const hasDir = segs.length > 1
+  const hitsSources = (segs[0] ?? '').toUpperCase() === 'SOURCES'
+  if (hasDir && !hitsSources) return rel
+  try {
+    const probe = ensureWriteOwnerFolder(sid, getSettingReader())
+    if (!probe.ok || !probe.relPath) return rel
+    return `${probe.relPath}/${segs[segs.length - 1]}`
+  } catch { return rel }
 }
 
 // ===== 六个内置工具 =====
@@ -641,6 +686,7 @@ export function registerBuiltinTools(): void {
     // 并广播通知渲染层重取 —— 知识库是保活模块，不通知就看不到（2026-09-10 修）
     invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '')
     broadcastDataChanged('knowledge')
+    notifyVaultTreeChange(page.path) // v3.1.2 条目9：页面落在可见分类目录，编辑区树同步刷新
     return { ok: true, id: page.id, title }
   })
 
@@ -1151,8 +1197,9 @@ export function registerBuiltinTools(): void {
     requires: 'write',
     tier: 'ondemand',
     vaultFile: 'write',
-  }, args => {
-    const rel = str(args.path).trim()
+  }, (args, ctx) => {
+    // v3.1.2 条目10：教学会话下产物落点归一化（裸文件名 / 仓库顶层 / SOURCES → 改写进本会话文件夹）
+    const rel = normalizeAiTeachingWritePath(str(args.path).trim(), ctx)
     const content = str(args.content)
     if (!rel) throw new Error('缺少必填参数: path')
     if (content.length > 2_000_000) throw new Error('内容过大（>2MB），拒绝写入')
@@ -1167,9 +1214,13 @@ export function registerBuiltinTools(): void {
       try { mkdirSync(dirname(abs), { recursive: true }) } catch { /* 目录已存在 */ }
     }
     writeWorkspaceFile(abs, content)
-    if (rel.toLowerCase().endsWith('.md')) invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 与 ws:writeFile 同规则：.md 落盘即失效，知识列表/图谱立即可见
+    if (rel.toLowerCase().endsWith('.md')) {
+      invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 与 ws:writeFile 同规则：.md 落盘即失效，知识列表/图谱立即可见
+      broadcastDataChanged('knowledge') // v3.1.2 条目9：对齐 knowledge.create-page 口径，带 frontmatter 的页即时进列表
+    }
     const st = statSync(abs)
     broadcastExternalWrite(rel, st.mtimeMs)
+    notifyVaultTreeChange(rel) // v3.1.2 条目9：编辑区树即时刷新（此前只发 external-change，新文件树上不出现）
     return { ok: true, path: rel, created: !existing, size: st.size, mtimeMs: st.mtimeMs }
   })
 
@@ -1222,9 +1273,13 @@ export function registerBuiltinTools(): void {
       next = text.slice(0, first) + newText + text.slice(first + oldText.length)
     }
     writeWorkspaceFile(abs, next)
-    if (rel.toLowerCase().endsWith('.md')) invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 同上：edit 后索引/图谱同步刷新
+    if (rel.toLowerCase().endsWith('.md')) {
+      invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 同上：edit 后索引/图谱同步刷新
+      broadcastDataChanged('knowledge') // v3.1.2 条目9：知识库列表/图谱同步重读
+    }
     const after = statSync(abs)
     broadcastExternalWrite(rel, after.mtimeMs)
+    notifyVaultTreeChange(rel) // v3.1.2 条目9：编辑区树即时刷新
     return {
       ok: true,
       path: rel,
@@ -1324,6 +1379,9 @@ export function registerBuiltinTools(): void {
     if (!rootId) throw new Error('仓库上下文未就绪')
     try { mkdirSync(dirname(finalAbs), { recursive: true }) } catch { /* 目录已存在 */ }
     renameWorkspacePath(rootId, rel, finalNewRel)
+    // v3.1.2 条目9：rename/trash 此前连 external-change 都不发；这里补树刷新（源 + 目标父目录）
+    if (finalNewRel.toLowerCase().endsWith('.md') || rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
+    notifyVaultTreeChange(finalNewRel, rel)
     return { ok: true, from: rel, to: finalNewRel }
   })
 
@@ -1358,6 +1416,9 @@ export function registerBuiltinTools(): void {
     const rootId = getCurrentVault()?.rootId
     if (!rootId) throw new Error('仓库上下文未就绪')
     await trashWorkspacePath(rootId, rel)
+    // v3.1.2 条目9：删除后编辑区树与知识库同步（此前无任何广播，文件树上条目还在）
+    if (rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
+    notifyVaultTreeChange(rel)
     return { ok: true, trashed: rel }
   })
 
@@ -1402,7 +1463,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'visual.html',
     title: '生成 HTML 示意图',
-    description: '生成单文件 HTML 示意图辅助讲解，写入本会话 SOURCES/<对话>/visuals/<slug>.html 并自动在右栏工件栏打开。html 为完整自包含单文件：CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）、建议 ≤150 行、画幅 680×400 比例 SVG 为主、中文标注。配色：文字与背景对比度 ≥4.5:1（深底近白字、浅底深字，禁同色系深浅叠加）。重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
+    description: '生成单文件 HTML 示意图辅助讲解，写入本会话文件夹 visuals/<slug>.html 并自动在右栏工件栏打开。html 为完整自包含单文件：CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）、建议 ≤150 行、画幅 680×400 比例 SVG 为主、中文标注。配色：文字与背景对比度 ≥4.5:1（深底近白字、浅底深字，禁同色系深浅叠加）。重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
     inputSchema: {
       type: 'object',
       properties: {

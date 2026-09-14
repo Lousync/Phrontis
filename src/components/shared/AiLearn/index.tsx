@@ -4,6 +4,7 @@ import {
   FileText, Wrench, BookOpen, MessageSquare, HelpCircle, Settings2, Loader2, Quote,
 } from 'lucide-react'
 import { MarkdownPreview } from '../MarkdownPreview'
+import { ResizablePanel } from '../ResizablePanel'
 import { MessageList, type UiMessage } from '../AssistantPanel/MessageList'
 import type { StreamDraft } from '../AssistantPanel/useAgentStream'
 import { loadHelpDocs, type HelpDoc } from '../../../modules/help/docsLoader'
@@ -579,22 +580,46 @@ export function AiLearnShell({ tab, onTabChange, onCollapse, onClose, active, pr
       </div>
 
       <div className="flex min-h-0 flex-1">
-        {/* 左栏：三个页签共用容器，切换时不重排 */}
-        <Col d={50} active={active} className="flex w-[236px] shrink-0 flex-col border-r border-[var(--border-color)] bg-[var(--bg-secondary)]">
-          {tab === 'learn' ? stepList : tab === 'chat' ? sessionList : helpCatalog}
-        </Col>
+        {/* 左栏（v3.1.2 条目4）：可拖拽调宽、不可收起——接既有 ResizablePanel，
+            宽度持久化于 sidebarWidth_aiLearnLeft；不传 onSnapClose → 无收起态。
+            Col 仅保留入场 stagger 动画，宽度/边框/底色交给 ResizablePanel */}
+        <ResizablePanel
+          storageKey="sidebarWidth_aiLearnLeft"
+          defaultWidth={236}
+          minWidth={180}
+          maxWidth={360}
+          visible
+          side="left"
+          className="border-r border-[var(--border-color)] bg-[var(--bg-secondary)]"
+        >
+          <Col d={50} active={active} className="flex min-h-0 flex-1 flex-col">
+            {tab === 'learn' ? stepList : tab === 'chat' ? sessionList : helpCatalog}
+          </Col>
+        </ResizablePanel>
 
         {/* 中栏 */}
         <Col d={95} active={active} className="min-w-0 flex-1 overflow-hidden bg-[var(--bg-primary)]">
           {tab === 'learn' ? lessonPane : tab === 'chat' ? chatCenter : <HelpDocView doc={activeHelp} />}
         </Col>
 
-        {/* 右栏 */}
-        <Col d={140} active={active} className="flex w-[366px] shrink-0 flex-col border-l border-[var(--border-color)] bg-[var(--bg-primary)]">
-          {tab === 'learn' ? <FollowChat chat={chat} lesson={lesson} />
-            : tab === 'chat' ? chatInfo
-              : <FollowChat chat={chat} lesson={lesson} docMode docTitle={activeHelp?.title} />}
-        </Col>
+        {/* 右栏（v3.1.2 条目4）：同上，持久化于 sidebarWidth_aiLearnRight。
+            底色由内层 Col 的 bg-primary 撑满（ResizablePanel 内置 bg-secondary，
+            不在 className 里覆盖以免同类名竞争顺序不确定） */}
+        <ResizablePanel
+          storageKey="sidebarWidth_aiLearnRight"
+          defaultWidth={366}
+          minWidth={240}
+          maxWidth={480}
+          visible
+          side="right"
+          className="border-l border-[var(--border-color)]"
+        >
+          <Col d={140} active={active} className="flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
+            {tab === 'learn' ? <FollowChat chat={chat} lesson={lesson} />
+              : tab === 'chat' ? chatInfo
+                : <FollowChat chat={chat} lesson={lesson} docMode docTitle={activeHelp?.title} />}
+          </Col>
+        </ResizablePanel>
       </div>
     </div>
   )

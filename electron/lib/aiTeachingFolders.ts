@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { BrowserWindow, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { getAgentSession } from './agentSessionRepo'
 import { renameWorkspacePath, trashWorkspacePath, uniqueFileName } from './workspaceManager'
 import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
+import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 
 /**
  * AI教学模块 · 会话 ⇄ 文件夹绑定（总纲 docs/ai-teaching-module-rework.md §二，P1）
@@ -77,15 +78,13 @@ export function folderBaseName(createdAt: string, title: string): string {
   return `${datePrefix(createdAt)} ${sanitizeTitle(title)}`
 }
 
-function broadcast(channel: string, payload: unknown): void {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send(channel, payload)
-  }
-}
-
-/** 编辑区文件树联动：广播刷新（模块自绘树 P4 接管） */
-function broadcastTreeRefresh(dirRel: string): void {
-  broadcast('aiTeach:tree-refresh', { dirRel })
+/**
+ * 编辑区文件树联动：广播刷新（模块自绘树 P4 接管）。
+ * v3.1.2 收敛：实现走 windowBus 的统一出口，channel 名取 BROADCAST_CHANNEL（唯一真相源）；
+ * 导出供 builtinTools 的 vault.* 写工具复用（AI 落盘即刷新，不再等模块重挂载）。
+ */
+export function broadcastTreeRefresh(dirRel: string): void {
+  broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel })
 }
 
 function anchorMatches(abs: string, sessionId: string): boolean {
@@ -250,6 +249,60 @@ export function ensureGlobalConstraints(getSetting: (key: string) => unknown): C
   }
 }
 
+// ===== 工作区约束层（v3.1.2 条目6：三层约束补中间档）=====
+// {AI教学}/{工作区}/CONSTRAINTS.md：本工作区所有会话共同要求，AgentRunner 每轮重读注入。
+// 优先级链：用户当下消息 > 本会话要求 > 工作区要求 > 全局要求 > 内置人设。
+// 未归属工作区（sessionWs 无记录）的会话跳过本层（注入零段，不报错）。
+
+const WORKSPACE_CONSTRAINTS_SKELETON = [
+  '# 工作区要求（本工作区所有会话每轮自动遵循）',
+  '',
+  '在这里写本课程/主题的共同要求，例如：',
+  '- 讲解尽量控制在 10 分钟能读完',
+  '- 代码示例统一用 TypeScript',
+  '- 每节课结尾附 3 道自测题',
+  '',
+  '优先级：用户当下消息 > 本会话要求 > 工作区要求 > 全局要求。',
+  '',
+].join('\n')
+
+/** 读会话所属工作区的约束层；未归属工作区 / 工作区夹不存在 → 空 text（注入层零段，不报错） */
+export function readWorkspaceConstraintsForSession(sessionId: string, getSetting: (key: string) => unknown): ConstraintsResult {
+  try {
+    const vault = getCurrentVault()
+    if (!vault) return { ok: true, text: '', relPath: null }
+    const wsId = getWorkspaceOfSession(sessionId)
+    if (!wsId) return { ok: true, text: '', relPath: null }
+    const rel = workspaceFolderRel(wsId, getSetting)
+    if (!rel) return { ok: true, text: '', relPath: null }
+    const p = join(vault.rootPath, rel, CONSTRAINTS_FILE)
+    const text = existsSync(p) ? readFileSync(p, 'utf-8') : ''
+    return { ok: true, text, relPath: text.trim() ? `${rel}/${CONSTRAINTS_FILE}` : null }
+  } catch {
+    return { ok: true, text: '', relPath: null }
+  }
+}
+
+/** 确保工作区约束文档存在（首次入口点击落骨架）；返回 relPath 供跳编辑区打开 */
+export function ensureWorkspaceConstraints(wsId: string, getSetting: (key: string) => unknown): ConstraintsResult & { created?: boolean } {
+  try {
+    if (typeof wsId !== 'string' || !wsId || wsId === '__none__') return { ok: false, error: '会话未归属工作区，无工作区要求层' }
+    const vault = getCurrentVault()
+    if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const rel = workspaceFolderRel(wsId, getSetting)
+    if (!rel) return { ok: false, error: '工作区不存在' }
+    const p = join(vault.rootPath, rel, CONSTRAINTS_FILE)
+    if (existsSync(p)) return { ok: true, text: readFileSync(p, 'utf-8'), relPath: `${rel}/${CONSTRAINTS_FILE}` }
+    const dirAbs = join(vault.rootPath, rel)
+    if (!existsSync(dirAbs)) mkdirSync(dirAbs, { recursive: true })
+    writeFileSync(p, WORKSPACE_CONSTRAINTS_SKELETON, 'utf-8')
+    broadcastTreeRefresh(rel)
+    return { ok: true, text: WORKSPACE_CONSTRAINTS_SKELETON, relPath: `${rel}/${CONSTRAINTS_FILE}`, created: true }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
 /**
  * AgentRunner 注入解析（§2.3 / 2-6）：CONSTRAINTS.md 文件是唯一真相源；
  * 旧会话从未落过文件夹 → 读兼容回退 DB sessionInstructions 一次；
@@ -360,6 +413,40 @@ export function sessionFolder(sessionId: string, getSetting: (key: string) => un
   return { ok: true, relPath: rel }
 }
 
+/**
+ * v3.1.2 条目11：支线的产物落点 = **跟随主线会话夹**，落在其下 `支线·{标题}/` 子目录。
+ * 支线**不新建自己的会话夹**（方案要求）。非支线会话即自身会话夹。
+ *
+ * `resolveWriteOwnerRel` = 纯函数（不建目录），供 `agentService` 注入落点 hint；
+ * `ensureWriteOwnerFolder` = 在其基础上懒建目录，供工具层落盘兜底（`normalizeAiTeachingWritePath`）。
+ */
+function laneSubName(title: string | undefined): string {
+  return String(title || '支线').replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 24) || '支线'
+}
+
+export function resolveWriteOwnerRel(sessionId: string, getSetting: (key: string) => unknown): string | null {
+  const row = getAgentSession(sessionId)
+  const ownerId = row?.parentSessionId || String(sessionId ?? '')
+  const base = sessionFolder(ownerId, getSetting).relPath
+  if (!base) return null
+  if (!row?.parentSessionId) return base
+  return `${base}/支线·${laneSubName(row.title)}`
+}
+
+export function ensureWriteOwnerFolder(sessionId: string, getSetting: (key: string) => unknown): FolderResult {
+  const row = getAgentSession(sessionId)
+  const ownerId = row?.parentSessionId || String(sessionId ?? '')
+  const base = ensureSessionFolder(ownerId, getSetting)
+  if (!base.ok || !base.relPath) return base
+  if (!row?.parentSessionId) return base
+  const rel = `${base.relPath}/支线·${laneSubName(row.title)}`
+  try {
+    const vault = getCurrentVault()
+    if (vault) mkdirSync(join(vault.rootPath, rel), { recursive: true })
+  } catch { /* 懒建失败不阻断落盘（vault.write 自身也会递归建父目录） */ }
+  return { ok: true, relPath: rel }
+}
+
 /** 删除会话文件夹 → 系统回收站（复用 ws:trash 同一语义，绝不 rm） */
 export async function deleteSessionFolder(sessionId: string, getSetting: (key: string) => unknown): Promise<FolderResult> {
   try {
@@ -400,7 +487,7 @@ export function migrateRootDir(oldName: string, newName: string): { ok: boolean;
     const newAbs = join(vault.rootPath, newName)
     if (!existsSync(oldAbs)) return { ok: true, skipped: true }
     if (existsSync(newAbs)) {
-      broadcast('aiTeach:notice', `根目录改名未完成：目标「${newName}」已存在，原「${oldName}」文件夹保留`)
+      broadcast(BROADCAST_CHANNEL.aiTeachNotice, `根目录改名未完成：目标「${newName}」已存在，原「${oldName}」文件夹保留`)
       return { ok: false, error: '目标目录已存在' }
     }
     renameSync(oldAbs, newAbs)
@@ -408,7 +495,7 @@ export function migrateRootDir(oldName: string, newName: string): { ok: boolean;
     return { ok: true }
   } catch (e) {
     const err = (e as Error).message
-    broadcast('aiTeach:notice', `根目录改名迁移失败（${err}），已保留原文件夹`)
+    broadcast(BROADCAST_CHANNEL.aiTeachNotice, `根目录改名迁移失败（${err}），已保留原文件夹`)
     return { ok: false, error: err }
   }
 }
@@ -463,7 +550,7 @@ export function sourceTemplateText(wsName: string, convName: string): string {
     '',
     '下面第 1 条是空位：把【】里的占位换成实际内容、填上「路径」就登记生效（路径是识别关键，不填不登记）。',
     '新增素材复制第 1 条小节、编号 +1。也可在右栏「素材库 → ＋ 添加素材」用表单登记，或在对话里让 AI 登记。',
-    '字段说明：类型(url/pptx/pdf/image/md/code/other)、页码区间(按 PDF/幻灯片自身的第几页=阅读器显示页码，不是书页印刷页码；code 用行号；如 12-34，无则 -)、',
+    '字段说明：类型(url/pptx/pdf/docx/image/md/code/other)、页码区间(按 PDF/幻灯片自身的第几页=阅读器显示页码，不是书页印刷页码；code 用行号；如 12-34，无则 -)、',
     '存放方式(已入库=原件拷进本目录/仅引用=只记地址)、已提取(程序维护)、备注。',
     '',
     '### 1. 【素材名称】',
@@ -487,6 +574,8 @@ export function registerAiTeachingFolderHandlers(getSetting: (key: string) => un
   ipcMain.handle('aiTeach:writeConstraints', (_e, sessionId: string, text: string) => writeConstraints(String(sessionId ?? ''), String(text ?? ''), getSetting))
   // 全局约束层（global-constraints 方案）：ensure=入口点击落骨架并返回 relPath 跳编辑区；写入走编辑器现有通道
   ipcMain.handle('aiTeachGlobal:ensureConstraints', () => ensureGlobalConstraints(getSetting))
+  // v3.1.2 条目6：工作区约束层（{工作区}/CONSTRAINTS.md）——ensure=入口点击落骨架并返回 relPath 跳编辑区
+  ipcMain.handle('aiTeachWorkspace:ensureConstraints', (_e, wsId: string) => ensureWorkspaceConstraints(String(wsId ?? ''), getSetting))
   // P3b：整理成文档（回答 md 落盘会话文件夹，幂等）；P7 起支持产物前缀（讲义/测验）
   ipcMain.handle('aiTeach:organizeDoc', (_e, sessionId: string, title: string, content: string, prefix?: string) => organizeDoc(String(sessionId ?? ''), String(title ?? '讲义'), String(content ?? ''), getSetting, typeof prefix === 'string' && prefix ? prefix : '讲义'))
 }

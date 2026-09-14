@@ -2,7 +2,8 @@ import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync, statS
 import { join, basename, isAbsolute, relative } from 'path'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
-import { ensureSessionFolder, rootDirName, sanitizeTitle, sessionFolder, sourceTemplateText } from './aiTeachingFolders'
+import { broadcastTreeRefresh, ensureSessionFolder, ensureWriteOwnerFolder, rootDirName, sanitizeTitle, sessionFolder, sourceTemplateText } from './aiTeachingFolders'
+import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { listWorkspaces, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { uniqueFileName } from './workspaceManager'
 import { extractPdfRange, extractPptxPages } from './docsReader'
@@ -21,7 +22,8 @@ import { appendAudit, countMonthVisionTokens, countMonthVisionPages } from './pl
  * - 对话级 `SOURCES/{对话夹名}/SOURCE.md` **降级为「对话私有补充」**（路径与格式不变，
  *   存量数据原地保留）；读接口把两层**合并**呈现并统一重编号，「存量迁移 = 合并读展示」。
  * - 素材原件（3-22「已入库」）+ 区间提取稿 `{素材名}-p{起}-{终}.md`（3-30 命名拍板）
- *   跟各自素材夹同层存放；`visuals/`（visual.html 工具产物）仍属对话级——它是本对话的示意图，不是素材。
+ *   跟各自素材夹同层存放；`visuals/`（visual.html 工具产物）v3.1.2 起落**会话文件夹**内——它是本对话的
+ *   产物（不是素材），不再占 SOURCES/（2026-09-14 条目10 落点纪律）。
  * - SOURCE.md = YAML frontmatter + 条目小节（3-28 拍板）：`### N. 名称` + 固定字段行
  *   （类型/路径/页码区间/存放方式/已提取/备注），程序按小节解析——三种录入方式（3-19 表单/对话 AI 登记/
  *   直接编辑文件）都收敛到同一份文件的解析与重写；
@@ -40,7 +42,7 @@ const SOURCES_DIR = 'SOURCES'
  */
 export type SourcesScope = 'workspace' | 'session'
 
-const TYPE_ENUM = ['url', 'pptx', 'pdf', 'image', 'md', 'code', 'dir', 'other'] as const
+const TYPE_ENUM = ['url', 'pptx', 'pdf', 'docx', 'image', 'md', 'code', 'dir', 'other'] as const
 export type SourceType = (typeof TYPE_ENUM)[number]
 
 export interface SourceEntry {
@@ -154,12 +156,6 @@ function layout(sessionId: string, getSetting: (key: string) => unknown, create:
 function emptyTemplate(l: SourcesLayout): string {
   // 工作区级库的 frontmatter 用「（工作区级）」标出归属——文件里一眼能区分主库与对话私有补充
   return sourceTemplateText(l.wsName, l.convName || '（工作区级·跨对话共用）')
-}
-
-function broadcastTreeRefresh(dirRel: string): void {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send('aiTeach:tree-refresh', { dirRel })
-  }
 }
 
 function today(): string {
@@ -386,7 +382,7 @@ export function readSources(sessionId: string, getSetting: (key: string) => unkn
 /** 扩展名 → 素材类型（类型纠错依据）：登记时选错类型（pptx 选了 pdf 等）会导致区间提取
  *  用错解析器（误导性报错）、原件阅读器分派错误、AI 注入描述失真——按扩展名自动纠正 */
 const EXT_TYPE_MAP: Record<string, SourceType> = {
-  pdf: 'pdf', pptx: 'pptx', ppt: 'pptx',
+  pdf: 'pdf', pptx: 'pptx', ppt: 'pptx', docx: 'docx', doc: 'docx',
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', bmp: 'image', svg: 'image',
   md: 'md', markdown: 'md', txt: 'md',
 }
@@ -495,8 +491,9 @@ export function removeSource(sessionId: string, no: number, getSetting: (key: st
   }
 }
 
-/** visual.html 工具产物（docs/ai-teaching-artifacts-pane-design.md §3.3）：
- *  写 `SOURCES/{对话夹}/visuals/<slug>.html`；重名不覆盖（-v2/-v3 递增）。
+/** visual.html 工具产物：
+ *  写 `{会话夹}/visuals/<slug>.html`（v3.1.2 条目10：从 `SOURCES/{对话夹}/visuals/` 迁出——
+ *  SOURCES 是给 AI 读的素材目录，产物一律落会话文件夹）；重名不覆盖（-v2/-v3 递增）。
  *  slug 白名单校验（kebab 英文数字，拒 `..`/分隔符/盘符——pathGuard 同口径的入参面收敛），
  *  落盘路径全程由本函数拼装，AI 参数无法越出会话 visuals/ 目录。不登记 SOURCE.md、不参与素材注入 */
 export function writeVisual(
@@ -511,17 +508,22 @@ export function writeVisual(
     const body = String(html ?? '')
     if (!body.trim()) return { ok: false, error: 'html 参数为空' }
     if (body.length > 512 * 1024) return { ok: false, error: 'html 超过 512KB，拒绝写入' }
-    // v3.1.1：示意图是**本对话**的产物（不是课程素材），固定落对话私有层，不随主库上移
-    const l = layout(sessionId, getSetting, true, 'session')
-    if ('error' in l) return { ok: false, error: l.error }
-    const visualsAbs = join(l.dirAbs, 'visuals')
+    // v3.1.2 条目10：示意图是**本对话**的产物、不是课程素材 —— 落会话文件夹 `{会话夹}/visuals/`，
+    // 不再踩 `SOURCES/`（SOURCES 是给 AI 读的素材目录，不放产物）。会话夹不存在 = 懒建。
+    // 条目11：支线跟随主线会话夹（`{主线夹}/支线·{标题}/visuals/`），不新建自己的夹。
+    const probe = ensureWriteOwnerFolder(sessionId, getSetting)
+    if (!probe.ok || !probe.relPath) return { ok: false, error: probe.error ?? '会话文件夹不可用' }
+    const vault = getCurrentVault()
+    if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const sessionRel = probe.relPath
+    const visualsAbs = join(vault.rootPath, sessionRel, 'visuals')
     mkdirSync(visualsAbs, { recursive: true })
     let fname = `${s}.html`
     for (let v = 2; existsSync(join(visualsAbs, fname)) && v <= 99; v++) fname = `${s}-v${v}.html`
     writeFileSync(join(visualsAbs, fname), body, 'utf-8')
-    broadcastTreeRefresh(l.dirRel)
+    broadcastTreeRefresh(sessionRel)
     const lines = body.replace(/\r\n/g, '\n').split('\n').length
-    return { ok: true, relPath: `${l.dirRel}/visuals/${fname}`, lines }
+    return { ok: true, relPath: `${sessionRel}/visuals/${fname}`, lines }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -570,7 +572,7 @@ export async function extractRange(sessionId: string, no: number, getSetting: (k
     // 3-26 程序防重复：已 ✓ 直接返回现有提取稿（UI 也不出提取按钮，双保险）
     const ext = /^✓\s*→\s*(.+)$/.exec(e.extracted)
     if (ext) return { ok: true, relPath: `${l.dirRel}/${ext[1].trim()}` }
-    if (e.type !== 'pdf' && e.type !== 'pptx' && e.type !== 'code') return { ok: false, error: '仅 pdf / pptx / code 支持区间提取' }
+    if (e.type !== 'pdf' && e.type !== 'pptx' && e.type !== 'docx' && e.type !== 'code') return { ok: false, error: '仅 pdf / pptx / docx / code 支持区间提取' }
     const abs = resolveMaterialAbs(l, e.path)
     if (!e.path || e.path === '-' || !existsSync(abs)) return { ok: false, error: `素材原件不可用：${e.path || '（未登记路径）'}` }
     const rg = parseRange(e.range)
@@ -602,8 +604,16 @@ export async function extractRange(sessionId: string, no: number, getSetting: (k
       broadcastTreeRefresh(l.dirRel)
       return { ok: true, relPath: `${l.dirRel}/${extractName}` }
     }
-    const pages: { n: number; text: string }[] = e.type === 'pdf'
-      ? (await extractPdfRange(abs, rg.from, rg.to)).pages
+    // v3.1.2 条目5：docx/doc 无原生解析，先经 soffice 无头转 PDF 再走 pdf 文本层提取
+    // （与 pptx 视觉转写同源基建；soffice 缺失时 convertToPdf 返回带指引的 error）
+    let docAbs = abs
+    if (e.type === 'docx') {
+      const conv = await convertToPdf(abs, getSetting('sofficePath'))
+      if (!conv.ok || !conv.pdfPath) return { ok: false, error: conv.error ?? 'Word 文档转 PDF 失败' }
+      docAbs = conv.pdfPath
+    }
+    const pages: { n: number; text: string }[] = e.type === 'pdf' || e.type === 'docx'
+      ? (await extractPdfRange(docAbs, rg.from, rg.to)).pages
       : extractPptxPages(abs).filter(p => p.n >= rg.from && p.n <= rg.to)
     if (pages.length === 0) return { ok: false, error: '区间内没有可提取的页（扫描件/图片型内容请走视觉转写或手工整理，提取稿可直接编辑补录）' }
     const extractName = uniqueFileName(l.dirAbs, `${sanitizeTitle(e.name)}-p${rg.from}-${rg.to}.md`)
@@ -637,16 +647,16 @@ export async function readSourceBytes(sessionId: string, no: number, getSetting:
     const hit = locateByNo(sessionId, no, getSetting)
     if (!hit) return { ok: false, error: `没有编号为 ${no} 的素材条目` }
     const { l, entry: e } = hit
-    if (e.type !== 'pdf' && e.type !== 'pptx') return { ok: false, error: '视觉转写支持 pdf/pptx 原件（其余类型请走文本提取/手工整理）' }
+    if (e.type !== 'pdf' && e.type !== 'pptx' && e.type !== 'docx') return { ok: false, error: '视觉转写支持 pdf / pptx / docx 原件（其余类型请走文本提取/手工整理）' }
     const abs = resolveMaterialAbs(l, e.path)
     if (!e.path || e.path === '-' || !existsSync(abs)) return { ok: false, error: `素材原件不可用：${e.path || '（未登记路径）'}` }
     const st = statSync(abs)
     if (st.size > 80 * 1024 * 1024) return { ok: false, error: `原件过大（${Math.round(st.size / 1048576)}MB > 80MB），请缩小区间` }
     if (e.type === 'pdf') return { ok: true, base64: readFileSync(abs).toString('base64') }
-    // pptx（2026-09-09 B 方案）：soffice 无头转 PDF 后交渲染层——pdf.js 栅格化链路原样复用；
+    // pptx / docx（docx 为 v3.1.2 条目5 扩展）：soffice 无头转 PDF 后交渲染层——pdf.js 栅格化链路原样复用；
     // 未装 LibreOffice 时 convertToPdf 返回带指引的 error（渲染层 toast），不影响 pdf 转写
     const conv = await convertToPdf(abs, getSetting('sofficePath'))
-    if (!conv.ok || !conv.pdfPath) return { ok: false, error: conv.error ?? 'pptx 转 PDF 失败' }
+    if (!conv.ok || !conv.pdfPath) return { ok: false, error: conv.error ?? `${e.type === 'docx' ? 'Word 文档' : 'pptx'} 转 PDF 失败` }
     return { ok: true, base64: readFileSync(conv.pdfPath).toString('base64') }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
@@ -738,9 +748,7 @@ const crawlAborts = new Map<string, AbortController>()
 
 /** 进度广播（渲染层订阅 aiTeach:web-crawl-progress，不轮询） */
 function broadcastWebProgress(payload: { sessionId: string; no: number; done: number; total: number; current: string }): void {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send('aiTeach:web-crawl-progress', payload)
-  }
+  broadcast(BROADCAST_CHANNEL.aiTeachWebCrawlProgress, payload)
 }
 
 /** 文件名段取 URL 末段去 .html（稳定可续抓：同一 URL 重爬命中 exists 跳过） */

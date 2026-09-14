@@ -1,4 +1,5 @@
-import { app, ipcMain, shell, BrowserWindow, net } from 'electron'
+import { app, ipcMain, shell, net } from 'electron'
+import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { join, resolve } from 'path'
 import { createHash } from 'crypto'
@@ -115,9 +116,7 @@ function pickAsset(assets: any[]): UpdateAsset | null {
 }
 
 function pushProgress(percent: number, receivedBytes: number, totalBytes: number): void {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send('update:download-progress', { percent, receivedBytes, totalBytes })
-  }
+  broadcast(BROADCAST_CHANNEL.updateDownloadProgress, { percent, receivedBytes, totalBytes })
 }
 
 /** 慢速保护:15s 内收到的字节不足 2MB(≈136KB/s)判定为慢通道,放弃换下一候选 */

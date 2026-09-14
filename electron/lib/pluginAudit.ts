@@ -199,3 +199,19 @@ export function countMonthLlmTokens(): number {
   }
   return total
 }
+
+/** 本月 LLM 消耗拆分（↑输入 / ↓输出）——与 countMonthLlmTokens 同源同口径，供用量 UI 展示 ↑↓ */
+export function countMonthLlmTokensSplit(): { promptTokens: number; completionTokens: number } {
+  const month = currentMonthKey()
+  let promptTokens = 0
+  let completionTokens = 0
+  for (const r of readAuditRows()) {
+    if (r.action !== 'llm.invoke' || !r.created_at.startsWith(month)) continue
+    try {
+      const d = JSON.parse(r.detail || '{}') as { promptTokens?: number; completionTokens?: number }
+      if (Number.isFinite(d.promptTokens)) promptTokens += Number(d.promptTokens)
+      if (Number.isFinite(d.completionTokens)) completionTokens += Number(d.completionTokens)
+    } catch { /* 跳过损坏条目 */ }
+  }
+  return { promptTokens, completionTokens }
+}

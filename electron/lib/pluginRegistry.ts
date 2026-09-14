@@ -1,5 +1,6 @@
 // R6 去库化（D9）：全局数据 = userData/data/*.json（sql.js 已移除）
 import { app, ipcMain, net, dialog, BrowserWindow } from 'electron'
+import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, readdirSync, statSync, lstatSync } from 'fs'
 import { join, resolve, sep, extname, basename, dirname } from 'path'
 import { unzipBuffer } from './zip'
@@ -745,9 +746,7 @@ function notifyPluginsChanged(): void {
   }
   // V3-2d：通知所有渲染窗口（插件页/后台 code 宿主容器刷新）
   try {
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('plugin:installed-changed')
-    }
+    broadcast(BROADCAST_CHANNEL.pluginInstalledChanged)
   } catch { /* 窗口已销毁等忽略 */ }
 }
 
@@ -815,9 +814,7 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
       if (typeof url !== 'string' || !isTrustedUrl(url)) return { success: false, message: '下载地址不受信任(仅允许 GitHub)' }
       const push = (received: number, total: number, host = '') => {
         const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : -1
-        for (const w of BrowserWindow.getAllWindows()) {
-          if (!w.isDestroyed()) w.webContents.send('plugin:download-progress', { key: url, received, total, percent: pct, host })
-        }
+        broadcast(BROADCAST_CHANNEL.pluginDownloadProgress, { key: url, received, total, percent: pct, host })
       }
       push(0, 0)
       // 大包友好:流式下载(连接 30s/空闲 60s 看门狗),镜像候选含 ghproxy 前缀节点;

@@ -1,6 +1,6 @@
 import { ipcMain, net } from 'electron'
 import { randomUUID } from 'crypto'
-import { appendAudit, countMonthLlmTokens, countMonthVisionTokens, countMonthVisionPages, summarizeMonthLlmUsage } from './pluginAudit'
+import { appendAudit, countMonthLlmTokens, countMonthLlmTokensSplit, countMonthVisionTokens, countMonthVisionPages, summarizeMonthLlmUsage } from './pluginAudit'
 import { encryptSecret, decryptSecret } from './secretBox'
 import { scanCcSwitch, importCcSwitchIds, bindCcSwitchSaver } from './ccSwitchImport'
 
@@ -1243,11 +1243,16 @@ export function registerLlmHandlers(deps: {
 
   ipcMain.handle('llm:invoke', (_e, req: LlmInvokeRequest) => llmInvoke(req))
 
-  ipcMain.handle('llm:getUsage', () => ({
-    monthTokens: countMonthLlmTokens(),
-    visionMonthTokens: countMonthVisionTokens(),
-    visionPages: countMonthVisionPages(),
-  }))
+  ipcMain.handle('llm:getUsage', () => {
+    const split = countMonthLlmTokensSplit()
+    return {
+      monthTokens: countMonthLlmTokens(),
+      monthPromptTokens: split.promptTokens,
+      monthCompletionTokens: split.completionTokens,
+      visionMonthTokens: countMonthVisionTokens(),
+      visionPages: countMonthVisionPages(),
+    }
+  })
   // 用量细分（网关补强）：本月按供应商/模型聚合（审计数据源，只读）
   ipcMain.handle('llm:usageBreakdown', () => summarizeMonthLlmUsage())
 }

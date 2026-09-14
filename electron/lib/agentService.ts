@@ -6,18 +6,19 @@ import { invokeLlmStreamInternal } from './llmService'
 import { estimateTokens, trimHistoryByBudget } from './agentContextBudget'
 import { compressAtTokens, composeContextWithDigest, rowsAfterDigest } from './agentCompressCore'
 import { compressSession } from './agentCompress'
-import type { SessionDigest } from './agentSessionRepo'
+import type { SessionDigest, AgentMessageRow } from './agentSessionRepo'
 import { clampMaxRounds, clampRunTokenBudget, isParallelSafe, partitionToolBatches, PARALLEL_CHUNK, PARALLEL_HINT, FINAL_ROUND_NOTICE, FORCED_SUMMARY_NOTICE } from './agentLoopPolicy'
 import {
   createAgentSession, listAgentSessions, renameAgentSession, deleteAgentSession,
   sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages,
   getMessageById, updateMessageContent, deleteMessage, deleteMessagesAfter,
   getAgentSession, updateAgentSessionInstructions, backfillSessionSources,
+  createSideLaneSession, listSideLanes, promoteSideLane,
 } from './agentSessionRepo'
-import { resolveConstraintsForInjection, readGlobalConstraints, listSessionFolderIds } from './aiTeachingFolders'
+import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceConstraintsForSession, resolveWriteOwnerRel, listSessionFolderIds } from './aiTeachingFolders'
 import { resolveSourcesForInjection } from './aiTeachingSources'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
-import { listWorkspaces } from './aiTeachingWorkspaces'
+import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { findSkillPrompt } from './skillService'
 
 /**
@@ -470,6 +471,27 @@ function assembleAgentHistory(sessionId: string): {
   }
 }
 
+/**
+ * 构建支线旁问的**固化上下文快照**（v3.1.2 条目11）。
+ *
+ * 内容 = 分叉点回答全文 + 主线此前 K 轮（每轮 = user + assistant）。
+ * 截断口径：快照过长时**保留尾部**（分叉回答在末尾，必须留下），丢掉最早的前轮。
+ * 纯函数、无副作用——只在 `agent:createSideLane` 建支线时算一次，之后随会话持久化。
+ */
+function buildSideLaneSnapshot(parentSessionId: string, anchor: AgentMessageRow | null, turns: number): string {
+  const rows = getAgentMessages(parentSessionId).filter(m => m.role === 'user' || m.role === 'assistant')
+  const fmt = (r: AgentMessageRow): string => `${r.role === 'user' ? '用户' : 'AI'}：${r.content}`
+  let anchorIdx = anchor ? rows.findIndex(m => m.id === anchor.id) : rows.length - 1
+  if (anchorIdx === -1) anchorIdx = rows.length - 1
+  const before = rows.slice(Math.max(0, anchorIdx - turns * 2), anchorIdx)
+  const parts: string[] = []
+  if (before.length > 0) parts.push(`— 主线此前 ${Math.ceil(before.length / 2)} 轮 —\n` + before.map(fmt).join('\n\n'))
+  if (anchor) parts.push(`— 被追问的回答（分叉点）—\n${anchor.content}`)
+  const CAP = 6000
+  const text = parts.join('\n\n')
+  return text.length > CAP ? text.slice(-CAP) : text
+}
+
 /** 从会话库当前内容直接推理（不追加新用户消息）——重新生成/编辑重推共用 */
 async function runAgentLoop(
   sessionId: string,
@@ -537,16 +559,25 @@ async function runAgentLoop(
     ? rawConstraints.slice(0, 4000) + '\n…（约束文件过长已截断，全文见会话文件夹 CONSTRAINTS.md）'
     : rawConstraints
   const instHint = sessionInst
-    ? `\n\n【本会话要求】（用户为此对话单独设定于 CONSTRAINTS.md，优先于全局要求遵守；与用户消息冲突时以用户当下消息为准）\n${sessionInst}`
+    ? `\n\n【本会话要求】（用户为此对话单独设定于 CONSTRAINTS.md，是约束链中最细、优先级最高的一层；与用户消息冲突时以用户当下消息为准）\n${sessionInst}`
+    : ''
+  // 工作区约束层（v3.1.2 条目6：三层约束补中间档）：{AI教学}/{工作区}/CONSTRAINTS.md 每轮重读，
+  // 本工作区所有会话共同遵守；未归属工作区的会话本层零段。截断 3500 取全局层与会话层之间的中间档。
+  const rawWs = readWorkspaceConstraintsForSession(sessionId, getSettingReader()).text ?? ''
+  const wsInst = rawWs.length > 3500
+    ? rawWs.slice(0, 3500) + '\n…（工作区要求过长已截断，全文见工作区文件夹 CONSTRAINTS.md）'
+    : rawWs
+  const wsInstHint = wsInst.trim()
+    ? `\n\n【工作区要求】（用户为本工作区所有会话共同设定于 {工作区}/CONSTRAINTS.md，次于本会话要求、优先于全局要求；与更细颗粒层或用户当下消息冲突时以更细层为准）\n${wsInst}`
     : ''
   // 全局约束层（.claude/plans/global-constraints.md）：{产物根}/CONSTRAINTS.md 每轮重读，跨工作区/跨会话共同遵守；
-  // 冲突裁决链写进提示词：用户当下消息 > 会话层 > 全局层 > 内置人设。截断 3000 与画像段同量级。
+  // 冲突裁决链写进提示词：用户当下消息 > 会话层 > 工作区层 > 全局层 > 内置人设。截断 3000 与画像段同量级。
   const rawGlobal = readGlobalConstraints(getSettingReader()).text ?? ''
   const globalInst = rawGlobal.length > 3000
     ? rawGlobal.slice(0, 3000) + '\n…（全局要求过长已截断，全文见 AI教学产物根 CONSTRAINTS.md）'
     : rawGlobal
   const globalInstHint = globalInst.trim()
-    ? `\n\n【全局要求】（用户设定于 AI教学产物根的 CONSTRAINTS.md，所有会话共同遵守；与上方本会话要求或用户当下消息冲突时，以会话要求与当下消息为准）\n${globalInst}`
+    ? `\n\n【全局要求】（用户设定于 AI教学产物根的 CONSTRAINTS.md，跨工作区所有会话共同遵守，是约束链中最粗、优先级最低的一层；与更细颗粒层或用户当下消息冲突时以更细层为准）\n${globalInst}`
     : ''
   // P3a（§3.8-2 标题规则，3-13 拍板）：AI教学会话每条回答首行带三级标题，供快速定位条取锚点标题
   const titleRuleHint = source === 'aiTeaching'
@@ -581,6 +612,51 @@ async function runAgentLoop(
   // P8（§3.14）+ UI 优化条目8.2.2：三层学习者画像注入（全局 → 工作区 → 会话，细颗粒覆盖粗颗粒）
   // + 更新建议协议（3-33 Plan B）
   const profileHint = source === 'aiTeaching' ? resolveProfilesForInjection(sessionId, getSettingReader()) : ''
+  // v3.1.2 条目8+10：AI教学「取材范围」与「产物落点」两条纪律共用一次会话夹解析（避免重复 stat）
+  // 条目11：支线的落点跟随**主线**会话夹（`{主线夹}/支线·{标题}/`），不新建自己的夹
+  const aiTeachScope = source === 'aiTeaching' ? (() => {
+    const wsId = getWorkspaceOfSession(sessionId)
+    const wsRel = wsId ? workspaceFolderRel(wsId, getSettingReader()) : null
+    const sessionRel = resolveWriteOwnerRel(sessionId, getSettingReader())
+    return { wsRel, sessionRel }
+  })() : null
+  // v3.1.2 条目8：资料范围纪律（AI教学恒注入——无素材时更要防全仓乱扫，故不搭在 sourcesHint 上）。
+  // 默认只读材料登记项 + 本工作区夹；用户当前消息明确点名时才放开。长度控制百字级，防缓存前缀膨胀。
+  const scopeRuleHint = aiTeachScope ? (() => {
+    const { wsRel, sessionRel } = aiTeachScope
+    const scope1 = '① 素材目录（SOURCE.md）中登记的文件 / 提取稿 / 链接'
+    const scope2 = wsRel
+      ? `② 本工作区文件夹 \`${wsRel}/\` 内的内容（含本会话产物${sessionRel ? `，本会话文件夹为 \`${sessionRel}/\`` : ''}）`
+      : '② 本会话产物所在文件夹'
+    return '\n\n【资料范围纪律（AI教学）】取材默认只限两处：' + scope1 + '；' + scope2 + '。'
+      + '除非用户在当前消息中明确要求扩大范围（如「在整个仓库找一下 X」「看看我仓库里有没有 Y」），'
+      + '否则不要用 vault.search / vault.read 扫描整个仓库，也不要读工作区文件夹之外的仓库内容。'
+      + '用户明确要求时按其指定范围放开；要引用范围内的其他内容时先说明意图，不要自行扩大检索面。'
+  })() : ''
+  // v3.1.2 条目10：产物落点纪律（与条目8 是同一枚硬币两面：一个管读哪、一个管写哪）。
+  // 实时给出本会话文件夹相对路径；工具层还有一道归一化兜底（builtinTools.normalizeAiTeachingWritePath）。
+  const writeScopeHint = aiTeachScope ? (() => {
+    const { wsRel, sessionRel } = aiTeachScope
+    const dest = sessionRel
+      ? `\`${sessionRel}/\``
+      : (wsRel ? `\`${wsRel}/\` 下本会话的文件夹` : '本会话对应的文件夹')
+    return '\n\n【产物落点纪律（AI教学）】你创建或生成的一切文档（讲义、笔记、测验、总结等）统一写入本会话文件夹 ' + dest
+      + '（调用工具时 path 要带上该目录前缀，不要只给裸文件名）。'
+      + '禁止写入 `SOURCES/`（那是给你读的素材目录，不是放产物的）、禁止写仓库顶层或工作区文件夹根目录。'
+      + '用户在当前消息里明确指定了路径时，以用户指定的路径为准。'
+  })() : ''
+  // v3.1.2 条目11：支线旁问上下文（仅带 sideContext 的会话注入）。快照在建支线时固化，跨轮稳定 → 不扰动缓存前缀。
+  // 升格为正式会话（lane='main'）后仍保留来源快照，只是不再套「支线纪律」措辞。
+  const laneRow = source === 'aiTeaching' ? getAgentSession(sessionId) : undefined
+  const isSideLane = !!(laneRow?.parentSessionId && laneRow.lane === 'side')
+  const sideLaneHint = laneRow?.sideContext
+    ? (isSideLane
+        ? '\n\n【支线旁问上下文（快照）】本条对话是从主线会话的某条回答分叉出来的**独立支线**，以下是分叉那一刻的上下文快照（被追问的回答 + 主线前若干轮）。'
+          + '注意：① 你只掌握这份快照，**不知道**主线在分叉之后的任何进展；② 回答聚焦被追问的那一点，不要展开主线内容；'
+          + '③ 不要调用会写入主线产物的工具，避免污染主线；④ 快照不足以回答时如实说明，并建议用户回到主线补充。\n'
+        : '\n\n【来源上下文（快照）】本条对话由主线会话的一条回答升格而来，以下是其来源快照（仅供参考背景；后续进展以本对话自身历史为准）。\n')
+      + laneRow.sideContext
+    : ''
   const baseSystem = buildSystemPrompt(context)
   // UI 优化条目9②：教学会话的注入分段用量（字符数，渲染层按 ≈2.6 字/token 折算做构成摘要）
   const injection: AiTeachInjectionStats | undefined = source === 'aiTeaching'
@@ -589,10 +665,10 @@ async function runAgentLoop(
         constraintChars: sessionInst.length,
         profileChars: profileHint.length,
         sourcesChars: sourcesHint.length,
-        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + visualHint.length,
+        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + visualHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
       }
     : undefined
-  const systemFull = baseSystem + globalInstHint + instHint + profileHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+  const systemFull = baseSystem + globalInstHint + wsInstHint + instHint + profileHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
   // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
   let convo: AgentMessage[] = [
@@ -606,7 +682,8 @@ async function runAgentLoop(
   // （检查点推进 → base 变小）；无可压段时 skipped 不调 LLM；失败静默回退现有裁剪。
   let compressed: { covered: number; digestChars: number } | undefined
   const budgetSetting = Math.floor(Number(getSettingReader()('agentContextBudgetTokens')) || 24000)
-  if (!virtualKickoff && budgetSetting > 0 && getSettingReader()('agentCompressionEnabled') !== false) {
+  // v3.1.2 条目11：支线不参与压缩——上下文 = 自己的历史 + 固化快照，压成纪要会打乱快照语义
+  if (!virtualKickoff && !isSideLane && budgetSetting > 0 && getSettingReader()('agentCompressionEnabled') !== false) {
     const est = estimateTokens(convo.map(m => m.content ?? '').join('\n')) + estimateTokens(JSON.stringify(toolPayload))
     if (est > compressAtTokens(budgetSetting, Number(getSettingReader()('agentCompressAtPercent')))) {
       const cr = await compressSession({ sessionId, modelId: llmOpts?.modelId, effort: llmOpts?.effort })
@@ -1027,7 +1104,48 @@ export function registerAgentHandlers(): void {
     return { ok: true }
   })
   ipcMain.handle('agent:deleteSession', (_e, id: string) => {
-    deleteAgentSession(String(id ?? ''))
+    const sid = String(id ?? '')
+    // v3.1.2 条目11：级联删除挂在该会话下的支线（连同各自 .jsonl 消息文件）。
+    // 渲染层在删除前用 agent:listSideLanes 取支线数做确认文案，确认后才调到这里。
+    for (const lane of listSideLanes(sid)) deleteAgentSession(lane.id)
+    deleteAgentSession(sid)
     return true
+  })
+
+  // ===== v3.1.2 条目11：支线旁问（sidetrack）=====
+  // 建支线：只做「固化上下文快照 + 建独立会话」，**不调 LLM**（点按钮与装载阶段零请求）。
+  ipcMain.handle('agent:createSideLane', (_e, payload: { parentSessionId?: unknown; anchorMessageId?: unknown; contextTurns?: unknown }) => {
+    const p = (payload ?? {}) as { parentSessionId?: unknown; anchorMessageId?: unknown; contextTurns?: unknown }
+    const parentSessionId = String(p.parentSessionId ?? '')
+    if (!parentSessionId || !sessionExists(parentSessionId)) return { ok: false, error: '主线会话不存在' }
+    const anchorMessageId = String(p.anchorMessageId ?? '')
+    const anchor = anchorMessageId ? getMessageById(parentSessionId, anchorMessageId) : null
+    const turns = Math.min(5, Math.max(1, Math.floor(Number(p.contextTurns)) || 3))
+    const snapshotText = buildSideLaneSnapshot(parentSessionId, anchor, turns)
+    const titleCore = (anchor?.content ?? '').replace(/^#{1,6}\s*/gm, '').replace(/\s+/g, ' ').trim().slice(0, 16)
+    const lane = createSideLaneSession({
+      parentSessionId,
+      branchFromMessageId: anchor?.id ?? '',
+      sideContext: snapshotText,
+      title: titleCore ? `支线·${titleCore}` : '支线旁问',
+      source: 'aiTeaching',
+    })
+    return { ok: true, laneSessionId: lane.id, title: lane.title, snapshotText, turns }
+  })
+  // 列某主线下的支线（含已升格）：左栏缩进渲染 + 删除前计数
+  ipcMain.handle('agent:listSideLanes', (_e, parentSessionId: string) =>
+    listSideLanes(String(parentSessionId ?? '')).map(camelRow))
+  // 升格支线为正式会话（单向）：lane 置 'main' → 进左栏列表
+  ipcMain.handle('agent:promoteSideLane', (_e, laneSessionId: string) =>
+    promoteSideLane(String(laneSessionId ?? '')))
+  // 把支线结论作为一条**普通用户消息**追加到主线（P3「带回主线」）——**不调 LLM**：
+  // 结论进入主线上下文（下一轮 assembleAgentHistory 自然带上），但不打断主线节奏、不强制新回答。
+  ipcMain.handle('agent:appendNote', (_e, payload: { sessionId?: unknown; content?: unknown }) => {
+    const p = (payload ?? {}) as { sessionId?: unknown; content?: unknown }
+    const sid = String(p.sessionId ?? '')
+    const content = String(p.content ?? '')
+    if (!sid || !sessionExists(sid) || !content.trim()) return { ok: false, error: '参数非法' }
+    appendAgentMessage(sid, 'user', content)
+    return { ok: true }
   })
 }

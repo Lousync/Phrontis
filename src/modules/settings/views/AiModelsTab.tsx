@@ -9,7 +9,7 @@ import {
   llmTestConnection, llmRefreshModels, llmSetDefaultModel, llmGetUsage, llmAddModel, llmTestModel,
   llmCcSwitchList, llmCcSwitchImport, openExternal, llmUsageBreakdown, aiTeachSrcSofficeProbe,
 } from '../../../lib/ipc'
-import type { LlmProviderInfo, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, CcSwitchItem, LlmUsageBreakdownEntry } from '../../../types'
+import type { LlmProviderInfo, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, CcSwitchItem, LlmUsageBreakdownEntry, LlmUsageInfo } from '../../../types'
 import { prettyModelName, isOpenCodeFree } from '../../../lib/modelNames'
 
 /** 免费=用户手动标记 ∪ id 含 free（上游不提供该元数据，双轨启发式） */
@@ -45,7 +45,7 @@ export function AiModelsTab() {
   const { s, update } = useSettings()
   const [providers, setProviders] = useState<LlmProviderInfo[]>([])
   const [defaultModel, setDefaultModel] = useState('')
-  const [usage, setUsage] = useState({ monthTokens: 0 })
+  const [usage, setUsage] = useState<LlmUsageInfo>({ monthTokens: 0 })
   const [breakdown, setBreakdown] = useState<{ month: string; entries: LlmUsageBreakdownEntry[] }>({ month: '', entries: [] })
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -106,12 +106,18 @@ export function AiModelsTab() {
       {/* 用量统计（仅统计不限额） */}
       <div>
         <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">Token 用量</h2>
-        <p className="text-[12px] text-[var(--text-muted)] mb-4">本月累计消耗（仅统计，不设限额拦截）；每次对话回复下方的 ↑↓ 标记为单轮消耗。</p>
+        <p className="text-[12px] text-[var(--text-muted)] mb-4">本月累计消耗（↑输入 ↓输出，仅统计、不设限额拦截）；每次对话回复下方的 ↑↓ 标记为单轮消耗。</p>
         <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md">
           <div className="flex items-center justify-between text-[13px]">
             <span className="flex items-center gap-2"><Gauge size={14} className="text-[var(--accent)]" />本月 tokens</span>
             <span className="tabular-nums text-[var(--text-secondary)]">{usage.monthTokens.toLocaleString()}</span>
           </div>
+          {(usage.monthPromptTokens != null || usage.monthCompletionTokens != null) && (
+            <div className="mt-0.5 flex items-center justify-end gap-3 text-[11px] tabular-nums text-[var(--text-muted)]">
+              <span>↑ {(usage.monthPromptTokens ?? 0).toLocaleString()} 输入</span>
+              <span>↓ {(usage.monthCompletionTokens ?? 0).toLocaleString()} 输出</span>
+            </div>
+          )}
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
             <label className="flex items-center justify-between gap-3 text-[12px]">
               <span className="text-[var(--text-muted)] mr-2">单次 maxTokens</span>
@@ -127,7 +133,7 @@ export function AiModelsTab() {
                 {breakdown.entries.slice(0, 8).map(e => (
                   <div key={`${e.providerId}-${e.model}`} className="flex items-center justify-between gap-2 text-[11px]">
                     <span className="truncate text-[var(--text-secondary)]" title={`${e.provider} · ${e.model}`}>{e.provider} · {prettyModelName(e.model)}</span>
-                    <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{e.calls} 次 · {e.tokens.toLocaleString()} tok</span>
+                    <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{e.calls} 次 · ↑{e.promptTokens.toLocaleString()} ↓{e.completionTokens.toLocaleString()} · 合计 {e.tokens.toLocaleString()}</span>
                   </div>
                 ))}
               </div>

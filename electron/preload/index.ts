@@ -246,6 +246,13 @@ const api = {
   agentRenameSession: (id: string, title: string) => ipcRenderer.invoke('agent:renameSession', id, title),
   agentSetSessionInstructions: (id: string, instructions: string) => ipcRenderer.invoke('agent:setSessionInstructions', id, instructions),
   agentDeleteSession: (id: string) => ipcRenderer.invoke('agent:deleteSession', id),
+  // v3.1.2 条目11：支线旁问（sidetrack）。createSideLane 只装上下文、不调 LLM
+  agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) =>
+    ipcRenderer.invoke('agent:createSideLane', payload),
+  agentListSideLanes: (parentSessionId: string) => ipcRenderer.invoke('agent:listSideLanes', parentSessionId),
+  agentPromoteSideLane: (laneSessionId: string) => ipcRenderer.invoke('agent:promoteSideLane', laneSessionId),
+  /** P3 带回主线：把支线结论作为普通消息追加到主线（不调 LLM） */
+  agentAppendNote: (payload: { sessionId: string; content: string }) => ipcRenderer.invoke('agent:appendNote', payload),
   // AI教学 P1：会话 ⇄ 文件夹绑定
   aiTeachEnsureSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:ensureSessionFolder', id),
   aiTeachSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:sessionFolder', id),
@@ -254,6 +261,8 @@ const api = {
   aiTeachReadConstraints: (id: string) => ipcRenderer.invoke('aiTeach:readConstraints', id),
   /** 全局约束文档（AI教学产物根 CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区打开 */
   aiTeachGlobalEnsureConstraints: () => ipcRenderer.invoke('aiTeachGlobal:ensureConstraints'),
+  /** v3.1.2 条目6：工作区约束文档（{工作区}/CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区打开 */
+  aiTeachWorkspaceEnsureConstraints: (wsId: string) => ipcRenderer.invoke('aiTeachWorkspace:ensureConstraints', wsId),
   aiTeachWriteConstraints: (id: string, text: string) => ipcRenderer.invoke('aiTeach:writeConstraints', id, text),
   aiTeachOrganizeDoc: (id: string, title: string, content: string, prefix?: string) => ipcRenderer.invoke('aiTeach:organizeDoc', id, title, content, prefix),
   // AI教学 P5：工作区两层（§3.2-6）

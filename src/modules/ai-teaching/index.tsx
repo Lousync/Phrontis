@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList } from 'lucide-react'
+import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
-  agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills,
+  agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentAppendNote, agentPromoteSideLane, agentListSideLanes,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceListDir,
-  agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh,
+  agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachAssignSession, aiTeachUnassignSession, aiTeachSetLastWorkspace,
   aiTeachSrcRead, aiTeachSrcAdd, aiTeachSrcRemove, aiTeachSrcExtract, aiTeachSrcPick, aiTeachSrcPickDir, aiTeachSrcVisionCheck,
   aiTeachSrcPdfBytes, aiTeachSrcTranscribe, aiTeachSrcPromote,
@@ -27,6 +27,12 @@ import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { WebSourceDialog } from './components/WebSourceDialog'
+import { SideLanePanel } from './SideLanePanel'
+
+/** v3.1.2 条目11 P3：带回主线的消息前缀（渲染层据此把该条用户消息渲染成「支线结论」锚点） */
+const BRINGBACK_PREFIX = '◧ 已从支线带回结论：'
+/** 带回锚点 → 支线映射（localStorage）：让「查看支线 →」在重启后依然能重新打开原支线 */
+const BRINGBACK_KEY = 'aiTeach.broughtBack'
 import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourceEntry, SkillInfo } from '../../types'
 
 /**
@@ -50,9 +56,9 @@ import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange,
  * 逐题记录经 quizRecord:report（aiTeach: 命名空间）入知识库错题体系（3-10）。
  * P6 素材库（v3.1.1 上移工作区层）：右栏「素材库」= **工作区主库** `SOURCES/SOURCE.md`（跨对话共用，未建对话也可登记）
  * + 本对话历史登记（存量，合并视图重编号 1..N，标「对话」角标，一键「上收」并入主库）；「＋素材」表单登记
- * （类型/存放/页码区间仅 pdf·pptx 拆起止，3-28 程序解析写入）、pdf/pptx 一键区间提取为同级可编辑提取稿（3-20/3-26），
+ * （类型/存放/页码区间仅 pdf·pptx·docx 拆起止，3-28 程序解析写入）、pdf/pptx/docx 一键区间提取为同级可编辑提取稿（3-20/3-26；docx 经 soffice 转 PDF，v3.1.2 条目5），
  * SOURCE.md 与提取稿经 AgentRunner 素材目录注入供 AI 编号引用（3-29，每轮重读）——新对话因此能看到工作区已有素材。
-  * 3-21 视觉转写（手动档）：pdf/pptx 条目「转写」按钮→主进程转 PDF（pptx 经 soffice）→渲染层 pdf.js 区间栅格化→视觉模型逐页转写→并入提取稿。
+  * 3-21 视觉转写（手动档）：pdf/pptx/docx 条目「转写」按钮→主进程转 PDF（pptx/docx 经 soffice）→渲染层 pdf.js 区间栅格化→视觉模型逐页转写→并入提取稿。
  * P8 用户画像（§3.14）：全局画像（userData/AI教学/PROFILE.md）+ 会话 PROFILE.md 两层每轮注入；
  * 更新走 Plan B——AI 输出 ```profile 建议块 → 输入框上方建议卡片「接受（本主题/全局）/忽略」，接受才写文件（3-33）；
  * 「🩺 诊断问答」模板（3-34）答完生成初稿；入口=选择页「全局画像」chip + 顶栏「画像」chip（3-35）。
@@ -67,6 +73,7 @@ function inferSrcType(path: string): string {
   const ext = m ? m[1].toLowerCase() : ''
   if (ext === 'pdf') return 'pdf'
   if (ext === 'pptx' || ext === 'ppt') return 'pptx'
+  if (ext === 'docx' || ext === 'doc') return 'docx'
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'image'
   if (['md', 'markdown', 'txt'].includes(ext)) return 'md'
   if (['js', 'ts', 'jsx', 'tsx', 'py', 'c', 'h', 'cpp', 'hpp', 'cc', 'java', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'kt', 'sh', 'bat', 'ps1', 'lua', 'sql', 'vue', 'scss', 'css', 'html', 'xml', 'json', 'yml', 'yaml', 'toml', 'ini'].includes(ext)) return 'code'
@@ -300,13 +307,14 @@ function parseAskBlock(raw: string, id: string): AskBlock | null {
 const SRC_GROUPS: Array<{ key: string; label: string; color: string }> = [
   { key: 'pdf', label: 'PDF 文件', color: '#d04242' },
   { key: 'pptx', label: 'PPT 课件', color: '#e8842a' },
+  { key: 'docx', label: 'Word 文档', color: '#2b579a' },
   { key: 'url', label: '网页', color: '#2e9e5b' },
   { key: 'code', label: '代码', color: '#4f6bed' },
   { key: 'dir', label: '目录', color: '#8b949e' },
   { key: 'other', label: '其他', color: '#a3aab8' },
 ]
 /** type → 组键（image/md/other/未识别全进 other，不丢条目） */
-const srcGroupKey = (t: string): string => (['pdf', 'pptx', 'url', 'code', 'dir'].includes(t) ? t : 'other')
+const srcGroupKey = (t: string): string => (['pdf', 'pptx', 'docx', 'url', 'code', 'dir'].includes(t) ? t : 'other')
 /** 折叠缓动：快出缓停无回弹（方案 §3 定稿曲线） */
 const SRC_EASE = 'ease-[cubic-bezier(0.22,0.68,0.32,1)]'
 
@@ -477,6 +485,26 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     () => sessions.filter(s => (wsSessionMap[s.id] ?? '__none__') === (activeWs ?? '__none__')),
     [sessions, wsSessionMap, activeWs],
   )
+  /**
+   * v3.1.2 条目11 P4：左栏会话列表 = 主线行 + 其下缩进的「已升格支线」。
+   * 支线本身不分配工作区，靠 parentSessionId 归属到父行下（父行在当前工作区视图时才带出）。
+   */
+  const wsSessionTree = useMemo(() => {
+    const inView = new Set(wsSessions.map(s => s.id))
+    const childrenOf = new Map<string, AgentSessionInfo[]>()
+    for (const s of sessions) {
+      if (!s.parentSessionId || s.lane !== 'main' || !inView.has(s.parentSessionId)) continue
+      const arr = childrenOf.get(s.parentSessionId) ?? []
+      arr.push(s); childrenOf.set(s.parentSessionId, arr)
+    }
+    const out: Array<{ s: AgentSessionInfo; child: boolean }> = []
+    for (const s of wsSessions) {
+      if (s.parentSessionId && s.lane === 'main') continue // 已升格支线由父行带出，不单独成行
+      out.push({ s, child: false })
+      for (const c of childrenOf.get(s.id) ?? []) out.push({ s: c, child: true })
+    }
+    return out
+  }, [wsSessions, sessions])
   // ---------- P7 题目视图（§3.2-7/3-9 中栏顶部切换器；答题复用知识库 QuizMode，3-10 记录持久化） ----------
   const [midView, setMidView] = useState<'chat' | 'quiz'>('chat')
   // ---------- v3.1.2 条目7：会话准备态（新建对话 → 首条消息之间的中间态） ----------
@@ -526,6 +554,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   const [instrOpen, setInstrOpen] = useState(false)
   const [instrDraft, setInstrDraft] = useState('')
   const [instrDismiss, setInstrDismiss] = useState(false)
+  // v3.1.2 条目11：支线旁问面板（浮层 / 右栏宽轨）。null=关闭。
+  // parentSessionId 在打开瞬间锁定——面板开着时切主线会话不会把支线挪到别的会话下。
+  const [sideLane, setSideLane] = useState<{ parentSessionId: string; anchorMessageId: string; parentTitle: string; openLaneId?: string } | null>(null)
+  const [sideLaneWide, setSideLaneWide] = useState(false)
+  /** 带回锚点映射：主线消息 id → 支线（用于「查看支线 →」重新打开） */
+  const [broughtBack, setBroughtBack] = useState<Record<string, { laneId: string; laneTitle: string }>>(() => {
+    try { return JSON.parse(localStorage.getItem(BRINGBACK_KEY) || '{}') as Record<string, { laneId: string; laneTitle: string }> } catch { return {} }
+  })
   // PPT 逐页阅读已并入工件栏 pptx 页签（工件栏方案 §1.4，原 reader 中栏互斥态退役）
   // UI 优化条目6B：中栏导航状态（对话/题目 · 工件栏激活页签）随变化落到本会话持久化键
   useEffect(() => {
@@ -592,8 +628,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   }, [])
 
   const refreshSessions = useCallback(async () => {
-    // 只保留 AI 教学来源的会话：助手侧栏 / AI 学堂的会话有自己的列表（同表存储，按 source 分流）
-    const list = (await agentSessions().catch(() => [])).filter(s => s.source !== 'assistant')
+    // 只保留 AI 教学来源的会话：助手侧栏 / AI 学堂的会话有自己的列表（同表存储，按 source 分流）。
+    // v3.1.2 条目11：未升格的支线（lane='side'）不进主列表——它们只活在浮层/宽轨里；
+    // 升格后 lane='main'，随主线行缩进显示（见 wsSessionTree）。
+    const list = (await agentSessions().catch(() => []))
+      .filter(s => s.source !== 'assistant' && !(s.parentSessionId && s.lane === 'side'))
     setSessions(list)
     // P5：选择页状态（activeWs=null）不自动开会话；进工作区后只在本工作区会话里选
     const cur = activeIdRef.current ? list.find(s => s.id === activeIdRef.current) : undefined
@@ -612,6 +651,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     }
   }, [loadConstraints])
 
+  /** v3.1.2 条目11 P4：升格支线为正式会话（单向不可逆）——刷新会话表后随主线行缩进显示 */
+  const promoteLane = useCallback(async (laneId: string) => {
+    const ok = await agentPromoteSideLane(laneId).catch(() => false)
+    if (!ok) { showToast({ type: 'error', message: '升格失败' }); return }
+    await refreshSessions()
+    showToast({ type: 'info', message: '已升格为正式会话（见左栏主线会话下方）' })
+  }, [refreshSessions])
+
   const refreshMessages = useCallback(async (sid: string) => {
     const rows = await agentMessages(sid).catch(() => [] as AgentStoredMessage[])
     setMessages(rows.map(m => ({
@@ -620,9 +667,31 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     })))
   }, [])
 
+  /**
+   * v3.1.2 条目11 P3：把支线结论带回主线。
+   * 作为一条普通用户消息追加（**不调 LLM**，不打断主线节奏）；前缀 BRINGBACK_PREFIX 让渲染层
+   * 把这条渲染成「支线结论」锚点而非普通气泡，并记住映射以便「查看支线 →」重新打开。
+   */
+  const bringBackToMain = useCallback(async (laneId: string, laneTitle: string, text: string) => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    const r = await agentAppendNote({ sessionId: sid, content: `${BRINGBACK_PREFIX}${laneTitle}\n\n${text}` })
+    if (!r.ok) { showToast({ type: 'error', message: r.error || '带回主线失败' }); return }
+    await refreshMessages(sid)
+    // 记录映射：刚追加的那条 = 当前最后一条
+    const rows = await agentMessages(sid).catch(() => [] as AgentStoredMessage[])
+    const lastId = rows.length > 0 ? rows[rows.length - 1].id : ''
+    if (lastId) {
+      setBroughtBack(prev => {
+        const next = { ...prev, [lastId]: { laneId, laneTitle } }
+        try { localStorage.setItem(BRINGBACK_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+        return next
+      })
+    }
+  }, [refreshMessages])
+
   // 打开 AI教学 Tab 时同步会话
   useEffect(() => { void refreshSessions() }, [refreshSessions, isActive])
-
   // P1 重命名会话（双击列表行）：agentRenameSession + 文件夹同步改名
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
@@ -666,6 +735,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   // 切换会话
   const openSession = useCallback(async (sid: string, title: string) => {
     setLeftNewMenu(false) // 从左栏点会话即视为收起新建菜单
+    setSideLane(null) // v3.1.2 条目11：切会话即收起支线面板（支线挂在原主线会话下）
     setActiveId(sid); setActiveTitle(title); setLastChanges(null); setLiveSteps([])
     quotesRef.current = []; setQuotes([]); setQuotesOpen(false) // 引用片段属于发起时那个对话，切会话即失效
     setArtTabs([]); setArtActive(null) // 工件栏页签=会话内存态：切会话清空（§2，阅读位置记忆保留在页签组件内）
@@ -1015,7 +1085,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     // v3.1.1 两层合并：提取稿/原件相对「条目所属层」的素材夹（工作区主库 vs 对话私有存量），
     // 逐条目携带（e.dirRel），不能再用主库 srcFileRel 统一推导 —— 会话存量会被拼到错误目录
     const dirRel = e.dirRel || (srcFileRel ? srcFileRel.slice(0, srcFileRel.lastIndexOf('/')) : '')
-    const extractable = (e.type === 'pdf' || e.type === 'pptx' || e.type === 'code') && !extMatch && e.range && e.range !== '-' // 条目10：code 按行号区间提取
+    const extractable = (e.type === 'pdf' || e.type === 'pptx' || e.type === 'docx' || e.type === 'code') && !extMatch && e.range && e.range !== '-' // 条目10：code 按行号区间提取；v3.1.2 条目5：docx 先经 soffice 转 PDF 再提取
     const inRepo = e.path.startsWith('./') || (srcFileRel && !/^[a-zA-Z]:|^https?:|^\//.test(e.path))
     return (
       <div key={e.no} className={`rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 kb-group-anim transition-[padding] duration-[320ms] ${SRC_EASE} ${srcCompact ? 'py-[3px]' : 'py-1.5'}`}>
@@ -1048,20 +1118,20 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                     {srcBusy === e.no ? <Loader2 size={9} className="animate-spin" /> : <BookOpen size={9} />}{srcBusy === e.no ? '提取中…' : '提取'}
                   </button>
                 )}
-                {(e.type === 'pdf' || e.type === 'pptx') && e.path && e.path !== '-' && (
+                {(e.type === 'pdf' || e.type === 'pptx' || e.type === 'docx') && e.path && e.path !== '-' && (
                   /* 3-21 手动档→分批流水线：区间页栅格化→视觉模型转写（公式/图形/扫描件），
                      >12 页自动分批+断点续转（提取稿已有页跳过），结果非破坏并入提取稿；
                      pptx（2026-09-09 B 方案）由主进程 soffice 转 PDF 后同链路栅格化 */
                   <button onClick={() => { void doTranscribe(e.no) }} disabled={!!visionBusy}
-                    title={visionBusy?.no === e.no ? visionBusy.label : e.type === 'pptx'
-                      ? '视觉转写：pptx 先经本机 LibreOffice 转 PDF 再逐页转写（需已安装 LibreOffice；装在自定义目录时可在「设置 → AI 工具 → 模型 → LibreOffice 路径」手动指定，无需重启）；文本提取对多数 PPT 公式已够用'
+                    title={visionBusy?.no === e.no ? visionBusy.label : (e.type === 'pptx' || e.type === 'docx')
+                      ? `视觉转写：${e.type === 'docx' ? 'Word 文档' : 'pptx'} 先经本机 LibreOffice 转 PDF 再逐页转写（需已安装 LibreOffice；装在自定义目录时可在「设置 → AI 工具 → 模型 → LibreOffice 路径」手动指定，无需重启）；文本提取多数情况下已够用`
                       : '视觉转写：把登记区间的页面交给视觉模型转写（>12 页自动分批、断点续转），并入提取稿后可编辑。点击可中途停止'}
                     className="flex items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50 transition-colors">
                     {visionBusy?.no === e.no ? <Loader2 size={9} className="animate-spin" /> : <Eye size={9} />}
                     {visionBusy?.no === e.no ? '转写中…' : '转写'}
                   </button>
                 )}
-                {(e.type === 'pdf' || e.type === 'pptx') && e.path && e.path !== '-' && (
+                {(e.type === 'pdf' || e.type === 'pptx' || e.type === 'docx') && e.path && e.path !== '-' && (
                   /* 同一原件再加区间（2026-09-08 用户需求）：一个 PDF 多章 = 多条目共享同一份
                      已入库原件（不再重复拷贝），各条目独立转写/提取/编号引用 */
                   <button onClick={() => setSrcForm({ name: e.name, type: e.type, path: e.path, storage: '仅引用', rangeFrom: '', rangeTo: '', note: '' })}
@@ -1355,13 +1425,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
       if (showNewMenu) { setShowNewMenu(false); return }
       if (leftNewMenu) { setLeftNewMenu(false); return }
       if (modelMenuOpen) { setModelMenuOpen(false); return }
+      // v3.1.2 条目11：支线旁问面板（浮层/宽轨）——模态类浮层都关掉后再轮到这里
+      if (sideLane) { setSideLane(null); return }
       if (!zenActive) return
       e.preventDefault()
       onZenLevelChange?.(0)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, srcForm, wsModal, instrOpen, tokenOpen, showNewMenu, leftNewMenu, modelMenuOpen])
+  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, srcForm, wsModal, instrOpen, tokenOpen, showNewMenu, leftNewMenu, modelMenuOpen, sideLane])
   /** 最新一条 assistant 回答里的 ```profile 围栏 = 画像更新建议（接受才写文件） */
   const profileSuggestion = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -1391,6 +1463,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
     showToast({ type: 'info', message: `全局要求已在编辑区打开（${r.created ? '已按骨架创建' : '已有文件'}）· 保存后所有会话下一轮生效` })
   }, [])
+  /** v3.1.2 条目6：工作区要求编辑 = ensure {工作区}/CONSTRAINTS.md（缺则落骨架）→ 跳编辑区打开；与全局要求同款交互 */
+  const openWorkspaceConstraints = useCallback(async (wsId?: string | null) => {
+    const wid = wsId ?? activeWs
+    if (!wid || wid === '__none__') { showToast({ type: 'warning', message: '会话未归属工作区，无工作区要求层' }); return }
+    const r = await aiTeachWorkspaceEnsureConstraints(wid).catch(() => null)
+    if (!r?.ok || !r.relPath) { showToast({ type: 'error', message: `工作区要求打开失败${r?.error ? `：${r.error}` : ''}` }); return }
+    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
+    showToast({ type: 'info', message: `工作区要求已在编辑区打开（${r.created ? '已按骨架创建' : '已有文件'}）· 保存后本工作区会话下一轮生效` })
+  }, [activeWs])
   const acceptProfileSuggestion = useCallback(async (target: 'global' | 'workspace' | 'session') => {
     if (!profileSuggestion) return
     if (target === 'session' && !activeId) return
@@ -1531,8 +1612,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   /** 删除会话（P1，2-4）：对话记录必删；产物文件夹按 aiTeachDeleteSessionFolder 设置处理。A2：ask 弹窗三键，「取消」中止整个删除 */
   const delSession = useCallback(async (e: React.MouseEvent, sid: string, title?: string) => {
     e.stopPropagation()
+    // v3.1.2 条目11 P4：删除主线会级联删除其下支线——先查个数，明确告知（不静默连带删）。
+    // 主进程 agent:deleteSession 负责真正级联（连同各自 .jsonl 消息文件）。
+    const lanes = await agentListSideLanes(sid).catch(() => [] as AgentSessionInfo[])
+    const laneNote = lanes.length > 0 ? `该对话下还有 ${lanes.length} 条支线旁问，将一并删除。` : ''
     const mode = String((await getSettingRaw('aiTeachDeleteSessionFolder').catch(() => null)) ?? 'ask')
     let rmFolder = false
+    let laneNoteShown = false
     if (mode !== 'keep') {
       const f = await aiTeachSessionFolder(sid).catch(() => null)
       if (f?.ok && f.relPath) {
@@ -1540,7 +1626,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
         else {
           const r = await showGlobalConfirm({
             title: '删除会话',
-            message: `对话记录「${title ?? ''}」将被删除。该会话在仓库中的产物文件夹「${f.relPath}」如何处理？\n\n· 删除文件夹 —— 对话记录与文件夹一并移入系统回收站\n· 仅保留文件夹 —— 只删对话记录，文件夹留在仓库\n· 取消 —— 什么都不删`,
+            message: `${laneNote ? laneNote + '\n\n' : ''}对话记录「${title ?? ''}」将被删除。该会话在仓库中的产物文件夹「${f.relPath}」如何处理？\n\n· 删除文件夹 —— 对话记录与文件夹一并移入系统回收站\n· 仅保留文件夹 —— 只删对话记录，文件夹留在仓库\n· 取消 —— 什么都不删`,
             confirmLabel: '删除文件夹',
             extraLabel: '仅保留文件夹',
             cancelLabel: '取消',
@@ -1548,8 +1634,20 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
           })
           if (r === false) return // A2：Esc/背景/「取消」= 真正中止删除（原行为会无条件删掉会话）
           rmFolder = r === true
+          laneNoteShown = true
         }
       }
+    }
+    // 有支线但上面没机会提示（无文件夹 / 文件夹模式=直接删）→ 单独确认一次
+    if (laneNote && !laneNoteShown) {
+      const r = await showGlobalConfirm({
+        title: '删除会话',
+        message: `${laneNote}\n\n对话记录「${title ?? ''}」将被删除。`,
+        confirmLabel: '删除',
+        cancelLabel: '取消',
+        variant: 'danger',
+      })
+      if (r === false) return
     }
     await agentDeleteSession(sid).catch(() => null)
     void aiTeachUnassignSession(sid).catch(() => null) // A4：同步清理 workspaces.json.sessionWs 残留
@@ -1699,11 +1797,17 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   const tokenStats = useMemo(() => {
     const all: AgentTraceStep[] = [...messages.flatMap(m => m.trace ?? []), ...liveSteps]
     let llmTokens = 0, llmRounds = 0, toolCalls = 0, durationMs = 0
+    let promptTokens = 0, completionTokens = 0, hasSplit = false
     for (const s of all) {
       durationMs += s.durationMs || 0
-      if (s.kind === 'llm') { llmRounds++; llmTokens += s.tokens ?? 0 } else { toolCalls++ }
+      if (s.kind === 'llm') {
+        llmRounds++; llmTokens += s.tokens ?? 0
+        if (typeof s.promptTokens === 'number' || typeof s.completionTokens === 'number') hasSplit = true
+        promptTokens += s.promptTokens ?? 0
+        completionTokens += s.completionTokens ?? 0
+      } else toolCalls++
     }
-    return { llmTokens, llmRounds, toolCalls, durationMs }
+    return { llmTokens, llmRounds, toolCalls, durationMs, promptTokens, completionTokens, hasSplit }
   }, [messages, liveSteps])
   const monthTokens = usage?.monthTokens ?? 0
   const budget = usage?.budget ?? 0
@@ -1863,9 +1967,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                       · 这个对话只聊 Linux 内核，跑题请拉回<br />
                        · 每次回答结尾附一个表情<br />
                        （留空并保存 = 清除约束；此文件可在左栏资源管理器或编辑器直接改）<br />
-                       <span className="text-[var(--text-muted)]">跨会话共同遵守的要求请写「全局要求」：AI教学选择页 → 全局要求（会话要求优先于全局要求）</span>
+                       <span className="text-[var(--text-muted)]">层级从细到粗：<b>本会话要求</b>（此文件，只作用于本对话）＞ <b>工作区要求</b>（本工作区所有会话，入口见下方）＞ <b>全局要求</b>（AI教学选择页，跨工作区所有会话）。写在哪一层，作用范围就到哪一层。</span>
                     </div>
                   </details>
+                  {/* v3.1.2 条目6：本工作区要求入口（三层约束中间档）——仅当会话归属工作区时出现 */}
+                  {activeWs && activeWs !== '__none__' && (
+                    <button onClick={() => { setInstrOpen(false); void openWorkspaceConstraints() }} title={`编辑本工作区要求（${wsActive?.name ?? '工作区'}/CONSTRAINTS.md）——本工作区所有会话共同遵循，优先级低于本会话要求、高于全局要求`}
+                      className="mt-1.5 flex items-center gap-1 text-[11px] text-[var(--accent)] hover:underline transition-colors">
+                      🏷️ 本工作区要求（{wsActive?.name ?? '工作区'}）→
+                    </button>
+                  )}
                 </div>
                 <textarea
                   value={instrDraft}
@@ -1956,12 +2067,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                 {wsSessions.length === 0 && (
                   <div className="px-2 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">本工作区还没有对话，点右上 ＋ 新建。</div>
                 )}
-                {wsSessions.map(s => (
+                {wsSessionTree.map(({ s, child }) => (
                   <div key={s.id} onClick={() => { void openSession(s.id, s.title) }}
                     title={s.id === activeId ? `当前对话：${activeTitle}` : s.title}
-                    className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer text-[12.5px] transition-colors ${s.id === activeId ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                    className={`group flex items-center gap-1.5 ${child ? 'ml-3.5 pl-1.5 border-l border-[var(--border-color)]' : ''} px-2 py-1.5 rounded-md cursor-pointer text-[12.5px] transition-colors ${s.id === activeId ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                    {/* v3.1.2 条目11 P4：已升格支线的徽章 */}
+                    {child && <span className="shrink-0 px-1 rounded text-[9.5px] text-[var(--accent)] bg-[var(--accent)]/10" title="由支线旁问升格而来">支线</span>}
                     {/* 未开讲的会话带「准备中」点标（读 nav.prep；prepNavSeq 触发重渲染） */}
-                    {(prepNavSeq >= 0 && readNav(s.id).prep?.started === false) && (
+                    {!child && (prepNavSeq >= 0 && readNav(s.id).prep?.started === false) && (
                       <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--warning)]" title="准备中：尚未发出首条消息" />
                     )}
                     {renamingId === s.id ? (
@@ -2106,6 +2219,22 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                 </div>
               )}
               <div className="relative flex-1 min-h-0">
+              {/* v3.1.2 条目11：支线旁问浮层（右上角浮出，不压输入区）；宽轨形态在 section 之外（真不遮挡中栏） */}
+              {sideLane && !sideLaneWide && (
+                <div className="absolute top-3 right-3 z-40 w-[380px] h-[min(560px,74%)] rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl overflow-hidden kb-pop">
+                  <SideLanePanel
+                    key={sideLane.openLaneId ?? sideLane.anchorMessageId}
+                    parentSessionId={sideLane.parentSessionId}
+                    parentTitle={sideLane.parentTitle}
+                    anchorMessageId={sideLane.anchorMessageId}
+                    openLaneId={sideLane.openLaneId}
+                    onClose={() => setSideLane(null)}
+                    onToggleWide={() => setSideLaneWide(true)}
+                    onBringBack={bringBackToMain}
+                    onPromote={promoteLane}
+                  />
+                </div>
+              )}
               <div ref={scrollRef} onScroll={onConvScroll} className="absolute inset-0 overflow-y-auto pl-4 pr-8 py-3 space-y-3 min-h-0">
                 {messages.length === 0 && !pending && (
                   !prepStarted && prepTemplate ? (
@@ -2145,6 +2274,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                 {messages.map((m, idx) => (
                   <div key={m.id ?? idx} data-msg-idx={idx} className={m.role === 'user' ? 'group relative flex justify-end' : 'min-w-0'}>
                     {m.role === 'user' ? (
+                      m.content.startsWith(BRINGBACK_PREFIX) ? (
+                        /* v3.1.2 条目11 P3：支线结论锚点——不是用户手打的字，而是「带回」回来的支线结论，
+                           与普通气泡区分；右侧「查看支线 →」可重新打开原支线（映射持久化，重启仍在） */
+                        <div className="max-w-[86%] min-w-0 rounded-xl border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3.5 py-2 kb-item-in">
+                          <div className="flex items-center gap-1.5 text-[11px] text-[var(--accent)]">
+                            <GitBranch size={11} className="shrink-0" />
+                            <span className="truncate">已从支线带回结论：{m.content.split('\n')[0].slice(BRINGBACK_PREFIX.length)}</span>
+                            {(() => { const bb = m.id ? broughtBack[m.id] : undefined; return bb ? (
+                              <button onClick={() => { setSideLaneWide(false); setSideLane({ parentSessionId: activeId ?? '', anchorMessageId: '', parentTitle: activeTitle, openLaneId: bb.laneId }) }}
+                                className="ml-auto shrink-0 hover:underline">查看支线 →</button>
+                            ) : null })()}
+                          </div>
+                          <div className="mt-1 text-[12.5px] leading-relaxed text-[var(--text-primary)] select-text break-words whitespace-pre-wrap">{m.content.split('\n').slice(1).join('\n').trim()}</div>
+                        </div>
+                      ) : (
                       /* 用户消息保留右侧气泡（§3.8-3：仅 AI 回复去气泡）；v3.1.1 条目6：
                          select-text = 全局 body user-select:none（防误选 UI）下对气泡的局部白名单恢复，
                          悬停时气泡左侧空白区浮出「复制」chip（绝对定位不挤布局，复制原始 m.content） */
@@ -2156,6 +2300,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                           <Copy size={11} />复制
                         </button>
                       </>
+                      )
                     ) : (
                       /* P3a 去气泡：助手回复平铺 markdown 原生排版；P3b 轻量操作条（§3.8-3：整理成文档/复制/轨迹折叠） */
                       <div className="min-w-0">
@@ -2185,6 +2330,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                         )}
                         {/* UI 优化条目4：操作条升格为轻 chip 条（11.5px+图标，对齐顶栏 chip 规范）；时间戳坏数据不渲染 */}
                         <div className="text-[11.5px] mt-1.5 flex items-center gap-1.5 -ml-1.5">
+                          {/* v3.1.2 条目11：支线旁问入口（与整理成文档/复制/轨迹同簇） */}
+                          <button onClick={() => { setSideLaneWide(false); setSideLane({ parentSessionId: activeId ?? '', anchorMessageId: m.id ?? '', parentTitle: activeTitle }) }}
+                            title="就这条回答的某一点开独立深挖线，不打断主线节奏"
+                            className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                            <GitBranch size={12} />就这点追问
+                          </button>
                           <button onClick={() => { void organizeDocFor(m.content, idx, m.id) }}
                             className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${organized[m.id ?? `idx${idx}`] ? 'text-[var(--accent)] ring-1 ring-inset ring-[var(--accent)]/40' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
                             <FileOutput size={12} />{organized[m.id ?? `idx${idx}`] ? '✓ 已生成文档 →' : '整理成文档'}
@@ -2603,7 +2754,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                           })()}
                         </div>
                         <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] border-t border-[var(--border-color)] bg-[var(--bg-secondary)] space-y-0.5">
-                          <div>本月用量 · 回答：{(usage?.monthTokens ?? 0).toLocaleString()} tokens</div>
+                          <div>本月用量 · 回答：{(usage?.monthTokens ?? 0).toLocaleString()} tokens{(usage?.monthPromptTokens != null || usage?.monthCompletionTokens != null) ? `（↑ ${(usage?.monthPromptTokens ?? 0).toLocaleString()} / ↓ ${(usage?.monthCompletionTokens ?? 0).toLocaleString()}）` : ''}</div>
                           <div>本月用量 · 视觉转写：{(usage?.visionMonthTokens ?? 0).toLocaleString()} tokens / {(usage?.visionPages ?? 0)} 页</div>
                         </div>
                         <div className="px-3 pt-1.5 flex items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-secondary)]">
@@ -2689,9 +2840,17 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                                 </div>
                               )}
                             </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-[var(--text-muted)]">本会话 LLM tokens（累计）</span>
-                              <span className="tabular-nums font-medium text-[var(--text-primary)]">{fmtTok(tokenStats.llmTokens)}{tokenStats.llmTokens >= 1000 ? `（${Math.round(tokenStats.llmTokens)}）` : ''}</span>
+                            <div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[var(--text-muted)]">本会话 LLM tokens（累计）</span>
+                                <span className="tabular-nums font-medium text-[var(--text-primary)]">{fmtTok(tokenStats.llmTokens)}{tokenStats.llmTokens >= 1000 ? `（${Math.round(tokenStats.llmTokens)}）` : ''}</span>
+                              </div>
+                              {tokenStats.hasSplit && (
+                                <div className="mt-0.5 flex items-center justify-end gap-3 text-[10.5px] tabular-nums text-[var(--text-muted)]">
+                                  <span>↑ {fmtTok(tokenStats.promptTokens)} 输入</span>
+                                  <span>↓ {fmtTok(tokenStats.completionTokens)} 输出</span>
+                                </div>
+                              )}
                             </div>
                             <div className="grid grid-cols-3 gap-1.5 text-center">
                               {[['模型轮次', String(tokenStats.llmRounds)], ['工具调用', String(tokenStats.toolCalls)], ['耗时', `${Math.round(tokenStats.durationMs / 1000)}s`]].map(([k, v]) => (
@@ -2706,6 +2865,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                                 <span className="text-[var(--text-muted)]">本月 LLM tokens</span>
                                 <span className="tabular-nums">{fmtTok(monthTokens)}{budget > 0 && <span className="text-[var(--text-muted)]"> / {fmtTok(budget)}</span>}</span>
                               </div>
+                              {(usage?.monthPromptTokens != null || usage?.monthCompletionTokens != null) && (
+                                <div className="mb-1 flex items-center justify-end gap-3 text-[10.5px] tabular-nums text-[var(--text-muted)]">
+                                  <span>↑ {fmtTok(usage?.monthPromptTokens ?? 0)} 输入</span>
+                                  <span>↓ {fmtTok(usage?.monthCompletionTokens ?? 0)} 输出</span>
+                                </div>
+                              )}
                               {budget > 0 ? (
                                 <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
                                   <div className="h-full rounded-full" style={{ width: `${Math.min(100, (monthTokens / budget) * 100)}%`, background: monthTokens / budget > 0.85 ? '#a32d2d' : '#185fa5' }} />
@@ -2739,6 +2904,26 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
             </>
           )}
         </section>
+
+        {/* v3.1.2 条目11：支线旁问 宽轨形态（贴右栏）——作为中栏的**兄弟节点**插入（不覆盖对话区，并列占宽），
+            这才是「中栏不遮挡」；宽度可拖并持久化（复用 ResizablePanel）。 */}
+        {sideLane && sideLaneWide && (
+          <ResizablePanel side="right" storageKey="aiTeach.sideLaneWidth" defaultWidth={440} minWidth={320} maxWidth={720}
+            visible className="border-l border-[var(--border-color)] kb-view-in">
+            <SideLanePanel
+              key={sideLane.openLaneId ?? sideLane.anchorMessageId}
+              parentSessionId={sideLane.parentSessionId}
+              parentTitle={sideLane.parentTitle}
+              anchorMessageId={sideLane.anchorMessageId}
+              openLaneId={sideLane.openLaneId}
+              wide
+              onClose={() => setSideLane(null)}
+              onToggleWide={() => setSideLaneWide(false)}
+              onBringBack={bringBackToMain}
+              onPromote={promoteLane}
+            />
+          </ResizablePanel>
+        )}
 
         {/* 工件栏（docs/ai-teaching-artifacts-pane-design.md §1.2）：分隔条可拖 24%~60%、双击复位 46、宽度持久化。
             无打开页签即不渲染——工件栏没有主动展开把手（2026-09-09 用户拍板：右缘把手与素材库拉出条冲突），
@@ -3026,6 +3211,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                   {/* UI 优化条目8.2.2：工作区画像第三层入口（卡片 hover 行） */}
                   <button onClick={() => { void openProfile('workspace', w.id) }} title={`工作区画像 · ${aiTeachRoot}/${w.folderRel.startsWith(`${aiTeachRoot}/`) ? w.folderRel.slice(aiTeachRoot.length + 1) : w.folderRel}/PROFILE.md（本课程目标/进度，覆盖全局画像）`}
                     className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><User size={11} /> 画像</button>
+                  {/* v3.1.2 条目6：工作区要求入口（卡片 hover 行，与画像并列）——本工作区所有会话共同遵循的 CONSTRAINTS.md */}
+                  <button onClick={() => { void openWorkspaceConstraints(w.id) }} title={`工作区要求 · ${w.folderRel}/CONSTRAINTS.md（本工作区所有会话共同遵循，优先级：本会话要求 > 工作区要求 > 全局要求）`}
+                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><ScrollText size={11} /> 要求</button>
                   <button onClick={() => void removeWs(w)}
                     className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:text-red-400 transition-colors"><Trash2 size={11} /> 删除</button>
                 </div>
@@ -3076,7 +3264,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
               <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 group-hover:grid-rows-[1fr]">
                 <div className="overflow-hidden">
                   <div className="mt-1 text-[11.5px] text-[var(--text-muted)] leading-relaxed">
-                    写在 <code className="rounded bg-[var(--bg-hover)] px-1">{aiTeachRoot}/CONSTRAINTS.md</code> 的个人通用要求（语言/结构/风格），跨工作区共享；冲突时优先级：用户当下消息 &gt; 会话要求 &gt; 全局要求。
+                    写在 <code className="rounded bg-[var(--bg-hover)] px-1">{aiTeachRoot}/CONSTRAINTS.md</code> 的个人通用要求（语言/结构/风格），跨工作区共享；冲突时优先级：用户当下消息 &gt; 会话要求 &gt; 工作区要求 &gt; 全局要求。
                   </div>
                 </div>
               </div>
