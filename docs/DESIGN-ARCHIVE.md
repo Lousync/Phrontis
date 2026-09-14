@@ -64,6 +64,16 @@
 | 2026-09-12 | ai-streaming-design.md | `useAgentStream.ts` + `StreamBubble.tsx` + `aiStreamEnabled`/`aiShowThinking` 已落地 |
 | 2026-09-12 | slim-activitybar-plan.md | `Onboarding.tsx` 场景选择步骤 + `activityBarHidden` 写入链路已落地 |
 | 2026-09-12 | vault-archive-all-files-design.md | `electron/lib/kbStore/archivedFilesRepo.ts` 全类型归档已落地 |
+| 2026-09-14 | session-prepare-design.md | 会话「准备态」已落码（v3.1.2 条目 1+7 合并，`d4a584d`，随 v3.1.2 发布）；配套原型同批归档（见原型清单） |
+
+### 2026-09-14 原型（AI 教学 v3.1.2 · 支线旁问 + 会话准备态）
+
+| 原型 | 来源 | 判定依据 |
+|---|---|---|
+| ai-teaching-sidetrack-prototype.html | tmp/ait-sidetrack-proto/ | 支线旁问已落码（`9801d68` P1–P4 三阶段 + `ee823b4` 二次修订：自动回执 / 三条纪律 / 浮窗） |
+| ai-teaching-sidewin-prototype.html | tmp/ait-sidewin-proto/ | 浮窗「拖动 / 八向缩放 / 右缘停靠」已落码（`src/modules/ai-teaching/useFloatingWindow.ts`，`ee823b4`）；目录内的 probe 探针脚本按规则 8 留 `tmp/` 不归档 |
+| ai-teaching-session-prepare-prototype.html | tmp/session-prepare-proto/ | 会话「准备态」已落码（`d4a584d`，配套 session-prepare-design.md 同批归档） |
+| ai-teaching-left-pane-prototype.html | tmp/left-pane-proto/ | 左栏「会话列表 + 资源管理器共存」已落码（`d4a584d` 左栏会话区回归） |
 
 ### 2026-09-12 第二批（口径放宽为「设计过程留存」后）
 
