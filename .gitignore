@@ -2,6 +2,8 @@ node_modules/
 out/
 dist/
 dist-electron/
+# 打包产物目录（含按版本切出的 dist-electron-vXXX / -vXXXb 变体，旧实例锁目录时的绕法产物）
+dist-electron-*/
 data/
 *.db
 *.exe

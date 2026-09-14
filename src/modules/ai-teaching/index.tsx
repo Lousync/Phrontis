@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info } from 'lucide-react'
+import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills,
@@ -127,6 +127,11 @@ interface Template {
    * 不再作为开场白伪装成用户消息发送——主进程每轮重读该文件注入，用户可在编辑器直接改。
    */
   rule: string
+  /**
+   * v3.1.2 条目7：开场模板——新建对话后预填进「准备态」首条消息框（用户可编辑后再发送）。
+   * 不再自动空发首轮（原 startScene 虚拟首轮已从 newTask 摘除）。
+   */
+  startPrompt: string
 }
 
 const TEMPLATES: Template[] = [
@@ -136,6 +141,7 @@ const TEMPLATES: Template[] = [
     goal: '把我提供的资料教到我会：先出大纲待我确认，再分步精讲，最后出题检验。',
     steps: ['通读资料', '学习大纲', '分章精讲', '随堂测验', '沉淀复习笔记'],
     rule: '## 场景流程（跟我学）\n用户会提供学习资料（网址/文件/仓库笔记均可）。按此流程执行：\n① 通读资料后产出学习大纲，等用户确认后再开讲（未确认不要直接讲）；\n② 确认后分步精讲，每步讲完停一下让用户提问；\n③ 最后出题检验并讲解。\n全程用简体中文。',
+    startPrompt: '我要学：〈主题，如 数列极限的定义与证明〉\n资料：〈网址 / 文件路径 / 素材编号，留空则由你从已登记素材里选〉\n其他要求：〈可选，如 多举例子 / 跳过基础推导〉',
   },
   {
     id: 'research', label: '深度研读（织网）', icon: <Compass size={13} />,
@@ -143,6 +149,7 @@ const TEMPLATES: Template[] = [
     goal: '把一个主题在仓库里的所有相关内容研读一遍，讲给我听，并产出一张带双链的专题页草稿待确认写入。',
     steps: ['定位相关笔记', '批量通读', '综合讲解', '专题页草稿', '确认写入'],
     rule: '## 场景流程（深度研读）\n用户会给出研究主题关键词。按此流程执行：\n① 用 vault.search 找出仓库内相关笔记并通读；\n② 向用户综合讲解；\n③ 产出一张「主题专题」.md 草稿（含指向来源页的 [[双链]]），等用户确认后再写入。',
+    startPrompt: '研究主题：〈关键词，如 傅里叶变换的物理意义〉\n范围：〈可指定素材编号如 #1#3，留空则用全部已登记素材〉',
   },
   {
     id: 'review', label: '周复盘', icon: <CalendarClock size={13} />,
@@ -150,6 +157,7 @@ const TEMPLATES: Template[] = [
     goal: '总结我指定的一段时间：成就、回落与下周建议，产出周报草稿。',
     steps: ['读取模块数据', '生成周报草稿', '确认写入'],
     rule: '## 场景流程（周复盘）\n读取用户的日程待办、日记、习惯打卡与番茄钟统计，生成一份复盘报告草稿（成就/回落/下周建议），等用户确认后再写入周总结。',
+    startPrompt: '复盘时间段：〈本周 / 上周 / MM-DD ~ MM-DD〉\n关注重点：〈可选，如 学习时长 / 打卡连续性〉',
   },
   {
     id: 'profile-diagnose', label: '画像诊断', icon: <User size={13} />,
@@ -158,6 +166,7 @@ const TEMPLATES: Template[] = [
     steps: ['AI 出 3~5 道诊断题', '我作答', 'AI 产出画像初稿', '确认写入 PROFILE.md'],
     // 注：ask/profile 围栏的具体协议由主进程每轮注入（askRuleHint / profileHint），此处只写流程，不重复协议细节
     rule: '## 场景流程（画像诊断）\n用 ask 整卷模式做入学诊断：先输出整卷问卷（3~5 题，覆盖身份/学科背景、当前水平、薄弱点、学习目标、偏好；每题选项 ≤20 字）。用户整卷作答后，据答案产出**本主题**学习者画像初稿（含当前水平/薄弱点/学习进度/学习目标/偏好），以 profile 围栏输出，等用户确认后再写入会话文件夹 PROFILE.md——确认前不要写文件。诊断只针对本主题层，全局与工作区画像不需要生成。',
+    startPrompt: '开始入学诊断：我想先把本主题的学习者画像建起来。\n说明：〈可选，补充你的背景或特别想被了解的点〉',
   },
 ]
 
@@ -241,7 +250,17 @@ const CHARS_PER_TOKEN = 2.6
 /** UI 优化条目6B：中栏导航状态按会话持久化（`aiTeach.nav.{sessionId}`）。
  *  保活架构下切 Tab 不卸载组件，但模块在主栏/副栏之间换位（分屏互切）或实例重建会整树重置——
  *  以 localStorage 兜底，回到该会话即恢复到离开时的视图（文档阅读 > 逐页阅读 > 题目 > 对话）。 */
-type AiTeachNav = { midView?: 'chat' | 'quiz'; docRel?: string | null; readerRel?: string | null; readerPage?: number }
+type AiTeachNav = {
+  midView?: 'chat' | 'quiz'; docRel?: string | null; readerRel?: string | null; readerPage?: number
+  /**
+   * v3.1.2 条目7（会话准备态）：创建对话 → 首条消息之间的中间态快照。
+   * - `started` 缺省/false = 仍停准备态；true = 已开讲（此后不再进准备态）
+   * - `draft` 首条消息（用户编辑后的值；缺省回落场景 startPrompt）
+   * - `srcOpen`/`reqOpen` 素材条 / 会话要求条折叠态（切回时还原到切走瞬间）
+   * 素材与约束内容不入快照——真相源是 SOURCE.md / CONSTRAINTS.md，实时读才不会丢外部变更。
+   */
+  prep?: { started?: boolean; draft?: string; srcOpen?: boolean; reqOpen?: boolean }
+}
 function readNav(sid: string): AiTeachNav {
   try { return JSON.parse(String(localStorage.getItem(`aiTeach.nav.${sid}`) || '{}')) as AiTeachNav } catch { return {} }
 }
@@ -460,6 +479,17 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   )
   // ---------- P7 题目视图（§3.2-7/3-9 中栏顶部切换器；答题复用知识库 QuizMode，3-10 记录持久化） ----------
   const [midView, setMidView] = useState<'chat' | 'quiz'>('chat')
+  // ---------- v3.1.2 条目7：会话准备态（新建对话 → 首条消息之间的中间态） ----------
+  // prepStarted=false 时输入区显示准备面板（素材 / 会话要求 / 首条消息），零 LLM 调用；
+  // 点「开始对话」才置 true 并走既有 doSend，此后与旧会话行为完全一致。
+  const [prepStarted, setPrepStarted] = useState(true)
+  const [prepSrcOpen, setPrepSrcOpen] = useState(false)
+  const [prepReqOpen, setPrepReqOpen] = useState(false)
+  // 场景模板与首条消息草稿（准备态专用；草稿同步落 nav.prep.draft 以支持切走切回还原）
+  const [prepTemplate, setPrepTemplate] = useState<Template | null>(null)
+  const prepDraftTimer = useRef<number | null>(null)
+  /** nav 是 localStorage（非 React state）——准备态开讲/新建后需要一次重渲染让页签「准备中」标记即时更新 */
+  const [prepNavSeq, setPrepNavSeq] = useState(0)
   const [quizOpen, setQuizOpen] = useState(false)
   const [lastQuizReport, setLastQuizReport] = useState<{ rel: string; score: string } | null>(null)
   const quizItems = useMemo(
@@ -467,6 +497,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     [messages],
   )
   const [showNewMenu, setShowNewMenu] = useState(false)
+  /** 左栏「会话」区的 ＋ 自带菜单（锚点必须在自己身上，不能复用顶栏那个 setShowNewMenu） */
+  const [leftNewMenu, setLeftNewMenu] = useState(false)
   // ---- Token 消耗统计（月度走 llm:getUsage）----
   const [usage, setUsage] = useState<LlmUsageInfo | null>(null)
   const [defaultModel, setDefaultModel] = useState('')
@@ -633,6 +665,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
 
   // 切换会话
   const openSession = useCallback(async (sid: string, title: string) => {
+    setLeftNewMenu(false) // 从左栏点会话即视为收起新建菜单
     setActiveId(sid); setActiveTitle(title); setLastChanges(null); setLiveSteps([])
     quotesRef.current = []; setQuotes([]); setQuotesOpen(false) // 引用片段属于发起时那个对话，切会话即失效
     setArtTabs([]); setArtActive(null) // 工件栏页签=会话内存态：切会话清空（§2，阅读位置记忆保留在页签组件内）
@@ -641,8 +674,18 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     setInstrDismiss(false)
     void loadConstraints(sid, row?.instructions ?? '')
     await refreshMessages(sid)
-    // UI 优化条目6B：恢复该会话「上次离开时的工件」（页签在则栏在——内容驱动，无手动开合）
     const nav = readNav(sid)
+    // v3.1.2 条目7：准备态还原——未开讲的会话回到「切走瞬间」的准备态（草稿/折叠态入 nav，素材与约束实时读）
+    const prep = nav.prep
+    if (prep && prep.started === false) {
+      setPrepStarted(false)
+      setPrepSrcOpen(!!prep.srcOpen); setPrepReqOpen(!!prep.reqOpen)
+      setInput(prep.draft ?? '')
+      setPrepTemplate(TEMPLATES.find(t => t.label === title) ?? null)
+      return
+    }
+    setPrepStarted(true); setPrepTemplate(null)
+    // UI 优化条目6B：恢复该会话「上次离开时的工件」（页签在则栏在——内容驱动，无手动开合）
     if (nav.docRel) void openArtFile(nav.docRel)
     else if (nav.readerRel && /\.pptx$/i.test(nav.readerRel)) void openArtFile(nav.readerRel, { cur: nav.readerPage ?? 0 })
     if (nav.midView === 'quiz') setMidView('quiz')
@@ -757,7 +800,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     setArtActive(cur => cur?.startsWith('gen:') ? null : cur)
   }, [refreshMessages])
 
-  // 新建任务（模板）：播种场景规则到 CONSTRAINTS.md，再用虚拟首轮触发 AI 开口
+  // 新建任务（模板）：播种场景规则到 CONSTRAINTS.md，再进「准备态」由用户备好首条消息后手动开讲
+  // （v3.1.2 条目7：原先此处 void startScene(row.id) 自动空发首轮——已摘除，改为零 LLM 调用）
   const newTask = useCallback(async (tpl: Template) => {
     const row = await agentNewSession(`${tpl.label}`, 'aiTeaching').catch(() => null)
     if (!row) return
@@ -766,23 +810,67 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     // P1（2-2）：新建对话确认即建会话文件夹（懒建语义下空会话也不删）
     const folder = await aiTeachEnsureSessionFolder(row.id).catch(() => null)
     if (folder && !folder.ok && folder.error) showToast({ type: 'error', message: `会话文件夹创建失败：${folder.error}` })
-    // 场景流程播种进 CONSTRAINTS.md（会话约束唯一真相源，用户可编辑；主进程每轮重读注入）。
-    // 必须 await 完成再触发首轮，否则 AI 第一轮读到的还是播种前的约束。
+    // 场景流程播种进 CONSTRAINTS.md（会话约束唯一真相源，用户可编辑；主进程每轮重读注入）
     const cur = await aiTeachReadConstraints(row.id).catch(() => null)
     const base = (cur?.text ?? '').trim()
     if (!base.includes(tpl.rule)) {
       await aiTeachWriteConstraints(row.id, [base, tpl.rule].filter(Boolean).join('\n\n')).catch(() => null)
     }
+    // v3.1.2 条目7：进准备态——快照落 nav（started=false + 场景模板预填），切走切回可还原
+    writeNav(row.id, { prep: { started: false, draft: tpl.startPrompt, srcOpen: false, reqOpen: false } })
+    setPrepNavSeq(n => n + 1)
+    setPrepTemplate(tpl)
+    // v3.1.2（志岩 2026-09-14）：新建对话后默认收起左右两侧栏——让用户先专注在「备好再开讲」，
+    // 需要时用顶栏把手 / 拖拽展开（不覆盖用户的持久化意图，仅本次新建动作后收起）
+    setLeftOpen(false); localStorage.setItem('aiTeach.leftOpen', '0')
+    setRightOpen(false); localStorage.setItem('aiTeach.rightOpen', '0'); setSrcVisible(false)
+    setPrepStarted(false); setPrepSrcOpen(false); setPrepReqOpen(false)
     void loadConstraints(row.id, '')
     void refreshWorkspaces()
     setTemplate(tpl)
     setActiveId(row.id); setActiveTitle(row.title)
     activeIdRef.current = row.id
-    setMessages([]); setLastChanges(null); setShowNewMenu(false); setActiveInstr(''); setInstrRel(''); setInstrDismiss(false); setArtTabs([]); setArtActive(null)
+    setInput(tpl.startPrompt)
+    setMessages([]); setLastChanges(null); setShowNewMenu(false); setLeftNewMenu(false); setActiveInstr(''); setInstrRel(''); setInstrDismiss(false); setArtTabs([]); setArtActive(null)
     setMidView('chat'); setQuizOpen(false); setLastQuizReport(null) // P7 复位
     void refreshSessions()
-    void startScene(row.id)
-  }, [startScene, refreshSessions, loadConstraints, activeWs, refreshWorkspaces])
+  }, [refreshSessions, loadConstraints, activeWs, refreshWorkspaces])
+
+  // ---------- v3.1.2 条目7：会话准备态交互 ----------
+  /** 准备态草稿变更 → 同步 state + 防抖落 nav.prep.draft（切走切回还原的关键） */
+  const onPrepDraftChange = useCallback((text: string) => {
+    setInput(text)
+    const sid = activeIdRef.current
+    if (!sid) return
+    if (prepDraftTimer.current) window.clearTimeout(prepDraftTimer.current)
+    prepDraftTimer.current = window.setTimeout(() => {
+      const prev = readNav(sid).prep ?? {}
+      writeNav(sid, { prep: { ...prev, started: false, draft: text } })
+    }, 300)
+  }, [])
+  /** 准备态折叠条开合 → 同步 state + nav（切回时还原到切走瞬间） */
+  const onPrepFold = useCallback((which: 'src' | 'req') => {
+    const sid = activeIdRef.current
+    const nextSrc = which === 'src' ? !prepSrcOpen : prepSrcOpen
+    const nextReq = which === 'req' ? !prepReqOpen : prepReqOpen
+    setPrepSrcOpen(nextSrc); setPrepReqOpen(nextReq)
+    if (sid) {
+      const prev = readNav(sid).prep ?? {}
+      writeNav(sid, { prep: { ...prev, started: false, srcOpen: nextSrc, reqOpen: nextReq } })
+    }
+  }, [prepSrcOpen, prepReqOpen])
+  /** 「开始对话」：退出准备态 → 发首条消息（走既有 doSend，首轮即带素材目录 + 会话要求 + 用户消息） */
+  const startPreparedChat = useCallback(() => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    const text = input.trim()
+    if (!text || pending || compressing) return
+    const prev = readNav(sid).prep ?? {}
+    writeNav(sid, { prep: { ...prev, started: true } }) // 开讲标记：此后切回不再进准备态
+    setPrepNavSeq(n => n + 1)
+    setPrepStarted(true); setPrepTemplate(null)
+    void doSend(text)
+  }, [input, pending, compressing, doSend])
 
   // ---------- P5：工作区进出与管理 ----------
   const enterWs = useCallback((id: string) => {
@@ -1265,6 +1353,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
       if (instrOpen) { setInstrOpen(false); return }
       if (tokenOpen) { setTokenOpen(false); return }
       if (showNewMenu) { setShowNewMenu(false); return }
+      if (leftNewMenu) { setLeftNewMenu(false); return }
       if (modelMenuOpen) { setModelMenuOpen(false); return }
       if (!zenActive) return
       e.preventDefault()
@@ -1272,7 +1361,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, srcForm, wsModal, instrOpen, tokenOpen, showNewMenu, modelMenuOpen])
+  }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, srcForm, wsModal, instrOpen, tokenOpen, showNewMenu, leftNewMenu, modelMenuOpen])
   /** 最新一条 assistant 回答里的 ```profile 围栏 = 画像更新建议（接受才写文件） */
   const profileSuggestion = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -1707,6 +1796,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                   className="w-24 px-1 py-0 rounded border border-[var(--accent)] bg-[var(--input-bg)] text-[11px] text-[var(--text-primary)] outline-none" />
               ) : (
                 <>
+                  {/* v3.1.2 条目7：未开讲的会话带「准备中」点标（等价左栏徽标，页签即会话切换器）。
+                      prepNavSeq 是重渲染触发器——nav 存 localStorage，开讲后需一次 bump 才能即时消标 */}
+                  {(prepNavSeq >= 0 && readNav(s.id).prep?.started === false) && (
+                    <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--warning)]" title="准备中：尚未发出首条消息" />
+                  )}
                   <span className="truncate" title={s.title} onDoubleClick={(e) => { e.stopPropagation(); setRenamingId(s.id); setRenameDraft(s.title) }}>{s.title}</span>
                   <button onClick={e => { e.stopPropagation(); void delSession(e, s.id, s.title) }} title="删除会话"
                     className="opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-400 transition-opacity shrink-0"><X size={10} /></button>
@@ -1830,6 +1924,66 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
         <ResizablePanel side="left" storageKey="aiTeach.leftWidth" defaultWidth={248} minWidth={200} maxWidth={400}
           visible={leftOpen} onSnapClose={() => toggleSide('left')} onSnapOpen={() => toggleSide('left')}
           collapsedWidth={14}>
+          {/* v3.1.2（志岩 2026-09-14）：会话列表区回归，与资源管理器「分区并列共存」——
+              形态 A：会话（上，限高可折叠）+ 资源管理器（中，撑满剩余）+ 任务规划（下）。
+              折叠任一分区，其余分区自动获得空间（原会话列表区曾因「页签即会话切换器」退役，本次恢复）。 */}
+          <SectionHead open={!collapsedSec.sessions} title="会话" onToggle={() => toggleSec('sessions')}
+            right={
+              /* 菜单必须锚定在本按钮上（顶栏那个 ＋ 的菜单锚在顶栏里，左栏点它会「菜单出现在别处」），
+                 故左栏自带一份 relative 容器 + 独立展开态 leftNewMenu */
+              <span className="relative inline-flex">
+                <button onClick={() => setLeftNewMenu(v => !v)} title="新建对话"
+                  className="p-0.5 rounded text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><Plus size={12} /></button>
+                {leftNewMenu && (
+                  <div className="absolute right-0 top-full mt-1 w-52 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl z-40 overflow-hidden">
+                    {TEMPLATES.map(t => (
+                      <button key={t.id} onClick={() => { setLeftNewMenu(false); void newTask(t) }}
+                        className="w-full flex items-start gap-2 px-2.5 py-2 text-left hover:bg-[var(--bg-hover)] transition-colors">
+                        <span className="mt-0.5 text-[var(--accent)]">{t.icon}</span>
+                        <span className="min-w-0">
+                          <span className="block text-[12px] text-[var(--text-primary)]">{t.label}</span>
+                          <span className="block text-[10.5px] text-[var(--text-muted)]">{t.desc}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </span>
+            } />
+          <div className="grid shrink-0 transition-[grid-template-rows] duration-200 ease-out" style={{ gridTemplateRows: collapsedSec.sessions ? '0fr' : '1fr' }}>
+            <div className={`overflow-hidden min-h-0 transition-opacity duration-150 ${collapsedSec.sessions ? 'invisible opacity-0' : 'opacity-100'}`}>
+              <div className="max-h-[38vh] overflow-y-auto px-1.5 pb-1.5">
+                {wsSessions.length === 0 && (
+                  <div className="px-2 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">本工作区还没有对话，点右上 ＋ 新建。</div>
+                )}
+                {wsSessions.map(s => (
+                  <div key={s.id} onClick={() => { void openSession(s.id, s.title) }}
+                    title={s.id === activeId ? `当前对话：${activeTitle}` : s.title}
+                    className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer text-[12.5px] transition-colors ${s.id === activeId ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                    {/* 未开讲的会话带「准备中」点标（读 nav.prep；prepNavSeq 触发重渲染） */}
+                    {(prepNavSeq >= 0 && readNav(s.id).prep?.started === false) && (
+                      <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--warning)]" title="准备中：尚未发出首条消息" />
+                    )}
+                    {renamingId === s.id ? (
+                      <input autoFocus onFocus={e => e.currentTarget.select()} value={renameDraft} maxLength={40}
+                        onChange={e => setRenameDraft(e.target.value)}
+                        onBlur={() => void commitRename(s.id)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void commitRename(s.id) } else if (e.key === 'Escape') { e.stopPropagation(); setRenamingId(null) } }}
+                        onClick={e => e.stopPropagation()}
+                        className="flex-1 min-w-0 px-1 py-0 rounded border border-[var(--accent)] bg-[var(--input-bg)] text-[11.5px] text-[var(--text-primary)] outline-none" />
+                    ) : (
+                      <>
+                        <span className="flex-1 min-w-0 truncate" onDoubleClick={e => { e.stopPropagation(); setRenamingId(s.id); setRenameDraft(s.title) }}>{s.title}</span>
+                        <button onClick={e => { e.stopPropagation(); void delSession(e, s.id, s.title) }} title="删除会话"
+                          className="shrink-0 opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-400 transition-opacity"><X size={10} /></button>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <SectionHead open={!collapsedSec.explorer} title="资源管理器" onToggle={() => toggleSec('explorer')} />
           <div className="grid flex-1 min-h-0 transition-[grid-template-rows] duration-200 ease-out" style={{ gridTemplateRows: collapsedSec.explorer ? '0fr' : '1fr' }}>
             <div className={`overflow-hidden min-h-0 transition-opacity duration-150 ${collapsedSec.explorer ? 'invisible opacity-0' : 'opacity-100'}`}>
@@ -1844,8 +1998,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
               </div>
             </div>
           </div>
-
-          {/* P5：会话列表区退役（§3.7「页签即会话切换器」）——切会话走顶栏页签条 */}
 
           <SectionHead open={!collapsedSec.plan} title="任务规划" onToggle={() => toggleSec('plan')}
             right={<span title={template.goal} className="cursor-help text-[var(--text-muted)] hover:text-[var(--text-secondary)]">ⓘ</span>} />
@@ -1956,7 +2108,39 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
               <div className="relative flex-1 min-h-0">
               <div ref={scrollRef} onScroll={onConvScroll} className="absolute inset-0 overflow-y-auto pl-4 pr-8 py-3 space-y-3 min-h-0">
                 {messages.length === 0 && !pending && (
-                  <div className="h-full flex items-center justify-center text-[12px] text-[var(--text-muted)]">开始对话</div>
+                  !prepStarted && prepTemplate ? (
+                    /* v3.1.2 条目7：准备态引导区（中栏）——场景说明 + 本工作区素材迷你清单 */
+                    <div className="h-full flex flex-col items-center justify-center gap-3 kb-view-in">
+                      <div className="text-[26px] leading-none">{prepTemplate.icon}</div>
+                      <div className="text-[15px] font-medium text-[var(--text-primary)]">先备好，再开讲</div>
+                      <div className="text-[12px] text-[var(--text-muted)] text-center leading-[1.7]">
+                        当前场景：<b className="font-medium text-[var(--text-secondary)]">{prepTemplate.label}</b><br />
+                        素材、会话要求、首条消息都可以在下方先安排好。<br />
+                        点「开始对话」才正式发送首条消息——在此之前不会产生任何 AI 调用。
+                      </div>
+                      {srcEntries.length > 0 && (
+                        <div className="w-full max-w-[420px] mt-2">
+                          <div className="flex items-center gap-2 mb-1.5 text-[11px] text-[var(--text-muted)]">
+                            <span className="font-medium text-[var(--text-secondary)]">本工作区素材</span>
+                            <span className="flex-1 h-px bg-[var(--border-color)]" />
+                            <span>{srcEntries.length} 项</span>
+                          </div>
+                          {srcEntries.slice(0, 4).map(e => (
+                            <div key={e.no} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11.5px] mb-1">
+                              <span className="text-[10px] text-[var(--text-muted)] w-5 shrink-0">#{e.no}</span>
+                              <span className="flex-1 min-w-0 truncate text-[var(--text-secondary)]">{e.name}</span>
+                              <span className="shrink-0 text-[9.5px] text-[var(--text-muted)] uppercase">{e.type}</span>
+                            </div>
+                          ))}
+                          {srcEntries.length > 4 && (
+                            <div className="text-[10.5px] text-[var(--text-muted)] pt-0.5">等共 {srcEntries.length} 项，可在下方「素材」条查看全部</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-[12px] text-[var(--text-muted)]">开始对话</div>
+                  )
                 )}
                 {messages.map((m, idx) => (
                   <div key={m.id ?? idx} data-msg-idx={idx} className={m.role === 'user' ? 'group relative flex justify-end' : 'min-w-0'}>
@@ -2111,6 +2295,87 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                 </div>
               )}
               <div className="shrink-0 border-t border-[var(--border-color)] p-2 bg-[var(--bg-secondary)]">
+                {/* v3.1.2 条目7：会话准备态 —— 未开讲时输入区位置显示准备面板（素材 / 会话要求 / 首条消息）
+                    与正常输入框同一块区域互斥切换；点「开始对话」才发首条消息。 */}
+                {!prepStarted && prepTemplate ? (
+                  <div className="kb-view-in">
+                    <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] overflow-hidden">
+                      {/* ① 素材条（折叠）：摘要 + 展开清单 + 既有登记入口 */}
+                      <div onClick={() => onPrepFold('src')}
+                        className="flex items-center gap-2 px-2.5 py-2 border-b border-[var(--border-color)] cursor-pointer select-none hover:bg-[var(--bg-hover)] transition-colors">
+                        <Paperclip size={12} className="shrink-0 text-[var(--text-secondary)]" />
+                        <span className="shrink-0 text-[12px] text-[var(--text-secondary)]">素材</span>
+                        <span className="flex-1 min-w-0 truncate text-[11.5px] text-[var(--text-muted)]">
+                          {srcEntries.length > 0 ? `已登记 ${srcEntries.length} 项 · ${srcEntries[0].name} 等` : '尚未添加素材'}
+                        </span>
+                        {srcEntries.length > 0 && <span className="shrink-0 text-[11px] text-[var(--success)]">✓</span>}
+                        <ChevronRight size={10} className={`shrink-0 text-[var(--text-muted)] kb-chevron ${prepSrcOpen ? 'rotate-90' : ''}`} />
+                      </div>
+                      <div className="grid transition-[grid-template-rows] duration-200" style={{ gridTemplateRows: prepSrcOpen ? '1fr' : '0fr' }}>
+                        <div className="overflow-hidden">
+                          <div className="p-2.5">
+                            {srcEntries.length > 0 ? srcEntries.slice(0, 8).map(e => (
+                              <div key={e.no} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11.5px] mb-1">
+                                <span className="text-[10px] text-[var(--text-muted)] w-5 shrink-0">#{e.no}</span>
+                                <span className="flex-1 min-w-0 truncate text-[var(--text-secondary)]">{e.name}</span>
+                                <span className="shrink-0 text-[9.5px] text-[var(--text-muted)] uppercase">{e.type}</span>
+                              </div>
+                            )) : <div className="text-[11.5px] text-[var(--text-muted)] px-1 py-0.5">还没有素材，可在下方添加。</div>}
+                            <button onClick={() => setSrcForm({ name: '', type: 'pdf', path: '', storage: '已入库', rangeFrom: '', rangeTo: '', note: '' })}
+                              className="mt-1.5 w-full px-2 py-1.5 rounded-md border border-dashed border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors">
+                              ＋ 添加素材（登记进工作区 SOURCES/SOURCE.md）
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ② 会话要求条（折叠）：场景流程已播种，可展开预览 / 走既有弹层编辑 */}
+                      <div onClick={() => onPrepFold('req')}
+                        className="flex items-center gap-2 px-2.5 py-2 border-b border-[var(--border-color)] cursor-pointer select-none hover:bg-[var(--bg-hover)] transition-colors">
+                        <ClipboardList size={12} className="shrink-0 text-[var(--text-secondary)]" />
+                        <span className="shrink-0 text-[12px] text-[var(--text-secondary)]">会话要求</span>
+                        <span className="flex-1 min-w-0 truncate text-[11.5px] text-[var(--text-muted)]">
+                          {activeInstr ? `场景流程已自动播种 · ${activeInstr.split('\n').length} 行` : '暂无要求'}
+                        </span>
+                        {activeInstr && <span className="shrink-0 text-[11px] text-[var(--success)]">✓</span>}
+                        <ChevronRight size={10} className={`shrink-0 text-[var(--text-muted)] kb-chevron ${prepReqOpen ? 'rotate-90' : ''}`} />
+                      </div>
+                      <div className="grid transition-[grid-template-rows] duration-200" style={{ gridTemplateRows: prepReqOpen ? '1fr' : '0fr' }}>
+                        <div className="overflow-hidden">
+                          <div className="p-2.5">
+                            <div className="rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] px-2.5 py-2 max-h-[110px] overflow-y-auto">
+                              <pre className="whitespace-pre-wrap text-[11px] leading-[1.65] text-[var(--text-secondary)] font-[var(--font-mono,var(--font-family))]">{activeInstr || '（本会话没有额外要求）'}</pre>
+                            </div>
+                            <button onClick={() => { setInstrOpen(true); setInstrDraft(activeInstr) }}
+                              className="mt-1.5 w-full px-2 py-1.5 rounded-md border border-dashed border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors">
+                              编辑会话要求（CONSTRAINTS.md）
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ③ 首条消息（主体）：场景模板预填、可自由编辑 */}
+                      <textarea ref={inputRef} spellCheck={false} value={input}
+                        onChange={e => onPrepDraftChange(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); startPreparedChat() } }}
+                        rows={Math.min(6, Math.max(3, input.split('\n').length))}
+                        placeholder={prepTemplate.startPrompt}
+                        className="w-full px-2.5 py-2 bg-transparent text-[12.5px] leading-[1.7] resize-none outline-none text-[var(--text-primary)]" />
+                      <div className="flex items-center gap-2 px-2.5 pb-2.5">
+                        <span className="flex-1 min-w-0 truncate text-[11px] text-[var(--text-muted)]">首条消息已按场景模板预填，可自由编辑</span>
+                        <button onClick={startPreparedChat} disabled={!input.trim() || pending || compressing}
+                          className="shrink-0 px-4 py-1.5 rounded-md bg-[var(--accent)] text-white text-[12.5px] font-medium hover:opacity-90 disabled:opacity-40 transition-all kb-micro-pop">
+                          开始对话
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5 px-0.5 text-[10.5px] text-[var(--text-muted)]">
+                      <span>准备态 · 未产生 AI 调用</span>
+                      <span className="ml-auto">切走再切回会还原到这里</span>
+                    </div>
+                  </div>
+                ) : (
+                <>
                 {/* UI 优化条目12/13：未答 ```ask 块 → 输入区变形为提问卡（单题选择卡 / 整卷模式）；
                     「自由输入」随时切回打字（ask 标记忽略，输入框恢复） */}
                 {askVisible && askPending ? (() => {
@@ -2468,6 +2733,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                     </button>
                   )}
                 </div>
+                </>
+                )}
               </div>
             </>
           )}

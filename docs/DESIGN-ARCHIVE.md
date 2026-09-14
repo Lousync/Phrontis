@@ -10,12 +10,12 @@
 
 **定位：软件设计过程的留存库**（不只是文档与原型）——收录「立项 → 调研 → 方案 → 交互原型 → 视觉 → 落地 → 验收」全链路产物。六类目录：
 
-- `Knowbase-方案与调研/` — 已搁置 / 已作废 / 已暂缓的方案稿 + 调研与对标注记
-- `Knowbase-已实现设计文档/` — 已落码的设计方案
-- `Knowbase-原型/` — 全部交互原型（HTML / drawio）
-- `Knowbase-视觉与品牌/` — 图标（含完整过程稿）、命名、文案、欢迎页设计
-- `Knowbase-过程记录/` — 决策记录、验收记录、UI 迭代截图
-- `Knowbase-内容与素材/` — 产品内容规划与素材清单
+- `Phrontis/方案与调研/` — 已搁置 / 已作废 / 已暂缓的方案稿 + 调研与对标注记
+- `Phrontis/已实现设计文档/` — 已落码的设计方案
+- `Phrontis/原型/` — 全部交互原型（HTML / drawio）
+- `Phrontis/视觉与品牌/` — 图标（含完整过程稿）、命名、文案、欢迎页设计
+- `Phrontis/过程记录/` — 决策记录、验收记录、UI 迭代截图
+- `Phrontis/内容与素材/` — 产品内容规划与素材清单
 
 该仓库由定时任务自动提交推送：有未提交变更时每日自动 commit + push。
 
@@ -86,7 +86,7 @@
 
 ## 原型归档清单
 
-> 归档目标：DesignProcess `Knowbase-原型/`。
+> 归档目标：DesignProcess `Phrontis/原型/`。
 
 | 日期 | 原型 | 配套文档 / 实现证据 |
 |---|---|---|
@@ -126,17 +126,18 @@
 
 | 日期 | 内容 | 去向 |
 |---|---|---|
-| 2026-09-11 | 图标重设计全过程（决策记录 + 终稿 + 过程稿） | `Knowbase-视觉与品牌/图标重设计/` |
-| 2026-09-12 | `name-compare.html`（定名候选对比）、`phrontis-copy-brief.md`、`readme-draft.md`、`Phrontis-plugins-README.md`、`欢迎.html`、`knowledge-recorder-icon-redesign.png` | `Knowbase-视觉与品牌/` |
+| 2026-09-11 | 图标重设计全过程（决策记录 + 终稿 + 过程稿） | `Phrontis/视觉与品牌/图标重设计/` |
+| 2026-09-12 | `name-compare.html`（定名候选对比）、`phrontis-copy-brief.md`、`readme-draft.md`、`Phrontis-plugins-README.md`、`欢迎.html`、`knowledge-recorder-icon-redesign.png` | `Phrontis/视觉与品牌/` |
 | 2026-09-12 | `outputs/icon-final`、`icon-final-noshadow`、`icon-redesign` 三目录 | **去重删除**——与 DP 内 `图标重设计/final-带影版`、`final-无影版`、`过程稿` 目录级零差异（`diff -rq` 确认） |
 
 ## 过程记录归档
 
 | 日期 | 内容 | 去向 |
 |---|---|---|
-| 2026-09-12 | `outputs/` 与 `tmp/proto-shots/` 的设计过程截图 61 张 | `Knowbase-过程记录/UI迭代截图/`（分 欢迎页与宣传页 / 日程与日面板 / AI教学与学习中心 / 底栏与动效 四组） |
-| 2026-09-12 | `Knowbase仓库整合报告-20260910.md` | `Knowbase-过程记录/` |
-| 2026-09-12 | Claude Code plan 文件 25 份（约 175 KB） | `Knowbase-过程记录/Claude 计划文件/` |
+| 2026-09-12 | `outputs/` 与 `tmp/proto-shots/` 的设计过程截图 61 张 | `Phrontis/过程记录/UI迭代截图/`（分 欢迎页与宣传页 / 日程与日面板 / AI教学与学习中心 / 底栏与动效 四组） |
+| 2026-09-12 | `Knowbase仓库整合报告-20260910.md` | `Phrontis/过程记录/` |
+| 2026-09-12 | Claude Code plan 文件 25 份（约 175 KB） | `Phrontis/过程记录/Claude 计划文件/` |
+| 2026-09-13 | 主仓库根目录 `更新计划.md` 整体迁出；DP 侧新建 `更新计划/` 专夹，**按版本分文件**（`vX.Y.Z.md` = 自上一版升级到该版的批次计划，版本号标注在文件名与标题）。批次划分：`v3.1.1.md`（3.1.0→3.1.1，13 项全完成收官）+ `v3.1.2.md`（3.1.1→3.1.2，当前迭代 8 项待办：开场模板预填/会话准备态、Token 用量拆分、/ 弹层透明、扩大态侧栏拖宽、docx 素材、工作区级约束、资料范围纪律；两条旧待办经志岩确认不再跟进） | `Phrontis/更新计划/v3.1.1.md`、`v3.1.2.md` |
 
 ## Claude 计划文件归档（2026-09-12）
 
@@ -144,7 +145,7 @@
 
 | 来源 | 数量 | 去向 |
 |---|---|---|
-| `.claude/plans/*.md` | 14 | `Knowbase-过程记录/Claude 计划文件/` |
+| `.claude/plans/*.md` | 14 | `Phrontis/过程记录/Claude 计划文件/` |
 | `.claude/plans/plugins/*.md` | 11 | 同上（扁平化，去掉 plugins 子层） |
 
 **判定的依据**：AI 工作过程产物，非用户视角的设计文档；对应方案**多数已落码或被后续设计取代**（真实设计稿在 `docs/`，已按状态分流至本库）。作为「当时是怎么想出来的」的过程证据留存。
@@ -174,7 +175,7 @@
 
 - `docs/rework-master-plan.md`、`.AGENT/docs/去库化迁移方案.md` 等引用已归档的 rework-* 文档
 - `docs/ai-teaching-module-rework.md` 正文按名引用已归档的 `ai-teaching-prototype.html` / `ai-teaching-layout-builder.html` / `ai-teaching-layout-user-v1.json`
-- `scripts/publish-knowledge-pack.py:23` 写的是 `docs/knowledge-pack-answer-format.md`，该路径**早已失效**（真实文件现位于 DP `Knowbase-内容与素材/`）
+- `scripts/publish-knowledge-pack.py:23` 写的是 `docs/knowledge-pack-answer-format.md`，该路径**早已失效**（真实文件现位于 DP `Phrontis/内容与素材/`）
 
 ## 反向说明：留在主仓库的"旧位置"文档
 
