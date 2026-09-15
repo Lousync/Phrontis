@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw } from 'lucide-react'
+import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
@@ -611,7 +611,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     })
   }, [activeId, midView, artTabs, artActive])
   const [activeIdRef, chatIdRef] = [useRef<string | null>(null), useRef('')]
-  const bottomRef = useRef<HTMLDivElement>(null)
+  // v3.2.0 条目6：原先这里还有个 `bottomRef` 死锚点（定义了、也渲染了，全仓无人读取）——
+  // 它就是「滚底实现丢了」的物证。本条改用直接赋值 `scrollTop = scrollHeight`（同 MessageList 范式、
+  // 与 rules 1/2 的写法一致），不再需要锚点元素，故连同其渲染点一并移除。
+
   /** 输入区（划词「问 AI」就地追问时聚焦用） */
   const inputRef = useRef<HTMLTextAreaElement>(null)
   /** 引用片段的 ref 镜像——sendText 是 useCallback，读 ref 避免闭包捕获旧值 */
@@ -621,8 +624,29 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   /** 对话流滚动记忆（2026-09-08）：跳文档阅读视图会卸载对话容器（scrollTop 丢失）——
    *  onConvScroll 持续记录，返回对话时恢复（对齐 docScrollPos 的文档滚动记忆模式） */
   const convScrollTop = useRef(0)
+  /**
+   * 贴底跟随（v3.2.0 条目 6）：距底 < 48px 视为「贴底」，只有贴底时内容增长才跟随滚到底。
+   * 初始 true：新会话从底部开始。范式对齐 `src/components/shared/AssistantPanel/MessageList.tsx`。
+   */
+  const stickRef = useRef(true)
+  /** 不贴底时显示「回到底部」浮标 */
+  const [jumpBottom, setJumpBottom] = useState(false)
   const [activeAnchor, setActiveAnchor] = useState(0)
   const liveRef = useRef(liveSteps)
+  /**
+   * 贴底 + 滚到底（instant）——**条目 6 的「强制滚底」只有这一份实现**：
+   * 规则 1（发送，无条件）与规则 3（浮标点击）都走它；规则 2（内容增长）走下面那个只贴底才生效的 effect。
+   * instant 而非 smooth：流式下 effect 每 ~60ms 触发一次，smooth 动画会与下一次调用互相打断，表现为滚动抽搐
+   * （同 `src/components/shared/AssistantPanel/MessageList.tsx` 已记录的坑）。
+   * 末尾补一帧 rAF：发送路径调用时乐观消息可能尚未提交 DOM，同步读到的 scrollHeight 会少最后一条的高度。
+   */
+  const jumpToBottom = useCallback(() => {
+    stickRef.current = true
+    setJumpBottom(false)
+    const c = scrollRef.current
+    if (c) c.scrollTop = c.scrollHeight
+    requestAnimationFrame(() => { const c2 = scrollRef.current; if (c2) c2.scrollTop = c2.scrollHeight })
+  }, [])
 
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
   useEffect(() => { liveRef.current = liveSteps }, [liveSteps])
@@ -822,6 +846,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
       ? qs.map((q, i) => `> 【引用 ${i + 1}】${q.replace(/\s+/g, ' ').trim().slice(0, 600)}${q.replace(/\s+/g, ' ').trim().length > 600 ? '…' : ''}`).join('\n') + `\n\n${raw}`
       : raw
     setMessages(prev => [...prev, { role: 'user', content: text, createdAt: new Date().toISOString() }]) // 条目4：乐观时间存 ISO（原纯时刻串必 Invalid Date）
+    // v3.2.0 条目6 规则1：**发送 = 无条件滚到底**（与规则3「上滚不打断」刻意不对称，对标 ChatGPT：
+    // 刚发出消息本就该看到它，哪怕之前正在上方阅读）。共用 jumpToBottom 一份实现，见其定义处注释。
+    jumpToBottom()
     const ov = convoLlm.current.get(sid)
     const r = await agentChat(sid, text, undefined, cid, 'aiTeaching', ov?.modelId, ov?.effort, skillName)
     // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
@@ -838,7 +865,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     setArtTabs(prev => prev.some(t => t.generating) ? prev.filter(t => !t.generating) : prev) // 中止/失败收尾：禁关占位不留场
     setArtActive(cur => cur?.startsWith('gen:') ? null : cur)
     return r
-  }, [refreshMessages, beginStream, endStream])
+  }, [refreshMessages, beginStream, endStream, jumpToBottom])
 
   const doSend = useCallback(async (override?: string) => {
     const text = (override ?? inputValueRef.current).trim()
@@ -1809,7 +1836,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   const onConvScroll = useCallback(() => {
     const c = scrollRef.current
     if (!c) return
+    // Tab 保活隐藏期间（display:none）滚动容器读回 0——别把位置记忆冲掉，否则回切恢复不到
+    if (!isActive) return
     convScrollTop.current = c.scrollTop
+    // 贴底判定（条目 6）：**纯几何**，不需要「程序化滚动」标记 —— 程序滚到底后几何上本就是贴底，
+    // 所以不会把「自己滚的自己」误判成用户上滚；48px 容差同时吸收了流式增量带来的高度滞后。
+    const near = c.scrollHeight - c.scrollTop - c.clientHeight < 48
+    stickRef.current = near
+    setJumpBottom(!near)
     if (anchors.length === 0) return
     const top = c.getBoundingClientRect().top
     let cur = 0
@@ -1818,14 +1852,37 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
       if (el && el.getBoundingClientRect().top - top <= 90) cur = i
     })
     setActiveAnchor(cur)
-  }, [anchors])
-  useEffect(() => { setActiveAnchor(0) }, [activeId])
-  // 题目视图会卸载对话容器：切回对话恢复滚动位置；切换会话则归零（从顶部看新会话）
+  }, [anchors, isActive])
+
+  /**
+   * 内容变化 → **仅贴底时**滚到底（规则 2）。
+   * **必须 instant，不能用 smooth**：流式下本 effect 每 60ms 触发一次，smooth 动画会与下一次
+   * 调用互相打断，表现为滚动抽搐（同 MessageList.tsx 已记录的坑）。
+   */
+  const draftSig = streamDraft ? `${streamDraft.text.length}|${streamDraft.items.length}|${streamDraft.thinking?.length ?? 0}` : ''
+  useEffect(() => {
+    const c = scrollRef.current
+    if (!c || !stickRef.current) return
+    c.scrollTop = c.scrollHeight
+  }, [messages, pending, draftSig])
+
+  useEffect(() => {
+    setActiveAnchor(0)
+    // 条目 6 顺带①：切会话**必须真的归零**。旧代码只做 `if (t > 0)` 恢复、从不置 0，
+    // 于是新会话沿用了上一个会话遗留的位置（与「从顶部看新会话」的注释不符）。
+    convScrollTop.current = 0
+    // 同时解除贴底：否则随后 messages 载入会被规则 2 一把拉到最底，与「新会话从顶部开始」矛盾。
+    stickRef.current = false
+    setJumpBottom(false)
+  }, [activeId])
+  // 题目视图会卸载对话容器（scrollTop 丢失）；Tab 保活切换会让 display:none 重置滚动位置。
+  // 两处都要恢复 → 条目 6 顺带②：isActive 也必须进依赖（原来只监听 midView / activeId）。
+  // 归零情形同样走这一条（t = 0 时无条件应用，旧代码的 `if (t > 0)` 正是顺带① 的成因）。
   useEffect(() => {
     if (midView !== 'chat') return
     const t = convScrollTop.current
-    if (t > 0) requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = t })
-  }, [midView, activeId])
+    requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = t })
+  }, [midView, activeId, isActive])
 
   // P3b：切会话时同步模型/思考强度控件到该会话的覆盖值（未覆盖=跟随全局默认）
   useEffect(() => {
@@ -2333,7 +2390,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
               <div className="relative flex-1 min-h-0">
               {/* v3.1.2 补强：支线旁问浮层已提到**行容器末尾**（见 rowRef 那一段）——
                   原先挂在这里只能在中栏里浮，现在要能跨左栏/中栏/工件栏自由拖动。 */}
-              <div ref={scrollRef} onScroll={onConvScroll} className="absolute inset-0 overflow-y-auto pl-4 pr-8 py-3 space-y-3 min-h-0">
+              {/* 底部留白 48px = 「回到底部」浮标占位（bottom-3 12px + 按钮 36px）——浮标是 absolute 不占流，
+                  若不留白就会盖住滚到下方时的最后一行文字。留白常驻（不随浮标显隐变化）→ 不产生二次回流。 */}
+              <div ref={scrollRef} onScroll={onConvScroll} className="absolute inset-0 overflow-y-auto pl-4 pr-8 pt-3 pb-12 space-y-3 min-h-0">
                 {messages.length === 0 && !pending && (
                   !prepStarted && prepTemplate ? (
                     /* v3.1.2 条目7：准备态引导区（中栏）——场景说明 + 本工作区素材迷你清单 */
@@ -2490,7 +2549,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                     </div>
                   </div>
                 ))}
-                <div ref={bottomRef} />
                 </div>
                 {/* 右缘快速定位条（§3.8-1，3-13）：每条回答一个刻度，hover 预览标题，点击滚动定位。
                     2026-09-08 用户拍板：锚点紧凑聚拢（顶部起 + 固定间距），不再 evenly 拉满整条高度 */}
@@ -2504,6 +2562,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                       </button>
                     ))}
                   </div>
+                )}
+                {/* v3.2.0 条目6 规则3：不贴底时的「回到底部」浮标——圆 · 纯白底（暗色主题随 --bg-primary）·
+                    无边框 · 柔和阴影 · 细线 ↓。进场走 .kb-pop（已被统一 reduced-motion 兜底覆盖）；
+                    退场不排队动画：滚底后立刻消失才不挡视线。底部 48px 留白见 scrollRef 上的注释。 */}
+                {jumpBottom && (
+                  <button type="button" onClick={jumpToBottom} title="回到底部" aria-label="回到底部"
+                    className="kb-pop absolute right-3 bottom-3 z-20 w-9 h-9 rounded-full flex items-center justify-center bg-[var(--bg-primary)] text-[var(--text-secondary)] shadow-lg hover:text-[var(--text-primary)] transition-colors">
+                    <ArrowDown size={16} strokeWidth={1.75} />
+                  </button>
                 )}
               </div>
 
@@ -2594,11 +2661,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                         </div>
                       </div>
 
-                      {/* ③ 首条消息（主体）：场景模板预填、可自由编辑 */}
+                      {/* ③ 首条消息（主体）：场景模板预填、可自由编辑。
+                          v3.2.0 条目6 顺带③：rows 固定 3 行 + 框内滚动。原为 `Math.min(6, Math.max(3, 行数))`——
+                          每按一次 Enter 输入区就 ±1 行，而消息区是 flex-1 min-h-0，高度随之变化 → 对话内容上下跳。
+                          高度由 rows 定死后，超出部分天然框内滚动（textarea 默认 overflow:auto），零额外样式。 */}
                       <textarea ref={inputRef} spellCheck={false} value={input}
                         onChange={e => onPrepDraftChange(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); startPreparedChat() } }}
-                        rows={Math.min(6, Math.max(3, input.split('\n').length))}
+                        rows={3}
                         placeholder={prepTemplate.startPrompt}
                         className="w-full px-2.5 py-2 bg-transparent text-[12.5px] leading-[1.7] resize-none outline-none text-[var(--text-primary)]" />
                       <div className="flex items-center gap-2 px-2.5 pb-2.5">
