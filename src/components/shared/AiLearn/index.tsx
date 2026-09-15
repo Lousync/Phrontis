@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import {
-  Sparkles, X, Plus, Trash2, Send, Check, ChevronLeft, ChevronRight, Minimize2,
+  Sparkles, X, Plus, Trash2, ArrowUp, Check, ChevronLeft, ChevronRight, Minimize2,
   FileText, Wrench, BookOpen, MessageSquare, HelpCircle, Settings2, Loader2, Quote,
 } from 'lucide-react'
 import { MarkdownPreview } from '../MarkdownPreview'
@@ -119,24 +119,33 @@ function Composer({ placeholder, onSend, disabled, compact }: {
     setDraft('')
   }
   return (
-    <div className={`flex shrink-0 items-end gap-2 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] ${compact ? 'px-3 py-2.5' : 'px-4 py-2.5'}`}>
-      <textarea
-        rows={2}
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); push() } }}
-        placeholder={placeholder}
-        className={`flex-1 resize-none rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] ${
-          compact ? 'px-2.5 py-2 text-[12px]' : 'px-3 py-2 text-[12.5px]'
-        }`}
-      />
-      <button
-        onClick={push}
-        disabled={disabled || !draft.trim()}
-        className={`flex shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-white transition-opacity hover:opacity-90 disabled:opacity-40 ${compact ? 'h-9 w-9' : 'h-9 w-9'}`}
-      >
-        {disabled ? <Loader2 size={13} className="animate-spin" /> : <Send size={compact ? 13 : 14} />}
-      </button>
+    <div className={`shrink-0 ${compact ? 'px-3' : 'px-4'} pb-2.5 pt-2`}>
+      <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60">
+        <textarea
+          rows={2}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); push() } }}
+          placeholder={placeholder}
+          className={`w-full resize-none rounded-none border-0 bg-transparent px-0.5 py-1 text-[var(--text-primary)] outline-none ${
+            compact ? 'text-[12px]' : 'text-[12.5px]'
+          }`}
+        />
+        <div className="flex items-center gap-2 mt-0.5">
+          <span
+            className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none"
+            title="AI 生成内容可能存在错误，请自行核实"
+          >AI 生成内容，请注意甄别</span>
+          <button
+            onClick={push}
+            disabled={disabled || !draft.trim()}
+            title="发送"
+            className="w-8 h-8 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all"
+          >
+            {disabled ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp size={15} />}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

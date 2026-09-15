@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
@@ -2008,6 +2008,227 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     </div>
   )
 
+  const composerFooter = (
+                <div className="flex items-center gap-2 mt-0.5">
+                  {/* 条目7：AI 生成内容合规提示——常驻左端空白处（原 flex-1 空占位），弱化小字不新增行高；
+                      静态渲染与流式/停止两种右端状态正交，布局零跳动（AGENTS.md#12 帮助披露：禁醒目标签轰炸） */}
+                  <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
+                  {/* 模型 + 思考强度合一菜单（P3b R12/R14）：仅本对话生效 */}
+                  <div className="relative">
+                    <button onClick={openModelMenu}
+                      className="flex items-center gap-1 h-7 px-2 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                      title="本对话模型与思考强度（仅本对话生效，默认跟随 设置→AI 默认模型）">
+                      <Bot size={11} />
+                      <span className="max-w-[140px] truncate">{effModelBare || '默认'}</span>
+                      {convoEffort !== 'off' && <span className="text-[var(--accent)]">· 🧠{EFFORT_LABEL[convoEffort]}</span>}
+                      <ChevronRight size={10} className="-rotate-90 shrink-0" />
+                    </button>
+                    {modelMenuOpen && (
+                      <div className="absolute bottom-full right-0 mb-1.5 w-[280px] z-30 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden select-none">
+                        <div className="px-3 py-1.5 text-[10.5px] text-[var(--text-muted)] bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">回答模型 · 仅本对话生效</div>
+                        <div className="max-h-[300px] overflow-y-auto py-1">
+                          {providerList.filter(p => p.enabled && p.models.length > 0).flatMap(p =>
+                            p.models.map(mm => {
+                              const val = `${p.id}:${mm}`
+                              const sel = effModel === val
+                              return (
+                                <button key={val} onClick={() => pickModel(val)}
+                                  className={`w-full flex items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-[var(--bg-hover)] transition-colors ${sel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
+                                  <span className="text-[9.5px] text-[var(--text-muted)] shrink-0">{p.name}</span>
+                                  <span className="truncate flex-1">{mm}</span>
+                                  {sel && <span className="shrink-0">✓</span>}
+                                </button>
+                              )
+                            }))}
+                          {providerList.filter(p => p.enabled && p.models.length > 0).length === 0 && (
+                            <div className="px-3 py-3 text-[11px] text-[var(--text-muted)]">尚无启用的供应商（设置 → AI 模型中添加）</div>
+                          )}
+                        </div>
+                        <div className="px-3 py-1.5 text-[10.5px] text-[var(--text-muted)] bg-[var(--bg-secondary)] border-t border-b border-[var(--border-color)]">视觉转写模型（素材转写用 · 全局）</div>
+                        <div className="max-h-[180px] overflow-y-auto py-1">
+                          <button onClick={() => pickVision('')}
+                            className={`w-full flex items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-[var(--bg-hover)] transition-colors ${!visionModel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
+                            <span className="truncate flex-1">自动识别（按模型名：qwen-vl / glm-4v / gpt-4o…）</span>
+                            {!visionModel && <span className="shrink-0">✓</span>}
+                          </button>
+                          {(() => {
+                            // 只列视觉特征模型（vision/vl/4o/glm-4v/gemini/kimi-vision…）；正则漏判时「显示全部」兜底
+                            const list = showAllVision
+                              ? providerList.filter(p => p.enabled && p.type === 'openai-compatible' && p.models.length > 0).flatMap(p => p.models.map(mm => ({ spec: `${p.id}:${mm}`, providerName: p.name, model: mm })))
+                              : visionList
+                            return (
+                              <>
+                                {list.map(v => {
+                                  const sel = visionModel === v.spec
+                                  return (
+                                    <button key={v.spec} onClick={() => pickVision(v.spec)}
+                                      className={`w-full flex items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-[var(--bg-hover)] transition-colors ${sel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
+                                      <span className="text-[9.5px] text-[var(--text-muted)] shrink-0">{v.providerName}</span>
+                                      <span className="truncate flex-1">{v.model}</span>
+                                      {sel && <span className="shrink-0">✓</span>}
+                                    </button>
+                                  )
+                                })}
+                                {list.length === 0 && (
+                                  <div className="px-3 py-2 text-[11px] text-[var(--text-muted)]">没有识别到视觉模型（模型名需含 vision/vl/4o/glm-4v 等特征）。</div>
+                                )}
+                                {providerList.some(p => p.enabled && p.type === 'openai-compatible' && p.models.length > 0) && (
+                                  <button onClick={() => setShowAllVision(v => !v)}
+                                    className="w-full px-3 py-1 text-left text-[10.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                                    {showAllVision ? '▲ 收起，只看视觉模型' : '▼ 显示全部模型（若你确认某模型支持图片但未被识别）'}
+                                  </button>
+                                )}
+                              </>
+                            )
+                          })()}
+                        </div>
+                        <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] border-t border-[var(--border-color)] bg-[var(--bg-secondary)] space-y-0.5">
+                          <div>本月用量 · 回答：{(usage?.monthTokens ?? 0).toLocaleString()} tokens{(usage?.monthPromptTokens != null || usage?.monthCompletionTokens != null) ? `（↑ ${(usage?.monthPromptTokens ?? 0).toLocaleString()} / ↓ ${(usage?.monthCompletionTokens ?? 0).toLocaleString()}）` : ''}</div>
+                          <div>本月用量 · 视觉转写：{(usage?.visionMonthTokens ?? 0).toLocaleString()} tokens / {(usage?.visionPages ?? 0)} 页</div>
+                        </div>
+                        <div className="px-3 pt-1.5 flex items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-secondary)]">
+                          <span className="text-[10.5px] text-[var(--text-muted)]">思考强度</span>
+                          {!modelCapable && <span className="text-[10px] text-[var(--text-muted)]">当前模型不支持</span>}
+                        </div>
+                        <div className={`flex gap-1 px-3 py-2 bg-[var(--bg-secondary)] ${modelCapable ? '' : 'opacity-40 pointer-events-none'}`}>
+                          {(['off', 'low', 'medium', 'high'] as const).map(e => (
+                            <button key={e} onClick={() => pickEffort(e)}
+                              className={`flex-1 px-1 py-0.5 rounded-md text-[11px] transition-colors ${convoEffort === e ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>
+                              {EFFORT_LABEL[e]}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {/* UI 优化条目9②③：用量指示（圆环/数字降级）——hover 看上下文构成摘要，点击上翻详情面板；
+                      档位由 设置→AI教学 `aiTeachUsageDetail`（off/compact/detailed），窗口大小 `aiTeachCtxWindow` */}
+                  {usageDetail !== 'off' && (
+                    <div className="relative group">
+                      <button onClick={() => setTokenOpen(v => !v)}
+                        className={`flex items-center gap-1 h-7 px-2 rounded-md transition-colors ${tokenOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+                        title={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)} · 点击查看明细（窗口大小在 设置→AI教学 配置）` : '本会话累计 LLM tokens · 点击查看明细（设置模型上下文窗口后圆环按占用比例着色）'}>
+                        <UsageRing pct={ctxWindow > 0 ? ctxPct : null} used={ctxUsed || tokenStats.llmTokens} />
+                        {usageDetail === 'detailed' && (
+                          <span className="tabular-nums whitespace-nowrap text-[10.5px]">
+                            {ctxWindow > 0 ? `${fmtTok(ctxUsed)}/${fmtTok(ctxWindow)}` : `会话 ≈${fmtTok(tokenStats.llmTokens)}`}
+                          </span>
+                        )}
+                      </button>
+                      {!tokenOpen && (
+                        <div className="pointer-events-none absolute bottom-full right-0 mb-1.5 hidden group-hover:block w-[248px] z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl px-2.5 py-2 text-[10.5px] leading-relaxed">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[var(--text-muted)] shrink-0">上下文已用</span>
+                            <span className="tabular-nums text-[var(--text-primary)] truncate">
+                              {ctxWindow > 0 ? `${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)} · 剩 ${fmtTok(Math.max(0, ctxWindow - ctxUsed))}` : `${fmtTok(ctxUsed)}（未设窗口）`}
+                            </span>
+                          </div>
+                          {injParts.length > 0 ? (
+                            <div className="mt-1 border-t border-[var(--border-color)] pt-1">
+                              <div className="text-[var(--text-muted)]">本轮 system 注入构成（≈2.6 字/token 估算）</div>
+                              {injParts.map(p => (
+                                <div key={p.k} className="flex items-center justify-between"><span className="text-[var(--text-secondary)]">{p.k}</span><span className="tabular-nums">{fmtTok(p.v)}</span></div>
+                              ))}
+                              <div className="flex items-center justify-between"><span className="text-[var(--text-secondary)]">对话历史与工具</span><span className="tabular-nums">{fmtTok(Math.max(0, ctxWindow - ctxUsed - injSystemEst))}</span></div>
+                            </div>
+                          ) : (
+                            <div className="mt-1 text-[var(--text-muted)]">本轮尚无注入采样（发一条消息后可见构成）</div>
+                          )}
+                        </div>
+                      )}
+                      {tokenOpen && (
+                        <div className="absolute bottom-full right-0 mb-1.5 w-[300px] z-30 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden select-text">
+                          <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+                            <span className="text-[11.5px] font-medium text-[var(--text-primary)]">用量明细</span>
+                            <button onClick={() => setTokenOpen(false)} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><X size={12} /></button>
+                          </div>
+                          <div className="p-3 space-y-2.5 text-[11.5px] max-h-[60vh] overflow-y-auto">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[var(--text-muted)]">模型</span>
+                              <span className="text-[var(--text-primary)] truncate max-w-[190px]" title={effModel}>{effModelBare || defaultModel || '（默认配置）'}</span>
+                            </div>
+                            <div className="border-b border-[var(--border-color)] pb-2">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[var(--text-muted)]">上下文占用</span>
+                                <span className="tabular-nums font-medium text-[var(--text-primary)]">{ctxWindow > 0 ? `${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)}` : `${fmtTok(ctxUsed)}（未设窗口）`}</span>
+                              </div>
+                              {ctxWindow > 0 && (
+                                <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
+                                  <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${Math.min(100, (ctxPct ?? 0) * 100)}%`, background: (ctxPct ?? 0) > 0.85 ? 'var(--danger)' : (ctxPct ?? 0) >= 0.7 ? 'var(--warning)' : 'var(--accent)' }} />
+                                </div>
+                              )}
+                              <div className="mt-1 text-[10.5px] text-[var(--text-muted)] leading-relaxed">
+                                口径 = 最近一次调用的输入 tokens（含 system 注入与工具定义）。{ctxWindow <= 0 && '在 设置 → AI教学 填模型上下文窗口后可见比例。'}
+                              </div>
+                              {injParts.length > 0 && (
+                                <div className="mt-1.5 space-y-0.5">
+                                  {injParts.map(p => (
+                                    <div key={p.k} className="flex items-center justify-between text-[10.5px]"><span className="text-[var(--text-muted)]">{p.k}</span><span className="tabular-nums text-[var(--text-secondary)]">≈{fmtTok(p.v)}</span></div>
+                                  ))}
+                                  <div className="flex items-center justify-between text-[10.5px]"><span className="text-[var(--text-muted)]">对话历史与工具</span><span className="tabular-nums text-[var(--text-secondary)]">≈{fmtTok(Math.max(0, ctxWindow - injSystemEst))}</span></div>
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <div className="flex items-center justify-between">
+                                <span className="text-[var(--text-muted)]">本会话 LLM tokens（累计）</span>
+                                <span className="tabular-nums font-medium text-[var(--text-primary)]">{fmtTok(tokenStats.llmTokens)}{tokenStats.llmTokens >= 1000 ? `（${Math.round(tokenStats.llmTokens)}）` : ''}</span>
+                              </div>
+                              {tokenStats.hasSplit && (
+                                <div className="mt-0.5 flex items-center justify-end gap-3 text-[10.5px] tabular-nums text-[var(--text-muted)]">
+                                  <span>↑ {fmtTok(tokenStats.promptTokens)} 输入</span>
+                                  <span>↓ {fmtTok(tokenStats.completionTokens)} 输出</span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-3 gap-1.5 text-center">
+                              {[['模型轮次', String(tokenStats.llmRounds)], ['工具调用', String(tokenStats.toolCalls)], ['耗时', `${Math.round(tokenStats.durationMs / 1000)}s`]].map(([k, v]) => (
+                                <div key={k} className="rounded-lg bg-[var(--bg-secondary)] py-1.5">
+                                  <div className="text-[10.5px] text-[var(--text-muted)]">{k}</div>
+                                  <div className="tabular-nums text-[12px] font-medium">{v}</div>
+                                </div>
+                              ))}
+                            </div>
+                            <div className="border-t border-[var(--border-color)] pt-2">
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[var(--text-muted)]">本月 LLM tokens</span>
+                                <span className="tabular-nums">{fmtTok(monthTokens)}{budget > 0 && <span className="text-[var(--text-muted)]"> / {fmtTok(budget)}</span>}</span>
+                              </div>
+                              {(usage?.monthPromptTokens != null || usage?.monthCompletionTokens != null) && (
+                                <div className="mb-1 flex items-center justify-end gap-3 text-[10.5px] tabular-nums text-[var(--text-muted)]">
+                                  <span>↑ {fmtTok(usage?.monthPromptTokens ?? 0)} 输入</span>
+                                  <span>↓ {fmtTok(usage?.monthCompletionTokens ?? 0)} 输出</span>
+                                </div>
+                              )}
+                              {budget > 0 ? (
+                                <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
+                                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, (monthTokens / budget) * 100)}%`, background: monthTokens / budget > 0.85 ? '#a32d2d' : '#185fa5' }} />
+                                </div>
+                              ) : (
+                                <div className="text-[10.5px] text-[var(--text-muted)]">未设月度预算（设置 → AI 工具 可配置上限）</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {/* P3b（R12）：流式输出中发送键 → 停止键（深色底白方块），点击中断、保留已落库内容 */}
+                  {pending ? (
+                    <button onClick={() => { void agentAbort(chatIdRef.current) }}
+                      className="w-8 h-8 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity"
+                      title="停止生成（已完成的轮次保留）">
+                      <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
+                    </button>
+                  ) : (
+                    <button onClick={() => { void doSend() }} disabled={!input.trim()} title="发送"
+                      className="w-8 h-8 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
+                      <ArrowUp size={15} />
+                    </button>
+                  )}
+                </div>
+  )
+
   return (
     <div className="h-full flex flex-col min-h-0 bg-[var(--bg-primary)]">
       {/* P5（§3.2-6/页签即会话切换器）：顶栏 = 工作区 chip（返回选择页）+ 对话页签 + 新建任务 + 工具组 */}
@@ -2621,7 +2842,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                   </Collapsible>
                 </div>
               )}
-              <div className="shrink-0 border-t border-[var(--border-color)] p-2 bg-[var(--bg-secondary)]">
+              <div className="shrink-0 px-3 pb-2.5 pt-2">
                 {/* v3.1.2 条目7：会话准备态 —— 未开讲时输入区位置显示准备面板（素材 / 会话要求 / 首条消息）
                     与正常输入框同一块区域互斥切换；点「开始对话」才发首条消息。 */}
                 {!prepStarted && prepTemplate ? (
@@ -2704,11 +2925,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                       <span className="ml-auto">切走再切回会还原到这里</span>
                     </div>
                   </div>
-                ) : (
+                ) : askVisible && askPending ? (
                 <>
                 {/* UI 优化条目12/13：未答 ```ask 块 → 输入区变形为提问卡（单题选择卡 / 整卷模式）；
                     「自由输入」随时切回打字（ask 标记忽略，输入框恢复） */}
-                {askVisible && askPending ? (() => {
+                {(() => {
                   /* 提问卡 v2（WorkBuddy 式版式）：题干头行 + ‹k/n› 翻页 + ✕；序号横条选项（整卷点选/单题点选即发）；
                      「✎ 其他补充…」= 自定义回答输入；右下圆形 ↑ 发送（整卷=全部选完统一发送，单题=发送补充内容）。
                      定位边界：ask 只用于「下一步工作」类流程澄清 + 会话级画像诊断（§13.3）——全局/工作区画像仅在编辑区编辑 */
@@ -2799,8 +3020,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                       </Collapsible>
                     </div>
                   )
-                })() : (
-                  <>
+                })()}
+                {composerFooter}
+                </>
+                ) : (
+                  <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60">
                     {quotes.length > 0 && (
                       <div className="mb-1.5">
                         {/* 引用胶囊（会话引用形式）：不展示全文只报条数，点开管理；× 一键全清 */}
@@ -2855,229 +3079,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                       <textarea ref={inputRef} spellCheck={false} value={input} onChange={e => { setInput(e.target.value); setSlashActive(0) }}
                         onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void doSend() } }}
                         rows={2} placeholder={quotes.length > 0 ? '针对引用内容提问…（Enter 发送）' : '粘贴资料或输入指令…（Enter 发送，/ 唤起指令）'}
-                        className="w-full px-3 py-2 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] resize-none outline-none focus:border-[var(--accent)]" />
+                        className="w-full px-0.5 py-1 rounded-none border-0 bg-transparent text-[13px] resize-none outline-none" />
                     </div>
-                  </>
-                )}
-                <div className="flex items-center gap-2 mt-1.5">
-                  {/* 条目7：AI 生成内容合规提示——常驻左端空白处（原 flex-1 空占位），弱化小字不新增行高；
-                      静态渲染与流式/停止两种右端状态正交，布局零跳动（AGENTS.md#12 帮助披露：禁醒目标签轰炸） */}
-                  <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
-                  {/* 模型 + 思考强度合一菜单（P3b R12/R14）：仅本对话生效 */}
-                  <div className="relative">
-                    <button onClick={openModelMenu}
-                      className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                      title="本对话模型与思考强度（仅本对话生效，默认跟随 设置→AI 默认模型）">
-                      <Bot size={11} />
-                      <span className="max-w-[140px] truncate">{effModelBare || '默认'}</span>
-                      {convoEffort !== 'off' && <span className="text-[var(--accent)]">· 🧠{EFFORT_LABEL[convoEffort]}</span>}
-                      <ChevronRight size={10} className="-rotate-90 shrink-0" />
-                    </button>
-                    {modelMenuOpen && (
-                      <div className="absolute bottom-full right-0 mb-1.5 w-[280px] z-30 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden select-none">
-                        <div className="px-3 py-1.5 text-[10.5px] text-[var(--text-muted)] bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">回答模型 · 仅本对话生效</div>
-                        <div className="max-h-[300px] overflow-y-auto py-1">
-                          {providerList.filter(p => p.enabled && p.models.length > 0).flatMap(p =>
-                            p.models.map(mm => {
-                              const val = `${p.id}:${mm}`
-                              const sel = effModel === val
-                              return (
-                                <button key={val} onClick={() => pickModel(val)}
-                                  className={`w-full flex items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-[var(--bg-hover)] transition-colors ${sel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
-                                  <span className="text-[9.5px] text-[var(--text-muted)] shrink-0">{p.name}</span>
-                                  <span className="truncate flex-1">{mm}</span>
-                                  {sel && <span className="shrink-0">✓</span>}
-                                </button>
-                              )
-                            }))}
-                          {providerList.filter(p => p.enabled && p.models.length > 0).length === 0 && (
-                            <div className="px-3 py-3 text-[11px] text-[var(--text-muted)]">尚无启用的供应商（设置 → AI 模型中添加）</div>
-                          )}
-                        </div>
-                        <div className="px-3 py-1.5 text-[10.5px] text-[var(--text-muted)] bg-[var(--bg-secondary)] border-t border-b border-[var(--border-color)]">视觉转写模型（素材转写用 · 全局）</div>
-                        <div className="max-h-[180px] overflow-y-auto py-1">
-                          <button onClick={() => pickVision('')}
-                            className={`w-full flex items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-[var(--bg-hover)] transition-colors ${!visionModel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
-                            <span className="truncate flex-1">自动识别（按模型名：qwen-vl / glm-4v / gpt-4o…）</span>
-                            {!visionModel && <span className="shrink-0">✓</span>}
-                          </button>
-                          {(() => {
-                            // 只列视觉特征模型（vision/vl/4o/glm-4v/gemini/kimi-vision…）；正则漏判时「显示全部」兜底
-                            const list = showAllVision
-                              ? providerList.filter(p => p.enabled && p.type === 'openai-compatible' && p.models.length > 0).flatMap(p => p.models.map(mm => ({ spec: `${p.id}:${mm}`, providerName: p.name, model: mm })))
-                              : visionList
-                            return (
-                              <>
-                                {list.map(v => {
-                                  const sel = visionModel === v.spec
-                                  return (
-                                    <button key={v.spec} onClick={() => pickVision(v.spec)}
-                                      className={`w-full flex items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-[var(--bg-hover)] transition-colors ${sel ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>
-                                      <span className="text-[9.5px] text-[var(--text-muted)] shrink-0">{v.providerName}</span>
-                                      <span className="truncate flex-1">{v.model}</span>
-                                      {sel && <span className="shrink-0">✓</span>}
-                                    </button>
-                                  )
-                                })}
-                                {list.length === 0 && (
-                                  <div className="px-3 py-2 text-[11px] text-[var(--text-muted)]">没有识别到视觉模型（模型名需含 vision/vl/4o/glm-4v 等特征）。</div>
-                                )}
-                                {providerList.some(p => p.enabled && p.type === 'openai-compatible' && p.models.length > 0) && (
-                                  <button onClick={() => setShowAllVision(v => !v)}
-                                    className="w-full px-3 py-1 text-left text-[10.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
-                                    {showAllVision ? '▲ 收起，只看视觉模型' : '▼ 显示全部模型（若你确认某模型支持图片但未被识别）'}
-                                  </button>
-                                )}
-                              </>
-                            )
-                          })()}
-                        </div>
-                        <div className="px-3 py-1.5 text-[10px] text-[var(--text-muted)] border-t border-[var(--border-color)] bg-[var(--bg-secondary)] space-y-0.5">
-                          <div>本月用量 · 回答：{(usage?.monthTokens ?? 0).toLocaleString()} tokens{(usage?.monthPromptTokens != null || usage?.monthCompletionTokens != null) ? `（↑ ${(usage?.monthPromptTokens ?? 0).toLocaleString()} / ↓ ${(usage?.monthCompletionTokens ?? 0).toLocaleString()}）` : ''}</div>
-                          <div>本月用量 · 视觉转写：{(usage?.visionMonthTokens ?? 0).toLocaleString()} tokens / {(usage?.visionPages ?? 0)} 页</div>
-                        </div>
-                        <div className="px-3 pt-1.5 flex items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-secondary)]">
-                          <span className="text-[10.5px] text-[var(--text-muted)]">思考强度</span>
-                          {!modelCapable && <span className="text-[10px] text-[var(--text-muted)]">当前模型不支持</span>}
-                        </div>
-                        <div className={`flex gap-1 px-3 py-2 bg-[var(--bg-secondary)] ${modelCapable ? '' : 'opacity-40 pointer-events-none'}`}>
-                          {(['off', 'low', 'medium', 'high'] as const).map(e => (
-                            <button key={e} onClick={() => pickEffort(e)}
-                              className={`flex-1 px-1 py-0.5 rounded-md text-[11px] transition-colors ${convoEffort === e ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>
-                              {EFFORT_LABEL[e]}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    {composerFooter}
                   </div>
-                  {/* UI 优化条目9②③：用量指示（圆环/数字降级）——hover 看上下文构成摘要，点击上翻详情面板；
-                      档位由 设置→AI教学 `aiTeachUsageDetail`（off/compact/detailed），窗口大小 `aiTeachCtxWindow` */}
-                  {usageDetail !== 'off' && (
-                    <div className="relative group">
-                      <button onClick={() => setTokenOpen(v => !v)}
-                        className={`flex items-center gap-1 px-1 py-0.5 rounded-md transition-colors ${tokenOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
-                        title={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)} · 点击查看明细（窗口大小在 设置→AI教学 配置）` : '本会话累计 LLM tokens · 点击查看明细（设置模型上下文窗口后圆环按占用比例着色）'}>
-                        <UsageRing pct={ctxWindow > 0 ? ctxPct : null} used={ctxUsed || tokenStats.llmTokens} />
-                        {usageDetail === 'detailed' && (
-                          <span className="tabular-nums whitespace-nowrap text-[10.5px]">
-                            {ctxWindow > 0 ? `${fmtTok(ctxUsed)}/${fmtTok(ctxWindow)}` : `会话 ≈${fmtTok(tokenStats.llmTokens)}`}
-                          </span>
-                        )}
-                      </button>
-                      {!tokenOpen && (
-                        <div className="pointer-events-none absolute bottom-full right-0 mb-1.5 hidden group-hover:block w-[248px] z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl px-2.5 py-2 text-[10.5px] leading-relaxed">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[var(--text-muted)] shrink-0">上下文已用</span>
-                            <span className="tabular-nums text-[var(--text-primary)] truncate">
-                              {ctxWindow > 0 ? `${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)} · 剩 ${fmtTok(Math.max(0, ctxWindow - ctxUsed))}` : `${fmtTok(ctxUsed)}（未设窗口）`}
-                            </span>
-                          </div>
-                          {injParts.length > 0 ? (
-                            <div className="mt-1 border-t border-[var(--border-color)] pt-1">
-                              <div className="text-[var(--text-muted)]">本轮 system 注入构成（≈2.6 字/token 估算）</div>
-                              {injParts.map(p => (
-                                <div key={p.k} className="flex items-center justify-between"><span className="text-[var(--text-secondary)]">{p.k}</span><span className="tabular-nums">{fmtTok(p.v)}</span></div>
-                              ))}
-                              <div className="flex items-center justify-between"><span className="text-[var(--text-secondary)]">对话历史与工具</span><span className="tabular-nums">{fmtTok(Math.max(0, ctxUsed - injSystemEst))}</span></div>
-                            </div>
-                          ) : (
-                            <div className="mt-1 text-[var(--text-muted)]">本轮尚无注入采样（发一条消息后可见构成）</div>
-                          )}
-                        </div>
-                      )}
-                      {tokenOpen && (
-                        <div className="absolute bottom-full right-0 mb-1.5 w-[300px] z-30 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden select-text">
-                          <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
-                            <span className="text-[11.5px] font-medium text-[var(--text-primary)]">用量明细</span>
-                            <button onClick={() => setTokenOpen(false)} className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><X size={12} /></button>
-                          </div>
-                          <div className="p-3 space-y-2.5 text-[11.5px] max-h-[60vh] overflow-y-auto">
-                            <div className="flex items-center justify-between">
-                              <span className="text-[var(--text-muted)]">模型</span>
-                              <span className="text-[var(--text-primary)] truncate max-w-[190px]" title={effModel}>{effModelBare || defaultModel || '（默认配置）'}</span>
-                            </div>
-                            <div className="border-b border-[var(--border-color)] pb-2">
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-[var(--text-muted)]">上下文占用</span>
-                                <span className="tabular-nums font-medium text-[var(--text-primary)]">{ctxWindow > 0 ? `${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)}` : `${fmtTok(ctxUsed)}（未设窗口）`}</span>
-                              </div>
-                              {ctxWindow > 0 && (
-                                <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
-                                  <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${Math.min(100, (ctxPct ?? 0) * 100)}%`, background: (ctxPct ?? 0) > 0.85 ? 'var(--danger)' : (ctxPct ?? 0) >= 0.7 ? 'var(--warning)' : 'var(--accent)' }} />
-                                </div>
-                              )}
-                              <div className="mt-1 text-[10.5px] text-[var(--text-muted)] leading-relaxed">
-                                口径 = 最近一次调用的输入 tokens（含 system 注入与工具定义）。{ctxWindow <= 0 && '在 设置 → AI教学 填模型上下文窗口后可见比例。'}
-                              </div>
-                              {injParts.length > 0 && (
-                                <div className="mt-1.5 space-y-0.5">
-                                  {injParts.map(p => (
-                                    <div key={p.k} className="flex items-center justify-between text-[10.5px]"><span className="text-[var(--text-muted)]">{p.k}</span><span className="tabular-nums text-[var(--text-secondary)]">≈{fmtTok(p.v)}</span></div>
-                                  ))}
-                                  <div className="flex items-center justify-between text-[10.5px]"><span className="text-[var(--text-muted)]">对话历史与工具</span><span className="tabular-nums text-[var(--text-secondary)]">≈{fmtTok(Math.max(0, ctxUsed - injSystemEst))}</span></div>
-                                </div>
-                              )}
-                            </div>
-                            <div>
-                              <div className="flex items-center justify-between">
-                                <span className="text-[var(--text-muted)]">本会话 LLM tokens（累计）</span>
-                                <span className="tabular-nums font-medium text-[var(--text-primary)]">{fmtTok(tokenStats.llmTokens)}{tokenStats.llmTokens >= 1000 ? `（${Math.round(tokenStats.llmTokens)}）` : ''}</span>
-                              </div>
-                              {tokenStats.hasSplit && (
-                                <div className="mt-0.5 flex items-center justify-end gap-3 text-[10.5px] tabular-nums text-[var(--text-muted)]">
-                                  <span>↑ {fmtTok(tokenStats.promptTokens)} 输入</span>
-                                  <span>↓ {fmtTok(tokenStats.completionTokens)} 输出</span>
-                                </div>
-                              )}
-                            </div>
-                            <div className="grid grid-cols-3 gap-1.5 text-center">
-                              {[['模型轮次', String(tokenStats.llmRounds)], ['工具调用', String(tokenStats.toolCalls)], ['耗时', `${Math.round(tokenStats.durationMs / 1000)}s`]].map(([k, v]) => (
-                                <div key={k} className="rounded-lg bg-[var(--bg-secondary)] py-1.5">
-                                  <div className="text-[10.5px] text-[var(--text-muted)]">{k}</div>
-                                  <div className="tabular-nums text-[12px] font-medium">{v}</div>
-                                </div>
-                              ))}
-                            </div>
-                            <div className="border-t border-[var(--border-color)] pt-2">
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-[var(--text-muted)]">本月 LLM tokens</span>
-                                <span className="tabular-nums">{fmtTok(monthTokens)}{budget > 0 && <span className="text-[var(--text-muted)]"> / {fmtTok(budget)}</span>}</span>
-                              </div>
-                              {(usage?.monthPromptTokens != null || usage?.monthCompletionTokens != null) && (
-                                <div className="mb-1 flex items-center justify-end gap-3 text-[10.5px] tabular-nums text-[var(--text-muted)]">
-                                  <span>↑ {fmtTok(usage?.monthPromptTokens ?? 0)} 输入</span>
-                                  <span>↓ {fmtTok(usage?.monthCompletionTokens ?? 0)} 输出</span>
-                                </div>
-                              )}
-                              {budget > 0 ? (
-                                <div className="h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
-                                  <div className="h-full rounded-full" style={{ width: `${Math.min(100, (monthTokens / budget) * 100)}%`, background: monthTokens / budget > 0.85 ? '#a32d2d' : '#185fa5' }} />
-                                </div>
-                              ) : (
-                                <div className="text-[10.5px] text-[var(--text-muted)]">未设月度预算（设置 → AI 工具 可配置上限）</div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {/* P3b（R12）：流式输出中发送键 → 停止键（深色底白方块），点击中断、保留已落库内容 */}
-                  {pending ? (
-                    <button onClick={() => { void agentAbort(chatIdRef.current) }}
-                      className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-80 transition-opacity"
-                      title="停止生成（已完成的轮次保留）">
-                      <span className="w-2 h-2 rounded-[2px] bg-current shrink-0" /> 停止
-                    </button>
-                  ) : (
-                    <button onClick={() => { void doSend() }} disabled={!input.trim()}
-                      className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-40 transition-colors">
-                      <Send size={12} /> 发送
-                    </button>
-                  )}
-                </div>
-                </>
                 )}
               </div>
             </>

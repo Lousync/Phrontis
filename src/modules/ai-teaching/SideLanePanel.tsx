@@ -5,7 +5,7 @@ import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubbl
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { showToast } from '../../lib/toast'
 import type { AgentStoredMessage, AgentTraceStep } from '../../types'
-import { ArrowUp, Check, ChevronDown, Copy, Loader2, Maximize2, Minimize2, Send, Sparkles, X } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, Copy, Loader2, Maximize2, Minimize2, Sparkles, X } from 'lucide-react'
 
 /**
  * 支线旁问面板（v3.1.2 条目11）。
@@ -309,8 +309,8 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
       )}
 
       {/* 输入区 */}
-      <div className="shrink-0 border-t border-[var(--border-color)] p-2.5">
-        <div className="flex items-end gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] px-2.5 py-1.5 focus-within:border-[var(--accent)]/60 transition-colors">
+      <div className="shrink-0 px-2.5 pb-2.5 pt-2">
+        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60 transition-colors">
           <textarea
             ref={inputRef}
             value={input}
@@ -319,23 +319,28 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
               if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); return }
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void doSend() }
             }}
-            rows={wide ? 2 : 2}
+            rows={2}
             spellCheck={false}
             placeholder="就这一点追问…（Enter 发送 · Shift+Enter 换行）"
-            className="flex-1 min-w-0 resize-none bg-transparent text-[12.5px] leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none max-h-32"
+            className="w-full resize-none rounded-none border-0 bg-transparent px-0.5 py-1 text-[12.5px] leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none max-h-32"
             disabled={stopped}
           />
-          {pending ? (
-            <button onClick={() => { void agentAbort(chatIdRef.current) }} title="停止生成"
-              className="shrink-0 p-1.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-              <X size={13} />
-            </button>
-          ) : (
-            <button onClick={() => { void doSend() }} disabled={!input.trim() || stopped} title="发送"
-              className="shrink-0 p-1.5 rounded-md text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-              <Send size={13} />
-            </button>
-          )}
+          <div className="flex items-center gap-2 mt-0.5">
+            {/* 拍板② 同原则：底栏左端补合规提示 */}
+            <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none"
+              title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
+            {pending ? (
+              <button onClick={() => { void agentAbort(chatIdRef.current) }} title="停止生成"
+                className="w-8 h-8 shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity">
+                <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
+              </button>
+            ) : (
+              <button onClick={() => { void doSend() }} disabled={!input.trim() || stopped} title="发送"
+                className="w-8 h-8 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
+                <ArrowUp size={15} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

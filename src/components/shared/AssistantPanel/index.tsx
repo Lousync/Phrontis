@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
-  Sparkles, X, Menu, Plus, Trash2, Wrench, FileText, Check, ArrowUpRight, Maximize2,
+  Sparkles, X, Menu, Plus, Trash2, Wrench, FileText, Check, ArrowUpRight, ArrowUp, Maximize2,
   Languages, Loader2, Bot, Quote,
 } from 'lucide-react'
 import { AiLearnShell, type AiLearnTab, type ChatBridge } from '../AiLearn'
@@ -771,86 +771,90 @@ useEffect(() => { if (open) void refreshSessions() }, [open, refreshSessions])
                   )}
 
                   {/* 引用胶囊（会话引用形式）+ 上下文徽章（帮助页/学堂/当前界面，将随提问附带） */}
-                  {(selQuotes.length > 0 || ctx) && (
-                    <div className="px-3 pb-1 shrink-0 space-y-1">
-                      {selQuotes.length > 0 && (
-                        <>
-                          <div className="flex items-center gap-1.5">
-                            <button onClick={() => setSelQuotesOpen(o => !o)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                              title="点击查看/管理引用片段">
-                              <Quote size={10} className="text-[var(--accent)]" />
-                              <span>{selQuotes.length} 条对话引用</span>
-                            </button>
-                            <button onClick={() => { selQuotesRef.current = []; setSelQuotes([]); setSelQuotesOpen(false) }} title="移除全部引用"
-                              className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-                              <X size={10} />
-                            </button>
-                          </div>
-                          {selQuotesOpen && (
-                            <div className="space-y-1">
-                              {selQuotes.map((q, i) => (
-                                <div key={`${i}-${q.slice(0, 16)}`} className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)]">
-                                  <Quote size={10} className="mt-[3px] shrink-0 text-[var(--accent)]" />
-                                  <span className="flex-1 min-w-0 text-[11px] leading-[1.5] text-[var(--text-secondary)] line-clamp-3">【引用 {i + 1}】{q}</span>
-                                  <button onClick={() => setSelQuotes(prev => { const next = prev.filter((_, j) => j !== i); selQuotesRef.current = next; return next })} title="移除此引用"
-                                    className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
-                                    <X size={10} />
-                                  </button>
+                  <div className="shrink-0 px-3 pb-2.5 pt-2">
+                    <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60">
+                      {(selQuotes.length > 0 || ctx) && (
+                        <div className="space-y-1">
+                          {selQuotes.length > 0 && (
+                            <>
+                              <div className="flex items-center gap-1.5">
+                                <button onClick={() => setSelQuotesOpen(o => !o)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                                  title="点击查看/管理引用片段">
+                                  <Quote size={10} className="text-[var(--accent)]" />
+                                  <span>{selQuotes.length} 条对话引用</span>
+                                </button>
+                                <button onClick={() => { selQuotesRef.current = []; setSelQuotes([]); setSelQuotesOpen(false) }} title="移除全部引用"
+                                  className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+                                  <X size={10} />
+                                </button>
+                              </div>
+                              {selQuotesOpen && (
+                                <div className="space-y-1">
+                                  {selQuotes.map((q, i) => (
+                                    <div key={`${i}-${q.slice(0, 16)}`} className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+                                      <Quote size={10} className="mt-[3px] shrink-0 text-[var(--accent)]" />
+                                      <span className="flex-1 min-w-0 text-[11px] leading-[1.5] text-[var(--text-secondary)] line-clamp-3">【引用 {i + 1}】{q}</span>
+                                      <button onClick={() => setSelQuotes(prev => { const next = prev.filter((_, j) => j !== i); selQuotesRef.current = next; return next })} title="移除此引用"
+                                        className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+                                        <X size={10} />
+                                      </button>
+                                    </div>
+                                  ))}
                                 </div>
-                              ))}
-                            </div>
+                              )}
+                            </>
                           )}
-                        </>
+                          {ctx && (
+                            <span className="inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
+                              <FileText size={10} className="shrink-0 text-[var(--accent)]" />
+                              <span className="truncate">{ctx.label}</span>
+                              <span className="text-[var(--text-disabled)]">·将随提问附带</span>
+                            </span>
+                          )}
+                        </div>
                       )}
-                      {ctx && (
+
+                      {/* 输入区（v3.1.1 条目10：/ 弹层 + 压缩占位 + Skill chip） */}
+                      {compressing && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)] kb-pop">
+                          <Loader2 size={12} className="animate-spin shrink-0 text-[var(--accent)]" />
+                          正在压缩对话历史…（可能数十秒，期间暂不能发送）
+                        </div>
+                      )}
+                      {pickedSkill && (
                         <span className="inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
-                          <FileText size={10} className="shrink-0 text-[var(--accent)]" />
-                          <span className="truncate">{ctx.label}</span>
-                          <span className="text-[var(--text-disabled)]">·将随提问附带</span>
+                          <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
+                          <span className="truncate">Skill：{pickedSkill.title} · 本轮显式生效</span>
+                          <button onClick={() => setPickedSkill(null)} title="移除该 Skill"
+                            className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={10} /></button>
                         </span>
                       )}
-                    </div>
-                  )}
-
-                  {/* 输入区（v3.1.1 条目10：/ 弹层 + 压缩占位 + Skill chip） */}
-                  <div className="p-2.5 shrink-0 border-t border-[var(--border-color)] space-y-1.5">
-                    {compressing && (
-                      <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)] kb-pop">
-                        <Loader2 size={12} className="animate-spin shrink-0 text-[var(--accent)]" />
-                        正在压缩对话历史…（可能数十秒，期间暂不能发送）
+                      <div className="relative">
+                        {slashOpen && (
+                          <SlashCommandMenu items={slashItems} activeIndex={slashActive} onHover={setSlashActive} onPick={pickSlash} />
+                        )}
+                        <textarea
+                          ref={inputRef}
+                          spellCheck={false}
+                          value={input}
+                          onChange={e => { setInput(e.target.value); setSlashActive(0) }}
+                          onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
+                          rows={2}
+                          placeholder="问问任何事…(Enter 发送，/ 唤起指令)"
+                          className="w-full px-0.5 py-1 rounded-none border-0 bg-transparent text-[12px] resize-none outline-none"
+                        />
                       </div>
-                    )}
-                    {pickedSkill && (
-                      <span className="inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
-                        <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
-                        <span className="truncate">Skill：{pickedSkill.title} · 本轮显式生效</span>
-                        <button onClick={() => setPickedSkill(null)} title="移除该 Skill"
-                          className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={10} /></button>
-                      </span>
-                    )}
-                    <div className="relative flex items-end gap-2">
-                      {slashOpen && (
-                        <SlashCommandMenu items={slashItems} activeIndex={slashActive} onHover={setSlashActive} onPick={pickSlash} />
-                      )}
-                      <textarea
-                        ref={inputRef}
-                        spellCheck={false}
-                        value={input}
-                        onChange={e => { setInput(e.target.value); setSlashActive(0) }}
-                        onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
-                        rows={2}
-                        placeholder="问问任何事…(Enter 发送，/ 唤起指令)"
-                        className="flex-1 px-2.5 py-2 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] resize-none outline-none focus:border-[var(--accent)]"
-                      />
-                      <button onClick={() => { void send() }} disabled={pending || compressing || !input.trim()}
-                        className="p-2 rounded-md bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-40 transition-opacity">
-                        {pending ? <Loader2 size={14} className="animate-spin" /> : <SendIcon />}
-                      </button>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none"
+                          title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
+                        <button onClick={() => { void send() }} disabled={pending || compressing || !input.trim()} title="发送"
+                          className="w-8 h-8 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
+                          {pending ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp size={15} />}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  {/* 条目7：AI 生成内容合规提示——常驻一行弱化小字（AGENTS.md#12：禁醒目标签/图标轰炸）；本组件多模块共用，改一处全局生效 */}
-                  <div className="px-3 pb-1.5 -mt-0.5 shrink-0 text-[10.5px] leading-none text-[var(--text-disabled)] select-none">AI 生成内容，请注意甄别</div>
                 </>
               )}
             </div>
@@ -942,14 +946,6 @@ function NoProviderHint({ onGoSettings }: { onGoSettings: () => void }) {
         </button>
       </div>
     </div>
-  )
-}
-
-function SendIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />
-    </svg>
   )
 }
 

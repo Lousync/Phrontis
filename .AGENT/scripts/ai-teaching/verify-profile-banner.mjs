@@ -95,7 +95,17 @@ check('剥注释后源码显著变短（说明注释确实被剥掉了，负向�
   src.length < raw.length, `raw=${raw.length} stripped=${src.length}`)
 
 const BS = src.indexOf('{profileSuggestion && !profDismissed && (')
-const BE = src.indexOf('<div className="shrink-0 border-t border-[var(--border-color)] p-2 bg-[var(--bg-secondary)]">', BS)
+// 结束边界 = 紧随其后的「输入区外壳」开标签。⚠️ 这个锚点是**样式类**，会随输入区改版而失效
+//（条目 ⑧ 气泡化把外壳从 `border-t … p-2 bg-secondary` 换成了 `px-3 pb-2.5 pt-2`），
+// 故同时列出新旧两种写法，取落在 BS 之后的第一个，避免下次改版又整段断言假失败。
+const SHELL_ANCHORS = [
+  '<div className="shrink-0 px-3 pb-2.5 pt-2">',
+  '<div className="shrink-0 border-t border-[var(--border-color)] p-2 bg-[var(--bg-secondary)]">',
+]
+const BE = SHELL_ANCHORS
+  .map((s) => src.indexOf(s, BS))
+  .filter((i) => i > BS)
+  .sort((a, b) => a - b)[0] ?? -1
 check('能定位到横幅区块（锚点：profileSuggestion 条件 + 紧随其后的输入区）', BS > -1 && BE > BS,
   `BS=${BS} BE=${BE}`)
 const banner = BS > -1 && BE > BS ? src.slice(BS, BE) : ''
