@@ -30,6 +30,8 @@ interface Props {
   focusOn?: boolean
   /** 点击骨架条 = 退出聚焦并定位（目录展开 / 文件打开） */
   onFocusLocate?: (relPath: string, isDir: boolean) => void
+  /** 根容器 ref：父级用它把焦点交给文件树（右键「粘贴」需先聚焦，见 editor/index.tsx） */
+  rootRef?: React.RefObject<HTMLDivElement | null>
 }
 
 const DRAG_MIME = 'text/x-kb-rel'
@@ -55,7 +57,7 @@ function FileIcon({ name }: { name: string }) {
  * 拖拽：条目均可拖（mime: text/x-kb-rel）；目录与根容器是落点，
  * drop 时把源相对路径移动到目标目录下（主进程 ws:rename 跨目录移动）。
  */
-export function FileTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, hiddenRelPaths, draftRelPaths, softNames, focusOn, onFocusLocate }: Props) {
+export function FileTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, hiddenRelPaths, draftRelPaths, softNames, focusOn, onFocusLocate, rootRef }: Props) {
   const [dragOver, setDragOver] = useState<string | null>(null)
 
   /**
@@ -262,7 +264,15 @@ export function FileTree({ dirCache, expanded, activePath, onToggleDir, onOpenFi
 
   return (
     <div
-      className={`flex flex-1 flex-col overflow-y-auto px-1.5 py-1 ${dragOver === '' ? 'bg-[var(--accent)]/10' : ''}`}
+      ref={rootRef}
+      /* tabIndex：右键「粘贴」要先 programmatic focus 到这里（paste 命令落在「当前聚焦元素」上，
+         焦点留在 Monaco 里的话会变成往正文插文本）。focus 圈用极淡 inset ring：
+         既知道焦点进来了，又不抢视觉（开发负责人厌恶醒目标签）。
+         注意 Ctrl+V 的守卫**不看焦点在不在树上**，只看焦点在不在文本编辑区
+         （Chromium 会把非可编辑焦点的 paste 事件 target 重定向成 BODY，见 editor/index.tsx
+         的 isTextEditingTarget）——所以这里不需要额外的 data-* 标记。 */
+      tabIndex={0}
+      className={`flex flex-1 flex-col overflow-y-auto px-1.5 py-1 outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--accent)]/25 ${dragOver === '' ? 'bg-[var(--accent)]/10' : ''}`}
       onDragOver={(e) => { e.preventDefault(); setDragOver('') }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(null) }}
       onDrop={(e) => dropToDir(e, '')}

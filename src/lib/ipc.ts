@@ -4,6 +4,8 @@ import { SETTINGS_DEFAULTS } from './settings'
 const a = () => { if (!window.api) throw new Error('Electron API not available.'); return window.api }
 
 export const getPathForFile = (file: File): string => a().getPathForFile(file)
+/** 请主进程对本窗口补发一次真实 paste（文件树右键「粘贴」用；渲染层需先交焦点给文件树） */
+export const pasteFromClipboard = (): Promise<{ ok: boolean }> => a().pasteFromClipboard()
 export const copyImage = (src: { path?: string; dataUrl?: string }): Promise<boolean> => a().copyImage(src)
 export const copyText = (text: string): Promise<boolean> => a().copyText(text)
 
@@ -298,6 +300,8 @@ export const workspaceWriteFile = (rootId: string, relPath: string, content: str
   })
 export const workspaceCreateFile = (rootId: string, relPath: string, content?: string) => a().workspaceCreateFile(rootId, relPath, content)
 export const workspaceMkdir = (rootId: string, relPath: string) => a().workspaceMkdir(rootId, relPath)
+/** 粘贴系统剪贴板里的外部文件/目录到 relDir（srcPaths 由 paste 事件侧取得，见 types） */
+export const workspacePasteExternal = (rootId: string, relDir: string, srcPaths: string[]) => a().workspacePasteExternal(rootId, relDir, srcPaths)
 export const workspaceRename = (rootId: string, oldRel: string, newRel: string) => a().workspaceRename(rootId, oldRel, newRel)
 export const workspaceTrash = (rootId: string, relPath: string) => a().workspaceTrash(rootId, relPath)
 export const workspaceStat = (rootId: string, relPath: string) => a().workspaceStat(rootId, relPath)

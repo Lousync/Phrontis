@@ -2,7 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { createPortal } from 'react-dom'
 import {
   FolderOpen, Plus, FolderPlus, Save, SaveAll, X, Folder, FileText, ArrowLeft,
-  Pencil, Trash2, FilePlus2, Braces, ListTree, Eye, PanelRightClose, Archive, ArchiveRestore, FilePenLine, Link2, ImagePlus,
+  Pencil, Trash2, FilePlus2, Braces, ListTree, Eye, PanelRightClose, Archive, ArchiveRestore, FilePenLine, Link2, ImagePlus, ClipboardPaste,
 } from 'lucide-react'
 import type { WorkspaceRecent } from '../../types'
 import {
@@ -10,7 +10,9 @@ import {
   workspaceCreateFile, workspaceMkdir, workspaceRename, workspaceTrash, workspaceGetRecent,
   workspaceGetCurrent, workspaceSetArchiveStatus, workspaceGetArchiveEntries, getKnowledgePages, getKnowledgeGraph, onWsExternalChange,
   workspacePickImages, workspaceSaveImage, onAiTeachTreeRefresh,
+  workspacePasteExternal, pasteFromClipboard, getPathForFile,
 } from '../../lib/ipc'
+import { notifyDataChanged } from '../../lib/dataChanged'
 import { openVaultWithGuide } from '../../lib/vaultOpen'
 import { VaultSwitcher } from '../../components/shared/VaultSwitcher'
 import { showToast } from '../../lib/toast'
@@ -32,6 +34,45 @@ import { joinRel, parentRel, baseName, languageFor, splitFrontmatter, joinFrontm
 import { ConfirmDialog, ResizablePanel } from '../../components/shared'
 import { PluginSlotEntry } from '../../components/shared/PluginSlotEntry'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
+
+/**
+ * Ctrl+V 粘贴外部文件时的焦点守卫：判断这次 paste 有没有「文本接收方」。
+ *
+ * 两条判据互为保险，均为**双向实测**（2026-09-15 探针，Electron 33.2.0 / win32；
+ * 可复跑脚本 `.AGENT/scripts/editor/probes/probe-clipboard-paths.cjs`）：
+ *
+ *   焦点                     paste.target   activeElement
+ *   文件树(tabindex=0)        BODY           tree
+ *   body / 无焦点             BODY           BODY
+ *   textarea（Monaco 旧形态）  textarea       textarea
+ *   input（命名行/重命名框）    input          input
+ *   contenteditable（Monaco 新形态） div      div
+ *
+ * ① 浏览器判据：**有编辑宿主时 Chromium 把 target 指向它，否则重定向到 BODY** —— 不依赖
+ *    「哪些标签算编辑器」的名单，是浏览器自己的口径。
+ * ② 名单判据：盖住 Monaco 的两种形态。
+ * 只留 ② 会被 Monaco 换形态蒙掉；只留 ① 则把行为完全押在 Chromium 上，所以两条都留。
+ *
+ * **绝不能写成「`e.target` 在文件树内才接管」**：非可编辑焦点的 target 恒为 BODY，
+ * 那样等于永不进分支 —— Ctrl+V 永久静默失效且不报错（`verify-paste-external.mjs` 已把这条钉住）。
+ *
+ * 放模块级而非组件内：纯函数无需每轮重建，effect 依赖数组也不必为它破例。
+ */
+function hasTextPasteTarget(e: ClipboardEvent): boolean {
+  const t = e.target as Element | null
+  if (t && t !== document.body && t !== document.documentElement) return true
+  return isTextEditingTarget(document.activeElement)
+}
+
+/**
+ * 焦点是否落在「能自己接文本」的元素里（判据 ② 的名单部分）。
+ */
+function isTextEditingTarget(el: Element | null): boolean {
+  if (!el) return false
+  if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return true
+  if ((el as HTMLElement).isContentEditable) return true
+  return !!el.closest?.('.monaco-editor')
+}
 
 interface Props {
   isActive?: boolean
@@ -91,6 +132,11 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   const [activePath, setActivePath] = useState<string | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null)
   const ctxMenuRef = useRef<HTMLDivElement | null>(null)
+  /** 外部文件粘贴（v3.2.0 条目 ③）：文件树容器 ref —— 右键「粘贴」前要把焦点交给它 */
+  const treeRef = useRef<HTMLDivElement | null>(null)
+  /** 最近一次在树里点中/右键的目录：Ctrl+V 落点优先取它，再退到当前打开文件的所在目录 */
+  const lastTreeDirRef = useRef<string>('')
+  const [pasting, setPasting] = useState(false)
   const tabCtxRef = useRef<HTMLDivElement | null>(null)
   /** 资源管理器标题「+」新建下拉：锚定按钮下方展开（文件 / 文件夹 / 知识页） */
   const [createMenu, setCreateMenu] = useState<{ x: number; y: number } | null>(null)
@@ -788,6 +834,90 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     return () => window.removeEventListener('keydown', onEsc)
   }, [ctxMenu])
 
+  /**
+   * 外部文件/目录粘贴（v3.2.0 条目 ③）：把系统剪贴板里 Explorer 复制的东西落到仓库目录。
+   *
+   * **路径只能从渲染层 paste 事件的 File 对象取**（`getPathForFile`）：主进程
+   * `clipboard.readBuffer('FileNameW')` 实测只能拿到第一条，多选会静默丢文件（证据见
+   * electron/lib/workspaceManager.ts 的 ws:pasteExternal）。落盘、重名递增、越界守卫都在主进程。
+   */
+  const pasteExternalFiles = useCallback(async (files: File[], dirRel: string) => {
+    const root = rootIdRef.current
+    if (!root || files.length === 0) return
+    const srcPaths: string[] = []
+    for (const f of files) {
+      try { const p = getPathForFile(f); if (p) srcPaths.push(p) } catch { /* 取不到路径的条目丢弃 */ }
+    }
+    if (srcPaths.length === 0) return
+    setPasting(true)
+    try {
+      const res = await workspacePasteExternal(root, dirRel, srcPaths)
+      if (res.pasted.length === 0) {
+        // 全失败时要把**具体原因**带出来：主进程只在循环走完却一项没成功时不给 reason，
+        // 此时第一条 skipped 的原因（越界/符号链接/权限…）才是用户能据此行动的信息
+        showToast({
+          type: 'warning',
+          message: res.reason === 'empty'
+            ? '剪贴板里没有可粘贴的文件'
+            : `粘贴失败：${res.error || res.skipped[0]?.reason || '未知原因'}`,
+        })
+        return
+      }
+      setExpanded((prev) => new Set(prev).add(dirRel))
+      await refreshDir(dirRel)
+      // 粘进来的 .md 可能是草稿或已归档页：重读归档清单 + 图谱拿草稿徽标，并让知识库重读
+      if (res.pasted.some((n) => n.toLowerCase().endsWith('.md'))) {
+        await refreshArchived()
+        notifyDataChanged('knowledge')
+      }
+      const skippedNote = res.skipped.length > 0 ? `，已跳过 ${res.skipped.length} 项` : ''
+      showToast({
+        type: res.skipped.length > 0 ? 'warning' : 'success',
+        message: res.pasted.length === 1
+          ? `已粘贴「${res.pasted[0]}」${skippedNote}`
+          : `已粘贴 ${res.pasted.length} 项${skippedNote}`,
+      })
+    } finally {
+      setPasting(false)
+    }
+  }, [refreshDir, refreshArchived])
+
+  /** 粘贴落点：右键的那个目录 > 最近点中的目录 > 当前打开文件所在目录 > 仓库根 */
+  const resolvePasteDir = useCallback((node?: TreeNode | null): string => {
+    if (node) return node.type === 'dir' ? node.relPath : parentRel(node.relPath)
+    if (lastTreeDirRef.current) return lastTreeDirRef.current
+    const active = activePathRef.current
+    return active ? parentRel(active) : ''
+  }, [])
+
+  /**
+   * 右键「粘贴」：Ctrl+V 有真实 paste 事件（clipboardData 带 File 列表），菜单点击是合成动作
+   * 拿不到，所以先聚焦文件树再请主进程补发一次 `webContents.paste()`，复用同一条链路。
+   * 必须等 React 把菜单卸载完再聚焦——被卸载的菜单是当时 focused 元素，先聚焦会被它的
+   * blur 打回 body，粘贴就落到 Monaco 里变成插文本了（故走 rAF 等这一帧提交结束）。
+   */
+  const requestPasteFromMenu = useCallback((dirRel: string) => {
+    lastTreeDirRef.current = dirRel
+    requestAnimationFrame(() => {
+      treeRef.current?.focus()
+      void pasteFromClipboard()
+    })
+  }, [])
+
+  // Ctrl+V：剪贴板里确实是文件、且没有文本接收方时才接管；文本粘贴原样放行
+  useEffect(() => {
+    if (!isActive) return
+    const onPaste = (e: ClipboardEvent) => {
+      const files = e.clipboardData?.files
+      if (!files || files.length === 0) return
+      if (hasTextPasteTarget(e)) return
+      e.preventDefault()
+      void pasteExternalFiles(Array.from(files), resolvePasteDir())
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [isActive, pasteExternalFiles, resolvePasteDir])
+
   // 「+」新建下拉：Esc 关闭（外部点击由遮罩层处理）
   useEffect(() => {
     if (!createMenu) return
@@ -1017,7 +1147,10 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
             <>
               <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
                 <FileText size={12} />
-                资源管理器
+                {pasting ? (
+                  // swap-bar（docs/help-disclosure-pattern.md）：同一位置换文案，不新增元素
+                  <span key="pasting" className="kb-view-in text-[var(--accent)]">粘贴中…</span>
+                ) : '资源管理器'}
                 <FolderFocusButton
                   className="ml-auto"
                   on={!!zenSettings.editorFolderFocus}
@@ -1040,6 +1173,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                 </button>
               </div>
               <FileTree
+                rootRef={treeRef}
                 dirCache={dirCache}
                 softNames={softNames}
                 expanded={expanded}
@@ -1050,8 +1184,8 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                   if (isDir) setExpanded((prev) => new Set(prev).add(rel))
                   else void openFile({ name: rel.split('/').pop() || rel, type: 'file', size: 0, mtime: 0, relPath: rel })
                 }}
-                onToggleDir={(p) => void toggleDir(p)}
-                onOpenFile={(n) => void openFile(n)}
+                onToggleDir={(p) => { lastTreeDirRef.current = p; void toggleDir(p) }}
+                onOpenFile={(n) => { lastTreeDirRef.current = parentRel(n.relPath); void openFile(n) }}
                 onMove={(src, dst) => void moveNode(src, dst)}
                 creating={creating}
                 onCommitCreate={(dirRel, type, raw) => void commitCreate(dirRel, type, raw)}
@@ -1061,6 +1195,8 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                 onContextMenu={(e, n) => {
                   e.preventDefault()
                   e.stopPropagation()
+                  // 记下这次右键落点：Ctrl+V 与菜单「粘贴」都用它当落点（见 resolvePasteDir）
+                  lastTreeDirRef.current = resolvePasteDir(n)
                   setCtxMenu({ x: e.clientX, y: e.clientY, node: n })
                 }}
               />
@@ -1365,6 +1501,11 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                 <button onClick={() => { const d = ctxMenu.node.relPath; setCtxMenu(null); askCreateKnowledgePage(d) }}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
                   <FilePlus2 size={13} className="text-[var(--text-muted)]" />新建知识页
+                </button>
+                {/* 粘贴系统剪贴板里的文件/目录（Ctrl+V 同名功能的菜单入口；焦点随后交给文件树） */}
+                <button onClick={() => { const d = ctxMenu.node.relPath; setCtxMenu(null); requestPasteFromMenu(d) }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
+                  <ClipboardPaste size={13} className="text-[var(--text-muted)]" />粘贴
                 </button>
                 {/* 全类型归档（docs/vault-archive-all-files-design.md）：目录整体进出知识库（动态前缀） */}
                 {ctxMenu.node.relPath !== '' && (

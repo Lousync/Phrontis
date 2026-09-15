@@ -1159,8 +1159,22 @@ export type VaultArchiveImportResult =
   | { pending: true; target: string; totalFiles: number; conflicts: VaultArchiveConflictItem[] }
   | { pending?: false; ok?: boolean; canceled?: boolean; written?: number; skipped?: number; renamed?: number; registered?: string; rootId?: string; name?: string; path?: string; error?: string }
 
+/**
+ * 外部文件/目录粘贴结果（ws:pasteExternal，v3.2.0 条目 ③）。
+ * pasted = 落盘后的**最终文件名**（已含重名递增）；skipped = 被拒条目及原因（逐条独立，不中断其余）。
+ * reason 仅表整体失败：empty=剪贴板里没有文件项；notdir=目标不是目录；error=抛错（细节见 error）。
+ */
+export interface WorkspacePasteResult {
+  ok: boolean
+  reason?: 'empty' | 'notdir' | 'error'
+  error?: string
+  pasted: string[]
+  skipped: Array<{ path: string; reason: string }>
+}
+
 export interface ElectronAPI {
   getPathForFile: (file: File) => string
+  pasteFromClipboard: () => Promise<{ ok: boolean }>
   copyImage: (src: { path?: string; dataUrl?: string }) => Promise<boolean>
   clearClipboardIfEqual: (text: string) => Promise<boolean>
   copyText: (text: string) => Promise<boolean>
@@ -1395,6 +1409,8 @@ export interface ElectronAPI {
   workspaceGetArchiveEntries: (rootId: string) => Promise<{ ok: boolean; entries?: Array<{ id: string; path: string; type: 'file' | 'dir'; archivedAt: string }>; error?: string }>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
+  /** 粘贴系统剪贴板里的外部文件/目录到 relDir；srcPaths 由渲染层 paste 事件取得（见 WorkspacePasteResult） */
+  workspacePasteExternal: (rootId: string, relDir: string, srcPaths: string[]) => Promise<WorkspacePasteResult>
   workspaceRename: (rootId: string, oldRel: string, newRel: string) => Promise<{ ok: boolean; error?: string }>
   workspaceTrash: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string }>
   workspaceStat: (rootId: string, relPath: string) => Promise<{ size: number; mtime: number; isDir: boolean } & { error?: string }>

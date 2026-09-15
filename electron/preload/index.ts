@@ -10,6 +10,8 @@ const isDayPanel = process.argv.includes('--day-panel-window')
 
 const api = {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  // 编辑器文件树右键「粘贴」：请主进程对本窗口补发一次真实 paste 命令（渲染层先交焦点给文件树）
+  pasteFromClipboard: () => ipcRenderer.invoke('clipboard:paste'),
   copyImage: (src: { path?: string; dataUrl?: string }) => ipcRenderer.invoke('clipboard:copyImage', src),
   clearClipboardIfEqual: (text: string) => ipcRenderer.invoke('clipboard:clearIfEqual', text),
   copyText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
@@ -597,6 +599,9 @@ const api = {
   workspaceGetArchiveEntries: (rootId: string) => ipcRenderer.invoke('ws:getArchiveEntries', rootId),
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => ipcRenderer.invoke("ws:createFile", rootId, relPath, content),
   workspaceMkdir: (rootId: string, relPath: string) => ipcRenderer.invoke('ws:mkdir', rootId, relPath),
+  // 粘贴系统剪贴板里的外部文件/目录：srcPaths 由渲染层 paste 事件 + webUtils.getPathForFile 取得
+  // （主进程 clipboard.readBuffer('FileNameW') 实测只能拿到第一条，多选会丢文件——见 ws:pasteExternal 注释）
+  workspacePasteExternal: (rootId: string, relDir: string, srcPaths: string[]) => ipcRenderer.invoke('ws:pasteExternal', rootId, relDir, srcPaths),
   workspaceRename: (rootId: string, oldRel: string, newRel: string) => ipcRenderer.invoke('ws:rename', rootId, oldRel, newRel),
   workspaceTrash: (rootId: string, relPath: string) => ipcRenderer.invoke('ws:trash', rootId, relPath),
   workspaceStat: (rootId: string, relPath: string) => ipcRenderer.invoke('ws:stat', rootId, relPath),

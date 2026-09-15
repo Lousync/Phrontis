@@ -802,6 +802,18 @@ app.whenReady().then(async () => {
       return false
     }
   })
+  /**
+   * 向发起窗口补发一次真实粘贴命令（编辑器文件树右键「粘贴」用，v3.2.0 条目 ③）。
+   *
+   * Ctrl+V 会自然产生带 `clipboardData.files` 的 paste 事件，但**右键菜单点击是合成动作**，
+   * 拿不到 clipboardData；所以由渲染层先把焦点交给文件树，再请主进程代为执行
+   * `webContents.paste()`，从而复用同一条 paste 链路（落盘见 ws:pasteExternal）。
+   * 用 `e.sender` 而非 mainWindow：多窗口下必须打在发起方（小窗也有编辑器宿主）。
+   */
+  ipcMain.handle('clipboard:paste', (e) => {
+    try { e.sender.paste() } catch { /* 窗口已销毁等：静默 */ }
+    return { ok: true }
+  })
   ipcMain.handle('app:openExternal', async (_e, target: string) => {
     if (typeof target !== 'string' || !target) return
     // 网页链接 → 系统浏览器(仅 http/https,拒绝 file:/自定义协议)

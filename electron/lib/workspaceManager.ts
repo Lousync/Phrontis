@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow, dialog, app, shell } from 'electron'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, openSync, readSync, closeSync } from 'fs'
-import { basename, join, relative, resolve, sep, extname, dirname } from 'path'
+import { basename, join, relative, resolve, sep, extname, dirname, isAbsolute } from 'path'
+import { cp } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { setCurrentVault, ensureKbRoot, readCurrentVaultId, getCurrentVault, ATTACHMENTS_DIR, readRecentVaults, forgetRecentVault, markRecentDeleted, clearRecentDeleted, setVaultMetaName } from './kbStore/vaultContext'
 import { writeWelcomeDocOnce, importWelcomeDoc, getWelcomeDocState, WELCOME_DOC_FILENAME } from './kbStore/welcomeDoc'
@@ -28,6 +29,7 @@ import { rootDirName } from './aiTeachingFolders'
 
 const MAX_EDIT_SIZE = 10 * 1024 * 1024 // >10MB 拒绝编辑（只读）
 const MAX_OPEN_SIZE = 50 * 1024 * 1024 // >50MB 拒绝打开
+const MAX_PASTE_ITEMS = 500 // 单次粘贴条目上限（超出部分记为 skipped，不静默丢弃）
 const BINARY_NUL_RATIO = 0.05 // 前 512 字节 NUL 占比 >5% 判二进制
 const HIDDEN_DIRS = new Set([
   '.git', 'node_modules', 'out', 'dist', '.obsidian', '__pycache__',
@@ -151,6 +153,25 @@ export function uniqueFileName(parentAbs: string, baseName: string): string {
   const stem = baseName.slice(0, baseName.length - ext.length)
   for (let i = 1; i < 10_000; i++) {
     const next = `${stem}(${i})${ext}`
+    if (!existsSync(join(parentAbs, next))) return next
+  }
+  return baseName // 兜底（理论不可达）
+}
+
+/**
+ * VS Code 风格重名递增（粘贴外部文件专用，与 `uniqueFileName` 的 `(N)` 口径**故意不同**）：
+ * `a.md` → `a copy.md` → `a copy 2.md` → `a copy 3.md`；无扩展名的目录同规则（`subdir copy`）。
+ *
+ * 为什么要两套口径：`uniqueFileName` 服务于「新建文件撞名」，`a(1).md` 是系统惯例；
+ * 而「粘贴」是对标 VS Code/资源管理器的复制语义，用户看到 `xxx copy.md` 才知道这是副本。
+ * 两者都是**纯函数**（只读 existsSync），供契约脚本直接断言。
+ */
+export function vscodeCopyName(parentAbs: string, baseName: string): string {
+  if (!existsSync(join(parentAbs, baseName))) return baseName
+  const ext = extname(baseName)
+  const stem = baseName.slice(0, baseName.length - ext.length)
+  for (let i = 0; i < 10_000; i++) {
+    const next = i === 0 ? `${stem} copy${ext}` : `${stem} copy ${i + 1}${ext}`
     if (!existsSync(join(parentAbs, next))) return next
   }
   return baseName // 兜底（理论不可达）
@@ -859,6 +880,54 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       return { ok: true, relPath: finalRel, renamed: finalName !== requestedName }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
+    }
+  })
+
+  /**
+   * 粘贴系统剪贴板里的外部文件/目录到仓库内某个目录（v3.2.0 条目 ③）。
+   *
+   * **路径来源为什么在渲染层**：主进程侧唯一的读法是 `clipboard.readBuffer('FileNameW')`，
+   * 实测（2026-09-15 探针，Electron 33.2.0 / win32）它**只能拿到第一条路径**、且载荷里没有
+   * DROPFILES 头——同一次剪贴板，PS 回读 3/3、渲染层 paste 事件 3/3、主进程只得 1/3，
+   * 即多选会**静默丢文件**。故改由渲染层 `paste` 事件 + `webUtils.getPathForFile` 取全量路径
+   * （Electron 32+ 官方路线，File.path 已移除），本通道只负责落盘。
+   *
+   * 因而 `srcPaths` 是**不可信输入**，逐条校验（绝对路径 / 真实存在 / 非符号链接）；
+   * 目标目录仍由 requireInside 单向守——渲染层永远只说 `{ rootId, relDir }`，不接触落盘绝对路径。
+   */
+  ipcMain.handle('ws:pasteExternal', async (_e, rootId: string, relDir: string, srcPaths: unknown) => {
+    const skipped: Array<{ path: string; reason: string }> = []
+    const pasted: string[] = []
+    try {
+      const destDir = requireInside(rootId, relDir)
+      const list = Array.isArray(srcPaths)
+        ? srcPaths.filter((p): p is string => typeof p === 'string' && p.length > 0)
+        : []
+      if (list.length === 0) return { ok: false, reason: 'empty', pasted, skipped }
+      if (!statSync(destDir).isDirectory()) return { ok: false, reason: 'notdir', pasted, skipped }
+
+      for (let i = 0; i < list.length; i++) {
+        const src = list[i]
+        if (i >= MAX_PASTE_ITEMS) { skipped.push({ path: src, reason: `超出单次上限 ${MAX_PASTE_ITEMS}` }); continue }
+        try {
+          if (!isAbsolute(src)) { skipped.push({ path: src, reason: '不是绝对路径' }); continue }
+          const lst = lstatSync(src) // lstat：不跟随符号链接，避免把仓库外内容链进来
+          if (lst.isSymbolicLink()) { skipped.push({ path: src, reason: '符号链接' }); continue }
+          const name = basename(src)
+          if (!name) { skipped.push({ path: src, reason: '无法解析文件名' }); continue }
+          // 把某目录粘进它自己（或其子孙）会无限递归；把仓库根粘进仓库同理
+          if (isInside(src, destDir)) { skipped.push({ path: src, reason: '目标位于源目录内' }); continue }
+          const finalName = vscodeCopyName(destDir, name)
+          await cp(src, join(destDir, finalName), { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true })
+          pasted.push(finalName)
+        } catch (err) {
+          skipped.push({ path: src, reason: (err as Error).message })
+        }
+      }
+      if (pasted.some((n) => /\.md$/i.test(n))) invalidateIndexIfCurrentVault(rootId)
+      return { ok: pasted.length > 0, pasted, skipped }
+    } catch (e) {
+      return { ok: false, reason: 'error', error: (e as Error).message, pasted, skipped }
     }
   })
 
