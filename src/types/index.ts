@@ -2,8 +2,26 @@
 
 import type { DictLookupResult, DictStatus, DictWordEntry, DictExchange, TranslateMode, TranslateInvokeRequest, TranslateInvokeResult } from '../lib/translateTypes'
 import type { GraphIndexData, GraphViewConfig } from '../lib/graphTypes'
+import type { SummaryKind } from '../lib/summary'
 
 export type { DictLookupResult, DictStatus, DictWordEntry, DictExchange, TranslateMode, TranslateInvokeRequest, TranslateInvokeResult }
+
+/**
+ * 层级总结（周 / 月 / 年）文件 —— `.knowbase/blog/summaries/summary-<kind>-<start>_<end>.md`。
+ *
+ * 窗口口径是**日历口径**（自然周 / 自然月 / 自然年），与桌面上日历逐格对齐；
+ * 与 `getSummaryWindow`（总结日 −6 天，只做提醒与徽章）是两套，别混用 —— 见 `src/lib/summary.ts` 头部说明。
+ */
+export interface SummaryRecord {
+  id: string
+  kind: SummaryKind
+  start: string
+  end: string
+  title: string
+  contentMd: string
+  createdAt: string
+  updatedAt: string
+}
 
 export interface Entry {
   id: string; title: string; contentMd: string; contentHtml: string
@@ -1501,6 +1519,11 @@ export interface ElectronAPI {
     pomodoroMinutes: number
     scheduleDone: number
   }>
+  // 层级总结文件（周 / 月 / 年）—— .knowbase/blog/summaries/
+  listSummaries: () => Promise<SummaryRecord[]>
+  getSummaryById: (id: string) => Promise<SummaryRecord | null>
+  ensureSummary: (kind: SummaryKind, start: string, end: string) => Promise<SummaryRecord>
+  saveSummary: (id: string, contentMd: string) => Promise<SummaryRecord>
   // blog templates
   listBlogTemplates: () => Promise<BlogTemplate[]>
   createBlogTemplate: (d: { name: string; contentMd?: string }) => Promise<BlogTemplate | null>

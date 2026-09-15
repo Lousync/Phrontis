@@ -13,12 +13,12 @@ import {
   getScheduleTodos, updateScheduleTodo,
   habitGetAll, toggleHabitCheck,
   getKnowledgePages, getKnowledgeCategories, getKnowledgeTags,
-  getMomentsPosts,
+  getMomentsPosts, listSummaries,
 } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
 import type {
   ScheduleTodo, Habit, HabitRecord, KnowledgePage, KnowledgeCategory,
-  KnowledgeTag, MomentsPost,
+  KnowledgeTag, MomentsPost, SummaryRecord,
 } from '../../types'
 
 /* ---------------- 日期小工具（全部按本地时区，不用 toISOString 免得跨时区串日） ---------------- */
@@ -48,10 +48,14 @@ export interface DesktopData {
   categories: KnowledgeCategory[]
   tags: KnowledgeTag[]
   moments: MomentsPost[]
+  /** 层级总结文件（周 / 月 / 年），供日程面板的总结入口判断是否已生成 */
+  summaries: SummaryRecord[]
   loaded: boolean
   /** 桌面上的打卡/勾待办：写回后端 */
   toggleTodo: (id: string, done: boolean) => Promise<void>
   toggleHabit: (habitId: string) => Promise<void>
+  /** 切换指定日期的打卡（与 toggleHabit 同源乐观更新，但允许指定日期） */
+  toggleHabitOn: (habitId: string, date: string) => Promise<void>
   /** 手动重拉（「刷新」按钮 / 外部文件系统变更后） */
   refresh: () => void
 }
@@ -65,19 +69,21 @@ export function useDesktopData(): DesktopData {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [tags, setTags] = useState<KnowledgeTag[]>([])
   const [moments, setMoments] = useState<MomentsPost[]>([])
+  const [summaries, setSummaries] = useState<SummaryRecord[]>([])
   const [loaded, setLoaded] = useState(false)
 
   const load = useCallback(async (): Promise<void> => {
     // 每个源独立 catch：仓库没打开 / 某个模块数据坏掉时，其余磁贴照常显示
     const day = todayIso()
     setToday(day)
-    const [td, hb, pg, cat, tg, mo] = await Promise.all([
+    const [td, hb, pg, cat, tg, mo, sm] = await Promise.all([
       getScheduleTodos(day).catch(() => [] as ScheduleTodo[]),
       habitGetAll().catch(() => ({ habits: [] as Habit[], records: [] as HabitRecord[] })),
       getKnowledgePages().catch(() => [] as KnowledgePage[]),
       getKnowledgeCategories().catch(() => [] as KnowledgeCategory[]),
       getKnowledgeTags().catch(() => [] as KnowledgeTag[]),
       getMomentsPosts().catch(() => [] as MomentsPost[]),
+      listSummaries().catch(() => [] as SummaryRecord[]),
     ])
     setTodos(Array.isArray(td) ? td : [])
     setHabits(Array.isArray(hb?.habits) ? hb.habits.filter((h) => !h.archived) : [])
@@ -86,6 +92,7 @@ export function useDesktopData(): DesktopData {
     setCategories(Array.isArray(cat) ? cat : [])
     setTags(Array.isArray(tg) ? tg : [])
     setMoments(Array.isArray(mo) ? mo : [])
+    setSummaries(Array.isArray(sm) ? sm : [])
     setLoaded(true)
   }, [])
 
@@ -128,9 +135,22 @@ export function useDesktopData(): DesktopData {
     }
   }, [records, load])
 
+  const toggleHabitOn = useCallback(async (habitId: string, date: string): Promise<void> => {
+    // 与 toggleHabit 同一套乐观更新，但允许指定日期（IPC 本来就支持任意日期）
+    const has = records.some((r) => r.habitId === habitId && r.date === date)
+    setRecords((prev) => has
+      ? prev.filter((r) => !(r.habitId === habitId && r.date === date))
+      : [...prev, { id: `optimistic-${habitId}-${date}`, habitId, date }])
+    try {
+      await toggleHabitCheck(habitId, date)
+    } finally {
+      void load()
+    }
+  }, [records, load])
+
   return {
-    today, todos, habits, records, pages, categories, tags, moments,
-    loaded, toggleTodo, toggleHabit, refresh: () => { void load() },
+    today, todos, habits, records, pages, categories, tags, moments, summaries,
+    loaded, toggleTodo, toggleHabit, toggleHabitOn, refresh: () => { void load() },
   }
 }
 

@@ -401,6 +401,12 @@ export interface PeriodStats {
 }
 export const getBlogPeriodStats = (start: string, end: string): Promise<PeriodStats> => a().getBlogPeriodStats(start, end)
 
+// ===== 层级总结文件（周 / 月 / 年）—— 窗口口径见 lib/summary.ts =====
+export const listSummaries = () => a().listSummaries()
+export const getSummaryById = (id: string) => a().getSummaryById(id)
+export const ensureSummary = (kind: 'week' | 'month' | 'year', start: string, end: string) => a().ensureSummary(kind, start, end)
+export const saveSummary = (id: string, contentMd: string) => a().saveSummary(id, contentMd)
+
 // ===== Blog Templates =====
 export const listBlogTemplates = () => a().listBlogTemplates()
 export const createBlogTemplate = (d: { name: string; contentMd?: string }) => a().createBlogTemplate(d)

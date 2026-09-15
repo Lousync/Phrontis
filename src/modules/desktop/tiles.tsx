@@ -21,6 +21,8 @@ import {
 } from '../../components/shared/ModuleIcons'
 import type { DesktopData, DerivedStats } from './useDesktopData'
 import { hasCheckOn, shiftDays } from './useDesktopData'
+import { isoWeekNo, weekRangeOf, monthRangeOf, yearRangeOf, summaryWindowsAt } from '../../lib/summary'
+import { Collapsible } from '../../components/shared/Collapsible'
 
 export interface TileCtx {
   w: number
@@ -94,6 +96,7 @@ function greetingOf(hour: number): string {
 }
 
 const pad2 = (n: number): string => String(n).padStart(2, '0')
+const isoStr = (d: Date): string => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 
 /** 时钟卡：问候语 + 超大时间 + 日期（参照图的时钟卡布局） */
 function ClockTile(): ReactNode {
@@ -112,49 +115,267 @@ function ClockTile(): ReactNode {
   )
 }
 
-/** 月历卡：可翻月；今天圆角高亮；有打卡的日子带点 */
-function CalendarTile({ today, records }: { today: string; records: HabitRecord[] }): ReactNode {
+/**
+ * 月历 / 日历卡（可点，四类跳转）：周一起表头 + 首列周号（ISO 周号，如 W34）。
+ * 「月历」磁贴与「日程面板」的日历段共用同一份实现。
+ * 四类点击（全部派发事件，由 blog 侧按窗口打开 / 生成总结文件）：
+ *   点日期 → blog-open-date       点周号 → blog-open-summary(kind:week)
+ *   点标题里的月 → blog-open-summary(kind:month)  点标题里的年 → blog-open-summary(kind:year)
+ * 注：磁贴拖拽只在编辑态（onPointerDown 命中 `.desk-tile` 且 editing 为真）触发，
+ * 非编辑态点是安全的；编辑态下 `.desk-tile-body` 已是 pointer-events:none，按钮本身也点不到。
+ * 沿用 content:checkin 行按钮的先例：不在按钮上写 stopPropagation。
+ */
+function MiniCalendar({ today, records }: { today: string; records: HabitRecord[] }): ReactNode {
   const [off, setOff] = useState(0)
   const [ty, tm, td] = today.split('-').map(Number)
   const view = new Date(ty, (tm || 1) - 1 + off, 1)
   const y = view.getFullYear()
   const m = view.getMonth()
 
-  const cells: Array<number | null> = []
-  const firstDow = new Date(y, m, 1).getDay()
-  const dayCount = new Date(y, m + 1, 0).getDate()
-  for (let i = 0; i < firstDow; i++) cells.push(null)
-  for (let d = 1; d <= dayCount; d++) cells.push(d)
-  while (cells.length % 7 !== 0) cells.push(null)
+  const leading = (new Date(y, m, 1).getDay() + 6) % 7 // 周一起：1 号前的占位天数
+  const total = new Date(y, m + 1, 0).getDate()
+  const cells: number[] = []
+  for (let i = 0; i < leading; i++) cells.push(0)
+  for (let d = 1; d <= total; d++) cells.push(d)
+  while (cells.length % 7 !== 0) cells.push(0)
 
-  const isToday = (d: number): boolean => off === 0 && y === ty && m === (tm || 1) - 1 && d === td
-  const checkedOn = (d: number): boolean => hasCheckOn(records, `${y}-${pad2(m + 1)}-${pad2(d)}`)
+  // 按周切片：每周取周一算 ISO 周号与周窗口
+  const startMonday = new Date(y, m, 1 - leading)
+  const weeks: Array<{
+    key: number
+    wno: number
+    start: string
+    end: string
+    days: Array<{ d: number; ds: string; isToday: boolean; marked: boolean }>
+  }> = []
+  for (let w = 0; w < cells.length / 7; w++) {
+    const monday = new Date(startMonday.getFullYear(), startMonday.getMonth(), startMonday.getDate() + w * 7)
+    const mondayStr = isoStr(monday)
+    const wr = weekRangeOf(mondayStr)
+    const days = cells.slice(w * 7, w * 7 + 7).map((d) => {
+      if (d === 0) return { d: 0, ds: '', isToday: false, marked: false }
+      const ds = `${y}-${pad2(m + 1)}-${pad2(d)}`
+      return { d, ds, isToday: off === 0 && d === td, marked: hasCheckOn(records, ds) }
+    })
+    weeks.push({ key: w, wno: isoWeekNo(mondayStr), start: wr.start, end: wr.end, days })
+  }
+
+  const openSummary = (kind: 'week' | 'month' | 'year', start: string, end: string): void => {
+    window.dispatchEvent(new CustomEvent('blog-open-summary', { detail: { kind, start, end } }))
+  }
+
+  const grid: ReactNode[] = []
+  grid.push(<span key="wk-head" className="desk-cal-wk-head" />)
+  for (const w of ['一', '二', '三', '四', '五', '六', '日']) {
+    grid.push(<span key={`wd-${w}`} className="desk-cal-wd">{w}</span>)
+  }
+  for (const week of weeks) {
+    grid.push(
+      <button
+        key={`wk-${week.key}`}
+        className="desk-cal-wk"
+        title={`第 ${week.wno} 周总结`}
+        onClick={() => openSummary('week', week.start, week.end)}
+      >
+        W{week.wno}
+      </button>,
+    )
+    week.days.forEach((c, i) => {
+      if (c.d === 0) {
+        grid.push(<span key={`b-${week.key}-${i}`} className="desk-cal-cell is-blank" />)
+        return
+      }
+      grid.push(
+        <span
+          key={`c-${week.key}-${c.d}`}
+          className={`desk-cal-cell${c.isToday ? ' is-today' : ''}${c.marked ? ' is-marked' : ''}`}
+          title={c.marked ? `${c.ds} · 有打卡` : c.ds}
+          onClick={() => window.dispatchEvent(new CustomEvent('blog-open-date', { detail: { date: c.ds } }))}
+        >
+          {c.d}
+        </span>,
+      )
+    })
+  }
 
   return (
     <div className="desk-cal">
       <div className="desk-cal-head">
         <button className="desk-cal-nav" onClick={() => setOff((v) => v - 1)} title="上个月"><ChevronLeft size={13} /></button>
-        <span className="desk-cal-title">{y} 年 {m + 1} 月</span>
+        <div className="desk-cal-title">
+          <button className="desk-cal-lk" title="查看年度总结" onClick={() => { const r = yearRangeOf(y); openSummary('year', r.start, r.end) }}>{y} 年</button>
+          <button className="desk-cal-lk" title="查看月度总结" onClick={() => { const r = monthRangeOf(y, m + 1); openSummary('month', r.start, r.end) }}>{m + 1} 月</button>
+        </div>
         <button className="desk-cal-nav" onClick={() => setOff((v) => v + 1)} title="下个月"><ChevronRight size={13} /></button>
         {off !== 0 && (
           <button className="desk-cal-back" onClick={() => setOff(0)} title="回到本月">今天</button>
         )}
       </div>
-      <div className="desk-cal-grid">
-        {['日', '一', '二', '三', '四', '五', '六'].map((w) => (
-          <span key={w} className="desk-cal-wd">{w}</span>
-        ))}
-        {cells.map((d, i) => (
-          <span
-            key={i}
-            className={`desk-cal-cell${d === null ? ' is-blank' : ''}${d !== null && isToday(d) ? ' is-today' : ''}${d !== null && checkedOn(d) ? ' is-marked' : ''}`}
-            title={d === null ? undefined : checkedOn(d) ? '这天有打卡' : undefined}
-          >
-            {d ?? ''}
-          </span>
-        ))}
+      <div className="desk-cal-grid desk-cal-grid-wk">{grid}</div>
+    </div>
+  )
+}
+
+const DAYBOOK_COLLAPSE_KEY = 'desk.daybook.collapsed'
+
+function readDaybookCollapsed(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(DAYBOOK_COLLAPSE_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
+  } catch { return {} }
+}
+function writeDaybookCollapsed(v: Record<string, boolean>): void {
+  try { localStorage.setItem(DAYBOOK_COLLAPSE_KEY, JSON.stringify(v)) } catch { /* 忽略写入异常 */ }
+}
+
+/**
+ * 日程面板：① 日历 ② 打卡记录 ③ 总结入口 ④ 最近编辑，四段各自可折叠，
+ * 折叠态持久化到 localStorage（键 desk.daybook.collapsed，JSON 对象，缺省全展开）。
+ */
+function DaybookTile({ w, h, data, onOpen }: { w: number; h: number; data: DesktopData; onOpen: (t: TabName) => void }): ReactNode {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readDaybookCollapsed)
+
+  const toggle = (key: string): void => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [key]: !prev[key] }
+      writeDaybookCollapsed(next)
+      return next
+    })
+  }
+  const isOpen = (key: string): boolean => !collapsed[key]
+
+  const recentList = [...data.pages]
+    .filter((p) => p.status !== 'draft')
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, rowsFor(h, 2, 6))
+
+  const wins = summaryWindowsAt(data.today)
+  const hasSummary = (kind: string, start: string, end: string): boolean =>
+    data.summaries.some((s) => s.kind === kind && s.start === start && s.end === end)
+  const winText = (kind: string, start: string, end: string): string => {
+    if (kind === 'week') return `${start.slice(5).replace('-', '.')} ~ ${end.slice(5).replace('-', '.')}`
+    if (kind === 'month') return `${start.slice(0, 4)} 年 ${start.slice(5, 7)} 月`
+    return `${start.slice(0, 4)} 年`
+  }
+  const badge = (kind: string): string => (kind === 'week' ? '周' : kind === 'month' ? '月' : '年')
+
+  const dotN = w >= 4 ? 7 : w >= 3 ? 5 : 4
+  const dotDays = Array.from({ length: dotN }, (_, i) => shiftDays(data.today, -(dotN - 1 - i)))
+
+  return (
+    <div className="desk-db-scroll">
+      {/* ① 日历 */}
+      <div className="desk-db-sec">
+        <DaybookSectionHead open={isOpen('calendar')} onToggle={() => toggle('calendar')} icon={<CalendarDays size={13} className="desk-db-sec-ico" />} title="日历" />
+        <Collapsible open={isOpen('calendar')}>
+          {() => <MiniCalendar today={data.today} records={data.records} />}
+        </Collapsible>
+      </div>
+
+      {/* ② 打卡记录：每个习惯一行，最近 N 天圆点可点切换那天打卡 */}
+      <div className="desk-db-sec">
+        <DaybookSectionHead open={isOpen('checkin')} onToggle={() => toggle('checkin')} icon={<CalendarCheck size={13} className="desk-db-sec-ico" />} title="打卡记录" />
+        <Collapsible open={isOpen('checkin')}>
+          {() => (
+            data.habits.length === 0
+              ? <Empty text="还没有习惯，去日程里建一个" />
+              : (
+                <div className="desk-db-habits">
+                  {data.habits.slice(0, rowsFor(h, 3, 8)).map((hb) => {
+                    const onCount = dotDays.filter((d) => data.records.some((r) => r.habitId === hb.id && r.date === d)).length
+                    return (
+                      <div key={hb.id} className="desk-db-habit">
+                        <span className="desk-db-habit-name" title={hb.name}>{hb.name}</span>
+                        <span className="desk-db-dots">
+                          {dotDays.map((d) => {
+                            const on = data.records.some((r) => r.habitId === hb.id && r.date === d)
+                            const isToday = d === data.today
+                            return (
+                              <button
+                                key={d}
+                                className={`desk-db-dot${on ? ' is-on' : ''}${isToday ? ' is-today' : ''}`}
+                                title={`${d}${on ? ' · 已打卡' : ' · 未打卡'}`}
+                                onClick={() => { void data.toggleHabitOn(hb.id, d) }}
+                              />
+                            )
+                          })}
+                        </span>
+                        <span className="desk-db-habit-cnt">{onCount}/{dotN}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+          )}
+        </Collapsible>
+      </div>
+
+      {/* ③ 总结入口：周 / 月 / 年 三档，已有总结→打开，否则→生成 */}
+      <div className="desk-db-sec">
+        <DaybookSectionHead open={isOpen('summary')} onToggle={() => toggle('summary')} icon={<History size={13} className="desk-db-sec-ico" />} title="总结入口" />
+        <Collapsible open={isOpen('summary')}>
+          {() => (
+            <div className="desk-db-sums">
+              {wins.map((wn) => {
+                const exists = hasSummary(wn.kind, wn.start, wn.end)
+                return (
+                  <div key={wn.kind} className="desk-db-sum-row">
+                    <span className="desk-db-badge">{badge(wn.kind)}</span>
+                    <span className="desk-db-win">{winText(wn.kind, wn.start, wn.end)}</span>
+                    <button
+                      className="desk-db-act"
+                      onClick={() => window.dispatchEvent(new CustomEvent('blog-open-summary', { detail: { kind: wn.kind, start: wn.start, end: wn.end } }))}
+                    >
+                      {exists ? '打开' : '生成'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Collapsible>
+      </div>
+
+      {/* ④ 最近编辑：照 content:recent 的写法 */}
+      <div className="desk-db-sec">
+        <DaybookSectionHead open={isOpen('recent')} onToggle={() => toggle('recent')} icon={<FileClock size={13} className="desk-db-sec-ico" />} title="最近编辑" />
+        <Collapsible open={isOpen('recent')}>
+          {() => (
+            recentList.length === 0
+              ? <Empty text="仓库里还没有页面" />
+              : (
+                <div className="desk-rows">
+                  {recentList.map((p) => (
+                    <button
+                      key={p.id}
+                      className="desk-row desk-row-btn"
+                      title={p.path ?? p.title}
+                      onClick={() => {
+                        if (p.path) window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: p.path, from: 'desktop' } }))
+                        else onOpen('knowledge')
+                      }}
+                    >
+                      <span className="desk-row-txt">{p.title || p.path || '(未命名)'}</span>
+                      <span className="desk-row-meta">{relTime(p.updatedAt)}</span>
+                    </button>
+                  ))}
+                </div>
+              )
+          )}
+        </Collapsible>
       </div>
     </div>
+  )
+}
+
+/** 日程面板段标题行（图标 + 文字 + 右侧 chevron）。模块作用域，避免每次渲染重挂子树。 */
+function DaybookSectionHead({ open, onToggle, icon, title }: { open: boolean; onToggle: () => void; icon: ReactNode; title: string }): ReactNode {
+  return (
+    <button className="desk-db-sec-head" onClick={onToggle}>
+      {icon}
+      <span className="desk-db-sec-txt">{title}</span>
+      <ChevronRight size={13} className={`kb-chevron${open ? ' is-open' : ''}`} />
+    </button>
   )
 }
 
@@ -213,12 +434,23 @@ const CONTENT_TILES: TileDef[] = [
     key: 'content:calendar',
     label: '月历',
     kind: 'content',
-    desc: '本月日历，今日高亮；可翻月、点「今天」回来',
+    desc: '本月日历（周一起、带周号）；点日期/周号/月份/年份直达对应日志或总结',
     icon: (s) => <CalendarDays size={s} />,
     defaultW: 2,
     defaultH: 2,
     tail: ({ stats }) => (stats.streak ? `连续 ${stats.streak} 天` : ''),
-    render: ({ data }) => <CalendarTile today={data.today} records={data.records} />,
+    render: ({ data }) => <MiniCalendar today={data.today} records={data.records} />,
+  },
+  {
+    key: 'content:daybook',
+    label: '日程面板',
+    kind: 'content',
+    desc: '日历 / 打卡 / 总结 / 最近编辑，可点跳转的一屏日程总览',
+    icon: (s) => <CalendarDays size={s} />,
+    defaultW: 2,
+    defaultH: 5,
+    tail: ({ stats }) => (stats.streak ? `连续 ${stats.streak} 天` : ''),
+    render: ({ w, h, data, onOpen }) => <DaybookTile w={w} h={h} data={data} onOpen={onOpen} />,
   },
   {
     key: 'content:activity',

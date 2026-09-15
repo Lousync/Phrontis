@@ -31,6 +31,7 @@ import { registerBookmarkHandlers } from '../database/repositories/bookmarkRepo'
 import { registerSuperviseHandlers } from '../database/repositories/superviseRepo'
 import { registerSummaryHandlers } from '../database/repositories/summaryRepo'
 import { registerBlogTemplateHandlers } from '../database/repositories/blogTemplateRepo'
+import { registerBlogSummaryHandlers } from '../database/repositories/blogSummaryRepo'
 import { registerQuizHandlers } from '../database/repositories/quizRepo'
 import { startSuperviseScheduler, stopSuperviseScheduler, enqueueExternalPush } from '../lib/pushService'
 import { initScheduleReminders } from '../lib/scheduleReminder'
@@ -864,6 +865,7 @@ app.whenReady().then(async () => {
   registerBookmarkHandlers()
   registerSuperviseHandlers()
   registerSummaryHandlers()
+  registerBlogSummaryHandlers()
   registerBlogTemplateHandlers()
   registerQuizHandlers({ getSettingValue: (key) => settingsCache[key] })
   // 开发者工具(内部对 app.isPackaged 自行守卫,打包版不注册任何 handler)

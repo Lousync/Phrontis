@@ -45,6 +45,8 @@ import type { PluginCommandInfo } from './types'
    **真正的大头（monaco 8.3MB / pdfjs / heic-to）仍由各自宿主组件 lazy 拆出**，
    兼顾启动体积与切换手感。 */
 import { BlogModule } from './modules/blog'
+import type { BlogJump } from './modules/blog'
+import type { SummaryKind } from './lib/summary'
 import { ScheduleModule } from './modules/schedule'
 import { KnowledgeModule } from './modules/knowledge'
 import { MomentsModule } from './modules/moments'
@@ -528,6 +530,32 @@ export default function App() {
     return () => window.removeEventListener('kb-open-in-editor', handler)
   }, [])
 
+  // 日程侧边栏（v3.2.0 ⑮）桌面磁贴的日历 → 日志跳转。
+  // 与 kb-open-in-editor 同范式：事件只送意图，payload 走 state + props
+  // （保活层会重建 BlogModule 实例，靠 window 一次性变量会丢）。消费后立即清空，
+  // 免得切走再切回又跳一次。
+  const [pendingBlogJump, setPendingBlogJump] = useState<BlogJump | null>(null)
+  useEffect(() => {
+    const onDate = (e: Event) => {
+      const date = (e as CustomEvent<{ date?: string }>).detail?.date
+      if (typeof date !== 'string' || !date) return
+      setPendingBlogJump({ kind: 'date', date })
+      setActiveTab('blog')
+    }
+    const onSummary = (e: Event) => {
+      const d = (e as CustomEvent<{ kind?: SummaryKind; start?: string; end?: string }>).detail
+      if (!d?.kind || !d.start || !d.end) return
+      setPendingBlogJump({ kind: 'summary', summaryKind: d.kind, start: d.start, end: d.end })
+      setActiveTab('blog')
+    }
+    window.addEventListener('blog-open-date', onDate)
+    window.addEventListener('blog-open-summary', onSummary)
+    return () => {
+      window.removeEventListener('blog-open-date', onDate)
+      window.removeEventListener('blog-open-summary', onSummary)
+    }
+  }, [])
+
   // Listen for help:open — navigate to help tab(入口:设置弹出菜单/Toast 深链)
   useEffect(() => {
     const handler = () => { setActiveTab('help'); setSidebarOpen(true) }
@@ -756,7 +784,7 @@ export default function App() {
       // 桌面外壳：磁贴点开模块一律回到 handleTabChange（= 点活动栏图标），
       // 于是侧栏展开、分屏冲突处理等既有行为全部自动继承，桌面侧不需要知道这些规则。
       case 'desktop': return <DesktopModule isActive={on} onOpenModule={handleTabChange} />
-      case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} />
+      case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} />
       case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} />
       case 'moments': return <MomentsModule />

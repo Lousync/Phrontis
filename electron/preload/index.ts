@@ -460,6 +460,11 @@ const api = {
   // period summary (weekly / monthly)
   createPomodoroSession: (minutes: number) => ipcRenderer.invoke('pomodoro:createSession', minutes),
   getBlogPeriodStats: (start: string, end: string) => ipcRenderer.invoke('blog:periodStats', start, end),
+  // 层级总结文件（周 / 月 / 年，.knowbase/blog/summaries/）
+  listSummaries: () => ipcRenderer.invoke('blog:listSummaries'),
+  getSummaryById: (id: string) => ipcRenderer.invoke('blog:getSummaryById', id),
+  ensureSummary: (kind: string, start: string, end: string) => ipcRenderer.invoke('blog:ensureSummary', kind, start, end),
+  saveSummary: (id: string, contentMd: string) => ipcRenderer.invoke('blog:saveSummary', id, contentMd),
   // blog templates
   listBlogTemplates: () => ipcRenderer.invoke('blogTpl:list'),
   createBlogTemplate: (d: unknown) => ipcRenderer.invoke('blogTpl:create', d),

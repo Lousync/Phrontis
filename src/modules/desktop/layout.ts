@@ -23,15 +23,16 @@ export interface DesktopPreset {
   tiles: TileLayout[]
 }
 
-/** 尺寸边界（格）。上限刻意压到 4×3：再大就会把「一屏看全」这件事毁掉。 */
+/** 尺寸边界（格）。高放宽到 6：让「日程面板」之类能竖着占满一屏。MAX_W 保持 4。 */
 export const MIN_W = 1
 export const MAX_W = 4
 export const MIN_H = 1
-export const MAX_H = 3
+export const MAX_H = 6
 
-/** 点尺寸标签时按档轮转的顺序（从小到大一圈） */
+/** 点尺寸标签时按档轮转的顺序（从小到大一圈）。前九档沿用旧序，后面补更高的高度档。 */
 export const SIZE_CYCLE: ReadonlyArray<readonly [number, number]> = [
   [1, 1], [2, 1], [3, 1], [2, 2], [3, 2], [1, 2], [4, 2], [2, 3], [1, 3],
+  [3, 3], [4, 3], [2, 4], [3, 4], [4, 4], [2, 5], [3, 5], [4, 5], [2, 6], [3, 6], [4, 6],
 ]
 
 let seq = 0

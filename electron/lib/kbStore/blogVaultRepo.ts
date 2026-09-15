@@ -3,6 +3,10 @@ import { dirname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { getCurrentVault } from './vaultContext'
 import { parseMarkdown, serializeMarkdown } from './mdStore'
+// 总结文件命名与窗口口径的**单一真相源**在渲染层 `src/lib/summary.ts`（纯函数、无副作用），
+// 主进程直接引它而不是各写一份 —— 否则「磁贴点周号算出的窗口」与「落盘文件名」迟早对不上。
+// 先例：`electron/main/index.ts` 引 `src/lib/settings`。
+import { summaryFileName, summaryLabel, type SummaryKind } from '../../../src/lib/summary'
 
 /**
  * 博客 vault 数据仓库（去库化 P1：博客(.md) + 索引，见 .AGENT/docs/去库化迁移方案.md）
@@ -73,6 +77,15 @@ function blogRoot(): string {
   return join(requireRoot(), '.knowbase', 'blog')
 }
 
+/**
+ * 总结分区目录名（相对 blogRoot）。
+ *
+ * ⚠️ 日志扫描必须**整个目录跳过**（见 `readAllDocs`）：总结文件同样带 frontmatter.id，
+ * 若被日志扫描收走就会混进博客列表 / 标签聚合 / 全文搜索。
+ * 这是一条**结构性隔离**，不是靠事后 filter 兜——filter 漏一处就静默出错。
+ */
+const SUMMARY_DIR = 'summaries'
+
 /** 字数：去空白后的字符数（与 sqlite word_count 维护口径一致） */
 function countWords(md: string): number {
   return md.replace(/\s/g, '').length
@@ -113,7 +126,8 @@ function readAllDocs(): BlogDoc[] {
       const p = join(dir, n)
       let isDir = false
       try { isDir = statSync(p).isDirectory() } catch { continue }
-      if (isDir) { walk(p); continue }
+      // 总结分区不进日志（结构性隔离，见 SUMMARY_DIR 注释）；年份目录照常下钻
+      if (isDir) { if (n === SUMMARY_DIR) continue; walk(p); continue }
       if (n.toLowerCase().endsWith('.md')) {
         try {
           const raw = readFileSync(p, 'utf-8')
@@ -326,5 +340,134 @@ export function vaultRemoveTagFromAll(tagName: string): number {
   return touched
 }
 
+// ===== 层级总结（周 / 月 / 年）：.knowbase/blog/summaries/<summary-*.md> =====
+//
+// 与日志的区别（三处，缺一处就会串）：
+//   ① 目录：住在 summaries/ 分区，与 <年份>/ 平级 —— 日志扫描整个目录跳过；
+//   ② 字段：frontmatter 用 kind/start/end 定位窗口，**没有 date**（不参与「每天一篇」的防撞）；
+//   ③ 内容：正文 = 复盘文字（用户写），统计数字仍实时查询、绝不落库（DP 第 12 项拍板③）。
+
+export interface VaultSummary {
+  id: string
+  kind: SummaryKind
+  start: string
+  end: string
+  title: string
+  contentMd: string
+  createdAt: string
+  updatedAt: string
+}
+
+function summaryRoot(): string {
+  return join(blogRoot(), SUMMARY_DIR)
+}
+
+/**
+ * 读总结分区下所有 .md（**不递归**：分区是扁平的）。
+ * 只认 kind/start/end 齐全的文件 —— 缺字段的半成品没有窗口可对上，列出来只会让入口显示错行。
+ */
+function readSummaryDocs(): BlogDoc[] {
+  const root = summaryRoot()
+  if (!existsSync(root)) return []
+  let names: string[] = []
+  try { names = readdirSync(root) } catch { return [] }
+  const out: BlogDoc[] = []
+  for (const n of names) {
+    if (!n.toLowerCase().endsWith('.md')) continue
+    const p = join(root, n)
+    try {
+      const doc = parseMarkdown(readFileSync(p, 'utf-8'))
+      const fm = doc.frontmatter ?? {}
+      const kind = strOf(fm, 'kind')
+      if (kind !== 'week' && kind !== 'month' && kind !== 'year') continue
+      if (!strOf(fm, 'start') || !strOf(fm, 'end')) continue
+      out.push({ path: p, fm, body: doc.body })
+    } catch { /* 跳过坏文件 */ }
+  }
+  return out
+}
+
+function docToSummary(doc: BlogDoc): VaultSummary {
+  const createdAt = strOf(doc.fm, 'created', new Date().toISOString())
+  return {
+    id: strOf(doc.fm, 'id'),
+    kind: strOf(doc.fm, 'kind') as SummaryKind,
+    start: strOf(doc.fm, 'start'),
+    end: strOf(doc.fm, 'end'),
+    title: strOf(doc.fm, 'title'),
+    contentMd: doc.body,
+    createdAt,
+    updatedAt: strOf(doc.fm, 'updated', createdAt),
+  }
+}
+
+/** 全部总结（窗口起点倒序，新的在前） */
+export function vaultListSummaries(): VaultSummary[] {
+  return readSummaryDocs().map(docToSummary).sort((a, b) => b.start.localeCompare(a.start))
+}
+
+export function vaultGetSummaryById(id: string): VaultSummary | null {
+  const doc = readSummaryDocs().find((d) => d.fm.id === id)
+  return doc ? docToSummary(doc) : null
+}
+
+/**
+ * 按需生成：**同窗口幂等**（同窗口必同文件，不产生第二份）。三种落点都要对：
+ *   ① 已有同窗口总结（哪怕用户手改过文件名）→ 按 kind/start/end 三元组命中，直接返回；
+ *   ② 目标文件已存在但 frontmatter 缺 id → **补 id 写回**（保住用户已写下的正文），不另建；
+ *   ③ 都没有 → 新建空壳（只写 frontmatter、正文留空）。
+ * 不预填模板、不做总结日空壳 —— 「按需生成，不堆空文件」（DP 第 12 项拍板②）。
+ */
+export function vaultEnsureSummary(kind: SummaryKind, start: string, end: string): VaultSummary {
+  const hit = readSummaryDocs().find(
+    (d) => strOf(d.fm, 'kind') === kind && strOf(d.fm, 'start') === start && strOf(d.fm, 'end') === end,
+  )
+  if (hit) return docToSummary(hit)
+
+  const now = new Date().toISOString()
+  const title = summaryLabel(kind, start, end)
+  const abs = join(summaryRoot(), summaryFileName(kind, start, end))
+
+  if (existsSync(abs)) {
+    try {
+      const doc = parseMarkdown(readFileSync(abs, 'utf-8'))
+      const fm = { ...(doc.frontmatter ?? {}) }
+      if (!fm.id) {
+        fm.id = randomUUID()
+        fm.kind = kind
+        fm.start = start
+        fm.end = end
+        if (!fm.title) fm.title = title
+        fm.created = strOf(fm, 'created', now)
+        fm.updated = now
+        fm.wordCount = countWords(doc.body)
+        atomicWrite(abs, serializeMarkdown(fm, doc.body))
+        return docToSummary({ path: abs, fm, body: doc.body })
+      }
+    } catch { /* 读坏了 → 走下面重建 */ }
+  }
+
+  const fm: Record<string, unknown> = {
+    id: randomUUID(), kind, start, end, title, created: now, updated: now, wordCount: 0,
+  }
+  atomicWrite(abs, serializeMarkdown(fm, ''))
+  return docToSummary({ path: abs, fm, body: '' })
+}
+
+/** 保存总结正文（按 id 定位；窗口字段 kind/start/end 不可改 —— 改了就等于换了文件） */
+export function vaultUpdateSummary(id: string, data: { contentMd?: string; title?: string }): VaultSummary {
+  const doc = readSummaryDocs().find((d) => d.fm.id === id)
+  if (!doc) throw new Error('总结不存在')
+  const fm = { ...doc.fm }
+  const body = data.contentMd !== undefined ? data.contentMd : doc.body
+  if (data.title !== undefined) fm.title = data.title
+  fm.updated = new Date().toISOString()
+  fm.wordCount = countWords(body)
+  atomicWrite(doc.path, serializeMarkdown(fm, body))
+  return docToSummary({ path: doc.path, fm, body })
+}
+
 /** 便于冒烟/测试定位数据目录 */
 export const __blogRoot = blogRoot
+/** 便于冒烟/测试定位总结分区 */
+export const __summaryRoot = summaryRoot
