@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch } from 'lucide-react'
+import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
@@ -637,15 +637,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     })
   }, [isActive])
 
-  // ---- 禅模式（唯一作用域 = 本模块）----
-  // Esc 的「先关本模块浮层，再退禅」统一放在 askVisible/srcForm 等浮层 state 声明之后（见 §P8 画像小节），
-  // 这里只保留 zenActive（若在此处引用后文声明的 srcForm/askVisible 会触发 TDZ 报错 → 整模块崩溃）。
+  // ---- 禅模式（本模块只**消费**档位，不再持有入口）----
+  // 入口已上移到标题栏「布局」菜单（App 层 zenLevel 单一真相源，全模块可用），本模块只读档位用于
+  // 收起自身顶栏/侧栏。Esc 的「先关本模块浮层，再退禅」统一放在 askVisible/srcForm 等浮层 state 声明之后
+  // （见 §P8 画像小节），这里只保留 zenActive（若在此处引用后文声明的 srcForm/askVisible 会触发 TDZ 报错
+  // → 整模块崩溃）。
   const zenActive = zenLevel >= 1 && !!onZenLevelChange
-
-  // 离开本模块 Tab 自动退出禅（保活架构组件不卸载，必须监听 isActive）
-  useEffect(() => {
-    if (!isActive && zenLevel > 0) onZenLevelChange?.(0)
-  }, [isActive, zenLevel, onZenLevelChange])
 
   // P2（§2.3/2-6）：会话约束读取——文件唯一真相源；无文件夹的旧会话读兼容回退 DB 字段一次
   const loadConstraints = useCallback(async (sid: string, dbFallback: string): Promise<void> => {
@@ -2055,26 +2052,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
           )}
 
           {/* UI 优化条目9①：顶栏用量 chip 退役——用量指示迁入输入区（与模型·思考同簇，见下方输入栏）；
-              顶栏就此收敛为 工作区 chip + 页签 + 画像 + 会话要求 + 禅模式 */}
+              顶栏就此收敛为 工作区 chip + 页签 + 画像 + 会话要求 */}
 
           {/* P3b（§3.8-2/连锁）：顶栏「文档地图」退役——产物导航由逐条「整理成文档」+ P4 左栏资源管理器承接；
-              顶栏恒为：会话要求 + Token 仪表 +（P5 工作区 chip）+ 禅模式 */}
-
-          {/* 禅模式（唯一作用域 = 本模块）：一键窗口全屏 + 隐壳（标题栏/活动栏隐藏）；再点或 Esc 退出 */}
-          {onZenLevelChange && (
-            <button
-              onClick={() => onZenLevelChange(zenLevel >= 1 ? 0 : 2)}
-              title={zenLevel >= 1 ? '退出禅模式 (Esc)' : '禅模式 · 全屏沉浸'}
-              className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] transition-colors ${
-                zenLevel >= 1
-                  ? 'bg-[var(--accent)]/15 text-[var(--accent)]'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <Feather size={12} />
-              {zenLevel >= 1 ? '退出禅' : '禅模式'}
-            </button>
-          )}
+              顶栏恒为：会话要求 + Token 仪表 +（P5 工作区 chip）。
+              原「禅模式」按钮已迁出：入口统一到标题栏「布局」菜单（全模块可用），本模块只消费档位 */}
         </div>
       </div>
 

@@ -148,27 +148,31 @@ export default function App() {
   }, [dayPanelVisible, dayPanelDetached])
 
   // 禅模式（docs/zen-mode-design.md）：0=off 1=Z1 专注 2=禅。唯一真相源在 App 层——
-  // Z2 需隐藏标题栏/活动栏（模块内无法触及）；编辑器经 onZenLevelChange 切档，切 Tab 由编辑器自动归零
+  // Z2 需隐藏标题栏/活动栏（模块内无法触及）。入口 = 标题栏「布局」菜单（布局模式 · 禅模式）；
+  // 退出四条：ZenHotZone 顶栏热区 / Esc（模块内）/ 菜单再点一次 / 持久化档位由 changeZen 统一收口
   const [zenLevel, setZenLevel] = useState<number>(0)
 
   const { s, update, ready: settingsReady } = useSettings()
   const workbench = !!s.uiWorkbench
+  // 布局 · 活动栏整条显隐（标题栏「布局」菜单 ↔ 命令面板两个入口，读写同一个 setting）。
+  // 与 activityBarHidden（逐模块显隐）互不干扰：这里关的是「活动栏这个容器本身」。
+  // 缺省 true：老仓库 settings.json 里没这个键 → 不因升级被突然藏掉活动栏
+  const activityBarVisible = s.activityBarVisible !== false
 
-  // 禅模式（一键全屏沉浸）：进入 = 档位直达 2（隐标题栏/活动栏 + OS 全屏盖任务栏）；
-  // 退出还原进入前状态（最大化 → 重新最大化，普通 → 还原 bounds，主进程负责）。
-  // zenFullscreen 可关；zenFsActiveRef 只标记「禅模式自己进的全屏」，退出时只回收它
-  const zenFsActiveRef = useRef(false)
+  // OS 全屏的单一真相源：两个请求方各自表态，合成后才下发——
+  //   ① 禅模式 Z2（受 zenFullscreen 开关约束）② 布局菜单「全屏」（VS Code F11 语义，与禅无关）
+  // 刻意「合成」而不是各自记账：分开记账时退出禅模式会连带关掉用户自己开的全屏，两边状态失同步。
+  // fsActiveRef = 当前已下发的全屏是否为我们自己请求的——用于躲开启动时空跑一次 setFullscreen(false)
+  // （那会把「窗口恰好处于全屏」的现场踢掉）。退出还原（最大化 → 重新最大化，普通 → 还原 bounds）由主进程负责
+  const [osFullscreen, setOsFullscreen] = useState(false)
+  const wantFullscreen = (zenLevel >= 2 && !!s.zenFullscreen) || osFullscreen
+  const fsActiveRef = useRef(false)
   useEffect(() => {
-    if (zenLevel >= 2 && s.zenFullscreen) {
-      zenFsActiveRef.current = true
-      setFsHint(true)
-      window.api?.setFullscreen?.(true)
-    } else if (zenFsActiveRef.current) {
-      zenFsActiveRef.current = false
-      setFsHint(false)
-      window.api?.setFullscreen?.(false)
-    }
-  }, [zenLevel, s.zenFullscreen])
+    if (wantFullscreen === fsActiveRef.current) return
+    fsActiveRef.current = wantFullscreen
+    setFsHint(wantFullscreen)
+    window.api?.setFullscreen?.(wantFullscreen)
+  }, [wantFullscreen])
 
   // R1-W2：命令面板 / 快速切换器（Ctrl+Shift+P / Ctrl+O），两布局均可用（docs/rework-workbench-design.md §3）
   const [palette, setPalette] = useState<null | 'command' | 'file'>(null)
@@ -188,8 +192,8 @@ export default function App() {
   // 用信号而非命令布尔值：同一信号值不会重复触发，连续点击每次都生效
   const [toolboxHomeSignal, setToolboxHomeSignal] = useState(0)
 
-  // 禅模式档位统一出口：内存 + 持久化。唯一入口在 AI 教学模块（aiTeaching 顶栏按钮），
-  // 该模块 Esc/离开 Tab 自动退出；顶部热区退出也走这里保持持久化一致
+  // 禅模式档位统一出口：内存 + 持久化。入口 = 标题栏「布局」菜单（全模块可用，已从 AI 教学模块迁出）；
+  // Esc / 顶部热区 / 菜单再点 都走这里，保证持久化一致
   const changeZen = useCallback((n: number) => { setZenLevel(n); update('zenLevel', n) }, [update])
 
   // ---- 全局搜索（VS Code 式：标题栏顶部输入 + 顶部结果弹层，Ctrl+P / Ctrl+` 唤出）----
@@ -215,6 +219,16 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // 全局 Esc 退禅兜底（开发负责人 2026-09-15 拍板「全生效」）：禅入口上移到标题栏布局菜单后，
+      // 从任意模块都能进禅，但此前只有编辑器 / AI 教学自己监听 Esc（禅入口曾在它们手里），
+      // 其余模块只能摸顶部 8px 热区。编辑器 / AI 教学仍优先走自己那份（带「先关本模块弹窗再退禅」
+      // 的档位逻辑，App 不抢）；命令面板 / 快速切换器开着时 Esc 归它们收。
+      if (e.key === 'Escape' && zenLevel >= 2 && !palette) {
+        const zenOwnerActive =
+          activeTab === 'editor' || secondaryTab === 'editor' ||
+          activeTab === 'aiTeaching' || secondaryTab === 'aiTeaching'
+        if (!zenOwnerActive) { e.preventDefault(); changeZen(0); return }
+      }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.key === 'P' || e.key === 'p')) {
         e.preventDefault()
         setPalette((p) => (p === 'command' ? null : 'command'))
@@ -228,7 +242,8 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+    // 依赖带全：退禅兜底需要读到当前禅档位 / 激活模块 / 面板态，重挂监听比 ref 镜像直白
+  }, [zenLevel, activeTab, secondaryTab, palette, changeZen])
 
   // 快速切换器数据源：知识页索引（默认 vault 读源带 path → 经 kb-open-in-editor 在编辑器组打开）
   useEffect(() => {
@@ -314,6 +329,10 @@ export default function App() {
     items.push(
       { id: 'toggle-workbench', label: workbench ? '布局：切回 旧布局' : '布局：启用 Workbench 外壳（实验）', group: '界面设置', run: () => { update('uiWorkbench', !workbench); setPalette(null) } },
       { id: 'toggle-lineno', label: s.showLineNumbers ? '编辑器：隐藏行号' : '编辑器：显示行号', group: '界面设置', run: () => { update('showLineNumbers', !s.showLineNumbers); setPalette(null) } },
+      // 布局菜单（VS Code Customize Layout 同款）的命令面板侧入口：与标题栏「布局」下拉共用同一份状态
+      { id: 'toggle-activitybar', label: activityBarVisible ? '布局：隐藏活动栏' : '布局：显示活动栏', group: '界面设置', run: () => { update('activityBarVisible', !activityBarVisible); setPalette(null) } },
+      { id: 'toggle-zen', label: zenLevel >= 2 ? '布局：退出禅模式' : '布局：禅模式（全屏沉浸）', group: '界面设置', run: () => { changeZen(zenLevel >= 2 ? 0 : 2); setPalette(null) } },
+      { id: 'toggle-fullscreen', label: osFullscreen ? '布局：退出全屏' : '布局：全屏', group: '界面设置', run: () => { setOsFullscreen(!osFullscreen); setPalette(null) } },
     )
     // W3 · 分屏命令（Editor Groups）：开/关副栏 + 选副栏模块（排除当前主栏，避免同模块双实例）
     items.push(
@@ -775,14 +794,25 @@ export default function App() {
     <div className={`flex flex-col h-screen bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)] overflow-hidden ${winRounded ? 'rounded-[var(--window-radius)]' : 'rounded-none'}`}>
       <CodePluginHosts />
       {zenLevel < 2 ? (
-        <TitleBar dayPanelActive={dayPanelVisible || dayPanelDetached} onToggleDayPanel={toggleDayPanel} drawerWidth={dayPanelWidth} />
+        <TitleBar
+          dayPanelActive={dayPanelVisible || dayPanelDetached}
+          onToggleDayPanel={toggleDayPanel}
+          drawerWidth={dayPanelWidth}
+          activityBarVisible={activityBarVisible}
+          onActivityBarChange={(v) => update('activityBarVisible', v)}
+          zenLevel={zenLevel}
+          onZenLevelChange={changeZen}
+          osFullscreen={osFullscreen}
+          onOsFullscreenChange={setOsFullscreen}
+        />
       ) : (
         <ZenHotZone zenLevel={zenLevel} onZenLevelChange={changeZen} />
       )}
       <PomodoroProvider>
         <div className="flex flex-1 flex-col overflow-hidden">
         <div className="flex flex-1 overflow-hidden">
-          {zenLevel < 2 && <ActivityBar active={activeTab} onChange={handleTabChange} flush={winMax} />}
+          {/* 活动栏两个收起来源：禅模式 Z2（隐壳）与布局菜单（用户显式隐藏），取并集 */}
+          {zenLevel < 2 && activityBarVisible && <ActivityBar active={activeTab} onChange={handleTabChange} flush={winMax} />}
 <main className="flex-1 flex overflow-hidden bg-transparent relative">
             {/* 主内容区卡片壳：与左右两侧(ActivityBar / 日程打卡面板)同款圆角+阴影+留白，三卡对称。
                 半透明底色 + 顶缘高光 = 液态玻璃卡片；禅模式 Z2+ 或 最大化（UI 优化条目1）全屏化（去边距/圆角/边框，贴满屏幕） */}
@@ -893,8 +923,8 @@ export default function App() {
             )}
           </main>
       {/* 全局 AI 助手侧栏。shellLeft = 全屏扩张时要避让的活动栏占位宽度
-          （禅模式 Z2+ 活动栏不渲染 → 0；最大化 flush → 56；否则 56 + mx-1.5 两侧留白） */}
-      <AssistantPanel shellLeft={zenLevel >= 2 ? 0 : winMax ? 56 : 68} />
+          （活动栏不渲染时 → 0：禅模式 Z2 隐壳，或布局菜单把它整条藏了；最大化 flush → 56；否则 56 + mx-1.5 两侧留白） */}
+      <AssistantPanel shellLeft={zenLevel >= 2 || !activityBarVisible ? 0 : winMax ? 56 : 68} />
         </div>
       {/* 全局搜索（VS Code 式顶部弹层）：输入 portal 进标题栏，全模块可用 */}
       <QuickSearch
