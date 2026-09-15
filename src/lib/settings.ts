@@ -162,6 +162,10 @@ export const SETTINGS = {
   zoomStep: { default: 0.05, type: 'number', label: '缩放步进', group: '缩放', desc: '界面缩放步进（约束，勿手改）', keywords: ['缩放', '步进', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   activityBarOrder: { default: '["editor","blog","schedule","knowledge","moments","toolbox","plugins","export","recycle"]', type: 'json', label: '活动栏图标顺序', group: '活动栏', desc: '活动栏模块图标顺序（JSON）', keywords: ['活动栏', '顺序', '图标', 'activitybar', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   activityBarHidden: { default: '[]', type: 'json', label: '活动栏隐藏模块', group: '活动栏', desc: '活动栏隐藏的模块（JSON）', keywords: ['活动栏', '隐藏', '模块', 'activitybar', 'hidden'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // 布局（VS Code Customize Layout 同款）：整条活动栏显隐。与上面 activityBarHidden（逐模块显隐）互不干扰——
+  // 本键关的是「活动栏这个容器本身」，标题栏那枚「布局」按钮与命令面板「布局：隐藏活动栏」是它的两个入口。
+  // ui:false 与同组两键一致：入口在布局菜单/命令面板，不在设置页（避免与「显示/隐藏模块」混淆）
+  activityBarVisible: { default: true, type: 'toggle', label: '显示活动栏', group: '活动栏', desc: '关闭后隐藏最左侧模块活动栏（标题栏「布局」按钮可随时调回）', keywords: ['活动栏', '布局', '隐藏', '侧边栏', 'activitybar', 'visible', 'layout'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   toolboxHiddenTools: { default: '[]', type: 'json', label: '工具箱隐藏工具', group: '工具箱', desc: '工具箱画廊中隐藏的工具 id 列表（JSON，内置工具用 id，插件工具用 pluginId:toolId）', keywords: ['工具箱', '隐藏', '工具', '显示', 'toolbox', 'hidden'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   startupTab: { default: 'blog', type: 'select', label: '启动时默认显示', group: '启动', desc: '每次打开应用时自动进入的模块', keywords: ['启动', '默认模块', '首页', 'startup', '默认显示', '初始模块'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.startupTab' },
   startupVaultPicker: { default: true, type: 'toggle', label: '每次启动选择仓库', group: '启动', desc: '开启后每次进入应用先显示仓库选择页（已有仓库一键进入）；关闭则直连上次的仓库', keywords: ['启动', '仓库', '选择', '进入', 'vault', 'startup', '切库'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'startup.vaultPicker' },
@@ -238,6 +242,12 @@ export const SETTINGS = {
   pluginTrustedKeys: { default: '', type: 'text', label: '受信公钥 keyring', group: '插件安全', desc: '受信签名公钥 keyring（JSON 或 keyId=公钥）', keywords: ['插件', '公钥', 'keyring', '签名', '信任'], section: 'security', ui: true, scope: 'global', level: 'danger', affects: 'live' , anchor: 'security.pluginKeys' },
   updateMirror: { default: 'https://gh-proxy.com', type: 'text', label: '下载镜像', group: '更新', desc: 'GitHub 加速代理前缀，留空直连', keywords: ['镜像', '加速', '代理', 'github', 'proxy', '下载', 'cdn'], section: 'about', ui: true, scope: 'global', level: 'normal', affects: 'reload', anchor: 'advanced.mirror' },
   aiVaultFilePerm: { default: 'read', type: 'select', label: 'AI vault 文件权限', group: '权限', desc: 'AI vault.* 工具访问仓库文件：off=禁止 read=只读 write=预留', keywords: ['vault', '文件', '权限', '仓库', 'ai', '读写'], section: 'aiTools', ui: false, scope: 'global', level: 'danger', affects: 'live', aiTab: 'perms' },
+
+  // ---- 桌面外壳（自定义磁贴工作台）----
+  // 布局刻意存**全局**、不进 `.knowbase/`：桌面怎么摆是「这台机器上我怎么用」，
+  // 不是某份资料的一部分；换仓库不该换桌面。详见 src/modules/desktop/layout.ts 顶部说明。
+  desktopPresets: { default: '', type: 'json', label: '桌面布局预设', group: '桌面外壳', desc: '桌面磁贴布局（多套预设 JSON；留空=首次进入时种入默认三套）', keywords: ['桌面', '外壳', '磁贴', '布局', '预设', 'desktop', 'shell', 'tile', '工作台'], section: 'appearance', ui: false, scope: 'global', level: 'experimental', affects: 'live' },
+  desktopActivePreset: { default: 'study', type: 'text', label: '当前桌面预设', group: '桌面外壳', desc: '当前生效的桌面预设 id', keywords: ['桌面', '预设', '当前', 'desktop', 'preset'], section: 'appearance', ui: false, scope: 'global', level: 'experimental', affects: 'live' },
 }
 
 // ===== 边栏面板约束（组件 default/min/max，非用户可改，集中引用） =====
