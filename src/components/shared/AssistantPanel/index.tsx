@@ -858,31 +858,47 @@ useEffect(() => { if (open) void refreshSessions() }, [open, refreshSessions])
 
           {/* 宽度拖拽条：向左拖缩小；低于 320px 松手 = 整体关闭（snap）
               面板为悬浮层且置顶，打开期间本拖拽条独占该边缘，
-              不会误触下层（如知识库大纲侧栏）的拖拽条。全屏态不需要调宽 → 隐藏 */}
+              不会误触下层（如知识库大纲侧栏）的拖拽条。全屏态不需要调宽 → 隐藏。
+              v3.2.0 条目 ⑤ 同源修法（全应用第三套手柄）：① 4px dead-zone（掠过/轻点不再改宽度、
+              也不再落盘）；② `setPointerCapture` 保证指针移到工件 iframe 之上时事件仍能送达
+              （capture 后事件照旧冒泡到 window，故处理路径仍是单一路径）；③ 收尾走
+              pointerup / pointercancel 双路 + 真拖过才落盘。 */}
           <div
             className={`absolute top-0 left-[-3px] w-1.5 h-full cursor-ew-resize hover:bg-[var(--accent)]/30 ${full ? 'hidden' : ''}`}
-            onMouseDown={e => {
+            title="拖拽调整宽度（拖到 320px 以内松手即关闭）"
+            onPointerDown={e => {
+              if (e.button !== 0) return
               e.preventDefault()
+              const el = e.currentTarget
               const startX = e.clientX
               const startW = savedWidth
               let latest = startW
-              const move = (ev: MouseEvent) => {
+              let moved = false
+              // capture 只为「送达保证」：指针进入工件 iframe 后事件不再丢失
+              try { el.setPointerCapture(e.pointerId) } catch { /* 不支持则退回普通 window 监听 */ }
+              const move = (ev: PointerEvent) => {
+                if (!moved && Math.abs(ev.clientX - startX) < 4) return
+                moved = true
                 latest = Math.min(520, Math.max(260, startW + (startX - ev.clientX)))
                 setDragW(latest)
               }
-              const up = () => {
-                window.removeEventListener('mousemove', move)
-                window.removeEventListener('mouseup', up)
+              const finish = () => {
+                window.removeEventListener('pointermove', move)
+                window.removeEventListener('pointerup', finish)
+                window.removeEventListener('pointercancel', finish)
                 setDragW(null)
+                if (!moved) return // 误触：不改宽度、不落盘、也不做 snap 判定
                 if (latest < 320) {
                   setOpen(false) // snap 关闭
                 } else {
                   void update('assistantWidth', latest)
                 }
               }
-              window.addEventListener('mousemove', move)
-              window.addEventListener('mouseup', up)
+              window.addEventListener('pointermove', move)
+              window.addEventListener('pointerup', finish)
+              window.addEventListener('pointercancel', finish)
             }}
+            onLostPointerCapture={() => setDragW(null)}
           />
           </div>
 
