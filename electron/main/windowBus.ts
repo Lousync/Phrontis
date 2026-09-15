@@ -77,6 +77,9 @@ export const BROADCAST_CHANNEL = {
   pluginDownloadProgress: 'plugin:download-progress',
   /** 应用更新下载进度，载荷 `{ percent, receivedBytes, totalBytes }` */
   updateDownloadProgress: 'update:download-progress',
+  /** 应用更新下载阶段，载荷 `{ stage: 'downloading' | 'verifying' | 'switching' }`
+   *  —— 进度无变化时的可读反馈（校验空窗 / 换通道），见 updateService.ts */
+  updateDownloadStage: 'update:download-stage',
   /** 番茄钟状态广播，载荷 PomodoroSnapshot */
   pomodoroStateBroadcast: 'pomodoro:state-broadcast',
   /** 小窗（日面板）状态变化，载荷 `{ detached, mode, collapsed, widgetInteractive }` */

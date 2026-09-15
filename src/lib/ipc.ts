@@ -143,6 +143,7 @@ export const installUpdate = (filePath: string) => a().installUpdate(filePath)
 export const updatePauseDownload = () => a().updatePauseDownload()
 export const updateCancelDownload = () => a().updateCancelDownload()
 export const onUpdateDownloadProgress = (cb: (p: { percent: number; receivedBytes: number; totalBytes: number }) => void) => a().onUpdateDownloadProgress(cb)
+export const onUpdateDownloadStage = (cb: (p: { stage: 'downloading' | 'verifying' | 'switching' }) => void) => a().onUpdateDownloadStage(cb)
 // 更新说明（VS Code 式 tab）
 export const getReleaseNotesState = () => a().getReleaseNotesState()
 export const markReleaseNotesShown = (version: string) => a().markReleaseNotesShown(version)

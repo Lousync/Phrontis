@@ -1254,11 +1254,12 @@ export interface ElectronAPI {
   openExternal: (filePath: string) => Promise<void>
   getAppVersion: () => Promise<string>
   checkForUpdate: () => Promise<{ ok: boolean; hasUpdate: boolean; currentVersion: string; latestVersion: string; releaseUrl: string; notes: string; asset: { name: string; url: string; size: number } | null; message?: string }>
-  downloadUpdate: (url: string, name: string, size?: number) => Promise<{ success: boolean; filePath?: string; message?: string; paused?: boolean; cancelled?: boolean; receivedBytes?: number; reason?: 'size-mismatch' | 'sha512-mismatch' | 'network' | 'channel-all-failed' | 'cancelled' | 'unknown'; step?: 'download' | 'verify' | 'sha512'; metaMissing?: boolean }>
+  downloadUpdate: (url: string, name: string, size?: number) => Promise<{ success: boolean; filePath?: string; message?: string; paused?: boolean; cancelled?: boolean; receivedBytes?: number; reason?: 'size-mismatch' | 'sha512-mismatch' | 'network' | 'stalled' | 'channel-all-failed' | 'cancelled' | 'unknown'; step?: 'download' | 'verify' | 'sha512'; metaMissing?: boolean }>
   installUpdate: (filePath: string) => Promise<{ success: boolean; message?: string }>
   updatePauseDownload: () => Promise<{ ok: boolean; message?: string }>
   updateCancelDownload: () => Promise<{ ok: boolean; removedPartial?: boolean; message?: string }>
   onUpdateDownloadProgress: (cb: (p: { percent: number; receivedBytes: number; totalBytes: number }) => void) => () => void
+  onUpdateDownloadStage: (cb: (p: { stage: 'downloading' | 'verifying' | 'switching' }) => void) => () => void
   // 更新说明（VS Code 式 tab）
   getReleaseNotesState: () => Promise<ReleaseNotesState>
   markReleaseNotesShown: (version: string) => Promise<{ ok: boolean; error?: string }>

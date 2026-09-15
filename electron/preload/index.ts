@@ -124,6 +124,11 @@ const api = {
     ipcRenderer.on('update:download-progress', handler)
     return () => { ipcRenderer.removeListener('update:download-progress', handler) }
   },
+  onUpdateDownloadStage: (cb: (p: { stage: 'downloading' | 'verifying' | 'switching' }) => void) => {
+    const handler = (_e: unknown, p: { stage: 'downloading' | 'verifying' | 'switching' }) => cb(p)
+    ipcRenderer.on('update:download-stage', handler)
+    return () => { ipcRenderer.removeListener('update:download-stage', handler) }
+  },
   // 更新说明（VS Code 式 tab）：清单来自 CHANGELOG，阅读记录落仓库 .knowbase/modules/release-notes/
   getReleaseNotesState: () => ipcRenderer.invoke('releaseNotes:getState'),
   markReleaseNotesShown: (version: string) => ipcRenderer.invoke('releaseNotes:markShown', version),

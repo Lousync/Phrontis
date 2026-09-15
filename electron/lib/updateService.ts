@@ -38,8 +38,12 @@ function resolveMirror(): string | null {
   return s
 }
 
-/** 已知可用的 ghproxy 节点(下载速度与缓存健康度不定,作为用户镜像之后的兜底候选) */
-const FALLBACK_MIRRORS = ['https://gh-proxy.com', 'https://gh.dpik.top', 'https://cdn.gh-proxy.com']
+/**
+ * 已知可用的 ghproxy 节点(下载速度与缓存健康度不定,作为用户镜像之后的兜底候选)。
+ * 2026-09-15 移除 `cdn.gh-proxy.com`:实测它对同一资产返回 206 响应头后 **0 字节即 terminated**
+ * (坏节点),留在候选里只会每次白等一轮再换通道;日后若恢复可加回。
+ */
+const FALLBACK_MIRRORS = ['https://gh-proxy.com', 'https://gh.dpik.top']
 
 /**
  * 由已通过白名单校验的 GitHub URL 构造下载候选列表:
@@ -62,10 +66,11 @@ export interface UpdateAsset { name: string; url: string; size: number }
 /**
  * 结构化失败原因 — UI 据此渲染差异化操作(重试/换镜像/稍后再试):
  * size-mismatch/sha512-mismatch → 服务器文件或镜像坏字节;network/channel-all-failed → 网络类;
+ * stalled → 通道长时间没有新字节(挂着不回也不断),已自动换通道;
  * cancelled/paused → 主动中止,不算错误。
  */
 export type UpdateFailReason =
-  | 'size-mismatch' | 'sha512-mismatch' | 'network' | 'channel-all-failed' | 'cancelled' | 'unknown'
+  | 'size-mismatch' | 'sha512-mismatch' | 'network' | 'stalled' | 'channel-all-failed' | 'cancelled' | 'unknown'
 
 /** 失败发生环节(download → verify → sha512),供 UI 文案精准定位 */
 export type UpdateFailStep = 'download' | 'verify' | 'sha512'
@@ -119,6 +124,21 @@ function pushProgress(percent: number, receivedBytes: number, totalBytes: number
   broadcast(BROADCAST_CHANNEL.updateDownloadProgress, { percent, receivedBytes, totalBytes })
 }
 
+/**
+ * 下载阶段(2026-09-15 补) — 让 UI 在「流已收完 → sha512 校验完成」这段**没有任何进度变化**
+ * 的空窗里有可读反馈。v3.1.2 报障里的「卡在 100% 一动不动」有两个来源:一是假 100%(四舍五入),
+ * 二是这个空窗+静默死锁完全没有状态提示。前者靠进度口径修,后者全靠本通道兜住。
+ */
+export type UpdateDownloadStage = 'downloading' | 'verifying' | 'switching'
+
+function pushStage(stage: UpdateDownloadStage): void {
+  broadcast(BROADCAST_CHANNEL.updateDownloadStage, { stage })
+}
+
+/** 进度推送节流:字节增量 ≥256KB 或 距上次 ≥200ms 才发一个事件(不依赖整数百分比变化) */
+const PROGRESS_MIN_BYTES = 256 * 1024
+const PROGRESS_MIN_INTERVAL_MS = 200
+
 /** 慢速保护:15s 内收到的字节不足 2MB(≈136KB/s)判定为慢通道,放弃换下一候选 */
 const SLOW_WINDOW_MS = 15000
 const SLOW_MIN_BYTES = 2 * 1024 * 1024
@@ -166,10 +186,28 @@ async function downloadOne(
   }
   const out = createWriteStream(dest, { flags: offset > 0 ? 'a' : 'w' })
   let received = 0
-  let lastPct = -1
+  // 首个字节到达 = 本通道确实活着 → 把上一个通道留下的「正在切换镜像」提示收回到正常进度展示。
+  // 刻意不挂在响应头校验之后:头是瞬时就有的(挂死通道的头也秒回),要等**真实字节**才算活。
+  let aliveNotified = false
+  // 进度口径(2026-09-15 修):旧实现是 `Math.round` + 「只在整数百分比变化时推送」→ 最后一格
+  // (真实 99.5%~100%)内界面完全冻结、一个事件都不再发,表象即「卡在 100%」。
+  // 现改为按「字节增量 / 时间」节流,百分比用 floor,且**校验通过前上限锁 99%**
+  // (100% 只在 verifyInstaller 通过后由上层单独推)。
+  let lastPushAt = 0
+  let lastPushBytes = offset
   let slowTimer: NodeJS.Timeout | null = null
   let mirrorTimer: NodeJS.Timeout | null = null
   const reader = Readable.fromWeb(r.body as import('stream/web').ReadableStream)
+
+  const emitProgress = (): void => {
+    if (totalFull <= 0) return
+    const done = offset + received
+    const now = Date.now()
+    if (done - lastPushBytes < PROGRESS_MIN_BYTES && now - lastPushAt < PROGRESS_MIN_INTERVAL_MS) return
+    lastPushAt = now
+    lastPushBytes = done
+    pushProgress(Math.min(99, Math.floor((done / totalFull) * 100)), done, totalFull)
+  }
 
   // 镜像纠错:下载中用户更换代理源 → 2s 内感知,中止当前通道,由上层按新镜像重算候选断点续传
   mirrorTimer = setInterval(() => {
@@ -179,21 +217,24 @@ async function downloadOne(
 
   reader.on('data', (chunk: Buffer) => {
     received += chunk.length
-    const done = offset + received
-    const pct = totalFull > 0 ? Math.round((done / totalFull) * 100) : 0
-    if (pct !== lastPct) {
-      lastPct = pct
-      pushProgress(pct, done, totalFull)
-    }
+    if (!aliveNotified) { aliveNotified = true; pushStage('downloading') }
+    emitProgress()
   })
   try {
     await new Promise<void>((res, rej) => {
       const host = new URL(candidate).hostname
-      const scheduleSlowCheck = () => {
+      // 慢速看门狗(2026-09-15 修):旧实现比较的是**全程累计** received —— 首个窗口只要收过
+      // ≥2MB(正常起步必然满足),此后每轮都把累计值当窗口值 → 永远判不出卡住,这是「进度满格
+      // 后静默死锁、永不换通道」的根因。改为每轮只统计**本窗口新增字节**,窗口结束即重置起点。
+      // 附带收益:完全静默的通道会在**一个窗口(15s)内**被判卡,比另外补一条 30s 空闲超时更早动手。
+      let windowStart = 0
+      const scheduleSlowCheck = (): void => {
         slowTimer = setTimeout(() => {
-          if (received < SLOW_MIN_BYTES) {
+          const seen = received - windowStart
+          windowStart = received
+          if (seen < SLOW_MIN_BYTES) {
             reader.destroy()
-            rej(new UpdateError(`${host} 下载过慢(15s 内不足 2MB),已切换通道`, 'network'))
+            rej(new UpdateError(`${host} 通道无响应(${Math.round(SLOW_WINDOW_MS / 1000)}s 内新增不足 2MB),已切换通道`, 'stalled'))
           } else {
             scheduleSlowCheck()
           }
@@ -340,12 +381,18 @@ ipcMain.handle('update:download', async (_e, url: string, name: string, expected
       // 下载中更换镜像 → downloadOne 2s 内感知抛 MIRROR_CHANGED → 重算候选列表断点续传。
       let restarts = 0
       let restart = true
+      // 上一个候选失败过 → 下一个候选进入时先发 switching,让 UI 说出「通道无响应,正在切换镜像」,
+      // 而不是让进度条原地冻住(那正是 v3.1.2 报障的观感)。首字节到达后自动收回 downloading。
+      let switched = false
       while (restart && restarts < 5) {
         restart = false
         for (const candidate of downloadCandidates(url)) {
           if (pauseRequested || cancelRequested) break
+          pushStage(switched ? 'switching' : 'downloading')
           try {
             await downloadOne(candidate, dest, expectedSize, activeDownloadAbort.signal, partialSize(dest), mirrorPrefixOf(candidate))
+            // 流已收完 → sha512 校验(133MB 要 1~3s)期间给 UI 一个明确状态,不再无声停住
+            pushStage('verifying')
             const check = await verifyInstaller(dest, expectedSize, url)
             if (check.ok) {
               pushProgress(100, statSync(dest).size, expectedSize || statSync(dest).size)
@@ -355,6 +402,7 @@ ipcMain.handle('update:download', async (_e, url: string, name: string, expected
             lastErr = check.message || lastErr
             lastReason = check.reason || 'unknown'
             lastStep = check.step || 'verify'
+            switched = true
             try { if (existsSync(dest)) unlinkSync(dest) } catch { /* ignore */ }
           } catch (e: any) {
             if (e?.name === 'AbortError' || pauseRequested || cancelRequested) {
@@ -365,11 +413,13 @@ ipcMain.handle('update:download', async (_e, url: string, name: string, expected
               // 换镜像纠错:断点保留,重算候选列表(新镜像优先)继续下
               restart = true
               restarts++
+              switched = true
               break
             }
             lastErr = e?.message || String(e)
             lastReason = e instanceof UpdateError ? e.reason : 'network'
             lastStep = 'download'
+            switched = true
             try { if (existsSync(dest)) unlinkSync(dest) } catch { /* ignore */ }
           }
         }

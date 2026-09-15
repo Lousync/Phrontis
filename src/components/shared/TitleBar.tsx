@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import {
   useUpdateStore, updateStartupCheck, updateDownload, updatePause, updateCancel, updateInstall,
-  updateFailKind, updateFailMessage,
+  updateFailKind, updateFailMessage, updateStageText,
 } from '../../lib/updateStore'
 import { MarkdownPreview } from './MarkdownPreview'
 import { openExternal, edgeResizeStart, edgeResizeEnd } from '../../lib/ipc'
@@ -126,6 +126,8 @@ export function TitleBar({ dayPanelActive = false, onToggleDayPanel, drawerWidth
     : `发现新版本 v${upd.check?.latestVersion},点击查看`
 
   const failKind = updateFailKind(upd.reason)
+  // 非进度类阶段提示(校验中/换镜像);downloading 时为 null,按常规进度渲染
+  const stageText = updateStageText(upd.stage)
 
   function togglePin() {
     const next = !isPinned
@@ -256,9 +258,15 @@ export function TitleBar({ dayPanelActive = false, onToggleDayPanel, drawerWidth
                           style={{ width: `${upd.progress.percent}%` }} />
                       </div>
                       <div className="text-[11px] text-[var(--text-muted)] mb-2">
-                        {upd.phase === 'paused' ? '已暂停 ' : '正在下载 '}{upd.check?.asset?.name} — {upd.progress.percent}%
-                        {upd.progress.totalBytes > 0 && `（${(upd.progress.receivedBytes / 1048576).toFixed(1)} / ${(upd.progress.totalBytes / 1048576).toFixed(1)} MB）`}
-                        {upd.phase === 'paused' && ',继续下载将从断点续传'}
+                        {stageText ? (
+                          <span className="text-[var(--accent)]">{stageText}</span>
+                        ) : (
+                          <>
+                            {upd.phase === 'paused' ? '已暂停 ' : '正在下载 '}{upd.check?.asset?.name} — {upd.progress.percent}%
+                            {upd.progress.totalBytes > 0 && `（${(upd.progress.receivedBytes / 1048576).toFixed(1)} / ${(upd.progress.totalBytes / 1048576).toFixed(1)} MB）`}
+                            {upd.phase === 'paused' && ',继续下载将从断点续传'}
+                          </>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         {upd.phase === 'downloading' ? (

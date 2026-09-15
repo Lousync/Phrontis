@@ -8,12 +8,22 @@ import { getAppVersion, listReleaseNotes, openExternal, workspaceImportWelcomeDo
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import {
   useUpdateStore, updateCheck, updateDownload, updatePause, updateCancel, updateInstall,
-  updateFailKind, updateFailMessage,
+  updateFailKind, updateFailMessage, updateStageText,
 } from '../../../lib/updateStore'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { ConfirmDialog } from '../../../components/shared/ConfirmDialog'
 import { showToast } from '../../../lib/toast'
 import { notifyDataChanged } from '../../../lib/dataChanged'
+
+/**
+ * 镜像输入框旁的「常用」快捷填充。
+ * 2026-09-15 摘掉 `cdn.gh-proxy.com`：实测是坏节点（对同一资产返回 206 响应头后 0 字节即 terminated），
+ * 已同时从主进程 `FALLBACK_MIRRORS` 移除，不宜再作为推荐项出现在 UI 上。
+ */
+const MIRROR_PRESETS: ReadonlyArray<readonly [string, string]> = [
+  ['gh.dpik.top', 'https://gh.dpik.top'],
+  ['gh-proxy.com', 'https://gh-proxy.com'],
+]
 
 /** 设置 → 关于：版本 / 更新（下载镜像） / 新手引导 */
 export function AboutView() {
@@ -56,6 +66,8 @@ export function AboutView() {
 
   const failText = upd.check ? updateFailMessage(upd) : (upd.error || '检查失败,请检查网络')
   const failKind = upd.check ? updateFailKind(upd.reason) : 'network'
+  // 非进度类阶段提示(校验中/换镜像);downloading 时为 null,按常规进度渲染
+  const stageText = updateStageText(upd.stage)
 
   return (
     <div>
@@ -88,10 +100,13 @@ export function AboutView() {
           />
           <p className="text-[11px] text-[var(--text-muted)] mt-1 leading-relaxed">
             镜像仅用于加速下载，失效自动回退直连。常用:{' '}
-            {[['gh.dpik.top', 'https://gh.dpik.top'], ['gh-proxy.com', 'https://gh-proxy.com'], ['cdn.gh-proxy.com', 'https://cdn.gh-proxy.com']].map(([name, url], i) => (
-              <button key={url} onClick={() => update('updateMirror', url)} className="text-[var(--accent)] hover:underline font-mono" title={`使用 ${url}`}>
-                {name}{i < 2 ? ' / ' : ''}
-              </button>
+            {MIRROR_PRESETS.map(([name, url], i) => (
+              <span key={url}>
+                <button onClick={() => update('updateMirror', url)} className="text-[var(--accent)] hover:underline font-mono" title={`使用 ${url}`}>
+                  {name}
+                </button>
+                {i < MIRROR_PRESETS.length - 1 && ' / '}
+              </span>
             ))}
           </p>
         </div>
@@ -146,9 +161,15 @@ export function AboutView() {
                   <div className={`h-full transition-all ${upd.phase === 'paused' ? 'bg-[var(--warning)]' : 'bg-[var(--accent)]'}`} style={{ width: `${upd.progress.percent}%` }} />
                 </div>
                 <div className="text-[11px] text-[var(--text-muted)]">
-                  {upd.phase === 'paused' ? '已暂停 ' : '正在下载 '}{upd.check.asset?.name} — {upd.progress.percent}%
-                  {upd.progress.totalBytes > 0 && `（${(upd.progress.receivedBytes / 1048576).toFixed(1)} / ${(upd.progress.totalBytes / 1048576).toFixed(1)} MB）`}
-                  {upd.phase === 'paused' && ',继续下载将从断点续传'}
+                  {stageText ? (
+                    <span className="text-[var(--accent)]">{stageText}</span>
+                  ) : (
+                    <>
+                      {upd.phase === 'paused' ? '已暂停 ' : '正在下载 '}{upd.check.asset?.name} — {upd.progress.percent}%
+                      {upd.progress.totalBytes > 0 && `（${(upd.progress.receivedBytes / 1048576).toFixed(1)} / ${(upd.progress.totalBytes / 1048576).toFixed(1)} MB）`}
+                      {upd.phase === 'paused' && ',继续下载将从断点续传'}
+                    </>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 mt-2">
                   {upd.phase === 'downloading' ? (
