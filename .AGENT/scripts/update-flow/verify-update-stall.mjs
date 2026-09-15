@@ -76,6 +76,13 @@ check('看门狗按窗口增量判定（received - windowStart）',
   /const seen = received - windowStart/.test(src))
 check('阶段切换在候选通道循环里发出（switched → switching）',
   /pushStage\(switched \? 'switching' : 'downloading'\)/.test(src))
+// 镜像巡检口径（2026-09-15 二次修复）：基准 = 设置值的归一化，而不是「当前候选走不走镜像」。
+// 判「定义已删」而不是全文 includes —— 修复说明的注释里仍然会提到旧函数名。
+check('逐候选前缀推导已删除（mirrorPrefixOf 定义不存在）', !/function mirrorPrefixOf/.test(src))
+check('镜像基准归一化：直连 null 与显式空串同口径', /return resolveMirror\(\) \?\? ''/.test(src))
+check('镜像巡检比的是「下载开始时的基准」', /if \(mirrorKey\(\) !== mirrorAtStart\)/.test(src))
+check('调用点传基准而不再传候选前缀', /partialSize\(dest\), mirrorAtStart\)/.test(src))
+check('基准在每轮重算候选时重新捕获', /const mirrorAtStart = mirrorKey\(\)/.test(src))
 
 // ---------------------------------------------------------------- 切出真实实现
 /** 按大括号配平切出完整块（从 token 起），能处理 class / 多行函数 */
@@ -146,9 +153,10 @@ function pushStage(stage) { __pushes.stage.push(stage) }
 export const __net = { fetch: null }
 const net = { fetch: (...a) => __net.fetch(...a) }
 
-// 固定镜像（本验证不覆盖镜像纠错路径，只保证 downloadOne 里那处「resolveMirror() !== mirrorPrefix」
-// 的两秒巡检不会误伤：两侧给同一个值，于是巡检恒为 no-op）。用例里的 MIRROR 常量必须与之一致。
-function resolveMirror() { return 'https://gh-proxy.com' }
+// 镜像设置值的替身（可用例中途改写 → 模拟「下载中用户换镜像」）
+// 与用例里的 MIRROR 常量必须一致：默认值相同，两秒一次的巡检才是 no-op。
+export const __mirrorCtl = { value: 'https://gh-proxy.com' }
+function resolveMirror() { return __mirrorCtl.value }
 
 ${sliceConst(src, 'FALLBACK_MIRRORS')}
 ${sliceConst(src, 'PROGRESS_MIN_BYTES')}
@@ -156,6 +164,7 @@ ${sliceConst(src, 'PROGRESS_MIN_INTERVAL_MS')}
 ${windowLine}
 ${sliceConst(src, 'SLOW_MIN_BYTES')}
 ${sliceBraced(src, 'class UpdateError')}
+${sliceBraced(src, 'function mirrorKey')}
 ${sliceFn(src, 'async function downloadOne')}
 
 export { downloadOne, UpdateError }
@@ -237,15 +246,17 @@ const REMOTE = 'https://github.com/x/y/releases/download/v1/a.exe'
 /**
  * 跑一次真实 downloadOne。返回 { err, dt } —— 失败不抛出，交给断言表达，
  * 这样单个用例挂死/报错不会把后面的用例一起带走（A/B 对照时需要看到全貌）。
+ * opts.baseline 覆盖第 6 个实参（镜像基准），用来复现旧调用点的口径。
  */
 async function drive(mod, dest, plan, total, timeoutMs, tag, opts = {}) {
   mod.__pushes.progress.length = 0
   mod.__pushes.stage.length = 0
   mod.__net.fetch = makeFetch(plan, total, opts)
+  opts.onStart?.()
   const t0 = Date.now()
   let err = null
   try {
-    await withTimeout(mod.downloadOne(REMOTE, dest, total, new AbortController().signal, 0, MIRROR), timeoutMs, tag)
+    await withTimeout(mod.downloadOne(REMOTE, dest, total, new AbortController().signal, 0, opts.baseline ?? MIRROR), timeoutMs, tag)
   } catch (e) { err = e }
   return { err, dt: Date.now() - t0 }
 }
@@ -312,6 +323,46 @@ async function run() {
     const { err } = await drive(B, dest, plan, total, 10000, 'B2')
     check('稳定低速通道（2.56MB/s）：不被误判为卡死', !err, err ? `${err.reason || ''} ${err.message || err}` : '')
     check('稳定低速通道：完整落盘', fs.existsSync(dest) && fs.statSync(dest).size === total)
+    try { fs.unlinkSync(dest) } catch { /* ignore */ }
+  }
+
+  // ============ B3–B5：镜像巡检口径（2026-09-15 二次修复） ============
+  // 统一的流：窗口内新增 256KB*20 = 5.12MB > 2MB，确保慢速看门狗不会抢先介入，
+  // 于是用例里唯一可能中止下载的就是两秒一次的镜像巡检。
+  const MP = Array.from({ length: 64 }, (_, i) => [256 * 1024, i === 0 ? 0 : 50])
+  const MT = 16 * MB // ≈3.15s，跨过至少一次 2s 巡检
+
+  // B3 旧口径复现：调用点把「当前候选的前缀」当基准 —— 直连候选推导出 ''，
+  //    而设置里填的是镜像地址 → 恒不相等 → 2s 被判成「用户换了镜像」。
+  //    这就是「任何非默认配置下兜底候选都活不过 2s、自动回退直连不可达」的机制。
+  {
+    const dest = tmpDest('b3')
+    const { err, dt } = await drive(B, dest, MP, MT, 8000, 'B3', { baseline: '' })
+    check('旧口径复现：候选前缀当基准 → 直连候选 2s 被判「换了镜像」',
+      err?.message === 'MIRROR_CHANGED', `message=${err?.message || '(无)'} dt=${dt}ms`)
+    try { fs.unlinkSync(dest) } catch { /* ignore */ }
+  }
+
+  // B4 修复后：基准 = 设置值 → 同一个直连候选不再自杀，完整下完
+  {
+    const dest = tmpDest('b4')
+    const { err, dt } = await drive(B, dest, MP, MT, 12000, 'B4')
+    check('修复后：直连候选不再被误判为换镜像，完整下完',
+      !err && fs.existsSync(dest) && fs.statSync(dest).size === MT,
+      `${err ? `err=${err.message} ` : ''}dt=${dt}ms`)
+    try { fs.unlinkSync(dest) } catch { /* ignore */ }
+  }
+
+  // B5 功能没被改坏：下载中真的换了镜像，仍要 2s 内感知并中止（断点由上层续传）
+  {
+    const dest = tmpDest('b5')
+    const { err, dt } = await drive(B, dest, MP, MT, 8000, 'B5', {
+      onStart: () => { setTimeout(() => { B.__mirrorCtl.value = 'https://gh.dpik.top' }, 1000) },
+    })
+    B.__mirrorCtl.value = MIRROR // 复原，免得影响后续用例
+    check('下载中换镜像：2s 内感知并抛 MIRROR_CHANGED',
+      err?.message === 'MIRROR_CHANGED' && dt >= 1200 && dt <= 4000,
+      `message=${err?.message || '(无)'} dt=${dt}ms`)
     try { fs.unlinkSync(dest) } catch { /* ignore */ }
   }
 }

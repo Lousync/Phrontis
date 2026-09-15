@@ -147,14 +147,21 @@ function partialSize(dest: string): number {
   try { return statSync(dest).size } catch { return 0 }
 }
 
-/** 候选 URL 使用的镜像前缀('' = 直连) — 供下载中镜像切换检测比对 */
-function mirrorPrefixOf(candidate: string): string {
-  const current = resolveMirror()
-  if (current && candidate.startsWith(current + '/')) return current
-  for (const m of FALLBACK_MIRRORS) {
-    if (candidate.startsWith(m + '/')) return m
-  }
-  return ''
+/**
+ * 镜像切换检测的**基准值**（`''` = 直连）。
+ *
+ * 2026-09-15 修：原先是 `mirrorPrefixOf(当前候选)` —— 与 `resolveMirror()` 语义不齐
+ * （显式直连时 `resolveMirror()` 返 `null`、`mirrorPrefixOf()` 返 `''` → 恒不相等），
+ * 而且把「这个候选走不走镜像」误当成了「用户换没换镜像」。后果两条：
+ *   ① 用户显式置空镜像（AboutView 明示「留空 = 直连 GitHub」）时，每个候选都在下一次
+ *      2s 巡检被 `MIRROR_CHANGED` 打断，换满 5 轮后报「所有下载通道均失败」；
+ *   ② 任何非默认配置下，**兜底候选（备用镜像 / 直连）进入后 2s 即被判成「换了镜像」**与中止
+ *      → AboutView 承诺的「镜像失效自动回退直连」实际不可达。
+ * 现在统一归一化（`null` 与 `''` 同口径 = 直连），只有**用户真的改了设置**才会触发中止；
+ * 基准在每轮重算候选时捕获（见 `update:download` 的 while），故中途换镜像只会重排候选、不会反复自杀。
+ */
+function mirrorKey(): string {
+  return resolveMirror() ?? ''
 }
 
 /** 从单通道下载到 dest,流式推送进度;支持断点续传(Range)、外部中断与镜像切换感知;失败抛出(由上层换通道) */
@@ -164,7 +171,7 @@ async function downloadOne(
   expectedSize: number | undefined,
   signal: AbortSignal,
   startOffset: number,
-  mirrorPrefix: string,
+  mirrorAtStart: string,
 ): Promise<void> {
   const headers: Record<string, string> = { 'User-Agent': 'Knowbase-App' }
   if (startOffset > 0) headers['Range'] = `bytes=${startOffset}-`
@@ -209,9 +216,11 @@ async function downloadOne(
     pushProgress(Math.min(99, Math.floor((done / totalFull) * 100)), done, totalFull)
   }
 
-  // 镜像纠错:下载中用户更换代理源 → 2s 内感知,中止当前通道,由上层按新镜像重算候选断点续传
+  // 镜像纠错:下载中用户更换代理源 → 2s 内感知,中止当前通道,由上层按新镜像重算候选断点续传。
+  // 比的是「下载开始时捕获的基准」(mirrorAtStart),不是当前候选走不走镜像 —— 后者会把
+  // 兜底候选误判成换镜像(见 mirrorKey 注释)。
   mirrorTimer = setInterval(() => {
-    if (resolveMirror() !== mirrorPrefix) reader.destroy(new Error('MIRROR_CHANGED'))
+    if (mirrorKey() !== mirrorAtStart) reader.destroy(new Error('MIRROR_CHANGED'))
   }, 2000)
   mirrorTimer.unref?.()
 
@@ -386,11 +395,14 @@ ipcMain.handle('update:download', async (_e, url: string, name: string, expected
       let switched = false
       while (restart && restarts < 5) {
         restart = false
+        // 镜像基准在**每轮重算候选时**捕获：用户中途换镜像会让当前轮以 MIRROR_CHANGED 结束，
+        // 下一轮拿到新基准 + 新候选顺序，带着断点续传继续下（否则会拿旧基准反复自杀）。
+        const mirrorAtStart = mirrorKey()
         for (const candidate of downloadCandidates(url)) {
           if (pauseRequested || cancelRequested) break
           pushStage(switched ? 'switching' : 'downloading')
           try {
-            await downloadOne(candidate, dest, expectedSize, activeDownloadAbort.signal, partialSize(dest), mirrorPrefixOf(candidate))
+            await downloadOne(candidate, dest, expectedSize, activeDownloadAbort.signal, partialSize(dest), mirrorAtStart)
             // 流已收完 → sha512 校验(133MB 要 1~3s)期间给 UI 一个明确状态,不再无声停住
             pushStage('verifying')
             const check = await verifyInstaller(dest, expectedSize, url)
