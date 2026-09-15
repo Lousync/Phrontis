@@ -4,6 +4,7 @@ import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag } from './
 
 /** 模块清单（打开命令 / 分屏副栏选择共用；devtools 为 dev-only 不列入口） */
 const MODULE_TABS: Array<{ id: TabName; label: string }> = [
+  { id: 'desktop', label: '桌面' },
   { id: 'editor', label: '编辑器' },
   { id: 'knowledge', label: '知识库' },
   { id: 'blog', label: '博客' },
@@ -56,6 +57,7 @@ import { PluginsModule } from './modules/plugins'
 import { EditorModule } from './modules/editor'
 import { AiTeachingModule } from './modules/ai-teaching'
 import { ReleaseNotesModule } from './modules/release-notes'
+import { DesktopModule } from './modules/desktop'
 
 import { FillPopup } from './modules/toolbox/components/FillPopup'
 import { VaultPicker } from './components/shared/VaultPicker'
@@ -732,6 +734,9 @@ export default function App() {
   /** 模块内容（主栏/副栏共用；on = 该模块当前在屏幕某栏激活） */
   function renderModuleContent(name: TabName, on: boolean): React.ReactNode {
     switch (name) {
+      // 桌面外壳：磁贴点开模块一律回到 handleTabChange（= 点活动栏图标），
+      // 于是侧栏展开、分屏冲突处理等既有行为全部自动继承，桌面侧不需要知道这些规则。
+      case 'desktop': return <DesktopModule isActive={on} onOpenModule={handleTabChange} />
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} />
       case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} />

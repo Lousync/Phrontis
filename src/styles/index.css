@@ -713,3 +713,417 @@ input:focus, textarea:focus, select:focus {
   .rn-demo-anim, .rn-row-anim, .rn-check-anim { animation: none; }
   .rn-bar i, .rn-bar .fill { animation: none; transform: none; }
 }
+
+/* ==========================================================================
+   桌面外壳（自定义磁贴工作台）  →  src/modules/desktop/
+   铁律 13：只动 transform / opacity / 颜色。栅格轨道（span 变化）不做补间——
+   格子重排是瞬时的，补间会让整屏内容重排并逐帧重绘。
+   ⚠️ --desk-cell / --desk-gap 必须与 modules/desktop/layout.ts 的
+      CELL_UNIT / CELL_GAP 保持一致（拖角改尺寸按格吸附，两边不等就会错位）。
+      添加面板的缩略图也用这两个常量算宽高比例（TileThumb），同样依赖这一致性。
+   ========================================================================== */
+.desk {
+  position: relative;
+  --desk-cell: 108px;
+  --desk-gap: 12px;
+}
+
+/* ---- 顶栏 ---- */
+.desk-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 22px 2px; }
+.desk-bar-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.desk-tool {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px;
+  border-radius: var(--radius-btn); border: 1px solid transparent; color: var(--text-secondary);
+  font-size: 12px;
+  transition: color var(--dur-micro) var(--ease-kb), background-color var(--dur-micro) var(--ease-kb),
+              border-color var(--dur-micro) var(--ease-kb);
+}
+.desk-tool:hover { color: var(--text-primary); background: var(--bg-hover); }
+.desk-tool.is-on {
+  color: var(--accent); border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.desk-tool-wide { padding: 0 10px; }
+.desk-preset-wrap { position: relative; }
+.desk-chev { transition: transform var(--dur-micro) var(--ease-kb); }
+.desk-chev.is-open { transform: rotate(180deg); }
+
+.desk-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 178px; padding: 4px;
+  border-radius: var(--radius-card); border: 1px solid var(--border-color);
+  background: var(--bg-secondary); box-shadow: var(--shadow-card);
+}
+.desk-menu-item {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px;
+  border-radius: var(--radius-btn); font-size: 12.5px; color: var(--text-primary); text-align: left;
+  transition: background-color var(--dur-micro) var(--ease-kb);
+}
+.desk-menu-item:hover:not(:disabled) { background: var(--bg-hover); }
+.desk-menu-item:disabled { color: var(--text-disabled); }
+.desk-menu-tick { display: inline-flex; width: 14px; color: var(--accent); }
+.desk-menu-sep { height: 1px; margin: 4px 0; background: var(--border-color); }
+
+/* ---- 中心（大时钟承担首屏最大权重，原可编辑标题已删） ---- */
+.desk-hero {
+  flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 6px 24px 14px; text-align: center;
+}
+.desk-hero-date { font-size: 12px; color: var(--text-muted); letter-spacing: .3px; }
+/* tabular-nums：等宽数字，否则 1→8 逐位变宽、整块时间每跳一秒就左右晃一下 */
+.desk-hero-clock {
+  font-size: 34px; font-weight: 500; line-height: 1.2; letter-spacing: .5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* ---- 搜索 + 新建 ---- */
+.desk-hero-tools { display: flex; align-items: center; gap: 8px; width: min(620px, 100%); margin-top: 4px; }
+.desk-search {
+  position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 12px; border-radius: var(--radius-btn);
+  background: var(--card-bg); border: 1px solid var(--border-color);
+  transition: border-color var(--dur-micro) var(--ease-kb);
+}
+.desk-search:focus-within { border-color: var(--accent); }
+.desk-search-ico { flex: none; color: var(--text-muted); }
+.desk-search-in {
+  flex: 1; min-width: 0; background: transparent; border: none; outline: none;
+  font-size: 13px; color: var(--text-primary);
+}
+.desk-search-in::placeholder { color: var(--text-disabled); }
+.desk-search-pop {
+  position: absolute; left: 0; right: 0; top: calc(100% + 6px); z-index: 40;
+  padding: 4px; max-height: 264px; overflow-y: auto;
+  border-radius: var(--radius-card); border: 1px solid var(--border-color);
+  background: var(--bg-secondary); box-shadow: var(--shadow-card);
+}
+.desk-search-row {
+  display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 6px 9px;
+  border-radius: var(--radius-btn); text-align: left;
+  transition: background-color var(--dur-micro) var(--ease-kb);
+}
+.desk-search-row:hover { background: var(--bg-hover); }
+.desk-search-txt { font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-search-exc { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-search-none { padding: 12px 9px; font-size: 12px; color: var(--text-muted); }
+.desk-newbtn {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; height: 36px; padding: 0 14px;
+  border-radius: var(--radius-btn); border: 1px solid var(--border-color); background: var(--card-bg);
+  font-size: 13px; color: var(--text-secondary);
+  transition: color var(--dur-micro) var(--ease-kb), border-color var(--dur-micro) var(--ease-kb);
+}
+.desk-newbtn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ---- 图标快捷行 ---- */
+.desk-dock { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 6px; }
+.desk-dock-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: var(--radius-btn); color: var(--text-secondary);
+  transition: color var(--dur-micro) var(--ease-kb), background-color var(--dur-micro) var(--ease-kb);
+}
+.desk-dock-btn:hover { color: var(--accent); background: var(--bg-hover); }
+
+/* ---- 栅格 ---- */
+.desk-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 22px 24px; }
+.desk-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--desk-cols, 6), minmax(0, 1fr));
+  grid-auto-rows: var(--desk-cell);
+  gap: var(--desk-gap);
+  align-content: start;
+  grid-auto-flow: row dense;
+}
+
+/* ---- 磁贴 ---- */
+.desk-tile {
+  position: relative; display: flex; flex-direction: column;
+  min-width: 0; min-height: 0; padding: 12px 13px; overflow: hidden;
+  border-radius: 12px; border: 1px solid var(--border-color); background: var(--card-bg);
+  transition: border-color var(--dur-micro) var(--ease-kb), transform var(--dur-micro) var(--ease-kb),
+              box-shadow var(--dur-micro) var(--ease-kb);
+}
+.desk-tile.is-jump { cursor: pointer; }
+.desk-tile.is-jump:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border-color)); }
+/* 编辑态只作用于**栅格里的**磁贴。作用域必须收窄：添加面板的缩略图复用 `.desk-tile`
+   （也挂在 `.desk.is-editing` 里），不收窄就会满屏虚线框 + grab 光标。
+   `:not(.desk-add)` 同理 —— 那个 + 号按钮不是磁贴，不该是抓手。 */
+.desk.is-editing .desk-grid > .desk-tile:not(.desk-add) { cursor: grab; border-style: dashed; touch-action: none; }
+.desk.is-editing .desk-grid > .desk-tile:not(.desk-add):hover { border-color: var(--accent); }
+/* 跟手过程不加动画（铁律 13 硬约束） */
+.desk.is-editing .desk-grid > .desk-tile.is-dragging { cursor: grabbing; transition: none; opacity: .9; }
+.desk.is-editing .desk-grid > .desk-tile.is-over {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+/* 编辑态里磁贴内容不可交互，避免「本意是拖，结果把待办勾了」 */
+.desk.is-editing .desk-tile-body { pointer-events: none; }
+
+.desk-tile-head { flex: none; display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.desk-tile-ico { display: inline-flex; color: var(--text-muted); }
+.desk-tile-name { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.desk-tile-tail { margin-left: auto; font-size: 10.5px; color: var(--text-muted); white-space: nowrap; }
+.desk-tile-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+/* ---- 列表行 ---- */
+.desk-rows { display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+.desk-row {
+  display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px;
+  border-radius: 5px; font-size: 12px; color: var(--text-primary); text-align: left;
+}
+.desk-row-btn { transition: background-color var(--dur-micro) var(--ease-kb); }
+.desk-row-btn:hover { background: var(--bg-hover); }
+.desk-row-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desk-row-meta { flex: none; font-size: 10.5px; color: var(--text-muted); }
+.desk-row.is-done .desk-row-txt { color: var(--text-muted); text-decoration: line-through; }
+.desk-check {
+  flex: none; width: 13px; height: 13px; border-radius: 4px; border: 1.4px solid var(--border-color);
+  transition: background-color var(--dur-micro) var(--ease-kb), border-color var(--dur-micro) var(--ease-kb);
+}
+.desk-row.is-done .desk-check {
+  background: var(--accent); border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--card-bg);
+}
+.desk-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted); opacity: .55; }
+
+/* ---- 打卡 / 说说 ---- */
+.desk-stack { display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow: hidden; }
+/* 需要「撑满磁贴」的 stack（如热力图：内部子项靠 flex:1 分配高度）。
+   普通 stack 保持内容高度 —— 否则列表类磁贴会被强行拉长、行距变形。 */
+.desk-stack-fill { flex: 1; }
+.desk-quote {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 3px 4px;
+  border-radius: 5px; text-align: left;
+  transition: background-color var(--dur-micro) var(--ease-kb);
+}
+.desk-quote:hover { background: var(--bg-hover); }
+.desk-quote-txt {
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+  font-size: 11.5px; line-height: 1.4; color: var(--text-secondary);
+}
+.desk-quote-new { font-size: 11.5px; color: var(--text-muted); }
+
+/* ---- 空态 / 统计 / 模块磁贴 ---- */
+.desk-empty { margin: auto; font-size: 11.5px; color: var(--text-muted); text-align: center; }
+.desk-blank {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 56px 0; color: var(--text-muted);
+}
+.desk-blank p { font-size: 13px; }
+.desk-blank-btn {
+  height: 30px; padding: 0 14px; border-radius: var(--radius-btn);
+  border: 1px solid var(--border-color); font-size: 12.5px; color: var(--text-primary);
+  transition: border-color var(--dur-micro) var(--ease-kb);
+}
+.desk-blank-btn:hover { border-color: var(--accent); }
+
+/* ---- 时钟卡 ---- */
+.desk-clock {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 3px; text-align: center;
+}
+.desk-clock-hi { font-size: 12.5px; color: var(--text-muted); }
+.desk-clock-time {
+  font-size: 38px; font-weight: 500; line-height: 1.1; letter-spacing: 1px;
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+.desk-clock-date { font-size: 12px; color: var(--text-secondary); }
+
+/* ---- 月历卡 ---- */
+.desk-cal { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.desk-cal-head { flex: none; display: flex; align-items: center; gap: 4px; }
+.desk-cal-nav {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 5px; color: var(--text-muted);
+  transition: color var(--dur-micro) var(--ease-kb), background-color var(--dur-micro) var(--ease-kb);
+}
+.desk-cal-nav:hover { color: var(--text-primary); background: var(--bg-hover); }
+.desk-cal-title { font-size: 12.5px; color: var(--text-primary); }
+.desk-cal-back {
+  margin-left: auto; padding: 0 4px; border-radius: 4px;
+  font-size: 11px; color: var(--accent);
+  transition: background-color var(--dur-micro) var(--ease-kb);
+}
+.desk-cal-back:hover { background: var(--bg-hover); }
+.desk-cal-grid {
+  flex: 1; min-height: 0; display: grid; align-content: start;
+  grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px;
+}
+.desk-cal-wd { font-size: 10.5px; line-height: 18px; color: var(--text-muted); text-align: center; }
+.desk-cal-cell {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  min-height: 20px; border-radius: 5px; font-size: 11.5px; line-height: 1; color: var(--text-secondary);
+}
+.desk-cal-cell.is-blank { visibility: hidden; }
+.desk-cal-cell.is-today { color: #fff; background: var(--accent); font-weight: 500; }
+/* 有打卡的日子给一个点（今天已经是实心底，不用再点） */
+.desk-cal-cell.is-marked:not(.is-today)::after {
+  content: ''; position: absolute; bottom: 2px; left: 50%; margin-left: -1.5px;
+  width: 3px; height: 3px; border-radius: 50%; background: var(--accent);
+}
+
+/* ---- 打卡轨迹（长周期热力图，列 = 自然周 / 行 = 周日…周六） ---- */
+.desk-act {
+  flex: 1; min-height: 0; display: grid; grid-auto-flow: column;
+  grid-template-rows: repeat(7, minmax(0, 1fr)); grid-auto-columns: minmax(0, 1fr); gap: 3px;
+}
+.desk-act i { border-radius: 2px; background: var(--bg-tertiary); }
+.desk-act i.lv1, .desk-act-legend i.lv1 { background: color-mix(in srgb, var(--accent) 28%, var(--bg-tertiary)); }
+.desk-act i.lv2, .desk-act-legend i.lv2 { background: color-mix(in srgb, var(--accent) 52%, var(--bg-tertiary)); }
+.desk-act i.lv3, .desk-act-legend i.lv3 { background: color-mix(in srgb, var(--accent) 76%, var(--bg-tertiary)); }
+.desk-act i.lv4, .desk-act-legend i.lv4 { background: var(--accent); }
+.desk-act-foot {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px; color: var(--text-muted);
+}
+.desk-act-legend { margin-left: auto; display: inline-flex; align-items: center; gap: 3px; }
+.desk-act-legend i { width: 9px; height: 9px; border-radius: 2px; background: var(--bg-tertiary); }
+
+/* ---- 四数字横排（笔记 / 附件 / 目录 / 标签） ---- */
+.desk-figs {
+  flex: 1; min-height: 0; display: grid; align-items: center; gap: 4px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.desk-fig { display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
+.desk-fig b {
+  font-size: 22px; font-weight: 500; line-height: 1.1;
+  color: var(--text-primary); font-variant-numeric: tabular-nums;
+}
+.desk-fig span { font-size: 10.5px; color: var(--text-muted); }
+.desk-center {
+  display: flex; flex: 1; min-height: 0; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+}
+.desk-center-ico { color: var(--accent); }
+.desk-center-txt { font-size: 12px; color: var(--text-primary); }
+.desk-hint { font-size: 11.5px; color: var(--text-secondary); }
+.desk-offer {
+  display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 6px;
+  font-size: 11px; color: var(--text-muted);
+}
+.desk-offer-arrow { transition: transform var(--dur-micro) var(--ease-kb); }
+.desk-tile.is-jump:hover .desk-offer-arrow { transform: translateX(3px); }
+
+/* ---- 编辑态徽标：常态极简，hover 才强调（1×1 格子上不能和内容抢空间） ---- */
+.desk-del {
+  position: absolute; top: 5px; right: 5px; z-index: 5;
+  display: grid; place-items: center; width: 19px; height: 19px; border-radius: 50%;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-muted);
+  transition: color var(--dur-micro) var(--ease-kb), border-color var(--dur-micro) var(--ease-kb),
+              transform var(--dur-micro) var(--ease-kb);
+}
+.desk-del:hover { color: var(--danger); border-color: var(--danger); transform: scale(1.08); }
+.desk-size {
+  position: absolute; right: 4px; bottom: 4px; z-index: 5;
+  display: flex; align-items: center; gap: 2px; height: 19px; padding: 0 5px;
+  border-radius: 5px; background: var(--bg-secondary); border: 1px solid var(--border-color);
+  color: var(--text-muted); cursor: nwse-resize;
+  transition: color var(--dur-micro) var(--ease-kb), border-color var(--dur-micro) var(--ease-kb);
+}
+.desk-size:hover { color: var(--accent); border-color: var(--accent); }
+.desk-size-lbl { font-size: 10px; font-variant-numeric: tabular-nums; }
+
+.desk-hint-bar {
+  display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 7px 11px;
+  border-radius: var(--radius-card); border: 1px dashed var(--border-color);
+  font-size: 11.5px; color: var(--text-muted);
+}
+.desk-hint-btn { margin-left: auto; font-size: 11.5px; color: var(--accent); }
+
+.desk-add {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  border-style: dashed; color: var(--text-muted); font-size: 11.5px;
+  transition: color var(--dur-micro) var(--ease-kb), border-color var(--dur-micro) var(--ease-kb);
+}
+.desk-add:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ---- 添加控件面板 ---- */
+.desk-overlay {
+  position: absolute; inset: 0; z-index: 60; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg-primary) 55%, transparent);
+}
+.desk-panel {
+  display: flex; flex-direction: column; width: min(460px, 92vw); max-height: 64vh; overflow: hidden;
+  border-radius: var(--radius-card); border: 1px solid var(--border-color);
+  background: var(--bg-secondary); box-shadow: var(--shadow-card);
+}
+.desk-panel-head {
+  flex: none; display: flex; align-items: center; padding: 10px 12px;
+  font-size: 12.5px; font-weight: 500; color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+}
+.desk-panel-x { margin-left: auto; color: var(--text-muted); }
+.desk-panel-x:hover { color: var(--text-primary); }
+.desk-panel-empty { padding: 16px 12px; font-size: 12px; color: var(--text-muted); }
+.desk-panel-list { overflow-y: auto; padding: 4px; }
+.desk-panel-item {
+  display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 8px;
+  border-radius: var(--radius-btn); font-size: 12.5px; color: var(--text-primary);
+  transition: background-color var(--dur-micro) var(--ease-kb);
+}
+.desk-panel-item:hover { background: var(--bg-hover); }
+
+/*
+ * ---- 面板条目里的「真身」缩略图 ----
+ * 缩略图不是示意图：它就是磁贴本体按默认尺寸渲染后等比缩放，所以这里只负责
+ * 「盒子 + 裁剪 + 缩放」，磁贴内部的样式一律复用 `.desk-tile*`，不在面板里重画一套。
+ */
+.desk-pick-group {
+  display: flex; align-items: center; gap: 8px; padding: 9px 12px 3px;
+  font-size: 11px; color: var(--text-muted);
+}
+.desk-pick-group::after { content: ''; flex: 1; height: 1px; background: var(--border-color); }
+
+/* 内容控件：左侧缩略图 + 右侧名称 / 尺寸 / 说明 */
+.desk-pick-item { align-items: flex-start; gap: 10px; padding: 9px 10px; cursor: pointer; }
+.desk-pick-thumb {
+  position: relative; flex: none; width: 150px; height: 110px; overflow: hidden;
+  border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary);
+}
+.desk-pick-inner { position: absolute; transform-origin: 0 0; pointer-events: none; }
+/* 缩略图内的磁贴撑满内层盒子（尺寸由内联 style 给出，这里只负责填满） */
+.desk-pick-inner > .desk-tile { width: 100%; height: 100%; }
+.desk-pick-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.desk-pick-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.desk-pick-name { font-size: 12.5px; color: var(--text-primary); }
+.desk-pick-was { font-size: 10.5px; color: var(--text-disabled); }
+.desk-pick-size {
+  flex: none; padding: 0 4px; border-radius: 5px; border: 1px solid var(--border-color);
+  font-size: 10.5px; color: var(--text-muted); font-variant-numeric: tabular-nums;
+}
+.desk-pick-desc { font-size: 11.5px; line-height: 1.5; color: var(--text-muted); }
+/* 「＋ 添加」不常驻：面板本身已经只列可添加项，常驻反而抢名称的注意力 */
+.desk-pick-add {
+  margin-left: auto; font-size: 11px; color: var(--accent); opacity: 0;
+  transition: opacity var(--dur-micro) var(--ease-kb);
+}
+.desk-panel-item:hover .desk-pick-add { opacity: 1; }
+.desk-pick-item:focus-visible, .desk-pick-cell:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* 模块入口：小方块缩略图 + 两列（都是 1×1，铺成两列比单列省一半滚动） */
+.desk-pick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 0 4px 8px; }
+.desk-pick-cell {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; text-align: left;
+  border-radius: var(--radius-btn); cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-kb);
+}
+.desk-pick-cell:hover { background: var(--bg-hover); }
+.desk-pick-thumb.is-small { width: 58px; height: 58px; }
+.desk-pick-cell-txt { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.desk-pick-cell-txt .n {
+  min-width: 0; font-size: 12.5px; color: var(--text-primary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.desk-pick-cell-txt .d {
+  font-size: 11px; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desk-tool, .desk-menu-item, .desk-chev, .desk-tile, .desk-row-btn,
+  .desk-check, .desk-quote, .desk-del, .desk-size, .desk-offer-arrow,
+  .desk-blank-btn, .desk-add, .desk-panel-item, .desk-search, .desk-search-row,
+  .desk-newbtn, .desk-dock-btn, .desk-cal-nav, .desk-cal-back,
+  .desk-pick-cell, .desk-pick-add { transition: none; }
+  .desk-tile.is-dragging { opacity: 1; }
+}
+

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import type { TabName } from '../../types'
-import { Palette, ChevronRight, ChevronDown, Check, Download, FlaskConical, History, LifeBuoy, Trash2 } from 'lucide-react'
+import { Palette, ChevronRight, ChevronDown, Check, Download, FlaskConical, History, LifeBuoy, Trash2, LayoutGrid } from 'lucide-react'
 import { useSettings } from '../../lib/SettingsContext'
 import { applyThemeClass } from '../../lib/settings'
 import { useContextMenuPosition } from '../../lib/useContextMenuPosition'
@@ -8,6 +8,7 @@ import { BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon, ToolboxIcon, UserIc
 
 /** All draggable module tabs (excluding user/settings; 帮助已在用户菜单内,侧边栏不再单列; UI 打磨点4：editor 提首位与 activityBarOrder 新默认对齐) */
 const ALL_MODULES: { id: TabName; label: string; icon: (size: number) => React.ReactNode }[] = [
+  { id: 'desktop',   label: '桌面',   icon: s => <LayoutGrid size={s} /> },
   { id: 'editor',    label: '编辑器', icon: s => <EditorIcon size={s} /> },
   { id: 'blog',      label: '博客',   icon: s => <BlogIcon size={s} /> },
   { id: 'schedule',  label: '日程',   icon: s => <ScheduleIcon size={s} /> },
@@ -80,6 +81,9 @@ export function ActivityBar({ active, onChange, onToggleSidebar, flush }: Props)
 
   // Compute ordered visible modules
   const order = allOrder.filter(id => ALL_MODULES.some(m => m.id === id))
+  // 新模块（还没进过 activityBarOrder）默认插队首 = 入口位。
+  // 一旦用户拖拽过一次、desktop 进了存储，这里就不再插手，完全尊重用户排序。
+  if (!order.includes('desktop')) order.unshift('desktop')
   // Append any new modules not yet in the order
   for (const m of ALL_MODULES) {
     if (!order.includes(m.id)) order.push(m.id)

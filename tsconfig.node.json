@@ -8,7 +8,10 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "outDir": "./out",
+    // 同 tsconfig.web.json：本文件只用于类型检查。原来这里还有 `outDir: "./out"`，
+    // 一旦有人直接跑 `tsc -p tsconfig.node.json`，就会把 electron/ 的原样副本排进 out/
+    // （out/electron、out/src），而 build.files 是 ["out/**/*"] → 会被打进安装包。
+    "noEmit": true,
     "types": ["electron-vite/node"]
   },
   "include": ["electron/**/*", "electron.vite.config.ts", "src/lib/settings.ts", "src/lib/translateTypes.ts", "src/lib/wordbookTypes.ts"]
