@@ -28,6 +28,7 @@ import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubbl
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { WebSourceDialog } from './components/WebSourceDialog'
 import { SideLanePanel } from './SideLanePanel'
+import { AI_TEXT_CODE_EXT_SET } from '../../lib/aiTextExts'
 import { useFloatingWindow } from './useFloatingWindow'
 
 /**
@@ -81,7 +82,8 @@ function inferSrcType(path: string): string {
   if (ext === 'docx' || ext === 'doc') return 'docx'
   if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'image'
   if (['md', 'markdown', 'txt'].includes(ext)) return 'md'
-  if (['js', 'ts', 'jsx', 'tsx', 'py', 'c', 'h', 'cpp', 'hpp', 'cc', 'java', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'kt', 'sh', 'bat', 'ps1', 'lua', 'sql', 'vue', 'scss', 'css', 'html', 'xml', 'json', 'yml', 'yaml', 'toml', 'ini'].includes(ext)) return 'code'
+  // 代码扩展名清单与主进程同源（v3.2.0 条目 9 三处合一；配置类五项不识别为 code）
+  if (AI_TEXT_CODE_EXT_SET.has(ext)) return 'code'
   return 'other'
 }
 

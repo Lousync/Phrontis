@@ -12,6 +12,9 @@ import { convertToPdf, probeSoffice, resetSofficeCache } from './sofficeConvert'
 import { probeWeb, crawlQueue, type ProbeResult, type TocChapter } from './webCrawler'
 import { appendAudit, countMonthVisionTokens, countMonthVisionPages } from './pluginAudit'
 import { getAgentSession } from './agentSessionRepo'
+// 素材类型识别的代码扩展名清单与 AI 读白名单同源（v3.2.0 条目 9 三处合一）：
+// 连带效果 = 素材库不再把 json/yml/yaml/toml/ini 五个配置类识别为 code（拍板④ 配置类不放开）
+import { AI_TEXT_CODE_EXTS } from '../../src/lib/aiTextExts'
 
 /**
  * AI教学模块 · 素材库（总纲 docs/ai-teaching-module-rework.md §3.13 结构 v3，P6）
@@ -406,7 +409,7 @@ const EXT_TYPE_MAP: Record<string, SourceType> = {
   png: 'image', jpg: 'image', jpeg: 'image', gif: 'image', webp: 'image', bmp: 'image', svg: 'image',
   md: 'md', markdown: 'md', txt: 'md',
 }
-const CODE_EXTS = new Set(['js', 'ts', 'jsx', 'tsx', 'py', 'c', 'h', 'cpp', 'hpp', 'cc', 'java', 'cs', 'go', 'rs', 'rb', 'php', 'swift', 'kt', 'sh', 'bat', 'ps1', 'lua', 'sql', 'vue', 'scss', 'css', 'html', 'xml', 'json', 'yml', 'yaml', 'toml', 'ini'])
+const CODE_EXTS = new Set<string>(AI_TEXT_CODE_EXTS)
 
 /** 由文件名/路径推断素材类型；无法识别返回 null（保留用户所选） */
 function inferTypeFromPath(p: string): SourceType | null {

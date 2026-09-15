@@ -3,43 +3,43 @@
 
 【core —— 每轮常驻注入】14 个
   builtin.quiz.list                   3290 字符  ~1036 tok  schema  556  [read/quiz]
-  builtin.vault.read                  2842 字符  ~ 894 tok  schema  308  [read/-]
+  builtin.vault.read                  2879 字符  ~ 917 tok  schema  308  [read/-]
   builtin.habits.stats                2438 字符  ~ 684 tok  schema  241  [read/checkin]
   builtin.quiz.stats                  2280 字符  ~ 693 tok  schema   96  [read/quiz]
   builtin.tool.request                2256 字符  ~ 797 tok  schema  157  [read/-]
   builtin.schedule.list-todos         1755 字符  ~ 537 tok  schema  164  [read/schedule]
-  builtin.vault.list                  1752 字符  ~ 527 tok  schema   97  [read/-]
-  builtin.vault.search                1519 字符  ~ 432 tok  schema  161  [read/-]
+  builtin.vault.list                  1755 字符  ~ 530 tok  schema   97  [read/-]
+  builtin.vault.search                1526 字符  ~ 439 tok  schema  161  [read/-]
   builtin.pomodoro.summary            1499 字符  ~ 397 tok  schema   83  [read/pomodoro]
   builtin.vault.resolve-ref           1386 字符  ~ 447 tok  schema  114  [read/-]
   builtin.help.search                 1061 字符  ~ 418 tok  schema  274  [read/-]
   builtin.knowledge.search             977 字符  ~ 316 tok  schema  490  [read/knowledge]
   builtin.web.read                     932 字符  ~ 308 tok  schema  174  [read/-]
   builtin.web.search                   722 字符  ~ 245 tok  schema  173  [read/-]
-  小计: 24709 字符  ~7731 tok
+  小计: 24756 字符  ~7764 tok
 
 【ondemand —— 默认折叠，tool.request 后才注入】17 个
   builtin.quiz.gen-paper              4627 字符  ~1521 tok  schema  631  [write/quiz]
   builtin.schedule.create-todo        3014 字符  ~ 955 tok  schema  728  [write/schedule]
-  builtin.vault.edit                  2659 字符  ~ 881 tok  schema  491  [write/-]
+  builtin.vault.edit                  2794 字符  ~ 932 tok  schema  491  [write/-]
   builtin.schedule.update-todo        2425 字符  ~ 849 tok  schema  716  [write/schedule]
-  builtin.vault.rename                2014 字符  ~ 681 tok  schema  188  [write/-]
-  builtin.vault.write                 1784 字符  ~ 586 tok  schema  285  [write/-]
+  builtin.vault.rename                2253 字符  ~ 756 tok  schema  188  [write/-]
+  builtin.vault.write                 2096 字符  ~ 715 tok  schema  285  [write/-]
   builtin.quiz.tag                    1584 字符  ~ 519 tok  schema  437  [write/quiz]
+  builtin.knowledge.create-page       1474 字符  ~ 471 tok  schema  229  [write/knowledge]
   builtin.quiz.collect                1411 字符  ~ 421 tok  schema  276  [write/quiz]
-  builtin.knowledge.create-page       1403 字符  ~ 439 tok  schema  229  [write/knowledge]
-  visual.html                         1220 字符  ~ 480 tok  schema  310  [write/-]
+  builtin.vault.trash                 1278 字符  ~ 430 tok  schema  102  [write/-]
+  visual.html                         1210 字符  ~ 478 tok  schema  310  [write/-]
   builtin.blog.create-entry           1186 字符  ~ 369 tok  schema  227  [write/blog]
   builtin.checkin.check-habit         1177 字符  ~ 351 tok  schema  103  [write/checkin]
-  builtin.vault.trash                 1120 字符  ~ 368 tok  schema  102  [write/-]
   builtin.schedule.delete-todo         964 字符  ~ 323 tok  schema  109  [write/schedule]
   builtin.quiz.remove                  936 字符  ~ 311 tok  schema  118  [write/quiz]
   builtin.quiz.favorite                856 字符  ~ 264 tok  schema  187  [write/quiz]
   builtin.quiz.set-note                774 字符  ~ 239 tok  schema  203  [write/quiz]
-  小计: 29154 字符  ~9557 tok
+  小计: 30059 字符  ~9904 tok
 
-合计若全部装载: ~17288 tok
-实际常驻(默认权限 read 态): ~7731 tok / 轮
+合计若全部装载: ~17668 tok
+实际常驻(默认权限 read 态): ~7764 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】
   全部合规（最大 728 字符：builtin.schedule.create-todo）

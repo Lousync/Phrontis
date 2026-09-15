@@ -30,6 +30,7 @@ import {
   quizCollectionList, quizCollectionResolveOrCreate,
 } from '../database/repositories/quizRepo'
 import { quizDataStats } from './quizDataAdmin'
+import { AI_TEXT_CODE_EXT_SET } from '../../src/lib/aiTextExts'
 import type { ToolJsonSchema } from './aiTools'
 
 /**
@@ -209,17 +210,23 @@ export function childAiAllowed(root: string, childAbs: string): boolean {
   return true
 }
 
-/** 读白名单：.md/.txt（可见区任意处）+ .json（仅 .knowbase/modules） */
+/** 读白名单：.md/.txt/文本类代码文件（可见区任意处）+ .json（仅 .knowbase/modules）。
+ *  代码扩展名走单一真相源 src/lib/aiTextExts.ts（素材库 / 前端同源；配置类 json/yml/yaml/toml/ini 不放开） */
 export function isAiReadableFile(root: string, abs: string): boolean {
   const parts = vaultRelParts(root, abs)
   if (parts.length === 0) return false
   if (!childAiAllowed(root, abs)) return false
   const ext = extname(abs).slice(1).toLowerCase()
   if (ext === 'json') return isModulesJson(parts)
-  return ext === 'md' || ext === 'txt'
+  if (ext === 'md' || ext === 'txt') return true
+  return AI_TEXT_CODE_EXT_SET.has(ext)
 }
 
-/** 递归收集可搜索文本文件（.knowbase 只深入 modules；隐藏区跳过；数量预算封顶） */
+/** 搜索遍历忽略的目录（v3.2.0 条目 9）：依赖/产物目录会吃光 400 个文件预算 → search 静默失效。
+ *  只影响 search 遍历；AI 明确给出路径时 vault.read 仍可读这些目录内的文件 */
+const SEARCH_IGNORE_DIRS = new Set(['node_modules', 'dist', 'out', 'build'])
+
+/** 递归收集可搜索文本文件（.knowbase 只深入 modules；隐藏区跳过；依赖/产物目录忽略；数量预算封顶） */
 function walkAiFiles(root: string, dirAbs: string, out: string[], budget: { count: number }): void {
   if (budget.count >= MAX_VAULT_SEARCH_FILES) return
   let names: string[] = []
@@ -231,7 +238,10 @@ function walkAiFiles(root: string, dirAbs: string, out: string[], budget: { coun
     let st: ReturnType<typeof lstatSync>
     try { st = lstatSync(full) } catch { continue }
     if (st.isSymbolicLink()) continue
-    if (st.isDirectory()) { walkAiFiles(root, full, out, budget); continue }
+    if (st.isDirectory()) {
+      if (!SEARCH_IGNORE_DIRS.has(name.toLowerCase())) walkAiFiles(root, full, out, budget)
+      continue
+    }
     if (!st.isFile()) continue
     if (st.size > MAX_VAULT_SEARCH_FILE) continue
     if (!isAiReadableFile(root, full)) continue
@@ -1021,7 +1031,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.list',
     title: '列仓库目录',
-    description: '列当前知识仓库某目录下的条目（目录与可读文本文件）；隐藏区(.knowbase 内部非 modules)不出现。用于让 AI 了解仓库结构',
+    description: '列当前知识仓库某目录下的条目（目录与可读文本/代码文件）；隐藏区(.knowbase 内部非 modules)不出现。用于让 AI 了解仓库结构',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1063,7 +1073,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.read',
     title: '读仓库文件',
-    description: '读取仓库内文件：.md/.txt 全文（.knowbase/modules/*.json 结构化数据只读）与 .pdf/.pptx 文本提取（扫描版提取为空属预期）。path 与 id 二选一：传 id（knowledge.search 返回的知识页 frontmatter id）可直接读知识页全文。返回 mtimeMs 供后续写回冲突校验。图片/>10MB/保护区文件拒绝',
+    description: '读取仓库内文件：.md/.txt 与文本类代码文件（.html/.js/.py 等）全文（.knowbase/modules/*.json 结构化数据只读）与 .pdf/.pptx 文本提取（扫描版提取为空属预期）。path 与 id 二选一：传 id（knowledge.search 返回的知识页 frontmatter id）可直接读知识页全文。返回 mtimeMs 供后续写回冲突校验。图片/>10MB/保护区文件拒绝',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1117,7 +1127,7 @@ export function registerBuiltinTools(): void {
       }
     }
     if (!isAiReadableFile(root, abs)) {
-      throw new Error(`文件不可读：仅支持 .md/.txt（仓库内）与 .knowbase/modules/*.json（只读）；图片与保护区拒绝: ${rel}`)
+      throw new Error(`文件不可读：仅支持 .md/.txt 与文本类代码文件（仓库内）与 .knowbase/modules/*.json（只读）；图片、配置与保护区拒绝: ${rel}`)
     }
     const maxChars = clamp(Math.floor(num(args.maxChars, 8000)), 200, 50000)
     const text = readFileSync(abs, 'utf-8')
@@ -1136,7 +1146,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.search',
     title: '搜索仓库内容',
-    description: '在当前知识仓库内按关键词搜索可读文本文件（.md/.txt 与 .knowbase/modules/*.json）内容，返回命中文件与上下文摘录。用于在仓库内定位内容',
+    description: '在当前知识仓库内按关键词搜索可读文本文件（.md/.txt/文本类代码文件与 .knowbase/modules/*.json）内容，返回命中文件与上下文摘录。用于在仓库内定位内容',
     inputSchema: {
       type: 'object',
       properties: {
