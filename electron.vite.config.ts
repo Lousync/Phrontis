@@ -1,6 +1,7 @@
 import { dirname, resolve } from 'path'
-import { realpathSync } from 'node:fs'
+import { realpathSync, rmSync } from 'node:fs'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -10,6 +11,32 @@ import tailwindcss from '@tailwindcss/vite'
 const nodeModulesReal = realpathSync(resolve(__dirname, 'node_modules'))
 const mainProjectRoot = dirname(nodeModulesReal)
 
+// 清空单个 outDir（替代被拦截的 emptyOutDir）。
+// 背景：本机 safe-delete 钩子会拦截 Vite 内部基于 trash 的清空动作（Error during a
+// `trash` operation），故三处 build 都设了 emptyOutDir:false；但代价是 hash 命名的产物
+// 跨构建无限累积 —— 实测 out/renderer/assets 攒到 141 个 js / 90 MB，而 index.html
+// 真正引用的仅 7 个 / 5.31 MB，又因 build.files=["out/**/*"] 全部打进安装包。
+// Node 的 fs.rmSync 不受该钩子影响（150 文件 / 29.3 MB 实测无错通过），故改由本插件在
+// 构建开始前手动清空各自的 outDir。
+// 仅当开启 watch 时跳过（`electron-vite dev --watch`）：此时删目录可能让正在运行的 Electron
+// 读不到入口。本项目 `npm run dev` 不带 --watch，主/预加载只在启动时构建一次，清一次无副作用。
+// 渲染器侧另有 apply:'build'，dev 走 serve 不触发，out/renderer 不受影响。
+function cleanOutDir(outDir: string): Plugin {
+  const abs = resolve(__dirname, outDir)
+  let isWatch = false
+  return {
+    name: 'phrontis:clean-out-dir',
+    apply: 'build',
+    configResolved(config) {
+      isWatch = Boolean(config.build.watch)
+    },
+    buildStart() {
+      if (isWatch) return
+      rmSync(abs, { recursive: true, force: true })
+    }
+  }
+}
+
 export default defineConfig({
   main: {
     // defuddle 打进 bundle 而非 externalize：其 '/node' 子路径 exports 只有 import 条件，
@@ -18,7 +45,7 @@ export default defineConfig({
     // linkedom 一并打进来：其 cjs 构建运行时 require('css-select')，而 css-select 新版是 ESM-only，
     // Electron 主进程必炸 ERR_REQUIRE_ESM（实测）；bundle 静态解析后统一为 CJS 产物，运行期无 require 链。
     // turndown 有合法 require 条件，维持外置。
-    plugins: [externalizeDepsPlugin({ exclude: ['defuddle', 'linkedom'] })],
+    plugins: [cleanOutDir('out/main'), externalizeDepsPlugin({ exclude: ['defuddle', 'linkedom'] })],
     // AI 测试桥开关：构建期静态替换。为 false 时 main 中的动态 import 会被
     // tree-shake 掉，devbridge 整个 chunk 不进产物（生产零残留）。
     define: {
@@ -26,9 +53,8 @@ export default defineConfig({
     },
     build: {
       outDir: 'out/main',
-      // 本机 safe-delete 钩子会拦截 Vite 清空 outDir 的操作（Error during a `trash` operation），
-      // 导致 dev/build 直接失败。关闭自动清空改为覆盖写：旧产物残留无害（文件名带 hash 或固定），
-      // 需要彻底清理时手动删除 out/ 目录。
+      // 保持 false（Vite 的 trash 清空会被 safe-delete 钩子拦截）；实际清空交给文件顶部
+      // 的 cleanOutDir() 插件用 fs.rmSync 完成。
       emptyOutDir: false,
       rollupOptions: {
         input: {
@@ -41,10 +67,10 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [cleanOutDir('out/preload'), externalizeDepsPlugin()],
     build: {
       outDir: 'out/preload',
-      emptyOutDir: false,   // 同上：规避 safe-delete 拦截
+      emptyOutDir: false,   // 同上：清空交给 cleanOutDir()
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'electron/preload/index.ts')
@@ -72,7 +98,7 @@ export default defineConfig({
     },
     build: {
       outDir: 'out/renderer',
-      emptyOutDir: false,   // 同上：规避 safe-delete 拦截
+      emptyOutDir: false,   // 同上：清空交给 cleanOutDir()
       // monaco / pdfjs 等天然超过默认 500KB 提示阈值——它们是**按需加载**的独立 chunk，
       // 不属于首屏负担，调高阈值避免噪音警告。
       chunkSizeWarningLimit: 8000,
@@ -100,6 +126,6 @@ export default defineConfig({
         }
       }
     },
-    plugins: [react(), tailwindcss()]
+    plugins: [cleanOutDir('out/renderer'), react(), tailwindcss()]
   }
 })
