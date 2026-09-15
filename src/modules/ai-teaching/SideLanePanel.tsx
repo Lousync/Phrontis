@@ -309,7 +309,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
       )}
 
       {/* 输入区 */}
-      <div className="shrink-0 px-2.5 pb-2.5 pt-2">
+      <div className="shrink-0 w-full max-w-[820px] mx-auto px-2.5 pb-2.5 pt-2">
         <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60 transition-colors">
           <textarea
             ref={inputRef}

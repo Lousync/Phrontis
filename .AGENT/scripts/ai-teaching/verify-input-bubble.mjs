@@ -155,6 +155,19 @@ ok('side 追问 placeholder 保留', has('side', '就这一点追问…'))
 ok('teach 合规提示上方旧占位注释语义保留（合规提示行仍在 footer 内）',
   has('teach', COMPLIANCE) && has('teach', 'composerFooter'))
 
+// ── ⑩ 输入壳限宽居中（v3.2.0 条目⑧追加：中心独占时不横跨整窗）──────────────────────
+// 五处输入壳（4 个源文件，Composer 一处覆盖 #3/#4）外壳统一 `w-full max-w-[820px] mx-auto`，
+// 与项目内容列约定一致（quiz L2565 / 学堂 L445 / 工件栏 L154 同为 820）。
+// 消息列按拍板「保持整宽」→ 不对消息区加限宽断言。
+for (const k of ['teach', 'side', 'assistant', 'learn']) {
+  ok(`${k} 输入壳限宽 820 居中（w-full max-w-[820px] mx-auto）`,
+    has(k, 'w-full max-w-[820px] mx-auto'))
+}
+ok('限宽只落在输入壳，不影响气泡本体类名', code.teach.includes('max-w-[820px] mx-auto px-3 pb-2.5 pt-2')
+  && code.side.includes('max-w-[820px] mx-auto px-2.5 pb-2.5 pt-2')
+  && code.assistant.includes('max-w-[820px] mx-auto px-3 pb-2.5 pt-2')
+  && code.learn.includes('mx-auto ${compact ? \'px-3\' : \'px-4\'} pb-2.5 pt-2'))
+
 console.log(`\nverify-input-bubble: ${pass} PASS / ${fail} FAIL`)
 if (fail) { console.log('\n失败项：'); for (const f of fails) console.log('  ✗ ' + f) }
 process.exit(fail ? 1 : 0)

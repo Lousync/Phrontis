@@ -771,7 +771,7 @@ useEffect(() => { if (open) void refreshSessions() }, [open, refreshSessions])
                   )}
 
                   {/* 引用胶囊（会话引用形式）+ 上下文徽章（帮助页/学堂/当前界面，将随提问附带） */}
-                  <div className="shrink-0 px-3 pb-2.5 pt-2">
+                  <div className="shrink-0 w-full max-w-[820px] mx-auto px-3 pb-2.5 pt-2">
                     <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60">
                       {(selQuotes.length > 0 || ctx) && (
                         <div className="space-y-1">

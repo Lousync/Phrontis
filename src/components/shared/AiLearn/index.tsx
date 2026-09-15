@@ -119,7 +119,7 @@ function Composer({ placeholder, onSend, disabled, compact }: {
     setDraft('')
   }
   return (
-    <div className={`shrink-0 ${compact ? 'px-3' : 'px-4'} pb-2.5 pt-2`}>
+    <div className={`shrink-0 w-full max-w-[820px] mx-auto ${compact ? 'px-3' : 'px-4'} pb-2.5 pt-2`}>
       <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60">
         <textarea
           rows={2}

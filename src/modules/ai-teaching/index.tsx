@@ -2842,7 +2842,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                   </Collapsible>
                 </div>
               )}
-              <div className="shrink-0 px-3 pb-2.5 pt-2">
+              <div className="shrink-0 w-full max-w-[820px] mx-auto px-3 pb-2.5 pt-2">
                 {/* v3.1.2 条目7：会话准备态 —— 未开讲时输入区位置显示准备面板（素材 / 会话要求 / 首条消息）
                     与正常输入框同一块区域互斥切换；点「开始对话」才发首条消息。 */}
                 {!prepStarted && prepTemplate ? (
