@@ -121,7 +121,7 @@ export function QuizCard({ quiz, index, onAnswered, pageId, pageTitle }: Props) 
             : 'border-[var(--border-color)] hover:border-[var(--border-color-secondary,var(--border-color))]'
       }`}
     >
-      {/* 卡片头：题号 + 状态（条目15 追加：分值徽章按志岩拍板移除——解析仍容忍 points 字段，只是不渲染） */}
+      {/* 卡片头：题号 + 状态（条目15 追加：分值徽章按开发负责人拍板移除——解析仍容忍 points 字段，只是不渲染） */}
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
         <span className="text-[12px] font-medium text-[var(--text-primary)]">
           第 {quiz.no} 题

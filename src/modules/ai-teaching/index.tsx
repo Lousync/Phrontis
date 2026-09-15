@@ -929,7 +929,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     writeNav(row.id, { prep: { started: false, draft: tpl.startPrompt, srcOpen: false, reqOpen: false } })
     setPrepNavSeq(n => n + 1)
     setPrepTemplate(tpl)
-    // v3.1.2（志岩 2026-09-14）：新建对话后默认收起左右两侧栏——让用户先专注在「备好再开讲」，
+    // v3.1.2（开发负责人 2026-09-14）：新建对话后默认收起左右两侧栏——让用户先专注在「备好再开讲」，
     // 需要时用顶栏把手 / 拖拽展开（不覆盖用户的持久化意图，仅本次新建动作后收起）
     setLeftOpen(false); localStorage.setItem('aiTeach.leftOpen', '0')
     setRightOpen(false); localStorage.setItem('aiTeach.rightOpen', '0'); setSrcVisible(false)
@@ -1714,7 +1714,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   }, [activeWs])
   /** 双窗口判定：工件栏有页签即在（内容驱动，无折叠态；空栏不挤占素材库） */
   const artExpanded = artTabs.length > 0
-  // 支线旁问浮窗力学（v3.1.2 补强，2026-09-14 志岩拍板）：可拖动 + 八向缩放 + 拖近右缘自动停靠。
+  // 支线旁问浮窗力学（v3.1.2 补强，2026-09-14 开发负责人拍板）：可拖动 + 八向缩放 + 拖近右缘自动停靠。
   // 舞台 = 三栏工作区行（rowRef，已是 position:relative）→ 拖拽范围 = 顶栏以下整个模块工作区；
   // 位置尺寸全局记忆（不随工作区/会话变）；双击顶栏复位。宽轨态交给 ResizablePanel，本 hook 只管浮层态。
   const floatWin = useFloatingWindow({
@@ -2084,7 +2084,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
         <ResizablePanel side="left" storageKey="aiTeach.leftWidth" defaultWidth={248} minWidth={200} maxWidth={400}
           visible={leftOpen} onSnapClose={() => toggleSide('left')} onSnapOpen={() => toggleSide('left')}
           collapsedWidth={14}>
-          {/* v3.1.2（志岩 2026-09-14）：会话列表区回归，与资源管理器「分区并列共存」——
+          {/* v3.1.2（开发负责人 2026-09-14）：会话列表区回归，与资源管理器「分区并列共存」——
               形态 A：会话（上，限高可折叠）+ 资源管理器（中，撑满剩余）+ 任务规划（下）。
               折叠任一分区，其余分区自动获得空间（原会话列表区曾因「页签即会话切换器」退役，本次恢复）。 */}
           <SectionHead open={!collapsedSec.sessions} title="会话" onToggle={() => toggleSec('sessions')}

@@ -97,7 +97,7 @@ for (const [name, ok] of repairChecks) {
 }
 
 // ===== v3.1.1 条目15：分值字段不渲染 =====
-// 2026-09-13 志岩拍板：分值徽章整个移除（此前是「2分 分」归一化）。契约 = QuizCard 不再渲染 points；
+// 2026-09-13 开发负责人拍板：分值徽章整个移除（此前是「2分 分」归一化）。契约 = QuizCard 不再渲染 points；
 // 解析层/类型仍容忍该字段（存量数据兼容），gen-paper 落盘 points:'' 不变（不可见）。
 console.log('\n--- 条目15：分值徽章已移除 ---')
 const { readFileSync } = await import('node:fs')
