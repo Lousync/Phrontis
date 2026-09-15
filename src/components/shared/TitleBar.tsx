@@ -416,10 +416,15 @@ export function TitleBar({
                 </div>
 
                 <div className="mx-2 mt-1.5 border-t border-[var(--border-color)]" />
-                <div className="px-3 pb-1 pt-2 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
-                  活动栏隐藏后，标题栏这枚「布局」按钮不会消失，随时可以把它调回来。<br />
-                  禅模式原先挂在「AI 教学」模块顶栏，本次起统一收进这里 —— 全局只有这一个入口。
-                </div>
+                {/* 脚注 = 元信息，不该常驻占面板高度 → 按全应用同款 <details> 折叠收起
+                    （与上方更新面板的「查看更新内容」同一套写法；summary 保留默认三角当展开提示） */}
+                <details className="px-3 pb-1.5 pt-2 text-[10.5px] text-[var(--text-muted)]">
+                  <summary className="cursor-pointer select-none text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">说明</summary>
+                  <div className="pt-1.5 leading-relaxed">
+                    活动栏隐藏后，标题栏这枚「布局」按钮不会消失，随时可以把它调回来。<br />
+                    禅模式原先挂在「AI 教学」模块顶栏，本次起统一收进这里 —— 全局只有这一个入口。
+                  </div>
+                </details>
               </div>
             )}
           </div>
