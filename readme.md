@@ -88,8 +88,6 @@
 
 前往 [Releases](https://github.com/Lousync/Phrontis/releases) 下载最新 NSIS 安装包（x64），双击安装即用。
 
-> 注：安装包文件名暂沿用旧名（Knowbase Programmer Edition Setup），将在随版本切换。
-
 ## 💾 数据目录
 
 应用采用「仓库 = 磁盘文件夹」模型（对标 Obsidian Vault），数据分两层：

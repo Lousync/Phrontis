@@ -52,7 +52,8 @@
   },
   "build": {
     "appId": "com.local.knowbase.programmer",
-    "productName": "Knowbase Programmer Edition",
+    "productName": "Phrontis",
+    "artifactName": "Phrontis-${version}-setup.${ext}",
     "extraResources": [
       {
         "from": "resources/builtin-plugins",
