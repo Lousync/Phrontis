@@ -22,6 +22,7 @@ import {
 import type { DesktopData, DerivedStats } from './useDesktopData'
 import { hasCheckOn, shiftDays } from './useDesktopData'
 import { isoWeekNo, weekRangeOf, monthRangeOf, yearRangeOf, summaryWindowsAt } from '../../lib/summary'
+import { TILE_MODULE_IDS, labelOf } from '../../lib/appModules'
 import { Collapsible } from '../../components/shared/Collapsible'
 
 export interface TileCtx {
@@ -660,26 +661,35 @@ interface ModuleDef {
   icon: (size: number) => ReactNode
 }
 
+/** 每个模块磁贴「画什么图标 + 一句话说明」（成员与顺序看 appModules 的 `tile` 标记） */
+const TILE_META: Record<string, { desc: string; icon: (size: number) => ReactNode }> = {
+  editor: { desc: '仓库文件树', icon: (s) => <EditorIcon size={s} /> },
+  knowledge: { desc: '页面 / 目录 / 标签', icon: (s) => <KnowledgeIcon size={s} /> },
+  blog: { desc: '写与整理博客', icon: (s) => <BlogIcon size={s} /> },
+  schedule: { desc: '任务与日历', icon: (s) => <ScheduleIcon size={s} /> },
+  moments: { desc: '发布与回顾', icon: (s) => <MomentsIcon size={s} /> },
+  aiTeaching: { desc: '讲义 / 研读 / 出题', icon: (s) => <AiTeachingIcon size={s} /> },
+  toolbox: { desc: '零散小工具', icon: (s) => <ToolboxIcon size={s} /> },
+  plugins: { desc: '已装插件管理', icon: (s) => <PluginIcon size={s} /> },
+  recycle: { desc: '找回删掉的内容', icon: (s) => <Trash2 size={s} /> },
+  help: { desc: '使用说明与快捷键', icon: (s) => <LifeBuoy size={s} /> },
+  user: { desc: '个人信息', icon: (s) => <UserIcon size={s} /> },
+  releaseNotes: { desc: '每个版本改了什么', icon: (s) => <History size={s} /> },
+  settings: { desc: '全部设置项', icon: (s) => <SettingsIcon size={s} /> },
+}
+
 /**
- * 模块清单（与 `ActivityBar` 的 ALL_MODULES / `App` 的 MODULE_TABS 同源，
- * 此处独立声明一份：那两处在 React 树的上游，从桌面模块反向 import 会形成循环依赖。
- * 新增模块时三处都要补 —— 已记进任务清单。）
+ * 桌面「添加控件」面板里的模块磁贴清单。
+ *
+ * 旧实现在这里独立声明了一份 13 项的字面量，注释还写着「新增模块时三处都要补」——
+ * 那份注释描述的正是问题本身。现在**只保留图标与说明**，成员与顺序一律来自
+ * `lib/appModules` 的唯一真相源（`tile` 标记），新增模块只需在真相源里标一个 `tile: true`。
  */
-export const DESK_MODULES: ModuleDef[] = [
-  { tab: 'editor', label: '编辑器', desc: '仓库文件树', icon: (s) => <EditorIcon size={s} /> },
-  { tab: 'knowledge', label: '知识库', desc: '页面 / 目录 / 标签', icon: (s) => <KnowledgeIcon size={s} /> },
-  { tab: 'blog', label: '博客', desc: '写与整理博客', icon: (s) => <BlogIcon size={s} /> },
-  { tab: 'schedule', label: '日程', desc: '任务与日历', icon: (s) => <ScheduleIcon size={s} /> },
-  { tab: 'moments', label: '说说', desc: '发布与回顾', icon: (s) => <MomentsIcon size={s} /> },
-  { tab: 'aiTeaching', label: 'AI教学', desc: '讲义 / 研读 / 出题', icon: (s) => <AiTeachingIcon size={s} /> },
-  { tab: 'toolbox', label: '工具箱', desc: '零散小工具', icon: (s) => <ToolboxIcon size={s} /> },
-  { tab: 'plugins', label: '插件', desc: '已装插件管理', icon: (s) => <PluginIcon size={s} /> },
-  { tab: 'recycle', label: '回收站', desc: '找回删掉的内容', icon: (s) => <Trash2 size={s} /> },
-  { tab: 'help', label: '帮助', desc: '使用说明与快捷键', icon: (s) => <LifeBuoy size={s} /> },
-  { tab: 'user', label: '账户', desc: '个人信息', icon: (s) => <UserIcon size={s} /> },
-  { tab: 'releaseNotes', label: '更新说明', desc: '每个版本改了什么', icon: (s) => <History size={s} /> },
-  { tab: 'settings', label: '设置', desc: '全部设置项', icon: (s) => <SettingsIcon size={s} /> },
-]
+export const DESK_MODULES: ModuleDef[] = TILE_MODULE_IDS.map((tab) => ({
+  tab,
+  label: labelOf(tab),
+  ...TILE_META[tab],
+}))
 
 /** 模块磁贴右侧小字：只给「有真实数字可说」的几个模块，其余留白（不编造占位） */
 function moduleTail(tab: TabName, stats: DerivedStats, data: DesktopData): string {

@@ -3,21 +3,30 @@ import type { TabName } from '../../types'
 import { Palette, ChevronRight, ChevronDown, Check, Download, FlaskConical, History, LifeBuoy, Trash2, LayoutGrid } from 'lucide-react'
 import { useSettings } from '../../lib/SettingsContext'
 import { applyThemeClass } from '../../lib/settings'
+import { BAR_MODULE_IDS, labelOf, normalizeModuleId } from '../../lib/appModules'
 import { useContextMenuPosition } from '../../lib/useContextMenuPosition'
 import { BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon, ToolboxIcon, UserIcon, SettingsIcon, PluginIcon, EditorIcon, AiTeachingIcon } from './ModuleIcons'
 
-/** All draggable module tabs (excluding user/settings; 帮助已在用户菜单内,侧边栏不再单列; UI 打磨点4：editor 提首位与 activityBarOrder 新默认对齐) */
-const ALL_MODULES: { id: TabName; label: string; icon: (size: number) => React.ReactNode }[] = [
-  { id: 'desktop',   label: '桌面',   icon: s => <LayoutGrid size={s} /> },
-  { id: 'editor',    label: '编辑器', icon: s => <EditorIcon size={s} /> },
-  { id: 'blog',      label: '博客',   icon: s => <BlogIcon size={s} /> },
-  { id: 'schedule',  label: '日程',   icon: s => <ScheduleIcon size={s} /> },
-  { id: 'knowledge', label: '知识库', icon: s => <KnowledgeIcon size={s} /> },
-  { id: 'moments',   label: '说说',   icon: s => <MomentsIcon size={s} /> },
-  { id: 'aiTeaching', label: 'AI教学', icon: s => <AiTeachingIcon size={s} /> },
-  { id: 'toolbox',   label: '工具箱', icon: s => <ToolboxIcon size={s} /> },
-  { id: 'plugins',   label: '插件',   icon: s => <PluginIcon size={s} /> },
-]
+/**
+ * 活动栏图标位的**图标表**（成员与顺序不在图标表里）。
+ * 哪些模块能进活动栏、能不能被隐藏，一律查 `lib/appModules` 的唯一真相源 ——
+ * 这里只负责「这个 id 画成什么」。用户/设置/帮助不占图标位（在底部的设置菜单里）。
+ */
+const BAR_ICONS: Record<string, (size: number) => React.ReactNode> = {
+  desktop: s => <LayoutGrid size={s} />,
+  editor: s => <EditorIcon size={s} />,
+  blog: s => <BlogIcon size={s} />,
+  schedule: s => <ScheduleIcon size={s} />,
+  knowledge: s => <KnowledgeIcon size={s} />,
+  moments: s => <MomentsIcon size={s} />,
+  aiTeaching: s => <AiTeachingIcon size={s} />,
+  toolbox: s => <ToolboxIcon size={s} />,
+  plugins: s => <PluginIcon size={s} />,
+}
+
+/** 可拖拽 / 可隐藏的模块（id 与名称来自唯一真相源，顺序由 settings 的 activityBarOrder 决定） */
+const ALL_MODULES: { id: TabName; label: string; icon: (size: number) => React.ReactNode }[] =
+  BAR_MODULE_IDS.map((id) => ({ id, label: labelOf(id), icon: BAR_ICONS[id] }))
 
 const THEME_CHOICES = [
   { id: 'dark',  label: '深色主题' },
@@ -52,8 +61,11 @@ export function ActivityBar({ active, onChange, onToggleSidebar, flush }: Props)
   // 旧版本下 editor 拖拽从未生效过（同一段归一代码），故「跑一次归一 + 标记」安全：
   // 标记落位后 allOrder 完全尊重 settings 存储，拖拽写回即所见即所得；缺失模块仍由下方 append 兜底。
   // AI教学 P0：activityBarOrder 内 immersive → aiTeaching（模块 id 改名，位置原地替换不丢失）。
+  // ⚠️ 这里**刻意不**换成 appModules.activityOrder()：那个函数会额外补 desktop、追加缺失模块，
+  // 而 allOrder 会被原样写回 settings —— 换掉就等于给每个老用户的活动栏顺序做一次静默改写。
+  // 真正的成员/顺序口径由下方 `order`（基于唯一真相源）承担，这里只管存量数据归一。
   const allOrder = useMemo(
-    () => safeParse(String(s.activityBarOrder ?? ''), ['blog', 'schedule', 'knowledge', 'toolbox']).map((x) => (x === 'immersive' ? 'aiTeaching' : x)),
+    () => safeParse(String(s.activityBarOrder ?? ''), BAR_MODULE_IDS).map(normalizeModuleId),
     [s.activityBarOrder],
   )
   useEffect(() => {
@@ -71,7 +83,7 @@ export function ActivityBar({ active, onChange, onToggleSidebar, flush }: Props)
   }, [allOrder]) // eslint-disable-line react-hooks/exhaustive-deps
   // AI教学 P0：activityBarHidden 同步一次性迁移 immersive → aiTeaching（隐藏的旧 Agent 迁移后仍隐藏）
   const hidden: string[] = useMemo(
-    () => safeParse(s.activityBarHidden, []).map((x) => (x === 'immersive' ? 'aiTeaching' : x)),
+    () => safeParse(s.activityBarHidden, []).map(normalizeModuleId),
     [s.activityBarHidden],
   )
   useEffect(() => {

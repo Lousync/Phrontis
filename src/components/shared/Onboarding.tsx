@@ -6,6 +6,7 @@ import {
   Sparkles, Sun, Wrench,
 } from 'lucide-react'
 import { useSettings } from '../../lib/SettingsContext'
+import { BAR_MODULE_IDS, labelOf } from '../../lib/appModules'
 import type { TabName } from '../../types'
 
 const MODULES = [
@@ -20,17 +21,31 @@ const MODULES = [
   { icon: Puzzle, name: '插件', desc: '主题 / 预设 / 知识包官方市场' },
 ]
 
-/** 场景选择步骤的候选 = 活动栏 8 个一级模块（与 ActivityBar 的 ALL_MODULES 同 id 同序） */
-const ACTIVITY_MODS = [
-  { id: 'editor', name: '编辑器', desc: '正文写作 · 唯一写入方', icon: PenLine },
-  { id: 'knowledge', name: '知识库', desc: '双链 · 图谱 · 沉浸阅读', icon: BookOpen },
-  { id: 'aiTeaching', name: 'AI 教学', desc: '会话学习 · 视觉转写 · 出题', icon: GraduationCap },
-  { id: 'schedule', name: '日程', desc: '日历 · 四象限 · 打卡', icon: CalendarDays },
-  { id: 'blog', name: '博客', desc: '每日一篇 · 周月总结', icon: FileText },
-  { id: 'moments', name: '说说', desc: '轻量动态 · 相册', icon: MessageCircle },
-  { id: 'toolbox', name: '工具箱', desc: '密码本 · 导出 · 局域网互传', icon: Wrench },
-  { id: 'plugins', name: '插件', desc: '官方市场 · 主题包', icon: Puzzle },
-]
+/**
+ * 场景选择步骤里每个模块的一句话说明 + 图标（成员与顺序看 appModules 的唯一真相源）。
+ * 原文案写着「与 ActivityBar 的 ALL_MODULES 同 id 同序」，但那份手抄清单的实际顺序
+ * （editor, knowledge, aiTeaching, schedule, blog, …）与活动栏并不一致 —— 又一处漂移。
+ */
+const SCENE_META: Record<string, { desc: string; icon: typeof PenLine }> = {
+  editor: { desc: '正文写作 · 唯一写入方', icon: PenLine },
+  knowledge: { desc: '双链 · 图谱 · 沉浸阅读', icon: BookOpen },
+  blog: { desc: '每日一篇 · 周月总结', icon: FileText },
+  schedule: { desc: '日历 · 四象限 · 打卡', icon: CalendarDays },
+  moments: { desc: '轻量动态 · 相册', icon: MessageCircle },
+  aiTeaching: { desc: '会话学习 · 视觉转写 · 出题', icon: GraduationCap },
+  toolbox: { desc: '密码本 · 导出 · 局域网互传', icon: Wrench },
+  plugins: { desc: '官方市场 · 主题包', icon: Puzzle },
+}
+
+/**
+ * 场景选择的候选 = 活动栏一级模块（**剔除桌面外壳** —— 向导问的是「你想用哪些场景」，
+ * 桌面不是场景而是外壳本身）。
+ * 带上 `SCENE_META[id]` 存在性判定：将来新增的模块若还没写场景说明，这里自动跳过而不是崩掉。
+ */
+const ACTIVITY_MODS: { id: TabName; name: string; desc: string; icon: typeof PenLine }[] =
+  BAR_MODULE_IDS.filter((id) => id !== 'desktop' && SCENE_META[id]).map((id) => ({
+    id, name: labelOf(id), ...SCENE_META[id],
+  }))
 
 /** 活动栏精简默认态：编辑器 + 知识库 + AI教学（docs/slim-activitybar-plan.md） */
 const DEFAULT_TRIO = ['editor', 'knowledge', 'aiTeaching']

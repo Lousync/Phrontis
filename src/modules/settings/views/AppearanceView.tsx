@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Sun, Moon, Puzzle, Flame } from 'lucide-react'
+import { Sun, Moon, Puzzle, Flame, LayoutGrid } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { THEME_OPTIONS, BLOG_SIZE_OPTIONS, KNOWLEDGE_SIDEBAR_SIZE_OPTIONS, applyThemeClass } from '../../../lib/settings'
-import { BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon, ToolboxIcon, EditorIcon, IconPreview } from '../../../components/shared/ModuleIcons'
+import { STARTABLE_MODULE_IDS, labelOf } from '../../../lib/appModules'
+import { BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon, ToolboxIcon, EditorIcon, AiTeachingIcon, PluginIcon, IconPreview } from '../../../components/shared/ModuleIcons'
 import { ensurePluginThemeStyles, type PluginThemeWithVars } from '../../../lib/pluginService'
 import { BUILTIN_ICON_PACKS, usePluginIconPacks, type IconModuleId } from '../../../lib/sidebarIcons'
 import { pluginListDeleteFxSkins } from '../../../lib/ipc'
 import { SettingSelect } from '../components/SettingSelect'
-import type { DeleteFxSkin } from '../../../types'
+import type { DeleteFxSkin, TabName } from '../../../types'
 
 const THEME_ICONS: Record<string, React.ReactNode> = {
   dark:  <Moon size={24} />,
@@ -16,6 +17,19 @@ const THEME_ICONS: Record<string, React.ReactNode> = {
 const THEME_DESCS: Record<string, string> = {
   dark:  'VS Code 风格深色配色，适合夜间使用',
   light: '明亮清爽的浅色配色，适合日间使用',
+}
+
+/** 「启动时默认显示」按钮的图标表：成员来自 appModules 的 `startable`，这里只管画什么 */
+const STARTUP_ICONS: Record<string, React.ReactNode> = {
+  desktop: <LayoutGrid size={16} />,
+  editor: <EditorIcon size={16} />,
+  knowledge: <KnowledgeIcon size={16} />,
+  blog: <BlogIcon size={16} />,
+  schedule: <ScheduleIcon size={16} />,
+  moments: <MomentsIcon size={16} />,
+  aiTeaching: <AiTeachingIcon size={16} />,
+  toolbox: <ToolboxIcon size={16} />,
+  plugins: <PluginIcon size={16} />,
 }
 
 export function AppearanceView() {
@@ -120,17 +134,14 @@ export function AppearanceView() {
 
       <div className="mb-8" data-setting-anchor="appearance.startupTab">
         <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-3">启动时默认显示</h3>
-        <p className="text-[11px] text-[var(--text-muted)] mb-3">每次打开应用时，自动切换到该模块。若该模块被隐藏，则回退到第一个可见模块。</p>
+        <p className="text-[11px] text-[var(--text-muted)] mb-3">每次打开应用时，自动切换到该模块。若该模块被隐藏或不可用，则回退到桌面。</p>
         <div className="grid grid-cols-3 gap-2 max-w-sm">
           {(function () {
-            const TABS: { id: string; label: string; icon: React.ReactNode }[] = [
-              { id: 'blog', label: '博客', icon: <BlogIcon size={16} /> },
-              { id: 'schedule', label: '日程', icon: <ScheduleIcon size={16} /> },
-              { id: 'knowledge', label: '知识库', icon: <KnowledgeIcon size={16} /> },
-              { id: 'editor', label: '编辑区', icon: <EditorIcon size={16} /> },
-              { id: 'moments', label: '说说', icon: <MomentsIcon size={16} /> },
-              { id: 'toolbox', label: '工具箱', icon: <ToolboxIcon size={16} /> },
-            ]
+            // 候选来自唯一真相源（`startable` 标记），不再手抄一份 ——
+            // 旧清单少了「桌面」和「AI教学」，而 App 那份候选表同样没有它们，
+            // 于是这里选了也白选（会被启动逻辑静默忽略）。
+            const TABS: { id: TabName; label: string; icon: React.ReactNode }[] =
+              STARTABLE_MODULE_IDS.map(id => ({ id, label: labelOf(id), icon: STARTUP_ICONS[id] }))
             return TABS.map(tab => (
               <button
                 key={tab.id}

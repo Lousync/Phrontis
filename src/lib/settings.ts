@@ -160,7 +160,12 @@ export const SETTINGS = {
   zoomMin: { default: 0.85, type: 'number', label: '缩放下限', group: '缩放', desc: '界面缩放下限（约束，勿手改）', keywords: ['缩放', '下限', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   zoomMax: { default: 1.5, type: 'number', label: '缩放上限', group: '缩放', desc: '界面缩放上限（约束，勿手改）', keywords: ['缩放', '上限', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   zoomStep: { default: 0.05, type: 'number', label: '缩放步进', group: '缩放', desc: '界面缩放步进（约束，勿手改）', keywords: ['缩放', '步进', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  activityBarOrder: { default: '["editor","blog","schedule","knowledge","moments","toolbox","plugins","export","recycle"]', type: 'json', label: '活动栏图标顺序', group: '活动栏', desc: '活动栏模块图标顺序（JSON）', keywords: ['活动栏', '顺序', '图标', 'activitybar', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // ⚠️ 默认值里**不能出现**不在活动栏图标位上的 id。这里曾混着 `export`（模块早已不存在）与
+  // `recycle`（回收站已移进底部设置菜单）—— `recycle` 那次是真出过事故：启动兜底会沿着这张顺序表
+  // 找"第一个没被隐藏的模块"，而 recycle 永远隐藏不掉，于是把侧边栏模块全隐藏后重启就开回收站。
+  // 存量用户的活动栏顺序由 ActivityBar 的归一逻辑自行补齐（desktop 顶首位 / 缺失模块追加），
+  // 所以这里只保留图标位模块、相对次序不动即可。
+  activityBarOrder: { default: '["editor","blog","schedule","knowledge","moments","toolbox","plugins"]', type: 'json', label: '活动栏图标顺序', group: '活动栏', desc: '活动栏模块图标顺序（JSON）', keywords: ['活动栏', '顺序', '图标', 'activitybar', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   activityBarHidden: { default: '[]', type: 'json', label: '活动栏隐藏模块', group: '活动栏', desc: '活动栏隐藏的模块（JSON）', keywords: ['活动栏', '隐藏', '模块', 'activitybar', 'hidden'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   // 布局（VS Code Customize Layout 同款）：整条活动栏显隐。与上面 activityBarHidden（逐模块显隐）互不干扰——
   // 本键关的是「活动栏这个容器本身」，标题栏那枚「布局」按钮与命令面板「布局：隐藏活动栏」是它的两个入口。

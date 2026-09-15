@@ -2,22 +2,7 @@ import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
 import { Sparkles } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag } from './types'
 
-/** 模块清单（打开命令 / 分屏副栏选择共用；devtools 为 dev-only 不列入口） */
-const MODULE_TABS: Array<{ id: TabName; label: string }> = [
-  { id: 'desktop', label: '桌面' },
-  { id: 'editor', label: '编辑器' },
-  { id: 'knowledge', label: '知识库' },
-  { id: 'blog', label: '博客' },
-  { id: 'schedule', label: '日程' },
-  { id: 'moments', label: '说说' },
-  { id: 'recycle', label: '回收站' },
-  { id: 'settings', label: '设置' },
-  { id: 'toolbox', label: '工具箱' },
-  { id: 'plugins', label: '插件' },
-  { id: 'help', label: '帮助' },
-  { id: 'user', label: '账户' },
-]
-const tabLabel = (t: TabName) => MODULE_TABS.find((m) => m.id === t)?.label ?? t
+import { PALETTE_MODULES, labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
 
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
 import { ZenHotZone } from './components/shared/ZenHotZone'
@@ -340,7 +325,7 @@ export default function App() {
     items.push(
       { id: 'split-toggle', label: secondaryTab ? '分屏：关闭副栏' : '分屏：开启副栏', hint: '两栏独立选模块', group: '分屏', run: () => { setSecondaryTab(secondaryTab ? null : (activeTab === 'knowledge' ? 'editor' : 'knowledge')); setPalette(null) } },
     )
-    MODULE_TABS.filter((m) => m.id !== activeTab).forEach((m) => {
+    PALETTE_MODULES.filter((m) => m.id !== activeTab).forEach((m) => {
       items.push({ id: `split-${m.id}`, label: `分屏：在副栏打开 ${m.label}`, group: '分屏', run: () => { setSecondaryTab(m.id); setPalette(null) } })
     })
     // 插件命令（plugin-phase1-design C3）：hint = 插件名，与内置命令并列
@@ -383,21 +368,11 @@ export default function App() {
   // Set startup tab from settings — only on initial load, NOT on subsequent setting changes
   useEffect(() => {
     if (!settingsReady || !loaded) return
-    try {
-      const hidden: string[] = JSON.parse(s.activityBarHidden || '[]')
-      const all = ['blog','schedule','knowledge','editor','moments','toolbox','plugins','recycle','help'] as const
-      if (all.includes(s.startupTab as any) && !hidden.includes(s.startupTab)) {
-        setActiveTab(s.startupTab as TabName)
-        return
-      }
-      const order: string[] = JSON.parse(s.activityBarOrder || '[]')
-      for (const id of order) {
-        if (all.includes(id as any) && !hidden.includes(id)) { setActiveTab(id as TabName); return }
-      }
-      for (const id of all) {
-        if (!hidden.includes(id)) { setActiveTab(id as TabName); return }
-      }
-    } catch {}
+    // 口径统一收在 lib/appModules.resolveStartupTab：用户选的启动项可用就用它，否则**桌面兜底**。
+    // 旧实现在这里维护了一张硬编码候选清单，里头含 recycle / help —— 而这两个模块不在活动栏的
+    // 「显示/隐藏模块」菜单里（永远隐藏不掉），于是「把侧边栏模块全隐藏 + 重启」必然落到回收站。
+    // 现在不再做任何逐项回退，从根上消掉这类兜底事故。
+    setActiveTab(resolveStartupTab(s.startupTab, s.activityBarHidden))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsReady, loaded])
 
@@ -593,9 +568,10 @@ export default function App() {
   useEffect(() => {
     const off = window.api?.onMainCommand?.((p) => {
       if (p?.type === 'switch-tab' && typeof p.tab === 'string') {
-        const all: string[] = ['blog', 'schedule', 'knowledge', 'moments', 'toolbox', 'plugins', 'recycle', 'help', 'settings', 'user']
-        if (all.includes(p.tab)) {
-          setActiveTab(p.tab as TabName)
+        // 白名单走唯一真相源：旧版把清单抄在这里，缺 editor / aiTeaching / desktop
+        // —— 小窗喊「切到编辑器」会被静默拒绝，症状是「点了没反应」。
+        if (isTabName(p.tab)) {
+          setActiveTab(p.tab)
           setSidebarOpen(true)
           // 子工具深链（如小窗书签 → 工具箱·网址导航）：目标模块监听 toolbox:open-tool 自行激活
           if (p.tool) window.dispatchEvent(new CustomEvent('toolbox:open-tool', { detail: { tool: p.tool } }))
@@ -898,7 +874,7 @@ export default function App() {
                         <div className="flex h-full flex-col">
                           <SplitPaneBar
                             currentLabel={tabLabel(secondaryTab)}
-                            targets={MODULE_TABS.filter((m) => m.id !== activeTab && m.id !== secondaryTab)}
+                            targets={PALETTE_MODULES.filter((m) => m.id !== activeTab && m.id !== secondaryTab)}
                             onSwitch={(id) => setSecondaryTab(id as TabName)}
                             onClose={() => setSecondaryTab(null)}
                           />
