@@ -850,10 +850,15 @@ input:focus, textarea:focus, select:focus {
 .desk.is-editing .desk-grid > .desk-tile:not(.desk-add) { cursor: grab; border-style: dashed; touch-action: none; }
 .desk.is-editing .desk-grid > .desk-tile:not(.desk-add):hover { border-color: var(--accent); }
 /* 跟手过程不加动画（铁律 13 硬约束） */
-.desk.is-editing .desk-grid > .desk-tile.is-dragging { cursor: grabbing; transition: none; opacity: .9; }
-.desk.is-editing .desk-grid > .desk-tile.is-over {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+.desk.is-editing .desk-grid > .desk-tile.is-dragging {
+  cursor: grabbing; transition: none;
+  /* 「拎起来」三件套 = 抬层级 + 大投影 + 实线高亮描边（放大由内联 transform 给）。
+     刻意**不**用降透明度来表达 —— 那读起来像「被删掉」，而不是「被拿起」。
+     z-index 除了让投影不被后画的磁贴盖住，还是「命中判定不能再用 elementFromPoint」的原因：
+     抬起来之后，指针底下永远先是自己。 */
+  z-index: 30;
+  border-color: var(--accent); border-style: solid;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, .22), 0 3px 8px rgba(0, 0, 0, .14);
 }
 /* 编辑态里磁贴内容不可交互，避免「本意是拖，结果把待办勾了」 */
 .desk.is-editing .desk-tile-body { pointer-events: none; }
@@ -1124,6 +1129,5 @@ input:focus, textarea:focus, select:focus {
   .desk-blank-btn, .desk-add, .desk-panel-item, .desk-search, .desk-search-row,
   .desk-newbtn, .desk-dock-btn, .desk-cal-nav, .desk-cal-back,
   .desk-pick-cell, .desk-pick-add { transition: none; }
-  .desk-tile.is-dragging { opacity: 1; }
 }
 

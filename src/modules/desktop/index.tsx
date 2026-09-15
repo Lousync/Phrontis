@@ -12,6 +12,7 @@
  *     挂错层会让 `.xxx-editing .hero` 这类选择器静默失效（原型阶段实测）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
 import type { TabName, KnowledgePage } from '../../types'
 import { LayoutGrid, Plus, RefreshCw, Check, ChevronDown, X, GripVertical, Search } from 'lucide-react'
 import { useSettings } from '../../lib/SettingsContext'
@@ -190,6 +191,17 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
     window.setTimeout(() => window.dispatchEvent(new CustomEvent('kb-open-knowledge-page', { detail: { pageId: p.id } })), 100)
   }, [onOpenModule])
 
+  /**
+   * 「新建」= 去编辑器里建页，不在桌面就地弹输入框。
+   * 读写分工铁律：知识库/桌面都只是**入口**，建页的写入动作只发生在编辑器。
+   * 直接复用知识库 Ctrl+N 的同一条通道（先切 Tab、再触发内联命名行），不另造一套跳转逻辑；
+   * 180ms 是留给编辑器 Tab 挂载 + 注册 `kb-editor-new-page` 监听的余量（与 Ctrl+N 同值）。
+   */
+  const onNewPage = useCallback((): void => {
+    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { from: 'desktop' } }))
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent('kb-editor-new-page')), 180)
+  }, [])
+
   /* ---------------- 编辑态 ---------------- */
 
   const [editing, setEditing] = useState(false)
@@ -215,14 +227,33 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
   /* ---------------- 拖拽换位 / 拖角改尺寸 ---------------- */
   // 走 pointer events 而非 HTML5 拖放：格内自由移动用 HTML5 拖放会静默失败（铁律 9）。
   // 指针捕获挂在被操作的元素上，松开前的事件都归它，不会漏到别的格子。
+  //
+  // 手感（iPad 编辑桌面参考；原型 `outputs/desk-edit-feel-prototype.html` 已拍板）：
+  //   抬起 = 放大 + 大投影   （不再靠降透明度 —— 那读起来像「被删掉」，不是「被拿起」）
+  //   让位 = 拖动中把命中的那块用 transform 挪进你腾出的格子（真正落库仍等松手）
+  //   落位 = 松手从跟手位置滑回格位（FLIP），不再瞬间跳
+  //
+  // 两条硬约束（原型阶段实测出来，别当「实现细节」顺手优化掉）：
+  //   ① 拖动块不能改成 position:fixed —— 一旦脱离栅格流，其它磁贴会立刻左移把这个洞填掉，
+  //      「留个空位等让位」的前提就没了。留在流里、只改 transform，洞才留得住。
+  //   ② 让位不能靠拖动中真重排 DOM —— 栅格是 grid-auto-flow: row dense，任何重排都会被
+  //      回填到最早的那个洞（恰好就是被拖块腾出的原位），渲染出来等于没动。
+  //      transform 不参与布局，才躲得开。
 
   const [draggingId, setDraggingId] = useState<string | null>(null)
-  const [overId, setOverId] = useState<string | null>(null)
-  /** overId 的权威副本：pointerup 可能与最后一次 pointermove 同帧到达，
-   *  只读 state 会拿到上一帧的旧值（拖了半天没换位就是这个原因） */
+  /** 换位目标（权威副本）：pointerup 可能与最后一次 pointermove 同帧到达，
+   *  只读 state 会拿到上一帧的旧值（「拖了半天没换位」就是这个原因） */
   const overIdRef = useRef<string | null>(null)
+  /** 拖动中「被让位的那块」：只走 ref + 直接写 style，避免每次 move 都触发 React 渲染 */
+  const previewElRef = useRef<HTMLElement | null>(null)
+  /** 抬起瞬间的布局快照（各磁贴**未位移**的矩形，坐标相对栅格左上角）。
+   *  命中判定必须用它，不能用 elementFromPoint：拖动块抬了 z-index 会盖住指针，
+   *  而被让位的那块自己也被 translate 走了，transform 会带着命中区一起走
+   *  —— 拿会动的元素判命中会来回抖（移位 → 失配 → 弹回 → 又命中）。
+   *  存相对坐标，是为了拖动中滚动栅格后仍然对得上。 */
+  const hitSnapRef = useRef<{ id: string; el: HTMLElement; l: number; t: number; r: number; b: number }[]>([])
 
-  const dragRef = useRef<{ id: string; x: number; y: number; moved: boolean; el: HTMLElement } | null>(null)
+  const dragRef = useRef<{ id: string; x: number; y: number; tx: number; ty: number; moved: boolean; el: HTMLElement; originRect: DOMRect | null } | null>(null)
   const resizeRef = useRef<{ id: string; x: number; y: number; moved: boolean; w0: number; h0: number } | null>(null)
   /** 拖动中的尺寸预览：只进 ref、不入 settings，松手才落盘（避免拖动时每帧写设置） */
   const sizePreview = useRef<{ w: number; h: number } | null>(null)
@@ -232,15 +263,66 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
    *  pointer 手势结束浏览器会补发 click，不拦的话「拖大」会立刻又被当成「单击换档」。 */
   const suppressSizeClick = useRef(false)
 
-  const setOver = (id: string | null): void => { overIdRef.current = id; setOverId(id) }
+  /** 抬起倍数：给「拿起来」的体积感 */
+  const LIFT_SCALE = 1.06
+  /** 让位 / 落位用的缓动。尊重系统「减少动态效果」：时长归零（位移照做，只是不再滑过去） */
+  const shiftEase = (ms: number): string =>
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ? 'none'
+      : `transform ${ms}ms cubic-bezier(.2, .9, .3, 1)`
 
+  /** 抬起：量一份「谁在哪」的快照。必须在给任何块加 transform 之前取。 */
+  const captureHitSnapshot = (grid: HTMLElement, skipId: string): void => {
+    const g = grid.getBoundingClientRect()
+    const list: typeof hitSnapRef.current = []
+    for (const child of Array.from(grid.children)) {
+      const el = child as HTMLElement
+      const id = el.dataset.deskId
+      if (!id || id === skipId) continue
+      const r = el.getBoundingClientRect()
+      list.push({ id, el, l: r.left - g.left, t: r.top - g.top, r: r.right - g.left, b: r.bottom - g.top })
+    }
+    hitSnapRef.current = list
+  }
+
+  /** 命中：指针落在哪块磁贴（按抬起瞬间的布局算，不受拖动中的视觉位移影响） */
+  const hitTest = (px: number, py: number): { id: string; el: HTMLElement } | null => {
+    const grid = gridRef.current
+    if (!grid) return null
+    const g = grid.getBoundingClientRect()
+    const x = px - g.left
+    const y = py - g.top
+    for (const s of hitSnapRef.current) {
+      if (x >= s.l && x < s.r && y >= s.t && y < s.b) return { id: s.id, el: s.el }
+    }
+    return null
+  }
+
+  /** 让位预告：把命中的那块用 transform 挪到被拖块腾出的格子上（不动 DOM，见硬约束 ②）。
+   *  注意**先清干净再量** —— 否则量到的是上一轮预告之后的 rect，偏移会累加。 */
+  const previewShift = (target: HTMLElement | null, originRect: DOMRect | null): void => {
+    const prev = previewElRef.current
+    if (prev === target) return
+    if (prev) { prev.style.transition = shiftEase(170); prev.style.transform = '' }
+    previewElRef.current = target
+    if (!target || !originRect) return
+    target.style.transition = 'none'
+    target.style.transform = ''
+    const r = target.getBoundingClientRect()
+    const dx = originRect.left - r.left
+    const dy = originRect.top - r.top
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return
+    void target.offsetHeight
+    target.style.transition = shiftEase(170)
+    target.style.transform = `translate(${dx}px, ${dy}px)`
+  }
   const onTilePointerDown = (e: React.PointerEvent, tile: TileLayout): void => {
     if (!editing) return
     const target = e.target as HTMLElement
     if (target.closest('[data-desk-resize]') || target.closest('[data-desk-del]')) return
     const el = e.currentTarget as HTMLElement
     el.setPointerCapture?.(e.pointerId)
-    dragRef.current = { id: tile.id, x: e.clientX, y: e.clientY, moved: false, el }
+    dragRef.current = { id: tile.id, x: e.clientX, y: e.clientY, tx: 0, ty: 0, moved: false, el, originRect: null }
   }
 
   const onTilePointerMove = (e: React.PointerEvent): void => {
@@ -248,25 +330,77 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
     if (!d) return
     const dx = e.clientX - d.x
     const dy = e.clientY - d.y
-    if (!d.moved && Math.abs(dx) + Math.abs(dy) < 5) return
-    if (!d.moved) { d.moved = true; setDraggingId(d.id) }
-    d.el.style.transform = `translate(${dx}px, ${dy}px) scale(1.03)`
-    const under = document.elementFromPoint(e.clientX, e.clientY)
-    const hit = under?.closest?.('[data-desk-id]') as HTMLElement | null
-    const id = hit?.dataset.deskId ?? null
-    setOver(id && id !== d.id ? id : null)
+    if (!d.moved) {
+      if (Math.abs(dx) + Math.abs(dy) < 5) return
+      d.moved = true
+      // 顺序不能反：originRect 与命中快照都必须是「还没加 transform」时的几何
+      d.originRect = d.el.getBoundingClientRect()
+      const grid = gridRef.current
+      if (grid) captureHitSnapshot(grid, d.id)
+      // 跟手必须先关掉过渡：`.is-dragging` 那份 `transition: none` 要等 React 渲染才生效，
+      // 而下面写 transform 是同步的 —— 不在这里先关，第一次移动会被 `.desk-tile` 的
+      // transform 过渡拖成「果冻延迟」。
+      d.el.style.transition = 'none'
+      setDraggingId(d.id)
+    }
+    d.tx = dx
+    d.ty = dy
+    d.el.style.transform = `translate(${dx}px, ${dy}px) scale(${LIFT_SCALE})`
+    const hit = hitTest(e.clientX, e.clientY)
+    overIdRef.current = hit?.id ?? null
+    previewShift(hit?.el ?? null, d.originRect)
   }
 
   const onTilePointerUp = (): void => {
     const d = dragRef.current
     dragRef.current = null
     if (!d) return
-    d.el.style.transform = ''
+    const el = d.el
+    const preview = previewElRef.current
+    previewElRef.current = null
     const target = overIdRef.current
+    overIdRef.current = null
     setDraggingId(null)
-    setOver(null)
-    if (!d.moved || !target) return
-    patchPreset((p) => ({ ...p, tiles: swapTiles(p.tiles, d.id, target) }))
+
+    if (!d.moved) { el.style.transform = ''; return }
+
+    // 1) 先落数据。用 flushSync 是因为下面要量「终态位置」，DOM 必须已经重排完
+    const swapped = !!target && target !== d.id
+    if (swapped) {
+      flushSync(() => { patchPreset((p) => ({ ...p, tiles: swapTiles(p.tiles, d.id, target) })) })
+    }
+
+    // 2) 摘掉抬起态与内联位移，量出落点（同一帧内完成，视觉上不会闪）
+    el.classList.remove('is-dragging')
+    el.style.transition = 'none'
+    el.style.transform = ''
+    void el.offsetHeight
+    // 被让位的那块：
+    //   换过位 → 它的新格位**就是**它现在的视觉位置（两者都是被拖块腾出的那格），
+    //            所以必须**瞬时**清掉位移；带过渡反而会从错位处滑回来（计算属性变了、布局也变了）。
+    //   没换位 → 格位没变，带过渡正好是从腾出的位置滑回自己家。
+    if (preview) {
+      preview.style.transition = swapped ? 'none' : shiftEase(170)
+      preview.style.transform = ''
+    }
+
+    // 3) FLIP：从「松手时的视觉位置」滑回格位。
+    //    起点必须用 originRect + 当前位移 —— 只拿 originRect 会让磁贴先瞬移回原位再滑，
+    //    看起来就是「松手回跳」（scale 带来的半格偏移在两端一致，正好抵消）。
+    const origin = d.originRect
+    const after = origin ? el.getBoundingClientRect() : null
+    const mx = origin && after ? origin.left + d.tx - after.left : 0
+    const my = origin && after ? origin.top + d.ty - after.top : 0
+    if (origin && after && (Math.abs(mx) > 0.5 || Math.abs(my) > 0.5)) {
+      el.style.transform = `translate(${mx}px, ${my}px) scale(${LIFT_SCALE})`
+      void el.offsetHeight
+      el.style.transition = shiftEase(200)
+      el.style.transform = 'translate(0px, 0px) scale(1)'
+      window.setTimeout(() => { el.style.transition = ''; el.style.transform = '' }, 260)
+    } else {
+      el.style.transition = ''
+    }
+    if (preview) window.setTimeout(() => { preview.style.transition = '' }, 260)
   }
 
   const onSizePointerDown = (e: React.PointerEvent, tile: TileLayout): void => {
@@ -450,7 +584,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
               </div>
             )}
           </div>
-          <button className="desk-newbtn" onClick={() => onOpenModule('knowledge')} title="去知识库新建">
+          <button className="desk-newbtn" onClick={onNewPage} title="新建知识页（在编辑器中）">
             <Plus size={15} />新建
           </button>
         </div>
@@ -484,7 +618,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
               <div
                 key={tile.id}
                 data-desk-id={tile.id}
-                className={`desk-tile${draggingId === tile.id ? ' is-dragging' : ''}${overId === tile.id ? ' is-over' : ''}${d.kind === 'module' ? ' is-jump' : ''}`}
+                className={`desk-tile${draggingId === tile.id ? ' is-dragging' : ''}${d.kind === 'module' ? ' is-jump' : ''}`}
                 style={{ gridColumn: `span ${w}`, gridRow: `span ${h}` }}
                 onPointerDown={(e) => onTilePointerDown(e, tile)}
               >
