@@ -1286,6 +1286,8 @@ export interface ElectronAPI {
   onPluginInstalledChanged: (cb: () => void) => () => void
   /** AI vault 写工具落盘后的外部变更通知（payload {relPath, mtimeMs}） */
   onWsExternalChange: (cb: (p: { relPath: string; mtimeMs?: number }) => void) => () => void
+  /** v3.2.0 条目 ④：仓库目录发生文件系统变更（外部改动 / watcher 降级告知） */
+  onWsFsChanged: (cb: (p: { relPaths: string[]; watcherError?: string }) => void) => () => void
   pluginInstallFromFile: (grantedCapabilities?: string[]) => Promise<{ success: boolean; message?: string }>
   pluginInstallBundledSample: (filename: string, grantedCapabilities?: string[]) => Promise<{ success: boolean; message?: string }>
   pluginListInstalled: () => Promise<PluginSummary[]>
@@ -1427,6 +1429,8 @@ export interface ElectronAPI {
   workspaceForget: (rootId: string) => Promise<{ ok: boolean }>
   workspaceDeleteVault: (rootId: string) => Promise<{ ok?: boolean; deletedCurrent?: boolean; error?: string }>
   workspaceClearCurrentVault: () => Promise<{ ok: boolean; cleared?: string | null }>
+  /** v3.2.0 条目 ④ 保底：手动刷新（口径 b 全量：知识索引/图谱失效 + 归档清单 prune） */
+  workspaceRefreshVault: () => Promise<{ ok: boolean; pruned?: number; error?: string }>
   // P6 整仓归档（zip 全量导出/导入；冲突逐条决策：覆盖/跳过/重命名）
   vaultArchiveExport: () => Promise<{ ok?: boolean; canceled?: boolean; path?: string; files?: number; bytes?: number; error?: string }>
   vaultArchiveImportStart: () => Promise<VaultArchiveImportResult>

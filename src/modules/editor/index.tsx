@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   FolderOpen, Plus, FolderPlus, Save, SaveAll, X, Folder, FileText, ArrowLeft,
   Pencil, Trash2, FilePlus2, Braces, ListTree, Eye, PanelRightClose, Archive, ArchiveRestore, FilePenLine, Link2, ImagePlus, ClipboardPaste,
+  RefreshCw,
 } from 'lucide-react'
 import type { WorkspaceRecent } from '../../types'
 import {
@@ -11,6 +12,7 @@ import {
   workspaceGetCurrent, workspaceSetArchiveStatus, workspaceGetArchiveEntries, getKnowledgePages, getKnowledgeGraph, onWsExternalChange,
   workspacePickImages, workspaceSaveImage, onAiTeachTreeRefresh,
   workspacePasteExternal, pasteFromClipboard, getPathForFile,
+  workspaceStat, workspaceRefreshVault, onWsFsChanged,
 } from '../../lib/ipc'
 import { notifyDataChanged } from '../../lib/dataChanged'
 import { openVaultWithGuide } from '../../lib/vaultOpen'
@@ -174,6 +176,8 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   const [closeTarget, setCloseTarget] = useState<string | null>(null)
   /** 保存冲突（磁盘被外部修改）：弹三选对话框 */
   const [conflictState, setConflictState] = useState<{ relPath: string; diskMtimeMs?: number; missing: boolean } | null>(null)
+  /** v3.2.0 条目 ④ 保底：手动「刷新资源管理器」进行中（转圈 + 防连点） */
+  const [refreshing, setRefreshing] = useState(false)
 
   // ---- 禅模式（docs/zen-mode-design.md）----
   const { s: zenSettings, update: zenUpdate } = useSettings()
@@ -400,6 +404,58 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
       setConflictState((cur) => (cur ? cur : { relPath, diskMtimeMs: mtimeMs, missing: false }))
     })
   }, [])
+
+  // ---- v3.2.0 条目 ④：外部文件系统变更（资源管理器 / 外部编辑器 / git）→ 重扫 + 冲突三选 ----
+  // 主进程 fsWatcher 已在侧做自写抑制与 300ms 防抖，这里只负责把可见树收敛到磁盘真值。
+  // 载荷 relPaths 为空 = 主进程拼不出具体路径（语义「可能有任意变化」）→ 只重扫、不做冲突判定：
+  // 拿不到可靠依据时不冒险误弹三选，真正的外部改动还有「聚焦回读」与手动刷新两条后路。
+  useEffect(() => {
+    return onWsFsChanged(({ relPaths, watcherError }) => {
+      if (watcherError) {
+        showToast({ type: 'warning', message: '文件监听不可用（仓库被移走 / 网络盘），已降级为聚焦回读 + 手动刷新' })
+        return
+      }
+      for (const dirRel of Object.keys(dirCacheRef.current)) void refreshDir(dirRel)
+      // 冲突三选：只对「本次变更命中且正被打开」的文件判定（复用现成三选，UI 侧零改动）
+      const hit = relPaths.filter((p) => p in openFilesRef.current)
+      if (hit.length === 0) return
+      void (async () => {
+        const root = rootIdRef.current
+        if (!root) return
+        for (const relPath of hit) {
+          const doc = openFilesRef.current[relPath]
+          if (!doc) continue
+          const st = await workspaceStat(root, relPath)
+          if (st.error) {
+            setConflictState((cur) => (cur ? cur : { relPath, missing: true }))
+            return
+          }
+          if (typeof st.mtime === 'number' && Math.abs(st.mtime - (doc.mtimeMs ?? 0)) > 2) {
+            setConflictState((cur) => (cur ? cur : { relPath, diskMtimeMs: st.mtime, missing: false }))
+            return
+          }
+        }
+      })()
+    })
+  }, [refreshDir])
+
+  // ---- v3.2.0 条目 ④ 焦点兜底：外部编辑器改文件后切回窗口 → 重读已展开目录 ----
+  // 与 AI 教学侧同范式（「项目无 fs 监听时，聚焦回读是最省成本的兜底策略」）。Windows 递归
+  // watch 有已知丢事件，watcher 静默失效时这是第二层保险。
+  useEffect(() => {
+    const onFocus = (): void => {
+      if (!rootIdRef.current) return
+      for (const dirRel of Object.keys(dirCacheRef.current)) void refreshDir(dirRel)
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refreshDir])
+
+  // ---- v3.2.0 条目 ④ 第三层：切回编辑器 Tab（Tab 保活 display:none）时重扫一次 ----
+  useEffect(() => {
+    if (!isActive || !rootIdRef.current) return
+    for (const dirRel of Object.keys(dirCacheRef.current)) void refreshDir(dirRel)
+  }, [isActive, refreshDir])
 
   // ---- R5 分栏预览 ----
   /** 切换预览并记忆到 localStorage（下次打开编辑器保持上次状态） */
@@ -746,6 +802,34 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   }, [])
 
   /** 文件是否被某个已归档目录覆盖（B1：目录状态优先，单独「取消归档」对其无意义） */
+  /**
+   * v3.2.0 条目 ④ 保底机制：手动「刷新资源管理器」（口径 b 全量）。
+   *
+   * 行为与 `vault:tree-refresh` 的处理**完全同构**（重扫所有已加载目录），外加：
+   *  - 兜底补一次 `refreshDir('')`：目录只有被展开过才进 dirCache，而没展开的目录一定出现在
+   *    其父目录的列表里、根 '' 又在 enterWorkspace 必被加载 → 一次遍历即可把**可见树的全部
+   *    层级**收敛到磁盘真值（不需要递归、主进程侧不需要新增读目录接口）。
+   *  - 语义边界 = 口径 (b) 全量：再让主进程失效知识索引 / 图谱缓存并 prune 归档清单僵尸条目
+   *    （`ws:refreshVault`），避免「树刷新了、知识库还是旧的」这种半刷新态；`refreshArchived()`
+   *    同步重读归档路径集。
+   *  - **不动任何视图态**：不复位展开集、不动当前打开文件、不「清空 dirCache 再重建」（那会闪）。
+   */
+  const refreshExplorer = useCallback(async () => {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      const dirs = Object.keys(dirCacheRef.current)
+      if (!dirs.includes('')) dirs.push('')
+      // 每目录一次 readdir（ws:listDir 无缓存，连点即真的连读磁盘）→ 并行 + refreshing 守卫
+      await Promise.all(dirs.map((d) => refreshDir(d)))
+      await refreshArchived()
+      const res = await workspaceRefreshVault()
+      if (res.error) showToast({ type: 'error', message: res.error })
+    } finally {
+      setRefreshing(false)
+    }
+  }, [refreshing, refreshDir, refreshArchived])
+
   const isCoveredByArchivedDir = useCallback((rel: string): boolean =>
     archivedDirPaths.some((d) => rel === d || rel.startsWith(`${d}/`))
   , [archivedDirPaths])
@@ -1156,6 +1240,16 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                   on={!!zenSettings.editorFolderFocus}
                   onToggle={() => zenUpdate('editorFolderFocus', !zenSettings.editorFolderFocus)}
                 />
+                {/* v3.2.0 条目 ④ 保底：刷新资源管理器（VS Code 的 Refresh Explorer）——watcher 静默
+                    失效时用户仍能强制重扫，而不是只能重启应用。置于「+」左侧（排布：聚焦 · 刷新 · 新建） */}
+                <button
+                  onClick={() => void refreshExplorer()}
+                  disabled={refreshing}
+                  title="刷新资源管理器"
+                  className="p-1 rounded-md transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50"
+                >
+                  <RefreshCw size={13} className={refreshing ? 'animate-spin' : undefined} />
+                </button>
                 <button
                   onClick={(e) => {
                     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()

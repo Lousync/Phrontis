@@ -157,6 +157,8 @@ export const pluginInstall = (url: string, grantedCapabilities?: string[]) => a(
 export const onPluginInstalledChanged = (cb: () => void) => a().onPluginInstalledChanged(cb)
 /** AI vault 写工具落盘后的外部变更通知 */
 export const onWsExternalChange = (cb: (p: { relPath: string; mtimeMs?: number }) => void) => a().onWsExternalChange(cb)
+/** v3.2.0 条目 ④：仓库目录发生文件系统变更（外部改动 / watcher 降级告知） */
+export const onWsFsChanged = (cb: (p: { relPaths: string[]; watcherError?: string }) => void) => a().onWsFsChanged(cb)
 export const pluginInstallFromFile = (grantedCapabilities?: string[]) => a().pluginInstallFromFile(grantedCapabilities)
 /** 一键安装内置示例插件（开发期从工作区 samples/ 读，prod 后续用 extraResources 预置） */
 export const pluginInstallBundledSample = (filename: string, grantedCapabilities?: string[]) => a().pluginInstallBundledSample(filename, grantedCapabilities)
@@ -321,6 +323,8 @@ export const workspaceForget = (rootId: string) => a().workspaceForget(rootId)
 // P7（D6）：删除当前仓库 = 整仓进 OS 回收站（不弹提醒窗，回收站可还原兜底）
 export const workspaceDeleteVault = (rootId: string): Promise<{ ok?: boolean; deletedCurrent?: boolean; error?: string }> => a().workspaceDeleteVault(rootId)
 export const workspaceClearCurrentVault = () => a().workspaceClearCurrentVault()
+/** v3.2.0 条目 ④ 保底：手动刷新（口径 b 全量：知识索引/图谱失效 + 归档清单 prune） */
+export const workspaceRefreshVault = () => a().workspaceRefreshVault()
 // P6：整仓归档（导出 zip / 导入 + 冲突逐条决策）
 export const vaultArchiveExport = () => a().vaultArchiveExport()
 export const vaultArchiveImportStart = () => a().vaultArchiveImportStart()

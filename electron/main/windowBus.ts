@@ -69,6 +69,10 @@ export const BROADCAST_CHANNEL = {
   aiTeachWebCrawlProgress: 'aiTeach:web-crawl-progress',
   /** 仓库文件被主进程改写（AI 写工具落盘），载荷 `{ relPath, mtimeMs? }` */
   wsExternalChange: 'ws:external-change',
+  /** 仓库目录发生文件系统变更（外部改动 / 手动刷新），载荷 `{ relPaths: string[], watcherError?: string }`
+   *  —— relPaths 为仓库内 posix 相对路径（拼不出时为空数组 = 「可能有任意变化」）；
+   *  watcherError 仅在监听降级（仓库被删/网络盘）时出现一次，见 lib/fsWatcher.ts */
+  wsFsChanged: 'ws:fs-changed',
   /** 插件事件投递，载荷 `{ pluginId, event, payload, dropped? }` */
   pluginEvent: 'plugin:event',
   /** 插件安装/启停状态变化，无载荷 */

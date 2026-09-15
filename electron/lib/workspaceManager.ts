@@ -10,8 +10,9 @@ import { invalidateGraphIndex } from './kbStore/graphIndex'
 import { emitPluginEvent } from './pluginEvents'
 import { IGNORE_FILE_NAME } from './kbStore/ignoreFile'
 import { parseMarkdown, serializeMarkdown } from './kbStore/mdStore'
-import { addArchiveEntry, removeArchiveEntry, renameArchiveEntries, readManifest, relPosixOf } from './kbStore/archivedFilesRepo'
+import { addArchiveEntry, removeArchiveEntry, renameArchiveEntries, readManifest, relPosixOf, gcArchiveEntries } from './kbStore/archivedFilesRepo'
 import { broadcastDataChanged } from '../main/windowBus'
+import { syncVaultWatcher, markSelfWrite } from './fsWatcher'
 import { globalReadJson, globalWriteJson } from './globalJsonStore'
 import { isAllowedClearRoot, trashVaultFolder } from './vaultDelete'
 import { rootDirName } from './aiTeachingFolders'
@@ -301,6 +302,9 @@ export function detectConflict(absPath: string, expectedMtimeMs: number | null |
 
 /** 原子写：临时文件 + rename 覆盖（对标数据库写盘策略，防半写损坏） */
 export function writeWorkspaceFile(absPath: string, content: string): void {
+  // v3.2.0 条目 ④：落盘前登记「这条路径的变更出自我自己」——fsWatcher 命中即跳过，
+  // 否则应用内保存会被监听器当成外部修改，弹「文件已被外部修改」冲突三选（自打自脸）
+  markSelfWrite(absPath)
   const real = absPath
   const tmp = join(real, `..`, `.kb-tmp-${randomUUID()}`)
   try {
@@ -366,6 +370,8 @@ function loadVaults(): void {
       ensureKbRoot(cur.name)
       // 启动恢复也过一遍一次性布局迁移（P4 博客收拢；幂等）
       runLayoutMigrations(cur.rootPath)
+      // v3.2.0 条目 ④：启动即给当前仓库挂上文件监听
+      syncVaultWatcher()
     }
   } catch {
     /* 登记表未就绪等：忽略，openDir 时重新登记 */
@@ -439,6 +445,8 @@ function adoptVaultDirectory(rootPath: string, name?: string): { rootId: string;
   ensureKbRoot(vaultName)
   if (isFirstInit) writeWelcomeDocOnce(rootPath)
   runLayoutMigrations(rootPath)
+  // v3.2.0 条目 ④：仓库（换）了 → 文件监听对准它
+  syncVaultWatcher()
   return { rootId: id, name: vaultName, path: rootPath }
 }
 
@@ -617,6 +625,10 @@ export function renameWorkspacePath(rootId: string, oldRel: string, newRel: stri
   // 目标父目录缺失时自动补建父链（renameSync 不建父目录）——移动语义的 mkdir -p，
   // 与「新建目录」的 ws:mkdir（重名自动加后缀）严格区分，绝不产生 (1) 镜像目录
   mkdirSync(dirname(to), { recursive: true })
+  // v3.2.0 条目 ④：应用内改名/移动同样登记自写（否则监听器会把「我自己刚改的」当成外部改动，
+  // 正在编辑的文件会误弹三选）；新旧两条路径都登记
+  markSelfWrite(from)
+  markSelfWrite(to)
   renameSync(from, to)
   // 归档清单跟随（全类型归档 §4.2）：文件条目精确改 path、目录条目及其下条目前缀级联；
   // 清单按当前仓库落盘（jsonStore 作用域），非当前仓库的 rename 不动清单
@@ -628,6 +640,9 @@ export function renameWorkspacePath(rootId: string, oldRel: string, newRel: stri
 export async function trashWorkspacePath(rootId: string, relPath: string): Promise<void> {
   const abs = requireInside(rootId, relPath)
   if (!existsSync(abs)) throw new Error('文件不存在')
+  // v3.2.0 条目 ④：应用内删除登记自写（正被编辑的文件由编辑器自己关闭标签，
+  // 不该再走「文件已在磁盘上被删除」三选——那是给外部删除准备的）
+  markSelfWrite(abs)
   const trash = (await import('trash')).default
   await trash([abs])
   invalidateIndexIfCurrentVault(rootId)
@@ -1040,6 +1055,8 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       // 切换仓库后失效新仓库缓存（多仓库陈旧兜底，与 ws:openDir 同策略）
       invalidateIndexIfCurrentVault(r.id)
       invalidateGraphIndex()
+      // v3.2.0 条目 ④：切仓库 → 监听跟随（旧仓库的改动不再触发刷新）
+      syncVaultWatcher()
       return { rootId: r.id, name: r.name, path: r.rootPath }
     } catch (e) {
       return { error: (e as Error).message }
@@ -1127,6 +1144,8 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       setCurrentVault(null)
       invalidateKnowledgeIndex()
       invalidateGraphIndex()
+      // v3.2.0 条目 ④：当前仓库被删 → 关掉监听（目录已进回收站）
+      syncVaultWatcher()
     }
     return { ok: true, deletedCurrent: wasCurrent }
   })
@@ -1138,7 +1157,36 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
     setCurrentVault(null)
     invalidateKnowledgeIndex()
     invalidateGraphIndex()
+    // v3.2.0 条目 ④：退出仓库 → 关掉监听
+    syncVaultWatcher()
     return { ok: true, cleared: was }
+  })
+
+  /**
+   * v3.2.0 条目 ④ 保底机制：手动「刷新资源管理器」（口径 (b) 全量）。
+   *
+   * 语义对齐 VS Code 的 `workbench.action.files.refreshExplorer`，但本项目「文件树」与
+   * 「知识索引 / 归档清单」是两套缓存 → 全量口径 = 文件树（渲染层重扫已加载目录，见
+   * `src/modules/editor/index.tsx`）+ 知识索引/图谱失效 + 归档清单僵尸条目清理，
+   * 避免「树刷新了、知识库还是旧的」这种半刷新态。
+   *
+   * 主进程侧**不需要读目录**：`ws:listDir` 没有缓存（每次实时 readdir），所以这个按钮
+   * 从定义上就读不到旧值、不存在「假刷新」——这也正是它能当真保底的根本原因。
+   */
+  ipcMain.handle('ws:refreshVault', () => {
+    const cur = getCurrentVault()
+    if (!cur) return { ok: false, error: '当前没有打开的仓库' }
+    if (!existsSync(cur.rootPath)) return { ok: false, error: '仓库文件夹不存在（可能已被移动或删除）' }
+    invalidateKnowledgeIndex()
+    invalidateGraphIndex()
+    let pruned = 0
+    try {
+      pruned = gcArchiveEntries()
+    } catch {
+      /* 清单损坏等：不影响刷新本身 */
+    }
+    broadcastDataChanged('knowledge')
+    return { ok: true, pruned }
   })
 }
 
@@ -1164,6 +1212,8 @@ export async function trashAllRegisteredVaults(): Promise<{ trashed: number; err
   setCurrentVault(null)
   invalidateKnowledgeIndex()
   invalidateGraphIndex()
+  // v3.2.0 条目 ④：全部仓库已进回收站 → 关掉监听
+  syncVaultWatcher()
   return { trashed, errors }
 }
 

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch } from 'lucide-react'
+import { Sparkles, X, Send, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, Feather, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
-  workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceListDir,
-  agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh,
+  workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceListDir, workspaceRefreshVault,
+  agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachAssignSession, aiTeachUnassignSession, aiTeachSetLastWorkspace,
   aiTeachSrcRead, aiTeachSrcAdd, aiTeachSrcRemove, aiTeachSrcExtract, aiTeachSrcPick, aiTeachSrcPickDir, aiTeachSrcVisionCheck,
   aiTeachSrcPdfBytes, aiTeachSrcTranscribe, aiTeachSrcPromote,
@@ -412,6 +412,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     const n = Number(localStorage.getItem('aiTeach.artWidth'))
     return Number.isFinite(n) && n >= 24 && n <= 60 ? n : 46
   })
+  /**
+   * 分栏拖拽期遮罩（v3.2.0 条目 ⑤「第二层保险」）。
+   * `setPointerCapture` 是正解，但工件栏正文是 `.html` 时会挂一个 `kbview://` 独立文档的 iframe
+   * ——capture 跨文档边界是否稳不由我们决定，而**遮罩是物理上不让指针进入 iframe**，不依赖任何语义。
+   * 两者并用：capture 保证收尾可达，遮罩保证指针全程留在父文档内（顺带全窗口光标统一为 col-resize）。
+   * ⚠️ 只能由拖拽收尾摘除（`onUp` / `lostpointercapture`），绝不能另挂一个只认 up 的监听——
+   * 那正是「状态卡死只能重启」的老路。
+   */
+  const [artDragMask, setArtDragMask] = useState(false)
   /** html 页签 ⟳ 刷新计数（key 版本，ArtHtmlView 重读磁盘） */
   const [htmlSeq, setHtmlSeq] = useState<Record<string, number>>({})
   /** ⤢ 原位放大：工件栏占满内容区（absolute 盖过对话/左右栏，组件不卸载 → 对话滚动与 iframe 全存活），⤡/Esc 退出 */
@@ -1192,6 +1201,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   }
   const [srcAnom, setSrcAnom] = useState<{ unnamed: number; dupNo: number; noPath?: number } | null>(null)
   /** v3.1.1：对话级补充文件路径（非空 = 该对话还有存量「对话私有补充」条目，显示上收入口） */
+  /**
+   * v3.2.0 条目 ④：左栏「资源管理器」树的重扫计数（原始类型 prop → memo 化的 AiTeachFileTree）。
+   * 两个来源共用它：外部文件系统变更广播、左栏头部的手动刷新按钮。
+   */
+  const [treeRefreshSeq, setTreeRefreshSeq] = useState(0)
+  /** 左栏手动刷新进行中（转圈 + 防连点；子组件重扫与其并行，不复位展开态） */
+  const [treeRefreshing, setTreeRefreshing] = useState(false)
   const [srcSessionRel, setSrcSessionRel] = useState<string | null>(null)
   /**
    * v3.1.1：素材库 = **工作区主库 + 本对话存量**合并；sid 为空也照常读（工作区库脱离对话常驻，
@@ -1254,7 +1270,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     window.addEventListener('kb:file-saved', onSaved)
     window.addEventListener('focus', onFocus)
     const off = onAiTeachTreeRefresh(onTree)
-    return () => { window.removeEventListener('kb:file-saved', onSaved); window.removeEventListener('focus', onFocus); off() }
+    // v3.2.0 条目 ④：仓库目录被外部改动（资源管理器 / 外部编辑器 / git）→ 右栏回读 + 左栏树重扫。
+    // watcher 降级告知由编辑器侧统一 toast（同一条广播会送达所有窗口），这里不重复提示。
+    const offFs = onWsFsChanged(({ watcherError }) => {
+      if (watcherError) return
+      onTree()
+      setTreeRefreshSeq(n => n + 1)
+    })
+    return () => { window.removeEventListener('kb:file-saved', onSaved); window.removeEventListener('focus', onFocus); off(); offFs() }
   }, [syncSessionFiles])
   // 切回本模块 Tab：回读一次（保活组件不卸载，isActive 是唯一「重新可见」信号）
   useEffect(() => { if (isActive) syncSessionFiles({ sources: true, constraints: true }) }, [isActive, syncSessionFiles])
@@ -1735,28 +1758,46 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   // 老逻辑 mousedown 立刻改 cursor + 监听 mousemove，鼠标移动 1px 就 setArtPct；
   // 触摸板"轻敲"瞬间 / 用户没意识到按下时手稍微抖一下，都会被解释成"拖拽"，看起来像"鼠标掠过手柄就自动被点击"。
   // 改为 mousedown 后先 armed=false 待命，只有 mousemove 横向位移 ≥4px 才算真拖——cursor 才变 col-resize、setArtPct 才被调用。
-  const onDividerDown = useCallback((e: React.MouseEvent) => {
+  //
+  // 2026-09-15 补 `setPointerCapture`（v3.2.0 条目 ⑤ 同源漏点，本处是最后一个）：分隔条只有 5px 宽，
+  // **往右拖第一下指针就离开它、落进工件栏**；而工件栏正文是 `.html` 时走 `ArtHtmlView` →
+  // `kbview://` iframe（独立文档、无 allow-same-origin）→ 父文档收不到 `mousemove`、更收不到 `mouseup`
+  // → 手柄当场跟丢、`body.cursor` 永久卡在 `col-resize`（只能重启）。capture 后事件即使落在 iframe
+  // 之上也仍派发给本元素（并继续冒泡到 window），这才是「往右拖」的正解。
+  // ⚠️ 判据：右侧开 `.md` 页签时走 `MarkdownPreview`、渲染在**父文档 DOM** 里，所以从来不犯病——
+  // 这也是「HTML 必犯病、md 完全正常」的原因，改动时必须保住这一半（`.md` 的对照组不许被弄坏）。
+  const dividerEndRef = useRef<(() => void) | null>(null)
+  const onDividerDown = useCallback((e: React.PointerEvent) => {
+    if (e.button !== 0) return
     e.preventDefault()
     const row = rowRef.current
     if (!row) return
     const rect = row.getBoundingClientRect()
     const startX = e.clientX
     let armed = false
-    const onMove = (ev: MouseEvent): void => {
+    // capture 只为「送达保证」：指针进入工件 iframe 后事件不再断流（不支持时退回 window 监听）
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* 退回 window 监听 */ }
+    const onMove = (ev: PointerEvent): void => {
       if (!armed) {
         if (Math.abs(ev.clientX - startX) < 4) return
         armed = true
+        setArtDragMask(true)
         document.body.style.cursor = 'col-resize'
       }
       setArtPct(Math.min(60, Math.max(24, (rect.right - ev.clientX) / rect.width * 100)))
     }
     const onUp = (): void => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
+      dividerEndRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      setArtDragMask(false)
       document.body.style.cursor = ''
     }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
+    dividerEndRef.current = onUp
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }, [setArtPct])
   // P3a（§3.8-1）：快速定位条锚点——每条 AI 回答取首行标题（标题规则由主进程注入，3-13）
   const anchors = useMemo(
@@ -2146,12 +2187,34 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
             </div>
           </div>
 
-          <SectionHead open={!collapsedSec.explorer} title="资源管理器" onToggle={() => toggleSec('explorer')} />
+          <SectionHead open={!collapsedSec.explorer} title="资源管理器" onToggle={() => toggleSec('explorer')}
+            right={(
+              /* v3.2.0 条目 ④：与编辑器侧同语义的手动刷新（口径 b 全量：树重扫 + 知识索引/图谱失效
+                 + 归档清单 prune）。右栏的 SOURCE.md / 约束 / 打开中的工件由 syncSessionFiles 一并回读 */
+              <button
+                onClick={() => {
+                  if (treeRefreshing) return
+                  setTreeRefreshing(true)
+                  setTreeRefreshSeq(n => n + 1)
+                  syncSessionFiles({ sources: true, constraints: true })
+                  void workspaceRefreshVault()
+                    .then(r => { if (r.error) showToast({ type: 'error', message: r.error }) })
+                    .catch(() => {})
+                    .finally(() => setTreeRefreshing(false))
+                }}
+                disabled={treeRefreshing}
+                title="刷新资源管理器"
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={treeRefreshing ? 'animate-spin' : undefined} />
+              </button>
+            )} />
           <div className="grid flex-1 min-h-0 transition-[grid-template-rows] duration-200 ease-out" style={{ gridTemplateRows: collapsedSec.explorer ? '0fr' : '1fr' }}>
             <div className={`overflow-hidden min-h-0 transition-opacity duration-150 ${collapsedSec.explorer ? 'invisible opacity-0' : 'opacity-100'}`}>
               <div className="h-full min-h-0 pb-1">
                 <AiTeachFileTree
                   subRel={wsTreeSeg}
+                  refreshSeq={treeRefreshSeq}
                   activeRel={(() => { const r = artTabs.find(t => t.id === artActive && !t.generating)?.rel ?? null; return r && r.startsWith(`${treeBase}/`) ? r.slice(treeBase.length + 1) : null })()}
                   onOpenMd={treeOpenArt}
                   onOpenHtml={treeOpenArt}
@@ -2959,11 +3022,17 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
             hover 又跳到 4~7px——鼠标在热区边缘微动会让 :hover 反复进出，视觉线带 transition-all 来回位移 4px，
             看着就是"手柄被来回小范围拖拽抖动"。现在 left-1/2 -translate-x-1/2 固定居中，只剩宽度/颜色过渡。 */}
         {artExpanded && !artZoom && (
-          <div onMouseDown={onDividerDown} onDoubleClick={() => setArtPct(46)} title="拖拽调宽（24%~60%）· 双击复位"
+          <div onPointerDown={onDividerDown}
+            onLostPointerCapture={() => dividerEndRef.current?.()}
+            onDoubleClick={() => setArtPct(46)} title="拖拽调宽（24%~60%）· 双击复位"
             className="group shrink-0 w-[5px] cursor-col-resize relative z-[5]">
             <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-px group-hover:w-[3px] bg-[var(--border-color)] group-hover:bg-[var(--accent)] transition-[width,background-color] duration-150" />
           </div>
         )}
+        {/* 拖拽期遮罩（见 artDragMask 注释）：把指针物理上留在父文档内——工件栏正文是 `.html` 时
+            挂的是 `kbview://` 独立文档的 iframe，一旦指针落进去，父文档就收不到 move/up。
+            必须由收尾路径摘除（`onUp` / `lostpointercapture`），不能只认 up。 */}
+        {artDragMask && <div className="fixed inset-0 z-[60] cursor-col-resize" />}
         {artExpanded && (
           <div className={artZoom ? 'absolute inset-0 z-40 min-h-0' : 'shrink-0 min-h-0'} style={artZoom ? undefined : { width: `${artPctEff}%`, minWidth: 300 }}>
             <ArtifactsPane
@@ -2984,11 +3053,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
           </div>
         )}
 
-        {/* 右栏（UI 优化条目2/5）：ResizablePanel 可调宽持久化 + 折叠贴边条；「素材库/资料来源」双区块合并为素材库单一区块。
-            收起 = 面板彻底消失（collapsedWidth=0，2026-09-08 用户拍板参照外部产品），展开入口在顶栏工具组 */}
+        {/* 右栏（UI 优化条目2/5）：ResizablePanel 可调宽持久化；「素材库/资料来源」双区块合并为素材库单一区块。
+            收起 = 面板彻底归零（v3.2.0 条目 ⑤ 清死配置：原来同时传 collapsedWidth=0 与 onSnapOpen，
+            而 onSnapOpen 只在「留出贴边条」时才有意义——0 宽的贴边条既看不见也点不到，是纯死配置；
+            展开入口在顶栏工具组，不需要贴边条） */}
         <ResizablePanel side="right" storageKey="aiTeach.rightWidth" defaultWidth={280} minWidth={240} maxWidth={420}
-          collapsedWidth={0}
-          visible={srcVisible} onSnapClose={() => toggleSide('right')} onSnapOpen={() => toggleSide('right')}>
+          visible={srcVisible} onSnapClose={() => toggleSide('right')}>
           <div className="h-full min-h-0 flex flex-col">
           <div className="shrink-0">
             <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
@@ -3157,28 +3227,40 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
         </ResizablePanel>
         {/* 右缘透明拉出条（2026-09-08 用户拍板：收起后面板彻底消失，但右缘保留透明拉出条——
             默认透明，悬停显示蓝色高亮竖条。两种展开方式：点击直接展开 / 按住向左拖过
-            minWidth 一半即展开（与 ResizablePanel onEdgeMouseDown 同语义）；
-            拖拽展开后抑制随后的 click 派发防二次翻转；顶栏「素材库」按钮为等效入口 */}
+            minWidth 一半即展开（与 ResizablePanel 折叠态「拖出展开」同语义）；
+            拖拽展开后抑制随后的 click 派发防二次翻转；顶栏「素材库」按钮为等效入口。
+            2026-09-15 同源补 pointer events + capture（v3.2.0 条目 ⑤）：本条在窗口最右缘，
+            而有工件栏时**往左拖的前 120px 全落在工件栏上**——工件栏正文是 `.html` 时即
+            `kbview://` iframe，父文档收不到 mousemove → 阈值永远走不到、拉出彻底失效；
+            指针一旦进 iframe 连 mouseup 也丢 → body.cursor 卡住。capture 后事件不再断流。 */}
         {!srcVisible && (
           <div
             data-edge-strip="right"
             title="点击或向左拖拽展开素材库"
             className="shrink-0 w-2 group relative cursor-col-resize"
-            onMouseDown={(e) => {
+            onLostPointerCapture={() => { document.body.style.cursor = '' }}
+            onPointerDown={(e) => {
+              if (e.button !== 0) return
               e.preventDefault()
               // React 合成事件 currentTarget 在派发结束后被置 null——异步回调（onUp）里
-              // 不能再读，必须在 mousedown 同步期捕获元素引用（2026-09-08 实锤报错点）
+              // 不能再读，必须在 pointerdown 同步期捕获元素引用（2026-09-08 实锤报错点）
               const strip = e.currentTarget as HTMLElement
               const startX = e.clientX
               let opened = false
-              const onMove = (ev: MouseEvent): void => {
+              let maskOn = false
+              try { strip.setPointerCapture(e.pointerId) } catch { /* 退回 window 监听 */ }
+              const onMove = (ev: PointerEvent): void => {
+                // 遮罩等真动了再挂：单击展开不该闪一层透明遮罩（4px 与全应用 dead-zone 同口径）
+                if (!maskOn && Math.abs(ev.clientX - startX) >= 4) { maskOn = true; setArtDragMask(true) }
                 if (opened) return
                 if (startX - ev.clientX > 120) { opened = true; openSources() }
               }
               const onUp = (): void => {
+                setArtDragMask(false)
                 document.body.style.cursor = ''
-                window.removeEventListener('mousemove', onMove)
-                window.removeEventListener('mouseup', onUp)
+                window.removeEventListener('pointermove', onMove)
+                window.removeEventListener('pointerup', onUp)
+                window.removeEventListener('pointercancel', onUp)
                 if (opened) {
                   const suppress = (ev: Event): void => { ev.stopPropagation(); strip.removeEventListener('click', suppress, true) }
                   strip.addEventListener('click', suppress, true)
@@ -3186,8 +3268,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                 }
               }
               document.body.style.cursor = 'col-resize'
-              window.addEventListener('mousemove', onMove)
-              window.addEventListener('mouseup', onUp)
+              window.addEventListener('pointermove', onMove)
+              window.addEventListener('pointerup', onUp)
+              window.addEventListener('pointercancel', onUp)
             }}
             onClick={openSources}
           >

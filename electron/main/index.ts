@@ -61,6 +61,7 @@ import { registerDocsReadHandlers } from '../lib/docsIpc'
 import { registerLanShareHandlers } from '../lib/lanShare'
 import { registerClipperHandlers, startClipperServer, stopClipperServer } from '../lib/clipperServer'
 import { registerWorkspaceHandlers, trashAllRegisteredVaults, clearVaultRegistry } from '../lib/workspaceManager'
+import { closeVaultWatcher } from '../lib/fsWatcher'
 import { registerVaultArchiveHandlers } from '../lib/vaultArchive'
 import { getCurrentVault, setCurrentVault } from '../lib/kbStore/vaultContext'
 import { SETTINGS } from '../../src/lib/settings'
@@ -1042,6 +1043,8 @@ app.on('before-quit', () => {
   stopSuperviseScheduler()
   disposeDayPanel()
   stopClipperServer()
+  // v3.2.0 条目 ④：关掉仓库文件监听（防句柄泄漏、防 dev 重启后重复挂载）
+  closeVaultWatcher()
   // Flush pending settings writes
   if (saveTimer) { clearTimeout(saveTimer); flushSettingsToDisk() }
 })

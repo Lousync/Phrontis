@@ -27,12 +27,15 @@ interface Props {
   /** 工件栏方案 A（2026-09-09）：.html 点击/右键=工件栏沙箱渲染页签；不传则回落编辑器 */
   onOpenHtml?: (rel: string) => void
   onOpenExternal: (rel: string) => void
+  /** v3.2.0 条目 ④：父组件持有的刷新计数（原始类型 prop，不破坏 memo）——自增即重扫已加载目录。
+   *  两个来源共用它：外部文件系统变更广播、左栏头部的「刷新资源管理器」按钮 */
+  refreshSeq?: number
 }
 
 interface CtxState { x: number; y: number; node: TreeNode | null }
 interface InputModal { title: string; placeholder: string; initial: string; submitLabel: string; onSubmit: (v: string) => void }
 
-function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenExternal }: Props) {
+function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenExternal, refreshSeq }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [rootDir, setRootDir] = useState('AI教学')
   const [dirCache, setDirCache] = useState<DirCache>({})
@@ -85,6 +88,15 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
       loadedDirsRef.current.forEach(k => { void loadDir(k) })
     })
   }, [loadDir])
+
+  // v3.2.0 条目 ④：refreshSeq 自增（外部文件系统变更 / 手动刷新按钮）→ 重扫已加载目录。
+  // 用 ref 记上次值，保证只在**变化**时重扫（首次挂载不重复读一次目录）。
+  const refreshSeqRef = useRef(refreshSeq)
+  useEffect(() => {
+    if (refreshSeq === undefined || refreshSeqRef.current === refreshSeq) return
+    refreshSeqRef.current = refreshSeq
+    loadedDirsRef.current.forEach(k => { void loadDir(k) })
+  }, [refreshSeq, loadDir])
 
   const toggleDir = useCallback((rel: string) => {
     setExpanded(prev => {

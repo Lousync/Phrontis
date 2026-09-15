@@ -155,6 +155,14 @@ const api = {
     ipcRenderer.on('ws:external-change', handler)
     return () => { ipcRenderer.removeListener('ws:external-change', handler) }
   },
+  /** v3.2.0 条目 ④：仓库目录的文件系统变更（外部改动触发，主进程 fsWatcher 广播）。
+   *  relPaths = 本次变更涉及的仓库内 posix 相对路径（拼不出时为空数组 = 「可能有任意变化」）；
+   *  watcherError 仅在监听降级（仓库被删 / 网络盘）时出现一次。 */
+  onWsFsChanged: (cb: (p: { relPaths: string[]; watcherError?: string }) => void) => {
+    const handler = (_e: unknown, p: { relPaths: string[]; watcherError?: string }) => cb(p)
+    ipcRenderer.on('ws:fs-changed', handler)
+    return () => { ipcRenderer.removeListener('ws:fs-changed', handler) }
+  },
   pluginInstallFromFile: (grantedCapabilities?: string[]) => ipcRenderer.invoke('plugin:installFromFile', grantedCapabilities),
   pluginInstallBundledSample: (filename: string, grantedCapabilities?: string[]) => ipcRenderer.invoke('plugin:installBundledSample', filename, grantedCapabilities),
   pluginListInstalled: () => ipcRenderer.invoke('plugin:listInstalled'),
@@ -618,6 +626,9 @@ const api = {
   // P7（D6）：删除仓库 = 整仓进 OS 回收站（主进程护栏校验；无提醒弹窗）
   workspaceDeleteVault: (rootId: string) => ipcRenderer.invoke('ws:deleteVault', rootId),
   workspaceClearCurrentVault: () => ipcRenderer.invoke('ws:clearCurrentVault'),
+  /** v3.2.0 条目 ④ 保底：手动「刷新资源管理器」（口径 b 全量 = 知识索引/图谱失效 + 归档清单 prune；
+   *  文件树重扫由渲染层自己做，主进程侧 ws:listDir 无缓存） */
+  workspaceRefreshVault: () => ipcRenderer.invoke('ws:refreshVault') as Promise<{ ok: boolean; pruned?: number; error?: string }>,
   // P6：整仓导出 / 导入（冲突逐条决策：覆盖/跳过/重命名）
   vaultArchiveExport: () => ipcRenderer.invoke('va:export'),
   vaultArchiveImportStart: () => ipcRenderer.invoke('va:importStart'),
