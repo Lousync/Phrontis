@@ -1495,6 +1495,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
 
   const [profDismissed, setProfDismissed] = useState(false)
   useEffect(() => { setProfDismissed(false) }, [messages])
+  /**
+   * v3.2.0 条目7：画像建议「预览」= **就地受控展开/收起**。
+   * 原实现是对 `[data-profile-suggestion]`（那是个默认收起的 `<details>`，且横幅本身在消息滚动容器
+   * **之外**、是输入区上方的页脚带、任何时刻完整可见）调 `scrollIntoView` —— 对「最近可滚动祖先为零」
+   * 的元素，浏览器什么也不做，于是用户视角就是「点了没反应」（onClick 其实触发了）。
+   * 受控 state 还让按钮文案（预览 ↔ 收起）与展开态天然一致，并消掉那处全文档 querySelector 脆弱点。
+   */
+  const [profPreviewOpen, setProfPreviewOpen] = useState(false)
+  useEffect(() => { setProfPreviewOpen(false) }, [messages])
   // Esc 统一入口（R26 真机验证补口）：本模块浮层优先逐个关闭（素材表单 → 工作区弹层 → 会话要求 →
   // 用量明细 → 新建菜单 → 模型菜单），都关完才退禅。原实现挂在 zenActive 分支里 → 非禅模式下浮层按 Esc 无反应。
   useEffect(() => {
@@ -2590,15 +2599,26 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                     )}
                     <button onClick={() => { void acceptProfileSuggestion('global') }} title="写入全局画像（userData，跨工作区/跨仓库共享）"
                       className="shrink-0 px-2 py-0.5 rounded-md border border-[var(--accent)]/50 text-[var(--accent)] text-[11px] hover:bg-[var(--accent)]/10 transition-colors">接受（全局）</button>
-                    <button onClick={() => setProfDismissed(true)} title="忽略（不写入；下条回答会重新提议）"
-                      className="shrink-0 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors">忽略</button>
-                    <button onClick={() => { const pre = document.querySelector('[data-profile-suggestion]') as HTMLElement | null; pre?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }}
-                      title="查看建议内容（下方代码块）" className="shrink-0 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors">预览</button>
+                    {/* 条目7 根因1：这两个按钮原先**没有任何按钮样式**（无底无描边 + `--text-muted`），
+                        而同一排的「接受」三兄弟是实底/描边 → 用户读到的就是「前三个是按钮、后两个是灰字 = 像禁用」。
+                        现改为与「接受（工作区/全局）」同源的次级描边样式（保留小尺寸、不抢主操作权重）；
+                        「忽略」再暗一档（次要中的次要），但有描边 + 真 hover → 不再像禁用。 */}
+                    <button type="button" onClick={() => setProfDismissed(true)} title="忽略（不写入；下条回答会重新提议）"
+                      className="shrink-0 px-1.5 py-0.5 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors">忽略</button>
+                    {/* 条目7 根因2：由 scrollIntoView 改为就地展开；`建议内容全文` 这行文案收进 title（铁律 12：只收不删） */}
+                    <button type="button" onClick={() => setProfPreviewOpen(v => !v)} aria-expanded={profPreviewOpen}
+                      title={profPreviewOpen ? '收起（建议内容全文）' : '预览（建议内容全文）'}
+                      className="shrink-0 px-1.5 py-0.5 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">{profPreviewOpen ? '收起' : '预览'}</button>
                   </div>
-                  <details data-profile-suggestion className="mt-1.5 max-h-40 overflow-y-auto">
-                    <summary className="cursor-pointer text-[10.5px] text-[var(--text-muted)] select-none">建议内容全文</summary>
-                    <pre className="mt-1 whitespace-pre-wrap text-[11px] leading-relaxed text-[var(--text-secondary)] font-[var(--font-mono,var(--font-family))]">{profileSuggestion.text}</pre>
-                  </details>
+                  {/* 折叠走既有 .kb-collapse（经 Collapsible 封装）——铁律 13 的面板开合令牌，不另造过渡。
+                      外层 grid 容器常驻，故收起态零高度；子树在收起动画播完后才卸载（懒语义同文件树）。 */}
+                  <Collapsible open={profPreviewOpen} className="mt-1.5">
+                    {() => (
+                      <div className="max-h-40 overflow-y-auto">
+                        <pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-[var(--text-secondary)] font-[var(--font-mono,var(--font-family))]">{profileSuggestion.text}</pre>
+                      </div>
+                    )}
+                  </Collapsible>
                 </div>
               )}
               <div className="shrink-0 border-t border-[var(--border-color)] p-2 bg-[var(--bg-secondary)]">
