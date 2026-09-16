@@ -24,6 +24,16 @@
  * 运行（项目根目录）：
  *   node --no-warnings .AGENT/scripts/ai-teaching/verify-profile-banner.mjs [仓库路径]
  * 期望：全部 PASS 且 exit=0
+ *
+ * ⚠️ v3.2.0 第 20 项把这张卡片整体重写了（变化条目 + 可勾选 diff 列表 + 层级切换 + 节流窗口），
+ *   本脚本随之改为校验**新卡片里仍然成立的那几条红线** —— 控件样式、预览非空操作、真二态切换、
+ *   重置 effect 重置的确实是 `profPreviewOpen`。**红线本身一条没松**，换掉的是失效的旧锚点：
+ *   · 区块锚点 `profileSuggestion && !profDismissed` → `profShow && profileSuggestion`（`profDismissed`
+ *     已被节流状态取代，见 verify-profile-patch.mjs）；
+ *   · 重置 effect 的依赖 `[messages]` → `[profileSuggestion, activeId]`（**刻意**不再挂 `[messages]`，
+ *     否则节流窗口会被下一条消息冲掉）；
+ *   · 「接受（工作区/全局）」accent 描边对照组 → 主操作「写入X」实底 accent 对照组（层级改选择器了）。
+ *   新增的契约（合并写入 / 层级权限 / 节流）在 `verify-profile-patch.mjs`，两边不重叠。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -94,7 +104,7 @@ const src = stripComments(raw)
 check('剥注释后源码显著变短（说明注释确实被剥掉了，负向断言才有意义）',
   src.length < raw.length, `raw=${raw.length} stripped=${src.length}`)
 
-const BS = src.indexOf('{profileSuggestion && !profDismissed && (')
+const BS = src.indexOf('{profShow && profileSuggestion && (')
 // 结束边界 = 紧随其后的「输入区外壳」开标签。⚠️ 这个锚点是**样式类**，会随输入区改版而失效
 //（条目 ⑧ 气泡化把外壳从 `border-t … p-2 bg-secondary` 换成 `px-3 pb-2.5 pt-2`；
 // ⑧ 追加限宽又变成 `shrink-0 w-full max-w-[820px] mx-auto px-3 pb-2.5 pt-2`），
@@ -140,9 +150,11 @@ check('「忽略」观感仍弱于「预览」（次级中的次级）：正文�
   /text-\[var\(--text-muted\)\]/.test(btnIgnore) && !/text-\[var\(--text-muted\)\]/.test(btnPreview))
 check('【红线】旧的无描边写法不得回退（`rounded-md text-[11px] text-[var(--text-muted)] hover:bg-…`）',
   !/rounded-md text-\[11px\] text-\[var\(--text-muted\)\] hover:bg-\[var\(--bg-hover\)\]/.test(banner))
-const acceptWs = (banner.match(/border border-\[var\(--accent\)\]\/50/g) || []).length
-check('同排「接受（工作区/全局）」仍是 accent 描边（对照组存在，故不是把全排都涂成灰底）',
-  acceptWs >= 2, `found ${acceptWs}`)
+// 第 20 项后同排的主操作是「写入X」实底按钮（层级改成选择器了，不再有「接受（工作区/全局）」两个）——
+// 对照组的作用不变：证明「忽略」的弱化样式是刻意的层级差，而不是整排都被涂成灰。
+const acceptWs = (banner.match(/bg-\[var\(--accent\)\] text-white/g) || []).length
+check('同排主操作「写入X」仍是 accent 实底（对照组存在，故不是把全排都涂成灰底）',
+  acceptWs >= 1, `found ${acceptWs}`)
 
 // ------------------------------------------------------------------ 根因 2：预览的动作
 console.log('\n[根因 2：「预览」原本是空操作]')
@@ -160,9 +172,9 @@ check('不再依赖原生折叠元素（受控 state 才能让按钮文案与展
 
 // ------------------------------------------------------------------ 受控展开
 console.log('\n[受控展开 / 收起]')
-check('新增受控 state profPreviewOpen（与 profDismissed 同款重置写法）',
+check('受控 state profPreviewOpen 仍在（与卡片勾选态同一处 effect 重置）',
   /const \[profPreviewOpen, setProfPreviewOpen\] = useState\(false\)/.test(src) &&
-  /const \[profDismissed, setProfDismissed\] = useState\(false\)/.test(src))
+  /setProfPreviewOpen\(false\)/.test(src))
 check('按钮 onClick 走 setProfPreviewOpen（不再是滚动定位）',
   /onClick=\{\(\) => setProfPreviewOpen\(/.test(banner))
 check('有 aria-expanded 暴露展开态', /aria-expanded=\{profPreviewOpen\}/.test(banner))
@@ -193,14 +205,19 @@ const lm = banner.match(/>\{(profPreviewOpen \? '([^']+)' : '([^']+)')\}<\/butto
 check('按钮文案随展开态切换（收起 ↔ 预览）',
   !!lm && lm[2] === '收起' && lm[3] === '预览', lm ? `${lm[2]} / ${lm[3]}` : '(未匹配)')
 
-const reset = sliceEffect(src, /^},\s*\[messages\]\)$/, /setProfPreviewOpen\(false\)/)
-check('重置 effect 的依赖确实是 [messages]', /\[messages\]/.test(reset.deps), reset.deps)
+const reset = sliceEffect(src, /^},\s*\[profileSuggestion, activeId\]\)$/, /setProfPreviewOpen\(false\)/)
+check('重置 effect 的依赖是 [profileSuggestion, activeId]（**刻意不是 [messages]**：否则节流窗口被下一条消息冲掉）',
+  /\[profileSuggestion, activeId\]/.test(reset.deps), reset.deps)
 // 真跑一遍：把「重置的是哪个 state」钉死 —— 两条 effect 依赖同名，交换了不会报错
+// 依赖同名的 effect 不止一条，故把**同处重置的其它 state 也一并桩掉**，只验证 profPreviewOpen 那条没写反
 const harness = stripTypeScriptTypes(
   `
 let called = []
 const setProfPreviewOpen = (v) => called.push(['profPreviewOpen', v])
-const setProfDismissed = (v) => called.push(['profDismissed', v])
+const setProfRows = (v) => called.push(['profRows', Array.isArray(v) ? v.length : typeof v])
+const setProfLayer = (v) => called.push(['profLayer', v])
+const setProfExpanded = (v) => called.push(['profExpanded', v])
+const profileSuggestion = null
 export const api = { run() { called = []; ${reset.body}; return called } }
 `,
   { mode: 'transform' }
@@ -211,8 +228,11 @@ const tmpFile = path.join(tmpDir, `pb-${Date.now().toString(36)}.mjs`)
 fs.writeFileSync(tmpFile, harness, 'utf8')
 const { api } = await import(pathToFileURL(tmpFile).href)
 const effectCalls = api.run()
-check('重置 effect 真调用的是 setProfPreviewOpen(false)（两条同名依赖的 effect 没被写反）',
-  effectCalls.length === 1 && effectCalls[0][0] === 'profPreviewOpen' && effectCalls[0][1] === false,
+check('重置 effect 真调用的是 setProfPreviewOpen(false)（同处重置的 state 没被写反）',
+  effectCalls.filter((c) => c[0] === 'profPreviewOpen' && c[1] === false).length === 1,
+  JSON.stringify(effectCalls))
+check('同处一并重置勾选副本 / 层级 / 安静入口展开态（新建议来时不应带着上一条的勾选）',
+  ['profRows', 'profLayer', 'profExpanded'].every((k) => effectCalls.some((c) => c[0] === k)),
   JSON.stringify(effectCalls))
 
 // ------------------------------------------------------------------ 报告

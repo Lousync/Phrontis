@@ -1182,6 +1182,28 @@ export interface WorkspacePasteResult {
   skipped: Array<{ path: string; reason: string }>
 }
 
+/** AI 教学「画像更新建议」的**变化条目**（v3.2.0 第 20 项）。
+ *  形状与主进程 `electron/lib/profilePatch.ts` 的 `ProfileEntry` 必须一致 ——
+ *  一个在渲染层解析、一个在主进程应用，跨进程共享不了模块，故各留一份；**改形状要同时改两处**。 */
+export type AiTeachProfileOp = 'add' | 'update' | 'remove'
+export interface AiTeachProfileEntry {
+  /** 本主题画像的二级标题名（可带 `## ` 前缀） */
+  field: string
+  op: AiTeachProfileOp
+  /** 新内容（不带 `- ` 前缀） */
+  text: string
+  /** 仅 `update`：被替换的原文 */
+  from?: string
+}
+/** `aiTeachProfileApplyPatch` 的返回：哪几条真落了 / 哪几条为什么没落 */
+export interface AiTeachProfilePatchResult {
+  ok: boolean
+  relPath?: string | null
+  applied?: Array<{ field: string; op: AiTeachProfileOp; text: string; note?: string }>
+  skipped?: Array<{ field: string; op: AiTeachProfileOp; text: string; reason: string }>
+  error?: string
+}
+
 export interface ElectronAPI {
   getPathForFile: (file: File) => string
   pasteFromClipboard: () => Promise<{ ok: boolean }>
@@ -1690,6 +1712,8 @@ export interface ElectronAPI {
   aiTeachProfileEnsureGlobal: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
   aiTeachProfileEnsureSession: (id: string) => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
   aiTeachProfileEnsureWorkspace: (id: string) => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
+  /** v3.2.0 第 20 项：画像「变化条目」合并写入（上层 mergeOnly 只接受 add） */
+  aiTeachProfileApplyPatch: (layer: 'global' | 'workspace' | 'session', id: string | null, entries: AiTeachProfileEntry[]) => Promise<AiTeachProfilePatchResult>
   llmReasoningCapable: (model: string) => Promise<boolean>
   onAiTeachTreeRefresh: (cb: (p: { dirRel: string }) => void) => () => void
   onAiTeachWebProgress: (cb: (p: { sessionId: string; no: number; done: number; total: number; current: string }) => void) => () => void

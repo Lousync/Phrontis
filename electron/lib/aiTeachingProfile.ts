@@ -4,6 +4,8 @@ import { app, ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { broadcastTreeRefresh, rootDirName, ensureSessionFolder } from './aiTeachingFolders'
 import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
+import { applyProfileEntries } from './profilePatch'
+import type { ProfileApplyOutcome, ProfileApplySkipped, ProfileEntry } from './profilePatch'
 
 /**
  * AI教学模块 · 用户画像（总纲 docs/ai-teaching-module-rework.md §3.14，P8；UI 优化 §13.2 分层入口 / 第三轮「C 移入仓库」）
@@ -13,7 +15,10 @@ import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspace
  * - 工作区 PROFILE.md：{仓库}/{aiTeachRootDir}/{工作区文件夹}/PROFILE.md；
  * - 会话 PROFILE.md：{仓库}/{aiTeachRootDir}/{会话文件夹}/PROFILE.md。
  * 注入规则：全局 + 工作区 + 会话三层进 system，冲突时以更细颗粒为准；画像=「我是谁/我会什么」，约束=「你要怎么做」。
- * 维护策略 Plan B（3-33）：AI 在回答里给 ```profile 围栏建议块 → 用户「接受」才写文件（渲染层做卡片）。
+ * 维护策略 Plan B（3-33）：AI 在回答里给 ```profile 围栏建议块 → 用户逐条勾选后写文件（渲染层做卡片）。
+ * v3.2.0 第 20 项起，围栏内容是**相对本主题画像的变化条目**（`[{field,op,text}]`）而不是整篇全文，
+ * 落盘走 `applyProfilePatch`（合并语义；上层 `mergeOnly` 只接受追加）——`writeXxxProfile` 保留给
+ * 「编辑画像」这类用户直存场景（整篇写入）。
  */
 
 export const PROFILE_FILE = 'PROFILE.md'
@@ -233,10 +238,11 @@ export function writeSessionProfile(sessionId: string, text: string, getSetting:
 }
 
 /**
- * AgentRunner 注入（§3.14 注入规则）：全局 + 会话两层画像合成一个提示块；
- * 每轮重读（与 CONSTRAINTS/SOURCE 同哲学）；两层皆空 → 零注入。
- * 同时携带「更新建议协议」：AI 发现画像需更新时输出 ```profile 围栏（完整替换版会话画像 md），
- * 用户确认接受才写文件（3-33 Plan B）——AI 不得直接写画像文件。
+ * AgentRunner 注入（§3.14 注入规则）：全局 + 工作区 + 会话三层画像合成一个提示块；
+ * 每轮重读（与 CONSTRAINTS/SOURCE 同哲学）；三层皆空 → 零注入。
+ * 同时携带「更新建议协议」（v3.2.0 第 20 项改口径）：AI 只输出**相对本主题画像的变化条目**
+ * （`[{field,op,text}]`，不是整篇全文），且**没有新信息就不要输出**；
+ * 用户在卡片上逐条勾选后才由 `applyProfilePatch` 落文件 —— AI 不得直接写画像文件。
  */
 export function resolveProfilesForInjection(sessionId: string, getSetting: (key: string) => unknown): string {
   try {
@@ -253,10 +259,57 @@ export function resolveProfilesForInjection(sessionId: string, getSetting: (key:
     if (gt) parts.push(`■ 全局画像（跨工作区稳定）：\n${cut(gt, 2000)}`)
     if (wt) parts.push(`■ 工作区画像（本课程目标/进度/薄弱点，覆盖全局）：\n${cut(wt, 2000)}`)
     if (st) parts.push(`■ 本主题画像（会话级，覆盖以上两层）：\n${cut(st, 2000)}`)
-    parts.push('当对话揭示画像应更新（新掌握的知识点、暴露的薄弱点、进度推进）时，不要直接修改画像文件——在回答末尾追加一个 ```profile 围栏代码块，内容是**更新后的本主题画像全文**（完整 PROFILE.md markdown，保留未变化部分），客户端会渲染「画像更新建议」卡片，用户选择写入层级后才会落文件。')
+    parts.push('当对话出现**明确的新信息**（新掌握的知识点 / 新暴露的薄弱点 / 进度推进）时，不要直接改画像文件——在回答末尾追加一个 ```profile 围栏，内容是**相对本主题画像的变化条目**（严格 JSON 数组，不要注释与多余文字）：[{"field":"薄弱点","op":"add","text":"…"},{"field":"学习进度","op":"update","from":"被替换的原文","text":"新写法"},{"field":"偏好","op":"remove","text":"要删掉的原文"}]。field 取本主题画像里已有的二级标题名，op 取 add / update / remove。**没有新信息就不要输出这个块**，不要为了更新而更新；同一件事不要重复登记；上面「全局 / 工作区」两层已经写过的内容不要在本主题层再写一遍。客户端会渲染成可逐条勾选的卡片，用户确认后才落文件。')
     return '\n\n' + parts.join('\n\n')
   } catch {
     return ''
+  }
+}
+
+export interface ProfilePatchResult {
+  ok: boolean
+  relPath?: string | null
+  applied?: ProfileApplyOutcome[]
+  skipped?: ProfileApplySkipped[]
+  error?: string
+}
+
+/**
+ * 合并写入画像（v3.2.0 第 20 项）：把「变化条目」应用到指定层，**不再整篇覆盖**。
+ *
+ * - 上层（workspace / global）传 `mergeOnly: true` —— `update` / `remove` 由 `profilePatch`
+ *   在函数入口拒绝并逐条回报，这是「不许整篇覆盖上层」的红线落点（不靠调用方自觉过滤）。
+ * - 文件不存在（或内容为空）时以该层骨架为底，保证 `add` 有落点（等价 ensure + 应用）。
+ * - 返回 `applied` / `skipped` 供卡片转结果态（哪几条真落了、哪几条为什么没落）。
+ */
+export function applyProfilePatch(
+  layer: 'global' | 'workspace' | 'session',
+  id: string | null,
+  entries: ProfileEntry[],
+  getSetting: (key: string) => unknown,
+): ProfilePatchResult {
+  try {
+    const list = Array.isArray(entries) ? entries : []
+    const read = layer === 'global'
+      ? readGlobalProfile(getSetting)
+      : layer === 'workspace'
+        ? readWorkspaceProfile(String(id ?? ''), getSetting)
+        : readSessionProfile(String(id ?? ''), getSetting)
+    if (!read.ok) return { ok: false, error: read.error }
+
+    const base = read.text && read.text.trim() ? read.text : (read.skeleton ?? '')
+    const res = applyProfileEntries(base, list, { mergeOnly: layer !== 'session' })
+
+    const write = layer === 'global'
+      ? writeGlobalProfile(res.text, getSetting)
+      : layer === 'workspace'
+        ? writeWorkspaceProfile(String(id ?? ''), res.text, getSetting)
+        : writeSessionProfile(String(id ?? ''), res.text, getSetting)
+    if (!write.ok) return { ok: false, error: write.error }
+
+    return { ok: true, relPath: write.relPath ?? null, applied: res.applied, skipped: res.skipped }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
   }
 }
 
@@ -271,4 +324,9 @@ export function registerAiTeachingProfileHandlers(getSetting: (key: string) => u
   ipcMain.handle('aiTeachProfile:ensureGlobal', () => ensureGlobalProfile(getSetting))
   ipcMain.handle('aiTeachProfile:ensureSession', (_e, sessionId: string) => ensureSessionProfile(String(sessionId ?? ''), getSetting))
   ipcMain.handle('aiTeachProfile:ensureWorkspace', (_e, wsId: string) => ensureWorkspaceProfile(String(wsId ?? ''), getSetting))
+  /** v3.2.0 第 20 项：按「变化条目」合并写入（add / update / remove；上层 mergeOnly 只追加） */
+  ipcMain.handle('aiTeachProfile:applyPatch', (_e, layer: string, id: string | null, entries: unknown) => {
+    if (layer !== 'global' && layer !== 'workspace' && layer !== 'session') return { ok: false, error: '未知写入层级' }
+    return applyProfilePatch(layer, id ? String(id) : null, (Array.isArray(entries) ? entries : []) as ProfileEntry[], getSetting)
+  })
 }

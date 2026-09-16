@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
@@ -9,10 +9,11 @@ import {
   aiTeachSrcRead, aiTeachSrcAdd, aiTeachSrcRemove, aiTeachSrcExtract, aiTeachSrcPick, aiTeachSrcPickDir, aiTeachSrcVisionCheck,
   aiTeachSrcPdfBytes, aiTeachSrcTranscribe, aiTeachSrcPromote,
   aiTeachProfileEnsureGlobal, aiTeachProfileEnsureSession, aiTeachProfileEnsureWorkspace,
-  aiTeachProfileWriteGlobal, aiTeachProfileWriteSession, aiTeachProfileWriteWorkspace,
+  aiTeachProfileWriteSession, aiTeachProfileApplyPatch, getSetting,
 } from '../../lib/ipc'
 import { AiTeachFileTree } from './AiTeachFileTree'
 import { decidePrepLanding, withDraft, withFold, withStarted } from './prepPolicy'
+import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
 import { ArtifactsPane } from './ArtifactsPane'
 import type { ArtTab } from './artifacts'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
@@ -40,7 +41,7 @@ import { useFloatingWindow } from './useFloatingWindow'
  * ——关掉浮窗不再失联：那条被追问的回答自己就是入口，不必再往主线里塞一条"带回消息"。
  */
 const ANCHOR_LANES_KEY = 'aiTeach.anchorLanes'
-import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourceEntry, SkillInfo } from '../../types'
+import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourceEntry, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp } from '../../types'
 
 /**
  * 「AI教学」模块（原 id immersive / 沉浸式 Agent；总纲 docs/ai-teaching-module-rework.md，
@@ -66,8 +67,11 @@ import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange,
  * （类型/存放/页码·行号区间仅 pdf·pptx·docx·code 拆起止，3-28 程序解析写入；区间类型清单收敛为 RANGE_TYPES 常量，v3.2.0 条目 ⑯）、pdf/pptx/docx 一键区间提取为同级可编辑提取稿（3-20/3-26；docx 经 soffice 转 PDF，v3.1.2 条目5），
  * SOURCE.md 与提取稿经 AgentRunner 素材目录注入供 AI 编号引用（3-29，每轮重读）——新对话因此能看到工作区已有素材。
   * 3-21 视觉转写（手动档）：pdf/pptx/docx 条目「转写」按钮→主进程转 PDF（pptx/docx 经 soffice）→渲染层 pdf.js 区间栅格化→视觉模型逐页转写→并入提取稿。
- * P8 用户画像（§3.14）：全局画像（userData/AI教学/PROFILE.md）+ 会话 PROFILE.md 两层每轮注入；
- * 更新走 Plan B——AI 输出 ```profile 建议块 → 输入框上方建议卡片「接受（本主题/全局）/忽略」，接受才写文件（3-33）；
+ * P8 用户画像（§3.14）：全局（仓库内 {aiTeachRoot}/PROFILE.md）+ 工作区 + 会话 PROFILE.md 三层每轮注入；
+ * 更新走 Plan B——AI 输出 ```profile 建议块 → 输入框上方建议卡片，接受才写文件（3-33）；
+ * v3.2.0 第 20 项起：围栏内容是**相对本主题画像的变化条目**（`[{field,op,text}]`），卡片升级为
+ * 可勾选 / 可编辑的 diff 列表 —— 本主题层可整段替换字段，工作区 / 全局只允许追加（只接受 add）；
+ * 忽略后有节流窗口（8 轮 / 30 分钟取先到），窗口内只留安静入口，不再每轮弹；
  * 「🩺 诊断问答」模板（3-34）答完生成初稿；入口=选择页「全局画像」chip + 顶栏「画像」chip（3-35）。
  */
 
@@ -302,7 +306,15 @@ type AiTeachNav = {
    * 素材与约束内容不入快照——真相源是 SOURCE.md / CONSTRAINTS.md，实时读才不会丢外部变更。
    */
   prep?: { started?: boolean; draft?: string; srcOpen?: boolean; reqOpen?: boolean }
+  /**
+   * v3.2.0 第 20 项（画像更新建议节流）：用户忽略 / 应用一次后记账，
+   * 窗口内（8 轮或 30 分钟，取先到）不再自动弹卡片 —— 忽略的留一个安静入口，已写入的不留。
+   */
+  profile?: ProfileThrottleState
 }
+/** 画像建议卡片的一行 = 一条变化条目 + 勾选态；`text` 可被用户就地改写（改过即以用户版本为准） */
+type ProfRow = AiTeachProfileEntry & { checked: boolean }
+
 function readNav(sid: string): AiTeachNav {
   try { return JSON.parse(String(localStorage.getItem(`aiTeach.nav.${sid}`) || '{}')) as AiTeachNav } catch { return {} }
 }
@@ -1547,17 +1559,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   const [askCollapsed, setAskCollapsed] = useState(false)
   useEffect(() => { setAskPicks({}); setAskPage(0); setAskCustomOpen(false); setAskCustom(''); setAskCollapsed(false) }, [askPending?.id]) // 换 ask 重置整卷点选/翻页/补充/收起
 
-  const [profDismissed, setProfDismissed] = useState(false)
-  useEffect(() => { setProfDismissed(false) }, [messages])
   /**
-   * v3.2.0 条目7：画像建议「预览」= **就地受控展开/收起**。
-   * 原实现是对 `[data-profile-suggestion]`（那是个默认收起的 `<details>`，且横幅本身在消息滚动容器
-   * **之外**、是输入区上方的页脚带、任何时刻完整可见）调 `scrollIntoView` —— 对「最近可滚动祖先为零」
-   * 的元素，浏览器什么也不做，于是用户视角就是「点了没反应」（onClick 其实触发了）。
-   * 受控 state 还让按钮文案（预览 ↔ 收起）与展开态天然一致，并消掉那处全文档 querySelector 脆弱点。
+   * v3.2.0 第 20 项：画像建议的三块状态。
+   * - `profRows`：条目形态下 AI 所给条目的**可勾选 / 可编辑副本**（AI 原文不直接落盘）。
+   *   重建只由「建议本身或会话变化」触发 —— **刻意不再挂 `[messages]` 无条件复位**，
+   *   否则「忽略后 8 轮内不再提示」的节流窗口会被下一条消息冲掉（旧实现就是这个毛病）。
+   * - `profLayer`：写入层级（本主题可整段替换字段；工作区 / 全局只追加）。
+   * - `profExpanded`：节流窗口内「安静入口」被手动展开。
+   * - `profTick`：忽略 / 写入后记一次账，用于让节流判定重算（localStorage 不是响应式数据源）。
    */
+  const [profRows, setProfRows] = useState<ProfRow[]>([])
+  const [profLayer, setProfLayer] = useState<ProfileLayer>('session')
+  const [profExpanded, setProfExpanded] = useState(false)
+  const [profTick, setProfTick] = useState(0)
+  /** 旧形态（整篇全文）建议的「预览」= 就地受控展开 / 收起 —— v3.2.0 条目7 同款口径，保留给回落路径 */
   const [profPreviewOpen, setProfPreviewOpen] = useState(false)
-  useEffect(() => { setProfPreviewOpen(false) }, [messages])
   // Esc 统一入口（R26 真机验证补口）：本模块浮层优先逐个关闭（素材表单 → 工作区弹层 → 会话要求 →
   // 用量明细 → 新建菜单 → 模型菜单），都关完才退禅。原实现挂在 zenActive 分支里 → 非禅模式下浮层按 Esc 无反应。
   useEffect(() => {
@@ -1586,16 +1602,53 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [isActive, zenActive, onZenLevelChange, askVisible, askPending, askCollapsed, srcForm, wsModal, instrOpen, tokenOpen, showNewMenu, leftNewMenu, modelMenuOpen, sideLane])
-  /** 最新一条 assistant 回答里的 ```profile 围栏 = 画像更新建议（接受才写文件） */
-  const profileSuggestion = useMemo(() => {
+  /**
+   * 最新一条 assistant 回答里的 ```profile 围栏 = 画像更新建议（接受才写文件）。
+   * v3.2.0 第 20 项起：围栏正文先过 `parseProfileFence` —— 解得出 JSON 条目数组就是新形态，
+   * 解不出则回落「整篇全文」（历史消息仍是旧形态，回落只允许写本主题层）。
+   */
+  const profileFence = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
       if (m.role !== 'assistant') continue
       const mt = /```profile[^\n]*\n([\s\S]*?)```/.exec(m.content)
-      return mt ? { text: mt[1].trim() } : null
+      return mt ? { raw: mt[1].trim() } : null
     }
     return null
   }, [messages])
+  const profileSuggestion = useMemo<ProfileSuggestion | null>(
+    () => (profileFence ? parseProfileFence(profileFence.raw) : null),
+    [profileFence],
+  )
+  /** 建议一变（或换会话）就重建勾选副本：默认全勾，层级回本主题，安静入口收起 */
+  useEffect(() => {
+    setProfRows(profileSuggestion?.mode === 'entries' ? profileSuggestion.entries.map((e) => ({ ...e, checked: true })) : [])
+    setProfLayer('session')
+    setProfExpanded(false)
+    setProfPreviewOpen(false)
+  }, [profileSuggestion, activeId])
+  /** 节流判定：忽略 / 写入后 8 轮或 30 分钟内不再自动弹（取先到）。轮数 = user 消息条数 */
+  const profRound = useMemo(() => userRoundCount(messages), [messages])
+  const profThrottle = useMemo(() => {
+    void profTick // localStorage 不是响应式数据源：忽略 / 写入后靠 profTick 触发重算
+    const state = activeId ? readNav(activeId).profile : undefined
+    const now = Date.now()
+    return { state, active: !profileThrottleAllows(state, profRound, now), note: profileThrottleNote(state, profRound, now) }
+  }, [activeId, profRound, profTick])
+  /** 有待确认的建议（已写入过的不再算待确认） */
+  const profPending = !!profileSuggestion && profileSuggestion.mode !== 'invalid' && profThrottle.state?.mutedBy !== 'applied'
+  /** 窗口已过或用户手动展开 → 展开卡片 */
+  const profShow = profPending && (!profThrottle.active || profExpanded)
+  /** 窗口内的安静入口（拍板：不打断心流但不错过） */
+  const profQuiet = profPending && profThrottle.active && !profExpanded
+  /** 卡片可选层级：工作区层在无工作区时不可用 */
+  const profLayers = useMemo(() => ([
+    { id: 'session' as ProfileLayer, label: '本主题', enabled: !!activeId, title: '写入当前会话 PROFILE.md —— 最细颗粒，可整段替换字段' },
+    { id: 'workspace' as ProfileLayer, label: '工作区', enabled: !!wsActive, title: wsActive ? `写入工作区「${wsActive.name}」画像 —— 只做追加，不改写已有内容` : '会话未归属工作区，无工作区画像层' },
+    { id: 'global' as ProfileLayer, label: '全局', enabled: true, title: '写入仓库内全局画像（跨工作区 / 跨仓库共享）—— 只做追加，不改写已有内容' },
+  ]), [activeId, wsActive])
+  /** 当前勾选且在当前层级可用的条目数 */
+  const profUsableCount = profRows.filter((r) => r.checked && layerAllows(profLayer, r.op)).length
   /** 画像编辑 = 确保对应层文档存在（缺则落骨架）后直接跳编辑区打开；编辑器顶栏「← 返回 AI教学」回跳（条目6 已实现） */
   const openProfile = useCallback(async (layer: 'global' | 'workspace' | 'session', wsId?: string | null) => {
     if (layer === 'session' && !activeId) { showToast({ type: 'warning', message: '本主题画像随对话存放：先选择或新建一个对话' }); return }
@@ -1624,18 +1677,58 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
     showToast({ type: 'info', message: `工作区要求已在编辑区打开（${r.created ? '已按骨架创建' : '已有文件'}）· 保存后本工作区会话下一轮生效` })
   }, [activeWs])
-  const acceptProfileSuggestion = useCallback(async (target: 'global' | 'workspace' | 'session') => {
-    if (!profileSuggestion) return
-    if (target === 'session' && !activeId) return
-    if (target === 'workspace' && !(activeWs && activeWs !== '__none__')) return
-    const r = target === 'global'
-      ? await aiTeachProfileWriteGlobal(profileSuggestion.text).catch(() => null)
-      : target === 'workspace'
-        ? await aiTeachProfileWriteWorkspace(activeWs!, profileSuggestion.text).catch(() => null)
-        : await aiTeachProfileWriteSession(activeId!, profileSuggestion.text).catch(() => null)
-    if (r?.ok) { setProfDismissed(true); showToast({ type: 'info', message: `已写入${target === 'global' ? '全局' : target === 'workspace' ? '工作区' : '本主题'}画像 · 下轮生效` }) }
-    else showToast({ type: 'error', message: '画像写入失败' })
-  }, [profileSuggestion, activeId, activeWs])
+  /** 关闭建议 → 记账节流窗口：`ignored` 窗口内留安静入口，`applied` 已写入则不再留 */
+  const muteProfileSuggestion = useCallback((by: 'ignored' | 'applied') => {
+    if (!activeId) return
+    writeNav(activeId, { ...readNav(activeId), profile: { mutedRound: profRound, mutedTs: Date.now(), mutedBy: by } })
+    setProfTick((v) => v + 1)
+    setProfExpanded(false)
+  }, [activeId, profRound])
+  /** 应用当前勾选的条目到 `profLayer`（合并语义：add 追加 / update 替换 / remove 删行） */
+  const applyProfileSuggestion = useCallback(async () => {
+    const sug = profileSuggestion
+    if (!sug || !activeId) return
+
+    // 旧形态（整篇全文）：只写本主题层 —— 上层绝不允许被整篇覆盖
+    if (sug.mode === 'fulltext') {
+      const r = await aiTeachProfileWriteSession(activeId, sug.text).catch(() => null)
+      if (r?.ok) {
+        muteProfileSuggestion('applied')
+        showToast({ type: 'info', message: '已写入本主题画像（AI 给的是整篇全文，按旧格式处理）· 下轮生效' })
+      } else showToast({ type: 'error', message: '画像写入失败' })
+      return
+    }
+
+    const usable = profRows.filter((r) => r.checked && layerAllows(profLayer, r.op))
+    if (usable.length === 0) { showToast({ type: 'warning', message: '没有可写入的条目（当前层级下这些条目都不可用）' }); return }
+
+    // 删除类条目二次确认（设置项 `skipProfileDeleteConfirm` 可关；默认要确认）
+    const removes = usable.filter((r) => r.op === 'remove')
+    if (removes.length > 0) {
+      const skip = await getSetting('skipProfileDeleteConfirm').catch(() => false)
+      if (skip !== true) {
+        const yes = await showGlobalConfirm({
+          title: '确认删除画像内容',
+          message: `将删除 ${removes.length} 条画像内容：${removes.map((r) => `${r.field}·${r.text}`).join('；')}。删除后可到画像文档手动加回。`,
+          confirmLabel: '删除',
+          variant: 'danger',
+        })
+        if (!yes) return
+      }
+    }
+
+    const id = profLayer === 'global' ? null : profLayer === 'workspace' ? (activeWs && activeWs !== '__none__' ? activeWs : null) : activeId
+    if (profLayer !== 'global' && !id) { showToast({ type: 'warning', message: '当前层级不可用' }); return }
+    const entries: AiTeachProfileEntry[] = usable.map((r) => (r.from ? { field: r.field, op: r.op, text: r.text, from: r.from } : { field: r.field, op: r.op, text: r.text }))
+    const r = await aiTeachProfileApplyPatch(profLayer, id, entries).catch(() => null)
+    if (!r?.ok) { showToast({ type: 'error', message: `画像写入失败${r?.error ? `：${r.error}` : ''}` }); return }
+    muteProfileSuggestion('applied')
+    const label = profLayers.find((l) => l.id === profLayer)?.label ?? ''
+    const applied = r.applied ?? []
+    const skipped = r.skipped ?? []
+    showToast({ type: 'info', message: `已写入${label}画像 ${applied.length} 条${skipped.length > 0 ? ` · ${skipped.length} 条跳过` : ''}` })
+    if (skipped.length > 0) showToast({ type: 'warning', message: skipped.map((s) => `${s.field}：${s.reason}`).join('；') })
+  }, [profileSuggestion, activeId, profRows, profLayer, activeWs, profLayers, muteProfileSuggestion])
 
   // ---------- UI 优化条目11/12/13：任务规划激活（plan 协议）+ 提问模式（ask 协议） ----------
   /** 11A：最新一份 ```plan 围栏（AI 阶段推进时输出；随消息历史自动恢复，无需单独落库） */
@@ -2354,7 +2447,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
             className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
             <User size={12} />
             <span>画像</span>
-            {profileSuggestion && <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" title="AI 有画像更新建议待确认" />}
+            {profPending && <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" title="AI 有画像更新建议待确认" />}
           </button>
           {/* 右栏展开入口：右栏不可见（收起或被工件栏自动收起）时顶栏显示，点击恢复素材库（参照外部产品：入口在顶栏） */}
           {!srcVisible && (
@@ -2843,42 +2936,111 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                 )}
               </div>
 
-              {profileSuggestion && !profDismissed && (
-                /* P8（3-33 Plan B）：AI 画像更新建议——接受才写文件，下轮注入生效
-                   UI 优化条目8.2.2：写入目标升三层（本主题 / 工作区 / 全局），细颗粒优先 */
-                <div className="shrink-0 mx-2 mb-1.5 rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <User size={12} className="shrink-0 text-[var(--accent)]" />
-                    <span className="text-[12px] text-[var(--text-primary)]">AI 提议更新学习者画像（{profileSuggestion.text.length} 字）</span>
-                    <span className="ml-auto shrink-0 text-[10.5px] text-[var(--text-muted)]">选择写入层级</span>
-                    <button onClick={() => { void acceptProfileSuggestion('session') }} title="写入当前会话文件夹 PROFILE.md（最细颗粒，覆盖上两层）"
-                      className="shrink-0 px-2 py-0.5 rounded-md bg-[var(--accent)] text-white text-[11px] hover:opacity-90 transition-opacity">接受（本主题）</button>
-                    {wsActive && (
-                      <button onClick={() => { void acceptProfileSuggestion('workspace') }} title={`写入工作区「${wsActive.name}」画像（${aiTeachRoot}/${wsTreeSeg}/PROFILE.md，覆盖全局）`}
-                        className="shrink-0 px-2 py-0.5 rounded-md border border-[var(--accent)]/50 text-[var(--accent)] text-[11px] hover:bg-[var(--accent)]/10 transition-colors">接受（工作区）</button>
+              {/* v3.2.0 第 20 项 · 安静入口：节流窗口内不再自动弹卡片，只留一行可点开的提示
+                  （拍板口径：不打断心流但不错过 —— 点一下即展开完整卡片） */}
+              {profQuiet && (
+                <div className="shrink-0 w-full max-w-[820px] mx-auto px-3 pb-1 pt-1.5">
+                  <button type="button" onClick={() => setProfExpanded(true)}
+                    title={profThrottle.note || `本会话再过 ${PROFILE_THROTTLE_ROUNDS} 轮后恢复提示`}
+                    className="kb-pop flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors">
+                    <User size={11} className="shrink-0" />
+                    <span>{profileSuggestion?.mode === 'entries' ? `${profileSuggestion.entries.length} 条画像更新待确认` : '1 条画像更新待确认'}</span>
+                  </button>
+                </div>
+              )}
+              {/* P8（3-33 Plan B）+ v3.2.0 第 20 项：AI 画像更新建议 —— 逐条勾选 / 行内可改 / 选写入层。
+                  容器与输入框同为 `max-w-[820px] mx-auto px-3`（原是 `mx-2`，右边界对不齐）→ 左边界逐像素对齐。 */}
+              {profShow && profileSuggestion && (
+                <div className="shrink-0 w-full max-w-[820px] mx-auto px-3 pb-1.5 pt-1.5">
+                  <div className="kb-pop rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <User size={12} className="shrink-0 text-[var(--accent)]" />
+                      <span className="text-[12px] text-[var(--text-primary)]">
+                        AI 提议更新学习者画像 · {profileSuggestion.mode === 'entries' ? `${profRows.length} 处变化` : '整篇全文（旧格式）'}
+                      </span>
+                      {profileSuggestion.mode === 'entries' ? (
+                        <>
+                          <span className="ml-auto shrink-0 text-[10.5px] text-[var(--text-muted)]">写入到</span>
+                          {profLayers.filter((l) => l.enabled).map((l) => (
+                            <button key={l.id} type="button" onClick={() => setProfLayer(l.id)} title={l.title}
+                              className={`shrink-0 px-1.5 py-0.5 rounded-md border text-[11px] transition-colors ${profLayer === l.id ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]' : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>{l.label}</button>
+                          ))}
+                        </>
+                      ) : (
+                        <span className="ml-auto shrink-0 text-[10.5px] text-[var(--text-muted)]">写入到 本主题</span>
+                      )}
+                    </div>
+                    {profileSuggestion.mode === 'entries' ? (
+                      <>
+                        {/* 上层只做追加 —— 非 add 条目在此层级置灰，并就地说明原因（铁律 12：说明只收不删） */}
+                        {profLayer !== 'session' && (
+                          <div className="mt-1 text-[10.5px] text-[var(--text-muted)]">上层画像只做追加 —— 「修改 / 删除」类条目在此层级不可用（确要改上层，走顶栏「画像」跳编辑区直接改）。</div>
+                        )}
+                        <div className="mt-1.5 space-y-1">
+                          {profRows.map((r, i) => {
+                            const usable = layerAllows(profLayer, r.op)
+                            return (
+                              <div key={`${r.field}-${r.op}-${i}`} className="flex items-start gap-2">
+                                <button type="button" disabled={!usable}
+                                  onClick={() => setProfRows((rows) => rows.map((x, j) => (j === i ? { ...x, checked: !x.checked } : x)))}
+                                  title={usable ? '勾选后写入' : '上层画像只做追加，不改写已有内容'}
+                                  className={`shrink-0 mt-[2px] w-3.5 h-3.5 rounded-[3px] border flex items-center justify-center transition-colors ${usable ? (r.checked ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'border-[var(--border-color)] hover:border-[var(--accent)]') : 'border-[var(--border-color)] opacity-40 cursor-not-allowed'}`}>
+                                  {r.checked && usable && <Check size={10} strokeWidth={3} />}
+                                </button>
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="shrink-0 px-1 rounded text-[10.5px] text-[var(--text-secondary)] bg-[var(--bg-hover)]">{r.field}</span>
+                                    <span className={`shrink-0 px-1 rounded text-[10.5px] ${r.op === 'add' ? 'text-[var(--success)]' : r.op === 'update' ? 'text-[var(--warning)]' : 'text-[var(--danger)]'}`}>{r.op === 'add' ? '新增' : r.op === 'update' ? '修改' : '删除'}</span>
+                                    {/* 行内可改：改过即以用户版本为准（AI 原文不直接落盘） */}
+                                    <input value={r.text} disabled={!usable}
+                                      onChange={(e) => setProfRows((rows) => rows.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)))}
+                                      className="min-w-0 flex-1 bg-transparent outline-none text-[11.5px] text-[var(--text-primary)] border-b border-transparent focus:border-[var(--accent)] disabled:opacity-50" />
+                                  </div>
+                                  {r.op === 'update' && r.from && (
+                                    <div className="mt-0.5 text-[10.5px] text-[var(--text-muted)] line-through">原：{r.from}</div>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="mt-1.5 text-[10.5px] text-[var(--text-muted)]">AI 给的是「整篇全文」形态的建议（旧格式）—— 只能写入本主题层，上层不允许被整篇覆盖。</div>
+                        <div className="mt-1.5">
+                          {/* 条目7 根因2：由 scrollIntoView 改为就地展开；「建议内容全文」这行文案收进 title（铁律 12：只收不删） */}
+                          <button type="button" onClick={() => setProfPreviewOpen(v => !v)} aria-expanded={profPreviewOpen}
+                            title={profPreviewOpen ? '收起（建议内容全文）' : '预览（建议内容全文）'}
+                            className="shrink-0 px-1.5 py-0.5 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">{profPreviewOpen ? '收起' : '预览'}</button>
+                        </div>
+                        {/* 折叠走既有 .kb-collapse（经 Collapsible 封装）——铁律 13 的面板开合令牌，不另造过渡。
+                            外层 grid 容器常驻，故收起态零高度；子树在收起动画播完后才卸载（懒语义同文件树）。 */}
+                        <Collapsible open={profPreviewOpen} className="mt-1.5">
+                          {() => (
+                            <div className="max-h-40 overflow-y-auto">
+                              <pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-[var(--text-secondary)] font-[var(--font-mono,var(--font-family))]">{profileSuggestion.text}</pre>
+                            </div>
+                          )}
+                        </Collapsible>
+                      </>
                     )}
-                    <button onClick={() => { void acceptProfileSuggestion('global') }} title="写入全局画像（userData，跨工作区/跨仓库共享）"
-                      className="shrink-0 px-2 py-0.5 rounded-md border border-[var(--accent)]/50 text-[var(--accent)] text-[11px] hover:bg-[var(--accent)]/10 transition-colors">接受（全局）</button>
-                    {/* 条目7 根因1：这两个按钮原先**没有任何按钮样式**（无底无描边 + `--text-muted`），
-                        而同一排的「接受」三兄弟是实底/描边 → 用户读到的就是「前三个是按钮、后两个是灰字 = 像禁用」。
-                        现改为与「接受（工作区/全局）」同源的次级描边样式（保留小尺寸、不抢主操作权重）；
-                        「忽略」再暗一档（次要中的次要），但有描边 + 真 hover → 不再像禁用。 */}
-                    <button type="button" onClick={() => setProfDismissed(true)} title="忽略（不写入；下条回答会重新提议）"
-                      className="shrink-0 px-1.5 py-0.5 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors">忽略</button>
-                    {/* 条目7 根因2：由 scrollIntoView 改为就地展开；`建议内容全文` 这行文案收进 title（铁律 12：只收不删） */}
-                    <button type="button" onClick={() => setProfPreviewOpen(v => !v)} aria-expanded={profPreviewOpen}
-                      title={profPreviewOpen ? '收起（建议内容全文）' : '预览（建议内容全文）'}
-                      className="shrink-0 px-1.5 py-0.5 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">{profPreviewOpen ? '收起' : '预览'}</button>
-                  </div>
-                  {/* 折叠走既有 .kb-collapse（经 Collapsible 封装）——铁律 13 的面板开合令牌，不另造过渡。
-                      外层 grid 容器常驻，故收起态零高度；子树在收起动画播完后才卸载（懒语义同文件树）。 */}
-                  <Collapsible open={profPreviewOpen} className="mt-1.5">
-                    {() => (
-                      <div className="max-h-40 overflow-y-auto">
-                        <pre className="whitespace-pre-wrap text-[11px] leading-relaxed text-[var(--text-secondary)] font-[var(--font-mono,var(--font-family))]">{profileSuggestion.text}</pre>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span className="text-[10.5px] text-[var(--text-muted)]">
+                        {profileSuggestion.mode === 'entries' ? (profUsableCount > 0 ? `已选 ${profUsableCount} 条` : '未选任何条目') : '写入后下轮生效'}
+                      </span>
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <button type="button" onClick={() => muteProfileSuggestion('ignored')}
+                          title={`忽略本条建议：本会话再过 ${PROFILE_THROTTLE_ROUNDS} 轮、或 30 分钟后才恢复提示（窗口内可点输入区上方那行小字重新打开）`}
+                          className="shrink-0 px-1.5 py-0.5 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors">忽略</button>
+                        <button type="button" onClick={() => { void applyProfileSuggestion() }}
+                          disabled={profileSuggestion.mode === 'entries' && profUsableCount === 0}
+                          className="shrink-0 px-2 py-0.5 rounded-md bg-[var(--accent)] text-white text-[11px] hover:opacity-90 disabled:opacity-40 transition-opacity">
+                          {`写入${profLayers.find((l) => l.id === profLayer)?.label ?? ''}`}
+                        </button>
                       </div>
-                    )}
-                  </Collapsible>
+                    </div>
+                  </div>
                 </div>
               )}
               <div className="shrink-0 w-full max-w-[820px] mx-auto px-3 pb-2.5 pt-2">

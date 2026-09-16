@@ -310,6 +310,8 @@ const api = {
   aiTeachProfileEnsureGlobal: () => ipcRenderer.invoke('aiTeachProfile:ensureGlobal'),
   aiTeachProfileEnsureSession: (id: string) => ipcRenderer.invoke('aiTeachProfile:ensureSession', id),
   aiTeachProfileEnsureWorkspace: (id: string) => ipcRenderer.invoke('aiTeachProfile:ensureWorkspace', id),
+  /** v3.2.0 第 20 项：画像「变化条目」合并写入（上层只接受追加） */
+  aiTeachProfileApplyPatch: (layer: string, id: string | null, entries: unknown) => ipcRenderer.invoke('aiTeachProfile:applyPatch', layer, id, entries),
   /** AI教学会话文件夹落盘/改名/删除后的编辑区文件树刷新提示 */
   onAiTeachTreeRefresh: (cb: (p: { dirRel: string }) => void) => {
     const handler = (_e: unknown, p: { dirRel: string }) => cb(p)
