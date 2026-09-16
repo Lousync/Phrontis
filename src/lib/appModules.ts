@@ -37,16 +37,15 @@ export interface AppModuleDef {
  * ⚠️ 顺序即默认顺序，改动前先看两个消费者：
  *   · `PALETTE_MODULES`（命令面板按此顺序列出）
  *   · 活动栏「追加尚未进 activityBarOrder 的模块」也按此顺序
- * 现有顺序刻意保持与历史一致（desktop 首位、其余沿用旧 DESK_MODULES / MODULE_TABS 的相对次序），
- * 以免顺手把老用户的活动栏或面板顺序洗牌。
+ * v3.4.0 工作台三栏外壳：`desktop`（磁贴壳）被三栏外壳整体替代、`user`（账户）并入设置，
+ * 两者从清单删除；新增 `bookshelf` / `aiChat` / `graph` 三个「入口产生型」Tab。
  */
 export const APP_MODULES = [
-  { id: 'desktop', label: '桌面', bar: true, startable: true, tile: false, palette: true },
   { id: 'editor', label: '编辑器', bar: true, startable: true, tile: true, palette: true },
   { id: 'knowledge', label: '知识库', bar: true, startable: true, tile: true, palette: true },
   { id: 'blog', label: '博客', bar: true, startable: true, tile: true, palette: true },
   { id: 'schedule', label: '日程', bar: true, startable: true, tile: true, palette: true },
-  { id: 'moments', label: '说说', bar: true, startable: true, tile: true, palette: true },
+  { id: 'moments', label: '动态', bar: true, startable: true, tile: true, palette: true },
   { id: 'aiTeaching', label: 'AI教学', bar: true, startable: true, tile: true, palette: true },
   { id: 'toolbox', label: '工具箱', bar: true, startable: true, tile: true, palette: true },
   { id: 'plugins', label: '插件', bar: true, startable: true, tile: true, palette: true },
@@ -54,7 +53,11 @@ export const APP_MODULES = [
   // （「回收站」「帮助」是刻意去才会去的目的地，当启动落点必是 bug）
   { id: 'recycle', label: '回收站', bar: false, startable: false, tile: true, palette: true },
   { id: 'help', label: '帮助', bar: false, startable: false, tile: true, palette: true },
-  { id: 'user', label: '账户', bar: false, startable: false, tile: true, palette: true },
+  // v3.4.0 新增「入口产生型」Tab：只能由工作台入口产生（书架=左栏书签、AI对话=⤢、图谱=知识库跳转），
+  // 不进命令面板、不当启动落点——关掉后想再开，从对应入口再点一次即可（幂等哲学）
+  { id: 'bookshelf', label: '书架', bar: false, startable: false, tile: false, palette: false },
+  { id: 'aiChat', label: 'AI对话', bar: false, startable: false, tile: false, palette: false },
+  { id: 'graph', label: '知识图谱', bar: false, startable: false, tile: false, palette: false },
   { id: 'releaseNotes', label: '更新说明', bar: false, startable: false, tile: true, palette: false },
   { id: 'settings', label: '设置', bar: false, startable: false, tile: true, palette: true },
   { id: 'devtools', label: '开发者工具', bar: false, startable: false, tile: false, palette: false },
@@ -113,8 +116,6 @@ function parseIdList(raw: string | undefined, fallback: TabName[]): string[] {
 export function activityOrder(rawOrder?: string): TabName[] {
   const stored = parseIdList(rawOrder, [])
   const order = stored.filter((id) => BAR_MODULE_IDS.includes(id as TabName)) as TabName[]
-  // 桌面外壳是主入口：没进过存储就顶到最前（用户一旦拖拽过，就完全尊重存储顺序）
-  if (!order.includes('desktop')) order.unshift('desktop')
   for (const id of BAR_MODULE_IDS) if (!order.includes(id)) order.push(id)
   return order
 }
@@ -130,7 +131,7 @@ export function activityVisibleOrder(rawOrder?: string, rawHidden?: string): Tab
  *
  * 规则（刻意做得很钝，钝才不会出意外）：
  *   ① 用户选了 `startupTab`、且它是可启动模块、且没被隐藏 → 就用它；
- *   ② 其余一切情况 → **桌面兜底**。
+ *   ② 其余一切情况 → **编辑区兜底**（v3.4.0 起三栏外壳的默认主区即编辑区标签）。
  *
  * 曾经的做法是「按 activityBarOrder 逐项找，找不到就按一张硬编码清单找第一个没隐藏的」——
  * 而那张清单里含 `recycle` / `help`，这两个模块又不在活动栏的显隐菜单里（永远隐藏不掉），
@@ -140,5 +141,5 @@ export function resolveStartupTab(rawStartupTab?: string, rawHidden?: string): T
   const t = String(rawStartupTab ?? '')
   const hidden = parseIdList(rawHidden, [])
   if (t && (STARTABLE_MODULE_IDS as string[]).includes(t) && !hidden.includes(t)) return t as TabName
-  return 'desktop'
+  return 'editor'
 }
