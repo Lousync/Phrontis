@@ -110,6 +110,20 @@ export const WORKBENCH_BOOKMARKS: readonly WorkbenchBookmark[] = [
 ]
 
 /**
+ * 书签配色（原型 v15 定稿 c-teal/blue/orange/green/purple/red 六色系）。
+ * fg = 图标与文字色，bg = 图标底块色（同色低透明度）；明暗主题下均可读。
+ */
+export interface BookmarkColor { fg: string; bg: string }
+export const BOOKMARK_COLORS: Readonly<Record<RailModule, BookmarkColor>> = {
+  editor: { fg: '#2a988f', bg: 'rgba(42,161,152,.14)' },
+  knowledge: { fg: '#4f6ef2', bg: 'rgba(79,110,242,.14)' },
+  schedule: { fg: '#d97a1e', bg: 'rgba(232,132,44,.16)' },
+  bookshelf: { fg: '#35975c', bg: 'rgba(63,174,106,.15)' },
+  blog: { fg: '#9157d6', bg: 'rgba(160,107,224,.15)' },
+  quiz: { fg: '#c94f4f', bg: 'rgba(217,91,91,.14)' },
+}
+
+/**
  * 主界面切换 → 左栏模块态跟随映射（原型 v15「自动跟随」语义）：
  * 激活标签变为映射内的模块且未锁定（!leftLocked）时，左栏进入该模块侧边栏态；
  * **不在映射内的标签（设置/工具箱/动态…）不动左栏**（保持用户当前的书签/总览态）。

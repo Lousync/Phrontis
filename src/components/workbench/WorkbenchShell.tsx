@@ -1,5 +1,4 @@
 import { useMemo } from 'react'
-import { PanelLeftClose, PanelRightClose } from 'lucide-react'
 import { ResizablePanel } from '../shared/ResizablePanel'
 import { useSettings } from '../../lib/SettingsContext'
 import { parseWorkbenchLayout, type WorkbenchLayout, type RailModule } from '../../lib/workbenchLayout'
@@ -93,25 +92,7 @@ export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRe
         {right}
       </ResizablePanel>
 
-      {/* 两栏收起时的边缘唤起浮钮（收起态下 ResizablePanel 只剩 6px 边条，点击手柄也能开，这里给显式按钮） */}
-      {!suppressSides && layout.leftCollapsed && (
-        <button
-          onClick={() => patch({ leftCollapsed: false })}
-          title="展开左栏 (Ctrl+B)"
-          className="kb-pop absolute left-1.5 top-1/2 z-20 -translate-y-1/2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-1 text-[var(--text-muted)] shadow-sm transition-colors hover:text-[var(--text-primary)]"
-        >
-          <PanelLeftClose size={14} className="rotate-180" />
-        </button>
-      )}
-      {!suppressSides && layout.rightCollapsed && (
-        <button
-          onClick={() => patch({ rightCollapsed: false })}
-          title="展开右栏 (Ctrl+Alt+B)"
-          className="kb-pop absolute right-1.5 top-1/2 z-20 -translate-y-1/2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-1 text-[var(--text-muted)] shadow-sm transition-colors hover:text-[var(--text-primary)]"
-        >
-          <PanelRightClose size={14} className="rotate-180" />
-        </button>
-      )}
+      {/* 两栏收起后的开合 = 边缘 6px 手柄（悬停显形/单击开合，ResizablePanel 自带），不再放浮钮 */}
     </div>
   )
 }

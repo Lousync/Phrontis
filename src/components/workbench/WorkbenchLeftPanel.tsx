@@ -6,7 +6,7 @@ import {
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { useSettings } from '../../lib/SettingsContext'
 import { workspaceGetCurrent, workspaceListDir } from '../../lib/ipc'
-import { LOCATE_QUIZ_VIEW_EVENT, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, type RailModule } from '../../lib/workbenchLayout'
+import { BOOKMARK_COLORS, LOCATE_QUIZ_VIEW_EVENT, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, type RailModule } from '../../lib/workbenchLayout'
 import type { TabName } from '../../types'
 
 /**
@@ -172,16 +172,20 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
             <div data-wb="bookmarks" className="flex flex-col gap-0.5 p-1.5">
               {WORKBENCH_BOOKMARKS.map((b) => {
                 const isActive = railModule === b.key || (railModule === null && RAIL_FOLLOW_MAP[activeTab] === b.key && activeTab === b.tab)
+                const c = BOOKMARK_COLORS[b.key]
                 return (
                   <button
                     key={b.key}
                     data-wb-bookmark={b.key}
                     data-wb-active={isActive ? '1' : '0'}
                     onClick={() => onBookmarkClick(b.key)}
-                    className={`${itemCls} ${isActive ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+                    className={`${itemCls} ${isActive ? 'bg-[var(--bg-hover)] font-medium' : 'hover:bg-[var(--bg-hover)]'}`}
                   >
-                    {BOOKMARK_ICONS[b.key](14)}
-                    {b.label}
+                    {/* 图标底块 + 同色文字（原型 v15 c-* 配色） */}
+                    <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md" style={{ background: c.bg, color: c.fg }}>
+                      {BOOKMARK_ICONS[b.key](13)}
+                    </span>
+                    <span style={{ color: c.fg }}>{b.label}</span>
                   </button>
                 )
               })}

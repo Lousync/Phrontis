@@ -83,7 +83,7 @@ export function WorkbenchTabBar({ tabs, active, onSelect, onClose, onReorder }: 
   }
 
   return (
-    <div data-wb="tabbar" className="flex h-9 shrink-0 select-none items-stretch border-b border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-secondary)_60%,transparent)]">
+    <div data-wb="tabbar" className="flex h-8 shrink-0 select-none items-stretch border-b border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-secondary)_60%,transparent)]">
       <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
         {tabs.map((id) => {
           const isActive = id === active
@@ -103,7 +103,7 @@ export function WorkbenchTabBar({ tabs, active, onSelect, onClose, onReorder }: 
               onAuxClick={(e) => { if (e.button === 1 && canClose) { e.preventDefault(); onClose(id) } }}
               title={labelOf(id)}
               className={`
-                group relative flex min-w-0 shrink-0 cursor-pointer items-center gap-1.5 px-3 text-[12.5px] transition-colors duration-100
+                group relative flex min-w-0 shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12px] transition-colors duration-100
                 ${isActive
                   ? 'bg-[var(--bg-primary)] text-[var(--text-primary)]'
                   : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]/60 hover:text-[var(--text-primary)]'}
