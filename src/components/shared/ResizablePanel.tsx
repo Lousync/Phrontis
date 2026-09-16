@@ -39,9 +39,11 @@ interface Props {
   growWindow?: boolean
   /** 面板实际占宽上报（px，折叠/卸载为 0）。供标题栏把搜索框等锚定在主内容区，外扩时不漂移 */
   onWidthChange?: (width: number) => void
+  /** 单击手柄（未越过 dead-zone 的按下-抬起）= 开合切换。工作台三栏外壳的边缘手柄行为（原型 v15）；不传则单击无操作 */
+  onHandleClick?: () => void
 }
 
-export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, visible, className = '', children, initialWidth, showHandle = true, onSnapClose, onSnapOpen, side = 'left', collapsedWidth = 4, growWindow = false, onWidthChange }: Props) {
+export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, visible, className = '', children, initialWidth, showHandle = true, onSnapClose, onSnapOpen, side = 'left', collapsedWidth = 4, growWindow = false, onWidthChange, onHandleClick }: Props) {
   const [width, setWidth] = useState(initialWidth ?? defaultWidth)
   const [dragging, setDragging] = useState(false)
   /** pointer capture 不可用时的退路标记（退回 window 监听，老实现同构但带 dead-zone 与统一收尾） */
@@ -104,6 +106,10 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
   const onSnapCloseRef = useRef(onSnapClose)
   onSnapCloseRef.current = onSnapClose
 
+  // 单击开合回调同样经 ref 转发（调用方传内联箭头函数，避免 endDrag 依赖抖动）
+  const onHandleClickRef = useRef(onHandleClick)
+  onHandleClickRef.current = onHandleClick
+
   /**
    * 拖拽收尾 —— **四路兜底共用这一份实现**：pointerup / pointercancel / lostpointercapture / 卸载。
    *
@@ -123,6 +129,8 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
     if (!d) return
     // 只有「真拖过且没被 snap 掉」才落盘：误触（没过 dead-zone）不再产生一次宽度持久化
     if (persist && d.moved && !d.snapped) void setSettingRaw(storageKey, widthRef.current)
+    // 单击手柄（按下-抬起都没越过 dead-zone 也没 snap）= 开合切换（工作台三栏外壳的边缘手柄行为）
+    if (!d.moved && !d.snapped) onHandleClickRef.current?.()
   }, [storageKey])
 
   /**

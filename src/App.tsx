@@ -3,6 +3,8 @@ import { Sparkles } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag } from './types'
 
 import { PALETTE_MODULES, labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
+import { WorkbenchShell } from './components/workbench/WorkbenchShell'
+import { WorkbenchTabBar } from './components/workbench/WorkbenchTabBar'
 
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
 import { ZenHotZone } from './components/shared/ZenHotZone'
@@ -339,7 +341,9 @@ export default function App() {
   }
 
   useCheckinReminder()
-  const mountedTabs = useRef<Set<TabName>>(new Set(['blog']))  // keep modules alive after first visit
+  const mountedTabs = useRef<Set<TabName>>(new Set())  // keep modules alive after first visit
+  /** 中间标签条显示的已打开 Tab（v3.4.0）：只能由入口产生，无「＋新建」按钮；activeTab 变化时自动追加（见下方 effect） */
+  const [openTabs, setOpenTabs] = useState<TabName[]>([])
 
   // 启动检测当前仓库：无 → 仓库选择页（VaultPicker，新老用户统一）；有且开启「每次启动选择仓库」→ 启动形态选择页
   // sessionStorage 一次性标记：应用内切库会整窗 reload（数据激活重读约定），热重载不再打扰；冷启动才重新出页
@@ -684,13 +688,40 @@ export default function App() {
     }
   }, [])
 
+  // 标签条同步（v3.4.0）：任何通道的 setActiveTab（handleTabChange / 全局事件 / 命令面板 / 启动落点）
+  // 都会走到这里 —— openTabs 统一在此追加，杜绝「某条打开路径漏登记」
+  useEffect(() => {
+    setOpenTabs((ts) => (ts.includes(activeTab) ? ts : [...ts, activeTab]))
+  }, [activeTab])
+
+  /** 关闭标签：从标签条与保活集合同时移除；关的是激活 Tab 时切到相邻标签；最后一个标签不可关（UI 层已禁） */
+  const handleTabClose = (tab: TabName) => {
+    const idx = openTabs.indexOf(tab)
+    if (idx === -1 || openTabs.length <= 1) return
+    const rest = openTabs.filter((t) => t !== tab)
+    setOpenTabs(rest)
+    mountedTabs.current.delete(tab)
+    if (tab === activeTab) {
+      const next = rest[Math.min(idx, rest.length - 1)]
+      if (next) {
+        setEditorJumpFrom(null)
+        setActiveTab(next)
+        window.dispatchEvent(new CustomEvent('tab-switched'))
+      }
+    }
+  }
+
+  /** 标签拖拽重排：仅改显示顺序，不改变激活状态 */
+  const handleTabsReorder = (next: TabName[]) => setOpenTabs(next)
+
   const handleTabChange = (tab: TabName) => {
     setEditorJumpFrom(null) // 手动切 Tab 即清除「返回来源」上下文（条目6）
     if (tab === activeTab) {
       // 工具箱专属（2026-09-10）：已在工具箱时再点活动栏图标 = 退出当前工具、回到工具箱主界面。
-      // 通用行为（折叠侧栏）对工具箱无意义（本模块无侧栏），故仅 toolbox 走这条分支
+      // 通用行为对图标条无意义 —— v3.4.0 起图标条幂等哲学：重复点击已激活模块 = 无操作
+      //（旧「再点当前 = 切模块侧栏」语义随双态设计废弃，模块侧栏将由左栏双态接管，见方案 §3.6）
       if (tab === 'toolbox') { setToolboxHomeSignal(n => n + 1); return }
-      setSidebarOpen(v => !v); return
+      return
     }
     // 分屏冲突：目标已在副栏 → 主栏显示它、旧主栏进副栏（避免同模块双实例）
     if (secondaryTab === tab) {
@@ -810,10 +841,43 @@ export default function App() {
           {/* 活动栏两个收起来源：禅模式 Z2（隐壳）与布局菜单（用户显式隐藏），取并集 */}
           {zenLevel < 2 && activityBarVisible && <ActivityBar active={activeTab} onChange={handleTabChange} flush={winMax} />}
 <main className="flex-1 flex overflow-hidden bg-transparent relative">
+            {/* 工作台三栏外壳（v3.4.0 批次2）：左栏(临时模块列表，批次3 换书签双态) | 中间栏(卡片壳) | 右栏(占位，批次4 填控件)。
+                DayPanel 保持 main 层平级（批次4 迁入右栏）；aiTeaching 整窗形态隐藏左右栏（suppressSides，方案 §2） */}
+            <WorkbenchShell
+              onSwitchTab={handleTabChange}
+              suppressSides={activeTab === 'aiTeaching'}
+              right={
+                <div className="flex h-full flex-col bg-[var(--bg-secondary)]">
+                  <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] px-3 text-[12px] font-medium text-[var(--text-secondary)]">小工具</div>
+                  <div className="flex flex-1 items-center justify-center text-[11.5px] text-[var(--text-muted)]">控件区 · 批次4</div>
+                </div>
+              }
+              center={
+            <>
             {/* 主内容区卡片壳：与左右两侧(ActivityBar / 日程打卡面板)同款圆角+阴影+留白，三卡对称。
                 半透明底色 + 顶缘高光 = 液态玻璃卡片；禅模式 Z2+ 或 最大化（UI 优化条目1）全屏化（去边距/圆角/边框，贴满屏幕） */}
             <div className={`transition-all duration-300 ease-out ${zenLevel >= 2 || winMax ? 'flex min-w-0 flex-1' : 'm-1.5 flex min-w-0 flex-1'}`}>
               <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden transition-all duration-300 ease-out ${zenLevel >= 2 || winMax ? 'bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)]' : 'rounded-xl border border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-primary)_88%,transparent)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}>
+              {/* 中间栏标签条（v3.4.0 方案 §3.2）：无「＋新建」按钮，标签只能由入口产生；
+                  aiTeaching 整窗形态隐藏（方案 §2），devtools 无 UI 再开入口一并排除 */}
+              {activeTab !== 'aiTeaching' && (
+                <WorkbenchTabBar
+                  tabs={openTabs.filter((t) => t !== 'aiTeaching' && t !== 'devtools')}
+                  active={activeTab}
+                  onSelect={handleTabChange}
+                  onClose={handleTabClose}
+                  onReorder={handleTabsReorder}
+                />
+              )}
+              {activeTab === 'aiTeaching' && (
+                <button
+                  onClick={() => handleTabChange([...openTabs].reverse().find((t) => t !== 'aiTeaching') ?? 'editor')}
+                  title="返回工作台"
+                  className="kb-pop absolute right-3 top-2 z-30 flex items-center gap-1 rounded-full bg-[var(--accent)] px-3 py-1 text-[11.5px] text-white shadow-lg transition-opacity hover:opacity-90"
+                >
+                  工作台
+                </button>
+              )}
               {/* 编辑器组（W3 · Editor Groups v1）：主栏 + 可选副栏，两栏模块互不相同。
                   Workbench 模式下编辑器文件树 portal 到下方全局侧栏槽（R1-W1）；禅模式 Z1+ 收起侧栏槽。
                   槽仅在编辑器组激活时渲染（卸载而非收起）——2026-09-08 用户实锤：切到 blog/knowledge
@@ -895,6 +959,9 @@ export default function App() {
               </div>
               </div>
             </div>
+            </>
+              }
+            />
             {dayPanelVisible && !dayPanelDetached && (
               <ResizablePanel
                 storageKey="dayPanelEmbedded"

@@ -97,8 +97,10 @@ ok(!looseArray('blog', 'schedule', 'knowledge', 'editor').test(srcApp),
 ok(!looseArray('blog', 'schedule', 'knowledge', 'moments').test(srcApp),
   'B2 App.tsx 的小窗 switch-tab 硬编码白名单已删除')
 ok(!/const\s+MODULE_TABS\s*(:|=)/.test(srcApp), 'B3 App.tsx 不再自持 MODULE_TABS（改用 PALETTE_MODULES）')
-ok(/const\s+ALL_MODULES[\s\S]{0,240}?BAR_MODULE_IDS\.map\(/.test(srcBar),
-  'B4 ActivityBar 的 ALL_MODULES 由 BAR_MODULE_IDS 派生（不是手抄一份）')
+ok(/const\s+RAIL_BUTTONS\s*:[\s\S]*?=\s*\[/.test(srcBar),
+  'B4 ActivityBar 图标条为固定 RAIL_BUTTONS 清单（v3.4.0 拍板：不再由 BAR_MODULE_IDS 派生）')
+ok(!/BAR_MODULE_IDS/.test(srcBar),
+  'B4c ActivityBar 不再引用 BAR_MODULE_IDS（图标条 4 项独立拍板，禁手抄回归）')
 ok(!/\[\s*\{\s*id:\s*'desktop'\s*,\s*label:\s*'桌面'/.test(srcBar),
   'B4b 旧的 9 项字面量数组已删除')
 ok(!/const\s+DESK_MODULES\s*:\s*ModuleDef\[\]\s*=\s*\[/.test(srcTiles), 'B5 tiles.tsx 不再自持 DESK_MODULES 字面量（改用 TILE_MODULE_IDS）')
@@ -123,7 +125,19 @@ const checkCover = (label, keys, members) => {
   const miss = members.filter((id) => !keys.includes(id))
   return ok(miss.length === 0, label, `缺 ${miss.join(',')}`)
 }
-checkCover('C1 ActivityBar BAR_ICONS 覆盖全部活动栏模块', keysOfRecord(srcBar, 'BAR_ICONS'), BAR_MODULE_IDS)
+// C1 v3.4.0 新口径：ActivityBar 图标条 = 固定 RAIL_BUTTONS 数组（拍板顺序：回收站/插件市场/工具箱/动态）
+//   + 底部设置按钮（直开设置标签页）。旧 BAR_ICONS Record 已随外壳重写删除。
+const railIds = (() => {
+  const m = srcBar.match(/const\s+RAIL_BUTTONS[\s\S]*?=\s*\[([\s\S]*?)\n\]/)
+  return m ? [...m[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((x) => x[1]) : null
+})()
+if (railIds === null) {
+  ok(false, 'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 4 项（回收站/插件市场/工具箱/动态）', '抠不到 RAIL_BUTTONS（结构变了，脚本要跟着改）')
+} else {
+  ok(railIds.join(',') === 'recycle,plugins,toolbox,moments',
+    'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 4 项（回收站/插件市场/工具箱/动态）', `实际 ${railIds.join(',')}`)
+}
+ok(/title="设置"/.test(srcBar), 'C1b 图标条底部设置按钮存在（直开设置标签页）')
 checkCover('C2 设置页 STARTUP_ICONS 覆盖全部可启动模块', keysOfRecord(srcAppear, 'STARTUP_ICONS'), STARTABLE_MODULE_IDS)
 checkCover('C3 tiles.tsx TILE_META 覆盖全部可作磁贴模块', keysOfRecord(srcTiles, 'TILE_META'), TILE_MODULE_IDS)
 checkCover('C4 Onboarding SCENE_META 覆盖全部活动栏模块', keysOfRecord(srcOnb, 'SCENE_META'), BAR_MODULE_IDS)
