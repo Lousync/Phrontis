@@ -62,7 +62,7 @@ import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange,
  * 逐题记录经 quizRecord:report（aiTeach: 命名空间）入知识库错题体系（3-10）。
  * P6 素材库（v3.1.1 上移工作区层）：右栏「素材库」= **工作区主库** `SOURCES/SOURCE.md`（跨对话共用，未建对话也可登记）
  * + 本对话历史登记（存量，合并视图重编号 1..N，标「对话」角标，一键「上收」并入主库）；「＋素材」表单登记
- * （类型/存放/页码区间仅 pdf·pptx·docx 拆起止，3-28 程序解析写入）、pdf/pptx/docx 一键区间提取为同级可编辑提取稿（3-20/3-26；docx 经 soffice 转 PDF，v3.1.2 条目5），
+ * （类型/存放/页码·行号区间仅 pdf·pptx·docx·code 拆起止，3-28 程序解析写入；区间类型清单收敛为 RANGE_TYPES 常量，v3.2.0 条目 ⑯）、pdf/pptx/docx 一键区间提取为同级可编辑提取稿（3-20/3-26；docx 经 soffice 转 PDF，v3.1.2 条目5），
  * SOURCE.md 与提取稿经 AgentRunner 素材目录注入供 AI 编号引用（3-29，每轮重读）——新对话因此能看到工作区已有素材。
   * 3-21 视觉转写（手动档）：pdf/pptx/docx 条目「转写」按钮→主进程转 PDF（pptx/docx 经 soffice）→渲染层 pdf.js 区间栅格化→视觉模型逐页转写→并入提取稿。
  * P8 用户画像（§3.14）：全局画像（userData/AI教学/PROFILE.md）+ 会话 PROFILE.md 两层每轮注入；
@@ -85,6 +85,33 @@ function inferSrcType(path: string): string {
   // 代码扩展名清单与主进程同源（v3.2.0 条目 9 三处合一；配置类五项不识别为 code）
   if (AI_TEXT_CODE_EXT_SET.has(ext)) return 'code'
   return 'other'
+}
+
+/** 支持「登记页码 / 行号区间」的素材类型 —— 唯一真相源（v3.2.0 条目 ⑯：
+ *  登记表单守卫、卡片上提取 / 转写 / 再加区间三个按钮曾各写一份类型字面量，
+ *  于是 v3.1.2 让 docx 进链路时漏了表单那份，docx 素材的区间能力整条不可达） */
+const RANGE_TYPES = ['pdf', 'pptx', 'docx', 'code'] as const
+/** 视觉转写类型 = 区间类去掉 code（纯代码没有可栅格化的页；与主进程 aiTeachingSources 的转写放行清单同口径） */
+const TRANSCRIBE_TYPES = ['pdf', 'pptx', 'docx'] as const
+/** 区间串语法（`1` / `1-5`）。doTranscribe 解析起止页与「是否有区间」判定共用此正则，防两处口径漂移 */
+const RANGE_RE = /^(\d+)\s*(?:-\s*(\d+))?$/
+/** 区间是否已登记（空 / `-` = 未登记，addSource 对空区间的写入口径就是 `-`） */
+function hasValidRange(range: string | undefined | null): boolean {
+  const r = (range ?? '').trim()
+  return r !== '' && r !== '-' && RANGE_RE.test(r)
+}
+/** 区间类素材的 label / 输入占位 / 悬浮说明（按类型分口径：code 是行号，docx 是转 PDF 后的页） */
+function rangeFieldMeta(type: string): { label: string; from: string; to: string; title: string } {
+  if (type === 'code') {
+    return { label: '行号', from: '起始行', to: '结束行', title: '按文件自身的行号区间（如 1-40），不是页码' }
+  }
+  if (type === 'docx') {
+    return {
+      label: '页码', from: '起始页', to: '结束页',
+      title: '按 Word 转成 PDF 后阅读器显示的页码（本机 LibreOffice 分页可能与 Word 中看到的不同），不是书页印刷页码；未装 LibreOffice 时可在「设置 → AI 工具 → 模型 → LibreOffice 路径」指定',
+    }
+  }
+  return { label: '页码', from: '起始页', to: '结束页', title: '按 PDF/幻灯片自身的第几页（阅读器显示页码），不是书页印刷页码' }
 }
 
 /** P5：工作区卡片「最近活跃」相对时间（updated_at 'YYYY-MM-DD HH:MM:SS' 本地串） */
@@ -1135,7 +1162,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
   // ---------- P6 素材库（§3.13 结构 v3：SOURCE.md 登记 + 区间提取稿） ----------
   const [srcEntries, setSrcEntries] = useState<AiTeachSourceEntry[]>([])
   const [srcFileRel, setSrcFileRel] = useState<string | null>(null)
-  const [srcForm, setSrcForm] = useState<null | { name: string; type: string; path: string; storage: '已入库' | '仅引用'; rangeFrom: string; rangeTo: string; note: string }>(null)
+  const [srcForm, setSrcForm] = useState<null | { name: string; type: string; path: string; storage: '已入库' | '仅引用'; rangeFrom: string; rangeTo: string; note: string; needRange?: boolean }>(null)
+  /** 补区间入口（v3.2.0 条目 ⑯ 轻版 B，开发负责人拍板）：区间无效时点「提取 / 转写」不再弹警告，
+   *  而是把共用的登记表单打开成「补区间」态 —— 预填同一原件（仅引用，不重复拷贝原件）、焦点落在起始页、
+   *  顶部说明「确定后为同一原件新增一条带区间的条目」。提交走原有 addSource，**不新增改条目的 API**
+   *  （就地改区间会改变已有条目编号的 AI 引用含义，且超出本条「不动再加区间=新增条目语义」的边界）。 */
+  const openRangeEntry = (e: AiTeachSourceEntry) => setSrcForm({
+    name: e.name, type: e.type, path: e.path, storage: '仅引用', rangeFrom: '', rangeTo: '', note: '', needRange: true,
+  })
   const [srcBusy, setSrcBusy] = useState<number | null>(null)
   const [visionBusy, setVisionBusy] = useState<null | { no: number; label: string; done?: number; total?: number }>(null)
   /** 网页素材「展开网页」对话框（web-crawl P3）：{no,name,path} 非空即开 */
@@ -1159,7 +1193,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     // v3.1.1 两层合并：提取稿/原件相对「条目所属层」的素材夹（工作区主库 vs 对话私有存量），
     // 逐条目携带（e.dirRel），不能再用主库 srcFileRel 统一推导 —— 会话存量会被拼到错误目录
     const dirRel = e.dirRel || (srcFileRel ? srcFileRel.slice(0, srcFileRel.lastIndexOf('/')) : '')
-    const extractable = (e.type === 'pdf' || e.type === 'pptx' || e.type === 'docx' || e.type === 'code') && !extMatch && e.range && e.range !== '-' // 条目10：code 按行号区间提取；v3.1.2 条目5：docx 先经 soffice 转 PDF 再提取
+    // v3.2.0 条目 ⑯：类型集合收敛为 RANGE_TYPES 常量（此前三处按钮各写一份字面量，docx 就漏在表单那份）；
+    // 区间有效性改由 hasValidRange 单点判定，按钮**一律渲染**，无区间时点击走 openRangeEntry 补区间入口
+    const rangeType = (RANGE_TYPES as readonly string[]).includes(e.type) // 条目10：code 按行号区间提取；v3.1.2 条目5：docx 先经 soffice 转 PDF
+    const rangeValid = hasValidRange(e.range)
+    const transcribeType = (TRANSCRIBE_TYPES as readonly string[]).includes(e.type)
+    const canExtract = rangeType && !extMatch // 已有提取稿 → 由「提取稿 ✓」接管，不再重复给提取入口
     const inRepo = e.path.startsWith('./') || (srcFileRel && !/^[a-zA-Z]:|^https?:|^\//.test(e.path))
     return (
       <div key={e.no} className={`rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 kb-group-anim transition-[padding] duration-[320ms] ${SRC_EASE} ${srcCompact ? 'py-[3px]' : 'py-1.5'}`}>
@@ -1186,29 +1225,32 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
                   <button onClick={() => { void openArtFile(`${dirRel}/${extMatch[1].trim()}`) }} title="阅读提取稿（可编辑）"
                     className="text-[var(--accent)] hover:opacity-80 transition-opacity">提取稿 ✓</button>
                 )}
-                {extractable && (
-                  <button onClick={() => { void doExtract(e.no) }} disabled={srcBusy === e.no}
+                {canExtract && (
+                  <button onClick={() => { if (rangeValid) void doExtract(e.no); else openRangeEntry(e) }} disabled={srcBusy === e.no}
+                    title={rangeValid ? '按登记区间出提取稿（可编辑）' : '还没登记区间——点击填写；确定后为同一原件新增一条带区间的条目（原件不重复拷贝），随后即可提取 / 转写'}
                     className="flex items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50 transition-colors">
                     {srcBusy === e.no ? <Loader2 size={9} className="animate-spin" /> : <BookOpen size={9} />}{srcBusy === e.no ? '提取中…' : '提取'}
                   </button>
                 )}
-                {(e.type === 'pdf' || e.type === 'pptx' || e.type === 'docx') && e.path && e.path !== '-' && (
+                {transcribeType && e.path && e.path !== '-' && (
                   /* 3-21 手动档→分批流水线：区间页栅格化→视觉模型转写（公式/图形/扫描件），
                      >12 页自动分批+断点续转（提取稿已有页跳过），结果非破坏并入提取稿；
                      pptx（2026-09-09 B 方案）由主进程 soffice 转 PDF 后同链路栅格化 */
-                  <button onClick={() => { void doTranscribe(e.no) }} disabled={!!visionBusy}
-                    title={visionBusy?.no === e.no ? visionBusy.label : (e.type === 'pptx' || e.type === 'docx')
-                      ? `视觉转写：${e.type === 'docx' ? 'Word 文档' : 'pptx'} 先经本机 LibreOffice 转 PDF 再逐页转写（需已安装 LibreOffice；装在自定义目录时可在「设置 → AI 工具 → 模型 → LibreOffice 路径」手动指定，无需重启）；文本提取多数情况下已够用`
-                      : '视觉转写：把登记区间的页面交给视觉模型转写（>12 页自动分批、断点续转），并入提取稿后可编辑。点击可中途停止'}
+                  <button onClick={() => { if (rangeValid) void doTranscribe(e.no); else openRangeEntry(e) }} disabled={!!visionBusy}
+                    title={!rangeValid
+                      ? '还没登记页码区间——点击填写；确定后为同一原件新增一条带区间的条目（原件不重复拷贝），随后即可视觉转写'
+                      : visionBusy?.no === e.no ? visionBusy.label : (e.type === 'pptx' || e.type === 'docx')
+                        ? `视觉转写：${e.type === 'docx' ? 'Word 文档' : 'pptx'} 先经本机 LibreOffice 转 PDF 再逐页转写（需已安装 LibreOffice；装在自定义目录时可在「设置 → AI 工具 → 模型 → LibreOffice 路径」手动指定，无需重启）；文本提取多数情况下已够用`
+                        : '视觉转写：把登记区间的页面交给视觉模型转写（>12 页自动分批、断点续转），并入提取稿后可编辑。点击可中途停止'}
                     className="flex items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50 transition-colors">
                     {visionBusy?.no === e.no ? <Loader2 size={9} className="animate-spin" /> : <Eye size={9} />}
                     {visionBusy?.no === e.no ? '转写中…' : '转写'}
                   </button>
                 )}
-                {(e.type === 'pdf' || e.type === 'pptx' || e.type === 'docx') && e.path && e.path !== '-' && (
+                {transcribeType && e.path && e.path !== '-' && (
                   /* 同一原件再加区间（2026-09-08 用户需求）：一个 PDF 多章 = 多条目共享同一份
                      已入库原件（不再重复拷贝），各条目独立转写/提取/编号引用 */
-                  <button onClick={() => setSrcForm({ name: e.name, type: e.type, path: e.path, storage: '仅引用', rangeFrom: '', rangeTo: '', note: '' })}
+                  <button onClick={() => openRangeEntry(e)}
                     title="同一文件换个页码区间再登记一条（如另一章）——不重复拷贝原件"
                     className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">再加区间</button>
                 )}
@@ -1358,8 +1400,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     if (visionBusy) return
     const e = srcEntries.find(x => x.no === no)
     if (!e) return
-    const rm = /^(\d+)\s*(?:-\s*(\d+))?$/.exec(e.range.trim())
-    if (e.range.trim() === '-' || !rm) { showToast({ type: 'warning', message: '先登记页码区间（编辑 SOURCE.md 或重新登记），再视觉转写' }); return }
+    // 区间语法判定与 doTranscribe 的起止页解析共用 RANGE_RE；兜底路径（按钮已分流 openRangeEntry）
+    const rm = RANGE_RE.exec(e.range.trim())
+    if (!rm) { showToast({ type: 'warning', message: '该条目区间无效——点卡片上的「再加区间」补一条带区间的条目（或编辑 SOURCE.md 修正），再视觉转写' }); return }
     const from0 = Math.max(1, parseInt(rm[1], 10))
     const to0 = rm[2] ? parseInt(rm[2], 10) : from0
     const total = Math.max(1, to0 - from0 + 1)
@@ -3524,7 +3567,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
             <div className="space-y-2.5 text-[12.5px] text-[var(--text-primary)]">
               <div className="flex items-center gap-2">
                 <label className="w-[52px] shrink-0 text-right text-[11.5px] text-[var(--text-secondary)]">名称 *</label>
-                <input autoFocus value={srcForm.name} maxLength={60} onChange={e => setSrcForm({ ...srcForm, name: e.target.value })} placeholder="如：一次函数课件"
+                <input autoFocus={!srcForm.needRange} value={srcForm.name} maxLength={60} onChange={e => setSrcForm({ ...srcForm, name: e.target.value })} placeholder="如：一次函数课件"
                   className="min-w-0 flex-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5 text-[12.5px] outline-none focus:border-[var(--accent)]"
                   onKeyDown={e => { if (e.key === 'Escape') setSrcForm(null) }} />
               </div>
@@ -3566,17 +3609,28 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
               </div>
               {(() => {
                 const detected = inferSrcType(srcForm.path)
-                return (detected === 'pdf' || detected === 'pptx' || detected === 'code') ? (
-                  <div className="flex items-center gap-2">
-                    <label className="w-[52px] shrink-0 text-right text-[11.5px] text-[var(--text-secondary)]" title="按 PDF/幻灯片自身的第几页（阅读器显示页码），不是书页印刷页码">{detected === 'code' ? '行号' : '页码'}</label>
-                    <input value={srcForm.rangeFrom} inputMode="numeric" onChange={e => setSrcForm({ ...srcForm, rangeFrom: e.target.value.replace(/\D/g, '') })} placeholder={detected === 'code' ? '起始行' : '起始页'}
-                      className="w-[72px] rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5 text-[12px] outline-none focus:border-[var(--accent)]" />
-                    <span className="text-[var(--text-muted)]">–</span>
-                    <input value={srcForm.rangeTo} inputMode="numeric" onChange={e => setSrcForm({ ...srcForm, rangeTo: e.target.value.replace(/\D/g, '') })} placeholder={detected === 'code' ? '结束行' : '结束页'}
-                      className="w-[72px] rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5 text-[12px] outline-none focus:border-[var(--accent)]" />
-                    <span className="text-[10.5px] text-[var(--text-muted)]">登记后可一键出提取稿</span>
+                // v3.2.0 条目 ⑯：区间行守卫改用 RANGE_TYPES 常量 —— docx 此前漏在这里，
+                // 于是「登记」与「再加区间」两条路都拿不到区间输入框（下游主进程其实早已放行 docx）
+                if (!(RANGE_TYPES as readonly string[]).includes(detected)) return null
+                const meta = rangeFieldMeta(detected)
+                return (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <label className="w-[52px] shrink-0 text-right text-[11.5px] text-[var(--text-secondary)]" title={meta.title}>{meta.label}</label>
+                      <input value={srcForm.rangeFrom} inputMode="numeric" autoFocus={!!srcForm.needRange} onChange={e => setSrcForm({ ...srcForm, rangeFrom: e.target.value.replace(/\D/g, '') })} placeholder={meta.from}
+                        className="w-[72px] rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5 text-[12px] outline-none focus:border-[var(--accent)]" />
+                      <span className="text-[var(--text-muted)]">–</span>
+                      <input value={srcForm.rangeTo} inputMode="numeric" onChange={e => setSrcForm({ ...srcForm, rangeTo: e.target.value.replace(/\D/g, '') })} placeholder={meta.to}
+                        className="w-[72px] rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5 text-[12px] outline-none focus:border-[var(--accent)]" />
+                      <span className="text-[10.5px] text-[var(--text-muted)]">登记后可一键出提取稿</span>
+                    </div>
+                    {srcForm.needRange && (
+                      <div className="pl-[60px] pr-1 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
+                        原条目还没登记区间：确定后为同一原件新增一条带区间的条目（原件不重复拷贝，原条目保留），随后即可提取 / 转写。
+                      </div>
+                    )}
                   </div>
-                ) : null
+                )
               })()}
               <div className="flex items-center gap-2">
                 <label className="w-[52px] shrink-0 text-right text-[11.5px] text-[var(--text-secondary)]">备注</label>
@@ -3589,7 +3643,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
               <span className="text-[10px] text-[var(--text-muted)]">确定=程序解析模板写入文件（3-28）</span>
               <div className="flex gap-2">
                 <button onClick={() => setSrcForm(null)} className="rounded-md px-3 py-1 text-[12.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">取消</button>
-                <button onClick={() => void submitSrcForm()} disabled={!srcForm.name.trim()}
+                <button onClick={() => void submitSrcForm()}
+                  disabled={!srcForm.name.trim() || (!!srcForm.needRange && !srcForm.rangeFrom.trim())}
+                  title={srcForm.needRange && !srcForm.rangeFrom.trim() ? '补区间模式下需先填起始页码——本次确定就是为同一原件新增一条带区间的条目' : undefined}
                   className="rounded-md bg-[var(--accent)] px-3 py-1 text-[12.5px] text-white hover:opacity-90 disabled:opacity-40 transition-opacity">确定登记</button>
               </div>
             </div>
