@@ -21,6 +21,13 @@ export interface EditorDoc {
   frontmatterPrefix?: string
   /** 打开时的 frontmatter 前缀快照（dirty 判定与保存基线，含"仅改前缀"场景） */
   savedPrefix?: string
+  /**
+   * v3.2.0 条目 18：文件已在磁盘上被删除（外部删除 / 移走）。
+   * 口径对标 VS Code —— **标签不关闭**，标题加删除线提示；保存时**不带 mtime 基线**，
+   * 主进程 `detectConflict` 对非正数基线直接放行（`workspaceManager.ts:290`），
+   * 于是原子写自然把文件**重新创建**出来，不需要任何「重建」专用通道。
+   */
+  missing?: boolean
 }
 
 /**

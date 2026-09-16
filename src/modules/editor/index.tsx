@@ -4,6 +4,8 @@ import {
   FolderOpen, Plus, FolderPlus, Save, SaveAll, X, Folder, FileText, ArrowLeft,
   Pencil, Trash2, FilePlus2, Braces, ListTree, Eye, PanelRightClose, Archive, ArchiveRestore, FilePenLine, Link2, ImagePlus, ClipboardPaste,
   RefreshCw,
+  // 条目 18 标签右键菜单：固定标签 + 三个批量关闭
+  Pin, CopyX, FileX, SquareX,
 } from 'lucide-react'
 import type { WorkspaceRecent } from '../../types'
 import {
@@ -33,6 +35,8 @@ const PdfReaderView = lazy(() => import('./components/PdfReaderView').then((m) =
 import { extractOutline } from '../../lib/markdownOutline'
 import type { EditorDoc, DirCache, TreeNode, CreateIntent } from './types'
 import { joinRel, parentRel, baseName, languageFor, splitFrontmatter, joinFrontmatter, fullContent, savedFullContent } from './types'
+// 条目 18 标签策略的纯函数部分（可被契约脚本直接执行）
+import { TAB_SOFT_CAP, previewReplacement, pickTabsToEvict, nextTabInCycle, landingAfterClose } from './tabPolicy'
 import { ConfirmDialog, ResizablePanel } from '../../components/shared'
 import { PluginSlotEntry } from '../../components/shared/PluginSlotEntry'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
@@ -132,6 +136,13 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [openFiles, setOpenFiles] = useState<Record<string, EditorDoc>>({})
   const [activePath, setActivePath] = useState<string | null>(null)
+  /**
+   * v3.2.0 条目 18（VS Code 双态标签）：当前处于**预览态**的标签 relPath，同一时刻至多一个。
+   * `openFiles` 里除它以外的一律是「固定标签」。
+   * 用单值而非给每个 doc 加 `pinned: boolean`：单值天然保证「至多一个」，
+   * 不需要遍历校验、也不会出现「两个预览」的非法中间态。
+   */
+  const [previewRel, setPreviewRel] = useState<string | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null)
   const ctxMenuRef = useRef<HTMLDivElement | null>(null)
   /** 外部文件粘贴（v3.2.0 条目 ③）：文件树容器 ref —— 右键「粘贴」前要把焦点交给它 */
@@ -174,8 +185,12 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     fix(tabCtxRef.current, tabCtx?.x ?? 0, tabCtx?.y ?? 0)
   }, [ctxMenu, tabCtx])
   const [closeTarget, setCloseTarget] = useState<string | null>(null)
-  /** 保存冲突（磁盘被外部修改）：弹三选对话框 */
-  const [conflictState, setConflictState] = useState<{ relPath: string; diskMtimeMs?: number; missing: boolean } | null>(null)
+  /**
+   * 保存冲突（磁盘内容被外部修改）：弹三选对话框。
+   * v3.2.0 条目 18 起不再承载「文件被删除」—— 那种情况改走「标签删除线 + 保存即重建」（对标 VS Code），
+   * 故 `missing` 字段已从本状态移除。
+   */
+  const [conflictState, setConflictState] = useState<{ relPath: string; diskMtimeMs?: number } | null>(null)
   /** v3.2.0 条目 ④ 保底：手动「刷新资源管理器」进行中（转圈 + 防连点） */
   const [refreshing, setRefreshing] = useState(false)
 
@@ -201,31 +216,82 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   const rootIdRef = useRef<string | null>(null)
   const openFilesRef = useRef(openFiles)
   const activePathRef = useRef(activePath)
+  /** previewRel 的同步引用：openFile / capTabs 在 setState 同一批次内要读到「刚设的新预览」 */
+  const previewRelRef = useRef<string | null>(null)
+  /** 标签栏容器（激活标签自动滚进可视区用） */
+  const tabBarRef = useRef<HTMLDivElement | null>(null)
+  /** 标签激活顺序 LRU（末尾 = 最近激活），见 touchTab / capTabs */
+  const tabLruRef = useRef<string[]>([])
 
   useEffect(() => { rootIdRef.current = rootId }, [rootId])
   useEffect(() => { openFilesRef.current = openFiles }, [openFiles])
   useEffect(() => { activePathRef.current = activePath }, [activePath])
+  useEffect(() => { previewRelRef.current = previewRel }, [previewRel])
   useEffect(() => { if (inputBox) setInputValue(inputBox.initial) }, [inputBox])
 
-  // 回收策略：仅「脏(未保存)文档」长期驻留 openFiles + 标签栏；
-  // 干净文档只作为当前预览存在——切走即从 openFiles 移除（无修改，丢弃安全，重开再读盘）。
+  // v3.2.0 条目 18：回收条件从「是否脏」换成「是否预览态」——
+  // openFiles 里的文档**一律驻留**（干净的也留），只有「预览标签被新预览顶替」时才回收（转移规则见 openFile）。
+  // 于是「保存」与「标签存亡」彻底解耦（原报障点「一保存标签就没了」从根上消失），
+  // 被有意保留下来的是 VS Code 的另一半：**单击新文件会顶替旧预览**。
+  // 原先的 pruneCleanNonActive（「非激活且干净就整体回收」）连同它的两处调用（activePath 变化 / 保存后）一并删除
+  // —— 那正是让标签随保存消失的机制。这里只剩 LRU 记账与软上限回收。
   const isDirtyDoc = (d: EditorDoc): boolean => fullContent(d) !== savedFullContent(d)
-  const pruneCleanNonActive = useCallback((activeRel: string | null) => {
+
+  /** 标签激活顺序（末尾 = 最近激活）；仅用于超上限时挑回收候选，故放 ref 不进 state（不触发渲染） */
+  const touchTab = useCallback((rel: string) => {
+    tabLruRef.current = [...tabLruRef.current.filter((r) => r !== rel), rel]
+  }, [])
+
+  /**
+   * 常驻软上限回收：固定标签（非预览）超过 TAB_SOFT_CAP 时，按 LRU **静默**回收
+   * 「干净 + 非激活」的固定标签。保护集三档 = 当前激活 / 预览标签 / 脏标签，三者永不回收、也不弹提示。
+   * `protectRel` 必须由调用方显式传入：打开的同一批次里 activePathRef 与 previewRelRef 还没被 effect 同步。
+   */
+  const capTabs = useCallback((protectRel: string | null) => {
     setOpenFiles((prev) => {
-      const entries = Object.entries(prev)
-      if (entries.every(([rel, d]) => rel === activeRel || isDirtyDoc(d))) return prev
-      const next: Record<string, EditorDoc> = {}
-      for (const [rel, d] of entries) {
-        if (rel === activeRel || isDirtyDoc(d)) next[rel] = d
+      const rels = Object.keys(prev)
+      // 判定在 tabPolicy.pickTabsToEvict（纯函数）：保护激活 / 预览 / 脏，只回收干净非激活的固定标签、LRU 最旧优先
+      const drop = pickTabsToEvict({
+        rels,
+        previewRel: previewRelRef.current,
+        activeRel: protectRel ?? activePathRef.current,
+        dirtyRels: rels.filter((r) => isDirtyDoc(prev[r])),
+        lru: tabLruRef.current,
+        cap: TAB_SOFT_CAP,
+      })
+      if (drop.length === 0) return prev
+      const next = { ...prev }
+      for (const r of drop) {
+        delete next[r]
+        tabLruRef.current = tabLruRef.current.filter((x) => x !== r)
       }
       return next
     })
   }, [])
 
-  // activePath 切换后回收：切走的干净文档不留驻（脏文档保留）
-  useEffect(() => {
-    pruneCleanNonActive(activePath)
-  }, [activePath, pruneCleanNonActive])
+  /**
+   * 标签 relPath 迁移（重命名 / 移动 / 撤销）后的**记账搬运**：
+   * previewRel 与 LRU 顺序都是按 rel 记账的，key 一变就得跟着搬，否则预览态会「跟丢」
+   * （表象：重命名后标签从斜体变正体，且新路径不被任何预览态跟踪）。
+   * 这里只管不进 state 的记账部分，openFiles / activePath 由调用方照旧迁移。
+   */
+  const remapTabRel = useCallback((from: string, to: string) => {
+    if (from === to) return
+    tabLruRef.current = tabLruRef.current.map((r) => (r === from ? to : r))
+    if (previewRelRef.current === from) {
+      previewRelRef.current = to
+      setPreviewRel(to)
+    }
+  }, [])
+
+  /** 标签被移除（删除文件 / 撤销新建）后的记账清理 —— 与 closeTab 的清理同口径 */
+  const forgetTabRel = useCallback((rel: string) => {
+    tabLruRef.current = tabLruRef.current.filter((r) => r !== rel)
+    if (previewRelRef.current === rel) {
+      previewRelRef.current = null
+      setPreviewRel(null)
+    }
+  }, [])
 
   useEffect(() => {
     workspaceGetRecent().then(setRecent).catch(() => {})
@@ -257,6 +323,10 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     setExpanded(new Set())
     setOpenFiles({})
     setActivePath(null)
+    // 条目 18：换/关仓库时预览态与 LRU 记账一并清空（标签已全清，残留记账会污染新仓库的回收顺序）
+    previewRelRef.current = null
+    setPreviewRel(null)
+    tabLruRef.current = []
     await refreshDir('')
     setExpanded((prev) => new Set(prev).add(''))
     // Workbench 状态栏仓库上下文联动
@@ -360,9 +430,11 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     if (node.type === 'dir') { void toggleDir(node.relPath); return }
     const root = rootIdRef.current
     if (!root) return
-    setActivePath(node.relPath)
-    if (openFilesRef.current[node.relPath]) return
-    const res = await workspaceReadFile(root, node.relPath)
+    const rel = node.relPath
+    setActivePath(rel)
+    // 转移规则 1 前半：已是标签（固定或当前预览）→ 只激活，**不改预览态**
+    if (openFilesRef.current[rel]) { touchTab(rel); return }
+    const res = await workspaceReadFile(root, rel)
     if (res.error) { showToast({ type: 'error', message: res.error }); return }
     const language = languageFor(node.name)
     // PDF 文档类型（P1）：不按文本读——内容置空、binary 标记、路由 PdfReaderView 懒加载渲染。
@@ -370,10 +442,19 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     const isPdf = res.pdf === true || /\.pdf$/i.test(node.name)
     // frontmatter 隐藏：markdown 文档拆分前缀，Monaco 只见正文（保存时拼回，roundtrip 无损）
     const fm = !isPdf && res.editable && language === 'markdown' && !res.binary ? splitFrontmatter(res.content) : null
-    setOpenFiles((prev) => ({
-      ...prev,
-      [node.relPath]: {
-        relPath: node.relPath,
+    // 转移规则 1 后半：新文件成为新预览，旧预览要顶替掉——
+    // 旧预览**不脏** → 从 openFiles 移除（无修改，丢弃安全，重开再读盘）；
+    // 旧预览**脏** → 自动转固定（保留在 openFiles，只把 previewRel 让出去），**绝不丢内容**。
+    // 两件事合并在同一个 updater 里做：状态变更原子化，不产生「旧预览已删、新预览未加」的中间态。
+    const prevPreview = previewRelRef.current
+    setOpenFiles((prev) => {
+      const next = { ...prev }
+      // 判定在 tabPolicy.previewReplacement（纯函数）：旧预览**脏** → keep（转固定，绝不丢内容）；
+      // 干净 → drop（从 openFiles 移除，无修改丢弃安全）；无旧预览/同一个 → none。
+      const verdict = previewReplacement(prevPreview, rel, Object.keys(prev).filter((r) => isDirtyDoc(prev[r])))
+      if (verdict === 'drop' && prevPreview) delete next[prevPreview]
+      next[rel] = {
+        relPath: rel,
         content: isPdf ? '' : (fm ? fm.body : res.content),
         savedContent: isPdf ? '' : (fm ? fm.body : res.content),
         binary: isPdf || res.binary,
@@ -385,9 +466,14 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
         mtimeMs: res.mtimeMs,
         frontmatterPrefix: fm ? fm.prefix : undefined,
         savedPrefix: fm ? fm.prefix : undefined,
-      },
-    }))
-  }, [toggleDir])
+      }
+      return next
+    })
+    previewRelRef.current = rel
+    setPreviewRel(rel)
+    touchTab(rel)
+    capTabs(rel)
+  }, [toggleDir, touchTab, capTabs])
 
   // AI教学 P1：会话文件夹落盘/改名/删除 → 刷新文件树（根级 + 产物根目录）
   useEffect(() => {
@@ -397,15 +483,59 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     })
   }, [refreshDir])
 
-  // ---- AI 写入（vault 写工具）落盘后的外部变更通知：目标文件正被打开 → 复用保存冲突三选 ----
+  /**
+   * 磁盘上的文件被外部改动、而**缓冲区干净**时：静默重读（对标 VS Code —— 只有脏缓冲区才需要用户裁决）。
+   *
+   * 为什么条目 18 必须补这条：干净文件原先「切走即回收」，几乎不会长时间驻留，
+   * 外部改动的冲突三选也就很少被触发；改成常驻标签后，**一个干净标签会一直开着**，
+   * 若仍按「一改就弹三选」，用外部编辑器改一下就会撞一次弹窗——这是标签常驻带来的新噪声。
+   *
+   * 定义位置必须在这两个消费 effect 之前：它们要把本函数写进依赖数组（渲染期求值）。
+   */
+  const reloadCleanDocFromDisk = useCallback(async (relPath: string): Promise<boolean> => {
+    const root = rootIdRef.current
+    const doc = openFilesRef.current[relPath]
+    if (!root || !doc || isDirtyDoc(doc)) return false
+    const res = await workspaceReadFile(root, relPath)
+    if (res.error) return false
+    const isPdf = res.pdf === true || /\.pdf$/i.test(relPath)
+    const language = isPdf ? 'pdf' : languageFor(baseName(relPath))
+    const fm = !isPdf && res.editable && language === 'markdown' && !res.binary ? splitFrontmatter(res.content) : null
+    const body = isPdf ? '' : (fm ? fm.body : res.content)
+    setOpenFiles((prev) => (prev[relPath]
+      ? {
+        ...prev,
+        [relPath]: {
+          ...prev[relPath],
+          content: body,
+          savedContent: body,
+          savedPrefix: fm ? fm.prefix : undefined,
+          frontmatterPrefix: fm ? fm.prefix : undefined,
+          mtimeMs: res.mtimeMs,
+          size: res.size,
+          binary: isPdf || res.binary,
+          editable: res.editable,
+          truncated: res.truncated,
+          lastSavedAt: Date.now(),
+          missing: false, // 文件又回来了（外部恢复 / 重建）→ 摘掉删除线
+        },
+      }
+      : prev))
+    return true
+  }, [])
+
+  // ---- AI 写入（vault 写工具）落盘后的外部变更通知 ----
   useEffect(() => {
     return onWsExternalChange(({ relPath, mtimeMs }) => {
       if (!relPath || !(relPath in openFilesRef.current)) return
-      setConflictState((cur) => (cur ? cur : { relPath, diskMtimeMs: mtimeMs, missing: false }))
+      const doc = openFilesRef.current[relPath]
+      // 条目 18：缓冲区干净 → 静默重读（不再打扰）；脏 → 才弹三选
+      if (doc && !isDirtyDoc(doc)) { void reloadCleanDocFromDisk(relPath); return }
+      setConflictState((cur) => (cur ? cur : { relPath, diskMtimeMs: mtimeMs }))
     })
-  }, [])
+  }, [reloadCleanDocFromDisk])
 
-  // ---- v3.2.0 条目 ④：外部文件系统变更（资源管理器 / 外部编辑器 / git）→ 重扫 + 冲突三选 ----
+  // ---- v3.2.0 条目 ④：外部文件系统变更（资源管理器 / 外部编辑器 / git）→ 重扫 + 冲突处理 ----
   // 主进程 fsWatcher 已在侧做自写抑制与 300ms 防抖，这里只负责把可见树收敛到磁盘真值。
   // 载荷 relPaths 为空 = 主进程拼不出具体路径（语义「可能有任意变化」）→ 只重扫、不做冲突判定：
   // 拿不到可靠依据时不冒险误弹三选，真正的外部改动还有「聚焦回读」与手动刷新两条后路。
@@ -416,7 +546,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
         return
       }
       for (const dirRel of Object.keys(dirCacheRef.current)) void refreshDir(dirRel)
-      // 冲突三选：只对「本次变更命中且正被打开」的文件判定（复用现成三选，UI 侧零改动）
+      // 只对「本次变更命中且正被打开」的文件判定：干净 → 静默重读；脏 → 弹三选（条目 18 新增前一档）
       const hit = relPaths.filter((p) => p in openFilesRef.current)
       if (hit.length === 0) return
       void (async () => {
@@ -427,17 +557,20 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
           if (!doc) continue
           const st = await workspaceStat(root, relPath)
           if (st.error) {
-            setConflictState((cur) => (cur ? cur : { relPath, missing: true }))
+            // v3.2.0 条目 18：外部删除 → 对标 VS Code，**不关标签、也不弹三选**，只在标签上打删除线提示；
+            // 缓冲区内容原样留着，用户按保存即重建（saveDoc 对 missing 文档不带基线写盘）。
+            setOpenFiles((prev) => (prev[relPath] ? { ...prev, [relPath]: { ...prev[relPath], missing: true } } : prev))
             return
           }
           if (typeof st.mtime === 'number' && Math.abs(st.mtime - (doc.mtimeMs ?? 0)) > 2) {
-            setConflictState((cur) => (cur ? cur : { relPath, diskMtimeMs: st.mtime, missing: false }))
+            if (!isDirtyDoc(doc)) { await reloadCleanDocFromDisk(relPath); return }
+            setConflictState((cur) => (cur ? cur : { relPath, diskMtimeMs: st.mtime }))
             return
           }
         }
       })()
     })
-  }, [refreshDir])
+  }, [refreshDir, reloadCleanDocFromDisk])
 
   // ---- v3.2.0 条目 ④ 焦点兜底：外部编辑器改文件后切回窗口 → 重读已展开目录 ----
   // 与 AI 教学侧同范式（「项目无 fs 监听时，聚焦回读是最省成本的兜底策略」）。Windows 递归
@@ -510,6 +643,12 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
 
   const handleChange = useCallback((relPath: string, value: string) => {
     setOpenFiles((prev) => (prev[relPath] ? { ...prev, [relPath]: { ...prev[relPath], content: value } } : prev))
+    // 转移规则 2：在预览标签里编辑（首次产生 diff）→ **立即自动转固定**，防「打到一半被顶替」。
+    // 不等「脏」的判定结果：onChange 本身就意味着用户已经动手写了，此时固定最符合直觉（VS Code 亦然）。
+    if (previewRelRef.current === relPath) {
+      previewRelRef.current = null
+      setPreviewRel(null)
+    }
   }, [])
 
   /**
@@ -517,6 +656,11 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
    * @returns true=已写入磁盘（或无需保存）；false=未写入（冲突弹窗 / 失败）。
    * 冲突弹窗在编辑器模块内，若切走 Tab 会被 display:none 隐藏——调用方（如回跳知识库）
    * 必须依据返回值决定是否继续，避免冲突未决就切走。
+   *
+   * forceMtimeMs 两种用法（v3.2.0 条目 18 起）：
+   *   · 具体 mtime → 以它为基线强制写（「覆盖磁盘」用磁盘最新 mtime）；
+   *   · **0** → 明确要求「不带基线」，主进程 detectConflict 对非正数基线直接放行 →
+   *     文件已被外部删除时原子写会把文件**重新创建**出来（保存即重建）。
    */
   const saveDoc = useCallback(async (relPath: string, forceMtimeMs?: number): Promise<boolean> => {
     const root = rootIdRef.current
@@ -531,7 +675,13 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
         ? prefix.replace(/^(status:\s*).*$/im, '$1draft')
         : prefix.replace(/(\r?\n---\s*$)/, `\nstatus: draft$1`) // 无 status 行 → 补一行（缺省语义=published）
     // frontmatter 前缀拼回（如曾被编辑），保证磁盘文件完整
-    const res = await workspaceWriteFile(root, relPath, joinFrontmatter({ frontmatterPrefix: writePrefix || undefined, content: doc.content }), forceMtimeMs ?? doc.mtimeMs)
+    // v3.2.0 条目 18：文件已被外部删除（missing）时**不带 mtime 基线**保存 —— 非正数基线在
+    // detectConflict 里直接放行（`electron/lib/workspaceManager.ts:290`），原子写随即把文件**重新创建**出来。
+    // 这就是「对标 VS Code 的保存即重建」，纯前端即可，不需要任何主进程专用通道。
+    const wasMissing = doc.missing === true
+    // 显式传 0 = 「明确不带基线」（重建场景的递归调用用它，写成 ?? 会被"undefined 即缺省"吞掉）
+    const baseline = forceMtimeMs !== undefined ? forceMtimeMs : (wasMissing ? undefined : doc.mtimeMs)
+    const res = await workspaceWriteFile(root, relPath, joinFrontmatter({ frontmatterPrefix: writePrefix || undefined, content: doc.content }), baseline)
     if (res.ok) {
       setOpenFiles((prev) => (prev[relPath]
         ? {
@@ -544,6 +694,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
             mtimeMs: res.mtimeMs ?? prev[relPath].mtimeMs,
             size: res.size ?? prev[relPath].size,
             lastSavedAt: Date.now(),
+            missing: false,
           },
         }
         : prev))
@@ -556,15 +707,23 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
         // 禅模式：不用 toast 打断沉浸，悬浮条闪现「已保存 HH:MM」（§4）
         setZenSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
       } else {
-        showToast({ type: 'info', message: autoDraft ? '已保存 · 转为草稿（知识库隐藏，完成后可右键归档）' : '已保存' })
+        showToast({ type: 'info', message: wasMissing ? '已保存（文件已在磁盘上重新创建）' : autoDraft ? '已保存 · 转为草稿（知识库隐藏，完成后可右键归档）' : '已保存' })
       }
-      // 保存后该文档不再脏：若非当前激活，回收其驻留（干净文件不长期占 openFiles/标签）
-      pruneCleanNonActive(activePathRef.current)
+      // v3.2.0 条目 18：**保存不改变预览态**（对照 VS Code：保存 ≠ 固定），
+      // 也不再回收任何标签（原 pruneCleanNonActive 调用已删 —— 它就是「保存后标签消失」的机制）。
       return true
     }
     if (res.conflict) {
-      // 磁盘已被外部修改（或删除）→ 弹三选冲突对话框
-      setConflictState({ relPath, diskMtimeMs: res.diskMtimeMs, missing: res.missing === true })
+      if (res.missing === true) {
+        // v3.2.0 条目 18：文件已在磁盘上被删除 —— 对标 VS Code，**不弹三选**：
+        // 先就地打上 missing 标记（标签显示删除线），再立刻以「明确不带基线」重写一次（0 = sentinel），
+        // 把文件重新创建出来。走到这里说明此前没收到监听事件（doc.missing 还是 false），
+        // 否则第一次就会带 undefined 基线直接写成功。
+        setOpenFiles((prev) => (prev[relPath] ? { ...prev, [relPath]: { ...prev[relPath], missing: true } } : prev))
+        return await saveDoc(relPath, 0)
+      }
+      // 磁盘已被外部修改（内容冲突）→ 仍走三选对话框（这条不在条目 18 改动范围内）
+      setConflictState({ relPath, diskMtimeMs: res.diskMtimeMs })
       return false
     }
     showToast({ type: 'error', message: res.error || '保存失败' })
@@ -634,17 +793,25 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   }, [isActive, saveAll, saveDoc])
 
   const closeTab = useCallback((relPath: string) => {
+    if (!(relPath in openFilesRef.current)) return
     setOpenFiles((prev) => {
+      if (!(relPath in prev)) return prev
       const next = { ...prev }
       delete next[relPath]
       return next
     })
+    // 转移规则 5：标签移除后的记账清理（预览态清空 + LRU 记账剔除），与文件删除路径共用同一实现
+    forgetTabRel(relPath)
     setActivePath((p) => {
       if (p !== relPath) return p
-      const keys = Object.keys(openFilesRef.current).filter((k) => k !== relPath)
-      return keys.length ? keys[keys.length - 1] : null
+      // 落点「右邻居优先，否则左邻居」（判定在 tabPolicy.landingAfterClose，纯函数可直接执行）。
+      // 旧实现取 `keys[keys.length-1]` = 最右标签，关一个标签就跳到最右边，来回编辑时很跳。
+      // 都没有 → null，回到 MonacoPane 现成空态。
+      const landing = landingAfterClose(Object.keys(openFilesRef.current), relPath)
+      if (landing) touchTab(landing)
+      return landing
     })
-  }, [])
+  }, [touchTab, forgetTabRel])
 
   /** 关闭标签：有未保存修改时走确认弹窗 */
   const requestCloseTab = useCallback((relPath: string) => {
@@ -655,6 +822,67 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     }
     closeTab(relPath)
   }, [closeTab])
+
+  /** 固定标签（转移规则 3 的右键入口）：单向「预览 → 固定」，**不做 Unpin**（去固定会让「谁会被顶替」不可预期） */
+  const pinTab = useCallback((relPath: string) => {
+    if (previewRelRef.current !== relPath) return
+    previewRelRef.current = null
+    setPreviewRel(null)
+  }, [])
+
+  // ---- 标签右键的三个批量关闭（v3.2.0 条目 18）----
+  // 统一口径：**只关「干净」标签，脏标签一律保留**（关标签不允许丢内容），保留时给一条 toast 说明。
+  // 不弹批量二次确认框：静默保留既不丢数据、也不打断心流，与「顶替旧预览不弹确认」同一取舍。
+  const closeTabsExcept = useCallback((keepRel: string) => {
+    const kept = Object.keys(openFilesRef.current).filter((r) => r !== keepRel && isDirtyDoc(openFilesRef.current[r]))
+    for (const r of Object.keys(openFilesRef.current)) {
+      if (r !== keepRel && !isDirtyDoc(openFilesRef.current[r])) closeTab(r)
+    }
+    setActivePath(keepRel)
+    touchTab(keepRel)
+    if (kept.length > 0) showToast({ type: 'info', message: `${kept.length} 个未保存的标签已保留` })
+  }, [closeTab, touchTab])
+
+  const closeSavedTabs = useCallback(() => {
+    const dirty = Object.keys(openFilesRef.current).filter((r) => isDirtyDoc(openFilesRef.current[r]))
+    for (const r of Object.keys(openFilesRef.current)) {
+      if (!isDirtyDoc(openFilesRef.current[r])) closeTab(r)
+    }
+    if (dirty.length > 0) showToast({ type: 'info', message: `已关闭全部已保存标签，保留 ${dirty.length} 个未保存的` })
+  }, [closeTab])
+
+  const closeAllTabs = useCallback(() => {
+    const dirty = Object.keys(openFilesRef.current).filter((r) => isDirtyDoc(openFilesRef.current[r]))
+    for (const r of Object.keys(openFilesRef.current)) {
+      if (!isDirtyDoc(openFilesRef.current[r])) closeTab(r)
+    }
+    if (dirty.length > 0) showToast({ type: 'info', message: `${dirty.length} 个未保存的标签未关闭（避免丢失修改）` })
+  }, [closeTab])
+
+  // Ctrl+W 关闭当前标签 / Ctrl+Tab(|Shift) 循环切换 —— 「多文件来回切换」的直接诉求（v3.2.0 条目 18）。
+  // 与 Ctrl+S 同款不设输入守卫：Monaco 聚焦时也要可用（keydown 冒泡到 window，Monaco 不吞）。
+  useEffect(() => {
+    if (!isActive) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.altKey) return
+      if (!e.shiftKey && (e.key === 'w' || e.key === 'W')) {
+        e.preventDefault()
+        if (activePathRef.current) requestCloseTab(activePathRef.current)
+        return
+      }
+      if (e.key === 'Tab') {
+        const rels = Object.keys(openFilesRef.current)
+        // 落点在 tabPolicy.nextTabInCycle（纯函数）：顺序 = 标签栏顺序，首尾相接
+        const next = nextTabInCycle(rels, activePathRef.current, e.shiftKey)
+        if (!next) return
+        e.preventDefault()
+        setActivePath(next)
+        touchTab(next)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isActive, requestCloseTab, touchTab])
 
   /** VS Code 式内联创建：在目标目录的树内条目末尾显示命名行（不再居中弹输入框） */
   const askCreateNode = useCallback((dirRel: string, type: 'file' | 'dir') => {
@@ -779,9 +1007,10 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
       return next
     })
     setActivePath((p) => (p === node.relPath ? newRel : p))
+    remapTabRel(node.relPath, newRel) // 条目 18：预览态 / LRU 记账跟着新路径走
     await refreshDir(parentRel(node.relPath))
     showToast({ type: 'info', message: '已重命名' })
-  }, [refreshDir])
+  }, [refreshDir, remapTabRel])
 
   /** 双态模型：归档（published）path 集合刷新 —— 知识库正式页在编辑器树中隐藏 */
   const refreshArchived = useCallback(async () => {
@@ -891,24 +1120,21 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
       return next
     })
     setActivePath((p) => (p === srcRel ? newRel : p))
+    remapTabRel(srcRel, newRel) // 条目 18：预览态 / LRU 记账跟着新路径走
     await refreshDir(parentRel(srcRel))
     if (targetDirRel !== parentRel(srcRel)) await refreshDir(targetDirRel)
-  }, [refreshDir])
+  }, [refreshDir, remapTabRel])
 
   const doTrash = useCallback(async (node: TreeNode) => {
     const root = rootIdRef.current
     if (!root) return
     const res = await workspaceTrash(root, node.relPath)
     if (!res.ok) { showToast({ type: 'error', message: res.error || '删除失败' }); return }
-    setOpenFiles((prev) => {
-      const next = { ...prev }
-      delete next[node.relPath]
-      return next
-    })
-    setActivePath((p) => (p === node.relPath ? null : p))
+    // 条目 18：删除文件 → 关掉其标签（复用 closeTab：一并清预览态 / LRU 记账，并按「右邻优先」重选激活落点）
+    closeTab(node.relPath)
     await refreshDir(parentRel(node.relPath))
     showToast({ type: 'info', message: `已移入回收站：${baseName(node.relPath)}` })
-  }, [refreshDir])
+  }, [refreshDir, closeTab])
 
   // 右键菜单：Esc / 外部点击关闭
   useEffect(() => {
@@ -1079,6 +1305,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
           return next
         })
         setActivePath((p) => (p === srcRel ? dstRel : p))
+        remapTabRel(srcRel, dstRel) // 条目 18：预览态 / LRU 记账跟着新路径走
       }
       void refreshDir(parentRel(srcRel))
       if (parentRel(dstRel) !== parentRel(srcRel)) void refreshDir(parentRel(dstRel))
@@ -1086,7 +1313,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     }
     window.addEventListener('kb-file-moved', handler)
     return () => window.removeEventListener('kb-file-moved', handler)
-  }, [refreshDir, refreshArchived])
+  }, [refreshDir, refreshArchived, remapTabRel])
 
   /** Ctrl+Z 撤销 / 重做文件操作（kb-fs-op-changed）→ 刷新目录 + 迁移打开文档 key + 关闭被移除文档的标签 */
   useEffect(() => {
@@ -1105,6 +1332,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
           return next
         })
         setActivePath((p) => (p === rmFrom ? rmTo : p))
+        remapTabRel(rmFrom, rmTo) // 条目 18：预览态 / LRU 记账跟着新路径走
       }
       if (d.removed) closeTab(d.removed) // 撤销「新建」：文件被移除后关掉可能开着的标签
       d.dirs.forEach((dir) => { void refreshDir(dir) })
@@ -1112,7 +1340,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     }
     window.addEventListener('kb-fs-op-changed', handler)
     return () => window.removeEventListener('kb-fs-op-changed', handler)
-  }, [refreshDir, refreshArchived, closeTab])
+  }, [refreshDir, refreshArchived, closeTab, remapTabRel])
 
   const activeDoc = activePath ? openFiles[activePath] ?? null : null
 
@@ -1131,8 +1359,17 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   }, [])
   /** 预览内容延迟值：React 19 并发渲染，预览重解析不阻塞输入（大文档打字不卡） */
   const previewContent = useDeferredValue(activeDoc?.content ?? '')
-  // 标签栏只驻留「未保存修改」的文件；干净文件仅作当前预览，不占标签（切走即回收）
-  const openList = Object.keys(openFiles).filter((rel) => isDirtyDoc(openFiles[rel]))
+  // v3.2.0 条目 18：标签栏 = openFiles **全部**（不再按「脏」过滤）—— 干净文件同样驻留。
+  // 顺序沿用 Object.keys 的插入序；预览态 / 固定态的差别只体现在渲染样式（斜体）与顶替规则上。
+  const openList = Object.keys(openFiles)
+
+  // 激活标签自动滚进可视区（标签溢出横向滚动时，当前标签必须可见）
+  useEffect(() => {
+    const bar = tabBarRef.current
+    if (!bar || !activePath) return
+    const el = Array.from(bar.querySelectorAll<HTMLElement>('[data-tab-rel]')).find((n) => n.dataset.tabRel === activePath)
+    el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activePath, openList.length])
 
   // ===== 空状态：未打开仓库 =====
   if (!rootId) {
@@ -1338,17 +1575,27 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
               </button>
             </div>
           )}
-          {/* 标签栏（禅模式隐藏：当前文件名见悬浮信息条/退出条） */}
+          {/* 标签栏（禅模式隐藏：当前文件名见悬浮信息条/退出条）
+              v3.2.0 条目 18：**预览态 = 文件名斜体 + 次要色**、固定态 = 常态（不加图标 / 色块 / 角标）；
+              右键「文件已在磁盘上被删除」的标签 = 文件名删除线，按保存即重建 */}
           {zenLevel < 1 && openList.length > 0 && (
-            <div className="flex items-center gap-0.5 overflow-x-auto border-b border-[var(--border-color)] px-1.5 pt-1">
+            <div ref={tabBarRef} className="flex items-center gap-0.5 overflow-x-auto border-b border-[var(--border-color)] px-1.5 pt-1">
               {openList.map((rel) => {
                 const d = openFiles[rel]
                 const isDirty = fullContent(d) !== savedFullContent(d)
                 const isActiveTab = rel === activePath
+                const isPreview = rel === previewRel
+                const isMissing = d.missing === true
+                const tabTitle = [rel, isPreview ? '预览标签（双击固定）' : '', isMissing ? '文件已在磁盘上被删除，保存将重新创建' : '']
+                  .filter(Boolean).join(' · ')
                 return (
                   <div
                     key={rel}
-                    onClick={() => setActivePath(rel)}
+                    data-tab-rel={rel}
+                    onClick={() => { setActivePath(rel); touchTab(rel) }}
+                    onDoubleClick={() => pinTab(rel)}
+                    onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
+                    onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); requestCloseTab(rel) } }}
                     onContextMenu={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
@@ -1359,9 +1606,9 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                         ? 'border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-primary)]'
                         : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                     }`}
-                    title={rel}
+                    title={tabTitle}
                   >
-                    <span className="truncate">{baseName(rel)}</span>
+                    <span className={`truncate ${isPreview ? 'italic' : ''} ${isMissing ? 'line-through' : ''}`}>{baseName(rel)}</span>
                     {isDirty ? (
                       <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />
                     ) : (
@@ -1703,10 +1950,35 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                 <div className="mx-2 my-0.5 border-t border-[var(--border-color)]" />
               </>
             )}
+            {tabCtx.rel === previewRel && (
+              <>
+                <button onClick={() => { const rel = tabCtx.rel; setTabCtx(null); pinTab(rel) }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
+                  <Pin size={13} className="text-[var(--text-muted)]" />固定标签（保持常驻）
+                </button>
+                <div className="mx-2 my-0.5 border-t border-[var(--border-color)]" />
+              </>
+            )}
             <button onClick={() => { const rel = tabCtx.rel; setTabCtx(null); requestCloseTab(rel) }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
               <X size={13} className="text-[var(--text-muted)]" />关闭
             </button>
+            {openList.length > 1 && (
+              <>
+                <button onClick={() => { const rel = tabCtx.rel; setTabCtx(null); closeTabsExcept(rel) }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
+                  <CopyX size={13} className="text-[var(--text-muted)]" />关闭其他
+                </button>
+                <button onClick={() => { setTabCtx(null); closeSavedTabs() }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
+                  <FileX size={13} className="text-[var(--text-muted)]" />关闭已保存
+                </button>
+                <button onClick={() => { setTabCtx(null); closeAllTabs() }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
+                  <SquareX size={13} className="text-[var(--text-muted)]" />关闭全部
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -1770,7 +2042,8 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
         </div>
       )}
 
-      {/* 保存冲突对话框：磁盘被外部修改（对标 VS Code 的 saveConflictResolution） */}
+      {/* 保存冲突对话框：磁盘内容被外部修改（对标 VS Code 的 saveConflictResolution）
+          —— 「文件被删除」不走这里，见条目 18 的标签删除线 + 保存即重建 */}
       {conflictState && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30 kb-overlay" onClick={() => setConflictState(null)}>
           <div
@@ -1778,11 +2051,10 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-1 text-[13px] font-medium text-[var(--text-warning)]">
-              {conflictState.missing ? '文件已在磁盘上被删除' : '文件已被外部修改'}
+              文件已被外部修改
             </div>
             <div className="mb-3 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">
-              「{baseName(conflictState.relPath)}」在编辑期间被其他程序改动
-              {conflictState.missing ? '或移走' : ''}。要如何处理？
+              「{baseName(conflictState.relPath)}」在编辑期间被其他程序改动。要如何处理？
             </div>
             <div className="flex flex-col gap-1.5">
               <button
