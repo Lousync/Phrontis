@@ -44,7 +44,6 @@ import { PluginsModule } from './modules/plugins'
 import { EditorModule } from './modules/editor'
 import { AiTeachingModule } from './modules/ai-teaching'
 import { ReleaseNotesModule } from './modules/release-notes'
-import { DesktopModule } from './modules/desktop'
 
 import { FillPopup } from './modules/toolbox/components/FillPopup'
 import { VaultPicker } from './components/shared/VaultPicker'
@@ -566,7 +565,7 @@ export default function App() {
   useEffect(() => {
     const off = window.api?.onMainCommand?.((p) => {
       if (p?.type === 'switch-tab' && typeof p.tab === 'string') {
-        // 白名单走唯一真相源：旧版把清单抄在这里，缺 editor / aiTeaching / desktop
+        // 白名单走唯一真相源：旧版把清单抄在这里，缺 editor / aiTeaching
         // —— 小窗喊「切到编辑器」会被静默拒绝，症状是「点了没反应」。
         if (isTabName(p.tab)) {
           setActiveTab(p.tab)
@@ -755,9 +754,6 @@ export default function App() {
   /** 模块内容（主栏/副栏共用；on = 该模块当前在屏幕某栏激活） */
   function renderModuleContent(name: TabName, on: boolean): React.ReactNode {
     switch (name) {
-      // 桌面外壳：磁贴点开模块一律回到 handleTabChange（= 点活动栏图标），
-      // 于是侧栏展开、分屏冲突处理等既有行为全部自动继承，桌面侧不需要知道这些规则。
-      case 'desktop': return <DesktopModule isActive={on} onOpenModule={handleTabChange} />
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} />
       case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} />

@@ -62,14 +62,15 @@ function stripComments(src) {
 console.log('\n=== A. 唯一真相源自洽 ===')
 const ids = APP_MODULES.map((m) => m.id)
 ok(new Set(ids).size === ids.length, 'A2 APP_MODULES 内 id 无重复')
-ok(ids.length === 15, 'A2b APP_MODULES 覆盖 15 个 TabName', `实际 ${ids.length}`)
+ok(ids.length === 14, 'A2b APP_MODULES 覆盖 14 个 TabName（v3.2.0 已剥离桌面外壳）', `实际 ${ids.length}`)
 ok(BAR_MODULE_IDS.every((id) => ids.includes(id)), 'A3 BAR_MODULE_IDS ⊆ APP_MODULES')
 ok(STARTABLE_MODULE_IDS.every((id) => BAR_MODULE_IDS.includes(id)), 'A4 可启动模块 ⊆ 活动栏模块（非活动栏模块不该当落点）')
 const utility = ['recycle', 'help', 'settings', 'user', 'releaseNotes', 'devtools']
 const leaked = utility.filter((id) => STARTABLE_MODULE_IDS.includes(id))
 ok(leaked.length === 0, 'A5 回收站/帮助/设置/账户/更新说明/开发者工具 都不可作启动项', `漏了 ${leaked.join(',')}`)
-ok(BAR_MODULE_IDS[0] === 'desktop', 'A6 桌面是活动栏首位（也是兜底落点）')
-ok(STARTABLE_MODULE_IDS.includes('desktop'), 'A6b 桌面可选作启动项（设置页此前没有它）')
+ok(BAR_MODULE_IDS[0] === 'editor', 'A6 编辑器是活动栏首位（也是兜底落点）')
+ok(!STARTABLE_MODULE_IDS.includes('desktop'), 'A6b 桌面已不再是启动项（v3.2.0 随外壳剥离）')
+ok(resolveStartupTab(undefined, JSON.stringify(BAR_MODULE_IDS)) === 'editor', 'A6c 全隐藏时兜底落到编辑器（不是回收站/帮助）')
 console.log(`  活动栏位(${BAR_MODULE_IDS.length})：${BAR_MODULE_IDS.join(', ')}`)
 console.log(`  可启动(${STARTABLE_MODULE_IDS.length})：${STARTABLE_MODULE_IDS.join(', ')}`)
 console.log(`  可作磁贴(${TILE_MODULE_IDS.length})：${TILE_MODULE_IDS.join(', ')}`)
@@ -79,7 +80,6 @@ console.log(`  命令面板(${PALETTE_MODULES.length})：${PALETTE_MODULES.map((
 console.log('\n=== B. 旧的手抄清单必须已消失（负向断言） ===')
 const srcApp = stripComments(read('src/App.tsx'))
 const srcBar = stripComments(read('src/components/shared/ActivityBar.tsx'))
-const srcTiles = stripComments(read('src/modules/desktop/tiles.tsx'))
 const srcOnb = stripComments(read('src/components/shared/Onboarding.tsx'))
 const srcAppear = stripComments(read('src/modules/settings/views/AppearanceView.tsx'))
 const srcSettings = stripComments(read('src/lib/settings.ts'))
@@ -95,7 +95,6 @@ ok(/const\s+ALL_MODULES[\s\S]{0,240}?BAR_MODULE_IDS\.map\(/.test(srcBar),
   'B4 ActivityBar 的 ALL_MODULES 由 BAR_MODULE_IDS 派生（不是手抄一份）')
 ok(!/\[\s*\{\s*id:\s*'desktop'\s*,\s*label:\s*'桌面'/.test(srcBar),
   'B4b 旧的 9 项字面量数组已删除')
-ok(!/const\s+DESK_MODULES\s*:\s*ModuleDef\[\]\s*=\s*\[/.test(srcTiles), 'B5 tiles.tsx 不再自持 DESK_MODULES 字面量（改用 TILE_MODULE_IDS）')
 ok(!/const\s+ACTIVITY_MODS\s*=\s*\[/.test(srcOnb), 'B6 Onboarding 不再自持 ACTIVITY_MODS 字面量')
 ok(!/const\s+TABS\s*:\s*\{[^}]*\}\[\]\s*=\s*\[/.test(srcAppear), 'B7 设置页不再自持启动项 TABS 字面量')
 
@@ -115,8 +114,7 @@ const checkCover = (label, keys, members) => {
 }
 checkCover('C1 ActivityBar BAR_ICONS 覆盖全部活动栏模块', keysOfRecord(srcBar, 'BAR_ICONS'), BAR_MODULE_IDS)
 checkCover('C2 设置页 STARTUP_ICONS 覆盖全部可启动模块', keysOfRecord(srcAppear, 'STARTUP_ICONS'), STARTABLE_MODULE_IDS)
-checkCover('C3 tiles.tsx TILE_META 覆盖全部可作磁贴模块', keysOfRecord(srcTiles, 'TILE_META'), TILE_MODULE_IDS)
-checkCover('C4 Onboarding SCENE_META 覆盖除桌面外的活动栏模块', keysOfRecord(srcOnb, 'SCENE_META'), BAR_MODULE_IDS.filter((id) => id !== 'desktop'))
+checkCover('C4 Onboarding SCENE_META 覆盖全部活动栏模块', keysOfRecord(srcOnb, 'SCENE_META'), BAR_MODULE_IDS)
 
 /* ================= D. settings 默认值 ================= */
 console.log('\n=== D. 设置默认值里不许出现非活动栏 id（本次 bug 的引信） ===')
@@ -134,6 +132,8 @@ const subsets = []
 for (let mask = 0; mask < (1 << BAR_MODULE_IDS.length); mask++) {
   subsets.push(BAR_MODULE_IDS.filter((_, i) => mask & (1 << i)))
 }
+// 'desktop' 是 v3.2.0 剥离掉的 id：它现在既不是合法 TabName 也不是启动项，
+// 拿来当坏数据用 —— 落点必须退回兜底，绝不能原样返回（那会渲染出一个不存在的模块）。
 const startupChoices = [undefined, '', 'blog', 'editor', 'desktop', 'recycle', 'help', 'ghost', ...BAR_MODULE_IDS]
 let badLanding = 0, unknownLanding = 0, honored = 0, dishonored = 0, threw = 0
 for (const sub of subsets) {
@@ -157,12 +157,12 @@ console.log(`  其中「应当尊重 startupTab」的 ${honored} 次全部命中
 
 console.log('\n  —— 报告场景的定点复现（旧实现全部落到 recycle）——')
 const CASES = [
-  ['隐藏完所有可隐藏模块', JSON.stringify(BAR_MODULE_IDS), 'desktop'],
-  ['隐藏掉不用的，只留桌面', JSON.stringify(BAR_MODULE_IDS.filter((x) => x !== 'desktop')), 'desktop'],
-  ['只留 AI教学', JSON.stringify(BAR_MODULE_IDS.filter((x) => x !== 'aiTeaching')), 'desktop'],
-  ['只留 桌面 + AI教学', JSON.stringify(BAR_MODULE_IDS.filter((x) => !['desktop', 'aiTeaching'].includes(x))), 'desktop'],
+  ['隐藏完所有可隐藏模块', JSON.stringify(BAR_MODULE_IDS), 'editor'],
+  ['隐藏掉不用的，只留编辑器', JSON.stringify(BAR_MODULE_IDS.filter((x) => x !== 'editor')), 'editor'],
+  ['只留 AI教学', JSON.stringify(BAR_MODULE_IDS.filter((x) => x !== 'aiTeaching')), 'editor'],
+  ['只留 编辑器 + AI教学', JSON.stringify(BAR_MODULE_IDS.filter((x) => !['editor', 'aiTeaching'].includes(x))), 'editor'],
   ['只隐藏说说一项，启动项=编辑器', JSON.stringify(['moments']), 'editor'],
-  ['只隐藏启动项本身（编辑器）', JSON.stringify(['editor']), 'desktop'],
+  ['只隐藏启动项本身（编辑器）', JSON.stringify(['editor']), 'editor'],
   ['什么都没隐藏，启动项=编辑器', '[]', 'editor'],
 ]
 for (const [label, hidden, want] of CASES) {
@@ -176,17 +176,16 @@ const junkBad = junk.filter((h) => { try { return !isTabName(resolveStartupTab('
 ok(junkBad.length === 0, 'E6 坏 JSON / null / 数字都不炸且落到合法模块', `坏在 ${JSON.stringify(junkBad)}`)
 
 /* ================= F. 活动栏可见顺序 ================= */
-console.log('\n=== F. 活动栏可见顺序（桌面顶首位 / 尊重存储 / 陈年 id 过滤） ===')
-ok(activityOrder('["blog","editor"]')[0] === 'desktop', 'F1 desktop 恒顶首位（没进过存储时）')
+console.log('\n=== F. 活动栏可见顺序（尊重存储 / 缺失补齐 / 陈年 id 过滤） ===')
+ok(activityOrder('["blog","editor"]')[0] === 'blog', 'F1 存储顺序原样保留（不再有人为顶首位）', activityOrder('["blog","editor"]').join(','))
 ok(activityOrder('["blog","editor"]').length === BAR_MODULE_IDS.length, 'F1b 缺失模块被补齐')
-ok(activityVisibleOrder('[]', '["desktop"]')[0] !== 'desktop', 'F2 隐藏生效（桌面被隐藏后不再首位）')
-// 存储顺序被尊重 —— 但 desktop 会被顶到首位（活动栏的选择：桌面外壳是主入口，
-// 用户没把它拖进存储顺序里时就替它占首位）。所以比对要连同 desktop 一起。
-ok(activityVisibleOrder('["plugins","blog","editor"]', '[]').slice(0, 4).join(',') === 'desktop,plugins,blog,editor',
-  'F3 存储顺序被尊重（desktop 顶首位后原样跟出）',
+ok(activityVisibleOrder('[]', '["editor"]')[0] !== 'editor', 'F2 隐藏生效（编辑器被隐藏后不再首位）')
+// 存储顺序被完整尊重：剥离桌面外壳后，activityOrder 不再往队首插任何模块
+ok(activityVisibleOrder('["plugins","blog","editor"]', '[]').slice(0, 3).join(',') === 'plugins,blog,editor',
+  'F3 存储顺序被尊重（无人插队）',
   activityVisibleOrder('["plugins","blog","editor"]', '[]').join(','))
-ok(activityVisibleOrder('["desktop","plugins","blog"]', '[]').slice(0, 3).join(',') === 'desktop,plugins,blog',
-  'F3b 用户把 desktop 拖进存储顺序后完全照办')
+ok(activityVisibleOrder('["editor","plugins","blog"]', '[]').slice(0, 3).join(',') === 'editor,plugins,blog',
+  'F3b 用户自定义顺序完全照办')
 const normalized = activityOrder('["immersive","export","recycle","blog"]')
 ok(normalized.includes('aiTeaching') && !normalized.includes('export') && !normalized.includes('recycle'),
   'F4 immersive→aiTeaching 且陈年 id（export/recycle）被滤掉', normalized.join(','))
@@ -204,13 +203,14 @@ ok(TILE_MODULE_IDS.join(',') === OLD_DESK_ORDER.join(','),
 // 取本机真实设置里的活动栏数据（重构前后都应得到同一结果）
 const USER_ORDER = '["editor","aiTeaching","knowledge","blog","schedule","moments","toolbox","plugins"]'
 const USER_HIDDEN = '["moments"]'
-const EXPECT_VISIBLE = 'desktop,editor,aiTeaching,knowledge,blog,schedule,toolbox,plugins'
+const EXPECT_VISIBLE = 'editor,aiTeaching,knowledge,blog,schedule,toolbox,plugins'
 ok(activityVisibleOrder(USER_ORDER, USER_HIDDEN).join(',') === EXPECT_VISIBLE,
   'G2 真实设置下的活动栏可见顺序零变化',
   `\n     期望 ${EXPECT_VISIBLE}\n     实际 ${activityVisibleOrder(USER_ORDER, USER_HIDDEN).join(',')}`)
 
-// 重构前 `App.tsx` 的 MODULE_TABS（12 项）；本次**有意**补进 aiTeaching
-const OLD_MODULE_TABS = ['desktop', 'editor', 'knowledge', 'blog', 'schedule', 'moments', 'recycle',
+// 重构前 `App.tsx` 的 MODULE_TABS（12 项）；本次**有意**补进 aiTeaching，
+// 并移除已随桌面外壳剥离的 desktop
+const OLD_MODULE_TABS = ['editor', 'knowledge', 'blog', 'schedule', 'moments', 'recycle',
   'settings', 'toolbox', 'plugins', 'help', 'user']
 const newPalette = PALETTE_MODULES.map((m) => m.id)
 const addedToPalette = newPalette.filter((id) => !OLD_MODULE_TABS.includes(id))
@@ -220,12 +220,12 @@ console.log(`   ⚠ 命令面板顺序有变（旧的是模块段 + 工具段混
 console.log(`     旧 ${OLD_MODULE_TABS.join(', ')}`)
 console.log(`     新 ${newPalette.join(', ')}`)
 
-// 重构前设置页启动项只有 6 个；本次**有意**补进 desktop / aiTeaching / plugins
+// 重构前设置页启动项只有 6 个；本次**有意**补进 aiTeaching / plugins（desktop 已随外壳剥离）
 const OLD_STARTUP_OPTS = ['blog', 'schedule', 'knowledge', 'editor', 'moments', 'toolbox']
 ok(OLD_STARTUP_OPTS.every((id) => STARTABLE_MODULE_IDS.includes(id)), 'G4 设置页启动项没有丢原有选项')
 const addedStartup = STARTABLE_MODULE_IDS.filter((id) => !OLD_STARTUP_OPTS.includes(id))
-ok(addedStartup.join(',') === 'desktop,aiTeaching,plugins',
-  'G4b 设置页新增「桌面」「AI教学」「插件」三个选项（有意）', `新增 ${addedStartup.join(',')}`)
+ok(addedStartup.join(',') === 'aiTeaching,plugins',
+  'G4b 设置页新增「AI教学」「插件」两个选项（有意）', `新增 ${addedStartup.join(',')}`)
 console.log(`   设置页启动项：旧 ${OLD_STARTUP_OPTS.length} 个 → 新 ${STARTABLE_MODULE_IDS.length} 个（新增 ${addedStartup.join(', ')}）`)
 
 /* ================= 结果 ================= */

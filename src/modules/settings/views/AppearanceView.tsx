@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Sun, Moon, Puzzle, Flame, LayoutGrid } from 'lucide-react'
+import { Sun, Moon, Puzzle, Flame } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { THEME_OPTIONS, BLOG_SIZE_OPTIONS, KNOWLEDGE_SIDEBAR_SIZE_OPTIONS, applyThemeClass } from '../../../lib/settings'
 import { STARTABLE_MODULE_IDS, labelOf } from '../../../lib/appModules'
@@ -21,7 +21,6 @@ const THEME_DESCS: Record<string, string> = {
 
 /** 「启动时默认显示」按钮的图标表：成员来自 appModules 的 `startable`，这里只管画什么 */
 const STARTUP_ICONS: Record<string, React.ReactNode> = {
-  desktop: <LayoutGrid size={16} />,
   editor: <EditorIcon size={16} />,
   knowledge: <KnowledgeIcon size={16} />,
   blog: <BlogIcon size={16} />,

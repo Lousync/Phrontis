@@ -3,13 +3,12 @@ import type { TabName } from '../types'
 /**
  * 模块清单的**唯一真相源**。
  *
- * 为什么要有这个文件：模块清单原本被抄在 6 个地方，各自演化、已经飘了 ——
+ * 为什么要有这个文件：模块清单原本被抄在 5 个地方，各自演化、已经飘了 ——
  *   · `App.tsx` 的 `MODULE_TABS`（命令面板 / 分屏）        —— 少了 aiTeaching
- *   · `App.tsx` 的启动回退候选 `all`                        —— 少了 desktop / aiTeaching，多了 recycle / help
- *   · `App.tsx` 的小窗 `switch-tab` 白名单                  —— 少了 desktop / editor / aiTeaching
+ *   · `App.tsx` 的启动回退候选 `all`                        —— 少了 aiTeaching，多了 recycle / help
+ *   · `App.tsx` 的小窗 `switch-tab` 白名单                  —— 少了 editor / aiTeaching
  *   · `ActivityBar.tsx` 的 `ALL_MODULES`（右键显隐）        —— 只有 9 个 bar 模块
  *   · `settings.ts` 的 `activityBarOrder` 默认值            —— 混着 `export` / `recycle` 两个陈年 id
- *   · `desktop/tiles.tsx` 的 `DESK_MODULES`（磁贴入口）
  * 其中「启动回退候选里混进 recycle，而 recycle 又永远无法被隐藏」直接导致了
  * **把侧边栏模块全部隐藏后重启，应用自动打开回收站**（App.tsx 的兜底循环必然走到 recycle）。
  *
@@ -37,11 +36,10 @@ export interface AppModuleDef {
  * ⚠️ 顺序即默认顺序，改动前先看两个消费者：
  *   · `PALETTE_MODULES`（命令面板按此顺序列出）
  *   · 活动栏「追加尚未进 activityBarOrder 的模块」也按此顺序
- * 现有顺序刻意保持与历史一致（desktop 首位、其余沿用旧 DESK_MODULES / MODULE_TABS 的相对次序），
+ * 现有顺序刻意保持与历史一致（editor 首位、其余沿用旧 MODULE_TABS 的相对次序），
  * 以免顺手把老用户的活动栏或面板顺序洗牌。
  */
 export const APP_MODULES = [
-  { id: 'desktop', label: '桌面', bar: true, startable: true, tile: false, palette: true },
   { id: 'editor', label: '编辑器', bar: true, startable: true, tile: true, palette: true },
   { id: 'knowledge', label: '知识库', bar: true, startable: true, tile: true, palette: true },
   { id: 'blog', label: '博客', bar: true, startable: true, tile: true, palette: true },
@@ -113,8 +111,6 @@ function parseIdList(raw: string | undefined, fallback: TabName[]): string[] {
 export function activityOrder(rawOrder?: string): TabName[] {
   const stored = parseIdList(rawOrder, [])
   const order = stored.filter((id) => BAR_MODULE_IDS.includes(id as TabName)) as TabName[]
-  // 桌面外壳是主入口：没进过存储就顶到最前（用户一旦拖拽过，就完全尊重存储顺序）
-  if (!order.includes('desktop')) order.unshift('desktop')
   for (const id of BAR_MODULE_IDS) if (!order.includes(id)) order.push(id)
   return order
 }
@@ -130,7 +126,7 @@ export function activityVisibleOrder(rawOrder?: string, rawHidden?: string): Tab
  *
  * 规则（刻意做得很钝，钝才不会出意外）：
  *   ① 用户选了 `startupTab`、且它是可启动模块、且没被隐藏 → 就用它；
- *   ② 其余一切情况 → **桌面兜底**。
+ *   ② 其余一切情况 → **编辑器兜底**。
  *
  * 曾经的做法是「按 activityBarOrder 逐项找，找不到就按一张硬编码清单找第一个没隐藏的」——
  * 而那张清单里含 `recycle` / `help`，这两个模块又不在活动栏的显隐菜单里（永远隐藏不掉），
@@ -140,5 +136,5 @@ export function resolveStartupTab(rawStartupTab?: string, rawHidden?: string): T
   const t = String(rawStartupTab ?? '')
   const hidden = parseIdList(rawHidden, [])
   if (t && (STARTABLE_MODULE_IDS as string[]).includes(t) && !hidden.includes(t)) return t as TabName
-  return 'desktop'
+  return 'editor'
 }

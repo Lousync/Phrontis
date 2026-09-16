@@ -165,7 +165,7 @@ export const SETTINGS = {
   // ⚠️ 默认值里**不能出现**不在活动栏图标位上的 id。这里曾混着 `export`（模块早已不存在）与
   // `recycle`（回收站已移进底部设置菜单）—— `recycle` 那次是真出过事故：启动兜底会沿着这张顺序表
   // 找"第一个没被隐藏的模块"，而 recycle 永远隐藏不掉，于是把侧边栏模块全隐藏后重启就开回收站。
-  // 存量用户的活动栏顺序由 ActivityBar 的归一逻辑自行补齐（desktop 顶首位 / 缺失模块追加），
+  // 存量用户的活动栏顺序由 ActivityBar 的归一逻辑自行补齐（缺失模块追加），
   // 所以这里只保留图标位模块、相对次序不动即可。
   activityBarOrder: { default: '["editor","blog","schedule","knowledge","moments","toolbox","plugins"]', type: 'json', label: '活动栏图标顺序', group: '活动栏', desc: '活动栏模块图标顺序（JSON）', keywords: ['活动栏', '顺序', '图标', 'activitybar', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   activityBarHidden: { default: '[]', type: 'json', label: '活动栏隐藏模块', group: '活动栏', desc: '活动栏隐藏的模块（JSON）', keywords: ['活动栏', '隐藏', '模块', 'activitybar', 'hidden'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
@@ -249,12 +249,6 @@ export const SETTINGS = {
   pluginTrustedKeys: { default: '', type: 'text', label: '受信公钥 keyring', group: '插件安全', desc: '受信签名公钥 keyring（JSON 或 keyId=公钥）', keywords: ['插件', '公钥', 'keyring', '签名', '信任'], section: 'security', ui: true, scope: 'global', level: 'danger', affects: 'live' , anchor: 'security.pluginKeys' },
   updateMirror: { default: 'https://gh-proxy.com', type: 'text', label: '下载镜像', group: '更新', desc: 'GitHub 加速代理前缀，留空直连', keywords: ['镜像', '加速', '代理', 'github', 'proxy', '下载', 'cdn'], section: 'about', ui: true, scope: 'global', level: 'normal', affects: 'reload', anchor: 'advanced.mirror' },
   aiVaultFilePerm: { default: 'read', type: 'select', label: 'AI vault 文件权限', group: '权限', desc: 'AI vault.* 工具访问仓库文件：off=禁止 read=只读 write=预留', keywords: ['vault', '文件', '权限', '仓库', 'ai', '读写'], section: 'aiTools', ui: false, scope: 'global', level: 'danger', affects: 'live', aiTab: 'perms' },
-
-  // ---- 桌面外壳（自定义磁贴工作台）----
-  // 布局刻意存**全局**、不进 `.knowbase/`：桌面怎么摆是「这台机器上我怎么用」，
-  // 不是某份资料的一部分；换仓库不该换桌面。详见 src/modules/desktop/layout.ts 顶部说明。
-  desktopPresets: { default: '', type: 'json', label: '桌面布局预设', group: '桌面外壳', desc: '桌面磁贴布局（多套预设 JSON；留空=首次进入时种入默认三套）', keywords: ['桌面', '外壳', '磁贴', '布局', '预设', 'desktop', 'shell', 'tile', '工作台'], section: 'appearance', ui: false, scope: 'global', level: 'experimental', affects: 'live' },
-  desktopActivePreset: { default: 'study', type: 'text', label: '当前桌面预设', group: '桌面外壳', desc: '当前生效的桌面预设 id', keywords: ['桌面', '预设', '当前', 'desktop', 'preset'], section: 'appearance', ui: false, scope: 'global', level: 'experimental', affects: 'live' },
 }
 
 // ===== 边栏面板约束（组件 default/min/max，非用户可改，集中引用） =====

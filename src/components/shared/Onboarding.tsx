@@ -38,12 +38,11 @@ const SCENE_META: Record<string, { desc: string; icon: typeof PenLine }> = {
 }
 
 /**
- * 场景选择的候选 = 活动栏一级模块（**剔除桌面外壳** —— 向导问的是「你想用哪些场景」，
- * 桌面不是场景而是外壳本身）。
+ * 场景选择的候选 = 活动栏一级模块。
  * 带上 `SCENE_META[id]` 存在性判定：将来新增的模块若还没写场景说明，这里自动跳过而不是崩掉。
  */
 const ACTIVITY_MODS: { id: TabName; name: string; desc: string; icon: typeof PenLine }[] =
-  BAR_MODULE_IDS.filter((id) => id !== 'desktop' && SCENE_META[id]).map((id) => ({
+  BAR_MODULE_IDS.filter((id) => SCENE_META[id]).map((id) => ({
     id, name: labelOf(id), ...SCENE_META[id],
   }))
 

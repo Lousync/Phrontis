@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import type { TabName } from '../../types'
-import { Palette, ChevronRight, ChevronDown, Check, Download, FlaskConical, History, LifeBuoy, Trash2, LayoutGrid } from 'lucide-react'
+import { Palette, ChevronRight, ChevronDown, Check, Download, FlaskConical, History, LifeBuoy, Trash2 } from 'lucide-react'
 import { useSettings } from '../../lib/SettingsContext'
 import { applyThemeClass } from '../../lib/settings'
 import { BAR_MODULE_IDS, labelOf, normalizeModuleId } from '../../lib/appModules'
@@ -13,7 +13,6 @@ import { BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon, ToolboxIcon, UserIc
  * 这里只负责「这个 id 画成什么」。用户/设置/帮助不占图标位（在底部的设置菜单里）。
  */
 const BAR_ICONS: Record<string, (size: number) => React.ReactNode> = {
-  desktop: s => <LayoutGrid size={s} />,
   editor: s => <EditorIcon size={s} />,
   blog: s => <BlogIcon size={s} />,
   schedule: s => <ScheduleIcon size={s} />,
@@ -61,7 +60,7 @@ export function ActivityBar({ active, onChange, onToggleSidebar, flush }: Props)
   // 旧版本下 editor 拖拽从未生效过（同一段归一代码），故「跑一次归一 + 标记」安全：
   // 标记落位后 allOrder 完全尊重 settings 存储，拖拽写回即所见即所得；缺失模块仍由下方 append 兜底。
   // AI教学 P0：activityBarOrder 内 immersive → aiTeaching（模块 id 改名，位置原地替换不丢失）。
-  // ⚠️ 这里**刻意不**换成 appModules.activityOrder()：那个函数会额外补 desktop、追加缺失模块，
+  // ⚠️ 这里**刻意不**换成 appModules.activityOrder()：那个函数会额外追加缺失模块，
   // 而 allOrder 会被原样写回 settings —— 换掉就等于给每个老用户的活动栏顺序做一次静默改写。
   // 真正的成员/顺序口径由下方 `order`（基于唯一真相源）承担，这里只管存量数据归一。
   const allOrder = useMemo(
@@ -93,9 +92,6 @@ export function ActivityBar({ active, onChange, onToggleSidebar, flush }: Props)
 
   // Compute ordered visible modules
   const order = allOrder.filter(id => ALL_MODULES.some(m => m.id === id))
-  // 新模块（还没进过 activityBarOrder）默认插队首 = 入口位。
-  // 一旦用户拖拽过一次、desktop 进了存储，这里就不再插手，完全尊重用户排序。
-  if (!order.includes('desktop')) order.unshift('desktop')
   // Append any new modules not yet in the order
   for (const m of ALL_MODULES) {
     if (!order.includes(m.id)) order.push(m.id)
