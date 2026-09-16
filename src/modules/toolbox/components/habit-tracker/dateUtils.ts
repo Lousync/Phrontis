@@ -70,17 +70,6 @@ export function buildRecordIndex(records: HabitRecord[]): RecordIndex {
   return map
 }
 
-/** habitId → date → 打卡来源（manual=手动 / auto=跨模块联动自动），供界面区分标注 */
-export function buildRecordSourceIndex(records: HabitRecord[]): Map<string, Map<string, 'manual' | 'auto'>> {
-  const map = new Map<string, Map<string, 'manual' | 'auto'>>()
-  for (const r of records) {
-    let m = map.get(r.habitId)
-    if (!m) { m = new Map(); map.set(r.habitId, m) }
-    m.set(r.date, r.source === 'auto' ? 'auto' : 'manual')
-  }
-  return map
-}
-
 /**
  * 当前连续天数：从今天往回逐日走，跳过非计划日；计划日已打卡则 +1。
  * 今天是计划日但还没打卡不算断档（一天没结束）。

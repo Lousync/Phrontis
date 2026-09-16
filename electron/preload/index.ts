@@ -430,13 +430,6 @@ const api = {
   deleteHabit: (id: string) => ipcRenderer.invoke('habit:delete', id),
   toggleHabitCheck: (habitId: string, date: string) => ipcRenderer.invoke('habit:toggleCheck', habitId, date),
   reorderHabits: (orderedIds: string[]) => ipcRenderer.invoke('habit:reorder', orderedIds),
-  habitLinkSave: (habitId: string, link: unknown) => ipcRenderer.invoke('habitLink:save', habitId, link),
-  habitLinkRemove: (habitId: string) => ipcRenderer.invoke('habitLink:remove', habitId),
-  onHabitAutoChecked: (cb: (items: unknown) => void) => {
-    const listener = (_e: unknown, items: unknown) => cb(items)
-    ipcRenderer.on('habit:autoChecked', listener)
-    return () => ipcRenderer.removeListener('habit:autoChecked', listener)
-  },
   // bookmark nav
   bookmarkGetAll: () => ipcRenderer.invoke('bookmark:getAll'),
   createBookmarkCategory: (data: unknown) => ipcRenderer.invoke('bookmark:createCategory', data),

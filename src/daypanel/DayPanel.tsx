@@ -140,11 +140,6 @@ export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widg
   useDataChanged('schedule', load)
   useDataChanged('habit', load)
 
-  // 主进程自动打卡 → 同步刷新
-  useEffect(() => {
-    window.api?.onHabitAutoChecked?.(() => { void load() })
-  }, [load])
-
   // Esc：嵌入式关闭内嵌面板；脱离式吸附回内嵌
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

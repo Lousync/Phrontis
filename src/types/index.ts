@@ -265,14 +265,8 @@ export interface MomentsPost {
 }
 // ---- 打卡模块 ----
 export type HabitRuleType = 'daily' | 'weekdays' | 'flexible'
-/** 自动打卡来源（跨模块联动），指标现值由主进程从各源表按业务日期反查 */
-export type HabitLinkSource = 'blog' | 'pomodoro' | 'schedule' | 'knowledge'
-export interface HabitLink {
-  source: HabitLinkSource
-  /** 达标阈值：博客=字数，其余=当天累计次数 */
-  threshold: number
-  enabled: boolean
-}
+// v3.2.0 条目 14：「习惯跨模块联动自动打卡」整条拔线 —— 原先这里的
+// HabitLinkSource / HabitLink 两个类型、以及下方 Habit 的 link 字段已随功能移除。
 export interface Habit {
   id: string
   name: string
@@ -285,12 +279,9 @@ export interface Habit {
   sortOrder: number
   archived: boolean
   createdAt: string
-  /** 自动完成联动规则；null = 未绑定 */
-  link?: HabitLink | null
 }
+/** source 保留 'auto' 仅用于兼容历史自动打卡记录（条目 14 之后不再产生新值，界面也不区分来源） */
 export interface HabitRecord { id: string; habitId: string; date: string; source?: 'manual' | 'auto' }
-/** 自动打卡事件（主进程 → 渲染层轻提示） */
-export type HabitAutoCheckin = { habitId: string; habitName: string; date: string }
 export interface CreateHabitDTO {
   name: string; color?: string; ruleType?: HabitRuleType
   ruleDays?: number[]; weeklyTarget?: number; sortOrder?: number
@@ -496,8 +487,9 @@ export interface HabitExport {
   sortOrder: number; archived: boolean; createdAt: string; updatedAt: string
 }
 export interface HabitRecordExport { id: string; habitId: string; date: string; source?: 'manual' | 'auto' }
-export interface HabitLinkExport { habitId: string; source: HabitLinkSource; threshold: number; enabled: boolean }
-export interface CheckinExportData { habits: HabitExport[]; records: HabitRecordExport[]; links?: HabitLinkExport[] }
+// v3.2.0 条目 14 起：导出数据不再含联动规则（原 HabitLinkExport 与 links 字段已移除，
+// 旧备份文件里的 links 字段导入时会被忽略 —— 不做迁移，历史记录原样保留）
+export interface CheckinExportData { habits: HabitExport[]; records: HabitRecordExport[] }
 export interface BookmarkNavExportData { categories: BookmarkCategory[]; bookmarks: BookmarkItem[] }
 export interface AllExportData {
   exportVersion: string; exportedAt: string
@@ -1487,9 +1479,6 @@ export interface ElectronAPI {
   deleteHabit: (id: string) => Promise<void>
   toggleHabitCheck: (habitId: string, date: string) => Promise<{ checked: boolean }>
   reorderHabits: (orderedIds: string[]) => Promise<void>
-  habitLinkSave: (habitId: string, link: HabitLink | null) => Promise<void>
-  habitLinkRemove: (habitId: string) => Promise<void>
-  onHabitAutoChecked: (cb: (items: HabitAutoCheckin[]) => void) => () => void
   // bookmark nav
   bookmarkGetAll: () => Promise<{ categories: BookmarkCategory[]; bookmarks: BookmarkItem[] }>
   createBookmarkCategory: (d: { name: string; color?: string }) => Promise<BookmarkCategory>

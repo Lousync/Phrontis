@@ -345,7 +345,7 @@ writeJson(join(moduleRoot, 'moments', 'posts.json'), data.moments.posts || [], p
 writeJson(join(moduleRoot, 'moments', 'albums.json'), data.moments.albums || [], plan)
 writeJson(join(moduleRoot, 'checkin', 'habits.json'), data.checkin.habits || [], plan)
 writeJson(join(moduleRoot, 'checkin', 'records.json'), data.checkin.records || [], plan)
-writeJson(join(moduleRoot, 'checkin', 'links.json'), data.checkin.links || [], plan)
+// 习惯联动打卡（links.json）已随 v3.2.0 条目 14 整条拔线，导入时不再产出该文件
 writeJson(join(moduleRoot, 'bookmarks', 'categories.json'), data.bookmarkNav.categories || [], plan)
 writeJson(join(moduleRoot, 'bookmarks', 'bookmarks.json'), data.bookmarkNav.bookmarks || [], plan)
 writeJson(join(moduleRoot, 'toolbox', 'scripts.json'), data.toolbox.scripts || [], plan)

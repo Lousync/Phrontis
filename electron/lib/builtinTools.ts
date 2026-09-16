@@ -17,9 +17,8 @@ import { searchHelp } from './helpService'
 import { vaultCreateEntry } from './kbStore/blogVaultRepo'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
 import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, type TodoRow } from './kbStore/scheduleVaultRepo'
-// 日程「标记完成」要触发与 UI 完全相同的副作用：习惯跨模块联动 + 插件事件。
-// 依赖方向已核：habitLinkService / pluginEvents 的依赖树不反向 import 本模块，无循环。
-import { recordActivity } from './habitLinkService'
+// 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
+// 依赖方向已核：pluginEvents 的依赖树不反向 import 本模块，无循环。
 import { emitPluginEvent } from './pluginEvents'
 import { extractDocText } from './docsReader'
 import {
@@ -838,9 +837,8 @@ export function registerBuiltinTools(): void {
     const updated = vaultUpdateTodo(id, patch, new Date().toISOString())
     if (!updated) throw new Error(`待办 id=${id} 更新失败（写入期间已被删除？）`)
     // 与 UI 的 schedule:updateTodo 同口径：只有 pending → done 才算「完成」事件。
-    // 漏了这步的后果是「AI 标记完成的任务不计入习惯联动 / 插件收不到 schedule:todoCompleted」。
+    // 漏了这步的后果是「AI 标记完成的任务，插件收不到 schedule:todoCompleted」。
     if (existing.status !== 'done' && updated.status === 'done') {
-      void recordActivity({ source: 'schedule', date: updated.date })
       emitPluginEvent('schedule:todoCompleted', { todoId: id, title: updated.title ?? '' })
     }
     // 主进程写盘后必须广播：日程模块保活（切 Tab 不重载），不通知界面看不到

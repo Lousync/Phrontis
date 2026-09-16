@@ -667,7 +667,7 @@ function sameIgnoreState(a: VaultIgnoreState | null | undefined, b: VaultIgnoreS
  *
  * 磁盘缓存虽免了重建，但每次 getKnowledgeIndex 仍要走 readJson 的
  * existsSync + statSync + readFileSync + JSON.parse 全同步链（实测 417 页 ≈ 2.3ms/次）。
- * 而该函数被 knowledgeVaultRepo 多处 + AI 工具 / quiz / 附件 / summary / habitLink 高频调用，
+ * 而该函数被 knowledgeVaultRepo 多处 + AI 工具 / quiz / 附件 / summary 高频调用，
  * 单次页面加载累积可达数十毫秒且全程阻塞主进程。
  *
  * 失效条件与磁盘缓存保持一致：.ignore 指纹变化（外部改规则、无 watcher 也感知）或显式 invalidate。

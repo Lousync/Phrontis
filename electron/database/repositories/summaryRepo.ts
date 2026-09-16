@@ -1,5 +1,4 @@
 import { ipcMain } from 'electron'
-import { recordActivity } from '../../lib/habitLinkService'
 import { vaultTodosAll } from '../../lib/kbStore/scheduleVaultRepo'
 import { vaultRecordsAll } from '../../lib/kbStore/habitVaultRepo'
 import { vaultListEntries } from '../../lib/kbStore/blogVaultRepo'
@@ -16,12 +15,10 @@ import { getKnowledgeIndex } from '../../lib/kbStore/knowledgeIndex'
 export function registerSummaryHandlers(): void {
 
   // 番茄钟：记录一次完成的专注（fire-and-forget，失败不影响计时）
-  ipcMain.handle('pomodoro:createSession', (e, minutes: number) => {
+  ipcMain.handle('pomodoro:createSession', (_e, minutes: number) => {
     try {
       const mins = Math.max(1, Math.round(minutes || 0))
-      const row = pomoSessionCreate(mins)
-      // 联动:当天场次累计达标则自动打卡(现值由 habitLinkService 反查)
-      void recordActivity({ source: 'pomodoro', date: row.date }, e.sender)
+      pomoSessionCreate(mins)
       return true
     } catch (err) {
       console.error('[summary] Failed to record pomodoro:', err)

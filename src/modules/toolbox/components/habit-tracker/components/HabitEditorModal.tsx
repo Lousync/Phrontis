@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { X, Trash2, Zap } from 'lucide-react'
-import type { Habit, HabitRuleType, HabitLinkSource } from '../../../../../types'
-import { createHabit, updateHabit, deleteHabit, habitLinkSave } from '../../../../../lib/ipc'
+import { X, Trash2 } from 'lucide-react'
+import type { Habit, HabitRuleType } from '../../../../../types'
+import { createHabit, updateHabit, deleteHabit } from '../../../../../lib/ipc'
 import { showToast } from '../../../../../lib/toast'
 import { ConfirmDialog } from '../../../../../components/shared'
 
@@ -28,24 +28,12 @@ const WEEKDAYS = [
   { value: 4, label: '四' }, { value: 5, label: '五' }, { value: 6, label: '六' }, { value: 0, label: '日' },
 ]
 
-/** 联动来源:指标现值由主进程从对应源表按业务日期反查 */
-const LINK_SOURCES: { id: HabitLinkSource; label: string; unit: string; hint: string }[] = [
-  { id: 'blog', label: '写博客日志', unit: '字', hint: '当天日志去空白字数达到阈值' },
-  { id: 'pomodoro', label: '完成番茄专注', unit: '次', hint: '当天完成的专注场次达到阈值' },
-  { id: 'schedule', label: '完成日程任务', unit: '个', hint: '当天完成的任务数达到阈值' },
-  { id: 'knowledge', label: '新建知识页面', unit: '个', hint: '当天新建的页面数达到阈值' },
-]
-
 export function HabitEditorModal({ mode, habit, onClose, onSaved }: Props) {
   const [name, setName] = useState(habit?.name ?? '')
   const [color, setColor] = useState(habit?.color ?? COLORS[6])
   const [ruleType, setRuleType] = useState<HabitRuleType>(habit?.ruleType ?? 'daily')
   const [ruleDays, setRuleDays] = useState<number[]>(habit?.ruleDays ?? [1, 2, 3, 4, 5])
   const [weeklyTarget, setWeeklyTarget] = useState<number>(habit?.weeklyTarget ?? 3)
-  // 自动完成联动
-  const [linkOn, setLinkOn] = useState<boolean>(habit?.link?.enabled === true)
-  const [linkSource, setLinkSource] = useState<HabitLinkSource>(habit?.link?.source ?? 'blog')
-  const [linkThreshold, setLinkThreshold] = useState<number>(habit?.link?.threshold ?? 100)
   const [saving, setSaving] = useState(false)
   // 删除确认用应用内 ConfirmDialog — Electron 的 window.confirm 会破坏渲染进程键盘焦点,
   // 确认后全应用输入框都无法输入,只能重启(历史 bug),禁止再引入原生对话框
@@ -61,17 +49,11 @@ export function HabitEditorModal({ mode, habit, onClose, onSaved }: Props) {
     if (!canSave || saving) return
     setSaving(true)
     try {
-      let habitId = habit?.id
       if (mode === 'create') {
-        const created = await createHabit({ name: name.trim(), color, ruleType, ruleDays, weeklyTarget })
-        habitId = created.id
+        await createHabit({ name: name.trim(), color, ruleType, ruleDays, weeklyTarget })
         showToast({ type: 'info', message: `习惯「${name.trim()}」已创建` })
       } else if (habit) {
         await updateHabit(habit.id, { name: name.trim(), color, ruleType, ruleDays, weeklyTarget })
-      }
-      // 联动规则随习惯一并保存:关掉开关即解除绑定
-      if (habitId) {
-        await habitLinkSave(habitId, linkOn ? { source: linkSource, threshold: Math.max(1, Math.round(linkThreshold || 1)), enabled: true } : null)
       }
       onSaved()
     } catch (e) {
@@ -178,53 +160,6 @@ export function HabitEditorModal({ mode, habit, onClose, onSaved }: Props) {
                     className="w-7 h-7 rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">+</button>
                 </div>
                 <span className="text-[12px] text-[var(--text-secondary)]">次</span>
-              </div>
-            )}
-          </div>
-
-          {/* 自动完成（跨模块联动） */}
-          <div>
-            <label className="flex items-center justify-between mb-1.5 cursor-pointer select-none"
-              onClick={() => setLinkOn(v => !v)}>
-              <span className="flex items-center gap-1 text-[12px] text-[var(--text-secondary)]">
-                <Zap size={12} className={linkOn ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />自动完成
-              </span>
-              <span className={`relative w-8 h-[18px] rounded-full transition-colors ${linkOn ? 'bg-[var(--accent)]' : 'bg-[var(--bg-hover)] border border-[var(--border-color)]'}`}>
-                <span className={`absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white transition-all ${linkOn ? 'left-[14px]' : 'left-[2px]'}`} />
-              </span>
-            </label>
-            {linkOn && (
-              <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-1.5">
-                  {LINK_SOURCES.map(o => (
-                    <button key={o.id} onClick={() => setLinkSource(o.id)} title={o.hint}
-                      className={`py-1.5 text-[12px] rounded border transition-colors ${
-                        linkSource === o.id
-                          ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--text-primary)]'
-                          : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                      }`}>
-                      {o.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-[12px] text-[var(--text-secondary)] shrink-0">
-                    {linkSource === 'blog' ? '当天字数达到' : '当天达到'}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => setLinkThreshold(n => Math.max(1, n - (linkSource === 'blog' ? 50 : 1)))}
-                      className="w-7 h-7 rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">−</button>
-                    <span className="w-12 text-center text-[14px] font-semibold tabular-nums">{linkThreshold}</span>
-                    <button onClick={() => setLinkThreshold(n => n + (linkSource === 'blog' ? 50 : 1))}
-                      className="w-7 h-7 rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">+</button>
-                  </div>
-                  <span className="text-[12px] text-[var(--text-secondary)]">
-                    {LINK_SOURCES.find(o => o.id === linkSource)?.unit}
-                  </span>
-                </div>
-                <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
-                  {LINK_SOURCES.find(o => o.id === linkSource)?.hint}，即自动打卡并推送远程监督（不弹窗、可手动撤销）
-                </p>
               </div>
             )}
           </div>

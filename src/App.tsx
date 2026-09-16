@@ -53,7 +53,6 @@ import { PomodoroPanel } from './modules/toolbox/components/PomodoroPanel'
 import { Onboarding } from './components/shared/Onboarding'
 import { ImportModal } from './modules/shared/components/ImportModal'
 import { useCheckinReminder } from './lib/useCheckinReminder'
-import { useHabitAutoCheckinToast } from './lib/useHabitAutoCheckin'
 import { installFileOpUndoShortcuts } from './lib/fileOpHistory'
 import { AssistantPanel } from './components/shared/AssistantPanel'
 import { DayPanelWindowApp } from './daypanel/DayPanelWindowApp'
@@ -342,7 +341,6 @@ export default function App() {
   }
 
   useCheckinReminder()
-  useHabitAutoCheckinToast()
   const mountedTabs = useRef<Set<TabName>>(new Set(['blog']))  // keep modules alive after first visit
 
   // 启动检测当前仓库：无 → 仓库选择页（VaultPicker，新老用户统一）；有且开启「每次启动选择仓库」→ 启动形态选择页

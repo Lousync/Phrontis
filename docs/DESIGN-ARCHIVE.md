@@ -49,7 +49,7 @@
 | 2026-09-07 | agent-immersive-quiz-design.md | 沉浸问答方案已被 AI教学题目视图（P7）取代并实施 |
 | 2026-09-07 | devbridge-roadmap.md | 已实现并实测通过（2026-08-29，feature/devbridge-roadmap 分支） |
 | 2026-09-07 | ai-test-bridge.md | 已实现并实测通过（仅 dev/测试环境启用，生产构建不打包） |
-| 2026-09-07 | habit-module-linkage.md | 已实现（迁移 048 + `electron/lib/habitLinkService.ts`） |
+| 2026-09-07 | habit-module-linkage.md | 已实现（迁移 048 + `electron/lib/habitLinkService.ts`）；**v3.2.0 条目 14 已整体移除**（服务 + 2 个 IPC + 联动 UI），文档仅作历史留存 |
 | 2026-09-07 | DEVELOPER.md | 开发者指南（非设计方案），随本地归档区整体并入留存 |
 | 2026-09-11 | conflict-resolution-design.md | v1（保存时 mtime 校验）已落地 |
 | 2026-09-11 | icon-redesign-record.md | 无影版图标接入 build/，构建验证通过 |

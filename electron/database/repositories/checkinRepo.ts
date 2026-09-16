@@ -1,7 +1,6 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import { notifyCheckin } from '../../lib/pushService'
-import type { LinkSource } from '../../lib/habitLinkService'
 import {
   vaultHabitsAll,
   vaultHabitsSave,
@@ -9,8 +8,6 @@ import {
   vaultRecordsSave,
   vaultHabitRecordAddIfAbsent,
   vaultHabitRecordRemove,
-  vaultHabitLinksAll,
-  vaultHabitLinksSave,
   type HabitRow,
 } from '../../lib/kbStore/habitVaultRepo'
 
@@ -22,21 +19,21 @@ import {
  * （见 habitVaultRepo）。行结构=表行 snake_case 原样，SQL 语义（ORDER BY sort_order,
  * created_at、删习惯连带记录、UNIQUE(habit_id,date) 的 INSERT OR IGNORE、排序批量 UPDATE）
  * 在内存复刻。
- * 注意：联动规则存 links.json（getAll 的 link 映射、
- * habitLink:* 落 links.json（R6 去库化，D9））。
+ *
+ * v3.2.0 条目 14：「习惯跨模块联动自动打卡」整条拔线（2026-09-15 开发负责人拍板
+ * 「联动打卡这个功能根本就没有用，没有数据牵连放心删」）—— 联动服务 habitLinkService、
+ * `habitLink:save` / `habitLink:remove` 两个 IPC、getAll 里的 link 映射全部移除。
+ * 磁盘上遗留的 links.json 不再读取、不做迁移；历史自动打卡记录（records 里 source='auto'）
+ * 原样保留，只是界面不再区分来源。**手动打卡与远程监督推送（habit:toggleCheck 里的
+ * notifyCheckin）不受影响。**
  */
-
-interface LinkRow { habit_id: string; source: string; threshold: number; enabled: number }
 
 export interface HabitDto {
   id: string; name: string; color: string
   ruleType: 'daily' | 'weekdays' | 'flexible'
   ruleDays: number[]; weeklyTarget: number
   sortOrder: number; archived: boolean; createdAt: string
-  link?: { source: LinkSource; threshold: number; enabled: boolean } | null
 }
-
-const LINK_SOURCES: LinkSource[] = ['blog', 'pomodoro', 'schedule', 'knowledge']
 
 function parseDays(json: string): number[] {
   try { const v = JSON.parse(json); if (Array.isArray(v)) return v.map(Number) } catch { /* ignore */ }
@@ -70,13 +67,6 @@ function vaultHabitsOrdered(): HabitRow[] {
     || (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0))
 }
 
-/** 联动规则读 .knowbase/modules/checkin/links.json（R6 去库化，D9）；读取异常按无规则处理 */
-function linkRowsSafe(): LinkRow[] {
-  try {
-    return vaultHabitLinksAll() as LinkRow[]
-  } catch { return [] }
-}
-
 export function registerCheckinHandlers(): void {
 
   ipcMain.handle('habit:getAll', () => {
@@ -84,13 +74,6 @@ export function registerCheckinHandlers(): void {
     const records = vaultRecordsAll().map(r => ({
       id: r.id, habitId: r.habit_id, date: r.date, source: r.source,
     }))
-    const links = linkRowsSafe()
-    const linkMap = new Map(links.map(l => [l.habit_id, {
-      source: l.source as LinkSource,
-      threshold: l.threshold,
-      enabled: l.enabled === 1,
-    }]))
-    for (const h of habits) h.link = linkMap.get(h.id) ?? null
     return { habits, records }
   })
 
@@ -145,10 +128,9 @@ export function registerCheckinHandlers(): void {
   })
 
   ipcMain.handle('habit:delete', (_e, id: string) => {
-    // 删除习惯连带记录与联动规则（links.json，R6 去库化）
+    // 删除习惯连带其打卡记录（links.json 的联动规则已随条目 14 整条拔线，不再维护）
     vaultRecordsSave(vaultRecordsAll().filter(r => r.habit_id !== id))
     vaultHabitsSave(vaultHabitsAll().filter(h => h.id !== id))
-    vaultHabitLinksSave(vaultHabitLinksAll().filter(l => l.habit_id !== id))
     return
   })
 
@@ -175,24 +157,5 @@ export function registerCheckinHandlers(): void {
     }
     vaultHabitsSave(rows)
     return
-  })
-
-  // 联动规则:link 为 null 表示解除绑定;UNIQUE(habit_id) → 一个习惯至多一条规则（links.json，R6 去库化）
-  ipcMain.handle('habitLink:save', (_e, habitId: string, link: { source: LinkSource; threshold: number; enabled: boolean } | null) => {
-    const rows = vaultHabitLinksAll().filter(l => l.habit_id !== habitId)
-    if (link === null) {
-      vaultHabitLinksSave(rows)
-      return
-    }
-    if (!LINK_SOURCES.includes(link.source)) throw new Error(`未知的联动来源: ${link.source}`)
-    if (!vaultHabitsAll().some(h => h.id === habitId)) throw new Error('习惯不存在')
-    const threshold = Math.max(1, Math.round(link.threshold || 1))
-    rows.push({ id: randomUUID(), habit_id: habitId, source: link.source, threshold, enabled: link.enabled ? 1 : 0 })
-    vaultHabitLinksSave(rows)
-    return
-  })
-
-  ipcMain.handle('habitLink:remove', (_e, habitId: string) => {
-    vaultHabitLinksSave(vaultHabitLinksAll().filter(l => l.habit_id !== habitId))
   })
 }
