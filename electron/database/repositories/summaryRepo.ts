@@ -1,9 +1,10 @@
 import { ipcMain } from 'electron'
 import { vaultTodosAll } from '../../lib/kbStore/scheduleVaultRepo'
-import { vaultRecordsAll } from '../../lib/kbStore/habitVaultRepo'
+import { vaultRecordsAll, vaultHabitsAll } from '../../lib/kbStore/habitVaultRepo'
 import { vaultListEntries } from '../../lib/kbStore/blogVaultRepo'
 import { pomoSessionCreate, pomoSessionsAll } from '../../lib/kbStore/pomoVaultRepo'
 import { getKnowledgeIndex } from '../../lib/kbStore/knowledgeIndex'
+import { checkinTotalInWindow, habitPeriodStats } from '../../lib/kbStore/habitStats'
 
 /**
  * 周期总结支持服务 ——
@@ -31,20 +32,28 @@ export function registerSummaryHandlers(): void {
     // 博客篇数（entries.date 为 YYYY-MM-DD）
     const entries = vaultListEntries()
     const blogEntries = entries.filter((r) => r.date >= start && r.date <= end).length
-    // 知识库页面数（含草稿，对齐原 DB 全表口径）
-    const knowledgePages = getKnowledgeIndex().pages.length
+    // 知识库页面数：**按 frontmatter created 归窗口**（v3.2.0 条目 13 口径修复 ——
+    // 原实现直接取 pages.length，显示的是全库页数，与窗口无关）。
+    // 无 created 的页面（外部 md、早期文件）算不出归属 → 不计入任何窗口，
+    // 宁可少算也不把「不知道哪天建的」摊进当期。
+    const knowledgePages = getKnowledgeIndex().pages
+      .filter((p) => { const d = localDay(p.createdAt); return d >= start && d <= end })
+      .length
     // 番茄钟专注分钟数
     const pomodoroMinutes = pomoSessionsAll()
       .filter((r) => r.date >= start && r.date <= end)
       .reduce((sum, r) => sum + (Number(r.minutes) || 0), 0)
+    // 打卡：总数与每习惯明细读同一份记录，避免两处各扫一次导致数字对不上
+    const records = vaultRecordsAll()
     return {
-      // 打卡次数（habit_records.date 即纯日期）
-      checkins: vaultRecordsAll().filter((r) => typeof r.date === 'string' && r.date >= start && r.date <= end).length,
+      checkins: checkinTotalInWindow(records, start, end),
       blogEntries,
       knowledgePages,
       pomodoroMinutes,
       // 完成的日程任务数（按完成时间 updated_at 归日,转本地日期）
       scheduleDone: vaultTodosAll().filter((r) => r.status === 'done' && localDay(r.updated_at) >= start && localDay(r.updated_at) <= end && localDay(r.updated_at) !== '').length,
+      // 每习惯明细：次数 / 完成率 / 最长连续（判定策略在 lib/kbStore/habitStats.ts，纯函数）
+      habitDetails: habitPeriodStats(vaultHabitsAll(), records, start, end),
     }
   })
 }

@@ -282,6 +282,26 @@ export interface Habit {
 }
 /** source 保留 'auto' 仅用于兼容历史自动打卡记录（条目 14 之后不再产生新值，界面也不区分来源） */
 export interface HabitRecord { id: string; habitId: string; date: string; source?: 'manual' | 'auto' }
+/**
+ * 周 / 月 / 年总结面板的「每习惯打卡明细」（v3.2.0 条目 13）。
+ * 判定策略（统计谁、按什么分母算）在主进程纯函数 `electron/lib/kbStore/habitStats.ts`，
+ * 这里只作跨线共享的形状声明 —— 两边改字段必须同步。
+ */
+export interface HabitPeriodStat {
+  id: string
+  name: string
+  color: string
+  ruleType: string
+  weeklyTarget: number
+  /** 窗口内打卡次数 */
+  count: number
+  /** 窗口内计划日天数（flexible 恒为 0 —— 它不以计划日作分母） */
+  planned: number
+  /** 完成率百分比；null = 无可用分母（未设计划日 / 空窗口），界面显示占位而非 0% */
+  rate: number | null
+  /** 窗口内最长连续打卡天数 */
+  longest: number
+}
 export interface CreateHabitDTO {
   name: string; color?: string; ruleType?: HabitRuleType
   ruleDays?: number[]; weeklyTarget?: number; sortOrder?: number
@@ -1529,6 +1549,8 @@ export interface ElectronAPI {
     knowledgePages: number
     pomodoroMinutes: number
     scheduleDone: number
+    /** 每习惯明细（次数 / 完成率 / 最长连续）；v3.2.0 条目 13 起提供 */
+    habitDetails: HabitPeriodStat[]
   }>
   // 层级总结文件（周 / 月 / 年）—— .knowbase/blog/summaries/
   listSummaries: () => Promise<SummaryRecord[]>

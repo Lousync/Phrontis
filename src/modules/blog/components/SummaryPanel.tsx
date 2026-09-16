@@ -20,7 +20,7 @@ import { useDataChanged } from '../../../lib/dataChanged'
  * ========================================================================== */
 
 /**
- * 统计块：窗口内五项实时统计。
+ * 统计块：窗口内五项实时统计 + 每习惯打卡明细。
  *
  * **绝不落库**（DP v3.2.0 第 12 项拍板③）：补录了打卡、补写了日记之后，
  * 数字应当跟着变；需要持久化的只有正文（用户自己的复盘文字）。
@@ -45,15 +45,49 @@ export function SummaryStats({ start, end }: { start: string; end: string }) {
     { label: '完成日程任务', value: `${stats?.scheduleDone ?? '…'} 项` },
   ]
 
+  // 打卡明细（v3.2.0 条目 13）：与上方「坚持打卡」读同一份统计，此处按习惯拆开。
+  // 加载中（stats 为 null）时给空数组，避免闪一下「无习惯」。
+  const habits = stats?.habitDetails ?? []
+
   return (
-    <div className="mt-4 border-y border-[var(--border-color)] divide-y divide-[var(--border-color)]">
-      {rows.map((r) => (
-        <div key={r.label} className="flex items-baseline justify-between py-2.5 text-[15px] leading-7">
-          <span className="text-[var(--text-secondary)]">{r.label}</span>
-          <span className="font-semibold tabular-nums text-[var(--text-primary)]">{r.value}</span>
+    <>
+      <div className="mt-4 border-y border-[var(--border-color)] divide-y divide-[var(--border-color)]">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-baseline justify-between py-2.5 text-[15px] leading-7">
+            <span className="text-[var(--text-secondary)]">{r.label}</span>
+            <span className="font-semibold tabular-nums text-[var(--text-primary)]">{r.value}</span>
+          </div>
+        ))}
+      </div>
+
+      {habits.length > 0 && (
+        <div className="mt-8">
+          <h3 className="mb-1 text-[17px] font-semibold text-[var(--text-primary)]">打卡情况</h3>
+          <div className="mt-3 border-y border-[var(--border-color)] divide-y divide-[var(--border-color)]">
+            {habits.map((h) => (
+              <div
+                key={h.id}
+                title={h.ruleType === 'flexible'
+                  ? `本周目标每周 ${h.weeklyTarget} 次，已完成 ${h.count} 次`
+                  : `计划 ${h.planned} 天，已完成 ${h.count} 天`}
+                className="kb-item-in flex items-center gap-3 py-2.5 text-[15px] leading-7"
+              >
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: h.color || 'var(--text-disabled)' }}
+                />
+                <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">{h.name}</span>
+                <span className="shrink-0 font-semibold tabular-nums text-[var(--text-primary)]">{h.count} 次</span>
+                <span className="w-12 shrink-0 text-right tabular-nums text-[var(--text-secondary)]">
+                  {h.rate === null ? '—' : `${h.rate}%`}
+                </span>
+                <span className="shrink-0 tabular-nums text-[var(--text-muted)]">最长 {h.longest} 天</span>
+              </div>
+            ))}
+          </div>
         </div>
-      ))}
-    </div>
+      )}
+    </>
   )
 }
 
