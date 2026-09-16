@@ -12,6 +12,7 @@ import {
   aiTeachProfileWriteGlobal, aiTeachProfileWriteSession, aiTeachProfileWriteWorkspace,
 } from '../../lib/ipc'
 import { AiTeachFileTree } from './AiTeachFileTree'
+import { decidePrepLanding, withDraft, withFold, withStarted } from './prepPolicy'
 import { ArtifactsPane } from './ArtifactsPane'
 import type { ArtTab } from './artifacts'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
@@ -745,12 +746,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     showToast({ type: 'info', message: '已升格为正式会话（见左栏主线会话下方）' })
   }, [refreshSessions])
 
-  const refreshMessages = useCallback(async (sid: string) => {
+  /** v3.2.0 第 19 项：返回消息条数——`openSession` 用它校正「准备态」判据（快照说未开讲、但会话已有消息）。 */
+  const refreshMessages = useCallback(async (sid: string): Promise<number> => {
     const rows = await agentMessages(sid).catch(() => [] as AgentStoredMessage[])
     setMessages(rows.map(m => ({
       id: m.id, role: m.role, content: m.content, createdAt: m.createdAt,
       trace: m.traceJson ? (() => { try { return JSON.parse(m.traceJson) as AgentTraceStep[] } catch { return undefined } })() : undefined,
     })))
+    return rows.length
   }, [])
 
   /**
@@ -841,17 +844,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     const row = sessions.find(s => s.id === sid)
     setInstrDismiss(false)
     void loadConstraints(sid, row?.instructions ?? '')
-    await refreshMessages(sid)
+    const msgCount = await refreshMessages(sid)
     const nav = readNav(sid)
     // v3.1.2 条目7：准备态还原——未开讲的会话回到「切走瞬间」的准备态（草稿/折叠态入 nav，素材与约束实时读）
+    // v3.2.0 第 19 项：落点判定交给纯函数 `prepPolicy.decidePrepLanding`（可被契约脚本真实执行），
+    // 它同时承担兜底自愈 —— 快照说「未开讲」但会话已有消息时判为已开讲并回写校正，历史失真快照由此自愈。
     const prep = nav.prep
-    if (prep && prep.started === false) {
+    const landing = decidePrepLanding(prep, msgCount)
+    if (landing.mode === 'prepare') {
       setPrepStarted(false)
-      setPrepSrcOpen(!!prep.srcOpen); setPrepReqOpen(!!prep.reqOpen)
-      setInput(prep.draft ?? '')
+      setPrepSrcOpen(!!prep?.srcOpen); setPrepReqOpen(!!prep?.reqOpen)
+      setInput(prep?.draft ?? '')
       setPrepTemplate(TEMPLATES.find(t => t.label === title) ?? null)
       return
     }
+    if (landing.correctStarted) writeNav(sid, { prep: withStarted(prep) }) // 校正快照，避免下次再判错
     setPrepStarted(true); setPrepTemplate(null)
     // UI 优化条目6B：恢复该会话「上次离开时的工件」（页签在则栏在——内容驱动，无手动开合）
     if (nav.docRel) void openArtFile(nav.docRel)
@@ -1016,7 +1023,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     if (prepDraftTimer.current) window.clearTimeout(prepDraftTimer.current)
     prepDraftTimer.current = window.setTimeout(() => {
       const prev = readNav(sid).prep ?? {}
-      writeNav(sid, { prep: { ...prev, started: false, draft: text } })
+      // v3.2.0 第 19 项：`withDraft` 结构上不碰 started —— 「草稿变了」与「是否已开讲」是两回事，
+      // 此前展开 prev 后写 started:false 会把刚落下的 true 压回去（定时器恰好跨过开讲时刻时必现）。
+      writeNav(sid, { prep: withDraft(prev, text) })
     }, 300)
   }, [])
   /** 准备态折叠条开合 → 同步 state + nav（切回时还原到切走瞬间） */
@@ -1027,7 +1036,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     setPrepSrcOpen(nextSrc); setPrepReqOpen(nextReq)
     if (sid) {
       const prev = readNav(sid).prep ?? {}
-      writeNav(sid, { prep: { ...prev, started: false, srcOpen: nextSrc, reqOpen: nextReq } })
+      writeNav(sid, { prep: withFold(prev, nextSrc, nextReq) }) // v3.2.0 第 19 项：折叠态同样不碰 started（withFold 内不出现该字段）
     }
   }, [prepSrcOpen, prepReqOpen])
   /** 「开始对话」：退出准备态 → 发首条消息（走既有 doSend，首轮即带素材目录 + 会话要求 + 用户消息） */
@@ -1036,8 +1045,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     if (!sid) return
     const text = input.trim()
     if (!text || pending || compressing) return
+    // v3.2.0 第 19 项：先掐掉准备态草稿的防抖写入 —— 它 300ms 后才触发、且读的是「触发时刻」的 nav，
+    // 否则会把这里刚写下的 started:true 又压回 false（「编辑后立刻点开始对话」的时序竞态）。
+    if (prepDraftTimer.current) { window.clearTimeout(prepDraftTimer.current); prepDraftTimer.current = null }
     const prev = readNav(sid).prep ?? {}
-    writeNav(sid, { prep: { ...prev, started: true } }) // 开讲标记：此后切回不再进准备态
+    writeNav(sid, { prep: withStarted(prev) }) // 开讲标记：此后切回不再进准备态
     setPrepNavSeq(n => n + 1)
     setPrepStarted(true); setPrepTemplate(null)
     void doSend(text)
