@@ -68,9 +68,11 @@ export function WorkbenchTabBar({ tabs, active, onSelect, onClose, onReorder }: 
 
   const handleDrop = (e: React.DragEvent, targetId: TabName) => {
     e.preventDefault()
-    const srcId = dragIdRef.current ?? e.dataTransfer.getData('text/plain')
+    // 拖拽源优先取 ref（TabName），兜底 dataTransfer（text/plain 是 string，需窄化）
+    const raw = dragIdRef.current ?? e.dataTransfer.getData('text/plain')
     setDragOverId(null)
-    if (!srcId || srcId === targetId) return
+    if (!raw || raw === targetId) return
+    const srcId = raw as TabName
     const next = [...tabs]
     const from = next.indexOf(srcId)
     const to = next.indexOf(targetId)

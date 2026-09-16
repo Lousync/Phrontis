@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
+import { createPortal } from 'react-dom'
 import { Star, ListTree, ChevronLeft, ChevronRight, X, FileText } from 'lucide-react'
 import { Entry, Tag, type SummaryRecord } from '../../types'
 import { getEntries, createEntry, deleteEntry, getEntryById, toggleEntryStar, getSetting, setSetting, openExternal, getTags, workspaceGetCurrent, ensureSummary } from '../../lib/ipc'
@@ -35,8 +36,8 @@ export type BlogJump =
   | { kind: 'date'; date: string }
   | { kind: 'summary'; summaryKind: SummaryKind; start: string; end: string }
 
-export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, blogJump = null, onBlogJumpConsumed }: {
-  showLineNumbers?: boolean; sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; blogJump?: BlogJump | null; onBlogJumpConsumed?: () => void
+export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, blogJump = null, onBlogJumpConsumed, sidebarEl = null }: {
+  showLineNumbers?: boolean; sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; blogJump?: BlogJump | null; onBlogJumpConsumed?: () => void; sidebarEl?: HTMLElement | null
 }) {
   const { s } = useSettings()
   const [view, setView] = useState<BlogView>('list')
@@ -335,7 +336,10 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
         <span className="text-[11.5px] font-medium text-[var(--text-muted)]">博客</span>
       </div>
       <div className="flex min-h-0 flex-1">
-      <ResizablePanel storageKey="sidebarWidth_blog" defaultWidth={256} minWidth={200} maxWidth={320} visible={sidebarOpen && !showOutline} initialWidth={sidebarWidths.sidebarWidth_blog} onSnapClose={onSnapCloseSidebar} onSnapOpen={onSnapOpenSidebar}>
+      {/* v3.4.0 批次3：左栏模块态（sidebarEl）时侧栏内容 portal 进左栏 slot（挂载点迁移），
+          否则回落原位 ResizablePanel；大纲模式的显隐条件在两形态下保持一致 */}
+      {(() => {
+        const sidebarInner = (
         <div className="h-full flex flex-col">
           <div className="flex-1 overflow-hidden">
             <Sidebar
@@ -350,7 +354,15 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
           </div>
           <PluginSlotEntry slot="blog.sidebar" />
         </div>
-      </ResizablePanel>
+        )
+        return sidebarEl
+          ? createPortal(sidebarOpen && !showOutline ? sidebarInner : null, sidebarEl)
+          : (
+              <ResizablePanel storageKey="sidebarWidth_blog" defaultWidth={256} minWidth={200} maxWidth={320} visible={sidebarOpen && !showOutline} initialWidth={sidebarWidths.sidebarWidth_blog} onSnapClose={onSnapCloseSidebar} onSnapOpen={onSnapOpenSidebar}>
+                {sidebarInner}
+              </ResizablePanel>
+            )
+      })()}
 
       {/* Outline panel — replaces sidebar on the left when toggled */}
       {showOutline && (view === 'editor' || view === 'detail') && (

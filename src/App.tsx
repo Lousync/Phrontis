@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useRef, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
 import { Sparkles } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag } from './types'
 
 import { PALETTE_MODULES, labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchTabBar } from './components/workbench/WorkbenchTabBar'
+import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, type RailModule } from './lib/workbenchLayout'
 
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
 import { ZenHotZone } from './components/shared/ZenHotZone'
@@ -43,6 +44,7 @@ import { HelpModule } from './modules/help'
 import { ToolboxModule } from './modules/toolbox'
 import { PluginsModule } from './modules/plugins'
 import { EditorModule } from './modules/editor'
+import { BookshelfModule } from './modules/bookshelf'
 import { AiTeachingModule } from './modules/ai-teaching'
 import { ReleaseNotesModule } from './modules/release-notes'
 
@@ -119,13 +121,16 @@ export default function App() {
   }, [])
   const winRounded = !winMax && !winFs && !fsHint
 
-  // Workbench 外壳（R1-W1）：全局侧栏容器节点（EditorModule 文件树 portal 目标），
-  // 以 state 持有保证 portal 目标出现后触发重渲染；非 workbench 布局保持 null。
-  // ref 回调用 useCallback 稳定引用：React 卸载节点时才以 null 调用，避免内联箭头每帧触发 setState
-  const [wbSidebarEl, setWbSidebarEl] = useState<HTMLElement | null>(null)
-  const wbSidebarRef = useCallback((node: HTMLDivElement | null) => {
-    setWbSidebarEl(node)
+  // v3.4.0 批次3：左栏模块态 slot 节点（模块侧栏 portal 目标，挂载点迁移）。
+  // 以 state 持有保证 portal 目标出现后触发重渲染；ref 回调用 useCallback 稳定引用，
+  // React 卸载节点时才以 null 调用，避免内联箭头每帧触发 setState（editor R1-W1 同款手法）
+  const [wbModSlotEl, setWbModSlotEl] = useState<HTMLElement | null>(null)
+  const wbModSlotRef = useCallback((node: HTMLDivElement | null) => {
+    setWbModSlotEl(node)
   }, [])
+
+  // 左栏模块态（书签侧边栏）：null = 总览态。跟随逻辑见下方 effect（RAIL_FOLLOW_MAP + leftLocked）
+  const [railModule, setRailModule] = useState<RailModule | null>(null)
 
   // 抽屉面板实际占宽：标题栏搜索框/按钮锚定主内容区的偏移依据（面板卸载时归零）
   const [dayPanelWidth, setDayPanelWidth] = useState(0)
@@ -140,6 +145,8 @@ export default function App() {
 
   const { s, update, ready: settingsReady } = useSettings()
   const workbench = !!s.uiWorkbench
+  // 工作台布局（workbenchLayout 键钝解析）：左栏锁定/树模式供跟随与左栏交互用
+  const wbLayout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   // 布局 · 活动栏整条显隐（标题栏「布局」菜单 ↔ 命令面板两个入口，读写同一个 setting）。
   // 与 activityBarHidden（逐模块显隐）互不干扰：这里关的是「活动栏这个容器本身」。
   // 缺省 true：老仓库 settings.json 里没这个键 → 不因升级被突然藏掉活动栏
@@ -302,7 +309,6 @@ export default function App() {
       { id: 'toolbox', label: '打开 工具箱' },
       { id: 'plugins', label: '打开 插件' },
       { id: 'help', label: '打开 帮助' },
-      { id: 'user', label: '打开 账户' },
       { id: 'releaseNotes', label: '打开 更新说明', hint: '本版做了什么' },
     ]
     const items: PaletteItem[] = tabs.map((t) => ({
@@ -735,6 +741,51 @@ export default function App() {
     setActiveTab(tab); setSidebarOpen(true); window.dispatchEvent(new CustomEvent('tab-switched'))
   }
 
+  // ---- 左栏书签（v3.4.0 批次3）----
+  // 跟随（原型 v15「自动跟随」）：激活标签变为映射内模块且未锁定时，左栏进入该模块侧边栏态；
+  // 不在映射内的标签（设置/工具箱/动态…）不动左栏，锁定（leftLocked）时不跟随。
+  // 仅跳过首挂那次：启动恢复的激活标签不拉左栏（原型 v15 启动=总览态）；
+  // 解锁触发的重跑会「追上」当前映射内标签（锁定期间切过的上下文，解锁即恢复跟随）
+  const followMountedRef = useRef(false)
+  useEffect(() => {
+    if (!followMountedRef.current) { followMountedRef.current = true; return }
+    if (wbLayout.leftLocked) return
+    const m = RAIL_FOLLOW_MAP[activeTab]
+    if (m) setRailModule(m)
+  }, [activeTab, wbLayout.leftLocked])
+
+  /** 书签点击：再点当前书签 = 退出模块侧边栏（原型 lpBack，锁定态顺带自动解锁）；
+      错题本 = openTab('knowledge') + kb-locate-quiz-view 定位事件；其余直开对应标签 */
+  const handleBookmarkClick = (key: RailModule) => {
+    if (railModule === key) {
+      setRailModule(null)
+      if (wbLayout.leftLocked) update('workbenchLayout', JSON.stringify({ ...wbLayout, leftLocked: false }))
+      return
+    }
+    setRailModule(key)
+    const b = WORKBENCH_BOOKMARKS.find((x) => x.key === key)
+    if (!b) return
+    if (key === 'quiz') {
+      handleTabChange('knowledge')
+      // 冷启动时知识库模块可能尚未挂载（保活注册表为空），延迟派发等监听器就绪（同 kb-open-knowledge-page 约定）
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent(LOCATE_QUIZ_VIEW_EVENT)), 100)
+    } else {
+      handleTabChange(b.tab)
+    }
+  }
+
+  /** 左栏模块态「← 返回总览」：清模块态，锁定态顺带自动解锁（原型 lpBack 语义） */
+  const handleBackToOverview = () => {
+    setRailModule(null)
+    if (wbLayout.leftLocked) update('workbenchLayout', JSON.stringify({ ...wbLayout, leftLocked: false }))
+  }
+
+  /** 左栏散文件点击 → 编辑区打开（复用 kb-open-in-editor 的 pendingOpenRel 通道） */
+  const handleOpenLooseFile = (relPath: string) => {
+    setPendingOpenRel(relPath)
+    handleTabChange('editor')
+  }
+
   // 日程打卡侧边栏：标题栏按钮 + Ctrl+Alt+S 统一入口
   // - 脱离态 → 吸附回来（关独立窗口 + 显示内嵌）
   // - 内嵌态 → 切可见性
@@ -784,11 +835,12 @@ export default function App() {
   /** 模块内容（主栏/副栏共用；on = 该模块当前在屏幕某栏激活） */
   function renderModuleContent(name: TabName, on: boolean): React.ReactNode {
     switch (name) {
-      case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} />
-      case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} />
+      case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} />
+      case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} />
       case 'moments': return <MomentsModule />
-      case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={workbench && on ? wbSidebarEl : null} sidebarHosted={workbench} markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} openFrom={editorJumpFrom && editorJumpFrom !== 'editor' ? tabLabel(editorJumpFrom) : null} onBackFrom={() => { const f = editorJumpFrom; if (f) { setEditorJumpFrom(null); handleTabChange(f) } }} zenLevel={zenLevel} onZenLevelChange={setZenLevel} />
+      case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'editor' ? wbModSlotEl : null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} openFrom={editorJumpFrom && editorJumpFrom !== 'editor' ? tabLabel(editorJumpFrom) : null} onBackFrom={() => { const f = editorJumpFrom; if (f) { setEditorJumpFrom(null); handleTabChange(f) } }} zenLevel={zenLevel} onZenLevelChange={setZenLevel} />
+      case 'bookshelf': return <BookshelfModule isActive={on} />
       case 'aiTeaching': return <AiTeachingModule isActive={on} zenLevel={zenLevel} onZenLevelChange={changeZen} />
       case 'recycle': return <RecycleBinModule isActive={on} />
       case 'settings': return <SettingsModule />
@@ -841,10 +893,16 @@ export default function App() {
           {/* 活动栏两个收起来源：禅模式 Z2（隐壳）与布局菜单（用户显式隐藏），取并集 */}
           {zenLevel < 2 && activityBarVisible && <ActivityBar active={activeTab} onChange={handleTabChange} flush={winMax} />}
 <main className="flex-1 flex overflow-hidden bg-transparent relative">
-            {/* 工作台三栏外壳（v3.4.0 批次2）：左栏(临时模块列表，批次3 换书签双态) | 中间栏(卡片壳) | 右栏(占位，批次4 填控件)。
+            {/* 工作台三栏外壳（v3.4.0 批次3）：左栏=书签双态（总览/模块侧栏/树模式+锁定+仓库切换） | 中间栏(卡片壳) | 右栏(占位，批次4 填控件)。
                 DayPanel 保持 main 层平级（批次4 迁入右栏）；aiTeaching 整窗形态隐藏左右栏（suppressSides，方案 §2） */}
             <WorkbenchShell
-              onSwitchTab={handleTabChange}
+              activeTab={activeTab}
+              railModule={railModule}
+              modSlotRef={wbModSlotRef}
+              onBookmarkClick={handleBookmarkClick}
+              onBackToOverview={handleBackToOverview}
+              onOpenLooseFile={handleOpenLooseFile}
+              onPluginBookmark={handleTabChange}
               suppressSides={activeTab === 'aiTeaching'}
               right={
                 <div className="flex h-full flex-col bg-[var(--bg-secondary)]">
@@ -879,29 +937,9 @@ export default function App() {
                 </button>
               )}
               {/* 编辑器组（W3 · Editor Groups v1）：主栏 + 可选副栏，两栏模块互不相同。
-                  Workbench 模式下编辑器文件树 portal 到下方全局侧栏槽（R1-W1）；禅模式 Z1+ 收起侧栏槽。
-                  槽仅在编辑器组激活时渲染（卸载而非收起）——2026-09-08 用户实锤：切到 blog/knowledge
-                  等内嵌侧栏模块时，本槽 6px 折叠把手常驻与其侧栏把手构成双手柄（学 sidebarHosted
-                  的「不渲染代替收起」思路）。卸载→ref 置 null→editor sidebarHosted 不渲染树（保活不可见，无碍） */}
+                  v3.4.0 批次3：旧 R1-W1 全局侧栏槽（wbSidebarEl）已删除——editor 文件树与
+                  knowledge/schedule/blog 侧栏统一由左栏模块态 slot（wbModSlotEl）portal 承接 */}
               <div className="flex min-h-0 flex-1">
-                {workbench && (activeTab === 'editor' || secondaryTab === 'editor') && (
-                  <ResizablePanel
-                    storageKey="wb.sidebarWidth"
-                    defaultWidth={220}
-                    minWidth={180}
-                    maxWidth={420}
-                    visible={sidebarOpen && zenLevel < 1}
-                    initialWidth={sidebarWidths?.['wb.sidebarWidth']}
-                    collapsedWidth={6}
-                    onSnapClose={() => setSidebarOpen(false)}
-                    onSnapOpen={zenLevel >= 1 ? undefined : () => setSidebarOpen(true)}
-                  >
-                    <div
-                      ref={wbSidebarRef}
-                      className="flex h-full flex-col bg-[var(--bg-secondary)]"
-                    />
-                  </ResizablePanel>
-                )}
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                   {/* 编辑器组（W3 · Editor Groups v1）：主栏 + 可选副栏，两栏模块互不相同 */}
                   <div className="flex min-h-0 min-w-0 flex-1">

@@ -1,16 +1,16 @@
 import { useMemo } from 'react'
-import { PanelLeftClose, PanelRightClose, Info } from 'lucide-react'
+import { PanelLeftClose, PanelRightClose } from 'lucide-react'
 import { ResizablePanel } from '../shared/ResizablePanel'
 import { useSettings } from '../../lib/SettingsContext'
-import { parseWorkbenchLayout, type WorkbenchLayout } from '../../lib/workbenchLayout'
-import { STARTABLE_MODULE_IDS, labelOf } from '../../lib/appModules'
+import { parseWorkbenchLayout, type WorkbenchLayout, type RailModule } from '../../lib/workbenchLayout'
+import { WorkbenchLeftPanel } from './WorkbenchLeftPanel'
 import type { TabName } from '../../types'
 
 /**
- * 工作台三栏外壳（v3.4.0 批次2，方案 §2/§5）。
+ * 工作台三栏外壳（v3.4.0 批次2/3，方案 §2/§5）。
  *
  * 结构：图标条（ActivityBar，App 层渲染）+ [左栏 | 中间栏 | 右栏]。
- * - 左栏：批次2 为**临时模块入口列表**（保住切换能力），批次3 换成书签双态；
+ * - 左栏：WorkbenchLeftPanel（批次3 落地：书签 6 项 / 总览-模块双态 / 锁定 / 树模式 / 仓库切换）；
  * - 中间栏：标签条 + 内容区（App 层填）；
  * - 右栏：批次2 为占位收起，批次4 填小工具/AI。
  * - 左右栏复用 ResizablePanel：拖拽调宽 + snap 开合 + **单击手柄开合**（原型 v15 行为）；
@@ -22,13 +22,21 @@ interface Props {
   center: React.ReactNode
   /** 右栏内容（批次4 前为占位） */
   right: React.ReactNode
-  /** 模块切换（临时左栏列表用；批次3 书签接管后由书签动作替代） */
-  onSwitchTab: (tab: TabName) => void
+  /** 当前激活标签（左栏书签高亮 / 跟随展示） */
+  activeTab: TabName
+  /** 左栏模块态（null = 总览态） */
+  railModule: RailModule | null
+  /** 模块态 slot 的 ref callback（App 收集 DOM 传给模块做 sidebarEl portal 目标） */
+  modSlotRef: (node: HTMLDivElement | null) => void
+  onBookmarkClick: (key: RailModule) => void
+  onBackToOverview: () => void
+  onOpenLooseFile: (relPath: string) => void
+  onPluginBookmark: (tab: TabName) => void
   /** AI教学整窗形态（方案 §2）：左右栏与唤起浮钮一并隐藏，中间栏独占 */
   suppressSides?: boolean
 }
 
-export function WorkbenchShell({ center, right, onSwitchTab, suppressSides = false }: Props) {
+export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRef, onBookmarkClick, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
 
@@ -51,27 +59,19 @@ export function WorkbenchShell({ center, right, onSwitchTab, suppressSides = fal
         onSnapOpen={() => patch({ leftCollapsed: false })}
         onHandleClick={() => patch({ leftCollapsed: !layout.leftCollapsed })}
       >
-        <div className="flex h-full flex-col bg-[var(--bg-secondary)]">
-          <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border-color)] px-3">
-            <span className="text-[12px] font-medium text-[var(--text-secondary)]">模块</span>
-            <span className="flex items-center gap-1 text-[10.5px] text-[var(--text-muted)]">
-              <Info size={11} />
-              书签区 · 批次3
-            </span>
-          </div>
-          {/* 临时模块入口（批次2 保切换能力；批次3 换 6 书签双态） */}
-          <div data-wb="leftTemp" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5">
-            {STARTABLE_MODULE_IDS.map((id) => (
-              <button
-                key={id}
-                onClick={() => onSwitchTab(id)}
-                className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              >
-                {labelOf(id)}
-              </button>
-            ))}
-          </div>
-        </div>
+        <WorkbenchLeftPanel
+          activeTab={activeTab}
+          railModule={railModule}
+          locked={layout.leftLocked}
+          treeMode={layout.leftMode === 'tree'}
+          modSlotRef={modSlotRef}
+          onBookmarkClick={onBookmarkClick}
+          onBack={onBackToOverview}
+          onToggleLock={() => patch({ leftLocked: !layout.leftLocked })}
+          onToggleTreeMode={() => patch({ leftMode: layout.leftMode === 'tree' ? 'overview' : 'tree' })}
+          onOpenLooseFile={onOpenLooseFile}
+          onPluginBookmark={onPluginBookmark}
+        />
       </ResizablePanel>
 
       {/* ---- 中间栏 ---- */}

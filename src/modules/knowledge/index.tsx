@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
+import { createPortal } from 'react-dom'
 import { FileText, Folder, ListTree, X, BookMarked, Puzzle, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff } from 'lucide-react'
+import { LOCATE_QUIZ_VIEW_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { WelcomeHtmlView } from './components/WelcomeHtmlView'
@@ -47,7 +49,7 @@ import { KNOWLEDGE_SIDEBAR_ITEM_VARS } from '../../lib/settings'
 interface ClipItem { type: 'category' | 'page'; id: string }
 interface ClipboardData { action: 'copy' | 'cut'; items: ClipItem[] }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -74,6 +76,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [locateCategoryId, setLocateCategoryId] = useState<string | null>(null)
   const [allKnowledgeTags, setAllKnowledgeTags] = useState<KnowledgeTag[]>([])
   const [showQuizCollection, setShowQuizCollection] = useState(false)
+  // v3.4.0 左栏「错题本」书签定位（kb-locate-quiz-view）：App 书签点击 = 切到本模块 + 延迟派发事件 → 打开错题本/收藏视图
+  useEffect(() => {
+    const handler = () => setShowQuizCollection(true)
+    window.addEventListener(LOCATE_QUIZ_VIEW_EVENT, handler)
+    return () => window.removeEventListener(LOCATE_QUIZ_VIEW_EVENT, handler)
+  }, [])
   /** C 级模块插件声明的视图（slot=knowledge.sidebar）+ 当前打开的插件视图 */
   const [pluginViews, setPluginViews] = useState<PluginViewContribution[]>([])
   const [activePluginView, setActivePluginView] = useState<PluginViewContribution | null>(null)
@@ -1405,7 +1413,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         )}
         <div className="kb-view-fade flex min-h-0 flex-1">
         {/* L1: File / Outline tabs — file tab drills into ChapterPanel when a notebook is selected */}
-        <ResizablePanel storageKey="sidebarWidth_knowledgeCat" defaultWidth={240} minWidth={180} maxWidth={400} visible={!graphMode && panelsVisible && showCategoryPanel} initialWidth={sidebarWidths.sidebarWidth_knowledgeCat} onSnapClose={() => setShowCategoryPanel(false)} onSnapOpen={() => { setShowCategoryPanel(true); onSnapOpenSidebar?.() }}>
+        {/* v3.4.0 批次3：左栏模块态（sidebarEl 由 App 传入）时，侧栏内容 portal 进左栏 slot —— 挂载点迁移
+            而非复制渲染，全部状态留在本组件（方案 §7 风险2）。否则回落原位 ResizablePanel。
+            两形态显隐一致：portal 传 null ⇔ ResizablePanel visible=false 不渲染 children；
+            且 sidebarEl 形态下 ResizablePanel 整体不渲染，模块中间区不再残留收起边条。 */}
+        {(() => {
+          const sidebarInner = (
           <div className="flex flex-col h-full" style={sidebarItemVars as unknown as React.CSSProperties}>
             {/* 空间沉浸视图顶部：返回栏（仅空间内显示）；目录拖到本栏=移出空间（移到根级中转） */}
             {selectedSpaceId && selectedSpace && (
@@ -1629,7 +1642,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               </div>
             )}
           </div>
-        </ResizablePanel>
+          )
+          return sidebarEl
+            ? createPortal(!graphMode && panelsVisible && showCategoryPanel ? sidebarInner : null, sidebarEl)
+            : (
+                <ResizablePanel storageKey="sidebarWidth_knowledgeCat" defaultWidth={240} minWidth={180} maxWidth={400} visible={!graphMode && panelsVisible && showCategoryPanel} initialWidth={sidebarWidths.sidebarWidth_knowledgeCat} onSnapClose={() => setShowCategoryPanel(false)} onSnapOpen={() => { setShowCategoryPanel(true); onSnapOpenSidebar?.() }}>
+                  {sidebarInner}
+                </ResizablePanel>
+              )
+        })()}
 
         {/* 右侧链接提示（选中章节且无L2面板时显示） */}
         {/* Editor */}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Plus, Maximize2, Zap, ChevronDown, RotateCcw, Trash2, Check, CalendarDays, LayoutGrid } from 'lucide-react'
 import type { ScheduleTodo, ScheduleTag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO } from '../../types'
 import { registerAssistantContext } from '../../lib/assistantContext'
@@ -75,7 +76,7 @@ function localToday(): string {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
 }
 
-export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar }: { isActive?: boolean; sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void }) {
+export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, sidebarEl = null }: { isActive?: boolean; sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; sidebarEl?: HTMLElement | null }) {
   const now = new Date()
   const today = localToday()
 
@@ -207,13 +208,17 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
   }
 
   /** 左栏「周任务」清单：本周（自然周）全部任务，含已完成。复用 vaultTodosForWeek（已按周取数） */
-  async function refreshWeekTasks() {
+  // 必须是稳定引用：下方 `useEffect(..., [trayMode, weekStart, weekEnd, refreshWeekTasks])` 把它列进依赖，
+  // 而它内部又 setWeekTasks（filter 出来的新数组 = 新引用）触发重渲染 —— 引用一旦不稳定，
+  // 这条 effect 就每次渲染都跑一轮 IPC，形成「拉取 → 重渲染 → 再拉取」的空转；
+  // 在「本周」档位下会一直转，顺带不断重渲染本模块，把弹窗里正在输入的内容冲掉。
+  const refreshWeekTasks = useCallback(async () => {
     try {
       const list = await getScheduleWeekTodos(weekStart, weekEnd)
       // 只留自然周区间内的任务（排除「延后候选」），含已完成
       setWeekTasks(list.filter(t => t.date >= weekStart && t.date <= weekEnd))
     } catch (e) { console.error(e) }
-  }
+  }, [weekStart, weekEnd])
 
   async function refreshAll() { await Promise.all([refreshDotDates(), refreshMonthTodos(), refreshUnscheduled()]) }
 
@@ -636,7 +641,10 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
       </div>
 
       <div className="flex min-h-0 flex-1">
-      <ResizablePanel storageKey="sidebarWidth_schedule" defaultWidth={280} minWidth={220} maxWidth={450} visible={sidebarOpen} initialWidth={sidebarWidths.sidebarWidth_schedule} onSnapClose={onSnapCloseSidebar} onSnapOpen={onSnapOpenSidebar}>
+      {/* v3.4.0 批次3：左栏模块态（sidebarEl）时侧栏内容 portal 进左栏 slot（挂载点迁移），
+          否则回落原位 ResizablePanel；portal 传 null ⇔ visible=false 不渲染 children，显隐一致 */}
+      {(() => {
+        const sidebarInner = (
         <div className="h-full flex flex-col" style={paneStyle(viewLeaving)}>
           {/* 头部：与编辑器「资源管理器」同款紧凑标题行 */}
           <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
@@ -689,7 +697,15 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
           </div>
           <PluginSlotEntry slot="schedule.sidebar" />
         </div>
-      </ResizablePanel>
+        )
+        return sidebarEl
+          ? createPortal(sidebarOpen ? sidebarInner : null, sidebarEl)
+          : (
+              <ResizablePanel storageKey="sidebarWidth_schedule" defaultWidth={280} minWidth={220} maxWidth={450} visible={sidebarOpen} initialWidth={sidebarWidths.sidebarWidth_schedule} onSnapClose={onSnapCloseSidebar} onSnapOpen={onSnapOpenSidebar}>
+                {sidebarInner}
+              </ResizablePanel>
+            )
+      })()}
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {shownMode === 'week' ? (
