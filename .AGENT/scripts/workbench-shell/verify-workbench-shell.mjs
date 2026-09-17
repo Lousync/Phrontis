@@ -231,7 +231,7 @@ console.log('\n=== E. 右栏优化轮：布局权重 + 工具侧栏适配 ===')
 
 // E1 布局权重：中段「最近编辑」收缩，下段简略视图吃满
 ok(/h-\[196px\]/.test(srcRight) === false, 'E1 简略视图不再固定 196px（自适应+上限，超长才滚动）')
-ok(/data-wb="widgetBrief"[^]*?min-h-0 flex-1 overflow-y-auto/.test(srcRight.replace(/\n/g, ' ')),
+ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col overflow-y-auto/.test(srcRight.replace(/\n/g, ' ')),
   'E1b 简略视图 = flex-1 吃满下段剩余（显示完常规内容量）')
 ok(!/flex min-h-\[72px\] flex-1/.test(srcRight) && /shrink-0 flex-col overflow-hidden rounded-lg border/.test(srcRight),
   'E1c 最近编辑不再 flex-1 抢占空间（自适应收缩）')
@@ -263,6 +263,25 @@ ok(/!wbLayout\.leftLocked && TOOLS_WITH_SIDEBAR\.has\(tid\)/.test(srcApp),
   'E4c 锁定时工具侧栏回落内嵌（toolHosted 判定含 !leftLocked，不与旧模块态抢 slot）')
 ok(/railTool=\{railTool\}/.test(srcApp) && /railTool\?/.test(srcShell) && /railModule \|\| railTool/.test(srcLeft),
   'E4d App → Shell → LeftPanel railTool 透传，模块态条件 = railModule || railTool')
+
+// E5 右栏下段「只留番茄钟」+ 番茄钟形态改造（2026-09-17 第二轮）
+ok(/DEFAULT_VISIBLE_WIDGET_IDS[^]*?\['pomo'\]/.test(srcWbl.replace(/\n/g, ' ')),
+  'E5 默认可见控件 = 只番茄钟（DEFAULT_VISIBLE_WIDGET_IDS，其余 4 项 ⋯ 菜单可勾回）')
+ok(/widgetsHidden: WORKBENCH_WIDGET_IDS\.filter/.test(srcWbl) && /widgetsHidden: \[\.\.\.DEFAULT_WORKBENCH_LAYOUT\.widgetsHidden\]/.test(srcWbl),
+  'E5b 默认隐藏集由规范集派生 + parse 层缺键用规范默认（不再硬编码 []，否则默认可见集永远被覆盖）')
+const srcPomo = stripComments(read('src/components/workbench/widgets/PomoWidget.tsx'))
+ok(/data-wb="pomoRing"/.test(srcPomo) && /strokeDashoffset/.test(srcPomo) && /const RING_CIRC = 2 \* Math\.PI \* RING_R/.test(srcPomo),
+  'E5c 专注态环形进度（SVG 环 + stroke-dashoffset 周长派生）')
+ok(/const ringMode = ps\.visible && ps\.phase === 'work'/.test(srcPomo),
+  'E5d 环仅专注阶段显形（就绪/休息保持横条，拍板口径）')
+ok(/data-wb="pomoControls"[^]*?grid w-full grid-cols-2/.test(srcPomo.replace(/\n/g, ' ')) && /col-span-2/.test(srcPomo),
+  'E5e 控制钮等宽两列（就绪单钮跨两列，运行/暂停/完成 = 主钮 + 重置）')
+ok(/sub\s*:/.test(srcRight) === false && /与工具箱同源/.test(srcRight) === false,
+  'E5f 简略视图副说明文字已移除（WIDGET_META 无 sub 字段）')
+ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col/.test(srcRight.replace(/\n/g, ' ')) && /m-auto w-full/.test(srcRight),
+  'E5g 简略视图内容垂直居中（m-auto：上下留白均匀，超高时归零顶部起滚不被裁）')
+ok(/widgetsDefaultMigrated/.test(srcWbl) && /base\.widgetsHidden\.length === 0/.test(srcWbl),
+  'E5h 控件默认可见集一次性迁移（旧 widgetsHidden=[] 是旧默认态 → 收敛为新默认 + 置标记；幂等不误伤手动全显）')
 
 console.log('\n========================================')
 if (fails.length === 0) {

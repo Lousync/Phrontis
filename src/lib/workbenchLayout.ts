@@ -33,10 +33,20 @@ export interface WorkbenchLayout {
   bookmarksHidden: string[]
   /** 分屏比例（主栏:副栏，0~1；null = 未分屏） */
   splitRatio: number | null
+  /** 控件默认可见集迁移标记（2026-09-17）：旧布局 widgetsHidden=[] = 「默认全显」时代的默认态，
+   *  首次解析时收敛为新默认并置位；置位后尊重用户选择（含手动全显）。见 parseWorkbenchLayout */
+  widgetsDefaultMigrated?: boolean
 }
 
 /** 右栏控件的规范顺序（缺省序 = 原型 v15 定稿）；DayPanel 四控件 id 沿用 DAY_TABS */
 export const WORKBENCH_WIDGET_IDS = ['task', 'habit', 'pomo', 'password', 'nav'] as const
+
+/**
+ * 右栏下段简略视图的**默认可见控件**（2026-09-17 右栏优化轮拍板）：
+ * 默认只显番茄钟——右栏下段是常驻区，任务/打卡/导航/密码生成器都在各自模块有完整界面，
+ * 塞进右栏只会互相挤压。其余 4 个控件仍在切换条 ⋯ 菜单里可手动勾回（隐藏 ≠ 卸载）。
+ */
+export const DEFAULT_VISIBLE_WIDGET_IDS: readonly string[] = ['pomo']
 
 /**
  * 源自 DayPanel 的四个控件 id（方案 §3.7 互斥判定用）：整体脱离为独立窗口
@@ -55,7 +65,8 @@ export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   rightCollapsed: true,
   rightTab: 'widgets',
   widgetOrder: [...WORKBENCH_WIDGET_IDS],
-  widgetsHidden: [],
+  // 默认隐藏 = 规范集 - 默认可见集（2026-09-17：右栏下段默认只显番茄钟）
+  widgetsHidden: WORKBENCH_WIDGET_IDS.filter((id) => !DEFAULT_VISIBLE_WIDGET_IDS.includes(id)),
   panelTabsHidden: [],
   bookmarksHidden: [],
   splitRatio: null,
@@ -65,7 +76,9 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
   const base: WorkbenchLayout = {
     ...DEFAULT_WORKBENCH_LAYOUT,
     widgetOrder: [...DEFAULT_WORKBENCH_LAYOUT.widgetOrder],
-    widgetsHidden: [],
+    // 缺键时用规范默认（右栏默认只显番茄钟，见 DEFAULT_VISIBLE_WIDGET_IDS），
+    // 不再硬编码 [] —— 否则「默认可见集」永远被空数组（= 全显）覆盖
+    widgetsHidden: [...DEFAULT_WORKBENCH_LAYOUT.widgetsHidden],
   }
   if (!raw) return base
   try {
@@ -86,6 +99,14 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       }
       if (Array.isArray(o.widgetsHidden)) {
         base.widgetsHidden = o.widgetsHidden.filter((x): x is string => typeof x === 'string')
+      }
+      /* 控件默认可见集一次性迁移（2026-09-17 右栏优化轮）：
+         旧持久化里 widgetsHidden=[] 是「默认全显」时代的**默认态**（不是用户的显式选择），
+         直接改 DEFAULT 对它无效。这里在「未打过迁移标记 + 隐藏集为空」时收敛为新默认，
+         并置标记让写回落盘；打过标记的数据（含用户之后手动全显）不再迁移 —— 幂等且不误伤。 */
+      if (o.widgetsDefaultMigrated !== true) {
+        if (base.widgetsHidden.length === 0) base.widgetsHidden = [...DEFAULT_WORKBENCH_LAYOUT.widgetsHidden]
+        base.widgetsDefaultMigrated = true
       }
       if (Array.isArray(o.panelTabsHidden)) {
         base.panelTabsHidden = o.panelTabsHidden.filter((x): x is string => typeof x === 'string')

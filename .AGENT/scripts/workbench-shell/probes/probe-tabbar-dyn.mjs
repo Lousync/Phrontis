@@ -192,6 +192,39 @@ async function main() {
   const afterClose = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
   ok(afterClose !== 'pdf-toolkit', 'D10c 关工具标签 → railTool 清空不滞留（左栏跟随落点标签）', `mod=${afterClose}`)
 
+  // D11 右栏下段改造（2026-09-17 第二轮）：默认只留番茄钟 + 专注态变环形进度 + 按钮随状态变
+  // 展开右栏（默认收起；点右缘展开手柄）
+  await evalJs(`(() => {
+    const hs = [...document.querySelectorAll('[data-wb="shell"] [title="拖拽或点击展开"]')]
+    hs[hs.length - 1]?.click(); return true
+  })()`)
+  await sleep(800)
+  const rpOpen = await evalJs(`!!document.querySelector('[data-wb="rightPanel"]')`)
+  ok(rpOpen, 'D11a 右栏可展开（展开手柄仍有边缘入口）')
+  const wsCount = await evalJs(`document.querySelectorAll('[data-wb="wsBtn"]').length`)
+  const wsFirst = await evalJs(`document.querySelector('[data-wb="wsBtn"]')?.getAttribute('title') ?? ''`)
+  ok(wsCount === 1 && wsFirst === '番茄钟', 'D11b 右栏下段默认只显番茄钟（切换条 1 项，其余 ⋯ 菜单可勾回）', `count=${wsCount} first=${wsFirst}`)
+  const subGone = await evalJs(`(() => {
+    const el = document.querySelector('[data-wb="widgetBrief"]')
+    return !!el && !el.textContent.includes('与工具箱同源')
+  })()`)
+  ok(subGone, 'D11c 副说明文字已移除（简略视图内无「与工具箱同源」）')
+  const ringBefore = await evalJs(`!!document.querySelector('[data-wb="pomoRing"]')`)
+  ok(!ringBefore, 'D11d 就绪态无环（保持横条）')
+  // 点「开始」→ 专注态：环出现 + 重置钮出现（按钮随状态变）+ 主钮文案变「暂停」
+  await evalJs(`(() => { document.querySelector('[data-wb="pomoMain"]')?.click(); return true })()`)
+  await sleep(1200)
+  const ringAfter = await evalJs(`!!document.querySelector('[data-wb="pomoRing"]')`)
+  const resetShown = await evalJs(`!!document.querySelector('[data-wb="pomoReset"]')`)
+  const mainTxt = await evalJs(`document.querySelector('[data-wb="pomoMain"]')?.textContent ?? ''`)
+  ok(ringAfter, 'D11e 专注态出现环形进度（环围着倒计时）')
+  ok(resetShown && mainTxt === '暂停', 'D11f 按钮随状态变（专注中 = 暂停 + 重置）', `main=${mainTxt} reset=${resetShown}`)
+  // 收尾：暂停 + 重置（不留运行中的计时器）
+  await evalJs(`(() => { document.querySelector('[data-wb="pomoMain"]')?.click(); return true })()`)
+  await sleep(400)
+  await evalJs(`(() => { document.querySelector('[data-wb="pomoReset"]')?.click(); return true })()`)
+  await sleep(400)
+
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)
   for (const r of results) console.log(`${r.pass ? '✓' : '✗'} ${r.label}${r.detail ? '  → ' + r.detail : ''}`)

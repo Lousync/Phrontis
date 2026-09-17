@@ -75,13 +75,14 @@ interface Props {
   onOpenSchedule: () => void
 }
 
-/** 5 控件的切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS） */
-const WIDGET_META: Record<string, { icon: typeof Timer; label: string; sub: string }> = {
-  task: { icon: CalendarDays, label: '今日任务', sub: '逾期置顶' },
-  habit: { icon: ListChecks, label: '今日打卡', sub: '计划内习惯' },
-  pomo: { icon: Timer, label: '番茄钟', sub: '与工具箱同源' },
-  password: { icon: KeyRound, label: '强密码生成器', sub: '本地生成' },
-  nav: { icon: Globe, label: '网址导航', sub: '选自收藏' },
+/** 5 控件的切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
+ *  2026-09-17 右栏优化轮：删 sub 副说明（「与工具箱同源」等文字按反馈移除，标题行只留控件名） */
+const WIDGET_META: Record<string, { icon: typeof Timer; label: string }> = {
+  task: { icon: CalendarDays, label: '今日任务' },
+  habit: { icon: ListChecks, label: '今日打卡' },
+  pomo: { icon: Timer, label: '番茄钟' },
+  password: { icon: KeyRound, label: '强密码生成器' },
+  nav: { icon: Globe, label: '网址导航' },
 }
 
 export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule }: Props) {
@@ -314,15 +315,17 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
 
               {/* 简略视图（2026-09-17 右栏优化轮：原固定 h-[196px] 改 flex-1 吃满下段剩余——
                   内容少时整窗显示完不滚动；条目特别多时在此高度内滚动（自适应+上限）。
+                  内容垂直居中（m-auto）：番茄钟这类内容量小的控件不再「贴顶 + 底部一大片空白」，
+                  上下留白均匀；内容超高时 auto margin 归零，从顶部开始正常滚动不被裁。
                   DayPanel 系控件脱离中 → 「已在桌面」互斥条目） */}
-              <div data-wb="widgetBrief" className="kb-view-fade m-2 mt-1.5 min-h-0 flex-1 overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] p-2.5">
+              <div data-wb="widgetBrief" className="kb-view-fade m-2 mt-1.5 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] p-2.5">
                 {effectiveWidget == null ? (
-                  <div className="flex h-full items-center justify-center text-[11.5px] text-[var(--text-muted)]">小控件均已隐藏，点击上方 ⋯ 恢复</div>
+                  <div className="m-auto text-[11.5px] text-[var(--text-muted)]">小控件均已隐藏，点击上方 ⋯ 恢复</div>
                 ) : dayPanelDetached && (DAY_PANEL_WIDGET_IDS as readonly string[]).includes(effectiveWidget) ? (
                   <button
                     data-wb="detachedStub"
                     onClick={onDockDayPanel}
-                    className="flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                    className="m-auto flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
                     title="该小组件已脱离为独立桌面窗口，点击收回右栏"
                   >
                     <MonitorX size={16} />
@@ -330,17 +333,14 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
                     <span className="text-[10.5px]">点击收回右栏</span>
                   </button>
                 ) : (
-                  <>
-                    <div className="mb-1.5 flex items-baseline justify-between px-0.5">
-                      <span className="text-[11.5px] font-semibold text-[var(--text-secondary)]">{WIDGET_META[effectiveWidget]?.label}</span>
-                      <span className="text-[10px] text-[var(--text-muted)]">{WIDGET_META[effectiveWidget]?.sub}</span>
-                    </div>
+                  <div className="m-auto w-full">
+                    <div className="mb-1.5 px-0.5 text-[11.5px] font-semibold text-[var(--text-secondary)]">{WIDGET_META[effectiveWidget]?.label}</div>
                     {effectiveWidget === 'task' && <TaskWidget onOpenSchedule={onOpenSchedule} />}
                     {effectiveWidget === 'habit' && <HabitWidget />}
                     {effectiveWidget === 'pomo' && <PomoWidget />}
                     {effectiveWidget === 'password' && <PasswordWidget />}
                     {effectiveWidget === 'nav' && <NavWidget />}
-                  </>
+                  </div>
                 )}
               </div>
             </div>
