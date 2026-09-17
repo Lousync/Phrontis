@@ -7,11 +7,12 @@ import {
 import * as pdfjsLib from 'pdfjs-dist'
 import { renderTextLayer } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
-import { openExternal, pdfReaderGet, pdfReaderPatch, workspaceReadRange } from '../../../lib/ipc'
+import { openExternal, copyText, pdfReaderGet, pdfReaderPatch, translateInvoke, workspaceReadRange } from '../../../lib/ipc'
 import { showToast } from '../../../lib/toast'
 import { normalizeSpreadStart, resolveDegrade, spreadPages, estimatePageHeight, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/pdfLayout'
 import { PdfThumbGrid } from './PdfThumbGrid'
 import { PdfBookmarkList } from './PdfBookmarkList'
+import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
 import type { PdfBookPatch, PdfBookState } from '../../../types'
 
 // 同源 worker（v3 classic，兼容 Electron 33 / Chromium 130——v4.5+ 依赖 toHex 未实现）
@@ -481,6 +482,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
         else break
       }
       if (best !== pageNumRef.current) { pageNumRef.current = best; setPageNum(best) }
+      setSelInfo(null) // 滚动即失效浮条锚点
       // 续读：页内滚动比例（0..1，两极端不写避免污染）
       const max = host.scrollHeight - host.clientHeight
       if (max > 40) {
@@ -717,6 +719,83 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     })
   }, [scheduleProgress])
 
+  // ===== 划词 AI 工具条（方案 §6）=====
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [selInfo, setSelInfo] = useState<{ rect: SelectionRect; text: string; page: number } | null>(null)
+  const [translate, setTranslate] = useState<TranslateState | null>(null)
+  const closeSelBar = useCallback(() => { setSelInfo(null); setTranslate(null) }, [])
+
+  const evalSelection = useCallback(() => {
+    const sel = window.getSelection()
+    const root = rootRef.current
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !root) {
+      setSelInfo((prev) => (prev ? null : prev))
+      return
+    }
+    const text = String(sel)
+    if (!text.trim()) { setSelInfo((prev) => (prev ? null : prev)); return }
+    const range = sel.getRangeAt(0)
+    const anchorEl = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement
+    if (!anchorEl || !root.contains(anchorEl)) return
+    const r0 = range.getBoundingClientRect()
+    if (!r0 || (r0.width === 0 && r0.height === 0)) return
+    // 页码：竖滚从页槽 data-pg 解析；翻页模式回退当前页
+    const pgEl = anchorEl.closest('[data-pg]')
+    let page = pgEl ? Number((pgEl as HTMLElement).dataset.pg) : 0
+    if (!page || Number.isNaN(page)) page = viewMode === 'duo' ? duoStartRef.current : pageNumRef.current
+    setSelInfo({ rect: { left: r0.left, top: r0.top, width: r0.width, height: r0.height }, text, page })
+  }, [viewMode])
+
+  useEffect(() => {
+    const onMouseUp = () => { window.setTimeout(evalSelection, 0) }
+    const onSelChange = () => {
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed) closeSelBar()
+    }
+    document.addEventListener('mouseup', onMouseUp)
+    document.addEventListener('selectionchange', onSelChange)
+    return () => {
+      document.removeEventListener('mouseup', onMouseUp)
+      document.removeEventListener('selectionchange', onSelChange)
+    }
+  }, [evalSelection, closeSelBar])
+
+  const doCopySel = useCallback(() => {
+    if (!selInfo) return
+    void copyText(selInfo.text).then((ok) => {
+      showToast(ok ? { type: 'success', message: '已复制选中文本' } : { type: 'warning', message: '复制失败' })
+    })
+  }, [selInfo])
+
+  const doTranslateSel = useCallback(async () => {
+    if (!selInfo || translate?.loading) return
+    const text = selInfo.text.trim().slice(0, 4000)
+    setTranslate({ loading: true, text: '' })
+    try {
+      // translationRepo 缓存通道（方案 §1.5）：命中缓存零 token，结果纯展示
+      const r = await translateInvoke({ text })
+      if (r.ok) setTranslate({ loading: false, text: r.markdown, cached: r.cached })
+      else setTranslate({ loading: false, text: '', error: r.error })
+    } catch (e) {
+      setTranslate({ loading: false, text: '', error: String((e as Error)?.message || e) })
+    }
+  }, [selInfo, translate])
+
+  const doAsk = useCallback((intent: 'explain' | 'quiz') => {
+    if (!selInfo) return
+    const excerpt = selInfo.text.trim().slice(0, 1200)
+    const head = `我正在阅读 PDF《${name}》第 ${selInfo.page} 页，选了下面这段内容：\n\n「${excerpt}」\n\n`
+    const question = intent === 'explain'
+      ? head + '请讲解这段内容：先讲清涉及的概念/公式，再给一个可操作的例子或推演步骤。'
+      : head + '请根据这段内容出一组练习题帮助我巩固（用 ```quiz 围栏输出，题号从 1 开始连续编号），覆盖它的核心考点。'
+    // state+props 范式（ISS-2026-09-04-07）：事件只送意图，payload 由 App 落 state 后经 props 下发
+    window.dispatchEvent(new CustomEvent('kb-ai-teaching-ask', {
+      detail: { question, source: { type: 'pdf', relPath, page: selInfo.page, excerpt } },
+    }))
+    closeSelBar()
+    showToast({ type: 'info', message: '已跳转 AI 教学并带上选段上下文' })
+  }, [closeSelBar, name, relPath, selInfo])
+
   /** 大纲点击 → 跳页 */
   const jumpOutline = useCallback(async (node: OutlineNode) => {
     const pdf = pdfRef.current
@@ -801,6 +880,8 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       } else if (e.key === 'Escape') {
         if (document.getElementById('kb-pdf-search-input') === document.activeElement) {
           ;(document.activeElement as HTMLInputElement).blur()
+        } else if (selInfo) {
+          closeSelBar()
         } else if (sideTab !== null) {
           setSideTab(null)
         } else if (immersive) {
@@ -810,7 +891,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [immersive, sideTab, stepPage, toggleImmersive])
+  }, [closeSelBar, immersive, selInfo, sideTab, stepPage, toggleImmersive])
 
   // 渲染时高亮本页搜索命中（single/duo：文本层 refs）
   useEffect(() => {
@@ -1013,7 +1094,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   }, [viewMode, numPages, slotH])
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)]">
+    <div ref={rootRef} className="relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)]">
       {toolbar}
       <div className="flex min-h-0 flex-1 items-stretch" style={eyeCare ? { filter: 'sepia(0.32) brightness(0.97) saturate(0.92)' } : undefined}>
         {sidePanel}
@@ -1063,6 +1144,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       {immersive && <button onClick={toggleImmersive} title="退出沉浸 (Esc)"
         className="fixed top-3 right-3 z-50 flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 text-[var(--text-secondary)] shadow hover:text-[var(--text-primary)]"><X size={14} /></button>}
       {floatingBar}
+      <TextSelectionBar rect={selInfo?.rect ?? null} translate={translate} onCopy={doCopySel} onTranslate={() => void doTranslateSel()} onAsk={doAsk} onClose={closeSelBar} />
     </div>
   )
 }

@@ -510,6 +510,20 @@ export default function App() {
     return () => window.removeEventListener('kb-open-in-editor', handler)
   }, [])
 
+  // v3.4.0 PDF 划词 → AI 教学（pdf-reader 方案 §6）：事件只送意图，payload 走 state+props
+  // （ISS-2026-09-04-07：保活层实例重建会丢 window 一次性变量）。消费后立即清空防重复跳转。
+  const [pendingAsk, setPendingAsk] = useState<{ question: string; source?: { type: string; relPath: string; page: number; excerpt: string } } | null>(null)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent).detail as { question?: string; source?: { type: string; relPath: string; page: number; excerpt: string } } | undefined
+      if (!d?.question) return
+      setPendingAsk({ question: d.question, source: d.source })
+      setActiveTab('aiTeaching')
+    }
+    window.addEventListener('kb-ai-teaching-ask', handler)
+    return () => window.removeEventListener('kb-ai-teaching-ask', handler)
+  }, [])
+
   // 日程侧边栏（v3.2.0 ⑮）桌面磁贴的日历 → 日志跳转。
   // 与 kb-open-in-editor 同范式：事件只送意图，payload 走 state + props
   // （保活层会重建 BlogModule 实例，靠 window 一次性变量会丢）。消费后立即清空，
@@ -829,7 +843,7 @@ export default function App() {
       case 'moments': return <MomentsModule />
       case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'editor' ? wbModSlotEl : null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} openFrom={editorJumpFrom && editorJumpFrom !== 'editor' ? tabLabel(editorJumpFrom) : null} onBackFrom={() => { const f = editorJumpFrom; if (f) { setEditorJumpFrom(null); handleTabChange(f) } }} zenLevel={zenLevel} onZenLevelChange={setZenLevel} />
       case 'bookshelf': return <BookshelfModule isActive={on} />
-      case 'aiTeaching': return <AiTeachingModule isActive={on} zenLevel={zenLevel} onZenLevelChange={changeZen} />
+      case 'aiTeaching': return <AiTeachingModule isActive={on} zenLevel={zenLevel} onZenLevelChange={changeZen} pendingAsk={pendingAsk} onConsumePendingAsk={() => setPendingAsk(null)} />
       case 'recycle': return <RecycleBinModule isActive={on} />
       case 'settings': return <SettingsModule />
       case 'toolbox': return <ToolboxModule homeSignal={toolboxHomeSignal} />
