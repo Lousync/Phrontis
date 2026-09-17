@@ -2,14 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize as MaximizeIcon,
   FileText, AlertTriangle, Loader2, ListTree, Search, BookOpen, X,
-  GalleryVertical, Square, Columns2,
+  GalleryVertical, Square, Columns2, Bookmark, BookmarkPlus, LayoutGrid, Eye, EyeOff, BookMarked,
 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { renderTextLayer } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
-import { workspaceReadRange } from '../../../lib/ipc'
+import { openExternal, pdfReaderGet, pdfReaderPatch, workspaceReadRange } from '../../../lib/ipc'
 import { showToast } from '../../../lib/toast'
 import { normalizeSpreadStart, resolveDegrade, spreadPages, estimatePageHeight, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/pdfLayout'
+import { PdfThumbGrid } from './PdfThumbGrid'
+import { PdfBookmarkList } from './PdfBookmarkList'
+import type { PdfBookPatch, PdfBookState } from '../../../types'
 
 // 同源 worker（v3 classic，兼容 Electron 33 / Chromium 130——v4.5+ 依赖 toHex 未实现）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -20,7 +23,7 @@ const POOL_CONCURRENCY = 4
 /** 渲染池预取缓冲：可视页 ±2 */
 const POOL_BUFFER = 2
 
-/** 文本层必要样式（pdf.js 官方 viewer.css 子集）：一次性注入 */
+/** 文本层必要样式（pdf.js 官方 viewer.css 子集）+ 页内链接热区：一次性注入 */
 let textLayerStyleInjected = false
 function ensureTextLayerStyle(): void {
   if (textLayerStyleInjected) return
@@ -32,6 +35,7 @@ function ensureTextLayerStyle(): void {
     .kb-pdf-text-layer span, .kb-pdf-text-layer br { position: absolute; white-space: pre; transform-origin: 0% 0%; color: transparent; }
     .kb-pdf-text-layer ::selection { background: rgba(0,120,255,0.35); color: transparent; }
     .kb-pdf-text-layer .kb-pdf-match { color: transparent; outline: 2px solid rgba(230,140,30,0.9); background: rgba(230,140,30,0.35); }
+    .kb-pdf-link:hover { background: rgba(0,120,255,0.14); box-shadow: 0 0 0 1px rgba(0,120,255,0.25); }
   `
   document.head.appendChild(style)
 }
@@ -71,6 +75,53 @@ async function destToPageNum(pdf: pdfjsLib.PDFDocumentProxy, dest: unknown): Pro
     }
   } catch { /* 解析失败回第 1 页 */ }
   return 1
+}
+
+/**
+ * 页内链接热区（方案 §5.8）：/Link 注解 rect → viewport 矩形 → 透明热区。
+ * 内部 dest 跳页；URI 型走 app:openExternal（主进程白名单 http/https）。
+ * goPage 经 ref 注入避免渲染闭包环。
+ */
+async function attachLinks(
+  pdf: pdfjsLib.PDFDocumentProxy,
+  page: pdfjsLib.PDFPageProxy,
+  viewport: { convertToViewportRectangle: (r: number[]) => number[] },
+  host: HTMLElement,
+  onJumpPage: (n: number) => void,
+): Promise<void> {
+  try {
+    const annots = await page.getAnnotations()
+    for (const a of annots) {
+      if (!a || a.subtype !== 'Link') continue
+      const url = typeof (a as { url?: unknown }).url === 'string' ? (a as { url: string }).url : ''
+      let destPage: number | null = null
+      if (!url && (a as { dest?: unknown }).dest !== undefined) {
+        const n = await destToPageNum(pdf, (a as { dest: unknown }).dest)
+        if (n >= 1) destPage = n
+      }
+      if (!url && !destPage) continue
+      const rect = viewport.convertToViewportRectangle((a as { rect?: number[] }).rect ?? [0, 0, 0, 0])
+      const left = Math.min(rect[0], rect[2])
+      const top = Math.min(rect[1], rect[3])
+      const w = Math.abs(rect[2] - rect[0])
+      const h = Math.abs(rect[3] - rect[1])
+      if (w <= 1 || h <= 1) continue
+      const div = document.createElement('div')
+      div.className = 'kb-pdf-link'
+      div.style.cssText = `position:absolute;left:${left}px;top:${top}px;width:${w}px;height:${h}px;cursor:pointer;`
+      div.title = url || `跳转到第 ${destPage} 页`
+      div.addEventListener('click', (ev) => {
+        ev.preventDefault()
+        ev.stopPropagation()
+        if (url) {
+          if (/^https?:\/\//i.test(url)) void openExternal(url)
+        } else if (destPage) {
+          onJumpPage(destPage)
+        }
+      })
+      host.appendChild(div)
+    }
+  } catch { /* 注解读取失败不影响页面渲染 */ }
 }
 
 interface OutlineNode {
@@ -113,6 +164,8 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   const [fitWidth, setFitWidth] = useState(true)
   const pageNumRef = useRef(1)
   const zoomRef = useRef(1)
+  /** goPage 经 ref 供 attachLinks 热区调用（避免渲染闭包环） */
+  const goPageRef = useRef<((n: number) => void) | null>(null)
   /** 容器可用宽（去内边距；duo 再对半） */
   const [availW, setAvailW] = useState(800)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -128,18 +181,78 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   const pageHostRef = useRef<HTMLDivElement>(null)
 
   // ===== 侧栏 / 搜索 / 沉浸（v1 保留） =====
-  const [sideTab, setSideTab] = useState<'outline' | 'search' | null>(null)
+  const [sideTab, setSideTab] = useState<'outline' | 'search' | 'thumbs' | 'bookmarks' | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [searchHits, setSearchHits] = useState<Array<{ page: number; preview: string }>>([])
   const [immersive, setImmersive] = useState(false)
   const [barHidden, setBarHidden] = useState(false)
 
+  // ===== 书级状态（批次 4：书签 / 续读 / 护眼，方案 §3/§5.6/§5.7）=====
+  const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
+  const [bookmarks, setBookmarks] = useState<Array<{ page: number; note: string; at: string }>>([])
+  const [eyeCare, setEyeCare] = useState(false)
+  /** 冲突检测基准（pdfReader.json 的 updatedAt） */
+  const bookUpdatedRef = useRef<string | undefined>(undefined)
+  const [hasProgressBook, setHasProgressBook] = useState(false)
+
   const readRange = useCallback(async (begin: number, end: number): Promise<Uint8Array> => {
     const r = await workspaceReadRange(rootId, relPath, begin, Math.max(1, end - begin))
     if ('error' in r && r.error) throw new Error(r.error)
     return b64ToU8(r.data)
   }, [rootId, relPath])
+
+  // ===== 续读写回（方案 §5.7：翻页/滚动节流 800ms patch；关标签/切 Tab/切文档立即 flush）=====
+  const pendingRef = useRef<{ patch: PdfBookPatch } | null>(null)
+  const flushTimerRef = useRef(0)
+
+  const doPatch = useCallback(async (patch: PdfBookPatch): Promise<void> => {
+    try {
+      const r = await pdfReaderPatch(rootId, relPath, patch, bookUpdatedRef.current)
+      if (r.ok && r.state) {
+        bookUpdatedRef.current = r.state.updatedAt
+        if (r.state.bookmarks) setBookmarks(r.state.bookmarks)
+      } else if (r.conflict && r.state) {
+        // 冲突 → 以服务端为基底、本地意图覆盖（进度语义 = 最新一次阅读位置胜出），带新基准重试一次
+        bookUpdatedRef.current = r.state.updatedAt
+        const merged: PdfBookPatch = { ...patch, lastPage: patch.lastPage ?? r.state.lastPage }
+        const r2 = await pdfReaderPatch(rootId, relPath, merged, r.state.updatedAt)
+        if (r2.ok && r2.state) {
+          bookUpdatedRef.current = r2.state.updatedAt
+          if (r2.state.bookmarks) setBookmarks(r2.state.bookmarks)
+        }
+      }
+    } catch { /* 写回失败静默：进度属可再生数据 */ }
+  }, [relPath, rootId])
+
+  const scheduleProgress = useCallback((patch: PdfBookPatch, immediate = false) => {
+    pendingRef.current = { patch: { ...(pendingRef.current?.patch ?? {}), ...patch } }
+    window.clearTimeout(flushTimerRef.current)
+    flushTimerRef.current = window.setTimeout(() => {
+      const p = pendingRef.current?.patch
+      pendingRef.current = null
+      if (p) void doPatch(p)
+    }, immediate ? 0 : 800)
+  }, [doPatch])
+
+  /** 卸载/隐藏/卸载前兜底 flush（保活层切 Tab 不卸载 → 用 visibilitychange 兜底） */
+  useEffect(() => {
+    const flush = () => {
+      const p = pendingRef.current?.patch
+      pendingRef.current = null
+      window.clearTimeout(flushTimerRef.current)
+      if (p) void doPatch(p)
+    }
+    const onVis = () => { if (document.visibilityState === 'hidden') flush() }
+    const onBeforeUnload = () => flush()
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      flush()
+    }
+  }, [doPatch])
 
   // ===== 容器宽测量（防呆降级 + 适宽基准）=====
   useEffect(() => {
@@ -171,12 +284,13 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availW, viewMode])
 
-  // ===== 渲染一页到指定 canvas（single / duo / scroll 池共用）=====
+  // ===== 渲染一页到指定 canvas（single / duo / scroll 池共用；textHost 同时承载链接热区）=====
   const renderPageTo = useCallback(async (
     num: number,
     canvas: HTMLCanvasElement,
     textHost: HTMLDivElement | null,
     scale: number,
+    opts?: { withText?: boolean },
   ): Promise<void> => {
     const pdf = pdfRef.current
     if (!pdf) return
@@ -192,8 +306,12 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     await page.render({ canvasContext: ctx, viewport, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined }).promise
     if (textHost) {
       textHost.innerHTML = ''
-      const textContent = await page.getTextContent()
-      void renderTextLayer({ textContentSource: textContent, container: textHost, viewport })
+      // 竖滚池：文本层只挂可视页（方案 §11.2）；链接热区总是挂
+      if (opts?.withText !== false) {
+        const textContent = await page.getTextContent()
+        await renderTextLayer({ textContentSource: textContent, container: textHost, viewport }).promise
+      }
+      await attachLinks(pdf, page, viewport, textHost, (n) => goPageRef.current?.(n))
     }
   }, [])
 
@@ -279,16 +397,11 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       const canvas = document.createElement('canvas')
       canvas.className = 'block bg-[var(--bg-primary)] shadow-sm'
       slot.appendChild(canvas)
-      await renderPageTo(n, canvas, null, scale)
+      const frame = document.createElement('div')
+      frame.className = 'kb-pdf-text-layer absolute inset-0'
+      await renderPageTo(n, canvas, frame, scale, { withText: tightVisibleRef.current.has(n) })
       // 渲染完按真实高度校正占位（估高只对首页可信）
       slot.style.height = `${canvas.style.height}`
-      if (tightVisibleRef.current.has(n)) {
-        const host = document.createElement('div')
-        host.className = 'kb-pdf-text-layer absolute inset-0'
-        slot.appendChild(host)
-        const textContent = await page.getTextContent()
-        void renderTextLayer({ textContentSource: textContent, container: host, viewport: page.getViewport({ scale }) })
-      }
       poolRenderedRef.current.add(n)
     } catch { /* 单页失败不进 error 全局态，滚动重试 */ }
     finally {
@@ -352,7 +465,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     return () => { tight.disconnect(); near.disconnect() }
   }, [viewMode, loading, numPages, syncPool])
 
-  // 竖滚：当前页跟踪（视口中心线所在 slot，rect 基准不依赖 offsetParent）+ rAF 节流
+  // 竖滚：当前页跟踪（视口中心线所在 slot，rect 基准不依赖 offsetParent）+ rAF 节流 + 滚动比例写回
   const scrollRafRef = useRef(0)
   const onScrollHost = useCallback(() => {
     if (scrollRafRef.current) return
@@ -368,8 +481,14 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
         else break
       }
       if (best !== pageNumRef.current) { pageNumRef.current = best; setPageNum(best) }
+      // 续读：页内滚动比例（0..1，两极端不写避免污染）
+      const max = host.scrollHeight - host.clientHeight
+      if (max > 40) {
+        const ratio = Math.min(1, Math.max(0, host.scrollTop / max))
+        scheduleProgress({ lastPage: best, scrollRatio: ratio })
+      }
     })
-  }, [])
+  }, [scheduleProgress])
 
   /** 竖滚跳页：滚到 slot 顶（rect 基准） */
   const scrollGoPage = useCallback((n: number) => {
@@ -389,10 +508,12 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       pageNumRef.current = target
       setPageNum(target)
       scrollGoPage(target)
+      scheduleProgress({ lastPage: target })
       return
     }
     if (viewMode === 'duo') {
       await renderDuo(target)
+      scheduleProgress({ lastPage: normalizeSpreadStart(Math.min(target, pdf.numPages)) })
       return
     }
     if (target === pageNumRef.current) {
@@ -402,13 +523,16 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     pageNumRef.current = target
     setPageNum(target)
     await renderSingle(target)
-  }, [renderDuo, renderSingle, scrollGoPage, viewMode])
+    scheduleProgress({ lastPage: target })
+  }, [renderDuo, renderSingle, scheduleProgress, scrollGoPage, viewMode])
+  goPageRef.current = (n) => { void goPage(n) }
 
   // ===== 模式切换 =====
   const switchMode = useCallback(async (m: PdfLayoutMode) => {
     if (m === viewMode) return
     const from = viewMode
     setViewMode(m)
+    scheduleProgress({ mode: m }, true)
     if (m === 'scroll') {
       // 从翻页模式进来：滚到当前页
       requestAnimationFrame(() => scrollGoPage(pageNumRef.current))
@@ -419,6 +543,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
         showToast({ type: 'warning', message: `容器宽度不足 ${DUO_MIN_WIDTH}px，已自动切回单页` })
         setViewMode('single')
         await renderSingle(pageNumRef.current)
+        scheduleProgress({ mode: 'single' }, true)
         return
       }
       const start = from === 'scroll' ? normalizeSpreadStart(pageNumRef.current) : pageNumRef.current
@@ -430,7 +555,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     pageNumRef.current = target
     setPageNum(target)
     requestAnimationFrame(() => { void renderSingle(target) })
-  }, [availW, renderDuo, renderSingle, scrollGoPage, viewMode])
+  }, [availW, renderDuo, renderSingle, scheduleProgress, scrollGoPage, viewMode])
 
   // ===== 加载文档 =====
   useEffect(() => {
@@ -451,6 +576,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
         const pdf = await task.promise
         if (!alive) { void task.destroy(); return }
         pdfRef.current = pdf
+        setPdfDoc(pdf)
         setNumPages(pdf.numPages)
         const p1 = await pdf.getPage(1)
         const base1 = p1.getViewport({ scale: 1 })
@@ -477,22 +603,61 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       alive = false
       pdfRef.current?.destroy().catch(() => {})
       pdfRef.current = null
+      setPdfDoc(null)
+      bookUpdatedRef.current = undefined
+      setBookmarks([])
+      setHasProgressBook(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootId, relPath])
 
-  // 加载完 → 竖滚估高；其余模式首渲
+  // 加载完 → 读书级状态（进度/模式/缩放/护眼/书签）→ 按恢复位置首渲（方案 §5.7 续读）
   useEffect(() => {
     if (loading || numPages === 0) return
-    if (viewMode === 'scroll') {
-      const { w, h } = firstPageRef.current
-      setSlotH(estimatePageHeight(w, h, Math.max(120, availW)))
-      requestAnimationFrame(() => scrollGoPage(pageNumRef.current))
-    } else if (viewMode === 'single') {
-      void renderSingle(pageNumRef.current)
-    } else {
-      void renderDuo(normalizeSpreadStart(pageNumRef.current))
-    }
+    void (async () => {
+      let restored: PdfBookState | null = null
+      try {
+        const r = await pdfReaderGet(rootId, relPath)
+        if (r.ok && r.state) {
+          restored = r.state
+          bookUpdatedRef.current = r.state.updatedAt
+          setBookmarks(r.state.bookmarks ?? [])
+          if (r.state.eyeCare) setEyeCare(true)
+          if (r.state.zoom && r.state.zoom !== 1) {
+            setFitWidth(false)
+            zoomRef.current = r.state.zoom
+            setZoom(r.state.zoom)
+          }
+          if (r.state.mode && r.state.mode !== 'scroll' && resolveDegrade(availW, r.state.mode) === r.state.mode) {
+            setViewMode(r.state.mode)
+          }
+        }
+      } catch { /* 无进度/读取失败 → 从头看 */ }
+      const page = restored?.lastPage && restored.lastPage >= 1 ? Math.min(restored.lastPage, numPages) : 1
+      pageNumRef.current = page
+      setPageNum(page)
+      const modeNow = restored?.mode && restored.mode !== 'scroll' && resolveDegrade(availW, restored.mode) === restored.mode ? restored.mode : 'scroll'
+      if (modeNow === 'scroll') {
+        const { w, h } = firstPageRef.current
+        setSlotH(estimatePageHeight(w, h, Math.max(120, availW)))
+        requestAnimationFrame(() => {
+          if (restored && restored.scrollRatio > 0.005) {
+            const host = scrollHostRef.current
+            if (host) {
+              // 占位已挂载 → 按比例恢复页内滚动位置
+              const max = host.scrollHeight - host.clientHeight
+              if (max > 40) host.scrollTop = restored.scrollRatio * max
+              return
+            }
+          }
+          scrollGoPage(page)
+        })
+      } else if (modeNow === 'duo') {
+        void renderDuo(page)
+      } else {
+        void renderSingle(page)
+      }
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, numPages])
 
@@ -518,7 +683,39 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     setFitWidth(false)
     zoomRef.current = Math.max(0.25, Math.min(5, (zoomRef.current || 1) * delta))
     setZoom(zoomRef.current)
-  }, [])
+    scheduleProgress({ zoom: zoomRef.current })
+  }, [scheduleProgress])
+
+  // ===== 书签（方案 §5.6：当页增删 + 列表备注）=====
+  const currentPageForBookmark = () => (viewMode === 'duo' ? duoStartRef.current : pageNumRef.current)
+
+  const toggleBookmark = useCallback(() => {
+    const page = currentPageForBookmark()
+    const has = bookmarks.some((b) => b.page === page)
+    const next = has
+      ? bookmarks.filter((b) => b.page !== page)
+      : [...bookmarks, { page, note: '', at: new Date().toISOString() }].sort((a, b) => a.page - b.page)
+    setBookmarks(next)
+    setHasProgressBook(next.length > 0)
+    scheduleProgress({ bookmarks: next }, true)
+  }, [bookmarks, scheduleProgress, viewMode])
+
+  const setBookmarkNote = useCallback((page: number, note: string) => {
+    const next = bookmarks
+      .map((b) => (b.page === page ? { ...b, note } : b))
+      .sort((a, b) => a.page - b.page)
+    setBookmarks(next)
+    scheduleProgress({ bookmarks: next }, true)
+  }, [bookmarks, scheduleProgress])
+
+  // ===== 护眼（方案 §5.9：容器级 filter，书级记忆；不碰全局主题变量）=====
+  const toggleEyeCare = useCallback(() => {
+    setEyeCare((v) => {
+      const next = !v
+      scheduleProgress({ eyeCare: next }, true)
+      return next
+    })
+  }, [scheduleProgress])
 
   /** 大纲点击 → 跳页 */
   const jumpOutline = useCallback(async (node: OutlineNode) => {
@@ -686,6 +883,22 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
         className={`flex items-center gap-1 rounded p-0.5 ${sideTab === 'search' ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <Search size={14} />搜索
       </button>
+      <button onClick={() => setSideTab((v) => (v === 'thumbs' ? null : 'thumbs'))} title="缩略图"
+        className={`flex items-center gap-1 rounded p-0.5 ${sideTab === 'thumbs' ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+        <LayoutGrid size={14} />缩略图
+      </button>
+      <button onClick={toggleBookmark} title={bookmarks.some((b) => b.page === currentPageForBookmark()) ? '移除本页书签' : '收藏本页书签'}
+        className={`flex items-center gap-1 rounded p-0.5 ${bookmarks.some((b) => b.page === currentPageForBookmark()) ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+        {bookmarks.some((b) => b.page === currentPageForBookmark()) ? <Bookmark size={14} /> : <BookmarkPlus size={14} />}书签
+      </button>
+      <button onClick={() => setSideTab((v) => (v === 'bookmarks' ? null : 'bookmarks'))} title="书签列表"
+        className={`flex items-center gap-1 rounded p-0.5 ${sideTab === 'bookmarks' ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+        <BookMarked size={14} />
+      </button>
+      <button onClick={toggleEyeCare} title="护眼模式（书级记忆）"
+        className={`flex items-center gap-1 rounded p-0.5 ${eyeCare ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+        {eyeCare ? <Eye size={14} /> : <EyeOff size={14} />}护眼
+      </button>
       <button onClick={toggleImmersive} title="沉浸阅读（隐藏全部 UI，Esc 退出）"
         className={`ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 ${immersive ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <BookOpen size={14} />沉浸
@@ -697,9 +910,18 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   const sidePanel = (
     <div className={`kb-view-fade flex w-64 shrink-0 flex-col border-r border-[var(--border-color)] bg-[var(--bg-secondary)] ${immersive || sideTab === null ? 'hidden' : ''}`}>
       <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-primary)]">
-        {sideTab === 'outline' ? <><ListTree size={13} />大纲</> : <><Search size={13} />搜索</>}
+        {sideTab === 'outline' ? <><ListTree size={13} />大纲</>
+          : sideTab === 'search' ? <><Search size={13} />搜索</>
+          : sideTab === 'thumbs' ? <><LayoutGrid size={13} />缩略图</>
+          : <><BookMarked size={13} />书签</>}
         <button onClick={() => setSideTab(null)} className="ml-auto rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><X size={12} /></button>
       </div>
+      {sideTab === 'thumbs' && (
+        <PdfThumbGrid pdf={pdfDoc} numPages={numPages} current={pageNum} duo={viewMode === 'duo'} onJump={(n) => void goPage(n)} />
+      )}
+      {sideTab === 'bookmarks' && (
+        <PdfBookmarkList bookmarks={bookmarks} current={pageNum} duo={viewMode === 'duo'} onJump={(n) => void goPage(n)} onNote={setBookmarkNote} />
+      )}
       {sideTab === 'outline' && (
         <div className="kb-view-in min-h-0 flex-1 overflow-auto py-1">
           {outline.length === 0 && <div className="px-3 py-2 text-[12px] text-[var(--text-muted)]">此 PDF 没有书签</div>}
@@ -793,7 +1015,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)]">
       {toolbar}
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 items-stretch" style={eyeCare ? { filter: 'sepia(0.32) brightness(0.97) saturate(0.92)' } : undefined}>
         {sidePanel}
         {viewMode === 'scroll' ? (
           <div ref={scrollHostRef} onScroll={onScrollHost} className="min-h-0 flex-1 overflow-auto">
