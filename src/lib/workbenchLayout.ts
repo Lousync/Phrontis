@@ -85,10 +85,12 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
  *
  * 2026-09-17 第三轮 UI 反馈拍板：标签条 = **文档标签式动态标签**（openTabs，可关闭/拖拽/
  * 全关空态），模块按钮不上标签栏——openTabs 恢复为标签条数据源。
- * 本清单 = 不画成标签的模块（渲染侧过滤）：aiTeaching 整窗形态（标签条本身隐藏）、
- * devtools dev-only。本文件保持零 value import，契约脚本 strip-types 直跑不炸。
+ * 2026-09-17 第四轮反馈拍板②：**图标条功能（回收站/插件市场/工具箱/动态/设置）点击只切换
+ * 视图、不登记为标签页**——它们是功能面板不是文档型模块，图标条常驻可随时返回；
+ * aiTeaching 整窗形态（标签条本身隐藏）与 devtools dev-only 一并排除。
+ * 本清单在 openTabs 登记处与渲染处双重过滤。本文件保持零 value import，契约脚本 strip-types 直跑不炸。
  */
-export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools']
+export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools', 'moments', 'toolbox', 'plugins', 'recycle', 'settings']
 
 /**
  * 左栏书签模块（v3.4.0 方案 §3.3 映射表，原型 v15 定稿 6 项）。

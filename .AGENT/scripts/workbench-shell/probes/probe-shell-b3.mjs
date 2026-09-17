@@ -93,8 +93,13 @@ async function main() {
   if (!st0.shell) {
     // 仓库选择页 → 进入
     await evalJs(`(() => { const b=[...document.querySelectorAll('button')].find(x=>/进入|打开|继续/.test(x.textContent)); b?.click(); return !!b })()`)
-    await sleep(1500)
+  }
+  // 等主界面就绪（书签区 6 项渲染）：进入仓库 + 懒加载可能慢于固定 sleep（实测选仓页进入
+  // 偶发慢于 1.5s → S3/S4/T1b 假失败），轮询最长 12s
+  for (let i = 0; i < 24; i++) {
     st0 = await evalJs(JS_STATE)
+    if (st0.shell && st0.bookmarks.length === 6) break
+    await sleep(500)
   }
 
   // 状态复位：上次运行的 S13 可能落盘了 leftCollapsed=true → 本次启动左栏直接收起，S3 假失败。

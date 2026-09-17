@@ -209,13 +209,12 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
               </div>
             )}
           </div>
+          {/* 仓库切换只在总览态（顶层）显示——2026-09-17 第四轮反馈拍板④；模块态/树模式不混入 */}
+          <div data-wb="vaultBar" className="shrink-0 border-t border-[var(--border-color)] p-1.5">
+            <VaultSwitcher />
+          </div>
         </>
       )}
-
-      {/* ---- 底部：仓库切换恒驻（vaultBar ⊂ 左栏） ---- */}
-      <div data-wb="vaultBar" className="shrink-0 border-t border-[var(--border-color)] p-1.5">
-        <VaultSwitcher />
-      </div>
     </div>
   )
 }

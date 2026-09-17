@@ -59,7 +59,15 @@ async function main() {
     const m = JSON.parse(e.data)
     if (m.id && pending.has(m.id)) { pending.get(m.id).resolve(m.result); pending.delete(m.id) }
   }
-  await sleep(1200)
+  // 等主界面就绪：可能停在仓库选择页 → 点「进入/打开/继续」，再轮询书签区（最长 12s；
+  // 实测选仓页进入后主界面懒加载偶发慢于固定 sleep）
+  for (let i = 0; i < 24; i++) {
+    const ready = await evalJs(`!!document.querySelector('[data-wb-bookmark="editor"]')`).catch(() => false)
+    if (ready) break
+    await evalJs(`(() => { const b=[...document.querySelectorAll('button')].find(x=>/进入|打开|继续/.test(x.textContent)); b?.click(); return true })()`)
+    await sleep(500)
+  }
+  await sleep(600)
 
   // D1 启动态：只有启动落点 1 个标签（不再 14 个固定全集）
   let st = await evalJs(JS_TABS)
@@ -96,6 +104,20 @@ async function main() {
   st = await evalJs(JS_TABS)
   ok(st.tabs.length === 1 && st.tabs[0]?.id === 'schedule' && st.tabs[0]?.active === '1',
     'D5 空态后点书签恢复', JSON.stringify(st.tabs))
+
+  // D6 图标条功能不登记为标签（第四轮拍板②）：点回收站 → openTabs 不变
+  await evalJs(`(() => { document.querySelector('button[title="回收站"]')?.click(); return true })()`)
+  await sleep(600)
+  st = await evalJs(JS_TABS)
+  ok(st.tabs.length === 1 && st.tabs[0]?.id === 'schedule', 'D6 图标条功能不产生标签', JSON.stringify(st.tabs))
+
+  // D7 vaultBar 只在总览态显示（第四轮拍板④）：模块态无、返回总览后有
+  const modVb = await evalJs(`!!document.querySelector('[data-wb="vaultBar"]')`)
+  ok(!modVb, 'D7a 模块态下 vaultBar 不显示')
+  await evalJs(`(() => { document.querySelector('button[title^="返回总览"]')?.click(); return true })()`)
+  await sleep(400)
+  const ovVb = await evalJs(`!!document.querySelector('[data-wb="vaultBar"]')`)
+  ok(ovVb, 'D7b 总览态下 vaultBar 显示')
 
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)

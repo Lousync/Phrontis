@@ -702,20 +702,27 @@ export default function App() {
   // 标签条同步（v3.4.0）：任何通道的 setActiveTab（handleTabChange / 全局事件 / 命令面板 / 启动落点）
   // 都会走到这里 —— openTabs 统一在此追加，杜绝「某条打开路径漏登记」。
   // 2026-09-17 拍板：openTabs 恢复为标签条数据源（文档标签式）；aiTeaching 整窗「返回工作台」
-  // 也按 openTabs 找回上一个标签。!activeTab 守卫 = 启动占位期（null）不登记假标签。
+  // 也按 openTabs 找回上一个标签。!activeTab 守卫 = 启动占位期（null）不登记假标签；
+  // EXCLUDED = 图标条功能面板（回收站/插件/工具箱/动态/设置）与 aiTeaching/devtools，
+  // 点击只切换视图不登记标签（第四轮反馈拍板②），图标条常驻可随时返回。
   useEffect(() => {
-    if (!activeTab) return
+    if (!activeTab || WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)) return
     setOpenTabs((ts) => (ts.includes(activeTab) ? ts : [...ts, activeTab]))
   }, [activeTab])
 
   // 关闭标签（✕ / 中键）：关的是激活标签 → 落右邻居优先、越界退左邻居（tabPolicy.landingAfterClose
-  // 与编辑器文档标签同一份语义）；关完为空 = 空态（activeTab 置 null，拍板③允许全部关闭）
+  // 与编辑器文档标签同一份语义）；关完为空 = 空态（activeTab 置 null，拍板③允许全部关闭），
+  // 且左栏退回总览态（2026-09-17 第四轮反馈拍板①：全关后不滞留某模块侧栏）
   const closeTab = useCallback((tab: TabName) => {
     const i = openTabs.indexOf(tab)
     if (i === -1) return
     const next = openTabs.filter((t) => t !== tab)
     setOpenTabs(next)
-    if (activeTab === tab) setActiveTab(landingAfterClose(openTabs, tab) as TabName | null)
+    if (activeTab === tab) {
+      const landing = landingAfterClose(openTabs, tab) as TabName | null
+      setActiveTab(landing)
+      if (landing === null) setRailModule(null)
+    }
   }, [openTabs, activeTab])
 
   // 标签拖拽重排（现成机制恢复）：只调 openTabs 顺序，激活标签跟内容走、不变
@@ -913,9 +920,11 @@ export default function App() {
               onPluginBookmark={handleTabChange}
               suppressSides={activeTab === 'aiTeaching'}
               right={
-                <div className="flex h-full flex-col bg-[var(--bg-secondary)]">
-                  <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] px-3 text-[12px] font-medium text-[var(--text-secondary)]">小工具</div>
-                  <div className="flex flex-1 items-center justify-center text-[11.5px] text-[var(--text-muted)]">控件区 · 批次4</div>
+                <div className="flex h-full flex-col p-1.5">
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-sm">
+                    <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] px-3 text-[12px] font-medium text-[var(--text-secondary)]">小工具</div>
+                    <div className="flex flex-1 items-center justify-center text-[11.5px] text-[var(--text-muted)]">控件区 · 批次4</div>
+                  </div>
                 </div>
               }
               center={

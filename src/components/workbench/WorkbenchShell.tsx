@@ -57,6 +57,7 @@ export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRe
         onSnapClose={() => patch({ leftCollapsed: true })}
         onSnapOpen={() => patch({ leftCollapsed: false })}
         onHandleClick={() => patch({ leftCollapsed: !layout.leftCollapsed })}
+        className="m-1.5 rounded-xl border border-[var(--border-color)] shadow-sm"
       >
         <WorkbenchLeftPanel
           activeTab={activeTab}
