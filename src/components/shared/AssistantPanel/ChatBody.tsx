@@ -356,7 +356,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
                     rows={isNarrow ? 2 : 3}
                     placeholder="问问任何事…（Enter 发送）"
-                    className="w-full px-0.5 py-1 rounded-none border-0 bg-transparent text-[12px] resize-none outline-none"
+                    className="w-full appearance-none px-0.5 py-1 rounded-none border-0 bg-transparent text-[12px] resize-none outline-none"
                   />
                 </div>
 

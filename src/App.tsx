@@ -1155,7 +1155,9 @@ export default function App() {
                   onOpenFile={(relPath) => { setPendingOpenRel(relPath); handleTabChange('editor') }}
                   onOpenPage={(pageId) => openKnowledgePageFromSearch(pageId)}
                   onOpenSchedule={() => handleTabChange('schedule')}
-                  aiChatOpen={openTabs.includes('aiChat')}
+                  // token 面板只在 aiChat 标签「激活中」陪伴显示（批次5 反馈拍板）：
+                  // 切走模块 → 右栏主动回对话态但 aiChat 标签保留；点回标签 → 右栏再变 token 面板
+                  aiChatOpen={activeTab === 'aiChat'}
                   onExpandAiChat={() => handleTabChange('aiChat')}
                   onOpenChangeFile={(relPath) => { setPendingOpenRel(relPath); handleTabChange('editor') }}
                 />

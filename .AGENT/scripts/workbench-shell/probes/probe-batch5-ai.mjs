@@ -174,6 +174,28 @@ async function main() {
   const again = await evalJs(`!!document.querySelector('[data-wb="aiUsagePanel"]')`)
   ok(again, 'A8 再次 ⤢ 幂等（token 面板重现）')
 
+  // A9 联动语义（反馈拍板）：aiChat 激活中切到别的模块 → 右栏回对话但 aiChat 标签保留；
+  // 点回 aiChat 标签 → 右栏再变 token 面板
+  await evalJs(`(() => {
+    const t = [...document.querySelectorAll('[data-wb="tabbar"] [data-wb-tab]')].find((x) => x.dataset.wbTab === 'editor')
+    t?.click(); return true
+  })()`)
+  await sleep(700)
+  const switchedAway = await evalJs(`(() => ({
+    chatBack: !!document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"] textarea'),
+    panelGone: !document.querySelector('[data-wb="aiUsagePanel"]'),
+    tabKept: !!document.querySelector('[data-wb="tabbar"] [data-wb-tab="aiChat"]'),
+  }))()`)
+  ok(switchedAway.chatBack && switchedAway.panelGone && switchedAway.tabKept,
+    'A9a 切走模块 → 右栏回对话、token 面板退场、aiChat 标签保留', JSON.stringify(switchedAway))
+  await evalJs(`(() => {
+    document.querySelector('[data-wb="tabbar"] [data-wb-tab="aiChat"]')?.click(); return true
+  })()`)
+  await sleep(700)
+  const switchedBack = await evalJs(`!!document.querySelector('[data-wb="aiUsagePanel"]')`)
+  ok(switchedBack, 'A9b 点回 aiChat 标签 → 右栏再变 token 面板')
+  // A9 结束保持 aiChat 激活（B 组前置：左栏 aiChat 模块态 + token 面板显示中）
+
   // ---- B 组：左栏 AI 会话侧栏（2026-09-17 反馈轮，drawio 简图排版）----
   // B1 aiChat 激活 → 左栏经 RAIL_FOLLOW_MAP 切 aiChat 模块态
   const modAi = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
