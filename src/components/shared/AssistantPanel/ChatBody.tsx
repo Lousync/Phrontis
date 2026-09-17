@@ -104,7 +104,9 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-assistant-variant={variant}>
+    /* 根节点必须 h-full 不能 flex-1（铁律 11）：page 态槽位容器（renderMounted div）是块级，
+       flex-1 在里面不生效 → 高度塌成内容高，输入框跟着消息区飘到面板中上部（2026-09-17 实机反馈） */
+    <div className="flex h-full min-h-0 flex-col" data-assistant-variant={variant}>
       {/* 轻头部（悬浮侧栏的头部在其外壳上）：抽屉 + 标题 + ⤢（仅窄版）。
           page 态 showDrawer=false：Menu 钮不渲染（会话导航在左栏 AI 会话侧栏） */}
       {variant !== 'sidebar' && (
@@ -281,9 +283,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     className="w-full px-0.5 py-1 rounded-none border-0 bg-transparent text-[12px] resize-none outline-none"
                   />
                 </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none"
-                    title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
+                <div className="flex items-center justify-end mt-0.5">
                   <button onClick={() => { void send() }} disabled={pending || compressing || !input.trim()} title="发送"
                     className="w-8 h-8 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
                     {pending ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp size={15} />}

@@ -1210,7 +1210,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     requestAnimationFrame(() => setLocateCategoryId(categoryId))
   }, [categories])
 
-  // 全局搜索（App 层 QuickSearch）跨模块通道：按 id 打开页面 / 定位目录。
+  // 全局搜索（左栏搜索态 WorkbenchSearchPanel）跨模块通道：按 id 打开页面 / 定位目录。
   // 冷启动时知识库可能尚未挂载，App 在切 Tab 后延迟派发；handleOpenPage 自带按 id 拉取兜底。
   useEffect(() => {
     const openPage = (e: Event): void => {

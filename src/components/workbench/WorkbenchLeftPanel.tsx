@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowLeft, Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, Lock,
-  LockOpen, NotebookPen, Library, Trees, Bot,
+  LockOpen, NotebookPen, Library, Trees, Bot, Search,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { useSettings } from '../../lib/SettingsContext'
 import { workspaceGetCurrent, workspaceListDir } from '../../lib/ipc'
+import { WorkbenchSearchPanel } from './WorkbenchSearchPanel'
 import { BOOKMARK_COLORS, LOCATE_QUIZ_VIEW_EVENT, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, type RailModule } from '../../lib/workbenchLayout'
 import type { TabName } from '../../types'
 
@@ -83,9 +84,19 @@ interface Props {
   onOpenLooseFile: (relPath: string) => void
   /** 插件书签点击（tab 型 action 直开标签） */
   onPluginBookmark: (tab: TabName) => void
+  /** 搜索态（v3.4.0 反馈轮：顶栏搜索框删除，全局搜索搬进左栏；瞬态不持久化） */
+  searchMode?: boolean
+  /** 总览态头部 🔍 进入搜索态 */
+  onEnterSearch?: () => void
+  /** 搜索态 🏠 返回顶层 */
+  onExitSearch?: () => void
+  /** 搜索结果动作（App 层处理器：页面打开 / 目录定位 / 命令） */
+  onSearchOpenPage?: (pageId: string) => void
+  onSearchLocateCategory?: (categoryId: string) => void
+  onSearchRunCommand?: (commandId: string) => void
 }
 
-export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, locked, treeMode, modSlotRef, onBookmarkClick, onBookmarkVisibility, bookmarksHidden, onBack, onToggleLock, onToggleTreeMode, onOpenLooseFile, onPluginBookmark }: Props) {
+export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, locked, treeMode, modSlotRef, onBookmarkClick, onBookmarkVisibility, bookmarksHidden, onBack, onToggleLock, onToggleTreeMode, onOpenLooseFile, onPluginBookmark, searchMode = false, onEnterSearch, onExitSearch, onSearchOpenPage, onSearchLocateCategory, onSearchRunCommand }: Props) {
   const { s } = useSettings()
   const pluginBookmarks = useMemo(() => parsePluginBookmarks(s.workbenchBookmarks), [s.workbenchBookmarks])
   // 🔖 书签选显菜单开关（v10 拍板：逐个勾选显示哪些书签 + 插件可注册书签）。
@@ -158,7 +169,19 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
     <div data-wb="leftPanel" className="flex h-full flex-col bg-[var(--bg-secondary)]">
       {/* ---- 树模式：仓库顶层目录（不含 .knowbase）+ 根散文件 ----
            2026-09-16 第二轮 UI 反馈：头部只留 ‹ 返回钮（文字装饰与横线删除） */}
-      {treeMode ? (
+      {/* ---- 搜索态（反馈轮新增第四态，优先级最高）：🏠 返回 + 🔒 锁定 + 搜索框 + 结果 ---- */}
+      {searchMode ? (
+        onSearchOpenPage && onSearchLocateCategory && onSearchRunCommand && onExitSearch ? (
+          <WorkbenchSearchPanel
+            onOpenPage={onSearchOpenPage}
+            onLocateCategory={onSearchLocateCategory}
+            onRunCommand={onSearchRunCommand}
+            onExit={onExitSearch}
+            locked={locked}
+            onToggleLock={onToggleLock}
+          />
+        ) : null
+      ) : treeMode ? (
         <>
           <div className="flex h-8 shrink-0 items-center px-1.5">
             <button onClick={onToggleTreeMode} title="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
@@ -208,8 +231,8 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
       ) : (
         /* ---- 总览态：书签（内置 6 + 插件注册）+ 零散文件快速打开 ---- */
         <>
-          <div className="relative flex h-8 shrink-0 items-center justify-between px-1.5">
-            {/* 第四轮拍板③：「工作台」文字说明删除，头部只留 🔖 书签选显 + 🌳 树模式两钮（v13 头部结构落地） */}
+          <div className="relative flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
+            {/* 头部三钮居中（2026-09-17 反馈轮拍板，仿 Obsidian 侧栏头）：🔖 书签选显 / 🔍 搜索 / 🌳 树模式 */}
             <button
               ref={bmBtnRef}
               onClick={toggleBookmarkMenu}
@@ -218,6 +241,14 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
               className={`rounded p-1 transition-colors ${bookmarkMenuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
             >
               <Bookmark size={13} />
+            </button>
+            <button
+              onClick={onEnterSearch}
+              title="全局搜索（Ctrl+P）"
+              data-wb="leftSearchBtn"
+              className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            >
+              <Search size={13} />
             </button>
             <button
               onClick={onToggleTreeMode}

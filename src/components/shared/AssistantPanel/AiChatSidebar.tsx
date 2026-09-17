@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, MessageSquare, ListTree, FileEdit } from 'lucide-react'
-import { agentSessionChanges } from '../../../lib/ipc'
+import { Plus, Trash2, MessageSquare, ListTree, FileEdit, Pencil } from 'lucide-react'
+import { agentSessionChanges, agentRenameSession } from '../../../lib/ipc'
 import { fmtTime } from './MessageList'
 import type { AssistantChatController } from './useAssistantChat'
 import type { SessionFileChange } from '../../../types'
@@ -34,6 +34,61 @@ export function AiChatSidebar({ chat, active, container }: Props) {
   const [tab, setTab] = useState<'sessions' | 'outline'>('sessions')
   const [changes, setChanges] = useState<SessionFileChange[]>([])
   const { sessions, activeId, messages, pending } = chat
+
+  // ---- 右键菜单（重命名/删除）：portal + 原生事件委托（React 对 body-portal 首个菜单的
+  //      合成 click 分发会话内首次失效——🔖 菜单同坑同修，见 WorkbenchLeftPanel 注释）----
+  const [menu, setMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  /** 行内重命名：目标会话 + 草稿 */
+  const [renaming, setRenaming] = useState<{ id: string; draft: string } | null>(null)
+  const renameRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!menu) return
+    const onDown = (e: PointerEvent) => {
+      if (menuRef.current?.contains(e.target as Node)) return
+      setMenu(null)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenu(null) }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [menu])
+
+  // 菜单项点击走容器原生事件委托（合成事件坑，见上）
+  useEffect(() => {
+    if (!menu) return
+    const el = menuRef.current
+    if (!el) return
+    const onClick = (e: MouseEvent) => {
+      const t = (e.target as HTMLElement | null)?.closest?.('[data-ai-menu-item]') as HTMLElement | null
+      if (!t?.dataset.aiMenuItem) return
+      setMenu(null)
+      if (t.dataset.aiMenuItem === 'rename') {
+        const sess = sessions.find(s => s.id === menu.sessionId)
+        setRenaming({ id: menu.sessionId, draft: sess?.title ?? '' })
+        requestAnimationFrame(() => renameRef.current?.select())
+        return
+      }
+      if (t.dataset.aiMenuItem === 'delete') {
+        // 走 controller 的双击确认语义：第一次 = 进入确认态（条目删除钮变红提示），再点执行
+        void chat.removeSession(menu.sessionId)
+      }
+    }
+    el.addEventListener('click', onClick)
+    return () => el.removeEventListener('click', onClick)
+  }, [menu, sessions, chat])
+
+  const submitRename = useCallback(async () => {
+    if (!renaming) return
+    const title = renaming.draft.trim()
+    setRenaming(null)
+    if (!title) return
+    try {
+      await agentRenameSession(renaming.id, title)
+      await chat.refreshSessions()
+    } catch { /* 重命名失败静默（标题保持旧值） */ }
+  }, [renaming, chat])
 
   // 文件改动（本会话）：activeId 变化 / 轮询 / 回复完成后刷新
   const refreshChanges = useCallback(async () => {
@@ -105,23 +160,45 @@ export function AiChatSidebar({ chat, active, container }: Props) {
                   data-wb="aiSideSession"
                   data-wb-ai-session={sess.id}
                   onClick={() => { void chat.loadSession(sess.id) }}
+                  onContextMenu={e => {
+                    e.preventDefault()
+                    setMenu({ sessionId: sess.id, x: e.clientX, y: e.clientY })
+                  }}
                   className={`kb-item-in group flex cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 text-[12px] transition-colors ${
                     activeId === sess.id
                       ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]'
                       : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                   }`}
                 >
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{sess.title}</span>
-                    <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
-                  </span>
-                  <button
-                    onClick={e => { e.stopPropagation(); void chat.removeSession(sess.id) }}
-                    className={`shrink-0 rounded p-0.5 ${chat.deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100'}`}
-                    title={chat.deletingId === sess.id ? '再点一次确认删除' : '删除会话'}
-                  >
-                    <Trash2 size={11} />
-                  </button>
+                  {renaming?.id === sess.id ? (
+                    <input
+                      ref={renameRef}
+                      value={renaming.draft}
+                      onChange={e => setRenaming({ id: sess.id, draft: e.target.value })}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void submitRename() }
+                        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRenaming(null) }
+                      }}
+                      onBlur={() => { void submitRename() }}
+                      onClick={e => e.stopPropagation()}
+                      spellCheck={false}
+                      className="min-w-0 flex-1 rounded border border-[var(--accent)]/60 bg-[var(--bg-primary)] px-1 py-0.5 text-[12px] text-[var(--text-primary)] outline-none"
+                    />
+                  ) : (
+                    <>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate">{sess.title}</span>
+                        <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
+                      </span>
+                      <button
+                        onClick={e => { e.stopPropagation(); void chat.removeSession(sess.id) }}
+                        className={`shrink-0 rounded p-0.5 ${chat.deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100'}`}
+                        title={chat.deletingId === sess.id ? '再点一次确认删除' : '删除会话（右键更多操作）'}
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
               {sessions.length === 0 && (
@@ -197,6 +274,30 @@ export function AiChatSidebar({ chat, active, container }: Props) {
           </div>
         )}
       </div>
+
+      {/* 右键菜单（fixed portal 到 body；菜单项点击走容器原生委托，见上方 useEffect） */}
+      {menu && container && createPortal(
+        <div
+          ref={menuRef}
+          data-wb="aiSessionMenu"
+          className="fixed z-[130] w-[150px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] py-1 shadow-xl"
+          style={{ left: Math.min(menu.x, window.innerWidth - 160), top: Math.min(menu.y, window.innerHeight - 90) }}
+        >
+          <button
+            data-ai-menu-item="rename"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <Pencil size={12} className="shrink-0" /> 重命名
+          </button>
+          <button
+            data-ai-menu-item="delete"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-red-400"
+          >
+            <Trash2 size={12} className="shrink-0" /> 删除会话
+          </button>
+        </div>,
+        document.body,
+      )}
     </div>,
     container,
   )

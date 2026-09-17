@@ -40,9 +40,18 @@ interface Props {
   suppressSides?: boolean
   /** 最大化/禅模式 Z2：左右栏卡片随中间内容卡一起方角全屏化（第四轮拍板②） */
   maximized?: boolean
+  /** 左栏搜索态（反馈轮：顶栏搜索框删除，全局搜索搬进左栏；瞬态）+ 结果动作回调打包透传 */
+  leftSearch?: {
+    mode: boolean
+    onEnter: () => void
+    onExit: () => void
+    onOpenPage: (pageId: string) => void
+    onLocateCategory: (categoryId: string) => void
+    onRunCommand: (commandId: string) => void
+  }
 }
 
-export function WorkbenchShell({ center, right, activeTab, railModule, railTool = null, modSlotRef, onBookmarkClick, onBookmarkVisibility, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false, maximized = false }: Props) {
+export function WorkbenchShell({ center, right, activeTab, railModule, railTool = null, modSlotRef, onBookmarkClick, onBookmarkVisibility, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false, maximized = false, leftSearch }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
 
@@ -87,6 +96,12 @@ export function WorkbenchShell({ center, right, activeTab, railModule, railTool 
           onToggleTreeMode={() => patch({ leftMode: layout.leftMode === 'tree' ? 'overview' : 'tree' })}
           onOpenLooseFile={onOpenLooseFile}
           onPluginBookmark={onPluginBookmark}
+          searchMode={leftSearch?.mode}
+          onEnterSearch={leftSearch?.onEnter}
+          onExitSearch={leftSearch?.onExit}
+          onSearchOpenPage={leftSearch?.onOpenPage}
+          onSearchLocateCategory={leftSearch?.onLocateCategory}
+          onSearchRunCommand={leftSearch?.onRunCommand}
         />
       </ResizablePanel>
 

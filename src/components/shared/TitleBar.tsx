@@ -22,8 +22,6 @@ interface TitleBarProps {
   dayPanelActive?: boolean
   /** 点击日程打卡侧边栏开关按钮：App 统一处理「脱离态→吸附 / 内嵌态→显示」逻辑 */
   onToggleDayPanel?: () => void
-  /** 抽屉面板当前实际占宽（0 = 收起）。搜索框以此为偏移锚定主内容区中心，外扩时不漂移 */
-  drawerWidth?: number
   /** 布局菜单 · 活动栏段：整条活动栏当前是否显示 + 切换出口（App 侧读写同一 setting） */
   activityBarVisible?: boolean
   onActivityBarChange?: (visible: boolean) => void
@@ -36,7 +34,7 @@ interface TitleBarProps {
 }
 
 export function TitleBar({
-  dayPanelActive = false, onToggleDayPanel, drawerWidth = 0,
+  dayPanelActive = false, onToggleDayPanel,
   activityBarVisible = true, onActivityBarChange, zenLevel = 0, onZenLevelChange,
   osFullscreen = false, onOsFullscreenChange,
 }: TitleBarProps = {}) {
@@ -443,14 +441,6 @@ export function TitleBar({
           </WinBtn>
         </div>
 
-      {/* VS Code 风格居中搜索框：锚定主内容区中心（左移 drawerWidth/2），抽屉外扩时纹丝不动；
-          宽度同步扣除 drawerWidth，展开前后保持不变 */}
-      <div
-        className="absolute -translate-x-1/2 no-drag z-10"
-        style={{ left: `calc(50% - ${drawerWidth / 2}px)`, width: `min(100% - ${180 + drawerWidth}px, 560px)` }}
-      >
-        <div id="titlebar-search" />
-      </div>
       {/* UI 优化条目1.7：最大化态顶栏拖拽恢复 overlay（空白区接管，控件 z-10 保持可点；双击 toggle 还原） */}
       {isMaximized && (
         <div className="absolute inset-0 no-drag z-0" onMouseDown={onMaxTitleDown} onDoubleClick={() => window.api?.maximize()} />

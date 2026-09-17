@@ -14,7 +14,6 @@ import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
 import { ZenHotZone } from './components/shared/ZenHotZone'
 import { WorkbenchStatusBar } from './components/shared/WorkbenchStatusBar'
-import { QuickSearch } from './modules/knowledge/components/QuickSearch'
 import { CommandPalette, type PaletteItem } from './components/shared/CommandPalette'
 import { SplitPaneBar } from './components/shared/SplitPaneBar'
 import { CodePluginHosts } from './components/shared/CodePluginHosts'
@@ -205,17 +204,9 @@ export default function App() {
   // Esc / 顶部热区 / 菜单再点 都走这里，保证持久化一致
   const changeZen = useCallback((n: number) => { setZenLevel(n); update('zenLevel', n) }, [update])
 
-  // ---- 全局搜索（VS Code 式：标题栏顶部输入 + 顶部结果弹层，Ctrl+P / Ctrl+` 唤出）----
-  // 数据源 = 知识库索引（页面/目录/标签），打开搜索时刷新；打开页面/定位目录经事件通道进知识库模块
-  const [gsPages, setGsPages] = useState<KnowledgePage[]>([])
-  const [gsCategories, setGsCategories] = useState<KnowledgeCategory[]>([])
-  const [gsTags, setGsTags] = useState<KnowledgeTag[]>([])
-  const refreshGlobalSearch = useCallback(async () => {
-    try {
-      const [p, c, t] = await Promise.all([getKnowledgePages(), getKnowledgeCategories(), getKnowledgeTags()])
-      setGsPages(p ?? []); setGsCategories(c ?? []); setGsTags(t ?? [])
-    } catch { /* 索引未就绪时保持旧数据 */ }
-  }, [])
+  // ---- 全局搜索（反馈轮：顶栏搜索框删除，入口搬进左栏搜索态——总览态 🔍 / Ctrl+P / Ctrl+`）----
+  // 打开页面/定位目录仍经事件通道进知识库模块（openKnowledgePageFromSearch / locateKnowledgeCategoryFromSearch）
+  const [leftSearchMode, setLeftSearchMode] = useState(false)
   const openKnowledgePageFromSearch = useCallback((pageId: string) => {
     setActiveTab('knowledge')
     // 冷启动时知识库模块可能尚未挂载（保活注册表为空），延迟派发等监听器就绪
@@ -241,6 +232,17 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.key === 'P' || e.key === 'p')) {
         e.preventDefault()
         setPalette((p) => (p === 'command' ? null : 'command'))
+        return
+      }
+      // 左栏搜索态快捷键（反馈轮：顶栏搜索框删除后，Ctrl+P / Ctrl+` / Ctrl+Shift+F 全部指向左栏搜索）
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'p' || e.key === 'P' || e.key === '`')) {
+        e.preventDefault()
+        setLeftSearchMode(true)
+        return
+      }
+      if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'F' || e.key === 'f')) {
+        e.preventDefault()
+        setLeftSearchMode(true)
         return
       }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) {
@@ -1120,6 +1122,14 @@ export default function App() {
               onPluginBookmark={handleTabChange}
               suppressSides={fullWindowTab}
               maximized={zenLevel >= 2 || winMax}
+              leftSearch={{
+                mode: leftSearchMode,
+                onEnter: () => setLeftSearchMode(true),
+                onExit: () => setLeftSearchMode(false),
+                onOpenPage: openKnowledgePageFromSearch,
+                onLocateCategory: locateKnowledgeCategoryFromSearch,
+                onRunCommand: (id) => openTab(id as TabName),
+              }}
               right={
                 <WorkbenchRightPanel
                   dayPanelDetached={dayPanelDetached}
@@ -1236,16 +1246,6 @@ export default function App() {
           （活动栏不渲染时 → 0：禅模式 Z2 隐壳，或布局菜单把它整条藏了；最大化 flush → 56；否则 56 + mx-1.5 两侧留白） */}
       <AssistantPanel shellLeft={zenLevel >= 2 || !activityBarVisible ? 0 : winMax ? 56 : 68} />
         </div>
-      {/* 全局搜索（VS Code 式顶部弹层）：输入 portal 进标题栏，全模块可用 */}
-      <QuickSearch
-        pages={gsPages}
-        categories={gsCategories}
-        tags={gsTags}
-        onOpenPage={openKnowledgePageFromSearch}
-        onLocateCategory={locateKnowledgeCategoryFromSearch}
-        onRequestRefresh={refreshGlobalSearch}
-        onRunCommand={(id) => openTab(id as TabName)}
-      />
       {workbench && <WorkbenchStatusBar />}
         </div>
       </PomodoroProvider>

@@ -176,6 +176,70 @@ async function main() {
   const sideGone = await evalJs(`!document.querySelector('[data-wb="aiChatSidebar"]')`)
   ok(modAfter !== 'aiChat' && sideGone, 'B5 关标签 → 左栏跟随落点退出 aiChat 侧栏', `mod=${modAfter} sideGone=${sideGone}`)
 
+  // ---- C 组：左栏头部三钮居中 + 搜索态（2026-09-17 反馈轮，顶栏搜索搬进左栏）----
+  // C0 先回总览态（B5 后左栏在 editor 模块态，🔍 只在总览态头部）
+  await evalJs(`(() => { document.querySelector('button[title^="返回总览"]')?.click(); return true })()`)
+  await sleep(500)
+  // C1 三钮（🔖/🔍/🌳）合组水平居中（仿 Obsidian）：按钮组中心 ≈ 左栏中心
+  const centerChk = await evalJs(`(() => {
+    const lp = document.querySelector('[data-wb="leftPanel"]')
+    const btns = [
+      document.querySelector('[data-wb="bookmarkMenuBtn"]'),
+      document.querySelector('[data-wb="leftSearchBtn"]'),
+      lp?.querySelector('button[title^="切换为文件树模式"]'),
+    ]
+    if (!lp || btns.some((b) => !b)) return null
+    const lpr = lp.getBoundingClientRect()
+    const l = Math.min(...btns.map((b) => b.getBoundingClientRect().left))
+    const r = Math.max(...btns.map((b) => b.getBoundingClientRect().right))
+    const groupCenter = (l + r) / 2
+    const panelCenter = lpr.left + lpr.width / 2
+    return { groupCenter, panelCenter, diff: Math.abs(groupCenter - panelCenter) }
+  })()`)
+  ok(!!centerChk && centerChk.diff < 20, 'C1 总览态头部三钮合组居中（仿 Obsidian）', JSON.stringify(centerChk))
+  // C2 点 🔍 → 搜索态（面板挂载 + 输入框聚焦）
+  await evalJs(`(() => { document.querySelector('[data-wb="leftSearchBtn"]')?.click(); return true })()`)
+  await sleep(500)
+  const searchOpen = await evalJs(`(() => ({
+    there: !!document.querySelector('[data-wb="leftSearch"]'),
+    hasInput: !!document.querySelector('[data-wb="leftSearch"] input'),
+    hasHome: !!document.querySelector('[data-wb="leftSearch"] button[title="返回总览"]'),
+    hasLock: !!document.querySelector('[data-wb="leftSearch"] button[title^="锁定侧边栏"]'),
+    focused: document.activeElement?.tagName === 'INPUT',
+  }))()`)
+  ok(searchOpen.there && searchOpen.hasInput && searchOpen.hasHome && searchOpen.hasLock,
+    'C2 🔍 → 搜索态（🏠+🔒头部+搜索框）', JSON.stringify(searchOpen))
+  // C3 输入查询 → 结果或空态渲染（探针 vault 内容不定，两种都算通过）
+  await evalJs(`(() => {
+    const i = document.querySelector('[data-wb="leftSearch"] input')
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
+    setter.call(i, '工作台')
+    i.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })()`)
+  await sleep(900)
+  const searchOut = await evalJs(`(() => {
+    const el = document.querySelector('[data-wb="leftSearch"]')
+    return { hasResult: !!el && (el.textContent.includes('个结果') || el.textContent.includes('未找到匹配结果')) }
+  })()`)
+  ok(searchOut.hasResult, 'C3 输入查询 → 结果列表或空态渲染')
+  // C4 Ctrl+P 再次打开（快捷键指向左栏搜索态）
+  await evalJs(`(() => {
+    document.querySelector('[data-wb="leftSearch"] button[title="返回总览"]')?.click(); return true
+  })()`)
+  await sleep(400)
+  const backToOverview = await evalJs(`!!document.querySelector('[data-wb="bookmarkMenuBtn"]') && !document.querySelector('[data-wb="leftSearch"]')`)
+  ok(backToOverview, 'C4 🏠 返回顶层 → 总览态')
+  await evalJs(`(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true, cancelable: true }))
+    return true
+  })()`)
+  await sleep(400)
+  const viaHotkey = await evalJs(`!!document.querySelector('[data-wb="leftSearch"]')`)
+  ok(viaHotkey, 'C5 Ctrl+P → 左栏搜索态')
+  await evalJs(`(() => { document.querySelector('[data-wb="leftSearch"] button[title="返回总览"]')?.click(); return true })()`)
+  await sleep(300)
+
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)
   for (const r of results) console.log(`${r.pass ? '✓' : '✗'} ${r.label}${r.detail ? '  → ' + r.detail : ''}`)
