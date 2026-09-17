@@ -226,6 +226,44 @@ for (const k of ['rightTab', 'widgetOrder', 'widgetsHidden', 'panelTabsHidden'])
 }
 ok(/widgetOrder/.test(srcApp) === false || true, 'D5b （提示）控件排序状态收在右栏组件内')
 
+/* ================= E. 右栏优化轮：布局权重 + 工具侧栏适配左栏（2026-09-17） ================= */
+console.log('\n=== E. 右栏优化轮：布局权重 + 工具侧栏适配 ===')
+
+// E1 布局权重：中段「最近编辑」收缩，下段简略视图吃满
+ok(/h-\[196px\]/.test(srcRight) === false, 'E1 简略视图不再固定 196px（自适应+上限，超长才滚动）')
+ok(/data-wb="widgetBrief"[^]*?min-h-0 flex-1 overflow-y-auto/.test(srcRight.replace(/\n/g, ' ')),
+  'E1b 简略视图 = flex-1 吃满下段剩余（显示完常规内容量）')
+ok(!/flex min-h-\[72px\] flex-1/.test(srcRight) && /shrink-0 flex-col overflow-hidden rounded-lg border/.test(srcRight),
+  'E1c 最近编辑不再 flex-1 抢占空间（自适应收缩）')
+ok(/if \(recent\.length === 0\) return null/.test(srcRight), 'E1d 最近编辑无记录整卡不渲染（中段零占位）')
+
+// E2 工具侧栏真相源 + ToolHost 透传
+ok(/TOOLS_WITH_SIDEBAR[^]*?\['habit-tracker', 'data-export', 'bookmark-nav', 'pdf-toolkit'\]/.test(srcRegistry.replace(/\n/g, ' ')),
+  'E2 TOOLS_WITH_SIDEBAR 固定 4 工具（习惯打卡/数据导出/网址导航/PDF 工具箱，toolRegistry 唯一真相源）')
+ok(/case 'habit-tracker':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' '))
+  && /case 'pdf-toolkit':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' '))
+  && /case 'bookmark-nav':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' '))
+  && /case 'data-export':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' ')),
+  'E2b ToolHost 向 4 个有侧栏工具透传 sidebarEl/sidebarHosted')
+
+// E3 工具组件侧栏三态（portal / 槽未就绪 null / 原地内嵌）
+const srcHabit = stripComments(read('src/modules/toolbox/components/habit-tracker/index.tsx'))
+const srcExport = stripComments(read('src/modules/toolbox/components/export/ExportTool.tsx'))
+const srcBookmark = stripComments(read('src/modules/toolbox/components/bookmark-nav/index.tsx'))
+const srcPdf = stripComments(read('src/modules/toolbox/components/pdf-toolkit/index.tsx'))
+for (const [name, src] of [['habit-tracker', srcHabit], ['data-export', srcExport], ['bookmark-nav', srcBookmark], ['pdf-toolkit', srcPdf]]) {
+  ok(/createPortal/.test(src) && /sidebarHosted\s*\?\s*null/.test(src) && /sidebarEl\s*\?/.test(src),
+    `E3 ${name} 侧栏三态（portal → hosted-null → 原地内嵌，knowledge 同款挂载点迁移）`)
+}
+
+// E4 App 接线：railTool 跟随 + 锁定回落 + 左栏模块态判定扩展
+ok(/const \[railTool, setRailTool\]/.test(srcApp), 'E4 App 持有 railTool 工具侧栏态（瞬态跟随，不进书签/持久化体系）')
+ok(/TOOLS_WITH_SIDEBAR\.has/.test(srcApp) && /setRailTool\(/.test(srcApp), 'E4b activeToolTab 变化跟随 railTool（无侧栏工具/切回文档清空）')
+ok(/!wbLayout\.leftLocked && TOOLS_WITH_SIDEBAR\.has\(tid\)/.test(srcApp),
+  'E4c 锁定时工具侧栏回落内嵌（toolHosted 判定含 !leftLocked，不与旧模块态抢 slot）')
+ok(/railTool=\{railTool\}/.test(srcApp) && /railTool\?/.test(srcShell) && /railModule \|\| railTool/.test(srcLeft),
+  'E4d App → Shell → LeftPanel railTool 透传，模块态条件 = railModule || railTool')
+
 console.log('\n========================================')
 if (fails.length === 0) {
   console.log(`✅ 全部通过：${pass} 项断言 PASS`)

@@ -53,6 +53,24 @@ export const BUILTIN_TOOLS: ToolMeta[] = [
 /** 可深链激活的内置工具 id 白名单（无效 id 忽略，避免 ToolHost 落 default 白屏） */
 export const DEEPLINKABLE_TOOL_IDS = new Set(BUILTIN_TOOLS.map((t) => t.id))
 
+/**
+ * 自带左侧栏的内置工具（2026-09-17 右栏优化轮新增）：
+ * 习惯打卡（习惯列表）/ 数据导出（导出配置）/ 网址导航（分类）/ PDF 工具箱（文件列表）。
+ * 这 4 个工具以**中间标签页**语境打开时，左栏 portal 进工作台左栏模块态 slot
+ * （knowledge/schedule 同款挂载点迁移机制；工具箱画廊语境打开时保持内嵌不变）。
+ * 密码本 = 列表/详情双视图，无常驻侧栏，不入列。
+ */
+export const TOOLS_WITH_SIDEBAR: ReadonlySet<string> = new Set(['habit-tracker', 'data-export', 'bookmark-nav', 'pdf-toolkit'])
+
+/** 工具组件的左栏适配 props（sidebarEl = portal 目标；sidebarHosted = 已托管但槽未就绪） */
+export interface ToolSidebarProps {
+  /** 非空 = 侧栏内容 portal 进工作台左栏模块态 slot（挂载点迁移，状态留在工具组件内）。
+   *  HTMLElement 口径与 App 的 wbModSlotEl 一致 */
+  sidebarEl?: HTMLElement | null
+  /** true 且 sidebarEl 为空 = 已托管但槽未就绪（左栏收起/翻转/锁定瞬间）→ 侧栏渲染 null 等槽，不回落内嵌 */
+  sidebarHosted?: boolean
+}
+
 export function findTool(id: string): ToolMeta | undefined {
   return BUILTIN_TOOLS.find((t) => t.id === id)
 }
@@ -80,25 +98,27 @@ export function toolIdOfTab(tabId: string): string {
  * 工具箱模块（画廊内进入）与右栏入口区开的工具标签页共用——
  * onBack 由宿主语境决定：工具箱 = 回画廊，标签页 = 关闭标签。
  * 番茄钟不走本宿主（点击 = pomodoro:activate 全屏面板，沿用既有语义）。
+ * sidebarEl/sidebarHosted：仅标签页语境由 App 传入（TOOLS_WITH_SIDEBAR 的 4 个工具
+ * 侧栏 portal 进工作台左栏）；画廊语境不传 → 工具侧栏保持内嵌原位。
  */
-export function ToolHost({ toolId, onBack }: { toolId: string; onBack: () => void }) {
+export function ToolHost({ toolId, onBack, sidebarEl, sidebarHosted }: { toolId: string; onBack: () => void } & ToolSidebarProps) {
   switch (toolId) {
     case 'password-vault':
       return <PasswordVault onBack={onBack} />
     case 'habit-tracker':
-      return <HabitTracker onBack={onBack} />
+      return <HabitTracker onBack={onBack} sidebarEl={sidebarEl} sidebarHosted={sidebarHosted} />
     case 'remote-supervise':
       return <RemoteSupervise onBack={onBack} />
     case 'pdf-toolkit':
       return (
         <Suspense fallback={<div className="flex flex-1 items-center justify-center text-[12px] text-[var(--text-muted)]">正在加载 PDF 工具…</div>}>
-          <PdfToolkit onBack={onBack} />
+          <PdfToolkit onBack={onBack} sidebarEl={sidebarEl} sidebarHosted={sidebarHosted} />
         </Suspense>
       )
     case 'bookmark-nav':
-      return <BookmarkNav onBack={onBack} />
+      return <BookmarkNav onBack={onBack} sidebarEl={sidebarEl} sidebarHosted={sidebarHosted} />
     case 'data-export':
-      return <ExportTool onBack={onBack} />
+      return <ExportTool onBack={onBack} sidebarEl={sidebarEl} sidebarHosted={sidebarHosted} />
     case 'lan-share':
       return <LanShare onBack={onBack} />
     case 'web-clipper':

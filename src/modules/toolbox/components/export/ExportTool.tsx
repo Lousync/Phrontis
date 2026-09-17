@@ -1,6 +1,8 @@
 import { useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Upload, FileText, Database, Check, Settings, History, FileArchive, XCircle, Loader2, Shield, Sparkles, CalendarCheck2, Globe, ArrowLeft } from 'lucide-react'
 import { SETTINGS_DEFAULTS } from '../../../../lib/settings'
+import type { ToolSidebarProps } from '../../../../components/workbench/toolRegistry'
 import { ProgressPanel } from './ProgressPanel'
 
 // ---- types ----
@@ -53,7 +55,7 @@ async function runBackupExport(_moduleIds: string[]): Promise<ExportResult> {
   throw new Error('已弃用：数据已随仓库文件夹保存（.knowbase/），按模块备份包导出不再支持。请使用 设置 → 数据与仓库 的「导出整仓备份（zip）」')
 }
 
-export function ExportTool({ onBack }: { onBack: () => void }) {
+export function ExportTool({ onBack, sidebarEl, sidebarHosted }: { onBack: () => void } & ToolSidebarProps) {
   const [selectedModules, setSelectedModules] = useState<Set<string>>(new Set(['blog', 'schedule', 'knowledge', 'moments']))
   const [status, setStatus] = useState<ExportStatus>('idle')
   const [statusMessage, setStatusMessage] = useState('')
@@ -129,8 +131,11 @@ export function ExportTool({ onBack }: { onBack: () => void }) {
         <span className="text-[11.5px] font-medium text-[var(--text-muted)]">数据导出</span>
       </div>
       <div className="flex flex-1 min-h-0">
-      {/* Left: Config panel */}
-      <div className="w-56 shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col overflow-y-auto">
+      {/* Left: Config panel。2026-09-17 右栏优化轮：标签页语境 sidebarEl 非空时 portal 进
+          工作台左栏模块态 slot（挂载点迁移，状态留在本组件）；槽未就绪渲染 null 等槽。 */}
+      {(() => {
+        const sidebarInner = (
+          <>
         <div className="px-4 py-3 border-b border-[var(--border-color)]">
           <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
             <Settings size={14} />
@@ -156,7 +161,14 @@ export function ExportTool({ onBack }: { onBack: () => void }) {
             </label>
           ))}
         </div>
-      </div>
+          </>
+        )
+        return sidebarEl
+          ? createPortal(<div className="flex h-full w-full min-h-0 flex-col overflow-y-auto bg-[var(--bg-secondary)]">{sidebarInner}</div>, sidebarEl)
+          : sidebarHosted
+            ? null
+            : <div className="w-56 shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col overflow-y-auto">{sidebarInner}</div>
+      })()}
 
       {/* Right: Content area */}
       <div className="flex-1 flex flex-col">

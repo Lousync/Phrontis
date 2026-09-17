@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowLeft, Globe, Plus, Search, ExternalLink, Pencil, Trash2, Copy, Download, Upload, Check } from 'lucide-react'
 import type { BookmarkCategory, BookmarkItem } from '../../../../types'
 import {
@@ -12,8 +13,9 @@ import { buildJsonExport, buildHtmlExport, parseJsonImport, parseHtmlImport, dom
 import { CategorySidebar } from './components/CategorySidebar'
 import { BookmarkEditModal, CategoryEditModal } from './components/BookmarkModals'
 import { localToday } from '../../../../lib/date'
+import type { ToolSidebarProps } from '../../../../components/workbench/toolRegistry'
 
-interface Props { onBack: () => void }
+interface Props extends ToolSidebarProps { onBack: () => void }
 
 const AVATAR_COLORS = ['#EF4444', '#EA580C', '#CA8A04', '#059669', '#0D9488', '#027A74', '#2563EB', '#7C3AED', '#C026D3', '#64748B']
 
@@ -23,7 +25,7 @@ function avatarColor(domain: string): string {
   return AVATAR_COLORS[h % AVATAR_COLORS.length]
 }
 
-export function BookmarkNav({ onBack }: Props) {
+export function BookmarkNav({ onBack, sidebarEl, sidebarHosted }: Props) {
   const [categories, setCategories] = useState<BookmarkCategory[]>([])
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([])
   const [selected, setSelected] = useState('all')
@@ -247,18 +249,26 @@ export function BookmarkNav({ onBack }: Props) {
       </div>
 
       <div className="flex flex-1 min-h-0">
-        {/* 左栏分类 */}
-        <div className="w-52 shrink-0 border-r border-[var(--border-color)] min-h-0">
-          <CategorySidebar
-            categories={categories}
-            bookmarks={bookmarks}
-            selected={selected}
-            onSelect={setSelected}
-            onNew={() => setCategoryEditor({ mode: 'create' })}
-            onEdit={c => setCategoryEditor({ mode: 'edit', category: c })}
-            onDelete={c => void handleDeleteCategory(c)}
-          />
-        </div>
+        {/* 左栏分类。2026-09-17 右栏优化轮：标签页语境 sidebarEl 非空时 portal 进
+            工作台左栏模块态 slot（挂载点迁移，状态留在本组件）；槽未就绪渲染 null 等槽。 */}
+        {(() => {
+          const sidebarInner = (
+            <CategorySidebar
+              categories={categories}
+              bookmarks={bookmarks}
+              selected={selected}
+              onSelect={setSelected}
+              onNew={() => setCategoryEditor({ mode: 'create' })}
+              onEdit={c => setCategoryEditor({ mode: 'edit', category: c })}
+              onDelete={c => void handleDeleteCategory(c)}
+            />
+          )
+          return sidebarEl
+            ? createPortal(<div className="h-full w-full min-h-0">{sidebarInner}</div>, sidebarEl)
+            : sidebarHosted
+              ? null
+              : <div className="w-52 shrink-0 border-r border-[var(--border-color)] min-h-0">{sidebarInner}</div>
+        })()}
 
         {/* 主区 */}
         <div className="flex-1 flex flex-col min-w-0">

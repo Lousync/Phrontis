@@ -8,7 +8,7 @@ import { landingAfterClose } from './modules/editor/tabPolicy'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchTabBar } from './components/workbench/WorkbenchTabBar'
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
-import { ToolHost, PluginToolHost, isToolTabId, toolIdOfTab, toolTabId } from './components/workbench/toolRegistry'
+import { ToolHost, PluginToolHost, TOOLS_WITH_SIDEBAR, isToolTabId, toolIdOfTab, toolTabId } from './components/workbench/toolRegistry'
 import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, type RailModule } from './lib/workbenchLayout'
 
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
@@ -140,6 +140,10 @@ export default function App() {
 
   // 左栏模块态（书签侧边栏）：null = 总览态。跟随逻辑见下方 effect（RAIL_FOLLOW_MAP + leftLocked）
   const [railModule, setRailModule] = useState<RailModule | null>(null)
+  // 左栏工具侧栏态（2026-09-17 右栏优化轮）：激活工具标签属于 TOOLS_WITH_SIDEBAR 时，
+  // 该工具的侧栏 portal 进左栏模块态 slot（与 railModule 互斥共用 slot；锁定/树模式优先）。
+  // RailModule 类型不动——工具侧栏态是瞬态跟随（随 activeToolTab 变化），不进书签/持久化体系。
+  const [railTool, setRailTool] = useState<string | null>(null)
 
   // 禅模式（docs/zen-mode-design.md）：0=off 1=Z1 专注 2=禅。唯一真相源在 App 层——
   // Z2 需隐藏标题栏/活动栏（模块内无法触及）。入口 = 标题栏「布局」菜单（布局模式 · 禅模式）；
@@ -838,12 +842,17 @@ export default function App() {
   }, [])
 
   /** 工具标签页宿主：内置工具走共享 ToolHost；插件工具按清单匹配 PluginToolHost；
-      onBack（组件头部「← 返回」）= 关闭该标签（标签页语境的「返回」语义） */
+      onBack（组件头部「← 返回」）= 关闭该标签（标签页语境的「返回」语义）。
+      侧栏适配（2026-09-17 右栏优化轮）：激活的有侧栏工具（TOOLS_WITH_SIDEBAR）且左栏未被锁定时，
+      侧栏 portal 进左栏模块态 slot；锁定瞬间/槽未就绪 sidebarHosted=true & el=null → 侧栏渲染 null；
+      非激活工具（display:none 保活中）不参与 → 回落内嵌侧栏。 */
   const renderToolTabHost = (tabId: string) => {
     const tid = toolIdOfTab(tabId)
     const pluginTool = pluginTools.find((t) => `${t.pluginId}:${t.toolId}` === tid)
     if (pluginTool) return <PluginToolHost tool={pluginTool} onBack={() => closeTab(tabId)} />
-    return <ToolHost toolId={tid} onBack={() => closeTab(tabId)} />
+    const toolHosted = tabId === activeToolTab && !wbLayout.leftLocked && TOOLS_WITH_SIDEBAR.has(tid)
+    const toolSidebarEl = toolHosted ? wbModSlotEl : null
+    return <ToolHost toolId={tid} onBack={() => closeTab(tabId)} sidebarEl={toolSidebarEl} sidebarHosted={toolHosted} />
   }
 
   // ---- 左栏书签（v3.4.0 批次3）----
@@ -865,6 +874,16 @@ export default function App() {
     const m = activeTab ? RAIL_FOLLOW_MAP[activeTab] : undefined
     if (m) setRailModule(m)
   }, [activeTab, wbLayout.leftLocked])
+
+  // 工具标签 → 左栏工具侧栏态跟随（2026-09-17 右栏优化轮，语义对齐 RAIL_FOLLOW_MAP：
+  // 「不在映射内的标签不动左栏」——无侧栏工具/切回文档标签只清工具态，不碰 railModule）。
+  // 锁定时不跟随（侧栏归属权留给用户）；归属判定见 renderToolTabHost（锁定时工具侧栏回落内嵌）。
+  useEffect(() => {
+    if (!followArmedRef.current) return
+    if (wbLayout.leftLocked) { setRailTool(null); return }
+    const tid = activeToolTab && isToolTabId(activeToolTab) ? toolIdOfTab(activeToolTab) : null
+    setRailTool(tid && TOOLS_WITH_SIDEBAR.has(tid) ? tid : null)
+  }, [activeToolTab, wbLayout.leftLocked])
 
   // 批次 6（PDF 整包方案 §2）：编辑区激活文档是 PDF 时，左栏自动跟随到 bookshelf 大纲态（锁定除外）；
   // 换回普通文档则回编辑器侧栏态。跟随语义沿用 RAIL_FOLLOW_MAP 的「不在映射内的标签不动左栏」。
@@ -915,9 +934,10 @@ export default function App() {
     if (!hidden && railModule === key) setRailModule(null)
   }
 
-  /** 左栏模块态「← 返回总览」：清模块态，锁定态顺带自动解锁（原型 lpBack 语义） */
+  /** 左栏模块态「← 返回总览」：清模块态（含工具侧栏态），锁定态顺带自动解锁（原型 lpBack 语义） */
   const handleBackToOverview = () => {
     setRailModule(null)
+    setRailTool(null)
     if (wbLayout.leftLocked) update('workbenchLayout', JSON.stringify({ ...wbLayout, leftLocked: false }))
   }
 
@@ -1087,6 +1107,7 @@ export default function App() {
             <WorkbenchShell
               activeTab={activeTab}
               railModule={railModule}
+              railTool={railTool}
               modSlotRef={wbModSlotRef}
               onBookmarkClick={handleBookmarkClick}
               onBookmarkVisibility={handleBookmarkVisibility}

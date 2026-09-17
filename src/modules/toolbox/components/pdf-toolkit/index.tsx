@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Loader2, FileText, RotateCw, Trash2, ChevronUp, ChevronDown, Download, Merge, Save, X } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 import { showToast } from '../../../../lib/toast'
 import { pdfMerge, pdfOrganize, pdfExport } from '../../../../lib/ipc'
 import type { PdfOpResult } from '../../../../types'
+import type { ToolSidebarProps } from '../../../../components/workbench/toolRegistry'
 
 /**
  * PDF 工具箱（内置工具）：
@@ -30,7 +32,7 @@ interface PageItem {
 // pdf.js worker:同 PdfViewer 的 ?url 方案（v3 classic worker，兼容当前 Electron）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 
-export function PdfToolkit({ onBack }: { onBack: () => void }) {
+export function PdfToolkit({ onBack, sidebarEl, sidebarHosted }: { onBack: () => void } & ToolSidebarProps) {
   const [files, setFiles] = useState<PdfFile[]>([])
   const [activeIdx, setActiveIdx] = useState<number>(-1)
   const [pages, setPages] = useState<PageItem[]>([])
@@ -249,8 +251,11 @@ export function PdfToolkit({ onBack }: { onBack: () => void }) {
       </div>
 
       <div className="flex-1 min-h-0 flex">
-        {/* 文件列表 */}
-        <div className="w-56 shrink-0 border-r border-[var(--border-color)] overflow-y-auto py-1.5 px-1.5 space-y-0.5">
+        {/* 文件列表。2026-09-17 右栏优化轮：标签页语境 sidebarEl 非空时 portal 进
+            工作台左栏模块态 slot（挂载点迁移，状态留在本组件）；槽未就绪渲染 null 等槽。 */}
+        {(() => {
+          const sidebarInner = (
+            <>
           {files.length === 0 && (
             <p className="text-[11px] text-[var(--text-muted)] text-center pt-6 leading-relaxed px-2">
               添加 PDF 后点选文件进行页面整理。<br />支持多选后合并。
@@ -265,7 +270,14 @@ export function PdfToolkit({ onBack }: { onBack: () => void }) {
               <span className="block text-[10px] text-[var(--text-disabled)]">{f.pageCount} 页</span>
             </button>
           ))}
-        </div>
+            </>
+          )
+          return sidebarEl
+            ? createPortal(<div className="h-full w-full min-h-0 overflow-y-auto py-1.5 px-1.5 space-y-0.5">{sidebarInner}</div>, sidebarEl)
+            : sidebarHosted
+              ? null
+              : <div className="w-56 shrink-0 border-r border-[var(--border-color)] overflow-y-auto py-1.5 px-1.5 space-y-0.5">{sidebarInner}</div>
+        })()}
 
         {/* 页面工作区 */}
         <div className="flex-1 min-w-0 flex flex-col">

@@ -259,8 +259,10 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
 
             <RecentEdited onOpenFile={onOpenFile} onOpenPage={onOpenPage} />
 
-            {/* 下段：控件切换条（可拖拽排序 + ⋯ 选显）+ 简略视图 */}
-            <div className="mx-2.5 mb-2.5 shrink-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+            {/* 下段：控件切换条（可拖拽排序 + ⋯ 选显）+ 简略视图。
+                2026-09-17 右栏优化轮：下段改为 flex-1 吃满中段让出的空间——中段「最近编辑」
+                收缩为自适应高度后，控件简略视图拿到最大可用高度（常规内容量全部显示无滚动） */}
+            <div className="mx-2.5 mb-2.5 flex min-h-0 flex-1 flex-col rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
               <div data-wb="widgetSwitch" className="flex items-center gap-1 px-2 pt-1.5">
                 {visibleWidgets.map((id) => {
                   const meta = WIDGET_META[id]
@@ -310,8 +312,10 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
                 </div>
               </div>
 
-              {/* 简略视图（固定高、独立滚动；DayPanel 系控件脱离中 → 「已在桌面」互斥条目） */}
-              <div data-wb="widgetBrief" className="kb-view-fade m-2 mt-1.5 h-[196px] overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] p-2.5">
+              {/* 简略视图（2026-09-17 右栏优化轮：原固定 h-[196px] 改 flex-1 吃满下段剩余——
+                  内容少时整窗显示完不滚动；条目特别多时在此高度内滚动（自适应+上限）。
+                  DayPanel 系控件脱离中 → 「已在桌面」互斥条目） */}
+              <div data-wb="widgetBrief" className="kb-view-fade m-2 mt-1.5 min-h-0 flex-1 overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] p-2.5">
                 {effectiveWidget == null ? (
                   <div className="flex h-full items-center justify-center text-[11.5px] text-[var(--text-muted)]">小控件均已隐藏，点击上方 ⋯ 恢复</div>
                 ) : dayPanelDetached && (DAY_PANEL_WIDGET_IDS as readonly string[]).includes(effectiveWidget) ? (
@@ -404,7 +408,8 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
   )
 }
 
-/** 中段：🕘 最近编辑（常驻、独立滚动；近 7 天知识页按更新时间倒序） */
+/** 中段：🕘 最近编辑（2026-09-17 右栏优化轮收缩——不再 flex-1 抢占空间：自适应内容高度，
+ *  近 7 天最多 6 条（超出截断），无记录整卡不渲染；剩余空间全部让给下段控件简略视图） */
 function RecentEdited({ onOpenFile, onOpenPage }: { onOpenFile: (relPath: string) => void; onOpenPage: (pageId: string) => void }) {
   const [pages, setPages] = useState<KnowledgePage[]>([])
 
@@ -426,20 +431,20 @@ function RecentEdited({ onOpenFile, onOpenPage }: { onOpenFile: (relPath: string
         return Number.isFinite(t) && now - t <= REL_MS && now - t >= 0
       })
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      .slice(0, 12)
+      .slice(0, 6)
   }, [pages])
 
+  if (recent.length === 0) return null
+
   return (
-    <div data-wb="recentEdited" className="mx-2.5 mt-2 flex min-h-[72px] flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+    <div data-wb="recentEdited" className="mx-2.5 mt-2 flex shrink-0 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
       <div className="flex shrink-0 items-center gap-1.5 px-2.5 pb-1 pt-2 text-[11.5px] font-semibold text-[var(--text-secondary)]">
         <History size={12} className="text-[var(--text-muted)]" />
         最近编辑
         <span className="ml-auto text-[10px] font-normal text-[var(--text-muted)]">近 7 天</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1.5">
-        {recent.length === 0 ? (
-          <div className="px-1.5 py-3 text-[11px] text-[var(--text-muted)]">近 7 天没有编辑记录</div>
-        ) : recent.map((p) => (
+      <div className="max-h-[180px] overflow-y-auto px-1.5 pb-1.5">
+        {recent.map((p) => (
           <button
             key={p.id}
             onClick={() => (p.path ? onOpenFile(p.path) : onOpenPage(p.id))}

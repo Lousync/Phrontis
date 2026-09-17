@@ -165,6 +165,33 @@ async function main() {
   const mod2 = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
   ok(mod1 === 'editor' && mod2 === 'editor', 'D9 再点同书签不退出模块态', `mod1=${mod1} mod2=${mod2}`)
 
+  // D10 工具侧栏适配左栏（2026-09-17 右栏优化轮）：pdf-toolkit 标签激活 → 左栏模块态
+  // data-wb-mod=pdf-toolkit，侧栏（文件列表）portal 进 slot；关标签 → 回原模块态。
+  //（先退出模块态到总览，排除 railModule 残留干扰；pdf-toolkit 为 lazy chunk，多等加载）
+  await evalJs(`(() => { document.querySelector('button[title^="返回总览"]')?.click(); return true })()`)
+  await sleep(400)
+  // 打开工具标签：右栏入口区「PDF 工具箱」条目（或全隐藏时走命令面板兜底——探针环境默认全显）
+  await evalJs(`(() => {
+    const btns = [...document.querySelectorAll('[data-wb="toolsZone"] button')]
+    const hit = btns.find((b) => b.textContent?.includes('PDF 工具箱'))
+    hit?.click(); return true
+  })()`)
+  await sleep(1800)
+  const toolMod = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
+  ok(toolMod === 'pdf-toolkit', 'D10 PDF 工具箱标签激活 → 左栏切工具侧栏态（data-wb-mod=pdf-toolkit）', `mod=${toolMod}`)
+  const slotHasSidebar = await evalJs(`!!document.querySelector('[data-wb="modSlot"] > div')`)
+  ok(slotHasSidebar, 'D10b 工具侧栏 portal 进左栏 slot（文件列表挂载）')
+  // 关工具标签（标签条 ✕）→ railTool 清空；落点 = 上一个文档标签（landingAfterClose 语义），
+  // 左栏 RAIL_FOLLOW_MAP 跟随落点模块态 —— 关键断言：railTool 不滞留（mod ≠ pdf-toolkit）
+  await evalJs(`(() => {
+    const tabs = [...document.querySelectorAll('[data-wb="tabbar"] [data-wb-tab]')]
+    const t = tabs.find((x) => x.dataset.wbTab === 'tool:pdf-toolkit')
+    t?.querySelector('button[title="关闭标签页"]')?.click(); return true
+  })()`)
+  await sleep(700)
+  const afterClose = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
+  ok(afterClose !== 'pdf-toolkit', 'D10c 关工具标签 → railTool 清空不滞留（左栏跟随落点标签）', `mod=${afterClose}`)
+
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)
   for (const r of results) console.log(`${r.pass ? '✓' : '✗'} ${r.label}${r.detail ? '  → ' + r.detail : ''}`)

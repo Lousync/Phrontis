@@ -61,6 +61,9 @@ interface Props {
   activeTab: TabName | null
   /** 当前左栏模块态（null = 总览态）；树模式由 leftMode==='tree' 单独表达 */
   railModule: RailModule | null
+  /** 工具侧栏态（2026-09-17 右栏优化轮）：激活工具属于 TOOLS_WITH_SIDEBAR 时的 toolId。
+      与 railModule 互斥共用模块态 slot（瞬态跟随，不进书签/持久化体系）；仅影响模块态判定与 data-wb-mod */
+  railTool?: string | null
   locked: boolean
   treeMode: boolean
   /** 模块态 slot 的 ref callback（App 收集 DOM 传给模块 sidebarEl 做 portal 目标） */
@@ -80,7 +83,7 @@ interface Props {
   onPluginBookmark: (tab: TabName) => void
 }
 
-export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, modSlotRef, onBookmarkClick, onBookmarkVisibility, bookmarksHidden, onBack, onToggleLock, onToggleTreeMode, onOpenLooseFile, onPluginBookmark }: Props) {
+export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, locked, treeMode, modSlotRef, onBookmarkClick, onBookmarkVisibility, bookmarksHidden, onBack, onToggleLock, onToggleTreeMode, onOpenLooseFile, onPluginBookmark }: Props) {
   const { s } = useSettings()
   const pluginBookmarks = useMemo(() => parsePluginBookmarks(s.workbenchBookmarks), [s.workbenchBookmarks])
   // 🔖 书签选显菜单开关（v10 拍板：逐个勾选显示哪些书签 + 插件可注册书签）。
@@ -181,12 +184,12 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
             )}
           </div>
         </>
-      ) : railModule ? (
-        /* ---- 模块侧边栏态：书签对应模块的侧栏 portal 进 slot ----
+      ) : railModule || railTool ? (
+        /* ---- 模块侧边栏态：书签对应模块（或工具侧栏，data-wb-mod=toolId）portal 进 slot ----
              2026-09-16 第二轮 UI 反馈：头部只留 ‹ 返回 + 锁定（文字描述与横线删除）；
-             data-wb-mod 记录当前模块 key，供探针/脚本断言（不渲染可见文字） */
+             data-wb-mod 记录当前模块 key（工具侧栏态 = tool id），供探针/脚本断言（不渲染可见文字） */
         <>
-          <div data-wb="mod" data-wb-mod={railModule ?? ''} className="flex h-8 shrink-0 items-center justify-between px-1.5">
+          <div data-wb="mod" data-wb-mod={railModule ?? railTool ?? ''} className="flex h-8 shrink-0 items-center justify-between px-1.5">
             <button onClick={onBack} title="返回总览（自动解锁）" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <ArrowLeft size={13} />
             </button>

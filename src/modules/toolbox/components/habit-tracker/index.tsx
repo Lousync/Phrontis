@@ -1,17 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { ArrowLeft, CalendarCheck2, CalendarDays, BarChart3 } from 'lucide-react'
 import type { Habit, HabitRecord } from '../../../../types'
 import { deleteHabit, updateHabit, toggleHabitCheck } from '../../../../lib/ipc'
 import { showToast } from '../../../../lib/toast'
 import { buildRecordIndex, currentStreak } from './dateUtils'
 import { useDataChanged, notifyDataChanged } from '../../../../lib/dataChanged'
+import type { ToolSidebarProps } from '../../../../components/workbench/toolRegistry'
 import { HabitSidebar } from './components/HabitSidebar'
 import { TodayView } from './components/TodayView'
 import { CalendarView } from './components/CalendarView'
 import { StatsView } from './components/StatsView'
 import { HabitEditorModal } from './components/HabitEditorModal'
 
-interface Props { onBack: () => void }
+interface Props extends ToolSidebarProps { onBack: () => void }
 
 type ViewTab = 'today' | 'calendar' | 'stats'
 
@@ -24,7 +26,7 @@ const VIEW_TABS: { id: ViewTab; label: string; icon: React.ReactNode }[] = [
 /** 连续天数里程碑：达成时弹提示 */
 const MILESTONES = [3, 7, 14, 21, 30, 50, 100, 150, 200, 250, 300, 365]
 
-export function HabitTracker({ onBack }: Props) {
+export function HabitTracker({ onBack, sidebarEl, sidebarHosted }: Props) {
   const [habits, setHabits] = useState<Habit[]>([])
   const [records, setRecords] = useState<HabitRecord[]>([])
   const [view, setView] = useState<ViewTab>('today')
@@ -94,16 +96,24 @@ export function HabitTracker({ onBack }: Props) {
       </div>
 
       <div className="flex flex-1 min-h-0">
-        {/* 左栏：习惯列表（固定宽） */}
-        <div className="w-56 shrink-0 border-r border-[var(--border-color)] min-h-0">
-          <HabitSidebar
-            habits={habits}
-            records={records}
-            onNew={() => setEditor({ mode: 'create' })}
-            onEdit={h => setEditor({ mode: 'edit', habit: h })}
-            onArchive={handleArchive}
-          />
-        </div>
+        {/* 左栏：习惯列表（固定宽）。2026-09-17 右栏优化轮：标签页语境 sidebarEl 非空时
+            portal 进工作台左栏模块态 slot（挂载点迁移，状态留在本组件）；槽未就绪渲染 null 等槽。 */}
+        {(() => {
+          const sidebarInner = (
+            <HabitSidebar
+              habits={habits}
+              records={records}
+              onNew={() => setEditor({ mode: 'create' })}
+              onEdit={h => setEditor({ mode: 'edit', habit: h })}
+              onArchive={handleArchive}
+            />
+          )
+          return sidebarEl
+            ? createPortal(<div className="h-full w-full min-h-0">{sidebarInner}</div>, sidebarEl)
+            : sidebarHosted
+              ? null
+              : <div className="w-56 shrink-0 border-r border-[var(--border-color)] min-h-0">{sidebarInner}</div>
+        })()}
 
         {/* 主区 */}
         <div className="flex-1 flex flex-col min-w-0">

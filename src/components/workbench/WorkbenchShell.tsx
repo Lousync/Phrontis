@@ -25,6 +25,8 @@ interface Props {
   activeTab: TabName | null
   /** 左栏模块态（null = 总览态） */
   railModule: RailModule | null
+  /** 左栏工具侧栏态（TOOLS_WITH_SIDEBAR 工具标签激活时的 toolId；透传左栏，见 WorkbenchLeftPanel） */
+  railTool?: string | null
   /** 模块态 slot 的 ref callback（App 收集 DOM 传给模块做 sidebarEl portal 目标） */
   modSlotRef: (node: HTMLDivElement | null) => void
   onBookmarkClick: (key: RailModule) => void
@@ -40,7 +42,7 @@ interface Props {
   maximized?: boolean
 }
 
-export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRef, onBookmarkClick, onBookmarkVisibility, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false, maximized = false }: Props) {
+export function WorkbenchShell({ center, right, activeTab, railModule, railTool = null, modSlotRef, onBookmarkClick, onBookmarkVisibility, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false, maximized = false }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
 
@@ -73,6 +75,7 @@ export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRe
         <WorkbenchLeftPanel
           activeTab={activeTab}
           railModule={railModule}
+          railTool={railTool}
           locked={layout.leftLocked}
           treeMode={layout.leftMode === 'tree'}
           modSlotRef={modSlotRef}
