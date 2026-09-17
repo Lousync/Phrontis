@@ -970,6 +970,11 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // 工具标签页保活集合（批次4）：**必须声明在下方 `if (!loaded) return null` 早退之前**——
+  // hook 若落在早退之后，首挂（loaded=false）与恢复后的两次渲染 hook 数不同 = React #310 整屏崩
+  // （2026-09-17 实机启动白屏根因，与 PDF 批次 806a12d 同一类病；教训：早退组件的 hook 一律前置）。
+  const mountedToolTabs = useRef<Set<string>>(new Set())
+
   if (!loaded) return null
 
   /** 整窗模块（2026-09-17 第五轮拍板修正）：回收站/插件市场/工具箱/动态/设置与 aiTeaching/devtools
@@ -1025,8 +1030,8 @@ export default function App() {
   }
 
   /** 工具标签页槽位级保活挂载（批次4）：同一工具标签只渲染一份，切走 display:none 常驻
-      （工具内状态如密码本解锁态不因切换丢失）。宿主组件见 renderToolTabHost。 */
-  const mountedToolTabs = useRef<Set<string>>(new Set())
+      （工具内状态如密码本解锁态不因切换丢失）。集合声明见上方 hooks 区（早退之前）。
+      宿主组件见 renderToolTabHost。 */
   function renderToolMounted(tabId: string, on: boolean) {
     if (on) mountedToolTabs.current.add(tabId)
     if (!on && !mountedToolTabs.current.has(tabId)) return null
