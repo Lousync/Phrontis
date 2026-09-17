@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { BookOpen, Import, Loader2, Play } from 'lucide-react'
 import {
   pdfReaderCoverList, pdfReaderListBooks, wsImportPdf, workspaceGetCurrent,
@@ -7,6 +8,7 @@ import { useDataChanged } from '../../lib/dataChanged'
 import { showToast } from '../../lib/toast'
 import type { PdfBookListItem } from '../../types'
 import { PdfCover } from './PdfCover'
+import { PdfRailPanel } from '../../components/shared/pdf/PdfRailPanel'
 
 /**
  * 书架（v3.4.0 PDF 阅读体验整包批次 2，方案 §2/§8）：
@@ -27,7 +29,7 @@ const byRecent: SortFn = (a, b) => {
   return a.name.localeCompare(b.name, 'zh-Hans')
 }
 
-export function BookshelfModule({ isActive = true }: { isActive?: boolean }) {
+export function BookshelfModule({ isActive = true, sidebarEl = null, readerDoc = null }: { isActive?: boolean; sidebarEl?: HTMLElement | null; readerDoc?: { relPath: string } | null }) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [books, setBooks] = useState<PdfBookListItem[] | null>(null)
   /** 封面缓存命中集（coverList 索引 + mtime 对账通过）——PdfCover 据此走 coverGet 直取 */
@@ -87,10 +89,14 @@ export function BookshelfModule({ isActive = true }: { isActive?: boolean }) {
     }
   }, [importing])
 
+  // 左栏 bookshelf 模块态（批次 6）：三件套（目录/缩略图/书签）经 portal 挂进左栏 slot
+  const railPortal = sidebarEl ? createPortal(<PdfRailPanel readerDoc={readerDoc} />, sidebarEl) : null
+
   // 未打开仓库
   if (rootId === null && books !== null) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-[var(--bg-primary)] text-[var(--text-muted)]">
+        {railPortal}
         <BookOpen size={40} strokeWidth={1.5} />
         <div className="text-[13.5px]">书架</div>
         <div className="max-w-[280px] text-center text-[11.5px] leading-relaxed">先在编辑区打开一个仓库，书架会自动收拢其中的 PDF</div>
@@ -104,6 +110,7 @@ export function BookshelfModule({ isActive = true }: { isActive?: boolean }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+      {railPortal}
       {/* 顶栏：标题 + 导入 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-2">
         <BookOpen size={15} className="text-[var(--text-secondary)]" />

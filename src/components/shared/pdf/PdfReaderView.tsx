@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize as MaximizeIcon,
-  FileText, AlertTriangle, Loader2, ListTree, Search, BookOpen, X,
-  GalleryVertical, Square, Columns2, Bookmark, BookmarkPlus, LayoutGrid, Eye, EyeOff, BookMarked,
+  FileText, AlertTriangle, Loader2, Search, BookOpen, X,
+  GalleryVertical, Square, Columns2, Bookmark, BookmarkPlus, Eye, EyeOff, ListTree,
 } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { renderTextLayer } from 'pdfjs-dist'
@@ -10,8 +10,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 import { openExternal, copyText, pdfReaderGet, pdfReaderPatch, translateInvoke, workspaceReadRange } from '../../../lib/ipc'
 import { showToast } from '../../../lib/toast'
 import { normalizeSpreadStart, resolveDegrade, spreadPages, estimatePageHeight, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/pdfLayout'
-import { PdfThumbGrid } from './PdfThumbGrid'
-import { PdfBookmarkList } from './PdfBookmarkList'
+import { destToPageNum } from './PdfOutlineTree'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
 import type { PdfBookPatch, PdfBookState } from '../../../types'
 
@@ -66,17 +65,7 @@ class KbRangeTransport extends pdfjsLib.PDFDataRangeTransport {
   }
 }
 
-/** outline dest → 页码（v3 dest 结构：数组首元素是 {num,gen} ref；字符串需 getDestination 解析） */
-async function destToPageNum(pdf: pdfjsLib.PDFDocumentProxy, dest: unknown): Promise<number> {
-  try {
-    let d = dest
-    if (typeof d === 'string') d = await pdf.getDestination(d)
-    if (Array.isArray(d) && d[0] && typeof d[0] === 'object' && typeof (d[0] as { num?: unknown }).num === 'number') {
-      return (d[0] as { num: number }).num
-    }
-  } catch { /* 解析失败回第 1 页 */ }
-  return 1
-}
+/** outline dest → 页码逻辑已迁 PdfOutlineTree.tsx（批次 6），此处 import 复用 */
 
 /**
  * 页内链接热区（方案 §5.8）：/Link 注解 rect → viewport 矩形 → 透明热区。
@@ -125,12 +114,6 @@ async function attachLinks(
   } catch { /* 注解读取失败不影响页面渲染 */ }
 }
 
-interface OutlineNode {
-  title: string
-  dest?: unknown
-  items: OutlineNode[]
-}
-
 interface Props {
   rootId: string
   relPath: string
@@ -154,7 +137,6 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   const [numPages, setNumPages] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [outline, setOutline] = useState<OutlineNode[]>([])
   /** 首页基准尺寸（占位估算用） */
   const firstPageRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 })
 
@@ -181,8 +163,8 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   const duoStartRef = useRef(1)
   const pageHostRef = useRef<HTMLDivElement>(null)
 
-  // ===== 侧栏 / 搜索 / 沉浸（v1 保留） =====
-  const [sideTab, setSideTab] = useState<'outline' | 'search' | 'thumbs' | 'bookmarks' | null>(null)
+  // ===== 侧栏 / 搜索 / 沉浸（v1 保留；目录/缩略图/书签三件套已迁左栏 bookshelf 模块态，§0.6）=====
+  const [sideTab, setSideTab] = useState<'search' | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searching, setSearching] = useState(false)
   const [searchHits, setSearchHits] = useState<Array<{ page: number; preview: string }>>([])
@@ -583,17 +565,6 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
         const p1 = await pdf.getPage(1)
         const base1 = p1.getViewport({ scale: 1 })
         firstPageRef.current = { w: base1.width, h: base1.height }
-        try {
-          const raw = await pdf.getOutline()
-          if (raw && raw.length) {
-            const walk = (list: typeof raw): OutlineNode[] => list.map((it) => ({
-              title: it.title ?? '',
-              dest: it.dest,
-              items: it.items?.length ? walk(it.items) : [],
-            }))
-            setOutline(walk(raw))
-          }
-        } catch { setOutline([]) }
         setLoading(false)
         pageNumRef.current = 1
         setPageNum(1)
@@ -796,17 +767,6 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     showToast({ type: 'info', message: '已跳转 AI 教学并带上选段上下文' })
   }, [closeSelBar, name, relPath, selInfo])
 
-  /** 大纲点击 → 跳页 */
-  const jumpOutline = useCallback(async (node: OutlineNode) => {
-    const pdf = pdfRef.current
-    if (!pdf || node.dest === undefined) return
-    const p = await destToPageNum(pdf, node.dest)
-    if (p >= 1 && p <= pdf.numPages) {
-      await goPage(p)
-      if (viewMode !== 'scroll') containerRef.current?.scrollTo({ top: 0 })
-    }
-  }, [goPage, viewMode])
-
   /** 全文搜索：逐页取文本（v1 保留） */
   const searchText = useCallback(async (q: string) => {
     const pdf = pdfRef.current
@@ -893,6 +853,20 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     return () => window.removeEventListener('keydown', onKey)
   }, [closeSelBar, immersive, selInfo, sideTab, stepPage, toggleImmersive])
 
+  // 批次 6：当前页广播（左栏大纲态跟随高亮）+ 左栏跳页请求承接
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('kb-pdf-page-changed', { detail: { relPath, page: pageNum, mode: viewMode } }))
+  }, [pageNum, viewMode, relPath])
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent).detail as { relPath?: string; page?: number } | undefined
+      if (!d?.relPath || d.relPath !== relPath || typeof d.page !== 'number') return
+      void goPage(d.page)
+    }
+    window.addEventListener('kb-pdf-goto-page', on)
+    return () => window.removeEventListener('kb-pdf-goto-page', on)
+  }, [goPage, relPath])
+
   // 渲染时高亮本页搜索命中（single/duo：文本层 refs）
   useEffect(() => {
     if (!searchQuery.trim() || loading) return
@@ -956,25 +930,18 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       <button onClick={() => void zoomBy(1.2)} title="放大" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomIn size={14} /></button>
       <button onClick={() => void zoomBy(1 / 1.2)} title="缩小" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomOut size={14} /></button>
       <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
-      <button onClick={() => setSideTab((v) => (v === 'outline' ? null : 'outline'))} title="大纲"
-        className={`flex items-center gap-1 rounded p-0.5 ${sideTab === 'outline' ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+      {/* 大纲 = 左栏 bookshelf 模块态（批次 6：内嵌大纲侧栏已删）：解锁左栏并切过去（兜底入口） */}
+      <button onClick={() => window.dispatchEvent(new CustomEvent('kb-rail-show-bookshelf-outline'))} title="在左栏打开目录/缩略图/书签"
+        className="flex items-center gap-1 rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
         <ListTree size={14} />大纲
       </button>
       <button onClick={() => setSideTab((v) => (v === 'search' ? null : 'search'))} title="搜索 (Ctrl+F)"
         className={`flex items-center gap-1 rounded p-0.5 ${sideTab === 'search' ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <Search size={14} />搜索
       </button>
-      <button onClick={() => setSideTab((v) => (v === 'thumbs' ? null : 'thumbs'))} title="缩略图"
-        className={`flex items-center gap-1 rounded p-0.5 ${sideTab === 'thumbs' ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-        <LayoutGrid size={14} />缩略图
-      </button>
       <button onClick={toggleBookmark} title={bookmarks.some((b) => b.page === currentPageForBookmark()) ? '移除本页书签' : '收藏本页书签'}
         className={`flex items-center gap-1 rounded p-0.5 ${bookmarks.some((b) => b.page === currentPageForBookmark()) ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         {bookmarks.some((b) => b.page === currentPageForBookmark()) ? <Bookmark size={14} /> : <BookmarkPlus size={14} />}书签
-      </button>
-      <button onClick={() => setSideTab((v) => (v === 'bookmarks' ? null : 'bookmarks'))} title="书签列表"
-        className={`flex items-center gap-1 rounded p-0.5 ${sideTab === 'bookmarks' ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-        <BookMarked size={14} />
       </button>
       <button onClick={toggleEyeCare} title="护眼模式（书级记忆）"
         className={`flex items-center gap-1 rounded p-0.5 ${eyeCare ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
@@ -991,24 +958,9 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   const sidePanel = (
     <div className={`kb-view-fade flex w-64 shrink-0 flex-col border-r border-[var(--border-color)] bg-[var(--bg-secondary)] ${immersive || sideTab === null ? 'hidden' : ''}`}>
       <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2.5 py-1.5 text-[12px] font-medium text-[var(--text-primary)]">
-        {sideTab === 'outline' ? <><ListTree size={13} />大纲</>
-          : sideTab === 'search' ? <><Search size={13} />搜索</>
-          : sideTab === 'thumbs' ? <><LayoutGrid size={13} />缩略图</>
-          : <><BookMarked size={13} />书签</>}
+        <><Search size={13} />搜索</>
         <button onClick={() => setSideTab(null)} className="ml-auto rounded p-0.5 text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><X size={12} /></button>
       </div>
-      {sideTab === 'thumbs' && (
-        <PdfThumbGrid pdf={pdfDoc} numPages={numPages} current={pageNum} duo={viewMode === 'duo'} onJump={(n) => void goPage(n)} />
-      )}
-      {sideTab === 'bookmarks' && (
-        <PdfBookmarkList bookmarks={bookmarks} current={pageNum} duo={viewMode === 'duo'} onJump={(n) => void goPage(n)} onNote={setBookmarkNote} />
-      )}
-      {sideTab === 'outline' && (
-        <div className="kb-view-in min-h-0 flex-1 overflow-auto py-1">
-          {outline.length === 0 && <div className="px-3 py-2 text-[12px] text-[var(--text-muted)]">此 PDF 没有书签</div>}
-          <OutlineTree nodes={outline} onJump={(n) => void jumpOutline(n)} depth={0} />
-        </div>
-      )}
       {sideTab === 'search' && (
         <div className="kb-view-in flex min-h-0 flex-1 flex-col">
           <div className="flex items-center gap-1.5 p-2">
@@ -1145,37 +1097,6 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
         className="fixed top-3 right-3 z-50 flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 text-[var(--text-secondary)] shadow hover:text-[var(--text-primary)]"><X size={14} /></button>}
       {floatingBar}
       <TextSelectionBar rect={selInfo?.rect ?? null} translate={translate} onCopy={doCopySel} onTranslate={() => void doTranslateSel()} onAsk={doAsk} onClose={closeSelBar} />
-    </div>
-  )
-}
-
-/** 大纲递归树 */
-function OutlineTree({ nodes, onJump, depth }: { nodes: OutlineNode[]; onJump: (n: OutlineNode) => void; depth: number }) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  return (
-    <div className={depth > 0 ? 'ml-3 border-l border-[var(--border-color)]' : ''}>
-      {nodes.map((n, i) => {
-        const key = `${depth}-${i}-${n.title}`
-        const isCollapsed = collapsed.has(key)
-        const hasKids = n.items.length > 0
-        return (
-          <div key={key}>
-            <div className="group flex items-center gap-0.5 pr-1 hover:bg-[var(--bg-hover)]">
-              {hasKids ? (
-                <button onClick={() => setCollapsed((s) => { const n2 = new Set(s); if (n2.has(key)) n2.delete(key); else n2.add(key); return n2 })}
-                  className="w-4 shrink-0 pl-0.5 text-center text-[10px] text-[var(--text-tertiary)]">{isCollapsed ? '▸' : '▾'}</button>
-              ) : <span className="w-4 shrink-0" />}
-              <button onClick={() => onJump(n)}
-                className="min-w-0 flex-1 truncate py-0.5 pr-2 text-left text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                style={{ paddingLeft: depth > 0 ? 0 : 2 }}
-                title={n.title}>
-                {n.title}
-              </button>
-            </div>
-            {hasKids && !isCollapsed && <OutlineTree nodes={n.items} onJump={onJump} depth={depth + 1} />}
-          </div>
-        )
-      })}
     </div>
   )
 }

@@ -524,6 +524,18 @@ export default function App() {
     return () => window.removeEventListener('kb-ai-teaching-ask', handler)
   }, [])
 
+  // v3.4.0 批次 6：编辑器激活文档类型透出（kb-editor-doc-changed）→ 左栏跟随判断用
+  const [editorActiveDoc, setEditorActiveDoc] = useState<{ relPath: string; kind: 'pdf' | 'doc' } | null>(null)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent).detail as { relPath?: string; kind?: 'pdf' | 'doc' } | undefined
+      if (!d || typeof d.relPath !== 'string') return
+      setEditorActiveDoc({ relPath: d.relPath, kind: d.kind === 'pdf' ? 'pdf' : 'doc' })
+    }
+    window.addEventListener('kb-editor-doc-changed', handler)
+    return () => window.removeEventListener('kb-editor-doc-changed', handler)
+  }, [])
+
   // 日程侧边栏（v3.2.0 ⑮）桌面磁贴的日历 → 日志跳转。
   // 与 kb-open-in-editor 同范式：事件只送意图，payload 走 state + props
   // （保活层会重建 BlogModule 实例，靠 window 一次性变量会丢）。消费后立即清空，
@@ -756,6 +768,29 @@ export default function App() {
     if (m) setRailModule(m)
   }, [activeTab, wbLayout.leftLocked])
 
+  // 批次 6（PDF 整包方案 §2）：编辑区激活文档是 PDF 时，左栏自动跟随到 bookshelf 大纲态（锁定除外）；
+  // 换回普通文档则回编辑器侧栏态。跟随语义沿用 RAIL_FOLLOW_MAP 的「不在映射内的标签不动左栏」。
+  useEffect(() => {
+    if (!followArmedRef.current) return
+    if (wbLayout.leftLocked) return
+    if (activeTab !== 'editor') return
+    if (editorActiveDoc?.kind === 'pdf') setRailModule('bookshelf')
+    else if (editorActiveDoc !== null && railModule === 'bookshelf') setRailModule('editor')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, editorActiveDoc, wbLayout.leftLocked])
+
+  // 阅读器工具栏「大纲」→ 解锁左栏 + 展开左栏 + 切 bookshelf 模块态（兜底入口，方案 §2）
+  useEffect(() => {
+    const handler = () => {
+      if (wbLayout.leftLocked || wbLayout.leftCollapsed) {
+        update('workbenchLayout', JSON.stringify({ ...wbLayout, leftLocked: false, leftCollapsed: false }))
+      }
+      setRailModule('bookshelf')
+    }
+    window.addEventListener('kb-rail-show-bookshelf-outline', handler)
+    return () => window.removeEventListener('kb-rail-show-bookshelf-outline', handler)
+  }, [wbLayout, update])
+
   /** 书签点击：再点当前书签 = 退出模块侧边栏（原型 lpBack，锁定态顺带自动解锁）；
       错题本 = openTab('knowledge') + kb-locate-quiz-view 定位事件；其余直开对应标签 */
   const handleBookmarkClick = (key: RailModule) => {
@@ -842,7 +877,7 @@ export default function App() {
       case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} />
       case 'moments': return <MomentsModule />
       case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'editor' ? wbModSlotEl : null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} openFrom={editorJumpFrom && editorJumpFrom !== 'editor' ? tabLabel(editorJumpFrom) : null} onBackFrom={() => { const f = editorJumpFrom; if (f) { setEditorJumpFrom(null); handleTabChange(f) } }} zenLevel={zenLevel} onZenLevelChange={setZenLevel} />
-      case 'bookshelf': return <BookshelfModule isActive={on} />
+      case 'bookshelf': return <BookshelfModule isActive={on} sidebarEl={on && railModule === 'bookshelf' ? wbModSlotEl : null} readerDoc={editorActiveDoc?.kind === 'pdf' ? { relPath: editorActiveDoc.relPath } : null} />
       case 'aiTeaching': return <AiTeachingModule isActive={on} zenLevel={zenLevel} onZenLevelChange={changeZen} pendingAsk={pendingAsk} onConsumePendingAsk={() => setPendingAsk(null)} />
       case 'recycle': return <RecycleBinModule isActive={on} />
       case 'settings': return <SettingsModule />

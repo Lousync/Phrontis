@@ -1343,6 +1343,15 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
 
   const activeDoc = activePath ? openFiles[activePath] ?? null : null
 
+  // 批次 6（PDF 整包方案 §2）：向 App 透出「当前激活文档类型」——左栏跟随（PDF → bookshelf 大纲态）用。
+  // App 顶层监听后落 state（state+props 范式；编辑器保活常驻，广播只在变化时发生，无一次性 payload 丢失面）
+  const activeDocRel = activeDoc?.relPath ?? ''
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('kb-editor-doc-changed', {
+      detail: { relPath: activeDocRel, kind: /\.pdf$/i.test(activeDocRel) ? 'pdf' : 'doc' },
+    }))
+  }, [activeDocRel])
+
   /** 复制文件/目录路径：rel=仓库相对；abs=含仓库根的完整路径 */
   const copyNodePath = useCallback(async (rel: string, mode: 'abs' | 'rel') => {
     try {
