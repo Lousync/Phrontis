@@ -249,7 +249,9 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [immersive])
+    // viewMode 切换会换挂容器 ref（scroll 用 scrollHostRef）——观察器须随模式重挂
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [immersive, viewMode])
 
   // ===== 双页防呆降级（方案 §5.3：低于 1240px 自动降级 + toast）=====
   const degradeToastedRef = useRef(false)
@@ -1008,25 +1010,8 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     </div>
   )
 
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-[var(--text-secondary)]">
-        <AlertTriangle size={28} className="text-[var(--text-warning)]" />
-        <div className="max-w-md text-center text-[13px] leading-relaxed">PDF 打开失败：{error}</div>
-      </div>
-    )
-  }
-
-  if (loading) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-[var(--text-secondary)]">
-        <Loader2 size={26} className="animate-spin text-[var(--accent)]" />
-        <span className="text-[12.5px]">正在加载 {name}…（懒加载模式）</span>
-      </div>
-    )
-  }
-
-  // 竖滚 slots
+  // 竖滚页槽 —— ⚠️ Hook 必须在下方 error/loading 早退**之前**调用：
+  // 首渲染走 loading 早退时若跳过本 useMemo，加载完成后 Hook 数量变化 → React #310 直接崩（RootErrorBoundary 兜底）。
   const slots = useMemo(() => {
     if (viewMode !== 'scroll') return null
     const out: React.ReactNode[] = []
@@ -1044,6 +1029,24 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, numPages, slotH])
+
+  if (error) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-[var(--text-secondary)]">
+        <AlertTriangle size={28} className="text-[var(--text-warning)]" />
+        <div className="max-w-md text-center text-[13px] leading-relaxed">PDF 打开失败：{error}</div>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-[var(--text-secondary)]">
+        <Loader2 size={26} className="animate-spin text-[var(--accent)]" />
+        <span className="text-[12.5px]">正在加载 {name}…（懒加载模式）</span>
+      </div>
+    )
+  }
 
   return (
     <div ref={rootRef} className="relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)]">
