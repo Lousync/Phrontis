@@ -31,16 +31,21 @@ interface Props {
 }
 
 export function ActivityBar({ active, onChange, flush }: Props) {
+  // 尺寸对齐原型 v15（2026-09-16 第二轮 UI 反馈「图标条还是太粗」）：容器 44px、按钮 34×34、
+  // 圆角 7px、图标 22px；激活指示条 3×18px，left -5px 贴容器左缘（(44-34)/2 = 5px）。
   const railCls = (isActive: boolean) => `
-    w-14 h-14 flex items-center justify-center relative rounded-2xl transition-all duration-150
+    w-[34px] h-[34px] flex items-center justify-center relative rounded-[7px] transition-all duration-150
     ${isActive
       ? 'text-[var(--accent)] bg-[var(--bg-hover)]/80 shadow-[inset_0_0_0_1px_var(--border-color)]'
       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]/50'}
   `
+  const railMark = (
+    <div className="absolute -left-[5px] top-1/2 -translate-y-1/2 w-[3px] h-[18px] bg-[var(--accent)] rounded-r-full" />
+  )
 
   return (
     <div
-      className={`w-14 flex flex-col items-center py-2 gap-1 shrink-0 select-none transition-all duration-300 ease-out bg-[color-mix(in_srgb,var(--activitybar-bg)_85%,transparent)] ${flush ? 'rounded-none' : 'mx-1.5 my-1.5 rounded-xl border border-[var(--border-color)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}
+      className={`w-11 flex flex-col items-center py-2 gap-0.5 shrink-0 select-none transition-all duration-300 ease-out bg-[color-mix(in_srgb,var(--activitybar-bg)_85%,transparent)] ${flush ? 'rounded-none' : 'mx-1.5 my-1.5 rounded-xl border border-[var(--border-color)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}
     >
       {RAIL_BUTTONS.map(({ id, label, icon }) => (
         <button
@@ -49,29 +54,23 @@ export function ActivityBar({ active, onChange, flush }: Props) {
           title={label}
           className={railCls(active === id)}
         >
-          {active === id && (
-            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-9 bg-[var(--accent)] rounded-r-full" />
-          )}
-          {icon(26)}
+          {active === id && railMark}
+          {icon(22)}
         </button>
       ))}
 
       <div className="mt-auto flex flex-col items-center">
         {/* 设置 —— 直接打开设置标签页（拍板：设置=中间标签页；原底部弹出菜单删除） */}
         <button onClick={() => onChange('settings')} title="设置" className={railCls(active === 'settings')}>
-          {active === 'settings' && (
-            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-9 bg-[var(--accent)] rounded-r-full" />
-          )}
-          <SettingsIcon size={26} />
+          {active === 'settings' && railMark}
+          <SettingsIcon size={22} />
         </button>
 
         {/* 开发者工具 — 仅 DEV 渲染,打包构建时该分支被静态消除 */}
         {import.meta.env.DEV && (
           <button onClick={() => onChange('devtools')} title="开发者工具 (DEV)" className={railCls(active === 'devtools')}>
-            {active === 'devtools' && (
-              <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-9 bg-[var(--accent)] rounded-r-full" />
-            )}
-            <FlaskConical size={26} />
+            {active === 'devtools' && railMark}
+            <FlaskConical size={22} />
           </button>
         )}
       </div>

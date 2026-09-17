@@ -18,7 +18,6 @@ import {
 } from '../../lib/ipc'
 import { notifyDataChanged } from '../../lib/dataChanged'
 import { openVaultWithGuide } from '../../lib/vaultOpen'
-import { VaultSwitcher } from '../../components/shared/VaultSwitcher'
 import { showToast } from '../../lib/toast'
 import { recordFileOp, type FileOpResult } from '../../lib/fileOpHistory'
 import { useSettings } from '../../lib/SettingsContext'
@@ -1531,10 +1530,8 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                   setCtxMenu({ x: e.clientX, y: e.clientY, node: n })
                 }}
               />
-              {/* UI 打磨点1：仓库切换器停靠侧栏底部（portal 与自绘列两种模式共用本列）；面板向上弹出 */}
-              <div className="mt-auto border-t border-[var(--border-color)] p-1.5 shrink-0">
-                <VaultSwitcher />
-              </div>
+              {/* 仓库切换器已收口到工作台左栏底部 vaultBar（2026-09-16 第二轮 UI 反馈：
+                  编辑区侧栏底部再放一个 = 双入口重复，本段删除） */}
             </>
           )
           if (sidebarEl) {

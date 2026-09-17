@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag } from './types'
 
-import { PALETTE_MODULES, labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
+import { PALETTE_MODULES, labelOf as tabLabel, resolveStartupTab, isTabName, WORKBENCH_SWITCHER_TABS } from './lib/appModules'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchTabBar } from './components/workbench/WorkbenchTabBar'
 import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, type RailModule } from './lib/workbenchLayout'
@@ -694,30 +694,12 @@ export default function App() {
   }, [])
 
   // 标签条同步（v3.4.0）：任何通道的 setActiveTab（handleTabChange / 全局事件 / 命令面板 / 启动落点）
-  // 都会走到这里 —— openTabs 统一在此追加，杜绝「某条打开路径漏登记」
+  // 都会走到这里 —— openTabs 统一在此追加，杜绝「某条打开路径漏登记」。
+  // 2026-09-16 拍板：切换条改固定单选清单（WORKBENCH_SWITCHER_TABS）后不再消费 openTabs，
+  // 但本机制保留——aiTeaching 整窗形态的「返回工作台」仍按 openTabs 找回上一个标签。
   useEffect(() => {
     setOpenTabs((ts) => (ts.includes(activeTab) ? ts : [...ts, activeTab]))
   }, [activeTab])
-
-  /** 关闭标签：从标签条与保活集合同时移除；关的是激活 Tab 时切到相邻标签；最后一个标签不可关（UI 层已禁） */
-  const handleTabClose = (tab: TabName) => {
-    const idx = openTabs.indexOf(tab)
-    if (idx === -1 || openTabs.length <= 1) return
-    const rest = openTabs.filter((t) => t !== tab)
-    setOpenTabs(rest)
-    mountedTabs.current.delete(tab)
-    if (tab === activeTab) {
-      const next = rest[Math.min(idx, rest.length - 1)]
-      if (next) {
-        setEditorJumpFrom(null)
-        setActiveTab(next)
-        window.dispatchEvent(new CustomEvent('tab-switched'))
-      }
-    }
-  }
-
-  /** 标签拖拽重排：仅改显示顺序，不改变激活状态 */
-  const handleTabsReorder = (next: TabName[]) => setOpenTabs(next)
 
   const handleTabChange = (tab: TabName) => {
     setEditorJumpFrom(null) // 手动切 Tab 即清除「返回来源」上下文（条目6）
@@ -743,11 +725,18 @@ export default function App() {
   // ---- 左栏书签（v3.4.0 批次3）----
   // 跟随（原型 v15「自动跟随」）：激活标签变为映射内模块且未锁定时，左栏进入该模块侧边栏态；
   // 不在映射内的标签（设置/工具箱/动态…）不动左栏，锁定（leftLocked）时不跟随。
-  // 仅跳过首挂那次：启动恢复的激活标签不拉左栏（原型 v15 启动=总览态）；
-  // 解锁触发的重跑会「追上」当前映射内标签（锁定期间切过的上下文，解锁即恢复跟随）
+  // 仅跳过首挂那次；且 mount 后 2s 内不武装——settings 异步恢复 activeTab（占位 'blog' →
+  // 恢复值）的那次变化同样不拉左栏（原型 v15 启动=总览态；S3 探针实证启动被拉进模块态）；
+  // 武装后的重跑会「追上」当前映射内标签（锁定期间切过的上下文，解锁即恢复跟随）
   const followMountedRef = useRef(false)
+  const followArmedRef = useRef(false)
+  useEffect(() => {
+    const t = window.setTimeout(() => { followArmedRef.current = true }, 2000)
+    return () => window.clearTimeout(t)
+  }, [])
   useEffect(() => {
     if (!followMountedRef.current) { followMountedRef.current = true; return }
+    if (!followArmedRef.current) return
     if (wbLayout.leftLocked) return
     const m = RAIL_FOLLOW_MAP[activeTab]
     if (m) setRailModule(m)
@@ -915,15 +904,14 @@ export default function App() {
                 半透明底色 + 顶缘高光 = 液态玻璃卡片；禅模式 Z2+ 或 最大化（UI 优化条目1）全屏化（去边距/圆角/边框，贴满屏幕） */}
             <div className={`transition-all duration-300 ease-out ${zenLevel >= 2 || winMax ? 'flex min-w-0 flex-1' : 'm-1.5 flex min-w-0 flex-1'}`}>
               <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden transition-all duration-300 ease-out ${zenLevel >= 2 || winMax ? 'bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)]' : 'rounded-xl border border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-primary)_88%,transparent)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}>
-              {/* 中间栏标签条（v3.4.0 方案 §3.2）：无「＋新建」按钮，标签只能由入口产生；
+              {/* 顶部模块切换条（v3.4.0 方案 §3.2；2026-09-16 拍板修订）：固定模块单选切换器
+                  （WORKBENCH_SWITCHER_TABS 固定全集），非 openTabs 停靠标签；无关闭/拖拽。
                   aiTeaching 整窗形态隐藏（方案 §2），devtools 无 UI 再开入口一并排除 */}
               {activeTab !== 'aiTeaching' && (
                 <WorkbenchTabBar
-                  tabs={openTabs.filter((t) => t !== 'aiTeaching' && t !== 'devtools')}
+                  tabs={WORKBENCH_SWITCHER_TABS}
                   active={activeTab}
                   onSelect={handleTabChange}
-                  onClose={handleTabClose}
-                  onReorder={handleTabsReorder}
                 />
               )}
               {activeTab === 'aiTeaching' && (

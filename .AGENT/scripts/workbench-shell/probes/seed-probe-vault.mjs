@@ -1,5 +1,5 @@
 /**
- * 探针 fixture 仓库种子：探针 userData（%APPDATA%/Electron）默认无仓库 →
+ * 探针 fixture 仓库种子：探针 userData（%APPDATA%/knowbase (dev KnowledgeRecorder)，dev 隔离）默认无仓库 →
  * 编辑器走「未打开仓库」欢迎态，文件树侧栏不渲染，T1c/T3b portal 断言必然空。
  * 这里造一个带 .knowbase 的 fixture 仓库 + 登记（data/vaults.json）+ settings.currentVaultId，
  * 让 electron 启动时经 workspaceManager.loadVaults() 常规恢复路径打开它（不用原生对话框）。
@@ -9,7 +9,7 @@ import { join } from 'node:path'
 
 const proj = 'E:/Projects/KnowledgeRecorder'
 const fixture = join(proj, 'tmp', 'vault-fixture')
-const userData = join(process.env.APPDATA ?? '', 'Electron')
+const userData = join(process.env.APPDATA ?? '', 'knowbase (dev KnowledgeRecorder)')
 
 // 1. fixture 仓库：.knowbase + 两个目录 + 散文件
 for (const d of ['.knowbase', 'AI教学', '学习笔记']) mkdirSync(join(fixture, d), { recursive: true })

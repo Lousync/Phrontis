@@ -79,7 +79,6 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
   const pluginBookmarks = useMemo(() => parsePluginBookmarks(s.workbenchBookmarks), [s.workbenchBookmarks])
 
   // 仓库根层一次读取：树模式（文件夹+散文件）与总览态散文件区共用
-  const [vault, setVault] = useState<{ rootId: string; name: string } | null>(null)
   const [dirs, setDirs] = useState<string[]>([])
   const [loose, setLoose] = useState<string[]>([])
   useEffect(() => {
@@ -88,7 +87,6 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
       try {
         const cur = await workspaceGetCurrent()
         if (!cur?.rootId || !alive) return
-        setVault({ rootId: cur.rootId, name: cur.name })
         const res = await workspaceListDir(cur.rootId, '')
         if (!alive || res.error) return
         const soft = new Set(res.softNames ?? [])
@@ -99,22 +97,18 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
     return () => { alive = false }
   }, [])
 
-  const modTitle = railModule ? WORKBENCH_BOOKMARKS.find((b) => b.key === railModule)?.label ?? '' : ''
   const itemCls = 'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors'
 
   return (
     <div data-wb="leftPanel" className="flex h-full flex-col bg-[var(--bg-secondary)]">
-      {/* ---- 树模式：仓库顶层目录（不含 .knowbase）+ 根散文件 ---- */}
+      {/* ---- 树模式：仓库顶层目录（不含 .knowbase）+ 根散文件 ----
+           2026-09-16 第二轮 UI 反馈：头部只留 ‹ 返回钮（文字装饰与横线删除） */}
       {treeMode ? (
         <>
-          <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-2">
+          <div className="flex h-8 shrink-0 items-center px-1.5">
             <button onClick={onToggleTreeMode} title="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <ArrowLeft size={13} />
             </button>
-            <span className="flex items-center gap-1 text-[12px] font-medium text-[var(--text-secondary)]">
-              <Trees size={12} />
-              {vault?.name || '仓库文件'}
-            </span>
           </div>
           <div data-wb="treeMode" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5">
             {dirs.map((d) => (
@@ -138,13 +132,14 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
           </div>
         </>
       ) : railModule ? (
-        /* ---- 模块侧边栏态：书签对应模块的侧栏 portal 进 slot ---- */
+        /* ---- 模块侧边栏态：书签对应模块的侧栏 portal 进 slot ----
+             2026-09-16 第二轮 UI 反馈：头部只留 ‹ 返回 + 锁定（文字描述与横线删除）；
+             data-wb-mod 记录当前模块 key，供探针/脚本断言（不渲染可见文字） */
         <>
-          <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-2">
+          <div data-wb="mod" data-wb-mod={railModule ?? ''} className="flex h-8 shrink-0 items-center justify-between px-1.5">
             <button onClick={onBack} title="返回总览（自动解锁）" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <ArrowLeft size={13} />
             </button>
-            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--text-secondary)]">{modTitle}</span>
             <button
               onClick={onToggleLock}
               title={locked ? '已锁定：主界面切换不改变左栏（点击解锁）' : '锁定侧边栏：主界面切换不改变左栏'}
@@ -158,7 +153,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
       ) : (
         /* ---- 总览态：书签（内置 6 + 插件注册）+ 零散文件快速打开 ---- */
         <>
-          <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border-color)] px-3">
+          <div className="flex h-8 shrink-0 items-center justify-between px-3">
             <span className="text-[12px] font-medium text-[var(--text-secondary)]">工作台</span>
             <button
               onClick={onToggleTreeMode}

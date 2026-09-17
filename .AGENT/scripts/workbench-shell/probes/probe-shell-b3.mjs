@@ -2,7 +2,7 @@
  * 批次3 左栏书签双态运行时探针：electron 产物 + CDP（Node 22 内置 WebSocket）
  * 断言：外壳 DOM / 书签 6 项 / 书签↔标签联动 / 模块态 slot+portal / 跟随与锁定 /
  *       树模式 / vaultBar / workbenchLayout 落盘 / console 零 error
- * 前置：electron 以 KNOWBASE_SHARED_DATA=1 启动（userData=%APPDATA%/Electron，与正式数据隔离）
+ * 前置：electron 不设 KNOWBASE_SHARED_DATA 启动（走 dev 隔离，userData=%APPDATA%/knowbase (dev KnowledgeRecorder)）
  */
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
@@ -56,7 +56,8 @@ const JS_STATE = `(() => {
     bookmarkActive: qa('[data-wb="bookmarks"] [data-wb-bookmark][data-wb-active="1"]').map((b) => b.dataset.wbBookmark),
     modSlot: !!q('[data-wb="modSlot"]'),
     modSlotFilled: !!q('[data-wb="modSlot"]') && q('[data-wb="modSlot"]').children.length > 0,
-    modTitle: q('[data-wb="leftPanel"]')?.innerText?.split('\\n')?.[0] ?? '',
+    // 2026-09-16 第二轮 UI 反馈：模块态头部文字装饰已删，模块态改读 data-wb-mod（模块 key）
+    modTitle: q('[data-wb="mod"]')?.dataset.wbMod ?? '',
     treeMode: !!q('[data-wb="treeMode"]'),
     treeDirs: qa('[data-wb="treeMode"] div').filter((d) => d.textContent && !d.querySelector('button')).length,
     vaultBar: !!q('[data-wb="vaultBar"]'),
@@ -116,7 +117,7 @@ async function main() {
   ok(st1.tabs.some((t) => t.id === 'editor'), 'T1 点编辑区书签 → 标签条出现 editor', JSON.stringify(st1.tabs.map((t) => t.id)))
   ok(st1.modSlot, 'T1b 左栏进入模块态（modSlot 渲染）')
   ok(st1.modSlotFilled, 'T1c editor 文件树 portal 进左栏 slot', st1.modSlotFilled ? '' : 'slot 空——检查 sidebarEl 接线/仓库是否打开')
-  ok(st1.modTitle === '编辑区', 'T1d 模块态标题「编辑区」', `title=${st1.modTitle}`)
+  ok(st1.modTitle === 'editor', 'T1d 模块态 = 编辑区（data-wb-mod）', `mod=${st1.modTitle}`)
 
   // T2 ‹ 返回总览 = 退出模块态（原型 lpBack：书签区只在总览可见，「再点书签退出」经返回钮达成）
   await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
@@ -129,13 +130,13 @@ async function main() {
   await evalJs(`document.querySelector('[data-wb-bookmark="knowledge"]')?.click()`)
   await sleep(1200)
   const st3 = await evalJs(JS_STATE)
-  ok(st3.modSlot && st3.modTitle === '知识库', 'T3 点知识库书签 → 模块态标题「知识库」', `title=${st3.modTitle}`)
+  ok(st3.modSlot && st3.modTitle === 'knowledge', 'T3 点知识库书签 → 模块态 = knowledge', `mod=${st3.modTitle}`)
   ok(st3.modSlotFilled, 'T3b knowledge 侧栏 portal 进左栏 slot')
-  // 标签条点 editor（已开）→ 跟随。⚠️ 点 tab div 本身；tab 内第一个 button 是 ✕ 关闭钮，点它会关标签
+  // 标签条点 editor（已开）→ 跟随。2026-09-16 改单选切换器后 tab 内无 ✕，点 div 即切换
   await evalJs(`document.querySelector('[data-wb="tab"][data-wb-tab="editor"]')?.click()`)
   await sleep(700)
   const st4 = await evalJs(JS_STATE)
-  ok(st4.modTitle === '编辑区', 'T3c 标签切换 → 左栏自动跟随为「编辑区」', `title=${st4.modTitle}`)
+  ok(st4.modTitle === 'editor', 'T3c 标签切换 → 左栏自动跟随为编辑区', `mod=${st4.modTitle}`)
 
   // T4 锁定：📌 后切标签不跟随；解锁恢复
   const lockBtn = st4.lockTitle
@@ -145,13 +146,13 @@ async function main() {
   await evalJs(`document.querySelector('[data-wb="tab"][data-wb-tab="knowledge"]')?.click()`)
   await sleep(700)
   const st5 = await evalJs(JS_STATE)
-  ok(st5.modTitle === '编辑区', 'T4b 锁定后切标签不跟随（仍编辑区）', `title=${st5.modTitle}`)
+  ok(st5.modTitle === 'editor', 'T4b 锁定后切标签不跟随（仍编辑区）', `mod=${st5.modTitle}`)
   await evalJs(`document.querySelector('button[title^="已锁定"]')?.click()`)
   await sleep(400)
   await evalJs(`document.querySelector('[data-wb="tab"][data-wb-tab="knowledge"]')?.click()`)
   await sleep(700)
   const st6 = await evalJs(JS_STATE)
-  ok(st6.modTitle === '知识库', 'T4c 解锁后切标签恢复跟随（知识库）', `title=${st6.modTitle}`)
+  ok(st6.modTitle === 'knowledge', 'T4c 解锁后切标签恢复跟随（知识库）', `mod=${st6.modTitle}`)
 
   // T5 错题本书签：先返回总览（模块态无书签区），再点错题本 → knowledge 标签 + 模块态标题「错题本」
   await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
@@ -160,7 +161,7 @@ async function main() {
   await sleep(1200)
   const st7 = await evalJs(JS_STATE)
   ok(st7.tabs.some((t) => t.id === 'knowledge'), 'T5 错题本书签 → knowledge 标签')
-  ok(st7.modTitle === '错题本', 'T5b 模块态标题「错题本」（quiz 态复用 knowledge 侧栏）', `title=${st7.modTitle}`)
+  ok(st7.modTitle === 'quiz', 'T5b 模块态 = quiz（错题本复用 knowledge 侧栏）', `mod=${st7.modTitle}`)
 
   // T6 树模式：返回总览 → 点 🌳 → treeMode；返回总览（树模式返回钮 title 恰为「返回总览」）
   await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
@@ -192,7 +193,9 @@ async function main() {
   const stC = await evalJs(JS_STATE)
   ok(!stC.shell || stC.bookmarks.length === 0, 'S13a 单击手柄 → 左栏收起', `bookmarks=${stC.bookmarks.length}`)
   await sleep(1200)
-  const settingsPath = join(process.env.APPDATA || '', 'Electron', 'settings.json')
+  // userData = %APPDATA%/knowbase (dev KnowledgeRecorder)——不设 KNOWBASE_SHARED_DATA 时
+  // main/index.ts L86 在正式目录名后加 " (dev <检出目录名>)" 后缀（与正式数据隔离）
+  const settingsPath = join(process.env.APPDATA || '', 'knowbase (dev KnowledgeRecorder)', 'settings.json')
   let persisted = null
   let readErr = ''
   try {

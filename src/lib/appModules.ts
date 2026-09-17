@@ -86,6 +86,17 @@ export const TILE_MODULE_IDS = byFlag('tile')
 export const PALETTE_MODULES: Array<{ id: TabName; label: string }> =
   APP_MODULES.filter((m) => m.palette).map((m) => ({ id: m.id, label: m.label }))
 
+/**
+ * 工作台顶部模块切换条固定清单（v3.4.0 方案 §3.2；2026-09-16 第二轮 UI 反馈拍板）：
+ * 切换条 = **固定模块单选切换器**（「其他模块整合进了工作台」心智，跟旧版顶部一个效果），
+ * 不是 openTabs 停靠标签。成员从 APP_MODULES 派生、排除 aiTeaching / devtools
+ * （排除清单见 workbenchLayout.WORKBENCH_TABBAR_EXCLUDED）——新增 TabName 进了
+ * APP_MODULES 就自动出现在切换条，无需另改。
+ */
+export const WORKBENCH_SWITCHER_TABS: readonly TabName[] = APP_MODULES
+  .map((m) => m.id)
+  .filter((id) => !(id === 'aiTeaching' || id === 'devtools'))
+
 const KNOWN_IDS: string[] = APP_MODULES.map((m) => m.id)
 
 export function isTabName(v: unknown): v is TabName {

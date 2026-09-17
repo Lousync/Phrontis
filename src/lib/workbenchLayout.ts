@@ -80,8 +80,14 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
 }
 
 /**
- * 工作台标签条可出现的 Tab（入口产生型哲学的反面清单）：
- * aiTeaching 走整窗形态不进标签条；devtools 由 DEV 按钮直达、进了标签条也无法从 UI 再打开，一并排除。
+ * 顶部模块切换条排除清单：aiTeaching 走整窗形态不进切换条；devtools 由 DEV 按钮直达、
+ * 进了切换条也无法从 UI 再打开，一并排除。
+ *
+ * 2026-09-16 第二轮 UI 反馈拍板：切换条 = **固定模块单选切换器**（「其他模块整合进了工作台」
+ * 心智，跟旧版顶部一个效果），不再是 openTabs 停靠标签——openTabs 机制保留供
+ * aiTeaching 整窗返回等内部逻辑使用，仅切换条不再消费。
+ * 切换条固定清单 WORKBENCH_SWITCHER_TABS 在 appModules.ts（从 APP_MODULES 派生；
+ * 本文件保持零 value import，契约脚本 strip-types 直跑不炸）。
  */
 export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools']
 
