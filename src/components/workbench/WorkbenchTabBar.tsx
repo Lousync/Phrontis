@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, Puzzle, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical } from 'lucide-react'
 import type { TabName } from '../../types'
 import { labelOf } from '../../lib/appModules'
+import { isToolTabId, toolIdOfTab, findTool } from './toolRegistry'
 
 /**
  * 工作台中间栏标签条（v3.4.0 方案 §3.2；2026-09-17 第三轮 UI 反馈拍板定稿）。
@@ -14,6 +15,10 @@ import { labelOf } from '../../lib/appModules'
  * 同色盖住标签条底线），消除旧版「标签与内容区之间隔着一条线」的分离感。
  * aiTeaching（整窗形态，标签条本身隐藏）与 devtools 不画成标签（WORKBENCH_TABBAR_EXCLUDED，
  * 由 App 侧过滤 openTabs 后传入）。
+ *
+ * v3.4.0 批次4：支持**工具标签页**（`tool:<toolId>` 前缀约定字符串，不占 TabName，
+ * 由右栏工具入口区产生；标题/图标走共享工具注册表）——tabs 因此放宽为 string[]，
+ * 模块标签仍是 TabName 子集。
  *
  * 与旧 TabBar.tsx（博客模块内部页签，两者无关）。
  */
@@ -40,12 +45,27 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
 /** 未收录模块的兜底图标（新增 Tab 忘配图标时不出空白） */
 const FALLBACK_ICON = <BookText size={14} />
 
+/** 标签显示解析：工具标签（tool:<id>）走共享注册表，模块标签走 appModules */
+function tabLabel(id: string): string {
+  if (isToolTabId(id)) return findTool(toolIdOfTab(id))?.name ?? '工具'
+  return labelOf(id as TabName)
+}
+
+function tabIcon(id: string): React.ReactNode {
+  if (isToolTabId(id)) {
+    const t = findTool(toolIdOfTab(id))
+    if (t) return <t.Icon size={14} />
+    return <Wrench size={14} />
+  }
+  return TAB_ICONS[id] ?? FALLBACK_ICON
+}
+
 interface Props {
-  tabs: TabName[]
-  active: TabName | null
-  onSelect: (tab: TabName) => void
-  onClose: (tab: TabName) => void
-  onReorder: (tabs: TabName[]) => void
+  tabs: string[]
+  active: string | null
+  onSelect: (tab: string) => void
+  onClose: (tab: string) => void
+  onReorder: (tabs: string[]) => void
 }
 
 export function WorkbenchTabBar({ tabs, active, onSelect, onClose, onReorder }: Props) {
@@ -62,7 +82,7 @@ export function WorkbenchTabBar({ tabs, active, onSelect, onClose, onReorder }: 
     )
   }
 
-  const handleDragStart = (e: React.DragEvent, id: TabName) => {
+  const handleDragStart = (e: React.DragEvent, id: string) => {
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', id)
     dragIdRef.current = id
@@ -79,13 +99,13 @@ export function WorkbenchTabBar({ tabs, active, onSelect, onClose, onReorder }: 
     setDragOverId(null)
   }
 
-  const handleDrop = (e: React.DragEvent, targetId: TabName) => {
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
     e.preventDefault()
-    // 拖拽源优先取 ref（TabName），兜底 dataTransfer（text/plain 是 string，需窄化）
+    // 拖拽源优先取 ref，兜底 dataTransfer（text/plain 是 string）
     const raw = dragIdRef.current ?? e.dataTransfer.getData('text/plain')
     setDragOverId(null)
     if (!raw || raw === targetId) return
-    const srcId = raw as TabName
+    const srcId = raw
     const next = [...tabs]
     const from = next.indexOf(srcId)
     const to = next.indexOf(targetId)
@@ -112,7 +132,7 @@ export function WorkbenchTabBar({ tabs, active, onSelect, onClose, onReorder }: 
             onDrop={(e) => handleDrop(e, id)}
             onClick={() => onSelect(id)}
             onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id) } }}
-            title={labelOf(id)}
+            title={tabLabel(id)}
             className={`group relative flex max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 rounded-t-md border px-2.5 text-[12.5px] transition-colors ${
               isActive
                 // 连体：激活标签底边与内容区同色，盖住标签条底线（消除分离感）
@@ -121,9 +141,9 @@ export function WorkbenchTabBar({ tabs, active, onSelect, onClose, onReorder }: 
             } ${dragOverId === id ? 'after:absolute after:inset-y-0 after:left-0 after:w-[2px] after:bg-[var(--accent)]' : ''}`}
           >
             <span className={`shrink-0 ${isActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>
-              {TAB_ICONS[id] ?? FALLBACK_ICON}
+              {tabIcon(id)}
             </span>
-            <span className="max-w-[140px] truncate">{labelOf(id)}</span>
+            <span className="max-w-[140px] truncate">{tabLabel(id)}</span>
             <button
               onClick={(e) => { e.stopPropagation(); onClose(id) }}
               onAuxClick={(e) => e.stopPropagation()}

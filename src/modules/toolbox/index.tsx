@@ -1,23 +1,14 @@
-import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
-import { Shield, Timer, CalendarCheck2, Globe, BellRing, Puzzle, Archive, FileText, Wifi, Wrench, ArrowLeft, Scissors, Eye } from 'lucide-react'
-import { PasswordVault } from './components/PasswordVault'
-import { HabitTracker } from './components/habit-tracker'
-// PdfToolkit 内联 pdfjs（~800KB）：不进首屏，打开该工具时才加载
-// （toolbox 模块本身是静态引入的，切换零延迟；只有这一件含大依赖的工具按需）
-const PdfToolkit = lazy(() => import('./components/pdf-toolkit').then((m) => ({ default: m.PdfToolkit })))
-import { BookmarkNav } from './components/bookmark-nav'
-import { RemoteSupervise } from './components/remote-supervise'
-import { ExportTool } from './components/export/ExportTool'
-import { LanShare } from './components/lan-share'
-import { WebClipper } from './components/web-clipper'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Eye, Wrench } from 'lucide-react'
 import { getPluginTools, type PluginTool } from '../../lib/pluginService'
-import { showToast } from '../../lib/toast'
 import { useSettings } from '../../lib/SettingsContext'
 import { SettingSwitch } from '../../components/shared/SettingSwitch'
 import { PluginIconImg } from '../../components/shared/PluginIconImg'
-import { PluginFrame } from '../../components/shared/PluginFrame'
+// 工具清单与「id → 组件」映射的唯一真相源（v3.4.0 方案 §10.3 抽共享）：
+// 右栏工具入口区（ToolLauncherZone）与本模块共同消费，加工具只改 toolRegistry 一处
+import { BUILTIN_TOOLS, ToolHost, PluginToolHost, DEEPLINKABLE_TOOL_IDS, type ToolMeta } from '../../components/workbench/toolRegistry'
 
-// ---- Tool registry ----
+// ---- Tool registry（派生自共享注册表；icon 按 20px 画廊规格实例化） ----
 interface ToolDefinition {
   id: string
   name: string
@@ -25,68 +16,11 @@ interface ToolDefinition {
   available: boolean
 }
 
-const DATA_TOOLS: ToolDefinition[] = [
-  {
-    id: 'password-vault',
-    name: '密码本',
-    icon: <Shield size={20} strokeWidth={1.5} />,
-    available: true,
-  },
-  {
-    id: 'bookmark-nav',
-    name: '网址导航',
-    icon: <Globe size={20} strokeWidth={1.5} />,
-    available: true,
-  },
-  {
-    id: 'data-export',
-    name: '数据导出',
-    icon: <Archive size={20} strokeWidth={1.5} />,
-    available: true,
-  },
-  {
-    id: 'lan-share',
-    name: '设备传输',
-    icon: <Wifi size={20} strokeWidth={1.5} />,
-    available: true,
-  },
-  {
-    id: 'web-clipper',
-    name: '网页剪藏',
-    icon: <Scissors size={20} strokeWidth={1.5} />,
-    available: true,
-  },
-]
+const toDefinition = (t: ToolMeta): ToolDefinition => ({ id: t.id, name: t.name, icon: <t.Icon size={20} strokeWidth={1.5} />, available: true })
 
-const PRODUCTIVITY_TOOLS: ToolDefinition[] = [
-  {
-    id: 'pomodoro',
-    name: '番茄钟',
-    icon: <Timer size={20} strokeWidth={1.5} />,
-    available: true,
-  },
-  {
-    id: 'habit-tracker',
-    name: '习惯打卡',
-    icon: <CalendarCheck2 size={20} strokeWidth={1.5} />,
-    available: true,
-  },
-  {
-    id: 'remote-supervise',
-    name: '远程监督',
-    icon: <BellRing size={20} strokeWidth={1.5} />,
-    available: true,
-  },
-  {
-    id: 'pdf-toolkit',
-    name: 'PDF 工具箱',
-    icon: <FileText size={20} strokeWidth={1.5} />,
-    available: true,
-  },
-]
+const DATA_TOOLS: ToolDefinition[] = BUILTIN_TOOLS.filter((t) => t.group === 'data').map(toDefinition)
 
-/** 可深链激活的内置工具 id 白名单（无效 id 忽略，避免 renderTool 落 default 白屏） */
-const DEEPLINKABLE_TOOL_IDS = new Set([...DATA_TOOLS, ...PRODUCTIVITY_TOOLS].map((t) => t.id))
+const PRODUCTIVITY_TOOLS: ToolDefinition[] = BUILTIN_TOOLS.filter((t) => t.group === 'prod').map(toDefinition)
 
 // 深链入口（2026-09-08）：小窗「在工具箱中管理」等外部入口 → toolbox:open-tool。
 // 工具箱首访才挂载（App 保活机制），事件发出时组件可能还不存在——
@@ -190,30 +124,9 @@ export function ToolboxModule({ homeSignal = 0 }: ToolboxModuleProps) {
   }, [])
 
   const renderTool = () => {
-    switch (activeTool) {
-      case 'password-vault':
-        return <PasswordVault onBack={() => setActiveTool(null)} />
-      case 'habit-tracker':
-        return <HabitTracker onBack={() => setActiveTool(null)} />
-      case 'remote-supervise':
-        return <RemoteSupervise onBack={() => setActiveTool(null)} />
-      case 'pdf-toolkit':
-        return (
-          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-[var(--text-muted)]">正在加载 PDF 工具…</div>}>
-            <PdfToolkit onBack={() => setActiveTool(null)} />
-          </Suspense>
-        )
-      case 'bookmark-nav':
-        return <BookmarkNav onBack={() => setActiveTool(null)} />
-      case 'data-export':
-        return <ExportTool onBack={() => setActiveTool(null)} />
-      case 'lan-share':
-        return <LanShare onBack={() => setActiveTool(null)} />
-      case 'web-clipper':
-        return <WebClipper onBack={() => setActiveTool(null)} />
-      default:
-        return null
-    }
+    // case 映射已抽到共享 ToolHost（方案 §10.3）；onBack = 回画廊
+    if (activeTool) return <ToolHost toolId={activeTool} onBack={() => setActiveTool(null)} />
+    return null
   }
 
   // 内置工具全屏
@@ -225,7 +138,7 @@ export function ToolboxModule({ homeSignal = 0 }: ToolboxModuleProps) {
     )
   }
 
-  // UI 插件工具全屏宿主
+  // UI 插件工具全屏宿主（PluginToolHost 已迁共享 toolRegistry，与右栏入口区共用）
   if (activePluginTool) {
     return (
       <div className="kb-view-in flex min-h-0 flex-1 flex-col">
@@ -359,36 +272,3 @@ export function ToolboxModule({ homeSignal = 0 }: ToolboxModuleProps) {
   )
 }
 
-/** UI 插件宿主:sandbox iframe 加载 plugin:// 页面,postMessage 桥按授权白名单执行 */
-function PluginToolHost({ tool, onBack }: { tool: PluginTool; onBack: () => void }) {
-  // V3-2 授权单点化：改用 PluginFrame v2 双轨宿主（v2 报文 → host:rpc 主进程 Gateway 裁决，
-  // data.*/kb.store.*/files.* 全可用；v1 报文保留兼容分支服务存量插件）。
-  // 替代原 v1 手工 iframe + 白名单桥（data 通道此前「未开放」）。
-  return (
-    <div className="flex flex-col h-full bg-[var(--bg-primary)]">
-      <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 shrink-0">
-        <button
-          onClick={onBack}
-          className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-          title="返回"
-        >
-          <ArrowLeft size={12} />
-        </button>
-        <span className="text-[11.5px] font-medium text-[var(--text-muted)] flex items-center gap-1.5">
-          <Puzzle size={12} className="text-[var(--accent)]" />
-          {tool.name}
-        </span>
-        <span className="ml-auto text-[11px] text-[var(--text-disabled)]">插件</span>
-      </div>
-      <div className="min-h-0 flex-1">
-        <PluginFrame
-          key={`${tool.pluginId}:${tool.entry}`}
-          pluginId={tool.pluginId}
-          entry={tool.entry}
-          grantedCapabilities={tool.grantedCapabilities}
-          onDenied={(reason) => showToast({ type: 'warning', message: `插件请求被拒绝:${reason}` })}
-        />
-      </div>
-    </div>
-  )
-}

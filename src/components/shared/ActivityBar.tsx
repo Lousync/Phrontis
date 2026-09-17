@@ -1,15 +1,15 @@
 import type { TabName } from '../../types'
 import { Trash2, FlaskConical } from 'lucide-react'
-import { MomentsIcon, ToolboxIcon, SettingsIcon, PluginIcon } from './ModuleIcons'
+import { MomentsIcon, SettingsIcon, PluginIcon } from './ModuleIcons'
 
 /**
- * 图标条（v3.4.0 工作台三栏外壳，方案 §3.4）。
+ * 图标条（v3.4.0 工作台三栏外壳，方案 §3.4 / §10；2026-09-17 拍板变化：工具箱按钮撤掉，5 → 4）。
  *
- * 与旧版的区别（拍板定稿）：
- * - **固定 5 按钮**：回收站 / 插件市场 / 工具箱 / 动态 / 设置——不再提供拖拽排序与右键显隐
+ * - **固定 4 按钮**：回收站 / 插件市场 / 动态 / 设置——不再提供拖拽排序与右键显隐
  *   （旧 `activityBarOrder` / `activityBarHidden` 设置键随之废弃，见方案 §3.5）；
- * - **入口幂等哲学**：标签只能由入口产生，重复点击已激活的按钮 = 无操作（工具箱除外——
- *   「再点 = 回工具箱主界面」是 2026-09-10 定的特例，逻辑在 App.handleTabChange）；
+ * - **工具箱入口移除**：原「🧰 打开为中间标签页」的入口语义由右栏上部「工具箱工具入口区」
+ *   承接（方案 §10，ToolLauncherZone），工具箱模块本身保留（命令面板/深链仍可达）；
+ * - **入口幂等哲学**：标签只能由入口产生，重复点击已激活的按钮 = 无操作；
  * - 底部弹出菜单整条删除：设置按钮直接打开「设置」标签页（主题切换等在设置页内），
  *   帮助入口改在设置页（批次7）、回收站直接从本图标条进入；
  * - user 账户按钮删除（账户并入设置「账户」分组，批次7）；
@@ -19,7 +19,6 @@ import { MomentsIcon, ToolboxIcon, SettingsIcon, PluginIcon } from './ModuleIcon
 const RAIL_BUTTONS: { id: TabName; label: string; icon: (size: number) => React.ReactNode }[] = [
   { id: 'recycle', label: '回收站', icon: (s) => <Trash2 size={s} /> },
   { id: 'plugins', label: '插件市场', icon: (s) => <PluginIcon size={s} /> },
-  { id: 'toolbox', label: '工具箱', icon: (s) => <ToolboxIcon size={s} /> },
   { id: 'moments', label: '动态', icon: (s) => <MomentsIcon size={s} /> },
 ]
 

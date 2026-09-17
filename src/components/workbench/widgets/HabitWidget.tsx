@@ -1,32 +1,74 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, ExternalLink } from 'lucide-react'
-import type { Habit } from '../../types'
+import type { Habit, HabitRecord } from '../../../types'
+import { habitGetAll, toggleHabitCheck } from '../../../lib/ipc'
+import { notifyDataChanged, useDataChanged } from '../../../lib/dataChanged'
+import { localToday } from '../../../lib/date'
 import {
   currentStreak, longestStreak, totalCount, completionRate30d, weekDoneCount,
-  formatLocalDate, type RecordIndex,
-} from '../../modules/toolbox/components/habit-tracker/dateUtils'
+  formatLocalDate, buildRecordIndex, isPlannedOn, type RecordIndex,
+} from '../../../modules/toolbox/components/habit-tracker/dateUtils'
 
 interface Props {
-  /** 全部习惯（内部过滤 archived） */
-  habits: Habit[]
-  /** 打卡记录索引（buildRecordIndex 结果，由父层持有保证双侧同源） */
-  habitIndex: RecordIndex
-  /** 今日计划中的习惯 */
-  plannedHabits: Habit[]
-  /** 今日已打卡数 */
-  checkedToday: number
-  onCheck: (h: Habit) => void
-  todayDate: Date
-  /** 在主窗口工具箱中管理 */
-  onOpenInMain: () => void
+  /** 「管理」按钮回调：主窗口语境 = 打开习惯打卡工具标签；脱离小窗语境 = dayPanelOpenInMain */
+  onManage?: () => void
 }
 
 /**
- * 侧边栏「打卡」Tab：完成度圆环 + 今日/统计 子视图。
+ * 今日打卡控件（v3.4.0 批次4：DayPanel「打卡」Tab 抽为可嵌入控件，方案 §3.7）。
+ *
+ * **右栏简略视图与脱离小窗共用本组件**（不复制渲染）。自包含数据加载：
+ * 完成度圆环 + 今日勾选列表（近 7 日迷你条 + 连续天数）+ 统计子视图。
  * 数据与工具箱习惯打卡完全同源（同一 habitGetAll / toggleHabitCheck IPC + data-changed 广播）。
  */
-export function HabitPanel({ habits, habitIndex, plannedHabits, checkedToday, onCheck, todayDate, onOpenInMain }: Props) {
+export function HabitWidget({ onManage }: Props) {
+  const [habits, setHabits] = useState<Habit[]>([])
+  const [records, setRecords] = useState<HabitRecord[]>([])
   const [sub, setSub] = useState<'today' | 'stats'>('today')
+
+  const todayStr = localToday()
+  const todayDate = useMemo(() => {
+    const [y, m, d] = todayStr.split('-').map(Number)
+    return new Date(y, m - 1, d)
+  }, [todayStr])
+
+  const load = useCallback(async () => {
+    try {
+      const data = await habitGetAll()
+      setHabits(data.habits ?? [])
+      setRecords(data.records ?? [])
+    } catch (e) {
+      console.error('[HabitWidget] 加载失败', e)
+    }
+  }, [])
+
+  useEffect(() => { void load() }, [load])
+  useDataChanged('habit', load)
+
+  const habitIndex = useMemo(() => buildRecordIndex(records), [records])
+  const plannedHabits = useMemo(
+    () => habits.filter(h => !h.archived && isPlannedOn(h, todayDate)),
+    [habits, todayDate],
+  )
+  const checkedToday = useMemo(
+    () => plannedHabits.filter(h => habitIndex.get(h.id)?.has(todayStr)).length,
+    [plannedHabits, habitIndex, todayStr],
+  )
+
+  const checkHabit = useCallback(async (h: Habit) => {
+    const willCheck = !(habitIndex.get(h.id)?.has(todayStr) ?? false)
+    setRecords(cur => willCheck
+      ? [...cur, { id: `${h.id}:${todayStr}`, habitId: h.id, date: todayStr } as HabitRecord]
+      : cur.filter(r => !(r.habitId === h.id && r.date === todayStr)))
+    try {
+      await toggleHabitCheck(h.id, todayStr)
+      notifyDataChanged('habit')
+    } catch (e) {
+      console.error('[HabitWidget] 打卡失败', e)
+      void load()
+    }
+  }, [todayStr, habitIndex, load])
+
   const active = habits.filter(h => !h.archived)
   const plannedCount = plannedHabits.length
   const pct = plannedCount > 0 ? Math.round((checkedToday / plannedCount) * 100) : 100
@@ -75,9 +117,11 @@ export function HabitPanel({ habits, habitIndex, plannedHabits, checkedToday, on
               </button>
             ))}
           </div>
-          <button onClick={onOpenInMain} className="inline-flex items-center gap-0.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)]" title="在主窗口工具箱中管理">
-            管理 <ExternalLink size={10} />
-          </button>
+          {onManage && (
+            <button onClick={onManage} className="inline-flex items-center gap-0.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--accent)]" title="打开习惯打卡工具管理">
+              管理 <ExternalLink size={10} />
+            </button>
+          )}
         </div>
 
         {/* 今日：勾选列表 */}
@@ -102,7 +146,7 @@ export function HabitPanel({ habits, habitIndex, plannedHabits, checkedToday, on
                   </span>
                   {streak > 0 && <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">{streak}天</span>}
                   <button
-                    onClick={() => onCheck(h)}
+                    onClick={() => void checkHabit(h)}
                     className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border transition-colors ${
                       done ? 'border-[var(--success)] bg-[var(--success)] text-white' : 'border-[var(--border-color)] hover:border-[var(--success)]'
                     }`}
@@ -175,3 +219,6 @@ function StatCell({ label, value, color, bar, barColor }: {
     </div>
   )
 }
+
+/** 打卡记录索引类型再导出（DayPanel 脱离窗口角标复用同口径） */
+export type { RecordIndex }

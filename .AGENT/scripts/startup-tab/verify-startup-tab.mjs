@@ -125,17 +125,18 @@ const checkCover = (label, keys, members) => {
   const miss = members.filter((id) => !keys.includes(id))
   return ok(miss.length === 0, label, `缺 ${miss.join(',')}`)
 }
-// C1 v3.4.0 新口径：ActivityBar 图标条 = 固定 RAIL_BUTTONS 数组（拍板顺序：回收站/插件市场/工具箱/动态）
-//   + 底部设置按钮（直开设置标签页）。旧 BAR_ICONS Record 已随外壳重写删除。
+// C1 v3.4.0 批次4 新口径（2026-09-17 拍板变化）：图标条 = 固定 RAIL_BUTTONS 数组
+//   （回收站/插件市场/动态）+ 底部设置按钮——🧰工具箱按钮撤掉，入口语义由右栏上部
+//   「工具箱工具入口区」（ToolLauncherZone，方案 §10）承接。旧 BAR_ICONS Record 已随外壳重写删除。
 const railIds = (() => {
   const m = srcBar.match(/const\s+RAIL_BUTTONS[\s\S]*?=\s*\[([\s\S]*?)\n\]/)
   return m ? [...m[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((x) => x[1]) : null
 })()
 if (railIds === null) {
-  ok(false, 'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 4 项（回收站/插件市场/工具箱/动态）', '抠不到 RAIL_BUTTONS（结构变了，脚本要跟着改）')
+  ok(false, 'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 3 项（回收站/插件市场/动态）', '抠不到 RAIL_BUTTONS（结构变了，脚本要跟着改）')
 } else {
-  ok(railIds.join(',') === 'recycle,plugins,toolbox,moments',
-    'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 4 项（回收站/插件市场/工具箱/动态）', `实际 ${railIds.join(',')}`)
+  ok(railIds.join(',') === 'recycle,plugins,moments',
+    'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 3 项（回收站/插件市场/动态，工具箱撤到右栏入口区）', `实际 ${railIds.join(',')}`)
 }
 ok(/title="设置"/.test(srcBar), 'C1b 图标条底部设置按钮存在（直开设置标签页）')
 checkCover('C2 设置页 STARTUP_ICONS 覆盖全部可启动模块', keysOfRecord(srcAppear, 'STARTUP_ICONS'), STARTABLE_MODULE_IDS)

@@ -27,6 +27,8 @@ export interface WorkbenchLayout {
   widgetOrder: string[]
   /** 右栏隐藏的控件 id（⋯ 菜单选显） */
   widgetsHidden: string[]
+  /** 右栏隐藏的面板 Tab id（⋯ 菜单管理显示哪些 Tab：'widgets' | 'ai'；DP 条目6「无 ✕ 关闭按钮」） */
+  panelTabsHidden: string[]
   /** 左栏隐藏的书签（🔖 菜单选显；内置 RailModule key 与插件书签 id 共用此清单） */
   bookmarksHidden: string[]
   /** 分屏比例（主栏:副栏，0~1；null = 未分屏） */
@@ -36,6 +38,16 @@ export interface WorkbenchLayout {
 /** 右栏控件的规范顺序（缺省序 = 原型 v15 定稿）；DayPanel 四控件 id 沿用 DAY_TABS */
 export const WORKBENCH_WIDGET_IDS = ['task', 'habit', 'pomo', 'password', 'nav'] as const
 
+/**
+ * 源自 DayPanel 的四个控件 id（方案 §3.7 互斥判定用）：整体脱离为独立窗口
+ * （dayPanelDetached）时，右栏这四槽显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
+ * password 控件不在 DayPanel 内，不参与互斥。
+ */
+export const DAY_PANEL_WIDGET_IDS = ['task', 'habit', 'pomo', 'nav'] as const
+
+/** 右栏面板 Tab 的规范集合（🧩 小工具 / 🤖 AI） */
+export const WORKBENCH_PANEL_TAB_IDS = ['widgets', 'ai'] as const
+
 export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   leftCollapsed: false,
   leftMode: 'overview',
@@ -44,6 +56,7 @@ export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   rightTab: 'widgets',
   widgetOrder: [...WORKBENCH_WIDGET_IDS],
   widgetsHidden: [],
+  panelTabsHidden: [],
   bookmarksHidden: [],
   splitRatio: null,
 }
@@ -73,6 +86,10 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       }
       if (Array.isArray(o.widgetsHidden)) {
         base.widgetsHidden = o.widgetsHidden.filter((x): x is string => typeof x === 'string')
+      }
+      if (Array.isArray(o.panelTabsHidden)) {
+        base.panelTabsHidden = o.panelTabsHidden.filter((x): x is string => typeof x === 'string')
+          .filter((x) => (WORKBENCH_PANEL_TAB_IDS as readonly string[]).includes(x))
       }
       if (Array.isArray(o.bookmarksHidden)) {
         base.bookmarksHidden = o.bookmarksHidden.filter((x): x is string => typeof x === 'string')

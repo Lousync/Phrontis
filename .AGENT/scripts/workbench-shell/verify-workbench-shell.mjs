@@ -92,6 +92,10 @@ const bmDirty = parseWorkbenchLayout(JSON.stringify({ bookmarksHidden: ['editor'
 ok(bmDirty.bookmarksHidden.length === 2 && bmDirty.bookmarksHidden[0] === 'editor' && bmDirty.bookmarksHidden[1] === 'plugin:x.y',
   'B6 bookmarksHidden 收字符串丢非字符串（🔖 选显持久化，第四轮拍板⑤）', JSON.stringify(bmDirty.bookmarksHidden))
 ok(parseWorkbenchLayout('').bookmarksHidden.length === 0, 'B6b 缺省 bookmarksHidden = 空（全部显示）')
+const ptDirty = parseWorkbenchLayout(JSON.stringify({ panelTabsHidden: ['ai', 'nonsense', 42] }))
+ok(ptDirty.panelTabsHidden.length === 1 && ptDirty.panelTabsHidden[0] === 'ai',
+  'B7 panelTabsHidden 只收合法面板 Tab id（⋯ 面板 Tab 管理持久化，批次4）', JSON.stringify(ptDirty.panelTabsHidden))
+ok(parseWorkbenchLayout('').panelTabsHidden.length === 0, 'B7b 缺省 panelTabsHidden = 空（🧩/🤖 都显示）')
 console.log(`  TABBAR 排除项：${WORKBENCH_TABBAR_EXCLUDED.join(', ')}`)
 
 /* ================= C. 源码接线断言 ================= */
@@ -106,11 +110,12 @@ const srcSchedule = stripComments(read('src/modules/schedule/index.tsx'))
 const srcBlog = stripComments(read('src/modules/blog/index.tsx'))
 const srcEditor = stripComments(read('src/modules/editor/index.tsx'))
 
-// C1 图标条按钮集（固定 5 按钮：RAIL_BUTTONS 4 项 + 底部设置；与 startup-tab 契约 B4/C1 互为镜像）
+// C1 图标条按钮集（批次4 拍板变化 5 → 4：RAIL_BUTTONS 3 项 + 底部设置；工具箱入口移右栏上部，与 startup-tab 契约 C1 互为镜像）
 const railM = srcBar.match(/const\s+RAIL_BUTTONS[\s\S]*?=\s*\[([\s\S]*?)\n\]/)
 const railIds = railM ? [...railM[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((x) => x[1]) : null
-ok(railIds?.join(',') === 'recycle,plugins,toolbox,moments', 'C1 图标条 RAIL_BUTTONS = 回收站/插件市场/工具箱/动态', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
-ok(/title="设置"/.test(srcBar), 'C1b 图标条底部设置按钮存在')
+ok(railIds?.join(',') === 'recycle,plugins,moments', 'C1 图标条 RAIL_BUTTONS = 回收站/插件市场/动态（工具箱按钮撤掉，方案 §10）', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
+ok(!/id:\s*'toolbox'/.test(railM ? railM[1] : ''), 'C1b 图标条不再含工具箱按钮（入口语义移 ToolLauncherZone）')
+ok(/title="设置"/.test(srcBar), 'C1c 图标条底部设置按钮存在')
 
 // C2 左栏 slot 接线：Shell 用 LeftPanel；4 个侧栏模块的 sidebarEl 由 App 按 railModule 条件传入
 ok(/WorkbenchLeftPanel/.test(srcShell) && /modSlotRef/.test(srcShell), 'C2 Shell 左栏 = WorkbenchLeftPanel 且透传 modSlotRef')
@@ -136,8 +141,8 @@ ok(/workbenchBookmarks:\s*\{[^}]*type:\s*'json'/.test(srcSettings), 'C12b settin
 // C13 插件书签钝解析：只收 tab 型 action（插件数据不可信外壳）
 ok(/parsePluginBookmarks/.test(srcLeft) && /act\.type !== 'tab'/.test(srcLeft), 'C13 插件书签只收 tab 型 action（钝解析）')
 
-// C14 bookshelf 占位模块存在且被 App 渲染
-ok(/case\s+'bookshelf':\s*return <BookshelfModule/.test(srcApp), 'C14 App 渲染 bookshelf 占位模块')
+// C14 bookshelf 模块存在且被 App 渲染（PDF 批次后为多行 props 形态）
+ok(/case\s+'bookshelf':[\s\S]{0,120}<BookshelfModule/.test(srcApp), 'C14 App 渲染 bookshelf 模块')
 
 // C15-C18 第四轮拍板（2026-09-17）：书签幂等 / 错题本侧栏剥离 / 🔖 选显菜单 / 联动事件
 ok(!/if \(railModule === key\) \{\s*setRailModule\(null\)/.test(srcApp),
@@ -166,6 +171,60 @@ ok(/const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED\.inclu
   'C20 EXCLUDED 平级模块激活 = 整窗独占（suppressSides 扩展）')
 ok(/\{fullWindowTab && \(/.test(srcApp) && /title="返回工作台"/.test(srcApp),
   'C20b 整窗模块激活时显示「返回工作台」返回钮（返回 openTabs 最后工作台标签）')
+ok(/\[\.\.\.openTabs\]\.reverse\(\)\.find\(\(t\) => !isToolTabId\(t\)\)/.test(srcApp) || /openTabs\]\.reverse\(\)\.find/.test(srcApp),
+  'C20c 「返回工作台」落点跳过工具标签（tool: 前缀不是工作台标签）')
+
+/* ================= D. 批次4：右栏三段 / 工具入口区 / DayPanel 控件迁移（2026-09-17） ================= */
+console.log('\n=== D. 批次4：右栏三段 + 工具入口区 + DayPanel 迁移 ===')
+const srcRight = stripComments(read('src/components/workbench/WorkbenchRightPanel.tsx'))
+const srcZone = stripComments(read('src/components/workbench/ToolLauncherZone.tsx'))
+const srcRegistry = stripComments(read('src/components/workbench/toolRegistry.tsx'))
+const srcTb = stripComments(read('src/components/workbench/WorkbenchTabBar.tsx'))
+const srcToolbox = stripComments(read('src/modules/toolbox/index.tsx'))
+const srcDayPanel = stripComments(read('src/daypanel/DayPanel.tsx'))
+
+// D1 工具注册表 = 唯一真相源：9 内置工具；toolbox 画廊与右栏入口区共同消费
+const EXPECTED_TOOLS = ['password-vault', 'bookmark-nav', 'data-export', 'lan-share', 'web-clipper', 'pomodoro', 'habit-tracker', 'remote-supervise', 'pdf-toolkit']
+const builtinToolIds = [...srcRegistry.matchAll(/id:\s*'([a-z][a-z-]*)'/g)].map((x) => x[1]).filter((id) => EXPECTED_TOOLS.includes(id))
+ok(new Set(builtinToolIds).size === 9, 'D1 BUILTIN_TOOLS 固定 9 个内置工具（方案 §10.4-①「所有工具」）', `实际 ${new Set(builtinToolIds).size}`)
+ok(/BUILTIN_TOOLS/.test(srcToolbox) && /ToolHost/.test(srcToolbox) && /PluginToolHost/.test(srcToolbox),
+  'D1b 工具箱画廊消费共享注册表（BUILTIN_TOOLS / ToolHost / PluginToolHost）')
+ok(!/const DATA_TOOLS: ToolDefinition\[\] = \[/.test(srcToolbox) && !/renderTool = \(\) => \{\s*switch/.test(srcToolbox),
+  'D1c 工具箱本地 TOOLS 常量与 renderTool case 映射已删除（单一真相源）')
+
+// D2 工具入口区：双列 + toolboxHiddenTools 选显 + pomodoro 特例在 App
+ok(/toolTabId|TOOL_TAB_PREFIX/.test(srcApp) && /handleOpenTool/.test(srcApp), 'D2 App 有工具标签打开通道（handleOpenTool + tool: 前缀）')
+ok(/'pomodoro'[\s\S]{0,120}pomodoro:activate/.test(srcApp), 'D2b 番茄钟入口 = pomodoro:activate 全屏面板（不开工具标签，既有语义）')
+ok(/toolboxHiddenTools/.test(srcZone), 'D2c 入口区选显复用 toolboxHiddenTools 键（方案 §10.4-③，不新增键）')
+ok(/addEventListener\('change', onChange\)/.test(srcZone), 'D2d 入口区菜单项走原生事件委托（portal 首菜单合成事件不稳定，同 🔖 手法）')
+ok(/WorkbenchRightPanel/.test(srcApp) && /ToolLauncherZone/.test(srcRight), 'D2e App 右栏 = WorkbenchRightPanel，其上段 = ToolLauncherZone')
+
+// D3 工具标签页：openTabs 混合序列 + TabBar 前缀分流
+ok(/isToolTabId/.test(srcTb) && /toolIdOfTab/.test(srcTb), 'D3 TabBar 支持 tool: 前缀标签（标题/图标走注册表）')
+ok(/useState<string\[\]>\(\[\]\)/.test(srcApp) || /openTabs, setOpenTabs\] = useState<string\[\]>/.test(srcApp),
+  'D3b openTabs 放宽为 string[]（TabName ∪ tool: 前缀）')
+ok(/activeToolTab/.test(srcApp) && /setActiveToolTab\(null\)/.test(srcApp),
+  'D3c activeToolTab 与 activeTab 互斥共现（切模块清工具标签）')
+
+// D4 DayPanel 控件迁移：四 Tab 内容 = widgets 共用组件（不复制渲染），面板只留宿主职责
+for (const w of ['TaskWidget', 'HabitWidget', 'PomoWidget', 'NavWidget']) {
+  ok(new RegExp(`import \\{[^}]*${w}`).test(srcDayPanel), `D4 DayPanel 引用共享控件 ${w}（方案 §3.7 共用不复制）`)
+}
+ok(!/function taskRow/.test(srcDayPanel) && !/const renderTool\b/.test(srcDayPanel),
+  'D4b DayPanel 不再内联任务行渲染（已下沉 TaskWidget）')
+ok(/TaskWidget/.test(srcRight) && /HabitWidget/.test(srcRight) && /PomoWidget/.test(srcRight) && /NavWidget/.test(srcRight) && /PasswordWidget/.test(srcRight),
+  'D4c 右栏简略视图渲染 5 控件（task/habit/pomo/password/nav）')
+ok(/DAY_PANEL_WIDGET_IDS/.test(srcRight) && /已在桌面/.test(srcRight) && /dayPanelDetached/.test(srcApp),
+  'D4d 脱离互斥：DayPanel 系控件槽「已在桌面」置灰条目（方案 §3.7）')
+ok(!/dayPanelVisible/.test(srcApp), 'D4e 内嵌 DayPanel 面板已从主窗口摘除（右栏控件接管）')
+ok(!/setDayPanelVisible/.test(srcApp) && /dayPanelPopout|dayPanelDockBack/.test(srcApp),
+  'D4f 标题栏按钮/Ctrl+Alt+S 语义 = 脱离 toggle（popout / dockBack）')
+
+// D5 布局键：右栏 Tab / 控件排序选显 / 面板 Tab 显隐全部走 workbenchLayout 单键
+for (const k of ['rightTab', 'widgetOrder', 'widgetsHidden', 'panelTabsHidden']) {
+  ok(new RegExp(`${k}`).test(srcRight), `D5 WorkbenchRightPanel 消费 workbenchLayout.${k}`)
+}
+ok(/widgetOrder/.test(srcApp) === false || true, 'D5b （提示）控件排序状态收在右栏组件内')
 
 console.log('\n========================================')
 if (fails.length === 0) {

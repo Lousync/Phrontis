@@ -7,6 +7,8 @@ import { WORKBENCH_TABBAR_EXCLUDED } from './lib/workbenchLayout'
 import { landingAfterClose } from './modules/editor/tabPolicy'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchTabBar } from './components/workbench/WorkbenchTabBar'
+import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
+import { ToolHost, PluginToolHost, isToolTabId, toolIdOfTab, toolTabId } from './components/workbench/toolRegistry'
 import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, type RailModule } from './lib/workbenchLayout'
 
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
@@ -22,9 +24,11 @@ import { useSettings } from './lib/SettingsContext'
 import { isEditingInput } from './lib/shortcuts'
 import { setGlobalActiveTab } from './lib/activeTab'
 import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged } from './lib/ipc'
+import { getPluginTools } from './lib/pluginService'
 import { requestPluginViewActivation, dispatchCodePluginAction } from './lib/pluginCommandBus'
 import { showToast } from './lib/toast'
 import type { PluginCommandInfo } from './types'
+import type { PluginTool } from './lib/pluginService'
 /* 模块引入方式（2026-09-10 二次修正：回退到静态 import）
    曾把 12 个模块改成 React.lazy 做代码分割——首屏从 13.3MB 降到 3.37MB，但代价是
    「每次打开应用后，进入一个尚未访问过的模块都要现取 chunk」：生产下数十 ms，
@@ -62,7 +66,6 @@ import { useCheckinReminder } from './lib/useCheckinReminder'
 import { installFileOpUndoShortcuts } from './lib/fileOpHistory'
 import { AssistantPanel } from './components/shared/AssistantPanel'
 import { DayPanelWindowApp } from './daypanel/DayPanelWindowApp'
-import { DayPanel } from './daypanel/DayPanel'
 import { RootErrorBoundary } from './components/shared/RootErrorBoundary'
 import { ResizablePanel } from './components/shared/ResizablePanel'
 import { WindowResizeHandles } from './components/shared/WindowResizeHandles'
@@ -99,8 +102,8 @@ export default function App() {
   const [startupChecked, setStartupChecked] = useState(false)
   // 启动仓库选择页（startupVaultPicker，默认开）：已有仓库时每次进入先给一次选择/快速直入的机会
   const [startupPickerOpen, setStartupPickerOpen] = useState(false)
-  // 日程打卡侧边栏（WeChat 模式）：内嵌/脱离状态由 React + 主进程共同管理
-  const [dayPanelVisible, setDayPanelVisible] = useState(false)
+  // 日程打卡侧边栏（WeChat 模式）：v3.4.0 批次4 起内嵌态由右栏小工具接管（控件迁移），
+  // 本窗口只保留**脱离态**（独立桌面窗口）；dayPanelDetached 同时驱动右栏控件互斥显示
   const [dayPanelDetached, setDayPanelDetached] = useState(false)
   // 窗口宽度：任务栏最大宽度与窗口联动（窄窗口自动收窄，主体不被压扁）
   const [winWidth, setWinWidth] = useState(() => window.innerWidth)
@@ -113,7 +116,6 @@ export default function App() {
   // 文件操作撤销快捷键（Ctrl+Z 撤销 / Ctrl+Shift+Z·Ctrl+Y 重做）：
   // 编辑区与知识库共用一份栈；焦点在 Monaco/输入框时自动让路给文本撤销（isEditingInput）
   useEffect(() => installFileOpUndoShortcuts(), [])
-  const dayPanelMaxWidth = Math.max(300, Math.min(500, Math.floor(winWidth * 0.4)))
 
   // 窗口圆角：透明窗口自绘 18px 大圆角；最大化/全屏时切直角（贴满屏幕时圆角会露四角缝）。
   // fsHint = 禅模式已请求全屏的乐观态：Windows 下 enter-full-screen 事件可能迟到或缺失，
@@ -138,12 +140,6 @@ export default function App() {
 
   // 左栏模块态（书签侧边栏）：null = 总览态。跟随逻辑见下方 effect（RAIL_FOLLOW_MAP + leftLocked）
   const [railModule, setRailModule] = useState<RailModule | null>(null)
-
-  // 抽屉面板实际占宽：标题栏搜索框/按钮锚定主内容区的偏移依据（面板卸载时归零）
-  const [dayPanelWidth, setDayPanelWidth] = useState(0)
-  useEffect(() => {
-    if (!dayPanelVisible || dayPanelDetached) setDayPanelWidth(0)
-  }, [dayPanelVisible, dayPanelDetached])
 
   // 禅模式（docs/zen-mode-design.md）：0=off 1=Z1 专注 2=禅。唯一真相源在 App 层——
   // Z2 需隐藏标题栏/活动栏（模块内无法触及）。入口 = 标题栏「布局」菜单（布局模式 · 禅模式）；
@@ -185,6 +181,14 @@ export default function App() {
     load()
     const off = onPluginInstalledChanged(load)
     return off
+  }, [])
+  // 插件 UI 工具清单（批次4）：右栏入口区的插件工具标签宿主匹配用（ToolLauncherZone 自持一份渲染清单）
+  const [pluginTools, setPluginTools] = useState<PluginTool[]>([])
+  useEffect(() => {
+    const load = () => { void getPluginTools().then(setPluginTools).catch(() => null) }
+    load()
+    window.addEventListener('plugins-changed', load)
+    return () => window.removeEventListener('plugins-changed', load)
   }, [])
   // W3 · Editor Groups v1：副栏模块（两栏互不相同；null = 未分屏）
   const [secondaryTab, setSecondaryTab] = useState<TabName | null>(null)
@@ -356,8 +360,12 @@ export default function App() {
   useCheckinReminder()
   const mountedTabs = useRef<Set<TabName>>(new Set())  // keep modules alive after first visit
   /** 中间标签条显示的已打开 Tab（v3.4.0）：只能由入口产生，无「＋新建」按钮；activeTab 变化时自动追加（见下方 effect）。
-      2026-09-17 拍板：恢复为标签条数据源（文档标签式，可关闭/拖拽/全关空态），可关闭与重排由 closeTab / handleReorder 消费。 */
-  const [openTabs, setOpenTabs] = useState<TabName[]>([])
+      2026-09-17 拍板：恢复为标签条数据源（文档标签式，可关闭/拖拽/全关空态），可关闭与重排由 closeTab / handleReorder 消费。
+      批次4 起元素放宽为 string：模块标签 = TabName，工具标签 = `tool:<toolId>`（右栏工具入口区产生，不占 TabName）。 */
+  const [openTabs, setOpenTabs] = useState<string[]>([])
+  /** 激活的工具标签页（`tool:<toolId>` | null）。与 activeTab 互斥共现：工具标签激活时 activeTab=null
+      （模块保活层照常 display:none 常驻），激活模块标签时清空。批次4 方案 §10.2「点击入口 → 中间开工具标签页」。 */
+  const [activeToolTab, setActiveToolTab] = useState<string | null>(null)
 
   // 启动检测当前仓库：无 → 仓库选择页（VaultPicker，新老用户统一）；有且开启「每次启动选择仓库」→ 启动形态选择页
   // sessionStorage 一次性标记：应用内切库会整窗 reload（数据激活重读约定），热重载不再打扰；冷启动才重新出页
@@ -640,20 +648,22 @@ export default function App() {
     return () => { off?.() }
   }, [])
 
-  // 日程打卡侧边栏：脱离态变化推送（独立窗口打开/销毁）
+  // 日程打卡侧边栏：脱离态变化推送（独立窗口打开/销毁）。
+  // v3.4.0 批次4：内嵌态由右栏小工具接管，detached=false 不再需要「恢复内嵌显示」。
   useEffect(() => {
     const off = window.api?.onDayPanelStateChanged?.(({ detached }) => {
       setDayPanelDetached(detached)
-      // 脱离→内嵌（独立窗口被关）：自动恢复内嵌显示，避免用户看到一个"消失的面板"
-      if (!detached) setDayPanelVisible(true)
     })
     return () => { off?.() }
   }, [])
-  // 全局快捷键 Ctrl+Alt+S toggle：脱离态→吸附 + 显示内嵌；否则切内嵌可见性
+  // 全局快捷键 Ctrl+Alt+S toggle：脱离中 → 吸附回右栏（关独立窗口）；否则脱离为独立窗口
   useEffect(() => {
-    const off = window.api?.onDayPanelToggleVisibility?.(() => { setDayPanelVisible(v => !v) })
+    const off = window.api?.onDayPanelToggleVisibility?.(() => {
+      if (dayPanelDetached) void window.api?.dayPanelDockBack?.()
+      else void window.api?.dayPanelPopout?.()
+    })
     return () => { off?.() }
-  }, [])
+  }, [dayPanelDetached])
 
   // 开发者工具 — 仅 DEV 动态加载:打包构建时 import.meta.env.DEV 被静态替换为 false,
   // 动态 import 随之被 tree-shaking 移除,devtools 模块代码不进入产物
@@ -744,31 +754,49 @@ export default function App() {
   // 也按 openTabs 找回上一个标签。!activeTab 守卫 = 启动占位期（null）不登记假标签；
   // EXCLUDED = 图标条功能面板（回收站/插件/工具箱/动态/设置）与 aiTeaching/devtools，
   // 点击只切换视图不登记标签（第四轮反馈拍板②），图标条常驻可随时返回。
+  // 批次4：工具标签（activeToolTab）同批登记——模块与工具标签共用一条 openTabs 序列。
   useEffect(() => {
     if (!activeTab || WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)) return
     setOpenTabs((ts) => (ts.includes(activeTab) ? ts : [...ts, activeTab]))
   }, [activeTab])
+  useEffect(() => {
+    if (!activeToolTab) return
+    setOpenTabs((ts) => (ts.includes(activeToolTab) ? ts : [...ts, activeToolTab]))
+  }, [activeToolTab])
 
   // 关闭标签（✕ / 中键）：关的是激活标签 → 落右邻居优先、越界退左邻居（tabPolicy.landingAfterClose
   // 与编辑器文档标签同一份语义）；关完为空 = 空态（activeTab 置 null，拍板③允许全部关闭），
-  // 且左栏退回总览态（2026-09-17 第四轮反馈拍板①：全关后不滞留某模块侧栏）
-  const closeTab = useCallback((tab: TabName) => {
+  // 且左栏退回总览态（2026-09-17 第四轮反馈拍板①：全关后不滞留某模块侧栏）。
+  // 批次4：落点按 tool: 前缀分流——工具标签落点切 activeToolTab（activeTab 归 null），模块落点反之。
+  const closeTab = useCallback((tab: string) => {
     const i = openTabs.indexOf(tab)
     if (i === -1) return
     const next = openTabs.filter((t) => t !== tab)
     setOpenTabs(next)
-    if (activeTab === tab) {
-      const landing = landingAfterClose(openTabs, tab) as TabName | null
-      setActiveTab(landing)
-      if (landing === null) setRailModule(null)
+    const isTool = isToolTabId(tab)
+    const isActive = isTool ? activeToolTab === tab : activeTab === tab
+    if (isActive) {
+      const landing = landingAfterClose(openTabs, tab)
+      if (landing && isToolTabId(landing)) {
+        setActiveTab(null)
+        setActiveToolTab(landing)
+      } else if (landing) {
+        setActiveToolTab(null)
+        setActiveTab(landing as TabName)
+      } else {
+        setActiveToolTab(null)
+        setActiveTab(null)
+        setRailModule(null)
+      }
     }
-  }, [openTabs, activeTab])
+  }, [openTabs, activeTab, activeToolTab])
 
   // 标签拖拽重排（现成机制恢复）：只调 openTabs 顺序，激活标签跟内容走、不变
-  const handleReorder = useCallback((tabs: TabName[]) => setOpenTabs(tabs), [])
+  const handleReorder = useCallback((tabs: string[]) => setOpenTabs(tabs), [])
 
   const handleTabChange = (tab: TabName) => {
     setEditorJumpFrom(null) // 手动切 Tab 即清除「返回来源」上下文（条目6）
+    setActiveToolTab(null)  // 切回模块标签时退出工具标签（工具标签关闭走 ✕ / 落点分流）
     if (tab === activeTab) {
       // 工具箱专属（2026-09-10）：已在工具箱时再点活动栏图标 = 退出当前工具、回到工具箱主界面。
       // 通用行为对图标条无意义 —— v3.4.0 起图标条幂等哲学：重复点击已激活模块 = 无操作
@@ -786,6 +814,36 @@ export default function App() {
       return
     }
     setActiveTab(tab); setSidebarOpen(true); window.dispatchEvent(new CustomEvent('tab-switched'))
+  }
+
+  // ---- 工具标签页（v3.4.0 批次4，方案 §10.2）----
+  // 右栏工具入口点击 → 中间开对应工具标签页；重复点击同入口 = 激活已有标签（openTabs includes
+  // 判定 + openTabs 登记处去重），关闭走文档标签通用 ✕。番茄钟特例 = 既有 pomodoro:activate
+  // 全屏面板语义，不开标签。
+  // 插件工具标签：App 层持插件工具清单（pluginTools），tool:<pluginId:toolId> 按清单匹配宿主。
+  const handleOpenTool = useCallback((toolId: string) => {
+    if (toolId === 'pomodoro') {
+      window.dispatchEvent(new CustomEvent('pomodoro:activate', { detail: { preset: 0 } }))
+      return
+    }
+    setEditorJumpFrom(null)
+    setActiveTab(null)
+    setActiveToolTab(toolTabId(toolId))
+  }, [])
+
+  const handleOpenPluginTool = useCallback((tool: PluginTool) => {
+    setEditorJumpFrom(null)
+    setActiveTab(null)
+    setActiveToolTab(toolTabId(`${tool.pluginId}:${tool.toolId}`))
+  }, [])
+
+  /** 工具标签页宿主：内置工具走共享 ToolHost；插件工具按清单匹配 PluginToolHost；
+      onBack（组件头部「← 返回」）= 关闭该标签（标签页语境的「返回」语义） */
+  const renderToolTabHost = (tabId: string) => {
+    const tid = toolIdOfTab(tabId)
+    const pluginTool = pluginTools.find((t) => `${t.pluginId}:${t.toolId}` === tid)
+    if (pluginTool) return <PluginToolHost tool={pluginTool} onBack={() => closeTab(tabId)} />
+    return <ToolHost toolId={tid} onBack={() => closeTab(tabId)} />
   }
 
   // ---- 左栏书签（v3.4.0 批次3）----
@@ -869,15 +927,14 @@ export default function App() {
     handleTabChange('editor')
   }
 
-  // 日程打卡侧边栏：标题栏按钮 + Ctrl+Alt+S 统一入口
-  // - 脱离态 → 吸附回来（关独立窗口 + 显示内嵌）
-  // - 内嵌态 → 切可见性
+  // 日程打卡侧边栏：标题栏按钮 + Ctrl+Alt+S 统一入口（v3.4.0 批次4 起语义 = 脱离 toggle）：
+  // - 脱离中 → 吸附回右栏（关独立窗口，控件互斥解除）
+  // - 未脱离 → 脱离为独立桌面窗口（内嵌态已由右栏小工具承担）
   const toggleDayPanel = useCallback(() => {
     if (dayPanelDetached) {
       void window.api?.dayPanelDockBack?.()
-      setDayPanelVisible(true)
     } else {
-      setDayPanelVisible(v => !v)
+      void window.api?.dayPanelPopout?.()
     }
   }, [dayPanelDetached])
 
@@ -967,15 +1024,27 @@ export default function App() {
     )
   }
 
+  /** 工具标签页槽位级保活挂载（批次4）：同一工具标签只渲染一份，切走 display:none 常驻
+      （工具内状态如密码本解锁态不因切换丢失）。宿主组件见 renderToolTabHost。 */
+  const mountedToolTabs = useRef<Set<string>>(new Set())
+  function renderToolMounted(tabId: string, on: boolean) {
+    if (on) mountedToolTabs.current.add(tabId)
+    if (!on && !mountedToolTabs.current.has(tabId)) return null
+    return (
+      <div key={tabId} className="kb-view-fade flex-1 min-h-0" style={on ? undefined : { display: 'none' }}>
+        {renderToolTabHost(tabId)}
+      </div>
+    )
+  }
+
   return (
     <RootErrorBoundary>
     <div className={`flex flex-col h-screen bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)] overflow-hidden ${winRounded ? 'rounded-[var(--window-radius)]' : 'rounded-none'}`}>
       <CodePluginHosts />
       {zenLevel < 2 ? (
         <TitleBar
-          dayPanelActive={dayPanelVisible || dayPanelDetached}
+          dayPanelActive={dayPanelDetached}
           onToggleDayPanel={toggleDayPanel}
-          drawerWidth={dayPanelWidth}
           activityBarVisible={activityBarVisible}
           onActivityBarChange={(v) => update('activityBarVisible', v)}
           zenLevel={zenLevel}
@@ -1015,12 +1084,16 @@ export default function App() {
               suppressSides={fullWindowTab}
               maximized={zenLevel >= 2 || winMax}
               right={
-                <div className="flex h-full flex-col p-1.5">
-                  <div className={`flex min-h-0 flex-1 flex-col overflow-hidden border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-sm ${zenLevel >= 2 || winMax ? 'rounded-none border-0' : 'rounded-xl'}`}>
-                    <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] px-3 text-[12px] font-medium text-[var(--text-secondary)]">小工具</div>
-                    <div className="flex flex-1 items-center justify-center text-[11.5px] text-[var(--text-muted)]">控件区 · 批次4</div>
-                  </div>
-                </div>
+                <WorkbenchRightPanel
+                  maximized={zenLevel >= 2 || winMax}
+                  dayPanelDetached={dayPanelDetached}
+                  onDockDayPanel={() => { void window.api?.dayPanelDockBack?.() }}
+                  onOpenTool={handleOpenTool}
+                  onOpenPluginTool={handleOpenPluginTool}
+                  onOpenFile={(relPath) => { setPendingOpenRel(relPath); handleTabChange('editor') }}
+                  onOpenPage={(pageId) => openKnowledgePageFromSearch(pageId)}
+                  onOpenSchedule={() => handleTabChange('schedule')}
+                />
               }
               center={
             <>
@@ -1033,16 +1106,24 @@ export default function App() {
                   图标条入口打开。整窗模块（EXCLUDED 平级模块）激活时整条隐藏（同 aiTeaching，方案 §2） */}
               {!fullWindowTab && (
                 <WorkbenchTabBar
-                  tabs={openTabs.filter((t) => !WORKBENCH_TABBAR_EXCLUDED.includes(t))}
-                  active={activeTab}
-                  onSelect={handleTabChange}
+                  tabs={openTabs}
+                  active={activeToolTab ?? activeTab}
+                  onSelect={(id) => {
+                    if (isToolTabId(id)) {
+                      setEditorJumpFrom(null)
+                      setActiveTab(null)
+                      setActiveToolTab(id)
+                    } else {
+                      handleTabChange(id as TabName)
+                    }
+                  }}
                   onClose={closeTab}
                   onReorder={handleReorder}
                 />
               )}
               {fullWindowTab && (
                 <button
-                  onClick={() => handleTabChange([...openTabs].reverse()[0] ?? 'editor')}
+                  onClick={() => handleTabChange(([...openTabs].reverse().find((t) => !isToolTabId(t)) ?? 'editor') as TabName)}
                   title="返回工作台"
                   className="kb-pop absolute right-3 top-2 z-30 flex items-center gap-1 rounded-full bg-[var(--accent)] px-3 py-1 text-[11.5px] text-white shadow-lg transition-opacity hover:opacity-90"
                 >
@@ -1068,8 +1149,13 @@ export default function App() {
                         ...(activeTab ? [activeTab] : []),
                         ...Array.from(mountedTabs.current).filter((t) => t !== activeTab && t !== secondaryTab),
                       ].map((t) => renderMounted(t, t === activeTab))}
-                      {/* 全关空态（2026-09-17 拍板③）：无激活模块时显示引导页；已保活模块仍在（display:none） */}
-                      {activeTab === null && (
+                      {/* 工具标签宿主（批次4，保活）：激活的可见，其余已开工具 display:none 常驻 */}
+                      {activeToolTab && renderToolMounted(activeToolTab, true)}
+                      {Array.from(mountedToolTabs.current)
+                        .filter((t) => t !== activeToolTab)
+                        .map((t) => renderToolMounted(t, false))}
+                      {/* 全关空态（2026-09-17 拍板③）：无激活模块且无工具标签时显示引导页；已保活内容仍在（display:none） */}
+                      {activeTab === null && !activeToolTab && (
                         <div className="flex flex-1 flex-col items-center justify-center gap-1.5 pb-16">
                           <div className="text-[13.5px] text-[var(--text-secondary)]">所有标签页已关闭</div>
                           <div className="text-[12px] text-[var(--text-muted)]">从左侧书签或图标条打开模块</div>
@@ -1113,28 +1199,6 @@ export default function App() {
             </>
               }
             />
-            {dayPanelVisible && !dayPanelDetached && (
-              <ResizablePanel
-                storageKey="dayPanelEmbedded"
-                defaultWidth={300}
-                minWidth={240}
-                maxWidth={dayPanelMaxWidth}
-                side="right"
-                visible
-                showHandle
-                growWindow
-              >
-                {/* 内嵌面板的"子窗口"外壳：留白 + 圆角 + 阴影，让它在主窗口内像独立浮窗（微信会议窗同款）；
-                    最大化时与主内容/活动栏同条件贴边（UI 优化条目1） */}
-                <div className={`flex min-h-0 flex-1 flex-col overflow-hidden transition-all duration-300 ease-out ${winMax ? 'bg-[var(--bg-secondary)]' : 'm-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-[0_6px_24px_rgba(0,0,0,0.16)]'}`}>
-                  <DayPanel
-                    mode="embedded"
-                    onPopout={() => { void window.api?.dayPanelPopout?.() }}
-                    onClose={() => setDayPanelVisible(false)}
-                  />
-                </div>
-              </ResizablePanel>
-            )}
           </main>
       {/* 全局 AI 助手侧栏。shellLeft = 全屏扩张时要避让的活动栏占位宽度
           （活动栏不渲染时 → 0：禅模式 Z2 隐壳，或布局菜单把它整条藏了；最大化 flush → 56；否则 56 + mx-1.5 两侧留白） */}

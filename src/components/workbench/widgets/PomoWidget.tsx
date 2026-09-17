@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
-import { usePomodoro } from '../../modules/toolbox/hooks/PomodoroContext'
-import { getBlogPeriodStats } from '../../lib/ipc'
-import { localToday } from '../../lib/date'
+import { usePomodoro } from '../../../modules/toolbox/hooks/PomodoroContext'
+import { getBlogPeriodStats } from '../../../lib/ipc'
+import { localToday } from '../../../lib/date'
 
 /**
- * 侧边栏「番茄」Tab：大数字倒计时 + 阶段徽章 + 预设分段器 + 启停控制 + 今日专注统计。
+ * 番茄钟控件（v3.4.0 批次4：DayPanel「番茄」Tab 迁入 widgets，方案 §3.7）。
+ * **右栏简略视图与脱离小窗共用**（不复制渲染）。
+ * 大数字倒计时 + 阶段徽章 + 预设分段器 + 启停控制 + 今日专注统计。
  * 与主窗口工具箱共用同一 PomodoroContext 状态机（嵌入式同窗口天然联通），
- * 脱离窗口由主进程广播快照（pomodoroStatus），本面板仅嵌入式使用。
+ * 脱离窗口由主进程广播快照（pomodoroStatus），PomodoroPopoutPanel 仅脱离态使用。
  */
-export function PomodoroPanel() {
+export function PomoWidget() {
   const pom = usePomodoro()
   const { state: ps } = pom
 
@@ -31,7 +33,7 @@ export function PomodoroPanel() {
   // 主按钮：未激活=开始 / 完成=下一阶段 / 运行=暂停 / 暂停=继续
   const mainLabel = !ps.visible ? '开始' : ps.done ? '下一阶段' : ps.running ? '暂停' : '继续'
   const mainAction = () => {
-    // 侧边栏启动不展开主窗口的全屏番茄钟遮罩（expanded:false）——在侧栏点开始就只在侧栏跑，
+    // 控件内启动不展开主窗口的全屏番茄钟遮罩（expanded:false）——在侧栏点开始就只在侧栏跑，
     // 否则 activate() 的 expanded:true 会让主内容区被全屏番茄钟盖住，观感像「跳转到了工具箱」
     if (!ps.visible) { pom.setState(s => ({ ...s, visible: true, expanded: false })); pom.startTimer() }
     else if (ps.done) pom.switchPhase()
@@ -98,7 +100,7 @@ export function PomodoroPanel() {
   )
 }
 
-/** 脱离窗口版番茄 Tab：独立窗口不持有计时器，只读展示主进程广播的快照，控制跳转主窗口 */
+/** 脱离窗口版番茄控件：独立窗口不持有计时器，只读展示主进程广播的快照，控制跳转主窗口 */
 export function PomodoroPopoutPanel({ status, onOpenInMain }: {
   status: { visible?: boolean; display: string; running: boolean; phase: string; done: boolean; progress: number } | null
   onOpenInMain: () => void

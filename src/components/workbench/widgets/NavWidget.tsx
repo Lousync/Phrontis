@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Search, ExternalLink } from 'lucide-react'
-import type { BookmarkCategory, BookmarkItem } from '../../types'
-import { bookmarkGetAll, openBookmarkUrl } from '../../lib/ipc'
-import { useDataChanged } from '../../lib/dataChanged'
-import { domainOf } from '../../modules/toolbox/components/bookmark-nav/io'
+import type { BookmarkCategory, BookmarkItem } from '../../../types'
+import { bookmarkGetAll, openBookmarkUrl } from '../../../lib/ipc'
+import { useDataChanged } from '../../../lib/dataChanged'
+import { domainOf } from '../../../modules/toolbox/components/bookmark-nav/io'
 
 const AVATAR_COLORS = ['#EF4444', '#EA580C', '#CA8A04', '#059669', '#0D9488', '#027A74', '#2563EB', '#7C3AED', '#C026D3', '#64748B']
 
@@ -13,12 +13,19 @@ function avatarColor(domain: string): string {
   return AVATAR_COLORS[h % AVATAR_COLORS.length]
 }
 
+interface Props {
+  /** 「管理」按钮回调：主窗口语境 = 打开网址导航工具标签；脱离小窗语境 = dayPanelOpenInMain */
+  onManage?: () => void
+}
+
 /**
- * 侧边栏「导航」Tab：搜索 + 分类 chips + 双列书签卡片，点击直达系统浏览器。
+ * 网址导航控件（v3.4.0 批次4：DayPanel「导航」Tab 迁入 widgets，方案 §3.7）。
+ * **右栏简略视图与脱离小窗共用**（不复制渲染）。自包含数据加载：
+ * 搜索 + 分类 chips + 双列书签卡片，点击直达系统浏览器。
  * 数据与工具箱网址导航同源（同一 bookmarkGetAll IPC）；工具箱的增删改会广播
  * 'bookmark' data-changed，此处监听后自动刷新，保证双侧联通。
  */
-export function NavPanel() {
+export function NavWidget({ onManage }: Props) {
   const [categories, setCategories] = useState<BookmarkCategory[]>([])
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([])
   const [selected, setSelected] = useState('all')
@@ -30,7 +37,7 @@ export function NavPanel() {
       setCategories(data.categories ?? [])
       setBookmarks(data.bookmarks ?? [])
     } catch (e) {
-      console.error('[NavPanel] 加载书签失败', e)
+      console.error('[NavWidget] 加载书签失败', e)
     }
   }, [])
 
@@ -56,7 +63,7 @@ export function NavPanel() {
   ], [categories])
 
   const open = useCallback(async (b: BookmarkItem) => {
-    try { await openBookmarkUrl(b.url) } catch (e) { console.error('[NavPanel] 打开链接失败', e) }
+    try { await openBookmarkUrl(b.url) } catch (e) { console.error('[NavWidget] 打开链接失败', e) }
   }, [])
 
   return (
@@ -117,13 +124,15 @@ export function NavPanel() {
         </p>
       )}
 
-      <button
-        onClick={() => { window.api?.dayPanelOpenInMain?.('toolbox', 'bookmark-nav') }}
-        className="mx-auto flex items-center gap-1 rounded-lg border border-dashed border-[var(--border-color)] px-3.5 py-1 text-[11px] text-[var(--text-muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
-        title="在工具箱网址导航中添加 / 编辑"
-      >
-        <ExternalLink size={10} /> 在工具箱中管理
-      </button>
+      {onManage && (
+        <button
+          onClick={onManage}
+          className="mx-auto flex items-center gap-1 rounded-lg border border-dashed border-[var(--border-color)] px-3.5 py-1 text-[11px] text-[var(--text-muted)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+          title="打开网址导航工具添加 / 编辑"
+        >
+          <ExternalLink size={10} /> 管理书签
+        </button>
+      )}
     </div>
   )
 }
