@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Puzzle, Bot, MoreHorizontal, History, FileText, MonitorX, Timer } from 'lucide-react'
+import { Puzzle, Bot, MoreHorizontal, History, FileText, MonitorX } from 'lucide-react'
 import type { KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
 import { useSettings } from '../../lib/SettingsContext'
 import {
-  parseWorkbenchLayout, WORKBENCH_PANEL_TAB_IDS,
+  parseWorkbenchLayout, DAY_PANEL_WIDGET_IDS, WORKBENCH_WIDGET_IDS, WORKBENCH_PANEL_TAB_IDS,
   type WorkbenchLayout,
 } from '../../lib/workbenchLayout'
 import { ToolLauncherZone } from './ToolLauncherZone'
+import { TaskWidget } from './widgets/TaskWidget'
+import { HabitWidget } from './widgets/HabitWidget'
 import { PomoWidget } from './widgets/PomoWidget'
+import { PasswordWidget } from './widgets/PasswordWidget'
+import { NavWidget } from './widgets/NavWidget'
 import type { PluginTool } from '../../lib/pluginService'
 
 /**
@@ -22,13 +26,13 @@ import type { PluginTool } from '../../lib/pluginService'
  *
  * **小工具态 = 上中下三段**：
  * - 上：🧰 工具箱工具入口区（ToolLauncherZone，方案 §10）；
- * - 中：🕘 最近编辑（自适应收缩，近 7 天最多 6 条，无记录整卡不渲染）；
- * - 下：番茄钟简略视图（2026-09-17 右栏优化轮第二轮拍板：**只留番茄钟**——控件切换条、
- *   ⋯ 控件选显菜单、拖拽排序一并下线，可行控件集见 workbenchLayout.RIGHT_PANEL_WIDGET_IDS；
- *   其余控件组件仍在仓库、DayPanel 脱离窗口继续消费）。
+ * - 中：🕘 最近编辑（常驻卡片，近 7 天最多 6 条；无记录显示空态文案）；
+ * - 下：**控件切换条（原型 v16：一排彩色图标 + ⋯ 选显菜单 + 拖拽排序）+ 简略视图**
+ *   （5 控件：今日任务 / 今日打卡 / 番茄钟 / 强密码生成器 / 网址导航，与 DayPanel 共用同一份组件）。
+ *   2026-09-17 反馈轮：切换条曾被误删，已按原型恢复（彩色 emoji 图标）。
  *
- * **脱离互斥（方案 §3.7）**：DayPanel 控件脱离为独立窗口（dayPanelDetached）时，
- * 番茄钟槽位显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
+ * **脱离互斥（方案 §3.7）**：DayPanel 四控件整体脱离为独立窗口（dayPanelDetached）时，
+ * 对应槽位显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
  *
  * **AI 态**：本批次只落双 Tab 骨架与占位；aiChat 标签 + ⤢ + token 面板 = 批次5（方案 §4/§8）。
  */
@@ -63,9 +67,21 @@ interface Props {
   onOpenFile: (relPath: string) => void
   /** 最近编辑点击（非 vault 读源页面 → 知识库定位打开） */
   onOpenPage: (pageId: string) => void
+  /** 今日任务控件「打开日程模块」 */
+  onOpenSchedule: () => void
 }
 
-export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage }: Props) {
+/** 5 控件的切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
+ *  图标 = 原型 v16 的彩色 emoji 语言（与左侧线性图标条区分：这一排是「控件切换」而非模块入口） */
+const WIDGET_META: Record<string, { icon: string; label: string }> = {
+  task: { icon: '✅', label: '今日任务' },
+  habit: { icon: '🔔', label: '今日打卡' },
+  pomo: { icon: '⏰', label: '番茄钟' },
+  password: { icon: '🔑', label: '强密码生成器' },
+  nav: { icon: '🌐', label: '网址导航' },
+}
+
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -87,6 +103,60 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
       panelTabsHidden: next,
       rightTab: show ? id : (id === layout.rightTab ? visiblePanelTabs.find((k) => k !== id) ?? 'widgets' : layout.rightTab),
     })
+  }
+
+  // 控件区：排序（widgetOrder 拖拽）+ 选显（widgetsHidden）+ 激活控件
+  const visibleWidgets = useMemo(
+    () => layout.widgetOrder.filter((id) => !layout.widgetsHidden.includes(id)),
+    [layout.widgetOrder, layout.widgetsHidden],
+  )
+  const [activeWidget, setActiveWidget] = useState<string | null>(null)
+  // 激活控件缺省 = 首个可见项；被隐藏后回落（钝规则）
+  const effectiveWidget = activeWidget && visibleWidgets.includes(activeWidget) ? activeWidget : visibleWidgets[0] ?? null
+
+  // ⋯ 控件选显菜单（照 🔖 手法：portal + 原生委托 + 外部关闭）
+  const [wsMenuOpen, setWsMenuOpen] = useState(false)
+  const [wsMenuPos, setWsMenuPos] = useState<{ left: number; top: number } | null>(null)
+  const wsMoreRef = useRef<HTMLButtonElement | null>(null)
+  const wsMenuRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!wsMenuOpen) return
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node
+      if ((wsMoreRef.current && wsMoreRef.current.contains(t)) || (wsMenuRef.current && wsMenuRef.current.contains(t))) return
+      setWsMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setWsMenuOpen(false) }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [wsMenuOpen])
+  useEffect(() => {
+    if (!wsMenuOpen) return
+    const menu = wsMenuRef.current
+    if (!menu) return
+    // 隐藏集从**菜单 DOM 的勾选状态**推导，而不是读 layout 闭包值：
+    // 连续勾选时（同一 tick 内多次 change）闭包里的 layout 是旧值，逐个 filter 会互相覆盖、
+    // 只有最后一次生效；菜单本身是这些 checkbox 的唯一权威界面，DOM 即最新真相。
+    const onChange = (e: Event) => {
+      const input = (e.target as HTMLElement | null)?.closest?.('input[data-ws-widget-id]') as HTMLInputElement | null
+      if (!input?.dataset.wsWidgetId) return
+      const checkedIds = [...menu.querySelectorAll('input[data-ws-widget-id]')]
+        .filter((el) => (el as HTMLInputElement).checked)
+        .map((el) => (el as HTMLInputElement).dataset.wsWidgetId)
+        .filter((x): x is string => !!x)
+      const hidden = WORKBENCH_WIDGET_IDS.filter((id) => !checkedIds.includes(id))
+      patch({ widgetsHidden: [...hidden] })
+    }
+    menu.addEventListener('change', onChange)
+    return () => menu.removeEventListener('change', onChange)
+  }, [wsMenuOpen, patch])
+  const toggleWsMenu = () => {
+    if (!wsMenuOpen) {
+      const r = wsMoreRef.current?.getBoundingClientRect()
+      if (r) setWsMenuPos({ left: Math.max(8, Math.min(r.right - 210, window.innerWidth - 218)), top: Math.max(8, r.top - 248) })
+    }
+    setWsMenuOpen(v => !v)
   }
 
   // ⋯ 面板 Tab 管理菜单（同款手法）
@@ -127,6 +197,23 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
       if (r) setPtMenuPos({ left: Math.max(8, Math.min(r.right - 210, window.innerWidth - 218)), top: r.bottom + 6 })
     }
     setPtMenuOpen(v => !v)
+  }
+
+  // 控件切换条拖拽重排（HTML5 drag，WorkbenchTabBar 同款手法；序持久化 widgetOrder）
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const dragIdRef = useRef<string | null>(null)
+  const handleWidgetDrop = (targetId: string) => {
+    const src = dragIdRef.current
+    setDragOverId(null)
+    if (!src || src === targetId) return
+    const next = [...layout.widgetOrder]
+    const from = next.indexOf(src)
+    const to = next.indexOf(targetId)
+    if (from === -1 || to === -1) return
+    next.splice(from, 1)
+    next.splice(to, 0, src)
+    patch({ widgetOrder: next })
   }
 
   return (
@@ -178,34 +265,88 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
             {/* 下段：控件切换条（可拖拽排序 + ⋯ 选显）+ 简略视图。
                 2026-09-17 右栏优化轮：下段改为 flex-1 吃满中段让出的空间——中段「最近编辑」
                 收缩为自适应高度后，控件简略视图拿到最大可用高度（常规内容量全部显示无滚动） */}
-            {/* 下段：番茄钟简略视图（2026-09-17 右栏优化轮第二轮拍板：只留番茄钟）。
-                层级：外壳卡片(bg-secondary) → 本容器(bg-primary，兼作滚动容器) → 番茄钟内容(frameless)
-                —— 原来的「下段卡 + widgetBrief + 番茄钟自带卡」四层嵌套已合并，消除卡中卡
-                （数据-wb=widgetBrief 保留在本容器上，探针/脚本断言口径不变） */}
-            <div
-              data-wb="widgetBrief"
-              className="kb-view-fade mx-2.5 mb-2.5 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] p-2.5"
-            >
-              {dayPanelDetached ? (
-                <button
-                  data-wb="detachedStub"
-                  onClick={onDockDayPanel}
-                  className="m-auto flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                  title="番茄钟已脱离为独立桌面窗口，点击收回右栏"
-                >
-                  <MonitorX size={16} />
-                  <span className="text-[11.5px]">已在桌面</span>
-                  <span className="text-[10.5px]">点击收回右栏</span>
-                </button>
-              ) : (
-                <div className="m-auto w-full">
-                  <div className="mb-2 flex items-center gap-1.5 px-0.5 text-[11.5px] font-semibold text-[var(--text-secondary)]">
-                    <Timer size={12} className="text-[var(--text-muted)]" />
-                    番茄钟
-                  </div>
-                  <PomoWidget frameless />
+            {/* 下段：控件切换条（原型 v16 的一排彩色图标 + ⋯ 选显，可拖拽排序）+ 简略视图。
+                层级：外壳卡(bg-secondary) → 本容器(bg-primary) → 控件内容 → 共两层带边框容器
+                （控件自身不画卡，如 PomoWidget frameless）。
+                内容区不再放文字标题——切换条选中图标即当前控件标识（2026-09-17 反馈：删冗余文字说明） */}
+            <div className="mx-2.5 mb-2.5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)]">
+              <div data-wb="widgetSwitch" className="flex shrink-0 items-center gap-0.5 px-2 pt-2">
+                {visibleWidgets.map((id) => {
+                  const meta = WIDGET_META[id]
+                  if (!meta) return null
+                  const isActive = effectiveWidget === id
+                  return (
+                    <button
+                      key={id}
+                      data-wb="wsBtn"
+                      data-ws-widget={id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = 'move'
+                        e.dataTransfer.setData('text/plain', id)
+                        dragIdRef.current = id
+                        setDragId(id)
+                        requestAnimationFrame(() => { (e.currentTarget as HTMLElement | null)?.style?.setProperty('opacity', '0.4') })
+                      }}
+                      onDragEnd={(e) => {
+                        (e.currentTarget as HTMLElement | null)?.style?.setProperty('opacity', '1')
+                        dragIdRef.current = null
+                        setDragId(null)
+                        setDragOverId(null)
+                      }}
+                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragId && dragId !== id) setDragOverId(id) }}
+                      onDrop={(e) => { e.preventDefault(); handleWidgetDrop(id) }}
+                      onClick={() => setActiveWidget(id)}
+                      title={meta.label}
+                      className={`flex h-8 w-8 items-center justify-center rounded-md text-[17px] leading-none transition-colors ${
+                        isActive
+                          ? 'bg-[var(--bg-hover)] shadow-[inset_0_0_0_1px_var(--border-color)]'
+                          : 'hover:bg-[var(--bg-hover)]/60'
+                      } ${dragOverId === id ? 'ring-1 ring-[var(--accent)]' : ''} ${dragId === id ? 'opacity-40' : ''}`}
+                    >
+                      {meta.icon}
+                    </button>
+                  )
+                })}
+                <div className="ml-auto">
+                  <button
+                    ref={wsMoreRef}
+                    data-wb="wsMore"
+                    onClick={toggleWsMenu}
+                    title="显示的小控件"
+                    className={`rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${wsMenuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : ''}`}
+                  >
+                    <MoreHorizontal size={13} />
+                  </button>
                 </div>
-              )}
+              </div>
+
+              {/* 简略视图：吃满下段剩余、内容垂直居中（m-auto：上下留白均匀，超高归零顶部起滚不被裁）；
+                  DayPanel 系控件脱离中 → 「已在桌面」互斥条目 */}
+              <div data-wb="widgetBrief" className="kb-view-fade flex min-h-0 flex-1 flex-col overflow-y-auto px-2.5 pb-2.5 pt-1">
+                {effectiveWidget == null ? (
+                  <div className="m-auto text-[11.5px] text-[var(--text-muted)]">小控件均已隐藏，点击上方 ⋯ 恢复</div>
+                ) : dayPanelDetached && (DAY_PANEL_WIDGET_IDS as readonly string[]).includes(effectiveWidget) ? (
+                  <button
+                    data-wb="detachedStub"
+                    onClick={onDockDayPanel}
+                    className="m-auto flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                    title="该小组件已脱离为独立桌面窗口，点击收回右栏"
+                  >
+                    <MonitorX size={16} />
+                    <span className="text-[11.5px]">已在桌面</span>
+                    <span className="text-[10.5px]">点击收回右栏</span>
+                  </button>
+                ) : (
+                  <div className="m-auto w-full">
+                    {effectiveWidget === 'task' && <TaskWidget onOpenSchedule={onOpenSchedule} />}
+                    {effectiveWidget === 'habit' && <HabitWidget />}
+                    {effectiveWidget === 'pomo' && <PomoWidget frameless />}
+                    {effectiveWidget === 'password' && <PasswordWidget />}
+                    {effectiveWidget === 'nav' && <NavWidget />}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         ) : (
@@ -238,12 +379,37 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
         document.body,
         'wb-panel-tab-menu',
       )}
+
+      {/* ⋯ 控件选显菜单（portal + 原生委托；2026-09-17 反馈：不带任何底部说明文字） */}
+      {wsMenuOpen && wsMenuPos && createPortal(
+        <div
+          ref={wsMenuRef}
+          data-wb="widgetMenu"
+          className="fixed z-50 w-[210px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-2xl"
+          style={{ left: wsMenuPos.left, top: wsMenuPos.top }}
+        >
+          <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] tracking-wider text-[var(--text-muted)]">显示的小控件</div>
+          {WORKBENCH_WIDGET_IDS.map((id) => {
+            const meta = WIDGET_META[id]
+            if (!meta) return null
+            return (
+              <label key={id} className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[6px] text-[12px] hover:bg-[var(--bg-hover)]">
+                <input type="checkbox" data-ws-widget-id={id} defaultChecked={!layout.widgetsHidden.includes(id)} className="accent-[var(--accent)]" />
+                <span className="shrink-0 text-[13px] leading-none">{meta.icon}</span>
+                <span className="min-w-0 flex-1 truncate">{meta.label}</span>
+              </label>
+            )
+          })}
+        </div>,
+        document.body,
+        'wb-widget-menu',
+      )}
     </div>
   )
 }
 
-/** 中段：🕘 最近编辑（2026-09-17 右栏优化轮收缩——不再 flex-1 抢占空间：自适应内容高度，
- *  近 7 天最多 6 条（超出截断），无记录整卡不渲染；剩余空间全部让给下段控件简略视图） */
+/** 中段：🕘 最近编辑（常驻卡片——无记录也显示，只占标题 + 一行空态；有记录时自适应高度，
+ *  近 7 天最多 6 条（超出截断），剩余空间让给下段控件区） */
 function RecentEdited({ onOpenFile, onOpenPage }: { onOpenFile: (relPath: string) => void; onOpenPage: (pageId: string) => void }) {
   const [pages, setPages] = useState<KnowledgePage[]>([])
 
@@ -268,8 +434,6 @@ function RecentEdited({ onOpenFile, onOpenPage }: { onOpenFile: (relPath: string
       .slice(0, 6)
   }, [pages])
 
-  if (recent.length === 0) return null
-
   return (
     <div data-wb="recentEdited" className="mx-2.5 mt-2 flex shrink-0 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)]">
       <div className="flex shrink-0 items-center gap-1.5 px-2.5 pb-1 pt-2 text-[11.5px] font-semibold text-[var(--text-secondary)]">
@@ -278,7 +442,9 @@ function RecentEdited({ onOpenFile, onOpenPage }: { onOpenFile: (relPath: string
         <span className="ml-auto text-[10px] font-normal text-[var(--text-muted)]">近 7 天</span>
       </div>
       <div className="max-h-[180px] overflow-y-auto px-1.5 pb-1.5">
-        {recent.map((p) => (
+        {recent.length === 0 ? (
+          <div className="px-1.5 py-2.5 text-[11px] text-[var(--text-muted)]">近 7 天没有编辑记录</div>
+        ) : recent.map((p) => (
           <button
             key={p.id}
             onClick={() => (p.path ? onOpenFile(p.path) : onOpenPage(p.id))}

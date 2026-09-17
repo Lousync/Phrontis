@@ -212,24 +212,24 @@ for (const w of ['TaskWidget', 'HabitWidget', 'PomoWidget', 'NavWidget']) {
 }
 ok(!/function taskRow/.test(srcDayPanel) && !/const renderTool\b/.test(srcDayPanel),
   'D4b DayPanel 不再内联任务行渲染（已下沉 TaskWidget）')
-ok(/PomoWidget/.test(srcRight) && !/TaskWidget/.test(srcRight) && !/HabitWidget/.test(srcRight) && !/NavWidget/.test(srcRight) && !/PasswordWidget/.test(srcRight),
-  'D4c 右栏下段只挂番茄钟（2026-09-17 第二轮拍板；其余控件从右栏下线，DayPanel 继续用）')
-ok(!/data-wb="widgetSwitch"/.test(srcRight) && !/data-wb="widgetMenu"/.test(srcRight) && !/data-wb="wsBtn"/.test(srcRight),
-  'D4c2 控件切换条 / ⋯ 控件选显菜单 / 拖拽排序整条下线（负向断言：不得残留）')
+ok(/TaskWidget/.test(srcRight) && /HabitWidget/.test(srcRight) && /PomoWidget/.test(srcRight) && /NavWidget/.test(srcRight) && /PasswordWidget/.test(srcRight),
+  'D4c 右栏简略视图渲染 5 控件（task/habit/pomo/password/nav）——切换条按原型保留')
+ok(/data-wb="widgetSwitch"/.test(srcRight) && /data-wb="wsBtn"/.test(srcRight) && /data-wb="widgetMenu"/.test(srcRight),
+  'D4c2 控件切换条 / ⋯ 选显菜单在册（2026-09-17 反馈轮曾误删，已按原型恢复）')
 ok(/已在桌面/.test(srcRight) && /dayPanelDetached/.test(srcApp) && /data-wb="detachedStub"/.test(srcRight),
-  'D4d 脱离互斥：番茄钟槽「已在桌面」置灰条目（方案 §3.7，判定收窄为单一开关）')
+  'D4d 脱离互斥：DayPanel 系控件槽「已在桌面」置灰条目（方案 §3.7）')
 ok(!/dayPanelVisible/.test(srcApp), 'D4e 内嵌 DayPanel 面板已从主窗口摘除（右栏控件接管）')
 ok(!/setDayPanelVisible/.test(srcApp) && /dayPanelPopout|dayPanelDockBack/.test(srcApp),
   'D4f 标题栏按钮/Ctrl+Alt+S 语义 = 脱离 toggle（popout / dockBack）')
 
-// D5 布局键：右栏 Tab / 面板 Tab 显隐走 workbenchLayout 单键
-//（widgetOrder / widgetsHidden 自第二轮起从右栏下线——控件集固定为 RIGHT_PANEL_WIDGET_IDS，
-//  两键仅保留在类型与钝解析里，旧数据不丢）
-for (const k of ['rightTab', 'panelTabsHidden']) {
+// D5 布局键：右栏 Tab / 控件排序选显 / 面板 Tab 显隐全部走 workbenchLayout 单键
+for (const k of ['rightTab', 'widgetOrder', 'widgetsHidden', 'panelTabsHidden']) {
   ok(new RegExp(`${k}`).test(srcRight), `D5 WorkbenchRightPanel 消费 workbenchLayout.${k}`)
 }
-ok(!/widgetOrder/.test(srcRight) && !/widgetsHidden/.test(srcRight),
-  'D5b 右栏不再消费 widgetOrder / widgetsHidden（控件集固定，两键保留仅供未来扩展）')
+ok(/handleWidgetDrop/.test(srcRight) && /widgetOrder: next/.test(srcRight),
+  'D5b 控件切换条拖拽重排落 widgetOrder（HTML5 drag，TabBar 同款手法）')
+ok(/checkedIds/.test(srcRight) && /WORKBENCH_WIDGET_IDS\.filter\(\(id\) => !checkedIds\.includes\(id\)\)/.test(srcRight),
+  'D5c 选显隐藏集从菜单 DOM 勾选状态推导（同一 tick 连续勾选不再互相覆盖）')
 
 /* ================= E. 右栏优化轮：布局权重 + 工具侧栏适配左栏（2026-09-17） ================= */
 console.log('\n=== E. 右栏优化轮：布局权重 + 工具侧栏适配 ===')
@@ -240,7 +240,8 @@ ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col overflow-y-auto/.test
   'E1b 简略视图 = flex-1 吃满下段剩余（显示完常规内容量）')
 ok(!/flex min-h-\[72px\] flex-1/.test(srcRight) && /shrink-0 flex-col overflow-hidden rounded-lg border/.test(srcRight),
   'E1c 最近编辑不再 flex-1 抢占空间（自适应收缩）')
-ok(/if \(recent\.length === 0\) return null/.test(srcRight), 'E1d 最近编辑无记录整卡不渲染（中段零占位）')
+ok(!/if \(recent\.length === 0\) return null/.test(srcRight) && /近 7 天没有编辑记录/.test(srcRight),
+  'E1d 最近编辑常驻卡片（无记录显示空态文案，不再整卡消失——2026-09-17 反馈）')
 
 // E2 工具侧栏真相源 + ToolHost 透传
 ok(/TOOLS_WITH_SIDEBAR[^]*?\['habit-tracker', 'data-export', 'bookmark-nav', 'pdf-toolkit'\]/.test(srcRegistry.replace(/\n/g, ' ')),
@@ -269,11 +270,11 @@ ok(/!wbLayout\.leftLocked && TOOLS_WITH_SIDEBAR\.has\(tid\)/.test(srcApp),
 ok(/railTool=\{railTool\}/.test(srcApp) && /railTool\?/.test(srcShell) && /railModule \|\| railTool/.test(srcLeft),
   'E4d App → Shell → LeftPanel railTool 透传，模块态条件 = railModule || railTool')
 
-// E5 右栏下段「只留番茄钟」+ 番茄钟形态改造（2026-09-17 第二轮）
-ok(/RIGHT_PANEL_WIDGET_IDS: readonly string\[\] = \['pomo'\]/.test(srcWbl),
-  'E5 右栏挂载控件集 = 只番茄钟（RIGHT_PANEL_WIDGET_IDS 唯一真相源；恢复其他控件 = 往这里加 id）')
-ok(!/DEFAULT_VISIBLE_WIDGET_IDS/.test(srcWbl) && !/widgetsDefaultMigrated/.test(srcWbl),
-  'E5b 上一轮的「默认可见集 + 迁移」机制已随之退役（控件集固定后不需要隐藏/迁移语义）')
+// E5 右栏下段：切换条（原型彩色图标）+ 番茄钟形态改造（2026-09-17）
+ok(!/RIGHT_PANEL_WIDGET_IDS/.test(srcWbl) && /WORKBENCH_WIDGET_IDS = \['task', 'habit', 'pomo', 'password', 'nav'\]/.test(srcWbl),
+  'E5 控件集回归 WORKBENCH_WIDGET_IDS 全 5 项（「只留番茄钟」的收窄已撤销）')
+ok(/task: \{ icon: '✅'/.test(srcRight) && /pomo: \{ icon: '⏰'/.test(srcRight) && /nav: \{ icon: '🌐'/.test(srcRight),
+  'E5b 切换条图标 = 原型彩色 emoji（✅ 今日任务 / 🔔 打卡 / ⏰ 番茄钟 / 🔑 密码 / 🌐 导航）')
 const srcPomo = stripComments(read('src/components/workbench/widgets/PomoWidget.tsx'))
 ok(/data-wb="pomoRing"/.test(srcPomo) && /strokeDashoffset/.test(srcPomo) && /const RING_CIRC = 2 \* Math\.PI \* RING_R/.test(srcPomo),
   'E5c 专注态环形进度（SVG 环 + stroke-dashoffset 周长派生）')
@@ -281,8 +282,8 @@ ok(/const ringMode = ps\.visible && ps\.phase === 'work'/.test(srcPomo),
   'E5d 环仅专注阶段显形（就绪/休息保持横条，拍板口径）')
 ok(/data-wb="pomoControls"[^]*?grid w-full grid-cols-2/.test(srcPomo.replace(/\n/g, ' ')) && /col-span-2/.test(srcPomo),
   'E5e 控制钮等宽两列（就绪单钮跨两列，运行/暂停/完成 = 主钮 + 重置）')
-ok(/与工具箱同源/.test(srcRight) === false && /WIDGET_META/.test(srcRight) === false,
-  'E5f 副说明文字与控件元表已移除（下段只挂番茄钟，标题行为固定文案）')
+ok(/与工具箱同源/.test(srcRight) === false && /小控件均已隐藏/.test(srcRight),
+  'E5f 副说明文字已移除（无「与工具箱同源」；仅保留全隐藏时的空态提示）')
 ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col/.test(srcRight.replace(/\n/g, ' ')) && /m-auto w-full/.test(srcRight),
   'E5g 简略视图内容垂直居中（m-auto：上下留白均匀，超高时归零顶部起滚不被裁）')
 
@@ -294,10 +295,9 @@ ok(/data-wb="rightPanel"[\s\S]{0,150}?className="flex min-h-0 flex-1 flex-col ov
 ok(!/maximized/.test(srcRight), 'E6c 右栏组件的 maximized prop 随卡片下移外壳而退役')
 ok(/<PomoWidget frameless \/>/.test(srcRight) && /frameless\?: boolean/.test(srcPomo),
   'E6d 番茄钟在右栏走 frameless（不再画自带卡片，消除卡中卡）')
-ok(/<Timer size=\{12\}[^]*?番茄钟/.test(srcRight.replace(/\n/g, ' ')),
-  'E6e 下段标题行恢复番茄钟图标（Timer + 文字，与左栏书签行同款语言）')
-ok(/data-wb="widgetBrief"[\s\S]{0,220}?rounded-lg border border-\[var\(--border-color\)\] bg-\[var\(--bg-primary\)\]/.test(srcRight),
-  'E6f 下段容器 = bg-primary 内容层（与外壳 bg-secondary 形成层次；原四层嵌套合并为两层）')
+ok(!/排序：直接拖拽上方图标/.test(srcRight), 'E6e ⋯ 控件选显菜单不带底部排序说明文字（文案精简）')
+ok(/mx-2\.5 mb-2\.5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-\[var\(--border-color\)\] bg-\[var\(--bg-primary\)\]/.test(srcRight),
+  'E6f 下段容器 = bg-primary 内容层 + 细边框（与外壳 bg-secondary 形成层次；简略视图本身不画边框，避免卡中卡）')
 
 console.log('\n========================================')
 if (fails.length === 0) {

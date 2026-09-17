@@ -1124,6 +1124,7 @@ export default function App() {
                   onOpenPluginTool={handleOpenPluginTool}
                   onOpenFile={(relPath) => { setPendingOpenRel(relPath); handleTabChange('editor') }}
                   onOpenPage={(pageId) => openKnowledgePageFromSearch(pageId)}
+                  onOpenSchedule={() => handleTabChange('schedule')}
                 />
               }
               center={

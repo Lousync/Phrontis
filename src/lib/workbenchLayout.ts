@@ -39,19 +39,9 @@ export interface WorkbenchLayout {
 export const WORKBENCH_WIDGET_IDS = ['task', 'habit', 'pomo', 'password', 'nav'] as const
 
 /**
- * 右栏下段简略视图**实际挂载的控件**（2026-09-17 右栏优化轮第二轮拍板：只留番茄钟）。
- *
- * 右栏下段是常驻区，任务/打卡/导航/密码生成器在各自模块都有完整界面，塞进右栏只会互相挤压；
- * 控件切换条、⋯ 选显菜单、拖拽排序一并下线（只剩一个控件时这些机制全无意义）。
- * **恢复其他控件 = 往本常量加 id + 右栏渲染分支加一行**（其余 4 个组件仍在仓库、DayPanel 脱离窗口继续用）。
- * widgetOrder / widgetsHidden 两键保留在类型与钝解析里（旧数据不丢），当前无消费方。
- */
-export const RIGHT_PANEL_WIDGET_IDS: readonly string[] = ['pomo']
-
-/**
- * 源自 DayPanel 的四个控件 id：只是「DayPanel 有哪四 Tab」的语义常量。
- * 2026-09-17 右栏优化轮第二轮起**无代码消费方**（右栏下段的脱离互斥已收窄为单一番茄钟，
- * 见 RIGHT_PANEL_WIDGET_IDS）——保留作语义描述，恢复多控件右栏时可直接复用。
+ * 源自 DayPanel 的四个控件 id（方案 §3.7 互斥判定用）：整体脱离为独立窗口
+ * （dayPanelDetached）时，右栏这四槽显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
+ * password 控件不在 DayPanel 内，不参与互斥。
  */
 export const DAY_PANEL_WIDGET_IDS = ['task', 'habit', 'pomo', 'nav'] as const
 
