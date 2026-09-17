@@ -1,23 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import {
-  Puzzle, Bot, MoreHorizontal, History, FileText,
-  CalendarDays, ListChecks, Timer, KeyRound, Globe, MonitorX,
-} from 'lucide-react'
+import { Puzzle, Bot, MoreHorizontal, History, FileText, MonitorX } from 'lucide-react'
 import type { KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
 import { useSettings } from '../../lib/SettingsContext'
 import {
-  parseWorkbenchLayout, DAY_PANEL_WIDGET_IDS, WORKBENCH_WIDGET_IDS, WORKBENCH_PANEL_TAB_IDS,
+  parseWorkbenchLayout, WORKBENCH_PANEL_TAB_IDS,
   type WorkbenchLayout,
 } from '../../lib/workbenchLayout'
 import { ToolLauncherZone } from './ToolLauncherZone'
-import { TaskWidget } from './widgets/TaskWidget'
-import { HabitWidget } from './widgets/HabitWidget'
 import { PomoWidget } from './widgets/PomoWidget'
-import { PasswordWidget } from './widgets/PasswordWidget'
-import { NavWidget } from './widgets/NavWidget'
 import type { PluginTool } from '../../lib/pluginService'
 
 /**
@@ -29,12 +22,13 @@ import type { PluginTool } from '../../lib/pluginService'
  *
  * **小工具态 = 上中下三段**：
  * - 上：🧰 工具箱工具入口区（ToolLauncherZone，方案 §10）；
- * - 中：🕘 最近编辑常驻、独立滚动（近 7 天的知识页，点击直开）；
- * - 下：控件切换条（可拖拽排序 + ⋯ 逐个选显）+ 简略视图（5 控件：今日任务 / 今日打卡 /
- *   番茄钟 / 强密码生成器 / 网址导航，前三者与今日任务为 DayPanel 抽出的共用控件）。
+ * - 中：🕘 最近编辑（自适应收缩，近 7 天最多 6 条，无记录整卡不渲染）；
+ * - 下：番茄钟简略视图（2026-09-17 右栏优化轮第二轮拍板：**只留番茄钟**——控件切换条、
+ *   ⋯ 控件选显菜单、拖拽排序一并下线，可行控件集见 workbenchLayout.RIGHT_PANEL_WIDGET_IDS；
+ *   其余控件组件仍在仓库、DayPanel 脱离窗口继续消费）。
  *
- * **脱离互斥（方案 §3.7）**：DayPanel 四控件整体脱离为独立窗口（dayPanelDetached）时，
- * 对应槽位显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
+ * **脱离互斥（方案 §3.7）**：DayPanel 控件脱离为独立窗口（dayPanelDetached）时，
+ * 番茄钟槽位显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
  *
  * **AI 态**：本批次只落双 Tab 骨架与占位；aiChat 标签 + ⤢ + token 面板 = 批次5（方案 §4/§8）。
  */
@@ -71,21 +65,9 @@ interface Props {
   onOpenFile: (relPath: string) => void
   /** 最近编辑点击（非 vault 读源页面 → 知识库定位打开） */
   onOpenPage: (pageId: string) => void
-  /** 今日任务控件「打开日程模块」 */
-  onOpenSchedule: () => void
 }
 
-/** 5 控件的切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
- *  2026-09-17 右栏优化轮：删 sub 副说明（「与工具箱同源」等文字按反馈移除，标题行只留控件名） */
-const WIDGET_META: Record<string, { icon: typeof Timer; label: string }> = {
-  task: { icon: CalendarDays, label: '今日任务' },
-  habit: { icon: ListChecks, label: '今日打卡' },
-  pomo: { icon: Timer, label: '番茄钟' },
-  password: { icon: KeyRound, label: '强密码生成器' },
-  nav: { icon: Globe, label: '网址导航' },
-}
-
-export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule }: Props) {
+export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -107,56 +89,6 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
       panelTabsHidden: next,
       rightTab: show ? id : (id === layout.rightTab ? visiblePanelTabs.find((k) => k !== id) ?? 'widgets' : layout.rightTab),
     })
-  }
-
-  // 控件区：排序（widgetOrder 拖拽）+ 选显（widgetsHidden）+ 激活控件
-  const visibleWidgets = useMemo(
-    () => layout.widgetOrder.filter((id) => !layout.widgetsHidden.includes(id)),
-    [layout.widgetOrder, layout.widgetsHidden],
-  )
-  const [activeWidget, setActiveWidget] = useState<string | null>(null)
-  // 激活控件缺省 = 首个可见项；被隐藏后回落（钝规则）
-  const effectiveWidget = activeWidget && visibleWidgets.includes(activeWidget) ? activeWidget : visibleWidgets[0] ?? null
-
-  // ⋯ 控件选显菜单（照 🔖 手法：portal + 原生委托 + 外部关闭）
-  const [wsMenuOpen, setWsMenuOpen] = useState(false)
-  const [wsMenuPos, setWsMenuPos] = useState<{ left: number; top: number } | null>(null)
-  const wsMoreRef = useRef<HTMLButtonElement | null>(null)
-  const wsMenuRef = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (!wsMenuOpen) return
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node
-      if ((wsMoreRef.current && wsMoreRef.current.contains(t)) || (wsMenuRef.current && wsMenuRef.current.contains(t))) return
-      setWsMenuOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setWsMenuOpen(false) }
-    document.addEventListener('pointerdown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
-  }, [wsMenuOpen])
-  useEffect(() => {
-    if (!wsMenuOpen) return
-    const menu = wsMenuRef.current
-    if (!menu) return
-    const onChange = (e: Event) => {
-      const input = (e.target as HTMLElement | null)?.closest?.('input[data-ws-widget-id]') as HTMLInputElement | null
-      const id = input?.dataset.wsWidgetId
-      if (!id || !input) return
-      const hidden = input.checked
-        ? layout.widgetsHidden.filter((k) => k !== id)
-        : [...layout.widgetsHidden, id]
-      patch({ widgetsHidden: hidden })
-    }
-    menu.addEventListener('change', onChange)
-    return () => menu.removeEventListener('change', onChange)
-  }, [wsMenuOpen, layout.widgetsHidden, patch])
-  const toggleWsMenu = () => {
-    if (!wsMenuOpen) {
-      const r = wsMoreRef.current?.getBoundingClientRect()
-      if (r) setWsMenuPos({ left: Math.max(8, Math.min(r.right - 210, window.innerWidth - 218)), top: Math.max(8, r.top - 248) })
-    }
-    setWsMenuOpen(v => !v)
   }
 
   // ⋯ 面板 Tab 管理菜单（同款手法）
@@ -197,23 +129,6 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
       if (r) setPtMenuPos({ left: Math.max(8, Math.min(r.right - 210, window.innerWidth - 218)), top: r.bottom + 6 })
     }
     setPtMenuOpen(v => !v)
-  }
-
-  // 控件切换条拖拽重排（HTML5 drag，WorkbenchTabBar 同款手法；序持久化 widgetOrder）
-  const [dragId, setDragId] = useState<string | null>(null)
-  const [dragOverId, setDragOverId] = useState<string | null>(null)
-  const dragIdRef = useRef<string | null>(null)
-  const handleWidgetDrop = (targetId: string) => {
-    const src = dragIdRef.current
-    setDragOverId(null)
-    if (!src || src === targetId) return
-    const next = [...layout.widgetOrder]
-    const from = next.indexOf(src)
-    const to = next.indexOf(targetId)
-    if (from === -1 || to === -1) return
-    next.splice(from, 1)
-    next.splice(to, 0, src)
-    patch({ widgetOrder: next })
   }
 
   return (
@@ -264,69 +179,20 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
                 2026-09-17 右栏优化轮：下段改为 flex-1 吃满中段让出的空间——中段「最近编辑」
                 收缩为自适应高度后，控件简略视图拿到最大可用高度（常规内容量全部显示无滚动） */}
             <div className="mx-2.5 mb-2.5 flex min-h-0 flex-1 flex-col rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
-              <div data-wb="widgetSwitch" className="flex items-center gap-1 px-2 pt-1.5">
-                {visibleWidgets.map((id) => {
-                  const meta = WIDGET_META[id]
-                  if (!meta) return null
-                  const Icon = meta.icon
-                  const isActive = effectiveWidget === id
-                  return (
-                    <button
-                      key={id}
-                      data-wb="wsBtn"
-                      data-ws-widget={id}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.effectAllowed = 'move'
-                        e.dataTransfer.setData('text/plain', id)
-                        dragIdRef.current = id
-                        setDragId(id)
-                        requestAnimationFrame(() => { (e.currentTarget as HTMLElement | null)?.style?.setProperty('opacity', '0.4') })
-                      }}
-                      onDragEnd={(e) => {
-                        (e.currentTarget as HTMLElement | null)?.style?.setProperty('opacity', '1')
-                        dragIdRef.current = null
-                        setDragId(null)
-                        setDragOverId(null)
-                      }}
-                      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragId && dragId !== id) setDragOverId(id) }}
-                      onDrop={(e) => { e.preventDefault(); handleWidgetDrop(id) }}
-                      onClick={() => setActiveWidget(id)}
-                      title={meta.label}
-                      className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
-                        isActive ? 'bg-[var(--accent)]/10 text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-                      } ${dragOverId === id ? 'ring-1 ring-[var(--accent)]' : ''} ${dragId === id ? 'opacity-40' : ''}`}
-                    >
-                      <Icon size={14} strokeWidth={1.8} />
-                    </button>
-                  )
-                })}
-                <div className="ml-auto">
-                  <button
-                    ref={wsMoreRef}
-                    onClick={toggleWsMenu}
-                    title="显示的小控件"
-                    className={`rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${wsMenuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : ''}`}
-                  >
-                    <MoreHorizontal size={13} />
-                  </button>
-                </div>
-              </div>
-
               {/* 简略视图（2026-09-17 右栏优化轮：原固定 h-[196px] 改 flex-1 吃满下段剩余——
                   内容少时整窗显示完不滚动；条目特别多时在此高度内滚动（自适应+上限）。
                   内容垂直居中（m-auto）：番茄钟这类内容量小的控件不再「贴顶 + 底部一大片空白」，
                   上下留白均匀；内容超高时 auto margin 归零，从顶部开始正常滚动不被裁。
-                  DayPanel 系控件脱离中 → 「已在桌面」互斥条目） */}
-              <div data-wb="widgetBrief" className="kb-view-fade m-2 mt-1.5 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] p-2.5">
-                {effectiveWidget == null ? (
-                  <div className="m-auto text-[11.5px] text-[var(--text-muted)]">小控件均已隐藏，点击上方 ⋯ 恢复</div>
-                ) : dayPanelDetached && (DAY_PANEL_WIDGET_IDS as readonly string[]).includes(effectiveWidget) ? (
+                  第二轮拍板：下段只挂番茄钟——切换条 / ⋯ 控件选显菜单 / 拖拽排序全下线
+                  （控件集见 workbenchLayout.RIGHT_PANEL_WIDGET_IDS）；
+                  DayPanel 脱离中 → 「已在桌面」互斥条目） */}
+              <div data-wb="widgetBrief" className="kb-view-fade m-2 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] p-2.5">
+                {dayPanelDetached ? (
                   <button
                     data-wb="detachedStub"
                     onClick={onDockDayPanel}
                     className="m-auto flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                    title="该小组件已脱离为独立桌面窗口，点击收回右栏"
+                    title="番茄钟已脱离为独立桌面窗口，点击收回右栏"
                   >
                     <MonitorX size={16} />
                     <span className="text-[11.5px]">已在桌面</span>
@@ -334,12 +200,8 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
                   </button>
                 ) : (
                   <div className="m-auto w-full">
-                    <div className="mb-1.5 px-0.5 text-[11.5px] font-semibold text-[var(--text-secondary)]">{WIDGET_META[effectiveWidget]?.label}</div>
-                    {effectiveWidget === 'task' && <TaskWidget onOpenSchedule={onOpenSchedule} />}
-                    {effectiveWidget === 'habit' && <HabitWidget />}
-                    {effectiveWidget === 'pomo' && <PomoWidget />}
-                    {effectiveWidget === 'password' && <PasswordWidget />}
-                    {effectiveWidget === 'nav' && <NavWidget />}
+                    <div className="mb-1.5 px-0.5 text-[11.5px] font-semibold text-[var(--text-secondary)]">番茄钟</div>
+                    <PomoWidget />
                   </div>
                 )}
               </div>
@@ -374,35 +236,6 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
         </div>,
         document.body,
         'wb-panel-tab-menu',
-      )}
-
-      {/* ⋯ 控件选显菜单 */}
-      {wsMenuOpen && wsMenuPos && createPortal(
-        <div
-          ref={wsMenuRef}
-          data-wb="widgetMenu"
-          className="fixed z-50 w-[210px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-2xl"
-          style={{ left: wsMenuPos.left, top: wsMenuPos.top }}
-        >
-          <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] tracking-wider text-[var(--text-muted)]">显示的小控件</div>
-          {WORKBENCH_WIDGET_IDS.map((id) => {
-            const meta = WIDGET_META[id]
-            if (!meta) return null
-            const Icon = meta.icon
-            return (
-              <label key={id} className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[6px] text-[12px] hover:bg-[var(--bg-hover)]">
-                <input type="checkbox" data-ws-widget-id={id} defaultChecked={!layout.widgetsHidden.includes(id)} className="accent-[var(--accent)]" />
-                <Icon size={12} className="shrink-0 text-[var(--text-muted)]" />
-                <span className="min-w-0 flex-1 truncate">{meta.label}</span>
-              </label>
-            )
-          })}
-          <div className="mt-1 border-t border-[var(--border-color)] px-2.5 pb-1 pt-1.5 text-[10px] leading-relaxed text-[var(--text-muted)]">
-            排序：直接拖拽上方图标。
-          </div>
-        </div>,
-        document.body,
-        'wb-widget-menu',
       )}
     </div>
   )

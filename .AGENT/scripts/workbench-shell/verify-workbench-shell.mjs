@@ -212,19 +212,24 @@ for (const w of ['TaskWidget', 'HabitWidget', 'PomoWidget', 'NavWidget']) {
 }
 ok(!/function taskRow/.test(srcDayPanel) && !/const renderTool\b/.test(srcDayPanel),
   'D4b DayPanel 不再内联任务行渲染（已下沉 TaskWidget）')
-ok(/TaskWidget/.test(srcRight) && /HabitWidget/.test(srcRight) && /PomoWidget/.test(srcRight) && /NavWidget/.test(srcRight) && /PasswordWidget/.test(srcRight),
-  'D4c 右栏简略视图渲染 5 控件（task/habit/pomo/password/nav）')
-ok(/DAY_PANEL_WIDGET_IDS/.test(srcRight) && /已在桌面/.test(srcRight) && /dayPanelDetached/.test(srcApp),
-  'D4d 脱离互斥：DayPanel 系控件槽「已在桌面」置灰条目（方案 §3.7）')
+ok(/PomoWidget/.test(srcRight) && !/TaskWidget/.test(srcRight) && !/HabitWidget/.test(srcRight) && !/NavWidget/.test(srcRight) && !/PasswordWidget/.test(srcRight),
+  'D4c 右栏下段只挂番茄钟（2026-09-17 第二轮拍板；其余控件从右栏下线，DayPanel 继续用）')
+ok(!/data-wb="widgetSwitch"/.test(srcRight) && !/data-wb="widgetMenu"/.test(srcRight) && !/data-wb="wsBtn"/.test(srcRight),
+  'D4c2 控件切换条 / ⋯ 控件选显菜单 / 拖拽排序整条下线（负向断言：不得残留）')
+ok(/已在桌面/.test(srcRight) && /dayPanelDetached/.test(srcApp) && /data-wb="detachedStub"/.test(srcRight),
+  'D4d 脱离互斥：番茄钟槽「已在桌面」置灰条目（方案 §3.7，判定收窄为单一开关）')
 ok(!/dayPanelVisible/.test(srcApp), 'D4e 内嵌 DayPanel 面板已从主窗口摘除（右栏控件接管）')
 ok(!/setDayPanelVisible/.test(srcApp) && /dayPanelPopout|dayPanelDockBack/.test(srcApp),
   'D4f 标题栏按钮/Ctrl+Alt+S 语义 = 脱离 toggle（popout / dockBack）')
 
-// D5 布局键：右栏 Tab / 控件排序选显 / 面板 Tab 显隐全部走 workbenchLayout 单键
-for (const k of ['rightTab', 'widgetOrder', 'widgetsHidden', 'panelTabsHidden']) {
+// D5 布局键：右栏 Tab / 面板 Tab 显隐走 workbenchLayout 单键
+//（widgetOrder / widgetsHidden 自第二轮起从右栏下线——控件集固定为 RIGHT_PANEL_WIDGET_IDS，
+//  两键仅保留在类型与钝解析里，旧数据不丢）
+for (const k of ['rightTab', 'panelTabsHidden']) {
   ok(new RegExp(`${k}`).test(srcRight), `D5 WorkbenchRightPanel 消费 workbenchLayout.${k}`)
 }
-ok(/widgetOrder/.test(srcApp) === false || true, 'D5b （提示）控件排序状态收在右栏组件内')
+ok(!/widgetOrder/.test(srcRight) && !/widgetsHidden/.test(srcRight),
+  'D5b 右栏不再消费 widgetOrder / widgetsHidden（控件集固定，两键保留仅供未来扩展）')
 
 /* ================= E. 右栏优化轮：布局权重 + 工具侧栏适配左栏（2026-09-17） ================= */
 console.log('\n=== E. 右栏优化轮：布局权重 + 工具侧栏适配 ===')
@@ -265,10 +270,10 @@ ok(/railTool=\{railTool\}/.test(srcApp) && /railTool\?/.test(srcShell) && /railM
   'E4d App → Shell → LeftPanel railTool 透传，模块态条件 = railModule || railTool')
 
 // E5 右栏下段「只留番茄钟」+ 番茄钟形态改造（2026-09-17 第二轮）
-ok(/DEFAULT_VISIBLE_WIDGET_IDS[^]*?\['pomo'\]/.test(srcWbl.replace(/\n/g, ' ')),
-  'E5 默认可见控件 = 只番茄钟（DEFAULT_VISIBLE_WIDGET_IDS，其余 4 项 ⋯ 菜单可勾回）')
-ok(/widgetsHidden: WORKBENCH_WIDGET_IDS\.filter/.test(srcWbl) && /widgetsHidden: \[\.\.\.DEFAULT_WORKBENCH_LAYOUT\.widgetsHidden\]/.test(srcWbl),
-  'E5b 默认隐藏集由规范集派生 + parse 层缺键用规范默认（不再硬编码 []，否则默认可见集永远被覆盖）')
+ok(/RIGHT_PANEL_WIDGET_IDS: readonly string\[\] = \['pomo'\]/.test(srcWbl),
+  'E5 右栏挂载控件集 = 只番茄钟（RIGHT_PANEL_WIDGET_IDS 唯一真相源；恢复其他控件 = 往这里加 id）')
+ok(!/DEFAULT_VISIBLE_WIDGET_IDS/.test(srcWbl) && !/widgetsDefaultMigrated/.test(srcWbl),
+  'E5b 上一轮的「默认可见集 + 迁移」机制已随之退役（控件集固定后不需要隐藏/迁移语义）')
 const srcPomo = stripComments(read('src/components/workbench/widgets/PomoWidget.tsx'))
 ok(/data-wb="pomoRing"/.test(srcPomo) && /strokeDashoffset/.test(srcPomo) && /const RING_CIRC = 2 \* Math\.PI \* RING_R/.test(srcPomo),
   'E5c 专注态环形进度（SVG 环 + stroke-dashoffset 周长派生）')
@@ -276,12 +281,10 @@ ok(/const ringMode = ps\.visible && ps\.phase === 'work'/.test(srcPomo),
   'E5d 环仅专注阶段显形（就绪/休息保持横条，拍板口径）')
 ok(/data-wb="pomoControls"[^]*?grid w-full grid-cols-2/.test(srcPomo.replace(/\n/g, ' ')) && /col-span-2/.test(srcPomo),
   'E5e 控制钮等宽两列（就绪单钮跨两列，运行/暂停/完成 = 主钮 + 重置）')
-ok(/sub\s*:/.test(srcRight) === false && /与工具箱同源/.test(srcRight) === false,
-  'E5f 简略视图副说明文字已移除（WIDGET_META 无 sub 字段）')
+ok(/与工具箱同源/.test(srcRight) === false && /WIDGET_META/.test(srcRight) === false,
+  'E5f 副说明文字与控件元表已移除（下段只挂番茄钟，标题行为固定文案）')
 ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col/.test(srcRight.replace(/\n/g, ' ')) && /m-auto w-full/.test(srcRight),
   'E5g 简略视图内容垂直居中（m-auto：上下留白均匀，超高时归零顶部起滚不被裁）')
-ok(/widgetsDefaultMigrated/.test(srcWbl) && /base\.widgetsHidden\.length === 0/.test(srcWbl),
-  'E5h 控件默认可见集一次性迁移（旧 widgetsHidden=[] 是旧默认态 → 收敛为新默认 + 置标记；幂等不误伤手动全显）')
 
 console.log('\n========================================')
 if (fails.length === 0) {

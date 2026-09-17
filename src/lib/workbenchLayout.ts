@@ -33,25 +33,25 @@ export interface WorkbenchLayout {
   bookmarksHidden: string[]
   /** 分屏比例（主栏:副栏，0~1；null = 未分屏） */
   splitRatio: number | null
-  /** 控件默认可见集迁移标记（2026-09-17）：旧布局 widgetsHidden=[] = 「默认全显」时代的默认态，
-   *  首次解析时收敛为新默认并置位；置位后尊重用户选择（含手动全显）。见 parseWorkbenchLayout */
-  widgetsDefaultMigrated?: boolean
 }
 
 /** 右栏控件的规范顺序（缺省序 = 原型 v15 定稿）；DayPanel 四控件 id 沿用 DAY_TABS */
 export const WORKBENCH_WIDGET_IDS = ['task', 'habit', 'pomo', 'password', 'nav'] as const
 
 /**
- * 右栏下段简略视图的**默认可见控件**（2026-09-17 右栏优化轮拍板）：
- * 默认只显番茄钟——右栏下段是常驻区，任务/打卡/导航/密码生成器都在各自模块有完整界面，
- * 塞进右栏只会互相挤压。其余 4 个控件仍在切换条 ⋯ 菜单里可手动勾回（隐藏 ≠ 卸载）。
+ * 右栏下段简略视图**实际挂载的控件**（2026-09-17 右栏优化轮第二轮拍板：只留番茄钟）。
+ *
+ * 右栏下段是常驻区，任务/打卡/导航/密码生成器在各自模块都有完整界面，塞进右栏只会互相挤压；
+ * 控件切换条、⋯ 选显菜单、拖拽排序一并下线（只剩一个控件时这些机制全无意义）。
+ * **恢复其他控件 = 往本常量加 id + 右栏渲染分支加一行**（其余 4 个组件仍在仓库、DayPanel 脱离窗口继续用）。
+ * widgetOrder / widgetsHidden 两键保留在类型与钝解析里（旧数据不丢），当前无消费方。
  */
-export const DEFAULT_VISIBLE_WIDGET_IDS: readonly string[] = ['pomo']
+export const RIGHT_PANEL_WIDGET_IDS: readonly string[] = ['pomo']
 
 /**
- * 源自 DayPanel 的四个控件 id（方案 §3.7 互斥判定用）：整体脱离为独立窗口
- * （dayPanelDetached）时，右栏这四槽显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
- * password 控件不在 DayPanel 内，不参与互斥。
+ * 源自 DayPanel 的四个控件 id：只是「DayPanel 有哪四 Tab」的语义常量。
+ * 2026-09-17 右栏优化轮第二轮起**无代码消费方**（右栏下段的脱离互斥已收窄为单一番茄钟，
+ * 见 RIGHT_PANEL_WIDGET_IDS）——保留作语义描述，恢复多控件右栏时可直接复用。
  */
 export const DAY_PANEL_WIDGET_IDS = ['task', 'habit', 'pomo', 'nav'] as const
 
@@ -65,8 +65,7 @@ export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   rightCollapsed: true,
   rightTab: 'widgets',
   widgetOrder: [...WORKBENCH_WIDGET_IDS],
-  // 默认隐藏 = 规范集 - 默认可见集（2026-09-17：右栏下段默认只显番茄钟）
-  widgetsHidden: WORKBENCH_WIDGET_IDS.filter((id) => !DEFAULT_VISIBLE_WIDGET_IDS.includes(id)),
+  widgetsHidden: [],
   panelTabsHidden: [],
   bookmarksHidden: [],
   splitRatio: null,
@@ -76,9 +75,7 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
   const base: WorkbenchLayout = {
     ...DEFAULT_WORKBENCH_LAYOUT,
     widgetOrder: [...DEFAULT_WORKBENCH_LAYOUT.widgetOrder],
-    // 缺键时用规范默认（右栏默认只显番茄钟，见 DEFAULT_VISIBLE_WIDGET_IDS），
-    // 不再硬编码 [] —— 否则「默认可见集」永远被空数组（= 全显）覆盖
-    widgetsHidden: [...DEFAULT_WORKBENCH_LAYOUT.widgetsHidden],
+    widgetsHidden: [],
   }
   if (!raw) return base
   try {
@@ -99,14 +96,6 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       }
       if (Array.isArray(o.widgetsHidden)) {
         base.widgetsHidden = o.widgetsHidden.filter((x): x is string => typeof x === 'string')
-      }
-      /* 控件默认可见集一次性迁移（2026-09-17 右栏优化轮）：
-         旧持久化里 widgetsHidden=[] 是「默认全显」时代的**默认态**（不是用户的显式选择），
-         直接改 DEFAULT 对它无效。这里在「未打过迁移标记 + 隐藏集为空」时收敛为新默认，
-         并置标记让写回落盘；打过标记的数据（含用户之后手动全显）不再迁移 —— 幂等且不误伤。 */
-      if (o.widgetsDefaultMigrated !== true) {
-        if (base.widgetsHidden.length === 0) base.widgetsHidden = [...DEFAULT_WORKBENCH_LAYOUT.widgetsHidden]
-        base.widgetsDefaultMigrated = true
       }
       if (Array.isArray(o.panelTabsHidden)) {
         base.panelTabsHidden = o.panelTabsHidden.filter((x): x is string => typeof x === 'string')

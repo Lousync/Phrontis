@@ -19,6 +19,11 @@ const STRENGTH_META = {
  * 强密码生成器控件（v3.4.0 批次4 新写，原型 v15「wb-pwgen」形态）。
  * 生成框 + 长度滑条（8~32）+ 强度条；纯本地生成（lib/passwordGen 同款算法，
  * 与密码本 / 悬浮小密码本共用），不落盘、不进剪贴板除非用户点复制。
+ *
+ * ⚠️ 2026-09-17 右栏优化轮第二轮起**无挂载点**：右栏下段收窄为单一番茄钟
+ * （workbenchLayout.RIGHT_PANEL_WIDGET_IDS = ['pomo']），本组件暂从界面下线。
+ * 恢复路径 = 把 'password' 加回 RIGHT_PANEL_WIDGET_IDS + 右栏渲染分支加一行；
+ * 若确定不再需要，可按「删除型改动」双向盘点后整体移除。
  */
 export function PasswordWidget() {
   const [len, setLen] = useState(16)

@@ -170,7 +170,16 @@ async function main() {
   //（先退出模块态到总览，排除 railModule 残留干扰；pdf-toolkit 为 lazy chunk，多等加载）
   await evalJs(`(() => { document.querySelector('button[title^="返回总览"]')?.click(); return true })()`)
   await sleep(400)
-  // 打开工具标签：右栏入口区「PDF 工具箱」条目（或全隐藏时走命令面板兜底——探针环境默认全显）
+  // 入口区在右栏内 → 先确保右栏展开（布局键刚被清空，rightCollapsed 必为默认收起）
+  await evalJs(`(() => {
+    if (document.querySelector('[data-wb="toolsZone"]')) return true
+    const hs = [...document.querySelectorAll('[data-wb="shell"] [title="拖拽或点击展开"]')]
+    hs[hs.length - 1]?.click(); return true
+  })()`)
+  await sleep(800)
+  const rpReady = await evalJs(`!!document.querySelector('[data-wb="toolsZone"]')`)
+  ok(rpReady, 'D10-0 右栏展开、工具入口区就绪（打开入口的前置条件）')
+  // 打开工具标签：右栏入口区「PDF 工具箱」条目
   await evalJs(`(() => {
     const btns = [...document.querySelectorAll('[data-wb="toolsZone"] button')]
     const hit = btns.find((b) => b.textContent?.includes('PDF 工具箱'))
@@ -192,18 +201,17 @@ async function main() {
   const afterClose = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
   ok(afterClose !== 'pdf-toolkit', 'D10c 关工具标签 → railTool 清空不滞留（左栏跟随落点标签）', `mod=${afterClose}`)
 
-  // D11 右栏下段改造（2026-09-17 第二轮）：默认只留番茄钟 + 专注态变环形进度 + 按钮随状态变
-  // 展开右栏（默认收起；点右缘展开手柄）
-  await evalJs(`(() => {
-    const hs = [...document.querySelectorAll('[data-wb="shell"] [title="拖拽或点击展开"]')]
-    hs[hs.length - 1]?.click(); return true
-  })()`)
-  await sleep(800)
+  // D11 右栏下段改造（2026-09-17 第二轮）：只留番茄钟 + 专注态变环形进度 + 按钮随状态变
+  //（右栏已由 D10 展开；此处只复核可用性）
   const rpOpen = await evalJs(`!!document.querySelector('[data-wb="rightPanel"]')`)
-  ok(rpOpen, 'D11a 右栏可展开（展开手柄仍有边缘入口）')
-  const wsCount = await evalJs(`document.querySelectorAll('[data-wb="wsBtn"]').length`)
-  const wsFirst = await evalJs(`document.querySelector('[data-wb="wsBtn"]')?.getAttribute('title') ?? ''`)
-  ok(wsCount === 1 && wsFirst === '番茄钟', 'D11b 右栏下段默认只显番茄钟（切换条 1 项，其余 ⋯ 菜单可勾回）', `count=${wsCount} first=${wsFirst}`)
+  ok(rpOpen, 'D11a 右栏展开可用（承接 D10 状态）')
+  const switchGone = await evalJs(`!document.querySelector('[data-wb="widgetSwitch"]') && !document.querySelector('[data-wb="wsBtn"]') && !document.querySelector('[data-wb="widgetMenu"]')`)
+  ok(switchGone, 'D11b 控件切换条 / ⋯ 控件选显菜单整条下线（负向断言，无其他工具列表）')
+  const briefHasPomo = await evalJs(`(() => {
+    const el = document.querySelector('[data-wb="widgetBrief"]')
+    return !!el && !!el.querySelector('[data-wb="pomoMain"]') && el.textContent.includes('番茄钟')
+  })()`)
+  ok(briefHasPomo, 'D11b2 右栏下段直接是番茄钟（标题 + 控件，无中间层列表）')
   const subGone = await evalJs(`(() => {
     const el = document.querySelector('[data-wb="widgetBrief"]')
     return !!el && !el.textContent.includes('与工具箱同源')
