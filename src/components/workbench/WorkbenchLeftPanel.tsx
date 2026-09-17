@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ArrowLeft, Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, Lock,
+  Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, House, Lock,
   LockOpen, NotebookPen, Library, Trees, Bot, Search,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
@@ -183,9 +183,9 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
         ) : null
       ) : treeMode ? (
         <>
-          <div className="flex h-8 shrink-0 items-center px-1.5">
+          <div className="flex h-8 shrink-0 items-center justify-center px-1.5">
             <button onClick={onToggleTreeMode} title="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-              <ArrowLeft size={13} />
+              <House size={13} />
             </button>
           </div>
           <div data-wb="treeMode" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5">
@@ -214,9 +214,10 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
              2026-09-16 第二轮 UI 反馈：头部只留 ‹ 返回 + 锁定（文字描述与横线删除）；
              data-wb-mod 记录当前模块 key（工具侧栏态 = tool id），供探针/脚本断言（不渲染可见文字） */
         <>
-          <div data-wb="mod" data-wb-mod={railModule ?? railTool ?? ''} className="flex h-8 shrink-0 items-center justify-between px-1.5">
+          <div data-wb="mod" data-wb-mod={railModule ?? railTool ?? ''} className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
+            {/* 返回顶层统一 🏠（2026-09-17 反馈轮：‹ 换 House，钮组与搜索态头部同一居中语言） */}
             <button onClick={onBack} title="返回总览（自动解锁）" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-              <ArrowLeft size={13} />
+              <House size={13} />
             </button>
             <button
               onClick={onToggleLock}

@@ -263,8 +263,8 @@ export function WorkbenchSearchPanel({ onOpenPage, onLocateCategory, onRunComman
 
   return (
     <div data-wb="leftSearch" className="flex min-h-0 flex-1 flex-col">
-      {/* 头部：🏠 返回顶层 + 🔒 锁定（简图右图排版；模块态同款高度） */}
-      <div className="flex h-8 shrink-0 items-center justify-between px-1.5">
+      {/* 头部：🏠 返回顶层 + 🔒 锁定（简图右图排版；与总览态头部同一居中语言） */}
+      <div className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
         <button onClick={onExit} title="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           <House size={13} />
         </button>
@@ -277,9 +277,9 @@ export function WorkbenchSearchPanel({ onOpenPage, onLocateCategory, onRunComman
         </button>
       </div>
 
-      {/* 搜索框（头部下方，简图右图） */}
+      {/* 搜索框：无边的浅底圆角条（不画边框，避免左栏卡里「卡中卡」的三层感） */}
       <div className="shrink-0 px-2 pb-1.5">
-        <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1.5 transition-colors focus-within:border-[var(--accent)]/60">
+        <div className="flex items-center gap-1.5 rounded-lg bg-[var(--bg-tertiary)] px-2.5 py-[7px] transition-colors focus-within:bg-[var(--bg-hover)]">
           <Search size={13} className="shrink-0 text-[var(--text-muted)]" />
           <input
             ref={inputRef}
@@ -289,7 +289,7 @@ export function WorkbenchSearchPanel({ onOpenPage, onLocateCategory, onRunComman
             onKeyDown={handleKeyDown}
             placeholder="搜索页面 / 目录 / 标签…"
             spellCheck={false}
-            className="min-w-0 flex-1 border-none bg-transparent py-0.5 text-[12.5px] text-[var(--text-primary)] outline-none placeholder-[var(--text-disabled)]"
+            className="min-w-0 flex-1 border-0 bg-transparent py-0.5 text-[12.5px] text-[var(--text-primary)] shadow-none outline-none placeholder:text-[var(--text-disabled)]"
           />
         </div>
       </div>
