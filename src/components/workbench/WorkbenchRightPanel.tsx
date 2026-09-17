@@ -15,6 +15,9 @@ import { HabitWidget } from './widgets/HabitWidget'
 import { PomoWidget } from './widgets/PomoWidget'
 import { PasswordWidget } from './widgets/PasswordWidget'
 import { NavWidget } from './widgets/NavWidget'
+import { AiUsagePanel } from './AiUsagePanel'
+import { ChatBody } from '../shared/AssistantPanel/ChatBody'
+import { useAssistantChat } from '../shared/AssistantPanel/useAssistantChat'
 import type { PluginTool } from '../../lib/pluginService'
 
 /**
@@ -34,7 +37,9 @@ import type { PluginTool } from '../../lib/pluginService'
  * **脱离互斥（方案 §3.7）**：DayPanel 四控件整体脱离为独立窗口（dayPanelDetached）时，
  * 对应槽位显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
  *
- * **AI 态**：本批次只落双 Tab 骨架与占位；aiChat 标签 + ⤢ + token 面板 = 批次5（方案 §4/§8）。
+ * **AI 态（批次5，方案 §4）**：小对话（ChatBody docked，会话基建与悬浮侧栏同体）⇄ token 面板
+ * （AiUsagePanel）双形态——aiChat 中间标签打开期间右栏原位变 token 面板，关闭标签自动变回小对话。
+ * ⤢ = 打开 aiChat 标签（App 传 onExpandAiChat）。
  */
 
 const REL_MS = 7 * 24 * 60 * 60 * 1000
@@ -69,6 +74,12 @@ interface Props {
   onOpenPage: (pageId: string) => void
   /** 今日任务控件「打开日程模块」 */
   onOpenSchedule: () => void
+  /** aiChat 中间标签是否已打开（开 = 右栏 AI 态显示 token 面板；关 = 小对话） */
+  aiChatOpen?: boolean
+  /** ⤢：打开 aiChat 中间标签（宽版对话） */
+  onExpandAiChat?: () => void
+  /** token 面板「改动文件」行点击 → 编辑区打开 */
+  onOpenChangeFile?: (relPath: string) => void
 }
 
 /** 切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
@@ -82,7 +93,7 @@ const WIDGET_META: Record<string, { icon: string; label: string }> = {
   nav: { icon: '🌐', label: '网址导航' },
 }
 
-export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule }: Props) {
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -96,6 +107,11 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
   )
   const effectiveTab = visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0]
   const setPanelTab = (id: 'widgets' | 'ai') => patch({ rightTab: id })
+
+  // AI 态对话控制器（批次5）：与悬浮侧栏 / aiChat 标签共用 ChatBody 会话基建。
+  // 实例常驻（右栏折叠/隐藏只是宽度变化，组件不卸载，输入草稿与会话视角不丢）；
+  // 「激活」= AI Tab 可见且未扩大为 aiChat 标签（扩大期间显示 token 面板，无需对话刷新）
+  const aiChat = useAssistantChat({ active: effectiveTab === 'ai' && !aiChatOpen })
   const togglePanelTabVisibility = (id: (typeof WORKBENCH_PANEL_TAB_IDS)[number], show: boolean) => {
     const next = show
       ? layout.panelTabsHidden.filter((k) => k !== id)
@@ -352,12 +368,17 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
             </div>
           </div>
         ) : (
-          /* ---- AI 态：批次5 接入 aiChat 标签 + ⤢ + token 面板（方案 §4）；本批次落骨架占位 ---- */
-          <div data-wb="aiPlaceholder" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 pb-10 text-[var(--text-muted)]">
-            <Bot size={22} strokeWidth={1.4} />
-            <span className="text-[12px]">AI 助手</span>
-            <span className="text-[11px]">对话面板接入中</span>
-          </div>
+          /* ---- AI 态（批次5，方案 §4）：aiChat 标签开着 → token 面板原位替换；否则小对话 + ⤢ ---- */
+          aiChatOpen && onOpenChangeFile ? (
+            <AiUsagePanel onOpenChangeFile={onOpenChangeFile} />
+          ) : (
+            <ChatBody
+              chat={aiChat}
+              variant="docked"
+              active={effectiveTab === 'ai' && !aiChatOpen}
+              onExpand={onExpandAiChat}
+            />
+          )
         )}
       </div>
 

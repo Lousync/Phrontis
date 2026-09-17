@@ -258,6 +258,9 @@ const api = {
   agentSessions: () => ipcRenderer.invoke('agent:sessions'),
   agentNewSession: (title?: string, source?: string) => ipcRenderer.invoke('agent:newSession', title, source),
   agentMessages: (sessionId: string) => ipcRenderer.invoke('agent:messages', sessionId),
+  // AI 用量 / 会话文件改动（v3.4.0 批次5）：右栏 token 面板只读
+  agentUsageGet: () => ipcRenderer.invoke('agent:usage:get'),
+  agentSessionChanges: (sessionId?: string) => ipcRenderer.invoke('agent:sessionChanges:get', sessionId),
   agentRenameSession: (id: string, title: string) => ipcRenderer.invoke('agent:renameSession', id, title),
   agentSetSessionInstructions: (id: string, instructions: string) => ipcRenderer.invoke('agent:setSessionInstructions', id, instructions),
   agentDeleteSession: (id: string) => ipcRenderer.invoke('agent:deleteSession', id),

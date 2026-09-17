@@ -1049,6 +1049,31 @@ export interface AgentChange {
   file?: string
 }
 
+// ---- AI 用量 / 会话文件改动（v3.4.0 批次5，右栏 token 面板数据源） ----
+
+/** 单日 token 用量聚合（主进程 agentUsage 的渲染层镜像） */
+export interface AiUsageDay {
+  in: number
+  out: number
+  cache: number
+  calls: number
+  /** 按会话分桶的当日消耗（title 为记账时快照） */
+  sessions: Record<string, { title: string; in: number; out: number }>
+}
+
+/** 会话内一次 AI 文件写改动的审计条目（右栏「改动文件」行） */
+export interface SessionFileChange {
+  sessionId: string
+  sessionTitle: string
+  tool: string
+  action: string
+  target: string
+  file?: string
+  /** M=修改 / A=新建 */
+  op: 'M' | 'A'
+  at: string
+}
+
 export interface AgentChatResult {
   ok: boolean
   sessionId?: string
@@ -1719,6 +1744,9 @@ export interface ElectronAPI {
   agentSessions: () => Promise<AgentSessionInfo[]>
   agentNewSession: (title?: string, source?: AgentSessionSource) => Promise<AgentSessionInfo>
   agentMessages: (sessionId: string) => Promise<AgentStoredMessage[]>
+  // ===== AI 用量 / 会话文件改动（v3.4.0 批次5，右栏 token 面板只读）=====
+  agentUsageGet: () => Promise<{ days: Record<string, AiUsageDay> }>
+  agentSessionChanges: (sessionId?: string) => Promise<SessionFileChange[]>
   agentRenameSession: (id: string, title: string) => Promise<boolean>
   agentSetSessionInstructions: (id: string, instructions: string) => Promise<{ ok: boolean; error?: string }>
   agentDeleteSession: (id: string) => Promise<boolean>

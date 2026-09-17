@@ -65,6 +65,7 @@ import { ImportModal } from './modules/shared/components/ImportModal'
 import { useCheckinReminder } from './lib/useCheckinReminder'
 import { installFileOpUndoShortcuts } from './lib/fileOpHistory'
 import { AssistantPanel } from './components/shared/AssistantPanel'
+import { AiChatTab } from './components/shared/AssistantPanel/ChatBody'
 import { DayPanelWindowApp } from './daypanel/DayPanelWindowApp'
 import { RootErrorBoundary } from './components/shared/RootErrorBoundary'
 import { ResizablePanel } from './components/shared/ResizablePanel'
@@ -1023,6 +1024,8 @@ export default function App() {
         />
       )
       case 'aiTeaching': return <AiTeachingModule isActive={on} zenLevel={zenLevel} onZenLevelChange={changeZen} pendingAsk={pendingAsk} onConsumePendingAsk={() => setPendingAsk(null)} />
+      // aiChat = AI 对话中间标签（v3.4.0 批次5，方案 §4）：右栏 AI 态点 ⤢ 进入，关标签自动回右栏小对话
+      case 'aiChat': return <AiChatTab active={on} />
       case 'recycle': return <RecycleBinModule isActive={on} />
       case 'settings': return <SettingsModule />
       case 'toolbox': return <ToolboxModule homeSignal={toolboxHomeSignal} />
@@ -1125,6 +1128,9 @@ export default function App() {
                   onOpenFile={(relPath) => { setPendingOpenRel(relPath); handleTabChange('editor') }}
                   onOpenPage={(pageId) => openKnowledgePageFromSearch(pageId)}
                   onOpenSchedule={() => handleTabChange('schedule')}
+                  aiChatOpen={openTabs.includes('aiChat')}
+                  onExpandAiChat={() => handleTabChange('aiChat')}
+                  onOpenChangeFile={(relPath) => { setPendingOpenRel(relPath); handleTabChange('editor') }}
                 />
               }
               center={

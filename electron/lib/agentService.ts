@@ -20,6 +20,7 @@ import { resolveSourcesForInjection } from './aiTeachingSources'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
 import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { findSkillPrompt } from './skillService'
+import { recordAiUsage, recordSessionFileChange, getAiUsageData, getSessionChanges } from './agentUsage'
 
 /**
  * 最小 AgentRunner —— 「用户消息 → LLM 决策 → ToolRegistry 执行 → 结果回喂」循环。
@@ -804,7 +805,17 @@ async function runAgentLoop(
     }
     trace.push(llmStep)
     stepEmitters.get(signal)?.(llmStep) // 实时过程：渲染层活动气泡
-    if (r.ok) runTokens += r.tokens
+    if (r.ok) {
+      runTokens += r.tokens
+      // token 用量记账（批次5，方案 §4）：每轮 LLM 一笔，按日落盘；会话分桶供「会话消耗 TOP」
+      recordAiUsage({
+        sessionId,
+        sessionTitle: getAgentSession(sessionId)?.title ?? '',
+        promptTokens: r.promptTokens,
+        completionTokens: r.completionTokens,
+        cachedTokens: r.cachedTokens,
+      })
+    }
     if (!r.ok) return { ok: false, sessionId, error: r.error, code: r.code, trace }
 
     if (!r.toolCalls || r.toolCalls.length === 0) {
@@ -877,7 +888,13 @@ async function runAgentLoop(
           // 参数里取不到可读目标时，回落到工具结果自带的标题（如 schedule.delete-todo
           // 只收 id，摘要里的 title 是唯一人能看懂的目标）—— 否则删除不会出现在「本次改动」清单里
           const target = vaultPath || String(args?.title ?? args?.date ?? args?.name ?? data?.title ?? '').trim().slice(0, 120)
-          if (target) changes.push({ tool: realName, action: label, target, ...(file ? { file } : {}) })
+          if (target) {
+            const change = { tool: realName, action: label, target, ...(file ? { file } : {}) }
+            changes.push(change)
+            // 会话文件改动审计（批次5，方案 §3.8）：仅 vault 内文件写（file 非空可直达编辑器），
+            // 内存按会话分桶，右栏 token 面板「改动文件」控件拉取
+            if (file) recordSessionFileChange(sessionId, change, getAgentSession(sessionId)?.title ?? '')
+          }
         }
       }
       // 单条结果超上限时截断为合法摘要（见 capToolResult 说明）
@@ -993,6 +1010,15 @@ async function runAgentLoop(
   const frStep: AgentTraceStep = { kind: 'llm', ok: fr.ok, durationMs: 0, tokens: fr.ok ? fr.tokens : undefined, summary: fr.ok ? '预算耗尽总结轮' : undefined }
   trace.push(frStep)
   stepEmitters.get(signal)?.(frStep)
+  if (fr.ok) {
+    recordAiUsage({
+      sessionId,
+      sessionTitle: getAgentSession(sessionId)?.title ?? '',
+      promptTokens: fr.promptTokens,
+      completionTokens: fr.completionTokens,
+      cachedTokens: fr.cachedTokens,
+    })
+  }
   if (fr.ok && fr.content.trim()) {
     const changesText = changes.length > 0
       ? '\n\n——\n本次改动：\n' + changes.map((c, idx) => `${idx + 1}. ${c.action}「${c.target}」`).join('\n')
@@ -1143,6 +1169,10 @@ export function registerAgentHandlers(): void {
       source === 'aiTeaching' ? 'aiTeaching' : 'assistant',
     )))
   ipcMain.handle('agent:messages', (_e, id: string) => getAgentMessages(String(id ?? '')).map(camelRow))
+  // AI 用量 / 会话文件改动（v3.4.0 批次5，方案 §4/§3.8）：右栏 token 面板只读
+  ipcMain.handle('agent:usage:get', () => getAiUsageData())
+  ipcMain.handle('agent:sessionChanges:get', (_e, sessionId?: string) =>
+    getSessionChanges(typeof sessionId === 'string' && sessionId ? sessionId : undefined))
   ipcMain.handle('agent:renameSession', (_e, id: string, title: string) => {
     if (typeof id === 'string' && typeof title === 'string' && title.trim()) renameAgentSession(id, title.trim())
     return true
