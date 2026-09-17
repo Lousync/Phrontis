@@ -1,10 +1,15 @@
 import type { TabName } from '../../types'
-import { Trash2, FlaskConical } from 'lucide-react'
+import { Trash2, FlaskConical, LayoutPanelLeft } from 'lucide-react'
 import { MomentsIcon, SettingsIcon, PluginIcon } from './ModuleIcons'
+import { WORKBENCH_TABBAR_EXCLUDED } from '../../lib/workbenchLayout'
 
 /**
- * 图标条（v3.4.0 工作台三栏外壳，方案 §3.4 / §10；2026-09-17 拍板变化：工具箱按钮撤掉，5 → 4）。
+ * 图标条（v3.4.0 工作台三栏外壳，方案 §3.4 / §10；2026-09-17 拍板变化：工具箱按钮撤掉，5 → 4；
+ * 同日 bug 修复轮：顶部补「工作台」按钮——整窗模块（回收站/插件/动态/设置等）激活时唯一的
+ * 「回工作台」入口（原右上角浮动按钮删除，见 App.tsx fullWindowTab 节））。
  *
+ * - **顶部工作台按钮**：工作台态（activeTab 为空或非整窗模块）高亮且点击无操作（入口幂等）；
+ *   整窗模块态点击 = 回工作台（目标标签由 App 决定：openTabs 最后文档标签 ?? editor）；
  * - **固定 4 按钮**：回收站 / 插件市场 / 动态 / 设置——不再提供拖拽排序与右键显隐
  *   （旧 `activityBarOrder` / `activityBarHidden` 设置键随之废弃，见方案 §3.5）；
  * - **工具箱入口移除**：原「🧰 打开为中间标签页」的入口语义由右栏上部「工具箱工具入口区」
@@ -26,11 +31,16 @@ interface Props {
   /** 当前激活模块；null = 全部标签已关闭的空态（无高亮项） */
   active: TabName | null
   onChange: (tab: TabName) => void
+  /** 点「工作台」按钮时回调（仅整窗模块态触发；工作台态按钮幂等无操作）。
+      目标标签由 App 决定——与被删除的右上角浮动按钮同一份语义（openTabs 最后文档标签 ?? editor） */
+  onWorkbench?: () => void
   /** UI 优化条目1：最大化时图标条卡去留白/圆角/边框阴影，贴满屏幕边缘 */
   flush?: boolean
 }
 
-export function ActivityBar({ active, onChange, flush }: Props) {
+export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
+  /** 工作台态 = 激活标签为空（全关空态）或非整窗平级模块（EXCLUDED 之外） */
+  const inWorkbench = active === null || !WORKBENCH_TABBAR_EXCLUDED.includes(active)
   // 尺寸对齐原型 v15（2026-09-16 第二轮 UI 反馈「图标条还是太粗」）：容器 44px、按钮 34×34、
   // 圆角 7px、图标 22px；激活指示条 3×18px，left -5px 贴容器左缘（(44-34)/2 = 5px）。
   const railCls = (isActive: boolean) => `
@@ -47,6 +57,17 @@ export function ActivityBar({ active, onChange, flush }: Props) {
     <div
       className={`w-11 flex flex-col items-center py-2 gap-0.5 shrink-0 select-none transition-all duration-300 ease-out bg-[color-mix(in_srgb,var(--activitybar-bg)_85%,transparent)] ${flush ? 'rounded-none' : 'mx-1.5 my-1.5 rounded-xl border border-[var(--border-color)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}
     >
+      {/* 工作台 —— 顶部第一按钮（VS Code 惯例：主视图入口在最上）。
+          工作台态高亮 + 点击无操作（入口幂等）；整窗模块态 = 唯一的「回工作台」入口 */}
+      <button
+        onClick={() => { if (!inWorkbench) onWorkbench?.() }}
+        title="工作台"
+        className={railCls(inWorkbench)}
+      >
+        {inWorkbench && railMark}
+        <LayoutPanelLeft size={22} />
+      </button>
+
       {RAIL_BUTTONS.map(({ id, label, icon }) => (
         <button
           key={id}

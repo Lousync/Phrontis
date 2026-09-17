@@ -120,8 +120,15 @@ async function main() {
   ok(fwLeftGone, 'D6b 回收站整窗形态：左栏隐藏（平级模块，非工作台子模块）')
   const fwTabbarGone = await evalJs(`!document.querySelector('[data-wb="tabbar"]')`)
   ok(fwTabbarGone, 'D6c 整窗形态下标签条隐藏')
-  // D6d 「工作台」返回钮 → 回到工作台（schedule 标签恢复显示）
-  await evalJs(`(() => { document.querySelector('button[title="返回工作台"]')?.click(); return true })()`)
+  // D6e 整窗形态下左右栏**连折叠边条一并退场**（2026-09-17 bug 修复轮）：
+  // 「拖拽或点击展开」边缘条 = ResizablePanel 折叠残留物，suppressSides 下不得存在
+  const fwEdgeGone = await evalJs(`!document.querySelector('[data-wb="shell"] [title="拖拽或点击展开"]')`)
+  ok(fwEdgeGone, 'D6e 整窗形态无残留折叠边条（标签条旁的「手柄」已清除）')
+  // D6d 图标条顶部「工作台」按钮 → 回到工作台（schedule 标签恢复显示）
+  //（2026-09-17 bug 修复轮：右上角浮动「返回工作台」钮删除，入口收敛到 ActivityBar 顶部）
+  const wbBtnThere = await evalJs(`!!document.querySelector('button[title="工作台"]')`)
+  ok(wbBtnThere, 'D6d-0 整窗态下图标条顶部有「工作台」按钮')
+  await evalJs(`(() => { document.querySelector('button[title="工作台"]')?.click(); return true })()`)
   await sleep(700)
   st = await evalJs(JS_TABS)
   ok(st.tabs.length === 1 && st.tabs[0]?.id === 'schedule' && st.tabs[0]?.active === '1',

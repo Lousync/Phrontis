@@ -1064,7 +1064,14 @@ export default function App() {
         <div className="flex flex-1 flex-col overflow-hidden">
         <div className="flex flex-1 overflow-hidden">
           {/* 活动栏两个收起来源：禅模式 Z2（隐壳）与布局菜单（用户显式隐藏），取并集 */}
-          {zenLevel < 2 && activityBarVisible && <ActivityBar active={activeTab} onChange={handleTabChange} flush={winMax} />}
+          {zenLevel < 2 && activityBarVisible && (
+            <ActivityBar
+              active={activeTab}
+              onChange={handleTabChange}
+              onWorkbench={() => handleTabChange(([...openTabs].reverse().find((t) => !isToolTabId(t)) ?? 'editor') as TabName)}
+              flush={winMax}
+            />
+          )}
 <main className="flex-1 flex overflow-hidden bg-transparent relative">
             {/* 工作台三栏外壳（v3.4.0 批次3）：左栏=书签双态（总览/模块侧栏/树模式+锁定+仓库切换） | 中间栏(卡片壳) | 右栏(占位，批次4 填控件)。
                 DayPanel 保持 main 层平级（批次4 迁入右栏）；aiTeaching 整窗形态隐藏左右栏（suppressSides，方案 §2） */}
@@ -1126,15 +1133,8 @@ export default function App() {
                   onReorder={handleReorder}
                 />
               )}
-              {fullWindowTab && (
-                <button
-                  onClick={() => handleTabChange(([...openTabs].reverse().find((t) => !isToolTabId(t)) ?? 'editor') as TabName)}
-                  title="返回工作台"
-                  className="kb-pop absolute right-3 top-2 z-30 flex items-center gap-1 rounded-full bg-[var(--accent)] px-3 py-1 text-[11.5px] text-white shadow-lg transition-opacity hover:opacity-90"
-                >
-                  工作台
-                </button>
-              )}
+              {/* 整窗模块的「回工作台」入口 = 图标条顶部「工作台」按钮（2026-09-17 bug 修复轮：
+                  原右上角浮动「工作台」按钮删除——入口统一收敛到 ActivityBar，避免同一功能两处入口） */}
               {/* 编辑器组（W3 · Editor Groups v1）：主栏 + 可选副栏，两栏模块互不相同。
                   v3.4.0 批次3：旧 R1-W1 全局侧栏槽（wbSidebarEl）已删除——editor 文件树与
                   knowledge/schedule/blog 侧栏统一由左栏模块态 slot（wbModSlotEl）portal 承接 */}

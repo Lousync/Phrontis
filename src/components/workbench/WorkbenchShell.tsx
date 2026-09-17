@@ -33,7 +33,8 @@ interface Props {
   onBackToOverview: () => void
   onOpenLooseFile: (relPath: string) => void
   onPluginBookmark: (tab: TabName) => void
-  /** AI教学整窗形态（方案 §2）：左右栏与唤起浮钮一并隐藏，中间栏独占 */
+  /** 整窗模块形态（方案 §2）：回收站/插件市场/动态/设置/aiTeaching/devtools 激活时中间栏独占——
+   *  左右栏**连折叠边条一并退场**（开合回调置空 → displayWidth=0，无残留手柄，见 sidesGone） */
   suppressSides?: boolean
   /** 最大化/禅模式 Z2：左右栏卡片随中间内容卡一起方角全屏化（第四轮拍板②） */
   maximized?: boolean
@@ -47,6 +48,12 @@ export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRe
     update('workbenchLayout', JSON.stringify({ ...layout, ...p }))
   }
 
+  /** 整窗模块（suppressSides）时左右栏**完全退场**：不仅内容不渲染（visible=false 原有语义），
+   *  开合回调一并置空——ResizablePanel 对「不可见但给了 onSnapOpen」会保留 collapsedWidth 的
+   *  折叠边条（悬停显蓝、可拖出展开），在整窗形态下残留成标签条旁边的「神秘手柄」（bug 修复轮）。
+   *  面板仍常驻挂载（width 状态无损），回工作台时无重新挂载闪动。 */
+  const sidesGone = suppressSides
+
   return (
     <div data-wb="shell" className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
       {/* ---- 左栏 ---- */}
@@ -56,12 +63,12 @@ export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRe
         defaultWidth={240}
         minWidth={180}
         maxWidth={420}
-        visible={!suppressSides && !layout.leftCollapsed}
-        collapsedWidth={6}
-        onSnapClose={() => patch({ leftCollapsed: true })}
-        onSnapOpen={() => patch({ leftCollapsed: false })}
-        onHandleClick={() => patch({ leftCollapsed: !layout.leftCollapsed })}
-        className={maximized ? 'rounded-none border-0' : 'm-1.5 rounded-xl border border-[var(--border-color)] shadow-sm'}
+        visible={!sidesGone && !layout.leftCollapsed}
+        collapsedWidth={sidesGone ? 0 : 6}
+        onSnapClose={sidesGone ? undefined : () => patch({ leftCollapsed: true })}
+        onSnapOpen={sidesGone ? undefined : () => patch({ leftCollapsed: false })}
+        onHandleClick={sidesGone ? undefined : () => patch({ leftCollapsed: !layout.leftCollapsed })}
+        className={sidesGone || maximized ? 'rounded-none border-0' : 'm-1.5 rounded-xl border border-[var(--border-color)] shadow-sm'}
       >
         <WorkbenchLeftPanel
           activeTab={activeTab}
@@ -90,16 +97,17 @@ export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRe
         defaultWidth={300}
         minWidth={240}
         maxWidth={420}
-        visible={!suppressSides && !layout.rightCollapsed}
-        collapsedWidth={6}
-        onSnapClose={() => patch({ rightCollapsed: true })}
-        onSnapOpen={() => patch({ rightCollapsed: false })}
-        onHandleClick={() => patch({ rightCollapsed: !layout.rightCollapsed })}
+        visible={!sidesGone && !layout.rightCollapsed}
+        collapsedWidth={sidesGone ? 0 : 6}
+        onSnapClose={sidesGone ? undefined : () => patch({ rightCollapsed: true })}
+        onSnapOpen={sidesGone ? undefined : () => patch({ rightCollapsed: false })}
+        onHandleClick={sidesGone ? undefined : () => patch({ rightCollapsed: !layout.rightCollapsed })}
       >
         {right}
       </ResizablePanel>
 
-      {/* 两栏收起后的开合 = 边缘 6px 手柄（悬停显形/单击开合，ResizablePanel 自带），不再放浮钮 */}
+      {/* 两栏收起后的开合 = 边缘 6px 手柄（悬停显形/单击开合，ResizablePanel 自带），不再放浮钮；
+          整窗模块态（sidesGone）该手柄不渲染 —— 残留即 bug，见上方 sidesGone 注释 */}
     </div>
   )
 }

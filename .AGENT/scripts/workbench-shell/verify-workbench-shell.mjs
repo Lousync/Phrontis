@@ -169,8 +169,8 @@ ok(/maximized/.test(srcShell) && /maximized=\{zenLevel >= 2 \|\| winMax\}/.test(
 ok(/const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED\.includes\(activeTab\)/.test(srcApp)
   && /suppressSides=\{fullWindowTab\}/.test(srcApp),
   'C20 EXCLUDED 平级模块激活 = 整窗独占（suppressSides 扩展）')
-ok(/\{fullWindowTab && \(/.test(srcApp) && /title="返回工作台"/.test(srcApp),
-  'C20b 整窗模块激活时显示「返回工作台」返回钮（返回 openTabs 最后工作台标签）')
+ok(/onWorkbench=/.test(srcApp) && /title="工作台"/.test(srcBar) && /onWorkbench\?\.\(\)/.test(srcBar),
+  'C20b 整窗模块的「回工作台」入口 = 图标条顶部工作台按钮（2026-09-17 bug 修复轮：右上角浮动钮删除，入口收敛 ActivityBar）')
 ok(/\[\.\.\.openTabs\]\.reverse\(\)\.find\(\(t\) => !isToolTabId\(t\)\)/.test(srcApp) || /openTabs\]\.reverse\(\)\.find/.test(srcApp),
   'C20c 「返回工作台」落点跳过工具标签（tool: 前缀不是工作台标签）')
 
