@@ -39,6 +39,16 @@ export interface WorkbenchLayout {
 export const WORKBENCH_WIDGET_IDS = ['task', 'habit', 'pomo', 'password', 'nav'] as const
 
 /**
+ * 右栏下段**切换条实际挂载的控件集**（2026-09-17 拍板：只留番茄钟）。
+ *
+ * 切换条与 ⋯ 选显菜单都只围绕本集合渲染（当前 = 1 项：番茄钟图标 + ⋯ 菜单里 1 条）。
+ * 其余控件组件仍在 widgets/ 下（DayPanel 脱离窗口继续用），**恢复某个控件 = 往本常量加 id**
+ * （渲染分支已按 5 个控件的条件渲染保留，加 id 即生效）。
+ * 注：widgetsHidden 里的历史 id 若不在本集合内会被自然忽略，无需迁移。
+ */
+export const RIGHT_PANEL_WIDGET_IDS: readonly string[] = ['pomo']
+
+/**
  * 源自 DayPanel 的四个控件 id（方案 §3.7 互斥判定用）：整体脱离为独立窗口
  * （dayPanelDetached）时，右栏这四槽显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
  * password 控件不在 DayPanel 内，不参与互斥。

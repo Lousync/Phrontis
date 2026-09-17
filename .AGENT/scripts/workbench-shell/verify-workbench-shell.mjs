@@ -213,9 +213,9 @@ for (const w of ['TaskWidget', 'HabitWidget', 'PomoWidget', 'NavWidget']) {
 ok(!/function taskRow/.test(srcDayPanel) && !/const renderTool\b/.test(srcDayPanel),
   'D4b DayPanel 不再内联任务行渲染（已下沉 TaskWidget）')
 ok(/TaskWidget/.test(srcRight) && /HabitWidget/.test(srcRight) && /PomoWidget/.test(srcRight) && /NavWidget/.test(srcRight) && /PasswordWidget/.test(srcRight),
-  'D4c 右栏简略视图渲染 5 控件（task/habit/pomo/password/nav）——切换条按原型保留')
+  'D4c 简略视图 5 控件的条件渲染分支保留（挂载集驱动，当前只命中番茄钟）')
 ok(/data-wb="widgetSwitch"/.test(srcRight) && /data-wb="wsBtn"/.test(srcRight) && /data-wb="widgetMenu"/.test(srcRight),
-  'D4c2 控件切换条 / ⋯ 选显菜单在册（2026-09-17 反馈轮曾误删，已按原型恢复）')
+  'D4c2 控件切换条 / ⋯ 选显菜单在册（形态保留，内容按挂载集收窄为番茄钟一项）')
 ok(/已在桌面/.test(srcRight) && /dayPanelDetached/.test(srcApp) && /data-wb="detachedStub"/.test(srcRight),
   'D4d 脱离互斥：DayPanel 系控件槽「已在桌面」置灰条目（方案 §3.7）')
 ok(!/dayPanelVisible/.test(srcApp), 'D4e 内嵌 DayPanel 面板已从主窗口摘除（右栏控件接管）')
@@ -228,7 +228,7 @@ for (const k of ['rightTab', 'widgetOrder', 'widgetsHidden', 'panelTabsHidden'])
 }
 ok(/handleWidgetDrop/.test(srcRight) && /widgetOrder: next/.test(srcRight),
   'D5b 控件切换条拖拽重排落 widgetOrder（HTML5 drag，TabBar 同款手法）')
-ok(/checkedIds/.test(srcRight) && /WORKBENCH_WIDGET_IDS\.filter\(\(id\) => !checkedIds\.includes\(id\)\)/.test(srcRight),
+ok(/checkedIds/.test(srcRight) && /RIGHT_PANEL_WIDGET_IDS\.filter\(\(id\) => !checkedIds\.includes\(id\)\)/.test(srcRight),
   'D5c 选显隐藏集从菜单 DOM 勾选状态推导（同一 tick 连续勾选不再互相覆盖）')
 
 /* ================= E. 右栏优化轮：布局权重 + 工具侧栏适配左栏（2026-09-17） ================= */
@@ -271,8 +271,12 @@ ok(/railTool=\{railTool\}/.test(srcApp) && /railTool\?/.test(srcShell) && /railM
   'E4d App → Shell → LeftPanel railTool 透传，模块态条件 = railModule || railTool')
 
 // E5 右栏下段：切换条（原型彩色图标）+ 番茄钟形态改造（2026-09-17）
-ok(!/RIGHT_PANEL_WIDGET_IDS/.test(srcWbl) && /WORKBENCH_WIDGET_IDS = \['task', 'habit', 'pomo', 'password', 'nav'\]/.test(srcWbl),
-  'E5 控件集回归 WORKBENCH_WIDGET_IDS 全 5 项（「只留番茄钟」的收窄已撤销）')
+ok(/RIGHT_PANEL_WIDGET_IDS: readonly string\[\] = \['pomo'\]/.test(srcWbl),
+  'E5 右栏切换条挂载集 = 只番茄钟（RIGHT_PANEL_WIDGET_IDS 单点真相源；恢复控件 = 往这里加 id）')
+ok(/RIGHT_PANEL_WIDGET_IDS\.filter/.test(srcRight) && /RIGHT_PANEL_WIDGET_IDS\.map/.test(srcRight),
+  'E5b 切换条渲染与 ⋯ 选显菜单**同一挂载集**（只列番茄钟一项，两处口径一致）')
+ok(/pomo: \{ icon: '⏰'/.test(srcRight) && /task: \{ icon: '✅'/.test(srcRight),
+  'E5b2 图标表保留原型彩色 emoji（当前只渲染 ⏰ 番茄钟，其余 4 项供恢复引用）')
 ok(/task: \{ icon: '✅'/.test(srcRight) && /pomo: \{ icon: '⏰'/.test(srcRight) && /nav: \{ icon: '🌐'/.test(srcRight),
   'E5b 切换条图标 = 原型彩色 emoji（✅ 今日任务 / 🔔 打卡 / ⏰ 番茄钟 / 🔑 密码 / 🌐 导航）')
 const srcPomo = stripComments(read('src/components/workbench/widgets/PomoWidget.tsx'))

@@ -6,7 +6,7 @@ import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
 import { useSettings } from '../../lib/SettingsContext'
 import {
-  parseWorkbenchLayout, DAY_PANEL_WIDGET_IDS, WORKBENCH_WIDGET_IDS, WORKBENCH_PANEL_TAB_IDS,
+  parseWorkbenchLayout, DAY_PANEL_WIDGET_IDS, RIGHT_PANEL_WIDGET_IDS, WORKBENCH_PANEL_TAB_IDS,
   type WorkbenchLayout,
 } from '../../lib/workbenchLayout'
 import { ToolLauncherZone } from './ToolLauncherZone'
@@ -27,9 +27,9 @@ import type { PluginTool } from '../../lib/pluginService'
  * **小工具态 = 上中下三段**：
  * - 上：🧰 工具箱工具入口区（ToolLauncherZone，方案 §10）；
  * - 中：🕘 最近编辑（常驻卡片，近 7 天最多 6 条；无记录显示空态文案）；
- * - 下：**控件切换条（原型 v16：一排彩色图标 + ⋯ 选显菜单 + 拖拽排序）+ 简略视图**
- *   （5 控件：今日任务 / 今日打卡 / 番茄钟 / 强密码生成器 / 网址导航，与 DayPanel 共用同一份组件）。
- *   2026-09-17 反馈轮：切换条曾被误删，已按原型恢复（彩色 emoji 图标）。
+ * - 下：**控件切换条**（原型 v16 形态：一排彩色图标 + ⋯ 选显菜单 + 拖拽排序）+ 简略视图。
+ *   2026-09-17 拍板：切换条与 ⋯ 菜单**都只挂番茄钟**（挂载集 = workbenchLayout.RIGHT_PANEL_WIDGET_IDS），
+ *   其余控件组件仍在 widgets/ 下由 DayPanel 消费；恢复某控件 = 往该常量加 id。
  *
  * **脱离互斥（方案 §3.7）**：DayPanel 四控件整体脱离为独立窗口（dayPanelDetached）时，
  * 对应槽位显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
@@ -71,8 +71,9 @@ interface Props {
   onOpenSchedule: () => void
 }
 
-/** 5 控件的切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
- *  图标 = 原型 v16 的彩色 emoji 语言（与左侧线性图标条区分：这一排是「控件切换」而非模块入口） */
+/** 切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
+ *  图标 = 原型 v16 的彩色 emoji 语言；当前只渲染 RIGHT_PANEL_WIDGET_IDS 内的项（仅番茄钟），
+ *  其余 4 项保留在此表里供恢复时直接引用 */
 const WIDGET_META: Record<string, { icon: string; label: string }> = {
   task: { icon: '✅', label: '今日任务' },
   habit: { icon: '🔔', label: '今日打卡' },
@@ -105,9 +106,10 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
     })
   }
 
-  // 控件区：排序（widgetOrder 拖拽）+ 选显（widgetsHidden）+ 激活控件
+  // 控件区：挂载集 = RIGHT_PANEL_WIDGET_IDS（当前仅番茄钟）∩ 未隐藏，顺序仍走 widgetOrder
+  //（排序语义保留：日后把控件加回挂载集，拖拽顺序即刻生效；当前 1 项时拖拽无感）
   const visibleWidgets = useMemo(
-    () => layout.widgetOrder.filter((id) => !layout.widgetsHidden.includes(id)),
+    () => layout.widgetOrder.filter((id) => RIGHT_PANEL_WIDGET_IDS.includes(id) && !layout.widgetsHidden.includes(id)),
     [layout.widgetOrder, layout.widgetsHidden],
   )
   const [activeWidget, setActiveWidget] = useState<string | null>(null)
@@ -145,7 +147,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
         .filter((el) => (el as HTMLInputElement).checked)
         .map((el) => (el as HTMLInputElement).dataset.wsWidgetId)
         .filter((x): x is string => !!x)
-      const hidden = WORKBENCH_WIDGET_IDS.filter((id) => !checkedIds.includes(id))
+      const hidden = RIGHT_PANEL_WIDGET_IDS.filter((id) => !checkedIds.includes(id))
       patch({ widgetsHidden: [...hidden] })
     }
     menu.addEventListener('change', onChange)
@@ -389,7 +391,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
           style={{ left: wsMenuPos.left, top: wsMenuPos.top }}
         >
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] tracking-wider text-[var(--text-muted)]">显示的小控件</div>
-          {WORKBENCH_WIDGET_IDS.map((id) => {
+          {RIGHT_PANEL_WIDGET_IDS.map((id) => {
             const meta = WIDGET_META[id]
             if (!meta) return null
             return (

@@ -208,44 +208,26 @@ async function main() {
   // D11-0 基线摆正：历史轮次可能落盘过 widgetsHidden（控件选显）→ 打开 ⋯ 菜单把 5 项全勾上。
   // 走 UI 而不写 settings（实测 setSetting('workbenchLayout','') 清空对渲染不生效），
   // 顺带验证菜单项的原生事件委托通道可用。
+  // D11-0 形态断言：⋯ 选显菜单只列番茄钟一项（与切换条同一挂载集）
   await evalJs(`(() => { document.querySelector('[data-wb="wsMore"]')?.click(); return true })()`)
   await sleep(400)
-  const menuTotal = await evalJs(`document.querySelectorAll('[data-wb="widgetMenu"] input[data-ws-widget-id]').length`)
-  ok(menuTotal === 5, 'D11-0 ⋯ 选显菜单列出 5 个控件（原型清单，原生委托可驱动）', 'total=' + menuTotal)
-  // 逐个勾上（逐个派发 change 并等重渲染；已验证菜单勾选链路本身能一轮勾完全部）
-  for (let i = 0; i < 6; i++) {
-    const turned = await evalJs(`(() => {
-      const off = [...document.querySelectorAll('[data-wb="widgetMenu"] input[data-ws-widget-id]')].filter((x) => !x.checked)
-      if (!off.length) return 0
-      off[0].checked = true
-      off[0].dispatchEvent(new Event('change', { bubbles: true }))
-      return 1
-    })()`)
-    if (!turned) break
-    await sleep(200)
-  }
-  await sleep(300)
+  const menuIds = await evalJs(`[...document.querySelectorAll('[data-wb="widgetMenu"] input[data-ws-widget-id]')].map((i) => i.dataset.wsWidgetId)`)
+  ok(menuIds.length === 1 && menuIds[0] === 'pomo', 'D11-0 ⋯ 选显菜单只列番茄钟（挂载集收窄）', JSON.stringify(menuIds))
   await evalJs(`(() => { document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); return true })()`)
   await sleep(300)
   const bar = await evalJs(`(() => {
     const btns = [...document.querySelectorAll('[data-wb="wsBtn"]')]
     return { n: btns.length, labels: btns.map((b) => b.getAttribute('title')), hasMore: !!document.querySelector('[data-wb="wsMore"]') }
   })()`)
-  ok(bar.n === 5 && bar.hasMore, 'D11b 控件切换条 = 5 个控件图标 + ⋯（原型形态，非空列表）', JSON.stringify(bar))
-  const firstActive = await evalJs(`document.querySelector('[data-wb="wsBtn"][data-ws-widget="task"]')?.className.includes('bg-[var(--bg-hover)]') ?? false`)
-  const briefIsTask = await evalJs(`(() => {
-    const el = document.querySelector('[data-wb="widgetBrief"]')
-    return !!el && el.textContent.includes('今天')
-  })()`)
-  ok(firstActive && briefIsTask, 'D11b2 默认激活首个控件（今日任务），简略视图随动', `active=${firstActive} task=${briefIsTask}`)
+  ok(bar.n === 1 && bar.labels[0] === '番茄钟' && bar.hasMore, 'D11b 切换条 = 番茄钟一个图标 + ⋯（形态保留、内容收窄）', JSON.stringify(bar))
+  const firstActive = await evalJs(`document.querySelector('[data-wb="wsBtn"][data-ws-widget="pomo"]')?.className.includes('bg-[var(--bg-hover)]') ?? false`)
+  const briefIsPomo = await evalJs(`!!document.querySelector('[data-wb="widgetBrief"] [data-wb="pomoMain"]')`)
+  ok(firstActive && briefIsPomo, 'D11b2 默认激活番茄钟，简略视图随动', `active=${firstActive} pomo=${briefIsPomo}`)
   const subGone = await evalJs(`(() => {
     const el = document.querySelector('[data-wb="widgetBrief"]')
     return !!el && !el.textContent.includes('与工具箱同源')
   })()`)
   ok(subGone, 'D11c 简略视图内无「与工具箱同源」副说明')
-  // 切到番茄钟（第 3 个图标）→ 就绪态无环
-  await evalJs(`(() => { document.querySelector('[data-wb="wsBtn"][data-ws-widget="pomo"]')?.click(); return true })()`)
-  await sleep(600)
   const titleGone = await evalJs(`(() => {
     const el = document.querySelector('[data-wb="widgetBrief"]')
     return !!el && !el.textContent.includes('番茄钟')
