@@ -110,11 +110,22 @@ async function main() {
   ok(st.tabs.length === 1 && st.tabs[0]?.id === 'schedule' && st.tabs[0]?.active === '1',
     'D5 空态后点书签恢复', JSON.stringify(st.tabs))
 
-  // D6 图标条功能不登记为标签（第四轮拍板②）：点回收站 → openTabs 不变
+  // D6 图标条功能 = 与工作台平级的模块（第五轮拍板修正）：点回收站 → 整窗独占
+  //（左栏与标签条隐藏，同 aiTeaching），不产生标签
   await evalJs(`(() => { document.querySelector('button[title="回收站"]')?.click(); return true })()`)
-  await sleep(600)
+  await sleep(700)
   st = await evalJs(JS_TABS)
-  ok(st.tabs.length === 1 && st.tabs[0]?.id === 'schedule', 'D6 图标条功能不产生标签', JSON.stringify(st.tabs))
+  ok(st.tabs.length === 0, 'D6 回收站整窗：无标签可见（不产生标签，标签条整体隐藏）', JSON.stringify(st.tabs))
+  const fwLeftGone = await evalJs(`!document.querySelector('[data-wb="leftPanel"]')`)
+  ok(fwLeftGone, 'D6b 回收站整窗形态：左栏隐藏（平级模块，非工作台子模块）')
+  const fwTabbarGone = await evalJs(`!document.querySelector('[data-wb="tabbar"]')`)
+  ok(fwTabbarGone, 'D6c 整窗形态下标签条隐藏')
+  // D6d 「工作台」返回钮 → 回到工作台（schedule 标签恢复显示）
+  await evalJs(`(() => { document.querySelector('button[title="返回工作台"]')?.click(); return true })()`)
+  await sleep(700)
+  st = await evalJs(JS_TABS)
+  ok(st.tabs.length === 1 && st.tabs[0]?.id === 'schedule' && st.tabs[0]?.active === '1',
+    'D6d 返回工作台 → schedule 标签恢复', JSON.stringify(st.tabs))
 
   // D7 vaultBar 只在总览态显示（第四轮拍板④）：模块态无、返回总览后有
   const modVb = await evalJs(`!!document.querySelector('[data-wb="vaultBar"]')`)

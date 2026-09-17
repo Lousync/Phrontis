@@ -160,6 +160,13 @@ ok(/QUIZ_FOCUS_BOOK_EVENT/.test(srcWbl) && /bookmarksHidden/.test(srcWbl),
 ok(/maximized/.test(srcShell) && /maximized=\{zenLevel >= 2 \|\| winMax\}/.test(srcApp),
   'C19 左右栏卡片随最大化方角化（maximized 透传，第四轮拍板②）')
 
+// C20 整窗模块（第五轮拍板修正）：EXCLUDED 平级模块激活时整窗独占（同 aiTeaching），不再呈现为工作台子模块
+ok(/const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED\.includes\(activeTab\)/.test(srcApp)
+  && /suppressSides=\{fullWindowTab\}/.test(srcApp),
+  'C20 EXCLUDED 平级模块激活 = 整窗独占（suppressSides 扩展）')
+ok(/\{fullWindowTab && \(/.test(srcApp) && /title="返回工作台"/.test(srcApp),
+  'C20b 整窗模块激活时显示「返回工作台」返回钮（返回 openTabs 最后工作台标签）')
+
 console.log('\n========================================')
 if (fails.length === 0) {
   console.log(`✅ 全部通过：${pass} 项断言 PASS`)

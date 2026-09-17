@@ -853,6 +853,11 @@ export default function App() {
 
   if (!loaded) return null
 
+  /** 整窗模块（2026-09-17 第五轮拍板修正）：回收站/插件市场/工具箱/动态/设置与 aiTeaching/devtools
+      一样**与工作台平级**——激活时整窗独占（左右栏与标签条隐藏，见 suppressSides），
+      不再呈现为「工作台内的子模块」；EXCLUDED 同时承担「不登记为标签页」的过滤。 */
+  const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)
+
   /** 模块内容（主栏/副栏共用；on = 该模块当前在屏幕某栏激活） */
   function renderModuleContent(name: TabName, on: boolean): React.ReactNode {
     switch (name) {
@@ -925,7 +930,7 @@ export default function App() {
               onBackToOverview={handleBackToOverview}
               onOpenLooseFile={handleOpenLooseFile}
               onPluginBookmark={handleTabChange}
-              suppressSides={activeTab === 'aiTeaching'}
+              suppressSides={fullWindowTab}
               maximized={zenLevel >= 2 || winMax}
               right={
                 <div className="flex h-full flex-col p-1.5">
@@ -943,8 +948,8 @@ export default function App() {
               <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden transition-all duration-300 ease-out ${zenLevel >= 2 || winMax ? 'bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)]' : 'rounded-xl border border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-primary)_88%,transparent)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}>
               {/* 顶部标签条（v3.4.0 方案 §3.2；2026-09-17 第三轮反馈拍板定稿）：文档标签式动态
                   标签（openTabs，可关闭/拖拽重排/全关空态），模块按钮不上标签栏——模块由书签 /
-                  图标条入口打开。aiTeaching 整窗形态隐藏（方案 §2）；EXCLUDED 不画成标签 */}
-              {activeTab !== 'aiTeaching' && (
+                  图标条入口打开。整窗模块（EXCLUDED 平级模块）激活时整条隐藏（同 aiTeaching，方案 §2） */}
+              {!fullWindowTab && (
                 <WorkbenchTabBar
                   tabs={openTabs.filter((t) => !WORKBENCH_TABBAR_EXCLUDED.includes(t))}
                   active={activeTab}
@@ -953,9 +958,9 @@ export default function App() {
                   onReorder={handleReorder}
                 />
               )}
-              {activeTab === 'aiTeaching' && (
+              {fullWindowTab && (
                 <button
-                  onClick={() => handleTabChange([...openTabs].reverse().find((t) => t !== 'aiTeaching') ?? 'editor')}
+                  onClick={() => handleTabChange([...openTabs].reverse()[0] ?? 'editor')}
                   title="返回工作台"
                   className="kb-pop absolute right-3 top-2 z-30 flex items-center gap-1 rounded-full bg-[var(--accent)] px-3 py-1 text-[11.5px] text-white shadow-lg transition-opacity hover:opacity-90"
                 >
