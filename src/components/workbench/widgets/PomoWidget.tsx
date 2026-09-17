@@ -21,7 +21,14 @@ const RING_CIRC = 2 * Math.PI * RING_R
  * 与主窗口工具箱共用同一 PomodoroContext 状态机（嵌入式同窗口天然联通），
  * 脱离窗口由主进程广播快照（pomodoroStatus），PomodoroPopoutPanel 仅脱离态使用。
  */
-export function PomoWidget() {
+interface PomoWidgetProps {
+  /** 宿主已自带卡片容器（如右栏下段控件卡）时置 true：本组件不再画自己的卡片/内边距，
+   *  只渲染内容 —— 避免「卡中卡」多层嵌套（2026-09-17 反馈：番茄钟看着套了好几层）。
+   *  DayPanel 嵌入态不传（那里需要组件自带卡片外观）。 */
+  frameless?: boolean
+}
+
+export function PomoWidget({ frameless = false }: PomoWidgetProps) {
   const pom = usePomodoro()
   const { state: ps } = pom
 
@@ -60,7 +67,13 @@ export function PomoWidget() {
 
   return (
     <div className="w-full space-y-3">
-      <div className="flex flex-col items-center gap-2.5 rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] px-3 pb-3.5 pt-4">
+      <div
+        className={
+          frameless
+            ? 'flex flex-col items-center gap-2.5'
+            : 'flex flex-col items-center gap-2.5 rounded-2xl border border-[var(--border-color)] bg-[var(--card-bg)] px-3 pb-3.5 pt-4'
+        }
+      >
         <span
           className="rounded-full px-2.5 py-0.5 text-[10.5px] tracking-[2px]"
           style={{ color: phaseColor, backgroundColor: `color-mix(in srgb, ${phaseColor} 14%, transparent)` }}

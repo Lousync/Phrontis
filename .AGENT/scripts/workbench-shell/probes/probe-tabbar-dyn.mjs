@@ -233,6 +233,39 @@ async function main() {
   await evalJs(`(() => { document.querySelector('[data-wb="pomoReset"]')?.click(); return true })()`)
   await sleep(400)
 
+  // D12 底层 UI 统一（2026-09-17 第三轮反馈）：右栏外壳对齐左栏 + 番茄钟层级收敛 + 标题图标
+  const align = await evalJs(`(() => {
+    const shell = document.querySelector('[data-wb="shell"]')
+    const kids = shell ? [...shell.children] : []
+    const l = kids[0], r = kids[kids.length - 1]
+    if (!l || !r) return null
+    const pick = (el) => { const c = getComputedStyle(el); return c.margin + '|' + c.borderTopLeftRadius + '|' + c.borderTopWidth + '|' + c.backgroundColor }
+    return { left: pick(l), right: pick(r) }
+  })()`)
+  ok(!!align && align.left === align.right, 'D12 右栏外壳与左栏同款卡片（margin/圆角/边框/底色逐项一致）', JSON.stringify(align))
+  const layers = await evalJs(`(() => {
+    const btn = document.querySelector('[data-wb="pomoMain"]')
+    if (!btn) return -1
+    let n = 0, el = btn
+    while (el && el !== document.body) {
+      const c = getComputedStyle(el)
+      if (parseFloat(c.borderTopWidth) > 0 && parseFloat(c.borderTopLeftRadius) > 0) n++
+      el = el.parentElement
+    }
+    return n
+  })()`)
+  ok(layers === 2, 'D12b 番茄钟只余两层带边框容器（外壳卡 + 下段容器；卡中卡已消除）', 'layers=' + layers)
+  const briefTone = await evalJs(`getComputedStyle(document.querySelector('[data-wb="widgetBrief"]')).backgroundColor`)
+  const cardTone = await evalJs(`getComputedStyle(document.querySelector('[data-wb="shell"] > div:last-child')).backgroundColor`)
+  ok(briefTone !== cardTone, 'D12c 下段内容层与外壳卡底色分层（bg-primary vs bg-secondary）', briefTone + ' vs ' + cardTone)
+  const titleIcon = await evalJs(`(() => {
+    const el = document.querySelector('[data-wb="widgetBrief"]')
+    if (!el) return ''
+    const row = [...el.querySelectorAll('div')].find((d) => d.textContent.trim() === '番茄钟')
+    return row ? String(!!row.querySelector('svg')) : 'no-row'
+  })()`)
+  ok(titleIcon === 'true', 'D12d 下段标题行有番茄钟图标（Timer + 文字）', `svg=${titleIcon}`)
+
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)
   for (const r of results) console.log(`${r.pass ? '✓' : '✗'} ${r.label}${r.detail ? '  → ' + r.detail : ''}`)

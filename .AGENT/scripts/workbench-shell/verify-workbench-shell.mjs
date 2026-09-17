@@ -286,6 +286,19 @@ ok(/与工具箱同源/.test(srcRight) === false && /WIDGET_META/.test(srcRight)
 ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col/.test(srcRight.replace(/\n/g, ' ')) && /m-auto w-full/.test(srcRight),
   'E5g 简略视图内容垂直居中（m-auto：上下留白均匀，超高时归零顶部起滚不被裁）')
 
+// E6 底层 UI 统一（2026-09-17 第三轮反馈）：右栏外壳对齐左栏 + 番茄钟层级收敛
+ok(/side="right"[\s\S]{0,700}?className=\{sidesGone \|\| maximized \? 'rounded-none border-0' : 'm-1\.5 rounded-xl border border-\[var\(--border-color\)\] shadow-sm'\}/.test(srcShell),
+  'E6 右栏外壳 = 左栏同款卡片（m-1.5 + rounded-xl + border + shadow-sm，卡片装饰由外壳承担）')
+ok(/data-wb="rightPanel"[\s\S]{0,150}?className="flex min-h-0 flex-1 flex-col overflow-hidden"/.test(srcRight),
+  'E6b 右栏内层不再重复画卡片（去 border/bg/圆角/shadow，仅作布局容器）')
+ok(!/maximized/.test(srcRight), 'E6c 右栏组件的 maximized prop 随卡片下移外壳而退役')
+ok(/<PomoWidget frameless \/>/.test(srcRight) && /frameless\?: boolean/.test(srcPomo),
+  'E6d 番茄钟在右栏走 frameless（不再画自带卡片，消除卡中卡）')
+ok(/<Timer size=\{12\}[^]*?番茄钟/.test(srcRight.replace(/\n/g, ' ')),
+  'E6e 下段标题行恢复番茄钟图标（Timer + 文字，与左栏书签行同款语言）')
+ok(/data-wb="widgetBrief"[\s\S]{0,220}?rounded-lg border border-\[var\(--border-color\)\] bg-\[var\(--bg-primary\)\]/.test(srcRight),
+  'E6f 下段容器 = bg-primary 内容层（与外壳 bg-secondary 形成层次；原四层嵌套合并为两层）')
+
 console.log('\n========================================')
 if (fails.length === 0) {
   console.log(`✅ 全部通过：${pass} 项断言 PASS`)

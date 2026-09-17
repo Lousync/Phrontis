@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Puzzle, Bot, MoreHorizontal, History, FileText, MonitorX } from 'lucide-react'
+import { Puzzle, Bot, MoreHorizontal, History, FileText, MonitorX, Timer } from 'lucide-react'
 import type { KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
@@ -51,8 +51,6 @@ function relTime(iso: string): string {
 }
 
 interface Props {
-  /** 最大化/禅模式 Z2：右栏卡片方角全屏化（第四轮拍板②，与左右内容卡同条件） */
-  maximized?: boolean
   /** DayPanel 整体脱离为独立窗口中（DayPanel 系控件互斥显示「已在桌面」） */
   dayPanelDetached?: boolean
   /** 收回脱离窗口回嵌右栏（互斥条目点击 / 快捷键同语义） */
@@ -67,7 +65,7 @@ interface Props {
   onOpenPage: (pageId: string) => void
 }
 
-export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage }: Props) {
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -132,10 +130,12 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
   }
 
   return (
-    <div className="flex h-full flex-col p-1.5">
+    <div className="flex h-full flex-col">
+      {/* 卡片外观由外壳 ResizablePanel 承担（2026-09-17 反馈：与左栏完全同款
+          m-1.5 + rounded-xl + border + shadow-sm）——本层只作布局容器，不再重复画边框/底色/圆角 */}
       <div
         data-wb="rightPanel"
-        className={`flex min-h-0 flex-1 flex-col overflow-hidden border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-sm ${maximized ? 'rounded-none border-0' : 'rounded-xl'}`}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
         {/* ---- 双 Tab 头（🧩 小工具 / 🤖 AI）+ ⋯ 面板 Tab 管理 ---- */}
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-2">
@@ -178,33 +178,34 @@ export function WorkbenchRightPanel({ maximized = false, dayPanelDetached = fals
             {/* 下段：控件切换条（可拖拽排序 + ⋯ 选显）+ 简略视图。
                 2026-09-17 右栏优化轮：下段改为 flex-1 吃满中段让出的空间——中段「最近编辑」
                 收缩为自适应高度后，控件简略视图拿到最大可用高度（常规内容量全部显示无滚动） */}
-            <div className="mx-2.5 mb-2.5 flex min-h-0 flex-1 flex-col rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
-              {/* 简略视图（2026-09-17 右栏优化轮：原固定 h-[196px] 改 flex-1 吃满下段剩余——
-                  内容少时整窗显示完不滚动；条目特别多时在此高度内滚动（自适应+上限）。
-                  内容垂直居中（m-auto）：番茄钟这类内容量小的控件不再「贴顶 + 底部一大片空白」，
-                  上下留白均匀；内容超高时 auto margin 归零，从顶部开始正常滚动不被裁。
-                  第二轮拍板：下段只挂番茄钟——切换条 / ⋯ 控件选显菜单 / 拖拽排序全下线
-                  （控件集见 workbenchLayout.RIGHT_PANEL_WIDGET_IDS）；
-                  DayPanel 脱离中 → 「已在桌面」互斥条目） */}
-              <div data-wb="widgetBrief" className="kb-view-fade m-2 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] p-2.5">
-                {dayPanelDetached ? (
-                  <button
-                    data-wb="detachedStub"
-                    onClick={onDockDayPanel}
-                    className="m-auto flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                    title="番茄钟已脱离为独立桌面窗口，点击收回右栏"
-                  >
-                    <MonitorX size={16} />
-                    <span className="text-[11.5px]">已在桌面</span>
-                    <span className="text-[10.5px]">点击收回右栏</span>
-                  </button>
-                ) : (
-                  <div className="m-auto w-full">
-                    <div className="mb-1.5 px-0.5 text-[11.5px] font-semibold text-[var(--text-secondary)]">番茄钟</div>
-                    <PomoWidget />
+            {/* 下段：番茄钟简略视图（2026-09-17 右栏优化轮第二轮拍板：只留番茄钟）。
+                层级：外壳卡片(bg-secondary) → 本容器(bg-primary，兼作滚动容器) → 番茄钟内容(frameless)
+                —— 原来的「下段卡 + widgetBrief + 番茄钟自带卡」四层嵌套已合并，消除卡中卡
+                （数据-wb=widgetBrief 保留在本容器上，探针/脚本断言口径不变） */}
+            <div
+              data-wb="widgetBrief"
+              className="kb-view-fade mx-2.5 mb-2.5 flex min-h-0 flex-1 flex-col overflow-y-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] p-2.5"
+            >
+              {dayPanelDetached ? (
+                <button
+                  data-wb="detachedStub"
+                  onClick={onDockDayPanel}
+                  className="m-auto flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-[var(--border-color)] text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                  title="番茄钟已脱离为独立桌面窗口，点击收回右栏"
+                >
+                  <MonitorX size={16} />
+                  <span className="text-[11.5px]">已在桌面</span>
+                  <span className="text-[10.5px]">点击收回右栏</span>
+                </button>
+              ) : (
+                <div className="m-auto w-full">
+                  <div className="mb-2 flex items-center gap-1.5 px-0.5 text-[11.5px] font-semibold text-[var(--text-secondary)]">
+                    <Timer size={12} className="text-[var(--text-muted)]" />
+                    番茄钟
                   </div>
-                )}
-              </div>
+                  <PomoWidget frameless />
+                </div>
+              )}
             </div>
           </div>
         ) : (
@@ -270,7 +271,7 @@ function RecentEdited({ onOpenFile, onOpenPage }: { onOpenFile: (relPath: string
   if (recent.length === 0) return null
 
   return (
-    <div data-wb="recentEdited" className="mx-2.5 mt-2 flex shrink-0 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+    <div data-wb="recentEdited" className="mx-2.5 mt-2 flex shrink-0 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)]">
       <div className="flex shrink-0 items-center gap-1.5 px-2.5 pb-1 pt-2 text-[11.5px] font-semibold text-[var(--text-secondary)]">
         <History size={12} className="text-[var(--text-muted)]" />
         最近编辑

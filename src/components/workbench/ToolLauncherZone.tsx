@@ -125,8 +125,10 @@ export function ToolLauncherZone({ onOpenTool, onOpenPluginTool }: Props) {
     )
   }
 
+  // 底色口径（2026-09-17 右栏对齐左栏）：外壳卡 = bg-secondary，三段内容层 = bg-primary + 细边框，
+  // 层次由底色差承担；原「段与外卡同色、只靠边框区分」看着像同色面板叠在卡上
   return (
-    <div data-wb="toolsZone" className="mx-2.5 mt-2.5 shrink-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2">
+    <div data-wb="toolsZone" className="mx-2.5 mt-2.5 shrink-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] p-2">
       {/* 标题行 */}
       <div className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[11.5px] font-semibold text-[var(--text-secondary)]">
         <Wrench size={12} className="text-[var(--text-muted)]" />

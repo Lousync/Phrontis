@@ -1118,7 +1118,6 @@ export default function App() {
               maximized={zenLevel >= 2 || winMax}
               right={
                 <WorkbenchRightPanel
-                  maximized={zenLevel >= 2 || winMax}
                   dayPanelDetached={dayPanelDetached}
                   onDockDayPanel={() => { void window.api?.dayPanelDockBack?.() }}
                   onOpenTool={handleOpenTool}
