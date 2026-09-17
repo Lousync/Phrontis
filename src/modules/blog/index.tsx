@@ -36,8 +36,8 @@ export type BlogJump =
   | { kind: 'date'; date: string }
   | { kind: 'summary'; summaryKind: SummaryKind; start: string; end: string }
 
-export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, blogJump = null, onBlogJumpConsumed, sidebarEl = null }: {
-  showLineNumbers?: boolean; sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; blogJump?: BlogJump | null; onBlogJumpConsumed?: () => void; sidebarEl?: HTMLElement | null
+export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, blogJump = null, onBlogJumpConsumed, sidebarEl = null, sidebarHosted = false }: {
+  showLineNumbers?: boolean; sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; blogJump?: BlogJump | null; onBlogJumpConsumed?: () => void; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean
 }) {
   const { s } = useSettings()
   const [view, setView] = useState<BlogView>('list')
@@ -357,7 +357,9 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
         )
         return sidebarEl
           ? createPortal(sidebarOpen && !showOutline ? sidebarInner : null, sidebarEl)
-          : (
+          : sidebarHosted
+            ? null // Workbench 托管但槽未就绪（左栏收起/翻转瞬间）：渲染 null 等槽重挂后 portal，绝不回落内嵌列（同 editor 口径）
+            : (
               <ResizablePanel storageKey="sidebarWidth_blog" defaultWidth={256} minWidth={200} maxWidth={320} visible={sidebarOpen && !showOutline} initialWidth={sidebarWidths.sidebarWidth_blog} onSnapClose={onSnapCloseSidebar} onSnapOpen={onSnapOpenSidebar}>
                 {sidebarInner}
               </ResizablePanel>

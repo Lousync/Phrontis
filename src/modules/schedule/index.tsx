@@ -76,7 +76,7 @@ function localToday(): string {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
 }
 
-export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, sidebarEl = null }: { isActive?: boolean; sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; sidebarEl?: HTMLElement | null }) {
+export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, sidebarEl = null, sidebarHosted = false }: { isActive?: boolean; sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean }) {
   const now = new Date()
   const today = localToday()
 
@@ -700,7 +700,9 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
         )
         return sidebarEl
           ? createPortal(sidebarOpen ? sidebarInner : null, sidebarEl)
-          : (
+          : sidebarHosted
+            ? null // Workbench 托管但槽未就绪（左栏收起/翻转瞬间）：渲染 null 等槽重挂后 portal，绝不回落内嵌列（同 editor 口径）
+            : (
               <ResizablePanel storageKey="sidebarWidth_schedule" defaultWidth={280} minWidth={220} maxWidth={450} visible={sidebarOpen} initialWidth={sidebarWidths.sidebarWidth_schedule} onSnapClose={onSnapCloseSidebar} onSnapOpen={onSnapOpenSidebar}>
                 {sidebarInner}
               </ResizablePanel>
