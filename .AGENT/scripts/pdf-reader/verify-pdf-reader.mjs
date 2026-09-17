@@ -120,7 +120,7 @@ if (statSync(layoutPath, { throwIfNoEntry: false })?.isFile?.()) {
   check('resolveDegrade(1240,duo)=duo', L.resolveDegrade(1240, 'duo') === 'duo')
   check('resolveDegrade(800,scroll)=scroll', L.resolveDegrade(800, 'scroll') === 'scroll')
   // 估高：按首页宽高比 × 容器宽
-  check('estimatePageHeight(800,600,800)=800', L.estimatePageHeight(800, 600, 800) === 800)
+  check('estimatePageHeight(800,600,800)=600', L.estimatePageHeight(800, 600, 800) === 600)
   check('estimatePageHeight(600,900,600)=900', L.estimatePageHeight(600, 900, 600) === 900)
   check('estimatePageHeight 零宽兜底 ≥1', L.estimatePageHeight(0, 0, 800) >= 1)
 } else {
