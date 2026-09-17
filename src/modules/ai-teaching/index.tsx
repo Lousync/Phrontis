@@ -365,7 +365,12 @@ const srcGroupKey = (t: string): string => (['pdf', 'pptx', 'docx', 'url', 'code
 /** 折叠缓动：快出缓停无回弹（方案 §3 定稿曲线） */
 const SRC_EASE = 'ease-[cubic-bezier(0.22,0.68,0.32,1)]'
 
-export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: { isActive?: boolean; zenLevel?: number; onZenLevelChange?: (n: number) => void }) {
+export interface PendingAsk {
+  question: string
+  source?: { type: string; relPath: string; page: number; excerpt: string }
+}
+
+export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pendingAsk = null, onConsumePendingAsk }: { isActive?: boolean; zenLevel?: number; onZenLevelChange?: (n: number) => void; pendingAsk?: PendingAsk | null; onConsumePendingAsk?: () => void }) {
   const [sessions, setSessions] = useState<AgentSessionInfo[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [activeTitle, setActiveTitle] = useState('')
@@ -1025,6 +1030,24 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange }: {
     setMidView('chat'); setQuizOpen(false); setLastQuizReport(null) // P7 复位
     void refreshSessions()
   }, [refreshSessions, loadConstraints, activeWs, refreshWorkspaces])
+
+  // ---------- v3.4.0 PDF 划词入口（pdf-reader 方案 §6）：pendingAsk（state+props 范式）----------
+  // 新建会话 → 首条用户消息 = 划词上下文模板（书名/页码/选段 + 意图指令）。
+  // 只加入口，不碰会话内部结构；出题由 AI 走既有 quiz 围栏闭环（题号重排在落盘侧保证）。
+  useEffect(() => {
+    if (!pendingAsk?.question) return
+    const q = pendingAsk.question
+    onConsumePendingAsk?.()
+    void (async () => {
+      const row = await agentNewSession('PDF 划词', 'aiTeaching').catch(() => null)
+      if (!row) { showToast({ type: 'warning', message: '新建会话失败，请手动新建后重试' }); return }
+      if (activeWs && activeWs !== '__none__') await aiTeachAssignSession(row.id, activeWs).catch(() => null)
+      setActiveId(row.id); setActiveTitle(row.title); activeIdRef.current = row.id
+      setMessages([]); setLastChanges(null); setMidView('chat'); setQuizOpen(false); setArtTabs([]); setArtActive(null)
+      await sendText(q, crypto.randomUUID())
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAsk])
 
   // ---------- v3.1.2 条目7：会话准备态交互 ----------
   /** 准备态草稿变更 → 同步 state + 防抖落 nav.prep.draft（切走切回还原的关键） */

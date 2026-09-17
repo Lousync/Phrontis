@@ -5,7 +5,7 @@ import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { QuizMode } from '../../../components/shared/QuizMode'
 import { extractQuizzes } from '../../../components/shared/QuizParser'
 import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem, SimilarPageHit } from '../../../types'
-import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, readAttachmentBase64, readAttachmentBase64ByFileName, getKnowledgeSimilarPages } from '../../../lib/ipc'
+import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, getKnowledgeSimilarPages } from '../../../lib/ipc'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
 import { uploadImageFile, insertImageAtCursor, isImageFile, IMAGE_OWNER } from '../../../lib/editorImage'
@@ -15,7 +15,6 @@ import { getGlobalActiveTab } from '../../../lib/activeTab'
 import { visibleKnowledgeTags } from '../../../lib/knowledgeTags'
 import { ConfirmDialog } from '../../../components/shared'
 import { ResizablePanel } from '../../../components/shared/ResizablePanel'
-import { PdfViewer } from './PdfViewer'
 import { WelcomeHtmlView } from './WelcomeHtmlView'
 import { FileMetaCard } from './FileMetaCard'
 import Editor, { type OnMount } from '@monaco-editor/react'
@@ -145,18 +144,16 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   useEffect(() => { vaultModeRef.current = vaultMode }, [vaultMode])
 
   const [attachmentsPath, setAttachmentsPath] = useState('')
-  const [pdfBase64, setPdfBase64] = useState('')
-  // PDF 阅读方式: builtin=内置阅读器, external=本地工具打开
-  const [pdfReaderMode, setPdfReaderMode] = useState<'builtin' | 'external'>('builtin')
-  const pdfReaderModeRef = useRef<'builtin' | 'external'>('builtin')
+  // v3.4.0 PDF 整包批次 7：「内置阅读」（base64 整本渲染的旧内嵌查看器）退役 → 跳编辑器新阅读器；
+  // 「本地打开」保留。旧版 userData 附件无仓库路径，跳转不可达时提示走本地打开。
+  const openPdfInReader = useCallback(() => {
+    const rel = page?.path
+    if (!rel) { showToast({ type: 'warning', message: '旧版附件不在仓库内，无法在阅读器打开，请用「本地打开」' }); return }
+    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: rel, from: 'knowledge' } }))
+  }, [page])
 
   useEffect(() => {
     getAttachmentsPath().then(setAttachmentsPath).catch(() => {})
-    getSetting('pdfReaderMode').then(v => {
-      const mode = v === 'external' ? 'external' : 'builtin'
-      setPdfReaderMode(mode)
-      pdfReaderModeRef.current = mode
-    })
   }, [])
 
   // 用本地工具打开 PDF
@@ -168,32 +165,6 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     if (!filePath && page) filePath = `${attachmentsPath}\\${page.contentMd}`
     if (filePath) openExternal(filePath)
   }, [page, attachmentsPath])
-
-  const switchPdfReaderMode = useCallback((mode: 'builtin' | 'external') => {
-    setPdfReaderMode(mode)
-    pdfReaderModeRef.current = mode
-    setSetting('pdfReaderMode', mode)
-  }, [])
-
-  // PDF 页面：读取附件内容供内置阅读器渲染
-  useEffect(() => {
-    setPdfBase64('')
-    if (!page || page.fileType !== 'pdf') return
-    let cancelled = false
-    const load = async () => {
-      let data: string | null = null
-      if (page.attachmentId) {
-        data = await readAttachmentBase64(page.attachmentId)
-      }
-      if (!data) {
-        // 旧版附件（无 attachment_id，contentMd 存的是文件名）
-        data = await readAttachmentBase64ByFileName(page.contentMd)
-      }
-      if (!cancelled && data) setPdfBase64(data)
-    }
-    load().catch(e => console.error('[PageEditor] load pdf base64 failed:', e))
-    return () => { cancelled = true }
-  }, [page?.id, page?.attachmentId, page?.fileType, page?.contentMd])
 
   const loadPage = useCallback(() => {
     Promise.all([
@@ -842,18 +813,18 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           <div className="flex flex-col flex-1 overflow-hidden">
             <div className="flex items-center gap-2 px-2 py-1 border-b border-[var(--border-color)] shrink-0">
               <span className="flex-1 truncate text-[12px] font-medium text-[var(--text-primary)] min-w-0">{title || 'PDF 文档'}</span>
-              {/* 阅读方式切换 */}
+              {/* v3.4.0 批次 7：内置 base64 阅读器退役 —— 在阅读器打开 = 跳编辑器 PdfReaderView v2；本地打开保留 */}
               <div className="flex items-center gap-0.5 shrink-0">
                 <button
-                  onClick={() => switchPdfReaderMode('builtin')}
-                  className={`px-2 py-1 text-[11px] rounded transition-colors ${pdfReaderMode === 'builtin' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-                  title="使用内置阅读器（在应用内阅读）"
+                  onClick={openPdfInReader}
+                  className="px-2 py-1 text-[11px] rounded transition-colors text-[var(--secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  title="在编辑器阅读器中打开（续读/三模式/划词 AI）"
                 >
-                  内置阅读
+                  在阅读器打开
                 </button>
                 <button
-                  onClick={() => switchPdfReaderMode('external')}
-                  className={`px-2 py-1 text-[11px] rounded transition-colors ${pdfReaderMode === 'external' ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                  onClick={openPdfExternal}
+                  className="px-2 py-1 text-[11px] rounded transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                   title="使用本地工具打开"
                 >
                   本地打开
@@ -861,31 +832,15 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               </div>
             </div>
 
-            {pdfReaderMode === 'builtin' ? (
-              pdfBase64 ? (
-                <PdfViewer base64={pdfBase64} title={title || 'PDF 文档'} />
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--text-secondary)]">
-                  <FileText size={64} className="opacity-20" />
-                  <p className="text-sm">正在加载 PDF…</p>
-                  <button onClick={openPdfExternal}
-                    className="flex items-center gap-2 px-4 py-2 text-[13px] bg-[var(--accent)] text-white rounded hover:bg-[var(--accent-hover)] transition-colors">
-                    <ExternalLink size={15} />
-                    使用本地工具打开
-                  </button>
-                </div>
-              )
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--text-secondary)]">
-                <FileText size={64} className="opacity-20" />
-                <p className="text-sm">PDF 文档将使用本地工具打开</p>
-                <button onClick={openPdfExternal}
-                    className="flex items-center gap-2 px-4 py-2 text-[13px] bg-[var(--accent)] text-white rounded hover:bg-[var(--accent-hover)] transition-colors">
-                  <ExternalLink size={15} />
-                  使用本地工具打开
-                </button>
-              </div>
-            )}
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--text-secondary)]">
+              <FileText size={64} className="opacity-20" />
+              <p className="text-sm">点击「在阅读器打开」继续阅读，或使用本地工具打开</p>
+              <button onClick={openPdfExternal}
+                  className="flex items-center gap-2 px-4 py-2 text-[13px] bg-[var(--accent)] text-white rounded hover:bg-[var(--accent-hover)] transition-colors">
+                <ExternalLink size={15} />
+                使用本地工具打开
+              </button>
+            </div>
           </div>
         ) : isWelcomeHtml && page?.path ? (
           <WelcomeHtmlView path={page.path} />

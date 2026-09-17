@@ -194,6 +194,40 @@ function scanVaultFiles(root: string, dir: string, out: string[], warnings?: str
 }
 
 /**
+ * v3.4.0 书架「自动库」：扫当前仓库全部 .pdf（方案 pdf-reader-v340-design §1.4）。
+ * 复用 scanVaultFiles 的全类型出口 —— 系统区跳过 / .ignore 剪枝 / 符号链接跳过全部继承，
+ * 零新过滤逻辑（.ignore 只在 scanVaultFiles 一处生效的既有口径）。
+ * 只读不建索引：返回 posix relPath + size + mtimeMs，书架清单不落盘。
+ */
+export function scanVaultPdfs(): Array<{ relPath: string; size: number; mtimeMs: number }> {
+  const current = getCurrentVault()
+  if (!current) return []
+  const files: string[] = []
+  try {
+    const ignoreResult = getVaultIgnore()
+    scanVaultFiles(current.rootPath, current.rootPath, files, undefined, ignoreResult.ign, undefined)
+  } catch {
+    return []
+  }
+  const out: Array<{ relPath: string; size: number; mtimeMs: number }> = []
+  for (const abs of files) {
+    if (!abs.toLowerCase().endsWith('.pdf')) continue
+    try {
+      const st = statSync(abs)
+      if (!st.isFile()) continue
+      out.push({
+        relPath: relative(current.rootPath, abs).replace(/\\/g, '/'),
+        size: st.size,
+        mtimeMs: st.mtimeMs,
+      })
+    } catch {
+      /* 单个不可读跳过 */
+    }
+  }
+  return out
+}
+
+/**
  * 读取分类树。兼容两种落盘格式：
  *  - dict（迁移器产物）: { "<uuid>": { id,name,type,parent,sortOrder,...,path } }
  *  - array（早期/其它写入路径）: [{ id,name,categoryType,parentId,... }]
