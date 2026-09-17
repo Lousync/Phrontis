@@ -3,6 +3,7 @@ import { agentAbort, agentChat, agentCreateSideLane, agentDeleteSession, agentMe
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
+import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
 import { showToast } from '../../lib/toast'
 import type { AgentStoredMessage, AgentTraceStep } from '../../types'
 import { ArrowUp, Check, ChevronDown, Copy, Loader2, Maximize2, Minimize2, Sparkles, X } from 'lucide-react'
@@ -66,6 +67,7 @@ interface PanelMsg {
 }
 
 export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, openLaneId, onClose, onToggleWide, onLaneReady, onPromote, wide, titleDrag }: SideLanePanelProps) {
+  const shell = useInputShell()
   const chatIdRef = useRef('')
   const { draft: streamDraft, begin: beginStream, end: endStream } = useAgentStream(chatIdRef)
 
@@ -310,7 +312,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
 
       {/* 输入区 */}
       <div className="shrink-0 w-full max-w-[820px] mx-auto px-2.5 pb-2.5 pt-2">
-        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60 transition-colors">
+        <div className={`px-3 pt-2.5 pb-2 ${shell.wrap}`}>
           <textarea
             ref={inputRef}
             value={input}
@@ -322,7 +324,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
             rows={2}
             spellCheck={false}
             placeholder="就这一点追问…（Enter 发送 · Shift+Enter 换行）"
-            className="w-full resize-none rounded-none border-0 bg-transparent px-0.5 py-1 text-[12.5px] leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none max-h-32"
+            className="w-full resize-none appearance-none px-0.5 py-1 text-[12.5px] leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none max-h-32 bg-transparent! border-0! rounded-none!"
             disabled={stopped}
           />
           <div className="flex items-center gap-2 mt-0.5">

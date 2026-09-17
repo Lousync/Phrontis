@@ -1,16 +1,17 @@
 import type { TabName } from '../../types'
-import { Trash2, FlaskConical, LayoutPanelLeft } from 'lucide-react'
+import { Trash2, FlaskConical, LayoutPanelLeft, GraduationCap } from 'lucide-react'
 import { MomentsIcon, SettingsIcon, PluginIcon } from './ModuleIcons'
 import { WORKBENCH_TABBAR_EXCLUDED } from '../../lib/workbenchLayout'
 
 /**
  * 图标条（v3.4.0 工作台三栏外壳，方案 §3.4 / §10；2026-09-17 拍板变化：工具箱按钮撤掉，5 → 4；
- * 同日 bug 修复轮：顶部补「工作台」按钮——整窗模块（回收站/插件/动态/设置等）激活时唯一的
- * 「回工作台」入口（原右上角浮动按钮删除，见 App.tsx fullWindowTab 节））。
+ * 同日 bug 修复轮：顶部补「工作台」按钮；批次5 反馈轮（21:xx 拍板）：**AI 教学入口回归图标条**
+ * （用户侧边 tab 上没有 AI 教学区入口）——排在工作台之下第一位，整窗独占语义不变）。
  *
  * - **顶部工作台按钮**：工作台态（activeTab 为空或非整窗模块）高亮且点击无操作（入口幂等）；
  *   整窗模块态点击 = 回工作台（目标标签由 App 决定：openTabs 最后文档标签 ?? editor）；
- * - **固定 4 按钮**：回收站 / 插件市场 / 动态 / 设置——不再提供拖拽排序与右键显隐
+ * - **AI 教学**：整窗独占模块（EXCLUDED 内），激活时中间栏 + 标签条整体让位；
+ * - **固定按钮**：AI 教学 / 回收站 / 插件市场 / 动态 / 设置——不再提供拖拽排序与右键显隐
  *   （旧 `activityBarOrder` / `activityBarHidden` 设置键随之废弃，见方案 §3.5）；
  * - **工具箱入口移除**：原「🧰 打开为中间标签页」的入口语义由右栏上部「工具箱工具入口区」
  *   承接（方案 §10，ToolLauncherZone），工具箱模块本身保留（命令面板/深链仍可达）；
@@ -22,6 +23,7 @@ import { WORKBENCH_TABBAR_EXCLUDED } from '../../lib/workbenchLayout'
  */
 
 const RAIL_BUTTONS: { id: TabName; label: string; icon: (size: number) => React.ReactNode }[] = [
+  { id: 'aiTeaching', label: 'AI 教学', icon: (s) => <GraduationCap size={s} /> },
   { id: 'recycle', label: '回收站', icon: (s) => <Trash2 size={s} /> },
   { id: 'plugins', label: '插件市场', icon: (s) => <PluginIcon size={s} /> },
   { id: 'moments', label: '动态', icon: (s) => <MomentsIcon size={s} /> },

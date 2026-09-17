@@ -28,6 +28,7 @@ import { registerSelectionAskHost } from '../../lib/assistantContext'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
+import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
 import { WebSourceDialog } from './components/WebSourceDialog'
 import { SideLanePanel } from './SideLanePanel'
 import { AI_TEXT_CODE_EXT_SET } from '../../lib/aiTextExts'
@@ -371,6 +372,8 @@ export interface PendingAsk {
 }
 
 export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pendingAsk = null, onConsumePendingAsk }: { isActive?: boolean; zenLevel?: number; onZenLevelChange?: (n: number) => void; pendingAsk?: PendingAsk | null; onConsumePendingAsk?: () => void }) {
+  // 输入卡外壳（v3.4.0 反馈轮：与 AI 助手共用 inputShells，设置 → 外观统一切换）
+  const shell = useInputShell()
   const [sessions, setSessions] = useState<AgentSessionInfo[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [activeTitle, setActiveTitle] = useState('')
@@ -3135,7 +3138,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); startPreparedChat() } }}
                         rows={3}
                         placeholder={prepTemplate.startPrompt}
-                        className="w-full px-2.5 py-2 bg-transparent text-[12.5px] leading-[1.7] resize-none outline-none text-[var(--text-primary)]" />
+                        className="w-full px-2.5 py-2 appearance-none bg-transparent! border-0! rounded-none! text-[12.5px] leading-[1.7] resize-none outline-none text-[var(--text-primary)]" />
                       <div className="flex items-center gap-2 px-2.5 pb-2.5">
                         <span className="flex-1 min-w-0 truncate text-[11px] text-[var(--text-muted)]">首条消息已按场景模板预填，可自由编辑</span>
                         <button onClick={startPreparedChat} disabled={!input.trim() || pending || compressing}
@@ -3248,7 +3251,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 {composerFooter}
                 </>
                 ) : (
-                  <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60">
+                  <div className={`px-3 pt-2.5 pb-2 ${shell.wrap}`}>
                     {quotes.length > 0 && (
                       <div className="mb-1.5">
                         {/* 引用胶囊（会话引用形式）：不展示全文只报条数，点开管理；× 一键全清 */}
@@ -3303,7 +3306,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       <textarea ref={inputRef} spellCheck={false} value={input} onChange={e => { setInput(e.target.value); setSlashActive(0) }}
                         onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void doSend() } }}
                         rows={2} placeholder={quotes.length > 0 ? '针对引用内容提问…（Enter 发送）' : '粘贴资料或输入指令…（Enter 发送，/ 唤起指令）'}
-                        className="w-full px-0.5 py-1 rounded-none border-0 bg-transparent text-[13px] resize-none outline-none" />
+                        className="w-full appearance-none px-0.5 py-1 text-[13px] resize-none outline-none bg-transparent! border-0! rounded-none!" />
                     </div>
                     {composerFooter}
                   </div>

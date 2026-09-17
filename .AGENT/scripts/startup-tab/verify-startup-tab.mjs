@@ -133,10 +133,10 @@ const railIds = (() => {
   return m ? [...m[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((x) => x[1]) : null
 })()
 if (railIds === null) {
-  ok(false, 'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 3 项（回收站/插件市场/动态）', '抠不到 RAIL_BUTTONS（结构变了，脚本要跟着改）')
+  ok(false, 'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 4 项（AI教学/回收站/插件市场/动态）', '抠不到 RAIL_BUTTONS（结构变了，脚本要跟着改）')
 } else {
-  ok(railIds.join(',') === 'recycle,plugins,moments',
-    'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 3 项（回收站/插件市场/动态，工具箱撤到右栏入口区）', `实际 ${railIds.join(',')}`)
+  ok(railIds.join(',') === 'aiTeaching,recycle,plugins,moments',
+    'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 4 项（AI 教学入口回归 + 回收站/插件市场/动态）', `实际 ${railIds.join(',')}`)
 }
 ok(/title="设置"/.test(srcBar), 'C1b 图标条底部设置按钮存在（直开设置标签页）')
 checkCover('C2 设置页 STARTUP_ICONS 覆盖全部可启动模块', keysOfRecord(srcAppear, 'STARTUP_ICONS'), STARTABLE_MODULE_IDS)
