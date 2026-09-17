@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowLeft, Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, Lock,
-  LockOpen, NotebookPen, Library, Trees,
+  LockOpen, NotebookPen, Library, Trees, Bot,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { useSettings } from '../../lib/SettingsContext'
@@ -29,6 +29,8 @@ const BOOKMARK_ICONS: Record<RailModule, (size: number) => React.ReactNode> = {
   bookshelf: (s) => <BookOpen size={s} />,
   blog: (s) => <NotebookPen size={s} />,
   quiz: (s) => <FileQuestion size={s} />,
+  // aiChat 不是书签，此条目仅满足 Record 全量约束，不被书签区渲染消费
+  aiChat: (s) => <Bot size={s} />,
 }
 
 /** 插件注册书签的钝解析：只收 tab 型 action，坏条目/坏 JSON 静默丢弃（插件数据不可信外壳） */

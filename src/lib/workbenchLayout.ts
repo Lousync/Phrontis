@@ -129,8 +129,10 @@ export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'dev
  * 左栏书签模块（v3.4.0 方案 §3.3 映射表，原型 v15 定稿 6 项）。
  * quiz（错题本）不占独立 TabName：打开 = `openTab('knowledge')` + `kb-locate-quiz-view`
  * 事件定位到模块内「错题本 / 收藏」视图；左栏模块态复用 knowledge 侧栏（错题本按空间分区）。
+ * aiChat（2026-09-17 批次5 反馈轮）不占书签：aiChat 标签激活时左栏经 RAIL_FOLLOW_MAP
+ * 原位切「AI 会话侧栏」（会话列表/会话大纲 + 底部文件改动），返回/锁定复用模块态头部。
  */
-export type RailModule = 'editor' | 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz'
+export type RailModule = 'editor' | 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat'
 
 export interface WorkbenchBookmark {
   key: RailModule
@@ -161,6 +163,8 @@ export const BOOKMARK_COLORS: Readonly<Record<RailModule, BookmarkColor>> = {
   bookshelf: { fg: '#35975c', bg: 'rgba(63,174,106,.15)' },
   blog: { fg: '#9157d6', bg: 'rgba(160,107,224,.15)' },
   quiz: { fg: '#c94f4f', bg: 'rgba(217,91,91,.14)' },
+  // aiChat 不是书签（不进书签区/选显菜单），此色仅满足 Record 全量约束，不被渲染消费
+  aiChat: { fg: '#8b7ec8', bg: 'rgba(139,126,200,.14)' },
 }
 
 /**
@@ -174,6 +178,8 @@ export const RAIL_FOLLOW_MAP: Readonly<Partial<Record<TabName, RailModule>>> = {
   schedule: 'schedule',
   bookshelf: 'bookshelf',
   blog: 'blog',
+  // aiChat 标签激活 → 左栏切 AI 会话侧栏（批次5 反馈轮：会话列表/会话大纲 + 文件改动）
+  aiChat: 'aiChat',
 }
 
 /**

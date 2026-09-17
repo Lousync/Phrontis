@@ -152,7 +152,7 @@ export function MessageList({
     >
       {messages.length === 0 && !pending && emptyHint}
       {messages.map((m, i) => (
-        <div key={m.id ?? `live-${i}`} className="group/msg">
+        <div key={m.id ?? `live-${i}`} data-msg-id={m.id ?? undefined} className="group/msg">
           {m.role === 'assistant' ? (
             <div className="mr-6 px-3 py-2 rounded-lg text-[12px] leading-relaxed break-words select-text cursor-text bg-[var(--bg-secondary)] border border-[var(--border-color)] [&_.prose-content>:first-child]:mt-0 [&_.prose-content>:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_table]:block [&_table]:overflow-x-auto">
               <MarkdownPreview content={m.content} />

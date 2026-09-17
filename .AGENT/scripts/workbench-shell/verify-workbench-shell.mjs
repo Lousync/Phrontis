@@ -64,8 +64,8 @@ ok(WORKBENCH_BOOKMARKS.every((b) => isTabName(b.tab)), 'A4 每个书签的 tab �
 const quiz = WORKBENCH_BOOKMARKS.find((b) => b.key === 'quiz')
 ok(quiz?.tab === 'knowledge', 'A5 错题本书签 = knowledge 标签（不占独立 TabName，方案 §3.3）', `实际 ${quiz?.tab}`)
 const followValues = Object.values(RAIL_FOLLOW_MAP)
-ok(followValues.every((v) => ['editor', 'knowledge', 'schedule', 'bookshelf', 'blog'].includes(v)),
-  'A6 跟随映射的值域合法（quiz 不由标签触发，不进映射）')
+ok(followValues.every((v) => ['editor', 'knowledge', 'schedule', 'bookshelf', 'blog', 'aiChat'].includes(v)),
+  'A6 跟随映射的值域合法（quiz 不由标签触发，不进映射；aiChat 批次5 反馈轮入映射）')
 for (const k of ['editor', 'knowledge', 'schedule', 'bookshelf', 'blog']) {
   ok(RAIL_FOLLOW_MAP[k] === k, `A7 跟随映射 ${k} → 自身`)
 }

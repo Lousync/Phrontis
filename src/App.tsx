@@ -1024,8 +1024,9 @@ export default function App() {
         />
       )
       case 'aiTeaching': return <AiTeachingModule isActive={on} zenLevel={zenLevel} onZenLevelChange={changeZen} pendingAsk={pendingAsk} onConsumePendingAsk={() => setPendingAsk(null)} />
-      // aiChat = AI 对话中间标签（v3.4.0 批次5，方案 §4）：右栏 AI 态点 ⤢ 进入，关标签自动回右栏小对话
-      case 'aiChat': return <AiChatTab active={on} />
+      // aiChat = AI 对话中间标签（v3.4.0 批次5，方案 §4）：右栏 AI 态点 ⤢ 进入，关标签自动回右栏小对话。
+      // 激活时左栏经 RAIL_FOLLOW_MAP 切 aiChat 模块态——侧栏（会话列表/会话大纲）portal 进 slot
+      case 'aiChat': return <AiChatTab active={on} sidebarEl={on && railModule === 'aiChat' ? wbModSlotEl : null} />
       case 'recycle': return <RecycleBinModule isActive={on} />
       case 'settings': return <SettingsModule />
       case 'toolbox': return <ToolboxModule homeSignal={toolboxHomeSignal} />

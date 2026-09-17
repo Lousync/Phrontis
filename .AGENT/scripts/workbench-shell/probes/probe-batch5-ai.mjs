@@ -71,9 +71,11 @@ async function main() {
   const rpOpen = await evalJs(`!!document.querySelector('[data-wb="rightPanel"]')`)
   ok(rpOpen, 'A0 右栏展开')
 
-  // A1 右栏默认小工具态 → 切 AI Tab
+  // A1a 基线摆正：历史轮次可能落盘 rightTab='ai'（A1b 持久化）→ 先点 🧩 回小工具态再断言
+  await evalJs(`(() => { document.querySelector('[data-wb="rpTab"][data-wb-rp-tab="widgets"]')?.click(); return true })()`)
+  await sleep(500)
   const widgetsThere = await evalJs(`!!document.querySelector('[data-wb="toolsZone"]')`)
-  ok(widgetsThere, 'A1a 右栏默认小工具态（工具入口区在）')
+  ok(widgetsThere, 'A1a 右栏切回小工具态（工具入口区在）')
   await evalJs(`(() => { document.querySelector('[data-wb="rpTab"][data-wb-rp-tab="ai"]')?.click(); return true })()`)
   await sleep(800)
   const aiActive = await evalJs(`document.querySelector('[data-wb="rpTab"][data-wb-rp-tab="ai"]')?.dataset.wbRpActive`)
@@ -138,6 +140,41 @@ async function main() {
   await sleep(800)
   const again = await evalJs(`!!document.querySelector('[data-wb="aiUsagePanel"]')`)
   ok(again, 'A8 再次 ⤢ 幂等（token 面板重现）')
+
+  // ---- B 组：左栏 AI 会话侧栏（2026-09-17 反馈轮，drawio 简图排版）----
+  // B1 aiChat 激活 → 左栏经 RAIL_FOLLOW_MAP 切 aiChat 模块态
+  const modAi = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
+  ok(modAi === 'aiChat', 'B1 aiChat 激活 → 左栏模块态跟随（data-wb-mod=aiChat）', `mod=${modAi}`)
+  // B2 侧栏挂载：双 tab（会话列表/会话大纲）+ 新会话钮 + 底部文件改动卡
+  const side = await evalJs(`(() => {
+    const el = document.querySelector('[data-wb="aiChatSidebar"]')
+    const tabs = [...document.querySelectorAll('[data-wb="aiSideTab"]')].map((t) => t.dataset.wbAiSideTab)
+    return { there: !!el, tabs, hasNew: !!el?.querySelector('[data-wb="aiSideNew"]'), hasChanges: !!document.querySelector('[data-wb="aiSideChanges"]') }
+  })()`)
+  ok(side.there && side.tabs.join(',') === 'sessions,outline' && side.hasNew && side.hasChanges,
+    'B2 左栏 AI 侧栏挂载（双 tab + 新会话 + 文件改动卡）', JSON.stringify(side))
+  // B3 page 态对话区无抽屉入口（会话导航已移交左栏）
+  const pageDrawer = await evalJs(`!!document.querySelector('[data-assistant-variant="page"] button[title="会话列表"]')`)
+  ok(!pageDrawer, 'B3 page 态无抽屉按钮（导航交左栏）')
+  // B4 新建会话 → 大纲 tab 空态
+  await evalJs(`(() => { document.querySelector('[data-wb="aiSideNew"]')?.click(); return true })()`)
+  await sleep(700)
+  await evalJs(`(() => { document.querySelector('[data-wb="aiSideTab"][data-wb-ai-side-tab="outline"]')?.click(); return true })()`)
+  await sleep(300)
+  const outlineEmpty = await evalJs(`(() => {
+    const el = document.querySelector('[data-wb="aiChatSidebar"]')
+    return { empty: !!el && (el.textContent.includes('当前会话还没有消息') || el.textContent.includes('正在思考')), active: document.querySelector('[data-wb="aiSideTab"][data-wb-ai-side-tab="outline"]')?.dataset.wbAiSideActive }
+  })()`)
+  ok(outlineEmpty.empty && outlineEmpty.active === '1', 'B4 新会话 + 大纲 tab 空态提示', JSON.stringify(outlineEmpty))
+  // B5 关 aiChat 标签 → 左栏跟随落点（aiChat 态退场）
+  await evalJs(`(() => {
+    const t = document.querySelector('[data-wb="tabbar"] [data-wb-tab="aiChat"]')
+    t?.querySelector('button[title="关闭标签页"]')?.click(); return true
+  })()`)
+  await sleep(800)
+  const modAfter = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
+  const sideGone = await evalJs(`!document.querySelector('[data-wb="aiChatSidebar"]')`)
+  ok(modAfter !== 'aiChat' && sideGone, 'B5 关标签 → 左栏跟随落点退出 aiChat 侧栏', `mod=${modAfter} sideGone=${sideGone}`)
 
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)

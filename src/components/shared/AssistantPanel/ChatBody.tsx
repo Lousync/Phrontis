@@ -1,4 +1,5 @@
 import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
   Loader2, Bot, X, Sparkles,
@@ -7,6 +8,7 @@ import { getAssistantContext } from '../../../lib/assistantContext'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
 import { MessageList, fmtTime } from './MessageList'
 import { useAssistantChat } from './useAssistantChat'
+import { AiChatSidebar } from './AiChatSidebar'
 import type { AssistantChatController } from './useAssistantChat'
 
 /**
@@ -32,6 +34,11 @@ interface ChatBodyProps {
   emptyHint?: ReactNode
   /** 输入容器顶部插槽（悬浮侧栏：划词引用胶囊） */
   inputTop?: ReactNode
+  /** 会话抽屉开关（默认开）。page 态传 false：会话导航交左栏 AI 会话侧栏（抽屉浮层
+      遮空态文字、与输入区层次割裂——2026-09-17 实机反馈拍板）；docked/悬浮侧栏保留 */
+  showDrawer?: boolean
+  /** 左栏 AI 会话侧栏 portal 目标（AiChatTab 专用；传入即挂侧栏） */
+  sidebarEl?: HTMLElement | null
 }
 
 /** 输入容器 padding 与最大宽（按形态） */
@@ -48,7 +55,7 @@ const LIST_WRAP: Record<AssistantBodyVariant, string> = {
   page: 'mx-auto w-full max-w-[860px]',
 }
 
-export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyHint, inputTop }: ChatBodyProps) {
+export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyHint, inputTop, showDrawer = true, sidebarEl }: ChatBodyProps) {
   const {
     sessions, providersOk, activeId, messages, input, setInput, inputRef, pending,
     liveSteps, draft, lastChanges, compressing, pickedSkill, setPickedSkill,
@@ -98,13 +105,16 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-assistant-variant={variant}>
-      {/* 轻头部（悬浮侧栏的头部在其外壳上）：抽屉 + 标题 + ⤢（仅窄版） */}
+      {/* 轻头部（悬浮侧栏的头部在其外壳上）：抽屉 + 标题 + ⤢（仅窄版）。
+          page 态 showDrawer=false：Menu 钮不渲染（会话导航在左栏 AI 会话侧栏） */}
       {variant !== 'sidebar' && (
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-2">
-          <button onClick={toggleDrawer} title="会话列表"
-            className={`p-1.5 rounded-md transition-colors ${drawerOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}>
-            <Menu size={14} />
-          </button>
+          {showDrawer && (
+            <button onClick={toggleDrawer} title="会话列表"
+              className={`p-1.5 rounded-md transition-colors ${drawerOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}>
+              <Menu size={14} />
+            </button>
+          )}
           <span className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
             <Sparkles size={13} className="text-[var(--accent)]" /> AI 助手
           </span>
@@ -125,14 +135,14 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
           <>
             {/* 抽屉容器：仅包住消息列表，不遮挡上下文徽章与输入框 */}
             <div className={`flex-1 min-h-0 relative ${LIST_WRAP[variant]}`}>
-              {/* 遮罩：点击空白处收起抽屉 */}
-              {drawerMounted && (
+              {/* 遮罩：点击空白处收起抽屉（page 态不渲染——showDrawer=false） */}
+              {showDrawer && drawerMounted && (
                 <div
                   className={`absolute inset-0 z-[5] bg-black/20 transition-opacity duration-200 ${drawerOpen ? 'opacity-100' : 'opacity-0'}`}
                   onClick={closeDrawer}
                 />
               )}
-              {drawerMounted && (
+              {showDrawer && drawerMounted && (
                 <div
                   className={`absolute inset-y-0 left-0 ${isNarrow ? 'w-48' : 'w-52'} z-10 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col transition-transform duration-200 ease-out ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}
                 >
@@ -307,8 +317,15 @@ function NoProviderHint({ onGoSettings }: { onGoSettings: () => void }) {
 }
 
 /** aiChat 中间标签的页面态宿主（v3.4.0 批次5）：自带会话控制器，App.tsx 槽位直接渲染本组件。
- *  display:none 保活期间 active=false（不刷新供应商/会话），切回标签自动恢复。 */
-export function AiChatTab({ active }: { active: boolean }) {
+ *  display:none 保活期间 active=false（不刷新供应商/会话），切回标签自动恢复。
+ *  会话导航不放对话区抽屉（实机反馈层次混乱）——sidebarEl 传入时把左栏 AI 会话侧栏
+ *  （AiChatSidebar：会话列表/会话大纲 + 底部文件改动）portal 进左栏模块态 slot。 */
+export function AiChatTab({ active, sidebarEl }: { active: boolean; sidebarEl?: HTMLElement | null }) {
   const chat = useAssistantChat({ active })
-  return <ChatBody chat={chat} variant="page" active={active} />
+  return (
+    <>
+      <ChatBody chat={chat} variant="page" active={active} showDrawer={false} />
+      {sidebarEl && <AiChatSidebar chat={chat} active={active} container={sidebarEl} />}
+    </>
+  )
 }
