@@ -1162,8 +1162,20 @@ export default function App() {
                       setEditorJumpFrom(null)
                       setActiveTab(null)
                       setActiveToolTab(id)
+                      // 重复点击已激活的工具标签也跟随左栏（跟随 effect 只认 state 变化，同值不触发）
+                      if (!wbLayout.leftLocked) {
+                        const tid = toolIdOfTab(id)
+                        setRailTool(TOOLS_WITH_SIDEBAR.has(tid) ? tid : null)
+                      }
                     } else {
-                      handleTabChange(id as TabName)
+                      const t = id as TabName
+                      handleTabChange(t)
+                      // 2026-09-17 反馈拍板：点击标签（含重复点击已激活标签）→ 左栏若不在该模块态则切过去；
+                      // 锁定时左栏归用户所有，不跟随（与 RAIL_FOLLOW 跟随语义一致）
+                      if (!wbLayout.leftLocked) {
+                        const m = RAIL_FOLLOW_MAP[t]
+                        if (m) setRailModule(m)
+                      }
                     }
                   }}
                   onClose={closeTab}

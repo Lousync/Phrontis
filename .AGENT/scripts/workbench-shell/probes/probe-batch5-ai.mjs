@@ -239,6 +239,11 @@ async function main() {
   ok(viaHotkey, 'C5 Ctrl+P → 左栏搜索态')
   await evalJs(`(() => { document.querySelector('[data-wb="leftSearch"] button[title="返回总览"]')?.click(); return true })()`)
   await sleep(300)
+  // C6 点标签条已激活标签（editor）→ 左栏从总览态跟随切模块态（2026-09-17 反馈拍板）
+  await evalJs(`(() => { document.querySelector('[data-wb="tabbar"] [data-wb-tab="editor"]')?.click(); return true })()`)
+  await sleep(600)
+  const modFollow = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
+  ok(modFollow === 'editor', 'C6 点已激活标签 → 左栏跟随切该模块态', `mod=${modFollow}`)
 
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)
