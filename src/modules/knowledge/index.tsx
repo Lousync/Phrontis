@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, Folder, ListTree, X, BookMarked, Puzzle, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff } from 'lucide-react'
-import { LOCATE_QUIZ_VIEW_EVENT } from '../../lib/workbenchLayout'
+import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_VIEW_TOGGLED_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { WelcomeHtmlView } from './components/WelcomeHtmlView'
@@ -82,6 +82,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     const handler = () => setShowQuizCollection(true)
     window.addEventListener(LOCATE_QUIZ_VIEW_EVENT, handler)
     return () => window.removeEventListener(LOCATE_QUIZ_VIEW_EVENT, handler)
+  }, [])
+  // 错题本视图开合反向通知左栏（批次5 反馈轮，QUIZ_VIEW_TOGGLED_EVENT）：
+  // 非书签路径（树内入口）进出时 App 据此切左栏 quiz/knowledge 模块态，双侧栏与错位由此消除
+  const toggleQuizCollection = useCallback((open: boolean) => {
+    setShowQuizCollection(open)
+    window.dispatchEvent(new CustomEvent(QUIZ_VIEW_TOGGLED_EVENT, { detail: { open } }))
   }, [])
   /** C 级模块插件声明的视图（slot=knowledge.sidebar）+ 当前打开的插件视图 */
   const [pluginViews, setPluginViews] = useState<PluginViewContribution[]>([])
@@ -1601,7 +1607,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               <div className="shrink-0 border-t border-[var(--border-color)] px-2 py-1.5 space-y-0.5">
                 {/* 内置错题本：唯一入口，恒驻 */}
                 <button
-                  onClick={() => setShowQuizCollection(true)}
+                  onClick={() => toggleQuizCollection(true)}
                   className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                 >
                   <BookMarked size={14} />
@@ -1752,7 +1758,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       />
 
       {/* 错题本 / 收藏（按当前学习空间分区：只显示该空间的内容；源链接可跳回原页面） */}
-      {showQuizCollection && <QuizCollection onClose={() => setShowQuizCollection(false)} spaceName={selectedSpace?.name ?? undefined} onOpenPage={handleOpenPage} />}
+      {showQuizCollection && <QuizCollection onClose={() => toggleQuizCollection(false)} spaceName={selectedSpace?.name ?? undefined} onOpenPage={handleOpenPage} />}
 
       {/* C 级模块插件视图：全屏覆盖层（沙箱 iframe + 数据桥） */}
       {activePluginView && (

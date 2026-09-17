@@ -9,7 +9,7 @@ import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchTabBar } from './components/workbench/WorkbenchTabBar'
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
 import { ToolHost, PluginToolHost, TOOLS_WITH_SIDEBAR, isToolTabId, toolIdOfTab, toolTabId } from './components/workbench/toolRegistry'
-import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, type RailModule } from './lib/workbenchLayout'
+import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_VIEW_TOGGLED_EVENT, type RailModule } from './lib/workbenchLayout'
 
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
 import { ZenHotZone } from './components/shared/ZenHotZone'
@@ -887,6 +887,19 @@ export default function App() {
     const tid = activeToolTab && isToolTabId(activeToolTab) ? toolIdOfTab(activeToolTab) : null
     setRailTool(tid && TOOLS_WITH_SIDEBAR.has(tid) ? tid : null)
   }, [activeToolTab, wbLayout.leftLocked])
+
+  // 错题本视图开合反向联动（批次5 反馈轮，QUIZ_VIEW_TOGGLED_EVENT）：非书签路径（树内入口）
+  // 进出错题本时 knowledge 派发 {open}——左栏非锁定则切 quiz 态（关 = 回 knowledge 树态），
+  // 避免「主体错题本 + 左栏知识库树」的双侧栏错位
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const open = (e as CustomEvent<{ open?: boolean }>).detail?.open ?? true
+      if (wbLayout.leftLocked) return
+      setRailModule(open ? 'quiz' : 'knowledge')
+    }
+    window.addEventListener(QUIZ_VIEW_TOGGLED_EVENT, handler)
+    return () => window.removeEventListener(QUIZ_VIEW_TOGGLED_EVENT, handler)
+  }, [wbLayout.leftLocked])
 
   // 批次 6（PDF 整包方案 §2）：编辑区激活文档是 PDF 时，左栏自动跟随到 bookshelf 大纲态（锁定除外）；
   // 换回普通文档则回编辑器侧栏态。跟随语义沿用 RAIL_FOLLOW_MAP 的「不在映射内的标签不动左栏」。

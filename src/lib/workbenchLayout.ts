@@ -190,6 +190,13 @@ export const RAIL_FOLLOW_MAP: Readonly<Partial<Record<TabName, RailModule>>> = {
 export const LOCATE_QUIZ_VIEW_EVENT = 'kb-locate-quiz-view'
 
 /**
+ * knowledge 模块 → App：错题本视图开合反向通知（批次5 反馈轮）。
+ * 非书签路径（树内入口）进出错题本时，knowledge 派发 {open: boolean}；
+ * App 非锁定时切左栏 quiz 模块态（关 = 回 knowledge 态），避免「主体错题本 + 左栏知识库树」错位。
+ */
+export const QUIZ_VIEW_TOGGLED_EVENT = 'kb-quiz-view-toggled'
+
+/**
  * 错题本左栏（QuizNavPanel）→ QuizCollection 视图内聚焦某本书（科目）。
  * QuizNavPanel 点书条目 = 派发本事件携带书名；QuizCollection 监听后 setBookFilter + 展开书架。
  * 2026-09-17 第四轮拍板④：错题本从知识库目录树侧栏剥离，左栏 quiz 态挂本组件。

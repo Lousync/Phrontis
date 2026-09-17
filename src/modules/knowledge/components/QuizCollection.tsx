@@ -13,7 +13,6 @@ import {
 import { showToast } from '../../../lib/toast'
 import { useDataChanged } from '../../../lib/dataChanged'
 import { QUIZ_FOCUS_BOOK_EVENT } from '../../../lib/workbenchLayout'
-import { ResizablePanel } from '../../../components/shared/ResizablePanel'
 
 type Kind = 'favorite' | 'wrong'
 
@@ -78,11 +77,8 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
   const [collectionFilter, setCollectionFilter] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [reviewing, setReviewing] = useState<QuizItem[] | null>(null)
-  const [newCollection, setNewCollection] = useState('')
   /** 书架「翻书」状态：true 时右侧显示书头（书名 + 返回书架），并按 bookFilter 聚焦某本书 */
   const [inBook, setInBook] = useState(false)
-  /** 左侧筛选栏（按知识点/自定义分组）显隐：翻书自动收起，可拖拽手柄收放 */
-  const [showSidebar, setShowSidebar] = useState(true)
   /** 勾选模式 + 选中的记录 id 集合（批量重刷） */
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -131,15 +127,16 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
   // 「AI 说改好了，错题本界面没反应，得关掉重开」（2026-09-12）
   useDataChanged('quiz', () => { void load(); void loadStats() })
 
-  // 左栏错题本专属侧栏（QuizNavPanel，第四轮拍板④）→ 视图联动：
-  // 点「错题/收藏视图」切 kind；点科目（书）→ 聚焦该书（bookFilter + 翻书态）
+  // 左栏错题本专属侧栏（QuizNavPanel，第四轮拍板④；批次5 反馈轮合并主体内置侧栏）→ 筛选下发：
+  // 事件已扩为「筛选快照」——kind / book / tagIds / collectionId 逐字段可选，未携带不改动；
+  // 点视图入口/科目 → 聚焦书（翻书态），点标签/分组 → 筛选（主体内已无筛选 UI，左栏是唯一入口）
   useEffect(() => {
     const handler = (e: Event) => {
-      const d = (e as CustomEvent<{ kind?: 'wrong' | 'favorite'; book?: string | null }>).detail ?? {}
+      const d = (e as CustomEvent<{ kind?: 'wrong' | 'favorite'; book?: string | null; tagIds?: string[]; collectionId?: string | null }>).detail ?? {}
       if (d.kind === 'wrong' || d.kind === 'favorite') setKind(d.kind)
-      setBookFilter(d.book ?? null)
-      setInBook(!!d.book)
-      if (d.book) setShowSidebar(true)
+      if (d.book !== undefined) { setBookFilter(d.book); setInBook(!!d.book) }
+      if (d.tagIds) setTagFilter(new Set(d.tagIds))
+      if (d.collectionId !== undefined) setCollectionFilter(d.collectionId)
     }
     window.addEventListener(QUIZ_FOCUS_BOOK_EVENT, handler)
     return () => window.removeEventListener(QUIZ_FOCUS_BOOK_EVENT, handler)
@@ -155,13 +152,6 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
     if (!spaceName) return records
     return records.filter(r => r.sourceSpace === spaceName)
   }, [records, spaceName])
-
-  /** 左侧栏列表（空间内=知识点/科目，全局=来源空间） */
-  const spaces = useMemo(() => {
-    const s = new Set<string>()
-    baseRecords.forEach(r => s.add(bookKeyOf(r)))
-    return Array.from(s)
-  }, [baseRecords, spaceName])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => baseRecords.filter(r => {
     if (bookFilter && bookKeyOf(r) !== bookFilter) return false
@@ -192,19 +182,17 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
     return Array.from(m.entries()).sort((a, b) => b[1].length - a[1].length)
   }, [baseRecords, spaceName])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** 翻书：进入某本书（科目/来源）聚焦视图，自动收起左侧筛选栏 */
+  /** 翻书：进入某本书（科目/来源）聚焦视图（筛选栏已合并左栏，无需收放） */
   const openBook = (book: string) => {
     setBookFilter(book)
     setInBook(true)
     setExpanded(null)
-    setShowSidebar(false)
   }
-  /** 返回书架：清除书筛选，回到书架主页，恢复左侧筛选栏 */
+  /** 返回书架：清除书筛选，回到书架主页 */
   const backToShelf = () => {
     setBookFilter(null)
     setInBook(false)
     setExpanded(null)
-    setShowSidebar(true)
   }
 
   const bookSpace = inBook && bookFilter ? bookFilter : null
@@ -268,31 +256,8 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
     showToast({ type: 'info', message: `已给 ${ids.length} 题打标` })
   }
 
-  /** 删除标签（同时解除所有题目关联） */
-  const deleteTag = async (tagId: string) => {
-    try { await quizTagDelete(tagId) } catch { /* ignore */ }
-    setTags(prev => prev.filter(t => t.id !== tagId))
-    setTagFilter(prev => { const n = new Set(prev); n.delete(tagId); return n })
-    setRecords(prev => prev.map(x => ({ ...x, tagIds: x.tagIds.filter(t => t !== tagId) })))
-  }
-
-  const createCollection = async () => {
-    const name = newCollection.trim()
-    if (!name) return
-    try {
-      await quizCollectionCreate(name)
-      setNewCollection('')
-      await load()
-    } catch { /* ignore */ }
-  }
-
-  const deleteCollection = async (id: string) => {
-    try {
-      await quizCollectionDelete(id)
-      if (collectionFilter === id) setCollectionFilter(null)
-      await load()
-    } catch { /* ignore */ }
-  }
+  // 分组创建/删除与标签删除的管理入口已迁左栏 QuizNavPanel
+  //（quizCollectionCreate/Delete、quizTagDelete 直调 + useDataChanged 刷新；筛选状态权威源仍在本组件）
 
   /** 重刷任意题集：单题 / 档位 / 知识点组 / 勾选批量 / 全部 共用入口 */
   const startReview = (items: QuizRecordDto[]) => {
@@ -620,138 +585,8 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
       </div>
 
       <div className="flex-1 min-h-0 flex">
-        {/* 左侧：来源 + 自定义分组（可拖拽调宽 / 边缘收放；翻书自动收起） */}
-        <ResizablePanel
-          storageKey="quizCollectionSidebar"
-          defaultWidth={208}
-          minWidth={160}
-          maxWidth={320}
-          visible={showSidebar}
-          onSnapClose={() => setShowSidebar(false)}
-          onSnapOpen={() => setShowSidebar(true)}
-        >
-          <div className="h-full overflow-y-auto px-3 py-3 space-y-4">
-          <div>
-            <div className="mb-1.5 flex items-center gap-1 text-[11px] font-medium text-[var(--text-muted)]">
-              <Inbox size={12} /> {spaceName ? '按知识点' : '按来源'}
-            </div>
-            <button
-              onClick={() => { setBookFilter(null); setInBook(false); setShowSidebar(true) }}
-              className={`w-full text-left px-2 py-1 rounded text-[12px] transition-colors ${
-                bookFilter === null ? 'bg-[var(--accent)]/10 text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-              }`}
-            >
-              全部（{baseRecords.length}）
-            </button>
-            {spaces.map(s => (
-              <button
-                key={s}
-                onClick={() => {
-                  setBookFilter(s === bookFilter ? null : s)
-                  setInBook(s !== bookFilter)
-                  setShowSidebar(s !== bookFilter ? false : true)
-                }}
-                className={`w-full text-left px-2 py-1 rounded text-[12px] transition-colors truncate ${
-                  bookFilter === s ? 'bg-[var(--accent)]/10 text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                }`}
-              >
-                {s}（{baseRecords.filter(r => bookKeyOf(r) === s).length}）
-              </button>
-            ))}
-          </div>
-
-          {/* 标签筛选：考点 / 题型 / 难度 / 关键词，多选命中任一 */}
-          <div>
-            <div className="mb-1.5 flex items-center gap-1 text-[11px] font-medium text-[var(--text-muted)]">
-              <Tag size={12} /> 按标签
-            </div>
-            {tags.length === 0 ? (
-              <div className="px-2 text-[11px] text-[var(--text-muted)]">暂无标签，展开题目可添加</div>
-            ) : (
-              <div className="flex flex-wrap gap-1">
-                {tags.map(t => {
-                  const on = tagFilter.has(t.id)
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => setTagFilter(prev => {
-                        const n = new Set(prev)
-                        if (n.has(t.id)) n.delete(t.id)
-                        else n.add(t.id)
-                        return n
-                      })}
-                      onContextMenu={e => { e.preventDefault(); void deleteTag(t.id) }}
-                      title={on ? '取消筛选（右键删除标签）' : '按此标签筛选（右键删除标签）'}
-                      className={`px-1.5 py-0.5 rounded-full border text-[11px] transition-colors ${
-                        on ? 'text-white' : 'bg-transparent'
-                      }`}
-                      style={on
-                        ? { borderColor: t.color, background: t.color }
-                        : { borderColor: t.color, color: t.color }}
-                    >
-                      {t.name}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-            {tagFilter.size > 0 && (
-              <button
-                onClick={() => setTagFilter(new Set())}
-                className="mt-1.5 px-2 py-0.5 rounded text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-              >
-                清除标签筛选 ({tagFilter.size})
-              </button>
-            )}
-          </div>
-
-          <div>
-            <div className="mb-1.5 flex items-center gap-1 text-[11px] font-medium text-[var(--text-muted)]">
-              <Folder size={12} /> 自定义分组
-            </div>
-            <button
-              onClick={() => setCollectionFilter(null)}
-              className={`w-full text-left px-2 py-1 rounded text-[12px] transition-colors ${
-                collectionFilter === null ? 'bg-[var(--accent)]/10 text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-              }`}
-            >
-              全部分组
-            </button>
-            {collections.map(c => (
-              <div key={c.id} className="group flex items-center gap-1">
-                <button
-                  onClick={() => setCollectionFilter(c.id === collectionFilter ? null : c.id)}
-                  className={`flex-1 text-left px-2 py-1 rounded text-[12px] transition-colors truncate ${
-                    collectionFilter === c.id ? 'bg-[var(--accent)]/10 text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                  }`}
-                >
-                  {c.name}（{c.count}）
-                </button>
-                <button
-                  onClick={() => void deleteCollection(c.id)}
-                  className="hidden group-hover:flex p-0.5 text-[var(--text-muted)] hover:text-[var(--danger)]"
-                  title="删除分组"
-                >
-                  <Trash2 size={11} />
-                </button>
-              </div>
-            ))}
-            <div className="mt-1.5 flex items-center gap-1">
-              <input
-                value={newCollection}
-                onChange={e => setNewCollection(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') void createCollection() }}
-                placeholder="新建分组"
-                className="flex-1 px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-              />
-              <button onClick={() => void createCollection()} className="p-1 text-[var(--text-muted)] hover:text-[var(--accent)]" title="新建分组">
-                <FolderPlus size={14} />
-              </button>
-            </div>
-          </div>
-          </div>
-        </ResizablePanel>
-
+        {/* 主体内不再渲染筛选侧栏（批次5 反馈轮：来源/标签/分组整段合并到左栏 QuizNavPanel，
+            原内置 ResizablePanel 侧栏删除——双侧边栏由此消除）；筛选全部经左栏事件下发 */}
         {/* 右侧：书架 / 翻书内容 */}
         <div className="flex-1 min-w-0 overflow-y-auto">
           {/* 批量打标面板：勾选模式下给选中的题目一次性打标签 */}
