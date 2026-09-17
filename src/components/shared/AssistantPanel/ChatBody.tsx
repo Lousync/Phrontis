@@ -382,8 +382,11 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
                     rows={isNarrow ? 2 : 3}
                     placeholder="问问任何事…（Enter 发送）"
-                    className={`w-full appearance-none px-0.5 py-1 rounded-none border-0 bg-transparent text-[12px] resize-none outline-none ${shell.ta ?? ''}`}
+                    className={`w-full appearance-none px-0.5 py-1 text-[12px] resize-none outline-none bg-transparent! border-0! rounded-none! ${shell.ta ?? ''}`}
                   />
+                  {/* ↑ bg-transparent! 等 Tailwind v4 important 修饰符：styles/index.css 的全局
+                      textarea 规则（var(--input-bg) 白底 + 1px 边框）是未分层样式，按 cascade
+                      规范压过 layered utilities——不加 ! 每个样式方案里都嵌着一个白框 */}
                 </div>
 
                 {/* 工具行：📎 附加文件 / 对话模型 / 消耗查看（宽态带文字标签，参考主流 AI 输入框）—— 发送钮右置 */}
