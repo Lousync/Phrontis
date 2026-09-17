@@ -600,6 +600,13 @@ const api = {
   workspacePickImages: (rootId: string) => ipcRenderer.invoke('ws:pickImagesToAttachments', rootId),
   workspaceSaveImage: (rootId: string, payload: { fileName: string; dataBase64: string }) => ipcRenderer.invoke('ws:saveImageToAttachments', rootId, payload),
   workspaceReadRange: (rootId: string, relPath: string, offset: number, length: number) => ipcRenderer.invoke('ws:readRange', rootId, relPath, offset, length),
+  // PDF 阅读体验整包（v3.4.0 第 2 项）：进度/书签/封面缓存/导入
+  pdfReaderListBooks: () => ipcRenderer.invoke('pdfReader:listBooks'),
+  pdfReaderGet: (rootId: string, relPath: string) => ipcRenderer.invoke('pdfReader:get', rootId, relPath),
+  pdfReaderPatch: (rootId: string, relPath: string, patch: unknown, expectedUpdatedAt?: string) => ipcRenderer.invoke('pdfReader:patch', rootId, relPath, patch, expectedUpdatedAt),
+  pdfReaderCoverList: () => ipcRenderer.invoke('pdfReader:coverList'),
+  pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => ipcRenderer.invoke('pdfReader:coverSave', rootId, relPath, dataUrl, expectedMtimeMs),
+  wsImportPdf: () => ipcRenderer.invoke('ws:importPdf'),
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => ipcRenderer.invoke('ws:writeFile', rootId, relPath, content, expectedMtimeMs),
   workspaceSetMdStatus: (rootId: string, relPath: string, draft: boolean) => ipcRenderer.invoke('ws:setMdStatus', rootId, relPath, draft),
   // 全类型归档（docs/vault-archive-all-files-design.md）：md 分流 frontmatter 双态，非 md/目录走清单

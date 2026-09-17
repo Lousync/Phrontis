@@ -1147,6 +1147,36 @@ export interface WorkspaceRangeResult {
   size: number
   truncated: boolean
 }
+
+// ===== PDF 阅读体验整包（v3.4.0 第 2 项）=====
+/** 阅读模式：竖滚（默认）/ 单页 / 双页（≥1240px，低于自动降级单页） */
+export type PdfViewMode = 'scroll' | 'single' | 'duo'
+/** 单本书的阅读状态（vault `.knowbase/modules/pdfReader.json`，键 {rootId}/{relPath}） */
+export interface PdfBookState {
+  /** 冲突检测基准（pdfReader:patch 带 expectedUpdatedAt） */
+  updatedAt: string
+  lastPage: number
+  /** 竖滚模式页内滚动比例 0..1 */
+  scrollRatio: number
+  mode: PdfViewMode
+  zoom: number
+  eyeCare: boolean
+  bookmarks: Array<{ page: number; note: string; at: string }>
+}
+/** pdfReader:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
+export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks'>>
+/** 书架清单条目（自动库：扫描 join 进度，不落盘） */
+export interface PdfBookListItem {
+  relPath: string
+  name: string
+  size: number
+  /** PDF 文件 mtimeMs（封面缓存失效判据） */
+  mtime: number
+  lastPage: number
+  hasProgress: boolean
+  updatedAt: string | null
+}
+
 /** 写文件结果：conflict=true 表示磁盘已被外部修改（或已删除），需用户决策 */
 export interface WorkspaceWriteResult {
   ok: boolean
@@ -1456,6 +1486,13 @@ export interface ElectronAPI {
   workspacePickImages: (rootId: string) => Promise<{ ok: boolean; images?: VaultStagedImage[]; error?: string }>
   workspaceSaveImage: (rootId: string, payload: { fileName: string; dataBase64: string }) => Promise<{ ok: boolean; name?: string; relPath?: string; error?: string }>
   workspaceReadRange: (rootId: string, relPath: string, offset: number, length: number) => Promise<WorkspaceRangeResult & { error?: string }>
+  // ===== PDF 阅读体验整包（v3.4.0 第 2 项）：进度/书签/封面缓存/导入 =====
+  pdfReaderListBooks: () => Promise<{ ok: boolean; books?: PdfBookListItem[]; error?: string }>
+  pdfReaderGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; state?: PdfBookState | null; error?: string }>
+  pdfReaderPatch: (rootId: string, relPath: string, patch: PdfBookPatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; state?: PdfBookState; conflict?: boolean; error?: string }>
+  pdfReaderCoverList: () => Promise<{ ok: boolean; covers?: Record<string, { mtimeMs: number; file: string }>; error?: string }>
+  pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => Promise<{ ok: boolean; error?: string }>
+  wsImportPdf: () => Promise<{ ok: boolean; imported?: string[]; canceled?: boolean; error?: string }>
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
   workspaceSetMdStatus: (rootId: string, relPath: string, draft: boolean) => Promise<{ ok: boolean; error?: string }>
   /** 全类型归档（docs/vault-archive-all-files-design.md）：md 分流 frontmatter 双态，非 md/目录走清单 */
