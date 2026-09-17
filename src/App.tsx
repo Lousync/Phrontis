@@ -769,14 +769,10 @@ export default function App() {
     if (m) setRailModule(m)
   }, [activeTab, wbLayout.leftLocked])
 
-  /** 书签点击：再点当前书签 = 退出模块侧边栏（原型 lpBack，锁定态顺带自动解锁）；
+  /** 书签点击（第四轮拍板①：幂等激活——再点当前书签不再退出模块态，退出只走「‹ 返回总览」。
+      旧「再点退出」会把左栏退回总览而 activeTab 仍停在该模块，出现「总览态 + 书签高亮」的怪状态）；
       错题本 = openTab('knowledge') + kb-locate-quiz-view 定位事件；其余直开对应标签 */
   const handleBookmarkClick = (key: RailModule) => {
-    if (railModule === key) {
-      setRailModule(null)
-      if (wbLayout.leftLocked) update('workbenchLayout', JSON.stringify({ ...wbLayout, leftLocked: false }))
-      return
-    }
     setRailModule(key)
     const b = WORKBENCH_BOOKMARKS.find((x) => x.key === key)
     if (!b) return
@@ -787,6 +783,16 @@ export default function App() {
     } else {
       handleTabChange(b.tab)
     }
+  }
+
+  /** 🔖 书签选显菜单（v10 拍板落地）：切换某书签显隐并持久化；隐藏当前激活的书签时自动退出模块态 */
+  const handleBookmarkVisibility = (key: string) => {
+    const hidden = wbLayout.bookmarksHidden.includes(key)
+    const next = hidden
+      ? wbLayout.bookmarksHidden.filter((k) => k !== key)
+      : [...wbLayout.bookmarksHidden, key]
+    update('workbenchLayout', JSON.stringify({ ...wbLayout, bookmarksHidden: next }))
+    if (!hidden && railModule === key) setRailModule(null)
   }
 
   /** 左栏模块态「← 返回总览」：清模块态，锁定态顺带自动解锁（原型 lpBack 语义） */
@@ -852,7 +858,7 @@ export default function App() {
     switch (name) {
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarHosted={on} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} />
       case 'moments': return <MomentsModule />
       case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'editor' ? wbModSlotEl : null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} openFrom={editorJumpFrom && editorJumpFrom !== 'editor' ? tabLabel(editorJumpFrom) : null} onBackFrom={() => { const f = editorJumpFrom; if (f) { setEditorJumpFrom(null); handleTabChange(f) } }} zenLevel={zenLevel} onZenLevelChange={setZenLevel} />
       case 'bookshelf': return <BookshelfModule isActive={on} />
@@ -915,13 +921,15 @@ export default function App() {
               railModule={railModule}
               modSlotRef={wbModSlotRef}
               onBookmarkClick={handleBookmarkClick}
+              onBookmarkVisibility={handleBookmarkVisibility}
               onBackToOverview={handleBackToOverview}
               onOpenLooseFile={handleOpenLooseFile}
               onPluginBookmark={handleTabChange}
               suppressSides={activeTab === 'aiTeaching'}
+              maximized={zenLevel >= 2 || winMax}
               right={
                 <div className="flex h-full flex-col p-1.5">
-                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-sm">
+                  <div className={`flex min-h-0 flex-1 flex-col overflow-hidden border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-sm ${zenLevel >= 2 || winMax ? 'rounded-none border-0' : 'rounded-xl'}`}>
                     <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] px-3 text-[12px] font-medium text-[var(--text-secondary)]">小工具</div>
                     <div className="flex flex-1 items-center justify-center text-[11.5px] text-[var(--text-muted)]">控件区 · 批次4</div>
                   </div>

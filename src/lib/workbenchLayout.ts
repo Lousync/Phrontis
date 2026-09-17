@@ -27,6 +27,8 @@ export interface WorkbenchLayout {
   widgetOrder: string[]
   /** 右栏隐藏的控件 id（⋯ 菜单选显） */
   widgetsHidden: string[]
+  /** 左栏隐藏的书签（🔖 菜单选显；内置 RailModule key 与插件书签 id 共用此清单） */
+  bookmarksHidden: string[]
   /** 分屏比例（主栏:副栏，0~1；null = 未分屏） */
   splitRatio: number | null
 }
@@ -42,6 +44,7 @@ export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   rightTab: 'widgets',
   widgetOrder: [...WORKBENCH_WIDGET_IDS],
   widgetsHidden: [],
+  bookmarksHidden: [],
   splitRatio: null,
 }
 
@@ -70,6 +73,9 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       }
       if (Array.isArray(o.widgetsHidden)) {
         base.widgetsHidden = o.widgetsHidden.filter((x): x is string => typeof x === 'string')
+      }
+      if (Array.isArray(o.bookmarksHidden)) {
+        base.bookmarksHidden = o.bookmarksHidden.filter((x): x is string => typeof x === 'string')
       }
       if (o.splitRatio === null || (typeof o.splitRatio === 'number' && Number.isFinite(o.splitRatio))) {
         base.splitRatio = o.splitRatio as number | null
@@ -149,3 +155,10 @@ export const RAIL_FOLLOW_MAP: Readonly<Partial<Record<TabName, RailModule>>> = {
  * 冷启动时模块保活注册可能未就绪）；knowledge 模块监听后打开错题本视图。
  */
 export const LOCATE_QUIZ_VIEW_EVENT = 'kb-locate-quiz-view'
+
+/**
+ * 错题本左栏（QuizNavPanel）→ QuizCollection 视图内聚焦某本书（科目）。
+ * QuizNavPanel 点书条目 = 派发本事件携带书名；QuizCollection 监听后 setBookFilter + 展开书架。
+ * 2026-09-17 第四轮拍板④：错题本从知识库目录树侧栏剥离，左栏 quiz 态挂本组件。
+ */
+export const QUIZ_FOCUS_BOOK_EVENT = 'kb-quiz-focus-book'

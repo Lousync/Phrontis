@@ -28,14 +28,18 @@ interface Props {
   /** 模块态 slot 的 ref callback（App 收集 DOM 传给模块做 sidebarEl portal 目标） */
   modSlotRef: (node: HTMLDivElement | null) => void
   onBookmarkClick: (key: RailModule) => void
+  /** 🔖 书签选显菜单：切换某书签显隐（App 持久化 + 隐藏当前激活书签时退出模块态） */
+  onBookmarkVisibility: (key: string) => void
   onBackToOverview: () => void
   onOpenLooseFile: (relPath: string) => void
   onPluginBookmark: (tab: TabName) => void
   /** AI教学整窗形态（方案 §2）：左右栏与唤起浮钮一并隐藏，中间栏独占 */
   suppressSides?: boolean
+  /** 最大化/禅模式 Z2：左右栏卡片随中间内容卡一起方角全屏化（第四轮拍板②） */
+  maximized?: boolean
 }
 
-export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRef, onBookmarkClick, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false }: Props) {
+export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRef, onBookmarkClick, onBookmarkVisibility, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false, maximized = false }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
 
@@ -57,7 +61,7 @@ export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRe
         onSnapClose={() => patch({ leftCollapsed: true })}
         onSnapOpen={() => patch({ leftCollapsed: false })}
         onHandleClick={() => patch({ leftCollapsed: !layout.leftCollapsed })}
-        className="m-1.5 rounded-xl border border-[var(--border-color)] shadow-sm"
+        className={maximized ? 'rounded-none border-0' : 'm-1.5 rounded-xl border border-[var(--border-color)] shadow-sm'}
       >
         <WorkbenchLeftPanel
           activeTab={activeTab}
@@ -66,6 +70,8 @@ export function WorkbenchShell({ center, right, activeTab, railModule, modSlotRe
           treeMode={layout.leftMode === 'tree'}
           modSlotRef={modSlotRef}
           onBookmarkClick={onBookmarkClick}
+          onBookmarkVisibility={onBookmarkVisibility}
+          bookmarksHidden={layout.bookmarksHidden}
           onBack={onBackToOverview}
           onToggleLock={() => patch({ leftLocked: !layout.leftLocked })}
           onToggleTreeMode={() => patch({ leftMode: layout.leftMode === 'tree' ? 'overview' : 'tree' })}

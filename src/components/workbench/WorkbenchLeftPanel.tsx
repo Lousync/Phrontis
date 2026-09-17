@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
-  ArrowLeft, CalendarDays, BookOpen, FileText, FileQuestion, Folder, Lock,
+  ArrowLeft, Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, Lock,
   LockOpen, NotebookPen, Library, Trees,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
@@ -65,6 +66,10 @@ interface Props {
   /** 模块态 slot 的 ref callback（App 收集 DOM 传给模块 sidebarEl 做 portal 目标） */
   modSlotRef: (node: HTMLDivElement | null) => void
   onBookmarkClick: (key: RailModule) => void
+  /** 🔖 书签选显菜单：切换某书签显隐（内置 key 或 plugin:<id>），App 持久化并处理「隐藏当前激活书签 → 退出模块态」 */
+  onBookmarkVisibility: (key: string) => void
+  /** 隐藏中的书签（内置 RailModule key / plugin:<id>），书签区与 🔖 菜单据此过滤 */
+  bookmarksHidden: string[]
   /** 模块态「← 返回总览」（App 清 railModule，锁定态顺带解锁） */
   onBack: () => void
   onToggleLock: () => void
@@ -75,9 +80,53 @@ interface Props {
   onPluginBookmark: (tab: TabName) => void
 }
 
-export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, modSlotRef, onBookmarkClick, onBack, onToggleLock, onToggleTreeMode, onOpenLooseFile, onPluginBookmark }: Props) {
+export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, modSlotRef, onBookmarkClick, onBookmarkVisibility, bookmarksHidden, onBack, onToggleLock, onToggleTreeMode, onOpenLooseFile, onPluginBookmark }: Props) {
   const { s } = useSettings()
   const pluginBookmarks = useMemo(() => parsePluginBookmarks(s.workbenchBookmarks), [s.workbenchBookmarks])
+  // 🔖 书签选显菜单开关（v10 拍板：逐个勾选显示哪些书签 + 插件可注册书签）。
+  // 浮层走 portal + fixed + document pointerdown 外部关闭（照 VaultSwitcher 模式——
+  // 头部行内嵌 backdrop 兄弟结构下 React 对菜单项的 click 分发实测不稳定，不重蹈）。
+  const [bookmarkMenuOpen, setBookmarkMenuOpen] = useState(false)
+  const [bmMenuPos, setBmMenuPos] = useState<{ left: number; top: number } | null>(null)
+  const bmBtnRef = useRef<HTMLButtonElement | null>(null)
+  const bmMenuRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!bookmarkMenuOpen) return
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node
+      if ((bmBtnRef.current && bmBtnRef.current.contains(t)) || (bmMenuRef.current && bmMenuRef.current.contains(t))) return
+      setBookmarkMenuOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setBookmarkMenuOpen(false) }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [bookmarkMenuOpen])
+
+  // 菜单项点击用 **原生事件委托**（menu 容器上 addEventListener），不依赖 React 合成事件——
+  // 实测（2026-09-17）：portal 到 body 的首个菜单在本会话内对 React 合成 click 分发不稳定
+  // （事件到达委托节点但 handler 不触发，无报错；同结构先挂过另一 portal 后则正常）。
+  // 原生委托对所有派发方式免疫；项目内 menu-item 不依赖受控 input，无需合成事件的额外能力。
+  useEffect(() => {
+    if (!bookmarkMenuOpen) return
+    const menu = bmMenuRef.current
+    if (!menu) return
+    const onClick = (e: MouseEvent) => {
+      const t = (e.target as HTMLElement | null)?.closest?.('[data-wb-menu-item]') as HTMLElement | null
+      if (t?.dataset.wbMenuItem) onBookmarkVisibility(t.dataset.wbMenuItem)
+    }
+    menu.addEventListener('click', onClick)
+    return () => menu.removeEventListener('click', onClick)
+  }, [bookmarkMenuOpen, onBookmarkVisibility])
+
+  const toggleBookmarkMenu = () => {
+    if (!bookmarkMenuOpen) {
+      const r = bmBtnRef.current?.getBoundingClientRect()
+      if (r) setBmMenuPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - 190)), top: r.bottom + 6 })
+    }
+    setBookmarkMenuOpen(v => !v)
+  }
 
   // 仓库根层一次读取：树模式（文件夹+散文件）与总览态散文件区共用
   const [dirs, setDirs] = useState<string[]>([])
@@ -154,8 +203,17 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
       ) : (
         /* ---- 总览态：书签（内置 6 + 插件注册）+ 零散文件快速打开 ---- */
         <>
-          <div className="flex h-8 shrink-0 items-center justify-between px-3">
-            <span className="text-[12px] font-medium text-[var(--text-secondary)]">工作台</span>
+          <div className="relative flex h-8 shrink-0 items-center justify-between px-1.5">
+            {/* 第四轮拍板③：「工作台」文字说明删除，头部只留 🔖 书签选显 + 🌳 树模式两钮（v13 头部结构落地） */}
+            <button
+              ref={bmBtnRef}
+              onClick={toggleBookmarkMenu}
+              title="书签显示管理"
+              data-wb="bookmarkMenuBtn"
+              className={`rounded p-1 transition-colors ${bookmarkMenuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+            >
+              <Bookmark size={13} />
+            </button>
             <button
               onClick={onToggleTreeMode}
               title="切换为文件树模式（仓库顶层目录）"
@@ -163,10 +221,59 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
             >
               <Trees size={13} />
             </button>
+            {bookmarkMenuOpen && bmMenuPos && createPortal(
+              <div
+                ref={bmMenuRef}
+                data-wb="bookmarkMenu"
+                className="fixed w-44 max-h-[min(420px,70vh)] overflow-y-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] p-1 shadow-xl z-[130]"
+                style={{ left: bmMenuPos.left, top: bmMenuPos.top }}
+              >
+                <div className="px-2 pb-1 pt-1.5 text-[10.5px] text-[var(--text-muted)]">显示的书签</div>
+                {WORKBENCH_BOOKMARKS.map((b) => {
+                  const shown = !bookmarksHidden.includes(b.key)
+                  return (
+                    <button
+                      key={b.key}
+                      data-wb-menu-item={b.key}
+                      /* 点击走 menu 容器的原生事件委托（见上方 useEffect），不挂 React onClick */
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border ${shown ? 'border-[var(--accent)] bg-[var(--accent)] text-white' : 'border-[var(--border-color)]'}`}>
+                        {shown && <Check size={10} />}
+                      </span>
+                      <span style={{ color: BOOKMARK_COLORS[b.key].fg }}>{b.label}</span>
+                    </button>
+                  )
+                })}
+                {pluginBookmarks.length > 0 && (
+                  <div className="mt-1 border-t border-[var(--border-color)] pt-1">
+                    {pluginBookmarks.map((p) => {
+                      const pid = `plugin:${p.id}`
+                      const shown = !bookmarksHidden.includes(pid)
+                      return (
+                        <button
+                          key={pid}
+                          data-wb-menu-item={pid}
+                          /* 同上：原生事件委托 */
+                          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+                        >
+                          <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-sm border ${shown ? 'border-[var(--accent)] bg-[var(--accent)] text-white' : 'border-[var(--border-color)]'}`}>
+                            {shown && <Check size={10} />}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">{p.label}</span>
+                          <span className="shrink-0 text-[10px] text-[var(--text-disabled)]">插件</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>,
+              document.body,
+            )}
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             <div data-wb="bookmarks" className="flex flex-col gap-0.5 p-1.5">
-              {WORKBENCH_BOOKMARKS.map((b) => {
+              {WORKBENCH_BOOKMARKS.filter((b) => !bookmarksHidden.includes(b.key)).map((b) => {
                 const isActive = railModule === b.key || (railModule === null && !!activeTab && RAIL_FOLLOW_MAP[activeTab] === b.key && activeTab === b.tab)
                 const c = BOOKMARK_COLORS[b.key]
                 return (
@@ -185,7 +292,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
                   </button>
                 )
               })}
-              {pluginBookmarks.map((p) => (
+              {pluginBookmarks.filter((p) => !bookmarksHidden.includes(`plugin:${p.id}`)).map((p) => (
                 <button
                   key={`plugin:${p.id}`}
                   data-wb-bookmark={`plugin:${p.id}`}

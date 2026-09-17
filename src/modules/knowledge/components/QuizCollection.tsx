@@ -12,6 +12,7 @@ import {
 } from '../../../lib/ipc'
 import { showToast } from '../../../lib/toast'
 import { useDataChanged } from '../../../lib/dataChanged'
+import { QUIZ_FOCUS_BOOK_EVENT } from '../../../lib/workbenchLayout'
 import { ResizablePanel } from '../../../components/shared/ResizablePanel'
 
 type Kind = 'favorite' | 'wrong'
@@ -129,6 +130,20 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
   // 本组件原本只在自身操作后本地 load，收不到外部写入 —— 不收这条广播就表现为
   // 「AI 说改好了，错题本界面没反应，得关掉重开」（2026-09-12）
   useDataChanged('quiz', () => { void load(); void loadStats() })
+
+  // 左栏错题本专属侧栏（QuizNavPanel，第四轮拍板④）→ 视图联动：
+  // 点「错题/收藏视图」切 kind；点科目（书）→ 聚焦该书（bookFilter + 翻书态）
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const d = (e as CustomEvent<{ kind?: 'wrong' | 'favorite'; book?: string | null }>).detail ?? {}
+      if (d.kind === 'wrong' || d.kind === 'favorite') setKind(d.kind)
+      setBookFilter(d.book ?? null)
+      setInBook(!!d.book)
+      if (d.book) setShowSidebar(true)
+    }
+    window.addEventListener(QUIZ_FOCUS_BOOK_EVENT, handler)
+    return () => window.removeEventListener(QUIZ_FOCUS_BOOK_EVENT, handler)
+  }, [])
 
   /** 记录的"书"归属：空间内按知识点（来源笔记本）分书，全局按来源空间分书 */
   const bookKeyOf = (r: QuizRecordDto) => spaceName

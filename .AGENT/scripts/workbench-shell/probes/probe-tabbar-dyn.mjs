@@ -44,6 +44,7 @@ function ok(pass, label, detail = '') {
 
 const JS_TABS = `(() => ({
   tabs: [...document.querySelectorAll('[data-wb="tab"]')].map((t) => ({ id: t.dataset.wbTab, active: t.dataset.wbActive })),
+  bookmarks: [...document.querySelectorAll('[data-wb="bookmarks"] [data-wb-bookmark]')].map((b) => b.dataset.wbBookmark),
   tabbarEmpty: !!document.querySelector('[data-wb="tabbar"]')?.textContent.includes('没有打开的标签页'),
   emptyPage: [...document.querySelectorAll('div')].some((d) => d.textContent?.trim() === '所有标签页已关闭' && d.children.length === 0),
   closeBtns: document.querySelectorAll('[data-wb="tab"] button[title="关闭标签页"]').length,
@@ -68,6 +69,10 @@ async function main() {
     await sleep(500)
   }
   await sleep(600)
+  // 状态复位：上轮 D8 可能落盘 bookmarksHidden / leftCollapsed 残留 → 本次启动基线被污染（同 b3 口径）。
+  // 清空 workbenchLayout（空串走默认：书签全显、左栏展开总览），等 debounce flush 后再断言。
+  await evalJs(`window.api?.setSetting ? window.api.setSetting('workbenchLayout', '') : 'no-api'`)
+  await sleep(800)
 
   // D1 启动态：只有启动落点 1 个标签（不再 14 个固定全集）
   let st = await evalJs(JS_TABS)
@@ -118,6 +123,29 @@ async function main() {
   await sleep(400)
   const ovVb = await evalJs(`!!document.querySelector('[data-wb="vaultBar"]')`)
   ok(ovVb, 'D7b 总览态下 vaultBar 显示')
+
+  // D8 🔖 书签选显菜单（第四轮拍板⑤）：总览态打开 → 隐藏书架 → 书签区 5 项 → 勾回 6 项
+  await evalJs(`(() => { document.querySelector('[data-wb="bookmarkMenuBtn"]')?.click(); return true })()`)
+  await sleep(400)
+  const menuOpen = await evalJs(`!!document.querySelector('[data-wb="bookmarkMenu"]')`)
+  ok(menuOpen, 'D8a 🔖 菜单打开（总览态头部）')
+  await evalJs(`(() => { document.querySelector('[data-wb="bookmarkMenu"] [data-wb-menu-item="bookshelf"]')?.click(); return true })()`)
+  await sleep(500)
+  st = await evalJs(JS_TABS)
+  ok(!st.bookmarks.includes('bookshelf') && st.bookmarks.length === 5, 'D8b 隐藏书架 → 书签区 5 项', JSON.stringify(st.bookmarks))
+  await evalJs(`(() => { document.querySelector('[data-wb="bookmarkMenu"] [data-wb-menu-item="bookshelf"]')?.click(); return true })()`)
+  await sleep(500)
+  st = await evalJs(JS_TABS)
+  ok(st.bookmarks.length === 6, 'D8c 重新勾选 → 书签区恢复 6 项（菜单保持打开，允许多选）', JSON.stringify(st.bookmarks))
+
+  // D9 书签点击幂等（第四轮拍板①）：再点当前高亮书签 → 模块态保持（不退回总览）
+  await clickBookmark('editor')
+  await sleep(700)
+  const mod1 = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
+  await clickBookmark('editor')
+  await sleep(500)
+  const mod2 = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
+  ok(mod1 === 'editor' && mod2 === 'editor', 'D9 再点同书签不退出模块态', `mod1=${mod1} mod2=${mod2}`)
 
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)

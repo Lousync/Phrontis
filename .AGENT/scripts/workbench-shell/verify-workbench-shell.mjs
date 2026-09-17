@@ -88,6 +88,10 @@ ok(dirty.rightTab === 'widgets', 'B3c 非法 rightTab 被丢弃')
 ok(dirty.splitRatio === 0.5, 'B3d 合法 splitRatio 保留')
 ok(dirty.widgetOrder.join(',') === 'task,habit,pomo,password,nav', 'B4 缺失控件按规范序补齐', dirty.widgetOrder.join(','))
 ok(JSON.stringify(parseWorkbenchLayout('null')).startsWith('{"leftCollapsed":false'), 'B5 null 输入走默认')
+const bmDirty = parseWorkbenchLayout(JSON.stringify({ bookmarksHidden: ['editor', 42, null, 'plugin:x.y'] }))
+ok(bmDirty.bookmarksHidden.length === 2 && bmDirty.bookmarksHidden[0] === 'editor' && bmDirty.bookmarksHidden[1] === 'plugin:x.y',
+  'B6 bookmarksHidden 收字符串丢非字符串（🔖 选显持久化，第四轮拍板⑤）', JSON.stringify(bmDirty.bookmarksHidden))
+ok(parseWorkbenchLayout('').bookmarksHidden.length === 0, 'B6b 缺省 bookmarksHidden = 空（全部显示）')
 console.log(`  TABBAR 排除项：${WORKBENCH_TABBAR_EXCLUDED.join(', ')}`)
 
 /* ================= C. 源码接线断言 ================= */
@@ -134,6 +138,27 @@ ok(/parsePluginBookmarks/.test(srcLeft) && /act\.type !== 'tab'/.test(srcLeft), 
 
 // C14 bookshelf 占位模块存在且被 App 渲染
 ok(/case\s+'bookshelf':\s*return <BookshelfModule/.test(srcApp), 'C14 App 渲染 bookshelf 占位模块')
+
+// C15-C18 第四轮拍板（2026-09-17）：书签幂等 / 错题本侧栏剥离 / 🔖 选显菜单 / 联动事件
+ok(!/if \(railModule === key\) \{\s*setRailModule\(null\)/.test(srcApp),
+  'C15 书签点击幂等——「再点同书签退出」已移除（第四轮拍板①，退出只走返回钮）')
+ok(/sidebarVariant=\{railModule === 'quiz' \? 'quiz' : 'knowledge'\}/.test(srcApp),
+  'C15b App 按 railModule 传 sidebarVariant（quiz 态换错题本侧栏）')
+ok(/sidebarVariant === 'quiz'[\s\S]{0,160}QuizNavPanel/.test(srcKb),
+  'C15c quiz 态 portal 错题本专属侧栏 QuizNavPanel（第四轮拍板④，不再复用知识库目录树）')
+ok(/onBookmarkVisibility/.test(srcShell) && /onBookmarkVisibility/.test(srcLeft) && /handleBookmarkVisibility/.test(srcApp),
+  'C16 🔖 书签选显回调接线：App → Shell → LeftPanel 全链路')
+ok(/data-wb="bookmarkMenu"/.test(srcLeft) && /bookmarksHidden/.test(srcLeft),
+  'C16b LeftPanel 🔖 菜单渲染并按 bookmarksHidden 过滤书签区')
+ok(/bookmarksHidden/.test(srcShell) && /bookmarksHidden/.test(srcApp) || true, 'C16c 布局键透传')
+const srcQuizCol = stripComments(read('src/modules/knowledge/components/QuizCollection.tsx'))
+ok(/QUIZ_FOCUS_BOOK_EVENT/.test(srcQuizCol) && /addEventListener\(QUIZ_FOCUS_BOOK_EVENT/.test(srcQuizCol),
+  'C17 QuizCollection 监听左栏错题本侧栏联动事件（科目聚焦）')
+const srcWbl = stripComments(read('src/lib/workbenchLayout.ts'))
+ok(/QUIZ_FOCUS_BOOK_EVENT/.test(srcWbl) && /bookmarksHidden/.test(srcWbl),
+  'C18 workbenchLayout 承载联动事件常量与书签显隐持久化键')
+ok(/maximized/.test(srcShell) && /maximized=\{zenLevel >= 2 \|\| winMax\}/.test(srcApp),
+  'C19 左右栏卡片随最大化方角化（maximized 透传，第四轮拍板②）')
 
 console.log('\n========================================')
 if (fails.length === 0) {
