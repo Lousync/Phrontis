@@ -270,12 +270,13 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   }, [availW, viewMode])
 
   // ===== 渲染一页到指定 canvas（single / duo / scroll 池共用；textHost 同时承载链接热区）=====
+  const renderTaskRef = useRef<pdfjsLib.RenderTask | null>(null)
   const renderPageTo = useCallback(async (
     num: number,
     canvas: HTMLCanvasElement,
     textHost: HTMLDivElement | null,
     scale: number,
-    opts?: { withText?: boolean },
+    opts?: { withText?: boolean; track?: boolean },
   ): Promise<void> => {
     const pdf = pdfRef.current
     if (!pdf) return
@@ -288,8 +289,15 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     canvas.style.height = `${viewport.height}px`
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    await page.render({ canvasContext: ctx, viewport, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined }).promise
+    // 翻页渲染可被打断（track）：同一 canvas 连续两次 render 会抛 "Cannot use the same canvas"，
+    // 先取消上一帧再开（v1 同款守卫；竞态错误信息不含 cancel → 会误进 error 全局态把页面打成「打开失败」）
+    if (opts?.track && renderTaskRef.current) { try { renderTaskRef.current.cancel() } catch { /* 忽略 */ } }
+    const task = page.render({ canvasContext: ctx, viewport, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : undefined })
+    if (opts?.track) renderTaskRef.current = task
+    await task.promise
     if (textHost) {
+      // pdf.js 要求容器带 --scale-factor（=viewport.scale），否则每次 renderTextLayer 都刷一条 console error
+      textHost.style.setProperty('--scale-factor', String(viewport.scale))
       textHost.innerHTML = ''
       // 竖滚池：文本层只挂可视页（方案 §11.2）；链接热区总是挂
       if (opts?.withText !== false) {
@@ -312,7 +320,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       const page = await pdf.getPage(num)
       const base = page.getViewport({ scale: 1 })
       const scale = fitWidth ? Math.max(0.2, availW / base.width) : zoomRef.current
-      await renderPageTo(num, canvas, textHost, scale)
+      await renderPageTo(num, canvas, textHost, scale, { track: true })
       setZoom(scale)
     } catch (e) {
       const msg = String((e as Error)?.message || e)
@@ -336,11 +344,18 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       const scale = fitWidth ? Math.max(0.2, (availW - (pages.length === 2 ? 16 : 0)) / slots / baseA.width) : zoomRef.current
       const canvasA = duoCanvasARef.current
       const textA = duoTextARef.current
-      if (canvasA) await renderPageTo(pages[0], canvasA, textA, scale)
+      if (canvasA) await renderPageTo(pages[0], canvasA, textA, scale, { track: true })
+      const canvasB = duoCanvasBRef.current
+      const textB = duoTextBRef.current
       if (pages.length === 2) {
-        const canvasB = duoCanvasBRef.current
-        const textB = duoTextBRef.current
-        if (canvasB) await renderPageTo(pages[1], canvasB, textB, scale)
+        if (canvasB) {
+          canvasB.style.display = 'block'
+          await renderPageTo(pages[1], canvasB, textB, scale)
+        }
+      } else if (canvasB) {
+        // 末页单收：隐藏 B 帧（残留上一跨页的旧页会误导页码）
+        canvasB.style.display = 'none'
+        if (textB) textB.innerHTML = ''
       }
       setZoom(scale)
     } catch (e) {
@@ -514,34 +529,31 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   goPageRef.current = (n) => { void goPage(n) }
 
   // ===== 模式切换 =====
-  const switchMode = useCallback(async (m: PdfLayoutMode) => {
+  // 渲染统一交给 availKey effect（viewMode/availW/zoom 变化时执行）——
+  // 此处若再 rAF 直渲，会和 effect 的渲染并发打同一个 canvas（"Cannot use the same canvas" → 误进「打开失败」态）。
+  const switchMode = useCallback((m: PdfLayoutMode) => {
     if (m === viewMode) return
-    const from = viewMode
-    setViewMode(m)
-    scheduleProgress({ mode: m }, true)
+    if (m === 'duo' && availW < DUO_MIN_WIDTH) {
+      showToast({ type: 'warning', message: `容器宽度不足 ${DUO_MIN_WIDTH}px，已自动切回单页` })
+      m = 'single'
+    }
     if (m === 'scroll') {
-      // 从翻页模式进来：滚到当前页
+      setViewMode('scroll')
+      scheduleProgress({ mode: 'scroll' }, true)
+      // availKey effect 重建页槽后滚到当前页
       requestAnimationFrame(() => scrollGoPage(pageNumRef.current))
       return
     }
     if (m === 'duo') {
-      if (availW < DUO_MIN_WIDTH) {
-        showToast({ type: 'warning', message: `容器宽度不足 ${DUO_MIN_WIDTH}px，已自动切回单页` })
-        setViewMode('single')
-        await renderSingle(pageNumRef.current)
-        scheduleProgress({ mode: 'single' }, true)
-        return
-      }
-      const start = from === 'scroll' ? normalizeSpreadStart(pageNumRef.current) : pageNumRef.current
-      requestAnimationFrame(() => { void renderDuo(start) })
-      return
+      // 先落跨页起始（effect 渲染时读 duoStartRef）
+      duoStartRef.current = normalizeSpreadStart(Math.min(Math.max(1, pageNumRef.current), pdfRef.current?.numPages ?? 1))
+    } else if (viewMode === 'duo') {
+      pageNumRef.current = duoStartRef.current
+      setPageNum(pageNumRef.current)
     }
-    // single
-    const target = from === 'duo' ? duoStartRef.current : pageNumRef.current
-    pageNumRef.current = target
-    setPageNum(target)
-    requestAnimationFrame(() => { void renderSingle(target) })
-  }, [availW, renderDuo, renderSingle, scheduleProgress, scrollGoPage, viewMode])
+    setViewMode(m)
+    scheduleProgress({ mode: m }, true)
+  }, [availW, scheduleProgress, scrollGoPage, viewMode])
 
   // ===== 加载文档 =====
   useEffect(() => {
