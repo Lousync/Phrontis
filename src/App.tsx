@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy } from 'react'
+import { createPortal } from 'react-dom'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag } from './types'
 
 import { PALETTE_MODULES, labelOf as tabLabel, resolveStartupTab, isTabName, WORKBENCH_SWITCHER_TABS } from './lib/appModules'
@@ -46,6 +47,8 @@ import { EditorModule } from './modules/editor'
 import { BookshelfModule } from './modules/bookshelf'
 import { AiTeachingModule } from './modules/ai-teaching'
 import { ReleaseNotesModule } from './modules/release-notes'
+// 左栏书架大纲态（内含 pdfjs —— 必须 lazy，不进主包；见上方模块引入方式注释）
+const PdfRailPanel = lazy(() => import('./components/shared/pdf/PdfRailPanel').then((m) => ({ default: m.PdfRailPanel })))
 
 import { FillPopup } from './modules/toolbox/components/FillPopup'
 import { VaultPicker } from './components/shared/VaultPicker'
@@ -536,6 +539,16 @@ export default function App() {
     return () => window.removeEventListener('kb-editor-doc-changed', handler)
   }, [])
 
+  // 2026-09-17 拍板（书架内自渲染）：点书在书架标签页内部打开阅读器，不再借编辑器文档标签。
+  // 阅读状态上收 App（单一真相源）：书架模块消费 + 左栏大纲态（PdfRailPanel）同步跟随。
+  const [bookshelfReading, setBookshelfReading] = useState<{ relPath: string; name: string } | null>(null)
+  /** 左栏大纲态展示对象：书架内正在读的书优先，其次编辑器激活的 PDF（知识库附件路径） */
+  const railReaderDoc = bookshelfReading
+    ? { relPath: bookshelfReading.relPath }
+    : editorActiveDoc?.kind === 'pdf'
+      ? { relPath: editorActiveDoc.relPath }
+      : null
+
   // 日程侧边栏（v3.2.0 ⑮）桌面磁贴的日历 → 日志跳转。
   // 与 kb-open-in-editor 同范式：事件只送意图，payload 走 state + props
   // （保活层会重建 BlogModule 实例，靠 window 一次性变量会丢）。消费后立即清空，
@@ -877,7 +890,18 @@ export default function App() {
       case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} />
       case 'moments': return <MomentsModule />
       case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'editor' ? wbModSlotEl : null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} openFrom={editorJumpFrom && editorJumpFrom !== 'editor' ? tabLabel(editorJumpFrom) : null} onBackFrom={() => { const f = editorJumpFrom; if (f) { setEditorJumpFrom(null); handleTabChange(f) } }} zenLevel={zenLevel} onZenLevelChange={setZenLevel} />
-      case 'bookshelf': return <BookshelfModule isActive={on} sidebarEl={on && railModule === 'bookshelf' ? wbModSlotEl : null} readerDoc={editorActiveDoc?.kind === 'pdf' ? { relPath: editorActiveDoc.relPath } : null} />
+      case 'bookshelf': return (
+        <BookshelfModule
+          isActive={on}
+          reading={bookshelfReading}
+          onOpenBook={(relPath, name) => {
+            setBookshelfReading({ relPath, name })
+            // 阅读发生时左栏切书架大纲态（锁定除外；若本就处于书架态则无感）
+            if (!wbLayout.leftLocked) setRailModule('bookshelf')
+          }}
+          onCloseBook={() => setBookshelfReading(null)}
+        />
+      )
       case 'aiTeaching': return <AiTeachingModule isActive={on} zenLevel={zenLevel} onZenLevelChange={changeZen} pendingAsk={pendingAsk} onConsumePendingAsk={() => setPendingAsk(null)} />
       case 'recycle': return <RecycleBinModule isActive={on} />
       case 'settings': return <SettingsModule />
@@ -932,6 +956,15 @@ export default function App() {
 <main className="flex-1 flex overflow-hidden bg-transparent relative">
             {/* 工作台三栏外壳（v3.4.0 批次3）：左栏=书签双态（总览/模块侧栏/树模式+锁定+仓库切换） | 中间栏(卡片壳) | 右栏(占位，批次4 填控件)。
                 DayPanel 保持 main 层平级（批次4 迁入右栏）；aiTeaching 整窗形态隐藏左右栏（suppressSides，方案 §2） */}
+            {/* 左栏书架大纲态（拍板 B：三件套只在左栏一份；portal 独立于书架标签页挂载，
+                编辑器 PDF（知识库附件路径）与书架内阅读都走这里；随 railModule 卸载） */}
+            {railModule === 'bookshelf' && wbModSlotEl ? createPortal(
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-[11.5px] text-[var(--text-muted)]">加载中…</div>}>
+                <PdfRailPanel readerDoc={railReaderDoc} />
+              </Suspense>,
+              wbModSlotEl,
+              'wb-bookshelf-rail',
+            ) : null}
             <WorkbenchShell
               activeTab={activeTab}
               railModule={railModule}

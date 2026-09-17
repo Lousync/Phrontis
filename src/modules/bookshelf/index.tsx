@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { BookOpen, Import, Loader2, Play } from 'lucide-react'
+import { lazy, useCallback, useEffect, useRef, useState, Suspense } from 'react'
+import { ArrowLeft, BookOpen, Import, Loader2, Play } from 'lucide-react'
 import {
   pdfReaderCoverList, pdfReaderListBooks, wsImportPdf, workspaceGetCurrent,
 } from '../../lib/ipc'
@@ -8,7 +7,11 @@ import { useDataChanged } from '../../lib/dataChanged'
 import { showToast } from '../../lib/toast'
 import type { PdfBookListItem } from '../../types'
 import { PdfCover } from './PdfCover'
-import { PdfRailPanel } from '../../components/shared/pdf/PdfRailPanel'
+
+// 2026-09-17 拍板「书架内自渲染」：点书在书架标签页内部打开阅读器（书架 ⇄ 阅读器），
+// 不再借编辑器文档标签（编辑器 PDF 能力保留给知识库附件等既有入口）。
+// PdfReaderView 内含 pdfjs —— lazy 拆 chunk（与 editor 同一模块Specifier，Vite 去重共享 chunk）。
+const PdfReaderView = lazy(() => import('../../components/shared/pdf/PdfReaderView').then((m) => ({ default: m.PdfReaderView })))
 
 /**
  * 书架（v3.4.0 PDF 阅读体验整包批次 2，方案 §2/§8）：
@@ -29,7 +32,13 @@ const byRecent: SortFn = (a, b) => {
   return a.name.localeCompare(b.name, 'zh-Hans')
 }
 
-export function BookshelfModule({ isActive = true, sidebarEl = null, readerDoc = null }: { isActive?: boolean; sidebarEl?: HTMLElement | null; readerDoc?: { relPath: string } | null }) {
+export function BookshelfModule({ isActive = true, reading = null, onOpenBook, onCloseBook }: {
+  isActive?: boolean
+  /** 正在阅读的书（状态上收 App：书架模块消费 + 左栏大纲态跟随） */
+  reading?: { relPath: string; name: string } | null
+  onOpenBook?: (relPath: string, name: string) => void
+  onCloseBook?: () => void
+}) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [books, setBooks] = useState<PdfBookListItem[] | null>(null)
   /** 封面缓存命中集（coverList 索引 + mtime 对账通过）——PdfCover 据此走 coverGet 直取 */
@@ -90,13 +99,41 @@ export function BookshelfModule({ isActive = true, sidebarEl = null, readerDoc =
   }, [importing])
 
   // 左栏 bookshelf 模块态（批次 6）：三件套（目录/缩略图/书签）经 portal 挂进左栏 slot
-  const railPortal = sidebarEl ? createPortal(<PdfRailPanel readerDoc={readerDoc} />, sidebarEl) : null
+  const openBook = useCallback((b: PdfBookListItem) => {
+    onOpenBook?.(b.relPath, b.name.replace(/\.pdf$/i, ''))
+  }, [onOpenBook])
+
+  // 阅读视图（书架 ⇄ 阅读器，模块内切换；Hook 全部在早退之前）
+  if (reading) {
+    return (
+      <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+        <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5">
+          <button onClick={() => onCloseBook?.()} title="返回书架"
+            className="kb-pop flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+            <ArrowLeft size={13} />返回书架
+          </button>
+          <span className="min-w-0 truncate text-[12px] text-[var(--text-primary)]">{reading.name}</span>
+        </div>
+        <div className="min-h-0 flex-1">
+          {rootId ? (
+            <Suspense fallback={
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-[var(--text-muted)]">
+                <Loader2 size={22} className="animate-spin text-[var(--accent)]" />
+                <span className="text-[12px]">正在准备阅读器…</span>
+              </div>
+            }>
+              <PdfReaderView rootId={rootId} relPath={reading.relPath} name={reading.name} />
+            </Suspense>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
 
   // 未打开仓库
   if (rootId === null && books !== null) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-[var(--bg-primary)] text-[var(--text-muted)]">
-        {railPortal}
         <BookOpen size={40} strokeWidth={1.5} />
         <div className="text-[13.5px]">书架</div>
         <div className="max-w-[280px] text-center text-[11.5px] leading-relaxed">先在编辑区打开一个仓库，书架会自动收拢其中的 PDF</div>
@@ -110,7 +147,6 @@ export function BookshelfModule({ isActive = true, sidebarEl = null, readerDoc =
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
-      {railPortal}
       {/* 顶栏：标题 + 导入 */}
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-2">
         <BookOpen size={15} className="text-[var(--text-secondary)]" />
@@ -148,7 +184,7 @@ export function BookshelfModule({ isActive = true, sidebarEl = null, readerDoc =
               {continueList.map((b) => (
                 <button
                   key={`c-${b.relPath}`}
-                  onClick={() => window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: b.relPath, from: 'bookshelf' } }))}
+                  onClick={() => openBook(b)}
                   className="kb-item-in group flex w-[210px] shrink-0 items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 text-left hover:border-[var(--accent)]"
                   title={`第 ${b.lastPage} 页 · 打开继续阅读`}
                 >
@@ -173,7 +209,7 @@ export function BookshelfModule({ isActive = true, sidebarEl = null, readerDoc =
             {gridList.map((b) => (
               <button
                 key={b.relPath}
-                onClick={() => window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: b.relPath, from: 'bookshelf' } }))}
+                onClick={() => openBook(b)}
                 className="kb-item-in group text-left"
                 title={b.relPath}
               >

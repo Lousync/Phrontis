@@ -150,7 +150,7 @@ export function PdfRailPanel({ readerDoc }: Props) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-[var(--text-muted)]">
         <BookOpen size={26} strokeWidth={1.4} />
-        <div className="text-[12px] leading-relaxed">在编辑区打开一本 PDF<br />这里会显示它的目录、缩略图与书签</div>
+        <div className="text-[12px] leading-relaxed">从书架选一本书开始阅读<br />这里会显示它的目录、缩略图与书签</div>
       </div>
     )
   }
