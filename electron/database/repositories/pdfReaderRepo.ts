@@ -4,7 +4,7 @@ import { broadcastDataChanged } from '../../main/windowBus'
 import { getCurrentVault } from '../../lib/kbStore/vaultContext'
 import { scanVaultPdfs } from '../../lib/kbStore/knowledgeIndex'
 import {
-  pdfReaderCoverList, pdfReaderCoverSave, pdfReaderGetBook, pdfReaderImportPdf,
+  pdfReaderCoverGet, pdfReaderCoverList, pdfReaderCoverSave, pdfReaderGetBook, pdfReaderImportPdf,
   pdfReaderListProgress, pdfReaderPatchBook,
 } from '../../lib/kbStore/pdfReaderVaultRepo'
 
@@ -73,6 +73,15 @@ export function registerPdfReaderHandlers(): void {
   ipcMain.handle('pdfReader:coverList', () => {
     try {
       return { ok: true, covers: pdfReaderCoverList() }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
+
+  // 封面字节读取（缓存命中后渲染 <img> 用；未命中返回 null 由渲染层懒渲染补种）
+  ipcMain.handle('pdfReader:coverGet', (_e, rootId: string, relPath: string) => {
+    try {
+      return { ok: true, dataUrl: pdfReaderCoverGet(String(rootId), String(relPath)) }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }

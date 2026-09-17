@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
 import { basename, join } from 'path'
 import { exists, kbModulePath, readJson, writeJsonOrThrow } from './jsonStore'
@@ -217,4 +217,22 @@ export function pdfReaderCoverHit(rootId: string, relPath: string, pdfMtimeMs: n
   const dir = kbModulePath(COVER_DIR, '')
   if (!dir || !existsSync(join(dir, hit.file))) return null
   return hit.file
+}
+
+/** 读封面 png → dataUrl（渲染层无 fs，缓存命中后经此通道取字节；未命中返回 null） */
+export function pdfReaderCoverGet(rootId: string, relPath: string): string | null {
+  const key = pdfBookKey(rootId, relPath)
+  if (!key) return null
+  const hit = readCoverIndex()[key]
+  if (!hit) return null
+  const dir = kbModulePath(COVER_DIR, '')
+  const abs = dir ? join(dir, hit.file) : null
+  if (!abs || !existsSync(abs)) return null
+  try {
+    const buf = readFileSync(abs)
+    if (buf.length === 0 || buf.length > MAX_COVER_BYTES) return null
+    return `data:image/png;base64,${buf.toString('base64')}`
+  } catch {
+    return null
+  }
 }

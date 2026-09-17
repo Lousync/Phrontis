@@ -89,6 +89,8 @@ const scopeOk = /export type DataChangeScope\s*=[^;]*'pdfReader'/.test(dataChang
 check('渲染层 DataChangeScope union 含 pdfReader', scopeOk)
 const repoSrc = stripComments(readFileSync(join(ROOT, 'electron/database/repositories/pdfReaderRepo.ts'), 'utf8'))
 check('主进程写盘后 broadcastDataChanged(pdfReader)', repoSrc.includes("broadcastDataChanged('pdfReader')"))
+const bookshelfSrc = stripComments(readFileSync(join(ROOT, 'src/modules/bookshelf/index.tsx'), 'utf8'))
+check('书架挂 useDataChanged(pdfReader)（AI/导入改动界面自动刷新）', bookshelfSrc.includes("useDataChanged('pdfReader'"))
 
 // ===== ④ TabName 冻结 16 项 =====
 console.log('\n--- ④ TabName 冻结 ---')

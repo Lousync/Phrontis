@@ -292,6 +292,7 @@ export const pdfReaderGet = (rootId: string, relPath: string): Promise<{ ok: boo
 export const pdfReaderPatch = (rootId: string, relPath: string, patch: PdfBookPatch, expectedUpdatedAt?: string): Promise<{ ok: boolean; state?: PdfBookState; conflict?: boolean; error?: string }> =>
   a().pdfReaderPatch(rootId, relPath, patch, expectedUpdatedAt)
 export const pdfReaderCoverList = (): Promise<{ ok: boolean; covers?: Record<string, { mtimeMs: number; file: string }>; error?: string }> => a().pdfReaderCoverList()
+export const pdfReaderCoverGet = (rootId: string, relPath: string): Promise<{ ok: boolean; dataUrl?: string | null; error?: string }> => a().pdfReaderCoverGet(rootId, relPath)
 export const pdfReaderCoverSave = (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number): Promise<{ ok: boolean; error?: string }> =>
   a().pdfReaderCoverSave(rootId, relPath, dataUrl, expectedMtimeMs)
 export const wsImportPdf = (): Promise<{ ok: boolean; imported?: string[]; canceled?: boolean; error?: string }> => a().wsImportPdf()

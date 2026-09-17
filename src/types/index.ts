@@ -1491,6 +1491,7 @@ export interface ElectronAPI {
   pdfReaderGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; state?: PdfBookState | null; error?: string }>
   pdfReaderPatch: (rootId: string, relPath: string, patch: PdfBookPatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; state?: PdfBookState; conflict?: boolean; error?: string }>
   pdfReaderCoverList: () => Promise<{ ok: boolean; covers?: Record<string, { mtimeMs: number; file: string }>; error?: string }>
+  pdfReaderCoverGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; dataUrl?: string | null; error?: string }>
   pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => Promise<{ ok: boolean; error?: string }>
   wsImportPdf: () => Promise<{ ok: boolean; imported?: string[]; canceled?: boolean; error?: string }>
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
