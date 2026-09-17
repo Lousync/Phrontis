@@ -5,6 +5,7 @@ import {
   Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu,
 } from 'lucide-react'
 import { getAssistantContext } from '../../../lib/assistantContext'
+import { useSettings } from '../../../lib/SettingsContext'
 import { getKnowledgePages, agentUsageGet, llmListProviders } from '../../../lib/ipc'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
 import { MessageList, fmtTime } from './MessageList'
@@ -57,6 +58,23 @@ const LIST_WRAP: Record<AssistantBodyVariant, string> = {
   page: 'mx-auto w-full max-w-[860px]',
 }
 
+/**
+ * 输入卡外壳样式（v3.4.0 反馈轮：原型 ai-input-style-prototype.html V1-V9 全量落地，
+ * 设置 → 外观 →「AI 助手输入样式」切换）。wrap = 输入卡容器；ta = textarea 覆盖（V7 内条）。
+ * 阴影/描边全部走主题变量（color-mix），明暗主题自适应。
+ */
+const INPUT_SHELLS: Record<string, { wrap: string; ta?: string }> = {
+  v1: { wrap: 'rounded-xl bg-[var(--bg-tertiary)] transition-colors focus-within:bg-[var(--bg-hover)]' },
+  v2: { wrap: 'rounded-xl bg-[var(--bg-primary)] border border-[var(--border-color)] transition-colors focus-within:border-[var(--accent)]' },
+  v3: { wrap: 'rounded-xl bg-[var(--bg-primary)] border border-[var(--border-color)] transition-all focus-within:border-[var(--accent)] focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_18%,transparent)]' },
+  v4: { wrap: 'rounded-xl bg-[var(--bg-primary)] shadow-[0_2px_12px_color-mix(in_srgb,var(--text-primary)_9%,transparent)] transition-all focus-within:shadow-[0_4px_20px_color-mix(in_srgb,var(--accent)_16%,transparent)]' },
+  v5: { wrap: 'rounded-[22px] bg-[var(--bg-tertiary)] transition-colors focus-within:bg-[var(--bg-hover)]' },
+  v6: { wrap: 'rounded-xl bg-transparent border border-[var(--border-color)] transition-colors focus-within:border-[var(--line-strong)] focus-within:bg-[var(--bg-tertiary)]' },
+  v7: { wrap: 'group rounded-xl bg-[var(--bg-tertiary)]', ta: 'bg-[var(--bg-primary)] rounded-[10px] px-2.5 mb-1.5 group-focus-within:shadow-[0_0_0_1.5px_color-mix(in_srgb,var(--accent)_45%,transparent)]' },
+  v8: { wrap: 'rounded-none bg-transparent border-b-[1.5px] border-b-[var(--border-color)] px-1 transition-colors focus-within:border-b-[var(--accent)]' },
+  v9: { wrap: 'rounded-xl bg-[var(--bg-tertiary)] border border-transparent transition-colors focus-within:border-[var(--accent)] focus-within:bg-[var(--bg-hover)]' },
+}
+
 export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyHint, inputTop, showDrawer = true, sidebarEl }: ChatBodyProps) {
   const {
     sessions, providersOk, activeId, messages, input, setInput, inputRef, pending,
@@ -69,6 +87,14 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   } = chat
 
   const isNarrow = variant === 'docked'
+
+  // 输入卡外壳样式（设置 → 外观 →「AI 助手输入样式」；未知值回落 v1）
+  const { s: uiSettings } = useSettings()
+  const shell = INPUT_SHELLS[
+    typeof uiSettings.assistantInputStyle === 'string' && INPUT_SHELLS[uiSettings.assistantInputStyle]
+      ? uiSettings.assistantInputStyle
+      : 'v1'
+  ]
 
   // ---- 输入区工具浮层（📎 附加文件 / 模型选择 / 消耗查看）：互斥单开，外部点击关闭 ----
   const [pop, setPop] = useState<'files' | 'model' | 'usage' | null>(null)
@@ -305,7 +331,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
             {/* 输入区（宿主插槽 + 上下文徽章 + 附件 chips + 工具行 📎/模型/消耗 + 发送）。
                 输入卡 = 无边框浅底大圆角（参考主流 AI 输入框：底色分层替代描边，聚焦时加深） */}
             <div className={`shrink-0 mx-auto ${INPUT_WRAP[variant]} pb-2.5 pt-2`}>
-              <div ref={inputCardRef} className="relative rounded-xl bg-[var(--bg-tertiary)] px-2.5 pt-2 pb-2 transition-colors focus-within:bg-[var(--bg-hover)]">
+              <div ref={inputCardRef} className={`relative px-2.5 pt-2 pb-2 ${shell.wrap}`}>
                 {inputTop}
                 {ctx && (
                   <span className="mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
@@ -356,7 +382,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
                     rows={isNarrow ? 2 : 3}
                     placeholder="问问任何事…（Enter 发送）"
-                    className="w-full appearance-none px-0.5 py-1 rounded-none border-0 bg-transparent text-[12px] resize-none outline-none"
+                    className={`w-full appearance-none px-0.5 py-1 rounded-none border-0 bg-transparent text-[12px] resize-none outline-none ${shell.ta ?? ''}`}
                   />
                 </div>
 

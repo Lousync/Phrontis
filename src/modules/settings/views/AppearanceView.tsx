@@ -131,6 +131,27 @@ export function AppearanceView() {
         />
       </div>
 
+      {/* AI 助手输入样式（批次5 反馈轮：原型 ai-input-style-prototype.html V1-V9 全量落地） */}
+      <div className="mb-8" data-setting-anchor="appearance.assistantInputStyle">
+        <SettingSelect
+          title="AI 助手输入样式"
+          description="AI 助手对话输入框（侧栏 / 右栏 / aiChat 共用）的外观方案。"
+          value={typeof s.assistantInputStyle === 'string' ? s.assistantInputStyle : 'v1'}
+          onChange={id => update('assistantInputStyle', id)}
+          options={[
+            { id: 'v1', label: '浅灰填充', desc: '无边框浅灰底，聚焦时底色加深（默认）', isDefault: true },
+            { id: 'v2', label: '白卡描边', desc: '白底细边框，聚焦时描边转主题色' },
+            { id: 'v3', label: '白卡描边 + 光晕', desc: '描边外发光，聚焦状态最醒目' },
+            { id: 'v4', label: '白卡投影', desc: '无边框靠阴影分层，聚焦时投影抬升' },
+            { id: 'v5', label: '灰底胶囊', desc: '大圆角胶囊形，聚焦底色加深' },
+            { id: 'v6', label: '透明底描边（内凹）', desc: '默认嵌入页面，聚焦浮现浅底' },
+            { id: 'v7', label: '双层嵌套', desc: '外灰壳 + 内白输入条，聚焦内条描边' },
+            { id: 'v8', label: '下划线极简', desc: '无底无框只留底线，聚焦线变主题色' },
+            { id: 'v9', label: '灰底聚焦描边', desc: '平时无边框，聚焦时才显描边' },
+          ]}
+        />
+      </div>
+
       <div className="mb-8" data-setting-anchor="appearance.startupTab">
         <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-3">启动时默认显示</h3>
         <p className="text-[11px] text-[var(--text-muted)] mb-3">每次打开应用时，自动切换到该模块。若该模块被隐藏或不可用，则回退到桌面。</p>
