@@ -247,20 +247,13 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 onDeleteMessage={id => { void deleteMessage(id) }}
                 onAbort={() => { void abort() }}
                 emptyHint={emptyHint ?? (
-                  variant === 'page' ? (
-                    /* page 态：垂直+水平全居中（宽版面板空态在顶部显得飘） */
-                    <div className="flex h-full items-center justify-center">
-                      <div className="text-center text-[12px] leading-relaxed text-[var(--text-muted)] px-4">
-                        在这里可以直接询问你正在查看的内容。<br />
-                        例如打开一篇知识库页面后问：「总结一下这一页」。
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="pt-8 text-center text-[12px] text-[var(--text-muted)] leading-relaxed px-4">
+                  /* 三态统一：空态在滚动区高度内垂直+水平居中（顶对齐显得飘，2026-09-17 反馈） */
+                  <div className="flex h-full items-center justify-center">
+                    <div className="text-center text-[12px] leading-relaxed text-[var(--text-muted)] px-4">
                       在这里可以直接询问你正在查看的内容。<br />
                       例如打开一篇知识库页面后问：「总结一下这一页」。
                     </div>
-                  )
+                  </div>
                 )}
               />
             </div>
@@ -309,9 +302,10 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
               </div>
             )}
 
-            {/* 输入区（宿主插槽 + 上下文徽章 + 附件 chips + 工具行 📎/模型/消耗 + 发送） */}
+            {/* 输入区（宿主插槽 + 上下文徽章 + 附件 chips + 工具行 📎/模型/消耗 + 发送）。
+                输入卡 = 无边框浅底大圆角（参考主流 AI 输入框：底色分层替代描边，聚焦时加深） */}
             <div className={`shrink-0 mx-auto ${INPUT_WRAP[variant]} pb-2.5 pt-2`}>
-              <div ref={inputCardRef} className="relative rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-sm px-2.5 pt-2 pb-2 transition-colors focus-within:border-[var(--accent)]/50">
+              <div ref={inputCardRef} className="relative rounded-xl bg-[var(--bg-tertiary)] px-2.5 pt-2 pb-2 transition-colors focus-within:bg-[var(--bg-hover)]">
                 {inputTop}
                 {ctx && (
                   <span className="mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
@@ -324,7 +318,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 {attachedFiles.length > 0 && (
                   <div className="mb-1 flex flex-wrap gap-1">
                     {attachedFiles.map(f => (
-                      <span key={f.pageId} className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10.5px] text-[var(--text-secondary)]">
+                      <span key={f.pageId} className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[10.5px] text-[var(--text-secondary)]">
                         <FileText size={9} className="shrink-0 text-[var(--accent)]" />
                         <span className="max-w-[160px] truncate">{f.title}</span>
                         <button
@@ -361,12 +355,12 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     onChange={e => { setInput(e.target.value); setSlashActive(0) }}
                     onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
                     rows={isNarrow ? 2 : 3}
-                    placeholder="问问任何事…(Enter 发送，/ 唤起指令)"
+                    placeholder="问问任何事…（Enter 发送）"
                     className="w-full px-0.5 py-1 rounded-none border-0 bg-transparent text-[12px] resize-none outline-none"
                   />
                 </div>
 
-                {/* 工具行：📎 附加文件 / 对话模型 / 消耗查看 —— 发送钮右置 */}
+                {/* 工具行：📎 附加文件 / 对话模型 / 消耗查看（宽态带文字标签，参考主流 AI 输入框）—— 发送钮右置 */}
                 <div className="relative flex items-center gap-0.5 mt-1">
                   <button
                     onClick={() => setPop(p => (p === 'files' ? null : 'files'))}
@@ -374,11 +368,12 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     data-wb="aiAttachBtn"
                     className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors ${
                       pop === 'files' || attachedFiles.length > 0
-                        ? 'bg-[var(--bg-hover)] text-[var(--accent)]'
-                        : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                        ? 'bg-[var(--bg-selected)] text-[var(--accent)]'
+                        : 'text-[var(--text-muted)] hover:bg-[var(--bg-selected)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     <Paperclip size={12} />
+                    {!isNarrow && <span className="leading-none">附件</span>}
                     {attachedFiles.length > 0 && <span className="leading-none">{attachedFiles.length}</span>}
                   </button>
                   <button
@@ -386,22 +381,23 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     title="对话模型"
                     data-wb="aiModelBtn"
                     className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors ${
-                      pop === 'model' ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                      pop === 'model' ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-selected)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     <Cpu size={12} />
-                    <span className="max-w-[92px] truncate leading-none">{modelLabel}</span>
+                    <span className={`leading-none ${isNarrow ? 'max-w-[80px] truncate' : 'max-w-[120px] truncate'}`}>{modelLabel}</span>
                     <ChevronDown size={10} />
                   </button>
                   <button
                     onClick={() => setPop(p => (p === 'usage' ? null : 'usage'))}
                     title="Token 消耗"
                     data-wb="aiUsageBtn"
-                    className={`rounded-md p-1 transition-colors ${
-                      pop === 'usage' ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                    className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors ${
+                      pop === 'usage' ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-selected)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     <Coins size={12} />
+                    {!isNarrow && <span className="leading-none">消耗</span>}
                   </button>
                   <span className="flex-1" />
                   <button onClick={() => { void send() }} disabled={pending || compressing || !input.trim()} title="发送"
