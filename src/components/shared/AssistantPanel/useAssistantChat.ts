@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import { showToast } from '../../../lib/toast'
 import { handleChatCommand } from '../../../lib/chatCommands'
 import { getAssistantContext } from '../../../lib/assistantContext'
+import { useSettings } from '../../../lib/SettingsContext'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentRegenerate, agentEditMessage, agentDeleteMessage,
@@ -72,6 +73,12 @@ export interface AssistantChatController {
   dismissChanges: () => void
   /** 主动刷新会话列表（宿主切换等场景） */
   refreshSessions: () => Promise<void>
+  /** 对话模型（providerId:modelId 串；空 = 全局默认）——settings 持久化 */
+  modelId: string
+  setModelId: (v: string) => void
+  /** 📎 附加文件（随消息上下文；发送后不清空，× 移除） */
+  attachedFiles: Array<{ pageId: string; title: string; path: string }>
+  setAttachedFiles: Dispatch<SetStateAction<Array<{ pageId: string; title: string; path: string }>>>
 }
 
 function nowLocal(): string {
@@ -108,6 +115,12 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   /** 本次请求的真实改动清单（agentChat 返回 changes）→ 完成后卡片 */
   const [lastChanges, setLastChanges] = useState<AgentChange[] | null>(null)
+  // 对话模型选择（settings 持久化；空串 = 全局默认模型）。agentChat 的 modelId 形参
+  const { s: assistantSettings, update: updateAssistantSetting } = useSettings()
+  const modelId = typeof assistantSettings.assistantModelId === 'string' ? assistantSettings.assistantModelId : ''
+  const setModelId = useCallback((v: string) => { updateAssistantSetting('assistantModelId', v) }, [updateAssistantSetting])
+  /** 附加文件（输入区 📎 添加，随消息作为上下文；正文不注入，模型按 path 用文件读取工具自取） */
+  const [attachedFiles, setAttachedFiles] = useState<Array<{ pageId: string; title: string; path: string }>>([])
   // 会话抽屉动画三态（Tailwind v4 translate 过渡的 transitionend 不可依赖，定时器兜底卸载）
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerMounted, setDrawerMounted] = useState(false)
@@ -236,6 +249,19 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setActiveId(sid)
     }
     const ctx = options.resolveContext ? options.resolveContext() : getAssistantContext()
+    // 附加文件（📎）合成进上下文：正文不注入，模型需要内容时用文件读取工具按 path 自取
+    let finalCtx: AgentContextInfo | null = ctx
+    if (attachedFiles.length > 0) {
+      finalCtx = {
+        type: 'attachedFiles',
+        label: (ctx ? ctx.label + ' + ' : '') + `附加 ${attachedFiles.length} 个文件`,
+        data: {
+          ...(ctx?.data ?? {}),
+          attachedFiles: attachedFiles.map(f => ({ title: f.title, path: f.path })),
+          附加上下文说明: '用户为本轮对话附加了以上知识库文件作为上下文；文件正文未注入，需要内容时用文件读取工具按 path 读取。',
+        },
+      }
+    }
     setMessages(prev => [...prev, { role: 'user', content: body, createdAt: nowLocal() }])
     setInput('')
     setPending(true)
@@ -247,7 +273,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       // Skill chip 随消息一次性消费，发出即清
       const sk = pickedSkill
       setPickedSkill(null)
-      const r = await agentChat(sid, body, ctx ?? undefined, cid, undefined, undefined, undefined, sk?.registryName)
+      const r = await agentChat(sid, body, finalCtx ?? undefined, cid, undefined, modelId || undefined, undefined, sk?.registryName)
       // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
       if (r.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要` })
       // 用户在等待期间切换了会话：回复已落库，但不注入当前视图
@@ -269,7 +295,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setPending(false)
       void refreshSessions()
     }
-  }, [input, pending, pickedSkill, refreshMessages, refreshSessions, beginStream, endStream, options])
+  }, [input, pending, pickedSkill, refreshMessages, refreshSessions, beginStream, endStream, options, attachedFiles, modelId])
 
   /** 重新生成最后一条回复（末条为助手消息时可用） */
   const regenerate = useCallback(async () => {
@@ -364,5 +390,9 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     abort,
     dismissChanges: () => setLastChanges(null),
     refreshSessions,
+    modelId,
+    setModelId,
+    attachedFiles,
+    setAttachedFiles,
   }
 }

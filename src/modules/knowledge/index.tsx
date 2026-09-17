@@ -77,18 +77,18 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [locateCategoryId, setLocateCategoryId] = useState<string | null>(null)
   const [allKnowledgeTags, setAllKnowledgeTags] = useState<KnowledgeTag[]>([])
   const [showQuizCollection, setShowQuizCollection] = useState(false)
-  // v3.4.0 左栏「错题本」书签定位（kb-locate-quiz-view）：App 书签点击 = 切到本模块 + 延迟派发事件 → 打开错题本/收藏视图
-  useEffect(() => {
-    const handler = () => setShowQuizCollection(true)
-    window.addEventListener(LOCATE_QUIZ_VIEW_EVENT, handler)
-    return () => window.removeEventListener(LOCATE_QUIZ_VIEW_EVENT, handler)
-  }, [])
   // 错题本视图开合反向通知左栏（批次5 反馈轮，QUIZ_VIEW_TOGGLED_EVENT）：
   // 非书签路径（树内入口）进出时 App 据此切左栏 quiz/knowledge 模块态，双侧栏与错位由此消除
   const toggleQuizCollection = useCallback((open: boolean) => {
     setShowQuizCollection(open)
     window.dispatchEvent(new CustomEvent(QUIZ_VIEW_TOGGLED_EVENT, { detail: { open } }))
   }, [])
+  // v3.4.0 左栏「错题本」书签定位（kb-locate-quiz-view）：App 书签点击 = 切到本模块 + 延迟派发事件 → 打开错题本/收藏视图
+  useEffect(() => {
+    const handler = () => toggleQuizCollection(true)
+    window.addEventListener(LOCATE_QUIZ_VIEW_EVENT, handler)
+    return () => window.removeEventListener(LOCATE_QUIZ_VIEW_EVENT, handler)
+  }, [toggleQuizCollection])
   /** C 级模块插件声明的视图（slot=knowledge.sidebar）+ 当前打开的插件视图 */
   const [pluginViews, setPluginViews] = useState<PluginViewContribution[]>([])
   const [activePluginView, setActivePluginView] = useState<PluginViewContribution | null>(null)

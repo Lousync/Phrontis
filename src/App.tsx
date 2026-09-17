@@ -890,10 +890,13 @@ export default function App() {
 
   // 错题本视图开合反向联动（批次5 反馈轮，QUIZ_VIEW_TOGGLED_EVENT）：非书签路径（树内入口）
   // 进出错题本时 knowledge 派发 {open}——左栏非锁定则切 quiz 态（关 = 回 knowledge 树态），
-  // 避免「主体错题本 + 左栏知识库树」的双侧栏错位
+  // 避免「主体错题本 + 左栏知识库树」的双侧栏错位。quizViewOpen 同时作为标签跟随的特判依据：
+  // knowledge 标签当前显示的可能是错题本子视图，此时点标签条「知识库」应保持 quiz 态而非切回知识库树
+  const [quizViewOpen, setQuizViewOpen] = useState(false)
   useEffect(() => {
     const handler = (e: Event) => {
       const open = (e as CustomEvent<{ open?: boolean }>).detail?.open ?? true
+      setQuizViewOpen(open)
       if (wbLayout.leftLocked) return
       setRailModule(open ? 'quiz' : 'knowledge')
     }
@@ -1184,9 +1187,10 @@ export default function App() {
                       const t = id as TabName
                       handleTabChange(t)
                       // 2026-09-17 反馈拍板：点击标签（含重复点击已激活标签）→ 左栏若不在该模块态则切过去；
-                      // 锁定时左栏归用户所有，不跟随（与 RAIL_FOLLOW 跟随语义一致）
+                      // 锁定时左栏归用户所有，不跟随（与 RAIL_FOLLOW 跟随语义一致）。
+                      // 特判：knowledge 标签当前显示错题本子视图时保持 quiz 态（否则点「知识库」会把错题本的左栏错切成目录树）
                       if (!wbLayout.leftLocked) {
-                        const m = RAIL_FOLLOW_MAP[t]
+                        const m = t === 'knowledge' && quizViewOpen ? 'quiz' : RAIL_FOLLOW_MAP[t]
                         if (m) setRailModule(m)
                       }
                     }

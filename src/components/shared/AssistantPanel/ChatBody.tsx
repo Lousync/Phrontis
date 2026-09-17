@@ -1,15 +1,17 @@
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
-  Loader2, Bot, X, Sparkles,
+  Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu,
 } from 'lucide-react'
 import { getAssistantContext } from '../../../lib/assistantContext'
+import { getKnowledgePages, agentUsageGet, llmListProviders } from '../../../lib/ipc'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
 import { MessageList, fmtTime } from './MessageList'
 import { useAssistantChat } from './useAssistantChat'
 import { AiChatSidebar } from './AiChatSidebar'
 import type { AssistantChatController } from './useAssistantChat'
+import type { AiUsageDay, KnowledgePage } from '../../../types'
 
 /**
  * AI 助手对话体（v3.4.0 批次5）：消息区 + 会话抽屉 + 改动卡 + 输入区的共用 UI。
@@ -63,9 +65,64 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     drawerMounted, drawerOpen, toggleDrawer, closeDrawer,
     send, newSession, loadSession, removeSession, regenerate, editSubmit, deleteMessage,
     abort, dismissChanges,
+    modelId, setModelId, attachedFiles, setAttachedFiles,
   } = chat
 
   const isNarrow = variant === 'docked'
+
+  // ---- 输入区工具浮层（📎 附加文件 / 模型选择 / 消耗查看）：互斥单开，外部点击关闭 ----
+  const [pop, setPop] = useState<'files' | 'model' | 'usage' | null>(null)
+  const inputCardRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!pop) return
+    const onDown = (e: PointerEvent) => {
+      if (inputCardRef.current?.contains(e.target as Node)) return
+      setPop(null)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPop(null) }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [pop])
+
+  // 📎 附加文件候选：打开时拉知识库索引，标题/路径即时过滤（不含已附加）
+  const [fileQuery, setFileQuery] = useState('')
+  const [allPages, setAllPages] = useState<KnowledgePage[]>([])
+  useEffect(() => {
+    if (pop !== 'files') return
+    getKnowledgePages().then(ps => setAllPages(ps ?? [])).catch(() => setAllPages([]))
+  }, [pop])
+  const fileCandidates = useMemo(() => {
+    const q = fileQuery.trim().toLowerCase()
+    return allPages
+      .filter(p => !attachedFiles.some(f => f.pageId === p.id))
+      .filter(p => !q || (p.title || '').toLowerCase().includes(q) || (p.path ?? '').toLowerCase().includes(q))
+      .slice(0, 20)
+  }, [allPages, fileQuery, attachedFiles])
+  const attachFile = (p: KnowledgePage) => {
+    if (!p.path) return
+    setAttachedFiles(prev => [...prev, { pageId: p.id, title: p.title || p.path || p.id, path: p.path! }])
+    setFileQuery('')
+  }
+
+  // 模型候选：打开时拉启用供应商的模型清单（扁平 pid:model 串；「默认模型」置顶）
+  const [providers, setProviders] = useState<Array<{ id: string; name: string; models: string[] }>>([])
+  useEffect(() => {
+    if (pop !== 'model') return
+    llmListProviders()
+      .then(r => setProviders(r.providers.filter(p => p.enabled && p.models.length > 0).map(p => ({ id: p.id, name: p.name, models: p.models }))))
+      .catch(() => setProviders([]))
+  }, [pop])
+  const modelLabel = modelId ? modelId.split(':').slice(1).join(':') || modelId : '默认模型'
+
+  // 消耗浮层：今日用量 + 当前会话当日消耗（agentUsageGet 只读）
+  const [usage, setUsage] = useState<AiUsageDay | null>(null)
+  useEffect(() => {
+    if (pop !== 'usage') return
+    const key = (() => { const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` })()
+    agentUsageGet().then(u => setUsage(u.days?.[key] ?? null)).catch(() => setUsage(null))
+  }, [pop])
+  const sessionUsage = activeId ? usage?.sessions?.[activeId] : null
 
   // ---- / 弹层派生态：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
   const [slashActive, setSlashActive] = useState(0)
@@ -122,9 +179,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
           </span>
           {isNarrow && onExpand && (
             <button onClick={onExpand} title="扩大为完整对话页"
-              className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-1 text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_20%,transparent)] transition-colors">
-              <Maximize2 size={12} />
-              <span className="text-[10.5px]">扩大</span>
+              className="ml-auto rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+              <Maximize2 size={13} />
             </button>
           )}
         </div>
@@ -191,10 +247,20 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 onDeleteMessage={id => { void deleteMessage(id) }}
                 onAbort={() => { void abort() }}
                 emptyHint={emptyHint ?? (
-                  <div className="pt-8 text-center text-[12px] text-[var(--text-muted)] leading-relaxed px-4">
-                    在这里可以直接询问你正在查看的内容。<br />
-                    例如打开一篇知识库页面后问：「总结一下这一页」。
-                  </div>
+                  variant === 'page' ? (
+                    /* page 态：垂直+水平全居中（宽版面板空态在顶部显得飘） */
+                    <div className="flex h-full items-center justify-center">
+                      <div className="text-center text-[12px] leading-relaxed text-[var(--text-muted)] px-4">
+                        在这里可以直接询问你正在查看的内容。<br />
+                        例如打开一篇知识库页面后问：「总结一下这一页」。
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="pt-8 text-center text-[12px] text-[var(--text-muted)] leading-relaxed px-4">
+                      在这里可以直接询问你正在查看的内容。<br />
+                      例如打开一篇知识库页面后问：「总结一下这一页」。
+                    </div>
+                  )
                 )}
               />
             </div>
@@ -243,15 +309,31 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
               </div>
             )}
 
-            {/* 输入区（上下文徽章 + / 弹层 + 压缩占位 + Skill chip） */}
+            {/* 输入区（宿主插槽 + 上下文徽章 + 附件 chips + 工具行 📎/模型/消耗 + 发送） */}
             <div className={`shrink-0 mx-auto ${INPUT_WRAP[variant]} pb-2.5 pt-2`}>
-              <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-2.5 pt-2 pb-2 focus-within:border-[var(--accent)]/60">
+              <div ref={inputCardRef} className="relative rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-sm px-2.5 pt-2 pb-2 transition-colors focus-within:border-[var(--accent)]/50">
+                {inputTop}
                 {ctx && (
                   <span className="mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
                     <FileText size={10} className="shrink-0 text-[var(--accent)]" />
                     <span className="truncate">{ctx.label}</span>
                     <span className="text-[var(--text-disabled)]">·将随提问附带</span>
                   </span>
+                )}
+
+                {attachedFiles.length > 0 && (
+                  <div className="mb-1 flex flex-wrap gap-1">
+                    {attachedFiles.map(f => (
+                      <span key={f.pageId} className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[10.5px] text-[var(--text-secondary)]">
+                        <FileText size={9} className="shrink-0 text-[var(--accent)]" />
+                        <span className="max-w-[160px] truncate">{f.title}</span>
+                        <button
+                          onClick={() => setAttachedFiles(prev => prev.filter(x => x.pageId !== f.pageId))}
+                          className="shrink-0 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]" title="移除附件"
+                        ><X size={9} /></button>
+                      </span>
+                    ))}
+                  </div>
                 )}
 
                 {compressing && (
@@ -283,12 +365,157 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     className="w-full px-0.5 py-1 rounded-none border-0 bg-transparent text-[12px] resize-none outline-none"
                   />
                 </div>
-                <div className="flex items-center justify-end mt-0.5">
+
+                {/* 工具行：📎 附加文件 / 对话模型 / 消耗查看 —— 发送钮右置 */}
+                <div className="relative flex items-center gap-0.5 mt-1">
+                  <button
+                    onClick={() => setPop(p => (p === 'files' ? null : 'files'))}
+                    title="添加文件作为上下文（模型按需读取全文）"
+                    data-wb="aiAttachBtn"
+                    className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors ${
+                      pop === 'files' || attachedFiles.length > 0
+                        ? 'bg-[var(--bg-hover)] text-[var(--accent)]'
+                        : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    <Paperclip size={12} />
+                    {attachedFiles.length > 0 && <span className="leading-none">{attachedFiles.length}</span>}
+                  </button>
+                  <button
+                    onClick={() => setPop(p => (p === 'model' ? null : 'model'))}
+                    title="对话模型"
+                    data-wb="aiModelBtn"
+                    className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors ${
+                      pop === 'model' ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    <Cpu size={12} />
+                    <span className="max-w-[92px] truncate leading-none">{modelLabel}</span>
+                    <ChevronDown size={10} />
+                  </button>
+                  <button
+                    onClick={() => setPop(p => (p === 'usage' ? null : 'usage'))}
+                    title="Token 消耗"
+                    data-wb="aiUsageBtn"
+                    className={`rounded-md p-1 transition-colors ${
+                      pop === 'usage' ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    <Coins size={12} />
+                  </button>
+                  <span className="flex-1" />
                   <button onClick={() => { void send() }} disabled={pending || compressing || !input.trim()} title="发送"
-                    className="w-8 h-8 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
-                    {pending ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp size={15} />}
+                    className="h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
+                    {pending ? <Loader2 size={12} className="animate-spin" /> : <ArrowUp size={14} />}
                   </button>
                 </div>
+
+                {/* ── 📎 文件浮层 ── */}
+                {pop === 'files' && (
+                  <div data-wb="aiAttachPop" className="absolute bottom-full left-0 mb-2 w-[280px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
+                    <div className="border-b border-[var(--border-color)] p-1.5">
+                      <input
+                        value={fileQuery}
+                        onChange={e => setFileQuery(e.target.value)}
+                        onKeyDown={e => e.stopPropagation()}
+                        placeholder="搜索知识库页面…"
+                        spellCheck={false}
+                        autoFocus
+                        className="w-full rounded-md bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11.5px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-disabled)]"
+                      />
+                    </div>
+                    <div className="max-h-[220px] overflow-y-auto p-1">
+                      {fileCandidates.length === 0 ? (
+                        <div className="px-2 py-4 text-center text-[11px] text-[var(--text-muted)]">{fileQuery ? '未找到匹配页面' : '知识库还没有页面'}</div>
+                      ) : fileCandidates.map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => attachFile(p)}
+                          className="w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                          title={p.path ?? p.title}
+                        >
+                          <span className="block truncate text-[11.5px] text-[var(--text-primary)]">{p.title || p.path || '无标题'}</span>
+                          {p.path && <span className="block truncate text-[10px] text-[var(--text-disabled)]">{p.path}</span>}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="border-t border-[var(--border-color)] px-2.5 py-1.5 text-[9.5px] text-[var(--text-muted)]">
+                      附加后模型按需读取文件内容（不整篇注入）
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 模型浮层 ── */}
+                {pop === 'model' && (
+                  <div data-wb="aiModelPop" className="absolute bottom-full left-0 mb-2 w-[250px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
+                    <div className="max-h-[240px] overflow-y-auto p-1">
+                      <button
+                        onClick={() => setModelId('')}
+                        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                      >
+                        <Check size={12} className={`shrink-0 ${modelId === '' ? 'text-[var(--accent)]' : 'opacity-0'}`} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[12px] text-[var(--text-primary)]">默认模型</span>
+                          <span className="block text-[10px] text-[var(--text-muted)]">设置里的全局默认对话模型</span>
+                        </span>
+                      </button>
+                      {providers.map(p => p.models.map(m => {
+                        const id = `${p.id}:${m}`
+                        const on = modelId === id
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => setModelId(id)}
+                            className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                          >
+                            <Check size={12} className={`shrink-0 ${on ? 'text-[var(--accent)]' : 'opacity-0'}`} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-[12px] text-[var(--text-primary)]">{m}</span>
+                              <span className="block text-[10px] text-[var(--text-muted)]">{p.name}</span>
+                            </span>
+                          </button>
+                        )
+                      }))}
+
+                      {providers.length === 0 && (
+                        <div className="px-2 py-4 text-center text-[11px] text-[var(--text-muted)]">没有已启用的模型供应商</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 消耗浮层 ── */}
+                {pop === 'usage' && (
+                  <div data-wb="aiUsagePop" className="absolute bottom-full left-0 mb-2 w-[230px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
+                    <div className="border-b border-[var(--border-color)] px-2.5 py-2">
+                      <div className="text-[10.5px] text-[var(--text-muted)]">今日消耗</div>
+                      <div className="mt-0.5 text-[15px] font-semibold text-[var(--text-primary)]">
+                        {usage ? (usage.in + usage.out).toLocaleString() : '0'}
+                        <span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">tokens</span>
+                      </div>
+                      {usage && (
+                        <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">
+                          输入 {usage.in.toLocaleString()} · 输出 {usage.out.toLocaleString()} · {usage.calls} 次调用
+                          {usage.cache > 0 && ` · 缓存命中 ${usage.cache.toLocaleString()}`}
+                        </div>
+                      )}
+                    </div>
+                    <div className="px-2.5 py-2">
+                      <div className="text-[10.5px] text-[var(--text-muted)]">当前会话（今日）</div>
+                      {sessionUsage ? (
+                        <div className="mt-0.5 text-[12px] text-[var(--text-primary)]">
+                          {(sessionUsage.in + sessionUsage.out).toLocaleString()}
+                          <span className="ml-1 text-[10px] text-[var(--text-muted)]">tokens（输入 {sessionUsage.in.toLocaleString()} / 输出 {sessionUsage.out.toLocaleString()}）</span>
+                        </div>
+                      ) : (
+                        <div className="mt-0.5 text-[11px] text-[var(--text-muted)]">本会话今日还没有消耗</div>
+                      )}
+                    </div>
+                    <div className="border-t border-[var(--border-color)] px-2.5 py-1.5 text-[9.5px] text-[var(--text-muted)]">
+                      按日落盘近 30 天 · 右栏扩大页可看会话排行
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </>
