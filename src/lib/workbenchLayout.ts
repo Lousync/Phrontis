@@ -83,11 +83,10 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
  * 顶部模块切换条排除清单：aiTeaching 走整窗形态不进切换条；devtools 由 DEV 按钮直达、
  * 进了切换条也无法从 UI 再打开，一并排除。
  *
- * 2026-09-16 第二轮 UI 反馈拍板：切换条 = **固定模块单选切换器**（「其他模块整合进了工作台」
- * 心智，跟旧版顶部一个效果），不再是 openTabs 停靠标签——openTabs 机制保留供
- * aiTeaching 整窗返回等内部逻辑使用，仅切换条不再消费。
- * 切换条固定清单 WORKBENCH_SWITCHER_TABS 在 appModules.ts（从 APP_MODULES 派生；
- * 本文件保持零 value import，契约脚本 strip-types 直跑不炸）。
+ * 2026-09-17 第三轮 UI 反馈拍板：标签条 = **文档标签式动态标签**（openTabs，可关闭/拖拽/
+ * 全关空态），模块按钮不上标签栏——openTabs 恢复为标签条数据源。
+ * 本清单 = 不画成标签的模块（渲染侧过滤）：aiTeaching 整窗形态（标签条本身隐藏）、
+ * devtools dev-only。本文件保持零 value import，契约脚本 strip-types 直跑不炸。
  */
 export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools']
 

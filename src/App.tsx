@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag } from './types'
 
-import { PALETTE_MODULES, labelOf as tabLabel, resolveStartupTab, isTabName, WORKBENCH_SWITCHER_TABS } from './lib/appModules'
+import { PALETTE_MODULES, labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
+import { WORKBENCH_TABBAR_EXCLUDED } from './lib/workbenchLayout'
+import { landingAfterClose } from './modules/editor/tabPolicy'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchTabBar } from './components/workbench/WorkbenchTabBar'
 import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, type RailModule } from './lib/workbenchLayout'
@@ -81,7 +83,10 @@ export default function App() {
   if (window.api.isDayPanel) {
     return <DayPanelWindowApp />
   }
-  const [activeTab, setActiveTab] = useState<TabName>('blog')
+  // 2026-09-17 第三轮反馈：允许全部标签关闭（拍板③）→ activeTab 可为 null = 空态（无激活模块）。
+  // 初始 null = settings 恢复前的空窗（占位改 null 而非 'blog'：'blog' 会被 openTabs 登记
+  // 成假标签——settings 在 mount 前往往已 ready，ready 判定拦不住；null 由 !activeTab 守卫天然拦住）。
+  const [activeTab, setActiveTab] = useState<TabName | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [sidebarWidths, setSidebarWidths] = useState<Record<string, number>>({})
   const [importModalOpen, setImportModalOpen] = useState(false)
@@ -347,7 +352,8 @@ export default function App() {
 
   useCheckinReminder()
   const mountedTabs = useRef<Set<TabName>>(new Set())  // keep modules alive after first visit
-  /** 中间标签条显示的已打开 Tab（v3.4.0）：只能由入口产生，无「＋新建」按钮；activeTab 变化时自动追加（见下方 effect） */
+  /** 中间标签条显示的已打开 Tab（v3.4.0）：只能由入口产生，无「＋新建」按钮；activeTab 变化时自动追加（见下方 effect）。
+      2026-09-17 拍板：恢复为标签条数据源（文档标签式，可关闭/拖拽/全关空态），可关闭与重排由 closeTab / handleReorder 消费。 */
   const [openTabs, setOpenTabs] = useState<TabName[]>([])
 
   // 启动检测当前仓库：无 → 仓库选择页（VaultPicker，新老用户统一）；有且开启「每次启动选择仓库」→ 启动形态选择页
@@ -385,7 +391,7 @@ export default function App() {
   // 判定在主进程（app.getVersion() vs 仓库 `.knowbase/modules/release-notes/index.json` 的基线），
   // 渲染层只消费结果。延迟 2s：错开 updateStartupCheck() 的 6s（不抢网络/IO），也不与首屏渲染抢。
   // 无当前仓库 / IPC 未就绪 → 静默失败，绝不打扰（更新说明不值得为它弹错误）。
-  const activeTabRef = useRef<TabName>('blog')
+  const activeTabRef = useRef<TabName | null>('blog')
   useEffect(() => { activeTabRef.current = activeTab }, [activeTab])
   const tabBeforeNotes = useRef<TabName | null>(null)
   const notesCheckedRef = useRef(false)
@@ -625,7 +631,7 @@ export default function App() {
   useEffect(() => {
     if (!import.meta.env.DEV) return
     import('./devbridge/collector')
-      .then(m => m.reportUiState({ activeModule: activeTab }))
+      .then(m => m.reportUiState({ activeModule: activeTab ?? undefined }))
       .catch(() => { /* 桥未启用 */ })
   }, [activeTab])
 
@@ -673,7 +679,7 @@ export default function App() {
   }, [s.zoom])
 
   // Sync active tab for module-level shortcut guards (hidden modules stay mounted)
-  useEffect(() => { setGlobalActiveTab(activeTab) }, [activeTab])
+  useEffect(() => { setGlobalActiveTab(activeTab ?? '') }, [activeTab])
 
   // Blue-outline drag workaround
   useEffect(() => {
@@ -695,11 +701,25 @@ export default function App() {
 
   // 标签条同步（v3.4.0）：任何通道的 setActiveTab（handleTabChange / 全局事件 / 命令面板 / 启动落点）
   // 都会走到这里 —— openTabs 统一在此追加，杜绝「某条打开路径漏登记」。
-  // 2026-09-16 拍板：切换条改固定单选清单（WORKBENCH_SWITCHER_TABS）后不再消费 openTabs，
-  // 但本机制保留——aiTeaching 整窗形态的「返回工作台」仍按 openTabs 找回上一个标签。
+  // 2026-09-17 拍板：openTabs 恢复为标签条数据源（文档标签式）；aiTeaching 整窗「返回工作台」
+  // 也按 openTabs 找回上一个标签。!activeTab 守卫 = 启动占位期（null）不登记假标签。
   useEffect(() => {
+    if (!activeTab) return
     setOpenTabs((ts) => (ts.includes(activeTab) ? ts : [...ts, activeTab]))
   }, [activeTab])
+
+  // 关闭标签（✕ / 中键）：关的是激活标签 → 落右邻居优先、越界退左邻居（tabPolicy.landingAfterClose
+  // 与编辑器文档标签同一份语义）；关完为空 = 空态（activeTab 置 null，拍板③允许全部关闭）
+  const closeTab = useCallback((tab: TabName) => {
+    const i = openTabs.indexOf(tab)
+    if (i === -1) return
+    const next = openTabs.filter((t) => t !== tab)
+    setOpenTabs(next)
+    if (activeTab === tab) setActiveTab(landingAfterClose(openTabs, tab) as TabName | null)
+  }, [openTabs, activeTab])
+
+  // 标签拖拽重排（现成机制恢复）：只调 openTabs 顺序，激活标签跟内容走、不变
+  const handleReorder = useCallback((tabs: TabName[]) => setOpenTabs(tabs), [])
 
   const handleTabChange = (tab: TabName) => {
     setEditorJumpFrom(null) // 手动切 Tab 即清除「返回来源」上下文（条目6）
@@ -738,7 +758,7 @@ export default function App() {
     if (!followMountedRef.current) { followMountedRef.current = true; return }
     if (!followArmedRef.current) return
     if (wbLayout.leftLocked) return
-    const m = RAIL_FOLLOW_MAP[activeTab]
+    const m = activeTab ? RAIL_FOLLOW_MAP[activeTab] : undefined
     if (m) setRailModule(m)
   }, [activeTab, wbLayout.leftLocked])
 
@@ -904,14 +924,16 @@ export default function App() {
                 半透明底色 + 顶缘高光 = 液态玻璃卡片；禅模式 Z2+ 或 最大化（UI 优化条目1）全屏化（去边距/圆角/边框，贴满屏幕） */}
             <div className={`transition-all duration-300 ease-out ${zenLevel >= 2 || winMax ? 'flex min-w-0 flex-1' : 'm-1.5 flex min-w-0 flex-1'}`}>
               <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden transition-all duration-300 ease-out ${zenLevel >= 2 || winMax ? 'bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)]' : 'rounded-xl border border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-primary)_88%,transparent)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}>
-              {/* 顶部模块切换条（v3.4.0 方案 §3.2；2026-09-16 拍板修订）：固定模块单选切换器
-                  （WORKBENCH_SWITCHER_TABS 固定全集），非 openTabs 停靠标签；无关闭/拖拽。
-                  aiTeaching 整窗形态隐藏（方案 §2），devtools 无 UI 再开入口一并排除 */}
+              {/* 顶部标签条（v3.4.0 方案 §3.2；2026-09-17 第三轮反馈拍板定稿）：文档标签式动态
+                  标签（openTabs，可关闭/拖拽重排/全关空态），模块按钮不上标签栏——模块由书签 /
+                  图标条入口打开。aiTeaching 整窗形态隐藏（方案 §2）；EXCLUDED 不画成标签 */}
               {activeTab !== 'aiTeaching' && (
                 <WorkbenchTabBar
-                  tabs={WORKBENCH_SWITCHER_TABS}
+                  tabs={openTabs.filter((t) => !WORKBENCH_TABBAR_EXCLUDED.includes(t))}
                   active={activeTab}
                   onSelect={handleTabChange}
+                  onClose={closeTab}
+                  onReorder={handleReorder}
                 />
               )}
               {activeTab === 'aiTeaching' && (
@@ -938,8 +960,17 @@ export default function App() {
                           模块单列为数组外的首个子节点，切 Tab 时可见↔隐藏换了子节点槽位，React 按位置卸载重建
                           （= ISS-2026-09-04-07 备注的「保活层在切 Tab 时会重建编辑器实例」真实成因）；
                           同数组内换序由 key 保住实例，模块内状态（会话/中栏视图/滚动）自然保留。 */}
-                      {[activeTab, ...Array.from(mountedTabs.current).filter((t) => t !== activeTab && t !== secondaryTab)]
-                        .map((t) => renderMounted(t, t === activeTab))}
+                      {[
+                        ...(activeTab ? [activeTab] : []),
+                        ...Array.from(mountedTabs.current).filter((t) => t !== activeTab && t !== secondaryTab),
+                      ].map((t) => renderMounted(t, t === activeTab))}
+                      {/* 全关空态（2026-09-17 拍板③）：无激活模块时显示引导页；已保活模块仍在（display:none） */}
+                      {activeTab === null && (
+                        <div className="flex flex-1 flex-col items-center justify-center gap-1.5 pb-16">
+                          <div className="text-[13.5px] text-[var(--text-secondary)]">所有标签页已关闭</div>
+                          <div className="text-[12px] text-[var(--text-muted)]">从左侧书签或图标条打开模块</div>
+                        </div>
+                      )}
                     </div>
                     {secondaryTab && secondaryTab !== activeTab && (
                       <ResizablePanel

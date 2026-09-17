@@ -56,7 +56,8 @@ function parsePluginBookmarks(raw: string | undefined | null): PluginBookmark[] 
 }
 
 interface Props {
-  activeTab: TabName
+  /** 当前激活模块；null = 全部标签已关闭的空态（书签高亮只看 railModule） */
+  activeTab: TabName | null
   /** 当前左栏模块态（null = 总览态）；树模式由 leftMode==='tree' 单独表达 */
   railModule: RailModule | null
   locked: boolean
@@ -166,7 +167,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, locked, treeMode, mo
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             <div data-wb="bookmarks" className="flex flex-col gap-0.5 p-1.5">
               {WORKBENCH_BOOKMARKS.map((b) => {
-                const isActive = railModule === b.key || (railModule === null && RAIL_FOLLOW_MAP[activeTab] === b.key && activeTab === b.tab)
+                const isActive = railModule === b.key || (railModule === null && !!activeTab && RAIL_FOLLOW_MAP[activeTab] === b.key && activeTab === b.tab)
                 const c = BOOKMARK_COLORS[b.key]
                 return (
                   <button

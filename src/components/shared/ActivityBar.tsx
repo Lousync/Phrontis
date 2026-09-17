@@ -24,7 +24,8 @@ const RAIL_BUTTONS: { id: TabName; label: string; icon: (size: number) => React.
 ]
 
 interface Props {
-  active: TabName
+  /** 当前激活模块；null = 全部标签已关闭的空态（无高亮项） */
+  active: TabName | null
   onChange: (tab: TabName) => void
   /** UI 优化条目1：最大化时图标条卡去留白/圆角/边框阴影，贴满屏幕边缘 */
   flush?: boolean

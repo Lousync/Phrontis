@@ -22,7 +22,7 @@ interface Props {
   /** 右栏内容（批次4 前为占位） */
   right: React.ReactNode
   /** 当前激活标签（左栏书签高亮 / 跟随展示） */
-  activeTab: TabName
+  activeTab: TabName | null
   /** 左栏模块态（null = 总览态） */
   railModule: RailModule | null
   /** 模块态 slot 的 ref callback（App 收集 DOM 传给模块做 sidebarEl portal 目标） */
