@@ -172,9 +172,12 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     /* 根节点必须 h-full 不能 flex-1（铁律 11）：page 态槽位容器（renderMounted div）是块级，
        flex-1 在里面不生效 → 高度塌成内容高，输入框跟着消息区飘到面板中上部（2026-09-17 实机反馈） */
     <div className="flex h-full min-h-0 flex-col" data-assistant-variant={variant}>
-      {/* 轻头部（悬浮侧栏的头部在其外壳上）：抽屉 + 标题 + ⤢（仅窄版）。
-          page 态 showDrawer=false：Menu 钮不渲染（会话导航在左栏 AI 会话侧栏） */}
-      {variant !== 'sidebar' && (
+      {/* 轻头部：仅在**有控件可放**时才渲染（2026-09-18 反馈轮）。
+          悬浮侧栏的头部在其外壳上（本组件不渲染）；page 态（右栏 AI 态 ⤢ 扩大的主体页）
+          showDrawer=false 且 isNarrow=false → 原来只剩一个「✦ AI 助手」纯标题，
+          与左栏 AI 会话侧栏重复 → 整块不渲染，对话区直接顶满。
+          docked 态保留（Menu 会话列表 + ⤢ 扩大）。 */}
+      {variant !== 'sidebar' && (showDrawer || (isNarrow && onExpand)) && (
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-2">
           {showDrawer && (
             <button onClick={toggleDrawer} title="会话列表"

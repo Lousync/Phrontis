@@ -12,7 +12,7 @@
  * 用法：
  *   node --experimental-strip-types .AGENT/scripts/workbench-shell/verify-workbench-shell.mjs
  */
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import {
   WORKBENCH_BOOKMARKS, RAIL_FOLLOW_MAP, WORKBENCH_TABBAR_EXCLUDED,
   parseWorkbenchLayout, DEFAULT_WORKBENCH_LAYOUT,
@@ -392,6 +392,43 @@ ok(!/开发者工具<\/span>|>DEV<\/span>/.test(srcDevtools),
 const blogMainOpen = (srcBlog.match(/<div className="flex min-h-0 flex-1">/g) || []).length
 ok(blogMainOpen === 1,
   'H6 blog 删行后主区容器恰好一处（未误删/误留兄弟层）', `count=${blogMainOpen}`)
+
+// ===== I. B 组首批：aiChat 页态标题行 + 页面条空态提示（v3.4.0，2026-09-18 反馈轮）=====
+// 背景：开发负责人指出两处漏删 —— ① 右栏 AI 栏 ⤢ 扩大的主体页（中栏 aiChat 标签，ChatBody page 态）
+// 顶部仍有「✦ AI 助手」纯标题行，与左栏 AI 会话侧栏重复；② 页面条空态提示文字属冗余说明（铁律 12）。
+// 判据：① ChatBody 轻头部渲染条件收窄为「有控件可放」（showDrawer 或 docked 的 ⤢）；
+//       ② 页面条空态提示块与 its 专属 state（hasAnyItem）/ MutationObserver 观察一并清除。
+// 运行时由 probe-batch5-ai.mjs 的 A2b/A6b 与 probe-pagebar.mjs 的 P 组在真实 Electron 内实证。
+const srcChatBody = stripComments(read('src/components/shared/AssistantPanel/ChatBody.tsx'))
+
+ok(/variant !== 'sidebar' && \(showDrawer \|\| \(isNarrow && onExpand\)\)/.test(srcChatBody),
+  'I1 ChatBody 轻头部仅在「有控件可放」时渲染（page 态无控件 → 整块不渲染）')
+ok(!/没有打开的页面/.test(srcPageBar),
+  'I2 页面条空态提示文字已删（源码层无「没有打开的页面」残留）')
+ok(!/hasAnyItem/.test(srcPageBar) && !/MutationObserver/.test(srcPageBar),
+  'I3 页面条空态专属 state（hasAnyItem）与 MutationObserver 观察已一并清除（不留死代码）')
+// I4 防陈旧选择器：页面条置顶后 [data-wb="tabbar"] 已退役（F1/P1b），
+// 探针若**正向**用它选条目 = 断言必然 miss 后读到上一个态的容器（假失败/假通过）。
+// 负向用法（`!q('[data-wb="tabbar"]')` 之类，P1b 就是在断言它已退役）是合法的，不计入。
+// batch5 探针写于置顶之前，2026-09-18 已迁移到 pagebar —— 本断言防它回退。
+//
+// 未纳入扫描的已知陈旧探针（整探针仍待迁移，非本轮范围）：
+//   probe-tabbar-dyn.mjs —— D1/D4a/D6c 段针对已退役的标签条（含「没有打开的标签页」空态），
+//     其 D7~D12（vaultBar / 书签菜单 / 工具侧栏 / 番茄钟）断言仍有价值，
+//     待后续整体迁移到 pagebar 口径时一并处理。
+const probeDir = '.AGENT/scripts/workbench-shell/probes'
+const I4_SKIP = new Set(['probe-tabbar-dyn.mjs'])
+const staleTabbar = []
+for (const f of readdirSync(`${ROOT}/${probeDir}`)) {
+  if (!f.endsWith('.mjs') || I4_SKIP.has(f)) continue
+  const src = stripComments(read(`${probeDir}/${f}`))
+  // 正向形态：作为选择器出现在 querySelector* 里（`!q(...)` 的负向断言不算）
+  const re = /(?<![!])\bq(?:uerySelector|uerySelectorAll)?\s*\(\s*'\[data-wb="tabbar"\]/g
+  if (re.test(src)) staleTabbar.push(f)
+}
+ok(staleTabbar.length === 0,
+  'I4 探针层无陈旧 tabbar 正向选择残留（条目一律走 [data-wb="pagebar"] [data-wb-tab]）',
+  staleTabbar.join(', ') || 'clean')
 
 console.log('\n========================================')
 if (fails.length === 0) {

@@ -214,6 +214,15 @@ async function main() {
 
   const shotKnowledge = await shot('pagebar-03-knowledge')
 
+  // P10 空态提示文字已删（2026-09-18 反馈轮）：页面条内不得再出现「没有打开的页面」。
+  // 该文案属冗余说明（左栏书签 / 图标条本身就是入口），按铁律 12 只收不增。
+  // 判据分两路：① 条内文本不含关键词；② 源码层/hasAnyItem 死代码已在契约 I3 锁住。
+  const emptyHint = await evalJs(`(() => {
+    const bar = document.querySelector('[data-wb="pagebar"]')
+    return { hasHint: !!bar && bar.textContent.includes('没有打开的页面'), text: (bar?.textContent ?? '').slice(0, 120) }
+  })()`)
+  ok(!emptyHint.hasHint, 'P10 页面条内无空态提示文字（「没有打开的页面」足迹为零）', JSON.stringify(emptyHint))
+
   ok(consoleErrors.length === 0, 'P9 console 零 error', consoleErrors.slice(0, 3).join(' | '))
 
   console.log('\n截图：', shotOverview, '|', shotEditor, '|', shotKnowledge)

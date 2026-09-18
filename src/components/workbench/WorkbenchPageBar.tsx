@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, Puzzle, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical } from 'lucide-react'
 import type { TabName } from '../../types'
 import { labelOf } from '../../lib/appModules'
@@ -98,18 +98,6 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const dragIdRef = useRef<string | null>(null)
   const rowRef = useRef<HTMLDivElement | null>(null)
-  /** 页签组是否有条目由**模块侧渲染决定**（portal 进来才有），外壳拿不到 → 观察 DOM */
-  const [hasAnyItem, setHasAnyItem] = useState(false)
-
-  useEffect(() => {
-    const el = rowRef.current
-    if (!el) return
-    const check = () => setHasAnyItem(!!el.querySelector('[data-pb-item]'))
-    check()
-    const mo = new MutationObserver(check)
-    mo.observe(el, { childList: true, subtree: true })
-    return () => mo.disconnect()
-  }, [])
 
   const visible = tabs.filter((t) => !PAGE_OWNED.includes(t))
   const reorderTo = (next: string[]) => onReorder(applyReorder(tabs, visible, next))
@@ -199,11 +187,8 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
         {/* 主栏知识库页签组槽 */}
         <div ref={knowledgeSlotRef} data-pb-slot="knowledge" className={`flex min-w-0 shrink-0 max-w-[50%] items-center gap-1 overflow-x-auto ${hidePages ? 'hidden' : ''}`} />
         {trail && <div className="ml-1 flex shrink-0 items-center gap-0.5">{trail}</div>}
-        {!hasAnyItem && (
-          <span className="pointer-events-none px-1.5 text-[12px] italic text-[var(--text-muted)]">
-            没有打开的页面 —— 从左侧书签或图标条打开模块
-          </span>
-        )}
+        {/* 空态提示文字已删（2026-09-18 反馈轮）：「没有打开的页面 —— 从左侧书签或图标条打开模块」
+            属冗余说明（左栏书签 / 图标条本身就是入口），按铁律 12 只收不增 → 整块去掉 */}
       </div>
     </div>
   )

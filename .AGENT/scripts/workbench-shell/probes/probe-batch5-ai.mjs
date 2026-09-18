@@ -87,6 +87,15 @@ async function main() {
     return { there: !!el, hasInput: !!el?.querySelector('textarea'), hasHeader: !!el && el.textContent.includes('AI 助手') }
   })()`)
   ok(docked.there && docked.hasInput && docked.hasHeader, 'A2 右栏 AI 态 = 对话窄版（ChatBody docked，头部+输入框）', JSON.stringify(docked))
+  // A2b docked 态头部必须保住（收窄渲染条件后不能误伤窄版）：Menu 会话列表 + ⤢ 都在
+  const dockedHeader = await evalJs(`(() => {
+    const el = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    return {
+      menu: !!el?.querySelector('button[title="会话列表"]'),
+      expand: !!el?.querySelector('button[title="扩大为完整对话页"]'),
+    }
+  })()`)
+  ok(dockedHeader.menu && dockedHeader.expand, 'A2b docked 态轻头部控件齐全（会话列表 + ⤢；收窄条件未误伤窄版）', JSON.stringify(dockedHeader))
 
   // ---- D 组：输入区工具行（反馈轮：选模型/查消耗/附加文件 + 输入卡轻量美化）----
   const toolRow = await evalJs(`(() => ({
@@ -138,7 +147,7 @@ async function main() {
   await evalJs(`(() => { document.querySelector('[data-wb="rightPanel"] button[title="扩大为完整对话页"]')?.click(); return true })()`)
   await sleep(900)
   const afterExpand = await evalJs(`(() => {
-    const tab = document.querySelector('[data-wb="tabbar"] [data-wb-tab="aiChat"]')
+    const tab = document.querySelector('[data-wb="pagebar"] [data-wb-tab="aiChat"]')
     return { tabThere: !!tab, tabActive: tab?.dataset.wbActive ?? '' }
   })()`)
   ok(afterExpand.tabThere && afterExpand.tabActive === '1', 'A4b ⤢ → aiChat 标签登记并激活', JSON.stringify(afterExpand))
@@ -155,14 +164,31 @@ async function main() {
   const pageBody = await evalJs(`!!document.querySelector('[data-assistant-variant="page"] textarea')`)
   ok(pageBody, 'A6 aiChat 标签 = 宽版对话体（page 态输入区挂载）')
 
+  // A6b page 态无「✦ AI 助手」纯标题行（2026-09-18 反馈轮）：顶部直接是消息区，
+  // 会话导航已移交左栏，中间主体不再重复一个标题行 —— 有控件才渲染头部的收窄条件实测
+  const pageNoTitle = await evalJs(`(() => {
+    const el = document.querySelector('[data-assistant-variant="page"]')
+    if (!el) return null
+    const first = el.firstElementChild
+    const firstH = first ? Math.round(first.getBoundingClientRect().height) : 0
+    return {
+      hasTitleRow: el.textContent.includes('AI 助手'),
+      firstChildH: firstH,
+      // 头部那排是 h-9 = 36px + 下边框；消息区不可能恰好这个高度
+      titleRowLike: firstH >= 30 && firstH <= 42 && first?.className?.toString().includes('items-center'),
+    }
+  })()`)
+  ok(!!pageNoTitle && !pageNoTitle.hasTitleRow && !pageNoTitle.titleRowLike,
+    'A6b page 态无「✦ AI 助手」标题行（头部收窄到有控件才渲染）', JSON.stringify(pageNoTitle))
+
   // A7 关闭 aiChat 标签 → 右栏自动回小对话
   await evalJs(`(() => {
-    const t = document.querySelector('[data-wb="tabbar"] [data-wb-tab="aiChat"]')
+    const t = document.querySelector('[data-wb="pagebar"] [data-wb-tab="aiChat"]')
     t?.querySelector('button[title="关闭标签页"]')?.click(); return true
   })()`)
   await sleep(800)
   const afterClose = await evalJs(`(() => ({
-    tabGone: !document.querySelector('[data-wb="tabbar"] [data-wb-tab="aiChat"]'),
+    tabGone: !document.querySelector('[data-wb="pagebar"] [data-wb-tab="aiChat"]'),
     panelGone: !document.querySelector('[data-wb="aiUsagePanel"]'),
     chatBack: !!document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"] textarea'),
   }))()`)
@@ -176,20 +202,32 @@ async function main() {
 
   // A9 联动语义（反馈拍板）：aiChat 激活中切到别的模块 → 右栏回对话但 aiChat 标签保留；
   // 点回 aiChat 标签 → 右栏再变 token 面板
-  await evalJs(`(() => {
-    const t = [...document.querySelectorAll('[data-wb="tabbar"] [data-wb-tab]')].find((x) => x.dataset.wbTab === 'editor')
-    t?.click(); return true
+  // 前置① 左栏此刻在 aiChat 模块态（书签区隐藏）→ 必须先「返回总览」才点得到书签，
+  //        否则查不到 bookmark、静默 no-op（与 probe-mod-header 的同款陷阱）。
+  // 前置② 目标必须是**真实存在的模块条目**：页面条置顶后 editor / knowledge 由各自页签组
+  //        代表、不作为模块条目出现（WorkbenchPageBar 的 PAGE_OWNED 过滤），写死 editor 点空。
+  await evalJs(`(() => { document.querySelector('button[title^="返回总览"]')?.click(); return true })()`)
+  await sleep(500)
+  await evalJs(`(() => { document.querySelector('[data-wb-bookmark="blog"]')?.click(); return true })()`)
+  await sleep(1200)
+  const a9Switch = await evalJs(`(() => {
+    const t = [...document.querySelectorAll('[data-wb="pagebar"] [data-wb-tab]')].find((x) => x.dataset.wbTab !== 'aiChat')
+    if (!t) return ''
+    const id = t.dataset.wbTab
+    t.click()
+    return id
   })()`)
   await sleep(700)
   const switchedAway = await evalJs(`(() => ({
     chatBack: !!document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"] textarea'),
     panelGone: !document.querySelector('[data-wb="aiUsagePanel"]'),
-    tabKept: !!document.querySelector('[data-wb="tabbar"] [data-wb-tab="aiChat"]'),
+    tabKept: !!document.querySelector('[data-wb="pagebar"] [data-wb-tab="aiChat"]'),
   }))()`)
-  ok(switchedAway.chatBack && switchedAway.panelGone && switchedAway.tabKept,
-    'A9a 切走模块 → 右栏回对话、token 面板退场、aiChat 标签保留', JSON.stringify(switchedAway))
+  ok(a9Switch !== '' && switchedAway.chatBack && switchedAway.panelGone && switchedAway.tabKept,
+    'A9a 切走模块 → 右栏回对话、token 面板退场、aiChat 标签保留',
+    `switchedTo=${a9Switch} ${JSON.stringify(switchedAway)}`)
   await evalJs(`(() => {
-    document.querySelector('[data-wb="tabbar"] [data-wb-tab="aiChat"]')?.click(); return true
+    document.querySelector('[data-wb="pagebar"] [data-wb-tab="aiChat"]')?.click(); return true
   })()`)
   await sleep(700)
   const switchedBack = await evalJs(`!!document.querySelector('[data-wb="aiUsagePanel"]')`)
@@ -223,7 +261,7 @@ async function main() {
   ok(outlineEmpty.empty && outlineEmpty.active === '1', 'B4 新会话 + 大纲 tab 空态提示', JSON.stringify(outlineEmpty))
   // B5 关 aiChat 标签 → 左栏跟随落点（aiChat 态退场）
   await evalJs(`(() => {
-    const t = document.querySelector('[data-wb="tabbar"] [data-wb-tab="aiChat"]')
+    const t = document.querySelector('[data-wb="pagebar"] [data-wb-tab="aiChat"]')
     t?.querySelector('button[title="关闭标签页"]')?.click(); return true
   })()`)
   await sleep(800)
@@ -294,11 +332,25 @@ async function main() {
   ok(viaHotkey, 'C5 Ctrl+P → 左栏搜索态')
   await evalJs(`(() => { document.querySelector('[data-wb="leftSearch"] button[title="返回总览"]')?.click(); return true })()`)
   await sleep(300)
-  // C6 点标签条已激活标签（editor）→ 左栏从总览态跟随切模块态（2026-09-17 反馈拍板）
-  await evalJs(`(() => { document.querySelector('[data-wb="tabbar"] [data-wb-tab="editor"]')?.click(); return true })()`)
+  // C6 点标签条**已激活**标签 → 左栏从总览态跟随切该模块态（2026-09-17 反馈拍板）
+  // 目标动态取「条上 data-wb-active=1 的模块条目」而非写死 editor —— 页面条置顶后
+  // editor / knowledge 由各自页签组代表、**不作为模块条目出现**（WorkbenchPageBar 的
+  // PAGE_OWNED 过滤）；若当时唯一打开的就是 editor，条上 entries 为空（实测 pbTabs="editor"
+  // 但 entries=[]），点不到（静默 no-op）。所以先经书签打开一个真实模块条目再断言。
+  await evalJs(`(() => { document.querySelector('[data-wb-bookmark="blog"]')?.click(); return true })()`)
+  await sleep(1200)
+  const c6Target = await evalJs(`(() => {
+    const el = document.querySelector('[data-wb="pagebar"] [data-wb-tab][data-wb-active="1"]')
+    return el?.dataset.wbTab ?? ''
+  })()`)
+  // 回总览态（点书签后左栏进入模块态，C6 的前提是「总览态 → 点条上已激活条目 → 跟随」）
+  await evalJs(`(() => { document.querySelector('button[title^="返回总览"]')?.click(); return true })()`)
+  await sleep(500)
+  await evalJs(`(() => { document.querySelector('[data-wb="pagebar"] [data-wb-tab][data-wb-active="1"]')?.click(); return true })()`)
   await sleep(600)
   const modFollow = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
-  ok(modFollow === 'editor', 'C6 点已激活标签 → 左栏跟随切该模块态', `mod=${modFollow}`)
+  ok(c6Target !== '' && modFollow === c6Target,
+    'C6 点已激活标签 → 左栏跟随切该模块态', `target=${c6Target} mod=${modFollow}`)
 
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)
