@@ -376,7 +376,7 @@ ok(!/分屏/.test(srcApp) && !/分屏/.test(srcStrip) && !/分屏/.test(srcPageB
 // A 组 = 纯标题（无工具）可直接删：blog（博客）、devtools（开发者工具 · DEV）。
 // 带工具的 5 项（aiChat / aiTeaching / schedule / bookshelf / releaseNotes）留待逐个讨论，不在本段。
 // 运行时不变量：blog 删行后模块根只剩 1 个子元素、内容区占满容器高 —— 由
-// tmp/probe-a-group-headers.mjs 在真实 Electron 内实证（A1~A3、A5）。
+// probe-mod-header.mjs 在真实 Electron 内实证（G0~G5，含 knowledge 作对照组）。
 const srcDevtools = stripComments(read('src/modules/devtools/index.tsx'))
 
 ok(!/顶部贯通行（图二骨架）：横跨侧栏 \+ 内容区；快捷动作在侧栏内搜索框上方/.test(srcBlog),
