@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Sparkles, X, Menu, Quote, Languages, Maximize2 } from 'lucide-react'
+import { Sparkles, X, Menu, Quote, Languages, Maximize2, Radar } from 'lucide-react'
 import { AiLearnShell, type AiLearnTab, type ChatBridge } from '../AiLearn'
 import { useLearnProgress, learnStepContext } from '../AiLearn/useLearnProgress'
 import { getLesson } from '../AiLearn/lessons'
 import { useSettings } from '../../../lib/SettingsContext'
+import { getSemanticStatus } from '../../../lib/ipc'
 import { getSelectionAskHost, getAssistantContext } from '../../../lib/assistantContext'
 import { TranslateCard } from '../TranslateCard'
 import { ChatBody } from './ChatBody'
@@ -39,6 +40,13 @@ export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
   const { s, update } = useSettings()
   /** 上手路径进度（settings 落盘）；全屏学堂与提问上下文共用 */
   const learn = useLearnProgress()
+  // 感知模式（B2）：开关态 + 语义索引可用性（未配置 → 头部下方弱提示）
+  const perceptionOn = s.aiAssistantPerception === true
+  const [semanticOk, setSemanticOk] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!perceptionOn) return
+    getSemanticStatus().then(st => setSemanticOk(st?.configured === true)).catch(() => setSemanticOk(false))
+  }, [perceptionOn])
   const [open, setOpen] = useState(false)
   // 动画三态: mounted=DOM 存在(含退场动画期间), shown=滑入到位
   const [mounted, setMounted] = useState(false)
@@ -381,6 +389,17 @@ export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
             <span className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
               <Sparkles size={13} className="text-[var(--accent)]" /> AI 助手
             </span>
+            {/* 感知模式开关（B2）：与右栏 AI 态头部、设置页读写同一 settings 键 */}
+            <button onClick={() => { void update('aiAssistantPerception', !perceptionOn) }}
+              aria-pressed={perceptionOn} data-wb="perceptionToggle"
+              title={perceptionOn
+                ? '感知模式：已开启 —— 发送前自动检索知识库，把最相关的笔记素材注入本轮上下文（纯本地检索，不消耗对话 token）'
+                : '感知模式：已关闭 —— 点击开启后，发送前会自动检索知识库并注入相关笔记素材'}
+              className={`p-1.5 rounded-md transition-colors ${perceptionOn
+                ? 'text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_20%,transparent)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}>
+              <Radar size={14} />
+            </button>
             <button onClick={() => expandToFull()} title="全屏展开 (Ctrl+Shift+J)"
               className="ml-auto p-1.5 rounded-md text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_20%,transparent)] transition-colors">
               <Maximize2 size={14} />
@@ -390,6 +409,15 @@ export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
               <X size={14} />
             </button>
           </div>
+
+          {/* 弱提示（B2 §4.1）：开了感知但没配向量模型 → 当前退化到关键词路。
+              sidebar 态的头部在本组件（不在 ChatBody），故这里也渲染一份 */}
+          {perceptionOn && semanticOk === false && (
+            <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-1 text-[11px] text-[var(--text-muted)]"
+              data-wb="perceptionHint">
+              语义索引未配置，当前按关键词匹配
+            </div>
+          )}
 
           {/* 对话体（批次5 抽出，与右栏 AI 态 / aiChat 标签同体） */}
           <ChatBody

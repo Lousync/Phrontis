@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboa
 import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
-  Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu,
+  Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu, Radar,
 } from 'lucide-react'
 import { getAssistantContext } from '../../../lib/assistantContext'
 import { showToast } from '../../../lib/toast'
+import { useSettings } from '../../../lib/SettingsContext'
 import { useInputShell } from './inputShells'
-import { getKnowledgePages, agentUsageGet, llmListProviders } from '../../../lib/ipc'
+import { getKnowledgePages, agentUsageGet, llmListProviders, getSemanticStatus } from '../../../lib/ipc'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
 import { MessageList, fmtTime } from './MessageList'
 import { useAssistantChat } from './useAssistantChat'
@@ -84,6 +85,18 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
 
   // 输入卡外壳样式（设置 → 外观 →「AI 助手输入样式」；未知值回落 v1）
   const shell = useInputShell()
+
+  // ---- 感知模式（B2）：开关本体在主进程读（检索发生在主进程），渲染层只做「显示 + 切换」----
+  // 默认 false（上游 §4.1 拍板）：用户主动开启才检索，绝不替用户多花检索开销。
+  const { s: chatSettings, update: updateChatSetting } = useSettings()
+  const perceptionOn = chatSettings.aiAssistantPerception === true
+  const togglePerception = () => { void updateChatSetting('aiAssistantPerception', !perceptionOn) }
+  /** 语义索引是否已配置（未配置 → 开启后显示弱提示「当前按关键词匹配」） */
+  const [semanticOk, setSemanticOk] = useState<boolean | null>(null)
+  useEffect(() => {
+    if (!perceptionOn) return
+    getSemanticStatus().then(st => setSemanticOk(st?.configured === true)).catch(() => setSemanticOk(false))
+  }, [perceptionOn])
 
   // ---- 输入区工具浮层（📎 附加文件 / 模型选择 / 消耗查看）：互斥单开，外部点击关闭 ----
   const [pop, setPop] = useState<'files' | 'model' | 'usage' | null>(null)
@@ -237,9 +250,10 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     <div className="flex h-full min-h-0 flex-col" data-assistant-variant={variant}>
       {/* 轻头部：仅在**有控件可放**时才渲染（2026-09-18 反馈轮）。
           悬浮侧栏的头部在其外壳上（本组件不渲染）；page 态（右栏 AI 态 ⤢ 扩大的主体页）
-          showDrawer=false 且 isNarrow=false → 原来只剩一个「✦ AI 助手」纯标题，
-          与左栏 AI 会话侧栏重复 → 整块不渲染，对话区直接顶满。
-          docked 态保留（Menu 会话列表 + ⤢ 扩大）。 */}
+          showDrawer=false 且 isNarrow=false → 无任何控件可放 → 整块不渲染，对话区直接顶满
+          （B2 感知开关按开发负责人 2026-09-18 拍板**不放这里**：page 态继承同一 settings 值，
+           要改去悬浮侧栏或右栏 AI 态，或设置页。保持 B1 的清理成果）。
+          docked 态保留（Menu 会话列表 + 感知 + ⤢ 扩大）。 */}
       {variant !== 'sidebar' && (showDrawer || (isNarrow && onExpand)) && (
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-2">
           {showDrawer && (
@@ -251,12 +265,22 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
           <span className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
             <Sparkles size={13} className="text-[var(--accent)]" /> AI 助手
           </span>
+          <PerceptionToggle on={perceptionOn} onToggle={togglePerception} />
           {isNarrow && onExpand && (
             <button onClick={onExpand} title="扩大为完整对话页"
               className="ml-auto rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <Maximize2 size={13} />
             </button>
           )}
+        </div>
+      )}
+
+      {/* 弱提示（B2 §4.1）：开了感知但没配向量模型 → 说明当前退化到关键词路。
+          不阻断、不弹窗、无「知道了」记忆 —— 它描述的是**当前状态**不是一次性引导 */}
+      {perceptionOn && semanticOk === false && (
+        <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-1 text-[11px] text-[var(--text-muted)]"
+          data-wb="perceptionHint">
+          语义索引未配置，当前按关键词匹配
         </div>
       )}
 
@@ -629,6 +653,32 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * 感知模式开关（B2 §4.1）。
+ *
+ * 读写同一个 settings 键 `aiAssistantPerception`（悬浮侧栏 / 右栏 AI 态 / 设置页三处同源，
+ * 不存在第二份状态）。开启时主进程在发送前检索知识库、注入最相关的笔记素材。
+ *
+ * 视觉：开启态用 accent 染色（与 ⤢ 按钮同款 `color-mix` 底），关闭态走普通 muted ——
+ * 与头部其它按钮一致，不新增动效（按钮已有 `transition-colors`，铁律 13 允许）。
+ */
+function PerceptionToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button
+      onClick={onToggle}
+      aria-pressed={on}
+      data-wb="perceptionToggle"
+      title={on
+        ? '感知模式：已开启 —— 发送前自动检索知识库，把最相关的笔记素材注入本轮上下文（纯本地检索，不消耗对话 token）'
+        : '感知模式：已关闭 —— 点击开启后，发送前会自动检索知识库并注入相关笔记素材'}
+      className={`p-1.5 rounded-md transition-colors ${on
+        ? 'text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_20%,transparent)]'
+        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}>
+      <Radar size={14} />
+    </button>
   )
 }
 

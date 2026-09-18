@@ -1346,6 +1346,8 @@ export interface ElectronAPI {
   getKnowledgeBacklinks: (pageId: string) => Promise<KnowledgePage[]>
   getKnowledgeBacklinkContext: (pageId: string) => Promise<KnowledgeBacklinkItem[]>
   getKnowledgeSimilarPages: (pageId: string) => Promise<{ hits: SimilarPageHit[]; semantic?: { enabled: boolean; reason?: string } }>
+  /** 语义索引状态（B2 感知模式弱提示：configured=false → 当前只走关键词路） */
+  getSemanticStatus: () => Promise<{ configured: boolean; model: string; pages: number; chunks: number; generatedAt: string }>
   getKnowledgeManualLinks: (pageId: string) => Promise<KnowledgePage[]>
   addKnowledgeManualLink: (pageId: string, targetId: string) => Promise<{ ok: boolean }>
   removeKnowledgeManualLink: (a: string, b: string) => Promise<{ ok: boolean }>

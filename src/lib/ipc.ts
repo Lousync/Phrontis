@@ -102,6 +102,8 @@ export const searchKnowledgePages = (q: string) => a().searchKnowledgePages(q)
 export const getKnowledgeBacklinks = (pageId: string) => a().getKnowledgeBacklinks(pageId)
 export const getKnowledgeBacklinkContext = (pageId: string) => a().getKnowledgeBacklinkContext(pageId)
 export const getKnowledgeSimilarPages = (pageId: string) => a().getKnowledgeSimilarPages(pageId)
+/** 语义索引状态（B2 感知模式弱提示） */
+export const getSemanticStatus = () => a().getSemanticStatus()
 export const getKnowledgeManualLinks = (pageId: string) => a().getKnowledgeManualLinks(pageId)
 export const addKnowledgeManualLink = (pageId: string, targetId: string) => a().addKnowledgeManualLink(pageId, targetId)
 export const removeKnowledgeManualLink = (pageIdA: string, pageIdB: string) => a().removeKnowledgeManualLink(pageIdA, pageIdB)

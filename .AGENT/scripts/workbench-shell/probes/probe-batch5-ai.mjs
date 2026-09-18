@@ -507,6 +507,63 @@ async function main() {
     'E7 📎 路径无回归（浮层搜索框可编辑，点击候选可附加）',
     `可见态=${JSON.stringify(e7Visible)} 点击=${JSON.stringify(normalAttach)} 附加后=${afterNormal}`)
 
+  // ---- F 组：B2 感知模式（toggle 存在 / 点击落盘 / 弱提示 / 默认关）----
+  // ⚠️ E7 已把右栏关成可见 docked 小对话态，F 组直接复用这个前置（别再切标签）。
+  // ⚠️ 选择器一律限定在 `[data-wb="rightPanel"] [data-assistant-variant="docked"]` 内 ——
+  //    page 态那份 ChatBody 是 display:none 保活实例，也渲染同款 data-wb（E7 同源教训）。
+
+  // F1 感知 toggle 在（默认关：aria-pressed=false）
+  const f1 = await evalJs(`(() => {
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    const b = root?.querySelector('[data-wb="perceptionToggle"]')
+    const r = b?.getBoundingClientRect()
+    return { there: !!b, pressed: b?.getAttribute('aria-pressed'),
+             w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0) }
+  })()`)
+  ok(f1.there && f1.w > 0 && f1.h > 0, 'F1 右栏 AI 态头部有感知 toggle（可见可点）', JSON.stringify(f1))
+
+  // F2 默认关（上游 §4.1 拍板 false；探针 vault 是全新 settings → 必须是初始默认值）
+  ok(f1.pressed === 'false', 'F2 感知默认关闭（default:false，用户主动开才检索）', `aria-pressed=${f1.pressed}`)
+
+  // F3 点击 → 开启（aria-pressed 翻转）
+  await evalJs(`(() => {
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    root?.querySelector('[data-wb="perceptionToggle"]')?.click(); return true
+  })()`)
+  await sleep(700)
+  const f3 = await evalJs(`(() => {
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    const b = root?.querySelector('[data-wb="perceptionToggle"]')
+    return { pressed: b?.getAttribute('aria-pressed'), hint: !!root?.querySelector('[data-wb="perceptionHint"]') }
+  })()`)
+  ok(f3.pressed === 'true', 'F3 点击感知 toggle → 开启态（aria-pressed=true）', JSON.stringify(f3))
+
+  // F4 弱提示：探针 vault 未配向量模型 → 开启后必现「语义索引未配置」。
+  //    这条在探针环境里是**确定可验的**（没有 embedding provider）。
+  ok(f3.hint, 'F4 开启后弱提示出现（未配向量模型 → 明示当前按关键词匹配）',
+    `hint=${f3.hint}`)
+
+  // F5 落盘：settings 真写进主进程（不是纯前端态）——重读一遍设置值
+  const f5 = await evalJs(`(async () => {
+    try { return await window.api.getSetting('aiAssistantPerception') } catch (e) { return 'ERR:' + e.message }
+  })()`)
+  ok(f5 === true, 'F5 感知开关落盘到 settings（主进程读得到 —— 检索发生在主进程，必须真落盘）',
+    `getSetting=${JSON.stringify(f5)}`)
+
+  // F6 关回去（不给后续探针留副作用：开着感知会让每轮多发一次本地检索）
+  await evalJs(`(() => {
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    root?.querySelector('[data-wb="perceptionToggle"]')?.click(); return true
+  })()`)
+  await sleep(700)
+  const f6 = await evalJs(`(async () => {
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    return { pressed: root?.querySelector('[data-wb="perceptionToggle"]')?.getAttribute('aria-pressed'),
+             saved: await window.api.getSetting('aiAssistantPerception') }
+  })()`)
+  ok(f6.pressed === 'false' && f6.saved === false,
+    'F6 再点一次关回（双向切换 + 落盘一致，无副作用残留）', JSON.stringify(f6))
+
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)
   for (const r of results) console.log(`${r.pass ? '✓' : '✗'} ${r.label}${r.detail ? '  → ' + r.detail : ''}`)

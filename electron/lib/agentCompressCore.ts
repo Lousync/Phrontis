@@ -144,11 +144,25 @@ export function normalizeDigestOutput(text: string): string {
 /**
  * 上下文合成：纪要以**首条 user 消息**注入（system+tools 是 prompt cache 前缀，
  * 必须逐字稳定——纪要只在压缩时变化，变化时前缀重建是一次性成本）。
+ *
+ * `extraPrefix`（v3.4.0 批次 B2 新增）：**每轮变化的上下文注入段**（@ 引用骨架 / 感知素材）。
+ * 它们与纪要同层注入首条 user 消息，而**不进 system** —— 理由：
+ *  - system + tools 是 prompt cache 前缀，逐字稳定才能命中（core 14 工具 ≈7.7k tok/轮）；
+ *  - B1 初版把骨架塞进 `buildSystemPrompt`（= system），引用一变 system 就变 →
+ *    **缓存前缀全量失效**，每轮多付整段 system + tools 的钱。B2 一并纠正。
+ *  - 注入首条 user 消息也更符合语义：素材只对**本轮**有效，不该沉淀成系统的长期人设。
+ *
+ * 顺序：`extraPrefix` 在纪要**之后**（纪要是历史、注入段是当下，越靠近当前用户消息
+ * 越贴合注意力；且纪要变化频率更低，放前面更利于其内部缓存）。
  */
 export function composeContextWithDigest<T extends BudgetMessage>(
   digestText: string | null | undefined,
   history: T[],
+  extraPrefix?: string | null,
 ): Array<T | { role: 'user'; content: string }> {
-  if (!digestText) return [...history]
-  return [{ role: 'user' as const, content: DIGEST_PREFIX + digestText }, ...history]
+  const head: Array<{ role: 'user'; content: string }> = []
+  if (digestText) head.push({ role: 'user' as const, content: DIGEST_PREFIX + digestText })
+  if (extraPrefix) head.push({ role: 'user' as const, content: extraPrefix })
+  if (head.length === 0) return [...history]
+  return [...head, ...history]
 }

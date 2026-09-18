@@ -1,11 +1,11 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
-import { readFileSync } from 'fs'
 import { listTools, invokeToolInternal, getSettingReader, checkModulePermission, checkVaultFilePermission } from './aiTools'
 import type { ToolDescription, AiToolInvokeResult } from './aiTools'
-import { resolveSafe } from './workspaceManager'
-import { getCurrentVault } from './kbStore/vaultContext'
 import { buildAttachedRefsInjection } from './aiAssistant/refSkeleton'
+import { readVaultRefText } from './aiAssistant/refText'
+import { runPerception } from './aiAssistant/perception'
+import { buildPerceptionInjection } from './aiAssistant/perceptionBudget'
 import { invokeLlmStreamInternal } from './llmService'
 import { estimateTokens, trimHistoryByBudget } from './agentContextBudget'
 import { compressAtTokens, composeContextWithDigest, rowsAfterDigest } from './agentCompressCore'
@@ -451,23 +451,20 @@ const SYSTEM_PROMPT_BASE = [
 function buildSystemPrompt(context?: AgentContextInfo): string {
   if (!context) return SYSTEM_PROMPT_BASE
   let dataText = ''
-  // 附加文件（B1 @ 引用）：把 [{title,path}] 升格为**骨架注入**——
-  // 只给元数据模型不知道文件里有什么，每篇都要多一轮 fileRead；骨架（frontmatter 摘要 +
-  // 标题骨架 + 首段）先给「这篇讲什么」，需要全文时再 fileRead。截断与预算口径全在
-  // aiAssistant/refSkeleton.ts（纯函数、契约脚本断言），这里只做读盘与拼装。
+  // ★ 前缀稳定红线（B2 纠正）：**这里只能放逐字稳定的内容**。
+  // system + tools 是 prompt cache 前缀，一旦每轮变化（如 @ 引用骨架、感知素材）
+  // 就会让整段 system + core 14 工具（≈7.7k tok）逐轮重算。
+  // @ 引用骨架与感知素材已挪到 `composeContextWithDigest` 的 extraPrefix（首条 user 消息层）。
+  // 本函数的入参 `context` 也由渲染层每轮现算，故只放「本轮正在看什么」这类
+  // 短摘要 + 去重后的元数据（不含被引用笔记的正文骨架）。
   const refs = Array.isArray((context.data as Record<string, unknown> | undefined)?.attachedFiles)
     ? (context.data as Record<string, unknown>).attachedFiles as Array<{ title?: string; path?: string }>
     : []
   if (refs.length > 0) {
-    const injected = buildAttachedRefsInjection(refs.map((r) => ({
-      title: String(r?.title ?? ''),
-      path: String(r?.path ?? ''),
-      raw: readVaultRefText(String(r?.path ?? '')),
-    })))
-    // 注入段为空 = 全部读取失败 → 落回普通序列化（不静默丢掉「有引用」这一事实）
-    if (injected) dataText = injected
-  }
-  if (!dataText) {
+    // 只列标题与路径（告诉模型「用户引用了这几篇」，正文骨架走 extraPrefix）
+    dataText = '用户为本轮对话引用了以下知识库笔记（其骨架见本轮消息开头的注入段）：\n' +
+      refs.map((r) => `— 《${String(r?.title ?? '')}》（${String(r?.path ?? '')}）`).join('\n')
+  } else {
     try {
       dataText = JSON.stringify(context.data ?? {}, null, 0)
     } catch { /* ignore */ }
@@ -477,26 +474,6 @@ function buildSystemPrompt(context?: AgentContextInfo): string {
     `\n\n【当前上下文】用户正在查看：${context.label}（类型 ${context.type}）。` +
     (dataText ? `\n上下文数据：\n${dataText}` : '') +
     '\n用户的问题大概率与该上下文相关；若需要更多数据仍应调用工具。'
-}
-
-/**
- * 按 relPath 读 vault 内文件正文（B1 骨架注入用）。
- *
- * 走 `resolveSafe` 路径守卫（拒绝对路径 / `..` 越界 / symlink 逃逸），
- * 读失败一律返回 undefined —— **逐篇容错**：一篇读不到不能炸整轮对话，
- * 该篇降级为「仅路径」的骨架（模型仍可 fileRead 自取）。
- */
-function readVaultRefText(relPath: string): string | undefined {
-  if (!relPath) return undefined
-  const root = getCurrentVault()?.rootPath
-  if (!root) return undefined
-  const abs = resolveSafe(root, relPath)
-  if (!abs) return undefined
-  try {
-    return readFileSync(abs, 'utf-8')
-  } catch {
-    return undefined
-  }
 }
 
 async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: string): Promise<AgentChatResult> {
@@ -750,11 +727,40 @@ async function runAgentLoop(
       }
     : undefined
   const systemFull = baseSystem + globalInstHint + wsInstHint + instHint + profileHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+
+  // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
+  // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
+  // 逐字稳定才命中（core 14 工具 ≈7.7k tok/轮）。B1 初版误放进 buildSystemPrompt，
+  // 引用一变前缀就失效；B2 纠正（开发负责人 2026-09-18 拍板「一并纠正」）。
+  // 本段只对**本轮**有效，也因此不该沉淀成系统的长期人设。
+  const contextRefs = Array.isArray((context?.data as Record<string, unknown> | undefined)?.attachedFiles)
+    ? (context!.data as Record<string, unknown>).attachedFiles as Array<{ pageId?: string; title?: string; path?: string }>
+    : []
+  const refInjection = contextRefs.length > 0
+    ? buildAttachedRefsInjection(contextRefs.map((r) => ({
+        title: String(r?.title ?? ''),
+        path: String(r?.path ?? ''),
+        raw: readVaultRefText(String(r?.path ?? '')),
+      })))
+    : ''
+  // 感知模式（B2）：开关开启时先检索知识库，把最相关素材注入。
+  // 排除已 @ 引用的 pageId —— 同一篇不重复占两段预算。全路零命中 / 检索异常 → 空串，照常发请求。
+  const perceptionOn = getSettingReader()('aiAssistantPerception') === true
+  let perceptionInjection = ''
+  if (perceptionOn && !virtualKickoff) {
+    const lastUser = [...history].reverse().find((m) => m.role === 'user')
+    const pr = await runPerception(String(lastUser?.content ?? ''), {
+      excludePageIds: contextRefs.map((r) => String(r?.pageId ?? '')).filter(Boolean),
+    })
+    if (pr && pr.items.length > 0) perceptionInjection = buildPerceptionInjection({ items: pr.items, dropped: pr.dropped })
+  }
+  const requestInjection = [refInjection, perceptionInjection].filter(Boolean).join('\n\n')
+
   // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
   let convo: AgentMessage[] = [
     { role: 'system', content: systemFull },
-    ...composeContextWithDigest(asm.digest?.text, history),
+    ...composeContextWithDigest(asm.digest?.text, history, requestInjection),
   ]
 
   // ---- 自动压缩预检（会话压缩 §6.1）：逼近触发线时先把旧轮折叠为纪要再发送 ----
@@ -772,7 +778,7 @@ async function runAgentLoop(
         compressed = { covered: cr.covered, digestChars: cr.digestChars ?? 0 }
         asm = assembleAgentHistory(sessionId)
         history = asm.history
-        convo = [{ role: 'system', content: systemFull }, ...composeContextWithDigest(asm.digest?.text, history)]
+        convo = [{ role: 'system', content: systemFull }, ...composeContextWithDigest(asm.digest?.text, history, requestInjection)]
       }
     }
   }
