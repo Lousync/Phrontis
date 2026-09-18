@@ -42,11 +42,6 @@ interface Props {
   onReorder?: (ids: string[]) => void
   onTogglePin?: (id: string) => void
   onContextMenu?: (e: React.MouseEvent, id: string) => void
-  /**
-   * 该组所在栏是否为**当前栏焦点**（VS Code 式分屏焦点表达：非焦点栏的激活标签不再高亮，
-   * 整条轻微淡化；不分屏时恒为 true）。默认 true。
-   */
-  paneActive?: boolean
 }
 
 /** 来源配色（方案 §1）：编辑器文件=青 #2a988f，知识库页面=蓝 #4f6ef2 */
@@ -55,7 +50,7 @@ const OWNER_COLOR: Record<'editor' | 'knowledge', string> = {
   knowledge: '#4f6ef2',
 }
 
-export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClose, onReorder, onTogglePin, onContextMenu, paneActive = true }: Props) {
+export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClose, onReorder, onTogglePin, onContextMenu }: Props) {
   const [draggedId, setDraggedId] = useState<string | null>(null)
 
   const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
@@ -118,8 +113,7 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
   return (
     <div
       data-pb-group={owner}
-      data-pane-active={paneActive ? '1' : '0'}
-      className={`flex min-w-0 items-center gap-1 ${paneActive ? '' : 'opacity-75'}`}
+      className="flex min-w-0 items-center gap-1"
     >
       {items.map((it) => {
         const isActive = it.id === activeId
@@ -152,10 +146,7 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
               isDragged ? 'opacity-40' : ''
             } ${
               isActive
-                ? (paneActive
-                    ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
-                    /* 非焦点栏：激活标签不再给底色（VS Code 的不焦点组观感），只保留主文本色 */
-                    : 'bg-transparent text-[var(--text-secondary)]')
+                ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
                 : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
             }`}
           >

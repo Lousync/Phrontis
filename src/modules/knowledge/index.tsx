@@ -58,7 +58,7 @@ interface PageInfo {
   fileType: string
 }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, paneActive = true }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; paneActive?: boolean }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -1427,7 +1427,6 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             <PageTabStrip
               owner="knowledge"
               itemAttr="data-tab-id"
-              paneActive={paneActive}
               items={openPageIds.map((id) => {
                 const info = openPageInfos[id]
                 const pinned = pinnedPageIds.has(id) || dirtyPageIds.has(id)

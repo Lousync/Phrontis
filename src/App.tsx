@@ -1,14 +1,12 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy } from 'react'
 import { createPortal } from 'react-dom'
-import { Columns2, X } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag } from './types'
 
-import { SPLIT_ELIGIBLE, isSplitEligible, labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
+import { labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
 import { WORKBENCH_TABBAR_EXCLUDED } from './lib/workbenchLayout'
 import { landingAfterClose } from './modules/editor/tabPolicy'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchPageBar } from './components/workbench/WorkbenchPageBar'
-import { SplitHandle } from './components/workbench/SplitHandle'
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
 import { ToolHost, PluginToolHost, TOOLS_WITH_SIDEBAR, isToolTabId, toolIdOfTab, toolTabId } from './components/workbench/toolRegistry'
 import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_VIEW_TOGGLED_EVENT, type RailModule } from './lib/workbenchLayout'
@@ -74,17 +72,6 @@ import type { DevToolsModuleProps } from './modules/devtools'
 /** 更新说明自动打开的延迟（ms）。错开标题栏 updateStartupCheck() 的 6s 静默检查，
  *  也留出首屏渲染时间——它是一次「告知」，不该和启动路径抢资源。 */
 const RELEASE_NOTES_AUTO_OPEN_DELAY_MS = 2000
-
-/**
- * 副栏宽度兜底（px）—— `splitWidth` 尚未上报时的首帧值。
- *
- * ⚠️ **单一真相源**：副栏模块容器、内容级操作浮层宽度、分屏手柄、顶栏副段宽度
- * 五处必须用同一个数。曾经顶栏副段自留了一份 `46%` 兜底，而这里用 `380` ——
- * 基准不同（百分比 vs 像素）导致分屏后**分界竖线与副栏左缘错位 81px**
- * （2026-09-18 实机探针 S2e 实测：secWrap=663 / pane=582）。
- * 改这里即可，**不要在调用点再写一份兜底字面量**。
- */
-const SPLIT_FALLBACK_WIDTH = 380
 
 /** 模块 chunk 拉取期间的占位（仅首次访问该 Tab 时出现一瞬，之后由保活层常驻） */
 function ModuleLoadingFallback() {
@@ -158,14 +145,6 @@ export default function App() {
   const wbKnowledgePageRef = useCallback((node: HTMLDivElement | null) => { setWbKnowledgePageEl(node) }, [])
   const [wbContentActionsEl, setWbContentActionsEl] = useState<HTMLElement | null>(null)
   const wbContentActionsRef = useCallback((node: HTMLDivElement | null) => { setWbContentActionsEl(node) }, [])
-  // 2026-09-18 分屏改版（两栏共用一条顶栏）：副栏页签组槽 + 副栏内容级操作槽。
-  // 副栏的页签与操作从此都挂在**顶栏副段**/副栏浮层里，副栏内部不再有自己的行。
-  const [wbSecondaryTabsEl, setWbSecondaryTabsEl] = useState<HTMLElement | null>(null)
-  const wbSecondaryTabsRef = useCallback((node: HTMLDivElement | null) => { setWbSecondaryTabsEl(node) }, [])
-  const [wbSecActionsEl, setWbSecActionsEl] = useState<HTMLElement | null>(null)
-  const wbSecActionsRef = useCallback((node: HTMLDivElement | null) => { setWbSecActionsEl(node) }, [])
-  /** 副栏实测宽度（ResizablePanel.onWidthChange 上报）→ 顶栏副段宽度，保证分界竖线与分屏手柄对齐 */
-  const [splitWidth, setSplitWidth] = useState(0)
   // 知识库沉浸阅读 / 图谱模式：模块自己让整条页面条隐藏（那些形态下外壳行也该让位，模块内无法触及）
   const [knowledgeImmersive, setKnowledgeImmersive] = useState(false)
   const handleKnowledgeImmersive = useCallback((v: boolean) => setKnowledgeImmersive(v), [])
@@ -228,65 +207,6 @@ export default function App() {
     window.addEventListener('plugins-changed', load)
     return () => window.removeEventListener('plugins-changed', load)
   }, [])
-  // W3 · Editor Groups v1：副栏模块（两栏互不相同；null = 未分屏）
-  const [secondaryTab, setSecondaryTab] = useState<TabName | null>(null)
-
-  /**
-   * 分屏栏焦点（2026-09-18 分屏完整化）：点击某一栏即接管后续操作（VS Code 的 focused group）。
-   * 功能落点目前只有一处 —— **页面条里点模块条目时开在哪一栏**（副栏聚焦时开进副栏，
-   * 见下方 WorkbenchPageBar 的 onSelect）；视觉上给副栏顶条一个很轻的信号（底色 + 左侧
-   * accent 竖线 + 图标变色），不做整栏描边。
-   * 副栏关闭一律走 `closeSplit` 复位为 main，避免焦点留在一个不存在的栏上。
-   */
-  const [activePane, setActivePane] = useState<'main' | 'secondary'>('main')
-  /** 关闭分屏的唯一收口（✕ / 拖拽收合 / 页面条按钮 / Ctrl+\ 全走这里，保证焦点复位） */
-  const closeSplit = useCallback(() => {
-    setSecondaryTab(null)
-    setActivePane('main')
-  }, [])
-  /**
-   * 在副栏打开指定模块（分屏准入收窄后，唯一开副栏的正门）。
-   *
-   * 准入收窄（2026-09-18 第十一轮）：副栏**只允许**编辑区与知识库（`SPLIT_ELIGIBLE`）。
-   * 非准入目标一律拒绝并回到主栏 —— 调用方不该自己筛，筛在收口层，
-   * 三个入口（Ctrl+\ / 页面条按钮 / 命令面板）才对得上同一套语义。
-   *
-   * 目标是当前主栏模块时**让主栏让位**：副栏与主栏不能同模块（同模块会渲染两份实例、
-   * 且主栏数组会把它整条剔出去），所以把主栏让给另一个准入模块。
-   */
-  const openInSecondary = useCallback((target: TabName): boolean => {
-    if (!isSplitEligible(target)) {
-      showToast({ type: 'info', message: '分屏仅支持编辑区 / 知识库' })
-      return false
-    }
-    if (target === activeTab) {
-      // 主栏正是目标 → 主栏让位到另一个准入模块，副栏放目标
-      const swap = SPLIT_ELIGIBLE.find((t) => t !== target)
-      if (!swap) return false
-      setActiveTab(swap)
-      setSecondaryTab(target)
-      return true
-    }
-    setSecondaryTab(target)
-    return true
-  }, [activeTab])
-  /**
-   * Ctrl+\ 开关分屏：
-   *   · 已分屏 → 关闭（**不加准入**：关闭应永远生效，否则用户被锁死在分屏里）；
-   *   · 主栏非准入模块 → 不换主栏、不强开副栏，只给一次提示（B 方案，2026-09-18 拍板）；
-   *   · 主栏是准入模块 → 副栏放**另一个**准入模块（编辑器 ↔ 知识库）。
-   */
-  const toggleSplit = useCallback(() => {
-    if (secondaryTab) {
-      closeSplit()
-      return
-    }
-    if (!isSplitEligible(activeTab)) {
-      showToast({ type: 'info', message: '分屏仅支持编辑区 / 知识库' })
-      return
-    }
-    openInSecondary(activeTab === 'editor' ? 'knowledge' : 'editor')
-  }, [secondaryTab, activeTab, closeSplit, openInSecondary])
   // 工具箱「回主页」信号（单调递增）：已在工具箱时点击活动栏图标 → +1，工具箱模块据此退出当前工具。
   // 用信号而非命令布尔值：同一信号值不会重复触发，连续点击每次都生效
   const [toolboxHomeSignal, setToolboxHomeSignal] = useState(0)
@@ -316,9 +236,7 @@ export default function App() {
       // 编辑器 / AI 教学仍优先走自己那份（带「先关本模块弹窗再退禅」的档位逻辑，App 不抢）；
       // 命令面板 / 快速切换器开着时 Esc 归它们收。
       if (e.key === 'Escape' && zenLevel >= 2 && !palette) {
-        const zenOwnerActive =
-          activeTab === 'editor' || secondaryTab === 'editor' ||
-          activeTab === 'aiTeaching' || secondaryTab === 'aiTeaching'
+        const zenOwnerActive = activeTab === 'editor' || activeTab === 'aiTeaching'
         if (!zenOwnerActive) { e.preventDefault(); changeZen(0); return }
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.key === 'P' || e.key === 'p')) {
@@ -346,7 +264,7 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // 依赖带全：退禅兜底需要读到当前禅档位 / 激活模块 / 面板态，重挂监听比 ref 镜像直白
-  }, [zenLevel, activeTab, secondaryTab, palette, changeZen])
+  }, [zenLevel, activeTab, palette, changeZen])
 
   // 快速切换器数据源：知识页索引（默认 vault 读源带 path → 经 kb-open-in-editor 在编辑器组打开）
   useEffect(() => {
@@ -437,11 +355,6 @@ export default function App() {
       { id: 'toggle-zen', label: zenLevel >= 2 ? '布局：退出禅模式' : '布局：禅模式（全屏沉浸）', group: '界面设置', run: () => { changeZen(zenLevel >= 2 ? 0 : 2); setPalette(null) } },
       { id: 'toggle-fullscreen', label: osFullscreen ? '布局：退出全屏' : '布局：全屏', group: '界面设置', run: () => { setOsFullscreen(!osFullscreen); setPalette(null) } },
     )
-    // 分屏命令（Editor Groups）：准入收窄为「编辑区 / 知识库」两个模块（`SPLIT_ELIGIBLE`），
-    // 排除当前主栏（同模块开副栏会渲染两份实例）。「关闭副栏」不在这里 —— 有 Ctrl+\ 与副栏 ✕ 两个入口。
-    SPLIT_ELIGIBLE.filter((t) => t !== activeTab).forEach((t) => {
-      items.push({ id: `split-${t}`, label: `分屏：在副栏打开 ${tabLabel(t)}`, group: '分屏', run: () => { openInSecondary(t); setPalette(null) } })
-    })
     // 插件命令（plugin-phase1-design C3）：hint = 插件名，与内置命令并列
     for (const c of pluginCommands) {
       items.push({
@@ -902,15 +815,6 @@ export default function App() {
       if (tab === 'toolbox') { setToolboxHomeSignal(n => n + 1); return }
       return
     }
-    // 分屏冲突：目标已在副栏 → 主栏显示它、旧主栏进副栏（避免同模块双实例）
-    if (secondaryTab === tab) {
-      const old = activeTab
-      setActiveTab(tab)
-      setSecondaryTab(old)
-      setSidebarOpen(true)
-      window.dispatchEvent(new CustomEvent('tab-switched'))
-      return
-    }
     setActiveTab(tab); setSidebarOpen(true); window.dispatchEvent(new CustomEvent('tab-switched'))
   }
 
@@ -1112,30 +1016,16 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Ctrl+\ — 分屏开关（2026-09-18 分屏完整化；与命令面板「分屏：开启/关闭副栏」同源）
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (isEditingInput(e)) return
-      if (e.ctrlKey && (e.key === '\\' || e.code === 'Backslash')) {
-        e.preventDefault()
-        toggleSplit()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [toggleSplit])
-
   // 工具标签页保活集合（批次4）：**必须声明在下方 `if (!loaded) return null` 早退之前**——
   // hook 若落在早退之后，首挂（loaded=false）与恢复后的两次渲染 hook 数不同 = React #310 整屏崩
   // （2026-09-17 实机启动白屏根因，与 PDF 批次 806a12d 同一类病；教训：早退组件的 hook 一律前置）。
   const mountedToolTabs = useRef<Set<string>>(new Set())
 
   /**
-   * 渲染行的模块序列 —— **单一父节点、顺序恒定**（跨栏保活的关键，勿改成「主栏列表 + 副栏拼接」）。
+   * 渲染行的模块序列 —— **单一父节点、顺序恒定**（保活的关键，勿改成「可见模块单列」）。
    *
-   * 顺序 = `mountedTabs` 访问序（稳定，不随 activeTab / secondaryTab 变化）+ 副栏模块补入。
-   * 于是模块无论在主栏还是副栏，它在 children 里的下标都不变 → 换栏不触发卸载重建。
-   * `pane` 由渲染时用 `t === secondaryTab` 判定（只影响 style 的 order/宽度/显隐）。
+   * 顺序 = `mountedTabs` 访问序（稳定，不随 activeTab 变化），于是模块在 children 里的下标
+   * 恒定 → 切换不触发卸载重建。
    *
    * ⚠️ 绝不能把「当前可见模块」单列到数组之外 —— 那会让可见↔隐藏换子节点槽位，
    * React 按位置卸载重建（ISS-2026-09-04-07 的真实成因）。
@@ -1144,19 +1034,10 @@ export default function App() {
     const visited = Array.from(mountedTabs.current)
     // activeTab 兜底首访（renderMounted 的 on=true 会 add，但首帧要先进数组）
     if (activeTab && !visited.includes(activeTab)) visited.push(activeTab)
-    // 副栏模块可能尚未进访问序（外部直接开副栏的场景），补进去
-    if (secondaryTab && !visited.includes(secondaryTab)) visited.push(secondaryTab)
     return visited
-    // mountedTabs 是 ref（不进依赖）；两个 tab 变化时重算即可
+    // mountedTabs 是 ref（不进依赖）；activeTab 变化时重算即可
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, secondaryTab])
-  /** 副栏模块是否合法（非法值一律不渲染，与 openInSecondary 的准入同一口径） */
-  const splitPaneModules = useMemo<TabName[]>(
-    () => (isSplitEligible(secondaryTab) ? [secondaryTab] : []),
-    [secondaryTab],
-  )
-  /** 副栏实际占宽（px）—— 五处（模块容器 / 浮层 / 手柄 / 顶栏副段 / 工具槽）**共用这一个数** */
-  const splitSecondaryWidth = splitWidth > 0 ? splitWidth : SPLIT_FALLBACK_WIDTH
+  }, [activeTab])
 
   if (!loaded) return null
 
@@ -1168,47 +1049,15 @@ export default function App() {
   /** 页面条整行隐藏（v3.4.0 页面条置顶）：知识库沉浸阅读 / 图谱模式本来就是全幅形态，行让位 */
   const pageBarHidden = activeTab === 'knowledge' && knowledgeImmersive
 
-  /**
-   * 顶栏副段的模块名 chip —— **纯标识，不是菜单**（2026-09-18 第十二轮拍板：开发负责人明确不要
-   * 「类似菜单的按钮」）。副栏只能放编辑区/知识库（`SPLIT_ELIGIBLE`），两个目标之间来回切
-   * 已经没有选择价值；关闭分屏有副段 ✕ 与 Ctrl+\，换模块重新分屏即可。
-   * 因此这里不用 button（无 hover 反馈、cursor 默认），只承担「一眼看出右边是什么模块」。
-   */
-  function paneChipNode(cur: TabName): React.ReactNode {
-    return (
-      <span
-        data-pb-pane-chip={cur}
-        title={`副栏：${tabLabel(cur)}`}
-        className="flex h-7 shrink-0 cursor-default items-center gap-1.5 rounded-md bg-[var(--bg-secondary)] px-2 text-[12.5px] text-[var(--text-primary)]"
-      >
-        <span className="shrink-0 text-[var(--accent)]"><Columns2 size={13} /></span>
-        <span className="max-w-[110px] truncate">{tabLabel(cur)}</span>
-      </span>
-    )
-  }
-
-  /**
-   * 渲染行的模块序列 —— **单一父节点、顺序恒定**（跨栏保活的关键，勿改成「主栏列表 + 副栏拼接」）。
-   *
-   * 顺序 = `mountedTabs` 访问序（稳定，不随 activeTab / secondaryTab 变化）+ 副栏模块补入。
-   * 于是模块无论在主栏还是副栏，它在 children 里的下标都不变 → 换栏不触发卸载重建。
-   * `pane` 由渲染时用 `t === secondaryTab` 判定（只影响 style 的 order/宽度/显隐）。
-   *
-   * ⚠️ 绝不能把「当前可见模块」单列到数组之外 —— 那会让可见↔隐藏换子节点槽位，
-   * React 按位置卸载重建（ISS-2026-09-04-07 的真实成因）。
-   */
-  // （rowModules / splitPaneModules 两个 useMemo 已上移到 `if (!loaded) return null` 之前 —— 见上方
-  //   React #310 注释：hook 落在早退之后会让两次渲染 hook 数不同、整屏崩。）
-
-  /** 模块内容（主栏/副栏共用；on = 该模块当前在屏幕某栏激活；pane = 挂在主栏还是分屏副栏）
-      —— 页面条置顶后 pane 决定页签条的归属：主栏 portal 进外壳页面条，副栏内嵌在栏内（SplitPaneBar 之下）。 */
-  function renderModuleContent(name: TabName, on: boolean, pane: 'main' | 'secondary' = 'main'): React.ReactNode {
+  /** 模块内容（on = 该模块当前在屏幕激活）
+      —— 页面条置顶后页签条 portal 进外壳页面条。 */
+  function renderModuleContent(name: TabName, on: boolean): React.ReactNode {
     switch (name) {
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={pane === 'main' ? wbKnowledgePageEl : wbSecondaryTabsEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} paneActive={pane === 'main' ? activePane === 'main' : activePane === 'secondary'} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} />
       case 'moments': return <MomentsModule />
-      case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'editor' ? wbModSlotEl : null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} zenLevel={zenLevel} onZenLevelChange={setZenLevel} pageBarEl={pane === 'main' ? wbEditorPageEl : wbSecondaryTabsEl} pageBarHosted contentActionsEl={pane === 'main' ? wbContentActionsEl : wbSecActionsEl} contentActionsHosted paneActive={pane === 'main' ? activePane === 'main' : activePane === 'secondary'} />
+      case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'editor' ? wbModSlotEl : null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} zenLevel={zenLevel} onZenLevelChange={setZenLevel} pageBarEl={wbEditorPageEl} pageBarHosted contentActionsEl={wbContentActionsEl} contentActionsHosted />
       case 'bookshelf': return (
         <BookshelfModule
           isActive={on}
@@ -1235,8 +1084,8 @@ export default function App() {
       default: return null
     }
   }
-  /** 槽位级保活挂载：首次出现在任意栏后常驻（display:none 保活），同一模块只在一个栏渲染 */
-  function renderMounted(name: TabName, on: boolean, pane: 'main' | 'secondary' = 'main') {
+  /** 槽位级保活挂载：首次出现在任意栏后常驻（display:none 保活） */
+  function renderMounted(name: TabName, on: boolean) {
     if (on) mountedTabs.current.add(name)
     if (!on && !mountedTabs.current.has(name)) return null
     // Suspense 不产生 DOM 节点，容器布局与改前一致；fallback 只在该模块 chunk 首次拉取期间出现。
@@ -1246,7 +1095,7 @@ export default function App() {
     // 位移动画会把整棵子树提升为合成层重新栅格化（见计划文档 §五 风险表）。
     return (
       <div key={name} className="kb-view-fade flex-1 min-h-0" style={on ? undefined : { display: 'none' }}>
-        <Suspense fallback={<ModuleLoadingFallback />}>{renderModuleContent(name, on, pane)}</Suspense>
+        <Suspense fallback={<ModuleLoadingFallback />}>{renderModuleContent(name, on)}</Suspense>
       </div>
     )
   }
@@ -1373,11 +1222,6 @@ export default function App() {
                       }
                     } else {
                       const t = id as TabName
-                      // 分屏栏焦点在副栏 → 模块开进副栏（VS Code focused group 同款语义）；焦点在主栏照旧
-                      if (activePane === 'secondary' && secondaryTab && t !== activeTab) {
-                        setSecondaryTab(t)
-                        return
-                      }
                       handleTabChange(t)
                       // 2026-09-17 反馈拍板：点击标签（含重复点击已激活标签）→ 左栏若不在该模块态则切过去；
                       // 锁定时左栏归用户所有，不跟随（与 RAIL_FOLLOW 跟随语义一致）。
@@ -1392,35 +1236,7 @@ export default function App() {
                   onReorder={handleReorder}
                   editorSlotRef={wbEditorPageRef}
                   knowledgeSlotRef={wbKnowledgePageRef}
-                  secondarySlotRef={wbSecondaryTabsRef}
                   hidePages={zenLevel >= 1}
-                  secondary={secondaryTab ? {
-                    /* 副段（一条行里的右半）：模块名 ⌄ + 副栏页签组 + ✕。宽度取副栏实测宽度，
-                       分界竖线才与下面的分屏手柄对齐（这是「右边矮一节」那轮的修法） */
-                    lead: paneChipNode(secondaryTab),
-                    trail: (
-                      <button
-                        onClick={closeSplit}
-                        data-pb-split-close="1"
-                        title="关闭分屏（Ctrl+\\）"
-                        className="flex shrink-0 items-center rounded-md p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                      >
-                        <X size={13} />
-                      </button>
-                    ),
-                    width: splitSecondaryWidth,
-                  } : null}
-                  trail={(
-                    /* 分屏开关只在**未分屏**时出现在主段尾部；分屏后由副段 ✕ 关闭 */
-                    <button
-                      onClick={toggleSplit}
-                      data-pb-split-btn="1"
-                      title="分屏：在副栏打开另一个模块（Ctrl+\\）"
-                      className="flex items-center rounded-md p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    >
-                      <Columns2 size={13} />
-                    </button>
-                  )}
                   lead={activeTab === 'editor' && editorJumpFrom && editorJumpFrom !== 'editor' ? (
                     /* 编辑器「← 返回 X」chip：属当前上下文导航，落页面条最左端（原独立常驻行已删） */
                     <button
@@ -1435,106 +1251,52 @@ export default function App() {
               )}
               {/* 整窗模块的「回工作台」入口 = 图标条顶部「工作台」按钮（2026-09-17 bug 修复轮：
                   原右上角浮动「工作台」按钮删除——入口统一收敛到 ActivityBar，避免同一功能两处入口） */}
-              {/* 编辑器组（W3 · Editor Groups v1）：主栏 + 可选副栏，两栏模块互不相同。
+              {/* 编辑器组（W3 · Editor Groups v1）：主栏渲染。
                   v3.4.0 批次3：旧 R1-W1 全局侧栏槽（wbSidebarEl）已删除——editor 文件树与
                   knowledge/schedule/blog 侧栏统一由左栏模块态 slot（wbModSlotEl）portal 承接 */}
               <div className="flex min-h-0 flex-1">
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-                  {/* 渲染器组（W3 · Editor Groups v1）：主栏 + 可选副栏，两栏模块互不相同。
-                      ★ 跨栏保活结构（2026-09-18 第十二轮 · 本轮核心修复，已用最小实验钉死）：
-                      模块容器**全部是这一行的直接子元素**（单一父节点），DOM 顺序按 `mountedTabs` 访问序
-                      恒定不变；`pane` 只决定每个容器的 **样式**（`order` + 宽度 + 显隐）。
+                  {/* 模块渲染区。
+                      ★ 保活结构：模块容器**全部是这一行的直接子元素**（单一父节点），DOM 顺序按
+                      `mountedTabs` 访问序恒定不变；可见性只由 style 的 `display` 决定，不换父节点。
                       为什么必须这样：React 的 reconciliation 作用域是「父节点 + children 数组」，
-                      旧结构把副栏模块挂在 `{secondaryTab && <ResizablePanel>}` 里 = 另一个父节点 →
-                      模块跨栏搬迁 = 旧位置删除 + 新位置新增 → 模块内 useState 全归零
-                      （实机探针实证：搬迁后知识库页签组 items 2 → 0、激活页 id → null）。
-                      已验证的错路：① 挂跨父节点稳定 key（key 只在同父节点内有效）；② createPortal 换 target
-                      （一样重挂）。结构实验读数：旧结构 3 mounts / 2 unmounts；本结构 1 / 0（零卸载）。 */}
+                      把「当前可见模块」挪到数组之外/换父节点 = 旧位置删除 + 新位置新增 →
+                      模块内 useState 全归零（实机探针实证过：知识库页签组 items 2 → 0）。
+                      已验证的错路：① 挂跨父节点稳定 key（key 只在同父节点内有效）；
+                      ② createPortal 换 target（一样重挂）。 */}
                   <div className="relative flex min-h-0 min-w-0 flex-1">
-                    {/* 主栏的内容级操作浮层（v3.4.0 页面条置顶）：插图/大纲/预览/保存全部 的胶囊，
+                    {/* 内容级操作浮层（v3.4.0 页面条置顶）：插图/大纲/预览/保存全部 的胶囊，
                         以及知识库页面级动作槽 `#editor-toolbar-slot`。
-                        ⚠️ 必须相对**主栏区域**定位（2026-09-18 分屏轮修）：挂在整个模块区上时，
-                        `right-3` 会算到副栏去 → 分屏后胶囊飘到副栏右上角。
                         `pointer-events-none` 外壳 + 子元素 auto：空槽不挡内容点击。
                         该 id 必须保留 —— knowledge/components/PageEditor.tsx 按 id 全局查它做 portal。 */}
                     <div
                       data-wb="mainPane"
-                      className="pointer-events-none absolute inset-y-0 left-0 z-30 flex items-start justify-end"
-                      style={{ width: secondaryTab ? `calc(100% - ${splitSecondaryWidth}px)` : '100%' }}
-                      onMouseDownCapture={() => { if (activePane !== 'main') setActivePane('main') }}
+                      className="pointer-events-none absolute inset-y-0 left-0 z-30 flex items-start justify-end w-full"
                     >
                       <div className="pointer-events-none mt-3 mr-3 flex items-center gap-1.5">
                         <div ref={wbContentActionsRef} className="pointer-events-auto flex items-center" />
-                        {secondaryTab !== 'knowledge' && (
-                          <div id="editor-toolbar-slot" className="pointer-events-auto flex items-center gap-0.5" />
-                        )}
+                        <div id="editor-toolbar-slot" className="pointer-events-auto flex items-center gap-0.5" />
                       </div>
                     </div>
-                    {/* 模块容器序列：主栏模块（flex-1，可见的那个撑满）+ 副栏模块（固定宽，order 靠右）。
-                        隐藏模块 display:none 常驻保活（切 Tab / 换栏都不卸载 → 状态保留）。
+                    {/* 模块容器序列：可见模块撑满（flex-1），其余 display:none 常驻保活。
                         ISS-2026-09-04-02 / -07：可见与隐藏模块必须在**同一个 keyed 数组**里，
                         否则可见↔隐藏换子节点槽位会被 React 按位置卸载重建。 */}
-                    {rowModules.map((t) => {
-                      const isSec = t === secondaryTab
-                      return (
-                        <div
-                          key={t}
-                          data-pane={isSec ? 'secondary' : 'main'}
-                          className="relative flex min-h-0 flex-col"
-                          style={{
-                            order: isSec ? 2 : 1,
-                            // 副栏模块固定宽度（splitWidth 未上报前给 SPLIT_FALLBACK_WIDTH 兜底，
-                            // 避免首帧塌成 0；未分屏时取 0 → 不占空间）；主栏模块 flex-1 撑满剩余
-                            width: isSec ? splitSecondaryWidth : undefined,
-                            flex: isSec ? '0 0 auto' : 1,
-                            minWidth: 0,
-                            // 可见性：主栏当前激活模块 or 副栏模块可见；其余保活模块隐藏
-                            display: t === activeTab || isSec ? undefined : 'none',
-                          }}
-                          onMouseDownCapture={() => { if ((activePane === 'main') === isSec) return; setActivePane(isSec ? 'secondary' : 'main') }}
-                        >
-                          {isSec && (
-                            <div
-                              data-wb="splitPane"
-                              data-pane-module={t}
-                              className="flex h-full min-h-0 flex-col"
-                            >
-                              {/* 副栏浮层（内容级操作）：与主栏同一套位置约定（内容区右上角）。
-                                  `#editor-toolbar-slot` 全窗口只出现一次 —— 知识库在哪一栏，它就在哪一栏。 */}
-                              <div className="pointer-events-none absolute right-3 top-3 z-30 flex items-center gap-1.5">
-                                <div ref={wbSecActionsRef} className="pointer-events-auto flex items-center" />
-                                {t === 'knowledge' && (
-                                  <div id="editor-toolbar-slot" className="pointer-events-auto flex items-center gap-0.5" />
-                                )}
-                              </div>
-                            </div>
-                          )}
-                          {renderMounted(t, t === activeTab || isSec, isSec ? 'secondary' : 'main')}
-                        </div>
-                      )
-                    })}
-                    {/* 分屏手柄：绝对定位在副栏左缘（**不占 children 槽位**，所以不会干扰上面的 key 序列）。
-                        未分屏时不渲染；分屏时负责拖宽 / snap 收合（语义与旧 ResizablePanel 一致）。 */}
-                    {secondaryTab && (
-                      <SplitHandle
-                        width={splitSecondaryWidth}
-                        minWidth={300}
-                        maxWidth={Math.max(420, Math.floor(winWidth * 0.45))}
-                        storageKey="kb.splitSecondaryWidth"
-                        onWidthChange={setSplitWidth}
-                        onSnapClose={closeSplit}
-                      />
-                    )}
-                    {/* 工具标签宿主（批次4，保活）：**绝对定位铺满主栏区域**，不参与上面的 flex 流 ——
-                        否则它作为 flex 子项会挤在「主栏模块」与「副栏模块」之间，破坏两栏几何。
+                    {rowModules.map((t) => (
+                      <div
+                        key={t}
+                        data-pane="main"
+                        className="relative flex min-h-0 flex-1 flex-col"
+                        style={{ display: t === activeTab ? undefined : 'none', minWidth: 0 }}
+                      >
+                        {renderMounted(t, t === activeTab)}
+                      </div>
+                    ))}
+                    {/* 工具标签宿主（批次4，保活）：**绝对定位铺满主栏区域**，不参与上面的 flex 流。
                         激活的可见，其余已开工具 display:none 常驻（工具内状态如密码本解锁态不丢）。 */}
                     {mountedToolTabs.current.size > 0 && (
                       <div
-                        className="absolute inset-y-0 left-0 z-20 flex min-h-0 flex-col"
-                        style={{
-                          width: `calc(100% - ${secondaryTab ? splitSecondaryWidth : 0}px)`,
-                          display: activeToolTab ? undefined : 'none',
-                        }}
+                        className="absolute inset-y-0 left-0 z-20 flex min-h-0 w-full flex-col"
+                        style={{ display: activeToolTab ? undefined : 'none' }}
                       >
                         {activeToolTab && renderToolMounted(activeToolTab, true)}
                         {Array.from(mountedToolTabs.current)
@@ -1546,8 +1308,7 @@ export default function App() {
                         绝对定位铺满主栏区域（不参与 flex 流，避免挤动两栏几何）。 */}
                     {activeTab === null && !activeToolTab && (
                       <div
-                        className="absolute inset-y-0 left-0 z-20 flex flex-col items-center justify-center gap-1.5 pb-16"
-                        style={{ width: `calc(100% - ${secondaryTab ? splitSecondaryWidth : 0}px)` }}
+                        className="absolute inset-y-0 left-0 z-20 flex w-full flex-col items-center justify-center gap-1.5 pb-16"
                       >
                         <div className="text-[13.5px] text-[var(--text-secondary)]">所有标签页已关闭</div>
                         <div className="text-[12px] text-[var(--text-muted)]">从左侧书签或图标条打开模块</div>

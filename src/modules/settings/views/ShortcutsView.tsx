@@ -7,7 +7,6 @@ export function ShortcutsView() {
       <div className="space-y-8">
         <Group anchor="shortcuts.global" label="全局">
           <Row keys={['Ctrl', 'B']} desc="展开 / 折叠侧栏" />
-          <Row keys={['Ctrl', '\\']} desc="分屏：开启 / 关闭中间栏副栏" />
           <Row keys={['Escape']} desc="关闭弹窗 / 从编辑器返回列表" />
           <Row keys={['Ctrl', 'Shift', 'P']} desc="命令面板" />
           <Row keys={['Ctrl', 'O']} desc="快速打开 / 切换文件（知识页索引）" />

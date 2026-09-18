@@ -106,8 +106,6 @@ interface Props {
   contentActionsEl?: HTMLElement | null
   /** 内容级操作由 App 托管（语义同 pageBarHosted） */
   contentActionsHosted?: boolean
-  /** 所在栏是否为当前栏焦点（VS Code 式分屏焦点：非焦点栏标签淡化；不分屏恒 true） */
-  paneActive?: boolean
   /** 内嵌侧栏开合（Ctrl+B / 贴边收放联动；缺省=恒开，兼容 Workbench 等旧调用） */
   sidebarOpen?: boolean
   /** 侧栏宽度持久化集（sidebarWidth_editor） */
@@ -126,7 +124,7 @@ interface InputBoxState {
   onSubmit: (value: string) => void
 }
 
-export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted = false, markdownDim = true, pendingOpenRel = null, onPendingConsumed, zenLevel = 0, onZenLevelChange, pageBarEl = null, pageBarHosted = false, contentActionsEl = null, contentActionsHosted = false, paneActive = true, sidebarOpen, sidebarWidths, onSnapCloseSidebar, onSnapOpenSidebar }: Props) {
+export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted = false, markdownDim = true, pendingOpenRel = null, onPendingConsumed, zenLevel = 0, onZenLevelChange, pageBarEl = null, pageBarHosted = false, contentActionsEl = null, contentActionsHosted = false, sidebarOpen, sidebarWidths, onSnapCloseSidebar, onSnapOpenSidebar }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [recent, setRecent] = useState<WorkspaceRecent[]>([])
   const [dirCache, setDirCache] = useState<DirCache>({})
@@ -1590,7 +1588,6 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
               <PageTabStrip
                 owner="editor"
                 itemAttr="data-tab-rel"
-                paneActive={paneActive}
                 items={openList.map((rel) => {
                   const d = openFiles[rel]
                   return {

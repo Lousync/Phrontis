@@ -326,8 +326,12 @@ ok(/pageBarHosted/.test(srcEditor) && /createPortal\(/.test(srcEditor) && /pageB
   'F6 编辑器文件标签行 portal 进页面条槽（槽未就绪渲染 null，不回落内嵌）')
 ok(/contentActionsHosted/.test(srcEditor) && /actionsPill/.test(srcEditor),
   'F7 编辑器四个动作收成胶囊并 portal 进内容级操作槽')
-ok(/id="editor-toolbar-slot"/.test(srcApp) && /pointer-events-none absolute right-3 top-3/.test(srcApp),
-  'F8 内容级操作浮层在 App（含 #editor-toolbar-slot；pointer-events 分层不挡内容）')
+// 浮层结构（2026-09-18 分屏下线后重写判据）：外壳 `data-wb="mainPane"` 全宽、pointer-events-none，
+// 内层负责右上角对齐（mt-3 mr-3）。分屏时代外壳宽度曾是 `calc(100% - 副栏宽)`，下线后恒为全宽。
+ok(/data-wb="mainPane"[\s\S]{0,200}?pointer-events-none[\s\S]{0,200}?w-full/.test(srcApp)
+  && /id="editor-toolbar-slot"/.test(srcApp) && /mt-3 mr-3/.test(srcApp)
+  && (srcApp.match(/id="editor-toolbar-slot"/g) || []).length === 1,
+  'F8 内容级操作浮层在 App（含 #editor-toolbar-slot 唯一一处；pointer-events 分层不挡内容）')
 ok(/pageBarHosted/.test(srcKnowledge) && /createPortal\(strip/.test(srcKnowledge),
   'F9 知识库页签条 portal 进页面条槽')
 ok(/onImmersiveChange\?\.\(v\)/.test(srcKnowledge) && /readingMode \|\| graphMode/.test(srcKnowledge) && /pageBarHidden/.test(srcApp),
@@ -338,136 +342,34 @@ ok(/OWNER_COLOR/.test(srcStrip) && /PenLine/.test(srcStrip) && /BookOpen/.test(s
 ok(srcStrip.indexOf('if (items.length === 0) return null') > srcStrip.indexOf('const [draggedId'),
   'F12 页签条 hooks 全在早退之前（React #310 防线）')
 
-// ===== G. 分屏完整化（中间栏双栏分区，2026-09-18）=====
-// 形态：页面条右端一个分屏开关 + Ctrl+\；副栏 = 自己那块区域；栏焦点 activePane 决定
-// 「页面条点模块条目开在哪一栏」；关闭统一走 closeSplit 复位焦点。
-// （注：原副栏顶条的 SplitPaneMenu 已于第十二轮删除，见 G9 / J5）
-
-ok(/activePane/.test(srcApp) && /const closeSplit = useCallback/.test(srcApp) && /const toggleSplit = useCallback/.test(srcApp),
-  'G1 App 有栏焦点 activePane + closeSplit / toggleSplit 两个收口')
-ok(/data-pb-split-btn="1"/.test(srcApp) && /onClick=\{toggleSplit\}/.test(srcApp)
-  && /data-pb-split-close="1"/.test(srcApp) && /onClick=\{closeSplit\}/.test(srcApp),
-  'G2 分屏开关只在未分屏时出（data-pb-split-btn）；分屏后由副段 ✕（data-pb-split-close → closeSplit）关闭')
-// 注：`Ctrl+\` 的反斜杠在 regex 字面量里要写成 `\\\\`，极易写错；且此脚本用的是 `stripComments`
-// 后的源码，**注释里的字面量测不到**。所以这里只用代码判据：① 分屏 keydown 处理体认 `\` / `Backslash`
-// （用 e.code 断，绕开反斜杠转义）；② 该处理体挂在 window keydown 上并正确清理。
-ok(/e\.ctrlKey && \(e\.key === '\\\\' \|\| e\.code === 'Backslash'\)/.test(srcApp)
-  && /window\.addEventListener\('keydown', onKey\)[\s\S]{0,400}?return \(\) => window\.removeEventListener\('keydown', onKey\)/.test(srcApp),
-  'G3 Ctrl+\\ 全局快捷键已绑定（分屏 toggle 处理体接管 Backslash，且 effect 正确卸载）')
-ok(!/setSecondaryTab\(secondaryTab \? null/.test(srcApp) && !/onSnapClose=\{\(\) => setSecondaryTab\(null\)\}/.test(srcApp)
-  && !/onClose=\{\(\) => setSecondaryTab\(null\)\}/.test(srcApp),
-  'G4 关闭副栏的四条路径（拖拽收合 / 顶条 ✕ / 页面条按钮 / Ctrl+\\）都走 closeSplit，无遗留 setSecondaryTab(null)')
-ok(/function renderModuleContent\(name: TabName, on: boolean, pane/.test(srcApp)
-  && /function renderMounted\(name: TabName, on: boolean, pane/.test(srcApp)
-  && /renderMounted\(t, t === activeTab \|\| isSec, isSec \? 'secondary' : 'main'\)/.test(srcApp),
-  'G5 栏位参数 pane 贯通 renderMounted → renderModuleContent（副栏模块同一调用点传 secondary）')
-ok(/pageBarEl=\{pane === 'main' \? wbKnowledgePageEl : wbSecondaryTabsEl\} pageBarHosted/.test(srcApp)
-  && /pageBarEl=\{pane === 'main' \? wbEditorPageEl : wbSecondaryTabsEl\} pageBarHosted/.test(srcApp)
-  && /secondarySlotRef=\{wbSecondaryTabsRef\}/.test(srcApp),
-  'G6 页签归属：主栏 → 主段编辑器/知识库槽；副栏 → 顶栏副段槽（两栏页签同挂一条行）')
-ok(/data-wb="splitPane"/.test(srcApp)
-  && /onMouseDownCapture=\{\(\) => \{ if \(\(activePane === 'main'\) === isSec\) return; setActivePane\(isSec \? 'secondary' : 'main'\) \}\}/.test(srcApp),
-  'G7 副栏容器带 data-wb=splitPane 且点击接管栏焦点（与主栏同一套 click-capture 语义）')
-ok(/data-wb="mainPane"/.test(srcApp) && /if \(activePane !== 'main'\) setActivePane\('main'\)/.test(srcApp),
-  'G11 主栏容器带 data-wb=mainPane（栏焦点的两个锚点都在 DOM 上可观测）')
-ok(/activePane !== 'main'\) setActivePane\('main'\)/.test(srcApp) && /data-pane-module=\{t\}/.test(srcApp),
-  'G8 主栏点击回收焦点；副栏容器暴露 data-pane-module（模块序列化渲染，属性值 = 该栏模块名）')
-ok(!existsSync(`${ROOT}/src/components/shared/SplitPaneMenu.tsx`),
-  'G9 ⋯ 菜单（SplitPaneMenu）已随「副段 chip 纯标识化」整件退役（2026-09-18 第十二轮，见 J5）')
-ok(/activePane === 'secondary' && secondaryTab && t !== activeTab/.test(srcApp) && /setSecondaryTab\(t\)/.test(srcApp),
-  'G10 副栏聚焦时页面条点模块条目 → 开进副栏（focused group 语义）')
-
-// ===== H. 分屏改 VS Code 式（2026-09-18 第二轮反馈拍板）=====
-// 形态：副栏**不再有**独立的功能条（模块名 + 下拉 + ✕），顶部就是该模块自己的标签行；
-// 栏焦点靠标签明暗（非焦点栏的激活标签不给底色）；模块切换/关闭收进 ⋯ 菜单。
-ok(!existsSync(`${ROOT}/src/components/shared/SplitPaneBar.tsx`) && !/SplitPaneBar/.test(srcApp),
-  'H1 旧的副栏功能条组件已删除且 App 不再引用（副栏顶部只该有标签行）')
-ok(/paneActive\?: boolean/.test(srcStrip)
-  && /data-pane-active=\{paneActive \? '1' : '0'\}/.test(srcStrip)
-  && /paneActive \? '' : 'opacity-75'/.test(srcStrip)
-  && /bg-transparent text-\[var\(--text-secondary\)\]/.test(srcStrip),
-  'H2 栏焦点 = 标签明暗：非焦点栏整条淡化 + 激活标签不出底色（VS Code 观感，不另加边框/竖线）')
-ok(/\tpaneActive=| paneActive=\{paneActive\}/.test(srcEditor)
-  && /paneActive=\{paneActive\}/.test(srcKnowledge)
-  && /paneActive=\{pane === 'main' \? activePane === 'main' : activePane === 'secondary'\}/.test(srcApp),
-  'H3 paneActive 从 App 贯通到两个模块的标签组（不分屏时恒 true，不引入无意义淡化）')
-ok(/secondarySlotRef/.test(srcPageBar) && /data-pb-slot-wrap="secondary"/.test(srcPageBar) && /data-pb-slot="secondary"/.test(srcPageBar)
-  && /border-l border-\[var\(--border-color\)\]/.test(srcPageBar),
-  'H4 顶栏 = 一条行两段：主段（flex-1）+ 副段（border-l 分界竖线 + 模块名 chip + 副栏页签槽 + ✕）')
-ok(/function paneChipNode\(cur: TabName\)/.test(srcApp) && /data-pb-pane-chip=\{cur\}/.test(srcApp)
-  && /lead: paneChipNode\(secondaryTab\)/.test(srcApp)
-  && /\{secondary\.lead\}/.test(srcPageBar),
-  'H5 副段左端 = 模块名 chip（**纯标识**，第十二轮起不再是 ⌄ 菜单；App 渲染 → PageBar 以 secondary.lead 承载，见 J6）')
-ok(!/data-pb-split="1"/.test(srcApp) && !/triggerTitle="选择副栏模块 \/ 关闭分屏"/.test(srcApp)
-  && !/paneMenu=/.test(srcApp),
-  'H6 旧的两处 ⋯ 入口（模块标签行右端 paneMenu / 页面条小箭头）已收回，入口统一在副段')
-ok(/data-wb="mainPane"[\s\S]{0,900}?id="editor-toolbar-slot"/.test(srcApp)
-  && /secondaryTab !== 'knowledge' && \(/.test(srcApp) && /t === 'knowledge' && \(/.test(srcApp)
-  && (srcApp.match(/id="editor-toolbar-slot"/g) || []).length === 2,
-  'H7 内容级操作浮层按栏各一份（mainPane 内 + splitPane 内）；#editor-toolbar-slot 恰好两处且互斥渲染 → 全窗口只出现一次')
-
-// ===== I. 两栏共用一条顶栏（2026-09-18 第三轮反馈：页面条下面右边「矮上一节」）=====
-// 病根：主栏页签在全宽条里、副栏页签在副栏自己的一行里 → 横向底线不在同一 y、分界处断成两段。
-// 修法：两栏的条合并成同一条（主段 + 副段），副段宽度取副栏实测宽度与手柄对齐。
-ok(/style=\{\{ width: secondary\.width \}\}/.test(srcPageBar)
-  && /width: splitSecondaryWidth,/.test(srcApp) && /onWidthChange=\{setSplitWidth\}/.test(srcApp),
-  'I1 副段宽度取副栏实测宽度（SplitHandle.onWidthChange → splitWidth → splitSecondaryWidth），分界竖线才能与分屏手柄对齐')
-ok(/data-pb-main/.test(srcPageBar) && /items-stretch/.test(srcPageBar),
-  'I2 一条行内部 items-stretch：分界竖线贯穿整行高度，底线连续、不再断成两段')
-ok(!/paneMenu/.test(srcEditor) && !/paneMenu/.test(srcKnowledge),
-  'I3 paneMenu 机制退役：副栏页签已挂在顶栏副段，模块不再自渲染一行 + ⋯')
-ok(/isActive && contentActionsHosted && contentActionsEl && createPortal\(actionsPill, contentActionsEl\)/.test(srcEditor),
-  'I4 编辑器动作胶囊加 isActive 门槛（隐藏保活时不会飘到当前模块头上）')
-
-// ===== J. 副栏准入收窄 + 副段 chip 纯标识化 + ★ 跨栏保活（2026-09-18 第十二轮）=====
-// 方案：docs/workbench-split-scope-design.md；核心病根 = 模块容器跨父节点搬迁 → React 卸载重建。
+// ===== G. 分屏整轮下线（2026-09-18 晚 · 从 v3.4.0 撤下，改排 v3.5.0）=====
+// 背景：工作台分区精细化（分屏 + 准入收窄 + 跨栏保活）整轮撤下 v3.4.0，重做排期到 v3.5.0。
+// 页面条置顶（F 段）与分屏无关、已完成验证，**保留不动**。
+// 方案留档继续作为 3.5.0 输入：docs/workbench-split-scope-design.md（不删）。
+// 本段做**负向断言**：确认分屏残留为零 —— 「只删了一半」是最容易漏的一类静默复发。
 const srcModules = stripComments(read('src/lib/appModules.ts'))
-const srcSplitHandle = stripComments(read('src/components/workbench/SplitHandle.tsx'))
+const srcStatusBar = stripComments(read('src/components/shared/WorkbenchStatusBar.tsx'))
 
-ok(/export const SPLIT_ELIGIBLE: TabName\[\] = \['editor', 'knowledge'\]/.test(srcModules)
-  && /export function isSplitEligible/.test(srcModules),
-  'J1 分屏准入唯一真相源 SPLIT_ELIGIBLE + isSplitEligible 落在 appModules.ts')
-ok(/isSplitEligible\(target\)/.test(srcApp) && /const openInSecondary = useCallback/.test(srcApp),
-  'J2 开副栏收敛到 openInSecondary（准入判断在收口层，三个入口自动同口径）')
-ok(/isSplitEligible\(activeTab\)/.test(srcApp) && /分屏仅支持编辑区 \/ 知识库/.test(srcApp)
-  && /showToast\(\{ type: 'info', message: '分屏仅支持编辑区 \/ 知识库' \}\)/.test(srcApp),
-  'J3 Ctrl+\\ 在主栏非准入模块时 → 不换主栏、不强开副栏，只给一次提示（B 方案）')
-ok(!/split-toggle/.test(srcApp) && /SPLIT_ELIGIBLE\.filter\(\(t\) => t !== activeTab\)/.test(srcApp),
-  'J4 命令面板分屏组只消费 SPLIT_ELIGIBLE（2 条打开项，排除主栏自身；旧的开启/关闭项已删）')
-ok(!existsSync(`${ROOT}/src/components/shared/SplitPaneMenu.tsx`) && !/SplitPaneMenu/.test(srcApp)
-  && !/paneMenuNode/.test(srcApp),
-  'J5 SplitPaneMenu 组件文件已删 + App 无 paneMenuNode 残留（副段不再是菜单）')
-ok(/function paneChipNode\(cur: TabName\)/.test(srcApp) && /data-pb-pane-chip=\{cur\}/.test(srcApp)
-  && /cursor-default/.test(srcApp) && !/ChevronDown/.test(srcApp),
-  'J6 副段模块名 = 纯标识 span（data-pb-pane-chip、cursor-default、全文件无 ChevronDown）')
-// ★ 跨栏保活的结构三约束（任一条破了就退回卸载重建，见 docs 方案 §2.5）
-ok(/const rowModules = useMemo<TabName\[\]>/.test(srcApp)
-  && /const visited = Array\.from\(mountedTabs\.current\)/.test(srcApp),
-  'J7 ★ 模块序列 rowModules 按 mountedTabs 访问序生成（顺序恒定，不随栏位变化）')
-ok(/\{rowModules\.map\(\(t\) => \{/.test(srcApp) && /const isSec = t === secondaryTab/.test(srcApp)
-  && /order: isSec \? 2 : 1/.test(srcApp),
-  'J8 ★ 单一父节点 + pane 只改样式：模块容器同挂一行，order 决定视觉左右')
-ok(!/renderMounted\(secondaryTab, true, 'secondary'\)/.test(srcApp)
-  && /renderMounted\(t, t === activeTab \|\| isSec, isSec \? 'secondary' : 'main'\)/.test(srcApp),
-  'J9 ★ 副栏模块不再单独渲染进另一个容器（旧结构 = 跨父节点搬迁 = 卸载重建）')
-ok(!/<ResizablePanel/.test(srcApp) && /<SplitHandle/.test(srcApp) && /from '\.\/components\/workbench\/SplitHandle'/.test(srcApp),
-  'J10 副栏不再用 ResizablePanel 装模块（它会把模块变成子孙 = 另一个父节点）；改用 SplitHandle')
-ok(/splitPaneModules/.test(srcApp) && /onWidthChange=\{setSplitWidth\}/.test(srcApp),
-  'J11 副栏仍有 splitPaneModules / 宽度上报（宽度真相源在 App，模块容器与顶栏副段共用）')
-ok(/function SplitHandle/.test(srcSplitHandle) && /setPointerCapture/.test(srcSplitHandle)
-  && /onLostPointerCapture=\{\(\) => endDrag\(\)\}/.test(srcSplitHandle)
-  && /document\.body\.style\.cursor = ''/.test(srcSplitHandle),
-  'J12 SplitHandle 原样继承 ResizablePanel 的拖拽语义（pointer capture + 四路收尾 + body 污染兜底）')
-// ★ 副栏宽度兜底的单一真相源（2026-09-18 实机探针 S2e 抓到的 81px 错位根因）：
-// App 曾用 `380` 兜底、PageBar 自留 `46%` 兜底 → 两个基准不同的数算同一个未知宽度。
-// 断言：常量只声明一次、五处调用点全用它、且**全仓无残留的第二种兜底写法**。
-const splitFallbackSites = (srcApp.match(/SPLIT_FALLBACK_WIDTH/g) || []).length
-ok(/const SPLIT_FALLBACK_WIDTH = 380/.test(srcApp) && /const splitSecondaryWidth = splitWidth > 0 \? splitWidth : SPLIT_FALLBACK_WIDTH/.test(srcApp)
-  && splitFallbackSites >= 2
-  && !/splitWidth > 0 \? splitWidth : 380/.test(srcApp)
-  && !/width: secondary\.width > 0 \? secondary\.width : '46%'/.test(srcPageBar)
-  && /style=\{\{ width: secondary\.width \}\}/.test(srcPageBar),
-  'J13 ★ 副栏宽度兜底单一真相源 SPLIT_FALLBACK_WIDTH（App 五处调用点共用；PageBar 不自带第二种兜底）')
+ok(!/SPLIT_ELIGIBLE|isSplitEligible/.test(srcModules),
+  'G1 分屏准入清单 SPLIT_ELIGIBLE / isSplitEligible 已从 appModules.ts 整件移除')
+ok(!/secondaryTab|setSecondaryTab/.test(srcApp) && !/activePane/.test(srcApp),
+  'G2 App 无副栏 state（secondaryTab / activePane）残留')
+ok(!/openInSecondary|toggleSplit|closeSplit|splitSecondaryWidth|splitPaneModules/.test(srcApp),
+  'G3 App 无分屏回调与派生量（openInSecondary / toggleSplit / closeSplit / splitSecondaryWidth / splitPaneModules）')
+ok(!/secondarySlotRef/.test(srcApp) && !/wbSecondaryTabsRef|wbSecActionsRef/.test(srcApp)
+  && !/data-pb-split|data-pb-slot="secondary"|data-wb="splitPane"/.test(srcApp),
+  'G4 副栏槽与副栏 DOM 标识（secondarySlotRef / wbSecActions / data-pb-split / splitPane）已清空')
+ok(!existsSync(`${ROOT}/src/components/workbench/SplitHandle.tsx`) && !/SplitHandle/.test(srcApp),
+  'G5 分屏手柄组件已删且 App 无引用（3.5.0 重做时从 git 历史取回）')
+ok(!/paneActive/.test(srcStrip) && !/paneActive/.test(srcEditor) && !/paneActive/.test(srcKnowledge),
+  'G6 栏焦点 paneActive 已从页签条与两个模块的调用点清空（页面条置顶成果不受影响）')
+ok(!/SPLIT_FALLBACK_WIDTH|splitWidth/.test(srcApp) && !/RowsPerPane/.test(srcApp),
+  'G7 副栏宽度兜底与实测宽度上报（SPLIT_FALLBACK_WIDTH / splitWidth）已删')
+ok(!/Backslash/.test(srcApp) && !/Columns2/.test(srcApp),
+  'G8 分屏入口全清：Ctrl+\\ 快捷键与页面条分屏按钮（Columns2 图标）')
+// 负向：全仓（源码 + 外壳 + 下游文案）不得再有「分屏」概念残留
+ok(!/分屏/.test(srcApp) && !/分屏/.test(srcStrip) && !/分屏/.test(srcPageBar) && !/分屏/.test(srcStatusBar),
+  'G9 「分屏」概念已从 App / 页签条 / 页面条 / 状态栏的源码与注释中清除')
 
 console.log('\n========================================')
 if (fails.length === 0) {

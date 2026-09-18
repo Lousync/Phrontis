@@ -4,7 +4,7 @@ import type { TabName } from '../types'
  * 模块清单的**唯一真相源**。
  *
  * 为什么要有这个文件：模块清单原本被抄在 6 个地方，各自演化、已经飘了 ——
- *   · `App.tsx` 的 `MODULE_TABS`（命令面板 / 分屏）        —— 少了 aiTeaching
+ *   · `App.tsx` 的 `MODULE_TABS`（命令面板）              —— 少了 aiTeaching
  *   · `App.tsx` 的启动回退候选 `all`                        —— 少了 desktop / aiTeaching，多了 recycle / help
  *   · `App.tsx` 的小窗 `switch-tab` 白名单                  —— 少了 desktop / editor / aiTeaching
  *   · `ActivityBar.tsx` 的 `ALL_MODULES`（右键显隐）        —— 只有 9 个 bar 模块
@@ -85,23 +85,6 @@ export const TILE_MODULE_IDS = byFlag('tile')
 /** 命令面板「打开模块」的清单（带名称） */
 export const PALETTE_MODULES: Array<{ id: TabName; label: string }> =
   APP_MODULES.filter((m) => m.palette).map((m) => ({ id: m.id, label: m.label }))
-
-/**
- * 可分屏（能进副栏）的模块 —— **只有编辑区与知识库**。
- *
- * ⚠️ 这是分屏准入的唯一真相源。三个入口（`Ctrl+\` / 页面条分屏按钮 / 命令面板「分屏」组）
- * 必须全部读它，绝不在调用点再写一份 `['editor','knowledge']` 字面量 ——
- * 项目里已经有「同一份清单被手抄成多份、改动只落到其中几处」这类静默失效的先例。
- *
- * 为什么只有这两个：其余模块（日程 / 动态 / 博客…）进副栏会整模块占半屏、又没有页签体系，
- * 只能靠菜单换掉，是"打开了就收不了场"的形态。
- */
-export const SPLIT_ELIGIBLE: TabName[] = ['editor', 'knowledge']
-
-/** 模块是否可进副栏（类型守卫，传 null/undefined 安全） */
-export function isSplitEligible(id: TabName | null | undefined): id is TabName {
-  return !!id && SPLIT_ELIGIBLE.includes(id)
-}
 
 const KNOWN_IDS: string[] = APP_MODULES.map((m) => m.id)
 

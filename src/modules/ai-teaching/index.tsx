@@ -295,7 +295,7 @@ function UsageRing({ pct, used }: { pct: number | null; used: number }) {
 const CHARS_PER_TOKEN = 2.6
 
 /** UI 优化条目6B：中栏导航状态按会话持久化（`aiTeach.nav.{sessionId}`）。
- *  保活架构下切 Tab 不卸载组件，但模块在主栏/副栏之间换位（分屏互切）或实例重建会整树重置——
+ *  保活架构下切 Tab 不卸载组件，但模块实例重建会整树重置——
  *  以 localStorage 兜底，回到该会话即恢复到离开时的视图（文档阅读 > 逐页阅读 > 题目 > 对话）。 */
 type AiTeachNav = {
   midView?: 'chat' | 'quiz'; docRel?: string | null; readerRel?: string | null; readerPage?: number

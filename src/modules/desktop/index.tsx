@@ -29,7 +29,7 @@ import { useDesktopData, useDerived } from './useDesktopData'
 interface Props {
   /** 桌面是否当前可见（保活层切走时仍挂载，用于跳过无谓的重算） */
   isActive?: boolean
-  /** 打开某个模块 —— 由 App 传入，复用既有 Tab 切换（含侧栏/分屏等既有行为） */
+  /** 打开某个模块 —— 由 App 传入，复用既有 Tab 切换（含侧栏等既有行为） */
   onOpenModule: (tab: TabName) => void
 }
 
