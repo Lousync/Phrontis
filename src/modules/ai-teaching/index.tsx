@@ -721,7 +721,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [isActive])
 
   // ---- 禅模式（本模块只**消费**档位，不再持有入口）----
-  // 入口已上移到标题栏「布局」菜单（App 层 zenLevel 单一真相源，全模块可用），本模块只读档位用于
+  // 入口统一在命令面板「布局：禅模式」（App 层 zenLevel 单一真相源，全模块可用），本模块只读档位用于
   // 收起自身顶栏/侧栏。Esc 的「先关本模块浮层，再退禅」统一放在 askVisible/srcForm 等浮层 state 声明之后
   // （见 §P8 画像小节），这里只保留 zenActive（若在此处引用后文声明的 srcForm/askVisible 会触发 TDZ 报错
   // → 整模块崩溃）。
@@ -2560,7 +2560,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
 
           {/* P3b（§3.8-2/连锁）：顶栏「文档地图」退役——产物导航由逐条「整理成文档」+ P4 左栏资源管理器承接；
               顶栏恒为：会话要求 + Token 仪表 +（P5 工作区 chip）。
-              原「禅模式」按钮已迁出：入口统一到标题栏「布局」菜单（全模块可用），本模块只消费档位 */}
+              原「禅模式」按钮已迁出：入口统一到命令面板「布局：禅模式」（全模块可用），本模块只消费档位 */}
         </div>
       </div>
 
@@ -2734,12 +2734,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     </div>
                   ) : (
                     <>
-                      <div className="flex items-center gap-2.5">
+                      {/* 窄容器下三重保险：说明文字可缩+截断（min-w-0/truncate）先牺牲 →
+                          按钮 shrink-0 保形 → 仍放不下时隐去「开始答题」四字只留图标与题数。 */}
+                      <div className="kb-fit kb-fit-aiquiz flex items-center gap-2.5">
                         <button onClick={() => setQuizOpen(true)}
-                          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[12.5px] hover:opacity-90 transition-opacity">
-                          <Presentation size={13} /> 开始答题（{quizItems.length} 题）
+                          className="flex shrink-0 items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[12.5px] hover:opacity-90 transition-opacity">
+                          <Presentation size={13} /><span className="kb-l1">开始答题</span>（{quizItems.length} 题）
                         </button>
-                        <span className="text-[10.5px] text-[var(--text-muted)]">自动判分、错题显示解析；交卷后成绩报告落会话文件夹</span>
+                        <span className="min-w-0 truncate text-[10.5px] text-[var(--text-muted)]">自动判分、错题显示解析；交卷后成绩报告落会话文件夹</span>
                       </div>
                       {quizItems.map((q, i) => (
                         <div key={`${q.no}-${i}`} className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2.5">
@@ -3383,9 +3385,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           visible={srcVisible} onSnapClose={() => toggleSide('right')}>
           <div className="h-full min-h-0 flex flex-col">
           <div className="shrink-0">
-            <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
-              <span title="素材库 = 工作区主库 SOURCES/SOURCE.md（跨对话共用）+ 本对话历史登记（存量，标记「对话」）">素材库{srcEntries.length > 0 ? `（${srcEntries.length}）` : ''}</span>
-              <div className="ml-auto flex items-center gap-1">
+            {/* 素材库标题行（文字按容器宽度退化，见 styles/index.css 的 .kb-fit 段）。
+                ⚠️ 本行宽 = 右栏 ResizablePanel（240–420px 可调），没有 `shrink-0` 时
+                标题与按钮会一起被压变形（文字换行成竖排）。治本两条一起做：
+                ① 标题可缩可截断（min-w-0 + truncate）—— 空间不够先牺牲它；
+                ② 按钮组 shrink-0 —— 按钮永不保形失败。
+                仍放不下时（<280px）才由容器查询隐去「素材」二字、只留 ＋ 图标。 */}
+            <div className="kb-fit kb-fit-aisrc flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
+              <span className="min-w-0 truncate" title="素材库 = 工作区主库 SOURCES/SOURCE.md（跨对话共用）+ 本对话历史登记（存量，标记「对话」）">素材库{srcEntries.length > 0 ? `（${srcEntries.length}）` : ''}</span>
+              <div className="ml-auto flex shrink-0 items-center gap-1">
                 {srcSessionRel && activeId && (
                   <button onClick={() => { void doPromoteSources() }} title="把本对话历史登记的素材（含原件与提取稿）并入工作区主库，之后所有对话共用"
                     className="px-1 py-0.5 rounded-md text-[var(--warning)] hover:bg-[var(--bg-hover)] transition-colors">上收</button>
@@ -3405,7 +3413,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   }}
                   title="添加素材（写入工作区主库 SOURCE.md）"
                   className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                  <Plus size={11} /> 素材
+                  <Plus size={11} /><span className="kb-l1">素材</span>
                 </button>
               </div>
             </div>
@@ -3654,7 +3662,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 className="w-full pl-8 pr-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] text-[12.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
             </div>
             <button onClick={() => setWsModal({ mode: 'create', value: '' })}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[12.5px] hover:opacity-90 transition-opacity"><Plus size={12} /> 新建工作区</button>
+              className="flex shrink-0 items-center gap-1 px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[12.5px] hover:opacity-90 transition-opacity"><Plus size={12} /><span className="kb-l1">新建工作区</span></button>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3">
             {wsFiltered.map(w => (
@@ -3667,17 +3675,20 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   {w.id === lastWsId && <span className="ml-auto shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-[var(--accent)]/15 text-[var(--accent)]">上次</span>}
                 </div>
                 <div className="mt-2 text-[11.5px] text-[var(--text-muted)]">{w.sessionCount} 个对话 · {w.docCount} 个产物 · 最近活跃 {wsAgo(w.lastActive)}</div>
-                <div className="mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                {/* 卡片 hover 操作行：4 个「图标+文字」按钮挤在卡片宽（grid 两列 → 卡片约 200–500px）里。
+                    文字按容器宽度退化（styles/index.css 的 .kb-fit 段）：卡片 <200px 时隐文字只留图标，
+                    避免「改名/画像/要求/删除」被压成竖排。 */}
+                <div className="kb-fit kb-fit-aiws mt-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                   <button onClick={() => setWsModal({ mode: 'rename', id: w.id, value: w.name })}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><PenLine size={11} /> 改名</button>
+                    className="flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><PenLine size={11} /><span className="kb-l1">改名</span></button>
                   {/* UI 优化条目8.2.2：工作区画像第三层入口（卡片 hover 行） */}
                   <button onClick={() => { void openProfile('workspace', w.id) }} title={`工作区画像 · ${aiTeachRoot}/${w.folderRel.startsWith(`${aiTeachRoot}/`) ? w.folderRel.slice(aiTeachRoot.length + 1) : w.folderRel}/PROFILE.md（本课程目标/进度，覆盖全局画像）`}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><User size={11} /> 画像</button>
+                    className="flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><User size={11} /><span className="kb-l1">画像</span></button>
                   {/* v3.1.2 条目6：工作区要求入口（卡片 hover 行，与画像并列）——本工作区所有会话共同遵循的 CONSTRAINTS.md */}
                   <button onClick={() => { void openWorkspaceConstraints(w.id) }} title={`工作区要求 · ${w.folderRel}/CONSTRAINTS.md（本工作区所有会话共同遵循，优先级：本会话要求 > 工作区要求 > 全局要求）`}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><ScrollText size={11} /> 要求</button>
+                    className="flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"><ScrollText size={11} /><span className="kb-l1">要求</span></button>
                   <button onClick={() => void removeWs(w)}
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:text-red-400 transition-colors"><Trash2 size={11} /> 删除</button>
+                    className="flex shrink-0 items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:text-red-400 transition-colors"><Trash2 size={11} /><span className="kb-l1">删除</span></button>
                 </div>
               </div>
             ))}

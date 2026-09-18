@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
-  FileText, Calendar, BookOpen, MessageCircle, Wrench, Puzzle,
+  FileText, Calendar, BookOpen, MessageCircle, Wrench, Package,
   Trash2, LifeBuoy, User, Settings, Upload, FileCode2, GraduationCap,
 } from 'lucide-react'
 import { pluginGetContribution, pluginListInstalled } from './ipc'
@@ -29,7 +29,9 @@ export function renderClassicIcon(moduleId: IconModuleId, size: number, classNam
   const map = {
     blog: FileText, schedule: Calendar, knowledge: BookOpen, moments: MessageCircle,
     aiTeaching: GraduationCap,
-    toolbox: Wrench, plugins: Puzzle, recycle: Trash2, help: LifeBuoy,
+    // plugins 用 Package（箱子）而非 Puzzle（拼图）：与手绘包的 PluginIconHandDrawn 同构，
+    // 切换图标风格时只是画法不同、形状认得出来（2026-09-17 起）
+    toolbox: Wrench, plugins: Package, recycle: Trash2, help: LifeBuoy,
     user: User, settings: Settings, export: Upload, editor: FileCode2,
   } as const
   const C = map[moduleId]

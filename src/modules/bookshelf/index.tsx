@@ -1,5 +1,5 @@
 import { lazy, useCallback, useEffect, useRef, useState, Suspense } from 'react'
-import { ArrowLeft, BookOpen, Import, Loader2, Play } from 'lucide-react'
+import { BookOpen, Import, Loader2, Play } from 'lucide-react'
 import {
   pdfReaderCoverList, pdfReaderListBooks, wsImportPdf, workspaceGetCurrent,
 } from '../../lib/ipc'
@@ -107,13 +107,10 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
   if (reading) {
     return (
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
-        <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5">
-          <button onClick={() => onCloseBook?.()} title="返回书架"
-            className="kb-pop flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-            <ArrowLeft size={13} />返回书架
-          </button>
-          <span className="min-w-0 truncate text-[12px] text-[var(--text-primary)]">{reading.name}</span>
-        </div>
+        {/* 2026-09-18：原「返回书架 + 书名」独立行已并入阅读器工具栏。
+            两处原因：① 书名此前在模块顶行与阅读器工具栏**各显示一次**（重复）；
+            ② 这一行白占掉一整行阅读高度。返回入口不丢 —— 作阅读器工具栏最左的「← 返回书架」
+            （窄容器下自动收成纯图标，见 index.css 的 .kb-fit-pdfread 容器查询）。 */}
         <div className="min-h-0 flex-1">
           {rootId ? (
             <Suspense fallback={
@@ -122,7 +119,8 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                 <span className="text-[12px]">正在准备阅读器…</span>
               </div>
             }>
-              <PdfReaderView rootId={rootId} relPath={reading.relPath} name={reading.name} />
+              <PdfReaderView rootId={rootId} relPath={reading.relPath} name={reading.name}
+                backLabel="返回书架" onBack={() => onCloseBook?.()} />
             </Suspense>
           ) : null}
         </div>

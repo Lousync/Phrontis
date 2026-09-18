@@ -26,8 +26,10 @@ const env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE // 否则 electron 退化成裸 Node（ipcMain undefined）
 // 不设 KNOWBASE_SHARED_DATA → 走 main/index.ts L86 dev 隔离分支，userData 与正式数据隔离
 
+// 沙箱硬约束（electron-inapp-ui-probe §一）：不传 --no-sandbox → GPU 进程连环 exit_code=1，
+// 最终 FATAL:GPU process isn't usable → 渲染进程被 kill。这两个参数在所有环境都无害，固定带上。
 const extraArgs = process.argv.slice(3)
-const electronProc = spawn(ELECTRON_EXE, ['.', '--remote-debugging-port=9222', ...extraArgs], {
+const electronProc = spawn(ELECTRON_EXE, ['.', '--remote-debugging-port=9222', '--no-sandbox', '--disable-gpu', ...extraArgs], {
   cwd: process.cwd(),
   env,
   stdio: ['ignore', 'inherit', 'inherit'],

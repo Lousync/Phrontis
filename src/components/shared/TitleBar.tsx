@@ -3,7 +3,7 @@ import { useSettings } from '../../lib/SettingsContext'
 import {
   X, Pin, ArrowDownToLine, Loader2, Play,
   Pause, Download, AlertTriangle, RefreshCw, SlidersHorizontal, ExternalLink,
-  CalendarCheck2, UserPlus, MonitorPlay, LayoutGrid,
+  CalendarCheck2, UserPlus, MonitorPlay,
 } from 'lucide-react'
 import {
   useUpdateStore, updateStartupCheck, updateDownload, updatePause, updateCancel, updateInstall,
@@ -22,22 +22,9 @@ interface TitleBarProps {
   dayPanelActive?: boolean
   /** 点击日程打卡侧边栏开关按钮：App 统一处理「脱离态→吸附 / 内嵌态→显示」逻辑 */
   onToggleDayPanel?: () => void
-  /** 布局菜单 · 活动栏段：整条活动栏当前是否显示 + 切换出口（App 侧读写同一 setting） */
-  activityBarVisible?: boolean
-  onActivityBarChange?: (visible: boolean) => void
-  /** 布局菜单 · 布局模式段：禅模式档位 + 切换出口（复用 App 的 zenLevel 单一真相源） */
-  zenLevel?: number
-  onZenLevelChange?: (n: number) => void
-  /** 布局菜单 · 布局模式段：纯 OS 全屏开关（VS Code F11 语义，与禅模式相互独立） */
-  osFullscreen?: boolean
-  onOsFullscreenChange?: (v: boolean) => void
 }
 
-export function TitleBar({
-  dayPanelActive = false, onToggleDayPanel,
-  activityBarVisible = true, onActivityBarChange, zenLevel = 0, onZenLevelChange,
-  osFullscreen = false, onOsFullscreenChange,
-}: TitleBarProps = {}) {
+export function TitleBar({ dayPanelActive = false, onToggleDayPanel }: TitleBarProps = {}) {
   const { s: settings, update: updateSetting } = useSettings()
   const badgeEgg = settings.badgeEggActivated
   const [isMaximized, setIsMaximized] = useState(false)
@@ -100,25 +87,6 @@ export function TitleBar({
     document.addEventListener('pointerdown', onDown)
     return () => document.removeEventListener('pointerdown', onDown)
   }, [panelOpen])
-
-  // ---- 布局菜单（VS Code Customize Layout 同款）：活动栏位置 + 布局模式 ----
-  // 与上面「更新入口」的展开态各管各的：两个面板不会互相顶掉，各自点外部关闭。
-  // 点选项 = 即刻生效并收起（开发负责人 2026-09-15 拍板，对齐 VS Code 菜单语义）——
-  // 活动栏藏掉后这枚按钮留在原位并带描边提示，随时可以点开调回来
-  const [layoutOpen, setLayoutOpen] = useState(false)
-  const layoutRef = useRef<HTMLDivElement | null>(null)
-  // 活动栏被整条藏起来时，这枚按钮自我解释（描边 + 强调色）——「洞」还在时用户得知道去哪儿找回来。
-  // 菜单开着时让位给展开态底色，同一枚按钮不叠两种强调
-  const abHiddenHint = activityBarVisible === false
-
-  useEffect(() => {
-    if (!layoutOpen) return
-    const onDown = (e: PointerEvent) => {
-      if (layoutRef.current && !layoutRef.current.contains(e.target as Node)) setLayoutOpen(false)
-    }
-    document.addEventListener('pointerdown', onDown)
-    return () => document.removeEventListener('pointerdown', onDown)
-  }, [layoutOpen])
 
   // 入口可见:有新版/下载中/暂停/已下载,或下载失败(检查失败不展示,避免网络抖动打扰)
   const showEntry =
@@ -354,11 +322,9 @@ export function TitleBar({
               )}
             </div>
           )}
-          {/* 布局控件组（VS Code Customize Layout 同款）：官方说法是「标题栏里切换主 UI 元素可见性的那组按钮
-              （Side bars / Panel region），最右那枚开 Customize Layout 下拉」——
-              于是「日程与打卡侧边栏」= VS Code 的 toggle Panel region，与「布局」同属一组。
-              两侧细线把这一组与相邻的窗口级操作（更新 / 置顶）切开，读起来是「一组布局能力」
-              而不是凭空多出来的一个图标。
+          {/* 「日程与打卡侧边栏」开关（= VS Code 的 toggle Panel region 语义）。
+              原先与「自定义布局」下拉同属一组；2026-09-17 开发负责人拍板把该菜单整条删除后，
+              活动栏显隐 / 禅模式 / OS 全屏收敛为只留命令面板入口，这里随之从「一组按钮」收回单枚。
               摆在窗口按钮簇里而不放标题栏最右：Phrontis 的窗口级操作全在左簇，右侧只有绝对定位的搜索框，
               单摆一枚图标到最右会回到「平白无故冒出来」的观感（原型里把它画在右侧是原型没对齐真机布局） */}
           <span className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" aria-hidden />
@@ -375,66 +341,6 @@ export function TitleBar({
               fillOpacity={dayPanelActive ? 0.25 : 0}
             />
           </WinBtn>
-
-          <div className="relative h-full" ref={layoutRef}>
-            <WinBtn
-              onClick={() => setLayoutOpen(o => !o)}
-              title="自定义布局 · 活动栏与布局模式"
-              className={`w-9 ${layoutOpen ? 'bg-[var(--bg-hover)]' : abHiddenHint ? 'bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/45' : ''}`}
-            >
-              <LayoutGrid size={14} strokeWidth={1.5}
-                className={abHiddenHint || layoutOpen ? 'text-[var(--accent)]' : ''} />
-            </WinBtn>
-
-            {layoutOpen && (
-              <div className="kb-pop absolute left-0 top-full z-50 mt-1 w-[296px] overflow-hidden rounded-[11px] border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl no-drag">
-                <div className="flex items-center gap-2 px-3 pb-2 pt-2.5">
-                  <span className="text-[12.5px] font-semibold text-[var(--text-primary)]">自定义布局</span>
-                  <span className="ml-auto text-[10.5px] text-[var(--text-muted)]">随全局保存</span>
-                </div>
-                <div className="mx-2 h-px bg-[var(--border-color)]" />
-
-                <div className="px-2.5 pb-1 pt-2.5">
-                  <div className="px-1 pb-2 text-[10.5px] tracking-[0.6px] text-[var(--text-muted)]">活动栏</div>
-                  <div className="grid grid-cols-2 gap-1">
-                    <LayoutOpt selected={!abHiddenHint} onClick={() => { onActivityBarChange?.(true); setLayoutOpen(false) }} label="默认">
-                      {WF_AB_DEFAULT}
-                    </LayoutOpt>
-                    <LayoutOpt selected={abHiddenHint} onClick={() => { onActivityBarChange?.(false); setLayoutOpen(false) }} label="隐藏">
-                      {WF_AB_HIDDEN}
-                    </LayoutOpt>
-                  </div>
-                </div>
-
-                <div className="mt-1.5 border-t border-[var(--border-color)] px-2.5 pb-1 pt-2.5">
-                  <div className="flex items-center gap-1.5 px-1 pb-2 text-[10.5px] tracking-[0.6px] text-[var(--text-muted)]">
-                    布局模式
-                    <span className="rounded bg-[var(--bg-tertiary)] px-1.5 py-px text-[9.5px] tracking-normal">复用现有</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1">
-                    <LayoutOpt selected={osFullscreen} onClick={() => { onOsFullscreenChange?.(!osFullscreen); setLayoutOpen(false) }} label="全屏">
-                      {WF_MODE_FULL}
-                    </LayoutOpt>
-                    <LayoutOpt selected={zenLevel >= 2} onClick={() => { onZenLevelChange?.(zenLevel >= 2 ? 0 : 2); setLayoutOpen(false) }} label="禅模式">
-                      {WF_MODE_ZEN}
-                    </LayoutOpt>
-                  </div>
-                </div>
-
-                <div className="mx-2 mt-1.5 border-t border-[var(--border-color)]" />
-                {/* 脚注 = 元信息，不该常驻占面板高度 → 按全应用同款 <details> 折叠收起
-                    （与上方更新面板的「查看更新内容」同一套写法；summary 保留默认三角当展开提示） */}
-                <details className="px-3 pb-1.5 pt-2 text-[10.5px] text-[var(--text-muted)]">
-                  <summary className="cursor-pointer select-none text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors">说明</summary>
-                  <div className="pt-1.5 leading-relaxed">
-                    活动栏隐藏后，标题栏这枚「布局」按钮不会消失，随时可以把它调回来。<br />
-                    禅模式原先挂在「AI 教学」模块顶栏，本次起统一收进这里 —— 全局只有这一个入口。
-                  </div>
-                </details>
-              </div>
-            )}
-          </div>
-          <span className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" aria-hidden />
 
           <WinBtn onClick={togglePin} title={isPinned ? '取消置顶' : '窗口置顶'} className="w-9">
             <Pin size={14} strokeWidth={1.5} fill={isPinned ? 'var(--text-primary)' : 'transparent'} />
@@ -473,59 +379,6 @@ function TrafficLight({ color, title, onClick, children }: {
           {children}
         </span>
       </span>
-    </button>
-  )
-}
-
-/* ===== 布局菜单的选项（VS Code 的做法：给迷你线框图，不给文字开关）=====
-   四张线框共用 46×31 画布：左边一条竖条 = 活动栏，中间三条横线 = 内容。
-   实心竖条 = 显示；虚线竖条 = 隐藏；四角括号 = 全屏；居中窄块 = 禅模式。
-   颜色一律继承 currentColor —— 选中态由外层 LayoutOpt 改文字色（走主题 accent），
-   图里不写死任何颜色，亮/暗主题自动跟随。 */
-const WF_AB_DEFAULT = (
-  <svg width="46" height="31" viewBox="0 0 46 31" fill="none" stroke="currentColor" aria-hidden>
-    <rect x="1" y="1" width="44" height="29" rx="3.4" strokeWidth="1.3" />
-    <rect x="2" y="2" width="8.4" height="27" rx="2.4" fill="currentColor" stroke="none" opacity="0.5" />
-    <path d="M14 7h24M14 13h18M14 19h22" strokeWidth="1.1" opacity="0.45" strokeLinecap="round" />
-  </svg>
-)
-const WF_AB_HIDDEN = (
-  <svg width="46" height="31" viewBox="0 0 46 31" fill="none" stroke="currentColor" aria-hidden>
-    <rect x="1" y="1" width="44" height="29" rx="3.4" strokeWidth="1.3" />
-    <rect x="2" y="2" width="8.4" height="27" rx="2.4" strokeWidth="1.1" strokeDasharray="2.4 2.2" opacity="0.5" />
-    <path d="M14 7h24M14 13h18M14 19h22" strokeWidth="1.1" opacity="0.45" strokeLinecap="round" />
-  </svg>
-)
-const WF_MODE_FULL = (
-  <svg width="46" height="31" viewBox="0 0 46 31" fill="none" stroke="currentColor" aria-hidden>
-    <rect x="1" y="1" width="44" height="29" rx="3.4" strokeWidth="1.3" />
-    <rect x="3.4" y="3.4" width="39.2" height="24.2" rx="2" fill="currentColor" stroke="none" opacity="0.16" />
-    <path d="M7 7h4M7 7v4M39 7h-4M39 7v4M7 24h4M7 24v-4M39 24h-4M39 24v-4" strokeWidth="1.3" strokeLinecap="round" />
-  </svg>
-)
-const WF_MODE_ZEN = (
-  <svg width="46" height="31" viewBox="0 0 46 31" fill="none" stroke="currentColor" aria-hidden>
-    <rect x="1" y="1" width="44" height="29" rx="3.4" strokeWidth="1.3" opacity="0.55" />
-    <rect x="15" y="8" width="16" height="15" rx="2" fill="currentColor" stroke="none" opacity="0.22" />
-    <path d="M18.5 13h9M18.5 17h6" strokeWidth="1.2" strokeLinecap="round" opacity="0.7" />
-  </svg>
-)
-
-function LayoutOpt({ selected, onClick, label, children }: {
-  selected: boolean; onClick: () => void; label: string; children: React.ReactNode
-}) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={selected}
-      className={`flex flex-col items-center gap-[5px] rounded-lg border px-1 pb-1.5 pt-1.5 text-[10.5px] leading-none tracking-[0.2px] transition-colors duration-100 ${
-        selected
-          ? 'border-[var(--accent)]/45 bg-[var(--accent)]/10 text-[var(--accent)]'
-          : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-      }`}
-    >
-      {children}
-      <span>{label}</span>
     </button>
   )
 }

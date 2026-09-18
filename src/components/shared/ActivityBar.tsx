@@ -22,6 +22,12 @@ import { WORKBENCH_TABBAR_EXCLUDED } from '../../lib/workbenchLayout'
  * - devtools 保留 dev-only 老位置（打包构建时静态消除）。
  */
 
+/** 图标条固定按钮的图标。
+ *  2026-09-17：插件市场由「拼图块」改为「包裹箱」—— 22px 下箱子的轮廓比多块拼图更清楚，
+ *  语义也更贴「插件市场里取件」。但**没有放弃跟随**：这枚仍走 PluginIcon（StyleAware），
+ *  选「手绘」包 = ModuleIcons 的手绘箱子，选「经典细线」包 = lucide Package，
+ *  两包形状同构、画法有别 —— 切设置时看得出来变了，又不会认成另一个模块。
+ *  同源的还有桌面磁贴的「插件」卡片与设置→外观的图标预览（都经 moduleId 'plugins'）。 */
 const RAIL_BUTTONS: { id: TabName; label: string; icon: (size: number) => React.ReactNode }[] = [
   { id: 'aiTeaching', label: 'AI 教学', icon: (s) => <GraduationCap size={s} /> },
   { id: 'recycle', label: '回收站', icon: (s) => <Trash2 size={s} /> },

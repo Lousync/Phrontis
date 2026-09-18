@@ -86,6 +86,23 @@ export const TILE_MODULE_IDS = byFlag('tile')
 export const PALETTE_MODULES: Array<{ id: TabName; label: string }> =
   APP_MODULES.filter((m) => m.palette).map((m) => ({ id: m.id, label: m.label }))
 
+/**
+ * 可分屏（能进副栏）的模块 —— **只有编辑区与知识库**。
+ *
+ * ⚠️ 这是分屏准入的唯一真相源。三个入口（`Ctrl+\` / 页面条分屏按钮 / 命令面板「分屏」组）
+ * 必须全部读它，绝不在调用点再写一份 `['editor','knowledge']` 字面量 ——
+ * 项目里已经有「同一份清单被手抄成多份、改动只落到其中几处」这类静默失效的先例。
+ *
+ * 为什么只有这两个：其余模块（日程 / 动态 / 博客…）进副栏会整模块占半屏、又没有页签体系，
+ * 只能靠菜单换掉，是"打开了就收不了场"的形态。
+ */
+export const SPLIT_ELIGIBLE: TabName[] = ['editor', 'knowledge']
+
+/** 模块是否可进副栏（类型守卫，传 null/undefined 安全） */
+export function isSplitEligible(id: TabName | null | undefined): id is TabName {
+  return !!id && SPLIT_ELIGIBLE.includes(id)
+}
+
 const KNOWN_IDS: string[] = APP_MODULES.map((m) => m.id)
 
 export function isTabName(v: unknown): v is TabName {

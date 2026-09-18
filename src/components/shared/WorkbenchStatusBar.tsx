@@ -52,7 +52,7 @@ export function WorkbenchStatusBar() {
       )}
       <span className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[var(--text-tertiary)]" title="快捷键">
         <Keyboard size={11} />
-        Ctrl+B 折叠侧栏
+        Ctrl+B 折叠侧栏 · Ctrl+\ 分屏
       </span>
     </div>
   )

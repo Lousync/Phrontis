@@ -51,7 +51,10 @@ const JS_STATE = `(() => {
   return {
     rootChildren: q('#root')?.children.length ?? 0,
     shell: !!q('[data-wb="shell"]'),
-    tabbar: !!q('[data-wb="tabbar"]'),
+    tabbar: !!q('[data-wb="pagebar"]'),
+    // 2026-09-18 页面条置顶：编辑器 / 知识库不再占模块条目（由各自页签组代表），
+    // 模块级状态改从页面条的 data-pb-tabs（openTabs 全量）读
+    openTabs: (q('[data-wb="pagebar"]')?.dataset.pbTabs ?? '').split(',').filter(Boolean),
     bookmarks: qa('[data-wb="bookmarks"] [data-wb-bookmark]').map((b) => b.dataset.wbBookmark),
     bookmarkActive: qa('[data-wb="bookmarks"] [data-wb-bookmark][data-wb-active="1"]').map((b) => b.dataset.wbBookmark),
     modSlot: !!q('[data-wb="modSlot"]'),
@@ -110,16 +113,16 @@ async function main() {
   st0 = await evalJs(JS_STATE)
 
   ok(st0.shell, 'S1 三栏外壳渲染')
-  ok(st0.tabbar, 'S2 中间标签条渲染')
+  ok(st0.tabbar, 'S2 中间页面条渲染（v3.4.0 页面条置顶：原标签条）')
   ok(st0.bookmarks.join(',') === 'editor,knowledge,schedule,bookshelf,blog,quiz', 'S3 书签 6 项按 v15 定稿渲染', st0.bookmarks.join(','))
   ok(st0.vaultBar, 'S4 底部仓库切换 vaultBar 渲染')
-  ok(st0.tabs.length >= 1 && !!st0.tabs.find((t) => t.active === '1'), 'S5 有激活标签', JSON.stringify(st0.tabs))
+  ok(st0.openTabs.length >= 1, 'S5 openTabs 已登记（data-pb-tabs）', st0.openTabs.join(','))
 
   // T1 书签点击 → 标签打开 + 左栏进模块态（模块态=独立视图，书签区隐藏——原型 lpModView 同款）
   await evalJs(`document.querySelector('[data-wb-bookmark="editor"]')?.click()`)
   await sleep(1200)
   const st1 = await evalJs(JS_STATE)
-  ok(st1.tabs.some((t) => t.id === 'editor'), 'T1 点编辑区书签 → 标签条出现 editor', JSON.stringify(st1.tabs.map((t) => t.id)))
+  ok(st1.openTabs.includes('editor'), 'T1 点编辑区书签 → openTabs 登记 editor（页签由编辑器组代表）', st1.openTabs.join(','))
   ok(st1.modSlot, 'T1b 左栏进入模块态（modSlot 渲染）')
   ok(st1.modSlotFilled, 'T1c editor 文件树 portal 进左栏 slot', st1.modSlotFilled ? '' : 'slot 空——检查 sidebarEl 接线/仓库是否打开')
   ok(st1.modTitle === 'editor', 'T1d 模块态 = 编辑区（data-wb-mod）', `mod=${st1.modTitle}`)
@@ -137,27 +140,44 @@ async function main() {
   const st3 = await evalJs(JS_STATE)
   ok(st3.modSlot && st3.modTitle === 'knowledge', 'T3 点知识库书签 → 模块态 = knowledge', `mod=${st3.modTitle}`)
   ok(st3.modSlotFilled, 'T3b knowledge 侧栏 portal 进左栏 slot')
-  // 标签条点 editor（已开）→ 跟随。2026-09-16 改单选切换器后 tab 内无 ✕，点 div 即切换
-  await evalJs(`document.querySelector('[data-wb="tab"][data-wb-tab="editor"]')?.click()`)
+  // T3c 页面条点模块条目 → 左栏自动跟随。2026-09-18 页面条置顶后编辑器 / 知识库不再占模块条目，
+  // 故改用「博客」条目验证同一条链路（先返回总览 → 开博客 → 再返回总览 → 点条目）。
+  await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
+  await sleep(500)
+  await evalJs(`document.querySelector('[data-wb-bookmark="blog"]')?.click()`)
+  await sleep(1200)
+  await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
+  await sleep(500)
+  await evalJs(`document.querySelector('[data-wb="tab"][data-wb-tab="blog"]')?.click()`)
   await sleep(700)
   const st4 = await evalJs(JS_STATE)
-  ok(st4.modTitle === 'editor', 'T3c 标签切换 → 左栏自动跟随为编辑区', `mod=${st4.modTitle}`)
+  ok(st4.modTitle === 'blog', 'T3c 页面条点博客条目 → 左栏自动跟随', `mod=${st4.modTitle}`)
 
-  // T4 锁定：📌 后切标签不跟随；解锁恢复
-  const lockBtn = st4.lockTitle
+  // T4 锁定：📌 后点条目不跟随；解锁恢复（两个条目：博客 / 日程）
+  // 注意：模块态下书签区隐藏，必须先「返回总览」才能点书签把日程登记进 openTabs
+  await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
+  await sleep(500)
+  await evalJs(`document.querySelector('[data-wb-bookmark="schedule"]')?.click()`)
+  await sleep(1000)
+  await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
+  await sleep(500)
+  await evalJs(`document.querySelector('[data-wb="tab"][data-wb-tab="blog"]')?.click()`)
+  await sleep(700)
+  const st4b = await evalJs(JS_STATE)
+  const lockBtn = st4b.lockTitle
   ok(!!lockBtn, 'T4 模块态头部有锁定钮', lockBtn)
   await evalJs(`document.querySelector('button[title^="锁定侧边栏"]')?.click()`)
   await sleep(400)
-  await evalJs(`document.querySelector('[data-wb="tab"][data-wb-tab="knowledge"]')?.click()`)
+  await evalJs(`document.querySelector('[data-wb="tab"][data-wb-tab="schedule"]')?.click()`)
   await sleep(700)
   const st5 = await evalJs(JS_STATE)
-  ok(st5.modTitle === 'editor', 'T4b 锁定后切标签不跟随（仍编辑区）', `mod=${st5.modTitle}`)
+  ok(st5.modTitle === 'blog', 'T4b 锁定后点条目不跟随（仍博客）', `mod=${st5.modTitle}`)
   await evalJs(`document.querySelector('button[title^="已锁定"]')?.click()`)
   await sleep(400)
-  await evalJs(`document.querySelector('[data-wb="tab"][data-wb-tab="knowledge"]')?.click()`)
+  await evalJs(`document.querySelector('[data-wb="tab"][data-wb-tab="schedule"]')?.click()`)
   await sleep(700)
   const st6 = await evalJs(JS_STATE)
-  ok(st6.modTitle === 'knowledge', 'T4c 解锁后切标签恢复跟随（知识库）', `mod=${st6.modTitle}`)
+  ok(st6.modTitle === 'schedule', 'T4c 解锁后点条目恢复跟随（日程）', `mod=${st6.modTitle}`)
 
   // T5 错题本书签：先返回总览（模块态无书签区），再点错题本 → knowledge 标签 + 模块态标题「错题本」
   await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
@@ -165,7 +185,7 @@ async function main() {
   await evalJs(`document.querySelector('[data-wb-bookmark="quiz"]')?.click()`)
   await sleep(1200)
   const st7 = await evalJs(JS_STATE)
-  ok(st7.tabs.some((t) => t.id === 'knowledge'), 'T5 错题本书签 → knowledge 标签')
+  ok(st7.openTabs.includes('knowledge'), 'T5 错题本书签 → openTabs 登记 knowledge', st7.openTabs.join(','))
   ok(st7.modTitle === 'quiz', 'T5b 模块态 = quiz（错题本复用 knowledge 侧栏）', `mod=${st7.modTitle}`)
 
   // T6 树模式：返回总览 → 点 🌳 → treeMode；返回总览（树模式返回钮 title 恰为「返回总览」）

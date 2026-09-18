@@ -1,7 +1,8 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
+import { PageTabStrip } from '../../components/workbench/PageTabStrip'
 import {
-  FolderOpen, Plus, FolderPlus, Save, SaveAll, X, Folder, FileText, ArrowLeft,
+  FolderOpen, Plus, FolderPlus, Save, SaveAll, X, Folder, FileText,
   Pencil, Trash2, FilePlus2, Braces, ListTree, Eye, PanelRightClose, Archive, ArchiveRestore, FilePenLine, Link2, ImagePlus, ClipboardPaste,
   RefreshCw,
   // 条目 18 标签右键菜单：固定标签 + 三个批量关闭
@@ -97,10 +98,16 @@ interface Props {
   zenLevel?: number
   /** 切档回调（Ctrl+K Z 循环 / 退出条 / Esc / 切 Tab 自动退出） */
   onZenLevelChange?: (n: number) => void
-  /** UI 优化条目6：模块跳转入编辑器时的来源标签（如「AI教学」）；非空时标签栏右侧显示「← 返回 X」chip */
-  openFrom?: string | null
-  /** 点「返回来源」：App 切回来源 Tab（保活上下文不丢） */
-  onBackFrom?: () => void
+  /** v3.4.0 页面条置顶：中间栏页面条里给编辑器页签组的槽（portal 目标；与 sidebarEl 同款托管语义） */
+  pageBarEl?: HTMLElement | null
+  /** 页面条由 App 托管（true 时槽未就绪就渲染 null，绝不回落内嵌，否则同屏两条） */
+  pageBarHosted?: boolean
+  /** v3.4.0：内容级操作（插图/大纲/预览/保存全部）的浮层槽（内容区右上角，胶囊挂在里面） */
+  contentActionsEl?: HTMLElement | null
+  /** 内容级操作由 App 托管（语义同 pageBarHosted） */
+  contentActionsHosted?: boolean
+  /** 所在栏是否为当前栏焦点（VS Code 式分屏焦点：非焦点栏标签淡化；不分屏恒 true） */
+  paneActive?: boolean
   /** 内嵌侧栏开合（Ctrl+B / 贴边收放联动；缺省=恒开，兼容 Workbench 等旧调用） */
   sidebarOpen?: boolean
   /** 侧栏宽度持久化集（sidebarWidth_editor） */
@@ -119,7 +126,7 @@ interface InputBoxState {
   onSubmit: (value: string) => void
 }
 
-export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted = false, markdownDim = true, pendingOpenRel = null, onPendingConsumed, zenLevel = 0, onZenLevelChange, openFrom = null, onBackFrom, sidebarOpen, sidebarWidths, onSnapCloseSidebar, onSnapOpenSidebar }: Props) {
+export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted = false, markdownDim = true, pendingOpenRel = null, onPendingConsumed, zenLevel = 0, onZenLevelChange, pageBarEl = null, pageBarHosted = false, contentActionsEl = null, contentActionsHosted = false, paneActive = true, sidebarOpen, sidebarWidths, onSnapCloseSidebar, onSnapOpenSidebar }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [recent, setRecent] = useState<WorkspaceRecent[]>([])
   const [dirCache, setDirCache] = useState<DirCache>({})
@@ -1379,6 +1386,59 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [activePath, openList.length])
 
+  /* 内容级操作胶囊（截图款分段控件）：原「编辑区」标题行右侧那组按钮。
+     v3.4.0 页面条置顶后挂在内容区右上角浮层（App 提供的槽）；未托管时内嵌在标签行右端。 */
+  const actionsPill = (
+    <div className="inline-flex items-center gap-[2px] rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] p-[3px]">
+      {activeDoc?.language === 'markdown' && (
+        <>
+          <button
+            onClick={() => void handleInsertImage()}
+            title="插图：复制图片到仓库附件区 .attachments/ 并在光标处插入相对链接（也支持直接粘贴截图）"
+            className="flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <ImagePlus size={12} />
+            插图
+          </button>
+          <button
+            onClick={() => { setOutlineOpen((v) => !v); }}
+            title="大纲（跳转标题）"
+            className={`flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
+              outlineOpen
+                ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            <ListTree size={12} />
+            大纲
+          </button>
+          <button
+            onClick={togglePreview}
+            title="分栏预览（左编辑 / 右实时渲染）"
+            className={`flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
+              previewOpen
+                ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            {previewOpen ? <PanelRightClose size={12} /> : <Eye size={12} />}
+            预览
+          </button>
+        </>
+      )}
+      {dirtyCount > 0 && (
+        <button
+          onClick={() => void saveAll()}
+          title="保存全部 (Ctrl+Shift+S)"
+          className="flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        >
+          <SaveAll size={12} />
+          保存全部 ({dirtyCount})
+        </button>
+      )}
+    </div>
+  )
+
   // ===== 空状态：未打开仓库 =====
   if (!rootId) {
     return (
@@ -1414,60 +1474,6 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
 
   return (
     <div className="flex h-full flex-col">
-      {/* 顶部贯行（统一紧凑样式）：标题居左，动作按钮靠右 */}
-      <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 shrink-0 select-none">
-        <FileText size={12} className="text-[var(--text-muted)]" />
-        <span className="text-[11.5px] font-medium text-[var(--text-muted)]">编辑区</span>
-        <div className="ml-auto flex items-center gap-0.5">
-          {activeDoc?.language === 'markdown' && (
-            <>
-              <button
-                onClick={() => void handleInsertImage()}
-                title="插图：复制图片到仓库附件区 .attachments/ 并在光标处插入相对链接（也支持直接粘贴截图）"
-                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              >
-                <ImagePlus size={12} />
-                插图
-              </button>
-              <button
-                onClick={() => { setOutlineOpen((v) => !v); }}
-                title="大纲（跳转标题）"
-                className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] transition-colors ${
-                  outlineOpen
-                    ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]'
-                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                <ListTree size={12} />
-                大纲
-              </button>
-              <button
-                onClick={togglePreview}
-                title="分栏预览（左编辑 / 右实时渲染）"
-                className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] transition-colors ${
-                  previewOpen
-                    ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]'
-                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-                }`}
-              >
-                {previewOpen ? <PanelRightClose size={12} /> : <Eye size={12} />}
-                预览
-              </button>
-            </>
-          )}
-          {dirtyCount > 0 && (
-            <button
-              onClick={() => void saveAll()}
-              title="保存全部 (Ctrl+Shift+S)"
-              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            >
-              <SaveAll size={12} />
-              保存全部 ({dirtyCount})
-            </button>
-          )}
-        </div>
-      </div>
-
       {/* 主体：文件树 + 编辑区。Workbench 外壳模式下文件树 portal 到全局侧栏槽（侧栏槽渲染在编辑器组左侧）。
           禅模式 Z1+：文件树列整体隐藏（workbench 侧栏槽由 App 层收起，§6-1/§7-6） */}
       <div className="flex min-h-0 flex-1">
@@ -1571,67 +1577,106 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
         })()}
 
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* 条目6 + 第三轮：返回来源 chip——独立常驻行（不依赖标签栏：未脏文件无标签行，chip 也要可见） */}
-          {openFrom && onBackFrom && (
-            <div className="shrink-0 flex items-center px-2 py-1 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
-              <button onClick={onBackFrom}
-                className="flex items-center gap-1 rounded-md border border-[var(--border-color)] px-2 py-0.5 text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                title={`返回「${openFrom}」（保留其离开时的界面状态）`}>
-                <ArrowLeft size={12} /> 返回 {openFrom}
-              </button>
-            </div>
-          )}
+          {/* v3.4.0 页面条置顶（2026-09-18）：原「← 返回 X」独立常驻行已删——该 chip 改由 App
+              渲染在中间栏页面条最左端（属当前上下文导航，不占模块内一行）。 */}
           {/* 标签栏（禅模式隐藏：当前文件名见悬浮信息条/退出条）
               v3.2.0 条目 18：**预览态 = 文件名斜体 + 次要色**、固定态 = 常态（不加图标 / 色块 / 角标）；
               右键「文件已在磁盘上被删除」的标签 = 文件名删除线，按保存即重建 */}
-          {zenLevel < 1 && openList.length > 0 && (
-            <div ref={tabBarRef} className="flex items-center gap-0.5 overflow-x-auto border-b border-[var(--border-color)] px-1.5 pt-1">
-              {openList.map((rel) => {
-                const d = openFiles[rel]
-                const isDirty = fullContent(d) !== savedFullContent(d)
-                const isActiveTab = rel === activePath
-                const isPreview = rel === previewRel
-                const isMissing = d.missing === true
-                const tabTitle = [rel, isPreview ? '预览标签（双击固定）' : '', isMissing ? '文件已在磁盘上被删除，保存将重新创建' : '']
-                  .filter(Boolean).join(' · ')
-                return (
-                  <div
-                    key={rel}
-                    data-tab-rel={rel}
-                    onClick={() => { setActivePath(rel); touchTab(rel) }}
-                    onDoubleClick={() => pinTab(rel)}
-                    onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
-                    onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); requestCloseTab(rel) } }}
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setTabCtx({ x: e.clientX, y: e.clientY, rel })
-                    }}
-                    className={`group flex max-w-[200px] cursor-pointer items-center gap-1.5 rounded-t-md border border-b-0 px-2.5 py-1.5 text-[12.5px] transition-colors ${
-                      isActiveTab
-                        ? 'border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-primary)]'
-                        : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                    }`}
-                    title={tabTitle}
-                  >
-                    <span className={`truncate ${isPreview ? 'italic' : ''} ${isMissing ? 'line-through' : ''}`}>{baseName(rel)}</span>
-                    {isDirty ? (
-                      <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />
-                    ) : (
-                      <span className="h-2 w-2 shrink-0 rounded-full bg-transparent" />
-                    )}
-                    <button
-                      onClick={(e) => { e.stopPropagation(); requestCloseTab(rel) }}
-                      className="shrink-0 rounded p-0.5 text-[var(--text-tertiary)] opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    >
-                      <X size={11} />
-                    </button>
-                  </div>
-                )
-              })}
-              {/* 返回 chip 已上移为独立常驻行（未脏文件无标签行时也可见） */}
+          {zenLevel < 1 && (pageBarHosted ? openList.length > 0 : true) && (() => {
+            /* 托管（主栏）= 有条目才渲染页签组，portal 进外壳页面条；
+               非托管（副栏，VS Code 式）= 顶部永远保留一条同高的本模块标签行，
+               没文件时它是空行 —— 空编辑组该有的样子，也是 ⋯ 菜单的落脚点 */
+            const strip = (
+              <PageTabStrip
+                owner="editor"
+                itemAttr="data-tab-rel"
+                paneActive={paneActive}
+                items={openList.map((rel) => {
+                  const d = openFiles[rel]
+                  return {
+                    id: rel,
+                    title: baseName(rel),
+                    preview: rel === previewRel,
+                    dirty: fullContent(d) !== savedFullContent(d),
+                    missing: d.missing === true,
+                    pinned: rel !== previewRel,
+                  }
+                })}
+                activeId={activePath}
+                onSelect={(id) => { setActivePath(id); touchTab(id) }}
+                onClose={requestCloseTab}
+                onTogglePin={pinTab}
+                onContextMenu={(e, id) => setTabCtx({ x: e.clientX, y: e.clientY, rel: id })}
+              />
+            )
+            if (pageBarHosted) {
+              /* 托管：portal 进中间栏页面条槽；槽未就绪渲染 null，绝不回落内嵌（否则同屏两条） */
+              return pageBarEl
+                ? createPortal(<div ref={tabBarRef} className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{strip}</div>, pageBarEl)
+                : null
+            }
+            return (
+            <div className="flex shrink-0 items-center border-b border-[var(--border-color)]">
+            <div ref={tabBarRef} className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1.5 pt-1">
+              {strip}
+              {/* 返回 chip 改由 App 渲染在页面条最左端（原独立常驻行已删） */}
             </div>
-          )}
+            {!contentActionsHosted && <div className="flex shrink-0 items-center pr-1.5 pt-1">
+              <div className="inline-flex items-center gap-[2px] rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] p-[3px]">
+                {activeDoc?.language === 'markdown' && (
+                  <>
+                    <button
+                      onClick={() => void handleInsertImage()}
+                      title="插图：复制图片到仓库附件区 .attachments/ 并在光标处插入相对链接（也支持直接粘贴截图）"
+                      className="flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    >
+                      <ImagePlus size={12} />
+                      插图
+                    </button>
+                    <button
+                      onClick={() => { setOutlineOpen((v) => !v); }}
+                      title="大纲（跳转标题）"
+                      className={`flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
+                        outlineOpen
+                          ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
+                          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                      }`}
+                    >
+                      <ListTree size={12} />
+                      大纲
+                    </button>
+                    <button
+                      onClick={togglePreview}
+                      title="分栏预览（左编辑 / 右实时渲染）"
+                      className={`flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
+                        previewOpen
+                          ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
+                          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                      }`}
+                    >
+                      {previewOpen ? <PanelRightClose size={12} /> : <Eye size={12} />}
+                      预览
+                    </button>
+                  </>
+                )}
+                {dirtyCount > 0 && (
+                  <button
+                    onClick={() => void saveAll()}
+                    title="保存全部 (Ctrl+Shift+S)"
+                    className="flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  >
+                    <SaveAll size={12} />
+                    保存全部 ({dirtyCount})
+                  </button>
+                )}
+              </div>
+            </div>}
+            </div>
+            )
+          })()}
+          {/* 内容级操作（托管形态）：portal 到**本栏**内容右上角浮层槽。
+              `isActive` 门槛必须有：隐藏保活的编辑器若照常 portal，胶囊会飘到当前模块头上。 */}
+          {isActive && contentActionsHosted && contentActionsEl && createPortal(actionsPill, contentActionsEl)}
           {/* 编辑器 */}
           <div className="min-h-0 flex-1 relative" onClick={() => setOutlineOpen(false)}>
             {/* 主体：pdf 文档类型 → PdfReaderView（懒加载 canvas）；其余 → R5 分栏（Monaco | 预览） */}
@@ -1688,7 +1733,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
             {/* 大纲浮层：markdown 标题树 → 点击跳转 */}
             {outlineOpen && activeDoc?.language === 'markdown' && (
               <div
-                className="kb-pop absolute top-2 right-2 z-20 w-72 max-h-[65%] overflow-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/98 shadow-xl py-1.5 flex flex-col"
+                className="kb-pop absolute top-12 right-2 z-20 w-72 max-h-[65%] overflow-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/98 shadow-xl py-1.5 flex flex-col"
                 onClick={(e) => e.stopPropagation()}
               >
                 {(() => {

@@ -1204,3 +1204,58 @@ input:focus, textarea:focus, select:focus {
   .desk-pick-cell, .desk-pick-add { transition: none; }
 }
 
+/* ==========================================================================
+   工具栏「文字按容器宽度退化」（2026-09-18）
+   --------------------------------------------------------------------------
+   需求：工具按钮「图标 + 文字」在窗口变小 / 侧栏压缩时，文字被挤成竖排或显示不全。
+        到达阈值、文字不能完整显示后，直接隐去文字、只留图标（title tooltip 保留）。
+
+   ⚠️ 为什么必须用容器查询（@container）而不是视口媒体查询（@media）：
+      触发场景是「侧栏压缩」——那时**窗口宽度根本没变**，只有中间/侧栏的**容器**变窄，
+      @media 完全失效。容器查询看的就是容器自身宽度，两种场景都能覆盖。
+
+   ⚠️ 阈值口径：每个容器标的是「全部文字都不再被挤压」的最小宽度（真机实测标定）。
+      取这个值 = 竖排现象永远不会出现（宁可早一点隐，也不要挤成竖排）。
+
+   用法：① 工具栏根元素加 .kb-fit .kb-fit-<名字>
+        ② 需要按宽度隐去的文字包一层 <span class="kb-l1">/<span class="kb-l2">/…
+        ③ 同一容器内 l1 最先隐、l3 最后隐（按信息重要性排）
+   ========================================================================== */
+
+.kb-fit { container-type: inline-size; }
+
+/* ---- ① PDF 阅读器工具栏（中间主体，PdfReaderView.tsx）----
+   实测（真机 devbridge，容器 643px）：大纲/搜索/书签/护眼理想宽 46px、沉浸 54px、
+   「N 页」35px、「/ N」27px，全部文字所需 ≈ 920px —— 低于此值就开始竖排。 */
+.kb-fit-pdfread { container-name: kb-pdfread; }
+@container kb-pdfread (max-width: 920px) { .kb-l1 { display: none; } }  /* 大纲 / 搜索 / 书签 / 护眼 / 沉浸 */
+@container kb-pdfread (max-width: 770px) { .kb-l2 { display: none; } }  /* 竖滚 / 单页 / 双页 */
+@container kb-pdfread (max-width: 668px) { .kb-l3 { display: none; } }  /* N 页 / / N / 100% */
+
+/* ---- ② PDF 左栏三件套（PdfRailPanel.tsx）----
+   实测：目录 53 / 缩略图 56 / 书签 53px，需求 ≈ 170px；左栏宽度可在 180–420px 之间调，
+   收到最小 180 时「缩略图」三个字就塞不下（56 > 53）→ 开始竖排。 */
+.kb-fit-pdfrail { container-name: kb-pdfrail; }
+@container kb-pdfrail (max-width: 178px) { .kb-l1 { display: none; } }
+
+/* ---- ③ AI 教学 · 素材库标题行（ai-teaching/index.tsx）----
+   本行宽 = 右栏 ResizablePanel（240–420px）。按钮组需求 ≈ 190px + 标题 ≈ 70px + 内边距，
+   合计 ≈ 280px；低于此值时「素材」二字（贴着 ＋ 图标）会换行成竖排 → 隐文字留 ＋。
+   注：本行同时已做治本处理（标题 min-w-0+truncate 先牺牲、按钮组 shrink-0 不变形），
+   这里的容器查询只兜住「标题已截到最短仍放不下」的极端窄位。 */
+.kb-fit-aisrc { container-name: kb-aisrc; }
+@container kb-aisrc (max-width: 280px) { .kb-l1 { display: none; } }
+
+/* ---- ④ AI 教学 · 工作区卡片 hover 操作行（改名 / 画像 / 要求 / 删除）----
+   卡片由 `grid grid-cols-2` 均分，宽约 200–500px；4 个按钮需求 ≈ 196px，
+   卡片收到 <200px 时文字会换行成竖排 → 隐文字只留图标。 */
+.kb-fit-aiws { container-name: kb-aiws; }
+@container kb-aiws (max-width: 200px) { .kb-l1 { display: none; } }
+
+/* ---- ⑤ AI 教学 · 「开始答题（N 题）」行（ai-teaching/index.tsx）----
+   按钮 + 长说明并排。说明已可缩可截断、按钮已 shrink-0 保形；
+   容器再窄到 <260px 时隐去按钮上的「开始答题」，保留图标与题数。 */
+.kb-fit-aiquiz { container-name: kb-aiquiz; }
+@container kb-aiquiz (max-width: 260px) { .kb-l1 { display: none; } }
+
+

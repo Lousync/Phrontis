@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Puzzle, Bot, MoreHorizontal, History, FileText, MonitorX } from 'lucide-react'
+import { Bot, MoreHorizontal, History, FileText, MonitorX } from 'lucide-react'
 import type { KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
@@ -9,6 +9,7 @@ import {
   parseWorkbenchLayout, DAY_PANEL_WIDGET_IDS, RIGHT_PANEL_WIDGET_IDS, WORKBENCH_PANEL_TAB_IDS,
   type WorkbenchLayout,
 } from '../../lib/workbenchLayout'
+import { ToolboxIcon } from '../shared/ModuleIcons'
 import { ToolLauncherZone } from './ToolLauncherZone'
 import { TaskWidget } from './widgets/TaskWidget'
 import { HabitWidget } from './widgets/HabitWidget'
@@ -258,7 +259,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                   : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
               }`}
             >
-              {id === 'widgets' ? <Puzzle size={14} /> : <Bot size={14} />}
+              {id === 'widgets' ? <ToolboxIcon size={14} /> : <Bot size={14} />}
             </button>
           ))}
           <div className="ml-auto">
@@ -394,7 +395,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
           {WORKBENCH_PANEL_TAB_IDS.map((id) => (
             <label key={id} className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[6px] text-[12px] hover:bg-[var(--bg-hover)]">
               <input type="checkbox" data-pt-tab-id={id} defaultChecked={!layout.panelTabsHidden.includes(id)} className="accent-[var(--accent)]" />
-              {id === 'widgets' ? <Puzzle size={12} className="shrink-0 text-[var(--text-muted)]" /> : <Bot size={12} className="shrink-0 text-[var(--text-muted)]" />}
+              {id === 'widgets' ? <ToolboxIcon size={12} className="shrink-0 text-[var(--text-muted)]" /> : <Bot size={12} className="shrink-0 text-[var(--text-muted)]" />}
               <span className="min-w-0 flex-1 truncate">{id === 'widgets' ? '小工具' : 'AI 对话 / 面板'}</span>
             </label>
           ))}

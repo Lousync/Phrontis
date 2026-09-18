@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize as MaximizeIcon,
+  ChevronLeft, ChevronRight, ArrowLeft, ZoomIn, ZoomOut, Maximize as MaximizeIcon, MoveHorizontal,
   FileText, AlertTriangle, Loader2, Search, BookOpen, X,
   GalleryVertical, Square, Columns2, Bookmark, BookmarkPlus, Eye, EyeOff, ListTree,
 } from 'lucide-react'
@@ -118,6 +118,11 @@ interface Props {
   rootId: string
   relPath: string
   name: string
+  /** 工具栏最左的返回入口（书架阅读态用）：把「返回书架」并进阅读器工具栏，
+      省掉模块自己那行标题 —— 否则书名会在模块顶行与阅读器工具栏各显示一次，白占一行阅读高度。
+      不传则不渲染该按钮（编辑器打开 PDF 的路径即如此）。 */
+  backLabel?: string
+  onBack?: () => void
 }
 
 /**
@@ -130,7 +135,7 @@ interface Props {
  * - 双页：跨页对 (p, p+1)，起始页归一化 normalizeSpreadStart；容器 <1240px 自动降级单页 + toast。
  * 保留 v1：懒加载 range transport、文本层、大纲（批次 6 迁左栏）、全文搜索、沉浸、快捷键。
  */
-export function PdfReaderView({ rootId, relPath, name }: Props) {
+export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Props) {
   const pdfRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null)
 
   // ===== 文档态 =====
@@ -145,13 +150,22 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   const [pageNum, setPageNum] = useState(1)
   const [zoom, setZoom] = useState(1)
   const [fitWidth, setFitWidth] = useState(true)
+  /** 整页适配开关（2026-09-18 书架反馈）。**默认 false = 适宽**：页面宽铺满容器，字最大最清晰，
+      纵向滚动看完整页 —— 「整页可见」是可选口径、不强制，因为强制缩小会让字变小，
+      而且窄容器下宽度是瓶颈时页高必然填不满容器高（大片底部留白，2026-09-18 实机反馈）。
+      打开后缩放取 `min(容器可用宽/页宽, 容器可用高/页高)`（工具栏「适合页面」按钮切）。
+      仅在 fitWidth（自动适配）为真时生效；手动缩放/滚轮缩放会把 fitWidth 置 false 走自定义 zoom。 */
+  const [fitPage, setFitPage] = useState(false)
   const pageNumRef = useRef(1)
   const zoomRef = useRef(1)
   /** goPage 经 ref 供 attachLinks 热区调用（避免渲染闭包环） */
   const goPageRef = useRef<((n: number) => void) | null>(null)
-  /** 容器可用宽（去内边距；duo 再对半） */
+  /** 容器可用宽/高（去内边距；duo 再对半）——高是整页适配的新增依据 */
   const [availW, setAvailW] = useState(800)
+  const [availH, setAvailH] = useState(600)
   const containerRef = useRef<HTMLDivElement>(null)
+  /** 竖滚模式的滚动宿主（测量亦用；声明提前，供尺寸测量 effect 引用） */
+  const scrollHostRef = useRef<HTMLDivElement>(null)
 
   // ===== 单页/双页渲染 refs =====
   const singleCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -237,21 +251,23 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     }
   }, [doPatch])
 
-  // ===== 容器宽测量（防呆降级 + 适宽基准）=====
+  // ===== 容器可用宽/高测量（防呆降级 + 适宽 / 整页适配的基准）=====
   useEffect(() => {
-    const el = containerRef.current
+    const el = viewMode === 'scroll' ? scrollHostRef.current : containerRef.current
     if (!el) return
     const measure = () => {
       const pad = immersive ? 0 : 48
       setAvailW(Math.max(120, el.clientWidth - pad))
+      setAvailH(Math.max(120, el.clientHeight - pad))
     }
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-    // viewMode 切换会换挂容器 ref（scroll 用 scrollHostRef）——观察器须随模式重挂
+    // viewMode 切换会换挂容器 ref（竖滚用 scrollHostRef、翻页模式用 containerRef）——观察器须随模式重挂；
+    // 依赖里带 loading：文档就绪前容器还没挂上，早退后再不会重测（availH 会一直停在初值）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [immersive, viewMode])
+  }, [immersive, viewMode, loading])
 
   // ===== 双页防呆降级（方案 §5.3：低于 1240px 自动降级 + toast）=====
   const degradeToastedRef = useRef(false)
@@ -310,6 +326,23 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
 
   /** 当前页缩放系数由各 render 分支按 fitWidth/zoom 现算；这里不再集中（duo/单页/滚动池口径不同） */
 
+  // ===== 自动适配的缩放口径（整页适配 / 适宽）=====
+  /** fitPage=true → `min(容器宽/页宽, 容器高/页高)` = 整页可见；false → 适宽（页面宽铺满容器）。
+      duo 并排时传入"单页可用宽"（availWOverride）参与比较，高仍用容器高。 */
+  const fitScaleFor = useCallback((w: number, h: number, availWOverride?: number) => {
+    const aw = availWOverride ?? availW
+    return fitPage ? Math.min(aw / w, availH / h) : aw / w
+  }, [availW, availH, fitPage])
+
+  /** 竖滚占位高度：按**实际渲染页宽**估。整页适配下页宽可能小于容器宽（两侧留白），
+      若仍用容器宽估高，占位会偏高 → 滚动条长度跳变（渲染完成后虽会按真实高度校正，首次进入最好一次到位）。 */
+  const estimateSlotH = useCallback((w: number, h: number) => {
+    const renderW = fitWidth && fitPage && w > 0 && h > 0
+      ? Math.min(availW, availH * (w / h))
+      : Math.max(120, availW)
+    return estimatePageHeight(w, h, renderW)
+  }, [availW, availH, fitWidth, fitPage])
+
   // ===== 单页渲染 =====
   const renderSingle = useCallback(async (num: number) => {
     const pdf = pdfRef.current
@@ -319,14 +352,14 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     try {
       const page = await pdf.getPage(num)
       const base = page.getViewport({ scale: 1 })
-      const scale = fitWidth ? Math.max(0.2, availW / base.width) : zoomRef.current
+      const scale = fitWidth ? Math.max(0.2, fitScaleFor(base.width, base.height)) : zoomRef.current
       await renderPageTo(num, canvas, textHost, scale, { track: true })
       setZoom(scale)
     } catch (e) {
       const msg = String((e as Error)?.message || e)
       if (!msg.includes('cancel')) setError(msg)
     }
-  }, [availW, fitWidth, renderPageTo])
+  }, [fitWidth, fitScaleFor, renderPageTo])
 
   // ===== 双页渲染（跨页对，起始归一化）=====
   const renderDuo = useCallback(async (startRaw: number) => {
@@ -341,7 +374,9 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       const pageA = await pdf.getPage(pages[0])
       const baseA = pageA.getViewport({ scale: 1 })
       const slots = pages.length === 2 ? 2 : 1
-      const scale = fitWidth ? Math.max(0.2, (availW - (pages.length === 2 ? 16 : 0)) / slots / baseA.width) : zoomRef.current
+      // 并排时"单页可用宽"要扣掉中间 16px 间隙再对半；高仍按容器高比较 —— 整页适配要两轴都装得下
+      const slotW = (availW - (pages.length === 2 ? 16 : 0)) / slots
+      const scale = fitWidth ? Math.max(0.2, fitScaleFor(baseA.width, baseA.height, slotW)) : zoomRef.current
       const canvasA = duoCanvasARef.current
       const textA = duoTextARef.current
       if (canvasA) await renderPageTo(pages[0], canvasA, textA, scale, { track: true })
@@ -362,10 +397,9 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       const msg = String((e as Error)?.message || e)
       if (!msg.includes('cancel')) setError(msg)
     }
-  }, [availW, fitWidth, renderPageTo])
+  }, [availW, fitWidth, fitScaleFor, renderPageTo])
 
   // ===== 竖滚渲染池 =====
-  const scrollHostRef = useRef<HTMLDivElement>(null)
   const slotElsRef = useRef(new Map<number, HTMLDivElement>())
   /** 已渲染页集合（canvas 已插入） */
   const poolRenderedRef = useRef(new Set<number>())
@@ -390,12 +424,12 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     try {
       const page = await pdf.getPage(n)
       const base = page.getViewport({ scale: 1 })
-      const scale = fitWidth ? Math.max(0.2, availW / base.width) : zoomRef.current
+      const scale = fitWidth ? Math.max(0.2, fitScaleFor(base.width, base.height)) : zoomRef.current
       // 就绪前 slot 可能已被回收（翻滚离开）
       if (!slotElsRef.current.get(n) || !poolWantedRef.current.has(n)) return
       slot.innerHTML = ''
       const canvas = document.createElement('canvas')
-      canvas.className = 'block bg-[var(--bg-primary)] shadow-sm'
+      canvas.className = 'block bg-[var(--bg-primary)] shadow-[0_2px_8px_rgba(0,0,0,0.18)]'
       slot.appendChild(canvas)
       const frame = document.createElement('div')
       frame.className = 'kb-pdf-text-layer absolute inset-0'
@@ -408,7 +442,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       poolInflightRef.current.delete(n)
       poolPumpRef.current?.()
     }
-  }, [availW, fitWidth, renderPageTo])
+  }, [fitWidth, fitScaleFor, renderPageTo])
 
   poolPumpRef.current = () => {
     let running = poolInflightRef.current.size
@@ -626,7 +660,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       const modeNow = restored?.mode && restored.mode !== 'scroll' && resolveDegrade(availW, restored.mode) === restored.mode ? restored.mode : 'scroll'
       if (modeNow === 'scroll') {
         const { w, h } = firstPageRef.current
-        setSlotH(estimatePageHeight(w, h, Math.max(120, availW)))
+        setSlotH(estimateSlotH(w, h))
         requestAnimationFrame(() => {
           if (restored && restored.scrollRatio > 0.005) {
             const host = scrollHostRef.current
@@ -648,13 +682,14 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, numPages])
 
-  // 适宽 / 容器变化 → 重绘当前视图（竖滚：重估占位 + 清池重渲）
-  const availKey = `${availW}-${fitWidth ? 'fit' : zoom.toFixed(2)}`
+  // 适配口径 / 容器尺寸变化 → 重绘当前视图（竖滚：重估占位 + 清池重渲）
+  // 键里必须含 fitPage 与 availH：切「整页 / 适宽」或容器变高都要重排，否则按钮点了不生效
+  const availKey = `${availW}x${availH}-${fitWidth ? (fitPage ? 'page' : 'fit') : zoom.toFixed(2)}`
   useEffect(() => {
     if (loading || numPages === 0) return
     if (viewMode === 'scroll') {
       const { w, h } = firstPageRef.current
-      setSlotH(estimatePageHeight(w, h, Math.max(120, availW)))
+      setSlotH(estimateSlotH(w, h))
       poolRenderedRef.current.clear()
       for (const slot of slotElsRef.current.values()) slot.innerHTML = ''
       syncPool()
@@ -665,6 +700,21 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availKey, viewMode])
+
+  // ===== 进入阅读时请求「阅读空间」（2026-09-18 书架反馈；只发一次）=====
+  // 判据：整页适配下 `availW/页宽 < availH/页高` ⇒ **宽度是瓶颈** —— 页面被容器宽度卡住，
+  // 收掉左右侧栏能显著把页面放大；反之高度是瓶颈，收侧栏对页面大小毫无帮助，就不打扰用户。
+  // 侧栏收起后本 effect 会因 availW 变化重跑，但 ref 保证只派发一次（用户手动展开后也不会被反复收走）。
+  const spaceAskedRef = useRef(false)
+  useEffect(() => {
+    if (spaceAskedRef.current || loading || numPages === 0) return
+    const { w, h } = firstPageRef.current
+    if (!w || !h) return
+    spaceAskedRef.current = true
+    if (availW / w < availH / h) {
+      window.dispatchEvent(new CustomEvent('kb-reader-request-space'))
+    }
+  }, [loading, numPages, availW, availH])
 
   const zoomBy = useCallback(async (delta: number) => {
     setFitWidth(false)
@@ -901,24 +951,35 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
   const isPaging = viewMode !== 'scroll'
 
   const toolbar = (
-    <div className={`flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)] ${immersive ? 'hidden' : ''}`}>
+    <div className={`kb-fit kb-fit-pdfread flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)] ${immersive ? 'hidden' : ''}`}>
+      {onBack && (
+        <>
+          <button onClick={onBack} title={backLabel ?? '返回书架'}
+            className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+            <ArrowLeft size={13} /><span className="kb-l1">{backLabel ?? '返回书架'}</span>
+          </button>
+          <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
+        </>
+      )}
       <FileText size={13} className="text-[var(--text-tertiary)]" />
       <span className="max-w-[220px] truncate text-[var(--text-primary)]">{name}</span>
-      <span className="text-[var(--text-tertiary)]">{numPages} 页</span>
+      <span className="kb-l3 text-[var(--text-tertiary)]">{numPages} 页</span>
       <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
-      {/* 三模式切换（方案 §5.2：竖滚默认） */}
+      {/* 三模式切换（方案 §5.2：竖滚默认）。
+          文字按容器宽度退化（见 styles/index.css 的 .kb-fit 段）：容器 <770px 隐模式名、<668px 隐计数、
+          <920px 先隐右侧功能按钮文字。title 保留 → 隐去后悬停仍可读。 */}
       <div className="flex items-center overflow-hidden rounded border border-[var(--border-color)]">
         <button onClick={() => void switchMode('scroll')} title="竖滚模式"
           className={`flex items-center gap-1 px-1.5 py-0.5 ${viewMode === 'scroll' ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)]'}`}>
-          <GalleryVertical size={12} />竖滚
+          <GalleryVertical size={12} /><span className="kb-l2">竖滚</span>
         </button>
         <button onClick={() => void switchMode('single')} title="单页模式"
           className={`flex items-center gap-1 border-x border-[var(--border-color)] px-1.5 py-0.5 ${viewMode === 'single' ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)]'}`}>
-          <Square size={12} />单页
+          <Square size={12} /><span className="kb-l2">单页</span>
         </button>
         <button onClick={() => void switchMode('duo')} title="双页模式（需宽 ≥1240px）"
           className={`flex items-center gap-1 px-1.5 py-0.5 ${viewMode === 'duo' ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)]'}`}>
-          <Columns2 size={12} />双页
+          <Columns2 size={12} /><span className="kb-l2">双页</span>
         </button>
       </div>
       <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
@@ -931,15 +992,21 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
         onChange={(e) => { const n = parseInt(e.target.value, 10); if (!Number.isNaN(n)) void goPage(n) }}
         className="w-11 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] px-1 py-0.5 text-center text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
       />
-      <span className="text-[var(--text-tertiary)]">/ {numPages}</span>
+      <span className="kb-l3 text-[var(--text-tertiary)]">/ {numPages}</span>
       <button onClick={() => void stepPage(1)} disabled={viewMode !== 'duo' && pageNum >= numPages} title="下一页 (PageDown / →)"
         className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40">
         <ChevronRight size={15} />
       </button>
       <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
-      <button onClick={() => { setFitWidth(true); zoomRef.current = 1; setZoom(1) }} title="适合宽度"
-        className={`rounded p-0.5 ${fitWidth ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+      {/* 适配口径二选一（2026-09-18）：整页适配 = 整页完整可见（默认，书架诉求）；
+          适合宽度 = 页面宽铺满容器、纵向滚动看完整页。放大/缩小会脱离自动适配（fitWidth=false）。 */}
+      <button onClick={() => { setFitWidth(true); setFitPage(true); zoomRef.current = 1; setZoom(1) }} title="适合页面（整页完整可见）"
+        className={`rounded p-0.5 ${fitWidth && fitPage ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <MaximizeIcon size={14} />
+      </button>
+      <button onClick={() => { setFitWidth(true); setFitPage(false); zoomRef.current = 1; setZoom(1) }} title="适合宽度（页面宽铺满，纵向滚动）"
+        className={`rounded p-0.5 ${fitWidth && !fitPage ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+        <MoveHorizontal size={14} />
       </button>
       <button onClick={() => void zoomBy(1.2)} title="放大" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomIn size={14} /></button>
       <button onClick={() => void zoomBy(1 / 1.2)} title="缩小" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomOut size={14} /></button>
@@ -947,25 +1014,25 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
       {/* 大纲 = 左栏 bookshelf 模块态（批次 6：内嵌大纲侧栏已删）：解锁左栏并切过去（兜底入口） */}
       <button onClick={() => window.dispatchEvent(new CustomEvent('kb-rail-show-bookshelf-outline'))} title="在左栏打开目录/缩略图/书签"
         className="flex items-center gap-1 rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-        <ListTree size={14} />大纲
+        <ListTree size={14} /><span className="kb-l1">大纲</span>
       </button>
       <button onClick={() => setSideTab((v) => (v === 'search' ? null : 'search'))} title="搜索 (Ctrl+F)"
         className={`flex items-center gap-1 rounded p-0.5 ${sideTab === 'search' ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-        <Search size={14} />搜索
+        <Search size={14} /><span className="kb-l1">搜索</span>
       </button>
       <button onClick={toggleBookmark} title={bookmarks.some((b) => b.page === currentPageForBookmark()) ? '移除本页书签' : '收藏本页书签'}
         className={`flex items-center gap-1 rounded p-0.5 ${bookmarks.some((b) => b.page === currentPageForBookmark()) ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-        {bookmarks.some((b) => b.page === currentPageForBookmark()) ? <Bookmark size={14} /> : <BookmarkPlus size={14} />}书签
+        {bookmarks.some((b) => b.page === currentPageForBookmark()) ? <Bookmark size={14} /> : <BookmarkPlus size={14} />}<span className="kb-l1">书签</span>
       </button>
       <button onClick={toggleEyeCare} title="护眼模式（书级记忆）"
         className={`flex items-center gap-1 rounded p-0.5 ${eyeCare ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-        {eyeCare ? <Eye size={14} /> : <EyeOff size={14} />}护眼
+        {eyeCare ? <Eye size={14} /> : <EyeOff size={14} />}<span className="kb-l1">护眼</span>
       </button>
       <button onClick={toggleImmersive} title="沉浸阅读（隐藏全部 UI，Esc 退出）"
         className={`ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 ${immersive ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-        <BookOpen size={14} />沉浸
+        <BookOpen size={14} /><span className="kb-l1">沉浸</span>
       </button>
-      <span className="text-[11px] text-[var(--text-tertiary)]">{Math.round(zoom * 100)}%</span>
+      <span className="kb-l3 text-[11px] text-[var(--text-tertiary)]">{Math.round(zoom * 100)}%</span>
     </div>
   )
 
@@ -1033,7 +1100,7 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
           key={n}
           data-pg={n}
           ref={(el) => setSlotRef(n, el)}
-          className="relative w-full overflow-hidden bg-[var(--bg-primary)] shadow-sm"
+          className="relative flex w-full justify-center overflow-hidden bg-[var(--bg-primary)] shadow-[0_2px_8px_rgba(0,0,0,0.18)]"
           style={{ height: slotH }}
         />,
       )
@@ -1067,26 +1134,29 @@ export function PdfReaderView({ rootId, relPath, name }: Props) {
         {sidePanel}
         {viewMode === 'scroll' ? (
           <div ref={scrollHostRef} onScroll={onScrollHost} className="min-h-0 flex-1 overflow-auto">
-            <div className={`mx-auto flex flex-col items-center gap-3 ${immersive ? 'py-0' : 'py-4'}`} style={{ width: availW }}>
+            {/* 页间距 gap-4（16px）：连续阅读时相邻页有清晰的分隔，不再糊成一片 */}
+            <div className={`mx-auto flex flex-col items-center gap-4 ${immersive ? 'py-0' : 'py-4'}`} style={{ width: availW }}>
               {slots}
             </div>
           </div>
         ) : (
           <div ref={containerRef} className="relative min-h-0 flex-1 overflow-auto">
-            <div className={`flex min-h-full w-full items-start justify-center ${immersive ? 'p-0' : 'p-6'}`}>
+            {/* safe center：页面比容器小时垂直居中（留白上下均分，不再全堆在底部）；
+                页面比容器大时退回顶对齐 —— 否则溢出后顶部会被裁掉且滚不回去 */}
+            <div className={`flex min-h-full w-full items-[safe_center] justify-center ${immersive ? 'p-0' : 'p-6'}`}>
               {viewMode === 'single' ? (
                 <div ref={pageHostRef} className="relative inline-block">
-                  <canvas ref={singleCanvasRef} className="block bg-[var(--bg-primary)] shadow-sm" />
+                  <canvas ref={singleCanvasRef} className="block bg-[var(--bg-primary)] shadow-[0_2px_8px_rgba(0,0,0,0.18)]" />
                   <div ref={singleTextRef} className="kb-pdf-text-layer" style={{ top: 0, left: 0 }} />
                 </div>
               ) : (
                 <div className="flex items-start justify-center gap-4">
                   <div ref={pageHostRef} className="relative inline-block">
-                    <canvas ref={duoCanvasARef} className="block bg-[var(--bg-primary)] shadow-sm" />
+                    <canvas ref={duoCanvasARef} className="block bg-[var(--bg-primary)] shadow-[0_2px_8px_rgba(0,0,0,0.18)]" />
                     <div ref={duoTextARef} className="kb-pdf-text-layer" style={{ top: 0, left: 0 }} />
                   </div>
                   <div className="relative inline-block">
-                    <canvas ref={duoCanvasBRef} className="block bg-[var(--bg-primary)] shadow-sm" />
+                    <canvas ref={duoCanvasBRef} className="block bg-[var(--bg-primary)] shadow-[0_2px_8px_rgba(0,0,0,0.18)]" />
                     <div ref={duoTextBRef} className="kb-pdf-text-layer" style={{ top: 0, left: 0 }} />
                   </div>
                 </div>

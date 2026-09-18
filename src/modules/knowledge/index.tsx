@@ -31,7 +31,8 @@ import { SpacePanel } from './components/SpacePanel'
 // Monaco 宿主单独 lazy：PageEditor 内联了 @monaco-editor/react，而 monaco 主包 8.3MB
 // 绝不能进首屏。知识库模块本身是静态引入的（切换零延迟），只有编辑器这一块按需加载。
 const PageEditor = lazy(() => import('./components/PageEditor').then((m) => ({ default: m.PageEditor })))
-import { PageTabBar, type PageInfo } from './components/PageTabBar'
+import { PageTabStrip } from '../../components/workbench/PageTabStrip'
+import { getFileTypeInfo } from '../../lib/fileTypes'
 import { GraphView } from './components/graph/GraphView'
 import { QuizCollection } from './components/QuizCollection'
 import { QuizNavPanel } from './components/QuizNavPanel'
@@ -50,7 +51,14 @@ import { KNOWLEDGE_SIDEBAR_ITEM_VARS } from '../../lib/settings'
 interface ClipItem { type: 'category' | 'page'; id: string }
 interface ClipboardData { action: 'copy' | 'cut'; items: ClipItem[] }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge' }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz' }) {
+/** 打开页面的显示信息（标题 + 文件类型）。v3.4.0 页面条置顶后页签条统一由 PageTabStrip 渲染，
+    本类型只承担本模块 openPageInfos 的数据形状（原 PageTabBar 组件已删除） */
+interface PageInfo {
+  title: string
+  fileType: string
+}
+
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, paneActive = true }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; paneActive?: boolean }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -1306,6 +1314,16 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     return () => { alive = false }
   }, [isActive, knownWikiTitles])
 
+  /* v3.4.0 页面条置顶：沉浸阅读 / 图谱模式是「全幅」形态，中间栏页面条整行让位 ——
+     页面条在外壳层、模块内无法触及，故反向通知 App。只在值变化时回调，避免无谓 setState。 */
+  const immersiveRef = useRef(false)
+  useEffect(() => {
+    const v = readingMode || graphMode
+    if (immersiveRef.current === v) return
+    immersiveRef.current = v
+    onImmersiveChange?.(v)
+  }, [readingMode, graphMode, onImmersiveChange])
+
   // onWikiLink 稳定化（性能 2026-09-10）：原先以内联箭头传入 MarkdownPreview，每次渲染都是
   // 新函数引用 → 组件的 React.memo 恒失效、正文被反复重解析（模块内任意 setState 都会命中）。
   const handleReadingWikiLink = useCallback((t: string) => {
@@ -1402,22 +1420,41 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
           </div>
         ) : (
         <>
-        {/* 顶部贯通行（图二骨架）：页签栏横跨侧栏 + 内容区；图谱模式隐藏（保持全幅） */}
-        {!graphMode && (
-          <PageTabBar
-            openPageIds={openPageIds}
-            activePageId={activePageId}
-            openPageInfos={openPageInfos}
-            dirtyPageIds={dirtyPageIds}
-            pinnedPageIds={pinnedPageIds}
-            onSelectTab={handleOpenPage}
-            onCloseTab={handleCloseTab}
-            onReorder={handleReorderTabs}
-            onTogglePin={handleTogglePin}
-            onTabContextMenu={handleTabContextMenu}
-            rightActions={<div id="editor-toolbar-slot" className="flex items-center gap-0.5" />}
-          />
-        )}
+        {/* v3.4.0 页面条置顶（2026-09-18）：知识库页签条搬进中间栏页面条（portal 到 App 槽位）；
+            图谱模式不渲染。托管但槽未就绪 → 渲染 null，绝不回落内嵌（否则同屏两条）。 */}
+        {!graphMode && (() => {
+          const strip = (
+            <PageTabStrip
+              owner="knowledge"
+              itemAttr="data-tab-id"
+              paneActive={paneActive}
+              items={openPageIds.map((id) => {
+                const info = openPageInfos[id]
+                const pinned = pinnedPageIds.has(id) || dirtyPageIds.has(id)
+                return {
+                  id,
+                  title: info?.title || '加载中…',
+                  preview: !pinned,
+                  pinned,
+                  badge: info?.fileType ? getFileTypeInfo(info.fileType).badge : undefined,
+                }
+              })}
+              activeId={activePageId}
+              onSelect={(id) => { void handleOpenPage(id) }}
+              onClose={handleCloseTab}
+              onReorder={handleReorderTabs}
+              onTogglePin={handleTogglePin}
+              onContextMenu={(e, id) => handleTabContextMenu(e, id)}
+            />
+          )
+          if (pageBarHosted) return pageBarEl ? createPortal(strip, pageBarEl) : null
+          /* 兜底形态（未托管）：顶部就是本模块自己的页签行，没页签也留一条同高的空行 */
+          return (
+            <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5">
+              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{strip}</div>
+            </div>
+          )
+        })()}
         <div className="kb-view-fade flex min-h-0 flex-1">
         {/* L1: File / Outline tabs — file tab drills into ChapterPanel when a notebook is selected */}
         {/* v3.4.0 批次3：左栏模块态（sidebarEl 由 App 传入）时，侧栏内容 portal 进左栏 slot —— 挂载点迁移
