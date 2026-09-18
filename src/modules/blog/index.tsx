@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { Star, ListTree, ChevronLeft, ChevronRight, X, FileText } from 'lucide-react'
+import { Star, ListTree, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { Entry, Tag, type SummaryRecord } from '../../types'
 import { getEntries, createEntry, deleteEntry, getEntryById, toggleEntryStar, getSetting, setSetting, openExternal, getTags, workspaceGetCurrent, ensureSummary } from '../../lib/ipc'
 import { useSettings } from '../../lib/SettingsContext'
@@ -330,11 +330,8 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
 
   return (
     <div className="flex h-full flex-col bg-[var(--bg-primary)]">
-      {/* 顶部贯通行（图二骨架）：横跨侧栏 + 内容区；快捷动作在侧栏内搜索框上方 */}
-      <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 shrink-0 select-none">
-        <FileText size={12} className="text-[var(--text-muted)]" />
-        <span className="text-[11.5px] font-medium text-[var(--text-muted)]">博客</span>
-      </div>
+      {/* 顶部贯通行（图二骨架）已删除（2026-09-18）：与左栏 Sidebar 的「博客」标题重复，
+          中栏内容直接顶到页面条下方。快捷动作仍在侧栏搜索框上方。 */}
       <div className="flex min-h-0 flex-1">
       {/* v3.4.0 批次3：左栏模块态（sidebarEl）时侧栏内容 portal 进左栏 slot（挂载点迁移），
           否则回落原位 ResizablePanel；大纲模式的显隐条件在两形态下保持一致 */}

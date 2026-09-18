@@ -371,6 +371,28 @@ ok(!/Backslash/.test(srcApp) && !/Columns2/.test(srcApp),
 ok(!/分屏/.test(srcApp) && !/分屏/.test(srcStrip) && !/分屏/.test(srcPageBar) && !/分屏/.test(srcStatusBar),
   'G9 「分屏」概念已从 App / 页签条 / 页面条 / 状态栏的源码与注释中清除')
 
+// ===== H. 中间主体冗余头部行清除（v3.4.0，2026-09-18 · A 组）=====
+// 背景：多个模块在中间主体顶部自带一条「贯通行」（图标 + 模块名），与左栏标识 / 页面条重复。
+// A 组 = 纯标题（无工具）可直接删：blog（博客）、devtools（开发者工具 · DEV）。
+// 带工具的 5 项（aiChat / aiTeaching / schedule / bookshelf / releaseNotes）留待逐个讨论，不在本段。
+// 运行时不变量：blog 删行后模块根只剩 1 个子元素、内容区占满容器高 —— 由
+// tmp/probe-a-group-headers.mjs 在真实 Electron 内实证（A1~A3、A5）。
+const srcDevtools = stripComments(read('src/modules/devtools/index.tsx'))
+
+ok(!/顶部贯通行（图二骨架）：横跨侧栏 \+ 内容区；快捷动作在侧栏内搜索框上方/.test(srcBlog),
+  'H1 blog 顶部贯通行 JSX 整块已删（连同原注释）')
+ok(!/FileText/.test(srcBlog),
+  'H2 blog 已清掉删行后无用的 FileText 图标 import')
+ok(!/<span[^>]*>博客<\/span>/.test(srcBlog),
+  'H3 blog 源码层无「博客」标题 span 残留（左栏 Sidebar 自己的标识不动）')
+ok(!/FlaskConical/.test(srcDevtools),
+  'H4 devtools 已清掉删行后无用的 FlaskConical 图标 import')
+ok(!/开发者工具<\/span>|>DEV<\/span>/.test(srcDevtools),
+  'H5 devtools 源码层无「开发者工具」/「DEV」徽章残留')
+const blogMainOpen = (srcBlog.match(/<div className="flex min-h-0 flex-1">/g) || []).length
+ok(blogMainOpen === 1,
+  'H6 blog 删行后主区容器恰好一处（未误删/误留兄弟层）', `count=${blogMainOpen}`)
+
 console.log('\n========================================')
 if (fails.length === 0) {
   console.log(`✅ 全部通过：${pass} 项断言 PASS`)

@@ -8,7 +8,7 @@
  * 工具注册表:新增开发者工具时在 TOOLS 末尾追加一项即可,壳负责导航与挂载。
  */
 import { useState } from 'react'
-import { FlaskConical, BookOpen } from 'lucide-react'
+import { BookOpen } from 'lucide-react'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
 import { PANEL_CONSTRAINTS } from '../../lib/settings'
 import { HelpDocEditor } from './HelpDocEditor'
@@ -42,15 +42,8 @@ export function DevToolsModule({ sidebarOpen = true, sidebarWidths = {} as Recor
 
   return (
     <div className="flex h-full flex-col bg-[var(--bg-primary)]">
-      {/* 顶部贯通行（图二骨架）：横跨侧栏 + 内容区（标题自侧栏上移） */}
-      <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 shrink-0 select-none">
-        <FlaskConical size={12} className="text-[var(--text-muted)]" />
-        <span className="text-[11.5px] font-medium text-[var(--text-muted)]">开发者工具</span>
-        <span className="text-[9px] px-1 rounded bg-[var(--bg-tertiary)] text-[var(--text-muted)]">DEV</span>
-        <div className="ml-auto flex items-center gap-0.5">
-          {active && <span className="text-[11.5px] text-[var(--text-muted)]">{active.label}</span>}
-        </div>
-      </div>
+      {/* 顶部贯通行（图二骨架）已删除（2026-09-18）：左栏工具列表已标明当前工具，
+          本模块 dev-only 不进正式产物。 */}
       <div className="flex min-h-0 flex-1">
       <ResizablePanel
         storageKey="sidebarWidth_devtools"
