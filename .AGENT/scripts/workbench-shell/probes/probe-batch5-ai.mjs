@@ -352,6 +352,161 @@ async function main() {
   ok(c6Target !== '' && modFollow === c6Target,
     'C6 点已激活标签 → 左栏跟随切该模块态', `target=${c6Target} mod=${modFollow}`)
 
+  // ---- E 组：B1 @ 引用（@ 唤起 / 键盘选择 / 收尾清 @query / chip 上限 / 📎 无回归）----
+  // E1 前置：往输入框打「@」——光标在行首，满足「行首或前一字符为空白」
+  await evalJs(`(() => {
+    const ta = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"] textarea')
+    if (!ta) return false
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(ta, '@')
+    ta.selectionStart = ta.selectionEnd = 1
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })()`)
+  await sleep(600)
+  const atPop = await evalJs(`(() => {
+    const el = document.querySelector('[data-wb="aiAttachPop"]')
+    return { there: !!el, readOnly: el?.querySelector('input')?.readOnly, cands: el?.querySelectorAll('button').length ?? 0 }
+  })()`)
+  ok(atPop.there, 'E1 输入 @ → 唤起浮层（复用 📎 同一浮层）', JSON.stringify(atPop))
+  ok(atPop.readOnly === true,
+    'E2 @ 态浮层搜索框只读（不夺焦点，用户可继续在输入框打字）', `readOnly=${atPop.readOnly}`)
+  ok(atPop.cands > 0,
+    'E3 @ 态有候选（fixture 仓库有页面）', `候选 ${atPop.cands} 条`)
+
+  // E4 键盘 ↑↓ 选择：下移一次后高亮项应在候选列表内
+  const atNav = await evalJs(`(() => {
+    const ta = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"] textarea')
+    if (!ta) return null
+    ta.focus()
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    const el = document.querySelector('[data-wb="aiAttachPop"] [data-at-active="1"]')
+    return { hasActive: !!el, text: (el?.textContent ?? '').slice(0, 40) }
+  })()`)
+  ok(atNav && atNav.hasActive, 'E4 @ 态 ↑↓ 键盘选择生效（高亮项 data-at-active=1）', JSON.stringify(atNav))
+
+  // E5 Enter 采纳：chip 出现 + 输入框里的 `@` 被清掉
+  const atPick = await evalJs(`(() => {
+    const ta = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"] textarea')
+    if (!ta) return null
+    ta.focus()
+    ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    return true
+  })()`)
+  await sleep(700)
+  const atAfter = await evalJs(`(() => {
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    const ta = root?.querySelector('textarea')
+    const popGone = !document.querySelector('[data-wb="aiAttachPop"]')
+    return {
+      popGone,
+      value: ta?.value ?? null,
+      chipCount: [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[title="移除附件"]')).length,
+    }
+  })()`)
+  ok(atAfter.popGone && atAfter.value === '' && atAfter.chipCount === 1,
+    'E5 Enter 采纳 → chip +1 且输入框 @query 已清（浮层关闭）', JSON.stringify(atAfter))
+
+  // E6 chip 上限：逐轮「@ → Enter」加到满。
+  // ⚠️ 每轮之间必须 await 让出事件循环 —— React 18 自动批处理会把**同一 tick 内的多次
+  // setAttachedFiles 合并**，且每次的 `attachedFiles.length` 守卫读的都是同一个闭包旧值
+  // （同步连发 10 次的结果是只加进前 2 篇，会被误读成「上限失效」）。
+  for (let i = 0; i < 8; i++) {
+    await evalJs(`(() => {
+      const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+      const ta = root?.querySelector('textarea')
+      if (!ta) return false
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+      setter.call(ta, '@')
+      ta.selectionStart = ta.selectionEnd = 1
+      ta.dispatchEvent(new Event('input', { bubbles: true }))
+      ta.focus()
+      return true
+    })()`)
+    await sleep(300)
+    await evalJs(`(() => {
+      const ta = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"] textarea')
+      ta?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      return true
+    })()`)
+    await sleep(400)
+  }
+  const chipCap = await evalJs(`(() => {
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    return [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[title="移除附件"]')).length
+  })()`)
+  // 断言「=== 4」：fixture 种子保证候选池 ≥5（「引用测试」6 篇），加到第 5 篇必须被拒
+  ok(chipCap === 4, 'E6 chip 上限 = 4（超限被拒，不无限追加）', `实际 ${chipCap} 篇`)
+
+  // E7 📎 路径无回归：清空 chip + 清空输入框（把 E6 @ 残留一并抹掉）后，
+  //    经 📎 按钮打开浮层 → 搜索框可编辑 + 点击候选 +1
+  // ⚠️ 前置：必须让右栏处于**可见的 docked 小对话态**。A9b 结束后右栏是 token 面板
+  //    （aiChat 标签开着），此时 `[data-assistant-variant="docked"]` 只是 display:none 的
+  //    保活实例 —— 原生 keydown 打在隐藏节点上 React 仍处理（E1-E6 因此仍 PASS），
+  //    但 `el.click()` 需要元素可点，零尺寸节点点不动（实测 firstRect w=0/h=0）。
+  //    先关掉 aiChat 标签，让右栏原位回到小对话。
+  await evalJs(`(() => {
+    const t = [...document.querySelectorAll('[data-wb="pagebar"] [data-wb-tab]')].find((x) => x.dataset.wbTab === 'aiChat')
+    if (t && t.dataset.wbActive === '1') t.click()
+    return true
+  })()`)
+  await sleep(900)
+  const e7Visible = await evalJs(`(() => {
+    const el = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    const r = el?.getBoundingClientRect()
+    return { there: !!el, w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0) }
+  })()`)
+  await evalJs(`(() => {
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    for (const b of [...(root?.querySelectorAll('button[title="移除附件"]') ?? [])]) b.click()
+    return true
+  })()`)
+  await sleep(700)
+  // 清输入框：@ 残留会让点候选走「清理 @query」分支，与 📎 语义混在一起
+  await evalJs(`(() => {
+    const ta = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"] textarea')
+    if (!ta) return false
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+    setter.call(ta, '')
+    ta.selectionStart = ta.selectionEnd = 0
+    ta.dispatchEvent(new Event('input', { bubbles: true }))
+    return true
+  })()`)
+  await sleep(400)
+  // 关掉可能还开着的浮层，确保下面点 📎 是全新一次打开
+  await evalJs(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true })()`)
+  await sleep(400)
+  const preE7 = await evalJs(`(() => {
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    return {
+      chips: [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[title="移除附件"]')).length,
+      taValue: root?.querySelector('textarea')?.value ?? null,
+      pop: !!root?.querySelector('[data-wb="aiAttachPop"]'),
+    }
+  })()`)
+  await evalJs(`(() => { document.querySelector('[data-wb="rightPanel"] [data-wb="aiAttachBtn"]')?.click(); return true })()`)
+  await sleep(900)
+  const normalAttach = await evalJs(`(() => {
+    // ⚠️ 必须**限定在可见的 docked 容器内**取浮层：page 态那份 ChatBody 也渲染同款
+    //    data-wb="aiAttachPop"（保活 display:none），document.querySelector 会先命中它 →
+    //    按钮 rect 恒为 0×0，el.click() 打在隐藏节点上不触发 React 处理
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    const el = root?.querySelector('[data-wb="aiAttachPop"]')
+    const ro = el?.querySelector('input')?.readOnly
+    const btns = [...(el?.querySelectorAll('button') ?? [])].filter((b) => b.querySelector('span'))
+    const dbg = { pool: btns.length, searchReadOnly: ro, clicked: false, firstText: btns[0]?.textContent?.slice(0, 30), firstRect: btns[0] ? (() => { const r = btns[0].getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) } })() : null }
+    if (btns[0]) { btns[0].click(); dbg.clicked = true }
+    return dbg
+  })()`)
+  await sleep(900)
+  const afterNormal = await evalJs(`(() => {
+    const root = document.querySelector('[data-wb="rightPanel"] [data-assistant-variant="docked"]')
+    return [...(root?.querySelectorAll('span') ?? [])].filter((s) => s.querySelector('button[title="移除附件"]')).length
+  })()`)
+  ok(normalAttach.searchReadOnly === false && normalAttach.clicked && preE7.chips === 0 && afterNormal === 1,
+    'E7 📎 路径无回归（浮层搜索框可编辑，点击候选可附加）',
+    `可见态=${JSON.stringify(e7Visible)} 点击=${JSON.stringify(normalAttach)} 附加后=${afterNormal}`)
+
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)
   for (const r of results) console.log(`${r.pass ? '✓' : '✗'} ${r.label}${r.detail ? '  → ' + r.detail : ''}`)

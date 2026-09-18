@@ -5,6 +5,7 @@ import {
   Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu,
 } from 'lucide-react'
 import { getAssistantContext } from '../../../lib/assistantContext'
+import { showToast } from '../../../lib/toast'
 import { useInputShell } from './inputShells'
 import { getKnowledgePages, agentUsageGet, llmListProviders } from '../../../lib/ipc'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
@@ -23,6 +24,12 @@ import type { AiUsageDay, KnowledgePage } from '../../../types'
  */
 
 export type AssistantBodyVariant = 'sidebar' | 'docked' | 'page'
+
+/**
+ * chip 上限（篇）—— B1 上游 §3.1 拍板 4 篇。
+ * 契约脚本 `verify-perception.mjs` C2/C3 断言此处**只此一份字面量**（list-drift 防线）。
+ */
+export const MAX_ATTACHED_REFS = 4
 
 interface ChatBodyProps {
   chat: AssistantChatController
@@ -81,20 +88,29 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   // ---- 输入区工具浮层（📎 附加文件 / 模型选择 / 消耗查看）：互斥单开，外部点击关闭 ----
   const [pop, setPop] = useState<'files' | 'model' | 'usage' | null>(null)
   const inputCardRef = useRef<HTMLDivElement | null>(null)
+  // 📎 浮层检索词 / @ 唤起光标位（两者共用同一浮层，故状态同层声明）
+  const [fileQuery, setFileQuery] = useState('')
+  const atPosRef = useRef<number | null>(null)
   useEffect(() => {
     if (!pop) return
     const onDown = (e: PointerEvent) => {
       if (inputCardRef.current?.contains(e.target as Node)) return
       setPop(null)
+      atPosRef.current = null
+      setFileQuery('')
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPop(null) }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setPop(null)
+      atPosRef.current = null
+      setFileQuery('')
+    }
     document.addEventListener('pointerdown', onDown)
     document.addEventListener('keydown', onKey)
     return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
   }, [pop])
 
   // 📎 附加文件候选：打开时拉知识库索引，标题/路径即时过滤（不含已附加）
-  const [fileQuery, setFileQuery] = useState('')
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   useEffect(() => {
     if (pop !== 'files') return
@@ -109,8 +125,55 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   }, [allPages, fileQuery, attachedFiles])
   const attachFile = (p: KnowledgePage) => {
     if (!p.path) return
+    // chip 上限（B1，上游 §3.1 拍板 4 篇）：读常量不写死数字，
+    // 与 refSkeleton.MAX_ATTACHED_REFS 同值，契约脚本 C2/C3 守着「不得有第二份字面量」
+    if (attachedFiles.length >= MAX_ATTACHED_REFS) {
+      showToast({ type: 'info', message: `最多引用 ${MAX_ATTACHED_REFS} 篇笔记` })
+      return
+    }
     setAttachedFiles(prev => [...prev, { pageId: p.id, title: p.title || p.path || p.id, path: p.path! }])
     setFileQuery('')
+  }
+
+  // ---- @ 唤起（B1）：与 📎 共用同一套浮层与候选状态，差异只在触发方式与收尾 ----
+  // atPosRef 记录输入框中 `@` 的位置；选中后要把 `@query` 从正文删掉（📎 无此步骤）
+  const [atActive, setAtActive] = useState(0)
+  const pickFileAndCleanAt = (p: KnowledgePage) => {
+    attachFile(p)
+    setPop(null)
+    const pos = atPosRef.current
+    atPosRef.current = null
+    if (pos === null) return
+    // 删掉 `@` 到光标之间的检索词（光标可能已被方向键移动，取 max 兜底）
+    const ta = inputRef.current
+    const caret = ta ? ta.selectionStart : pos + 1 + fileQuery.length
+    setInput(input.slice(0, pos) + input.slice(Math.max(caret, pos + 1)))
+  }
+  /** @ 唤起键控：与 slash 弹层同款形态（↑↓ 选择 / Enter 确认 / Esc 关闭），不另造一套 */
+  const onAtKeys = (e: ReactKeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (pop !== 'files' || atPosRef.current === null) return false
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setPop(null); atPosRef.current = null; return true }
+    if (fileCandidates.length === 0) return false
+    if (e.key === 'ArrowDown') {
+      e.preventDefault(); setAtActive(i => (i + 1) % fileCandidates.length); return true
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault(); setAtActive(i => (i - 1 + fileCandidates.length) % fileCandidates.length); return true
+    }
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault(); pickFileAndCleanAt(fileCandidates[atActive]); return true
+    }
+    return false
+  }
+  /** 输入变化时同步 @ 检索词：光标退回 `@` 之前则视为已放弃，关闭浮层 */
+  const syncAtQuery = (value: string, caret: number) => {
+    const pos = atPosRef.current
+    if (pos === null) return
+    if (caret <= pos) { atPosRef.current = null; setPop(null); setFileQuery(''); return }
+    const seg = value.slice(pos + 1, caret)
+    // 检索词里出现空白 = 用户在写别的话，不再是 @ 引用
+    if (/[\s\n]/.test(seg)) { atPosRef.current = null; setPop(null); setFileQuery(''); return }
+    setFileQuery(seg)
   }
 
   // 模型候选：打开时拉启用供应商的模型清单（扁平 pid:model 串；「默认模型」置顶）
@@ -363,10 +426,37 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     ref={inputRef}
                     spellCheck={false}
                     value={input}
-                    onChange={e => { setInput(e.target.value); setSlashActive(0) }}
-                    onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() } }}
+                    onChange={e => {
+                      const v = e.target.value
+                      setInput(v); setSlashActive(0)
+                      // @ 唤起：本次输入**新插入了一个 `@`**，且它落在行首或空白之后
+                      // （`@` 是 ASCII 直输、不进 composition，中文输入法场景天然安全）
+                      if (atPosRef.current === null && v.length === input.length + 1) {
+                        const caret = e.target.selectionStart
+                        const at = caret - 1
+                        if (v[at] === '@' && (at === 0 || /\s/.test(v[at - 1]))) {
+                          atPosRef.current = at
+                          setFileQuery('')
+                          setAtActive(0)
+                          setPop('files')
+                          return
+                        }
+                      }
+                      // @ 唤起态：同步检索词（光标退回 @ 之前或打入空白即关闭）
+                      if (atPosRef.current !== null) syncAtQuery(v, e.target.selectionStart)
+                    }}
+                    onKeyDown={e => {
+                      // 回车等键序：@ 浮层优先 → slash 弹层 → 发送（各层自己 stopPropagation）
+                      if (onAtKeys(e)) return
+                      onSlashKeys(e)
+                      if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
+                    }}
+                    onKeyUp={e => {
+                      // 方向键移动光标后重算 @ 检索词（↑↓ 被浮层拦下时不会走到这里）
+                      if (atPosRef.current !== null) syncAtQuery(e.currentTarget.value, e.currentTarget.selectionStart)
+                    }}
                     rows={isNarrow ? 2 : 3}
-                    placeholder="问问任何事…（Enter 发送）"
+                    placeholder="问问任何事…（@ 引用笔记 / Enter 发送）"
                     className={`w-full appearance-none px-0.5 py-1 text-[12px] resize-none outline-none bg-transparent! border-0! rounded-none! ${shell.ta ?? ''}`}
                   />
                   {/* ↑ bg-transparent! 等 Tailwind v4 important 修饰符：styles/index.css 的全局
@@ -428,20 +518,25 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                         value={fileQuery}
                         onChange={e => setFileQuery(e.target.value)}
                         onKeyDown={e => e.stopPropagation()}
-                        placeholder="搜索知识库页面…"
+                        placeholder={atPosRef.current !== null ? '在输入框继续打字即可筛选…' : '搜索知识库页面…'}
                         spellCheck={false}
-                        autoFocus
+                        /* @ 唤起态不夺焦点——用户还在输入框里连续打字（夺焦会让后续字符全丢） */
+                        autoFocus={atPosRef.current === null}
+                        readOnly={atPosRef.current !== null}
                         className="w-full rounded-md bg-[var(--bg-tertiary)] px-2 py-1.5 text-[11.5px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-disabled)]"
                       />
                     </div>
                     <div className="max-h-[220px] overflow-y-auto p-1">
                       {fileCandidates.length === 0 ? (
                         <div className="px-2 py-4 text-center text-[11px] text-[var(--text-muted)]">{fileQuery ? '未找到匹配页面' : '知识库还没有页面'}</div>
-                      ) : fileCandidates.map(p => (
+                      ) : fileCandidates.map((p, idx) => (
                         <button
                           key={p.id}
-                          onClick={() => attachFile(p)}
-                          className="w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                          onClick={() => (atPosRef.current !== null ? pickFileAndCleanAt(p) : attachFile(p))}
+                          data-at-active={atPosRef.current !== null && idx === atActive ? '1' : undefined}
+                          className={`w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${
+                            atPosRef.current !== null && idx === atActive ? 'bg-[var(--bg-selected)]' : ''
+                          }`}
                           title={p.path ?? p.title}
                         >
                           <span className="block truncate text-[11.5px] text-[var(--text-primary)]">{p.title || p.path || '无标题'}</span>
@@ -450,7 +545,9 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       ))}
                     </div>
                     <div className="border-t border-[var(--border-color)] px-2.5 py-1.5 text-[9.5px] text-[var(--text-muted)]">
-                      附加后模型按需读取文件内容（不整篇注入）
+                      {atPosRef.current !== null
+                        ? `↑↓ 选择 · Enter 引用 · Esc 取消（最多 ${MAX_ATTACHED_REFS} 篇）`
+                        : '附加后模型按需读取文件内容（不整篇注入）'}
                     </div>
                   </div>
                 )}

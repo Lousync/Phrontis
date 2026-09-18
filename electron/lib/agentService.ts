@@ -1,7 +1,11 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
+import { readFileSync } from 'fs'
 import { listTools, invokeToolInternal, getSettingReader, checkModulePermission, checkVaultFilePermission } from './aiTools'
 import type { ToolDescription, AiToolInvokeResult } from './aiTools'
+import { resolveSafe } from './workspaceManager'
+import { getCurrentVault } from './kbStore/vaultContext'
+import { buildAttachedRefsInjection } from './aiAssistant/refSkeleton'
 import { invokeLlmStreamInternal } from './llmService'
 import { estimateTokens, trimHistoryByBudget } from './agentContextBudget'
 import { compressAtTokens, composeContextWithDigest, rowsAfterDigest } from './agentCompressCore'
@@ -447,14 +451,52 @@ const SYSTEM_PROMPT_BASE = [
 function buildSystemPrompt(context?: AgentContextInfo): string {
   if (!context) return SYSTEM_PROMPT_BASE
   let dataText = ''
-  try {
-    dataText = JSON.stringify(context.data ?? {}, null, 0)
-  } catch { /* ignore */ }
+  // 附加文件（B1 @ 引用）：把 [{title,path}] 升格为**骨架注入**——
+  // 只给元数据模型不知道文件里有什么，每篇都要多一轮 fileRead；骨架（frontmatter 摘要 +
+  // 标题骨架 + 首段）先给「这篇讲什么」，需要全文时再 fileRead。截断与预算口径全在
+  // aiAssistant/refSkeleton.ts（纯函数、契约脚本断言），这里只做读盘与拼装。
+  const refs = Array.isArray((context.data as Record<string, unknown> | undefined)?.attachedFiles)
+    ? (context.data as Record<string, unknown>).attachedFiles as Array<{ title?: string; path?: string }>
+    : []
+  if (refs.length > 0) {
+    const injected = buildAttachedRefsInjection(refs.map((r) => ({
+      title: String(r?.title ?? ''),
+      path: String(r?.path ?? ''),
+      raw: readVaultRefText(String(r?.path ?? '')),
+    })))
+    // 注入段为空 = 全部读取失败 → 落回普通序列化（不静默丢掉「有引用」这一事实）
+    if (injected) dataText = injected
+  }
+  if (!dataText) {
+    try {
+      dataText = JSON.stringify(context.data ?? {}, null, 0)
+    } catch { /* ignore */ }
+  }
   if (dataText.length > 6000) dataText = dataText.slice(0, 6000) + '…(截断)'
   return SYSTEM_PROMPT_BASE +
     `\n\n【当前上下文】用户正在查看：${context.label}（类型 ${context.type}）。` +
     (dataText ? `\n上下文数据：\n${dataText}` : '') +
     '\n用户的问题大概率与该上下文相关；若需要更多数据仍应调用工具。'
+}
+
+/**
+ * 按 relPath 读 vault 内文件正文（B1 骨架注入用）。
+ *
+ * 走 `resolveSafe` 路径守卫（拒绝对路径 / `..` 越界 / symlink 逃逸），
+ * 读失败一律返回 undefined —— **逐篇容错**：一篇读不到不能炸整轮对话，
+ * 该篇降级为「仅路径」的骨架（模型仍可 fileRead 自取）。
+ */
+function readVaultRefText(relPath: string): string | undefined {
+  if (!relPath) return undefined
+  const root = getCurrentVault()?.rootPath
+  if (!root) return undefined
+  const abs = resolveSafe(root, relPath)
+  if (!abs) return undefined
+  try {
+    return readFileSync(abs, 'utf-8')
+  } catch {
+    return undefined
+  }
 }
 
 async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: string): Promise<AgentChatResult> {

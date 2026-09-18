@@ -15,6 +15,19 @@ const userData = join(process.env.APPDATA ?? '', 'knowbase (dev KnowledgeRecorde
 for (const d of ['.knowbase', 'AI教学', '学习笔记']) mkdirSync(join(fixture, d), { recursive: true })
 writeFileSync(join(fixture, 'README.md'), '# 探针 fixture\n\n仅供 probe-shell-b3 使用。\n', 'utf8')
 writeFileSync(join(fixture, '学习笔记', '笔记一.md'), '# 笔记一\n\nfixture 内容。\n', 'utf8')
+
+// 1b. B1 @ 引用（probe-batch5-ai E 组）需要 ≥5 个**可引用**页面（带 frontmatter id 的 doc，
+//     非欢迎页）——chip 上限 4 篇要加到第 5 篇才验得出「超限被拒」。
+//     无 frontmatter id 的 md 是草稿、知识库不显示，所以这批必须带 id。
+for (let i = 1; i <= 6; i++) {
+  const dir = join(fixture, '引用测试')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, `引用页${i}.md`),
+    `---\nid: probe-ref-${i}\ntitle: 引用页${i}\ntags: [探针, 引用]\n---\n\n# 引用页${i} 一级标题\n\n## 小节 A\n## 小节 B\n\n这是第 ${i} 篇引用测试页的首段正文，供 B1 骨架注入与 chip 上限断言使用。\n`,
+    'utf8',
+  )
+}
 if (!existsSync(join(fixture, '.knowbase', 'meta.json'))) {
   writeFileSync(join(fixture, '.knowbase', 'meta.json'), JSON.stringify({ name: '探针测试仓库', createdAt: new Date().toISOString() }), 'utf8')
 }
