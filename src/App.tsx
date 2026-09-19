@@ -1038,15 +1038,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
-  if (!loaded) return null
-
   /** 整窗模块（2026-09-17 第五轮拍板修正）：回收站/插件市场/工具箱/动态/设置与 aiTeaching/devtools
       一样**与工作台平级**——激活时整窗独占（左右栏与标签条隐藏，见 suppressSides），
       不再呈现为「工作台内的子模块」；EXCLUDED 同时承担「不登记为标签页」的过滤。 */
   const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)
 
   // Ctrl+Alt+B — 切换工作台右栏（2026-09-19 反馈：工作台区对齐 AI 教学的右栏快捷键；
-  // 整窗模块下左右栏本就退场（suppressSides），跳过避免改了布局却看不见）
+  // 整窗模块下左右栏本就退场（suppressSides），跳过避免改了布局却看不见）。
+  // ⚠️ 必须在 `if (!loaded) return null` 早退**之前**声明（React #310：早退组件的 hook 一律前置）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditingInput(e)) return
@@ -1058,7 +1057,10 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullWindowTab, wbLayout, update])
+
+  if (!loaded) return null
 
   /** 页面条整行隐藏（v3.4.0 页面条置顶）：知识库沉浸阅读 / 图谱模式本来就是全幅形态，行让位 */
   const pageBarHidden = activeTab === 'knowledge' && knowledgeImmersive

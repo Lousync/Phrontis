@@ -166,7 +166,9 @@ async function main() {
 
   ok(st.hasBar, 'P1a 中间栏页面条渲染（[data-wb="pagebar"]）')
   ok(!st.oldTabbar, 'P1b 旧标签条 [data-wb="tabbar"] 已退役')
-  ok(st.barH >= 32 && st.barH <= 44, 'P1c 页面条高度在 32~44px（一行）', `h=${st.barH}`)
+  // 2026-09-19 设计更新（Edge 页面条 + 空行隐藏）：无条目停靠 → 整行 display:none（h=0）；有条目 → 32~44px
+  ok(st.barH === 0 || (st.barH >= 32 && st.barH <= 44),
+    'P1c 页面条高度：无条目停靠=整行隐藏（h=0），有条目=32~44px', `h=${st.barH}`)
   ok(st.nextTop >= st.barTop + st.barH - 1, 'P2 页面条紧邻内容在其正下方（行确在内容之上）', `bar=${st.barTop}+${st.barH} next=${st.nextTop}`)
   ok(st.slots.includes('editor') && st.slots.includes('knowledge'), 'P3 两个页签组槽同在条内', JSON.stringify(st.slots))
   ok(typeof st.pbTabs === 'string', 'P4 条上暴露 data-pb-tabs（openTabs 可观测）', st.pbTabs)
@@ -178,8 +180,8 @@ async function main() {
   await evalJs(`document.querySelector('[data-wb-bookmark="knowledge"]')?.click()`)
   await sleep(1400)
   const st1 = await evalJs(JS_PAGEBAR)
-  ok(st1.hasBar && st1.barTop === st.barTop && st1.barH === st.barH,
-    'P5 切到知识库模块 → 页面条位置/高度不变', `before=${st.barTop}/${st.barH} after=${st1.barTop}/${st1.barH}`)
+  ok(st1.hasBar && st1.barH === st.barH && st1.barTop === st.barTop,
+    'P5 切到知识库模块 → 页面条可见性/位置保持（无停靠时保持隐藏）', `before=${st.barTop}/${st.barH} after=${st1.barTop}/${st1.barH}`)
   ok(st1.modTitle === 'knowledge', 'P5b 左栏模块态 = 知识库', `mod=${st1.modTitle}`)
 
   // P6 打开 README.md：走 App 自己的 `kb-open-note` 事件通道（搜索面板同款）——
@@ -213,8 +215,9 @@ async function main() {
   await evalJs(`document.querySelector('[data-wb-bookmark="blog"]')?.click()`)
   await sleep(1600)
   const st3 = await evalJs(JS_PAGEBAR)
-  ok(st3.hasBar && st3.barTop === st.barTop && st3.barH === st.barH,
-    'P8a 切到博客模块 → 页面条位置/高度仍不变', `top=${st3.barTop} h=${st3.barH}`)
+  // 2026-09-19：基准改为**最近可见态 st2**（此前对比的隐藏基线已无意义），±1px 为缩放/亚像素舍入容差
+  ok(st3.hasBar && st3.barH === st2.barH && Math.abs(st3.barTop - st2.barTop) <= 1,
+    'P8a 切到博客模块 → 页面条位置/高度与最近可见态一致（±1px）', `prev=${st2.barTop}/${st2.barH} now=${st3.barTop}/${st3.barH}`)
   ok(st3.items.filter((i) => i.owner === 'knowledge').length >= 1, 'P8b 知识库页签条目保活（切走不消失）', JSON.stringify(st3.items.map((i) => i.owner + ':' + i.label)))
   ok(st3.modTitle === 'blog', 'P8c 左栏模块态 = 博客', `mod=${st3.modTitle}`)
 
