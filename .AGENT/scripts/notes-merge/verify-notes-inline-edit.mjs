@@ -129,5 +129,20 @@ console.log('[7] 草稿直入编辑（批次 1 下半场）')
   ok(vaultBranch && vaultBranch[0].includes('workspaceWriteFile'), '草稿保存走同一 vault 写路径（零旁路）')
 }
 
+// ---- ⑧ 批次 3：更名「笔记」+ 事件改名 + 归类入口 ----
+console.log('[8] 更名与归类入口（批次 3）')
+{
+  const am = read('src/lib/appModules.ts')
+  const ki = read('src/modules/knowledge/index.tsx')
+  const app = read('src/App.tsx')
+  ok(/id: 'knowledge', label: '笔记'/.test(am), '模块更名「笔记」')
+  ok(/id: 'editor', label: '编辑器', bar: false, startable: false/.test(am), 'editor 活动栏与启动落点均已退役')
+  ok(am.includes("return 'knowledge'"), '启动兜底 = 知识库（editor 退役后）')
+  const srcApp = app
+  ok(!srcApp.includes('kb-open-in-editor') || srcApp.includes("'kb-open-note'"), 'App 打开事件已更名 kb-open-note')
+  ok(ki.includes('kb-open-note'), 'knowledge 侧事件名同步')
+  ok(ki.includes('handleCommitCategory') && ki.includes("categoryType: 'folder'"), '右键「新建分类目录」= 顶层 mkdir + categories.json 登记（归类 = 拖进该目录）')
+}
+
 console.log(`\n${pass} PASS / ${fail} FAIL`)
 process.exit(fail === 0 ? 0 : 1)

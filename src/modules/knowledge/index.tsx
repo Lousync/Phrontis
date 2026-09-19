@@ -89,6 +89,8 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']))
   const [treeCreating, setTreeCreating] = useState<CreateIntent | null>(null)
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null)
+  /** 新建分类目录（Phase 2 批次 3 收尾）：顶层 mkdir + categories.json 登记——页面拖进该目录即归类 */
+  const [catDraft, setCatDraft] = useState<{ name: string } | null>(null)
   const vaultRootRef = useRef<string | null>(null)
   const [liveContent, setLiveContent] = useState('')
   const [locatePageId, setLocatePageId] = useState<string | null>(null)
@@ -799,6 +801,23 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       if (page) showToast({ type: 'info', message: `已移动「${name}」` })
     } catch { showToast({ type: 'error', message: '移动失败' }) }
   }, [allPages, ensureVaultRoot, refreshTreeDir])
+
+  /** 新建分类目录提交（Phase 2 批次 3 收尾）：顶层 mkdir + categories.json 登记（vault 白名单通道）。
+   *  分类 = 目录（resolveCategoryIdByPath）：页面拖进该目录即归类。仅支持顶层（子目录层级 = 普通目录嵌套）。 */
+  const handleCommitCategory = useCallback(async (rawName: string) => {
+    setCatDraft(null)
+    const name = rawName.trim()
+    if (!name) return
+    try {
+      await createKnowledgeCategory({ name, parentId: null, categoryType: 'folder' })
+      void refreshTreeDir('')
+      refreshCategories()
+      showToast({ type: 'info', message: `分类目录「${name}」已创建——把笔记拖进去即归类` })
+    } catch (e) {
+      console.error('[knowledge] create category failed:', e)
+      showToast({ type: 'error', message: e instanceof Error ? e.message : '创建失败' })
+    }
+  }, [refreshTreeDir, refreshCategories])
 
   const handleTreeCommitCreate = useCallback(async (dirRel: string, type: 'file' | 'dir' | 'knowledge', rawName: string) => {
     setTreeCreating(null)
@@ -1641,6 +1660,26 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   onCancelCreate={() => setTreeCreating(null)}
                   draftRelPaths={treeDraftRelPaths}
                 />
+                {catDraft && (
+                  <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/25 pt-[26vh]" onMouseDown={() => setCatDraft(null)}>
+                    <div
+                      className="w-[380px] max-w-[90vw] rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-lg kb-modal-in"
+                      onMouseDown={e => e.stopPropagation()}
+                    >
+                      <div className="mb-2 text-[12px] text-[var(--text-muted)]">新建分类目录（仓库顶层）——之后把笔记拖进该目录即归类</div>
+                      <input
+                        autoFocus
+                        spellCheck={false}
+                        placeholder="分类名称…"
+                        className="w-full rounded border border-[var(--accent)] bg-[var(--bg-primary)] px-2 py-1.5 text-[12.5px] text-[var(--text-primary)] outline-none"
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') { e.preventDefault(); void handleCommitCategory((e.target as HTMLInputElement).value) }
+                          else if (e.key === 'Escape') { e.preventDefault(); setCatDraft(null) }
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
                 {treeMenu && (
                   <div className="fixed inset-0 z-[70]" onMouseDown={() => setTreeMenu(null)} onContextMenu={e => { e.preventDefault(); setTreeMenu(null) }}>
                     <div
@@ -1654,6 +1693,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                           <>
                             <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'file' }) }}>新建文件</button>
                             <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'dir' }) }}>新建目录</button>
+                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setCatDraft({ name: '' }) }}>新建分类目录</button>
                             {treeMenu.node.type === 'file' && (
                               <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); handleTreeOpenFile(treeMenu.node) }}>打开</button>
                             )}
