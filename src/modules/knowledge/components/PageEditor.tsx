@@ -5,7 +5,8 @@ import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { QuizMode } from '../../../components/shared/QuizMode'
 import { extractQuizzes } from '../../../components/shared/QuizParser'
 import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem, SimilarPageHit } from '../../../types'
-import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, getKnowledgeSimilarPages } from '../../../lib/ipc'
+import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, getKnowledgeSimilarPages, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent } from '../../../lib/ipc'
+import { splitFrontmatter, joinFrontmatter } from '../../../lib/frontmatter'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
 import { uploadImageFile, insertImageAtCursor, isImageFile, IMAGE_OWNER } from '../../../lib/editorImage'
@@ -41,7 +42,7 @@ interface Props {
   onClearDirty?: () => void
   /** 请求进入沉浸阅读模式（由父级切换布局） */
   onRequestReading?: () => void
-  /** 仓库读源模式：显示「在编辑器模块中打开」跳转（读写分工） */
+  /** 仓库读源模式：正文走就地编辑（vault 写路径，Phase 1）；「在编辑器模块中打开」保留为次入口 */
   vaultMode?: boolean
   onOpenInEditor?: () => void
 }
@@ -54,7 +55,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const [fileType, setFileTypeState] = useState('')
   const [showLangMenu, setShowLangMenu] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
-  // 知识库以阅读优先:md/txt 页面打开即预览(右上角眼睛或 Ctrl+/ 切回编辑)
+  // 知识库以阅读优先:md/txt 页面打开即预览(右上角眼睛或 Ctrl+E / Ctrl+/ 切回编辑;vault 模式就地保存)
   const [preview, setPreview] = useState(true)
   const [backlinks, setBacklinks] = useState<KnowledgeBacklinkItem[]>([])
   // 相似笔记（A3-3：标题+首段语义/关键词混合召回，排除自身）
@@ -119,6 +120,11 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const isCodeFileRef = useRef(false)
   const isPdfFileRef = useRef(false)
   const vaultModeRef = useRef(vaultMode)
+  // 就地编辑（笔记合并 Phase 1，docs/notes-merge-phase1-design.md §1.1）：
+  // vault 写路径三件套 = 当前仓库 rootId + 装载时的 frontmatter 前缀 + mtime 冲突基线
+  const vaultRootRef = useRef<string | null>(null)
+  const vaultPrefixRef = useRef('')
+  const vaultMtimeRef = useRef(0)
 
   const isCodeFile = fileType !== '' && fileType !== 'md' && fileType !== 'txt' && fileType !== 'pdf' && fileType !== 'xmind'
   const isPdfFile = fileType === 'pdf' || fileType === 'xmind'
@@ -166,6 +172,26 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     if (filePath) openExternal(filePath)
   }, [page, attachmentsPath])
 
+  /** 就地编辑（vault 写路径）：装载时缓存 frontmatter 前缀与磁盘 mtime（冲突基线）。
+   *  读失败 = 文件已被外部删除 → mtime 置 0，保存时按「重建」语义不带基线（同编辑器 missing 口径）。 */
+  const loadVaultBaseline = useCallback(async (rel: string) => {
+    try {
+      if (!vaultRootRef.current) {
+        const cur = await workspaceGetCurrent()
+        vaultRootRef.current = cur?.rootId ?? null
+      }
+      const root = vaultRootRef.current
+      if (!root) return
+      const res = await workspaceReadFile(root, rel)
+      const fm = splitFrontmatter(res?.content ?? '')
+      vaultPrefixRef.current = fm?.prefix ?? ''
+      vaultMtimeRef.current = typeof res?.mtimeMs === 'number' && res.mtimeMs > 0 ? res.mtimeMs : 0
+    } catch {
+      vaultPrefixRef.current = ''
+      vaultMtimeRef.current = 0
+    }
+  }, [])
+
   const loadPage = useCallback(() => {
     Promise.all([
       getKnowledgePageById(pageId).then(p => {
@@ -181,6 +207,14 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           // 非 md/txt 类型(pdf/代码)强制编辑视图;md/txt 保持阅读优先
           const ft = (p.fileType || 'md').toLowerCase()
           setPreview(ft === 'md' || ft === '' || ft === 'txt')
+          // 就地编辑基线（vault 写路径）：可编辑文本类缓存 frontmatter 前缀 + mtime；其余类型清零
+          const vaultEditable = ft === 'md' || ft === 'txt' || (ft !== '' && ft !== 'pdf' && ft !== 'xmind' && ft !== 'html')
+          if (vaultModeRef.current && p.path && vaultEditable && p.entryKind !== 'file') {
+            void loadVaultBaseline(p.path)
+          } else {
+            vaultPrefixRef.current = ''
+            vaultMtimeRef.current = 0
+          }
         } else if (pageRef.current) {
           // 重读时页面消失 = 编辑器侧已删除或保存转草稿 → 退出阅读并说明（知识库列表已由激活刷新移除）
           onBack()
@@ -225,7 +259,45 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
   const doSave = useCallback(async (t: string, c: string) => {
     if (!pageRef.current) return
-    if (vaultMode) return  // 仓库文件模式：知识库只读导航，保存统一在编辑器模块（防任何进入编辑态的漏网写入）
+    // 就地编辑 vault 写路径（笔记合并 Phase 1）：正文走 workspaceWriteFile（与编辑器模块同一条写路径），
+    // frontmatter 前缀拼回 + mtime 冲突基线；不再复活 pre-R6 的 updateKnowledgePage 正文保存。
+    if (vaultModeRef.current) {
+      const rel = pageRef.current.path
+      const root = vaultRootRef.current
+      if (!rel || !root) {
+        showToast({ type: 'warning', message: '该页面不在仓库内，无法就地保存' })
+        return
+      }
+      try {
+        // mtime 基线：装载时记录；<=0 = 文件已被外部删除 → 不带基线（保存即重建，同编辑器 missing 口径）
+        const baseline = vaultMtimeRef.current > 0 ? vaultMtimeRef.current : undefined
+        const res = await workspaceWriteFile(root, rel, joinFrontmatter({ frontmatterPrefix: vaultPrefixRef.current || undefined, content: c }), baseline)
+        if (res?.ok) {
+          vaultMtimeRef.current = typeof res.mtimeMs === 'number' && res.mtimeMs > 0 ? res.mtimeMs : vaultMtimeRef.current
+          isDirtyRef.current = false
+          savedContentRef.current = c
+          savedTitleRef.current = t
+          setSaving(false)
+          onClearDirty?.()
+          // 双链/图谱不入图通道：vault 模式下 knowledge:updateLinks 被 DB-only 白名单拒绝（knowledgeRepo.ts:201），
+          // 图谱由主进程随文件落盘的索引重建负责（knowledgeIndex 扫描）
+        } else if (res?.conflict) {
+          // 磁盘已被外部修改：不静默覆盖 —— 放弃本地缓冲并重读（kb:file-saved 已由 ipc 包装广播给编辑器）
+          showToast({ type: 'warning', message: '文件已被外部修改，已放弃本地改动并重新加载' })
+          isDirtyRef.current = false
+          vaultMtimeRef.current = 0
+          setSaving(false)
+          onClearDirty?.()
+          loadPageRef.current()
+        } else {
+          showToast({ type: 'error', message: res?.error || '保存失败，请重试' })
+        }
+      } catch (e) {
+        console.error('[PageEditor] vault save failed:', e)
+        showToast({ type: 'error', message: '保存失败，请重试' })
+      }
+      return
+    }
     try {
       // 双链解析范围：正文 + 注解层
       const links = parseWikiLinks(c + '\n' + savedAnnotationRef.current)
@@ -349,10 +421,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
       if (isEditingInput(e)) return
 
-      // Ctrl+/ — toggle preview (md/txt only)
-      if (e.ctrlKey && e.key === '/') {
+      // Ctrl+/ 或 Ctrl+E — 切换阅读/编辑（就地编辑，vault 模式同样可用；md/txt 专属）
+      if ((e.ctrlKey && e.key === '/') || (e.ctrlKey && (e.key === 'e' || e.key === 'E'))) {
         if (isCodeFileRef.current || isPdfFileRef.current) return
-        if (vaultModeRef.current) return  // 仓库文件模式：固定阅读视图，编辑切到编辑器模块
         e.preventDefault()
         setPreview(v => !v)
         return
@@ -692,8 +763,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               <ImagePlus size={15} />
             </button>
           )}
-          {!isCodeFile && !isPdfFile && !vaultMode && (
-            <button onClick={() => setPreview(v => !v)} className={`p-1.5 rounded text-xs ${preview ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`} title={preview ? '切换到编辑 (Ctrl+/)' : '切换到预览 (Ctrl+/)'}>
+          {!isCodeFile && !isPdfFile && !isWelcomeHtml && !isArchiveFile && (
+            <button onClick={() => setPreview(v => !v)} className={`p-1.5 rounded text-xs ${preview ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`} title={preview ? '切换到编辑 (Ctrl+E / Ctrl+/)' : '切换到预览 (Ctrl+E / Ctrl+/)'}>
               {preview ? <Edit3 size={15} /> : <Eye size={15} />}
             </button>
           )}
@@ -888,7 +959,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 onMount={handleEditorMount}
                 loading={<div className="flex items-center justify-center h-full text-[var(--text-muted)]">加载编辑器...</div>}
                 options={{
-                  readOnly: vaultMode,  // 仓库文件模式：代码/PDF 附件只读展示，编辑统一在编辑器模块
+                  // 就地编辑（Phase 1）：vault 模式解除只读——欢迎页/归档非 md 文件不进 Monaco，无需再闸
+                  readOnly: false,
                   fontSize: Math.round(s.editorFontSize * zoom),
                   fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
                   lineNumbers: 'on',
