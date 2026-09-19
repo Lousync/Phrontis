@@ -667,23 +667,91 @@ async function main() {
   await evalJs(`(() => { const m = window.monaco?.editor?.getModels?.()[0]; if (m) m.setValue('# 探针还原\\n\\n正文内容。'); return true })()`)
   await sleep(600)
 
-  // G8 ★ 打字 / 移光标不触发（Monaco 的 Automatic 触发必须被「点火守卫」挡掉）
-  //      否则每敲一键就给 LLM 发一次请求 —— 与「仅手动触发、零常驻开销」的设计直接冲突。
-  await evalJs(`(() => { document.querySelector('.monaco-editor textarea')?.focus?.(); return true })()`)
-  for (let i = 0; i < 6; i++) {
-    await evalJs(`(() => {
-      const ta = document.querySelector('.monaco-editor textarea')
-      if (!ta) return false
-      ta.focus()
-      const dt = new DataTransfer(); dt.setData('text/plain', 'x')
-      ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
-      return true
+  // ---- 自动通道（2026-09-19 返工轮）：触发点闸门 / debounce / 冷却 / 开关 ----
+  // 真实输入的三条路实测（2026-09-19，各踩一遍）：
+  //   ✗ CDP Input.insertText —— 对 Monaco 的 ime-text-area 完全无效（内容不变、不报错）
+  //   ✗ document.execCommand('insertText') —— 在 ime-text-area 上返回 false
+  //   ✓ CDP Input.dispatchKeyEvent —— 走浏览器输入管线，产生受信任按键 + 默认行为，
+  //     Monaco 的 TextAreaInput 正常感知。**逐字符发**，且必须校验内容真的变了，
+  //     否则又是假信号（G9/G11 前两轮就是这么白挂的）。
+  let lastViewLen = -1
+  const viewLen = () => evalJs(`(document.querySelector('.monaco-editor .view-lines')?.textContent || '').length`)
+  // 模拟「在文末打字」：直接驱动 Monaco model（window.__kb_monaco 由 monaco-setup 挂出，
+  // 见该文件注释 —— CDP 的三条输入路在 Electron 沙箱下全进不了 Monaco，这是唯一可靠路）。
+  // applyEdits 会真实触发 onDidChangeModelContent → 自动通道的 scheduleAuto，与用户打字同源。
+  const typeInto = async (text) => {
+    const r = await evalJs(`(async () => {
+      const m = window.__kb_monaco
+      if (!m) return { err: 'window.__kb_monaco 不存在' }
+      const model = m.editor.getModels().find((x) => x.getLanguageId() === 'markdown')
+      if (!model) return { err: '无 markdown model' }
+      const ed = m.editor.getEditors()[0]
+      const fr = model.getFullModelRange()
+      model.applyEdits([{ range: { startLineNumber: fr.endLineNumber, startColumn: fr.endColumn, endLineNumber: fr.endLineNumber, endColumn: fr.endColumn }, text: ${JSON.stringify(text)} }])
+      const pos = model.getPositionAt(model.getValueLength())
+      ed?.setPosition(pos)
+      return { ok: true }
     })()`)
-    await sleep(250)
+    const len = await viewLen()
+    const changed = len !== lastViewLen
+    lastViewLen = len
+    if (r?.err) console.log(`  ⚠️ typeInto 异常: ${r.err}`)
+    else if (!changed) console.log(`  ⚠️ typeInto 未生效（view-lines 长度未变：${len}）—— 本组结果无效`)
+    return changed
   }
+  lastViewLen = await viewLen()
+
+  // G8 ★ 词中间打字不触发（触发点闸门 —— 成本闸的核心）
+  await typeInto('积分')
   const g8rose = await waitBusy(true, 2500)
   ok(g8rose === false,
-    'G8 ★ 打字不触发请求（点火守卫挡住 Monaco 自动触发）', `busyRose=${g8rose}`)
+    'G8 ★ 词中间打字不触发请求（触发点闸门生效，省 token）', `busyRose=${g8rose}`)
+
+  // G9 ★ 打字到句读处 → 停顿 → 自动出建议（对标 VS Code / Cursor 的核心体验）
+  await typeInto('。')
+  const g9 = await waitBusy(true, 3500)
+  ok(g9, 'G9 ★ 句读后停顿自动触发（无需按键：debounce 800ms + 触发点命中）', `busy=${await busyNow()}`)
+  await waitBusy(false, 16000)
+
+  // G11 冷却：连续几次自动建议没人采纳 → 暂停自动
+  //      （注意结算滞后一轮：第 N 次触发前才结算第 N-1 次，故需要多打几轮）
+  for (let i = 0; i < 5; i++) {
+    await typeInto('。')
+    await sleep(1300)
+  }
+  await waitBusy(false, 16000)
+  const g11 = await evalJs(`!!document.querySelector('[data-wb="inlinePaused"]')`)
+  ok(g11, 'G11 ★ 连续未采纳后暂停自动（状态栏出现「建议已暂停 · Alt+A 唤醒」）', `paused=${g11}`)
+
+  // G11b 手动唤醒：Alt+A 是明确的「我现在要」→ 清除暂停
+  await evalJs(`(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', altKey: true, bubbles: true, cancelable: true })); return true })()`)
+  await sleep(600)
+  const g11b = await evalJs(`!!document.querySelector('[data-wb="inlinePaused"]')`)
+  ok(g11b === false, 'G11b ★ Alt+A 唤醒自动（暂停提示消失）', `paused=${g11b}`)
+  await waitBusy(false, 16000)
+
+  // G12 关掉「自动触发」开关 → 打字不再自动请求（开关真挡在自动通道口）
+  await evalJs(`(async () => {
+    try { await window.api.setSetting('aiAssistantInlineSuggestAuto', false) } catch {}
+    window.dispatchEvent(new Event('settings-imported'))
+    return true
+  })()`)
+  await sleep(1400)
+  await typeInto('这样写就对了。')
+  const g12rose = await waitBusy(true, 2500)
+  ok(g12rose === false, 'G12 ★ 关自动后打字不再自动请求（设置项真生效）', `busyRose=${g12rose}`)
+
+  // G12b 关自动 ≠ 关功能：手动 Alt+A 仍然可用（两条通道互相独立）
+  await evalJs(`(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', altKey: true, bubbles: true, cancelable: true })); return true })()`)
+  const g12b = await waitBusy(true, 3000)
+  ok(g12b, 'G12b 关自动后手动 Alt+A 仍可用（自动 / 手动两条通道独立）', `busy=${await busyNow()}`)
+  await waitBusy(false, 16000)
+  await evalJs(`(async () => {
+    try { await window.api.setSetting('aiAssistantInlineSuggestAuto', true) } catch {}
+    window.dispatchEvent(new Event('settings-imported'))
+    return true
+  })()`)
+  await sleep(1000)
 
   // G6 开关关掉 → 按钮消失 + Alt+A 不再触发
   // ★ 手法要点：SettingsContext 只在 'settings-imported' 事件里重拉设置（见 src/lib/SettingsContext.tsx），

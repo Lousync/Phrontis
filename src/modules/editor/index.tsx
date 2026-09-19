@@ -201,12 +201,16 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   // ---- 禅模式（docs/zen-mode-design.md）----
   const { s: zenSettings, update: zenUpdate } = useSettings()
 
-  // ---- B4 内联建议（DP 方案 §5）：Alt+A 手动触发 AI 续写；请求中状态栏微标 ----
-  /** 开关（设置 aiAssistantInlineSuggest）：关时快捷键完全不发起请求 */
+  // ---- B4 内联建议（DP 方案 §5）：打字停顿自动续写 + Alt+A 手动；请求中状态栏微标 ----
+  /** 开关（设置 aiAssistantInlineSuggest）：关时快捷键与自动通道都不发起请求 */
   const inlineSuggestOn = zenSettings.aiAssistantInlineSuggest !== false
   // 同步引用：keydown 闭包只挂一次，读 ref 拿最新开关值（避免每次改设置重挂监听）
   const inlineSuggestOnRef = useRef(inlineSuggestOn)
   inlineSuggestOnRef.current = inlineSuggestOn
+  /** 自动触发开关（设置 aiAssistantInlineSuggestAuto）：关 = 仅手动 Alt+A / 胶囊按钮 */
+  const inlineSuggestAuto = zenSettings.aiAssistantInlineSuggestAuto !== false
+  /** 自动暂停态（连续若干次建议没被采纳 → 暂停，状态栏给一条「Alt+A 唤醒」提示） */
+  const [inlinePaused, setInlinePaused] = useState(false)
   /** 请求中（状态栏微标；provider 经 MonacoPane 的模块级监听回传） */
   const [inlineBusy, setInlineBusy] = useState(false)
   const zenLevelRef = useRef(zenLevel)
@@ -1704,7 +1708,9 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                       layoutKey={zenLevel}
                       onPasteImage={activeDoc?.language === 'markdown' ? handlePasteImageFile : undefined}
                       inlineSuggestEnabled={inlineSuggestOn}
+                      inlineSuggestAuto={inlineSuggestAuto}
                       onInlineSuggestBusy={setInlineBusy}
+                      onInlineSuggestPaused={setInlinePaused}
                     />
                   </Suspense>
                 </div>
@@ -1783,6 +1789,11 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                   <span className="kb-item-in flex items-center gap-1 text-[var(--accent)]" data-wb="inlineBusy">
                     <Loader2 size={10} className="animate-spin" />
                     建议生成中
+                  </span>
+                )}
+                {!inlineBusy && inlinePaused && inlineSuggestOn && inlineSuggestAuto && (
+                  <span className="kb-item-in text-[var(--text-tertiary)]" data-wb="inlinePaused" title="连续几次建议都没被采纳，已暂停自动续写；按 Alt+A 或点胶囊里的「建议」唤醒">
+                    建议已暂停 · Alt+A 唤醒
                   </span>
                 )}
                 {fullContent(activeDoc) !== savedFullContent(activeDoc) && <span className="kb-item-in text-[var(--accent)]">未保存</span>}

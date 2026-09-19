@@ -82,10 +82,12 @@ export async function runInlineSuggest(req: InlineSuggestRequest): Promise<Inlin
       title: pickFrontmatterTitle(text),
     })
 
-    // 模型解析：设置 agentInlineSuggestModelId（'pid:mid'）> 请求透传 > 默认链
+    // 模型解析：设置 aiAssistantInlineSuggestModelId（'pid:mid'）> 请求透传 > 默认链
+    //   ★ 内联建议建议单独指定便宜/快的模型（设置 → 编辑器 → AI 内联建议）：
+    //     它的调用频次远高于对话，别跟对话主模型共用贵模型。
     let providerId = req.providerId
     let modelId = req.modelId
-    const configured = String(getSettingReader()('agentInlineSuggestModelId') ?? '').trim()
+    const configured = String(getSettingReader()('aiAssistantInlineSuggestModelId') ?? '').trim()
     if (configured) {
       const ci = configured.indexOf(':')
       providerId = ci > 0 ? configured.slice(0, ci) : undefined

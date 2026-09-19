@@ -7,6 +7,8 @@ import { bindEditorTheme, applyEditorTheme, setEditorThemeVariant } from '../../
 import '../../../lib/monaco-setup'
 import { dimMarkdownText, markdownWikiHighlights, wikiTargetTitle, type DimCls } from '../../../lib/markdownDim'
 import { getKnowledgePages, aiInlineSuggestRun, aiInlineSuggestCancel } from '../../../lib/ipc'
+// B4 自动触发闸门（纯函数：触发点判定 / 冷却记账 / 常量；零依赖便于契约脚本 import）
+import { AUTO_DEBOUNCE_MS, INITIAL_AUTO_STATE, afterAutoResult, canAutoRequest, isTriggerPoint, type AutoState } from '../../../lib/inlineSuggestTrigger'
 import { MonacoErrorBoundary } from '../../../components/shared/MonacoErrorBoundary'
 import type { KnowledgePage } from '../../../types'
 import type { EditorDoc } from '../types'
@@ -28,8 +30,12 @@ interface Props {
   onPasteImage?: (file: File) => Promise<string | null>
   /** B4 内联建议开关（设置 aiAssistantInlineSuggest；关时快捷键不发起请求） */
   inlineSuggestEnabled?: boolean
+  /** B4 自动触发开关（设置 aiAssistantInlineSuggestAuto；关 = 仅手动 Alt+A / 胶囊按钮） */
+  inlineSuggestAuto?: boolean
   /** B4 请求态回调（true = 正在生成），供编辑器状态栏微标 */
   onInlineSuggestBusy?: (busy: boolean) => void
+  /** B4 自动暂停态回调（连续若干次建议没被采纳 → 暂停自动，直到手动唤醒） */
+  onInlineSuggestPaused?: (paused: boolean) => void
 }
 
 export interface MonacoPaneHandle {
@@ -74,7 +80,7 @@ async function getPagesCached(): Promise<KnowledgePage[]> {
 
 /** 编辑器「大纲」导航句柄透传 */
 export const MonacoPane = forwardRef<MonacoPaneHandle, Props>(function MonacoPane(
-  { doc, onChange, dimEnabled = true, layoutKey = 0, zen = false, typewriter = false, zenPaper = true, onPasteImage, inlineSuggestEnabled = true, onInlineSuggestBusy },
+  { doc, onChange, dimEnabled = true, layoutKey = 0, zen = false, typewriter = false, zenPaper = true, onPasteImage, inlineSuggestEnabled = true, inlineSuggestAuto = true, onInlineSuggestBusy, onInlineSuggestPaused },
   ref,
 ) {
   const hostRef = useRef<MonacoPaneHandle | null>(null)
@@ -106,12 +112,12 @@ export const MonacoPane = forwardRef<MonacoPaneHandle, Props>(function MonacoPan
       </div>
     )
   }
-  return <MonacoHost ref={hostRef} doc={doc} onChange={onChange} dimEnabled={dimEnabled} layoutKey={layoutKey} zen={zen} typewriter={typewriter} zenPaper={zenPaper} onPasteImage={onPasteImage} inlineSuggestEnabled={inlineSuggestEnabled} onInlineSuggestBusy={onInlineSuggestBusy} />
+  return <MonacoHost ref={hostRef} doc={doc} onChange={onChange} dimEnabled={dimEnabled} layoutKey={layoutKey} zen={zen} typewriter={typewriter} zenPaper={zenPaper} onPasteImage={onPasteImage} inlineSuggestEnabled={inlineSuggestEnabled} inlineSuggestAuto={inlineSuggestAuto} onInlineSuggestBusy={onInlineSuggestBusy} onInlineSuggestPaused={onInlineSuggestPaused} />
 })
 
 /** 有效文档的 Monaco 宿主；hooks 集中在子组件，doc 为 null 时父组件卸载它（满足 hooks 规则） */
-const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Props['onChange']; dimEnabled: boolean; layoutKey: number; zen: boolean; typewriter: boolean; zenPaper: boolean; onPasteImage?: Props['onPasteImage']; inlineSuggestEnabled: boolean; onInlineSuggestBusy?: Props['onInlineSuggestBusy'] }>(
-  function MonacoHost({ doc, onChange, dimEnabled, layoutKey, zen, typewriter, zenPaper = true, onPasteImage, inlineSuggestEnabled = true, onInlineSuggestBusy }, ref) {
+const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Props['onChange']; dimEnabled: boolean; layoutKey: number; zen: boolean; typewriter: boolean; zenPaper: boolean; onPasteImage?: Props['onPasteImage']; inlineSuggestEnabled: boolean; inlineSuggestAuto: boolean; onInlineSuggestBusy?: Props['onInlineSuggestBusy']; onInlineSuggestPaused?: Props['onInlineSuggestPaused'] }>(
+  function MonacoHost({ doc, onChange, dimEnabled, layoutKey, zen, typewriter, zenPaper = true, onPasteImage, inlineSuggestEnabled = true, inlineSuggestAuto = true, onInlineSuggestBusy, onInlineSuggestPaused }, ref) {
     const dimEnabledRef = useRef(dimEnabled)
     dimEnabledRef.current = dimEnabled
     /** P3 粘贴拦截回调透传（paste 监听器只挂一次，不随 prop 变化重挂） */
@@ -135,6 +141,10 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Prop
     inlineOnRef.current = inlineSuggestEnabled
     const inlineBusyRef = useRef<Props['onInlineSuggestBusy']>(onInlineSuggestBusy)
     inlineBusyRef.current = onInlineSuggestBusy
+    // 自动通道开关 + 暂停态回调：模块级状态（provider/debounce 闭包读不到 React 闭包）
+    setInlineAutoMode(inlineSuggestAuto)
+    const inlinePausedRef = useRef<Props['onInlineSuggestPaused']>(onInlineSuggestPaused)
+    inlinePausedRef.current = onInlineSuggestPaused
     /** B4 触发入口（onMount 内装配，供 handle.triggerInlineSuggest 调用） */
     const triggerInlineRef = useRef<(() => boolean) | null>(null)
 
@@ -277,11 +287,11 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Prop
       // ---- B4 内联建议（AI 续写 ghost text）----
       // provider 注册一次（language 级，同 installWikiCompletion）；触发入口按编辑器实例装配。
       installInlineCompletion(monaco)
-      // 触发入口：Alt+A / 胶囊按钮 → 走 Monaco 内建命令 editor.action.inlineSuggest.trigger。
+      // 触发入口：Alt+A / 胶囊按钮 / 自动通道 → 走 Monaco 内建命令 editor.action.inlineSuggest.trigger。
       // 该命令的 precondition 只有 EditorContextKeys.writable（已核实产物 monaco-lFGDj3sW.js
       // 的 TriggerInlineSuggestionAction），不要求 inlineSuggestionVisible → 手动触发可行。
       // explicit 默认 true：显式请求的 ghost text 在打字/移光标时自动消失，不必自己管生命周期。
-      triggerInlineRef.current = (): boolean => {
+      const fireInlineTrigger = (): boolean => {
         if (!inlineOnRef.current) return false
         const model = editor.getModel()
         if (!model || model.getLanguageId() !== 'markdown') return false
@@ -294,11 +304,50 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Prop
           .catch(() => { /* 触发失败静默：不打断写作 */ })
         return true
       }
+      // 手动入口（Alt+A / 胶囊按钮）：显式「我现在要」→ 唤醒自动 + 重置冷却计数，
+      // 且**不看触发点判定**（用户说了才算）。
+      triggerInlineRef.current = (): boolean => {
+        settleAutoOutcome()
+        inlineAutoState = { ...INITIAL_AUTO_STATE }
+        inlinePausedListener?.(false)
+        return fireInlineTrigger()
+      }
+
+      // ---- 自动通道：停顿 → 触发点判定 → 冷却检查 → 触发 ----
+      // 为什么不用 Monaco 自己的 Automatic 触发：那个没有 debounce 与断点概念，
+      // 每敲一键都算一次「该续写」，会把成本闸整个绕过（provider 侧仍会挡掉它）。
+      let autoTimer: ReturnType<typeof setTimeout> | null = null
+      const scheduleAuto = (): void => {
+        if (autoTimer) clearTimeout(autoTimer)
+        autoTimer = setTimeout(() => {
+          autoTimer = null
+          if (!inlineOnRef.current || !inlineAutoMode) return
+          settleAutoOutcome()                          // 先结算上一次自动建议的采纳情况
+          if (!canAutoRequest(inlineAutoState)) return  // 冷却中：连续没人采纳，别再打扰
+          const model = editor.getModel()
+          if (!model || model.getLanguageId() !== 'markdown') return
+          const text = model.getValue()
+          if (!text.trim()) return
+          const pos = editor.getPosition()
+          if (!pos) return
+          const verdict = isTriggerPoint(text, model.getOffsetAt(pos))
+          if (!verdict.hit) return
+          inlineAutoPending = true                     // 标记「这次自动请求待结算」
+          fireInlineTrigger()
+        }, AUTO_DEBOUNCE_MS)
+      }
+      const contentSub = editor.onDidChangeModelContent(() => { scheduleAuto() })
+
       // 请求态 → 宿主回调（状态栏微标）。模块级监听，卸载时注销。
       setInlineSuggestBusyListener((busy) => inlineBusyRef.current?.(busy))
+      // 自动暂停态 → 宿主回调（状态栏「已暂停 · Alt+A 唤醒」提示）
+      setInlinePausedListener((paused) => inlinePausedRef.current?.(paused))
       editor.onDidDispose(() => {
+        if (autoTimer) clearTimeout(autoTimer)
+        contentSub.dispose()
         triggerInlineRef.current = null
         setInlineSuggestBusyListener(null)
+        setInlinePausedListener(null)
         cancelInlineSuggestInFlight()
       })
 
@@ -491,6 +540,42 @@ const INLINE_UI_TIMEOUT_MS = 12000
 function armInlineSuggest(): void {
   inlineArmedAt = Date.now()
 }
+
+/**
+ * 自动触发状态（成本优化 ③ 冷却）与记账位。
+ *
+ * 语义：**每一次自动请求在被下一次自动请求「结算」时**，看它有没有被采纳；
+ * 连续 AUTO_PAUSE_STREAK 次没人采纳 → 暂停自动（这个时段显然不需要它），
+ * 直到用户手动 Alt+A / 点胶囊按钮（那是明确的「我现在要」）才唤醒。
+ * 手动请求不进这套账（用户主动要的，不该被冷却影响）。
+ */
+let inlineAutoState: AutoState = { ...INITIAL_AUTO_STATE }
+/** 上一次自动请求是否待结算 */
+let inlineAutoPending = false
+/** 上一次建议是否被采纳（由 provider 的 handleEndOfLifetime 写入） */
+let inlineLastAccepted = false
+/** 自动模式开关（宿主每次渲染同步进来） */
+let inlineAutoMode = true
+/** 暂停态广播（宿主状态栏消费） */
+let inlinePausedListener: ((paused: boolean) => void) | null = null
+
+/** 宿主同步自动模式开关（关 = 仅手动） */
+export function setInlineAutoMode(on: boolean): void {
+  inlineAutoMode = on
+}
+/** 宿主注册暂停态监听（卸载时传 null 注销） */
+export function setInlinePausedListener(fn: ((paused: boolean) => void) | null): void {
+  inlinePausedListener = fn
+}
+
+/** 结算上一次自动请求的采纳结果（自动触发前 / 手动触发前调用） */
+function settleAutoOutcome(): void {
+  if (!inlineAutoPending) return
+  inlineAutoPending = false
+  inlineAutoState = afterAutoResult(inlineAutoState, inlineLastAccepted)
+  inlineLastAccepted = false
+  inlinePausedListener?.(inlineAutoState.paused)
+}
 /**
  * 请求态广播（模块级）：provider 是模块级函数、拿不到 React 闭包，
  * 故用回调注册表把「开始 / 结束」播给当前挂载的宿主（编辑器状态栏微标消费）。
@@ -589,6 +674,13 @@ function installInlineCompletion(monaco: typeof Monaco, reinstall = false): void
     },
     // 接口要求（0.56）：disposeInlineCompletions 为**必填**方法（不是可选的 free*）
     disposeInlineCompletions: () => { /* 无额外资源需释放 */ },
+    /**
+     * 建议「生命终结」时被调用 —— 唯一可靠的采纳信号（0.56 接口）。
+     * Accepted=0 / Rejected=1 / Ignored=2；只认 Accepted，供冷却记账（见 inlineAutoState）。
+     */
+    handleEndOfLifetime: (_c, _i, reason) => {
+      if (reason?.kind === monaco.languages.InlineCompletionEndOfLifeReasonKind.Accepted) inlineLastAccepted = true
+    },
   })
 }
 

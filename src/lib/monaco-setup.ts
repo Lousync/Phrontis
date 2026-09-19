@@ -26,6 +26,12 @@ import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker'
 // Electron 环境下必须从本地 node_modules 加载，禁用 CDN
 loader.config({ monaco })
 
+// 探针/诊断入口：把 monaco 实例挂到 window（同一模块实例的引用，零成本、无副作用）。
+// 为什么必须挂：CDP 的 Input.insertText / dispatchKeyEvent / execCommand 三条路在
+// Electron 沙箱下都进不了 Monaco 的 ime-text-area（2026-09-19 实测三种全失败、且不报错），
+// 探针要模拟"用户打字"只能直接驱动 model —— 而 monaco 实例在 React 组件内部，不挂出来拿不到。
+;(window as unknown as Record<string, unknown>).__kb_monaco = monaco
+
 function hexLuminance(hex: string): number {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
   if (!m) return 0

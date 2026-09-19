@@ -10,10 +10,16 @@
 
 // ===== 常量 =====
 
-/** 光标前取多少字符作为「已写上下文」 */
-export const INLINE_BEFORE_LIMIT = 2000
-/** 光标后取多少字符作为「后文线索」 */
-export const INLINE_AFTER_LIMIT = 500
+/**
+ * 光标前取多少字符作为「已写上下文」。
+ *
+ * 成本口径（2026-09-19 实测）：续写只需最近一小段，2000 → 800 让单次输入从
+ * ≈2300-3450 token 降到 ≈1100-1650 token（省 ~55%）。给的越多并不会更准，
+ * 反而稀释最近的上下文。
+ */
+export const INLINE_BEFORE_LIMIT = 800
+/** 光标后取多少字符作为「后文线索」（同样收窄：500 → 300） */
+export const INLINE_AFTER_LIMIT = 300
 /** 单条建议的字数上限（提示模型 + 兜底截断） */
 export const INLINE_SUGGEST_MAX_CHARS = 600
 /**
@@ -71,6 +77,55 @@ export function sliceCursorWindow(
   }
 }
 
+/**
+ * 段落锚定窗口（成本优化 ②）：起点对齐「段落边界」，而不是固定回溯 N 字符。
+ *
+ * 为什么不直接用上面的滑动窗口（`at - 800`）：
+ *   DeepSeek 的上下文硬盘缓存要求**两个请求的前缀从第 0 个 token 起完全相同**
+ *   （官方文档：中间开始的重复不算命中）。滑动窗口每敲一个字起点就右移一格 →
+ *   前缀首 token 变化 → 缓存 **100% 不命中**：输入按未命中价计费，而命中价差 30 倍
+ *   （flash 1.5 元/M vs 0.05 元/M）。
+ *   锚定到段落起点后，同一段内连续打字时起点不动 → 前缀稳定 → 命中绝大部分输入。
+ *
+ * 锚点选择：从光标所在段落往上逐段扩展，只要没超出 before 上限就继续 ——
+ *   取到的是「不超过上限的最靠前段落起点」，既给足上下文又天然落在段落边界上。
+ * 退化：单段就超过上限时（长段落），退回滑动窗口 —— 缓存不再命中，但语义仍正确。
+ */
+export function sliceParagraphWindow(
+  text: string,
+  offset: number,
+  before = INLINE_BEFORE_LIMIT,
+  after = INLINE_AFTER_LIMIT,
+): CursorWindow {
+  const s = String(text ?? '')
+  const total = s.length
+  const at = Math.max(0, Math.min(Number.isFinite(offset) ? Math.floor(offset) : 0, total))
+  const lim = Math.max(0, before)
+
+  // 段落起点 = 文档开头 + 每个 \n 之后（空行分隔的段落在锚定意义上等价，多锚几个更细）
+  const starts: number[] = [0]
+  const head = s.slice(0, at)
+  for (let i = 0; i < head.length; i++) if (head[i] === '\n') starts.push(i + 1)
+
+  // 从光标所在段落往上逐段扩展：只要没超出上限就继续往前挪锚点
+  //   ⚠️ anchor 必须初始化为 -1（无效），不能用 at —— 否则「单段就超上限」时
+  //   会误判成「at 这个锚点合法」→ from = at → 窗口退化成空串（契约 J15c/J15e 抓到）。
+  let anchor = -1
+  for (let i = starts.length - 1; i >= 0; i--) {
+    const st = starts[i]
+    if (at - st > lim) break
+    anchor = st
+  }
+  const from = anchor >= 0 ? anchor : Math.max(0, at - lim)
+  const to = Math.min(total, at + Math.max(0, after))
+  return {
+    head: s.slice(from, at),
+    tail: s.slice(at, to),
+    truncatedHead: from > 0,
+    truncatedTail: to < total,
+  }
+}
+
 // ===== frontmatter title =====
 
 /**
@@ -94,7 +149,8 @@ export function pickFrontmatterTitle(text: string): string {
  * @param ctx 光标上下文
  */
 export function buildInlinePrompt(ctx: InlineContext): { system: string; user: string } {
-  const win = sliceCursorWindow(ctx.text, ctx.offset)
+  // 段落锚定窗口（不是滑动）—— 见 sliceParagraphWindow 的缓存说明
+  const win = sliceParagraphWindow(ctx.text, ctx.offset)
   const title = String(ctx.title ?? '').trim()
 
   const system = [

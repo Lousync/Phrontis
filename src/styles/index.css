@@ -198,6 +198,13 @@ input:focus, textarea:focus, select:focus {
 .kb-md-link   { color: var(--accent) !important; text-decoration: underline; text-underline-offset: 2px; }
 .kb-md-wiki   { color: var(--accent) !important; }
 
+/* ===== B4 内联建议（AI 续写 ghost text）=====
+   Monaco 内建 ghost text 的类名就是 `ghost-text`（见 monaco 的 ghostTextView.js），
+   颜色由主题的 editorGhostText 决定（已是灰色），这里只统一为斜体 ——
+   与 VS Code / Cursor 的观感一致（斜体一眼区分「这不是我写的字」）。
+   注：动效由 Monaco 内建（ghost 淡入），插不进铁律 13 的令牌体系，属既有例外。 */
+.monaco-editor .ghost-text { font-style: italic; }
+
 /* ===== Markdown 预览样式 ===== */
 .prose-content h1 { font-size: 1.75rem; font-weight: 700; margin: 1.25rem 0 0.5rem; color: var(--text-primary); padding-bottom: 0.35rem; border-bottom: var(--divider-style); }
 .prose-content h2 { font-size: 1.4rem; font-weight: 600; margin: 1rem 0 0.4rem; color: var(--text-primary); padding-bottom: 0.25rem; border-bottom: var(--heading-rule); }

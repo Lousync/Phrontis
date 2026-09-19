@@ -47,7 +47,7 @@ export function ShortcutsView() {
         <Group anchor="shortcuts.editorModule" label="编辑器模块">
           <Row keys={['Ctrl', 'S']} desc="保存当前文件" />
           <Row keys={['Ctrl', 'Shift', 'S']} desc="保存全部打开文件" />
-          <Row keys={['Alt', 'A']} desc="AI 续写建议（Markdown；Tab 采纳 / Esc 拒绝）" />
+          <Row keys={['Alt', 'A']} desc="AI 内联建议：立即要一条（Markdown；Tab 采纳 / Esc 拒绝；平时停顿会自动出）" />
           <Row keys={['Ctrl', 'F']} desc="PDF 阅读器内搜索" />
           <Row keys={['PageDown', '空格']} desc="PDF 下一页" />
           <Row keys={['PageUp']} desc="PDF 上一页" />

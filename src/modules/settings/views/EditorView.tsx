@@ -1,11 +1,31 @@
+import { useEffect, useState } from 'react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { FONT_OPTIONS, FONT_CSS_MAP } from '../../../lib/settings'
 import { SettingSelect } from '../components/SettingSelect'
 import { NumberField } from '../components/fields/NumberField'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
+import { llmListProviders } from '../../../lib/ipc'
+import { prettyModelName } from '../../../lib/modelNames'
 
 export function EditorView() {
   const { s, update } = useSettings()
+  /** 内联建议模型下拉的候选：已启用供应商的全部模型（providerId:modelId） */
+  const [modelOptions, setModelOptions] = useState<Array<{ id: string; label: string; desc?: string }>>([])
+  useEffect(() => {
+    let alive = true
+    void llmListProviders()
+      .then(r => {
+        if (!alive) return
+        const ps = r?.providers ?? []
+        setModelOptions(ps.filter(p => p.enabled).flatMap(p => p.models.map(m => ({
+          id: `${p.id}:${m}`,
+          label: prettyModelName(m),
+          desc: p.name,
+        }))))
+      })
+      .catch(() => { /* 未配置供应商 → 只留「跟随全局默认」，不是错误 */ })
+    return () => { alive = false }
+  }, [])
 
   return (
     <div>
@@ -91,6 +111,48 @@ export function EditorView() {
               { id: 'hidden', label: '隐藏式', desc: '只保留当前目录链，更干净' },
             ]}
           />
+        </div>
+      </div>
+
+      {/* AI 内联建议（B4）：打字停顿自动续写 + 模型选型 */}
+      <div className="mt-8" data-setting-anchor="editor.inlineSuggest">
+        <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-3">AI 内联建议</h3>
+        <label className="flex items-center justify-between gap-4 cursor-pointer max-w-md">
+          <span className="text-[13px] text-[var(--text-primary)]">启用内联建议</span>
+          <SettingSwitch
+            checked={s.aiAssistantInlineSuggest !== false}
+            onChange={(v) => update('aiAssistantInlineSuggest', v)}
+          />
+        </label>
+        <div data-setting-anchor="editor.inlineSuggestAuto" className={`mt-2.5 max-w-md ${s.aiAssistantInlineSuggest === false ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+          <label className="flex items-center justify-between gap-4 cursor-pointer">
+            <span className="text-[13px] text-[var(--text-primary)]">自动触发（停 0.8 秒出建议）</span>
+            <SettingSwitch
+              checked={s.aiAssistantInlineSuggestAuto !== false}
+              onChange={(v) => update('aiAssistantInlineSuggestAuto', v)}
+            />
+          </label>
+        </div>
+        <p className="text-[11px] text-[var(--text-muted)] mt-1.5 mb-3 leading-relaxed max-w-md">
+          自动触发只在自然断点（句读、换行、写完一个词之后）发起，词中间不打扰；连续几次建议都没采纳会自动暂停，
+          按 <span className="font-mono">Alt+A</span> 或点编辑器右上角胶囊里的「建议」唤醒。关掉自动即只在手动触发时请求。
+        </p>
+        <div data-setting-anchor="editor.inlineSuggestModel" className={`max-w-md ${s.aiAssistantInlineSuggest === false ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+          <SettingSelect
+            title="内联建议模型"
+            description="续写用的模型。它的调用频次远高于对话，建议单独指定便宜、快的模型"
+            value={typeof s.aiAssistantInlineSuggestModelId === 'string' ? s.aiAssistantInlineSuggestModelId : ''}
+            onChange={(id) => update('aiAssistantInlineSuggestModelId', id)}
+            options={[
+              { id: '', label: '跟随全局默认模型', desc: '用设置 → AI 工具 → 模型里的默认模型', isDefault: true },
+              ...modelOptions,
+            ]}
+          />
+          {modelOptions.length === 0 && (
+            <p className="text-[11px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
+              还没配置模型供应商 —— 到「AI 工具 → 模型」里加一个，这里就能选了。
+            </p>
+          )}
         </div>
       </div>
     </div>

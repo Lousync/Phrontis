@@ -29,8 +29,13 @@ import {
 } from '../../../electron/lib/aiAssistant/perceptionBudget.ts'
 import {
   buildInlinePrompt, isValidSuggestion, normalizeInlineSuggestion,
-  pickFrontmatterTitle, sliceCursorWindow, INLINE_SUGGEST_MAX_CHARS,
+  pickFrontmatterTitle, sliceCursorWindow, sliceParagraphWindow,
+  INLINE_SUGGEST_MAX_CHARS, INLINE_BEFORE_LIMIT, INLINE_AFTER_LIMIT,
 } from '../../../electron/lib/aiAssistant/inlineSuggestCore.ts'
+import {
+  AUTO_DEBOUNCE_MS, AUTO_PAUSE_STREAK, INITIAL_AUTO_STATE,
+  afterAutoResult, canAutoRequest, isTriggerPoint, reviveByManual,
+} from '../../../src/lib/inlineSuggestTrigger.ts'
 import { composeContextWithDigest } from '../../../electron/lib/agentCompressCore.ts'
 import { stripComments } from '../shared/strip-comments.mjs'
 
@@ -53,6 +58,8 @@ const SRC_CORE = stripComments(read('electron/lib/agentCompressCore.ts'))
 const SRC_CHATBODY = stripComments(read('src/components/shared/AssistantPanel/ChatBody.tsx'))
 const SRC_SIDEBAR = stripComments(read('src/components/shared/AssistantPanel/index.tsx'))
 const SRC_SETTINGS = stripComments(read('src/lib/settings.ts'))
+/** B4 自动触发闸门（渲染层纯函数区） */
+const SRC_TRIGGER = stripComments(read('src/lib/inlineSuggestTrigger.ts'))
 
 // ===================== A 组：纯函数 =====================
 
@@ -572,8 +579,8 @@ ok(pillCount === 1,
 // J11 设置键
 ok(/aiAssistantInlineSuggest:\s*\{[^}]*default:\s*true/.test(SRC_SETTINGS),
   'J11a ★ 设置键 aiAssistantInlineSuggest 默认 on（手动触发无常驻 token 压力）', '')
-ok(/aiAssistantInlineSuggest:\s*\{[^}]*section:\s*'aiTools'/.test(SRC_SETTINGS),
-  'J11b 设置键落在 aiTools 段（与 aiAssistantPerception 同段）', '')
+ok(/aiAssistantInlineSuggest:\s*\{[^}]*section:\s*'editor'/.test(SRC_SETTINGS),
+  'J11b 总开关落在 editor 段（与自动触发 / 模型两项同页渲染，避免同一开关两处出现）', '')
 // 上游写的点号键名在本项目不成立（SETTINGS 全扁平键）
 ok(!/aiAssistant\.inlineSuggest/.test(SRC_SETTINGS) && !/inlineSuggest:/.test(SRC_SETTINGS),
   'J11c ★ 不得出现上游的点号键写法（本项目 SETTINGS 全扁平键）', '')
@@ -622,6 +629,134 @@ ok(/installInlineCompletion\(monaco,\s*true\)/.test(SRC_MONACO) && /inlineProvid
 const iReinstall = SRC_MONACO.indexOf('installInlineCompletion(monaco, true)')
 ok(iReinstall > 0 && iReinstall < iTrig,
   `J14i 重注册在 trigger 之前（reinstall@${iReinstall} < trigger@${iTrig}）`, '')
+
+// ===================== J15：自动触发 + 三条成本优化（2026-09-19 返工轮） =====================
+
+// J15a 窗口收窄（成本优化 ①）
+ok(INLINE_BEFORE_LIMIT === 800 && INLINE_AFTER_LIMIT === 300,
+  `J15a ★ 上下文窗口 800/300（成本优化 ①：原 2000/500，单次输入省 ~55%）`,
+  `before=${INLINE_BEFORE_LIMIT} after=${INLINE_AFTER_LIMIT}`)
+
+// J15b 段落锚定（成本优化 ②）：prompt 必须走锚定窗口而不是滑动窗口
+ok(/sliceParagraphWindow\(ctx\.text,\s*ctx\.offset\)/.test(SRC_INLINE_CORE),
+  'J15b ★ buildInlinePrompt 走段落锚定窗口（滑动窗口会让前缀首 token 变化 → 缓存永不命中）', '')
+// 同一段落内连续打字：起点必须不动（缓存命中的前提）
+{
+  const doc = '第一段内容。\n\n第二段开始，这里写了一些字。'
+  const at1 = doc.length
+  const at2 = doc.length + 5   // 同段继续打 5 个字
+  const w1 = sliceParagraphWindow(doc + '', at1)
+  const w2 = sliceParagraphWindow(doc + '补五个字', at2)
+  const start1 = doc.length - w1.head.length
+  const start2 = (doc + '补五个字').length - w2.head.length
+  ok(start1 === start2,
+    'J15c ★ 同一段落内继续打字，窗口起点稳定（前缀不变 → 命中 DeepSeek 硬盘缓存）',
+    `start1=${start1} start2=${start2}`)
+  // 长文档（多段、总量远超上限）→ 起点必须落在**段落边界**，且给足上下文
+  const lines = Array.from({ length: 60 }, (_, i) => `第${i}行：${'这是内容。'.repeat(6)}`).join('\n')
+  const w5 = sliceParagraphWindow(lines, lines.length)
+  const s5 = lines.length - w5.head.length
+  ok((s5 === 0 || lines[s5 - 1] === '\n'),
+    'J15d 窗口起点对齐到段落边界（不是随便截断）', `start=${s5} 前一字符=${JSON.stringify(lines[s5 - 1] ?? '')}`)
+  ok(w5.head.length > 400 && w5.head.length <= INLINE_BEFORE_LIMIT,
+    'J15d2 锚定后仍给足上下文（接近上限而不是只剩几十字）',
+    `head=${w5.head.length} 上限=${INLINE_BEFORE_LIMIT}`)
+  // 超长「单段」（整篇没有一个换行）→ 退回滑动窗口，且不越界
+  const long = 'x'.repeat(3000) + '尾巴'
+  const w3 = sliceParagraphWindow(long, long.length)
+  ok(w3.head.length === INLINE_BEFORE_LIMIT,
+    'J15e 单段超过上限时退回滑动窗口（语义仍正确，只是不再命中缓存）', `head=${w3.head.length}`)
+  // 越界 offset 仍要夹紧（不因锚定改动而回归）
+  const w4 = sliceParagraphWindow('abc', 999)
+  ok(w4.head === 'abc' && w4.tail === '',
+    'J15f 段落锚定窗口同样夹紧越界 offset（不回归 J1 的越界防线）', JSON.stringify(w4))
+}
+
+// J15g 触发点判定（纯函数用例表）——自动模式的成本闸
+{
+  const doc = '这句话已经写完了。'
+  const cases = [
+    ['这句话已经写完了。', doc.length, true, '句末标点后'],
+    ['换元之后，', 5, true, '中文逗号后（最该续写处）'],
+    ['第一行\n', 4, true, '换行后'],
+    ['写了一个词 ', 6, true, '写完一个词 + 空格'],
+    ['积分', 2, false, '词中间 —— 必须拦下'],
+    ['开头几个字', 5, false, '半句话中间'],
+    ['', 0, false, '空文档'],
+  ]
+  let allOk = true
+  const bad = []
+  for (const [text, at, want, label] of cases) {
+    const got = isTriggerPoint(text, at).hit
+    if (got !== want) { allOk = false; bad.push(`${label}: 期望${want} 实得${got}`) }
+  }
+  ok(allOk, `J15g ★ 触发点判定用例表 ${cases.length} 条全对`, bad.join(' | '))
+  ok(isTriggerPoint('abc', 0).why.length > 0 && isTriggerPoint('积分', 2).why.includes('不打扰'),
+    'J15h 判定附带人话原因（界面/探针可直接显示，便于判断为什么没触发）', '')
+}
+
+// J15i 冷却（成本优化 ③）
+ok(AUTO_PAUSE_STREAK === 3, `J15i 冷却阈值 = 3 次连续未采纳`, String(AUTO_PAUSE_STREAK))
+{
+  let st = { ...INITIAL_AUTO_STATE }
+  ok(canAutoRequest(st), 'J15j 初始可自动请求', '')
+  st = afterAutoResult(st, false)
+  st = afterAutoResult(st, false)
+  ok(canAutoRequest(st), 'J15k 未采纳 2 次仍在自动（阈值前不误伤）', `streak=${st.streak}`)
+  st = afterAutoResult(st, false)
+  ok(!canAutoRequest(st) && st.paused, 'J15l ★ 未采纳满 3 次 → 暂停自动（不再打扰）', JSON.stringify(st))
+  ok(canAutoRequest(reviveByManual()) && reviveByManual().streak === 0,
+    'J15m ★ 手动触发唤醒自动并重新计数（Alt+A 是明确的「我现在要」）', '')
+  const adopted = afterAutoResult({ streak: 2, paused: false }, true)
+  ok(adopted.streak === 0 && !adopted.paused, 'J15n 采纳后计数归零（有人在用就继续给）', JSON.stringify(adopted))
+}
+
+// J15o 渲染层接线：自动通道 / 采纳信号 / 手动唤醒 / 兜底超时
+ok(/AUTO_DEBOUNCE_MS/.test(SRC_MONACO) && /scheduleAuto/.test(SRC_MONACO),
+  'J15o ★ MonacoPane 有 debounce 自动通道（不是靠 Monaco 的 Automatic 触发）', '')
+ok(/onDidChangeModelContent\(\(\)\s*=>\s*\{\s*scheduleAuto\(\)/.test(SRC_MONACO),
+  'J15p 内容变化 → 重新计时（打字中不发请求）', '')
+ok(/isTriggerPoint\(text,\s*model\.getOffsetAt\(pos\)\)/.test(SRC_MONACO) && /verdict\.hit/.test(SRC_MONACO),
+  'J15q ★ 到点先过触发点判定，未命中直接 return（成本闸在这里）', '')
+ok(/canAutoRequest\(inlineAutoState\)/.test(SRC_MONACO),
+  'J15r 冷却暂停时自动通道直接 return', '')
+ok(/handleEndOfLifetime/.test(SRC_MONACO) && /InlineCompletionEndOfLifeReasonKind\.Accepted/.test(SRC_MONACO),
+  'J15s ★ 用官方 handleEndOfLifetime(Accepted) 记采纳（唯一可靠的采纳信号）', '')
+ok(/settleAutoOutcome\(\)/.test(SRC_MONACO) && /afterAutoResult\(inlineAutoState, inlineLastAccepted\)/.test(SRC_MONACO),
+  'J15t 每次自动触发前先结算上一次的采纳结果', '')
+ok(/inlineAutoState = \{ \.\.\.INITIAL_AUTO_STATE \}/.test(SRC_MONACO),
+  'J15u 手动触发复位冷却（唤醒自动）', '')
+ok(/setInlineAutoMode\(inlineSuggestAuto\)/.test(SRC_MONACO),
+  'J15v 自动开关由宿主同步进模块级状态（关 = 仅手动）', '')
+ok(/inlineSuggestAuto/.test(SRC_EDITOR) && /onInlineSuggestPaused/.test(SRC_EDITOR),
+  'J15w 编辑器模块透传自动开关与暂停态回调', '')
+ok(/data-wb="inlinePaused"/.test(SRC_EDITOR),
+  'J15x 状态栏有「建议已暂停 · Alt+A 唤醒」提示（否则用户不知道为何不再自动出）', '')
+
+// J15y 设置三件套 + 模型选择 UI + ghost 观感
+ok(/aiAssistantInlineSuggestAuto:\s*\{[^}]*default:\s*true/.test(SRC_SETTINGS),
+  'J15y 新增设置键 aiAssistantInlineSuggestAuto（默认 on = 自动）', '')
+ok(/aiAssistantInlineSuggestModelId:\s*\{[^}]*default:\s*''/.test(SRC_SETTINGS),
+  'J15z 新增设置键 aiAssistantInlineSuggestModelId（空 = 跟随全局默认）', '')
+ok(/aiAssistantInlineSuggestModelId/.test(SRC_INLINE),
+  'J15aa ★ 主进程真读该键（设置选了模型要生效，不能只写不读）', '')
+{
+  const SRC_EDITOR_VIEW = stripComments(read('src/modules/settings/views/EditorView.tsx'))
+  ok(/llmListProviders/.test(SRC_EDITOR_VIEW) && /aiAssistantInlineSuggestModelId/.test(SRC_EDITOR_VIEW)
+    && /SettingSelect/.test(SRC_EDITOR_VIEW),
+    'J15ab 设置 → 编辑器页有模型下拉（数据源 = 已启用供应商的模型）', '')
+  ok(/aiAssistantInlineSuggestAuto/.test(SRC_EDITOR_VIEW) && /aiAssistantInlineSuggest\b/.test(SRC_EDITOR_VIEW),
+    'J15ac 同一页还有总开关与自动开关（三项集中，不散在别处）', '')
+}
+{
+  const SRC_CSS = read('src/styles/index.css')
+  ok(/\.monaco-editor\s+\.ghost-text\s*\{\s*font-style:\s*italic/.test(SRC_CSS),
+    'J15ad ★ ghost text 斜体（对标 VS Code/Cursor 观感；类名取自 monaco ghostTextView.js）', '')
+}
+
+// J15ae 负向：不得有「文档末尾就触发」这类让成本闸失效的兜底
+ok(!/文档末尾/.test(SRC_TRIGGER),
+  'J15ae ★ 触发点判定里不得有「文档末尾就触发」兜底（人基本都在文末打字，加了等于不拦）', '')
 
 // ===================== 结果 =====================
 
