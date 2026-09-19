@@ -1002,11 +1002,11 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [s.zoom, s.zoomMin, s.zoomMax, s.zoomStep, update])
 
-  // Ctrl+B — toggle sidebar
+  // Ctrl+B — toggle sidebar（Alt 修饰的组合键不拦：Ctrl+Alt+B 归工作台右栏，见下方处理器）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isEditingInput(e)) return
-      if (e.ctrlKey && e.key === 'b') {
+      if (e.ctrlKey && !e.altKey && e.key === 'b') {
         e.preventDefault()
         setSidebarOpen(v => !v)
       }
@@ -1044,6 +1044,21 @@ export default function App() {
       一样**与工作台平级**——激活时整窗独占（左右栏与标签条隐藏，见 suppressSides），
       不再呈现为「工作台内的子模块」；EXCLUDED 同时承担「不登记为标签页」的过滤。 */
   const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)
+
+  // Ctrl+Alt+B — 切换工作台右栏（2026-09-19 反馈：工作台区对齐 AI 教学的右栏快捷键；
+  // 整窗模块下左右栏本就退场（suppressSides），跳过避免改了布局却看不见）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isEditingInput(e)) return
+      if (e.ctrlKey && e.altKey && e.key.toLowerCase() === 'b') {
+        if (fullWindowTab) return
+        e.preventDefault()
+        update('workbenchLayout', JSON.stringify({ ...wbLayout, rightCollapsed: !wbLayout.rightCollapsed }))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [fullWindowTab, wbLayout, update])
 
   /** 页面条整行隐藏（v3.4.0 页面条置顶）：知识库沉浸阅读 / 图谱模式本来就是全幅形态，行让位 */
   const pageBarHidden = activeTab === 'knowledge' && knowledgeImmersive
