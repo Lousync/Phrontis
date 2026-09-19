@@ -80,7 +80,9 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
 
   /**
    * 目录聚焦（2026-09-12）：只保留「当前打开文件的祖先目录链 + 同级文件」实名——
-   * 链外的目录一律失焦（兄弟目录也不保留实名），同级文件保留实名方便切换；其余骨架化/隐藏
+   * 链外的目录一律失焦（兄弟目录也不保留实名），同级文件保留实名方便切换；其余骨架化/隐藏。
+   * 2026-09-19 补充：聚焦目标在**仓库根层**（不在任何目录里）时，同级保留规则不适用——
+   * 其他顶层文件/目录一并骨架化，只留聚焦目标实名（否则一聚焦根层文件整棵树都还是实名）。
    */
   const { s: focusSettings } = useSettings()
   const focusHide = (focusSettings.folderFocusStyle ?? 'skeleton') === 'hidden'
@@ -91,7 +93,8 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
   const focusActive = !!focusOn && !!focusPath
   const curParentDir = focusPath ? focusPath.split('/').slice(0, -1).join('/') : null
   const isChainDir = (rel: string) => !!focusPath && (focusPath + '/').startsWith(rel + '/')
-  const isSiblingItem = (rel: string) => !!focusPath && rel.split('/').slice(0, -1).join('/') === curParentDir
+  const isSiblingItem = (rel: string) =>
+    !!focusPath && curParentDir !== '' && rel.split('/').slice(0, -1).join('/') === curParentDir
   const skelWidth = (rel: string) => { let h = 0; for (let i = 0; i < rel.length; i++) h = (h * 31 + rel.charCodeAt(i)) >>> 0; return 42 + (h % 48) }
   /** 骨架条：占位 + 悬停显原名；点击 = 退出聚焦并定位 */
   const renderSkeletonRow = (relPath: string, name: string, isDir: boolean, depth: number, icon: React.ReactNode) => (
