@@ -114,6 +114,10 @@ interface Props {
   onSnapCloseSidebar?: () => void
   /** 折叠态拖拽/点击拉出（ResizablePanel 回调） */
   onSnapOpenSidebar?: () => void
+  /** 最后一个文档关闭时请求关闭模块标签（2026-09-19 修复）：编辑器/知识库由页签组代表、
+   *  模块条目不进页面条（PAGE_OWNED），关掉最后一个文档后模块标签会「隐形滞留」——
+   *  页面条看似全空但 activeTab 仍在，左栏不回总览、空态不出现。由此回调走 App.closeTab 收尾。 */
+  onRequestCloseTab?: () => void
 }
 
 interface InputBoxState {
@@ -124,7 +128,7 @@ interface InputBoxState {
   onSubmit: (value: string) => void
 }
 
-export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted = false, markdownDim = true, pendingOpenRel = null, onPendingConsumed, zenLevel = 0, onZenLevelChange, pageBarEl = null, pageBarHosted = false, contentActionsEl = null, contentActionsHosted = false, sidebarOpen, sidebarWidths, onSnapCloseSidebar, onSnapOpenSidebar }: Props) {
+export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted = false, markdownDim = true, pendingOpenRel = null, onPendingConsumed, zenLevel = 0, onZenLevelChange, pageBarEl = null, pageBarHosted = false, contentActionsEl = null, contentActionsHosted = false, sidebarOpen, sidebarWidths, onSnapCloseSidebar, onSnapOpenSidebar, onRequestCloseTab }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [recent, setRecent] = useState<WorkspaceRecent[]>([])
   const [dirCache, setDirCache] = useState<DirCache>({})
@@ -1408,6 +1412,19 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   // v3.2.0 条目 18：标签栏 = openFiles **全部**（不再按「脏」过滤）—— 干净文件同样驻留。
   // 顺序沿用 Object.keys 的插入序；预览态 / 固定态的差别只体现在渲染样式（斜体）与顶替规则上。
   const openList = Object.keys(openFiles)
+
+  // 最后一个文档关闭 → 自动关闭模块标签（2026-09-19 修复，见 props 注释）。
+  // prev===null/0 守卫：模块刚打开本就无文档时不触发，只在「有过文档 → 清零」的关闭转移上触发。
+  const prevDocCountRef = useRef<number | null>(null)
+  const onRequestCloseTabRef = useRef(onRequestCloseTab)
+  onRequestCloseTabRef.current = onRequestCloseTab
+  useEffect(() => {
+    const prev = prevDocCountRef.current
+    prevDocCountRef.current = openList.length
+    if (prev === null || prev === 0) return
+    if (openList.length > 0) return
+    onRequestCloseTabRef.current?.()
+  }, [openList.length])
 
   // 激活标签自动滚进可视区（标签溢出横向滚动时，当前标签必须可见）
   useEffect(() => {

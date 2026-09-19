@@ -131,12 +131,8 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
-      {/* 顶栏：标题（2026-09-19 拍板：「＋导入」按钮删除——放 .pdf 进仓库任意目录即被自动库扫到） */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-2">
-        <BookOpen size={15} className="text-[var(--text-secondary)]" />
-        <span className="text-[13px] font-medium text-[var(--text-primary)]">书架</span>
-        <span className="text-[11.5px] text-[var(--text-tertiary)]">{list.length} 本</span>
-      </div>
+      {/* 「书架 N 本」标题横排已删（2026-09-19 反馈：多余——页面条已有书架条目、左栏条目视图亦有头部，
+          与博客主区顶部行同口径）。主区直接从续读条/封面网格开始 */}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {loadErr && (

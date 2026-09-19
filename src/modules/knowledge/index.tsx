@@ -62,7 +62,7 @@ interface PageInfo {
   fileType: string
 }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onRequestCloseTab }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onRequestCloseTab?: () => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -654,6 +654,22 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       }
     }
   }, [])
+
+  // 最后一个页面关闭 → 自动关闭模块标签（2026-09-19 修复，同 editor 口径）：
+  // PAGE_OWNED 模块条目不进页面条，页面清零后模块标签「隐形滞留」——页面条看似全空，
+  // 但 activeTab 仍在，左栏不回总览、全关空态不出现。守卫：① 首挂/本就无页面不触发；
+  // ② 错题本/图谱/沉浸阅读任一全幅视图开着不触发（那些视图不依赖页面存在）。
+  const prevPageCountRef = useRef<number | null>(null)
+  const onRequestCloseTabRef = useRef(onRequestCloseTab)
+  onRequestCloseTabRef.current = onRequestCloseTab
+  useEffect(() => {
+    const prev = prevPageCountRef.current
+    prevPageCountRef.current = openPageIds.length
+    if (prev === null || prev === 0) return
+    if (openPageIds.length > 0) return
+    if (showQuizCollection || graphMode || readingMode) return
+    onRequestCloseTabRef.current?.()
+  }, [openPageIds.length, showQuizCollection, graphMode, readingMode])
 
   /** 固定/取消固定：双击标签、图钉按钮、右键菜单共用 */
   const handleTogglePin = useCallback((pageId: string) => {
