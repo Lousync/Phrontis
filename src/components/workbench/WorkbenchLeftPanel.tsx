@@ -6,10 +6,12 @@ import {
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { ConfirmDialog } from '../shared'
+import { FileIcon } from '../shared/FileIcon'
 import { useSettings } from '../../lib/SettingsContext'
 import { workspaceGetCurrent, workspaceListDir, workspaceRename, workspaceTrash } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { recordFileOp } from '../../lib/fileOpHistory'
+import { useDataChanged } from '../../lib/dataChanged'
 import { WorkbenchSearchPanel } from './WorkbenchSearchPanel'
 import { BOOKMARK_COLORS, LOCATE_QUIZ_VIEW_EVENT, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, type RailModule } from '../../lib/workbenchLayout'
 import type { TabName } from '../../types'
@@ -167,6 +169,14 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
     } catch { /* 无仓库/未就绪：区留空 */ }
   }, [])
   useEffect(() => { void refreshRoot() }, [refreshRoot])
+  // 实时刷新（2026-09-19 反馈：外部改动后左栏零散文件区不更新）：fsWatcher 广播 knowledge scope +
+  // 仓库切换事件都重拉（重命名/删除的右键操作自己在 handler 里调 refreshRoot，这里兜外部改动）
+  useDataChanged('knowledge', () => { void refreshRoot() })
+  useEffect(() => {
+    const onVault = () => { void refreshRoot() }
+    window.addEventListener('vault:changed', onVault)
+    return () => window.removeEventListener('vault:changed', onVault)
+  }, [refreshRoot])
 
   // ---- 零散文件右键菜单（2026-09-19 反馈）：打开 / 重命名 / 复制路径 / 删除（回收站） ----
   const [looseMenu, setLooseMenu] = useState<{ x: number; y: number; file: string } | null>(null)
@@ -240,7 +250,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
             )}
             {loose.map((f) => (
               <button key={f} onClick={() => onOpenLooseFile(f)} onContextMenu={(e) => openLooseMenu(e, f)} className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}>
-                <FileText size={13} className="shrink-0 text-[var(--text-muted)]" />
+                <FileIcon ext={f.includes('.') ? f.split('.').pop()!.toLowerCase() : ''} size={13} />
                 {f}
               </button>
             ))}
@@ -389,7 +399,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                 <div className="px-2.5 pb-0.5 pt-1 text-[10.5px] text-[var(--text-muted)]">零散文件</div>
                 {loose.map((f) => (
                   <button key={f} onClick={() => onOpenLooseFile(f)} onContextMenu={(e) => openLooseMenu(e, f)} className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}>
-                    <FileText size={13} className="shrink-0 text-[var(--text-muted)]" />
+                    <FileIcon ext={f.includes('.') ? f.split('.').pop()!.toLowerCase() : ''} size={13} />
                     {f}
                   </button>
                 ))}

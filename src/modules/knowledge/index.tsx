@@ -88,6 +88,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [showOutline, setShowOutline] = useState(false)
   // 文件视图（Phase 2 批次 1，B 方案）：左栏 = VaultTree 文件树（结构三件套已退役，下述 state 留待清理）
   const [dirCache, setDirCache] = useState<DirCache>({})
+  /** 目录缓存 ref：useDataChanged 回调里重扫已加载目录用（回调声明在 refreshTreeDir 之前，走 ref 取最新值） */
+  const dirCacheRef = useRef<DirCache>({})
+  dirCacheRef.current = dirCache
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']))
   const [treeCreating, setTreeCreating] = useState<CreateIntent | null>(null)
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null)
@@ -284,6 +287,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   useDataChanged('knowledge', () => {
     refreshCategories(); refreshAllPages(); refreshStarred(); refreshTags()
     if (selectedChapterId) refreshChapterPages()
+    // 外部 fs 变化（资源管理器增删改名 → fsWatcher 广播）→ 文件树已加载目录重扫
+    //（2026-09-19 反馈：此前只重读知识页索引，树一直停留在旧缓存）
+    Object.keys(dirCacheRef.current).forEach((rel) => void refreshTreeDir(rel))
     window.dispatchEvent(new Event('kb-graph-refresh'))
     window.dispatchEvent(new Event('kb-reload-detail'))
   })
