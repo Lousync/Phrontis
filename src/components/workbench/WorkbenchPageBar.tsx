@@ -231,7 +231,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
         )}
         {/* 知识库页签组槽：紧跟模块条目从左排起（2026-09-19 反馈：原排在 flex-1 编辑器槽之后，
             页签组被顶到行最右端、贴着右栏，看起来像排错位置）。 */}
-        <div ref={knowledgeSlotRef} data-pb-slot="knowledge" className={`flex min-w-0 shrink-0 max-w-[50%] items-end gap-1 overflow-x-auto ${hidePages ? 'hidden' : ''}`} />
+        <div ref={knowledgeSlotRef} data-pb-slot="knowledge" className={`kb-edge-strip flex min-w-0 shrink-0 max-w-[50%] items-end gap-1 overflow-x-auto ${hidePages ? 'hidden' : ''}`} />
         {/* 主栏编辑器页签组槽：flex-1 让组内横向滚动（组内容器带 overflow-x-auto） */}
         <div ref={editorSlotRef} data-pb-slot="editor" className={`flex min-w-0 flex-1 items-end gap-1 ${hidePages ? 'hidden' : ''}`} />
         {trail && <div className="self-center ml-1 flex shrink-0 items-center gap-0.5">{trail}</div>}

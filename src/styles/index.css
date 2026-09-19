@@ -1294,3 +1294,8 @@ input:focus, textarea:focus, select:focus {
 }
 .kb-pagebar-item:hover + .kb-edge-sep,
 .kb-edge-sep:has(+ .kb-pagebar-item:hover) { opacity: 0; }
+
+/* 页签组滚动容器隐藏滚动条（内凹弧溢出会触发横向滚动条，把激活标签从底部顶起——2026-09-19 反馈）；
+   滚轮 / 触控板仍可横向滚动，Edge 标签带同口径 */
+.kb-edge-strip { scrollbar-width: none; }
+.kb-edge-strip::-webkit-scrollbar { display: none; }

@@ -1677,7 +1677,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
             if (pageBarHosted) {
               /* 托管：portal 进中间栏页面条槽；槽未就绪渲染 null，绝不回落内嵌（否则同屏两条） */
               return pageBarEl
-                ? createPortal(<div ref={tabBarRef} className="flex min-w-0 flex-1 items-end gap-1 overflow-x-auto">{strip}</div>, pageBarEl)
+                ? createPortal(<div ref={tabBarRef} className="kb-edge-strip flex min-w-0 flex-1 items-end gap-1 overflow-x-auto">{strip}</div>, pageBarEl)
                 : null
             }
             return (
