@@ -67,5 +67,21 @@ console.log('[3] 就地编辑解锁')
   ok(pe.includes('loadVaultBaseline'), '装载时缓存 frontmatter 前缀 + mtime 基线')
 }
 
+// ---- ④ P1b：共享 MonacoPane 宿主 ----
+console.log('[4] 共享 MonacoPane 宿主（P1b）')
+{
+  const shared = read('src/components/shared/MonacoPane.tsx')
+  const shim = read('src/modules/editor/components/MonacoPane.tsx')
+  const pe = read('src/modules/knowledge/components/PageEditor.tsx')
+  ok(shared.includes("'../../lib/monaco-setup'") && shared.includes('installInlineCompletion'), '共享层持有 B4 provider 装配（内联建议随宿主带入知识库）')
+  ok(shared.includes('addInlineSuggestBusyListener') && shared.includes('inlineBusyListeners = new Set'), 'busy/暂停监听为多宿主注册表（keep-alive 双宿主共存不互相覆盖）')
+  ok(shared.includes('modelPath') && shared.includes('relPathByModel'), 'modelPath 命名空间 + relPath 记账（跨模块不共享 Monaco model，内联建议仍拿真实路径）')
+  ok(/export \{ MonacoPane/.test(shim) && !/interface Props/.test(shim), 'editor 旧路径为 re-export shim，不再持有实现')
+  ok(pe.includes("from '../../../components/shared/MonacoPane'"), 'PageEditor 消费共享宿主')
+  ok(pe.includes('kb://knowledge/'), '知识库文档走命名空间 modelPath')
+  ok(pe.includes('onDropImage={handleImageToMarkdown}') && pe.includes('onPasteImage={handleImageToMarkdown}'), '粘贴与拖图拦截接入共享宿主')
+  ok(shared.includes('focus(): void') && shared.includes('getEditor():'), '句柄含 focus/getEditor（脚注/插图/大纲沿用）')
+}
+
 console.log(`\n${pass} PASS / ${fail} FAIL`)
 process.exit(fail === 0 ? 0 : 1)

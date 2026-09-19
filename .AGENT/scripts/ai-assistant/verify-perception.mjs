@@ -557,7 +557,7 @@ ok(/from '\.\.\/lib\/aiAssistant\/inlineSuggest'/.test(SRC_MAIN),
   'J9b main 从 lib/aiAssistant/inlineSuggest 导入', '')
 
 // J10 渲染层接线
-const SRC_MONACO = stripComments(read('src/modules/editor/components/MonacoPane.tsx'))
+const SRC_MONACO = stripComments(read('src/components/shared/MonacoPane.tsx'))
 const SRC_EDITOR = stripComments(read('src/modules/editor/index.tsx'))
 ok(/registerInlineCompletionsProvider\(\s*'markdown'/.test(SRC_MONACO),
   'J10a 注册 markdown 语言的 inline completions provider（仅 md）', '')

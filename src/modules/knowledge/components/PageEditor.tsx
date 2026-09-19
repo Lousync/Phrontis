@@ -9,7 +9,7 @@ import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext,
 import { splitFrontmatter, joinFrontmatter } from '../../../lib/frontmatter'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
-import { uploadImageFile, insertImageAtCursor, isImageFile, IMAGE_OWNER } from '../../../lib/editorImage'
+import { uploadImageFile, insertImageAtCursor, isImageFile, imageMarkdown, IMAGE_OWNER } from '../../../lib/editorImage'
 import { FILE_LANG_OPTIONS, getFileTypeInfo } from '../../../lib/fileTypes'
 import { isEditingInput } from '../../../lib/shortcuts'
 import { getGlobalActiveTab } from '../../../lib/activeTab'
@@ -19,6 +19,9 @@ import { ResizablePanel } from '../../../components/shared/ResizablePanel'
 import { WelcomeHtmlView } from './WelcomeHtmlView'
 import { FileMetaCard } from './FileMetaCard'
 import Editor, { type OnMount } from '@monaco-editor/react'
+// 共享 Monaco 宿主（P1b）：就地编辑换用与编辑器模块同一份装配——[[ 补全 / B4 内联建议 /
+// 淡化装饰 / 粘贴与拖图拦截全部随之带入；legacy <Editor> 分支仅服务非 vault 旧数据兜底
+import { MonacoPane, type MonacoPaneHandle } from '../../../components/shared/MonacoPane'
 import { MonacoErrorBoundary } from '../../../components/shared/MonacoErrorBoundary'
 import type * as Monaco from 'monaco-editor'
 import { bindEditorTheme } from '../../../lib/editorTheme'
@@ -120,6 +123,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const isCodeFileRef = useRef(false)
   const isPdfFileRef = useRef(false)
   const vaultModeRef = useRef(vaultMode)
+  // 共享 MonacoPane 句柄（P1b）：大纲跳转 / 插图 / 脚注经它拿编辑器实例
+  const paneRef = useRef<MonacoPaneHandle | null>(null)
   // 就地编辑（笔记合并 Phase 1，docs/notes-merge-phase1-design.md §1.1）：
   // vault 写路径三件套 = 当前仓库 rootId + 装载时的 frontmatter 前缀 + mtime 冲突基线
   const vaultRootRef = useRef<string | null>(null)
@@ -136,6 +141,22 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
    *  html 走同一沙箱 iframe（kbview 白名单③收清单内归档 html）；其余类型元信息卡，不进 Monaco/预览 */
   const isArchiveFile = page?.entryKind === 'file'
   const isArchiveHtml = isArchiveFile && fileType === 'html'
+  /** 就地编辑的共享宿主文档（P1b）：可编辑文本类 + 仓库内路径才走 MonacoPane；
+   *  modelPath 命名空间防与编辑器模块同名文件共享 Monaco model（onChange/外部监听会打架）。 */
+  const paneDoc = vaultMode && page?.path && !isWelcomeHtml && !isArchiveFile && !isPdfFile
+    ? {
+        relPath: page.path,
+        modelPath: `kb://knowledge/${page.path}`,
+        content,
+        language: getFileTypeInfo(fileType).monacoLang,
+        binary: false,
+        editable: true,
+        truncated: false,
+        size: content.length,
+      }
+    : null
+  /** 当前生效的编辑器实例：共享宿主优先，legacy 兜底分支用自有 ref */
+  const activeEditor = () => paneRef.current?.getEditor() ?? editorRef.current
 
   useEffect(() => { contentRef.current = content }, [content])
   useEffect(() => { pageIdRef.current = pageId }, [pageId])
@@ -454,7 +475,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
       } else {
         // Editing mode: use Monaco editor API
-        const ed = editorRef.current
+        const ed = activeEditor()
         if (ed) {
           ed.revealLineInCenter(line)
           ed.setPosition({ lineNumber: line, column: 1 })
@@ -469,7 +490,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   // ===== Inline image insertion (paste / drag / toolbar) — md/txt only =====
   const insertImageFiles = useCallback(async (files: File[]) => {
     if (isCodeFileRef.current || isPdfFileRef.current) return
-    const editor = editorRef.current
+    const editor = activeEditor()
     if (!editor) return
     for (const f of files) {
       if (!isImageFile(f)) continue
@@ -482,9 +503,20 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     }
   }, [])
 
+  /** 共享宿主的粘贴/拖图回调（P1b）：上传后返回 md 文本，由宿主在光标/松手处插入 */
+  const handleImageToMarkdown = useCallback(async (f: File): Promise<string | null> => {
+    try {
+      const meta = await uploadImageFile(f, IMAGE_OWNER.knowledge, pageIdRef.current)
+      return imageMarkdown(meta)
+    } catch {
+      showToast({ type: 'error', message: `图片「${f.name}」插入失败` })
+      return null
+    }
+  }, [])
+
   // ===== 脚注：选中词语包裹为 `word^[标注]`，阅读/预览态点击展开 =====
   const insertFootnote = useCallback(() => {
-    const editor = editorRef.current
+    const editor = activeEditor()
     const model = editor?.getModel()
     const sel = editor?.getSelection()
     if (!editor || !model || !sel) return
@@ -946,6 +978,35 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               }}
             />
           </div>
+        ) : paneDoc ? (
+          <MonacoPane
+            ref={paneRef}
+            doc={paneDoc}
+            onChange={(_rel, v) => { setContent(v); onContentChange?.(v) }}
+            fontSize={Math.round(s.editorFontSize * zoom)}
+            editorOptions={{
+              fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
+              cursorBlinking: 'smooth',
+              cursorSmoothCaretAnimation: 'on',
+              renderWhitespace: 'selection',
+              padding: { top: 8, bottom: 16 },
+              overviewRulerLanes: 0,
+              hideCursorInOverviewRuler: true,
+              overviewRulerBorder: false,
+              guides: { indentation: true },
+              insertSpaces: true,
+              bracketPairColorization: { enabled: true },
+              matchBrackets: 'always',
+              unicodeHighlight: { nonBasicASCII: false, ambiguousCharacters: false, invisibleCharacters: false },
+              selectionHighlight: true,
+              quickSuggestions: true,
+              suggest: { showWords: false },
+            }}
+            onPasteImage={handleImageToMarkdown}
+            onDropImage={handleImageToMarkdown}
+            inlineSuggestEnabled={s.aiAssistantInlineSuggest !== false}
+            inlineSuggestAuto={s.aiAssistantInlineSuggestAuto !== false}
+          />
         ) : (
           <div className="flex flex-col flex-1 overflow-hidden">
             <div className="flex-1 min-h-0">
