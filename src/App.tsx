@@ -7,7 +7,7 @@ import { labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModu
 import { WORKBENCH_TABBAR_EXCLUDED } from './lib/workbenchLayout'
 import { landingAfterClose } from './modules/editor/tabPolicy'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
-import { WorkbenchPageBar } from './components/workbench/WorkbenchPageBar'
+import { WorkbenchPageBar, PAGE_OWNED } from './components/workbench/WorkbenchPageBar'
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
 import { ToolHost, PluginToolHost, TOOLS_WITH_SIDEBAR, isToolTabId, toolIdOfTab, toolTabId } from './components/workbench/toolRegistry'
 import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT, type RailModule } from './lib/workbenchLayout'
@@ -785,6 +785,10 @@ export default function App() {
     setOpenTabs((ts) => (ts.includes(activeToolTab) ? ts : [...ts, activeToolTab]))
   }, [activeToolTab])
 
+  // quizViewOpen / 页签组可见性（2026-09-19）：声明在 closeTab 之前——其全关判定 deps 渲染期就要读
+  const [quizViewOpen, setQuizViewOpen] = useState(false)
+  const [kbStripVisible, setKbStripVisible] = useState(false)
+  const [editorStripVisible, setEditorStripVisible] = useState(false)
   // 关闭标签（✕ / 中键）：关的是激活标签 → 落右邻居优先、越界退左邻居（tabPolicy.landingAfterClose
   // 与编辑器文档标签同一份语义）；关完为空 = 空态（activeTab 置 null，拍板③允许全部关闭），
   // 且左栏退回总览态（2026-09-17 第四轮反馈拍板①：全关后不滞留某模块侧栏）。
@@ -792,8 +796,7 @@ export default function App() {
   const closeTab = useCallback((tab: string) => {
     const i = openTabs.indexOf(tab)
     if (i === -1) return
-    const next = openTabs.filter((t) => t !== tab)
-    setOpenTabs(next)
+    let next = openTabs.filter((t) => t !== tab)
     const isTool = isToolTabId(tab)
     const isActive = isTool ? activeToolTab === tab : activeTab === tab
     if (isActive) {
@@ -810,7 +813,21 @@ export default function App() {
         setRailModule(null)
       }
     }
-  }, [openTabs, activeTab, activeToolTab])
+    // 全关兜底（2026-09-19 反馈：关掉博客后左栏转到笔记）：剩余标签全部「不可见」=
+    // PAGE_OWNED 空壳（模块条目不进页面条、无停靠页面时页签组也不出现）→ 用户视角已无
+    // 标签页，按全关收尾：清掉隐形空壳、activeTab/左栏回总览。可见性由模块上报。
+    const tabVisible = (t: string) =>
+      isToolTabId(t) || !PAGE_OWNED.includes(t) ||
+      (t === 'knowledge' && (kbStripVisible || quizViewOpen)) ||
+      (t === 'editor' && editorStripVisible)
+    if (!next.some(tabVisible)) {
+      next = next.filter((t) => !PAGE_OWNED.includes(t))
+      setActiveToolTab(null)
+      setActiveTab(null)
+      setRailModule(null)
+    }
+    setOpenTabs(next)
+  }, [openTabs, activeTab, activeToolTab, kbStripVisible, editorStripVisible, quizViewOpen])
 
   // 标签拖拽重排（现成机制恢复）：只调 openTabs 顺序，激活标签跟内容走、不变
   const handleReorder = useCallback((tabs: string[]) => setOpenTabs(tabs), [])
@@ -897,7 +914,7 @@ export default function App() {
   // 进出错题本时 knowledge 派发 {open}——左栏非锁定则切 quiz 态（关 = 回 knowledge 树态），
   // 避免「主体错题本 + 左栏知识库树」的双侧栏错位。quizViewOpen 同时作为标签跟随的特判依据：
   // knowledge 标签当前显示的可能是错题本子视图，此时点标签条「知识库」应保持 quiz 态而非切回知识库树
-  const [quizViewOpen, setQuizViewOpen] = useState(false)
+  // （quizViewOpen 等三个状态声明在 closeTab 之前——closeTab 的全关判定 deps 渲染期就要读它们）
   useEffect(() => {
     const handler = (e: Event) => {
       const open = (e as CustomEvent<{ open?: boolean }>).detail?.open ?? true
@@ -1071,9 +1088,9 @@ export default function App() {
     switch (name) {
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onRequestCloseTab={() => closeTab('knowledge')} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onRequestCloseTab={() => closeTab('knowledge')} onStripVisibleChange={setKbStripVisible} />
       case 'moments': return <MomentsModule />
-      case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} zenLevel={zenLevel} onZenLevelChange={setZenLevel} pageBarEl={wbEditorPageEl} pageBarHosted contentActionsEl={wbContentActionsEl} contentActionsHosted onRequestCloseTab={() => closeTab('editor')} />
+      case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} zenLevel={zenLevel} onZenLevelChange={setZenLevel} pageBarEl={wbEditorPageEl} pageBarHosted contentActionsEl={wbContentActionsEl} contentActionsHosted onRequestCloseTab={() => closeTab('editor')} onStripVisibleChange={setEditorStripVisible} />
       case 'bookshelf': return (
         <BookshelfModule
           isActive={on}

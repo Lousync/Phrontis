@@ -41,7 +41,8 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
 const FALLBACK_ICON = <BookText size={14} />
 
 /** 模块条目里不渲染的 id：编辑器 / 知识库由各自页签组代表（模块清空页面即从条内消失） */
-const PAGE_OWNED: readonly string[] = ['editor', 'knowledge']
+/** 页签组代表制：这两个模块的条目不进页面条（由各自页签组代表），App 全关判定也依赖此口径 */
+export const PAGE_OWNED: readonly string[] = ['editor', 'knowledge']
 
 function tabLabel(id: string): string {
   if (isToolTabId(id)) return findTool(toolIdOfTab(id))?.name ?? '工具'

@@ -118,6 +118,8 @@ interface Props {
    *  模块条目不进页面条（PAGE_OWNED），关掉最后一个文档后模块标签会「隐形滞留」——
    *  页面条看似全空但 activeTab 仍在，左栏不回总览、空态不出现。由此回调走 App.closeTab 收尾。 */
   onRequestCloseTab?: () => void
+  /** 页面条可见性上报（2026-09-19）：有停靠文档才可见，App 全关判定用 */
+  onStripVisibleChange?: (v: boolean) => void
 }
 
 interface InputBoxState {
@@ -128,7 +130,7 @@ interface InputBoxState {
   onSubmit: (value: string) => void
 }
 
-export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted = false, markdownDim = true, pendingOpenRel = null, onPendingConsumed, zenLevel = 0, onZenLevelChange, pageBarEl = null, pageBarHosted = false, contentActionsEl = null, contentActionsHosted = false, sidebarOpen, sidebarWidths, onSnapCloseSidebar, onSnapOpenSidebar, onRequestCloseTab }: Props) {
+export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted = false, markdownDim = true, pendingOpenRel = null, onPendingConsumed, zenLevel = 0, onZenLevelChange, pageBarEl = null, pageBarHosted = false, contentActionsEl = null, contentActionsHosted = false, sidebarOpen, sidebarWidths, onSnapCloseSidebar, onSnapOpenSidebar, onRequestCloseTab, onStripVisibleChange }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [recent, setRecent] = useState<WorkspaceRecent[]>([])
   const [dirCache, setDirCache] = useState<DirCache>({})
@@ -1425,6 +1427,10 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     if (openList.length > 0) return
     onRequestCloseTabRef.current?.()
   }, [openList.length])
+  // 页面条可见性上报（App 全关判定用）：有停靠文档才可见
+  const onStripVisibleRef = useRef(onStripVisibleChange)
+  onStripVisibleRef.current = onStripVisibleChange
+  useEffect(() => { onStripVisibleRef.current?.(openList.length > 0) }, [openList.length])
 
   // 激活标签自动滚进可视区（标签溢出横向滚动时，当前标签必须可见）
   useEffect(() => {
