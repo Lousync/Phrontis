@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboa
 import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
-  Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu, Radar,
+  Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu, Radar, MessagesSquare,
 } from 'lucide-react'
 import { getAssistantContext } from '../../../lib/assistantContext'
 import { showToast } from '../../../lib/toast'
@@ -345,12 +345,10 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 onDeleteMessage={id => { void deleteMessage(id) }}
                 onAbort={() => { void abort() }}
                 emptyHint={emptyHint ?? (
-                  /* 三态统一：空态在滚动区高度内垂直+水平居中（顶对齐显得飘，2026-09-17 反馈） */
+                  /* 三态统一：空态在滚动区高度内垂直+水平居中。2026-09-19 反馈：两行引导文字收敛为
+                     一个聊天气泡图案（入口语义自明，冗余文案按铁律 12 只收不增）。 */
                   <div className="flex h-full items-center justify-center">
-                    <div className="text-center text-[12px] leading-relaxed text-[var(--text-muted)] px-4">
-                      在这里可以直接询问你正在查看的内容。<br />
-                      例如打开一篇知识库页面后问：「总结一下这一页」。
-                    </div>
+                    <MessagesSquare size={22} strokeWidth={1.5} className="text-[var(--text-disabled)]" />
                   </div>
                 )}
               />
