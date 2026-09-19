@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { Fragment, useState, useCallback } from 'react'
 import { X, Pin, PenLine, BookOpen } from 'lucide-react'
 import { getFileTypeInfo } from '../../lib/fileTypes'
 
@@ -113,11 +113,14 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
   return (
     <div
       data-pb-group={owner}
-      className="flex min-w-0 items-center gap-1"
+      className="flex min-w-0 items-end gap-1"
     >
-      {items.map((it) => {
+      {items.map((it, i) => {
         const isActive = it.id === activeId
         const isDragged = it.id === draggedId
+        // Edge 细分隔线：与左邻都是非激活条目时才画（悬停任一侧由 CSS :has/相邻选择器淡出）
+        const prev = i > 0 ? items[i - 1] : null
+        const showSep = !!prev && prev.id !== activeId && !isActive
         const tip = [
           it.title,
           it.preview ? '预览标签（双击固定）' : '',
@@ -125,8 +128,9 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
         ].filter(Boolean).join(' · ')
         const fi = it.badge ? getFileTypeInfo(it.badge) : null
         return (
+          <Fragment key={it.id}>
+          {showSep && <div className="kb-edge-sep" />}
           <div
-            key={it.id}
             data-pb-item
             data-pb-owner={owner}
             {...{ [itemAttr]: it.id }}
@@ -142,12 +146,12 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
             onDragLeave={onReorder ? handleDragLeave : undefined}
             onDrop={onReorder ? (e) => handleDrop(e, it.id) : undefined}
             title={tip}
-            className={`group flex h-7 max-w-[220px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[12.5px] transition-colors ${
+            className={`kb-edge-tab group flex max-w-[220px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
               isDragged ? 'opacity-40' : ''
             } ${
               isActive
-                ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
-                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
+                : 'h-[30px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
             }`}
           >
             <span className="shrink-0" style={{ color: OWNER_COLOR[owner] }}>
@@ -185,6 +189,7 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
               <X size={13} />
             </button>
           </div>
+          </Fragment>
         )
       })}
     </div>

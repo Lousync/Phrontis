@@ -1266,3 +1266,31 @@ input:focus, textarea:focus, select:focus {
 @container kb-aiquiz (max-width: 260px) { .kb-l1 { display: none; } }
 
 
+
+/* ===== 页面条 Edge Fluent 风格（2026-09-19 反馈「模块标签页没质感」） =====
+   激活条目 = 内容区同色（--bg-primary）+ 只圆上角 + 通高盖过页面条 hairline，
+   两侧 8px 内凹弧（radial-gradient 伪元素）与内容区连成一体；
+   非激活条目透明底、悬停浮出 --bg-hover；相邻非激活条目之间 1px 分隔线，
+   悬停任一侧淡出（:has 选择器，Electron 33 / Chromium 130 支持）。
+   页面条行本身不再用 border-b：hairline 是行内绝对定位子元素，激活条目（DOM 靠后、
+   positioned）自然盖住它——绕开滚动容器 overflow 对负 margin 贴边的裁剪。 */
+.kb-edge-tab { position: relative; border-radius: 8px 8px 0 0; }
+.kb-edge-tab-active { background: var(--bg-primary); }
+.kb-edge-tab-active::before,
+.kb-edge-tab-active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+}
+.kb-edge-tab-active::before { left: -8px; background: radial-gradient(circle at 0 0, transparent 7.5px, var(--bg-primary) 8px); }
+.kb-edge-tab-active::after { right: -8px; background: radial-gradient(circle at 100% 0, transparent 7.5px, var(--bg-primary) 8px); }
+.kb-edge-sep {
+  width: 1px; height: 15px; align-self: flex-end; flex-shrink: 0;
+  margin-bottom: 8px; background: var(--border-color);
+  transition: opacity .12s;
+}
+.kb-pagebar-item:hover + .kb-edge-sep,
+.kb-edge-sep:has(+ .kb-pagebar-item:hover) { opacity: 0; }

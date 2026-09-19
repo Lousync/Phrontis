@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { Fragment, useRef, useState } from 'react'
 import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, Puzzle, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical, FileQuestion } from 'lucide-react'
 import type { TabName } from '../../types'
 import { labelOf } from '../../lib/appModules'
@@ -145,51 +145,61 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
       ref={rowRef}
       data-wb="pagebar"
       data-pb-tabs={tabs.join(',')}
-      className="flex h-9 shrink-0 select-none items-stretch overflow-hidden border-b border-[var(--border-color)] bg-[var(--bg-primary)]"
+      /* Edge Fluent（2026-09-19）：行底不用 border-b（滚动槽的 overflow 会裁掉负 margin 贴边），
+         改为行内 hairline 子元素——激活条目（positioned、DOM 靠后）自然盖住它形成「与内容区同体」；
+         items-end 让条目沉底，overflow-x-clip 只拦首尾条目内凹弧的水平外溢、不裁垂直融合。 */
+      className="relative flex h-9 shrink-0 select-none items-end overflow-x-clip bg-[var(--bg-secondary)] px-1.5"
     >
+      {/* hairline：页面条与内容区的分隔线（激活条目处被同色条目盖住） */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[var(--border-color)]" />
       {/* 模块条目 + 两个模块的页签组 + 尾部动作 */}
-      <div data-pb-main className="flex min-w-0 flex-1 items-center gap-1 px-1.5">
-        {lead}
-        {visible.map((id) => {
+      <div data-pb-main className="flex min-w-0 flex-1 items-end gap-1 px-1.5 self-stretch">
+        {lead && <div className="flex shrink-0 items-center self-center">{lead}</div>}
+        {visible.map((id, i) => {
           const isActive = id === active
+          // Edge 细分隔线：与左邻都是非激活条目时才画（悬停任一侧由 CSS :has/相邻选择器淡出）
+          const prevId = i > 0 ? visible[i - 1] : null
+          const showSep = prevId !== null && prevId !== active && id !== active
           return (
-            <div
-              key={id}
-              data-pb-item
-              data-pb-owner="module"
-              data-wb="tab"
-              data-wb-tab={id}
-              data-wb-active={isActive ? '1' : '0'}
-              draggable
-              onDragStart={(e) => handleDragStart(e, id)}
-              onDragEnd={handleDragEnd}
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragId && dragId !== id) setDragOverId(id) }}
-              onDrop={(e) => handleDrop(e, id)}
-              onClick={() => onSelect(id)}
-              onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id) } }}
-              title={tabLabel(id)}
-              className={`group flex h-7 max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[12.5px] transition-colors ${
-                isActive
-                  ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-              }`}
-            >
-              <span className={`shrink-0 ${isActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{tabIcon(id)}</span>
-              <span className="max-w-[140px] truncate">{tabLabel(id)}</span>
-              <button
-                onClick={(e) => { e.stopPropagation(); onClose(id) }}
-                onAuxClick={(e) => e.stopPropagation()}
-                title="关闭标签页"
-                className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
-                  isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            <Fragment key={id}>
+              {showSep && <div className="kb-edge-sep" />}
+              <div
+                data-pb-item
+                data-pb-owner="module"
+                data-wb="tab"
+                data-wb-tab={id}
+                data-wb-active={isActive ? '1' : '0'}
+                draggable
+                onDragStart={(e) => handleDragStart(e, id)}
+                onDragEnd={handleDragEnd}
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragId && dragId !== id) setDragOverId(id) }}
+                onDrop={(e) => handleDrop(e, id)}
+                onClick={() => onSelect(id)}
+                onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id) } }}
+                title={tabLabel(id)}
+                className={`kb-edge-tab group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
+                  isActive
+                    ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
+                    : 'h-[30px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >
-                <X size={11} />
-              </button>
-            </div>
+                <span className={`shrink-0 ${isActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{tabIcon(id)}</span>
+                <span className="max-w-[140px] truncate">{tabLabel(id)}</span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onClose(id) }}
+                  onAuxClick={(e) => e.stopPropagation()}
+                  title="关闭标签页"
+                  className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
+                    isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  }`}
+                >
+                  <X size={11} />
+                </button>
+              </div>
+            </Fragment>
           )
         })}
-        {/* 错题本专属条目（合成条目，非 openTabs 成员）：不可拖拽/关闭，视图态随错题本开合 */}
+        {/* 错题本专属条目（合成条目，非 openTabs 成员）：视图态随错题本开合 */}
         {showQuizEntry && (
           <div
             data-pb-item
@@ -199,10 +209,10 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
             data-wb-active={quizEntryActive ? '1' : '0'}
             onClick={() => onSelect('quiz')}
             title="错题本 / 收藏"
-            className={`flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[12.5px] transition-colors ${
+            className={`kb-edge-tab group flex shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
               quizEntryActive
-                ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
-                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
+                : 'h-[30px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
             }`}
           >
             <span className={`shrink-0 ${quizEntryActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{TAB_ICONS.quiz}</span>
@@ -211,7 +221,9 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
               onClick={(e) => { e.stopPropagation(); onClose('quiz') }}
               onAuxClick={(e) => e.stopPropagation()}
               title="关闭错题本"
-              className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
+                quizEntryActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              }`}
             >
               <X size={11} />
             </button>
@@ -219,10 +231,10 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
         )}
         {/* 知识库页签组槽：紧跟模块条目从左排起（2026-09-19 反馈：原排在 flex-1 编辑器槽之后，
             页签组被顶到行最右端、贴着右栏，看起来像排错位置）。 */}
-        <div ref={knowledgeSlotRef} data-pb-slot="knowledge" className={`flex min-w-0 shrink-0 max-w-[50%] items-center gap-1 overflow-x-auto ${hidePages ? 'hidden' : ''}`} />
+        <div ref={knowledgeSlotRef} data-pb-slot="knowledge" className={`flex min-w-0 shrink-0 max-w-[50%] items-end gap-1 overflow-x-auto ${hidePages ? 'hidden' : ''}`} />
         {/* 主栏编辑器页签组槽：flex-1 让组内横向滚动（组内容器带 overflow-x-auto） */}
-        <div ref={editorSlotRef} data-pb-slot="editor" className={`flex min-w-0 flex-1 items-center gap-1 ${hidePages ? 'hidden' : ''}`} />
-        {trail && <div className="ml-1 flex shrink-0 items-center gap-0.5">{trail}</div>}
+        <div ref={editorSlotRef} data-pb-slot="editor" className={`flex min-w-0 flex-1 items-end gap-1 ${hidePages ? 'hidden' : ''}`} />
+        {trail && <div className="self-center ml-1 flex shrink-0 items-center gap-0.5">{trail}</div>}
         {/* 空态提示文字已删（2026-09-18 反馈轮）：「没有打开的页面 —— 从左侧书签或图标条打开模块」
             属冗余说明（左栏书签 / 图标条本身就是入口），按铁律 12 只收不增 → 整块去掉 */}
       </div>
