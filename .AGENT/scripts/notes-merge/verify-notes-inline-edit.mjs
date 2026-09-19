@@ -113,5 +113,20 @@ console.log('[6] 文件视图（Phase 2 批次 1）')
   ok(ki.includes('workspaceListDir') && ki.includes('refreshTreeDir'), '目录懒加载接线')
 }
 
+// ---- ⑦ Phase 2 批次 1 下半场：草稿直入编辑 ----
+console.log('[7] 草稿直入编辑（批次 1 下半场）')
+{
+  const pe = read('src/modules/knowledge/components/PageEditor.tsx')
+  const ki = read('src/modules/knowledge/index.tsx')
+  ok(pe.includes('draftRelPath') && pe.includes('loadDraftPage'), 'PageEditor 支持 draftRelPath 草稿装载')
+  ok(pe.includes('draft:${rel}') || pe.includes('`draft:${rel}`'), '草稿伪页 id = draft:<relPath>')
+  ok(pe.includes('handleConvertDraft') && pe.includes('crypto.randomUUID()'), '转为正式笔记：写入 randomUUID 格式 id（与主进程同源）')
+  ok(pe.includes('handleConvertDraft') && pe.includes('onNavigate?.(id)'), '转正后导航到正式页签')
+  ok(ki.includes("`draft:${node.relPath}`"), '树点草稿 = 打开 draft 页签（不再跳编辑器模块）')
+  ok(ki.includes('treeDraftRelPaths'), '树内草稿徽标集合（对照索引 path 差集）')
+  const vaultBranch = pe.match(/if \(vaultModeRef\.current\) \{[\s\S]*?\n    \}\n/)
+  ok(vaultBranch && vaultBranch[0].includes('workspaceWriteFile'), '草稿保存走同一 vault 写路径（零旁路）')
+}
+
 console.log(`\n${pass} PASS / ${fail} FAIL`)
 process.exit(fail === 0 ? 0 : 1)

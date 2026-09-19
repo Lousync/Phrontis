@@ -48,9 +48,12 @@ interface Props {
   /** 仓库读源模式：正文走就地编辑（vault 写路径，Phase 1）；「在编辑器模块中打开」保留为次入口 */
   vaultMode?: boolean
   onOpenInEditor?: () => void
+  /** 草稿直入编辑（Phase 2 批次 1）：无 frontmatter id 文件的相对路径——页签 id 为 `draft:<relPath>`，
+   *  走同一套脏状态机与 vault 写路径；「转为正式笔记」= 写入 frontmatter id（randomUUID，与主进程同格式） */
+  draftRelPath?: string
 }
 
-export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, onOpenInEditor }: Props) {
+export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, onOpenInEditor, draftRelPath }: Props) {
   const { s } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
@@ -213,7 +216,78 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     }
   }, [])
 
+  /** 草稿装载（Phase 2 批次 1）：读原始文件 → body 进同一套脏状态机；frontmatter 前缀/mtime 进 vault 基线。
+   *  pageRef 构造最小伪页（path 指向草稿文件），doSave 的 vault 分支零改动直接复用。 */
+  /** 转为正式笔记（Phase 2 批次 1）：写入 frontmatter id（randomUUID，与主进程同格式），保存后导航到正式页 */
+  const handleConvertDraft = useCallback(async () => {
+    const rel = draftRelPath
+    const root = vaultRootRef.current
+    if (!rel || !root || !pageRef.current) return
+    try {
+      const res = await workspaceReadFile(root, rel)
+      const fm = splitFrontmatter(res?.content ?? '')
+      const id = crypto.randomUUID()
+      let prefix: string
+      if (fm) {
+        prefix = fm.prefix.replace(/^---\r?\n/, `---\nid: ${id}\n`)
+      } else {
+        const name = rel.slice(rel.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '')
+        prefix = `---\nid: ${id}\ntitle: ${name}\n---\n`
+      }
+      const baseline = vaultMtimeRef.current > 0 ? vaultMtimeRef.current : undefined
+      const out = await workspaceWriteFile(root, rel, prefix + contentRef.current, baseline)
+      if (out?.ok) {
+        vaultMtimeRef.current = typeof out.mtimeMs === 'number' && out.mtimeMs > 0 ? out.mtimeMs : vaultMtimeRef.current
+        isDirtyRef.current = false
+        savedContentRef.current = contentRef.current
+        setSaving(false)
+        onClearDirty?.()
+        onUpdate()
+        showToast({ type: 'info', message: '已转为正式笔记' })
+        // 索引重建是异步的：给主进程一点时间后导航到正式页（页签 id 从 draft: 切到真 id）
+        setTimeout(() => onNavigate?.(id), 600)
+      } else {
+        showToast({ type: 'warning', message: out?.conflict ? '文件已被外部修改，转换失败' : '转换失败，请重试' })
+      }
+    } catch (e) {
+      console.error('[PageEditor] convert draft failed:', e)
+      showToast({ type: 'error', message: '转换失败，请重试' })
+    }
+  }, [draftRelPath])
+
+  const loadDraftPage = useCallback(async (rel: string) => {
+    try {
+      if (!vaultRootRef.current) {
+        const cur = await workspaceGetCurrent()
+        vaultRootRef.current = cur?.rootId ?? null
+      }
+      const root = vaultRootRef.current
+      if (!root) return
+      const res = await workspaceReadFile(root, rel)
+      const fm = splitFrontmatter(res?.content ?? '')
+      vaultPrefixRef.current = fm?.prefix ?? ''
+      vaultMtimeRef.current = typeof res?.mtimeMs === 'number' && res.mtimeMs > 0 ? res.mtimeMs : 0
+      const body = fm ? fm.body : (res?.content ?? '')
+      const name = rel.slice(rel.lastIndexOf('/') + 1)
+      const dot = name.lastIndexOf('.')
+      const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : 'md'
+      const title = dot > 0 ? name.slice(0, dot) : name
+      const pseudo = { id: `draft:${rel}`, path: rel, title, contentMd: body, fileType: ext, tags: [] } as unknown as KnowledgePage
+      pageRef.current = pseudo
+      setPage(pseudo); setTitle(title); setContent(body); setFileTypeState(ext); setEntryTags([])
+      savedContentRef.current = body; savedTitleRef.current = title; isDirtyRef.current = false
+      setAnnotation(''); savedAnnotationRef.current = ''
+      onTitleChange?.(title); onContentChange?.(body)
+      setPreview(ext === 'md' || ext === 'txt')
+    } catch (e) {
+      console.error('[PageEditor] draft load failed:', e)
+      showToast({ type: 'error', message: '草稿读取失败' })
+    }
+  }, [])
+
   const loadPage = useCallback(() => {
+    // 草稿直入编辑：无 frontmatter id 的文件，页签 id = draft:<relPath>
+    if (draftRelPath) { void loadDraftPage(draftRelPath); return }
     Promise.all([
       getKnowledgePageById(pageId).then(p => {
         if (p) {
@@ -256,7 +330,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     // 每次打开/切换页面都被强行打开。改为不动它——由用户当前开关状态决定，
     // 关着就一直关着、开着就保持开着（同一编辑器实例在标签间切换时状态自然延续）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageId])
+  }, [pageId, draftRelPath])
 
   useEffect(() => { loadPage() }, [loadPage])
 
@@ -829,8 +903,14 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     <Link2 size={13} />添加关联
                   </button>
                 )}
-                {(fileType === 'md' || fileType === 'txt') && onRequestReading && (
-                  <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}
+                {draftRelPath && (
+                  <button onClick={() => { setShowMoreMenu(false); void handleConvertDraft() }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    <FileText size={13} />转为正式笔记
+                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">写入 frontmatter id</span>
+                  </button>
+                )}
+                {(fileType === 'md' || fileType === 'txt') && onRequestReading && (                  <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <BookOpen size={13} />沉浸阅读
                     <span className="ml-auto text-[10px] text-[var(--text-disabled)]">Ctrl+Shift+R</span>

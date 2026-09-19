@@ -564,13 +564,18 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   }, [])
 
   // --- tab management (VS Code preview mode) ---
-  const handleOpenPage = useCallback(async (pageId: string) => {
-    let info = [...allLoosePages, ...chapterPages, ...starredPages].find(p => p.id === pageId)
-    if (!info || !info.fileType) {
-      try { info = await getKnowledgePageById(pageId) ?? undefined } catch {}
+  const handleOpenPage = useCallback(async (pageId: string, infoOverride?: PageInfo) => {
+    // info：页签标题/类型（草稿直入编辑时由调用方自带，Phase 2 批次 1）
+    let info: PageInfo | undefined = infoOverride
+    if (!infoOverride) {
+      let found = [...allLoosePages, ...chapterPages, ...starredPages].find(p => p.id === pageId)
+      if (!found || !found.fileType) {
+        try { found = await getKnowledgePageById(pageId) ?? undefined } catch {}
+      }
+      if (found) info = { title: found.title, fileType: found.fileType || '' }
     }
     if (info) {
-      setOpenPageInfos(prev => ({ ...prev, [pageId]: { title: info!.title, fileType: info!.fileType || '' } }))
+      setOpenPageInfos(prev => ({ ...prev, [pageId]: info! }))
     }
 
     const currentIds = openPageIdsRef.current
@@ -599,7 +604,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       setOpenPageInfos(prev => {
         const next = { ...prev }
         delete next[slot]
-        next[pageId] = { title: info?.title ?? '', fileType: info?.fileType ?? '' }
+        next[pageId] = info ?? { title: '', fileType: '' }
         return next
       })
     } else {
@@ -702,6 +707,18 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
 
   const handleReorderTabs = useCallback((newOrder: string[]) => { setOpenPageIds(newOrder) }, [])
 
+  /** 树内草稿徽标集合：文件视图里出现、但知识页索引没有对应 path 的 md/txt（无 frontmatter id） */
+  const treeDraftRelPaths = useMemo(() => {
+    const known = new Set(allPages.map(p => p.path))
+    const out = new Set<string>()
+    for (const entries of Object.values(dirCache)) {
+      for (const e of entries) {
+        if (e.type === 'file' && /\.(md|txt)$/i.test(e.name) && !known.has(e.relPath)) out.add(e.relPath)
+      }
+    }
+    return out
+  }, [dirCache, allPages])
+
   // ---- 文件视图（Phase 2 批次 1）：VaultTree 接线——与编辑区同一份树实现，目录即真相 ----
   const ensureVaultRoot = useCallback(async (): Promise<string | null> => {
     if (vaultRootRef.current) return vaultRootRef.current
@@ -736,11 +753,20 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     if (leftView === 'files') void refreshTreeDir('')
   }, [leftView, refreshTreeDir])
 
-  /** 打开文件：有 frontmatter id 的知识页 → 页签（handleOpenPage）；草稿/非 md → 批次 1 仍由编辑器模块兜底 */
+  /** 打开文件：知识页走页签；无 id 草稿 md/txt → draft 直入编辑（同页签栈，Phase 2 批次 1）；
+   *  非 md（PDF/代码/html）暂由编辑器模块兜底（批次 2 迁移） */
   const handleTreeOpenFile = useCallback((node: TreeNode) => {
     if (node.type === 'dir') { handleToggleTreeDir(node.relPath); return }
     const page = allPages.find(p => p.path === node.relPath)
     if (page) { void handleOpenPage(page.id); return }
+    const lower = node.name.toLowerCase()
+    if (lower.endsWith('.md') || lower.endsWith('.txt')) {
+      const name = node.relPath.slice(node.relPath.lastIndexOf('/') + 1)
+      const dot = name.lastIndexOf('.')
+      const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : 'md'
+      void handleOpenPage(`draft:${node.relPath}`, { title: name, fileType: ext })
+      return
+    }
     window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: node.relPath, from: 'knowledge' } }))
   }, [allPages, handleOpenPage, handleToggleTreeDir])
 
@@ -1618,7 +1644,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 <VaultTree
                   dirCache={dirCache}
                   expanded={expandedDirs}
-                  activePath={allPages.find(p => p.id === activePageId)?.path ?? null}
+                  activePath={allPages.find(p => p.id === activePageId)?.path ?? (activePageId?.startsWith('draft:') ? activePageId.slice(6) : null)}
                   onToggleDir={handleToggleTreeDir}
                   onOpenFile={handleTreeOpenFile}
                   onContextMenu={(e, node) => { e.preventDefault(); setTreeMenu({ x: e.clientX, y: e.clientY, node }) }}
@@ -1626,6 +1652,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   creating={treeCreating}
                   onCommitCreate={handleTreeCommitCreate}
                   onCancelCreate={() => setTreeCreating(null)}
+                  draftRelPaths={treeDraftRelPaths}
                 />
                 {treeMenu && (
                   <div className="fixed inset-0 z-[70]" onMouseDown={() => setTreeMenu(null)} onContextMenu={e => { e.preventDefault(); setTreeMenu(null) }}>
@@ -1879,6 +1906,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 onRequestReading={enterReading}
                 vaultMode={true} // R6 D9 后恒 vault
                 onOpenInEditor={() => handleOpenInEditor(activePageId)}
+                draftRelPath={activePageId.startsWith('draft:') ? activePageId.slice(6) : undefined}
               />
             </Suspense>
           ) : (
