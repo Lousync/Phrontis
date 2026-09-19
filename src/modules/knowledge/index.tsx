@@ -22,6 +22,8 @@ import {
   workspaceRename, workspaceGetCurrent,
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
+// 页签判定消费共享 tabPolicy（笔记合并 Phase 1 §1.3）：与编辑器模块同一套「该不该消失 / 关闭落点」
+import { previewReplacement, landingAfterClose } from '../../lib/tabPolicy'
 import { recordFileOp } from '../../lib/fileOpHistory'
 import { useDataChanged } from '../../lib/dataChanged'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
@@ -570,17 +572,22 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
 
     // 预览/钉住双态（VS Code 模型）：只替换「当前预览槽」（非固定、非编辑中）。
-    // 固定标签永不被替换；必须原位替换而非整栏重置，否则钉住的标签会被清掉
+    // 固定标签永不被替换；必须原位替换而非整栏重置，否则钉住的标签会被清掉。
+    // 判定消费共享 tabPolicy.previewReplacement（§1.3，与编辑器同源）：知识库无显式 previewRel ——
+    // 「激活且非固定」即预览槽；激活标签脏（有未保存编辑）视同固定 → verdict='keep' → 追加，绝不丢内容。
     const dirty = dirtyPageIdsRef.current
     const pinned = pinnedPageIdsRef.current
-    const replaceCurrent = activeId && !dirty.has(activeId) && !pinned.has(activeId)
+    const previewSlot = activeId && !pinned.has(activeId) ? activeId : null
+    const verdict = previewReplacement(previewSlot, pageId, [...dirty])
 
-    if (replaceCurrent) {
+    if (verdict === 'drop') {
       // Replace the preview tab in place (pinned/dirty neighbors stay)
-      setOpenPageIds(prev => prev.map(id => (id === activeId ? pageId : id)))
+      // verdict==='drop' 蕴含 previewSlot 非空（存在干净的预览槽才谈得上替换）
+      const slot = previewSlot as string
+      setOpenPageIds(prev => prev.map(id => (id === slot ? pageId : id)))
       setOpenPageInfos(prev => {
         const next = { ...prev }
-        delete next[activeId]
+        delete next[slot]
         next[pageId] = { title: info?.title ?? '', fileType: info?.fileType ?? '' }
         return next
       })
@@ -612,12 +619,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     setDirtyPageIds(prev => { const next = new Set(prev); next.delete(pageId); return next })
     setPinnedPageIds(prev => { const next = new Set(prev); next.delete(pageId); return next })
     if (activePageIdRef.current === pageId) {
-      if (nextIds.length === 0) {
+      // 激活落点消费共享 tabPolicy.landingAfterClose（§1.3，与编辑器同源）：右邻居优先，否则左邻居
+      const landing = landingAfterClose(currentIds, pageId)
+      if (landing) {
+        setActivePageId(landing)
+      } else {
         setActivePageId(null)
         // All tabs closed — just close outline, keep sidebar state unchanged
         setShowOutline(false)
       }
-      else { const newIdx = Math.min(idx, nextIds.length - 1); setActivePageId(nextIds[newIdx]) }
     }
   }, [])
 

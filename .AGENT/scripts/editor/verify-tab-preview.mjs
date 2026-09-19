@@ -28,12 +28,12 @@ import { stripComments } from '../shared/strip-comments.mjs'
 // 真实纯函数（无 React / 无 electron 依赖，可直接引）
 import {
   TAB_SOFT_CAP, previewReplacement, pickTabsToEvict, nextTabInCycle, landingAfterClose,
-} from '../../../src/modules/editor/tabPolicy.ts'
+} from '../../../src/lib/tabPolicy.ts'
 
 const ROOT = path.resolve(new URL('../../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'))
 const EDITOR = path.join(ROOT, 'src/modules/editor/index.tsx')
 const TYPES = path.join(ROOT, 'src/modules/editor/types.ts')
-const POLICY = path.join(ROOT, 'src/modules/editor/tabPolicy.ts')
+const POLICY = path.join(ROOT, 'src/lib/tabPolicy.ts')
 
 const checks = []
 const check = (name, pass, detail = '') => checks.push({ name, pass: !!pass, detail })

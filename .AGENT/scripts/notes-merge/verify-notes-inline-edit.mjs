@@ -83,5 +83,19 @@ console.log('[4] 共享 MonacoPane 宿主（P1b）')
   ok(shared.includes('focus(): void') && shared.includes('getEditor():'), '句柄含 focus/getEditor（脚注/插图/大纲沿用）')
 }
 
+// ---- ⑤ 1.3：知识库页签判定消费共享 tabPolicy ----
+console.log('[5] 页签策略同源（1.3）')
+{
+  const ki = read('src/modules/knowledge/index.tsx')
+  ok(ki.includes("from '../../lib/tabPolicy'"), 'knowledge/index.tsx 从共享层引入 tabPolicy')
+  ok(ki.includes('previewReplacement(previewSlot, pageId'), '预览槽替换判定走 previewReplacement（脏=追加不丢内容）')
+  ok(ki.includes('landingAfterClose(currentIds, pageId)'), '关闭落点走 landingAfterClose（右邻优先）')
+  ok(!/const newIdx = Math\.min\(idx, nextIds\.length - 1\)/.test(ki), '负向：手写落点（Math.min 下标算术）已移除')
+  const policy = read('src/lib/tabPolicy.ts')
+  ok(policy.includes('export function previewReplacement') && policy.includes('export function landingAfterClose'), '共享层持有页签纯函数实现')
+  const shim = read('src/modules/editor/tabPolicy.ts')
+  ok(/export \{ TAB_SOFT_CAP/.test(shim) && !/export function previewReplacement/.test(shim), 'editor/tabPolicy.ts 为 re-export shim')
+}
+
 console.log(`\n${pass} PASS / ${fail} FAIL`)
 process.exit(fail === 0 ? 0 : 1)
