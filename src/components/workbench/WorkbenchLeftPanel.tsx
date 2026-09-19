@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, House, Lock,
-  LockOpen, NotebookPen, Library, Trees, Bot, Search,
+  LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, Clipboard,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
+import { ConfirmDialog } from '../shared'
 import { useSettings } from '../../lib/SettingsContext'
-import { workspaceGetCurrent, workspaceListDir } from '../../lib/ipc'
+import { workspaceGetCurrent, workspaceListDir, workspaceRename, workspaceTrash } from '../../lib/ipc'
+import { showToast } from '../../lib/toast'
+import { recordFileOp } from '../../lib/fileOpHistory'
 import { WorkbenchSearchPanel } from './WorkbenchSearchPanel'
 import { BOOKMARK_COLORS, LOCATE_QUIZ_VIEW_EVENT, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, type RailModule } from '../../lib/workbenchLayout'
 import type { TabName } from '../../types'
@@ -147,23 +150,58 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
   }
 
   // 仓库根层一次读取：树模式（文件夹+散文件）与总览态散文件区共用
+  // （2026-09-19 反馈：零散文件支持右键文件操作 → 刷新抽成 refreshRoot，重命名/删除后重拉）
   const [dirs, setDirs] = useState<string[]>([])
   const [loose, setLoose] = useState<string[]>([])
-  useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const cur = await workspaceGetCurrent()
-        if (!cur?.rootId || !alive) return
-        const res = await workspaceListDir(cur.rootId, '')
-        if (!alive || res.error) return
-        const soft = new Set(res.softNames ?? [])
-        setDirs((res.entries ?? []).filter((e) => e.type === 'dir' && !soft.has(e.name)).map((e) => e.name))
-        setLoose((res.entries ?? []).filter((e) => e.type === 'file' && !soft.has(e.name)).map((e) => e.name))
-      } catch { /* 无仓库/未就绪：区留空 */ }
-    })()
-    return () => { alive = false }
+  const rootIdRef = useRef<string | null>(null)
+  const refreshRoot = useCallback(async () => {
+    try {
+      const cur = await workspaceGetCurrent()
+      if (!cur?.rootId) { rootIdRef.current = null; setDirs([]); setLoose([]); return }
+      rootIdRef.current = cur.rootId
+      const res = await workspaceListDir(cur.rootId, '')
+      if (res.error) return
+      const soft = new Set(res.softNames ?? [])
+      setDirs((res.entries ?? []).filter((e) => e.type === 'dir' && !soft.has(e.name)).map((e) => e.name))
+      setLoose((res.entries ?? []).filter((e) => e.type === 'file' && !soft.has(e.name)).map((e) => e.name))
+    } catch { /* 无仓库/未就绪：区留空 */ }
   }, [])
+  useEffect(() => { void refreshRoot() }, [refreshRoot])
+
+  // ---- 零散文件右键菜单（2026-09-19 反馈）：打开 / 重命名 / 复制路径 / 删除（回收站） ----
+  const [looseMenu, setLooseMenu] = useState<{ x: number; y: number; file: string } | null>(null)
+  const [renameBox, setRenameBox] = useState<{ file: string; value: string } | null>(null)
+  const [trashTarget, setTrashTarget] = useState<string | null>(null)
+  const openLooseMenu = useCallback((e: React.MouseEvent, file: string) => {
+    e.preventDefault()
+    setLooseMenu({ x: e.clientX, y: e.clientY, file })
+  }, [])
+  const doRenameLoose = useCallback(async (file: string, rawName: string) => {
+    const newName = rawName.trim()
+    const root = rootIdRef.current
+    if (!root || !newName || newName === file) return
+    // 零散文件都在仓库根层：relPath === 文件名，重命名即根内改名
+    const res = await workspaceRename(root, file, newName)
+    if (!res.ok) { showToast({ type: 'error', message: res.error || '重命名失败' }); return }
+    recordFileOp({ kind: 'move', rootId: root, from: file, to: newName, name: newName })
+    await refreshRoot()
+    showToast({ type: 'info', message: '已重命名' })
+  }, [refreshRoot])
+  const doTrashLoose = useCallback(async (file: string) => {
+    const root = rootIdRef.current
+    if (!root) return
+    const res = await workspaceTrash(root, file)
+    if (!res.ok) { showToast({ type: 'error', message: res.error || '删除失败' }); return }
+    await refreshRoot()
+    showToast({ type: 'info', message: `已移入回收站：${file}` })
+  }, [refreshRoot])
+  // 菜单 Esc / 外部点击关闭（同 editor 树右键菜单口径）
+  useEffect(() => {
+    if (!looseMenu) return
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setLooseMenu(null) }
+    window.addEventListener('keydown', onEsc)
+    return () => window.removeEventListener('keydown', onEsc)
+  }, [looseMenu])
 
   const itemCls = 'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors'
 
@@ -201,7 +239,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
               <div className="px-2.5 pb-0.5 pt-2 text-[10.5px] text-[var(--text-muted)]">根目录散文件</div>
             )}
             {loose.map((f) => (
-              <button key={f} onClick={() => onOpenLooseFile(f)} className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}>
+              <button key={f} onClick={() => onOpenLooseFile(f)} onContextMenu={(e) => openLooseMenu(e, f)} className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}>
                 <FileText size={13} className="shrink-0 text-[var(--text-muted)]" />
                 {f}
               </button>
@@ -350,7 +388,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
               <div className="flex flex-col gap-0.5 border-t border-[var(--border-color)] p-1.5">
                 <div className="px-2.5 pb-0.5 pt-1 text-[10.5px] text-[var(--text-muted)]">零散文件</div>
                 {loose.map((f) => (
-                  <button key={f} onClick={() => onOpenLooseFile(f)} className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}>
+                  <button key={f} onClick={() => onOpenLooseFile(f)} onContextMenu={(e) => openLooseMenu(e, f)} className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}>
                     <FileText size={13} className="shrink-0 text-[var(--text-muted)]" />
                     {f}
                   </button>
@@ -363,6 +401,90 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
             <VaultSwitcher />
           </div>
         </>
+      )}
+      {/* ---- 零散文件右键菜单 + 重命名/删除弹层（fixed，覆盖两种模式下的散文件列表） ---- */}
+      {looseMenu && (
+        <div
+          className="fixed inset-0 z-[70]"
+          onMouseDown={() => setLooseMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setLooseMenu(null) }}
+        >
+          <div
+            className="absolute min-w-[140px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-lg kb-pop"
+            style={{ left: Math.min(looseMenu.x, window.innerWidth - 160), top: Math.min(looseMenu.y, window.innerHeight - 180) }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => { onOpenLooseFile(looseMenu.file); setLooseMenu(null) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+            >
+              <FileText size={13} className="text-[var(--text-muted)]" />打开
+            </button>
+            <button
+              onClick={() => { setRenameBox({ file: looseMenu.file, value: looseMenu.file }); setLooseMenu(null) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+            >
+              <Pencil size={13} className="text-[var(--text-muted)]" />重命名
+            </button>
+            <button
+              onClick={() => { void navigator.clipboard.writeText(looseMenu.file); setLooseMenu(null) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+            >
+              <Clipboard size={13} className="text-[var(--text-muted)]" />复制路径
+            </button>
+            <div className="my-1 border-t border-[var(--border-color)]" />
+            <button
+              onClick={() => { setTrashTarget(looseMenu.file); setLooseMenu(null) }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
+            >
+              <Trash2 size={13} className="text-[var(--text-muted)]" />删除（回收站）
+            </button>
+          </div>
+        </div>
+      )}
+      <ConfirmDialog
+        open={trashTarget !== null}
+        title="移入回收站"
+        message={`「${trashTarget ?? ''}」移入回收站，可恢复。`}
+        confirmLabel="删除"
+        showCheckbox={false}
+        onConfirm={() => { if (trashTarget) void doTrashLoose(trashTarget); setTrashTarget(null) }}
+        onCancel={() => setTrashTarget(null)}
+      />
+      {renameBox && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30 kb-overlay" onClick={() => setRenameBox(null)}>
+          <div
+            className="w-80 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-2 text-[13px] font-medium text-[var(--text-primary)]">重命名</div>
+            <input
+              autoFocus
+              value={renameBox.value}
+              onChange={(e) => setRenameBox((b) => (b ? { ...b, value: e.target.value } : b))}
+              placeholder="新名称"
+              className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { const b = renameBox; setRenameBox(null); if (b) void doRenameLoose(b.file, b.value) }
+                if (e.key === 'Escape') setRenameBox(null)
+              }}
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                onClick={() => setRenameBox(null)}
+                className="rounded-md px-3 py-1 text-[12.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)]"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => { const b = renameBox; setRenameBox(null); if (b) void doRenameLoose(b.file, b.value) }}
+                className="rounded-md bg-[var(--accent)] px-3 py-1 text-[12.5px] text-white transition-opacity hover:opacity-90"
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

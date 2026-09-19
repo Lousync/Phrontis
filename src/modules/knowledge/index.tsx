@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, Folder, ListTree, X, BookMarked, Puzzle, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff } from 'lucide-react'
-import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_VIEW_TOGGLED_EVENT } from '../../lib/workbenchLayout'
+import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { WelcomeHtmlView } from './components/WelcomeHtmlView'
@@ -108,6 +108,13 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     const handler = () => toggleQuizCollection(true)
     window.addEventListener(LOCATE_QUIZ_VIEW_EVENT, handler)
     return () => window.removeEventListener(LOCATE_QUIZ_VIEW_EVENT, handler)
+  }, [toggleQuizCollection])
+  // 页面条「错题本」条目的 ✕（2026-09-19 反馈补关闭钮）→ 关闭错题本视图；
+  // 随后 QUIZ_VIEW_TOGGLED {open:false} 回流，条目与左栏 quiz 态自然收起
+  useEffect(() => {
+    const handler = () => toggleQuizCollection(false)
+    window.addEventListener(QUIZ_VIEW_CLOSE_REQUEST_EVENT, handler)
+    return () => window.removeEventListener(QUIZ_VIEW_CLOSE_REQUEST_EVENT, handler)
   }, [toggleQuizCollection])
   /** C 级模块插件声明的视图（slot=knowledge.sidebar）+ 当前打开的插件视图 */
   const [pluginViews, setPluginViews] = useState<PluginViewContribution[]>([])

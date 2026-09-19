@@ -87,10 +87,9 @@ export function BookshelfSideList({ onOpenBook }: {
           </div>
         )}
         {list !== null && list.length === 0 && !loadErr && (
-          <div className="flex h-full flex-col items-center justify-center gap-1.5 px-3 text-center text-[var(--text-muted)]">
-            <BookOpen size={24} strokeWidth={1.4} />
-            <div className="text-[12px]">.books 里还没有 PDF</div>
-            <div className="text-[11px]">把 .pdf 放进仓库顶层的 .books 文件夹（目录已自动创建）</div>
+          /* 空态只留图标（2026-09-19 反馈：不要多余的文字说明） */
+          <div className="flex h-full flex-col items-center justify-center text-[var(--text-muted)]">
+            <BookOpen size={28} strokeWidth={1.4} />
           </div>
         )}
         {list && list.map((b) => {

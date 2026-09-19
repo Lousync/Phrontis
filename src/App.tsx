@@ -9,7 +9,7 @@ import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchPageBar } from './components/workbench/WorkbenchPageBar'
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
 import { ToolHost, PluginToolHost, TOOLS_WITH_SIDEBAR, isToolTabId, toolIdOfTab, toolTabId } from './components/workbench/toolRegistry'
-import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_VIEW_TOGGLED_EVENT, type RailModule } from './lib/workbenchLayout'
+import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT, type RailModule } from './lib/workbenchLayout'
 
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
 import { ZenHotZone } from './components/shared/ZenHotZone'
@@ -1242,7 +1242,11 @@ export default function App() {
                       }
                     }
                   }}
-                  onClose={closeTab}
+                  onClose={(id) => {
+                    // 错题本合成条目的 ✕ = 请求关闭错题本视图（视图关 → QUIZ_VIEW_TOGGLED 回流收条目）
+                    if (id === 'quiz') { window.dispatchEvent(new CustomEvent(QUIZ_VIEW_CLOSE_REQUEST_EVENT)); return }
+                    closeTab(id)
+                  }}
                   onReorder={handleReorder}
                   editorSlotRef={wbEditorPageRef}
                   knowledgeSlotRef={wbKnowledgePageRef}

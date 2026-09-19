@@ -194,6 +194,13 @@ export const LOCATE_QUIZ_VIEW_EVENT = 'kb-locate-quiz-view'
 export const QUIZ_VIEW_TOGGLED_EVENT = 'kb-quiz-view-toggled'
 
 /**
+ * App → knowledge：关闭错题本视图的请求（2026-09-19 反馈）。
+ * 页面条「错题本」条目是无 close 就发不出去的合成条目——补 ✕ 后经本事件让 knowledge
+ * 走 toggleQuizCollection(false)，随后 QUIZ_VIEW_TOGGLED {open:false} 自然回流收条目。
+ */
+export const QUIZ_VIEW_CLOSE_REQUEST_EVENT = 'kb-quiz-view-close-request'
+
+/**
  * 错题本左栏（QuizNavPanel）→ QuizCollection 视图内聚焦某本书（科目）。
  * QuizNavPanel 点书条目 = 派发本事件携带书名；QuizCollection 监听后 setBookFilter + 展开书架。
  * 2026-09-17 第四轮拍板④：错题本从知识库目录树侧栏剥离，左栏 quiz 态挂本组件。

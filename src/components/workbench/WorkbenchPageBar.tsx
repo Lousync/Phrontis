@@ -207,6 +207,14 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
           >
             <span className={`shrink-0 ${quizEntryActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{TAB_ICONS.quiz}</span>
             <span>错题本</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); onClose('quiz') }}
+              onAuxClick={(e) => e.stopPropagation()}
+              title="关闭错题本"
+              className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            >
+              <X size={11} />
+            </button>
           </div>
         )}
         {/* 知识库页签组槽：紧跟模块条目从左排起（2026-09-19 反馈：原排在 flex-1 编辑器槽之后，
