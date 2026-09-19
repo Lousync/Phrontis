@@ -277,7 +277,10 @@ export function WorkbenchSearchPanel({ onOpenPage, onLocateCategory, onRunComman
         </button>
       </div>
 
-      {/* 搜索框：无边的浅底圆角条（不画边框，避免左栏卡里「卡中卡」的三层感） */}
+      {/* 搜索框：无边的浅底圆角条（不画边框，避免左栏卡里「卡中卡」的三层感）。
+          input 上的 bg-transparent!/border-0! 照抄 AI 对话框 textarea 的写法：
+          styles/index.css 的全局 input 规则（白底+1px 边框）是未分层样式，会压过
+          layered utilities——不加 ! 输入框自己嵌出一个白边框（2026-09-19 反馈）。 */}
       <div className="shrink-0 px-2 pb-1.5">
         <div className="flex items-center gap-1.5 rounded-lg bg-[var(--bg-tertiary)] px-2.5 py-[7px] transition-colors focus-within:bg-[var(--bg-hover)]">
           <Search size={13} className="shrink-0 text-[var(--text-muted)]" />
@@ -289,7 +292,7 @@ export function WorkbenchSearchPanel({ onOpenPage, onLocateCategory, onRunComman
             onKeyDown={handleKeyDown}
             placeholder="搜索页面 / 目录 / 标签…"
             spellCheck={false}
-            className="min-w-0 flex-1 border-0 bg-transparent py-0.5 text-[12.5px] text-[var(--text-primary)] shadow-none outline-none placeholder:text-[var(--text-disabled)]"
+            className="min-w-0 flex-1 border-0! bg-transparent! py-0.5 text-[12.5px] text-[var(--text-primary)] shadow-none outline-none placeholder:text-[var(--text-disabled)]"
           />
         </div>
       </div>
