@@ -17,6 +17,7 @@ const byRecent: SortFn = (a, b) => {
 
 /**
  * 书架左栏书目条目视图（2026-09-19 反馈：进入书架后左栏不再空置，放书条目列表）。
+ * 书源 = 仓库顶层 `.books/`（点前缀系统区，笔记区不显示；目录不存在时主进程自动创建）。
  * 条目 = 封面 + 书名 + 细进度条（百分比 = lastPage/totalPages，totalPages 由阅读器
  * 首读登记进 pdfReader.json；未登记/未读的书进度条为空）。点击条目 = 打开阅读，
  * 与主区封面网格同一落点（App 的 setBookshelfReading）。阅读态（有 railReaderDoc）
@@ -88,8 +89,8 @@ export function BookshelfSideList({ onOpenBook }: {
         {list !== null && list.length === 0 && !loadErr && (
           <div className="flex h-full flex-col items-center justify-center gap-1.5 px-3 text-center text-[var(--text-muted)]">
             <BookOpen size={24} strokeWidth={1.4} />
-            <div className="text-[12px]">仓库里还没有 PDF</div>
-            <div className="text-[11px]">把 .pdf 放进仓库任意目录（子目录也行），书架自动识别</div>
+            <div className="text-[12px]">.books 里还没有 PDF</div>
+            <div className="text-[11px]">把 .pdf 放进仓库顶层的 .books 文件夹（目录已自动创建）</div>
           </div>
         )}
         {list && list.map((b) => {

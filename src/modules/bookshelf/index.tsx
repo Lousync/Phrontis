@@ -14,7 +14,8 @@ const PdfReaderView = lazy(() => import('../../components/shared/pdf/PdfReaderVi
 
 /**
  * 书架（v3.4.0 PDF 阅读体验整包批次 2，方案 §2/§8）：
- * - 自动库 = 扫 vault 全部 .pdf（pdfReader:listBooks），清单不落盘；放文件进仓库即被识别，无导入入口（2026-09-19 拍板删「＋导入」）；
+ * - 自动库 = 扫仓库顶层 `.books/` 目录的全部 .pdf（pdfReader:listBooks），清单不落盘；
+ *   `.books` 为点前缀系统区，笔记区不显示；目录不存在时主进程自动创建（2026-09-19 拍板）。
  * - 封面网格（PdfCover 懒渲染 + covers 缓存）；续读条（hasProgress 按最近读排序）；
  * - 点书 = kb-open-note { relPath, from:'bookshelf' }（state+props 范式，编辑器组文档标签每书一个）。
  * 模块根节点 h-full（槽位容器是块级 div，flex-1 无效）。
@@ -119,7 +120,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-[var(--bg-primary)] text-[var(--text-muted)]">
         <BookOpen size={40} strokeWidth={1.5} />
         <div className="text-[13.5px]">书架</div>
-        <div className="max-w-[280px] text-center text-[11.5px] leading-relaxed">先在编辑区打开一个仓库，书架会自动收拢其中的 PDF</div>
+        <div className="max-w-[280px] text-center text-[11.5px] leading-relaxed">先打开一个仓库，书架会自动收拢 .books 目录里的 PDF</div>
       </div>
     )
   }
@@ -147,8 +148,8 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
         {books !== null && list.length === 0 && !loadErr && (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-[var(--text-muted)]">
             <BookOpen size={34} strokeWidth={1.4} />
-            <div className="text-[12.5px]">仓库里还没有 PDF</div>
-            <div className="text-[11.5px]">把 .pdf 放进仓库任意目录（子目录也行），书架自动识别</div>
+            <div className="text-[12.5px]">.books 里还没有 PDF</div>
+            <div className="text-[11.5px]">把 .pdf 放进仓库顶层的 .books 文件夹（目录已自动创建）</div>
           </div>
         )}
 

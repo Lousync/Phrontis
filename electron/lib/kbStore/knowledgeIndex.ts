@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, statSync, type Dirent } from 'fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, type Dirent } from 'fs'
 import { join, relative } from 'path'
 import { randomUUID } from 'crypto'
 import { getCurrentVault, KB_INBOX_DIR } from './vaultContext'
@@ -194,37 +194,43 @@ function scanVaultFiles(root: string, dir: string, out: string[], warnings?: str
 }
 
 /**
- * v3.4.0 书架「自动库」：扫当前仓库全部 .pdf（方案 pdf-reader-v340-design §1.4）。
- * 复用 scanVaultFiles 的全类型出口 —— 系统区跳过 / .ignore 剪枝 / 符号链接跳过全部继承，
- * 零新过滤逻辑（.ignore 只在 scanVaultFiles 一处生效的既有口径）。
- * 只读不建索引：返回 posix relPath + size + mtimeMs，书架清单不落盘。
+ * v3.4.0 书架「自动库」。2026-09-19 拍板：识别范围限定为**仓库顶层 `.books/` 目录**——
+ * 免得 vault 里散落的 PDF 把书架搞乱；`.books` 是点前缀目录 = 系统区，
+ * 笔记区（md 索引 / 文件树）天然不收录，见 scanVaultFiles 的 dot 分支。
+ * 目录不存在时自动创建（放文件即识别，用户无需手动 mkdir）。
+ * 以 `.books` 为扫描根复用 scanVaultFiles —— 符号链接跳过 / 点子目录跳过等语义照旧；
+ * 返回的 relPath 仍相对仓库根（书键口径不变），只读不建索引、书架清单不落盘。
  */
 export function scanVaultPdfs(): Array<{ relPath: string; size: number; mtimeMs: number }> {
   const current = getCurrentVault()
   if (!current) return []
-  const files: string[] = []
+  const booksDir = join(current.rootPath, '.books')
   try {
-    const ignoreResult = getVaultIgnore()
-    scanVaultFiles(current.rootPath, current.rootPath, files, undefined, ignoreResult.ign, undefined)
+    if (!existsSync(booksDir)) {
+      mkdirSync(booksDir, { recursive: true })
+      return []
+    }
+    const files: string[] = []
+    scanVaultFiles(booksDir, booksDir, files, undefined, null, undefined)
+    const out: Array<{ relPath: string; size: number; mtimeMs: number }> = []
+    for (const abs of files) {
+      if (!abs.toLowerCase().endsWith('.pdf')) continue
+      try {
+        const st = statSync(abs)
+        if (!st.isFile()) continue
+        out.push({
+          relPath: relative(current.rootPath, abs).replace(/\\/g, '/'),
+          size: st.size,
+          mtimeMs: st.mtimeMs,
+        })
+      } catch {
+        /* 单个不可读跳过 */
+      }
+    }
+    return out
   } catch {
     return []
   }
-  const out: Array<{ relPath: string; size: number; mtimeMs: number }> = []
-  for (const abs of files) {
-    if (!abs.toLowerCase().endsWith('.pdf')) continue
-    try {
-      const st = statSync(abs)
-      if (!st.isFile()) continue
-      out.push({
-        relPath: relative(current.rootPath, abs).replace(/\\/g, '/'),
-        size: st.size,
-        mtimeMs: st.mtimeMs,
-      })
-    } catch {
-      /* 单个不可读跳过 */
-    }
-  }
-  return out
 }
 
 /**
