@@ -371,8 +371,36 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
           <PluginSlotEntry slot="blog.sidebar" />
         </div>
         )
+        // 大纲内嵌形态（2026-09-19 反馈修复）：大纲面板也进左栏槽（embedded + 返回钮头部），
+        // 而不是渲染在模块主区——此前托管形态下 OutlinePanel 落在模块 flex 行里、
+        // 左栏槽 portal null，看起来「大纲跑到中间、左栏空了」
+        const outlineVisible = showOutline && (view === 'editor' || view === 'detail')
+        const outlineInner = (
+          <div className="flex h-full flex-col">
+            <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] px-2 py-1.5">
+              <button
+                onClick={handleToggleOutline}
+                title="返回文章列表"
+                className="rounded p-0.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--text-primary)]">
+                {view === 'editor' ? (entries.find(e => e.id === selectedId)?.title || '无标题') : (entries.find(e => e.id === selectedId)?.date || '')}
+              </span>
+            </div>
+            <div className="min-h-0 flex-1">
+              <OutlinePanel
+                pageTitle={view === 'editor' ? (entries.find(e => e.id === selectedId)?.title || '') : (entries.find(e => e.id === selectedId)?.date || '')}
+                headings={outlineHeadings}
+                onBackToFile={handleToggleOutline}
+                embedded
+              />
+            </div>
+          </div>
+        )
         return sidebarEl
-          ? createPortal(sidebarOpen && !showOutline ? sidebarInner : null, sidebarEl)
+          ? createPortal(outlineVisible ? outlineInner : (sidebarOpen ? sidebarInner : null), sidebarEl)
           : sidebarHosted
             ? null // Workbench 托管但槽未就绪（左栏收起/翻转瞬间）：渲染 null 等槽重挂后 portal，绝不回落内嵌列（同 editor 口径）
             : (
@@ -382,8 +410,8 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
             )
       })()}
 
-      {/* Outline panel — replaces sidebar on the left when toggled */}
-      {showOutline && (view === 'editor' || view === 'detail') && (
+      {/* Outline panel — 非托管回落形态：原位独立面板（托管形态已 portal 进左栏槽，见上） */}
+      {!sidebarEl && showOutline && (view === 'editor' || view === 'detail') && (
         <OutlinePanel
           pageTitle={view === 'editor' ? (entries.find(e => e.id === selectedId)?.title || '') : (entries.find(e => e.id === selectedId)?.date || '')}
           headings={outlineHeadings}
