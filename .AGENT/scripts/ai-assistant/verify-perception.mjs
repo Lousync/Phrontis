@@ -758,6 +758,16 @@ ok(/aiAssistantInlineSuggestModelId/.test(SRC_INLINE),
 ok(!/文档末尾/.test(SRC_TRIGGER),
   'J15ae ★ 触发点判定里不得有「文档末尾就触发」兜底（人基本都在文末打字，加了等于不拦）', '')
 
+// J15af 流式早停（感知延迟主修法）：max_tokens 全局 4096 + 思考型模型默认思考，都会拖死「续写一句」
+ok(/earlyStop/.test(SRC_INLINE) && /INLINE_SUGGEST_MAX_CHARS \+ 200/.test(SRC_INLINE),
+  'J15af ★ 正文聚合到建议上限即早停（已有的内容直接作为建议返回，不等模型收尾）', '')
+ok(/thinkingLen > 1500/.test(SRC_INLINE),
+  'J15b0 ★ 思考链超 1500 字符还没出正文就放弃（思考型模型狂思考时不让用户干等）', '')
+ok(/if \(earlyStop\) \{[\s\S]{0,200}isValidSuggestion\(suggestion\)\) return \{ ok: true, text: suggestion \}/.test(SRC_INLINE),
+  'J15ah ★ 早停走「成功返回」分支（掐断≠失败，否则优化等于白做）', '')
+ok(!/effort:\s*req\.effort/.test(SRC_INLINE),
+  'J15ai 内联建议不透传 effort（思考型模型该靠早停兜底 + 设置里单独选非思考模型）', '')
+
 // ===================== 结果 =====================
 
 if (fails.length === 0) {

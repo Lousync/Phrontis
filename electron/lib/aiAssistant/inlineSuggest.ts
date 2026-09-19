@@ -18,6 +18,7 @@ import { invokeLlmStreamInternal } from '../llmService'
 import { getSettingReader } from '../aiTools'
 import {
   buildInlinePrompt,
+  INLINE_SUGGEST_MAX_CHARS,
   INLINE_SUGGEST_TIMEOUT_MS,
   isValidSuggestion,
   normalizeInlineSuggestion,
@@ -95,6 +96,13 @@ export async function runInlineSuggest(req: InlineSuggestRequest): Promise<Inlin
     }
 
     let out = ''
+    // 早停（感知延迟的主修法）：max_tokens 走全局默认 4096，且思考型模型默认会先思考一大段 ——
+    // 都会让「续写一句」等到天荒地老。流式聚合中一旦内容足够就主动掐断：
+    //   - 正文超过建议上限（+余量）：已有的 out 直接作为建议返回，不等模型收尾；
+    //   - 思考链超过 1500 字符还没出正文：这个时段它不适合作续写，立刻放弃，别让用户干等。
+    //   思考走独立的 reasoning 事件（网关已归一化），不会混进 out，截断安全。
+    let earlyStop = false
+    let thinkingLen = 0
     const r = await invokeLlmStreamInternal(
       {
         messages: [
@@ -103,15 +111,36 @@ export async function runInlineSuggest(req: InlineSuggestRequest): Promise<Inlin
         ],
         providerId,
         modelId,
-        effort: req.effort,
+        // 内联建议不透传 effort：reasoning_effort 只影响「是否发参数」，思考型模型默认照样思考；
+        // 真正的延迟控制靠下面的 reasoning 早停 + 建议用户在设置里给续写单独选非思考模型。
         signal: ctrl.signal,
       },
       (e) => {
-        if (e.type === 'text') out += e.delta
+        if (e.type === 'text') {
+          out += e.delta
+          if (!earlyStop && out.length >= INLINE_SUGGEST_MAX_CHARS + 200) {
+            earlyStop = true
+            ctrl.abort()
+          }
+        } else if (e.type === 'reasoning') {
+          thinkingLen += e.delta.length
+          if (!earlyStop && thinkingLen > 1500) {
+            earlyStop = true
+            ctrl.abort()
+          }
+        }
       },
     )
 
-    if (ctrl.signal.aborted) return { ok: false, aborted: true, error: timedOut ? '生成超时' : '已取消' }
+    if (ctrl.signal.aborted) {
+      // 早停 ≠ 失败：正文已经够一条建议了，直接用（这是「变快」的关键路径）
+      if (earlyStop) {
+        const suggestion = normalizeInlineSuggestion(out)
+        if (isValidSuggestion(suggestion)) return { ok: true, text: suggestion }
+        return { ok: false, aborted: true, error: thinkingLen > 0 ? '该模型思考过久，已放弃本次续写' : '已取消' }
+      }
+      return { ok: false, aborted: true, error: timedOut ? '生成超时' : '已取消' }
+    }
     if (!r.ok) return { ok: false, error: r.error ?? '生成失败' }
 
     const suggestion = normalizeInlineSuggestion(out)
