@@ -51,7 +51,7 @@ const preload = readIfExists('electron/preload/index.ts')
 const ipcLib = readIfExists('src/lib/ipc.ts')
 const typeDecl = readIfExists('src/types/index.ts')
 const mainIndex = readIfExists('electron/main/index.ts')
-const fileTree = readIfExists('src/modules/editor/components/FileTree.tsx')
+const fileTree = readIfExists('src/components/shared/VaultTree.tsx')
 const editorIdx = readIfExists('src/modules/editor/index.tsx')
 
 const checks = []

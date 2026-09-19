@@ -1,4 +1,3 @@
-import type { WorkspaceEntry } from '../../types'
 import { splitFrontmatter, joinFrontmatter } from '../../lib/frontmatter'
 
 /**
@@ -51,18 +50,10 @@ export function savedFullContent(doc: Pick<EditorDoc, 'savedPrefix' | 'savedCont
   return `${doc.savedPrefix ?? ''}${doc.savedContent}`
 }
 
-export type TreeNode = WorkspaceEntry & { relPath: string }
-
-/** 目录缓存：dirRelPath -> entries（懒加载，展开时填充） */
-export type DirCache = Record<string, TreeNode[]>
-
-/** VS Code 式内联创建意图：目标目录 + 条目类型（file=普通文件 / dir=目录 / knowledge=带 frontmatter 知识页） */
-export interface CreateIntent {
-  dirRel: string
-  type: 'file' | 'dir' | 'knowledge'
-  /** 内联输入框默认名（全选态）：空 = 只 focus 让用户输入 */
-  initial?: string
-}
+/** VS Code 式内联创建意图：目标目录 + 条目类型（file=普通文件 / dir=目录 / knowledge=带 frontmatter 知识页）
+ *  —— TreeNode / DirCache / CreateIntent 三个类型已随文件树上移共享层
+ *  `src/components/shared/VaultTree.tsx`（Phase 2 批次 1），此处 re-export 保持既有 import 路径。 */
+export type { TreeNode, DirCache, CreateIntent } from '../../components/shared/VaultTree'
 
 const LANG_MAP: Record<string, string> = {
   md: 'markdown', markdown: 'markdown', mdx: 'markdown',

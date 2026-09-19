@@ -20,10 +20,13 @@ import {
   getKnowledgeTags, pluginListViews, getKnowledgeGraph,
   getKnowledgeIndexWarnings,
   workspaceRename, workspaceGetCurrent,
+  workspaceListDir, workspaceCreateFile, workspaceMkdir,
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 // 页签判定消费共享 tabPolicy（笔记合并 Phase 1 §1.3）：与编辑器模块同一套「该不该消失 / 关闭落点」
 import { previewReplacement, landingAfterClose } from '../../lib/tabPolicy'
+// 文件视图（Phase 2 批次 1，B 方案）：共享 VaultTree——与编辑区同一份实现，目录即真相
+import { VaultTree, type DirCache, type TreeNode, type CreateIntent } from '../../components/shared/VaultTree'
 import { recordFileOp } from '../../lib/fileOpHistory'
 import { useDataChanged } from '../../lib/dataChanged'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
@@ -82,6 +85,14 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [showCategoryPanel, setShowCategoryPanel] = useState(true)
   const [showChapterPanel, setShowChapterPanel] = useState(true)
   const [showOutline, setShowOutline] = useState(false)
+  // 文件视图（Phase 2 批次 1，B 方案）：VaultTree 的一等左栏视图；结构三件套暂留「结构」视图，
+  // 逐批吸收职责后退役（docs/notes-merge-phase2-design.md §2 批次 1）
+  const [leftView, setLeftView] = useState<'files' | 'structure'>('files')
+  const [dirCache, setDirCache] = useState<DirCache>({})
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']))
+  const [treeCreating, setTreeCreating] = useState<CreateIntent | null>(null)
+  const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null)
+  const vaultRootRef = useRef<string | null>(null)
   const [liveContent, setLiveContent] = useState('')
   const [locatePageId, setLocatePageId] = useState<string | null>(null)
   const [locateCategoryId, setLocateCategoryId] = useState<string | null>(null)
@@ -690,6 +701,80 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   }, [forceCloseTab, vaultReadonly])
 
   const handleReorderTabs = useCallback((newOrder: string[]) => { setOpenPageIds(newOrder) }, [])
+
+  // ---- 文件视图（Phase 2 批次 1）：VaultTree 接线——与编辑区同一份树实现，目录即真相 ----
+  const ensureVaultRoot = useCallback(async (): Promise<string | null> => {
+    if (vaultRootRef.current) return vaultRootRef.current
+    const cur = await workspaceGetCurrent()
+    vaultRootRef.current = cur?.rootId ?? null
+    return vaultRootRef.current
+  }, [])
+
+  const refreshTreeDir = useCallback(async (dirRel: string) => {
+    const root = await ensureVaultRoot()
+    if (!root) return
+    try {
+      const res = await workspaceListDir(root, dirRel)
+      if (res?.error) return
+      const nodes: TreeNode[] = (res.entries ?? []).map(e => ({ ...e, relPath: dirRel ? `${dirRel}/${e.name}` : e.name }))
+      setDirCache(prev => ({ ...prev, [dirRel]: nodes }))
+    } catch { /* 静默：树保留旧缓存 */ }
+  }, [ensureVaultRoot])
+
+  const handleToggleTreeDir = useCallback((rel: string) => {
+    setExpandedDirs(prev => {
+      const next = new Set(prev)
+      if (next.has(rel)) { next.delete(rel); return next }
+      next.add(rel)
+      if (!dirCache[rel]) void refreshTreeDir(rel)
+      return next
+    })
+  }, [dirCache, refreshTreeDir])
+
+  useEffect(() => {
+    // 进入文件视图即装载根层（切视图不重挂树，展开态自然延续）
+    if (leftView === 'files') void refreshTreeDir('')
+  }, [leftView, refreshTreeDir])
+
+  /** 打开文件：有 frontmatter id 的知识页 → 页签（handleOpenPage）；草稿/非 md → 批次 1 仍由编辑器模块兜底 */
+  const handleTreeOpenFile = useCallback((node: TreeNode) => {
+    if (node.type === 'dir') { handleToggleTreeDir(node.relPath); return }
+    const page = allPages.find(p => p.path === node.relPath)
+    if (page) { void handleOpenPage(page.id); return }
+    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: node.relPath, from: 'knowledge' } }))
+  }, [allPages, handleOpenPage, handleToggleTreeDir])
+
+  const parentDirOf = (rel: string): string => { const i = rel.lastIndexOf('/'); return i === -1 ? '' : rel.slice(0, i) }
+
+  const handleTreeMove = useCallback(async (srcRel: string, targetDirRel: string) => {
+    const root = await ensureVaultRoot()
+    if (!root) return
+    const name = srcRel.slice(srcRel.lastIndexOf('/') + 1)
+    const dst = targetDirRel ? `${targetDirRel}/${name}` : name
+    try {
+      await workspaceRename(root, srcRel, dst)
+      void refreshTreeDir(parentDirOf(srcRel)); void refreshTreeDir(targetDirRel)
+      const page = allPages.find(p => p.path === srcRel)
+      if (page) showToast({ type: 'info', message: `已移动「${name}」` })
+    } catch { showToast({ type: 'error', message: '移动失败' }) }
+  }, [allPages, ensureVaultRoot, refreshTreeDir])
+
+  const handleTreeCommitCreate = useCallback(async (dirRel: string, type: 'file' | 'dir' | 'knowledge', rawName: string) => {
+    setTreeCreating(null)
+    const name = rawName.trim()
+    if (!name) return
+    const root = await ensureVaultRoot()
+    if (!root) return
+    const rel = dirRel ? `${dirRel}/${name}` : name
+    try {
+      if (type === 'dir') await workspaceMkdir(root, rel)
+      else await workspaceCreateFile(root, rel)
+      void refreshTreeDir(dirRel)
+      // 新建的 md 若未被索引收录（无 id 草稿），点开走编辑器兜底；有 id 由刷新后的索引接管
+      void refreshAllPages()
+    } catch (e) { console.error('[knowledge] tree create failed:', e); showToast({ type: 'error', message: '创建失败' }) }
+  }, [ensureVaultRoot, refreshTreeDir, refreshAllPages])
+
 
   const handleBackToList = useCallback(() => {
     if (activePageIdRef.current) handleCloseTab(activePageIdRef.current)
@@ -1508,8 +1593,18 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
                 <BookMarked size={12} />
                 知识库
+                {/* 视图切换（Phase 2 批次 1）：文件树为主（B 方案），结构三件套暂留过渡 */}
+                <button
+                  onClick={() => setLeftView('files')}
+                  className={`ml-auto rounded px-1.5 py-[1px] text-[11px] transition-colors ${leftView === 'files' ? 'bg-[var(--accent-weak)] text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)]'}`}
+                  title="文件树（目录即真相）"
+                >文件</button>
+                <button
+                  onClick={() => setLeftView('structure')}
+                  className={`rounded px-1.5 py-[1px] text-[11px] transition-colors ${leftView === 'structure' ? 'bg-[var(--accent-weak)] text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)]'}`}
+                  title="笔记本 / 分类（结构视图，过渡保留）"
+                >结构</button>
                 <FolderFocusButton
-                  className="ml-auto"
                   on={!!settings.knowledgeFolderFocus}
                   onToggle={() => updateSettings('knowledgeFolderFocus', !settings.knowledgeFolderFocus)}
                 />
@@ -1517,7 +1612,45 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             )}
 
             {/* 空间列表层：无大纲入口，直接显示文件树；空间内可切换大纲 */}
-            {selectedSpaceId && showOutline ? (
+            {/** 文件视图（Phase 2 批次 1，B 方案）：VaultTree = 与编辑区同一份实现；草稿/非 md 暂由编辑器模块兜底打开 */}
+            {!selectedSpaceId && leftView === 'files' ? (
+              <div className="kb-view-in relative flex flex-1 min-h-0 flex-col">
+                <VaultTree
+                  dirCache={dirCache}
+                  expanded={expandedDirs}
+                  activePath={allPages.find(p => p.id === activePageId)?.path ?? null}
+                  onToggleDir={handleToggleTreeDir}
+                  onOpenFile={handleTreeOpenFile}
+                  onContextMenu={(e, node) => { e.preventDefault(); setTreeMenu({ x: e.clientX, y: e.clientY, node }) }}
+                  onMove={(src, target) => { void handleTreeMove(src, target) }}
+                  creating={treeCreating}
+                  onCommitCreate={handleTreeCommitCreate}
+                  onCancelCreate={() => setTreeCreating(null)}
+                />
+                {treeMenu && (
+                  <div className="fixed inset-0 z-[70]" onMouseDown={() => setTreeMenu(null)} onContextMenu={e => { e.preventDefault(); setTreeMenu(null) }}>
+                    <div
+                      className="absolute min-w-[150px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-lg kb-pop"
+                      style={{ left: Math.min(treeMenu.x, window.innerWidth - 170), top: Math.min(treeMenu.y, window.innerHeight - 160) }}
+                      onMouseDown={e => e.stopPropagation()}
+                    >
+                      {(() => {
+                        const dirRel = treeMenu.node.type === 'dir' ? treeMenu.node.relPath : parentDirOf(treeMenu.node.relPath)
+                        return (
+                          <>
+                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'file' }) }}>新建文件</button>
+                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'dir' }) }}>新建目录</button>
+                            {treeMenu.node.type === 'file' && (
+                              <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); handleTreeOpenFile(treeMenu.node) }}>打开</button>
+                            )}
+                          </>
+                        )
+                      })()}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : selectedSpaceId && showOutline ? (
               <div className="kb-view-in flex-1 min-h-0">
                 <OutlinePanel
                   pageTitle={activePageForOutline?.title ?? ''}

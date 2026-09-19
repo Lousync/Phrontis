@@ -97,5 +97,21 @@ console.log('[5] 页签策略同源（1.3）')
   ok(/export \{ TAB_SOFT_CAP/.test(shim) && !/export function previewReplacement/.test(shim), 'editor/tabPolicy.ts 为 re-export shim')
 }
 
+// ---- ⑥ Phase 2 批次 1：VaultTree 共享 + 知识库文件视图 ----
+console.log('[6] 文件视图（Phase 2 批次 1）')
+{
+  const vt = read('src/components/shared/VaultTree.tsx')
+  const shim = read('src/modules/editor/components/FileTree.tsx')
+  const et = read('src/modules/editor/types.ts')
+  const ki = read('src/modules/knowledge/index.tsx')
+  ok(vt.includes('export function VaultTree') && vt.includes('export type TreeNode'), '共享层持有 VaultTree 实现 + TreeNode/DirCache/CreateIntent 类型')
+  ok(/export \{ VaultTree as FileTree \}/.test(shim), 'editor FileTree 旧路径为 re-export shim')
+  ok(et.includes("export type { TreeNode, DirCache, CreateIntent } from '../../components/shared/VaultTree'"), 'editor/types 三个树类型 re-export 自共享层')
+  ok(ki.includes("from '../../components/shared/VaultTree'"), 'knowledge 消费共享 VaultTree')
+  ok(ki.includes("useState<'files' | 'structure'>('files')"), '左栏双视图（文件为主，结构过渡保留）')
+  ok(ki.includes("kb-open-in-editor'") && ki.includes('handleTreeOpenFile'), '树打开文件：知识页走页签，草稿/非 md 由编辑器模块兜底（批次 2 迁移）')
+  ok(ki.includes('workspaceListDir') && ki.includes('refreshTreeDir'), '目录懒加载接线')
+}
+
 console.log(`\n${pass} PASS / ${fail} FAIL`)
 process.exit(fail === 0 ? 0 : 1)
