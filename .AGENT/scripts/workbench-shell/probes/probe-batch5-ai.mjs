@@ -572,27 +572,10 @@ async function main() {
   //    不让它真去打网络（既快又稳定）。
   //    真生成属于实机验收（需要配好 provider），不在探针覆盖范围。
 
-  // G0 切到编辑器模块并打开一篇 markdown（探针 vault 的欢迎页即 md）
-  await evalJs(`(() => { document.querySelector('[data-wb-bookmark="editor"]')?.click(); return true })()`)
-  await sleep(1500)
-  // 用快速切换器（Ctrl+O）打开第一份知识页 —— 比在文件树里点更稳（免展开目录）
-  await evalJs(`(() => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true, cancelable: true }))
-    return true
-  })()`)
-  await sleep(900)
-  const g0Pick = await evalJs(`(() => {
-    // ★ 2026-09-19 修选择器：分组标签「知识页」在分组头 div 里、不在条目 button 内（面板重构后），
-    //   旧 /知识页/ 按钮匹配恒落空。改走 [data-wb="palette"] 锚点 + 条目 button[data-i]。
-    const pal = document.querySelector('[data-wb="palette"]')
-    const items = [...(pal?.querySelectorAll('button[data-i]') ?? [])]
-    const first = items.find((b) => b.getBoundingClientRect().height > 0)
-    if (first) { first.click(); return { clicked: true, label: first.textContent.slice(0, 40) } }
-    return { clicked: false, label: '', palOpen: !!pal }
-  })()`)
-  await sleep(1600)
-  // Phase 2 批次 2：kb-open-note 改道知识库——README.md 无 id → draft 页签默认阅读态，
-  // B4 链路在编辑态，先进编辑（PageEditor 工具条「切换到编辑」按钮）
+  // G0 打开一篇 markdown（Phase 2 批次 2 起：kb-open-note 事件 = 确定性通道，等价于快速切换器）——
+  // README.md 无 id → draft 页签；随后进编辑态（B4 链路在编辑态）
+  await evalJs(`window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: 'README.md' } }))`)
+  await sleep(2000)
   await evalJs(`(() => {
     const b = [...document.querySelectorAll('button')].find((x) => (x.title || '').startsWith('切换到编辑'))
     b?.click()
@@ -604,7 +587,7 @@ async function main() {
     return { hasEditor: !!ed, hasMonaco: !!document.querySelector('.monaco-editor .view-lines') }
   })()`)
   ok(g0Doc.hasEditor && g0Doc.hasMonaco,
-    'G0 编辑器模块打开 markdown 文档（Monaco 挂载）', `pick=${JSON.stringify(g0Pick)} doc=${JSON.stringify(g0Doc)}`)
+    'G0 打开 markdown 文档（Monaco 挂载）', `doc=${JSON.stringify(g0Doc)}`)
 
   // G1 胶囊里有「建议」按钮且可见可点（单点定义 → 两个宿主都应渲染同一份）
   const g1 = await evalJs(`(() => {
@@ -641,6 +624,17 @@ async function main() {
     const vis = bs.find((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
     vis?.click(); return true
   })()`)
+  // Phase 2 诊断：点击后 dump 编辑器实例与 model 状态（取证 trigger 链路是否到位）
+  const g3dbg = await evalJs(`(() => {
+    const m = window.__kb_monaco
+    if (!m) return { noMonaco: true }
+    return {
+      editors: m.editor.getEditors().length,
+      models: m.editor.getModels().map((x) => x.getLanguageId() + ':' + x.getValueLength()),
+      focused: !!m.editor.getEditors().find((e) => e.hasTextFocus()),
+    }
+  })()`)
+  console.log('[G3 dump]', JSON.stringify(g3dbg))
   const g3 = await waitBusy(true, 2000)
   ok(g3, 'G3 ★ 点「建议」→ provider 真被调用（忙态微标亮起 = 触发链路通）', `busy=${await busyNow()}`)
   // G3b 忙态必须回落：探针无 LLM key → 走主进程硬超时（10s）/ 渲染层兜底（12s）分支。

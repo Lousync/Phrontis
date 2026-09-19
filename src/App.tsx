@@ -899,17 +899,7 @@ export default function App() {
     return () => window.removeEventListener(QUIZ_VIEW_TOGGLED_EVENT, handler)
   }, [wbLayout.leftLocked])
 
-  // 批次 6（PDF 整包方案 §2）：编辑区激活文档是 PDF 时，左栏自动跟随到 bookshelf 大纲态（锁定除外）；
-  // 换回普通文档则回编辑器侧栏态。跟随语义沿用 RAIL_FOLLOW_MAP 的「不在映射内的标签不动左栏」。
-  useEffect(() => {
-    if (!followArmedRef.current) return
-    if (wbLayout.leftLocked) return
-    if (activeTab !== 'editor') return
-    if (editorActiveDoc?.kind === 'pdf') setRailModule('bookshelf')
-    else if (editorActiveDoc !== null && railModule === 'bookshelf') setRailModule('editor')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, editorActiveDoc, wbLayout.leftLocked])
-
+  
   // 阅读器工具栏「大纲」→ 解锁左栏 + 展开左栏 + 切 bookshelf 模块态（兜底入口，方案 §2）
   useEffect(() => {
     const handler = () => {
@@ -1056,7 +1046,7 @@ export default function App() {
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
       case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} />
       case 'moments': return <MomentsModule />
-      case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'editor' ? wbModSlotEl : null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} zenLevel={zenLevel} onZenLevelChange={setZenLevel} pageBarEl={wbEditorPageEl} pageBarHosted contentActionsEl={wbContentActionsEl} contentActionsHosted />
+      case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} zenLevel={zenLevel} onZenLevelChange={setZenLevel} pageBarEl={wbEditorPageEl} pageBarHosted contentActionsEl={wbContentActionsEl} contentActionsHosted />
       case 'bookshelf': return (
         <BookshelfModule
           isActive={on}

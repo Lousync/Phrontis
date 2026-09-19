@@ -56,17 +56,17 @@ function stripComments(src) {
 /* ================= A. 书签 ↔ 模块映射（唯一真相源双向断言） ================= */
 console.log('\n=== A. 书签映射双向断言（方案 §3.3 / 原型 v15 六书签） ===')
 const keys = WORKBENCH_BOOKMARKS.map((b) => b.key)
-ok(keys.length === 6, 'A1 内置书签固定 6 项（编辑区/知识库/日程/书架/博客总结/错题本）', `实际 ${keys.length}`)
+ok(keys.length === 5, 'A1 内置书签固定 5 项（笔记/日程/书架/博客总结/错题本——Phase 2 编辑区退役）', `实际 ${keys.length}`)
 ok(new Set(keys).size === keys.length, 'A2 书签 key 无重复')
-ok(keys.join(',') === 'editor,knowledge,schedule,bookshelf,blog,quiz', 'A3 书签集合与顺序 = v15 定稿', `实际 ${keys.join(',')}`)
+ok(keys.join(',') === 'knowledge,schedule,bookshelf,blog,quiz', 'A3 书签集合与顺序 = Phase 2 退役后（编辑区书签已移除）', `实际 ${keys.join(',')}`)
 ok(WORKBENCH_BOOKMARKS.every((b) => isTabName(b.tab)), 'A4 每个书签的 tab 都是合法 TabName',
   WORKBENCH_BOOKMARKS.filter((b) => !isTabName(b.tab)).map((b) => b.key).join(','))
 const quiz = WORKBENCH_BOOKMARKS.find((b) => b.key === 'quiz')
 ok(quiz?.tab === 'knowledge', 'A5 错题本书签 = knowledge 标签（不占独立 TabName，方案 §3.3）', `实际 ${quiz?.tab}`)
 const followValues = Object.values(RAIL_FOLLOW_MAP)
-ok(followValues.every((v) => ['editor', 'knowledge', 'schedule', 'bookshelf', 'blog', 'aiChat'].includes(v)),
+ok(followValues.every((v) => ['knowledge', 'schedule', 'bookshelf', 'blog', 'aiChat'].includes(v)),
   'A6 跟随映射的值域合法（quiz 不由标签触发，不进映射；aiChat 批次5 反馈轮入映射）')
-for (const k of ['editor', 'knowledge', 'schedule', 'bookshelf', 'blog']) {
+for (const k of ['knowledge', 'schedule', 'bookshelf', 'blog']) {
   ok(RAIL_FOLLOW_MAP[k] === k, `A7 跟随映射 ${k} → 自身`)
 }
 
@@ -120,7 +120,7 @@ ok(/title="设置"/.test(srcBar), 'C1c 图标条底部设置按钮存在')
 
 // C2 左栏 slot 接线：Shell 用 LeftPanel；4 个侧栏模块的 sidebarEl 由 App 按 railModule 条件传入
 ok(/WorkbenchLeftPanel/.test(srcShell) && /modSlotRef/.test(srcShell), 'C2 Shell 左栏 = WorkbenchLeftPanel 且透传 modSlotRef')
-ok(/case\s+'editor'[\s\S]{0,220}sidebarEl=\{on && railModule === 'editor'/.test(srcApp), 'C3 editor sidebarEl ← 左栏模块态')
+ok(/case\s+'editor'[\s\S]{0,220}sidebarEl=\{null\}/.test(srcApp), 'C3 editor 兜底 case 的侧栏槽恒空（Phase 2：左栏模块态不再有 editor）')
 ok(/railModule === 'knowledge' \|\| railModule === 'quiz'/.test(srcApp), 'C4 knowledge sidebarEl ← 知识库/错题本两态')
 ok(/railModule === 'schedule'/.test(srcApp) && /sidebarEl=\{on && railModule === 'schedule' \? wbModSlotEl : null\}/.test(srcApp), 'C5 schedule sidebarEl ← 左栏模块态')
 ok(/sidebarEl=\{on && railModule === 'blog' \? wbModSlotEl : null\}/.test(srcApp), 'C6 blog sidebarEl ← 左栏模块态')

@@ -24,7 +24,6 @@ import type { TabName } from '../../types'
  */
 
 const BOOKMARK_ICONS: Record<RailModule, (size: number) => React.ReactNode> = {
-  editor: (s) => <FileText size={s} />,
   knowledge: (s) => <Library size={s} />,
   schedule: (s) => <CalendarDays size={s} />,
   bookshelf: (s) => <BookOpen size={s} />,

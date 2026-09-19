@@ -132,7 +132,7 @@ export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'dev
  * aiChat（2026-09-17 批次5 反馈轮）不占书签：aiChat 标签激活时左栏经 RAIL_FOLLOW_MAP
  * 原位切「AI 会话侧栏」（会话列表/会话大纲 + 底部文件改动），返回/锁定复用模块态头部。
  */
-export type RailModule = 'editor' | 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat'
+export type RailModule = 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat'
 
 export interface WorkbenchBookmark {
   key: RailModule
@@ -143,8 +143,7 @@ export interface WorkbenchBookmark {
 
 /** 书签集合（内置固定 6 项）——契约脚本 verify-workbench-shell.mjs 对此做映射双向断言 */
 export const WORKBENCH_BOOKMARKS: readonly WorkbenchBookmark[] = [
-  { key: 'editor', label: '编辑区', tab: 'editor' },
-  { key: 'knowledge', label: '知识库', tab: 'knowledge' },
+  { key: 'knowledge', label: '笔记', tab: 'knowledge' },
   { key: 'schedule', label: '日程', tab: 'schedule' },
   { key: 'bookshelf', label: '书架', tab: 'bookshelf' },
   { key: 'blog', label: '博客总结', tab: 'blog' },
@@ -157,7 +156,6 @@ export const WORKBENCH_BOOKMARKS: readonly WorkbenchBookmark[] = [
  */
 export interface BookmarkColor { fg: string; bg: string }
 export const BOOKMARK_COLORS: Readonly<Record<RailModule, BookmarkColor>> = {
-  editor: { fg: '#2a988f', bg: 'rgba(42,161,152,.14)' },
   knowledge: { fg: '#4f6ef2', bg: 'rgba(79,110,242,.14)' },
   schedule: { fg: '#d97a1e', bg: 'rgba(232,132,44,.16)' },
   bookshelf: { fg: '#35975c', bg: 'rgba(63,174,106,.15)' },
@@ -173,7 +171,6 @@ export const BOOKMARK_COLORS: Readonly<Record<RailModule, BookmarkColor>> = {
  * **不在映射内的标签（设置/工具箱/动态…）不动左栏**（保持用户当前的书签/总览态）。
  */
 export const RAIL_FOLLOW_MAP: Readonly<Partial<Record<TabName, RailModule>>> = {
-  editor: 'editor',
   knowledge: 'knowledge',
   schedule: 'schedule',
   bookshelf: 'bookshelf',
