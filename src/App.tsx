@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy } from 'react'
 import { createPortal } from 'react-dom'
+import { AppWindow } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag } from './types'
 
 import { labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
@@ -1323,11 +1324,11 @@ export default function App() {
                     {/* 全关空态（2026-09-17 拍板③）：无激活模块且无工具标签时显示引导页；
                         绝对定位铺满主栏区域（不参与 flex 流，避免挤动两栏几何）。 */}
                     {activeTab === null && !activeToolTab && (
+                      /* 空态只留图标（2026-09-19 反馈：不要文字说明，页面简画） */
                       <div
-                        className="absolute inset-y-0 left-0 z-20 flex w-full flex-col items-center justify-center gap-1.5 pb-16"
+                        className="absolute inset-y-0 left-0 z-20 flex w-full flex-col items-center justify-center pb-16"
                       >
-                        <div className="text-[13.5px] text-[var(--text-secondary)]">所有标签页已关闭</div>
-                        <div className="text-[12px] text-[var(--text-muted)]">从左侧书签或图标条打开模块</div>
+                        <AppWindow size={44} strokeWidth={1.2} className="text-[var(--text-disabled)]" />
                       </div>
                     )}
                   </div>

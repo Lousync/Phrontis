@@ -1299,3 +1299,6 @@ input:focus, textarea:focus, select:focus {
    滚轮 / 触控板仍可横向滚动，Edge 标签带同口径 */
 .kb-edge-strip { scrollbar-width: none; }
 .kb-edge-strip::-webkit-scrollbar { display: none; }
+
+/* 没有任何可见条目（无页面停靠 / 全关）时不渲染空页面条行（2026-09-19 反馈：不要空的一行） */
+[data-wb='pagebar']:not(:has([data-pb-item])) { display: none; }
