@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { Star, ListTree, ChevronLeft, ChevronRight, X, Edit3, List } from 'lucide-react'
+import { Star, ListTree, ChevronLeft, ChevronRight, X, Edit3 } from 'lucide-react'
 import { Entry, Tag, type SummaryRecord } from '../../types'
 import { getEntries, createEntry, deleteEntry, getEntryById, toggleEntryStar, getSetting, setSetting, openExternal, getTags, workspaceGetCurrent, ensureSummary } from '../../lib/ipc'
 import { useSettings } from '../../lib/SettingsContext'
@@ -150,16 +150,8 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
     }
   }
 
-  const handleShowAll = useCallback(() => {
-    setView('list')
-    setSelectedId(null)
-    setSelectedDate(null)
-    setSelectedMonth('showAll')
-    setFilterTagId(null)
-    setShowOutline(false)
-    onSnapOpenSidebar?.()
-    loadEntries()
-  }, [loadEntries, onSnapOpenSidebar])
+  // handleShowAll 退役（2026-09-19 反馈）：模块标签页打开默认就是全部文章列表，
+  // 左栏头部的「全部文章」按钮（List 图标）成了纯冗余；列表视图内的「全部」筛选保留
 
   const handleSelectDate = async (date: string | null) => {
     setSelectedDate(date)
@@ -343,13 +335,6 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
             className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
           >
             <Edit3 size={13} />
-          </button>
-          <button
-            onClick={handleShowAll}
-            title="全部文章"
-            className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            <List size={13} />
           </button>
         </>,
         modActionsEl,
