@@ -1181,6 +1181,8 @@ export interface PdfBookState {
   /** 冲突检测基准（pdfReader:patch 带 expectedUpdatedAt） */
   updatedAt: string
   lastPage: number
+  /** 总页数（0 = 未知）：阅读器首次打开时登记，书架侧栏进度条分母 */
+  totalPages: number
   /** 竖滚模式页内滚动比例 0..1 */
   scrollRatio: number
   mode: PdfViewMode
@@ -1189,7 +1191,7 @@ export interface PdfBookState {
   bookmarks: Array<{ page: number; note: string; at: string }>
 }
 /** pdfReader:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
-export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks'>>
+export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks'>>
 /** 书架清单条目（自动库：扫描 join 进度，不落盘） */
 export interface PdfBookListItem {
   relPath: string
@@ -1198,6 +1200,8 @@ export interface PdfBookListItem {
   /** PDF 文件 mtimeMs（封面缓存失效判据） */
   mtime: number
   lastPage: number
+  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母 */
+  totalPages: number
   hasProgress: boolean
   updatedAt: string | null
 }

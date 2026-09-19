@@ -654,6 +654,11 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
           }
         }
       } catch { /* 无进度/读取失败 → 从头看 */ }
+      // 首读登记总页数（书架侧栏进度条分母）；文件更换页数变化时顺手校正
+      if (restored?.totalPages !== numPages) {
+        bookUpdatedRef.current = restored?.updatedAt
+        void doPatch({ totalPages: numPages })
+      }
       const page = restored?.lastPage && restored.lastPage >= 1 ? Math.min(restored.lastPage, numPages) : 1
       pageNumRef.current = page
       setPageNum(page)

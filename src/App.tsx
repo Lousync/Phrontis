@@ -53,6 +53,8 @@ import { AiTeachingModule } from './modules/ai-teaching'
 import { ReleaseNotesModule } from './modules/release-notes'
 // 左栏书架大纲态（内含 pdfjs —— 必须 lazy，不进主包；见上方模块引入方式注释）
 const PdfRailPanel = lazy(() => import('./components/shared/pdf/PdfRailPanel').then((m) => ({ default: m.PdfRailPanel })))
+// 左栏书架书目条目视图（2026-09-19）：未在读任何书时左栏放书列表（封面 + 书名 + 进度条）
+const BookshelfSideList = lazy(() => import('./modules/bookshelf/BookshelfSideList').then((m) => ({ default: m.BookshelfSideList })))
 
 import { FillPopup } from './modules/toolbox/components/FillPopup'
 import { VaultPicker } from './components/shared/VaultPicker'
@@ -1129,11 +1131,17 @@ export default function App() {
 <main className="flex-1 flex overflow-hidden bg-transparent relative">
             {/* 工作台三栏外壳（v3.4.0 批次3）：左栏=书签双态（总览/模块侧栏/树模式+锁定+仓库切换） | 中间栏(卡片壳) | 右栏(占位，批次4 填控件)。
                 DayPanel 保持 main 层平级（批次4 迁入右栏）；aiTeaching 整窗形态隐藏左右栏（suppressSides，方案 §2） */}
-            {/* 左栏书架大纲态（拍板 B：三件套只在左栏一份；portal 独立于书架标签页挂载，
-                编辑器 PDF（知识库附件路径）与书架内阅读都走这里；随 railModule 卸载） */}
+            {/* 左栏书架态（拍板 B：三件套只在左栏一份；portal 独立于书架标签页挂载，
+                编辑器 PDF（知识库附件路径）与书架内阅读都走三件套；随 railModule 卸载）。
+                2026-09-19 反馈：未在读任何书（railReaderDoc 为空）→ 左栏放书目条目视图
+                （封面 + 书名 + 进度条，点击即开读），不再空置。 */}
             {railModule === 'bookshelf' && wbModSlotEl ? createPortal(
               <Suspense fallback={<div className="flex h-full items-center justify-center text-[11.5px] text-[var(--text-muted)]">加载中…</div>}>
-                <PdfRailPanel readerDoc={railReaderDoc} />
+                {railReaderDoc ? (
+                  <PdfRailPanel readerDoc={railReaderDoc} />
+                ) : (
+                  <BookshelfSideList onOpenBook={(relPath, name) => setBookshelfReading({ relPath, name })} />
+                )}
               </Suspense>,
               wbModSlotEl,
               'wb-bookshelf-rail',

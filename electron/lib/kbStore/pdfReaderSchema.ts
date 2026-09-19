@@ -25,6 +25,8 @@ export interface VaultBookState {
   updatedAt: string
   /** 续读页（竖滚时配 scrollRatio） */
   lastPage: number
+  /** 总页数（0 = 未知）：阅读器首次打开该书时登记，书架侧栏进度条分母 */
+  totalPages: number
   /** 竖滚模式页内滚动比例 0..1；翻页模式忽略 */
   scrollRatio: number
   mode: PdfViewMode
@@ -42,7 +44,7 @@ export interface VaultPdfReaderStore {
 }
 
 /** patch 白名单：调用方只能改这些键；updatedAt 由服务端生成，不在白名单 */
-const PATCH_KEYS: readonly string[] = ['lastPage', 'scrollRatio', 'mode', 'zoom', 'eyeCare', 'bookmarks']
+const PATCH_KEYS: readonly string[] = ['lastPage', 'scrollRatio', 'mode', 'zoom', 'eyeCare', 'bookmarks', 'totalPages']
 
 export const PDF_MODES: readonly PdfViewMode[] = ['scroll', 'single', 'duo']
 
@@ -91,6 +93,9 @@ export function sanitizeBookPatch(patch: unknown): Partial<VaultBookState> | nul
     if (k === 'lastPage') {
       if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 100000) return null
       out.lastPage = v
+    } else if (k === 'totalPages') {
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 100000) return null
+      out.totalPages = v
     } else if (k === 'scrollRatio') {
       if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) return null
       out.scrollRatio = v
@@ -120,7 +125,7 @@ export function sanitizeBookPatch(patch: unknown): Partial<VaultBookState> | nul
 
 /** 存量/新键的完整书状态（新键用默认值：竖滚 + 适宽 + 无书签） */
 export function defaultBookState(now: string): VaultBookState {
-  return { updatedAt: now, lastPage: 1, scrollRatio: 0, mode: 'scroll', zoom: 1, eyeCare: false, bookmarks: [] }
+  return { updatedAt: now, lastPage: 1, totalPages: 0, scrollRatio: 0, mode: 'scroll', zoom: 1, eyeCare: false, bookmarks: [] }
 }
 
 /** 存量数据修补：缺键补默认（老版本 / 半写容错），非法值回落默认不抛错 */
@@ -129,13 +134,14 @@ export function coerceBookState(raw: unknown, now: string): VaultBookState {
   if (!isRecord(raw)) return base
   const mode = typeof raw['mode'] === 'string' && PDF_MODES.includes(raw['mode'] as PdfViewMode) ? (raw['mode'] as PdfViewMode) : 'scroll'
   const lastPage = typeof raw['lastPage'] === 'number' && Number.isInteger(raw['lastPage']) && raw['lastPage'] >= 1 ? raw['lastPage'] : 1
+  const totalPages = typeof raw['totalPages'] === 'number' && Number.isInteger(raw['totalPages']) && raw['totalPages'] >= 1 ? raw['totalPages'] : 0
   const scrollRatio = typeof raw['scrollRatio'] === 'number' && Number.isFinite(raw['scrollRatio']) ? Math.min(1, Math.max(0, raw['scrollRatio'])) : 0
   const zoom = typeof raw['zoom'] === 'number' && Number.isFinite(raw['zoom']) ? Math.min(5, Math.max(0.25, raw['zoom'])) : 1
   const bookmarks = Array.isArray(raw['bookmarks'])
     ? (raw['bookmarks'].map(sanitizeBookmark).filter((b): b is VaultPdfBookmark => !!b))
     : []
   const updatedAt = typeof raw['updatedAt'] === 'string' && raw['updatedAt'] ? raw['updatedAt'] : now
-  return { updatedAt, lastPage, scrollRatio, mode, zoom, eyeCare: raw['eyeCare'] === true, bookmarks }
+  return { updatedAt, lastPage, totalPages, scrollRatio, mode, zoom, eyeCare: raw['eyeCare'] === true, bookmarks }
 }
 
 /** 封面索引单条 */

@@ -48,6 +48,8 @@ check('patch：mode 越界拒绝', S.sanitizeBookPatch({ mode: 'vertical' }) ===
 check('patch：scrollRatio>1 拒绝', S.sanitizeBookPatch({ scrollRatio: 1.2 }) === null)
 check('patch：zoom 越界拒绝', S.sanitizeBookPatch({ zoom: 9 }) === null)
 check('patch：eyeCare 非布尔拒绝', S.sanitizeBookPatch({ eyeCare: 'yes' }) === null)
+check('patch：totalPages 合法收', (() => { const r = S.sanitizeBookPatch({ totalPages: 446 }); return !!r && r.totalPages === 446 })())
+check('patch：totalPages=0 拒绝（0 = 未登记语义，走默认而非 patch）', S.sanitizeBookPatch({ totalPages: 0 }) === null)
 check('patch：书签坏页码拒绝', S.sanitizeBookPatch({ bookmarks: [{ page: 0, note: '', at: 'x' }] }) === null)
 const bm = S.sanitizeBookPatch({ bookmarks: [{ page: 3, note: '重点', at: '2026-09-17T00:00:00Z' }] })
 check('patch：合法书签收下', !!bm && Array.isArray(bm.bookmarks) && bm.bookmarks.length === 1 && bm.bookmarks[0].page === 3)
@@ -57,9 +59,10 @@ const coerced = S.coerceBookState({ lastPage: 5, mode: 'bogus', zoom: 99 }, 'NOW
 check('修补：坏 mode 回落 scroll', coerced.mode === 'scroll')
 check('修补：越界 zoom 夹取到上限 5', coerced.zoom === 5)
 check('修补：lastPage 保留', coerced.lastPage === 5)
+check('修补：totalPages 缺键补 0（未知）', coerced.totalPages === 0)
 check('修补：updatedAt 透传', coerced.updatedAt === 'NOW')
 check('修补：非对象给全默认', S.coerceBookState(null, 'NOW').mode === 'scroll')
-check('默认态：竖滚 + 适宽 + 无书签', (() => { const d = S.defaultBookState('NOW'); return d.mode === 'scroll' && d.zoom === 1 && d.bookmarks.length === 0 })())
+check('默认态：竖滚 + 适宽 + 无书签', (() => { const d = S.defaultBookState('NOW'); return d.mode === 'scroll' && d.zoom === 1 && d.bookmarks.length === 0 && d.totalPages === 0 })())
 
 // ===== ② 负向断言：pdfReader.json 唯一写方 =====
 console.log('\n--- ② 负向断言：pdfReader.json 唯一写方 ---')

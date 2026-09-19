@@ -98,7 +98,7 @@ export function pdfReaderPatchBook(rootId: string, relPath: string, patch: unkno
   if (!key) return { ok: false, error: '非法的书键' }
   try { requireCurrentRootId(rootId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const clean = sanitizeBookPatch(patch)
-  if (!clean) return { ok: false, error: 'patch 字段非法（只收 lastPage/scrollRatio/mode/zoom/eyeCare/bookmarks）' }
+  if (!clean) return { ok: false, error: 'patch 字段非法（只收 lastPage/totalPages/scrollRatio/mode/zoom/eyeCare/bookmarks）' }
   const now = new Date().toISOString()
   const store = readStore()
   const prev = store.books[key] ? coerceBookState(store.books[key], now) : defaultBookState(now)

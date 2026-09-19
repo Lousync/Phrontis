@@ -27,6 +27,8 @@ export interface PdfBookListItem {
   size: number
   mtime: number
   lastPage: number
+  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母 */
+  totalPages: number
   hasProgress: boolean
   updatedAt: string | null
 }
@@ -46,6 +48,7 @@ export function registerPdfReaderHandlers(): void {
           size: f.size,
           mtime: f.mtimeMs,
           lastPage: st?.lastPage ?? 1,
+          totalPages: st?.totalPages ?? 0,
           hasProgress: !!st && (st.lastPage > 1 || st.bookmarks.length > 0 || st.scrollRatio > 0),
           updatedAt: st?.updatedAt ?? null,
         }
