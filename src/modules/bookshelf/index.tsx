@@ -76,8 +76,10 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
   }, [])
 
   useEffect(() => { void load() }, [load])
-  // 铁律 1：主进程写盘（patch/coverSave/import）后经 windowBus 广播 → 书架自动重拉
+  // 铁律 1：主进程写盘（patch/coverSave）后经 windowBus 广播 → 书架自动重拉
   useDataChanged('pdfReader', () => { void load() })
+  // 外部 fs 变化（往 .books 丢/删 PDF → fsWatcher 广播 knowledge scope）→ 清单重扫（2026-09-19 反馈）
+  useDataChanged('knowledge', () => { void load() })
 
   const onCoverReady = useCallback((relPath: string, url: string) => {
     coverMem.current.set(relPath, url)

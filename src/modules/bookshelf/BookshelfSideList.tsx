@@ -61,8 +61,9 @@ export function BookshelfSideList({ onOpenBook }: {
   }, [])
 
   useEffect(() => { void load() }, [load])
-  // 铁律 1：主进程写盘（patch/coverSave/import）后经 windowBus 广播 → 列表与进度自动重拉
+  // 实时刷新：pdfReader 广播（阅读进度/封面）+ knowledge 广播（外部往 .books 增删 PDF）都重拉
   useDataChanged('pdfReader', () => { void load() })
+  useDataChanged('knowledge', () => { void load() })
 
   const onCoverReady = useCallback((relPath: string, url: string) => {
     coverMem.current.set(relPath, url)
