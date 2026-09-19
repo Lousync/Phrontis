@@ -740,17 +740,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
 
   const handleReorderTabs = useCallback((newOrder: string[]) => { setOpenPageIds(newOrder) }, [])
 
-  /** 树内草稿徽标集合：文件视图里出现、但知识页索引没有对应 path 的 md/txt（无 frontmatter id） */
-  const treeDraftRelPaths = useMemo(() => {
-    const known = new Set(allPages.map(p => p.path))
-    const out = new Set<string>()
-    for (const entries of Object.values(dirCache)) {
-      for (const e of entries) {
-        if (e.type === 'file' && /\.(md|txt)$/i.test(e.name) && !known.has(e.relPath)) out.add(e.relPath)
-      }
-    }
-    return out
-  }, [dirCache, allPages])
+  /* 树内「草稿」徽标已退役（2026-09-19 反馈）：笔记区合并后草稿与正式笔记走同一模块、同一打开路径，
+     徽标的原始语义（编辑区专属地盘）已消失；「未转正」状态打开文件即自明（draft: 页签 + 工具栏转正按钮）。
+     转正能力不受影响：PageEditor 的「转为正式笔记」照旧。 */
 
   // ---- 文件视图（Phase 2 批次 1）：VaultTree 接线——与编辑区同一份树实现，目录即真相 ----
   const ensureVaultRoot = useCallback(async (): Promise<string | null> => {
@@ -1722,7 +1714,6 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   creating={treeCreating}
                   onCommitCreate={handleTreeCommitCreate}
                   onCancelCreate={() => setTreeCreating(null)}
-                  draftRelPaths={treeDraftRelPaths}
                 />
                 {catDraft && createPortal(
                   /* fixed 浮层必须 portal 到 body：侧栏（含本弹层）随批次3 portal 挂进左栏后，
