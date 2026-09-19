@@ -138,6 +138,13 @@ export default function App() {
     setWbModSlotEl(node)
   }, [])
 
+  // 模块态头部动作槽（2026-09-19 反馈）：模块自己的标题行删除，聚焦/写作等按钮 portal 到
+  // 左栏头部（🏠 🔒）最右。ref/state 手法与 wbModSlotEl 同款。
+  const [wbModActionsEl, setWbModActionsEl] = useState<HTMLElement | null>(null)
+  const wbModActionsRef = useCallback((node: HTMLDivElement | null) => {
+    setWbModActionsEl(node)
+  }, [])
+
   // v3.4.0「页面条置顶」（2026-09-18）：中间栏页面条内的两个页签组槽 —— 编辑器与知识库
   // 各自把现有页签条 portal 进来（与上面 wbModSlotEl 同款手法与托管语义）。
   // 另有一个内容级操作槽（插图/大纲/预览/保存全部 的胶囊），挂在内容区右上角浮层里。
@@ -1044,9 +1051,9 @@ export default function App() {
       —— 页面条置顶后页签条 portal 进外壳页面条。 */
   function renderModuleContent(name: TabName, on: boolean): React.ReactNode {
     switch (name) {
-      case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} />
+      case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} />
       case 'moments': return <MomentsModule />
       case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} zenLevel={zenLevel} onZenLevelChange={setZenLevel} pageBarEl={wbEditorPageEl} pageBarHosted contentActionsEl={wbContentActionsEl} contentActionsHosted />
       case 'bookshelf': return (
@@ -1151,6 +1158,7 @@ export default function App() {
               railModule={railModule}
               railTool={railTool}
               modSlotRef={wbModSlotRef}
+              modActionsRef={wbModActionsRef}
               onBookmarkClick={handleBookmarkClick}
               onBookmarkVisibility={handleBookmarkVisibility}
               onBackToOverview={handleBackToOverview}
@@ -1217,6 +1225,11 @@ export default function App() {
                         const tid = toolIdOfTab(id)
                         setRailTool(TOOLS_WITH_SIDEBAR.has(tid) ? tid : null)
                       }
+                    } else if (id === 'quiz') {
+                      // 错题本合成条目（2026-09-19）：回知识库标签 + 定位错题本视图（同错题本书签路径）
+                      handleTabChange('knowledge')
+                      window.setTimeout(() => window.dispatchEvent(new CustomEvent(LOCATE_QUIZ_VIEW_EVENT)), 100)
+                      if (!wbLayout.leftLocked) setRailModule('quiz')
                     } else {
                       const t = id as TabName
                       handleTabChange(t)
@@ -1233,6 +1246,8 @@ export default function App() {
                   onReorder={handleReorder}
                   editorSlotRef={wbEditorPageRef}
                   knowledgeSlotRef={wbKnowledgePageRef}
+                  showQuizEntry={quizViewOpen && openTabs.includes('knowledge')}
+                  quizEntryActive={activeTab === 'knowledge'}
                   hidePages={zenLevel >= 1}
                   lead={activeTab === 'editor' && editorJumpFrom && editorJumpFrom !== 'editor' ? (
                     /* 编辑器「← 返回 X」chip：属当前上下文导航，落页面条最左端（原独立常驻行已删） */

@@ -70,6 +70,9 @@ interface Props {
   treeMode: boolean
   /** 模块态 slot 的 ref callback（App 收集 DOM 传给模块 sidebarEl 做 portal 目标） */
   modSlotRef: (node: HTMLDivElement | null) => void
+  /** 模块态头部「动作槽」ref callback（2026-09-19 反馈：模块自己的标题行删除，聚焦/写作等
+      按钮 portal 到头部二钮最右；App 收集 DOM 传给模块 modActionsEl 做 portal 目标） */
+  modActionsRef?: (node: HTMLDivElement | null) => void
   onBookmarkClick: (key: RailModule) => void
   /** 🔖 书签选显菜单：切换某书签显隐（内置 key 或 plugin:<id>），App 持久化并处理「隐藏当前激活书签 → 退出模块态」 */
   onBookmarkVisibility: (key: string) => void
@@ -95,7 +98,7 @@ interface Props {
   onSearchRunCommand?: (commandId: string) => void
 }
 
-export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, locked, treeMode, modSlotRef, onBookmarkClick, onBookmarkVisibility, bookmarksHidden, onBack, onToggleLock, onToggleTreeMode, onOpenLooseFile, onPluginBookmark, searchMode = false, onEnterSearch, onExitSearch, onSearchOpenPage, onSearchLocateCategory, onSearchRunCommand }: Props) {
+export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, locked, treeMode, modSlotRef, modActionsRef, onBookmarkClick, onBookmarkVisibility, bookmarksHidden, onBack, onToggleLock, onToggleTreeMode, onOpenLooseFile, onPluginBookmark, searchMode = false, onEnterSearch, onExitSearch, onSearchOpenPage, onSearchLocateCategory, onSearchRunCommand }: Props) {
   const { s } = useSettings()
   const pluginBookmarks = useMemo(() => parsePluginBookmarks(s.workbenchBookmarks), [s.workbenchBookmarks])
   // 🔖 书签选显菜单开关（v10 拍板：逐个勾选显示哪些书签 + 插件可注册书签）。
@@ -213,7 +216,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
              2026-09-16 第二轮 UI 反馈：头部只留 ‹ 返回 + 锁定（文字描述与横线删除）；
              data-wb-mod 记录当前模块 key（工具侧栏态 = tool id），供探针/脚本断言（不渲染可见文字） */
         <>
-          <div data-wb="mod" data-wb-mod={railModule ?? railTool ?? ''} className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
+          <div data-wb="mod" data-wb-mod={railModule ?? railTool ?? ''} className="relative flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
             {/* 返回顶层统一 🏠（2026-09-17 反馈轮：‹ 换 House，钮组与搜索态头部同一居中语言） */}
             <button onClick={onBack} title="返回总览（自动解锁）" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <House size={13} />
@@ -225,6 +228,9 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
             >
               {locked ? <Lock size={13} /> : <LockOpen size={13} />}
             </button>
+            {/* 模块头部动作槽（2026-09-19）：模块自己的按钮（笔记聚焦 / 博客写作等）portal 到这里，
+                绝对定位最右——不挤占二钮的居中语言 */}
+            <div ref={modActionsRef} className="absolute right-1 flex items-center gap-0.5" />
           </div>
           <div ref={modSlotRef} data-wb="modSlot" className="flex min-h-0 flex-1 flex-col overflow-hidden" />
         </>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { Star, ListTree, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Star, ListTree, ChevronLeft, ChevronRight, X, Edit3, List } from 'lucide-react'
 import { Entry, Tag, type SummaryRecord } from '../../types'
 import { getEntries, createEntry, deleteEntry, getEntryById, toggleEntryStar, getSetting, setSetting, openExternal, getTags, workspaceGetCurrent, ensureSummary } from '../../lib/ipc'
 import { useSettings } from '../../lib/SettingsContext'
@@ -36,8 +36,8 @@ export type BlogJump =
   | { kind: 'date'; date: string }
   | { kind: 'summary'; summaryKind: SummaryKind; start: string; end: string }
 
-export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, blogJump = null, onBlogJumpConsumed, sidebarEl = null, sidebarHosted = false }: {
-  showLineNumbers?: boolean; sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; blogJump?: BlogJump | null; onBlogJumpConsumed?: () => void; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean
+export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, blogJump = null, onBlogJumpConsumed, sidebarEl = null, sidebarHosted = false, modActionsEl = null }: {
+  showLineNumbers?: boolean; sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; blogJump?: BlogJump | null; onBlogJumpConsumed?: () => void; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; modActionsEl?: HTMLElement | null
 }) {
   const { s } = useSettings()
   const [view, setView] = useState<BlogView>('list')
@@ -333,6 +333,27 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
       {/* 顶部贯通行（图二骨架）已删除（2026-09-18）：与左栏 Sidebar 的「博客」标题重复，
           中栏内容直接顶到页面条下方。快捷动作仍在侧栏搜索框上方。 */}
       <div className="flex min-h-0 flex-1">
+      {/* 侧栏头部动作（2026-09-19 反馈）：原 Sidebar「文章」标题行删除，写作/全部文章两钮
+          portal 到左栏模块态头部（🏠 🔒）最右；与侧栏同显隐（收起/大纲态不渲染） */}
+      {modActionsEl && createPortal(
+        <>
+          <button
+            onClick={handleTodayEntry}
+            title={entries.some(e => e.date === localToday()) ? '继续编写今日文章' : '新建今日文章'}
+            className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            <Edit3 size={13} />
+          </button>
+          <button
+            onClick={handleShowAll}
+            title="全部文章"
+            className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            <List size={13} />
+          </button>
+        </>,
+        modActionsEl,
+      )}
       {/* v3.4.0 批次3：左栏模块态（sidebarEl）时侧栏内容 portal 进左栏 slot（挂载点迁移），
           否则回落原位 ResizablePanel；大纲模式的显隐条件在两形态下保持一致 */}
       {(() => {
@@ -344,8 +365,6 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
               starredEntries={starredEntries}
               selectedDate={selectedDate}
               onSelectDate={handleSelectDate}
-              onNewEntry={handleTodayEntry}
-              onShowAll={handleShowAll}
               allTags={allTags}
             />
           </div>

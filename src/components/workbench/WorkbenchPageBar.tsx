@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, Puzzle, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical } from 'lucide-react'
+import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, Puzzle, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical, FileQuestion } from 'lucide-react'
 import type { TabName } from '../../types'
 import { labelOf } from '../../lib/appModules'
 import { isToolTabId, toolIdOfTab, findTool } from './toolRegistry'
@@ -34,6 +34,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   aiChat: <Bot size={14} />,
   graph: <Network size={14} />,
   devtools: <FlaskConical size={14} />,
+  quiz: <FileQuestion size={14} />,
 }
 
 /** 未收录模块的兜底图标（新增 Tab 忘配图标时不出空白） */
@@ -44,6 +45,8 @@ const PAGE_OWNED: readonly string[] = ['editor', 'knowledge']
 
 function tabLabel(id: string): string {
   if (isToolTabId(id)) return findTool(toolIdOfTab(id))?.name ?? '工具'
+  // quiz 不是 TabName（错题本 = 知识库的错题本子视图，2026-09-19 起在页面条有专属条目）
+  if (id === 'quiz') return '错题本'
   return labelOf(id as TabName)
 }
 
@@ -85,6 +88,10 @@ interface Props {
   editorSlotRef: (node: HTMLDivElement | null) => void
   /** 知识库页签组槽 */
   knowledgeSlotRef: (node: HTMLDivElement | null) => void
+  /** 错题本专属条目（2026-09-19 反馈）：知识库的错题本子视图打开时显示；点击回知识库 + 定位错题本。
+      无关闭钮——视图随知识库标签存在，关闭错题本视图后条目自动消失 */
+  showQuizEntry?: boolean
+  quizEntryActive?: boolean
   /** 条尾部动作 */
   trail?: React.ReactNode
   /** 条最左端前置元素（编辑器「← 返回 X」chip） */
@@ -93,7 +100,7 @@ interface Props {
   hidePages?: boolean
 }
 
-export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, editorSlotRef, knowledgeSlotRef, trail = null, lead = null, hidePages = false }: Props) {
+export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, editorSlotRef, knowledgeSlotRef, showQuizEntry = false, quizEntryActive = false, trail = null, lead = null, hidePages = false }: Props) {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const dragIdRef = useRef<string | null>(null)
@@ -182,6 +189,26 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
             </div>
           )
         })}
+        {/* 错题本专属条目（合成条目，非 openTabs 成员）：不可拖拽/关闭，视图态随错题本开合 */}
+        {showQuizEntry && (
+          <div
+            data-pb-item
+            data-pb-owner="module"
+            data-wb="tab"
+            data-wb-tab="quiz"
+            data-wb-active={quizEntryActive ? '1' : '0'}
+            onClick={() => onSelect('quiz')}
+            title="错题本 / 收藏"
+            className={`flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-[12.5px] transition-colors ${
+              quizEntryActive
+                ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+            }`}
+          >
+            <span className={`shrink-0 ${quizEntryActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{TAB_ICONS.quiz}</span>
+            <span>错题本</span>
+          </div>
+        )}
         {/* 知识库页签组槽：紧跟模块条目从左排起（2026-09-19 反馈：原排在 flex-1 编辑器槽之后，
             页签组被顶到行最右端、贴着右栏，看起来像排错位置）。 */}
         <div ref={knowledgeSlotRef} data-pb-slot="knowledge" className={`flex min-w-0 shrink-0 max-w-[50%] items-center gap-1 overflow-x-auto ${hidePages ? 'hidden' : ''}`} />

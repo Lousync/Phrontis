@@ -29,6 +29,8 @@ interface Props {
   railTool?: string | null
   /** 模块态 slot 的 ref callback（App 收集 DOM 传给模块做 sidebarEl portal 目标） */
   modSlotRef: (node: HTMLDivElement | null) => void
+  /** 模块态头部动作槽的 ref callback（模块自己的标题行按钮 portal 到头部最右，2026-09-19） */
+  modActionsRef?: (node: HTMLDivElement | null) => void
   onBookmarkClick: (key: RailModule) => void
   /** 🔖 书签选显菜单：切换某书签显隐（App 持久化 + 隐藏当前激活书签时退出模块态） */
   onBookmarkVisibility: (key: string) => void
@@ -51,7 +53,7 @@ interface Props {
   }
 }
 
-export function WorkbenchShell({ center, right, activeTab, railModule, railTool = null, modSlotRef, onBookmarkClick, onBookmarkVisibility, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false, maximized = false, leftSearch }: Props) {
+export function WorkbenchShell({ center, right, activeTab, railModule, railTool = null, modSlotRef, modActionsRef, onBookmarkClick, onBookmarkVisibility, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false, maximized = false, leftSearch }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
 
@@ -88,6 +90,7 @@ export function WorkbenchShell({ center, right, activeTab, railModule, railTool 
           locked={layout.leftLocked}
           treeMode={layout.leftMode === 'tree'}
           modSlotRef={modSlotRef}
+          modActionsRef={modActionsRef}
           onBookmarkClick={onBookmarkClick}
           onBookmarkVisibility={onBookmarkVisibility}
           bookmarksHidden={layout.bookmarksHidden}
