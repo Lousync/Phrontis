@@ -32,7 +32,6 @@ import { useDataChanged } from '../../lib/dataChanged'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { NotebookList } from './components/NotebookList'
 import { ChapterPanel } from './components/ChapterPanel'
-import { SpacePanel } from './components/SpacePanel'
 // Monaco 宿主单独 lazy：PageEditor 内联了 @monaco-editor/react，而 monaco 主包 8.3MB
 // 绝不能进首屏。知识库模块本身是静态引入的（切换零延迟），只有编辑器这一块按需加载。
 const PageEditor = lazy(() => import('./components/PageEditor').then((m) => ({ default: m.PageEditor })))
@@ -85,9 +84,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [showCategoryPanel, setShowCategoryPanel] = useState(true)
   const [showChapterPanel, setShowChapterPanel] = useState(true)
   const [showOutline, setShowOutline] = useState(false)
-  // 文件视图（Phase 2 批次 1，B 方案）：VaultTree 的一等左栏视图；结构三件套暂留「结构」视图，
-  // 逐批吸收职责后退役（docs/notes-merge-phase2-design.md §2 批次 1）
-  const [leftView, setLeftView] = useState<'files' | 'structure'>('files')
+  // 文件视图（Phase 2 批次 1，B 方案）：左栏 = VaultTree 文件树（结构三件套已退役，下述 state 留待清理）
   const [dirCache, setDirCache] = useState<DirCache>({})
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']))
   const [treeCreating, setTreeCreating] = useState<CreateIntent | null>(null)
@@ -261,6 +258,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     window.addEventListener('kb-fs-op-changed', handler)
     return () => window.removeEventListener('kb-fs-op-changed', handler)
   }, [refreshCategories, refreshAllPages, refreshStarred, refreshTags, refreshChapterPages, selectedChapterId])
+
+  // 结构上下文派生（Phase 2 批次 1 收尾）：树选择退役后，导入目标/图谱 scope 等的「当前分类」语义
+  // = 活动页所在分类（无活动页 = null → 落根/零散，与原「未选章节」语义一致）
+  useEffect(() => {
+    const p = activePageId ? allPages.find(x => x.id === activePageId) : undefined
+    const catId = p?.categoryId ?? null
+    setSelectedChapterId(catId)
+    setSelectedCategoryId(catId)
+  }, [activePageId, allPages])
 
   /** 主进程侧写操作（AI 工具建页面/写文件等）→ 广播后重读（2026-09-10 修）。
    *  与 kb-fs-op-changed 同一套刷新动作；不限 isActive —— 保活时也要把数据更新到位，回来即是最新。 */
@@ -749,9 +755,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   }, [dirCache, refreshTreeDir])
 
   useEffect(() => {
-    // 进入文件视图即装载根层（切视图不重挂树，展开态自然延续）
-    if (leftView === 'files') void refreshTreeDir('')
-  }, [leftView, refreshTreeDir])
+    // 文件视图装载根层（树常驻左栏，展开态自然延续）
+    void refreshTreeDir('')
+  }, [refreshTreeDir])
 
   /** 打开文件：知识页走页签；无 id 草稿 md/txt → draft 直入编辑（同页签栈，Phase 2 批次 1）；
    *  非 md（PDF/代码/html）暂由编辑器模块兜底（批次 2 迁移） */
@@ -1584,53 +1590,13 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         {(() => {
           const sidebarInner = (
           <div className="flex flex-col h-full" style={sidebarItemVars as unknown as React.CSSProperties}>
-            {/* 空间沉浸视图顶部：返回栏（仅空间内显示）；目录拖到本栏=移出空间（移到根级中转） */}
-            {selectedSpaceId && selectedSpace && (
-              <SpacePanel space={selectedSpace} onCollapse={handleCollapseSpace} onRename={handleRenameNotebook}
-                extraAction={
-                  <FolderFocusButton
-                    on={!!settings.knowledgeFolderFocus}
-                    onToggle={() => updateSettings('knowledgeFolderFocus', !settings.knowledgeFolderFocus)}
-                  />
-                }
-                onMoveOut={(id) => { void handleMoveCategory(id, null) }} />
-            )}
-
-            {/* 文件/大纲切换 — 仅在空间内显示，位于返回栏下方 */}
-            {selectedSpaceId && selectedSpace && (
-              <div className="flex items-center gap-1 px-2 pt-1.5 pb-1 border-b border-[var(--border-color)] shrink-0">
-                <button
-                  onClick={() => setShowOutline(false)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1 rounded text-[12px] transition-colors ${!showOutline ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
-                >
-                  <Folder size={13} />文件
-                </button>
-                <button
-                  onClick={() => setShowOutline(true)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1 rounded text-[12px] transition-colors ${showOutline ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
-                >
-                  <ListTree size={13} />大纲
-                </button>
-              </div>
-            )}
-
             {/* 空间列表层：顶部「知识库」标题 — 与日程/博客等模块侧栏标题行完全同款 */}
             {!selectedSpaceId && (
               <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
                 <BookMarked size={12} />
                 知识库
-                {/* 视图切换（Phase 2 批次 1）：文件树为主（B 方案），结构三件套暂留过渡 */}
-                <button
-                  onClick={() => setLeftView('files')}
-                  className={`ml-auto rounded px-1.5 py-[1px] text-[11px] transition-colors ${leftView === 'files' ? 'bg-[var(--accent-weak)] text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)]'}`}
-                  title="文件树（目录即真相）"
-                >文件</button>
-                <button
-                  onClick={() => setLeftView('structure')}
-                  className={`rounded px-1.5 py-[1px] text-[11px] transition-colors ${leftView === 'structure' ? 'bg-[var(--accent-weak)] text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)]'}`}
-                  title="笔记本 / 分类（结构视图，过渡保留）"
-                >结构</button>
                 <FolderFocusButton
+                  className="ml-auto"
                   on={!!settings.knowledgeFolderFocus}
                   onToggle={() => updateSettings('knowledgeFolderFocus', !settings.knowledgeFolderFocus)}
                 />
@@ -1639,7 +1605,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
 
             {/* 空间列表层：无大纲入口，直接显示文件树；空间内可切换大纲 */}
             {/** 文件视图（Phase 2 批次 1，B 方案）：VaultTree = 与编辑区同一份实现；草稿/非 md 暂由编辑器模块兜底打开 */}
-            {!selectedSpaceId && leftView === 'files' ? (
+            {(
               <div className="kb-view-in relative flex flex-1 min-h-0 flex-col">
                 <VaultTree
                   dirCache={dirCache}
@@ -1677,139 +1643,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   </div>
                 )}
               </div>
-            ) : selectedSpaceId && showOutline ? (
-              <div className="kb-view-in flex-1 min-h-0">
-                <OutlinePanel
-                  pageTitle={activePageForOutline?.title ?? ''}
-                  headings={outlineHeadings}
-                  onBackToFile={() => setShowOutline(false)}
-                  embedded
-                />
-              </div>
-            ) : (
-              <>
-                {/* File tab: tree stays mounted so its expand/collapse state survives drill-in navigation */}
-                <div className={`flex flex-col flex-1 min-h-0 ${showChapterPanel && selectedCategory?.categoryType === 'notebook' ? 'hidden' : ''}`}>
-                  {/* 树模式顶部「移出当前目录」drop 区（顶层/空间内常驻；拖页面进入展开，推下树不覆盖） */}
-                  <div
-                    data-eject-zone
-                    onDragOver={e => {
-                      const types = e.dataTransfer.types || []
-                      if (!types.includes('application/x-kb-page')) return
-                      e.preventDefault()
-                      e.dataTransfer.dropEffect = 'move'
-                      if (!ejectOn) setEjectOn(true)
-                    }}
-                    onDragLeave={e => {
-                      if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) setEjectOn(false)
-                    }}
-                    onDrop={e => {
-                      const types = e.dataTransfer.types || []
-                      if (!types.includes('application/x-kb-page')) return
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setEjectOn(false)
-                      try {
-                        const raw = e.dataTransfer.getData('text/plain')
-                        const v = JSON.parse(raw)
-                        if (v?.type === 'page' && typeof v.id === 'string') void handleDropOnLooseArea(v.id)
-                      } catch {}
-                    }}
-                    className={`overflow-hidden transition-all duration-150 ${ejectOn ? 'h-9 opacity-100' : 'h-0 opacity-0'}`}
-                  >
-                    <div className="mx-2 my-1 flex items-center gap-1.5 rounded-lg border border-dashed border-[var(--accent)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--accent)] animate-pulse">
-                      <ArrowUp size={12} className="shrink-0" />
-                      松手：将页面移出当前目录（返回上一级 / 零散）
-                    </div>
-                  </div>
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    <NotebookList
-                      categories={categories}
-                      allPages={allPages}
-                      loosePages={allLoosePages}
-                      starredPages={starredPages}
-                      selectedCategoryId={selectedCategoryId}
-                      focusChapterId={focusChapterId}
-                      activePageId={activePageId}
-                      spaceId={selectedSpaceId}
-                      onSelectSpace={handleSelectSpace}
-                      onSelectCategory={handleSelectCategory}
-                      onSelectCategoryChapter={handleSelectCategoryChapter}
-                      onRenameNotebook={handleRenameNotebook}
-                      onDeleteNotebook={handleDeleteNotebook}
-                      deletingMap={deletingMap}
-                      onOpenPage={handleOpenPage}
-                      onImport={handleDialogImport}
-                      onImportFolder={handleImportFolder}
-                      onDropOnNotebook={handleDropOnNotebook}
-                      onDropOnCategory={handleDropOnCategory}
-                      onDropOnLooseArea={handleDropOnLooseArea}
-                      onMoveCategory={handleMoveCategory}
-                      onCreateSpace={handleCreateSpace}
-                      onCreateNotebook={handleCreateNotebook}
-                      onSortCategory={handleSortCategory}
-                      onSortPage={handleSortPage}
-                      locatePageId={locatePageId}
-                      locateCategoryId={locateCategoryId}
-                      focusOn={!!settings.knowledgeFolderFocus}
-                      onExitFocus={() => updateSettings('knowledgeFolderFocus', false)}
-                      // vault（仓库文件）模式：移动由拖拽承担，复制副本暂不支持 → 隐藏复制/剪切/粘贴，避免点到报错
-                      onCopy={vaultReadonly ? undefined : handleCopy}
-                      onCut={vaultReadonly ? undefined : handleCut}
-                      onPaste={vaultReadonly ? undefined : handlePaste}
-                      onExportPage={handleExportPage}
-                      onDeletePage={handlePageDeleted}
-                      onRenamePage={handleRenamePage}
-                      onCopyPath={handleCopyPath}
-                      clipboard={clipboard}
-                      cutItemIds={cutItemIds}
-                    />
-                  </div>
-                </div>
-                {showChapterPanel && selectedCategory && selectedCategory.categoryType === 'notebook' && (
-                  <div className="flex-1 min-h-0">
-                    <ChapterPanel
-                      notebookName={selectedCategory.name}
-                      notebookId={selectedCategory.id}
-                      chapters={chapters}
-                      selectedChapterId={selectedChapterId}
-                      focusChapterId={focusChapterId}
-                      onSelectChapter={(id) => { setSelectedChapterId(id === selectedChapterId ? null : id); setFocusChapterId(null) }}
-                      onRenameChapter={handleRenameChapter}
-                      onDeleteChapter={handleDeleteChapter}
-                      pages={chapterPages}
-                      activePageId={activePageId}
-                      onOpenPage={handleOpenPage}
-                      onImport={handleDialogImport}
-                      onDropOnChapter={handleDropOnChapter}
-                      onCollapse={() => { setSelectedCategoryId(null); setSelectedChapterId(null); setFocusChapterId(null); setShowChapterPanel(false) }}
-                      onToggleStar={handleToggleStar}
-                      onSortChapter={handleSortCategory}
-                      onLocateInExplorer={handleLocateInExplorer}
-                      onSortPage={handleSortPage}
-                      onRefreshPages={() => { refreshAllPages(); refreshChapterPages() }}
-                      onMoveCategory={handleMoveCategory}
-                      allCategories={categories}
-                      onMovePageToLoose={handleDropOnLooseArea}
-                      onMovePageToNotebook={handleDropOnNotebook}
-                      onMovePageToCategory={handleDropOnCategory}
-                      // vault 模式隐藏复制/剪切（移动靠拖拽）
-                      onCopy={vaultReadonly ? undefined : handleCopy}
-                      onCut={vaultReadonly ? undefined : handleCut}
-                      onExportPage={handleExportPage}
-                      onDeletePage={handlePageDeleted}
-                      onRenamePage={handleRenamePage}
-                      onCopyPath={handleCopyPath}
-                      clipboard={clipboard}
-                      cutItemIds={cutItemIds}
-                      deletingMap={deletingMap}
-                    />
-                  </div>
-                )}
-              </>
             )}
-            {/* 侧边栏底部：错题本 / 收藏 + 插件视图入口（仅空间内显示，顶层工作区列表不显示） */}
-            {selectedSpaceId && selectedSpace && (
+            {/* 侧边栏底部：错题本 / 收藏 + 插件视图入口（Phase 2 批次 1 收尾：文件视图下常驻） */}
+            {(
               <div className="shrink-0 border-t border-[var(--border-color)] px-2 py-1.5 space-y-0.5">
                 {/* 内置错题本：唯一入口，恒驻 */}
                 <button
@@ -1841,10 +1677,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               <div className="shrink-0 border-t border-[var(--border-color)] px-2 py-1.5">
                 <button
                   onClick={() => {
-                    // 当前选中目录(章节/笔记本优先,否则空间)的仓库路径 → 图谱 scope
-                    const sel = (selectedCategoryId ? categories.find((c) => c.id === selectedCategoryId) : null)
-                      ?? (selectedSpaceId ? categories.find((c) => c.id === selectedSpaceId) : null)
-                    setGraphScope(sel?.path ? { path: sel.path, name: sel.name } : null)
+                    // 图谱 scope（Phase 2 批次 1 收尾）：树选择退役 → 跟随活动页所在分类（无活动页 = 全库）
+                    const catId = activePageId ? allPages.find(p => p.id === activePageId)?.categoryId : null
+                    const cat = catId ? categories.find(c => c.id === catId) : null
+                    setGraphScope(cat?.path ? { path: cat.path, name: cat.name } : null)
                     setGraphMode(true)
                   }}
                   className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
