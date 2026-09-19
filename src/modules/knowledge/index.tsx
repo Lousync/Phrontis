@@ -563,10 +563,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     } catch (e) { console.error(e) }
   }, [])
 
-  /** P1 附件路由：PDF/文档附件 → 编辑器 PdfReaderView（App 收到 kb-open-in-editor 会切编辑器 Tab） */
+  /** P1 附件路由：PDF/文档附件 → 编辑器 PdfReaderView（App 收到 kb-open-note 会切编辑器 Tab） */
   const openAttachmentInEditor = useCallback((relPath: string) => {
     if (!relPath) { showToast({ type: 'warning', message: '附件路径为空' }); return }
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath, from: 'knowledge' } })) // 条目6：带来源 → 编辑器出「← 返回 知识库」
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath, from: 'knowledge' } })) // 条目6：带来源 → 编辑器出「← 返回 知识库」
   }, [])
 
   // --- tab management (VS Code preview mode) ---
@@ -775,7 +775,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     openByRelPath(node.relPath)
   }, [openByRelPath, handleToggleTreeDir])
 
-  // App 转发通道：kb-open-in-editor 的所有消费方（快速切换器/AI 引用/书架/aiTeaching/散文件…）改道后由此进入
+  // App 转发通道：kb-open-note 的所有消费方（快速切换器/AI 引用/书架/aiTeaching/散文件…）改道后由此进入
   useEffect(() => {
     const onOpen = (e: Event) => {
       const rel = (e as CustomEvent).detail as { relPath?: string } | undefined
@@ -896,7 +896,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         showToast({ type: 'warning', message: '该页面不在仓库读源中（设置 → 通用 → 知识库读源 开启 vault）' })
         return
       }
-      window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: p.path, from: 'knowledge' } }))
+      window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: p.path, from: 'knowledge' } }))
     } catch (e) {
       console.error(e)
       showToast({ type: 'error', message: '跳转编辑器失败' })
@@ -1518,7 +1518,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             <div className="h-full overflow-y-auto">
               <div className="max-w-[720px] mx-auto px-10 py-14" style={{ fontSize: '15px', lineHeight: 1.9 }}>
                 <h1 className="text-[26px] font-bold leading-snug mb-6">{readingPage?.title || '无标题'}</h1>
-                {/* P1 附件条：PDF/无扩展名附件 → 在阅读器中打开（kb-open-in-editor → 编辑器 PdfReaderView）；图片灰显 */}
+                {/* P1 附件条：PDF/无扩展名附件 → 在阅读器中打开（kb-open-note → 编辑器 PdfReaderView）；图片灰显 */}
                 {readingPage?.attachments && readingPage.attachments.length > 0 && (
                   <div className="mb-6 flex flex-wrap gap-1.5">
                     {readingPage.attachments.map((att) => {
@@ -1615,7 +1615,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             {!selectedSpaceId && (
               <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
                 <BookMarked size={12} />
-                知识库
+                笔记
                 <FolderFocusButton
                   className="ml-auto"
                   on={!!settings.knowledgeFolderFocus}

@@ -92,7 +92,7 @@ check('主进程写盘后 broadcastDataChanged(pdfReader)', repoSrc.includes("br
 const bookshelfSrc = stripComments(readFileSync(join(ROOT, 'src/modules/bookshelf/index.tsx'), 'utf8'))
 check('书架挂 useDataChanged(pdfReader)（AI/导入改动界面自动刷新）', bookshelfSrc.includes("useDataChanged('pdfReader'"))
 // 2026-09-17 拍板「书架内自渲染」：点书走模块内阅读器，不再借道编辑器
-check('书架点书不再派发 kb-open-in-editor（书架内自渲染）', !bookshelfSrc.includes('kb-open-in-editor'))
+check('书架点书不再派发 kb-open-note（书架内自渲染）', !bookshelfSrc.includes('kb-open-note'))
 
 // ===== ④ TabName 冻结 16 项 =====
 console.log('\n--- ④ TabName 冻结 ---')

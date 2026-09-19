@@ -7,7 +7,7 @@ import { showToast } from '../../../lib/toast'
  * 归档非 md 文件的元信息卡（docs/vault-archive-all-files-design.md §7，D1 拍板）。
  *
  * 知识库阅读器的非 md 落点：不渲染内容（html 走沙箱 iframe，其余只给元信息），
- * 提供「在编辑器打开」跳转（kb-open-in-editor 闭环已有）。html 分支由 PageEditor /
+ * 提供「在编辑器打开」跳转（kb-open-note 闭环已有）。html 分支由 PageEditor /
  * 沉浸阅读分支直接走 WelcomeHtmlView，不经此卡。
  */
 
@@ -32,7 +32,7 @@ export function FileMetaCard({ title, fileType, path, updatedAt, sizeBytes }: {
       showToast({ type: 'warning', message: '该条目没有关联的仓库文件' })
       return
     }
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: path, from: 'knowledge' } }))
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: path, from: 'knowledge' } }))
   }
   return (
     <div className="flex-1 flex items-center justify-center p-6 overflow-y-auto">

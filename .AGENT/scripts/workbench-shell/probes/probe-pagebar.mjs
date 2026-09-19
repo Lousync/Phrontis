@@ -182,22 +182,22 @@ async function main() {
     'P5 切到知识库模块 → 页面条位置/高度不变', `before=${st.barTop}/${st.barH} after=${st1.barTop}/${st1.barH}`)
   ok(st1.modTitle === 'knowledge', 'P5b 左栏模块态 = 知识库', `mod=${st1.modTitle}`)
 
-  // P6 打开 README.md：走 App 自己的 `kb-open-in-editor` 事件通道（搜索面板同款）——
+  // P6 打开 README.md：走 App 自己的 `kb-open-note` 事件通道（搜索面板同款）——
   // 批次 2 起该通道改道知识库（README.md 无 frontmatter id → draft 页签，PageEditor 内嵌 MonacoPane）
   const opened = await evalJs(`(() => {
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: 'README.md' } }))
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: 'README.md' } }))
     return 'sent'
   })()`)
   await sleep(2000)
   // 时序兜底：启动后 allPages 未就绪时事件可能落空（实测偶发）→ 最多补发 2 次
   let st2 = await evalJs(JS_PAGEBAR)
   for (let i = 0; i < 2 && !st2.items.some((x) => x.owner === 'knowledge' && /README/i.test(x.label)); i++) {
-    await evalJs(`window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: 'README.md' } }))`)
+    await evalJs(`window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: 'README.md' } }))`)
     await sleep(2200)
     st2 = await evalJs(JS_PAGEBAR)
   }
   const editorItems = st2.items.filter((i) => i.owner === 'knowledge')
-  ok(opened === 'sent', 'P6a 经 kb-open-in-editor 通道请求打开 README.md', String(opened))
+  ok(opened === 'sent', 'P6a 经 kb-open-note 通道请求打开 README.md', String(opened))
   ok(editorItems.length >= 1 && editorItems.every((i) => i.inBar),
     'P6b 知识库页签进页面条（owner=knowledge，条目在条内）', JSON.stringify(st2.items))
   ok(editorItems.some((i) => /README/i.test(i.label)), 'P6c 条目标题 = 文件名', JSON.stringify(editorItems.map((i) => i.label)))

@@ -1,6 +1,6 @@
 /**
  * 图谱视图（R4-G1→G3）：知识模块内的全幅画布视图容器。
- * - G1：拉数据 + 浮层 + 单击卡片确认打开（kb-open-in-editor 跳编辑器）
+ * - G1：拉数据 + 浮层 + 单击卡片确认打开（kb-open-note 跳编辑器）
  * - G2：A7 本地图谱（BFS1 子图）
  * - G3：设置面板（参数持久化到 .knowbase/config.json graphView 段）、过滤（标签/孤儿页）、
  *       未解析 [[引用]] 合成 dangling 虚节点渲染、着色/簇力/文字阈值开关
@@ -214,7 +214,7 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
 
   const openInEditor = useCallback(() => {
     if (!sel || sel.kind !== 'page') return
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: sel.path, from: 'knowledge' } })) // 条目6：带来源
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: sel.path, from: 'knowledge' } })) // 条目6：带来源
   }, [sel])
 
   const openInReader = useCallback(() => {

@@ -18,7 +18,7 @@ const PdfReaderView = lazy(() => import('../../components/shared/pdf/PdfReaderVi
  * - 自动库 = 扫 vault 全部 .pdf（pdfReader:listBooks），清单不落盘；
  * - 封面网格（PdfCover 懒渲染 + covers 缓存）；续读条（hasProgress 按最近读排序）；
  * - 「＋导入」= ws:importPdf（外部 PDF 拷入仓库根）；
- * - 点书 = kb-open-in-editor { relPath, from:'bookshelf' }（state+props 范式，编辑器组文档标签每书一个）。
+ * - 点书 = kb-open-note { relPath, from:'bookshelf' }（state+props 范式，编辑器组文档标签每书一个）。
  * 模块根节点 h-full（槽位容器是块级 div，flex-1 无效）。
  */
 

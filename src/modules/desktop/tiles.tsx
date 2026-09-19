@@ -352,7 +352,7 @@ function DaybookTile({ w, h, data, onOpen }: { w: number; h: number; data: Deskt
                       className="desk-row desk-row-btn"
                       title={p.path ?? p.title}
                       onClick={() => {
-                        if (p.path) window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: p.path, from: 'desktop' } }))
+                        if (p.path) window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: p.path, from: 'desktop' } }))
                         else onOpen('knowledge')
                       }}
                     >
@@ -558,7 +558,7 @@ const CONTENT_TILES: TileDef[] = [
               title={p.path ?? p.title}
               onClick={() => {
                 // 有仓库相对路径 → 交给编辑器打开真身；没有（合成的知识页）→ 退回知识库
-                if (p.path) window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: p.path, from: 'desktop' } }))
+                if (p.path) window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: p.path, from: 'desktop' } }))
                 else onOpen('knowledge')
               }}
             >

@@ -110,7 +110,7 @@ console.log('[6] 文件视图（Phase 2 批次 1）')
   ok(ki.includes("from '../../components/shared/VaultTree'"), 'knowledge 消费共享 VaultTree')
   ok(!ki.includes('leftView') && ki.includes('<VaultTree'), '左栏单文件视图（结构三件套已退役，VaultTree 常驻）')
   ok(!ki.includes('<NotebookList') && !ki.includes('<ChapterPanel') && !ki.includes('<SpacePanel'), '负向：三件套不再渲染')
-  ok(ki.includes("kb-open-in-editor'") && ki.includes('handleTreeOpenFile'), '树打开文件：知识页走页签，草稿/非 md 由编辑器模块兜底（批次 2 迁移）')
+  ok(ki.includes("kb-open-note'") && ki.includes('handleTreeOpenFile'), '树打开文件：知识页走页签，草稿/非 md 由编辑器模块兜底（批次 2 迁移）')
   ok(ki.includes('workspaceListDir') && ki.includes('refreshTreeDir'), '目录懒加载接线')
 }
 

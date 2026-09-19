@@ -383,7 +383,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                         <li key={i}>
                           {canOpen ? (
                             <button
-                              onClick={() => window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: c.file } }))}
+                              onClick={() => window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file } }))}
                               title="在编辑器中打开该文件"
                               className="w-full flex items-center gap-1.5 px-2.5 py-1 text-left text-[11.5px] text-[var(--text-primary)] group/item transition-colors hover:bg-[var(--bg-hover)]"
                             >

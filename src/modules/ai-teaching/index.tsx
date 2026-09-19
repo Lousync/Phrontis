@@ -562,10 +562,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    */
   const treeOpenArt = useCallback((rel: string) => { void openArtFile(`${treeBase}/${rel}`) }, [openArtFile, treeBase])
   const treeOpenExternal = useCallback((rel: string) => {
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: `${treeBase}/${rel}`, from: 'aiTeaching' } }))
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: `${treeBase}/${rel}`, from: 'aiTeaching' } }))
   }, [treeBase])
   const artOpenInEditor = useCallback((rel: string) => {
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: rel, from: 'aiTeaching' } }))
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))
   }, [])
   const wsSessions = useMemo(
     () => sessions.filter(s => (wsSessionMap[s.id] ?? '__none__') === (activeWs ?? '__none__')),
@@ -1399,7 +1399,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [syncSessionFiles])
   // 切回本模块 Tab：回读一次（保活组件不卸载，isActive 是唯一「重新可见」信号）
   useEffect(() => { if (isActive) syncSessionFiles({ sources: true, constraints: true }) }, [isActive, syncSessionFiles])
-  const openSrcFile = (rel: string) => window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: rel, from: 'aiTeaching' } }))
+  const openSrcFile = (rel: string) => window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))
   const submitSrcForm = async () => {
     if (!srcForm) return
     const name = srcForm.name.trim()
@@ -1684,14 +1684,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       : layer === 'workspace' ? await aiTeachProfileEnsureWorkspace(wid!).catch(() => null)
       : await aiTeachProfileEnsureSession(activeId!).catch(() => null)
     if (!r?.ok || !r.relPath) { showToast({ type: 'error', message: `画像打开失败${r?.error ? `：${r.error}` : ''}` }); return }
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
     showToast({ type: 'info', message: `画像文档已在编辑区打开（${r.created ? '已按骨架创建' : '已有文件'}）· 编辑器顶栏可「← 返回 AI教学」` })
   }, [activeId, activeWs])
   /** 全局要求编辑 = ensure 产物根 CONSTRAINTS.md（缺则落骨架）→ 跳编辑区打开；与全局画像同款交互（global-constraints 方案） */
   const openGlobalConstraints = useCallback(async () => {
     const r = await aiTeachGlobalEnsureConstraints().catch(() => null)
     if (!r?.ok || !r.relPath) { showToast({ type: 'error', message: `全局要求打开失败${r?.error ? `：${r.error}` : ''}` }); return }
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
     showToast({ type: 'info', message: `全局要求已在编辑区打开（${r.created ? '已按骨架创建' : '已有文件'}）· 保存后所有会话下一轮生效` })
   }, [])
   /** v3.1.2 条目6：工作区要求编辑 = ensure {工作区}/CONSTRAINTS.md（缺则落骨架）→ 跳编辑区打开；与全局要求同款交互 */
@@ -1700,7 +1700,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (!wid || wid === '__none__') { showToast({ type: 'warning', message: '会话未归属工作区，无工作区要求层' }); return }
     const r = await aiTeachWorkspaceEnsureConstraints(wid).catch(() => null)
     if (!r?.ok || !r.relPath) { showToast({ type: 'error', message: `工作区要求打开失败${r?.error ? `：${r.error}` : ''}` }); return }
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
     showToast({ type: 'info', message: `工作区要求已在编辑区打开（${r.created ? '已按骨架创建' : '已有文件'}）· 保存后本工作区会话下一轮生效` })
   }, [activeWs])
   /** 关闭建议 → 记账节流窗口：`ignored` 窗口内留安静入口，`applied` 已写入则不再留 */
@@ -3519,7 +3519,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     {lastChanges.map((c, i) => (
                       <li key={i}>
                         {c.file ? (
-                          <button onClick={() => (c.tool === 'visual.html' ? void openArtFile(String(c.file), { title: c.target }) : window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: c.file, from: 'aiTeaching' } })))}
+                          <button onClick={() => (c.tool === 'visual.html' ? void openArtFile(String(c.file), { title: c.target }) : window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file, from: 'aiTeaching' } })))}
                             title={c.tool === 'visual.html' ? '在工件栏打开渲染预览' : '在编辑器中打开'}
                             className="w-full flex items-center gap-1.5 px-2.5 py-1 text-left text-[11.5px] group hover:bg-[var(--bg-hover)] transition-colors">
                             <FileText size={10} className="shrink-0 text-[var(--accent)]" />
@@ -3864,7 +3864,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         </div>
       )}
       {/* UI 优化第三轮：画像编辑不再用弹层——三层=三份仓库内 PROFILE.md，入口直接跳编辑区打开
-          （ensure 落骨架 → kb-open-in-editor from:aiTeaching → 编辑器「← 返回 AI教学」回跳）；弹层 JSX 已删除 */}
+          （ensure 落骨架 → kb-open-note from:aiTeaching → 编辑器「← 返回 AI教学」回跳）；弹层 JSX 已删除 */}
       {webDlg && activeId && (
         <WebSourceDialog sessionId={activeId ?? ''} entry={webDlg} onClose={() => setWebDlg(null)} onDone={() => { void refreshSources(activeId) }} />
       )}

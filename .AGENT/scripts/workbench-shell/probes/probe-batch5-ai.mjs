@@ -591,7 +591,7 @@ async function main() {
     return { clicked: false, label: '', palOpen: !!pal }
   })()`)
   await sleep(1600)
-  // Phase 2 批次 2：kb-open-in-editor 改道知识库——README.md 无 id → draft 页签默认阅读态，
+  // Phase 2 批次 2：kb-open-note 改道知识库——README.md 无 id → draft 页签默认阅读态，
   // B4 链路在编辑态，先进编辑（PageEditor 工具条「切换到编辑」按钮）
   await evalJs(`(() => {
     const b = [...document.querySelectorAll('button')].find((x) => (x.title || '').startsWith('切换到编辑'))

@@ -184,7 +184,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
   const openHit = useCallback((p: KnowledgePage): void => {
     setQ('')
     if (p.path) {
-      window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: p.path, from: 'desktop' } }))
+      window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: p.path, from: 'desktop' } }))
       return
     }
     onOpenModule('knowledge')
@@ -198,7 +198,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
    * 180ms 是留给编辑器 Tab 挂载 + 注册 `kb-editor-new-page` 监听的余量（与 Ctrl+N 同值）。
    */
   const onNewPage = useCallback((): void => {
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { from: 'desktop' } }))
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { from: 'desktop' } }))
     window.setTimeout(() => window.dispatchEvent(new CustomEvent('kb-editor-new-page')), 180)
   }, [])
 

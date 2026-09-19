@@ -257,7 +257,7 @@ export function AiChatSidebar({ chat, active, container }: Props) {
             {changes.slice(0, 8).map((c, i) => (
               <button
                 key={`${c.at}-${i}`}
-                onClick={() => c.file && window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: c.file } }))}
+                onClick={() => c.file && window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file } }))}
                 disabled={!c.file}
                 title={c.file ? `${c.action} · ${c.file}` : c.action}
                 className="group/cf flex w-full items-center gap-1.5 rounded-md px-1 py-1 text-left transition-colors enabled:hover:bg-[var(--bg-hover)]"

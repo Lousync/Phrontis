@@ -266,7 +266,7 @@ export default function App() {
     // 依赖带全：退禅兜底需要读到当前禅档位 / 激活模块 / 面板态，重挂监听比 ref 镜像直白
   }, [zenLevel, activeTab, palette, changeZen])
 
-  // 快速切换器数据源：知识页索引（默认 vault 读源带 path → 经 kb-open-in-editor 在编辑器组打开）
+  // 快速切换器数据源：知识页索引（默认 vault 读源带 path → 经 kb-open-note 在编辑器组打开）
   useEffect(() => {
     if (palette !== 'file') return
     let alive = true
@@ -284,7 +284,7 @@ export default function App() {
               group: '知识页',
               run: () => {
                 setPalette(null)
-                if (p.path) window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: p.path } }))
+                if (p.path) window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: p.path } }))
               },
             })),
         )
@@ -326,7 +326,7 @@ export default function App() {
 
   const buildCommandItems = (): PaletteItem[] => {
     const tabs: Array<{ id: TabName; label: string; hint?: string }> = [
-      { id: 'knowledge', label: '打开 知识库', hint: '阅读 / 编辑 / 导航' },
+      { id: 'knowledge', label: '打开 笔记', hint: '阅读 / 编辑 / 导航' },
       { id: 'aiTeaching', label: '打开 AI教学', hint: '讲义 / 研读 / 出题' },
       { id: 'blog', label: '打开 博客' },
       { id: 'schedule', label: '打开 日程' },
@@ -520,10 +520,10 @@ export default function App() {
   // 会重建编辑器实例，旧实例的 listener 消费事件后随实例一起被丢弃，新实例拿不到
   // pending → 永远空态。state+props 不受实例重建影响。
   const [pendingOpenRel, setPendingOpenRel] = useState<string | null>(null)
-  // UI 优化条目6：跳转来源记录——kb-open-in-editor 带 from（如 aiTeaching），编辑器出「← 返回 X」chip；
+  // UI 优化条目6：跳转来源记录——kb-open-note 带 from（如 aiTeaching），编辑器出「← 返回 X」chip；
   // 新跳转覆盖旧来源，任何手动切 Tab（handleTabChange）清除
   const [editorJumpFrom, setEditorJumpFrom] = useState<TabName | null>(null)
-  // Phase 2 批次 2（编辑区退役）：kb-open-in-editor 全部改道知识库——切 Tab 后把 relPath
+  // Phase 2 批次 2（编辑区退役）：kb-open-note 全部改道知识库——切 Tab 后把 relPath
   // 转发给 knowledge 的 kb-open-note-rel 通道（知识页/草稿/PDF/源码统一由文件视图语境消化）。
   // 十余处 dispatch 方零改动；editor 模块代码暂留（不再可达），批次 3 物理清理。
   useEffect(() => {
@@ -534,8 +534,8 @@ export default function App() {
         window.dispatchEvent(new CustomEvent('kb-open-note-rel', { detail: { relPath: detail.relPath } }))
       }
     }
-    window.addEventListener('kb-open-in-editor', handler)
-    return () => window.removeEventListener('kb-open-in-editor', handler)
+    window.addEventListener('kb-open-note', handler)
+    return () => window.removeEventListener('kb-open-note', handler)
   }, [])
 
   // v3.4.0 PDF 划词 → AI 教学（pdf-reader 方案 §6）：事件只送意图，payload 走 state+props
@@ -575,7 +575,7 @@ export default function App() {
       : null
 
   // 日程侧边栏（v3.2.0 ⑮）桌面磁贴的日历 → 日志跳转。
-  // 与 kb-open-in-editor 同范式：事件只送意图，payload 走 state + props
+  // 与 kb-open-note 同范式：事件只送意图，payload 走 state + props
   // （保活层会重建 BlogModule 实例，靠 window 一次性变量会丢）。消费后立即清空，
   // 免得切走再切回又跳一次。
   const [pendingBlogJump, setPendingBlogJump] = useState<BlogJump | null>(null)
@@ -967,9 +967,9 @@ export default function App() {
     if (wbLayout.leftLocked) update('workbenchLayout', JSON.stringify({ ...wbLayout, leftLocked: false }))
   }
 
-  /** 左栏散文件点击 → 知识库文件视图语境打开（Phase 2 批次 2：kb-open-in-editor 统一改道） */
+  /** 左栏散文件点击 → 知识库文件视图语境打开（Phase 2 批次 2：kb-open-note 统一改道） */
   const handleOpenLooseFile = (relPath: string) => {
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath, from: 'knowledge' } }))
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath, from: 'knowledge' } }))
   }
 
   // 日程打卡侧边栏：标题栏按钮 + Ctrl+Alt+S 统一入口（v3.4.0 批次4 起语义 = 脱离 toggle）：

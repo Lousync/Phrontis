@@ -108,8 +108,8 @@ check('up：只有真拖过才动数据（单击不触发换位）',
 check('up：换过位时让位目标**瞬时**还原（它的新格位已在视觉位上，带过渡反而错位滑回）',
   /preview\.style\.transition = swapped \? 'none' : shiftEase\(170\)/.test(upBody || ''))
 
-check('新建按钮改为走编辑器（复用 kb-open-in-editor + kb-editor-new-page）',
-  !!newBtn && /kb-open-in-editor/.test(newBtn) && /kb-editor-new-page/.test(newBtn))
+check('新建按钮改为走编辑器（复用 kb-open-note + kb-editor-new-page）',
+  !!newBtn && /kb-open-note/.test(newBtn) && /kb-editor-new-page/.test(newBtn))
 check('新建按钮：切换 Tab 与触发命名行之间留了挂载余量（180ms，与知识库 Ctrl+N 同值）',
   /setTimeout\(\(\) => window\.dispatchEvent\(new CustomEvent\('kb-editor-new-page'\)\), 180\)/.test(newBtn || ''))
 check("新建按钮的 onClick 已从 onOpenModule('knowledge') 换成 onNewPage",

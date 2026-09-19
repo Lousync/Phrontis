@@ -28,7 +28,7 @@ type BlogView = 'list' | 'editor' | 'detail' | 'summary'
 /**
  * 外部跳转意图（桌面磁贴的日历 / 总结入口、日志尾部的总结入口都走这里）。
  *
- * 传递方式照 `kb-open-in-editor` 的成熟范式：**事件只负责把意图送到 App，
+ * 传递方式照 `kb-open-note` 的成熟范式：**事件只负责把意图送到 App，
  * 真实 payload 走 state + props**（`pendingOpenRel` 的教训：保活层里靠 window 变量
  * 会丢事件）。所以这里是一个由 App 下传、消费后回调清空的 prop。
  */

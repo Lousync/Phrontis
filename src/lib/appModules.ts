@@ -44,7 +44,7 @@ export const APP_MODULES = [
   // Phase 2 批次 2（编辑区退役）：editor 退出活动栏（bar: false）——文件树并入知识库后不再单独暴露；
   // id 保留（类型/存量数据兼容），模块代码暂留作兜底，批次 3 物理清理
   { id: 'editor', label: '编辑器', bar: false, startable: false, tile: true, palette: false },
-  { id: 'knowledge', label: '知识库', bar: true, startable: true, tile: true, palette: true },
+  { id: 'knowledge', label: '笔记', bar: true, startable: true, tile: true, palette: true },
   { id: 'blog', label: '博客', bar: true, startable: true, tile: true, palette: true },
   { id: 'schedule', label: '日程', bar: true, startable: true, tile: true, palette: true },
   { id: 'moments', label: '动态', bar: true, startable: true, tile: true, palette: true },
