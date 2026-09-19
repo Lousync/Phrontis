@@ -5,7 +5,6 @@ import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag } from './
 
 import { labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
 import { WORKBENCH_TABBAR_EXCLUDED } from './lib/workbenchLayout'
-import { landingAfterClose } from './modules/editor/tabPolicy'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchPageBar, PAGE_OWNED } from './components/workbench/WorkbenchPageBar'
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
@@ -789,10 +788,10 @@ export default function App() {
   const [quizViewOpen, setQuizViewOpen] = useState(false)
   const [kbStripVisible, setKbStripVisible] = useState(false)
   const [editorStripVisible, setEditorStripVisible] = useState(false)
-  // 关闭标签（✕ / 中键）：关的是激活标签 → 落右邻居优先、越界退左邻居（tabPolicy.landingAfterClose
-  // 与编辑器文档标签同一份语义）；关完为空 = 空态（activeTab 置 null，拍板③允许全部关闭），
-  // 且左栏退回总览态（2026-09-17 第四轮反馈拍板①：全关后不滞留某模块侧栏）。
-  // 批次4：落点按 tool: 前缀分流——工具标签落点切 activeToolTab（activeTab 归 null），模块落点反之。
+  // 关闭标签（✕ / 中键）。2026-09-19 反馈拍板（需求而非 bug）：**关掉激活标签 = 一律回总览空态**，
+  // 不再自动落邻居标签——哪怕还有其他标签页，它们原样留在页面条（未激活），点击再激活；
+  // 左栏同步退回顶层。「标签 ↔ 左栏」关系收敛为两条可预期规则：点标签 = 左栏跟随；关标签 = 回总览。
+  // （旧「右邻居优先落点」语义保留在编辑器/知识库内部的文档页签 landingAfterClose，模块级标签不用。）
   const closeTab = useCallback((tab: string) => {
     const i = openTabs.indexOf(tab)
     if (i === -1) return
@@ -800,18 +799,9 @@ export default function App() {
     const isTool = isToolTabId(tab)
     const isActive = isTool ? activeToolTab === tab : activeTab === tab
     if (isActive) {
-      const landing = landingAfterClose(openTabs, tab)
-      if (landing && isToolTabId(landing)) {
-        setActiveTab(null)
-        setActiveToolTab(landing)
-      } else if (landing) {
-        setActiveToolTab(null)
-        setActiveTab(landing as TabName)
-      } else {
-        setActiveToolTab(null)
-        setActiveTab(null)
-        setRailModule(null)
-      }
+      setActiveToolTab(null)
+      setActiveTab(null)
+      setRailModule(null)
     }
     // 全关兜底（2026-09-19 反馈：关掉博客后左栏转到笔记）：剩余标签全部「不可见」=
     // PAGE_OWNED 空壳（模块条目不进页面条、无停靠页面时页签组也不出现）→ 用户视角已无
