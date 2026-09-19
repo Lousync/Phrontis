@@ -216,7 +216,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
              2026-09-16 第二轮 UI 反馈：头部只留 ‹ 返回 + 锁定（文字描述与横线删除）；
              data-wb-mod 记录当前模块 key（工具侧栏态 = tool id），供探针/脚本断言（不渲染可见文字） */
         <>
-          <div data-wb="mod" data-wb-mod={railModule ?? railTool ?? ''} className="relative flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
+          <div data-wb="mod" data-wb-mod={railModule ?? railTool ?? ''} className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
             {/* 返回顶层统一 🏠（2026-09-17 反馈轮：‹ 换 House，钮组与搜索态头部同一居中语言） */}
             <button onClick={onBack} title="返回总览（自动解锁）" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <House size={13} />
@@ -229,8 +229,8 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
               {locked ? <Lock size={13} /> : <LockOpen size={13} />}
             </button>
             {/* 模块头部动作槽（2026-09-19）：模块自己的按钮（笔记聚焦 / 博客写作等）portal 到这里，
-                绝对定位最右——不挤占二钮的居中语言 */}
-            <div ref={modActionsRef} className="absolute right-1 flex items-center gap-0.5" />
+                与二钮**同组居中**（2026-09-19 二次反馈：不要贴右，所有按钮居中放一起） */}
+            <div ref={modActionsRef} className="flex items-center gap-1" />
           </div>
           <div ref={modSlotRef} data-wb="modSlot" className="flex min-h-0 flex-1 flex-col overflow-hidden" />
         </>
