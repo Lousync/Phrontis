@@ -759,22 +759,31 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     void refreshTreeDir('')
   }, [refreshTreeDir])
 
-  /** 打开文件：知识页走页签；无 id 草稿 md/txt → draft 直入编辑（同页签栈，Phase 2 批次 1）；
-   *  非 md（PDF/代码/html）暂由编辑器模块兜底（批次 2 迁移） */
+  /** 按 relPath 打开（统一通道，Phase 2 批次 2）：树点击与 App 转发的 kb-open-note-rel 共用——
+   *  知识页走页签；无 id md/txt/PDF/代码 → draft 页签（PDF 内嵌阅读器、源码走 Monaco）；不再跳编辑器模块 */
+  const openByRelPath = useCallback((relPath: string) => {
+    const page = allPages.find(p => p.path === relPath)
+    if (page) { void handleOpenPage(page.id); return }
+    const name = relPath.slice(relPath.lastIndexOf('/') + 1)
+    const dot = name.lastIndexOf('.')
+    const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : 'md'
+    void handleOpenPage(`draft:${relPath}`, { title: name, fileType: ext })
+  }, [allPages, handleOpenPage])
+
   const handleTreeOpenFile = useCallback((node: TreeNode) => {
     if (node.type === 'dir') { handleToggleTreeDir(node.relPath); return }
-    const page = allPages.find(p => p.path === node.relPath)
-    if (page) { void handleOpenPage(page.id); return }
-    const lower = node.name.toLowerCase()
-    if (lower.endsWith('.md') || lower.endsWith('.txt')) {
-      const name = node.relPath.slice(node.relPath.lastIndexOf('/') + 1)
-      const dot = name.lastIndexOf('.')
-      const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : 'md'
-      void handleOpenPage(`draft:${node.relPath}`, { title: name, fileType: ext })
-      return
+    openByRelPath(node.relPath)
+  }, [openByRelPath, handleToggleTreeDir])
+
+  // App 转发通道：kb-open-in-editor 的所有消费方（快速切换器/AI 引用/书架/aiTeaching/散文件…）改道后由此进入
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const rel = (e as CustomEvent).detail as { relPath?: string } | undefined
+      if (rel?.relPath) openByRelPath(rel.relPath)
     }
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: node.relPath, from: 'knowledge' } }))
-  }, [allPages, handleOpenPage, handleToggleTreeDir])
+    window.addEventListener('kb-open-note-rel', onOpen)
+    return () => window.removeEventListener('kb-open-note-rel', onOpen)
+  }, [openByRelPath])
 
   const parentDirOf = (rel: string): string => { const i = rel.lastIndexOf('/'); return i === -1 ? '' : rel.slice(0, i) }
 
@@ -799,13 +808,26 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     if (!root) return
     const rel = dirRel ? `${dirRel}/${name}` : name
     try {
+      if (type === 'knowledge') {
+        // 新建知识页（Phase 2 批次 2）：frontmatter id 直接写入（randomUUID，与主进程同格式），
+        // 索引重建后即成为正式页——文件名不带扩展名时补 .md
+        const mdName = /\.[a-z0-9]+$/i.test(name) ? name : `${name}.md`
+        const mdRel = dirRel ? `${dirRel}/${mdName}` : mdName
+        const base = mdName.replace(/\.[^.]+$/, '')
+        const id = crypto.randomUUID()
+        await workspaceCreateFile(root, mdRel, `---\nid: ${id}\ntitle: ${base}\n---\n\n`)
+        void refreshTreeDir(dirRel)
+        void refreshAllPages()
+        setTimeout(() => { void handleOpenPage(id, { title: base, fileType: 'md' }) }, 400)
+        return
+      }
       if (type === 'dir') await workspaceMkdir(root, rel)
       else await workspaceCreateFile(root, rel)
       void refreshTreeDir(dirRel)
       // 新建的 md 若未被索引收录（无 id 草稿），点开走编辑器兜底；有 id 由刷新后的索引接管
       void refreshAllPages()
     } catch (e) { console.error('[knowledge] tree create failed:', e); showToast({ type: 'error', message: '创建失败' }) }
-  }, [ensureVaultRoot, refreshTreeDir, refreshAllPages])
+  }, [ensureVaultRoot, refreshTreeDir, refreshAllPages, handleOpenPage])
 
 
   const handleBackToList = useCallback(() => {
@@ -1163,11 +1185,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       }
       if (isEditingInput(e)) return
 
-      // Ctrl+N — 新建知识页：跳编辑器触发内联命名行（读写分工：知识库为阅读器，建页在编辑器完成）
+      // Ctrl+N — 新建知识页：文件树内联创建（Phase 2 批次 2：frontmatter id 直接写入，不再借道编辑器）
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'n' || e.key === 'N')) {
         e.preventDefault()
-        window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { from: 'knowledge' } }))
-        window.setTimeout(() => window.dispatchEvent(new CustomEvent('kb-editor-new-page')), 180)
+        setTreeCreating({ dirRel: '', type: 'knowledge' })
         return
       }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { Trash2, Eye, Edit3, Star, FileText, ChevronDown, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, MoreHorizontal, ListChecks, SquarePen, Sparkles, RefreshCw } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
@@ -27,6 +27,8 @@ import type * as Monaco from 'monaco-editor'
 import { bindEditorTheme } from '../../../lib/editorTheme'
 // Monaco 运行时装配下沉到宿主组件：不随应用入口进首屏 chunk（性能 2026-09-10）
 import '../../../lib/monaco-setup'
+// PDF 阅读器（Phase 2 批次 2）：共享层组件内嵌知识库——编辑器退役后阅读承载移到本模块
+const PdfReaderView = lazy(() => import('../../../components/shared/pdf/PdfReaderView').then((m) => ({ default: m.PdfReaderView })))
 
 interface Props {
   pageId: string
@@ -120,6 +122,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const monacoRef = useRef<typeof Monaco | null>(null)
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const pageIdRef = useRef(pageId)
+  /** 已重试过的 pageId（索引重建延迟：新建/转正后立即打开时 getKnowledgePageById 可能 404 一次） */
+  const retryRef = useRef<string | null>(null)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const showDeleteConfirmRef = useRef(showDeleteConfirm)
   const showLangMenuRef = useRef(showLangMenu)
@@ -128,6 +132,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const vaultModeRef = useRef(vaultMode)
   // 共享 MonacoPane 句柄（P1b）：大纲跳转 / 插图 / 脚注经它拿编辑器实例
   const paneRef = useRef<MonacoPaneHandle | null>(null)
+  // B4 内联建议请求态/暂停态（知识库编辑态的可观测信号；Phase 2 批次 2 随编辑器退役补齐入口）
+  const [inlineBusy, setInlineBusy] = useState(false)
+  const [inlinePaused, setInlinePaused] = useState(false)
   // 就地编辑（笔记合并 Phase 1，docs/notes-merge-phase1-design.md §1.1）：
   // vault 写路径三件套 = 当前仓库 rootId + 装载时的 frontmatter 前缀 + mtime 冲突基线
   const vaultRootRef = useRef<string | null>(null)
@@ -174,13 +181,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   useEffect(() => { vaultModeRef.current = vaultMode }, [vaultMode])
 
   const [attachmentsPath, setAttachmentsPath] = useState('')
-  // v3.4.0 PDF 整包批次 7：「内置阅读」（base64 整本渲染的旧内嵌查看器）退役 → 跳编辑器新阅读器；
-  // 「本地打开」保留。旧版 userData 附件无仓库路径，跳转不可达时提示走本地打开。
-  const openPdfInReader = useCallback(() => {
-    const rel = page?.path
-    if (!rel) { showToast({ type: 'warning', message: '旧版附件不在仓库内，无法在阅读器打开，请用「本地打开」' }); return }
-    window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: rel, from: 'knowledge' } }))
-  }, [page])
+  // Phase 2 批次 2：PDF 阅读器内嵌本模块（openPdfInReader 跳转通道随编辑器退役而移除）
 
   useEffect(() => {
     getAttachmentsPath().then(setAttachmentsPath).catch(() => {})
@@ -255,7 +256,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     }
   }, [draftRelPath])
 
-  const loadDraftPage = useCallback(async (rel: string) => {
+  /** 草稿装载（Phase 2 批次 1）：读原始文件 → body 进同一套脏状态机；frontmatter 前缀/mtime 进 vault 基线。
+   *  pageRef 构造最小伪页（path 指向草稿文件），doSave 的 vault 分支零改动直接复用。
+   *  isReload = keep-alive/广播重读：保持当前阅读/编辑态（否则自动保存写盘 → 广播 → 重读会把用户踢回阅读态）。 */
+  const loadDraftPage = useCallback(async (rel: string, isReload = false) => {
     try {
       if (!vaultRootRef.current) {
         const cur = await workspaceGetCurrent()
@@ -263,31 +267,42 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       }
       const root = vaultRootRef.current
       if (!root) return
-      const res = await workspaceReadFile(root, rel)
-      const fm = splitFrontmatter(res?.content ?? '')
-      vaultPrefixRef.current = fm?.prefix ?? ''
-      vaultMtimeRef.current = typeof res?.mtimeMs === 'number' && res.mtimeMs > 0 ? res.mtimeMs : 0
-      const body = fm ? fm.body : (res?.content ?? '')
       const name = rel.slice(rel.lastIndexOf('/') + 1)
       const dot = name.lastIndexOf('.')
       const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : 'md'
       const title = dot > 0 ? name.slice(0, dot) : name
+      // PDF：二进制不走文本读取——伪页只带 path，正文交给内嵌 PdfReaderView（按 relPath 自读）
+      let body = ''
+      if (ext !== 'pdf' && ext !== 'xmind') {
+        const res = await workspaceReadFile(root, rel)
+        const fm = splitFrontmatter(res?.content ?? '')
+        vaultPrefixRef.current = fm?.prefix ?? ''
+        vaultMtimeRef.current = typeof res?.mtimeMs === 'number' && res.mtimeMs > 0 ? res.mtimeMs : 0
+        body = fm ? fm.body : (res?.content ?? '')
+      } else {
+        vaultPrefixRef.current = ''
+        vaultMtimeRef.current = 0
+      }
       const pseudo = { id: `draft:${rel}`, path: rel, title, contentMd: body, fileType: ext, tags: [] } as unknown as KnowledgePage
       pageRef.current = pseudo
       setPage(pseudo); setTitle(title); setContent(body); setFileTypeState(ext); setEntryTags([])
       savedContentRef.current = body; savedTitleRef.current = title; isDirtyRef.current = false
       setAnnotation(''); savedAnnotationRef.current = ''
       onTitleChange?.(title); onContentChange?.(body)
-      setPreview(ext === 'md' || ext === 'txt')
+      if (!isReload) setPreview(ext === 'md' || ext === 'txt')
     } catch (e) {
       console.error('[PageEditor] draft load failed:', e)
       showToast({ type: 'error', message: '草稿读取失败' })
     }
   }, [])
 
-  const loadPage = useCallback(() => {
+  const loadPage = useCallback((isReload = false) => {
     // 草稿直入编辑：无 frontmatter id 的文件，页签 id = draft:<relPath>
-    if (draftRelPath) { void loadDraftPage(draftRelPath); return }
+    if (draftRelPath) { void loadDraftPage(draftRelPath, isReload); return }
+    // vaultRoot 预热（PDF 内嵌阅读器需要 rootId；一次性，全局复用）
+    if (vaultModeRef.current && !vaultRootRef.current) {
+      void workspaceGetCurrent().then(cur => { vaultRootRef.current = cur?.rootId ?? null }).catch(() => {})
+    }
     Promise.all([
       getKnowledgePageById(pageId).then(p => {
         if (p) {
@@ -299,9 +314,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           onTitleChange?.(p.title)
           // 种子 liveContent(大纲/导出依赖);列表已瘦身,活动页内容以编辑器装载为准
           onContentChange?.(p.contentMd || '')
-          // 非 md/txt 类型(pdf/代码)强制编辑视图;md/txt 保持阅读优先
+          // 非 md/txt 类型(pdf/代码)强制编辑视图;md/txt 保持阅读优先（重读时保持当前态）
           const ft = (p.fileType || 'md').toLowerCase()
-          setPreview(ft === 'md' || ft === '' || ft === 'txt')
+          if (!isReload) setPreview(ft === 'md' || ft === '' || ft === 'txt')
           // 就地编辑基线（vault 写路径）：可编辑文本类缓存 frontmatter 前缀 + mtime；其余类型清零
           const vaultEditable = ft === 'md' || ft === 'txt' || (ft !== '' && ft !== 'pdf' && ft !== 'xmind' && ft !== 'html')
           if (vaultModeRef.current && p.path && vaultEditable && p.entryKind !== 'file') {
@@ -311,7 +326,12 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
             vaultMtimeRef.current = 0
           }
         } else if (pageRef.current) {
-          // 重读时页面消失 = 编辑器侧已删除或保存转草稿 → 退出阅读并说明（知识库列表已由激活刷新移除）
+          // 页面消失：可能是删除/转草稿，也可能是索引尚未重建（新建/转正后立即打开）→ 每个 pageId 重试一次再退
+          if (retryRef.current !== pageId) {
+            retryRef.current = pageId
+            setTimeout(() => { loadPageRef.current() }, 500)
+            return
+          }
           onBack()
         }
       }),
@@ -340,11 +360,35 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   useEffect(() => {
     const onReload = () => {
       if (isDirtyRef.current) return // 本地有未保存编辑 → 不打断
-      loadPageRef.current()
+      loadPageRef.current(true) // isReload：保持当前阅读/编辑态
     }
     window.addEventListener('kb-reload-detail', onReload)
     return () => window.removeEventListener('kb-reload-detail', onReload)
   }, [])
+
+  // Alt+A — B4 内联建议手动触发（知识库编辑态；Phase 2 批次 2 随编辑器退役补齐入口）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (getGlobalActiveTab() !== 'knowledge') return
+      if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'a' || e.key === 'A')) {
+        e.preventDefault()
+        paneRef.current?.triggerInlineSuggest()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // 外部变更监听（Phase 2 批次 2）：编辑器退役后由本模块承接——文件在磁盘上被外部修改时，
+  // 本地干净 → 静默重读（keep-alive 语义）；本地有脏编辑 → 打断守卫在 onReload 内（:213）
+  useEffect(() => {
+    if (!vaultMode) return
+    const off = window.api.onWsExternalChange(({ relPath }) => {
+      if (pageRef.current?.path !== relPath) return
+      window.dispatchEvent(new CustomEvent('kb-reload-detail'))
+    })
+    return off
+  }, [vaultMode])
 
   useEffect(() => {
     getSetting('skipDeleteConfirm_knowledge').then(v => {
@@ -874,6 +918,23 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               {preview ? <Edit3 size={15} /> : <Eye size={15} />}
             </button>
           )}
+          {/* B4 内联建议手动入口（Phase 2 批次 2）：与编辑器模块胶囊同款，编辑态 + markdown 才显示。
+              busy/paused 为可观测信号（data-wb 锚点，探针与状态栏语义一致） */}
+          {fileType === 'md' && !preview && s.aiAssistantInlineSuggest !== false && (
+            <>
+              {inlineBusy && <span data-wb="inlineBusy" className="w-2 h-2 rounded-full bg-[var(--warning)] animate-pulse shrink-0" title="AI 续写请求中…" />}
+              {inlinePaused && <span data-wb="inlinePaused" className="text-[10.5px] text-[var(--text-muted)] shrink-0" title="连续建议未采纳已暂停自动，按 Alt+A 唤醒">建议已暂停 · Alt+A 唤醒</span>}
+              <button
+                onClick={() => paneRef.current?.triggerInlineSuggest()}
+                title="AI 续写建议：在光标处生成下一句（Alt+A；Tab 采纳 / Esc 拒绝）"
+                data-wb="inlineSuggestBtn"
+                className={`flex items-center gap-1 rounded-full border border-[var(--border-color)] px-2 py-[2px] text-[11px] transition-colors ${inlineBusy ? 'bg-[var(--bg-active)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+              >
+                <Sparkles size={12} className={inlineBusy ? 'opacity-60' : ''} />
+                建议
+              </button>
+            </>
+          )}
           {vaultMode && onOpenInEditor && (
             <button onClick={onOpenInEditor} className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" title="在编辑器模块中打开（读写分工：编辑统一在编辑器进行）">
               <SquarePen size={15} />
@@ -992,19 +1053,18 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               </button>
             </div>
           </div>
+        ) : isPdfFile && page?.path && vaultRootRef.current ? (
+          /* Phase 2 批次 2：PdfReaderView 内嵌（共享层组件，编辑器退役后知识库直接承载阅读）；
+             划词 AI / 续读进度 / 三模式全部随组件带来 */
+          <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-[var(--text-muted)]">正在加载阅读器…</div>}>
+            <PdfReaderView key={page.path} rootId={vaultRootRef.current} relPath={page.path} name={title || 'PDF 文档'} />
+          </Suspense>
         ) : isPdfFile ? (
           <div className="flex flex-col flex-1 overflow-hidden">
             <div className="flex items-center gap-2 px-2 py-1 border-b border-[var(--border-color)] shrink-0">
               <span className="flex-1 truncate text-[12px] font-medium text-[var(--text-primary)] min-w-0">{title || 'PDF 文档'}</span>
-              {/* v3.4.0 批次 7：内置 base64 阅读器退役 —— 在阅读器打开 = 跳编辑器 PdfReaderView v2；本地打开保留 */}
+              {/* 旧版附件（不在仓库内）：无法内嵌阅读器，本地打开保留 */}
               <div className="flex items-center gap-0.5 shrink-0">
-                <button
-                  onClick={openPdfInReader}
-                  className="px-2 py-1 text-[11px] rounded transition-colors text-[var(--secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                  title="在编辑器阅读器中打开（续读/三模式/划词 AI）"
-                >
-                  在阅读器打开
-                </button>
                 <button
                   onClick={openPdfExternal}
                   className="px-2 py-1 text-[11px] rounded transition-colors text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
@@ -1017,7 +1077,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--text-secondary)]">
               <FileText size={64} className="opacity-20" />
-              <p className="text-sm">点击「在阅读器打开」继续阅读，或使用本地工具打开</p>
+              <p className="text-sm">旧版附件不在仓库内，请使用本地工具打开</p>
               <button onClick={openPdfExternal}
                   className="flex items-center gap-2 px-4 py-2 text-[13px] bg-[var(--accent)] text-white rounded hover:bg-[var(--accent-hover)] transition-colors">
                 <ExternalLink size={15} />
@@ -1086,6 +1146,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
             onDropImage={handleImageToMarkdown}
             inlineSuggestEnabled={s.aiAssistantInlineSuggest !== false}
             inlineSuggestAuto={s.aiAssistantInlineSuggestAuto !== false}
+            onInlineSuggestBusy={setInlineBusy}
+            onInlineSuggestPaused={setInlinePaused}
           />
         ) : (
           <div className="flex flex-col flex-1 overflow-hidden">

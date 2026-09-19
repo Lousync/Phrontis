@@ -82,7 +82,8 @@ const JS_PAGEBAR = `(() => {
     inBar: !!el.closest('[data-wb="pagebar"]'),
     iconPaths: (el.querySelector('svg path')?.getAttribute('d') || '').slice(0, 24),
   }))
-  const tabRels = qa('[data-tab-rel]')
+  // Phase 2 批次 2（编辑区退役）：页签属性两套并存——编辑器 data-tab-rel / 知识库 data-tab-id
+  const tabRels = qa('[data-tab-rel],[data-tab-id]')
   return {
     shell: !!q('[data-wb="shell"]'),
     hasBar: !!bar,
@@ -172,45 +173,50 @@ async function main() {
 
   const shotOverview = await shot('pagebar-01-overview')
 
-  // P5 进编辑区模块：页面条位置/高度不变
+  // P5 进知识库模块（Phase 2 批次 2：编辑区退役，页面条锚点 = 知识库）：位置/高度不变
   await evalJs(dismissPicker)
-  await evalJs(`document.querySelector('[data-wb-bookmark="editor"]')?.click()`)
+  await evalJs(`document.querySelector('[data-wb-bookmark="knowledge"]')?.click()`)
   await sleep(1400)
   const st1 = await evalJs(JS_PAGEBAR)
   ok(st1.hasBar && st1.barTop === st.barTop && st1.barH === st.barH,
-    'P5 切到编辑区模块 → 页面条位置/高度不变', `before=${st.barTop}/${st.barH} after=${st1.barTop}/${st1.barH}`)
-  ok(st1.modTitle === 'editor', 'P5b 左栏模块态 = 编辑区', `mod=${st1.modTitle}`)
+    'P5 切到知识库模块 → 页面条位置/高度不变', `before=${st.barTop}/${st.barH} after=${st1.barTop}/${st1.barH}`)
+  ok(st1.modTitle === 'knowledge', 'P5b 左栏模块态 = 知识库', `mod=${st1.modTitle}`)
 
   // P6 打开 README.md：走 App 自己的 `kb-open-in-editor` 事件通道（搜索面板同款）——
-  // 页面条置顶后编辑器文件树在左栏模块态里，而真实指针点击可能被仓库选择浮层吞掉，
-  // 事件通道是确定性的（等价于从快速切换器打开文件）。
+  // 批次 2 起该通道改道知识库（README.md 无 frontmatter id → draft 页签，PageEditor 内嵌 MonacoPane）
   const opened = await evalJs(`(() => {
     window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: 'README.md' } }))
     return 'sent'
   })()`)
   await sleep(2000)
-  const st2 = await evalJs(JS_PAGEBAR)
-  const editorItems = st2.items.filter((i) => i.owner === 'editor')
+  // 时序兜底：启动后 allPages 未就绪时事件可能落空（实测偶发）→ 最多补发 2 次
+  let st2 = await evalJs(JS_PAGEBAR)
+  for (let i = 0; i < 2 && !st2.items.some((x) => x.owner === 'knowledge' && /README/i.test(x.label)); i++) {
+    await evalJs(`window.dispatchEvent(new CustomEvent('kb-open-in-editor', { detail: { relPath: 'README.md' } }))`)
+    await sleep(2200)
+    st2 = await evalJs(JS_PAGEBAR)
+  }
+  const editorItems = st2.items.filter((i) => i.owner === 'knowledge')
   ok(opened === 'sent', 'P6a 经 kb-open-in-editor 通道请求打开 README.md', String(opened))
   ok(editorItems.length >= 1 && editorItems.every((i) => i.inBar),
-    'P6b 编辑器页签进页面条（owner=editor，条目在条内）', JSON.stringify(st2.items))
-  ok(editorItems.some((i) => /README/.test(i.label)), 'P6c 条目标题 = 文件名', JSON.stringify(editorItems.map((i) => i.label)))
+    'P6b 知识库页签进页面条（owner=knowledge，条目在条内）', JSON.stringify(st2.items))
+  ok(editorItems.some((i) => /README/i.test(i.label)), 'P6c 条目标题 = 文件名', JSON.stringify(editorItems.map((i) => i.label)))
   ok(editorItems.every((i) => i.iconPaths.length > 0), 'P6d 条目带模块图标（svg path 非空）', JSON.stringify(editorItems.map((i) => i.iconPaths)))
   ok(st2.tabRelCount > 0 && st2.tabRelOutsideBar === 0,
-    'P7 [data-tab-rel] 全部落在页面条内（模块内部不再有标签行）', `total=${st2.tabRelCount} outside=${st2.tabRelOutsideBar}`)
+    'P7 页签条目（data-tab-rel / data-tab-id）全部落在页面条内（模块内部不再有标签行）', `total=${st2.tabRelCount} outside=${st2.tabRelOutsideBar}`)
 
   const shotEditor = await shot('pagebar-02-editor-file-open')
 
-  // P8 切知识库：条不动、编辑器条目保活（模块态下书签区隐藏 → 先返回总览再点书签）
+  // P8 切博客：条不动、知识库页签保活（模块态下书签区隐藏 → 先返回总览再点书签）
   await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
   await sleep(600)
-  await evalJs(`document.querySelector('[data-wb-bookmark="knowledge"]')?.click()`)
+  await evalJs(`document.querySelector('[data-wb-bookmark="blog"]')?.click()`)
   await sleep(1600)
   const st3 = await evalJs(JS_PAGEBAR)
   ok(st3.hasBar && st3.barTop === st.barTop && st3.barH === st.barH,
-    'P8a 切到知识库 → 页面条位置/高度仍不变', `top=${st3.barTop} h=${st3.barH}`)
-  ok(st3.items.filter((i) => i.owner === 'editor').length >= 1, 'P8b 编辑器页签条目保活（切走不消失）', JSON.stringify(st3.items.map((i) => i.owner + ':' + i.label)))
-  ok(st3.modTitle === 'knowledge', 'P8c 左栏模块态 = 知识库', `mod=${st3.modTitle}`)
+    'P8a 切到博客模块 → 页面条位置/高度仍不变', `top=${st3.barTop} h=${st3.barH}`)
+  ok(st3.items.filter((i) => i.owner === 'knowledge').length >= 1, 'P8b 知识库页签条目保活（切走不消失）', JSON.stringify(st3.items.map((i) => i.owner + ':' + i.label)))
+  ok(st3.modTitle === 'blog', 'P8c 左栏模块态 = 博客', `mod=${st3.modTitle}`)
 
   const shotKnowledge = await shot('pagebar-03-knowledge')
 

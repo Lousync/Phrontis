@@ -41,7 +41,9 @@ export interface AppModuleDef {
  * 两者从清单删除；新增 `bookshelf` / `aiChat` / `graph` 三个「入口产生型」Tab。
  */
 export const APP_MODULES = [
-  { id: 'editor', label: '编辑器', bar: true, startable: true, tile: true, palette: true },
+  // Phase 2 批次 2（编辑区退役）：editor 退出活动栏（bar: false）——文件树并入知识库后不再单独暴露；
+  // id 保留（类型/存量数据兼容），模块代码暂留作兜底，批次 3 物理清理
+  { id: 'editor', label: '编辑器', bar: false, startable: false, tile: true, palette: false },
   { id: 'knowledge', label: '知识库', bar: true, startable: true, tile: true, palette: true },
   { id: 'blog', label: '博客', bar: true, startable: true, tile: true, palette: true },
   { id: 'schedule', label: '日程', bar: true, startable: true, tile: true, palette: true },
@@ -141,5 +143,6 @@ export function resolveStartupTab(rawStartupTab?: string, rawHidden?: string): T
   const t = String(rawStartupTab ?? '')
   const hidden = parseIdList(rawHidden, [])
   if (t && (STARTABLE_MODULE_IDS as string[]).includes(t) && !hidden.includes(t)) return t as TabName
-  return 'editor'
+  // Phase 2 批次 2：editor 退役后兜底 = 知识库（原「编辑区兜底」语义由知识库承载）
+  return 'knowledge'
 }

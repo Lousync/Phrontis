@@ -591,6 +591,14 @@ async function main() {
     return { clicked: false, label: '', palOpen: !!pal }
   })()`)
   await sleep(1600)
+  // Phase 2 批次 2：kb-open-in-editor 改道知识库——README.md 无 id → draft 页签默认阅读态，
+  // B4 链路在编辑态，先进编辑（PageEditor 工具条「切换到编辑」按钮）
+  await evalJs(`(() => {
+    const b = [...document.querySelectorAll('button')].find((x) => (x.title || '').startsWith('切换到编辑'))
+    b?.click()
+    return !!b
+  })()`)
+  await sleep(1500)
   const g0Doc = await evalJs(`(() => {
     const ed = document.querySelector('.monaco-editor')
     return { hasEditor: !!ed, hasMonaco: !!document.querySelector('.monaco-editor .view-lines') }
@@ -655,6 +663,20 @@ async function main() {
   ok(g4, 'G4 ★ Alt+A 触发（与按钮同一条链路）', `busy=${await busyNow()}`)
   await waitBusy(false, 16000)
 
+  // 诊断（Phase 2）：G5 前 dump 编辑器挂载态——G8 的 models=[] 需要在这里抓到卸载时机
+  const g45dump = await evalJs(`(() => {
+    const m = window.__kb_monaco
+    return {
+      models: m ? m.editor.getModels().length : -1,
+      editors: m ? m.editor.getEditors().length : -1,
+      monacoDom: !!document.querySelector('.monaco-editor'),
+      editBtn: [...document.querySelectorAll('button')].some((x) => (x.title || '').startsWith('切换到编辑')),
+      previewBtn: [...document.querySelectorAll('button')].some((x) => (x.title || '').startsWith('切换到预览')),
+      tabs: [...document.querySelectorAll('[data-pb-item]')].map((x) => x.textContent.trim().slice(0, 20)),
+    }
+  })()`)
+  console.log('[G4.5 dump]', JSON.stringify(g45dump))
+
   // G5 空文档不得触发（防「快捷键在空文件上给 LLM 发空上下文」）
   const g5 = await evalJs(`(() => {
     const m = window.monaco?.editor?.getModels?.()[0]
@@ -686,7 +708,7 @@ async function main() {
       const m = window.__kb_monaco
       if (!m) return { err: 'window.__kb_monaco 不存在' }
       const model = m.editor.getModels().find((x) => x.getLanguageId() === 'markdown')
-      if (!model) return { err: '无 markdown model' }
+      if (!model) return { err: '无 markdown model', models: m.editor.getModels().map((x) => x.getLanguageId() + ':' + x.uri.toString().slice(-40)), editors: m.editor.getEditors().length }
       const ed = m.editor.getEditors()[0]
       const fr = model.getFullModelRange()
       model.applyEdits([{ range: { startLineNumber: fr.endLineNumber, startColumn: fr.endColumn, endLineNumber: fr.endLineNumber, endColumn: fr.endColumn }, text: ${JSON.stringify(text)} }])
@@ -697,7 +719,7 @@ async function main() {
     const len = await viewLen()
     const changed = len !== lastViewLen
     lastViewLen = len
-    if (r?.err) console.log(`  ⚠️ typeInto 异常: ${r.err}`)
+    if (r?.err) console.log(`  ⚠️ typeInto 异常: ${r.err} | models=${JSON.stringify(r.models ?? [])} editors=${r.editors}`)
     else if (!changed) console.log(`  ⚠️ typeInto 未生效（view-lines 长度未变：${len}）—— 本组结果无效`)
     return changed
   }
