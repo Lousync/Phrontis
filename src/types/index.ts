@@ -1524,7 +1524,6 @@ export interface ElectronAPI {
   pdfReaderCoverList: () => Promise<{ ok: boolean; covers?: Record<string, { mtimeMs: number; file: string }>; error?: string }>
   pdfReaderCoverGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; dataUrl?: string | null; error?: string }>
   pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => Promise<{ ok: boolean; error?: string }>
-  wsImportPdf: () => Promise<{ ok: boolean; imported?: string[]; canceled?: boolean; error?: string }>
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
   workspaceSetMdStatus: (rootId: string, relPath: string, draft: boolean) => Promise<{ ok: boolean; error?: string }>
   /** 全类型归档（docs/vault-archive-all-files-design.md）：md 分流 frontmatter 双态，非 md/目录走清单 */

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
-import { basename, join } from 'path'
+import { join } from 'path'
 import { exists, kbModulePath, readJson, writeJsonOrThrow } from './jsonStore'
 import {
   coerceBookState, defaultBookState, pdfBookKey, pdfKeyRel,
@@ -170,37 +170,6 @@ export function pdfCoverExists(file: string): boolean {
 
 function statSyncSafe(p: string): boolean {
   try { return statSync(p).isFile() } catch { return false }
-}
-
-/** 导入外部 PDF → 拷入仓库根（重名自动后缀 name-2.pdf / name-3.pdf …）。返回新 relPath；取消返回 null */
-export async function pdfReaderImportPdf(
-  rootId: string,
-  pickDialog: () => Promise<string[] | null>,
-  copyFile: (src: string, dest: string) => void,
-): Promise<{ ok: boolean; imported?: string[]; canceled?: boolean; error?: string }> {
-  try { requireCurrentRootId(rootId) } catch (e) { return { ok: false, error: (e as Error).message } }
-  const picked = await pickDialog()
-  if (!picked) return { ok: false, canceled: true }
-  const cur = getCurrentVault()
-  if (!cur) return { ok: false, error: '当前没有打开的仓库' }
-  const imported: string[] = []
-  for (const src of picked) {
-    try {
-      if (!src.toLowerCase().endsWith('.pdf')) continue
-      const base = basename(src)
-      const stem = base.slice(0, -4)
-      let rel = base
-      let n = 2
-      while (existsSync(join(cur.rootPath, rel))) {
-        rel = `${stem}-${n}.pdf`
-        n++
-      }
-      copyFile(src, join(cur.rootPath, rel))
-      imported.push(rel)
-    } catch { /* 单个失败跳过，不中断整批 */ }
-  }
-  if (imported.length === 0) return { ok: false, error: '没有可导入的 PDF' }
-  return { ok: true, imported }
 }
 
 /** 封面缓存目录是否就绪（渲染层预检用） */

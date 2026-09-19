@@ -297,7 +297,6 @@ export const pdfReaderCoverList = (): Promise<{ ok: boolean; covers?: Record<str
 export const pdfReaderCoverGet = (rootId: string, relPath: string): Promise<{ ok: boolean; dataUrl?: string | null; error?: string }> => a().pdfReaderCoverGet(rootId, relPath)
 export const pdfReaderCoverSave = (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number): Promise<{ ok: boolean; error?: string }> =>
   a().pdfReaderCoverSave(rootId, relPath, dataUrl, expectedMtimeMs)
-export const wsImportPdf = (): Promise<{ ok: boolean; imported?: string[]; canceled?: boolean; error?: string }> => a().wsImportPdf()
 export const workspaceSetMdStatus = (rootId: string, relPath: string, draft: boolean) => a().workspaceSetMdStatus(rootId, relPath, draft)
 /** 全类型归档（docs/vault-archive-all-files-design.md §4.1）：md 走 frontmatter 双态，非 md/目录走清单 */
 export const workspaceSetArchiveStatus = (rootId: string, relPath: string, archive: boolean): Promise<{ ok: boolean; count?: number; error?: string }> =>

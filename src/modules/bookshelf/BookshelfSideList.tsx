@@ -89,7 +89,7 @@ export function BookshelfSideList({ onOpenBook }: {
           <div className="flex h-full flex-col items-center justify-center gap-1.5 px-3 text-center text-[var(--text-muted)]">
             <BookOpen size={24} strokeWidth={1.4} />
             <div className="text-[12px]">仓库里还没有 PDF</div>
-            <div className="text-[11px]">把 .pdf 放进仓库任意目录，或在主区「导入 PDF」</div>
+            <div className="text-[11px]">把 .pdf 放进仓库任意目录（子目录也行），书架自动识别</div>
           </div>
         )}
         {list && list.map((b) => {

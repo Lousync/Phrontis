@@ -1,10 +1,9 @@
 import { lazy, useCallback, useEffect, useRef, useState, Suspense } from 'react'
-import { BookOpen, Import, Loader2, Play } from 'lucide-react'
+import { BookOpen, Loader2, Play } from 'lucide-react'
 import {
-  pdfReaderCoverList, pdfReaderListBooks, wsImportPdf, workspaceGetCurrent,
+  pdfReaderCoverList, pdfReaderListBooks, workspaceGetCurrent,
 } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
-import { showToast } from '../../lib/toast'
 import type { PdfBookListItem } from '../../types'
 import { PdfCover } from './PdfCover'
 
@@ -15,9 +14,8 @@ const PdfReaderView = lazy(() => import('../../components/shared/pdf/PdfReaderVi
 
 /**
  * 书架（v3.4.0 PDF 阅读体验整包批次 2，方案 §2/§8）：
- * - 自动库 = 扫 vault 全部 .pdf（pdfReader:listBooks），清单不落盘；
+ * - 自动库 = 扫 vault 全部 .pdf（pdfReader:listBooks），清单不落盘；放文件进仓库即被识别，无导入入口（2026-09-19 拍板删「＋导入」）；
  * - 封面网格（PdfCover 懒渲染 + covers 缓存）；续读条（hasProgress 按最近读排序）；
- * - 「＋导入」= ws:importPdf（外部 PDF 拷入仓库根）；
  * - 点书 = kb-open-note { relPath, from:'bookshelf' }（state+props 范式，编辑器组文档标签每书一个）。
  * 模块根节点 h-full（槽位容器是块级 div，flex-1 无效）。
  */
@@ -44,7 +42,6 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
   /** 封面缓存命中集（coverList 索引 + mtime 对账通过）——PdfCover 据此走 coverGet 直取 */
   const [coverHits, setCoverHits] = useState<Set<string>>(new Set())
   const [loadErr, setLoadErr] = useState('')
-  const [importing, setImporting] = useState(false)
   /** 封面内存缓存 relPath → dataUrl（滚动往返免重复取/渲染） */
   const coverMem = useRef(new Map<string, string>())
   const [, forceTick] = useState(0)
@@ -85,18 +82,6 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
     coverMem.current.set(relPath, url)
     forceTick((t) => t + 1)
   }, [])
-
-  const doImport = useCallback(async () => {
-    if (importing) return
-    setImporting(true)
-    try {
-      const r = await wsImportPdf()
-      if (r.ok) showToast({ type: 'success', message: `已导入 ${r.imported?.length ?? 0} 本 PDF 到仓库根` })
-      else if (!r.canceled) showToast({ type: 'warning', message: r.error ?? '导入失败' })
-    } finally {
-      setImporting(false)
-    }
-  }, [importing])
 
   // 左栏 bookshelf 模块态（批次 6）：三件套（目录/缩略图/书签）经 portal 挂进左栏 slot
   const openBook = useCallback((b: PdfBookListItem) => {
@@ -145,18 +130,11 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
-      {/* 顶栏：标题 + 导入 */}
+      {/* 顶栏：标题（2026-09-19 拍板：「＋导入」按钮删除——放 .pdf 进仓库任意目录即被自动库扫到） */}
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-2">
         <BookOpen size={15} className="text-[var(--text-secondary)]" />
         <span className="text-[13px] font-medium text-[var(--text-primary)]">书架</span>
         <span className="text-[11.5px] text-[var(--text-tertiary)]">{list.length} 本</span>
-        <button
-          onClick={() => void doImport()}
-          disabled={importing || rootId === null}
-          className="kb-micro-pop ml-auto flex items-center gap-1.5 rounded-md border border-[var(--border-color)] px-2.5 py-1 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50"
-        >
-          {importing ? <Loader2 size={13} className="animate-spin" /> : <Import size={13} />}导入 PDF
-        </button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
@@ -170,7 +148,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
           <div className="flex h-full flex-col items-center justify-center gap-2 text-[var(--text-muted)]">
             <BookOpen size={34} strokeWidth={1.4} />
             <div className="text-[12.5px]">仓库里还没有 PDF</div>
-            <div className="text-[11.5px]">把 .pdf 放进仓库任意目录，或点右上角「导入 PDF」</div>
+            <div className="text-[11.5px]">把 .pdf 放进仓库任意目录（子目录也行），书架自动识别</div>
           </div>
         )}
 
