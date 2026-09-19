@@ -53,9 +53,13 @@ interface Props {
   /** 草稿直入编辑（Phase 2 批次 1）：无 frontmatter id 文件的相对路径——页签 id 为 `draft:<relPath>`，
    *  走同一套脏状态机与 vault 写路径；「转为正式笔记」= 写入 frontmatter id（randomUUID，与主进程同格式） */
   draftRelPath?: string
+  /** 模块激活态（v3.4.0 修复）：工具栏 portal 到外壳右上角常驻浮层 `#editor-toolbar-slot`，
+   *  模块被 display:none 保活时 portal 不会跟着藏——不加这道门槛，铅笔/保存点会飘在当前模块头上
+   *  （与编辑器模块 actionsPill 的 isActive 门槛同款，editor/index.tsx 同注释）。 */
+  isActive?: boolean
 }
 
-export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, onOpenInEditor, draftRelPath }: Props) {
+export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, onOpenInEditor, draftRelPath, isActive = true }: Props) {
   const { s } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
@@ -869,8 +873,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      {/* Toolbar — portaled into the tab bar row (merged layer 1 + 2) */}
-      {toolbarSlot && createPortal(
+      {/* Toolbar — portaled into the tab bar row (merged layer 1 + 2)
+          isActive 门槛：隐藏保活时停掉 portal，否则工具栏飘在当前模块头上（2026-09-19 修复） */}
+      {toolbarSlot && isActive && createPortal(
         <>
           {!isPdfFile && !vaultMode && (
             <div className="relative">

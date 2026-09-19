@@ -1804,6 +1804,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 vaultMode={true} // R6 D9 后恒 vault
                 onOpenInEditor={() => handleOpenInEditor(activePageId)}
                 draftRelPath={activePageId.startsWith('draft:') ? activePageId.slice(6) : undefined}
+                isActive={isActive}
               />
             </Suspense>
           ) : (
