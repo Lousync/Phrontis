@@ -786,6 +786,10 @@ export default function App() {
 
   // quizViewOpen / 页签组可见性（2026-09-19）：声明在 closeTab 之前——其全关判定 deps 渲染期就要读
   const [quizViewOpen, setQuizViewOpen] = useState(false)
+  // 页面条「错题本」条目 ✕ 的关闭来源标记：CustomEvent 派发是同步的，置位 → CLOSE_REQUEST →
+  // knowledge 同步回流 TOGGLED → 此处消费后于 onClose 复位。区分「标签条关闭」（对齐关=回总览）
+  // 与「模块内开关关闭」（回知识库树态）。
+  const quizTabCloseRef = useRef(false)
   const [kbStripVisible, setKbStripVisible] = useState(false)
   const [editorStripVisible, setEditorStripVisible] = useState(false)
   // 关闭标签（✕ / 中键）。2026-09-19 反馈拍板（需求而非 bug）：**关掉激活标签 = 一律回总览空态**，
@@ -910,11 +914,23 @@ export default function App() {
       const open = (e as CustomEvent<{ open?: boolean }>).detail?.open ?? true
       setQuizViewOpen(open)
       if (wbLayout.leftLocked) return
+      // 页面条「错题本」条目 ✕（quizTabCloseRef 置位）：对齐模块标签「关=回总览」——
+      // 当时正看着错题本（activeTab=knowledge）才清视图落总览；知识库标签无停靠页签则随壳清理。
+      // 模块内入口（侧栏错题本/收藏开关）关闭 → 维持回知识库树态。
+      if (!open && quizTabCloseRef.current) {
+        if (activeTab === 'knowledge') {
+          setActiveToolTab(null)
+          setActiveTab(null)
+          setRailModule(null)
+        }
+        if (!kbStripVisible) setOpenTabs((ts) => ts.filter((t) => t !== 'knowledge'))
+        return
+      }
       setRailModule(open ? 'quiz' : 'knowledge')
     }
     window.addEventListener(QUIZ_VIEW_TOGGLED_EVENT, handler)
     return () => window.removeEventListener(QUIZ_VIEW_TOGGLED_EVENT, handler)
-  }, [wbLayout.leftLocked])
+  }, [wbLayout.leftLocked, activeTab, kbStripVisible])
 
   
   // 阅读器工具栏「大纲」→ 解锁左栏 + 展开左栏 + 切 bookshelf 模块态（兜底入口，方案 §2）
@@ -1268,8 +1284,14 @@ export default function App() {
                     }
                   }}
                   onClose={(id) => {
-                    // 错题本合成条目的 ✕ = 请求关闭错题本视图（视图关 → QUIZ_VIEW_TOGGLED 回流收条目）
-                    if (id === 'quiz') { window.dispatchEvent(new CustomEvent(QUIZ_VIEW_CLOSE_REQUEST_EVENT)); return }
+                    // 错题本合成条目的 ✕ = 请求关闭错题本视图（视图关 → QUIZ_VIEW_TOGGLED 回流收条目）；
+                    // 标记来源 → 回流时对齐「关标签=回总览」（否则回流写死回知识库树态，2026-09-19 反馈）
+                    if (id === 'quiz') {
+                      quizTabCloseRef.current = true
+                      window.dispatchEvent(new CustomEvent(QUIZ_VIEW_CLOSE_REQUEST_EVENT))
+                      quizTabCloseRef.current = false
+                      return
+                    }
                     closeTab(id)
                   }}
                   onReorder={handleReorder}
