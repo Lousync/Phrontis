@@ -582,11 +582,13 @@ async function main() {
   })()`)
   await sleep(900)
   const g0Pick = await evalJs(`(() => {
-    const pal = document.querySelector('[data-wb="palette"]') || document.querySelector('[role="dialog"]')
-    const items = [...document.querySelectorAll('button')].filter((b) => /知识页/.test(b.textContent || ''))
+    // ★ 2026-09-19 修选择器：分组标签「知识页」在分组头 div 里、不在条目 button 内（面板重构后），
+    //   旧 /知识页/ 按钮匹配恒落空。改走 [data-wb="palette"] 锚点 + 条目 button[data-i]。
+    const pal = document.querySelector('[data-wb="palette"]')
+    const items = [...(pal?.querySelectorAll('button[data-i]') ?? [])]
     const first = items.find((b) => b.getBoundingClientRect().height > 0)
     if (first) { first.click(); return { clicked: true, label: first.textContent.slice(0, 40) } }
-    return { clicked: false, label: '' }
+    return { clicked: false, label: '', palOpen: !!pal }
   })()`)
   await sleep(1600)
   const g0Doc = await evalJs(`(() => {
