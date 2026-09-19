@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, Folder, ListTree, X, BookMarked, Puzzle, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff } from 'lucide-react'
+import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Puzzle, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff } from 'lucide-react'
 import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
@@ -76,6 +76,8 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [openPageInfos, setOpenPageInfos] = useState<Record<string, PageInfo>>({})
   /** R4-G1：图谱全幅视图开关（入口在左侧目录树底部；Esc/返回按钮退出） */
   const [graphMode, setGraphMode] = useState(false)
+  // 左栏「文件 | 大纲」切换（2026-09-19 反馈恢复旧版）：大纲仅 md 页面可用（非 md 激活时自动回落文件树）
+  const [sidebarTab, setSidebarTab] = useState<'files' | 'outline'>('files')
   /** 图谱目录 scope：进入时锁定「当前最深选中目录」的仓库路径；null=全库 */
   const [graphScope, setGraphScope] = useState<{ path: string; name: string } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -1335,6 +1337,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     const md = liveContent || (readingPage && readingPage.id === activePageId ? readingPage.contentMd : '') || ''
     return parseHeadings(md)
   }, [liveContent, readingPage, activePageId])
+  // 左栏停在大纲页时，激活页面切到非 md（或无页面）→ 自动回落文件树
+  useEffect(() => {
+    if (sidebarTab !== 'outline') return
+    const ft = activePageId ? openPageInfos[activePageId]?.fileType : undefined
+    if (ft !== 'md') setSidebarTab('files')
+  }, [sidebarTab, activePageId, openPageInfos])
 
   // 搜索定位到分类/笔记本（展开树并滚动到目标）
   const handleLocateCategory = useCallback((categoryId: string) => {
@@ -1667,9 +1675,32 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             {/* 「笔记」标题行已删（2026-09-19 反馈）：聚焦按钮上移到左栏模块态头部最右（modActionsEl portal），
                 侧栏直接从文件树开始，少占一行 */}
 
-            {/* 空间列表层：无大纲入口，直接显示文件树；空间内可切换大纲 */}
-            {/** 文件视图（Phase 2 批次 1，B 方案）：VaultTree = 与编辑区同一份实现；草稿/非 md 暂由编辑器模块兜底打开 */}
-            {(
+            {/* 文件 | 大纲 切换行（2026-09-19 反馈恢复旧版）：md 页面才有大纲，非 md 激活时禁用并自动回落文件树 */}
+            {(() => {
+              const activeIsMd = !!activePageId && openPageInfos[activePageId]?.fileType === 'md'
+              const tabCls = (on: boolean) =>
+                `flex flex-1 items-center justify-center gap-1 rounded px-1 py-1 text-[11px] transition-colors ${
+                  on ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                }`
+              return (
+                <div className="mx-1.5 mt-1.5 flex shrink-0 items-center gap-0.5 rounded-md border border-[var(--border-color)] p-0.5">
+                  <button onClick={() => setSidebarTab('files')} className={tabCls(sidebarTab === 'files')} title="文件">
+                    <FolderTree size={12} /><span>文件</span>
+                  </button>
+                  <button
+                    onClick={() => { if (activeIsMd) setSidebarTab('outline') }}
+                    disabled={!activeIsMd}
+                    className={`${tabCls(sidebarTab === 'outline')} ${activeIsMd ? '' : 'cursor-default opacity-40 hover:bg-transparent'}`}
+                    title={activeIsMd ? '大纲' : '大纲（仅 md 页面可用）'}
+                  >
+                    <ListTree size={12} /><span>大纲</span>
+                  </button>
+                </div>
+              )
+            })()}
+            {/* 文件视图（Phase 2 批次 1，B 方案）：VaultTree = 与编辑区同一份实现；草稿/非 md 暂由编辑器模块兜底打开。
+                2026-09-19：包进「文件 | 大纲」切换——大纲页 = OutlinePanel（embedded），数据走 outlineHeadings（liveContent） */}
+            {sidebarTab === 'files' ? (
               <div className="kb-view-in relative flex flex-1 min-h-0 flex-col">
                 <VaultTree
                   dirCache={dirCache}
@@ -1677,6 +1708,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   activePath={allPages.find(p => p.id === activePageId)?.path ?? (activePageId?.startsWith('draft:') ? activePageId.slice(6) : null)}
                   onToggleDir={handleToggleTreeDir}
                   onOpenFile={handleTreeOpenFile}
+                  /* 目录聚焦（2026-09-19 修复失效）：VaultTree 迁移（Phase 2 批次 1）后一直没接
+                     focusOn——按钮只是空开关。与编辑器同款：focusOn + onFocusLocate（点骨架条
+                     = 退出聚焦并展开目录 / 打开文件）。 */
+                  focusOn={!!settings.knowledgeFolderFocus}
+                  onFocusLocate={(rel, isDir) => {
+                    updateSettings('knowledgeFolderFocus', false)
+                    if (isDir) setExpandedDirs((prev) => new Set(prev).add(rel))
+                    else openByRelPath(rel)
+                  }}
                   onContextMenu={(e, node) => { e.preventDefault(); setTreeMenu({ x: e.clientX, y: e.clientY, node }) }}
                   onMove={(src, target) => { void handleTreeMove(src, target) }}
                   creating={treeCreating}
@@ -1733,6 +1773,16 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   </div>,
                   document.body,
                 )}
+              </div>
+            ) : (
+              /* 大纲页：OutlinePanel embedded（标题搜索 + 跳转走 outline:go-to-heading，PageEditor 消费） */
+              <div className="kb-view-in flex min-h-0 flex-1 flex-col">
+                <OutlinePanel
+                  pageTitle={activePageForOutline?.title || '无标题'}
+                  headings={outlineHeadings}
+                  onBackToFile={() => setSidebarTab('files')}
+                  embedded
+                />
               </div>
             )}
             {/* 侧边栏底部：错题本 / 收藏 + 插件视图入口（Phase 2 批次 1 收尾：文件视图下常驻） */}
