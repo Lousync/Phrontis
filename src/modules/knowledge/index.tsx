@@ -1684,7 +1684,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   onCancelCreate={() => setTreeCreating(null)}
                   draftRelPaths={treeDraftRelPaths}
                 />
-                {catDraft && (
+                {catDraft && createPortal(
+                  /* fixed 浮层必须 portal 到 body：侧栏（含本弹层）随批次3 portal 挂进左栏后，
+                     左栏面板的变换/收缩容器会让 fixed 的包含块变成窄栏——菜单/弹层被压成竖条
+                     （2026-09-19 反馈截图）。同 WorkbenchLeftPanel 书签菜单的 portal 模式。 */
                   <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/25 pt-[26vh]" onMouseDown={() => setCatDraft(null)}>
                     <div
                       className="w-[380px] max-w-[90vw] rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-lg kb-modal-in"
@@ -1702,9 +1705,11 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                         }}
                       />
                     </div>
-                  </div>
+                  </div>,
+                  document.body,
                 )}
-                {treeMenu && (
+                {treeMenu && createPortal(
+                  /* 同 catDraft：fixed 菜单 portal 到 body，否则在左栏窄包含块里被压成竖条 */
                   <div className="fixed inset-0 z-[70]" onMouseDown={() => setTreeMenu(null)} onContextMenu={e => { e.preventDefault(); setTreeMenu(null) }}>
                     <div
                       className="absolute min-w-[150px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-lg kb-pop"
@@ -1725,7 +1730,8 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                         )
                       })()}
                     </div>
-                  </div>
+                  </div>,
+                  document.body,
                 )}
               </div>
             )}

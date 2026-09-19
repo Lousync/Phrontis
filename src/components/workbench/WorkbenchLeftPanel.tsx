@@ -402,8 +402,10 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
           </div>
         </>
       )}
-      {/* ---- 零散文件右键菜单 + 重命名/删除弹层（fixed，覆盖两种模式下的散文件列表） ---- */}
-      {looseMenu && (
+      {/* ---- 零散文件右键菜单 + 重命名/删除弹层 ----
+          fixed 浮层一律 portal 到 body（同书签菜单模式）：左栏面板的变换/收缩容器会把
+          fixed 的包含块变成窄栏，菜单被压成竖条（2026-09-19 反馈截图） */}
+      {looseMenu && createPortal(
         <div
           className="fixed inset-0 z-[70]"
           onMouseDown={() => setLooseMenu(null)}
@@ -411,7 +413,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
         >
           <div
             className="absolute min-w-[140px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-lg kb-pop"
-            style={{ left: Math.min(looseMenu.x, window.innerWidth - 160), top: Math.min(looseMenu.y, window.innerHeight - 180) }}
+            style={{ left: Math.min(looseMenu.x, window.innerWidth - 160), top: Math.min(looseMenu.y, window.innerHeight - 200) }}
             onMouseDown={(e) => e.stopPropagation()}
           >
             <button
@@ -440,18 +442,22 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
               <Trash2 size={13} className="text-[var(--text-muted)]" />删除（回收站）
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
-      <ConfirmDialog
-        open={trashTarget !== null}
-        title="移入回收站"
-        message={`「${trashTarget ?? ''}」移入回收站，可恢复。`}
-        confirmLabel="删除"
-        showCheckbox={false}
-        onConfirm={() => { if (trashTarget) void doTrashLoose(trashTarget); setTrashTarget(null) }}
-        onCancel={() => setTrashTarget(null)}
-      />
-      {renameBox && (
+      {trashTarget !== null && createPortal(
+        <ConfirmDialog
+          open
+          title="移入回收站"
+          message={`「${trashTarget}」移入回收站，可恢复。`}
+          confirmLabel="删除"
+          showCheckbox={false}
+          onConfirm={() => { if (trashTarget) void doTrashLoose(trashTarget); setTrashTarget(null) }}
+          onCancel={() => setTrashTarget(null)}
+        />,
+        document.body,
+      )}
+      {renameBox && createPortal(
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30 kb-overlay" onClick={() => setRenameBox(null)}>
           <div
             className="w-80 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 shadow-xl"
@@ -484,7 +490,8 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
