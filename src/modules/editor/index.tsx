@@ -4,7 +4,7 @@ import { PageTabStrip } from '../../components/workbench/PageTabStrip'
 import {
   FolderOpen, Plus, FolderPlus, Save, SaveAll, X, Folder, FileText,
   Pencil, Trash2, FilePlus2, Braces, ListTree, Eye, PanelRightClose, Archive, ArchiveRestore, FilePenLine, Link2, ImagePlus, ClipboardPaste,
-  RefreshCw,
+  RefreshCw, SunMedium, Loader2,
   // 条目 18 标签右键菜单：固定标签 + 三个批量关闭
   Pin, CopyX, FileX, SquareX,
 } from 'lucide-react'
@@ -200,6 +200,15 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
 
   // ---- 禅模式（docs/zen-mode-design.md）----
   const { s: zenSettings, update: zenUpdate } = useSettings()
+
+  // ---- B4 内联建议（DP 方案 §5）：Alt+A 手动触发 AI 续写；请求中状态栏微标 ----
+  /** 开关（设置 aiAssistantInlineSuggest）：关时快捷键完全不发起请求 */
+  const inlineSuggestOn = zenSettings.aiAssistantInlineSuggest !== false
+  // 同步引用：keydown 闭包只挂一次，读 ref 拿最新开关值（避免每次改设置重挂监听）
+  const inlineSuggestOnRef = useRef(inlineSuggestOn)
+  inlineSuggestOnRef.current = inlineSuggestOn
+  /** 请求中（状态栏微标；provider 经 MonacoPane 的模块级监听回传） */
+  const [inlineBusy, setInlineBusy] = useState(false)
   const zenLevelRef = useRef(zenLevel)
   zenLevelRef.current = zenLevel
   /** 保存反馈：禅模式下不弹 toast，悬浮条闪现「已保存 HH:MM」两秒后回落（§4） */
@@ -921,6 +930,26 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     return () => window.removeEventListener('kb-editor-new-page', h)
   }, [askCreateKnowledgePage])
 
+  // Alt+A — B4 内联建议手动触发（DP 方案 §5）。
+  // 为什么用 Alt+A 而非上游候选 Ctrl+Alt+S：后者已被系统级全局快捷键占用
+  // （electron/main/dayPanelWindow.ts:436 globalShortcut.register('Control+Alt+S')，
+  //  日程打卡侧栏开关），渲染层按该组合会被系统抢走。
+  // 不设输入守卫：Monaco 聚焦时也要可用（keydown 冒泡到 window，Monaco 不吞；
+  // 与 Ctrl+S / Ctrl+W / Ctrl+N 同款口径）。
+  useEffect(() => {
+    if (!isActive) return
+    const onKey = (e: KeyboardEvent) => {
+      // 仅 Alt+A，且不与 Ctrl/Shift 组合（避免吃掉 Ctrl+Alt+A 这类将来可能的绑定）
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return
+      if (e.key !== 'a' && e.key !== 'A') return
+      if (!inlineSuggestOnRef.current) return
+      e.preventDefault()
+      monacoRef.current?.triggerInlineSuggest()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isActive])
+
   /** 内联提交：按类型清洗并执行创建（文件/目录直接建；知识页带 frontmatter 模板） */
   const commitCreate = useCallback(async (dirRel: string, type: 'file' | 'dir' | 'knowledge', rawName: string) => {
     setCreating(null)
@@ -1385,7 +1414,9 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   }, [activePath, openList.length])
 
   /* 内容级操作胶囊（截图款分段控件）：原「编辑区」标题行右侧那组按钮。
-     v3.4.0 页面条置顶后挂在内容区右上角浮层（App 提供的槽）；未托管时内嵌在标签行右端。 */
+     v3.4.0 页面条置顶后挂在内容区右上角浮层（App 提供的槽）；未托管时内嵌在标签行右端。
+     ⚠️ 单一真相源：内嵌场景复用同一个 actionsPill（不再手抄第二份），
+     否则新增按钮时只加一处、另一处静默缺失。 */
   const actionsPill = (
     <div className="inline-flex items-center gap-[2px] rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] p-[3px]">
       {activeDoc?.language === 'markdown' && (
@@ -1398,6 +1429,22 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
             <ImagePlus size={12} />
             插图
           </button>
+          {/* B4 内联建议：触发型（点了立刻生成），与上面三个动作型按钮同构 */}
+          {inlineSuggestOn && (
+            <button
+              onClick={() => { monacoRef.current?.triggerInlineSuggest() }}
+              title="AI 续写建议：在光标处生成下一句（Alt+A；Tab 采纳 / Esc 拒绝）"
+              data-wb="inlineSuggestBtn"
+              className={`flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
+                inlineBusy
+                  ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <SunMedium size={12} className={inlineBusy ? 'opacity-60' : ''} />
+              建议
+            </button>
+          )}
           <button
             onClick={() => { setOutlineOpen((v) => !v); }}
             title="大纲（跳转标题）"
@@ -1619,54 +1666,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
               {/* 返回 chip 改由 App 渲染在页面条最左端（原独立常驻行已删） */}
             </div>
             {!contentActionsHosted && <div className="flex shrink-0 items-center pr-1.5 pt-1">
-              <div className="inline-flex items-center gap-[2px] rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] p-[3px]">
-                {activeDoc?.language === 'markdown' && (
-                  <>
-                    <button
-                      onClick={() => void handleInsertImage()}
-                      title="插图：复制图片到仓库附件区 .attachments/ 并在光标处插入相对链接（也支持直接粘贴截图）"
-                      className="flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    >
-                      <ImagePlus size={12} />
-                      插图
-                    </button>
-                    <button
-                      onClick={() => { setOutlineOpen((v) => !v); }}
-                      title="大纲（跳转标题）"
-                      className={`flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
-                        outlineOpen
-                          ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
-                          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-                      }`}
-                    >
-                      <ListTree size={12} />
-                      大纲
-                    </button>
-                    <button
-                      onClick={togglePreview}
-                      title="分栏预览（左编辑 / 右实时渲染）"
-                      className={`flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
-                        previewOpen
-                          ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
-                          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-                      }`}
-                    >
-                      {previewOpen ? <PanelRightClose size={12} /> : <Eye size={12} />}
-                      预览
-                    </button>
-                  </>
-                )}
-                {dirtyCount > 0 && (
-                  <button
-                    onClick={() => void saveAll()}
-                    title="保存全部 (Ctrl+Shift+S)"
-                    className="flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                  >
-                    <SaveAll size={12} />
-                    保存全部 ({dirtyCount})
-                  </button>
-                )}
-              </div>
+              {actionsPill}
             </div>}
             </div>
             )
@@ -1703,6 +1703,8 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                       zenPaper={!!zenSettings.zenPaper}
                       layoutKey={zenLevel}
                       onPasteImage={activeDoc?.language === 'markdown' ? handlePasteImageFile : undefined}
+                      inlineSuggestEnabled={inlineSuggestOn}
+                      onInlineSuggestBusy={setInlineBusy}
                     />
                   </Suspense>
                 </div>
@@ -1777,6 +1779,12 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                   </button>
                 )}
                 <span className="ml-auto">{activeDoc.size.toLocaleString()} B</span>
+                {inlineBusy && (
+                  <span className="kb-item-in flex items-center gap-1 text-[var(--accent)]" data-wb="inlineBusy">
+                    <Loader2 size={10} className="animate-spin" />
+                    建议生成中
+                  </span>
+                )}
                 {fullContent(activeDoc) !== savedFullContent(activeDoc) && <span className="kb-item-in text-[var(--accent)]">未保存</span>}
               </>
             )}

@@ -6,7 +6,7 @@ import { bindEditorTheme, applyEditorTheme, setEditorThemeVariant } from '../../
 // Monaco 运行时装配（worker 注册 + loader 本地化）下沉到宿主组件：不随应用入口进首屏 chunk（性能 2026-09-10）
 import '../../../lib/monaco-setup'
 import { dimMarkdownText, markdownWikiHighlights, wikiTargetTitle, type DimCls } from '../../../lib/markdownDim'
-import { getKnowledgePages } from '../../../lib/ipc'
+import { getKnowledgePages, aiInlineSuggestRun, aiInlineSuggestCancel } from '../../../lib/ipc'
 import { MonacoErrorBoundary } from '../../../components/shared/MonacoErrorBoundary'
 import type { KnowledgePage } from '../../../types'
 import type { EditorDoc } from '../types'
@@ -26,6 +26,10 @@ interface Props {
   zenPaper?: boolean
   /** P3 插图：粘贴图片拦截（返回要插入的 md 文本；null = 放弃）。仅 markdown 文档传入 */
   onPasteImage?: (file: File) => Promise<string | null>
+  /** B4 内联建议开关（设置 aiAssistantInlineSuggest；关时快捷键不发起请求） */
+  inlineSuggestEnabled?: boolean
+  /** B4 请求态回调（true = 正在生成），供编辑器状态栏微标 */
+  onInlineSuggestBusy?: (busy: boolean) => void
 }
 
 export interface MonacoPaneHandle {
@@ -33,6 +37,8 @@ export interface MonacoPaneHandle {
   revealLine(line: number): void
   /** P3 插图：在光标处插入文本（多张图依次调用），插入后聚焦 */
   insertAtCursor(text: string): void
+  /** B4 手动触发一次内联建议（Alt+A）。返回 false = 未触发（无编辑器 / 文档不支持 / 开关关闭） */
+  triggerInlineSuggest(): boolean
 }
 
 /** DimCls → inlineClassName（CSS 类定义见 src/styles/index.css） */
@@ -68,13 +74,14 @@ async function getPagesCached(): Promise<KnowledgePage[]> {
 
 /** 编辑器「大纲」导航句柄透传 */
 export const MonacoPane = forwardRef<MonacoPaneHandle, Props>(function MonacoPane(
-  { doc, onChange, dimEnabled = true, layoutKey = 0, zen = false, typewriter = false, zenPaper = true, onPasteImage },
+  { doc, onChange, dimEnabled = true, layoutKey = 0, zen = false, typewriter = false, zenPaper = true, onPasteImage, inlineSuggestEnabled = true, onInlineSuggestBusy },
   ref,
 ) {
   const hostRef = useRef<MonacoPaneHandle | null>(null)
   useImperativeHandle(ref, () => ({
     revealLine: (line: number) => hostRef.current?.revealLine(line),
     insertAtCursor: (text: string) => hostRef.current?.insertAtCursor(text),
+    triggerInlineSuggest: () => hostRef.current?.triggerInlineSuggest() ?? false,
   }), [])
 
   if (!doc) {
@@ -99,12 +106,12 @@ export const MonacoPane = forwardRef<MonacoPaneHandle, Props>(function MonacoPan
       </div>
     )
   }
-  return <MonacoHost ref={hostRef} doc={doc} onChange={onChange} dimEnabled={dimEnabled} layoutKey={layoutKey} zen={zen} typewriter={typewriter} zenPaper={zenPaper} onPasteImage={onPasteImage} />
+  return <MonacoHost ref={hostRef} doc={doc} onChange={onChange} dimEnabled={dimEnabled} layoutKey={layoutKey} zen={zen} typewriter={typewriter} zenPaper={zenPaper} onPasteImage={onPasteImage} inlineSuggestEnabled={inlineSuggestEnabled} onInlineSuggestBusy={onInlineSuggestBusy} />
 })
 
 /** 有效文档的 Monaco 宿主；hooks 集中在子组件，doc 为 null 时父组件卸载它（满足 hooks 规则） */
-const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Props['onChange']; dimEnabled: boolean; layoutKey: number; zen: boolean; typewriter: boolean; zenPaper: boolean; onPasteImage?: Props['onPasteImage'] }>(
-  function MonacoHost({ doc, onChange, dimEnabled, layoutKey, zen, typewriter, zenPaper = true, onPasteImage }, ref) {
+const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Props['onChange']; dimEnabled: boolean; layoutKey: number; zen: boolean; typewriter: boolean; zenPaper: boolean; onPasteImage?: Props['onPasteImage']; inlineSuggestEnabled: boolean; onInlineSuggestBusy?: Props['onInlineSuggestBusy'] }>(
+  function MonacoHost({ doc, onChange, dimEnabled, layoutKey, zen, typewriter, zenPaper = true, onPasteImage, inlineSuggestEnabled = true, onInlineSuggestBusy }, ref) {
     const dimEnabledRef = useRef(dimEnabled)
     dimEnabledRef.current = dimEnabled
     /** P3 粘贴拦截回调透传（paste 监听器只挂一次，不随 prop 变化重挂） */
@@ -123,6 +130,13 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Prop
     const padRef = useRef(0)
     /** 平滑滚动动画句柄（光标移动时重启） */
     const smoothRafRef = useRef(0)
+    /** B4 内联建议：开关 + 请求态回调透传（onMount 闭包只注册一次，读 ref 拿最新值） */
+    const inlineOnRef = useRef(inlineSuggestEnabled)
+    inlineOnRef.current = inlineSuggestEnabled
+    const inlineBusyRef = useRef<Props['onInlineSuggestBusy']>(onInlineSuggestBusy)
+    inlineBusyRef.current = onInlineSuggestBusy
+    /** B4 触发入口（onMount 内装配，供 handle.triggerInlineSuggest 调用） */
+    const triggerInlineRef = useRef<(() => boolean) | null>(null)
 
     /** 打字机留白：上下各 ~40% 视口高 → 文首/文尾行也能真正居中（iA Writer/Typora 式） */
     const applyZenPadding = useCallback((ed: Monaco.editor.IStandaloneCodeEditor): void => {
@@ -170,6 +184,7 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Prop
         editor.executeEdits('kb-insert', [{ range, text, forceMoveMarkers: true }])
         editor.focus()
       },
+      triggerInlineSuggest: () => triggerInlineRef.current?.() ?? false,
     }), [])
 
     const onMount = useCallback<OnMount>((editor, monaco) => {
@@ -259,6 +274,34 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Prop
       // 因此模块级 guard 只注册一次（schema 全局共享）。
       installWikiCompletion(monaco)
 
+      // ---- B4 内联建议（AI 续写 ghost text）----
+      // provider 注册一次（language 级，同 installWikiCompletion）；触发入口按编辑器实例装配。
+      installInlineCompletion(monaco)
+      // 触发入口：Alt+A / 胶囊按钮 → 走 Monaco 内建命令 editor.action.inlineSuggest.trigger。
+      // 该命令的 precondition 只有 EditorContextKeys.writable（已核实产物 monaco-lFGDj3sW.js
+      // 的 TriggerInlineSuggestionAction），不要求 inlineSuggestionVisible → 手动触发可行。
+      // explicit 默认 true：显式请求的 ghost text 在打字/移光标时自动消失，不必自己管生命周期。
+      triggerInlineRef.current = (): boolean => {
+        if (!inlineOnRef.current) return false
+        const model = editor.getModel()
+        if (!model || model.getLanguageId() !== 'markdown') return false
+        if (!model.getValue().trim()) return false
+        // 破缓存 → 点火 → 触发，三步顺序不能换（见 installInlineCompletion 注释）：
+        // 重注册让 providers 集合变化，点火让 provider 放行本次请求，最后才 trigger。
+        installInlineCompletion(monaco, true)
+        armInlineSuggest()
+        void Promise.resolve(editor.trigger('kb-inline', 'editor.action.inlineSuggest.trigger', null))
+          .catch(() => { /* 触发失败静默：不打断写作 */ })
+        return true
+      }
+      // 请求态 → 宿主回调（状态栏微标）。模块级监听，卸载时注销。
+      setInlineSuggestBusyListener((busy) => inlineBusyRef.current?.(busy))
+      editor.onDidDispose(() => {
+        triggerInlineRef.current = null
+        setInlineSuggestBusyListener(null)
+        cancelInlineSuggestInFlight()
+      })
+
       // P3 插图：容器捕获阶段拦截 paste——剪贴板含图片文件时走 onPasteImage 落附件区并插入
       // md 链接（Monaco 隐藏 textarea 收不到被吞的事件）；纯文本粘贴不受影响。
       const domNode = editor.getDomNode()
@@ -293,6 +336,7 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: EditorDoc; onChange: Prop
         alive = false
         applyFnRef.current = null
         editorRef.current = null
+        triggerInlineRef.current = null
         collection.clear()
         cancelAnimationFrame(smoothRafRef.current)
       })
@@ -423,7 +467,140 @@ function installWikiCompletion(monaco: typeof Monaco): void {
 
 export type { OnMount }
 
-/** 供外部（编辑器模块大纲/提示）判断当前文档是否处于 [[ 补全上下文 */
+// ===== B4 内联建议 provider =====
+
+let inlineCompletionInstalled = false
+/** provider 注册句柄（重注册时用；见 installInlineCompletion 的破缓存说明） */
+let inlineProviderHandle: Monaco.IDisposable | null = null
+/** 在途请求 id（新请求顶替 / 编辑器卸载时取消前次；同一时刻只允许一条在途） */
+let inlineInFlightId: string | null = null
+/**
+ * 「点火」时间戳：只有手动触发（Alt+A / 胶囊按钮）才置位。
+ *
+ * 为什么需要：Monaco 在打字 / 移光标时也会自动调 provider（InlineCompletionTriggerKind.Automatic），
+ * 那不是本功能的设计（「仅手动触发，零常驻开销」）→ 未点火一律返回空，绝不给 LLM 发请求。
+ * 用时间戳而非布尔：若 trigger 命令因 precondition 不满足而最终没调到 provider，
+ * 残留的点火会在窗口外自然失效，不会误放行下一次自动触发。
+ */
+let inlineArmedAt = 0
+const INLINE_ARM_WINDOW_MS = 500
+/** 渲染层 UI 兜底超时：必须 ≥ 主进程 INLINE_SUGGEST_TIMEOUT_MS（契约 J7b 断言） */
+const INLINE_UI_TIMEOUT_MS = 12000
+
+/** 手动触发前调用：给 provider 一次性点火许可 */
+function armInlineSuggest(): void {
+  inlineArmedAt = Date.now()
+}
+/**
+ * 请求态广播（模块级）：provider 是模块级函数、拿不到 React 闭包，
+ * 故用回调注册表把「开始 / 结束」播给当前挂载的宿主（编辑器状态栏微标消费）。
+ */
+let inlineBusyListener: ((busy: boolean) => void) | null = null
+
+/** 宿主挂载时注册 busy 监听（卸载时传 null 注销） */
+export function setInlineSuggestBusyListener(fn: ((busy: boolean) => void) | null): void {
+  inlineBusyListener = fn
+}
+
+/**
+ * 注册内联建议 provider（幂等：整 app 一次；markdown 语言共享）。
+ *
+ * 设计要点：
+ * - provider **不主动**发起请求，只在 Monaco 收到 trigger 命令时被调用（手动触发模式，
+ *   无常驻 token 成本）。因此这里无需 debounce / 缓存。
+ * - 只对 markdown 生效（与 [[ 补全同语言）；非 md 不注册 provider 就不会被调。
+ * - 返回单条 ghost text：Moanco 的 items 数组只放一项，`insertText` 即建议正文。
+ */
+/**
+ * 注册 provider（reinstall=true 时先注销再注册）。
+ *
+ * ★ 为什么要「每次手动触发前重注册」——破 Monaco 的请求级缓存：
+ *   InlineCompletionsSource.fetch() 命中缓存就不再调 provider，
+ *   判据 `UpdateRequest.satisfies()` 只比 position / versionId / triggerKind / **providers 集合**
+ *   （源码：node_modules/monaco-editor/esm/vs/editor/contrib/inlineCompletions/browser/model/
+ *          inlineCompletionsSource.js 的 fetch + satisfies）。
+ *   于是「同光标 + 内容未变 + 上次是 Explicit」时第二次 trigger 直接返回缓存，
+ *   provider 不被调用 —— 实测后果：点一次没出结果（超时 / 建议为空），
+ *   不动光标再点一次 **永远没反应**。这是真实用户高频动作（「再来一次」），必须支持。
+ *   重注册会让 providers 集合里换成新注册项（对象引用不同）→ satisfies 为假 → 强制重拉。
+ *   Monaco 没给公开的「清缓存」命令能替代：hide 命令的 precondition 要求建议可见，
+ *   而空结果时它不成立；provider 的 onDidChangeInlineCompletions 也只重放 trigger，不清缓存。
+ */
+function installInlineCompletion(monaco: typeof Monaco, reinstall = false): void {
+  if (inlineCompletionInstalled && !reinstall) return
+  inlineCompletionInstalled = true
+  inlineProviderHandle?.dispose()
+  inlineProviderHandle = monaco.languages.registerInlineCompletionsProvider('markdown', {
+    provideInlineCompletions: async (
+      model: Monaco.editor.ITextModel,
+      position: Monaco.Position,
+    ): Promise<Monaco.languages.InlineCompletions> => {
+      // 非手动点火（Monaco 自动触发）→ 一律不发请求，零开销返回
+      const armed = inlineArmedAt > 0 && Date.now() - inlineArmedAt < INLINE_ARM_WINDOW_MS
+      inlineArmedAt = 0
+      if (!armed) return { items: [] }
+
+      const text = model.getValue()
+      // Monaco 的 offset：Position → offset 用 getOffsetAt（0-based 字符偏移）
+      const offset = model.getOffsetAt(position)
+      const relPath = model.uri.path.replace(/^\//, '')
+
+      // 新请求顶替前次：先取消在途（渲染层同一时刻只允许一条）
+      if (inlineInFlightId) {
+        void aiInlineSuggestCancel(inlineInFlightId).catch(() => { /* 主进程无此 id 时静默 */ })
+        inlineInFlightId = null
+      }
+      const requestId = `is_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      inlineInFlightId = requestId
+      inlineBusyListener?.(true)
+
+      try {
+        const r = await Promise.race([
+          aiInlineSuggestRun({ requestId, text, offset, relPath }),
+          // UI 兜底：主进程已有硬超时，这里是双保险 —— IPC 异常 / 主进程卡死时
+          // 也不让状态栏微标永久转圈（探针实测无 provider 时请求永不 resolve）
+          new Promise<null>((res) => { setTimeout(() => res(null), INLINE_UI_TIMEOUT_MS) }),
+        ])
+        // 已被新请求顶替 / 用户取消 → 不呈现
+        if (inlineInFlightId !== requestId) return { items: [] }
+        // 兜底超时命中 → 顺手取消主进程那一条，别让它白跑
+        if (!r) {
+          void aiInlineSuggestCancel(requestId).catch(() => { /* 静默 */ })
+          return { items: [] }
+        }
+        if (!r?.ok || !r.text) return { items: [] }
+        return {
+          items: [{
+            insertText: r.text,
+            range: new monaco.Range(
+              position.lineNumber, position.column,
+              position.lineNumber, position.column,
+            ),
+          }],
+        }
+      } catch {
+        return { items: [] }
+      } finally {
+        if (inlineInFlightId === requestId) {
+          inlineInFlightId = null
+          inlineBusyListener?.(false)
+        }
+      }
+    },
+    // 接口要求（0.56）：disposeInlineCompletions 为**必填**方法（不是可选的 free*）
+    disposeInlineCompletions: () => { /* 无额外资源需释放 */ },
+  })
+}
+
+/** 取消在途内联建议请求（编辑器卸载 / 切文档时由宿主调用） */
+export function cancelInlineSuggestInFlight(): void {
+  if (!inlineInFlightId) return
+  const id = inlineInFlightId
+  inlineInFlightId = null
+  void aiInlineSuggestCancel(id).catch(() => { /* 静默 */ })
+}
+
+/** 供外部（大纲/提示）判断当前文档是否处于 [[ 补全上下文 */
 export function wikiContextTarget(text: string): string | null {
   const lastOpen = text.lastIndexOf('[[')
   const lastClose = text.lastIndexOf(']]')

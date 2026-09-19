@@ -506,6 +506,11 @@ export const agentEditMessage = (sessionId: string, messageId: string, message: 
 export const agentDeleteMessage = (sessionId: string, messageId: string): Promise<boolean> => a().agentDeleteMessage(sessionId, messageId)
 /** 会话压缩（conversation-compaction-design）：/compress 指令触发；自动预检在主进程内不走此通道 */
 export const agentCompressSession = (req: { sessionId: string; modelId?: string; providerId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }): Promise<AgentCompressResult> => a().agentCompressSession(req)
+
+/** B4 编辑器内联建议：手动触发一次续写（独立于对话历史，不进 prompt cache 前缀） */
+export const aiInlineSuggestRun = (req: { requestId: string; text: string; offset: number; relPath?: string; modelId?: string; providerId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }): Promise<{ ok: boolean; text?: string; aborted?: boolean; error?: string }> => a().aiInlineSuggestRun(req)
+/** B4 取消在途建议请求 */
+export const aiInlineSuggestCancel = (requestId: string): Promise<{ ok: boolean }> => a().aiInlineSuggestCancel(requestId)
 export const agentAbort = (chatId: string): Promise<boolean> => a().agentAbort(chatId)
 /** 保存/清除会话级全局要求（仅该会话后续轮次生效，空串=清除） */
 export const agentSetSessionInstructions = (id: string, instructions: string): Promise<{ ok: boolean; error?: string }> => a().agentSetSessionInstructions(id, instructions)

@@ -564,6 +564,163 @@ async function main() {
   ok(f6.pressed === 'false' && f6.saved === false,
     'F6 再点一次关回（双向切换 + 落盘一致，无副作用残留）', JSON.stringify(f6))
 
+  // ---- G 组：B4 内联建议（胶囊按钮 / Alt+A / 触发链路 / 开关联动）----
+  // ⚠️ 探针环境**没有 LLM API key**，真生成必然失败 → 因此这组验的是
+  //    「触发链路接通 + UI 联动」而非「真出一句建议」。
+  //    手法：先在渲染层包一层 window.api.aiInlineSuggestRun 计数器，
+  //    断言 provider 确实被调用、且入参（text/offset）合理；随后立即 resolve 空结果，
+  //    不让它真去打网络（既快又稳定）。
+  //    真生成属于实机验收（需要配好 provider），不在探针覆盖范围。
+
+  // G0 切到编辑器模块并打开一篇 markdown（探针 vault 的欢迎页即 md）
+  await evalJs(`(() => { document.querySelector('[data-wb-bookmark="editor"]')?.click(); return true })()`)
+  await sleep(1500)
+  // 用快速切换器（Ctrl+O）打开第一份知识页 —— 比在文件树里点更稳（免展开目录）
+  await evalJs(`(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'o', ctrlKey: true, bubbles: true, cancelable: true }))
+    return true
+  })()`)
+  await sleep(900)
+  const g0Pick = await evalJs(`(() => {
+    const pal = document.querySelector('[data-wb="palette"]') || document.querySelector('[role="dialog"]')
+    const items = [...document.querySelectorAll('button')].filter((b) => /知识页/.test(b.textContent || ''))
+    const first = items.find((b) => b.getBoundingClientRect().height > 0)
+    if (first) { first.click(); return { clicked: true, label: first.textContent.slice(0, 40) } }
+    return { clicked: false, label: '' }
+  })()`)
+  await sleep(1600)
+  const g0Doc = await evalJs(`(() => {
+    const ed = document.querySelector('.monaco-editor')
+    return { hasEditor: !!ed, hasMonaco: !!document.querySelector('.monaco-editor .view-lines') }
+  })()`)
+  ok(g0Doc.hasEditor && g0Doc.hasMonaco,
+    'G0 编辑器模块打开 markdown 文档（Monaco 挂载）', `pick=${JSON.stringify(g0Pick)} doc=${JSON.stringify(g0Doc)}`)
+
+  // G1 胶囊里有「建议」按钮且可见可点（单点定义 → 两个宿主都应渲染同一份）
+  const g1 = await evalJs(`(() => {
+    const bs = [...document.querySelectorAll('[data-wb="inlineSuggestBtn"]')]
+    // 可能有浮层槽 / 内嵌两种宿主，取**可见的那个**（另一份 display:none）
+    const vis = bs.find((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
+    const r = vis?.getBoundingClientRect()
+    return { count: bs.length, visible: !!vis, w: Math.round(r?.width ?? 0), h: Math.round(r?.height ?? 0),
+             label: vis?.textContent?.trim() ?? '' }
+  })()`)
+  ok(g1.visible && g1.w > 0 && g1.h > 0,
+    'G1 内容胶囊里有「建议」按钮（可见可点）', JSON.stringify(g1))
+
+  // G2 观测手段（★ 踩坑记录，别再走回头路）：
+  //   window.api 是 contextBridge 暴露的**冻结对象**（实测 frozen:true / writable:false /
+  //   Object.defineProperty 抛 "Cannot redefine property"）→ 覆盖 .aiInlineSuggestRun 装计数器
+  //   **静默失败**，断言永远拿到空数组（假 FAIL，且看不出是手法问题）。
+  //   改用**可观测 UI 信号**：状态栏忙态微标 [data-wb="inlineBusy"] —— provider 一启动置 true，
+  //   结束 / 超时回落 false。一条信号同时覆盖「触发链路真通了」与「忙态不残留」。
+  //   入参（text / offset / requestId）正确性由契约脚本 J1-J5 纯函数断言 + 实机验收覆盖，
+  //   探针不重复验（无 key 环境也验不出真建议）。
+  const busyNow = () => evalJs(`!!document.querySelector('[data-wb="inlineBusy"]')`)
+  const waitBusy = async (want, ms) => {
+    for (let i = 0; i < Math.ceil(ms / 200); i++) {
+      if ((await busyNow()) === want) return true
+      await sleep(200)
+    }
+    return false
+  }
+
+  // G3 点「建议」按钮 → provider 被调用，入参合理（text 非空、offset 为数字）
+  await evalJs(`(() => {
+    const bs = [...document.querySelectorAll('[data-wb="inlineSuggestBtn"]')]
+    const vis = bs.find((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
+    vis?.click(); return true
+  })()`)
+  const g3 = await waitBusy(true, 2000)
+  ok(g3, 'G3 ★ 点「建议」→ provider 真被调用（忙态微标亮起 = 触发链路通）', `busy=${await busyNow()}`)
+  // G3b 忙态必须回落：探针无 LLM key → 走主进程硬超时（10s）/ 渲染层兜底（12s）分支。
+  //     这条锁的是「不可达时不永久转圈」（实测修超时前：8s+ 不回落且永不 resolve）。
+  const g3b = await waitBusy(false, 16000)
+  ok(g3b, 'G3b ★ 忙态回落（模型不可达时靠硬超时兜底，微标不永久转圈）', `busy=${await busyNow()}`)
+
+  // G4 Alt+A 快捷键 → 同样打通 provider（原生 keydown，与用户真实按键同路径）
+  await evalJs(`(() => {
+    // 先把焦点给编辑器（快捷键不设输入守卫，但真实用户此时就聚焦在编辑器里）
+    document.querySelector('.monaco-editor textarea')?.focus?.()
+    return true
+  })()`)
+  await sleep(200)
+  await evalJs(`(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', altKey: true, bubbles: true, cancelable: true }))
+    return true
+  })()`)
+  const g4 = await waitBusy(true, 2000)
+  ok(g4, 'G4 ★ Alt+A 触发（与按钮同一条链路）', `busy=${await busyNow()}`)
+  await waitBusy(false, 16000)
+
+  // G5 空文档不得触发（防「快捷键在空文件上给 LLM 发空上下文」）
+  const g5 = await evalJs(`(() => {
+    const m = window.monaco?.editor?.getModels?.()[0]
+    if (!m) return { skipped: true }
+    m.setValue('')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', altKey: true, bubbles: true, cancelable: true }))
+    return { skipped: false }
+  })()`)
+  const g5rose = await waitBusy(true, 1500)
+  ok(g5.skipped || g5rose === false,
+    'G5 ★ 空文档不触发请求（避免给 LLM 发空上下文）', `busyRose=${g5rose}`)
+  await evalJs(`(() => { const m = window.monaco?.editor?.getModels?.()[0]; if (m) m.setValue('# 探针还原\\n\\n正文内容。'); return true })()`)
+  await sleep(600)
+
+  // G8 ★ 打字 / 移光标不触发（Monaco 的 Automatic 触发必须被「点火守卫」挡掉）
+  //      否则每敲一键就给 LLM 发一次请求 —— 与「仅手动触发、零常驻开销」的设计直接冲突。
+  await evalJs(`(() => { document.querySelector('.monaco-editor textarea')?.focus?.(); return true })()`)
+  for (let i = 0; i < 6; i++) {
+    await evalJs(`(() => {
+      const ta = document.querySelector('.monaco-editor textarea')
+      if (!ta) return false
+      ta.focus()
+      const dt = new DataTransfer(); dt.setData('text/plain', 'x')
+      ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+      return true
+    })()`)
+    await sleep(250)
+  }
+  const g8rose = await waitBusy(true, 2500)
+  ok(g8rose === false,
+    'G8 ★ 打字不触发请求（点火守卫挡住 Monaco 自动触发）', `busyRose=${g8rose}`)
+
+  // G6 开关关掉 → 按钮消失 + Alt+A 不再触发
+  // ★ 手法要点：SettingsContext 只在 'settings-imported' 事件里重拉设置（见 src/lib/SettingsContext.tsx），
+  //   探针直接用 window.api.setSetting 写盘**不会**推 React 重渲染 → 必须补一次派发，
+  //   否则拿到的是「设置已改但 UI 没跟上」的假 FAIL。
+  await evalJs(`(async () => {
+    try { await window.api.setSetting('aiAssistantInlineSuggest', false) } catch {}
+    window.dispatchEvent(new Event('settings-imported'))
+    return true
+  })()`)
+  await sleep(1400)
+  const g6 = await evalJs(`(() => ({ count: document.querySelectorAll('[data-wb="inlineSuggestBtn"]').length }))()`)
+  ok(g6.count === 0,
+    'G6 ★ 关掉设置后「建议」按钮消失（胶囊不再渲染该按钮）', JSON.stringify(g6))
+  await evalJs(`(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', altKey: true, bubbles: true, cancelable: true }))
+    return true
+  })()`)
+  const g6rose = await waitBusy(true, 1500)
+  ok(g6rose === false,
+    'G6b ★ 关掉设置后 Alt+A 不发起请求（开关真挡在触发口）', `busyRose=${g6rose}`)
+
+  // G7 复原开关（不给后续探针 / 用户留副作用）
+  await evalJs(`(async () => {
+    try { await window.api.setSetting('aiAssistantInlineSuggest', true) } catch {}
+    window.dispatchEvent(new Event('settings-imported'))
+    return true
+  })()`)
+  await sleep(1000)
+  const g7 = await evalJs(`(async () => {
+    let v = null
+    try { v = await window.api.getSetting('aiAssistantInlineSuggest') } catch {}
+    return { saved: v, btn: document.querySelectorAll('[data-wb="inlineSuggestBtn"]').length }
+  })()`)
+  ok(g7.saved === true && g7.btn === 1,
+    'G7 复原开关（设置回 true、按钮回来，无副作用残留）', JSON.stringify(g7))
+
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)
   for (const r of results) console.log(`${r.pass ? '✓' : '✗'} ${r.label}${r.detail ? '  → ' + r.detail : ''}`)

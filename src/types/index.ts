@@ -1739,6 +1739,10 @@ export interface ElectronAPI {
   /** 会话压缩（/compress 指令 + 自动预检共用）：折叠检查点后旧轮为纪要并推进检查点 */
   agentCompressSession: (req: { sessionId: string; modelId?: string; providerId?: string; effort?: string }) => Promise<AgentCompressResult>
   agentAbort: (chatId: string) => Promise<boolean>
+  /** B4 编辑器内联建议：手动触发一次续写建议（独立于对话历史） */
+  aiInlineSuggestRun: (req: { requestId: string; text: string; offset: number; relPath?: string; modelId?: string; providerId?: string; effort?: string }) => Promise<{ ok: boolean; text?: string; aborted?: boolean; error?: string }>
+  /** B4 取消在途建议请求 */
+  aiInlineSuggestCancel: (requestId: string) => Promise<{ ok: boolean }>
   /** AgentRunner 实时过程步骤（llm/tool 每步完成即推送，payload {chatId, step}） */
   onAgentStep: (cb: (p: { chatId: string; step: AgentTraceStep }) => void) => () => void
   /** AgentRunner 流式增量（思考链 / 正文 / 工具进行中；主进程已合批，payload {chatId, event}） */

@@ -51,6 +51,7 @@ import { registerSkillHandlers } from '../lib/skillService'
 import { registerLlmHandlers } from '../lib/llmService'
 import { registerAgentHandlers } from '../lib/agentService'
 import { registerAgentCompressHandlers } from '../lib/agentCompress'
+import { registerInlineSuggestHandlers } from '../lib/aiAssistant/inlineSuggest'
 import { registerSemanticIndexHandlers } from '../lib/kbStore/semanticIndex'
 import { registerKnowledgeSearchHandlers } from '../lib/knowledgeSearch'
 import { registerAiTeachingFolderHandlers, migrateRootDir as migrateAiTeachRootDir } from '../lib/aiTeachingFolders'
@@ -916,6 +917,8 @@ app.whenReady().then(async () => {
     registerAgentHandlers()
     // 会话压缩（conversation-compaction-design）：agent:compressSession（/compress 指令 + 自动预检共用）
     registerAgentCompressHandlers()
+    // B4 编辑器内联建议：ai:inlineSuggest:run / :cancel（手动触发，独立于对话历史）
+    registerInlineSuggestHandlers()
     // 知识语义索引（knowledge-index-design）：设置页状态卡 + 手动重建
     registerSemanticIndexHandlers()
     // 相似笔记（编辑器右栏）检索 handler

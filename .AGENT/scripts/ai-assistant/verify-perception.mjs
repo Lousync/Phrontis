@@ -1,5 +1,5 @@
 /**
- * 契约脚本：AI 助手 Agent 能力整包 · 批次 B1（@ 引用 + 骨架注入）+ B2（感知模式）
+ * 契约脚本：AI 助手 Agent 能力整包 · 批次 B1（@ 引用 + 骨架注入）+ B2（感知模式）+ B4（内联建议）
  *
  * 覆盖的缺陷面：
  *   ① 骨架 / 素材装配的**静默截断错** —— 多切一个字符不报错、少切一段不报错，
@@ -8,8 +8,12 @@
  *   ③ 既有路径零回归 —— 未引用文件时 `buildSystemPrompt` 必须逐字节退回现状
  *      （老路径被新特判污染是这类改动最常见的回归）；
  *   ④ list-drift（同类第 5 次）—— chip 上限值被抄成多份字面量后改动只落到一处；
+ *      同款：编辑器内容胶囊曾被手抄两份（J10g 锁死为单点定义）；
  *   ⑤ **prompt cache 前缀稳定**（B2 纠正）—— 每轮变化的注入段不得进 system，
- *      否则 system + core 14 工具（≈7.7k tok/轮）逐轮重算而**没有任何报错**。
+ *      否则 system + core 14 工具（≈7.7k tok/轮）逐轮重算而**没有任何报错**；
+ *   ⑥ B4 静默失效面 —— 光标 offset 越界被 slice 吞成空窗口、Monaco 接口方法名随版本漂移
+ *      （0.56 是 disposeInlineCompletions，不是旧版的 freeInlineCompletions）、
+ *      快捷键被系统级 globalShortcut 抢走（Ctrl+Alt+S 已被日程侧栏占用）。
  *
  * 用法：
  *   node --experimental-strip-types .AGENT/scripts/ai-assistant/verify-perception.mjs
@@ -23,6 +27,10 @@ import {
   budgetMaterial, buildPerceptionInjection, footnoteSafe, renderMaterialBlocks,
   PERCEPTION_ITEM_LIMIT, PERCEPTION_TOTAL_LIMIT, PERCEPTION_TOPK,
 } from '../../../electron/lib/aiAssistant/perceptionBudget.ts'
+import {
+  buildInlinePrompt, isValidSuggestion, normalizeInlineSuggestion,
+  pickFrontmatterTitle, sliceCursorWindow, INLINE_SUGGEST_MAX_CHARS,
+} from '../../../electron/lib/aiAssistant/inlineSuggestCore.ts'
 import { composeContextWithDigest } from '../../../electron/lib/agentCompressCore.ts'
 import { stripComments } from '../shared/strip-comments.mjs'
 
@@ -409,6 +417,211 @@ const sysIdx = SRC_AGENT.indexOf('const systemFull =')
 const sysLine = sysIdx === -1 ? '' : SRC_AGENT.slice(sysIdx, SRC_AGENT.indexOf('\n', sysIdx))
 ok(sysLine.length > 0 && !/Injection|requestInjection/.test(sysLine),
   'I5 ★ systemFull 拼接串里不得出现注入段变量', sysLine.slice(0, 100))
+
+// ===================== J 组：B4 内联建议 =====================
+
+// J1 光标窗口：按字符切 + 越界夹紧（最易静默出错的边界）
+const winBasic = sliceCursorWindow('abcdefghij', 5, 3, 2)
+ok(winBasic.head === 'cde' && winBasic.tail === 'fg',
+  'J1a sliceCursorWindow 前后各取 before/after 字符', JSON.stringify(winBasic))
+ok(winBasic.truncatedHead === true && winBasic.truncatedTail === true,
+  'J1b sliceCursorWindow 两侧都截断标记为 true', JSON.stringify(winBasic))
+
+// offset 越界（文档被外部改动后 offset 可能失效）→ 必须夹紧而非返回空
+const winOver = sliceCursorWindow('abc', 999, 10, 10)
+ok(winOver.head === 'abc' && winOver.tail === '',
+  'J1c ★ offset 超出文本长度 → 夹紧到末尾（不得静默返回空窗口）', JSON.stringify(winOver))
+const winNeg = sliceCursorWindow('abc', -5, 10, 10)
+ok(winNeg.head === '' && winNeg.tail === 'abc',
+  'J1d ★ offset 为负 → 夹紧到 0', JSON.stringify(winNeg))
+ok(winOver.head.length === 'abc'.length,
+  'J1e 越界后 head 恰好等于全文（证明夹紧而非丢弃）', JSON.stringify(winOver.head))
+
+// 光标在文首 / 文尾
+const winHead0 = sliceCursorWindow('hello', 0, 100, 100)
+ok(winHead0.head === '' && winHead0.tail === 'hello',
+  'J1f 光标在文首 → head 空、tail 全文', JSON.stringify(winHead0))
+const winEnd = sliceCursorWindow('hello', 5, 100, 100)
+ok(winEnd.head === 'hello' && winEnd.tail === '',
+  'J1g 光标在文尾 → head 全文、tail 空', JSON.stringify(winEnd))
+
+// J2 frontmatter title 三态
+ok(pickFrontmatterTitle('---\ntitle: 我的笔记\nstatus: draft\n---\n正文') === '我的笔记',
+  'J2a pickFrontmatterTitle 取到 title', pickFrontmatterTitle('---\ntitle: 我的笔记\nstatus: draft\n---\n正文'))
+ok(pickFrontmatterTitle('没有 frontmatter') === '',
+  'J2b pickFrontmatterTitle 无 frontmatter → 空串', '')
+ok(pickFrontmatterTitle('---\ntitle: "带引号"\n---\n正文') === '带引号',
+  'J2c pickFrontmatterTitle 去掉包裹引号', pickFrontmatterTitle('---\ntitle: "带引号"\n---\n正文'))
+ok(pickFrontmatterTitle('---\nstatus: draft\n---\n正文') === '',
+  'J2d pickFrontmatterTitle 有 frontmatter 无 title → 空串', '')
+// 未闭合围栏不得吞正文
+ok(pickFrontmatterTitle('---\ntitle: 未闭合\n\n正文') === '',
+  'J2e ★ pickFrontmatterTitle 未闭合围栏 → 空串（不吞正文）', '')
+
+// J3 prompt 组装：恒定性 + 必要成分
+const p1 = buildInlinePrompt({ text: 'abc', offset: 3 })
+const p2 = buildInlinePrompt({ text: 'abc', offset: 3 })
+ok(JSON.stringify(p1) === JSON.stringify(p2),
+  'J3a buildInlinePrompt 同输入恒同输出（纯函数）', '')
+ok(typeof p1.system === 'string' && p1.system.length > 0 && p1.user.length > 0,
+  'J3b buildInlinePrompt 产出 system + user 两段', '')
+ok(p1.system.includes(String(INLINE_SUGGEST_MAX_CHARS)),
+  'J3c ★ system 里写明字数上限（避免模型写长篇）', '')
+ok(p1.user.includes('【光标之前的正文】') && p1.user.includes('【光标之后的正文】'),
+  'J3d user 含前后文两个标记段', '')
+// 空文档段仍要出现占位，不能让 prompt 缺段
+const pEmpty = buildInlinePrompt({ text: '', offset: 0 })
+ok(pEmpty.user.includes('（空）'),
+  'J3e ★ 空文档也要保留段位（缺段会让模型误判结构）', pEmpty.user.slice(0, 80))
+// title 有则带上、无则不出现空标题行
+ok(buildInlinePrompt({ text: 'a', offset: 1, title: 'T' }).user.includes('文档标题：T'),
+  'J3f 有 title 时写入 prompt', '')
+ok(!buildInlinePrompt({ text: 'a', offset: 1 }).user.includes('文档标题：'),
+  'J3g ★ 无 title 时不写空标题行', '')
+
+// J4 normalizeInlineSuggestion 清洗
+ok(normalizeInlineSuggestion('```md\n下一句\n```') === '下一句',
+  'J4a 去掉代码围栏', normalizeInlineSuggestion('```md\n下一句\n```'))
+ok(normalizeInlineSuggestion('"下一句"') === '下一句',
+  'J4b 去掉包裹引号', normalizeInlineSuggestion('"下一句"'))
+ok(normalizeInlineSuggestion('续写：下一句') === '下一句',
+  'J4c 去掉「续写：」前缀', normalizeInlineSuggestion('续写：下一句'))
+ok(normalizeInlineSuggestion('  \n 下一句 \n ') === '下一句',
+  'J4d 去掉首尾空白', JSON.stringify(normalizeInlineSuggestion('  \n 下一句 \n ')))
+// 内部换行必须保留（多行续写合法）
+ok(normalizeInlineSuggestion('第一句\n第二句') === '第一句\n第二句',
+  'J4e ★ 保留内部换行（多行续写合法）', JSON.stringify(normalizeInlineSuggestion('第一句\n第二句')))
+// 幂等（铁律 17：压缩必须幂等）
+const once = normalizeInlineSuggestion('```\n续写：abc\n```')
+ok(normalizeInlineSuggestion(once) === once,
+  'J4f ★ normalizeInlineSuggestion 幂等', JSON.stringify(once))
+
+// J5 isValidSuggestion 拒绝空/纯标点
+ok(isValidSuggestion('') === false, 'J5a 空串无效', '')
+ok(isValidSuggestion('   ') === false, 'J5b 纯空白无效', '')
+ok(isValidSuggestion('。。。') === false,
+  'J5c ★ 纯标点无效（模型偶尔只吐一个句号）', '')
+ok(isValidSuggestion('好') === true, 'J5d 单字有效', '')
+ok(isValidSuggestion('hello') === true, 'J5e 英文有效', '')
+
+// J6 ★ 纯函数区零 import（合同脚本裸 node 能 import 的前提）
+const SRC_INLINE_CORE = stripComments(read('electron/lib/aiAssistant/inlineSuggestCore.ts'))
+ok(!/^\s*import\s/m.test(SRC_INLINE_CORE),
+  'J6 ★ inlineSuggestCore 零 import（零依赖红线 —— 裸 node 才能 import 它做断言）',
+  (SRC_INLINE_CORE.match(/^\s*import\s.*$/m) ?? [])[0] ?? '')
+
+// J7 编排区接线
+const SRC_INLINE = stripComments(read('electron/lib/aiAssistant/inlineSuggest.ts'))
+ok(/invokeLlmStreamInternal\s*\(/.test(SRC_INLINE),
+  'J7a 编排走 invokeLlmStreamInternal（不自造 LLM 调用链）', '')
+ok(/signal:\s*ctrl\.signal/.test(SRC_INLINE),
+  'J7b ★ 请求带 AbortSignal（ctrl.signal 透传）', '')
+ok(/ipcMain\.handle\(\s*'ai:inlineSuggest:run'/.test(SRC_INLINE),
+  'J7c 注册 ai:inlineSuggest:run handler', '')
+ok(/ipcMain\.handle\(\s*'ai:inlineSuggest:cancel'/.test(SRC_INLINE),
+  'J7d 注册 ai:inlineSuggest:cancel handler', '')
+// 消息式取消：AbortSignal 不可经 IPC 序列化 → 必须有 requestId → controller 的映射表
+ok(/Map<string,\s*AbortController>/.test(SRC_INLINE),
+  'J7e ★ 在途表 Map<requestId, AbortController>（消息式取消的核心）', '')
+ok(/ctrl\.abort\(\)/.test(SRC_INLINE),
+  'J7f 取消路径实际调 abort()', '')
+// 不得进对话历史（前缀稳定）
+ok(!/getAgentMessages|updateSessionDigest|agentSessionRepo/.test(SRC_INLINE),
+  'J7g ★ 内联建议不碰会话历史（独立一次性调用，不扰动 prompt cache 前缀）', '')
+
+// J8 IPC 三处对齐（preload / types / ipc.ts）
+const SRC_PRELOAD = stripComments(read('electron/preload/index.ts'))
+const SRC_TYPES = stripComments(read('src/types/index.ts'))
+const SRC_IPC = stripComments(read('src/lib/ipc.ts'))
+ok(/aiInlineSuggestRun/.test(SRC_PRELOAD) && /ai:inlineSuggest:run/.test(SRC_PRELOAD),
+  'J8a preload 暴露 aiInlineSuggestRun → ai:inlineSuggest:run', '')
+ok(/aiInlineSuggestCancel/.test(SRC_PRELOAD) && /ai:inlineSuggest:cancel/.test(SRC_PRELOAD),
+  'J8b preload 暴露 aiInlineSuggestCancel → ai:inlineSuggest:cancel', '')
+ok(/aiInlineSuggestRun/.test(SRC_TYPES) && /aiInlineSuggestCancel/.test(SRC_TYPES),
+  'J8c types 声明两个方法（与 preload 同名）', '')
+ok(/aiInlineSuggestRun/.test(SRC_IPC) && /aiInlineSuggestCancel/.test(SRC_IPC),
+  'J8d ipc.ts 封装两个方法', '')
+
+// J9 main 注册接线
+const SRC_MAIN = stripComments(read('electron/main/index.ts'))
+ok(/registerInlineSuggestHandlers\(\)/.test(SRC_MAIN),
+  'J9a main 调用 registerInlineSuggestHandlers()', '')
+ok(/from '\.\.\/lib\/aiAssistant\/inlineSuggest'/.test(SRC_MAIN),
+  'J9b main 从 lib/aiAssistant/inlineSuggest 导入', '')
+
+// J10 渲染层接线
+const SRC_MONACO = stripComments(read('src/modules/editor/components/MonacoPane.tsx'))
+const SRC_EDITOR = stripComments(read('src/modules/editor/index.tsx'))
+ok(/registerInlineCompletionsProvider\(\s*'markdown'/.test(SRC_MONACO),
+  'J10a 注册 markdown 语言的 inline completions provider（仅 md）', '')
+ok(/inlineCompletionInstalled/.test(SRC_MONACO),
+  'J10b provider 幂等 guard（重复注册会叠加）', '')
+ok(/disposeInlineCompletions/.test(SRC_MONACO),
+  'J10c ★ 提供 disposeInlineCompletions（0.56 接口的必填方法，非可在旧的 free*）', '')
+ok(/editor\.action\.inlineSuggest\.trigger/.test(SRC_MONACO),
+  'J10d 走 Monaco 内建 trigger 命令', '')
+ok(/altKey/.test(SRC_EDITOR) && /'a'/.test(SRC_EDITOR),
+  'J10e 编辑器模块注册 Alt+A 快捷键', '')
+ok(/triggerInlineSuggest/.test(SRC_EDITOR),
+  'J10f 快捷键调 handle.triggerInlineSuggest()', '')
+// ★ 胶囊去重：内嵌场景不得再手抄一份
+const pillCount = (SRC_EDITOR.match(/inline-flex items-center gap-\[2px\] rounded-full border/g) ?? []).length
+ok(pillCount === 1,
+  `J10g ★ 内容胶囊只渲染一处定义（list-drift 防线；实测 ${pillCount} 处）`, '')
+
+// J11 设置键
+ok(/aiAssistantInlineSuggest:\s*\{[^}]*default:\s*true/.test(SRC_SETTINGS),
+  'J11a ★ 设置键 aiAssistantInlineSuggest 默认 on（手动触发无常驻 token 压力）', '')
+ok(/aiAssistantInlineSuggest:\s*\{[^}]*section:\s*'aiTools'/.test(SRC_SETTINGS),
+  'J11b 设置键落在 aiTools 段（与 aiAssistantPerception 同段）', '')
+// 上游写的点号键名在本项目不成立（SETTINGS 全扁平键）
+ok(!/aiAssistant\.inlineSuggest/.test(SRC_SETTINGS) && !/inlineSuggest:/.test(SRC_SETTINGS),
+  'J11c ★ 不得出现上游的点号键写法（本项目 SETTINGS 全扁平键）', '')
+
+// J12 快捷键总表登记 + 不得与既有系统级快捷键冲突
+const SRC_SHORTCUTS = stripComments(read('src/modules/settings/views/ShortcutsView.tsx'))
+ok(/'Alt',\s*'A'/.test(SRC_SHORTCUTS),
+  'J12a 快捷键总表登记 Alt+A', '')
+// Ctrl+Alt+S 是系统级全局快捷键（dayPanelWindow globalShortcut）→ 不得用作内联建议触发
+const SRC_DAYPANEL = stripComments(read('electron/main/dayPanelWindow.ts'))
+ok(/globalShortcut\.register\('Control\+Alt\+S'/.test(SRC_DAYPANEL),
+  'J12b ★ Ctrl+Alt+S 确为系统级全局快捷键（上游候选因此不可用）', '')
+ok(!/'Ctrl',\s*'Alt',\s*'S'[\s\S]{0,80}续写/.test(SRC_SHORTCUTS),
+  'J12c 内联建议未占用 Ctrl+Alt+S', '')
+
+// J13 负向：不新增 AI 工具 / 不进常驻 schema（铁律 16）
+ok(!/registerTool|builtinTools|coreTool/.test(SRC_INLINE) && !/registerTool|builtinTools|coreTool/.test(SRC_MONACO),
+  'J13 ★ B4 不新增常驻 AI 工具（工具 schema 就是每轮成本）', '')
+
+// J14 B4 的两条静默失效防线（探针实测取证后才补的，别退化）
+//  ① 主进程硬超时：无 provider / 模型不可达时请求永不 resolve → 状态栏微标永久转圈
+const inlineTimeout = Number((SRC_INLINE_CORE.match(/INLINE_SUGGEST_TIMEOUT_MS\s*=\s*(\d+)/) ?? [])[1] ?? 0)
+ok(inlineTimeout >= 3000 && inlineTimeout <= 30000,
+  `J14a ★ 主进程有硬超时常量（INLINE_SUGGEST_TIMEOUT_MS=${inlineTimeout}ms）`, String(inlineTimeout))
+ok(/INLINE_SUGGEST_TIMEOUT_MS/.test(SRC_INLINE) && /clearTimeout\(timer\)/.test(SRC_INLINE),
+  'J14b 超时定时器 arm / clear 成对（不泄漏）', '')
+ok(/timedOut \? '生成超时'/.test(SRC_INLINE),
+  'J14c ★ 超时/取消给出明确 error（不是静默 ok:false，界面才好回落）', '')
+//  ② 点火守卫：Monaco 的 Automatic 触发不得给 LLM 发请求（设计是「仅手动触发」）
+ok(/let inlineArmedAt/.test(SRC_MONACO) && /function armInlineSuggest/.test(SRC_MONACO),
+  'J14d ★ 存在手动点火标志 inlineArmedAt（区分手动 / Monaco 自动）', '')
+ok(/const armed = inlineArmedAt > 0/.test(SRC_MONACO) && /if \(!armed\) return \{ items: \[\] \}/.test(SRC_MONACO),
+  'J14e ★ 未点火一律返回空（自动触发零请求、零 token）', '')
+const iArm = SRC_MONACO.indexOf('armInlineSuggest()')
+const iTrig = SRC_MONACO.indexOf("editor.trigger('kb-inline'")
+ok(iArm > 0 && iTrig > 0 && iArm < iTrig,
+  `J14f 点火在 trigger 之前（arm@${iArm} < trigger@${iTrig}）`, '')
+//  ③ 渲染层 UI 兜底必须 ≥ 主进程超时（否则兜底先于主进程超时命中，白等/白取消）
+const uiTimeout = Number((SRC_MONACO.match(/INLINE_UI_TIMEOUT_MS\s*=\s*(\d+)/) ?? [])[1] ?? 0)
+ok(uiTimeout >= inlineTimeout && uiTimeout > 0,
+  `J14g ★ UI 兜底超时(${uiTimeout}ms) ≥ 主进程超时(${inlineTimeout}ms)`, '')
+//  ④ 破 Monaco 请求级缓存：同光标二次触发若命中缓存，provider 永远不被调用
+//     （实测：点一次没出结果，再点一次毫无反应 —— 用户高频的「再来一次」动作）
+ok(/installInlineCompletion\(monaco,\s*true\)/.test(SRC_MONACO) && /inlineProviderHandle\?\.dispose\(\)/.test(SRC_MONACO),
+  'J14h ★ 每次手动触发前重注册 provider（换掉 providers 集合 → satisfies 为假 → 强制重拉）', '')
+const iReinstall = SRC_MONACO.indexOf('installInlineCompletion(monaco, true)')
+ok(iReinstall > 0 && iReinstall < iTrig,
+  `J14i 重注册在 trigger 之前（reinstall@${iReinstall} < trigger@${iTrig}）`, '')
 
 // ===================== 结果 =====================
 
