@@ -170,5 +170,26 @@ console.log('\n--- ⑩ TabName 冻结（仍 16 项） ---')
   check('APP_MODULES 仍为 15 项（编辑器退役后冻结，新增即 FAIL）', ids.length === 15, `实得 ${ids.length}: ${ids.join(',')}`)
 }
 
+// ===== ⑪ 扫描版探测（轻量方案） =====
+console.log('\n--- ⑪ detectScanMode：抽样字数 → full/partial/no ---')
+{
+  const D = await import('../../../electron/lib/kbStore/scanDetect.ts')
+  check('空样本 → full（无样本不定罪）', D.detectScanMode([]) === 'full')
+  check('全部 texty → full', D.detectScanMode([300, 420, 260, 380, 510]) === 'full')
+  check('全零 → no（纯扫描）', D.detectScanMode([0, 0, 0, 0]) === 'no')
+  check('零星字符（<20）也算无文本 → no', D.detectScanMode([5, 12, 3, 8]) === 'no')
+  check('混合 → partial', D.detectScanMode([500, 0, 600, 0, 0, 400]) === 'partial')
+  check('阈值：恰 20 字符算 texty', D.detectScanMode([20]) === 'full')
+  check('阈值：19 字符不算 texty', D.detectScanMode([19]) === 'no')
+  check('SCAN_MODES 与 schema 白名单一致', D.SCAN_MODES.join(',') === 'full,partial,no')
+  const S2 = await import('../../../electron/lib/kbStore/pdfReaderSchema.ts')
+  check('patch：scan= 合法收', (() => { const r = S2.sanitizeBookPatch({ scan: 'no' }); return !!r && r.scan === 'no' })())
+  check('patch：scan 非法值拒', S2.sanitizeBookPatch({ scan: 'unknown' }) === null)
+  const c = S2.coerceBookState({ lastPage: 2, scan: 'partial' }, 'NOW')
+  check('修补：合法 scan 保留', c.scan === 'partial')
+  const c2 = S2.coerceBookState({ lastPage: 2, scan: 'bogus' }, 'NOW')
+  check('修补：坏 scan 回落缺省（undefined = full）', c2.scan === undefined)
+}
+
 console.log(`\n${pass ? '全部通过' : '存在失败项'}`)
 process.exit(pass ? 0 : 1)

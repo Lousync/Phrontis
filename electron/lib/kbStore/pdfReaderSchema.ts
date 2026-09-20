@@ -12,6 +12,12 @@
  * 封面缓存索引 = `.knowbase/cache/covers/index.json`（cache 可删可再生，索引随目录同生共死）。
  */
 
+import type { ScanMode } from './scanDetect'
+
+/** scan 白名单值集（与 scanDetect.SCAN_MODES 保持同步，契约断言一致性；
+ *  此处不用运行时导入——strip-types 直跑的零依赖文件里扩展名省略会 ERR_MODULE_NOT_FOUND） */
+const SCAN_MODE_SET: readonly string[] = ['full', 'partial', 'no']
+
 export type PdfViewMode = 'scroll' | 'single' | 'duo'
 
 export interface VaultPdfBookmark {
@@ -35,6 +41,8 @@ export interface VaultBookState {
   /** 护眼开关（书级记忆） */
   eyeCare: boolean
   bookmarks: VaultPdfBookmark[]
+  /** 扫描版探测结论（缺省 = full 有文本层，不落盘）：full / partial / no */
+  scan?: ScanMode
 }
 
 /** pdfReader.json 顶层（version + books） */
@@ -44,7 +52,7 @@ export interface VaultPdfReaderStore {
 }
 
 /** patch 白名单：调用方只能改这些键；updatedAt 由服务端生成，不在白名单 */
-const PATCH_KEYS: readonly string[] = ['lastPage', 'scrollRatio', 'mode', 'zoom', 'eyeCare', 'bookmarks', 'totalPages']
+const PATCH_KEYS: readonly string[] = ['lastPage', 'scrollRatio', 'mode', 'zoom', 'eyeCare', 'bookmarks', 'totalPages', 'scan']
 
 export const PDF_MODES: readonly PdfViewMode[] = ['scroll', 'single', 'duo']
 
@@ -108,6 +116,9 @@ export function sanitizeBookPatch(patch: unknown): Partial<VaultBookState> | nul
     } else if (k === 'eyeCare') {
       if (typeof v !== 'boolean') return null
       out.eyeCare = v
+    } else if (k === 'scan') {
+      if (typeof v !== 'string' || !SCAN_MODE_SET.includes(v)) return null
+      out.scan = v as ScanMode
     } else if (k === 'bookmarks') {
       if (!Array.isArray(v) || v.length > 500) return null
       const list: VaultPdfBookmark[] = []
@@ -141,7 +152,8 @@ export function coerceBookState(raw: unknown, now: string): VaultBookState {
     ? (raw['bookmarks'].map(sanitizeBookmark).filter((b): b is VaultPdfBookmark => !!b))
     : []
   const updatedAt = typeof raw['updatedAt'] === 'string' && raw['updatedAt'] ? raw['updatedAt'] : now
-  return { updatedAt, lastPage, totalPages, scrollRatio, mode, zoom, eyeCare: raw['eyeCare'] === true, bookmarks }
+  const scan = typeof raw['scan'] === 'string' && SCAN_MODE_SET.includes(raw['scan']) ? (raw['scan'] as ScanMode) : undefined
+  return { updatedAt, lastPage, totalPages, scrollRatio, mode, zoom, eyeCare: raw['eyeCare'] === true, bookmarks, ...(scan ? { scan } : {}) }
 }
 
 /** 封面索引单条 */

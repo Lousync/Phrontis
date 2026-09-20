@@ -80,6 +80,7 @@ export function registerPdfReaderHandlers(): void {
           totalPages: st?.totalPages ?? 0,
           hasProgress: !!st && (st.lastPage > 1 || st.bookmarks.length > 0 || st.scrollRatio > 0),
           updatedAt: st?.updatedAt ?? null,
+          ...(st?.scan ? { scan: st.scan } : {}),
         }
       })
       return { ok: true, books }

@@ -12,8 +12,9 @@ import { useDataChanged } from '../../../lib/dataChanged'
 import { showToast } from '../../../lib/toast'
 import { normalizeSpreadStart, resolveDegrade, spreadPages, estimatePageHeight, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/pdfLayout'
 import { destToPageNum } from './PdfOutlineTree'
+import { detectScanMode } from '../../../../electron/lib/kbStore/scanDetect'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
-import type { ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState } from '../../../types'
+import type { BookScanMode, ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState } from '../../../types'
 
 // 同源 worker（v3 classic，兼容 Electron 33 / Chromium 130——v4.5+ 依赖 toHex 未实现）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -690,6 +691,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
           restored = r.state
           bookUpdatedRef.current = r.state.updatedAt
           setBookmarks(r.state.bookmarks ?? [])
+          if (r.state.scan) setScanMode(r.state.scan)
           if (r.state.eyeCare) setEyeCare(true)
           if (r.state.zoom && r.state.zoom !== 1) {
             setFitWidth(false)
@@ -733,6 +735,40 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, numPages])
+
+  // ===== 扫描版探测（轻量方案）：均匀抽样 ≤6 页 getTextContent 字符计数 → full/partial/no。
+  // 结论落盘一次（pdfReader.scan，书架角标复用）；'full' 不落盘（缺省即 full）。
+  const [scanMode, setScanMode] = useState<BookScanMode | null>(null)
+  useEffect(() => {
+    if (loading || numPages === 0) return
+    if (scanMode) return // 已有结论（持久化或本次已测）
+    let alive = true
+    void (async () => {
+      const pdf = pdfRef.current
+      if (!pdf) return
+      const k = Math.min(6, numPages)
+      const chars: number[] = []
+      for (let i = 0; i < k; i++) {
+        const n = k === 1 ? 1 : 1 + Math.round(i * (numPages - 1) / (k - 1))
+        try {
+          const p = await pdf.getPage(Math.min(numPages, Math.max(1, n)))
+          const tc = await p.getTextContent()
+          chars.push(tc.items.reduce((s, it) => s + (typeof (it as { str?: unknown }).str === 'string' ? ((it as { str: string }).str).trim().length : 0), 0))
+        } catch { chars.push(0) }
+      }
+      if (!alive) return
+      const mode = detectScanMode(chars)
+      setScanMode(mode)
+      if (mode !== 'full') {
+        try { await doPatch({ scan: mode }) } catch { /* 落盘失败不影响阅读 */ }
+      }
+    })()
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, numPages, scanMode])
+
+  // 扫描版提示条（无文本层的页划选/摘录不可用——管理预期，见 bookshelf-reader-upgrade-design §5）
+  const effectiveScan: BookScanMode = scanMode ?? 'full'
 
   // 适配口径 / 容器尺寸变化 → 重绘当前视图（竖滚：重估占位 + 清池重渲）
   // 键里必须含 fitPage 与 availH：切「整页 / 适宽」或容器变高都要重排，否则按钮点了不生效
@@ -1259,6 +1295,11 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   return (
     <div ref={rootRef} data-sel-float-ignore className="relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)]">
       {toolbar}
+      {effectiveScan !== 'full' && (
+        <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1 text-[11px] text-[var(--text-tertiary)]" data-wb="scanHint">
+          {effectiveScan === 'no' ? '本册为扫描版（页面是图片），划选 / 摘录不可用' : '本册部分页为扫描件（无文字层），这些页划选 / 摘录不可用'}
+        </div>
+      )}
       <div className="flex min-h-0 flex-1 items-stretch" style={eyeCare ? { filter: 'sepia(0.32) brightness(0.97) saturate(0.92)' } : undefined}>
         {sidePanel}
         {viewMode === 'scroll' ? (

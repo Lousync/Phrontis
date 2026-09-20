@@ -202,6 +202,9 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                   {b.kind === 'txt' && (b.pct ?? 0) > 0 && (
                     <span className="absolute bottom-1.5 right-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">{b.pct}%</span>
                   )}
+                  {b.kind === 'pdf' && b.scan === 'no' && (
+                    <span className="absolute bottom-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">扫描版</span>
+                  )}
                 </div>
                 <div className="mt-1.5 truncate px-0.5 text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{bookDisplayName(b.relPath)}</div>
               </button>

@@ -1187,9 +1187,11 @@ export interface PdfBookState {
   zoom: number
   eyeCare: boolean
   bookmarks: Array<{ page: number; note: string; at: string }>
+  /** 扫描版探测结论（缺省 = full；阅读器打开时抽样检测并落盘一次） */
+  scan?: BookScanMode
 }
 /** pdfReader:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
-export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks'>>
+export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks' | 'scan'>>
 /** 书架清单条目（自动库：扫描 join 进度，不落盘）。一期 kind = pdf | txt */
 export interface BookListItem {
   relPath: string
@@ -1208,10 +1210,15 @@ export interface BookListItem {
   pct?: number
   hasProgress: boolean
   updatedAt: string | null
+  /** 扫描版探测结论（仅 pdf；缺省 = full，阅读器打开时抽样检测并落盘一次） */
+  scan?: BookScanMode
 }
 
 /** 书籍种类（渲染层侧镜像；与 electron/lib/kbStore/bookFormats.ts 保持同步，契约脚本双向断言） */
 export type BookKind = 'pdf' | 'txt'
+
+/** 扫描版探测结论（渲染层侧镜像；真源 = electron/lib/kbStore/scanDetect.ts，缺省 = full） */
+export type BookScanMode = 'full' | 'partial' | 'no'
 
 /** readerState:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
 export type ReaderStatePatch = { pct: number }
