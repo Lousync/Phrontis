@@ -855,8 +855,11 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   const rootRef = useRef<HTMLDivElement>(null)
 
   // Ctrl/Cmd + 滚轮缩放：必须 native 监听 + passive:false——React 合成 onWheel 是 passive，
-  // preventDefault 无效，拦不掉 Chromium 的整页缩放（2026-09-20 反馈：阅读器加 Ctrl+滚轮）
+  // preventDefault 无效，拦不掉 Chromium 的整页缩放（2026-09-20 反馈：阅读器加 Ctrl+滚轮）。
+  // ★ 依赖必须含 loading：挂载时 loading 分支未渲染根 div（rootRef=null），若只依赖 zoomBy
+  //   监听将永不挂载——Ctrl+滚轮完全失效的根因（ref 时序，React #310 同族）
   useEffect(() => {
+    if (loading) return
     const root = rootRef.current
     if (!root) return
     const onWheel = (e: WheelEvent) => {
@@ -866,7 +869,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     }
     root.addEventListener('wheel', onWheel, { passive: false })
     return () => root.removeEventListener('wheel', onWheel)
-  }, [zoomBy])
+  }, [zoomBy, loading, numPages])
 
   const [selInfo, setSelInfo] = useState<{ rect: SelectionRect; text: string; page: number; rects?: ExcerptRect[] } | null>(null)
   const [translate, setTranslate] = useState<TranslateState | null>(null)
@@ -1225,7 +1228,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
         className={`ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 ${immersive ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <BookOpen size={14} /><span className="kb-l1">沉浸</span>
       </button>
-      <span className="kb-l3 text-[11px] text-[var(--text-tertiary)]">{Math.round(zoom * 100)}%</span>
+      <span data-wb="pdfZoom" className="kb-l3 text-[11px] text-[var(--text-tertiary)]">{Math.round(zoom * 100)}%</span>
     </div>
   )
 

@@ -1022,9 +1022,12 @@ export default function App() {
   }, [dayPanelDetached])
 
   // Ctrl+= / Ctrl+- zoom — synced with settings
+  // 作用域仲裁（2026-09-20 反馈「界面缩放和页面缩放冲突」）：正在书架里读 PDF 时，
+  // 这组快捷键归阅读器页面缩放（PdfReaderView 自行处理），全局界面缩放让位
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return
+      if (bookshelfReading && activeTab === 'bookshelf' && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '_')) return
       if (e.code === 'Equal' || e.code === 'NumpadAdd') {
         e.preventDefault()
         const n = Math.min(s.zoomMax, +(s.zoom + s.zoomStep).toFixed(2))
@@ -1038,7 +1041,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [s.zoom, s.zoomMin, s.zoomMax, s.zoomStep, update])
+  }, [s.zoom, s.zoomMin, s.zoomMax, s.zoomStep, update, bookshelfReading, activeTab])
 
   // Ctrl+B — toggle sidebar（Alt 修饰的组合键不拦：Ctrl+Alt+B 归工作台右栏，见下方处理器）
   useEffect(() => {

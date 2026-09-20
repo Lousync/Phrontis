@@ -116,6 +116,8 @@ if (existsSync(settingsPath)) {
   try { settings = JSON.parse(readFileSync(settingsPath, 'utf8')) ?? {} } catch { settings = {} }
 }
 settings.currentVaultId = row.id
+// 启动选择器关闭（App.tsx：onboardingDone 后每次启动弹 VaultPicker 全屏遮罩，拦截探针真实鼠标事件）
+settings.startupVaultPicker = false
 // 右栏基线归位（防上轮探针残留态污染：rightCollapsed=true 会让右栏面板整个不渲染，
 // 阅读侧栏断言全空；rightTab 残留 'reading' 也会让回落断言失真）——显式归零
 try {

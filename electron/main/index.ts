@@ -266,6 +266,10 @@ function createWindow(): void {
     }
   })
 
+  // 缩放分层钳制（2026-09-20）：界面缩放走 s.zoom（rem），PDF 页面缩走阅读器内部 zoom——
+  // 引擎级 zoomFactor（Ctrl+滚轮整页缩放 / 双指捏合）必须关掉，否则三层缩放互相叠加
+  mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
+
   // 安全：主窗口自身永不导航(应用为单页,任何导航请求均为异常/注入行为)。
   // 例外：同 URL 的 reload——Electron 把 location.reload() 也当导航触发本事件，
   // 无差别 preventDefault 会静默吞掉它（P8 仓库切换整窗重载失效、UI 卡旧仓库的根因）。

@@ -80,7 +80,16 @@ async function main() {
     return true
   })()`)
 
-  // 首启 Onboarding 欢迎页是 z-90 全屏遮罩，真实鼠标事件全被它吃掉——先点完引导
+  // 兜底：启动选择器（startupVaultPicker）若仍在，JS 直点当前仓库条目进入
+  for (let i = 0; i < 6; i++) {
+    const up = await evalJs(`!!document.querySelector('.vault-picker-step')`)
+    if (!up) break
+    await evalJs(`(() => {
+      const row = [...document.querySelectorAll('button, [role=button], .cursor-pointer')].find((x) => (x.textContent || '').includes('探针测试仓库'))
+      row?.click(); return true
+    })()`)
+    await sleep(500)
+  }
   // （按钮（下一步/完成/跳过）不在 .onboarding-step 内，按全文可见按钮匹配）
   for (let i = 0; i < 12; i++) {
     const step = await evalJs(`!!document.querySelector('.onboarding-step')`)
@@ -91,6 +100,20 @@ async function main() {
       b?.click(); return true
     })()`)
     await sleep(400)
+  }
+
+  // 实例自证：必须是 build 产物（file:）+ 当前仓库 = 探针 fixture——防止 CDP 连到别的实例
+  const ident = await evalJs(`(() => ({
+    proto: location.protocol,
+    vault: null,
+  }))()`)
+  const vaultName = await evalJs(`(async () => {
+    try { const cur = await window.api.workspaceGetCurrent(); return cur?.name ?? null } catch { return null }
+  })()`)
+  console.log('[实例自证]', JSON.stringify({ ...ident, vaultName }))
+  if (ident.proto !== 'file:' || vaultName !== '探针测试仓库') {
+    console.error('CDP 连接的不是隔离探针实例（proto/vault 不符），终止以防误伤')
+    process.exit(3)
   }
 
   // 1) 打开书架 → 点 PDF 样书
@@ -210,6 +233,36 @@ async function main() {
   ok('页面出现 .kb-excerpt-hl 高亮块', hl.overlays > 0, `overlays=${hl.overlays}`)
   const errs = await evalJs(`window.__errs ?? []`)
   if (errs.length) console.log('[window errors]', JSON.stringify(errs.slice(0, 5)))
+
+  // ===== 5) 缩放快捷操作：Ctrl+滚轮 / Ctrl+= → pdfZoom 百分比变化 =====
+  // wheel 取证：renderer 是否收到 wheel、ctrlKey 是否带到位
+  await evalJs(`(() => {
+    window.__wl = []
+    window.addEventListener('wheel', (e) => { window.__wl.push({ c: e.ctrlKey, dy: e.deltaY, defaultPrevented: e.defaultPrevented }) }, { capture: true, passive: true })
+    return true
+  })()`)
+  const zoomBefore = await evalJs(`document.querySelector('[data-wb="pdfZoom"]')?.textContent ?? null`)
+  // Ctrl+滚轮：reader 中心向上滚（modifiers bit2 = Ctrl）
+  const wheelAt = await evalJs(`(() => {
+    const root = document.querySelector('[data-sel-float-ignore]')
+    const r = root?.getBoundingClientRect()
+    if (!r) return null
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+  })()`)
+  if (wheelAt) {
+    await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: wheelAt.x, y: wheelAt.y, deltaX: 0, deltaY: -240, modifiers: 2 })
+    await sleep(700)
+  }
+  const zoomAfterWheel = await evalJs(`document.querySelector('[data-wb="pdfZoom"]')?.textContent ?? null`)
+  const wl = await evalJs(`window.__wl ?? []`)
+  console.log('[wheel 取证]', JSON.stringify(wl))
+  ok('Ctrl+滚轮 → PDF 页面缩放变化', !!zoomBefore && !!zoomAfterWheel && zoomBefore !== zoomAfterWheel, `before=${zoomBefore} after=${zoomAfterWheel}`)
+  // Ctrl+=：键盘路径（modifiers bit2 = Ctrl；key '='）
+  await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', modifiers: 2, key: '=', windowsVirtualKeyCode: 187, code: 'Equal' })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', modifiers: 2, key: '=', windowsVirtualKeyCode: 187, code: 'Equal' })
+  await sleep(700)
+  const zoomAfterKey = await evalJs(`document.querySelector('[data-wb="pdfZoom"]')?.textContent ?? null`)
+  ok('Ctrl+= → PDF 页面缩放变化（界面缩放已仲裁让位）', !!zoomAfterKey && zoomAfterKey !== zoomAfterWheel, `before=${zoomAfterWheel} after=${zoomAfterKey}`)
 
   console.log(failed ? '\n存在失败断言' : '\n全部通过')
   process.exit(failed ? 1 : 0)
