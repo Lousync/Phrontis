@@ -7,12 +7,13 @@ import {
 import * as pdfjsLib from 'pdfjs-dist'
 import { renderTextLayer } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
-import { openExternal, copyText, pdfReaderGet, pdfReaderPatch, translateInvoke, workspaceReadRange } from '../../../lib/ipc'
+import { openExternal, copyText, excerptCreate, excerptList, pdfReaderGet, pdfReaderPatch, translateInvoke, workspaceReadRange } from '../../../lib/ipc'
+import { useDataChanged } from '../../../lib/dataChanged'
 import { showToast } from '../../../lib/toast'
 import { normalizeSpreadStart, resolveDegrade, spreadPages, estimatePageHeight, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/pdfLayout'
 import { destToPageNum } from './PdfOutlineTree'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
-import type { PdfBookPatch, PdfBookState } from '../../../types'
+import type { ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState } from '../../../types'
 
 // 同源 worker（v3 classic，兼容 Electron 33 / Chromium 130——v4.5+ 依赖 toHex 未实现）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -759,9 +760,9 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     })
   }, [scheduleProgress])
 
-  // ===== 划词 AI 工具条（方案 §6）=====
+  // ===== 划词 AI 工具条（方案 §6）+ 划选摘录（摘录先行批次）=====
   const rootRef = useRef<HTMLDivElement>(null)
-  const [selInfo, setSelInfo] = useState<{ rect: SelectionRect; text: string; page: number } | null>(null)
+  const [selInfo, setSelInfo] = useState<{ rect: SelectionRect; text: string; page: number; rects?: ExcerptRect[] } | null>(null)
   const [translate, setTranslate] = useState<TranslateState | null>(null)
   const closeSelBar = useCallback(() => { setSelInfo(null); setTranslate(null) }, [])
 
@@ -783,7 +784,26 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     const pgEl = anchorEl.closest('[data-pg]')
     let page = pgEl ? Number((pgEl as HTMLElement).dataset.pg) : 0
     if (!page || Number.isNaN(page)) page = viewMode === 'duo' ? duoStartRef.current : pageNumRef.current
-    setSelInfo({ rect: { left: r0.left, top: r0.top, width: r0.width, height: r0.height }, text, page })
+    // 摘录用：选区矩形归一化到文本层容器（百分比，zoom 无关）；clamp 到 0..1（schema 白名单）
+    let rects: ExcerptRect[] | undefined
+    const layer = anchorEl.closest('.kb-pdf-text-layer') as HTMLElement | null
+    if (layer) {
+      const lc = layer.getBoundingClientRect()
+      if (lc.width > 0 && lc.height > 0) {
+        const clamp01 = (n: number) => Math.min(1, Math.max(0, n))
+        rects = [...range.getClientRects()]
+          .filter((rr) => rr.width > 0.5 && rr.height > 0.5)
+          .slice(0, 60)
+          .map((rr) => ({
+            l: clamp01((rr.left - lc.left) / lc.width),
+            t: clamp01((rr.top - lc.top) / lc.height),
+            w: clamp01(rr.width / lc.width),
+            h: clamp01(rr.height / lc.height),
+          }))
+        if (rects.length === 0) rects = undefined
+      }
+    }
+    setSelInfo({ rect: { left: r0.left, top: r0.top, width: r0.width, height: r0.height }, text, page, rects })
   }, [viewMode])
 
   useEffect(() => {
@@ -799,6 +819,64 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       document.removeEventListener('selectionchange', onSelChange)
     }
   }, [evalSelection, closeSelBar])
+
+  // ===== 摘录（摘录先行批次）：列表 + 正文高亮叠加 =====
+  const [excerpts, setExcerpts] = useState<ExcerptItem[]>([])
+  useEffect(() => {
+    let alive = true
+    setExcerpts([])
+    void excerptList(rootId, relPath).then((r) => {
+      if (alive && r.ok) setExcerpts(r.excerpts ?? [])
+    }).catch(() => { /* 摘录读取失败不阻塞阅读 */ })
+    return () => { alive = false }
+  }, [rootId, relPath])
+  useDataChanged('excerpt', () => {
+    void excerptList(rootId, relPath).then((r) => {
+      if (r.ok) setExcerpts(r.excerpts ?? [])
+    }).catch(() => { /* 忽略 */ })
+  })
+
+  const onCreateExcerpt = useCallback((info: { text: string; page: number; rects?: ExcerptRect[] }) => {
+    void excerptCreate(rootId, relPath, { kind: 'pdf', text: info.text, page: info.page, rects: info.rects }).catch(() => { /* 创建失败不打扰阅读 */ })
+    closeSelBar()
+    window.getSelection()?.removeAllRanges()
+  }, [rootId, relPath, closeSelBar])
+
+  /**
+   * 高亮叠加：把摘录 rects（文本层百分比）画进每页 .kb-pdf-text-layer。
+   * 幂等：以 data-ehl 标记去重/清陈旧——文本层重建（zoom/翻页）后重跑即可补画；
+   * 滚动不重建文本层，已画的 overlay 随层存在，无需每页重跑。
+   */
+  const applyExcerptOverlays = useCallback(() => {
+    const root = rootRef.current
+    if (!root) return
+    const layers = root.querySelectorAll<HTMLElement>('.kb-pdf-text-layer')
+    for (const layer of layers) {
+      const pgEl = layer.closest('[data-pg]') as HTMLElement | null
+      let page = pgEl ? Number(pgEl.dataset.pg) : 0
+      if (!page || Number.isNaN(page)) page = viewMode === 'duo' ? duoStartRef.current : pageNumRef.current
+      const wanted = new Set<string>()
+      const hits = excerpts.filter((e) => e.kind === 'pdf' && e.page === page && e.rects?.length)
+      for (const e of hits) {
+        (e.rects ?? []).forEach((r, idx) => wanted.add(`${e.id}:${idx}`))
+      }
+      layer.querySelectorAll<HTMLElement>('.kb-excerpt-hl').forEach((d) => {
+        if (!wanted.has(d.dataset.ehl ?? '')) d.remove()
+      })
+      for (const e of hits) {
+        (e.rects ?? []).forEach((r, idx) => {
+          const mark = `${e.id}:${idx}`
+          if (layer.querySelector(`.kb-excerpt-hl[data-ehl="${mark}"]`)) return
+          const d = document.createElement('div')
+          d.className = 'kb-excerpt-hl'
+          d.dataset.ehl = mark
+          d.style.cssText = `position:absolute;left:${(r.l * 100).toFixed(3)}%;top:${(r.t * 100).toFixed(3)}%;width:${(r.w * 100).toFixed(3)}%;height:${(r.h * 100).toFixed(3)}%;background:rgba(255,196,0,0.32);border-radius:2px;pointer-events:none;`
+          layer.appendChild(d)
+        })
+      }
+    }
+  }, [excerpts, viewMode])
+  useEffect(() => { applyExcerptOverlays() }, [applyExcerptOverlays, zoom, viewMode, loading, fitWidth, fitPage, numPages])
 
   const doCopySel = useCallback(() => {
     if (!selInfo) return
@@ -1186,7 +1264,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       {immersive && <button onClick={toggleImmersive} title="退出沉浸 (Esc)"
         className="fixed top-3 right-3 z-50 flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 text-[var(--text-secondary)] shadow hover:text-[var(--text-primary)]"><X size={14} /></button>}
       {floatingBar}
-      <TextSelectionBar rect={selInfo?.rect ?? null} translate={translate} onCopy={doCopySel} onTranslate={() => void doTranslateSel()} onAsk={doAsk} onClose={closeSelBar} />
+      <TextSelectionBar rect={selInfo?.rect ?? null} translate={translate} onCopy={doCopySel} onTranslate={() => void doTranslateSel()} onAsk={doAsk} onClose={closeSelBar} onCreateExcerpt={selInfo && rootId ? () => onCreateExcerpt({ text: selInfo.text, page: selInfo.page, rects: selInfo.rects }) : undefined} />
     </div>
   )
 }

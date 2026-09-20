@@ -57,7 +57,7 @@ const BookshelfSideList = lazy(() => import('./modules/bookshelf/BookshelfSideLi
 
 import { FillPopup } from './modules/toolbox/components/FillPopup'
 import { VaultPicker } from './components/shared/VaultPicker'
-import { KB_PDF_GOTO_PAGE } from './components/shared/pdf/pdfEvents'
+import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA } from './components/shared/pdf/pdfEvents'
 import { PomodoroProvider } from './modules/toolbox/hooks/PomodoroContext'
 import { PomodoroPanel } from './modules/toolbox/components/PomodoroPanel'
 import { Onboarding } from './components/shared/Onboarding'
@@ -1250,6 +1250,17 @@ export default function App() {
                     requestAnimationFrame(() => {
                       if (bookshelfReading?.kind === 'pdf') {
                         window.dispatchEvent(new CustomEvent(KB_PDF_GOTO_PAGE, { detail: { relPath: bookshelfReading.relPath, page } }))
+                      }
+                    })
+                  }}
+                  onLocateExcerpt={(loc) => {
+                    if (activeTab !== 'bookshelf') handleTabChange('bookshelf')
+                    requestAnimationFrame(() => {
+                      if (!bookshelfReading) return
+                      if (loc.kind === 'pdf' && loc.page) {
+                        window.dispatchEvent(new CustomEvent(KB_PDF_GOTO_PAGE, { detail: { relPath: bookshelfReading.relPath, page: loc.page } }))
+                      } else if (loc.kind === 'txt' && typeof loc.paraIndex === 'number') {
+                        window.dispatchEvent(new CustomEvent(KB_TXT_GOTO_PARA, { detail: { relPath: bookshelfReading.relPath, paraIndex: loc.paraIndex } }))
                       }
                     })
                   }}

@@ -12,3 +12,6 @@ export const KB_PDF_GOTO_PAGE = 'kb-pdf-goto-page'
 
 /** TXT 阅读器 → 右栏阅读侧栏：进度广播（detail: { relPath, kind:'txt', pct }） */
 export const KB_READER_STATE_CHANGED = 'kb-reader-state-changed'
+
+/** 右栏摘录面板 → TXT 阅读器：跳段请求（detail: { relPath, paraIndex }） */
+export const KB_TXT_GOTO_PARA = 'kb-txt-goto-para'

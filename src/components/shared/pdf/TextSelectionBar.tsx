@@ -1,4 +1,4 @@
-import { X, Copy, Languages, GraduationCap, ListChecks, Loader2 } from 'lucide-react'
+import { X, Copy, Languages, GraduationCap, ListChecks, Loader2, Highlighter } from 'lucide-react'
 
 export interface SelectionRect { left: number; top: number; width: number; height: number }
 
@@ -19,14 +19,16 @@ interface Props {
   /** intent：讲题（解释）/ 出题（生成练习，落 quiz 围栏闭环） */
   onAsk: (intent: 'explain' | 'quiz') => void
   onClose: () => void
+  /** 存为摘录（摘录先行批次）：传入才渲染按钮（AI 教学等无摘录域的调用方不传） */
+  onCreateExcerpt?: () => void
 }
 
 /**
  * 划词 AI 工具条（方案 §6）：文本层选区浮条 —— 复制 / 翻译（translationRepo 缓存通道，
- * 结果内嵌卡片纯展示）/ AI 讲题 / 出题（kb-ai-teaching-ask 跳转 AI 教学新会话）。
+ * 结果内嵌卡片纯展示）/ AI 讲题 / 出题（kb-ai-teaching-ask 跳转 AI 教学新会话）/ 摘录。
  * fixed 定位按选区 rect 锚定，越界自动翻面。
  */
-export function TextSelectionBar({ rect, translate, onCopy, onTranslate, onAsk, onClose }: Props) {
+export function TextSelectionBar({ rect, translate, onCopy, onTranslate, onAsk, onClose, onCreateExcerpt }: Props) {
   if (!rect) return null
   const BAR_H = 34
   const showAbove = rect.top > BAR_H + 56
@@ -44,6 +46,12 @@ export function TextSelectionBar({ rect, translate, onCopy, onTranslate, onAsk, 
           {translate?.loading ? <Loader2 size={12.5} className="animate-spin" /> : <Languages size={12.5} />}翻译
         </button>
         <div className="mx-0.5 h-4 w-px bg-[var(--border-color)]" />
+        {onCreateExcerpt && (
+          <button onClick={onCreateExcerpt} title="存为摘录（右栏阅读侧栏可回看/跳回）"
+            className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+            <Highlighter size={12.5} />摘录
+          </button>
+        )}
         <button onClick={() => onAsk('explain')} title="跳转 AI 教学，带着选段上下文讲解"
           className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           <GraduationCap size={12.5} />讲题

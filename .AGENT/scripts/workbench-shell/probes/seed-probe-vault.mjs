@@ -74,6 +74,14 @@ if (existsSync(settingsPath)) {
   try { settings = JSON.parse(readFileSync(settingsPath, 'utf8')) ?? {} } catch { settings = {} }
 }
 settings.currentVaultId = row.id
+// 右栏基线归位（防上轮探针残留态污染：rightCollapsed=true 会让右栏面板整个不渲染，
+// 阅读侧栏断言全空；rightTab 残留 'reading' 也会让回落断言失真）——显式归零
+try {
+  const wb = JSON.parse(settings.workbenchLayout ?? '{}')
+  wb.rightCollapsed = false
+  wb.rightTab = 'widgets'
+  settings.workbenchLayout = JSON.stringify(wb)
+} catch { settings.workbenchLayout = '{}' }
 writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
 
 console.log('seeded:', row.path)

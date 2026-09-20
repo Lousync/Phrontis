@@ -1224,6 +1224,49 @@ export interface ReaderBookState {
   updatedAt: string
 }
 
+/** 归一化选区矩形（相对文本层容器的百分比 0..1，zoom 无关；真源 = electron/lib/kbStore/excerptSchema.ts） */
+export interface ExcerptRect {
+  l: number
+  t: number
+  w: number
+  h: number
+}
+
+/** 摘录条目（excerpts.json 经 IPC 透出） */
+export interface ExcerptItem {
+  id: string
+  kind: BookKind
+  /** pdf 定位：页码 */
+  page?: number
+  /** pdf 高亮：归一化矩形组 */
+  rects?: ExcerptRect[]
+  /** txt 定位：段落序号 */
+  paraIndex?: number
+  /** txt 高亮：段内字符偏移 [start, end) */
+  start?: number
+  end?: number
+  text: string
+  note: string
+  at: string
+  updatedAt: string
+}
+
+/** 摘录创建载荷（服务端生成 id/at/updatedAt） */
+export interface ExcerptCreatePayload {
+  kind: BookKind
+  text: string
+  note?: string
+  /** pdf 必带 */
+  page?: number
+  rects?: ExcerptRect[]
+  /** txt 必带 */
+  paraIndex?: number
+  start?: number
+  end?: number
+}
+
+export type ExcerptPatch = { note: string }
+
 /** 写文件结果：conflict=true 表示磁盘已被外部修改（或已删除），需用户决策 */
 export interface WorkspaceWriteResult {
   ok: boolean
@@ -1545,6 +1588,11 @@ export interface ElectronAPI {
   // ===== 阅读状态（书架升级全格式阅读器一期）：txt 进度 =====
   readerStateGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; state?: ReaderBookState | null; error?: string }>
   readerStatePatch: (rootId: string, relPath: string, patch: ReaderStatePatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; state?: ReaderBookState; conflict?: boolean; error?: string }>
+  // ===== 摘录（阅读器 · 摘录先行批次） =====
+  excerptList: (rootId: string, relPath: string) => Promise<{ ok: boolean; excerpts?: ExcerptItem[]; error?: string }>
+  excerptCreate: (rootId: string, relPath: string, payload: ExcerptCreatePayload) => Promise<{ ok: boolean; excerpt?: ExcerptItem; error?: string }>
+  excerptPatch: (rootId: string, relPath: string, id: string, patch: ExcerptPatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; excerpt?: ExcerptItem; conflict?: boolean; error?: string }>
+  excerptDelete: (rootId: string, relPath: string, id: string) => Promise<{ ok: boolean; error?: string }>
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>

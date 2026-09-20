@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowLeft, FileText, Loader2 } from 'lucide-react'
-import { readerStateGet, readerStatePatch, workspaceReadRange } from '../../../lib/ipc'
-import { KB_READER_STATE_CHANGED } from '../pdf/pdfEvents'
+import { excerptCreate, excerptList, readerStateGet, readerStatePatch, workspaceReadRange } from '../../../lib/ipc'
+import { useDataChanged } from '../../../lib/dataChanged'
+import { KB_READER_STATE_CHANGED, KB_TXT_GOTO_PARA } from '../pdf/pdfEvents'
 import { decodeText } from '../../../lib/textDecode'
+import { ExcerptCaptureBar } from './ExcerptCaptureBar'
+import type { SelectionRect } from '../pdf/TextSelectionBar'
+import type { ExcerptItem } from '../../../types'
 
 /**
  * TXT 阅读器（书架升级全格式阅读器一期，方案 bookshelf-reader-upgrade-design §S5）。
@@ -44,6 +48,11 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   const restorePctRef = useRef(0)
   const throttleRef = useRef(0)
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // ===== 摘录（摘录先行批次）：列表 + 划选捕获浮条 =====
+  const [excerpts, setExcerpts] = useState<ExcerptItem[]>([])
+  const [capture, setCapture] = useState<{ rect: SelectionRect; paraIndex: number; start: number; end: number; text: string } | null>(null)
+  /** 右栏摘录跳转落点闪烁 */
+  const [flashPara, setFlashPara] = useState<number | null>(null)
 
   // ===== 加载：进度 + 正文 =====
   useEffect(() => {
@@ -167,6 +176,7 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     throttleRef.current = now
     const max = el.scrollHeight - el.clientHeight
     if (max <= 0) return
+    setCapture(null)
     const p = Math.min(100, Math.max(0, Math.round(el.scrollTop / max * 100)))
     setPct(p)
     try {
@@ -179,6 +189,100 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   useEffect(() => () => {
     if (persistTimerRef.current) { clearTimeout(persistTimerRef.current); persistTimerRef.current = null }
   }, [])
+
+  // ===== 摘录列表：挂载/换书拉一次 + excerpt 广播刷新（右栏增删/改备注实时反映为高亮增删） =====
+  useEffect(() => {
+    let alive = true
+    setExcerpts([])
+    setCapture(null)
+    if (!rootId) return
+    void excerptList(rootId, relPath).then((r) => {
+      if (alive && r.ok) setExcerpts(r.excerpts ?? [])
+    }).catch(() => { /* 摘录读取失败不阻塞阅读 */ })
+    return () => { alive = false }
+  }, [rootId, relPath])
+  useDataChanged('excerpt', () => {
+    if (!rootId) return
+    void excerptList(rootId, relPath).then((r) => {
+      if (r.ok) setExcerpts(r.excerpts ?? [])
+    }).catch(() => { /* 忽略 */ })
+  })
+
+  /** 段落 → 高亮区间表（txt 摘录且有偏移才参与；重叠区间后来者截断） */
+  const highlightMap = useMemo(() => {
+    const map = new Map<number, Array<{ start: number; end: number; id: string; note: string }>>()
+    for (const e of excerpts) {
+      if (e.kind !== 'txt' || typeof e.paraIndex !== 'number' || typeof e.start !== 'number' || typeof e.end !== 'number') continue
+      const arr = map.get(e.paraIndex) ?? []
+      arr.push({ start: e.start, end: e.end, id: e.id, note: e.note })
+      map.set(e.paraIndex, arr)
+    }
+    return map
+  }, [excerpts])
+
+  // ===== 右栏摘录跳段：滚到段落并闪烁提示 =====
+  useEffect(() => {
+    const onGoto = (e: Event) => {
+      const d = (e as CustomEvent).detail as { relPath?: string; paraIndex?: number }
+      if (d?.relPath !== relPath || typeof d.paraIndex !== 'number') return
+      const el = scrollRef.current?.querySelector(`p[data-p="${d.paraIndex}"]`)
+      el?.scrollIntoView({ block: 'center' })
+      setFlashPara(d.paraIndex)
+      setTimeout(() => setFlashPara((cur) => (cur === d.paraIndex ? null : cur)), 1200)
+    }
+    window.addEventListener(KB_TXT_GOTO_PARA, onGoto)
+    return () => window.removeEventListener(KB_TXT_GOTO_PARA, onGoto)
+  }, [relPath])
+
+  // ===== 划选捕获（原生 document mouseup——原生监听不受 React 合成事件限制） =====
+  useEffect(() => {
+    const onUp = () => {
+      setTimeout(() => {
+        const root = scrollRef.current
+        const sel = window.getSelection()
+        if (!root || !sel || sel.isCollapsed || sel.rangeCount !== 1) { setCapture(null); return }
+        const range = sel.getRangeAt(0)
+        const anc = range.commonAncestorContainer
+        const pEl = (anc.nodeType === 3 ? anc.parentElement : anc as HTMLElement)?.closest?.('p[data-p]')
+        if (!pEl || !root.contains(pEl)) { setCapture(null); return }
+        const paraIndex = Number(pEl.getAttribute('data-p'))
+        // 段内偏移：遍历段落文本节点累计前缀长度（<mark> 切分后 textContent 不变，口径稳定）
+        const walker = document.createTreeWalker(pEl, NodeFilter.SHOW_TEXT)
+        let pos = 0
+        let start = -1
+        let end = -1
+        let node: Node | null
+        while ((node = walker.nextNode())) {
+          const len = (node as Text).data.length
+          if (node === range.startContainer) start = pos + range.startOffset
+          if (node === range.endContainer) end = pos + range.endOffset
+          pos += len
+        }
+        if (start < 0 || end < 0) { setCapture(null); return }
+        if (start > end) { const t = start; start = end; end = t }
+        if (end - start < 1) { setCapture(null); return }
+        const text = (pEl.textContent ?? '').slice(start, end)
+        if (!text.trim()) { setCapture(null); return }
+        const r = range.getBoundingClientRect()
+        setCapture({ rect: { left: r.left, top: r.top, width: r.width, height: r.height }, paraIndex, start, end, text })
+      }, 0)
+    }
+    document.addEventListener('mouseup', onUp)
+    return () => document.removeEventListener('mouseup', onUp)
+  }, [])
+
+  const handleCreateExcerpt = useCallback((text: string) => {
+    if (!capture || !rootId) return
+    void excerptCreate(rootId, relPath, {
+      kind: 'txt',
+      text,
+      paraIndex: capture.paraIndex,
+      start: capture.start,
+      end: capture.end,
+    }).catch(() => { /* 创建失败不打扰阅读 */ })
+    setCapture(null)
+    window.getSelection()?.removeAllRanges()
+  }, [capture, rootId, relPath])
 
   const virtualize = paragraphs.length > 300
 
@@ -219,18 +323,44 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       ) : (
         <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto max-w-[700px] px-6 py-8" style={{ fontFamily: "'Georgia', 'Noto Serif SC', 'Source Han Serif SC', serif", fontSize: 19, lineHeight: 2.05, textAlign: 'justify' }}>
-            {paragraphs.map((p, i) => (
-              <p
-                key={i}
-                data-p={i}
-                style={virtualize ? { contentVisibility: 'auto', containIntrinsicSize: 'auto 96px', whiteSpace: 'pre-wrap' } : { whiteSpace: 'pre-wrap' }}
-                className="text-[var(--text-primary)]"
-              >
-                {p}
-              </p>
-            ))}
+            {paragraphs.map((p, i) => {
+              // 高亮分段：摘录区间内包 <mark>（区间来自 excerpt start/end；重叠由构建端按序截断）
+              const marks = (highlightMap.get(i) ?? []).filter((m) => m.start < p.length)
+              let rendered: ReactNode = p
+              if (marks.length > 0) {
+                const segs: ReactNode[] = []
+                let cur = 0
+                for (const m of marks) {
+                  if (m.start < cur) continue
+                  if (m.start > cur) segs.push(<span key={`s${cur}`}>{p.slice(cur, m.start)}</span>)
+                  const segText = p.slice(m.start, Math.min(m.end, p.length))
+                  segs.push(
+                    <mark key={m.id} data-eid={m.id} title={m.note || undefined}
+                      className="rounded-sm bg-[var(--accent)]/20 px-0.5 text-[var(--text-primary)]">
+                      {segText}
+                    </mark>,
+                  )
+                  cur = Math.min(m.end, p.length)
+                }
+                if (cur < p.length) segs.push(<span key={`s${cur}`}>{p.slice(cur)}</span>)
+                rendered = segs
+              }
+              return (
+                <p
+                  key={i}
+                  data-p={i}
+                  style={virtualize ? { contentVisibility: 'auto', containIntrinsicSize: 'auto 96px', whiteSpace: 'pre-wrap' } : { whiteSpace: 'pre-wrap' }}
+                  className={`text-[var(--text-primary)] transition-colors ${flashPara === i ? 'rounded bg-[var(--accent)]/10' : ''}`}
+                >
+                  {rendered}
+                </p>
+              )
+            })}
           </div>
         </div>
+      )}
+      {capture && (
+        <ExcerptCaptureBar rect={capture.rect} text={capture.text} onCreate={handleCreateExcerpt} onClose={() => setCapture(null)} />
       )}
     </div>
   )

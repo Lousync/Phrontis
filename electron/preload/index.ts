@@ -619,6 +619,11 @@ const api = {
   // 阅读状态（书架升级全格式阅读器一期）：txt 进度
   readerStateGet: (rootId: string, relPath: string) => ipcRenderer.invoke('readerState:get', rootId, relPath),
   readerStatePatch: (rootId: string, relPath: string, patch: unknown, expectedUpdatedAt?: string) => ipcRenderer.invoke('readerState:patch', rootId, relPath, patch, expectedUpdatedAt),
+  // 摘录（阅读器 · 摘录先行批次）
+  excerptList: (rootId: string, relPath: string) => ipcRenderer.invoke('excerpt:list', rootId, relPath),
+  excerptCreate: (rootId: string, relPath: string, payload: unknown) => ipcRenderer.invoke('excerpt:create', rootId, relPath, payload),
+  excerptPatch: (rootId: string, relPath: string, id: string, patch: unknown, expectedUpdatedAt?: string) => ipcRenderer.invoke('excerpt:patch', rootId, relPath, id, patch, expectedUpdatedAt),
+  excerptDelete: (rootId: string, relPath: string, id: string) => ipcRenderer.invoke('excerpt:delete', rootId, relPath, id),
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => ipcRenderer.invoke('ws:writeFile', rootId, relPath, content, expectedMtimeMs),
   // 归档三条通道（ws:setMdStatus / ws:setArchiveStatus / ws:getArchiveEntries）已于 2026-09-20 随归档退役删除
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => ipcRenderer.invoke("ws:createFile", rootId, relPath, content),

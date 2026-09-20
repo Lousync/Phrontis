@@ -11,7 +11,7 @@ import { useEffect, useRef } from 'react'
  * webContents.send('kb:data-changed', payload)，preload 转为本地 window 事件。
  */
 
-export type DataChangeScope = 'schedule' | 'habit' | 'settings' | 'bookmark' | 'passwords' | 'blog' | 'knowledge' | 'quiz' | 'pdfReader' | 'readerState'
+export type DataChangeScope = 'schedule' | 'habit' | 'settings' | 'bookmark' | 'passwords' | 'blog' | 'knowledge' | 'quiz' | 'pdfReader' | 'readerState' | 'excerpt'
 
 /** 本窗口数据变更后调用：本地广播 + 通知主进程转发给其它窗口 */
 export function notifyDataChanged(scope: DataChangeScope): void {

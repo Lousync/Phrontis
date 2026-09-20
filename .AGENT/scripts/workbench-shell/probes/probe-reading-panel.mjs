@@ -67,6 +67,13 @@ async function main() {
     await sleep(500)
   }
   await sleep(800)
+  // 全局错误捕获（渲染异常不会进 stdout，挂 window 监听取证）
+  await evalJs(`(() => {
+    window.__errs = []
+    window.addEventListener('error', (e) => window.__errs.push(String(e.message || e)))
+    window.addEventListener('unhandledrejection', (e) => window.__errs.push('rej:' + String(e.reason)))
+    return true
+  })()`)
 
   // ===== 1) 打开书架 → readingPanel 不存在 =====
   await evalJs(`(() => { document.querySelector('[data-wb-bookmark="bookshelf"]')?.click(); return true })()`)
@@ -96,8 +103,20 @@ async function main() {
   }
   ok('[data-wb="txtReader"] 出现（TXT 阅读器挂载）', txtReader)
   await sleep(600)
-  const readingTabOn = await evalJs(`(() => { const b = document.querySelector('[data-wb-rp-tab="reading"]'); return !!b })()`)
-  ok('有书在读 → 右栏出现阅读 Tab', readingTabOn)
+  const readingTabOn = await evalJs(`(() => {
+    const rp = document.querySelector('[data-wb="rightPanel"]')
+    const tabs = [...document.querySelectorAll('[data-wb-rp-tab]')].map((b) => b.getAttribute('data-wb-rp-tab'))
+    return {
+      on: tabs.includes('reading'),
+      tabs,
+      rpExists: !!rp,
+      rpParentHtml: rp?.parentElement?.innerHTML?.slice(0, 160) ?? '(no parent)',
+      bodyHasErr: /出错了|渲染出错|ErrorBoundary/i.test(document.body.textContent.slice(0, 5000)),
+      errs: (window.__errs ?? []).slice(0, 6),
+    }
+  })()`)
+  console.log('[step2 诊断]', JSON.stringify(readingTabOn))
+  ok('有书在读 → 右栏出现阅读 Tab', readingTabOn.on === true)
   assertNotFailed()
 
   // ===== 3) 点阅读 Tab → readingPanel 可见 + 右栏已展开 =====
@@ -174,6 +193,52 @@ async function main() {
     if (keys.length > 0) pct = store.books[keys[0]].pct
   } catch { /* 文件未落 → pct=null */ }
   ok('滚动 50% → readerState.json pct ∈ [40, 60]', pct !== null && pct >= 40 && pct <= 60, `pct=${pct}`)
+
+  // ===== 6) TXT 划选摘录：程序化选区 → mouseup → 浮条「摘录」→ 落盘 + 高亮 + 右栏列表 =====
+  // （原生 document mouseup 监听可被 dispatchEvent 触发——React 合成 onScroll 不行，见上一步教训）
+  const selOk = await evalJs(`(() => {
+    const p = document.querySelector('[data-wb="txtReader"] p[data-p="3"]')
+    if (!p || !p.firstChild) return false
+    const range = document.createRange()
+    const tn = p.firstChild
+    range.setStart(tn, 4)
+    range.setEnd(tn, Math.min(40, tn.data.length))
+    const s = window.getSelection()
+    s.removeAllRanges()
+    s.addRange(range)
+    p.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    return true
+  })()`)
+  ok('程序化选区 + mouseup 派发', selOk)
+  await sleep(300)
+  const barOn = await evalJs(`(() => {
+    const btn = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('title') || '').includes('存为摘录'))
+    if (!btn) return false
+    btn.click()
+    return true
+  })()`)
+  ok('划选浮条出现并点击「摘录」', barOn)
+  await sleep(900)
+  const exStore = (() => {
+    try {
+      const store = JSON.parse(readFileSync(join(fixture, '.knowbase', 'modules', 'excerpts.json'), 'utf8'))
+      const keys = Object.keys(store.books ?? {}).filter((k) => k.endsWith('/.books/探针样书.txt'))
+      return keys.length > 0 ? Object.values(store.books[keys[0]]) : []
+    } catch { return [] }
+  })()
+  ok('excerpts.json 落盘（该书 ≥1 条 txt 摘录）', exStore.length > 0, JSON.stringify(exStore).slice(0, 160))
+  const hlOn = await evalJs(`(() => {
+    // excerpt 广播回流 → TxtReaderView 高亮 mark 渲染
+    const marks = document.querySelectorAll('[data-wb="txtReader"] mark[data-eid]')
+    return marks.length > 0
+  })()`)
+  ok('正文出现 <mark> 高亮', hlOn)
+  const panelOn = await evalJs(`(() => {
+    // 右栏摘录列表出现摘文（ReadingSidePanel 经 useDataChanged('excerpt') 刷新）
+    const panel = document.querySelector('[data-wb="readingPanel"]')
+    return !!panel && panel.textContent.includes('摘录') && panel.textContent.includes('段')
+  })()`)
+  ok('右栏摘录列表出现条目', panelOn)
 
   console.log(failed ? '\n存在失败断言' : '\n全部通过')
   process.exit(failed ? 1 : 0)
