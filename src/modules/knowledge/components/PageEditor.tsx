@@ -873,12 +873,13 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      {/* Toolbar — portaled into the tab bar row (merged layer 1 + 2)
+      {/* Toolbar — portal 进外壳右上悬浮胶囊（2026-09-20 改悬浮栏）
+          标 kb-float-hide = 次级钮：胶囊静息态收成小把手时隐藏，悬停/焦点进入才展开（样式见 index.css）
           isActive 门槛：隐藏保活时停掉 portal，否则工具栏飘在当前模块头上（2026-09-19 修复） */}
       {toolbarSlot && isActive && createPortal(
         <>
           {!isPdfFile && !vaultMode && (
-            <div className="relative">
+            <div className="relative kb-float-hide">
               <button onClick={() => setShowLangMenu(v => !v)}
                 className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] transition-colors"
                 title="切换文件格式">
@@ -909,34 +910,34 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
             title={saving ? '保存中…' : '已保存'}
           />
           {!isCodeFile && !isPdfFile && !preview && (
-            <button onClick={insertFootnote} className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" title="脚注：选中词语后点击，加自己的标注（阅读时点击展开）">
+            <button onClick={insertFootnote} className="kb-float-hide p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" title="脚注：选中词语后点击，加自己的标注（阅读时点击展开）">
               <StickyNote size={15} />
             </button>
           )}
           {!isCodeFile && !isPdfFile && !preview && (
-            <button onClick={() => imageInputRef.current?.click()} className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" title="插入图片">
+            <button onClick={() => imageInputRef.current?.click()} className="kb-float-hide p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" title="插入图片">
               <ImagePlus size={15} />
             </button>
           )}
           {!isCodeFile && !isPdfFile && !isWelcomeHtml && !isArchiveFile && (
-            <button onClick={() => setPreview(v => !v)} className={`p-1.5 rounded text-xs ${preview ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`} title={preview ? '切换到编辑 (Ctrl+E / Ctrl+/)' : '切换到预览 (Ctrl+E / Ctrl+/)'}>
+            <button onClick={() => setPreview(v => !v)} className={`kb-float-hide p-1.5 rounded text-xs ${preview ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`} title={preview ? '切换到编辑 (Ctrl+E / Ctrl+/)' : '切换到预览 (Ctrl+E / Ctrl+/)'}>
               {preview ? <Edit3 size={15} /> : <Eye size={15} />}
             </button>
           )}
-          {/* B4 内联建议手动入口（Phase 2 批次 2）：与编辑器模块胶囊同款，编辑态 + markdown 才显示。
-              busy/paused 为可观测信号（data-wb 锚点，探针与状态栏语义一致） */}
+          {/* B4 内联建议手动入口（Phase 2 批次 2；2026-09-20 反馈：由「✦ 建议」文字胶囊收成单个图标）：
+              状态由图标自身表达——请求中 = 警示色脉冲 + 旁侧微点；已暂停 = 图标置灰 + 右上角标点。
+              data-wb 锚点保持不变（探针 probe-batch5-ai 的 G 系断言依赖 inlineSuggestBtn / inlineBusy / inlinePaused） */}
           {fileType === 'md' && !preview && s.aiAssistantInlineSuggest !== false && (
             <>
-              {inlineBusy && <span data-wb="inlineBusy" className="w-2 h-2 rounded-full bg-[var(--warning)] animate-pulse shrink-0" title="AI 续写请求中…" />}
-              {inlinePaused && <span data-wb="inlinePaused" className="text-[10.5px] text-[var(--text-muted)] shrink-0" title="连续建议未采纳已暂停自动，按 Alt+A 唤醒">建议已暂停 · Alt+A 唤醒</span>}
+              {inlineBusy && <span data-wb="inlineBusy" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--warning)]" title="AI 续写请求中…" />}
               <button
                 onClick={() => paneRef.current?.triggerInlineSuggest()}
-                title="AI 续写建议：在光标处生成下一句（Alt+A；Tab 采纳 / Esc 拒绝）"
+                title={inlineBusy ? 'AI 续写建议：生成中…' : inlinePaused ? '连续建议未采纳，已暂停自动 · 按 Alt+A 唤醒' : 'AI 续写建议：在光标处生成下一句（Alt+A；Tab 采纳 / Esc 拒绝）'}
                 data-wb="inlineSuggestBtn"
-                className={`flex items-center gap-1 rounded-full border border-[var(--border-color)] px-2 py-[2px] text-[11px] transition-colors ${inlineBusy ? 'bg-[var(--bg-active)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+                className={`relative p-1.5 rounded transition-colors ${inlineBusy ? 'text-[var(--warning)]' : inlinePaused ? 'text-[var(--text-disabled)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
               >
-                <Sparkles size={12} className={inlineBusy ? 'opacity-60' : ''} />
-                建议
+                <Sparkles size={15} className={inlineBusy ? 'animate-pulse' : ''} />
+                {inlinePaused && <span data-wb="inlinePaused" className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--text-disabled)]" />}
               </button>
             </>
           )}
@@ -1093,7 +1094,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         ) : isWelcomeHtml && page?.path ? (
           <WelcomeHtmlView path={page.path} />
         ) : preview ? (
-          <div className="flex-1 overflow-y-auto px-6 py-4">
+          <div className="flex-1 overflow-y-auto px-6 pb-6 pt-14">
             <h1 className="text-xl font-bold text-[var(--text-primary)] mb-3">{title}</h1>
             <MarkdownPreview
               content={content}
@@ -1134,7 +1135,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               cursorBlinking: 'smooth',
               cursorSmoothCaretAnimation: 'on',
               renderWhitespace: 'selection',
-              padding: { top: 8, bottom: 16 },
+              /* 正文避让（2026-09-20 悬浮栏）：右上浮动胶囊会压住正文头几行，
+                 编辑态顶部留出工具带高度（mt-3 + 胶囊约 40px 高 ≈ 52px，取 56px 冗余） */
+              padding: { top: 56, bottom: 16 },
               overviewRulerLanes: 0,
               hideCursorInOverviewRuler: true,
               overviewRulerBorder: false,

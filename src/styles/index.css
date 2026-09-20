@@ -1302,3 +1302,36 @@ input:focus, textarea:focus, select:focus {
 
 /* 没有任何可见条目（无页面停靠 / 全关）时不渲染空页面条行（2026-09-19 反馈：不要空的一行） */
 [data-wb='pagebar']:not(:has([data-pb-item])) { display: none; }
+
+/* ===== 内容区右上浮动工具栏（2026-09-20 反馈：页面工具改悬浮栏 · A 方案右上胶囊） =====
+   背景：原工具栏直接裸铺在内容区右上（mt-3 mr-3），编辑态 Monaco 正文被压在底下。
+   做法：一个胶囊容器（半透明 + 背景模糊，正文滚过其下仍可读），
+   静息态收成小把手——只留主钮，`.kb-float-hide` 标的次级钮隐藏；悬停 / 焦点进入才展开，
+   悬停态由 CSS 自持（不需要模块上报状态）。模块把次级钮标上 kb-float-hide 即可。
+   空胶囊自动隐身（:has 判断是否有按钮），避免槽空时留一个白点。 */
+[data-wb='floatBar'] {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-primary) 88%, transparent);
+  backdrop-filter: blur(10px) saturate(1.4);
+  box-shadow: 0 6px 22px rgba(15, 23, 42, 0.13), 0 1.5px 4px rgba(15, 23, 42, 0.07);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+[data-wb='floatBar']:not(:hover):not(:focus-within) {
+  opacity: 0.62;
+  transform: scale(0.97);
+}
+[data-wb='floatBar']:not(:hover):not(:focus-within) .kb-float-hide {
+  display: none;
+}
+/* 槽空（没有任何按钮）时整条隐身——避免空胶囊挂一个白色小丸 */
+[data-wb='floatBar']:not(:has(button)) {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-wb='floatBar'] { transition: none; }
+}

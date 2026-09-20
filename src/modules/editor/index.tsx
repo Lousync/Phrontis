@@ -1445,37 +1445,44 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
      ⚠️ 单一真相源：内嵌场景复用同一个 actionsPill（不再手抄第二份），
      否则新增按钮时只加一处、另一处静默缺失。 */
   const actionsPill = (
-    <div className="inline-flex items-center gap-[2px] rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] p-[3px]">
+    <div className={contentActionsHosted
+      /* 托管形态（2026-09-20）：外壳已给了一个浮动胶囊（data-wb="floatBar"），
+         本组不再自绘边框/底色，否则「胶囊里套胶囊」；内嵌形态保留原分段控件外观 */
+      ? 'inline-flex items-center gap-[2px]'
+      : 'inline-flex items-center gap-[2px] rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] p-[3px]'}>
       {activeDoc?.language === 'markdown' && (
         <>
           <button
             onClick={() => void handleInsertImage()}
             title="插图：复制图片到仓库附件区 .attachments/ 并在光标处插入相对链接（也支持直接粘贴截图）"
-            className="flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="kb-float-hide flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             <ImagePlus size={12} />
             插图
           </button>
-          {/* B4 内联建议：触发型（点了立刻生成），与上面三个动作型按钮同构 */}
+          {/* B4 内联建议：触发型（点了立刻生成）。2026-09-20 反馈：收成单图标（与笔记页同款），
+              busy/paused 由图标自身表达；data-wb 锚点保留（探针 G 系断言依赖） */}
           {inlineSuggestOn && (
             <button
               onClick={() => { monacoRef.current?.triggerInlineSuggest() }}
-              title="AI 续写建议：在光标处生成下一句（Alt+A；Tab 采纳 / Esc 拒绝）"
+              title={inlineBusy ? 'AI 续写建议：生成中…' : inlinePaused ? '连续建议未采纳，已暂停自动 · 按 Alt+A 唤醒' : 'AI 续写建议：在光标处生成下一句（Alt+A；Tab 采纳 / Esc 拒绝）'}
               data-wb="inlineSuggestBtn"
-              className={`flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
+              className={`relative flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
                 inlineBusy
                   ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
-                  : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                  : inlinePaused
+                    ? 'text-[var(--text-disabled)]'
+                    : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
               }`}
             >
               <SunMedium size={12} className={inlineBusy ? 'opacity-60' : ''} />
-              建议
+              {inlinePaused && <span data-wb="inlinePaused" className="absolute right-1 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--text-disabled)]" />}
             </button>
           )}
           <button
             onClick={() => { setOutlineOpen((v) => !v); }}
             title="大纲（跳转标题）"
-            className={`flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
+            className={`kb-float-hide flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
               outlineOpen
                 ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
                 : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
@@ -1487,7 +1494,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
           <button
             onClick={togglePreview}
             title="分栏预览（左编辑 / 右实时渲染）"
-            className={`flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
+            className={`kb-float-hide flex items-center gap-1 rounded-full px-2.5 py-[3px] text-[11.5px] transition-colors ${
               previewOpen
                 ? 'bg-[var(--bg-active)] text-[var(--text-primary)]'
                 : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
@@ -1729,6 +1736,9 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                       typewriter={zenLevel >= 1 && !!zenSettings.zenTypewriter}
                       zenPaper={!!zenSettings.zenPaper}
                       layoutKey={zenLevel}
+                      /* 正文避让（2026-09-20 悬浮栏）：内容区右上那颗浮动胶囊会压住正文头几行，
+                         编辑态给顶部留出工具带高度（禅模式自带大留白，不受影响） */
+                      editorOptions={{ padding: { top: 56, bottom: 16 } }}
                       onPasteImage={activeDoc?.language === 'markdown' ? handlePasteImageFile : undefined}
                       inlineSuggestEnabled={inlineSuggestOn}
                       inlineSuggestAuto={inlineSuggestAuto}
@@ -1746,7 +1756,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                       <Eye size={12} />
                       预览
                     </div>
-                    <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+                    <div className="min-h-0 flex-1 overflow-auto px-5 pb-4 pt-14">
                       <MarkdownPreview
                         content={previewContent}
                         onWikiLink={handleWikiLink}

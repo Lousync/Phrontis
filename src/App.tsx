@@ -1330,15 +1330,19 @@ export default function App() {
                   <div className="relative flex min-h-0 min-w-0 flex-1">
                     {/* 内容级操作浮层（v3.4.0 页面条置顶）：插图/大纲/预览/保存全部 的胶囊，
                         以及知识库页面级动作槽 `#editor-toolbar-slot`。
-                        `pointer-events-none` 外壳 + 子元素 auto：空槽不挡内容点击。
+                        ★ 2026-09-20：两者收进**一个悬浮胶囊**（data-wb="floatBar"，样式见
+                        styles/index.css 的 [data-wb='floatBar'] 段）——半透明毛玻璃底，
+                        静息态收成小把手（次级钮标 .kb-float-hide 者在非悬停时隐藏），
+                        模块只需给次级按钮加类，展开/淡出由 CSS 自持，无需上报状态。
+                        `pointer-events-none` 外壳保证空白区不挡内容点击；胶囊本体 auto。
                         该 id 必须保留 —— knowledge/components/PageEditor.tsx 按 id 全局查它做 portal。 */}
                     <div
                       data-wb="mainPane"
-                      className="pointer-events-none absolute inset-y-0 left-0 z-30 flex items-start justify-end w-full"
+                      className="pointer-events-none absolute inset-y-0 left-0 z-30 flex w-full items-start justify-end"
                     >
-                      <div className="pointer-events-none mt-3 mr-3 flex items-center gap-1.5">
-                        <div ref={wbContentActionsRef} className="pointer-events-auto flex items-center" />
-                        <div id="editor-toolbar-slot" className="pointer-events-auto flex items-center gap-0.5" />
+                      <div data-wb="floatBar" className="pointer-events-auto mr-3 mt-3">
+                        <div ref={wbContentActionsRef} className="flex items-center" />
+                        <div id="editor-toolbar-slot" className="flex items-center gap-0.5" />
                       </div>
                     </div>
                     {/* 模块容器序列：可见模块撑满（flex-1），其余 display:none 常驻保活。

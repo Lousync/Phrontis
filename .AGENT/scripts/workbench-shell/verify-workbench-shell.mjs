@@ -326,12 +326,22 @@ ok(/pageBarHosted/.test(srcEditor) && /createPortal\(/.test(srcEditor) && /pageB
   'F6 编辑器文件标签行 portal 进页面条槽（槽未就绪渲染 null，不回落内嵌）')
 ok(/contentActionsHosted/.test(srcEditor) && /actionsPill/.test(srcEditor),
   'F7 编辑器四个动作收成胶囊并 portal 进内容级操作槽')
-// 浮层结构（2026-09-18 分屏下线后重写判据）：外壳 `data-wb="mainPane"` 全宽、pointer-events-none，
-// 内层负责右上角对齐（mt-3 mr-3）。分屏时代外壳宽度曾是 `calc(100% - 副栏宽)`，下线后恒为全宽。
+// 浮层结构（2026-09-20 悬浮栏改造）：外壳 `data-wb="mainPane"` 全宽 + pointer-events-none；
+// 内层是**一个悬浮胶囊** `data-wb="floatBar"`（右上角 mt-3 mr-3）——两个槽（内容级操作 + 页面级工具）
+// 都在胶囊里；静息收把手 / 毛玻璃 / 空胶囊隐身由 index.css 的 [data-wb='floatBar'] 段承担。
+// 分屏时代外壳宽度曾是 `calc(100% - 副栏宽)`，下线后恒为全宽。
 ok(/data-wb="mainPane"[\s\S]{0,200}?pointer-events-none[\s\S]{0,200}?w-full/.test(srcApp)
-  && /id="editor-toolbar-slot"/.test(srcApp) && /mt-3 mr-3/.test(srcApp)
+  && /data-wb="floatBar"/.test(srcApp) && /floatBar[\s\S]{0,120}?mr-3 mt-3/.test(srcApp)
   && (srcApp.match(/id="editor-toolbar-slot"/g) || []).length === 1,
-  'F8 内容级操作浮层在 App（含 #editor-toolbar-slot 唯一一处；pointer-events 分层不挡内容）')
+  'F8 内容级操作浮层在 App（单个悬浮胶囊 floatBar 内含唯一 #editor-toolbar-slot；pointer-events 分层不挡内容）')
+// F8b 悬浮栏样式基建与把手口径（2026-09-20）：CSS 段 + 次级钮标记类必须在位，
+// 否则「静息收把手/毛玻璃/空胶囊隐身」三条行为整条失效（样式与实现分居两个文件，最易漏改）
+const srcCss = read('src/styles/index.css')
+ok(/\[data-wb='floatBar'\]/.test(srcCss) && /\.kb-float-hide/.test(srcCss)
+  && /backdrop-filter/.test(srcCss) && /:not\(:has\(button\)\)/.test(srcCss),
+  'F8b 悬浮栏样式基建在位（floatBar 胶囊 / kb-float-hide 把手 / 毛玻璃 / 空胶囊隐身）')
+ok(/kb-float-hide/.test(read('src/modules/knowledge/components/PageEditor.tsx')) && /kb-float-hide/.test(srcEditor),
+  'F8c 两个宿主（笔记页工具栏 / 编辑器动作胶囊）都标了次级钮 kb-float-hide')
 ok(/pageBarHosted/.test(srcKnowledge) && /createPortal\(strip/.test(srcKnowledge),
   'F9 知识库页签条 portal 进页面条槽')
 ok(/onImmersiveChange\?\.\(v\)/.test(srcKnowledge) && /readingMode \|\| graphMode/.test(srcKnowledge) && /pageBarHidden/.test(srcApp),
