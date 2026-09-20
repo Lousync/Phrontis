@@ -549,14 +549,15 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
       }
       if (/\.md$/i.test(rel)) {
         const doc = parseMarkdown(readFileSync(abs, 'utf8'))
-        // B1（目录状态优先）：被目录条目覆盖、且自身无 frontmatter id 的普通 md → 自动 id 收录
-        if (!asString(doc.frontmatter.id) && findCoveringDirEntry(rel, manifest)) {
+        // 身份统一（2026-09-20 拍板，docs/note-identity-unify-design.md §1）：无 frontmatter id 的 md
+        // **不再被跳过**，一律以 auto:<relPath> 作为临时身份进库（可搜索 / 进图谱 / 可被 [[引用]]）；
+        // 该文件首次被编辑保存时由渲染层写入真 UUID（ensureFrontmatterId），身份自动升级 —— 用户零操作。
+        if (!asString(doc.frontmatter.id)) {
           const fileName = rel.slice(rel.lastIndexOf('/') + 1)
           const dot = fileName.lastIndexOf('.')
           doc.frontmatter.id = `auto:${rel}`
           if (!asString(doc.frontmatter.title)) doc.frontmatter.title = dot > 0 ? fileName.slice(0, dot) : fileName
           doc.frontmatter.fileType = 'md'
-          doc.frontmatter.status = 'published'
         }
         docs.push({ abs, rel, doc, entryKind: 'doc' })
         continue
@@ -628,6 +629,8 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
     try {
       const id = asString(doc.frontmatter.id)
       if (!id) {
+        // 身份统一后不应再有无 id 的文档（md 走上方 auto: 兜底，非 md 由清单/收录分支给 id）——
+        // 真出现说明新增了新的收录分支却忘了给身份，这里保留跳过并告警以便尽早暴露。
         warnings.push(`页面缺少 frontmatter.id，已跳过：${rel}`)
         continue
       }

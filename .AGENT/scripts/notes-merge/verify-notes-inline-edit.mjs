@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { splitFrontmatter, joinFrontmatter } from '../../../src/lib/frontmatter.ts'
+import { splitFrontmatter, joinFrontmatter, hasFrontmatterId, ensureFrontmatterId } from '../../../src/lib/frontmatter.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../../..')
@@ -114,19 +114,36 @@ console.log('[6] 文件视图（Phase 2 批次 1）')
   ok(ki.includes('workspaceListDir') && ki.includes('refreshTreeDir'), '目录懒加载接线')
 }
 
-// ---- ⑦ Phase 2 批次 1 下半场：草稿直入编辑 ----
-console.log('[7] 草稿直入编辑（批次 1 下半场）')
+// ---- ⑦ Phase 2 批次 1 下半场：文件页直入编辑 + 身份统一（2026-09-20） ----
+console.log('[7] 文件页直入编辑 + 首次保存自动补 id')
 {
   const pe = read('src/modules/knowledge/components/PageEditor.tsx')
   const ki = read('src/modules/knowledge/index.tsx')
-  ok(pe.includes('draftRelPath') && pe.includes('loadDraftPage'), 'PageEditor 支持 draftRelPath 草稿装载')
-  ok(pe.includes('draft:${rel}') || pe.includes('`draft:${rel}`'), '草稿伪页 id = draft:<relPath>')
-  ok(pe.includes('handleConvertDraft') && pe.includes('crypto.randomUUID()'), '转为正式笔记：写入 randomUUID 格式 id（与主进程同源）')
-  ok(pe.includes('handleConvertDraft') && pe.includes('onNavigate?.(id)'), '转正后导航到正式页签')
+  ok(pe.includes('draftRelPath') && pe.includes('loadDraftPage'), 'PageEditor 支持 draftRelPath 装载（文件页直入编辑）')
+  ok(pe.includes('draft:${rel}') || pe.includes('`draft:${rel}`'), '文件页伪页 id = draft:<relPath>')
+  ok(pe.includes('ensureFrontmatterId'), '首次保存自动补 id：vault 保存分支接 ensureFrontmatterId')
+  ok(!pe.includes('转为正式笔记') && !pe.includes('handleConvertDraft'),
+    '负向：「转为正式笔记」入口与实现已退役（2026-09-20 拍板，能力由自动补 id 接棒）')
   ok(ki.includes('openByRelPath') && ki.includes('kb-open-note-rel'), '统一打开通道：树点击与 App 转发的 kb-open-note-rel 共用（草稿/PDF/源码全部 draft 页签消化）')
-  ok(!ki.includes('treeDraftRelPaths'), '树内草稿徽标已退役（2026-09-19 拍板：笔记区合并后草稿与正式笔记同模块同路径，状态打开即自明；转正入口留在 PageEditor 工具栏）')
+  ok(!ki.includes('treeDraftRelPaths'), '树内草稿徽标已退役（2026-09-19 拍板：笔记区合并后草稿与正式笔记同模块同路径，状态打开即自明）')
   const vaultBranch = pe.match(/if \(vaultModeRef\.current\) \{[\s\S]*?\n    \}\n/)
   ok(vaultBranch && vaultBranch[0].includes('workspaceWriteFile'), '草稿保存走同一 vault 写路径（零旁路）')
+  ok(vaultBranch && vaultBranch[0].includes('ensureFrontmatterId'), '补 id 发生在写盘之前（同一保存事务序内）')
+  // 索引层：无 id 的 md 兜底收录（不再要求被归档目录覆盖）
+  const kiMain = read('electron/lib/kbStore/knowledgeIndex.ts')
+  ok(kiMain.includes('auto:${rel}') && !/!asString\(doc\.frontmatter\.id\) && findCoveringDirEntry/.test(kiMain),
+    '索引层：无 id 的 md 一律以 auto:<relPath> 收录（旧「需被归档目录覆盖」前提已移除）')
+  // 补 id 纯函数行为（直接跑真实现）
+  ok(hasFrontmatterId('---\nid: abc\n---\n') && !hasFrontmatterId('---\ntitle: x\n---\n') && !hasFrontmatterId(''),
+    'hasFrontmatterId：有 id / 无 id / 空前缀 判定正确')
+  const e1 = ensureFrontmatterId('', '学习笔记/笔记一.md', 'UUID1')
+  ok(e1.injected && e1.prefix === '---\nid: UUID1\ntitle: 笔记一\n---\n', '无 frontmatter → 新建整块（title 取文件名去扩展名）')
+  const e2 = ensureFrontmatterId('---\ntitle: 旧\n---\n', 'a.md', 'UUID2')
+  ok(e2.injected && e2.prefix === '---\nid: UUID2\ntitle: 旧\n---\n', '有 frontmatter 无 id → id 插到首行之后，其余字段原样')
+  const e3 = ensureFrontmatterId('---\nid: keep\ntitle: x\n---\n', 'a.md', 'UUID3')
+  ok(!e3.injected && e3.prefix === '---\nid: keep\ntitle: x\n---\n', '已有 id → 幂等不注入（不会覆盖既有身份）')
+  const e4 = ensureFrontmatterId('---\r\ntitle: 旧\r\n---\r\n', 'a.md', 'UUID4')
+  ok(e4.injected && e4.prefix.startsWith('---\nid: UUID4\n'), 'CRLF 前缀同样能注入')
 }
 
 // ---- ⑧ 批次 3：更名「笔记」+ 事件改名 + 归类入口 ----

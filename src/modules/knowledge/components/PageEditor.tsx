@@ -6,7 +6,7 @@ import { QuizMode } from '../../../components/shared/QuizMode'
 import { extractQuizzes } from '../../../components/shared/QuizParser'
 import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem, SimilarPageHit } from '../../../types'
 import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, getKnowledgeSimilarPages, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent } from '../../../lib/ipc'
-import { splitFrontmatter, joinFrontmatter } from '../../../lib/frontmatter'
+import { splitFrontmatter, joinFrontmatter, ensureFrontmatterId } from '../../../lib/frontmatter'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
 import { uploadImageFile, insertImageAtCursor, isImageFile, imageMarkdown, IMAGE_OWNER } from '../../../lib/editorImage'
@@ -51,7 +51,8 @@ interface Props {
   vaultMode?: boolean
   onOpenInEditor?: () => void
   /** 草稿直入编辑（Phase 2 批次 1）：无 frontmatter id 文件的相对路径——页签 id 为 `draft:<relPath>`，
-   *  走同一套脏状态机与 vault 写路径；「转为正式笔记」= 写入 frontmatter id（randomUUID，与主进程同格式） */
+   *  走同一套脏状态机与 vault 写路径；无 frontmatter id 的文件在**首次保存时自动补 id**
+   *  （ensureFrontmatterId，2026-09-20 身份统一：门槛消失、用户零操作） */
   draftRelPath?: string
   /** 模块激活态（v3.4.0 修复）：工具栏 portal 到外壳右上角常驻浮层 `#editor-toolbar-slot`，
    *  模块被 display:none 保活时 portal 不会跟着藏——不加这道门槛，铅笔/保存点会飘在当前模块头上
@@ -230,45 +231,6 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   }, [])
 
   /** 草稿装载（Phase 2 批次 1）：读原始文件 → body 进同一套脏状态机；frontmatter 前缀/mtime 进 vault 基线。
-   *  pageRef 构造最小伪页（path 指向草稿文件），doSave 的 vault 分支零改动直接复用。 */
-  /** 转为正式笔记（Phase 2 批次 1）：写入 frontmatter id（randomUUID，与主进程同格式），保存后导航到正式页 */
-  const handleConvertDraft = useCallback(async () => {
-    const rel = draftRelPath
-    const root = vaultRootRef.current
-    if (!rel || !root || !pageRef.current) return
-    try {
-      const res = await workspaceReadFile(root, rel)
-      const fm = splitFrontmatter(res?.content ?? '')
-      const id = crypto.randomUUID()
-      let prefix: string
-      if (fm) {
-        prefix = fm.prefix.replace(/^---\r?\n/, `---\nid: ${id}\n`)
-      } else {
-        const name = rel.slice(rel.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '')
-        prefix = `---\nid: ${id}\ntitle: ${name}\n---\n`
-      }
-      const baseline = vaultMtimeRef.current > 0 ? vaultMtimeRef.current : undefined
-      const out = await workspaceWriteFile(root, rel, prefix + contentRef.current, baseline)
-      if (out?.ok) {
-        vaultMtimeRef.current = typeof out.mtimeMs === 'number' && out.mtimeMs > 0 ? out.mtimeMs : vaultMtimeRef.current
-        isDirtyRef.current = false
-        savedContentRef.current = contentRef.current
-        setSaving(false)
-        onClearDirty?.()
-        onUpdate()
-        showToast({ type: 'info', message: '已转为正式笔记' })
-        // 索引重建是异步的：给主进程一点时间后导航到正式页（页签 id 从 draft: 切到真 id）
-        setTimeout(() => onNavigate?.(id), 600)
-      } else {
-        showToast({ type: 'warning', message: out?.conflict ? '文件已被外部修改，转换失败' : '转换失败，请重试' })
-      }
-    } catch (e) {
-      console.error('[PageEditor] convert draft failed:', e)
-      showToast({ type: 'error', message: '转换失败，请重试' })
-    }
-  }, [draftRelPath])
-
-  /** 草稿装载（Phase 2 批次 1）：读原始文件 → body 进同一套脏状态机；frontmatter 前缀/mtime 进 vault 基线。
    *  pageRef 构造最小伪页（path 指向草稿文件），doSave 的 vault 分支零改动直接复用。
    *  isReload = keep-alive/广播重读：保持当前阅读/编辑态（否则自动保存写盘 → 广播 → 重读会把用户踢回阅读态）。 */
   const loadDraftPage = useCallback(async (rel: string, isReload = false) => {
@@ -422,6 +384,13 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         return
       }
       try {
+        // 首次保存自动补 id（2026-09-20 拍板）：无 frontmatter id 的 .md 在首次编辑保存时静默转正，
+        // 用户零操作；注入后必须回写 vaultPrefixRef（否则下一次保存又把它写掉）。
+        // 仅 .md 参与（非 md 是文件卡片，注入 frontmatter 会破坏内容）。
+        if (/\.md$/i.test(rel)) {
+          const ensured = ensureFrontmatterId(vaultPrefixRef.current, rel, crypto.randomUUID())
+          if (ensured.injected) vaultPrefixRef.current = ensured.prefix
+        }
         // mtime 基线：装载时记录；<=0 = 文件已被外部删除 → 不带基线（保存即重建，同编辑器 missing 口径）
         const baseline = vaultMtimeRef.current > 0 ? vaultMtimeRef.current : undefined
         const res = await workspaceWriteFile(root, rel, joinFrontmatter({ frontmatterPrefix: vaultPrefixRef.current || undefined, content: c }), baseline)
@@ -980,13 +949,6 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   <button onClick={() => { setShowBacklinks(true); setLinkPickerOpen(true); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <Link2 size={13} />添加关联
-                  </button>
-                )}
-                {draftRelPath && (
-                  <button onClick={() => { setShowMoreMenu(false); void handleConvertDraft() }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                    <FileText size={13} />转为正式笔记
-                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">写入 frontmatter id</span>
                   </button>
                 )}
                 {(fileType === 'md' || fileType === 'txt') && onRequestReading && (                  <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}

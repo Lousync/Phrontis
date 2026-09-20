@@ -28,7 +28,7 @@
 | `electron/lib/kbStore/knowledgeIndex.ts:550-563` | 删除 `findCoveringDirEntry` 前提，任何无 id 的 md 一律 `auto:<rel>` + 补 title/fileType（现有 552-560 的特例**提升为通例**） |
 | `electron/lib/kbStore/knowledgeIndex.ts:629-633` | 删掉「缺少 frontmatter.id 已跳过」分支（不再有跳过路径） |
 | `electron/lib/kbStore/knowledgeIndex.ts:654` | `status` 计算退役（阶段二统一） |
-| 保存写路径（主进程） | 新增「首次保存补 id」：在知识页 `.md` 的写盘收口处（`workspaceManager` 的 Knowledge 写入分支 / `knowledgeVaultRepo`），若原文无 `frontmatter.id` 且有正文改动 → 注入 `id: <uuid>` 后落盘。**只在 md + 仓库内 + 非 blog/aiTeaching 目录生效**；`auto:` 前缀文件同样适用 |
+| 保存写路径（**渲染层**，2026-09-20 落地时修正） | 新增「首次保存补 id」：`ensureFrontmatterId` 接在 PageEditor `doSave` 的 vault 分支、写盘之前；注入后**回写 `vaultPrefixRef`**。<br>⚠️ 为什么不在主进程收口：PageEditor 内存持有 frontmatter 前缀，主进程改写会让内存前缀缺 id → 下一次保存又写掉 → 身份来回丢。仅 `.md` 参与（非 md 是文件卡片，注入 frontmatter 会破坏内容）。共享纯函数在 `src/lib/frontmatter.ts`（零依赖、契约可 import）。 |
 | `src/modules/knowledge/components/PageEditor.tsx:226-256, 972-978` | 撤掉「转为正式笔记」菜单项与 `handleConvertDraft`（能力由主进程自动接棒）；`draftRelPath` 装载逻辑保留（用于「文件页」编辑） |
 | `.AGENT/scripts/notes-merge/verify-notes-inline-edit.mjs:117-129` | 断言改写：从「草稿直入编辑 + 转正入口」改为「文件页直入编辑 + 无转正入口（负向断言）」 |
 
