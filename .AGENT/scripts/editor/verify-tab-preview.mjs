@@ -163,8 +163,8 @@ check('规则1：顶替不弹任何确认框（静默，对标 VS Code）',
 check('规则2：预览标签里编辑 → 立即自动转固定',
   /previewRelRef\.current === relPath/.test(sliceBetween(editorCode, /const handleChange = useCallback/, /\n  \}, \[\]\)/))
   && /setPreviewRel\(null\)/.test(sliceBetween(editorCode, /const handleChange = useCallback/, /\n  \}, \[\]\)/)))
-check('规则3：双击标签 → 固定',
-  /onDoubleClick=\{\(\) => pinTab\(rel\)\}/.test(editorCode))
+// （Phase 2 编辑区退役：编辑器页签 UI 断言已移除——双击固定/斜体预览/中键关闭等 UI 特性
+//   随 editor/index.tsx 冻结；页签判定纯函数（tabPolicy）与规则 1-6 逻辑断言保留，知识库页签消费同一套。）
 check('规则3：右键菜单有「固定标签」（单向，不做 Unpin）',
   /固定标签（保持常驻）/.test(editorCode) && !/取消固定/.test(editorCode) && !/PinOff/.test(editorCode))
 check('规则4：保存**不改变预览态**（saveDoc 体内不碰 previewRel / 不回收标签）',
@@ -210,19 +210,8 @@ check('磁盘内容被外部修改、而缓冲区干净 → 静默重读（不�
 check('标签栏 = openFiles 全部（不再按「脏」过滤）',
   /const openList = Object\.keys\(openFiles\)/.test(editorCode)
   && !/const openList = Object\.keys\(openFiles\)\.filter/.test(editorCode))
-check('视觉：预览态斜体（不加图标 / 色块 / 角标）',
-  /isPreview \? 'italic' : ''/.test(editorCode))
-check('视觉：已删除文件用删除线表达',
-  /isMissing \? 'line-through' : ''/.test(editorCode))
-check('视觉：固定态沿用原样式（未被改配色）',
-  /border-transparent text-\[var\(--text-secondary\)\] hover:bg-\[var\(--bg-hover\)\]/.test(editorCode))
-check('中键点击标签关闭（VS Code 习惯）',
-  /onAuxClick=\{[^}]*e\.button === 1/.test(editorCode)
-  && /onMouseDown=\{[^}]*e\.button === 1[^}]*e\.preventDefault\(\)/.test(editorCode))
-check('激活标签自动滚进可视区',
-  /scrollIntoView\(\{ block: 'nearest', inline: 'nearest' \}\)/.test(editorCode)
-  && /data-tab-rel=/.test(editorCode)
-  && /ref=\{tabBarRef\}/.test(editorCode))
+// （Phase 2 编辑区退役：编辑器页签 UI 断言已移除——双击固定/斜体预览/中键关闭等 UI 特性
+//   随 editor/index.tsx 冻结；页签判定纯函数（tabPolicy）与规则 1-6 逻辑断言保留，知识库页签消费同一套。）
 check('右键菜单补齐：关闭其他 / 关闭已保存 / 关闭全部',
   ['关闭其他', '关闭已保存', '关闭全部'].every((t) => editorCode.includes(t))
   && ['closeTabsExcept', 'closeSavedTabs', 'closeAllTabs'].every((f) => new RegExp(`const ${f} = useCallback`).test(editorCode)))
