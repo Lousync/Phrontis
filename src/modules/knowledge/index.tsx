@@ -65,7 +65,7 @@ interface PageInfo {
   fileType: string
 }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onRequestCloseTab, onStripVisibleChange }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onRequestCloseTab?: () => void; onStripVisibleChange?: (v: boolean) => void }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onRequestCloseTab, onStripVisibleChange, onPageTabActivate }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onRequestCloseTab?: () => void; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -105,9 +105,13 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [locateCategoryId, setLocateCategoryId] = useState<string | null>(null)
   const [allKnowledgeTags, setAllKnowledgeTags] = useState<KnowledgeTag[]>([])
   const [showQuizCollection, setShowQuizCollection] = useState(false)
+  /** 开合镜像 ref：handleOpenPage 内判「当前在错题本视图」用——handleOpenPage 是高频复用回调，
+      依赖 showQuizCollection 本体会让 useCallback 随视图开合重建、下游 effect 连锁重跑 */
+  const showQuizCollectionRef = useRef(false)
   // 错题本视图开合反向通知左栏（批次5 反馈轮，QUIZ_VIEW_TOGGLED_EVENT）：
   // 非书签路径（树内入口）进出时 App 据此切左栏 quiz/knowledge 模块态，双侧栏与错位由此消除
   const toggleQuizCollection = useCallback((open: boolean) => {
+    showQuizCollectionRef.current = open
     setShowQuizCollection(open)
     window.dispatchEvent(new CustomEvent(QUIZ_VIEW_TOGGLED_EVENT, { detail: { open } }))
   }, [])
@@ -591,6 +595,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
 
   // --- tab management (VS Code preview mode) ---
   const handleOpenPage = useCallback(async (pageId: string, infoOverride?: PageInfo) => {
+    // 错题本是知识库内容区的全幅子视图（2026-09-20 反馈）：开着时点页签只改了保活模块内部
+    // activePageId，视图盖着什么都看不见 = 「点了没反应」。任何页面打开/切换先收错题本视图
+    // （QUIZ_VIEW_TOGGLED {open:false} 回流 → App 收页面条错题本条目 + 左栏回笔记态）。
+    if (showQuizCollectionRef.current) toggleQuizCollection(false)
     // info：页签标题/类型（草稿直入编辑时由调用方自带，Phase 2 批次 1）
     let info: PageInfo | undefined = infoOverride
     if (!infoOverride) {
@@ -639,7 +647,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
 
     setActivePageId(pageId)
-  }, [allLoosePages, chapterPages, starredPages])
+  }, [allLoosePages, chapterPages, starredPages, toggleQuizCollection])
 
   const handleCloseTab = useCallback((pageId: string) => {
     // Check unsaved changes
@@ -1681,7 +1689,13 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 }
               })}
               activeId={activePageId}
-              onSelect={(id) => { void handleOpenPage(id) }}
+              onSelect={(id) => {
+                void handleOpenPage(id)
+                // 页签组恒挂在页面条上（其他模块激活时也可见），点击 = 要看那个页面：
+                // 通知 App 把 knowledge 标签带到前台 + 左栏跟随（状态在模块、激活在 App，
+                // 同 onRequestCloseTab 的回调范式；2026-09-20 反馈「点笔记页签不跳笔记区」）
+                onPageTabActivate?.()
+              }}
               onClose={handleCloseTab}
               onReorder={handleReorderTabs}
               onTogglePin={handleTogglePin}
