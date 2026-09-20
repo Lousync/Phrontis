@@ -21,8 +21,8 @@ export interface WorkbenchLayout {
   leftLocked: boolean
   /** 右栏收起 */
   rightCollapsed: boolean
-  /** 右栏双 Tab：小工具 / AI */
-  rightTab: 'widgets' | 'ai'
+  /** 右栏双 Tab：小工具 / AI（'reading' 是条件性入口，见 RIGHT_PANEL_TAB_IDS_ALL） */
+  rightTab: 'widgets' | 'ai' | 'reading'
   /** 右栏控件排序（今日任务 task / 今日打卡 habit / 番茄钟 pomo / 网址导航 nav / 密码生成器 password） */
   widgetOrder: string[]
   /** 右栏隐藏的控件 id（⋯ 菜单选显） */
@@ -58,6 +58,14 @@ export const DAY_PANEL_WIDGET_IDS = ['task', 'habit', 'pomo', 'nav'] as const
 /** 右栏面板 Tab 的规范集合（🧩 小工具 / 🤖 AI） */
 export const WORKBENCH_PANEL_TAB_IDS = ['widgets', 'ai'] as const
 
+/**
+ * 右栏 Tab 全集（全格式阅读器一期）：'reading'（📖）是**条件性入口 Tab**——
+ * 有书在读时才渲染、点击才持久化 rightTab='reading'；不进 ⋯ 选显菜单、不持久化显隐。
+ * 关书回落逻辑在 WorkbenchRightPanel.effectiveTab（回落到 widgets/ai，不改持久化值的语义见彼处）。
+ * 两集合刻意不同，勿合并（防 list-drift：契约脚本双向断言）。
+ */
+export const RIGHT_PANEL_TAB_IDS_ALL = ['widgets', 'ai', 'reading'] as const
+
 export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   leftCollapsed: false,
   leftMode: 'overview',
@@ -86,7 +94,7 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       if (o.leftMode === 'overview' || o.leftMode === 'tree') base.leftMode = o.leftMode
       if (typeof o.leftLocked === 'boolean') base.leftLocked = o.leftLocked
       if (typeof o.rightCollapsed === 'boolean') base.rightCollapsed = o.rightCollapsed
-      if (o.rightTab === 'widgets' || o.rightTab === 'ai') base.rightTab = o.rightTab
+      if (o.rightTab === 'widgets' || o.rightTab === 'ai' || o.rightTab === 'reading') base.rightTab = o.rightTab
       if (Array.isArray(o.widgetOrder)) {
         const known = new Set<string>(WORKBENCH_WIDGET_IDS)
         const filtered = o.widgetOrder.filter((x): x is string => typeof x === 'string' && known.has(x))

@@ -13,7 +13,7 @@ import { getCurrentVault } from './vaultContext'
  * PDF 阅读数据 vault 仓库（v3.4.0 PDF 阅读体验整包，方案 §3/§4）——`.knowbase/modules/pdfReader.json` **唯一写方**。
  *
  * - 进度/书签/模式：键 `{rootId}/{relPath}`，patch 带 `expectedUpdatedAt` 冲突检测（铁律 4）。
- * - 书架清单不落盘（自动库：扫描即清单，见 knowledgeIndex.scanVaultPdfs）。
+ * - 书架清单不落盘（自动库：扫描即清单，见 knowledgeIndex.scanVaultBooks）。
  * - 封面缓存：`.knowbase/cache/covers/<sha1(key)>.png` + 同目录 index.json（mtime 失效判据）；缓存目录属 vault 可删可再生。
  * - IPC 转发层 = electron/database/repositories/pdfReaderRepo.ts（老目录名不是死代码，照既有模式）。
  * - 纯校验逻辑在 pdfReaderSchema.ts（零依赖，契约脚本直接 import）。

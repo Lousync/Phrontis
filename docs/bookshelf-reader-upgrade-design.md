@@ -1,8 +1,9 @@
 # 书架升级全格式阅读器 + 右栏阅读侧栏 · 实现方案（施工版）
 
-> 状态：**待拍板**（需求已确认 2026-09-19；本文含逐文件施工细则，可直接交给独立会话实施）
+> 状态：**一期已实施**（2026-09-20 落地：S1-S8 全部完成；契约 verify-reader-formats 全绿 + 探针 probe-reading-panel 13 项全过）。
 > 来源：Weave EPUB Reader 借鉴调研 + 交互原型 `outputs/weave-reader-prototype.html`
 > 实施者须知：本文所有「现状」都经过代码核对（附行号）。**开工前请先复核这些行号**（主仓随时有其它会话在写）。
+> 实施差异记录：① decodeText 落零依赖 `src/lib/textDecode.ts`（组件文件带 React 依赖，契约脚本 strip-types 直 import 会炸）；② `BookKind` 在 `src/types/index.ts` 本地定义（tsconfig.web 只含 src/**，不能复导出主进程文件），与 bookFormats 的一致性由契约断言；③ PDF 事件常量抽零依赖 `src/components/shared/pdf/pdfEvents.ts`（防常量消费方把 pdfjs 拖进主包）；④ `ws:readRange` 白名单补 `txt`（workspaceManager RANGE_EXT_WHITELIST，否则 TxtReader 读不了书）。
 
 ## 0. 拍板结论（需求侧，不再讨论）
 

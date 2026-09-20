@@ -2,6 +2,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, 
 import { join, relative } from 'path'
 import { randomUUID } from 'crypto'
 import { getCurrentVault, KB_INBOX_DIR } from './vaultContext'
+import { bookKindOf, type BookKind } from './bookFormats'
 import { readJson, writeJson, deleteFile } from './jsonStore'
 import { parseMarkdown } from './mdStore'
 import { WELCOME_DOC_FILENAME } from './welcomeDoc'
@@ -197,8 +198,10 @@ function scanVaultFiles(root: string, dir: string, out: string[], warnings?: str
  * 目录不存在时自动创建（放文件即识别，用户无需手动 mkdir）。
  * 以 `.books` 为扫描根复用 scanVaultFiles —— 符号链接跳过 / 点子目录跳过等语义照旧；
  * 返回的 relPath 仍相对仓库根（书键口径不变），只读不建索引、书架清单不落盘。
+ * 书架升级全格式阅读器一期（2026-09-20）：识别范围从硬编码 .pdf 扩为 BOOK_EXTS
+ * （bookKindOf 唯一真相源），返回项补 kind；此处不得再出现扩展名字面量（契约断言）。
  */
-export function scanVaultPdfs(): Array<{ relPath: string; size: number; mtimeMs: number }> {
+export function scanVaultBooks(): Array<{ relPath: string; size: number; mtimeMs: number; kind: BookKind }> {
   const current = getCurrentVault()
   if (!current) return []
   const booksDir = join(current.rootPath, '.books')
@@ -209,9 +212,10 @@ export function scanVaultPdfs(): Array<{ relPath: string; size: number; mtimeMs:
     }
     const files: string[] = []
     scanVaultFiles(booksDir, booksDir, files, undefined, null, undefined)
-    const out: Array<{ relPath: string; size: number; mtimeMs: number }> = []
+    const out: Array<{ relPath: string; size: number; mtimeMs: number; kind: BookKind }> = []
     for (const abs of files) {
-      if (!abs.toLowerCase().endsWith('.pdf')) continue
+      const kind = bookKindOf(abs)
+      if (!kind) continue
       try {
         const st = statSync(abs)
         if (!st.isFile()) continue
@@ -219,6 +223,7 @@ export function scanVaultPdfs(): Array<{ relPath: string; size: number; mtimeMs:
           relPath: relative(current.rootPath, abs).replace(/\\/g, '/'),
           size: st.size,
           mtimeMs: st.mtimeMs,
+          kind,
         })
       } catch {
         /* 单个不可读跳过 */

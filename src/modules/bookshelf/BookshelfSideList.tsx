@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { BookOpen } from 'lucide-react'
 import { pdfReaderCoverList, pdfReaderListBooks, workspaceGetCurrent } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
-import type { PdfBookListItem } from '../../types'
-import { PdfCover } from './PdfCover'
+import type { BookListItem } from '../../types'
+import { BookCover } from './BookCover'
+import { bookDisplayName } from '../../../electron/lib/kbStore/bookFormats'
 
-type SortFn = (a: PdfBookListItem, b: PdfBookListItem) => number
+type SortFn = (a: BookListItem, b: BookListItem) => number
 
 /** 排序与书架主区同口径：最近读优先，未读按名称 */
 const byRecent: SortFn = (a, b) => {
@@ -24,10 +25,10 @@ const byRecent: SortFn = (a, b) => {
  * 时左栏仍走 PdfRailPanel 三件套，本组件只在「未在读任何书」时渲染。
  */
 export function BookshelfSideList({ onOpenBook }: {
-  onOpenBook: (relPath: string, name: string) => void
+  onOpenBook: (relPath: string, name: string, kind: BookListItem['kind']) => void
 }) {
   const [rootId, setRootId] = useState<string | null>(null)
-  const [books, setBooks] = useState<PdfBookListItem[] | null>(null)
+  const [books, setBooks] = useState<BookListItem[] | null>(null)
   const [coverHits, setCoverHits] = useState<Set<string>>(new Set())
   const [loadErr, setLoadErr] = useState('')
   const coverMem = useRef(new Map<string, string>())
@@ -94,17 +95,19 @@ export function BookshelfSideList({ onOpenBook }: {
           </div>
         )}
         {list && list.map((b) => {
-          const title = b.name.replace(/\.pdf$/i, '')
-          const pct = b.hasProgress && b.totalPages > 0 ? Math.min(100, Math.round((b.lastPage / b.totalPages) * 100)) : 0
+          const title = bookDisplayName(b.relPath)
+          const pct = b.kind === 'txt'
+            ? (b.pct ?? 0)
+            : (b.hasProgress && b.totalPages > 0 ? Math.min(100, Math.round((b.lastPage / b.totalPages) * 100)) : 0)
           return (
             <button
               key={b.relPath}
-              onClick={() => onOpenBook(b.relPath, title)}
+              onClick={() => onOpenBook(b.relPath, title, b.kind)}
               className="kb-item-in group flex w-full items-center gap-2 rounded-md p-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
-              title={b.hasProgress && b.totalPages > 0 ? `第 ${b.lastPage} / ${b.totalPages} 页 · ${pct}%` : title}
+              title={b.kind === 'txt' ? (pct > 0 ? `已读 ${pct}%` : title) : (b.hasProgress && b.totalPages > 0 ? `第 ${b.lastPage} / ${b.totalPages} 页 · ${pct}%` : title)}
             >
               <div className="w-[34px] shrink-0">
-                <PdfCover rootId={rootId ?? ''} relPath={b.relPath} name={b.name} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
+                <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={title} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[12px] text-[var(--text-primary)] group-hover:text-[var(--text-primary)]">{title}</div>

@@ -1,0 +1,174 @@
+// 契约验证：书架升级全格式阅读器一期（bookshelf-reader-upgrade-design §S7）。
+//
+// 覆盖十组断言：
+//   ① bookFormats 纯函数用例（扩展名识别 / 展示名 / 常量↔函数一致性）
+//   ② readerStateSchema 纯函数用例（键归一 / patch 白名单 / 修补）
+//   ③ 负向：readerState.json 单写方（只允许出现在 readerStateVaultRepo.ts）
+//   ④ 负向：knowledgeIndex.ts 剥注释后不得出现 .pdf 字面量（过滤一律走 bookKindOf）
+//   ⑤ IPC 三处同步：readerState:get/patch 在 preload / types / ipc.ts 均有声明
+//   ⑥ DataChangeScope 双侧含 'readerState'
+//   ⑦ Tab 集合纪律：WORKBENCH_PANEL_TAB_IDS 仍 2 项且不含 reading；RIGHT_PANEL_TAB_IDS_ALL 含
+//     reading；parseWorkbenchLayout 接受 'reading'、坏值回落 'widgets'
+//   ⑧ 关标签清阅读态：App.tsx closeTab 函数体内存在 setBookshelfReading(null)
+//   ⑨ decodeText 用例表（UTF-8 无 BOM / 带 BOM / GB18030，hex 内联样本）
+//   ⑩ TabName 仍 16 项（与 verify-pdf-reader 同口径的冻结断言）
+//
+// 运行（项目根目录）：
+//   node --experimental-strip-types --no-warnings .AGENT/scripts/pdf-reader/verify-reader-formats.mjs
+// 期望：全部 ok + exit=0
+
+import { stripComments } from '../shared/strip-comments.mjs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+
+const ROOT = process.cwd()
+let pass = true
+const check = (name, ok, extra = '') => {
+  console.log(`${ok ? '  ok  ' : ' fail '} ${name}${extra ? `  [${extra}]` : ''}`)
+  if (!ok) pass = false
+}
+const read = (p) => readFileSync(join(ROOT, p), 'utf8')
+
+// ===== ① bookFormats 纯函数用例 =====
+console.log('\n--- ① bookFormats：扩展名唯一真相源 ---')
+const F = await import('../../../electron/lib/kbStore/bookFormats.ts')
+check('bookKindOf：txt 大写扩展名', F.bookKindOf('a/b/C.TXT') === 'txt')
+check('bookKindOf：pdf', F.bookKindOf('books/x.pdf') === 'pdf')
+check('bookKindOf：多重点仍按末段', F.bookKindOf('a.pdf.txt') === 'txt')
+check('bookKindOf：未收录返回 null', F.bookKindOf('a.md') === null)
+check('bookKindOf：空串返回 null', F.bookKindOf('') === null)
+check('bookDisplayName：去 txt 后缀', F.bookDisplayName('x/呐喊.txt') === '呐喊')
+check('bookDisplayName：去 pdf 后缀', F.bookDisplayName('x/算法.pdf') === '算法')
+check('bookDisplayName：非书文件原样返回', F.bookDisplayName('x/note.md') === 'note.md')
+check('BOOK_EXTS 每项都能被 bookKindOf 识别（常量↔函数一致）',
+  F.BOOK_EXTS.every((ext) => F.bookKindOf(`x${ext}`) !== null))
+check('BOOK_EXTS 一期 = pdf + txt 两项', F.BOOK_EXTS.length === 2 && F.BOOK_EXTS.includes('.pdf') && F.BOOK_EXTS.includes('.txt'))
+
+// ===== ② readerStateSchema 纯函数用例 =====
+console.log('\n--- ② readerStateSchema：键归一 / patch 白名单 / 修补 ---')
+const S = await import('../../../electron/lib/kbStore/readerStateSchema.ts')
+check('键归一：基础', S.readerKey('r1', 'books/a.txt') === 'r1/books/a.txt')
+check('键归一：反斜杠 → posix', S.readerKey('r1', 'books\\a.txt') === 'r1/books/a.txt')
+check('键归一：去 ./ 前缀', S.readerKey('r1', './a.txt') === 'r1/a.txt')
+check('键归一：空 rootId 拒绝', S.readerKey('', 'a.txt') === '')
+check('键归一：绝对 relPath 拒绝', S.readerKey('r1', '/a.txt') === '')
+check('键反解：relPath 可含子目录', S.readerKeyRel('r1/books/a.txt') === 'books/a.txt')
+check('patch：pct=50 收', (() => { const r = S.sanitizeReaderPatch({ pct: 50 }); return !!r && r.pct === 50 })())
+check('patch：pct=1.5 拒（非整数）', S.sanitizeReaderPatch({ pct: 1.5 }) === null)
+check('patch：pct=101 拒（越界）', S.sanitizeReaderPatch({ pct: 101 }) === null)
+check('patch：pct=-1 拒（越界）', S.sanitizeReaderPatch({ pct: -1 }) === null)
+check('patch：pct 字符串拒', S.sanitizeReaderPatch({ pct: '50' }) === null)
+check('patch：空 patch 拒', S.sanitizeReaderPatch({}) === null)
+check('patch：非对象拒', S.sanitizeReaderPatch('x') === null)
+check('patch：updatedAt 不在白名单', S.sanitizeReaderPatch({ updatedAt: 'x' }) === null)
+const coerced = S.coerceReaderState({ kind: 'bogus', pct: 250, updatedAt: 'KEEP' }, 'NOW')
+check('修补：坏 kind 回落 txt', coerced.kind === 'txt')
+check('修补：越界 pct 夹取到 100', coerced.pct === 100)
+check('修补：合法 updatedAt 保留', coerced.updatedAt === 'KEEP')
+const coerced2 = S.coerceReaderState({ kind: 'pdf', pct: 42 }, 'NOW')
+check('修补：合法 kind pdf 保留', coerced2.kind === 'pdf')
+
+// ===== ③ 负向：readerState.json 单写方 =====
+console.log('\n--- ③ 负向：readerState.json 唯一写方 ---')
+{
+  const offenders = []
+  const walk = (dir) => {
+    let entries = []
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (/\.(ts|tsx|mjs)$/.test(e.name)) {
+        const src = readFileSync(p, 'utf8')
+        if (stripComments(src).includes('readerState.json') && !p.replaceAll('\\', '/').endsWith('electron/lib/kbStore/readerStateVaultRepo.ts')) offenders.push(p)
+      }
+    }
+  }
+  walk(join(ROOT, 'electron'))
+  walk(join(ROOT, 'src'))
+  check('readerState.json 只出现在 readerStateVaultRepo.ts', offenders.length === 0, offenders.join(', '))
+}
+
+// ===== ④ 负向：knowledgeIndex 不再有 .pdf 字面量 =====
+console.log('\n--- ④ 负向：扫描过滤唯一走 bookKindOf ---')
+{
+  const stripped = stripComments(read('electron/lib/kbStore/knowledgeIndex.ts'))
+  check('knowledgeIndex.ts 剥注释后不含 .pdf 字面量', !stripped.includes(".pdf"), '过滤一律走 bookKindOf')
+  check('knowledgeIndex.ts 已 import bookKindOf', stripped.includes('bookKindOf'))
+  check('scanVaultBooks 存在（scanVaultPdfs 已更名）', stripped.includes('function scanVaultBooks'))
+}
+
+// ===== ⑤ IPC 三处同步 =====
+console.log('\n--- ⑤ IPC 三处同步：preload / types / ipc.ts ---')
+{
+  const preload = stripComments(read('electron/preload/index.ts'))
+  const types = stripComments(read('src/types/index.ts'))
+  const ipc = stripComments(read('src/lib/ipc.ts'))
+  for (const ch of ['readerState:get', 'readerState:patch']) {
+    check(`preload 桥含 ${ch}`, preload.includes(`'${ch}'`))
+  }
+  check('types 声明 readerStateGet', types.includes('readerStateGet:'))
+  check('types 声明 readerStatePatch', types.includes('readerStatePatch:'))
+  check('types 声明 ReaderBookState', types.includes('interface ReaderBookState'))
+  check('ipc.ts 封装 readerStateGet', ipc.includes('export const readerStateGet'))
+  check('ipc.ts 封装 readerStatePatch', ipc.includes('export const readerStatePatch'))
+}
+
+// ===== ⑥ DataChangeScope 双侧 =====
+console.log('\n--- ⑥ DataChangeScope 双侧含 readerState ---')
+{
+  const scopeSrc = stripComments(read('src/lib/dataChanged.ts'))
+  check("渲染层 union 含 'readerState'", scopeSrc.includes("'readerState'"))
+  const repoSrc = stripComments(read('electron/database/repositories/readerStateRepo.ts'))
+  check("主进程 broadcastDataChanged('readerState')", repoSrc.includes("broadcastDataChanged('readerState')"))
+}
+
+// ===== ⑦ Tab 集合纪律 =====
+console.log('\n--- ⑦ Tab 集合纪律：双集合刻意不同 ---')
+{
+  const L = await import('../../../src/lib/workbenchLayout.ts')
+  check('WORKBENCH_PANEL_TAB_IDS 仍 2 项（widgets/ai）', L.WORKBENCH_PANEL_TAB_IDS.length === 2 && !L.WORKBENCH_PANEL_TAB_IDS.includes('reading'))
+  check('RIGHT_PANEL_TAB_IDS_ALL 含 reading', L.RIGHT_PANEL_TAB_IDS_ALL.includes('reading'))
+  const parsed = L.parseWorkbenchLayout(JSON.stringify({ rightTab: 'reading' }))
+  check("parseWorkbenchLayout 接受 'reading'", parsed.rightTab === 'reading')
+  const fallback = L.parseWorkbenchLayout(JSON.stringify({ rightTab: 'bogus' }))
+  check("parseWorkbenchLayout 坏值回落 'widgets'", fallback.rightTab === 'widgets')
+  const panel = stripComments(read('src/components/workbench/WorkbenchRightPanel.tsx'))
+  check('rightTab===reading 关书回落表达式在位', panel.includes("layout.rightTab === 'reading'") && panel.includes('visiblePanelTabs[0]'))
+}
+
+// ===== ⑧ 关标签清阅读态 =====
+console.log('\n--- ⑧ closeTab 清阅读态（书架标签删除 → 阅读入口消失） ---')
+{
+  const app = stripComments(read('src/App.tsx'))
+  const i = app.indexOf('const closeTab = useCallback')
+  const body = i >= 0 ? app.slice(i, i + 600) : ''
+  check('closeTab 函数体内存在 setBookshelfReading(null)', body.includes('setBookshelfReading(null)'))
+}
+
+// ===== ⑨ decodeText 用例表 =====
+console.log('\n--- ⑨ decodeText：编码探测（hex 内联样本） ---')
+{
+  const { decodeText } = await import('../../../src/lib/textDecode.ts')
+  const utf8 = Buffer.from('第一行\n第二段正文。', 'utf8')
+  check('UTF-8 无 BOM', decodeText(new Uint8Array(utf8)) === '第一行\n第二段正文。')
+  const utf8Bom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), utf8])
+  check('UTF-8 带 BOM（去 BOM 解码）', decodeText(new Uint8Array(utf8Bom)) === '第一行\n第二段正文。')
+  const utf16le = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('中文阅读', 'utf16le')])
+  check('UTF-16LE BOM', decodeText(new Uint8Array(utf16le)) === '中文阅读')
+  // GB18030 样本：中文阅读（GBK 区 D6D0 CEC4 D4C4 B6C1；Buffer 不支持该编码名，内联 hex）
+  const gb = Buffer.from('D6D0CEC4D4C4B6C1', 'hex')
+  check('GB18030 兜底', decodeText(new Uint8Array(gb)) === '中文阅读')
+}
+
+// ===== ⑩ TabName 冻结 =====
+console.log('\n--- ⑩ TabName 冻结（仍 16 项） ---')
+{
+  const appModulesSrc = stripComments(read('src/lib/appModules.ts'))
+  const moduleBlock = appModulesSrc.slice(appModulesSrc.indexOf('export const APP_MODULES'), appModulesSrc.indexOf('as const satisfies'))
+  const ids = [...moduleBlock.matchAll(/id:\s*'([A-Za-z]+)'/g)].map((m) => m[1])
+  check('APP_MODULES 仍为 15 项（编辑器退役后冻结，新增即 FAIL）', ids.length === 15, `实得 ${ids.length}: ${ids.join(',')}`)
+}
+
+console.log(`\n${pass ? '全部通过' : '存在失败项'}`)
+process.exit(pass ? 0 : 1)

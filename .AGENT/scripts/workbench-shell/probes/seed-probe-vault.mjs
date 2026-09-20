@@ -28,6 +28,23 @@ for (let i = 1; i <= 6; i++) {
     'utf8',
   )
 }
+// 1c. 全格式阅读器一期（2026-09-20）：--add-books → .books/ 落一本 TXT 样书
+//     （几十段中文、空行分段），probe-reading-panel.mjs 断言链的 fixture
+if (process.argv.includes('--add-books')) {
+  const booksDir = join(fixture, '.books')
+  mkdirSync(booksDir, { recursive: true })
+  const bookPath = join(booksDir, '探针样书.txt')
+  if (!existsSync(bookPath)) {
+    const paras = []
+    for (let i = 1; i <= 60; i++) {
+      paras.push(`第 ${i} 段：这是探针样书的正文段落，用于驱动真实滚动并验证 TXT 阅读器的进度落盘与右栏阅读侧栏联动。`)
+      paras.push('')
+    }
+    writeFileSync(bookPath, paras.join('\n'), 'utf8')
+    console.log('seeded book:', bookPath)
+  }
+}
+
 if (!existsSync(join(fixture, '.knowbase', 'meta.json'))) {
   writeFileSync(join(fixture, '.knowbase', 'meta.json'), JSON.stringify({ name: '探针测试仓库', createdAt: new Date().toISOString() }), 'utf8')
 }

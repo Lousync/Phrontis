@@ -217,7 +217,8 @@ export function readWorkspaceFile(absPath: string): ReadFileResult {
 // ===== 二进制范围读取（PDF 阅读器懒加载通道，plugin-pdf-reader-design §4）=====
 
 /** 范围读取白名单扩展名：范围通道 = 二进制放行口，只允许可视化文档类型（防变成任意二进制窃取口） */
-const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg']
+// txt = 全格式阅读器一期（2026-09-20）：TxtReaderView 经 range 分块读 .books 样书（20MB 上限由渲染层限）
+const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'txt']
 
 export interface ReadRangeResult {
   /** base64 编码的 [offset, offset+len) 段数据（不足段取到文件尾） */

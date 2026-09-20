@@ -4,13 +4,16 @@ import {
   pdfReaderCoverList, pdfReaderListBooks, workspaceGetCurrent,
 } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
-import type { PdfBookListItem } from '../../types'
-import { PdfCover } from './PdfCover'
+import type { BookKind, BookListItem } from '../../types'
+import { BookCover } from './BookCover'
+import { bookDisplayName } from '../../../electron/lib/kbStore/bookFormats'
 
 // 2026-09-17 拍板「书架内自渲染」：点书在书架标签页内部打开阅读器（书架 ⇄ 阅读器），
 // 不再借编辑器文档标签（编辑器 PDF 能力保留给知识库附件等既有入口）。
 // PdfReaderView 内含 pdfjs —— lazy 拆 chunk（与 editor 同一模块Specifier，Vite 去重共享 chunk）。
+// TxtReaderView 同口径 lazy（纯渲染层，chunk 极小，但对齐拆分惯例）。
 const PdfReaderView = lazy(() => import('../../components/shared/pdf/PdfReaderView').then((m) => ({ default: m.PdfReaderView })))
+const TxtReaderView = lazy(() => import('../../components/shared/txt/TxtReaderView').then((m) => ({ default: m.TxtReaderView })))
 
 /**
  * 书架（v3.4.0 PDF 阅读体验整包批次 2，方案 §2/§8）：
@@ -21,7 +24,7 @@ const PdfReaderView = lazy(() => import('../../components/shared/pdf/PdfReaderVi
  * 模块根节点 h-full（槽位容器是块级 div，flex-1 无效）。
  */
 
-type SortFn = (a: PdfBookListItem, b: PdfBookListItem) => number
+type SortFn = (a: BookListItem, b: BookListItem) => number
 
 /** 排序 = 最近读优先（updatedAt desc），未读按名称（方案 §8） */
 const byRecent: SortFn = (a, b) => {
@@ -33,13 +36,13 @@ const byRecent: SortFn = (a, b) => {
 
 export function BookshelfModule({ isActive = true, reading = null, onOpenBook, onCloseBook }: {
   isActive?: boolean
-  /** 正在阅读的书（状态上收 App：书架模块消费 + 左栏大纲态跟随） */
-  reading?: { relPath: string; name: string } | null
-  onOpenBook?: (relPath: string, name: string) => void
+  /** 正在阅读的书（状态上收 App：书架模块消费 + 左栏大纲态跟随 + 右栏阅读入口），kind 决定阅读引擎 */
+  reading?: { relPath: string; name: string; kind: BookKind } | null
+  onOpenBook?: (relPath: string, name: string, kind: BookKind) => void
   onCloseBook?: () => void
 }) {
   const [rootId, setRootId] = useState<string | null>(null)
-  const [books, setBooks] = useState<PdfBookListItem[] | null>(null)
+  const [books, setBooks] = useState<BookListItem[] | null>(null)
   /** 封面缓存命中集（coverList 索引 + mtime 对账通过）——PdfCover 据此走 coverGet 直取 */
   const [coverHits, setCoverHits] = useState<Set<string>>(new Set())
   const [loadErr, setLoadErr] = useState('')
@@ -87,8 +90,8 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
   }, [])
 
   // 左栏 bookshelf 模块态（批次 6）：三件套（目录/缩略图/书签）经 portal 挂进左栏 slot
-  const openBook = useCallback((b: PdfBookListItem) => {
-    onOpenBook?.(b.relPath, b.name.replace(/\.pdf$/i, ''))
+  const openBook = useCallback((b: BookListItem) => {
+    onOpenBook?.(b.relPath, bookDisplayName(b.relPath), b.kind)
   }, [onOpenBook])
 
   // 阅读视图（书架 ⇄ 阅读器，模块内切换；Hook 全部在早退之前）
@@ -107,22 +110,26 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                 <span className="text-[12px]">正在准备阅读器…</span>
               </div>
             }>
-              <PdfReaderView rootId={rootId} relPath={reading.relPath} name={reading.name}
-                backLabel="返回书架" onBack={() => onCloseBook?.()} />
+              {reading.kind === 'txt' ? (
+                <TxtReaderView rootId={rootId} relPath={reading.relPath} name={reading.name}
+                  backLabel="返回书架" onBack={() => onCloseBook?.()} />
+              ) : (
+                <PdfReaderView rootId={rootId} relPath={reading.relPath} name={reading.name}
+                  backLabel="返回书架" onBack={() => onCloseBook?.()} />
+              )}
             </Suspense>
           ) : null}
         </div>
       </div>
     )
   }
-
   // 未打开仓库
   if (rootId === null && books !== null) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 bg-[var(--bg-primary)] text-[var(--text-muted)]">
         <BookOpen size={40} strokeWidth={1.5} />
         <div className="text-[13.5px]">书架</div>
-        <div className="max-w-[280px] text-center text-[11.5px] leading-relaxed">先打开一个仓库，书架会自动收拢 .books 目录里的 PDF</div>
+        <div className="max-w-[280px] text-center text-[11.5px] leading-relaxed">先打开一个仓库，书架会自动收拢 .books 目录里的书</div>
       </div>
     )
   }
@@ -160,15 +167,15 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                   key={`c-${b.relPath}`}
                   onClick={() => openBook(b)}
                   className="kb-item-in group flex w-[210px] shrink-0 items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 text-left hover:border-[var(--accent)]"
-                  title={`第 ${b.lastPage} 页 · 打开继续阅读`}
+                  title={b.kind === 'txt' ? `已读 ${b.pct ?? 0}% · 打开继续阅读` : `第 ${b.lastPage} 页 · 打开继续阅读`}
                 >
                   <div className="w-[44px] shrink-0" style={{ aspectRatio: '3 / 4' }}>
-                    <PdfCover rootId={rootId ?? ''} relPath={b.relPath} name={b.name} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
+                    <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={bookDisplayName(b.relPath)} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{b.name.replace(/\.pdf$/i, '')}</div>
+                    <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{bookDisplayName(b.relPath)}</div>
                     <div className="mt-1 flex items-center gap-1 text-[11px] text-[var(--accent)]">
-                      <Play size={10} />第 {b.lastPage} 页
+                      <Play size={10} />{b.kind === 'txt' ? `已读 ${b.pct ?? 0}%` : `第 ${b.lastPage} 页`}
                     </div>
                   </div>
                 </button>
@@ -188,12 +195,15 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                 title={b.relPath}
               >
                 <div className="relative transition-shadow group-hover:shadow-[0_8px_22px_rgba(0,0,0,0.14)] rounded-[10px]">
-                  <PdfCover rootId={rootId ?? ''} relPath={b.relPath} name={b.name} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
-                  {b.hasProgress && (
+                  <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={bookDisplayName(b.relPath)} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
+                  {b.kind === 'pdf' && b.hasProgress && (
                     <span className="absolute bottom-1.5 right-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">P{b.lastPage}</span>
                   )}
+                  {b.kind === 'txt' && (b.pct ?? 0) > 0 && (
+                    <span className="absolute bottom-1.5 right-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">{b.pct}%</span>
+                  )}
                 </div>
-                <div className="mt-1.5 truncate px-0.5 text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{b.name.replace(/\.pdf$/i, '')}</div>
+                <div className="mt-1.5 truncate px-0.5 text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{bookDisplayName(b.relPath)}</div>
               </button>
             ))}
           </div>

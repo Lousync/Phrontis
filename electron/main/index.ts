@@ -34,6 +34,7 @@ import { registerBlogTemplateHandlers } from '../database/repositories/blogTempl
 import { registerBlogSummaryHandlers } from '../database/repositories/blogSummaryRepo'
 import { registerQuizHandlers } from '../database/repositories/quizRepo'
 import { registerPdfReaderHandlers } from '../database/repositories/pdfReaderRepo'
+import { registerReaderStateHandlers } from '../database/repositories/readerStateRepo'
 import { startSuperviseScheduler, stopSuperviseScheduler, enqueueExternalPush } from '../lib/pushService'
 import { initScheduleReminders } from '../lib/scheduleReminder'
 import { initPasswordFiller, destroyPasswordFiller } from './passwordFiller'
@@ -872,6 +873,8 @@ app.whenReady().then(async () => {
   registerQuizHandlers({ getSettingValue: (key) => settingsCache[key] })
   // PDF 阅读体验整包（v3.4.0 第 2 项）：进度/书签/封面缓存/导入六通道
   registerPdfReaderHandlers()
+  // 阅读状态（书架升级全格式阅读器一期）：txt 进度两通道
+  registerReaderStateHandlers()
   // 开发者工具(内部对 app.isPackaged 自行守卫,打包版不注册任何 handler)
   registerDevtoolsHandlers()
   registerUpdateHandlers({ getSettingValue: (key) => settingsCache[key] })

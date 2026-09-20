@@ -102,7 +102,7 @@ console.log('\n--- ④ TabName 冻结 ---')
 const appModulesSrc = stripComments(readFileSync(join(ROOT, 'src/lib/appModules.ts'), 'utf8'))
 const moduleBlock = appModulesSrc.slice(appModulesSrc.indexOf('export const APP_MODULES'), appModulesSrc.indexOf('as const satisfies'))
 const ids = [...moduleBlock.matchAll(/id:\s*'([A-Za-z]+)'/g)].map((m) => m[1])
-check('APP_MODULES 仍为 16 项（冻结，新增即 FAIL）', ids.length === 16, `实得 ${ids.length}: ${ids.join(',')}`)
+check('APP_MODULES 仍为 15 项（编辑器退役后冻结，新增即 FAIL）', ids.length === 15, `实得 ${ids.length}: ${ids.join(',')}`)
 check("bookshelf 仍为入口产生型（bar:false / startable:false）", /id:\s*'bookshelf',\s*label:\s*'书架',\s*bar:\s*false,\s*startable:\s*false/.test(moduleBlock))
 
 // ===== ⑤ pdfLayout 纯函数（批次 3 落地后自动启用）=====

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, MoreHorizontal, History, FileText, MonitorX } from 'lucide-react'
-import type { KnowledgePage } from '../../types'
+import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX } from 'lucide-react'
+import type { BookKind, KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
 import { useSettings } from '../../lib/SettingsContext'
@@ -17,6 +17,7 @@ import { PomoWidget } from './widgets/PomoWidget'
 import { PasswordWidget } from './widgets/PasswordWidget'
 import { NavWidget } from './widgets/NavWidget'
 import { AiUsagePanel } from './AiUsagePanel'
+import { ReadingSidePanel } from './ReadingSidePanel'
 import { ChatBody } from '../shared/AssistantPanel/ChatBody'
 import { useAssistantChat } from '../shared/AssistantPanel/useAssistantChat'
 import type { PluginTool } from '../../lib/pluginService'
@@ -81,6 +82,10 @@ interface Props {
   onExpandAiChat?: () => void
   /** token 面板「改动文件」行点击 → 编辑区打开 */
   onOpenChangeFile?: (relPath: string) => void
+  /** 有书在读时出现第三个条件 Tab「📖 阅读」（全格式阅读器一期）；null/缺省 = 无书在读 */
+  reading?: { relPath: string; name: string; kind: BookKind } | null
+  /** 阅读侧栏「书签 → 定位原文」（仅 pdf）：App 负责切回书架标签 + 派发跳页事件 */
+  onLocatePdfPage?: (page: number) => void
 }
 
 /** 切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
@@ -94,7 +99,7 @@ const WIDGET_META: Record<string, { icon: string; label: string }> = {
   nav: { icon: '🌐', label: '网址导航' },
 }
 
-export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile }: Props) {
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, onLocatePdfPage }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -106,8 +111,13 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
     () => WORKBENCH_PANEL_TAB_IDS.filter((id) => !layout.panelTabsHidden.includes(id)),
     [layout.panelTabsHidden],
   )
-  const effectiveTab = visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0]
-  const setPanelTab = (id: 'widgets' | 'ai') => patch({ rightTab: id })
+  // 'reading' 是条件性 Tab：有书在读（reading 非空）才可成为有效态；
+  // 关书后回落 widgets/ai（不落 'reading'）——持久化值只在用户点 Tab 时写，关书不改写。
+  const readingOn = !!reading
+  const effectiveTab = layout.rightTab === 'reading'
+    ? (readingOn ? 'reading' : visiblePanelTabs[0])
+    : (visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0])
+  const setPanelTab = (id: 'widgets' | 'ai' | 'reading') => patch({ rightTab: id })
 
   // AI 态对话控制器（批次5）：与悬浮侧栏 / aiChat 标签共用 ChatBody 会话基建。
   // 实例常驻（右栏折叠/隐藏只是宽度变化，组件不卸载，输入草稿与会话视角不丢）；
@@ -243,7 +253,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
         data-wb="rightPanel"
         className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        {/* ---- 双 Tab 头（🧩 小工具 / 🤖 AI）+ ⋯ 面板 Tab 管理 ---- */}
+        {/* ---- Tab 头（🧩 小工具 / 🤖 AI / 📖 阅读[条件性]）+ ⋯ 面板 Tab 管理 ---- */}
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--border-color)] px-2">
           {visiblePanelTabs.map((id) => (
             <button
@@ -262,6 +272,23 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               {id === 'widgets' ? <ToolboxIcon size={14} /> : <Bot size={14} />}
             </button>
           ))}
+          {/* 阅读 Tab：有书在读才出现（条件性入口，不进 ⋯ 菜单）；点击同时展开右栏 */}
+          {reading && (
+            <button
+              data-wb="rpTab"
+              data-wb-rp-tab="reading"
+              data-wb-rp-active={effectiveTab === 'reading' ? '1' : '0'}
+              onClick={() => patch({ rightTab: 'reading', rightCollapsed: false })}
+              title="阅读"
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                effectiveTab === 'reading'
+                  ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <BookOpen size={14} />
+            </button>
+          )}
           <div className="ml-auto">
             <button
               ref={ptMoreRef}
@@ -368,6 +395,9 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               </div>
             </div>
           </div>
+        ) : effectiveTab === 'reading' && reading ? (
+          /* ---- 阅读态（全格式阅读器一期）：书名/进度 + 书签 + 摘录占位 ---- */
+          <ReadingSidePanel reading={reading} onLocatePdfPage={onLocatePdfPage} />
         ) : (
           /* ---- AI 态（批次5，方案 §4）：aiChat 标签开着 → token 面板原位替换；否则小对话 + ⤢ ---- */
           aiChatOpen && onOpenChangeFile ? (

@@ -1190,18 +1190,38 @@ export interface PdfBookState {
 }
 /** pdfReader:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
 export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks'>>
-/** 书架清单条目（自动库：扫描 join 进度，不落盘） */
-export interface PdfBookListItem {
+/** 书架清单条目（自动库：扫描 join 进度，不落盘）。一期 kind = pdf | txt */
+export interface BookListItem {
   relPath: string
   name: string
   size: number
   /** PDF 文件 mtimeMs（封面缓存失效判据） */
   mtime: number
+  /** 书籍种类（pdf / txt）——唯一真相源 = electron/lib/kbStore/bookFormats.ts 的 BOOK_EXTS，
+   *  渲染层侧此字面量与主进程侧由契约脚本 verify-reader-formats.mjs 双向断言同步（tsconfig.web
+   *  只含 src/**，不能直接复导出主进程文件） */
+  kind: BookKind
   lastPage: number
-  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母 */
+  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母（txt 恒 0，用 pct） */
   totalPages: number
+  /** txt 阅读进度 0..100（仅 kind==='txt' 有值） */
+  pct?: number
   hasProgress: boolean
   updatedAt: string | null
+}
+
+/** 书籍种类（渲染层侧镜像；与 electron/lib/kbStore/bookFormats.ts 保持同步，契约脚本双向断言） */
+export type BookKind = 'pdf' | 'txt'
+
+/** readerState:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
+export type ReaderStatePatch = { pct: number }
+/** 单本（txt）书阅读状态（readerState.json 经 IPC 透出） */
+export interface ReaderBookState {
+  kind: BookKind
+  /** 阅读进度 0..100 整数 */
+  pct: number
+  /** 冲突检测基准；patch 时服务端重新生成，客户端只读 */
+  updatedAt: string
 }
 
 /** 写文件结果：conflict=true 表示磁盘已被外部修改（或已删除），需用户决策 */
@@ -1516,12 +1536,15 @@ export interface ElectronAPI {
   workspaceSaveImage: (rootId: string, payload: { fileName: string; dataBase64: string }) => Promise<{ ok: boolean; name?: string; relPath?: string; error?: string }>
   workspaceReadRange: (rootId: string, relPath: string, offset: number, length: number) => Promise<WorkspaceRangeResult & { error?: string }>
   // ===== PDF 阅读体验整包（v3.4.0 第 2 项）：进度/书签/封面缓存/导入 =====
-  pdfReaderListBooks: () => Promise<{ ok: boolean; books?: PdfBookListItem[]; error?: string }>
+  pdfReaderListBooks: () => Promise<{ ok: boolean; books?: BookListItem[]; error?: string }>
   pdfReaderGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; state?: PdfBookState | null; error?: string }>
   pdfReaderPatch: (rootId: string, relPath: string, patch: PdfBookPatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; state?: PdfBookState; conflict?: boolean; error?: string }>
   pdfReaderCoverList: () => Promise<{ ok: boolean; covers?: Record<string, { mtimeMs: number; file: string }>; error?: string }>
   pdfReaderCoverGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; dataUrl?: string | null; error?: string }>
   pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => Promise<{ ok: boolean; error?: string }>
+  // ===== 阅读状态（书架升级全格式阅读器一期）：txt 进度 =====
+  readerStateGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; state?: ReaderBookState | null; error?: string }>
+  readerStatePatch: (rootId: string, relPath: string, patch: ReaderStatePatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; state?: ReaderBookState; conflict?: boolean; error?: string }>
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>

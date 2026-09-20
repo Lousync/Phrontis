@@ -7,6 +7,9 @@ import { useDataChanged } from '../../../lib/dataChanged'
 import { OutlineTree, destToPageNum, loadOutline, type OutlineNode } from './PdfOutlineTree'
 import { PdfThumbGrid } from './PdfThumbGrid'
 import { PdfBookmarkList } from './PdfBookmarkList'
+import { KB_PDF_PAGE_CHANGED, KB_PDF_GOTO_PAGE } from './pdfEvents'
+// 事件常量已抽到零依赖的 pdfEvents.ts（防 pdfjs 被常量消费方拖进主包）；此处再导出保持既有 import 路径可用
+export { KB_PDF_PAGE_CHANGED, KB_PDF_GOTO_PAGE } from './pdfEvents'
 
 // 同源 worker（与阅读器同口径）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -34,10 +37,6 @@ class RailRangeTransport extends pdfjsLib.PDFDataRangeTransport {
 }
 
 /** 阅读器 → 左栏：当前页广播（阅读器在 pageNum/viewMode 变化时派发） */
-export const KB_PDF_PAGE_CHANGED = 'kb-pdf-page-changed'
-/** 左栏 → 阅读器：跳页请求 */
-export const KB_PDF_GOTO_PAGE = 'kb-pdf-goto-page'
-
 interface Props {
   /** 当前编辑器激活文档（仅 PDF 时非空）——App 经 kb-editor-doc-changed 维护 */
   readerDoc: { relPath: string } | null

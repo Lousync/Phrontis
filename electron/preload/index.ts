@@ -616,6 +616,9 @@ const api = {
   pdfReaderCoverList: () => ipcRenderer.invoke('pdfReader:coverList'),
   pdfReaderCoverGet: (rootId: string, relPath: string) => ipcRenderer.invoke('pdfReader:coverGet', rootId, relPath),
   pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => ipcRenderer.invoke('pdfReader:coverSave', rootId, relPath, dataUrl, expectedMtimeMs),
+  // 阅读状态（书架升级全格式阅读器一期）：txt 进度
+  readerStateGet: (rootId: string, relPath: string) => ipcRenderer.invoke('readerState:get', rootId, relPath),
+  readerStatePatch: (rootId: string, relPath: string, patch: unknown, expectedUpdatedAt?: string) => ipcRenderer.invoke('readerState:patch', rootId, relPath, patch, expectedUpdatedAt),
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => ipcRenderer.invoke('ws:writeFile', rootId, relPath, content, expectedMtimeMs),
   // 归档三条通道（ws:setMdStatus / ws:setArchiveStatus / ws:getArchiveEntries）已于 2026-09-20 随归档退役删除
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => ipcRenderer.invoke("ws:createFile", rootId, relPath, content),
