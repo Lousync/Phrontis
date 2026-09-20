@@ -72,7 +72,7 @@ export const LESSONS: Lesson[] = [
     minutes: '30 秒',
     goal: '分清「活动栏 / 编辑区 / 知识库」各自负责什么',
     docId: '快速上手',
-    action: { label: '去编辑区看看', goto: 'editor' },
+    action: { label: '去笔记区看看', goto: 'knowledge' },
     ask: ['这三个区最常搞混的是哪一步？', '我可以只用知识库吗？'],
     body: (
       <>
@@ -89,7 +89,7 @@ export const LESSONS: Lesson[] = [
     minutes: '2 分钟',
     goal: '真的在仓库目录里落下一个 .md 文件',
     docId: '博客写作',
-    action: { label: '新建第一篇笔记', goto: 'editor' },
+    action: { label: '新建第一篇笔记', goto: 'knowledge' },
     ask: ['新建文件有哪几种方式？', '文件默认存在哪个目录？'],
     body: (
       <>
@@ -105,7 +105,7 @@ export const LESSONS: Lesson[] = [
     minutes: '3 分钟',
     goal: '理解「什么样的文件才算知识库页面」',
     docId: '常见问题',
-    action: { label: '在编辑器中打开该文件', goto: 'editor' },
+    action: { label: '在笔记区中打开该文件', goto: 'knowledge' },
     ask: ['这一步为什么要写 id？', '给我一个 frontmatter 模板'],
     body: (
       <>

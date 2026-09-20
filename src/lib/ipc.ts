@@ -297,13 +297,6 @@ export const pdfReaderCoverList = (): Promise<{ ok: boolean; covers?: Record<str
 export const pdfReaderCoverGet = (rootId: string, relPath: string): Promise<{ ok: boolean; dataUrl?: string | null; error?: string }> => a().pdfReaderCoverGet(rootId, relPath)
 export const pdfReaderCoverSave = (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number): Promise<{ ok: boolean; error?: string }> =>
   a().pdfReaderCoverSave(rootId, relPath, dataUrl, expectedMtimeMs)
-export const workspaceSetMdStatus = (rootId: string, relPath: string, draft: boolean) => a().workspaceSetMdStatus(rootId, relPath, draft)
-/** 全类型归档（docs/vault-archive-all-files-design.md §4.1）：md 走 frontmatter 双态，非 md/目录走清单 */
-export const workspaceSetArchiveStatus = (rootId: string, relPath: string, archive: boolean): Promise<{ ok: boolean; count?: number; error?: string }> =>
-  a().workspaceSetArchiveStatus(rootId, relPath, archive)
-/** 归档清单条目（渲染层右键菜单态：目录是否已归档） */
-export const workspaceGetArchiveEntries = (rootId: string): Promise<{ ok: boolean; entries?: Array<{ id: string; path: string; type: 'file' | 'dir'; archivedAt: string }>; error?: string }> =>
-  a().workspaceGetArchiveEntries(rootId)
 /** UI 优化条目5.3：应用内文件落盘后广播 `kb:file-saved`，供按需回读的消费方（AI教学右栏素材库 /
  *  会话要求弹层）即时同步。主进程程序写入另发 `aiTeach:tree-refresh`；应用外编辑由消费方在激活/聚焦时回读。 */
 export const workspaceWriteFile = (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) =>

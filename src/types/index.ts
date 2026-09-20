@@ -33,7 +33,7 @@ export interface EntryFilter { date?: string; tagId?: string; pinnedOnly?: boole
 export interface CreateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date: string; tags?: string[]; states?: string }
 export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date?: string; isPinned?: boolean; isStarred?: boolean; tags?: string[]; states?: string }
 export interface Tag { id: string; name: string; color: string }
-export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'editor' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph'
+export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph'
 
 // ===== 更新说明（release notes）=====
 // 主进程侧的同一份契约见 electron/lib/releaseNotes/types.ts
@@ -1523,10 +1523,6 @@ export interface ElectronAPI {
   pdfReaderCoverGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; dataUrl?: string | null; error?: string }>
   pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => Promise<{ ok: boolean; error?: string }>
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
-  workspaceSetMdStatus: (rootId: string, relPath: string, draft: boolean) => Promise<{ ok: boolean; error?: string }>
-  /** 全类型归档（docs/vault-archive-all-files-design.md）：md 分流 frontmatter 双态，非 md/目录走清单 */
-  workspaceSetArchiveStatus: (rootId: string, relPath: string, archive: boolean) => Promise<{ ok: boolean; count?: number; error?: string }>
-  workspaceGetArchiveEntries: (rootId: string) => Promise<{ ok: boolean; entries?: Array<{ id: string; path: string; type: 'file' | 'dir'; archivedAt: string }>; error?: string }>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   /** 粘贴系统剪贴板里的外部文件/目录到 relDir；srcPaths 由渲染层 paste 事件取得（见 WorkspacePasteResult） */

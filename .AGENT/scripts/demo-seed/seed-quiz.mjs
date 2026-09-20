@@ -85,7 +85,6 @@ function loadPages() {
   const out = []
   for (const f of walk(ROOT)) {
     const rel = path.relative(ROOT, f).split(path.sep).join('/')
-    if (rel.startsWith('归档/')) continue // 归档是镜像副本，忽略
     const text = fs.readFileSync(f, 'utf-8')
     const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)
     if (!m) continue

@@ -21,7 +21,10 @@ import {
   getKnowledgeIndexWarnings,
   workspaceRename, workspaceGetCurrent,
   workspaceListDir, workspaceCreateFile, workspaceMkdir,
+  workspacePasteExternal, getPathForFile,
 } from '../../lib/ipc'
+import { hasTextPasteTarget } from '../../lib/pasteTarget'
+import { notifyDataChanged } from '../../lib/dataChanged'
 import { showToast } from '../../lib/toast'
 // 页签判定消费共享 tabPolicy（笔记合并 Phase 1 §1.3）：与编辑器模块同一套「该不该消失 / 关闭落点」
 import { previewReplacement, landingAfterClose } from '../../lib/tabPolicy'
@@ -1324,6 +1327,62 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, readingMode, enterReading, exitReading])
+
+  // ---- 外部文件粘贴（2026-09-20 阶段四：能力自编辑器模块上移，随其退役）----
+  // 资源管理器里 Ctrl+C 文件 → 本模块 Ctrl+V：剪贴板带 File 列表且没有文本接收方时接管，
+  // 落到当前文件所在目录（无激活文件 = 仓库根）。文本粘贴原样放行（hasTextPasteTarget 判定）。
+  const pasteExternalFiles = useCallback(async (files: File[], dirRel: string) => {
+    const root = vaultRootRef.current
+    if (!root || files.length === 0) return
+    const srcPaths: string[] = []
+    for (const f of files) {
+      try { const p = getPathForFile(f); if (p) srcPaths.push(p) } catch { /* 取不到路径的条目丢弃 */ }
+    }
+    if (srcPaths.length === 0) return
+    try {
+      const res = await workspacePasteExternal(root, dirRel, srcPaths)
+      if (res.pasted.length === 0) {
+        // 全失败时把**具体原因**带出来：主进程只在循环走完却一项没成功时不给 reason，
+        // 此时第一条 skipped 的原因（越界/符号链接/权限…）才是用户能据此行动的信息
+        showToast({
+          type: 'warning',
+          message: res.reason === 'empty'
+            ? '剪贴板里没有可粘贴的文件'
+            : `粘贴失败：${res.error || res.skipped[0]?.reason || '未知原因'}`,
+        })
+        return
+      }
+      if (res.pasted.some((n) => n.toLowerCase().endsWith('.md'))) {
+        notifyDataChanged('knowledge') // 让本模块与保活模块重读（md 会影响列表/图谱）
+      }
+      const skippedNote = res.skipped.length > 0 ? `，已跳过 ${res.skipped.length} 项` : ''
+      showToast({
+        type: res.skipped.length > 0 ? 'warning' : 'success',
+        message: res.pasted.length === 1
+          ? `已粘贴「${res.pasted[0]}」${skippedNote}`
+          : `已粘贴 ${res.pasted.length} 项${skippedNote}`,
+      })
+    } catch (e) {
+      showToast({ type: 'error', message: `粘贴失败：${(e as Error).message}` })
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isActive) return
+    const onPaste = (e: ClipboardEvent) => {
+      const files = e.clipboardData?.files
+      if (!files || files.length === 0) return
+      if (hasTextPasteTarget(e)) return
+      e.preventDefault()
+      // 落点：当前打开文件所在目录 > 仓库根（activePageId 可能是 draft:<rel> 伪页，两种都取真实 relPath）
+      const active = allPages.find((p) => p.id === activePageIdRef.current)
+      const activeRel = active?.path ?? (activePageIdRef.current?.startsWith('draft:') ? activePageIdRef.current.slice(6) : null)
+      const dirRel = activeRel && activeRel.includes('/') ? activeRel.slice(0, activeRel.lastIndexOf('/')) : ''
+      void pasteExternalFiles(Array.from(files), dirRel)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [isActive, allPages, pasteExternalFiles])
 
   // --- outline ---
   const activePageForOutline = useMemo(() => {

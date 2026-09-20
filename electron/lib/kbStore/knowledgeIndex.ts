@@ -5,7 +5,6 @@ import { getCurrentVault, KB_INBOX_DIR } from './vaultContext'
 import { readJson, writeJson, deleteFile } from './jsonStore'
 import { parseMarkdown } from './mdStore'
 import { WELCOME_DOC_FILENAME } from './welcomeDoc'
-import { findCoveringDirEntry, gcArchiveEntries, isArchivedByManifest, readManifest, type ArchivedManifest } from './archivedFilesRepo'
 import { getVaultIgnore, isDirIgnored, getVaultIgnoreState, auditIgnoreRules, type VaultIgnoreResult, type VaultIgnoreState } from './ignoreFile'
 import { clearSemanticsMemo } from './semanticStore'
 import type { Ignore } from 'ignore'
@@ -514,10 +513,8 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
   }
 
   // 第一遍：读入全部条目（目录派生需先知道「所有知识页所在目录」，再统一补建分类）
-  // 全类型归档（§5）：先 GC 对账清单，再读清单；md 由 frontmatter 判定、非 md 由清单判定
-  const gcRemoved = gcArchiveEntries()
-  if (gcRemoved > 0) warnings.push(`归档清单已清理 ${gcRemoved} 个磁盘已消失的条目`)
-  const manifest: ArchivedManifest = readManifest()
+  // 阶段三（2026-09-20）：归档清单（archived-files.json）退役 —— md 按 frontmatter id / auto: 兜底，
+  // 非 md 一律收录，不再有「清单登记才进库」的分支。
   const docs: Array<{ abs: string; rel: string; doc: ReturnType<typeof parseMarkdown>; entryKind: 'doc' | 'file' }> = []
   for (const abs of files) {
     try {
@@ -560,9 +557,8 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
         docs.push({ abs, rel, doc, entryKind: 'doc' })
         continue
       }
-      // 非 md：仅清单归档的文件入索引（元信息卡 / html 沙箱）；不读内容（二进制可能很大）
-      if (!isArchivedByManifest(rel, manifest)) continue
-      const exact = manifest.entries.find((e) => e.type === 'file' && e.path === rel)
+      // 非 md：**一律收录**（阶段三 2026-09-20：归档退役后不再需要「清单登记才进库」）——
+      // 元信息卡 / html 沙箱渲染由渲染层按 entryKind 决定；不读内容（二进制可能很大）
       const fileName = rel.slice(rel.lastIndexOf('/') + 1)
       const dot = fileName.lastIndexOf('.')
       docs.push({
@@ -570,10 +566,9 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
         rel,
         doc: {
           frontmatter: {
-            id: exact?.id ?? `auto:${rel}`,
+            id: `auto:${rel}`,
             title: dot > 0 ? fileName.slice(0, dot) : fileName,
             fileType: (dot > 0 ? fileName.slice(dot + 1) : '').toLowerCase(),
-            status: 'published',
             created: mtime,
             updated: mtime,
           },

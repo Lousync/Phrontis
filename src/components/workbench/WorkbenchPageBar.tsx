@@ -40,9 +40,9 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
 /** 未收录模块的兜底图标（新增 Tab 忘配图标时不出空白） */
 const FALLBACK_ICON = <BookText size={14} />
 
-/** 模块条目里不渲染的 id：编辑器 / 知识库由各自页签组代表（模块清空页面即从条内消失） */
-/** 页签组代表制：这两个模块的条目不进页面条（由各自页签组代表），App 全关判定也依赖此口径 */
-export const PAGE_OWNED: readonly string[] = ['editor', 'knowledge']
+/** 页签组代表制：知识库条目不进页面条（由其页签组代表），App 全关判定也依赖此口径。
+ *  （editor 曾在此列，2026-09-20 随编辑器模块退役移除） */
+export const PAGE_OWNED: readonly string[] = ['knowledge']
 
 function tabLabel(id: string): string {
   if (isToolTabId(id)) return findTool(toolIdOfTab(id))?.name ?? '工具'

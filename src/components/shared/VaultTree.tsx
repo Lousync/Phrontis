@@ -37,10 +37,6 @@ interface Props {
   creating?: CreateIntent | null
   onCommitCreate?: (dirRel: string, type: 'file' | 'dir' | 'knowledge', rawName: string) => void
   onCancelCreate?: () => void
-  /** 双态模型：已归档知识页的仓库相对路径集合——树中隐藏（编辑器只留目录骨架 + 草稿/非知识文件） */
-  hiddenRelPaths?: Set<string>
-  /** 草稿页 path 集合：树内命中 .md 文件名旁显示「草稿」徽标（辨识写作中/待归档） */
-  draftRelPaths?: Set<string>
   /** 软件生成项名单（根层 .ignore / AI教学 产物根等，ws:listDir 附带）：
    *  命中条目从主列表移到底部「软件文件」折叠节（VS Code 时间线式，默认收起） */
   softNames?: string[]
@@ -75,7 +71,7 @@ function FileIcon({ name }: { name: string }) {
  * 拖拽：条目均可拖（mime: text/x-kb-rel）；目录与根容器是落点，
  * drop 时把源相对路径移动到目标目录下（主进程 ws:rename 跨目录移动）。
  */
-export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, hiddenRelPaths, draftRelPaths, softNames, focusOn, onFocusLocate, rootRef }: Props) {
+export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, softNames, focusOn, onFocusLocate, rootRef }: Props) {
   const [dragOver, setDragOver] = useState<string | null>(null)
 
   /**
@@ -154,9 +150,6 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
         <span className="w-[12px] shrink-0" />
         <FileIcon name={e.name} />
         <span className={`truncate text-[12.5px] ${activePath === e.relPath ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>{e.name}</span>
-        {draftRelPaths?.has(e.relPath) && (
-          <span className="ml-auto shrink-0 rounded bg-[var(--warning)]/15 px-1 text-[9px] leading-[14px] text-[var(--warning)]" title="草稿（修改中）— 右键可归档为知识页">草稿</span>
-        )}
       </div>
     )
   }
@@ -219,8 +212,6 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
           const children = (
             <>
               {main.map((e) => {
-                // 双态模型：已归档知识页在编辑器中隐藏（目录骨架/草稿/代码文件保留）
-                if (e.type === 'file' && hiddenRelPaths?.has(e.relPath)) return null
                 return e.type === 'dir'
                   ? renderDir(e.relPath, depth + 1)
                   : renderFileRow(e, depth + 1)

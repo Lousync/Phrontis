@@ -1,7 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'fs'
 import { protocol } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
-import { isArchivedByManifest } from './kbStore/archivedFilesRepo'
 import { rootDirName } from './aiTeachingFolders'
 import { WELCOME_DOC_FILENAME } from './kbStore/welcomeDoc'
 import { safePathInside } from './pathGuard'
@@ -11,7 +10,8 @@ import { safePathInside } from './pathGuard'
  *
  *  ① AI教学工件栏「示意图渲染」（docs/ai-teaching-artifacts-pane-design.md §4 实修裁决）
  *  ② 仓库根「欢迎.html」（新用户导览页；知识库阅读器内渲染，2026-09-10）
- *  ③ 归档清单内的 html（全类型归档 docs/vault-archive-all-files-design.md §4.3；知识库阅读器内渲染，2026-09-10）
+ *  ③ 仓库内任意 html（2026-09-20 阶段三放宽：原为「归档清单内的 html」，归档退役后按开发负责人
+ *     拍板改为「都走渲染」——仓库里任何一个 .html 都可在知识库阅读器内沙箱渲染）
  *
  * 为什么不用 iframe srcDoc：srcdoc 子框架会**继承父文档 CSP**（index.html `script-src 'self'`），
  * 文档脚本与宿主量高脚本全被拦（2026-09-09 实锤 Refused to execute inline script）；
@@ -21,8 +21,7 @@ import { safePathInside } from './pathGuard'
  * 安全边界（**只放行这三个白名单，其余一律 403**）：
  * - AI教学：仅「AI教学产物根/{...}/*.html」——safePathInside 防穿越 + 前缀与扩展名白名单 + 2MB 上限；
  * - 欢迎页：仅仓库根同名文件（精确相等，不接受子目录同名）+ 4MB 上限；
- * - 归档 html：仅归档清单（archived-files.json）覆盖到的 *.html + 2MB 上限——清单外 html 一律 403，
- *   「归档了才可渲染」由本处收敛（未归档的 html 不能经 kbview 探测）；
+ * - 仓库内 html：safePathInside 防穿越（必须在当前仓库内）+ 2MB 上限；
  * - 响应头 CSP 锁死网络（default-src 'none'，仅放行内联样式脚本与 data:/blob: 图片——connect-src 'none'
  *   即「沙箱渲染+断外联」档：页面 JS 可跑但 fetch/XHR 全断，无法外传数据），并剥掉文档自带的 CSP meta
  *   （取交集会反噬）；
@@ -98,21 +97,23 @@ export function registerKbVisualProtocol(getSetting: (key: string) => unknown): 
         })
       }
 
-      // ③ 归档清单内的 html（全类型归档）：整页原样返回（同欢迎页，不注入 AI 工件的居中/量高壳）；
-      //    CSP 同样锁死网络（断外联档），清单外 html 落到 ① 的前缀校验被 403
-      if (isArchivedByManifest(rel)) {
+      // ③ 仓库内任意 html（2026-09-20 阶段三：归档退役后白名单③ 由「归档清单内的 html」放宽到全仓 html
+      //    ——开发负责人拍板「都走渲染」）。安全边界不变：vault 内路径校验（safePathInside 防穿越）+
+      //    体积上限 + CSP 锁死外联（断外联档）+ 渲染侧 iframe sandbox 无 allow-same-origin。
+      {
         const abs = safePathInside(vault.rootPath, rel)
-        if (!abs) return new Response('Forbidden', { status: 403 })
-        if (!existsSync(abs) || !statSync(abs).isFile()) return new Response('Not Found', { status: 404 })
-        if (statSync(abs).size > MAX_VISUAL_BYTES) return new Response('Too Large', { status: 413 })
-        return new Response(stripCspMeta(readFileSync(abs, 'utf-8')), {
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8',
-            'Cache-Control': 'no-cache',
-            'Content-Security-Policy': VISUAL_CSP,
-            'X-Content-Type-Options': 'nosniff',
-          },
-        })
+        if (abs) {
+          if (!existsSync(abs) || !statSync(abs).isFile()) return new Response('Not Found', { status: 404 })
+          if (statSync(abs).size > MAX_VISUAL_BYTES) return new Response('Too Large', { status: 413 })
+          return new Response(stripCspMeta(readFileSync(abs, 'utf-8')), {
+            headers: {
+              'Content-Type': 'text/html; charset=utf-8',
+              'Cache-Control': 'no-cache',
+              'Content-Security-Policy': VISUAL_CSP,
+              'X-Content-Type-Options': 'nosniff',
+            },
+          })
+        }
       }
 
       // ① AI 教学工件：仅产物根目录下的 *.html

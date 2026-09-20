@@ -558,7 +558,7 @@ ok(/from '\.\.\/lib\/aiAssistant\/inlineSuggest'/.test(SRC_MAIN),
 
 // J10 渲染层接线
 const SRC_MONACO = stripComments(read('src/components/shared/MonacoPane.tsx'))
-const SRC_EDITOR = stripComments(read('src/modules/editor/index.tsx'))
+const SRC_EDITOR = stripComments(read('src/modules/knowledge/components/PageEditor.tsx'))
 ok(/registerInlineCompletionsProvider\(\s*'markdown'/.test(SRC_MONACO),
   'J10a 注册 markdown 语言的 inline completions provider（仅 md）', '')
 ok(/inlineCompletionInstalled/.test(SRC_MONACO),
@@ -571,10 +571,7 @@ ok(/altKey/.test(SRC_EDITOR) && /'a'/.test(SRC_EDITOR),
   'J10e 编辑器模块注册 Alt+A 快捷键', '')
 ok(/triggerInlineSuggest/.test(SRC_EDITOR),
   'J10f 快捷键调 handle.triggerInlineSuggest()', '')
-// ★ 胶囊去重：内嵌场景不得再手抄一份
-const pillCount = (SRC_EDITOR.match(/inline-flex items-center gap-\[2px\] rounded-full border/g) ?? []).length
-ok(pillCount === 1,
-  `J10g ★ 内容胶囊只渲染一处定义（list-drift 防线；实测 ${pillCount} 处）`, '')
+// （J10g 编辑器模块胶囊去重断言随模块退役——AI 入口现归 PageEditor 单一定义）
 
 // J11 设置键
 ok(/aiAssistantInlineSuggest:\s*\{[^}]*default:\s*true/.test(SRC_SETTINGS),

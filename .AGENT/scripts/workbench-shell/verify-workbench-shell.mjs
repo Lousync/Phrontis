@@ -108,7 +108,6 @@ const srcSettings = stripComments(read('src/lib/settings.ts'))
 const srcKb = stripComments(read('src/modules/knowledge/index.tsx'))
 const srcSchedule = stripComments(read('src/modules/schedule/index.tsx'))
 const srcBlog = stripComments(read('src/modules/blog/index.tsx'))
-const srcEditor = stripComments(read('src/modules/editor/index.tsx'))
 
 // C1 图标条按钮集（批次4 拍板 5 → 4；批次5 反馈轮 AI 教学入口回归：RAIL_BUTTONS 4 项 + 底部设置；
 // 工具箱入口移右栏上部，与 startup-tab 契约 C1 互为镜像）
@@ -120,7 +119,7 @@ ok(/title="设置"/.test(srcBar), 'C1c 图标条底部设置按钮存在')
 
 // C2 左栏 slot 接线：Shell 用 LeftPanel；4 个侧栏模块的 sidebarEl 由 App 按 railModule 条件传入
 ok(/WorkbenchLeftPanel/.test(srcShell) && /modSlotRef/.test(srcShell), 'C2 Shell 左栏 = WorkbenchLeftPanel 且透传 modSlotRef')
-ok(/case\s+'editor'[\s\S]{0,220}sidebarEl=\{null\}/.test(srcApp), 'C3 editor 兜底 case 的侧栏槽恒空（Phase 2：左栏模块态不再有 editor）')
+ok(!/case\s+'editor'/.test(srcApp), 'C3 editor 兜底 case 已随模块退役删除（2026-09-20 阶段四）')
 ok(/railModule === 'knowledge' \|\| railModule === 'quiz'/.test(srcApp), 'C4 knowledge sidebarEl ← 知识库/错题本两态')
 ok(/railModule === 'schedule'/.test(srcApp) && /sidebarEl=\{on && railModule === 'schedule' \? wbModSlotEl : null\}/.test(srcApp), 'C5 schedule sidebarEl ← 左栏模块态')
 ok(/sidebarEl=\{on && railModule === 'blog' \? wbModSlotEl : null\}/.test(srcApp), 'C6 blog sidebarEl ← 左栏模块态')
@@ -129,7 +128,6 @@ for (const [name, src] of [['knowledge', srcKb], ['schedule', srcSchedule], ['bl
   ok(new RegExp(`sidebarEl\\s*=\\s*null`).test(src) || /sidebarEl = null/.test(src), `C8 ${name} 模块签名含 sidebarEl（默认 null）`)
 }
 ok(/createPortal/.test(srcKb) && /createPortal/.test(srcSchedule) && /createPortal/.test(srcBlog), 'C9 knowledge/schedule/blog 侧栏 portal 化（挂载点迁移）')
-ok(/sidebarEl/.test(srcEditor), 'C10 editor 保留 R1-W1 sidebarEl 机制（批次3 复用）')
 
 // C11 错题本定位事件两侧同在（App 派发 + knowledge 监听；事件名以 lib 为准，防两侧手抄漂移）
 ok(/LOCATE_QUIZ_VIEW_EVENT/.test(srcApp) && /dispatchEvent\(new CustomEvent\(LOCATE_QUIZ_VIEW_EVENT\)\)/.test(srcApp), 'C11 App 派发错题本定位事件')
@@ -319,13 +317,8 @@ ok(!existsSync(`${ROOT}/src/components/workbench/WorkbenchTabBar.tsx`)
 ok(/data-wb="pagebar"/.test(srcPageBar) && /data-pb-tabs=/.test(srcPageBar) && /data-pb-item/.test(srcPageBar)
   && /data-pb-slot="editor"/.test(srcPageBar) && /data-pb-slot="knowledge"/.test(srcPageBar),
   'F3 页面条契约属性齐备（pagebar / pb-item / pb-tabs / 两个 pb-slot）')
-ok(/PAGE_OWNED/.test(srcPageBar) && /'editor', 'knowledge'/.test(srcPageBar),
-  'F4 编辑器 / 知识库不占模块条目（由页面条目代表，页面清空即从条内消失）')
-ok(!/编辑区/.test(srcEditor), 'F5 编辑器「编辑区」标题行已删除（源码层无残留标题）')
-ok(/pageBarHosted/.test(srcEditor) && /createPortal\(/.test(srcEditor) && /pageBarEl\s*\n?\s*\?/.test(srcEditor),
-  'F6 编辑器文件标签行 portal 进页面条槽（槽未就绪渲染 null，不回落内嵌）')
-ok(/contentActionsHosted/.test(srcEditor) && /actionsPill/.test(srcEditor),
-  'F7 编辑器四个动作收成胶囊并 portal 进内容级操作槽')
+ok(/PAGE_OWNED/.test(srcPageBar) && /'knowledge'/.test(srcPageBar) && !/'editor'/.test(srcPageBar),
+  'F4 页面条 PAGE_OWNED 只含知识库（编辑器已退役，不占模块条目）')
 // 浮层结构（2026-09-20 悬浮栏改造）：外壳 `data-wb="mainPane"` 全宽 + pointer-events-none；
 // 内层是**一个悬浮胶囊** `data-wb="floatBar"`（右上角 mt-3 mr-3）——两个槽（内容级操作 + 页面级工具）
 // 都在胶囊里；静息收把手 / 毛玻璃 / 空胶囊隐身由 index.css 的 [data-wb='floatBar'] 段承担。
@@ -340,15 +333,15 @@ const srcCss = read('src/styles/index.css')
 ok(/\[data-wb='floatBar'\]/.test(srcCss) && /\.kb-float-hide/.test(srcCss)
   && /backdrop-filter/.test(srcCss) && /:not\(:has\(button\)\)/.test(srcCss),
   'F8b 悬浮栏样式基建在位（floatBar 胶囊 / kb-float-hide 把手 / 毛玻璃 / 空胶囊隐身）')
-ok(/kb-float-hide/.test(read('src/modules/knowledge/components/PageEditor.tsx')) && /kb-float-hide/.test(srcEditor),
-  'F8c 两个宿主（笔记页工具栏 / 编辑器动作胶囊）都标了次级钮 kb-float-hide')
+ok(/kb-float-hide/.test(read('src/modules/knowledge/components/PageEditor.tsx')),
+  'F8c 笔记页工具栏标注次级钮 kb-float-hide（编辑器宿主已随模块退役）')
 ok(/pageBarHosted/.test(srcKnowledge) && /createPortal\(strip/.test(srcKnowledge),
   'F9 知识库页签条 portal 进页面条槽')
 ok(/onImmersiveChange\?\.\(v\)/.test(srcKnowledge) && /readingMode \|\| graphMode/.test(srcKnowledge) && /pageBarHidden/.test(srcApp),
   'F10 沉浸阅读 / 图谱模式反向通知外壳让位（页面条整行隐藏）')
 ok(/OWNER_COLOR/.test(srcStrip) && /PenLine/.test(srcStrip) && /BookOpen/.test(srcStrip)
-  && /owner="editor"/.test(srcEditor) && /owner="knowledge"/.test(srcKnowledge),
-  'F11 页签条按来源出图标与配色（编辑器=青笔 / 知识库=蓝书；两处调用各传自己 owner）')
+  && /owner="knowledge"/.test(srcKnowledge),
+  'F11 页签条按来源出图标与配色（知识库=蓝书；调用方传自己 owner；编辑器宿主已退役）')
 ok(srcStrip.indexOf('if (items.length === 0) return null') > srcStrip.indexOf('const [draggedId'),
   'F12 页签条 hooks 全在早退之前（React #310 防线）')
 
@@ -371,8 +364,8 @@ ok(!/secondarySlotRef/.test(srcApp) && !/wbSecondaryTabsRef|wbSecActionsRef/.tes
   'G4 副栏槽与副栏 DOM 标识（secondarySlotRef / wbSecActions / data-pb-split / splitPane）已清空')
 ok(!existsSync(`${ROOT}/src/components/workbench/SplitHandle.tsx`) && !/SplitHandle/.test(srcApp),
   'G5 分屏手柄组件已删且 App 无引用（3.5.0 重做时从 git 历史取回）')
-ok(!/paneActive/.test(srcStrip) && !/paneActive/.test(srcEditor) && !/paneActive/.test(srcKnowledge),
-  'G6 栏焦点 paneActive 已从页签条与两个模块的调用点清空（页面条置顶成果不受影响）')
+ok(!/paneActive/.test(srcStrip) && !/paneActive/.test(srcKnowledge),
+  'G6 栏焦点 paneActive 已从页签条与模块调用点清空（页面条置顶成果不受影响）')
 ok(!/SPLIT_FALLBACK_WIDTH|splitWidth/.test(srcApp) && !/RowsPerPane/.test(srcApp),
   'G7 副栏宽度兜底与实测宽度上报（SPLIT_FALLBACK_WIDTH / splitWidth）已删')
 ok(!/Backslash/.test(srcApp) && !/Columns2/.test(srcApp),

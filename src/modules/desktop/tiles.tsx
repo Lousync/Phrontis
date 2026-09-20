@@ -695,7 +695,6 @@ function moduleTail(tab: TabName, stats: DerivedStats, data: DesktopData): strin
     case 'schedule': return stats.todoTotal ? `${stats.todoLeft} 项今日` : '今日无任务'
     case 'knowledge': return `${stats.pageCount} 页 · ${stats.dirCount} 目录`
     case 'moments': return `${data.moments.length} 条`
-    case 'editor': return 'Vault 文件'
     case 'aiTeaching': return '讲义 / 研读 / 出题'
     default: return ''
   }

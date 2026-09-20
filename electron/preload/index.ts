@@ -617,10 +617,7 @@ const api = {
   pdfReaderCoverGet: (rootId: string, relPath: string) => ipcRenderer.invoke('pdfReader:coverGet', rootId, relPath),
   pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => ipcRenderer.invoke('pdfReader:coverSave', rootId, relPath, dataUrl, expectedMtimeMs),
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => ipcRenderer.invoke('ws:writeFile', rootId, relPath, content, expectedMtimeMs),
-  workspaceSetMdStatus: (rootId: string, relPath: string, draft: boolean) => ipcRenderer.invoke('ws:setMdStatus', rootId, relPath, draft),
-  // 全类型归档（docs/vault-archive-all-files-design.md）：md 分流 frontmatter 双态，非 md/目录走清单
-  workspaceSetArchiveStatus: (rootId: string, relPath: string, archive: boolean) => ipcRenderer.invoke('ws:setArchiveStatus', rootId, relPath, archive),
-  workspaceGetArchiveEntries: (rootId: string) => ipcRenderer.invoke('ws:getArchiveEntries', rootId),
+  // 归档三条通道（ws:setMdStatus / ws:setArchiveStatus / ws:getArchiveEntries）已于 2026-09-20 随归档退役删除
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => ipcRenderer.invoke("ws:createFile", rootId, relPath, content),
   workspaceMkdir: (rootId: string, relPath: string) => ipcRenderer.invoke('ws:mkdir', rootId, relPath),
   // 粘贴系统剪贴板里的外部文件/目录：srcPaths 由渲染层 paste 事件 + webUtils.getPathForFile 取得

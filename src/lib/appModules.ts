@@ -41,9 +41,7 @@ export interface AppModuleDef {
  * 两者从清单删除；新增 `bookshelf` / `aiChat` / `graph` 三个「入口产生型」Tab。
  */
 export const APP_MODULES = [
-  // Phase 2 批次 2（编辑区退役）：editor 退出活动栏（bar: false）——文件树并入知识库后不再单独暴露；
-  // id 保留（类型/存量数据兼容），模块代码暂留作兜底，批次 3 物理清理
-  { id: 'editor', label: '编辑器', bar: false, startable: false, tile: true, palette: false },
+  // 2026-09-20 阶段四：editor 模块整体退役（能力已并入笔记区；桌面磁贴随桌面模块后续专项处理）
   { id: 'knowledge', label: '笔记', bar: true, startable: true, tile: true, palette: true },
   { id: 'blog', label: '博客', bar: true, startable: true, tile: true, palette: true },
   { id: 'schedule', label: '日程', bar: true, startable: true, tile: true, palette: true },

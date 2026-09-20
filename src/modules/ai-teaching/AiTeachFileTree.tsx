@@ -6,14 +6,14 @@ import {
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
-import { FileTree } from '../editor/components/FileTree'
-import type { DirCache, TreeNode } from '../editor/types'
+import { VaultTree } from '../../components/shared/VaultTree'
+import type { DirCache, TreeNode } from '../../components/shared/VaultTree'
 
 /**
  * AI教学 P4 · 左栏「资源管理器」分区（总纲 §3.7，VS Code 多分区形态）
  *
  * - 树根 = 当前仓库产物根目录（`aiTeachRootDir` 设置，默认「AI教学」；P5 工作区两层后改挂工作区目录）；
- * - 复用编辑区 FileTree 纯展示组件 + ws:* IPC 全套操作（新建/重命名/复制(副本)/删除进回收站/路径复制）；
+ * - 复用编辑区 VaultTree 纯展示组件 + ws:* IPC 全套操作（新建/重命名/复制(副本)/删除进回收站/路径复制）；
  * - md 点击 → 中栏阅读视图（§3.9-2 方案 B）；非 md → 跳编辑器打开；
  * - 树数据里 relPath 一律为**产物根相对路径**，调 IPC 时拼 `${base}/${rel}`。
  */
@@ -177,7 +177,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
   const menuItems = (node: TreeNode | null): Array<{ label: string; run: () => void; danger?: boolean; disabled?: boolean }> => {
     const dirRel = node ? (node.type === 'dir' ? node.relPath : node.relPath.includes('/') ? node.relPath.slice(0, node.relPath.lastIndexOf('/')) : '') : ''
     if (!node || node.relPath === '') {
-      // 根（产物目录本身，含 FileTree 空白区右键合成的 '' 节点）：只能新建/粘贴，不可改名删除
+      // 根（产物目录本身，含 VaultTree 空白区右键合成的 '' 节点）：只能新建/粘贴，不可改名删除
       return [
         { label: '＋ 新建文件', run: () => doCreate('', 'file') },
         { label: '＋ 新建文件夹', run: () => doCreate('', 'dir') },
@@ -208,7 +208,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
             <button onClick={() => doCreate('', 'dir')} className="mt-1.5 flex items-center gap-1 text-[var(--accent)] hover:underline"><Plus size={11} /> 新建文件夹</button>
           </div>
         ) : (
-          <FileTree dirCache={dirCache} expanded={expanded} activePath={activeRel} onToggleDir={toggleDir} onOpenFile={openFile} onContextMenu={(e, n) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, node: n }) }} onMove={(src, dstDir) => {
+          <VaultTree dirCache={dirCache} expanded={expanded} activePath={activeRel} onToggleDir={toggleDir} onOpenFile={openFile} onContextMenu={(e, n) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, node: n }) }} onMove={(src, dstDir) => {
             void (async () => {
               if (!rootId) return
               const name = src.split('/').pop() ?? src

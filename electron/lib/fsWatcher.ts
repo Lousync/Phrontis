@@ -3,7 +3,6 @@ import { relative } from 'path'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { invalidateKnowledgeIndex } from './kbStore/knowledgeIndex'
 import { invalidateGraphIndex } from './kbStore/graphIndex'
-import { gcArchiveEntries } from './kbStore/archivedFilesRepo'
 import { broadcast, broadcastDataChanged, BROADCAST_CHANNEL } from '../main/windowBus'
 
 /**
@@ -120,14 +119,7 @@ function flush(): void {
   } catch {
     /* 索引未就绪等：忽略，不因缓存的副作用影响刷新 */
   }
-  // 归档清单僵尸条目：外部删除 / 改名已归档文件后，清单里会留下指向不存在路径的条目
-  // （表象 =「清单里在、磁盘上没了」）。gcArchiveEntries 幂等且只在磁盘条目真消失时才写盘，
-  // 而 `.knowbase/` 已被忽略 → 它自己的写盘不会再触发 watcher，不构成回环。
-  try {
-    gcArchiveEntries()
-  } catch {
-    /* 清单损坏等：不影响刷新本身（手动刷新路径也会再做一次） */
-  }
+  // 归档清单僵尸条目的 GC 随归档退役移除（2026-09-20 阶段三，docs/note-identity-unify-design.md §3）
   broadcastDataChanged('knowledge')
   broadcast(BROADCAST_CHANNEL.wsFsChanged, { relPaths })
 }

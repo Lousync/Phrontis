@@ -47,7 +47,6 @@ import { SettingsModule } from './modules/settings'
 import { HelpModule } from './modules/help'
 import { ToolboxModule } from './modules/toolbox'
 import { PluginsModule } from './modules/plugins'
-import { EditorModule } from './modules/editor'
 import { BookshelfModule } from './modules/bookshelf'
 import { AiTeachingModule } from './modules/ai-teaching'
 import { ReleaseNotesModule } from './modules/release-notes'
@@ -245,7 +244,7 @@ export default function App() {
       // 编辑器 / AI 教学仍优先走自己那份（带「先关本模块弹窗再退禅」的档位逻辑，App 不抢）；
       // 命令面板 / 快速切换器开着时 Esc 归它们收。
       if (e.key === 'Escape' && zenLevel >= 2 && !palette) {
-        const zenOwnerActive = activeTab === 'editor' || activeTab === 'aiTeaching'
+        const zenOwnerActive = activeTab === 'aiTeaching'
         if (!zenOwnerActive) { e.preventDefault(); changeZen(0); return }
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.key === 'P' || e.key === 'p')) {
@@ -310,7 +309,7 @@ export default function App() {
   }, [])
 
   /** 插件命令执行分发（plugin-phase1-design C3）：有视图 → 切模块激活；code 插件 → 推常驻 Worker */
-  const SLOT_MODULE: Record<string, TabName> = { knowledge: 'knowledge', editor: 'editor', blog: 'blog', schedule: 'schedule', aiTeach: 'aiTeaching' }
+  const SLOT_MODULE: Record<string, TabName> = { knowledge: 'knowledge', blog: 'blog', schedule: 'schedule', aiTeach: 'aiTeaching' }
   const runPluginCommand = useCallback((c: PluginCommandInfo) => {
     if (c.viewSlot) {
       const mod = SLOT_MODULE[c.viewSlot.split('.')[0]]
@@ -531,8 +530,6 @@ export default function App() {
   const [pendingOpenRel, setPendingOpenRel] = useState<string | null>(null)
   // UI 优化条目6：跳转来源记录——kb-open-note 带 from（如 aiTeaching），编辑器出「← 返回 X」chip；
   // 新跳转覆盖旧来源，任何手动切 Tab（handleTabChange）清除
-  const [editorJumpFrom, setEditorJumpFrom] = useState<TabName | null>(null)
-  // Phase 2 批次 2（编辑区退役）：kb-open-note 全部改道知识库——切 Tab 后把 relPath
   // 转发给 knowledge 的 kb-open-note-rel 通道（知识页/草稿/PDF/源码统一由文件视图语境消化）。
   // 十余处 dispatch 方零改动；editor 模块代码暂留（不再可达），批次 3 物理清理。
   useEffect(() => {
@@ -791,7 +788,6 @@ export default function App() {
   // 与「模块内开关关闭」（回知识库树态）。
   const quizTabCloseRef = useRef(false)
   const [kbStripVisible, setKbStripVisible] = useState(false)
-  const [editorStripVisible, setEditorStripVisible] = useState(false)
   // 关闭标签（✕ / 中键）。2026-09-19 反馈拍板（需求而非 bug）：**关掉激活标签 = 一律回总览空态**，
   // 不再自动落邻居标签——哪怕还有其他标签页，它们原样留在页面条（未激活），点击再激活；
   // 左栏同步退回顶层。「标签 ↔ 左栏」关系收敛为两条可预期规则：点标签 = 左栏跟随；关标签 = 回总览。
@@ -812,8 +808,7 @@ export default function App() {
     // 标签页，按全关收尾：清掉隐形空壳、activeTab/左栏回总览。可见性由模块上报。
     const tabVisible = (t: string) =>
       isToolTabId(t) || !PAGE_OWNED.includes(t) ||
-      (t === 'knowledge' && (kbStripVisible || quizViewOpen)) ||
-      (t === 'editor' && editorStripVisible)
+      (t === 'knowledge' && (kbStripVisible || quizViewOpen))
     if (!next.some(tabVisible)) {
       next = next.filter((t) => !PAGE_OWNED.includes(t))
       setActiveToolTab(null)
@@ -821,13 +816,11 @@ export default function App() {
       setRailModule(null)
     }
     setOpenTabs(next)
-  }, [openTabs, activeTab, activeToolTab, kbStripVisible, editorStripVisible, quizViewOpen])
-
+  }, [openTabs, activeTab, activeToolTab, kbStripVisible, quizViewOpen])
   // 标签拖拽重排（现成机制恢复）：只调 openTabs 顺序，激活标签跟内容走、不变
   const handleReorder = useCallback((tabs: string[]) => setOpenTabs(tabs), [])
 
   const handleTabChange = (tab: TabName) => {
-    setEditorJumpFrom(null) // 手动切 Tab 即清除「返回来源」上下文（条目6）
     setActiveToolTab(null)  // 切回模块标签时退出工具标签（工具标签关闭走 ✕ / 落点分流）
     if (tab === activeTab) {
       // 工具箱专属（2026-09-10）：已在工具箱时再点活动栏图标 = 退出当前工具、回到工具箱主界面。
@@ -849,13 +842,11 @@ export default function App() {
       window.dispatchEvent(new CustomEvent('pomodoro:activate', { detail: { preset: 0 } }))
       return
     }
-    setEditorJumpFrom(null)
     setActiveTab(null)
     setActiveToolTab(toolTabId(toolId))
   }, [])
 
   const handleOpenPluginTool = useCallback((tool: PluginTool) => {
-    setEditorJumpFrom(null)
     setActiveTab(null)
     setActiveToolTab(toolTabId(`${tool.pluginId}:${tool.toolId}`))
   }, [])
@@ -1096,7 +1087,6 @@ export default function App() {
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
       case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onRequestCloseTab={() => closeTab('knowledge')} onStripVisibleChange={setKbStripVisible} />
       case 'moments': return <MomentsModule />
-      case 'editor': return <EditorModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={null} sidebarHosted markdownDim={s.markdownDim} pendingOpenRel={pendingOpenRel} onPendingConsumed={() => setPendingOpenRel(null)} zenLevel={zenLevel} onZenLevelChange={setZenLevel} pageBarEl={wbEditorPageEl} pageBarHosted contentActionsEl={wbContentActionsEl} contentActionsHosted onRequestCloseTab={() => closeTab('editor')} onStripVisibleChange={setEditorStripVisible} />
       case 'bookshelf': return (
         <BookshelfModule
           isActive={on}
@@ -1258,7 +1248,6 @@ export default function App() {
                   active={activeToolTab ?? activeTab}
                   onSelect={(id) => {
                     if (isToolTabId(id)) {
-                      setEditorJumpFrom(null)
                       setActiveTab(null)
                       setActiveToolTab(id)
                       // 重复点击已激活的工具标签也跟随左栏（跟随 effect 只认 state 变化，同值不触发）
@@ -1298,19 +1287,9 @@ export default function App() {
                   editorSlotRef={wbEditorPageRef}
                   knowledgeSlotRef={wbKnowledgePageRef}
                   showQuizEntry={quizViewOpen && openTabs.includes('knowledge')}
-                  quizEntryActive={activeTab === 'knowledge'}
-                  hidePages={zenLevel >= 1}
-                  lead={activeTab === 'editor' && editorJumpFrom && editorJumpFrom !== 'editor' ? (
-                    /* 编辑器「← 返回 X」chip：属当前上下文导航，落页面条最左端（原独立常驻行已删） */
-                    <button
-                      onClick={() => { const f = editorJumpFrom; if (f) { setEditorJumpFrom(null); handleTabChange(f) } }}
-                      className="flex shrink-0 items-center gap-1 rounded-md border border-[var(--border-color)] px-2 py-0.5 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                      title={`返回「${tabLabel(editorJumpFrom)}」（保留其离开时的界面状态）`}
-                    >
-                      ← 返回 {tabLabel(editorJumpFrom)}
-                    </button>
-                  ) : null}
-                />
+                   quizEntryActive={activeTab === 'knowledge'}
+                   hidePages={zenLevel >= 1}
+                 />
               )}
               {/* 整窗模块的「回工作台」入口 = 图标条顶部「工作台」按钮（2026-09-17 bug 修复轮：
                   原右上角浮动「工作台」按钮删除——入口统一收敛到 ActivityBar，避免同一功能两处入口） */}
@@ -1424,7 +1403,7 @@ export default function App() {
       {winMax && <WindowResizeHandles />}
       <Toast />
       <GlobalConfirm />
-      {vaultPickOpen && <VaultPicker onDone={(created) => { setVaultPickOpen(false); if (!s.onboardingDone) setOnboardingOpen(true); if (created) setActiveTab('editor') }} />}
+      {vaultPickOpen && <VaultPicker onDone={(created) => { setVaultPickOpen(false); if (!s.onboardingDone) setOnboardingOpen(true); if (created) setActiveTab('knowledge') }} />}
       {startupPickerOpen && <VaultPicker startup onDone={() => setStartupPickerOpen(false)} />}
       {onboardingOpen && (
         <Onboarding

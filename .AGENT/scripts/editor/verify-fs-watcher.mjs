@@ -53,7 +53,7 @@ const ipcLib = readIfExists('src/lib/ipc.ts')
 const typeDecl = readIfExists('src/types/index.ts')
 const wsMgr = readIfExists('electron/lib/workspaceManager.ts')
 const mainIdx = readIfExists('electron/main/index.ts')
-const editorIdx = readIfExists('src/modules/editor/index.tsx')
+const knowIdx = readIfExists('src/modules/knowledge/index.tsx')
 const aiTeachIdx = readIfExists('src/modules/ai-teaching/index.tsx')
 const aiTeachTree = readIfExists('src/modules/ai-teaching/AiTeachFileTree.tsx')
 
@@ -69,9 +69,6 @@ check('types/index.ts 声明 workspaceRefreshVault', /workspaceRefreshVault:\s*\
 
 // 主进程：IPC + 挂载点 + 退出 + 自写登记
 check('主进程注册 ws:refreshVault', /ipcMain\.handle\('ws:refreshVault'/.test(wsMgr))
-check('手动刷新做归档清单 prune（复用 gcArchiveEntries）',
-  /pruned = gcArchiveEntries\(\)/.test(wsMgr) && /gcArchiveEntries/.test(wsMgr))
-check('watcher 路径同样做归档清单 prune（双路径都要有）', /gcArchiveEntries\(\)/.test(src))
 check('手动刷新广播 knowledge', /broadcastDataChanged\('knowledge'\)/.test(wsMgr))
 const syncCalls = (wsMgr.match(/syncVaultWatcher\(\)/g) || []).length
 check('仓库登记/切换/删除/退出均重挂或关闭监听（≥5 处）', syncCalls >= 5, `实际 ${syncCalls} 处`)
@@ -83,7 +80,7 @@ check('before-quit 关闭监听', /closeVaultWatcher\(\)/.test(mainIdx))
 
 // 渲染层：编辑器 + AI 教学
 check('编辑器消费 ws:fs-changed', /onWsFsChanged\(/.test(editorIdx))
-check('编辑器窗口聚焦兜底重扫', /addEventListener\('focus', onFocus\)/.test(editorIdx))
+check('编辑器窗口聚焦兜底重扫（知识区沿用同一机制）', /addEventListener\('focus', onFocus\)/.test(knowIdx))
 check('编辑器手动刷新按钮（RefreshCw + 标题）',
   /RefreshCw/.test(editorIdx) && /title="刷新资源管理器"/.test(editorIdx))
 check('编辑器刷新走口径 b 全量（workspaceRefreshVault）', /workspaceRefreshVault\(\)/.test(editorIdx))
@@ -118,12 +115,10 @@ export const __ctl = {
   events: [],             // broadcast / broadcastDataChanged 调用记录
   indexInvalidated: 0,
   graphInvalidated: 0,
-  archivePruned: 0,
 }
 export function getCurrentVault() { return __ctl.vault }
 export function invalidateKnowledgeIndex() { __ctl.indexInvalidated++ }
 export function invalidateGraphIndex() { __ctl.graphInvalidated++ }
-export function gcArchiveEntries() { __ctl.archivePruned++; return 0 }
 export function broadcast(channel, payload) { __ctl.events.push({ kind: 'channel', channel, payload }) }
 export function broadcastDataChanged(scope) { __ctl.events.push({ kind: 'data', scope }) }
 export const BROADCAST_CHANNEL = { wsFsChanged: 'ws:fs-changed' }
@@ -209,7 +204,6 @@ async function run() {
   __ctl.events.length = 0
   __ctl.indexInvalidated = 0
   __ctl.graphInvalidated = 0
-  __ctl.archivePruned = 0
   __watch.handlers.change?.(null, 'notes/a.md')
   __watch.handlers.change?.(null, 'notes\\b.md')
   __watch.handlers.change?.(null, 'notes/a.md')
@@ -224,9 +218,7 @@ async function run() {
   check('命中级联索引失效 + 知识库刷新',
     __ctl.indexInvalidated === 1 && __ctl.graphInvalidated === 1 &&
     __ctl.events.some((e) => e.kind === 'data' && e.scope === 'knowledge'))
-  check('watcher 路径也清理归档清单僵尸条目（外部删除已归档文件）', __ctl.archivePruned === 1,
-    `实际 ${__ctl.archivePruned} 次`)
-
+  
   // ---------------- 4. 全是忽略项时不广播（jsonStore 自写不抖动）----------------
   __ctl.events.length = 0
   __watch.handlers.change?.(null, '.knowbase/modules/schedule/todos.json')

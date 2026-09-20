@@ -10,7 +10,7 @@
  *
  * 跑法：node --experimental-strip-types .AGENT/scripts/notes-merge/verify-notes-inline-edit.mjs
  */
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { splitFrontmatter, joinFrontmatter, hasFrontmatterId, ensureFrontmatterId } from '../../../src/lib/frontmatter.ts'
@@ -37,8 +37,7 @@ console.log('[1] frontmatter 共享层')
   ok(fm2 && fm2.prefix === '---\r\nid: kb-abc\r\n---\r\n' && fm2.body === '\r\n正文', 'CRLF 前缀同样原样保留')
   ok(splitFrontmatter('无 frontmatter 的纯文本') === null, '无 frontmatter → null')
   ok(joinFrontmatter({ content: '正文' }) === '正文', '无前缀 join = 原样')
-  const types = read('src/modules/editor/types.ts')
-  ok(/export \{ splitFrontmatter, joinFrontmatter \}/.test(types) && !/export function splitFrontmatter/.test(types), 'editor/types.ts 为 re-export，不再持有实现')
+  ok(!existsSync(join(repo, 'src/modules/editor')), '编辑器模块已物理退役（阶段四 2026-09-20，目录不存在）')
 }
 
 // ---- ② vault 保存分支只走 workspaceWriteFile ----
@@ -71,12 +70,11 @@ console.log('[3] 就地编辑解锁')
 console.log('[4] 共享 MonacoPane 宿主（P1b）')
 {
   const shared = read('src/components/shared/MonacoPane.tsx')
-  const shim = read('src/modules/editor/components/MonacoPane.tsx')
   const pe = read('src/modules/knowledge/components/PageEditor.tsx')
   ok(shared.includes("'../../lib/monaco-setup'") && shared.includes('installInlineCompletion'), '共享层持有 B4 provider 装配（内联建议随宿主带入知识库）')
-  ok(shared.includes('addInlineSuggestBusyListener') && shared.includes('inlineBusyListeners = new Set'), 'busy/暂停监听为多宿主注册表（keep-alive 双宿主共存不互相覆盖）')
+  ok(shared.includes('addInlineSuggestBusyListener') && shared.includes('inlineBusyListeners = new Set'), 'busy/暂停监听为多宿主注册表（keep-alive 多宿主共存不互相覆盖）')
   ok(shared.includes('modelPath') && shared.includes('relPathByModel'), 'modelPath 命名空间 + relPath 记账（跨模块不共享 Monaco model，内联建议仍拿真实路径）')
-  ok(/export \{ MonacoPane/.test(shim) && !/interface Props/.test(shim), 'editor 旧路径为 re-export shim，不再持有实现')
+  ok(!existsSync(join(repo, 'src/modules/editor')), '负向：editor 旧路径 shim 已随模块退役（2026-09-20 阶段四）')
   ok(pe.includes("from '../../../components/shared/MonacoPane'"), 'PageEditor 消费共享宿主')
   ok(pe.includes('kb://knowledge/'), '知识库文档走命名空间 modelPath')
   ok(pe.includes('onDropImage={handleImageToMarkdown}') && pe.includes('onPasteImage={handleImageToMarkdown}'), '粘贴与拖图拦截接入共享宿主')
@@ -93,20 +91,15 @@ console.log('[5] 页签策略同源（1.3）')
   ok(!/const newIdx = Math\.min\(idx, nextIds\.length - 1\)/.test(ki), '负向：手写落点（Math.min 下标算术）已移除')
   const policy = read('src/lib/tabPolicy.ts')
   ok(policy.includes('export function previewReplacement') && policy.includes('export function landingAfterClose'), '共享层持有页签纯函数实现')
-  const shim = read('src/modules/editor/tabPolicy.ts')
-  ok(/export \{ TAB_SOFT_CAP/.test(shim) && !/export function previewReplacement/.test(shim), 'editor/tabPolicy.ts 为 re-export shim')
+  ok(!existsSync(join(repo, 'src/modules/editor/tabPolicy.ts')), '负向：editor/tabPolicy shim 已随模块退役')
 }
 
 // ---- ⑥ Phase 2 批次 1：VaultTree 共享 + 知识库文件视图 ----
 console.log('[6] 文件视图（Phase 2 批次 1）')
 {
   const vt = read('src/components/shared/VaultTree.tsx')
-  const shim = read('src/modules/editor/components/FileTree.tsx')
-  const et = read('src/modules/editor/types.ts')
   const ki = read('src/modules/knowledge/index.tsx')
   ok(vt.includes('export function VaultTree') && vt.includes('export type TreeNode'), '共享层持有 VaultTree 实现 + TreeNode/DirCache/CreateIntent 类型')
-  ok(/export \{ VaultTree as FileTree \}/.test(shim), 'editor FileTree 旧路径为 re-export shim')
-  ok(et.includes("export type { TreeNode, DirCache, CreateIntent } from '../../components/shared/VaultTree'"), 'editor/types 三个树类型 re-export 自共享层')
   ok(ki.includes("from '../../components/shared/VaultTree'"), 'knowledge 消费共享 VaultTree')
   ok(!ki.includes('leftView') && ki.includes('<VaultTree'), '左栏单文件视图（结构三件套已退役，VaultTree 常驻）')
   ok(!ki.includes('<NotebookList') && !ki.includes('<ChapterPanel') && !ki.includes('<SpacePanel'), '负向：三件套不再渲染')
@@ -153,7 +146,7 @@ console.log('[8] 更名与归类入口（批次 3）')
   const ki = read('src/modules/knowledge/index.tsx')
   const app = read('src/App.tsx')
   ok(/id: 'knowledge', label: '笔记'/.test(am), '模块更名「笔记」')
-  ok(/id: 'editor', label: '编辑器', bar: false, startable: false/.test(am), 'editor 活动栏与启动落点均已退役')
+  ok(!/id: 'editor'/.test(am), 'editor 活动栏/启动/磁贴/清单条目均已退役（阶段四：模块整体删除）')
   ok(am.includes("return 'knowledge'"), '启动兜底 = 知识库（editor 退役后）')
   const srcApp = app
   ok(!srcApp.includes('kb-open-in-editor') || srcApp.includes("'kb-open-note'"), 'App 打开事件已更名 kb-open-note')
