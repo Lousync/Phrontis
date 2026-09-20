@@ -77,6 +77,8 @@ export interface MonacoPaneHandle {
   focus(): void
   /** 取原始编辑器实例（脚注选区操作等少数高级用法；慎用，勿存引用） */
   getEditor(): Monaco.editor.IStandaloneCodeEditor | null
+  /** 立即收起当前 ghost text（AI 建议总开关关闭时调用；无可见建议时静默） */
+  hideInlineSuggest(): void
 }
 
 /** DimCls → inlineClassName（CSS 类定义见 src/styles/index.css） */
@@ -122,6 +124,7 @@ export const MonacoPane = forwardRef<MonacoPaneHandle, Props>(function MonacoPan
     triggerInlineSuggest: () => hostRef.current?.triggerInlineSuggest() ?? false,
     focus: () => hostRef.current?.focus(),
     getEditor: () => hostRef.current?.getEditor() ?? null,
+    hideInlineSuggest: () => hostRef.current?.hideInlineSuggest(),
   }), [])
 
   if (!doc) {
@@ -297,6 +300,14 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
       triggerInlineSuggest: () => triggerInlineRef.current?.() ?? false,
       focus: () => editorRef.current?.focus(),
       getEditor: () => editorRef.current,
+      hideInlineSuggest: () => {
+        const editor = editorRef.current
+        if (!editor) return
+        // 命令 precondition = 建议可见；不可见时 trigger 静默 no-op（无需自行判断）。
+        // 注意 source 标签别用 'kb-inline' 前缀——perception J14f/i 以 `editor.trigger('kb-inline'`
+        // 定位真触发点做顺序断言，这里的字面量会污染 indexOf。
+        try { void editor.trigger('kb-ghost-hide', 'editor.action.inlineSuggest.hide', null) } catch { /* 静默 */ }
+      },
     }), [])
 
     const onMount = useCallback<OnMount>((editor, monaco) => {
@@ -417,6 +428,9 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
         inlinePausedListeners.forEach((fn) => fn(false))
         return fireInlineTrigger()
       }
+      // 探针专用点火口（同 window.__kb_monaco 范式）：✨ 按钮已改为总开关（点击 = 开/关），
+      // 「请求链路通」的探针验证只能绕过 UI 直接点火（CDP 键盘三路都进不了 ime-text-area）。
+      ;(window as unknown as Record<string, unknown>).__kb_inline_trigger = fireInlineTrigger
 
       // ---- 自动通道：停顿 → 触发点判定 → 冷却检查 → 触发 ----
       // 为什么不用 Monaco 自己的 Automatic 触发：那个没有 debounce 与断点概念，
@@ -454,6 +468,8 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
         if (autoTimer) clearTimeout(autoTimer)
         contentSub.dispose()
         triggerInlineRef.current = null
+        const w = window as unknown as Record<string, unknown>
+        if (w.__kb_inline_trigger === fireInlineTrigger) delete w.__kb_inline_trigger
         busyDisposeRef.current?.()
         busyDisposeRef.current = null
         pausedDisposeRef.current?.()

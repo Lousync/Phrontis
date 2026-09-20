@@ -914,6 +914,26 @@ function resolveLlmTarget(req: LlmInvokeRequest): LlmTarget {
   return { ok: true, provider, model: finalModel, maxTokens }
 }
 
+/**
+ * B4 内联建议的默认模型解析（2026-09-20 反馈：默认跟随对话主模型，思考型会先思考一大段，
+ * 「续写一句」等到天荒地老且白烧 token）。跟随默认链，但默认链命中思考型时降级到
+ * 同供应商的**第一个非思考模型**；用户在设置 aiAssistantInlineSuggestModelId 钉死模型时
+ * 本函数不会被调用（钉死优先级最高，不做任何替换）。全部模型都是思考型 → 保持原样，
+ * 由 inlineSuggest 的思考早停兜底延迟。
+ */
+export function resolveInlineSuggestFallback(): { providerId: string; modelId: string } | null {
+  const def = String(depsRef?.getSettingValue('defaultChatModel') ?? '').trim()
+  if (!def) return null
+  const [pid, mid = ''] = def.split(':')
+  const provider = getProviders().find(x => x.id === pid && x.enabled)
+  if (!provider) return null
+  const target = mid || provider.models[0] || ''
+  if (!target) return null
+  if (!REASONING_MODEL_RE.test(target)) return { providerId: provider.id, modelId: target }
+  const nonThinking = provider.models.find(m => !REASONING_MODEL_RE.test(m))
+  return { providerId: provider.id, modelId: nonThinking ?? target }
+}
+
 /** 流式开关（设置项 aiStreamEnabled，缺省开）：关闭后退回非流式，功能不受损 */
 function streamEnabled(): boolean {
   return depsRef?.getSettingValue('aiStreamEnabled') !== false

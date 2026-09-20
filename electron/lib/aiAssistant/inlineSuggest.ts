@@ -14,7 +14,7 @@
  */
 
 import { ipcMain } from 'electron'
-import { invokeLlmStreamInternal } from '../llmService'
+import { invokeLlmStreamInternal, resolveInlineSuggestFallback } from '../llmService'
 import { getSettingReader } from '../aiTools'
 import {
   buildInlinePrompt,
@@ -83,9 +83,11 @@ export async function runInlineSuggest(req: InlineSuggestRequest): Promise<Inlin
       title: pickFrontmatterTitle(text),
     })
 
-    // 模型解析：设置 aiAssistantInlineSuggestModelId（'pid:mid'）> 请求透传 > 默认链
+    // 模型解析：设置 aiAssistantInlineSuggestModelId（'pid:mid'）> 请求透传 > 默认链降级
     //   ★ 内联建议建议单独指定便宜/快的模型（设置 → 编辑器 → AI 内联建议）：
     //     它的调用频次远高于对话，别跟对话主模型共用贵模型。
+    //   默认链降级（2026-09-20 反馈）：默认链是思考型模型时自动换同供应商第一个非思考模型
+    //   ——「续写一句」不需要思考链，思考型延迟与成本都不合适（llmService.resolveInlineSuggestFallback）。
     let providerId = req.providerId
     let modelId = req.modelId
     const configured = String(getSettingReader()('aiAssistantInlineSuggestModelId') ?? '').trim()
@@ -93,6 +95,12 @@ export async function runInlineSuggest(req: InlineSuggestRequest): Promise<Inlin
       const ci = configured.indexOf(':')
       providerId = ci > 0 ? configured.slice(0, ci) : undefined
       modelId = ci > 0 ? configured.slice(ci + 1) : configured
+    } else if (!providerId && !modelId) {
+      const fb = resolveInlineSuggestFallback()
+      if (fb) {
+        providerId = fb.providerId
+        modelId = fb.modelId
+      }
     }
 
     let out = ''

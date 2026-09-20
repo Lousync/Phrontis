@@ -618,25 +618,36 @@ async function main() {
     return false
   }
 
-  // G3 点「建议」按钮 → provider 被调用，入参合理（text 非空、offset 为数字）
+  // G3 ★ ✨ 总开关语义（2026-09-20 反馈：原「触发一次」开了关不掉）：开着点 = 立即关闭且不发请求
   await evalJs(`(() => {
     const bs = [...document.querySelectorAll('[data-wb="inlineSuggestBtn"]')]
     const vis = bs.find((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
     vis?.click(); return true
   })()`)
-  // Phase 2 诊断：点击后 dump 编辑器实例与 model 状态（取证 trigger 链路是否到位）
-  const g3dbg = await evalJs(`(() => {
-    const m = window.__kb_monaco
-    if (!m) return { noMonaco: true }
-    return {
-      editors: m.editor.getEditors().length,
-      models: m.editor.getModels().map((x) => x.getLanguageId() + ':' + x.getValueLength()),
-      focused: !!m.editor.getEditors().find((e) => e.hasTextFocus()),
-    }
+  await sleep(600)
+  const g3off = await evalJs(`(() => ({
+    off: !!document.querySelector('[data-wb="inlineSuggestBtn"][data-wb-inline-off]'),
+    busy: !!document.querySelector('[data-wb="inlineBusy"]'),
+  }))()`)
+  ok(g3off.off && !g3off.busy,
+    'G3 ★ 点 ✨（开→关）：立即进关闭态且不发请求', JSON.stringify(g3off))
+  // G3c 再点恢复开启 + 探针点火口就绪（window.__kb_inline_trigger，MonacoPane onMount 挂出）
+  await evalJs(`(() => {
+    const bs = [...document.querySelectorAll('[data-wb="inlineSuggestBtn"]')]
+    const vis = bs.find((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
+    vis?.click(); return true
   })()`)
-  console.log('[G3 dump]', JSON.stringify(g3dbg))
+  await sleep(600)
+  const g3c = await evalJs(`(() => ({
+    off: !!document.querySelector('[data-wb="inlineSuggestBtn"][data-wb-inline-off]'),
+    hasTrigger: typeof window.__kb_inline_trigger === 'function',
+  }))()`)
+  ok(!g3c.off && g3c.hasTrigger,
+    'G3c 再点 ✨（关→开）恢复开启态 + 探针点火口就绪', JSON.stringify(g3c))
+  // G3d 探针点火 → provider 被调用，入参合理（text 非空、offset 为数字——由契约 J1-J5 覆盖）
+  await evalJs(`(() => { window.__kb_inline_trigger?.(); return true })()`)
   const g3 = await waitBusy(true, 2000)
-  ok(g3, 'G3 ★ 点「建议」→ provider 真被调用（忙态微标亮起 = 触发链路通）', `busy=${await busyNow()}`)
+  ok(g3, 'G3d ★ 探针点火 → provider 真被调用（忙态微标亮起 = 触发链路通）', `busy=${await busyNow()}`)
   // G3b 忙态必须回落：探针无 LLM key → 走主进程硬超时（10s）/ 渲染层兜底（12s）分支。
   //     这条锁的是「不可达时不永久转圈」（实测修超时前：8s+ 不回落且永不 resolve）。
   const g3b = await waitBusy(false, 16000)
@@ -781,9 +792,12 @@ async function main() {
     return true
   })()`)
   await sleep(1400)
-  const g6 = await evalJs(`(() => ({ count: document.querySelectorAll('[data-wb="inlineSuggestBtn"]').length }))()`)
-  ok(g6.count === 0,
-    'G6 ★ 关掉设置后「建议」按钮消失（胶囊不再渲染该按钮）', JSON.stringify(g6))
+  const g6 = await evalJs(`(() => ({
+    count: document.querySelectorAll('[data-wb="inlineSuggestBtn"]').length,
+    off: !!document.querySelector('[data-wb="inlineSuggestBtn"][data-wb-inline-off]'),
+  }))()`)
+  ok(g6.count === 1 && g6.off,
+    'G6 ★ 关掉设置后 ✨ 进关闭态（按钮常驻表达开关，off 态可见）', JSON.stringify(g6))
   await evalJs(`(() => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', altKey: true, bubbles: true, cancelable: true }))
     return true
@@ -802,10 +816,14 @@ async function main() {
   const g7 = await evalJs(`(async () => {
     let v = null
     try { v = await window.api.getSetting('aiAssistantInlineSuggest') } catch {}
-    return { saved: v, btn: document.querySelectorAll('[data-wb="inlineSuggestBtn"]').length }
+    return {
+      saved: v,
+      btn: document.querySelectorAll('[data-wb="inlineSuggestBtn"]').length,
+      off: !!document.querySelector('[data-wb="inlineSuggestBtn"][data-wb-inline-off]'),
+    }
   })()`)
-  ok(g7.saved === true && g7.btn === 1,
-    'G7 复原开关（设置回 true、按钮回来，无副作用残留）', JSON.stringify(g7))
+  ok(g7.saved === true && g7.btn === 1 && g7.off === false,
+    'G7 复原开关（设置回 true、按钮回开启态，无副作用残留）', JSON.stringify(g7))
 
   console.log('\n========================================')
   const fails = results.filter((r) => !r.pass)

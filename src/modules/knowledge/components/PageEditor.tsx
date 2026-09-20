@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, Eye, Edit3, Star, FileText, ChevronDown, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, MoreHorizontal, ListChecks, SquarePen, Sparkles, RefreshCw } from 'lucide-react'
+import { Trash2, Eye, Edit3, Star, FileText, ChevronDown, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, MoreHorizontal, ListChecks, Sparkles, RefreshCw } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { QuizMode } from '../../../components/shared/QuizMode'
 import { extractQuizzes } from '../../../components/shared/QuizParser'
@@ -21,7 +21,7 @@ import { FileMetaCard } from './FileMetaCard'
 import Editor, { type OnMount } from '@monaco-editor/react'
 // 共享 Monaco 宿主（P1b）：就地编辑换用与编辑器模块同一份装配——[[ 补全 / B4 内联建议 /
 // 淡化装饰 / 粘贴与拖图拦截全部随之带入；legacy <Editor> 分支仅服务非 vault 旧数据兜底
-import { MonacoPane, type MonacoPaneHandle } from '../../../components/shared/MonacoPane'
+import { MonacoPane, cancelInlineSuggestInFlight, type MonacoPaneHandle } from '../../../components/shared/MonacoPane'
 import { MonacoErrorBoundary } from '../../../components/shared/MonacoErrorBoundary'
 import type * as Monaco from 'monaco-editor'
 import { bindEditorTheme } from '../../../lib/editorTheme'
@@ -60,8 +60,8 @@ interface Props {
   isActive?: boolean
 }
 
-export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, onOpenInEditor, draftRelPath, isActive = true }: Props) {
-  const { s } = useSettings()
+export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, isActive = true }: Props) {
+  const { s, update } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -70,6 +70,16 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   // 知识库以阅读优先:md/txt 页面打开即预览(右上角眼睛或 Ctrl+E / Ctrl+/ 切回编辑;vault 模式就地保存)
   const [preview, setPreview] = useState(true)
+  // 编辑器保活（2026-09-20 反馈「切换要迅速」）：首入编辑态才挂 MonacoPane，此后阅读态 display:none
+  // 藏起不卸载——Monaco 编辑器创建是切换延迟的大头（~200ms），保活后二次切换零重挂、即时出。
+  // reveal 时 bump layoutKey（display:none 期间容器尺寸为 0，需要显式 layout()）。
+  const [editorEverMounted, setEditorEverMounted] = useState(false)
+  const [editRevealTick, setEditRevealTick] = useState(0)
+  useEffect(() => {
+    if (preview) return
+    setEditorEverMounted(true)
+    setEditRevealTick(t => t + 1)
+  }, [preview])
   const [backlinks, setBacklinks] = useState<KnowledgeBacklinkItem[]>([])
   // 相似笔记（A3-3：标题+首段语义/关键词混合召回，排除自身）
   const [similar, setSimilar] = useState<SimilarPageHit[]>([])
@@ -905,28 +915,39 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               {preview ? <Edit3 size={15} /> : <Eye size={15} />}
             </button>
           )}
-          {/* B4 内联建议手动入口（Phase 2 批次 2；2026-09-20 反馈：由「✦ 建议」文字胶囊收成单个图标）：
-              状态由图标自身表达——请求中 = 警示色脉冲 + 旁侧微点；已暂停 = 图标置灰 + 右上角标点。
-              data-wb 锚点保持不变（探针 probe-batch5-ai 的 G 系断言依赖 inlineSuggestBtn / inlineBusy / inlinePaused） */}
-          {fileType === 'md' && !preview && s.aiAssistantInlineSuggest !== false && (
-            <>
-              {inlineBusy && <span data-wb="inlineBusy" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--warning)]" title="AI 续写请求中…" />}
-              <button
-                onClick={() => paneRef.current?.triggerInlineSuggest()}
-                title={inlineBusy ? 'AI 续写建议：生成中…' : inlinePaused ? '连续建议未采纳，已暂停自动 · 按 Alt+A 唤醒' : 'AI 续写建议：在光标处生成下一句（Alt+A；Tab 采纳 / Esc 拒绝）'}
-                data-wb="inlineSuggestBtn"
-                className={`relative p-1.5 rounded transition-colors ${inlineBusy ? 'text-[var(--warning)]' : inlinePaused ? 'text-[var(--text-disabled)]' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}
-              >
-                <Sparkles size={15} className={inlineBusy ? 'animate-pulse' : ''} />
-                {inlinePaused && <span data-wb="inlinePaused" className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--text-disabled)]" />}
-              </button>
-            </>
-          )}
-          {vaultMode && onOpenInEditor && (
-            <button onClick={onOpenInEditor} className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" title="在编辑器模块中打开（读写分工：编辑统一在编辑器进行）">
-              <SquarePen size={15} />
-            </button>
-          )}
+          {/* B4 内联建议总开关（2026-09-20 反馈：原「触发一次」定位不明、开了关不掉。
+              现语义：开着点 = **立即关闭**（掐在途请求 + 收起 ghost + 关设置总闸）；
+              关着点 = 打开。单次要一条仍按 Alt+A；自动触发由设置里「自动触发」管。
+              data-wb 锚点保持（探针 G 系依赖 inlineSuggestBtn / inlineBusy / inlinePaused）；
+              关闭态以 data-wb-inline-off 表达（探针 G3/G6/G7 断言同步更新）。 */}
+          {fileType === 'md' && !preview && (() => {
+            const inlineOn = s.aiAssistantInlineSuggest !== false
+            return (
+              <>
+                {inlineBusy && <span data-wb="inlineBusy" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--warning)]" title="AI 续写请求中…" />}
+                <button
+                  onClick={() => {
+                    if (inlineOn) {
+                      cancelInlineSuggestInFlight()
+                      paneRef.current?.hideInlineSuggest()
+                      update('aiAssistantInlineSuggest', false)
+                    } else {
+                      update('aiAssistantInlineSuggest', true)
+                    }
+                  }}
+                  data-wb="inlineSuggestBtn"
+                  {...(inlineOn ? {} : { 'data-wb-inline-off': '1' })}
+                  title={inlineBusy ? 'AI 续写建议：生成中…' : inlineOn ? 'AI 续写建议：已开启 · 点击关闭（单次要一条按 Alt+A）' : 'AI 续写建议：已关闭 · 点击开启'}
+                  className={`relative p-1.5 rounded transition-colors ${inlineBusy ? 'text-[var(--warning)]' : inlineOn ? 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]' : 'text-[var(--text-disabled)]'}`}
+                >
+                  <Sparkles size={15} className={inlineBusy ? 'animate-pulse' : ''} />
+                  {inlinePaused && inlineOn && <span data-wb="inlinePaused" className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--text-disabled)]" />}
+                </button>
+              </>
+            )
+          })()}
+          {/* 「在编辑器打开」按钮已删（2026-09-20 反馈）：编辑器模块退役后语义不明，
+              阅读态只留「编辑」单按钮（就地编辑，Phase 1 起写路径本就在本模块） */}
           {/* 更多操作:收藏 / 关联 / 沉浸阅读 / 删除 */}
           <div className="relative">
             <button onClick={() => setShowMoreMenu(v => !v)}
@@ -1098,40 +1119,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               }}
             />
           </div>
-        ) : paneDoc ? (
-          <MonacoPane
-            ref={paneRef}
-            doc={paneDoc}
-            onChange={(_rel, v) => { setContent(v); onContentChange?.(v) }}
-            fontSize={Math.round(s.editorFontSize * zoom)}
-            editorOptions={{
-              fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
-              cursorBlinking: 'smooth',
-              cursorSmoothCaretAnimation: 'on',
-              renderWhitespace: 'selection',
-              /* 正文避让（2026-09-20 悬浮栏）：右上浮动胶囊会压住正文头几行，
-                 编辑态顶部留出工具带高度（mt-3 + 胶囊约 40px 高 ≈ 52px，取 56px 冗余） */
-              padding: { top: 56, bottom: 16 },
-              overviewRulerLanes: 0,
-              hideCursorInOverviewRuler: true,
-              overviewRulerBorder: false,
-              guides: { indentation: true },
-              insertSpaces: true,
-              bracketPairColorization: { enabled: true },
-              matchBrackets: 'always',
-              unicodeHighlight: { nonBasicASCII: false, ambiguousCharacters: false, invisibleCharacters: false },
-              selectionHighlight: true,
-              quickSuggestions: true,
-              suggest: { showWords: false },
-            }}
-            onPasteImage={handleImageToMarkdown}
-            onDropImage={handleImageToMarkdown}
-            inlineSuggestEnabled={s.aiAssistantInlineSuggest !== false}
-            inlineSuggestAuto={s.aiAssistantInlineSuggestAuto !== false}
-            onInlineSuggestBusy={setInlineBusy}
-            onInlineSuggestPaused={setInlinePaused}
-          />
-        ) : (
+        ) : !paneDoc ? (
           <div className="flex flex-col flex-1 overflow-hidden">
             <div className="flex-1 min-h-0">
               <MonacoErrorBoundary>
@@ -1176,6 +1164,47 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               />
               </MonacoErrorBoundary>
             </div>
+          </div>
+        ) : null}
+        {/* MonacoPane 保活（2026-09-20 反馈「切换要迅速」）：首入编辑态挂载，此后阅读态 display:none
+            藏起不卸载——Monaco 编辑器创建是切换延迟大头（~200ms），保活后二次切换零重挂、即时出。
+            reveal 时 bump layoutKey（隐藏期间容器尺寸为 0，需显式 layout()）；外部内容变更经
+            doc 最小 diff 同步，隐藏期间模型保持新鲜。onOpenInEditor 入口随编辑器模块退役删除。 */}
+        {paneDoc && editorEverMounted && (
+          <div className={preview ? 'hidden' : 'min-h-0 flex-1'}>
+            <MonacoPane
+              ref={paneRef}
+              doc={paneDoc}
+              onChange={(_rel, v) => { setContent(v); onContentChange?.(v) }}
+              fontSize={Math.round(s.editorFontSize * zoom)}
+              editorOptions={{
+                fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
+                cursorBlinking: 'smooth',
+                cursorSmoothCaretAnimation: 'on',
+                renderWhitespace: 'selection',
+                /* 正文避让（2026-09-20 悬浮栏）：右上浮动胶囊会压住正文头几行，
+                   编辑态顶部留出工具带高度（mt-3 + 胶囊约 40px 高 ≈ 52px，取 56px 冗余） */
+                padding: { top: 56, bottom: 16 },
+                overviewRulerLanes: 0,
+                hideCursorInOverviewRuler: true,
+                overviewRulerBorder: false,
+                guides: { indentation: true },
+                insertSpaces: true,
+                bracketPairColorization: { enabled: true },
+                matchBrackets: 'always',
+                unicodeHighlight: { nonBasicASCII: false, ambiguousCharacters: false, invisibleCharacters: false },
+                selectionHighlight: true,
+                quickSuggestions: true,
+                suggest: { showWords: false },
+              }}
+              onPasteImage={handleImageToMarkdown}
+              onDropImage={handleImageToMarkdown}
+              inlineSuggestEnabled={s.aiAssistantInlineSuggest !== false}
+              inlineSuggestAuto={s.aiAssistantInlineSuggestAuto !== false}
+              onInlineSuggestBusy={setInlineBusy}
+              onInlineSuggestPaused={setInlinePaused}
+              layoutKey={editRevealTick}
+            />
           </div>
         )}
 
