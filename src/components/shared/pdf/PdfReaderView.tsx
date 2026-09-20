@@ -811,6 +811,15 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     scheduleProgress({ zoom: zoomRef.current })
   }, [scheduleProgress])
 
+  /** 复位整页适配（Ctrl+0 与「适合页面」按钮同款口径） */
+  const resetFit = useCallback(() => {
+    setFitWidth(true)
+    setFitPage(true)
+    zoomRef.current = 1
+    setZoom(1)
+    scheduleProgress({ zoom: 1 })
+  }, [scheduleProgress])
+
   // ===== 书签（方案 §5.6：当页增删 + 列表备注）=====
   const currentPageForBookmark = () => (viewMode === 'duo' ? duoStartRef.current : pageNumRef.current)
 
@@ -844,6 +853,21 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
 
   // ===== 划词 AI 工具条（方案 §6）+ 划选摘录（摘录先行批次）=====
   const rootRef = useRef<HTMLDivElement>(null)
+
+  // Ctrl/Cmd + 滚轮缩放：必须 native 监听 + passive:false——React 合成 onWheel 是 passive，
+  // preventDefault 无效，拦不掉 Chromium 的整页缩放（2026-09-20 反馈：阅读器加 Ctrl+滚轮）
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      void zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1)
+    }
+    root.addEventListener('wheel', onWheel, { passive: false })
+    return () => root.removeEventListener('wheel', onWheel)
+  }, [zoomBy])
+
   const [selInfo, setSelInfo] = useState<{ rect: SelectionRect; text: string; page: number; rects?: ExcerptRect[] } | null>(null)
   const [translate, setTranslate] = useState<TranslateState | null>(null)
   const closeSelBar = useCallback(() => { setSelInfo(null); setTranslate(null) }, [])
@@ -1060,6 +1084,10 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
       if (e.key === 'PageDown' || e.key === 'ArrowRight' || (e.key === ' ' && !immersive)) { e.preventDefault(); void stepPage(1) }
       else if (e.key === 'PageUp' || e.key === 'ArrowLeft') { e.preventDefault(); void stepPage(-1) }
+      // 缩放：Ctrl/Cmd + =（放大）/ -（缩小）/ 0（复位整页适配）
+      else if ((e.key === '=' || e.key === '+') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void zoomBy(1.2) }
+      else if ((e.key === '-' || e.key === '_') && (e.ctrlKey || e.metaKey)) { e.preventDefault(); void zoomBy(1 / 1.2) }
+      else if (e.key === '0' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); resetFit() }
       else if (e.key === 'f' && (e.ctrlKey || e.metaKey)) {
         e.preventDefault()
         setSideTab('search')
@@ -1080,7 +1108,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [closeSelBar, immersive, selInfo, sideTab, stepPage, toggleImmersive])
+  }, [closeSelBar, immersive, selInfo, sideTab, stepPage, toggleImmersive, zoomBy, resetFit])
 
   // 批次 6：当前页广播（左栏大纲态跟随高亮）+ 左栏跳页请求承接
   useEffect(() => {
@@ -1165,7 +1193,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
       {/* 适配口径二选一（2026-09-18）：整页适配 = 整页完整可见（默认，书架诉求）；
           适合宽度 = 页面宽铺满容器、纵向滚动看完整页。放大/缩小会脱离自动适配（fitWidth=false）。 */}
-      <button onClick={() => { setFitWidth(true); setFitPage(true); zoomRef.current = 1; setZoom(1) }} title="适合页面（整页完整可见）"
+      <button onClick={resetFit} title="适合页面（整页完整可见，Ctrl+0）"
         className={`rounded p-0.5 ${fitWidth && fitPage ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <MaximizeIcon size={14} />
       </button>
@@ -1173,8 +1201,8 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
         className={`rounded p-0.5 ${fitWidth && !fitPage ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
         <MoveHorizontal size={14} />
       </button>
-      <button onClick={() => void zoomBy(1.2)} title="放大" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomIn size={14} /></button>
-      <button onClick={() => void zoomBy(1 / 1.2)} title="缩小" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomOut size={14} /></button>
+      <button onClick={() => void zoomBy(1.2)} title="放大 (Ctrl + 滚轮 / Ctrl + =)" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomIn size={14} /></button>
+      <button onClick={() => void zoomBy(1 / 1.2)} title="缩小 (Ctrl + 滚轮 / Ctrl + -)" className="rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ZoomOut size={14} /></button>
       <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
       {/* 大纲 = 左栏 bookshelf 模块态（批次 6：内嵌大纲侧栏已删）：解锁左栏并切过去（兜底入口） */}
       <button onClick={() => window.dispatchEvent(new CustomEvent('kb-rail-show-bookshelf-outline'))} title="在左栏打开目录/缩略图/书签"
