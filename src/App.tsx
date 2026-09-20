@@ -480,6 +480,25 @@ export default function App() {
     setLoaded(true)
   }, [settingsReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 空闲预热大 chunk（性能 2026-09-20）：PageEditor 静态内联 monaco（构建产物 monaco chunk 8.12MB），
+  // 不预热时**首次打开笔记页面**（哪怕只是阅读态）都要现拉现解析这 8MB —— dev 下体感约 2s。
+  // 启动完成后在浏览器空闲期后台 import，把拉取+解析成本从「用户开门瞬间」挪到「启动后空闲」。
+  // 串行排队（monaco 优先、pdfjs 靠后），不与启动路径抢主线程。
+  useEffect(() => {
+    if (!loaded) return
+    const w = window as Window & {
+      requestIdleCallback?: (cb: (deadline: IdleDeadline) => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (id: number) => void
+    }
+    const idle = (fn: () => void, timeout: number): number =>
+      w.requestIdleCallback ? w.requestIdleCallback(fn, { timeout }) : window.setTimeout(fn, timeout)
+    const ids = [
+      idle(() => { void import('./modules/knowledge/components/PageEditor').catch(() => {}) }, 4000),
+      idle(() => { void import('./components/shared/pdf/PdfReaderView').catch(() => {}) }, 10000),
+    ]
+    return () => { for (const id of ids) { w.cancelIdleCallback?.(id); window.clearTimeout(id) } }
+  }, [loaded])
+
   // Listen for import modal open
   useEffect(() => {
     const handler = () => { setImportBackupPath(null); setImportModalOpen(true) }

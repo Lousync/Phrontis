@@ -174,11 +174,11 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
   const ym = `${year}-${String(month).padStart(2, '0')}`
 
   // ---- data loading ----
+  // dates 与 deadlineCounts 互相独立（性能 2026-09-20）：原来串行 await，模块首挂的数据等待被拉长一倍
   async function refreshDotDates() {
     try {
-      const dates = await getScheduleDates(ym)
+      const [dates, counts] = await Promise.all([getScheduleDates(ym), getScheduleDeadlineCounts(ym)])
       setDotDates(new Set(dates))
-      const counts = await getScheduleDeadlineCounts(ym)
       setDeadlineCounts(new Map(Object.entries(counts)))
     } catch (e) { console.error(e) }
   }
