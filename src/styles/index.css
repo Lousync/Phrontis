@@ -153,6 +153,16 @@ input:focus, textarea:focus, select:focus {
   -webkit-user-drag: auto;
 }
 
+/* 阅读器正文（2026-09-20 摘录批次补白名单）：划选是摘录/翻译/讲题的前提，
+   之前被 body 全局 none 拦死——TXT 段落与 PDF 文本层都不在任何白名单里 */
+[data-wb="txtReader"] p[data-p],
+[data-wb="txtReader"] p[data-p] *,
+.kb-pdf-text-layer,
+.kb-pdf-text-layer * {
+  user-select: text;
+  -webkit-user-drag: auto;
+}
+
 /* HTML5 拖拽源。
    body 上的 -webkit-user-drag: none 是**可继承属性**，会把所有后代的拖动能力钉死 ——
    即使元素写了 draggable="true" 也拖不动（表现为点住拖动毫无反应 / 禁止光标）。

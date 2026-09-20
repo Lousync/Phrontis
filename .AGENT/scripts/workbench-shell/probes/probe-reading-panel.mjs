@@ -240,6 +240,36 @@ async function main() {
   })()`)
   ok('右栏摘录列表出现条目', panelOn)
 
+  // ===== 7) 真实鼠标拖选（CDP mouse 事件链）——防 user-select 白名单回归 =====
+  // 程序化 Selection API 绕过 user-select 限制（2026-09-20 实测教训：body 全局 none 拦死真实划选、探针却全绿）
+  const dragPrep = await evalJs(`(() => {
+    const p = document.querySelector('[data-wb="txtReader"] p[data-p="5"]')
+    if (!p) return null
+    p.scrollIntoView({ block: 'center' })
+    return true
+  })()`)
+  await sleep(400)
+  const dragBox = await evalJs(`(() => {
+    const p = document.querySelector('[data-wb="txtReader"] p[data-p="5"]')
+    if (!p) return null
+    const r = p.getBoundingClientRect()
+    return { x0: Math.round(r.left + 12), x1: Math.round(r.right - 12), y: Math.round(r.top + r.height / 2) }
+  })()`)
+  if (!dragPrep || !dragBox) { console.error('拖选目标段落不可用'); process.exit(1) }
+  const mouse = (type, x, y) => send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1 })
+  await mouse('mousePressed', dragBox.x0, dragBox.y)
+  for (let i = 1; i <= 8; i++) {
+    await mouse('mouseMoved', Math.round(dragBox.x0 + (dragBox.x1 - dragBox.x0) * i / 8), dragBox.y)
+    await sleep(30)
+  }
+  await mouse('mouseReleased', dragBox.x1, dragBox.y)
+  await sleep(400)
+  const dragBarOn = await evalJs(`(() => {
+    const btn = [...document.querySelectorAll('button')].find((b) => (b.getAttribute('title') || '').includes('存为摘录'))
+    return !!btn
+  })()`)
+  ok('真实鼠标拖选 → 划选浮条出现（user-select 白名单生效）', dragBarOn)
+
   console.log(failed ? '\n存在失败断言' : '\n全部通过')
   process.exit(failed ? 1 : 0)
 }
