@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Coins, FileEdit, CalendarDays, ChevronRight } from 'lucide-react'
 import { agentUsageGet, agentSessionChanges } from '../../lib/ipc'
 import type { AiUsageDay, SessionFileChange } from '../../types'
@@ -104,7 +104,6 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
       .sort((a, b) => b.total - a.total)
       .slice(0, 5)
   }, [days])
-  const weekMax = weekTop[0]?.total ?? 0
 
   /** 改动文件：新→旧排序；可见条数按容器高度自适应（ResizeObserver） */
   const sortedChanges = useMemo(
@@ -126,7 +125,11 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
   }, [])
 
   return (
-    <div data-wb="aiUsagePanel" className="kb-view-fade flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-2.5 pb-2.5 pt-2">
+    <div
+      data-wb="aiUsagePanel"
+      className="kb-view-fade flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-2.5 pb-2.5 pt-2"
+      style={{ '--kb-in': '#8ba3f5' } as CSSProperties}
+    >
       {/* ── ① 消耗卡：今日大数字 + 7 天双段堆叠柱 + 会话 TOP（折叠） ── */}
       <div className="shrink-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
         <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[var(--text-secondary)]">
@@ -145,20 +148,20 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
           输入 {fmtTok(today.in)} · 输出 {fmtTok(today.out)} · {today.calls} 次调用{today.cache > 0 && todayTotal > 0 ? ` · 缓存命中 ${Math.min(100, Math.round((today.cache / Math.max(todayTotal, 1)) * 100))}%` : ''}
         </div>
 
-        {/* 近 7 天双段堆叠柱：浅=输入 / 深=输出，悬停看当日数值 */}
+        {/* 近 7 天双段堆叠柱：浅=输入 / 深=输出（--kb-in 取原型同款浅蓝紫），悬停提亮 + 看当日数值 */}
         <div className="mt-2 flex h-[96px] items-end gap-2" role="img" aria-label="近 7 天 token 消耗堆叠柱状图">
           {chartDays.map(d => (
-            <div key={d.key} className="flex h-full flex-1 flex-col items-center justify-end gap-1" title={d.title}>
+            <div key={d.key} className="group/bar flex h-full flex-1 flex-col items-center justify-end gap-1" title={d.title}>
               <div
                 className={`flex w-full max-w-[22px] flex-col justify-end overflow-hidden rounded-t-[5px] rounded-b-[2px] ${d.today ? 'outline outline-1 outline-[var(--accent)] outline-offset-1' : ''}`}
                 style={{ height: `${Math.round(((d.in + d.out) / chartMax) * 100)}%` }}
               >
                 <i
-                  className="w-full bg-[var(--accent)]"
+                  className="w-full bg-[var(--accent)] transition-[filter] group-hover/bar:brightness-110"
                   style={{ height: `${d.in + d.out > 0 ? Math.round((d.out / (d.in + d.out)) * 100) : 0}%` }}
                 />
                 <i
-                  className="w-full bg-[color-mix(in_srgb,var(--accent)_50%,white)]"
+                  className="w-full bg-[var(--kb-in)] transition-[filter] group-hover/bar:brightness-110"
                   style={{ height: `${d.in + d.out > 0 ? Math.round((d.in / (d.in + d.out)) * 100) : 0}%` }}
                 />
               </div>
@@ -167,7 +170,7 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
           ))}
         </div>
         <div className="mt-1.5 flex items-center gap-3">
-          <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)]"><i className="inline-block h-2 w-2 rounded-[2px] bg-[color-mix(in_srgb,var(--accent)_50%,white)]" />输入</span>
+          <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)]"><i className="inline-block h-2 w-2 rounded-[2px] bg-[var(--kb-in)]" />输入</span>
           <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)]"><i className="inline-block h-2 w-2 rounded-[2px] bg-[var(--accent)]" />输出</span>
           <span className="ml-auto text-[10px] text-[var(--text-disabled)]">悬停柱条看当日数值</span>
         </div>
@@ -182,20 +185,18 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
         </button>
         <Collapsible open={topOpen}>
           {() => (
-            <div className="space-y-2 pt-2">
+            <div className="pt-2">
               {weekTop.length === 0 ? (
                 <div className="py-1 text-[11px] text-[var(--text-muted)]">本周还没有对话消耗记录</div>
               ) : (
                 weekTop.map(s => (
-                  <div key={s.id}>
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]" title={s.title}>{s.title || '未命名会话'}</span>
-                      <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">{fmtTok(s.total)}</span>
-                    </div>
-                    <div className="mt-1 flex h-[5px] w-full overflow-hidden rounded-full bg-[var(--bg-hover)]">
-                      <i className="h-full bg-[var(--accent)]" style={{ width: weekMax > 0 ? `${(s.in / weekMax) * 100}%` : '0%' }} title={`输入 ${fmtTok(s.in)}`} />
-                      <i className="h-full bg-[color-mix(in_srgb,var(--accent)_42%,#9db1f7)]" style={{ width: weekMax > 0 ? `${(s.out / weekMax) * 100}%` : '0%' }} title={`输出 ${fmtTok(s.out)}`} />
-                    </div>
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-1.5 rounded-md px-1 py-1 hover:bg-[var(--bg-hover)]"
+                    title={`${s.title || '未命名会话'} · 输入 ${fmtTok(s.in)} / 输出 ${fmtTok(s.out)}`}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]">{s.title || '未命名会话'}</span>
+                    <span className="shrink-0 font-mono text-[10.5px] font-medium text-[var(--success)]">{fmtTok(s.total)}</span>
                   </div>
                 ))
               )}
@@ -226,8 +227,8 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
                   >
                     <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9.5px] font-semibold ${
                       c.op === 'A'
-                        ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]'
-                        : 'bg-[var(--bg-hover)] text-[var(--text-secondary)]'
+                        ? 'bg-[color-mix(in_srgb,var(--success)_16%,transparent)] text-[var(--success)]'
+                        : 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]'
                     }`}>{c.op}</span>
                     <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-primary)]">{c.target}</span>
                     <span className="shrink-0 text-[9.5px] text-[var(--text-disabled)]">{c.at.slice(11, 16)}</span>
