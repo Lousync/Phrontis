@@ -307,7 +307,7 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   )
 
   return (
-    <div data-wb="txtReader" className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+    <div data-wb="txtReader" data-sel-float-ignore className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
       {toolbar}
       {truncated && (
         <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-1 text-[11px] text-[var(--text-tertiary)]">
@@ -360,7 +360,18 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
         </div>
       )}
       {capture && (
-        <ExcerptCaptureBar rect={capture.rect} text={capture.text} onCreate={handleCreateExcerpt} onClose={() => setCapture(null)} />
+        <ExcerptCaptureBar
+          rect={capture.rect}
+          text={capture.text}
+          onCreate={handleCreateExcerpt}
+          onAsk={(t) => { window.dispatchEvent(new CustomEvent('ai-assistant:selection-action', { detail: { action: 'ask', text: t } })); setCapture(null); window.getSelection()?.removeAllRanges() }}
+          onTranslate={(t, r) => {
+            window.dispatchEvent(new CustomEvent('ai-assistant:selection-action', { detail: { action: 'translate', text: t, rect: { left: r.left, top: r.top, right: r.left + r.width, bottom: r.top + r.height } } }))
+            setCapture(null)
+            window.getSelection()?.removeAllRanges()
+          }}
+          onClose={() => setCapture(null)}
+        />
       )}
     </div>
   )

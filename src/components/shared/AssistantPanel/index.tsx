@@ -190,6 +190,9 @@ export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
           // 面板内部的选择不触发
           const anchorEl = sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement
           if (anchorEl?.closest('#assistant-panel-root')) { setSelFloat(null); return }
+          // 阅读域排除（2026-09-20 反馈「两个勾画菜单」）：阅读器有自己的选区浮条（摘录/翻译/问AI 全量），
+          // 标 data-sel-float-ignore 的子树内全局浮钮让位——否则同一选区弹两排菜单
+          if (anchorEl?.closest('[data-sel-float-ignore]')) { setSelFloat(null); return }
           const rect = sel.getRangeAt(0).getBoundingClientRect()
           if (!rect || (rect.width === 0 && rect.height === 0)) { setSelFloat(null); return }
           setSelFloat({
@@ -244,6 +247,23 @@ export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
     setSelFloat(null)
     setTransFloat({ rect: pos.rect, text })
   }, [])
+
+  // 阅读器浮条桥（2026-09-20「两个勾画菜单」合并）：阅读域内全局浮钮让位，
+  // 但「问 AI / 翻译」能力不丢——TXT 选区浮条经本事件借用这里的问答/翻译链路
+  useEffect(() => {
+    const onAction = (e: Event) => {
+      const d = (e as CustomEvent).detail as { action?: 'ask' | 'translate'; text?: string; rect?: SelRect } | undefined
+      const text = String(d?.text ?? '')
+      if (!text) return
+      if (d?.action === 'translate') {
+        translateSelection({ rect: d.rect ?? { left: 0, top: 0, right: 0, bottom: 0 } }, text)
+      } else {
+        askSelection(text)
+      }
+    }
+    window.addEventListener('ai-assistant:selection-action', onAction)
+    return () => window.removeEventListener('ai-assistant:selection-action', onAction)
+  }, [askSelection, translateSelection])
 
   /** 帮助页当前阅读的手册（AiLearnShell 回传）→ 提问时优先于「第几步」作为上下文 */
   const helpCtxRef = useRef<AgentContextInfo | null>(null)

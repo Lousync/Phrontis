@@ -1211,7 +1211,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   }
 
   return (
-    <div ref={rootRef} className="relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)]">
+    <div ref={rootRef} data-sel-float-ignore className="relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)]">
       {toolbar}
       <div className="flex min-h-0 flex-1 items-stretch" style={eyeCare ? { filter: 'sepia(0.32) brightness(0.97) saturate(0.92)' } : undefined}>
         {sidePanel}
