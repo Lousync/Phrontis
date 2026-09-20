@@ -122,6 +122,14 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const tagsRef = useRef<KnowledgeTag[]>([])
   const isDirtyRef = useRef(false)
   const savedContentRef = useRef('')
+  /**
+   * 自写广播守卫（2026-09-20 修「中文输入后光标跳文末」）：
+   * 每次自动保存成功 → 主进程广播 → 模块派发 kb-reload-detail → 本组件重读页面并回灌 content。
+   * 这条回灌对我们自己刚写的内容毫无价值，却会：① 撞上输入法停顿（那个停顿正是 debounce 触发点），
+   * ② 若写盘后又敲了几个字，磁盘版比模型旧 → 回灌会把新字吞掉。
+   * 故记下「刚刚自己写盘」的时刻，窗口期内忽略重读；真外部改动走 onWsExternalChange 通道。
+   */
+  const selfSavedAtRef = useRef(0)
   const savedTitleRef = useRef('')
   const monacoRef = useRef<typeof Monaco | null>(null)
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
@@ -364,6 +372,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   useEffect(() => {
     const onReload = () => {
       if (isDirtyRef.current) return // 本地有未保存编辑 → 不打断
+      // 自己刚写盘触发的广播：不回灌（回灌无收益，且可能用旧盘内容吞掉写盘后新敲的字）
+      if (Date.now() - selfSavedAtRef.current < 2000) return
       loadPageRef.current(true) // isReload：保持当前阅读/编辑态
     }
     window.addEventListener('kb-reload-detail', onReload)
@@ -420,6 +430,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           isDirtyRef.current = false
           savedContentRef.current = c
           savedTitleRef.current = t
+          selfSavedAtRef.current = Date.now() // 标记自写时刻（守卫：随后的广播不回灌）
           setSaving(false)
           onClearDirty?.()
           // 双链/图谱不入图通道：vault 模式下 knowledge:updateLinks 被 DB-only 白名单拒绝（knowledgeRepo.ts:201），
@@ -449,6 +460,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       isDirtyRef.current = false
       savedContentRef.current = c
       savedTitleRef.current = t
+      selfSavedAtRef.current = Date.now() // 同上：自写时刻守卫
       setSaving(false)
       onClearDirty?.()
     } catch (e) { console.error(e) }

@@ -152,6 +152,54 @@ export const MonacoPane = forwardRef<MonacoPaneHandle, Props>(function MonacoPan
 /** model → relPath（内联建议的 relPath 参数取真实 relPath，不受命名空间 modelPath 影响） */
 const relPathByModel = new WeakMap<Monaco.editor.ITextModel, string>()
 
+/**
+ * 把外部文本按**最小 diff** 落进模型，并保持光标（2026-09-20）。
+ *
+ * 为什么不能用包装层的 `value` prop：它一变就 `executeEdits(整模型范围)` →
+ * 光标无条件落到文末、输入法组合态被打断（用户症状：「打中文停顿时光标跳到末尾」）。
+ * 这里的策略：算出公共前缀 / 后缀，只替换真正变动的区段；光标按落点平移——
+ * 在改动区**之前**不动、在**之后**按长度增量平移、落在**改动区内部**则落到插入文本末尾。
+ * 两串相同 / 模型为空时不动作（幂等，避免无谓的 undo 栈污染）。
+ */
+function applyTextDiff(ed: Monaco.editor.IStandaloneCodeEditor, next: string): void {
+  const model = ed.getModel()
+  if (!model) return
+  const prev = model.getValue()
+  if (prev === next) return
+  let start = 0
+  const minLen = Math.min(prev.length, next.length)
+  while (start < minLen && prev.charCodeAt(start) === next.charCodeAt(start)) start++
+  let endPrev = prev.length
+  let endNext = next.length
+  while (endPrev > start && endNext > start && prev.charCodeAt(endPrev - 1) === next.charCodeAt(endNext - 1)) {
+    endPrev--
+    endNext--
+  }
+  const posBefore = ed.getPosition()
+  const caretBefore = posBefore ? model.getOffsetAt(posBefore) : null
+  const from = model.getPositionAt(start)
+  const to = model.getPositionAt(endPrev)
+  ed.pushUndoStop()
+  ed.executeEdits('kb-external-sync', [{
+    range: {
+      startLineNumber: from.lineNumber, startColumn: from.column,
+      endLineNumber: to.lineNumber, endColumn: to.column,
+    },
+    text: next.slice(start, endNext),
+    forceMoveMarkers: true,
+  }])
+  ed.pushUndoStop()
+  if (caretBefore === null) return
+  const delta = endNext - endPrev
+  const caretNext = caretBefore > endPrev
+    ? caretBefore + delta
+    : caretBefore > start
+      ? endNext
+      : caretBefore
+  const clamped = Math.max(0, Math.min(caretNext, next.length))
+  ed.setPosition(model.getPositionAt(clamped))
+}
+
 /** 有效文档的 Monaco 宿主；hooks 集中在子组件，doc 为 null 时父组件卸载它（满足 hooks 规则） */
 const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props['onChange']; dimEnabled: boolean; layoutKey: number; zen: boolean; typewriter: boolean; zenPaper: boolean; fontSize?: number; editorOptions?: Props['editorOptions']; onPasteImage?: Props['onPasteImage']; onDropImage?: Props['onDropImage']; inlineSuggestEnabled: boolean; inlineSuggestAuto: boolean; onInlineSuggestBusy?: Props['onInlineSuggestBusy']; onInlineSuggestPaused?: Props['onInlineSuggestPaused'] }>(
   function MonacoHost({ doc, onChange, dimEnabled, layoutKey, zen, typewriter, zenPaper = true, fontSize, editorOptions, onPasteImage, onDropImage, inlineSuggestEnabled = true, inlineSuggestAuto = true, onInlineSuggestBusy, onInlineSuggestPaused }, ref) {
@@ -189,9 +237,19 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
     /** 多宿主监听注销句柄（编辑区 keep-alive + 知识库就地编辑可能同时挂着两个宿主） */
     const busyDisposeRef = useRef<(() => void) | null>(null)
     const pausedDisposeRef = useRef<(() => void) | null>(null)
+    /**
+     * 外部文本同步（2026-09-20 修复「中文输入后光标跳到文末」）：
+     * @monaco-editor/react 的 `value` prop 一变就 `executeEdits(整模型范围)` 整篇替换 ——
+     * 光标必然落到文末、输入法组合态被打断。而笔记页每次自动保存后主进程广播 → 模块重读页面 →
+     * 回灌 content，正好撞在「打完一个中文词、停顿」的那一刻。
+     * 故：① `<Editor>` 只喂 `defaultValue`（`value === undefined` 时包装层跳过它自己的同步分支）；
+     *     ② 外部文本由本组件按**最小 diff** 落进模型，并显式恢复光标（改动区之前不变、之后按增量平移）；
+     *     ③ 输入法组合中（compositionstart..end）不落外部文本，组合结束后再对齐。
+     */
+    const composingRef = useRef(false)
+    const pendingSyncRef = useRef<string | null>(null)
 
-    /** 打字机留白：上下各 ~40% 视口高 → 文首/文尾行也能真正居中（iA Writer/Typora 式） */
-    const applyZenPadding = useCallback((ed: Monaco.editor.IStandaloneCodeEditor): void => {
+    /** 打字机留白：上下各 ~40% 视口高 → 文首/文尾行也能真正居中（iA Writer/Typora 式） */    const applyZenPadding = useCallback((ed: Monaco.editor.IStandaloneCodeEditor): void => {
       const pad = Math.max(140, Math.round(ed.getLayoutInfo().height * 0.4))
       if (Math.abs(pad - padRef.current) < 8) return
       padRef.current = pad
@@ -424,6 +482,19 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
         })().catch(() => { /* 失败提示由调用方 toast */ })
       }
       if (domNode) {
+        // 输入法组合态跟踪（2026-09-20）：组合期间不落外部文本，结束后补一次对齐。
+        // 挂在编辑器容器上（Monaco 的隐藏 textarea 在内部，事件在容器内冒泡）。
+        const onCompositionStart = (): void => { composingRef.current = true }
+        const onCompositionEnd = (): void => {
+          composingRef.current = false
+          const pending = pendingSyncRef.current
+          pendingSyncRef.current = null
+          if (pending === null) return
+          const ed = editorRef.current
+          if (ed) applyTextDiff(ed, pending)
+        }
+        domNode.addEventListener('compositionstart', onCompositionStart, true)
+        domNode.addEventListener('compositionend', onCompositionEnd, true)
         const onPasteCapture = (ev: Event): void => {
           const e = ev as ClipboardEvent
           const cb = pasteImageRef.current
@@ -470,6 +541,8 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
           domNode.removeEventListener('paste', onPasteCapture, true)
           domNode.removeEventListener('dragover', onDragOverCapture, true)
           domNode.removeEventListener('drop', onDropCapture, true)
+          domNode.removeEventListener('compositionstart', onCompositionStart, true)
+          domNode.removeEventListener('compositionend', onCompositionEnd, true)
         })
       }
 
@@ -489,6 +562,17 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
       const apply = applyFnRef.current
       if (apply) apply()
     }, [dimEnabled, zen])
+
+    /**
+     * 外部文本同步（2026-09-20）：doc.content 变化时按最小 diff 落进模型并保光标。
+     * 组合输入期间只记账不落盘，compositionend 后补一次对齐（否则会打断输入法候选）。
+     */
+    useEffect(() => {
+      const ed = editorRef.current
+      if (!ed) return
+      if (composingRef.current) { pendingSyncRef.current = doc.content; return }
+      applyTextDiff(ed, doc.content)
+    }, [doc.content])
 
     // 禅模式开关：隐藏行号 + 字号微增；打字机开 → 动态大留白（首尾行可居中），关 → 固定大留白
     useEffect(() => {
@@ -534,7 +618,10 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
         <Editor
           path={doc.modelPath ?? doc.relPath}
           language={doc.language}
-          value={doc.content}
+          /* ★ 只喂 defaultValue，**刻意不传 value**（2026-09-20）：
+             包装层的 value 同步是「整模型范围 executeEdits」→ 光标跳文末 + 打断输入法。
+             外部更新改由本组件的 applyTextDiff 承接（最小 diff + 显式恢复光标）。 */
+          defaultValue={doc.content}
           theme="knowbase-auto"
           beforeMount={bindEditorTheme}
           onMount={onMount}
