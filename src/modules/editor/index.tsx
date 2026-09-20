@@ -175,8 +175,6 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
   /** archivedPaths 的同步引用：saveDoc（闭包稳定）判定「保存的是已归档页 → 编辑即转草稿」 */
   const archivedRef = useRef<Set<string>>(new Set())
   useEffect(() => { archivedRef.current = archivedPaths }, [archivedPaths])
-  /** 草稿页 path 集合：树内 .md 文件显示「草稿」徽标（辨识写作中） */
-  const [draftRelPaths, setDraftRelPaths] = useState<Set<string>>(new Set())
   /** tab 右键（状态动作/关闭） */
   const [tabCtx, setTabCtx] = useState<{ x: number; y: number; rel: string } | null>(null)
 
@@ -689,14 +687,9 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
     const root = rootIdRef.current
     const doc = openFilesRef.current[relPath]
     if (!root || !doc || fullContent(doc) === savedFullContent(doc)) return true
-    // 编辑即转草稿（2026-09-09 拍板）：已归档（published）知识页被编辑器保存 = 进入「修改中」——
-    // frontmatter status 随本次保存一起翻成 draft（改缓冲区而非另写盘，避免后续保存把 published 翻回来）
-    const prefix = doc.frontmatterPrefix ?? ''
-    const autoDraft = /\.md$/i.test(relPath) && archivedRef.current.has(relPath) && prefix.length > 0
-    const writePrefix = !autoDraft ? prefix
-      : /^status:/im.test(prefix)
-        ? prefix.replace(/^(status:\s*).*$/im, '$1draft')
-        : prefix.replace(/(\r?\n---\s*$)/, `\nstatus: draft$1`) // 无 status 行 → 补一行（缺省语义=published）
+    // 身份统一后（2026-09-20 §2）：「编辑已归档页即转草稿」机制退役 —— status 双态不再存在，
+    // 保存只写内容与原前缀，不改任何状态字段。
+    const writePrefix = doc.frontmatterPrefix ?? ''
     // frontmatter 前缀拼回（如曾被编辑），保证磁盘文件完整
     // v3.2.0 条目 18：文件已被外部删除（missing）时**不带 mtime 基线**保存 —— 非正数基线在
     // detectConflict 里直接放行（`electron/lib/workspaceManager.ts:290`），原子写随即把文件**重新创建**出来。
@@ -721,16 +714,11 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
           },
         }
         : prev))
-      if (autoDraft) {
-        // 本地即时生效：树解除隐藏并显「草稿」徽标（知识库侧由其激活重读拿到 draft）
-        setArchivedPaths((prev) => { const n = new Set(prev); n.delete(relPath); return n })
-        setDraftRelPaths((prev) => new Set(prev).add(relPath))
-      }
       if (zenLevelRef.current > 0) {
         // 禅模式：不用 toast 打断沉浸，悬浮条闪现「已保存 HH:MM」（§4）
         setZenSavedAt(new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }))
       } else {
-        showToast({ type: 'info', message: wasMissing ? '已保存（文件已在磁盘上重新创建）' : autoDraft ? '已保存 · 转为草稿（知识库隐藏，完成后可右键归档）' : '已保存' })
+        showToast({ type: 'info', message: wasMissing ? '已保存（文件已在磁盘上重新创建）' : '已保存' })
       }
       // v3.2.0 条目 18：**保存不改变预览态**（对照 VS Code：保存 ≠ 固定），
       // 也不再回收任何标签（原 pruneCleanNonActive 调用已删 —— 它就是「保存后标签消失」的机制）。
@@ -1066,11 +1054,7 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
       const r = await workspaceGetArchiveEntries(rootIdRef.current ?? '')
       setArchivedDirPaths((r.entries ?? []).filter((e) => e.type === 'dir').map((e) => e.path))
     } catch { setArchivedDirPaths([]) }
-    // 草稿标记集：graph 节点（draft 保留 id 故在图谱缓存）→ 树内草稿文件显「草稿」徽标
-    try {
-      const g = await getKnowledgeGraph()
-      setDraftRelPaths(new Set(g.nodes.filter((n) => n.kind === 'page' && n.status === 'draft' && n.path).map((n) => n.path)))
-    } catch { /* 保持现状 */ }
+    // 身份统一后（2026-09-20 §2）：草稿态退役 → 树内「草稿徽标」数据源一并移除
   }, [])
 
   /** 文件是否被某个已归档目录覆盖（B1：目录状态优先，单独「取消归档」对其无意义） */
@@ -1615,7 +1599,6 @@ export function EditorModule({ isActive = true, sidebarEl = null, sidebarHosted 
                 onCommitCreate={(dirRel, type, raw) => void commitCreate(dirRel, type, raw)}
                 onCancelCreate={() => setCreating(null)}
                 hiddenRelPaths={archivedPaths}
-                draftRelPaths={draftRelPaths}
                 onContextMenu={(e, n) => {
                   e.preventDefault()
                   e.stopPropagation()

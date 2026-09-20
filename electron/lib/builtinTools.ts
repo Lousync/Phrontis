@@ -1322,7 +1322,7 @@ export function registerBuiltinTools(): void {
     let pages: Array<{ id: string; title: string; path: string }> = []
     try {
       pages = getKnowledgeIndex().pages
-        .filter(p => p.status !== 'draft' && p.entryKind !== 'file') // 引用锚只指向 md 知识页（非 md 归档文件无标题锚语义）
+        .filter(p => p.entryKind !== 'file') // 引用锚只指向 md 知识页（非 md 文件无标题锚语义）
         .map(p => ({ id: p.id, title: p.title, path: p.path }))
     } catch { /* 索引未就绪时按空处理 */ }
     const exact = pages.filter(p => p.title === want)

@@ -161,5 +161,33 @@ console.log('[8] 更名与归类入口（批次 3）')
   ok(ki.includes('handleCommitCategory') && ki.includes("categoryType: 'folder'"), '右键「新建分类目录」= 顶层 mkdir + categories.json 登记（归类 = 拖进该目录）')
 }
 
+// ---- ⑨ status 双态退役（阶段二，2026-09-20 §2）----
+console.log('[9] status 双态退役（文件即条目）')
+{
+  const types = read('src/types/index.ts')
+  ok(!/status\?: 'draft' \| 'published'/.test(types), '负向：KnowledgePage 不再有 status 字段')
+  const kiMain = read('electron/lib/kbStore/knowledgeIndex.ts')
+  ok(!/status: coveredByDir/.test(kiMain) && !/'draft' : 'published'/.test(kiMain),
+    '负向：索引条目不再计算 status（草稿/归档双态）')
+  const graph = read('electron/lib/kbStore/graphIndex.ts')
+  ok(!/status: entry\.status/.test(graph), '负向：图谱节点不再带 status')
+  const repo = read('electron/lib/kbStore/knowledgeVaultRepo.ts')
+  ok(!/entry\.status === 'draft'/.test(repo) && !/e\.status !== 'draft'/.test(repo),
+    '负向：仓库读源不再按 status 过滤（列表/阅读/反链/相似页全量）')
+  const search = read('electron/lib/knowledgeSearch.ts')
+  const sem = read('electron/lib/kbStore/semanticIndex.ts')
+  const tools = read('electron/lib/builtinTools.ts')
+  const plugin = read('electron/lib/pluginRegistry.ts')
+  ok(!/status !== 'draft'/.test(search + sem + tools + plugin),
+    '负向：检索 / 语义索引 / AI 引用锚 / 插件元数据面不再按 status 过滤')
+  const mp = read('src/components/shared/MarkdownPreview.tsx')
+  const ki = read('src/modules/knowledge/index.tsx')
+  ok(!mp.includes('draftWikiTitles') && !ki.includes('draftWikiTitles'),
+    '负向：正文 [[引用]] 的「草稿虚化」链路（draftWikiTitles）已删除')
+  const tiles = read('src/modules/desktop/tiles.tsx')
+  const ddata = read('src/modules/desktop/useDesktopData.ts')
+  ok(!/status !== 'draft'/.test(tiles + ddata), '负向：桌面统计 / 最近列表不再过滤 draft')
+}
+
 console.log(`\n${pass} PASS / ${fail} FAIL`)
 process.exit(fail === 0 ? 0 : 1)

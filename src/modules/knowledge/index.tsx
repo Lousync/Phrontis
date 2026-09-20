@@ -1500,19 +1500,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   /** 已知页面标题集合：阅读模式区分空链接 */
   const knownWikiTitles = useMemo(() => new Set(allPages.map(p => p.title)), [allPages])
 
-  // 草稿页 title 集（status: draft）：正文 [[引用]] 渲染为虚化样式（修改中）——数据源=图谱缓存节点 status
-  const [draftWikiTitles, setDraftWikiTitles] = useState<Set<string>>(new Set())
-  useEffect(() => {
-    if (!isActive) return
-    let alive = true
-    getKnowledgeGraph()
-      .then((g) => {
-        if (!alive) return
-        setDraftWikiTitles(new Set(g.nodes.filter((n) => n.kind === 'page' && n.status === 'draft').map((n) => n.title)))
-      })
-      .catch(() => { /* 无仓库/失败忽略 */ })
-    return () => { alive = false }
-  }, [isActive, knownWikiTitles])
+  // 身份统一后（2026-09-20 §2）：草稿态退役 —— 「draft 引用虚化」整条链（图谱 status → 正文渲染）已删除
 
   /* v3.4.0 页面条置顶：沉浸阅读 / 图谱模式是「全幅」形态，中间栏页面条整行让位 ——
      页面条在外壳层、模块内无法触及，故反向通知 App。只在值变化时回调，避免无谓 setState。 */
@@ -1527,14 +1515,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   // onWikiLink 稳定化（性能 2026-09-10）：原先以内联箭头传入 MarkdownPreview，每次渲染都是
   // 新函数引用 → 组件的 React.memo 恒失效、正文被反复重解析（模块内任意 setState 都会命中）。
   const handleReadingWikiLink = useCallback((t: string) => {
-    if (draftWikiTitles.has(t)) {
-      showToast({ type: 'warning', message: `「${t}」为草稿，归档后可阅读` })
-      return
-    }
     const hit = allPages.find(p => p.title === t)
     if (hit) void openInReading(hit.id)
     else showToast({ type: 'warning', message: `未找到「${t}」` })
-  }, [draftWikiTitles, allPages, openInReading])
+  }, [allPages, openInReading])
 
   return (
     <ImportZone onImport={handleDropImport} onImportPdf={handleDropImportBinary} className="h-full">
@@ -1607,7 +1591,6 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                     pageId={readingPage.id}
                     pageTitle={readingPage.title}
                     knownWikiTitles={knownWikiTitles}
-                    draftWikiTitles={draftWikiTitles}
                     onWikiLink={handleReadingWikiLink}
                   />
                 )}

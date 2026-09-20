@@ -53,7 +53,7 @@ async function buildSemanticIndex(opts?: { force?: boolean }): Promise<SemanticB
 
   const idx = getKnowledgeIndex()
   // 与 vaultSearchPages 同口径：草稿不索引；二进制归档文件无正文不索引
-  const mdPages = idx.pages.filter((p) => p.status !== 'draft' && p.entryKind !== 'file')
+  const mdPages = idx.pages.filter((p) => p.entryKind !== 'file')
 
   // 模型/维度不匹配或 force = 旧库整体作废（ADR：不混维度）
   const stale = !!opts?.force || isModelMismatch(root, model, loadSemantics(root).file.dim || 0)

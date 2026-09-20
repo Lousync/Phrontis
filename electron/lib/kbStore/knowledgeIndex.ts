@@ -55,8 +55,6 @@ export interface KnowledgePageIndexEntry {
   createdAt: string
   updatedAt: string
   mtimeMs: number
-  /** 页面状态（草稿/归档双态）：draft=草稿（知识库正式列表隐藏、图谱虚化/双链仍可引用）；published=归档（默认） */
-  status: 'draft' | 'published'
   /** 正文 [[出链]] 标题集合（R2：反链面板据此反查，不必全文扫） */
   outgoingTitles: string[]
   /**
@@ -639,8 +637,7 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
         continue
       }
       const stat = statSync(abs)
-      // B1（目录状态优先）：路径被目录条目覆盖 → 一律按已归档消费（draft md 放出、图谱不虚化）
-      const coveredByDir = findCoveringDirEntry(rel, manifest) !== null
+      // 身份统一后（2026-09-20 §2）：不再有草稿/归档双态 —— 文件即条目，status 字段已从索引条目移除。
       const entry: KnowledgePageIndexEntry = {
         id,
         title: asString(doc.frontmatter.title) || abs.slice(Math.max(abs.lastIndexOf('\\'), abs.lastIndexOf('/')) + 1).replace(/\.md$/i, ''),
@@ -654,7 +651,6 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
         attachmentId: asString(doc.frontmatter.attachmentId),
         createdAt: asString(doc.frontmatter.created),
         updatedAt: asString(doc.frontmatter.updated),
-        status: coveredByDir || asString(doc.frontmatter.status).toLowerCase() !== 'draft' ? 'published' : 'draft',
         mtimeMs: stat.mtimeMs,
         // 欢迎页不入双链图：它是导览页，正文里的 [[...]] 只是语法示例（见 welcomeHtmlToPlain）
         outgoingTitles: rel === WELCOME_DOC_FILENAME ? [] : extractWikiOutlinks(doc.body),

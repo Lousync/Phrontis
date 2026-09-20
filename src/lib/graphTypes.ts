@@ -12,8 +12,6 @@ export interface GraphNode {
   kind: 'page' | 'tag' | 'dangling'
   /** 无向关联数（页页边 + 页标签边）；dangling 为引用它的源页数 */
   degree: number
-  /** page 节点的页面状态：draft=草稿（图谱虚化「修改中」）；缺省/published=归档正式 */
-  status?: 'draft' | 'published'
   /**
    * tag 节点的「父目录」副线（学科/章节级），用关联度最高的 page 的 path 倒数第二段
    * 99d8871 修复仅覆盖 page 节点 → tag 节点在 GraphCanvas 单行显示英文短代码（kb-ds-8-7-3-1）用户读不懂

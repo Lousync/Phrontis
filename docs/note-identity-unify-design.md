@@ -54,7 +54,7 @@
 | `src/components/shared/MarkdownPreview.tsx:56-57, 136, 282-290` | `draftWikiTitles` prop 删除 |
 | `src/modules/knowledge/components/graph/*.tsx` | 虚化样式分支删除 |
 | `src/modules/desktop/tiles.tsx:249, 548`、`useDesktopData.ts:205` | 统计/最近不再过滤 draft |
-| 存量数据 | 一次性迁移：仓库内 `status: draft` 行**原地删除该行**（保留其余 frontmatter），写进 `.knowbot`?→ 走既有「刷新全量」路径静默完成；失败只记 warning，不阻断 |
+| 存量数据 | **不改写用户 frontmatter**（2026-09-20 落地时定，Obsidian 口径：那是用户自己的内容）——遗留的 `status: draft` 行不再被任何逻辑读取，等价于普通属性；想清理由用户自行编辑。 |
 
 ### 验收
 - `verify-workbench-shell` / `verify-perception` 全绿；

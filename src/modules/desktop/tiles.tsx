@@ -246,7 +246,6 @@ function DaybookTile({ w, h, data, onOpen }: { w: number; h: number; data: Deskt
   const isOpen = (key: string): boolean => !collapsed[key]
 
   const recentList = [...data.pages]
-    .filter((p) => p.status !== 'draft')
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
     .slice(0, rowsFor(h, 2, 6))
 
@@ -545,7 +544,6 @@ const CONTENT_TILES: TileDef[] = [
     tail: ({ stats }) => `${stats.pageCount} 篇`,
     render: ({ h, data, onOpen }) => {
       const list = [...data.pages]
-        .filter((p) => p.status !== 'draft')
         .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
         .slice(0, rowsFor(h, 2, 6))
       if (!list.length) return <Empty text="仓库里还没有页面" />

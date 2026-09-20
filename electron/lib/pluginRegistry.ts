@@ -1525,7 +1525,7 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
 
       // ---- kb.metadata.* 知识库元数据只读面（knowledge-index-design §9 / plugin-api-v2-design §5.3）----
       // capability 统一 vault:read（只读，但暴露全部笔记元数据与检索结果 → C 级授权）。
-      // 范围与知识库 UI 搜索同口径：草稿页不出（status !== 'draft'），二进制归档文件除外。
+      // 范围与知识库 UI 搜索同口径：非 md 文件（元信息卡）不出。
       'kb.metadata.search': {
         capability: 'vault:read',
         run: async (_ctx, params) => {
@@ -1556,7 +1556,7 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
           if (!entry || entry.entryKind === 'file') throw Object.assign(new Error('页面不存在'), { code: 'ENOTFOUND' })
           return {
             pageId: entry.id, path: entry.path, title: entry.title, tags: entry.tags,
-            status: entry.status, createdAt: entry.createdAt, updatedAt: entry.updatedAt,
+            createdAt: entry.createdAt, updatedAt: entry.updatedAt,
             frontmatter: entry.frontmatter, outgoingTitles: entry.outgoingTitles,
           }
         },
@@ -1573,7 +1573,7 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
           const limit = Math.min(Math.max(Math.floor(Number(p.limit) || 50), 1), 200)
           const results: Array<{ pageId: string; path: string; title: string; tags: string[]; updatedAt: string }> = []
           for (const e of idx.pages) {
-            if (e.status === 'draft' || e.entryKind === 'file') continue
+            if (e.entryKind === 'file') continue
             if (tag && !e.tags.some((t) => t.toLowerCase().includes(tag))) continue
             if (folder && !e.path.startsWith(folder + '/')) continue
             if (expr) {

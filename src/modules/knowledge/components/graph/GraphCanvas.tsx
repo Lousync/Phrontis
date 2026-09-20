@@ -189,23 +189,11 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         ctx.stroke()
         ctx.setLineDash([])
       } else {
-        const isDraft = n.status === 'draft'
-        ctx.fillStyle = isDraft ? colors.bg : (en ? colorBySpace(n.path, colors) : colors.accent)
+        // 身份统一后无草稿态（2026-09-20 §2）：页节点一律实心填充，虚化分支退役
+        ctx.fillStyle = en ? colorBySpace(n.path, colors) : colors.accent
         ctx.beginPath()
         ctx.arc(n.x!, n.y!, n.r * ns, 0, Math.PI * 2)
         ctx.fill()
-        if (isDraft) {
-          // 草稿页（修改中）：accent 虚线空心圈 + 轻微虚化——表示被引用但非正式
-          ctx.globalAlpha *= 0.55
-          ctx.strokeStyle = colors.accent
-          ctx.lineWidth = 1.3 / s
-          ctx.setLineDash([3 / s, 3 / s])
-          ctx.beginPath()
-          ctx.arc(n.x!, n.y!, n.r * ns, 0, Math.PI * 2)
-          ctx.stroke()
-          ctx.setLineDash([])
-          ctx.globalAlpha /= 0.55
-        }
       }
       // 选中/悬停环
       if (hoverId === n.id || propsRef.current.selectedId === n.id) {

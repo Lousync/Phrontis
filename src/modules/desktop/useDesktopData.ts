@@ -202,7 +202,7 @@ export function useDerived(data: DesktopData): DerivedStats {
     const { today, todos, habits, records, pages, categories, tags } = data
     const list = Array.isArray(todos) ? todos : []
     return {
-      pageCount: pages.filter((p) => p.status !== 'draft').length,
+      pageCount: pages.length,
       dirCount: categories.filter((c) => c.categoryType === 'space').length || categories.length,
       tagCount: tags.length,
       attachCount: pages.reduce((n, p) => n + (p.attachments?.length ?? 0), 0),

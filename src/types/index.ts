@@ -450,9 +450,7 @@ export interface KnowledgePage {
   path?: string
   /** frontmatter attachments：仓库内相对路径数组（附件面板/路由阅读器用） */
   attachments?: string[]
-  /** 页面状态：draft=草稿（知识库正式列表不显示，编辑器侧/图谱虚化可见）；published=归档（默认） */
-  status?: 'draft' | 'published'
-  /** 条目种类：file=清单归档的非 md 文件（元信息卡/沙箱渲染，不参与正文/双链）；缺省=md 知识页 */
+  /** 条目种类：file=仓库内的非 md 文件（元信息卡/沙箱渲染，不参与正文/双链）；缺省=md 知识页 */
   entryKind?: 'doc' | 'file'
   /** 文件大小（字节；元信息卡展示） */
   sizeBytes?: number

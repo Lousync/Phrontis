@@ -120,7 +120,7 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
   const [data, setData] = useState<GraphIndexData | null>(null)
   const [error, setError] = useState('')
   const [cfg, setCfg] = useState<GraphViewConfig>(DEFAULT_GVC)
-  const [sel, setSel] = useState<Pick<GraphNode, 'id' | 'title' | 'path' | 'kind' | 'degree' | 'status'> | null>(null)
+  const [sel, setSel] = useState<Pick<GraphNode, 'id' | 'title' | 'path' | 'kind' | 'degree'> | null>(null)
   // 选中页面节点时异步取正文首段，hover/卡片上让用户识别「这页讲什么」
   const [pageExcerpt, setPageExcerpt] = useState<string>('')
   const excerptOf = (md: string): string => {
@@ -432,9 +432,6 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
             <div className="min-w-0 flex-1">
               <div className="text-[13px] font-medium text-[var(--text-primary)] truncate flex items-center gap-1.5">
                 {sel.title}
-                {sel.status === 'draft' && (
-                  <span className="shrink-0 rounded bg-[var(--warning)]/15 px-1 py-px text-[9.5px] font-normal text-[var(--warning)]">草稿</span>
-                )}
               </div>
               <div className="text-[10.5px] text-[var(--text-muted)] mt-0.5 truncate">
                 {kindLabel(sel.kind)}{sel.kind === 'page' && sel.path ? ` · ${sel.path}` : ''}
