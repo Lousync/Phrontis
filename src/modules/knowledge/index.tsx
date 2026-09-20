@@ -105,6 +105,8 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [locateCategoryId, setLocateCategoryId] = useState<string | null>(null)
   const [allKnowledgeTags, setAllKnowledgeTags] = useState<KnowledgeTag[]>([])
   const [showQuizCollection, setShowQuizCollection] = useState(false)
+  /** 首开标记：错题本视图保活挂载的闸门（未开过不付首拉 3 组 IPC 的成本，开过即常驻） */
+  const [quizEverOpened, setQuizEverOpened] = useState(false)
   /** 开合镜像 ref：handleOpenPage 内判「当前在错题本视图」用——handleOpenPage 是高频复用回调，
       依赖 showQuizCollection 本体会让 useCallback 随视图开合重建、下游 effect 连锁重跑 */
   const showQuizCollectionRef = useRef(false)
@@ -113,6 +115,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const toggleQuizCollection = useCallback((open: boolean) => {
     showQuizCollectionRef.current = open
     setShowQuizCollection(open)
+    if (open) setQuizEverOpened(true)
     window.dispatchEvent(new CustomEvent(QUIZ_VIEW_TOGGLED_EVENT, { detail: { open } }))
   }, [])
   // v3.4.0 左栏「错题本」书签定位（kb-locate-quiz-view）：App 书签点击 = 切到本模块 + 延迟派发事件 → 打开错题本/收藏视图
@@ -1688,7 +1691,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   badge: info?.fileType ? getFileTypeInfo(info.fileType).badge : undefined,
                 }
               })}
-              activeId={activePageId}
+              /* 单激活（2026-09-20 深层修复）：错题本视图打开时本模块当前视图是错题本，
+                 页签条目全部转非激活——激活态只落在页面条「错题本」条目上（App quizEntryActive）。
+                 此前页签照常高亮 + 错题本条目也高亮 = 双激活，看起来像同时开了两个页面。 */
+              activeId={showQuizCollection ? null : activePageId}
               onSelect={(id) => {
                 void handleOpenPage(id)
                 // 页签组恒挂在页面条上（其他模块激活时也可见），点击 = 要看那个页面：
@@ -1702,14 +1708,11 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               onContextMenu={(e, id) => handleTabContextMenu(e, id)}
             />
           )
-          /* 错题本视图打开时页签组整体让位（2026-09-20 反馈）：页面条上错题本专属条目代表本模块
-             当前视图，页签组再挂着 = 「错题本 + 页面」两个条目同排且可能同时带激活态，
-             看着像同时开了两个页面。关错题本后页签组原样回来（openPageIds 一直都在，只是不渲染）。 */
-          if (pageBarHosted) return pageBarEl && !showQuizCollection ? createPortal(strip, pageBarEl) : null
+          if (pageBarHosted) return pageBarEl ? createPortal(strip, pageBarEl) : null
           /* 兜底形态（未托管）：顶部就是本模块自己的页签行，没页签也留一条同高的空行 */
           return (
             <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5">
-              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{showQuizCollection ? null : strip}</div>
+              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{strip}</div>
             </div>
           )
         })()}
@@ -2002,8 +2005,16 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         onCancel={() => setUnsavedClosePageId(null)}
       />
 
-      {/* 错题本 / 收藏（按当前学习空间分区：只显示该空间的内容；源链接可跳回原页面） */}
-      {showQuizCollection && <QuizCollection onClose={() => toggleQuizCollection(false)} spaceName={selectedSpace?.name ?? undefined} onOpenPage={handleOpenPage} />}
+      {/* 错题本 / 收藏 —— **保活浮层**（2026-09-20 深层修复）：页签↔错题本反复切换不卸载，
+          内部 20+ 筛选/备注态与首拉 3 组 IPC 全部保住（保活哲学与 App Tab 宿主同源）。
+          显隐走 .kb-view-toggle 两态过渡（docs/ui-animation-plan.md §H，aria-hidden 承载状态）；
+          quizEverOpened 闸门 = 未开过不挂载、不付首拉成本。隐藏期 useDataChanged('quiz') 照常收广播，
+          数据不陈旧；visibility:hidden 使内容脱离 tab 序、不吃点击。 */}
+      {quizEverOpened && (
+        <div className="kb-view-toggle absolute inset-0 z-50" aria-hidden={!showQuizCollection}>
+          <QuizCollection onClose={() => toggleQuizCollection(false)} spaceName={selectedSpace?.name ?? undefined} onOpenPage={handleOpenPage} />
+        </div>
+      )}
 
       {/* C 级模块插件视图：全屏覆盖层（沙箱 iframe + 数据桥） */}
       {activePluginView && (

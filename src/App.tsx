@@ -1306,7 +1306,9 @@ export default function App() {
                   editorSlotRef={wbEditorPageRef}
                   knowledgeSlotRef={wbKnowledgePageRef}
                   showQuizEntry={quizViewOpen && openTabs.includes('knowledge')}
-                   quizEntryActive={activeTab === 'knowledge'}
+                   /* 单激活（2026-09-20）：激活 = knowledge 标签在前台**且**当前视图是错题本；
+                      页面视图时激活落在页签组条目上（模块侧 activeId 置 null 配合） */
+                   quizEntryActive={quizViewOpen && activeTab === 'knowledge'}
                    hidePages={zenLevel >= 1}
                  />
               )}

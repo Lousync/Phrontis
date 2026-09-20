@@ -109,6 +109,16 @@
 调用方须给元素 `pointer-events-none`——提示压在舞台右缘，不能吃掉正在进行的拖拽手势。
 与「跟手无动画」的边界见 §五-6：跟手的是窗口本体（无动画），提示是状态翻转（有动画）。
 
+### H. 保活浮层显隐 → `.kb-view-toggle`（2026-09-20 新增）
+适用场景：**元素常驻不卸载**的浮层视图（错题本视图等「页签 ↔ 视图」反复切换、内部有大量
+筛选/编辑态不能丢的界面）。这类切换不能用 `.kb-view-fade` 等挂载动画——元素不 remount，
+动画没有重播时机；也不能用条件渲染——卸载即丢状态（与 §C 折叠容器的「外层常驻」同理）。
+用法：外层 wrapper 挂 `kb-view-toggle absolute inset-0` + `aria-hidden={!open}`，
+状态由 `aria-hidden` 属性承载（true = 淡出 + `visibility:hidden` + 不可点）。
+实现只动 `opacity` / `visibility`（visibility 离散属性随 duration 延迟翻转 = 淡出完成后
+才真正不可聚焦），令牌 `--dur-std` / `--ease-kb`，带 `prefers-reduced-motion` 兜底。
+首个使用方：知识库错题本视图（notes-merge，保活哲学与 App Tab 宿主同源）。
+
 ---
 
 ## 五、性能评估（实测数据）

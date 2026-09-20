@@ -567,6 +567,17 @@ input:focus, textarea:focus, select:focus {
 }
 .kb-view-fade { animation: kb-view-fade var(--dur-std) var(--ease-kb) both; }
 
+/* --- 保活浮层显隐（2026-09-20）：元素常驻不 remount 的浮层（错题本视图等「页签 ↔ 视图」
+    反复切换场景）不能走挂载动画——改两态过渡：opacity + visibility（visibility 离散属性
+    随 duration 延迟翻转 = 淡出完成后才真正不可点/不可聚焦）。状态由 aria-hidden 承载，
+    调用方只挂一个类 + 一个布尔属性。令牌取 --dur-std / --ease-kb。 */
+.kb-view-toggle { transition: opacity var(--dur-std) var(--ease-kb), visibility var(--dur-std); }
+.kb-view-toggle[aria-hidden='true'] { opacity: 0; visibility: hidden; pointer-events: none; }
+.kb-view-toggle[aria-hidden='false'] { opacity: 1; visibility: visible; }
+@media (prefers-reduced-motion: reduce) {
+  .kb-view-toggle { transition: none; }
+}
+
 /* --- B 弹层：遮罩 + 面板 --- */
 @keyframes kb-overlay-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes kb-overlay-out { from { opacity: 1; } to { opacity: 0; } }
