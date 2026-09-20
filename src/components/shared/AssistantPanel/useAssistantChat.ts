@@ -76,6 +76,9 @@ export interface AssistantChatController {
   /** 对话模型（providerId:modelId 串；空 = 全局默认）——settings 持久化 */
   modelId: string
   setModelId: (v: string) => void
+  /** 思考模式（开 = reasoning_effort:medium，慢而全面；关 = 快速回答）——settings 持久化 */
+  thinking: boolean
+  setThinking: (v: boolean) => void
   /** 📎 附加文件（随消息上下文；发送后不清空，× 移除） */
   attachedFiles: Array<{ pageId: string; title: string; path: string }>
   setAttachedFiles: Dispatch<SetStateAction<Array<{ pageId: string; title: string; path: string }>>>
@@ -119,6 +122,10 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const { s: assistantSettings, update: updateAssistantSetting } = useSettings()
   const modelId = typeof assistantSettings.assistantModelId === 'string' ? assistantSettings.assistantModelId : ''
   const setModelId = useCallback((v: string) => { updateAssistantSetting('assistantModelId', v) }, [updateAssistantSetting])
+  // 思考模式（2026-09-20 反馈）：开 = reasoning_effort:medium（慢而全面）；关 = off（快速回答）。
+  // 模型浮层里切换，settings 持久化；非思考型模型两种取值无差异。
+  const thinking = assistantSettings.assistantThinking !== false
+  const setThinking = useCallback((v: boolean) => { updateAssistantSetting('assistantThinking', v) }, [updateAssistantSetting])
   /** 附加文件（输入区 📎 添加，随消息作为上下文；正文不注入，模型按 path 用文件读取工具自取） */
   const [attachedFiles, setAttachedFiles] = useState<Array<{ pageId: string; title: string; path: string }>>([])
   // 会话抽屉动画三态（Tailwind v4 translate 过渡的 transitionend 不可依赖，定时器兜底卸载）
@@ -273,7 +280,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       // Skill chip 随消息一次性消费，发出即清
       const sk = pickedSkill
       setPickedSkill(null)
-      const r = await agentChat(sid, body, finalCtx ?? undefined, cid, undefined, modelId || undefined, undefined, sk?.registryName)
+      const r = await agentChat(sid, body, finalCtx ?? undefined, cid, undefined, modelId || undefined, thinking ? 'medium' : 'off', sk?.registryName)
       // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
       if (r.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要` })
       // 用户在等待期间切换了会话：回复已落库，但不注入当前视图
@@ -295,7 +302,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setPending(false)
       void refreshSessions()
     }
-  }, [input, pending, pickedSkill, refreshMessages, refreshSessions, beginStream, endStream, options, attachedFiles, modelId])
+  }, [input, pending, pickedSkill, refreshMessages, refreshSessions, beginStream, endStream, options, attachedFiles, modelId, thinking])
 
   /** 重新生成最后一条回复（末条为助手消息时可用） */
   const regenerate = useCallback(async () => {
@@ -308,7 +315,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     const cid = crypto.randomUUID()
     chatIdRef.current = cid
     try {
-      const r = await agentRegenerate(sid, getAssistantContext() ?? undefined, cid)
+      const r = await agentRegenerate(sid, getAssistantContext() ?? undefined, cid, thinking ? 'medium' : 'off')
       if (r.code === 'ABORTED') showToast({ type: 'info', message: '已停止生成' })
       else if (!r.ok) showToast({ type: 'error', message: `重新生成失败：${r.error ?? '未知错误'}` })
       else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
@@ -318,7 +325,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setPending(false)
       void refreshSessions()
     }
-  }, [pending, messages, refreshMessages, refreshSessions, beginStream, endStream])
+  }, [pending, messages, refreshMessages, refreshSessions, beginStream, endStream, thinking])
 
   /** 改写用户消息并重推其后回复 */
   const editSubmit = useCallback(async (messageId: string, content: string) => {
@@ -331,7 +338,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     const cid = crypto.randomUUID()
     chatIdRef.current = cid
     try {
-      const r = await agentEditMessage(sid, messageId, content, getAssistantContext() ?? undefined, cid)
+      const r = await agentEditMessage(sid, messageId, content, getAssistantContext() ?? undefined, cid, thinking ? 'medium' : 'off')
       if (r.code === 'ABORTED') showToast({ type: 'info', message: '已停止生成' })
       else if (!r.ok) showToast({ type: 'error', message: `修改失败：${r.error ?? '未知错误'}` })
       else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
@@ -341,7 +348,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setPending(false)
       void refreshSessions()
     }
-  }, [pending, refreshMessages, refreshSessions, beginStream, endStream])
+  }, [pending, refreshMessages, refreshSessions, beginStream, endStream, thinking])
 
   /** 删除单条消息（助手消息删除后可用「重新生成」补回） */
   const deleteMessage = useCallback(async (messageId: string) => {
@@ -392,6 +399,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     refreshSessions,
     modelId,
     setModelId,
+    thinking,
+    setThinking,
     attachedFiles,
     setAttachedFiles,
   }

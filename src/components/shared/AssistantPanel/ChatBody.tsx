@@ -7,6 +7,7 @@ import {
 import { getAssistantContext } from '../../../lib/assistantContext'
 import { showToast } from '../../../lib/toast'
 import { useSettings } from '../../../lib/SettingsContext'
+import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { useInputShell } from './inputShells'
 import { getKnowledgePages, agentUsageGet, llmListProviders, getSemanticStatus } from '../../../lib/ipc'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
@@ -78,7 +79,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     drawerMounted, drawerOpen, toggleDrawer, closeDrawer,
     send, newSession, loadSession, removeSession, regenerate, editSubmit, deleteMessage,
     abort, dismissChanges,
-    modelId, setModelId, attachedFiles, setAttachedFiles,
+    modelId, setModelId, thinking, setThinking, attachedFiles, setAttachedFiles,
   } = chat
 
   const isNarrow = variant === 'docked'
@@ -577,6 +578,15 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 {/* ── 模型浮层 ── */}
                 {pop === 'model' && (
                   <div data-wb="aiModelPop" className="absolute bottom-full left-0 mb-2 w-[250px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
+                    {/* 思考模式（2026-09-20 反馈）：开 = 深度思考（慢而全面）；关 = 快速回答。
+                        仅对具备思考能力的模型有差异（reasoning_effort 仅思考型透传） */}
+                    <label className="flex items-center justify-between gap-2 border-b border-[var(--border-color)] px-2.5 py-2 cursor-pointer">
+                      <span className="min-w-0">
+                        <span className="block text-[12px] text-[var(--text-primary)]">思考模式</span>
+                        <span className="block text-[10px] text-[var(--text-muted)]">开 = 深度思考（慢而全面） · 关 = 快速回答</span>
+                      </span>
+                      <SettingSwitch checked={thinking} onChange={setThinking} />
+                    </label>
                     <div className="max-h-[240px] overflow-y-auto p-1">
                       <button
                         onClick={() => setModelId('')}

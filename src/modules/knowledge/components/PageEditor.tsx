@@ -1182,9 +1182,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 cursorBlinking: 'smooth',
                 cursorSmoothCaretAnimation: 'on',
                 renderWhitespace: 'selection',
-                /* 正文避让（2026-09-20 悬浮栏）：右上浮动胶囊会压住正文头几行，
-                   编辑态顶部留出工具带高度（mt-3 + 胶囊约 40px 高 ≈ 52px，取 56px 冗余） */
-                padding: { top: 56, bottom: 16 },
+                /* 56px「正文避让」已撤（2026-09-20 反馈：顶部空一大块）——悬浮胶囊收窄后
+                   不再需要整块避让，与内容轻微重叠由半透明毛玻璃自持 */
                 overviewRulerLanes: 0,
                 hideCursorInOverviewRuler: true,
                 overviewRulerBorder: false,

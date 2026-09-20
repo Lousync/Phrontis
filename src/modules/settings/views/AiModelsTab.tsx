@@ -274,6 +274,51 @@ export function AiModelsTab() {
           )}
         </div>
       )}
+
+      {/* AI 内联建议（B4）：原在「编辑器」设置页，2026-09-20 反馈迁来模型页统一管理 */}
+      {providers.some(p => p.enabled && p.models.length > 0) && (
+        <div data-setting-anchor="editor.inlineSuggest">
+          <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">AI 内联建议（编辑器）</h2>
+          <p className="text-[12px] text-[var(--text-muted)] mb-3">
+            打字停顿后由 AI 续写下一句（灰色幽灵文字）；Tab 采纳、Esc 拒绝、Alt+A 立即要一条，
+            编辑器右上角胶囊里的 ✨ 可随时开关。调用频次远高于对话，建议单独指定便宜、快的模型。
+          </p>
+          <label className="flex items-center justify-between gap-4 cursor-pointer max-w-md">
+            <span className="text-[13px] text-[var(--text-primary)]">启用内联建议</span>
+            <SettingSwitch
+              checked={s.aiAssistantInlineSuggest !== false}
+              onChange={(v) => update('aiAssistantInlineSuggest', v)}
+            />
+          </label>
+          <div className={`mt-2.5 max-w-md ${s.aiAssistantInlineSuggest === false ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+            <label className="flex items-center justify-between gap-4 cursor-pointer">
+              <span className="text-[13px] text-[var(--text-primary)]">自动触发（停 0.8 秒出建议）</span>
+              <SettingSwitch
+                checked={s.aiAssistantInlineSuggestAuto !== false}
+                onChange={(v) => update('aiAssistantInlineSuggestAuto', v)}
+              />
+            </label>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1.5 mb-3 leading-relaxed max-w-md">
+              自动触发只在自然断点（句读、换行、写完一个词之后）发起，词中间不打扰；连续几次建议都没采纳会自动暂停。
+            </p>
+            <div className="max-w-md">
+              <p className="text-[13px] text-[var(--text-primary)] mb-1.5">内联建议模型</p>
+              <select
+                value={typeof s.aiAssistantInlineSuggestModelId === 'string' ? s.aiAssistantInlineSuggestModelId : ''}
+                onChange={e => update('aiAssistantInlineSuggestModelId', e.target.value)}
+                className="w-full px-2.5 py-2 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] outline-none focus:border-[var(--accent)]">
+                <option value="">跟随全局默认模型（思考型自动换非思考）</option>
+                {providers.filter(p => p.enabled).flatMap(p =>
+                  p.models.map(m => {
+                    const free = isFreeModel(m, freeSet)
+                    return <option key={`${p.id}:${m}`} value={`${p.id}:${m}`}>{free ? '[免费] ' : ''}{prettyModelName(m)}{free ? '' : ` · ${m}`}</option>
+                  })
+                )}
+              </select>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

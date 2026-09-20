@@ -1729,9 +1729,9 @@ export interface ElectronAPI {
   /** 界面逐页阅读：当前仓库内 .pptx → [{n,text}] */
   docsPptxPages: (relPath: string) => Promise<{ ok: boolean; pages?: Array<{ n: number; text: string }>; total?: number; error?: string }>
   agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string }) => Promise<AgentChatResult>
-  agentRegenerate: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string }) => Promise<AgentChatResult>
+  agentRegenerate: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
   agentStartScene: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string }) => Promise<AgentChatResult>
-  agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: AgentContextInfo; chatId?: string }) => Promise<AgentChatResult>
+  agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: AgentContextInfo; chatId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
   agentDeleteMessage: (sessionId: string, messageId: string) => Promise<boolean>
   /** 会话压缩（/compress 指令 + 自动预检共用）：折叠检查点后旧轮为纪要并推进检查点 */
   agentCompressSession: (req: { sessionId: string; modelId?: string; providerId?: string; effort?: string }) => Promise<AgentCompressResult>

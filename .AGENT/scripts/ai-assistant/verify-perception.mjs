@@ -738,12 +738,15 @@ ok(/aiAssistantInlineSuggestModelId:\s*\{[^}]*default:\s*''/.test(SRC_SETTINGS),
 ok(/aiAssistantInlineSuggestModelId/.test(SRC_INLINE),
   'J15aa ★ 主进程真读该键（设置选了模型要生效，不能只写不读）', '')
 {
+  // 2026-09-20 反馈：内联建议三项从「编辑器」页迁往「AI 工具 → 模型」页（统一模型管理）
+  const SRC_MODELS_TAB = stripComments(read('src/modules/settings/views/AiModelsTab.tsx'))
   const SRC_EDITOR_VIEW = stripComments(read('src/modules/settings/views/EditorView.tsx'))
-  ok(/llmListProviders/.test(SRC_EDITOR_VIEW) && /aiAssistantInlineSuggestModelId/.test(SRC_EDITOR_VIEW)
-    && /SettingSelect/.test(SRC_EDITOR_VIEW),
-    'J15ab 设置 → 编辑器页有模型下拉（数据源 = 已启用供应商的模型）', '')
-  ok(/aiAssistantInlineSuggestAuto/.test(SRC_EDITOR_VIEW) && /aiAssistantInlineSuggest\b/.test(SRC_EDITOR_VIEW),
-    'J15ac 同一页还有总开关与自动开关（三项集中，不散在别处）', '')
+  ok(/aiAssistantInlineSuggestModelId/.test(SRC_MODELS_TAB) && /aiAssistantInlineSuggest\b/.test(SRC_MODELS_TAB),
+    'J15ab 设置 → AI 工具·模型页有内联建议模型下拉（数据源 = 已启用供应商的模型）', '')
+  ok(/aiAssistantInlineSuggestAuto/.test(SRC_MODELS_TAB) && /aiAssistantInlineSuggest\b/.test(SRC_MODELS_TAB),
+    'J15ac 同页还有总开关与自动开关（三项集中，不散在别处）', '')
+  ok(!/aiAssistantInlineSuggestModelId/.test(SRC_EDITOR_VIEW),
+    'J15ag 负向：编辑器页不再渲染内联建议设置（已迁模型页，防回迁漂移）', '')
 }
 {
   const SRC_CSS = read('src/styles/index.css')

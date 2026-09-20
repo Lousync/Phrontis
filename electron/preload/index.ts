@@ -238,9 +238,9 @@ const api = {
   pdfExport: (payload: { data: Uint8Array; defaultName: string; kind?: 'pdf' | 'txt' }) => ipcRenderer.invoke('pdf:export', payload),
   docsPptxPages: (relPath: string) => ipcRenderer.invoke('docs:pptxPages', relPath),
   agentChat: (req: { sessionId: string; message: string; context?: unknown; chatId?: string; source?: string; modelId?: string; effort?: string; skillName?: string }) => ipcRenderer.invoke('agent:chat', req),
-  agentRegenerate: (req: { sessionId: string; context?: unknown; chatId?: string }) => ipcRenderer.invoke('agent:regenerate', req),
+  agentRegenerate: (req: { sessionId: string; context?: unknown; chatId?: string; effort?: string }) => ipcRenderer.invoke('agent:regenerate', req),
   agentStartScene: (req: { sessionId: string; context?: unknown; chatId?: string; source?: string; modelId?: string }) => ipcRenderer.invoke('agent:startScene', req),
-  agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: unknown; chatId?: string }) => ipcRenderer.invoke('agent:editMessage', req),
+  agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: unknown; chatId?: string; effort?: string }) => ipcRenderer.invoke('agent:editMessage', req),
   agentDeleteMessage: (sessionId: string, messageId: string) => ipcRenderer.invoke('agent:deleteMessage', { sessionId, messageId }),
   /** 会话压缩（/compress 指令 + 自动预检共用）：折叠检查点后旧轮为纪要并推进检查点 */
   agentCompressSession: (req: { sessionId: string; modelId?: string; providerId?: string; effort?: string }) => ipcRenderer.invoke('agent:compressSession', req),
