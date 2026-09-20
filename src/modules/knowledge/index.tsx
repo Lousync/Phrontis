@@ -1702,11 +1702,14 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               onContextMenu={(e, id) => handleTabContextMenu(e, id)}
             />
           )
-          if (pageBarHosted) return pageBarEl ? createPortal(strip, pageBarEl) : null
+          /* 错题本视图打开时页签组整体让位（2026-09-20 反馈）：页面条上错题本专属条目代表本模块
+             当前视图，页签组再挂着 = 「错题本 + 页面」两个条目同排且可能同时带激活态，
+             看着像同时开了两个页面。关错题本后页签组原样回来（openPageIds 一直都在，只是不渲染）。 */
+          if (pageBarHosted) return pageBarEl && !showQuizCollection ? createPortal(strip, pageBarEl) : null
           /* 兜底形态（未托管）：顶部就是本模块自己的页签行，没页签也留一条同高的空行 */
           return (
             <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5">
-              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{strip}</div>
+              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{showQuizCollection ? null : strip}</div>
             </div>
           )
         })()}
