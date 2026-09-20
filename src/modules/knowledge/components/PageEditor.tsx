@@ -6,7 +6,7 @@ import { QuizMode } from '../../../components/shared/QuizMode'
 import { extractQuizzes } from '../../../components/shared/QuizParser'
 import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem, SimilarPageHit } from '../../../types'
 import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, getKnowledgeSimilarPages, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent } from '../../../lib/ipc'
-import { splitFrontmatter, joinFrontmatter, ensureFrontmatterId } from '../../../lib/frontmatter'
+import { splitFrontmatter, joinFrontmatter, ensureFrontmatterId, bumpFrontmatterUpdated } from '../../../lib/frontmatter'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
 import { uploadImageFile, insertImageAtCursor, isImageFile, imageMarkdown, IMAGE_OWNER } from '../../../lib/editorImage'
@@ -400,6 +400,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         if (/\.md$/i.test(rel)) {
           const ensured = ensureFrontmatterId(vaultPrefixRef.current, rel, crypto.randomUUID())
           if (ensured.injected) vaultPrefixRef.current = ensured.prefix
+          // 保存即刷新 frontmatter.updated（2026-09-20 反馈：最近编辑列表停在旧值——
+          // 索引 updatedAt 取自 frontmatter.updated 而非 mtime，必须随保存刷新并回写内存前缀）
+          const bumped = bumpFrontmatterUpdated(vaultPrefixRef.current || '')
+          if (bumped.changed) vaultPrefixRef.current = bumped.prefix
         }
         // mtime 基线：装载时记录；<=0 = 文件已被外部删除 → 不带基线（保存即重建，同编辑器 missing 口径）
         const baseline = vaultMtimeRef.current > 0 ? vaultMtimeRef.current : undefined

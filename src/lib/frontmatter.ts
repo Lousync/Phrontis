@@ -40,3 +40,21 @@ export function ensureFrontmatterId(prefix: string, relPath: string, id: string)
   const name = relPath.slice(relPath.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '')
   return { prefix: `---\nid: ${id}\ntitle: ${name}\n---\n`, injected: true }
 }
+
+/**
+ * 保存时刷新 frontmatter `updated`（2026-09-20 反馈：最近编辑列表停在旧值——
+ * 索引 updatedAt 取自 frontmatter.updated 而非文件 mtime，就地保存原样拼回旧前缀导致列表不更新）。
+ * - 已有 updated 行（任何格式：日期 / ISO）原位替换为当前 ISO 时间；
+ * - 无 updated 行则在闭合 `---` 前插入一行；
+ * - 无 frontmatter 的纯文件不动（不为此注入 frontmatter——「文件即条目」的普通文件没有编辑时间语义）。
+ * 与 ensureFrontmatterId 同一收口理由：内存前缀必须同步回写，否则下一次保存又写回旧值。
+ */
+export function bumpFrontmatterUpdated(prefix: string, now = new Date().toISOString()): { prefix: string; changed: boolean } {
+  if (!prefix) return { prefix, changed: false }
+  if (/^updated:[ \t]/m.test(prefix)) {
+    return { prefix: prefix.replace(/^updated:[ \t]*[^\r\n]*/m, `updated: ${now}`), changed: true }
+  }
+  const closing = /(?:\r?\n)---\r?\n$/.exec(prefix)
+  if (!closing) return { prefix, changed: false }
+  return { prefix: prefix.slice(0, closing.index) + `\nupdated: ${now}\n---\n`, changed: true }
+}
