@@ -409,6 +409,20 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   const poolWantedRef = useRef(new Set<number>())
   /** 文本层只挂可视页（小半径集合） */
   const tightVisibleRef = useRef(new Set<number>())
+  /** 待补文本页：渲染 inflight 期间被观察器标记「要文本」的页——首渲染落盘后立即带文本重渲（堵竞态） */
+  const forceTextRef = useRef(new Set<number>())
+  // 探针取证口（只读快照，无副作用）：CDP 探针读渲染池状态定位文本层缺失环节
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>).__kbPdfProbe = {
+      get state() {
+        return {
+          tight: [...tightVisibleRef.current], rendered: [...poolRenderedRef.current],
+          inflight: [...poolInflightRef.current], wanted: [...poolWantedRef.current],
+          slots: slotElsRef.current.size,
+        }
+      },
+    }
+  }, [])
   const [slotH, setSlotH] = useState(600)
 
   const setSlotRef = useCallback((n: number, el: HTMLDivElement | null) => {
@@ -417,10 +431,21 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   }, [])
 
   const poolPumpRef = useRef<(() => void) | null>(null)
-  const renderIntoSlot = useCallback(async (n: number) => {
+  const renderIntoSlot = useCallback(async (n: number, forceText = false) => {
     const pdf = pdfRef.current
     const slot = slotElsRef.current.get(n)
-    if (!pdf || !slot || poolRenderedRef.current.has(n)) return
+    if (!pdf || !slot) return
+    if (poolInflightRef.current.has(n)) {
+      // 渲染中也要登记「要文本」——首渲染落盘后由下方补课重渲（否则竞态窗口永久丢文本层）
+      if (forceText) forceTextRef.current.add(n)
+      return
+    }
+    if (poolRenderedRef.current.has(n)) {
+      // forceText = 可见性观察器发现「画布已渲染但文本层缺失」的补课路径（首标竞态：渲染池先跑、
+      // tight 观察器后标，withText 曾被跳过且永不补——正文不可选的根因之二）
+      if (!forceText && !forceTextRef.current.has(n)) return
+      poolRenderedRef.current.delete(n)
+    }
     poolInflightRef.current.add(n)
     try {
       const page = await pdf.getPage(n)
@@ -434,7 +459,18 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       slot.appendChild(canvas)
       const frame = document.createElement('div')
       frame.className = 'kb-pdf-text-layer absolute inset-0'
-      await renderPageTo(n, canvas, frame, scale, { withText: tightVisibleRef.current.has(n) })
+      // ★ 文本层必须挂进 DOM（2026-09-20 取证：frames=0——frame 只创建未挂载，renderTextLayer
+      //   往游离节点渲染不报错，画布正常但正文永远不可选：划选/翻译/摘录全灭）
+      slot.appendChild(frame)
+      const withText = forceText || forceTextRef.current.has(n) || tightVisibleRef.current.has(n)
+      await renderPageTo(n, canvas, frame, scale, { withText })
+      // 首渲染无文本、但随后被标记「要文本」→ 原地再渲一次（inflight 已释放，本轮必带文本）
+      if (!withText && (forceTextRef.current.has(n) || tightVisibleRef.current.has(n))) {
+        poolRenderedRef.current.delete(n)
+        void renderIntoSlot(n)
+        return
+      }
+      forceTextRef.current.delete(n)
       // 渲染完按真实高度校正占位（估高只对首页可信）
       slot.style.height = `${canvas.style.height}`
       poolRenderedRef.current.add(n)
@@ -485,7 +521,17 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       for (const en of entries) {
         const n = Number((en.target as HTMLElement).dataset.pg)
         if (!n) continue
-        if (en.isIntersecting) tightVisibleRef.current.add(n)
+        if (en.isIntersecting) {
+          tightVisibleRef.current.add(n)
+          // 补课（见 renderIntoSlot forceText/forceTextRef）：画布已在但文本层缺失 → 带文本重渲；
+          // 若还在渲染 inflight，则登记待补，首渲染落盘后自动补
+          const slot = slotElsRef.current.get(n)
+          if (slot?.querySelector('canvas') && !slot.querySelector('.kb-pdf-text-layer span')) {
+            void renderIntoSlot(n, true)
+          } else if (slot && !slot.querySelector('canvas') && poolInflightRef.current.has(n)) {
+            forceTextRef.current.add(n)
+          }
+        }
         else tightVisibleRef.current.delete(n)
       }
       if (tightVisibleRef.current.size > 0) {
@@ -498,7 +544,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     for (const el of slotElsRef.current.values()) { tight.observe(el); near.observe(el) }
     syncPool()
     return () => { tight.disconnect(); near.disconnect() }
-  }, [viewMode, loading, numPages, syncPool])
+  }, [viewMode, loading, numPages, syncPool, renderIntoSlot])
 
   // 竖滚：当前页跟踪（视口中心线所在 slot，rect 基准不依赖 offsetParent）+ rAF 节流 + 滚动比例写回
   const scrollRafRef = useRef(0)

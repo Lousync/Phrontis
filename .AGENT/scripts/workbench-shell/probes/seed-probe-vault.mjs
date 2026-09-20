@@ -6,10 +6,26 @@
  */
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
 
 const proj = 'E:/Projects/KnowledgeRecorder'
+// --ud <name>：userData 目录名覆盖（默认 knowbase (dev KnowledgeRecorder)）。
+// 隔离探针实例（tmp/probe-app，见 probe-app 说明）须传 --ud "knowbase (dev probe-app)"——
+// 否则与用户正在跑的 dev 共用 userData：单实例锁互斥秒退 + 状态互相污染（2026-09-20 实测）。
+const udFlagIdx = process.argv.indexOf('--ud')
+const userDataName = udFlagIdx > -1 ? process.argv[udFlagIdx + 1] : 'knowbase (dev KnowledgeRecorder)'
+const userData = join(process.env.APPDATA ?? '', userDataName)
+
+// 防覆盖：隔离 userData 若尚无首启迁移 marker，先替 app 写上——
+// 否则 app 首启的「从正式版快照」会覆盖本 seed 写入的 settings/vaults（2026-09-20 实测踩坑）。
+// 探针数据自足（fixture vault + 空 settings），不需要正式版快照。
+const markerPath = join(userData, '.dev-migrated')
+if (!existsSync(markerPath)) {
+  mkdirSync(userData, { recursive: true })
+  writeFileSync(markerPath, new Date().toISOString(), 'utf8')
+  console.log('wrote .dev-migrated marker → app 首启跳过快照迁移，seed 不会被覆盖')
+}
 const fixture = join(proj, 'tmp', 'vault-fixture')
-const userData = join(process.env.APPDATA ?? '', 'knowbase (dev KnowledgeRecorder)')
 
 // 1. fixture 仓库：.knowbase + 两个目录 + 散文件
 for (const d of ['.knowbase', 'AI教学', '学习笔记']) mkdirSync(join(fixture, d), { recursive: true })
@@ -42,6 +58,32 @@ if (process.argv.includes('--add-books')) {
     }
     writeFileSync(bookPath, paras.join('\n'), 'utf8')
     console.log('seeded book:', bookPath)
+  }
+  // 轻量 PDF 样书（pdf-lib 生成，12 页带文本层）——PDF 划选摘录探针的 fixture
+  const pdfPath = join(booksDir, 'Reader Sample (light).pdf')
+  if (!existsSync(pdfPath)) {
+    try {
+      const require2 = createRequire(join(proj, 'package.json'))
+      const { PDFDocument, StandardFonts, rgb } = require2('pdf-lib')
+      const doc = PDFDocument.create ? await PDFDocument.create() : new PDFDocument()
+      doc.setTitle('Phrontis Reader Sample')
+      const font = await doc.embedFont(StandardFonts.Helvetica)
+      const bold = await doc.embedFont(StandardFonts.HelveticaBold)
+      for (let i = 1; i <= 12; i++) {
+        const page = doc.addPage([560, 760])
+        page.drawText('Phrontis Reader Sample', { x: 60, y: 700, size: 18, font: bold, color: rgb(0.15, 0.15, 0.2) })
+        page.drawText('Page ' + i + ' / 12', { x: 60, y: 668, size: 12, font, color: rgb(0.4, 0.4, 0.45) })
+        for (let l = 0; l < 20; l++) {
+          page.drawText('Lorem ipsum dolor sit amet, consectetur adipiscing elit sed do ' + (i * 20 + l) + '.', {
+            x: 60, y: 620 - l * 26, size: 10.5, font, color: rgb(0.2, 0.2, 0.25),
+          })
+        }
+      }
+      writeFileSync(pdfPath, Buffer.from(await doc.save()))
+      console.log('seeded pdf:', pdfPath)
+    } catch (e) {
+      console.log('pdf seed skipped:', String(e).slice(0, 120))
+    }
   }
 }
 
