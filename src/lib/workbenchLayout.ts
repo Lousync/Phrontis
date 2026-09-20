@@ -141,6 +141,14 @@ export interface WorkbenchBookmark {
   tab: TabName
 }
 
+/**
+ * 错题本入口总闸（2026-09-20）：三处 UI 入口（页面条「错题本」条目 / 左栏错题本书签 /
+ * 知识库侧栏底部入口）由它统一收放。现收起——与停靠页签的并存/激活/切换交互模型待
+ * v3.5.0 重做后拨 `true` 放出。机制层全部保留（事件接线 / 书签数据 / RailModule 类型 /
+ * 保活的 QuizCollection 视图），契约脚本 verify-workbench-shell.mjs 继续守住接线不漂移。
+ */
+export const QUIZ_ENTRY_ENABLED = false
+
 /** 书签集合（内置固定 6 项）——契约脚本 verify-workbench-shell.mjs 对此做映射双向断言 */
 export const WORKBENCH_BOOKMARKS: readonly WorkbenchBookmark[] = [
   { key: 'knowledge', label: '笔记', tab: 'knowledge' },

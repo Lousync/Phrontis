@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Puzzle, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff } from 'lucide-react'
-import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
+import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_ENTRY_ENABLED, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { WelcomeHtmlView } from './components/WelcomeHtmlView'
@@ -1851,14 +1851,16 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             {/* 侧边栏底部：错题本 / 收藏 + 插件视图入口（Phase 2 批次 1 收尾：文件视图下常驻） */}
             {(
               <div className="shrink-0 border-t border-[var(--border-color)] px-2 py-1.5 space-y-0.5">
-                {/* 内置错题本：唯一入口，恒驻 */}
-                <button
-                  onClick={() => toggleQuizCollection(true)}
-                  className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
-                >
-                  <BookMarked size={14} />
-                  错题本 / 收藏
-                </button>
+                {/* 内置错题本：入口暂收（QUIZ_ENTRY_ENABLED 总闸，v3.5.0 随交互重做放出）——视图/事件机制保留 */}
+                {QUIZ_ENTRY_ENABLED && (
+                  <button
+                    onClick={() => toggleQuizCollection(true)}
+                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
+                  >
+                    <BookMarked size={14} />
+                    错题本 / 收藏
+                  </button>
+                )}
                 {/* C 级模块插件声明的视图挂载点（slot=knowledge.sidebar） */}
                 {pluginViews.map(v => (
                   <button

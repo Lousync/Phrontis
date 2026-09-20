@@ -9,7 +9,7 @@ import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchPageBar, PAGE_OWNED } from './components/workbench/WorkbenchPageBar'
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
 import { ToolHost, PluginToolHost, TOOLS_WITH_SIDEBAR, isToolTabId, toolIdOfTab, toolTabId } from './components/workbench/toolRegistry'
-import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT, type RailModule } from './lib/workbenchLayout'
+import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, QUIZ_ENTRY_ENABLED, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT, type RailModule } from './lib/workbenchLayout'
 
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
 import { ZenHotZone } from './components/shared/ZenHotZone'
@@ -1305,7 +1305,9 @@ export default function App() {
                   onReorder={handleReorder}
                   editorSlotRef={wbEditorPageRef}
                   knowledgeSlotRef={wbKnowledgePageRef}
-                  showQuizEntry={quizViewOpen && openTabs.includes('knowledge')}
+                  /* 错题本条目暂收（QUIZ_ENTRY_ENABLED 总闸，v3.5.0 随交互重做放出）——
+                     onSelect/onClose 的 'quiz' 分支保留（死代码但 harmless，重做时直接接线） */
+                  showQuizEntry={QUIZ_ENTRY_ENABLED && quizViewOpen && openTabs.includes('knowledge')}
                    /* 单激活（2026-09-20）：激活 = knowledge 标签在前台**且**当前视图是错题本；
                       页面视图时激活落在页签组条目上（模块侧 activeId 置 null 配合） */
                    quizEntryActive={quizViewOpen && activeTab === 'knowledge'}
