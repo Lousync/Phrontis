@@ -933,13 +933,12 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     }
   }, [selInfo, translate])
 
-  const doAsk = useCallback((intent: 'explain' | 'quiz') => {
+  /** 讲题（2026-09-21 反馈：阅读器不出题 —— 原 intent='quiz' 分支已整条删除，不留不可达代码） */
+  const doAsk = useCallback(() => {
     if (!selInfo) return
     const excerpt = selInfo.text.trim().slice(0, 1200)
     const head = `我正在阅读 PDF《${name}》第 ${selInfo.page} 页，选了下面这段内容：\n\n「${excerpt}」\n\n`
-    const question = intent === 'explain'
-      ? head + '请讲解这段内容：先讲清涉及的概念/公式，再给一个可操作的例子或推演步骤。'
-      : head + '请根据这段内容出一组练习题帮助我巩固（用 ```quiz 围栏输出，题号从 1 开始连续编号），覆盖它的核心考点。'
+    const question = head + '请讲解这段内容：先讲清涉及的概念/公式，再给一个可操作的例子或推演步骤。'
     // state+props 范式（ISS-2026-09-04-07）：事件只送意图，payload 由 App 落 state 后经 props 下发
     window.dispatchEvent(new CustomEvent('kb-ai-teaching-ask', {
       detail: { question, source: { type: 'pdf', relPath, page: selInfo.page, excerpt } },

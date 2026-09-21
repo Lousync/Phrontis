@@ -1,4 +1,4 @@
-import { X, Copy, Languages, GraduationCap, ListChecks, Loader2, Highlighter } from 'lucide-react'
+import { X, Copy, Languages, GraduationCap, Loader2, Highlighter } from 'lucide-react'
 
 export interface SelectionRect { left: number; top: number; width: number; height: number }
 
@@ -16,8 +16,8 @@ interface Props {
   translate: TranslateState | null
   onCopy: () => void
   onTranslate: () => void
-  /** intent：讲题（解释）/ 出题（生成练习，落 quiz 围栏闭环） */
-  onAsk: (intent: 'explain' | 'quiz') => void
+  /** 讲题：跳转 AI 教学并带上选段上下文（2026-09-21 反馈：阅读器不出题，quiz 入口已整条移除） */
+  onAsk: () => void
   onClose: () => void
   /** 存为摘录（摘录先行批次）：传入才渲染按钮（AI 教学等无摘录域的调用方不传） */
   onCreateExcerpt?: () => void
@@ -25,7 +25,7 @@ interface Props {
 
 /**
  * 划词 AI 工具条（方案 §6）：文本层选区浮条 —— 复制 / 翻译（translationRepo 缓存通道，
- * 结果内嵌卡片纯展示）/ AI 讲题 / 出题（kb-ai-teaching-ask 跳转 AI 教学新会话）/ 摘录。
+ * 结果内嵌卡片纯展示）/ AI 讲题（kb-ai-teaching-ask 跳转 AI 教学新会话）/ 摘录。
  * fixed 定位按选区 rect 锚定，越界自动翻面。
  */
 export function TextSelectionBar({ rect, translate, onCopy, onTranslate, onAsk, onClose, onCreateExcerpt }: Props) {
@@ -52,13 +52,9 @@ export function TextSelectionBar({ rect, translate, onCopy, onTranslate, onAsk, 
             <Highlighter size={12.5} />摘录
           </button>
         )}
-        <button onClick={() => onAsk('explain')} title="跳转 AI 教学，带着选段上下文讲解"
+        <button onClick={onAsk} title="跳转 AI 教学，带着选段上下文讲解"
           className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           <GraduationCap size={12.5} />讲题
-        </button>
-        <button onClick={() => onAsk('quiz')} title="根据选段出练习题（落知识库可作答）"
-          className="flex items-center gap-1 rounded px-1.5 py-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-          <ListChecks size={12.5} />出题
         </button>
         <button onClick={onClose} title="关闭" className="rounded p-1 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
           <X size={11} />

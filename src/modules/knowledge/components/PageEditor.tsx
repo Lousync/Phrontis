@@ -88,11 +88,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const [manualLinks, setManualLinks] = useState<KnowledgePage[]>([])
   const [linkPickerOpen, setLinkPickerOpen] = useState(false)
   const [linkQuery, setLinkQuery] = useState('')
-  // 注解层（全类型通用）
-  const [annotation, setAnnotation] = useState('')
-  const [showAnnotation, setShowAnnotation] = useState(false)
+  // 注解层已整条移除（2026-09-21 反馈「这个注解现在又用不了」）：vaultMode 恒 true（R6 D9 后），
+  // 该栏 textarea 永远 readOnly、saveAnnotation 永远 early-return —— 死 UI + 死代码。
+  // `savedAnnotationRef` 保留：它仍参与既有页面的双链解析（见 save 里的 parseWikiLinks）。
   const savedAnnotationRef = useRef('')
-  const annoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [saving, setSaving] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   // 沉浸刷题模式（页面含选择题时可用）
@@ -271,7 +270,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       pageRef.current = pseudo
       setPage(pseudo); setTitle(title); setContent(body); setFileTypeState(ext); setEntryTags([])
       savedContentRef.current = body; savedTitleRef.current = title; isDirtyRef.current = false
-      setAnnotation(''); savedAnnotationRef.current = ''
+      savedAnnotationRef.current = ''
       onTitleChange?.(title); onContentChange?.(body)
       if (!isReload) setPreview(ext === 'md' || ext === 'txt')
     } catch (e) {
@@ -292,8 +291,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         if (p) {
           setPage(p); setTitle(p.title); setContent(p.contentMd); setFileTypeState(p.fileType || ''); setEntryTags(p.tags || [])
           savedContentRef.current = p.contentMd || ''; savedTitleRef.current = p.title; isDirtyRef.current = false
-          const anno = p.annotationMd || ''
-          setAnnotation(anno); savedAnnotationRef.current = anno
+          savedAnnotationRef.current = p.annotationMd || ''
           window.dispatchEvent(new CustomEvent('status-filetype', { detail: getFileTypeInfo(p.fileType || '').label }))
           onTitleChange?.(p.title)
           // 种子 liveContent(大纲/导出依赖);列表已瘦身,活动页内容以编辑器装载为准
@@ -448,27 +446,6 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       onClearDirty?.()
     } catch (e) { console.error(e) }
   }, [])
-
-  // 注解独立防抖保存（不触碰 content 的脏状态机）
-  const saveAnnotation = useCallback(async (id: string, value: string) => {
-    if (vaultMode) return  // 仓库文件模式：注解随页面文件统一在编辑器模块维护
-    try {
-      await updateKnowledgePage(id, { annotationMd: value })
-      savedAnnotationRef.current = value
-      // 注解里的双链也要入图
-      await updateKnowledgeLinks(id, parseWikiLinks(savedContentRef.current + '\n' + value))
-      void getKnowledgeBacklinkContext(id).then(setBacklinks)
-    } catch (e) { console.error('[PageEditor] save annotation failed:', e) }
-  }, [])
-
-  const handleAnnotationChange = useCallback((v: string) => {
-    setAnnotation(v)
-    if (!pageRef.current) return
-    if (annoTimerRef.current) clearTimeout(annoTimerRef.current)
-    annoTimerRef.current = setTimeout(() => {
-      void saveAnnotation(pageRef.current!.id, v)
-    }, 500)
-  }, [saveAnnotation])
 
   // ---- 手动关联 ----
   const handleAddManualLink = useCallback(async (targetId: string) => {
@@ -1005,30 +982,6 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
       {/* Main editing area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* 注解层：非 md/txt 页面的通用备注条（支持 [[双链]]，自动入图）；归档非 md 文件无 frontmatter 承载，不显示 */}
-        {fileType !== 'md' && fileType !== 'txt' && !isWelcomeHtml && !isArchiveFile && (
-          <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
-            <button onClick={() => setShowAnnotation(o => !o)}
-              className="w-full flex items-center gap-1.5 px-2 py-1 text-[11px] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-              title="展开/收起注解">
-              <StickyNote size={12} className={annotation ? 'text-[var(--warning)]' : ''} />
-              <span>注解{annotation ? ' · 已填写' : ''}</span>
-              <span className="flex-1" />
-              {showAnnotation ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            </button>
-            {showAnnotation && (
-              <textarea
-                value={annotation}
-                onChange={e => handleAnnotationChange(e.target.value)}
-                readOnly={vaultMode}
-                rows={3}
-                placeholder="给这份文件写点备注，可用 [[双链]] 关联其他页面…"
-                className="w-full px-4 pb-2 bg-transparent text-[12px] text-[var(--text-primary)] outline-none resize-none placeholder-[var(--text-disabled)] disabled:cursor-not-allowed"
-              />
-            )}
-          </div>
-        )}
-
         {/* Content */}
         {isArchiveFile ? (
           /* 归档非 md 文件：html 沙箱渲染（kbview 白名单③），其余元信息卡（D1） */
