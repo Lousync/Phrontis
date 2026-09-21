@@ -172,6 +172,16 @@ function flushSettingsToDisk(): void {
 // 允许打包后 file:// 环境下加载本地 module worker（pdf.js 阅读器需要）
 app.commandLine.appendSwitch('allow-file-access-from-files')
 
+// ★ 关闭 Windows「窗口遮挡」判定（2026-09-21 实测根因）：
+//   窗口被别的窗口盖住时，Chromium 会把页面标记为 hidden，连带**冻结 requestAnimationFrame 与
+//   IntersectionObserver**。而 pdf.js 3.11 的渲染步进正是 rAF 驱动的（display/api.js：
+//   `useRequestAnimationFrame: !intentPrint` → `_scheduleNext()` 里走 window.requestAnimationFrame），
+//   于是「被遮挡期间发起的那次渲染」永远不结束：画布一片空白、渲染池的 4 个并发槽被僵尸占满，
+//   之后缩放/滚动触发的重渲全部排不进去 —— 用户看到的就是「中间页不显示 + 缩放不好用」，
+//   且要等下一次滚动（新的一次 IO 投递）才可能自愈。
+//   关掉该判定后，被遮挡期间 rAF/IO 照常投递，渲染能正常收尾，回到前台时页面已经画好。
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+
 // 单实例锁 — 防止多窗口数据不同步（sql.js 内存数据库无跨进程共享能力）
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
