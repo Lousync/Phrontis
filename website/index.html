@@ -272,7 +272,43 @@
     width: 28px; height: 28px; border-radius: 8px; background: var(--k-accent); color: #fff;
     display: grid; place-items: center; flex-shrink: 0;
   }
-  @media (max-width: 760px) { .v-side { display: none !important; } .kbw-body { height: 440px; } .ai-drawer { width: 100%; max-width: 100%; } }
+  /* 书架 · 阅读器 */
+  .rd-wrap { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .rd-page { flex: 1; padding: 18px 22px; font-size: 13px; line-height: 1.85; color: var(--k-text2); overflow: hidden; }
+  .rd-page .rd-h { font-size: 14.5px; font-weight: 600; color: var(--k-text); margin-bottom: 10px; }
+  .rd-page p { margin-bottom: 9px; }
+  .rd-hl {
+    background: color-mix(in srgb, var(--k-warning) 26%, transparent);
+    color: var(--k-text); border-radius: 3px; padding: 1px 2px;
+  }
+  .rd-selbar {
+    display: flex; gap: 2px; width: fit-content; margin-top: 14px;
+    background: var(--k-bg); border: 1px solid var(--k-border); border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .12); overflow: hidden;
+  }
+  .rd-sb { font-size: 11px; color: var(--k-text2); padding: 5px 9px; }
+  .rd-sb.on { background: var(--k-accent); color: #fff; font-weight: 600; }
+  .rd-bar {
+    height: 26px; display: flex; align-items: center; gap: 12px; padding: 0 14px; flex-shrink: 0;
+    background: var(--k-sec); border-top: 1px solid var(--k-border); font-size: 11px; color: var(--k-muted);
+  }
+  .rd-bar .sp { flex: 1; }
+  .rd-panel {
+    width: 190px; flex-shrink: 0; background: var(--k-sec); border-left: 1px solid var(--k-border);
+    padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow: hidden;
+  }
+  .rd-p-cap { font-size: 11px; letter-spacing: .06em; color: var(--k-muted); }
+  .rd-tabs { display: flex; gap: 4px; }
+  .rd-tabs span { font-size: 11px; color: var(--k-muted); border: 1px solid var(--k-border); border-radius: 6px; padding: 2px 8px; }
+  .rd-tabs span.on { color: var(--k-accent); border-color: var(--k-accent); }
+  .rd-ex {
+    border: 1px solid var(--k-border); background: var(--k-ter); border-radius: 6px; padding: 6px 8px;
+    font-size: 11.5px; color: var(--k-text2); display: flex; gap: 6px; line-height: 1.55;
+  }
+  .rd-ex b { color: var(--k-accent); font-weight: 600; flex-shrink: 0; }
+  .rd-back { margin-top: auto; font-size: 10.5px; color: var(--k-muted); }
+
+  @media (max-width: 760px) { .v-side { display: none !important; } .kbw-body { height: 440px; } .ai-drawer { width: 100%; max-width: 100%; } .rd-panel { display: none; } }
 
   /* sections */
   section { padding: 72px 0; }
@@ -497,6 +533,22 @@
   @keyframes teaNo { 0%, 54% { opacity: 1 } 58%, 90% { opacity: .45 } 96%, 100% { opacity: 1 } }
   .tea-saved { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); border: 1px dashed var(--border); border-radius: 6px; padding: 3px 9px; margin-top: 8px; width: fit-content; animation: teaSaved 12s ease infinite; }
   .tea-saved b { color: var(--success); }
+
+  /* 演示 8：书架阅读器 · 划选与摘录 */
+  .rd-demo-page { font-size: 12.5px; line-height: 1.8; color: var(--text-2); padding: 2px 0; }
+  .rd-demo-hl { background: color-mix(in srgb, var(--warning) 24%, transparent); border-radius: 3px; padding: 1px 2px; color: var(--text); }
+  .rd-demo-bar {
+    display: flex; gap: 4px; width: fit-content; margin-top: 14px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .10); overflow: hidden;
+  }
+  .rd-demo-sb { font-size: 11.5px; color: var(--text-2); padding: 5px 10px; }
+  .rd-demo-sb.on { background: var(--accent); color: #fff; font-weight: 500; }
+  .rd-demo-ex {
+    margin-top: 12px; font-size: 12px; color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--bg);
+  }
+  .rd-demo-ex b { color: var(--accent); font-weight: 600; }
   @keyframes teaSaved { 0%, 66% { opacity: 0; transform: translateY(5px) } 72%, 90% { opacity: 1; transform: none } 97%, 100% { opacity: 0 } }
 
   @media (prefers-reduced-motion: reduce) {
@@ -540,7 +592,7 @@
   <div class="hero-tag">Windows 桌面端 · 纯本地运行</div>
   <h1>存好资料，AI 给你讲明白</h1>
   <p class="hero-sub">
-    Phrontis 是一款以知识库、AI 教学与 AI 侧栏为核心的本地桌面应用。
+    Phrontis 是一款以笔记、书架、AI 教学与 AI 侧栏为核心的本地桌面应用。
     所有数据保存本地，无需注册点击即用。
   </p>
   <div class="hero-actions">
@@ -571,9 +623,10 @@
     </svg>
 
     <div class="kbw-tabs">
-      <button class="kbw-tab on" data-v="editor">编辑器</button>
-      <button class="kbw-tab" data-v="knowledge">知识库</button>
+      <button class="kbw-tab on" data-v="editor">笔记 · 写</button>
+      <button class="kbw-tab" data-v="knowledge">笔记 · 读</button>
       <button class="kbw-tab" data-v="schedule">日程</button>
+      <button class="kbw-tab" data-v="books">书架 · 读</button>
       <button class="kbw-tab" data-v="ai">AI 侧栏</button>
     </div>
 
@@ -584,19 +637,19 @@
       </div>
       <div class="kbw-body">
         <div class="kbw-ab">
-          <span class="kbw-ab-btn active" data-m="editor" title="编辑器"><svg><use href="#i-pen"/></svg></span>
-          <span class="kbw-ab-btn" data-m="knowledge" title="知识库"><svg><use href="#i-book"/></svg></span>
+          <span class="kbw-ab-btn active" data-m="editor" title="笔记"><svg><use href="#i-pen"/></svg></span>
           <span class="kbw-ab-btn" data-m="schedule" title="日程"><svg><use href="#i-cal"/></svg></span>
+          <span class="kbw-ab-btn" data-m="books" title="书架"><svg><use href="#i-book"/></svg></span>
           <span class="kbw-ab-spacer"></span>
           <span class="kbw-ab-btn" title="用户"><svg><use href="#i-user"/></svg></span>
           <span class="kbw-ab-btn" title="设置与主题"><svg><use href="#i-gear"/></svg></span>
         </div>
         <div class="kbw-main">
 
-          <!-- 编辑器 -->
+          <!-- 笔记 · 写 -->
           <div class="kbw-view on" data-v="editor">
             <div class="v-strip">
-              <svg class="ic" style="color:var(--k-accent)"><use href="#i-pen"/></svg>编辑区
+              <svg class="ic" style="color:var(--k-accent)"><use href="#i-pen"/></svg>笔记
               <span class="sp"></span>
               <span class="lnk">插图</span><span class="lnk">大纲</span><span class="lnk">预览</span>
               <span class="lnk hot">保存全部 (3)</span>
@@ -639,22 +692,22 @@
             </div>
           </div>
 
-          <!-- 知识库 -->
+          <!-- 笔记 · 读 -->
           <div class="kbw-view" data-v="knowledge">
             <div class="v-strip">
-              <svg class="ic" style="color:var(--k-accent)"><use href="#i-book"/></svg>知识库
+              <svg class="ic" style="color:var(--k-accent)"><use href="#i-book"/></svg>阅读
               <span class="sp"></span>
-              <span class="lnk">错题本 / 收藏</span><span class="lnk hot">知识图谱</span>
+              <span class="lnk">标签</span><span class="lnk">反链</span><span class="lnk hot">知识图谱</span>
             </div>
             <div class="v-cols">
               <div class="v-side" style="width:232px">
-                <div class="side-head">空间与笔记本</div>
-                <div class="trow cur"><svg class="ic" style="color:var(--k-text2)"><use href="#i-layers"/></svg>程序员的空间</div>
-                <div class="trow" style="padding-left:22px"><svg class="ic"><use href="#i-chev"/></svg><svg class="ic"><use href="#i-book"/></svg>双链笔记法</div>
+                <div class="side-head">分类目录</div>
+                <div class="trow cur"><svg class="ic" style="color:var(--k-text2)"><use href="#i-folder"/></svg>笔记</div>
+                <div class="trow" style="padding-left:22px"><svg class="ic"><use href="#i-chev"/></svg><svg class="ic"><use href="#i-folder"/></svg>双链笔记法</div>
                 <div class="trow cur" style="padding-left:44px">什么是双链<span class="badge">MD</span></div>
                 <div class="trow" style="padding-left:44px">反链与互引<span class="badge">MD</span></div>
                 <div class="trow" style="padding-left:44px">卡片盒笔记法<span class="badge">MD</span></div>
-                <div class="trow" style="padding-left:22px"><svg class="ic"><use href="#i-chev"/></svg><svg class="ic"><use href="#i-book"/></svg>周报归档</div>
+                <div class="trow" style="padding-left:22px"><svg class="ic"><use href="#i-chev"/></svg><svg class="ic"><use href="#i-folder"/></svg>周报</div>
                 <div class="trow"><svg class="ic" style="color:var(--k-warning)"><use href="#i-star"/></svg>收藏</div>
                 <div class="trow" style="padding-left:22px">高效写作的十个习惯</div>
               </div>
@@ -696,7 +749,7 @@
                     <span class="due hot">今天截止！</span>
                   </div>
                   <div class="todo-card">
-                    <span class="chk"></span><span class="tt">面试复盘笔记归档进知识库</span>
+                    <span class="chk"></span><span class="tt">面试复盘笔记整理进分类目录</span>
                     <span class="qd"><span class="bar" style="background:var(--k-accent)"></span>重要不紧急</span>
                     <span class="due soon">明天截止</span>
                   </div>
@@ -709,6 +762,48 @@
                   <svg class="ic" style="width:12px;height:12px;transform:rotate(90deg)"><use href="#i-chev"/></svg>已完成 · 3 项
                   <span class="sp"></span><span class="clr">全部清除</span>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 书架 · 阅读器 -->
+          <div class="kbw-view" data-v="books">
+            <div class="v-strip">
+              <svg class="ic" style="color:var(--k-accent)"><use href="#i-book"/></svg>书架
+              <span class="sp"></span>
+              <span class="lnk hot">三排列</span><span class="lnk">封面墙</span><span class="lnk">在读 3 本</span>
+            </div>
+            <div class="v-cols">
+              <div class="v-side" style="width:200px">
+                <div class="side-head">在读书目</div>
+                <div class="trow cur"><svg class="ic"><use href="#i-file"/></svg>机器学习.pdf<span class="badge">PDF</span></div>
+                <div class="trow"><svg class="ic"><use href="#i-file"/></svg>计算机网络.txt<span class="badge">TXT</span></div>
+                <div class="trow"><svg class="ic"><use href="#i-file"/></svg>算法导论.pdf<span class="badge">PDF</span></div>
+                <div class="side-foot">
+                  <div class="foot-cap">阅读进度</div>
+                  <div class="trow"><svg class="ic"><use href="#i-check"/></svg>已读 3 / 12 本</div>
+                </div>
+              </div>
+              <div class="rd-wrap">
+                <div class="rd-page">
+                  <div class="rd-h">第 2 章 · 模型评估与选择</div>
+                  <p>过拟合是模型把训练样本自身的特点当成了所有样本的一般性质，泛化能力因此下降。</p>
+                  <p><span class="rd-hl">评估方法主要有留出法、交叉验证法与自助法</span>，需按数据规模与计算成本选择。</p>
+                  <p>训练集与验证集的划分要保持数据分布一致，否则评估结果会出现偏差。</p>
+                  <div class="rd-selbar">
+                    <span class="rd-sb on">AI 讲题</span><span class="rd-sb">翻译</span><span class="rd-sb">摘录</span><span class="rd-sb">复制</span>
+                  </div>
+                </div>
+                <div class="rd-bar">
+                  <span>12 / 441 页</span><span class="sp"></span><span>Ctrl+滚轮 缩放</span><span>进度已记住</span>
+                </div>
+              </div>
+              <div class="rd-panel">
+                <div class="rd-p-cap">阅读面板</div>
+                <div class="rd-tabs"><span class="on">摘录</span><span>书签</span><span>AI</span></div>
+                <div class="rd-ex"><b>p.34</b><span>留出法 / 交叉验证 / 自助法三种评估方法</span></div>
+                <div class="rd-ex"><b>p.41</b><span>过拟合的成因与缓解手段</span></div>
+                <div class="rd-back">点摘录跳回原文位置</div>
               </div>
             </div>
           </div>
@@ -773,10 +868,10 @@
     </div>
     <div class="feat-row">
       <div class="feat-copy">
-        <div class="k">编辑器</div>
-        <h3>VS Code 同款内核，同款体验</h3>
-        <p>Monaco 内核 + 文件树，分栏实时预览；<b>文件操作撤销栈</b>覆盖移动 / 重命名 / 新建——手滑之后，一键回到事故之前。</p>
-        <div class="kbd-hint"><code>Ctrl+Z</code>撤销文件操作 <code>Ctrl+N</code>新建</div>
+        <div class="k">笔记</div>
+        <h3>写和读，在同一处完成</h3>
+        <p>笔记区读写一体：Monaco 内核直接写，<b>自动保存</b>不用按；同一篇页面转身就是阅读视图——标签、双链、反链、图谱也都在这里，不用在两个模块之间搬内容。<b>文件操作撤销栈</b>覆盖移动 / 重命名 / 新建，手滑之后一键回到事故之前。</p>
+        <div class="kbd-hint"><code>Ctrl+N</code>新建即入列 <code>Ctrl+Z</code>撤销文件操作</div>
       </div>
       <div class="demo-card feat-demo">
         <div class="demo-title">项目周报-第37周.md</div>
@@ -790,9 +885,9 @@
 
     <div class="feat-row rev">
       <div class="feat-copy">
-        <div class="k">知识库</div>
+        <div class="k">双链 · 图谱</div>
         <h3>[[双链]] 织成你的第二大脑</h3>
-        <p>空间 / 笔记本 / 章节 / 页面四级结构，反链上下文与相关性推荐；<b>知识图谱</b>力导向布局，可进入目录只看局部；<code style="font-size:12px">.ignore</code> 规则把私人目录从检索与图谱中整体隐藏。</p>
+        <p>按分类目录组织，把笔记拖进目录就算归类；反链上下文与相关性推荐；<b>知识图谱</b>力导向布局，可进入目录只看局部；<code style="font-size:12px">.ignore</code> 规则把私人目录从检索与图谱中整体隐藏。</p>
         <div class="kbd-hint"><code>Ctrl+Shift+R</code>沉浸阅读 <code>Ctrl+O</code>快速打开</div>
       </div>
       <div class="demo-card feat-demo">
@@ -815,7 +910,7 @@
       <div class="demo-card feat-demo">
         <div class="demo-title">今日任务</div>
         <div class="demo-todo"><span class="demo-chk"></span><span class="tt strike2">整理周视图排期的边界情况清单</span><span class="due-tag">今天截止！</span></div>
-        <div class="demo-todo"><span class="demo-chk" style="animation-delay:-3.5s"></span><span class="tt strike2" style="animation-delay:-3.5s">面试复盘笔记归档进知识库</span><span class="due-tag" style="color:var(--warning)">明天截止</span></div>
+        <div class="demo-todo"><span class="demo-chk" style="animation-delay:-3.5s"></span><span class="tt strike2" style="animation-delay:-3.5s">面试复盘笔记整理进分类目录</span><span class="due-tag" style="color:var(--warning)">明天截止</span></div>
         <div class="demo-todo" style="opacity:.55"><span class="demo-chk" style="background:var(--success);border-color:var(--success)"></span><span class="tt" style="text-decoration:line-through">给新版本补一版快速上手文档</span></div>
       </div>
     </div>
@@ -840,7 +935,7 @@
         <div class="k">AI 教学</div>
         <h3>一门课一个工作区，讲到出题一个闭环</h3>
         <p>教材 / 课件入库作素材，讲解自带 <b>[1] p.34</b> 编号引用可溯源；「对话 ⇄ 题目」一键切换，随堂出题、即时判分；讲义与试卷<b>自动落盘</b>会话文件夹；<b>用户画像</b>持续记录薄弱点，越用越懂你。</p>
-        <div class="kbd-hint"><code>活动栏</code>进入 AI教学 <code>对话 ⇄ 题目</code>切换视图</div>
+        <div class="kbd-hint"><code>图标条</code>进入 AI 教学 <code>对话 ⇄ 题目</code>切换视图</div>
       </div>
       <div class="demo-card feat-demo tea-card">
         <div class="demo-title">AI教学 · 计算机网络工作区</div>
@@ -860,9 +955,29 @@
       </div>
     </div>
 
+    <div class="feat-row rev">
+      <div class="feat-copy">
+        <div class="k">书架 · 阅读器</div>
+        <h3>PDF、TXT 直接读，划一句就能问</h3>
+        <p>把书拖进书架就行：<b>PDF 与 TXT 都是原生阅读器</b>，封面墙与三排列两种摆法；划选正文弹出「AI 讲题 / 翻译」，<b>摘录高亮</b>落进右栏阅读面板，点一条跳回原文；缩放快捷键齐备，进度自动记住、下次接着读。</p>
+        <div class="kbd-hint"><code>Ctrl+滚轮</code>缩放 <code>划选正文</code>唤起操作浮条</div>
+      </div>
+      <div class="demo-card feat-demo">
+        <div class="demo-title">机器学习 · 周志华（441 页 · PDF）</div>
+        <div class="rd-demo-page">
+          过拟合是模型把训练样本自身的特点当成了所有样本的一般性质，泛化能力因此下降。
+          <div class="rd-demo-hl">评估方法主要有留出法、交叉验证法与自助法。</div>
+        </div>
+        <div class="rd-demo-bar">
+          <span class="rd-demo-sb on">AI 讲题</span><span class="rd-demo-sb">翻译</span><span class="rd-demo-sb">摘录</span>
+        </div>
+        <div class="rd-demo-ex"><b>p.34</b> 留出法 / 交叉验证 / 自助法 · 已存进摘录</div>
+      </div>
+    </div>
+
     <div class="more-chips">
       <span class="chip">博客 · 周月总结</span>
-      <span class="chip">说说 · 相册</span>
+      <span class="chip">动态 · 相册</span>
       <span class="chip">回收站 · 软删除可恢复</span>
       <span class="chip">设置 · 关键词搜索直达</span>
     </div>
@@ -1046,7 +1161,7 @@
     { x: 80,  y: 58,  r: 10, home: [80, 58], vx: 0, vy: 0 },
     { x: 282, y: 52,  r: 9,  home: [282, 52], vx: 0, vy: 0 },
     { x: 66,  y: 176, r: 9,  home: [66, 176], vx: 0, vy: 0 },
-    { x: 292, y: 172, r: 11, home: [292, 172], label: ['周报归档', 0, 26], vx: 0, vy: 0 },
+    { x: 292, y: 172, r: 11, home: [292, 172], label: ['周报', 0, 26], vx: 0, vy: 0 },
     { x: 182, y: 212, r: 8,  home: [182, 212], vx: 0, vy: 0 },
   ]
   var edges = [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [1, 3], [2, 4]]
@@ -1186,17 +1301,18 @@
     views.forEach(function (x) { x.classList.toggle('on', x.getAttribute('data-v') === v) })
     abs.forEach(function (a) {
       var m = a.getAttribute('data-m')
-      a.classList.toggle('active', m === v || (v === 'ai' && m === 'editor'))
+      a.classList.toggle('active', m === v || ((v === 'ai' || v === 'knowledge') && m === 'editor'))
     })
   }
   tabs.forEach(function (t) { t.addEventListener('click', function () { show(t.getAttribute('data-v')) }) })
   var hash = location.hash.replace('#', '')
-  if (['editor', 'knowledge', 'schedule', 'ai'].indexOf(hash) >= 0) show(hash)
+  if (['editor', 'knowledge', 'schedule', 'books', 'ai'].indexOf(hash) >= 0) show(hash)
 })()
 </script>
 <script>
 (function () {
-  var ZH2EN = {"Phrontis — 本地 Windows 桌面知识日程管理工具 · 纯本地": "Phrontis — Local-first knowledge & scheduling for Windows",
+  var ZH2EN = {
+"Phrontis — 本地 Windows 桌面知识日程管理工具 · 纯本地": "Phrontis — Local-first knowledge & scheduling for Windows",
 "功能模块": "Features",
 "工具箱": "Toolbox",
 "插件市场": "Plugins",
@@ -1205,11 +1321,10 @@
 "下载": "Download",
 "Windows 桌面端 · 纯本地运行": "Windows desktop · 100% local",
 "存好资料，AI 给你讲明白": "Save your materials — AI explains the rest",
-"Phrontis 是一款以知识库、AI 教学与 AI 侧栏为核心的本地桌面应用。 所有数据保存本地，无需注册点击即用。": "Phrontis is a local desktop app built around a knowledge base, AI teaching and an AI sidebar. All data stays local — no sign-up, just click and go.",
+"Phrontis 是一款以笔记、书架、AI 教学与 AI 侧栏为核心的本地桌面应用。 所有数据保存本地，无需注册点击即用。": "Phrontis is a local desktop app built around notes and a bookshelf, AI teaching and an AI sidebar. All data stays local — no sign-up, just click and go.",
 "下载 Windows 安装包": "Download for Windows",
 "GitHub 仓库": "GitHub Repo",
 "我的知识仓库": "My Knowledge Vault",
-"编辑区": "Editor",
 "插图": "Image",
 "大纲": "Outline",
 "预览": "Preview",
@@ -1231,15 +1346,11 @@
 "整理周视图拖拽排期的边界情况清单": "List edge cases of week-view drag scheduling",
 "给新版本补一版快速上手文档": "Add a quick-start doc for the new release",
 "● 未保存": "● Unsaved",
-"错题本 / 收藏": "Mistake Book / Favorites",
 "知识图谱": "Graph ",
-"空间与笔记本": "Spaces & Notebooks",
-"程序员的空间": "Programmer's Space",
 "双链笔记法": "Linked Notes",
 "什么是双链": "What Are Linked Notes",
 "反链与互引": "Backlinks & Cross-refs",
 "卡片盒笔记法": "Zettelkasten",
-"周报归档": "Weekly Reports",
 "收藏": "Favorites",
 "高效写作的十个习惯": "10 Habits of Efficient Writing",
 "更新于今天 · 被 12 篇笔记引用 · 双链笔记法 / 第 1 章": "Updated today · referenced by 12 notes · Linked Notes / Ch.1",
@@ -1247,7 +1358,6 @@
 "引用其他笔记，被引用的笔记会自动积累": "referencing others makes the referenced notes accumulate ",
 "反向链接": "backlinks",
 "为什么反链重要": "Why backlinks matter",
-"正向链接表达“我想到了什么”，反链回答“谁提到了我”。两者在知识图谱中同口径建模，检索时互为入口。": "Forward links say “what I thought of”; backlinks answer “who mentioned me”. Both are modeled in the graph and serve as each other's entry points.",
 "相关：": "Related: ",
 "周日程": "Week",
 "按日期": "By date",
@@ -1264,14 +1374,12 @@
 "快速添加当日零碎任务...": "Quick-add a quick task for today...",
 "紧急重要": "Urgent & Important",
 "今天截止！": "Due today!",
-"面试复盘笔记归档进知识库": "Archive interview retro notes into the knowledge base",
 "重要不紧急": "Important, Not Urgent",
 "明天截止": "Due tomorrow",
 "不紧急不重要": "Neither urgent nor important",
 "已完成 · 3 项": "Completed · 3",
 "全部清除": "Clear all",
 "引用其他笔记……": "referencing other notes…",
-"正向链接表达“我想到了什么”，反链回答“谁提到了我”……": "Forward links say “what I thought of”; backlinks answer “who mentioned me”…",
 "新会话": "New chat",
 "项目周报-第37周.md · 将随提问附带": "weekly-report-w37.md · attached with the question",
 "总结一下这一页的要点，再看看我今天还有什么没做完": "Summarize this page and check what's still open today",
@@ -1289,19 +1397,13 @@
 "AI 本地优先": "Local-first AI",
 "支持 OpenAI 兼容 / Ollama / Anthropic，本地大模型全程离线": "OpenAI-compatible / Ollama / Anthropic — local LLMs work fully offline",
 "高频场景逐一演示 · 其余模块见底部速览": "High-frequency scenarios demoed live · quick glance for the rest below",
-"VS Code 同款内核，同款体验": "VS Code's own core, same familiar experience",
-"Monaco 内核 + 文件树，分栏实时预览；": "Monaco core + file tree, split live preview; ",
 "文件操作撤销栈": "file-op undo stack",
-"覆盖移动 / 重命名 / 新建——手滑之后，一键回到事故之前。": "covering move / rename / create — one keystroke back to before the accident.",
 "撤销文件操作": "undo file ops",
 "唤起 AI 侧栏": "open the AI sidebar",
-"新建": "new",
 "Ctrl+Z 已撤销": "Ctrl+Z undone",
 "检索延迟下降约": "retrieval latency down about ",
 "边界情况：拖拽越界时占位闪烁": "Edge case: placeholder flicker on drag overflow",
-"40%。": "40%.",
 "[[双链]] 织成你的第二大脑": "[[Linked notes]] weave your second brain",
-"空间 / 笔记本 / 章节 / 页面四级结构，反链上下文与相关性推荐；": "Spaces / notebooks / chapters / pages, backlink context and relevance suggestions; ",
 "力导向布局，可进入目录只看局部；": "force-directed graph, zoom in to any folder; ",
 "规则把私人目录从检索与图谱中整体隐藏。": " rules hide private folders from search & graph.",
 "沉浸阅读": "Immersive reading",
@@ -1329,11 +1431,9 @@
 "总结这一页要点，再看看我今天还有什么没做完": "Summarize this page and check what's still open today",
 "核心是「双链与反链同口径」，检索延迟下降约 40%。你还有 1 项今天截止：「整理周视图排期的边界情况清单」，建议优先处理。": "It's about aligning linked notes with backlinks — retrieval is ~40% faster now. You still have 1 item due today: “List edge cases of week-view drag scheduling”. Suggest handling it first.",
 "博客 · 周月总结": "Blog · weekly/monthly recaps",
-"说说 · 相册": "Moments · photos",
 "回收站 · 软删除可恢复": "Recycle bin · soft delete",
 "设置 · 关键词搜索直达": "Settings · search-to-jump",
 "内置工具箱": "Built-in Toolbox",
-"11 个常用工具，不必再为小事装一堆软件": "11 everyday tools — stop installing an app for every little thing",
 "密码本（DPAPI 加密）": "Password vault (DPAPI)",
 "网址导航": "Bookmarks",
 "数据导出 / 整仓备份": "Export / full backup",
@@ -1397,13 +1497,13 @@
 "Windows 10 / 11（64 位）": "Windows 10 / 11 (64-bit)",
 "· 发现问题欢迎": "· Found an issue?",
 "提交 Issue": "file an issue",
-  "色": "TH",
-  "暗色": "DK",
-  "亮色": "LT",
-  "米白": "CR",
-  "赛博": "CP",
-  "手绘": "HD",
-  "终端": "TR",
+"色": "TH",
+"暗色": "DK",
+"亮色": "LT",
+"米白": "CR",
+"赛博": "CP",
+"手绘": "HD",
+"终端": "TR",
 "AI 教学": "AI Teaching",
 "一门课一个工作区，讲到出题一个闭环": "One workspace per course — from explaining to quizzing in one loop",
 "教材 / 课件入库作素材，讲解自带": "Textbooks and slides go in as sources; every explanation carries ",
@@ -1413,8 +1513,6 @@
 "会话文件夹；": " to the session folder; ",
 "用户画像": "a learner profile",
 "持续记录薄弱点，越用越懂你。": " keeps track of weak spots — the more you use it, the better it knows you.",
-"活动栏": "Activity bar",
-"进入 AI教学": "to open AI Teaching",
 "对话 ⇄ 题目": "Chat ⇄ Quiz",
 "切换视图": "to switch views",
 "AI教学 · 计算机网络工作区": "AI Teaching · Computer Networks workspace",
@@ -1428,13 +1526,75 @@
 "B. ACK": "B. ACK",
 "讲义·三次握手.md 已存入会话文件夹": " Lecture·Handshake.md saved to the session folder",
 "Phrontis · 纯本地知识日程管理": "Phrontis · local-first knowledge & scheduling",
-  "编辑器": "Editor",
-  "知识库": "Knowledge Base",
-  "日程": "Schedule",
-  "AI 侧栏": "AI Sidebar",
-  "> 按 Ctrl+J 随时唤起 AI 侧栏，\"边看边问\"。": "> Hit Ctrl+J anytime for the AI sidebar — ask while you read.",
-  "正向链接表达\"我想到了什么\"，反链回答\"谁提到了我\"。两者在知识图谱中同口径建模，检索时互为入口。": "Forward links say \"what I thought of\"; backlinks answer \"who mentioned me\". Both are modeled in the graph and serve as each other's entry points.",
-  "正向链接表达\"我想到了什么\"，反链回答\"谁提到了我\"……": "Forward links say \"what I thought of\"; backlinks answer \"who mentioned me\"…"};
+"日程": "Schedule",
+"AI 侧栏": "AI Sidebar",
+"> 按 Ctrl+J 随时唤起 AI 侧栏，\"边看边问\"。": "> Hit Ctrl+J anytime for the AI sidebar — ask while you read.",
+"正向链接表达\"我想到了什么\"，反链回答\"谁提到了我\"。两者在知识图谱中同口径建模，检索时互为入口。": "Forward links say \"what I thought of\"; backlinks answer \"who mentioned me\". Both are modeled in the graph and serve as each other's entry points.",
+"正向链接表达\"我想到了什么\"，反链回答\"谁提到了我\"……": "Forward links say \"what I thought of\"; backlinks answer \"who mentioned me\"…",
+"笔记 · 写": "Notes · Write",
+"笔记 · 读": "Notes · Read",
+"书架 · 读": "Bookshelf · Read",
+"笔记": "Notes",
+"阅读": "Reading",
+"标签": "Tags",
+"反链": "Backlinks",
+"分类目录": "Folders",
+"周报": "Weekly Reports",
+"面试复盘笔记整理进分类目录": "File the interview retro into a folder",
+"书架": "Bookshelf",
+"三排列": "3-column",
+"封面墙": "Cover wall",
+"在读 3 本": "3 in progress",
+"在读书目": "Reading now",
+"机器学习.pdf": "machine-learning.pdf",
+"计算机网络.txt": "computer-networks.txt",
+"算法导论.pdf": "intro-to-algorithms.pdf",
+"阅读进度": "Progress",
+"已读 3 / 12 本": "3 / 12 finished",
+"第 2 章 · 模型评估与选择": "Chapter 2 · Model Evaluation and Selection",
+"过拟合是模型把训练样本自身的特点当成了所有样本的一般性质，泛化能力因此下降。": "Overfitting is when a model mistakes traits of the training samples for general properties — so it generalizes worse.",
+"评估方法主要有留出法、交叉验证法与自助法": "The main evaluation methods are hold-out, cross-validation and bootstrapping",
+"，需按数据规模与计算成本选择。": ", picked by data size and compute budget.",
+"训练集与验证集的划分要保持数据分布一致，否则评估结果会出现偏差。": "Train/validation splits must keep the same data distribution, or the evaluation will be biased.",
+"AI 讲题": "Explain it",
+"翻译": "Translate",
+"摘录": "Excerpt",
+"复制": "Copy",
+"12 / 441 页": "12 / 441",
+"Ctrl+滚轮 缩放": "Ctrl+wheel to zoom",
+"进度已记住": "Progress saved",
+"阅读面板": "Reading panel",
+"书签": "Bookmarks",
+"留出法 / 交叉验证 / 自助法三种评估方法": "Hold-out / cross-validation / bootstrapping",
+"过拟合的成因与缓解手段": "What causes overfitting, and how to ease it",
+"点摘录跳回原文位置": "Click an excerpt to jump back",
+"写和读，在同一处完成": "Write and read in one place",
+"笔记区读写一体：Monaco 内核直接写，": "Read and write in one place: type right in Monaco, ",
+"自动保存": "auto-saved",
+"不用按；同一篇页面转身就是阅读视图——标签、双链、反链、图谱也都在这里，不用在两个模块之间搬内容。": " with no save button; the same page flips into a reading view — tags, links, backlinks and the graph all live here too. No shuttling content between two modules.",
+"覆盖移动 / 重命名 / 新建，手滑之后一键回到事故之前。": " covers move / rename / create — one keystroke back to before the accident.",
+"新建即入列": "new note joins the list",
+"双链 · 图谱": "Links · Graph",
+"按分类目录组织，把笔记拖进目录就算归类；反链上下文与相关性推荐；": "Organized by folders — drop a note into one to file it; backlink context and relevance suggestions; ",
+"图标条": "Icon bar",
+"进入 AI 教学": "to open AI Teaching",
+"书架 · 阅读器": "Bookshelf & Reader",
+"PDF、TXT 直接读，划一句就能问": "Read PDF and TXT natively — select a line and ask",
+"把书拖进书架就行：": "Just drag a book into the shelf: ",
+"PDF 与 TXT 都是原生阅读器": "PDF and TXT both have native readers",
+"，封面墙与三排列两种摆法；划选正文弹出「AI 讲题 / 翻译」，": ", laid out as a cover wall or a 3-column grid; selecting text pops up Explain / Translate, ",
+"摘录高亮": "excerpt highlights",
+"落进右栏阅读面板，点一条跳回原文；缩放快捷键齐备，进度自动记住、下次接着读。": " land in the reading panel — click one to jump back to the source; zoom shortcuts included, progress remembered for next time.",
+"Ctrl+滚轮": "Ctrl+wheel",
+"缩放": "zoom",
+"划选正文": "select text",
+"唤起操作浮条": "to open the action bar",
+"机器学习 · 周志华（441 页 · PDF）": "Machine Learning · Zhou Zhihua (441 pp · PDF)",
+"评估方法主要有留出法、交叉验证法与自助法。": "The main evaluation methods are hold-out, cross-validation and bootstrapping.",
+"留出法 / 交叉验证 / 自助法 · 已存进摘录": "Hold-out / cross-validation / bootstrapping · saved as excerpt",
+"动态 · 相册": "Moments · photos",
+"9 个常用工具，不必再为小事装一堆软件": "9 everyday tools — stop installing an app for every little thing"
+};
   var TITLE_EN = "Phrontis — Local-first knowledge & scheduling for Windows";
   var TITLE_ZH = document.title;
   var norm = function (s) { return s.replace(/\s+/g, ' ').trim() };
