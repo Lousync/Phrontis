@@ -1931,6 +1931,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               scopeName={graphScope?.name}
               onClearScope={() => setGraphScope(null)}
               onOpenInReader={(id) => void openPageInReader(id)}
+              sidebarEl={sidebarEl}
             />
           ) : activePageId ? (
             <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-[var(--text-muted)]">正在加载编辑器…</div>}>

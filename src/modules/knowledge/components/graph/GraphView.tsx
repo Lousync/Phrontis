@@ -6,10 +6,13 @@
  *       未解析 [[引用]] 合成 dangling 虚节点渲染、着色/簇力/文字阈值开关
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ExternalLink, FileText, Folder as FolderIcon, Maximize2, Minus, Plus, RotateCcw, Settings, Share2, Tag, X, Network, BookOpen } from 'lucide-react'
 import type { GraphIndexData, GraphNode, GraphViewConfig } from '../../../../lib/graphTypes'
 import { getKnowledgeGraph, getKnowledgePageById, getGraphViewConfig, updateGraphViewConfig } from '../../../../lib/ipc'
 import { GraphCanvas, type GraphCanvasHandle } from './GraphCanvas'
+import { GraphSidebar } from './GraphSidebar'
+import { applyGroupFilter } from './graphGroups'
 
 interface GraphViewProps {
   onExit: () => void
@@ -25,6 +28,11 @@ interface GraphViewProps {
   scopeName?: string
   /** 点「返回全库」清除 scope（不清则留在当前目录） */
   onClearScope?: () => void
+  /**
+   * 图谱态左栏 slot（2026-09-21 用户需求：图谱态左栏不再留空）：App 传入的左栏挂载点，
+   * 分区导航（GraphSidebar）portal 进去。挂载点由 KnowledgeModule 转发。
+   */
+  sidebarEl?: HTMLElement | null
 }
 
 const DEFAULT_GVC: GraphViewConfig = {
@@ -116,7 +124,7 @@ function applyScope(data: GraphIndexData, scopePath: string): GraphIndexData {
   return { ...data, nodes, edges }
 }
 
-export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenInReader }: GraphViewProps) {
+export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenInReader, sidebarEl = null }: GraphViewProps) {
   const [data, setData] = useState<GraphIndexData | null>(null)
   const [error, setError] = useState('')
   const [cfg, setCfg] = useState<GraphViewConfig>(DEFAULT_GVC)
@@ -133,6 +141,11 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
   /** A7 本地图谱：中心页 id；null=全图 */
   const [centerId, setCenterId] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
+  /**
+   * 左栏分区（2026-09-21）：进群 = 画布只画该群（applyGroupFilter 数据级裁剪，非变灰）。
+   * null = 全库；'all' 与 null 等价（保留 'all' key 是给侧栏「全库」行做高亮判断用）。
+   */
+  const [activeGroup, setActiveGroup] = useState<string | null>(null)
   const canvasRef = useRef<GraphCanvasHandle | null>(null)
   const exitRef = useRef(onExit)
   exitRef.current = onExit
@@ -169,14 +182,22 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
     })
   }, [])
 
-  // 目录 scope（先裁剪）→ 过滤（标签/孤儿）+ unresolved 虚节点 → 本地图谱（可选）
-  const scoped = useMemo(
-    () => (data && scopePath ? applyScope(data, scopePath) : data),
-    [data, scopePath],
+  // 左栏分区（先裁剪）→ 目录 scope → 过滤（标签/孤儿）+ unresolved 虚节点 → 本地图谱（可选）
+  const groupFiltered = useMemo(
+    () => (data && activeGroup && activeGroup !== 'all' ? applyGroupFilter(data, activeGroup) : data),
+    [data, activeGroup],
   )
+  const scoped = useMemo(
+    // 侧栏分区激活时覆盖目录 scope（叠加裁剪会把 unresolved 群清空，语义也混乱）：
+    // 用户在左栏明确点了群 = 显式意图优先
+    () => (groupFiltered && scopePath && !activeGroup ? applyScope(groupFiltered, scopePath) : groupFiltered),
+    [groupFiltered, scopePath, activeGroup],
+  )
+  // 孤立群特例：用户设置关掉「显示孤立页」时，进孤立群必须强制含孤点（否则群内永远空）
+  const cfgEff = activeGroup === 'orphan' && !cfg.showOrphans ? { ...cfg, showOrphans: true } : cfg
   const display = useMemo(
-    () => (scoped ? filterAndSynth(scoped, cfg) : null),
-    [scoped, cfg],
+    () => (scoped ? filterAndSynth(scoped, cfgEff) : null),
+    [scoped, cfgEff],
   )
   const displayData = useMemo(
     () => (display && centerId ? buildLocalGraph(display, centerId) : display),
@@ -211,6 +232,12 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
     const id = requestAnimationFrame(() => canvasRef.current?.fit())
     return () => cancelAnimationFrame(id)
   }, [centerId])
+
+  // 左栏分区（2026-09-21）：进群/退群 → 适屏（同本地图谱口径；增量 merge 已保留成员坐标）
+  useEffect(() => {
+    const id = requestAnimationFrame(() => canvasRef.current?.fit())
+    return () => cancelAnimationFrame(id)
+  }, [activeGroup])
 
   const openInEditor = useCallback(() => {
     if (!sel || sel.kind !== 'page') return
@@ -263,6 +290,17 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
 
   return (
     <div className="kb-view-fade flex-1 flex flex-col overflow-hidden h-full relative bg-[var(--bg-primary)]">
+      {/* 图谱态左栏：分区导航 portal 进 App 左栏 slot（挂载点由 KnowledgeModule 转发） */}
+      {sidebarEl && data && createPortal(
+        <GraphSidebar
+          data={data}
+          activeKey={activeGroup}
+          onSelect={setActiveGroup}
+          onOpenPage={(n) => window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: n.path, from: 'knowledge' } }))} // 条目6：带来源
+        />,
+        sidebarEl,
+      )}
+
       <GraphCanvas
         ref={canvasRef}
         data={displayData}
