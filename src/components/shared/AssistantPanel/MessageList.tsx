@@ -120,7 +120,6 @@ export function MessageList({
   messages, pending, liveSteps, draft, editing, setEditing, copiedIdx, setCopiedIdx,
   onRegenerate, onEditSubmit, onDeleteMessage, onAbort, emptyHint, className,
 }: MessageListProps) {
-  const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   /** 是否贴底（用户上滚阅读时不再强制拉回）。初始 true：新会话从底部开始 */
   const stickRef = useRef(true)
@@ -241,7 +240,6 @@ export function MessageList({
           </button>
         </div>
       ))}
-      <div ref={bottomRef} />
     </div>
   )
 }

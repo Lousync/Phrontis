@@ -1101,6 +1101,25 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullWindowTab, wbLayout, update])
 
+  // Ctrl+J — 上下文路由（2026-09-21 用户拍板）：工作台内唤出**右栏 AI 侧栏**（再按收起）；
+  // 整窗模块不拦，由悬浮 AssistantPanel 自己的监听处理（唤出悬浮 AI 助手）。
+  // 工作台分支先派 ai-assistant:close 收掉可能开着的浮层 —— 右栏与浮层同为 ChatBody，
+  // 叠着会出现两块对话（且浮层盖在右栏正上方，视觉上像同一个东西）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j')) return
+      if (fullWindowTab) return // 整窗模块：悬浮助手自己的监听处理
+      e.preventDefault()
+      window.dispatchEvent(new Event('ai-assistant:close'))
+      // 开 = 右栏可见且停在 AI Tab → 再按 = 收起；否则唤出（展开右栏并切到 AI Tab）
+      const open = !wbLayout.rightCollapsed && wbLayout.rightTab === 'ai'
+      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'ai', rightCollapsed: open }))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullWindowTab, wbLayout, update])
+
   if (!loaded) return null
 
   /** 页面条整行隐藏（v3.4.0 页面条置顶）：知识库沉浸阅读 / 图谱模式本来就是全幅形态，行让位 */
@@ -1427,8 +1446,9 @@ export default function App() {
             />
           </main>
       {/* 全局 AI 助手侧栏。shellLeft = 全屏扩张时要避让的活动栏占位宽度
-          （活动栏不渲染时 → 0：禅模式 Z2 隐壳，或用户显式隐藏了活动栏；最大化 flush → 56；否则 56 + mx-1.5 两侧留白） */}
-      <AssistantPanel shellLeft={zenLevel >= 2 || !activityBarVisible ? 0 : winMax ? 56 : 68} />
+          （活动栏不渲染时 → 0：禅模式 Z2 隐壳，或用户显式隐藏了活动栏；最大化 flush → 56；否则 56 + mx-1.5 两侧留白）。
+          suspendShortcut：工作台内 Ctrl+J 归 App 路由（唤出右栏 AI 侧栏），整窗模块才归本组件 */}
+      <AssistantPanel shellLeft={zenLevel >= 2 || !activityBarVisible ? 0 : winMax ? 56 : 68} suspendShortcut={!fullWindowTab} />
         </div>
       {workbench && <WorkbenchStatusBar />}
         </div>

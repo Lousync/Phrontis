@@ -35,8 +35,11 @@ const EASE_EXPAND = 'cubic-bezier(.22,.68,.32,1)'
 /**
  * @param shellLeft 全屏扩张时左侧需避让的宽度（活动栏占位，由 App 透传）。
  *   禅模式 Z2+ 活动栏不渲染 → 0；最大化 → 56；否则 56 + mx-1.5 两侧留白 = 68。
+ * @param suspendShortcut 宿主接管了 Ctrl+J 时挂起本组件的 Ctrl+J 分支（2026-09-21 用户拍板：
+ *   工作台内 Ctrl+J 唤出工作台右栏 AI 侧栏，整窗模块才唤出本悬浮助手 —— 路由由 App 做）。
+ *   Ctrl+Shift+J（全屏学堂）不挂起，仍归本组件。
  */
-export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
+export function AssistantPanel({ shellLeft = 68, suspendShortcut = false }: { shellLeft?: number; suspendShortcut?: boolean }) {
   const { s, update } = useSettings()
   /** 上手路径进度（settings 落盘）；全屏学堂与提问上下文共用 */
   const learn = useLearnProgress()
@@ -155,6 +158,8 @@ export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
         return
       }
       if (e.ctrlKey && !e.shiftKey && !e.altKey && k === 'j') {
+        // 宿主接管（工作台内 App 路由到右栏 AI 侧栏）：本组件不响应、不 preventDefault
+        if (suspendShortcut) return
         e.preventDefault()
         if (full) collapseToSidebar()
         else if (open) closeAll()
@@ -170,7 +175,7 @@ export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, full, chat.drawerOpen, chat.closeDrawer, openPanel, closeAll, expandToFull, collapseToSidebar])
+  }, [open, full, suspendShortcut, chat.drawerOpen, chat.closeDrawer, openPanel, closeAll, expandToFull, collapseToSidebar])
 
   // 主体卡片内 AI 按钮 → ai-assistant:toggle 事件（与 Ctrl+J 同一套开关逻辑）
   useEffect(() => {
@@ -178,6 +183,13 @@ export function AssistantPanel({ shellLeft = 68 }: { shellLeft?: number }) {
     window.addEventListener('ai-assistant:toggle', onToggle)
     return () => window.removeEventListener('ai-assistant:toggle', onToggle)
   }, [open, openPanel, closeAll])
+
+  // ai-assistant:close → 只收不叠（工作台 Ctrl+J 路由用：唤出右栏 AI 前先把浮层收掉，避免双对话叠加）
+  useEffect(() => {
+    const onClose = () => closeAll()
+    window.addEventListener('ai-assistant:close', onClose)
+    return () => window.removeEventListener('ai-assistant:close', onClose)
+  }, [closeAll])
 
   // 选中文本即问：mouseup 捕获主内容区（面板外）的非折叠选区 → 浮动按钮
   useEffect(() => {
