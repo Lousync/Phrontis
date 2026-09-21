@@ -12,10 +12,10 @@ import type { BookKind, ExcerptItem, ExcerptColor, ExcerptType, ExcerptExportEnt
  * 结构（对齐原型 renderReading / excCard）：
  *   书卡头（纯色块封面 + 书名 + 格式角标 + 位置信息 + 迷你进度条）
  *   → 双 Tab：摘录 / 时间线
- *   → 摘录 Tab：说明条 + 书签（仅 pdf）+ 卡片化条目
+ *   → 摘录 Tab：说明条 + 书签（pdf / txt；EPUB 一行中性说明）+ 卡片化条目
  *   → 时间线 Tab：按日期分组（组头「日期 + N 条」+ 同日卡片）
  *
- * 卡片化条目：色点 + 类型胶囊（摘录/想法/高亮）+ 来源（页码/段落 · 日期）+ 引文（左侧色边框、3 行截断）
+ * 卡片化条目：色点 + 类型胶囊（摘录/想法/高亮）+ 来源（页码/段落/章节 · 日期）+ 引文（左侧色边框、3 行截断）
  *   + 备注块 + 操作行（定位原文 / 复制 / 编辑备注 / 删除）。
  *
  * ⚠️ 封面用纯色块（色相由 relPath 派生），**不引入 BookCover**（它带 pdfjs，右栏常驻会拖进主 chunk）。
@@ -47,24 +47,28 @@ function fmtDayGroup(iso: string): string {
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }
 
-/** 来源标签：pdf 第 N 页 / txt 段 N */
+/** 来源标签（三分支，判据与 excerptExportSchema 的组标题同口径）：
+ *  pdf → 第 N 页 / txt → 段 N / epub → 章节名（无章节名回落「正文」）。
+ *  epub 的定位键是 CFI（不可读），所以来源显示**章节名**而不是位置号。 */
 function sourceLabel(e: ExcerptItem): string {
-  return e.kind === 'pdf' ? `第 ${e.page ?? '?'} 页` : `段 ${(e.paraIndex ?? 0) + 1}`
+  if (e.kind === 'pdf') return `第 ${e.page ?? '?'} 页`
+  if (e.kind === 'txt') return `段 ${(e.paraIndex ?? 0) + 1}`
+  return e.chapter?.trim() || '正文'
 }
 
 interface Props {
   reading: { relPath: string; name: string; kind: BookKind }
   onLocatePdfPage?: (page: number) => void
-  /** 摘录定位回原文（App 统一：切回书架标签 + 派发对应跳转事件） */
-  onLocateExcerpt?: (loc: { kind: BookKind; page?: number; paraIndex?: number }) => void
+  /** 摘录定位回原文（App 统一：切回书架标签 + 派发对应跳转事件）；epub 走 cfi */
+  onLocateExcerpt?: (loc: { kind: BookKind; page?: number; paraIndex?: number; cfi?: string }) => void
 }
 
 export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: Props) {
   const [rootId, setRootId] = useState('')
   const [pdfState, setPdfState] = useState<PdfBookState | null>(null)
-  const [txtPct, setTxtPct] = useState(0)
+  const [plainPct, setPlainPct] = useState(0)
   const [bookmarks, setBookmarks] = useState<PdfBookState['bookmarks']>([])
-  const [txtBookmarks, setTxtBookmarks] = useState<TxtBookmark[]>([])
+  const [plainBookmarks, setPlainBookmarks] = useState<TxtBookmark[]>([])
   const [excerpts, setExcerpts] = useState<ExcerptItem[]>([])
   const [noteEdit, setNoteEdit] = useState<{ id: string; draft: string } | null>(null)
   const [tab, setTab] = useState<'excerpt' | 'timeline'>('excerpt')
@@ -81,7 +85,7 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
     return () => { alive = false }
   }, [])
 
-  // 初值：按 kind 拉一次状态（书切换 / 首挂时重跑）
+  // 初值：按 kind 拉一次状态（书切换 / 首挂时重跑）。非 PDF（txt / epub）共用 readerState.json 一份状态
   useEffect(() => {
     let alive = true
     if (!rootId) return
@@ -95,21 +99,21 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
     } else {
       void readerStateGet(rootId, reading.relPath).then((r) => {
         if (!alive) return
-        setTxtPct(r.ok ? r.state?.pct ?? 0 : 0)
-        setTxtBookmarks(r.ok && Array.isArray(r.state?.bookmarks) ? (r.state!.bookmarks as TxtBookmark[]) : [])
+        setPlainPct(r.ok ? r.state?.pct ?? 0 : 0)
+        setPlainBookmarks(r.ok && Array.isArray(r.state?.bookmarks) ? (r.state!.bookmarks as TxtBookmark[]) : [])
       }).catch(() => { /* 同上 */ })
     }
     return () => { alive = false }
   }, [rootId, reading.kind, reading.relPath])
 
   // 书签集刷新（TXT）：readerState 变化时拉 TXT 书签（按 kind 取源，不重犯「左栏盲挂」同类缺陷）
-  const refreshTxtBookmarks = () => {
+  const refreshPlainBookmarks = () => {
     if (reading.kind !== 'txt' || !rootId) return
     void readerStateGet(rootId, reading.relPath).then((r) => {
-      setTxtBookmarks(r.ok && Array.isArray(r.state?.bookmarks) ? (r.state!.bookmarks as TxtBookmark[]) : [])
+      setPlainBookmarks(r.ok && Array.isArray(r.state?.bookmarks) ? (r.state!.bookmarks as TxtBookmark[]) : [])
     }).catch(() => { /* 忽略 */ })
   }
-  useDataChanged('readerState', refreshTxtBookmarks)
+  useDataChanged('readerState', refreshPlainBookmarks)
 
   // 实时跟随：阅读器在书的阅读过程中派发页码/进度广播
   useEffect(() => {
@@ -119,7 +123,8 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
     }
     const onPct = (e: Event) => {
       const d = (e as CustomEvent).detail as { relPath?: string; kind?: string; pct?: number }
-      if (d?.relPath === reading.relPath && d.kind === 'txt' && typeof d.pct === 'number') setTxtPct(d.pct)
+      // 判据 `!== 'pdf'`：pct 口径覆盖 txt 与 epub（写成 `=== 'txt'` 则 epub 的进度广播被丢）
+      if (d?.relPath === reading.relPath && d.kind !== 'pdf' && typeof d.pct === 'number') setPlainPct(d.pct)
     }
     window.addEventListener(KB_PDF_PAGE_CHANGED, onPage)
     window.addEventListener(KB_READER_STATE_CHANGED, onPct)
@@ -201,12 +206,13 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
   }
 
   const isPdf = reading.kind === 'pdf'
+  // 进度口径二分支：pdf 按页码，**其余格式（txt / epub）一律按 pct** —— 新格式天然走 else
   const progressPct = isPdf
     ? (pdfState && pdfState.totalPages > 0 ? Math.round(((pdfState.lastPage || 0) / pdfState.totalPages) * 100) : 0)
-    : txtPct
+    : plainPct
   const progressLabel = isPdf
     ? (pdfState && pdfState.totalPages > 0 ? `第 ${pdfState.lastPage} / ${pdfState.totalPages} 页` : '未开始')
-    : `${txtPct}%`
+    : `${plainPct}%`
 
   const onDelete = (e: ExcerptItem) => {
     if (!rootId) return
@@ -236,7 +242,8 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-[var(--text-primary)]">{reading.name}</span>
-              <span className="shrink-0 rounded bg-[var(--bg-hover)] px-1 py-0.5 text-[9.5px] text-[var(--text-tertiary)]">{isPdf ? 'PDF' : 'TXT'}</span>
+              {/* 角标直接取 kind（新增格式不必再改这里） */}
+              <span className="shrink-0 rounded bg-[var(--bg-hover)] px-1 py-0.5 text-[9.5px] text-[var(--text-tertiary)]">{reading.kind.toUpperCase()}</span>
             </div>
             <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">{progressLabel}</div>
             <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-[var(--bg-hover)]">
@@ -278,20 +285,28 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
               <span>摘录落在 Vault 笔记里。点「定位」跳回原文，正文点高亮也能跳回这里。点色即按该色高亮。</span>
             </div>
 
-            {/* 书签（按 kind 取源：PDF 在 pdfReader.json、TXT 在 readerState.json） */}
+            {/* 书签（按 kind 取源：PDF 在 pdfReader.json、TXT 在 readerState.json）。
+                EPUB 不进这一区：B 段没有 epub 书签（结构待定 —— 书签键是 CFI，塞进 TxtBookmark 的
+                paraIndex 形状会串味），故单独给一行中性说明，等真做时再换掉。 */}
+            {reading.kind === 'epub' && (
+              <div className="mb-2 flex items-start gap-1 px-1.5 py-1 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+                <BookMarked size={11} className="mt-0.5 shrink-0" />
+                <span>EPUB 阅读暂不支持书签</span>
+              </div>
+            )}
             {(isPdf || reading.kind === 'txt') && (
               <div className="mb-2">
                 <div className="flex items-center gap-1 px-1.5 py-1 text-[11px] text-[var(--text-muted)]">
                   <BookMarked size={11} />
                   书签
-                  {(isPdf ? bookmarks.length : txtBookmarks.length) > 0 && <span className="text-[var(--text-tertiary)]">{isPdf ? bookmarks.length : txtBookmarks.length}</span>}
+                  {(isPdf ? bookmarks.length : plainBookmarks.length) > 0 && <span className="text-[var(--text-tertiary)]">{isPdf ? bookmarks.length : plainBookmarks.length}</span>}
                 </div>
-                {(isPdf ? bookmarks.length : txtBookmarks.length) === 0 ? (
+                {(isPdf ? bookmarks.length : plainBookmarks.length) === 0 ? (
                   <div className="px-2 py-1.5 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
                     {isPdf ? '在阅读器工具栏加书签后，这里可以快速跳页' : '在 TXT 阅读器工具栏加书签后，这里可以快速跳段'}
                   </div>
                 ) : (
-                  (isPdf ? bookmarks : txtBookmarks).map((b, i) =>
+                  (isPdf ? bookmarks : plainBookmarks).map((b, i) =>
                     isPdf ? (
                       (() => {
                         const bm = b as PdfBookState['bookmarks'][number]
@@ -362,7 +377,7 @@ function ExcCard({
   noteEdit: { id: string; draft: string } | null
   setNoteEdit: (v: { id: string; draft: string } | null) => void
   saveNote: (e: ExcerptItem) => void
-  onLocate?: (loc: { kind: BookKind; page?: number; paraIndex?: number }) => void
+  onLocate?: (loc: { kind: BookKind; page?: number; paraIndex?: number; cfi?: string }) => void
   onCopy: (e: ExcerptItem) => void
   onDelete: (e: ExcerptItem) => void
 }) {
@@ -378,7 +393,7 @@ function ExcCard({
       </div>
 
       {/* 引文：左侧色边框、3 行截断；点击定位原文 */}
-      <button onClick={() => onLocate?.({ kind: e.kind, page: e.page, paraIndex: e.paraIndex })}
+      <button onClick={() => onLocate?.({ kind: e.kind, page: e.page, paraIndex: e.paraIndex, cfi: e.cfi })}
         className="mt-1 block w-full text-left">
         <span className={`kb-exc-bd kb-exc-${color} block rounded-r border-l-[3px] px-1.5 py-1 text-[11.5px] leading-relaxed text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]`}
           style={{ display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
@@ -407,7 +422,7 @@ function ExcCard({
         </div>
       ) : (
         <div className={`mt-1 flex items-center gap-0.5 ${e.note ? '' : 'opacity-0 group-hover:opacity-100'}`}>
-          <button onClick={() => onLocate?.({ kind: e.kind, page: e.page, paraIndex: e.paraIndex })} title="定位原文" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Crosshair size={10.5} /></button>
+          <button onClick={() => onLocate?.({ kind: e.kind, page: e.page, paraIndex: e.paraIndex, cfi: e.cfi })} title="定位原文" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Crosshair size={10.5} /></button>
           <button onClick={() => onCopy(e)} title="复制" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Copy size={10.5} /></button>
           <button onClick={() => setNoteEdit({ id: e.id, draft: e.note })} title="编辑备注" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Pencil size={10.5} /></button>
           <button onClick={() => onDelete(e)} title="删除摘录" className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-warning)]"><Trash2 size={10.5} /></button>

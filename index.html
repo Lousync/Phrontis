@@ -3,7 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob: plugin:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: file: attachment: plugin: https://raw.githubusercontent.com https://cdn.jsdelivr.net https://fastly.jsdelivr.net; frame-src 'self' plugin: kbview:;" />
+    <!-- 书架阅读器 B 段（epub 等格式）对 CSP 的两处例外，机制与约束见 AGENTS.md 铁律 10 与
+         src/vendor/foliate/README.md：
+         · frame-src 放 blob: —— 书页内容帧必须同源（引擎分页需读 iframe.contentDocument），
+           而同源 + 可控内容只能是 blob:；配套约束 = sandbox 永不含 allow-scripts。
+         · style-src 放 data: —— 书内 CSS 经 patch 后走 data:（该指令本已含 'unsafe-inline'，
+           属边际放宽；CSS 不能执行脚本）。
+         ⛔ script-src 永不加 'unsafe-inline' —— 那是挡恶意 EPUB 的关键防线（有负向契约断言）。 -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob: plugin:; style-src 'self' 'unsafe-inline' data:; font-src 'self' data:; img-src 'self' data: file: attachment: plugin: https://raw.githubusercontent.com https://cdn.jsdelivr.net https://fastly.jsdelivr.net; frame-src 'self' plugin: kbview: blob:;" />
     <title>Phrontis</title>
   </head>
   <body class="bg-[var(--bg-primary)] text-[var(--text-primary)]">

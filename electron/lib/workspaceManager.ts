@@ -216,9 +216,12 @@ export function readWorkspaceFile(absPath: string): ReadFileResult {
 
 // ===== 二进制范围读取（PDF 阅读器懒加载通道，plugin-pdf-reader-design §4）=====
 
-/** 范围读取白名单扩展名：范围通道 = 二进制放行口，只允许可视化文档类型（防变成任意二进制窃取口） */
-// txt = 全格式阅读器一期（2026-09-20）：TxtReaderView 经 range 分块读 .books 样书（20MB 上限由渲染层限）
-const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'txt']
+/** 范围读取白名单扩展名：范围通道 = 二进制放行口，只允许可视化文档类型（防变成任意二进制窃取口）。
+ *  ★ 扩容属**安全面变更**（提交信息须写明理由）：
+ *  - txt = 一期（2026-09-20）：TxtReaderView 经 range 分块读 .books 样书（20MB 上限由渲染层限）
+ *  - epub = B 段（2026-09-21）：EpubReaderView 整份取字节后交 foliate 解包（zip 需从头读中央目录）；
+ *    只读不写、仍受 pathGuard 与「仅当前仓库内」约束。 */
+const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'txt', 'epub']
 
 export interface ReadRangeResult {
   /** base64 编码的 [offset, offset+len) 段数据（不足段取到文件尾） */

@@ -1194,21 +1194,21 @@ export interface PdfBookState {
 }
 /** pdfReader:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
 export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks' | 'scan' | 'scanPages'>>
-/** 书架清单条目（自动库：扫描 join 进度，不落盘）。一期 kind = pdf | txt */
+/** 书架清单条目（自动库：扫描 join 进度，不落盘）。一期 kind = pdf | txt，B 段起加 epub */
 export interface BookListItem {
   relPath: string
   name: string
   size: number
-  /** PDF 文件 mtimeMs（封面缓存失效判据） */
+  /** 文件 mtimeMs（PDF 封面缓存失效判据） */
   mtime: number
-  /** 书籍种类（pdf / txt）——唯一真相源 = electron/lib/kbStore/bookFormats.ts 的 BOOK_EXTS，
-   *  渲染层侧此字面量与主进程侧由契约脚本 verify-reader-formats.mjs 双向断言同步（tsconfig.web
+  /** 书籍种类（pdf / txt / epub）——唯一真相源 = electron/lib/kbStore/bookFormats.ts 的 BOOK_EXTS，
+   *  渲染层侧此字面量由契约脚本 verify-epub-formats.mjs 双向断言同步（tsconfig.web
    *  只含 src/**，不能直接复导出主进程文件） */
   kind: BookKind
   lastPage: number
-  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母（txt 恒 0，用 pct） */
+  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母（txt / epub 恒 0，用 pct） */
   totalPages: number
-  /** txt 阅读进度 0..100（仅 kind==='txt' 有值） */
+  /** 字节/比例阅读进度 0..100（kind 为 txt / epub 时有值） */
   pct?: number
   hasProgress: boolean
   updatedAt: string | null
@@ -1216,8 +1216,10 @@ export interface BookListItem {
   scan?: BookScanMode
 }
 
-/** 书籍种类（渲染层侧镜像；与 electron/lib/kbStore/bookFormats.ts 保持同步，契约脚本双向断言） */
-export type BookKind = 'pdf' | 'txt'
+/** 书籍种类（渲染层侧镜像；与 electron/lib/kbStore/bookFormats.ts 保持同步，
+ *  由 `.AGENT/scripts/pdf-reader/verify-epub-formats.mjs` 双向断言 BOOK_EXTS ↔ 本联合）
+ *  B 段加 'epub'（foliate 引擎）。 */
+export type BookKind = 'pdf' | 'txt' | 'epub'
 
 /** 摘录色板 id（渲染层侧镜像；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
 export const EXCERPT_COLOR_IDS = ['y', 'g', 'b', 'p', 'v'] as const
@@ -1243,20 +1245,25 @@ export interface TxtBookmark {
 /** 纸色（书级记忆；档位与 PDF eyeCare 对齐） */
 export type ReaderPaper = 'default' | 'sepia' | 'green' | 'dark'
 
-/** readerState:patch 白名单载荷（updatedAt 由服务端生成，不接受传入；pct 可选，书签/字号/纸色可独立写） */
+/** readerState:patch 白名单载荷（updatedAt 由服务端生成，不接受传入；pct 可选，书签/字号/纸色可独立写）。
+ *  ★ `kind` 刻意不在白名单 —— 它是 relPath 的纯函数，由主进程按路径推导后覆盖写入。 */
 export type ReaderStatePatch = {
   pct?: number
   bookmarks?: TxtBookmark[]
   fontScale?: number
   paper?: ReaderPaper
+  /** 精确回跳载体（epub = foliate CFI；B 段引入，与 pct 双轨） */
+  locator?: string
 }
-/** 单本（txt）书阅读状态（readerState.json 经 IPC 透出） */
+/** 单本书阅读状态（readerState.json 经 IPC 透出；一期 txt，B 段起 epub 共用） */
 export interface ReaderBookState {
   kind: BookKind
-  /** 阅读进度 0..100 整数（A1 起 = 已加载字节 / 文件总字节） */
+  /** 阅读进度 0..100 整数（A1 起 = 已加载字节 / 文件总字节；epub = foliate fraction） */
   pct: number
   /** 冲突检测基准；patch 时服务端重新生成，客户端只读 */
   updatedAt: string
+  /** 精确回跳载体（epub = foliate CFI；与 pct 双轨） */
+  locator?: string
   bookmarks?: TxtBookmark[]
   fontScale?: number
   paper?: ReaderPaper
@@ -1283,6 +1290,10 @@ export interface ExcerptItem {
   /** txt 高亮：段内字符偏移 [start, end) */
   start?: number
   end?: number
+  /** epub 定位：foliate CFI 范围串（跳回原文与正文高亮共用） */
+  cfi?: string
+  /** epub 章节标签（导出分组与右栏来源行显示用） */
+  chapter?: string
   text: string
   note: string
   /** 高亮颜色（色板 id；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
@@ -1309,6 +1320,10 @@ export interface ExcerptCreatePayload {
   paraIndex?: number
   start?: number
   end?: number
+  /** epub 必带（foliate CFI 范围串） */
+  cfi?: string
+  /** epub 可选（章节标签） */
+  chapter?: string
 }
 
 export type ExcerptPatch = { note?: string; color?: ExcerptColor; type?: ExcerptType }

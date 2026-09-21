@@ -6,14 +6,16 @@ import {
 import { useDataChanged } from '../../lib/dataChanged'
 import type { BookKind, BookListItem } from '../../types'
 import { BookCover } from './BookCover'
-import { bookDisplayName } from '../../../electron/lib/kbStore/bookFormats'
+import { bookDisplayName, bookEngineOf } from '../../../electron/lib/kbStore/bookFormats'
 
 // 2026-09-17 拍板「书架内自渲染」：点书在书架标签页内部打开阅读器（书架 ⇄ 阅读器），
 // 不再借编辑器文档标签（编辑器 PDF 能力保留给知识库附件等既有入口）。
 // PdfReaderView 内含 pdfjs —— lazy 拆 chunk（与 editor 同一模块Specifier，Vite 去重共享 chunk）。
 // TxtReaderView 同口径 lazy（纯渲染层，chunk 极小，但对齐拆分惯例）。
+// EpubReaderView（B 段）lazy 是**硬要求**：foliate 引擎 + zip 解包都不许进首屏静态闭包（铁律 20）。
 const PdfReaderView = lazy(() => import('../../components/shared/pdf/PdfReaderView').then((m) => ({ default: m.PdfReaderView })))
 const TxtReaderView = lazy(() => import('../../components/shared/txt/TxtReaderView').then((m) => ({ default: m.TxtReaderView })))
+const EpubReaderView = lazy(() => import('../../components/shared/epub/EpubReaderView').then((m) => ({ default: m.EpubReaderView })))
 
 /**
  * 书架（v3.4.0 PDF 阅读体验整包批次 2，方案 §2/§8）：
@@ -96,6 +98,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
 
   // 阅读视图（书架 ⇄ 阅读器，模块内切换；Hook 全部在早退之前）
   if (reading) {
+    const engine = bookEngineOf(reading.relPath) ?? 'pdf'
     return (
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
         {/* 2026-09-18：原「返回书架 + 书名」独立行已并入阅读器工具栏。
@@ -110,8 +113,15 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                 <span className="text-[12px]">正在准备阅读器…</span>
               </div>
             }>
-              {reading.kind === 'txt' ? (
+              {/* 按**引擎**分发而非 kind 二值：引擎表在 bookFormats（唯一真相源），
+                  阶段 2 的 fb2/fbz/cbz 落 'foliate' 后这里一行都不用改。
+                  engine 由 relPath 推导而非读 state.kind —— 历史脏 state（旧版把 .epub 固定成 'txt'）
+                  也能被纠正回正确引擎（与 readerStateVaultRepo 的 kindOfPath 同一原则）。 */}
+              {engine === 'txt' ? (
                 <TxtReaderView rootId={rootId} relPath={reading.relPath} name={reading.name}
+                  backLabel="返回书架" onBack={() => onCloseBook?.()} />
+              ) : engine === 'foliate' ? (
+                <EpubReaderView rootId={rootId} relPath={reading.relPath} name={reading.name}
                   backLabel="返回书架" onBack={() => onCloseBook?.()} />
               ) : (
                 <PdfReaderView rootId={rootId} relPath={reading.relPath} name={reading.name}
@@ -167,7 +177,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                   key={`c-${b.relPath}`}
                   onClick={() => openBook(b)}
                   className="kb-item-in group flex w-[210px] shrink-0 items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 text-left hover:border-[var(--accent)]"
-                  title={b.kind === 'txt' ? `已读 ${b.pct ?? 0}% · 打开继续阅读` : `第 ${b.lastPage} 页 · 打开继续阅读`}
+                  title={b.kind !== 'pdf' ? `已读 ${b.pct ?? 0}% · 打开继续阅读` : `第 ${b.lastPage} 页 · 打开继续阅读`}
                 >
                   <div className="w-[44px] shrink-0" style={{ aspectRatio: '3 / 4' }}>
                     <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={bookDisplayName(b.relPath)} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
@@ -175,7 +185,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{bookDisplayName(b.relPath)}</div>
                     <div className="mt-1 flex items-center gap-1 text-[11px] text-[var(--accent)]">
-                      <Play size={10} />{b.kind === 'txt' ? `已读 ${b.pct ?? 0}%` : `第 ${b.lastPage} 页`}
+                      <Play size={10} />{b.kind !== 'pdf' ? `已读 ${b.pct ?? 0}%` : `第 ${b.lastPage} 页`}
                     </div>
                   </div>
                 </button>
@@ -199,7 +209,8 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                   {b.kind === 'pdf' && b.hasProgress && (
                     <span className="absolute bottom-1.5 right-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">P{b.lastPage}</span>
                   )}
-                  {b.kind === 'txt' && (b.pct ?? 0) > 0 && (
+                  {/* 判据 `!== 'pdf'`（pct 口径覆盖 txt / epub）：写成 `=== 'txt'` 新格式就丢了角标 */}
+                  {b.kind !== 'pdf' && (b.pct ?? 0) > 0 && (
                     <span className="absolute bottom-1.5 right-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">{b.pct}%</span>
                   )}
                   {b.kind === 'pdf' && b.scan === 'no' && (

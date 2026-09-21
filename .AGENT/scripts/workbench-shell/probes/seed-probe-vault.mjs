@@ -51,6 +51,10 @@ if (process.argv.includes('--add-books')) {
   // 实测两个假失败：① readerState.pct 残留 50 → step5「滚到 50%」从 50% 起滚，实际滚到 100%；
   // ② excerpts 残留 → 段落里已有 <mark>，程序化选区 range.setStart(文本节点, 4) 抛 IndexSizeError。
   // seed 在 electron 启动前执行（app 尚未把 jsonStore 载入内存），此处清空即真清空。
+  //   ★ 这四个文件是**全格式共用**的：readerState.json 按 relPath 存每本书的进度/locator/字体/书签
+  //     （epub 的 locator 是 CFI，同字段不同语义），excerpts.json / excerptExports.json 亦然。
+  //     故「加了新格式」**不需要**新加文件；反过来，将来某格式真另立状态文件时**必须**补进本数组，
+  //     否则残留态会让下一轮断言悄悄失真（正是 2026-09-21 踩到的那两个假失败）。
   const modulesDir = join(fixture, '.knowbase', 'modules')
   for (const f of ['readerState.json', 'excerpts.json', 'pdfReader.json', 'excerptExports.json']) {
     try { unlinkSync(join(modulesDir, f)); console.log('reset reader module data:', f) } catch { /* 不存在即无需清 */ }
@@ -103,6 +107,22 @@ if (process.argv.includes('--add-books')) {
       console.log('seeded pdf:', pdfPath)
     } catch (e) {
       console.log('pdf seed skipped:', String(e).slice(0, 120))
+    }
+  }
+  // 电子书引擎探针（B 段）的 fixture —— 两本 EPUB：
+  //   ① 探针样书.epub     正向：渲染 / 目录 / 分页 / 划选摘录 / 进度落盘
+  //   ② 恶意样书.epub     负向：内联 <script> / onerror 属性 / 外部 <script src> 三载荷
+  //                        「DOM 里在、执行没发生」（宿主 window 不被污染）
+  // 生成器见 ./make-epub.mjs（零依赖手写 STORED zip，产物字节可复现）。
+  for (const [name, build] of [['探针样书.epub', 'probeEpub'], ['恶意样书.epub', 'maliciousEpub']]) {
+    const p = join(booksDir, name)
+    if (existsSync(p)) continue
+    try {
+      const make = await import('./make-epub.mjs')
+      writeFileSync(p, make[build]())
+      console.log('seeded epub:', p)
+    } catch (e) {
+      console.log('epub seed skipped:', String(e).slice(0, 160))
     }
   }
 }

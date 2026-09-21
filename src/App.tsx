@@ -54,11 +54,14 @@ import { ReleaseNotesModule } from './modules/release-notes'
 const PdfRailPanel = lazy(() => import('./components/shared/pdf/PdfRailPanel').then((m) => ({ default: m.PdfRailPanel })))
 // 左栏书架书目条目视图（2026-09-19）：未在读任何书时左栏放书列表（封面 + 书名 + 进度条）
 const BookshelfSideList = lazy(() => import('./modules/bookshelf/BookshelfSideList').then((m) => ({ default: m.BookshelfSideList })))
+// 左栏 EPUB 目录态（B 段）：只做目录（foliate 的 book.toc），缩略图/书签是空状态。
+// 同样 lazy —— 它 import 的是 foliate 的 TOC 数据结构消费方，别把引擎拖进主包。
+const EpubRailPanel = lazy(() => import('./components/shared/epub/EpubRailPanel').then((m) => ({ default: m.EpubRailPanel })))
 
 import { FillPopup } from './modules/toolbox/components/FillPopup'
 import { VaultPicker } from './components/shared/VaultPicker'
-import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA, KB_OPEN_EXCERPT_LOC } from './components/shared/pdf/pdfEvents'
-import { bookDisplayName } from '../electron/lib/kbStore/bookFormats'
+import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA, KB_EPUB_GOTO_CFI, KB_OPEN_EXCERPT_LOC } from './components/shared/pdf/pdfEvents'
+import { bookDisplayName, bookEngineOf, bookKindOf } from '../electron/lib/kbStore/bookFormats'
 import { PomodoroProvider } from './modules/toolbox/hooks/PomodoroContext'
 import { PomodoroPanel } from './modules/toolbox/components/PomodoroPanel'
 import { Onboarding } from './components/shared/Onboarding'
@@ -617,13 +620,18 @@ export default function App() {
           return
         }
         setActiveToolTab(null)
-        setBookshelfReading({ relPath, name: bookDisplayName(relPath), kind: ex.kind })
+        // kind 以**磁盘上的书**为准（bookKindOf(relPath)），不用摘录里存的 ex.kind ——
+        // 摘录是历史数据，B 段之前的 epub 摘录不可能存在，而旧版 txt 摘录的 kind 字段也不可全信。
+        const kind = bookKindOf(relPath) ?? ex.kind
+        setBookshelfReading({ relPath, name: bookDisplayName(relPath), kind })
         setActiveTab('bookshelf')
         requestAnimationFrame(() => {
-          if (ex.kind === 'pdf' && ex.page) {
+          if (kind === 'pdf' && ex.page) {
             window.dispatchEvent(new CustomEvent(KB_PDF_GOTO_PAGE, { detail: { relPath, page: ex.page } }))
-          } else if (ex.kind === 'txt' && typeof ex.paraIndex === 'number') {
+          } else if (kind === 'txt' && typeof ex.paraIndex === 'number') {
             window.dispatchEvent(new CustomEvent(KB_TXT_GOTO_PARA, { detail: { relPath, paraIndex: ex.paraIndex } }))
+          } else if (kind === 'epub' && ex.cfi) {
+            window.dispatchEvent(new CustomEvent(KB_EPUB_GOTO_CFI, { detail: { relPath, cfi: ex.cfi } }))
           }
         })
       })()
@@ -1250,11 +1258,16 @@ export default function App() {
                 2026-09-19 反馈：未在读任何书（railReaderDoc 为空）→ 左栏放书目条目视图
                 （封面 + 书名 + 进度条，点击即开读），不再空置。
                 2026-09-21 修复：三件套**按 kind 分发** —— PdfRailPanel 依赖 pdfjs、且只认 PDF
-                （对 .txt 解析必失败并静默降级成空壳三件套）；TXT 在读时回落书目列表 + 当前书高亮。 */}
+                （对 .txt 解析必失败并静默降级成空壳三件套）；TXT 在读时回落书目列表 + 当前书高亮。
+                B 段（2026-09-21）：分发判据升级为**引擎**（bookEngineOf(relPath)，表在 bookFormats）——
+                pdf → PdfRailPanel / epub → EpubRailPanel（目录）/ 其余 → 书目列表 + 当前书高亮。
+                用引擎而非 kind 二值：阶段 2 的 fb2/fbz/cbz 落 foliate 后这里零改动。 */}
             {railModule === 'bookshelf' && wbModSlotEl ? createPortal(
               <Suspense fallback={<div className="flex h-full items-center justify-center text-[11.5px] text-[var(--text-muted)]">加载中…</div>}>
-                {railReaderDoc?.kind === 'pdf' ? (
+                {railReaderDoc && bookEngineOf(railReaderDoc.relPath) === 'pdf' ? (
                   <PdfRailPanel readerDoc={railReaderDoc} />
+                ) : railReaderDoc && bookEngineOf(railReaderDoc.relPath) === 'foliate' ? (
+                  <EpubRailPanel readerDoc={railReaderDoc} />
                 ) : (
                   <BookshelfSideList
                     activeRelPath={railReaderDoc?.relPath ?? null}
@@ -1318,6 +1331,9 @@ export default function App() {
                         window.dispatchEvent(new CustomEvent(KB_PDF_GOTO_PAGE, { detail: { relPath: bookshelfReading.relPath, page: loc.page } }))
                       } else if (loc.kind === 'txt' && typeof loc.paraIndex === 'number') {
                         window.dispatchEvent(new CustomEvent(KB_TXT_GOTO_PARA, { detail: { relPath: bookshelfReading.relPath, paraIndex: loc.paraIndex } }))
+                      } else if (loc.kind === 'epub' && loc.cfi) {
+                        // EPUB 的定位键是 CFI（不是页码/段号）：右栏摘录条目点击 → 阅读器 resolveCFI 后跳转
+                        window.dispatchEvent(new CustomEvent(KB_EPUB_GOTO_CFI, { detail: { relPath: bookshelfReading.relPath, cfi: loc.cfi } }))
                       }
                     })
                   }}

@@ -42,7 +42,20 @@ check('bookDisplayName：去 pdf 后缀', F.bookDisplayName('x/算法.pdf') === 
 check('bookDisplayName：非书文件原样返回', F.bookDisplayName('x/note.md') === 'note.md')
 check('BOOK_EXTS 每项都能被 bookKindOf 识别（常量↔函数一致）',
   F.BOOK_EXTS.every((ext) => F.bookKindOf(`x${ext}`) !== null))
-check('BOOK_EXTS 一期 = pdf + txt 两项', F.BOOK_EXTS.length === 2 && F.BOOK_EXTS.includes('.pdf') && F.BOOK_EXTS.includes('.txt'))
+check('BOOK_EXTS = pdf + txt + epub 三项',
+  F.BOOK_EXTS.length === 3
+  && F.BOOK_EXTS.includes('.pdf') && F.BOOK_EXTS.includes('.txt') && F.BOOK_EXTS.includes('.epub'))
+// ★ 这条断言在 B 段（2026-09-21）由「= 两项」**有意放宽**成三项 —— 加格式本就该改这里，
+//   勿当 drift 回滚。加第四种格式时改成本行 + bookFormats 两张表 + src/types 的 BookKind 镜像，
+//   并把新格式补进下面这条「每项都能识别」。
+check('bookKindOf：epub 识别且大小写不敏感', F.bookKindOf('x/三体.EPUB') === 'epub')
+check('bookKindOf：epub 不会被误判成 txt', F.bookKindOf('a/b.epub') === 'epub')
+check('bookEngineOf：pdf → pdf', F.bookEngineOf('x.pdf') === 'pdf')
+check('bookEngineOf：txt → txt', F.bookEngineOf('x.txt') === 'txt')
+check('bookEngineOf：epub → foliate（vendored 引擎）', F.bookEngineOf('x.epub') === 'foliate')
+check('bookEngineOf：裸扩展名（带点）也认', F.bookEngineOf('.epub') === 'foliate')
+check('bookEngineOf：未收录返回 null', F.bookEngineOf('x.md') === null)
+check('bookDisplayName：去 epub 后缀', F.bookDisplayName('x/三体.epub') === '三体')
 
 // ===== ② readerStateSchema 纯函数用例 =====
 console.log('\n--- ② readerStateSchema：键归一 / patch 白名单 / 修补 ---')

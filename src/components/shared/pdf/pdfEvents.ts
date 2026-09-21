@@ -17,6 +17,39 @@ export const KB_READER_STATE_CHANGED = 'kb-reader-state-changed'
 export const KB_TXT_GOTO_PARA = 'kb-txt-goto-para'
 
 /**
+ * 右栏摘录面板 / 左栏目录 → EPUB 阅读器：跳位置请求（detail: { relPath, cfi }）。
+ * `cfi` 取 foliate `goTo()` 的任意合法目标 —— 既接受 CFI 串（带界外偏移的
+ * `epubcfi(/6/4!/4/2/1:0)` 也行），也接受目录项的 href（`chapter1.xhtml#sec2`）；
+ * 值由 foliate 的 `resolveNavigation` 自行判别。字段名保留 cfi 是因为摘录定位是主要用途。
+ * 与 KB_TXT_GOTO_PARA 同构：App 侧统一转发，阅读器只关心「是不是给我的书」。
+ */
+export const KB_EPUB_GOTO_CFI = 'kb-epub-goto-cfi'
+
+/**
+ * EPUB 目录项（foliate `book.toc` 的节点形状，上游是裸 JS 对象，此处只取用到的字段）。
+ *
+ * ★ 放在本文件而**不是** `src/types/index.ts`：它是「阅读器 ↔ 左栏」这一对组件之间的私有载荷，
+ * 与事件常量同生共死，放一起才不会两边各写一份（本项目已有「合法 kind 列表被复制三份」的教训）。
+ * 本文件保持零依赖 —— 只加类型，不引入任何 import。
+ */
+export interface EpubTocItem {
+  label?: string
+  href?: string
+  subitems?: EpubTocItem[]
+}
+
+/**
+ * EPUB 阅读器 → 左栏目录面板：状态广播。
+ * detail: `{ relPath, cfi, chapterLabel, chapterHref, toc? }`。
+ * `toc` **只在首次/被请求时带**（目录是静态数据，每翻页重发整棵树是纯浪费）；
+ * 面板挂载时机晚于阅读器时，用 KB_EPUB_STATE_REQ 主动要一次。
+ */
+export const KB_EPUB_STATE = 'kb-epub-state'
+
+/** 左栏目录面板 → EPUB 阅读器：请求重发一次状态（含目录树）。detail: `{ relPath }` */
+export const KB_EPUB_STATE_REQ = 'kb-epub-state-req'
+
+/**
  * 知识库「读书笔记」页 → 书架：回到摘录原文（detail: { href }，href 形如 `kbloc:<bookKey>#<excerptId>`）。
  *
  * 由 MarkdownPreview 统一拦截 `kbloc:` 链接后派发（**单点拦截**：知识库预览 / 沉浸阅读 / 博客 /

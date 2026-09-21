@@ -12,6 +12,7 @@
  */
 
 import type { ExcerptColor, ExcerptType, VaultExcerpt } from './excerptSchema'
+import type { BookKind } from './bookFormats'
 
 /** 导出条目（一本书 ↔ 一篇知识库「读书笔记」页的映射） */
 export interface ExcerptExportEntry {
@@ -77,7 +78,7 @@ export const EXCERPT_TYPE_NAMES: Record<ExcerptType, string> = {
  * 结构：
  *   # 读书笔记 · 《书名》
  *   > 来源：<relPath> · 共 N 条摘录 · 导出于 <date>
- *   按页（pdf）或按段区间（txt）分 ## 组 → 每组下每条：
+ *   按页（pdf）/ 按段区间（txt）/ 按章节（epub）分 ## 组 → 每组下每条：
  *     引文（markdown 引用块）+ 备注（有则出）+ [回到原文](kbloc:<bookKey>#<excerptId>) 链接
  *     色 / 类型以纯文本呈现（如「摘录 · 黄」）
  *
@@ -109,11 +110,13 @@ export function buildExcerptExportMarkdown(opts: {
 
   if (excerpts.length === 0) return header.trimEnd() + '\n'
 
-  // 分组：pdf 按 page；txt 按连续段区间
+  // 分组：pdf 按 page；txt 按连续段区间；epub 按章节
   const groups = groupExcerpts(excerpts)
   const blocks: string[] = []
   for (const g of groups) {
-    const heading = g.kind === 'pdf' ? `## 第 ${g.label} 页` : `## 第 ${g.label} 段`
+    const heading = g.kind === 'pdf' ? `## 第 ${g.label} 页`
+      : g.kind === 'txt' ? `## 第 ${g.label} 段`
+        : `## ${g.label}` // epub：label 已是章节名，不再补模板词
     const items: string[] = []
     for (const e of g.items) {
       const lines: string[] = []
@@ -135,14 +138,30 @@ export function buildExcerptExportMarkdown(opts: {
 
 interface ExcerptGroup {
   label: string
-  kind: 'pdf' | 'txt'
+  kind: BookKind
   items: VaultExcerpt[]
 }
 
-/** 分组（纯函数）：pdf 按 page 升序；txt 按段落序号连续区间合并 */
+/** 分组（纯函数）：pdf 按 page 升序；txt 按段落序号连续区间合并；epub 按章节名连续合并 */
 export function groupExcerpts(excerpts: VaultExcerpt[]): ExcerptGroup[] {
   if (excerpts.length === 0) return []
   const kind = excerpts[0].kind
+  if (kind === 'epub') {
+    // 按「章节名连续段」合并（摘录在库里按创建顺序排列，同一章的通常相邻）；
+    // 无 chapter 的旧数据统一归到「正文」组，不丢条目。
+    const groups: ExcerptGroup[] = []
+    let cur: VaultExcerpt[] = []
+    let curLabel = ''
+    const flush = () => { if (cur.length > 0) groups.push({ label: curLabel, kind, items: cur }) }
+    for (const e of excerpts) {
+      const label = (e.chapter || '').trim() || '正文'
+      if (cur.length > 0 && label !== curLabel) { flush(); cur = [] }
+      if (cur.length === 0) curLabel = label
+      cur.push(e)
+    }
+    flush()
+    return groups
+  }
   if (kind === 'pdf') {
     const byPage = new Map<number, VaultExcerpt[]>()
     for (const e of excerpts) {

@@ -87,7 +87,7 @@ interface Props {
   /** 阅读侧栏「书签 → 定位原文」（仅 pdf）：App 负责切回书架标签 + 派发跳页事件 */
   onLocatePdfPage?: (page: number) => void
   /** 阅读侧栏「摘录 → 定位原文」（pdf 跳页 / txt 跳段）：App 统一切回书架标签再派发 */
-  onLocateExcerpt?: (loc: { kind: BookKind; page?: number; paraIndex?: number }) => void
+  onLocateExcerpt?: (loc: { kind: BookKind; page?: number; paraIndex?: number; cfi?: string }) => void
 }
 
 /** 切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。

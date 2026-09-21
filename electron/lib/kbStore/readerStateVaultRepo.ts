@@ -4,6 +4,7 @@ import {
   sanitizeReaderPatch,
   type VaultReaderState, type VaultReaderStateStore,
 } from './readerStateSchema'
+import { bookKindOf } from './bookFormats'
 import { getCurrentVault } from './vaultContext'
 
 /**
@@ -18,6 +19,16 @@ import { getCurrentVault } from './vaultContext'
 
 const MOD = 'modules'
 const F_STORE = 'readerState.json'
+
+/**
+ * kind 是 relPath 的纯函数（bookKindOf），故**每次读写都按路径重算**，不信存量值：
+ * - 读：历史条目里 epub 曾被落成 'txt'（B 段之前 defaultReaderState 写死），重算即自愈；
+ * - 写：客户端报什么都被覆盖，新格式首写不会再落错。
+ * 未收录扩展名（.md 等非书文件误入）返回 undefined → 保留存量值。
+ */
+function kindOfPath(relPath: string) {
+  return bookKindOf(relPath) ?? undefined
+}
 
 function emptyStore(): VaultReaderStateStore {
   return { version: 1, books: {} }
@@ -44,7 +55,7 @@ export function readerStateGetBook(rootId: string, relPath: string): VaultReader
   if (!key) return null
   const store = readStore()
   const raw = store.books[key]
-  return raw ? coerceReaderState(raw, new Date().toISOString()) : null
+  return raw ? coerceReaderState(raw, new Date().toISOString(), kindOfPath(relPath)) : null
 }
 
 /** 书架 join 用：当前仓库内所有有记录的书键 → 状态（按 rootId 前缀过滤，忽略其他仓库残留） */
@@ -53,10 +64,12 @@ export function readerStateListProgress(rootId: string): Record<string, VaultRea
   const prefix = `${id}/`
   if (!id) return {}
   const store = readStore()
+  const now = new Date().toISOString()
   const out: Record<string, VaultReaderState> = {}
   for (const [key, raw] of Object.entries(store.books)) {
     if (!key.startsWith(prefix)) continue
-    out[readerKeyRel(key)] = coerceReaderState(raw, new Date().toISOString())
+    const rel = readerKeyRel(key)
+    out[rel] = coerceReaderState(raw, now, kindOfPath(rel))
   }
   return out
 }
@@ -79,14 +92,18 @@ export function readerStatePatchBook(rootId: string, relPath: string, patch: unk
   if (!key) return { ok: false, error: '非法的书键' }
   try { requireCurrentRootId(rootId) } catch (e) { return { ok: false, error: (e as Error).message } }
   const clean = sanitizeReaderPatch(patch)
-  if (!clean) return { ok: false, error: 'patch 字段非法（只收 pct 整数 0..100）' }
+  if (!clean) return { ok: false, error: 'patch 字段非法（只收 pct 整数 0..100 / locator 串等白名单项）' }
   const now = new Date().toISOString()
+  const derived = kindOfPath(relPath)
   const store = readStore()
-  const prev = store.books[key] ? coerceReaderState(store.books[key], now) : defaultReaderState(now)
+  const prev = store.books[key]
+    ? coerceReaderState(store.books[key], now, derived)
+    : defaultReaderState(now, derived ?? 'txt')
   if (typeof expectedUpdatedAt === 'string' && expectedUpdatedAt && prev.updatedAt !== expectedUpdatedAt) {
     return { ok: false, conflict: true, state: prev }
   }
-  const next: VaultReaderState = { ...prev, ...clean, updatedAt: now }
+  // kind 显式写回：prev 已是重算结果，此处只是让「kind 不可被 patch 覆盖」在代码里可见
+  const next: VaultReaderState = { ...prev, ...clean, kind: derived ?? prev.kind, updatedAt: now }
   store.books[key] = next
   try {
     writeJsonOrThrow(MOD, F_STORE, store)

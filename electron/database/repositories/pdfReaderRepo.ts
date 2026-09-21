@@ -3,7 +3,8 @@ import { broadcastDataChanged } from '../../main/windowBus'
 import { getCurrentVault } from '../../lib/kbStore/vaultContext'
 import { scanVaultBooks } from '../../lib/kbStore/knowledgeIndex'
 import { readerStateListProgress } from '../../lib/kbStore/readerStateVaultRepo'
-import { bookDisplayName } from '../../lib/kbStore/bookFormats'
+import { bookDisplayName, type BookKind } from '../../lib/kbStore/bookFormats'
+import type { ScanMode } from '../../lib/kbStore/scanDetect'
 import {
   pdfReaderCoverGet, pdfReaderCoverList, pdfReaderCoverSave, pdfReaderGetBook,
   pdfReaderListProgress, pdfReaderPatchBook,
@@ -24,8 +25,9 @@ import {
  * 书架是自动库，放 .pdf 进仓库任意目录即被扫描扫到，导入入口冗余。
  *
  * 书架升级全格式阅读器一期（2026-09-20）：listBooks 按 kind 分流 join ——
- *   pdf  → pdfReaderListProgress（页码/书签口径不变）
- *   txt  → readerStateListProgress（pct 进度口径），映射 lastPage=0/totalPages=0
+ *   pdf       → pdfReaderListProgress（页码/书签口径不变）
+ *   非 pdf    → readerStateListProgress（pct 进度口径），映射 lastPage=0/totalPages=0
+ * B 段（2026-09-21）：新增 epub，走上面「非 pdf」同一支 —— 加格式无需再动本文件。
  */
 
 export interface BookListItem {
@@ -33,14 +35,17 @@ export interface BookListItem {
   name: string
   size: number
   mtime: number
-  kind: 'pdf' | 'txt'
+  /** 唯一真相源 = lib/kbStore/bookFormats.ts 的 BookKind（勿在此写字面量联合） */
+  kind: BookKind
   lastPage: number
-  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母；txt 恒 0（进度用 pct） */
+  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母；txt / epub 恒 0（进度用 pct） */
   totalPages: number
-  /** txt 阅读进度 0..100（仅 kind==='txt' 有值） */
+  /** 阅读进度 0..100（kind 为 txt / epub 时有值） */
   pct?: number
   hasProgress: boolean
   updatedAt: string | null
+  /** 扫描版探测结论（仅 pdf；缺省 = full）——类型真源 = lib/kbStore/scanDetect.ts */
+  scan?: ScanMode
 }
 
 export function registerPdfReaderHandlers(): void {
@@ -53,7 +58,10 @@ export function registerPdfReaderHandlers(): void {
       const readerProgress = readerStateListProgress(cur.rootId)
       const books: BookListItem[] = scanned.map((f) => {
         const name = bookDisplayName(f.relPath)
-        if (f.kind === 'txt') {
+        // 非 pdf 一律走 readerState.json 的 pct 口径（txt 与 epub 共用；epub 另有 locator，
+        // 但书架清单只画进度条，不需要它）。判据写成 `!== 'pdf'` 而非 `=== 'txt'`：
+        // 再出新格式时默认落这一支（有 pct 就不至于书架显示成「未开始」），不会被漏掉。
+        if (f.kind !== 'pdf') {
           const st = readerProgress[f.relPath]
           const pct = st?.pct ?? 0
           return {
@@ -61,7 +69,7 @@ export function registerPdfReaderHandlers(): void {
             name,
             size: f.size,
             mtime: f.mtimeMs,
-            kind: 'txt',
+            kind: f.kind,
             lastPage: 0,
             totalPages: 0,
             pct,

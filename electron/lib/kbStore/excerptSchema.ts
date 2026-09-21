@@ -12,9 +12,26 @@
  * 定位口径（双向溯源的「正向跳回」依据）：
  *   pdf  → page（页码，跳页走 KB_PDF_GOTO_PAGE）+ rects（选区矩形，归一化到文本层百分比，zoom 无关）
  *   txt  → paraIndex（段落序号，跳段走 KB_TXT_GOTO_PARA）+ start/end（段内字符偏移，<mark> 渲染依据）
+ *   epub → cfi（foliate CFI 范围串，跳回与正文高亮共用；B 段新增）+ chapter（章节标签，导出分组用）
  */
 
 import type { BookKind } from './bookFormats'
+
+/** 合法书籍 kind（真源 = bookFormats 的 `BOOK_EXTS`；本文件须零值导入故手工镜像，
+ *  由 `.AGENT/scripts/pdf-reader/verify-epub-formats.mjs` 断言各镜像与 BOOK_EXTS 一致。
+ *  与 readerStateSchema 同款 **export**：契约脚本要按值比对镜像、不能只读源码文本） */
+export const BOOK_KINDS: readonly BookKind[] = ['pdf', 'txt', 'epub']
+
+/** CFI 串上限（foliate 实测几百字符；留富余但拒超长串）；CFI 只含可打印字符 */
+const MAX_CFI_LEN = 2000
+
+function sanitizeCfi(v: unknown): string | null {
+  if (typeof v !== 'string') return null
+  if (!v || v.length > MAX_CFI_LEN) return null
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(v)) return null
+  return v
+}
 
 /** 归一化选区矩形（相对文本层容器的百分比 0..1，zoom/窗口无关） */
 export interface ExcerptRect {
@@ -60,6 +77,10 @@ export interface VaultExcerpt {
   /** txt 高亮：段内字符偏移 [start, end) */
   start?: number
   end?: number
+  /** epub 定位：foliate CFI 范围串（B 段；跳回原文与正文高亮共用同一串） */
+  cfi?: string
+  /** epub 章节标签（TOC 标签；导出分组与右栏来源行显示用，可缺省） */
+  chapter?: string
   /** 摘文原文（去首尾空白，1..8000 字符） */
   text: string
   /** 一句话备注（可空串 = 无备注；<=500 字符） */
@@ -121,13 +142,17 @@ function sanitizeRects(v: unknown): ExcerptRect[] | null {
 
 /**
  * 创建载荷清洗（服务端生成 id/at/updatedAt，不接受传入）。
- * pdf 必须带 page（rects 可选）；txt 必须带 paraIndex（start/end 可选且成对合法）。
+ * pdf 必须带 page（rects 可选）；txt 必须带 paraIndex（start/end 可选且成对合法）；
+ * epub 必须带 cfi（chapter 可选）。
  * 返回 null = 载荷非法（整体拒绝）。
  */
 export function sanitizeExcerptCreate(payload: unknown): Omit<VaultExcerpt, 'id' | 'at' | 'updatedAt'> | null {
   if (!isRecord(payload)) return null
-  const kind = payload['kind']
-  if (kind !== 'pdf' && kind !== 'txt') return null
+  const rawKind = payload['kind']
+  // ★ 判据是「不在合法集才拒」而非「不等于 pdf/txt 就拒」—— 后者会让新格式被静默当 txt 校验，
+  //   表现是 epub 划选创建时报「要 paraIndex」。
+  if (typeof rawKind !== 'string' || !(BOOK_KINDS as readonly string[]).includes(rawKind)) return null
+  const kind = rawKind as BookKind
   const textRaw = payload['text']
   if (typeof textRaw !== 'string') return null
   const text = textRaw.trim()
@@ -144,7 +169,7 @@ export function sanitizeExcerptCreate(payload: unknown): Omit<VaultExcerpt, 'id'
       if (!rects) return null
       out.rects = rects
     }
-  } else {
+  } else if (kind === 'txt') {
     const paraIndex = payload['paraIndex']
     if (typeof paraIndex !== 'number' || !Number.isInteger(paraIndex) || paraIndex < 0 || paraIndex > 1000000) return null
     out.paraIndex = paraIndex
@@ -158,6 +183,13 @@ export function sanitizeExcerptCreate(payload: unknown): Omit<VaultExcerpt, 'id'
       out.start = start
       out.end = end
     }
+  } else {
+    // epub：CFI 范围串必填（高亮绘制与跳回原文都靠它）
+    const cfi = sanitizeCfi(payload['cfi'])
+    if (!cfi) return null
+    out.cfi = cfi
+    const chapter = payload['chapter']
+    if (typeof chapter === 'string' && chapter.trim()) out.chapter = chapter.trim().slice(0, 200)
   }
   // 颜色 / 类型：缺省回落（存量旧数据无此字段时由 coerceExcerpt 透传后在此补默认，不报错不迁移）
   const rawColor = payload['color']
@@ -198,7 +230,7 @@ export function sanitizeExcerptPatch(patch: unknown): { note?: string; color?: E
 /** 存量数据修补：坏值回落默认不抛错（kind 非法 → 整条丢弃返回 null，由仓库层剔除） */
 export function coerceExcerpt(raw: unknown, now: string): VaultExcerpt | null {
   if (!isRecord(raw)) return null
-  const base = sanitizeExcerptCreate({ kind: raw['kind'], text: raw['text'], note: raw['note'], page: raw['page'], rects: raw['rects'], paraIndex: raw['paraIndex'], start: raw['start'], end: raw['end'], color: raw['color'], type: raw['type'] })
+  const base = sanitizeExcerptCreate({ kind: raw['kind'], text: raw['text'], note: raw['note'], page: raw['page'], rects: raw['rects'], paraIndex: raw['paraIndex'], start: raw['start'], end: raw['end'], cfi: raw['cfi'], chapter: raw['chapter'], color: raw['color'], type: raw['type'] })
   if (!base) return null
   const at = typeof raw['at'] === 'string' && raw['at'] ? raw['at'] : now
   const updatedAt = typeof raw['updatedAt'] === 'string' && raw['updatedAt'] ? raw['updatedAt'] : now
