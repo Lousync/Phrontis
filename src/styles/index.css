@@ -157,8 +157,9 @@ input:focus, textarea:focus, select:focus {
    之前被 body 全局 none 拦死——TXT 段落与 PDF 文本层都不在任何白名单里 */
 [data-wb="txtReader"] p[data-p],
 [data-wb="txtReader"] p[data-p] *,
-.kb-pdf-text-layer,
-.kb-pdf-text-layer * {
+/* PDF 文本层：2026-09-21 换官方 pdf.js viewer 后类名由 .kb-pdf-text-layer 变为 .textLayer */
+.pdfViewer .textLayer,
+.pdfViewer .textLayer * {
   user-select: text;
   -webkit-user-drag: auto;
 }

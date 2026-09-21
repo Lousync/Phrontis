@@ -129,16 +129,17 @@ async function main() {
   //    阈值 >10：文本层只挂紧集合页（设计如此），单页 ≈ 20-24 span
   let spans = 0
   for (let i = 0; i < 60; i++) {
-    spans = await evalJs(`document.querySelectorAll('.kb-pdf-text-layer span').length`)
+    // 2026-09-21 换官方 pdf.js viewer 后：页盒 = .pdfViewer .page[data-page-number]，文本层 = .textLayer
+    spans = await evalJs(`document.querySelectorAll('.pdfViewer .page .textLayer span').length`)
     if (spans > 10) break
     await sleep(500)
   }
   const diag = await evalJs(`(() => ({
-    canvases: document.querySelectorAll('[data-pg] canvas').length,
-    slots: document.querySelectorAll('[data-pg]').length,
-    pgs: [...document.querySelectorAll('[data-pg]')].slice(0, 6).map((e) => e.dataset.pg),
-    frames: document.querySelectorAll('.kb-pdf-text-layer').length,
-    frameSpans: document.querySelectorAll('.kb-pdf-text-layer span').length,
+    canvases: document.querySelectorAll('.pdfViewer .page canvas').length,
+    pages: document.querySelectorAll('.pdfViewer .page').length,
+    pageNos: [...document.querySelectorAll('.pdfViewer .page')].slice(0, 6).map((e) => e.dataset.pageNumber),
+    frames: document.querySelectorAll('.pdfViewer .page .textLayer').length,
+    frameSpans: document.querySelectorAll('.pdfViewer .page .textLayer span').length,
     toolbar: (document.querySelector('.kb-fit-pdfread')?.textContent || '').slice(0, 100),
     failText: (document.body.textContent.match(/打开失败|加载失败|正在准备/g) || []).slice(0, 3),
     errs: (window.__errs ?? []).slice(0, 6),
@@ -147,7 +148,7 @@ async function main() {
   console.log('[console 取证]', JSON.stringify(consoleMsgs.slice(-10)))
   // 渲染池内部状态三次采样（看 tight/rendered/inflight 动向与是否在无限重渲染）
   for (let k = 0; k < 3; k++) {
-    const st = await evalJs(`window.__kbPdfProbe?.state ?? null`)
+    const st = await evalJs(`window.__kbPdf?.state ?? null`)
     console.log('[池状态' + k + ']', JSON.stringify(st))
     await sleep(700)
   }
@@ -156,7 +157,7 @@ async function main() {
 
   // 3) user-select 白名单取证
   const sel = await evalJs(`(() => {
-    const sp = [...document.querySelectorAll('[data-pg] .kb-pdf-text-layer span')].find((x) => (x.textContent || '').length > 8)
+    const sp = [...document.querySelectorAll('.pdfViewer .page .textLayer span')].find((x) => (x.textContent || '').length > 8)
     if (!sp) return { noSpan: true }
     const cs = getComputedStyle(sp)
     const r = sp.getBoundingClientRect()
@@ -168,7 +169,7 @@ async function main() {
 
   // 4) 真实鼠标拖选一行（先把目标 span 滚进视口——否则 CDP 坐标落在视口外、拖不中任何字）
   const dragRect = await evalJs(`(() => {
-    const sp = [...document.querySelectorAll('.kb-pdf-text-layer span')].find((x) => (x.textContent || '').length > 8)
+    const sp = [...document.querySelectorAll('.pdfViewer .page .textLayer span')].find((x) => (x.textContent || '').length > 8)
     if (!sp) return null
     sp.scrollIntoView({ block: 'center' })
     const r = sp.getBoundingClientRect()

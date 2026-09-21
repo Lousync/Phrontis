@@ -1,0 +1,94 @@
+/**
+ * 官方 pdf.js viewer 的主题适配层（方案 A 迁移，2026-09-21）。
+ *
+ * 上游 `pdf_viewer.css` 是从 Firefox 阅读器直接搬来的**整站样式**（.pdfViewer / .page /
+ * .textLayer / .annotationLayer / :root 若干自定义属性）。本文件只做「套进 Phrontis 主题」
+ * 的覆盖，不改上游结构。所有规则都带 `.kb-pdf-scope` 前缀（阅读器根节点），
+ * 保证不会波及应用其它部分。
+ *
+ * 加载顺序：pdfViewerKit.ts 里先引上游、后引本文件 —— 但**顺序不是判据**（多个 import 的
+ * 打包顺序在产物里可能被合并/重排），所以每条覆盖都靠**更高特异度**而不是靠后来居上。
+ */
+
+/* ── ① 文本层不透明度：上游是 0.25 ──────────────────────────────
+   上游 `.textLayer { opacity: 0.25 }` 与「文字透明」叠加后对正文没影响，但它会**连带**
+   把层内所有可见物一起压到 25%：划选高亮、搜索命中、摘录叠加框全都淡到看不见。
+   自研层当年是满不透明度 + rgba 配色，这里恢复同口径。 */
+.kb-pdf-scope .pdfViewer .textLayer {
+  opacity: 1;
+}
+
+/* ── ② 页面盒 ──────────────────────────────────────────────────
+   上游 `--page-border: 9px solid transparent` 是给观察器阴影占位的，配合
+   `background-clip: content-box`。它会让内容盒比页面盒小 18px，进而让「文本层 inset:0」
+   与「pdf.js 按 viewport 写的画布尺寸」不再重合（摘录存的是**百分比**，靠的就是两者重合）。
+   所以这里把边框归零 —— 页面盒 = 内容盒 = 画布盒 = 文本层盒，四者严格同口径。 */
+.kb-pdf-scope .pdfViewer .page {
+  border: 0;
+  margin: 8px auto;
+  background-color: var(--bg-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+/* 整卷上下留白（上游 --pdfViewer-padding-bottom 缺省 0） */
+.kb-pdf-scope .pdfViewer {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+/* 跨页对（双页模式）：上面那条 `.page { margin: 8px auto }` 会把上游的
+   `.spread .page { margin-inline: -3.5px }` 一起盖掉 —— inline-block 元素的 `auto`
+   外边距退化为 0，两页会**贴在一起**。这里补回一个水平间距（比旧的 gap-4=16px 略窄，
+   与竖滚模式的页间距口径一致）。 */
+.kb-pdf-scope .pdfViewer .spread .page {
+  margin-inline: 8px;
+}
+
+/* ── ③ 滚动宿主：固定留出滚动条槽位 ─────────────────────────────
+   适配宽度（page-width）是按 `container.clientWidth` 算的，而滚动条出现/消失会改
+   clientWidth → 再触发一次重算。槽位固定后这个反馈环从根上断掉。 */
+.kb-pdf-scope .kb-pdf-scroll {
+  scrollbar-gutter: stable;
+}
+
+/* 沉浸阅读：官方固定扣掉 SCROLLBAR_PADDING(40) 作为两侧留白，这里用负外边距把
+   一部分还回来（自研层当年是 p-6 → p-0，即每侧多出 24px）。 */
+.kb-pdf-scope-immersive .kb-pdf-scroll {
+  margin-inline: -16px;
+}
+
+/* ── ④ 划选配色（沿用自研层口径） ───────────────────────────────*/
+.kb-pdf-scope .pdfViewer .textLayer ::selection {
+  background: rgba(0, 120, 255, 0.35);
+}
+
+/* ── ⑤ 行间命中盒补白 ─────────────────────────────────────────
+   pdf.js 的 span 盒高 = 字号（≈1em），而正文行距常是它的两倍以上 —— 六成纵向空间没有
+   可命中的盒，鼠标落进空隙时浏览器的「最近文本位置」会跳到很远的节点（拖选到两行之间
+   突然选中下面十几行）。`--kb-hit-pad` 由 expandTextLayerHitAreas 按**实测行距**写入
+   （挂在文本层上、由 span 继承）；等量负 margin 抵消 padding 对内容的推挤，
+   字形位置与选区高亮（按文本行盒绘制、不含 padding）都零变化。 */
+.kb-pdf-scope .pdfViewer .textLayer :is(span, br) {
+  padding: var(--kb-hit-pad, 0px) 0;
+  margin-top: calc(-1 * var(--kb-hit-pad, 0px));
+}
+
+/* ── ⑥ 搜索命中 / 摘录叠加 ─────────────────────────────────────
+   官方层里的 `.highlight` 是 PDFFindController 用的，我们不用它，沿用自研类名。 */
+.kb-pdf-scope .pdfViewer .textLayer .kb-pdf-match {
+  background: rgba(230, 140, 30, 0.35);
+  outline: 2px solid rgba(230, 140, 30, 0.9);
+}
+
+.kb-pdf-scope .pdfViewer .textLayer .kb-excerpt-hl {
+  position: absolute;
+  background: rgba(255, 196, 0, 0.32);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* ── ⑦ 页内链接热区（官方 annotationLayer 的 <a>） ──────────────*/
+.kb-pdf-scope .pdfViewer .annotationLayer a:hover {
+  background: rgba(0, 120, 255, 0.14);
+  box-shadow: 0 0 0 1px rgba(0, 120, 255, 0.25);
+}
