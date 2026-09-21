@@ -275,7 +275,7 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
   return (
     <div
       ref={panelRef}
-      className={`shrink-0 relative flex flex-col bg-[var(--bg-secondary)] overflow-hidden ${className}`}
+      className={`shrink-0 relative flex flex-col bg-[var(--bg-primary)] overflow-hidden ${className}`}
       style={{
         width: displayWidth,
         transition: dragging ? 'none' : 'width 200ms ease-out'
