@@ -28,7 +28,11 @@ import type { UiMessage } from './MessageList'
 export interface AssistantChatOptions {
   /** 宿主是否可见：可见时刷新供应商检查 / Skill 候选 / 会话列表 */
   active: boolean
-  /** 发送时的上下文解析（缺省 = 当前界面 getAssistantContext） */
+  /**
+   * 界面上下文解析（缺省 = 当前界面 getAssistantContext）。
+   * ⚠️ 只会被**事件回调 / effect** 调用（发送、重生成、改写，以及徽章的提交后同步）——
+   * 所以宿主可以安全闭包引用本组件里声明在 hook 之后的 ref；但**别在 render 期调用它**（TDZ 崩页）。
+   */
   resolveContext?: () => AgentContextInfo | null
   /** / 指令的执行面（悬浮版随全屏态切换；其余宿主固定 assistant） */
   surfaceOf?: () => 'assistant' | 'aiLearn'
@@ -82,6 +86,14 @@ export interface AssistantChatController {
   /** 📎 附加文件（随消息上下文；发送后不清空，× 移除） */
   attachedFiles: Array<{ pageId: string; title: string; path: string }>
   setAttachedFiles: Dispatch<SetStateAction<Array<{ pageId: string; title: string; path: string }>>>
+  /**
+   * 当前界面上下文（与发送时解析同源，供输入区徽章显示）。
+   * `contextRemoved` = 用户已把这个界面从附带里移除（发送时不附带；换界面自动恢复）。
+   */
+  contextInfo: AgentContextInfo | null
+  contextRemoved: boolean
+  dismissContext: () => void
+  restoreContext: () => void
 }
 
 function nowLocal(): string {
@@ -101,8 +113,56 @@ function toUi(m: AgentStoredMessage): UiMessage {
   }
 }
 
+/**
+ * 界面上下文的「身份」——给「已移除」记忆用。
+ * 同 type + 同 data.id（无 id 时退化为 label）即视为同一个界面上下文：
+ * 同一界面保持移除态，换界面（另一个页面/模块）自动恢复显示与附带。
+ */
+function contextKeyOf(c: AgentContextInfo | null): string | null {
+  if (!c) return null
+  const id = (c.data as Record<string, unknown> | undefined)?.['id']
+  const tail = (typeof id === 'string' || typeof id === 'number') ? String(id) : c.label
+  return `${c.type}|${tail}`
+}
+
 export function useAssistantChat(options: AssistantChatOptions): AssistantChatController {
   const { active } = options
+  /**
+   * 界面上下文解析（宿主可注入优先级链，缺省 = 当前界面）。
+   *
+   * ⚠️ **只能在事件回调 / effect 里调用，绝不能在 render 期调用**：宿主的 resolveContext 常闭包
+   * 引用本组件里声明在 useAssistantChat **之后**的 ref（如 AssistantPanel 的 helpCtxRef），
+   * render 期调用会直接撞 TDZ（`Cannot access 'helpCtxRef' before initialization`）→ 整页 error
+   * boundary。2026-09-20 实践过，别重犯。发送路径在事件回调里，安全。
+   */
+  const resolveCtx = useCallback(
+    () => (options.resolveContext ? options.resolveContext() : getAssistantContext()),
+    [options.resolveContext],
+  )
+  /**
+   * 「已移除的界面上下文」身份（2026-09-20 反馈：打开某个界面就被默认附加进对话，想不要都不行）。
+   * 记身份而不是布尔量：同一界面保持移除，换界面自动恢复。仅由事件回调写入。
+   */
+  const [ctxOffKey, setCtxOffKey] = useState<string | null>(null)
+  /**
+   * 当前界面上下文（徽章显示用，与发送同源）。经 effect 同步而非 render 期解析（见 resolveCtx 警告），
+   * 且只在「身份 + 标签」变化时落 state —— resolver 每次都返回新对象，无此闸会无限重渲染。
+   */
+  const [contextInfo, setContextInfo] = useState<AgentContextInfo | null>(null)
+  const ctxSeenRef = useRef('')
+  useEffect(() => {
+    const c = resolveCtx()
+    const seen = `${contextKeyOf(c) ?? ''}|${c?.label ?? ''}`
+    if (seen === ctxSeenRef.current) return
+    ctxSeenRef.current = seen
+    setContextInfo(c)
+  })
+  const contextRemoved = contextInfo !== null && ctxOffKey !== null && ctxOffKey === contextKeyOf(contextInfo)
+  const dismissContext = useCallback(() => {
+    const k = contextKeyOf(contextInfo)
+    if (k) setCtxOffKey(k)
+  }, [contextInfo])
+  const restoreContext = useCallback(() => setCtxOffKey(null), [])
   const [sessions, setSessions] = useState<AgentSessionInfo[]>([])
   const [providersOk, setProvidersOk] = useState<boolean | null>(null)
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -255,7 +315,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       sid = sRow.id
       setActiveId(sid)
     }
-    const ctx = options.resolveContext ? options.resolveContext() : getAssistantContext()
+    // 界面上下文：被用户在徽章上 × 移除时不附带（contextRemoved 只对「当前这个界面」成立）
+    const ctx = contextRemoved ? null : resolveCtx()
     // 附加文件（📎）合成进上下文：正文不注入，模型需要内容时用文件读取工具按 path 自取
     let finalCtx: AgentContextInfo | null = ctx
     if (attachedFiles.length > 0) {
@@ -302,7 +363,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setPending(false)
       void refreshSessions()
     }
-  }, [input, pending, pickedSkill, refreshMessages, refreshSessions, beginStream, endStream, options, attachedFiles, modelId, thinking])
+  }, [input, pending, pickedSkill, refreshMessages, refreshSessions, beginStream, endStream, options, attachedFiles, modelId, thinking, contextRemoved, resolveCtx])
 
   /** 重新生成最后一条回复（末条为助手消息时可用） */
   const regenerate = useCallback(async () => {
@@ -315,7 +376,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     const cid = crypto.randomUUID()
     chatIdRef.current = cid
     try {
-      const r = await agentRegenerate(sid, getAssistantContext() ?? undefined, cid, thinking ? 'medium' : 'off')
+      const r = await agentRegenerate(sid, (contextRemoved ? null : resolveCtx()) ?? undefined, cid, thinking ? 'medium' : 'off')
       if (r.code === 'ABORTED') showToast({ type: 'info', message: '已停止生成' })
       else if (!r.ok) showToast({ type: 'error', message: `重新生成失败：${r.error ?? '未知错误'}` })
       else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
@@ -325,7 +386,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setPending(false)
       void refreshSessions()
     }
-  }, [pending, messages, refreshMessages, refreshSessions, beginStream, endStream, thinking])
+  }, [pending, messages, refreshMessages, refreshSessions, beginStream, endStream, thinking, contextRemoved, resolveCtx])
 
   /** 改写用户消息并重推其后回复 */
   const editSubmit = useCallback(async (messageId: string, content: string) => {
@@ -338,7 +399,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     const cid = crypto.randomUUID()
     chatIdRef.current = cid
     try {
-      const r = await agentEditMessage(sid, messageId, content, getAssistantContext() ?? undefined, cid, thinking ? 'medium' : 'off')
+      const r = await agentEditMessage(sid, messageId, content, (contextRemoved ? null : resolveCtx()) ?? undefined, cid, thinking ? 'medium' : 'off')
       if (r.code === 'ABORTED') showToast({ type: 'info', message: '已停止生成' })
       else if (!r.ok) showToast({ type: 'error', message: `修改失败：${r.error ?? '未知错误'}` })
       else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
@@ -348,7 +409,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setPending(false)
       void refreshSessions()
     }
-  }, [pending, refreshMessages, refreshSessions, beginStream, endStream, thinking])
+  }, [pending, refreshMessages, refreshSessions, beginStream, endStream, thinking, contextRemoved, resolveCtx])
 
   /** 删除单条消息（助手消息删除后可用「重新生成」补回） */
   const deleteMessage = useCallback(async (messageId: string) => {
@@ -403,5 +464,9 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     setThinking,
     attachedFiles,
     setAttachedFiles,
+    contextInfo,
+    contextRemoved,
+    dismissContext,
+    restoreContext,
   }
 }

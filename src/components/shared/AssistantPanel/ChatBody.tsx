@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
   Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu, Radar, MessagesSquare,
+  RotateCcw,
 } from 'lucide-react'
-import { getAssistantContext } from '../../../lib/assistantContext'
 import { showToast } from '../../../lib/toast'
 import { useSettings } from '../../../lib/SettingsContext'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
@@ -80,6 +80,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     send, newSession, loadSession, removeSession, regenerate, editSubmit, deleteMessage,
     abort, dismissChanges,
     modelId, setModelId, thinking, setThinking, attachedFiles, setAttachedFiles,
+    contextInfo, contextRemoved, dismissContext, restoreContext,
   } = chat
 
   const isNarrow = variant === 'docked'
@@ -238,7 +239,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setInput(''); setSlashActive(0) }
   }
 
-  const ctx = active ? getAssistantContext() : null
+  // 界面上下文徽章：与发送时同源（控制器解析），不再各算一份
+  const ctx = active ? contextInfo : null
 
   const goSettings = () => {
     if (onGoSettings) { onGoSettings(); return }
@@ -404,11 +406,30 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
             <div className={`shrink-0 mx-auto ${INPUT_WRAP[variant]} pb-2.5 pt-2`}>
               <div ref={inputCardRef} className={`relative px-2.5 pt-2 pb-2 ${shell.wrap}`}>
                 {inputTop}
+                {/* 界面上下文徽章（2026-09-20 反馈）：打开某界面默认就附带，原先没有退出口。
+                    × = 本轮不附带该界面（虚线灰显 = 已移除态），点 ↺ 收回。移除只对「这个界面」生效，
+                    换界面自动恢复；与发送路径同一真源（controller 的 contextRemoved）。 */}
                 {ctx && (
-                  <span className="mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
-                    <FileText size={10} className="shrink-0 text-[var(--accent)]" />
+                  <span
+                    data-wb="ctxBadge"
+                    data-wb-ctx-removed={contextRemoved ? '1' : '0'}
+                    className={`mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md border text-[11px] ${contextRemoved
+                      ? 'border-dashed border-[var(--border-color)] text-[var(--text-muted)]'
+                      : 'border-[var(--border-color)] bg-[var(--bg-selected)] text-[var(--text-secondary)]'}`}
+                  >
+                    <FileText size={10} className={`shrink-0 ${contextRemoved ? 'text-[var(--text-muted)]' : 'text-[var(--accent)]'}`} />
                     <span className="truncate">{ctx.label}</span>
-                    <span className="text-[var(--text-disabled)]">·将随提问附带</span>
+                    {/* 尾注 shrink-0：窄面板里让标签先省略，尾注与按钮不被压到换行 */}
+                    <span className="shrink-0 text-[var(--text-disabled)]">{contextRemoved ? '·已移除' : '·将随提问附带'}</span>
+                    <button
+                      data-wb={contextRemoved ? 'ctxRestoreBtn' : 'ctxDismissBtn'}
+                      onClick={contextRemoved ? restoreContext : dismissContext}
+                      onMouseDown={e => e.preventDefault()}
+                      title={contextRemoved ? '恢复：把当前界面作为上下文附带' : '移除：本轮提问不附带当前界面上下文'}
+                      className="shrink-0 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+                    >
+                      {contextRemoved ? <RotateCcw size={10} /> : <X size={10} />}
+                    </button>
                   </span>
                 )}
 
@@ -533,9 +554,14 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   </button>
                 </div>
 
-                {/* ── 📎 文件浮层 ── */}
+                {/* ── 工具行浮层（📎 / 模型 / 消耗，三者同构）──
+                    宽度必须自适应宿主：面板最窄 240（工作台右栏 ResizablePanel minWidth），
+                    docked 态输入卡实宽只有 ~210 → 原先写死的 230~280 会被右栏根节点
+                    `overflow-hidden` 从右侧裁掉（2026-09-20 反馈：右栏拖到最窄时模型菜单右侧被切、
+                    开关被啃掉一半）。规则：固定宽只作上限，`max-w-full` 按输入卡宽度收缩，
+                    行内文案本就有 truncate 兜底，不会溢出。 */}
                 {pop === 'files' && (
-                  <div data-wb="aiAttachPop" className="absolute bottom-full left-0 mb-2 w-[280px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
+                  <div data-wb="aiAttachPop" className="absolute bottom-full left-0 mb-2 w-[280px] max-w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
                     <div className="border-b border-[var(--border-color)] p-1.5">
                       <input
                         value={fileQuery}
@@ -577,14 +603,11 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
 
                 {/* ── 模型浮层 ── */}
                 {pop === 'model' && (
-                  <div data-wb="aiModelPop" className="absolute bottom-full left-0 mb-2 w-[250px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
-                    {/* 思考模式（2026-09-20 反馈）：开 = 深度思考（慢而全面）；关 = 快速回答。
-                        仅对具备思考能力的模型有差异（reasoning_effort 仅思考型透传） */}
+                  <div data-wb="aiModelPop" className="absolute bottom-full left-0 mb-2 w-[250px] max-w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
+                    {/* 思考模式：开 = 深度思考（reasoning_effort 仅思考型透传）；关 = 快速回答。
+                        仅对具备思考能力的模型有差异 */}
                     <label className="flex items-center justify-between gap-2 border-b border-[var(--border-color)] px-2.5 py-2 cursor-pointer">
-                      <span className="min-w-0">
-                        <span className="block text-[12px] text-[var(--text-primary)]">思考模式</span>
-                        <span className="block text-[10px] text-[var(--text-muted)]">开 = 深度思考（慢而全面） · 关 = 快速回答</span>
-                      </span>
+                      <span className="text-[12px] text-[var(--text-primary)]">思考模式</span>
                       <SettingSwitch checked={thinking} onChange={setThinking} />
                     </label>
                     <div className="max-h-[240px] overflow-y-auto p-1">
@@ -625,7 +648,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
 
                 {/* ── 消耗浮层 ── */}
                 {pop === 'usage' && (
-                  <div data-wb="aiUsagePop" className="absolute bottom-full left-0 mb-2 w-[230px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
+                  <div data-wb="aiUsagePop" className="absolute bottom-full left-0 mb-2 w-[230px] max-w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
                     <div className="border-b border-[var(--border-color)] px-2.5 py-2">
                       <div className="text-[10.5px] text-[var(--text-muted)]">今日消耗</div>
                       <div className="mt-0.5 text-[15px] font-semibold text-[var(--text-primary)]">
