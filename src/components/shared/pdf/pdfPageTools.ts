@@ -91,8 +91,10 @@ export function paintExcerptOverlays(
       const mark = `${e.id}:${idx}`
       if (layer.querySelector(`.kb-excerpt-hl[data-ehl="${mark}"]`)) return
       const d = document.createElement('div')
-      d.className = 'kb-excerpt-hl'
+      const ehc = e.color ?? 'y'
+      d.className = `kb-excerpt-hl kb-exc-${ehc}`
       d.dataset.ehl = mark
+      d.dataset.ehc = ehc
       d.style.left = `${(r.l * 100).toFixed(3)}%`
       d.style.top = `${(r.t * 100).toFixed(3)}%`
       d.style.width = `${(r.w * 100).toFixed(3)}%`

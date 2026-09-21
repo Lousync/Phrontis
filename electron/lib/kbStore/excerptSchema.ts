@@ -24,6 +24,30 @@ export interface ExcerptRect {
   h: number
 }
 
+/**
+ * 摘录色板（前后端唯一真相源；CSS 侧色值由契约脚本 verify-excerpts.mjs 断言一致，严禁两处各写一份）。
+ * id 用于 data-ehc / class 后缀（`.kb-exc-<id>`），hex 用于持久化与 CSS 变量 `--exc`。
+ */
+export const EXCERPT_COLORS = [
+  { id: 'y', hex: '#efb84c' },
+  { id: 'g', hex: '#7fb844' },
+  { id: 'b', hex: '#5d9bdc' },
+  { id: 'p', hex: '#e0709a' },
+  { id: 'v', hex: '#9188e8' },
+] as const
+
+/** 合法颜色 id 白名单 */
+export type ExcerptColor = (typeof EXCERPT_COLORS)[number]['id']
+export const EXCERPT_COLOR_IDS: readonly ExcerptColor[] = EXCERPT_COLORS.map((c) => c.id)
+
+/** 条目类型（注意：不能叫 `kind` —— kind 已被书籍格式 pdf/txt 占用） */
+export type ExcerptType = 'highlight' | 'excerpt' | 'idea'
+
+/** 缺省色（首色，存量缺色回落） */
+export const DEFAULT_EXCERPT_COLOR: ExcerptColor = EXCERPT_COLORS[0].id
+/** 缺省类型（存量缺 type 回落） */
+export const DEFAULT_EXCERPT_TYPE: ExcerptType = 'excerpt'
+
 export interface VaultExcerpt {
   id: string
   kind: BookKind
@@ -40,6 +64,10 @@ export interface VaultExcerpt {
   text: string
   /** 一句话备注（可空串 = 无备注；<=500 字符） */
   note: string
+  /** 高亮颜色（色板 id 白名单；缺省回落 DEFAULT_EXCERPT_COLOR） */
+  color: ExcerptColor
+  /** 条目类型：highlight 高亮 / excerpt 摘录 / idea 想法（缺省回落 DEFAULT_EXCERPT_TYPE） */
+  type: ExcerptType
   /** 创建时间（ISO；展示排序用，不可从外部注入修改） */
   at: string
   /** 冲突检测基准（铁律 4）；patch 时服务端重新生成 */
@@ -106,7 +134,7 @@ export function sanitizeExcerptCreate(payload: unknown): Omit<VaultExcerpt, 'id'
   if (!text || text.length > 8000) return null
   const noteRaw = payload['note']
   const note = typeof noteRaw === 'string' ? noteRaw.slice(0, 500) : ''
-  const out: Omit<VaultExcerpt, 'id' | 'at' | 'updatedAt'> = { kind, text, note }
+  const out: Omit<VaultExcerpt, 'id' | 'at' | 'updatedAt'> = { kind, text, note, color: DEFAULT_EXCERPT_COLOR, type: DEFAULT_EXCERPT_TYPE }
   if (kind === 'pdf') {
     const page = payload['page']
     if (typeof page !== 'number' || !Number.isInteger(page) || page < 1 || page > 100000) return null
@@ -131,20 +159,38 @@ export function sanitizeExcerptCreate(payload: unknown): Omit<VaultExcerpt, 'id'
       out.end = end
     }
   }
+  // 颜色 / 类型：缺省回落（存量旧数据无此字段时由 coerceExcerpt 透传后在此补默认，不报错不迁移）
+  const rawColor = payload['color']
+  out.color = EXCERPT_COLOR_IDS.includes(rawColor as ExcerptColor) ? (rawColor as ExcerptColor) : DEFAULT_EXCERPT_COLOR
+  const rawType = payload['type']
+  out.type = rawType === 'highlight' || rawType === 'excerpt' || rawType === 'idea' ? rawType : DEFAULT_EXCERPT_TYPE
   return out
 }
 
-/** patch 白名单：只收 note；null/undefined 之外必须是 string（<=500 字符，超长截断由调用方语义=拒收？——这里收下截断，备注是低敏字段） */
-export function sanitizeExcerptPatch(patch: unknown): { note?: string } | null {
+/** patch 白名单：收 note / color / type；每个字段独立校验，任一非法整体拒（touched=false 即无合法字段也返回 null） */
+export function sanitizeExcerptPatch(patch: unknown): { note?: string; color?: ExcerptColor; type?: ExcerptType } | null {
   if (!isRecord(patch)) return null
-  const out: { note?: string } = {}
+  const out: { note?: string; color?: ExcerptColor; type?: ExcerptType } = {}
   let touched = false
   for (const k of Object.keys(patch)) {
-    if (k !== 'note') continue
-    const v = patch[k]
-    if (typeof v !== 'string') return null
-    out.note = v.slice(0, 500)
-    touched = true
+    if (k === 'note') {
+      const v = patch[k]
+      if (typeof v !== 'string') return null
+      out.note = v.slice(0, 500)
+      touched = true
+    } else if (k === 'color') {
+      const v = patch[k]
+      if (typeof v !== 'string' || !EXCERPT_COLOR_IDS.includes(v as ExcerptColor)) return null
+      out.color = v as ExcerptColor
+      touched = true
+    } else if (k === 'type') {
+      const v = patch[k]
+      if (v !== 'highlight' && v !== 'excerpt' && v !== 'idea') return null
+      out.type = v
+      touched = true
+    } else {
+      return null
+    }
   }
   return touched ? out : null
 }
@@ -152,7 +198,7 @@ export function sanitizeExcerptPatch(patch: unknown): { note?: string } | null {
 /** 存量数据修补：坏值回落默认不抛错（kind 非法 → 整条丢弃返回 null，由仓库层剔除） */
 export function coerceExcerpt(raw: unknown, now: string): VaultExcerpt | null {
   if (!isRecord(raw)) return null
-  const base = sanitizeExcerptCreate({ kind: raw['kind'], text: raw['text'], note: raw['note'], page: raw['page'], rects: raw['rects'], paraIndex: raw['paraIndex'], start: raw['start'], end: raw['end'] })
+  const base = sanitizeExcerptCreate({ kind: raw['kind'], text: raw['text'], note: raw['note'], page: raw['page'], rects: raw['rects'], paraIndex: raw['paraIndex'], start: raw['start'], end: raw['end'], color: raw['color'], type: raw['type'] })
   if (!base) return null
   const at = typeof raw['at'] === 'string' && raw['at'] ? raw['at'] : now
   const updatedAt = typeof raw['updatedAt'] === 'string' && raw['updatedAt'] ? raw['updatedAt'] : now

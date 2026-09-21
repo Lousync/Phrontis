@@ -15,7 +15,7 @@ import { showToast } from '../../../lib/toast'
 import { resolveDegrade, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/pdfLayout'
 import { detectScanMode } from '../../../../electron/lib/kbStore/scanDetect'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
-import type { BookScanMode, ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState } from '../../../types'
+import type { BookScanMode, ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState, ExcerptColor, ExcerptType } from '../../../types'
 
 // 同源 worker（v3 classic，兼容 Electron 33 / Chromium 130——v4.5+ 依赖 toHex 未实现）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -893,11 +893,12 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     }).catch(() => { /* 忽略 */ })
   })
 
-  const onCreateExcerpt = useCallback((info: { text: string; page: number; rects?: ExcerptRect[] }) => {
-    void excerptCreate(rootId, relPath, { kind: 'pdf', text: info.text, page: info.page, rects: info.rects }).catch(() => { /* 创建失败不打扰阅读 */ })
+  const onCreateExcerpt = useCallback((color: ExcerptColor, type: ExcerptType, note?: string) => {
+    if (!selInfo) return
+    void excerptCreate(rootId, relPath, { kind: 'pdf', text: selInfo.text, page: selInfo.page, rects: selInfo.rects, color, type, note }).catch(() => { /* 创建失败不打扰阅读 */ })
     closeSelBar()
     window.getSelection()?.removeAllRanges()
-  }, [rootId, relPath, closeSelBar])
+  }, [rootId, relPath, closeSelBar, selInfo])
 
   /** 摘录高亮叠加：把摘录 rects（文本层百分比）画进各页 .textLayer（官方结构）。 */
   const applyExcerptOverlays = useCallback(() => {
@@ -1283,7 +1284,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       {immersive && <button onClick={toggleImmersive} title="退出沉浸 (Esc)"
         className="fixed top-3 right-3 z-50 flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 text-[var(--text-secondary)] shadow hover:text-[var(--text-primary)]"><X size={14} /></button>}
       {floatingBar}
-      <TextSelectionBar rect={selInfo?.rect ?? null} translate={translate} onCopy={doCopySel} onTranslate={() => void doTranslateSel()} onAsk={doAsk} onClose={closeSelBar} onCreateExcerpt={selInfo && rootId ? () => onCreateExcerpt({ text: selInfo.text, page: selInfo.page, rects: selInfo.rects }) : undefined} />
+      <TextSelectionBar rect={selInfo?.rect ?? null} translate={translate} onCopy={doCopySel} onTranslate={() => void doTranslateSel()} onAsk={doAsk} onClose={closeSelBar} onCreateExcerpt={selInfo && rootId ? onCreateExcerpt : undefined} />
     </div>
   )
 }

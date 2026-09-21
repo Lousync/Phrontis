@@ -6,7 +6,7 @@ import { KB_READER_STATE_CHANGED, KB_TXT_GOTO_PARA } from '../pdf/pdfEvents'
 import { decodeText } from '../../../lib/textDecode'
 import { ExcerptCaptureBar } from './ExcerptCaptureBar'
 import type { SelectionRect } from '../pdf/TextSelectionBar'
-import type { ExcerptItem } from '../../../types'
+import type { ExcerptItem, ExcerptColor, ExcerptType } from '../../../types'
 
 /**
  * TXT 阅读器（书架升级全格式阅读器一期，方案 bookshelf-reader-upgrade-design §S5）。
@@ -210,11 +210,11 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
 
   /** 段落 → 高亮区间表（txt 摘录且有偏移才参与；重叠区间后来者截断） */
   const highlightMap = useMemo(() => {
-    const map = new Map<number, Array<{ start: number; end: number; id: string; note: string }>>()
+    const map = new Map<number, Array<{ start: number; end: number; id: string; note: string; color: ExcerptColor }>>()
     for (const e of excerpts) {
       if (e.kind !== 'txt' || typeof e.paraIndex !== 'number' || typeof e.start !== 'number' || typeof e.end !== 'number') continue
       const arr = map.get(e.paraIndex) ?? []
-      arr.push({ start: e.start, end: e.end, id: e.id, note: e.note })
+      arr.push({ start: e.start, end: e.end, id: e.id, note: e.note, color: e.color })
       map.set(e.paraIndex, arr)
     }
     return map
@@ -271,7 +271,7 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     return () => document.removeEventListener('mouseup', onUp)
   }, [])
 
-  const handleCreateExcerpt = useCallback((text: string) => {
+  const handleCreateExcerpt = useCallback((text: string, color: ExcerptColor, type: ExcerptType, note?: string) => {
     if (!capture || !rootId) return
     void excerptCreate(rootId, relPath, {
       kind: 'txt',
@@ -279,6 +279,9 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       paraIndex: capture.paraIndex,
       start: capture.start,
       end: capture.end,
+      color,
+      type,
+      note,
     }).catch(() => { /* 创建失败不打扰阅读 */ })
     setCapture(null)
     window.getSelection()?.removeAllRanges()
@@ -335,8 +338,8 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
                   if (m.start > cur) segs.push(<span key={`s${cur}`}>{p.slice(cur, m.start)}</span>)
                   const segText = p.slice(m.start, Math.min(m.end, p.length))
                   segs.push(
-                    <mark key={m.id} data-eid={m.id} title={m.note || undefined}
-                      className="rounded-sm bg-[var(--accent)]/20 px-0.5 text-[var(--text-primary)]">
+                    <mark key={m.id} data-eid={m.id} data-ehc={m.color} title={m.note || undefined}
+                      className={`kb-exc-${m.color} rounded-sm px-0.5 text-[var(--text-primary)]`}>
                       {segText}
                     </mark>,
                   )

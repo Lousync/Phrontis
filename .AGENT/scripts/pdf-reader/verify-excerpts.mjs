@@ -56,6 +56,21 @@ check('patch：note 非字符串拒', S.sanitizeExcerptPatch({ note: 3 }) === nu
 check('patch：updatedAt 不在白名单', S.sanitizeExcerptPatch({ updatedAt: 'x' }) === null)
 check('patch：非对象拒', S.sanitizeExcerptPatch('note') === null)
 
+// color / type 白名单 + 缺省回落
+const cColorType = S.sanitizeExcerptCreate({ kind: 'txt', text: 'x', paraIndex: 1, color: 'b', type: 'idea' })
+check('创建：合法 color/type 收', !!cColorType && cColorType.color === 'b' && cColorType.type === 'idea')
+check('创建：非法 color 回落默认首色 y', (() => { const r = S.sanitizeExcerptCreate({ kind: 'txt', text: 'x', paraIndex: 1, color: 'zzz' }); return !!r && r.color === 'y' })())
+check('创建：非法 type 回落 excerpt', (() => { const r = S.sanitizeExcerptCreate({ kind: 'txt', text: 'x', paraIndex: 1, type: 'nope' }); return !!r && r.type === 'excerpt' })())
+const cDef = S.sanitizeExcerptCreate({ kind: 'txt', text: 'x', paraIndex: 1 })
+check('创建：缺 color/type 回落（type=excerpt, color=首色 y）', !!cDef && cDef.type === 'excerpt' && cDef.color === 'y')
+check('patch：color 合法收', (() => { const r = S.sanitizeExcerptPatch({ color: 'g' }); return !!r && r.color === 'g' })())
+check('patch：type 合法收', (() => { const r = S.sanitizeExcerptPatch({ type: 'highlight' }); return !!r && r.type === 'highlight' })())
+check('patch：color 非法拒', S.sanitizeExcerptPatch({ color: 'zzz' }) === null)
+check('patch：type 非法拒', S.sanitizeExcerptPatch({ type: 'nope' }) === null)
+// 存量旧数据（无 color/type）修补不报错、不丢、回落默认
+const oldCoerced = S.coerceExcerpt({ id: 'e9', kind: 'txt', text: '旧摘文', paraIndex: 1, start: 0, end: 2 }, 'NOW')
+check('修补：缺 color/type 的旧数据回落（不报错、不丢、type=excerpt/color=y）', !!oldCoerced && oldCoerced.type === 'excerpt' && oldCoerced.color === 'y')
+
 // 修补
 const coerced = S.coerceExcerpt({ id: 'e1', kind: 'txt', text: '摘文', note: '', paraIndex: 2, start: 0, end: 2, at: 'AT', updatedAt: 'UP' }, 'NOW')
 check('修补：合法条目保留 id/at/updatedAt', !!coerced && coerced.id === 'e1' && coerced.at === 'AT' && coerced.updatedAt === 'UP')
@@ -108,6 +123,20 @@ console.log('\n--- ④ DataChangeScope 双侧含 excerpt ---')
   for (const f of ['src/components/shared/txt/TxtReaderView.tsx', 'src/components/shared/pdf/PdfReaderView.tsx', 'src/components/workbench/ReadingSidePanel.tsx']) {
     check(`${f.split('/').pop()} 消费 excerpt 广播`, stripComments(read(f)).includes("useDataChanged('excerpt'"))
   }
+}
+
+// ===== ⑤ 色板常量 ↔ CSS 一致（单一来源，严禁两处各写一份色值） =====
+console.log('\n--- ⑤ 色板常量 ↔ CSS 一致 ---')
+{
+  const css = read('src/styles/index.css')
+  let ok = true
+  for (const c of S.EXCERPT_COLORS) {
+    const hasClass = css.includes(`.kb-exc-${c.id}`)
+    const hasHex = css.toLowerCase().includes(c.hex.toLowerCase())
+    if (!hasClass || !hasHex) { ok = false; console.log(` fail  .kb-exc-${c.id} ↔ ${c.hex}  [class=${hasClass}, hex=${hasHex}]`) }
+    else console.log(`  ok   .kb-exc-${c.id} ↔ ${c.hex}`)
+  }
+  check('色板 5 色与 CSS（src/styles/index.css）一一对应', ok)
 }
 
 console.log(`\n${pass ? '全部通过' : '存在失败项'}`)

@@ -262,6 +262,24 @@ async function main() {
   })()`)
   ok('右栏摘录列表出现条目', panelOn)
 
+  // ===== 6b) 多色高亮 + 卡片五要素（v3.5.0 摘录闭环） =====
+  const ehcOn = await evalJs(`(() => {
+    const marks = document.querySelectorAll('[data-wb="txtReader"] mark[data-ehc]')
+    return marks.length > 0
+  })()`)
+  ok('正文高亮带 data-ehc（多色高亮落地）', ehcOn)
+  const card5 = await evalJs(`(() => {
+    const panel = document.querySelector('[data-wb="readingPanel"]')
+    if (!panel) return { ok: false }
+    const card = !!panel.querySelector('.kb-exc-dot')
+    const pill = [...panel.querySelectorAll('span')].some((s) => ['摘录','想法','高亮'].includes((s.textContent || '').trim()))
+    const srcDate = /段 \\d+ · \\d{4}-\\d{2}-\\d{2}/.test(panel.textContent)
+    const quote = !!panel.querySelector('.kb-exc-bd')
+    const acts = !!panel.querySelector('button[title="复制"]')
+    return { ok: card && pill && srcDate && quote && acts, card, pill, srcDate, quote, acts }
+  })()`)
+  ok('右栏卡片渲染五要素（色点/类型胶囊/来源日期/引文边框/复制操作）', card5.ok, JSON.stringify(card5))
+
   // ===== 7) 真实鼠标拖选（CDP mouse 事件链）——防 user-select 白名单回归 =====
   // 程序化 Selection API 绕过 user-select 限制（2026-09-20 实测教训：body 全局 none 拦死真实划选、探针却全绿）
   const dragPrep = await evalJs(`(() => {

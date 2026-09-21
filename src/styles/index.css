@@ -1357,3 +1357,27 @@ input:focus, textarea:focus, select:focus {
 @media (prefers-reduced-motion: reduce) {
   [data-wb='floatBar'] { transition: none; }
 }
+
+/* ===== 摘录多色高亮（txt <mark> / pdf overlay 共用色板；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） ===== */
+.kb-exc-y { --exc: #efb84c; }
+.kb-exc-g { --exc: #7fb844; }
+.kb-exc-b { --exc: #5d9bdc; }
+.kb-exc-p { --exc: #e0709a; }
+.kb-exc-v { --exc: #9188e8; }
+
+/* 正文高亮：按 data-ehc 取色（缺省回落 accent） */
+mark[data-ehc], .kb-excerpt-hl[data-ehc] {
+  background-color: color-mix(in srgb, var(--exc) 34%, transparent);
+}
+mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
+  background-color: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* 色点（划选浮条 / 右栏卡片） */
+.kb-exc-dot {
+  width: 16px; height: 16px; border-radius: 5px;
+  border: 1px solid rgba(31, 29, 24, 0.14);
+  background-color: var(--exc);
+}
+/* 卡片左侧色边框 */
+.kb-exc-bd { border-left: 3px solid var(--exc); }

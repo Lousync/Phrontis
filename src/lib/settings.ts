@@ -261,6 +261,9 @@ export const SETTINGS = {
   updateMirror: { default: 'https://gh-proxy.com', type: 'text', label: '下载镜像', group: '更新', desc: 'GitHub 加速代理前缀，留空直连', keywords: ['镜像', '加速', '代理', 'github', 'proxy', '下载', 'cdn'], section: 'about', ui: true, scope: 'global', level: 'normal', affects: 'reload', anchor: 'advanced.mirror' },
   aiVaultFilePerm: { default: 'read', type: 'select', label: 'AI vault 文件权限', group: '权限', desc: 'AI vault.* 工具访问仓库文件：off=禁止 read=只读 write=预留', keywords: ['vault', '文件', '权限', '仓库', 'ai', '读写'], section: 'aiTools', ui: false, scope: 'global', level: 'danger', affects: 'live', aiTab: 'perms' },
 
+  // ---- 阅读摘录：上次用色（落 settings，不新开 localStorage；浮条点色即时更新，缺省首色 y） ----
+  excerptLastColor: { default: 'y', type: 'select', label: '上次摘录用色', group: '阅读', desc: '划选摘录默认使用的颜色（点色即更新，落 settings）', keywords: ['摘录', '高亮', '颜色'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+
   // ---- 桌面外壳（自定义磁贴工作台）----
   // 布局刻意存**全局**、不进 `.knowbase/`：桌面怎么摆是「这台机器上我怎么用」，
   // 不是某份资料的一部分；换仓库不该换桌面。详见 src/modules/desktop/layout.ts 顶部说明。

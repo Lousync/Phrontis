@@ -1217,6 +1217,14 @@ export interface BookListItem {
 /** 书籍种类（渲染层侧镜像；与 electron/lib/kbStore/bookFormats.ts 保持同步，契约脚本双向断言） */
 export type BookKind = 'pdf' | 'txt'
 
+/** 摘录色板 id（渲染层侧镜像；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
+export const EXCERPT_COLOR_IDS = ['y', 'g', 'b', 'p', 'v'] as const
+export type ExcerptColor = (typeof EXCERPT_COLOR_IDS)[number]
+/** 条目类型（注意：不是 kind —— kind 已被书籍格式 pdf/txt 占用） */
+export type ExcerptType = 'highlight' | 'excerpt' | 'idea'
+/** 色 id → 中文名（浮条 tooltip / 调试用） */
+export const EXCERPT_COLOR_NAMES: Record<ExcerptColor, string> = { y: '黄', g: '绿', b: '蓝', p: '粉', v: '紫' }
+
 /** 扫描版探测结论（渲染层侧镜像；真源 = electron/lib/kbStore/scanDetect.ts，缺省 = full） */
 export type BookScanMode = 'full' | 'partial' | 'no'
 
@@ -1254,6 +1262,10 @@ export interface ExcerptItem {
   end?: number
   text: string
   note: string
+  /** 高亮颜色（色板 id；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
+  color: ExcerptColor
+  /** 条目类型：highlight 高亮 / excerpt 摘录 / idea 想法（注意：不是 kind —— kind 已被书籍格式占用） */
+  type: ExcerptType
   at: string
   updatedAt: string
 }
@@ -1263,6 +1275,10 @@ export interface ExcerptCreatePayload {
   kind: BookKind
   text: string
   note?: string
+  /** 高亮颜色（色板 id） */
+  color?: ExcerptColor
+  /** 条目类型 */
+  type?: ExcerptType
   /** pdf 必带 */
   page?: number
   rects?: ExcerptRect[]
@@ -1272,7 +1288,7 @@ export interface ExcerptCreatePayload {
   end?: number
 }
 
-export type ExcerptPatch = { note: string }
+export type ExcerptPatch = { note?: string; color?: ExcerptColor; type?: ExcerptType }
 
 /** 写文件结果：conflict=true 表示磁盘已被外部修改（或已删除），需用户决策 */
 export interface WorkspaceWriteResult {

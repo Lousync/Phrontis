@@ -232,6 +232,14 @@ async function main() {
   })()`)
   console.log('[摘录后]', JSON.stringify(hl))
   ok('页面出现 .kb-excerpt-hl 高亮块', hl.overlays > 0, `overlays=${hl.overlays}`)
+  // 多色高亮：高亮块带 data-ehc（色板单源落地；点「摘录」缺省回落首色 y）
+  const ehc = await evalJs(`(() => {
+    const all = document.querySelectorAll('.kb-excerpt-hl').length
+    const withEhc = document.querySelectorAll('.kb-excerpt-hl[data-ehc]').length
+    const y = document.querySelectorAll('.kb-excerpt-hl[data-ehc="y"]').length
+    return { all, withEhc, y }
+  })()`)
+  ok('PDF 高亮块带 data-ehc（多色落地）', ehc.withEhc > 0, JSON.stringify(ehc))
   const errs = await evalJs(`window.__errs ?? []`)
   if (errs.length) console.log('[window errors]', JSON.stringify(errs.slice(0, 5)))
 
