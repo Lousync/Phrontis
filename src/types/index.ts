@@ -1189,9 +1189,11 @@ export interface PdfBookState {
   bookmarks: Array<{ page: number; note: string; at: string }>
   /** 扫描版探测结论（缺省 = full；阅读器打开时抽样检测并落盘一次） */
   scan?: BookScanMode
+  /** 页级降级（A5）：逐页 scanned 布尔；仅 scanMode !== 'full' 时落盘 */
+  scanPages?: boolean[]
 }
 /** pdfReader:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
-export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks' | 'scan'>>
+export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks' | 'scan' | 'scanPages'>>
 /** 书架清单条目（自动库：扫描 join 进度，不落盘）。一期 kind = pdf | txt */
 export interface BookListItem {
   relPath: string
@@ -1228,15 +1230,36 @@ export const EXCERPT_COLOR_NAMES: Record<ExcerptColor, string> = { y: '黄', g: 
 /** 扫描版探测结论（渲染层侧镜像；真源 = electron/lib/kbStore/scanDetect.ts，缺省 = full） */
 export type BookScanMode = 'full' | 'partial' | 'no'
 
-/** readerState:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
-export type ReaderStatePatch = { pct: number }
+/** TXT 书签（段落级定位；与 PDF 书签 page 不同源） */
+export interface TxtBookmark {
+  id: string
+  paraIndex: number
+  start?: number
+  end?: number
+  label: string
+  at: string
+}
+
+/** 纸色（书级记忆；档位与 PDF eyeCare 对齐） */
+export type ReaderPaper = 'default' | 'sepia' | 'green' | 'dark'
+
+/** readerState:patch 白名单载荷（updatedAt 由服务端生成，不接受传入；pct 可选，书签/字号/纸色可独立写） */
+export type ReaderStatePatch = {
+  pct?: number
+  bookmarks?: TxtBookmark[]
+  fontScale?: number
+  paper?: ReaderPaper
+}
 /** 单本（txt）书阅读状态（readerState.json 经 IPC 透出） */
 export interface ReaderBookState {
   kind: BookKind
-  /** 阅读进度 0..100 整数 */
+  /** 阅读进度 0..100 整数（A1 起 = 已加载字节 / 文件总字节） */
   pct: number
   /** 冲突检测基准；patch 时服务端重新生成，客户端只读 */
   updatedAt: string
+  bookmarks?: TxtBookmark[]
+  fontScale?: number
+  paper?: ReaderPaper
 }
 
 /** 归一化选区矩形（相对文本层容器的百分比 0..1，zoom 无关；真源 = electron/lib/kbStore/excerptSchema.ts） */

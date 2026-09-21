@@ -13,7 +13,7 @@ import { openExternal, copyText, excerptCreate, excerptList, pdfReaderGet, pdfRe
 import { useDataChanged } from '../../../lib/dataChanged'
 import { showToast } from '../../../lib/toast'
 import { resolveDegrade, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/pdfLayout'
-import { detectScanMode } from '../../../../electron/lib/kbStore/scanDetect'
+import { detectScanMode, resolveScanPages } from '../../../../electron/lib/kbStore/scanDetect'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
 import type { BookScanMode, ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState, ExcerptColor, ExcerptType } from '../../../types'
 
@@ -623,6 +623,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
           if (!alive) return
           setBookmarks(r.state.bookmarks ?? [])
           if (r.state.scan) setScanMode(r.state.scan)
+          if (r.state.scanPages) setScanPages(r.state.scanPages)
           if (r.state.eyeCare) setEyeCare(true)
         }
       } catch { /* 无进度/读取失败 → 从头看 */ }
@@ -643,6 +644,8 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   // ===== 扫描版探测（轻量方案）：均匀抽样 ≤6 页 getTextContent 字符计数 → full/partial/no。
   // 结论落盘一次（pdfReader.scan，书架角标复用）；'full' 不落盘（缺省即 full）。
   const [scanMode, setScanMode] = useState<BookScanMode | null>(null)
+  /** 页级降级（A5）：逐页 scanned 布尔；null = 未探测/无需（scanMode==='full'） */
+  const [scanPages, setScanPages] = useState<boolean[] | null>(null)
   useEffect(() => {
     if (loading || numPages === 0) return
     if (scanMode) return // 已有结论（持久化或本次已测）
@@ -670,6 +673,66 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, numPages, scanMode])
+
+  // ===== 页级扫描降级（A5）：仅 scanMode!=='full' 时逐页 getTextContent（分片空闲执行 200ms）=====
+  // 结论落盘 pdfReader.scanPages；禁止阻塞首屏。
+  useEffect(() => {
+    if (loading || numPages === 0) return
+    if (!scanMode || scanMode === 'full') return
+    if (scanPages !== null) return // 已探测（持久化或本次已测）
+    let alive = true
+    void (async () => {
+      const pdf = pdfRef.current
+      if (!pdf) return
+      const texty: boolean[] = new Array(numPages).fill(false)
+      for (let n = 1; n <= numPages; n++) {
+        if (!alive) return
+        try {
+          const p = await pdf.getPage(n)
+          const tc = await p.getTextContent()
+          const chars = tc.items.reduce((s, it) => s + (typeof (it as { str?: unknown }).str === 'string' ? ((it as { str: string }).str).trim().length : 0), 0)
+          texty[n - 1] = chars >= 20
+        } catch { texty[n - 1] = false }
+        // 分片空闲：每页之间让出 200ms，避免几百页探测卡死主线程
+        await new Promise((res) => setTimeout(res, 200))
+      }
+      if (!alive) return
+      const scanned = resolveScanPages(texty)
+      setScanPages(scanned)
+      try { await doPatch({ scanPages: scanned }) } catch { /* 落盘失败不影响阅读 */ }
+    })()
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, numPages, scanMode, scanPages])
+
+  // 页级扫描标记：扫描页（无文本层）右上角挂「扫描页」角标（懒渲染页面出现即装饰，防御式）
+  useEffect(() => {
+    if (scanPages === null) return
+    const viewer = viewerElRef.current
+    if (!viewer) return
+    const decorate = () => {
+      try {
+        viewer.querySelectorAll('.page[data-page-number]').forEach((el) => {
+          const n = Number((el as HTMLElement).getAttribute('data-page-number'))
+          if (!Number.isFinite(n)) return
+          const scanned = scanPages[n - 1]
+          const has = el.querySelector('.kb-scan-badge')
+          if (scanned && !has) {
+            const badge = document.createElement('div')
+            badge.className = 'kb-scan-badge'
+            badge.textContent = '扫描页'
+            el.appendChild(badge)
+          } else if (!scanned && has) {
+            has.remove()
+          }
+        })
+      } catch { /* 装饰失败忽略 */ }
+    }
+    decorate()
+    const mo = new MutationObserver(() => decorate())
+    mo.observe(viewer, { childList: true, subtree: true })
+    return () => mo.disconnect()
+  }, [scanPages])
 
   // 扫描版提示条（无文本层的页划选/摘录不可用——管理预期，见 bookshelf-reader-upgrade-design §5）
   const effectiveScan: BookScanMode = scanMode ?? 'full'
@@ -1248,7 +1311,9 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       {toolbar}
       {effectiveScan !== 'full' && (
         <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1 text-[11px] text-[var(--text-tertiary)]" data-wb="scanHint">
-          {effectiveScan === 'no' ? '本册为扫描版（页面是图片），划选 / 摘录不可用' : '本册部分页为扫描件（无文字层），这些页划选 / 摘录不可用'}
+          {effectiveScan === 'no'
+            ? '本册为扫描版（页面是图片），划选 / 摘录不可用'
+            : `本册部分页为扫描件（无文字层），这些页划选 / 摘录不可用${scanPages ? `（共 ${scanPages.filter(Boolean).length} 页）` : ''}`}
         </div>
       )}
       <div className="flex min-h-0 flex-1 items-stretch" style={eyeCare ? { filter: 'sepia(0.32) brightness(0.97) saturate(0.92)' } : undefined}>

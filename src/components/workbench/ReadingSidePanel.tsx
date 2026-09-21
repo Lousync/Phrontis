@@ -3,7 +3,7 @@ import { BookMarked, Pencil, Trash2, Check, X, Copy, Crosshair, Info } from 'luc
 import { excerptDelete, excerptList, excerptPatch, pdfReaderGet, readerStateGet, workspaceGetCurrent } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
 import { KB_PDF_PAGE_CHANGED, KB_READER_STATE_CHANGED } from '../shared/pdf/pdfEvents'
-import type { BookKind, ExcerptItem, ExcerptColor, ExcerptType, PdfBookState } from '../../types'
+import type { BookKind, ExcerptItem, ExcerptColor, ExcerptType, PdfBookState, TxtBookmark } from '../../types'
 
 /**
  * 右栏「阅读」侧栏（书架升级全格式阅读器一期 + 摘录先行批次 v3.5.0 重做）。
@@ -63,6 +63,7 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
   const [pdfState, setPdfState] = useState<PdfBookState | null>(null)
   const [txtPct, setTxtPct] = useState(0)
   const [bookmarks, setBookmarks] = useState<PdfBookState['bookmarks']>([])
+  const [txtBookmarks, setTxtBookmarks] = useState<TxtBookmark[]>([])
   const [excerpts, setExcerpts] = useState<ExcerptItem[]>([])
   const [noteEdit, setNoteEdit] = useState<{ id: string; draft: string } | null>(null)
   const [tab, setTab] = useState<'excerpt' | 'timeline'>('excerpt')
@@ -91,10 +92,20 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
       void readerStateGet(rootId, reading.relPath).then((r) => {
         if (!alive) return
         setTxtPct(r.ok ? r.state?.pct ?? 0 : 0)
+        setTxtBookmarks(r.ok && Array.isArray(r.state?.bookmarks) ? (r.state!.bookmarks as TxtBookmark[]) : [])
       }).catch(() => { /* 同上 */ })
     }
     return () => { alive = false }
   }, [rootId, reading.kind, reading.relPath])
+
+  // 书签集刷新（TXT）：readerState 变化时拉 TXT 书签（按 kind 取源，不重犯「左栏盲挂」同类缺陷）
+  const refreshTxtBookmarks = () => {
+    if (reading.kind !== 'txt' || !rootId) return
+    void readerStateGet(rootId, reading.relPath).then((r) => {
+      setTxtBookmarks(r.ok && Array.isArray(r.state?.bookmarks) ? (r.state!.bookmarks as TxtBookmark[]) : [])
+    }).catch(() => { /* 忽略 */ })
+  }
+  useDataChanged('readerState', refreshTxtBookmarks)
 
   // 实时跟随：阅读器在书的阅读过程中派发页码/进度广播
   useEffect(() => {
@@ -215,28 +226,47 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
               <span>摘录落在 Vault 笔记里。点「定位」跳回原文，正文点高亮也能跳回这里。点色即按该色高亮。</span>
             </div>
 
-            {/* 书签（仅 pdf） */}
-            {isPdf && (
+            {/* 书签（按 kind 取源：PDF 在 pdfReader.json、TXT 在 readerState.json） */}
+            {(isPdf || reading.kind === 'txt') && (
               <div className="mb-2">
                 <div className="flex items-center gap-1 px-1.5 py-1 text-[11px] text-[var(--text-muted)]">
                   <BookMarked size={11} />
                   书签
-                  {bookmarks.length > 0 && <span className="text-[var(--text-tertiary)]">{bookmarks.length}</span>}
+                  {(isPdf ? bookmarks.length : txtBookmarks.length) > 0 && <span className="text-[var(--text-tertiary)]">{isPdf ? bookmarks.length : txtBookmarks.length}</span>}
                 </div>
-                {bookmarks.length === 0 ? (
-                  <div className="px-2 py-1.5 text-[11px] leading-relaxed text-[var(--text-tertiary)]">在阅读器工具栏加书签后，这里可以快速跳页</div>
+                {(isPdf ? bookmarks.length : txtBookmarks.length) === 0 ? (
+                  <div className="px-2 py-1.5 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+                    {isPdf ? '在阅读器工具栏加书签后，这里可以快速跳页' : '在 TXT 阅读器工具栏加书签后，这里可以快速跳段'}
+                  </div>
                 ) : (
-                  bookmarks.map((b, i) => (
-                    <button
-                      key={`${b.page}-${i}`}
-                      onClick={() => onLocatePdfPage?.(b.page)}
-                      className="kb-item-in group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"
-                      title={b.note ? `第 ${b.page} 页 · ${b.note}` : `第 ${b.page} 页`}
-                    >
-                      <span className="shrink-0 rounded bg-[var(--bg-hover)] px-1 py-0.5 text-[10px] text-[var(--text-secondary)]">P{b.page}</span>
-                      <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{b.note || ' '}</span>
-                    </button>
-                  ))
+                  (isPdf ? bookmarks : txtBookmarks).map((b, i) =>
+                    isPdf ? (
+                      (() => {
+                        const bm = b as PdfBookState['bookmarks'][number]
+                        return (
+                          <button
+                            key={`${bm.page}-${i}`}
+                            onClick={() => onLocatePdfPage?.(bm.page)}
+                            className="kb-item-in group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                            title={bm.note ? `第 ${bm.page} 页 · ${bm.note}` : `第 ${bm.page} 页`}
+                          >
+                            <span className="shrink-0 rounded bg-[var(--bg-hover)] px-1 py-0.5 text-[10px] text-[var(--text-secondary)]">P{bm.page}</span>
+                            <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{bm.note || ' '}</span>
+                          </button>
+                        )
+                      })()
+                    ) : (
+                      <button
+                        key={`${(b as TxtBookmark).id}-${i}`}
+                        onClick={() => onLocateExcerpt?.({ kind: 'txt', paraIndex: (b as TxtBookmark).paraIndex })}
+                        className="kb-item-in group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                        title={`跳到 ${(b as TxtBookmark).label || `段落 ${(b as TxtBookmark).paraIndex + 1}`}`}
+                      >
+                        <span className="shrink-0 rounded bg-[var(--bg-hover)] px-1 py-0.5 text-[10px] text-[var(--text-secondary)]">¶{(b as TxtBookmark).paraIndex + 1}</span>
+                        <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{(b as TxtBookmark).label || ' '}</span>
+                      </button>
+                    ),
+                  )
                 )}
               </div>
             )}

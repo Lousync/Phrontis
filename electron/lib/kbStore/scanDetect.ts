@@ -30,3 +30,13 @@ export function detectScanMode(
   if (texty === 0) return 'no'
   return 'partial'
 }
+
+/**
+ * 页级降级（A5）：逐页 texty 布尔 → 逐页 scanned 布尔。
+ * 输入 = 每页是否「有文本层」（调用方在 scanMode !== 'full' 时逐页 getTextContent 得出），
+ * 输出 = 每页是否「扫描页（无文本层）」；true = 该页划选/摘录不可用。
+ * 纯函数、零依赖，契约脚本直接 import 跑用例。
+ */
+export function resolveScanPages(pageTexty: boolean[]): boolean[] {
+  return (Array.isArray(pageTexty) ? pageTexty : []).map((t) => t !== true)
+}

@@ -191,5 +191,24 @@ console.log('\n--- ⑪ detectScanMode：抽样字数 → full/partial/no ---')
   check('修补：坏 scan 回落缺省（undefined = full）', c2.scan === undefined)
 }
 
+// ===== ⑫ A1/A5 拆分函数：detectEncoding / decodeWith / resolveScanPages =====
+console.log('\n--- ⑫ detectEncoding / decodeWith / resolveScanPages ---')
+{
+  const { detectEncoding, decodeWith } = await import('../../../src/lib/textDecode.ts')
+  check('detectEncoding：UTF-8 BOM → utf8-bom', detectEncoding(new Uint8Array(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('hi', 'utf8')]))) === 'utf8-bom')
+  check('detectEncoding：UTF-16LE BOM → utf16le', detectEncoding(new Uint8Array(Buffer.from([0xff, 0xfe, 0x68, 0x00, 0x69, 0x00]))) === 'utf16le')
+  check('detectEncoding：UTF-16BE BOM → utf16be', detectEncoding(new Uint8Array(Buffer.from([0xfe, 0xff, 0x00, 0x68, 0x00, 0x69]))) === 'utf16be')
+  check('detectEncoding：无 BOM 合法 UTF-8 → utf8', detectEncoding(new Uint8Array(Buffer.from('中文阅读', 'utf8'))) === 'utf8')
+  check('detectEncoding：无 BOM GB18030 样本 → gb18030', detectEncoding(new Uint8Array(Buffer.from('D6D0CEC4D4C4B6C1', 'hex'))) === 'gb18030')
+  const utf8 = new Uint8Array(Buffer.from('第一行\n第二段正文。', 'utf8'))
+  check('decodeWith 复用 decodeText（无 BOM UTF-8）', decodeWith(utf8, detectEncoding(utf8)) === '第一行\n第二段正文。')
+  const gb = new Uint8Array(Buffer.from('D6D0CEC4D4C4B6C1', 'hex'))
+  check('decodeWith 复用 decodeText（GB18030）', decodeWith(gb, detectEncoding(gb)) === '中文阅读')
+  const D = await import('../../../electron/lib/kbStore/scanDetect.ts')
+  check('resolveScanPages：[t,f,t] → [f,t,f]', JSON.stringify(D.resolveScanPages([true, false, true])) === '[false,true,false]')
+  check('resolveScanPages：空 → 空', JSON.stringify(D.resolveScanPages([])) === '[]')
+  check('resolveScanPages：[f,f] → [t,t]', JSON.stringify(D.resolveScanPages([false, false])) === '[true,true]')
+}
+
 console.log(`\n${pass ? '全部通过' : '存在失败项'}`)
 process.exit(pass ? 0 : 1)

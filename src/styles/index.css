@@ -1373,6 +1373,32 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
   background-color: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+/* TXT 全文搜索命中高亮（A3：新类，严禁复用摘录的 data-ehc；与 .kb-excerpt-hl 区分两套） */
+.kb-search-hl {
+  background-color: color-mix(in srgb, #ffd24d 55%, transparent);
+  border-radius: 2px;
+}
+.kb-search-active {
+  background-color: #ffb020;
+  color: #1a1a1a;
+  box-shadow: 0 0 0 1px #ffb020;
+}
+
+/* PDF 页级扫描角标（A5）：无文本层的扫描页右上角标记 */
+.kb-scan-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 5;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  pointer-events: none;
+}
+
 /* 色点（划选浮条 / 右栏卡片） */
 .kb-exc-dot {
   width: 16px; height: 16px; border-radius: 5px;

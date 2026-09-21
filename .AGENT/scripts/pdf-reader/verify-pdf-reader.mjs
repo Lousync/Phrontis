@@ -132,5 +132,23 @@ if (statSync(layoutPath, { throwIfNoEntry: false })?.isFile?.()) {
   console.log('  skip  src/lib/pdfLayout.ts 未落地（批次 3 启用）')
 }
 
+// ===== ⑥ A5 页级降级：scanPages 白名单 + resolveScanPages =====
+console.log('\n--- ⑥ A5 页级扫描白名单 / resolveScanPages ---')
+{
+  const good = S.sanitizeBookPatch({ scanPages: [false, true, false] })
+  check('patch：scanPages 合法收', !!good && Array.isArray(good.scanPages) && good.scanPages.length === 3 && good.scanPages[1] === true)
+  check('patch：scanPages 空数组收', (() => { const r = S.sanitizeBookPatch({ scanPages: [] }); return !!r && Array.isArray(r.scanPages) && r.scanPages.length === 0 })())
+  check('patch：scanPages 含非布尔拒', S.sanitizeBookPatch({ scanPages: [true, 1] }) === null)
+  check('patch：scanPages 超长（>2000）拒', S.sanitizeBookPatch({ scanPages: new Array(2001).fill(false) }) === null)
+  check('patch：scanPages 非数组拒', S.sanitizeBookPatch({ scanPages: 'no' }) === null)
+  const coerced = S.coerceBookState({ lastPage: 2, scanPages: [false, true] }, 'NOW')
+  check('修补：合法 scanPages 保留', Array.isArray(coerced.scanPages) && coerced.scanPages[1] === true)
+  const coerced2 = S.coerceBookState({ lastPage: 2, scanPages: ['x'] }, 'NOW')
+  check('修补：坏 scanPages 回落缺省（undefined）', coerced2.scanPages === undefined)
+  const SD = await import('../../../electron/lib/kbStore/scanDetect.ts')
+  check('resolveScanPages：[t,f,t] → [f,t,f]', JSON.stringify(SD.resolveScanPages([true, false, true])) === '[false,true,false]')
+  check('resolveScanPages：全文本页 → 全 false', JSON.stringify(SD.resolveScanPages([true, true])) === '[false,false]')
+}
+
 console.log(pass ? '\nPASS: pdf-reader 契约全部通过' : '\nFAIL: 存在失败断言')
 process.exit(pass ? 0 : 1)
