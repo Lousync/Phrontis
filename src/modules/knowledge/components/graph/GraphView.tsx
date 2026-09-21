@@ -12,7 +12,7 @@ import type { GraphIndexData, GraphNode, GraphViewConfig } from '../../../../lib
 import { getKnowledgeGraph, getKnowledgePageById, getGraphViewConfig, updateGraphViewConfig } from '../../../../lib/ipc'
 import { GraphCanvas, type GraphCanvasHandle } from './GraphCanvas'
 import { GraphSidebar } from './GraphSidebar'
-import { applyGroupFilter } from './graphGroups'
+import { applyGroupFilter, excludeSoftwareFolders } from './graphGroups'
 
 interface GraphViewProps {
   onExit: () => void
@@ -156,7 +156,7 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
     let alive = true
     const load = (): void => {
       getKnowledgeGraph()
-        .then((g) => { if (alive) setData(g) })
+        .then((g) => { if (alive) setData(excludeSoftwareFolders(g)) })
         .catch((e) => { if (alive) setError(String(e?.message ?? e)) })
     }
     load()

@@ -31,6 +31,44 @@ function tagNodeId(data: GraphIndexData, name: string): string | null {
   return t ? t.id : null
 }
 
+/**
+ * 软件文件夹不进图谱（2026-09-21 用户指定）：AI教学 等软件自动生成的目录 + 点前缀
+ * 系统目录（.knowbase/.books…）。在数据入口（GraphView 拉取后）整体剔除 —— 侧栏分组、
+ * 计数、画布三处自动一致，无需各自排除。
+ */
+const EXCLUDED_TOP_DIRS = new Set(['AI教学'])
+
+function isExcludedPage(n: GraphNode): boolean {
+  if (n.kind !== 'page') return false
+  const top = (n.path || '').split('/')[0]
+  return top.startsWith('.') || EXCLUDED_TOP_DIRS.has(top)
+}
+
+export function excludeSoftwareFolders(data: GraphIndexData): GraphIndexData {
+  const byId = new Map(data.nodes.map((n) => [n.id, n]))
+  const keep = new Set(data.nodes.filter((n) => !isExcludedPage(n)).map((n) => n.id))
+  const edges1 = data.edges.filter((e) => keep.has(e.s) && keep.has(e.t))
+  // 局部 degree 重算（剔除后 tag 可能失去全部成员页 → 孤悬标签一并移除）
+  const deg = new Map<string, number>()
+  for (const e of edges1) {
+    deg.set(e.s, (deg.get(e.s) ?? 0) + 1)
+    deg.set(e.t, (deg.get(e.t) ?? 0) + 1)
+  }
+  const keep2 = new Set(
+    [...keep].filter((id) => {
+      const n = byId.get(id)
+      return n && (n.kind !== 'tag' || (deg.get(id) ?? 0) > 0)
+    }),
+  )
+  return {
+    ...data,
+    nodes: data.nodes
+      .filter((n) => keep2.has(n.id))
+      .map((n) => (n.kind === 'dangling' ? n : { ...n, degree: deg.get(n.id) ?? 0 })),
+    edges: edges1.filter((e) => keep2.has(e.s) && keep2.has(e.t)),
+  }
+}
+
 function edgesAmong(data: GraphIndexData, ids: Set<string>): GraphEdge[] {
   return data.edges.filter((e) => ids.has(e.s) && ids.has(e.t))
 }
