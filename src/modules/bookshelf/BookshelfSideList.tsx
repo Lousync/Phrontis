@@ -20,12 +20,17 @@ const byRecent: SortFn = (a, b) => {
  * 书架左栏书目条目视图（2026-09-19 反馈：进入书架后左栏不再空置，放书条目列表）。
  * 书源 = 仓库顶层 `.books/`（点前缀系统区，笔记区不显示；目录不存在时主进程自动创建）。
  * 条目 = 封面 + 书名 + 细进度条（百分比 = lastPage/totalPages，totalPages 由阅读器
- * 首读登记进 pdfReader.json；未登记/未读的书进度条为空）。点击条目 = 打开阅读，
- * 与主区封面网格同一落点（App 的 setBookshelfReading）。阅读态（有 railReaderDoc）
- * 时左栏仍走 PdfRailPanel 三件套，本组件只在「未在读任何书」时渲染。
+ * 首读登记进 pdfReader.json；txt 用 pct）。点击条目 = 打开阅读，与主区封面网格同一落点
+ * （App 的 setBookshelfReading）。
+ *
+ * 渲染时机（2026-09-21 修）：① 未在读任何书；② **在读 TXT** 时（PdfRailPanel 只认 PDF，
+ * 对 .txt 解析必失败 → 静默降级成空壳三件套，故 TXT 阅读态回落本列表并高亮当前书）。
+ * 仅「在读 PDF」时左栏才走 PdfRailPanel —— 分发点是 App.tsx 的左栏 portal。
  */
-export function BookshelfSideList({ onOpenBook }: {
+export function BookshelfSideList({ onOpenBook, activeRelPath = null }: {
   onOpenBook: (relPath: string, name: string, kind: BookListItem['kind']) => void
+  /** 当前正在阅读的书（TXT 阅读态由 App 传入）；命中则高亮该行 */
+  activeRelPath?: string | null
 }) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [books, setBooks] = useState<BookListItem[] | null>(null)
@@ -74,7 +79,7 @@ export function BookshelfSideList({ onOpenBook }: {
   const list = books ? [...books].sort(byRecent) : null
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div data-wb="bookshelfSideList" className="flex h-full min-h-0 flex-col">
       {/* 标题行：与其他模块左栏标题行同款（书架 + 本数） */}
       <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
         <BookOpen size={12} />
@@ -96,6 +101,7 @@ export function BookshelfSideList({ onOpenBook }: {
         )}
         {list && list.map((b) => {
           const title = bookDisplayName(b.relPath)
+          const active = activeRelPath === b.relPath
           const pct = b.kind === 'txt'
             ? (b.pct ?? 0)
             : (b.hasProgress && b.totalPages > 0 ? Math.min(100, Math.round((b.lastPage / b.totalPages) * 100)) : 0)
@@ -103,9 +109,12 @@ export function BookshelfSideList({ onOpenBook }: {
             <button
               key={b.relPath}
               onClick={() => onOpenBook(b.relPath, title, b.kind)}
-              className="kb-item-in group flex w-full items-center gap-2 rounded-md p-1.5 text-left transition-colors hover:bg-[var(--bg-hover)]"
+              data-wb-active={active ? '1' : undefined}
+              className={`kb-item-in group relative flex w-full items-center gap-2 rounded-md p-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${active ? 'bg-[var(--bg-hover)]' : ''}`}
               title={b.kind === 'txt' ? (pct > 0 ? `已读 ${pct}%` : title) : (b.hasProgress && b.totalPages > 0 ? `第 ${b.lastPage} / ${b.totalPages} 页 · ${pct}%` : title)}
             >
+              {/* 在读标记：左侧细竖条（只改底色 + 竖条，不加文字标签） */}
+              {active && <span className="absolute left-0.5 top-2 bottom-2 w-[2px] rounded-full bg-[var(--accent)]" />}
               <div className="w-[34px] shrink-0">
                 <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={title} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
               </div>

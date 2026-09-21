@@ -147,7 +147,7 @@ export function PdfRailPanel({ readerDoc }: Props) {
 
   if (!relPath) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-[var(--text-muted)]">
+      <div data-wb="pdfRailPanel" data-wb-state="empty" className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-[var(--text-muted)]">
         <BookOpen size={26} strokeWidth={1.4} />
         <div className="text-[12px] leading-relaxed">从书架选一本书开始阅读<br />这里会显示它的目录、缩略图与书签</div>
       </div>
@@ -158,7 +158,7 @@ export function PdfRailPanel({ readerDoc }: Props) {
     `flex flex-1 items-center justify-center gap-1 rounded px-1 py-1 text-[11px] ${active ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div data-wb="pdfRailPanel" data-wb-state="ready" className="flex h-full min-h-0 flex-col">
       {/* 三区切换。文字按容器宽度退化（styles/index.css 的 .kb-fit 段）：左栏收到 <178px 时
           「缩略图」三个字（理想 56px）塞不进 flex-1 均分出的 53px，会换行成竖排 → 只留图标。 */}
       <div className="kb-fit kb-fit-pdfrail mx-1.5 mb-1 flex shrink-0 items-center gap-0.5 rounded-md border border-[var(--border-color)] p-0.5">

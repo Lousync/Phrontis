@@ -7,9 +7,13 @@
  * 断言链（任一失败 exit 1）：
  *   1) 点左栏「书架」书签 → 书架打开，[data-wb="readingPanel"] 不存在（无书在读无阅读 Tab）
  *   2) 点第一本书卡片 → [data-wb="txtReader"] 存在 → 右栏出现 [data-wb-rp-tab="reading"]
+ *   2b) TXT 在读 → 左栏是书目列表（[data-wb="bookshelfSideList"]）**且不挂** PDF 三件套，当前书高亮
  *   3) 点阅读 Tab → [data-wb="readingPanel"] 可见，右栏已展开（宽度 > 0）
  *   4) 关书架标签（页面条 ✕）→ [data-wb-rp-tab="reading"] 从 DOM 消失，激活 Tab 回落 widgets/ai
  *   5) 重开书架、打开书、真实滚动到约 50% → 主进程侧读 readerState.json 断言 pct ∈ [40, 60]
+ *   6) 程序化划选 → 浮条「摘录」→ excerpts.json 落盘 + <mark> 高亮 + 右栏摘录列表
+ *   7) CDP 真实鼠标拖选 → 浮条出现（防 user-select 白名单回归）
+ *   8) 反向：返回书架 → 打开 PDF → 左栏挂回 PDF 三件套（证明左栏是「按书分流」而非永远走列表）
  */
 const DEBUG_PORT = 9222
 const { readFileSync } = await import('node:fs')
@@ -117,6 +121,24 @@ async function main() {
   })()`)
   console.log('[step2 诊断]', JSON.stringify(readingTabOn))
   ok('有书在读 → 右栏出现阅读 Tab', readingTabOn.on === true)
+  assertNotFailed()
+
+  // ===== 2b) TXT 在读 → 左栏按 kind 分发（书目列表 + 当前书高亮），不误挂 PDF 三件套 =====
+  // 修复前：App 左栏 portal 无条件挂 PdfRailPanel（该组件无 kind 概念），对 .txt 解析必失败 →
+  // setPdf(null) 静默降级成「空壳三件套」。判据 = 列表在位 **且** 三件套不在位（负向是关键）。
+  await sleep(400)
+  const railTxt = await evalJs(`(() => {
+    const activeBtn = document.querySelector('[data-wb="bookshelfSideList"] [data-wb-active="1"]')
+    return {
+      list: !!document.querySelector('[data-wb="bookshelfSideList"]'),
+      pdfRail: !!document.querySelector('[data-wb="pdfRailPanel"]'),
+      activeText: (activeBtn?.textContent ?? '').trim().slice(0, 40),
+    }
+  })()`)
+  console.log('[step2b 诊断]', JSON.stringify(railTxt))
+  ok('TXT 在读 → 左栏是书目列表', railTxt.list === true)
+  ok('TXT 在读 → 左栏不挂 PDF 三件套', railTxt.pdfRail === false)
+  ok('书目列表里当前书已高亮', /样书/.test(railTxt.activeText), `activeText=${railTxt.activeText}`)
   assertNotFailed()
 
   // ===== 3) 点阅读 Tab → readingPanel 可见 + 右栏已展开 =====
@@ -269,6 +291,28 @@ async function main() {
     return !!btn
   })()`)
   ok('真实鼠标拖选 → 划选浮条出现（user-select 白名单生效）', dragBarOn)
+
+  // ===== 8) 反向：PDF 在读 → 左栏回到 PDF 三件套（证明 kind 分发是「按书分流」而非「永远走列表」） =====
+  const backClicked = await evalJs(`(() => {
+    const b = [...document.querySelectorAll('[data-wb="txtReader"] button')].find((x) => (x.textContent || '').includes('返回书架'))
+    b?.click(); return !!b
+  })()`)
+  ok('点「返回书架」退出 TXT 阅读', backClicked)
+  await sleep(900)
+  const pdfClicked = await evalJs(`(() => {
+    const b = [...document.querySelectorAll('main button')].find((x) => (x.getAttribute('title') || '').includes('.pdf'))
+    b?.click(); return !!b
+  })()`)
+  ok('找到并点击 PDF 书卡片', pdfClicked)
+  await sleep(1800)
+  const railPdf = await evalJs(`(() => ({
+    pdfRail: !!document.querySelector('[data-wb="pdfRailPanel"]'),
+    state: document.querySelector('[data-wb="pdfRailPanel"]')?.getAttribute('data-wb-state') ?? null,
+    list: !!document.querySelector('[data-wb="bookshelfSideList"]'),
+  }))()`)
+  console.log('[step8 诊断]', JSON.stringify(railPdf))
+  ok('PDF 在读 → 左栏挂 PDF 三件套', railPdf.pdfRail === true)
+  ok('PDF 在读 → 左栏不挂书目列表', railPdf.list === false)
 
   console.log(failed ? '\n存在失败断言' : '\n全部通过')
   process.exit(failed ? 1 : 0)

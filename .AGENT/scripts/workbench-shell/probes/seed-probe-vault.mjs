@@ -4,7 +4,7 @@
  * 这里造一个带 .knowbase 的 fixture 仓库 + 登记（data/vaults.json）+ settings.currentVaultId，
  * 让 electron 启动时经 workspaceManager.loadVaults() 常规恢复路径打开它（不用原生对话框）。
  */
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 
@@ -47,6 +47,14 @@ for (let i = 1; i <= 6; i++) {
 // 1c. 全格式阅读器一期（2026-09-20）：--add-books → .books/ 落一本 TXT 样书
 //     （几十段中文、空行分段），probe-reading-panel.mjs 断言链的 fixture
 if (process.argv.includes('--add-books')) {
+  // 幂等闸门（2026-09-21）：探针会往模块数据里写进度 / 摘录 / 书签，第二次跑时残留会让断言失真——
+  // 实测两个假失败：① readerState.pct 残留 50 → step5「滚到 50%」从 50% 起滚，实际滚到 100%；
+  // ② excerpts 残留 → 段落里已有 <mark>，程序化选区 range.setStart(文本节点, 4) 抛 IndexSizeError。
+  // seed 在 electron 启动前执行（app 尚未把 jsonStore 载入内存），此处清空即真清空。
+  const modulesDir = join(fixture, '.knowbase', 'modules')
+  for (const f of ['readerState.json', 'excerpts.json', 'pdfReader.json']) {
+    try { unlinkSync(join(modulesDir, f)); console.log('reset reader module data:', f) } catch { /* 不存在即无需清 */ }
+  }
   const booksDir = join(fixture, '.books')
   mkdirSync(booksDir, { recursive: true })
   const bookPath = join(booksDir, '探针样书.txt')

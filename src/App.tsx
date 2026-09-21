@@ -578,28 +578,16 @@ export default function App() {
     return () => window.removeEventListener('kb-ai-teaching-ask', handler)
   }, [])
 
-  // v3.4.0 批次 6：编辑器激活文档类型透出（kb-editor-doc-changed）→ 左栏跟随判断用
-  const [editorActiveDoc, setEditorActiveDoc] = useState<{ relPath: string; kind: 'pdf' | 'doc' } | null>(null)
-  useEffect(() => {
-    const handler = (e: Event) => {
-      const d = (e as CustomEvent).detail as { relPath?: string; kind?: 'pdf' | 'doc' } | undefined
-      if (!d || typeof d.relPath !== 'string') return
-      setEditorActiveDoc({ relPath: d.relPath, kind: d.kind === 'pdf' ? 'pdf' : 'doc' })
-    }
-    window.addEventListener('kb-editor-doc-changed', handler)
-    return () => window.removeEventListener('kb-editor-doc-changed', handler)
-  }, [])
-
   // 2026-09-17 拍板（书架内自渲染）：点书在书架标签页内部打开阅读器，不再借编辑器文档标签。
   // 阅读状态上收 App（单一真相源）：书架模块消费 + 左栏大纲态（PdfRailPanel）同步跟随。
   // 全格式阅读器一期（2026-09-20）：补 kind —— 决定书架内渲染哪个阅读引擎 + 右栏阅读侧栏。
   const [bookshelfReading, setBookshelfReading] = useState<{ relPath: string; name: string; kind: BookKind } | null>(null)
-  /** 左栏大纲态展示对象：书架内正在读的书优先，其次编辑器激活的 PDF（知识库附件路径） */
-  const railReaderDoc = bookshelfReading
-    ? { relPath: bookshelfReading.relPath }
-    : editorActiveDoc?.kind === 'pdf'
-      ? { relPath: editorActiveDoc.relPath }
-      : null
+  /** 左栏阅读态展示对象：**仅书架内正在读的书**。kind 决定左栏挂 PDF 三件套还是回落书目列表。
+   *  2026-09-21：原先的 second source「编辑器激活的 PDF」已随编辑器模块退役失效（全仓无人派发
+   *  kb-editor-doc-changed，判定恒假），连同其监听一并清除——保留会让人误以为编辑器 PDF 仍进左栏。 */
+  const railReaderDoc: { relPath: string; kind: BookKind } | null = bookshelfReading
+    ? { relPath: bookshelfReading.relPath, kind: bookshelfReading.kind }
+    : null
 
   // 日程侧边栏（v3.2.0 ⑮）桌面磁贴的日历 → 日志跳转。
   // 与 kb-open-note 同范式：事件只送意图，payload 走 state + props
@@ -1215,16 +1203,20 @@ export default function App() {
 <main className="flex-1 flex overflow-hidden bg-transparent relative">
             {/* 工作台三栏外壳（v3.4.0 批次3）：左栏=书签双态（总览/模块侧栏/树模式+锁定+仓库切换） | 中间栏(卡片壳) | 右栏(占位，批次4 填控件)。
                 DayPanel 保持 main 层平级（批次4 迁入右栏）；aiTeaching 整窗形态隐藏左右栏（suppressSides，方案 §2） */}
-            {/* 左栏书架态（拍板 B：三件套只在左栏一份；portal 独立于书架标签页挂载，
-                编辑器 PDF（知识库附件路径）与书架内阅读都走三件套；随 railModule 卸载）。
+            {/* 左栏书架态（拍板 B：三件套只在左栏一份；portal 独立于书架标签页挂载；随 railModule 卸载）。
                 2026-09-19 反馈：未在读任何书（railReaderDoc 为空）→ 左栏放书目条目视图
-                （封面 + 书名 + 进度条，点击即开读），不再空置。 */}
+                （封面 + 书名 + 进度条，点击即开读），不再空置。
+                2026-09-21 修复：三件套**按 kind 分发** —— PdfRailPanel 依赖 pdfjs、且只认 PDF
+                （对 .txt 解析必失败并静默降级成空壳三件套）；TXT 在读时回落书目列表 + 当前书高亮。 */}
             {railModule === 'bookshelf' && wbModSlotEl ? createPortal(
               <Suspense fallback={<div className="flex h-full items-center justify-center text-[11.5px] text-[var(--text-muted)]">加载中…</div>}>
-                {railReaderDoc ? (
+                {railReaderDoc?.kind === 'pdf' ? (
                   <PdfRailPanel readerDoc={railReaderDoc} />
                 ) : (
-                  <BookshelfSideList onOpenBook={(relPath, name, kind) => setBookshelfReading({ relPath, name, kind })} />
+                  <BookshelfSideList
+                    activeRelPath={railReaderDoc?.relPath ?? null}
+                    onOpenBook={(relPath, name, kind) => setBookshelfReading({ relPath, name, kind })}
+                  />
                 )}
               </Suspense>,
               wbModSlotEl,
