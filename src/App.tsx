@@ -21,7 +21,7 @@ import { FONT_CSS_MAP, applyThemeClass } from './lib/settings'
 import { useSettings } from './lib/SettingsContext'
 import { isEditingInput } from './lib/shortcuts'
 import { setGlobalActiveTab } from './lib/activeTab'
-import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged } from './lib/ipc'
+import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList } from './lib/ipc'
 import { getPluginTools } from './lib/pluginService'
 import { requestPluginViewActivation, dispatchCodePluginAction } from './lib/pluginCommandBus'
 import { showToast } from './lib/toast'
@@ -57,7 +57,8 @@ const BookshelfSideList = lazy(() => import('./modules/bookshelf/BookshelfSideLi
 
 import { FillPopup } from './modules/toolbox/components/FillPopup'
 import { VaultPicker } from './components/shared/VaultPicker'
-import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA } from './components/shared/pdf/pdfEvents'
+import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA, KB_OPEN_EXCERPT_LOC } from './components/shared/pdf/pdfEvents'
+import { bookDisplayName } from '../electron/lib/kbStore/bookFormats'
 import { PomodoroProvider } from './modules/toolbox/hooks/PomodoroContext'
 import { PomodoroPanel } from './modules/toolbox/components/PomodoroPanel'
 import { Onboarding } from './components/shared/Onboarding'
@@ -588,6 +589,48 @@ export default function App() {
   const railReaderDoc: { relPath: string; kind: BookKind } | null = bookshelfReading
     ? { relPath: bookshelfReading.relPath, kind: bookshelfReading.kind }
     : null
+
+  // 摘录导出的「回到原文」（v3.5.0 第 5 项 · C4）：知识库「读书笔记」页里的 `kbloc:` 链接
+  // 由 MarkdownPreview 单点拦下后派发到这里 —— 解出书 → 打开该书（切到书架标签）→ 定位到摘录所在页/段。
+  // 只在这里读一次数据（摘录按 id 查 → 拿 kind 与 locator），阅读器仍从事件拿跳转意图，不新增 second source。
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const href = String((e as CustomEvent<{ href?: string }>).detail?.href ?? '')
+      const m = /^kbloc:([^#]+)#(.+)$/.exec(href)
+      if (!m) { showToast({ type: 'error', message: '无法解析摘录定位链接' }); return }
+      const key = m[1]
+      const excerptId = m[2]
+      const slash = key.indexOf('/')
+      const rootId = slash > 0 ? key.slice(0, slash) : ''
+      const relPath = slash >= 0 ? key.slice(slash + 1) : ''
+      if (!rootId || !relPath) { showToast({ type: 'error', message: '摘录定位链接缺少书籍信息' }); return }
+      void (async () => {
+        const cur = await workspaceGetCurrent().catch(() => null)
+        if (!cur || cur.rootId !== rootId) {
+          showToast({ type: 'info', message: '原书不在当前仓库，无法回到原文' })
+          return
+        }
+        const r = await excerptList(rootId, relPath).catch(() => null)
+        const ex = r?.ok ? (r.excerpts ?? []).find((x) => x.id === excerptId) : undefined
+        if (!ex) {
+          showToast({ type: 'info', message: '这条摘录已不在原书里（可能已被删除）' })
+          return
+        }
+        setActiveToolTab(null)
+        setBookshelfReading({ relPath, name: bookDisplayName(relPath), kind: ex.kind })
+        setActiveTab('bookshelf')
+        requestAnimationFrame(() => {
+          if (ex.kind === 'pdf' && ex.page) {
+            window.dispatchEvent(new CustomEvent(KB_PDF_GOTO_PAGE, { detail: { relPath, page: ex.page } }))
+          } else if (ex.kind === 'txt' && typeof ex.paraIndex === 'number') {
+            window.dispatchEvent(new CustomEvent(KB_TXT_GOTO_PARA, { detail: { relPath, paraIndex: ex.paraIndex } }))
+          }
+        })
+      })()
+    }
+    window.addEventListener(KB_OPEN_EXCERPT_LOC, onOpen)
+    return () => window.removeEventListener(KB_OPEN_EXCERPT_LOC, onOpen)
+  }, [])
 
   // 日程侧边栏（v3.2.0 ⑮）桌面磁贴的日历 → 日志跳转。
   // 与 kb-open-note 同范式：事件只送意图，payload 走 state + props

@@ -4,7 +4,7 @@
  * 这里造一个带 .knowbase 的 fixture 仓库 + 登记（data/vaults.json）+ settings.currentVaultId，
  * 让 electron 启动时经 workspaceManager.loadVaults() 常规恢复路径打开它（不用原生对话框）。
  */
-import { mkdirSync, writeFileSync, existsSync, readFileSync, unlinkSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 
@@ -52,8 +52,20 @@ if (process.argv.includes('--add-books')) {
   // ② excerpts 残留 → 段落里已有 <mark>，程序化选区 range.setStart(文本节点, 4) 抛 IndexSizeError。
   // seed 在 electron 启动前执行（app 尚未把 jsonStore 载入内存），此处清空即真清空。
   const modulesDir = join(fixture, '.knowbase', 'modules')
-  for (const f of ['readerState.json', 'excerpts.json', 'pdfReader.json']) {
+  for (const f of ['readerState.json', 'excerpts.json', 'pdfReader.json', 'excerptExports.json']) {
     try { unlinkSync(join(modulesDir, f)); console.log('reset reader module data:', f) } catch { /* 不存在即无需清 */ }
+  }
+  // 摘录导出探针的幂等闸门（2026-09-21）：导出产生的「读书笔记」页落在收件箱（.knowbase/_inbox），
+  // 残留会让「重复导出不产生新页」的页数断言漂移 → 一并清掉（只删本工具自己造的那一类页名）。
+  {
+    const inboxDir = join(fixture, '.knowbase', '_inbox')
+    if (existsSync(inboxDir)) {
+      for (const f of readdirSync(inboxDir)) {
+        if (f.startsWith('读书笔记 · ')) {
+          try { unlinkSync(join(inboxDir, f)); console.log('reset exported note:', f) } catch { /* 忽略 */ }
+        }
+      }
+    }
   }
   const booksDir = join(fixture, '.books')
   mkdirSync(booksDir, { recursive: true })

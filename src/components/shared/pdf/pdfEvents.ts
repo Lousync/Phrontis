@@ -15,3 +15,14 @@ export const KB_READER_STATE_CHANGED = 'kb-reader-state-changed'
 
 /** 右栏摘录面板 → TXT 阅读器：跳段请求（detail: { relPath, paraIndex }） */
 export const KB_TXT_GOTO_PARA = 'kb-txt-goto-para'
+
+/**
+ * 知识库「读书笔记」页 → 书架：回到摘录原文（detail: { href }，href 形如 `kbloc:<bookKey>#<excerptId>`）。
+ *
+ * 由 MarkdownPreview 统一拦截 `kbloc:` 链接后派发（**单点拦截**：知识库预览 / 沉浸阅读 / 博客 /
+ * AI 侧栏等所有渲染面共用，不必给每个调用方各接一次 onLinkClick）；App 侧监听：解出书 → 打开该书 →
+ * 再派发 KB_PDF_GOTO_PAGE / KB_TXT_GOTO_PARA。
+ * ⚠️ 必须拦在 MarkdownPreview 内部，否则会落到 `handleLinkClick` 默认分支 →
+ * `window.api.openExternal('kbloc:…')` 交给系统（报错且有安全风险）。
+ */
+export const KB_OPEN_EXCERPT_LOC = 'kb-open-excerpt-loc'

@@ -383,6 +383,29 @@ export function vaultToggleStar(id: string): VaultPage | null {
   return fresh ? entryToPage(fresh, doc.body) : null
 }
 
+/**
+ * 摘录导出覆盖重写（方案 C2 硬约束）：**只替换正文 body，frontmatter 原样保留**——
+ * 尤其不能丢 `id`，否则页面变「无 id 的草稿」，知识库直接不显示（不变量 2）。
+ * 风格照 vaultToggleStar：parseMarkdown → 替换 doc.body → serializeMarkdown → writeVaultFile → 失效索引。
+ * 广播交给调用方（IPC 层统一广播，同其余 vault 写函数）。
+ * 返回更新后的页面（含新正文）；页面不存在（被删）返回 null，由调用方走自愈新建分支。
+ */
+export function vaultExportExcerptsNote(pageId: string, contentMd: string): VaultPage | null {
+  const entry = getKnowledgeIndex().byId[pageId]
+  if (!entry) return null
+  if (isWelcomeEntry(entry)) throw new Error(WELCOME_WRITE_DENY)
+  if (isNonMdArchiveEntry(entry)) throw new Error(NON_MD_ARCHIVE_DENY)
+  const abs = join(requireRoot(), entry.path)
+  const doc = parseMarkdown(readFileSync(abs, 'utf-8'))
+  doc.body = contentMd
+  if (!writeVaultFile(entry.path, serializeMarkdown(doc.frontmatter, doc.body))) {
+    throw new Error('导出笔记写入失败')
+  }
+  invalidateKnowledgeIndex()
+  const fresh = getKnowledgeIndex().byId[pageId]
+  return fresh ? entryToPage(fresh, doc.body) : null
+}
+
 export function vaultGetStarredPages(): VaultPage[] {
   return publishedOnly(getKnowledgeIndex().pages)
     .filter((e) => e.starred)

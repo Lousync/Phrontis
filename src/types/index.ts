@@ -1313,6 +1313,18 @@ export interface ExcerptCreatePayload {
 
 export type ExcerptPatch = { note?: string; color?: ExcerptColor; type?: ExcerptType }
 
+/** 摘录导出映射（excerptExports.json 经 IPC 透出）：一本书 ↔ 一篇知识库「读书笔记」页 */
+export interface ExcerptExportEntry {
+  /** 知识库页面 frontmatter id（覆盖重写时原样保留 → 页面身份不变） */
+  pageId: string
+  /** 知识库页面仓库内相对路径（落收件箱） */
+  pagePath: string
+  /** 最近一次导出时间（ISO） */
+  exportedAt: string
+  /** 最近一次导出的摘录条数 */
+  count: number
+}
+
 /** 写文件结果：conflict=true 表示磁盘已被外部修改（或已删除），需用户决策 */
 export interface WorkspaceWriteResult {
   ok: boolean
@@ -1639,6 +1651,10 @@ export interface ElectronAPI {
   excerptCreate: (rootId: string, relPath: string, payload: ExcerptCreatePayload) => Promise<{ ok: boolean; excerpt?: ExcerptItem; error?: string }>
   excerptPatch: (rootId: string, relPath: string, id: string, patch: ExcerptPatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; excerpt?: ExcerptItem; conflict?: boolean; error?: string }>
   excerptDelete: (rootId: string, relPath: string, id: string) => Promise<{ ok: boolean; error?: string }>
+  /** 查某书的导出映射（右栏书卡头显示「已导出 · N 条」用） */
+  excerptExportEntry: (rootId: string, relPath: string) => Promise<{ ok: boolean; entry?: ExcerptExportEntry | null; error?: string }>
+  /** 导出为知识库「读书笔记」页（每本书一篇；重复导出覆盖重写同一篇，保留页面 id） */
+  excerptExportNote: (rootId: string, relPath: string) => Promise<{ ok: boolean; pageId?: string; pagePath?: string; created?: boolean; count?: number; error?: string }>
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>

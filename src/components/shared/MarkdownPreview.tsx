@@ -14,6 +14,7 @@ import { PluginFenceRenderer } from './PluginFenceRenderer'
 import { pluginListRenderers } from '../../lib/ipc'
 import type { PluginRendererInfo } from '../../types'
 import { normalizeAnswerLayout } from '../../lib/answerLayout'
+import { KB_OPEN_EXCERPT_LOC } from './pdf/pdfEvents'
 
 // Same ID generation as parseHeadings() in OutlinePanel — must match for outline navigation
 function headingId(text: string): string {
@@ -151,6 +152,15 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
 
   const handleLinkClick = useCallback((e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
     e.preventDefault()
+    // `kbloc:` = 知识库「读书笔记」页里摘录的「回到原文」链接（摘录导出闭环）。
+    // ★ 单点拦截：在委托给 onLinkClick / openExternal 之前处理，否则会落到下面的默认分支
+    //   被 window.api.openExternal 当外部路径交给系统（报错且有安全风险）。所有渲染面共用这一处。
+    if (/^kbloc:/i.test(href)) {
+      try {
+        window.dispatchEvent(new CustomEvent(KB_OPEN_EXCERPT_LOC, { detail: { href } }))
+      } catch { /* 派发失败不影响页面 */ }
+      return
+    }
     if (onLinkClick) {
       onLinkClick(href)
     } else {

@@ -624,6 +624,8 @@ const api = {
   excerptCreate: (rootId: string, relPath: string, payload: unknown) => ipcRenderer.invoke('excerpt:create', rootId, relPath, payload),
   excerptPatch: (rootId: string, relPath: string, id: string, patch: unknown, expectedUpdatedAt?: string) => ipcRenderer.invoke('excerpt:patch', rootId, relPath, id, patch, expectedUpdatedAt),
   excerptDelete: (rootId: string, relPath: string, id: string) => ipcRenderer.invoke('excerpt:delete', rootId, relPath, id),
+  excerptExportEntry: (rootId: string, relPath: string) => ipcRenderer.invoke('excerpt:exportEntry', rootId, relPath),
+  excerptExportNote: (rootId: string, relPath: string) => ipcRenderer.invoke('excerpt:exportNote', rootId, relPath),
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => ipcRenderer.invoke('ws:writeFile', rootId, relPath, content, expectedMtimeMs),
   // 归档三条通道（ws:setMdStatus / ws:setArchiveStatus / ws:getArchiveEntries）已于 2026-09-20 随归档退役删除
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => ipcRenderer.invoke("ws:createFile", rootId, relPath, content),

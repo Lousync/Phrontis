@@ -1,9 +1,10 @@
 import { useEffect, useState, useMemo } from 'react'
-import { BookMarked, Pencil, Trash2, Check, X, Copy, Crosshair, Info } from 'lucide-react'
-import { excerptDelete, excerptList, excerptPatch, pdfReaderGet, readerStateGet, workspaceGetCurrent } from '../../lib/ipc'
+import { BookMarked, Pencil, Trash2, Check, X, Copy, Crosshair, Info, NotebookPen } from 'lucide-react'
+import { excerptDelete, excerptList, excerptPatch, excerptExportEntry, excerptExportNote, pdfReaderGet, readerStateGet, workspaceGetCurrent } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
+import { showToast } from '../../lib/toast'
 import { KB_PDF_PAGE_CHANGED, KB_READER_STATE_CHANGED } from '../shared/pdf/pdfEvents'
-import type { BookKind, ExcerptItem, ExcerptColor, ExcerptType, PdfBookState, TxtBookmark } from '../../types'
+import type { BookKind, ExcerptItem, ExcerptColor, ExcerptType, ExcerptExportEntry, PdfBookState, TxtBookmark } from '../../types'
 
 /**
  * 右栏「阅读」侧栏（书架升级全格式阅读器一期 + 摘录先行批次 v3.5.0 重做）。
@@ -67,6 +68,9 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
   const [excerpts, setExcerpts] = useState<ExcerptItem[]>([])
   const [noteEdit, setNoteEdit] = useState<{ id: string; draft: string } | null>(null)
   const [tab, setTab] = useState<'excerpt' | 'timeline'>('excerpt')
+  // 导出映射（每本书一篇「读书笔记」页；重复导出覆盖重写同一篇）
+  const [exportEntry, setExportEntry] = useState<ExcerptExportEntry | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   // 当前仓库 rootId（书签/进度请求必带）
   useEffect(() => {
@@ -153,6 +157,43 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
     }).catch(() => { /* 忽略 */ })
   })
 
+  // 导出映射：书/rootId 就绪后拉一次；knowledge 广播时刷新（页面可能在外部被删 → 自愈状态要跟上）
+  const refreshExportEntry = () => {
+    if (!rootId) return
+    void excerptExportEntry(rootId, reading.relPath).then((r) => {
+      if (r.ok) setExportEntry(r.entry ?? null)
+    }).catch(() => { /* 忽略 */ })
+  }
+  useEffect(() => {
+    setExportEntry(null)
+    refreshExportEntry()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootId, reading.relPath])
+  useDataChanged('knowledge', refreshExportEntry)
+
+  /** 导出为知识库「读书笔记」页（幂等：重复导出覆盖重写同一篇、保留页面 id） */
+  const doExport = () => {
+    if (!rootId || exporting) return
+    if (excerpts.length === 0) {
+      showToast({ type: 'info', message: '这本书还没有摘录，先划选正文创建几条' })
+      return
+    }
+    setExporting(true)
+    void excerptExportNote(rootId, reading.relPath).then(async (r) => {
+      if (!r.ok) {
+        showToast({ type: 'error', message: r.error || '导出失败' })
+        return
+      }
+      showToast({
+        type: 'success',
+        message: r.created ? `已导出为笔记 · ${r.count} 条摘录` : `笔记已同步更新 · ${r.count} 条摘录`,
+      })
+      await excerptExportEntry(rootId, reading.relPath).then((e) => { if (e.ok) setExportEntry(e.entry ?? null) }).catch(() => { /* 忽略 */ })
+    }).catch((e) => {
+      showToast({ type: 'error', message: String((e as Error)?.message || e) })
+    }).finally(() => setExporting(false))
+  }
+
   const saveNote = (e: ExcerptItem) => {
     if (!rootId || !noteEdit || noteEdit.id !== e.id) return
     void excerptPatch(rootId, reading.relPath, e.id, { note: noteEdit.draft }, e.updatedAt).catch(() => { /* 忽略 */ })
@@ -201,6 +242,17 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
             <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-[var(--bg-hover)]">
               <div className="h-full rounded-full bg-[var(--accent)] transition-[width]" style={{ width: `${progressPct}%` }} />
             </div>
+            {/* 导出为笔记：每本书一篇（重复导出覆盖重写同一篇、保留页面 id） */}
+            <button
+              onClick={doExport}
+              disabled={exporting}
+              data-wb="excerptExportBtn"
+              title={exportEntry ? `已导出到 ${exportEntry.pagePath}（再次点击同步更新）` : '把这本书的摘录导出成一篇知识库「读书笔记」页'}
+              className="kb-micro-pop mt-1.5 inline-flex items-center gap-1 rounded border border-[var(--border-color)] px-1.5 py-0.5 text-[10.5px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)] disabled:opacity-50"
+            >
+              <NotebookPen size={10.5} />
+              {exporting ? '导出中…' : exportEntry ? `笔记已更新 · ${exportEntry.count} 条` : '导出为笔记'}
+            </button>
           </div>
         </div>
       </div>
