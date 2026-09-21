@@ -1848,8 +1848,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 />
               </div>
             )}
-            {/* 侧边栏底部：错题本 / 收藏 + 插件视图入口（Phase 2 批次 1 收尾：文件视图下常驻） */}
-            {(
+            {/* 侧边栏底部：错题本 / 收藏 + 插件视图入口（Phase 2 批次 1 收尾：文件视图下常驻）。
+                ⚠️ 必须整体受控（2026-09-21 反馈「左侧栏底部有两根短横线」）：本块是无条件渲染的，
+                而它的两个子项当前都为空（QUIZ_ENTRY_ENABLED=false 收起错题本入口；无插件声明
+                slot=knowledge.sidebar）→ 只剩容器自己的 border-t + py-1.5，在「图谱」上方多出一根
+                11px 高的幽灵分隔线。空则整块不渲染，开关拨 true / 有插件视图时自动恢复。 */}
+            {(QUIZ_ENTRY_ENABLED || pluginViews.length > 0) && (
               <div className="shrink-0 border-t border-[var(--border-color)] px-2 py-1.5 space-y-0.5">
                 {/* 内置错题本：入口暂收（QUIZ_ENTRY_ENABLED 总闸，v3.5.0 随交互重做放出）——视图/事件机制保留 */}
                 {QUIZ_ENTRY_ENABLED && (
