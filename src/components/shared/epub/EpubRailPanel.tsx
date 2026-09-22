@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BookMarked, BookOpen, LayoutGrid, ListTree } from 'lucide-react'
+import { BookOpen } from 'lucide-react'
 import { KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, type EpubTocItem } from '../pdf/pdfEvents'
 
 /**
@@ -10,8 +10,12 @@ import { KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, type EpubTocItem } 
  * PDF 那边没得选：pdfjs 的大纲无法序列化成可传值，而 EPUB 的 `book.toc` 本身就是普通对象）。
  * 面板挂载晚于阅读器时用 `KB_EPUB_STATE_REQ` 主动要一次（阅读器只对该书应答）。
  *
- * 缩略图 / 书签：B 段没有实现（EPUB 书签键是 CFI，塞进 TxtBookmark 的 paraIndex 形状会串味），
- * 两个 Tab 用中性空状态占位 —— 保留 Tab 而不是藏起来，是为了让「此格式有什么」一眼可知。
+ * ★ 本面板**只有目录树，没有切换头**（2026-09-21 拍板，2026-09-22 落码）：
+ * **某格式不支持的功能，侧栏不出对应入口，不做「中性空态占位」**。理由是 Tab 头本身就在宣称
+ * 「这里有东西」，点开却是空态，读起来像「坏了 / 点了没反应」；「此格式还有什么」交给文档说更合适。
+ * 据此原先的缩略图 / 书签两个空态 Tab 一并撤掉 —— EPUB 无「页」概念，缩略图格式层面就不存在
+ * （**明确不做**）；书签的定位能力 foliate 有（CFI），但存储口径未定（`TxtBookmark.paraIndex` 是数字），
+ * **未拍板前不出入口**。将来这件真正做出来时，按同一条规则办：**能用了才出 Tab**。
  *
  * `data-wb` / `data-wb-state` 锚点与 PdfRailPanel 同惯例（探针脚本按锚点找元素）。
  */
@@ -22,7 +26,6 @@ export function EpubRailPanel({ readerDoc }: {
   const [toc, setToc] = useState<EpubTocItem[]>([])
   const [chapterHref, setChapterHref] = useState('')
   const [chapterLabel, setChapterLabel] = useState('')
-  const [section, setSection] = useState<'outline' | 'thumbs' | 'bookmarks'>('outline')
 
   const relPath = readerDoc?.relPath ?? null
 
@@ -75,9 +78,6 @@ export function EpubRailPanel({ readerDoc }: {
     )
   }
 
-  const tabCls = (active: boolean) =>
-    `flex flex-1 items-center justify-center gap-1 rounded px-1 py-1 text-[11px] ${active ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`
-
   const renderNodes = (items: EpubTocItem[], depth: number) => items.map((it, i) => {
     const active = !!activeHref ? it.href === activeHref : (!!chapterLabel && it.label === chapterLabel && !it.subitems?.length)
     return (
@@ -98,29 +98,11 @@ export function EpubRailPanel({ readerDoc }: {
 
   return (
     <div data-wb="epubRailPanel" data-wb-state="ready" className="flex h-full min-h-0 flex-col">
-      {/* 三区切换（文字按容器宽度退化，与 PdfRailPanel 同款 .kb-fit） */}
-      <div className="kb-fit kb-fit-pdfrail mx-1.5 mb-1 flex shrink-0 items-center gap-0.5 rounded-md border border-[var(--border-color)] p-0.5">
-        <button onClick={() => setSection('outline')} className={tabCls(section === 'outline')} title="目录"><ListTree size={12} /><span className="kb-l1">目录</span></button>
-        <button onClick={() => setSection('thumbs')} className={tabCls(section === 'thumbs')} title="缩略图"><LayoutGrid size={12} /><span className="kb-l1">缩略图</span></button>
-        <button onClick={() => setSection('bookmarks')} className={tabCls(section === 'bookmarks')} title="书签"><BookMarked size={12} /><span className="kb-l1">书签</span></button>
+      <div className="min-h-0 flex-1 overflow-auto py-1">
+        {toc.length === 0
+          ? <div className="px-3 py-2 text-[12px] text-[var(--text-muted)]">这本 EPUB 没有目录</div>
+          : renderNodes(toc, 0)}
       </div>
-      {section === 'outline' && (
-        <div className="min-h-0 flex-1 overflow-auto py-1">
-          {toc.length === 0
-            ? <div className="px-3 py-2 text-[12px] text-[var(--text-muted)]">这本 EPUB 没有目录</div>
-            : renderNodes(toc, 0)}
-        </div>
-      )}
-      {section === 'thumbs' && (
-        <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-[12px] leading-relaxed text-[var(--text-muted)]">
-          EPUB 暂不支持缩略图
-        </div>
-      )}
-      {section === 'bookmarks' && (
-        <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-[12px] leading-relaxed text-[var(--text-muted)]">
-          EPUB 暂不支持书签
-        </div>
-      )}
     </div>
   )
 }

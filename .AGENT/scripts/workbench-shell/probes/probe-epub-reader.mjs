@@ -9,6 +9,9 @@
  *   2) 内容帧真在渲染：正文文本在、书内外部 CSS 生效（h1 = 红）、书内图片已解码（子资源 data: 通道）
  *   3) ★ 实机不变量：内容帧 sandbox 恰为 'allow-same-origin'（契约脚本只查源码文本，这里查运行时属性）
  *   4) 左栏按引擎分发：epubRailPanel 在位、pdfRailPanel 不在位；目录树三章齐（KB_EPUB_STATE_REQ 往返）
+ *      ★ 负向：面板内**不得**再出现「缩略图 / 书签」Tab 或「暂不支持」占位（2026-09-21 拍板：
+ *        不支持的格式不出入口，不做中性空态占位；这条原先是 filter 排除掉这三个 Tab 名，
+ *        撤 Tab 后排除即变成静默宽容 → 改成不再排除 + 显式负向）
  *   5) 划选 → 浮条 → 摘录：excerpts.json 落 kind='epub' + cfi + chapter；Overlayer 高亮真的画上
  *   5.5) 点已有高亮 → 回看卡（且不翻页）—— 这条路径曾因写成 `view.getContents()`（不存在）而失效
  *   6) 点目录「第三章」→ toolbar 章节标签变 + 内容帧真的换页（KB_EPUB_GOTO_CFI 的 href 目标可用）
@@ -44,7 +47,7 @@
  *   的 closed shadow root 内 —— 既不在内容帧里（帧内查 `svg g[fill]` 恒空），宿主 `document`
  *   也查不到。走 `DOM.getDocument({pierce:true})` 穿透 shadow root 收集 `fill` 属性值。
  */
-const DEBUG_PORT = 9222
+const DEBUG_PORT = Number(process.env.KB_CDP_PORT || 9222) // 端口可覆盖（见 run-probe.mjs）：默认 9222 不变
 const { readFileSync, unlinkSync } = await import('node:fs')
 const { join } = await import('node:path')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -408,7 +411,11 @@ async function main() {
       epubRail: !!p, state: p?.getAttribute('data-wb-state') ?? null,
       pdfRail: !!document.querySelector('[data-wb="pdfRailPanel"]'),
       list: !!document.querySelector('[data-wb="bookshelfSideList"]'),
-      labels: p ? [...p.querySelectorAll('button')].map((b) => (b.textContent || '').trim()).filter((t) => t && !['目录', '缩略图', '书签'].includes(t)) : [],
+      // ★ 不再排除 Tab 名：撤掉三态切换头后，面板里的 button 只应是目录条目 ——
+      //   一旦有人把跳「缩略图 / 书名」之类入口加回来，labels 会立刻多出这些字样（原先的排除是静默宽容）。
+      labels: p ? [...p.querySelectorAll('button')].map((b) => (b.textContent || '').trim()).filter(Boolean) : [],
+      staleTabs: p ? [...p.querySelectorAll('button')].filter((b) => /^(目录|缩略图|书签)$/.test((b.textContent || '').trim())).length : 0,
+      panelText: p ? (p.textContent || '') : '',
     }
   })()`)
   console.log('[左栏诊断]', JSON.stringify(rail))
@@ -416,6 +423,10 @@ async function main() {
   ok('EPUB 在读 → 左栏不挂 PDF 三件套 / 不挂书目列表', !rail.pdfRail && !rail.list)
   ok('目录树三章齐（KB_EPUB_STATE_REQ 往返成功）',
     ['第一章', '第二章', '第三章'].every((t) => rail.labels.some((l) => l.includes(t))), JSON.stringify(rail.labels))
+  // ★★ 负向：不支持的格式不出入口（2026-09-21 拍板）—— 撤掉三态切换头后，面板里既不该有
+  //    「目录 / 缩略图 / 书签」这类 Tab（目录本身也不该有，只剩条目），也不该有「暂不支持」占位文案。
+  ok('★★ 左栏面板不出现切换 Tab（缩略图 / 书签 / 空态占位）',
+    rail.staleTabs === 0 && !rail.panelText.includes('暂不支持'), JSON.stringify({ staleTabs: rail.staleTabs }))
 
   // ===== 5) 划选 → 摘录 =====
   const selRes = await evalIn(ctx0, `(() => {

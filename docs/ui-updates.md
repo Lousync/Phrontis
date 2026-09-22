@@ -758,3 +758,20 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **顺带修掉的既有 bug**：`view.getContents()` 在 `View` 上不存在（内容列表在 `renderer` 上），此前 `view.d.ts` 的错误声明把它藏到了运行时 → 每次点击抛 `TypeError`，且「点已有高亮 → 回看卡」这条路径自 B 段起整体失效。声明已删，调用点改 `view.renderer.getContents()`。
 
 **验收**：实机探针 `probe-epub-reader.mjs` 第 6.5 步（含两条负向：点正中不翻页 / 从边缘起拖不翻页）全绿，探针退出码 0；`tsc --noEmit -p tsconfig.web.json` 无新增错误；5 个契约脚本全过。排障钩子：置 `window.__kbEdgeDiag = true` 后每个鼠标事件写进宿主 `<html data-kb-edge>`（生产默认关）。
+
+
+## 19. EPUB 左栏收窄：去掉三态切换头，只留目录（2026-09-22）
+
+背景：`EpubRailPanel` 当初照 `PdfRailPanel` 的骨架抄了「目录 / 缩略图 / 书签」三态切换头，后两者是中性空态占位（「EPUB 暂不支持缩略图 / 书签」）—— 点开看到的是空态，读起来像「坏了 / 点了没反应」。而 EPUB 无「页」概念，缩略图格式层面就不存在；书签的定位能力 foliate 有（CFI），但存储口径未定（`TxtBookmark.paraIndex` 是数字）。
+
+拍板口径（2026-09-21）：**某格式不支持的功能，侧栏不出对应入口，不做中性空态占位** —— Tab 头本身就在宣称「这里有东西」，「此格式还有什么」交给文档说更合适。将来某件真正做出来时按同一条规则办：**能用了才出 Tab**。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 删 `section` state 与三态切换头，直接渲染目录树（目录为空仍走「这本 EPUB 没有目录」文案） | `src/components/shared/epub/EpubRailPanel.tsx` |
+| 2 | 连带清 `BookMarked` / `LayoutGrid` / `ListTree` 图标 import 与 `tabCls`（`BookOpen` 仍用于「未选书」空态） | 同上 |
+| 3 | 探针第 4 步：**不再 filter 排除** Tab 名（撤 Tab 后那会变成静默宽容，多出按钮也照样绿），并新增负向断言「面板内不出现切换 Tab / 暂不支持占位」 | `.AGENT/scripts/workbench-shell/probes/probe-epub-reader.mjs` |
+
+**未动**：`data-wb-state` 的语义保持 `empty` =「未选书」、`ready` =「有书在读（目录可有可无）」—— 目录为空**不**改写为 `empty`，否则与「未选书」不可区分（探针与锚点惯例都依赖这个含义）。
+
+**验收**：实机探针 `probe-epub-reader.mjs` 全绿（含新增负向）；`tsc --noEmit` 双端 0 错；6 个契约脚本全过；PDF / TXT 回归探针不受影响（`kb-fit-pdfrail` 样式仍归 `PdfRailPanel` 使用）。
