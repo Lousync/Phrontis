@@ -4,8 +4,22 @@
  *       右栏原位变 token 面板（今日消耗/改动文件/会话 TOP）→ 关标签自动回小对话；
  *       会话抽屉可用；page 态输入区挂载。
  */
+import { readFileSync } from 'node:fs'
+
 const DEBUG_PORT = 9222
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * 暂停阈值从**源码单点读取**，不写死轮数：G11 靠「打够轮数把 streak 攒满」触发暂停，
+ * 阈值一改（2026-09-21 由 3 放宽到 5）写死的轮数就会假失败。同 verify-perception 读
+ * INLINE_SUGGEST_TIMEOUT_MS 的口径。
+ */
+const AUTO_PAUSE_STREAK = (() => {
+  try {
+    const src = readFileSync(new URL('../../../../src/lib/inlineSuggestTrigger.ts', import.meta.url), 'utf8')
+    return Number((src.match(/AUTO_PAUSE_STREAK\s*=\s*(\d+)/) ?? [])[1] ?? 0)
+  } catch { return 0 }
+})()
 
 async function waitPage() {
   for (let i = 0; i < 40; i++) {
@@ -41,6 +55,29 @@ function ok(pass, label, detail = '') {
   results.push({ pass, label, detail })
   console.log(`${pass ? '✓' : '✗'} ${label}${detail ? '  → ' + detail : ''}`)
 }
+
+/**
+ * Toast 采集器（B-5 用）。
+ * ★ 为什么必须用 MutationObserver 而不是事后查 DOM：Toast 会自行退场（`kb-toast-out` → 移除），
+ *   而「进入暂停」这类事件在长循环里发生，事后查必然扑空 → 得到看似有理的假 FAIL。
+ *   Toast 组件没有 data-wb 锚点（见 src/components/shared/Toast.tsx），故按动画类名匹配。
+ */
+const installToastCollector = () => evalJs(`(() => {
+  window.__kb_toasts = []
+  const seen = new Set()
+  const scan = () => {
+    for (const t of document.querySelectorAll('[class*="kb-toast-in"]')) {
+      const s = t.textContent || ''
+      if (!seen.has(s)) { seen.add(s); window.__kb_toasts.push(s) }
+    }
+  }
+  scan()
+  try { window.__kb_toastMo && window.__kb_toastMo.disconnect() } catch {}
+  window.__kb_toastMo = new MutationObserver(scan)
+  window.__kb_toastMo.observe(document.body, { childList: true, subtree: true })
+  return true
+})()`)
+const collectToasts = () => evalJs(`window.__kb_toasts || []`)
 
 async function main() {
   const page = await waitPage()
@@ -625,12 +662,25 @@ async function main() {
     vis?.click(); return true
   })()`)
   await sleep(600)
-  const g3off = await evalJs(`(() => ({
-    off: !!document.querySelector('[data-wb="inlineSuggestBtn"][data-wb-inline-off]'),
-    busy: !!document.querySelector('[data-wb="inlineBusy"]'),
-  }))()`)
+  const g3off = await evalJs(`(() => {
+    const btn = document.querySelector('[data-wb="inlineSuggestBtn"][data-wb-inline-off]')
+    return {
+      off: !!btn,
+      busy: !!document.querySelector('[data-wb="inlineBusy"]'),
+      // ★ B-6：关闭态必须**不只是颜色**（红绿是色盲最难区分的一对，四态又共用同一个 Sparkles）
+      slash: !!document.querySelector('[data-wb="inlineOffSlash"]'),
+      // 关态用 --danger 降级表达（项目里红色专指危险/删除 → 借色但不借满色）
+      color: btn ? getComputedStyle(btn).color : '',
+      opacity: btn ? getComputedStyle(btn).opacity : '',
+    }
+  })()`)
   ok(g3off.off && !g3off.busy,
     'G3 ★ 点 ✨（开→关）：立即进关闭态且不发请求', JSON.stringify(g3off))
+  ok(g3off.slash,
+    'G3e ★ B-6：关闭态叠斜杠（形状差异 —— 颜色不是唯一信号，色弱用户也能分辨）', `slash=${g3off.slash}`)
+  ok(Number(g3off.opacity) < 1,
+    'G3f ★ B-6：关闭态红为**降级表达**（不透明度 < 1，与「删除红」拉开体感）',
+    `color=${g3off.color} opacity=${g3off.opacity}`)
   // G3c 再点恢复开启 + 探针点火口就绪（window.__kb_inline_trigger，MonacoPane onMount 挂出）
   await evalJs(`(() => {
     const bs = [...document.querySelectorAll('[data-wb="inlineSuggestBtn"]')]
@@ -638,12 +688,25 @@ async function main() {
     vis?.click(); return true
   })()`)
   await sleep(600)
-  const g3c = await evalJs(`(() => ({
-    off: !!document.querySelector('[data-wb="inlineSuggestBtn"][data-wb-inline-off]'),
-    hasTrigger: typeof window.__kb_inline_trigger === 'function',
-  }))()`)
+  const g3c = await evalJs(`(() => {
+    const btn = document.querySelector('[data-wb="inlineSuggestBtn"]')
+    return {
+      off: !!btn?.hasAttribute('data-wb-inline-off'),
+      hasTrigger: typeof window.__kb_inline_trigger === 'function',
+      slash: !!document.querySelector('[data-wb="inlineOffSlash"]'),
+      color: btn ? getComputedStyle(btn).color : '',
+      opacity: btn ? getComputedStyle(btn).opacity : '',
+    }
+  })()`)
   ok(!g3c.off && g3c.hasTrigger,
     'G3c 再点 ✨（关→开）恢复开启态 + 探针点火口就绪', JSON.stringify(g3c))
+  ok(!g3c.slash && Number(g3c.opacity) === 1,
+    'G3g ★ B-6：开启态斜杠消失、不透明度回满（四态互相不串味）', `slash=${g3c.slash} opacity=${g3c.opacity}`)
+  // B-6「开 = 绿常亮」：主题 --success 在两个主题下取值不同（light #107c10 / dark #4ec9b0），
+  // 故只断言「开态的色 ≠ 关态的色」+「不是灰白」，不锁具体色值（否则换主题即假失败）
+  ok(g3c.color && g3c.color !== g3off.color,
+    'G3h ★ B-6：开 / 关两态颜色确实不同（展开态也看得出开关状态）',
+    `开=${g3c.color} 关=${g3off.color}`)
   // G3d 探针点火 → provider 被调用，入参合理（text 非空、offset 为数字——由契约 J1-J5 覆盖）
   await evalJs(`(() => { window.__kb_inline_trigger?.(); return true })()`)
   const g3 = await waitBusy(true, 2000)
@@ -742,15 +805,23 @@ async function main() {
   ok(g9, 'G9 ★ 句读后停顿自动触发（无需按键：debounce 800ms + 触发点命中）', `busy=${await busyNow()}`)
   await waitBusy(false, 16000)
 
-  // G11 冷却：连续几次自动建议没人采纳 → 暂停自动
+  // G11 冷却：连续 AUTO_PAUSE_STREAK 次自动建议没人采纳 → 暂停自动
   //      （注意结算滞后一轮：第 N 次触发前才结算第 N-1 次，故需要多打几轮）
-  for (let i = 0; i < 5; i++) {
+  //      轮数由源码阈值派生 + 3 轮余量，改阈值不必改探针
+  await installToastCollector()
+  const g11Rounds = AUTO_PAUSE_STREAK + 3
+  for (let i = 0; i < g11Rounds; i++) {
     await typeInto('。')
     await sleep(1300)
   }
   await waitBusy(false, 16000)
   const g11 = await evalJs(`!!document.querySelector('[data-wb="inlinePaused"]')`)
-  ok(g11, 'G11 ★ 连续未采纳后暂停自动（状态栏出现「建议已暂停 · Alt+A 唤醒」）', `paused=${g11}`)
+  ok(g11, `G11 ★ 连续未采纳后暂停自动（状态栏出现「建议已暂停 · Alt+A 唤醒」）`, `paused=${g11} streak=${AUTO_PAUSE_STREAK} rounds=${g11Rounds}`)
+  // G11c ★ B-5 方案 D：暂停必须**可发现** —— 首次进入暂停给一次 Toast（原先只有 1.5px 灰点，
+  //      胶囊静息态还 opacity:.62 淡出 → 等于静默发生）。Toast 会自行退场，
+  //      故用 MutationObserver 采集而非事后查 DOM（事后查会因退场而假 FAIL）。
+  const g11c = (await collectToasts()).some((t) => /AI 续写建议已暂停/.test(t))
+  ok(g11c, 'G11c ★ B-5：进入暂停时有可见 Toast 提示（不再静默发生）', `toast=${g11c}`)
 
   // G11b 手动唤醒：Alt+A 是明确的「我现在要」→ 清除暂停
   await evalJs(`(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', altKey: true, bubbles: true, cancelable: true })); return true })()`)
@@ -798,6 +869,7 @@ async function main() {
   }))()`)
   ok(g6.count === 1 && g6.off,
     'G6 ★ 关掉设置后 ✨ 进关闭态（按钮常驻表达开关，off 态可见）', JSON.stringify(g6))
+  await installToastCollector()
   await evalJs(`(() => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', altKey: true, bubbles: true, cancelable: true }))
     return true
@@ -805,6 +877,10 @@ async function main() {
   const g6rose = await waitBusy(true, 1500)
   ok(g6rose === false,
     'G6b ★ 关掉设置后 Alt+A 不发起请求（开关真挡在触发口）', `busyRose=${g6rose}`)
+  // ★ B-5：总闸关着时 Alt+A 曾被 provider 静默吞掉 —— 按了键零反馈，是「不能用、不知为何」的一半来源
+  await sleep(400)
+  const g6c = (await collectToasts()).some((t) => /AI 续写建议已关闭/.test(t))
+  ok(g6c, 'G6c ★ B-5：总闸关闭时按 Alt+A 给出可见提示（不再静默无效）', `toast=${g6c}`)
 
   // G7 复原开关（不给后续探针 / 用户留副作用）
   await evalJs(`(async () => {

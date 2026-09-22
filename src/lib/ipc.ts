@@ -325,6 +325,8 @@ export const workspaceMkdir = (rootId: string, relPath: string) => a().workspace
 export const workspacePasteExternal = (rootId: string, relDir: string, srcPaths: string[]) => a().workspacePasteExternal(rootId, relDir, srcPaths)
 export const workspaceRename = (rootId: string, oldRel: string, newRel: string) => a().workspaceRename(rootId, oldRel, newRel)
 export const workspaceTrash = (rootId: string, relPath: string) => a().workspaceTrash(rootId, relPath)
+/** 用系统默认程序打开仓库内文件 / reveal=true 时在资源管理器中定位它（B-3 归档元信息卡） */
+export const workspaceOpenInSystem = (rootId: string, relPath: string, reveal = false) => a().workspaceOpenInSystem(rootId, relPath, reveal)
 export const workspaceStat = (rootId: string, relPath: string) => a().workspaceStat(rootId, relPath)
 export const workspaceGetRecent = () => a().workspaceGetRecent()
 export const workspaceOpenById = (rootId: string) => a().workspaceOpenById(rootId)

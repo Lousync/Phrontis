@@ -5,7 +5,7 @@ import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { QuizMode } from '../../../components/shared/QuizMode'
 import { extractQuizzes } from '../../../components/shared/QuizParser'
 import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem, SimilarPageHit } from '../../../types'
-import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, getKnowledgeSimilarPages, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent } from '../../../lib/ipc'
+import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, getKnowledgeSimilarPages, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent, workspaceOpenInSystem } from '../../../lib/ipc'
 import { splitFrontmatter, joinFrontmatter, ensureFrontmatterId, bumpFrontmatterUpdated } from '../../../lib/frontmatter'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
@@ -18,6 +18,8 @@ import { ConfirmDialog } from '../../../components/shared'
 import { ResizablePanel } from '../../../components/shared/ResizablePanel'
 import { WelcomeHtmlView } from './WelcomeHtmlView'
 import { FileMetaCard } from './FileMetaCard'
+import { ArchiveTextView } from './ArchiveTextView'
+import { isTextViewableExt } from '../../../lib/aiTextExts'
 import Editor, { type OnMount } from '@monaco-editor/react'
 // 共享 Monaco 宿主（P1b）：就地编辑换用与编辑器模块同一份装配——[[ 补全 / B4 内联建议 /
 // 淡化装饰 / 粘贴与拖图拦截全部随之带入；legacy <Editor> 分支仅服务非 vault 旧数据兜底
@@ -65,6 +67,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
+  /** 归档「查看内容」态（B-3）：见下方 isArchiveTextView；换页重置，不跨页继承展开态 */
+  const [archiveShowContent, setArchiveShowContent] = useState(false)
   const [fileType, setFileTypeState] = useState('')
   const [showLangMenu, setShowLangMenu] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
@@ -157,11 +161,45 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   // B4 内联建议请求态/暂停态（知识库编辑态的可观测信号；Phase 2 批次 2 随编辑器退役补齐入口）
   const [inlineBusy, setInlineBusy] = useState(false)
   const [inlinePaused, setInlinePaused] = useState(false)
+  /** B-5 方案 D：每次「进入暂停」只提示一次（唤醒后复位，下一轮再暂停仍会提示） */
+  const inlinePauseNotifiedRef = useRef(false)
+  /**
+   * 自动通道进入 / 离开暂停。**除角标外要给一次可见提示**（B-5 方案 D）：
+   * 原先暂停的唯一信号是胶囊右上角 1.5px 灰点，而胶囊静息态还会 `opacity: .62 + scale(.97)`
+   * → 基本看不见，用户只会觉得「AI 建议莫名其妙没了」。
+   * 回调来自 MonacoPane 的模块级广播（宿主侧 setState），只可能发生在事件回调里，不会撞 render 期。
+   */
+  const handleInlinePaused = useCallback((paused: boolean) => {
+    setInlinePaused(paused)
+    if (!paused) { inlinePauseNotifiedRef.current = false; return }
+    if (inlinePauseNotifiedRef.current) return
+    inlinePauseNotifiedRef.current = true
+    showToast({ type: 'info', message: 'AI 续写建议已暂停', detail: '连续几条没被采纳，自动通道先歇一会。按 Alt+A 可随时要一条' })
+  }, [])
   // 就地编辑（笔记合并 Phase 1，docs/notes-merge-phase1-design.md §1.1）：
   // vault 写路径三件套 = 当前仓库 rootId + 装载时的 frontmatter 前缀 + mtime 冲突基线
   const vaultRootRef = useRef<string | null>(null)
   const vaultPrefixRef = useRef('')
   const vaultMtimeRef = useRef(0)
+
+  // 换页重置归档「查看内容」态（B-3）：归档页之间切换不该继承上一个的展开态
+  useEffect(() => { setArchiveShowContent(false) }, [pageId])
+
+  /** 归档文件「在系统中打开」/「在文件夹中显示」（B-3 方案 B）：经主进程 ws:openInSystem
+   *  （rootId + relPath → requireInside 解析后 shell.openPath / showItemInFolder）。
+   *  ★ 不走通用的 openExternal：它只放行 userData 目录内的路径，仓库文件会被安全拦截挡掉。 */
+  const handleArchiveOpenInSystem = useCallback(async (reveal: boolean) => {
+    const rel = pageRef.current?.path
+    if (!rel) { showToast({ type: 'warning', message: '该条目没有关联的仓库文件' }); return }
+    if (!vaultRootRef.current) {
+      const cur = await workspaceGetCurrent()
+      vaultRootRef.current = cur?.rootId ?? null
+    }
+    const root = vaultRootRef.current
+    if (!root) { showToast({ type: 'warning', message: '当前没有打开的仓库' }); return }
+    const res = await workspaceOpenInSystem(root, rel, reveal)
+    if (!res?.ok) showToast({ type: 'error', message: res?.error || '打开失败' })
+  }, [])
 
   const isCodeFile = fileType !== '' && fileType !== 'md' && fileType !== 'txt' && fileType !== 'pdf' && fileType !== 'xmind'
   const isPdfFile = fileType === 'pdf' || fileType === 'xmind'
@@ -173,6 +211,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
    *  html 走同一沙箱 iframe（kbview 白名单③收清单内归档 html）；其余类型元信息卡，不进 Monaco/预览 */
   const isArchiveFile = page?.entryKind === 'file'
   const isArchiveHtml = isArchiveFile && fileType === 'html'
+  /** 归档文本类可在应用内**只读**查看（B-3 方案 A）：扩展名命中 TEXT_VIEWABLE_EXT_SET——
+   *  含 json / 配置类，比「AI 可读」名单宽（查看只需"能解码成文本"，不涉写入） */
+  const isArchiveTextView = isArchiveFile && !isArchiveHtml && isTextViewableExt(fileType)
   /** 就地编辑的共享宿主文档（P1b）：可编辑文本类 + 仓库内路径才走 MonacoPane；
    *  modelPath 命名空间防与编辑器模块同名文件共享 Monaco model（onChange/外部监听会打架）。 */
   const paneDoc = vaultMode && page?.path && !isWelcomeHtml && !isArchiveFile && !isPdfFile
@@ -356,7 +397,13 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       if (getGlobalActiveTab() !== 'knowledge') return
       if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'a' || e.key === 'A')) {
         e.preventDefault()
-        paneRef.current?.triggerInlineSuggest()
+        if (paneRef.current?.triggerInlineSuggest()) return
+        // ★ B-5：总闸关着时这个入口会被 provider 静默吞掉（fireInlineTrigger 的第一道闸就是
+        // inlineOnRef）——用户按了键却零反馈，正是「不能用、不知为何」的另一半来源。
+        // 只有「确实因为关闭」才提示（其余 false 分支：没挂编辑器 / 非 markdown / 空文档）。
+        void getSetting('aiAssistantInlineSuggest').then((v) => {
+          if (v === false) showToast({ type: 'info', message: 'AI 续写建议已关闭', detail: '点击工具条的 ✨ 开启后再按 Alt+A' })
+        })
       }
     }
     window.addEventListener('keydown', onKey)
@@ -900,12 +947,30 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               现语义：开着点 = **立即关闭**（掐在途请求 + 收起 ghost + 关设置总闸）；
               关着点 = 打开。单次要一条仍按 Alt+A；自动触发由设置里「自动触发」管。
               data-wb 锚点保持（探针 G 系依赖 inlineSuggestBtn / inlineBusy / inlinePaused）；
-              关闭态以 data-wb-inline-off 表达（探针 G3/G6/G7 断言同步更新）。 */}
+              关闭态以 data-wb-inline-off 表达（探针 G3/G6/G7 断言同步更新）。
+
+              ★ B-6 四态配色（2026-09-21 拍板）：开=绿常亮 / 关=红（降一级）/ 生成中=绿闪 / 暂停=黄。
+              为什么收起态也要靠颜色：工具栏 `[data-wb='floatBar']` 静息时会 display:none 掉
+              所有 `.kb-float-hide` 次级钮，而 ✨ **没标该类** —— 它常年可见但语义只差一档灰度。
+              两条实施取舍：
+              ① 「关」借用了 `--danger`（项目里红色专指危险/删除）→ 按拍板**降一级表达**：
+                 同色 + `opacity-70`（hover 回满），与「删除红」拉开体感；
+              ② 红绿是色盲最难区分的一对（约占男性 8%）且四态共用同一个 Sparkles →
+                 关闭态**额外叠一条斜杠**（传统「禁用」语汇），颜色不再是唯一信号。
+              ★ 短路顺序刻意保持：`inlineBusy` 恒在最前（生成中优先级最高），`inlinePaused` 插在
+                 「开」判定之后 —— 这是探针语义依赖的既有顺序，改色不改序。 */}
           {fileType === 'md' && !preview && (() => {
             const inlineOn = s.aiAssistantInlineSuggest !== false
+            const inlineStateClass = inlineBusy
+              ? 'text-[var(--success)]'
+              : !inlineOn
+                ? 'text-[var(--danger)] opacity-70 hover:opacity-100'
+                : inlinePaused
+                  ? 'text-[var(--warning)]'
+                  : 'text-[var(--success)]'
             return (
               <>
-                {inlineBusy && <span data-wb="inlineBusy" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--warning)]" title="AI 续写请求中…" />}
+                {inlineBusy && <span data-wb="inlineBusy" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--success)]" title="AI 续写请求中…" />}
                 <button
                   onClick={() => {
                     if (inlineOn) {
@@ -919,9 +984,21 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   data-wb="inlineSuggestBtn"
                   {...(inlineOn ? {} : { 'data-wb-inline-off': '1' })}
                   title={inlineBusy ? 'AI 续写建议：生成中…' : inlineOn ? 'AI 续写建议：已开启 · 点击关闭（单次要一条按 Alt+A）' : 'AI 续写建议：已关闭 · 点击开启'}
-                  className={`relative p-1.5 rounded transition-colors ${inlineBusy ? 'text-[var(--warning)]' : inlineOn ? 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]' : 'text-[var(--text-disabled)]'}`}
+                  className={`relative rounded p-1.5 transition-colors hover:bg-[var(--bg-hover)] ${inlineStateClass}`}
                 >
                   <Sparkles size={15} className={inlineBusy ? 'animate-pulse' : ''} />
+                  {/* 关闭态的形状差异（色盲兜底）。静态旋转，不走 transition-transform —— 铁律 13
+                      的 `.kb-chevron` 约束针对的是「要动画的 rotate-*」，此处不需要动画。 */}
+                  {!inlineOn && (
+                    <span
+                      aria-hidden
+                      data-wb="inlineOffSlash"
+                      className="pointer-events-none absolute left-0 right-0 top-1/2 h-[1.5px] rounded-full bg-current"
+                      style={{ transform: 'rotate(-45deg)' }}
+                    />
+                  )}
+                  {/* 暂停角标：保留（探针 G11/G11b 依赖此锚点）。**配色刻意中立**——
+                      按钮本身已变黄表达「暂停」，角标再黄就糊成一团；灰点在黄图标旁是清晰可辨的独立标记。 */}
                   {inlinePaused && inlineOn && <span data-wb="inlinePaused" className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--text-disabled)]" />}
                 </button>
               </>
@@ -984,11 +1061,29 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Content */}
         {isArchiveFile ? (
-          /* 归档非 md 文件：html 沙箱渲染（kbview 白名单③），其余元信息卡（D1） */
+          /* 归档非 md 文件：html 沙箱渲染（kbview 白名单③）；文本类可切只读内容视图（B-3 方案 A）；
+             其余（含二进制）元信息卡，卡上提供「在系统中打开 / 在文件夹中显示」（B-3 方案 B） */
           isArchiveHtml && page?.path ? (
             <WelcomeHtmlView path={page.path} />
+          ) : isArchiveTextView && archiveShowContent && page?.path ? (
+            <ArchiveTextView
+              path={page.path}
+              fileType={fileType}
+              fontSize={Math.round(s.editorFontSize * zoom)}
+              onBack={() => setArchiveShowContent(false)}
+            />
           ) : (
-            <FileMetaCard title={title} fileType={fileType} path={page?.path} updatedAt={page?.updatedAt} sizeBytes={page?.sizeBytes} />
+            <FileMetaCard
+              title={title}
+              fileType={fileType}
+              path={page?.path}
+              updatedAt={page?.updatedAt}
+              sizeBytes={page?.sizeBytes}
+              viewable={isArchiveTextView}
+              onView={() => setArchiveShowContent(true)}
+              onOpenInSystem={() => { void handleArchiveOpenInSystem(false) }}
+              onRevealInFolder={() => { void handleArchiveOpenInSystem(true) }}
+            />
           )
         ) : isXmindFile ? (
           <div className="flex flex-col flex-1 overflow-hidden">
@@ -1158,7 +1253,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               inlineSuggestEnabled={s.aiAssistantInlineSuggest !== false}
               inlineSuggestAuto={s.aiAssistantInlineSuggestAuto !== false}
               onInlineSuggestBusy={setInlineBusy}
-              onInlineSuggestPaused={setInlinePaused}
+              onInlineSuggestPaused={handleInlinePaused}
               layoutKey={editRevealTick}
             />
           </div>
