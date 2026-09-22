@@ -4,16 +4,15 @@ import { pdfReaderCoverList, pdfReaderListBooks, workspaceGetCurrent } from '../
 import { useDataChanged } from '../../lib/dataChanged'
 import type { BookListItem } from '../../types'
 import { BookCover } from './BookCover'
-import { bookDisplayName } from '../../../electron/lib/kbStore/bookFormats'
 
 type SortFn = (a: BookListItem, b: BookListItem) => number
 
-/** 排序与书架主区同口径：最近读优先，未读按名称 */
+/** 排序与书架主区同口径：最近读优先，未读按名称（展示名，上游拼好的 `displayName`） */
 const byRecent: SortFn = (a, b) => {
   const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0
   const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0
   if (ta !== tb) return tb - ta
-  return a.name.localeCompare(b.name, 'zh-Hans')
+  return a.displayName.localeCompare(b.displayName, 'zh-Hans')
 }
 
 /**
@@ -101,7 +100,8 @@ export function BookshelfSideList({ onOpenBook, activeRelPath = null }: {
           </div>
         )}
         {list && list.map((b) => {
-          const title = bookDisplayName(b.relPath)
+          // 展示名直接用上游的（S4 收口）：这里不再 `bookDisplayName(relPath)`
+          const title = b.displayName
           const active = activeRelPath === b.relPath
           // 判据写 `!== 'pdf'`（pct 口径覆盖 txt / epub）—— 写成 `=== 'txt'` 会让新格式落进
           // 页码口径、进度条恒 0（B 段踩点）。
@@ -119,10 +119,15 @@ export function BookshelfSideList({ onOpenBook, activeRelPath = null }: {
               {/* 在读标记：左侧细竖条（只改底色 + 竖条，不加文字标签） */}
               {active && <span className="absolute left-0.5 top-2 bottom-2 w-[2px] rounded-full bg-[var(--accent)]" />}
               <div className="w-[34px] shrink-0">
-                <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={title} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
+                <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={title} coverRef={b.coverRef} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[12px] text-[var(--text-primary)] group-hover:text-[var(--text-primary)]">{title}</div>
+                {/* 作者行：书市下到的书才有（meta.author 空则整行不渲染，与主区同口径）
+                    ★ --text-muted 而不是 --text-tertiary：后者全库**未定义**（只有 --bg-tertiary） */}
+                {b.author && (
+                  <div className="truncate text-[10.5px] text-[var(--text-muted)]">{b.author}</div>
+                )}
                 {/* 进度条：未读/总页数未登记为空条；h-[3px] 与全局细进度条口径一致 */}
                 <div className="mt-1.5 h-[3px] overflow-hidden rounded-full bg-[var(--bg-hover)]">
                   <div

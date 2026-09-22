@@ -1,6 +1,6 @@
 import { Fragment, useRef, useState } from 'react'
 import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical, FileQuestion } from 'lucide-react'
-import { PluginIcon } from '../shared/ModuleIcons'
+import { PluginIcon, BookMarketIcon } from '../shared/ModuleIcons'
 import type { TabName } from '../../types'
 import { labelOf } from '../../lib/appModules'
 import { isToolTabId, toolIdOfTab, findTool } from './toolRegistry'
@@ -34,6 +34,9 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   bookshelf: <BookMarked size={14} />,
   aiChat: <Bot size={14} />,
   graph: <Network size={14} />,
+  // 书市是整窗独占模块（WORKBENCH_TABBAR_EXCLUDED），页面条里用不到这条 —— 补上是为了
+  // 「表里一致」：本表漏 key 不崩（有 FALLBACK_ICON），但会让下次改动的人以为漏配了图标。
+  bookMarket: <BookMarketIcon size={14} />,
   devtools: <FlaskConical size={14} />,
   quiz: <FileQuestion size={14} />,
 }

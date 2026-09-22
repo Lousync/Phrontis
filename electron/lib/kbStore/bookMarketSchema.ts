@@ -106,6 +106,19 @@ export const BOOKS_DIR = '.books'
 export const BOOKS_COVERS_DIR = '.books/.covers'
 export const BOOKS_META_FILE = '.meta.json'
 
+/**
+ * 书市封面体积上限（4MB）。
+ *
+ * ★ 为什么住在这里而不是下载器里（S4 2026-09-22 从 downloader.ts 挪过来）：
+ *   它现在是**两处共用**的闸 —— 写入侧（`lib/bookMarket/downloader.ts` 抓到超大图就丢）
+ *   与读取侧（`vaultBookMetaRepo.bookCoverReadDataUrl` 拒绝把超大图塞进 IPC 载荷）。
+ *   只写在下载器里的话，kbStore 就得反向 import `lib/bookMarket`（**循环依赖**），
+ *   或者再抄一份字面量（**drift 家族**：写入侧放宽而读取侧没跟着改 ⇒ 封面静默读不出来）。
+ *   本文件是唯一「零 import 且已被契约脚本直读」的叶子，两个方向都能安全引用它。
+ *   判据 = 缩略图级别的资源；超过这个数基本可以断定抓到的不是封面（可能是整个 HTML 页）。
+ */
+export const MAX_COVER_BYTES = 4 * 1024 * 1024
+
 const SOURCE_KINDS: readonly BookSourceKind[] = ['opds', 'custom']
 const AUTH_TYPES: readonly BookAuthType[] = ['basic', 'bearer']
 const RESPONSE_TYPES: readonly BookResponseType[] = ['json', 'atom']
@@ -137,9 +150,14 @@ export function isAllowedSourceUrl(url: unknown): boolean {
 function coerceAuth(raw: unknown): BookAuthRef | null {
   if (!plainObject(raw)) return null
   const type = str(raw.type) as BookAuthType
-  const ref = str(raw.ref)
-  if (!AUTH_TYPES.includes(type) || !ref) return null
-  return { type, ref }
+  if (!AUTH_TYPES.includes(type)) return null
+  // ★ ref **不参与判定**：它恒由 `bookSourceUpsert` 改写成源自己的 id（见该函数注释），
+  //   入参里的值只是个占位。
+  // ★ 2026-09-22 修（S4 实机探针逮到）：旧实现要求 `ref` 非空才收，而**界面新建源时根本给不出
+  //   id**（id 是主进程 `randomUUID()` 生成的，界面只能送空串 —— 见 `SourceFormSheet.tsx` 的
+  //   `auth: { type, ref: '' }`）⇒ 勾了 Basic 认证的源被静默降级成 `auth: null`：行里显示
+  //   「无需登录」、没有「填凭据」入口、检索也不带 Authorization。凭据这条链路整条不可达。
+  return { type, ref: str(raw.ref) }
 }
 
 function coerceMapping(raw: unknown): BookSourceMapping | null {

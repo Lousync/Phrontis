@@ -33,7 +33,7 @@ export interface EntryFilter { date?: string; tagId?: string; pinnedOnly?: boole
 export interface CreateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date: string; tags?: string[]; states?: string }
 export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date?: string; isPinned?: boolean; isStarred?: boolean; tags?: string[]; states?: string }
 export interface Tag { id: string; name: string; color: string }
-export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph'
+export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket'
 
 // ===== 更新说明（release notes）=====
 // 主进程侧的同一份契约见 electron/lib/releaseNotes/types.ts
@@ -1198,7 +1198,18 @@ export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' 
  *  阶段 2a 加 fb2 / fbz（foliate 引擎系，阅读器与左栏零改动复用） */
 export interface BookListItem {
   relPath: string
-  name: string
+  /**
+   * 展示名 —— **上游拼好，渲染层只读**（方案 §3.6 / S4 收口）。
+   * 取值：`.books/.meta.json` 的 `title` 优先，缺则退回 `bookDisplayName(relPath)`（去扩展名的文件名）。
+   * ★ 渲染层**禁止**再写 `meta?.title || bookDisplayName(...)` 这类兜底 —— 那正是这次要收掉的东西
+   *   （同一条规则曾在 5 处各算一遍；契约脚本 verify-book-market-ui.mjs 有零调用点断言）。
+   */
+  displayName: string
+  /** 作者（`.books/.meta.json` 的 `author`；本地导入的书无 meta ⇒ 空串，渲染层按空不显示） */
+  author: string
+  /** 封面相对引用（`.books/.covers/<hash>.jpg`；无 meta / 未抓到封面 ⇒ 空串）。
+   *  渲染层拿它调 `bookMarketCoverGet` 取字节，取不到就回落原有的纯色书卡 / PDF 首页封面。 */
+  coverRef: string
   size: number
   /** 文件 mtimeMs（PDF 封面缓存失效判据） */
   mtime: number
@@ -1686,6 +1697,9 @@ export interface ElectronAPI {
   bookMarketDownload: (rootId: string, payload: BookDownloadRequest, conflict?: 'overwrite' | 'copy') => Promise<BookDownloadStartResult>
   bookMarketDownloadControl: (rootId: string, id: string, action: BookDownloadAction) => Promise<{ ok: boolean; error?: string }>
   bookMarketListQueue: (rootId: string) => Promise<{ ok: boolean; tasks?: BookDownloadTask[]; error?: string }>
+  /** 封面只读（S4 拍板 ①）：书架显示书市下到的封面用。路径守卫在主进程
+   *  （只认 `.books/.covers/` 下**单层**文件名），越权 / 缺失 / 超限一律 `dataUrl: null` */
+  bookMarketCoverGet: (rootId: string, coverRel: string) => Promise<{ ok: boolean; dataUrl: string | null; error?: string }>
   /** 下载队列快照推送（载荷 = **整个队列**，直接整体替换，不做增量合并） */
   onBookMarketDownloadProgress: (cb: (p: { rootId: string; tasks: BookDownloadTask[] }) => void) => () => void
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>

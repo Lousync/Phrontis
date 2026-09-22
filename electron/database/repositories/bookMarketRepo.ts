@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { broadcastDataChanged } from '../../main/windowBus'
+import { bookCoverReadDataUrl } from '../../lib/kbStore/vaultBookMetaRepo'
 import {
   bookSourceClearCredential, bookSourceInfos, bookSourceRemove, bookSourceSaveCredential,
   bookSourceSetEnabled, bookSourceUpsert,
@@ -22,6 +23,7 @@ import { controlDownload, listDownloadQueue, startDownload } from '../../lib/boo
  *   bookMarket:download         入队下载（重名闸未决时返回 conflict，**不入队**）
  *   bookMarket:downloadControl  队列逐项 / 批量控制（pause·resume·cancel·retry·pause-all·resume-all·clear-done）
  *   bookMarket:listQueue        当前仓库的队列快照
+ *   bookMarket:coverGet         封面字节（**只读**，S4 拍板 ①；书架显示下载来的封面用）
  *
  * ★ 位置参数 `(rootId, …)`（不是对象）—— 实测约定，同 `pdfReaderRepo.ts`。
  * ★ 写盘一律由 lib 侧广播 `broadcastDataChanged('bookMarket')`；本层只负责
@@ -98,6 +100,17 @@ export function registerBookMarketHandlers(): void {
       return { ok: true, tasks: listDownloadQueue(String(rootId)) }
     } catch (e) {
       return { ok: false, tasks: [], error: (e as Error).message }
+    }
+  })
+
+  // 封面只读（S4 拍板 ①）：书架显示书市下到的封面用。
+  // 路径守卫在 repo 层（bookCoverAbsPath → isSafeCoverRel），越权/缺失/超限一律 null，
+  // 渲染层拿不到就回落纯色书卡 —— 封面是增益，不该让书架整页报错。
+  ipcMain.handle('bookMarket:coverGet', (_e, rootId: string, coverRel: string) => {
+    try {
+      return { ok: true, dataUrl: bookCoverReadDataUrl(String(coverRel ?? ''), String(rootId ?? '')) }
+    } catch (e) {
+      return { ok: false, dataUrl: null, error: (e as Error).message }
     }
   })
 }

@@ -323,6 +323,12 @@ export const bookMarketDownload = (rootId: string, payload: BookDownloadRequest,
 export const bookMarketDownloadControl = (rootId: string, id: string, action: BookDownloadAction): Promise<{ ok: boolean; error?: string }> =>
   a().bookMarketDownloadControl(rootId, id, action)
 export const bookMarketListQueue = (rootId: string): Promise<{ ok: boolean; tasks?: BookDownloadTask[]; error?: string }> => a().bookMarketListQueue(rootId)
+/** 封面只读（S4 拍板 ①）：取不到返回 `dataUrl: null`，调用方回落纯色书卡即可，不必当错误处理 */
+export const bookMarketCoverGet = (rootId: string, coverRel: string): Promise<{ ok: boolean; dataUrl: string | null; error?: string }> =>
+  a().bookMarketCoverGet(rootId, coverRel)
+/** 下载队列快照推送（载荷 = **整个队列**，直接整体替换，不做增量合并） */
+export const onBookMarketDownloadProgress = (cb: (p: { rootId: string; tasks: BookDownloadTask[] }) => void): (() => void) =>
+  a().onBookMarketDownloadProgress(cb)
 // ===== 摘录（阅读器 · 摘录先行批次） =====
 export const excerptList = (rootId: string, relPath: string): Promise<{ ok: boolean; excerpts?: ExcerptItem[]; error?: string }> => a().excerptList(rootId, relPath)
 export const excerptCreate = (rootId: string, relPath: string, payload: ExcerptCreatePayload): Promise<{ ok: boolean; excerpt?: ExcerptItem; error?: string }> =>

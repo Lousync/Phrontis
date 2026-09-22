@@ -222,7 +222,8 @@ console.log('\n--- ⑩ TabName 冻结（仍 16 项） ---')
   const appModulesSrc = stripComments(read('src/lib/appModules.ts'))
   const moduleBlock = appModulesSrc.slice(appModulesSrc.indexOf('export const APP_MODULES'), appModulesSrc.indexOf('as const satisfies'))
   const ids = [...moduleBlock.matchAll(/id:\s*'([A-Za-z]+)'/g)].map((m) => m[1])
-  check('APP_MODULES 仍为 15 项（编辑器退役后冻结，新增即 FAIL）', ids.length === 15, `实得 ${ids.length}: ${ids.join(',')}`)
+  // 2026-09-22 书市 S4：15 → 16（+bookMarket）。有意变更（方案 §1.2 第 5 条），与上面「仍 16 项」的小节标题对齐。
+  check('APP_MODULES 仍为 16 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 16, `实得 ${ids.length}: ${ids.join(',')}`)
 }
 
 // ===== ⑪ 扫描版探测（轻量方案） =====

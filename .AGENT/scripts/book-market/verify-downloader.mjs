@@ -53,7 +53,12 @@ check('下载器有 MAX_BOOK_BYTES 常量', !!dlMax, dlMax ?? '未找到')
 check('阅读器有 MAX_BOOK_BYTES 常量', !!readerMax, readerMax ?? '未找到')
 check('★ 两处同值（= 128MB）', evalLiteral(dlMax) === 128 * 1024 * 1024 && evalLiteral(dlMax) === evalLiteral(readerMax),
   `${evalLiteral(dlMax)} vs ${evalLiteral(readerMax)}`)
-check('封面上限常量存在且小于书的（4MB）', /MAX_COVER_BYTES\s*=\s*4\s*\*\s*1024\s*\*\s*1024/.test(code(DL_REL)))
+// ★ 2026-09-22 随 S4 挪窝：常量本体搬到**零依赖叶子** `bookMarketSchema.ts`
+//   （下载器与 vaultBookMetaRepo 都要用它，留在 downloader.ts 会形成循环 import），
+//   downloader 改为 re-export 保持既有引用面不变。所以断言改成「真源在 schema」+「下载器仍在用」。
+check('封面上限常量真源在 schema（= 4MB，书的 1/32）', /MAX_COVER_BYTES\s*=\s*4\s*\*\s*1024\s*\*\s*1024/.test(code(SCHEMA_REL)))
+check('封面上限常量从下载器 re-export（既有引用面不破）',
+  /export\s*\{\s*MAX_COVER_BYTES\s*\}/.test(code(DL_REL)) && /fetchBinary\([^)]*MAX_COVER_BYTES/.test(code(DL_REL)))
 
 // ===== ② S0 选型 =====
 console.log('\n--- ② S0 选型：书市网络层零 net.fetch ---')
@@ -104,7 +109,9 @@ const channels = [...new Set([...repoSrc.matchAll(/ipcMain\.handle\(\s*'(bookMar
 const apiSrc = code(API_REL)
 const ipcSrc = code(IPC_REL)
 const memberOf = (channel) => `bookMarket${channel.split(':')[1][0].toUpperCase()}${channel.split(':')[1].slice(1)}`
-check('通道数是 10（书源 5 + 检索 1 + 下载 3 + 队列 1）', channels.length === 10, channels.join(','))
+// 2026-09-22 书市 S4：10 → 11 —— 新增**只读**的 `bookMarket:coverGet`（书架显示书市下到的
+// 封面，S4 拍板 ①）。这条数字是「加通道要显式改这里」的闸门，不是许愿池：加通道请连注释一起改。
+check('通道数是 11（书源 5 + 检索 1 + 下载 3 + 队列 1 + 封面只读 1）', channels.length === 11, channels.join(','))
 for (const ch of channels) {
   const member = memberOf(ch)
   const ok = preloadSrc.includes(`ipcRenderer.invoke('${ch}'`)

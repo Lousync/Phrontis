@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import {
   EditorIcon, BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon,
-  ToolboxIcon, PluginIcon, AiTeachingIcon, UserIcon, SettingsIcon,
+  ToolboxIcon, PluginIcon, AiTeachingIcon, UserIcon, SettingsIcon, BookMarketIcon,
 } from '../../components/shared/ModuleIcons'
 import type { DesktopData, DerivedStats } from './useDesktopData'
 import { hasCheckOn, shiftDays } from './useDesktopData'
@@ -669,6 +669,7 @@ const TILE_META: Record<string, { desc: string; icon: (size: number) => ReactNod
   aiTeaching: { desc: '讲义 / 研读 / 出题', icon: (s) => <AiTeachingIcon size={s} /> },
   toolbox: { desc: '零散小工具', icon: (s) => <ToolboxIcon size={s} /> },
   plugins: { desc: '已装插件管理', icon: (s) => <PluginIcon size={s} /> },
+  bookMarket: { desc: '从书源找书并下载上架', icon: (s) => <BookMarketIcon size={s} /> },
   recycle: { desc: '找回删掉的内容', icon: (s) => <Trash2 size={s} /> },
   help: { desc: '使用说明与快捷键', icon: (s) => <LifeBuoy size={s} /> },
   user: { desc: '个人信息', icon: (s) => <UserIcon size={s} /> },

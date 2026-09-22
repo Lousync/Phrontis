@@ -8,7 +8,7 @@ import type { ClientRequest } from 'electron'
 import { broadcast, broadcastDataChanged, BROADCAST_CHANNEL } from '../../main/windowBus'
 import { getCurrentVault } from '../kbStore/vaultContext'
 import { bookExtOf, type BookExt } from '../kbStore/bookFormats'
-import { BOOKS_DIR, bookCoverRelFor, safeBookFileName } from '../kbStore/bookMarketSchema'
+import { BOOKS_DIR, MAX_COVER_BYTES, bookCoverRelFor, safeBookFileName } from '../kbStore/bookMarketSchema'
 import { bookSourceCredentialFor, bookSourceGet } from '../kbStore/bookSourceVaultRepo'
 import {
   bookCoverDelete, bookMetaGet, bookMetaReadAll, bookMetaUpsert, ensureBookCoversDir,
@@ -50,8 +50,9 @@ import { authHeaderFor } from './sourceClient'
  */
 export const MAX_BOOK_BYTES = 128 * 1024 * 1024
 
-/** 封面是缩略图级别的资源：超过这个数基本可以断定抓到的不是封面（可能是整个 HTML 页） */
-export const MAX_COVER_BYTES = 4 * 1024 * 1024
+/** 封面体积上限：**定义在 schema**（写入侧与读取侧共用的闸），这里 re-export 保持既有引用面不变。
+ *  2026-09-22（S4）从本文件挪走的原因见 `kbStore/bookMarketSchema.ts` 的常量注释。 */
+export { MAX_COVER_BYTES }
 
 /** 进度节流（与 `updateService` 同一口径：字节增量 ≥256KB 或 距上次 ≥200ms 才推一个事件） */
 const PROGRESS_MIN_BYTES = 256 * 1024

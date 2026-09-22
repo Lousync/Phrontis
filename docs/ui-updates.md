@@ -851,3 +851,38 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 - **`fixed-layout.js` 的 `#render` 有 ResizeObserver 竞态** —— `#showSpread` 先把 `#left/#right` 置 null 再 `await #createFrame(center)`，窗口期内 `this.#center ?? this.#right` 得 null ⇒ 每次翻页控制台一条未捕获 TypeError。上游 latent bug，被「全居中」（`spread:'none'`）放大成**必现**。**本批不加第 6 处 patch**（patch ⑤ 已被限定在 `comic-book.js`）；页面观感正常（后续那次显式 `#render()` 会纠正版式）。探针把它从错误列表里**显式指名**滤掉，不是通配。
 - **cbz 里的 `.svg` 页是破图** —— `loadBlob(name)` 不传 MIME ⇒ Blob `type=''` ⇒ Chromium 拒解 SVG（PNG/JPEG 靠嗅探照常）。修它要动 vendor，本轮接受（实机画集极少用 SVG 当页）。★ 这条**不是**安全缺口，反而是安全结论的旁证。
+
+
+## 22. 书市：模块 UI + 书架书名收口（S4，2026-09-22）
+
+背景：书市（本地书源检索 → 下载 → 上架书架；方案见 `.claude/plans/book-market-implementation.md`）S0–S3 已落地数据层 / 网络层 / 下载层，本轮补界面，并顺手收口「书架显示的是文件名、不是书名」。
+
+**本轮两条拍板**（都扩大范围，故先问后做 —— 2026-09-22 开发负责人）：① 书架要显示书市下到的封面 → 新增**只读**通道 `bookMarket:coverGet`（通道 10 → 11）；② 书架书卡加一行作者（`meta.author` 非空才渲染）。
+
+改动点：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 模块接线：`APP_MODULES` 15 → 16（`bookMarket` 六个 flag 全真）· `WORKBENCH_TABBAR_EXCLUDED` 7 → 8（整窗独占 ⇒ 左右栏与页面条退场、图标条留着，这正是「左栏独立整窗模块」的语义）· 静态 import + `case 'bookMarket'`（传 `onOpenShelf` 真跳书架，原型里只能 toast） | `src/lib/appModules.ts`·`workbenchLayout.ts`·`App.tsx` |
+| 2 | 图标**六表齐**（缺一即渲染空白）：`IconModuleId` + classic 映射 / `HAND_DRAWN` / `TAB_ICONS` / `SCENE_META` / `TILE_META` / `STARTUP_ICONS`。手绘 = **店招**（篷顶 + 门脸），经典包 = lucide `Store` —— 刻意不用书：书架已有 `BookMarked` | `src/lib/sidebarIcons.tsx`·`ModuleIcons.tsx`·`WorkbenchPageBar.tsx`·`Onboarding.tsx`·`desktop/tiles.tsx`·`settings/views/AppearanceView.tsx` |
+| 3 | 左侧图标条 `RAIL_BUTTONS` 4 → 5，**追加在末尾**（现四项位置不动） | `src/components/shared/ActivityBar.tsx` |
+| 4 | 模块本体：发现页（检索条 / 结果网格 / 骨架 / 空态 / 「部分源未返回」灰条 / 加载更多）· 书卡（格式角标 + 体积 + 暂不支持 / 已上架态）· 详情抽屉 · 书源页（三态圆点 + 启停 + 凭据入口 + 代理输入）· 下载队列浮层 · 四个弹层 | `src/modules/bookmarket/` |
+| 5 | 书架书名收口：`BookListItem.name` → `displayName`（+ `author`·`coverRef`），展示名与作者在**上游定稿**（`meta.title \|\| bookDisplayName(relPath)`），`.meta.json` **循环外读一次** | `electron/database/repositories/pdfReaderRepo.ts` |
+| 6 | 新只读通道 `bookMarket:coverGet`：路径一律经 `bookCoverAbsPath`（内含 `isSafeCoverRel`：只认 `.covers` 下单层文件名），越权 / 超限（`MAX_COVER_BYTES`）/ 读不到一律 `null`（不抛） | `electron/lib/kbStore/vaultBookMetaRepo.ts`·`bookMarketRepo.ts`·`electron/preload/index.ts`·`src/lib/ipc.ts` |
+| 7 | `BookCover` 新增 `coverRef` 分支（模块级 Map 缓存 + 懒取，取不到**原样回落** pdf 首页封面 / 纯色卡）；书架 5 处 `bookDisplayName(` 全改 `b.displayName`，该 import 随之删掉 | `src/modules/bookshelf/` |
+| 8 | 新动效令牌 `.kb-drawer-in` / `.kb-drawer-out`（贴边通高抽屉，220 / 176ms）—— 与 Modal 的区别是**不做缩放** | `src/styles/index.css` + `docs/ui-animation-plan.md` |
+
+**四条不显然的机制**（都不是随手那么写的）：
+
+- **书架是「改名」而不是「加字段」**：全库 `name` 的读取点会**全部编译报错**，逼着逐处确认读的到底是「展示名」还是「文件名」，不会有漏网的旧语义。契约脚本再补一条负向锁（`bookshelf/` 下 `bookDisplayName(` 必须 0 次）。
+- **「已上架」判定复用 `safeBookFileName`**（与下载器 `destFor` 是同一函数），不另写一份命名规则 —— 两边一旦飘了，表象是「明明下过却显示未上架」。
+- **代理输入不新开 IPC**：读写 `settings.bookMarketProxy`。S3 已拍板「代理的唯一写路径是设置机制」，且**不动 `defaultSession`**（否则殃及 `llmService`）。
+- **进度条走 `transition-[width]`**：这是动效文档 §五-①「只动 transform / opacity」的**既有例外**（含书市共 7 处），理由已登记在该文档（宽度是数据本身的直接映射，改 `scaleX` 会让圆角端头在小百分比下被挤扁）。
+
+**有意变更的断言（8 处，勿当 drift 回滚）**：`startup-tab` 的 APP_MODULES 15→16 · RAIL_BUTTONS 5 项 · 磁贴序快照 · 命令面板快照（后两条特意用**存量设置里没有 `bookMarket`** 的形态，证老用户活动栏顺序不被新增模块打乱）；`pdf-reader/verify-pdf-reader` 与 `verify-reader-formats` 的 15→16；`workbench-shell` 的 RAIL_BUTTONS 精确串；`book-market/verify-downloader` 的「通道数恰 10」→ 11。每处都在脚本里就地写了日期与理由。
+
+**实机探针逮到一个产品缺陷（已修）**：`bookMarketSchema.coerceAuth` 旧实现要求 `auth.ref` **非空**才收，而界面新建书源时**根本给不出 id**（id 由主进程 `randomUUID()` 生成，表单只能送空串）⇒ 勾了 Basic 认证的源被**静默降级成 `auth: null`**：行里显示「无需登录」、没有「填凭据」入口、检索也不带 `Authorization` —— 整条凭据链路不可达。修法是让 `ref` 不参与判定（它恒由 `bookSourceUpsert` 改写成源自己的 id），并把 `verify-book-sources.mjs` 里那条「ref 空 ⇒ 判为不完整」的用例改成三条（ref 空 → 仍收 / 缺省 → 收成空串 / 类型非法 → `null`）。
+
+**验收**：新契约 `verify-book-market-ui.mjs` 绿 · 实机探针 `probe-s4-module.mjs` **全绿**（端到端：检索 → 详情 → 下载 → 字节一致落盘 → 上架后书架显示 meta 书名 + 作者 + 封面；另有格式闸、同名冲突、队列四项控制、凭据三态，以及「凭据明文不出现在 `.knowbase` 任何文件」的负向）· S1/S2/S3 探针回归绿（49 / 96 / 99 项）· 全量 43 个契约脚本 37 绿（6 红均为既有、与书市无关）· `tsc --noEmit` 两端 0 错。
+
+**一处已查明、本轮不修**：书市只在挂载时解析当前仓库（`workspaceGetCurrent`），之后靠 `bookMarket` / `knowledge` 广播刷新；而主进程 `adoptVaultDirectory`（换库）**不发** `broadcastDataChanged`，渲染层的 `vault:changed` 事件只有 `WorkbenchLeftPanel` 与 `blog` 在听。今天打不到 —— 用户可见的换库路径（`VaultSwitcher`、`VaultPicker` 启动形态）都是「广播 + **整窗重载**」；但将来若出现「不重载就换库」的路径（P6 导入收尾的 `adoptImportedVault` 最接近），书市与书架会显示上一个库的数据。可选后续：`DataChangeScope` 加 `vault` + 在 `adoptVaultDirectory` 里广播。

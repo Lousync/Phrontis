@@ -1,6 +1,6 @@
 import type { TabName } from '../../types'
 import { Trash2, FlaskConical, LayoutPanelLeft, GraduationCap } from 'lucide-react'
-import { MomentsIcon, SettingsIcon, PluginIcon } from './ModuleIcons'
+import { MomentsIcon, SettingsIcon, PluginIcon, BookMarketIcon } from './ModuleIcons'
 import { WORKBENCH_TABBAR_EXCLUDED } from '../../lib/workbenchLayout'
 
 /**
@@ -33,6 +33,11 @@ const RAIL_BUTTONS: { id: TabName; label: string; icon: (size: number) => React.
   { id: 'recycle', label: '回收站', icon: (s) => <Trash2 size={s} /> },
   { id: 'plugins', label: '插件市场', icon: (s) => <PluginIcon size={s} /> },
   { id: 'moments', label: '动态', icon: (s) => <MomentsIcon size={s} /> },
+  // 2026-09-22 书市（方案 §1.2 第 5 条 / 拍板 ⑤）：左栏独立整窗模块，与工具箱 / 插件平级。
+  // **追加在末尾**（不动现四项的位置）：这排是固定清单，位置本身没有语义，
+  // 追加的 diff 最小、也最好核对。图标走 BookMarketIcon（StyleAware）——
+  // 手绘包 = 店招，经典细线包 = lucide Store，两包形状同构、画法有别。
+  { id: 'bookMarket', label: '书市', icon: (s) => <BookMarketIcon size={s} /> },
 ]
 
 interface Props {

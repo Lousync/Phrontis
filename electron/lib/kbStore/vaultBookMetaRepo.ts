@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto'
 import { getCurrentVault } from './vaultContext'
 import { scanVaultBooks } from './knowledgeIndex'
 import { bookMetaKey, coerceBookMeta, emptyBookMeta, isSafeCoverRel, pruneOrphanMeta, sanitizeBookMetaPatch,
-  BOOKS_COVERS_DIR, BOOKS_DIR, BOOKS_META_FILE,
+  BOOKS_COVERS_DIR, BOOKS_DIR, BOOKS_META_FILE, MAX_COVER_BYTES,
   type BookMetaEntry, type BookMetaStore,
 } from './bookMarketSchema'
 
@@ -189,6 +189,37 @@ export function bookCoverDelete(coverRel: unknown): boolean {
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * 读封面字节给渲染层（`bookMarket:coverGet` 的实现，S4 拍板 ①）。
+ *
+ * 为什么必须新开这一条：`.books/.covers/` 里的书市封面**没有任何既有通道能读到** ——
+ * PDF 封面走的是另一套（`.knowbase/covers/` 模块目录 + `coverIndex` 索引 + `pdfReader:coverGet`），
+ * 两者只是长得像。路径一律经 `bookCoverAbsPath`（内含 `isSafeCoverRel`：只认 `.covers` 下
+ * **单层**文件名、拒 `..` 与嵌套），**这里不另写一份路径拼接**。
+ *
+ * 越权引用 / 文件不存在 / 读失败 / 空文件 / 超过 `MAX_COVER_BYTES` 一律返回 `null`（不抛）——
+ * 封面是**增益**，拿不到就回落纯色书卡，不该让书架整页报错。
+ *
+ * `rootId` 是渲染层带来的（铁律 3：渲染层不碰绝对路径，只传 `{ rootId, relPath }`）：
+ * 与当前仓库不一致时同样返回 `null` —— 口径同 `pdfReaderVaultRepo` 的「rootId 与当前仓库不一致」，
+ * 只是那边抛错、这边降级（理由同上：封面不该让整页报错）。
+ */
+export function bookCoverReadDataUrl(coverRel: unknown, rootId?: unknown): string | null {
+  const cur = getCurrentVault()
+  if (cur && typeof rootId === 'string' && rootId && rootId !== cur.rootId) return null
+  const p = bookCoverAbsPath(coverRel)
+  if (!p || !existsSync(p)) return null
+  try {
+    const buf = readFileSync(p)
+    if (buf.length === 0 || buf.length > MAX_COVER_BYTES) return null
+    // mime 由扩展名定（下载器只写 .jpg；白名单已保证扩展名形状），其余一律按 jpeg 兜底
+    const ext = p.toLowerCase().endsWith('.png') ? 'png' : p.toLowerCase().endsWith('.webp') ? 'webp' : 'jpeg'
+    return `data:image/${ext};base64,${buf.toString('base64')}`
+  } catch {
+    return null
   }
 }
 

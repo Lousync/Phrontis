@@ -84,7 +84,15 @@ check('kind 非法丢弃', S.sanitizeBookSourcePatch({ kind: 'weird' }).kind ===
 check('url 非法静默丢弃（错误文案由调用方给）', S.sanitizeBookSourcePatch({ url: 'ftp://x' }).url === undefined)
 check('enabled:false 保留', S.sanitizeBookSourcePatch({ enabled: false }).enabled === false)
 check('auth 可为 null（取消认证）', S.sanitizeBookSourcePatch({ auth: null }).auth === null)
-check('auth 不完整 → null', S.sanitizeBookSourcePatch({ auth: { type: 'basic' } }).auth === null)
+// ★ 2026-09-22 改（S4 实机探针逮到的真 bug）：旧断言要求「ref 非空才收」，而界面新建源时
+//   **给不出 id**（id 由主进程 randomUUID 生成，界面只能送空串）⇒ 勾了认证的源被静默降级成
+//   无需登录、凭据入口整条消失。ref 恒由 bookSourceUpsert 改写成源 id，本就不该参与判定。
+check('auth 类型对但 ref 空 → 仍收（ref 由主进程改写成源 id，界面给不出 id）',
+  JSON.stringify(S.sanitizeBookSourcePatch({ auth: { type: 'basic', ref: '' } }).auth) === '{"type":"basic","ref":""}')
+check('auth 类型对、ref 缺省 → 收成空串（同上，只是没写这个键）',
+  S.sanitizeBookSourcePatch({ auth: { type: 'basic' } }).auth?.type === 'basic')
+check('auth 类型非法 → null（这条才是真的「不完整」）',
+  S.sanitizeBookSourcePatch({ auth: { type: 'oauth', ref: 'x' } }).auth === null)
 check('mapping 缺 download → null', S.sanitizeBookSourcePatch({ mapping: { list: 'l', title: 't' } }).mapping === null)
 check('mapping 三必需项齐 → 收', S.sanitizeBookSourcePatch({ mapping: { list: 'l', title: 't', download: 'd' } }).mapping.download === 'd')
 

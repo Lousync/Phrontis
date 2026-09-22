@@ -49,6 +49,7 @@
 | `.kb-pop` | `opacity + scale(0.96→1) + translateY(6px→0)`，240ms | 菜单、下拉、popover 进场 |
 | `.kb-overlay` | 遮罩 `opacity 0→1` 200ms | 所有 Modal 遮罩 |
 | `.kb-modal-in` | 面板 `scale(0.97→1) + translateY(10px→0)`，280ms | Modal 主体进场 |
+| `.kb-drawer-in` | 面板 `translateX(100%→0)`，220ms（退场 176ms 反向） | 贴边通高抽屉进场（书市条目详情）；与 Modal 的区别见 index.css 该节注释 |
 | `.kb-collapse` | `grid-template-rows 0fr↔1fr` 240ms + 子元素 `overflow:hidden` | 树节点/分组/折叠面板展开收起 |
 | `.kb-chevron` | `transform rotate` 200ms | 所有展开箭头 |
 | `.kb-item-in` | `opacity + translateY(4px)` 200ms，`--ease-kb` | 列表项进场（新增行） |
@@ -82,6 +83,7 @@
 | 下拉（TitleBar 更新面板、ActivityBar 设置/主题子菜单、语言菜单、更多菜单、sizeMenu、createMenu、「+」新建）| `.kb-pop` 160ms |
 | 各模块自定义 Modal（TodoEditModal、ImportModal、moments 三弹窗、BlogTemplateModal、TagManageModal、plugins 确认框、关联/wiki 选择器）| 统一遮罩+面板组合；优先抽一个共享 `<KbModal>` 壳，一次收敛 |
 | 划词浮钮、AI 悬浮按钮 | `.kb-pop` 180ms spring |
+| 书市条目详情抽屉（右缘通高面板）| `.kb-drawer-in` / `.kb-drawer-out`（220ms / 176ms）—— 贴边面板不做缩放 |
 | Toast | 进：顶部滑入 240ms；出：淡出+上移 180ms；堆叠位移用 transform 过渡 |
 
 ### C. 展开/收起 → `.kb-collapse` + `.kb-chevron`
@@ -97,6 +99,12 @@
 
 ### E. 状态反馈 → `.kb-micro-pop` / 150ms 色变
 收藏星标（knowledge/blog）、保存圆点颜色、勾选框、plugins 开关（已有）、PdfViewer 适宽选中、TrafficLight 已达标项不动。日历月切换：网格 `.kb-view-in` 弱化版（仅 opacity 180ms）。PDF 翻页：canvas 容器 opacity 120ms 快闪淡入，不拖慢连续翻页。
+
+**已认可的例外：确定型进度条填充走 `transition-[width]`**（DayPanel / PomoWidget / ReadingSidePanel /
+AI 教学上下文条 / 书市下载队列，共 7 处）。它是 §五-①「只动 transform / opacity」的唯一既有例外：
+宽度是**数据本身的直接映射**（不是进场/退场效果），改成 `scaleX` 会让圆角端头在小百分比下被挤扁。
+新写进度条按既有写法办（`h-full rounded-full transition-[width] duration-300 ease-linear`），
+**不要**为它另造 keyframes，也不要顺手把别的东西也改成动 width。
 
 ### F. 主题切换 → View Transition（**不用 wildcard 全局过渡**）
 实测（见 §五）：`html.theme-transitioning * { transition: color/background }` 在 4290 节点下会让主线程卡住 133ms 单帧——**该方案作废**。

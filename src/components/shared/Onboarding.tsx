@@ -5,7 +5,7 @@ import {
   ShieldCheck,
   Sparkles, Sun, Wrench,
 } from 'lucide-react'
-import { PluginIcon } from './ModuleIcons'
+import { PluginIcon, BookMarketIcon } from './ModuleIcons'
 import { useSettings } from '../../lib/SettingsContext'
 import { BAR_MODULE_IDS, labelOf } from '../../lib/appModules'
 import type { TabName } from '../../types'
@@ -41,6 +41,7 @@ const SCENE_META: Record<string, { desc: string; icon: ModuleIconComp }> = {
   aiTeaching: { desc: '会话学习 · 视觉转写 · 出题', icon: GraduationCap },
   toolbox: { desc: '密码本 · 导出 · 局域网互传', icon: Wrench },
   plugins: { desc: '官方市场 · 主题包', icon: PluginIcon },
+  bookMarket: { desc: '从书源找书 · 下载上架', icon: BookMarketIcon },
 }
 
 /**
