@@ -19,6 +19,7 @@
  *   node --experimental-strip-types .AGENT/scripts/ai-assistant/verify-perception.mjs
  */
 import { readFileSync } from 'node:fs'
+import { resolve, join } from 'node:path'
 import {
   parseFrontmatter, extractHashes, extractFirstPara, buildRefSkeleton, buildAttachedRefsInjection,
   REF_SKELETON_TOTAL_LIMIT, ATTACHED_INJECTION_LIMIT, MAX_ATTACHED_REFS,
@@ -37,10 +38,14 @@ import {
   afterAutoResult, canAutoRequest, isTriggerPoint, reviveByManual,
 } from '../../../src/lib/inlineSuggestTrigger.ts'
 import { composeContextWithDigest } from '../../../electron/lib/agentCompressCore.ts'
-import { stripComments } from '../shared/strip-comments.mjs'
+import { AI_ASSISTANT_SHORTCUT_DISABLED } from '../../../src/lib/workbenchLayout.ts'
+import { stripComments, walkSourceFiles } from '../shared/strip-comments.mjs'
 
-const ROOT = 'E:/Projects/KnowledgeRecorder'
-const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8')
+// ★ 仓库根按**脚本自身位置**解析，不写死绝对路径：写死会把「在 worktree 里跑」变成
+//   「静默校验主仓」——脚本全绿而实际改的是另一棵树，是最难查的一类假 PASS。
+//   （同 verify-input-bubble / verify-ai-read-exts 的口径）
+const ROOT = resolve(import.meta.dirname, '..', '..', '..')
+const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 
 let pass = 0
 const fails = []
@@ -693,15 +698,18 @@ ok(/sliceParagraphWindow\(ctx\.text,\s*ctx\.offset\)/.test(SRC_INLINE_CORE),
 }
 
 // J15i 冷却（成本优化 ③）
-ok(AUTO_PAUSE_STREAK === 3, `J15i 冷却阈值 = 3 次连续未采纳`, String(AUTO_PAUSE_STREAK))
+// ★ 2026-09-21 由 3 放宽到 5（B-5 拍板）：3 次在真实写作里太容易踩到。
+//   阈值变化是产品决策，不该悄悄发生 → 这里锁死具体值，改它必须同步本条。
+ok(AUTO_PAUSE_STREAK === 5, `J15i 冷却阈值 = 5 次连续未采纳（B-5 由 3 放宽）`, String(AUTO_PAUSE_STREAK))
 {
   let st = { ...INITIAL_AUTO_STATE }
   ok(canAutoRequest(st), 'J15j 初始可自动请求', '')
+  for (let i = 0; i < AUTO_PAUSE_STREAK - 1; i++) st = afterAutoResult(st, false)
+  ok(canAutoRequest(st),
+    `J15k 未采纳 ${AUTO_PAUSE_STREAK - 1} 次仍在自动（阈值前不误伤）`, `streak=${st.streak}`)
   st = afterAutoResult(st, false)
-  st = afterAutoResult(st, false)
-  ok(canAutoRequest(st), 'J15k 未采纳 2 次仍在自动（阈值前不误伤）', `streak=${st.streak}`)
-  st = afterAutoResult(st, false)
-  ok(!canAutoRequest(st) && st.paused, 'J15l ★ 未采纳满 3 次 → 暂停自动（不再打扰）', JSON.stringify(st))
+  ok(!canAutoRequest(st) && st.paused,
+    `J15l ★ 未采纳满 ${AUTO_PAUSE_STREAK} 次 → 暂停自动（不再打扰）`, JSON.stringify(st))
   ok(canAutoRequest(reviveByManual()) && reviveByManual().streak === 0,
     'J15m ★ 手动触发唤醒自动并重新计数（Alt+A 是明确的「我现在要」）', '')
   const adopted = afterAutoResult({ streak: 2, paused: false }, true)
@@ -721,8 +729,8 @@ ok(/handleEndOfLifetime/.test(SRC_MONACO) && /InlineCompletionEndOfLifeReasonKin
   'J15s ★ 用官方 handleEndOfLifetime(Accepted) 记采纳（唯一可靠的采纳信号）', '')
 ok(/settleAutoOutcome\(\)/.test(SRC_MONACO) && /afterAutoResult\(inlineAutoState, inlineLastAccepted\)/.test(SRC_MONACO),
   'J15t 每次自动触发前先结算上一次的采纳结果', '')
-ok(/inlineAutoState = \{ \.\.\.INITIAL_AUTO_STATE \}/.test(SRC_MONACO),
-  'J15u 手动触发复位冷却（唤醒自动）', '')
+ok(/resetInlineAutoPause\(\)/.test(SRC_MONACO),
+  'J15u 手动触发复位冷却（唤醒自动）—— 走具名 resetInlineAutoPause（B-5 起单点定义）', '')
 ok(/setInlineAutoMode\(inlineSuggestAuto\)/.test(SRC_MONACO),
   'J15v 自动开关由宿主同步进模块级状态（关 = 仅手动）', '')
 ok(/inlineSuggestAuto/.test(SRC_EDITOR) && /onInlineSuggestPaused/.test(SRC_EDITOR),
@@ -767,6 +775,193 @@ ok(/if \(earlyStop\) \{[\s\S]{0,200}isValidSuggestion\(suggestion\)\) return \{ 
   'J15ah ★ 早停走「成功返回」分支（掐断≠失败，否则优化等于白做）', '')
 ok(!/effort:\s*req\.effort/.test(SRC_INLINE),
   'J15ai 内联建议不透传 effort（思考型模型该靠早停兜底 + 设置里单独选非思考模型）', '')
+
+// ===================== J16：「AI 续写建议不能用」三重死锁（B-5，2026-09-21 拍板） =====================
+//
+// 症状是「点 ✨ 好像不能用、不知为何」，实为三件事叠加（详见 docs/pending-fixes.md B-5）：
+//   ① 自动通道连续未采纳 → **静默**暂停（唯一信号是 1.5px 灰点，胶囊静息态还淡出）；
+//   ② 点 ✨ 的语义是总开关（开着点 = 关掉功能），与用户「要一条」的预期相反 ——
+//      ★ 本轮拍板**不改此语义**（2026-09-20 定的），故这里的断言只管「关→开能自愈」；
+//   ③ 总闸（inlineOnRef）与暂停态（模块级 inlineAutoState）是两套东西，
+//      总闸 false→true 这条边上**原先没有任何地方重置 paused** → 关掉再打开依然不工作。
+// 方案 A（自愈）+ 方案 D（暂停可发现）为本节断言对象；C（点击可见反馈）由 B-6 的四态配色承接。
+
+// J16a 单一重置入口：手动唤醒与「总闸重新打开」必须走同一个具名函数，不得各写一份
+ok(/export function resetInlineAutoPause\(\)/.test(SRC_MONACO),
+  'J16a ★ 存在具名 resetInlineAutoPause（唤醒语义单点定义）', '')
+ok(/function resetInlineAutoPause\(\)[\s\S]{0,400}?reviveByManual\(\)/.test(SRC_MONACO),
+  'J16a2 ★ 重置走纯函数 reviveByManual（阈值/字段只由 inlineSuggestTrigger 定义）', '')
+ok(/function resetInlineAutoPause\(\)[\s\S]{0,400}?inlinePausedListeners\.forEach/.test(SRC_MONACO),
+  'J16a3 重置会广播「已不在暂停」（否则宿主角标残留，用户以为还停着）', '')
+
+// J16b ★ 方案 A 的核心：总闸 / 自动开关 false→true 的边沿必须重置
+ok(/inlineSuggestEnabled && !prevInlineOnRef\.current/.test(SRC_MONACO) &&
+   /inlineSuggestAuto && !prevInlineAutoRef\.current/.test(SRC_MONACO),
+  'J16b ★ 总闸与自动开关的 false→true 边沿都触发重置（关掉再打开必须自愈）', '')
+ok(/\[inlineSuggestEnabled, inlineSuggestAuto\]/.test(SRC_MONACO),
+  'J16b2 边沿判定挂在 effect 依赖上（不是渲染期判断）', '')
+// ★ 负向：重置**不得**放进 setInlineAutoMode —— 那是渲染期调用的，会同步调
+//   inlinePausedListeners（宿主 setState）→ 「Cannot update a component while rendering…」
+ok(!/export function setInlineAutoMode\(on: boolean\): void \{[\s\S]{0,200}?resetInlineAutoPause/.test(SRC_MONACO),
+  'J16b3 ★ 负向：resetInlineAutoPause 不在 setInlineAutoMode 内（渲染期调用会触发跨组件 setState 警告）',
+  '')
+ok(!/const inlineOnRef = useRef\(inlineSuggestEnabled\)[\s\S]{0,80}?resetInlineAutoPause/.test(SRC_MONACO),
+  'J16b4 ★ 负向：不在渲染期/组件体直接调用重置', '')
+
+// J16c 方案 D：暂停要可发现（Toast），且每次暂停只提示一次
+ok(/inlinePauseNotifiedRef/.test(SRC_EDITOR),
+  'J16c ★ 暂停提示有「只提示一次」的记账位（防每轮 toast 刷屏）', '')
+ok(/onInlineSuggestPaused=\{handleInlinePaused\}/.test(SRC_EDITOR),
+  'J16c2 ★ 宿主接的是带提示的 handler（不是裸 setInlinePaused）', '')
+ok(!/onInlineSuggestPaused=\{setInlinePaused\}/.test(SRC_EDITOR),
+  'J16c3 ★ 负向：不再直连裸 setInlinePaused（否则提示丢失）', '')
+ok(/AI 续写建议已暂停/.test(SRC_EDITOR),
+  'J16c4 暂停文案给出唤醒方式（不能只说「暂停了」）', '')
+
+// J16d Alt+A 在总闸关闭时不得静默无效
+ok(/triggerInlineSuggest\(\)\)\s*return/.test(SRC_EDITOR) &&
+   /getSetting\('aiAssistantInlineSuggest'\)/.test(SRC_EDITOR) &&
+   /AI 续写建议已关闭/.test(SRC_EDITOR),
+  'J16d ★ 总闸关着时按 Alt+A 给出可见提示（原先被 fireInlineTrigger 静默吞掉）', '')
+
+// J16e 探针侧：G11 的轮数必须由源码阈值派生（写死轮数会在阈值调整时假失败）
+{
+  const SRC_PROBE = stripComments(read('.AGENT/scripts/workbench-shell/probes/probe-batch5-ai.mjs'))
+  ok(/AUTO_PAUSE_STREAK\s*=\s*\(\(\)\s*=>/.test(SRC_PROBE) && /AUTO_PAUSE_STREAK \+ 3/.test(SRC_PROBE),
+    'J16e ★ 探针从源码读 AUTO_PAUSE_STREAK 并派生轮数（不在探针里写死线程数）', '')
+  ok(!/for \(let i = 0; i < 5; i\+\+\) \{\s*await typeInto\('。'\)/.test(SRC_PROBE),
+    'J16e2 ★ 负向：G11 循环不再写死 5 轮', '')
+  ok(/__kb_toasts/.test(SRC_PROBE) && /MutationObserver/.test(SRC_PROBE),
+    'J16e3 探针用 MutationObserver 采集 Toast（Toast 会自行退场，事后查 DOM 必假 FAIL）', '')
+}
+
+// ===================== J17：✨ 四态配色（B-6，2026-09-21 拍板） =====================
+//
+// 用户口径：开=绿常亮 / 关=红常亮 / 生成中=绿闪 / 暂停=黄。
+// 为什么非要四态：工具栏静息态会 display:none 掉 `.kb-float-hide` 次级钮，而 ✨ 没标该类 →
+// 它常年可见却在旧版只靠一档灰度区分开关，收起态等于看不出状态。
+// 两条实施取舍（拍板时明确过）：
+//   ① 「关」借 `--danger` 但**降一级表达**（项目里红色专指危险/删除，别与删除红同强度）；
+//   ② 关闭态**叠一条斜杠** —— 红绿是色盲最难区分的一对，而四态共用同一个 Sparkles。
+
+{
+  const stateExpr = (SRC_EDITOR.match(/const inlineStateClass = ([\s\S]*?)\n\s*return \(/) ?? [])[1] ?? ''
+  ok(stateExpr.length > 0, 'J17a 存在 inlineStateClass 四态配色表达式（不在 JSX 里散写三元）', '')
+  const iBusy = stateExpr.indexOf('inlineBusy')
+  const iOff = stateExpr.indexOf('!inlineOn')
+  const iPaused = stateExpr.indexOf('inlinePaused')
+  // ★ 顺序本身是语义：生成中优先级最高（busy 时无论开关/暂停都显示生成中），暂停插在「开」之前
+  ok(iBusy >= 0 && iBusy < iOff && iOff < iPaused,
+    `J17b ★ 短路顺序保持：busy → 关 → 暂停 → 开（busy@${iBusy} 关@${iOff} 暂停@${iPaused}）`, '')
+  ok(stateExpr.includes('var(--success)') && stateExpr.includes('var(--warning)') && stateExpr.includes('var(--danger)'),
+    'J17c 三色令牌齐备（生成中/开 = success，暂停 = warning，关 = danger）', '')
+  ok(/opacity-70/.test(stateExpr),
+    'J17c2 ★ 「关」为降级红（opacity-70，不借 --danger 的满色强度）', '')
+  ok(/const inlineOn = s\.aiAssistantInlineSuggest !== false/.test(SRC_EDITOR),
+    'J17d 四种状态的判据取自设置真值（不是本地影子 state）', '')
+}
+ok(/data-wb="inlineOffSlash"/.test(SRC_EDITOR),
+  'J17e ★ 关闭态有斜杠元素（色盲兜底：颜色不是唯一信号）', '')
+ok(/className=\{inlineBusy \? 'animate-pulse' : ''\}/.test(SRC_EDITOR),
+  'J17f ★ 只有「生成中」挂 animate-pulse（开态常亮不闪 —— 避免常驻闪烁噪音）', '')
+ok(/data-wb="inlinePaused"/.test(SRC_EDITOR) && /data-wb="inlineSuggestBtn"/.test(SRC_EDITOR) &&
+   /data-wb="inlineBusy"/.test(SRC_EDITOR),
+  'J17g ★ 探针 G 系依赖的三个锚点未被四态改造破坏', '')
+ok(/data-wb-inline-off/.test(SRC_EDITOR),
+  'J17h 关闭态仍以 data-wb-inline-off 表达（探针 G3/G6/G7 断言语义不变）', '')
+
+// ============ J18：感知开关下移到输入区（B-12，2026-09-21 首拍=输入卡内顶部；2026-09-22 二次拍板：输入卡底部工具行行首） ============
+// 拍板 = 工具行行首（📎/模型/消耗那排）/ 只动侧边栏 / 弱提示跟着走。都要锁住，否则复发点很低调（开关"又回头部了"没人报错）。
+{
+  const iRow = SRC_SIDEBAR.indexOf('const perceptionRow')
+  const iToggle = SRC_SIDEBAR.indexOf('data-wb="perceptionToggle"')
+  const iQuote = SRC_SIDEBAR.indexOf('const quoteRow')
+  ok(iRow >= 0 && iToggle > iRow && iQuote > iToggle,
+    'J18a ★ 开关独占工具行行首 perceptionRow（提示已升格为独立提示条）', '')
+  const rowBlock = SRC_SIDEBAR.slice(iRow, SRC_SIDEBAR.indexOf('const perceptionHintStrip'))
+  ok(iRow >= 0 && rowBlock.length > 50 && !/perceptionHint/.test(rowBlock),
+    'J18a2 ★ 提示不再挤在开关旁（perceptionRow 内零提示残留）', '')
+  ok(/const perceptionHintStrip/.test(SRC_SIDEBAR) && /data-wb="perceptionHint"/.test(SRC_SIDEBAR) && /去配置/.test(SRC_SIDEBAR),
+    'J18c ★ 弱提示升格为暖色提示条（含「去配置」直达入口，四次拍板方案 A）', '')
+  ok(/inputBarLeft=\{perceptionRow\}/.test(SRC_SIDEBAR),
+    'J18b ★ 开关经 inputBarLeft 插槽渲染在输入卡底部工具行行首', '')
+  ok(/inputTop=\{inputTop\}/.test(SRC_SIDEBAR) && /const inputTop = <>\{perceptionHintStrip\}\{quoteRow\}<\/>/.test(SRC_SIDEBAR),
+    'J18c2 提示条经 inputTop 渲染在输入卡内顶部（引用胶囊同插槽）', '')
+  // 负向：侧边栏头部**区间内**不得再出现开关 / 弱提示。
+  // 用区间切片而非全文件 indexOf——头部 JSX 在文件里位于 perceptionRow **之后**（const 先于 return），
+  // 单纯比索引大小会把方向搞反（首版就是这么写错的）。
+  const iHead = SRC_SIDEBAR.indexOf('h-9 shrink-0 px-2.5 flex items-center gap-1')
+  const iHeadEnd = SRC_SIDEBAR.indexOf('variant="sidebar"', iHead)
+  const headerBlock = iHead >= 0 && iHeadEnd > iHead ? SRC_SIDEBAR.slice(iHead, iHeadEnd) : null
+  ok(!!headerBlock && headerBlock.length > 100 && !/perceptionToggle/.test(headerBlock),
+    'J18d ★ 负向：开关不得回到侧边栏头部（按头部区间切片断言，非全文件搜索）', '')
+  ok(!!headerBlock && !/perceptionHint/.test(headerBlock),
+    'J18e ★ 负向：弱提示也不得回头部', '')
+  ok(/aria-pressed=\{perceptionOn\}/.test(SRC_SIDEBAR),
+    'J18f 搬位后 aria-pressed 仍在（探针与无障碍都靠它判态）', '')
+}
+
+// ============ J19：AI 助手快捷键禁用清单（B-8，2026-09-22 拍板：**只禁 AI 教学区**） ============
+// 病灶是「规则漏了一条语义」而非逻辑写错：AI 教学区**自己就是 AI 对话区**，却还能 Ctrl+J 唤起悬浮助手
+// → 同屏两块对话。且原来**只禁一半**（Ctrl+J 分支查闸门、Ctrl+Shift+J 分支不查任何闸门）——两条都要锁。
+{
+  const SRC_APP = stripComments(read('src/App.tsx'))
+  const SRC_LAYOUT = stripComments(read('src/lib/workbenchLayout.ts'))
+
+  ok(AI_ASSISTANT_SHORTCUT_DISABLED.length === 1 && AI_ASSISTANT_SHORTCUT_DISABLED[0] === 'aiTeaching',
+    'J19a ★ 禁用清单恰为 aiTeaching 一项（真实现 import 断言：其他整窗模块不禁，设置里问 AI 仍可用）',
+    `实际 ${JSON.stringify(AI_ASSISTANT_SHORTCUT_DISABLED)}`)
+
+  // 清单本身必须是「具名导出 + 纯常量」——写进组件里的字面量不算（那正是 B-8 成因）
+  ok(/export const AI_ASSISTANT_SHORTCUT_DISABLED\s*:\s*readonly TabName\[\]\s*=/.test(SRC_LAYOUT),
+    'J19b 清单在 workbenchLayout 具名导出（唯一真相源，非组件内写死）', '')
+
+  // App 侧：读清单算闸门 + 透传给悬浮面板
+  const iGate = SRC_APP.indexOf('const aiShortcutDisabled')
+  const gateLine = iGate >= 0 ? SRC_APP.slice(iGate, SRC_APP.indexOf('\n', iGate)) : ''
+  ok(gateLine.includes('AI_ASSISTANT_SHORTCUT_DISABLED.includes'),
+    'J19c ★ App 的闸门由清单派生（不是写死 activeTab === \'aiTeaching\'）', gateLine.trim().slice(0, 120))
+  ok(/aiShortcutDisabled=\{aiShortcutDisabled\}/.test(SRC_APP),
+    'J19d 闸门透传给悬浮 AssistantPanel', '')
+
+  // ★ 两条分支都要闸：按**区间切片**断言（Ctrl+Shift+J 分支原来完全没查闸门 —— 只禁一半的成因）
+  const iShiftJ = SRC_SIDEBAR.indexOf("e.ctrlKey && e.shiftKey && !e.altKey && k === 'j'")
+  const iPlainJ = SRC_SIDEBAR.indexOf("e.ctrlKey && !e.shiftKey && !e.altKey && k === 'j'")
+  const iEsc = SRC_SIDEBAR.indexOf("e.key === 'Escape'", iPlainJ)
+  const shiftBlock = iShiftJ >= 0 && iPlainJ > iShiftJ ? SRC_SIDEBAR.slice(iShiftJ, iPlainJ) : null
+  const plainBlock = iPlainJ >= 0 && iEsc > iPlainJ ? SRC_SIDEBAR.slice(iPlainJ, iEsc) : null
+  ok(!!shiftBlock && shiftBlock.length > 50 && shiftBlock.includes('aiShortcutDisabled'),
+    'J19e ★ Ctrl+Shift+J 分支受闸（原来这里不查任何闸门 → 在 AI 教学区仍能全屏唤起助手）', '')
+  ok(!!plainBlock && plainBlock.length > 50 && /suspendShortcut \|\| aiShortcutDisabled/.test(plainBlock),
+    'J19f ★ Ctrl+J 分支同时受宿主挂起与模块禁用两重闸', '')
+  ok(/if \(aiShortcutDisabled\) return/.test(shiftBlock ?? '') && !/preventDefault/.test((shiftBlock ?? '').split('if (aiShortcutDisabled) return')[0]),
+    'J19g 禁用时**不** preventDefault（拍板口径「完全无反应」，别把按键吞掉影响别处）', '')
+
+  // 负向：悬浮面板组件里不得出现 'aiTeaching' 字面量（回退成写死即 list-drift 复发）
+  ok(!/aiTeaching/.test(SRC_SIDEBAR),
+    'J19h ★ 负向：AssistantPanel 内零 aiTeaching 字面量（只能读 prop）', '')
+  ok(!/aiTeaching/.test(gateLine),
+    'J19i ★ 负向：App 的闸门行内零 aiTeaching 字面量', gateLine.trim().slice(0, 120))
+
+  // 自动收起（2026-09-22 补拍）：只禁快捷键会漏掉「切 Tab」那条路 ——
+  // 工作台 Ctrl+Shift+J 唤起 → 收起 → 切到 AI 教学区，浮层仍在（fixed z-40，切 Tab 不自动收）→ 双对话换个入口复现。
+  ok(/if \(aiShortcutDisabled\) closeAll\(\)/.test(SRC_SIDEBAR),
+    'J19l ★ 进入禁用模块自动收掉浮层（只禁快捷键不够：浮层会随 Tab 切换残留）', '')
+
+
+  // 负向：死监听 ai-assistant:toggle（右下浮钮 2026-09-16 已删，监听无人派发）
+  const srcFiles = walkSourceFiles(join(ROOT, 'src'), { skip: (p) => p.includes('vendor') })
+  const toggleHits = []
+  for (const f of srcFiles) {
+    if (/ai-assistant:toggle/.test(stripComments(readFileSync(f, 'utf8').replace(/\r\n/g, '\n')))) {
+      toggleHits.push(f.slice(ROOT.length + 1))
+    }
+  }
+  ok(srcFiles.length > 100, 'J19j 源码遍历有效（防 skip 写错导致空集假通过）', `实际扫到 ${srcFiles.length} 个文件`)
+  ok(toggleHits.length === 0,
+    'J19k ★ 负向：全 src 无 ai-assistant:toggle 残留（死监听已随 B-8 清理）',
+    toggleHits.length ? '命中：' + toggleHits.join('、') : '')
+}
 
 // ===================== 结果 =====================
 
