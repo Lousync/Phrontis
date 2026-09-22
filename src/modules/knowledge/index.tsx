@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Puzzle, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff } from 'lucide-react'
+import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff } from 'lucide-react'
+import { PluginIcon } from '../../components/shared/ModuleIcons'
 import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_ENTRY_ENABLED, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
@@ -19,7 +20,7 @@ import {
   showExportSaveDialog, writeExportTextFile,
   getKnowledgeTags, pluginListViews, getKnowledgeGraph,
   getKnowledgeIndexWarnings,
-  workspaceRename, workspaceGetCurrent,
+  workspaceRename, workspaceGetCurrent, workspaceTrash,
   workspaceListDir, workspaceCreateFile, workspaceMkdir,
   workspacePasteExternal, getPathForFile,
 } from '../../lib/ipc'
@@ -29,10 +30,11 @@ import { showToast } from '../../lib/toast'
 // 页签判定消费共享 tabPolicy（笔记合并 Phase 1 §1.3）：与编辑器模块同一套「该不该消失 / 关闭落点」
 import { previewReplacement, landingAfterClose } from '../../lib/tabPolicy'
 // 文件视图（Phase 2 批次 1，B 方案）：共享 VaultTree——与编辑区同一份实现，目录即真相
-import { VaultTree, type DirCache, type TreeNode, type CreateIntent } from '../../components/shared/VaultTree'
+import { VaultTree, type DirCache, type TreeNode, type CreateIntent, type CreateType, type RenameIntent } from '../../components/shared/VaultTree'
 import { recordFileOp } from '../../lib/fileOpHistory'
 import { useDataChanged } from '../../lib/dataChanged'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
+import { useContextMenuPosition } from '../../lib/useContextMenuPosition'
 import { NotebookList } from './components/NotebookList'
 import { ChapterPanel } from './components/ChapterPanel'
 // Monaco 宿主单独 lazy：PageEditor 内联了 @monaco-editor/react，而 monaco 主包 8.3MB
@@ -49,6 +51,7 @@ import { PluginFrame } from '../../components/shared/PluginFrame'
 import { ImportZone } from '../shared/components/ImportZone'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
 import { FolderFocusButton } from '../../components/shared/FolderFocusButton'
+import { TreeNewButton, type TreeNewMenuItem } from '../../components/shared/TreeNewButton'
 import { isEditingInput } from '../../lib/shortcuts'
 import { getGlobalActiveTab } from '../../lib/activeTab'
 import { useSettings } from '../../lib/SettingsContext'
@@ -96,9 +99,22 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   dirCacheRef.current = dirCache
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']))
   const [treeCreating, setTreeCreating] = useState<CreateIntent | null>(null)
+  /** 文件树重命名态（B-2）：非空 = 该条目原地换成内联输入行 */
+  const [treeRenaming, setTreeRenaming] = useState<RenameIntent | null>(null)
+  /** 选中目录（B-7）：头部「＋」的落点来源。null = 无选中 → 落仓库根。
+   *  这是 UI 焦点而非 vault 数据（不写盘、不进撤销栈）：点目录行 = 该目录，点文件行 = 其父目录，
+   *  进空间 / 图谱态即清空。与 activePath（正在看哪个文件）是两层语义。 */
+  const [selectedDirRel, setSelectedDirRel] = useState<string | null>(null)
+  /** 选中目录镜像 ref：模块级快捷键 effect（Ctrl+N）内读它——把 selectedDirRel 塞进那个 effect 的
+   *  依赖数组会让键盘监听器随每次点目录重建（同 activePageIdRef / selectedCategoryIdRef 的理由） */
+  const selectedDirRelRef = useRef<string | null>(null)
+  selectedDirRelRef.current = selectedDirRel
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null)
-  /** 新建分类目录（Phase 2 批次 3 收尾）：顶层 mkdir + categories.json 登记——页面拖进该目录即归类 */
-  const [catDraft, setCatDraft] = useState<{ name: string } | null>(null)
+  // 树右键菜单定位：测量后 clamp 进视口（此前是「菜单高度按常量 160 估」的写法，
+  // B-2 加了删除/重命名两项后估值必然失真 → 复用本模块既有 hook，与 NotebookList/ChapterPanel 同源）
+  const { menuRef: treeMenuRef, style: treeMenuStyle } = useContextMenuPosition(treeMenu)
+  /** 新建分类目录的命名走文件树内联输入（B-13）：原 `catDraft` 居中浮层整条通道已删——
+   *  两条创建路径并存本身就是分叉源，命名方式现已与新建知识页/目录/文件完全一致。 */
   const vaultRootRef = useRef<string | null>(null)
   const [liveContent, setLiveContent] = useState('')
   const [locatePageId, setLocatePageId] = useState<string | null>(null)
@@ -840,9 +856,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   }, [allPages, ensureVaultRoot, refreshTreeDir])
 
   /** 新建分类目录提交（Phase 2 批次 3 收尾）：顶层 mkdir + categories.json 登记（vault 白名单通道）。
-   *  分类 = 目录（resolveCategoryIdByPath）：页面拖进该目录即归类。仅支持顶层（子目录层级 = 普通目录嵌套）。 */
+   *  分类 = 目录（resolveCategoryIdByPath）：页面拖进该目录即归类。仅支持顶层（子目录层级 = 普通目录嵌套）。
+   *  B-13：命名改走文件树内联输入后，本函数**不再自己收输入框**（原先第一行 setCatDraft(null) 已删），
+   *  由 handleTreeCommitCreate 的 category 分流调用——树内联机制统一负责「收起输入行」这件事。 */
   const handleCommitCategory = useCallback(async (rawName: string) => {
-    setCatDraft(null)
     const name = rawName.trim()
     if (!name) return
     try {
@@ -856,10 +873,14 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
   }, [refreshTreeDir, refreshCategories])
 
-  const handleTreeCommitCreate = useCallback(async (dirRel: string, type: 'file' | 'dir' | 'knowledge', rawName: string) => {
+  const handleTreeCommitCreate = useCallback(async (dirRel: string, type: CreateType, rawName: string) => {
     setTreeCreating(null)
     const name = rawName.trim()
     if (!name) return
+    // 分类目录（B-13）：顶层 mkdir + categories.json 登记，走既有 handleCommitCategory。
+    // ★ 必须先于 ensureVaultRoot 分流——handleCommitCategory 不走 vault 写通道，也不接受 dirRel
+    //（分类恒落仓库根层，与树内联行渲染在哪个目录无关）。
+    if (type === 'category') { await handleCommitCategory(name); return }
     const root = await ensureVaultRoot()
     if (!root) return
     const rel = dirRel ? `${dirRel}/${name}` : name
@@ -883,7 +904,117 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       // 新建的 md 若未被索引收录（无 id 草稿），点开走编辑器兜底；有 id 由刷新后的索引接管
       void refreshAllPages()
     } catch (e) { console.error('[knowledge] tree create failed:', e); showToast({ type: 'error', message: '创建失败' }) }
-  }, [ensureVaultRoot, refreshTreeDir, refreshAllPages, handleOpenPage])
+  }, [ensureVaultRoot, refreshTreeDir, refreshAllPages, handleOpenPage, handleCommitCategory])
+
+  /** 「＋」的落点（B-7 唯一真相源）：头部「＋」与 Ctrl+N 共用，避免两处各自推导再分叉。
+   *  无选中目录 → 仓库根（等价于加此特性前 Ctrl+N 的固定行为）。
+   *  读 ref 而非 state：恒等稳定的 useCallback（deps 为空）才能被模块级快捷键 effect 安全依赖。 */
+  const treeLandDir = useCallback(() => selectedDirRelRef.current ?? '', [])
+
+  /** 头部「＋」菜单项（B-7 拍板：就三项，不含「新建空文件」——那个仍在左栏右键菜单里）。
+   *  「新建分类目录」恒落仓库根（分类 = 顶层容器，handleCommitCategory 是 parentId:null + 顶层 mkdir），
+   *  所以选中子目录时补一个「根层」小字说明，而不是置灰（置灰会先被当成 bug）。 */
+  const treeNewItems = useMemo<TreeNewMenuItem[]>(() => {
+    const ic = 'shrink-0 text-[var(--text-muted)]'
+    const atSubDir = !!selectedDirRel
+    return [
+      { key: 'knowledge', label: '新建知识页', icon: <FileText size={13} className={ic} /> },
+      { key: 'dir', label: '新建目录', icon: <Folder size={13} className={ic} /> },
+      { key: 'category', label: '新建分类目录', icon: <FolderTree size={13} className={ic} />, ...(atSubDir ? { note: '根层' } : {}) },
+    ]
+  }, [selectedDirRel])
+
+  /** 「＋」选中类型 → 进既有内联输入，不新写创建逻辑（B-13 起分类目录也走这条路）。
+   *  先确保落点目录展开：内联输入行渲染在目录子级里，目录收着的话输入框根本不可见（表现为"点＋没反应"）。 */
+  const handleTreeNewPick = useCallback((key: string) => {
+    // 分类目录恒落仓库根层（顶层 mkdir + categories.json 登记），落点不跟随选中目录
+    if (key === 'category') { setTreeCreating({ dirRel: '', type: 'category' }); return }
+    const dirRel = treeLandDir()
+    if (dirRel) setExpandedDirs((prev) => (prev.has(dirRel) ? prev : new Set(prev).add(dirRel)))
+    setTreeCreating({ dirRel, type: key as 'knowledge' | 'dir' })
+  }, [treeLandDir])
+
+  // 选中目录只在「知识库文件视图」语境下有意义：进空间 / 图谱态即清空（B-7）
+  useEffect(() => {
+    if (selectedSpaceId || graphMode) setSelectedDirRel(null)
+  }, [selectedSpaceId, graphMode])
+
+  /** 删除树条目后关闭其下已打开的页签（force：磁盘文件已不存在，无需未保存确认） */
+  const closeTabsUnder = useCallback((relPath: string) => {
+    const prefix = relPath + '/'
+    for (const id of [...openPageIdsRef.current]) {
+      const rel = id.startsWith('draft:') ? id.slice('draft:'.length) : allPages.find((p) => p.id === id)?.path
+      if (rel && (rel === relPath || rel.startsWith(prefix))) forceCloseTab(id)
+    }
+  }, [allPages, forceCloseTab])
+
+  /** 文件树条目删除（B-2）：目录按性质分流，删完关闭其下页签并刷新父目录。
+   *  - **分类目录**（categories.json 有登记，path 命中）→ `deleteKnowledgeCategory`：同步清登记，
+   *    否则走回收站会在 categories.json 留下指向不存在目录的脏条目；
+   *  - **普通目录 / 任意文件** → `workspaceTrash`：直接移入系统回收站。
+   *  ★ 不记入撤销栈：删除走系统回收站，程序内无 restore 通道（fileOpHistory 头注）。
+   *  动画键用 `relPath`——VaultTree 的行以 relPath 为键（分类树那边才是 categoryId）。 */
+  const handleTreeDelete = useCallback(async (node: TreeNode) => {
+    const root = await ensureVaultRoot()
+    if (!root) return
+    const name = node.relPath.slice(node.relPath.lastIndexOf('/') + 1)
+    const isDir = node.type === 'dir'
+    const catId = isDir ? (categories.find((c) => c.path === node.relPath)?.id ?? null) : null
+
+    if (catId) {
+      if (!(await confirmVaultCategoryDelete(catId))) return
+    } else {
+      const ok = await showGlobalConfirm({
+        title: isDir ? '删除目录' : '删除文件',
+        message: isDir
+          ? `目录「${name}」及其下全部内容将一并移入系统回收站。确定删除吗？`
+          : `「${name}」将移入系统回收站。确定删除吗？`,
+        confirmLabel: '删除',
+        cancelLabel: '取消',
+        variant: 'danger',
+      })
+      if (ok !== true) return
+    }
+
+    await deleteWithAnimation(node.relPath, async () => {
+      if (catId) await deleteKnowledgeCategory(catId)
+      else {
+        const res = await workspaceTrash(root, node.relPath)
+        if (!res.ok) throw new Error(res.error || '删除失败')
+      }
+      closeTabsUnder(node.relPath)
+    })
+    // 树刷新放到动画整段走完之后（deleteWithAnimation 内部先播收尾淡出再返回，与 NotebookList
+    // 同一节奏）——若放进 fn 里，目录重扫会赶在淡出播放前就把条目从树上摘掉，收尾动画看不到。
+    // 丢弃被删目录自身的缓存（其子缓存随之失效，展开时按需重拉）
+    setDirCache((prev) => { const n = { ...prev }; delete n[node.relPath]; return n })
+    void refreshTreeDir(parentDirOf(node.relPath))
+  }, [ensureVaultRoot, categories, confirmVaultCategoryDelete, deleteWithAnimation, closeTabsUnder, refreshTreeDir])
+
+  /** 文件树重命名（B-2 同批补）：workspaceRename + 记入撤销栈（重命名属「移动」语义，
+   *  与 moveVaultPath 同一通道，Ctrl+Z 可撤回）。成功后刷新父目录并通知编辑器侧树同步。 */
+  const handleTreeRename = useCallback(async (relPath: string, rawName: string) => {
+    setTreeRenaming(null)
+    const name = rawName.trim()
+    if (!name) return
+    const curName = relPath.slice(relPath.lastIndexOf('/') + 1)
+    if (name === curName) return
+    const root = await ensureVaultRoot()
+    if (!root) return
+    const dir = parentDirOf(relPath)
+    const nextRel = dir ? `${dir}/${name}` : name
+    try {
+      const res = await workspaceRename(root, relPath, nextRel)
+      if (!res.ok) { showToast({ type: 'error', message: res.error || '重命名失败' }); return }
+      recordFileOp({ kind: 'move', rootId: root, from: relPath, to: nextRel, name })
+      window.dispatchEvent(new CustomEvent('kb-file-moved', { detail: { srcRel: relPath, dstRel: nextRel } }))
+      void refreshTreeDir(dir)
+      void refreshAllPages()
+      showToast({ type: 'info', message: `已重命名为「${name}」` })
+    } catch (e) {
+      showToast({ type: 'error', message: e instanceof Error ? e.message : '重命名失败' })
+    }
+  }, [ensureVaultRoot, refreshTreeDir, refreshAllPages])
 
 
   const handleBackToList = useCallback(() => {
@@ -1242,9 +1373,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       if (isEditingInput(e)) return
 
       // Ctrl+N — 新建知识页：文件树内联创建（Phase 2 批次 2：frontmatter id 直接写入，不再借道编辑器）
+      // 落点自 B-7 起跟随「选中目录」（原为恒落仓库根），与头部「＋」共用 treeLandDir()
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'n' || e.key === 'N')) {
         e.preventDefault()
-        setTreeCreating({ dirRel: '', type: 'knowledge' })
+        const dirRel = treeLandDir()
+        if (dirRel) setExpandedDirs((prev) => (prev.has(dirRel) ? prev : new Set(prev).add(dirRel)))
+        setTreeCreating({ dirRel, type: 'knowledge' })
         return
       }
 
@@ -1337,7 +1471,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, readingMode, enterReading, exitReading])
+  }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, readingMode, enterReading, exitReading, treeLandDir])
 
   // ---- 外部文件粘贴（2026-09-20 阶段四：能力自编辑器模块上移，随其退役）----
   // 资源管理器里 Ctrl+C 文件 → 本模块 Ctrl+V：剪贴板带 File 列表且没有文本接收方时接管，
@@ -1722,6 +1856,13 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             而非复制渲染，全部状态留在本组件（方案 §7 风险2）。否则回落原位 ResizablePanel。
             两形态显隐一致：portal 传 null ⇔ ResizablePanel visible=false 不渲染 children；
             且 sidebarEl 形态下 ResizablePanel 整体不渲染，模块中间区不再残留收起边条。 */}
+        {/* 头部「＋」新建（B-7）：同槽 portal，且**排在聚焦按钮之前**——portal 目标同一容器时
+            DOM 顺序 = 渲染顺序，于是「＋」在聚焦按钮左侧（动作在前、开关在后）。
+            显隐口径与聚焦按钮完全一致（非知识库形态 / 选中空间 / 图谱态均不渲染）。 */}
+        {modActionsEl && sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal(
+          <TreeNewButton items={treeNewItems} onPick={handleTreeNewPick} title="新建知识页 / 目录 / 分类目录" />,
+          modActionsEl,
+        )}
         {/* 聚焦按钮上移（2026-09-19 反馈）：portal 到左栏模块态头部动作槽（🏠 🔒 最右）。
             与侧栏同显隐口径：非知识库形态（quiz）/选中空间（行原本就不显示）/图谱态不渲染 */}
         {modActionsEl && createPortal(
@@ -1786,48 +1927,57 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   creating={treeCreating}
                   onCommitCreate={handleTreeCommitCreate}
                   onCancelCreate={() => setTreeCreating(null)}
+                  /* 选中目录（B-7）：头部「＋」/ Ctrl+N 的落点来源。点目录行或点文件行（其父目录）都会上报，
+                     受控——树本身不持选中态 */
+                  selectedPath={selectedDirRel}
+                  onSelectDir={setSelectedDirRel}
+                  renaming={treeRenaming}
+                  onCommitRename={(rel, name) => { void handleTreeRename(rel, name) }}
+                  onCancelRename={() => setTreeRenaming(null)}
+                  deletingMap={deletingMap}
                 />
-                {catDraft && createPortal(
-                  /* fixed 浮层必须 portal 到 body：侧栏（含本弹层）随批次3 portal 挂进左栏后，
-                     左栏面板的变换/收缩容器会让 fixed 的包含块变成窄栏——菜单/弹层被压成竖条
-                     （2026-09-19 反馈截图）。同 WorkbenchLeftPanel 书签菜单的 portal 模式。 */
-                  <div className="fixed inset-0 z-[70] flex items-start justify-center bg-black/25 pt-[26vh]" onMouseDown={() => setCatDraft(null)}>
-                    <div
-                      className="w-[380px] max-w-[90vw] rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-lg kb-modal-in"
-                      onMouseDown={e => e.stopPropagation()}
-                    >
-                      <div className="mb-2 text-[12px] text-[var(--text-muted)]">新建分类目录（仓库顶层）——之后把笔记拖进该目录即归类</div>
-                      <input
-                        autoFocus
-                        spellCheck={false}
-                        placeholder="分类名称…"
-                        className="w-full rounded border border-[var(--accent)] bg-[var(--bg-primary)] px-2 py-1.5 text-[12.5px] text-[var(--text-primary)] outline-none"
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') { e.preventDefault(); void handleCommitCategory((e.target as HTMLInputElement).value) }
-                          else if (e.key === 'Escape') { e.preventDefault(); setCatDraft(null) }
-                        }}
-                      />
-                    </div>
-                  </div>,
-                  document.body,
-                )}
+                {/* B-13（2026-09-21 拍板）：原「新建分类目录」的居中浮层（`catDraft` 通道）**已整体删除**，
+                    命名合并进文件树内联输入——与新建知识页/目录/文件同一机制，即 VS Code 式。
+                    分类目录语义不变：顶层 mkdir + categories.json 登记，**恒落仓库根层**
+                    （所以它的内联输入行固定在根层末尾，不跟随选中目录，头部「＋」菜单项也已标「根层」）。 */}
                 {treeMenu && createPortal(
-                  /* 同 catDraft：fixed 菜单 portal 到 body，否则在左栏窄包含块里被压成竖条 */
+                  /* fixed 菜单必须 portal 到 body：侧栏随批次3 portal 挂进左栏后，
+                     左栏面板的变换/收缩容器会让 fixed 的包含块变成窄栏——菜单被压成竖条
+                     （2026-09-19 反馈截图）。同 WorkbenchLeftPanel 书签菜单的 portal 模式。 */
                   <div className="fixed inset-0 z-[70]" onMouseDown={() => setTreeMenu(null)} onContextMenu={e => { e.preventDefault(); setTreeMenu(null) }}>
                     <div
+                      ref={treeMenuRef}
                       className="absolute min-w-[150px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-lg kb-pop"
-                      style={{ left: Math.min(treeMenu.x, window.innerWidth - 170), top: Math.min(treeMenu.y, window.innerHeight - 160) }}
+                      style={treeMenuStyle}
                       onMouseDown={e => e.stopPropagation()}
                     >
                       {(() => {
                         const dirRel = treeMenu.node.type === 'dir' ? treeMenu.node.relPath : parentDirOf(treeMenu.node.relPath)
+                        // 条目自身动作（B-2）：根容器（relPath === ''）是虚拟节点，没有删除/重命名语义
+                        const self = treeMenu.node.relPath !== '' ? treeMenu.node : null
                         return (
                           <>
                             <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'file' }) }}>新建文件</button>
                             <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'dir' }) }}>新建目录</button>
-                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setCatDraft({ name: '' }) }}>新建分类目录</button>
+                            {/* B-13：分类目录也走树内联命名（恒落根层，不吃 node 的 dirRel） */}
+                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel: '', type: 'category' }) }}>新建分类目录</button>
                             {treeMenu.node.type === 'file' && (
                               <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); handleTreeOpenFile(treeMenu.node) }}>打开</button>
+                            )}
+                            {self && (
+                              <>
+                                <div className="my-1 border-t border-[var(--border-color)]" />
+                                <button
+                                  data-wb="treeRenameItem"
+                                  className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                                  onClick={() => { setTreeMenu(null); setTreeRenaming({ relPath: self.relPath }) }}
+                                >重命名</button>
+                                <button
+                                  data-wb="treeDeleteItem"
+                                  className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--danger)] hover:bg-[var(--bg-hover)]"
+                                  onClick={() => { setTreeMenu(null); void handleTreeDelete(self) }}
+                                >删除</button>
+                              </>
                             )}
                           </>
                         )
@@ -1873,7 +2023,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                     title={`${v.name}（插件）`}
                     className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
                   >
-                    <Puzzle size={14} />
+                    <PluginIcon size={14} />
                     <span className="truncate">{v.title}</span>
                     <span className="ml-auto text-[10px] text-[var(--text-disabled)] shrink-0">插件</span>
                   </button>
@@ -2027,7 +2177,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       {activePluginView && (
         <div className="absolute inset-0 z-50 bg-[var(--bg-primary)] flex flex-col" role="dialog" aria-label={`${activePluginView.title}（插件）`}>
           <div className="shrink-0 flex items-center gap-2 px-2 py-1 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] select-none">
-            <Puzzle size={12} className="text-[var(--text-muted)]" />
+            <PluginIcon size={12} className="text-[var(--text-muted)]" />
             <span className="text-[11.5px] font-medium text-[var(--text-muted)]">{activePluginView.title}</span>
             <span className="text-[10px] text-[var(--text-disabled)]">{activePluginView.name} · 插件</span>
             <div className="flex-1" />
