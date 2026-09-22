@@ -4,6 +4,7 @@ import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX } from 'luci
 import type { BookKind, KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
+import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { useSettings } from '../../lib/SettingsContext'
 import {
   parseWorkbenchLayout, DAY_PANEL_WIDGET_IDS, RIGHT_PANEL_WIDGET_IDS, WORKBENCH_PANEL_TAB_IDS,
@@ -145,25 +146,12 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
   // 激活控件缺省 = 首个可见项；被隐藏后回落（钝规则）
   const effectiveWidget = activeWidget && visibleWidgets.includes(activeWidget) ? activeWidget : visibleWidgets[0] ?? null
 
-  // ⋯ 控件选显菜单（照 🔖 手法：portal + 原生委托 + 外部关闭）
-  const [wsMenuOpen, setWsMenuOpen] = useState(false)
-  const [wsMenuPos, setWsMenuPos] = useState<{ left: number; top: number } | null>(null)
+  // ⋯ 控件选显菜单（照 🔖 手法：portal + 原生委托 + 外部关闭；定位与开合已收口到 useAnchoredMenu）
   const wsMoreRef = useRef<HTMLButtonElement | null>(null)
   const wsMenuRef = useRef<HTMLDivElement | null>(null)
+  const wsMenu = useAnchoredMenu(wsMoreRef, wsMenuRef)
   useEffect(() => {
-    if (!wsMenuOpen) return
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node
-      if ((wsMoreRef.current && wsMoreRef.current.contains(t)) || (wsMenuRef.current && wsMenuRef.current.contains(t))) return
-      setWsMenuOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setWsMenuOpen(false) }
-    document.addEventListener('pointerdown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
-  }, [wsMenuOpen])
-  useEffect(() => {
-    if (!wsMenuOpen) return
+    if (!wsMenu.open) return
     const menu = wsMenuRef.current
     if (!menu) return
     // 隐藏集从**菜单 DOM 的勾选状态**推导，而不是读 layout 闭包值：
@@ -181,34 +169,14 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
     }
     menu.addEventListener('change', onChange)
     return () => menu.removeEventListener('change', onChange)
-  }, [wsMenuOpen, patch])
-  const toggleWsMenu = () => {
-    if (!wsMenuOpen) {
-      const r = wsMoreRef.current?.getBoundingClientRect()
-      if (r) setWsMenuPos({ left: Math.max(8, Math.min(r.right - 210, window.innerWidth - 218)), top: Math.max(8, r.top - 248) })
-    }
-    setWsMenuOpen(v => !v)
-  }
+  }, [wsMenu.open, patch])
 
   // ⋯ 面板 Tab 管理菜单（同款手法）
-  const [ptMenuOpen, setPtMenuOpen] = useState(false)
-  const [ptMenuPos, setPtMenuPos] = useState<{ left: number; top: number } | null>(null)
   const ptMoreRef = useRef<HTMLButtonElement | null>(null)
   const ptMenuRef = useRef<HTMLDivElement | null>(null)
+  const ptMenu = useAnchoredMenu(ptMoreRef, ptMenuRef)
   useEffect(() => {
-    if (!ptMenuOpen) return
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as Node
-      if ((ptMoreRef.current && ptMoreRef.current.contains(t)) || (ptMenuRef.current && ptMenuRef.current.contains(t))) return
-      setPtMenuOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPtMenuOpen(false) }
-    document.addEventListener('pointerdown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
-  }, [ptMenuOpen])
-  useEffect(() => {
-    if (!ptMenuOpen) return
+    if (!ptMenu.open) return
     const menu = ptMenuRef.current
     if (!menu) return
     const onChange = (e: Event) => {
@@ -221,14 +189,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
     menu.addEventListener('change', onChange)
     return () => menu.removeEventListener('change', onChange)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ptMenuOpen, layout.panelTabsHidden, layout.rightTab, visiblePanelTabs])
-  const togglePtMenu = () => {
-    if (!ptMenuOpen) {
-      const r = ptMoreRef.current?.getBoundingClientRect()
-      if (r) setPtMenuPos({ left: Math.max(8, Math.min(r.right - 210, window.innerWidth - 218)), top: r.bottom + 6 })
-    }
-    setPtMenuOpen(v => !v)
-  }
+  }, [ptMenu.open, layout.panelTabsHidden, layout.rightTab, visiblePanelTabs])
 
   // 控件切换条拖拽重排（HTML5 drag，WorkbenchTabBar 同款手法；序持久化 widgetOrder）
   const [dragId, setDragId] = useState<string | null>(null)
@@ -294,9 +255,9 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
           <div className="ml-auto">
             <button
               ref={ptMoreRef}
-              onClick={togglePtMenu}
+              onClick={ptMenu.toggle}
               title="管理面板 Tab"
-              className={`rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${ptMenuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : ''}`}
+              className={`rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${ptMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : ''}`}
             >
               <MoreHorizontal size={13} />
             </button>
@@ -360,9 +321,9 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                   <button
                     ref={wsMoreRef}
                     data-wb="wsMore"
-                    onClick={toggleWsMenu}
+                    onClick={wsMenu.toggle}
                     title="显示的小控件"
-                    className={`rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${wsMenuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : ''}`}
+                    className={`rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${wsMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : ''}`}
                   >
                     <MoreHorizontal size={13} />
                   </button>
@@ -416,12 +377,12 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
       </div>
 
       {/* ⋯ 面板 Tab 管理菜单（portal + 原生委托） */}
-      {ptMenuOpen && ptMenuPos && createPortal(
+      {ptMenu.open && ptMenu.pos && createPortal(
         <div
           ref={ptMenuRef}
           data-wb="panelTabMenu"
           className="fixed z-50 w-[210px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-2xl"
-          style={{ left: ptMenuPos.left, top: ptMenuPos.top }}
+          style={ptMenu.pos}
         >
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] tracking-wider text-[var(--text-muted)]">显示的面板 Tab</div>
           {WORKBENCH_PANEL_TAB_IDS.map((id) => (
@@ -437,12 +398,12 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
       )}
 
       {/* ⋯ 控件选显菜单（portal + 原生委托；2026-09-17 反馈：不带任何底部说明文字） */}
-      {wsMenuOpen && wsMenuPos && createPortal(
+      {wsMenu.open && wsMenu.pos && createPortal(
         <div
           ref={wsMenuRef}
           data-wb="widgetMenu"
           className="fixed z-50 w-[210px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-2xl"
-          style={{ left: wsMenuPos.left, top: wsMenuPos.top }}
+          style={wsMenu.pos}
         >
           <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] tracking-wider text-[var(--text-muted)]">显示的小控件</div>
           {RIGHT_PANEL_WIDGET_IDS.map((id) => {
