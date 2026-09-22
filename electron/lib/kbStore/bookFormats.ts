@@ -95,7 +95,7 @@ export function bookMimeOf(relPathOrExt: string): string | null {
 
 /** 展示名：去掉书籍扩展名（无匹配扩展名时原样返回）。
  *  ★ 它只用于**展示**，不是身份：`读书笔记 · ${bookDisplayName(relPath)}` 这种用法会让
- *    `a.epub` 与 `a.cbz` 撞进同一篇收件箱页（见 docs/pending-fixes.md B-12）。 */
+ *    `a.epub` 与 `a.cbz` 撞进同一篇收件箱页（见 docs/pending-fixes.md B-15）。 */
 export function bookDisplayName(relPath: string): string {
   const base = String(relPath ?? '').split('/').pop() ?? ''
   return bookKindOf(base) ? base.replace(/\.[^.]+$/, '') : base

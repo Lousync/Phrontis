@@ -3,6 +3,20 @@
 > 用途：开发负责人叙述的 bug 先在此逐条登记（现象 + 定位 + 根因 + 修复方向），攒齐后统一开修。
 > 修完把对应条目标 `[x]` 并注明修复提交；确认闭环的条目可整段删除。
 > 条目编号 `B-n` 全局递增，不复用。
+>
+> **★ 编号沿革（2026-09-22，合并前收口）**：本清单最初由两条并行线**各自创建**（`feature/v3.4.0` 与 `feature/ui-rework`；分叉点 `388657b` 上该文件尚不存在），于是 B-12 起两条线撞号。
+> 定案口径：**提交信息里引用过的号不动** —— ui-rework 侧的 B-12/13/14 有 3 条提交标题（`f52c83f` / `b368566` / `1879584`）与 28 处代码注释引用，故**保持原号**；本线这五条顺延一段：
+>
+> | 旧号（本线） | 新号 | 条目 |
+> |---|---|---|
+> | B-12 | **B-15** | 导出「读书笔记」页名不带扩展名（同名书撞同一篇页） |
+> | B-13 | **B-16** | cbz（画集）体积 / 卡顿两隐患 |
+> | B-14 | **B-17** | `fixed-layout.js` 的 `#render` RO 竞态 |
+> | B-15 | **B-18** | cbz 里的 `.svg` 页破图 |
+> | B-16 | **B-19** | 退出书籍刷 ~266 条 RO 告警 |
+>
+> 合并（v3.4.0 ← ui-rework）后编号分布：**1…11** = UI 线那批（已修，标 `[x]`）· **12/13/14** = 感知模式开关 / 树内联命名 / 教学区树内联输入 · **15…19** = 阅读器那批（本线，未修）。
+> 教训：**并行分支登记新条目前先取另一条线的最大号**（当时本线已到 B-16，ui-rework 侧从 B-12 续 ⇒ 撞号）。
 
 ---
 
@@ -421,7 +435,7 @@ className={`relative p-1.5 rounded transition-colors ${inlineBusy ? 'text-[var(-
 
 ---
 
-## B-12 导出「读书笔记」页名不带扩展名：同名书（a.epub / a.fb2）会撞进同一篇页（2026-09-22，P3）
+## B-15 导出「读书笔记」页名不带扩展名：同名书（a.epub / a.fb2）会撞进同一篇页（2026-09-22，P3）
 
 **现象**：同一本书的不同格式（或任意两个**去掉扩展名后同名**的书）都导出为笔记时，第二本会**顶掉**第一本的笔记页内容 —— 第一本的摘录静默消失。做阶段 2a 的 fb2 探针时撞见：`探针样书.epub` 与 `探针样书.fb2` 都导出成同一篇 `读书笔记 · 探针样书.md`。
 
@@ -446,7 +460,7 @@ const page = vaultCreatePage({ title: `读书笔记 · ${bookDisplayName(relPath
 
 ---
 
-## B-13 cbz（画集）的两个体积/卡顿隐患：128MB 上限偏紧 + zip 在主线程同步解包（2026-09-22，P3）
+## B-16 cbz（画集）的两个体积/卡顿隐患：128MB 上限偏紧 + zip 在主线程同步解包（2026-09-22，P3）
 
 **现象**（尚未收到用户报告，是阶段 2b 落码时从源码推出的**预判**）：打开一本大画集（几十上百 MB、几百页）时，应用会**卡住一段时间**再显示第一页；超过 `MAX_BOOK_BYTES` 则直接**打不开**（报体积超限）。
 
@@ -470,7 +484,7 @@ const page = vaultCreatePage({ title: `读书笔记 · ${bookDisplayName(relPath
 
 ---
 
-## B-14 `fixed-layout.js` 的 `#render` 有 ResizeObserver 竞态：每次翻页控制台一条未捕获 TypeError（2026-09-22，P3）
+## B-17 `fixed-layout.js` 的 `#render` 有 ResizeObserver 竞态：每次翻页控制台一条未捕获 TypeError（2026-09-22，P3）
 
 **现象**：打开任何 cbz（固定版式书），**每翻一页**控制台就出现一条未捕获异常：
 
@@ -497,7 +511,7 @@ Uncaught TypeError: Cannot read properties of null (reading 'width')
 
 ---
 
-## B-15 cbz 里的 `.svg` 页显示为破图（`loadBlob` 不传 MIME）（2026-09-22，P3）
+## B-18 cbz 里的 `.svg` 页显示为破图（`loadBlob` 不传 MIME）（2026-09-22，P3）
 
 **现象**：cbz 归档里若某一页是 `.svg`，那一页打开是**破图**（`<img>` 加载失败、`naturalWidth = 0`），其余 PNG/JPEG 页正常。属**静默降级**，没有任何报错。
 
@@ -511,11 +525,83 @@ Uncaught TypeError: Cannot read properties of null (reading 'width')
 **与安全的关系（重要，别误读）**：这条**不是**安全缺口，反而是安全结论的**旁证** —— `<img>` 里的 SVG 在**任何** MIME 下都**不执行脚本**（阶段 2b 的恶意样书探针已实测：正确 MIME 下可解码、标志位仍全 null）。所以修它**不会**打开任何新的攻击面（`img-src` 只放行图片，内容帧 sandbox 仍无 `allow-scripts`）。
 
 **修复方向**（择一）：
-- **A 按后缀推 MIME 传给 `loadBlob`**（`comic-book.js` 里已有扩展名 → 类型的映射可复用），一行左右；**但属 vendor 改动**（2b 已定「只动两处」，这条要另开 patch 批次，同 B-14 的仪式成本）。
+- **A 按后缀推 MIME 传给 `loadBlob`**（`comic-book.js` 里已有扩展名 → 类型的映射可复用），一行左右；**但属 vendor 改动**（2b 已定「只动两处」，这条要另开 patch 批次，同 B-17 的仪式成本）。
 - **B 把 `.svg` 从白名单剔除** —— 改了反而**降低**能力（能显示的页面变少），不推荐。
 - **C 接受** —— 实机画集极少用 SVG 当页，影响面接近零。**本轮的选择**。
 
 **验证**（若选 A）：恶意样书 / 探针样书里放一页 `.svg` → 该页正常显示（`naturalWidth > 0`），且探针的安全负向断言**仍全绿**（标志位 null、sandbox 不含 `allow-scripts`、`script-src` 无 `'unsafe-inline'`）。
+
+---
+
+## B-19 退出书籍回书架后，终端刷 ~266 条 `ResizeObserver loop completed with undelivered notifications`（2026-09-22，P2）
+
+**现象**：在 dev 实例里从某本书退出回书架后，跑 `npm run dev` 的那个终端**整屏刷**同样的行（用户截图 ≈ 200+ 行）：
+
+```
+[Renderer] ResizeObserver loop completed with undelivered notifications. (http://127.0.0.1:7173/:0)
+```
+
+**界面观感正常**（无白屏、无卡死、书卡与进度都对），所以这也是「终端刷红字」级别的问题 —— 但**一次刷两三百行**足以淹没真报错，且背后是真实的布局抖动。
+
+**量化证据**（devbridge `GET http://127.0.0.1:7465/errors` 的聚合项，2026-09-22 实测）：
+
+| 计数 | 作用域 | 区间 | 跨度 |
+|---|---|---|---|
+| 266 | `renderer` | 06:37:58.564 → 06:38:00.010 | **1.45 s** |
+| 234 | `main`（转发副本） | 06:37:58.569 → 06:38:00.004 | 1.44 s |
+
+→ **不是持续刷屏，是退出瞬间的阵发**：≈183 条/秒 ≈ 每帧 2~3 条，持续 1.45 s 后**收敛归零**（此后反复读取该聚合，count 不再增长）。这个「每帧多条、约 1.5 s 内衰减」的形态，正是**尺寸依赖型布局在收敛**的签名（滚动条出现/消失一类），不是死循环。
+
+**为什么会被终端刷屏（放大器，不是根因）**：`electron/main/index.ts:316-320` 把渲染层 `console-message` 中 `level >= 2` 的**无条件** `console.error('[Renderer]', …)` 转发到 stdout；而 Chromium 把 ResizeObserver 环告警当作**错误事件**投递 ⇒ 一条浏览器内部告警变成了 N 行终端输出。
+
+**已排除的两件事**（都有证据，避免下次重走）：
+1. **不是书籍内容帧（foliate）里的 observer**：同一次会话的 `/errors` 里，blob 内容帧的报错 sourceId 长这样 —— `blob:http://127.0.0.1:7173/<uuid>`（如 `Blocked script execution in 'blob:…'`）；而本条是 `http://127.0.0.1:7173/:0` = **主文档**。foliate 的观察者全在内容帧内，故可排除。
+2. **不是 B-17**：B-17 是「翻页 → 一条未捕获 TypeError」（`fixed-layout.js` 的 `#render` 竞态），形态与计数模式都不同，属另一处 RO 家族问题。
+
+**未复现说明（重要）**：装了构造期归因探针后，跑「打开→返回书架」共 **5 轮 epub + 1 轮 PDF**，主文档 RO 回调 **0**、`/errors` Δ告警 **0** ⇒ **简单进出不足以复现**，需要「当时的那个触发条件」。故本条**尚未锁定到唯一 observer**，下面给主推根因与归因手法。
+
+**★ 观测环境（2026-09-22 追加，重要）**：本条的观测与探针全部跑在**当时 7173 上的 dev 实例**，而该实例实际服务的是 `E:/Projects/KnowledgeRecorder-ui-rework` 检出 —— 判定手法：往两个检出各放一个同名标记文件，再问 dev server 要它（返回 `export const TREE = "UIREWORK"`）。两条结论：
+
+- 归因所依据的代码在**两树一致**（`ui-rework` 的 `PdfReaderView.tsx:147 / :262-264 / :267` 与主仓同款），故下面的根因分析对两树通用；但**修的时候改主仓**（阅读器 B 段及后续收尾都只提在主仓）。
+- 这暴露了「dev 实例跑在非预期检出」的老毛病（与 2026-09-22 上午「桌面启动无 EPUB」同源）。**排查 UI 问题前先确认实例服务的是哪个检出**，否则会出现「改了没反应 / HMR 不生效」的假象 —— 判定脚本 `tmp/tree-probe.mjs` 可复用。
+
+**主推根因（代码锚定）**：`PdfReaderView` 的「测量回灌」构成滚动条抖动的反馈环 ——
+- `src/components/shared/pdf/PdfReaderView.tsx:258-272`：`new ResizeObserver(measure)`，而 `measure()` **每次回调都 `setAvailW/setAvailH`**（无同值短路）；
+- `availW/availH` 又喂给 `:550`（依赖数组含 `availW, availH` 的 `applyAutoScale`）、`:749-752`（宽度是否瓶颈）、`:817`（双页降级）⇒ **缩放/模式会随测量值变化**；
+- 缩放一变，内容尺寸变 ⇒ `:1326` 的滚动容器（`absolute inset-0 overflow-auto`）**滚动条出现或消失** ⇒ `clientWidth` 跳 ~15px ⇒ 触发下一次回调 ⇒ 环。
+
+**次要候选（保活模块，`display:none` 也仍挂着）**：`src/modules/desktop/index.tsx:220`（`:224` 注释已记「切走时容器宽度 0、RO 不触发」—— 说明该风险团队有感知）· `src/components/workbench/AiUsagePanel.tsx:122` · `src/modules/knowledge/components/graph/GraphCanvas.tsx:529` · `src/modules/ai-teaching/index.tsx:1942` · `ArtHtmlView.tsx:51` · `useFloatingWindow.ts:174`；另有 `pdfjs-dist` 官方 viewer 内部 RO 与 Monaco `automaticLayout`（都不可 grep）。
+
+**★ 复现与归因手法（留档，否则下次要重做）**：
+1. **判定靠差量，不靠肉眼看终端**：读 devbridge `/errors` 聚合项的 `count` + `lastTs`，动作前后各读一次取差（探针 `tmp/ro-probe.mjs` 的 `scan`/`cycle` 动作即此法）。
+2. **归因靠「构造期包一层」**：在渲染层包 `ResizeObserver` 构造器，记录 `new Error().stack` + 每次回调的 target 尺寸与时间戳，再按创建点聚合。
+   ⚠️ **只能抓到安装之后创建的实例** ⇒ 顺序必须是「先装探针 → 再进书 → 再退出」；探针装在 `tmp/ro-probe.mjs`（`tmp/` 不入库，若要长期保留应移入 `.AGENT/scripts/`）。
+3. 复现时把「进书前 / 退出时是否伴随窗口变化（改尺寸、最大化）、右栏 Tab 切换、左栏折叠」一并记录 —— 本轮就是缺这个上下文才没能复现。
+
+**修复方向**：
+- **治本 A（推荐，一行级）**：`measure()` 里加**同值短路** —— `const w = Math.max(120, el.clientWidth), h = Math.max(120, el.clientHeight); if (w === availWRef.current && h === availHRef.current) return`，断掉「回调 → setState → 布局再变」的环；配套给滚动容器加 `scrollbar-gutter: stable`，让滚动条出现/消失不再改变 `clientWidth`。
+- **治本 B**：保活（`display:none`）期间在回调里跳过 0 尺寸，别用 `Math.max(120, …)` 兜底成假值（120 会与真实尺寸来回跳）。
+- **治标 C（可与 A 并行）**：`electron/main/index.ts:316-320` 的转发加**按消息去重限流**（例如同一条消息每秒最多一次），避免真错误被淹没；**不要整条静音** —— 这类告警在别的模块里可能真是缺陷信号。
+
+**验证**：复现该路径时 `/errors` 里 ResizeObserver 项 **Δ = 0**；终端最多一行提示；阅读器缩放/双页降级/进度还原行为不变（`probe-pdf-reader` 类探针全绿）；窗口从大到小拖动时页面不再抖动。
+
+**同族噪音与一个副作用（2026-09-22 追加，建议一并处置）**
+
+同一段会话里还出现过另两类消息（`GET /errors` 全量清单共 7 条，按 `count/firstTs` 分三类）：
+
+| 类别 | 计数 | 时间戳 | 判明 |
+|---|---|---|---|
+| `[Window] did-fail-load: {errorCode:-3, validatedURL:'blob:http://127.0.0.1:7173/<uuid>'}` | 3 | 06:41:29 / 06:41:59 / 06:45:01 | **良性**：书籍内容帧的导航被**主动中止**（ERR_ABORTED），发生在「帧还没加载完就被拆掉/换掉」的时序 —— 每次进入+退出书籍各一次（时间戳与探针那几轮打开/退出完全对齐） |
+| `[Renderer] Blocked script execution in 'blob:…' because the document's frame is sandboxed and the 'allow-scripts' permission is not set.` | 2 | 06:43:16 / 06:45:11 | **期望行为，不是缺陷**：正是铁律 10 的第二道防线（内容帧 sandbox 不含 `allow-scripts`）在拦书页内脚本；样例里那几本「恶意样书」就是为此造的，`verify-epub-formats.mjs` 有负向断言锁着 |
+
+处置建议：
+
+- **`did-fail-load` 加主帧判据**：该事件对**子帧**也会触发，而我们的 handler（`electron/main/index.ts:309-311`）不看 `isMainFrame` 就按窗口级错误报 —— 子帧的 `ERR_ABORTED` 属正常取消，应过滤（`if (!isMainFrame) return`，或对 `-3` 静默）。
+- **沙箱拦截消息不进日志环**：它是「防线生效」的常态输出，dev 下每次打开带脚本的书都会来一条；建议不进 `logRing`（或降为 info），否则会被误认为错误。
+- ★ **真正的副作用（本条的存在意义）**：devbridge 的日志环容量只有 **500 条**（`electron/devbridge/capture.ts:39` `logRing = new Ring<LogItem>(500)`），而本次 RO 刷屏单体就产生 **266 条**（renderer）+ **234 条**（main 转发副本）⇒ **把环形缓冲挤爆，把之前/同时段的其他报错挤了出去**。
+  - 这解释了排查中观察到的「计数从 266 衰减到 260」：不是错误消失，是旧条目被挤出环（**我以为的"收敛"在计数上混合了挤出效应**，真实收敛判据应以 `lastTs` 停住为准）。
+  - 后果：**这次刷屏已经破坏了 06:37:58 之前的证据**，所以不能断言「那次只有 RO 一条」—— 排查者若据此下结论会错。
+  - 配套建议：修掉 A（同值短路）后刷屏自然消失；另可给 `logRing` 扩容或在入环前**按消息去重计数**（同消息只占 1 条 + count），别让噪声吃掉诊断面。
 
 ---
 

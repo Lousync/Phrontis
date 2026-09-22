@@ -847,7 +847,7 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 **验收**：`probe-cbz-reader.mjs` **全绿**（含页序自然序、单页 = blob 帧恰好 1 个、两档缩放的几何等式、翻页落盘与逐字回位、缩略图按需 + 页号↔图色映射（靠 fixture 的**单射**配色反查）、边缘点击翻页、恶意书负向、摘录负向、右栏无阅读 Tab）；`tsc --noEmit` 双端 0 错；6 契约 + 4 条回归探针（epub / fb2 / reading-panel / excerpt-export / pdf）全绿。
 
-**两条已知噪声，都不是本批引入的**（已登记 `docs/pending-fixes.md` B-14 / B-15）：
+**两条已知噪声，都不是本批引入的**（已登记 `docs/pending-fixes.md` B-17 / B-18）：
 
 - **`fixed-layout.js` 的 `#render` 有 ResizeObserver 竞态** —— `#showSpread` 先把 `#left/#right` 置 null 再 `await #createFrame(center)`，窗口期内 `this.#center ?? this.#right` 得 null ⇒ 每次翻页控制台一条未捕获 TypeError。上游 latent bug，被「全居中」（`spread:'none'`）放大成**必现**。**本批不加第 6 处 patch**（patch ⑤ 已被限定在 `comic-book.js`）；页面观感正常（后续那次显式 `#render()` 会纠正版式）。探针把它从错误列表里**显式指名**滤掉，不是通配。
 - **cbz 里的 `.svg` 页是破图** —— `loadBlob(name)` 不传 MIME ⇒ Blob `type=''` ⇒ Chromium 拒解 SVG（PNG/JPEG 靠嗅探照常）。修它要动 vendor，本轮接受（实机画集极少用 SVG 当页）。★ 这条**不是**安全缺口，反而是安全结论的旁证。
