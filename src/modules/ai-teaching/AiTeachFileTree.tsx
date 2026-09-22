@@ -7,7 +7,7 @@ import {
 import { showToast } from '../../lib/toast'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { VaultTree } from '../../components/shared/VaultTree'
-import type { DirCache, TreeNode } from '../../components/shared/VaultTree'
+import type { DirCache, TreeNode, CreateIntent, RenameIntent } from '../../components/shared/VaultTree'
 
 /**
  * AI教学 P4 · 左栏「资源管理器」分区（总纲 §3.7，VS Code 多分区形态）
@@ -16,6 +16,8 @@ import type { DirCache, TreeNode } from '../../components/shared/VaultTree'
  * - 复用编辑区 VaultTree 纯展示组件 + ws:* IPC 全套操作（新建/重命名/复制(副本)/删除进回收站/路径复制）；
  * - md 点击 → 中栏阅读视图（§3.9-2 方案 B）；非 md → 跳编辑器打开；
  * - 树数据里 relPath 一律为**产物根相对路径**，调 IPC 时拼 `${base}/${rel}`。
+ * - B-14：新建 / 重命名与知识库**共用同一套内联输入行**（VaultTree 的 creating / renaming 受控 props）——
+ *   本模块原持一套居中弹窗（z-90），同一动作两处两种长相；现已整体删除。
  */
 
 interface Props {
@@ -33,7 +35,6 @@ interface Props {
 }
 
 interface CtxState { x: number; y: number; node: TreeNode | null }
-interface InputModal { title: string; placeholder: string; initial: string; submitLabel: string; onSubmit: (v: string) => void }
 
 function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenExternal, refreshSeq }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
@@ -41,8 +42,9 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
   const [dirCache, setDirCache] = useState<DirCache>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['']))
   const [ctx, setCtx] = useState<CtxState | null>(null)
-  const [modal, setModal] = useState<InputModal | null>(null)
-  const [modalValue, setModalValue] = useState('')
+  // B-14：新建 / 重命名改为树内联输入（与知识库同一机制），两个意图均受控由本组件持有
+  const [creating, setCreating] = useState<CreateIntent | null>(null)
+  const [renaming, setRenaming] = useState<RenameIntent | null>(null)
   const [clip, setClip] = useState<{ rel: string; name: string; isDir: boolean } | null>(null)
 
   // 仓库切换 / 挂载：取 rootId 与产物根设置并首扫
@@ -114,37 +116,39 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
   }, [onOpenMd, onOpenHtml, onOpenExternal])
 
   // ---- 操作 ----
-  const nameModal = (title: string, initial: string, placeholder: string, submitLabel: string, onSubmit: (v: string) => void) => {
-    setModal({ title, initial, placeholder, submitLabel, onSubmit })
-    setModalValue(initial)
-  }
+  /** 新建入口（B-14）：只落「内联输入意图」，真正写入在 commitCreate。
+   *  先确保落点目录展开——内联行渲染在目录子级里，目录收着的话输入框根本不可见（表现为「点了没反应」）。 */
   const doCreate = (dirRel: string, type: 'file' | 'dir') => {
-    nameModal(type === 'file' ? '新建文件' : '新建文件夹', '', '名称（含扩展名）', '创建', async (raw) => {
-      const name = raw.trim()
-      setModal(null)
-      if (!name) { showToast({ type: 'warning', message: '名称不能为空' }); return }
-      if (!rootId) { showToast({ type: 'error', message: '尚未打开仓库，无法创建' }); return }
-      const rel = dirRel ? `${dirRel}/${name}` : name
-      const full = `${base}/${rel}`
-      const r = type === 'file'
-        ? await workspaceCreateFile(rootId, full).catch((e) => ({ ok: false as const, error: String((e as Error)?.message ?? e) }))
-        : await workspaceMkdir(rootId, full).catch((e) => ({ ok: false as const, error: String((e as Error)?.message ?? e) }))
-      if (!r || r.ok === false) { showToast({ type: 'error', message: `创建失败：${(r as { error?: string })?.error ?? 'IPC 无响应'}` }); return }
-      void loadDir(dirRel)
-      showToast({ type: 'info', message: `已创建 ${name}` })
-    })
+    if (dirRel) setExpanded(prev => (prev.has(dirRel) ? prev : new Set(prev).add(dirRel)))
+    setCreating({ dirRel, type })
   }
-  const doRename = (n: TreeNode) => {
-    nameModal('重命名', n.name, '新名称', '改名', async (raw) => {
-      const name = raw.trim()
-      setModal(null)
-      if (!name || name === n.name || !rootId) return
-      const parent = n.relPath.includes('/') ? n.relPath.slice(0, n.relPath.lastIndexOf('/')) : ''
-      const to = `${base}/${parent ? `${parent}/` : ''}${name}`
-      const r = await workspaceRename(rootId, `${base}/${n.relPath}`, to).catch(() => null)
-      if (r && r.ok === false) { showToast({ type: 'error', message: `改名失败：${r.error ?? ''}` }); return }
-      void loadDir(parent)
-    })
+  /** 内联行提交（Enter）：空名 = 放弃（与笔记区一致，不写盘）；Esc / 失焦走 onCancelCreate */
+  const commitCreate = async (dirRel: string, type: 'file' | 'dir', rawName: string) => {
+    setCreating(null)
+    const name = rawName.trim()
+    if (!name) { showToast({ type: 'warning', message: '名称不能为空' }); return }
+    if (!rootId) { showToast({ type: 'error', message: '尚未打开仓库，无法创建' }); return }
+    const rel = dirRel ? `${dirRel}/${name}` : name
+    const full = `${base}/${rel}`
+    const r = type === 'file'
+      ? await workspaceCreateFile(rootId, full).catch((e) => ({ ok: false as const, error: String((e as Error)?.message ?? e) }))
+      : await workspaceMkdir(rootId, full).catch((e) => ({ ok: false as const, error: String((e as Error)?.message ?? e) }))
+    if (!r || r.ok === false) { showToast({ type: 'error', message: `创建失败：${(r as { error?: string })?.error ?? 'IPC 无响应'}` }); return }
+    void loadDir(dirRel)
+    showToast({ type: 'info', message: `已创建 ${name}` })
+  }
+  /** 重命名入口（B-14）：同样只落内联意图；目标目录本就在展开态（条目可见才能右键到它） */
+  const startRename = (n: TreeNode) => setRenaming({ relPath: n.relPath })
+  const commitRename = async (relPath: string, rawName: string) => {
+    setRenaming(null)
+    const name = rawName.trim()
+    const curName = relPath.slice(relPath.lastIndexOf('/') + 1)
+    if (!name || name === curName || !rootId) return
+    const parent = relPath.includes('/') ? relPath.slice(0, relPath.lastIndexOf('/')) : ''
+    const to = `${base}/${parent ? `${parent}/` : ''}${name}`
+    const r = await workspaceRename(rootId, `${base}/${relPath}`, to).catch(() => null)
+    if (r && r.ok === false) { showToast({ type: 'error', message: `改名失败：${r.error ?? ''}` }); return }
+    void loadDir(parent)
   }
   const doDuplicate = async (rel: string, isDir: boolean) => {
     if (!rootId) return
@@ -188,7 +192,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
     if (node.type === 'dir') items.push({ label: '＋ 新建文件', run: () => doCreate(node.relPath, 'file') }, { label: '＋ 新建文件夹', run: () => doCreate(node.relPath, 'dir') })
     if (node.type === 'file' && node.name.toLowerCase().endsWith('.md')) items.push({ label: '打开阅读', run: () => onOpenMd(node.relPath) })
     if (node.type === 'file' && /\.html?$/i.test(node.name) && onOpenHtml) items.push({ label: '打开渲染预览', run: () => onOpenHtml(node.relPath) })
-    items.push({ label: '重命名', run: () => doRename(node) })
+    items.push({ label: '重命名', run: () => startRename(node) })
     items.push({ label: '复制（到剪贴板）', run: () => { setClip({ rel: node.relPath, name: node.name, isDir: node.type === 'dir' }); showToast({ type: 'info', message: `已复制「${node.name}」，到目标目录右键粘贴（仅文件）` }) } })
     items.push({ label: '创建副本', run: () => void doDuplicate(node.relPath, node.type === 'dir') })
     items.push({ label: '复制路径', run: () => { void navigator.clipboard.writeText(`${base}/${node.relPath}`).catch(() => null) } })
@@ -202,7 +206,9 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
   return (
     <div className="flex flex-col h-full min-h-0" onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, node: null }) }}>
       <div className="flex-1 overflow-y-auto min-h-0 pr-0.5">
-        {(dirCache[''] ?? []).length === 0 ? (
+        {/* 空态：产物根还没内容时的引导文案。creating 非空时必须让位给树——内联输入行长在树里，
+            空态把树替换掉的话「新建文件夹」点了会看不见输入框（B-14 之前这里是居中弹窗，不存在该问题）。 */}
+        {(dirCache[''] ?? []).length === 0 && !creating ? (
           <div className="px-2.5 py-3 text-[11.5px] text-[var(--text-muted)] leading-relaxed">
             产物根「{rootDir}/」还没有内容。新建对话或点「整理成文档」后，会话文件夹会出现在这里。
             <button onClick={() => doCreate('', 'dir')} className="mt-1.5 flex items-center gap-1 text-[var(--accent)] hover:underline"><Plus size={11} /> 新建文件夹</button>
@@ -218,7 +224,15 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
               const srcParent = src.includes('/') ? src.slice(0, src.lastIndexOf('/')) : ''
               void loadDir(srcParent); void loadDir(dstDir)
             })()
-          }} />
+          }}
+          /* B-14：新建 / 重命名复用共享树的内联输入行（与知识库同一实现、同一 Esc/失焦语义） */
+          creating={creating}
+          onCommitCreate={(dirRel, type, rawName) => { void commitCreate(dirRel, type as 'file' | 'dir', rawName) }}
+          onCancelCreate={() => setCreating(null)}
+          renaming={renaming}
+          onCommitRename={(relPath, rawName) => { void commitRename(relPath, rawName) }}
+          onCancelRename={() => setRenaming(null)}
+          />
         )}
       </div>
 
@@ -233,21 +247,6 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
                 {it.label}
               </button>
             ))}
-          </div>
-        </div>
-      )}
-
-      {modal && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/30 kb-overlay" onClick={() => setModal(null)}>
-          <div className="w-80 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4 shadow-xl" onClick={e => e.stopPropagation()}>
-            <div className="mb-2 text-[13px] font-medium text-[var(--text-primary)]">{modal.title}</div>
-            <input autoFocus value={modalValue} onChange={e => setModalValue(e.target.value)} placeholder={modal.placeholder}
-              className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-              onKeyDown={e => { if (e.key === 'Enter') modal.onSubmit(modalValue); if (e.key === 'Escape') setModal(null) }} />
-            <div className="mt-3 flex justify-end gap-2">
-              <button onClick={() => setModal(null)} className="rounded-md px-3 py-1 text-[12.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">取消</button>
-              <button onClick={() => modal.onSubmit(modalValue)} className="rounded-md bg-[var(--accent)] px-3 py-1 text-[12.5px] text-white hover:opacity-90">{modal.submitLabel}</button>
-            </div>
           </div>
         </div>
       )}
