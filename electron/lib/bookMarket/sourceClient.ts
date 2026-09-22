@@ -112,8 +112,10 @@ function createPool(limit: number) {
  *
  * ★ 用 `Buffer.from(...).toString('base64')` 而不是 `btoa` —— 后者在 Node 里对非 ASCII
  *   会抛 `InvalidCharacterError`（用户名带中文/重音字符时）。这是实测踩过的坑。
+ * ★ **导出**是给 S3 的下载器用的（它也要按源注入凭据）：凭据拼装必须只有一份实现 ——
+ *   在 downloader 里再写一遍 base64 就是把「凭据不进日志/不进 URL」这条线的守卫复制成两份。
  */
-function authHeaderFor(cred: BookSourceCredential | null): string | null {
+export function authHeaderFor(cred: BookSourceCredential | null): string | null {
   if (!cred) return null
   if (cred.type === 'basic') {
     if (!cred.username || !cred.password) return null

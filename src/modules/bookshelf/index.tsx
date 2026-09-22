@@ -85,6 +85,9 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
   useDataChanged('pdfReader', () => { void load() })
   // 外部 fs 变化（往 .books 丢/删 PDF → fsWatcher 广播 knowledge scope）→ 清单重扫（2026-09-19 反馈）
   useDataChanged('knowledge', () => { void load() })
+  // 书市下载完成（downloader 写盘后广播 bookMarket）→ 新书立刻上架
+  // （铁律 18：新模块的 scope 不加这一行，表象就是「AI/主进程说下好了、书架里没有」）
+  useDataChanged('bookMarket', () => { void load() })
 
   const onCoverReady = useCallback((relPath: string, url: string) => {
     coverMem.current.set(relPath, url)

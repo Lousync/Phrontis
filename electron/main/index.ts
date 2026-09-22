@@ -36,6 +36,7 @@ import { registerQuizHandlers } from '../database/repositories/quizRepo'
 import { registerPdfReaderHandlers } from '../database/repositories/pdfReaderRepo'
 import { registerReaderStateHandlers } from '../database/repositories/readerStateRepo'
 import { registerExcerptHandlers } from '../database/repositories/excerptRepo'
+import { registerBookMarketHandlers } from '../database/repositories/bookMarketRepo'
 import { startSuperviseScheduler, stopSuperviseScheduler, enqueueExternalPush } from '../lib/pushService'
 import { initScheduleReminders } from '../lib/scheduleReminder'
 import { initPasswordFiller, destroyPasswordFiller } from './passwordFiller'
@@ -903,6 +904,8 @@ app.whenReady().then(async () => {
   registerReaderStateHandlers()
   // 摘录（阅读器 · 摘录先行批次）：四通道
   registerExcerptHandlers()
+  // 书市（book market）：书源 CRUD + 三态探测 + 聚合检索 + 下载队列（S3）
+  registerBookMarketHandlers()
   // 开发者工具(内部对 app.isPackaged 自行守卫,打包版不注册任何 handler)
   registerDevtoolsHandlers()
   registerUpdateHandlers({ getSettingValue: (key) => settingsCache[key] })

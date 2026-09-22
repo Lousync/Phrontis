@@ -84,6 +84,12 @@ export const BROADCAST_CHANNEL = {
   /** 应用更新下载阶段，载荷 `{ stage: 'downloading' | 'verifying' | 'switching' }`
    *  —— 进度无变化时的可读反馈（校验空窗 / 换通道），见 updateService.ts */
   updateDownloadStage: 'update:download-stage',
+  /** 书市下载队列快照，载荷 `{ rootId, tasks: BookDownloadTask[] }`
+   *  —— ★ 推的是**整个队列**而不是单条任务的增量：队列只有个位数项，
+   *  快照让渲染层不必做合并（增量协议一旦漏推一个终态，表象就是「卡在 99%」，
+   *  而这正是 updateService 那条通道踩过的坑）。`rootId` 供渲染层过滤别的仓库的队列，
+   *  见 lib/bookMarket/downloader.ts 的 `pushProgress` */
+  bookMarketDownloadProgress: 'bookMarket:download-progress',
   /** 番茄钟状态广播，载荷 PomodoroSnapshot */
   pomodoroStateBroadcast: 'pomodoro:state-broadcast',
   /** 小窗（日面板）状态变化，载荷 `{ detached, mode, collapsed, widgetInteractive }` */
