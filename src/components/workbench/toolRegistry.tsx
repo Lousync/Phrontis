@@ -1,8 +1,9 @@
 import { lazy, Suspense } from 'react'
 import {
   Shield, Globe, Archive, Wifi, Scissors, Timer, CalendarCheck2, BellRing, FileText,
-  Puzzle, ArrowLeft,
+  ArrowLeft,
 } from 'lucide-react'
+import { PluginIcon } from '../shared/ModuleIcons'
 import { PasswordVault } from '../../modules/toolbox/components/PasswordVault'
 import { HabitTracker } from '../../modules/toolbox/components/habit-tracker'
 import { BookmarkNav } from '../../modules/toolbox/components/bookmark-nav'
@@ -143,7 +144,7 @@ export function PluginToolHost({ tool, onBack }: { tool: PluginTool; onBack: () 
           <ArrowLeft size={12} />
         </button>
         <span className="text-[11.5px] font-medium text-[var(--text-muted)] flex items-center gap-1.5">
-          <Puzzle size={12} className="text-[var(--accent)]" />
+          <PluginIcon size={12} className="text-[var(--accent)]" />
           {tool.name}
         </span>
         <span className="ml-auto text-[11px] text-[var(--text-disabled)]">插件</span>

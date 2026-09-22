@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Puzzle, RefreshCw, Search, FolderOpen, Download, Loader2,
+import { RefreshCw, Search, FolderOpen, Download, Loader2,
   CheckCircle2, AlertTriangle, ArrowLeft, ShieldCheck, ShieldAlert, Shield, Boxes,
   History, Trash2, ScrollText, Package } from 'lucide-react'
+import { PluginIcon } from '../../components/shared/ModuleIcons'
 import {
   pluginFetchRegistry, pluginInstall, pluginInstallFromFile,
   pluginListInstalled, pluginSetEnabled, pluginUninstall, pluginGetContribution,
@@ -573,7 +574,7 @@ export function PluginsModule() {
     if (!selected) {
       return (
         <div className="flex-1 flex flex-col items-center justify-center text-[var(--text-muted)] gap-3">
-          <Puzzle size={40} strokeWidth={1.2} className="text-[var(--text-disabled)]" />
+          <PluginIcon size={40} strokeWidth={1.2} className="text-[var(--text-disabled)]" />
           <p className="text-[13px]">选择一个插件查看详情</p>
         </div>
       )
@@ -862,7 +863,7 @@ export function PluginsModule() {
       {/* 左侧面板 */}
       <div className="w-[280px] shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col">
         <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
-          <Puzzle size={12} />
+          <PluginIcon size={12} />
           插件
         </div>
 

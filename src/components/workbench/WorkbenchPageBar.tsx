@@ -1,5 +1,6 @@
 import { Fragment, useRef, useState } from 'react'
-import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, Puzzle, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical, FileQuestion } from 'lucide-react'
+import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical, FileQuestion } from 'lucide-react'
+import { PluginIcon } from '../shared/ModuleIcons'
 import type { TabName } from '../../types'
 import { labelOf } from '../../lib/appModules'
 import { isToolTabId, toolIdOfTab, findTool } from './toolRegistry'
@@ -25,7 +26,7 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   moments: <MessageCircle size={14} />,
   aiTeaching: <GraduationCap size={14} />,
   toolbox: <Wrench size={14} />,
-  plugins: <Puzzle size={14} />,
+  plugins: <PluginIcon size={14} />,
   recycle: <Trash2 size={14} />,
   help: <HelpCircle size={14} />,
   settings: <Settings size={14} />,
