@@ -27,13 +27,29 @@ function run(cmd, args, label) {
   })
 }
 
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
+/**
+ * 调用 npm 的方式（2026-09-21）：**不能**写 `npm.cmd`。
+ * Node ≥18.20.2（含本机 v24）对 `spawn('*.cmd', { shell: false })` 直接抛 EINVAL
+ * —— CVE-2024-27980 的缓解措施，实测 `spawn('npm.cmd', …)` 抛的就是 EINVAL；
+ * 而改走 shell: true 又要求 node 所在目录在 PATH 上，Explorer 双击时这个前提
+ * 不成立（同 scripts/launch.js 顶部注释第 2 条）。
+ * 出路与 launch.js 一致：`npm-cli.js` 是纯 JS 入口、就在 node 安装目录下，
+ * 用 process.execPath（= 正在跑本脚本的 node，必然存在）直接 exec，
+ * 不依赖 PATH、不依赖 .cmd、不依赖 shell。npx 式兜底只留给非标准安装。
+ */
+function npmInstall() {
+  const cli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+  if (fs.existsSync(cli)) return run(process.execPath, [cli, 'install'], '安装依赖')
+  return process.platform === 'win32'
+    ? run('cmd.exe', ['/c', 'npm', 'install'], '安装依赖')
+    : run('npm', ['install'], '安装依赖')
+}
 
 ;(async () => {
   try {
     if (needInstall()) {
       console.log('[启动器] 首次运行，正在安装依赖，请稍候...')
-      await run(npm, ['install'], '安装依赖')
+      await npmInstall()
     }
     console.log('[启动器] 正在以开发模式启动 Knowbase ...')
     await run(process.execPath, [path.join(ROOT, 'scripts/launch.js'), 'dev'], '启动应用')

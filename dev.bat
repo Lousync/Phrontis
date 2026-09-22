@@ -1,11 +1,11 @@
 @echo off
-title Phrontis Dev - AI/Plugin worktree (feature/ai-plugin-upgrade)
-cd /d E:\Projects\KnowledgeRecorder-ai-plugin
+title Phrontis Dev - UI rework worktree (feature/ui-rework)
+cd /d E:\Projects\KnowledgeRecorder-ui-rework
 
 echo ==================================================
-echo  Phrontis Dev (worktree: AI module + plugins)
-echo  Branch : feature/ai-plugin-upgrade
-echo  Folder : E:\Projects\KnowledgeRecorder-ai-plugin
+echo  Phrontis Dev (worktree: UI rework)
+echo  Branch : feature/ui-rework
+echo  Folder : E:\Projects\KnowledgeRecorder-ui-rework
 echo ==================================================
 echo.
 echo [Note] The app uses a single-instance lock. If another

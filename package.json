@@ -9,7 +9,8 @@
     "start": "node scripts/launch.js start",
     "preview": "electron-vite preview",
     "test": "node --experimental-strip-types --no-warnings scripts/test-parse-quick-date.mts",
-    "pack": "electron-vite build && electron-builder --win --publish=never"
+    "pack": "electron-vite build && electron-builder --win --publish=never",
+    "pack:dir": "electron-vite build && electron-builder --win --dir --publish=never"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
