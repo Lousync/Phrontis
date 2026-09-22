@@ -11,7 +11,7 @@
  *   3) 真实鼠标拖选一行 → TextSelectionBar 出现（复制 + 摘录按钮）
  *   4) 点「摘录」→ excerpts.json 落 pdf 条目 + 页面出现 .kb-excerpt-hl 高亮块
  */
-const DEBUG_PORT = 9222
+const DEBUG_PORT = Number(process.env.KB_CDP_PORT || 9222) // 端口可覆盖（见 run-probe.mjs）：默认 9222 不变
 const PROJ = 'E:/Projects/KnowledgeRecorder'
 const { readFileSync } = await import('node:fs')
 const { join } = await import('node:path')

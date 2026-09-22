@@ -4,7 +4,7 @@
  *       ✕ 关闭激活标签落右邻居 → 全关空态（tabbar 提示 + 内容区空态页）→ 空态恢复。
  * 拖拽重排沿用 4c0c7a6 批次3 版实现（HTML5 dnd，当时已经探针验证），此处不重复断言。
  */
-const DEBUG_PORT = 9222
+const DEBUG_PORT = Number(process.env.KB_CDP_PORT || 9222) // 端口可覆盖（见 run-probe.mjs）：默认 9222 不变
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function waitPage() {

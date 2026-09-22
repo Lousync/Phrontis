@@ -12,7 +12,7 @@
  *   4) 再点一次 → 页数**不变**、页面 id **不变**（幂等：覆盖重写同一篇，不产生新页）
  *   5) 页面被删 → 再导出自愈新建（映射指向失效页面时不报错、自动重建）
  */
-const DEBUG_PORT = 9222
+const DEBUG_PORT = Number(process.env.KB_CDP_PORT || 9222) // 端口可覆盖（见 run-probe.mjs）：默认 9222 不变
 const PROJ = 'E:/Projects/KnowledgeRecorder'
 const FIXTURE = `${PROJ}/tmp/vault-fixture`
 const BOOK = '.books/探针样书.txt'
@@ -142,10 +142,12 @@ async function main() {
   console.log('[fixture]', JSON.stringify({ key, notesBefore: listNotes().length }))
 
   // 3) 打开书架 → 点 TXT 样书 → 等阅读器
+  // 卡片 title = relPath（书架 index.tsx）；必须带 .txt —— fixture 里同时有「探针样书.epub」
+  //（阅读器 B 段起入库），只写「探针样书」会命中 epub 卡 → 挂 epubReader，txtReader 永等不到
   await evalJs(`(() => { document.querySelector('[data-wb-bookmark="bookshelf"]')?.click(); return true })()`)
   await sleep(1200)
   const clicked = await evalJs(`(() => {
-    const card = [...document.querySelectorAll('main button')].find((b) => (b.getAttribute('title') || '').includes('探针样书'))
+    const card = [...document.querySelectorAll('main button')].find((b) => (b.getAttribute('title') || '').includes('${BOOK}'))
     card?.click(); return !!card
   })()`)
   ok('找到并点击 TXT 样书卡片', clicked)

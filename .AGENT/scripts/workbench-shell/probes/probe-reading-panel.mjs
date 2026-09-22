@@ -15,7 +15,7 @@
  *   7) CDP 真实鼠标拖选 → 浮条出现（防 user-select 白名单回归）
  *   8) 反向：返回书架 → 打开 PDF → 左栏挂回 PDF 三件套（证明左栏是「按书分流」而非永远走列表）
  */
-const DEBUG_PORT = 9222
+const DEBUG_PORT = Number(process.env.KB_CDP_PORT || 9222) // 端口可覆盖（见 run-probe.mjs）：默认 9222 不变
 const { readFileSync } = await import('node:fs')
 const { join } = await import('node:path')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

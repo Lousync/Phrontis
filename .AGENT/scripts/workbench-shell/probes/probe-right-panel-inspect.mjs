@@ -6,7 +6,7 @@
  * 原一次性样式探查探针：量三栏容器的实际计算样式（底色/圆角/边框/阴影）+ 右栏下段嵌套层级。
  * 用法：node .AGENT/scripts/workbench-shell/probes/run-probe.mjs tmp/probe-inspect.mjs --no-sandbox --disable-gpu
  */
-const DEBUG_PORT = 9222
+const DEBUG_PORT = Number(process.env.KB_CDP_PORT || 9222) // 端口可覆盖（见 run-probe.mjs）：默认 9222 不变
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function waitPage() {
