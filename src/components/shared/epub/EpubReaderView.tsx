@@ -45,6 +45,22 @@ const HL_FILL: Record<ExcerptColor, string> = {
 /** foliate 的 `Overlayer.highlight` 用 `--overlayer-highlight-opacity`（默认 .3）控透明度 */
 const HL_OPACITY = '0.42'
 
+/**
+ * 侧边点击翻页热区（2026-09-21）：左右各一条，宽 = `min(EDGE_MAX, max(EDGE_MIN, 宿主阅读宽 × EDGE_RATIO))`。
+ * 中间留白给划选 —— 热区里**不**拦 mousedown，所以从边缘起拖照样能选字（只有「按下到抬起几乎没动」
+ * 才算点击，见 EDGE_DRAG_SLOP）。
+ * ★ 判据用**宿主坐标**（帧自身矩形 + 帧内坐标换算），不用 `e.clientX` 直接比 —— 分页器按章铺多个
+ *   iframe 并靠平移把当前章挪进可视区，于是帧内坐标既可能超出可见区（帧比宿主盒宽、右侧被裁），
+ *   也可能整体偏掉一个帧宽（实测点宿主正中收到 `clientX=2767`）。详见 bindDoc 里的注释。
+ */
+const EDGE_MAX = 160
+const EDGE_MIN = 48
+const EDGE_RATIO = 0.15
+/** 按下 → 抬起的位移超过它即判为划选拖动，不翻页（px） */
+const EDGE_DRAG_SLOP = 6
+/** 悬停热区时挂在内容文档 `<html>` 上的类（光标手型；样式在 buildStyles 的 after 槽） */
+const EDGE_CLS = { l: 'kb-et-l', r: 'kb-et-r' } as const
+
 function b64ToU8(b64: string): Uint8Array {
   const bin = atob(b64)
   const out = new Uint8Array(bin.length)
@@ -88,6 +104,8 @@ function buildStyles(fontScale: number, paper: ReaderPaper): [string, string] {
     'img, svg, video { max-width: 100% !important; height: auto !important; }',
     `:root { --overlayer-highlight-opacity: ${HL_OPACITY}; }`,
     `::selection { background: ${t.link}44; }`,
+    // 侧边热区悬停给手型（热区没有别的可见线索）；两个类由 mousemove 切换
+    `html.${EDGE_CLS.l}, html.${EDGE_CLS.r} { cursor: pointer !important; }`,
   ].join('\n')
   return [before, after]
 }
@@ -282,8 +300,109 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
         }, 0)
       }
       const onKeyDown = (e: KeyboardEvent) => { if (handleKey(e)) e.preventDefault() }
+
+      /**
+       * 侧边点击翻页（与工具栏 / 键盘同一对 prev/next）。
+       * 三条「不翻页」的排除 ——
+       *   ① 拖过：划选（含从边缘起拖选整段）不能变成翻页 → 比较按下/抬起位移；
+       *   ② 书内链接 / 控件：上游 `#handleLinks` 已 `preventDefault`，读 `defaultPrevented` 即可；
+       *   ③ 命中已有高亮：左键点高亮要出回看卡。高亮 SVG 是 `pointer-events:none`，
+       *      `e.target` 永远是被盖住的正文元素，故只能按坐标问 overlayer.hitTest。
+       * RTL 书（`<html dir="rtl">`，由上游 `#onLoad` 依语言设置）左右语义相反：点左边 = 下一页。
+       */
+      let downAt: { x: number; y: number } | null = null
+      /**
+       * ★ 热区一律用**宿主坐标**判，不用 `e.clientX`（帧内坐标）。
+       *  为什么：分页器按「跨章连续」的方式铺内容帧 —— 每章一个 iframe，在宿主里横向排开，
+       *  靠平移/滚动把当前章挪进可视区。于是 ① 帧比宿主盒子宽（实测 1830 vs 656），右边一大截
+       *  被宿主 `overflow:hidden` 裁掉、根本点不到；② **派给哪个帧不由点击位置决定**，
+       *  实测点宿主正中时收到的 `e.clientX` 是 2767（= 327 + 上一章宽度 2440）——
+       *  那是另一个帧的坐标系，按它算热区会把「点正中」判成「点右边缘」而翻页。
+       *  换算回宿主坐标（帧自身矩形 + 帧内坐标）后，无论哪个帧收事件、无论帧怎么偏移，
+       *  都还原成「用户实际点在阅读区哪个位置」，热区也就可以直接对着宿主阅读盒量。
+       */
+      const frameRect = () => {
+        try { return (doc.defaultView?.frameElement as HTMLElement | null)?.getBoundingClientRect() ?? null } catch { return null }
+      }
+      const hostPoint = (e: MouseEvent) => {
+        const fr = frameRect()
+        return { x: (fr?.left ?? 0) + e.clientX, y: (fr?.top ?? 0) + e.clientY }
+      }
+      /** 宿主阅读盒（`data-wb="epubHost"` = 分页器挂载点）的水平范围；取不到就退回本帧矩形 */
+      const hostArea = () => {
+        const fr = frameRect()
+        const fallback = { left: fr?.left ?? 0, right: (fr?.left ?? 0) + (doc.documentElement.clientWidth || 0) }
+        try {
+          const r = (doc.defaultView?.parent?.document?.querySelector('[data-wb="epubHost"]') as HTMLElement | null)?.getBoundingClientRect()
+          if (r && r.width > 0) return { left: r.left, right: r.right }
+        } catch { /* 取不到父文档 → 退回本帧 */ }
+        return fallback
+      }
+      const edgeZone = () => {
+        const a = hostArea()
+        return Math.min(EDGE_MAX, Math.max(EDGE_MIN, Math.round((a.right - a.left) * EDGE_RATIO)))
+      }
+      const onMouseDown = (e: MouseEvent) => { downAt = e.button === 0 ? { x: e.clientX, y: e.clientY } : null }
+      /**
+       * 排障钩子：探针置 `window.__kbEdgeDiag = true` 时才把事件写进宿主 `<html data-kb-edge>`
+       * （生产默认零开销 —— 每帧收到的事件坐标是这一块的「唯一真相」，出问题先开它）。
+       */
+      const diag = (where: string, e: MouseEvent) => {
+        try {
+          const pw = doc.defaultView?.parent as (Window & { __kbEdgeDiag?: boolean }) | null
+          const el = pw?.document?.documentElement
+          if (!el || !pw?.__kbEdgeDiag) return
+          const area = hostArea()
+          const zone = edgeZone()
+          const hit = viewRef.current?.renderer.getContents().find((x) => x.index === index)?.overlayer?.hitTest({ x: e.clientX, y: e.clientY })
+          const p = hostPoint(e)
+          const prev = JSON.parse(el.getAttribute('data-kb-edge') || '[]') as unknown[]
+          prev.push({
+            where, frameX: Math.round(e.clientX), hostX: Math.round(p.x),
+            area: [Math.round(area.left), Math.round(area.right)], zone,
+            branch: p.x <= area.left + zone ? 'L' : p.x >= area.right - zone ? 'R' : '-',
+            prevented: e.defaultPrevented, down: !!downAt, hit: !!hit?.[0],
+          })
+          el.setAttribute('data-kb-edge', JSON.stringify(prev.slice(-8)))
+        } catch { /* 诊断失败不影响功能 */ }
+      }
+      const onClick = (e: MouseEvent) => {
+        diag('click', e)
+        const at = downAt
+        downAt = null
+        const v = viewRef.current
+        if (!v || !at || e.defaultPrevented) return
+        if (Math.abs(e.clientX - at.x) > EDGE_DRAG_SLOP || Math.abs(e.clientY - at.y) > EDGE_DRAG_SLOP) return
+        const sel = doc.getSelection()
+        if (sel && !sel.isCollapsed) return
+        // ★ 内容列表在 **renderer** 上（`view.js:390` 自己的 `#getOverlayer` 也是这么取的）；
+        //   `View` 本身没有 getContents —— 写成 `v.getContents()` 会在每次点击抛 TypeError。
+        const hit = v.renderer.getContents().find((x) => x.index === index)?.overlayer?.hitTest({ x: e.clientX, y: e.clientY })
+        if (hit?.[0]) return
+        const area = hostArea()
+        const zone = edgeZone()
+        const x = hostPoint(e).x
+        const rtl = doc.documentElement.dir === 'rtl'
+        if (x <= area.left + zone) { void (rtl ? v.next() : v.prev()); return }
+        if (x >= area.right - zone) void (rtl ? v.prev() : v.next())
+      }
+      /** 悬停热区给手型光标（样式在 buildStyles 的 after 槽，类在这里切换） */
+      const onMouseMove = (e: MouseEvent) => {
+        diag('move', e)
+        const area = hostArea()
+        const zone = edgeZone()
+        const x = hostPoint(e).x
+        const want = x <= area.left + zone ? EDGE_CLS.l : x >= area.right - zone ? EDGE_CLS.r : ''
+        const cl = doc.documentElement.classList
+        for (const c of [EDGE_CLS.l, EDGE_CLS.r]) if (c !== want) cl.remove(c)
+        if (want && !cl.contains(want)) cl.add(want)
+      }
+
       doc.addEventListener('mouseup', onUp)
       doc.addEventListener('keydown', onKeyDown)
+      doc.addEventListener('mousedown', onMouseDown)
+      doc.addEventListener('click', onClick)
+      doc.addEventListener('mousemove', onMouseMove)
     }
 
     const onRelocate = (e: Event) => {
@@ -330,7 +449,9 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       if (!d?.value || !d.range) return
       const ex = excerptsRef.current.find((x) => x.kind === 'epub' && x.cfi === d.value)
       if (!ex) return
-      const doc = view.getContents().find((x) => x.index === d.index)?.doc
+      // ★ 同上：内容列表在 renderer 上。此前写 `view.getContents()` 会抛 TypeError，
+      //   于是「点已有高亮 → 回看卡」这条路径整体失效（探针 5.5 步锁住）。
+      const doc = view.renderer.getContents().find((x) => x.index === d.index)?.doc
       const fr = (doc?.defaultView?.frameElement as HTMLElement | null)?.getBoundingClientRect()
       const r = d.range.getBoundingClientRect()
       setCapture(null)
@@ -599,8 +720,9 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       {loadErr ? (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-[12.5px] text-[var(--text-muted)]">{loadErr}</div>
       ) : (
-        /* 渲染宿主常驻 DOM：foliate 要读宿主尺寸才能分页，加载态只做**覆盖层**而不是替换内容 */
-        <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden" style={paperStyle} />
+        /* 渲染宿主常驻 DOM：foliate 要读宿主尺寸才能分页，加载态只做**覆盖层**而不是替换内容。
+           `data-wb="epubHost"` = 帧内热区计算的锚（内容帧读它的 clientWidth 当可见阅读宽，见 bindDoc） */
+        <div ref={hostRef} data-wb="epubHost" className="min-h-0 flex-1 overflow-hidden" style={paperStyle} />
       )}
       {loading && !loadErr && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 top-[34px] flex items-center justify-center">

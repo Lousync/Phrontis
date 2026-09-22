@@ -86,9 +86,14 @@ iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts')
 1. **上游不做内容净化**。`epub.js:856` 留有作者自己的 TODO：
    `// TODO: replace inline scripts? probably not worth the trouble`
    —— 实测书里的内联 `<script>` 与 `<img onerror>` **都原样存活在 DOM 里**。
-2. **实际拦截靠我们自己的两层**：
+2. **实际拦截靠我们自己的两层 + 上游的一层加载策略**：
    - sandbox 不含 `allow-scripts`（见 patch ③）
    - 应用 CSP 的 `script-src 'self'`，**不含 `'unsafe-inline'`**（`blob:` 文档继承父文档 CSP）
+   - 上游 `epub.js:794`：`MIME.JS` 命中且 `allowScript=false`（默认值，本应用未改）→
+     `loadItem` 直接返回 `null`，**脚本子资源根本不进加载流程**。实测 `<script src="evil.js">`
+     标签仍在 DOM，但属性被 `replaceString` 写成字符串 `"null"`（更不可能加载）；
+     内联 `<script>` 则原样留存、由上面两层拦下。探针 `probe-epub-reader.mjs` 的第 9 步
+     对三种载荷逐一验「在 DOM 里 + 一句未执行」。
 3. ⛔ **`script-src` 永不加 `'unsafe-inline'`** —— 那是唯一挡着恶意 EPUB 的东西之一，
    加了等于全盘失守。契约脚本有负向断言锁这一条。
 4. ⛔ **sandbox 永不加回 `allow-scripts`**。契约脚本有负向断言锁这一条。

@@ -8,6 +8,7 @@
  *
  * 只声明本应用实际用到的 API —— 不是完整上游 API，加用法时按需补。
  */
+import type { Overlayer } from './overlayer.js'
 
 export interface FoliateTOCItem {
   label?: string
@@ -39,7 +40,8 @@ export interface FoliateRelocateDetail {
 /** 内容文档（同源 blob:，可直读 contentDocument / selection） */
 export interface FoliateContent {
   index: number
-  overlayer: unknown | null
+  /** 分页渲染器挂的高亮层（无注释层时为 null）；`hitTest({x,y})` 按坐标判是否命中已有高亮 */
+  overlayer: Overlayer | null
   doc: Document
 }
 
@@ -66,7 +68,9 @@ export class View extends HTMLElement {
   prev(distance?: number): Promise<void>
   getCFI(index: number, range?: Range): string
   resolveCFI(cfi: string): { index: number; anchor: (doc: Document) => Range }
-  getContents(): FoliateContent[]
+  /** ★ 刻意**不**声明 `getContents()`：`View` 本身没有这个方法（内容列表在 `renderer` 上，
+   *  见 `view.js:390`）。曾经错声明过，结果把 `view.getContents()` 的 TypeError 藏到运行时
+   *  （2026-09-21 探针在点击路径上抓到）。要用请走 `view.renderer.getContents()`。 */
   getSectionFractions(): number[]
   getProgressOf(index: number, range?: Range): { tocItem?: FoliateTOCItem | null; pageItem?: FoliateTOCItem | null }
   getTOCItemOf(target: string | number | { fraction: number }): Promise<FoliateTOCItem | null>

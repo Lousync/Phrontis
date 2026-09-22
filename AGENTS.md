@@ -74,7 +74,7 @@ src/
 8. **dev 主进程没有热重载** —— 改了 `electron/` 必须重启 dev。
 9. `-webkit-user-drag: none` 会被继承，拖拽源要挂 `.kb-draggable`；日程类拖拽用 **pointer events**（HTML5 拖放会静默失败）；pointer 手势结束会补发 click，需要 `dragGuard` 250ms 窗口兜底 + 手柄上 `stopPropagation`。
 10. `kbview://` 是独立 scheme + iframe sandbox，**绝不 srcdoc / blob**；白名单三处必须同步。欢迎页只渲染仓库根 `欢迎.html`（合成 id `kb-welcome-doc`；收藏 / 改名 / 排序一律拒绝）。
-    **唯一例外：电子书内容帧**（epub 等）—— 引擎分页必须读 `iframe.contentDocument`（跨源恒 `null` → 分页全废），故内容帧只能同源 = `blob:`。★ 配套两条硬约束：**sandbox 永不含 `allow-scripts`**、**`script-src` 永不含 `'unsafe-inline'`** —— 上游引擎**不做内容净化**（内联 `<script>` / `onerror` 属性原样存活），这两条是仅有的防线，契约有负向断言锁。机制与升级手法见 `src/vendor/foliate/README.md`。
+    **唯一例外：电子书内容帧**（epub 等）—— 引擎分页必须读 `iframe.contentDocument`（跨源恒 `null` → 分页全废），故内容帧只能同源 = `blob:`。★ 配套两条硬约束：**sandbox 永不含 `allow-scripts`**、**`script-src` 永不含 `'unsafe-inline'`** —— 上游引擎**不做内容净化**（内联 `<script>` / `onerror` 属性原样存活），这两条是仅有的防线，契约有负向断言锁。机制与升级手法见 `src/vendor/foliate/README.md`。**取内容帧只能走 CDP**（帧在 closed shadow root 内，`window.frames` / `querySelector` 都数不到它）—— 手法见 `probes/probe-epub-reader.mjs` 头注。
 11. 长列表用 `content-visibility`（`.kb-cv` / `.kb-cv-sm`，**加在「列表项」上**，估值 120px / 60px 一项）——只有几十行的短列表**不要**加（估值会抬虚滚动高度、滚动条乱跳）；`React.memo` 要 props 引用稳定；effect 依赖数组注意 TDZ（把数组整体后移）。
     **模块根节点必须 `h-full`，不能写 `flex-1`** —— 槽位容器是块级 div，`flex-1` 在里面是死属性，表象是「界面能显示，但滚轮没反应」。机制与判据见 skill `web-layout-scroll-verify`。
 12. 冗余说明文字一律按 `docs/help-disclosure-pattern.md` 处理：bar 类用 swap-bar、信息卡用 hover 展开卡、强引导首启可见 +「知道了」记忆。**文案只收不删，禁醒目标签。**

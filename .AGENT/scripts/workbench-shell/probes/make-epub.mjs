@@ -129,7 +129,7 @@ const nav = `<?xml version="1.0" encoding="UTF-8"?>
   <li><a href="ch3.xhtml#c3">第三章 收尾</a></li>
 </ol></nav></body></html>`
 
-/** 书内 CSS：给探针一个稳定可断言的特征（`h1 { color: #c00 }` → computed rgb(192, 0, 0)） */
+/** 书内 CSS：给探针一个稳定可断言的特征（`h1 { color: #c00 }` → computed rgb(204, 0, 0)） */
 const style = `body { font-family: serif; line-height: 1.8; }
 h1 { color: #c00; }`
 

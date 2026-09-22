@@ -737,3 +737,24 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 **验收**：`tsc --noEmit -p tsconfig.web.json` 本轮改动文件 0 新增错误；`npm run build` 通过。真机冒烟待做：`settings.json` 置 `onboardingDone:false`（并删 `activityBarHidden`）复现首启 → 完成/跳过均得三件套 → 右键找回；设置重开引导走完不点场景 → 活动栏不变。
 
+
+## 18. EPUB 阅读器：侧边点击翻页（2026-09-21）
+
+背景：EPUB 翻页此前只有工具栏按钮与键盘（`←/→/PageUp/PageDown/空格`）。本次补上「点书本左右边缘翻页」，与 PDF 阅读器的边缘点击手感对齐。
+
+改动点：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 内容帧内挂 `mousedown`/`click`/`mousemove`：点左右热区 → `view.prev()/next()`（RTL 书左右语义相反） | `src/components/shared/epub/EpubReaderView.tsx` |
+| 2 | 热区宽 = `min(160px, max(48px, 阅读区宽 × 15%))`，中间留白给划选 | 同上 |
+| 3 | 悬停热区给手型光标（类挂内容文档 `<html>`，样式走 `setStyles` 的 after 槽） | 同上 |
+| 4 | 宿主盒挂 `data-wb="epubHost"`（热区坐标锚点） | 同上 |
+
+三条「不翻页」的排除：① 按下→抬起位移 > 6px 判为划选拖动；② 书内链接（上游 `#handleLinks` 已 `preventDefault`，读 `defaultPrevented`）；③ 命中有高亮的坐标（左键点高亮要出回看卡，`overlayer.hitTest`）。热区里**不**拦 `mousedown`，故从边缘起拖照样能选字。
+
+**关键机制**：判据必须用**宿主坐标**（帧自身矩形 + 帧内坐标换算），不能用 `e.clientX` 直接比。分页器按章铺多个 iframe 并靠平移把当前章挪进可视区，于是帧内坐标既可能超出可见区（帧比宿主盒宽，实测 1830 vs 656，右侧被 `overflow:hidden` 裁掉、点不到），也可能整体偏掉一个帧宽（实测点宿主正中时帧收到 `clientX = 2767` = 327 + 上一章宽度 2440）。按帧内坐标算热区时，「点正中」会被判成「点右边缘」而误翻页。
+
+**顺带修掉的既有 bug**：`view.getContents()` 在 `View` 上不存在（内容列表在 `renderer` 上），此前 `view.d.ts` 的错误声明把它藏到了运行时 → 每次点击抛 `TypeError`，且「点已有高亮 → 回看卡」这条路径自 B 段起整体失效。声明已删，调用点改 `view.renderer.getContents()`。
+
+**验收**：实机探针 `probe-epub-reader.mjs` 第 6.5 步（含两条负向：点正中不翻页 / 从边缘起拖不翻页）全绿，探针退出码 0；`tsc --noEmit -p tsconfig.web.json` 无新增错误；5 个契约脚本全过。排障钩子：置 `window.__kbEdgeDiag = true` 后每个鼠标事件写进宿主 `<html data-kb-edge>`（生产默认关）。
