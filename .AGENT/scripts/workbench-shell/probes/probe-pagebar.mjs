@@ -18,11 +18,13 @@
  * 前置：先跑 seed-probe-vault.mjs 造 fixture 仓库（页面条要有文件可开）。
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const DEBUG_PORT = Number(process.env.KB_CDP_PORT || 9222) // 端口可覆盖（见 run-probe.mjs）：默认 9222 不变
+const DEBUG_PORT = Number(process.env.KNOWBASE_PROBE_PORT ?? 9222)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const SHOT_DIR = join('E:/Projects/KnowledgeRecorder', 'tmp', 'probe-shots')
+// 截图目录推导自脚本位置（勿写死盘符：在 worktree 里跑会把截图写进主仓）
+const SHOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../../tmp/probe-shots')
 
 async function waitPage() {
   for (let i = 0; i < 40; i++) {

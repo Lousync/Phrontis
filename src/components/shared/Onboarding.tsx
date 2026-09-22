@@ -2,14 +2,20 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Archive, ArrowLeft, ArrowRight, BellRing, Bot, BookOpen, CalendarDays, Check,
   Database, FileText, GraduationCap, Keyboard, ListChecks, MessageCircle, Moon, Network, PenLine,
-  Puzzle, ShieldCheck,
+  ShieldCheck,
   Sparkles, Sun, Wrench,
 } from 'lucide-react'
+import { PluginIcon } from './ModuleIcons'
 import { useSettings } from '../../lib/SettingsContext'
 import { BAR_MODULE_IDS, labelOf } from '../../lib/appModules'
 import type { TabName } from '../../types'
 
-const MODULES = [
+/** 模块图标组件类型：内置 lucide 与 StyleAware 的 PluginIcon 都要能装下。
+ *  `typeof PenLine` 是 lucide 的组件类型，装不下 PluginIcon（普通函数组件）——
+ *  2026-09-22 B-9 起放宽为「只要 size / className」。渲染处只用这两个 prop。 */
+type ModuleIconComp = React.ComponentType<{ size?: number; className?: string }>
+
+const MODULES: { icon: ModuleIconComp; name: string; desc: string }[] = [
   { icon: PenLine, name: '编辑器', desc: 'Markdown 正文写作 · 唯一写入方' },
   { icon: BookOpen, name: '博客 · 日志', desc: '每日写作、标签与周月总结' },
   { icon: CalendarDays, name: '任务', desc: '日程安排与四象限管理' },
@@ -18,7 +24,7 @@ const MODULES = [
   { icon: GraduationCap, name: 'AI 教学', desc: '会话学习、视觉转写与自动出题' },
   { icon: Wrench, name: '工具箱', desc: '番茄钟、习惯打卡、数据导出等 8 个工具' },
   { icon: Bot, name: 'AI 助手', desc: '本地模型驱动，边看边问（Ctrl+J）' },
-  { icon: Puzzle, name: '插件', desc: '主题 / 预设 / 知识包官方市场' },
+  { icon: PluginIcon, name: '插件', desc: '主题 / 预设 / 知识包官方市场' },
 ]
 
 /**
@@ -26,7 +32,7 @@ const MODULES = [
  * 原文案写着「与 ActivityBar 的 ALL_MODULES 同 id 同序」，但那份手抄清单的实际顺序
  * （editor, knowledge, aiTeaching, schedule, blog, …）与活动栏并不一致 —— 又一处漂移。
  */
-const SCENE_META: Record<string, { desc: string; icon: typeof PenLine }> = {
+const SCENE_META: Record<string, { desc: string; icon: ModuleIconComp }> = {
   editor: { desc: '正文写作 · 唯一写入方', icon: PenLine },
   knowledge: { desc: '双链 · 图谱 · 沉浸阅读', icon: BookOpen },
   blog: { desc: '每日一篇 · 周月总结', icon: FileText },
@@ -34,14 +40,14 @@ const SCENE_META: Record<string, { desc: string; icon: typeof PenLine }> = {
   moments: { desc: '轻量动态 · 相册', icon: MessageCircle },
   aiTeaching: { desc: '会话学习 · 视觉转写 · 出题', icon: GraduationCap },
   toolbox: { desc: '密码本 · 导出 · 局域网互传', icon: Wrench },
-  plugins: { desc: '官方市场 · 主题包', icon: Puzzle },
+  plugins: { desc: '官方市场 · 主题包', icon: PluginIcon },
 }
 
 /**
  * 场景选择的候选 = 活动栏一级模块（v3.4.0 起桌面外壳已删除，BAR_MODULE_IDS 即全部场景模块）。
  * 带上 `SCENE_META[id]` 存在性判定：将来新增的模块若还没写场景说明，这里自动跳过而不是崩掉。
  */
-const ACTIVITY_MODS: { id: TabName; name: string; desc: string; icon: typeof PenLine }[] =
+const ACTIVITY_MODS: { id: TabName; name: string; desc: string; icon: ModuleIconComp }[] =
   BAR_MODULE_IDS.filter((id) => SCENE_META[id]).map((id) => ({
     id, name: labelOf(id), ...SCENE_META[id],
   }))
@@ -192,7 +198,7 @@ export function Onboarding({ onComplete, onSwitchTab }: { onComplete: () => void
               <div className="space-y-2.5">
                 <InfoRow icon={<Bot size={14} />} title="AI 助手 · 边看边问"
                   desc="Ctrl+J 随时唤起；设置 → AI 工具 中配置本地（Ollama）或在线模型，支持 CC Switch 一键导入。对话可调用本地工具并全程留痕" />
-                <InfoRow icon={<Puzzle size={14} />} title="插件 · 官方市场"
+                <InfoRow icon={<PluginIcon size={14} />} title="插件 · 官方市场"
                   desc="插件页一键安装主题、番茄预设与知识包（如 408 考研学习空间，一键导入 148 页学习内容）；S/A/B 三级安全审核" />
                 <InfoRow icon={<ShieldCheck size={14} />} title="按模块授权"
                   desc="设置 → AI 工具 → 权限 中按模块控制 AI 能力边界（禁止 / 只读 / 读写），未授权模块 AI 完全无法触达" />

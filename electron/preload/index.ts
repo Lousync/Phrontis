@@ -641,6 +641,8 @@ const api = {
   workspaceGetCurrent: () => ipcRenderer.invoke('ws:getCurrent'),
   // 在系统文件管理器中打开当前仓库文件夹（标题栏仓库菜单）
   workspaceRevealVault: () => ipcRenderer.invoke('ws:revealVault'),
+  // 用系统默认程序打开仓库内文件 / 在资源管理器中定位它（B-3）
+  workspaceOpenInSystem: (rootId: string, relPath: string, reveal?: boolean) => ipcRenderer.invoke('ws:openInSystem', rootId, relPath, reveal),
   // 设置 → 新手引导：把《欢迎》导览页（HTML）导入仓库根并收录进知识库（force=true 覆盖已有同名文件）
   workspaceImportWelcomeDoc: (force?: boolean) => ipcRenderer.invoke('ws:importWelcomeDoc', force === true),
   // P8（D8）：重命名当前仓库（展示名同步 登记表/meta/最近列表，不改文件夹名）

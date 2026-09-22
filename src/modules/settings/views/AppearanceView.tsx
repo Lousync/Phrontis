@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Sun, Moon, Puzzle, Flame } from 'lucide-react'
+import { Sun, Moon, Flame } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { THEME_OPTIONS, BLOG_SIZE_OPTIONS, KNOWLEDGE_SIDEBAR_SIZE_OPTIONS, applyThemeClass } from '../../../lib/settings'
 import { STARTABLE_MODULE_IDS, labelOf } from '../../../lib/appModules'
@@ -67,7 +67,7 @@ export function AppearanceView() {
 
   const allThemes: { id: string; label: string; desc: string; icon: React.ReactNode }[] = [
     ...THEME_OPTIONS.map(t => ({ id: t.id, label: t.label, desc: THEME_DESCS[t.id] || '', icon: THEME_ICONS[t.id] || <Sun size={24} /> })),
-    ...pluginThemes.map(t => ({ id: t.id, label: t.name, desc: `来自插件「${t.pluginName}」`, icon: <Puzzle size={24} /> })),
+    ...pluginThemes.map(t => ({ id: t.id, label: t.name, desc: `来自插件「${t.pluginName}」`, icon: <PluginIcon size={24} /> })),
   ]
 
   return (

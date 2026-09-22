@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { X, FileText, Trash2, Settings2, Puzzle } from 'lucide-react'
+import { X, FileText, Trash2, Settings2 } from 'lucide-react'
+import { PluginIcon } from '../../../components/shared/ModuleIcons'
 import type { BlogTemplate } from '../../../types'
 import { listBlogTemplates, deleteBlogTemplate } from '../../../lib/ipc'
 import { getPluginBlogTemplates, type PluginBlogTemplate } from '../../../lib/pluginService'
@@ -89,7 +90,7 @@ export function BlogTemplateModal({ open, onClose, onApply }: Props) {
                     className="flex-1 min-w-0 flex items-center gap-2.5 text-left"
                     title="插入到文末"
                   >
-                    <Puzzle size={15} className="text-[var(--accent)] shrink-0" />
+                    <PluginIcon size={15} className="text-[var(--accent)] shrink-0" />
                     <span className="min-w-0">
                       <span className="block text-[13px] text-[var(--text-primary)] truncate">
                         {tpl.name}

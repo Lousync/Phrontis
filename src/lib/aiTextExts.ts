@@ -19,3 +19,29 @@ export const AI_TEXT_CODE_EXTS = [
 ] as const
 
 export const AI_TEXT_CODE_EXT_SET: ReadonlySet<string> = new Set(AI_TEXT_CODE_EXTS)
+
+/**
+ * 「可在应用内按文本查看」的归档扩展名（B-3 方案 A，元信息卡 →「查看内容」）。
+ *
+ * **与 `AI_TEXT_CODE_EXTS` 的区别在用途**：那份是「AI 可读/可写」的准入名单（2026-09-15 拍板把
+ * json / yml / yaml / toml / ini 挡在外面，理由是"真要改配置的时候也轮不到他来"）；这份只管
+ * **只读展示**——能解码成文本就够，配置类与纯文本自然应当包含。
+ *
+ * 从 `AI_TEXT_CODE_EXTS` 派生而非另抄一份：代码类那 28 项是两处共同的下界，
+ * 这里只补展示专有的部分，避免第三份手抄清单（本仓已因清单各持一份吃过多次 drift）。
+ */
+const VIEW_ONLY_EXTS = [
+  // 配置 / 数据类（AI 名单排除，展示要收）
+  'json', 'yml', 'yaml', 'toml', 'ini', 'cfg', 'conf', 'csv', 'tsv', 'log',
+  // 纯文本
+  'txt', 'text', 'md', 'markdown',
+] as const
+
+export const TEXT_VIEWABLE_EXTS: readonly string[] = [...AI_TEXT_CODE_EXTS, ...VIEW_ONLY_EXTS]
+
+export const TEXT_VIEWABLE_EXT_SET: ReadonlySet<string> = new Set(TEXT_VIEWABLE_EXTS)
+
+/** 该扩展名（不带点，小写）能否在应用内按文本查看 */
+export function isTextViewableExt(ext: string): boolean {
+  return TEXT_VIEWABLE_EXT_SET.has(ext.toLowerCase())
+}

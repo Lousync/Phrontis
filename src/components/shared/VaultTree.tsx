@@ -4,8 +4,9 @@
  * 知识库「文件视图」与编辑区共用同一份实现；TreeNode/DirCache/CreateIntent 类型随迁至此。
  */
 import { useEffect, useRef, useState } from 'react'
-import { ChevronRight, Folder, FolderOpen } from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen, FolderTree } from 'lucide-react'
 import { Collapsible } from './Collapsible'
+import { DeleteWipe } from './DeleteWipe'
 import { TreeGuideLine } from './treeGuides'
 import { useSettings } from '../../lib/SettingsContext'
 
@@ -17,12 +18,21 @@ import type { WorkspaceEntry } from '../../types/index'
 export type TreeNode = WorkspaceEntry & { relPath: string }
 /** 目录缓存：dirRelPath -> entries（懒加载，展开时填充） */
 export type DirCache = Record<string, TreeNode[]>
+/** 内联创建可产生的四种条目：file=普通文件 / dir=目录 / knowledge=带 frontmatter 知识页 /
+ *  category=分类目录（B-13 并入；顶层 mkdir + categories.json 登记，**恒落仓库根层**，
+ *  所以调用方传的 dirRel 对它无意义——树只管在给到的 dirRel 下渲染输入行） */
+export type CreateType = 'file' | 'dir' | 'knowledge' | 'category'
+
 /** VS Code 式内联创建意图：目标目录 + 条目类型（file=普通文件 / dir=目录 / knowledge=带 frontmatter 知识页） */
 export interface CreateIntent {
   dirRel: string
-  type: 'file' | 'dir' | 'knowledge'
+  type: CreateType
   /** 内联输入框默认名（全选态）：空 = 只 focus 让用户输入 */
   initial?: string
+}
+/** 重命名意图：该 relPath 的条目替换为内联输入行（宿主持有状态，树保持受控） */
+export interface RenameIntent {
+  relPath: string
 }
 
 interface Props {
@@ -35,8 +45,21 @@ interface Props {
   onMove: (srcRel: string, targetDirRel: string) => void
   /** VS Code 式内联创建：非空表示在目标目录的条目末尾显示待命名行 */
   creating?: CreateIntent | null
-  onCommitCreate?: (dirRel: string, type: 'file' | 'dir' | 'knowledge', rawName: string) => void
+  onCommitCreate?: (dirRel: string, type: CreateType, rawName: string) => void
   onCancelCreate?: () => void
+  /** 重命名态：非空表示该 relPath 的条目替换为内联输入行 */
+  renaming?: RenameIntent | null
+  onCommitRename?: (relPath: string, rawName: string) => void
+  onCancelRename?: () => void
+  /** 删除动画状态（键 = relPath）：'animating' 播放红色吞噬，'done' 收尾淡出。
+   *  与 NotebookList / ChapterPanel 共用同一 deleteWithAnimation 语义，只是键由分类 id 换成相对路径。 */
+  deletingMap?: Map<string, 'animating' | 'done'>
+  /** 选中目录（B-7）：头部「＋」的落点来源；null/undefined = 无选中，由调用方回退到仓库根。
+   *  与 activePath 是两层语义：activePath = 正在看哪个文件，selectedPath = 下一个新建落在哪。
+   *  全 optional，不传 = 与加此特性前完全一致（编辑器侧的文件树即不传）。 */
+  selectedPath?: string | null
+  /** 点目录行 / 点文件行（回调其父目录）时上报选中目录——受控，树自身不持选中态 */
+  onSelectDir?: (dirRel: string) => void
   /** 软件生成项名单（根层 .ignore / AI教学 产物根等，ws:listDir 附带）：
    *  命中条目从主列表移到底部「软件文件」折叠节（VS Code 时间线式，默认收起） */
   softNames?: string[]
@@ -49,6 +72,9 @@ interface Props {
 }
 
 const DRAG_MIME = 'text/x-kb-rel'
+
+/** 父目录相对路径（根层条目 → ''）。选中目录（B-7）与聚焦判定共用同一口径 */
+const parentDirOf = (rel: string) => rel.split('/').slice(0, -1).join('/')
 
 function FileIcon({ name }: { name: string }) {
   // .ignore 文件名精确匹配分支（先于 ext 提取；不做 'ignore' 后缀注册——避免 a.ignore 等误命中，§9.3-2）。
@@ -71,8 +97,15 @@ function FileIcon({ name }: { name: string }) {
  * 拖拽：条目均可拖（mime: text/x-kb-rel）；目录与根容器是落点，
  * drop 时把源相对路径移动到目标目录下（主进程 ws:rename 跨目录移动）。
  */
-export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, softNames, focusOn, onFocusLocate, rootRef }: Props) {
+export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, renaming, onCommitRename, onCancelRename, deletingMap, selectedPath, onSelectDir, softNames, focusOn, onFocusLocate, rootRef }: Props) {
   const [dragOver, setDragOver] = useState<string | null>(null)
+  /** 删除动画状态（键 = relPath；animating 渲染吞噬 / done 收尾淡出） */
+  const delState = (rel: string) => deletingMap?.get(rel)
+  /** 删除动画行附加类（.kb-deleting 自带 position:relative + pointer-events:none） */
+  const delClass = (rel: string) => {
+    const st = delState(rel)
+    return st === 'animating' ? ' kb-deleting' : st === 'done' ? ' kb-deleting kb-done' : ''
+  }
 
   /**
    * 目录聚焦（2026-09-12）：只保留「当前打开文件的祖先目录链 + 同级文件」实名——
@@ -87,10 +120,10 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
   if (activePath) lastActiveRef.current = activePath
   const focusPath = activePath ?? lastActiveRef.current
   const focusActive = !!focusOn && !!focusPath
-  const curParentDir = focusPath ? focusPath.split('/').slice(0, -1).join('/') : null
+  const curParentDir = focusPath ? parentDirOf(focusPath) : null
   const isChainDir = (rel: string) => !!focusPath && (focusPath + '/').startsWith(rel + '/')
   const isSiblingItem = (rel: string) =>
-    !!focusPath && curParentDir !== '' && rel.split('/').slice(0, -1).join('/') === curParentDir
+    !!focusPath && curParentDir !== '' && parentDirOf(rel) === curParentDir
   const skelWidth = (rel: string) => { let h = 0; for (let i = 0; i < rel.length; i++) h = (h * 31 + rel.charCodeAt(i)) >>> 0; return 42 + (h % 48) }
   /** 骨架条：占位 + 悬停显原名；点击 = 退出聚焦并定位 */
   const renderSkeletonRow = (relPath: string, name: string, isDir: boolean, depth: number, icon: React.ReactNode) => (
@@ -136,20 +169,33 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
       if (focusHide) return null
       return renderSkeletonRow(e.relPath, e.name, false, depth, <FileIcon name={e.name} />)
     }
+    if (renaming?.relPath === e.relPath) {
+      return (
+        <InlineRenameRow
+          key={e.relPath}
+          depth={depth}
+          name={e.name}
+          isDir={false}
+          onCommit={(raw) => onCommitRename?.(e.relPath, raw)}
+          onCancel={onCancelRename ?? (() => {})}
+        />
+      )
+    }
     return (
       <div
         key={e.relPath}
         draggable
         onDragStart={(ev) => startDrag(ev, e.relPath)}
-        className={`group flex items-center gap-1 rounded-md px-1.5 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)] ${activePath === e.relPath ? 'bg-[var(--bg-selected)]/40' : ''} ${focusActive && focusPath === e.relPath ? 'ring-1 ring-inset ring-[var(--accent)]/40' : ''}`}
+        className={`group flex items-center gap-1 rounded-md px-1.5 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)] ${activePath === e.relPath ? 'bg-[var(--bg-selected)]/40' : ''} ${focusActive && focusPath === e.relPath ? 'ring-1 ring-inset ring-[var(--accent)]/40' : ''}${delClass(e.relPath)}`}
         style={{ paddingLeft: 6 + depth * 12 }}
-        onClick={() => onOpenFile(e)}
+        onClick={() => { onSelectDir?.(parentDirOf(e.relPath)); onOpenFile(e) }}
         onContextMenu={(ev) => onContextMenu(ev, e)}
         title={e.relPath}
       >
         <span className="w-[12px] shrink-0" />
         <FileIcon name={e.name} />
         <span className={`truncate text-[12.5px] ${activePath === e.relPath ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>{e.name}</span>
+        {delState(e.relPath) === 'animating' && <DeleteWipe />}
       </div>
     )
   }
@@ -181,29 +227,48 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
           }
         } : undefined}
       >
-        {dirNode && (
+        {dirNode && (renaming?.relPath === relPath ? (
+          <InlineRenameRow
+            key={relPath}
+            depth={depth}
+            name={dirNode.name}
+            isDir
+            onCommit={(raw) => onCommitRename?.(relPath, raw)}
+            onCancel={onCancelRename ?? (() => {})}
+          />
+        ) : (
           <div
             draggable
             onDragStart={(e) => startDrag(e, relPath)}
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(relPath) }}
             onDragLeave={() => setDragOver((p) => (p === relPath ? null : p))}
             onDrop={(e) => dropToDir(e, relPath)}
-            className={`group flex items-center gap-1 rounded-md px-1.5 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)] ${
+            className={`group relative flex items-center gap-1 rounded-md px-1.5 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)] ${
               dragOver === relPath ? 'bg-[var(--accent)]/15 ring-1 ring-inset ring-[var(--accent)]/40' : ''
-            }`}
+            }${delClass(relPath)}`}
             style={{ paddingLeft: 6 + depth * 12 }}
-            onClick={() => onToggleDir(relPath)}
+            onClick={() => { onSelectDir?.(relPath); onToggleDir(relPath) }}
             onContextMenu={(e) => onContextMenu(e, dirNode)}
             title={relPath}
           >
+            {/* 选中目录（B-7）：左缘 2px 强调色竖条、不铺底色——文件「正在看」已占用蓝底，
+                同底色会让人以为目录被打开了。与 activePath 是两层语义（落点 vs 正在看）。 */}
+            {selectedPath === relPath && (
+              <span
+                aria-hidden
+                data-wb="treeDirSelected"
+                className="pointer-events-none absolute bottom-[3px] left-[1px] top-[3px] w-[2px] rounded-full bg-[var(--accent)]"
+              />
+            )}
             <ChevronRight
               size={12}
               className={`kb-chevron shrink-0 text-[var(--text-muted)] ${isOpen ? 'rotate-90' : ''}`}
             />
             {isOpen ? <FolderOpen size={14} className="shrink-0 text-[var(--text-muted)]" /> : <Folder size={14} className="shrink-0 text-[var(--text-muted)]" />}
             <span className="truncate text-[12.5px] text-[var(--text-primary)]">{dirNode.name}</span>
+            {delState(relPath) === 'animating' && <DeleteWipe />}
           </div>
-        )}
+        ))}
         {(() => {
           // 软件生成项分组（仅根层）：命中名单的条目移到底部「软件文件」折叠节（VS Code 时间线式）
           const softSet = depth === 0 && softNames?.length ? new Set(softNames) : null
@@ -303,14 +368,14 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
 /** VS Code 式内联创建行：条目末尾的可编辑输入框。Enter 提交、Esc 取消、失焦取消 */
 function InlineCreateRow({ depth, type, initial, onCommit, onCancel }: {
   depth: number
-  type: 'file' | 'dir' | 'knowledge'
+  type: CreateType
   initial?: string
   onCommit: (rawName: string) => void
   onCancel: () => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const committedRef = useRef(false)
-  // 默认名：file→"新建文件.md"（保持扩选态方便直接输入主名）; dir→"新目录"; knowledge→空
+  // 默认名：file→"新建文件.md"（保持扩选态方便直接输入主名）; dir→"新目录"; knowledge/category→空
   const def = type === 'file' ? (initial ?? '新建文件.md') : type === 'dir' ? (initial ?? '新目录') : (initial ?? '')
   useEffect(() => {
     const el = inputRef.current
@@ -334,8 +399,10 @@ function InlineCreateRow({ depth, type, initial, onCommit, onCancel }: {
       style={{ paddingLeft: 6 + depth * 12 }}
     >
       <span className="w-[12px] shrink-0" />
-      {type === 'dir'
-        ? <Folder size={14} className="shrink-0 text-[var(--text-muted)]" />
+      {type === 'dir' || type === 'category'
+        ? (type === 'category'
+          ? <FolderTree size={14} className="shrink-0 text-[var(--text-muted)]" />
+          : <Folder size={14} className="shrink-0 text-[var(--text-muted)]" />)
         : <FileIcon name={def || '新建文件.md'} />}
       <input
         ref={inputRef}
@@ -346,7 +413,60 @@ function InlineCreateRow({ depth, type, initial, onCommit, onCancel }: {
           e.stopPropagation()
         }}
         onBlur={() => cancel()}
-        placeholder={type === 'knowledge' ? '页面标题…' : '名称…'}
+        placeholder={type === 'category' ? '分类名称…' : type === 'knowledge' ? '页面标题…' : '名称…'}
+        className="min-w-0 flex-1 rounded border border-[var(--accent)] bg-[var(--bg-primary)] px-1 py-[1px] text-[12.5px] text-[var(--text-primary)] outline-none"
+      />
+    </div>
+  )
+}
+
+/** 内联重命名行：原地替换被重命名的条目（与 InlineCreateRow 同语义——Enter 提交 / Esc 取消 / 失焦取消）。
+ *  输入框预填原名，并选中**主名**（不含扩展名），直接输入即替换主名、扩展名保留。 */
+function InlineRenameRow({ depth, name, isDir, onCommit, onCancel }: {
+  depth: number
+  name: string
+  isDir: boolean
+  onCommit: (rawName: string) => void
+  onCancel: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const committedRef = useRef(false)
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.focus()
+    const dot = name.lastIndexOf('.')
+    requestAnimationFrame(() => { if (dot > 0) el.setSelectionRange(0, dot); else el.select() })
+  }, [name])
+  const commit = () => {
+    if (committedRef.current) return
+    committedRef.current = true
+    onCommit(inputRef.current?.value ?? '')
+  }
+  const cancel = () => {
+    if (committedRef.current) return
+    committedRef.current = true
+    onCancel()
+  }
+  return (
+    <div
+      className="flex items-center gap-1 rounded-md px-1.5 py-[3px]"
+      style={{ paddingLeft: 6 + depth * 12 }}
+    >
+      <span className="w-[12px] shrink-0" />
+      {isDir
+        ? <Folder size={14} className="shrink-0 text-[var(--text-muted)]" />
+        : <FileIcon name={name} />}
+      <input
+        ref={inputRef}
+        spellCheck={false}
+        defaultValue={name}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit()
+          else if (e.key === 'Escape') cancel()
+          e.stopPropagation()
+        }}
+        onBlur={() => cancel()}
         className="min-w-0 flex-1 rounded border border-[var(--accent)] bg-[var(--bg-primary)] px-1 py-[1px] text-[12.5px] text-[var(--text-primary)] outline-none"
       />
     </div>

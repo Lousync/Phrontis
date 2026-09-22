@@ -13,13 +13,17 @@
  *   node --experimental-strip-types .AGENT/scripts/workbench-shell/verify-workbench-shell.mjs
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { resolve } from 'node:path'
 import {
   WORKBENCH_BOOKMARKS, RAIL_FOLLOW_MAP, WORKBENCH_TABBAR_EXCLUDED,
   parseWorkbenchLayout, DEFAULT_WORKBENCH_LAYOUT,
 } from '../../../src/lib/workbenchLayout.ts'
 import { isTabName } from '../../../src/lib/appModules.ts'
 
-const ROOT = 'E:/Projects/KnowledgeRecorder'
+// ★ 仓库根按**脚本自身位置**解析，不写死绝对路径（2026-09-22 修正，同 verify-perception 的口径）：
+//   写死会把「在 worktree 里跑」变成「静默校验主仓」——脚本全绿而实际改的是另一棵树，
+//   是最难查的一类假 PASS（B-5 已在该脚本踩过一次）。
+const ROOT = resolve(import.meta.dirname, '..', '..', '..')
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8')
 
 let pass = 0

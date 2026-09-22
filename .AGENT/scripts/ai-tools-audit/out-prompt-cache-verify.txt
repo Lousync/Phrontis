@@ -1,4 +1,4 @@
-源文件: E:\Projects\KnowledgeRecorder\electron\lib\llmService.ts
+源文件: E:\Projects\KnowledgeRecorder-ui-rework\electron\lib\llmService.ts
 
 PASS  system 为数组形式
 PASS  system 带 ephemeral 断点

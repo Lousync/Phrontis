@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Puzzle, X } from 'lucide-react'
+import { X } from 'lucide-react'
+import { PluginIcon } from './ModuleIcons'
 import { pluginListViews } from '../../lib/ipc'
 import { peekPendingViewActivation, clearPendingViewActivation } from '../../lib/pluginCommandBus'
 import type { PluginViewContribution } from '../../types'
@@ -59,7 +60,7 @@ export function PluginSlotEntry({ slot, title = '插件' }: { slot: string; titl
             title={`${v.name}（插件）`}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           >
-            <Puzzle size={14} />
+            <PluginIcon size={14} />
             <span className="truncate">{v.title}</span>
             <span className="ml-auto text-[10px] text-[var(--text-disabled)] shrink-0">插件</span>
           </button>
@@ -69,7 +70,7 @@ export function PluginSlotEntry({ slot, title = '插件' }: { slot: string; titl
       {active && (
         <div className="absolute inset-0 z-50 bg-[var(--bg-primary)] flex flex-col" role="dialog" aria-label={`${active.title}（插件）`}>
           <div className="shrink-0 flex items-center gap-2 px-2 py-1 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] select-none">
-            <Puzzle size={12} className="text-[var(--text-muted)]" />
+            <PluginIcon size={12} className="text-[var(--text-muted)]" />
             <span className="text-[11.5px] font-medium text-[var(--text-muted)]">{active.title}</span>
             <span className="text-[10px] text-[var(--text-disabled)]">{active.name} · 插件</span>
             <div className="flex-1" />

@@ -5,15 +5,17 @@
  * 让 electron 启动时经 workspaceManager.loadVaults() 常规恢复路径打开它（不用原生对话框）。
  */
 import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname, basename } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
 
-const proj = 'E:/Projects/KnowledgeRecorder'
-// --ud <name>：userData 目录名覆盖（默认 knowbase (dev KnowledgeRecorder)）。
+// 仓库根由脚本位置推导（勿写死盘符：在 worktree 里跑会去改主仓的 fixture/userData）
+const proj = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
+// --ud <name>：userData 目录名覆盖（默认 knowbase (dev <仓库目录名>)，与 app 的 dev 隔离命名一致）。
 // 隔离探针实例（tmp/probe-app，见 probe-app 说明）须传 --ud "knowbase (dev probe-app)"——
 // 否则与用户正在跑的 dev 共用 userData：单实例锁互斥秒退 + 状态互相污染（2026-09-20 实测）。
 const udFlagIdx = process.argv.indexOf('--ud')
-const userDataName = udFlagIdx > -1 ? process.argv[udFlagIdx + 1] : 'knowbase (dev KnowledgeRecorder)'
+const userDataName = udFlagIdx > -1 ? process.argv[udFlagIdx + 1] : `knowbase (dev ${basename(proj)})`
 const userData = join(process.env.APPDATA ?? '', userDataName)
 
 // 防覆盖：隔离 userData 若尚无首启迁移 marker，先替 app 写上——

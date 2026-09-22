@@ -5,6 +5,7 @@ import { getCurrentVault, KB_INBOX_DIR } from './vaultContext'
 import { bookKindOf, type BookKind } from './bookFormats'
 import { readJson, writeJson, deleteFile } from './jsonStore'
 import { parseMarkdown } from './mdStore'
+import { normalizeMdEntryFields } from './mdEntryFields'
 import { WELCOME_DOC_FILENAME } from './welcomeDoc'
 import { getVaultIgnore, isDirIgnored, getVaultIgnoreState, auditIgnoreRules, type VaultIgnoreResult, type VaultIgnoreState } from './ignoreFile'
 import { clearSemanticsMemo } from './semanticStore'
@@ -84,8 +85,14 @@ export function extractWikiOutlinks(md: string): string[] {
   return out
 }
 
+/** 索引 schema 版本。**语义变更也要 bump**（bump 是唯一能让磁盘缓存失效的杠杆：
+ *  校验只看版本号 + .ignore 指纹，不看文件 mtime）。
+ *  v6（2026-09-21，B-4）：md 条目保证 `fileType` 非空 —— v5 缓存里正式页的 fileType 是空串，
+ *  不 bump 则装了修复的老仓库冷启动仍读旧缓存，表象照旧（大纲按钮仍灰）。 */
+const KNOWLEDGE_INDEX_SCHEMA_VERSION = 6
+
 export interface KnowledgeIndex {
-  schemaVersion: 5
+  schemaVersion: typeof KNOWLEDGE_INDEX_SCHEMA_VERSION
   generatedAt: string
   source: 'vault'
   categories: KnowledgeCategoryIndexEntry[]
@@ -491,7 +498,7 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
   const warnings: string[] = []
   if (!current) {
     return {
-      schemaVersion: 5,
+      schemaVersion: KNOWLEDGE_INDEX_SCHEMA_VERSION,
       generatedAt: new Date().toISOString(),
       source: 'vault',
       categories: [],
@@ -549,16 +556,9 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
       }
       if (/\.md$/i.test(rel)) {
         const doc = parseMarkdown(readFileSync(abs, 'utf8'))
-        // 身份统一（2026-09-20 拍板，docs/note-identity-unify-design.md §1）：无 frontmatter id 的 md
-        // **不再被跳过**，一律以 auto:<relPath> 作为临时身份进库（可搜索 / 进图谱 / 可被 [[引用]]）；
-        // 该文件首次被编辑保存时由渲染层写入真 UUID（ensureFrontmatterId），身份自动升级 —— 用户零操作。
-        if (!asString(doc.frontmatter.id)) {
-          const fileName = rel.slice(rel.lastIndexOf('/') + 1)
-          const dot = fileName.lastIndexOf('.')
-          doc.frontmatter.id = `auto:${rel}`
-          if (!asString(doc.frontmatter.title)) doc.frontmatter.title = dot > 0 ? fileName.slice(0, dot) : fileName
-          doc.frontmatter.fileType = 'md'
-        }
+        // 身份与类型缺省一律在此补全（纯函数，契约脚本可测）：id / title / fileType。
+        // ★ fileType 的补全必须对所有 md 生效，不能只写在 auto 分支里（B-4 根因，见该文件头注释）。
+        normalizeMdEntryFields(doc.frontmatter, rel)
         docs.push({ abs, rel, doc, entryKind: 'doc' })
         continue
       }
@@ -683,7 +683,7 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
   })
 
   return {
-    schemaVersion: 5,
+    schemaVersion: KNOWLEDGE_INDEX_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     source: 'vault',
     categories: visibleCategories.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'zh-Hans')),
@@ -796,7 +796,7 @@ export function getKnowledgeIndex(forceRebuild = false): KnowledgeIndex {
     const cached = readJson<KnowledgeIndex | null>('cache', 'knowledge-index.json', null)
     if (
       cached &&
-      cached.schemaVersion === 5 &&
+      cached.schemaVersion === KNOWLEDGE_INDEX_SCHEMA_VERSION &&
       cached.source === 'vault' &&
       Array.isArray(cached.pages) &&
       cached.byId &&

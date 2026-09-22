@@ -1678,6 +1678,10 @@ export interface ElectronAPI {
   workspacePasteExternal: (rootId: string, relDir: string, srcPaths: string[]) => Promise<WorkspacePasteResult>
   workspaceRename: (rootId: string, oldRel: string, newRel: string) => Promise<{ ok: boolean; error?: string }>
   workspaceTrash: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string }>
+  /** 用系统默认程序打开仓库内文件 / 在资源管理器中定位它（reveal=true）。
+   *  ★ 走 rootId + relPath（主进程 requireInside 解析），绝不接受裸绝对路径——
+   *  通用的 app:openExternal 只放行 userData 目录内路径，仓库文件会被它拦掉。 */
+  workspaceOpenInSystem: (rootId: string, relPath: string, reveal?: boolean) => Promise<{ ok: boolean; error?: string }>
   workspaceStat: (rootId: string, relPath: string) => Promise<{ size: number; mtime: number; isDir: boolean } & { error?: string }>
   workspaceGetRecent: () => Promise<WorkspaceRecent[]>
   workspaceOpenById: (rootId: string) => Promise<{ rootId: string; name: string; path: string } & { error?: string }>

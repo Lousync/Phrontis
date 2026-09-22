@@ -1,4 +1,4 @@
-源文件: E:\Projects\KnowledgeRecorder\electron\lib\builtinTools.ts
+源文件: E:\Projects\KnowledgeRecorder-ui-rework\electron\lib\builtinTools.ts
 工具总数: 31
 
 【core —— 每轮常驻注入】14 个
@@ -11,18 +11,18 @@
   builtin.vault.list                  1755 字符  ~ 530 tok  schema   97  [read/-]
   builtin.vault.search                1526 字符  ~ 439 tok  schema  161  [read/-]
   builtin.pomodoro.summary            1499 字符  ~ 397 tok  schema   83  [read/pomodoro]
-  builtin.vault.resolve-ref           1386 字符  ~ 447 tok  schema  114  [read/-]
+  builtin.vault.resolve-ref           1360 字符  ~ 439 tok  schema  114  [read/-]
   builtin.help.search                 1061 字符  ~ 418 tok  schema  274  [read/-]
   builtin.knowledge.search             977 字符  ~ 316 tok  schema  490  [read/knowledge]
   builtin.web.read                     932 字符  ~ 308 tok  schema  174  [read/-]
   builtin.web.search                   722 字符  ~ 245 tok  schema  173  [read/-]
-  小计: 24756 字符  ~7764 tok
+  小计: 24730 字符  ~7756 tok
 
 【ondemand —— 默认折叠，tool.request 后才注入】17 个
   builtin.quiz.gen-paper              4627 字符  ~1521 tok  schema  631  [write/quiz]
   builtin.schedule.create-todo        3014 字符  ~ 955 tok  schema  728  [write/schedule]
   builtin.vault.edit                  2794 字符  ~ 932 tok  schema  491  [write/-]
-  builtin.schedule.update-todo        2425 字符  ~ 849 tok  schema  716  [write/schedule]
+  builtin.schedule.update-todo        2346 字符  ~ 824 tok  schema  716  [write/schedule]
   builtin.vault.rename                2253 字符  ~ 756 tok  schema  188  [write/-]
   builtin.vault.write                 2096 字符  ~ 715 tok  schema  285  [write/-]
   builtin.quiz.tag                    1584 字符  ~ 519 tok  schema  437  [write/quiz]
@@ -36,10 +36,10 @@
   builtin.quiz.remove                  936 字符  ~ 311 tok  schema  118  [write/quiz]
   builtin.quiz.favorite                856 字符  ~ 264 tok  schema  187  [write/quiz]
   builtin.quiz.set-note                774 字符  ~ 239 tok  schema  203  [write/quiz]
-  小计: 30059 字符  ~9904 tok
+  小计: 29980 字符  ~9879 tok
 
-合计若全部装载: ~17668 tok
-实际常驻(默认权限 read 态): ~7764 tok / 轮
+合计若全部装载: ~17635 tok
+实际常驻(默认权限 read 态): ~7756 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】
   全部合规（最大 728 字符：builtin.schedule.create-todo）

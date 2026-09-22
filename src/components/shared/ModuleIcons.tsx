@@ -10,9 +10,13 @@ import { useSidebarIconNode, type IconModuleId } from '../../lib/sidebarIcons'
 interface IconProps {
   size?: number
   className?: string
+  /** 线宽覆盖（默认 1.6）。**大尺寸下 1.6 偏粗** —— 插件市场空态那个 40px 图标原本就是 1.2（2026-09-22 B-9）。
+   *  ★ 只有手绘包跟随此值：classic140 包自带 1.5、插件 SVG 包是第三方 `<svg>` 原样注入，
+   *    两者「各显其形」是本图标系统的既有设计，不为统一线宽去改它们。 */
+  strokeWidth?: number
 }
 
-function Svg({ size = 24, className, children }: IconProps & { children: React.ReactNode }) {
+function Svg({ size = 24, className, strokeWidth, children }: IconProps & { children: React.ReactNode }) {
   return (
     <svg
       width={size}
@@ -20,7 +24,7 @@ function Svg({ size = 24, className, children }: IconProps & { children: React.R
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.6}
+      strokeWidth={strokeWidth ?? 1.6}
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
@@ -196,14 +200,14 @@ function EditorIconHandDrawn(props: IconProps) {
 }
 // ===== 风格感知包装(设置→外观→侧边栏图标;default 走上方手绘实现) =====
 
-function StyleAware({ moduleId, Fallback, size = 24, className }: IconProps & {
+function StyleAware({ moduleId, Fallback, size = 24, className, strokeWidth }: IconProps & {
   moduleId: IconModuleId
   Fallback: (props: IconProps) => React.ReactElement
 }) {
   const { s } = useSettings()
   const node = useSidebarIconNode(s.sidebarIconStyle ?? 'default', moduleId, size, className)
   if (node) return <>{node}</>
-  return <Fallback size={size} className={className} />
+  return <Fallback size={size} className={className} strokeWidth={strokeWidth} />
 }
 
 const HAND_DRAWN: Record<IconModuleId, (props: IconProps) => React.ReactElement> = {

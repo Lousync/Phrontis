@@ -260,7 +260,11 @@ export function vaultCreatePage(data: { title: string; contentMd: string; catego
   const stem = sanitizeFileStem(data.title || '导入页面')
   const name = uniquePageName(dirRel, stem, root)
   const rel = `${dirRel}/${name}`
-  const fm = { id, title: data.title || stem, tags: data.tags ?? [], starred: false, status: 'published' as const, created: now, updated: now }
+  // ★ fileType 必须真写进 frontmatter（B-4）：该参数此前被静默丢弃，而更新路径
+  // （vaultUpdatePage，:210 `if (payload.fileType) fm.fileType = …`）却**会**写 —— 建页时缺、
+  // 首次保存后才有，中间这段窗口下游（大纲 / 沉浸阅读 / AI 续写）全按空串处理。
+  // 显式给了就用给的，没给一律 'md'（本函数落的文件恒是 .md）。
+  const fm = { id, title: data.title || stem, fileType: data.fileType || 'md', tags: data.tags ?? [], starred: false, status: 'published' as const, created: now, updated: now }
   if (!writeVaultFile(rel, serializeMarkdown(fm, data.contentMd ?? ''))) throw new Error('页面文件写入失败')
   invalidateKnowledgeIndex()
   const entry = getKnowledgeIndex().byId[id]

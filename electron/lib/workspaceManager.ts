@@ -951,6 +951,25 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
     }
   })
 
+  // 用系统默认程序打开仓库内文件 / 在资源管理器中定位（B-3 归档元信息卡）
+  // ★ 信任边界与 ws:trash 一致：只收 rootId + relPath，绝对路径一律经 requireInside 解析，
+  //   渲染层无法借此打开仓库外的任意文件。通用的 app:openExternal 只放行 userData 内的路径，
+  //   仓库文件会被它的安全拦截挡掉，故必须单开这条通道。
+  ipcMain.handle('ws:openInSystem', async (_e, rootId: string, relPath: string, reveal?: boolean) => {
+    try {
+      const abs = requireInside(rootId, relPath)
+      if (!existsSync(abs)) return { ok: false, error: '文件不存在（可能已被移动或删除）' }
+      if (reveal === true) {
+        shell.showItemInFolder(abs)
+        return { ok: true }
+      }
+      const err = await shell.openPath(abs)
+      return err ? { ok: false, error: err } : { ok: true }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
+
   // 文件信息（打开前校验）
   ipcMain.handle('ws:stat', (_e, rootId: string, relPath: string) => {
     try {

@@ -8,7 +8,7 @@ import '../../lib/monaco-setup'
 import { dimMarkdownText, markdownWikiHighlights, wikiTargetTitle, type DimCls } from '../../lib/markdownDim'
 import { getKnowledgePages, aiInlineSuggestRun, aiInlineSuggestCancel } from '../../lib/ipc'
 // B4 自动触发闸门（纯函数：触发点判定 / 冷却记账 / 常量；零依赖便于契约脚本 import）
-import { AUTO_DEBOUNCE_MS, INITIAL_AUTO_STATE, afterAutoResult, canAutoRequest, isTriggerPoint, type AutoState } from '../../lib/inlineSuggestTrigger'
+import { AUTO_DEBOUNCE_MS, INITIAL_AUTO_STATE, afterAutoResult, canAutoRequest, isTriggerPoint, reviveByManual, type AutoState } from '../../lib/inlineSuggestTrigger'
 import { MonacoErrorBoundary } from './MonacoErrorBoundary'
 import type { KnowledgePage } from '../../types/index'
 
@@ -233,6 +233,26 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
     inlineBusyRef.current = onInlineSuggestBusy
     // 自动通道开关 + 暂停态回调：模块级状态（provider/debounce 闭包读不到 React 闭包）
     setInlineAutoMode(inlineSuggestAuto)
+    /**
+     * ★ B-5 方案 A：总闸 / 自动开关 **false→true 的边沿**重置暂停与冷却记账。
+     *
+     * 必须在 effect 里做（`resetInlineAutoPause` 会同步调监听者 → 宿主 setState）：
+     * `setInlineAutoMode` 是渲染期调用的，在那里重置会触发
+     * 「Cannot update a component while rendering a different component」。
+     *
+     * 初值给 `false` 是有意的：**首次挂载也走一次重置** —— 总闸可能在别处（设置页）被打开过，
+     * 而那时没有 MonacoPane 挂着；且「打开一篇文档」本就该算新的写作时段，
+     * 不该继承上次留下的暂停。
+     */
+    const prevInlineOnRef = useRef(false)
+    const prevInlineAutoRef = useRef(false)
+    useEffect(() => {
+      if ((inlineSuggestEnabled && !prevInlineOnRef.current) || (inlineSuggestAuto && !prevInlineAutoRef.current)) {
+        resetInlineAutoPause()
+      }
+      prevInlineOnRef.current = inlineSuggestEnabled
+      prevInlineAutoRef.current = inlineSuggestAuto
+    }, [inlineSuggestEnabled, inlineSuggestAuto])
     const inlinePausedRef = useRef<Props['onInlineSuggestPaused']>(onInlineSuggestPaused)
     inlinePausedRef.current = onInlineSuggestPaused
     /** B4 触发入口（onMount 内装配，供 handle.triggerInlineSuggest 调用） */
@@ -424,8 +444,7 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
       // 且**不看触发点判定**（用户说了才算）。
       triggerInlineRef.current = (): boolean => {
         settleAutoOutcome()
-        inlineAutoState = { ...INITIAL_AUTO_STATE }
-        inlinePausedListeners.forEach((fn) => fn(false))
+        resetInlineAutoPause()
         return fireInlineTrigger()
       }
       // 探针专用点火口（同 window.__kb_monaco 范式）：✨ 按钮已改为总开关（点击 = 开/关），
@@ -792,6 +811,24 @@ function settleAutoOutcome(): void {
   inlineAutoState = afterAutoResult(inlineAutoState, inlineLastAccepted)
   inlineLastAccepted = false
   inlinePausedListeners.forEach((fn) => fn(inlineAutoState.paused))
+}
+
+/**
+ * 重置自动通道的暂停 / 冷却记账，并广播「已不在暂停」（**手动触发**与**总闸重新打开**共用）。
+ *
+ * B-5 方案 A 的存在理由：总闸（`inlineOnRef` ← prop `inlineSuggestEnabled`）与暂停态
+ * （本文件的模块级 `inlineAutoState`）是**两套东西**，而「总闸 false→true」这条边上
+ * 原先没有任何地方碰过 paused —— 于是用户点两次 ✨（关掉再打开）之后自动建议**依然是停的**，
+ * 表象正是「这个功能不能用，不知为何」。
+ *
+ * ⚠️ 会同步调用监听者（宿主 setState）→ **只能在 effect / 事件回调里调，不能在 render 期调**
+ * （`setInlineAutoMode` 每次渲染都被调一次，故重置逻辑不放在那里，见 MonacoHost 的边沿 effect）。
+ */
+export function resetInlineAutoPause(): void {
+  inlineAutoPending = false
+  inlineLastAccepted = false
+  inlineAutoState = reviveByManual()
+  inlinePausedListeners.forEach((fn) => fn(false))
 }
 /**
  * 请求态广播（模块级）：provider 是模块级函数、拿不到 React 闭包，

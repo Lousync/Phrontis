@@ -167,7 +167,7 @@ export const SETTINGS = {
   // 找"第一个没被隐藏的模块"，而 recycle 永远隐藏不掉，于是把侧边栏模块全隐藏后重启就开回收站。
   // 存量用户的活动栏顺序由 ActivityBar 的归一逻辑自行补齐（desktop 顶首位 / 缺失模块追加），
   // 所以这里只保留图标位模块、相对次序不动即可。
-  activityBarOrder: { default: '["editor","blog","schedule","knowledge","moments","toolbox","plugins"]', type: 'json', label: '活动栏图标顺序', group: '活动栏', desc: '活动栏模块图标顺序（JSON）', keywords: ['活动栏', '顺序', '图标', 'activitybar', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  activityBarOrder: { default: '["blog","schedule","knowledge","moments","toolbox","plugins"]', type: 'json', label: '活动栏图标顺序', group: '活动栏', desc: '活动栏模块图标顺序（JSON）', keywords: ['活动栏', '顺序', '图标', 'activitybar', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   activityBarHidden: { default: '[]', type: 'json', label: '活动栏隐藏模块', group: '活动栏', desc: '活动栏隐藏的模块（JSON）', keywords: ['活动栏', '隐藏', '模块', 'activitybar', 'hidden'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   // 布局：整条活动栏显隐。与上面 activityBarHidden（逐模块显隐）互不干扰——
   // 本键关的是「活动栏这个容器本身」，入口只有命令面板「布局：隐藏/显示活动栏」一个
