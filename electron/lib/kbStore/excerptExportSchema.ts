@@ -202,6 +202,8 @@ export function groupExcerpts(excerpts: VaultExcerpt[]): ExcerptGroup[] {
   }
   // 兜底：合法 kind 却没有分组规则 = 加了格式忘了接线。**不套用任何既有模板**
   // （套 txt 会把序号当段号、套 pdf 会把 0 当页码），只做「一个平铺组」这个不会撒谎的呈现。
+  // cbz 落到这里 = **不该发生的正常**：固定版式无文本层 ⇒ 生成不出摘录（excerptSchema 显式拒绝），
+  // 所以这条兜底事实上到不了 cbz。真到了说明上游哪处判定松了 —— 那时这一组也仍不会撒谎。
   return [{ label: '正文', kind, items: excerpts }]
 }
 

@@ -1,6 +1,6 @@
 # foliate-js（vendored）
 
-渲染 EPUB / FB2 / CBZ 等电子书格式的阅读引擎。**本项目对其源码做了 4 处修改**（见下「KB PATCH」），
+渲染 EPUB / FB2 / CBZ 等电子书格式的阅读引擎。**本项目对其源码做了 5 处修改**（见下「KB PATCH」），
 升级时必须重放这些改动。
 
 ## 来源与版本
@@ -31,7 +31,7 @@
 
 ---
 
-## KB PATCH（4 处，共 5 个文件）
+## KB PATCH（5 处，共 6 个文件）
 
 ### ① `epub.js` — 子资源改走 `data:` URL
 
@@ -102,6 +102,41 @@ const template = html => `<?xml version="1.0" encoding="utf-8"?>
 FB2 的节文档本身仍是 `blob:`（与 EPUB 内容文档同理，`paginator` 要读 `contentDocument`），
 这条 patch 只动**子资源**。图片走 `data:`（上游 `getImageSrc` 本就用 `data:`）。
 
+### ⑤ `comic-book.js` — 页序自然序 / 扩展名大小写 / 暴露页图字节
+
+**位置**：`entries.map(...).filter(...).sort()` 一处；`book.getCover` 之后一处。
+
+**动机**（三件事，都是 cbz 实机必踩）：
+
+1. **页序**：上游是裸 `.sort()`（字典序）⇒ `page_10` 排在 `page_2` **之前**。补零命名的 zip
+   看不出差别，非补零的**静默错页**（页序错 = 内容错，且无任何报错）。
+2. **扩展名判定**：上游 `name.endsWith(ext)` 大小写敏感 ⇒ `.JPG`/`.PNG` 整包被过滤掉，
+   表象是 `No supported image files in archive`；实机 zip 里大写扩展名很常见。
+3. **页图字节**：上游只给了 `getCover()`（第 1 页）与 `section.load()`（包好 `<img>` 的
+   **文档** URL）。宿主做左栏缩略图网格需要页图本身，不暴露就得在宿主里再解一遍 zip
+   （重复实现 + 双份内存）。
+
+```js
+const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
+const files = entries
+    .map(entry => entry.filename)
+    .filter(name => {
+        const lower = name.toLowerCase()
+        return exts.some(ext => lower.endsWith(ext))
+    })
+    .sort((a, b) => collator.compare(a, b))
+// …
+book.getPageBlob = name => loadBlob(name)
+```
+
+★ **钉死 `'en'` 是刻意的**：`Intl.Collator(undefined, …)` 会随运行环境 locale 变，页序将不可复现
+（探针断言会飘）。`getPageBlob` 未命中条目返回 `null`（上游 loader 的既有语义），调用方须兜底。
+
+★ **这条 patch 不减少 CSP 例外，与 ① 相反**：cbz 的页图**只能**走 `blob:`（`comic-book.js` 给每页图
+各造一个 blob URL，再套进一层 blob 文档），故 `index.html` 的 `img-src` 放开了 `blob:`。
+页图动辄数 MB，不适用 ① 那条「子资源改走 `data:`」的口径。风险面仅限「多一类图片来源」——
+`img` 通道不能执行脚本，SVG-as-`<img>` 亦然，且内容帧 sandbox 仍无 `allow-scripts`。
+
 ---
 
 ## 安全模型（改动这些文件前必读）
@@ -127,6 +162,6 @@ FB2 的节文档本身仍是 `blob:`（与 EPUB 内容文档同理，`paginator`
 
 1. 从**上游 git 仓库**取目标 commit（不要再走 npm）。
 2. 与本目录逐文件 diff，确认上游变更。
-3. **重放上述 4 处 patch**（patch 代码块可直接对照）。
+3. **重放上述 5 处 patch**（patch 代码块可直接对照）。
 4. 跑契约：`verify-epub-formats.mjs` 的负向断言会检查 sandbox 与 `createURL` 是否仍符合预期。
 5. 跑实机探针 `probe-epub-reader.mjs`（含恶意 EPUB 用例：打开后宿主 `window` 必须未被污染）。

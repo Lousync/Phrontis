@@ -5,8 +5,8 @@
  * 契约脚本 `.AGENT/scripts/pdf-reader/verify-reader-formats.mjs` 与
  * `verify-epub-formats.mjs` 用 `node --experimental-strip-types` 直接 import 本文件做用例验证。
  *
- * 一期 = pdf + txt；B 段（二期）加 '.epub'（阶段 1）、'.fb2' | '.fbz'（阶段 2a）；
- * 后续再加 '.cbz'（阶段 2b）与 '.mobi' | '.azw3'（阶段 3）。
+ * 一期 = pdf + txt；B 段（二期）加 '.epub'（阶段 1）、'.fb2' | '.fbz'（阶段 2a）、
+ * '.cbz'（阶段 2b）；后续再加 '.mobi' | '.azw3'（阶段 3）。
  * ★ 加格式的动作 = ① `BOOK_EXTS` 补一项 ② 下面**三张**表各补一行
  *   ③ 同步 `src/types/index.ts` 的 `BookKind` 镜像。**不要**把「扩展名 → 种类」写回
  *   `if / 三元`（一期曾是三元，加第二个非 pdf 格式即静默错判，契约脚本有断言锁）。
@@ -15,12 +15,14 @@
  *   name/type 分派**（`view.js:13-21`，`isCBZ`/`isFB2`/`isFBZ` 全是大小写敏感的 endsWith），
  *   **不看魔数**。渲染层若自己拼 MIME，就会重演「所有书都叫 xxx.epub」⇒ 裸 fb2 当场
  *   UnsupportedTypeError、fbz 被当 EPUB 解包炸掉。故映射与扩展名同源，渲染层只调用本函数。
+ *   ★ cbz 的 MIME 必须逐字是 `application/vnd.comicbook+zip` —— `view.js:14` 的 isCBZ 就是
+ *   拿这一个字符串比（外加 name 后缀），写错即 `UnsupportedTypeError`。
  */
 
-export const BOOK_EXTS = ['.pdf', '.txt', '.epub', '.fb2', '.fbz'] as const
+export const BOOK_EXTS = ['.pdf', '.txt', '.epub', '.fb2', '.fbz', '.cbz'] as const
 
 export type BookExt = (typeof BOOK_EXTS)[number]
-export type BookKind = 'pdf' | 'txt' | 'epub' | 'fb2' | 'fbz'
+export type BookKind = 'pdf' | 'txt' | 'epub' | 'fb2' | 'fbz' | 'cbz'
 
 /** 阅读引擎（决定渲染层挂哪个阅读器；多个格式可共用一个引擎） */
 export type BookEngine = 'pdf' | 'txt' | 'foliate'
@@ -32,15 +34,19 @@ const KIND_BY_EXT: Record<BookExt, BookKind> = {
   '.epub': 'epub',
   '.fb2': 'fb2',
   '.fbz': 'fbz',
+  '.cbz': 'cbz',
 }
 
-/** 扩展名 → 阅读引擎（foliate 系 = epub / fb2 / fbz，见 src/vendor/foliate/README.md） */
+/** 扩展名 → 阅读引擎（foliate 系 = epub / fb2 / fbz / cbz，见 src/vendor/foliate/README.md） */
 const ENGINE_BY_EXT: Record<BookExt, BookEngine> = {
   '.pdf': 'pdf',
   '.txt': 'txt',
   '.epub': 'foliate',
   '.fb2': 'foliate',
   '.fbz': 'foliate',
+  // cbz 走 foliate 的 fixed-layout 渲染器（book.rendition.layout = 'pre-paginated'），
+  // 与文本系共用 View，但**没有文本层**：摘录 / 高亮 / 划选整条链对它不存在。
+  '.cbz': 'foliate',
 }
 
 /** 扩展名 → MIME（★ 喂给 `new File(...)` 的 type，决定 foliate 选哪个解码器，见文件头注） */
@@ -50,6 +56,7 @@ const MIME_BY_EXT: Record<BookExt, string> = {
   '.epub': 'application/epub+zip',
   '.fb2': 'application/x-fictionbook+xml',
   '.fbz': 'application/x-zip-compressed-fb2',
+  '.cbz': 'application/vnd.comicbook+zip',
 }
 
 /** 命中末尾扩展名（不区分大小写）；未收录返回 null */
@@ -86,7 +93,9 @@ export function bookMimeOf(relPathOrExt: string): string | null {
   return ext ? MIME_BY_EXT[ext] : null
 }
 
-/** 展示名：去掉书籍扩展名（无匹配扩展名时原样返回） */
+/** 展示名：去掉书籍扩展名（无匹配扩展名时原样返回）。
+ *  ★ 它只用于**展示**，不是身份：`读书笔记 · ${bookDisplayName(relPath)}` 这种用法会让
+ *    `a.epub` 与 `a.cbz` 撞进同一篇收件箱页（见 docs/pending-fixes.md B-12）。 */
 export function bookDisplayName(relPath: string): string {
   const base = String(relPath ?? '').split('/').pop() ?? ''
   return bookKindOf(base) ? base.replace(/\.[^.]+$/, '') : base

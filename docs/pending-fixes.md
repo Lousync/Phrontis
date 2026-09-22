@@ -442,10 +442,84 @@ const page = vaultCreatePage({ title: `读书笔记 · ${bookDisplayName(relPath
 
 **验证**：造 `a.epub` 与 `a.fb2` 各含 1 条摘录 → 依次导出 → 两篇页都在、内容互不覆盖；再各导一次确认幂等（同一本书仍只一篇页、id 不变）。探针可挂在 `probe-excerpt-export.mjs` 后面加一步。
 
+**★ 第三个撞车者（2026-09-22 补，来自阶段 2b）**：cbz 接入后 `.cbz` 同样进 `BOOK_EXTS`，`探针样书.cbz` 的展示名也是 `探针样书` ⇒ 撞车面从「两种格式」扩到**三种**（epub / fb2 / fbz / cbz 任意两个同名即撞）。**这不改变修法**（A/B/C 三选一的取舍与格式无关），只是把触发概率抬高了一档 —— 探针 fixture 恰好四本同前缀，`--add-books` 造的样书**天然命中**。
+
+---
+
+## B-13 cbz（画集）的两个体积/卡顿隐患：128MB 上限偏紧 + zip 在主线程同步解包（2026-09-22，P3）
+
+**现象**（尚未收到用户报告，是阶段 2b 落码时从源码推出的**预判**）：打开一本大画集（几十上百 MB、几百页）时，应用会**卡住一段时间**再显示第一页；超过 `MAX_BOOK_BYTES` 则直接**打不开**（报体积超限）。
+
+**定位**：
+- 体积闸门：`electron/lib/workspaceManager.ts` 的 `MAX_BOOK_BYTES = 128MB`（`:47` 附近；`RANGE_EXT_WHITELIST` 的加白名单在 `:224`）
+- 主线程解包：`src/vendor/foliate/view.js:26` 的 `configure({ useWebWorkers: false })` —— **上游默认就是 false**，我们只是没改。于是 `zip.js` 的 `BlobReader`/`ZipReader` **全部在主线程**跑。
+
+**根因**：文字类书（epub/fb2）体积在几 MB 量级，主线程解包无感；**画集是图片归档，体积高一个数量级**，于是同一份配置从「无感」变成「可感知卡顿」。这两条都是**量变引起质变**，不是配置写错了。
+
+**影响面与定性**：
+- 128MB 上限：画集越界是「**打不开**」（正确性阻断），但上限本身是**有意设的**（防解压炸弹/误选大文件），不是 bug ⇒ 要动得先想清楚放开的代价。
+- 主线程解包：是「**打开时卡住**」（体验问题，不是正确性问题）。
+- ★ 本批的缩略图队列**没有加剧**这条：它是「按需 + 每页让出主线程」的设计（`docs`/方案 §四），真正的成本只在**首次解包**那一下。
+
+**修复方向**（都留待评估，本轮不做）：
+1. 主线程解包 → 试 `configure({ useWebWorkers: true })`（上游支持，但要验：worker 里 blob/URL 的生命周期、打包后 worker 文件能否被 electron-vite 正确产出 —— **分包与 CSP 都要看**）。收益是最大的，风险也最集中。
+2. 体积上限 → 按**扩展名分档**（画集给更大额度）或改成「超限时弹确认框、用户点继续才加载」。别直接一刀抬到无限。
+3. 兜底体验（无论 1/2 做不做都值得）：解包期间给个**可见的加载态**（现在打开大书是纯白等），避免「看起来死了」。
+
+**验证**：造一本 ~200MB / 300 页的 cbz → 打开时①有可见加载反馈；②主线程不出现长任务（CDP Performance 面板看 long task）；③若抬了上限，超限那一档有明确提示而不是静默失败。
+
+---
+
+## B-14 `fixed-layout.js` 的 `#render` 有 ResizeObserver 竞态：每次翻页控制台一条未捕获 TypeError（2026-09-22，P3）
+
+**现象**：打开任何 cbz（固定版式书），**每翻一页**控制台就出现一条未捕获异常：
+
+```
+Uncaught TypeError: Cannot read properties of null (reading 'width')
+  at fixed-layout-*.js:417
+```
+
+**页面观感正常**（版式被后续那次显式 `#render()` 纠正回来了），所以这是「控制台红字」级别的问题 —— 但**每次翻页一条**，排查别的问题时会被它干扰（探针已把它显式指名滤掉）。
+
+**定位**：`src/vendor/foliate/fixed-layout.js` 的 `#render()`（打包后 `fixed-layout-*.js:417`）
+
+**根因**（上游 latent bug，被我们的配置放大）：
+- `#showSpread({ center })` 先把 `#left` / `#right` **置 null**，再 `await #createFrame(center)`；
+- 这个 await 窗口内若有 ResizeObserver 回调触发 `#render()`，它读的是 `const right = this.#center ?? this.#right`（`#center` 此刻也还没赋上）⇒ **null.width** ⇒ 抛。
+- 上游默认用例里每节是「左 / 右 / 中」三选一，窗口期短、命中概率低；我们拍板 `rendition.spread = 'none'` ⇒ **每节都是 `{center}`** ⇒ `#center` 在窗口期必为 null ⇒ **每次翻页必踩**。
+
+**修复方向（本批没做，理由见下）**：
+- 上游一行即可修：`#render` 开头加 `if (!right) return`（或在 `#showSpread` 里先赋 `#center` 再 await）。
+- ★ **阶段 2b 明确不加第 6 处 vendor patch**（该批把 patch ⑤ 限定在 `comic-book.js`，见 `.claude/plans/b-stage2b-cbz.md` §C/§九）。要修就得**另开一次 patch 批次**：`src/vendor/foliate/README.md` 的补丁表 + 「5 处 / 6 文件」计数 + 契约脚本的负向断言都要同步改，属**有仪式成本**的动作，不适合顺手塞进 2b。
+- 若将来升级 foliate 版本，先看上游有没有自己修掉。
+
+**验证**：连续翻 20 页 → 控制台**零** `Cannot read properties of null` 异常；版式与现在一致（帧数、fit-page/fit-width 几何不变）；`probe-cbz-reader.mjs` 全绿（该探针的噪声过滤可一并撤掉）。
+
+---
+
+## B-15 cbz 里的 `.svg` 页显示为破图（`loadBlob` 不传 MIME）（2026-09-22，P3）
+
+**现象**：cbz 归档里若某一页是 `.svg`，那一页打开是**破图**（`<img>` 加载失败、`naturalWidth = 0`），其余 PNG/JPEG 页正常。属**静默降级**，没有任何报错。
+
+**定位**：`src/vendor/foliate/comic-book.js:8`（`URL.createObjectURL(await loadBlob(name))`）→ `loadBlob` 的定义在 `view.js` 的 `makeZipLoader`（`loadBlob = load((entry, type) => entry.getData(new BlobWriter(type)))`）。调用处**没传 `type`** ⇒ `new BlobWriter(undefined)` ⇒ 造出的 Blob `type = ''`。
+
+**根因**：`<img>` 的 `src` 指向 `blob:` 时，Chromium **靠 Blob 的 MIME 决定解码器**；`type = ''` 时按「未知类型」处理并**拒绝**，不会退化成按魔数嗅探。
+- PNG / JPEG / GIF / WebP 之所以"看起来没事"：它们走的是**图片嗅探**路径（且这几类本来就在浏览器硬编码的嗅探表里）。
+- SVG **必须**有 `image/svg+xml` 才解码 —— 实测同一份字节：`type:''` → **error**；`type:'image/svg+xml'` → **ok:800x1120**。
+- ★ 这也是 `comic-book.js:19` 的 `exts` 白名单**收了 `.svg` 却不生效**的原因（白名单让它进了归档，解码这一关又把它挡回来）。
+
+**与安全的关系（重要，别误读）**：这条**不是**安全缺口，反而是安全结论的**旁证** —— `<img>` 里的 SVG 在**任何** MIME 下都**不执行脚本**（阶段 2b 的恶意样书探针已实测：正确 MIME 下可解码、标志位仍全 null）。所以修它**不会**打开任何新的攻击面（`img-src` 只放行图片，内容帧 sandbox 仍无 `allow-scripts`）。
+
+**修复方向**（择一）：
+- **A 按后缀推 MIME 传给 `loadBlob`**（`comic-book.js` 里已有扩展名 → 类型的映射可复用），一行左右；**但属 vendor 改动**（2b 已定「只动两处」，这条要另开 patch 批次，同 B-14 的仪式成本）。
+- **B 把 `.svg` 从白名单剔除** —— 改了反而**降低**能力（能显示的页面变少），不推荐。
+- **C 接受** —— 实机画集极少用 SVG 当页，影响面接近零。**本轮的选择**。
+
+**验证**（若选 A）：恶意样书 / 探针样书里放一页 `.svg` → 该页正常显示（`naturalWidth > 0`），且探针的安全负向断言**仍全绿**（标志位 null、sandbox 不含 `allow-scripts`、`script-src` 无 `'unsafe-inline'`）。
+
 ---
 
 ## 登记格式（后续条目照此写）
-
 ```
 ## B-n <一句话现象>（YYYY-MM-DD，P0/P1/P2/P3）
 

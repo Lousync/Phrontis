@@ -17,10 +17,20 @@ export const makeComicBook = async ({ entries, loadBlob, getSize, getComment }, 
     }
 
     const exts = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.jxl', '.avif']
+    // ── KB PATCH（第 5 处，见 src/vendor/foliate/README.md）：页序与扩展名判定 ──
+    //   ① 上游是裸 `.sort()`（字典序）⇒ `page_10` 排在 `page_2` **之前**。补零命名的 zip
+    //      看不出差别，非补零的会静默错页。改自然序比较器；**钉死 'en' 是刻意的** ——
+    //      传 undefined 会随运行环境 locale 变，页序就不可复现（探针断言会飘）。
+    //   ② 上游 `endsWith` 大小写敏感 ⇒ `.JPG`/`.PNG` 整包被丢，表象是
+    //      `No supported image files in archive`（实机 zip 里大写扩展名很常见）。
+    const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
     const files = entries
         .map(entry => entry.filename)
-        .filter(name => exts.some(ext => name.endsWith(ext)))
-        .sort()
+        .filter(name => {
+            const lower = name.toLowerCase()
+            return exts.some(ext => lower.endsWith(ext))
+        })
+        .sort((a, b) => collator.compare(a, b))
     if (!files.length) throw new Error('No supported image files in archive')
 
     const book = {}
@@ -45,6 +55,11 @@ export const makeComicBook = async ({ entries, loadBlob, getSize, getComment }, 
         book.metadata = { title: file.name }
     }
     book.getCover = () => loadBlob(files[0])
+    // ── KB PATCH（同上）：暴露页图原始字节 ──
+    //    上游只给了 `getCover()`（第 1 页）与 `section.load()`（包好 <img> 的**文档** URL），
+    //    宿主拿不到页图本身 ⇒ 做左栏缩略图网格就得在宿主里再解一遍 zip（重复实现 + 双份内存）。
+    //    未命中条目返回 null（上游 loader 的既有语义），调用方须自行兜底。
+    book.getPageBlob = name => loadBlob(name)
     book.sections = files.map(name => ({
         id: name,
         load: () => load(name),

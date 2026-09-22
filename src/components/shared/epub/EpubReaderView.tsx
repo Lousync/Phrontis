@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { ArrowLeft, ChevronLeft, ChevronRight, Contrast, Loader2, Trash2, Type, X } from 'lucide-react'
-import { View } from '../../../vendor/foliate/view.js'
+import { ArrowLeft, ChevronLeft, ChevronRight, Contrast, Loader2, Maximize2, Minimize2, Trash2, Type, X } from 'lucide-react'
+import { View, makeBook } from '../../../vendor/foliate/view.js'
 import { Overlayer } from '../../../vendor/foliate/overlayer.js'
-import type { FoliateRelocateDetail } from '../../../vendor/foliate/view.js'
+import type { FoliateBook, FoliateRelocateDetail } from '../../../vendor/foliate/view.js'
 import { excerptCreate, excerptDelete, excerptList, readerStateGet, readerStatePatch, workspaceReadRange } from '../../../lib/ipc'
 import { useDataChanged } from '../../../lib/dataChanged'
 import { showToast } from '../../../lib/toast'
-import { KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, KB_READER_STATE_CHANGED, type EpubTocItem } from '../pdf/pdfEvents'
+import { KB_CBZ_THUMBS, KB_CBZ_THUMB_REQ, KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, KB_READER_STATE_CHANGED, type EpubTocItem } from '../pdf/pdfEvents'
 // 真源（扩展名 / kind / MIME 三张表都在那里）。★ 本文件**不得**再出现 MIME 或书籍扩展名字面量：
 // foliate 的 makeBook() 按 File 的 name/type 分派解码器（view.js:13-21，不看魔数），
 // 自拼 MIME 会重演「所有书都叫 xxx.epub」→ 裸 fb2 当场 UnsupportedTypeError、fbz 被当 EPUB 解包炸掉。
@@ -45,6 +45,14 @@ import type { ExcerptColor, ExcerptItem, ExcerptType, ReaderPaper } from '../../
 const READ_CHUNK = 8 * 1024 * 1024
 /** 整本载入上限：foliate 的 zip 解包要全量字节（无范围读通道），超大文件先挡住并给明确提示 */
 const MAX_BOOK_BYTES = 128 * 1024 * 1024
+
+/** 缩略图缓存的项数上限（每项约 5-8KB data URL ⇒ 240 项 ≈ 2MB）。
+ *  ★ 按**插入序**裁剪（Map 保序），不是严格 LRU —— 往回滚会重新生成，代价可接受；
+ *  真要改 LRU 请连「命中时重插」一起加，别只改裁剪方向。 */
+const THUMB_CACHE_MAX = 240
+
+/** 缩略图宽度（px）。页图解码后动辄 20-30MB（2000×3000），必须下采样后再进网格。 */
+const THUMB_WIDTH = 96
 
 /** 摘录色 → foliate 高亮填充（与 styles/index.css 的 .kb-exc-* 同源；透明度走 CSS 变量） */
 const HL_FILL: Record<ExcerptColor, string> = {
@@ -163,6 +171,11 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
    *  （`App.tsx` / 书架按引擎分发），故 `bookKind` 恒非空；`?? 'epub'` 只是类型收窄兜底，
    *  **不是第二个格式判断分支点** —— 不要在这里写任何格式映射。 */
   const kind = bookKind ?? 'epub'
+  /** 固定版式（pre-paginated）—— 当今只有 cbz 走这条路（`comic-book.js` 设 rendition.layout）。
+   *  ★ 判据用**真相源推导的 kind**、不用运行时 `view.isFixedLayout`：工具栏要在 `open()` **之前**
+   *  就渲染对（否则先出字号按钮、open 后才换成缩放按钮，视觉上闪一下）。将来若出现第二个固定版式
+   *  格式，这里改成按引擎能力集合判断 —— **别**在这里加 `||` 堆格式字面量。 */
+  const isFixedLayoutBook = bookKind === 'cbz'
 
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
@@ -170,6 +183,8 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   const [chapter, setChapter] = useState('')
   const [fontScale, setFontScale] = useState(1)
   const [paper, setPaper] = useState<ReaderPaper>('default')
+  /** 缩放档（仅固定版式用；`fixed-layout.js:118-131` 认 'fit-page' / 'fit-width'） */
+  const [zoomMode, setZoomMode] = useState<'fit-page' | 'fit-width'>('fit-page')
   const [excerpts, setExcerpts] = useState<ExcerptItem[]>([])
   const [capture, setCapture] = useState<{ rect: SelectionRect; cfi: string; text: string } | null>(null)
   const [notePop, setNotePop] = useState<{ rect: SelectionRect; excerpt: ExcerptItem } | null>(null)
@@ -192,6 +207,18 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   const annColorRef = useRef(new Map<string, ExcerptColor>())
   /** 已挂过监听的内容文档（同 section 重渲染会复用 doc，避免重复挂） */
   const boundDocsRef = useRef(new WeakSet<Document>())
+
+  // ===== 缩略图（仅固定版式 / cbz 的左栏网格用；机制见 .claude/plans/b-stage2b-cbz.md §四）=====
+  /** index → data URL；`null` = 该页解码失败，**记下来不再重试**（否则滚一次重试一次） */
+  const thumbCacheRef = useRef(new Map<number, string | null>())
+  /** 待处理页号（去重靠 cache 命中判定，这里只保证顺序） */
+  const thumbQueueRef = useRef<number[]>([])
+  /** 串行闸门：一次只处理一页，页间让出主线程（zip 解包也在主线程，见 view.js 的 useWebWorkers:false） */
+  const thumbBusyRef = useRef(false)
+  /** 关书即取消（与 `alive` 同思路，但缩略图队列可能活在 effect 之外） */
+  const thumbGenRef = useRef(0)
+  /** 缩放档的 ref 镜像：open effect 里要用当前值，又不能把 state 塞进依赖数组 */
+  const zoomModeRef = useRef<'fit-page' | 'fit-width'>('fit-page')
 
   // ===== 写回 readerState（冲突以服务端为基底、本地意图覆盖后重试一次）=====
   const patchReader = useCallback(async (patch: Parameters<typeof readerStatePatch>[2]) => {
@@ -245,6 +272,109 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       }))
     } catch { /* 广播失败不影响阅读 */ }
   }, [relPath])
+
+  // ===== 缩放（仅固定版式 / cbz）=====
+  /** 把当前缩放档写到 renderer 元素上。
+   *  ★ 只在 `view.open()` 之后调才有意义 —— renderer 是 open 里才建的（`view.js:243`）。
+   *  元素若尚未升级成 custom element，属性会留在元素上、升级时补发回调，故无需额外等待。 */
+  const applyZoom = useCallback((view: View) => {
+    try { view.renderer?.setAttribute('zoom', zoomModeRef.current) } catch { /* 元素未就绪：忽略 */ }
+  }, [])
+
+  const cycleZoom = useCallback(() => {
+    const next: 'fit-page' | 'fit-width' = zoomModeRef.current === 'fit-page' ? 'fit-width' : 'fit-page'
+    zoomModeRef.current = next
+    setZoomMode(next)
+    const view = viewRef.current
+    if (view) applyZoom(view)
+  }, [applyZoom])
+
+  // ===== 缩略图（cbz 左栏网格按需生成；机制见 .claude/plans/b-stage2b-cbz.md §四）=====
+  /** 一页 → 缩略图 data URL（失败回 null）。
+   *  ★ 必须下采样：原图解码后动辄 20-30MB（2000×3000），直接把原图塞进 96px 的格子
+   *  = 每格一份全尺寸位图，一屏几百 MB，且每次滚动都重解码。画完立刻 close 位图、丢掉源 blob。 */
+  const makeThumb = useCallback(async (index: number): Promise<string | null> => {
+    const view = viewRef.current
+    const section = view?.book?.sections?.[index]
+    const getBlob = view?.book?.getPageBlob
+    if (!getBlob || !section?.id) return null
+    try {
+      const blob = await getBlob(section.id)
+      if (!blob) return null
+      const bmp = await createImageBitmap(blob)
+      try {
+        const w = THUMB_WIDTH
+        const h = Math.max(1, Math.round((bmp.height / Math.max(1, bmp.width)) * w))
+        const cv = new OffscreenCanvas(w, h)
+        const ctx = cv.getContext('2d')
+        if (!ctx) return null
+        ctx.drawImage(bmp, 0, 0, w, h)
+        const out = await cv.convertToBlob({ type: 'image/jpeg', quality: 0.72 })
+        return await new Promise<string>((resolve, reject) => {
+          const fr = new FileReader()
+          fr.onload = () => resolve(String(fr.result))
+          fr.onerror = () => reject(fr.error)
+          fr.readAsDataURL(out)
+        })
+      } finally { bmp.close() }
+    } catch {
+      // 解码器不认的格式（zip 允许 .jxl 等，见 comic-book.js 的 exts）→ null，网格留占位
+      return null
+    }
+  }, [])
+
+  /** 排空队列：串行 + 页间让出（zip 解包与图片解码都在主线程，长任务会把翻页卡住） */
+  const drainThumbs = useCallback(async () => {
+    if (thumbBusyRef.current) return
+    thumbBusyRef.current = true
+    const gen = thumbGenRef.current
+    try {
+      while (thumbQueueRef.current.length) {
+        if (gen !== thumbGenRef.current) return          // 换书 / 关书 → 立即停
+        const index = thumbQueueRef.current.shift() as number
+        const cache = thumbCacheRef.current
+        if (cache.has(index)) continue                   // 已被前一批请求生成过
+        const url = await makeThumb(index)
+        if (gen !== thumbGenRef.current) return
+        cache.set(index, url)
+        while (cache.size > THUMB_CACHE_MAX) {           // 按插入序裁剪，见常量注释
+          const oldest = cache.keys().next().value
+          if (oldest === undefined) break
+          cache.delete(oldest)
+        }
+        try {
+          window.dispatchEvent(new CustomEvent(KB_CBZ_THUMBS, { detail: { relPath, from: index, items: [url] } }))
+        } catch { /* 广播失败不影响阅读 */ }
+        await new Promise((r) => { setTimeout(r, 0) })   // 让出主线程
+      }
+    } finally { thumbBusyRef.current = false }
+  }, [makeThumb, relPath])
+
+  /** 左栏网格的要图请求（只对固定版式生效；文本系没有「页图」这个概念） */
+  useEffect(() => {
+    if (!isFixedLayoutBook) return
+    const onReq = (e: Event) => {
+      const d = (e as CustomEvent).detail as { relPath?: string; from?: number; to?: number } | undefined
+      if (!d || d.relPath !== relPath) return
+      const total = viewRef.current?.book?.sections?.length ?? 0
+      const from = Math.max(0, Math.floor(Number(d.from) || 0))
+      const to = Math.min(total - 1, Math.max(from, Math.floor(Number(d.to ?? d.from) || 0)))
+      if (to < from) return
+      const cache = thumbCacheRef.current
+      const items: (string | null | undefined)[] = []
+      for (let i = from; i <= to; i++) {
+        if (cache.has(i)) items.push(cache.get(i) ?? null)
+        else { items.push(undefined); thumbQueueRef.current.push(i) }   // undefined = 还在队列里
+      }
+      // 先把已缓存的回掉（不等生成）；未命中的排队，产出后逐条补发同 index 的回广播
+      try {
+        window.dispatchEvent(new CustomEvent(KB_CBZ_THUMBS, { detail: { relPath, from, items } }))
+      } catch { /* 同上 */ }
+      void drainThumbs()
+    }
+    window.addEventListener(KB_CBZ_THUMB_REQ, onReq)
+    return () => window.removeEventListener(KB_CBZ_THUMB_REQ, onReq)
+  }, [relPath, isFixedLayoutBook, drainThumbs])
 
   // ===== 打开书：读字节 → foliate 打开 → 恢复位置 → 发首帧状态 =====
   useEffect(() => {
@@ -427,7 +557,13 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       const d = (e as CustomEvent).detail as FoliateRelocateDetail
       if (!d) return
       const nextPct = Number.isFinite(d.fraction) ? Math.min(100, Math.max(0, Math.round(d.fraction * 100))) : 0
-      const label = typeof d.tocItem?.label === 'string' ? d.tocItem.label : ''
+      // 固定版式（cbz）的 `tocItem.label` 是**文件名**（`page_07.png` —— `comic-book.js` 的
+      // toc 就是页表），直接摆到工具栏是噪音 ⇒ 换成「第 N / M 页」。页号取 `section.current`
+      // （`view.js:317` 的 SectionProgress 口径），**不是** relocate detail 顶层 —— 那里没有 index。
+      // `href` 保持文件名不动：左栏网格靠它与 toc 项比对来高亮当前页。
+      const label = isFixedLayoutBook && d.section?.total
+        ? `第 ${(d.section.current ?? 0) + 1} / ${d.section.total} 页`
+        : (typeof d.tocItem?.label === 'string' ? d.tocItem.label : '')
       const href = typeof d.tocItem?.href === 'string' ? d.tocItem.href : ''
       cfiRef.current = typeof d.cfi === 'string' ? d.cfi : ''
       pctRef.current = nextPct
@@ -529,8 +665,25 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
         const fileName = `${name || 'book'}${bookExt ?? ''}`
         const file = new File([bytes], fileName, bookMime ? { type: bookMime } : undefined)
 
-        await view.open(file)
+        // ★ 固定版式（cbz）默认**左右对开**（`fixed-layout.js:210-241` 的拼版），漫画要单页 ——
+        //   只有 `rendition.spread === 'none'` 时它才一节一跨页（`fixed-layout.js:208-209`）。
+        //   而 `view.open()` 只对 string / 有 `arrayBuffer()` 的入参自己 makeBook（`view.js:221-223`），
+        //   故先自家 makeBook、改完 rendition 再传**普通对象**进去（它不会再包一层）。
+        //   ⚠ 顺序反了（先 open 再改）就被 `fixed-layout.js:201` 读走默认值、静默成对开。
+        let target: File | FoliateBook = file
+        if (isFixedLayoutBook) {
+          const bk = await makeBook(file)
+          if (!alive) return
+          bk.rendition = { ...(bk.rendition ?? {}), spread: 'none' }
+          target = bk
+        }
+
+        await view.open(target)
         if (!alive) return
+        // 缩放档只能设在 renderer 元素上：`fixed-layout.js:35/64-72` 认自身 `zoom` 属性，而
+        // `view.js` 全程不转发它（全文无 zoom）。`view.renderer` 是**公开字段**（本文件另有三处
+        // 直接用它调 getContents），故直接 setAttribute 即可，无需第 6 处 vendor patch。
+        applyZoom(view)
         await view.init({ showTextStart: true })
         if (!alive) return
         readyRef.current = true
@@ -572,6 +725,12 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       try { view.remove() } catch { /* 已摘除 */ }
       viewRef.current = null
       readyRef.current = false
+      // 缩略图队列随书作废：换书/关标签时正在跑的那一页要在产出后被丢弃（判 gen，不是判 alive ——
+      // 队列可能跑在这个 effect 之外）。data URL 不需要 revoke，清掉 Map 即释放。
+      thumbGenRef.current += 1
+      thumbQueueRef.current.length = 0
+      thumbCacheRef.current.clear()
+      thumbBusyRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootId, relPath])
@@ -724,10 +883,25 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ChevronLeft size={15} /></button>
       <button onClick={() => turn(1)} title="下一页（→ / 空格）" data-wb="epubNext"
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ChevronRight size={15} /></button>
-      <button onClick={() => changeFont(-0.1)} title="缩小字号" data-wb="epubFontDec"
-        className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Type size={13} /><span className="text-[10px]">−</span></button>
-      <button onClick={() => changeFont(0.1)} title="放大字号" data-wb="epubFontInc"
-        className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Type size={13} /><span className="text-[10px]">＋</span></button>
+      {/* 字号只对文字书有意义：`changeFont` 改的是注入文本 CSS 的 `--kb-font-scale`，
+          固定版式（cbz）整页是图片，改了毫无反应 —— 与其留两个无效按钮，不如换成缩放档。 */}
+      {!isFixedLayoutBook && (
+        <>
+          <button onClick={() => changeFont(-0.1)} title="缩小字号" data-wb="epubFontDec"
+            className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Type size={13} /><span className="text-[10px]">−</span></button>
+          <button onClick={() => changeFont(0.1)} title="放大字号" data-wb="epubFontInc"
+            className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Type size={13} /><span className="text-[10px]">＋</span></button>
+        </>
+      )}
+      {/* 固定版式缩放两档（plan 拍板③）。写在 renderer 元素的 `zoom` 属性上 —— 见 view.d.ts 的注解。
+          `data-wb-zoom` 是探针断言「点了真的换档」的锚（比读图标可靠）。 */}
+      {isFixedLayoutBook && (
+        <button onClick={cycleZoom} data-wb="epubZoom" data-wb-zoom={zoomMode}
+          title={zoomMode === 'fit-page' ? '适应整页（点击切换为适应宽度）' : '适应宽度（点击切换为适应整页）'}
+          className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+          {zoomMode === 'fit-page' ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
+      )}
       <button onClick={cyclePaper} title={`纸色：${paperLabel}`} data-wb="epubPaper"
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Contrast size={14} /></button>
       <span className="shrink-0 text-[var(--text-tertiary)]" data-wb="epubPct">{pct}%</span>

@@ -806,3 +806,48 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **验收**：实机探针 `probe-fb2-reader.mjs` **61 条断言全绿**（含 PATCH ④ 排版靶：章标题居中 / 正文段 margin 归零 / 第二段缩进 1em；图片经 `<binary>` base64 解码；目录 href 是序号串仍能 `view.goTo`；导出按章节分组端到端；重开后 **locator 与关书前逐字相同** = 精确回位而非回落章首）；`probe-epub-reader.mjs`（迁移到公共套件后复跑）与 PDF / TXT / 导出三条回归探针全绿；`tsc --noEmit` 双端 0 错。
 
 > 上游方案 §三「陷阱 2」原判 fb2 的 CFI 是 fake、**只能回到章节开头** —— 实机推翻：`fb2.js` 确实不提供 section 级 cfi（基础部分走 `CFI.fake.fromIndex`），但 foliate 是 `CFI.joinIndir(基础, CFI.fromRange(range))` **拼上真实范围**，故章内精度保留、回跳精确到原处（探针用「重开前后 locator 逐字相同」断言）。
+
+## 21. 电子书扩格式：CBZ 接入（阶段 2b，2026-09-22）
+
+背景：2a 把 fb2 / fbz 接进了 foliate 的**重排**引擎。cbz（图片漫画）虽然复用同一个阅读器组件，**引擎却是另一个**（`fixed-layout.js`，固定版式）—— 这不是「再加一个扩展名」，而是「同一组件下长出第二条形状完全不同的链路」。本批方案 `.claude/plans/b-stage2b-cbz.md`，落码后的偏差与新增待办见其 §九。
+
+**四个拍板**（本轮问定）：右栏「阅读」Tab **不留** · 默认分页**单页** · 缩放**出 fit-page / fit-width 两档** · 页序**打 patch 改自然序**。
+
+改动点：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 真相源加 `.cbz` + 三张表各一行（kind `cbz` / engine **`foliate`** / mime **`application/vnd.comicbook+zip`**，该串必须逐字对，`view.js:14` 的 `isCBZ` 就是拿它比） | `electron/lib/kbStore/bookFormats.ts` |
+| 2 | 镜像同步：`BookKind` 联合、两个 schema 的 `BOOK_KINDS` | `src/types/index.ts`·`readerStateSchema`·`excerptSchema` |
+| 3 | 主进程整份读白名单补 `.cbz`（**安全面变更**） | `electron/lib/workspaceManager.ts` |
+| 4 | **CSP 只加一处**：`img-src` += `blob:` | `index.html` |
+| 5 | **vendor 第 5 处 patch**（只动 `comic-book.js`）：页序自然序（`Intl.Collator('en',{numeric:true})`，locale 必须钉死否则探针会飘）+ 扩展名过滤大小写不敏感（`.PNG` 原本整包被丢）+ 暴露 `book.getPageBlob` 供缩略图取页图字节 | `src/vendor/foliate/comic-book.js` |
+| 6 | 单页 / 缩放 / 工具栏页号：宿主侧解决，**不动 vendor** | `src/components/shared/epub/EpubReaderView.tsx` |
+| 7 | 左栏按**引擎**分叉：`comic` 出缩略图网格、其余仍出目录树；反向按需取图（`KB_CBZ_THUMB_REQ` / `KB_CBZ_THUMBS`） | `EpubRailPanel.tsx`·`pdfEvents.ts` |
+| 8 | 右栏 cbz **不出**第三个 Tab —— **只此一处**（`reading={… && kind !== 'cbz' ? … : null}`）；`railReaderDoc` 不能动（左栏网格靠它） | `src/App.tsx` |
+| 9 | 探针：`make-cbz.mjs`（零依赖手写 PNG + STORED zip，产物字节可复现）+ `probe-cbz-reader.mjs` | `.AGENT/scripts/workbench-shell/probes/` |
+
+**三件本以为要改引擎、实测都不用改**（本批最大的成本节约，都在源码里核对过）：
+
+- **单页**：`fixed-layout.js` 里 `rendition.spread === 'none'` ⇒ 每节一跨页。宿主在 `view.open` **之前**把 `book.rendition.spread` 设成 `'none'` 即可（★ 顺序反了会被读走默认值、静默成对开）。
+- **缩放**：`fixed-layout.js` 只认自己元素上的 `zoom` 属性，`view.js` 全程不转发 —— 但 `view.renderer` 是公开字段，`setAttribute('zoom', …)` 直接生效。
+- **回位 / 进度**：`view.js` 用**章节字节数**重算 `fraction`，`locator` 走 `CFI.fake.fromIndex`。⇒ cbz 的 pct 非 0 但**是字节加权**（不等于页数比例），`readerState.locator` 形如 `epubcfi(/6/8)`，与文本系同一条路，**不需要发明新 locator 口径**。
+
+**三个静默陷阱**：
+
+- **cbz 的每一页是两个 blob URL**：先给页图造一个，再把它塞进 HTML 字符串给这段文档造第二个。`frame-src blob:` 早就有了（阶段 0），缺的是 **`img-src blob:`** —— 少了它画面是「文档加载了、图全裂」，而报错只指向图片，很容易误判成 zip 解包问题。
+- **`view.goTo` 对无效目标返回真值**：目标无效时 `resolveHref` 给 `{index:-1}`，`FixedLayout.goTo` 对不存在的 section **静默 return** ⇒ 整条链返回真值，宿主 `restored = !!ok` 会误判成功。本批不喂无效目标所以没事，但**任何「把 index 拼成字符串塞进 locator」的将来改动都会踩**（`resolveNavigation` 只在 `typeof target === 'number'` 时认 index）。
+- **缩略图必须解码后下采样**：一页画集图解码后 20-30MB，直接把原图塞进 96px 格子 = 每格一份全尺寸位图。走 `createImageBitmap` → `OffscreenCanvas(96px)` → JPEG q0.72 data URL，随即 `bitmap.close()`。产出 5-8KB/页，缓存上限 240 项、按插入序裁剪。
+
+**缩略图是反向按需的**：面板滚到哪要到哪（可见 ± 12 格），阅读器串行处理、页间 `setTimeout(0)` 让出主线程 —— **没人看网格时 CPU 完全空闲**。这条不是保守设计：`view.js` 的 `configure({ useWebWorkers: false })` 让 zip 解包也在主线程。
+
+**摘录在格式层面不存在**（无文本层）：`create-overlayer` 事件根本不发，程序化选中整页拿到的 `selection.toString()` 长度是 **0**。所以这块是**负向断言** —— 不冒浮层、不落 `excerpts.json`、右栏没有「阅读」Tab（实测 `otherTabs = ["widgets","ai"]`）。防的是将来有人给 fixed-layout 接上 overlayer 时静默画错。
+
+**安全负向的形态又是新的**：内联 `<script>` 的 `.svg` 页，三条防线**各自独立**成立 —— ① `<img>` 里的 SVG **任何 MIME 下都不执行脚本**（SVG 作为图片加载时不进脚本解析）；② 内容帧 sandbox 无 `allow-scripts`；③ CSP `script-src 'self'` 无 `'unsafe-inline'`（`blob:` 文档继承父 CSP）。载荷的 `<script>` 与 `onerror` 都写了 `window.` **和 `window.parent.`** 两个方向，宿主标志位全 null。
+
+**验收**：`probe-cbz-reader.mjs` **全绿**（含页序自然序、单页 = blob 帧恰好 1 个、两档缩放的几何等式、翻页落盘与逐字回位、缩略图按需 + 页号↔图色映射（靠 fixture 的**单射**配色反查）、边缘点击翻页、恶意书负向、摘录负向、右栏无阅读 Tab）；`tsc --noEmit` 双端 0 错；6 契约 + 4 条回归探针（epub / fb2 / reading-panel / excerpt-export / pdf）全绿。
+
+**两条已知噪声，都不是本批引入的**（已登记 `docs/pending-fixes.md` B-14 / B-15）：
+
+- **`fixed-layout.js` 的 `#render` 有 ResizeObserver 竞态** —— `#showSpread` 先把 `#left/#right` 置 null 再 `await #createFrame(center)`，窗口期内 `this.#center ?? this.#right` 得 null ⇒ 每次翻页控制台一条未捕获 TypeError。上游 latent bug，被「全居中」（`spread:'none'`）放大成**必现**。**本批不加第 6 处 patch**（patch ⑤ 已被限定在 `comic-book.js`）；页面观感正常（后续那次显式 `#render()` 会纠正版式）。探针把它从错误列表里**显式指名**滤掉，不是通配。
+- **cbz 里的 `.svg` 页是破图** —— `loadBlob(name)` 不传 MIME ⇒ Blob `type=''` ⇒ Chromium 拒解 SVG（PNG/JPEG 靠嗅探照常）。修它要动 vendor，本轮接受（实机画集极少用 SVG 当页）。★ 这条**不是**安全缺口，反而是安全结论的旁证。

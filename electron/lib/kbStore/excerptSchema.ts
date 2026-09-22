@@ -14,6 +14,9 @@
  *   txt  → paraIndex（段落序号，跳段走 KB_TXT_GOTO_PARA）+ start/end（段内字符偏移，<mark> 渲染依据）
  *   epub | fb2 | fbz → cfi（foliate CFI 范围串，跳回与正文高亮共用；B 段新增）+ chapter（章节标签，导出分组用）
  *     —— 三者同属 foliate 引擎且都有文本层，故定位方式完全一致（`ENGINE_BY_EXT` 是判据）
+ *   cbz → **没有定位分支，也不该有**（阶段 2b，2026-09-22）：整页是图片、无文本层，
+ *     划不出选区 ⇒ 格式层面就不存在「摘录」这回事。kind 进白名单只为让存量/读取态共用同一份
+ *     合法集（契约断言各镜像一致），创建时会落到末尾的显式拒绝分支。
  */
 
 import type { BookKind } from './bookFormats'
@@ -21,7 +24,7 @@ import type { BookKind } from './bookFormats'
 /** 合法书籍 kind（真源 = bookFormats 的 `BOOK_EXTS`；本文件须零值导入故手工镜像，
  *  由 `.AGENT/scripts/pdf-reader/verify-epub-formats.mjs` 断言各镜像与 BOOK_EXTS 一致。
  *  与 readerStateSchema 同款 **export**：契约脚本要按值比对镜像、不能只读源码文本） */
-export const BOOK_KINDS: readonly BookKind[] = ['pdf', 'txt', 'epub', 'fb2', 'fbz']
+export const BOOK_KINDS: readonly BookKind[] = ['pdf', 'txt', 'epub', 'fb2', 'fbz', 'cbz']
 
 /** CFI 串上限（foliate 实测几百字符；留富余但拒超长串）；CFI 只含可打印字符 */
 const MAX_CFI_LEN = 2000
@@ -144,7 +147,7 @@ function sanitizeRects(v: unknown): ExcerptRect[] | null {
 /**
  * 创建载荷清洗（服务端生成 id/at/updatedAt，不接受传入）。
  * pdf 必须带 page（rects 可选）；txt 必须带 paraIndex（start/end 可选且成对合法）；
- * epub / fb2 / fbz 必须带 cfi（chapter 可选）。
+ * epub / fb2 / fbz 必须带 cfi（chapter 可选）；cbz **一律拒绝**（固定版式无文本层，见文件头）。
  * 返回 null = 载荷非法（整体拒绝）。
  */
 export function sanitizeExcerptCreate(payload: unknown): Omit<VaultExcerpt, 'id' | 'at' | 'updatedAt'> | null {
@@ -195,7 +198,11 @@ export function sanitizeExcerptCreate(payload: unknown): Omit<VaultExcerpt, 'id'
     const chapter = payload['chapter']
     if (typeof chapter === 'string' && chapter.trim()) out.chapter = chapter.trim().slice(0, 200)
   } else {
-    // 合法 kind（过得了上面的 BOOK_KINDS 白名单）却没有定位分支 = 加了格式忘了接线，显式拒绝
+    // 两种情形都在这里被拒，**都是对的**：
+    //   ① 合法 kind 却没有定位分支 = 加了格式忘了接线 → 显式拒绝（宁可创建失败，也不要静默错记定位）；
+    //   ② cbz = **刻意如此**（阶段 2b）：固定版式整页是图片、没有文本层，划不出选区，
+    //      「摘录」在格式层面就不存在。阅读器侧压根没有创建入口（见 EpubReaderView 的
+    //      `isFixedLayoutBook` 分支），右栏阅读 Tab 对该格式也不出（App.tsx 的 reading 传参）。
     return null
   }
   // 颜色 / 类型：缺省回落（存量旧数据无此字段时由 coerceExcerpt 透传后在此补默认，不报错不迁移）

@@ -1,6 +1,6 @@
 // 契约验证：书架阅读器 B 段 · 电子书引擎（foliate vendored）与 CSP 例外。
 //
-// 覆盖九组断言：
+// 覆盖十组断言：
 //   ① CSP 例外**只开了该开的**，且 key 防线未被弱化（script-src 不含 'unsafe-inline'）
 //   ② vendored foliate 关键文件齐全（缺文件 = 阅读器直接炸，且是运行时才炸）
 //   ③ ★ sandbox 负向：所有 setAttribute('sandbox', …) 调用一律不含 allow-scripts
@@ -13,6 +13,8 @@
 //   ⑧ ★ 负向：EPUB 相关组件不得把引擎拖进首屏静态闭包（BookCover 静态 PdfCover 是已修的历史违规）
 //   ⑨ ★ 阶段 2a 负向：阅读器不得再写死格式（MIME / `.epub` / kind:'epub' 一律走 bookFormats），
 //     且主进程整份读白名单 ⊇ BOOK_EXTS（漏一个 = 打开新格式时 readWholeBook 直接报错）
+//   ⑩ ★ 阶段 2b（cbz 固定版式）：patch ⑤ 三件事（自然序 / 扩展名大小写 / getPageBlob）·
+//     CSP 例外只开在 img-src · 缩略图网格两侧接线与下采样 · 固定版式判据单点 · 右栏 Tab 不留
 //
 // 注：`bookKindOf` / `bookEngineOf` 的纯函数用例表在 verify-reader-formats.mjs 的 ①组
 // （与其它 bookFormats 用例同处），此处只做「跨文件一致性 + 负向」两件事，不重复用例。
@@ -297,6 +299,96 @@ console.log('\n--- ⑨ ★ fb2/fbz 接入：阅读器零格式字面量 + 主进
   const listed = m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]) : []
   const missing = [...F2.BOOK_EXTS].map((e) => e.slice(1)).filter((e) => !listed.includes(e))
   check(`★ RANGE_EXT_WHITELIST ⊇ BOOK_EXTS（缺 ${missing.length} 项）`, missing.length === 0, missing.join(', '))
+}
+
+// ===== ⑩ ★ 阶段 2b：cbz（固定版式）—— patch ⑤ / CSP img-src / 缩略图网格接线 =====
+console.log('\n--- ⑩ ★ cbz：comic-book patch ⑤ / img-src 例外 / 缩略图网格 ---')
+{
+  // (1) patch ⑤ 三件事缺一不可（丢任一条都是「实机才炸」的静默错：错页 / 整包被过滤 / 拿不到页图）
+  const comic = stripComments(read(`${VENDOR}/comic-book.js`))
+  check('★ patch ⑤-a：页序改自然序比较器（裸 .sort() = page_10 排到 page_2 前面，静默错页）',
+    /Intl\.Collator\('en',\s*\{\s*numeric:\s*true/.test(comic))
+  check("★ patch ⑤-a：collator 钉死 'en'（传 undefined 会随运行环境 locale 变，页序不可复现）",
+    !/new Intl\.Collator\(\s*undefined/.test(comic))
+  check('★ patch ⑤-b：扩展名判定大小写不敏感（.JPG 会让整包报 No supported image files）',
+    /toLowerCase\(\)/.test(comic) && /lower\.endsWith\(ext\)/.test(comic))
+  check('★ patch ⑤-c：暴露页图字节 book.getPageBlob（宿主缩略图网格靠它，否则要再解一遍 zip）',
+    /book\.getPageBlob\s*=/.test(comic))
+  check('comic-book.js 未被改回 pre-paginated 之外的 layout（固定版式是它的语义）',
+    /layout:\s*'pre-paginated'/.test(comic))
+
+  // (2) CSP：cbz 页图只能走 blob:（每页图一个 blob URL，套进一层 blob 文档）——
+  //     例外只开在 img-src，且两条硬约束不得松（①组已锁 script-src / 这里再锁一次意义不大，故只锁 img）
+  const csp2 = (read('index.html').match(/<meta[^>]*Content-Security-Policy[^>]*>/) || [''])[0]
+  const cspVal = (csp2.match(/content="([^"]*)"/) || ['', ''])[1]
+  const imgSrc = (cspVal.match(/(?:^|;)\s*img-src\s([^;]*)/) || ['', ''])[1].trim()
+  check('★ img-src 含 blob:（cbz 页图所需）', imgSrc.split(/\s+/).includes('blob:'), imgSrc)
+  check('img-src 仍含 data: 与 file:（①的子资源改 data: 路线未被这条例外顶掉）',
+    imgSrc.split(/\s+/).includes('data:') && imgSrc.split(/\s+/).includes('file:'))
+  check('index.html 里有 cbz / img-src 例外与铁律 10 的对应说明', /cbz/i.test(read('index.html')))
+  check("style-src / font-src 未被顺势放开 blob:（cbz 只需要 img）",
+    !(cspVal.match(/(?:^|;)\s*style-src\s([^;]*)/) || ['', ''])[1].includes('blob:')
+    && !(cspVal.match(/(?:^|;)\s*font-src\s([^;]*)/) || ['', ''])[1].includes('blob:'))
+
+  // (3) 事件常量两侧都在用（少接一头 = 网格永远只有页码占位）
+  const ev = stripComments(read('src/components/shared/pdf/pdfEvents.ts'))
+  check('pdfEvents 定义 KB_CBZ_THUMB_REQ / KB_CBZ_THUMBS',
+    ev.includes('KB_CBZ_THUMB_REQ') && ev.includes('KB_CBZ_THUMBS'))
+  const readerSrc = stripComments(read('src/components/shared/epub/EpubReaderView.tsx'))
+  check('阅读器两侧都接（监听 REQ + 派发 THUMBS）',
+    readerSrc.includes('KB_CBZ_THUMB_REQ') && readerSrc.includes('KB_CBZ_THUMBS'))
+  const railSrc = stripComments(read('src/components/shared/epub/EpubRailPanel.tsx'))
+  check('左栏两侧都接（派发 REQ + 监听 THUMBS）',
+    railSrc.includes('KB_CBZ_THUMB_REQ') && railSrc.includes('KB_CBZ_THUMBS'))
+  check('缩略图在宿主侧下采样（OffscreenCanvas + createImageBitmap），不是把原图塞进格子',
+    readerSrc.includes('OffscreenCanvas') && readerSrc.includes('createImageBitmap'))
+  check('★ 位图用完即 close（不下采样/不关位图 = 一屏几百 MB + 滚动重解码）',
+    /bmp\.close\(\)/.test(readerSrc))
+  check('缩略图缓存有上限（THUMB_CACHE_MAX）', /THUMB_CACHE_MAX\s*=\s*\d+/.test(readerSrc))
+  check('★ 队列串行且页间让出主线程（zip 解包与解码都在主线程，连做会把翻页卡住）',
+    /setTimeout\(r,\s*0\)/.test(readerSrc))
+
+  // (4) 固定版式判据：单点、按 kind 推导，不读运行时 view.isFixedLayout
+  check("★ 固定版式判据单点：isFixedLayoutBook = bookKind === 'cbz'",
+    /const isFixedLayoutBook\s*=\s*bookKind === 'cbz'/.test(readerSrc))
+  check('★ 不读运行时 view.isFixedLayout（工具栏要在 open() 之前就渲染对）',
+    !/\.isFixedLayout\b/.test(readerSrc))
+  check("★ 固定版式工具栏：字号按钮隐藏 + 出缩放档（data-wb=\"epubZoom\"）",
+    /!isFixedLayoutBook\s*&&/.test(readerSrc) && readerSrc.includes('data-wb="epubZoom"'))
+  check('缩放写在 renderer 的 zoom 属性上（无 vendor 改动）',
+    /setAttribute\('zoom'/.test(readerSrc))
+  check('★ 单页显示：open 前把 rendition.spread 置 none（不是改 vendor 的拼版逻辑）',
+    /spread:\s*'none'/.test(readerSrc))
+  check('固定版式页面标签用 section.current（relocate detail 顶层没有 index）',
+    /d\.section\.current/.test(readerSrc))
+
+  // (5) 左栏网格四要素（丢任一条的分别是：不请求 / 断了线 / 无锚点 / 滚轮没反应）
+  check('左栏 cbz 分支按 bookKindOf 判定', /bookKindOf\(relPath\)\s*===\s*'cbz'/.test(railSrc))
+  check('左栏格子带 data-cbz-page 锚点（IntersectionObserver 按它读页号）',
+    /data-cbz-page=\{i\}/.test(railSrc))
+  check('左栏用 IntersectionObserver 按可见范围预取', railSrc.includes('IntersectionObserver'))
+  check('左栏网格格子用 .kb-cv-tile（长列表虚拟化，估值必须贴近真实格高）',
+    railSrc.includes('kb-cv-tile'))
+  const css = read('src/styles/index.css')
+  check('.kb-cv-tile 已定义且估值 156px（= 图区 138 + 页码行 18）',
+    /\.kb-cv-tile\s*\{[^}]*contain-intrinsic-size:\s*auto\s+156px/.test(css))
+
+  // (6) 右栏阅读 Tab 对 cbz 不留（拍板①）：App 传 null 即 Tab 消失
+  const app3 = stripComments(read('src/App.tsx'))
+  check("★ 右栏 reading 传参对 cbz 置空（kind !== 'cbz' 守卫在位）",
+    /reading=\{[^}]*kind\s*!==\s*'cbz'/.test(app3))
+
+  // (7) 负向：格式知识仍单点 —— 渲染层不得出现 cbz 的 MIME / 扩展名字面量
+  for (const p of [
+    'src/components/shared/epub/EpubReaderView.tsx',
+    'src/components/shared/epub/EpubRailPanel.tsx',
+  ]) {
+    const s = stripComments(read(p))
+    check(`★ ${p.split('/').pop()} 不含 cbz MIME 字面量（自拼 MIME = foliate 按错 type 选解码器）`,
+      !/application\/vnd\.comicbook/.test(s))
+    check(`★ ${p.split('/').pop()} 不含 '.cbz' 扩展名字面量（一律走 bookKindOf / bookExtOf）`,
+      !/['"]\.cbz['"]/i.test(s))
+  }
 }
 
 console.log(`\n${pass ? '全部通过' : '存在失败项'}`)

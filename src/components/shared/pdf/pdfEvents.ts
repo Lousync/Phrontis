@@ -56,6 +56,24 @@ export const KB_EPUB_STATE = 'kb-epub-state'
 export const KB_EPUB_STATE_REQ = 'kb-epub-state-req'
 
 /**
+ * 左栏缩略图网格（cbz）→ 阅读器：**按需**要一段页的缩略图。detail: `{ relPath, from, to }`（闭区间）。
+ *
+ * 方向刻意是「面板要 → 阅读器给」而不是阅读器主动全推：生成缩略图要解压页图 + 解码 + 画布，
+ * 都在主线程（`view.js:26` 的 `configure({ useWebWorkers: false })` 让 zip 解包也在这里）。
+ * 反向的话，没人看网格时也在烧 CPU，直接砸阅读体验。
+ */
+export const KB_CBZ_THUMB_REQ = 'kb-cbz-thumb-req'
+
+/**
+ * 阅读器 → 左栏缩略图网格：缩略图回广播。detail: `{ relPath, from, items }`。
+ * `items[i]` 对应第 `from + i` 页，三种取值各有含义、**不可合并**：
+ * - `string` —— data URL，可显示；
+ * - `null` —— 这一页**生成失败**（解码器不认的格式等），保持占位即可，不会再有后续；
+ * - `undefined` —— **还在队列里**，稍后会单独补一条同 index 的回广播（同一 index 迟到者可覆盖）。
+ */
+export const KB_CBZ_THUMBS = 'kb-cbz-thumbs'
+
+/**
  * 知识库「读书笔记」页 → 书架：回到摘录原文（detail: { href }，href 形如 `kbloc:<bookKey>#<excerptId>`）。
  *
  * 由 MarkdownPreview 统一拦截 `kbloc:` 链接后派发（**单点拦截**：知识库预览 / 沉浸阅读 / 博客 /

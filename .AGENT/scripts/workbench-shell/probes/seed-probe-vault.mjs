@@ -125,7 +125,12 @@ if (process.argv.includes('--add-books')) {
   //   ③ 探针样书.fb2      正向：同上 + KB PATCH ④（FB2 内建样式表内联）的排版靶
   //   ④ 探针样书.fbz      正向：同样内容装进 zip —— 分发看**后缀**（view.js 的 isFBZ 是 endsWith）
   //   ⑤ 恶意样书.fb2      负向：FB2 是白名单转换器 ⇒ 载荷**根本没进 DOM**（证据形态与 EPUB 不同）
-  // 生成器见 ./make-epub.mjs（零依赖手写 STORED zip，产物字节可复现）与 ./make-fb2.mjs。
+  // 固定版式（阶段 2b，2026-09-22）再加两本 cbz：
+  //   ⑥ 探针样书.cbz      正向：30 页纯色图（页名**不补零** ⇒ 字典序错页当场可见；部分条目大写 `.PNG`
+  //                       ⇒ 上游大小写敏感的 `endsWith` 会把它们整包漏掉）+ 中间一条 `.txt` 诱饵
+  //   ⑦ 恶意样书.cbz      负向：第 2 页是内联 <script> + onerror 的 .svg。三条防线**独立**：
+  //                       SVG 作为 <img> 加载不执行脚本 / 内容帧 sandbox 无 allow-scripts / CSP 无 unsafe-inline
+  // 生成器见 ./make-epub.mjs（零依赖手写 STORED zip，产物字节可复现）、./make-fb2.mjs、./make-cbz.mjs。
   // ★ 生成器改动后必须**先删产物**再 seed：下面按 existsSync 跳过，旧产物会静默留下来（踩过）
   for (const [name, mod, fn] of [
     ['探针样书.epub', './make-epub.mjs', 'probeEpub'],
@@ -133,6 +138,8 @@ if (process.argv.includes('--add-books')) {
     ['探针样书.fb2', './make-fb2.mjs', 'probeFb2'],
     ['探针样书.fbz', './make-fb2.mjs', 'probeFbz'],
     ['恶意样书.fb2', './make-fb2.mjs', 'maliciousFb2'],
+    ['探针样书.cbz', './make-cbz.mjs', 'probeCbz'],
+    ['恶意样书.cbz', './make-cbz.mjs', 'maliciousCbz'],
   ]) {
     const p = join(booksDir, name)
     if (existsSync(p)) continue

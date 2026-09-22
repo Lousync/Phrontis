@@ -1220,7 +1220,7 @@ export interface BookListItem {
 /** 书籍种类（渲染层侧镜像；与 electron/lib/kbStore/bookFormats.ts 保持同步，
  *  由 `.AGENT/scripts/pdf-reader/verify-epub-formats.mjs` 双向断言 BOOK_EXTS ↔ 本联合）
  *  B 段加 'epub'；阶段 2a 加 'fb2' / 'fbz'（同为 foliate 引擎）。 */
-export type BookKind = 'pdf' | 'txt' | 'epub' | 'fb2' | 'fbz'
+export type BookKind = 'pdf' | 'txt' | 'epub' | 'fb2' | 'fbz' | 'cbz'
 
 /** 摘录色板 id（渲染层侧镜像；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
 export const EXCERPT_COLOR_IDS = ['y', 'g', 'b', 'p', 'v'] as const

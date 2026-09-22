@@ -9,8 +9,11 @@
            而同源 + 可控内容只能是 blob:；配套约束 = sandbox 永不含 allow-scripts。
          · style-src 放 data: —— 书内 CSS 经 patch 后走 data:（该指令本已含 'unsafe-inline'，
            属边际放宽；CSS 不能执行脚本）。
+         · img-src 放 blob: —— 阶段 2b 的 cbz：comic-book.js 给每页图各造一个 blob URL（再套进
+           一层 blob 文档），页图动辄数 MB，不适用「子资源走 data:」那条口径。img 通道不能执行
+           脚本，SVG-as-<img> 亦然，故风险面仅限「多一类图片来源」。
          ⛔ script-src 永不加 'unsafe-inline' —— 那是挡恶意 EPUB 的关键防线（有负向契约断言）。 -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob: plugin:; style-src 'self' 'unsafe-inline' data:; font-src 'self' data:; img-src 'self' data: file: attachment: plugin: https://raw.githubusercontent.com https://cdn.jsdelivr.net https://fastly.jsdelivr.net; frame-src 'self' plugin: kbview: blob:;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob: plugin:; style-src 'self' 'unsafe-inline' data:; font-src 'self' data:; img-src 'self' data: blob: file: attachment: plugin: https://raw.githubusercontent.com https://cdn.jsdelivr.net https://fastly.jsdelivr.net; frame-src 'self' plugin: kbview: blob:;" />
     <title>Phrontis</title>
   </head>
   <body class="bg-[var(--bg-primary)] text-[var(--text-primary)]">

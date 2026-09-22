@@ -55,9 +55,18 @@ for (const k of ['epub', 'fb2', 'fbz']) {
 }
 check('创建：cfi 空串拒', S.sanitizeExcerptCreate({ kind: 'fb2', text: 'x', cfi: '' }) === null)
 check('创建：cfi 超长拒（>2000）', S.sanitizeExcerptCreate({ kind: 'fbz', text: 'x', cfi: 'x'.repeat(2001) }) === null)
-// 通用拒绝（★ 'mobi' 才是真·非法 kind —— 'epub' 是合法 kind，它被拒是因为缺 cfi，两码事）
+// 通用拒绝（★ 'mobi' 才是真·非法 kind —— 'epub' 是合法 kind，它被拒是因为缺 cfi，两码事；
+//   cbz 也是**合法** kind，它被拒是因为固定版式没有定位分支 —— 见下一条）
 check('创建：kind 非法拒（未收录的格式）', S.sanitizeExcerptCreate({ kind: 'mobi', text: 'x', paraIndex: 1 }) === null)
-check('创建：kind 非法拒（foliate 系也不放行未知格式）', S.sanitizeExcerptCreate({ kind: 'cbz', text: 'x', cfi: 'epubcfi(/6/4!/4/2/1:0)' }) === null)
+// ★ 阶段 2b：cbz 进了 BOOK_KINDS 白名单（kind 集合全仓共用一个），但创建必须被拒 ——
+//   固定版式整页是图片、没有文本层，划不出选区，「摘录」在格式层面就不存在。
+//   这条断言锁的是 schema 末尾那个显式拒绝分支：若哪天有人给它补上定位分支，
+//   这个用例会红，提醒回去看「cbz 到底该不该有摘录」。
+check('★ 创建：cbz 合法 kind 但无定位分支 → 拒（固定版式无文本层）',
+  S.sanitizeExcerptCreate({ kind: 'cbz', text: 'x', cfi: 'epubcfi(/6/4!/4/2/1:0)' }) === null)
+check('★ 创建：cbz 传 page / paraIndex 一样拒（不落进 pdf / txt 分支）',
+  S.sanitizeExcerptCreate({ kind: 'cbz', text: 'x', page: 1 }) === null
+  && S.sanitizeExcerptCreate({ kind: 'cbz', text: 'x', paraIndex: 1 }) === null)
 check('创建：空 text 拒', S.sanitizeExcerptCreate({ kind: 'txt', text: '   ', paraIndex: 1 }) === null)
 check('创建：text 超 8000 拒', S.sanitizeExcerptCreate({ kind: 'txt', text: 'x'.repeat(8001), paraIndex: 1 }) === null)
 check('创建：payload 注入 id/at/updatedAt 不进白名单', (() => { const r = S.sanitizeExcerptCreate({ kind: 'txt', text: 'x', paraIndex: 1, id: 'hack', at: 'hack', updatedAt: 'hack' }); return !!r && !('id' in r) && !('at' in r) && !('updatedAt' in r) })())
@@ -92,6 +101,11 @@ check('修补：坏 kind 返回 null', S.coerceExcerpt({ id: 'e2', kind: 'mobi',
 const cFb2 = S.coerceExcerpt({ id: 'e3', kind: 'fb2', text: '摘文', cfi: 'epubcfi(/6/4!/4/2/1:0)' }, 'NOW')
 check('修补：kind=fb2 的摘录保留（存量 fb2 摘录不得被当坏值剔除）',
   !!cFb2 && cFb2.kind === 'fb2' && cFb2.cfi === 'epubcfi(/6/4!/4/2/1:0)')
+// ★ 阶段 2b：cbz 摘录**不可能合法存在**（无文本层）—— 数据里出现就是脏数据，
+//   修补时按坏值剔除（返回 null 由仓库层丢掉）。与上一条的 fb2 恰成对照：
+//   「合法格式的摘录要留」、「无文本层格式的摘录要丢」，两条都靠 coerceExcerpt 走同一份校验。
+check('★ 修补：kind=cbz 的摘录返回 null（无文本层，库里出现即脏数据）',
+  S.coerceExcerpt({ id: 'e4', kind: 'cbz', text: 'x', cfi: 'epubcfi(/6/4!/4/2/1:0)' }, 'NOW') === null)
 
 // ===== ② 负向：excerpts.json 单写方 =====
 console.log('\n--- ② 负向：excerpts.json 唯一写方 ---')

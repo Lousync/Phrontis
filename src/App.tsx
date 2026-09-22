@@ -1315,8 +1315,12 @@ export default function App() {
                   aiChatOpen={activeTab === 'aiChat'}
                   onExpandAiChat={() => handleTabChange('aiChat')}
                   onOpenChangeFile={(relPath) => handleOpenLooseFile(relPath)}
-                  // 右栏「阅读」侧栏（全格式阅读器一期）：有书在读且书架标签在位时出现第三个条件 Tab
-                  reading={openTabs.includes('bookshelf') && bookshelfReading ? bookshelfReading : null}
+                  // 右栏「阅读」侧栏（全格式阅读器一期）：有书在读且书架标签在位时出现第三个条件 Tab。
+                  // ★ cbz（画集/漫画）**不给**这个 Tab（阶段 2b 拍板①）：面板内容是书签 + 摘录，
+                  //   而 cbz 整页是图片，没有文字层 ⇒ 摘录格式层面不存在、书签存储口径也未定。
+                  //   「某格式不支持的功能，侧栏不出对应入口，不做中性空态占位」—— 与 EpubRailPanel 同一口径。
+                  //   传 null 即 Tab 消失，且右栏自动回落到首个可见 Tab（WorkbenchRightPanel 的 effectiveTab）。
+                  reading={openTabs.includes('bookshelf') && bookshelfReading && bookshelfReading.kind !== 'cbz' ? bookshelfReading : null}
                   onLocatePdfPage={(page) => {
                     if (activeTab !== 'bookshelf') handleTabChange('bookshelf')
                     requestAnimationFrame(() => {

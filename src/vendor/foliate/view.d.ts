@@ -21,7 +21,12 @@ export interface FoliateBook {
   toc?: FoliateTOCItem[]
   metadata?: { title?: string | null; language?: string | null; [key: string]: unknown }
   sections: Array<{ id?: string; cfi?: string; linear?: string; [key: string]: unknown }>
-  rendition?: { layout?: string }
+  /** `spread: 'none'` ⇒ 一节一跨页（固定版式单页显示）；拼版规则见 `fixed-layout.js:208-241` */
+  rendition?: { layout?: string; spread?: string }
+  /** ★ 本仓 patch ⑤（`comic-book.js`）新增：取**页图原始字节**。
+   *  上游只有 `getCover()`（第 1 页）与 `section.load()`（包好 `<img>` 的**文档** URL）。
+   *  仅 cbz 的 book 有它；未命中条目返回 null。 */
+  getPageBlob?(name: string): Promise<Blob | null>
   [key: string]: unknown
 }
 
@@ -48,6 +53,10 @@ export interface FoliateContent {
 export interface FoliateRenderer {
   setStyles(styles: string | [string, string]): void
   getContents(): FoliateContent[]
+  /** ★ 它是 HTMLElement（`view.js:243/246` 的 `document.createElement`）。本仓只用到一个属性：
+   *  固定版式的缩放档 —— `fixed-layout.js:35/64-72` 认自身 `zoom`（`'fit-page'|'fit-width'|数字`），
+   *  而 `view.js` 全程不转发它，故宿主直接写在 renderer 元素上（无需 vendor patch）。 */
+  setAttribute(name: string, value: string): void
   next(distance?: number): Promise<void>
   prev(distance?: number): Promise<void>
   destroy(): void

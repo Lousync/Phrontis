@@ -88,6 +88,22 @@ for (const k of ['epub', 'fb2', 'fbz']) {
   check('fb2 无 chapter 时回落「## 正文」且条目不丢', md.includes('## 正文') && md.includes('无章节名'))
 }
 
+// ★ 阶段 2b：cbz 走兜底分支（平铺一组、不套任何量词模板）。
+//   实情是 cbz **生成不出摘录**（固定版式无文本层，excerptSchema 显式拒绝），这一组数据
+//   正常不会出现；用例留着是为了锁住「万一出现了，兜底也不撒谎」——不补「页」「段」量词，
+//   也不按 paraIndex 排序（cbz 那字段恒 undefined，会全被当 0 并成「第 1 段」）。
+{
+  const comic = [
+    mk({ id: 'c1', kind: 'cbz', text: '画集第一页说明' }),
+    mk({ id: 'c2', kind: 'cbz', text: '画集第二页说明' }),
+  ]
+  const md = X.buildExcerptExportMarkdown({ rootId: 'r1', relPath: '.books/画集.cbz', bookName: '画集', excerpts: comic, exportedAt: '2026-09-22T10:00:00.000Z' })
+  const heads = md.split('\n').filter((l) => l.startsWith('## ')).join(' / ')
+  check('cbz 兜底：平铺一组「## 正文」，不补「页」「段」量词', md.includes('## 正文') && !/## 第 /.test(md), heads)
+  check('cbz 兜底：不并成「第 1 段」（paraIndex 恒 undefined，套 txt 模板即错）', !md.includes('## 第 1 段'))
+  check('cbz 兜底：条目不丢（每条一个 kbloc 链接）', (md.match(/kbloc:/g) || []).length === 2)
+}
+
 // 空摘录：只出标题与说明，不产出 kbloc
 const mdEmpty = X.buildExcerptExportMarkdown({ rootId: 'r1', relPath: 'a.txt', bookName: 'a', excerpts: [], exportedAt: '2026-09-21T10:00:00.000Z' })
 check('空摘录：不产出 kbloc 链接', !mdEmpty.includes('kbloc:'))

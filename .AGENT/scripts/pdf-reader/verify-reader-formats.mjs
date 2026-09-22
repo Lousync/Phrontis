@@ -42,12 +42,13 @@ check('bookDisplayName：去 pdf 后缀', F.bookDisplayName('x/算法.pdf') === 
 check('bookDisplayName：非书文件原样返回', F.bookDisplayName('x/note.md') === 'note.md')
 check('BOOK_EXTS 每项都能被 bookKindOf 识别（常量↔函数一致）',
   F.BOOK_EXTS.every((ext) => F.bookKindOf(`x${ext}`) !== null))
-check('BOOK_EXTS = pdf + txt + epub + fb2 + fbz 五项',
-  F.BOOK_EXTS.length === 5
-  && ['.pdf', '.txt', '.epub', '.fb2', '.fbz'].every((e) => F.BOOK_EXTS.includes(e)))
-// ★ 这条断言在 B 段（2026-09-21）由「= 两项」放宽成三项、阶段 2a（2026-09-22）再放宽成五项 ——
-//   加格式本就该改这里，勿当 drift 回滚。加第六种格式时改成本行 + bookFormats 三张表
-//   + src/types 的 BookKind 镜像 + 两个 schema 的 BOOK_KINDS，并把新格式补进上面「每项都能识别」。
+check('BOOK_EXTS = pdf + txt + epub + fb2 + fbz + cbz 六项',
+  F.BOOK_EXTS.length === 6
+  && ['.pdf', '.txt', '.epub', '.fb2', '.fbz', '.cbz'].every((e) => F.BOOK_EXTS.includes(e)))
+// ★ 这条断言在 B 段（2026-09-21）由「= 两项」放宽成三项、阶段 2a（2026-09-22）放宽成五项、
+//   阶段 2b（2026-09-22）再放宽成六项 —— 加格式本就该改这里，勿当 drift 回滚。
+//   加第七种格式时改成本行 + bookFormats 三张表 + src/types 的 BookKind 镜像
+//   + 两个 schema 的 BOOK_KINDS，并把新格式补进上面「每项都能识别」。
 check('bookKindOf：epub 识别且大小写不敏感', F.bookKindOf('x/三体.EPUB') === 'epub')
 check('bookKindOf：epub 不会被误判成 txt', F.bookKindOf('a/b.epub') === 'epub')
 // ★ 阶段 2a：fb2 / fbz 与 epub 同引擎，最怕的是「落到 kind 三元里被当 txt」
@@ -61,12 +62,21 @@ check('bookEngineOf：txt → txt', F.bookEngineOf('x.txt') === 'txt')
 check('bookEngineOf：epub → foliate（vendored 引擎）', F.bookEngineOf('x.epub') === 'foliate')
 check('bookEngineOf：fb2 / fbz → foliate（同引擎，故阅读器与左栏零改动复用）',
   F.bookEngineOf('x.fb2') === 'foliate' && F.bookEngineOf('x.fbz') === 'foliate')
+// ★ 阶段 2b：cbz（zip 封装的图片漫画）。三条都是「错一个字就静默坏」的地方：
+//   kind 落错 → 左栏拿不到页表；engine 落错 → 书架挂错阅读器；MIME 落错 → foliate
+//   `view.js:14` 的 isCBZ 认不出来（它按 name 或 type 判，不看魔数）。
+check('bookKindOf：cbz 识别且大小写不敏感', F.bookKindOf('x/画集.CBZ') === 'cbz')
+check('bookKindOf：cbz 不会被误判成 fbz / txt', F.bookKindOf('a/b.cbz') === 'cbz' && F.bookKindOf('a/b.fbz') === 'fbz')
+check('bookEngineOf：cbz → foliate', F.bookEngineOf('x.cbz') === 'foliate')
+check('bookMimeOf：cbz → application/vnd.comicbook+zip（与 foliate view.js:14 逐字一致）',
+  F.bookMimeOf('x.cbz') === 'application/vnd.comicbook+zip')
+check('bookDisplayName：去 cbz 后缀', F.bookDisplayName('x/画集.cbz') === '画集')
 check('bookEngineOf：裸扩展名（带点）也认', F.bookEngineOf('.epub') === 'foliate')
 check('bookEngineOf：未收录返回 null', F.bookEngineOf('x.md') === null)
 check('bookDisplayName：去 epub 后缀', F.bookDisplayName('x/三体.epub') === '三体')
 // ★ MIME 必须与扩展名同源：foliate 的 makeBook 按 File 的 name/type 分派（不看魔数），
 //   渲染层自拼就会重演「所有书都叫 .epub」→ 裸 fb2 当场 UnsupportedTypeError。
-check('bookMimeOf：五种格式各有一份 MIME', F.BOOK_EXTS.every((ext) => !!F.bookMimeOf(`x${ext}`)))
+check('bookMimeOf：六种格式各有一份 MIME', F.BOOK_EXTS.every((ext) => !!F.bookMimeOf(`x${ext}`)))
 check('bookMimeOf：fb2 → application/x-fictionbook+xml', F.bookMimeOf('x.fb2') === 'application/x-fictionbook+xml')
 check('bookMimeOf：fbz → application/x-zip-compressed-fb2', F.bookMimeOf('x.fbz') === 'application/x-zip-compressed-fb2')
 check('bookMimeOf：未收录返回 null', F.bookMimeOf('x.md') === null)

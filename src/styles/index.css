@@ -177,7 +177,9 @@ input:focus, textarea:focus, select:focus {
    content-visibility: auto —— 视口外的条目不参与布局与绘制，滚回来才渲染。
    对**不定高**的卡片列表，它比 JS 虚拟滚动更省事、零侵入、不改组件结构；
    contain-intrinsic-size 给出高度估值（auto 关键字会记住上次实际尺寸），避免滚动条抖动。
-   用法：加到「列表项」元素上 —— .kb-cv 估值 120px，.kb-cv-sm 估值 60px。 */
+   用法：加到「列表项」元素上 —— .kb-cv 估值 120px，.kb-cv-sm 估值 60px，
+   .kb-cv-tile 估值 156px（cbz 左栏缩略图格 = 图区 138px + 页码行 18px）。
+   ★ 估值必须贴近真实高度，否则滚动条会跳：格子都要新估值类，别硬套 .kb-cv / .kb-cv-sm。 */
 .kb-cv {
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
@@ -185,6 +187,10 @@ input:focus, textarea:focus, select:focus {
 .kb-cv-sm {
   content-visibility: auto;
   contain-intrinsic-size: auto 60px;
+}
+.kb-cv-tile {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 156px;
 }
 
 /* ===== Markdown 标记淡化（编辑器弱化版 Live Preview，光标所在行除外）=====
