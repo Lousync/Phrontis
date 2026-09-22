@@ -31,6 +31,8 @@
 
 export type BookSourceKind = 'opds' | 'custom'
 export type BookAuthType = 'basic' | 'bearer'
+/** 响应格式：**唯一职责是选解析器**（`'atom'` 走标准 OPDS 抽取、字段映射不参与；`'json'` 走 mapping 取值路径） */
+export type BookResponseType = 'json' | 'atom'
 
 /** 认证引用：只存类型与密钥引用（ref = 源 id），**不存凭据本体** */
 export interface BookAuthRef {
@@ -41,22 +43,41 @@ export interface BookAuthRef {
 /**
  * 自定义源的**声明式取值路径**：只描述「去哪儿取值」，不执行任何脚本。
  * 方案 §三 边界：不做 HTML 抓取、不做整站镜像、映射只是路径。
+ * 路径语言：`a.b[*]`（数组展开）/ `a.b[0]`（定下标），**不含表达式、不含函数调用**。
  */
 export interface BookSourceMapping {
-  /** 结果数组所在路径（如 `feed.entry`） */
+  /** 结果数组所在路径（如 `data.books[*]`） */
   list: string
   title: string
   author?: string
   cover?: string
+  /** 简介（拍板 ⑤ 补） */
+  summary?: string
   /** 下载直链所在路径 */
   download: string
+  /**
+   * 格式字段路径（如 `files[0].format`，值为 `epub` / `pdf` 之类）。
+   * ★ 为什么要有它：不少自定义源的下载直链**没有扩展名**（`/download/12345`），
+   *   只从 URL 推 ext 会把可下载的书判成不可下载（拍板 ⑤）。
+   */
+  format?: string
 }
 
 export interface BookSource {
   id: string
   name: string
   kind: BookSourceKind
+  /** 源地址 / JSON 源的 base（模板里的 `{base}` 展开成它去尾斜杠的形式） */
   url: string
+  /**
+   * 检索 URL 模板，变量 `{base}` `{query}` `{page}` `{isbn}`。
+   * '' = 用 `url` 原样（`resolveSearchUrl` 兜底）。
+   * ★ 实测：连 OPDS 也必须给模板 —— Gutenberg 的检索端点是 `search.opds?query=`、
+   *   SE 是 `/feeds/opds/all?query=`，都无法从目录根推出来（推它要额外取 OpenSearch 描述）。
+   */
+  searchUrl: string
+  /** 仅 custom 有意义；opds 恒 'atom'（`coerceBookSource` 强制） */
+  responseType: BookResponseType
   /** null = 免认证（公版源） */
   auth: BookAuthRef | null
   enabled: boolean
@@ -87,6 +108,7 @@ export const BOOKS_META_FILE = '.meta.json'
 
 const SOURCE_KINDS: readonly BookSourceKind[] = ['opds', 'custom']
 const AUTH_TYPES: readonly BookAuthType[] = ['basic', 'bearer']
+const RESPONSE_TYPES: readonly BookResponseType[] = ['json', 'atom']
 
 function str(v: unknown): string {
   return typeof v === 'string' ? v.trim() : ''
@@ -129,8 +151,12 @@ function coerceMapping(raw: unknown): BookSourceMapping | null {
   const out: BookSourceMapping = { list, title, download }
   const author = str(raw.author)
   const cover = str(raw.cover)
+  const summary = str(raw.summary)
+  const format = str(raw.format)
   if (author) out.author = author
   if (cover) out.cover = cover
+  if (summary) out.summary = summary
+  if (format) out.format = format
   return out
 }
 
@@ -144,13 +170,18 @@ export function coerceBookSource(raw: unknown, now = new Date().toISOString()): 
   const name = str(raw.name)
   const url = str(raw.url)
   if (!id || !name || !isAllowedSourceUrl(url)) return null
-  const kind = str(raw.kind) as BookSourceKind
+  const rawKind = str(raw.kind) as BookSourceKind
+  const kind: BookSourceKind = SOURCE_KINDS.includes(rawKind) ? rawKind : 'custom'
+  const rawRt = str(raw.responseType) as BookResponseType
   const createdAt = str(raw.createdAt)
   return {
     id,
     name,
-    kind: SOURCE_KINDS.includes(kind) ? kind : 'custom',
+    kind,
     url,
+    searchUrl: str(raw.searchUrl),
+    // opds 恒 atom（标准协议）；custom 缺省 json（原型默认档，实测 Calibre-Web / Komga 都是 JSON）
+    responseType: kind === 'opds' ? 'atom' : RESPONSE_TYPES.includes(rawRt) ? rawRt : 'json',
     auth: coerceAuth(raw.auth),
     // enabled 缺省视为启用（存量数据没这个字段时不该集体静默停用）
     enabled: raw.enabled !== false,
@@ -186,6 +217,8 @@ export interface BookSourcePatch {
   name?: string
   kind?: BookSourceKind
   url?: string
+  searchUrl?: string
+  responseType?: BookResponseType
   auth?: BookAuthRef | null
   enabled?: boolean
   mapping?: BookSourceMapping | null
@@ -209,10 +242,120 @@ export function sanitizeBookSourcePatch(patch: unknown): BookSourcePatch | null 
     if (SOURCE_KINDS.includes(k)) out.kind = k
   }
   if (patch.url !== undefined && isAllowedSourceUrl(patch.url)) out.url = str(patch.url)
+  // searchUrl 是**模板**不是 URL（含 `{query}` ⇒ new URL() 必失败），故只做「非空则收」，
+  // 合法性由 resolveSearchUrl 在发请求前判（那时才知道 base）。
+  if (patch.searchUrl !== undefined) out.searchUrl = str(patch.searchUrl)
+  if (patch.responseType !== undefined) {
+    const rt = str(patch.responseType) as BookResponseType
+    if (RESPONSE_TYPES.includes(rt)) out.responseType = rt
+  }
   if (patch.auth !== undefined) out.auth = patch.auth === null ? null : coerceAuth(patch.auth)
   if (patch.enabled !== undefined) out.enabled = patch.enabled !== false
   if (patch.mapping !== undefined) out.mapping = patch.mapping === null ? null : coerceMapping(patch.mapping)
   return out
+}
+
+// ===== 检索地址（模板展开） =====
+
+export interface SearchUrlVars {
+  query: string
+  page?: number
+  isbn?: string
+}
+
+/**
+ * 把源描述展开成**本次检索真正要发的 URL**（纯函数，零依赖 ⇒ 契约脚本可直测）。
+ *
+ * 规则（每条都有实测来源，别随手改）：
+ *  1. 模板 = `searchUrl || url`。★ 连 OPDS 也必须给模板 —— Gutenberg 的检索端点是
+ *     `search.opds?query=`、SE 是 `/feeds/opds/all?query=`，**无法从目录根推出来**
+ *     （推它要额外取 OpenSearch 描述，等于多一跳且多数源没提供）。
+ *  2. `{base}` = `url` 去尾斜杠；`{query}` **必须 encodeURIComponent**（中文检索词不编码必炸）；
+ *     `{page}` = 页码（缺省 1）；`{isbn}` 缺省展开成空串。
+ *  3. 展开后若**连一个 `?` 都没有**且 query 非空 ⇒ 兜底追加 `?query=` —— 让「只填了地址、
+ *     没写模板」的源也能跑（用户少填一个框的代价，比报错友好）。
+ *  4. 最终串的 scheme 必须仍是 `http` / `https`（挡 `file:` / `javascript:` 之类 ——
+ *     模板里那个 `{base}` 是用户可控输入，展开后必须再过一次白名单）。
+ *
+ * 返回 null = 这个源根本构造不出合法检索地址 ⇒ 调用方报「未配置检索地址」（不是「连接失败」）。
+ */
+export function resolveSearchUrl(source: Pick<BookSource, 'url' | 'searchUrl'>, vars: SearchUrlVars): string | null {
+  const base = str(source.url).replace(/\/+$/, '')
+  if (!isAllowedSourceUrl(base)) return null
+  const tmpl = str(source.searchUrl) || base
+  const page = Number.isFinite(vars.page) && (vars.page as number) > 0 ? String(Math.floor(vars.page as number)) : '1'
+  const query = str(vars.query)
+  let out = tmpl
+    .replace(/\{base\}/g, base)
+    .replace(/\{query\}/g, encodeURIComponent(query))
+    .replace(/\{page\}/g, page)
+    .replace(/\{isbn\}/g, encodeURIComponent(str(vars.isbn)))
+  if (query && !out.includes('?')) out += `?query=${encodeURIComponent(query)}`
+  return isAllowedSourceUrl(out) ? out : null
+}
+
+// ===== 预置源（拍板 ⑥ / ⑦：只 Gutenberg + Standard Ebooks，可停用不可删） =====
+
+/**
+ * 随版本分发的公版源。**只放公版与公共目录**（§八：不预置/不推荐/不分发侵权源）。
+ *
+ * ★ 为什么 Open Library 不在这里：① 本机实测 `openlibrary.org` **连不上**（连 20s 超时 ×3）；
+ *   ② 它的封面是 `cover_i` 数字 ID，要拼成 `covers.openlibrary.org/b/id/{id}-M.jpg` ——
+ *   那是**模板**，超出「取值路径」的表达力。两项都记在方案 §九 拍板 ⑦，另立条目。
+ *
+ * id 必须**稳定**：种入是幂等的（按 id 判在不在），改名 id 会让老用户的预置源被重复种一份。
+ */
+export const PRESET_BOOK_SOURCES: readonly BookSource[] = [
+  {
+    id: 'builtin-gutenberg',
+    name: 'Project Gutenberg',
+    kind: 'opds',
+    url: 'https://www.gutenberg.org/ebooks.opds/',
+    searchUrl: 'https://www.gutenberg.org/ebooks/search.opds/?query={query}',
+    responseType: 'atom',
+    auth: null,
+    enabled: true,
+    builtin: true,
+    mapping: null,
+    createdAt: '2026-09-22T00:00:00.000Z',
+  },
+  {
+    id: 'builtin-standardebooks',
+    name: 'Standard Ebooks',
+    kind: 'opds',
+    url: 'https://standardebooks.org/feeds/opds',
+    searchUrl: 'https://standardebooks.org/feeds/opds/all?query={query}',
+    responseType: 'atom',
+    auth: null,
+    enabled: true,
+    builtin: true,
+    mapping: null,
+    createdAt: '2026-09-22T00:00:00.000Z',
+  },
+]
+
+export interface SeedPresetResult {
+  store: BookSourceStore
+  /** 本次新种进去的 id（空数组 = 无需改动，调用方就别写盘了） */
+  added: string[]
+}
+
+/**
+ * 幂等种入预置源：**只补缺的 id，绝不改动已存在的条目**。
+ *
+ * ★ 后一条是关键：用户把内置源**停用**了、或改了名字，`added` 必须为空、原条目原样保留 ——
+ *   否则每次读盘都会把用户的停用改回启用（拍板 ⑥ 明说预置源「可停用」）。
+ * 预置源排在用户源**前面**（内置在前、自建在后，列表读起来稳定）。
+ */
+export function seedPresetSources(store: BookSourceStore): SeedPresetResult {
+  const have = new Set(store.sources.map((s) => s.id))
+  // ★ 只取**缺的那些**（不是「有缺就整份重种」—— 后者会让已存在的那条重复一份）
+  const fresh = PRESET_BOOK_SOURCES.filter((p) => !have.has(p.id)).map((p) => ({ ...p }))
+  if (fresh.length === 0) return { store, added: [] }
+  return {
+    store: { version: BOOK_SOURCES_VERSION, sources: [...fresh, ...store.sources] },
+    added: fresh.map((p) => p.id),
+  }
 }
 
 // ===== 凭据（密文文件里的形状；明文只在这一处定义） =====

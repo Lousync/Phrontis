@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<?xml-stylesheet href="https://standardebooks.org/feeds/opds/style" type="text/xsl"?>
+	<feed xmlns="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:schema="http://schema.org/" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+		<id>https://standardebooks.org/feeds/opds/all?query=sherlock&amp;page=1&amp;per-page=3</id>
+		<link href="https://standardebooks.org/feeds/opds/all?query=sherlock&amp;page=1&amp;per-page=3" rel="self" type="application/atom+xml;profile=opds-catalog; charset=utf-8"/>
+		<link rel="first" href="https://standardebooks.org/feeds/opds/all?query=sherlock&amp;page=1&amp;per-page=3" type="application/atom+xml;profile=opds-catalog; charset=utf-8"/>
+							<link rel="next" href="https://standardebooks.org/feeds/opds/all?query=sherlock&amp;page=2&amp;per-page=3" type="application/atom+xml;profile=opds-catalog; charset=utf-8"/>
+				<link rel="last" href="https://standardebooks.org/feeds/opds/all?query=sherlock&amp;page=3&amp;per-page=3" type="application/atom+xml;profile=opds-catalog; charset=utf-8"/>
+		<link rel="search" href="https://standardebooks.org/opensearch" type="application/opensearchdescription+xml" title="Standard Ebooks"/>
+		<link href="https://standardebooks.org/ebooks/ebooks?query=sherlock&amp;page=1&amp;per-page=3" rel="alternate" type="application/xhtml+xml"/>
+		<opensearch:totalResults>9</opensearch:totalResults>
+		<opensearch:startIndex>1</opensearch:startIndex>
+		<opensearch:itemsPerPage>3</opensearch:itemsPerPage>
+		<link href="https://standardebooks.org/feeds/opds" rel="start" type="application/atom+xml;profile=opds-catalog;kind=navigation; charset=utf-8"/>
+		<link href="https://standardebooks.org/feeds/opds/all" rel="http://opds-spec.org/crawlable" type="application/atom+xml;profile=opds-catalog;kind=acquisition; charset=utf-8"/>
+		<title>Search Results</title>
+		<subtitle>Results for “sherlock”</subtitle>
+		<icon>https://standardebooks.org/images/logo.png</icon>
+		<updated>2026-09-22T11:37:51Z</updated>
+		<author>
+			<name>Standard Ebooks</name>
+			<uri>https://standardebooks.org</uri>
+		</author>
+					<entry>
+	<id>https://standardebooks.org/ebooks/arthur-conan-doyle/the-casebook-of-sherlock-holmes</id>
+	<dc:identifier>https://standardebooks.org/ebooks/arthur-conan-doyle/the-casebook-of-sherlock-holmes</dc:identifier>
+	<title>The Casebook of Sherlock Holmes</title>
+			<author>
+			<name>Arthur Conan Doyle</name>
+			<uri>https://standardebooks.org/ebooks/arthur-conan-doyle</uri>
+							<schema:alternateName>Sir Arthur Ignatius Conan Doyle</schema:alternateName>
+										<schema:sameAs>https://en.wikipedia.org/wiki/Arthur_Conan_Doyle</schema:sameAs>
+										<schema:sameAs>https://id.loc.gov/authorities/names/n79082292.html</schema:sameAs>
+					</author>
+		<published>2023-03-16T05:12:57Z</published>
+	<dc:issued>2023-03-16T05:12:57Z</dc:issued>
+	<updated>2026-08-15T17:38:45Z</updated>
+	<dc:language>en-GB</dc:language>
+	<dc:publisher>Standard Ebooks</dc:publisher>
+	<rights>Public domain in the United States. Users located outside of the United States must check their local laws before using this ebook. Original content released to the public domain via the Creative Commons CC0 1.0 Universal Public Domain Dedication.</rights>
+	<summary type="text">The world’s first consulting detective and his companion investigate further crimes and mysteries.</summary>
+	<content type="html">&lt;p&gt;&lt;i&gt;The Casebook of Sherlock Holmes&lt;/i&gt;, published in 1927, collects the final set of &lt;a href=&quot;https://standardebooks.org/collections/sherlock-holmes&quot;&gt;Sherlock Holmes&lt;/a&gt; stories authored by &lt;a href=&quot;https://standardebooks.org/ebooks/arthur-conan-doyle&quot;&gt;Arthur Conan Doyle&lt;/a&gt;. All of the included stories appeared previously in &lt;i&gt;The Strand Magazine&lt;/i&gt; between October 1921 and April 1927.&lt;/p&gt;
+			&lt;p&gt;As usual, the mysteries generally purport to be accounts written by Holmes’s friend Dr. John Watson. Uniquely, however, three stories in the &lt;i&gt;Casebook&lt;/i&gt; are presented from alternative points of view: “The Adventure of the Mazarin Stone” is narrated in the third person, since it was adapted from a stage play in which Watson hardly appeared; and “The Adventure of the Blanched Soldier” and “The Adventure of the Lion’s Mane” are both narrated by Holmes himself, the latter being set after his retirement as a detective.&lt;/p&gt;</content>
+			<category scheme="http://purl.org/dc/terms/LCSH" term="Holmes, Sherlock (Fictitious character) -- Fiction"/>
+			<category scheme="http://purl.org/dc/terms/LCSH" term="Private investigators -- England -- Fiction"/>
+			<category scheme="http://purl.org/dc/terms/LCSH" term="Detective and mystery stories, English"/>
+				<category scheme="https://standardebooks.org/vocab/subjects" term="Fiction"/>
+			<category scheme="https://standardebooks.org/vocab/subjects" term="Mystery"/>
+			<category scheme="https://standardebooks.org/vocab/subjects" term="Shorts"/>
+		<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-casebook-of-sherlock-holmes/downloads/cover.jpg" rel="http://opds-spec.org/image" type="image/jpeg"/>
+	<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-casebook-of-sherlock-holmes/downloads/cover-thumbnail.jpg" rel="http://opds-spec.org/image/thumbnail" type="image/jpeg"/>
+	<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-casebook-of-sherlock-holmes" rel="alternate" title="This ebook’s page at Standard Ebooks" type="application/xhtml+xml"/>
+			<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-casebook-of-sherlock-holmes/downloads/arthur-conan-doyle_the-casebook-of-sherlock-holmes.epub?source=feed" length="793095" rel="http://opds-spec.org/acquisition/open-access" title="Recommended compatible epub" type="application/epub+zip" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-casebook-of-sherlock-holmes/downloads/arthur-conan-doyle_the-casebook-of-sherlock-holmes_advanced.epub?source=feed" length="1128503" rel="http://opds-spec.org/acquisition/open-access" title="Advanced epub" type="application/epub+zip" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-casebook-of-sherlock-holmes/downloads/arthur-conan-doyle_the-casebook-of-sherlock-holmes.kepub.epub?source=feed" length="701682" rel="http://opds-spec.org/acquisition/open-access" title="Kobo Kepub epub" type="application/kepub+zip" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-casebook-of-sherlock-holmes/downloads/arthur-conan-doyle_the-casebook-of-sherlock-holmes.azw3?source=feed" length="850383" rel="http://opds-spec.org/acquisition/open-access" title="Amazon Kindle azw3" type="application/x-mobipocket-ebook" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-casebook-of-sherlock-holmes/text/single-page" length="589975" rel="http://opds-spec.org/acquisition/open-access" title="XHTML" type="application/xhtml+xml" />
+	</entry>
+					<entry>
+	<id>https://standardebooks.org/ebooks/arthur-conan-doyle/his-last-bow</id>
+	<dc:identifier>https://standardebooks.org/ebooks/arthur-conan-doyle/his-last-bow</dc:identifier>
+	<title>His Last Bow</title>
+			<author>
+			<name>Arthur Conan Doyle</name>
+			<uri>https://standardebooks.org/ebooks/arthur-conan-doyle</uri>
+							<schema:alternateName>Sir Arthur Ignatius Conan Doyle</schema:alternateName>
+										<schema:sameAs>https://en.wikipedia.org/wiki/Arthur_Conan_Doyle</schema:sameAs>
+										<schema:sameAs>https://id.loc.gov/authorities/names/n79082292.html</schema:sameAs>
+					</author>
+		<published>2018-09-15T17:31:37Z</published>
+	<dc:issued>2018-09-15T17:31:37Z</dc:issued>
+	<updated>2026-09-07T16:44:56Z</updated>
+	<dc:language>en-GB</dc:language>
+	<dc:publisher>Standard Ebooks</dc:publisher>
+	<rights>Public domain in the United States. Users located outside of the United States must check their local laws before using this ebook. Original content released to the public domain via the Creative Commons CC0 1.0 Universal Public Domain Dedication.</rights>
+	<summary type="text">The world’s first consulting detective and his faithful biographer tackle more mysterious cases.</summary>
+	<content type="html">&lt;p&gt;&lt;i&gt;His Last Bow: Some Reminiscences of Sherlock Holmes&lt;/i&gt; is the fourth collection of &lt;a href=&quot;https://standardebooks.org/collections/sherlock-holmes&quot;&gt;Sherlock Holmes&lt;/a&gt; stories published by &lt;a href=&quot;https://standardebooks.org/ebooks/arthur-conan-doyle&quot;&gt;Arthur Conan Doyle&lt;/a&gt;. It begins with a preface by Dr. John Watson, supposedly written in 1917, assuring the reader that Holmes is still alive but living in quiet retirement in Sussex.&lt;/p&gt;
+			&lt;p&gt;This collection contains the well-known stories “The Adventure of the Bruce-Partington Plans,” in which Holmes has to track down stolen plans for a new kind of submarine; and “The Adventure of the Devil’s Foot” in which a Cornish family is found one morning driven mad or dead, with expressions of horror on their faces. The titular story “His Last Bow” is set on the very eve of the outbreak of the First World War, and involves Holmes and Watson coming out of retirement to defeat a German spy.&lt;/p&gt;</content>
+			<category scheme="http://purl.org/dc/terms/LCSH" term="Holmes, Sherlock (Fictitious character)--Fiction"/>
+			<category scheme="http://purl.org/dc/terms/LCSH" term="Private investigators--England--Fiction"/>
+			<category scheme="http://purl.org/dc/terms/LCSH" term="Detective and mystery stories"/>
+				<category scheme="https://standardebooks.org/vocab/subjects" term="Fiction"/>
+			<category scheme="https://standardebooks.org/vocab/subjects" term="Mystery"/>
+			<category scheme="https://standardebooks.org/vocab/subjects" term="Shorts"/>
+		<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/his-last-bow/downloads/cover.jpg" rel="http://opds-spec.org/image" type="image/jpeg"/>
+	<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/his-last-bow/downloads/cover-thumbnail.jpg" rel="http://opds-spec.org/image/thumbnail" type="image/jpeg"/>
+	<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/his-last-bow" rel="alternate" title="This ebook’s page at Standard Ebooks" type="application/xhtml+xml"/>
+			<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/his-last-bow/downloads/arthur-conan-doyle_his-last-bow.epub?source=feed" length="711300" rel="http://opds-spec.org/acquisition/open-access" title="Recommended compatible epub" type="application/epub+zip" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/his-last-bow/downloads/arthur-conan-doyle_his-last-bow_advanced.epub?source=feed" length="716211" rel="http://opds-spec.org/acquisition/open-access" title="Advanced epub" type="application/epub+zip" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/his-last-bow/downloads/arthur-conan-doyle_his-last-bow.kepub.epub?source=feed" length="650872" rel="http://opds-spec.org/acquisition/open-access" title="Kobo Kepub epub" type="application/kepub+zip" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/his-last-bow/downloads/arthur-conan-doyle_his-last-bow.azw3?source=feed" length="762488" rel="http://opds-spec.org/acquisition/open-access" title="Amazon Kindle azw3" type="application/x-mobipocket-ebook" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/his-last-bow/text/single-page" length="439957" rel="http://opds-spec.org/acquisition/open-access" title="XHTML" type="application/xhtml+xml" />
+	</entry>
+					<entry>
+	<id>https://standardebooks.org/ebooks/arthur-conan-doyle/the-return-of-sherlock-holmes</id>
+	<dc:identifier>https://standardebooks.org/ebooks/arthur-conan-doyle/the-return-of-sherlock-holmes</dc:identifier>
+	<title>The Return of Sherlock Holmes</title>
+			<author>
+			<name>Arthur Conan Doyle</name>
+			<uri>https://standardebooks.org/ebooks/arthur-conan-doyle</uri>
+							<schema:alternateName>Sir Arthur Ignatius Conan Doyle</schema:alternateName>
+										<schema:sameAs>https://en.wikipedia.org/wiki/Arthur_Conan_Doyle</schema:sameAs>
+										<schema:sameAs>https://id.loc.gov/authorities/names/n79082292.html</schema:sameAs>
+					</author>
+		<published>2018-07-27T21:25:04Z</published>
+	<dc:issued>2018-07-27T21:25:04Z</dc:issued>
+	<updated>2026-09-07T16:44:57Z</updated>
+	<dc:language>en-GB</dc:language>
+	<dc:publisher>Standard Ebooks</dc:publisher>
+	<rights>Public domain in the United States. Users located outside of the United States must check their local laws before using this ebook. Original content released to the public domain via the Creative Commons CC0 1.0 Universal Public Domain Dedication.</rights>
+	<summary type="text">The world’s first consulting detective returns to London after having faked his death some years before, and investigates a series of baffling mysteries.</summary>
+	<content type="html">&lt;p&gt;&lt;i&gt;The Return of Sherlock Holmes&lt;/i&gt; is the third collection of &lt;a href=&quot;https://standardebooks.org/collections/sherlock-holmes&quot;&gt;Holmes&lt;/a&gt; stories by &lt;a href=&quot;https://standardebooks.org/ebooks/arthur-conan-doyle&quot;&gt;Arthur Conan Doyle&lt;/a&gt;, published in 1905. It includes stories published in &lt;i&gt;The Strand Magazine&lt;/i&gt; in 1903 and 1904, bringing Holmes for the first time into the twentieth century.&lt;/p&gt;
+			&lt;p&gt;Doyle had memorably “killed off” Holmes in a struggle with his nemesis Professor Moriarty in the story “The Final Problem,” which had appeared in 1893 (and which is included in the collection &lt;i&gt;&lt;a href=&quot;https://standardebooks.org/ebooks/arthur-conan-doyle/the-memoirs-of-sherlock-holmes&quot;&gt;The Memoirs of Sherlock Holmes&lt;/a&gt;&lt;/i&gt;). Intense public demand for more Holmes material after that had led to Doyle writing the novel &lt;i&gt;&lt;a href=&quot;https://standardebooks.org/ebooks/arthur-conan-doyle/the-hound-of-the-baskervilles&quot;&gt;The Hound of the Baskervilles&lt;/a&gt;&lt;/i&gt;, and then finally to return to writing Holmes short stories once more. The first story in this collection, “The Adventure of the Empty House” finds Dr. Watson united once again with his old friend Sherlock Holmes, who explains how and why he faked his death at Reichenbach Falls.&lt;/p&gt;
+			&lt;p&gt;Apart from the leading story which “resurrects” Holmes, this collection contains a number of the best-known Holmes stories. “The Adventure of the Dancing Men” has Holmes deciphering a cryptogram to solve a mystery; encountering a callous blackmailer in “The Adventure of Charles Augustus Milverton;” working out why cheap busts of Napoleon are being shattered all over London; and possibly averting a major European war in “The Adventure of the Second Stain.”&lt;/p&gt;</content>
+			<category scheme="http://purl.org/dc/terms/LCSH" term="Holmes, Sherlock (Fictitious character)--Fiction"/>
+			<category scheme="http://purl.org/dc/terms/LCSH" term="Detective and mystery stories, English"/>
+				<category scheme="https://standardebooks.org/vocab/subjects" term="Fiction"/>
+			<category scheme="https://standardebooks.org/vocab/subjects" term="Mystery"/>
+			<category scheme="https://standardebooks.org/vocab/subjects" term="Shorts"/>
+		<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-return-of-sherlock-holmes/downloads/cover.jpg" rel="http://opds-spec.org/image" type="image/jpeg"/>
+	<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-return-of-sherlock-holmes/downloads/cover-thumbnail.jpg" rel="http://opds-spec.org/image/thumbnail" type="image/jpeg"/>
+	<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-return-of-sherlock-holmes" rel="alternate" title="This ebook’s page at Standard Ebooks" type="application/xhtml+xml"/>
+			<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-return-of-sherlock-holmes/downloads/arthur-conan-doyle_the-return-of-sherlock-holmes.epub?source=feed" length="1339078" rel="http://opds-spec.org/acquisition/open-access" title="Recommended compatible epub" type="application/epub+zip" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-return-of-sherlock-holmes/downloads/arthur-conan-doyle_the-return-of-sherlock-holmes_advanced.epub?source=feed" length="1878373" rel="http://opds-spec.org/acquisition/open-access" title="Advanced epub" type="application/epub+zip" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-return-of-sherlock-holmes/downloads/arthur-conan-doyle_the-return-of-sherlock-holmes.kepub.epub?source=feed" length="1436305" rel="http://opds-spec.org/acquisition/open-access" title="Kobo Kepub epub" type="application/kepub+zip" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-return-of-sherlock-holmes/downloads/arthur-conan-doyle_the-return-of-sherlock-holmes.azw3?source=feed" length="1039767" rel="http://opds-spec.org/acquisition/open-access" title="Amazon Kindle azw3" type="application/x-mobipocket-ebook" />
+				<link href="https://standardebooks.org/ebooks/arthur-conan-doyle/the-return-of-sherlock-holmes/text/single-page" length="4387725" rel="http://opds-spec.org/acquisition/open-access" title="XHTML" type="application/xhtml+xml" />
+	</entry>
+			</feed>

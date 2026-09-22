@@ -65,7 +65,7 @@ const LEAK = { username: 'LEAK_USER', password: 'LEAK_PASS', token: 'LEAK_TOKEN'
 const dirtyRaw = { ...good, ...LEAK }
 const cleaned = S.coerceBookSource(dirtyRaw)
 const cleanedKeys = Object.keys(cleaned).sort().join(',')
-check('归一结果只含白名单键', cleanedKeys === 'auth,builtin,createdAt,enabled,id,kind,mapping,name,url', cleanedKeys)
+check('归一结果只含白名单键', cleanedKeys === 'auth,builtin,createdAt,enabled,id,kind,mapping,name,responseType,searchUrl,url', cleanedKeys)
 check('归一结果不含任何凭据标记', !JSON.stringify(cleaned).includes('LEAK'))
 const dirtyStore = JSON.stringify(S.coerceBookSources({ sources: [dirtyRaw] }))
 check('整壳序列化后不含凭据标记', !dirtyStore.includes('LEAK'))
@@ -116,6 +116,79 @@ check('三态：basic 缺 password → 不满足（应当是「需要凭据」�
 check('三态：bearer 有 token → 满足', S.credentialSatisfies('bearer', { type: 'bearer', token: 't' }) === true)
 check('三态：类型不匹配 → 不满足', S.credentialSatisfies('basic', { type: 'bearer', token: 't' }) === false)
 check('三态：无凭据 → 不满足', S.credentialSatisfies('basic', null) === false)
+
+// ===== ⑤b 源描述增补（拍板 ⑤：searchUrl / responseType / mapping.summary+format） =====
+console.log('\n--- ⑤b 源描述增补：searchUrl / responseType / mapping 增项 ---')
+const withSearch = S.coerceBookSource({ ...good, searchUrl: '  https://a.org/s?q={query}  ', responseType: 'json' })
+check('searchUrl 去空白保留（模板不是 URL，不做 URL 校验）', withSearch.searchUrl === 'https://a.org/s?q={query}', withSearch.searchUrl)
+check('searchUrl 缺省 = 空串', S.coerceBookSource(good).searchUrl === '')
+check('custom + responseType:json 保留', S.coerceBookSource({ ...good, kind: 'custom', responseType: 'json' }).responseType === 'json')
+check('custom 缺 responseType 缺省 json', S.coerceBookSource({ ...good, kind: 'custom' }).responseType === 'json')
+check('custom 乱值回落 json', S.coerceBookSource({ ...good, kind: 'custom', responseType: 'xml' }).responseType === 'json')
+check('★ opds 恒 atom（源写 json 也没用，标准协议说了算）', S.coerceBookSource({ ...good, kind: 'opds', responseType: 'json' }).responseType === 'atom')
+
+// coerceMapping 是模块私有的，走公开的 coerceBookSource 验（同一实现，不复制逻辑）
+const srcWithMapping = (m) => S.coerceBookSource({ ...good, kind: 'custom', mapping: m })
+const fullMapping = srcWithMapping({ list: 'l', title: 't', download: 'd', author: 'a', cover: 'c', summary: 's', format: 'f' }).mapping
+check('mapping 收下 summary / format（拍板 ⑤ 新增）', fullMapping.summary === 's' && fullMapping.format === 'f')
+check('mapping 可选增项缺省 = 不出现该键（不是空串）', !('summary' in srcWithMapping({ list: 'l', title: 't', download: 'd' }).mapping))
+check('★ patch 收 searchUrl（模板不做 URL 合法性判断）', S.sanitizeBookSourcePatch({ searchUrl: 'https://a.org/s?q={query}' }).searchUrl === 'https://a.org/s?q={query}')
+check('patch searchUrl 给空串 = 清掉（回落用 url）', S.sanitizeBookSourcePatch({ searchUrl: '' }).searchUrl === '')
+check('patch responseType 合法收', S.sanitizeBookSourcePatch({ responseType: 'atom' }).responseType === 'atom')
+check('patch responseType 非法丢弃', S.sanitizeBookSourcePatch({ responseType: 'xml' }).responseType === undefined)
+
+// ===== ⑤c 检索地址模板展开（resolveSearchUrl 纯函数） =====
+console.log('\n--- ⑤c 检索地址模板展开 ---')
+const tmplSrc = { url: 'https://a.org/opds/', searchUrl: 'https://a.org/search.opds/?query={query}&page={page}' }
+check('{base} 去尾斜杠（含多重斜杠）', S.resolveSearchUrl({ url: 'https://a.org///', searchUrl: '{base}/s?x=1' }, { query: 'q' }) === 'https://a.org/s?x=1')
+check('{base} 无尾斜杠时原样', S.resolveSearchUrl({ url: 'https://a.org', searchUrl: '{base}/s?x=1' }, { query: 'q' }) === 'https://a.org/s?x=1')
+check('★ {query} 必 encodeURIComponent（中文检索词不编码必炸）',
+  S.resolveSearchUrl(tmplSrc, { query: '图灵 test' }) === 'https://a.org/search.opds/?query=%E5%9B%BE%E7%81%B5%20test&page=1',
+  S.resolveSearchUrl(tmplSrc, { query: '图灵 test' }))
+check('{page} 展开页码', S.resolveSearchUrl(tmplSrc, { query: 'x', page: 3 }).includes('page=3'))
+check('{page} 缺省 1 / 乱值回落 1 / 小数取整', S.resolveSearchUrl(tmplSrc, { query: 'x' }).includes('page=1') && S.resolveSearchUrl(tmplSrc, { query: 'x', page: -2 }).includes('page=1') && S.resolveSearchUrl(tmplSrc, { query: 'x', page: 2.9 }).includes('page=2'))
+check('{isbn} 展开并编码', S.resolveSearchUrl({ url: 'https://a.org/', searchUrl: '{base}/i/{isbn}' }, { query: '', isbn: '978-7' }) === 'https://a.org/i/978-7')
+check('{isbn} 缺省展开成空串', S.resolveSearchUrl({ url: 'https://a.org/', searchUrl: '{base}/i/{isbn}' }, { query: '' }) === 'https://a.org/i/')
+check('searchUrl 为空 ⇒ 回落用 url', S.resolveSearchUrl({ url: 'https://a.org/opds', searchUrl: '' }, { query: 'x' }) === 'https://a.org/opds?query=x')
+check('★ 无 ? 且 query 非空 ⇒ 兜底追加 ?query=', S.resolveSearchUrl({ url: 'https://a.org/opds', searchUrl: '' }, { query: 'a b' }) === 'https://a.org/opds?query=a%20b')
+check('已有 ? 就不再追加', S.resolveSearchUrl({ url: 'https://a.org/', searchUrl: '{base}/s?x=1' }, { query: 'y' }) === 'https://a.org/s?x=1')
+check('query 为空时不追加（避免 ?query= 空参）', S.resolveSearchUrl({ url: 'https://a.org/opds', searchUrl: '' }, { query: '' }) === 'https://a.org/opds')
+check('★ 展开后 scheme 必须仍是 http(s)（{base} 是用户可控输入）', S.resolveSearchUrl({ url: 'file:///C:/a', searchUrl: '' }, { query: 'x' }) === null)
+check('★ 模板里塞 javascript: 也被最终白名单拦下', S.resolveSearchUrl({ url: 'https://a.org/', searchUrl: 'javascript:alert(1)?q={query}' }, { query: 'x' }) === null)
+check('url 非法 ⇒ null（调用方报「未配置检索地址」而非「连接失败」）', S.resolveSearchUrl({ url: 'not a url', searchUrl: '' }, { query: 'x' }) === null)
+check('Gutenberg 预置模板真值可用', S.resolveSearchUrl(S.PRESET_BOOK_SOURCES[0], { query: 'turing' }) === 'https://www.gutenberg.org/ebooks/search.opds/?query=turing')
+check('Standard Ebooks 预置模板真值可用', S.resolveSearchUrl(S.PRESET_BOOK_SOURCES[1], { query: 'turing' }) === 'https://standardebooks.org/feeds/opds/all?query=turing')
+
+// ===== ⑤d 预置源与幂等种入（拍板 ⑥⑦） =====
+console.log('\n--- ⑤d 预置源 / 幂等种入 ---')
+check('预置源两个（Gutenberg + Standard Ebooks；Open Library 另立条目）', S.PRESET_BOOK_SOURCES.length === 2, S.PRESET_BOOK_SOURCES.map((p) => p.id).join(','))
+check('预置源 id 稳定（改名会让老用户被重复种一份）',
+  S.PRESET_BOOK_SOURCES.map((p) => p.id).join(',') === 'builtin-gutenberg,builtin-standardebooks')
+check('预置源全是 opds + atom + 内置 + 免认证',
+  S.PRESET_BOOK_SOURCES.every((p) => p.kind === 'opds' && p.responseType === 'atom' && p.builtin === true && p.auth === null && p.mapping === null))
+check('预置源地址都过 URL 白名单', S.PRESET_BOOK_SOURCES.every((p) => S.isAllowedSourceUrl(p.url) && S.isAllowedSourceUrl(p.searchUrl)))
+check('预置源都带检索模板（连 OPDS 也必须给，推不出来）', S.PRESET_BOOK_SOURCES.every((p) => p.searchUrl !== '' && p.searchUrl.includes('{query}')))
+check('★ 预置源里不含任何凭据字段', !JSON.stringify(S.PRESET_BOOK_SOURCES).match(/password|token|username|secret/i))
+
+const seed0 = S.seedPresetSources(S.emptyBookSources())
+check('空库种入两个', seed0.added.length === 2 && seed0.store.sources.length === 2)
+check('★ 再种一次：added 为空、库不变（幂等）', S.seedPresetSources(seed0.store).added.length === 0)
+check('★ 幂等且不重复（不会出现两份 Gutenberg）',
+  S.seedPresetSources(S.seedPresetSources(seed0.store).store).store.sources.length === 2)
+check('预置源排在用户源**前面**', S.seedPresetSources({ version: 1, sources: [{ ...S.PRESET_BOOK_SOURCES[1], id: 'u1', builtin: false }] }).store.sources[0].id === 'builtin-gutenberg')
+
+// ★ 这条是种入逻辑最容易写错的地方：不能「有缺就整份重种」（会把已存在的那条复制一份）
+const halfSeeded = { version: 1, sources: [{ ...S.PRESET_BOOK_SOURCES[0] }] }
+const seedHalf = S.seedPresetSources(halfSeeded)
+check('★ 半缺时只补缺的那条，已有的不复制', seedHalf.added.join(',') === 'builtin-standardebooks' && seedHalf.store.sources.length === 2, seedHalf.added.join(','))
+// ★ 用户把内置源停用/改名后，种入不许把它改回启用
+const disabledBuiltin = { version: 1, sources: S.PRESET_BOOK_SOURCES.map((p) => (p.id === 'builtin-gutenberg' ? { ...p, enabled: false, name: '我给改的名' } : p)) }
+const seedDisabled = S.seedPresetSources(disabledBuiltin)
+check('★ 停用过的内置源：种入不动它（added 空）', seedDisabled.added.length === 0)
+check('★ 停用状态与改名都原样保留（不会被种回启用）',
+  seedDisabled.store.sources.find((s) => s.id === 'builtin-gutenberg').enabled === false && seedDisabled.store.sources.find((s) => s.id === 'builtin-gutenberg').name === '我给改的名')
+check('种入不改动用户自建源', S.seedPresetSources({ version: 1, sources: [{ ...good, id: 'mine', builtin: false }] }).store.sources.some((s) => s.id === 'mine'))
+check('种入硬塞凭据字段也进不来', !JSON.stringify(S.seedPresetSources(S.emptyBookSources()).store).match(/password|token|username|secret/i))
 
 // ===== ⑥ 元数据键 / 归一 / 剪枝 =====
 console.log('\n--- ⑥ 元数据：键归一 / 归一化 / 孤儿剪枝 ---')

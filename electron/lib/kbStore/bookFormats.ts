@@ -93,6 +93,27 @@ export function bookMimeOf(relPathOrExt: string): string | null {
   return ext ? MIME_BY_EXT[ext] : null
 }
 
+/** 反向表：MIME（去参数、小写）→ 扩展名。由 `MIME_BY_EXT` 推导，**不是第二张格式表** */
+const EXT_BY_MIME: Record<string, BookExt> = Object.fromEntries(
+  BOOK_EXTS.map((ext) => [MIME_BY_EXT[ext], ext]),
+)
+
+/**
+ * MIME → 扩展名；**未收录（含认不出的 MIME）返回 null**（调用方自行兜底）。
+ *
+ * ★ 为什么必须有它（2026-09-22 实测，书市 S2 用）：**OPDS 的下载直链未必以扩展名结尾** ——
+ *   Project Gutenberg 的是 `…/55047.epub.noimages` / `…/55047.epub3.images`，
+ *   末尾是 `.noimages` 而不是 `.epub`，`bookExtOf()` 对它恒 null。只有同一条 `<link>` 上的
+ *   `type="application/epub+zip"` 是可靠的。所以书市侧的扩展名判定顺序是
+ *   **源给的格式字段 → 本函数（按链接 MIME）→ `bookExtOf()`（按 URL）**。
+ * ★ 语义即「这个 MIME 是不是我们能读的书籍格式」——`application/x-mobipocket-ebook` 之类
+ *   不在 `MIME_BY_EXT` 里 ⇒ 返回 null ⇒ 书卡标「暂不支持」。这正是想要的。
+ */
+export function bookExtFromMime(mime: string): BookExt | null {
+  const m = String(mime ?? '').split(';')[0].trim().toLowerCase()
+  return m ? EXT_BY_MIME[m] ?? null : null
+}
+
 /** 展示名：去掉书籍扩展名（无匹配扩展名时原样返回）。
  *  ★ 它只用于**展示**，不是身份：`读书笔记 · ${bookDisplayName(relPath)}` 这种用法会让
  *    `a.epub` 与 `a.cbz` 撞进同一篇收件箱页（见 docs/pending-fixes.md B-15）。 */

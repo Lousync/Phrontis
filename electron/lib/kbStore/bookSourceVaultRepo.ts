@@ -4,9 +4,9 @@ import { readSecret, writeSecret } from './secretStore'
 import { getCurrentVault } from './vaultContext'
 import {
   coerceBookSources, coerceCredentials, credentialSatisfies, emptyBookSources, emptyCredentials,
-  isAllowedSourceUrl, sanitizeBookSourcePatch,
-  type BookAuthType, type BookCredentialStore, type BookSource, type BookSourceCredential,
-  type BookSourceMapping, type BookSourcePatch, type BookSourceStore,
+  isAllowedSourceUrl, sanitizeBookSourcePatch, seedPresetSources,
+  type BookAuthType, type BookCredentialStore, type BookResponseType, type BookSource,
+  type BookSourceCredential, type BookSourceMapping, type BookSourcePatch, type BookSourceStore,
 } from './bookMarketSchema'
 
 /**
@@ -37,6 +37,8 @@ export interface BookSourceInfo {
   name: string
   kind: BookSource['kind']
   url: string
+  searchUrl: string
+  responseType: BookResponseType
   authType: BookAuthType | null
   hasCredential: boolean
   enabled: boolean
@@ -58,8 +60,27 @@ function requireCurrentRootId(rootId: string): void {
   if (rootId !== cur.rootId) throw new Error('rootId 与当前仓库不一致')
 }
 
-function readSourceStore(): BookSourceStore {
+function readSourceStoreRaw(): BookSourceStore {
   return coerceBookSources(readJson<unknown>(MOD, F_SOURCES, emptyBookSources()))
+}
+
+/**
+ * 读 + **幂等种入预置源**（拍板 ⑥：预置源可停用不可删，「删了下次还会回来」）。
+ *
+ * ★ **所有读写路径都走这个**（不是「只在列表页种一次」）—— 否则 `bookSourceRemove` /
+ *   `bookSourceSetEnabled` 会把「不含预置源」的清单原样写回去，形成「删一次、下次读又回来」的抖动。
+ * ★ 只在**确实缺**预置源时才写盘（`added` 非空）；用户停用 / 改名过的内置源原样保留
+ *   （`seedPresetSources` 只补 id，不改已存在的条目 ⇒ 停用状态不会被种回启用）。
+ * ★ 写失败不抛：种入失败退化成「这次没种上」，不该让书源列表打不开（与 jsonStore 口径一致）。
+ */
+function readSourceStore(): BookSourceStore {
+  const store = readSourceStoreRaw()
+  const { store: next, added } = seedPresetSources(store)
+  if (added.length === 0) return store
+  try {
+    writeSourceStore(next)
+  } catch { /* 种入失败不影响本次读取 */ }
+  return next
 }
 
 function writeSourceStore(store: BookSourceStore): void {
@@ -100,6 +121,8 @@ export function bookSourceInfos(rootId: string): BookSourceInfo[] {
     name: s.name,
     kind: s.kind,
     url: s.url,
+    searchUrl: s.searchUrl,
+    responseType: s.responseType,
     authType: s.auth?.type ?? null,
     hasCredential: !!s.auth && credentialSatisfies(s.auth.type, creds[s.auth.ref]),
     enabled: s.enabled,
@@ -163,6 +186,8 @@ export function bookSourceUpsert(rootId: string, patch: unknown, id?: string): B
         name: '',
         kind: 'custom',
         url: '',
+        searchUrl: '',
+        responseType: 'json',
         auth: null,
         enabled: true,
         builtin: false,
@@ -172,6 +197,8 @@ export function bookSourceUpsert(rootId: string, patch: unknown, id?: string): B
   if (patchTyped.name !== undefined) merged.name = patchTyped.name
   if (patchTyped.kind !== undefined) merged.kind = patchTyped.kind
   if (patchTyped.url !== undefined) merged.url = patchTyped.url
+  if (patchTyped.searchUrl !== undefined) merged.searchUrl = patchTyped.searchUrl
+  if (patchTyped.responseType !== undefined) merged.responseType = patchTyped.responseType
   if (patchTyped.enabled !== undefined) merged.enabled = patchTyped.enabled
   if (patchTyped.auth !== undefined) {
     // ref 恒等于源 id：凭据引用不可能指向别的源（也就无法借 A 源读 B 源的密钥）
@@ -179,7 +206,10 @@ export function bookSourceUpsert(rootId: string, patch: unknown, id?: string): B
   }
   // mapping 只对 custom 有意义；opds 走标准解析，留 mapping 只会误导
   if (patchTyped.mapping !== undefined) merged.mapping = patchTyped.mapping
-  if (merged.kind === 'opds') merged.mapping = null
+  if (merged.kind === 'opds') {
+    merged.mapping = null
+    merged.responseType = 'atom' // opds 恒 atom（标准协议），改响应格式没有意义
+  }
 
   if (!merged.name) return { ok: false, error: '书源名称不能为空' }
   if (!isAllowedSourceUrl(merged.url)) return { ok: false, error: '书源地址只允许 http:// 或 https://' }

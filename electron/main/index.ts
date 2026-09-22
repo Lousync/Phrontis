@@ -64,6 +64,7 @@ import { registerTranslateHandlers } from '../lib/translateService'
 import { registerPdfHandlers } from '../lib/pdfService'
 import { registerDocsReadHandlers } from '../lib/docsIpc'
 import { registerLanShareHandlers } from '../lib/lanShare'
+import { applyBookMarketProxy, initBookMarketProxy } from '../lib/bookMarket/netSession'
 import { registerClipperHandlers, startClipperServer, stopClipperServer } from '../lib/clipperServer'
 import { registerWorkspaceHandlers, trashAllRegisteredVaults, clearVaultRegistry } from '../lib/workspaceManager'
 import { closeVaultWatcher } from '../lib/fsWatcher'
@@ -617,6 +618,12 @@ function registerWindowHandlers(): void {
       }
     }
     settingsCache[key] = value
+    // 书市代理（方案 §三）：改完**立刻**灌进 bookmarket 分区 —— 只作用于书市那座 session，
+    // 不动 defaultSession。失败不打断设置写入（代理串写错不该连带设置都存不下），
+    // 下次 `initBookMarketProxy` 启动时还会再试一次。
+    if (key === 'bookMarketProxy') {
+      void applyBookMarketProxy(typeof value === 'string' ? value : '').catch(() => { /* 见上 */ })
+    }
     // Debounce write to disk — coalesce rapid setSetting calls into one write
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(flushSettingsToDisk, 500)
@@ -672,6 +679,10 @@ app.whenReady().then(async () => {
   try {
     assertSecretBoxRoundTrip()
   } catch { /* 自检自身异常不应影响启动 */ }
+
+  // 书市代理灌进 bookmarket 分区（方案 §三）。**不 await**：代理连不上不是启动失败的理由，
+  // 而 session.setProxy 在某些代理下要跟系统代理配置打交道，await 它会把窗口拖晚。
+  void initBookMarketProxy((key) => settingsCache[key]).catch(() => { /* 见上 */ })
 
   // UI 插件页面协议:plugin://{id}/{file}
   // 安全:CSP 锁死网络(none),只允许插件自身源的内联资源;配合渲染层 iframe sandbox 使用

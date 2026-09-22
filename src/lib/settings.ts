@@ -274,6 +274,14 @@ export const SETTINGS = {
   // 不是某份资料的一部分；换仓库不该换桌面。详见 src/modules/desktop/layout.ts 顶部说明。
   desktopPresets: { default: '', type: 'json', label: '桌面布局预设', group: '桌面外壳', desc: '桌面磁贴布局（多套预设 JSON；留空=首次进入时种入默认三套）', keywords: ['桌面', '外壳', '磁贴', '布局', '预设', 'desktop', 'shell', 'tile', '工作台'], section: 'appearance', ui: false, scope: 'global', level: 'experimental', affects: 'live' },
   desktopActivePreset: { default: 'study', type: 'text', label: '当前桌面预设', group: '桌面外壳', desc: '当前生效的桌面预设 id', keywords: ['桌面', '预设', '当前', 'desktop', 'preset'], section: 'appearance', ui: false, scope: 'global', level: 'experimental', affects: 'live' },
+
+  // ---- 书市：网络代理（书市方案 §三）----
+  // ★ 只作用于**书市自建的 `bookmarket` 分区 session**（`electron/lib/bookMarket/netSession.ts`），
+  //   **不动 defaultSession** —— 动它会连带改道 LLM 对话 / 模型探测 / 自动更新 / 剪藏。
+  //   用户配代理的动机通常只是「书源要能连」，所以这里必须是独立开关而不是全局代理。
+  // ★ 值是 Chromium `--proxy-server` 语法（`http://127.0.0.1:7890` / `socks5://…`）；留空 = 直连。
+  //   `affects: 'live'` 名副其实：`settings:set` 里挂了 `applyBookMarketProxy`，改了立刻生效。
+  bookMarketProxy: { default: '', type: 'text', label: '书市代理', group: '书市', desc: '书市网络请求使用的代理（如 http://127.0.0.1:7890 或 socks5://…），留空直连；只影响书市，不影响 AI 对话与更新', keywords: ['书市', '代理', 'proxy', '网络', 'socks5', '书源', '下载'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'bookMarket.proxy' },
 }
 
 // ===== 边栏面板约束（组件 default/min/max，非用户可改，集中引用） =====

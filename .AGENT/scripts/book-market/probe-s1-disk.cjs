@@ -64,15 +64,33 @@ app.whenReady().then(() => {
 
   const out = { when: new Date().toISOString(), electron: process.versions.electron, base: BASE, vault: VAULT, checks: results }
 
+  console.log('--- ⓪ 预置源种入（拍板 ⑥⑦；★ 必须在建任何自建源**之前**读，否则量不出「首次」）---')
+  const seeded = repo.bookSourceList(ROOT)
+  check('首次读清单即种入两个预置源', seeded.length === 2 && seeded.every((s) => s.builtin), seeded.map((s) => s.id).join(','))
+  check('预置源带检索模板（不是只种了 id）', seeded.every((s) => s.searchUrl.includes('{query}')))
+  check('种入即落盘（不是只在内存里）', existsSync(F_SOURCES) && JSON.parse(rawBytes(F_SOURCES)).sources.length === 2)
+  check('再读不重复种入（幂等）', repo.bookSourceList(ROOT).length === 2)
+  check('内置源不可删（拍板 ⑥：可停用不可删）', repo.bookSourceRemove(ROOT, 'builtin-gutenberg').ok === false)
+  check('内置源可停用',
+    repo.bookSourceSetEnabled(ROOT, 'builtin-gutenberg', false).ok === true
+    && repo.bookSourceList(ROOT).find((s) => s.id === 'builtin-gutenberg').enabled === false)
+  check('★ 停用状态不会被下次读盘种回启用（种入只补**缺的 id**，不碰已存在的）',
+    repo.bookSourceList(ROOT).find((s) => s.id === 'builtin-gutenberg').enabled === false)
+  // 改名 + 复启用：改名后 id 仍在 ⇒ 不该被重种一份「同名新源」（重复种入的典型表象）
+  repo.bookSourceUpsert(ROOT, { name: '古腾堡（我改的名）', enabled: true }, 'builtin-gutenberg')
+  check('★ 改名后的内置源不被重种一份（清单仍 2 条）', repo.bookSourceList(ROOT).length === 2,
+    repo.bookSourceList(ROOT).map((s) => s.name).join(','))
+
   console.log('--- ① 书源读写往返 ---')
   const created = repo.bookSourceUpsert(ROOT, { name: '公版书库', kind: 'opds', url: 'https://example.org/opds' })
   check('新建书源成功', created.ok && !!created.source?.id, created.error || '')
   const sid = created.source?.id
   check('落盘文件已生成', existsSync(F_SOURCES))
-  check('新读回一条', repo.bookSourceList(ROOT).length === 1)
+  check('新读回 3 条（2 预置 + 1 自建）', repo.bookSourceList(ROOT).length === 3)
   const renamed = repo.bookSourceUpsert(ROOT, { name: '公版书库（改）' }, sid)
   check('更新只覆盖给到的字段', renamed.ok && renamed.source.name === '公版书库（改）' && renamed.source.url === 'https://example.org/opds')
-  check('停用生效', repo.bookSourceSetEnabled(ROOT, sid, false).ok && repo.bookSourceList(ROOT)[0].enabled === false)
+  check('停用生效', repo.bookSourceSetEnabled(ROOT, sid, false).ok
+    && repo.bookSourceList(ROOT).find((s) => s.id === sid).enabled === false)
   check('非法 URL 明确报错（不是静默丢弃）', repo.bookSourceUpsert(ROOT, { url: 'ftp://x/y' }, sid).ok === false)
   check('空 patch 不报错（no-op）', repo.bookSourceUpsert(ROOT, {}, sid).ok === true)
 
@@ -93,8 +111,12 @@ app.whenReady().then(() => {
 
   console.log('--- ③ 出 IPC 的描述不含凭据本体 ---')
   const infos = repo.bookSourceInfos(ROOT)
-  check('info 报 hasCredential=true', infos[0]?.hasCredential === true)
-  check('info 报 authType', infos[0]?.authType === 'basic')
+  // ★ 按 id 找，别用 [0] —— 预置源排在前面，[0] 是内置源
+  const info = infos.find((i) => i.id === sid)
+  check('info 报 hasCredential=true', info?.hasCredential === true)
+  check('info 报 authType', info?.authType === 'basic')
+  check('info 里有预置源且它们免认证（hasCredential=false）',
+    infos.filter((i) => i.builtin).length === 2 && infos.filter((i) => i.builtin).every((i) => i.hasCredential === false))
   check('info 序列化后无凭据明文', !JSON.stringify(infos).includes('LEAK_'))
   check('info 不含 auth.ref 之外的东西（无凭据字段）', !/"(password|token|username)"/.test(JSON.stringify(infos)))
 
@@ -104,18 +126,24 @@ app.whenReady().then(() => {
   writeFileSync(F_SOURCES, JSON.stringify(seed, null, 2), 'utf-8')
   check('内置源拒绝删除', repo.bookSourceRemove(ROOT, 'builtin-1').ok === false)
   check('删普通源成功', repo.bookSourceRemove(ROOT, sid).ok === true)
-  check('删源后源清空', repo.bookSourceList(ROOT).length === 1)
+  check('删源后清单里没有它（预置源与那条假内置源仍在）',
+    (() => { const l = repo.bookSourceList(ROOT); return !l.some((s) => s.id === sid) && l.filter((s) => s.builtin).length === 3 })(),
+    repo.bookSourceList(ROOT).map((s) => s.id).join(','))
   check('删源顺手清掉密文条目', rawBytes(F_SECRET) !== null && !repo.bookSourceHasCredential(ROOT, sid))
 
   console.log('--- ⑤ 脏数据回落（书市不该被坏文件弄打不开） ---')
   const before = backupFiles().length
   writeFileSync(F_SOURCES, '{ 这不是 JSON', 'utf-8')
   const afterGarbage = repo.bookSourceList(ROOT)
-  check('坏文件 → 返回空清单且不抛错', Array.isArray(afterGarbage) && afterGarbage.length === 0)
+  // ★ 期望在 2026-09-22 变过：坏文件下**自建源会丢**，但预置源照旧种回来（拍板 ⑥「删了下次还会回来」）。
+  //   别把「只剩预置源」当回归 —— 这才是「书市不被坏文件弄打不开」的落地形态。
+  check('坏文件 → 不抛错，退回「只剩预置源」', Array.isArray(afterGarbage) && afterGarbage.length === 2 && afterGarbage.every((s) => s.builtin),
+    afterGarbage.map((s) => s.id).join(','))
   check('坏文件已备份为 .corrupt-<ts>', backupFiles().length === before + 1)
-  check('坏 store 形状（sources 非数组）→ 空清单', (() => {
+  check('坏 store 形状（sources 非数组）→ 同样只剩预置源', (() => {
     writeFileSync(F_SOURCES, JSON.stringify({ version: 1, sources: 'oops' }), 'utf-8')
-    return repo.bookSourceList(ROOT).length === 0
+    const l = repo.bookSourceList(ROOT)
+    return l.length === 2 && l.every((s) => s.builtin)
   })())
 
   console.log('--- ⑥ 元数据落盘 / 自愈回收 ---')

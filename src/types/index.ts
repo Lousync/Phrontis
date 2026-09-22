@@ -1989,6 +1989,8 @@ export interface DevtoolsAPI {
 
 export type BookSourceKind = 'opds' | 'custom'
 export type BookAuthType = 'basic' | 'bearer'
+/** 响应格式：**唯一职责是选解析器**（atom ⇒ 标准 OPDS 抽取、字段映射不参与；json ⇒ 走 mapping） */
+export type BookResponseType = 'json' | 'atom'
 
 /** 声明式取值路径（只取值、不执行脚本；方案 §三 边界） */
 export interface BookSourceMapping {
@@ -1996,7 +1998,10 @@ export interface BookSourceMapping {
   title: string
   author?: string
   cover?: string
+  summary?: string
   download: string
+  /** 格式字段路径（如 `files[0].format`）—— 直链无扩展名时靠它判可读性与落盘后缀 */
+  format?: string
 }
 
 /** 渲染层可见的书源描述（凭据一律只报「存没存」） */
@@ -2005,6 +2010,9 @@ export interface BookSourceInfo {
   name: string
   kind: BookSourceKind
   url: string
+  /** 检索 URL 模板（`{base}{query}{page}{isbn}`）；'' = 用 url 原样 */
+  searchUrl: string
+  responseType: BookResponseType
   authType: BookAuthType | null
   hasCredential: boolean
   enabled: boolean
@@ -2019,9 +2027,15 @@ export interface BookMarketItem {
   sourceName: string
   title: string
   author: string
+  /** 简介（OPDS 取 `<summary>` / `<content>`；无则 ''） */
+  summary: string
   coverUrl: string
   downloadUrl: string
-  /** 由 downloadUrl 推得的扩展名（带点小写）；'' = 认不出 → 不可下载 */
+  /**
+   * 扩展名（带点小写）；'' = 认不出 → 不可下载。
+   * ★ 取值顺序：源映射的 `format` 字段优先，缺了才从 downloadUrl 推
+   *   （不少自定义源的直链没有扩展名，只从 URL 推会把能下的书判成不能下）。
+   */
   ext: string
   /** 服务端给出的体积（null = 未知，闸门放行后由 Content-Length 再判，方案 §4.3） */
   sizeBytes: number | null

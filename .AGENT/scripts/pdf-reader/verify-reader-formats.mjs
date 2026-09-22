@@ -83,6 +83,22 @@ check('bookMimeOf：未收录返回 null', F.bookMimeOf('x.md') === null)
 check('bookExtOf：回带点小写扩展名（File 名拼接用）',
   F.bookExtOf('x/三体.FB2') === '.fb2' && F.bookExtOf('x.md') === null)
 
+// bookExtFromMime（书市 S2 加：OPDS 的下载直链**未必以扩展名结尾**，见 bookFormats 头注）
+check('bookExtFromMime：六种格式的 MIME 都反查得回自己',
+  F.BOOK_EXTS.every((ext) => F.bookExtFromMime(F.bookMimeOf(`x${ext}`)) === ext))
+check('bookExtFromMime：去参数 / 大小写 / 空白容错',
+  F.bookExtFromMime('  Application/EPUB+Zip; charset=binary ') === '.epub')
+check('★ bookExtFromMime：mobi / kepub / xhtml 不在表里 → null（书卡据此标「暂不支持」）',
+  F.bookExtFromMime('application/x-mobipocket-ebook') === null &&
+  F.bookExtFromMime('application/kepub+zip') === null &&
+  F.bookExtFromMime('application/xhtml+xml') === null)
+check('bookExtFromMime：空 / 非串 → null', F.bookExtFromMime('') === null && F.bookExtFromMime(null) === null)
+// ★★ 这条锁的是真实陷阱：Project Gutenberg 的 EPUB 直链是 `…/55047.epub.noimages`，
+//    末尾是 `.noimages` 不是 `.epub` ⇒ bookExtOf 恒 null，只有 link 上的 MIME 能救。
+check('★ bookExtOf 对 Gutenberg 真直链返回 null，bookExtFromMime 救回来',
+  F.bookExtOf('https://www.gutenberg.org/ebooks/55047.epub.noimages') === null &&
+  F.bookExtFromMime('application/epub+zip') === '.epub')
+
 // ===== ② readerStateSchema 纯函数用例 =====
 console.log('\n--- ② readerStateSchema：键归一 / patch 白名单 / 修补 ---')
 const S = await import('../../../electron/lib/kbStore/readerStateSchema.ts')
