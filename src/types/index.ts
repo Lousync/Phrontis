@@ -1981,4 +1981,90 @@ export interface DevtoolsAPI {
   helpDocsDelete: (fileName: string) => Promise<{ ok?: boolean; error?: string }>
 }
 
+// ===== 书市（book market）=====
+// ★ 镜像声明：主进程侧的真相源在 electron/lib/kbStore/bookMarketSchema.ts（数据形状）与
+//   bookSourceVaultRepo.ts（BookSourceInfo）；这里保持同形，改一处必须改两处。
+//   （主进程不 import src/types —— 与其他模块同惯例，见 electron/lib/releaseNotes/types.ts 头注。）
+// ★★ 安全不变量：跨 IPC 的书源描述**永不含凭据本体** —— 只有 `hasCredential: boolean`。
+
+export type BookSourceKind = 'opds' | 'custom'
+export type BookAuthType = 'basic' | 'bearer'
+
+/** 声明式取值路径（只取值、不执行脚本；方案 §三 边界） */
+export interface BookSourceMapping {
+  list: string
+  title: string
+  author?: string
+  cover?: string
+  download: string
+}
+
+/** 渲染层可见的书源描述（凭据一律只报「存没存」） */
+export interface BookSourceInfo {
+  id: string
+  name: string
+  kind: BookSourceKind
+  url: string
+  authType: BookAuthType | null
+  hasCredential: boolean
+  enabled: boolean
+  builtin: boolean
+  mapping: BookSourceMapping | null
+  createdAt: string
+}
+
+/** 检索结果条目（统一模型；opds 与 custom 源都归一到这一形状） */
+export interface BookMarketItem {
+  sourceId: string
+  sourceName: string
+  title: string
+  author: string
+  coverUrl: string
+  downloadUrl: string
+  /** 由 downloadUrl 推得的扩展名（带点小写）；'' = 认不出 → 不可下载 */
+  ext: string
+  /** 服务端给出的体积（null = 未知，闸门放行后由 Content-Length 再判，方案 §4.3） */
+  sizeBytes: number | null
+  /** 命中 BOOK_EXTS ⇒ 可下载且可读；false 时书卡标「暂不支持」并禁用下载 */
+  readable: boolean
+}
+
+/** 聚合检索结果：**部分源失败不整页报错**（方案 §三 拍板 ⑦），failed 非空时渲染层出灰条 */
+export interface BookMarketSearchResult {
+  items: BookMarketItem[]
+  failed: Array<{ sourceId: string; name: string; reason: string }>
+}
+
+/** 下载队列状态机（方案 §4.1 拍板 ⑬：并发恒 1，队列是内存态，重启即清） */
+export type BookDownloadState = 'queued' | 'down' | 'paused' | 'done' | 'fail'
+
+export interface BookDownloadTask {
+  id: string
+  sourceId: string
+  sourceName: string
+  title: string
+  url: string
+  /** 目标落盘相对路径（仓库内，posix）；排队时即定，便于「已完成」项定位 */
+  relPath: string
+  state: BookDownloadState
+  received: number
+  /** 服务端 Content-Length；0 = 未知（进度条转不确定态） */
+  total: number
+  /** 已自动重试次数（方案 §4.1：失败自动重试 1 次，凭据类失败不空转） */
+  retry: number
+  error?: string
+}
+
+/** 书籍元数据（`.books/.meta.json` 的条目；书架 DTO 拼装的上游，方案 §五） */
+export interface BookMetaInfo {
+  relPath: string
+  title: string
+  author: string
+  coverRel: string
+  sourceId: string
+  sourceName: string
+  downloadedAt: string
+  size: number
+}
+
 declare global { interface Window { api: ElectronAPI; devtoolsApi?: DevtoolsAPI } }

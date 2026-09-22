@@ -3,6 +3,8 @@ import { join, relative } from 'path'
 import { randomUUID } from 'crypto'
 import { getCurrentVault, KB_INBOX_DIR } from './vaultContext'
 import { bookKindOf, type BookKind } from './bookFormats'
+// `.books/` 布局常量单源在 bookMarketSchema（零依赖叶子）；书架扫描根 / 元数据 / 封面三处同口径
+import { BOOKS_DIR } from './bookMarketSchema'
 import { readJson, writeJson, deleteFile } from './jsonStore'
 import { parseMarkdown } from './mdStore'
 import { normalizeMdEntryFields } from './mdEntryFields'
@@ -211,7 +213,7 @@ function scanVaultFiles(root: string, dir: string, out: string[], warnings?: str
 export function scanVaultBooks(): Array<{ relPath: string; size: number; mtimeMs: number; kind: BookKind }> {
   const current = getCurrentVault()
   if (!current) return []
-  const booksDir = join(current.rootPath, '.books')
+  const booksDir = join(current.rootPath, BOOKS_DIR)
   try {
     if (!existsSync(booksDir)) {
       mkdirSync(booksDir, { recursive: true })
