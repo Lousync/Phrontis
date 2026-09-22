@@ -4,6 +4,7 @@ import { excerptDelete, excerptList, excerptPatch, excerptExportEntry, excerptEx
 import { useDataChanged } from '../../lib/dataChanged'
 import { showToast } from '../../lib/toast'
 import { KB_PDF_PAGE_CHANGED, KB_READER_STATE_CHANGED } from '../shared/pdf/pdfEvents'
+import { bookEngineOf } from '../../../electron/lib/kbStore/bookFormats'
 import type { BookKind, ExcerptItem, ExcerptColor, ExcerptType, ExcerptExportEntry, PdfBookState, TxtBookmark } from '../../types'
 
 /**
@@ -12,7 +13,7 @@ import type { BookKind, ExcerptItem, ExcerptColor, ExcerptType, ExcerptExportEnt
  * 结构（对齐原型 renderReading / excCard）：
  *   书卡头（纯色块封面 + 书名 + 格式角标 + 位置信息 + 迷你进度条）
  *   → 双 Tab：摘录 / 时间线
- *   → 摘录 Tab：说明条 + 书签（pdf / txt；EPUB 一行中性说明）+ 卡片化条目
+ *   → 摘录 Tab：说明条 + 书签（pdf / txt；foliate 系 epub·fb2·fbz 一行中性说明）+ 卡片化条目
  *   → 时间线 Tab：按日期分组（组头「日期 + N 条」+ 同日卡片）
  *
  * 卡片化条目：色点 + 类型胶囊（摘录/想法/高亮）+ 来源（页码/段落/章节 · 日期）+ 引文（左侧色边框、3 行截断）
@@ -48,8 +49,8 @@ function fmtDayGroup(iso: string): string {
 }
 
 /** 来源标签（三分支，判据与 excerptExportSchema 的组标题同口径）：
- *  pdf → 第 N 页 / txt → 段 N / epub → 章节名（无章节名回落「正文」）。
- *  epub 的定位键是 CFI（不可读），所以来源显示**章节名**而不是位置号。 */
+ *  pdf → 第 N 页 / txt → 段 N / foliate 系（epub·fb2·fbz）→ 章节名（无章节名回落「正文」）。
+ *  foliate 系的定位键是 CFI（不可读），所以来源显示**章节名**而不是位置号。 */
 function sourceLabel(e: ExcerptItem): string {
   if (e.kind === 'pdf') return `第 ${e.page ?? '?'} 页`
   if (e.kind === 'txt') return `段 ${(e.paraIndex ?? 0) + 1}`
@@ -285,13 +286,15 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
               <span>摘录落在 Vault 笔记里。点「定位」跳回原文，正文点高亮也能跳回这里。点色即按该色高亮。</span>
             </div>
 
-            {/* 书签（按 kind 取源：PDF 在 pdfReader.json、TXT 在 readerState.json）。
-                EPUB 不进这一区：B 段没有 epub 书签（结构待定 —— 书签键是 CFI，塞进 TxtBookmark 的
-                paraIndex 形状会串味），故单独给一行中性说明，等真做时再换掉。 */}
-            {reading.kind === 'epub' && (
+            {/* 书签（按引擎取源：pdf 在 pdfReader.json、txt 在 readerState.json）。
+                foliate 系（epub / fb2 / fbz）不进这一区：它们没有书签（结构待定 —— 书签键是 CFI，
+                塞进 TxtBookmark 的 paraIndex 形状会串味），故单独给一行中性说明，等真做时再换掉。
+                ★ 判据用**引擎**而非 `kind === 'epub'`：写死 epub 会让 fb2/fbz 两个分支都不命中，
+                  整块书签区静默消失（既不显示也不报错）。 */}
+            {bookEngineOf(reading.relPath) === 'foliate' && (
               <div className="mb-2 flex items-start gap-1 px-1.5 py-1 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
                 <BookMarked size={11} className="mt-0.5 shrink-0" />
-                <span>EPUB 阅读暂不支持书签</span>
+                <span>本书格式暂不支持书签</span>
               </div>
             )}
             {(isPdf || reading.kind === 'txt') && (

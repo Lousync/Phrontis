@@ -73,7 +73,8 @@ export function EpubRailPanel({ readerDoc }: {
     return (
       <div data-wb="epubRailPanel" data-wb-state="empty" className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-[var(--text-muted)]">
         <BookOpen size={26} strokeWidth={1.4} />
-        <div className="text-[12px] leading-relaxed">从书架选一本 EPUB 开始阅读<br />这里会显示它的目录</div>
+        {/* 文案保持格式中立（本面板同时服务 epub / fb2 / fbz，写死「EPUB」会在后两种格式上撒谎） */}
+        <div className="text-[12px] leading-relaxed">从书架选一本书开始阅读<br />这里会显示它的目录</div>
       </div>
     )
   }
@@ -100,7 +101,7 @@ export function EpubRailPanel({ readerDoc }: {
     <div data-wb="epubRailPanel" data-wb-state="ready" className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-auto py-1">
         {toc.length === 0
-          ? <div className="px-3 py-2 text-[12px] text-[var(--text-muted)]">这本 EPUB 没有目录</div>
+          ? <div className="px-3 py-2 text-[12px] text-[var(--text-muted)]">这本书没有目录</div>
           : renderNodes(toc, 0)}
       </div>
     </div>

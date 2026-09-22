@@ -17,16 +17,22 @@ export const KB_READER_STATE_CHANGED = 'kb-reader-state-changed'
 export const KB_TXT_GOTO_PARA = 'kb-txt-goto-para'
 
 /**
- * 右栏摘录面板 / 左栏目录 → EPUB 阅读器：跳位置请求（detail: { relPath, cfi }）。
+ * 右栏摘录面板 / 左栏目录 → foliate 系阅读器：跳位置请求（detail: { relPath, cfi }）。
  * `cfi` 取 foliate `goTo()` 的任意合法目标 —— 既接受 CFI 串（带界外偏移的
  * `epubcfi(/6/4!/4/2/1:0)` 也行），也接受目录项的 href（`chapter1.xhtml#sec2`）；
  * 值由 foliate 的 `resolveNavigation` 自行判别。字段名保留 cfi 是因为摘录定位是主要用途。
  * 与 KB_TXT_GOTO_PARA 同构：App 侧统一转发，阅读器只关心「是不是给我的书」。
+ *
+ * ★ `KB_EPUB_*` / `EpubTocItem` 是**引擎系**命名（foliate 引擎 = epub + fb2 + fbz，见
+ *   `bookFormats.ENGINE_BY_EXT`），**不是格式限定** —— 阶段 2a 起 fb2 / fbz 复用同一套事件。
+ *   名字里的 EPUB 是历史遗留（先有的 epub），改名的收益 < 全仓 diff 的风险，故冻结不改。
  */
 export const KB_EPUB_GOTO_CFI = 'kb-epub-goto-cfi'
 
 /**
- * EPUB 目录项（foliate `book.toc` 的节点形状，上游是裸 JS 对象，此处只取用到的字段）。
+ * 目录项（foliate `book.toc` 的节点形状，上游是裸 JS 对象，此处只取用到的字段）。
+ * 同上是引擎系命名：epub / fb2 / fbz 三种格式的目录都走这个形状（FB2 的 label 更粗，
+ * 只到 section 级 —— 上游 `fb2.js` 的 `book.toc` 就这么给的，不是本仓的取舍）。
  *
  * ★ 放在本文件而**不是** `src/types/index.ts`：它是「阅读器 ↔ 左栏」这一对组件之间的私有载荷，
  * 与事件常量同生共死，放一起才不会两边各写一份（本项目已有「合法 kind 列表被复制三份」的教训）。
@@ -39,14 +45,14 @@ export interface EpubTocItem {
 }
 
 /**
- * EPUB 阅读器 → 左栏目录面板：状态广播。
+ * foliate 系阅读器 → 左栏目录面板：状态广播。
  * detail: `{ relPath, cfi, chapterLabel, chapterHref, toc? }`。
  * `toc` **只在首次/被请求时带**（目录是静态数据，每翻页重发整棵树是纯浪费）；
  * 面板挂载时机晚于阅读器时，用 KB_EPUB_STATE_REQ 主动要一次。
  */
 export const KB_EPUB_STATE = 'kb-epub-state'
 
-/** 左栏目录面板 → EPUB 阅读器：请求重发一次状态（含目录树）。detail: `{ relPath }` */
+/** 左栏目录面板 → foliate 系阅读器：请求重发一次状态（含目录树）。detail: `{ relPath }` */
 export const KB_EPUB_STATE_REQ = 'kb-epub-state-req'
 
 /**

@@ -19,7 +19,7 @@
 import type { BookKind } from './bookFormats'
 
 /** 合法 kind 集合（真源 = bookFormats 的 `BookKind`；此处手工镜像，契约脚本断言双向一致） */
-export const BOOK_KINDS: readonly BookKind[] = ['pdf', 'txt', 'epub']
+export const BOOK_KINDS: readonly BookKind[] = ['pdf', 'txt', 'epub', 'fb2', 'fbz']
 
 function isBookKind(v: unknown): v is BookKind {
   return typeof v === 'string' && (BOOK_KINDS as readonly string[]).includes(v)

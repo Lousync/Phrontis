@@ -32,7 +32,7 @@ function cardPaletteOf(relPath: string): { bg: string; fg: string } {
   return CARD_PALETTE[sum % CARD_PALETTE.length]
 }
 
-/** 纯色书卡（txt / epub 共用；角标显示格式名）——不含 pdfjs，可安全同步渲染 */
+/** 纯色书卡（非 pdf 共用：txt / epub / fb2 / fbz …；角标显示格式名）——不含 pdfjs，可安全同步渲染 */
 function PlainBookCard({ relPath, name, label }: { relPath: string; name: string; label: string }) {
   const { bg, fg } = cardPaletteOf(relPath)
   return (
@@ -70,6 +70,6 @@ export function BookCover({ kind, rootId, relPath, name, mtime, cacheHit, onRead
       </Suspense>
     )
   }
-  // txt / epub（以及将来任何非 pdf 格式）：纯色书卡 + 格式角标
+  // 非 pdf（txt / epub / fb2 / fbz，以及将来任何新格式）：纯色书卡 + 格式角标（角标由 kind 派生，无需改这里）
   return <PlainBookCard relPath={relPath} name={name} label={kind.toUpperCase()} />
 }

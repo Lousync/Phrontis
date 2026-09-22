@@ -170,7 +170,14 @@ const parseXML = async blob => {
     return doc
 }
 
-const style = URL.createObjectURL(new Blob([`
+// KB PATCH 4 (2026-09-22) —— 书内样式表改内联。
+// 上游此处是 URL.createObjectURL(...) 造一个 blob: 样式表，再以 <link href="blob:..."> 引用；
+// 宿主 CSP 的 style-src 为 'self' 'unsafe-inline' data:（无 blob:）⇒ FB2 排版会**静默失效**。
+// 本仓口径是「只让内容文档走 blob:，子资源一律 data: / 内联」（见 epub.js 的 KB PATCH 1），
+// 故把 CSS 文本直接内联进 <style>，CSP 因此无需放宽。
+// 升级重放：把 `const fb2CSS = \`` 还原为 `const style = URL.createObjectURL(new Blob([\``、
+// 结尾补 `], { type: 'text/css' }))`，并把 template 里的 <style> 换回 <link>。
+const fb2CSS = `
 @namespace epub "http://www.idpf.org/2007/ops";
 body > img, section > img {
     display: block;
@@ -218,11 +225,11 @@ a[epub|type~="noteref"] {
 body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     margin: 3em 0;
 }
-`], { type: 'text/css' }))
+`
 
 const template = html => `<?xml version="1.0" encoding="utf-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml">
-    <head><link href="${style}" rel="stylesheet" type="text/css"/></head>
+    <head><style>${fb2CSS}</style></head>
     <body>${html}</body>
 </html>`
 

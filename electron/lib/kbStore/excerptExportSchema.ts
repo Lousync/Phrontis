@@ -78,7 +78,7 @@ export const EXCERPT_TYPE_NAMES: Record<ExcerptType, string> = {
  * 结构：
  *   # 读书笔记 · 《书名》
  *   > 来源：<relPath> · 共 N 条摘录 · 导出于 <date>
- *   按页（pdf）/ 按段区间（txt）/ 按章节（epub）分 ## 组 → 每组下每条：
+ *   按页（pdf）/ 按段区间（txt）/ 按章节（epub · fb2 · fbz）分 ## 组 → 每组下每条：
  *     引文（markdown 引用块）+ 备注（有则出）+ [回到原文](kbloc:<bookKey>#<excerptId>) 链接
  *     色 / 类型以纯文本呈现（如「摘录 · 黄」）
  *
@@ -110,13 +110,14 @@ export function buildExcerptExportMarkdown(opts: {
 
   if (excerpts.length === 0) return header.trimEnd() + '\n'
 
-  // 分组：pdf 按 page；txt 按连续段区间；epub 按章节
+  // 分组：pdf 按 page；txt 按连续段区间；foliate 系（epub / fb2 / fbz）按章节
   const groups = groupExcerpts(excerpts)
   const blocks: string[] = []
   for (const g of groups) {
+    // label 已是章节名（foliate 系）/ 平铺组「正文」时不再补模板词；pdf / txt 才补量词
     const heading = g.kind === 'pdf' ? `## 第 ${g.label} 页`
       : g.kind === 'txt' ? `## 第 ${g.label} 段`
-        : `## ${g.label}` // epub：label 已是章节名，不再补模板词
+        : `## ${g.label}`
     const items: string[] = []
     for (const e of g.items) {
       const lines: string[] = []
@@ -142,11 +143,17 @@ interface ExcerptGroup {
   items: VaultExcerpt[]
 }
 
-/** 分组（纯函数）：pdf 按 page 升序；txt 按段落序号连续区间合并；epub 按章节名连续合并 */
+/** 分组（纯函数）：pdf 按 page 升序；txt 按段落序号连续区间合并；
+ *  foliate 系（epub / fb2 / fbz）按章节名连续合并 */
 export function groupExcerpts(excerpts: VaultExcerpt[]): ExcerptGroup[] {
   if (excerpts.length === 0) return []
   const kind = excerpts[0].kind
-  if (kind === 'epub') {
+  // ★ 三个 foliate-text 格式（epub / fb2 / fbz）共用「按章节」分组 —— 它们的 `chapter`
+  //   都由 EpubReaderView 同一条路径写入（取自 foliate 的 tocItem.label）。
+  //   **不能**让它们落到下面的 txt 分支：那条分支按 paraIndex 排序合并，而 foliate 系
+  //   摘录根本没有 paraIndex（恒 undefined → 全被当 0）⇒ 整本书的摘录会静默并成一组
+  //   「## 第 1 段」。这类错误不报错、只是导出结果看着不对，故显式列出。
+  if (kind === 'epub' || kind === 'fb2' || kind === 'fbz') {
     // 按「章节名连续段」合并（摘录在库里按创建顺序排列，同一章的通常相邻）；
     // 无 chapter 的旧数据统一归到「正文」组，不丢条目。
     const groups: ExcerptGroup[] = []
@@ -173,24 +180,29 @@ export function groupExcerpts(excerpts: VaultExcerpt[]): ExcerptGroup[] {
       .sort((a, b) => a[0] - b[0])
       .map(([p, items]) => ({ label: String(p), kind, items }))
   }
-  // txt：按 paraIndex 升序后合并连续区间（相邻差 1 视为同区间）
-  const sorted = [...excerpts].sort((a, b) => (a.paraIndex ?? 0) - (b.paraIndex ?? 0))
-  const groups: ExcerptGroup[] = []
-  let cur: VaultExcerpt[] = []
-  let curStart = sorted[0].paraIndex ?? 0
-  let curPrev = curStart
-  for (const e of sorted) {
-    const pi = e.paraIndex ?? 0
-    if (cur.length > 0 && pi !== curPrev + 1) {
-      groups.push(makeTxtGroup(curStart, curPrev, cur))
-      cur = []
+  if (kind === 'txt') {
+    // txt：按 paraIndex 升序后合并连续区间（相邻差 1 视为同区间）
+    const sorted = [...excerpts].sort((a, b) => (a.paraIndex ?? 0) - (b.paraIndex ?? 0))
+    const groups: ExcerptGroup[] = []
+    let cur: VaultExcerpt[] = []
+    let curStart = sorted[0].paraIndex ?? 0
+    let curPrev = curStart
+    for (const e of sorted) {
+      const pi = e.paraIndex ?? 0
+      if (cur.length > 0 && pi !== curPrev + 1) {
+        groups.push(makeTxtGroup(curStart, curPrev, cur))
+        cur = []
+      }
+      cur.push(e)
+      if (cur.length === 1) curStart = pi
+      curPrev = pi
     }
-    cur.push(e)
-    if (cur.length === 1) curStart = pi
-    curPrev = pi
+    if (cur.length > 0) groups.push(makeTxtGroup(curStart, curPrev, cur))
+    return groups
   }
-  if (cur.length > 0) groups.push(makeTxtGroup(curStart, curPrev, cur))
-  return groups
+  // 兜底：合法 kind 却没有分组规则 = 加了格式忘了接线。**不套用任何既有模板**
+  // （套 txt 会把序号当段号、套 pdf 会把 0 当页码），只做「一个平铺组」这个不会撒谎的呈现。
+  return [{ label: '正文', kind, items: excerpts }]
 }
 
 function makeTxtGroup(start: number, end: number, items: VaultExcerpt[]): ExcerptGroup {

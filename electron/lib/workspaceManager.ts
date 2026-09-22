@@ -220,8 +220,11 @@ export function readWorkspaceFile(absPath: string): ReadFileResult {
  *  ★ 扩容属**安全面变更**（提交信息须写明理由）：
  *  - txt = 一期（2026-09-20）：TxtReaderView 经 range 分块读 .books 样书（20MB 上限由渲染层限）
  *  - epub = B 段（2026-09-21）：EpubReaderView 整份取字节后交 foliate 解包（zip 需从头读中央目录）；
- *    只读不写、仍受 pathGuard 与「仅当前仓库内」约束。 */
-const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'txt', 'epub']
+ *    只读不写、仍受 pathGuard 与「仅当前仓库内」约束。
+ *  - fb2 | fbz = 阶段 2a（2026-09-22）：同一 foliate 阅读器（EpubReaderView）接管 fb2/fbz ——
+ *    fbz 是 zip 封装，同 epub 需整份读；fb2 是纯 XML，本可走 loadFile，但阅读器只有一条整本读路径，
+ *    且两类书都受 128MB 上限与「只读」约束，风险面与 epub 完全一致。 */
+const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'txt', 'epub', 'fb2', 'fbz']
 
 export interface ReadRangeResult {
   /** base64 编码的 [offset, offset+len) 段数据（不足段取到文件尾） */

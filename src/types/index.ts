@@ -1194,21 +1194,22 @@ export interface PdfBookState {
 }
 /** pdfReader:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
 export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks' | 'scan' | 'scanPages'>>
-/** 书架清单条目（自动库：扫描 join 进度，不落盘）。一期 kind = pdf | txt，B 段起加 epub */
+/** 书架清单条目（自动库：扫描 join 进度，不落盘）。一期 kind = pdf | txt；B 段加 epub，
+ *  阶段 2a 加 fb2 / fbz（foliate 引擎系，阅读器与左栏零改动复用） */
 export interface BookListItem {
   relPath: string
   name: string
   size: number
   /** 文件 mtimeMs（PDF 封面缓存失效判据） */
   mtime: number
-  /** 书籍种类（pdf / txt / epub）——唯一真相源 = electron/lib/kbStore/bookFormats.ts 的 BOOK_EXTS，
+  /** 书籍种类（pdf / txt / epub / fb2 / fbz）——唯一真相源 = electron/lib/kbStore/bookFormats.ts 的 BOOK_EXTS，
    *  渲染层侧此字面量由契约脚本 verify-epub-formats.mjs 双向断言同步（tsconfig.web
    *  只含 src/**，不能直接复导出主进程文件） */
   kind: BookKind
   lastPage: number
-  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母（txt / epub 恒 0，用 pct） */
+  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母（非 pdf 恒 0，用 pct） */
   totalPages: number
-  /** 字节/比例阅读进度 0..100（kind 为 txt / epub 时有值） */
+  /** 字节/比例阅读进度 0..100（非 pdf 格式有值：txt 按字节、foliate 系按 fraction） */
   pct?: number
   hasProgress: boolean
   updatedAt: string | null
@@ -1218,8 +1219,8 @@ export interface BookListItem {
 
 /** 书籍种类（渲染层侧镜像；与 electron/lib/kbStore/bookFormats.ts 保持同步，
  *  由 `.AGENT/scripts/pdf-reader/verify-epub-formats.mjs` 双向断言 BOOK_EXTS ↔ 本联合）
- *  B 段加 'epub'（foliate 引擎）。 */
-export type BookKind = 'pdf' | 'txt' | 'epub'
+ *  B 段加 'epub'；阶段 2a 加 'fb2' / 'fbz'（同为 foliate 引擎）。 */
+export type BookKind = 'pdf' | 'txt' | 'epub' | 'fb2' | 'fbz'
 
 /** 摘录色板 id（渲染层侧镜像；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
 export const EXCERPT_COLOR_IDS = ['y', 'g', 'b', 'p', 'v'] as const

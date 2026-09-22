@@ -59,6 +59,15 @@ if (process.argv.includes('--add-books')) {
   for (const f of ['readerState.json', 'excerpts.json', 'pdfReader.json', 'excerptExports.json']) {
     try { unlinkSync(join(modulesDir, f)); console.log('reset reader module data:', f) } catch { /* 不存在即无需清 */ }
   }
+  // ★ 在 app 之外删了页，就必须一并删索引缓存 —— 否则留下「幽灵页」。
+  //   knowledgeIndex 的磁盘缓存**不校验文件是否还在**（`getKnowledgeIndex` 只看 schemaVersion /
+  //   source / ignoreState 指纹，见 knowledgeIndex.ts:796），所以本脚本删掉的「读书笔记」页仍算一页，
+  //   表象是**下一个探针的页数断言假失败**：2026-09-22 实测 probe-excerpt-export 的
+  //   「点导出 → 知识库页数 +1」拿到 before=11 after=11（缓存里的幽灵 +1，新建的真实页顶掉它 ⇒ 数量不变）。
+  //   缓存删掉即强制重建，页数回到磁盘真值。给别的探针留一份干净的世界，比修某一个探针的断言更根本。
+  for (const f of ['knowledge-index.json', 'knowledge-text.json']) {
+    try { unlinkSync(join(fixture, '.knowbase', 'cache', f)); console.log('reset knowledge cache:', f) } catch { /* 不存在即无需清 */ }
+  }
   // 摘录导出探针的幂等闸门（2026-09-21）：导出产生的「读书笔记」页落在收件箱（.knowbase/_inbox），
   // 残留会让「重复导出不产生新页」的页数断言漂移 → 一并清掉（只删本工具自己造的那一类页名）。
   {
@@ -109,20 +118,30 @@ if (process.argv.includes('--add-books')) {
       console.log('pdf seed skipped:', String(e).slice(0, 120))
     }
   }
-  // 电子书引擎探针（B 段）的 fixture —— 两本 EPUB：
+  // 电子书引擎探针（B 段）的 fixture —— 两本 EPUB + 三本 FB2 系（阶段 2a 加后三本）：
   //   ① 探针样书.epub     正向：渲染 / 目录 / 分页 / 划选摘录 / 进度落盘
   //   ② 恶意样书.epub     负向：内联 <script> / onerror 属性 / 外部 <script src> 三载荷
   //                        「DOM 里在、执行没发生」（宿主 window 不被污染）
-  // 生成器见 ./make-epub.mjs（零依赖手写 STORED zip，产物字节可复现）。
-  for (const [name, build] of [['探针样书.epub', 'probeEpub'], ['恶意样书.epub', 'maliciousEpub']]) {
+  //   ③ 探针样书.fb2      正向：同上 + KB PATCH ④（FB2 内建样式表内联）的排版靶
+  //   ④ 探针样书.fbz      正向：同样内容装进 zip —— 分发看**后缀**（view.js 的 isFBZ 是 endsWith）
+  //   ⑤ 恶意样书.fb2      负向：FB2 是白名单转换器 ⇒ 载荷**根本没进 DOM**（证据形态与 EPUB 不同）
+  // 生成器见 ./make-epub.mjs（零依赖手写 STORED zip，产物字节可复现）与 ./make-fb2.mjs。
+  // ★ 生成器改动后必须**先删产物**再 seed：下面按 existsSync 跳过，旧产物会静默留下来（踩过）
+  for (const [name, mod, fn] of [
+    ['探针样书.epub', './make-epub.mjs', 'probeEpub'],
+    ['恶意样书.epub', './make-epub.mjs', 'maliciousEpub'],
+    ['探针样书.fb2', './make-fb2.mjs', 'probeFb2'],
+    ['探针样书.fbz', './make-fb2.mjs', 'probeFbz'],
+    ['恶意样书.fb2', './make-fb2.mjs', 'maliciousFb2'],
+  ]) {
     const p = join(booksDir, name)
     if (existsSync(p)) continue
     try {
-      const make = await import('./make-epub.mjs')
-      writeFileSync(p, make[build]())
-      console.log('seeded epub:', p)
+      const make = await import(mod)
+      writeFileSync(p, make[fn]())
+      console.log('seeded ebook:', p)
     } catch (e) {
-      console.log('epub seed skipped:', String(e).slice(0, 160))
+      console.log('ebook seed skipped:', name, String(e).slice(0, 160))
     }
   }
 }

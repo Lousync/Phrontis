@@ -1,15 +1,18 @@
 // 契约验证：书架阅读器 B 段 · 电子书引擎（foliate vendored）与 CSP 例外。
 //
-// 覆盖八组断言：
+// 覆盖九组断言：
 //   ① CSP 例外**只开了该开的**，且 key 防线未被弱化（script-src 不含 'unsafe-inline'）
 //   ② vendored foliate 关键文件齐全（缺文件 = 阅读器直接炸，且是运行时才炸）
 //   ③ ★ sandbox 负向：所有 setAttribute('sandbox', …) 调用一律不含 allow-scripts
-//   ④ ★ createURL patch 在位：内容文档走 blob:、子资源走 data:（丢了会让书内 CSS/图片全裂）
+//   ④ ★ patch ①② 在位：createURL 内容文档走 blob:、子资源走 data:（丢了会让书内 CSS/图片全裂）；
+//     patch ④ 在位：FB2 样式表内联进 <style>（丢回 blob: 会让 FB2 排版被 CSP 静默拦掉）
 //   ⑤ 依赖与文档登记（polyfill 已入 deps、vendor README 未被删）
-//   ⑥ ★ 格式真相源三处一致：bookFormats.BOOK_EXTS ↔ src/types 的 BookKind ↔ 两个 schema 的 BOOK_KINDS
-//     （三处都是手工镜像，谁加格式漏改一处就是「kind 认不出 → 阅读器开错引擎」）
+//   ⑥ ★ 格式真相源四处一致：bookFormats.BOOK_EXTS ↔ src/types 的 BookKind ↔ 两个 schema 的 BOOK_KINDS
+//     （都是手工镜像，谁加格式漏改一处就是「kind 认不出 → 阅读器开错引擎」）
 //   ⑦ locator 白名单（B 段新引入）＋ kind **仍不在**白名单（它是 relPath 的纯函数）
 //   ⑧ ★ 负向：EPUB 相关组件不得把引擎拖进首屏静态闭包（BookCover 静态 PdfCover 是已修的历史违规）
+//   ⑨ ★ 阶段 2a 负向：阅读器不得再写死格式（MIME / `.epub` / kind:'epub' 一律走 bookFormats），
+//     且主进程整份读白名单 ⊇ BOOK_EXTS（漏一个 = 打开新格式时 readWholeBook 直接报错）
 //
 // 注：`bookKindOf` / `bookEngineOf` 的纯函数用例表在 verify-reader-formats.mjs 的 ①组
 // （与其它 bookFormats 用例同处），此处只做「跨文件一致性 + 负向」两件事，不重复用例。
@@ -71,6 +74,8 @@ console.log('\n--- ② vendored foliate：关键文件齐全 ---')
     'view.js', 'epub.js', 'epubcfi.js', 'paginator.js',
     'overlayer.js', 'progress.js', 'text-walker.js',
     'vendor/zip.js', 'vendor/fflate.js',
+    // 阶段 2a：fb2.js 是被 view.js 静态 import 的分支解码器，缺了 = 打开 fb2 直接报错
+    'fb2.js',
   ]
   const missing = required.filter((f) => !exists(`${VENDOR}/${f}`))
   check(`${required.length} 个核心文件全部在（缺任一 = 运行时才炸）`, missing.length === 0, missing.join(', '))
@@ -108,6 +113,19 @@ console.log('\n--- ④ ★ createURL：内容文档 blob: / 子资源 data: ---'
     /:\s*await kbToDataURL\(/.test(src))
   check('revokeObjectURL 有 blob: 守卫（data: 不可 revoke）',
     src.includes("startsWith('blob:')"))
+}
+
+// ===== ④b ★ patch ④ 在位：FB2 样式表内联 =====
+console.log('\n--- ④b ★ fb2.js：内建样式表内联进 <style>（CSP style-src 无 blob:）---')
+{
+  const src = stripComments(read(`${VENDOR}/fb2.js`))
+  check('fb2CSS 常量在位（CSS 文本直挂模块作用域）', /const fb2CSS\s*=/.test(src))
+  check('★ template 用 <style>${fb2CSS}</style> 内联（改回 <link href="blob:…"> = FB2 排版被 CSP 静默拦掉）',
+    /<style>\$\{fb2CSS\}<\/style>/.test(src))
+  check('★ fb2.js 不再为样式表造 blob:（改回去 = 样式表重新变成被 CSP 拦的子资源）',
+    !/createObjectURL\(new Blob\(\[[^\]]*text\/css/.test(src))
+  check('FB2 节文档仍走 blob:（paginator 要读 contentDocument，勿改成 data:）',
+    /new Blob\(\[str\], \{ type: MIME\.XHTML \}\)[\s\S]{0,120}URL\.createObjectURL/.test(src))
 }
 
 // ===== ⑤ 依赖与文档登记 =====
@@ -237,6 +255,48 @@ console.log('\n--- ⑧ ★ 负向：foliate / pdfjs 不得进首屏静态闭包 
     stripComments(read('src/App.tsx')).includes('bookEngineOf'))
   check('EpubRailPanel 不 import foliate（目录靠事件传值，不重复解析整本）',
     !stripComments(read('src/components/shared/epub/EpubRailPanel.tsx')).includes('vendor/foliate'))
+}
+
+// ===== ⑨ ★ 阶段 2a 负向：阅读器不得写死格式 =====
+console.log('\n--- ⑨ ★ fb2/fbz 接入：阅读器零格式字面量 + 主进程白名单同步 ---')
+{
+  // (1) 阅读器：File 的 name/type 与摘录 kind 都必须由 bookFormats 派生
+  const reader = stripComments(read('src/components/shared/epub/EpubReaderView.tsx'))
+  check('EpubReaderView 从 bookFormats 取格式（不再自拼 MIME）',
+    reader.includes('bookMimeOf') && reader.includes('bookExtOf') && reader.includes('bookKindOf'))
+  check('★ EpubReaderView 不含 MIME 字面量（自拼 = foliate 按错 type 选解码器）',
+    !/application\/(epub\+zip|x-fictionbook|zip-compressed)/.test(reader))
+  check("★ EpubReaderView 不再写死 `kind: 'epub'`（fb2/fbz 摘录会被记成 epub）",
+    !/kind:\s*'epub'/.test(reader))
+  check("★ EpubReaderView 不再把摘录按 `=== 'epub'` 过滤（fb2/fbz 高亮会整体不画）",
+    !/===\s*'epub'/.test(reader))
+  check('File 名由 bookExtOf 拼（`.epub` 后缀不再硬编码在 File 名里）',
+    /\$\{name \|\| 'book'\}\$\{bookExt/.test(reader))
+
+  // (2) 跳回原文：两个派发点都按**引擎**判定，而非 kind === 'epub'
+  const app = stripComments(read('src/App.tsx'))
+  const cfiDispatch = (app.match(/KB_EPUB_GOTO_CFI, \{ detail/g) ?? []).length
+  const engineGuard = (app.match(/bookEngineOf\([^)]*\) === 'foliate' && (ex|loc)\.cfi/g) ?? []).length
+  check(`App 的 ${cfiDispatch} 处 CFI 派发都由引擎判定（bookEngineOf === 'foliate'）`,
+    cfiDispatch > 0 && engineGuard === cfiDispatch, `实得守卫 ${engineGuard} 处`)
+
+  // (3) 导出分组：foliate 三格式共用「按章节」分支，不得落到 txt 的 paraIndex 分支
+  const exp = stripComments(read('electron/lib/kbStore/excerptExportSchema.ts'))
+  check('★ 导出分组显式列出三个 foliate 格式（写 else 会让 fb2 摘录被当 txt 并成「第 1 段」）',
+    /\['epub', 'fb2', 'fbz'\]/.test(exp) || /=== 'epub' \|\| kind === 'fb2' \|\| kind === 'fbz'/.test(exp))
+
+  // (4) 摘录 schema：三个 foliate 格式同走 CFI 必填分支，且末尾不留吞新格式的 else
+  const exS = stripComments(read('electron/lib/kbStore/excerptSchema.ts'))
+  check('★ 摘录 schema 显式列出三个 foliate 格式（else 会把未来格式静默塞进 CFI 校验）',
+    /kind === 'epub' \|\| kind === 'fb2' \|\| kind === 'fbz'/.test(exS))
+
+  // (5) 主进程整份读白名单必须覆盖全部书籍格式（漏一个 = readWholeBook 第一步就报错）
+  const F2 = await import('../../../electron/lib/kbStore/bookFormats.ts')
+  const wm = stripComments(read('electron/lib/workspaceManager.ts'))
+  const m = wm.match(/RANGE_EXT_WHITELIST\s*=\s*\[([^\]]*)\]/)
+  const listed = m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]) : []
+  const missing = [...F2.BOOK_EXTS].map((e) => e.slice(1)).filter((e) => !listed.includes(e))
+  check(`★ RANGE_EXT_WHITELIST ⊇ BOOK_EXTS（缺 ${missing.length} 项）`, missing.length === 0, missing.join(', '))
 }
 
 console.log(`\n${pass ? '全部通过' : '存在失败项'}`)

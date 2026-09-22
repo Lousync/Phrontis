@@ -37,7 +37,7 @@ check('键反解', X.exportKeyRel('r1/.books/a.pdf') === '.books/a.pdf')
 check('键反解：无分隔返回空串', X.exportKeyRel('nokey') === '')
 
 // 造几条样本摘录
-const mk = (o) => ({ id: o.id, kind: o.kind, page: o.page, paraIndex: o.paraIndex, text: o.text, note: o.note ?? '', color: o.color ?? 'y', type: o.type ?? 'excerpt', at: 'AT', updatedAt: 'UP' })
+const mk = (o) => ({ id: o.id, kind: o.kind, page: o.page, paraIndex: o.paraIndex, cfi: o.cfi, chapter: o.chapter, text: o.text, note: o.note ?? '', color: o.color ?? 'y', type: o.type ?? 'excerpt', at: 'AT', updatedAt: 'UP' })
 const pdfs = [
   mk({ id: 'e1', kind: 'pdf', page: 3, text: '第一页的引文', note: '这页很关键', color: 'g', type: 'excerpt' }),
   mk({ id: 'e2', kind: 'pdf', page: 3, text: '同页第二条', color: 'b', type: 'idea' }),
@@ -66,6 +66,27 @@ const mdTxt = X.buildExcerptExportMarkdown({ rootId: 'r1', relPath: '.books/文.
 check('txt 连续段合并为区间（第 3–4 段）', mdTxt.includes('## 第 3–4 段'), mdTxt.split('\n').filter((l) => l.startsWith('## ')).join(' / '))
 check('txt 断点另起一组（第 10 段）', mdTxt.includes('## 第 10 段'))
 check('txt 单段不带区间符', !mdTxt.includes('第 10–10 段'))
+
+// ★ 阶段 2a：foliate 系（epub / fb2 / fbz）按章节分组 —— 三者走同一条分支
+//   （落到 txt 分支会按 paraIndex 排序，而 foliate 系摘录根本没有 paraIndex ⇒ 全被当 0
+//    合并成一组「## 第 1 段」，不报错、只是导出结果看着不对）
+for (const k of ['epub', 'fb2', 'fbz']) {
+  const foliate = [
+    mk({ id: `${k}1`, kind: k, chapter: '第一章', cfi: 'epubcfi(/6/4!/4/2/1:0)', text: '第一章引文', color: 'v', type: 'excerpt' }),
+    mk({ id: `${k}2`, kind: k, chapter: '第二章', cfi: 'epubcfi(/6/8!/4/2/1:0)', text: '第二章引文' }),
+  ]
+  const md = X.buildExcerptExportMarkdown({ rootId: 'r1', relPath: `.books/书.${k}`, bookName: '书', excerpts: foliate, exportedAt: '2026-09-22T10:00:00.000Z' })
+  check(`${k} 按章节分组（## 第一章 / ## 第二章，不补「页」「段」量词）`,
+    md.includes('## 第一章') && md.includes('## 第二章'))
+  check(`${k} 不被当 txt 并成「第 1 段」`, !md.includes('## 第 1 段'), md.split('\n').filter((l) => l.startsWith('## ')).join(' / '))
+  check(`${k} 每条一个 kbloc 链接`, (md.match(/kbloc:/g) || []).length === 2)
+}
+// 无 chapter 的 foliate 摘录统一归「正文」（不丢条目）
+{
+  const noChap = [mk({ id: 'n1', kind: 'fb2', cfi: 'epubcfi(/6/4!/4/2/1:0)', text: '无章节名' })]
+  const md = X.buildExcerptExportMarkdown({ rootId: 'r1', relPath: '.books/书.fb2', bookName: '书', excerpts: noChap, exportedAt: '2026-09-22T10:00:00.000Z' })
+  check('fb2 无 chapter 时回落「## 正文」且条目不丢', md.includes('## 正文') && md.includes('无章节名'))
+}
 
 // 空摘录：只出标题与说明，不产出 kbloc
 const mdEmpty = X.buildExcerptExportMarkdown({ rootId: 'r1', relPath: 'a.txt', bookName: 'a', excerpts: [], exportedAt: '2026-09-21T10:00:00.000Z' })

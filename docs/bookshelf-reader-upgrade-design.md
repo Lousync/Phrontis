@@ -1,6 +1,7 @@
 # 书架升级全格式阅读器 + 右栏阅读侧栏 · 实现方案（施工版）
 
 > 状态：**一期已实施**（2026-09-20 落地：S1-S8 全部完成；契约 verify-reader-formats 全绿 + 探针 probe-reading-panel 13 项全过）。
+> ★ 本文只覆盖**一期（pdf + txt）**。后续批次的**唯一真相源**是 `.claude/plans/b-epub-formats.md`（B 段总纲：阶段 0/1/1.5 已落码、2a = fb2+fbz 已落码、2b = cbz 未开工）与各批施工方案（如 `b-stage2a-fb2-fbz.md`）—— 本文 §5「本期不做」、§6「二期预留接口」都只对一期成立，**不要拿它判断当前支持哪些格式**。
 > 来源：Weave EPUB Reader 借鉴调研 + 交互原型 `outputs/weave-reader-prototype.html`
 > 实施者须知：本文所有「现状」都经过代码核对（附行号）。**开工前请先复核这些行号**（主仓随时有其它会话在写）。
 > 实施差异记录：① decodeText 落零依赖 `src/lib/textDecode.ts`（组件文件带 React 依赖，契约脚本 strip-types 直 import 会炸）；② `BookKind` 在 `src/types/index.ts` 本地定义（tsconfig.web 只含 src/**，不能复导出主进程文件），与 bookFormats 的一致性由契约断言；③ PDF 事件常量抽零依赖 `src/components/shared/pdf/pdfEvents.ts`（防常量消费方把 pdfjs 拖进主包）；④ `ws:readRange` 白名单补 `txt`（workspaceManager RANGE_EXT_WHITELIST，否则 TxtReader 读不了书）。

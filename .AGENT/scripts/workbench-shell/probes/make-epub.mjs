@@ -103,7 +103,9 @@ export function zipStore(entries, when = ZIP_EPOCH) {
 }
 
 // 1x1 红色 PNG（验证书内图片经 data: 子资源通道能加载）
-const PNG_1PX = Buffer.from(
+// ★ 导出给 make-fb2.mjs 复用（FB2 的图片是**自带 base64** 的 <binary>，通道不同但图同一张）。
+//   导出这个常量不改变 epub 产物字节（zipStore 未动），故已绿的 probe-epub-reader 无需重跑证伪。
+export const PNG_1PX = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 )

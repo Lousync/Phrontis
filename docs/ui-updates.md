@@ -775,3 +775,34 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **未动**：`data-wb-state` 的语义保持 `empty` =「未选书」、`ready` =「有书在读（目录可有可无）」—— 目录为空**不**改写为 `empty`，否则与「未选书」不可区分（探针与锚点惯例都依赖这个含义）。
 
 **验收**：实机探针 `probe-epub-reader.mjs` 全绿（含新增负向）；`tsc --noEmit` 双端 0 错；6 个契约脚本全过；PDF / TXT 回归探针不受影响（`kb-fit-pdfrail` 样式仍归 `PdfRailPanel` 使用）。
+
+
+## 20. 电子书扩格式：FB2 / FBZ 接入（阶段 2a，2026-09-22）
+
+背景：B 段一期只支持 EPUB。本批按上游方案 `b-epub-formats.md` §六 的分批，把 foliate 引擎的另外两种格式接进来（**fb2 + fbz 先行，cbz 单列 2b**）。核心结论：**两个格式都不需要新阅读器组件** —— 分发发生在**引擎**层（`bookEngineOf`），epub / fb2 / fbz 三者都映到 `'foliate'`。
+
+改动点：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 真相源加两个扩展名 + **三张表各一行**（KIND_BY_EXT / ENGINE_BY_EXT / MIME_BY_EXT）；新增 `bookExtOf` / `bookMimeOf` / `bookDisplayName` | `electron/lib/kbStore/bookFormats.ts` |
+| 2 | 镜像同步：`BookKind` 联合、两个 schema 的 `BOOK_KINDS` | `src/types/index.ts`·`readerStateSchema`·`excerptSchema` |
+| 3 | 阅读器**零格式字面量**：File 的 name/type 与摘录 `kind` 全部由 `bookFormats` 派生 | `src/components/shared/epub/EpubReaderView.tsx` |
+| 4 | CFI 回跳判据由 `kind === 'epub'` 改**引擎**判定（两处派发点） | `src/App.tsx` |
+| 5 | 书签块的格式判据同样改引擎（原写法让 fb2/fbz 的整块书签**静默消失**） | `src/components/workbench/ReadingSidePanel.tsx` |
+| 6 | 主进程整份读白名单补 `.fb2` / `.fbz` | `electron/lib/workspaceManager.ts:227` |
+| 7 | **vendor 第 4 处 patch**：FB2 内建样式表内联进 `<style>`（上游是 `blob:` 样式表，被 CSP `style-src` 拦） | `src/vendor/foliate/fb2.js` |
+| 8 | 探针：抽公共套件 `lib/reader-probe-kit.mjs`（CDP 取帧 / 真输入 / fixture 读写），新增 `make-fb2.mjs` + `probe-fb2-reader.mjs` | `.AGENT/scripts/workbench-shell/probes/` |
+
+**两个静默陷阱**（都改对了才没有报错、只会「看着不对」）：
+
+- **`kind` 与扩展名不是一回事**。fb2/fbz 的摘录若沿用 `kind: 'epub'`，会以 epub 的身份落库、导出分组、参与 `=== 'epub'` 过滤 —— 表象是「高亮不画」「导出并成一段」。故 `excerptSchema` / `excerptExportSchema` 都**显式列出三个格式而绝不写 `else`**（`else` 会把未来任何新格式静默塞进 CFI 校验 / txt 的 paraIndex 模板），末尾另留一个显式拒绝/兜底分支。
+- **foliate 靠 File 的 name/type 分派，不看魔数**（`view.js:13-21`，`isFB2`/`isFBZ` 全是大小写敏感 `endsWith`）。File 名与 MIME 因此必须由真相源派生 —— 恒给 `xxx.epub` 会让裸 fb2 直接 `UnsupportedTypeError`、fbz 被当 EPUB 解包炸掉（zip 里没有 `container.xml`）。契约脚本有负向断言锁住「阅读器内不得出现 MIME / `.epub` 字面量」。
+
+**安全负向的形态与 EPUB 不同**（两条硬约束本身未动）：FB2 的转换器是**白名单映射**（`fb2.js:129` 未知节点名 / 未列属性在**转换期**就被丢弃），所以恶意 fb2 的 `<script>`、`onerror` **根本进不了 DOM**；EPUB 那边是「进得了 DOM、靠 CSP + sandbox 执行不了」。两者都安全，但探针断言必须分开写，照抄会把「本来就进不来」记成「防住了」。
+
+**顺带修掉的探针污染**：`.knowbase/cache/knowledge-index.json` **不校验页文件是否还在**（`getKnowledgeIndex` 只看 schemaVersion / ignoreState 指纹），于是在 app 之外删页会留「幽灵页」—— 表现是下一个探针的页数断言假失败。`seed-probe-vault.mjs --add-books` 现在连带清索引缓存。
+
+**验收**：实机探针 `probe-fb2-reader.mjs` **61 条断言全绿**（含 PATCH ④ 排版靶：章标题居中 / 正文段 margin 归零 / 第二段缩进 1em；图片经 `<binary>` base64 解码；目录 href 是序号串仍能 `view.goTo`；导出按章节分组端到端；重开后 **locator 与关书前逐字相同** = 精确回位而非回落章首）；`probe-epub-reader.mjs`（迁移到公共套件后复跑）与 PDF / TXT / 导出三条回归探针全绿；`tsc --noEmit` 双端 0 错。
+
+> 上游方案 §三「陷阱 2」原判 fb2 的 CFI 是 fake、**只能回到章节开头** —— 实机推翻：`fb2.js` 确实不提供 section 级 cfi（基础部分走 `CFI.fake.fromIndex`），但 foliate 是 `CFI.joinIndir(基础, CFI.fromRange(range))` **拼上真实范围**，故章内精度保留、回跳精确到原处（探针用「重开前后 locator 逐字相同」断言）。

@@ -7,14 +7,23 @@ import { excerptCreate, excerptDelete, excerptList, readerStateGet, readerStateP
 import { useDataChanged } from '../../../lib/dataChanged'
 import { showToast } from '../../../lib/toast'
 import { KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, KB_READER_STATE_CHANGED, type EpubTocItem } from '../pdf/pdfEvents'
+// 真源（扩展名 / kind / MIME 三张表都在那里）。★ 本文件**不得**再出现 MIME 或书籍扩展名字面量：
+// foliate 的 makeBook() 按 File 的 name/type 分派解码器（view.js:13-21，不看魔数），
+// 自拼 MIME 会重演「所有书都叫 xxx.epub」→ 裸 fb2 当场 UnsupportedTypeError、fbz 被当 EPUB 解包炸掉。
+import { bookExtOf, bookKindOf, bookMimeOf } from '../../../../electron/lib/kbStore/bookFormats'
 import { ExcerptCaptureBar } from '../txt/ExcerptCaptureBar'
 import type { SelectionRect } from '../pdf/TextSelectionBar'
 import type { ExcerptColor, ExcerptItem, ExcerptType, ReaderPaper } from '../../../types'
 
 /**
- * EPUB 阅读器（B 段 · 二期六格式引擎第一步，方案 §三/§四）。
+ * foliate 系阅读器（B 段 · 二期六格式引擎）。
  *
- * 引擎 = **vendored foliate-js**（`src/vendor/foliate/`，3 处 KB PATCH，见其 README）。
+ * ★ 组件名里的 EPUB 是**引擎系**命名，不是格式限定：本组件接管 `bookEngineOf() === 'foliate'`
+ *   的全部格式 —— epub（阶段 1）/ fb2 + fbz（阶段 2a）/ cbz（阶段 2b，届时需另按「无文本层」退化）。
+ *   故凡涉及格式的判据一律由 `relPath` 推导（kind / 扩展名 / MIME 都取自 bookFormats 真源），
+ *   文件内**不写**格式字面量（契约有负向断言锁）。
+ *
+ * 引擎 = **vendored foliate-js**（`src/vendor/foliate/`，4 处 KB PATCH，见其 README）。
  * 与 PdfReaderView / TxtReaderView 同构：工具栏（最左「← 返回书架」）+ 内部渲染容器；
  * 进度落 `.knowbase/modules/readerState.json`（readerStatePatch，expectedUpdatedAt 冲突检测）。
  *
@@ -146,6 +155,15 @@ interface Props {
 }
 
 export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Props) {
+  /** 格式三件套（唯一来源 = bookFormats 真源；本组件被引擎选中，故三者理论恒非空，仍按可空处理） */
+  const bookKind = bookKindOf(relPath)
+  const bookExt = bookExtOf(relPath)
+  const bookMime = bookMimeOf(relPath)
+  /** 摘录落库 / 进度广播用的 kind。本组件只在 `bookEngineOf(relPath) === 'foliate'` 时被挂载
+   *  （`App.tsx` / 书架按引擎分发），故 `bookKind` 恒非空；`?? 'epub'` 只是类型收窄兜底，
+   *  **不是第二个格式判断分支点** —— 不要在这里写任何格式映射。 */
+  const kind = bookKind ?? 'epub'
+
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
   const [pct, setPct] = useState(0)
@@ -252,7 +270,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     view.style.width = '100%'
     view.style.height = '100%'
 
-    /** 重新应用全部 EPUB 摘录高亮（section 重建 / 摘录增删后都要重画） */
+    /** 重新应用全部 foliate 系摘录高亮（section 重建 / 摘录增删后都要重画） */
     const applyAnnotations = async () => {
       const v = viewRef.current
       if (!v) return
@@ -417,7 +435,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       setPct(nextPct)
       setChapter(label)
       try {
-        window.dispatchEvent(new CustomEvent(KB_READER_STATE_CHANGED, { detail: { relPath, kind: 'epub', pct: nextPct } }))
+        window.dispatchEvent(new CustomEvent(KB_READER_STATE_CHANGED, { detail: { relPath, kind, pct: nextPct } }))
       } catch { /* 广播失败不影响阅读 */ }
       persist(nextPct, cfiRef.current)
       // 左栏目录面板靠这个高亮当前章节；label 兜底（有些书目录项没有 href）
@@ -447,7 +465,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     const onShowAnnotation = (e: Event) => {
       const d = (e as CustomEvent).detail as { value?: string; index?: number; range?: Range } | undefined
       if (!d?.value || !d.range) return
-      const ex = excerptsRef.current.find((x) => x.kind === 'epub' && x.cfi === d.value)
+      const ex = excerptsRef.current.find((x) => x.kind === kind && x.cfi === d.value)
       if (!ex) return
       // ★ 同上：内容列表在 renderer 上。此前写 `view.getContents()` 会抛 TypeError，
       //   于是「点已有高亮 → 回看卡」这条路径整体失效（探针 5.5 步锁住）。
@@ -503,10 +521,13 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
           expectedUpdatedAtRef.current = undefined
         }
 
-        // 2) 整本字节 → File（foliate 用 ZIP 魔数分流，name 给 .epub 只为可读性与 isCBZ 判断不出错）
+        // 2) 整本字节 → File。★ name 与 type 决定 foliate 选哪个解码器（view.js:13-21 的
+        //    isCBZ / isFB2 / isFBZ 全是 endsWith 判定，**不看魔数**），故必须按真实格式给：
+        //    否则裸 fb2 落到 UnsupportedTypeError、fbz 被当 EPUB 解包（zip 里无 container.xml）而炸。
         const bytes = await readWholeBook(rootId, relPath)
         if (!alive) return
-        const file = new File([bytes], `${name || 'book'}.epub`, { type: 'application/epub+zip' })
+        const fileName = `${name || 'book'}${bookExt ?? ''}`
+        const file = new File([bytes], fileName, bookMime ? { type: bookMime } : undefined)
 
         await view.open(file)
         if (!alive) return
@@ -573,11 +594,11 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     }).catch(() => { /* 忽略 */ })
   })
 
-  /** EPUB 摘录（有 cfi 的）→ 高亮同步：写 cfi→色 表（供 foliate 回调查表）+ 重画 */
-  const epubExcerpts = useMemo(() => excerpts.filter((e) => e.kind === 'epub' && !!e.cfi), [excerpts])
+  /** foliate 系摘录（有 cfi 的）→ 高亮同步：写 cfi→色 表（供 foliate 回调查表）+ 重画 */
+  const foliateExcerpts = useMemo(() => excerpts.filter((e) => e.kind === kind && !!e.cfi), [excerpts, kind])
   useEffect(() => {
     const m = new Map<string, ExcerptColor>()
-    for (const e of epubExcerpts) m.set(e.cfi as string, e.color)
+    for (const e of foliateExcerpts) m.set(e.cfi as string, e.color)
     annColorRef.current = m
     excerptsRef.current = excerpts
     const view = viewRef.current
@@ -586,7 +607,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     for (const cfi of m.keys()) {
       void view.addAnnotation({ value: cfi }).catch(() => { /* CFI 失效忽略 */ })
     }
-  }, [epubExcerpts, excerpts])
+  }, [foliateExcerpts, excerpts])
 
   // ===== 右栏摘录 / 左栏目录 → 跳 CFI =====
   useEffect(() => {
@@ -637,7 +658,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     // 乐观上色：先画上，写盘失败再撤（摘录广播回来时会被同值覆盖，不会闪）
     annColorRef.current.set(cfi, color)
     void excerptCreate(rootId, relPath, {
-      kind: 'epub',
+      kind,
       text,
       cfi,
       ...(chapter ? { chapter: chapter.slice(0, 200) } : {}),
@@ -654,7 +675,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       showToast({ type: 'error', message: String((e as Error)?.message || e) })
     })
     setCapture(null)
-  }, [capture, rootId, relPath])
+  }, [capture, rootId, relPath, kind])
 
   const handleAsk = useCallback((t: string) => {
     window.dispatchEvent(new CustomEvent('ai-assistant:selection-action', { detail: { action: 'ask', text: t } }))
@@ -695,7 +716,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
         </>
       )}
       <span className="max-w-[220px] truncate text-[var(--text-primary)]">{name}</span>
-      <span className="kb-l3 text-[var(--text-tertiary)]">EPUB</span>
+      <span className="kb-l3 text-[var(--text-tertiary)]">{kind.toUpperCase()}</span>
       {/* data-wb 锚点：探针断言「目录跳转真的换了章」（无锚点时只能读整条 toolbar 文本） */}
       {chapter && <span data-wb="epubChapter" className="kb-l1 min-w-0 truncate text-[var(--text-tertiary)]">· {chapter}</span>}
       <div className="min-w-0 flex-1" />

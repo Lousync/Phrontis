@@ -1,6 +1,6 @@
 # foliate-js（vendored）
 
-渲染 EPUB / FB2 / CBZ 等电子书格式的阅读引擎。**本项目对其源码做了 3 处修改**（见下「KB PATCH」），
+渲染 EPUB / FB2 / CBZ 等电子书格式的阅读引擎。**本项目对其源码做了 4 处修改**（见下「KB PATCH」），
 升级时必须重放这些改动。
 
 ## 来源与版本
@@ -31,7 +31,7 @@
 
 ---
 
-## KB PATCH（3 处，共 4 个文件）
+## KB PATCH（4 处，共 5 个文件）
 
 ### ① `epub.js` — 子资源改走 `data:` URL
 
@@ -79,6 +79,29 @@ iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts')
 
 `allow-same-origin` **必须保留**（分页要读 `contentDocument`）。此处是**独立于 CSP 的第二道防线**。
 
+### ④ `fb2.js` — 书内样式表改内联（阶段 2a，2026-09-22）
+
+**位置**：模块级 `fb2CSS`（约 `:173`）+ `template()`（约 `:230`）。
+
+**动机**：上游把 FB2 的内建样式表做成 `blob:` URL，再用 `<link href="blob:…">` 注入每节文档；
+宿主 `style-src` 是 `'self' 'unsafe-inline' data:`（**无 `blob:`**）⇒ FB2 排版会**静默失效**
+（不报错，只是样式表被 CSP 拦下）。
+
+**改法**：与 ① 同思路 —— 把 CSS 文本直接内联进 `<style>`，`style-src` 因此**无需**放宽：
+
+```js
+const fb2CSS = `…上游原 CSS 文本…`
+
+const template = html => `<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+    <head><style>${fb2CSS}</style></head>
+    <body>${html}</body>
+</html>`
+```
+
+FB2 的节文档本身仍是 `blob:`（与 EPUB 内容文档同理，`paginator` 要读 `contentDocument`），
+这条 patch 只动**子资源**。图片走 `data:`（上游 `getImageSrc` 本就用 `data:`）。
+
 ---
 
 ## 安全模型（改动这些文件前必读）
@@ -104,6 +127,6 @@ iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts')
 
 1. 从**上游 git 仓库**取目标 commit（不要再走 npm）。
 2. 与本目录逐文件 diff，确认上游变更。
-3. **重放上述 3 处 patch**（patch 代码块可直接对照）。
+3. **重放上述 4 处 patch**（patch 代码块可直接对照）。
 4. 跑契约：`verify-epub-formats.mjs` 的负向断言会检查 sandbox 与 `createURL` 是否仍符合预期。
 5. 跑实机探针 `probe-epub-reader.mjs`（含恶意 EPUB 用例：打开后宿主 `window` 必须未被污染）。

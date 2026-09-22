@@ -630,7 +630,9 @@ export default function App() {
             window.dispatchEvent(new CustomEvent(KB_PDF_GOTO_PAGE, { detail: { relPath, page: ex.page } }))
           } else if (kind === 'txt' && typeof ex.paraIndex === 'number') {
             window.dispatchEvent(new CustomEvent(KB_TXT_GOTO_PARA, { detail: { relPath, paraIndex: ex.paraIndex } }))
-          } else if (kind === 'epub' && ex.cfi) {
+          } else if (bookEngineOf(relPath) === 'foliate' && ex.cfi) {
+            // 分支判据用**引擎**而非 `kind === 'epub'`：foliate 系 = epub + fb2 + fbz，
+            // 写死 epub 会让 fb2/fbz 的「回到原文」静默失效（没有 else，不报错、就是不动）。
             window.dispatchEvent(new CustomEvent(KB_EPUB_GOTO_CFI, { detail: { relPath, cfi: ex.cfi } }))
           }
         })
@@ -1331,8 +1333,11 @@ export default function App() {
                         window.dispatchEvent(new CustomEvent(KB_PDF_GOTO_PAGE, { detail: { relPath: bookshelfReading.relPath, page: loc.page } }))
                       } else if (loc.kind === 'txt' && typeof loc.paraIndex === 'number') {
                         window.dispatchEvent(new CustomEvent(KB_TXT_GOTO_PARA, { detail: { relPath: bookshelfReading.relPath, paraIndex: loc.paraIndex } }))
-                      } else if (loc.kind === 'epub' && loc.cfi) {
-                        // EPUB 的定位键是 CFI（不是页码/段号）：右栏摘录条目点击 → 阅读器 resolveCFI 后跳转
+                      } else if (bookEngineOf(bookshelfReading.relPath) === 'foliate' && loc.cfi) {
+                        // foliate 系（epub / fb2 / fbz）的定位键是 CFI（不是页码/段号）：
+                        // 右栏摘录条目点击 → 阅读器 resolveNavigation 后跳转。
+                        // 判据同上用**在读那本书的引擎**，不用 loc.kind —— 写死 epub 时
+                        // fb2/fbz 点了没反应且无任何报错。
                         window.dispatchEvent(new CustomEvent(KB_EPUB_GOTO_CFI, { detail: { relPath: bookshelfReading.relPath, cfi: loc.cfi } }))
                       }
                     })
