@@ -16,9 +16,11 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { stripTypeScriptTypes } from 'node:module'
 
-const SRC = path.resolve(process.argv[2] ?? 'E:/Projects/KnowledgeRecorder/electron/lib/llmService.ts')
+// 默认目标推导自脚本位置（勿写死盘符：在 worktree 里跑会静默校验主仓 → 假 PASS）
+const SRC = path.resolve(process.argv[2] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), '../../..', 'electron/lib/llmService.ts'))
 const src = fs.readFileSync(SRC, 'utf8')
 
 /** 按大括号配平，从 from 处切出完整函数定义文本 */

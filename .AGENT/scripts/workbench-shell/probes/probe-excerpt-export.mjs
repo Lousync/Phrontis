@@ -2,8 +2,8 @@
  * 摘录导出知识库闭环探针（v3.5.0 第 5 项 · 施工方案 C）。
  * 用法（隔离实例，勿与用户 dev 抢单实例锁）：
  *   node .AGENT/scripts/workbench-shell/probes/seed-probe-vault.mjs --add-books --ud "knowbase (dev probe-app)"
- *   cd tmp/probe-app && node E:/Projects/KnowledgeRecorder/.AGENT/scripts/workbench-shell/probes/run-probe.mjs ^
- *     E:/Projects/KnowledgeRecorder/.AGENT/scripts/workbench-shell/probes/probe-excerpt-export.mjs --no-sandbox --disable-gpu
+ *   cd tmp/probe-app && node <仓库根>/.AGENT/scripts/workbench-shell/probes/run-probe.mjs ^
+ *     <仓库根>/.AGENT/scripts/workbench-shell/probes/probe-excerpt-export.mjs --no-sandbox --disable-gpu
  *
  * 断言链（任一失败 exit 1）：
  *   1) 实例自证：build 产物（file:）+ 当前仓库 = 探针 fixture
@@ -12,12 +12,15 @@
  *   4) 再点一次 → 页数**不变**、页面 id **不变**（幂等：覆盖重写同一篇，不产生新页）
  *   5) 页面被删 → 再导出自愈新建（映射指向失效页面时不报错、自动重建）
  */
-const DEBUG_PORT = 9222
-const PROJ = 'E:/Projects/KnowledgeRecorder'
+const DEBUG_PORT = Number(process.env.KNOWBASE_PROBE_PORT ?? 9222)
+const { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync } = await import('node:fs')
+const { join, dirname } = await import('node:path')
+const { fileURLToPath } = await import('node:url')
+// 仓库根由脚本位置推导（probes → workbench-shell → scripts → .AGENT → 仓库根）。
+// 勿写死盘符：在 worktree 里跑会静默读主仓的 fixture → 假 PASS。
+const PROJ = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
 const FIXTURE = `${PROJ}/tmp/vault-fixture`
 const BOOK = '.books/探针样书.txt'
-const { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync } = await import('node:fs')
-const { join } = await import('node:path')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function waitPage() {

@@ -2,8 +2,8 @@
  * PDF 划选摘录探针（摘录先行批次 · PDF 分支取证，2026-09-20）。
  * 用法（隔离实例，勿与用户 dev 抢单实例锁）：
  *   node .AGENT/scripts/workbench-shell/probes/seed-probe-vault.mjs --add-books --ud "knowbase (dev probe-app)"
- *   cd tmp/probe-app && node E:/Projects/KnowledgeRecorder/.AGENT/scripts/workbench-shell/probes/run-probe.mjs ^
- *     E:/Projects/KnowledgeRecorder/.AGENT/scripts/workbench-shell/probes/probe-pdf-excerpt.mjs --no-sandbox --disable-gpu
+ *   cd tmp/probe-app && node <仓库根>/.AGENT/scripts/workbench-shell/probes/run-probe.mjs ^
+ *     <仓库根>/.AGENT/scripts/workbench-shell/probes/probe-pdf-excerpt.mjs --no-sandbox --disable-gpu
  *
  * 断言链：
  *   1) 书架点 PDF 样书 → 文本层 span 渲染出来（数量 > 30）
@@ -11,10 +11,12 @@
  *   3) 真实鼠标拖选一行 → TextSelectionBar 出现（复制 + 摘录按钮）
  *   4) 点「摘录」→ excerpts.json 落 pdf 条目 + 页面出现 .kb-excerpt-hl 高亮块
  */
-const DEBUG_PORT = 9222
-const PROJ = 'E:/Projects/KnowledgeRecorder'
+const DEBUG_PORT = Number(process.env.KNOWBASE_PROBE_PORT ?? 9222)
 const { readFileSync } = await import('node:fs')
-const { join } = await import('node:path')
+const { join, dirname } = await import('node:path')
+const { fileURLToPath } = await import('node:url')
+// 仓库根由脚本位置推导（勿写死盘符：在 worktree 里跑会静默读主仓 → 假 PASS）
+const PROJ = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function waitPage() {

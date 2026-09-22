@@ -20,9 +20,11 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { stripTypeScriptTypes } from 'node:module'
 
-const REPO = process.argv[2] ?? 'E:/Projects/KnowledgeRecorder'
+// 默认仓库推导自脚本位置（勿写死盘符：在 worktree 里跑会静默校验主仓 → 假 PASS）
+const REPO = process.argv[2] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const SRC = path.resolve(REPO, 'electron/lib/kbStore/scheduleVaultRepo.ts')
 const src = fs.readFileSync(SRC, 'utf8')
 

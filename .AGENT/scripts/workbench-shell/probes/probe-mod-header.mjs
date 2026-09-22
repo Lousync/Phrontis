@@ -24,11 +24,13 @@
  *      taskkill /F /IM electron.exe /T
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const DEBUG_PORT = 9222
+const DEBUG_PORT = Number(process.env.KNOWBASE_PROBE_PORT ?? 9222)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const SHOT_DIR = join('E:/Projects/KnowledgeRecorder', 'tmp', 'probe-shots')
+// 截图目录推导自脚本位置（勿写死盘符：在 worktree 里跑会把截图写进主仓）
+const SHOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../../../tmp/probe-shots')
 
 /** 逐项清理清单：id = 左栏书签 id；gone = 被删掉的那条贯通行的精确文本 */
 const CASES = [

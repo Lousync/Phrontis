@@ -17,9 +17,12 @@
  *   node --experimental-strip-types --no-warnings .AGENT/scripts/ai-teaching/verify-docx-range-entry.mjs
  */
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { AI_TEXT_CODE_EXT_SET } from '../../../src/lib/aiTextExts.ts'
 
-const ROOT = 'E:/Projects/KnowledgeRecorder'
+// 仓库根由脚本位置推导（勿写死盘符：在 worktree 里跑会静默读主仓 → 假 PASS）
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..')
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8')
 
 let pass = 0
