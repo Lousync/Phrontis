@@ -61,7 +61,7 @@ export function createAssertions() {
  *   `readySelector` = 宿主就绪判据（默认书架标签按钮）；探针若另有锚点可覆盖。
  */
 export async function connect(o = {}) {
-  const DEBUG_PORT = Number(o.port ?? process.env.KB_CDP_PORT ?? 9222)
+  const DEBUG_PORT = Number(o.port ?? process.env.KNOWBASE_PROBE_PORT ?? 9222)
   const readySelector = o.readySelector ?? '[data-wb-bookmark="bookshelf"]'
   const bootTimeoutMs = o.bootTimeoutMs ?? 12000
 

@@ -7,7 +7,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-const DEBUG_PORT = Number(process.env.KB_CDP_PORT || 9222) // 端口可覆盖（见 run-probe.mjs）：默认 9222 不变
+const DEBUG_PORT = Number(process.env.KNOWBASE_PROBE_PORT || 9222) // 端口可覆盖（KNOWBASE_PROBE_PORT，见 run-probe.mjs）：默认 9222 不变
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function waitPage() {

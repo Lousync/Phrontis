@@ -1,4 +1,4 @@
-源文件: E:\Projects\KnowledgeRecorder-ui-rework\electron\lib\agentService.ts
+源文件: E:\Projects\KnowledgeRecorder\electron\lib\agentService.ts
 
 PASS  构造的样本确实超过硬上限
 PASS  截断结果是合法 JSON

@@ -1,4 +1,4 @@
-源文件: E:\Projects\KnowledgeRecorder-ui-rework\electron\lib\builtinTools.ts
+源文件: E:\Projects\KnowledgeRecorder\electron\lib\builtinTools.ts
 工具总数: 31
 
 【core —— 每轮常驻注入】14 个

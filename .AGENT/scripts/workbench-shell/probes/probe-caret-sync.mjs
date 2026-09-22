@@ -23,7 +23,7 @@
  *     .AGENT/scripts/workbench-shell/probes/probe-caret-sync.mjs --no-sandbox --disable-gpu
  * 前置：先跑 seed-probe-vault.mjs 造 fixture 仓库（README.md 无 frontmatter → draft 页签）。
  */
-const DEBUG_PORT = Number(process.env.KB_CDP_PORT || 9222) // 端口可覆盖（见 run-probe.mjs）：默认 9222 不变
+const DEBUG_PORT = Number(process.env.KNOWBASE_PROBE_PORT || 9222) // 端口可覆盖（KNOWBASE_PROBE_PORT，见 run-probe.mjs）：默认 9222 不变
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 async function waitPage() {

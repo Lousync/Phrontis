@@ -14,11 +14,15 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const PORT = 9333 + Math.floor(Math.random() * 400)
-const PAGE = 'file:///E:/Projects/KnowledgeRecorder/outputs/desk-toolbar-prototype.html'
-const OUT = 'E:/Projects/KnowledgeRecorder/tmp/probe-toolbar'
+// 仓库根由脚本位置推导（勿写死盘符：在 worktree 里跑会静默量主仓的原型与产物）
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..')
+const PAGE = pathToFileURL(join(ROOT, 'outputs/desk-toolbar-prototype.html')).href
+const OUT = join(ROOT, 'tmp/probe-toolbar')
 
 if (!existsSync(EDGE)) { console.error('找不到 Edge：' + EDGE); process.exit(1) }
 mkdirSync(OUT, { recursive: true })
