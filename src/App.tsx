@@ -4,7 +4,7 @@ import { AppWindow } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag, BookKind } from './types'
 
 import { labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
-import { WORKBENCH_TABBAR_EXCLUDED } from './lib/workbenchLayout'
+import { WORKBENCH_TABBAR_EXCLUDED, AI_ASSISTANT_SHORTCUT_DISABLED } from './lib/workbenchLayout'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchPageBar, PAGE_OWNED } from './components/workbench/WorkbenchPageBar'
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
@@ -1115,6 +1115,12 @@ export default function App() {
       不再呈现为「工作台内的子模块」；EXCLUDED 同时承担「不登记为标签页」的过滤。 */
   const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)
 
+  // AI 助手快捷键闸门（2026-09-22 拍板）：AI 教学区自己就是 AI 对话区，在那里 Ctrl+J / Ctrl+Shift+J
+  // 一律不响应（详见 AI_ASSISTANT_SHORTCUT_DISABLED 的注释）。
+  // ★ 刻意**不**并进上面的 suspendShortcut —— 那个的语义是「宿主接管了 Ctrl+J」，工作台内恒为 true；
+  //   把 Ctrl+Shift+J 也挂上去会连带废掉工作台里现有的「全屏学堂」，超出本条目范围。
+  const aiShortcutDisabled = activeTab !== null && AI_ASSISTANT_SHORTCUT_DISABLED.includes(activeTab)
+
   // Ctrl+Alt+B — 切换工作台右栏（2026-09-19 反馈：工作台区对齐 AI 教学的右栏快捷键；
   // 整窗模块下左右栏本就退场（suppressSides），跳过避免改了布局却看不见）。
   // ⚠️ 必须在 `if (!loaded) return null` 早退**之前**声明（React #310：早退组件的 hook 一律前置）
@@ -1468,7 +1474,7 @@ export default function App() {
                     )}
                   </div>
                   {/* AI 助手右下浮钮已移除（2026-09-16）：AI 对话入口迁移（批次5 中间栏 aiChat 标签），
-                      Ctrl+J 与 ai-assistant:toggle 事件链路保留不受影响 */}
+                      Ctrl+J 链路保留不受影响（ai-assistant:toggle 事件链路随浮钮一并废除，2026-09-22 清理） */}
                   {/* 番茄钟全屏面板：挂在内容卡片内（而非 main），只覆盖主内容区 ——
                       否则会盖住右侧的任务栏（DayPanel），表现为「进入番茄钟任务栏被关闭/唤不出」 */}
                   <PomodoroPanel />
@@ -1482,8 +1488,13 @@ export default function App() {
           </main>
       {/* 全局 AI 助手侧栏。shellLeft = 全屏扩张时要避让的活动栏占位宽度
           （活动栏不渲染时 → 0：禅模式 Z2 隐壳，或用户显式隐藏了活动栏；最大化 flush → 56；否则 56 + mx-1.5 两侧留白）。
-          suspendShortcut：工作台内 Ctrl+J 归 App 路由（唤出右栏 AI 侧栏），整窗模块才归本组件 */}
-      <AssistantPanel shellLeft={zenLevel >= 2 || !activityBarVisible ? 0 : winMax ? 56 : 68} suspendShortcut={!fullWindowTab} />
+          suspendShortcut：工作台内 Ctrl+J 归 App 路由（唤出右栏 AI 侧栏），整窗模块才归本组件。
+          aiShortcutDisabled：AI 教学区连 Ctrl+Shift+J 也一并禁（AI_ASSISTANT_SHORTCUT_DISABLED 清单） */}
+      <AssistantPanel
+        shellLeft={zenLevel >= 2 || !activityBarVisible ? 0 : winMax ? 56 : 68}
+        suspendShortcut={!fullWindowTab}
+        aiShortcutDisabled={aiShortcutDisabled}
+      />
         </div>
       {workbench && <WorkbenchStatusBar />}
         </div>

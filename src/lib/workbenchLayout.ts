@@ -134,6 +134,17 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
 export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools', 'moments', 'toolbox', 'plugins', 'recycle', 'settings']
 
 /**
+ * AI 助手快捷键禁用清单（2026-09-22 用户拍板）：这些模块里 **Ctrl+J / Ctrl+Shift+J 一律不响应**。
+ *
+ * ｜ AI 教学区**自己就是 AI 对话区** —— 在那里再唤起一个悬浮助手 = 同屏两块对话，还容易问错对象，
+ * 用户原话「其实这是不允许的」。其余整窗模块（设置 / 回收站 / 工具箱 …）里问 AI 是合理用法，**不禁**。
+ *
+ * ★ 唯一真相源：`App`（算闸门）与 `AssistantPanel`（闸两条分支）都读它，别在组件里写死 'aiTeaching'
+ *   —— 同一份清单被抄成多份正是 list-drift 的温床。本文件保持零 value import，契约脚本 strip-types 直跑不炸。
+ */
+export const AI_ASSISTANT_SHORTCUT_DISABLED: readonly TabName[] = ['aiTeaching']
+
+/**
  * 左栏书签模块（v3.4.0 方案 §3.3 映射表，原型 v15 定稿 6 项）。
  * quiz（错题本）不占独立 TabName：打开 = `openTab('knowledge')` + `kb-locate-quiz-view`
  * 事件定位到模块内「错题本 / 收藏」视图；左栏模块态复用 knowledge 侧栏（错题本按空间分区）。
