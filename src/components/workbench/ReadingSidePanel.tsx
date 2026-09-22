@@ -280,12 +280,6 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
       <div key={tab} className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5 kb-view-in">
         {tab === 'excerpt' ? (
           <>
-            {/* 说明条（help-disclosure：只收不删，常驻低调） */}
-            <div className="flex items-start gap-1 px-1.5 py-1 text-[10.5px] leading-relaxed text-[var(--text-disabled)]">
-              <Info size={11} className="mt-0.5 shrink-0" />
-              <span>摘录落在 Vault 笔记里。点「定位」跳回原文，正文点高亮也能跳回这里。点色即按该色高亮。</span>
-            </div>
-
             {/* 书签（按引擎取源：pdf 在 pdfReader.json、txt 在 readerState.json）。
                 foliate 系（epub / fb2 / fbz）不进这一区：它们没有书签（结构待定 —— 书签键是 CFI，
                 塞进 TxtBookmark 的 paraIndex 形状会串味），故单独给一行中性说明，等真做时再换掉。
@@ -298,15 +292,21 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
               </div>
             )}
             {(isPdf || reading.kind === 'txt') && (
-              <div className="mb-2">
+              /* 书签空态说明按 help-disclosure 形态 B：标题旁 ⓘ，悬停整块平滑展开（docs/help-disclosure-pattern.md） */
+              <div className="group mb-2">
                 <div className="flex items-center gap-1 px-1.5 py-1 text-[11px] text-[var(--text-muted)]">
                   <BookMarked size={11} />
                   书签
                   {(isPdf ? bookmarks.length : plainBookmarks.length) > 0 && <span className="text-[var(--text-tertiary)]">{isPdf ? bookmarks.length : plainBookmarks.length}</span>}
+                  {(isPdf ? bookmarks.length : plainBookmarks.length) === 0 && <Info size={11} className="shrink-0 text-[var(--text-disabled)]" />}
                 </div>
                 {(isPdf ? bookmarks.length : plainBookmarks.length) === 0 ? (
-                  <div className="px-2 py-1.5 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
-                    {isPdf ? '在阅读器工具栏加书签后，这里可以快速跳页' : '在 TXT 阅读器工具栏加书签后，这里可以快速跳段'}
+                  <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 group-hover:grid-rows-[1fr]">
+                    <div className="overflow-hidden">
+                      <div className="px-2 py-1.5 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+                        {isPdf ? '在阅读器工具栏加书签后，这里可以快速跳页' : '在 TXT 阅读器工具栏加书签后，这里可以快速跳段'}
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   (isPdf ? bookmarks : plainBookmarks).map((b, i) =>

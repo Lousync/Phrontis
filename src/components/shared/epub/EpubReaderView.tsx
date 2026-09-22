@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { ArrowLeft, ChevronLeft, ChevronRight, Contrast, Loader2, Maximize2, Minimize2, Trash2, Type, X } from 'lucide-react'
+import { ArrowLeft, ChevronLeft, ChevronRight, Contrast, Loader2, Maximize2, Minimize2, MousePointerClick, Trash2, Type, X } from 'lucide-react'
 import { View, makeBook } from '../../../vendor/foliate/view.js'
 import { Overlayer } from '../../../vendor/foliate/overlayer.js'
 import type { FoliateBook, FoliateRelocateDetail } from '../../../vendor/foliate/view.js'
 import { excerptCreate, excerptDelete, excerptList, readerStateGet, readerStatePatch, workspaceReadRange } from '../../../lib/ipc'
 import { useDataChanged } from '../../../lib/dataChanged'
+import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
 import { KB_CBZ_THUMBS, KB_CBZ_THUMB_REQ, KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, KB_READER_STATE_CHANGED, type EpubTocItem } from '../pdf/pdfEvents'
 // 真源（扩展名 / kind / MIME 三张表都在那里）。★ 本文件**不得**再出现 MIME 或书籍扩展名字面量：
@@ -127,6 +128,42 @@ function buildStyles(fontScale: number, paper: ReaderPaper): [string, string] {
   return [before, after]
 }
 
+/** 边缘提示的四档形态（设置 `edgePageHint`；非法值一律回落默认 B） */
+type EdgeHintStyle = 'A' | 'B' | 'C' | 'D'
+const EDGE_HINT_DEFAULT: EdgeHintStyle = 'B'
+function coerceEdgeHint(v: unknown): EdgeHintStyle {
+  const s = String(v ?? '').trim().toUpperCase()
+  return s === 'A' || s === 'B' || s === 'C' || s === 'D' ? s : EDGE_HINT_DEFAULT
+}
+/** 工具栏 title 里的中文档名（点一下换一档，用户要看得懂现在在哪一档） */
+const EDGE_HINT_LABEL: Record<EdgeHintStyle, string> = { A: '纯渐变', B: '渐变 + 箭头', C: '书口 + 箭头', D: '胶囊按钮' }
+
+/**
+ * 边缘提示的配色：按**书页实际底色**取（亮底压暗 / 深底提亮）。
+ * ★ 判据是纸张而不是应用主题 —— 纸色（米黄 / 浅绿 / 暗）与应用明暗主题相互独立，
+ *   用主题决定会让「米黄纸 + 暗色主题」拿到白色渐变（在浅底上几乎看不见）。
+ */
+function edgeHintVars(paper: ReaderPaper): CSSProperties {
+  const bg = themeOf(paper).bg
+  let dark = false
+  const hex = bg.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i)
+  const rgb = bg.match(/rgba?\(([^)]+)\)/i)
+  if (hex) {
+    const h = hex[1].length === 3 ? hex[1].split('').map((c) => c + c).join('') : hex[1]
+    dark = lum(parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)) < 128
+  } else if (rgb) {
+    const [r, g, b] = rgb[1].split(',').map(Number)
+    dark = lum(r || 0, g || 0, b || 0) < 128
+  }
+  const v = dark
+    ? { veil: 'rgba(255,255,255,.075)', chip: 'rgba(255,255,255,.06)', edge: 'rgba(255,255,255,.18)', fg: 'rgba(255,255,255,.55)' }
+    : { veil: 'rgba(0,0,0,.085)', chip: 'rgba(0,0,0,.055)', edge: 'rgba(0,0,0,.16)', fg: 'rgba(0,0,0,.42)' }
+  return {
+    '--kb-veil': v.veil, '--kb-veil-chip': v.chip, '--kb-veil-edge': v.edge, '--kb-chip-fg': v.fg,
+  } as CSSProperties
+}
+function lum(r: number, g: number, b: number): number { return 0.2126 * r + 0.7152 * g + 0.0722 * b }
+
 /** 整本读入（foliate 需要完整字节；分块拼装避免单次超大 IPC）。
  *  返回 ArrayBuffer 而非 Uint8Array：`new File([u8])` 在 TS 5.7 的 `Uint8Array<ArrayBufferLike>`
  *  泛型下不满足 `BlobPart`（SharedArrayBuffer 分支），转一次 ArrayBuffer 最干净。 */
@@ -190,6 +227,9 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   const [notePop, setNotePop] = useState<{ rect: SelectionRect; excerpt: ExcerptItem } | null>(null)
 
   const hostRef = useRef<HTMLDivElement | null>(null)
+  /** 边缘翻页提示的宿主侧 overlay（形态由设置决定；用 ref 直接切类，见 paintEdgeHint） */
+  const hintLRef = useRef<HTMLDivElement | null>(null)
+  const hintRRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<View | null>(null)
   const expectedUpdatedAtRef = useRef<string | undefined>(undefined)
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -219,6 +259,34 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   const thumbGenRef = useRef(0)
   /** 缩放档的 ref 镜像：open effect 里要用当前值，又不能把 state 塞进依赖数组 */
   const zoomModeRef = useRef<'fit-page' | 'fit-width'>('fit-page')
+
+  // ===== 边缘翻页提示（形态由全局设置 `edgePageHint` 决定；入口 = 工具栏那个按钮）=====
+  const { s: settings, update: updateSetting } = useSettings()
+  const hintStyle = coerceEdgeHint(settings.edgePageHint)
+  /** 提示配色按**书页底色**算（纸色可独立于应用明暗主题，见 edgeHintVars 头注） */
+  const edgeHintStyle = useMemo(() => edgeHintVars(paper), [paper])
+  /**
+   * 点亮/收起宿主侧提示层。
+   * ★ 这里用 ref 直接切类，**不走 React state** —— mousemove 频率极高，setState 会让整个
+   *   阅读器每帧重渲染（本组件一重渲染就要动 foliate 宿主与摘录重绘，代价远大于一次 classList）。
+   * ★ 首/末页不提示：翻不动的那一侧不给线索，避免「提示能点、点了没反应」。
+   */
+  const paintEdgeHint = useCallback((side: '' | 'l' | 'r', zone: number) => {
+    for (const k of ['l', 'r'] as const) {
+      const node = k === 'l' ? hintLRef.current : hintRRef.current
+      if (!node) continue
+      node.style.setProperty('--kb-zw', `${zone}px`)
+      const canTurn = k === 'l' ? pctRef.current > 0 : pctRef.current < 100
+      node.classList.toggle('on', side === k && canTurn)
+    }
+  }, [])
+  const hideEdgeHints = useCallback(() => paintEdgeHint('', 0), [paintEdgeHint])
+  /** 工具栏循环切档（与 `cyclePaper` 同款交互：点一下换一档，title 显示当前档） */
+  const cycleEdgeHint = useCallback(() => {
+    const order: EdgeHintStyle[] = ['A', 'B', 'C', 'D']
+    const next = order[(order.indexOf(hintStyle) + 1) % order.length]
+    updateSetting('edgePageHint', next)
+  }, [hintStyle, updateSetting])
 
   // ===== 写回 readerState（冲突以服务端为基底、本地意图覆盖后重试一次）=====
   const patchReader = useCallback(async (patch: Parameters<typeof readerStatePatch>[2]) => {
@@ -534,7 +602,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
         if (x <= area.left + zone) { void (rtl ? v.next() : v.prev()); return }
         if (x >= area.right - zone) void (rtl ? v.prev() : v.next())
       }
-      /** 悬停热区给手型光标（样式在 buildStyles 的 after 槽，类在这里切换） */
+      /** 悬停热区给手型光标（样式在 buildStyles 的 after 槽，类在这里切换）+ 点亮宿主侧提示层 */
       const onMouseMove = (e: MouseEvent) => {
         diag('move', e)
         const area = hostArea()
@@ -544,6 +612,8 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
         const cl = doc.documentElement.classList
         for (const c of [EDGE_CLS.l, EDGE_CLS.r]) if (c !== want) cl.remove(c)
         if (want && !cl.contains(want)) cl.add(want)
+        // 提示层与热区同源同宽（zone 已在宿主坐标里，overlay 与 hostArea 同一盒子）
+        paintEdgeHint(want === EDGE_CLS.l ? 'l' : want === EDGE_CLS.r ? 'r' : '', zone)
       }
 
       doc.addEventListener('mouseup', onUp)
@@ -904,6 +974,11 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       )}
       <button onClick={cyclePaper} title={`纸色：${paperLabel}`} data-wb="epubPaper"
         className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Contrast size={14} /></button>
+      {/* 边缘翻页提示形态（设置 edgePageHint；本阅读器 = foliate 系，恒有这对热区 → 恒显示。
+          PDF / TXT 走各自的阅读器组件，那里没有这对热区，所以也不会出现这个按钮。） */}
+      <button onClick={cycleEdgeHint} title={`边缘翻页提示：${EDGE_HINT_LABEL[hintStyle]}（点击切换形态）`}
+        data-wb="epubHintStyle" data-wb-hint={hintStyle}
+        className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><MousePointerClick size={14} /></button>
       <span className="shrink-0 text-[var(--text-tertiary)]" data-wb="epubPct">{pct}%</span>
     </div>
   )
@@ -917,7 +992,22 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       ) : (
         /* 渲染宿主常驻 DOM：foliate 要读宿主尺寸才能分页，加载态只做**覆盖层**而不是替换内容。
            `data-wb="epubHost"` = 帧内热区计算的锚（内容帧读它的 clientWidth 当可见阅读宽，见 bindDoc） */
-        <div ref={hostRef} data-wb="epubHost" className="min-h-0 flex-1 overflow-hidden" style={paperStyle} />
+        <div className="relative flex min-h-0 flex-1 flex-col" onMouseLeave={hideEdgeHints}>
+          <div ref={hostRef} data-wb="epubHost" className="min-h-0 flex-1 overflow-hidden" style={paperStyle} />
+          {/* 边缘翻页提示（宿主侧 overlay，`pointer-events:none` —— 热区不拦 mousedown，
+              从边缘起拖照样能选字）：形态 = 设置 `edgePageHint`，默认 B。鼠标进入该侧热区才淡入；
+              首/末页不提示（见 paintEdgeHint）。配色按书页底色注入，见 edgeHintVars。 */}
+          <div ref={hintLRef} className="kb-edge-hint l" data-v={hintStyle} data-wb="edgeHintL" style={edgeHintStyle}>
+            <div className="veil" />
+            <div className="edge" />
+            <div className="chip"><ChevronLeft size={15} /><span className="ct">上一页</span></div>
+          </div>
+          <div ref={hintRRef} className="kb-edge-hint r" data-v={hintStyle} data-wb="edgeHintR" style={edgeHintStyle}>
+            <div className="veil" />
+            <div className="edge" />
+            <div className="chip"><ChevronRight size={15} /><span className="ct">下一页</span></div>
+          </div>
+        </div>
       )}
       {loading && !loadErr && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 top-[34px] flex items-center justify-center">

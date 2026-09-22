@@ -1413,3 +1413,50 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
 }
 /* 卡片左侧色边框 */
 .kb-exc-bd { border-left: 3px solid var(--exc); }
+
+/* ══ 阅读器边缘翻页提示（设置 `edgePageHint`；形态 A–D，见 outputs/edge-hint-prototype.html）══════
+   宿主侧 overlay：`pointer-events:none` —— 热区**不拦 mousedown**，从边缘起拖照样能选字；
+   只动 opacity（箭头另有 6px 位移），`prefers-reduced-motion` 下全部关掉。
+   `--kb-veil*` 由组件按**书页实际底色**注入（亮纸压暗 / 深纸提亮）—— 不吃应用主题，因为纸色可独立选。
+   `--kb-zw` 由组件按 `min(160, max(48, 阅读宽×0.15))` 写入（与 EpubReaderView 的 EDGE_* 同式）。 */
+.kb-edge-hint {
+  position: absolute; top: 0; bottom: 0; width: var(--kb-zw, 120px);
+  pointer-events: none; opacity: 0; transition: opacity 200ms var(--ease-kb);
+}
+.kb-edge-hint.l { left: 0; }
+.kb-edge-hint.r { right: 0; }
+.kb-edge-hint.on { opacity: 1; }
+.kb-edge-hint .veil { position: absolute; inset: 0; background: linear-gradient(to right, var(--kb-veil), transparent 88%); }
+.kb-edge-hint.r .veil { background: linear-gradient(to left, var(--kb-veil), transparent 88%); }
+.kb-edge-hint .edge { position: absolute; top: 0; bottom: 0; width: 4px; background: var(--kb-veil-edge); }
+.kb-edge-hint.l .edge { left: 0; }
+.kb-edge-hint.r .edge { right: 0; }
+.kb-edge-hint .chip {
+  position: absolute; top: 50%; display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--kb-veil-chip); color: var(--kb-chip-fg);
+  transition: transform 220ms var(--ease-kb);
+}
+.kb-edge-hint.l .chip { left: 14px; transform: translateY(-50%) translateX(-6px); }
+.kb-edge-hint.r .chip { right: 14px; transform: translateY(-50%) translateX(6px); }
+.kb-edge-hint.on .chip { transform: translateY(-50%) translateX(0); }
+.kb-edge-hint .chip .ct { display: none; }
+
+/* A · 纯渐变 */
+.kb-edge-hint[data-v="A"] .chip,
+.kb-edge-hint[data-v="A"] .edge { display: none; }
+.kb-edge-hint[data-v="A"] .veil { background: linear-gradient(to right, var(--kb-veil), transparent 100%); }
+.kb-edge-hint[data-v="A"].r .veil { background: linear-gradient(to left, var(--kb-veil), transparent 100%); }
+/* B · 渐变 + 圆形箭头（默认） */
+.kb-edge-hint[data-v="B"] .edge { display: none; }
+.kb-edge-hint[data-v="B"] .chip { width: 46px; height: 46px; border-radius: 50%; }
+/* C · 书口 + 箭头 */
+.kb-edge-hint[data-v="C"] .chip { width: 36px; height: 36px; border-radius: 50%; }
+.kb-edge-hint[data-v="C"] .veil { opacity: .62; }
+/* D · 胶囊按钮 */
+.kb-edge-hint[data-v="D"] .edge { display: none; }
+.kb-edge-hint[data-v="D"] .chip { height: 34px; padding: 0 13px; border-radius: 999px; font-size: 12px; white-space: nowrap; }
+.kb-edge-hint[data-v="D"] .chip .ct { display: inline; }
+
+@media (prefers-reduced-motion: reduce) {
+  .kb-edge-hint, .kb-edge-hint .chip { transition: none; }
+}

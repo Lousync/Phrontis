@@ -264,6 +264,11 @@ export const SETTINGS = {
   // ---- 阅读摘录：上次用色（落 settings，不新开 localStorage；浮条点色即时更新，缺省首色 y） ----
   excerptLastColor: { default: 'y', type: 'select', label: '上次摘录用色', group: '阅读', desc: '划选摘录默认使用的颜色（点色即更新，落 settings）', keywords: ['摘录', '高亮', '颜色'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
 
+  // ---- 阅读器：边缘翻页提示形态（入口在阅读器工具栏，故 ui:false —— 不进设置页）----
+  // 只在 foliate 系阅读器（epub / fb2 / fbz / cbz）有意义：PDF / TXT 没有这对边缘热区，
+  // 故那两支工具栏里不出现该按钮（结构性保证，见 EpubReaderView 头注）。
+  edgePageHint: { default: 'B', type: 'select', label: '边缘翻页提示', group: '阅读', desc: '悬停左右边缘时给出的翻页提示：A 纯渐变 / B 渐变+圆形箭头 / C 书口+箭头 / D 胶囊按钮（默认 B）', keywords: ['阅读', '翻页', '边缘', '热区', '提示', 'epub', 'hint'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+
   // ---- 桌面外壳（自定义磁贴工作台）----
   // 布局刻意存**全局**、不进 `.knowbase/`：桌面怎么摆是「这台机器上我怎么用」，
   // 不是某份资料的一部分；换仓库不该换桌面。详见 src/modules/desktop/layout.ts 顶部说明。
