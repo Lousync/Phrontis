@@ -147,6 +147,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   const [availW, setAvailW] = useState(800)
   const [availH, setAvailH] = useState(600)
   const availWRef = useRef(800)
+  const availHRef = useRef(600)
 
   // ===== 划词浮条 / 翻译（声明位置靠前：官方事件桥要读 setSelInfo）=====
   const [selInfo, setSelInfo] = useState<{ rect: SelectionRect; text: string; page: number; rects?: ExcerptRect[] } | null>(null)
@@ -258,10 +259,26 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
+    // ★ B-19（docs/pending-fixes.md）：RO 回调两条纪律，缺一条就会构成反馈环
+    //   「测量 → setState → 自动缩放/模式随 availW/H 变 → 内容尺寸变 → 滚动条进出 →
+    //    clientWidth 变 → 再测量」，表象是退出书籍时 1.45s 内阵发 ~266 条
+    //   `ResizeObserver loop completed with undelivered notifications`。
+    //   ① **同值短路**：值没变绝不 setState。`Math.max(120, …)` 的兜底在保活 display:none
+    //      期间会把 0 抬成假的 120，与真实尺寸来回跳 —— 那一跳同样被这条短路吃掉；
+    //   ② **未布局早退**：容器 0×0（保活隐藏 / 尚未挂上）时不写状态、保留上一次真实尺寸，
+    //      免得拿 120×120 的假值重排一次。RO 在尺寸 0 → 真实时仍会回调，不会漏测。
+    //   另一半（`scrollbar-gutter: stable`，让滚动条进出不改 clientWidth）见 pdfViewerTheme.css。
     const measure = () => {
-      availWRef.current = Math.max(120, el.clientWidth)
-      setAvailW(availWRef.current)
-      setAvailH(Math.max(120, el.clientHeight))
+      const cw = el.clientWidth
+      const ch = el.clientHeight
+      if (cw === 0 && ch === 0) return
+      const w = Math.max(120, cw)
+      const h = Math.max(120, ch)
+      if (w === availWRef.current && h === availHRef.current) return
+      availWRef.current = w
+      availHRef.current = h
+      setAvailW(w)
+      setAvailH(h)
     }
     measure()
     const ro = new ResizeObserver(measure)

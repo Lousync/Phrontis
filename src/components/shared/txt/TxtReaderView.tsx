@@ -4,9 +4,12 @@ import { excerptCreate, excerptList, readerStateGet, readerStatePatch, workspace
 import { useDataChanged } from '../../../lib/dataChanged'
 import { KB_READER_STATE_CHANGED, KB_TXT_GOTO_PARA } from '../pdf/pdfEvents'
 import { decodeWith, detectEncoding, type TextEncoding } from '../../../lib/textDecode'
+import { showToast } from '../../../lib/toast'
+// 书签条数上限：**唯一真源在 schema**（写盘侧会按它整单拒绝），渲染层只读来提前拦并给出提示
+import { MAX_BOOKMARKS } from '../../../../electron/lib/kbStore/readerStateSchema'
 import { ExcerptCaptureBar } from './ExcerptCaptureBar'
 import type { SelectionRect } from '../pdf/TextSelectionBar'
-import type { ExcerptColor, ExcerptItem, ExcerptType, ReaderPaper, TxtBookmark } from '../../../types'
+import type { BookBookmark, ExcerptColor, ExcerptItem, ExcerptType, ReaderPaper } from '../../../types'
 
 /**
  * TXT 阅读器（书架升级全格式阅读器一期 / 二期拉平，方案 §S5 / v3.5.0 第 3 项）。
@@ -105,7 +108,7 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   const [loadErr, setLoadErr] = useState('')
   const [pct, setPct] = useState(0)
   // A2 书签 / A4 字号纸色
-  const [bookmarks, setBookmarks] = useState<TxtBookmark[]>([])
+  const [bookmarks, setBookmarks] = useState<BookBookmark[]>([])
   const [fontScale, setFontScale] = useState(1)
   const [paper, setPaper] = useState<ReaderPaper>('default')
   // A3 搜索
@@ -136,7 +139,7 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   const loadingMoreRef = useRef(false)
   const fontScaleRef = useRef(1)
   const paperRef = useRef<ReaderPaper>('default')
-  const bkmRef = useRef<TxtBookmark[]>([])
+  const bkmRef = useRef<BookBookmark[]>([])
   const topParaRef = useRef(-1)
   const searchHitsRef = useRef<Array<{ paraIndex: number; start: number; end: number }>>([])
   const searchActiveRef = useRef(0)
@@ -442,13 +445,19 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     const idx = topParaRef.current
     if (idx < 0) return
     const exists = bkmRef.current.find((b) => b.paraIndex === idx)
-    let next: TxtBookmark[]
+    let next: BookBookmark[]
     if (exists) {
       next = bkmRef.current.filter((b) => b.id !== exists.id)
     } else {
+      // 上限与 schema 侧同一个常量：超了直接说，别让写回静默失败（书签会"加上又消失"）
+      if (bkmRef.current.length >= MAX_BOOKMARKS) {
+        showToast({ type: 'warning', message: `书签已达上限（${MAX_BOOKMARKS} 条），请先删掉一些` })
+        return
+      }
       const label = (paragraphs[idx] ?? '').slice(0, 16).replace(/\s+/g, ' ').trim() || `段落 ${idx + 1}`
       next = [...bkmRef.current, { id: crypto.randomUUID(), paraIndex: idx, label, at: new Date().toISOString() }]
-        .sort((a, b) => a.paraIndex - b.paraIndex)
+        // 本书是 txt ⇒ 条条都有 paraIndex；`?? 0` 只为满足「定位字段可选」的类型（BookBookmark 共用）
+        .sort((a, b) => (a.paraIndex ?? 0) - (b.paraIndex ?? 0))
     }
     bkmRef.current = next
     setBookmarks(next)

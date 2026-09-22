@@ -1,9 +1,25 @@
 export const makeComicBook = async ({ entries, loadBlob, getSize, getComment }, file) => {
     const cache = new Map()
     const urls = new Map()
+    // ── KB PATCH（第 7 处，见 src/vendor/foliate/README.md）：B-18 页图补 MIME ──
+    //   上游 `loadBlob(name)` 不传 type ⇒ `new BlobWriter(undefined)` ⇒ Blob 的 `type = ''`。
+    //   `<img src="blob:…">` 靠 **Blob 的 MIME** 选解码器，`type=''` 时按未知类型**拒绝**，
+    //   退化不成魔数嗅探 ⇒ 归档里的 `.svg` 页恒为破图（`naturalWidth = 0`，**且无任何报错**）。
+    //   PNG / JPEG / GIF / WebP 之所以「看起来没事」，是它们恰好在浏览器硬编码的嗅探表里；
+    //   SVG 不在。★ 这**不是**安全放宽 —— `<img>` 里的 SVG 在任何 MIME 下都不执行脚本
+    //   （阶段 2b 恶意样书探针实测：正确 MIME 下可解码、恶意标志位仍全 null）。
+    const MIME_BY_EXT = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+        '.gif': 'image/gif', '.bmp': 'image/bmp', '.webp': 'image/webp',
+        '.svg': 'image/svg+xml', '.jxl': 'image/jxl', '.avif': 'image/avif',
+    }
+    const mimeOf = name => {
+        const dot = name.lastIndexOf('.')
+        return dot > -1 ? (MIME_BY_EXT[name.slice(dot).toLowerCase()] ?? '') : ''
+    }
     const load = async name => {
         if (cache.has(name)) return cache.get(name)
-        const src = URL.createObjectURL(await loadBlob(name))
+        const src = URL.createObjectURL(await loadBlob(name, mimeOf(name)))
         const page = URL.createObjectURL(
             new Blob([`<body style="margin: 0"><img src="${src}">`], { type: 'text/html' }))
         urls.set(name, [src, page])

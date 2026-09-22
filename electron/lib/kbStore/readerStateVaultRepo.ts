@@ -91,10 +91,11 @@ export function readerStatePatchBook(rootId: string, relPath: string, patch: unk
   const key = readerKey(rootId, relPath)
   if (!key) return { ok: false, error: '非法的书键' }
   try { requireCurrentRootId(rootId) } catch (e) { return { ok: false, error: (e as Error).message } }
-  const clean = sanitizeReaderPatch(patch)
-  if (!clean) return { ok: false, error: 'patch 字段非法（只收 pct 整数 0..100 / locator 串等白名单项）' }
-  const now = new Date().toISOString()
   const derived = kindOfPath(relPath)
+  // kind 先算出来再校验：书签的定位字段合法性依赖它（txt 要 paraIndex / foliate 系要 cfi）
+  const clean = sanitizeReaderPatch(patch, derived)
+  if (!clean) return { ok: false, error: 'patch 字段非法（只收 pct 整数 0..100 / 书签 / locator 串等白名单项；书签定位字段须与本书格式匹配）' }
+  const now = new Date().toISOString()
   const store = readStore()
   const prev = store.books[key]
     ? coerceReaderState(store.books[key], now, derived)

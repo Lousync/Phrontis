@@ -400,6 +400,12 @@ export function vaultExportExcerptsNote(pageId: string, contentMd: string): Vaul
   if (isWelcomeEntry(entry)) throw new Error(WELCOME_WRITE_DENY)
   if (isNonMdArchiveEntry(entry)) throw new Error(NON_MD_ARCHIVE_DENY)
   const abs = join(requireRoot(), entry.path)
+  // 索引说在、盘上已不在（文件被应用外删掉 / 同步工具挪走，索引尚未失效）→ 视同「页不存在」。
+  // 返回 null 走调用方的自愈分支（重建 + 回写新 id），否则 readFileSync 抛 ENOENT 把导出整个打断。
+  if (!existsSync(abs)) {
+    invalidateKnowledgeIndex()
+    return null
+  }
   const doc = parseMarkdown(readFileSync(abs, 'utf-8'))
   doc.body = contentMd
   if (!writeVaultFile(entry.path, serializeMarkdown(doc.frontmatter, doc.body))) {

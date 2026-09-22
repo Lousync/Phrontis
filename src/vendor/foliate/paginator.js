@@ -202,6 +202,11 @@ class View {
     #element = document.createElement('div')
     #iframe = document.createElement('iframe')
     #contentRange = document.createRange()
+    // ── KB PATCH（B 段 · patch ⑧）：把「被观察的节点」**留一个实体引用**。
+    //    上游只在 destroy() 里现从 `this.document`（= `#iframe.contentDocument`）取 body，
+    //    而帧一脱离 `contentDocument` 就是 null ⇒ 那个 `if` 门永远进不去、观察者永远留着。
+    //    机制、复现与判据见 README 补丁表 ⑧。──
+    #body = null
     #overlayer
     #vertical = false
     #rtl = false
@@ -263,7 +268,8 @@ class View {
                 const layout = beforeRender?.({ vertical, rtl, background })
                 this.#iframe.style.display = 'block'
                 this.render(layout)
-                this.#observer.observe(doc.body)
+                this.#body = doc.body          // ← KB PATCH ⑧：留引用（撤销时不再依赖帧是否还在）
+                this.#observer.observe(this.#body)
 
                 // the resize observer above doesn't work in Firefox
                 // (see https://bugzilla.mozilla.org/show_bug.cgi?id=1832939)
@@ -409,7 +415,17 @@ class View {
         return this.#overlayer
     }
     destroy() {
-        if (this.document) this.#observer.unobserve(this.document.body)
+        // ── KB PATCH ⑧：按**留存的引用**撤销，不再读 `this.document`。
+        //    宿主正常的拆卸时序是「React 先把阅读器 DOM 摘掉 → 再跑 effect cleanup」，
+        //    所以走到这里时帧**已经**脱离、`contentDocument` 已是 null ⇒ 上游那版 `if (this.document)`
+        //    恰好在这一刻失效，观察者被永久留在已脱离的帧上：
+        //    实测 Chromium 会**每帧**报一条 `ResizeObserver loop completed with undelivered notifications`
+        //    （166 条/秒，与本条 B-21 的现象速率逐字相同），直到那个文档被 GC 才停 —— 这也是
+        //    「同一次会话里时有时无」的来源。──
+        if (this.#body) {
+            this.#observer.unobserve(this.#body)
+            this.#body = null
+        }
     }
 }
 
@@ -1156,8 +1172,13 @@ export class Paginator extends HTMLElement {
         this.#view.document.defaultView.focus()
     }
     destroy() {
-        this.#observer.unobserve(this)
-        this.#view.destroy()
+        // ── KB PATCH ⑧：两处上游笔误（都只在拆卸路径上咬人，故一直没被上游用例发现）：
+        //    ① 观察的是 `#container`（见本文件构造器里的 observe），上游却撤销 `this` ⇒ 撤销落空；
+        //       `#container` 随阅读器一起被摘掉，观察者却还挂着（B-21 的同一族问题）。
+        //    ② `this.#view` 在二次拆卸 / 视图尚未建起时是 null，`#view.destroy()` 会抛 —— 抛了就跳过
+        //       下面的 `unload()` 与 mediaQuery 解绑（那是真的泄漏），只剩宿主那句 `catch {}` 兜着。──
+        this.#observer.unobserve(this.#container)
+        this.#view?.destroy()
         this.#view = null
         this.sections[this.#index]?.unload?.()
         this.#mediaQuery.removeEventListener('change', this.#mediaQueryListener)

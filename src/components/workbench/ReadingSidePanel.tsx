@@ -5,7 +5,7 @@ import { useDataChanged } from '../../lib/dataChanged'
 import { showToast } from '../../lib/toast'
 import { KB_PDF_PAGE_CHANGED, KB_READER_STATE_CHANGED } from '../shared/pdf/pdfEvents'
 import { bookEngineOf } from '../../../electron/lib/kbStore/bookFormats'
-import type { BookKind, ExcerptItem, ExcerptColor, ExcerptType, ExcerptExportEntry, PdfBookState, TxtBookmark } from '../../types'
+import type { BookBookmark, BookKind, ExcerptItem, ExcerptColor, ExcerptType, ExcerptExportEntry, PdfBookState } from '../../types'
 
 /**
  * 右栏「阅读」侧栏（书架升级全格式阅读器一期 + 摘录先行批次 v3.5.0 重做）。
@@ -69,7 +69,7 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
   const [pdfState, setPdfState] = useState<PdfBookState | null>(null)
   const [plainPct, setPlainPct] = useState(0)
   const [bookmarks, setBookmarks] = useState<PdfBookState['bookmarks']>([])
-  const [plainBookmarks, setPlainBookmarks] = useState<TxtBookmark[]>([])
+  const [plainBookmarks, setPlainBookmarks] = useState<BookBookmark[]>([])
   const [excerpts, setExcerpts] = useState<ExcerptItem[]>([])
   const [noteEdit, setNoteEdit] = useState<{ id: string; draft: string } | null>(null)
   const [tab, setTab] = useState<'excerpt' | 'timeline'>('excerpt')
@@ -101,17 +101,20 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
       void readerStateGet(rootId, reading.relPath).then((r) => {
         if (!alive) return
         setPlainPct(r.ok ? r.state?.pct ?? 0 : 0)
-        setPlainBookmarks(r.ok && Array.isArray(r.state?.bookmarks) ? (r.state!.bookmarks as TxtBookmark[]) : [])
+        setPlainBookmarks(r.ok && Array.isArray(r.state?.bookmarks) ? (r.state!.bookmarks as BookBookmark[]) : [])
       }).catch(() => { /* 同上 */ })
     }
     return () => { alive = false }
   }, [rootId, reading.kind, reading.relPath])
 
-  // 书签集刷新（TXT）：readerState 变化时拉 TXT 书签（按 kind 取源，不重犯「左栏盲挂」同类缺陷）
+  // 书签集刷新（readerState 那条路）：readerState 变化时重拉。
+  // ★ 判据是「**非 pdf**」而不是「=== 'txt'」—— 2026-09-22 起 foliate 系（epub/fb2/fbz）的书签
+  //   也在这个字段里，条件写死 'txt' 会让阅读器里刚加的书签在右栏不出现（正是铁律 18 说的
+  //   「AI 说改好了、界面没反应」的同款表现，只是这里是阅读器与右栏之间）。
   const refreshPlainBookmarks = () => {
-    if (reading.kind !== 'txt' || !rootId) return
+    if (reading.kind === 'pdf' || !rootId) return
     void readerStateGet(rootId, reading.relPath).then((r) => {
-      setPlainBookmarks(r.ok && Array.isArray(r.state?.bookmarks) ? (r.state!.bookmarks as TxtBookmark[]) : [])
+      setPlainBookmarks(r.ok && Array.isArray(r.state?.bookmarks) ? (r.state!.bookmarks as BookBookmark[]) : [])
     }).catch(() => { /* 忽略 */ })
   }
   useDataChanged('readerState', refreshPlainBookmarks)
@@ -223,6 +226,53 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
     try { void navigator.clipboard?.writeText(e.text) } catch { /* 忽略 */ }
   }
 
+  /**
+   * 书签区渲染数据 —— 按**引擎**归一成一个列表再渲染。
+   * 为什么不写三份 JSX：pdf / txt / foliate 三种书签的徽标与跳法不同，但外壳完全一样；
+   * 三份并列时「漏改一处」的表现是**静默少一块**（这正是本块上一版对 foliate 只留一行说明的由来）。
+   * ★ 判据用**引擎**（`bookEngineOf`）而不是 `kind === 'epub'`：写死 epub 会让 fb2 / fbz 两头都不命中。
+   * ★ cbz 到不了这里（`App.tsx` 对 `kind === 'cbz'` 直接给右栏传 `null`，Tab 不出现），故不设分支。
+   */
+  const markItems = useMemo(() => {
+    const eng = bookEngineOf(reading.relPath)
+    if (eng === 'foliate') {
+      // 定位键是 CFI ⇒ 走 onLocateExcerpt 的既有 foliate 分支（App 侧按在读那本书的引擎派发跳转事件）
+      return plainBookmarks
+        .filter((b) => typeof b.cfi === 'string' && b.cfi)
+        .map((b) => ({
+          id: b.id,
+          badge: '§',
+          label: b.chapter?.trim() || b.label || ' ',
+          title: `跳到 ${b.label || b.chapter || '该书签'}`,
+          go: () => onLocateExcerpt?.({ kind: reading.kind, cfi: b.cfi }),
+        }))
+    }
+    if (isPdf) {
+      return bookmarks.map((bm) => ({
+        id: `${bm.page}-${bm.at}`,
+        badge: `P${bm.page}`,
+        label: bm.note || ' ',
+        title: bm.note ? `第 ${bm.page} 页 · ${bm.note}` : `第 ${bm.page} 页`,
+        go: () => onLocatePdfPage?.(bm.page),
+      }))
+    }
+    return plainBookmarks
+      // 本书是 txt ⇒ 条条都有 paraIndex；类型谓词只为把「定位字段可选」收窄回数字
+      .filter((b): b is BookBookmark & { paraIndex: number } => typeof b.paraIndex === 'number')
+      .map((b) => ({
+        id: b.id,
+        badge: `¶${b.paraIndex + 1}`,
+        label: b.label || ' ',
+        title: `跳到 ${b.label || `段落 ${b.paraIndex + 1}`}`,
+        go: () => onLocateExcerpt?.({ kind: 'txt', paraIndex: b.paraIndex }),
+      }))
+  }, [reading.relPath, reading.kind, isPdf, bookmarks, plainBookmarks, onLocatePdfPage, onLocateExcerpt])
+
+  /** 书签空态提示（按引擎；help-disclosure 形态 B 的 hover 展开） */
+  const markEmptyHint = bookEngineOf(reading.relPath) === 'foliate'
+    ? '在阅读器工具栏加书签后，这里可以快速跳回该处'
+    : isPdf ? '在阅读器工具栏加书签后，这里可以快速跳页' : '在 TXT 阅读器工具栏加书签后，这里可以快速跳段'
+
   // 时间线分组（按日）
   const timelineGroups = useMemo(() => {
     const map = new Map<string, ExcerptItem[]>()
@@ -280,66 +330,37 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
       <div key={tab} className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5 kb-view-in">
         {tab === 'excerpt' ? (
           <>
-            {/* 书签（按引擎取源：pdf 在 pdfReader.json、txt 在 readerState.json）。
-                foliate 系（epub / fb2 / fbz）不进这一区：它们没有书签（结构待定 —— 书签键是 CFI，
-                塞进 TxtBookmark 的 paraIndex 形状会串味），故单独给一行中性说明，等真做时再换掉。
-                ★ 判据用**引擎**而非 `kind === 'epub'`：写死 epub 会让 fb2/fbz 两个分支都不命中，
-                  整块书签区静默消失（既不显示也不报错）。 */}
-            {bookEngineOf(reading.relPath) === 'foliate' && (
-              <div className="mb-2 flex items-start gap-1 px-1.5 py-1 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
-                <BookMarked size={11} className="mt-0.5 shrink-0" />
-                <span>本书格式暂不支持书签</span>
+            {/* 书签（按引擎取源：pdf 在 pdfReader.json；txt 与 foliate 系共用 readerState.json 的同一字段，
+                定位字段按 kind 分支 —— 见 BookBookmark / markItems 的注释）。
+                空态说明按 help-disclosure 形态 B：标题旁 ⓘ，悬停整块平滑展开（docs/help-disclosure-pattern.md） */}
+            <div className="group mb-2" data-wb="readingMarks" data-wb-marks={markItems.length}>
+              <div className="flex items-center gap-1 px-1.5 py-1 text-[11px] text-[var(--text-muted)]">
+                <BookMarked size={11} />
+                书签
+                {markItems.length > 0 && <span className="text-[var(--text-tertiary)]">{markItems.length}</span>}
+                {markItems.length === 0 && <Info size={11} className="shrink-0 text-[var(--text-disabled)]" />}
               </div>
-            )}
-            {(isPdf || reading.kind === 'txt') && (
-              /* 书签空态说明按 help-disclosure 形态 B：标题旁 ⓘ，悬停整块平滑展开（docs/help-disclosure-pattern.md） */
-              <div className="group mb-2">
-                <div className="flex items-center gap-1 px-1.5 py-1 text-[11px] text-[var(--text-muted)]">
-                  <BookMarked size={11} />
-                  书签
-                  {(isPdf ? bookmarks.length : plainBookmarks.length) > 0 && <span className="text-[var(--text-tertiary)]">{isPdf ? bookmarks.length : plainBookmarks.length}</span>}
-                  {(isPdf ? bookmarks.length : plainBookmarks.length) === 0 && <Info size={11} className="shrink-0 text-[var(--text-disabled)]" />}
-                </div>
-                {(isPdf ? bookmarks.length : plainBookmarks.length) === 0 ? (
-                  <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 group-hover:grid-rows-[1fr]">
-                    <div className="overflow-hidden">
-                      <div className="px-2 py-1.5 text-[11px] leading-relaxed text-[var(--text-tertiary)]">
-                        {isPdf ? '在阅读器工具栏加书签后，这里可以快速跳页' : '在 TXT 阅读器工具栏加书签后，这里可以快速跳段'}
-                      </div>
-                    </div>
+              {markItems.length === 0 ? (
+                <div className="grid grid-rows-[0fr] transition-[grid-template-rows] duration-300 group-hover:grid-rows-[1fr]">
+                  <div className="overflow-hidden">
+                    <div className="px-2 py-1.5 text-[11px] leading-relaxed text-[var(--text-tertiary)]">{markEmptyHint}</div>
                   </div>
-                ) : (
-                  (isPdf ? bookmarks : plainBookmarks).map((b, i) =>
-                    isPdf ? (
-                      (() => {
-                        const bm = b as PdfBookState['bookmarks'][number]
-                        return (
-                          <button
-                            key={`${bm.page}-${i}`}
-                            onClick={() => onLocatePdfPage?.(bm.page)}
-                            className="kb-item-in group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"
-                            title={bm.note ? `第 ${bm.page} 页 · ${bm.note}` : `第 ${bm.page} 页`}
-                          >
-                            <span className="shrink-0 rounded bg-[var(--bg-hover)] px-1 py-0.5 text-[10px] text-[var(--text-secondary)]">P{bm.page}</span>
-                            <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{bm.note || ' '}</span>
-                          </button>
-                        )
-                      })()
-                    ) : (
-                      <button
-                        key={`${(b as TxtBookmark).id}-${i}`}
-                        onClick={() => onLocateExcerpt?.({ kind: 'txt', paraIndex: (b as TxtBookmark).paraIndex })}
-                        className="kb-item-in group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"
-                        title={`跳到 ${(b as TxtBookmark).label || `段落 ${(b as TxtBookmark).paraIndex + 1}`}`}
-                      >
-                        <span className="shrink-0 rounded bg-[var(--bg-hover)] px-1 py-0.5 text-[10px] text-[var(--text-secondary)]">¶{(b as TxtBookmark).paraIndex + 1}</span>
-                        <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{(b as TxtBookmark).label || ' '}</span>
-                      </button>
-                    ),
-                  )
-                )}
-              </div>
-            )}
+                </div>
+              ) : (
+                markItems.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={m.go}
+                    data-wb="readingMark"
+                    className="kb-item-in group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                    title={m.title}
+                  >
+                    <span className="shrink-0 rounded bg-[var(--bg-hover)] px-1 py-0.5 text-[10px] text-[var(--text-secondary)]">{m.badge}</span>
+                    <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{m.label}</span>
+                  </button>
+                ))
+              )}
+            </div>
 
             {/* 摘录卡片 */}
             {excerpts.length === 0 ? (

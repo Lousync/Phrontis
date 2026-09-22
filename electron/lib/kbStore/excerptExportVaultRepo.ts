@@ -10,7 +10,7 @@ import {
 import { excerptList } from './excerptVaultRepo'
 import { vaultCreatePage, vaultExportExcerptsNote } from './knowledgeVaultRepo'
 import { getCurrentVault } from './vaultContext'
-import { bookDisplayName } from './bookFormats'
+import { bookDisplayName, bookIdentityName } from './bookFormats'
 
 /**
  * 摘录导出映射 vault 仓库（书架阅读器 · 摘录导出知识库闭环，方案 §C1）——`.knowbase/modules/excerptExports.json` **唯一写方**。
@@ -72,8 +72,11 @@ export function excerptExportToNote(rootId: string, relPath: string): { ok: bool
     // 页面已不在库（被删）→ 落到下方自愈分支
   }
 
-  // 新建页（落默认收件箱）+ 回写映射；书名口径与 md 标题一致（bookDisplayName）
-  const page = vaultCreatePage({ title: `读书笔记 · ${bookDisplayName(relPath)}`, contentMd: md })
+  // 新建页（落默认收件箱）+ 回写映射。
+  // ★ 页名用**身份名**（带扩展名，B-15）：`读书笔记 · 探针样书.fb2` —— 页名是身份不是展示，
+  //   用 bookDisplayName 会让 a.epub / a.fb2 / a.cbz 输出同名页，只能靠 (1)(2) 后缀区分。
+  //   md 内的 H1 仍用展示名（给人读），来源行已带 relPath，两者分工不重叠。
+  const page = vaultCreatePage({ title: `读书笔记 · ${bookIdentityName(relPath)}`, contentMd: md })
   const entry: ExcerptExportEntry = { pageId: page.id, pagePath: page.path, exportedAt: now, count: excerpts.length }
   const next = applyExportEntry(readStore(), key, entry)
   writeJsonOrThrow(MOD, F_STORE, next)

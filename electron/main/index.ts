@@ -306,17 +306,42 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    // ★ B-19：该事件对**子帧**同样触发 —— 书籍内容帧（blob:）在「帧还没加载完就被拆掉/换掉」的
+    //   时序上报 ERR_ABORTED(-3)，那是有意取消、不是窗口级故障。不判主帧就会把它按窗口错误报，
+    //   每次进出书籍各来一条，混在真故障里增加排查噪声。
+    if (!isMainFrame) return
     console.error('[Window] did-fail-load:', { errorCode, errorDescription, validatedURL })
   })
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error('[Window] render-process-gone:', details)
     ;(globalThis as any).__kbLogRendererGone?.(details)
   })
+  // ★ B-19：渲染层 error 级消息**按「来源+消息体」去重限流**再转发。
+  //   一次「退出书籍回书架」实测在 1.45s 内向这里投递 266 条**同一条** RO 环告警；
+  //   无条件转发会把 `npm run dev` 的终端整屏刷掉，真报错被淹没（也正是这批刷屏把 devbridge
+  //   500 条日志环挤爆、吃掉了同段的其它证据）。同一条消息每个窗口只放行一次，
+  //   被压掉的条数在下次放行时标出来 —— **不整条静音**（别的模块可能真出问题）。
+  const rendererLogSeen = new Map<string, { at: number; suppressed: number }>()
+  const RENDERER_LOG_WINDOW_MS = 1000
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-    if (level >= 2) {
-      console.error('[Renderer]', message, `(${sourceId}:${line})`)
+    if (level < 2) return
+    const now = Date.now()
+    const key = `${sourceId}:${message}`
+    const prev = rendererLogSeen.get(key)
+    if (prev && now - prev.at < RENDERER_LOG_WINDOW_MS) {
+      prev.suppressed += 1
+      return
     }
+    const suppressed = prev?.suppressed ?? 0
+    rendererLogSeen.set(key, { at: now, suppressed: 0 })
+    // 窗口外且久未出现的键及时回收，防长期挂机无界增长
+    if (rendererLogSeen.size > 200) {
+      for (const [k, v] of rendererLogSeen) {
+        if (now - v.at > 10_000) rendererLogSeen.delete(k)
+      }
+    }
+    console.error('[Renderer]', message, `(${sourceId}:${line})`, suppressed > 0 ? `[+${suppressed} 条同类已折叠]` : '')
   })
 
   // 加载页面

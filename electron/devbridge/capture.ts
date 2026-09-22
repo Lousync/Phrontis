@@ -26,6 +26,10 @@ export interface LogItem extends RingItem {
   scope: 'renderer' | 'main'
   message: string
   stack?: string
+  /** 被折叠的**紧邻同消息**条数（>=1；见 recordLog 的 B-19 折叠） */
+  count?: number
+  /** 该消息最后一次出现的时间（折叠时刷新；`ts` 保持首现时间） */
+  lastTs?: string
 }
 
 export interface IpcItem extends RingItem {
@@ -191,13 +195,31 @@ function safeJson(v: unknown): string {
   }
 }
 
+/** 上一次压入的日志对象（引用即环内那条，用于折叠紧邻重复） */
+let lastLogItem: LogItem | null = null
+
+/**
+ * 记一条日志。★ B-19：**紧邻同消息折叠** —— 同 scope/level/message 连续到来时不新占条目，
+ * 只在原条目上累加 `count` 并刷新 `lastTs`（`ts` 保持首现时间，首现/末现都查得到）。
+ *
+ * 为什么必须折叠：日志环容量只有 500，而一次「退出书籍回书架」实测就产生 266 条同一条
+ * RO 环告警（主进程转发副本再加 234 条）—— 不作折叠会把整段环形缓冲挤爆，
+ * **把同段时间的其它报错一起挤出去**，排查者据此下结论就会错（该现象已实际发生过一次）。
+ * 只折叠**紧邻**重复：不同消息穿插时照常各记一条，事件先后关系不变。
+ */
 export function recordLog(
   level: LogItem['level'],
   scope: LogItem['scope'],
   message: string,
   stack?: string
 ): void {
-  logRing.push({ level, scope, message: String(message).slice(0, 2000), stack })
+  const msg = String(message).slice(0, 2000)
+  if (lastLogItem && lastLogItem.scope === scope && lastLogItem.level === level && lastLogItem.message === msg) {
+    lastLogItem.count = (lastLogItem.count ?? 1) + 1
+    lastLogItem.lastTs = new Date().toISOString()
+    return
+  }
+  lastLogItem = logRing.push({ level, scope, message: msg, stack, count: 1 })
 }
 
 export interface AggregatedError {
@@ -218,17 +240,18 @@ export function aggregateErrors(includeWarn = false): AggregatedError[] {
     const key = `${item.scope}|${item.level}|${item.message}`
     const existing = map.get(key)
     if (existing) {
-      existing.count++
-      existing.lastTs = item.ts
+      // count / lastTs 都要认折叠后的口径（recordLog 的 B-19 折叠把 N 条压成 1 条 + count）
+      existing.count += item.count ?? 1
+      existing.lastTs = item.lastTs ?? item.ts
       if (!existing.stack && item.stack) existing.stack = item.stack
     } else {
       map.set(key, {
         message: item.message,
-        count: 1,
+        count: item.count ?? 1,
         level: item.level,
         scope: item.scope,
         firstTs: item.ts,
-        lastTs: item.ts,
+        lastTs: item.lastTs ?? item.ts,
         stack: item.stack,
       })
     }

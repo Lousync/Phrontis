@@ -11,6 +11,7 @@
  *   3) 点导出 → 知识库页数 +1（**能看见**：广播 + 索引都生效）+ 映射回写 + md 里 2 个 kbloc 链接
  *   4) 再点一次 → 页数**不变**、页面 id **不变**（幂等：覆盖重写同一篇，不产生新页）
  *   5) 页面被删 → 再导出自愈新建（映射指向失效页面时不报错、自动重建）
+ *   6) ★ B-15：同名不同格式的书（探针样书.txt / .epub）各导一篇 → 页名带格式后缀、互不覆盖
  */
 const DEBUG_PORT = Number(process.env.KNOWBASE_PROBE_PORT ?? 9222)
 const { readFileSync, writeFileSync, existsSync, readdirSync, unlinkSync } = await import('node:fs')
@@ -143,12 +144,38 @@ async function main() {
   try { unlinkSync(mapPath) } catch { /* 无即无需清 */ }
   for (const f of listNotes()) { try { unlinkSync(join(inboxDir, f)) } catch { /* 忽略 */ } }
   console.log('[fixture]', JSON.stringify({ key, notesBefore: listNotes().length }))
+  // ★ 上面是**绕过应用直接删盘**，而 knowledgeIndex 是**记忆化**的（磁盘缓存还不校验文件是否在，
+  //   见 seed-probe-vault.mjs 里那段「幽灵页」说明）⇒ 不重建就会把已删的页继续算进页数，
+  //   下面「导出后页数 +1」拿到假读数。2026-09-22 实测：连跑几轮别的探针后 here = before 13 / after 11
+  //   （导出写盘触发 rebuild，才第一次看到真值），换 seed 紧接着跑则一直绿 ——
+  //   即这条与产品无关，是**探针之间的世界污染**。修法：用现成通道做一次**净零**的星标往返，
+  //   借它的 invalidateKnowledgeIndex() 逼索引重建（不新造测试专用 IPC，也不动产品代码）。
+  //   选页要躲开三类「不能写」的条目（欢迎页 / 二进制归档 / 索引里有但盘上已不在 = 幽灵页），
+  //   所以是**挨个试**：成功一次索引就已重建，随后那次回翻把星标复原（净零，不污染 fixture 语义）。
+  const rebuilt = await evalJs(`(async () => {
+    const pages = (await window.api.getKnowledgePages()) ?? []
+    for (const p of pages.slice(0, 12)) {
+      if (!p || !p.id) continue
+      try {
+        if (!(await window.api.toggleKnowledgeStar(p.id))) continue
+        await window.api.toggleKnowledgeStar(p.id)
+        return 'ok:' + p.id
+      } catch { /* 换下一个 */ }
+    }
+    return 'no-starrable-page'
+  })()`)
+  console.log('[索引重建]', rebuilt)
 
   // 3) 打开书架 → 点 TXT 样书 → 等阅读器
   await evalJs(`(() => { document.querySelector('[data-wb-bookmark="bookshelf"]')?.click(); return true })()`)
   await sleep(1200)
   const clicked = await evalJs(`(() => {
-    const card = [...document.querySelectorAll('main button')].find((b) => (b.getAttribute('title') || '').includes('探针样书'))
+    // ★ 必须**精确匹配 relPath**（卡片 title 就是 relPath）。
+    //   以前这里是 \`includes('探针样书')\` —— fixture 只有 .txt 时恰好命中，2a 加进 .epub/.fb2/.fbz、
+    //   2b 加进 .cbz 之后，DOM 第一张变成 \`探针样书.epub\` ⇒ 点开的是 EPUB、挂上 epubReader，
+    //   下面「TXT 阅读器挂载」永远为假（表象是探针自缢，不是产品挂了）。
+    const card = [...document.querySelectorAll('main button')]
+      .find((b) => (b.getAttribute('title') || '') === ${JSON.stringify(BOOK)})
     card?.click(); return !!card
   })()`)
   ok('找到并点击 TXT 样书卡片', clicked)
@@ -231,6 +258,42 @@ async function main() {
     const after3 = await waitPageCount(after1 + 1, 20)
     const e3 = readMap()?.books?.[key] ?? null
     ok('★ 映射指向已删页面 → 自愈新建（页数 +1、回写新 id）', after3 === after1 + 1 && !!e3?.pageId && e3.pageId !== 'no-such-page-id', `after=${after3} id=${e3?.pageId}`)
+  }
+
+  // 8) ★ B-15：同名不同格式的书各导一篇 —— 页名必须带格式后缀、互不覆盖。
+  //    fixture 里 探针样书.txt / .epub 展示名相同（bookDisplayName 都是「探针样书」），
+  //    修前会产出「读书笔记 · 探针样书.md」+「…(1).md」，只有 (N) 后缀能区分。
+  //    这里直接走 IPC 导出（不依赖 UI 划选），断言只看**页名与内容归属**。
+  {
+    const BOOK2 = '.books/探针样书.epub'
+    const key2 = `${cur.rootId}/${BOOK2}`
+    const xStore = JSON.parse(readFileSync(join(FIXTURE, '.knowbase', 'modules', 'excerpts.json'), 'utf8'))
+    const now2 = new Date().toISOString()
+    xStore.books[key2] = {
+      'ex-9': { id: 'ex-9', kind: 'epub', cfi: '/6/4!/4/2/2:0', chapter: '第一章', text: 'EPUB 那本的独占摘录文本', note: '', color: 'y', type: 'excerpt', at: now2, updatedAt: now2 },
+    }
+    writeFileSync(join(FIXTURE, '.knowbase', 'modules', 'excerpts.json'), JSON.stringify(xStore, null, 2), 'utf8')
+
+    const beforeNotes = listNotes()
+    const txtFile = beforeNotes.find((f) => f.includes('探针样书.txt'))
+    const txtBefore = txtFile ? readFileSync(join(inboxDir, txtFile), 'utf8') : ''
+
+    const r2 = await evalJs(`window.api.excerptExportNote(${JSON.stringify(cur.rootId)}, ${JSON.stringify(BOOK2)}).then((x) => x).catch((e) => ({ ok: false, error: String(e) }))`)
+    console.log('[B-15 导出]', JSON.stringify(r2))
+    const afterNotes = listNotes()
+    ok('★ B-15：EPUB 那本导出成功', !!r2?.ok, JSON.stringify(r2))
+    ok('★ B-15：收件箱恰好新增 1 篇（页数 +1）', afterNotes.length === beforeNotes.length + 1, `${beforeNotes.length} → ${afterNotes.length}`)
+    ok('★ B-15：页名带格式后缀且互不相同',
+      afterNotes.includes('读书笔记 · 探针样书.epub.md') && afterNotes.includes('读书笔记 · 探针样书.txt.md'),
+      JSON.stringify(afterNotes))
+    ok('★ B-15：新页不是 (N) 后缀副本（说明不是撞名退让）',
+      afterNotes.includes('读书笔记 · 探针样书.epub.md') && !afterNotes.some((f) => /探针样书\.epub\(\d+\)\.md$/.test(f)),
+      JSON.stringify(afterNotes))
+    const txtAfter = txtFile ? readFileSync(join(inboxDir, txtFile), 'utf8') : ''
+    ok('★ B-15：TXT 那篇内容零改动（互不覆盖）', !!txtBefore && txtAfter === txtBefore)
+    const epubMd = afterNotes.includes('读书笔记 · 探针样书.epub.md') ? readFileSync(join(inboxDir, '读书笔记 · 探针样书.epub.md'), 'utf8') : ''
+    ok('★ B-15：EPUB 那篇是自己的摘录（未串入 TXT 的）',
+      epubMd.includes('EPUB 那本的独占摘录文本') && !epubMd.includes('探针样书第一段的摘录文本'))
   }
 
   const errs = await evalJs(`window.__errs ?? []`)

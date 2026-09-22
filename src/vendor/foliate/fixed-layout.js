@@ -107,6 +107,22 @@ export class FixedLayout extends HTMLElement {
         if (!side) return
         const left = this.#left ?? {}
         const right = this.#center ?? this.#right
+        // ── KB PATCH（第 6 处，见 src/vendor/foliate/README.md）：B-17 空帧早退 ──
+        //   `#showSpread` 先把三个帧槽清成 null，**之后**才 `await #createFrame(...)`；
+        //   而帧上的 `ResizeObserver` 回调 `() => this.#render()` 在这个 await 窗口里照样会被
+        //   投递 ⇒ 此刻 `right` 为 null，而它下面**处处会用到**：
+        //     · `side !== 'left'` 时先撞 `target.width`（`target` 就是 `right`）
+        //     · 两个分支最终都撞 `transform(right)`（解构 null ⇒ `.element`）
+        //   上游默认用例「左 / 右 / 中三选一」，窗口期短、命中概率低；宿主拍板
+        //   `rendition.spread = 'none'`（每节都是 `{center}`）⇒ `#center` 在窗口期必为 null
+        //   ⇒ **每次翻页必踩**。页面观感正常（随后那次显式 `#render()` 把版式纠正回来），
+        //   纯粹是控制台红字，但它会污染排查别的 RO 问题时的证据。
+        //   ★ 判据取「`right` 缺席」而不是「三槽全空」：后者罩不住**双页路径的第二个** await
+        //   窗口（`#left` 已挂上、`#right` 仍为 null）—— 那条路径上 `side === 'left'` 时
+        //   前两处都没事，最后由 `transform(right)` 抛。半边帧也出不了正确的拼版
+        //   （宽度公式要把左右相加），故一并无帧早退；补上 `#right` 后的显式 `#render()`
+        //   会渲最终态。
+        if (!right) return
         const target = side === 'left' ? left : right
         const { width, height } = this.getBoundingClientRect()
         const portrait = this.spread !== 'both' && this.spread !== 'portrait'

@@ -336,8 +336,17 @@ async function main() {
   console.log('[宿主终态]', JSON.stringify(hostAfter))
   ok('★ 宿主 window 未被污染（标志位全 null）', Object.values(hostAfter.pwned).every((v) => v === null), JSON.stringify(hostAfter.pwned))
   ok('★ 宿主 document.title 未被改写', hostAfter.title === hostBase.title && hostAfter.title !== 'PWNED-INLINE', `${hostBase.title} → ${hostAfter.title}`)
-  const errs = await evalJs(`(window.__errs ?? []).filter((e) => !/ResizeObserver/.test(e)).slice(0, 6)`)
-  note('渲染层错误（已滤掉 ResizeObserver 噪声）', JSON.stringify(errs))
+  // B-21（`ResizeObserver loop completed with undelivered notifications`，foliate `View` 的观察者
+  // 被留在已脱离的帧上）**此处不作断言，只报数** —— 不是「与本条无关」，而是这条判据在本探针的
+  // 时序下**会假通过**：2026-09-22 拿故意改回上游门的构建实测，本探针读 0 条、`probe-ro-noise.mjs`
+  // （同构建）读 341 条 ⇒ 条数受卸载时机/GC 影响（这正是它当年「时有时无」的原因）。
+  // 回归位只在 `probe-ro-noise.mjs`（判据是「帧内 window 已消失却仍被观察」，不受时机影响）。
+  const rawErrs = (await evalJs(`(window.__errs ?? []).slice(0, 60)`)) ?? []
+  const roErrs = rawErrs.filter((e) => /ResizeObserver loop/.test(e))
+  note('ResizeObserver 环告警条数（**不作断言**：读 0 不代表没漏，见本段注释与 probe-ro-noise.mjs）',
+    `${roErrs.length} 条`)
+  const errs = rawErrs.filter((e) => !/ResizeObserver loop/.test(e)).slice(0, 6)
+  note('渲染层错误（RO 环告警单列在上一条，此处只列其余）', JSON.stringify(errs))
   note('CDP 求值竞态失败次数（帧被替换瞬间求值，非断言失败）', String(K.evalFailures()))
 
   finish()

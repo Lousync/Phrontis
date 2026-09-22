@@ -24,6 +24,11 @@
  *          `<html data-kb-edge>`（生产默认关，零开销）；「点了没反应」先读它看 frameX/hostX/branch。
  *   7) 进度落盘：readerState.json 该书 pct > 0 **且** locator 是 epubcfi(...) 串（双轨都写了）
  *   8) 返回书架 → 重开 → 位置从 CFI 恢复（回到第三章那一页，不是回首页）
+ *   8.5) 书签（2026-09-22）：工具栏加书签 → readerState.json 落 CFI → **同一页再点即移除（盘上回到 0 条）**
+ *        → 再加 → 右栏「阅读」面板出现该行（徽标 §）→ 翻走（按钮回未收藏态）→ 点该行跳回原处。
+ *        ★ 顺序刻意「先同页验移除、再验跳转」：同一页 CFI 必然相同，故"再点 = 移除"是确定性的；
+ *          而「跳回后当前 CFI 是否仍全等」不确定（换字号/窗口会变）→ 放最后**只记 note 不判失败**，
+ *          否则这条探针会在无关改动下变红（已知限制见 EpubReaderView.toggleBookmark 注释）。
  *   9) ★ 恶意书负向：三种载荷各占一章，逐一验「载荷在 DOM 里 + 一句都没执行 + 宿主清白」
  *
  * ★ fixture 前置复位（探针**必须**自带，不能只靠 seed 脚本）：
@@ -58,7 +63,7 @@ const {
   evalJs, evalIn, blobFrames, visibleCtxs, ctxWithText,
   frameBox, frameReport, pierceAttrs, pierceHighlightRect,
   hostPct, hostLabel, mouse, clickAt,
-  resetFixtureState, stateOf, excerptsOf, openBookshelf, openBook, backToShelf, sleep,
+  resetFixtureState, stateOf, excerptsOf, openBookshelf, openBook, backToShelf, waitAttr, sleep,
 } = K
 
 const BOOK = '探针样书.epub'
@@ -367,6 +372,60 @@ async function main() {
   ok('重开后进度回到落盘值附近（CFI 恢复生效）', Number.isFinite(uiPct) && Math.abs(uiPct - pctBefore) <= 5, `ui=${restored.pct} disk=${pctBefore}`)
   ok('重开后停在第三章（不是回首页）', !!backCtx, String(restored.chapter))
 
+  // ===== 8.5) 书签（2026-09-22）：加 → 再点即移除 → 加 → 右栏出现 → 翻走 → 点回来 =====
+  // 端到端锁这条链：工具栏按钮 → readerState.json（存 CFI）→ 右栏 readingMark 行
+  // → onLocateExcerpt → KB_EPUB_GOTO_CFI → view.goTo。任一环写错的表现都是「点了没反应」。
+  // ★ 顺序刻意是「先在同一页验证移除、再验证跳转」：**同一页**的 CFI 必然相同，
+  //   于是"再点一次 = 移除"是确定性的；而"跳回来之后 CFI 是否仍全等"是不确定的（换字号/窗口会变），
+  //   放在最后**只记 note 不判失败** —— 否则这条探针会在无关改动下变红。
+  const MARK = '[data-wb="epubBookmark"]'
+  const markAttr = () => evalJs(`document.querySelector('${MARK}')?.getAttribute('data-wb-marked') ?? null`)
+  const clickMark = () => evalJs(`(() => { document.querySelector('${MARK}')?.click(); return true })()`)
+
+  ok('工具栏书签按钮在位且初始未收藏', (await markAttr()) === '0', String(await markAttr()))
+  await clickMark()
+  ok('点书签 → 按钮转已收藏态', await waitAttr(MARK, 'data-wb-marked', '1'), String(await markAttr()))
+  const bm0 = stateOf(BOOK)?.bookmarks ?? []
+  console.log('[书签诊断]', JSON.stringify(bm0))
+  ok('书签已落盘 readerState.json（1 条）', bm0.length === 1, `len=${bm0.length}`)
+  ok('定位键是 CFI（foliate 系口径，不是页码/段号）',
+    typeof bm0[0]?.cfi === 'string' && bm0[0].cfi.startsWith('epubcfi('), String(bm0[0]?.cfi))
+
+  // 同一页再点一次 = 移除（也覆盖「删掉最后一条 = 写空数组」，schema 侧若拒空数组这里会红）
+  await clickMark()
+  ok('同一页再点一次 → 立即移除（盘上也回到 0 条）',
+    await waitAttr(MARK, 'data-wb-marked', '0') && (stateOf(BOOK)?.bookmarks ?? []).length === 0,
+    `len=${(stateOf(BOOK)?.bookmarks ?? []).length}`)
+
+  await clickMark()
+  await waitAttr(MARK, 'data-wb-marked', '1')
+  const pctAtMark = await hostPct()
+  ok('第二次加书签仍落盘（不是只在本地 state 里）', (stateOf(BOOK)?.bookmarks ?? []).length === 1)
+
+  await evalJs(`(() => { document.querySelector('[data-wb-rp-tab="reading"]')?.click(); return true })()`)
+  await sleep(600)
+  const markRows = await evalJs(`(() => {
+    const box = document.querySelector('[data-wb="readingMarks"]')
+    const rows = box ? [...box.querySelectorAll('[data-wb="readingMark"]')] : []
+    return { box: !!box, n: rows.length, badge: rows[0]?.querySelector('span')?.textContent ?? null, text: (rows[0]?.textContent ?? '').trim() }
+  })()`)
+  console.log('[右栏书签诊断]', JSON.stringify(markRows))
+  ok('右栏「阅读」面板书签区出现 1 行（engine=foliate 分支，不是空态提示）', markRows.box && markRows.n === 1, JSON.stringify(markRows))
+  ok('书签徽标是 §（CFI 定位，不是 ¶段号 / P页码）', markRows.badge === '§', String(markRows.badge))
+
+  await evalJs(`(() => { document.querySelector('[data-wb="epubNext"]')?.click(); return true })()`)
+  await sleep(1300)
+  const pctAway = await hostPct()
+  ok('翻走后书签按钮回未收藏态（两态判据跟着 relocate 走）', (await markAttr()) === '0', `pct ${pctAtMark}→${pctAway}`)
+
+  await evalJs(`(() => { document.querySelector('[data-wb="readingMark"]')?.click(); return true })()`)
+  await sleep(1600)
+  const pctBack = await hostPct()
+  ok('点右栏书签行 → 跳回加书签处（进度回到该值附近）', Math.abs(pctBack - pctAtMark) <= 3, `now=${pctBack} mark=${pctAtMark}`)
+  const cfiMatched = (await markAttr()) === '1'
+  note('跳回后当前 CFI 与存储值的稳定性',
+    cfiMatched ? '全等 ⇒ 在此处再点一次即移除' : '⚠ 不等 ⇒ 在此处再点会加出第二条（已知限制，非失败）')
+
   // ===== 9) ★ 恶意书负向 =====
   ok('点「返回书架」准备开恶意书', await backToShelf())
   ok('恶意书能正常渲染（不崩、不白屏）', await openBook(EVIL))
@@ -419,8 +478,17 @@ async function main() {
   console.log('[宿主终态]', JSON.stringify(hostAfter))
   ok('★ 宿主 window 未被污染（六个标志位全 null）', Object.values(hostAfter.pwned).every((v) => v === null), JSON.stringify(hostAfter.pwned))
   ok('★ 宿主 document.title 未被改写', hostAfter.title === hostBase.title && hostAfter.title !== 'PWNED-INLINE', `${hostBase.title} → ${hostAfter.title}`)
-  const errs = await evalJs(`(window.__errs ?? []).slice(0, 6)`)
-  note('渲染层错误（应为空）', JSON.stringify(errs))
+  // B-21（`ResizeObserver loop completed with undelivered notifications`，foliate `View` 的观察者
+  // 被留在已脱离的帧上）**此处不作断言，只报数** —— 不是「与本条无关」，而是这条判据在本探针的
+  // 时序下**会假通过**：2026-09-22 拿故意改回上游门的构建实测，本探针读 0 条、`probe-ro-noise.mjs`
+  // （同构建）读 341 条 ⇒ 条数受卸载时机/GC 影响（这正是它当年「时有时无」的原因）。
+  // 回归位只在 `probe-ro-noise.mjs`（判据是「帧内 window 已消失却仍被观察」，不受时机影响）。
+  const rawErrs = (await evalJs(`(window.__errs ?? []).slice(0, 60)`)) ?? []
+  const roErrs = rawErrs.filter((e) => /ResizeObserver loop/.test(e))
+  note('ResizeObserver 环告警条数（**不作断言**：读 0 不代表没漏，见本段注释与 probe-ro-noise.mjs）',
+    `${roErrs.length} 条`)
+  const errs = rawErrs.filter((e) => !/ResizeObserver loop/.test(e)).slice(0, 6)
+  note('渲染层错误（应为空；RO 环告警单列在上一条）', JSON.stringify(errs))
   note('CDP 求值竞态失败次数（帧被替换瞬间求值，非断言失败）', String(K.evalFailures()))
   note('blob 内容帧数（收尾）', String((await blobFrames()).length))
 

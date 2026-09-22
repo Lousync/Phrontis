@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { ArrowLeft, ChevronLeft, ChevronRight, Contrast, Loader2, Maximize2, Minimize2, MousePointerClick, Trash2, Type, X } from 'lucide-react'
+import { ArrowLeft, Bookmark, BookmarkPlus, ChevronLeft, ChevronRight, Contrast, Loader2, Maximize2, Minimize2, MousePointerClick, Trash2, Type, X } from 'lucide-react'
 import { View, makeBook } from '../../../vendor/foliate/view.js'
 import { Overlayer } from '../../../vendor/foliate/overlayer.js'
 import type { FoliateBook, FoliateRelocateDetail } from '../../../vendor/foliate/view.js'
-import { excerptCreate, excerptDelete, excerptList, readerStateGet, readerStatePatch, workspaceReadRange } from '../../../lib/ipc'
+import { excerptCreate, excerptDelete, excerptList, readerStateGet, readerStatePatch, workspaceReadRangeBytes } from '../../../lib/ipc'
+import { showGlobalConfirm } from '../../../lib/globalConfirm'
 import { useDataChanged } from '../../../lib/dataChanged'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
@@ -12,9 +13,13 @@ import { KB_CBZ_THUMBS, KB_CBZ_THUMB_REQ, KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EP
 // foliate 的 makeBook() 按 File 的 name/type 分派解码器（view.js:13-21，不看魔数），
 // 自拼 MIME 会重演「所有书都叫 xxx.epub」→ 裸 fb2 当场 UnsupportedTypeError、fbz 被当 EPUB 解包炸掉。
 import { bookExtOf, bookKindOf, bookMimeOf } from '../../../../electron/lib/kbStore/bookFormats'
+// 书签条数上限：**唯一真源在 schema**（写盘侧会按它整单拒绝），渲染层只读来提前拦并给出提示
+import { MAX_BOOKMARKS } from '../../../../electron/lib/kbStore/readerStateSchema'
+// 大书体积分档（B-16）：阈值与**用户看到的文案**都在那个零依赖文件里，两边共用同一份（勿在此另写数字）
+import { bookSizeTier, bigBookConfirmText, bigBookDeclinedText, tooBigText } from '../../../../electron/lib/kbStore/bookSizeGate'
 import { ExcerptCaptureBar } from '../txt/ExcerptCaptureBar'
 import type { SelectionRect } from '../pdf/TextSelectionBar'
-import type { ExcerptColor, ExcerptItem, ExcerptType, ReaderPaper } from '../../../types'
+import type { BookBookmark, ExcerptColor, ExcerptItem, ExcerptType, ReaderPaper } from '../../../types'
 
 /**
  * foliate 系阅读器（B 段 · 二期六格式引擎）。
@@ -42,10 +47,11 @@ import type { ExcerptColor, ExcerptItem, ExcerptType, ReaderPaper } from '../../
  * Hook 纪律：所有 hook 声明在任何早退 return 之前。
  */
 
-/** 分块读取步长：raw 字节 ×4/3 = base64 串长度，8MB 一步在 IPC 上是舒适区 */
+/** 分块读取步长。★ 别按「IPC 往返次数」来调：实测 8/16/32/64MB 分块拉完同一本书的总时长一样
+ *  （吞吐 ~160MB/s，是 V8 结构化克隆的天花板，与分块大小无关，见 docs/pending-fixes.md 的 B-16 表）。
+ *  这里 8MB 的取舍是**内存峰值**：分块越大，同一时刻多占的字节越多，而对总时长没有好处。 */
 const READ_CHUNK = 8 * 1024 * 1024
-/** 整本载入上限：foliate 的 zip 解包要全量字节（无范围读通道），超大文件先挡住并给明确提示 */
-const MAX_BOOK_BYTES = 128 * 1024 * 1024
+
 
 /** 缩略图缓存的项数上限（每项约 5-8KB data URL ⇒ 240 项 ≈ 2MB）。
  *  ★ 按**插入序**裁剪（Map 保序），不是严格 LRU —— 往回滚会重新生成，代价可接受；
@@ -79,12 +85,8 @@ const EDGE_DRAG_SLOP = 6
 /** 悬停热区时挂在内容文档 `<html>` 上的类（光标手型；样式在 buildStyles 的 after 槽） */
 const EDGE_CLS = { l: 'kb-et-l', r: 'kb-et-r' } as const
 
-function b64ToU8(b64: string): Uint8Array {
-  const bin = atob(b64)
-  const out = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
-  return out
-}
+/** 加载阶段（覆盖层文案用）：read = 正在读字节 / open = 正在解包排版 */
+type LoadPhase = 'read' | 'open'
 
 /** 宿主主题变量取值（内容帧是独立文档，CSS 变量不继承 —— 必须读出来再写进书页样式） */
 function hostVar(name: string, fallback: string): string {
@@ -164,30 +166,46 @@ function edgeHintVars(paper: ReaderPaper): CSSProperties {
 }
 function lum(r: number, g: number, b: number): number { return 0.2126 * r + 0.7152 * g + 0.0722 * b }
 
-/** 整本读入（foliate 需要完整字节；分块拼装避免单次超大 IPC）。
- *  返回 ArrayBuffer 而非 Uint8Array：`new File([u8])` 在 TS 5.7 的 `Uint8Array<ArrayBufferLike>`
- *  泛型下不满足 `BlobPart`（SharedArrayBuffer 分支），转一次 ArrayBuffer 最干净。 */
-async function readWholeBook(rootId: string, relPath: string): Promise<ArrayBuffer> {
-  const first = await workspaceReadRange(rootId, relPath, 0, READ_CHUNK)
-  if (!first || first.error) throw new Error(first?.error ?? '读取失败')
+/**
+ * 整本读入（foliate 需要完整字节；分块过 IPC）。
+ *
+ * 返回 ArrayBuffer 而非 Uint8Array：`new File([u8])` 在 TS 5.7 的 `Uint8Array<ArrayBufferLike>`
+ * 泛型下不满足 `BlobPart`（SharedArrayBuffer 分支），所以出口给 `.buffer`（本函数自己分配、
+ * 长度恰好等于文件长度，故 `.buffer` 不会有富余 —— 这也是它不需要再拷一次的原因）。
+ *
+ * ★ B-16（2026-09-22）改造了两点，都是实测驱动的（数字见 docs/pending-fixes.md 的 B-16 表）：
+ *   ① 走 `ws:readRangeBytes`（字节通道）而不是 base64 通道 —— 省掉渲染侧 `atob` + 逐字节解码，
+ *      96MB 省 ~660ms；IPC 传输本身不变（实测两种载荷同为 ~160MB/s，那是结构化克隆的天花板）。
+ *   ② **预分配一块就地写入**，不再「每块重新分配 + 全量拷贝」（那段 O(n²) 在 96MB 上 ~110ms，
+ *      且峰值内存从 3 份降到 1 份）。
+ *
+ * `onProgress(loaded, total)` 每块回调一次，用来喂加载进度（调用方拿它 setState）。
+ */
+async function readWholeBook(
+  rootId: string,
+  relPath: string,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<ArrayBuffer> {
+  const first = await workspaceReadRangeBytes(rootId, relPath, 0, READ_CHUNK)
+  if (!first) throw new Error('读取失败')
+  if ('error' in first) throw new Error(first.error || '读取失败')
   const total = first.size
-  if (total > MAX_BOOK_BYTES) {
-    throw new Error(`文件过大（${Math.round(total / 1048576)} MB），暂支持 ${MAX_BOOK_BYTES / 1048576} MB 以内的电子书`)
+  // ★ 体积闸门不在这里：三档判定（静默 / 确认 / 拒绝）由调用方在读完首块后走 bookSizeGate ——
+  //   放这里就没法「先问一句再继续」，因为那时字节已经在内存里了。
+  const out = new Uint8Array(total)
+  out.set(first.bytes, 0)
+  let off = first.bytes.length
+  onProgress?.(off, total)
+  while (off < total) {
+    const r = await workspaceReadRangeBytes(rootId, relPath, off, READ_CHUNK)
+    if (!r) throw new Error('读取失败')
+    if ('error' in r) throw new Error(r.error || '读取失败')
+    if (r.bytes.length === 0) break // 文件在读取途中被改短了：就此收手（后续解包会自行报错）
+    out.set(r.bytes, off)
+    off += r.bytes.length
+    onProgress?.(off, total)
   }
-  let out = b64ToU8(first.data)
-  while (out.length < total) {
-    const r = await workspaceReadRange(rootId, relPath, out.length, READ_CHUNK)
-    if (!r || r.error) throw new Error(r?.error ?? '读取失败')
-    const chunk = b64ToU8(r.data)
-    if (chunk.length === 0) break
-    const merged = new Uint8Array(out.length + chunk.length)
-    merged.set(out)
-    merged.set(chunk, out.length)
-    out = merged
-  }
-  const buf = new ArrayBuffer(out.length)
-  new Uint8Array(buf).set(out)
-  return buf
+  return out.buffer
 }
 
 interface Props {
@@ -216,6 +234,29 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
 
   const [loading, setLoading] = useState(true)
   const [loadErr, setLoadErr] = useState('')
+  /** 加载阶段（覆盖层文案的判据）：read = 正在读字节（带进度）/ open = 正在解包排版 */
+  const [phase, setPhase] = useState<LoadPhase>('read')
+  /** 读字节进度 0..100 —— 只对 `phase === 'read'` 有意义（拿到总大小后才开始有意义地增长） */
+  const [readPct, setReadPct] = useState(0)
+  /**
+   * 阶段文字是否已该显示：**延迟 250ms 才亮**（见装载 effect 里的定时器）。
+   * 小书（几 MB 的 epub/fb2）~300ms 就开完了，立刻显示会闪一下「正在读取 100%」再消失 ——
+   * 宁可这类书上一次都不显示，也不要闪。
+   */
+  const [showPhase, setShowPhase] = useState(false)
+  /**
+   * 用户在大书确认框里点了取消时的体积（> 0 = error 态要多给一个「仍要打开」入口）。
+   * ★ 取消不是死路：停在 error 态 + 重试按钮，比踢回书架更可逆（不产生意外跳转）。
+   */
+  const [declinedBytes, setDeclinedBytes] = useState(0)
+  /**
+   * 已就「大书确认」放行过的书键（`${rootId}/${relPath}`）。
+   * 用**书键**而不是布尔量：换一本书要重新问一次，而同一本书点「仍要打开」重试时**不能再问**
+   * （否则确认框会连弹两次）。故此处不清空、只比对。
+   */
+  const bigOkKeyRef = useRef('')
+  /** 装载流程复跑开关：点「仍要打开」→ 递增 → 装载 effect 重跑（不另写一条装载路径） */
+  const [reloadKey, setReloadKey] = useState(0)
   const [pct, setPct] = useState(0)
   const [chapter, setChapter] = useState('')
   const [fontScale, setFontScale] = useState(1)
@@ -223,6 +264,14 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   /** 缩放档（仅固定版式用；`fixed-layout.js:118-131` 认 'fit-page' / 'fit-width'） */
   const [zoomMode, setZoomMode] = useState<'fit-page' | 'fit-width'>('fit-page')
   const [excerpts, setExcerpts] = useState<ExcerptItem[]>([])
+  /** 书签（2026-09-22 起 foliate 系共用 readerState.json 的 bookmarks 字段，定位键 = CFI） */
+  const [bookmarks, setBookmarks] = useState<BookBookmark[]>([])
+  /**
+   * 当前视口的 CFI（**镜面** state，只为让书签按钮的图标随翻页变化）。
+   * `cfiRef.current` 在 relocate 回调里就被更新，但 ref 变更不触发渲染 —— 单独存一份 state，
+   * 与 `pct` 写在同一处。★ 别改成「渲染时读 ref」：那样图标会慢一拍且行为依赖别处 setState。
+   */
+  const [pageCfi, setPageCfi] = useState('')
   const [capture, setCapture] = useState<{ rect: SelectionRect; cfi: string; text: string } | null>(null)
   const [notePop, setNotePop] = useState<{ rect: SelectionRect; excerpt: ExcerptItem } | null>(null)
 
@@ -240,6 +289,8 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   const paperRef = useRef<ReaderPaper>('default')
   const chapterRef = useRef('')
   const cfiRef = useRef('')
+  /** 书签快照（与 excerptsRef 同款：foliate 回调注册在 effect 里，闭包拿不到最新 state） */
+  const bkmRef = useRef<BookBookmark[]>([])
   const pctRef = useRef(0)
   /** 摘录快照（foliate 回调注册在 effect 里，闭包拿不到最新 state） */
   const excerptsRef = useRef<ExcerptItem[]>([])
@@ -316,6 +367,44 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   useEffect(() => () => {
     if (persistTimerRef.current) { clearTimeout(persistTimerRef.current); persistTimerRef.current = null }
   }, [])
+
+  /**
+   * 书签切换（2026-09-22）：当前视口 = 当前 relocate 的 CFI，同一处再点一次即移除。
+   *
+   * - **定位键 = 整条 CFI 字符串**（与 txt 用 paraIndex 同理，只是 foliate 系的"位置"就是 CFI）。
+   *   判定用全等、不做任何截断：folio 的 range CFI 形如 `epubcfi(/6/6!/4/2,/2,/14/1:54)`
+   *   （公共父路径 + 逗号分隔的两个子路径），"取第一个逗号之前"会退化成整章 —— 比不判还糟。
+   * - **已知限制**：换字号 / 改窗口宽度会重新分页 → 同一屏的 CFI 与存储值不同 → 再点会加出第二条。
+   *   两条都跳同一处且可各自删，故不为此发明 CFI 归一化（口径与摘录 / 进度一致：存原样）。
+   * - 与 txt 一致：不写摘录、不进「导出为笔记」（书签只供快速跳转）。
+   */
+  const toggleBookmark = useCallback(() => {
+    const cfi = cfiRef.current
+    if (!cfi) return
+    const exists = bkmRef.current.find((b) => b.cfi === cfi)
+    let next: BookBookmark[]
+    if (exists) {
+      next = bkmRef.current.filter((b) => b.id !== exists.id)
+    } else {
+      // 上限与 schema 侧同一个常量：超了直接说，别让写回在下面静默失败（书签会"加上又消失"）
+      if (bkmRef.current.length >= MAX_BOOKMARKS) {
+        showToast({ type: 'warning', message: `书签已达上限（${MAX_BOOKMARKS} 条），请先删掉一些` })
+        return
+      }
+      const ch = chapterRef.current.trim()
+      next = [...bkmRef.current, {
+        id: crypto.randomUUID(),
+        cfi,
+        // 章节名只作展示兜底（左栏优先显示 chapter）；有些书目录项为空，故给个「正文」兜底
+        ...(ch ? { chapter: ch } : {}),
+        label: `${ch || '正文'} · ${pctRef.current}%`,
+        at: new Date().toISOString(),
+      }]
+    }
+    bkmRef.current = next
+    setBookmarks(next)
+    void patchReader({ bookmarks: next })
+  }, [patchReader])
 
   /** 应用书页样式（字号/纸色）。每个 section 加载后都要重挂一次 —— style 槽随文档走 */
   const applyStyles = useCallback(() => {
@@ -454,6 +543,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     setLoadErr('')
     setPct(0)
     setChapter('')
+    setDeclinedBytes(0)
     chapterRef.current = ''
     cfiRef.current = ''
     pctRef.current = 0
@@ -461,6 +551,12 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     readyRef.current = false
     setCapture(null)
     setNotePop(null)
+
+    // 加载阶段文字：延迟 250ms 才亮（小书转眼就好，立刻显示会闪一下；见 showPhase 的声明处）
+    setPhase('read')
+    setReadPct(0)
+    setShowPhase(false)
+    const phaseTimer = setTimeout(() => setShowPhase(true), 250)
 
     const view = new View()
     viewRef.current = view
@@ -639,6 +735,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       pctRef.current = nextPct
       chapterRef.current = label
       setPct(nextPct)
+      setPageCfi(cfiRef.current)
       setChapter(label)
       try {
         window.dispatchEvent(new CustomEvent(KB_READER_STATE_CHANGED, { detail: { relPath, kind, pct: nextPct } }))
@@ -717,6 +814,10 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
           expectedUpdatedAtRef.current = st.state.updatedAt
           savedPct = typeof st.state.pct === 'number' ? st.state.pct : 0
           savedLocator = typeof st.state.locator === 'string' ? st.state.locator : ''
+          // 书签：只信带 cfi 的条目（schema 侧已按 kind 过滤过一轮，这里再挡一次脏数据 —— 老仓库
+          // 里可能有遗留的 txt 形条目，它们在本书点了只会静默不动）
+          const bk = Array.isArray(st.state.bookmarks) ? st.state.bookmarks.filter((b) => !!b && typeof b.cfi === 'string' && !!b.cfi) : []
+          setBookmarks(bk); bkmRef.current = bk
           const fs = typeof st.state.fontScale === 'number' && st.state.fontScale >= 0.5 && st.state.fontScale <= 3 ? st.state.fontScale : 1
           fontScaleRef.current = fs
           setFontScale(fs)
@@ -727,11 +828,45 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
           expectedUpdatedAtRef.current = undefined
         }
 
+        // 1.5) 体积闸门（B-16）：先读**1 字节**只为拿总大小（handler 恒回 stat 出来的 size，
+        //   读多少字节都一样），据此三档处置。放在这里而不是 readWholeBook 里，是因为「先问一句」
+        //   必须在**整本进内存之前** —— 进去了再问就已经付过内存与时间了。
+        const sizeProbe = await workspaceReadRangeBytes(rootId, relPath, 0, 1)
+        if (!alive) return
+        if (!sizeProbe) throw new Error('读取失败')
+        if ('error' in sizeProbe) throw new Error(sizeProbe.error || '读取失败')
+        const totalBytes = sizeProbe.size
+        const tier = bookSizeTier(totalBytes)
+        if (tier === 'refuse') throw new Error(tooBigText(totalBytes))
+        if (tier === 'confirm') {
+          const key = `${rootId}/${relPath}`
+          if (bigOkKeyRef.current !== key) {
+            const ok = await showGlobalConfirm({
+              title: '打开这本大书？',
+              message: bigBookConfirmText(name, totalBytes),
+              confirmLabel: '仍要打开',
+              cancelLabel: '取消',
+            })
+            if (!alive) return
+            if (!ok) {
+              // 停在 error 态 + 「仍要打开」（比踢回书架可逆）；不复位 bigOkKeyRef —— 重试时不该再问一遍
+              setDeclinedBytes(totalBytes)
+              setLoadErr(bigBookDeclinedText(name, totalBytes))
+              setLoading(false)
+              return
+            }
+            bigOkKeyRef.current = key
+          }
+        }
+
         // 2) 整本字节 → File。★ name 与 type 决定 foliate 选哪个解码器（view.js:13-21 的
         //    isCBZ / isFB2 / isFBZ 全是 endsWith 判定，**不看魔数**），故必须按真实格式给：
         //    否则裸 fb2 落到 UnsupportedTypeError、fbz 被当 EPUB 解包（zip 里无 container.xml）而炸。
-        const bytes = await readWholeBook(rootId, relPath)
+        const bytes = await readWholeBook(rootId, relPath, (loaded, total) => {
+          if (total > 0) setReadPct(Math.min(100, Math.round((loaded / total) * 100)))
+        })
         if (!alive) return
+        setPhase('open') // 字节读完 → 进入解包/排版阶段（阶段文字随之切换）
         const fileName = `${name || 'book'}${bookExt ?? ''}`
         const file = new File([bytes], fileName, bookMime ? { type: bookMime } : undefined)
 
@@ -801,9 +936,10 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       thumbQueueRef.current.length = 0
       thumbCacheRef.current.clear()
       thumbBusyRef.current = false
+      clearTimeout(phaseTimer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rootId, relPath])
+  }, [rootId, relPath, reloadKey])
 
   // ===== 摘录列表：挂载/换书拉一次 + excerpt 广播刷新 =====
   useEffect(() => {
@@ -847,7 +983,8 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
       void (async () => {
         // 同 3) 的判据：goTo 失败返回 falsy（内部已吞异常）
         const ok = await view.goTo(d.cfi as string)
-        if (!ok) showToast({ type: 'info', message: '这条摘录的位置在当前书里已失效' })
+        // 文案对摘录与书签都成立（同一个通道两处在用，别写死"这条摘录"）
+        if (!ok) showToast({ type: 'info', message: '该位置在当前书里已失效（书可能已改版）' })
       })()
     }
     window.addEventListener(KB_EPUB_GOTO_CFI, onGoto)
@@ -957,6 +1094,14 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
           固定版式（cbz）整页是图片，改了毫无反应 —— 与其留两个无效按钮，不如换成缩放档。 */}
       {!isFixedLayoutBook && (
         <>
+          {/* 书签：只对文字层书有意义（cbz 整页是图片，且 schema 侧 `FOLIATE_KINDS` 不收 cbz ——
+              放在这个分支里，按钮可见性 = 可存性，不会出现"存了但从没出现过"的孤儿条目）。
+              判定 = 当前 CFI 全等（见 toggleBookmark 的已知限制）。 */}
+          <button onClick={toggleBookmark} data-wb="epubBookmark" data-wb-marked={bookmarks.some((b) => b.cfi === pageCfi) ? '1' : '0'}
+            title={bookmarks.some((b) => b.cfi === pageCfi) ? '移除本页书签' : '收藏本页书签'}
+            className={`flex items-center gap-1 rounded p-0.5 ${bookmarks.some((b) => b.cfi === pageCfi) ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+            {bookmarks.some((b) => b.cfi === pageCfi) ? <Bookmark size={14} /> : <BookmarkPlus size={14} />}<span className="kb-l1">书签</span>
+          </button>
           <button onClick={() => changeFont(-0.1)} title="缩小字号" data-wb="epubFontDec"
             className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Type size={13} /><span className="text-[10px]">−</span></button>
           <button onClick={() => changeFont(0.1)} title="放大字号" data-wb="epubFontInc"
@@ -987,31 +1132,57 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     <div data-wb="epubReader" data-wb-state={loadErr ? 'error' : loading ? 'loading' : 'ready'}
       className="relative flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
       {toolbar}
-      {loadErr ? (
-        <div className="flex flex-1 items-center justify-center px-6 text-center text-[12.5px] text-[var(--text-muted)]">{loadErr}</div>
-      ) : (
-        /* 渲染宿主常驻 DOM：foliate 要读宿主尺寸才能分页，加载态只做**覆盖层**而不是替换内容。
-           `data-wb="epubHost"` = 帧内热区计算的锚（内容帧读它的 clientWidth 当可见阅读宽，见 bindDoc） */
-        <div className="relative flex min-h-0 flex-1 flex-col" onMouseLeave={hideEdgeHints}>
-          <div ref={hostRef} data-wb="epubHost" className="min-h-0 flex-1 overflow-hidden" style={paperStyle} />
-          {/* 边缘翻页提示（宿主侧 overlay，`pointer-events:none` —— 热区不拦 mousedown，
-              从边缘起拖照样能选字）：形态 = 设置 `edgePageHint`，默认 B。鼠标进入该侧热区才淡入；
-              首/末页不提示（见 paintEdgeHint）。配色按书页底色注入，见 edgeHintVars。 */}
-          <div ref={hintLRef} className="kb-edge-hint l" data-v={hintStyle} data-wb="edgeHintL" style={edgeHintStyle}>
-            <div className="veil" />
-            <div className="edge" />
-            <div className="chip"><ChevronLeft size={15} /><span className="ct">上一页</span></div>
-          </div>
-          <div ref={hintRRef} className="kb-edge-hint r" data-v={hintStyle} data-wb="edgeHintR" style={edgeHintStyle}>
-            <div className="veil" />
-            <div className="edge" />
-            <div className="chip"><ChevronRight size={15} /><span className="ct">下一页</span></div>
-          </div>
+      {/* 渲染宿主**常驻 DOM，error 态也在**：foliate 要读宿主尺寸才能分页，加载态只做**覆盖层**而不是替换内容。
+          ★ error 态同样不能卸载它 —— 装载 effect 第一步就是 `const host = hostRef.current; if (!host) return`，
+            宿主不在 ⇒ 「取消」后点「仍要打开」会**静默失效**（reloadKey 递增了、但没有宿主可挂载，
+            表象是按钮点了没反应；2026-09-22 由 probe-cbz-bigbook 的复跑断言抓到）。
+          `data-wb="epubHost"` = 帧内热区计算的锚（内容帧读它的 clientWidth 当可见阅读宽，见 bindDoc） */}
+      <div className="relative flex min-h-0 flex-1 flex-col" onMouseLeave={hideEdgeHints}>
+        <div ref={hostRef} data-wb="epubHost" className="min-h-0 flex-1 overflow-hidden" style={paperStyle} />
+        {/* 边缘翻页提示（宿主侧 overlay，`pointer-events:none` —— 热区不拦 mousedown，
+            从边缘起拖照样能选字）：形态 = 设置 `edgePageHint`，默认 B。鼠标进入该侧热区才淡入；
+            首/末页不提示（见 paintEdgeHint）。配色按书页底色注入，见 edgeHintVars。 */}
+        <div ref={hintLRef} className="kb-edge-hint l" data-v={hintStyle} data-wb="edgeHintL" style={edgeHintStyle}>
+          <div className="veil" />
+          <div className="edge" />
+          <div className="chip"><ChevronLeft size={15} /><span className="ct">上一页</span></div>
+        </div>
+        <div ref={hintRRef} className="kb-edge-hint r" data-v={hintStyle} data-wb="edgeHintR" style={edgeHintStyle}>
+          <div className="veil" />
+          <div className="edge" />
+          <div className="chip"><ChevronRight size={15} /><span className="ct">下一页</span></div>
+        </div>
+      </div>
+      {loadErr && (
+        /* error 态覆盖层（覆盖宿主而非替换它，理由见上）：大书被用户取消时（declinedBytes > 0）
+           多给一个「仍要打开」—— 它是**复跑装载流程**（reloadKey +1），不是另写一条装载路径。
+           底色不透明：底下的宿主虽然空着（装载没走到 open），也不该让它透出来。 */
+        <div className="absolute inset-x-0 bottom-0 top-[34px] z-10 flex flex-col items-center justify-center gap-3 bg-[var(--bg-primary)] px-6 text-center text-[12.5px] text-[var(--text-muted)]">
+          <div data-wb="epubLoadErr">{loadErr}</div>
+          {declinedBytes > 0 && (
+            <button data-wb="epubBigBookRetry"
+              onClick={() => {
+                bigOkKeyRef.current = `${rootId}/${relPath}` // 已确认过 ⇒ 重跑时不再问第二遍
+                setReloadKey((k) => k + 1)
+              }}
+              className="kb-micro-pop inline-flex items-center gap-1 rounded border border-[var(--border-color)] px-2 py-1 text-[12px] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--text-primary)]">
+              仍要打开
+            </button>
+          )}
         </div>
       )}
       {loading && !loadErr && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 top-[34px] flex items-center justify-center">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 top-[34px] flex flex-col items-center justify-center gap-2">
           <Loader2 size={22} className="animate-spin text-[var(--accent)]" />
+          {/* 阶段 + 进度：延迟 250ms 才亮（小书不闪），但**必须亮** —— 一本 96MB 的书要等 2 秒，
+              没有文字时用户分不清「在加载」和「卡死了」。`data-wb=epubLoadPhase` 给探针做判据。 */}
+          {showPhase && (
+            <div data-wb="epubLoadPhase" className="text-[12px] text-[var(--text-muted)]">
+              {phase === 'read'
+                ? (readPct > 0 ? `正在读取 ${readPct}%` : '正在读取…')
+                : '正在解包排版…'}
+            </div>
+          )}
         </div>
       )}
 

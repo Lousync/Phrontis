@@ -8,6 +8,30 @@ const fillTheme = isFillPopup
 /** 日程与打卡小窗：主进程创建面板窗口时通过 additionalArguments 注入 */
 const isDayPanel = process.argv.includes('--day-panel-window')
 
+// ── `kb:data-changed` 单点扇出（B-20，2026-09-22）──────────────────────────────
+// 改前：`onDataChanged` 每调一次就 `ipcRenderer.on(...)` 一次 ⇒ **订阅者数 = 同屏挂载的
+// useDataChanged 组件数**。全仓 38 个调用点（工作台左右栏 / 各 widget / 阅读器 / 书架 / 知识库面板…），
+// 同屏十几个是正常稳态，而沙箱里 ipcRenderer 的默认上限是 10 ⇒ 每次会话必刷一条
+// `MaxListenersExceededWarning: 11 kb:data-changed listeners added`。
+// 危害不在噪声本身，而在它把两种情形混成同一条消息：①同屏订阅者多（正常）
+// ②某处订了不复位（**真泄漏**）—— 噪声长期在场后，真泄漏来了没人认得出。
+// 现在：无论多少订阅者，ipcRenderer 上永远只有 1 个监听者，广播也只在入口解一次。
+const dataChangedSubs = new Set<(payload: { scope: string }) => void>()
+let dataChangedWired = false
+let dataChangedLeakWarned = false
+/** 稳态观测值十几个（全仓 38 个调用点，实际同屏不可能全挂上）；越过它才提示，避免又变成常态噪声 */
+const DATA_CHANGED_SUB_SOFT_MAX = 50
+function wireDataChanged() {
+  if (dataChangedWired) return
+  dataChangedWired = true
+  ipcRenderer.on('kb:data-changed', (_e, payload: { scope: string }) => {
+    // 遍历副本：某个订阅者在回调里退订（组件恰好此刻卸载）不该让后面的订阅者漏掉这一拍
+    for (const cb of [...dataChangedSubs]) {
+      try { cb(payload) } catch { /* 单个订阅者出错不影响其余 */ }
+    }
+  })
+}
+
 const api = {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   // 编辑器文件树右键「粘贴」：请主进程对本窗口补发一次真实 paste 命令（渲染层先交焦点给文件树）
@@ -560,10 +584,19 @@ const api = {
   },
   // 跨窗口数据同步：本窗口数据变更后上报 → 主进程广播给其它窗口（kb:data-changed）
   dataNotify: (payload: { scope: string }) => ipcRenderer.send('data:notify', payload),
+  // 单点扇出（B-20）：只挂一个 ipc 监听者，订阅者进 Set（见文件上方 dataChangedSubs）
   onDataChanged: (cb: (payload: { scope: string }) => void) => {
-    const handler = (_e: unknown, p: { scope: string }) => cb(p)
-    ipcRenderer.on('kb:data-changed', handler)
-    return () => { ipcRenderer.removeListener('kb:data-changed', handler) }
+    wireDataChanged()
+    dataChangedSubs.add(cb)
+    // 越过软上限只提示一次：这是「订了不复位」的信号，别再让真泄漏淹没在同一条告警里
+    if (!dataChangedLeakWarned && dataChangedSubs.size > DATA_CHANGED_SUB_SOFT_MAX) {
+      dataChangedLeakWarned = true
+      console.warn(
+        `[数据同步] onDataChanged 订阅者达 ${dataChangedSubs.size} 个（稳态应十几个）。` +
+        '多半有组件没在 effect cleanup 里调用返回的退订函数 —— 查 src/lib/dataChanged.ts 的 useDataChanged。',
+      )
+    }
+    return () => { dataChangedSubs.delete(cb) }
   },
   fillPopupTheme: fillTheme,
   fillPopupGetEntries: () => ipcRenderer.invoke('fillPopup:getEntries'),
@@ -609,6 +642,8 @@ const api = {
   workspacePickImages: (rootId: string) => ipcRenderer.invoke('ws:pickImagesToAttachments', rootId),
   workspaceSaveImage: (rootId: string, payload: { fileName: string; dataBase64: string }) => ipcRenderer.invoke('ws:saveImageToAttachments', rootId, payload),
   workspaceReadRange: (rootId: string, relPath: string, offset: number, length: number) => ipcRenderer.invoke('ws:readRange', rootId, relPath, offset, length),
+  // 字节版本（B-16）：foliate 系阅读器整本取字节用（免渲染侧 base64 解码）；白名单与防穿越同 ws:readRange
+  workspaceReadRangeBytes: (rootId: string, relPath: string, offset: number, length: number) => ipcRenderer.invoke('ws:readRangeBytes', rootId, relPath, offset, length),
   // PDF 阅读体验整包（v3.4.0 第 2 项）：进度/书签/封面缓存/导入
   pdfReaderListBooks: () => ipcRenderer.invoke('pdfReader:listBooks'),
   pdfReaderGet: (rootId: string, relPath: string) => ipcRenderer.invoke('pdfReader:get', rootId, relPath),

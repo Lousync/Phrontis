@@ -239,11 +239,47 @@ export interface ReadRangeResult {
   truncated: boolean
 }
 
+export interface ReadRangeBytesResult {
+  /** [offset, offset+len) 段的原始字节（不足段取到文件尾） */
+  bytes: Uint8Array
+  /** 本段实际起始字节偏移 */
+  offset: number
+  /** 文件总字节数 */
+  size: number
+  /** 本段是否截断（end < size） */
+  truncated: boolean
+}
+
 /**
  * 范围读取：open+read 精确读段（不整文件载入内存），仅白名单扩展名放行。
  * 纯逻辑可冒烟（不依赖 electron）。
  */
 export function readWorkspaceRange(absPath: string, offset: unknown, length: unknown): ReadRangeResult | { error: string } {
+  const r = readRangeBuffer(absPath, offset, length)
+  if ('error' in r) return r
+  return { data: r.buf.toString('base64'), offset: r.offset, size: r.size, truncated: r.truncated }
+}
+
+/**
+ * `readWorkspaceRange` 的**字节**版本（B-16 · 2026-09-22）：同一个读段实现，只是不做 base64。
+ *
+ * 为什么值得单开一个通道：整本取字节的阅读器（foliate 系）原先拿 base64 再在渲染侧
+ * `atob` + 逐字节解码，实测 96MB 里解码占 ~660ms（总读取链路 1.5s）。改传 `Uint8Array` 后
+ * 这一段**整段消失**，而 IPC 传输本身不变（实测两种载荷同为 ~160MB/s，那是 V8 结构化克隆的天花板，
+ * 换载荷换不动它）。PDF 侧仍走 base64 老通道 —— pdf.js 要的是可 range 的字符串分片，不动它。
+ *
+ * ★ 白名单 / 偏移 / 越界逻辑只有 `readRangeBuffer` 一份：两个出口共用，别在这里复制条件。
+ */
+export function readWorkspaceRangeBytes(absPath: string, offset: unknown, length: unknown): ReadRangeBytesResult | { error: string } {
+  const r = readRangeBuffer(absPath, offset, length)
+  if ('error' in r) return r
+  // 视图而非拷贝：Buffer.alloc 出来的底层 ArrayBuffer 就是这一段（byteOffset/byteLength 已在其中），
+  // 而结构化克隆会由 Electron 自己把字节复制出去 ⇒ 这里再复制一次纯属浪费（8MB ≈ 2ms，但白花的）。
+  return { bytes: new Uint8Array(r.buf.buffer, r.buf.byteOffset, r.buf.byteLength), offset: r.offset, size: r.size, truncated: r.truncated }
+}
+
+/** 读段的唯一实现（白名单 / 偏移归一 / 越界截断）。返回原始 Buffer，由两个出口各自决定怎么过 IPC。 */
+function readRangeBuffer(absPath: string, offset: unknown, length: unknown): { buf: Buffer; offset: number; size: number; truncated: boolean } | { error: string } {
   try {
     const ext = extname(absPath).slice(1).toLowerCase()
     // 白名单扩展名；无扩展名文件按 %PDF- 头探测放行（知识库旧附件丢扩展名的 PDF）
@@ -263,13 +299,13 @@ export function readWorkspaceRange(absPath: string, offset: unknown, length: unk
     const want = Math.max(0, Math.floor(Number(length) || 0))
     const end = Math.min(st.size, start + want)
     if (start >= st.size) {
-      return { data: '', offset: start, size: st.size, truncated: false }
+      return { buf: Buffer.alloc(0), offset: start, size: st.size, truncated: false }
     }
     const fd = openSync(absPath, 'r')
     try {
       const buf = Buffer.alloc(end - start)
       readSync(fd, buf, 0, buf.length, start)
-      return { data: buf.toString('base64'), offset: start, size: st.size, truncated: end < st.size }
+      return { buf, offset: start, size: st.size, truncated: end < st.size }
     } finally {
       closeSync(fd)
     }
@@ -813,6 +849,17 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
     try {
       const abs = requireInside(rootId, relPath)
       return readWorkspaceRange(abs, offset, length)
+    } catch (e) {
+      return { error: (e as Error).message }
+    }
+  })
+
+  // 同上的**字节**版本（B-16）：foliate 系阅读器整本取字节，免掉渲染侧 base64 解码那 ~660ms/96MB。
+  // 与 ws:readRange 共用 readRangeBuffer，白名单与防穿越语义完全一致。
+  ipcMain.handle('ws:readRangeBytes', (_e, rootId: string, relPath: string, offset: unknown, length: unknown) => {
+    try {
+      const abs = requireInside(rootId, relPath)
+      return readWorkspaceRangeBytes(abs, offset, length)
     } catch (e) {
       return { error: (e as Error).message }
     }

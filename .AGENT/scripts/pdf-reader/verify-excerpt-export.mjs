@@ -169,12 +169,23 @@ console.log('\n--- ④ C2 硬约束：只换 body，不重建 frontmatter ---')
     check('保留原 frontmatter 序列化（serializeMarkdown(doc.frontmatter, …)）', /serializeMarkdown\(\s*doc\.frontmatter/.test(body))
     check('★ 不生成新 id（不含 randomUUID）', !/randomUUID/.test(body))
     check('页面不存在时返回 null（交给自愈分支）', /if\s*\(\s*!entry\s*\)\s*return null/.test(body))
+    // ★ 索引说在、盘上已不在（文件被应用外删掉 / 同步工具挪走，索引尚未失效）也必须返回 null：
+    //   否则 readFileSync 抛 ENOENT 穿透 IPC，把整个导出打断 —— 自愈分支形同虚设。
+    //   实测复现路径：probe-fb2-reader 复位只删「读书笔记 · *.md」不清 excerptExports.json，
+    //   第二轮导出必现 ENOENT（4 条断言红），本守卫补上后连跑两轮全绿。
+    check('★ 索引命中的文件已被应用外删除 → 也返回 null（自愈不落空）', /if\s*\(\s*!existsSync\(abs\)\s*\)/.test(body))
+    check('★ 该守卫先失效索引再返回（不留陈旧索引给后续读）', /if\s*\(\s*!existsSync\(abs\)\s*\)\s*\{\s*invalidateKnowledgeIndex\(\)\s*return null/.test(body))
     check('写后失效索引（invalidateKnowledgeIndex）', /invalidateKnowledgeIndex\(\)/.test(body))
   }
   const repo = stripComments(read('electron/lib/kbStore/excerptExportVaultRepo.ts'))
   check('★ 未把 knowledge:updatePage 当覆盖写入口（它只支持重命名）', !repo.includes('knowledge:updatePage'))
   check('自愈分支：页面不在时走 vaultCreatePage 新建', repo.includes('vaultCreatePage('))
   check('导出后回写映射（applyExportEntry）', repo.includes('applyExportEntry('))
+  // ★ B-15（2026-09-22 拍板 A）：页名 = 身份（带扩展名），否则 a.epub / a.fb2 / a.cbz 同名书
+  //   会输出同名页，只能靠 (1)(2) 后缀区分（展示名只用于 md 的 H1 书名）。
+  check('★ B-15：页名用身份名 bookIdentityName（恒带格式后缀）', repo.includes('`读书笔记 · ${bookIdentityName(relPath)}`'))
+  check('★ B-15：页名不得再用展示名 bookDisplayName', !repo.includes('`读书笔记 · ${bookDisplayName(relPath)}`'))
+  check('md 的 H1 书名仍用展示名（分工：页名是身份、书名给人读）', repo.includes('bookName: bookDisplayName(relPath)'))
 }
 
 // ===== ⑤ C4 单点拦截：kbloc: 必须拦在 openExternal 之前 =====

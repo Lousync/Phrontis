@@ -153,6 +153,21 @@ if (process.argv.includes('--add-books')) {
       console.log('ebook seed skipped:', name, String(e).slice(0, 160))
     }
   }
+  // 大体积 fixture（B-16）：**单独一个开关**，因为它是唯一按 MB 计磁盘的 fixture
+  //   （两本合计 ~226MB / 约 2s 生成），默认不落 —— 只有 probe-cbz-bigbook 那一组探针需要它。
+  //   ★ 体积是断言的一部分（96MB 必须落在静默档 ≤128MB 内、130MB 必须落在确认档），
+  //     所以生成器**不许**用 `crypto.randomBytes`：随机种子的产物 sha256 每轮都不同，等值断言全废。
+  //   生成器改动后同样要**先删产物**再 seed（下面按 existsSync 跳过，旧产物会静默留下来）。
+  if (process.argv.includes('--add-big-books')) {
+    const mk = await import('./make-big-cbz.mjs')
+    for (const { name, targetMb } of mk.BIG_BOOK_FIXTURES) {
+      const p = join(booksDir, name)
+      if (existsSync(p)) continue
+      const { buf, pages } = mk.makeBigCbz({ targetMb })
+      writeFileSync(p, buf)
+      console.log(`seeded big book: ${p}（目标 ${targetMb}MB / 实得 ${(buf.length / 1048576).toFixed(1)}MB / ${pages} 页）`)
+    }
+  }
 }
 
 if (!existsSync(join(fixture, '.knowbase', 'meta.json'))) {

@@ -15,8 +15,15 @@
 > | B-15 → **B-18** | cbz 里的 `.svg` 页破图 |
 > | B-16 → **B-19** | 退出书籍刷 ~266 条 RO 告警 |
 >
-> ★ **B-1…B-19 已全部占用**（12/13/14 是本线那三条，15…19 是并入的阅读器那批）—— 新条目请**从 B-20 起**，别再顺手写一个已占的号。
-> **本文自 2026-09-22 合并（v3.4.0 ← feature/ui-rework）起即唯一清单**：1…11 = UI 那批（已修，标 `[x]`）· 12/13/14 = 感知模式开关 / 树内联命名 / 教学区树内联输入 · 15…19 = 阅读器那批（未修）。
+> ★ **B-1…B-24 已全部占用**（12/13/14 是本线那三条，15…19 是并入的阅读器那批，20 = data-changed 监听告警，21 = foliate 残余 RO 刷屏，22 = EPUB 书签在重排后重复/删不掉，23 = 导出摘录撞上陈旧索引 ENOENT，24 = pdfjs `PDFViewer` 留观察者）—— 新条目请**从 B-25 起**，别再顺手写一个已占的号。
+> **本文自 2026-09-22 合并（v3.4.0 ← feature/ui-rework）起即唯一清单**：1…11 = UI 那批（已修，标 `[x]`）· 12/13/14 = 感知模式开关 / 树内联命名 / 教学区树内联输入 · 15…19 = 阅读器那批 · 20/21 = 两条诊断噪音。
+> **阅读器那批的现状（2026-09-22 更新）**：B-15 / B-16 / B-17 / B-18 / B-19 **已落码标 `[x]` 且实机验证完毕**
+> （B-17 另做了「stash 掉 patch ⑥」的前后对照；B-19 的 Δ=0 对 pdf/txt 成立，foliate 残余 ⇒ 见 **B-21**）；
+> B-16 的「worker 化」方向经实测**无收益**、已由用户拍板换成读取链路优化 + 体积分档确认框（见该条修复记录）。
+> **收尾轮（2026-09-22 晚）**：**B-20 / B-21 已修并标 `[x]`**（B-20 = preload 单点扇出 + 新契约脚本；
+> B-21 = vendor patch ⑧ + 新探针 `probe-ro-noise.mjs`，含变异测试）；
+> **B-22 保持开放**是用户 2026-09-22 的显式取舍（「书签只做快速跳转」），**不是漏项**；
+> 新登记 **B-24**（pdfjs `PDFViewer` 留观察者，无告警，排查 B-21 时顺带测出）。
 > 教训：**并行分支登记新条目前先取另一条线的最大号**（当时主仓已到 B-16，本线从 B-12 续 ⇒ 撞号）。
 
 ---
@@ -683,7 +690,32 @@ className={`relative p-1.5 rounded transition-colors ${inlineBusy ? 'text-[var(-
 
 ---
 
-## B-15 导出「读书笔记」页名不带扩展名：同名书（a.epub / a.fb2）会撞进同一篇页（2026-09-22，P3）
+## [x] B-15 导出「读书笔记」页名不带扩展名：同名书（a.epub / a.fb2）会撞进同一篇页（2026-09-22，P3）
+
+### ★ 修复记录（2026-09-22，选 **A**；契约 `verify-reader-formats.mjs` + `verify-excerpt-export.mjs` + 探针第 8 步）
+
+| # | 改动 | 落点 | 治的是 |
+|---|---|---|---|
+| 1 | 页名改用**身份名** `bookIdentityName`（保留扩展名的 basename） | `electron/lib/kbStore/excerptExportVaultRepo.ts` | 页名与映射键 `{rootId}/{relPath}` 口径对齐（映射键本来就区分格式，只有页名丢了信息） |
+| 2 | 新增 `bookIdentityName`，与 `bookDisplayName` 明确分工 | `electron/lib/kbStore/bookFormats.ts` | **页名是身份、书名给人读** —— md 内的 H1 仍用展示名（`bookName: bookDisplayName(relPath)`），来源行已带 relPath，两者不重叠 |
+
+**★ 对本文原「根因」段的更正（重要）**：原文写「已存在时走的是覆盖重写路径 ⇒ 第二本书**静默改写**第一篇页」，
+**这句是错的**。查 `knowledgeVaultRepo.ts` 的 `vaultCreatePage` → `uniquePageName`（`:247-252`）：
+
+```ts
+let name = `${stem}.md`
+let n = 1
+while (existsSync(join(root, dirRel, name))) { name = `${stem}(${n}).md`; n++ }
+```
+
+**重名只会加 `(1)` 后缀，绝不覆盖** —— 原文那句「实测过 `(1)` 后缀」和「已存在时覆盖」自相矛盾，
+写的时候把两条互斥的推断并列了。所以 B-15 的真实后果是**「两篇页无法按书名区分」**（观感与可检索性），
+**不是数据丢失** —— 严重性比原登记低一档。修法（A/B/C）的取舍不受此更正影响，仍按 A 落地。
+
+**验证**：`probe-excerpt-export.mjs` 新增第 8 步 —— 用 `探针样书.epub` 再导一次，断言
+`读书笔记 · 探针样书.epub.md` 与 `读书笔记 · 探针样书.txt.md` **两篇都在**、无 `(N)` 后缀重复、
+TXT 那篇逐字节未变、EPUB 那篇含自己的摘录文本。契约侧加了两条**立论**断言（同名三格式的
+展示名相同、身份名互不相同）与一条负向（页名不得再用 `bookDisplayName`）。
 
 **现象**：同一本书的不同格式（或任意两个**去掉扩展名后同名**的书）都导出为笔记时，第二本会**顶掉**第一本的笔记页内容 —— 第一本的摘录静默消失。做阶段 2a 的 fb2 探针时撞见：`探针样书.epub` 与 `探针样书.fb2` 都导出成同一篇 `读书笔记 · 探针样书.md`。
 
@@ -697,6 +729,9 @@ const page = vaultCreatePage({ title: `读书笔记 · ${bookDisplayName(relPath
 
 **根因**：页名 = 展示名，不是身份。`vaultCreatePage` 遇到重名会加 `(1)` 后缀（实测过：`读书笔记 · 探针样书(1).md`），但那只在「文件确实不存在」时发生；已存在时走的是覆盖重写路径，于是**第二本书静默改写第一篇页**（`count`/`pageId` 都回写成第二本的）。
 
+> ⚠️ **本段后半句已证伪**（2026-09-22）：`uniquePageName` 只会加 `(1)` 后缀、**不会覆盖**。
+> 真实后果是「两篇页无法按书名区分」，**无数据丢失** —— 详见上方「★ 修复记录」里的更正段。
+
 **修复方向**（择一，需拍板）：
 - **A**：页名带格式后缀（`读书笔记 · 探针样书.fb2`），与映射键口径对齐；缺点：页名出现扩展名，观感略生硬。
 - **B**：页名不变，但导出前先查映射表里是否已有**别的书**占用了该页名，撞了就加区分后缀（`.fb2` / `(2)`）。逻辑更绕、但普通情况页名干净。
@@ -708,12 +743,13 @@ const page = vaultCreatePage({ title: `读书笔记 · ${bookDisplayName(relPath
 
 ---
 
-## B-16 cbz（画集）的两个体积/卡顿隐患：128MB 上限偏紧 + zip 在主线程同步解包（2026-09-22，P3）
+## [x] B-16 cbz（画集）的两个体积/卡顿隐患：128MB 上限偏紧 + zip 在主线程同步解包（2026-09-22，P3）
 
 **现象**（尚未收到用户报告，是阶段 2b 落码时从源码推出的**预判**）：打开一本大画集（几十上百 MB、几百页）时，应用会**卡住一段时间**再显示第一页；超过 `MAX_BOOK_BYTES` 则直接**打不开**（报体积超限）。
+**读数修正（2026-09-22 实测）**：「纯白等」不准确 —— `loading` 期间**已有** `Loader2` 转圈（`data-wb-state="loading"`）；缺的是**阶段/进度文字**（读了多少字节、在解包还是在等首帧），用户无法区分「在加载」和「卡死了」。
 
-**定位**：
-- 体积闸门：`electron/lib/workspaceManager.ts` 的 `MAX_BOOK_BYTES = 128MB`（`:47` 附近；`RANGE_EXT_WHITELIST` 的加白名单在 `:224`）
+**定位**（2026-09-22 复核，原写错了）：
+- 体积闸门**在渲染层**：`src/components/shared/epub/EpubReaderView.tsx:50` 的 `MAX_BOOK_BYTES = 128 * 1024 * 1024`（`readWholeBook` 里比 `first.size`）。~~原先记的「`electron/lib/workspaceManager.ts` 的 `MAX_BOOK_BYTES`」不存在~~ —— 主进程 `readWorkspaceRange` **没有任何体积闸门**，只有扩展名白名单（`RANGE_EXT_WHITELIST`）。
 - 主线程解包：`src/vendor/foliate/view.js:26` 的 `configure({ useWebWorkers: false })` —— **上游默认就是 false**，我们只是没改。于是 `zip.js` 的 `BlobReader`/`ZipReader` **全部在主线程**跑。
 
 **根因**：文字类书（epub/fb2）体积在几 MB 量级，主线程解包无感；**画集是图片归档，体积高一个数量级**，于是同一份配置从「无感」变成「可感知卡顿」。这两条都是**量变引起质变**，不是配置写错了。
@@ -728,11 +764,133 @@ const page = vaultCreatePage({ title: `读书笔记 · ${bookDisplayName(relPath
 2. 体积上限 → 按**扩展名分档**（画集给更大额度）或改成「超限时弹确认框、用户点继续才加载」。别直接一刀抬到无限。
 3. 兜底体验（无论 1/2 做不做都值得）：解包期间给个**可见的加载态**（现在打开大书是纯白等），避免「看起来死了」。
 
-**验证**：造一本 ~200MB / 300 页的 cbz → 打开时①有可见加载反馈；②主线程不出现长任务（CDP Performance 面板看 long task）；③若抬了上限，超限那一档有明确提示而不是静默失败。
+**★ 实测分解（2026-09-22，本机；工具 = `tmp/make-big-cbz.mjs` + `tmp/probe-cbz-perf.mjs`，两份都**不进 git**）**
+
+fixture 刻意造在 128MB 闸门**之下**（96.2MB / 126 页噪声页 —— 噪声不可压缩，zip STORED 后 ≈ 页字节总和）：先量清「现行策略允许的最坏情况」，超限区现在根本打不开、无从测量。
+
+| 量 | 数值 |
+|---|---|
+| 点卡 → `data-wb-state=ready`：小书（258KB / 60 页） | ~550ms ← **固定开销基准**（zip 解析 + foliate 初启 + 首页解码） |
+| 同上：96MB 大书 | **1.6–2.0s** |
+| 读取链路 `readWholeBook`（96MB，页面侧独立复算） | **~1.5s**（≈62MB/s） |
+| ├ IPC 传输（`ws:readRange`；**与分块大小无关**，8/16/32/64MB 拉完总时长都在 550–650ms） | ~600ms ＝ **160MB/s 天花板** |
+| ├ base64 解码（`atob` + 逐字节循环；本版 Chromium **无** `Uint8Array.fromBase64`） | ~660ms |
+| └ O(n²) 重分配拼接 | ~110ms |
+| 磁盘地板（`readFileSync` 96MB，页缓存命中） | **34ms**（2.8GB/s） |
+
+**由实测得出的四条结论**（都不是推断）：
+1. **卡顿的主体是读取链路，不是 zip 解包** ⇒ 原「修复方向 1（worker 化）」**经测无收益**：读路径全在渲染主线程，而 Web Worker **拿不到** `contextBridge`（`window.api`），搬不动；zip 索引解析本身只占固定开销里极小一块。
+2. **160MB/s 是 `ipcRenderer.invoke` 的 V8 结构化克隆天花板** —— 临时加的一条「字节直传」通道实测同为 ~160MB/s（首块 8MB：字节 49ms / base64 39ms），换通道只省得掉解码那一段。
+3. **渲染侧即可省 ~0.77s**（1.5s → ~0.73s）：字节通道（免解码）+ 预分配一块就地写入（免 O(n²) 拼接）。零 CSP / 安全面改动。
+4. **内存面**：读链路同时存在三份 96MB（u8 / 合并副本 / ArrayBuffer），`new File()` 再复制第四份 ⇒ 峰值 ≈ **4× 文件体积**（500MB 的书 ≈ 2GB）。这是「上限不能无限抬」的硬理由。
+
+**验证**：①用 `tmp/probe-cbz-perf.mjs` 复算读取链路（改前 ~1.5s / 改后 ~0.73s）；②加载期有阶段+进度文字；
+③ 超限那一档有明确提示而不是静默失败。**★ 别用 long task 当判据**：本机 `PerformanceObserver('longtask')` 在 renderer 里
+一条都收不到（即便同时有 1.5s 的读链路）—— 判据用**墙钟 + 页面侧微基准**。
+
+### ★ 修复记录（2026-09-22 落码；用户当日拍板两条方向）
+
+原「修复方向 1（worker 化）」**按实测撤掉**（结论 1：读路径搬不进 worker），替换为**读取链路优化**；
+体积上限从「一刀切打不开」改为**三档 + 超限确认框**（用户原话：「大的先问一句」）。
+
+| # | 改动 | 落点 |
+|---|---|---|
+| 1 | 三档判定 + 全部用户可见文案，**零依赖纯函数**（照 `releaseNotes/judge.ts` 先例，契约脚本可直接 import） | `electron/lib/kbStore/bookSizeGate.ts`（新） |
+| 2 | 主进程抽出 `readRangeBuffer()` 为**唯一 core**（白名单 / 偏移 / 越界只此一份）；base64 出口 `readWorkspaceRange` 与新增 `readWorkspaceRangeBytes`（回 `Uint8Array` 零拷贝视图）都转发它；新增 IPC `ws:readRangeBytes` | `electron/lib/workspaceManager.ts` |
+| 3 | `api.workspaceReadRangeBytes` + 渲染侧类型镜子 | `electron/preload/index.ts` / `src/types/index.ts` / `src/lib/ipc.ts` |
+| 4 | `readWholeBook` 重写：字节通道 + **预分配一块就地写入**（`new Uint8Array(total)` + `.set()`）；装载流程加体积闸门 + 确认框 + 取消态；加载覆盖层加阶段/进度文字；删 `b64ToU8` | `src/components/shared/epub/EpubReaderView.tsx` |
+| 5 | 确认框加探针锚点（`data-wb=globalConfirm*`，纯测试面，无行为变化） | `src/components/shared/GlobalConfirm.tsx` |
+
+**分档口径**（`BOOK_SILENT_MAX = 128MB` / `BOOK_HARD_MAX = 384MB`，端点含上）：
+
+| 档 | 判据 | 行为 |
+|---|---|---|
+| 静默 | ≤ 128MB | 照旧直接开 |
+| 确认 | 128MB < size ≤ 384MB | `showGlobalConfirm` 写明**体积 / 预计耗时 / 预计内存**，点「仍要打开」才继续 |
+| 拒绝 | > 384MB | 不读、直接 error 态，文案给体积 + 上限 + 建议 |
+
+取消的落点是 **error 态 + 「仍要打开」**（不是踢回书架）：可逆、不产生意外跳转，再点一次 = 复跑装载
+（`reloadKey` 递增，`bigOkKeyRef` 记住「已确认过」避免追问第二遍）。
+
+**★ 实测前后（同机同 fixture，96.2MB / 126 页噪声页 cbz）**：
+
+| 量 | 改前 | 改后 |
+|---|---|---|
+| 点卡 → `ready`（小书 258KB 基准） | ~550ms | 457ms |
+| 点卡 → `ready`（96MB） | 1.6–2.0s | **805ms** |
+| **体积增量（大书 − 小书）** | ~1.4s | **348ms** |
+| 整本读回（探针页内复算，8MB 块 / 含逐字节 FNV） | ~1.5s | 690ms |
+| 内存峰值 | ≈ **4×** 体积 | ≈ **2×**（u8 + `new File()`） |
+
+`READ_EST_MBPS = 120` / `PEAK_MEM_RATIO = 2` 就是照这张表定的（宁可比预告快，不比预告慢）；改这两个常数
+必须同步重跑 `probe-cbz-bigbook.mjs`。2026-09-22 复核：131MB 的书文案报「约 2 秒 / 262 MB」，实测 1.09s 开完 —— 符合预留冗余的口径。
+
+**★ 期间探针抓到的一个真缺陷（顺手修掉）**：装载 effect 第一步是 `const host = hostRef.current; if (!host) return`，
+而宿主 div 原先只在**非 error 分支**渲染 ⇒ 「取消」后点「仍要打开」时宿主不在 DOM，effect 直接 return，
+`reloadKey` 递增了却什么都没发生（表象 =「按钮点了没反应」）。修法：宿主**常驻 DOM**（error 态改成覆盖宿主而非替换它）。
+这条断言现在锁在 `probe-cbz-bigbook.mjs` 里（改前红、改后绿）。
+
+**验证（2026-09-22）**：
+- 新增 `.AGENT/scripts/workbench-shell/probes/make-big-cbz.mjs`（大书生成器，**确定性**：定种 PRNG + 固定 zip 时间戳 ⇒ 产物 sha256 逐轮相同；原 `tmp/` 的两份一次性侦察脚本已删）+
+  `seed-probe-vault.mjs --add-big-books`（96MB / 130MB 两本，默认不落，约 226MB 磁盘）。
+- 新增探针 `probe-cbz-bigbook.mjs`：整本走新通道分块读回做 **FNV-1a 逐字节等值**（小书 + 96MB × 8MB/1MB 两种块大小）、
+  阶段/进度文字采样（`正在读取 N%` → `正在解包排版…`，百分比非递减）、130MB 确认框文案含真实体积、
+  取消 → error → 「仍要打开」→ ready 且不再问第二遍、耗时表 + 体积增量 < 1000ms 兜底。**全绿**。
+- `verify-reader-formats.mjs` 新增 §⑭（分档三档含端点 / 文案同口径 / 阈值只有一份 / 读取链路源码镜像 /
+  两通道共用 core / IPC 三处同步），**全绿**；既有 5 个阅读器契约与 `probe-cbz-reader` / `probe-epub-reader` /
+  `probe-fb2-reader` / `probe-reading-panel` **不回归**。
+- **★ 别用 long task 当判据**（同上，实测取证）。
 
 ---
 
-## B-17 `fixed-layout.js` 的 `#render` 有 ResizeObserver 竞态：每次翻页控制台一条未捕获 TypeError（2026-09-22，P3）
+## [x] B-17 `fixed-layout.js` 的 `#render` 有 ResizeObserver 竞态：每次翻页控制台一条未捕获 TypeError（2026-09-22，P3）
+
+### ★ 修复记录（2026-09-22，落码为 **patch ⑥**；契约 `verify-epub-formats.mjs` §⑪ 三条全绿）
+
+| # | 改动 | 落点 | 治的是 |
+|---|---|---|---|
+| 1 | `#render()` 在算出 `right` 之后加早退 `if (!right) return` | `src/vendor/foliate/fixed-layout.js` `#render`（patch ⑥） | 根因本身 —— await 窗口内无帧可渲时不再进坐标系 |
+
+**为什么判据是「`right` 缺席」**：第一版写的是「三槽全空早退」，落码后复核发现它**罩不全** ——
+`#showSpread` 有**两个** await 窗口：① 清空后第一个 `await`（三槽皆空，被它罩住）；
+② 双页路径里 `#left` 已挂上、`#right` 仍为 null 的那一段（`#center` 也是 null ⇒
+`right` 为 null）。窗口 ② 里 `side === 'left'` 时 `target.width` 与 `blankWidth` 都不抛，
+最后由 `transform(right)` 解构 null 抛 —— 「三槽全空」判据放它过去。改成 `!right` 后两个窗口一并罩住
+（`right` 缺席时 `left` 若是 `{}`，下面只会算出 `NaN`；半边帧也出不了把左右相加的拼版宽度）。
+契约据此加了一条**覆盖性顺序断言**：`transform(right)` 必须排在守卫之后（就是窗口 ② 那条）。
+
+**顺带撤掉了探针里的定点过滤（这才是这条修的真验证）**：`probe-cbz-reader.mjs` 以前把
+`Cannot read properties of null (reading 'width')` 当**已知噪声定点滤掉**（当年确实修不了）。
+patch ⑥ 落码后改成**硬断言零条** —— 留着过滤等于把这条修的验证也一起滤掉了。
+这是「不报错」类修复的通病：没有断言，后人删掉守卫不会有任何反馈。同时 §9 那段
+`[噪声提示] 接下来的 TypeError 不是断言失败` 的终稿说明也已删（现象不存在了）。
+
+**登记面同步**（这是上文说「有仪式成本」的那部分，一次做完）：
+- `src/vendor/foliate/README.md`：补丁表 **5 处 → 7 处**（新增 ⑥⑦）、升级流程「重放上述 7 处 patch」、
+  两处计数行；⑥ 条目含「为何这条守卫安全」与「上游若修掉照此删」。
+- 契约新增 §⑪：早退在位 · ★ **位置断言**（在 `const right = …` **之后**、`const target = …` **之前** ——
+  早了是引用未声明变量，晚了就先在 `target.width` 上抛）· ★ **覆盖性断言**（`transform(right)`
+  也排在守卫之后 = 窗口 ②）· 前提断言（`#observer` 回调仍直连 `#render`，即窗口期的触发路径）·
+  负向「未顺手把 `allow-scripts` 加回来」· README 计数＝7 与升级流程同步。
+
+✅ **实机验证（2026-09-22 完成）**：`probe-cbz-reader.mjs` 那条硬断言（连翻多页 + 进出多轮，全程零
+`Cannot read properties of null (reading 'width')`）**全绿**；同一次会话里渲染层错误列表为空（`[[]]`）。
+
+★ **另做了一次前后对照（`git stash` 掉本 patch → 重建 → 跑同样的序列），结论要按这个说**：
+
+| 序列（同序同实例） | 无守卫（pre-⑥） | 有守卫（post-⑥） |
+|---|---|---|
+| cbz 连开 3 轮 | 0 / 0 / 0 | 0 / 0 / 0 |
+| epub 2 轮 | 355 / 532 | 333 / 508 |
+| 再 1 轮 cbz | **622** | 8 |
+
+- **观感无差别**：两版在「打开 cbz 后的稳定帧」上截图**逐像素几乎相同**（都正常落位，紫色页 + 进度 14%）。
+  即本 patch 的**已验证收益是「异常消失」，不是「版式被修好」** —— 那个抛异常的窗口期过后版式本来就会被
+  下一次显式 `#render()` 纠正（原条目里写的「页面观感正常」是准确的，别被「修了个竞态」误读成「修好了版面」）。
+- **前文那个 RO 环告警（`loop`）计数与本 patch 无关**：epub 路径 patch ⑥ 碰不到（另一套引擎），
+  两版都在同一量级（355/532 vs 333/508）；cbz 路径在**同一个 post-⑥ 构建**上跨会话从 288/303/298 跳到 0/0/0
+  ⇒ 该计数是**状态依赖**的，不构成对本 patch 的判据；而两版里最大的一次读数（622）出在**被 stash 掉的**那一版。
+  残余刷屏已另立 **B-21**。
 
 **现象**：打开任何 cbz（固定版式书），**每翻一页**控制台就出现一条未捕获异常：
 
@@ -759,7 +917,38 @@ Uncaught TypeError: Cannot read properties of null (reading 'width')
 
 ---
 
-## B-18 cbz 里的 `.svg` 页显示为破图（`loadBlob` 不传 MIME）（2026-09-22，P3）
+## [x] B-18 cbz 里的 `.svg` 页显示为破图（`loadBlob` 不传 MIME）（2026-09-22，P3）
+
+### ★ 修复记录（2026-09-22，落码为 **patch ⑦**；契约 `verify-epub-formats.mjs` §⑪ 全绿）
+
+**选 A**（按后缀推 MIME）—— C「接受」在上一轮是暂缓，本轮按同一批 patch 摊薄仪式成本后一并做掉。
+
+| # | 改动 | 落点 | 治的是 |
+|---|---|---|---|
+| 1 | 页图 `loadBlob` 传 MIME 第二实参（新增 `MIME_BY_EXT` 表 + `mimeOf(name)`） | `src/vendor/foliate/comic-book.js` `load()`（patch ⑦） | 根因 —— Blob `type` 由 `''` 变成正确 MIME，Chromium 才选得出解码器 |
+
+**三条断言缺一不可**（少任一条都回到破图，且都是**静默**的）：
+1. 调用处确实传了第二实参（不传 ⇒ `BlobWriter(undefined)` ⇒ `type=''`）；
+2. `mimeOf` 取后缀**大小写不敏感** —— 与 patch ⑤-b 配对：⑤-b 放 `.JPG`/`.PNG` 进白名单，
+   这里若大小写敏感，那一类页就是「进得来、显示不出」（比彻底不收更糟，因为不报错）；
+3. **MIME 表 ⊇ `exts` 白名单全量**（契约里是**交叉校验**：从源码解析两组集合比对）。
+   漏一项 = 那一类页静默破图，而白名单偏偏让它照进归档 —— `.svg` 原来就是唯一那个漏项。
+   ★ 这条交叉校验是防「以后给 `exts` 加格式、忘了给 MIME 表加」的唯一防线，别删。
+
+**探针侧的升级（B-18 的真验证）**：恶意样书的第 2 页**就是** `page_2.svg`（800×1120），
+所以 `probe-cbz-reader.mjs` 原本那条「已知产品缺口：本帧 `img.naturalWidth` 实测 0」的 note，
+现在换成**硬断言 800×1120**。原来只能做「同一份载荷在正确 MIME 下可解码却不执行」的**间接**对照
+（因为当场解不出来），现在正面判据和数据都在同一个 `<img>` 上 ——
+且「标志位全 null」那条安全断言**同时**锁住了「补 MIME 不打开新攻击面」：加了 MIME 之后
+`<img>` 里的 SVG 依然不执行脚本（与 MIME 无关，`img` 通道本就不跑脚本）。
+
+★ 只改了**页图**路径。`book.getCover` 同样是裸 `loadBlob`，但宿主没接（宿主用 ⑤ 暴露的
+`getPageBlob`），不动它以免扩大改动面 —— 这条取舍已写进 vendor README 的 ⑦ 条目。
+
+✅ **实机验证（2026-09-22 完成）**：`probe-cbz-reader.mjs` 里原来那条「已知产品缺口」note 已换成硬断言，
+实机报 `{"scripts":0,"onerrorAttr":0,"imgNw":800,"imgNh":1120,"imgSrc":"blob:","sandbox":"allow-same-origin"}`
+—— 该 SVG 页**确实解码了**，且四个安全标志位仍全 null（补 MIME 没打开新攻击面）。**全绿**。
+（未做「stash 掉 patch ⑦ 再测」的反向对照：判据是同一个 `<img>` 上的 `naturalWidth`，正向值已足够定案。）
 
 **现象**：cbz 归档里若某一页是 `.svg`，那一页打开是**破图**（`<img>` 加载失败、`naturalWidth = 0`），其余 PNG/JPEG 页正常。属**静默降级**，没有任何报错。
 
@@ -781,7 +970,31 @@ Uncaught TypeError: Cannot read properties of null (reading 'width')
 
 ---
 
-## B-19 退出书籍回书架后，终端刷 ~266 条 `ResizeObserver loop completed with undelivered notifications`（2026-09-22，P2）
+## [x] B-19 退出书籍回书架后，终端刷 ~266 条 `ResizeObserver loop completed with undelivered notifications`（2026-09-22，P2）
+
+### ★ 修复记录（2026-09-22，落码 + 契约 `verify-devbridge-logging.mjs` 28 项全绿）
+
+按上文「修复方向」逐条落地，**四条一起做**才闭环（只做一条都会被另外一条抵消）：
+
+| # | 改动 | 落点 | 治的是 |
+|---|---|---|---|
+| 1 | `measure()` **同值短路 + 未布局(0×0)早退** | `src/components/shared/pdf/PdfReaderView.tsx` | 治本 A/B —— 断掉「测量 → setState → 缩放变 → 尺寸变 → 滚动条进出 → 再测量」的反馈环；0×0 早退顺带干掉保活 `display:none` 期间 `Math.max(120,…)` 造出的**假 120** |
+| 2 | 渲染层日志**按「来源+消息体」窗口去重限流**（1s 一次，压掉的条数回显 `[+N 条同类已折叠]`） | `electron/main/index.ts` `console-message` | 治标 C —— 终端不再被同一条刷屏；**不整条静音**，别的模块真出问题照样看得见 |
+| 3 | `recordLog` **折叠紧邻同消息**（同 scope/level/message 累加 `count` + 刷新 `lastTs`，不新占条目） | `electron/devbridge/capture.ts` | 配套建议 —— 500 条日志环不再被单体刷屏挤爆（**这正是上次吃掉同段其它证据的原因**）；`aggregateErrors` 同步认 `count`/`lastTs`，聚合数不缩水 |
+| 4 | `did-fail-load` **判主帧**（子帧 `ERR_ABORTED` 是有意取消） | `electron/main/index.ts` | 同族噪音 —— 进出书籍各一条的假窗口级故障 |
+
+- ★ **`scrollbar-gutter: stable` 早已在位**（`pdfViewerTheme.css:51`），故治本 A 只剩 measure 那一半。
+- ★ **有意不做**：把沙箱拦截消息（`Blocked script execution in 'blob:…'`）从日志环里滤掉 —— 它是**防线生效的常态输出**、每次开书仅 1~2 条，不构成刷屏；为它加一条消息名过滤，反而会在真出 CSP 问题时把信号一起吞掉。
+- ✅ **实机 Δ=0 已确认（2026-09-22）**：手法 = 装着 devbridge 的 dev 实例 + fixture 仓库，先 `ro-attrib.mjs install`
+  再按标题指书做「开书 → 返回书架」，取 `/errors` 聚合的 Δ。**本条要治的两条路径都 Δ=0**：
+
+  | 书 | 引擎 | 主文档 RO 回调 | 日志环 RO Δ |
+  |---|---|---|---|
+  | `.books/探针样书.txt` | txt | 0 | **Δ=0** |
+  | `.books/Reader Sample (light).pdf` | pdf | 3（pdfjs×2 + `PdfReaderView`×1） | **Δ=0** |
+
+- ⏳ **但仍有一处残余，且不在本条范围内**：foliate 系（epub/cbz）每轮**仍刷 168~622 条**，已另立 **B-21**
+  （并订正了下面「已排除」第 1 条的错判 —— 那台观察者其实**在**主文档里）。
 
 **现象**：在 dev 实例里从某本书退出回书架后，跑 `npm run dev` 的那个终端**整屏刷**同样的行（用户截图 ≈ 200+ 行）：
 
@@ -803,8 +1016,14 @@ Uncaught TypeError: Cannot read properties of null (reading 'width')
 **为什么会被终端刷屏（放大器，不是根因）**：`electron/main/index.ts:316-320` 把渲染层 `console-message` 中 `level >= 2` 的**无条件** `console.error('[Renderer]', …)` 转发到 stdout；而 Chromium 把 ResizeObserver 环告警当作**错误事件**投递 ⇒ 一条浏览器内部告警变成了 N 行终端输出。
 
 **已排除的两件事**（都有证据，避免下次重走）：
-1. **不是书籍内容帧（foliate）里的 observer**：同一次会话的 `/errors` 里，blob 内容帧的报错 sourceId 长这样 —— `blob:http://127.0.0.1:7173/<uuid>`（如 `Blocked script execution in 'blob:…'`）；而本条是 `http://127.0.0.1:7173/:0` = **主文档**。foliate 的观察者全在内容帧内，故可排除。
+1. ~~**不是书籍内容帧（foliate）里的 observer**：foliate 的观察者全在内容帧内，故可排除。~~
+   ★ **这条判错了（2026-09-22 订正，留档防再走）**：前一句的 sourceId 论证只能证明「告警**投递**在主文档」，
+   推不出「foliate 的观察者不在主文档」。实机包一层 RO 构造器后看得清清楚楚 —— foliate 系每轮造出的观察者
+   栈是 `at new RO… <- at <instance_members_initializer> (out/renderer/…)`，也就是
+   **`#observer = new ResizeObserver(…)` 这种类字段**（`paginator.js` / `fixed-layout.js` / `view.js` 都是这个写法），
+   `foliate-view` 宿主元素**就在主文档**里（内容帧才是它内部的 iframe）。⇒ 这条**不能排除**，反而正是残余刷屏的嫌疑人。
 2. **不是 B-17**：B-17 是「翻页 → 一条未捕获 TypeError」（`fixed-layout.js` 的 `#render` 竞态），形态与计数模式都不同，属另一处 RO 家族问题。
+   （B-17 修掉后残余刷屏仍在 ⇒ 这条排除**成立**，见 B-21 的前后对照。）
 
 **未复现说明（重要）**：装了构造期归因探针后，跑「打开→返回书架」共 **5 轮 epub + 1 轮 PDF**，主文档 RO 回调 **0**、`/errors` Δ告警 **0** ⇒ **简单进出不足以复现**，需要「当时的那个触发条件」。故本条**尚未锁定到唯一 observer**，下面给主推根因与归因手法。
 
@@ -823,7 +1042,7 @@ Uncaught TypeError: Cannot read properties of null (reading 'width')
 **★ 复现与归因手法（留档，否则下次要重做）**：
 1. **判定靠差量，不靠肉眼看终端**：读 devbridge `/errors` 聚合项的 `count` + `lastTs`，动作前后各读一次取差（探针 `tmp/ro-probe.mjs` 的 `scan`/`cycle` 动作即此法）。
 2. **归因靠「构造期包一层」**：在渲染层包 `ResizeObserver` 构造器，记录 `new Error().stack` + 每次回调的 target 尺寸与时间戳，再按创建点聚合。
-   ⚠️ **只能抓到安装之后创建的实例** ⇒ 顺序必须是「先装探针 → 再进书 → 再退出」；探针装在 `tmp/ro-probe.mjs`（`tmp/` 不入库，若要长期保留应移入 `.AGENT/scripts/`）。
+   ⚠️ **只能抓到安装之后创建的实例** ⇒ 顺序必须是「先装探针 → 再进书 → 再退出」；探针已收编进库：`.AGENT/scripts/devbridge/ro-attrib.mjs`（原 `tmp/ro-probe.mjs`）。
 3. 复现时把「进书前 / 退出时是否伴随窗口变化（改尺寸、最大化）、右栏 Tab 切换、左栏折叠」一并记录 —— 本轮就是缺这个上下文才没能复现。
 
 **修复方向**：
@@ -850,6 +1069,272 @@ Uncaught TypeError: Cannot read properties of null (reading 'width')
   - 这解释了排查中观察到的「计数从 266 衰减到 260」：不是错误消失，是旧条目被挤出环（**我以为的"收敛"在计数上混合了挤出效应**，真实收敛判据应以 `lastTs` 停住为准）。
   - 后果：**这次刷屏已经破坏了 06:37:58 之前的证据**，所以不能断言「那次只有 RO 一条」—— 排查者若据此下结论会错。
   - 配套建议：修掉 A（同值短路）后刷屏自然消失；另可给 `logRing` 扩容或在入环前**按消息去重计数**（同消息只占 1 条 + count），别让噪声吃掉诊断面。
+
+---
+
+## [x] B-20 渲染层每次会话都刷一条 `MaxListenersExceededWarning: 11 kb:data-changed listeners added`（2026-09-22，P3；**2026-09-22 已修**：方向 A 单点扇出 + 一次性软上限提示）
+
+**修复（2026-09-22）**：`electron/preload/index.ts` 里 `onDataChanged` 改成**单点扇出** —— 只挂
+**一个** `ipcRenderer.on('kb:data-changed')`，订阅者进 `Set<cb>`，返回的退订函数从 Set 里摘。
+第一次订阅时才接线（`dataChangedWired` 守卫）。遍历用副本，避免某订阅者在回调里退订时后面的漏掉这一拍；
+单个回调抛错被吞掉，不牵连同拍其他订阅者。
+
+另外补了**一次性软上限提示**（`DATA_CHANGED_SUB_SOFT_MAX = 50`，稳态十几个）：越线只 `console.warn` 一次，
+文案直接指向 `src/lib/dataChanged.ts`。这样两条语义重新分开 —— **同屏订阅者多（正常）不再刷屏，
+而「订了不复位」的真泄漏仍有且只有一条信号**。这正是本条的存在意义（原「方向 A」漏掉的一半）。
+
+**验证**：新增契约 `.AGENT/scripts/shared/verify-data-changed.mjs`（**16/16 PASS**）——
+静态 ①~⑧ 锁「preload 里 `ipcRenderer.on('kb:data-changed')` 只出现一次」等形状，
+行为 ⑨~⑯ 用桩 `ipcRenderer` 跑**真实切片代码**：12 个订阅者 ⇒ `listenerCount === 1`；
+广播每人恰好一次；退订一个不影响其余；某个订阅者抛错不阻塞同拍；>50 才提示且只提示一次；20 个订阅者零提示。
+另：`tsc -p tsconfig.node.json` / `tsconfig.web.json` 均 0 错，`npm run build` 通过。
+
+
+**现象**：dev 下（探针跑也行）终端出现：
+
+```
+[Renderer] MaxListenersExceededWarning: Possible EventEmitter memory leak detected.
+11 kb:data-changed listeners added. Use emitter.setMaxListeners() to increase limit
+```
+
+**本轮偶遇**：跑 `probe-excerpt-export.mjs` 时，点开 TXT 阅读器后出现（换页/开关阅读器都会加订阅者）。
+
+**定位**：`electron/preload/index.ts:563`（`onDataChanged`）+ `src/lib/dataChanged.ts:23`（`useDataChanged`）
+
+**根因（已验证，**不是**泄漏）**：`onDataChanged` 每次调用都 `ipcRenderer.on('kb:data-changed', handler)`，
+并返回配对的 `removeListener`；`useDataChanged` 的 effect 也在 cleanup 里 `offPush?.()`。
+所以**订阅者数 = 同时挂载的 `useDataChanged` 组件数**，而全仓有 **38 个调用点**
+（工作台左右栏 / 各 widget / 阅读器 / 书架 / 知识库面板…），同屏十几个是**正常稳态** ——
+Electron 沙箱里 `ipcRenderer` 的默认上限是 10，越过就报。
+
+**但仍值得修**，因为它把两种情形混成同一条消息：**①同屏订阅者多（正常）** 与
+**②某个组件忘记 cleanup（真泄漏）**。噪声长期在场后，真泄漏来的时候没人认得出 ——
+这正是铁律 1 那条 `useDataChanged` 接线（接错/漏接的表现是「AI 说改好了、界面没反应」）最需要的诊断面。
+
+**修复方向**（择一）：
+- **A preload 单点扇出**（推荐）：`onDataChanged` 只注册**一个** `ipcRenderer.on`，内部维护
+  `Set<cb>`，返回的函数从 Set 里摘；订阅者再多也只有一个 ipc 监听者。副产品是广播只解一次 payload。
+- **B 显式抬上限**：`ipcRenderer.setMaxListeners(50)` 并注明「预期同屏 N 个订阅者」——一行，
+  但把「真泄漏」这条路彻底堵死（不推荐单独用）。
+- **C 接受**：它是 warning 不是 error，不影响功能。**当前状态**。
+
+**验证**（若选 A）：打开阅读器 + 工作台全开 → 零 `MaxListenersExceededWarning`；
+`useDataChanged` 的 38 个调用点行为不变（派发一次、所有匹配 scope 的回调各触发一次）；
+契约侧建议加一条「preload 里 `ipcRenderer.on('kb:data-changed')` 只出现一次」。
+
+---
+
+## [x] B-21 foliate 系（epub / cbz）进出书籍仍刷主文档 `ResizeObserver loop` 告警（B-19 的残余）（2026-09-22，P3；**2026-09-22 当日闭环**：根因 = `View.destroy()` 的自我否定之门 → vendor patch ⑧）
+
+**现象**：把任意 **epub / fb2 / fbz / cbz**（即走 foliate 的书）开一次再返回书架，日志环与终端仍收
+`ResizeObserver loop completed with undelivered notifications.`（`http://127.0.0.1:7173/:0` = **主文档**）。
+B-19 修好的是 pdf/txt 那条路径（那两条已 **Δ=0**），本条是**修完才露出来的残余**。
+
+**量化（2026-09-22 实测，同一实例、同一次会话、按标题精确指书）**：
+
+| 书 | 引擎 | 主文档 RO 回调 | 页内 loop 告警 | `/errors` Δ |
+|---|---|---|---|---|
+| `.books/探针样书.txt` | txt | 0 | 0 | **Δ=0** |
+| `.books/Reader Sample (light).pdf` | pdf | 3（pdfjs×2 + `PdfReaderView`×1） | 0 | **Δ=0** |
+| `.books/探针样书.epub` | foliate | 3 | **168 / 333 / 355 / 508 / 532** | Δ=3~5 |
+| `.books/探针样书.cbz` | foliate | 1 | **0 ~ 622（见下「双稳」）** | Δ=0~6 |
+
+★ **读数要看两列**：页内计数是几百，而**日志环 Δ 只有几条** —— 那是 B-19 落的两条机制
+（`recordLog` 折叠紧邻同消息 + `console-message` 窗口限流）在压。**观感层面已经被压住了**（终端不再刷屏），
+但底噪没消：每轮仍有 1~6 条真进环，而且环是被折叠后的 count 占着。
+
+★ **cbz 的计数是双稳的（重要，别拿单次读数下结论）**：同一个 post-⑥ 构建上，一次会话读到
+288 / 303 / 298，另一次会话（新实例、同样序列）读到 0 / 0 / 0，再一轮 8 / 622。
+⇒ 该计数由**状态**（开书时的面板宽度 / resize 时序 / 存的 zoom 与 locator）主导，不是代码路径的性质。
+
+**归因**：告警的**投递**在主文档，而 foliate 的观察者**也在主文档** —— 给 `ResizeObserver` 构造器包一层后，
+每次回调都能拿到创建点栈：`at new RO… <- at <instance_members_initializer> (out/renderer/…)`，
+即 `#observer = new ResizeObserver(…)` 这类**类字段**初始化（`view.js` / `paginator.js` / `fixed-layout.js` 都是这个写法）。
+宿主元素 `foliate-view` 在主文档里，内容帧才是它内部的 iframe。
+（B-19 的「已排除」第 1 条与此冲突 —— 已在原处**订正并留档**，防止后人照它继续排除。）
+
+**与 B-17 无关（已做前后对照）**：把 patch ⑥ `git stash` 掉重建，epub 路径（patch ⑥ 碰不到的引擎）
+两版同量级（无守卫 355/532 vs 有守卫 333/508），cbz 路径最大的一次读数（622）出在**被 stash 掉的**那一版。
+⇒ 本条**不是** patch ⑥ 引入的，B-17 修掉后它照样在。
+
+**为什么仍值得修**：① 每条 loop 告警 = 那一帧里真的发生了布局抖动，几百条/轮说明 foliate 的
+relayout 与容器尺寸在互相追（真机翻页/改窗口大小是否掉帧值得实测）；② 与 B-20 同款理由 ——
+噪声长期在场，**真布局抖动来的时候没人分得出**。
+
+**修复方向（先做实验，别直接改 vendor）**：
+- **A 宿主侧先定位触发条件（下一步该做的）**：foliate 的 RO 观察的是**阅读区容器**，而右栏
+  `ReadingSidePanel` 开合 / 左栏折叠 / 进入阅读器时的布局动画都会改阅读区宽度 ⇒ 每次都进 foliate 的 relayout。
+  实验：同一台机器上跑「不动任何面板开书 → 退出」vs「开书往返期间切右栏 Tab / 折叠左栏」，比 Δ。
+  若「不动面板」能压到 0，根因在**宿主**，修的地方就不是 vendor（比如别在书开着时做宽度动画，或把面板开合
+  改成只动 transform）。
+  ★ **这条已被实验否掉（留档防重走）**：「不动任何面板」照样满速刷（**357 条/轮**）⇒ 与面板开合/宽度动画无关。
+- **B vendor：给 foliate 的 `#observer` 回调加同尺寸短路** —— 与 B-19 治本 A 同款手法（`measure()` 同值短路），
+  落点 `view.js` / `paginator.js` / `fixed-layout.js`。属第 8 处起的 patch，**仪式成本同 B-17**
+  （README 补丁表 + 计数 + 契约负向断言 + 升级流程全要同步）。
+  ★ **也不是这条**：回调短路治的是「抖动」，而实测是**观察者被永久留在已摘掉的帧上**（每帧一条，速率恒 166/s）。
+- **C 接受**：观感无异常、计数已被 B-19 的折叠/限流压住。
+
+---
+
+### ★★ B-21 结案（2026-09-22）：根因 = `View.destroy()` 撞上「帧先被摘」的时序，门自己失效
+
+**为什么刷得那么稳（166 条/秒）**：不是抖动，是**每次 RO 交付周期都发现有无主通知**。
+60fps ⇒ 每帧一条 ⇒ 视觉上「稳定 166/s」，与实测逐字吻合。原来那句「cbz 读数双稳」也由此解释：
+**更早那本 epub 留下的泄漏在继续刷**，cbz 只是接在后面的观测者（新实例/清空状态时读 0 = 那次没赶上趟）。
+
+**机制（微验证钉死）**：观察一个 **iframe 的 body** → 把这个 iframe **摘掉** → 该观察者从此每帧报一条
+（实测 166/s）；`disconnect()` 立刻归零。反之，**主文档**里被观察的普通 div 摘掉后 **0 条/秒**。
+⇒ 告警的必要条件是「目标的**帧**没了」，不是「目标不可见」。
+
+**根因**：`paginator.js` 的 `View` 观察内容帧的 `body`，而撤销写在
+`destroy() { if (this.document) this.#observer.unobserve(this.document.body) }` —— `this.document`
+就是 `#iframe.contentDocument`。宿主的拆卸顺序（`EpubReaderView`：`view.close()` → `view.remove()`）
+**先摘 DOM，effect cleanup 才跑**，于是帧已经脱离、`contentDocument` 变 `null`，
+**唯一需要它起作用的时刻正是它判据失效的时刻** ⇒ 观察者被永久留在已脱离帧上。
+相邻两处上游笔误：`Paginator.destroy()` 撤销的是 `this`（实例）而不是它真正观察的 `#container`；
+`this.#view.destroy()` 在 `#view` 为 null 时直接抛，会截断后面的清理。
+
+**定位手法（全部一次性脚本，未进库；可复用的是手法本身）**：
+1. 开书前包一层 `ResizeObserver` + `HTMLIFrameElement.prototype.contentDocument` 的 getter，
+   录 observe/unobserve/disconnect 的**调用栈**与「读 contentDocument 时帧还在不在」；
+2. 用上一步的痕迹证明 `View.destroy()` **确实跑了**，而它读 `contentDocument` 得到 `null`；
+3. 受控反证（微验证）：iframe body 被观察 → 摘帧 → 166/s → `disconnect()` → 0/s。
+
+**修复（vendor patch ⑧，`src/vendor/foliate/paginator.js` 三处）**：
+`View` 加 `#body` 字段留**实体引用**（`load()` 里 `this.#body = doc.body` 后再 observe），
+`destroy()` 改成按留存引用无条件 `unobserve`；`Paginator.destroy()` 改撤 `#container` 并把
+`#view?.destroy()` 写成可选调用。README 补丁表已补 ⑧ 并同步「8 处 / 重放 8 处 / 升级流程第 6 步跑新探针」。
+
+**验证**：
+- 修前 epub 单轮 **527 条** → 修后 **0 条**；时间线里出现 `unobserve body … at View.destroy`（修前从来没有）。
+- 新增探针 `.AGENT/scripts/workbench-shell/probes/probe-ro-noise.mjs`（六种格式各开一次再返回）**19/19 PASS**：
+  逐本断言 ①开书期间告警 0、②返回后告警 0、③**「帧已摘掉却仍被观察」的目标 0**（治本判据）+ ④六种格式都真进到 ready
+  （专挡「没打开所以没告警」这类假通过）。
+- **变异测试**：把构建产物里的 `View.destroy()` 改回上游那条门 → 探针当场变红 ⇒ 确实能抓这条回归，不是空跑。
+  首轮（旧判据）epub 返回后 **347** 条、fb2 183 / fbz 191 / cbz 188；改用最终判据后重跑：
+  逐本 **96 / 352 / 361 / 347** 条，且**残留帧观察逐本累加 1 → 2 → 3**（每开一本留一个，与实际机制一致）。
+- ★ **告警条数不能当判据**（这次变异测试顺带证伪的）：同一份变异构建上，`probe-cbz-reader` /
+  `probe-fb2-reader` / `probe-epub-reader` 读到的 RO 告警都是 **0 条**，而 `probe-ro-noise.mjs` 读 **341 条**
+  —— 条数受卸载时机 / GC 影响，**有 bug 时也能读 0**。所以那三条探针里这一类只**报数、不断言**
+  （源码注释写明会假通过），本条的回归位**只在** `probe-ro-noise.mjs`；本探针读数稳定是因为包装层的
+  `live` 表对被观察节点是强引用（RO 规范本身也强引用观察目标）。
+- 判据口径留档：检测写成 `el.ownerDocument !== document && !el.ownerDocument.defaultView`
+  （泄漏的 body 自述 `isConnected === true`、`frameElement` 取不到 —— 只有 `defaultView` 为 null 是准的）。
+- 契约位：`.AGENT/scripts/pdf-reader/verify-epub-formats.mjs` 第 **⑫** 组锁 patch ⑧（含
+  **负向**「上游那条 `if (this.document) this.#observer.unobserve` 必须不在」）＋ README 计数＝8 / 升级流程 / 探针登记。
+
+**复现与判据（留档）**：`node .AGENT/scripts/devbridge/ro-attrib.mjs install` → 按 relPath **精确指书**
+（书架主网格卡片的 `title` 就是 relPath；侧栏书名是按阅读状态算出来的，第二轮起指错）→ 开书 + 返回 → 读 Δ。
+⚠️ `install` 只能抓**安装之后**创建的实例，顺序必须是「先装 → 再进书 → 再退书」；日志环会折叠紧邻重复，
+**读 `count` 不读行数**。
+
+**验证**：同一序列下 `/errors` 里 ResizeObserver 项的 Δ 从 3~6 降到 **0**（页内计数同步降到个位数）；
+阅读器翻页 / 进度还原 / 版式几何不变；`probe-cbz-reader.mjs` 与 `probe-epub-reader.mjs` 全绿。
+
+## B-22 EPUB 书签在重新分页后（改字号 / 拉窗口）会重复，且旧那条从 UI 删不掉（2026-09-22，P3）
+
+**现象**：epub/fb2/fbz 里加了书签 → 改字号或改窗口宽度（重新分页）→ 回到「同一处」再点工具栏书签按钮，
+**加出第二条**而不是移除；且旧的那条**删不掉**（右栏书签行只能跳、没有删除入口；跳过去之后当前 CFI
+仍与存储值不等 ⇒ 再点还是加）。
+
+**定位**：`src/components/shared/epub/EpubReaderView.tsx` 的 `toggleBookmark`（判定 = `bkmRef.current.find(b => b.cfi === cfi)`，**全等**）；
+右栏行渲染在 `src/components/workbench/ReadingSidePanel.tsx` 的 `markItems`（只有 `go`，无删除）。
+
+**根因**：书签的定位键是 foliate 在 relocate 时给的 **range CFI**（= 当前屏可见文本范围）。**重新分页会改变同一屏的 CFI**
+（起点字符与范围终点都随分页走），全等判定因此失配。「删不掉」是**第二个独立缺口**：只有阅读器工具栏能删，
+且只在当前 CFI 恰好等于存储值时可删 —— 与漂移叠加后就成了孤儿条目。
+
+**修复方向**（二选一或都做）：
+1. 判「同一处」改成**起点归一化**比对（`父路径 + 第一个子路径`，即把 `epubcfi(/6/2!/4/2/4,/1:0,/1:24)` 截到 `epubcfi(/6/2!/4/2/4,/1:0)`）。
+   ★ **不能只截到第一个逗号**：`epubcfi(/6/6!/4,/2[c3],/12/1:55)` 的公共父是章节容器，截到那里等于「整章都算同一处」。
+2. 右栏书签行加**删除入口**（hover 出 ✕，走 `readerStatePatch({ bookmarks })`）—— 这条与 CFI 漂移无关，
+   一次就把「删不掉」独立修掉（pdf 书签在 PDF 阅读器内有自己的删除，不受此影响）。
+
+**验证**：改字号 → 同页再点书签按钮，盘上条数**不变**（而非 +1）；右栏能删任意一条；
+`probe-epub-reader.mjs` 第 8.5 步仍绿，并补一条「改字号后同页再点不新增」。
+
+**为什么现在不修**：本次（2026-09-22）拍板 **书签只做快速跳转**；实测「加 → 翻走 → 点右栏跳回」落回处
+CFI 与存储值**逐字相同**（探针 note 有记录）⇒ **不换字号 / 不拉窗口时不会发生**。先落可用版本，
+不为它临时发明一套 CFI 归一化口径。
+
+---
+
+## [x] B-23 「导出为笔记」撞上陈旧知识索引时直接 ENOENT，导出整个被打断（2026-09-22，P3；发现于 B-16 验证期）
+
+**现象**：书里点右栏「导出为笔记」没反应，主进程日志一条
+`Error occurred in handler for 'excerpt:exportNote': ENOENT: no such file or directory, open '…\.knowbase\_inbox\读书笔记 · 探针样书.fb2.md'`。
+触发不需要任何非常规操作：**只要 `excerptExports.json` 里记着的页面文件已被「应用外」删掉**（同步工具挪走 / 手动清目录 / 另一个实例删 / 探针绕过应用直接删盘），
+而应用还没重扫过知识库 —— 之后这本书**永远导不出来**，且页面上的提示只有一句泛泛的失败。
+
+**定位**：`electron/lib/kbStore/knowledgeVaultRepo.ts` 的 `vaultExportExcerptsNote`（按 id 查索引 → `readFileSync` 那一段）。
+
+**根因**：知识索引是**记忆化**的（`getKnowledgeIndex()` + 磁盘缓存 `cache/knowledge-index.json`），
+而它**不校验条目所指文件是否还在盘上**（「幽灵页」的由来，`seed-probe-vault.mjs` 里有同一坑的说明）。
+于是导出链路：索引说「有这篇页」→ 拼出 abs → `readFileSync` 抛 ENOENT → 异常穿出 handler。
+关键点是**调用方本来就有自愈分支**（页面不存在时重建 + 回写新 id），但它的触发条件是「函数返回 `null`」——
+异常绕过了这个契约，「文件没了」这种最该自愈的情形反而走了最硬的一条路。
+
+**修复**：命中索引后加一道 `if (!existsSync(abs)) { invalidateKnowledgeIndex(); return null }`。
+★ 顺序不能反：**先失效索引再返回 null** —— 否则下次读到的还是同一条幽灵条目（自愈会变成每轮都靠异常兜）。
+
+**验证**：
+- `probe-fb2-reader.mjs` 上这条是**改前红 4 条 / 改后连着两轮全绿**（自愈幂等：第二次导出不再重建新页）。
+- 契约 `verify-excerpt-export.mjs` §④ 加两条负向断言锁住（`existsSync` 守卫存在 + 守卫内**先** `invalidateKnowledgeIndex()` 再 `return null`）。
+
+**★ 顺带收掉的测试卫生问题（与产品无关，但会伪装成这条的回归）**：`probe-excerpt-export.mjs` **启动时绕过应用直接删盘**上的读书笔记页
+（为了「重复跑不漂移」），而索引是记忆化的 ⇒ 它自己就会把上一轮留下的页算成幽灵页，`点导出 → 知识库页数 +1` 拿到假读数
+（2026-09-22 实测：夹在别的探针后面跑 `before=13 after=11`；紧接 `seed-probe-vault.mjs` 跑则全绿）。
+修法：删盘之后**用一次净零的星标往返**（`toggleKnowledgeStar` 两次，内部自带 `invalidateKnowledgeIndex()`）逼索引重建，
+不新造测试专用 IPC、也不动产品代码。现在连跑两轮、且不预先 seed 也全绿。
+
+---
+
+## B-24 pdfjs 的 `PDFViewer` 每开一次 PDF 留一个观察者（无告警，但会拴住整棵 viewer 图）（2026-09-22，P3；排查 B-21 时顺带测出）
+
+**现象（无感）**：不用 RO 探针看不出来 —— 反复「开 PDF → 返回书架」不会产生任何告警，
+只是**每开一次**会多留一个仍被观察的 `.kb-pdf-scroll` 节点（B-21 结案时探针的「良性残留」那一列恒为 1）。
+
+**定位**：`node_modules/pdfjs-dist/web/pdf_viewer.js:6003`（`#resizeObserver = new ResizeObserver(...)`）
+与 `:6021`（构造器里 `observe(this.container)`）；宿主侧
+`src/components/shared/pdf/PdfReaderView.tsx:507`（`new kit.PDFViewer({...})`）+
+`src/components/shared/pdf/pdfViewerKit.ts:43`（`detachViewerDocument`）。
+
+**根因**：pdfjs 3.11 的 `PDFViewer` **没有 `destroy()`**（`grep` 全文件只有 `cleanup()` 与页级
+`firstView?.destroy()`），构造器里那次 `observe(container)` **没有任何解除路径**；而 `PDFViewer`
+是 React 每次挂载重建的 ⇒ 观察者被留在「卸载后已脱离文档」的容器上。
+`detachViewerDocument` 的注释（「官方 viewer 没有 destroy()，`setDocument(null)` 就是卸载」）是对的，
+但 `setDocument(null)` 不碰那个 RO。
+
+**为什么不是 B-21 同类（判据别混）**：目标在**主文档**，Chromium 对「主文档里被观察的脱离节点」
+**不报 loop 告警**（微验证实测 0 条/秒；只有帧被摘掉才 166/s）。所以它既不刷屏也不进日志环，
+**不要**把它算进 B-21 的判据 —— 那会逼着后人去调阈值。
+
+**为什么仍值得记**：`ResizeObserver` 的活动观察会**拴住目标**，目标又被 `PDFViewer` 引用 ⇒
+每开一次 PDF 就留一整套（viewer + 容器子树）在内存里，长会话反复开 PDF 会持续涨。
+量级不大（单本 PDF 一轮一份），但它是**单向累积**、无自愈。
+
+**修复方向（择一，都要验「连开 20 次 → 良性残留恒为 0 / 内存不涨」）**：
+- **A vendor patch（与 foliate 同款仪式）**：给 pdfjs 的 `PDFViewer` 补一个 `destroy()`（`#resizeObserver.disconnect()`
+  + 既有 `cleanup()` 之类），在 `detachViewerDocument` 里改调它。代价：多一个 vendor 补丁表 + 升级重放。
+- **B 宿主侧绕过**：不复用 React 的容器节点 —— 造一个**常驻**的容器元素（挂进一个不卸载的宿主、或应用级单例），
+  每次挂载复用它 ⇒ 被观察的目标永不脱离。代价：容器尺寸/定位得自己维护，且观察者会越积越多（只是不再拴住死节点）。
+  ⚠ **这条修不到根上，还会把判据弄绿**（2026-09-22 补注）：RO → 它绑定的回调 → `PDFViewer` 这条引用链
+  不因「目标是否脱离」而改变（保活只认「有没有活动观察」），所以换容器**不回收任何 viewer 图**；
+  它唯一的效果是让探针那列**读 0** ⇒ 变成「判据绿了、问题还在」的假通过。要复用容器请连带说明为什么还要它。
+- **A′ 宿主侧捕获式（2026-09-22 补记；不需要新依赖，代价最小）**：pdfjs 那份 `pdf_viewer.js` 是
+  **普通 npm 依赖**（`pdfjs-dist@^3.11.174`，无 alias、无 patch 工具），所以「A」其实还隐含一个
+  载具问题（要引入 `patch-package` + `postinstall`，或把 232KB 的 CJS 文件连同相对 import 一起 vendor）。
+  A′ 绕开载具：那个 RO 全文件只出现三处（`:6003` 字段初始化、`:6021` 构造器 observe、`:7374` 回调），
+  即**只可能建在构造期**。于是可以在 `pdfViewerKit` 里把 `globalThis.ResizeObserver` 在
+  **`new PDFViewer(...)` 这一句的同步窗口内**换成捕获版，收下这次构造新建的实例，宿主侧在
+  `detachViewerDocument` 里对它们 `disconnect()`。要留的注释：为什么必须「只在这一句包」、
+  以及 pdfjs 升级后若把 RO 建到构造期之外，捕获会漏（判据靠探针，见下行）。
+- **C 接受**：当前状态。若哪天要查内存增长，**从这条查起**。
+
+**判据（留档）**：跑 `.AGENT/scripts/workbench-shell/probes/probe-ro-noise.mjs`，
+看「良性残留」那一列 —— 现在恒为 1（首次开 PDF 之后），修好后应为 0。
+★ **只有 A 能让这一列真正归零**（B 是把它涂绿），所以「连开 20 次 → 恒 0」这条验证必须连同
+「`PDFViewer` 实例可回收」一起看，别只读探针的列。
 
 ---
 

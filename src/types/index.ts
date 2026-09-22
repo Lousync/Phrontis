@@ -1171,6 +1171,15 @@ export interface WorkspaceRangeResult {
   truncated: boolean
 }
 
+/** 范围读取的**字节**版本（B-16；foliate 系阅读器整本取字节用，免渲染侧 base64 解码）。
+ *  主进程侧真源 = `electron/lib/workspaceManager.ts` 的 `ReadRangeBytesResult`，两处字段一一对应。 */
+export interface WorkspaceRangeBytesResult {
+  bytes: Uint8Array
+  offset: number
+  size: number
+  truncated: boolean
+}
+
 // ===== PDF 阅读体验整包（v3.4.0 第 2 项）=====
 /** 阅读模式：竖滚（默认）/ 单页 / 双页（≥1240px，低于自动降级单页） */
 export type PdfViewMode = 'scroll' | 'single' | 'duo'
@@ -1233,12 +1242,20 @@ export const EXCERPT_COLOR_NAMES: Record<ExcerptColor, string> = { y: '黄', g: 
 /** 扫描版探测结论（渲染层侧镜像；真源 = electron/lib/kbStore/scanDetect.ts，缺省 = full） */
 export type BookScanMode = 'full' | 'partial' | 'no'
 
-/** TXT 书签（段落级定位；与 PDF 书签 page 不同源） */
-export interface TxtBookmark {
+/**
+ * 书签（一套结构 + 按 kind 分支的定位字段；真源 = `electron/lib/kbStore/readerStateSchema.ts` 的
+ * `BookBookmark`，此处镜像 —— 改那边记得同步这里）。
+ * - txt → `paraIndex`（+ 可选 `start`/`end`）；
+ * - epub/fb2/fbz → `cfi`（+ 可选 `chapter`）；
+ * - pdf 的书签在 `pdfReader.json`（page），与这里**不同源、不混用**；cbz 不支持。
+ */
+export interface BookBookmark {
   id: string
-  paraIndex: number
+  paraIndex?: number
   start?: number
   end?: number
+  cfi?: string
+  chapter?: string
   label: string
   at: string
 }
@@ -1250,7 +1267,7 @@ export type ReaderPaper = 'default' | 'sepia' | 'green' | 'dark'
  *  ★ `kind` 刻意不在白名单 —— 它是 relPath 的纯函数，由主进程按路径推导后覆盖写入。 */
 export type ReaderStatePatch = {
   pct?: number
-  bookmarks?: TxtBookmark[]
+  bookmarks?: BookBookmark[]
   fontScale?: number
   paper?: ReaderPaper
   /** 精确回跳载体（epub = foliate CFI；B 段引入，与 pct 双轨） */
@@ -1265,7 +1282,8 @@ export interface ReaderBookState {
   updatedAt: string
   /** 精确回跳载体（epub = foliate CFI；与 pct 双轨） */
   locator?: string
-  bookmarks?: TxtBookmark[]
+  /** 书签（txt 用 paraIndex、foliate 系用 cfi；按 kind 分支，见 `BookBookmark`） */
+  bookmarks?: BookBookmark[]
   fontScale?: number
   paper?: ReaderPaper
 }
@@ -1652,6 +1670,7 @@ export interface ElectronAPI {
   workspacePickImages: (rootId: string) => Promise<{ ok: boolean; images?: VaultStagedImage[]; error?: string }>
   workspaceSaveImage: (rootId: string, payload: { fileName: string; dataBase64: string }) => Promise<{ ok: boolean; name?: string; relPath?: string; error?: string }>
   workspaceReadRange: (rootId: string, relPath: string, offset: number, length: number) => Promise<WorkspaceRangeResult & { error?: string }>
+  workspaceReadRangeBytes: (rootId: string, relPath: string, offset: number, length: number) => Promise<WorkspaceRangeBytesResult & { error?: string }>
   // ===== PDF 阅读体验整包（v3.4.0 第 2 项）：进度/书签/封面缓存/导入 =====
   pdfReaderListBooks: () => Promise<{ ok: boolean; books?: BookListItem[]; error?: string }>
   pdfReaderGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; state?: PdfBookState | null; error?: string }>

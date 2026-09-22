@@ -1,6 +1,6 @@
 // 契约验证：书架阅读器 B 段 · 电子书引擎（foliate vendored）与 CSP 例外。
 //
-// 覆盖十组断言：
+// 覆盖十二组断言：
 //   ① CSP 例外**只开了该开的**，且 key 防线未被弱化（script-src 不含 'unsafe-inline'）
 //   ② vendored foliate 关键文件齐全（缺文件 = 阅读器直接炸，且是运行时才炸）
 //   ③ ★ sandbox 负向：所有 setAttribute('sandbox', …) 调用一律不含 allow-scripts
@@ -15,6 +15,11 @@
 //     且主进程整份读白名单 ⊇ BOOK_EXTS（漏一个 = 打开新格式时 readWholeBook 直接报错）
 //   ⑩ ★ 阶段 2b（cbz 固定版式）：patch ⑤ 三件事（自然序 / 扩展名大小写 / getPageBlob）·
 //     CSP 例外只开在 img-src · 缩略图网格两侧接线与下采样 · 固定版式判据单点 · 右栏 Tab 不留
+//   ⑪ ★ patch ⑥（B-17 `#render` 空帧早退，且必须在读 `right` 之前）· patch ⑦（B-18 页图补 MIME，
+//     两条都加了「未放宽安全面」的负向）
+//   ⑫ ★ patch ⑧（B-21：`View.destroy()` 的自我否定之门 → 按留存引用撤销；含 `#container` / 可选
+//     调用两处上游笔误，与 README 计数＝8 的登记面。★ 这条的核心是**负向断言** ——
+//     上游那条 `if (this.document)` 一旦被升级重放回去，观察者就永久留在已脱离的帧上）
 //
 // 注：`bookKindOf` / `bookEngineOf` 的纯函数用例表在 verify-reader-formats.mjs 的 ①组
 // （与其它 bookFormats 用例同处），此处只做「跨文件一致性 + 负向」两件事，不重复用例。
@@ -389,6 +394,99 @@ console.log('\n--- ⑩ ★ cbz：comic-book patch ⑤ / img-src 例外 / 缩略�
     check(`★ ${p.split('/').pop()} 不含 '.cbz' 扩展名字面量（一律走 bookKindOf / bookExtOf）`,
       !/['"]\.cbz['"]/i.test(s))
   }
+}
+
+// ===== ⑪ ★ B-17 / B-18：vendor patch ⑥⑦（RO 空帧早退 + cbz 页图 MIME）=====
+console.log('\n--- ⑪ ★ patch ⑥（B-17 RO 空帧早退）/ patch ⑦（B-18 页图 MIME）---')
+{
+  // (1) patch ⑥：`#render` 无帧早退（判据 = `right` 缺席，非「三槽全空」）
+  const flSrc = stripComments(read(`${VENDOR}/fixed-layout.js`))
+  const guardIdx = flSrc.search(/if \(!right\) return/)
+  const readIdx = flSrc.search(/const right = this\.#center \?\? this\.#right/)
+  const targetIdx = flSrc.search(/const target = side === 'left' \? left : right/)
+  const transformIdx = flSrc.search(/transform\(right\)/)
+  check('★ patch ⑥：`#render` 无帧早退在位（`right` 缺席 = 无帧可渲）', guardIdx > -1)
+  check('★★ patch ⑥：早退位置必须在 `const right = …` **之后**（早于它就是引用未声明变量）'
+    + '、且在 `const target = …` **之前**（晚于它就先在 `target.width` 上抛了，白改）',
+    guardIdx > -1 && readIdx > -1 && targetIdx > -1 && readIdx < guardIdx && guardIdx < targetIdx)
+  check('★ patch ⑥ 覆盖到第二条路径：`transform(right)` 也排在守卫之后'
+    + '（双页路径第二个 await 窗口：`#left` 已挂上、`#right` 仍 null —— `side===\'left\'` 时'
+    + '前两处都不抛，最后由它解构 null 抛；「三槽全空」判据罩不住这一条）',
+    guardIdx > -1 && transformIdx > -1 && guardIdx < transformIdx)
+  check('★ patch ⑥ 的前提仍在：`#observer` 回调直连 `#render`（就是 await 窗口里的触发路径）',
+    /#observer\s*=\s*new ResizeObserver\(\(\)\s*=>\s*this\.#render\(\)\)/.test(flSrc))
+
+  // (2) patch ⑦：页图补 MIME —— 三条缺一不可（不传 / 表漏项 / 大小写敏感，都回到破图）
+  const comic2 = stripComments(read(`${VENDOR}/comic-book.js`))
+  check('★ patch ⑦：页图 loadBlob 传了 MIME 第二实参（不传 ⇒ Blob type=\'\' ⇒ Chromium 按未知类型拒绝解码）',
+    /URL\.createObjectURL\(await loadBlob\(name,\s*mimeOf\(name\)\)\)/.test(comic2))
+  check('★ patch ⑦：`mimeOf` 取后缀是**大小写不敏感**的（与 patch ⑤-b 配对：⑤-b 放 `.JPG` 进白名单，'
+    + '这里若大小写敏感，那一类页仍拿到 type=\'\' ⇒ 进得来、显示不出）',
+    /lastIndexOf\('\.'\)[\s\S]{0,120}?toLowerCase\(\)/.test(comic2))
+  check('★ patch ⑦：`.svg → image/svg+xml` 在表里（B-18 的靶子：SVG 不在浏览器嗅探表里，必须显式给 MIME）',
+    /'\.svg':\s*'image\/svg\+xml'/.test(comic2))
+
+  // ★ 交叉校验：MIME 表键集合 ⊇ exts 白名单（漏一项 = 那一类页静默破图，且白名单让它照进归档）
+  const extsM = comic2.match(/const exts = \[([^\]]*)\]/)
+  const extsList = extsM ? extsM[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean) : []
+  const mimeKeys = [...comic2.matchAll(/'(\.\w+)':\s*'image\//g)].map((m) => m[1])
+  const missingMime = extsList.filter((e) => !mimeKeys.includes(e))
+  check(`★ patch ⑦：MIME 表覆盖 exts 白名单全部 ${extsList.length} 个扩展名（漏项数 ${missingMime.length}）`,
+    extsList.length > 0 && missingMime.length === 0, missingMime.join(', ') || extsList.join(','))
+
+  // (3) 负向：两条 patch 都不得顺势放宽安全面
+  const flCalls = [...stripComments(read(`${VENDOR}/fixed-layout.js`)).matchAll(/setAttribute\('sandbox',\s*([^)]*)\)/g)]
+    .map((m) => m[1])
+  check('★ patch ⑥ 未顺手把 sandbox 的 allow-scripts 加回来',
+    flCalls.length > 0 && flCalls.every((c) => !c.includes('allow-scripts')), flCalls.join(' | '))
+  check('★ patch ⑦ 未把页图改成 data:/内联 HTML（cbz 页图动辄数 MB，只能走 blob:）',
+    !/kbToDataURL|readAsDataURL/.test(comic2))
+
+  // (4) README 登记面：⑥⑦ 两条各自的动机在表里
+  //     ★ 总数与「重放 N 处」的硬同步由第 ⑫ 组独占断言（patch 表还在长，别在多处各写一遍总数）
+  const rdm2 = read(`${VENDOR}/README.md`)
+  const sections = (rdm2.match(/^### [①②③④⑤⑥⑦⑧⑨⑩]/gm) || []).length
+  check(`★ README 的 patch 表 ≥7 条（实为 ${sections}；删/加 patch 必须同步这张表）`, sections >= 7)
+  check('★ README 记了 ⑥⑦ 两条的动机（升级重放时才知道为什么不能丢）',
+    rdm2.includes('空帧早退') && rdm2.includes('页图补 MIME'))
+}
+
+// ===== ⑫ ★ B-21：vendor patch ⑧（拆卸时按留存引用撤销 ResizeObserver 观察）=====
+console.log('\n--- ⑫ ★ patch ⑧（B-21：`View.destroy()` 的自我否定之门 → 按留存引用撤销）---')
+{
+  const pg = stripComments(read(`${VENDOR}/paginator.js`))
+
+  // (1) View 侧：留引用 + 按引用撤销
+  check('★ patch ⑧：`View` 留住了被观察节点的实体引用（`#body = null` 字段）',
+    /#body\s*=\s*null/.test(pg))
+  check('★ patch ⑧：`load()` 里**先留引用再 observe**（顺序反了就等于没留 —— 撤销时还是拿不到节点）',
+    /this\.#body\s*=\s*doc\.body[\s\S]{0,90}?this\.#observer\.observe\(this\.#body\)/.test(pg))
+  check('★ patch ⑧：`View.destroy()` 按留存引用撤销（`if (this.#body) … unobserve(this.#body)`）',
+    /if\s*\(this\.#body\)[\s\S]{0,90}?unobserve\(this\.#body\)/.test(pg))
+
+  // (2) ★★ 负向：上游那条「自我否定之门」必须不在
+  check('★★ patch ⑧ 负向：`View.destroy()` 不得再按 `this.document`（= `iframe.contentDocument`）判据撤销 ——'
+    + '帧一被摘它就变 null，而这**正是唯一需要它起作用的时刻** ⇒ 观察者被永久留在已脱离帧上，'
+    + 'Chromium 每帧报一条 loop 告警（实测 166 条/秒，单轮 300~600 条）',
+    !/if\s*\(this\.document\)\s*this\.#observer\.unobserve/.test(pg))
+
+  // (3) Paginator 侧：两处上游笔误
+  check('★ patch ⑧：`Paginator.destroy()` 撤销的是它**真正观察的** `#container`（上游写 `unobserve(this)` —— 撤错目标）',
+    /unobserve\(this\.#container\)/.test(pg) && !/this\.#observer\.unobserve\(this\)/.test(pg))
+  check('★ patch ⑧：`this.#view?.destroy()` 写成可选调用（`#view` 为 null 时上游会抛，后面的清理被截断）',
+    /this\.#view\?\.destroy\(\)/.test(pg))
+
+  // (4) README 计数与升级流程同步（★ 本组是总数的唯一断言处）
+  const rdm3 = read(`${VENDOR}/README.md`)
+  const sections3 = (rdm3.match(/^### [①②③④⑤⑥⑦⑧⑨⑩]/gm) || []).length
+  check(`★ vendor README 的 patch 表有 ${sections3} 条（应为 8）且标题计数同步`,
+    sections3 === 8 && rdm3.includes('KB PATCH（8 处'))
+  check('★ README 的升级流程同步到 8 处（照 7 处重放 = 升级后这条修悄悄丢掉）',
+    /重放上述 8 处 patch/.test(rdm3))
+  check('★ README 登记了 ⑧ 的**实机回归位探针**（只写机制不写判据，后人重放时无从验）',
+    rdm3.includes('probe-ro-noise.mjs'))
+  check('★ README 记了 ⑧ 的机制与「判据不看告警计数」的口径（计数受 GC 时机影响，会自然归零而看着像好了）',
+    rdm3.includes('留存引用') && rdm3.includes('已不可渲染'))
 }
 
 console.log(`\n${pass ? '全部通过' : '存在失败项'}`)

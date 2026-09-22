@@ -851,3 +851,54 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 - **`fixed-layout.js` 的 `#render` 有 ResizeObserver 竞态** —— `#showSpread` 先把 `#left/#right` 置 null 再 `await #createFrame(center)`，窗口期内 `this.#center ?? this.#right` 得 null ⇒ 每次翻页控制台一条未捕获 TypeError。上游 latent bug，被「全居中」（`spread:'none'`）放大成**必现**。**本批不加第 6 处 patch**（patch ⑤ 已被限定在 `comic-book.js`）；页面观感正常（后续那次显式 `#render()` 会纠正版式）。探针把它从错误列表里**显式指名**滤掉，不是通配。
 - **cbz 里的 `.svg` 页是破图** —— `loadBlob(name)` 不传 MIME ⇒ Blob `type=''` ⇒ Chromium 拒解 SVG（PNG/JPEG 靠嗅探照常）。修它要动 vendor，本轮接受（实机画集极少用 SVG 当页）。★ 这条**不是**安全缺口，反而是安全结论的旁证。
+
+## 22. EPUB 书签：foliate 系（epub / fb2 / fbz）快速跳转（2026-09-22）
+
+背景：左栏书签 Tab 在 2026-09-21 被撤掉，理由是**存储口径未定** —— txt 的书签定位键是数字 `paraIndex`，而 foliate 系的定位键是 CFI，两者塞不进一个字段。本次把这件做掉，做法是**不加新文件、不加新 IPC、不加新事件、不动 vendor**：定位键直接用 CFI，与摘录 / 进度 locator 同一口径。
+
+用户拍板（2026-09-22）：**书签只供快速跳转 —— 不写摘录存储、不进「导出为笔记」**。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | `TxtBookmark` → **`BookBookmark`**（一份结构，定位字段全可选：txt 用 `paraIndex`、foliate 系用 `cfi`）；新增 `sanitizeBookmark(v, kind)` **按 kind 分支**决定哪个定位字段合法，**pdf / cbz / 未收录扩展名显式拒绝** | `electron/lib/kbStore/readerStateSchema.ts` |
+| 2 | `sanitizeReaderPatch(patch, kind?)` 多一个入参；repo 侧把 kind 推导**提到校验之前**（定位合法性依赖它） | `readerStateVaultRepo.ts`·`src/types/index.ts`（类型镜像） |
+| 3 | 新增上限 `MAX_BOOKMARKS = 500`，超限**整单拒绝**（与 pct 越界同款，不静默截断）；**两个写方都 import 这个常量**提前拦 + Toast | schema + `TxtReaderView` / `EpubReaderView` |
+| 4 | 阅读器：载入书签、`toggleBookmark`（同一 CFI 再点即移除）、工具栏两态按钮（`data-wb="epubBookmark"`，紧邻字号组，**只对文字层书**出现 = `!isFixedLayoutBook`，与 schema 的 `FOLIATE_KINDS` 一一对应） | `src/components/shared/epub/EpubReaderView.tsx` |
+| 5 | 右栏「阅读」面板书签区：按**引擎**归一成**一个**列表渲染（foliate → 徽标 `§` 走 `onLocateExcerpt({cfi})`；pdf → `P{页}`；txt → `¶{段}`），删掉原先的「本书格式暂不支持书签」说明与三份并列 JSX | `src/components/workbench/ReadingSidePanel.tsx` |
+| 6 | 跳转失败文案通用化（同一通道摘录与书签两处在用，不再写死「这条摘录」） | `EpubReaderView.tsx` |
+
+三个判据层面的取舍：
+
+- **判据一律用引擎**（`bookEngineOf`），不写 `kind === 'epub'` —— 写死会让 fb2 / fbz 的书签「点了没反应且无任何报错」（`App.tsx` 那条注释就是为此留的）。
+- **定位键取整条 CFI、按全等比较**：foliate 的 range CFI 形如 `epubcfi(/6/6!/4,/2[c3],/12/1:55)`（公共父路径 + 逗号分隔子路径），"取第一个逗号之前"会退化成整章，比不判还糟。故不做任何截断式归一。
+- **上限的写方也必须在场**：schema 拒 + `patchReader` 静默失败 =「书签加上又消失」（本地 state 有了、盘上没有）。契约里有一条**源码级断言**锁「两个写方都 import 了 `MAX_BOOKMARKS`」。
+
+**实测结论（探针 note 记录）**：加书签 → 翻走 → 点右栏那一行跳回，**落回处的 CFI 与存储值逐字相同** ⇒ 再点一次确实是「移除」。已知限制：**换字号 / 改窗口宽度会重新分页**，同一屏的 CFI 随之改变 ⇒ 那时再点会加出第二条（两条都跳同一处、可各自删）；不为它发明 CFI 归一化，代码注释与探针 note 都写明了。
+
+**cbz 仍不给右栏 Tab / 不收书签**（整页是图片、无文字层）。引擎 = foliate 是**超集**（cbz 也走 foliate 引擎），契约锁的是「foliate 引擎里不收书签的**差集恰好 = cbz**」—— 将来多一种 foliate 格式时会变红，逼两处同时决策。
+
+**验收**：`probe-epub-reader.mjs` 新增第 8.5 步全绿（加 → 同页再点即移除 → 右栏出现该行 → 翻走按钮回未收藏态 → 点行跳回原处）；`verify-reader-formats.mjs` 新增 ⑬ 组 **40 条**全绿；`tsc --noEmit` 双端 0 错；5 个阅读器契约 + 3 条回归探针（epub / fb2 / reading-panel）全绿。
+
+## 23. 大书装载的可见反馈 + 体积分档确认框（B-16 · 2026-09-22）
+
+背景：一本几十上百 MB 的画集（cbz）打开时，用户只看到转圈 —— 分不清「在加载」和「卡死了」；超过 128MB 则**直接打不开**（报体积超限），连等的机会都没有。用户拍板（2026-09-22）：**「大的先问一句」** —— 体积分档 + 超限前先问一句，而不是一刀切。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 加载覆盖层加**阶段文字**：`正在读取 N%`（真进度，按已读字节算）→ `正在解包排版…`（字节读完切阶段）；延迟 **250ms** 才亮（小书不闪），且**必须亮**（大书要等一秒以上，没文字就等于「像死了」） | `EpubReaderView.tsx` 加载覆盖层（`data-wb="epubLoadPhase"`） |
+| 2 | 三档体积闸门：≤128MB 直接开 · 128–384MB **弹应用级确认框**（写明体积 / 预计耗时 / 预计内存）· >384MB 直接拒绝并给「转 PDF 或拆书」的建议 | `EpubReaderView.tsx`（判据与文案在 `bookSizeGate.ts`） |
+| 3 | 取消**不踢回书架**：停在 error 态并给「仍要打开」按钮（再点 = 复跑装载，且不再追问第二遍）；error 态是**覆盖层**，宿主 DOM 常驻 | 同上（`data-wb="epubLoadErr"` / `epubBigBookRetry`） |
+| 4 | 确认框加探针锚点（`data-wb="globalConfirm*"`），无行为变化 | `GlobalConfirm.tsx` |
+
+**动效**：**无新基建**，全部复用 `docs/ui-animation-plan.md` 的既有令牌 —— 确认框走 `.kb-overlay` / `.kb-modal-in(-out)`（含 170ms 退场，`usePresence` 驱动），「仍要打开」按钮进出用 `.kb-micro-pop`；阶段文字是**纯文本替换**，不叠加过渡（进度数字每跳一次都做动画反而是干扰）。
+
+**交互口径**（两条都从「可逆 + 不产生意外跳转」推出）：
+
+- 闸门放在**读整本之前**（先读 1 字节拿 size 再决定）—— 进了内存再问，就已经把时间和内存都付过了。
+- 「仍要打开」＝**复跑装载流程**（`reloadKey` 递增），不是另一条装载路径；`bigOkKeyRef` 记住「这本已确认过」，所以点它不会再弹第二次框。
+
+**实测**（96.2MB / 126 页 cbz，Windows 本机）：点卡 → 可读 **805ms**（改造前 1.6–2.0s；小书基准 457ms）。阶段文字采样到 `正在读取 50% → 67% → 83% → 正在解包排版…`，百分比非递减。
+
+**已知取舍**：确认框里的耗时 / 内存是**估值**（`READ_EST_MBPS = 120` / `PEAK_MEM_RATIO = 2`，取值对照实测表留了冗余，宁可比预告快）。文案里带「约」字，不承诺精确值。
+
+**验收**：`probe-cbz-bigbook.mjs` **全绿**（整本通道逐字节等值 / 阶段与进度文字 / 分档端到端 / 取消 → 仍要打开）；`verify-reader-formats.mjs` §⑭ **全绿**（含边界端点与文案同口径）；既有 5 契约 + 4 回归探针不回归。

@@ -45,6 +45,7 @@ export function GlobalConfirm() {
   }
   return (
     <div
+      data-wb="globalConfirm"
       className={`fixed inset-0 z-[300] flex items-center justify-center bg-black/50 ${closing ? 'kb-overlay-out' : 'kb-overlay'}`}
       onClick={() => close(false)}
     >
@@ -53,13 +54,14 @@ export function GlobalConfirm() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-5 py-3 border-b border-[var(--border-color)]">
-          <h3 className="text-[14px] font-medium text-[var(--text-primary)]">{opts.title}</h3>
+          <h3 data-wb="globalConfirmTitle" className="text-[14px] font-medium text-[var(--text-primary)]">{opts.title}</h3>
         </div>
         <div className="px-5 py-4">
-          <p className="text-[13px] text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">{opts.message}</p>
+          <p data-wb="globalConfirmMsg" className="text-[13px] text-[var(--text-secondary)] leading-relaxed whitespace-pre-wrap">{opts.message}</p>
         </div>
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-[var(--border-color)]">
           <button
+            data-wb="globalConfirmCancel"
             onClick={() => close(false)}
             className="px-4 py-1.5 text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
           >
@@ -67,6 +69,7 @@ export function GlobalConfirm() {
           </button>
           {opts.extraLabel && (
             <button
+              data-wb="globalConfirmExtra"
               onClick={() => close('extra')}
               className="px-4 py-1.5 text-[13px] text-[var(--text-primary)] border border-[var(--border-color)] rounded hover:bg-[var(--bg-hover)] transition-colors"
             >
@@ -74,6 +77,7 @@ export function GlobalConfirm() {
             </button>
           )}
           <button
+            data-wb="globalConfirmOk"
             autoFocus
             onClick={() => close(true)}
             className={

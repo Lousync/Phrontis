@@ -100,3 +100,12 @@ export function bookDisplayName(relPath: string): string {
   const base = String(relPath ?? '').split('/').pop() ?? ''
   return bookKindOf(base) ? base.replace(/\.[^.]+$/, '') : base
 }
+
+/** 身份名：**保留扩展名**的文件名（basename）。
+ *  与 `bookDisplayName` 的分工是「页名 vs 书名」：展示给眼睛看的用展示名，
+ *  **落进文件名 / 映射键的必须用身份名** —— 同名不同格式的书（`a.epub` / `a.fb2`）只有扩展名能区分。
+ *  B-15 的修法即此处：`读书笔记 · ${bookIdentityName(relPath)}` 恒带格式后缀，不再撞页。 */
+export function bookIdentityName(relPath: string): string {
+  const base = String(relPath ?? '').split('/').pop() ?? ''
+  return base || '(未命名)'
+}

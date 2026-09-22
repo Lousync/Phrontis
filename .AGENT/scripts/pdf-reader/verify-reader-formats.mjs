@@ -1,6 +1,6 @@
 // 契约验证：书架升级全格式阅读器一期（bookshelf-reader-upgrade-design §S7）。
 //
-// 覆盖十组断言：
+// 覆盖十四组断言：
 //   ① bookFormats 纯函数用例（扩展名识别 / 展示名 / 常量↔函数一致性）
 //   ② readerStateSchema 纯函数用例（键归一 / patch 白名单 / 修补）
 //   ③ 负向：readerState.json 单写方（只允许出现在 readerStateVaultRepo.ts）
@@ -12,6 +12,10 @@
 //   ⑧ 关标签清阅读态：App.tsx closeTab 函数体内存在 setBookshelfReading(null)
 //   ⑨ decodeText 用例表（UTF-8 无 BOM / 带 BOM / GB18030，hex 内联样本）
 //   ⑩ TabName 仍 16 项（与 verify-pdf-reader 同口径的冻结断言）
+//   ⑪ 扫描版探测（detectScanMode / resolveScanPages）
+//   ⑫ A1/A5 拆分函数（detectEncoding / decodeWith / resolveScanPages）
+//   ⑬ 书签：定位键按 kind 分支 / 空数组可写 / 上限整单拒 + 两个写方共用常量（2026-09-22）
+//   ⑭ 大书体积分档（三档边界含端点 / 文案同口径）+ 读取链路镜像（字节通道 / 预分配 / core 唯一 / IPC 三处）
 //
 // 运行（项目根目录）：
 //   node --experimental-strip-types --no-warnings .AGENT/scripts/pdf-reader/verify-reader-formats.mjs
@@ -40,6 +44,13 @@ check('bookKindOf：空串返回 null', F.bookKindOf('') === null)
 check('bookDisplayName：去 txt 后缀', F.bookDisplayName('x/呐喊.txt') === '呐喊')
 check('bookDisplayName：去 pdf 后缀', F.bookDisplayName('x/算法.pdf') === '算法')
 check('bookDisplayName：非书文件原样返回', F.bookDisplayName('x/note.md') === 'note.md')
+// B-15（2026-09-22）：页名 / 映射键必须用**身份名**（带扩展名）；展示名只给人看。
+check('bookIdentityName：保留扩展名', F.bookIdentityName('x/呐喊.fb2') === '呐喊.fb2' && F.bookIdentityName('x/画集.CBZ') === '画集.CBZ')
+check('bookIdentityName：只取 basename', F.bookIdentityName('a/b/呐喊.epub') === '呐喊.epub')
+check('bookIdentityName：非书文件原样 / 空串兜底不炸', F.bookIdentityName('x/note.md') === 'note.md' && F.bookIdentityName('') === '(未命名)')
+check('★ B-15 立论：同名三格式的展示名相同、身份名互不相同',
+  new Set(['a.epub', 'a.fb2', 'a.cbz'].map((f) => F.bookDisplayName(`x/${f}`))).size === 1
+  && new Set(['a.epub', 'a.fb2', 'a.cbz'].map((f) => F.bookIdentityName(`x/${f}`))).size === 3)
 check('BOOK_EXTS 每项都能被 bookKindOf 识别（常量↔函数一致）',
   F.BOOK_EXTS.every((ext) => F.bookKindOf(`x${ext}`) !== null))
 check('BOOK_EXTS = pdf + txt + epub + fb2 + fbz + cbz 六项',
@@ -247,6 +258,167 @@ console.log('\n--- ⑫ detectEncoding / decodeWith / resolveScanPages ---')
   check('resolveScanPages：[t,f,t] → [f,t,f]', JSON.stringify(D.resolveScanPages([true, false, true])) === '[false,true,false]')
   check('resolveScanPages：空 → 空', JSON.stringify(D.resolveScanPages([])) === '[]')
   check('resolveScanPages：[f,f] → [t,t]', JSON.stringify(D.resolveScanPages([false, false])) === '[true,true]')
+}
+
+// ===== ⑬ 书签：定位键按 kind 分支 / 上限 / 存量兼容（2026-09-22）=====
+// 本组锁四件事：
+//   1) 定位键**按 kind 分支**（txt 要 paraIndex、foliate 系要 cfi），不是"有哪个字段就用哪个"；
+//      pdf / cbz / 未收录扩展名一律显式拒绝 —— 静默收下一条无定位的书签比报错更坏。
+//   2) 空数组必须合法（删掉最后一条书签就是写 `[]`；拒了 = "删了但关书又回来"）。
+//   3) 上限是**整单拒绝**（不是截断），且渲染层两个写方必须用同一个常量提前拦 ——
+//      schema 拒 + patchReader 静默失败 = "书签加上又消失"，本组用源码级断言把这条锁住。
+//   4) 存量兼容：老仓库里 txt 形条目在 txt 书里照旧可读；串到 epub 书里则被丢（不炸）。
+console.log('\n--- ⑬ 书签：kind 分行定位键 / 上限 / 存量兼容 ---')
+{
+  const CFI = 'epubcfi(/6/2!/4/2/4,/1:0,/1:24)'
+  const mk = (o) => ({ id: 'b1', label: '书签一', at: 'T', ...o })
+  const patchOf = (list, kind) => S.sanitizeReaderPatch({ bookmarks: list }, kind)
+
+  for (const k of S.FOLIATE_KINDS) {
+    const r = patchOf([mk({ cfi: CFI, chapter: ' 第一章 ' })], k)
+    check(`书签：${k} 带 cfi 收（定位键 = CFI）`, !!r && r.bookmarks.length === 1 && r.bookmarks[0].cfi === CFI)
+    check(`书签：${k} 的 chapter 去空白保留`, r?.bookmarks[0].chapter === '第一章')
+    check(`书签：${k} 无 cfi 拒`, patchOf([mk({})], k) === null)
+    check(`书签：${k} 只带 paraIndex 拒（不按"哪个字段有值"挑）`, patchOf([mk({ paraIndex: 3 })], k) === null)
+    // 未列入 FOLIATE_KINDS 的 kind 走不到 cfi 分支 ⇒ 这条即"新格式忘了进 FOLIATE_KINDS"的探针
+    check(`书签：${k} 的 cfi 超长 2001 字符拒`, patchOf([mk({ cfi: 'e'.repeat(2001) })], k) === null)
+    check(`书签：${k} 的 cfi 含控制字符拒`, patchOf([mk({ cfi: 'epubcfi(/6/2!)\u0000' })], k) === null)
+  }
+  check('书签：cfi 空串拒（假 CFI 比没书签更坏——点了不动还没报错）', patchOf([mk({ cfi: '' })], 'epub') === null)
+
+  check('书签：txt 带 paraIndex 收', (() => { const r = patchOf([mk({ paraIndex: 7 })], 'txt'); return !!r && r.bookmarks[0].paraIndex === 7 })())
+  check('书签：txt 负 paraIndex 拒', patchOf([mk({ paraIndex: -1 })], 'txt') === null)
+  check('书签：txt 非整数 paraIndex 拒', patchOf([mk({ paraIndex: 1.5 })], 'txt') === null)
+  check('书签：txt 只带 cfi 拒（cfi 是 foliate 系的口径）', patchOf([mk({ cfi: CFI })], 'txt') === null)
+  check('书签：txt 的 start/end 可省', (() => { const r = patchOf([mk({ paraIndex: 7, start: 3, end: 9 })], 'txt'); return r?.bookmarks[0].start === 3 && r?.bookmarks[0].end === 9 })())
+
+  for (const k of ['pdf', 'cbz']) {
+    check(`书签：${k} 一律拒（定位口径不在 readerState.json）`,
+      patchOf([mk({ cfi: CFI })], k) === null && patchOf([mk({ paraIndex: 1 })], k) === null)
+  }
+  check('书签：kind 未知（未收录扩展名）按 txt 口径 —— paraIndex 形收',
+    (() => { const r = patchOf([mk({ paraIndex: 2 })]); return !!r && r.bookmarks[0].paraIndex === 2 })())
+  check('书签：kind 未知时 cfi 形仍拒（兜底不新格式开口子）', patchOf([mk({ cfi: CFI })]) === null)
+
+  check('书签：空数组收（删掉最后一条要能落盘）', (() => { const r = patchOf([], 'epub'); return !!r && Array.isArray(r.bookmarks) && r.bookmarks.length === 0 })())
+  check('书签：非数组拒', patchOf('x', 'epub') === null)
+  const num = (n) => Array.from({ length: n }, (_, i) => mk({ id: `b${i}`, paraIndex: i }))
+  check(`书签：${S.MAX_BOOKMARKS} 条收（正好在上限）`, (() => { const r = patchOf(num(S.MAX_BOOKMARKS), 'txt'); return r?.bookmarks.length === S.MAX_BOOKMARKS })())
+  check(`书签：${S.MAX_BOOKMARKS + 1} 条**整单**拒（截断会让用户以为加上了）`, patchOf(num(S.MAX_BOOKMARKS + 1), 'txt') === null)
+  check('书签：一条坏就整单拒（不静默丢那一条）', patchOf([mk({ paraIndex: 1 }), mk({ cfi: CFI })], 'txt') === null)
+
+  const leg = S.coerceReaderState({ kind: 'txt', pct: 1, bookmarks: [{ id: 'x', paraIndex: 7, label: '老书签', at: 'T' }] }, 'NOW', 'txt')
+  check('修补：历史 txt 书签（无 cfi）仍保留', leg.bookmarks.length === 1 && leg.bookmarks[0].paraIndex === 7)
+  const mixed = S.coerceReaderState({ kind: 'epub', pct: 1, bookmarks: [{ id: 'x', paraIndex: 7, label: 'txt 形', at: 'T' }, { id: 'y', cfi: CFI, label: 'cfi 形', at: 'T' }] }, 'NOW', 'epub')
+  check('修补：epub 书里混进的 txt 形条目被丢、cfi 形留下', mixed.bookmarks.length === 1 && mixed.bookmarks[0].id === 'y')
+  check('修补：coerce 不传 kind 时 bookmarks 仍产出（默认空数组）', Array.isArray(S.coerceReaderState({ pct: 1 }, 'NOW').bookmarks))
+
+  // 镜像一致性（源码级 —— 本文件不得值导入，故只能读文本比）
+  const schemaSrc = read('electron/lib/kbStore/readerStateSchema.ts')
+  const excerptSrc = read('electron/lib/kbStore/excerptSchema.ts')
+  const cfiLen = (src) => /MAX_CFI_LEN\s*=\s*(\d+)/.exec(src)?.[1]
+  check('镜像：MAX_CFI_LEN 与 excerptSchema 同值', !!cfiLen(schemaSrc) && cfiLen(schemaSrc) === cfiLen(excerptSrc), `${cfiLen(schemaSrc)} vs ${cfiLen(excerptSrc)}`)
+  // ★ 这里断言的不是"相等"：**引擎 = foliate ⊋ 书签能用的 kind**。
+  //   cbz 也走 foliate 引擎（固定版式），但整页是图片、无文字层 ⇒ 不收书签。
+  //   故锁两条：(a) FOLIATE_KINDS 每项引擎都是 foliate；(b) 引擎侧多出来的**恰好只有 cbz** ——
+  //   将来多一种 foliate 格式（或 cbz 突然能存书签）时这条会红，逼两处同时决策，而不是静默漏一个。
+  const foliateEngineKinds = F.BOOK_EXTS.filter((e) => F.bookEngineOf(e) === 'foliate').map((e) => F.bookKindOf(`a${e}`))
+  const badEngine = S.FOLIATE_KINDS.filter((k) => F.bookEngineOf(`a.${k}`) !== 'foliate')
+  check('镜像：FOLIATE_KINDS 每项都是 foliate 引擎', badEngine.length === 0, badEngine.join(','))
+  const rest = foliateEngineKinds.filter((k) => !S.FOLIATE_KINDS.includes(k))
+  check('镜像：foliate 引擎里不收书签的**只有 cbz**（引擎 ⊋ 可存书签的 kind）',
+    rest.slice().sort().join(',') === 'cbz', `foliate 引擎=[${foliateEngineKinds}] 非书签格式=[${rest}]`)
+  // 上限的**写方**也必须在场：schema 拒 + patchReader 静默失败 = "书签加上又消失"
+  const writers = ['src/components/shared/txt/TxtReaderView.tsx', 'src/components/shared/epub/EpubReaderView.tsx']
+  const missGuard = writers.filter((p) => !stripComments(read(p)).includes('MAX_BOOKMARKS'))
+  check('上限：两个书签写方都按 MAX_BOOKMARKS 提前拦（否则静默失败）', missGuard.length === 0, missGuard.join(', '))
+}
+
+// ===== ⑭ 大书体积分档 + 读取链路（B-16 · 2026-09-22）=====
+// 本组锁四件事：
+//   1) 三档边界（含端点）：≤128MB 静默 / 128–384MB 确认 / >384MB 拒绝 —— 端点写错一个数，
+//      用户体感就是「刚过线的那本书没有问一句」或「刚好 384MB 的书打不开」。
+//   2) 文案：体积必须与 `mbOf` 同口径（用户拿它跟资源管理器对得上），耗时 / 内存 / 上限 / 建议齐全。
+//   3) 阈值与文案**只有一份**：渲染侧不得再出现 128/384 字面量（两份数就会漂）。
+//   4) 读取链路的两条改造不许回退：渲染侧不再 base64 解码（无 `atob` / `b64ToU8`）、
+//      整本读入必须是**预分配就地写入**（`new Uint8Array(total)` + `.set(`）而不是逐块拼接；
+//      主进程两个通道（base64 / bytes）必须共用同一个 core（否则边界与白名单逻辑会分叉）。
+//      运行时证据在 `probe-cbz-bigbook.mjs`（整本 FNV-1a 等值 + 分档端到端），此处锁源码形状。
+console.log('\n--- ⑭ 大书体积分档 + 读取链路 ---')
+{
+  const G = await import('../../../electron/lib/kbStore/bookSizeGate.ts')
+  const MB = 1048576
+  // 边界含端点：128MB 静默、128MB+1 确认、384MB 确认、384MB+1 拒绝
+  const cases = [[0, 'ok'], [1, 'ok'], [127 * MB, 'ok'], [128 * MB, 'ok'], [128 * MB + 1, 'confirm'],
+    [256 * MB, 'confirm'], [384 * MB, 'confirm'], [384 * MB + 1, 'refuse'], [1024 * MB, 'refuse']]
+  for (const [bytes, want] of cases) {
+    check(`分档 ${bytes === 0 ? '0' : (bytes / MB).toFixed(0) + 'MB'}${bytes % MB === 1 ? '+1B' : ''} → ${want}`,
+      G.bookSizeTier(bytes) === want, G.bookSizeTier(bytes))
+  }
+  // 异常输入不做输入校验（真出现说明 stat 上游已坏），但**不得**因此进确认/拒绝档
+  check('非有限 / 负数按「可开」处理（不拿文案当输入校验）', G.bookSizeTier(NaN) === 'ok' && G.bookSizeTier(-1) === 'ok')
+  check('常量口径：静默 128MB / 硬上限 384MB', G.BOOK_SILENT_MAX === 128 * MB && G.BOOK_HARD_MAX === 384 * MB)
+  // mbOf：向上取整、最小 1（1.2MB 报 2MB，不能让 0.4MB 显示成 0MB）
+  check('mbOf 向上取整', G.mbOf(1.2 * MB) === 2 && G.mbOf(128 * MB) === 128, `${G.mbOf(1.2 * MB)}`)
+  check('mbOf 最小 1（不出现 0 MB）', G.mbOf(1) === 1 && G.mbOf(0) === 1)
+  // 文案：体积同口径 + 三样信息齐全
+  const c130 = G.bigBookConfirmText('超大样书', 136854400)
+  check('确认文案含体积（与 mbOf 同口径）', c130.includes(`共 ${G.mbOf(136854400)} MB`), c130)
+  check('确认文案含耗时（秒）与内存预估', /约\s*\d+\s*秒/.test(c130) && c130.includes('内存'), c130)
+  check('确认文案说清「整本读进内存」这件事（用户要知道为什么慢）', c130.includes('整本读进内存') && c130.includes('无响应'), c130)
+  check('书名空 / 空白时回落中性称呼，不出现《》空壳', G.bigBookConfirmText('  ', 2 * MB).includes('《这本电子书》'))
+  const t500 = G.tooBigText(500 * MB)
+  check('拒绝文案含体积 + 上限 + 建议', t500.includes('500 MB') && t500.includes('384 MB') && t500.includes('建议'), t500)
+  const d130 = G.bigBookDeclinedText('超大样书', 136854400)
+  check('取消文案点明下一步（「仍要打开」就在下面）', d130.includes('已取消打开') && d130.includes('仍要打开'), d130)
+  // 耗时 / 内存估值必须与常量同源（改常量不改文案 = 用户在读旧数字）
+  check('耗时估值 = mbOf / READ_EST_MBPS（向上取整 ≥1s）',
+    G.estReadSeconds(130 * MB) === Math.max(1, Math.ceil(G.mbOf(130 * MB) / G.READ_EST_MBPS)), `${G.estReadSeconds(130 * MB)}s`)
+  check('内存估值 = mbOf × PEAK_MEM_RATIO（<1GB 报 MB）',
+    G.estPeakMemText(130 * MB) === `${G.mbOf(130 * MB) * G.PEAK_MEM_RATIO} MB`, G.estPeakMemText(130 * MB))
+  check('内存估值 ≥1GB 时换 GB 口径', G.estPeakMemText(2048 * MB).endsWith('GB'), G.estPeakMemText(2048 * MB))
+
+  // ★ 阈值只有一份：渲染侧不得再写 128/384 字面量（判据是「除以 MB 的那个写法」而不是裸数字 ——
+  //   128 这种数字在别处出现很正常，是 `128 * 1024 * 1024` 这种**阈值写法**才必须唯一）
+  const reader = stripComments(read('src/components/shared/epub/EpubReaderView.tsx'))
+  check('渲染侧 import 分档模块（阈值与文案唯一源）', /bookSizeGate/.test(reader) && /bookSizeTier\(/.test(reader))
+  check('★ 渲染侧不再自带体积阈值（128/384 的 MB 写法只许出现在 bookSizeGate）',
+    !/\b(128|384)\s*\*\s*1024\s*\*\s*1024\b/.test(reader), '见 EpubReaderView 的 MAX_BOOK_BYTES 前身')
+  check('★ 闸门在整本读入**之前**（先读 1 字节拿 size 再决定）',
+    /workspaceReadRangeBytes\([^)]*,\s*0,\s*1\s*\)/.test(reader))
+  check('★ 确认框走应用级 showGlobalConfirm（禁原生 confirm）', /showGlobalConfirm\(/.test(reader) && !/\bwindow\.confirm\(/.test(reader))
+  // 读取链路：字节通道 + 预分配就地写入
+  check('★ 整本读入走字节通道（不再 base64）', /workspaceReadRangeBytes\(/.test(reader))
+  check('★ 渲染侧不再 base64 解码（atob / b64ToU8 已删）', !/\batob\(/.test(reader) && !/b64ToU8/.test(reader))
+  check('★ 预分配就地写入（new Uint8Array(total) + set）',
+    /new Uint8Array\(total\)/.test(reader) && /\.set\(/.test(reader))
+  check('★ 不再逐块拼接（无 [...chunks] / concat 式的 O(n²) 合并）', !/chunks\.push\(/.test(reader) && !/\bchunks\b\s*\.\s*reduce\(/.test(reader))
+  check('读取阶段有进度回调（onProgress → setReadPct）', /setReadPct\(/.test(reader) && /onProgress/.test(reader))
+  // 主进程：两条通道共用一个 core（白名单 / 边界 / 越界逻辑只此一份）
+  const wm = stripComments(read('electron/lib/workspaceManager.ts'))
+  const coreCalls = wm.match(/readRangeBuffer\(/g) ?? []
+  check('★ 主进程两个通道都转发同一个 readRangeBuffer（core 唯一）', coreCalls.length >= 3, `出现 ${coreCalls.length} 次（1 定义 + 2 转发）`)
+  // 白名单在 **IPC handler** 层（`readRangeBuffer` 收的是已校验过的绝对路径 —— 它的注释就是这么写的），
+  // 故判据是「两个 handler 各自都过了 requireInside」：漏一个就是新通道绕开 pathGuard 直读磁盘。
+  const handlerBody = (channel) => {
+    const i = wm.indexOf(`'${channel}'`)
+    if (i < 0) return ''
+    const j = wm.indexOf('ipcMain.handle(', i + 1)
+    return wm.slice(i, j > -1 ? j : i + 900)
+  }
+  check('★ base64 通道 handler 过白名单', /requireInside\(/.test(handlerBody('ws:readRange')), 'ws:readRange')
+  check('★ 字节通道 handler 存在且过白名单', /requireInside\(/.test(handlerBody('ws:readRangeBytes')), 'ws:readRangeBytes')
+  // IPC 三处同步（preload / 渲染侧类型镜子 / ipc.ts 封装）—— 漏一处就是「类型门禁也拦不住的静默 undefined」
+  const pre = read('electron/preload/index.ts')
+  const types = read('src/types/index.ts')
+  const ipc = read('src/lib/ipc.ts')
+  check('IPC 三处同步：preload / types / ipc.ts 都有 workspaceReadRangeBytes',
+    /workspaceReadRangeBytes/.test(pre) && /workspaceReadRangeBytes/.test(types) && /workspaceReadRangeBytes/.test(ipc))
+  check('渲染侧类型镜子声明了 WorkspaceRangeBytesResult（bytes 是 Uint8Array）',
+    /WorkspaceRangeBytesResult/.test(types) && /bytes:\s*Uint8Array/.test(types))
+  // PDF 侧刻意不动：它读的是页片段（几 MB），base64 通道够用，改它是无收益的扩散
+  const pdf = stripComments(read('src/components/shared/pdf/PdfReaderView.tsx'))
+  check('PDF 侧仍用 base64 通道（本批刻意不动它）', /workspaceReadRange\(/.test(pdf) && !/workspaceReadRangeBytes\(/.test(pdf))
 }
 
 console.log(`\n${pass ? '全部通过' : '存在失败项'}`)

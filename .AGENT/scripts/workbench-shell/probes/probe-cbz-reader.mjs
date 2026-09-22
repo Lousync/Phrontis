@@ -32,9 +32,10 @@
  *   8) 返回书架重开 → 回到原页（工具栏页号一致；磁盘 locator 未被 reopen 写花）
  *   9) 左右边缘点击各翻一页（真输入事件）；点正中不翻页（负向）
  *   10) ★ 安全负向：恶意 cbz（SVG 内联 <script> + onerror）→ 宿主标志位全 null、帧 sandbox 无
- *       allow-scripts、页内 script 节点 0；正向对照 = 同一份载荷在正确 MIME 下可解码却仍不执行
- *       （不用「该页 img 解出了自然尺寸」当对照：`loadBlob` 不带 MIME 使 SVG 页恒为破图，
- *        那是产品缺口、已登记 pending-fixes，不是防线问题）
+ *       allow-scripts、页内 script 节点 0；正向对照 = 同一份载荷在正确 MIME 下可解码却仍不执行。
+ *       ★ 另含 **B-18 的实机判据**：该恶意页（`page_2.svg`）现在必须**解码出 800×1120**
+ *       （patch ⑦ 补 MIME 之前这里恒为破图 `naturalWidth = 0`，当年只能拿「正确 MIME 下可解码」
+ *        间接对照 —— 补 MIME 不打开新攻击面，标志位仍全 null 这条断言同时锁住了它）
  *   11) ★ 摘录负向：划选不冒摘录浮层、excerpts.json 不落条、右栏**没有**「阅读」Tab
  *
  * ★ 取内容帧 / 真输入 / fixture 读写的手法与踩坑全在 `./lib/reader-probe-kit.mjs`
@@ -342,10 +343,12 @@ async function main() {
 
   // ===== 9) 边缘点击翻页（真输入事件）=====
   {
-    // 先说明：下面每翻一页，终端都会实时回显一条 `[Renderer] Uncaught TypeError: Cannot read
-    // properties of null (reading 'width')` —— 那是宿主对 CDP `Runtime.exceptionThrown` 的原样透传，
-    // **不是断言失败**（本步三条断言全绿，末尾的 `__errs` 也已把它滤掉）。成因见文件末注释。
-    console.log('[噪声提示] 接下来的 [Renderer] TypeError 是 fixed-layout 上游 RO 竞态，非本探针失败')
+    // 注：**本步以前**每翻一页终端都会回显一条 `[Renderer] Uncaught TypeError: Cannot read
+    // properties of null (reading 'width')`（fixed-layout 的 RO 空帧竞态，当年是「明明页面正常
+    // 却满屏红字」）。patch ⑥ 落码后这条**必须消失** —— 本文件末尾把它从「定点过滤」改成了
+    // **硬断言**（零条），所以这里不再有噪声提示。
+    // `ResizeObserver loop completed with undelivered notifications` 循环告警（B-21，patch ⑧）
+    // **不从列表里滤掉**，但也不作断言（会假通过，理由见文件末尾那条 note）。
     const from = (await pageLabel()).cur
     // ★ 先切 fit-width：fit-page 下帧居中、左右留白，帧左边缘离宿主盒左边缘可能超过热区宽
     await evalJs(`(() => { const b = document.querySelector('${ZOOM}'); if (b && b.getAttribute('data-wb-zoom') === 'fit-page') b.click(); return true })()`)
@@ -449,13 +452,17 @@ async function main() {
       ok('★★ 内容帧 sandbox = allow-same-origin（永不含 allow-scripts）', probe?.sandbox === 'allow-same-origin', String(probe?.sandbox))
       ok('★ 该帧内标志位全 null（SVG 作为图片加载时不执行脚本）',
         Object.values(probe?.markers ?? { x: 1 }).every((v) => v === null), JSON.stringify(probe?.markers))
-      // ★ 正向对照必须换一个能成立的判据：`imgNw === 800` 在本仓**恒为 0** —— cbz 的 SVG 页
-      //   解不出来，根因是 `loadBlob(name)` 不带 MIME（zip.js 的 BlobWriter 拿到 undefined ⇒
-      //   Blob type='' ⇒ Chromium 拒解 SVG；PNG/JPEG 靠内容嗅探照常）。这是**产品侧待修**，
-      //   已登记 `docs/pending-fixes.md`。所以对照改成两步，都不依赖那条链路：
+      // ★ B-18 已修（patch ⑦）：此处**以前**只能做「两步对照」而不报正面断言 —— 因为
+      //   `imgNw` 当时**恒为 0**（cbz 的 SVG 页破图：`loadBlob(name)` 不带 MIME ⇒ Blob type=''
+      //   ⇒ Chromium 拒解；PNG/JPEG 靠内容嗅探照常，所以「别的页都好」掩盖了它）。
+      //   现在取消该豁免，正面断言直接压在上行的 `imgNw` 上。
+      //   下面两步安全对照**仍保留** —— 它们证的是「防线①本身成立」，与 MIME 无关：
       //   ①同一份载荷（import 自 make-cbz.mjs，逐字相同）在**正确 MIME** 下确实可解码
       //     —— 排除「没执行只是因为载荷是废文本」；
       //   ②而它解码后标志位仍全 null —— 直接证伪「SVG 走 <img> 会执行脚本」，即防线①本身。
+      ok('★★ B-18：该帧的 SVG 页**确实解码了**（`naturalWidth = 800 × 1120`）'
+        + '—— patch ⑦ 之前这里恒为 0；补齐 MIME **不打开新攻击面**，见下一条',
+        probe?.imgNw === 800 && probe?.imgNh === 1120, `imgNw=${probe?.imgNw} imgNh=${probe?.imgNh}`)
       const decodable = await evalJs(`(async () => {
         const im = new Image()
         const v = await new Promise((res) => {
@@ -470,9 +477,10 @@ async function main() {
         decodable?.v === 'ok:800x1120', String(decodable?.v))
       ok('★★ 而它解码后标志位依然全 null（防线① = `<img>` 里的 SVG 不执行脚本，与 MIME 无关）',
         Object.values(decodable?.pwned ?? { x: 1 }).every((v) => v === null), JSON.stringify(decodable?.pwned))
-      note('已知产品缺口（非本探针失败）：cbz 的 `.svg` 页显示为破图，因 `loadBlob` 未传 MIME；'
-        + '本帧 `img.naturalWidth` 实测 ' + String(probe?.imgNw) + ' —— 见 docs/pending-fixes.md',
-        'PNG/JPEG 页不受影响')
+      // 这条 note 以前记的是「已知产品缺口：cbz 的 .svg 页破图（`img.naturalWidth` 实测 0）」，
+      // B-18 修掉后已升级为上行硬断言；留一行说明避免后人以为断言被悄悄删了。
+      note('★ B-18 的旧「已知缺口」记录已撤销 —— `.svg` 页从破图改为硬断言（patch ⑦ 补 MIME）',
+        `imgNw=${probe?.imgNw}（旧记录恒为 0）· PNG/JPEG 页断言不变`)
     }
     const hostAfter = await evalJs(`({ title: document.title, pwned: ${HOST_PWNED} })`)
     console.log('[宿主终态]', JSON.stringify(hostAfter))
@@ -480,16 +488,25 @@ async function main() {
     ok('★ 宿主 document.title 未被改写', hostAfter.title === hostBase.title, `${hostBase.title} → ${hostAfter.title}`)
   }
 
-  // 两条已知噪声，**都不是本批引入的**，滤掉但显式记账：
-  //  ① ResizeObserver 循环告警（长列表 + 网格布局的常态）；
-  //  ② `fixed-layout.js` `#render` 的 RO 竞态：`#showSpread` 先把 `#left/#right` 置 null 再
-  //     `await #createFrame(center)`，此窗口内 RO 回调读 `this.#center ?? this.#right` 得 null
-  //     ⇒ `Cannot read properties of null (reading 'width')`。`spread:'none'`（全居中）会让每次
-  //     翻页都踩到，**每次翻页一条**。上游 latent bug，表象只是控制台红字（`#side='center'` 之后
-  //     的那次显式 `#render()` 会把版式纠正回来，页面无可见异常）。本批已定：**不加第 6 处 patch**，
-  //     登记 docs/pending-fixes.md（一行 `if (!target) return` 即可修）。
-  const errs = await evalJs(`(window.__errs ?? []).filter((e) => !/ResizeObserver/.test(e) && !/reading 'width'/.test(e)).slice(0, 6)`)
-  note('渲染层错误（已滤掉 ResizeObserver 与 fixed-layout RO 竞态两条已知噪声，见本行上方注释）', JSON.stringify(errs))
+  // ★ B-17 的**实机判据**：以前这里把 `Cannot read properties of null (reading 'width')` 当噪声
+  //   定点滤掉（当年确实修不了），patch ⑥ 落码后改为**硬断言零条** —— 一条都不能有。
+  //   留着过滤就等于把这条修的验证也一起滤掉了（「不报错」类修复必须这么锁）。
+  const rawErrs = (await evalJs(`(window.__errs ?? []).slice(0, 60)`)) ?? []
+  const widthErrs = rawErrs.filter((e) => /reading 'width'/.test(e) || /Cannot read properties of null/.test(e))
+  ok('★ B-17：全程零「Cannot read properties of null (reading \'width\')」'
+    + '（fixed-layout `#render` 空帧竞态，patch ⑥ 的 `if (!right) return`；本步连翻多页 + 进出多轮）',
+    widthErrs.length === 0, `实得 ${widthErrs.length} 条${widthErrs.length ? ' · ' + widthErrs[0].slice(0, 120) : ''}`)
+  // B-21（`ResizeObserver loop completed with undelivered notifications`，foliate `View` 的观察者
+  // 被留在已脱离的帧上）**此处不作断言，只报数** —— 理由不是「与本条无关」，而是这条判据在本探针
+  // 的时序下**会假通过**：2026-09-22 拿故意改回上游门的构建实测，本探针某轮读 **0 条**、而
+  // `probe-ro-noise.mjs`（同构建、同一批书）读 **341 条** ⇒ 告警条数受卸载时机/GC 影响，本就
+  // 「时有时无」（这正是它当年难查的原因）。回归位只在 `probe-ro-noise.mjs`，那里用
+  // 「帧内的 window 已消失却仍被观察」这一条**不受时机影响**的判据。
+  const roErrs = rawErrs.filter((e) => /ResizeObserver loop/.test(e))
+  note('ResizeObserver 环告警条数（**不作断言**：读 0 不代表没漏，见本段注释与 probe-ro-noise.mjs）',
+    `${roErrs.length} 条`)
+  const errs = rawErrs.filter((e) => !/ResizeObserver loop/.test(e)).slice(0, 6)
+  note('渲染层错误（B-17 已硬断言见上行；RO 环告警单列在上一条，此处只列其余）', JSON.stringify(errs))
   note('CDP 求值竞态失败次数（帧被替换瞬间求值，非断言失败）', String(K.evalFailures()))
   note('回归：epub / fb2 / pdf / txt / reading-panel / excerpt-export 五条探针另跑（本探针只覆盖 cbz）', '见 §六 步 11')
 
