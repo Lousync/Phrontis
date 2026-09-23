@@ -27,6 +27,7 @@ scripts/node-path.local.txt
 proto/
 .codegraph/
 .idea/
+.vscode/
 *.blockmap
 latest.yml
 
