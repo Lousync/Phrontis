@@ -1,7 +1,7 @@
 # 书市（书源检索与下载）实现方案
 
 > **状态**：**S1–S6 全部落地** · 2026-09-21 立项 / 2026-09-22 两批拍板收口 / 2026-09-23 S5 收尾 + S6 元数据自愈
-> **落地记录**：S1 磁盘与仓库 / S2 检索 / S3 下载器 / S4 模块 UI + 书架书名收口 —— 见 `docs/ui-updates.md` §22；**S5 AI 起草书源**（§四 的两个工具 + 草案预填表单）—— 见同文件 §23，三个新脚本：契约 `verify-book-market-tools.mjs`、实机探针 `probe-s5-tools.mjs`；**S6 元数据自愈**（本文件 §六 S6 行）—— 见同文件 §24，契约 `verify-book-market-selfheal.mjs`。
+> **落地记录**：S1 磁盘与仓库 / S2 检索 / S3 下载器 / S4 模块 UI + 书架书名收口 —— 见 `docs/ui-updates.md` §22；**S5 AI 起草书源**（§四 的两个工具 + 草案预填表单）—— 见同文件 §23，三个新脚本：契约 `verify-book-market-tools.mjs`、实机探针 `probe-s5-tools.mjs`；**S6 元数据自愈**（本文件 §六 S6 行）—— 见同文件 §24，契约 `verify-book-market-selfheal.mjs` + 实机探针 `probe-s6-selfheal.cjs`。
 > **前置依赖**：本功能的**实现**排在阅读器二期（epub 六格式，foliate）之后 —— 书市搜到的书绝大多数是 epub，格式引擎不到位则市场体验残缺。
 > **可交互原型**：`tmp/book-market-proto/book-market-prototype.html`（单文件、浅暗双主题）；**唯一探针** `tmp/book-market-proto/_probe.mjs`（CDP 驱动无头 Edge，**70 项交互断言全绿**、控制台零报错，另出 scene0..scene8 截图）
 >
