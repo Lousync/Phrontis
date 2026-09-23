@@ -1,8 +1,8 @@
 # 书市（书源检索与下载）实现方案
 
-> **状态**：**S1–S6 全部落地**（含 S0 前置探针）· 2026-09-21 立项 / 2026-09-22 两批拍板收口 / 2026-09-23 S5 收尾 + S6 元数据自愈 + §9 第 3 条 scope 契约补齐
-> **验收完备度**：契约 7 个（`.AGENT/scripts/book-market/verify-*.mjs`）全绿 · 实机探针 7 个（`probe-s0…s6`）· **仅剩 2 条人工项**（§9 第 10 代理隔离 / 第 11 换机凭据，需真机 dev 实例，自动化不可替代）
-> **落地记录**：S1 磁盘与仓库 / S2 检索 / S3 下载器 / S4 模块 UI + 书架书名收口 —— 见 `docs/ui-updates.md` §22；**S5 AI 起草书源**（§四 的两个工具 + 草案预填表单）—— 见同文件 §23，三个新脚本：契约 `verify-book-market-tools.mjs`、实机探针 `probe-s5-tools.mjs`；**S6 元数据自愈**（本文件 §六 S6 行）—— 见同文件 §24，契约 `verify-book-market-selfheal.mjs` + 实机探针 `probe-s6-selfheal.cjs`。
+> **状态**：**S1–S6 全部落地**（含 S0 前置探针）· 2026-09-21 立项 / 2026-09-22 两批拍板收口 / 2026-09-23 S5 收尾 + S6 元数据自愈 + §9 第 3 条 scope 契约补齐 + **§9 第 10/11 条转为可跑探针**
+> **验收完备度**：契约 7 个（`.AGENT/scripts/book-market/verify-*.mjs`）全绿 · 实机探针 9 个（`probe-s0…s6` + `probe-910-proxy-isolation` + `probe-911-rehost`）· **§9 全部 11 条均已覆盖，零人工残留**
+> **落地记录**：S1 磁盘与仓库 / S2 检索 / S3 下载器 / S4 模块 UI + 书架书名收口 —— 见 `docs/ui-updates.md` §22；**S5 AI 起草书源**（§四 的两个工具 + 草案预填表单）—— 见同文件 §23，三个新脚本：契约 `verify-book-market-tools.mjs`、实机探针 `probe-s5-tools.mjs`；**S6 元数据自愈**（本文件 §六 S6 行）—— 见同文件 §24，契约 `verify-book-market-selfheal.mjs` + 实机探针 `probe-s6-selfheal.cjs`；**§9 第 10/11 条自动化**（代理隔离 / 换机凭据）—— 两个新实机探针 `probe-910-proxy-isolation.cjs`（16/16）与 `probe-911-rehost.cjs`（29/29），见 §9 末。
 > **前置依赖**：本功能的**实现**排在阅读器二期（epub 六格式，foliate）之后 —— 书市搜到的书绝大多数是 epub，格式引擎不到位则市场体验残缺。
 > **可交互原型**：`tmp/book-market-proto/book-market-prototype.html`（单文件、浅暗双主题）；**唯一探针** `tmp/book-market-proto/_probe.mjs`（CDP 驱动无头 Edge，**70 项交互断言全绿**、控制台零报错，另出 scene0..scene8 截图）
 >
@@ -365,10 +365,31 @@ sess.setProxy({ proxyRules: proxy || '', proxyBypassRules: '<local>' })
 
 > ★ 粒度说明（2026-09-23）：上列 6–9 条是**验收条目**，不是「一文件一条」。第 6+7+8 条实机面**合并在 `probe-s4-module.mjs` 一个文件**内（其头注分层标注了模块挂载 / 端到端 / 三态连通性），第 9 条在 `probe-s5-tools.mjs`。功能均覆盖，仅产物粒度与本文分列不一致。
 
-**手工确认（自动化不可替代）**
+**手工确认（2026-09-23 已转为可跑探针 —— 不再是人工项）**
 
 10. 代理：配一个不可用代理 → 书市报错而 **LLM 对话不受影响**（验证 §3.3 的隔离）。
+    → `probe-910-proxy-isolation.cjs`（**16/16**）。判定面：死代理下 `bookRequestText` 抛 `BookRequestError`
+    + 检索三态 `fail`（书市报错）**且** `defaultSession.resolveProxy` 仍直连 + `net.fetch` 仍成功（LLM 不受影响）
+    —— **两条同时成立**才算隔离成立；另验本机源按 `<local>` 绕行、清空代理回直连、坏代理串不抛。
+    ★ 平台事实（探针实测留档）：**改代理不清 HTTP 缓存** —— 同 URL 改代理前取过会命中缓存「假成功」，
+    故所有判定请求一律带唯一查询串破缓存。
 11. 换机取舍：把 vault 拷到另一台机器 → 书源凭据需重输、源列表本身完好。
+    → `probe-911-rehost.cjs`（**29/29**）。判定面：vault 整份拷贝后**源描述明文可读且逐项保留**
+    （name/url/kind/enabled/builtin），异机密文（格式对、密钥不对 ⇒ 与真实换机在 `decryptSecret`
+    的 catch 上不可区分，见探针头注的复刻边界）⇒
+    凭据读不出 ⇒ 三态 `need-credential` 且**一个请求都不发**；重输凭据后立即恢复连通。
+    对照：切回原机 vault 凭据仍可读（证明坏的只有异机密文，不是仓库被拷坏）。
+
+> **两条探针的跑法**（主进程探针，同 S1/S2/S3/S6；先把真实实现打包成 CJS）：
+> ```bash
+> node_modules/.bin/esbuild tmp/probe-910-911-entry.ts --bundle --platform=node \
+>   --format=cjs --external:electron --outfile=tmp/probe-910-911.cjs
+> unset ELECTRON_RUN_AS_NODE
+> ./node_modules/electron/dist/electron.exe .AGENT/scripts/book-market/probe-910-proxy-isolation.cjs --no-sandbox --disable-gpu
+> ./node_modules/electron/dist/electron.exe .AGENT/scripts/book-market/probe-911-rehost.cjs --no-sandbox --disable-gpu
+> ```
+> 两条都**不碰**用户数据目录（userData 改到临时目录）· 产物 `tmp/book-market-910-proxy-isolation.json` / `tmp/book-market-911-rehost.json`。
+> 第 10 条依赖公网（Gutenberg），**离线时软跳过**那几条并打印 SKIP；代理归属与本机源那几条离线也判。
 
 ---
 
