@@ -12,6 +12,7 @@ import { IGNORE_FILE_NAME } from './kbStore/ignoreFile'
 import { parseMarkdown, serializeMarkdown } from './kbStore/mdStore'
 import { broadcastDataChanged } from '../main/windowBus'
 import { syncVaultWatcher, markSelfWrite } from './fsWatcher'
+import { bookMetaPruneOrphans } from './kbStore/vaultBookMetaRepo'
 import { globalReadJson, globalWriteJson } from './globalJsonStore'
 import { isAllowedClearRoot, trashVaultFolder } from './vaultDelete'
 import { rootDirName } from './aiTeachingFolders'
@@ -349,6 +350,20 @@ function registryNow(): string {
   return new Date().toISOString()
 }
 
+/**
+ * S6 元数据自愈：清理 `.meta.json` 中磁盘已不存在的孤儿条目与孤儿封面。
+ * 幂等、失败不阻塞、无新 IPC / 无新 UI。触发点 = 仓库打开（启动恢复 / 换库 / 按 id 打开），
+ * 覆盖「应用关闭期间用户在文件管理器删了书」；运行期删书由 fsWatcher 节流兜底。
+ */
+function pruneOrphanBookMetaQuiet(): void {
+  try {
+    const result = bookMetaPruneOrphans()
+    if (!result.ok && result.error) console.warn('[bookMetaPruneOrphans] 扫描失败:', result.error)
+  } catch (e) {
+    console.warn('[bookMetaPruneOrphans] 扫描异常:', (e as Error).message)
+  }
+}
+
 function loadVaults(): void {
   // P8 设备级自愈：settings.json.recentVaults 有而登记表没有的条目（库缺/损坏），
   // 磁盘上确实存在且含 .knowbase → 回登记（最近列表即第二注册表）。
@@ -380,6 +395,7 @@ function loadVaults(): void {
       runLayoutMigrations(cur.rootPath)
       // v3.2.0 条目 ④：启动即给当前仓库挂上文件监听
       syncVaultWatcher()
+      pruneOrphanBookMetaQuiet()
     }
   } catch {
     /* 登记表未就绪等：忽略，openDir 时重新登记 */
@@ -455,6 +471,7 @@ function adoptVaultDirectory(rootPath: string, name?: string): { rootId: string;
   runLayoutMigrations(rootPath)
   // v3.2.0 条目 ④：仓库（换）了 → 文件监听对准它
   syncVaultWatcher()
+  pruneOrphanBookMetaQuiet()
   return { rootId: id, name: vaultName, path: rootPath }
 }
 
@@ -1004,6 +1021,7 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       invalidateGraphIndex()
       // v3.2.0 条目 ④：切仓库 → 监听跟随（旧仓库的改动不再触发刷新）
       syncVaultWatcher()
+      pruneOrphanBookMetaQuiet()
       return { rootId: r.id, name: r.name, path: r.rootPath }
     } catch (e) {
       return { error: (e as Error).message }

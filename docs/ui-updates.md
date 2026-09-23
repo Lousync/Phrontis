@@ -909,3 +909,23 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **与拍板 ② 的关系**：`window.__kbBookSourceDraft` 这个 dev-only 钩子仍在（`import.meta.env.DEV` 守卫），但**探针不用它**触发那一跳 —— 探针走渲染层的 `aiTools:invoke`，与手动点这个工具完全同一条链路（同一套 `validateArgs` / `checkModulePermission` / 月度上限 / handler），比钩子更真。钩子降级为人工调试口，其生产负向由探针第 ⑨ 段实测锁住（`npm run build` 产物里 `typeof window.__kbBookSourceDraft === 'undefined'`）。
 
 **验收**：新契约 `verify-book-market-tools.mjs` 绿（元数据 / schema 红线 / 凭据负向 / 清单覆盖 17=17 / 通道四处齐 / 接线静态锁）· 新实机探针 `probe-s5-tools.mjs` **全绿（49 项）**：主进程段（在册元数据、**read 档拦写 / write 档放行**、七条入参错误路径、凭据字段送不进）+ 渲染层段（**开场停在别的模块** ⇒ 草案到达自动切书市且**可见**、左栏高亮、跳「书源」视图、表单预填七行映射、认证切到 Basic 而**用户名/密码框为空**、取消即弃且再点「新增书源」是空表单、二次草案走事件路径、点「添加并测试」真落库 + 连通性「已连通」打到 mock OPDS）；另锁两条负向：**草案不落库**（书源文件在点「添加」前未被改写）与**凭据标记值不出现在返回值 / 表单 / 落盘任一字节**。审计基线已按新工具数重生成（core 仍 14 枚 ≈7761 tok/轮 —— 两枚新工具全在 ondemand，每轮零成本）。
+
+## 24. 书市：元数据自愈（S6，2026-09-23）
+
+背景：书市下载的书落在 `<vault>/.books/`，元数据在 `.books/.meta.json`、封面在 `.books/.covers/`。用户完全可能在**文件管理器里直接删书**（这是 .books 设计的预期用法 —— 书是用户可整理的东西）。删掉后两处残留没人管：`.meta.json` 留下孤儿条目（键指向已不存在的文件）、`.covers/` 里留下没人引用的封面（只增不减）。方案与验收口径见 `.claude/plans/s6-metadata-selfheal.md`。
+
+**做法：零新 UI、零新 IPC、纯后台。** 复用已存在的 `vaultBookMetaRepo.bookMetaPruneOrphans()`（扫盘取现存清单 → `pruneOrphanMeta` 比孤儿 → 回收孤儿条目 + 删其封面 → `bookCoverDeleteUnreferenced` 删无引用封面），只在两个触发点接线：
+
+| 触发点 | 位置 | 覆盖场景 |
+|---|---|---|
+| ① 仓库打开（启动恢复 / 换库 / 按 id 打开） | `electron/lib/workspaceManager.ts` `loadVaults` / `adoptVaultDirectory` / `ws:openById` 的 `syncVaultWatcher()` 之后 | 应用**关闭期间**用户在文件管理器删了书 |
+| ② 文件监听 flush | `electron/lib/fsWatcher.ts` `flush()`：本次变更含 `.books/` 前缀路径 → 节流（`PRUNE_THROTTLE_MS = 30s`）触发 | 应用**运行期间**删书，30 秒内自动回收 |
+
+**与方案的一处有意偏离**：方案 §三① 写的是「在三处各贴一份 `try/catch` 调用块」，实际抽成了一个模块内 helper `pruneOrphanBookMetaQuiet()` 在三处各调一次 —— 三份逐字重复的 `try/catch + console.warn` 属铁律 14/21 的「同一常量多处分抄」家族，收成一个具名函数更稳。契约脚本据此断言「helper 恰好 3 处调用且都紧跟 `syncVaultWatcher()`」，而非方案里写的「`bookMetaPruneOrphans` 直接调用 ≥2 次」。
+
+**两条不显然的机制**：
+
+- **事件可达性是 S6 的隐性前提**：`fsWatcher` 的 `IGNORED_SEGMENTS` 里有 `.knowbase` 却**没有** `.books` —— 这不是巧合，是 S6 能成立的原因（`.books/` 的事件必须能抵达 `flush()`）。契约脚本把它锁成显式不变量：一旦有人顺手把 `.books` 加进忽略集，触发点②会**静默死掉**（没报错、只是再也不回收）。
+- **自写回环靠节流掐断**：`prune` 写回 `.meta.json` 会再触发一次 watcher 事件（该写入没走 `markSelfWrite`），若不节流就是「prune → 写盘 → 事件 → prune」的回环。节流窗口 + `prune` 本身「无孤儿即不写盘」两条叠加，实际最多多刷一次，不成环。
+
+**验收**：新契约 `.AGENT/scripts/book-market/verify-book-market-selfheal.mjs` 绿（核心函数四步齐 / 三个打开点接线 / `PRUNE_THROTTLE_MS ≥ 30s` / `.books` 不在忽略集 / 零新 IPC / 零新 UI）· `tsc --noEmit` 两端 0 错 · S1–S5 契约与探针回归绿。**行为面（真机删书 → 30s 内回收）本轮未跑探针** —— 方案 §五把 `probe-s6-selfheal.cjs` 列为「可选」，留待需要时补。

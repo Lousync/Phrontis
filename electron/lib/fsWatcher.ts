@@ -3,6 +3,7 @@ import { relative } from 'path'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { invalidateKnowledgeIndex } from './kbStore/knowledgeIndex'
 import { invalidateGraphIndex } from './kbStore/graphIndex'
+import { bookMetaPruneOrphans } from './kbStore/vaultBookMetaRepo'
 import { broadcast, broadcastDataChanged, BROADCAST_CHANNEL } from '../main/windowBus'
 
 /**
@@ -43,6 +44,13 @@ const DEBOUNCE_MS = 300
 /** 自写抑制的存活时长：覆盖一次落盘（临时文件写入 + rename 覆盖）到事件抵达主进程的时延 */
 const SELF_WRITE_TTL_MS = 1500
 
+/**
+ * S6 元数据自愈节流窗口（方案 `.claude/plans/s6-metadata-selfheal.md`）。
+ * `.books/` 下的变更（用户在文件管理器删/移走书籍）会触发孤儿元数据回收；
+ * 节流避免批量整理书籍时反复全量扫描。prune 自身幂等，多余一次无害。
+ */
+const PRUNE_THROTTLE_MS = 30_000
+
 /** 不监听任何名字命中这些规则的路径（**不用 .ignore 规则过滤** —— 那是知识库扫描语义，铁律 6） */
 const IGNORED_SEGMENTS = new Set(['.knowbase', '.git', 'node_modules', '.DS_Store', 'Thumbs.db'])
 
@@ -51,6 +59,7 @@ let watchedRootPath: string | null = null
 let watchedRootId: string | null = null
 let flushTimer: NodeJS.Timeout | null = null
 let degradedNoticeSent = false
+let lastPruneAt = 0
 const pending = new Set<string>()
 const selfWritePaths = new Map<string, number>()
 
@@ -118,6 +127,18 @@ function flush(): void {
     invalidateGraphIndex()
   } catch {
     /* 索引未就绪等：忽略，不因缓存的副作用影响刷新 */
+  }
+  // S6 元数据自愈：本次变更涉及 .books/（用户在文件管理器删/移走书籍）→ 节流回收孤儿 meta 与封面
+  if (relPaths.some((p) => p.startsWith('.books/'))) {
+    const now = Date.now()
+    if (now - lastPruneAt >= PRUNE_THROTTLE_MS) {
+      lastPruneAt = now
+      try {
+        bookMetaPruneOrphans()
+      } catch {
+        /* 静默失败，下次 flush 再试 */
+      }
+    }
   }
   // 归档清单僵尸条目的 GC 随归档退役移除（2026-09-20 阶段三，docs/note-identity-unify-design.md §3）
   broadcastDataChanged('knowledge')

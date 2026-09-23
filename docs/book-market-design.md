@@ -1,7 +1,7 @@
 # 书市（书源检索与下载）实现方案
 
-> **状态**：**S1–S5 已落地**（S6 元数据自愈待做）· 2026-09-21 立项 / 2026-09-22 两批拍板收口 / 2026-09-23 S5 收尾
-> **落地记录**：S1 磁盘与仓库 / S2 检索 / S3 下载器 / S4 模块 UI + 书架书名收口 —— 见 `docs/ui-updates.md` §22；**S5 AI 起草书源**（§四 的两个工具 + 草案预填表单）—— 见同文件 §23。三个新脚本：契约 `verify-book-market-tools.mjs`、实机探针 `probe-s5-tools.mjs`。
+> **状态**：**S1–S6 全部落地** · 2026-09-21 立项 / 2026-09-22 两批拍板收口 / 2026-09-23 S5 收尾 + S6 元数据自愈
+> **落地记录**：S1 磁盘与仓库 / S2 检索 / S3 下载器 / S4 模块 UI + 书架书名收口 —— 见 `docs/ui-updates.md` §22；**S5 AI 起草书源**（§四 的两个工具 + 草案预填表单）—— 见同文件 §23，三个新脚本：契约 `verify-book-market-tools.mjs`、实机探针 `probe-s5-tools.mjs`；**S6 元数据自愈**（本文件 §六 S6 行）—— 见同文件 §24，契约 `verify-book-market-selfheal.mjs`。
 > **前置依赖**：本功能的**实现**排在阅读器二期（epub 六格式，foliate）之后 —— 书市搜到的书绝大多数是 epub，格式引擎不到位则市场体验残缺。
 > **可交互原型**：`tmp/book-market-proto/book-market-prototype.html`（单文件、浅暗双主题）；**唯一探针** `tmp/book-market-proto/_probe.mjs`（CDP 驱动无头 Edge，**70 项交互断言全绿**、控制台零报错，另出 scene0..scene8 截图）
 >
@@ -299,6 +299,7 @@ sess.setProxy({ proxyRules: proxy || '', proxyBypassRules: '<local>' })
 | **S3 下载与上架** | `downloader`（断点续传 + 进度广播）→ 写 `.books/` → 写 `.meta.json` → 广播刷新 → 书架可见 | 端到端：搜到 → 下载 → 书架显示 `meta` 书名作者 |
 | **S4 模块 UI** | `src/modules/bookmarket/`（发现 / 书源双视图、详情抽屉、下载队列、凭据弹层、搜索条吸顶）；书架书名收口（§3.6） | 实机探针（见 §9） |
 | **S5 AI 工具** | `booksource.list` / `booksource.draft` + 选定的落地路（§4.4）+ 权限与 `tool.request` 清单接线 | schema ≤800；权限预过滤生效；草案→确认→落库闭环 |
+| **S6 元数据自愈** | 复用 `bookMetaPruneOrphans()`：仓库打开（`loadVaults` / `adoptVaultDirectory` / `ws:openById`）+ fsWatcher `flush()` 的 `.books/` 节流触发 | 零新 UI / 零新 IPC；契约 `verify-book-market-selfheal.mjs` 绿（方案 `.claude/plans/s6-metadata-selfheal.md`） |
 
 ---
 
