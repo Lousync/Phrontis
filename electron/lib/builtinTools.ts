@@ -1997,7 +1997,7 @@ export function registerBuiltinTools(): void {
         kind: { type: 'string', enum: ['opds', 'custom'], description: 'opds=OPDS 目录（默认）/ custom=JSON 接口' },
         searchUrl: { type: 'string', description: '检索模板，变量 {base} {query} {page}；省略=用 url' },
         responseType: { type: 'string', enum: ['json', 'atom'], description: '仅 custom，默认 json' },
-        authType: { type: 'string', enum: ['basic', 'bearer'], description: '需要登录时选；凭据由用户手输，勿索取' },
+        authType: { type: 'string', enum: ['none', 'basic', 'bearer'], description: '免登录的源填 none（或省略）；仅确实要登录时才填 basic / bearer，凭据由用户手输' },
         mappingJson: { type: 'string', description: '仅 custom 必填：字段映射的 JSON 文本，键为 list / title / author / cover / summary / download / format，值为取值路径（a.b[*] 数组展开 / a.b[0] 定下标）；list、title、download 必给，下载直链无扩展名时另给 format' },
       },
       required: ['name', 'url'],

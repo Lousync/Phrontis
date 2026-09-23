@@ -120,6 +120,34 @@ console.log('\n--- ② schema 字符红线（≤800，AGENTS.md#16） ---')
 check(`${LIST} schema ≤800`, (byName.get(LIST)?.schemaChars ?? 9999) <= 800, `${byName.get(LIST)?.schemaChars}`)
 check(`${DRAFT} schema ≤800`, (byName.get(DRAFT)?.schemaChars ?? 9999) <= 800, `${byName.get(DRAFT)?.schemaChars}`)
 
+/* ========== ②b enum 与执行体一致性（F-6 根因：schema 漏值 → 模型只能猜） ==========
+ * 2026-09-23 F-6：`authType` 的 schema enum 曾只写 ['basic','bearer']，而执行体
+ *   `bookSourceEnum(args.authType, ['basic','bearer','none'], 'none', ...)` 期望
+ *   'none' = 免认证 —— 模型想表达「此源免认证」时**没有合法取值可用**，只能省略或猜，
+ *   猜错就造出「配置说无需登录、探测说需要凭据」的矛盾源。
+ * ★ 断言口径：执行体第一处 `['...'] as const` 里的全部字面量，必须**逐个出现在**
+ *   该工具 schema 的 enum 里。少一个就是给模型的契约缺项。 */
+console.log('\n--- ②b schema enum 必须覆盖执行体接受的取值（F-6） ---')
+const enumCov = (toolName, label) => {
+  const t = byName.get(toolName)
+  if (!t) return { ok: false, missing: ['(工具不存在)'] }
+  // 执行体里 bookSourceEnum(...) 的第一个数组字面量 = 该参数接受的合法值全集
+  const m = t.block.match(new RegExp(`bookSourceEnum\\(\\s*args\\.${label}\\s*,\\s*\\[([^\\]]+)\\]`))
+  if (!m) return { ok: false, missing: ['(执行体未找到该参数)'] }
+  const allowed = m[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)
+  // schema 里该字段的 enum 数组（schema 是**源码文本**：字段名可能带引号也可能不带）
+  const sm = (t.schema ?? '').match(new RegExp(`["']?${label}["']?\\s*:\\s*\\{[^}]*enum\\s*:\\s*\\[([^\\]]+)\\]`))
+  if (!sm) return { ok: false, missing: allowed, allowed }
+  const declared = sm[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)
+  return { ok: allowed.every((v) => declared.includes(v)), allowed, declared, missing: allowed.filter((v) => !declared.includes(v)) }
+}
+for (const [label] of [['authType'], ['kind'], ['responseType']]) {
+  const r = enumCov(DRAFT, label)
+  check(`${DRAFT} · ${label}：schema enum 覆盖执行体全部取值`,
+    r.ok,
+    r.ok ? `[${r.declared.join(', ')}]` : `缺 ${(r.missing || []).join(', ')}（执行体接受 [${(r.allowed || []).join(', ')}]）`)
+}
+
 /* ================= ③ 凭据负向 ================= */
 console.log('\n--- ③ 凭据负向（AI 永不接触凭据） ---')
 const CRED_RE = /(username|password|passwd|token|apikey|api_key|secret|credential)/i
