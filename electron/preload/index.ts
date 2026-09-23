@@ -661,6 +661,34 @@ const api = {
   excerptDelete: (rootId: string, relPath: string, id: string) => ipcRenderer.invoke('excerpt:delete', rootId, relPath, id),
   excerptExportEntry: (rootId: string, relPath: string) => ipcRenderer.invoke('excerpt:exportEntry', rootId, relPath),
   excerptExportNote: (rootId: string, relPath: string) => ipcRenderer.invoke('excerpt:exportNote', rootId, relPath),
+  // 书市（book market）：书源 CRUD + 三态探测 + 聚合检索 + 下载队列
+  bookMarketListSources: (rootId: string) => ipcRenderer.invoke('bookMarket:listSources', rootId),
+  bookMarketUpsertSource: (rootId: string, patch: unknown, id?: string) => ipcRenderer.invoke('bookMarket:upsertSource', rootId, patch, id),
+  bookMarketRemoveSource: (rootId: string, id: string) => ipcRenderer.invoke('bookMarket:removeSource', rootId, id),
+  bookMarketSetSourceEnabled: (rootId: string, id: string, enabled: boolean) => ipcRenderer.invoke('bookMarket:setSourceEnabled', rootId, id, enabled),
+  // credential 传 null / 缺省 = 清空（不必另开一个「清凭据」通道）
+  bookMarketSaveCredential: (rootId: string, id: string, credential: unknown) => ipcRenderer.invoke('bookMarket:saveCredential', rootId, id, credential),
+  bookMarketProbeSource: (rootId: string, id: string, query?: string) => ipcRenderer.invoke('bookMarket:probeSource', rootId, id, query),
+  bookMarketSearch: (rootId: string, query: string, opts?: unknown) => ipcRenderer.invoke('bookMarket:search', rootId, query, opts),
+  // conflict 缺省 = 「先问用户」：主进程返 conflict 且**不入队**，渲染层弹「覆盖 / 另存副本」后带决定再调一次
+  bookMarketDownload: (rootId: string, payload: unknown, conflict?: 'overwrite' | 'copy') => ipcRenderer.invoke('bookMarket:download', rootId, payload, conflict),
+  bookMarketDownloadControl: (rootId: string, id: string, action: string) => ipcRenderer.invoke('bookMarket:downloadControl', rootId, id, action),
+  bookMarketListQueue: (rootId: string) => ipcRenderer.invoke('bookMarket:listQueue', rootId),
+  /** 封面只读（S4 拍板 ①）：越权/缺失/超限一律 dataUrl=null，渲染层回落纯色书卡 */
+  bookMarketCoverGet: (rootId: string, coverRel: string) => ipcRenderer.invoke('bookMarket:coverGet', rootId, coverRel),
+  // 下载队列快照（载荷 = 整个队列，渲染层直接整体替换，不做增量合并）
+  onBookMarketDownloadProgress: (cb: (p: { rootId: string; tasks: unknown[] }) => void) => {
+    const handler = (_e: unknown, p: { rootId: string; tasks: unknown[] }) => cb(p)
+    ipcRenderer.on('bookMarket:download-progress', handler)
+    return () => { ipcRenderer.removeListener('bookMarket:download-progress', handler) }
+  },
+  // AI 起草的书源草案（S5）：主进程 broadcast 推给所有窗口，渲染层切到书市并预填表单。
+  // 与上面的下载进度同款「订阅即返回退订函数」，不做 invoke（草案单向、无回执）
+  onBookMarketSourceDraft: (cb: (p: { draft: unknown }) => void) => {
+    const handler = (_e: unknown, p: { draft: unknown }) => cb(p)
+    ipcRenderer.on('bookMarket:source-draft', handler)
+    return () => { ipcRenderer.removeListener('bookMarket:source-draft', handler) }
+  },
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => ipcRenderer.invoke('ws:writeFile', rootId, relPath, content, expectedMtimeMs),
   // 归档三条通道（ws:setMdStatus / ws:setArchiveStatus / ws:getArchiveEntries）已于 2026-09-20 随归档退役删除
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => ipcRenderer.invoke("ws:createFile", rootId, relPath, content),

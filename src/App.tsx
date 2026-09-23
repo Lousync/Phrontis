@@ -25,6 +25,7 @@ import { setGlobalActiveTab } from './lib/activeTab'
 import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList } from './lib/ipc'
 import { getPluginTools } from './lib/pluginService'
 import { requestPluginViewActivation, dispatchCodePluginAction } from './lib/pluginCommandBus'
+import { requestSourceDraftPrefill } from './lib/bookSourceDraftBus'
 import { showToast } from './lib/toast'
 import type { PluginCommandInfo } from './types'
 import type { PluginTool } from './lib/pluginService'
@@ -51,6 +52,9 @@ import { PluginsModule } from './modules/plugins'
 import { BookshelfModule } from './modules/bookshelf'
 import { AiTeachingModule } from './modules/ai-teaching'
 import { ReleaseNotesModule } from './modules/release-notes'
+// 书市（2026-09-22 · S4）：左栏独立整窗模块。**静态 import** —— 铁律 20 的 lazy 只点名引擎类
+// （monaco / pdfjs / heic-to 宿主），书市纯渲染 + IPC，进主包是对的。
+import { BookMarketModule } from './modules/bookmarket'
 // 左栏书架大纲态（内含 pdfjs —— 必须 lazy，不进主包；见上方模块引入方式注释）
 const PdfRailPanel = lazy(() => import('./components/shared/pdf/PdfRailPanel').then((m) => ({ default: m.PdfRailPanel })))
 // 左栏书架书目条目视图（2026-09-19）：未在读任何书时左栏放书列表（封面 + 书名 + 进度条）
@@ -627,6 +631,9 @@ export default function App() {
         // kind 以**磁盘上的书**为准（bookKindOf(relPath)），不用摘录里存的 ex.kind ——
         // 摘录是历史数据，B 段之前的 epub 摘录不可能存在，而旧版 txt 摘录的 kind 字段也不可全信。
         const kind = bookKindOf(relPath) ?? ex.kind
+        // 书名兜底：这条路上只有 relPath（摘录里没有 DTO），拿不到书架的展示名，
+        // 所以先按文件名给一个 —— 书架模块拿到清单后会用它自己的 `displayName` 覆盖（S4 收口，
+        // 见 modules/bookshelf/index.tsx 的 readingName），展示名推导仍然只有上游那一处。
         setBookshelfReading({ relPath, name: bookDisplayName(relPath), kind })
         setActiveTab('bookshelf')
         requestAnimationFrame(() => {
@@ -703,6 +710,24 @@ export default function App() {
     const handler = () => { setActiveTab('plugins'); setSidebarOpen(true) }
     window.addEventListener('plugins:open', handler)
     return () => window.removeEventListener('plugins:open', handler)
+  }, [])
+
+  // AI 起草书源（S5）：主进程 builtin.booksource.draft 广播 → 切到书市 + 预填「新建书源」表单。
+  // 草案先过 bookSourceDraftBus 暂存 —— 书市模块首访才挂载，广播可能早于挂载（只发事件会漏）。
+  // toast 是必需的：切模块会打断用户当前操作，不说缘由就成了「屏幕自己跳了」。
+  // 悬浮 AI 面板是 App 级挂载（见下面 <AssistantPanel>），切到整窗独占的书市后回复仍可见。
+  useEffect(() => {
+    const off = window.api?.onBookMarketSourceDraft?.(({ draft }) => {
+      if (!draft) return
+      requestSourceDraftPrefill(draft)
+      setActiveTab('bookMarket')
+      showToast({
+        type: 'info',
+        message: 'AI 起草了一份书源配置',
+        detail: '已切到书市并预填表单：请核对字段、自己填写凭据后点「添加」',
+      })
+    })
+    return () => { off?.() }
   }, [])
 
   // 接收小窗指令：日程与打卡小窗「打开任务模块/完整配置」→ 切换主窗口 Tab
@@ -1240,6 +1265,9 @@ export default function App() {
       // aiChat = AI 对话中间标签（v3.4.0 批次5，方案 §4）：右栏 AI 态点 ⤢ 进入，关标签自动回右栏小对话。
       // 激活时左栏经 RAIL_FOLLOW_MAP 切 aiChat 模块态——侧栏（会话列表/会话大纲）portal 进 slot
       case 'aiChat': return <AiChatTab active={on} sidebarEl={on && railModule === 'aiChat' ? wbModSlotEl : null} />
+      // 书市：书源检索 + 下载上架。「去书架」是原型里没有的功能增量（整窗模块无法自跳 Tab，
+      // 原型只能 toast 说明），实机由 App 的回调真跳转（方案 §11.3）
+      case 'bookMarket': return <BookMarketModule onOpenShelf={() => handleTabChange('bookshelf')} />
       case 'recycle': return <RecycleBinModule isActive={on} />
       case 'settings': return <SettingsModule />
       case 'toolbox': return <ToolboxModule homeSignal={toolboxHomeSignal} />

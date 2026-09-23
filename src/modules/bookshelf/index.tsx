@@ -6,7 +6,7 @@ import {
 import { useDataChanged } from '../../lib/dataChanged'
 import type { BookKind, BookListItem } from '../../types'
 import { BookCover } from './BookCover'
-import { bookDisplayName, bookEngineOf } from '../../../electron/lib/kbStore/bookFormats'
+import { bookEngineOf } from '../../../electron/lib/kbStore/bookFormats'
 
 // 2026-09-17 拍板「书架内自渲染」：点书在书架标签页内部打开阅读器（书架 ⇄ 阅读器），
 // 不再借编辑器文档标签（编辑器 PDF 能力保留给知识库附件等既有入口）。
@@ -33,7 +33,8 @@ const byRecent: SortFn = (a, b) => {
   const ta = a.updatedAt ? Date.parse(a.updatedAt) : 0
   const tb = b.updatedAt ? Date.parse(b.updatedAt) : 0
   if (ta !== tb) return tb - ta
-  return a.name.localeCompare(b.name, 'zh-Hans')
+  // 按展示名排（书市下到的书有正式书名，按文件名排会把它塞到「作者-书名」那一堆里）
+  return a.displayName.localeCompare(b.displayName, 'zh-Hans')
 }
 
 export function BookshelfModule({ isActive = true, reading = null, onOpenBook, onCloseBook }: {
@@ -85,6 +86,9 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
   useDataChanged('pdfReader', () => { void load() })
   // 外部 fs 变化（往 .books 丢/删 PDF → fsWatcher 广播 knowledge scope）→ 清单重扫（2026-09-19 反馈）
   useDataChanged('knowledge', () => { void load() })
+  // 书市下载完成（downloader 写盘后广播 bookMarket）→ 新书立刻上架
+  // （铁律 18：新模块的 scope 不加这一行，表象就是「AI/主进程说下好了、书架里没有」）
+  useDataChanged('bookMarket', () => { void load() })
 
   const onCoverReady = useCallback((relPath: string, url: string) => {
     coverMem.current.set(relPath, url)
@@ -93,12 +97,17 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
 
   // 左栏 bookshelf 模块态（批次 6）：三件套（目录/缩略图/书签）经 portal 挂进左栏 slot
   const openBook = useCallback((b: BookListItem) => {
-    onOpenBook?.(b.relPath, bookDisplayName(b.relPath), b.kind)
+    onOpenBook?.(b.relPath, b.displayName, b.kind)
   }, [onOpenBook])
 
   // 阅读视图（书架 ⇄ 阅读器，模块内切换；Hook 全部在早退之前）
   if (reading) {
     const engine = bookEngineOf(reading.relPath) ?? 'pdf'
+    // 工具栏书名以**清单里的展示名为准**，`reading.name` 只作兜底（S4 收口 2026-09-22）：
+    // 「摘录 → 回到原文」这条路只有 relPath、手上没有 DTO，App 那边只能拿文件名兜底，
+    // 于是同一本书从书架点进去显示书名、从摘录点进去显示文件名 —— 两处不一致。
+    // 书架自己就拿着清单，这里覆盖一次即可（不在渲染层重算 meta，没有第二份推导）。
+    const readingName = books?.find((b) => b.relPath === reading.relPath)?.displayName ?? reading.name
     return (
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
         {/* 2026-09-18：原「返回书架 + 书名」独立行已并入阅读器工具栏。
@@ -118,13 +127,13 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                   engine 由 relPath 推导而非读 state.kind —— 历史脏 state（旧版把 .epub 固定成 'txt'）
                   也能被纠正回正确引擎（与 readerStateVaultRepo 的 kindOfPath 同一原则）。 */}
               {engine === 'txt' ? (
-                <TxtReaderView rootId={rootId} relPath={reading.relPath} name={reading.name}
+                <TxtReaderView rootId={rootId} relPath={reading.relPath} name={readingName}
                   backLabel="返回书架" onBack={() => onCloseBook?.()} />
               ) : engine === 'foliate' ? (
-                <EpubReaderView rootId={rootId} relPath={reading.relPath} name={reading.name}
+                <EpubReaderView rootId={rootId} relPath={reading.relPath} name={readingName}
                   backLabel="返回书架" onBack={() => onCloseBook?.()} />
               ) : (
-                <PdfReaderView rootId={rootId} relPath={reading.relPath} name={reading.name}
+                <PdfReaderView rootId={rootId} relPath={reading.relPath} name={readingName}
                   backLabel="返回书架" onBack={() => onCloseBook?.()} />
               )}
             </Suspense>
@@ -180,10 +189,16 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                   title={b.kind !== 'pdf' ? `已读 ${b.pct ?? 0}% · 打开继续阅读` : `第 ${b.lastPage} 页 · 打开继续阅读`}
                 >
                   <div className="w-[44px] shrink-0" style={{ aspectRatio: '3 / 4' }}>
-                    <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={bookDisplayName(b.relPath)} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
+                    <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={b.displayName} coverRef={b.coverRef} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{bookDisplayName(b.relPath)}</div>
+                    <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{b.displayName}</div>
+                    {/* 作者行：仅书市下到的书有（本地导入的书 meta 为空，不给空行占位）
+                        ★ 用 --text-muted 而非 --text-tertiary：后者**全库未定义**（只有 --bg-tertiary），
+                          写它等于 color 失效回落继承色。此处按「比书名淡一档」的意图用已定义的 muted。 */}
+                    {b.author && (
+                      <div className="mt-0.5 truncate text-[10.5px] text-[var(--text-muted)]">{b.author}</div>
+                    )}
                     <div className="mt-1 flex items-center gap-1 text-[11px] text-[var(--accent)]">
                       <Play size={10} />{b.kind !== 'pdf' ? `已读 ${b.pct ?? 0}%` : `第 ${b.lastPage} 页`}
                     </div>
@@ -205,7 +220,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                 title={b.relPath}
               >
                 <div className="relative transition-shadow group-hover:shadow-[0_8px_22px_rgba(0,0,0,0.14)] rounded-[10px]">
-                  <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={bookDisplayName(b.relPath)} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
+                  <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={b.displayName} coverRef={b.coverRef} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
                   {b.kind === 'pdf' && b.hasProgress && (
                     <span className="absolute bottom-1.5 right-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">P{b.lastPage}</span>
                   )}
@@ -217,7 +232,12 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                     <span className="absolute bottom-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">扫描版</span>
                   )}
                 </div>
-                <div className="mt-1.5 truncate px-0.5 text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{bookDisplayName(b.relPath)}</div>
+                <div className="mt-1.5 truncate px-0.5 text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{b.displayName}</div>
+                {/* 作者行（S4 拍板 ②）：meta.author 非空才渲染 —— 本地导入的书不留空行
+                    （颜色同续读条：--text-muted，理由见上） */}
+                {b.author && (
+                  <div className="truncate px-0.5 text-[10.5px] text-[var(--text-muted)]">{b.author}</div>
+                )}
               </button>
             ))}
           </div>

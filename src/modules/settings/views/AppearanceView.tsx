@@ -3,7 +3,7 @@ import { Sun, Moon, Flame } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { THEME_OPTIONS, BLOG_SIZE_OPTIONS, KNOWLEDGE_SIDEBAR_SIZE_OPTIONS, applyThemeClass } from '../../../lib/settings'
 import { STARTABLE_MODULE_IDS, labelOf } from '../../../lib/appModules'
-import { BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon, ToolboxIcon, EditorIcon, AiTeachingIcon, PluginIcon, IconPreview } from '../../../components/shared/ModuleIcons'
+import { BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon, ToolboxIcon, EditorIcon, AiTeachingIcon, PluginIcon, BookMarketIcon, IconPreview } from '../../../components/shared/ModuleIcons'
 import { ensurePluginThemeStyles, type PluginThemeWithVars } from '../../../lib/pluginService'
 import { BUILTIN_ICON_PACKS, usePluginIconPacks, type IconModuleId } from '../../../lib/sidebarIcons'
 import { pluginListDeleteFxSkins } from '../../../lib/ipc'
@@ -29,6 +29,7 @@ const STARTUP_ICONS: Record<string, React.ReactNode> = {
   aiTeaching: <AiTeachingIcon size={16} />,
   toolbox: <ToolboxIcon size={16} />,
   plugins: <PluginIcon size={16} />,
+  bookMarket: <BookMarketIcon size={16} />,
 }
 
 export function AppearanceView() {

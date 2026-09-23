@@ -303,6 +303,24 @@ input:focus, textarea:focus, select:focus {
 .drag-region { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
+/* 整窗居中卡片骨架（仓库选择页）：品牌与底部固定、仅中段滚动 —— 「整列一起滚」会让滚动条
+   贴内容列右缘并贯穿品牌区，观感是「位置不对的长柄」（见 .claude/plans/vault-picker-scrollbar.md）。
+   ① 内容放得下时：outer 限高 + 居中 → 卡片自然垂直居中（无 100vh 取整带来的偏上）。
+   ② 内容放不下时：inner 的 max-height 生效、中段（.kb-picker-scroll）滚动。
+   若只靠 inner 撑高，内容少时卡片会被推到视口顶部（实测偏上 ~130px）——故 outer 必须有 max-h 兜底。
+   ★ 必须**块级**（AGENTS.md 铁律 11：槽位是块级 div，flex-1 在里面是死属性）。 */
+.kb-picker-shell {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 48px);
+  min-height: 0;
+}
+.kb-picker-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .no-spinner::-webkit-inner-spin-button,
 .no-spinner::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .no-spinner { -moz-appearance: textfield; }
@@ -626,6 +644,21 @@ input:focus, textarea:focus, select:focus {
    菜单只做进场不做退场——菜单项点完立即切界面，退场动画只会拖慢操作。 */
 .kb-pop-layer > :first-child { animation: kb-pop-in calc(var(--dur-micro) + 20ms) var(--ease-kb) both; }
 
+/* --- B 侧边抽屉：从**右缘整幅滑入** / 反向滑出（书市条目详情抽屉，2026-09-22 补的基建）---
+   与 .kb-modal-in 的区别：那是「居中面板缩放进场」，用在贴边、通高的抽屉上会显得面板在
+   原地缩放；抽屉的语义是「从边上推出来」，所以只动 translateX（100% → 0，纯合成器动画）。
+   调用方负责 overflow:hidden 的容器（滑块在关闭态整块在容器外，不参与命中测试）。 */
+@keyframes kb-drawer-in {
+  from { transform: translateX(100%); }
+  to   { transform: none; }
+}
+@keyframes kb-drawer-out {
+  from { transform: none; }
+  to   { transform: translateX(100%); }
+}
+.kb-drawer-in { animation: kb-drawer-in var(--dur-std) var(--ease-kb) both; }
+.kb-drawer-out { animation: kb-drawer-out calc(var(--dur-std) * 0.8) var(--ease-kb) both; }
+
 /* --- B Toast：右上滑入 / 退出反向 --- */
 @keyframes kb-toast-in {
   from { opacity: 0; transform: translateX(18px) scale(0.98); }
@@ -707,7 +740,8 @@ input:focus, textarea:focus, select:focus {
 /* --- 统一 reduced-motion 兜底 --- */
 @media (prefers-reduced-motion: reduce) {
   .kb-view-in, .kb-view-fade, .kb-overlay, .kb-overlay-out,
-  .kb-modal-in, .kb-modal-out, .kb-pop, .kb-toast-in, .kb-toast-out,
+  .kb-modal-in, .kb-modal-out, .kb-pop, .kb-drawer-in, .kb-drawer-out,
+  .kb-toast-in, .kb-toast-out,
   .kb-item-in, .kb-micro-pop, .kb-dock-hint,
   .kb-overlay > :first-child, .kb-overlay-out > :first-child,
   .kb-pop-layer > :first-child { animation: none; }

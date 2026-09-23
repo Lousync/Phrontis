@@ -28,6 +28,8 @@ import {
   quizTagList, quizTagResolveOrCreate,
   quizCollectionList, quizCollectionResolveOrCreate,
 } from '../database/repositories/quizRepo'
+import { bookSourceInfos } from './kbStore/bookSourceVaultRepo'
+import { sanitizeBookSourcePatch, isAllowedSourceUrl, type BookSourceMapping } from './kbStore/bookMarketSchema'
 import { quizDataStats } from './quizDataAdmin'
 import { AI_TEXT_CODE_EXT_SET } from '../../src/lib/aiTextExts'
 import type { ToolJsonSchema } from './aiTools'
@@ -970,7 +972,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper）默认不在工具列表中。需要执行写操作时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft）默认不在工具列表中。需要执行写操作时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1925,6 +1927,131 @@ export function registerBuiltinTools(): void {
       matched: matched.length,
       ...(unknownTags.length ? { unknownTags } : {}),
       hint: '练习页已生成，用户可直接打开该页答题；答错的题会自动记入错题本',
+    }
+  })
+
+  // ===== 书市工具（2026-09-23，S5）：AI 把口述地址/响应样例整理成书源草案 → 预填表单 =====
+  //
+  // 落点约定（设计文档 §4.2/§4.3、施工方案 §十三）：草案**不落库** —— 工具只做
+  // 「整理 + 广播」，用户在表单里核对字段、亲手填写凭据、点「添加」之后才写盘；
+  // 凭据**永不进 AI 侧**（draft 的 schema 没有 username / password / token，
+  // list 只回「凭据是否已存」布尔，取自 bookSourceInfos 那份出渲染层的同一口径）。
+  // 草案校验复用 repo 的 sanitizeBookSourcePatch / isAllowedSourceUrl —— 不为 AI
+  // 单开一套判定（铁律 2 的同一条理由：同一业务只有一处实现）。
+  //
+  // 装载层：两枚均 ondemand —— 书源配置是低频动作，常驻等于让每个会话每轮白付 token。
+  // ★ 可达性链（写码时核过：全仓**没有** read+ondemand 的先例，而 ondemand 的发现路径
+  //   只有 builtin.tool.request 的写工具清单与 system prompt 的泛化提示 ⇒ 只读工具
+  //   若无人提及就永远进不了模型视野）：tool.request 清单里提 draft → 模型申请后
+  //   draft 进视野 → **draft 的 description 里指一句 list** → 模型需要时再申请 list。
+  //   多一跳，换来两枚的常驻成本都是零。
+
+  // enum 入参严格化：静默降级（如 authType 'Bearer' 被丢弃）会造出「配了但连不上」的源，
+  // 而用户与模型都看不出哪里不对 —— 明确报错才能让模型自我纠正
+  const bookSourceEnum = <T extends string>(v: unknown, allowed: readonly T[], def: T, label: string): T => {
+    const s = str(v).trim().toLowerCase()
+    if (!s) return def
+    if (!(allowed as readonly string[]).includes(s)) throw new Error(`${label} 只能是 ${allowed.join(' / ')}：${str(v)}`)
+    return s as T
+  }
+
+  // 33. builtin.booksource.list —— 查已配置书源（起草前的第一步）
+  registerTool({
+    name: 'builtin.booksource.list',
+    title: '查书源清单',
+    description: '列出用户已配置的书源：名称 / 类型 / 地址 / 检索模板 / 是否需要凭据 / 凭据是否已存 / 启用态 / 是否预置。永远不含凭据内容。起草新书源前可先看这里，避免与已有源重复',
+    inputSchema: { type: 'object', properties: {} },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    requires: 'read',
+    tier: 'ondemand',
+    module: 'bookMarket',
+  }, () => {
+    const rootId = getCurrentVault()?.rootId ?? ''
+    if (!rootId) throw new Error('当前没有打开的仓库：请先在应用中打开知识仓库')
+    const sources = bookSourceInfos(rootId).map(s => ({
+      name: s.name,
+      kind: s.kind,
+      url: s.url,
+      ...(s.searchUrl ? { searchUrl: s.searchUrl } : {}),
+      needsAuth: s.authType !== null,
+      hasCredential: s.hasCredential,
+      enabled: s.enabled,
+      builtin: s.builtin,
+      ...(s.mapping ? { mapping: s.mapping } : {}),
+    }))
+    return { count: sources.length, sources }
+  })
+
+  // 34. builtin.booksource.draft —— 起草书源配置（送进「新建书源」表单预填；本工具不落库）
+  registerTool({
+    name: 'builtin.booksource.draft',
+    title: '起草书源配置',
+    description: '把用户口述的地址（或一段响应样例）整理成一份书源配置草案，送进「新建书源」表单并预填，界面会切到书市 —— 本工具不落库：用户核对字段、自己填写凭据、点「添加」之后才算配好（它既拿不到也不需要凭据）。custom 源的字段映射是主战场：mappingJson 传 JSON 文本，形如 {"list":"data.books[*]","title":"title","download":"files[0].url"}。想先看用户已有书源时，可申请 builtin.booksource.list',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '书源名，如「我家 Calibre」' },
+        url: { type: 'string', description: '源地址（http/https）' },
+        kind: { type: 'string', enum: ['opds', 'custom'], description: 'opds=OPDS 目录（默认）/ custom=JSON 接口' },
+        searchUrl: { type: 'string', description: '检索模板，变量 {base} {query} {page}；省略=用 url' },
+        responseType: { type: 'string', enum: ['json', 'atom'], description: '仅 custom，默认 json' },
+        authType: { type: 'string', enum: ['basic', 'bearer'], description: '需要登录时选；凭据由用户手输，勿索取' },
+        mappingJson: { type: 'string', description: '仅 custom 必填：字段映射的 JSON 文本，键为 list / title / author / cover / summary / download / format，值为取值路径（a.b[*] 数组展开 / a.b[0] 定下标）；list、title、download 必给，下载直链无扩展名时另给 format' },
+      },
+      required: ['name', 'url'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'bookMarket',
+  }, args => {
+    const name = str(args.name).trim()
+    if (!name) throw new Error('缺少必填参数: name')
+    const url = str(args.url).trim()
+    if (!url) throw new Error('缺少必填参数: url')
+    // 地址非法要**明确报错**（与 bookSourceUpsert 同口径）：模型据此纠正后重试，
+    // 而不是把一条坏地址送进表单等用户去发现
+    if (!isAllowedSourceUrl(url)) throw new Error(`地址必须是 http/https 开头：${url}`)
+
+    const kind = bookSourceEnum(args.kind, ['opds', 'custom'] as const, 'opds', 'kind')
+    const authRaw = bookSourceEnum(args.authType, ['basic', 'bearer', 'none'] as const, 'none', 'authType')
+    const authType: 'basic' | 'bearer' | null = authRaw === 'none' ? null : authRaw
+    const searchUrl = str(args.searchUrl).trim()
+    // 映射：schema 里是 `mappingJson` 字符串（800 字符红线的退化形状，见施工方案 §13.2），
+    // 到这里先解析再交给 repo 的校验器 —— 界面 / IPC / AI 三条路共用同一套判定（铁律 2 同理）。
+    // 「源配好了但解析不出结果」正是本需求要消灭的痛点（§4.1），拿不到合法映射就不放行。
+    let mapping: BookSourceMapping | null = null
+    if (kind === 'custom') {
+      const raw = str(args.mappingJson).trim()
+      if (!raw) throw new Error('custom 源必须给出 mappingJson（至少含 list / title / download 三条取值路径）。可让用户提供一段该源的检索响应样例，据此填写')
+      let parsed: unknown
+      try { parsed = JSON.parse(raw) } catch { throw new Error(`mappingJson 不是合法 JSON：${raw.slice(0, 120)}`) }
+      mapping = sanitizeBookSourcePatch({ mapping: parsed })?.mapping ?? null
+      if (!mapping) throw new Error('mappingJson 里 list / title / download 三条取值路径必须都是非空字符串（如 {"list":"data.books[*]","title":"title","download":"files[0].url"}），请修正后重试')
+    }
+    const responseType = bookSourceEnum(args.responseType, ['json', 'atom'] as const, 'json', 'responseType')
+
+    // 草案形状 = 渲染层 BookSourceDraft（预填表单用），**不含任何凭据字段**
+    const draft = {
+      name,
+      kind,
+      url,
+      ...(searchUrl ? { searchUrl } : {}),
+      ...(kind === 'custom' ? { responseType } : {}),
+      ...(authType ? { authType } : {}),
+      ...(mapping ? { mapping } : {}),
+    }
+    // 广播是「主进程 → 渲染层自定义事件」的唯一出口：渲染层据此切到书市模块并预填表单。
+    // 这里**不发 broadcastDataChanged** —— 草案没有写盘，数据变更 scope 一条都不该动。
+    broadcast(BROADCAST_CHANNEL.bookMarketSourceDraft, { draft })
+    return {
+      ok: true,
+      draft,
+      hint: '草案已送进「新建书源」表单并预填，界面已切到书市。请让用户核对字段、自己填写凭据后点「添加」——本工具不落库，不要说「已添加 / 已保存」',
     }
   })
 }

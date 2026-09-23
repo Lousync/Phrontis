@@ -1,4 +1,4 @@
-import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitPeriodStat, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, LlmUsageBreakdownEntry, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentSessionInfo, AgentSessionSource, AgentSideLaneCreateResult, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, AiUsageDay, SessionFileChange, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, AiTeachProfileEntry, CreatePasswordEntryDTO, UpdatePasswordEntryDTO, PdfBookState, PdfBookPatch, BookListItem, ReaderBookState, ReaderStatePatch, ExcerptItem, ExcerptCreatePayload, ExcerptPatch, ExcerptExportEntry, WorkspaceRangeBytesResult } from '../types'
+import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitPeriodStat, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, LlmUsageBreakdownEntry, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentSessionInfo, AgentSessionSource, AgentSideLaneCreateResult, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, AiUsageDay, SessionFileChange, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, AiTeachProfileEntry, CreatePasswordEntryDTO, UpdatePasswordEntryDTO, PdfBookState, PdfBookPatch, BookListItem, ReaderBookState, ReaderStatePatch, ExcerptItem, ExcerptCreatePayload, ExcerptPatch, ExcerptExportEntry, WorkspaceRangeBytesResult, BookSourceInfo, BookSourcePatch, BookSourceCredentialInput, BookSourceConnectivity, BookMarketSearchResponse, BookDownloadRequest, BookDownloadStartResult, BookDownloadTask, BookDownloadAction } from '../types'
 import type { SettingsKey, SettingsValue, AppSettings } from './settings'
 import { SETTINGS_DEFAULTS } from './settings'
 const a = () => { if (!window.api) throw new Error('Electron API not available.'); return window.api }
@@ -305,6 +305,34 @@ export const pdfReaderCoverSave = (rootId: string, relPath: string, dataUrl: str
 export const readerStateGet = (rootId: string, relPath: string): Promise<{ ok: boolean; state?: ReaderBookState | null; error?: string }> => a().readerStateGet(rootId, relPath)
 export const readerStatePatch = (rootId: string, relPath: string, patch: ReaderStatePatch, expectedUpdatedAt?: string): Promise<{ ok: boolean; state?: ReaderBookState; conflict?: boolean; error?: string }> =>
   a().readerStatePatch(rootId, relPath, patch, expectedUpdatedAt)
+// ===== 书市（book market）=====
+/** 书源清单（**只报 hasCredential 布尔**，永不回传凭据本体） */
+export const bookMarketListSources = (rootId: string): Promise<{ ok: boolean; sources?: BookSourceInfo[]; error?: string }> => a().bookMarketListSources(rootId)
+export const bookMarketUpsertSource = (rootId: string, patch: BookSourcePatch, id?: string): Promise<{ ok: boolean; source?: BookSourceInfo; error?: string }> =>
+  a().bookMarketUpsertSource(rootId, patch, id)
+export const bookMarketRemoveSource = (rootId: string, id: string): Promise<{ ok: boolean; error?: string }> => a().bookMarketRemoveSource(rootId, id)
+export const bookMarketSetSourceEnabled = (rootId: string, id: string, enabled: boolean): Promise<{ ok: boolean; source?: BookSourceInfo; error?: string }> =>
+  a().bookMarketSetSourceEnabled(rootId, id, enabled)
+/** 存凭据；`null` = 清空 */
+export const bookMarketSaveCredential = (rootId: string, id: string, credential: BookSourceCredentialInput | null): Promise<{ ok: boolean; error?: string }> =>
+  a().bookMarketSaveCredential(rootId, id, credential)
+export const bookMarketProbeSource = (rootId: string, id: string, query?: string): Promise<{ ok: boolean; state: BookSourceConnectivity; error?: string }> =>
+  a().bookMarketProbeSource(rootId, id, query)
+/** 聚合检索（部分源失败只进 failed[]，不整页报错） */
+export const bookMarketSearch = (rootId: string, query: string, opts?: { sourceIds?: string[]; page?: number }): Promise<BookMarketSearchResponse> =>
+  a().bookMarketSearch(rootId, query, opts)
+/** 入队下载；`conflict` 缺省 = 先问用户 */
+export const bookMarketDownload = (rootId: string, payload: BookDownloadRequest, conflict?: 'overwrite' | 'copy'): Promise<BookDownloadStartResult> =>
+  a().bookMarketDownload(rootId, payload, conflict)
+export const bookMarketDownloadControl = (rootId: string, id: string, action: BookDownloadAction): Promise<{ ok: boolean; error?: string }> =>
+  a().bookMarketDownloadControl(rootId, id, action)
+export const bookMarketListQueue = (rootId: string): Promise<{ ok: boolean; tasks?: BookDownloadTask[]; error?: string }> => a().bookMarketListQueue(rootId)
+/** 封面只读（S4 拍板 ①）：取不到返回 `dataUrl: null`，调用方回落纯色书卡即可，不必当错误处理 */
+export const bookMarketCoverGet = (rootId: string, coverRel: string): Promise<{ ok: boolean; dataUrl: string | null; error?: string }> =>
+  a().bookMarketCoverGet(rootId, coverRel)
+/** 下载队列快照推送（载荷 = **整个队列**，直接整体替换，不做增量合并） */
+export const onBookMarketDownloadProgress = (cb: (p: { rootId: string; tasks: BookDownloadTask[] }) => void): (() => void) =>
+  a().onBookMarketDownloadProgress(cb)
 // ===== 摘录（阅读器 · 摘录先行批次） =====
 export const excerptList = (rootId: string, relPath: string): Promise<{ ok: boolean; excerpts?: ExcerptItem[]; error?: string }> => a().excerptList(rootId, relPath)
 export const excerptCreate = (rootId: string, relPath: string, payload: ExcerptCreatePayload): Promise<{ ok: boolean; excerpt?: ExcerptItem; error?: string }> =>

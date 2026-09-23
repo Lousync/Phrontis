@@ -49,6 +49,10 @@ export const APP_MODULES = [
   { id: 'aiTeaching', label: 'AI教学', bar: true, startable: true, tile: true, palette: true },
   { id: 'toolbox', label: '工具箱', bar: true, startable: true, tile: true, palette: true },
   { id: 'plugins', label: '插件', bar: true, startable: true, tile: true, palette: true },
+  // 2026-09-22 书市（S4）：左栏独立整窗模块，与工具箱 / 插件平级（方案 §1.2 第 5 条、拍板 ⑤）。
+  // 排在 bar 段末尾是有意的 —— 活动栏图标条（ActivityBar 的 RAIL_BUTTONS）按同一顺序追加，
+  // 现有四项的位置一个不动。
+  { id: 'bookMarket', label: '书市', bar: true, startable: true, tile: true, palette: true },
   // 以下不进活动栏图标位：只能从设置菜单 / 事件 / 命令打开，也**不当启动落点**
   // （「回收站」「帮助」是刻意去才会去的目的地，当启动落点必是 bug）
   { id: 'recycle', label: '回收站', bar: false, startable: false, tile: true, palette: true },

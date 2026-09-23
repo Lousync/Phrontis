@@ -130,8 +130,12 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
  * 视图、不登记为标签页**——它们是功能面板不是文档型模块，图标条常驻可随时返回；
  * aiTeaching 整窗形态（标签条本身隐藏）与 devtools dev-only 一并排除。
  * 本清单在 openTabs 登记处与渲染处双重过滤。本文件保持零 value import，契约脚本 strip-types 直跑不炸。
+ *
+ * 2026-09-22 书市（S4）：加 `bookMarket` —— 它是「左栏独立整窗模块」（方案 §1.2 第 5 条），
+ * 与工具箱 / 插件同形态；进这份清单同时意味着左右栏与页面条退场（`suppressSides`），
+ * 而活动栏图标条仍在 —— 那正是「左栏独立」的语义。
  */
-export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools', 'moments', 'toolbox', 'plugins', 'recycle', 'settings']
+export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools', 'moments', 'toolbox', 'plugins', 'recycle', 'settings', 'bookMarket']
 
 /**
  * AI 助手快捷键禁用清单（2026-09-22 用户拍板）：这些模块里 **Ctrl+J / Ctrl+Shift+J 一律不响应**。

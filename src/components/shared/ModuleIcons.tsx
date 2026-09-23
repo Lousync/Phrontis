@@ -198,6 +198,33 @@ function EditorIconHandDrawn(props: IconProps) {
     </Svg>
   )
 }
+
+/** 书市：店招（斜顶篷 + 篷褶 + 门脸门洞）。
+ *
+ *  几何与经典细线包的 lucide `Store` 同构（斜顶 + 篷檐 + 褶子 + 门洞），笔法走项目手绘：
+ *  线宽 1.6、褶子只画四道大弧（lucide 是六道小波）、门洞圆角更大。
+ *  **为什么不画一本书**：书架已有 `BookMarked`、插件市场已有箱子（`Package`），
+ *  第三个「书形」图标只会让三者认混；「书的市场 = 铺面」比再画一本书更好认。
+ *  两包并存的规则同 PluginIcon：切图标风格时各显其形（手绘=这个，经典细线=lucide Store）。 */
+function BookMarketIconHandDrawn(props: IconProps) {
+  return (
+    <Svg {...props}>
+      {/* 斜顶轮廓：左檐上斜到顶、右檐按下斜收，顶面留一段平顶 */}
+      <path d="M3.4 9.4 5.7 5.5a1.4 1.4 0 0 1 1.2-.7h10.2a1.4 1.4 0 0 1 1.2.7l2.3 3.9" />
+      {/* 篷檐横线 */}
+      <path d="M3.4 9.4h17.2" />
+      {/* 篷褶：四道等宽浅弧（rx 2.15 / ry 1.7，4×4.3 = 与篷檐同宽） */}
+      <path d="M3.4 9.4a2.15 1.7 0 0 0 4.3 0" />
+      <path d="M7.7 9.4a2.15 1.7 0 0 0 4.3 0" />
+      <path d="M12 9.4a2.15 1.7 0 0 0 4.3 0" />
+      <path d="M16.3 9.4a2.15 1.7 0 0 0 4.3 0" />
+      {/* 店身两壁 */}
+      <path d="M5.3 11.2v7.4a1.4 1.4 0 0 0 1.4 1.4h10.6a1.4 1.4 0 0 0 1.4-1.4v-7.4" />
+      {/* 门洞 */}
+      <path d="M9.7 20v-4.3a1.3 1.3 0 0 1 1.3-1.3h2a1.3 1.3 0 0 1 1.3 1.3V20" />
+    </Svg>
+  )
+}
 // ===== 风格感知包装(设置→外观→侧边栏图标;default 走上方手绘实现) =====
 
 function StyleAware({ moduleId, Fallback, size = 24, className, strokeWidth }: IconProps & {
@@ -218,6 +245,7 @@ const HAND_DRAWN: Record<IconModuleId, (props: IconProps) => React.ReactElement>
   aiTeaching: AiTeachingIconHandDrawn,
   toolbox: ToolboxIconHandDrawn,
   plugins: PluginIconHandDrawn,
+  bookMarket: BookMarketIconHandDrawn,
   recycle: RecycleIconHandDrawn,
   help: HelpIconHandDrawn,
   user: UserIconHandDrawn,
@@ -238,6 +266,7 @@ export function HelpIcon(props: IconProps) { return <StyleAware moduleId="help" 
 export function UserIcon(props: IconProps) { return <StyleAware moduleId="user" Fallback={UserIconHandDrawn} {...props} /> }
 export function SettingsIcon(props: IconProps) { return <StyleAware moduleId="settings" Fallback={SettingsIconHandDrawn} {...props} /> }
 export function PluginIcon(props: IconProps) { return <StyleAware moduleId="plugins" Fallback={PluginIconHandDrawn} {...props} /> }
+export function BookMarketIcon(props: IconProps) { return <StyleAware moduleId="bookMarket" Fallback={BookMarketIconHandDrawn} {...props} /> }
 export function EditorIcon(props: IconProps) { return <StyleAware moduleId="editor" Fallback={EditorIconHandDrawn} {...props} /> }
 
 /** 任意包预览:设置→外观 的图标选择器用它渲染每个包的效果 */

@@ -941,3 +941,118 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 **验收**：新探针 `probe-b26-ask-ai-routing.mjs` **12/12 全绿**（含「藏掉 AI Tab ⇒ 必须回退」的负向与「勾回 ⇒ 又落回右栏」的双向性）；**变异测试**把宿主 `accept()` 恒置 false → 6 条当场转红；`tsc` 双端 ✓；`npm run build` ✓；全量契约 36/41（5 条为主干既有红，逐个确认不读本轮改过的文件）；`probe-ro-noise` ✓。
 > 连带调整：`verify-epub-formats` ⑩(6) 原先按**文本形状**锁「右栏 reading 调用点内联的 cbz 守卫」，抽出 `rightReading` 后过期 —— 已改成「派生处有守卫 **且** 调用点消费该变量」两处同锁（两种变异均转红）。
+
+## 26. 书市：模块 UI + 书架书名收口（S4，2026-09-22）
+
+背景：书市（本地书源检索 → 下载 → 上架书架；方案见 `.claude/plans/book-market-implementation.md`）S0–S3 已落地数据层 / 网络层 / 下载层，本轮补界面，并顺手收口「书架显示的是文件名、不是书名」。
+
+**本轮两条拍板**（都扩大范围，故先问后做 —— 2026-09-22 开发负责人）：① 书架要显示书市下到的封面 → 新增**只读**通道 `bookMarket:coverGet`（通道 10 → 11）；② 书架书卡加一行作者（`meta.author` 非空才渲染）。
+
+改动点：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 模块接线：`APP_MODULES` 15 → 16（`bookMarket` 六个 flag 全真）· `WORKBENCH_TABBAR_EXCLUDED` 7 → 8（整窗独占 ⇒ 左右栏与页面条退场、图标条留着，这正是「左栏独立整窗模块」的语义）· 静态 import + `case 'bookMarket'`（传 `onOpenShelf` 真跳书架，原型里只能 toast） | `src/lib/appModules.ts`·`workbenchLayout.ts`·`App.tsx` |
+| 2 | 图标**六表齐**（缺一即渲染空白）：`IconModuleId` + classic 映射 / `HAND_DRAWN` / `TAB_ICONS` / `SCENE_META` / `TILE_META` / `STARTUP_ICONS`。手绘 = **店招**（篷顶 + 门脸），经典包 = lucide `Store` —— 刻意不用书：书架已有 `BookMarked` | `src/lib/sidebarIcons.tsx`·`ModuleIcons.tsx`·`WorkbenchPageBar.tsx`·`Onboarding.tsx`·`desktop/tiles.tsx`·`settings/views/AppearanceView.tsx` |
+| 3 | 左侧图标条 `RAIL_BUTTONS` 4 → 5，**追加在末尾**（现四项位置不动） | `src/components/shared/ActivityBar.tsx` |
+| 4 | 模块本体：发现页（检索条 / 结果网格 / 骨架 / 空态 / 「部分源未返回」灰条 / 加载更多）· 书卡（格式角标 + 体积 + 暂不支持 / 已上架态）· 详情抽屉 · 书源页（三态圆点 + 启停 + 凭据入口 + 代理输入）· 下载队列浮层 · 四个弹层 | `src/modules/bookmarket/` |
+| 5 | 书架书名收口：`BookListItem.name` → `displayName`（+ `author`·`coverRef`），展示名与作者在**上游定稿**（`meta.title \|\| bookDisplayName(relPath)`），`.meta.json` **循环外读一次** | `electron/database/repositories/pdfReaderRepo.ts` |
+| 6 | 新只读通道 `bookMarket:coverGet`：路径一律经 `bookCoverAbsPath`（内含 `isSafeCoverRel`：只认 `.covers` 下单层文件名），越权 / 超限（`MAX_COVER_BYTES`）/ 读不到一律 `null`（不抛） | `electron/lib/kbStore/vaultBookMetaRepo.ts`·`bookMarketRepo.ts`·`electron/preload/index.ts`·`src/lib/ipc.ts` |
+| 7 | `BookCover` 新增 `coverRef` 分支（模块级 Map 缓存 + 懒取，取不到**原样回落** pdf 首页封面 / 纯色卡）；书架 5 处 `bookDisplayName(` 全改 `b.displayName`，该 import 随之删掉 | `src/modules/bookshelf/` |
+| 8 | 新动效令牌 `.kb-drawer-in` / `.kb-drawer-out`（贴边通高抽屉，220 / 176ms）—— 与 Modal 的区别是**不做缩放** | `src/styles/index.css` + `docs/ui-animation-plan.md` |
+
+**四条不显然的机制**（都不是随手那么写的）：
+
+- **书架是「改名」而不是「加字段」**：全库 `name` 的读取点会**全部编译报错**，逼着逐处确认读的到底是「展示名」还是「文件名」，不会有漏网的旧语义。契约脚本再补一条负向锁（`bookshelf/` 下 `bookDisplayName(` 必须 0 次）。
+- **「已上架」判定复用 `safeBookFileName`**（与下载器 `destFor` 是同一函数），不另写一份命名规则 —— 两边一旦飘了，表象是「明明下过却显示未上架」。
+- **代理输入不新开 IPC**：读写 `settings.bookMarketProxy`。S3 已拍板「代理的唯一写路径是设置机制」，且**不动 `defaultSession`**（否则殃及 `llmService`）。
+- **进度条走 `transition-[width]`**：这是动效文档 §五-①「只动 transform / opacity」的**既有例外**（含书市共 7 处），理由已登记在该文档（宽度是数据本身的直接映射，改 `scaleX` 会让圆角端头在小百分比下被挤扁）。
+
+**有意变更的断言（8 处，勿当 drift 回滚）**：`startup-tab` 的 APP_MODULES 15→16 · RAIL_BUTTONS 5 项 · 磁贴序快照 · 命令面板快照（后两条特意用**存量设置里没有 `bookMarket`** 的形态，证老用户活动栏顺序不被新增模块打乱）；`pdf-reader/verify-pdf-reader` 与 `verify-reader-formats` 的 15→16；`workbench-shell` 的 RAIL_BUTTONS 精确串；`book-market/verify-downloader` 的「通道数恰 10」→ 11。每处都在脚本里就地写了日期与理由。
+
+**实机探针逮到一个产品缺陷（已修）**：`bookMarketSchema.coerceAuth` 旧实现要求 `auth.ref` **非空**才收，而界面新建书源时**根本给不出 id**（id 由主进程 `randomUUID()` 生成，表单只能送空串）⇒ 勾了 Basic 认证的源被**静默降级成 `auth: null`**：行里显示「无需登录」、没有「填凭据」入口、检索也不带 `Authorization` —— 整条凭据链路不可达。修法是让 `ref` 不参与判定（它恒由 `bookSourceUpsert` 改写成源自己的 id），并把 `verify-book-sources.mjs` 里那条「ref 空 ⇒ 判为不完整」的用例改成三条（ref 空 → 仍收 / 缺省 → 收成空串 / 类型非法 → `null`）。
+
+**验收**：新契约 `verify-book-market-ui.mjs` 绿 · 实机探针 `probe-s4-module.mjs` **全绿**（端到端：检索 → 详情 → 下载 → 字节一致落盘 → 上架后书架显示 meta 书名 + 作者 + 封面；另有格式闸、同名冲突、队列四项控制、凭据三态，以及「凭据明文不出现在 `.knowbase` 任何文件」的负向）· S1/S2/S3 探针回归绿（49 / 96 / 99 项）· 全量 43 个契约脚本 37 绿（6 红均为既有、与书市无关）· `tsc --noEmit` 两端 0 错。
+
+**一处已查明、本轮不修**：书市只在挂载时解析当前仓库（`workspaceGetCurrent`），之后靠 `bookMarket` / `knowledge` 广播刷新；而主进程 `adoptVaultDirectory`（换库）**不发** `broadcastDataChanged`，渲染层的 `vault:changed` 事件只有 `WorkbenchLeftPanel` 与 `blog` 在听。今天打不到 —— 用户可见的换库路径（`VaultSwitcher`、`VaultPicker` 启动形态）都是「广播 + **整窗重载**」；但将来若出现「不重载就换库」的路径（P6 导入收尾的 `adoptImportedVault` 最接近），书市与书架会显示上一个库的数据。可选后续：`DataChangeScope` 加 `vault` + 在 `adoptVaultDirectory` 里广播。
+
+## 27. 书市：AI 起草书源（S5，2026-09-23）
+
+用户说一句「把我家 Calibre 配成书源」，AI 把它整理成一份书源草案，**界面自己切到书市并打开「新建书源」表单、字段全部预填**；用户核对、自己填凭据、点「添加」——**草案本身不落库**。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 两枚 AI 工具（均 `tier:'ondemand'`、`module:'bookMarket'`）：`builtin.booksource.list`（读，列已配书源，只回「凭据是否已存」布尔）· `builtin.booksource.draft`（写，起草并把草案广播给界面） | `electron/lib/builtinTools.ts` |
+| 2 | 新广播通道 `bookMarket:source-draft`（载荷 `{ draft }`）——★ **没有伴随的 data-changed scope**：草案不落盘，别顺手配一个 | `electron/main/windowBus.ts` |
+| 3 | 草案总线：`requestSourceDraftPrefill` / `peek` / `clear` + window 事件双轨（模块未挂载时靠暂存补消费）。与 `pluginCommandBus` 的唯一差别是**不设 TTL** | `src/lib/bookSourceDraftBus.ts` |
+| 4 | App 订广播 → 切模块 + 暂存 + toast 说明「界面为什么跳」；模块挂载/已挂载两条路都消费；表单收 `draft` prop（新增态预填，编辑态以源现值优先，**凭据三框恒置空**）· 关闭即弃草案 | `src/App.tsx`·`src/modules/bookmarket/index.tsx`·`SourceFormSheet.tsx` |
+| 5 | 权限页与默认串补 `bookMarket` 一行（`read` 档 = 只看得到、起草被拦） | `AiPermissionsTab.tsx`·`src/lib/settings.ts` |
+
+**四条不显然的机制**：
+
+- **可达性是设计出来的**：本仓**没有任何「read + ondemand」先例** —— 这类工具既不在 `tool.request` 的写工具清单里、也没有专属提示，等于永久不可见。所以 `draft` 的 description 里点名了 `booksource.list`，由契约脚本正/负向双向锁住（清单里只加 `draft`、不加 `list`），另有 `visual.html` 那条「已知例外不许变成静默」的断言。
+- **凭据在结构上进不来**：`draft` 的 `inputSchema` 里没有任何凭据字段（`validateArgs` 会**静默忽略**未知键），返回的草案走白名单拷贝 —— AI 既拿不到也送不进凭据，凭据只能由用户在表单里手输。
+- **起草即校验**：`draft` 复用 repo 的 `isAllowedSourceUrl` / `sanitizeBookSourcePatch`，不另写一套判定。custom 源缺 `mappingJson`、或映射缺 `list/title/download` 任一条，当场明确报错（这正是 §4.1 的痛点：半份映射的源搜不出东西）。
+- **schema 红线下的取舍**：`mapping` 内联对象让 schema 冲到 1185 字符（红线 800），故按施工方案预先授权的退路改用 `mappingJson: string`（现 751 字符）—— 形如 `{"list":"data.books[*]","title":"title","download":"files[0].url"}`，示例写在**工具 description**（不计入 800 预算）里。
+
+**与拍板 ② 的关系**：`window.__kbBookSourceDraft` 这个 dev-only 钩子仍在（`import.meta.env.DEV` 守卫），但**探针不用它**触发那一跳 —— 探针走渲染层的 `aiTools:invoke`，与手动点这个工具完全同一条链路（同一套 `validateArgs` / `checkModulePermission` / 月度上限 / handler），比钩子更真。钩子降级为人工调试口，其生产负向由探针第 ⑨ 段实测锁住（`npm run build` 产物里 `typeof window.__kbBookSourceDraft === 'undefined'`）。
+
+**验收**：新契约 `verify-book-market-tools.mjs` 绿（元数据 / schema 红线 / 凭据负向 / 清单覆盖 17=17 / 通道四处齐 / 接线静态锁）· 新实机探针 `probe-s5-tools.mjs` **全绿（49 项）**：主进程段（在册元数据、**read 档拦写 / write 档放行**、七条入参错误路径、凭据字段送不进）+ 渲染层段（**开场停在别的模块** ⇒ 草案到达自动切书市且**可见**、左栏高亮、跳「书源」视图、表单预填七行映射、认证切到 Basic 而**用户名/密码框为空**、取消即弃且再点「新增书源」是空表单、二次草案走事件路径、点「添加并测试」真落库 + 连通性「已连通」打到 mock OPDS）；另锁两条负向：**草案不落库**（书源文件在点「添加」前未被改写）与**凭据标记值不出现在返回值 / 表单 / 落盘任一字节**。审计基线已按新工具数重生成（core 仍 14 枚 ≈7761 tok/轮 —— 两枚新工具全在 ondemand，每轮零成本）。
+
+## 28. 书市：元数据自愈（S6，2026-09-23）
+
+背景：书市下载的书落在 `<vault>/.books/`，元数据在 `.books/.meta.json`、封面在 `.books/.covers/`。用户完全可能在**文件管理器里直接删书**（这是 .books 设计的预期用法 —— 书是用户可整理的东西）。删掉后两处残留没人管：`.meta.json` 留下孤儿条目（键指向已不存在的文件）、`.covers/` 里留下没人引用的封面（只增不减）。方案与验收口径见 `.claude/plans/s6-metadata-selfheal.md`。
+
+**做法：零新 UI、零新 IPC、纯后台。** 复用已存在的 `vaultBookMetaRepo.bookMetaPruneOrphans()`（扫盘取现存清单 → `pruneOrphanMeta` 比孤儿 → 回收孤儿条目 + 删其封面 → `bookCoverDeleteUnreferenced` 删无引用封面），只在两个触发点接线：
+
+| 触发点 | 位置 | 覆盖场景 |
+|---|---|---|
+| ① 仓库打开（启动恢复 / 换库 / 按 id 打开） | `electron/lib/workspaceManager.ts` `loadVaults` / `adoptVaultDirectory` / `ws:openById` 的 `syncVaultWatcher()` 之后 | 应用**关闭期间**用户在文件管理器删了书 |
+| ② 文件监听 flush | `electron/lib/fsWatcher.ts` `flush()`：本次变更含 `.books/` 前缀路径 → 节流（`PRUNE_THROTTLE_MS = 30s`）触发 | 应用**运行期间**删书，30 秒内自动回收 |
+
+**与方案的一处有意偏离**：方案 §三① 写的是「在三处各贴一份 `try/catch` 调用块」，实际抽成了一个模块内 helper `pruneOrphanBookMetaQuiet()` 在三处各调一次 —— 三份逐字重复的 `try/catch + console.warn` 属铁律 14/21 的「同一常量多处分抄」家族，收成一个具名函数更稳。契约脚本据此断言「helper 恰好 3 处调用且都紧跟 `syncVaultWatcher()`」，而非方案里写的「`bookMetaPruneOrphans` 直接调用 ≥2 次」。
+
+**两条不显然的机制**：
+
+- **事件可达性是 S6 的隐性前提**：`fsWatcher` 的 `IGNORED_SEGMENTS` 里有 `.knowbase` 却**没有** `.books` —— 这不是巧合，是 S6 能成立的原因（`.books/` 的事件必须能抵达 `flush()`）。契约脚本把它锁成显式不变量：一旦有人顺手把 `.books` 加进忽略集，触发点②会**静默死掉**（没报错、只是再也不回收）。
+- **自写回环靠节流掐断**：`prune` 写回 `.meta.json` 会再触发一次 watcher 事件（该写入没走 `markSelfWrite`），若不节流就是「prune → 写盘 → 事件 → prune」的回环。节流窗口 + `prune` 本身「无孤儿即不写盘」两条叠加，实际最多多刷一次，不成环。
+
+**验收**：新契约 `.AGENT/scripts/book-market/verify-book-market-selfheal.mjs` 绿（核心函数四步齐 / 三个打开点接线 / `PRUNE_THROTTLE_MS ≥ 30s` / `.books` 不在忽略集 / 零新 IPC / 零新 UI）· 新实机探针 `probe-s6-selfheal.cjs` **全绿（11 项）** —— 真 electron 主进程里驱动**真实的 fsWatcher 与 workspaceManager**（S6 是纯主进程功能、零 UI，故主进程探针即可完整覆盖，不需要 CDP）：① 运行期从磁盘删书 → 真 `fs.watch` → flush 节流放行 → 条目被实时回收；② **节流负向** —— 刚 prune 过再放一个孤儿，1s 内**不被**回收（证明 30s 窗口真在拦，而非「碰巧回收了」）；③ `adoptImportedVault`（仓库打开）→ 孤儿同步回收 + 孤儿封面一并删 + 恰少 1 条不误伤；④ 幂等（再打开不再变化）。· `tsc --noEmit` 两端 0 错 · S1–S5 契约与探针回归绿。
+
+---
+
+## 29. 仓库选择页：滚动柄「很长 + 位置不对」修复（2026-09-23）
+
+用户报「启动软件选择仓库那个页面中有一个很长的而且位置不太对的上下滑动手柄」。诊断与方案见 `.claude/plans/vault-picker-scrollbar.md`（含三形态可交互原型 `tmp/vaultpicker-scroll-proto.html`）。
+
+**根因**：`VaultPicker.tsx` 的滚动容器是**整块 620px 内容列本身**（`max-h-[calc(100vh-64px)] overflow-y-auto`），品牌区 → 仓库列表 → 新建/打开卡片 → 底部链接全由它一起滚。内容 773px 仅比视口 705px 高一点，于是手柄占轨道 83%（数学上正确）；但因为滚动的是「整列」，手柄**贴内容列右缘**（620px 居中，窗口 1250 时在 x≈945）而非窗口边，且**贯穿品牌区**、压住列表盒右框线 —— 这才是「很长 + 位置不对」的字面来源。全仓其余滚动区一律是「有边界的局部滚动」，本页是唯一整列滚的孤例。
+
+**做法（方案 B）**：品牌与底部链接固定，**只让中段滚动**。新增两个工具类（`src/styles/index.css`）：
+
+- `.kb-picker-shell` —— `flex column` + `max-height: calc(100vh - 48px)`；外层限高是必需的：若只靠内层撑高，内容少时卡片被推到视口顶部（实测偏上 ~130px），外层限高 + 遮罩 `items-center` 才能让短内容自然居中。
+- `.kb-picker-scroll` —— `flex:1 1 auto; min-height:0; overflow-y:auto`；`home` 模式包住「标题→列表→新建/打开卡片」，`create` 模式包住整段（其内容本就短）。
+
+**两条容易踩的**：
+
+- **`-mt-8` 必须去掉**：它原本用来抵消「整列滚 + 顶部锚定」造成的偏上，现在改为居中后保留会再偏上。实测去掉后三种窗口高度都垂直居中（1280×900 / 760 / 620 均对称）。
+- **不能给内层加 `max-h-[min(...)]`**：内层一旦自带 `max-h`，`flex:1 1 auto` 在内容超出时会「反弹」到上限值而非填满外层，滚动条照样贯穿。限高只放在 `.kb-picker-shell` 一处。
+
+**验收**：`tsc --noEmit` 两端 0 错；无头 Edge 三档窗口（1280×900 短列表 / ×760 八个仓库 / ×620 十二个仓库）+ `create` 模式各截图核对 —— 溢出时手柄缩为**贴列表右缘的短柄**、品牌与底部固定；不溢出时整卡片垂直居中。**未在真机 dev 实例中验证**（CDP 探针需独占实例，本机单实例锁被占用），验证面是像素级复刻的无头渲染。
+
+
+---
+
+## 30. 书市：§9 第 10/11 条（代理隔离 / 换机取舍）转为可跑探针（2026-09-23）
+
+**无界面改动**。记在这里是因为它是书市验收面的收尾 —— 设计文档 §9 最后两条原本标着「需真机 dev 实例、自动化不可替代」，本轮复核后确认**两条都是纯主进程语义**，主进程探针即可完整覆盖（判据见记忆 `probe-form-main-vs-cdp`：纯主进程功能不上 CDP）。
+
+**新增两个探针**（`.AGENT/scripts/book-market/`，真实实现 esbuild 打包 + 裸 electron）：
+
+- `probe-910-proxy-isolation.cjs`（**16/16**）—— 死代理下书市 `BookRequestError` + 检索三态 `fail`（书市报错），**同时** `defaultSession.resolveProxy` 仍直连、`net.fetch` 仍成功（LLM 不受影响）。另验：本机/局域网源按 `<local>` 绕行、清空代理回直连（不是「不改动」）、坏代理串不抛异常、`net.fetch` 带书市 session **不读**分区代理（S0 结论的回归锁）。
+- `probe-911-rehost.cjs`（**29/29**）—— vault 整份拷贝后源描述**明文可读且逐项保留**（name/url/kind/enabled/builtin）；异机密文（`enc1:` 头、密钥不属本机 ⇒ 与真实换机同一条解密失败路径）⇒ 凭据读不出、`hasCredential` false、三态 `need-credential` 且**一个请求都不发**；重输凭据后立即恢复连通；密文损坏不阻断源列表。对照：切回原机 vault 凭据仍可读（坏的只有异机密文）。
+
+**变异测试**：把 `applyBookMarketProxy` 改成 no-op → 910 如实转红（2 项）；把 `credentialSatisfies` 改成恒 true → 911 如实转红（2 项）。改回后双绿。
+
+**踩到的平台事实（写进探针头注，勿再栽）**：**改代理不清 HTTP 缓存** —— 同一个 URL 在改代理**之前**取过，改完再取会命中缓存**直接成功**（实测 3ms、连代理都没碰），表象是「配了死代理书市却照常成功」。故探针所有「应当失败 / 应当成功」的判定请求一律带**唯一查询串破缓存**，判的是真网络路径。
+
+**验收**：两条探针全绿（16/16 + 29/29，均经变异测试）· 主仓源码零改动（变异后已还原，`git status` 干净）· 设计文档 §9 与实施计划的手工项标注同步结清。

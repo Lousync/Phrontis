@@ -33,7 +33,7 @@ export interface EntryFilter { date?: string; tagId?: string; pinnedOnly?: boole
 export interface CreateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date: string; tags?: string[]; states?: string }
 export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date?: string; isPinned?: boolean; isStarred?: boolean; tags?: string[]; states?: string }
 export interface Tag { id: string; name: string; color: string }
-export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph'
+export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket'
 
 // ===== 更新说明（release notes）=====
 // 主进程侧的同一份契约见 electron/lib/releaseNotes/types.ts
@@ -1207,7 +1207,18 @@ export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' 
  *  阶段 2a 加 fb2 / fbz（foliate 引擎系，阅读器与左栏零改动复用） */
 export interface BookListItem {
   relPath: string
-  name: string
+  /**
+   * 展示名 —— **上游拼好，渲染层只读**（方案 §3.6 / S4 收口）。
+   * 取值：`.books/.meta.json` 的 `title` 优先，缺则退回 `bookDisplayName(relPath)`（去扩展名的文件名）。
+   * ★ 渲染层**禁止**再写 `meta?.title || bookDisplayName(...)` 这类兜底 —— 那正是这次要收掉的东西
+   *   （同一条规则曾在 5 处各算一遍；契约脚本 verify-book-market-ui.mjs 有零调用点断言）。
+   */
+  displayName: string
+  /** 作者（`.books/.meta.json` 的 `author`；本地导入的书无 meta ⇒ 空串，渲染层按空不显示） */
+  author: string
+  /** 封面相对引用（`.books/.covers/<hash>.jpg`；无 meta / 未抓到封面 ⇒ 空串）。
+   *  渲染层拿它调 `bookMarketCoverGet` 取字节，取不到就回落原有的纯色书卡 / PDF 首页封面。 */
+  coverRef: string
   size: number
   /** 文件 mtimeMs（PDF 封面缓存失效判据） */
   mtime: number
@@ -1690,6 +1701,29 @@ export interface ElectronAPI {
   excerptExportEntry: (rootId: string, relPath: string) => Promise<{ ok: boolean; entry?: ExcerptExportEntry | null; error?: string }>
   /** 导出为知识库「读书笔记」页（每本书一篇；重复导出覆盖重写同一篇，保留页面 id） */
   excerptExportNote: (rootId: string, relPath: string) => Promise<{ ok: boolean; pageId?: string; pagePath?: string; created?: boolean; count?: number; error?: string }>
+  // ===== 书市（book market）=====
+  /** 书源清单（**只报 hasCredential 布尔**，永不回传凭据本体） */
+  bookMarketListSources: (rootId: string) => Promise<{ ok: boolean; sources?: BookSourceInfo[]; error?: string }>
+  bookMarketUpsertSource: (rootId: string, patch: BookSourcePatch, id?: string) => Promise<{ ok: boolean; source?: BookSourceInfo; error?: string }>
+  bookMarketRemoveSource: (rootId: string, id: string) => Promise<{ ok: boolean; error?: string }>
+  bookMarketSetSourceEnabled: (rootId: string, id: string, enabled: boolean) => Promise<{ ok: boolean; source?: BookSourceInfo; error?: string }>
+  /** 存凭据；`credential` 传 `null` = 清空（不必另开一个「清凭据」通道） */
+  bookMarketSaveCredential: (rootId: string, id: string, credential: BookSourceCredentialInput | null) => Promise<{ ok: boolean; error?: string }>
+  /** 单源连通性三态（会**真打一次请求** —— 只做前置判断会把「地址配了但服务器挂了」误报成已连通） */
+  bookMarketProbeSource: (rootId: string, id: string, query?: string) => Promise<{ ok: boolean; state: BookSourceConnectivity; error?: string }>
+  bookMarketSearch: (rootId: string, query: string, opts?: { sourceIds?: string[]; page?: number }) => Promise<BookMarketSearchResponse>
+  /** 入队下载；`conflict` 缺省 = 先问用户（见 `BookDownloadStartResult`） */
+  bookMarketDownload: (rootId: string, payload: BookDownloadRequest, conflict?: 'overwrite' | 'copy') => Promise<BookDownloadStartResult>
+  bookMarketDownloadControl: (rootId: string, id: string, action: BookDownloadAction) => Promise<{ ok: boolean; error?: string }>
+  bookMarketListQueue: (rootId: string) => Promise<{ ok: boolean; tasks?: BookDownloadTask[]; error?: string }>
+  /** 封面只读（S4 拍板 ①）：书架显示书市下到的封面用。路径守卫在主进程
+   *  （只认 `.books/.covers/` 下**单层**文件名），越权 / 缺失 / 超限一律 `dataUrl: null` */
+  bookMarketCoverGet: (rootId: string, coverRel: string) => Promise<{ ok: boolean; dataUrl: string | null; error?: string }>
+  /** 下载队列快照推送（载荷 = **整个队列**，直接整体替换，不做增量合并） */
+  onBookMarketDownloadProgress: (cb: (p: { rootId: string; tasks: BookDownloadTask[] }) => void) => () => void
+  /** AI 起草的书源草案推送（S5）：渲染层据此切到书市模块并预填「新建书源」表单。
+   *  草案不落库（`builtin.booksource.draft` 只广播、不写盘），也不含凭据字段 */
+  onBookMarketSourceDraft: (cb: (p: { draft: BookSourceDraft }) => void) => () => void
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
@@ -1998,6 +2032,197 @@ export interface DevtoolsAPI {
   helpDocsRead: (fileName: string) => Promise<DevtoolsHelpDocMeta & { body: string; dirty: boolean; error?: string }>
   helpDocsWrite: (doc: { fileName: string; title: string; category: string; icon: string; body: string }) => Promise<{ ok?: boolean; fileName?: string; error?: string }>
   helpDocsDelete: (fileName: string) => Promise<{ ok?: boolean; error?: string }>
+}
+
+// ===== 书市（book market）=====
+// ★ 镜像声明：主进程侧的真相源在 electron/lib/kbStore/bookMarketSchema.ts（数据形状）与
+//   bookSourceVaultRepo.ts（BookSourceInfo）；这里保持同形，改一处必须改两处。
+//   （主进程不 import src/types —— 与其他模块同惯例，见 electron/lib/releaseNotes/types.ts 头注。）
+// ★★ 安全不变量：跨 IPC 的书源描述**永不含凭据本体** —— 只有 `hasCredential: boolean`。
+
+export type BookSourceKind = 'opds' | 'custom'
+export type BookAuthType = 'basic' | 'bearer'
+/** 响应格式：**唯一职责是选解析器**（atom ⇒ 标准 OPDS 抽取、字段映射不参与；json ⇒ 走 mapping） */
+export type BookResponseType = 'json' | 'atom'
+
+/** 声明式取值路径（只取值、不执行脚本；方案 §三 边界） */
+export interface BookSourceMapping {
+  list: string
+  title: string
+  author?: string
+  cover?: string
+  summary?: string
+  download: string
+  /** 格式字段路径（如 `files[0].format`）—— 直链无扩展名时靠它判可读性与落盘后缀 */
+  format?: string
+}
+
+/** 渲染层可见的书源描述（凭据一律只报「存没存」） */
+export interface BookSourceInfo {
+  id: string
+  name: string
+  kind: BookSourceKind
+  url: string
+  /** 检索 URL 模板（`{base}{query}{page}{isbn}`）；'' = 用 url 原样 */
+  searchUrl: string
+  responseType: BookResponseType
+  authType: BookAuthType | null
+  hasCredential: boolean
+  enabled: boolean
+  builtin: boolean
+  mapping: BookSourceMapping | null
+  createdAt: string
+}
+
+/** 检索结果条目（统一模型；opds 与 custom 源都归一到这一形状） */
+export interface BookMarketItem {
+  sourceId: string
+  sourceName: string
+  title: string
+  author: string
+  /** 简介（OPDS 取 `<summary>` / `<content>`；无则 ''） */
+  summary: string
+  coverUrl: string
+  downloadUrl: string
+  /**
+   * 扩展名（带点小写）；'' = 认不出 → 不可下载。
+   * ★ 取值顺序：源映射的 `format` 字段优先，缺了才从 downloadUrl 推
+   *   （不少自定义源的直链没有扩展名，只从 URL 推会把能下的书判成不能下）。
+   */
+  ext: string
+  /** 服务端给出的体积（null = 未知，闸门放行后由 Content-Length 再判，方案 §4.3） */
+  sizeBytes: number | null
+  /** 命中 BOOK_EXTS ⇒ 可下载且可读；false 时书卡标「暂不支持」并禁用下载 */
+  readable: boolean
+}
+
+/** 聚合检索结果：**部分源失败不整页报错**（方案 §三 拍板 ⑦），failed 非空时渲染层出灰条 */
+export interface BookMarketSearchResult {
+  items: BookMarketItem[]
+  failed: BookSearchFailure[]
+}
+
+/** 单源失败（只带原因文案，**绝不含凭据**） */
+export interface BookSearchFailure {
+  sourceId: string
+  name: string
+  reason: string
+}
+
+/** 书源连通性三态（镜像 electron/lib/bookMarket/sourceClient.ts 的 SourceConnectivity） */
+export type BookSourceConnectivity = 'ok' | 'need-credential' | 'fail'
+
+/** 新建 / 更新书源的 patch（镜像 bookMarketSchema.BookSourcePatch；**结构上不含任何凭据字段**） */
+export interface BookSourcePatch {
+  name?: string
+  kind?: BookSourceKind
+  url?: string
+  searchUrl?: string
+  responseType?: BookResponseType
+  /** `null` = 改为免认证。`ref` 由主进程恒改写成源 id，故渲染层传什么都无所谓（统一传 ''） */
+  auth?: { type: BookAuthType; ref: string } | null
+  enabled?: boolean
+  mapping?: BookSourceMapping | null
+}
+
+/**
+ * AI 起草的书源草案（S5）—— 主进程 `builtin.booksource.draft` 经
+ * `bookMarket:source-draft` 广播送来的**预填数据**，只用来打开「新建书源」表单。
+ *
+ * ★ 三点口径（每一条都有对应断言，别在别处捡起来用）：
+ *  1. **结构上不含任何凭据字段** —— 凭据只能由用户在表单里手输（走
+ *     `bookMarketSaveCredential`），AI 侧从头到尾拿不到；
+ *  2. 草案**不落库、不落盘**：用户点「添加」才走 `bookMarketUpsertSource`，点取消即弃；
+ *  3. 与 `BookSourcePatch` 的差别只在 `authType`（patch 要 `auth:{type,ref}` 这个
+ *     主进程才认的形状；草案给的是人看的 `authType`，表单自己拼成 patch）。
+ */
+export interface BookSourceDraft {
+  name: string
+  kind: BookSourceKind
+  url: string
+  searchUrl?: string
+  responseType?: BookResponseType
+  authType?: BookAuthType
+  mapping?: BookSourceMapping | null
+}
+
+/** 书源凭据入参 —— **只走 `bookMarketSaveCredential` 一条路**，绝不写进源描述 */
+export interface BookSourceCredentialInput {
+  type: BookAuthType
+  username?: string
+  password?: string
+  token?: string
+}
+
+/** 检索 IPC 返回（ok/error 是信封，items/failed/connectivity 是数据） */
+export interface BookMarketSearchResponse {
+  ok: boolean
+  items?: BookMarketItem[]
+  failed?: BookSearchFailure[]
+  /** 每个源的连通性 —— 书源列表的三态**顺手**就刷新了，不必再发一轮探测请求 */
+  connectivity?: Record<string, BookSourceConnectivity>
+  error?: string
+}
+
+/** 下载队列状态机（方案 §4.1 拍板 ⑬：并发恒 1，队列是内存态，重启即清） */
+export type BookDownloadState = 'queued' | 'down' | 'paused' | 'done' | 'fail'
+
+export interface BookDownloadTask {
+  id: string
+  sourceId: string
+  sourceName: string
+  title: string
+  url: string
+  /** 目标落盘相对路径（仓库内，posix）；排队时即定，便于「已完成」项定位 */
+  relPath: string
+  state: BookDownloadState
+  received: number
+  /** 服务端 Content-Length；0 = 未知（进度条转不确定态） */
+  total: number
+  /** 已自动重试次数（方案 §4.1：失败自动重试 1 次，凭据类失败不空转） */
+  retry: number
+  error?: string
+}
+
+/** 下载入参（镜像 electron/lib/bookMarket/downloader.ts 的 BookDownloadRequest） */
+export interface BookDownloadRequest {
+  sourceId?: string
+  sourceName?: string
+  title: string
+  author?: string
+  downloadUrl: string
+  coverUrl?: string
+  /** 扩展名（带点优先，不带点也收）；不在 BOOK_EXTS 里 → 主进程直接拒（不在书架上出现的格式下了也白下） */
+  ext?: string
+  /** 检索时源给的体积（0 / 缺省 = 未知）—— 主进程先用它挡一次，响应头到了还有一次复核 */
+  sizeBytes?: number
+}
+
+/**
+ * 入队结果。
+ * ★ `conflict: true` = **同名书已存在且用户还没表态**（主进程**不入队**、不留痕迹）——
+ *   渲染层据此弹「覆盖 / 另存副本」，再带 `conflict` 决定调一次 `bookMarketDownload`
+ *   （拍板 ⑩：不静默覆盖）。
+ */
+export type BookDownloadStartResult =
+  | { ok: true; task?: BookDownloadTask }
+  | { ok: false; conflict: true; relPath: string; fileName: string; error?: string }
+  | { ok: false; error: string }
+
+/** 队列控制动作（`pause-all` / `resume-all` / `clear-done` 忽略 id） */
+export type BookDownloadAction =
+  | 'pause' | 'resume' | 'cancel' | 'retry' | 'pause-all' | 'resume-all' | 'clear-done'
+
+/** 书籍元数据（`.books/.meta.json` 的条目；书架 DTO 拼装的上游，方案 §五） */
+export interface BookMetaInfo {
+  relPath: string
+  title: string
+  author: string
+  coverRel: string
+  sourceId: string
+  sourceName: string
+  downloadedAt: string
+  size: number
 }
 
 declare global { interface Window { api: ElectronAPI; devtoolsApi?: DevtoolsAPI } }

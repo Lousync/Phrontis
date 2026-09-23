@@ -114,10 +114,11 @@ const srcSchedule = stripComments(read('src/modules/schedule/index.tsx'))
 const srcBlog = stripComments(read('src/modules/blog/index.tsx'))
 
 // C1 图标条按钮集（批次4 拍板 5 → 4；批次5 反馈轮 AI 教学入口回归：RAIL_BUTTONS 4 项 + 底部设置；
+// 2026-09-22 书市 S4：+bookMarket → 5 项，**追加在末尾**（现四项位置不动）；
 // 工具箱入口移右栏上部，与 startup-tab 契约 C1 互为镜像）
 const railM = srcBar.match(/const\s+RAIL_BUTTONS[\s\S]*?=\s*\[([\s\S]*?)\n\]/)
 const railIds = railM ? [...railM[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((x) => x[1]) : null
-ok(railIds?.join(',') === 'aiTeaching,recycle,plugins,moments', 'C1 图标条 RAIL_BUTTONS = AI教学/回收站/插件市场/动态（AI 教学入口回归）', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
+ok(railIds?.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket', 'C1 图标条 RAIL_BUTTONS = AI教学/回收站/插件市场/动态/书市', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
 ok(!/id:\s*'toolbox'/.test(railM ? railM[1] : ''), 'C1b 图标条不再含工具箱按钮（入口语义移 ToolLauncherZone）')
 ok(/title="设置"/.test(srcBar), 'C1c 图标条底部设置按钮存在')
 

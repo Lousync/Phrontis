@@ -19,6 +19,11 @@
  *   所以下面 A2b / A6 / A6b / D1 / E5 / F3 / G1 / G2 / G3 / G4 的期望一律按**现设计**重算。
  *   改这里的期望前请先确认模块清单真的变了（本脚本是用来抓清单飘移的，不是用来记录愿望的）。
  *
+ * ★ 2026-09-22 再对齐（书市 S4）：APP_MODULES 15 → **16**（+`bookMarket`，左栏独立整窗模块，
+ *   `bar/startable/tile/palette` 全 true）；ActivityBar 固定图标条 4 → 5 项（追加在末尾）。
+ *   又一次**有意变更**，不是 drift：G1/G2/G3 期望已同步，且 G2 特意用「存量设置里没有
+ *   bookMarket」的形态，证老用户顺序不被新增模块打乱。
+ *
  * 与探针的区别：这里**直接 import 真实实现**（`src/lib/appModules.ts`，靠 Node 的
  * `--experimental-strip-types` 剥离类型），而不是照抄一份算法 —— 抄一份正好会掩盖本次这类缺陷。
  *
@@ -76,7 +81,9 @@ function stripComments(src) {
 console.log('\n=== A. 唯一真相源自洽 ===')
 const ids = APP_MODULES.map((m) => m.id)
 ok(new Set(ids).size === ids.length, 'A2 APP_MODULES 内 id 无重复')
-ok(ids.length === 15, 'A2b APP_MODULES 覆盖 15 个 TabName（v3.4.0：-desktop -user +bookshelf +aiChat +graph；aaff952 再 -editor）', `实际 ${ids.length}`)
+// 2026-09-22 书市（S4）：16 项（+bookMarket）。它是「左栏独立整窗模块」，进活动栏、
+// 可启动、可作磁贴、进命令面板 —— 与工具箱 / 插件平级（方案 §1.2 第 5 条）。
+ok(ids.length === 16, 'A2b APP_MODULES 覆盖 16 个 TabName（v3.4.0：-desktop -user +bookshelf +aiChat +graph；aaff952 再 -editor；2026-09-22 +bookMarket）', `实际 ${ids.length}`)
 ok(!ids.includes('desktop') && !ids.includes('user'), 'A2c 已删除的 desktop/user 不再出现在清单')
 ok(BAR_MODULE_IDS.every((id) => ids.includes(id)), 'A3 BAR_MODULE_IDS ⊆ APP_MODULES')
 ok(STARTABLE_MODULE_IDS.every((id) => BAR_MODULE_IDS.includes(id)), 'A4 可启动模块 ⊆ 活动栏模块（非活动栏模块不该当落点）')
@@ -146,8 +153,9 @@ const railIds = (() => {
 if (railIds === null) {
   ok(false, 'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 4 项（AI教学/回收站/插件市场/动态）', '抠不到 RAIL_BUTTONS（结构变了，脚本要跟着改）')
 } else {
-  ok(railIds.join(',') === 'aiTeaching,recycle,plugins,moments',
-    'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 4 项（AI 教学入口回归 + 回收站/插件市场/动态）', `实际 ${railIds.join(',')}`)
+  // 2026-09-22 书市：4 → 5 项（bookMarket **追加在末尾**，现四项位置不动）
+  ok(railIds.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket',
+    'C1 ActivityBar RAIL_BUTTONS 覆盖 5 项（AI 教学入口 + 回收站/插件市场/动态 + 书市）', `实际 ${railIds.join(',')}`)
 }
 ok(/title="设置"/.test(srcBar), 'C1b 图标条底部设置按钮存在（直开设置标签页）')
 checkCover('C2 设置页 STARTUP_ICONS 覆盖全部可启动模块', keysOfRecord(srcAppear, 'STARTUP_ICONS'), STARTABLE_MODULE_IDS)
@@ -242,23 +250,25 @@ ok(activityVisibleOrder(undefined, undefined).length === BAR_MODULE_IDS.length, 
 console.log('\n=== G. v3.4.0 口径快照（锁定新顺序，防后续误动） ===')
 // v3.4.0 桌面外壳删除后的磁贴清单（tile:true 的模块，顺序 = APP_MODULES 声明序；editor 已退役故不在列）
 const V340_TILE_ORDER = ['knowledge', 'blog', 'schedule', 'moments', 'aiTeaching', 'toolbox',
-  'plugins', 'recycle', 'help', 'releaseNotes', 'settings']
+  'plugins', 'bookMarket', 'recycle', 'help', 'releaseNotes', 'settings']
 ok(TILE_MODULE_IDS.join(',') === V340_TILE_ORDER.join(','),
   'G1 磁贴模块清单与 v3.4.0 口径一致', `\n     期望 ${V340_TILE_ORDER.join(',')}\n     实际 ${TILE_MODULE_IDS.join(',')}`)
 
 // 真实用户数据形态：moments 被隐藏时的可见顺序（moments 改名「动态」不影响 id）。
 // 存量设置里仍带着退役的 editor（老用户的存储顺序照抄原样）—— 这里刻意保留它，
 // 用来证「陈年 id 被过滤且不影响其余顺序」这一条。
+// ★ 存量设置里**没有** bookMarket（它是 2026-09-22 新增的）—— 缺失项按声明序补到末尾，
+//   这正是这条断言的另一半价值：老用户的活动栏顺序不会被新增模块打乱，新模块稳稳落尾部。
 const USER_ORDER = '["editor","aiTeaching","knowledge","blog","schedule","moments","toolbox","plugins"]'
 const USER_HIDDEN = '["moments"]'
-const EXPECT_VISIBLE = 'aiTeaching,knowledge,blog,schedule,toolbox,plugins'
+const EXPECT_VISIBLE = 'aiTeaching,knowledge,blog,schedule,toolbox,plugins,bookMarket'
 ok(activityVisibleOrder(USER_ORDER, USER_HIDDEN).join(',') === EXPECT_VISIBLE,
   'G2 真实设置下的活动栏可见顺序与 v3.4.0 口径一致',
   `\n     期望 ${EXPECT_VISIBLE}\n     实际 ${activityVisibleOrder(USER_ORDER, USER_HIDDEN).join(',')}`)
 
 // 命令面板快照（palette:true；bookshelf/aiChat/graph 刻意不进面板——只能由工作台入口产生；editor 已退役）
 const V340_PALETTE = ['knowledge', 'blog', 'schedule', 'moments', 'aiTeaching', 'toolbox',
-  'plugins', 'recycle', 'help', 'settings']
+  'plugins', 'bookMarket', 'recycle', 'help', 'settings']
 const newPalette = PALETTE_MODULES.map((m) => m.id)
 ok(newPalette.join(',') === V340_PALETTE.join(','),
   'G3 命令面板清单与 v3.4.0 口径一致（desktop/user 已移除，三个新 Tab 不进面板）',
