@@ -90,6 +90,11 @@ export const BROADCAST_CHANNEL = {
    *  而这正是 updateService 那条通道踩过的坑）。`rootId` 供渲染层过滤别的仓库的队列，
    *  见 lib/bookMarket/downloader.ts 的 `pushProgress` */
   bookMarketDownloadProgress: 'bookMarket:download-progress',
+  /** 书市：AI 起草的书源草案，载荷 `{ draft: BookSourceDraft }`
+   *  —— S5 的「工具 → 表单」那一跳：渲染层收到后切到书市模块、打开「新建书源」
+   *  表单并预填。★ 草案**不落库、不落盘**（用户点「添加」才走 bookMarket:upsertSource），
+   *  所以本通道没有伴随的 data-changed scope —— 别顺手配一个 */
+  bookMarketSourceDraft: 'bookMarket:source-draft',
   /** 番茄钟状态广播，载荷 PomodoroSnapshot */
   pomodoroStateBroadcast: 'pomodoro:state-broadcast',
   /** 小窗（日面板）状态变化，载荷 `{ detached, mode, collapsed, widgetInteractive }` */

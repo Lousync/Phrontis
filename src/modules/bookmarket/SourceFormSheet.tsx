@@ -3,7 +3,7 @@ import { Lock } from 'lucide-react'
 import { Collapsible } from '../../components/shared/Collapsible'
 import { bookMarketProbeSource, bookMarketSaveCredential, bookMarketUpsertSource } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
-import type { BookAuthType, BookResponseType, BookSourceConnectivity, BookSourceInfo, BookSourceKind, BookSourceMapping, BookSourcePatch } from '../../types'
+import type { BookAuthType, BookResponseType, BookSourceConnectivity, BookSourceDraft, BookSourceInfo, BookSourceKind, BookSourceMapping, BookSourcePatch } from '../../types'
 import { SHEET_BTN, SHEET_BTN_GHOST, SHEET_FLD, SHEET_INFO, SHEET_INP, SHEET_LABEL, SHEET_TIP, Sheet } from './SheetShell'
 
 /**
@@ -16,8 +16,8 @@ import { SHEET_BTN, SHEET_BTN_GHOST, SHEET_FLD, SHEET_INFO, SHEET_INP, SHEET_LAB
  * ③ 凭据与源描述**分开写**：先 upsert 拿到源 id（新建时 id 由主进程生成），再单独
  *    `saveCredential`。编辑态若留空凭据则**不动**已存的那份（不会把已有的清掉）。
  *
- * ★ 这里是 S5（AI 从网页/文本起草书源 → 预填表单）的落点：预填只需把 `draft` 传进来即可，
- *   本轮先把完整表单做齐（方案 §六 路 A）。
+ * ★ S5 已落地（2026-09-23）：AI 起草的草案经 `draft` 进来预填（见下面的重置 effect）。
+ *   草案只在**新增态**参与（编辑态以源现值优先）；凭据三框恒为空 —— 草案里本就没有凭据字段。
  */
 
 const AUTH_OPTIONS = [
@@ -51,11 +51,13 @@ function KindRadio({ on, title, desc, disabled, onClick }: { on: boolean; title:
   )
 }
 
-export function SourceFormSheet({ open, source, rootId, onClose, onSaved }: {
+export function SourceFormSheet({ open, source, rootId, draft, onClose, onSaved }: {
   open: boolean
-  /** 编辑态传该源（新增传 null） */
+  /** 编辑态传该源（新增传 null）；`draft` 与它互斥，两者都在时 source 优先 */
   source: BookSourceInfo | null
   rootId: string
+  /** S5：AI 起草的预填草案（新增态用）。**不含凭据字段** —— 凭据只能用户手输 */
+  draft?: BookSourceDraft | null
   onClose: () => void
   onSaved: (id: string, state: BookSourceConnectivity | null) => void
 }) {
@@ -75,21 +77,24 @@ export function SourceFormSheet({ open, source, rootId, onClose, onSaved }: {
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
 
-  // 每次打开按来源重置（新增 = 空表单；编辑 = 带入现值）—— 不留上一家的残留输入
+  // 每次打开按来源重置（新增 = 空表单 / 草案；编辑 = 带入现值）—— 不留上一家的残留输入。
+  // 草案只在**新增态**生效（编辑态以源现值优先）；凭据三框恒为空：
+  // 草案结构上没有凭据字段（types 里 BookSourceDraft 的三点口径），这三行**不要动**。
   useEffect(() => {
     if (!open) return
     const s = source
-    setKind(s?.kind ?? 'opds')
-    setName(s?.name ?? '')
-    setUrl(s?.url ?? '')
-    setResponseType(s?.responseType ?? 'json')
-    setSearchUrl(s?.searchUrl || '{base}/search?q={query}&page={page}')
+    const d = source ? null : draft
+    setKind(d?.kind ?? s?.kind ?? 'opds')
+    setName(d?.name ?? s?.name ?? '')
+    setUrl(d?.url ?? s?.url ?? '')
+    setResponseType(d?.responseType ?? s?.responseType ?? 'json')
+    setSearchUrl(d?.searchUrl || s?.searchUrl || '{base}/search?q={query}&page={page}')
     const m: Record<string, string> = {}
-    for (const [k] of MAP_ROWS) m[k] = (s?.mapping && String(s.mapping[k] ?? '')) || ''
+    for (const [k] of MAP_ROWS) m[k] = String(d?.mapping?.[k] ?? s?.mapping?.[k] ?? '')
     setMap(m)
-    setAuthKind(s?.authType ?? 'none')
+    setAuthKind(d?.authType ?? s?.authType ?? 'none')
     setUsername(''); setPassword(''); setToken('')
-  }, [open, source])
+  }, [open, source, draft])
 
   const isOpds = kind === 'opds'
 

@@ -17,6 +17,7 @@ const MODULES: ModuleDef[] = [
   { id: 'schedule',  label: '日程',     desc: '查询待办事项',         writeDesc: '创建待办' },
   { id: 'checkin',   label: '习惯打卡', desc: '习惯列表与统计',       writeDesc: '按名称为今天打卡' },
   { id: 'quiz',      label: '错题本',   desc: '查询错题与薄弱点统计', writeDesc: '按错误类型打标签、写错因备注、加入分组、组卷成练习页' },
+  { id: 'bookMarket', label: '书市',    desc: '书源列表与检索状态',   writeDesc: '按草案预填「新建书源」表单（不自动落库）' },
   { id: 'pomodoro',  label: '番茄专注', desc: '专注统计',             writeDesc: '（暂无写操作）' },
 ]
 // 注：bookmarks 模块已随 2026-09-09 工具重构退役（bookmarks.search → vault.search）；

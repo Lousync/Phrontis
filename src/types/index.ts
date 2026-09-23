@@ -1702,6 +1702,9 @@ export interface ElectronAPI {
   bookMarketCoverGet: (rootId: string, coverRel: string) => Promise<{ ok: boolean; dataUrl: string | null; error?: string }>
   /** 下载队列快照推送（载荷 = **整个队列**，直接整体替换，不做增量合并） */
   onBookMarketDownloadProgress: (cb: (p: { rootId: string; tasks: BookDownloadTask[] }) => void) => () => void
+  /** AI 起草的书源草案推送（S5）：渲染层据此切到书市模块并预填「新建书源」表单。
+   *  草案不落库（`builtin.booksource.draft` 只广播、不写盘），也不含凭据字段 */
+  onBookMarketSourceDraft: (cb: (p: { draft: BookSourceDraft }) => void) => () => void
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
@@ -2100,6 +2103,27 @@ export interface BookSourcePatch {
   /** `null` = 改为免认证。`ref` 由主进程恒改写成源 id，故渲染层传什么都无所谓（统一传 ''） */
   auth?: { type: BookAuthType; ref: string } | null
   enabled?: boolean
+  mapping?: BookSourceMapping | null
+}
+
+/**
+ * AI 起草的书源草案（S5）—— 主进程 `builtin.booksource.draft` 经
+ * `bookMarket:source-draft` 广播送来的**预填数据**，只用来打开「新建书源」表单。
+ *
+ * ★ 三点口径（每一条都有对应断言，别在别处捡起来用）：
+ *  1. **结构上不含任何凭据字段** —— 凭据只能由用户在表单里手输（走
+ *     `bookMarketSaveCredential`），AI 侧从头到尾拿不到；
+ *  2. 草案**不落库、不落盘**：用户点「添加」才走 `bookMarketUpsertSource`，点取消即弃；
+ *  3. 与 `BookSourcePatch` 的差别只在 `authType`（patch 要 `auth:{type,ref}` 这个
+ *     主进程才认的形状；草案给的是人看的 `authType`，表单自己拼成 patch）。
+ */
+export interface BookSourceDraft {
+  name: string
+  kind: BookSourceKind
+  url: string
+  searchUrl?: string
+  responseType?: BookResponseType
+  authType?: BookAuthType
   mapping?: BookSourceMapping | null
 }
 

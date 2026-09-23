@@ -24,6 +24,7 @@ import { setGlobalActiveTab } from './lib/activeTab'
 import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList } from './lib/ipc'
 import { getPluginTools } from './lib/pluginService'
 import { requestPluginViewActivation, dispatchCodePluginAction } from './lib/pluginCommandBus'
+import { requestSourceDraftPrefill } from './lib/bookSourceDraftBus'
 import { showToast } from './lib/toast'
 import type { PluginCommandInfo } from './types'
 import type { PluginTool } from './lib/pluginService'
@@ -705,6 +706,24 @@ export default function App() {
     const handler = () => { setActiveTab('plugins'); setSidebarOpen(true) }
     window.addEventListener('plugins:open', handler)
     return () => window.removeEventListener('plugins:open', handler)
+  }, [])
+
+  // AI 起草书源（S5）：主进程 builtin.booksource.draft 广播 → 切到书市 + 预填「新建书源」表单。
+  // 草案先过 bookSourceDraftBus 暂存 —— 书市模块首访才挂载，广播可能早于挂载（只发事件会漏）。
+  // toast 是必需的：切模块会打断用户当前操作，不说缘由就成了「屏幕自己跳了」。
+  // 悬浮 AI 面板是 App 级挂载（见下面 <AssistantPanel>），切到整窗独占的书市后回复仍可见。
+  useEffect(() => {
+    const off = window.api?.onBookMarketSourceDraft?.(({ draft }) => {
+      if (!draft) return
+      requestSourceDraftPrefill(draft)
+      setActiveTab('bookMarket')
+      showToast({
+        type: 'info',
+        message: 'AI 起草了一份书源配置',
+        detail: '已切到书市并预填表单：请核对字段、自己填写凭据后点「添加」',
+      })
+    })
+    return () => { off?.() }
   }, [])
 
   // 接收小窗指令：日程与打卡小窗「打开任务模块/完整配置」→ 切换主窗口 Tab

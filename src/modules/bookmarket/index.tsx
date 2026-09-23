@@ -10,8 +10,9 @@ import { showToast } from '../../lib/toast'
 import { Collapsible } from '../../components/shared/Collapsible'
 import type {
   BookDownloadAction, BookDownloadRequest, BookDownloadTask, BookMarketItem, BookSearchFailure,
-  BookSourceConnectivity, BookSourceInfo,
+  BookSourceConnectivity, BookSourceDraft, BookSourceInfo,
 } from '../../types'
+import { clearPendingSourceDraft, onSourceDraftPrefill, peekPendingSourceDraft } from '../../lib/bookSourceDraftBus'
 import { DetailDrawer } from './DetailDrawer'
 import { DiscoverView } from './DiscoverView'
 import { DeleteSourceSheet, DuplicateSheet, type DuplicatePending } from './DuplicateSheet'
@@ -79,6 +80,8 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
   const [credSource, setCredSource] = useState<BookSourceInfo | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [formSource, setFormSource] = useState<BookSourceInfo | null>(null)
+  /** S5：AI 起草的预填草案（与 formSource 互斥：有草案 = 新增态） */
+  const [formDraft, setFormDraft] = useState<BookSourceDraft | null>(null)
   const [dupe, setDupe] = useState<DuplicatePending | null>(null)
   const [delSource, setDelSource] = useState<BookSourceInfo | null>(null)
 
@@ -124,6 +127,28 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
     })
     return off
   }, [rootId])
+
+  /** 打开「新建书源」表单；草案非空时预填（AI 起草走这里，S5）。传 null = 从按钮进来的空表单 */
+  const openSourceForm = useCallback((draft: BookSourceDraft | null = null) => {
+    setFormSource(null)
+    setFormDraft(draft)
+    setFormOpen(true)
+  }, [])
+
+  // S5：AI 草案到达 → 切到「书源」视图 + 打开预填表单。
+  // 双轨（照 pluginCommandBus 的既有形态）：模块**已挂载**时走事件；**未挂载**时 App 已把
+  // 草案暂存在 bus 里，这里挂载后补消费一份 —— 只订阅事件会漏掉「广播早于挂载」那一份。
+  // ⛔ hook 必须待在所有早退 return 之前（React #310，历史三犯）
+  useEffect(() => {
+    const consume = (draft: BookSourceDraft): void => {
+      clearPendingSourceDraft()
+      setView('sources')
+      openSourceForm(draft)
+    }
+    const pending = peekPendingSourceDraft()
+    if (pending) consume(pending)
+    return onSourceDraftPrefill(consume)
+  }, [openSourceForm])
 
   // 铁律 1/18：主进程写完盘发 bookMarket（源增删改 / 下载完成 / 元数据自愈）→ 这里重拉
   useDataChanged('bookMarket', () => {
@@ -283,7 +308,7 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
           <button type="button" className={`${SEG} ${view === 'sources' ? segOn : 'text-[var(--text-secondary)]'}`} onClick={() => setView('sources')}>书源</button>
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <button type="button" className={pill} onClick={() => { setFormSource(null); setFormOpen(true) }}>
+          <button type="button" className={pill} onClick={() => openSourceForm()}>
             <Plus size={13} strokeWidth={1.9} />
             新增书源
           </button>
@@ -383,8 +408,10 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
       <SourceFormSheet
         open={formOpen}
         source={formSource}
+        draft={formDraft}
         rootId={rootId ?? ''}
-        onClose={() => setFormOpen(false)}
+        // 关闭即弃草案（保存成功后表单也会走这里）—— 否则下次点「新增书源」会莫名其妙带出旧草案
+        onClose={() => { setFormOpen(false); setFormDraft(null) }}
         onSaved={(id, state) => { onSheetSaved(id, state) }}
       />
       <DuplicateSheet

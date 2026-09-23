@@ -886,3 +886,26 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **验收**：新契约 `verify-book-market-ui.mjs` 绿 · 实机探针 `probe-s4-module.mjs` **全绿**（端到端：检索 → 详情 → 下载 → 字节一致落盘 → 上架后书架显示 meta 书名 + 作者 + 封面；另有格式闸、同名冲突、队列四项控制、凭据三态，以及「凭据明文不出现在 `.knowbase` 任何文件」的负向）· S1/S2/S3 探针回归绿（49 / 96 / 99 项）· 全量 43 个契约脚本 37 绿（6 红均为既有、与书市无关）· `tsc --noEmit` 两端 0 错。
 
 **一处已查明、本轮不修**：书市只在挂载时解析当前仓库（`workspaceGetCurrent`），之后靠 `bookMarket` / `knowledge` 广播刷新；而主进程 `adoptVaultDirectory`（换库）**不发** `broadcastDataChanged`，渲染层的 `vault:changed` 事件只有 `WorkbenchLeftPanel` 与 `blog` 在听。今天打不到 —— 用户可见的换库路径（`VaultSwitcher`、`VaultPicker` 启动形态）都是「广播 + **整窗重载**」；但将来若出现「不重载就换库」的路径（P6 导入收尾的 `adoptImportedVault` 最接近），书市与书架会显示上一个库的数据。可选后续：`DataChangeScope` 加 `vault` + 在 `adoptVaultDirectory` 里广播。
+
+## 23. 书市：AI 起草书源（S5，2026-09-23）
+
+用户说一句「把我家 Calibre 配成书源」，AI 把它整理成一份书源草案，**界面自己切到书市并打开「新建书源」表单、字段全部预填**；用户核对、自己填凭据、点「添加」——**草案本身不落库**。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 两枚 AI 工具（均 `tier:'ondemand'`、`module:'bookMarket'`）：`builtin.booksource.list`（读，列已配书源，只回「凭据是否已存」布尔）· `builtin.booksource.draft`（写，起草并把草案广播给界面） | `electron/lib/builtinTools.ts` |
+| 2 | 新广播通道 `bookMarket:source-draft`（载荷 `{ draft }`）——★ **没有伴随的 data-changed scope**：草案不落盘，别顺手配一个 | `electron/main/windowBus.ts` |
+| 3 | 草案总线：`requestSourceDraftPrefill` / `peek` / `clear` + window 事件双轨（模块未挂载时靠暂存补消费）。与 `pluginCommandBus` 的唯一差别是**不设 TTL** | `src/lib/bookSourceDraftBus.ts` |
+| 4 | App 订广播 → 切模块 + 暂存 + toast 说明「界面为什么跳」；模块挂载/已挂载两条路都消费；表单收 `draft` prop（新增态预填，编辑态以源现值优先，**凭据三框恒置空**）· 关闭即弃草案 | `src/App.tsx`·`src/modules/bookmarket/index.tsx`·`SourceFormSheet.tsx` |
+| 5 | 权限页与默认串补 `bookMarket` 一行（`read` 档 = 只看得到、起草被拦） | `AiPermissionsTab.tsx`·`src/lib/settings.ts` |
+
+**四条不显然的机制**：
+
+- **可达性是设计出来的**：本仓**没有任何「read + ondemand」先例** —— 这类工具既不在 `tool.request` 的写工具清单里、也没有专属提示，等于永久不可见。所以 `draft` 的 description 里点名了 `booksource.list`，由契约脚本正/负向双向锁住（清单里只加 `draft`、不加 `list`），另有 `visual.html` 那条「已知例外不许变成静默」的断言。
+- **凭据在结构上进不来**：`draft` 的 `inputSchema` 里没有任何凭据字段（`validateArgs` 会**静默忽略**未知键），返回的草案走白名单拷贝 —— AI 既拿不到也送不进凭据，凭据只能由用户在表单里手输。
+- **起草即校验**：`draft` 复用 repo 的 `isAllowedSourceUrl` / `sanitizeBookSourcePatch`，不另写一套判定。custom 源缺 `mappingJson`、或映射缺 `list/title/download` 任一条，当场明确报错（这正是 §4.1 的痛点：半份映射的源搜不出东西）。
+- **schema 红线下的取舍**：`mapping` 内联对象让 schema 冲到 1185 字符（红线 800），故按施工方案预先授权的退路改用 `mappingJson: string`（现 751 字符）—— 形如 `{"list":"data.books[*]","title":"title","download":"files[0].url"}`，示例写在**工具 description**（不计入 800 预算）里。
+
+**与拍板 ② 的关系**：`window.__kbBookSourceDraft` 这个 dev-only 钩子仍在（`import.meta.env.DEV` 守卫），但**探针不用它**触发那一跳 —— 探针走渲染层的 `aiTools:invoke`，与手动点这个工具完全同一条链路（同一套 `validateArgs` / `checkModulePermission` / 月度上限 / handler），比钩子更真。钩子降级为人工调试口，其生产负向由探针第 ⑨ 段实测锁住（`npm run build` 产物里 `typeof window.__kbBookSourceDraft === 'undefined'`）。
+
+**验收**：新契约 `verify-book-market-tools.mjs` 绿（元数据 / schema 红线 / 凭据负向 / 清单覆盖 17=17 / 通道四处齐 / 接线静态锁）· 新实机探针 `probe-s5-tools.mjs` **全绿（49 项）**：主进程段（在册元数据、**read 档拦写 / write 档放行**、七条入参错误路径、凭据字段送不进）+ 渲染层段（**开场停在别的模块** ⇒ 草案到达自动切书市且**可见**、左栏高亮、跳「书源」视图、表单预填七行映射、认证切到 Basic 而**用户名/密码框为空**、取消即弃且再点「新增书源」是空表单、二次草案走事件路径、点「添加并测试」真落库 + 连通性「已连通」打到 mock OPDS）；另锁两条负向：**草案不落库**（书源文件在点「添加」前未被改写）与**凭据标记值不出现在返回值 / 表单 / 落盘任一字节**。审计基线已按新工具数重生成（core 仍 14 枚 ≈7761 tok/轮 —— 两枚新工具全在 ondemand，每轮零成本）。

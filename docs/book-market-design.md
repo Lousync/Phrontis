@@ -1,6 +1,7 @@
 # 书市（书源检索与下载）实现方案
 
-> **状态**：**方案已定稿**（未开工）· 2026-09-21 立项 / 2026-09-22 两批拍板收口
+> **状态**：**S1–S5 已落地**（S6 元数据自愈待做）· 2026-09-21 立项 / 2026-09-22 两批拍板收口 / 2026-09-23 S5 收尾
+> **落地记录**：S1 磁盘与仓库 / S2 检索 / S3 下载器 / S4 模块 UI + 书架书名收口 —— 见 `docs/ui-updates.md` §22；**S5 AI 起草书源**（§四 的两个工具 + 草案预填表单）—— 见同文件 §23。三个新脚本：契约 `verify-book-market-tools.mjs`、实机探针 `probe-s5-tools.mjs`。
 > **前置依赖**：本功能的**实现**排在阅读器二期（epub 六格式，foliate）之后 —— 书市搜到的书绝大多数是 epub，格式引擎不到位则市场体验残缺。
 > **可交互原型**：`tmp/book-market-proto/book-market-prototype.html`（单文件、浅暗双主题）；**唯一探针** `tmp/book-market-proto/_probe.mjs`（CDP 驱动无头 Edge，**70 项交互断言全绿**、控制台零报错，另出 scene0..scene8 截图）
 >
@@ -189,6 +190,11 @@ sess.setProxy({ proxyRules: proxy || '', proxyBypassRules: '<local>' })
 ## 四、新增需求：AI 辅助配置书源
 
 > 2026-09-21 追加。目标是「开放一个工具，让 AI 帮用户配置/添加书源」。
+>
+> **★ 已落地（S5，2026-09-23）**：本章的两个工具与「草案 → 预填表单」那一跳已实施，与本文的两处**有意差异**记在这里：
+> ① `booksource.draft` 的字段映射参数是 **`mappingJson: string`**（JSON 文本）而非内联对象 —— 内联对象让 `inputSchema` 冲到 1185 字符，破 AGENTS.md#16 的 800 红线；
+> ② 本仓**没有「read + ondemand」先例**，故 `booksource.list` 单独放着没人提及就永远进不了模型视野 —— 已让 `draft` 的 description 点名它，并由契约脚本双向锁住。
+> 落地细节与验收见 `docs/ui-updates.md` §23；实机验收 = `.AGENT/scripts/book-market/probe-s5-tools.mjs`（49 项全绿）。
 
 ### 4.1 这个需求真正的价值在哪
 
