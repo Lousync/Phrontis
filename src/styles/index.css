@@ -303,6 +303,24 @@ input:focus, textarea:focus, select:focus {
 .drag-region { -webkit-app-region: drag; }
 .no-drag { -webkit-app-region: no-drag; }
 
+/* 整窗居中卡片骨架（仓库选择页）：品牌与底部固定、仅中段滚动 —— 「整列一起滚」会让滚动条
+   贴内容列右缘并贯穿品牌区，观感是「位置不对的长柄」（见 .claude/plans/vault-picker-scrollbar.md）。
+   ① 内容放得下时：outer 限高 + 居中 → 卡片自然垂直居中（无 100vh 取整带来的偏上）。
+   ② 内容放不下时：inner 的 max-height 生效、中段（.kb-picker-scroll）滚动。
+   若只靠 inner 撑高，内容少时卡片会被推到视口顶部（实测偏上 ~130px）——故 outer 必须有 max-h 兜底。
+   ★ 必须**块级**（AGENTS.md 铁律 11：槽位是块级 div，flex-1 在里面是死属性）。 */
+.kb-picker-shell {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 48px);
+  min-height: 0;
+}
+.kb-picker-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .no-spinner::-webkit-inner-spin-button,
 .no-spinner::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .no-spinner { -moz-appearance: textfield; }
