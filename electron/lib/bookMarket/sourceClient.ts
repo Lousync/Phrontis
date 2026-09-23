@@ -42,19 +42,25 @@ export const MAX_ITEMS_PER_SOURCE = 60
 /**
  * 传输类失败的重试次数（方案 §三：「源请求必须有超时 + 重试」）。
  * ★ 实测依据：Gutenberg 本机不稳 —— HTTP2 stream 中断、45s 空回，**都是重试一次就过**。
- * ★ **凭据类失败不重试**（`need-credential`）：401 重试一万次还是 401，只会让用户多等
- *   （同 拍板 ⑬ 对下载队列的口径）。4xx 同理 —— 那是「你问错了」，不是「网络抖了」。
+ * ★ **凭据/拒绝类失败不重试**（`need-credential` / `forbidden`）：401 重试一万次还是 401，
+ *   403 重试一万次还是 403，只会让用户多等（同 拍板 ⑬ 对下载队列的口径）。
+ *   4xx 同理 —— 那是「你问错了」，不是「网络抖了」。
  */
 export const SOURCE_RETRY_TIMES = 1
 
 /** 重试前的等待。取值小：用户在看搜索结果，重试是「顺手再试一次」不是退避策略 */
 export const RETRY_DELAY_MS = 300
 
-/** 三态连通性（拍板：凭据缺失必须是「需要凭据」而不是「连接失败」） */
-export type SourceConnectivity = 'ok' | 'need-credential' | 'fail'
+/** 连通性四态。
+ *  ★ 2026-09-23 F-6 由三态拆为四态：原先把「配置缺凭据」与「服务端 401/403 拒绝」
+ *    合并成一个 `need-credential`，导致渲染层同一行同时显示「无需登录」（配置声明）
+ *    与「需要凭据」（探测结果）—— 两个不同维度撞了同一个词，看起来自相矛盾。
+ *    拆开后用户动作也分得清：缺凭据 → 去填；被拒 → 多半得换源或换地址。 */
+export type SourceConnectivity = 'ok' | 'need-credential' | 'forbidden' | 'fail'
 
 /** `failed[]` 里的原因文案（渲染层直接显示，故是给人看的中文） */
 export const REASON_NEED_CREDENTIAL = '需要凭据'
+export const REASON_FORBIDDEN = '访问被拒'
 export const REASON_NOT_CONFIGURED = '未配置检索地址'
 export const REASON_CONNECT_FAILED = '连接失败'
 export const REASON_TIMEOUT = '连接超时'
@@ -139,22 +145,35 @@ export function preflightConnectivity(source: BookSource, cred: BookSourceCreden
 interface FetchOutcome {
   /** 解析出的条目（未判可读性） */
   raw: RawItem[]
-  /** 三态判定结果 */
+  /** 连通性判定结果（F-6 起为四态，见 SourceConnectivity） */
   state: SourceConnectivity
   reason?: string
 }
 
-/** 401/403 是「需要凭据」，其余非 2xx 是「连接失败」（拍板 ⑦ 的三态口径） */
-function classifyStatus(status: number): SourceConnectivity {
-  if (status === 401 || status === 403) return 'need-credential'
+/** 状态码 → 连通性。2026-09-23 F-6 拆开：
+ *    - **401 未授权** → `need-credential`（服务端要身份，填凭据可解）
+ *    - **403 禁止** → `forbidden`（身份不够 / 干脆不让你访问 —— 填凭据多半也没用，
+ *      常见于屏蔽 UA、地域限制、该端点不对第三方开放）。
+ *    原先两者并作一个 `need-credential`，把「去填凭据」与「这源用不了」混为一谈。
+ *  （导出供契约脚本直接验映射，勿在别处另写一份同义判断） */
+export function classifyStatus(status: number): SourceConnectivity {
+  if (status === 401) return 'need-credential'
+  if (status === 403) return 'forbidden'
   return 'fail'
+}
+
+/** 状态 → 给人看的原因文案（`failed[]` 与 UI 共用同一份口径） */
+export function reasonOf(state: SourceConnectivity, status: number): string {
+  if (state === 'need-credential') return REASON_NEED_CREDENTIAL
+  if (state === 'forbidden') return REASON_FORBIDDEN
+  return `HTTP ${status}`
 }
 
 type FeedFailure = {
   ok: false
   state: SourceConnectivity
   reason: string
-  /** **与三态正交**：值得再试一次吗。见 `fetchFeedRetry` */
+  /** **与连通性正交**：值得再试一次吗。见 `fetchFeedRetry` */
   retryable: boolean
 }
 
@@ -166,7 +185,7 @@ async function fetchFeed(url: string, headers: Record<string, string>, timeoutMs
       return {
         ok: false,
         state,
-        reason: state === 'need-credential' ? REASON_NEED_CREDENTIAL : `HTTP ${res.status}`,
+        reason: reasonOf(state, res.status),
         // 5xx 是「对面挂了」（值得重试）；4xx 是「你问错了」（重试一万次还是一样）
         retryable: res.status >= 500,
       }
@@ -227,7 +246,7 @@ async function entriesToRawItems(
   return direct
 }
 
-/** 单源检索：返回未判可读性的 `RawItem[]` + 三态 */
+/** 单源检索：返回未判可读性的 `RawItem[]` + 连通性 */
 async function searchOneSource(
   source: BookSource,
   cred: BookSourceCredential | null,
@@ -278,7 +297,7 @@ export interface SearchOptions {
 
 /**
  * 聚合检索：所有启用源并发跑（全局 ≤2），**部分源失败只进 `failed[]`**（拍板 ⑦）。
- * 副产物是每个源的连通性（S4 的书源列表三态用它，无需再发一轮请求）。
+ * 副产物是每个源的连通性（S4 的书源列表连通性列用它，无需再发一轮请求）。
  */
 export async function searchBookSources(
   rootId: string,
@@ -293,7 +312,7 @@ export async function searchBookSources(
   const results = await Promise.all(
     sources.map((s) =>
       run(async () => {
-        // 凭据在主进程侧读取，**只用于构造请求头**；出这个函数的只有条目与三态
+        // 凭据在主进程侧读取，**只用于构造请求头**；出这个函数的只有条目与连通性
         const cred = s.auth ? bookSourceCredentialFor(rootId, s.auth.ref) : null
         const outcome = await searchOneSource(s, cred, query, page, run)
         return { source: s, outcome }
@@ -325,7 +344,7 @@ export async function searchBookSources(
 }
 
 /**
- * 单源连通性探测（S4 书源列表的「三态」显示用）。
+ * 单源连通性探测（S4 书源列表的连通性列显示用）。
  * ★ 它**发一次真实请求**（用当前检索词或一个探测词）—— 只做前置判断会把
  *   「地址配了但服务器挂了」误报成已连通。故这里必须真打一次。
  */

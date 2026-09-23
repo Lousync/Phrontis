@@ -40,10 +40,13 @@ export function extLabel(ext: string): string {
   return ext ? ext.replace(/^\./, '').toUpperCase() : '?'
 }
 
-/** 连通性三态 → 圆点色 + 文案（书源行右侧那两列） */
+/** 连通性四态 → 圆点色 + 文案（书源行右侧那两列）
+ *  ★ F-6：`forbidden` 是「服务端拒绝」（403），与「你还没填凭据」（`need-credential`）
+ *    分开显示 —— 前者填凭据通常也没用，得换源或换地址。 */
 export const CONN_META: Record<BookSourceConnectivity | 'off' | 'unknown', { dot: string; label: string }> = {
   ok: { dot: 'var(--success)', label: '已连通' },
   'need-credential': { dot: 'var(--warning)', label: '需要凭据' },
+  forbidden: { dot: 'var(--warning)', label: '访问被拒' },
   fail: { dot: 'var(--danger)', label: '连接失败' },
   off: { dot: 'var(--text-disabled)', label: '已停用' },
   unknown: { dot: 'var(--text-disabled)', label: '未测试' },

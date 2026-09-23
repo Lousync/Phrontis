@@ -9,8 +9,8 @@
  * —— 全都要看「服务端实际收到了什么 / 同时收到了几个」才判得出来。
  *
  * 跑法（两步；Electron 33 = Node 20，不能 strip-types，所以先把真实实现打包）：
- *   node_modules/.bin/esbuild tmp/s2-probe-entry.ts --bundle --platform=node \
- *     --format=cjs --external:electron --outfile=tmp/s2-net.cjs
+ *   node_modules/.bin/esbuild .AGENT/scripts/book-market/s2-probe-entry.ts --bundle \
+ *     --platform=node --format=cjs --external:electron --outfile=tmp/s2-net.cjs
  *   unset ELECTRON_RUN_AS_NODE
  *   ./node_modules/electron/dist/electron.exe .AGENT/scripts/book-market/probe-s2-search.cjs --no-sandbox --disable-gpu
  *
@@ -213,6 +213,8 @@ function startMock() {
           case '/opds/html': return finish(200, 'text/html', '<html><body>假装是 feed 的错误页</body></html>')
           case '/opds/500': return finish(500, 'text/plain', 'server error')
           case '/opds/404': return finish(404, 'text/plain', 'nope')
+          // 403 = 「拒绝访问」（与 401 「要身份」语义不同，F-6 拆成独立状态 forbidden）
+          case '/opds/403': return finish(403, 'text/plain', 'forbidden')
           case '/auth/opds':
             // 只有带上正确凭据才放行 —— 拿它验「凭据确实注入了」
             return auth === BASIC_EXPECTED
@@ -375,6 +377,22 @@ app.whenReady().then(async () => {
   const r3d = await search([s404])
   check('404 → fail + 文案带状态码', r3d.failed[0]?.reason === 'HTTP 404', r3d.failed[0]?.reason)
   check('★ 4xx **不重试**（「你问错了」重试没意义）', hitsOn('/opds/404').length === 1, `hits=${hitsOn('/opds/404').length}`)
+
+  // ===== ③b 403 独立成态（F-6 拆分：401「要身份」≠ 403「不放你进来」） =====
+  console.log('\n--- ③b 403 → forbidden（与 need-credential 分开） ---')
+  resetSrv()
+  const s403 = mk({ name: '403 源', url: `${MOCK}/opds/403`, searchUrl: `${MOCK}/opds/403?query={query}` })
+  const r3f = await search([s403])
+  check('★ 403 → 三态 forbidden（**不是** need-credential）',
+    r3f.connectivity[s403] === 'forbidden', r3f.connectivity[s403])
+  check('403 原因文案 =「访问被拒」（与「需要凭据」区分开）',
+    r3f.failed[0]?.reason === '访问被拒', r3f.failed[0]?.reason)
+  check('403 **不重试**（身份不够，重试无用）', hitsOn('/opds/403').length === 1, `hits=${hitsOn('/opds/403').length}`)
+  // ★ 本态与「配置声明」正交：该源 mk() 时 auth=null（没配认证），却仍被判 forbidden
+  //   —— 证明它来自**服务端结果**，不是像 need-credential 那样来自配置缺口。
+  const s403Info = net2.bookSourceInfos(ROOT).find((s) => s.id === s403)
+  check('★ 403 源本身 auth=null（未配认证）仍判 forbidden —— 该态来自服务端而非配置缺口',
+    !!s403Info && s403Info.authType === null, s403Info?.authType ?? '(未找到源)')
 
   resetSrv()
   const flaky = mk({ name: '抖一下的源', url: `${MOCK}/opds/single`, searchUrl: `${MOCK}/opds/single?query={query}` })

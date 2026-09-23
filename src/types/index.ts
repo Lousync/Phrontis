@@ -2113,8 +2113,9 @@ export interface BookSearchFailure {
   reason: string
 }
 
-/** 书源连通性三态（镜像 electron/lib/bookMarket/sourceClient.ts 的 SourceConnectivity） */
-export type BookSourceConnectivity = 'ok' | 'need-credential' | 'fail'
+/** 书源连通性四态（镜像 electron/lib/bookMarket/sourceClient.ts 的 SourceConnectivity）
+ *  `need-credential` = 配置缺凭据 / 服务端 401；`forbidden` = 服务端 403 拒绝访问。 */
+export type BookSourceConnectivity = 'ok' | 'need-credential' | 'forbidden' | 'fail'
 
 /** 新建 / 更新书源的 patch（镜像 bookMarketSchema.BookSourcePatch；**结构上不含任何凭据字段**） */
 export interface BookSourcePatch {

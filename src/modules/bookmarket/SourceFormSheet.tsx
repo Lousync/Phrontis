@@ -162,7 +162,7 @@ export function SourceFormSheet({ open, source, rootId, draft, onClose, onSaved 
     setBusy(false)
     showToast({
       type: probe.state === 'ok' ? 'success' : 'warning',
-      message: `${name.trim()} 已保存 · ${probe.state === 'ok' ? '连接正常' : probe.state === 'need-credential' ? '还需要填凭据' : '连接失败'}`,
+      message: `${name.trim()} 已保存 · ${probe.state === 'ok' ? '连接正常' : probe.state === 'need-credential' ? '还需要填凭据' : probe.state === 'forbidden' ? '访问被拒（该源可能不对外开放）' : '连接失败'}`,
     })
     onSaved(id, probe.state)
     onClose()

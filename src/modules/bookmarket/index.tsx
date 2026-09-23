@@ -256,7 +256,7 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
     setConn((prev) => ({ ...prev, [s.id]: r.state }))
     showToast({
       type: r.state === 'ok' ? 'success' : 'warning',
-      message: `${s.name}：${r.state === 'ok' ? '连接正常' : r.state === 'need-credential' ? '需要凭据' : '连接失败'}`,
+      message: `${s.name}：${r.state === 'ok' ? '连接正常' : r.state === 'need-credential' ? '需要凭据' : r.state === 'forbidden' ? '访问被拒' : '连接失败'}`,
     })
   }, [rootId])
 

@@ -1,4 +1,4 @@
-源文件: E:\Projects\KnowledgeRecorder-library\electron\lib\builtinTools.ts
+源文件: E:\Projects\KnowledgeRecorder\electron\lib\builtinTools.ts
 工具总数: 33
 
 【core —— 每轮常驻注入】14 个
@@ -20,7 +20,7 @@
 
 【ondemand —— 默认折叠，tool.request 后才注入】19 个
   builtin.quiz.gen-paper              4627 字符  ~1521 tok  schema  631  [write/quiz]
-  builtin.booksource.draft            3560 字符  ~1288 tok  schema  751  [write/bookMarket]
+  builtin.booksource.draft            3599 字符  ~1305 tok  schema  790  [write/bookMarket]
   builtin.schedule.create-todo        3014 字符  ~ 955 tok  schema  728  [write/schedule]
   builtin.vault.edit                  2794 字符  ~ 932 tok  schema  491  [write/-]
   builtin.schedule.update-todo        2346 字符  ~ 824 tok  schema  716  [write/schedule]
@@ -38,13 +38,13 @@
   builtin.booksource.list              904 字符  ~ 295 tok  schema   34  [read/bookMarket]
   builtin.quiz.favorite                856 字符  ~ 264 tok  schema  187  [write/quiz]
   builtin.quiz.set-note                774 字符  ~ 239 tok  schema  203  [write/quiz]
-  小计: 34444 字符  ~11462 tok
+  小计: 34483 字符  ~11479 tok
 
-合计若全部装载: ~19223 tok
+合计若全部装载: ~19240 tok
 实际常驻(默认权限 read 态): ~7761 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】
-  全部合规（最大 751 字符：builtin.booksource.draft）
+  全部合规（最大 790 字符：builtin.booksource.draft）
 
 注：字符数含 TS 源码语法噪声（缩进/逗号/类型标注），实际 JSON payload 略小；
     token 为估算值，用于横向比较而非精确计费；
