@@ -1338,6 +1338,217 @@ CFI 与存储值**逐字相同**（探针 note 有记录）⇒ **不换字号 / 
 
 ---
 
+## [x] B-25 边缘翻页的**提示层**只有右侧会亮，鼠标进左侧热区什么都不出现（2026-09-22，P2；用户实机反馈；**2026-09-23 已修**：判据换成引擎的 `atStart`/`atEnd`，固定版式走 section 序号兜底）
+
+**现象**：epub/fb2/fbz/cbz 阅读时把鼠标移到**左侧**边缘 —— 光标确实变成手型（热区在）、点一下也确实翻上一页，
+但那条提示动画（默认形态 B = 渐变 + 圆形箭头 +「上一页」）**始终不出现**；同样操作在**右侧**一切正常。
+
+**定位**：
+- 提示层点亮：`src/components/shared/epub/EpubReaderView.tsx:325` `paintEdgeHint`（`:330` 的 `canTurn` 门），
+  由 `:702` `onMouseMove` 在 `:712` 调用。
+- 提示层 DOM：同文件 `:1145`（`data-wb="edgeHintL"`）/ `:1150`（`data-wb="edgeHintR"`），左右各一个 div（类 `l` / `r`）。
+- 样式：`src/styles/index.css:1422-1458`（`.kb-edge-hint` 基类 + `.l`/`.r` + A–D 四档；只有 `.on` 才 `opacity: 1`）。
+
+**已排除（2026-09-22 逐处核对，四处全对称）**：① 两个 ref（`:280`/`:281`）与两处 JSX 结构逐字对称；
+② CSS 的定位、渐变方向、chip 位移左右成对（`:1426-1441`）；③ 热区几何 `hostArea()`/`edgeZone()`
+（`:644`/`:653`）左右同式，`want`（`:707`）与诊断钩子的 `branch`（`:675`）本来就是同一个表达式；
+④ `probe-epub-reader.mjs` 第①步在 `host.left + 12` 悬停**读到了帧内手型类 `kb-et-l`**（`:302`）
+⇒ 那个几何下事件到得了帧、且判成 L。
+
+**⇒ 整条链上唯一非对称的东西是 `canTurn`**（`:330`）：
+```ts
+const canTurn = k === 'l' ? pctRef.current > 0 : pctRef.current < 100
+```
+它拿**四舍五入后的全书百分比**（`:725` `Math.round(d.fraction * 100)`）当「还有没有上一屏 / 下一屏」的判据：
+
+- **书开头**：`Math.round` 让整本书的前 0.5% 都算 `pct === 0` —— 大书开头好几屏**翻得动却不提示**（左侧）；
+  书末 0.5% 同理（右侧，同一个 bug，用户没提）。
+- **`fraction` 取不到时**（`:725` 的 `Number.isFinite` 兜底写死 `0`）`pct` **恒为 0**
+  ⇒ 这本书**左侧永远不提示**（右侧恒亮，因为 `0 < 100`）—— 与用户描述的形状逐字一致。
+  固定版式（cbz / fb2 fixed-layout）到底给不给 `fraction` **尚未实测**，这是第一个要量的点。
+
+**待测的分叉（先量后改）**：开阅读器后置 `window.__kbEdgeDiag = true`（排障钩子 `:659`，生产零开销），
+鼠标移到左边缘，读宿主 `<html data-kb-edge>` 末条 + `[data-wb="edgeHintL"]` 的 `classList` 与 `opacity`：
+
+| 读数 | 结论 | 改哪儿 |
+|---|---|---|
+| 没有新条目 | 事件没到帧（几何 / 命中 / 被别的东西盖住） | 比 `frameRect()`（`:636`）与 `hostArea()`（`:644`） |
+| `branch:'L'` 但 `.on` 没挂上 | **`canTurn` 门**（本条目主嫌） | 换判据（见下） |
+| `branch:'-'` 或 `'R'` | 几何算错 | `hostArea()` / `edgeZone()` |
+| `.on` 挂上了但 `opacity: 0` | 样式 / 堆叠 / 被裁切 | CSS 或父容器 |
+
+**修复方向（判据本身要换）**：「还有没有上一屏」不能拿**取整的百分比**当代理。可选口径（待用户拍板）：
+① 用**未取整**的 `fraction` 加 eps；② 固定版式走 `d.section.current > 0` / `< total - 1`（`:730` 本来就在读 `d.section`）；
+③ 在 relocate 时算一次「已到首屏 / 末屏」的两个布尔存 ref，mousemove 里只读布尔，不在高频路径上做判断。
+
+**判据（回归位）**：这一层现在**零覆盖** —— `probe-epub-reader.mjs` 只断言帧内手型类（`:302`）与点击真的翻页（`:318`），
+**从不读宿主侧 overlay 的 `.on`**。要补：① 悬停左边缘 → `[data-wb="edgeHintL"]` 带 `on` 且 opacity 趋 1；
+② 同一次悬停右侧 → 只右边亮；③ 负向：移到正中 → 两边都不亮；④ ★ **在首屏与末屏各测一次** —— 当前判据正是错在这里。
+
+**为什么现在不修**：修法要选口径（①/②/③ 影响面不同），且第一步是**实测分叉**，方案见
+`.claude/plans/b25-edge-hint-left.md`（本机 `.claude/` 不进版本控制）。
+
+### ★★ B-25 结案（2026-09-23）：根因 = `canTurn` 拿**取整后的百分比**冒充「有没有上一屏」
+
+**第一步的实测分叉（按计划要求先量后改，结论与原推测**部分不符、必须记下来**）**：
+
+- 原推测「`fraction` 取不到 ⇒ `pct` 恒 0 ⇒ **左侧永远不亮**」在四种夹具（epub / fb2 / fbz / cbz）上
+  **未复现**：只要 `pct > 0`，左提示就亮；cbz 的 `fraction` 确实恒为 0（`fixed-layout.js:265`
+  `#reportLocation` 写死），但应用侧的 `pct` 走的是 `progress.getProgress`，实测 **1%/2%/3%** 正常推进。
+- 我反复观察到的「左侧不亮」是**探针伪影**：宿主盒两端各约 23px 的**事件投递死带**（帧收不到 mousemove，
+  `probe-epub-reader.mjs:244/248` 早有记录）。它是**左右对称**的 —— 所以**解释不了**用户说的「右侧一切正常」，
+  拿它当根因会修错地方。★ 后世沿用判据：**悬停坐标必须与 `frameBox()` 求交**，只按宿主盒取点会
+  「通过得莫名其妙」（`leftX = max(h.left+45, b.left+20)`；cbz 是 fit-page，帧 379..891 / 宿主 307..963）。
+- **真正可复现、且与用户描述形状一致的缺陷是「说谎式提示」**：书首 `atStart === true`（没有上一页）
+  时左提示**照样亮**（实测 `on:true`）—— 违背代码自己的意图（原文注释：「首/末页不提示…避免
+  『提示能点、点了没反应』」）。取整是元凶：`Math.round(fraction*100)` 让全书前 0.5% 都算 `pct === 0`…
+
+**修复**：口径取 ②+③ —— **主判据用引擎原生的 `atStart`/`atEnd`**（`paginator.js:1102` 的 getter，
+`#adjacentIndex(-1) == null && page <= 1`，是权威判据），**固定版式用 section 序号兜底**
+（`foliate-fxl` **没有**实现这两个 getter，必须兜）。落点 `EpubReaderView.tsx`：
+
+- `paintEdgeHint` 改为读 `viewRef.current?.renderer` 的 `atStart`/`atEnd`——
+  `typeof r.atStart === 'boolean'` **这一关本身就是「要不要走兜底」的开关**；
+- 兜底值 `fxlEdgeRef` 在 `onRelocate` 里**无条件**算（`cur <= 0` / `cur >= total-1`，与页码标签同源）。
+  ★ **不许为了省这一步去先判「是不是固定版式」**：`verify-epub-formats.mjs` ④ 有负向断言
+  `!/\.isFixedLayout\b/` —— 判据必须单点走 `isFixedLayoutBook = bookKind === 'cbz'`（工具栏要在
+  `open()` 之前就渲染对）。本轮先写成 `if (viewRef.current?.isFixedLayout)` 守卫，**当轮就被这条契约逮住**
+  （契约拦得对：`view.isFixedLayout` 由 `rendition.layout` 推导，`pre-paginated` 的 fbz 走 fxl 渲染器
+  却过不了 `bookKind` 那道闸）；改无条件赋值后契约回绿。
+- ★ 重排书**不得**拿 `fxlEdgeRef` 当判据 —— section 在一章之内不变，会把「章内第二页」误判成书首。
+
+**判据（回归位）**：`probe-epub-reader.mjs` 新增 **§10**（10 条断言，2026-09-23）——书首 `on:false` →
+翻页 `on:true` → 书末右缘 `on:false` → 回退 `on:true`；再开 cbz 验兜底分支（`FOLIATE-FXL` 且
+`atStart == null`）第 1 页不亮 / 第 2 页亮。**变异测试**：把 `canTurn` 还原成 pct 版 → 2 条断言转红
+（书首 + cbz 第 1 页，均为 `on:true` 的说谎式提示），证明断言有咬合力。
+
+**验证矩阵**：`tsc`(web/node) ✓ · `npm run build` ✓ · `verify-epub-formats.mjs` ✓ ·
+`probe-epub-reader.mjs`（含 §10）✓ · 同类探针 cbz / fb2 / excerpt-export / reading-panel / cbz-bigbook ✓。
+
+**顺带测出的既有失败（与本条无关，未修、只登记）**：全量契约扫描 35/41，5 个红——
+`verify-fs-watcher` / `verify-paste-external`（harness 自身 `ReferenceError: editorIdx is not defined`）、
+`verify-resizable-panel`（`onHandleClickRef is not defined`）、`verify-input-bubble`（17 条）、
+`verify-slash-commands`。**归因依据**：这 5 个脚本读的源文件（`ai-teaching/*`、`AssistantPanel/*`、
+`chatCommands.ts`、`fsWatcher.ts`、`ResizablePanel.tsx` …）**本次工作树一处未改**，不读 `epub/*`。
+
+---
+
+## [x] B-26 阅读器勾画后点「问 AI」弹出的是**悬浮 AI 侧栏**，不是工作台右栏的原生 AI 助手（2026-09-22，P2；用户实机反馈；**2026-09-23 已修**：右栏 AI 态登记为划词宿主 · 路线 1）
+
+**现象**：在阅读器（epub / txt）里勾画 / 划选后点浮条的「问 AI」，从屏幕右侧滑出**悬浮 AI 侧栏**（浮层，盖在阅读区上），
+而用户期望的是**工作台右栏那个原生 AI 助手**（即 Ctrl+J 唤出的同一处）。
+
+**定位**：浮条派发 `ai-assistant:selection-action`（epub：`src/components/shared/epub/EpubReaderView.tsx:1047`；
+txt：`src/components/shared/txt/TxtReaderView.tsx:668`）→
+`src/components/shared/AssistantPanel/index.tsx:274` 收 → `:244` `askSelection`：
+先问 `getSelectionAskHost()`（`:248` → `src/lib/assistantContext.ts:48`），**取不到**就
+`setSelQuotes(...)` + `openPanel()`（`:261`）= **悬浮侧栏**。
+而 `registerSelectionAskHost` 目前**只有 AI 教学注册**（`src/modules/ai-teaching/index.tsx:708`，
+且它的 `accept()` 要求「本模块激活 + 已有当前对话」）⇒ 在阅读器里必然走回退分支。
+
+**根因（是缺口不是回归）**：划词问答只有两个出口 ——「AI 教学就地接管」与「全局悬浮侧栏」，
+**工作台右栏 AI Tab 从来没被登记成候选宿主**。而它是这三处里最贴「边读边问」的那个：右栏 AI 态本来就是
+`ChatBody docked` + `useAssistantChat`（`WorkbenchRightPanel.tsx:128`），与悬浮侧栏**共用同一个会话真源**
+（在主进程），只是另一张皮 —— 所以「另开一个对话」这个担心不成立，问题纯粹是**落点选错**。
+
+**修复方向**（推荐 1；2/3 备选，待用户拍板 —— 见 `.claude/plans/b26-reader-ask-ai-routing.md` §三）：
+1. **在工作台右栏登记一个 `SelectionAskHost`**：`WorkbenchRightPanel` 在 `reading !== null`（有书在读）时注册，
+   `accept: () => 右栏 AI Tab 可用`（未被 `panelTabsHidden` 藏掉），
+   `ask: (text) => 展开右栏 + patch({ rightTab: 'ai' }) + 把选段交给右栏对话的输入区`。
+   **零新机制**（复用既有注册表 + 既有 `rightTab` 持久化 + `aiChat.setInput`/`inputRef`），
+   且 `accept()` false 时**回退分支原样保留**。
+2. 把「引用胶囊」下沉进 `ChatBody`（现在只在 `AssistantPanel/index.tsx:368` 的 JSX 里，右栏 docked 版没有）
+   ⇒ 三处宿主一致地「以引用形式带上选段」。★ 代价：`verify-perception.mjs` 的 H3b / J18c2 是**按该 JSX 所在文件**
+   断言的，要同步改 —— 属「先说清再动」的一档。
+3. 最小改动：只切 Tab + 聚焦输入框，选段**直接填进输入框**（不自动发送）。不动 `ChatBody`、不动契约，
+   但与悬浮侧栏的「引用胶囊」体验不一致。
+
+★ 无论走哪条，**`accept()` 为 false 时必须能落回悬浮侧栏**（右栏 AI Tab 被 ⋯ 藏掉 / 无书在读 / 右栏不渲染的场景）。
+★ 另有一处**已存在**的第三种行为要一并想清楚：PDF 的 `TextSelectionBar.tsx:22` 把「问 AI」做成了
+**跳 AI 教学模块**，与 epub/txt 走事件桥是两条路 —— 三处口径是否统一，本轮不擅自改。
+
+**判据（回归位）**：`probe-b8-ai-shortcuts.mjs` 的 P6 已覆盖「工作台 Ctrl+J → 右栏 AI」，但它不碰划词。要补
+（放 `probe-epub-reader.mjs` 或新小探针）：阅读器里划选 → 点浮条「问 AI」→ ① 悬浮侧栏锚点
+`#assistant-panel-root`（`AssistantPanel/index.tsx:441`）**不得出现**；② 右栏切到 `[data-wb-rp-tab="ai"]` 且可见；
+③ 选段确实进了右栏对话的输入/引用区；④ 负向：右栏 AI Tab 被藏掉时仍回退到悬浮侧栏（**不许静默无反应**）。
+
+**为什么现在不修**：三条路线体验差别明显（多一个决策点），且路线 2 会牵动既有契约，方案见
+`.claude/plans/b26-reader-ask-ai-routing.md`。
+
+### ★★ B-26 结案（2026-09-23）：路线 1 —— 右栏 AI 态登记为划词宿主，选段填进输入框
+
+**用户拍板（2026-09-22 会话）**：路线 **1**（右栏登记宿主，不把引用胶囊下沉进 `ChatBody` —— 那是路线 2，
+单独一项做）；`aiChatOpen`（右栏对话被 ⤢ 扩成中间标签，右栏原位变 token 面板）时**放手回退悬浮侧栏**
+（「点击必须始终有反应」优先于「一律进右栏」）。
+
+**落码要点（三处，按改动顺序）**：
+
+| # | 文件 | 改什么 |
+|---|---|---|
+| 1 | `src/lib/assistantContext.ts` | **注册表由单槽改为栈**（栈顶接管；注销弹出自己、露出下一个）—— 见下「为什么必须栈化」 |
+| 2 | `src/App.tsx` | 注册宿主（`rightAskRef` + deps 为空的注册 effect）；`pendingRightAsk` state 转交选段；抽出 `rightReading` 单一口径供「阅读 Tab」与「划词路由」共用 |
+| 3 | `src/components/workbench/WorkbenchRightPanel.tsx` | 消费 `pendingAsk`（挂载后 `setInput` + 聚焦）；**自身不再注册** |
+
+**★ 为什么宿主注册在 App 而不是右栏组件里（本轮最大的一处修正）**：右栏**折叠时 `WorkbenchRightPanel`
+整体卸载** —— `ResizablePanel` 只渲染 `visible` 的子节点（`{visible && children}`），而 `rightCollapsed`
+默认就是 `true`。第一版把注册写在组件里，探针当场照出「右栏折叠 ⇒ 宿主不在栈里 ⇒ 照旧弹悬浮侧栏」，
+**即默认状态下这条修复完全无效**。故宿主上移到常驻的 App，选段经 state 投递给挂载后的右栏消费
+（与既有 `pendingAsk`（PDF→AI 教学）同一手法，不新造机制）。
+> 顺带记一笔既有事实（**不在本条范围**）：右栏组件里「实例常驻、输入草稿不丢」的注释与
+> `{visible && children}` 的实际行为不符 —— 折叠/整窗都会卸载，草稿随之丢失。本轮不改渲染语义，
+> 只把注释里的判断按实际写清。
+
+**★ 为什么必须把注册表栈化**：单槽版（`askHost = h`，注销时 `askHost === h ? null : 略`）在
+「常驻宿主被临时宿主顶掉」时会**永久失联** —— 阅读器开着（App 宿主常驻）时去 AI 教学划词一次，
+教学宿主入栈；离开教学时它把槽置 null，而 App 宿主**不会自己回到槽里** ⇒ 此后在阅读器里划词
+一律回退悬浮侧栏。表象是「时灵时不灵、且与操作顺序有关」。栈化后这对组合**顺序无关**：
+教学激活即接管（§三 5「教学的地盘不被抢」由**栈顶优先**保证，教学侧 `accept` 未改动），离开即还给右栏。
+
+**回退矩阵（`accept()` 四条，全在 App；false ⇒ 原样回退悬浮侧栏，不许静默无反应）**：
+
+| 场景 | 判据 | 实测 |
+|---|---|---|
+| 无书在读 / 书已关 | `!!rightReading` | 未覆盖（构造上：划词只可能发生在阅读器可见时） |
+| 右栏 AI Tab 被 ⋯ 菜单藏掉 | `!panelTabsHidden.includes('ai')` | ★ 探针负向断言实测**回退到悬浮侧栏** |
+| 对话已扩成 aiChat 中间标签 | `activeTab !== 'aiChat'` | 未覆盖（同上，不可达） |
+| 整窗模块（左右栏退场） | `!fullWindowTab` | 未覆盖（同上，不可达） |
+| 右栏折叠 | **不挡**（`ask()` 顺手 `rightCollapsed: false` 拉开） | ★ 探针实测：折叠 → 点「问 AI」→ 宽度 6px → 299px |
+
+**判据（回归位）**：新探针 `.AGENT/scripts/workbench-shell/probes/probe-b26-ask-ai-routing.mjs`，12 条断言 ——
+夹具自证起始态（右栏折回折叠 + AI Tab 可见，★ 两者都是**持久化设置**，前一版探针跑挂后把它们留成
+脏状态，导致下一轮「所有断言都在另一个前提下跑」，已加收敛步骤 + 收尾复位）→ 划选 → 点浮条「问 AI」→
+① `#assistant-panel-root` **不得出现**；② 右栏 `[data-wb-rp-tab="ai"]` 激活且宽度 > 60（从折叠被拉开）；
+③ 选段进了 docked 输入框（不自动发送）；④ 主进程会话集合逐字不变（「没另开对话」）；
+⑤ 负向：藏掉 AI Tab 后再点 ⇒ 悬浮侧栏**出现**；⑥ 勾回后再点 ⇒ 又落回右栏（回退是双向的）。
+
+**变异测试（当场变红）**：把 App 宿主的 `accept()` 恒置 `false`（= 修复前行为）→ **6 条转红**
+（① 悬浮侧栏出现 / ② Tab 未激活 + 宽度 −1（组件未挂载）/ ③ 输入框空 / ⑤⑥ 两条级联），
+而**回退类断言保持绿**（本该如此：全都回退 = 回退语义没坏）。还原后 12 条全绿。
+
+**★ 全量契约扫出的连带一处（已修 · 属「期望过期」不是回归）**：`verify-epub-formats` ⑩(6) 是**文本
+形状锁**（`/reading=\{[^}]*kind !== 'cbz'/`），锁的是「调用点内联」这一形态。`rightReading` 抽出来
+（第 2 处改动，为了让「阅读 Tab」与「划词路由」共用同一份「有书在读」口径）后它当场转红 —— 但
+cbz 排除的**执行语义原样保留**（派生值对 cbz 仍为 `null`），且该断言读的是 `App.tsx` 文本、
+不含任何运行时行为，故判为期望过期。已改为**两处同锁**：派生处有 cbz 守卫 **且** 调用点确实
+`reading={rightReading}`；并做变异验证 —— ①去掉 cbz 守卫 ②调用点改回内联，**两种变异都转红**。
+
+**验证矩阵**：`tsc`(web/node) ✓ · `npm run build` ✓ · 新探针 12/12 ✓ · 变异测试 6 红 ✓ ·
+全量契约 **36/41**（5 条既有红：`verify-input-bubble` / `verify-slash-commands` / `verify-fs-watcher` /
+`verify-paste-external` / `verify-resizable-panel` —— 已逐个确认**都不读本轮改过的四个文件**，属主干既有红）·
+`probe-ro-noise.mjs` ✓（探针里反复折叠/展开右栏会打出几条主文档 `ResizeObserver loop` 告警 ——
+属 B-21 已定性为**良性、只报数**的那一类（主文档、非 foliate 帧）；对照：不做折叠舞蹈的
+`probe-epub-reader.mjs` 同样运行 0 条，故为探针自身的布局抖动）。
+
+**明确不做（不擅自扩大范围）**：① 引用胶囊下沉进 `ChatBody`（路线 2，会牵动 `verify-perception`
+的 H3b / J18c2）；② 统一 PDF `TextSelectionBar` 那条「跳 AI 教学」的第三口径；
+③ 右栏组件的挂载语义（折叠即卸载）—— 只改注释口径，不改渲染。
+
+**已知简化**：选段是**追加**到输入框（已有草稿接在后面，不覆盖），没有悬浮侧栏的「N 条对话引用」
+胶囊与 5 条上限 —— 那是路线 2 的事。`ExcerptCaptureBar` 的「问 AI」tooltip 仍写着「收进侧栏引用
+胶囊」，在阅读器场景下已不准确，属文案口径统一，未在本轮改。
+
+---
+
 ## 登记格式（后续条目照此写）
 
 ```

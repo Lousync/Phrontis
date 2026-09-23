@@ -29,7 +29,7 @@ export function getAssistantContext(): AssistantContext | null {
  * 而不是弹出全局侧边栏另开一个对话。
  *
  * 未注册、或 accept() 返回 false 时，回退到侧边栏原有行为（不阻断用户）。
- * 同一时刻只保留最后注册者（模块卸载时注销即可回退）。
+ * 同一时刻**栈顶**生效（后注册者优先）。
  */
 export interface SelectionAskHost {
   /** 是否接管本次划词提问（如：本模块处于激活态且已有当前对话） */
@@ -38,15 +38,29 @@ export interface SelectionAskHost {
   ask: (text: string) => void
 }
 
-let askHost: SelectionAskHost | null = null
+/**
+ * 宿主**栈**（B-26，2026-09-23 由单槽改）：栈顶接管，注销时**弹出自己、露出下一个**。
+ *
+ * 为什么不保持单槽（`askHost = h` + 注销时 `askHost === h ? null : 略`）：那会让
+ * 「常驻宿主被临时宿主顶掉」的场景**永久失联** —— 阅读器开着（右栏宿主常驻）时去 AI 教学
+ * 划词一次，教学宿主入栈；离开教学时它把自己置 null，而右栏宿主**不会**自动回到槽里
+ * ⇒ 此后在阅读器里划词一律回退悬浮侧栏（表象：功能时灵时不灵，且与操作顺序有关）。
+ * 栈化之后这对组合的顺序无关：教学激活即接管，离开即还给右栏。
+ */
+const askHosts: SelectionAskHost[] = []
 
 export function registerSelectionAskHost(h: SelectionAskHost): () => void {
-  askHost = h
-  return () => { if (askHost === h) askHost = null }
+  const dup = askHosts.indexOf(h)
+  if (dup !== -1) askHosts.splice(dup, 1)
+  askHosts.push(h)
+  return () => {
+    const i = askHosts.indexOf(h)
+    if (i !== -1) askHosts.splice(i, 1)
+  }
 }
 
 export function getSelectionAskHost(): SelectionAskHost | null {
-  return askHost
+  return askHosts.length ? askHosts[askHosts.length - 1] : null
 }
 
 /** 组装「选中片段」上下文对象（宿主与侧边栏共用同一 shape，保证主进程注入口径一致） */

@@ -292,6 +292,15 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   /** 书签快照（与 excerptsRef 同款：foliate 回调注册在 effect 里，闭包拿不到最新 state） */
   const bkmRef = useRef<BookBookmark[]>([])
   const pctRef = useRef(0)
+  /**
+   * 首/末页兜底判据。**只有渲染器答不了的时候才被读到** —— `foliate-fxl` 没实现
+   * `atStart`/`atEnd`（全 vendor 只有 `paginator.js:1102` 有这两个 getter），
+   * 判据开关就是 `paintEdgeHint` 里的 `typeof r.atStart === 'boolean'`，所以这里可以
+   * **无条件**按 section 序号算，不必先判断「是不是固定版式」（也就避免了在组件里读
+   * 运行时 `view.isFixedLayout` —— 那是 `isFixedLayoutBook` 的专属判据，见 verify-epub-formats ④）。
+   * ★ 重排书**不要**拿它当判据 —— section 在一章之内不变，会把「章内第二页」误判成书首。
+   */
+  const fxlEdgeRef = useRef({ atStart: true, atEnd: false })
   /** 摘录快照（foliate 回调注册在 effect 里，闭包拿不到最新 state） */
   const excerptsRef = useRef<ExcerptItem[]>([])
   /** cfi → 色（高亮重绘查表） */
@@ -321,14 +330,21 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
    * ★ 这里用 ref 直接切类，**不走 React state** —— mousemove 频率极高，setState 会让整个
    *   阅读器每帧重渲染（本组件一重渲染就要动 foliate 宿主与摘录重绘，代价远大于一次 classList）。
    * ★ 首/末页不提示：翻不动的那一侧不给线索，避免「提示能点、点了没反应」。
+   * ★ 判据问**引擎**（`paginator.atStart`/`atEnd` 认得跨章与书末的虚拟页），**不要**拿 `pct`
+   *   当代理：`pct` 是 `fraction` 四舍五入到整数的产物，① 一页占全书 <0.5% 的大书里首/末屏
+   *   的取整结果正好把「还有上一页」压成 0 → 左提示整段不亮；② `fraction` 缺失的会话
+   *   （`view.js:317` 的 `#sectionProgress` 未就绪时 `progress` 为 `{}`）pct 恒 0 → 同样整段不亮，
+   *   而点击路径不查判据，于是表象是「点得动、提示不亮、右边还正常」。
    */
   const paintEdgeHint = useCallback((side: '' | 'l' | 'r', zone: number) => {
+    const r = viewRef.current?.renderer as { atStart?: boolean; atEnd?: boolean } | undefined
+    const atStart = typeof r?.atStart === 'boolean' ? r.atStart : fxlEdgeRef.current.atStart
+    const atEnd = typeof r?.atEnd === 'boolean' ? r.atEnd : fxlEdgeRef.current.atEnd
     for (const k of ['l', 'r'] as const) {
       const node = k === 'l' ? hintLRef.current : hintRRef.current
       if (!node) continue
       node.style.setProperty('--kb-zw', `${zone}px`)
-      const canTurn = k === 'l' ? pctRef.current > 0 : pctRef.current < 100
-      node.classList.toggle('on', side === k && canTurn)
+      node.classList.toggle('on', side === k && (k === 'l' ? !atStart : !atEnd))
     }
   }, [])
   const hideEdgeHints = useCallback(() => paintEdgeHint('', 0), [paintEdgeHint])
@@ -731,6 +747,12 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
         ? `第 ${(d.section.current ?? 0) + 1} / ${d.section.total} 页`
         : (typeof d.tocItem?.label === 'string' ? d.tocItem.label : '')
       const href = typeof d.tocItem?.href === 'string' ? d.tocItem.href : ''
+      // 首/末页兜底：`foliate-fxl` 没有 atStart/atEnd（见 fxlEdgeRef），改由 section 序号提供 ——
+      // 与上面的页码标签同源，故「第 1 / 60 页」时左提示必不亮、第 60 页时右提示必不亮。
+      // ★ 无条件算是**故意**的：它只在该书渲染器答不了时被读到（开关在 paintEdgeHint），
+      //   先判「是不是固定版式」反而要多读一次运行时状态、且多一处可能判错的分支。
+      const cur = d.section?.current ?? 0
+      fxlEdgeRef.current = { atStart: cur <= 0, atEnd: cur >= (d.section?.total ?? 1) - 1 }
       cfiRef.current = typeof d.cfi === 'string' ? d.cfi : ''
       pctRef.current = nextPct
       chapterRef.current = label

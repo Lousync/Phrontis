@@ -20,6 +20,7 @@ import { Toast } from './components/shared/Toast'
 import { FONT_CSS_MAP, applyThemeClass } from './lib/settings'
 import { useSettings } from './lib/SettingsContext'
 import { isEditingInput } from './lib/shortcuts'
+import { registerSelectionAskHost, type SelectionAskHost } from './lib/assistantContext'
 import { setGlobalActiveTab } from './lib/activeTab'
 import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList } from './lib/ipc'
 import { getPluginTools } from './lib/pluginService'
@@ -571,6 +572,9 @@ export default function App() {
   // v3.4.0 PDF 划词 → AI 教学（pdf-reader 方案 §6）：事件只送意图，payload 走 state+props
   // （ISS-2026-09-04-07：保活层实例重建会丢 window 一次性变量）。消费后立即清空防重复跳转。
   const [pendingAsk, setPendingAsk] = useState<{ question: string; source?: { type: string; relPath: string; page: number; excerpt: string } } | null>(null)
+  /** B-26：划词「问 AI」路由到右栏时要投递的选段。走 state+props 而不直接摸右栏输入框 ——
+   *  右栏**折叠时整个组件是卸载的**（`ResizablePanel` 只渲染 visible 的子节点），而右栏默认折叠。 */
+  const [pendingRightAsk, setPendingRightAsk] = useState<string | null>(null)
   useEffect(() => {
     const handler = (e: Event) => {
       const d = (e as CustomEvent).detail as { question?: string; source?: { type: string; relPath: string; page: number; excerpt: string } } | undefined
@@ -1167,6 +1171,46 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullWindowTab, wbLayout, update])
 
+  /** 「有书在读」的统一口径：右栏阅读 Tab 与 B-26 划词路由**共用这一份**
+   *  （两处各写一遍必然漂移 —— cbz 那条排除尤其容易被漏掉）。cbz 不给：整页是图片、无文字层。 */
+  const rightReading = openTabs.includes('bookshelf') && bookshelfReading && bookshelfReading.kind !== 'cbz'
+    ? bookshelfReading
+    : null
+
+  // ── B-26：阅读器划词「问 AI」的落点 = 右栏 AI 对话（而不是从右侧滑出的悬浮侧栏）─────────
+  // 阅读器浮条原本只有两个出口（AI 教学就地接管 / 全局悬浮侧栏），右栏 AI 态从没被登记成候选。
+  // 右栏才是与 Ctrl+J 同一处、且与悬浮侧栏**共用主进程同一份会话真源**的落点（换皮不换会话）。
+  //
+  // ★ 宿主注册在 **App**、不在右栏组件里：右栏折叠/整窗时 `WorkbenchRightPanel` 会**整体卸载**
+  //   （`ResizablePanel` 只渲染 visible 的子节点），而右栏**默认就是折叠的** —— 注册在它里面等于
+  //   最常见的那个场景下根本没注册。注册在常驻的 App，选段经 state 转交右栏（它挂载后消费）。
+  //
+  // ★ 四条「放手」条件全收口在 accept()（false ⇒ 原样回退悬浮侧栏，**不许静默无反应**）：
+  //   ① 没有书在读；② 右栏 AI Tab 被 ⋯ 菜单藏了；③ 对话已扩成 aiChat 中间标签（右栏原位是
+  //   token 面板，看不到输入框 —— 用户 2026-09-22 拍板：放手回退）；④ 整窗模块（左右栏退场，
+  //   展开也看不见 —— 与上面 Ctrl+Alt+B / Ctrl+J 同款闸门）。③④ 构造上都不可达（划词只可能发生
+  //   在阅读器可见时），但**判据写全**比依赖「不可达」稳。
+  //
+  // ★ 用 ref 兜最新实况：注册只在挂载时做一次（deps 为空）。注册表是**栈**，重注册会把本宿主
+  //   顶到 AI 教学之上（后者激活即接管，是本条要保护的地盘），所以不能让依赖驱动它反复进出。
+  const rightAskRef = useRef<SelectionAskHost>({ accept: () => false, ask: () => {} })
+  useEffect(() => {
+    rightAskRef.current = {
+      accept: () => !fullWindowTab && activeTab !== 'aiChat'
+        && !!rightReading && !wbLayout.panelTabsHidden.includes('ai'),
+      ask: (text) => {
+        // 与 Ctrl+J 同款两步：先收掉可能开着的浮层（两个 ChatBody 叠着 = 两块对话），再展开右栏 AI
+        window.dispatchEvent(new Event('ai-assistant:close'))
+        update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'ai', rightCollapsed: false }))
+        setPendingRightAsk(text)
+      },
+    }
+  })
+  useEffect(() => registerSelectionAskHost({
+    accept: () => rightAskRef.current.accept(),
+    ask: (text) => rightAskRef.current.ask(text),
+  }), [])
+
   if (!loaded) return null
 
   /** 页面条整行隐藏（v3.4.0 页面条置顶）：知识库沉浸阅读 / 图谱模式本来就是全幅形态，行让位 */
@@ -1328,7 +1372,10 @@ export default function App() {
                   //   ⇒ cbz 存不进书签，Tab 里的书签区恒空 —— 仍然不该给。
                   //   「某格式不支持的功能，侧栏不出对应入口，不做中性空态占位」—— 与 EpubRailPanel 同一口径。
                   //   传 null 即 Tab 消失，且右栏自动回落到首个可见 Tab（WorkbenchRightPanel 的 effectiveTab）。
-                  reading={openTabs.includes('bookshelf') && bookshelfReading && bookshelfReading.kind !== 'cbz' ? bookshelfReading : null}
+                  reading={rightReading}
+                  // B-26：划词「问 AI」路由过来的选段（宿主在 App，见上面的 rightAskRef 注释）
+                  pendingAsk={pendingRightAsk}
+                  onConsumePendingAsk={() => setPendingRightAsk(null)}
                   onLocatePdfPage={(page) => {
                     if (activeTab !== 'bookshelf') handleTabChange('bookshelf')
                     requestAnimationFrame(() => {

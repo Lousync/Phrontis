@@ -380,8 +380,14 @@ console.log('\n--- ⑩ ★ cbz：comic-book patch ⑤ / img-src 例外 / 缩略�
 
   // (6) 右栏阅读 Tab 对 cbz 不留（拍板①）：App 传 null 即 Tab 消失
   const app3 = stripComments(read('src/App.tsx'))
+  // B-26 起这条判据抽成具名派生值 `rightReading`（划词「问 AI」的 accept() 要读**同一份**
+  // 「有书在读」——两处各写一遍必然漂移，cbz 那条排除尤其容易漏），故断言从「调用点内联」
+  // 改为两处同锁：**派生处**有 cbz 守卫 + **调用点**确实消费那个变量。
+  // 两段都锁是有意的：任一处被改写、或调用点又内联出一份局部守卫，都会被照出来。
   check("★ 右栏 reading 传参对 cbz 置空（kind !== 'cbz' 守卫在位）",
-    /reading=\{[^}]*kind\s*!==\s*'cbz'/.test(app3))
+    /const\s+rightReading\s*=[\s\S]{0,200}?kind\s*!==\s*'cbz'/.test(app3)
+    && /reading=\{rightReading\}/.test(app3),
+    '派生处的 cbz 守卫或调用点的消费缺失')
 
   // (7) 负向：格式知识仍单点 —— 渲染层不得出现 cbz 的 MIME / 扩展名字面量
   for (const p of [

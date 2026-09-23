@@ -22,6 +22,9 @@
  *          （实测点宿主正中时帧收到 `clientX=2767`）。app 侧同样用宿主坐标判热区。
  *        ★ 排障钩子：本步会置 `window.__kbEdgeDiag = true`，之后每个鼠标事件都写进宿主
  *          `<html data-kb-edge>`（生产默认关，零开销）；「点了没反应」先读它看 frameX/hostX/branch。
+ *   10) 首/末页提示判据（B-25，2026-09-23）：书首左缘**不亮** / 翻过一页亮 / 书末右缘**不亮** /
+ *        回退一页亮；固定版式（渲染器无 `atStart`/`atEnd`）同四条改走 section 序号兜底。
+ *        ★ 判据是引擎的 `atStart`/`atEnd`，**不许**退回工具栏 pct（四舍五入两个方向都会错）。
  *   7) 进度落盘：readerState.json 该书 pct > 0 **且** locator 是 epubcfi(...) 串（双轨都写了）
  *   8) 返回书架 → 重开 → 位置从 CFI 恢复（回到第三章那一页，不是回首页）
  *   8.5) 书签（2026-09-22）：工具栏加书签 → readerState.json 落 CFI → **同一页再点即移除（盘上回到 0 条）**
@@ -478,6 +481,103 @@ async function main() {
   console.log('[宿主终态]', JSON.stringify(hostAfter))
   ok('★ 宿主 window 未被污染（六个标志位全 null）', Object.values(hostAfter.pwned).every((v) => v === null), JSON.stringify(hostAfter.pwned))
   ok('★ 宿主 document.title 未被改写', hostAfter.title === hostBase.title && hostAfter.title !== 'PWNED-INLINE', `${hostBase.title} → ${hostAfter.title}`)
+
+  // ===== 10) 首/末页提示判据（B-25，2026-09-23）=====
+  // 判据取**引擎**的 `atStart`/`atEnd`（`paginator.js:1102`），**不要**拿工具栏 pct 当代理 ——
+  // pct 是 `fraction` 四舍五入到整数的产物，两个方向都会错：
+  //   ① 一页占全书 <0.5% 的大书，首屏取整把「其实还有上一页」压成 0 ⇒ 左提示整段不亮
+  //      （而点击路径不查判据 ⇒ 表象正是「点得动、提示不亮、右边还正常」）；
+  //   ② 反过来，书首 pct 有值就亮，可那一侧根本翻不动 ⇒ 「提示能点、点了没反应」。
+  // ★ 悬停坐标必须与**帧盒**取交集：宿主盒两端各有 ~23px 是帧收不到事件的死带
+  //   （左：§6.5 :244 的注释，右：实测 ~950 之后再点就落不到帧上），只按宿主盒取点会
+  //   「通过得莫名其妙」（本次实测踩到过：cbz 是 fit-page，页面比宿主盒窄 70px）。
+  // ★ 本节要复位 fixture 并重开书（翻到书末会毁掉 §7/§8 的「停在第三章」前提），故排在最后。
+  {
+    const edgeState = () => evalJs(`(() => {
+      const r = document.querySelector('foliate-view')?.renderer
+      return { tag: r?.tagName ?? null, atStart: typeof r?.atStart === 'boolean' ? r.atStart : null,
+        atEnd: typeof r?.atEnd === 'boolean' ? r.atEnd : null,
+        L: !!document.querySelector('[data-wb="edgeHintL"]')?.classList.contains('on'),
+        R: !!document.querySelector('[data-wb="edgeHintR"]')?.classList.contains('on') }
+    })()`)
+    const edgeGeo = async (b) => {
+      const h = await evalJs(`(() => { const n = document.querySelector('[data-wb="epubHost"]'); const r = n.getBoundingClientRect()
+        return { left: r.left, right: r.right } })()`)
+      return { midY: b.top + b.height * 0.5, midX: Math.round((h.left + h.right) / 2),
+        leftX: Math.round(Math.max(h.left + 45, b.left + 20)),
+        rightX: Math.round(Math.min(h.right - 45, b.left + b.width - 20)) }
+    }
+    /** 防陈旧：先正中归零（判据改过版，归零读数同样不可省）→ 再悬停到目标缘 */
+    const hoverEdge = async (side) => {
+      const b = await frameBox()
+      const g = await edgeGeo(b)
+      await mouse('mouseMoved', g.midX, g.midY)
+      await sleep(300)
+      const zero = await edgeState()
+      const x = side === 'l' ? g.leftX : g.rightX
+      await mouse('mouseMoved', x, g.midY)
+      await sleep(150)
+      await mouse('mouseMoved', x, g.midY)
+      await sleep(400)
+      return { zero, st: await edgeState() }
+    }
+    const turn = async (dir) => {
+      await evalJs(`(() => { document.querySelector('foliate-view')?.${dir}?.(); return true })()`)
+      await sleep(1100)
+    }
+
+    ok('§10 前置：从恶意书退回书架', await backToShelf())
+    await sleep(900)
+    note('§10 fixture 复位（让书从书首打开）', resetFixtureState().join(' ') || '（无残留）')
+    ok('§10 重开 EPUB', await openBook(BOOK))
+    await sleep(2000)
+    if (!(await frameBox())) ok('§10 前置：读到内容帧', false, '无帧 → 本节无判据')
+    else {
+      let st = await edgeState()
+      note('§10 书首态', JSON.stringify(st))
+      ok('§10 前提：书首 atStart=true（引擎判据在位）', st.atStart === true, JSON.stringify(st))
+      let p = await hoverEdge('l')
+      ok('★ 书首：左缘提示不亮（没有上一页 —— 拿 pct 当判据时这里会亮）',
+        p.zero.L === false && p.st.L === false, JSON.stringify(p))
+
+      await turn('next')
+      p = await hoverEdge('l')
+      ok('翻过一页：左缘提示亮（真有上一页 —— 取整判据会把它压掉）',
+        p.zero.L === false && p.st.L === true, JSON.stringify(p))
+
+      let lastPct = -1
+      for (let i = 0; i < 30; i++) {
+        const cur = await hostPct()
+        if (cur === lastPct) break
+        lastPct = cur
+        await turn('next')
+      }
+      st = await edgeState()
+      note('§10 书末态', JSON.stringify(st))
+      ok('§10 前提：书末 atEnd=true', st.atEnd === true, JSON.stringify(st))
+      p = await hoverEdge('r')
+      ok('★ 书末：右缘提示不亮（没有下一页）', p.zero.R === false && p.st.R === false, JSON.stringify(p))
+      await turn('prev')
+      p = await hoverEdge('r')
+      ok('书末回退一页：右缘提示亮', p.zero.R === false && p.st.R === true, JSON.stringify(p))
+
+      // 固定版式（cbz）：引擎**没有** atStart/atEnd → 判据须退回 relocate 的 section 序号
+      ok('§10 退回书架（换固定版式）', await backToShelf())
+      await sleep(900)
+      ok('§10 重开 CBZ', await openBook('探针样书.cbz'))
+      await sleep(2200)
+      st = await edgeState()
+      note('§10 cbz 开书态', JSON.stringify(st))
+      ok('§10 前提：固定版式渲染器无 atStart（兜底分支的存在理由）',
+        st.tag === 'FOLIATE-FXL' && st.atStart === null, JSON.stringify(st))
+      p = await hoverEdge('l')
+      ok('★ 固定版式第 1 页：左缘提示不亮（section 序号兜底判首）',
+        p.zero.L === false && p.st.L === false, JSON.stringify(p))
+      await turn('next')
+      p = await hoverEdge('l')
+      ok('固定版式第 2 页：左缘提示亮', p.zero.L === false && p.st.L === true, JSON.stringify(p))
+    }
+  }
   // B-21（`ResizeObserver loop completed with undelivered notifications`，foliate `View` 的观察者
   // 被留在已脱离的帧上）**此处不作断言，只报数** —— 不是「与本条无关」，而是这条判据在本探针的
   // 时序下**会假通过**：2026-09-22 拿故意改回上游门的构建实测，本探针读 0 条、`probe-ro-noise.mjs`

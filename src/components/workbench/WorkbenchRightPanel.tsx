@@ -21,6 +21,7 @@ import { AiUsagePanel } from './AiUsagePanel'
 import { ReadingSidePanel } from './ReadingSidePanel'
 import { ChatBody } from '../shared/AssistantPanel/ChatBody'
 import { useAssistantChat } from '../shared/AssistantPanel/useAssistantChat'
+import { QuoteChips } from '../shared/AssistantPanel/QuoteChips'
 import type { PluginTool } from '../../lib/pluginService'
 
 /**
@@ -89,6 +90,10 @@ interface Props {
   onLocatePdfPage?: (page: number) => void
   /** 阅读侧栏「摘录 → 定位原文」（pdf 跳页 / txt 跳段）：App 统一切回书架标签再派发 */
   onLocateExcerpt?: (loc: { kind: BookKind; page?: number; paraIndex?: number; cfi?: string }) => void
+  /** B-26：划词「问 AI」路由过来的选段（宿主注册在 App —— 本组件折叠时会卸载，见消费处的注释） */
+  pendingAsk?: string | null
+  /** 消费完成回执（App 清空，避免重挂载时重复投递） */
+  onConsumePendingAsk?: () => void
 }
 
 /** 切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
@@ -102,7 +107,7 @@ const WIDGET_META: Record<string, { icon: string; label: string }> = {
   nav: { icon: '🌐', label: '网址导航' },
 }
 
-export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, onLocatePdfPage, onLocateExcerpt }: Props) {
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -122,10 +127,45 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
     : (visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0])
   const setPanelTab = (id: 'widgets' | 'ai' | 'reading') => patch({ rightTab: id })
 
+  // ── B-26 划词引用胶囊（与悬浮侧栏同口径）────────────────────────────────────
+  // 选段不进 textarea 明文（那是「用户输入」形态），而是作为引用胶囊显示在输入区上方，
+  // 发送时以 markdown 引用块嵌入正文（`prepareBody`）并清空 —— 与悬浮侧栏完全同一套语义。
+  const [selQuotes, setSelQuotes] = useState<string[]>([])
+  const selQuotesRef = useRef<string[]>([])
+
   // AI 态对话控制器（批次5）：与悬浮侧栏 / aiChat 标签共用 ChatBody 会话基建。
   // 实例常驻（右栏折叠/隐藏只是宽度变化，组件不卸载，输入草稿与会话视角不丢）；
   // 「激活」= AI Tab 可见且未扩大为 aiChat 标签（扩大期间显示 token 面板，无需对话刷新）
-  const aiChat = useAssistantChat({ active: effectiveTab === 'ai' && !aiChatOpen })
+  const aiChat = useAssistantChat({
+    active: effectiveTab === 'ai' && !aiChatOpen,
+    prepareBody: useCallback((raw: string) => {
+      // 与悬浮侧栏同口径：引用块嵌入正文 + 清空胶囊（单条截断 600 字防刷屏）
+      const qs = [...selQuotesRef.current]
+      if (qs.length > 0) { selQuotesRef.current = []; setSelQuotes([]) }
+      return qs.length > 0
+        ? qs.map((q, i) => `> 【引用 ${i + 1}】${q.replace(/\s+/g, ' ').trim().slice(0, 600)}${q.replace(/\s+/g, ' ').trim().length > 600 ? '…' : ''}`).join('\n') + (raw ? `\n\n${raw}` : '')
+        : raw
+    }, []),
+  })
+
+  // ── B-26：消费 App 转交过来的划词选段（引用胶囊形式）──────────────────────────
+  // 宿主（`registerSelectionAskHost`）注册在 **App**，不在本组件：右栏折叠/整窗时本组件会
+  // **整体卸载**（ResizablePanel 只渲染 visible 的子节点），而右栏默认就是折叠的 ——
+  // 注册在这里等于最常见的场景下没注册。所以选段经 prop 进来，本组件挂载后消费。
+  //
+  // ★ 收进引用胶囊（多条可累积，上限 5 条），不自动发送、不覆盖用户已打的草稿。
+  useEffect(() => {
+    if (pendingAsk == null) return
+    setSelQuotes(prev => {
+      const next = prev.includes(pendingAsk) ? prev : [...prev, pendingAsk].slice(-5)
+      selQuotesRef.current = next
+      return next
+    })
+    onConsumePendingAsk?.()
+    setTimeout(() => aiChat.inputRef.current?.focus(), 60)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingAsk])
+
   const togglePanelTabVisibility = (id: (typeof WORKBENCH_PANEL_TAB_IDS)[number], show: boolean) => {
     const next = show
       ? layout.panelTabsHidden.filter((k) => k !== id)
@@ -371,6 +411,13 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               variant="docked"
               active={effectiveTab === 'ai' && !aiChatOpen}
               onExpand={onExpandAiChat}
+              inputTop={
+                <QuoteChips
+                  quotes={selQuotes}
+                  onRemove={(i) => setSelQuotes(prev => { const next = prev.filter((_, j) => j !== i); selQuotesRef.current = next; return next })}
+                  onRemoveAll={() => { selQuotesRef.current = []; setSelQuotes([]) }}
+                />
+              }
             />
           )
         )}

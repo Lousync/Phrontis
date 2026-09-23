@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Sparkles, X, Menu, Quote, Languages, Maximize2, Radar, TriangleAlert } from 'lucide-react'
+import { Sparkles, X, Menu, Languages, Maximize2, Radar, TriangleAlert } from 'lucide-react'
 import { AiLearnShell, type AiLearnTab, type ChatBridge } from '../AiLearn'
 import { useLearnProgress, learnStepContext } from '../AiLearn/useLearnProgress'
 import { getLesson } from '../AiLearn/lessons'
@@ -9,6 +9,7 @@ import { getSelectionAskHost, getAssistantContext } from '../../../lib/assistant
 import { TranslateCard } from '../TranslateCard'
 import { ChatBody } from './ChatBody'
 import { useAssistantChat } from './useAssistantChat'
+import { QuoteChips } from './QuoteChips'
 import type { AgentContextInfo, TabName } from '../../../types'
 
 /**
@@ -71,7 +72,6 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
   const [selFloat, setSelFloat] = useState<{ x: number; y: number; rect: SelRect; text: string } | null>(null)
   /** 划词引用（会话引用形式）：「问 AI」收进输入区上方引用胶囊（多条可累积），随消息以可见引用块发出 */
   const [selQuotes, setSelQuotes] = useState<string[]>([])
-  const [selQuotesOpen, setSelQuotesOpen] = useState(false)
   const selQuotesRef = useRef<string[]>([])
   /** 划词翻译卡片（与「问 AI」浮钮共用选区检测） */
   const [transFloat, setTransFloat] = useState<{ rect: SelRect; text: string } | null>(null)
@@ -87,7 +87,7 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
     prepareBody: useCallback((raw: string) => {
       // 划词引用（会话引用形式）：以可见的 markdown 引用块并入消息正文，随发随清（单条截断 600 字防刷屏）
       const qs = [...selQuotesRef.current]
-      if (qs.length > 0) { selQuotesRef.current = []; setSelQuotes([]); setSelQuotesOpen(false) }
+      if (qs.length > 0) { selQuotesRef.current = []; setSelQuotes([]) }
       const text = qs.length > 0
         ? qs.map((q, i) => `> 【引用 ${i + 1}】${q.replace(/\s+/g, ' ').trim().slice(0, 600)}${q.replace(/\s+/g, ' ').trim().length > 600 ? '…' : ''}`).join('\n') + (raw ? `\n\n${raw}` : '')
         : raw
@@ -257,7 +257,6 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
       selQuotesRef.current = next
       return next
     })
-    setSelQuotesOpen(true)
     openPanel()
     setTimeout(() => chat.inputRef.current?.focus(), 120)
   }, [openPanel, chat.inputRef])
@@ -364,35 +363,14 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
     </div>
   ) : null
 
-  /** 划词引用胶囊（会话引用形式，悬浮侧栏特有） */
-  const quoteRow = selQuotes.length > 0 ? (
-    <div className="mb-1 flex items-center gap-1.5">
-      <button onClick={() => setSelQuotesOpen(o => !o)}
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-        title="点击查看/管理引用片段">
-        <Quote size={10} className="text-[var(--accent)]" />
-        <span>{selQuotes.length} 条对话引用</span>
-      </button>
-      <button onClick={() => { selQuotesRef.current = []; setSelQuotes([]); setSelQuotesOpen(false) }} title="移除全部引用"
-        className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-        <X size={10} />
-      </button>
-      {selQuotesOpen && (
-        <div className="mt-1 space-y-1 w-full">
-          {selQuotes.map((q, i) => (
-            <div key={`${i}-${q.slice(0, 16)}`} className="flex items-start gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)]">
-              <Quote size={10} className="mt-[3px] shrink-0 text-[var(--accent)]" />
-              <span className="flex-1 min-w-0 text-[11px] leading-[1.5] text-[var(--text-secondary)] line-clamp-3">【引用 {i + 1}】{q}</span>
-              <button onClick={() => setSelQuotes(prev => { const next = prev.filter((_, j) => j !== i); selQuotesRef.current = next; return next })} title="移除此引用"
-                className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
-                <X size={10} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  ) : null
+  /** 划词引用胶囊（会话引用形式）：抽成共享组件，悬浮侧栏与右栏 docked 同体 */
+  const quoteRow = (
+    <QuoteChips
+      quotes={selQuotes}
+      onRemove={(i) => setSelQuotes(prev => { const next = prev.filter((_, j) => j !== i); selQuotesRef.current = next; return next })}
+      onRemoveAll={() => { selQuotesRef.current = []; setSelQuotes([]) }}
+    />
+  )
 
   /** 输入区顶部插槽：暖色提示条在上、划词引用胶囊在下（感知开关已改走工具行插槽 inputBarLeft） */
   const inputTop = <>{perceptionHintStrip}{quoteRow}</>
