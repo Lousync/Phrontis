@@ -26,6 +26,21 @@ export const KB_BOOKMARK_DELETE = 'kb-bookmark-delete'
 /** TXT 阅读器 → 右栏阅读侧栏：进度广播（detail: { relPath, kind:'txt', pct }） */
 export const KB_READER_STATE_CHANGED = 'kb-reader-state-changed'
 
+/**
+ * 阅读器 → 左栏阅读面板：**请求切到「书签」区**（detail: { relPath }）。
+ *
+ * 为什么要这个事件：左栏面板的三区（目录 / 缩略图 / 书签）切换状态 `section` 是
+ * `PdfRailPanel` 的**组件内部 state**，而「收藏本页书签」按钮在 `PdfReaderView` 工具栏 ——
+ * 两者互不知情。于是用户在「目录」区点收藏时，书签列表其实**已经加上了**，只是左栏还停在目录，
+ * 第一体验是「点了没反应」（开发负责人 2026-09-23 反馈）。
+ *
+ * 口径：**只在「新增」书签时派发**（移除时不切）—— 移除是「不要了」的语义，把用户强行拽到
+ * 书签区反而多余。判定在派发方（`toggleBookmark` 里 `!has` 分支）。
+ *
+ * `relPath` 用于「是不是给我的书」过滤，同 KB_EPUB_GOTO_CFI 的惯例。
+ */
+export const KB_BOOKMARK_SECTION_SHOW = 'kb-bookmark-section-show'
+
 /** 右栏摘录面板 → TXT 阅读器：跳段请求（detail: { relPath, paraIndex }） */
 export const KB_TXT_GOTO_PARA = 'kb-txt-goto-para'
 

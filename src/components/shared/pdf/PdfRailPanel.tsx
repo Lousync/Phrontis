@@ -7,7 +7,7 @@ import { useDataChanged } from '../../../lib/dataChanged'
 import { OutlineTree, destToPageNum, loadOutline, type OutlineNode } from './PdfOutlineTree'
 import { PdfThumbGrid } from './PdfThumbGrid'
 import { PdfBookmarkList } from './PdfBookmarkList'
-import { KB_BOOKMARK_DELETE, KB_PDF_PAGE_CHANGED, KB_PDF_GOTO_PAGE } from './pdfEvents'
+import { KB_BOOKMARK_DELETE, KB_BOOKMARK_SECTION_SHOW, KB_PDF_PAGE_CHANGED, KB_PDF_GOTO_PAGE } from './pdfEvents'
 // 事件常量已抽到零依赖的 pdfEvents.ts（防 pdfjs 被常量消费方拖进主包）；此处再导出保持既有 import 路径可用
 export { KB_PDF_PAGE_CHANGED, KB_PDF_GOTO_PAGE } from './pdfEvents'
 
@@ -69,6 +69,17 @@ export function PdfRailPanel({ readerDoc }: Props) {
     }
     window.addEventListener(KB_PDF_PAGE_CHANGED, on)
     return () => window.removeEventListener(KB_PDF_PAGE_CHANGED, on)
+  }, [relPath])
+
+  // 阅读器新增书签 → 请求本面板切到书签区（否则用户在目录区点收藏「看不到反应」）
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent).detail as { relPath?: string } | undefined
+      if (d?.relPath && d.relPath !== relPath) return
+      setSection('bookmarks')
+    }
+    window.addEventListener(KB_BOOKMARK_SECTION_SHOW, on)
+    return () => window.removeEventListener(KB_BOOKMARK_SECTION_SHOW, on)
   }, [relPath])
 
   // 书签随写盘广播刷新（阅读器增删书签 → patch → broadcastDataChanged）

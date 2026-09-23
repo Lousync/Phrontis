@@ -16,7 +16,7 @@ import { resolveDegrade, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/
 import { detectScanMode, resolveScanPages } from '../../../../electron/lib/kbStore/scanDetect'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
 import type { BookScanMode, ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState, ExcerptColor, ExcerptType } from '../../../types'
-import { KB_BOOKMARK_DELETE } from './pdfEvents'
+import { KB_BOOKMARK_DELETE, KB_BOOKMARK_SECTION_SHOW } from './pdfEvents'
 
 // 同源 worker（v3 classic，兼容 Electron 33 / Chromium 130——v4.5+ 依赖 toHex 未实现）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -857,7 +857,10 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     setBookmarks(next)
     setHasProgressBook(next.length > 0)
     scheduleProgress({ bookmarks: next }, true)
-  }, [bookmarks, scheduleProgress])
+    // 只在「新增」时把左栏切到书签区：面板 section 是它的内部 state，不通知的话
+    // 用户在目录区点收藏会看不到任何反馈（列表已更新，只是没显示）。
+    if (!has) window.dispatchEvent(new CustomEvent(KB_BOOKMARK_SECTION_SHOW, { detail: { relPath } }))
+  }, [bookmarks, scheduleProgress, relPath])
 
   const setBookmarkNote = useCallback((page: number, note: string) => {
     const next = bookmarks
