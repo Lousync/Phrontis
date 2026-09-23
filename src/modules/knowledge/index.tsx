@@ -22,7 +22,7 @@ import {
   getKnowledgeIndexWarnings,
   workspaceRename, workspaceGetCurrent, workspaceTrash,
   workspaceListDir, workspaceCreateFile, workspaceMkdir,
-  workspacePasteExternal, getPathForFile,
+  workspacePasteExternal, pasteFromClipboard, getPathForFile,
 } from '../../lib/ipc'
 import { hasTextPasteTarget } from '../../lib/pasteTarget'
 import { notifyDataChanged } from '../../lib/dataChanged'
@@ -116,6 +116,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   /** 新建分类目录的命名走文件树内联输入（B-13）：原 `catDraft` 居中浮层整条通道已删——
    *  两条创建路径并存本身就是分叉源，命名方式现已与新建知识页/目录/文件完全一致。 */
   const vaultRootRef = useRef<string | null>(null)
+  /** 文件树根容器 ref：右键「粘贴」是合成动作（拿不到真实 paste 事件的 File 列表），
+   *  故先 programmatic focus 到这里，再请主进程补发 `webContents.paste()` 复用同一条链路。
+   *  与 VaultTree 的 tabIndex={0} 配套（见其 ref/tabIndex 注释）。 */
+  const treeRef = useRef<HTMLDivElement | null>(null)
+  /** 最近点中的目录（落点兜底）：toggleDir / openFile / 右键都更新它，Ctrl+V 与菜单「粘贴」共用 */
+  const lastTreeDirRef = useRef<string>('')
   const [liveContent, setLiveContent] = useState('')
   const [locatePageId, setLocatePageId] = useState<string | null>(null)
   const [locateCategoryId, setLocateCategoryId] = useState<string | null>(null)
@@ -1512,6 +1518,30 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
   }, [])
 
+  /** 粘贴落点：右键的那个目录 > 最近点中的目录 > 当前打开文件所在目录 > 仓库根 */
+  const resolvePasteDir = useCallback((node?: TreeNode | null): string => {
+    if (node) return node.type === 'dir' ? node.relPath : parentDirOf(node.relPath)
+    if (lastTreeDirRef.current) return lastTreeDirRef.current
+    // activePageId 可能是 draft:<rel> 伪页，两种都取真实 relPath
+    const active = allPages.find((p) => p.id === activePageIdRef.current)
+    const activeRel = active?.path ?? (activePageIdRef.current?.startsWith('draft:') ? activePageIdRef.current.slice(6) : null)
+    return activeRel && activeRel.includes('/') ? activeRel.slice(0, activeRel.lastIndexOf('/')) : ''
+  }, [allPages])
+
+  /**
+   * 右键「粘贴」：Ctrl+V 有真实 paste 事件（clipboardData 带 File 列表），菜单点击是合成动作
+   * 拿不到，所以先聚焦文件树再请主进程补发一次 `webContents.paste()`，复用同一条链路。
+   * 必须等 React 把菜单卸载完再聚焦——被卸载的菜单是当时 focused 元素，先聚焦会被它的
+   * blur 打回 body，粘贴就落到别处去了（故走 rAF 等这一帧提交结束）。
+   */
+  const requestPasteFromMenu = useCallback((dirRel: string) => {
+    lastTreeDirRef.current = dirRel
+    requestAnimationFrame(() => {
+      treeRef.current?.focus()
+      void pasteFromClipboard()
+    })
+  }, [])
+
   useEffect(() => {
     if (!isActive) return
     const onPaste = (e: ClipboardEvent) => {
@@ -1519,15 +1549,11 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       if (!files || files.length === 0) return
       if (hasTextPasteTarget(e)) return
       e.preventDefault()
-      // 落点：当前打开文件所在目录 > 仓库根（activePageId 可能是 draft:<rel> 伪页，两种都取真实 relPath）
-      const active = allPages.find((p) => p.id === activePageIdRef.current)
-      const activeRel = active?.path ?? (activePageIdRef.current?.startsWith('draft:') ? activePageIdRef.current.slice(6) : null)
-      const dirRel = activeRel && activeRel.includes('/') ? activeRel.slice(0, activeRel.lastIndexOf('/')) : ''
-      void pasteExternalFiles(Array.from(files), dirRel)
+      void pasteExternalFiles(Array.from(files), resolvePasteDir())
     }
     window.addEventListener('paste', onPaste)
     return () => window.removeEventListener('paste', onPaste)
-  }, [isActive, allPages, pasteExternalFiles])
+  }, [isActive, pasteExternalFiles, resolvePasteDir])
 
   // --- outline ---
   const activePageForOutline = useMemo(() => {
@@ -1908,11 +1934,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             {sidebarTab === 'files' ? (
               <div className="kb-view-in relative flex flex-1 min-h-0 flex-col">
                 <VaultTree
+                  rootRef={treeRef}
                   dirCache={dirCache}
                   expanded={expandedDirs}
                   activePath={allPages.find(p => p.id === activePageId)?.path ?? (activePageId?.startsWith('draft:') ? activePageId.slice(6) : null)}
-                  onToggleDir={handleToggleTreeDir}
-                  onOpenFile={handleTreeOpenFile}
+                  onToggleDir={(p) => { lastTreeDirRef.current = p; handleToggleTreeDir(p) }}
+                  onOpenFile={(n) => { lastTreeDirRef.current = parentDirOf(n.relPath); handleTreeOpenFile(n) }}
                   /* 目录聚焦（2026-09-19 修复失效）：VaultTree 迁移（Phase 2 批次 1）后一直没接
                      focusOn——按钮只是空开关。与编辑器同款：focusOn + onFocusLocate（点骨架条
                      = 退出聚焦并展开目录 / 打开文件）。 */
@@ -1922,7 +1949,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                     if (isDir) setExpandedDirs((prev) => new Set(prev).add(rel))
                     else openByRelPath(rel)
                   }}
-                  onContextMenu={(e, node) => { e.preventDefault(); setTreeMenu({ x: e.clientX, y: e.clientY, node }) }}
+                  onContextMenu={(e, node) => {
+                    e.preventDefault()
+                    // 记下这次右键落点：Ctrl+V 与菜单「粘贴」都用它当落点（见 resolvePasteDir）
+                    lastTreeDirRef.current = resolvePasteDir(node)
+                    setTreeMenu({ x: e.clientX, y: e.clientY, node })
+                  }}
                   onMove={(src, target) => { void handleTreeMove(src, target) }}
                   creating={treeCreating}
                   onCommitCreate={handleTreeCommitCreate}
@@ -1961,6 +1993,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                             <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'dir' }) }}>新建目录</button>
                             {/* B-13：分类目录也走树内联命名（恒落根层，不吃 node 的 dirRel） */}
                             <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel: '', type: 'category' }) }}>新建分类目录</button>
+                            {/* 粘贴系统剪贴板里的文件/目录（Ctrl+V 同名功能的菜单入口；焦点随后交给文件树）。
+                                2026-09-23 恢复：编辑器退役时该入口随模块丢失（Ctrl+V 路径当时已上移），
+                                而 pasteFromClipboard IPC / VaultTree 的 rootRef+tabIndex 基建一直留着。 */}
+                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); requestPasteFromMenu(dirRel) }}>粘贴</button>
                             {treeMenu.node.type === 'file' && (
                               <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); handleTreeOpenFile(treeMenu.node) }}>打开</button>
                             )}

@@ -42,7 +42,8 @@ function stripComments(src) {
 const FILES = {
   teach: 'src/modules/ai-teaching/index.tsx',
   side: 'src/modules/ai-teaching/SideLanePanel.tsx',
-  assistant: 'src/components/shared/AssistantPanel/index.tsx',
+  // 2026-09-23：assistant 面的输入体已从 AssistantPanel/index.tsx 拆到共享 ChatBody.tsx
+  assistant: 'src/components/shared/AssistantPanel/ChatBody.tsx',
   learn: 'src/components/shared/AiLearn/index.tsx',
 }
 
@@ -62,14 +63,17 @@ function ok(name, cond, extra = '') {
 const count = (s, sub) => s.split(sub).length - 1
 const has = (k, sub) => code[k].includes(sub)
 
-// ── ① 合规提示：4 个源文件各 1 处（= 5 处 UI，因为 Composer 同时服务 #3/#4）──────────
+// ── ① 合规提示：3 个源文件各 1 处（teach / side / learn）──────────────────────────
+// 2026-09-17「删冗余说明行」拍板：assistant 面（ChatBody）不再放合规提示 —— 此处改为**钉住移除**，
+// 防回填（该面是用户自己的对话，披露被视为冗余；teach/side/learn 三处披露保留）。
 const COMPLIANCE = 'AI 生成内容，请注意甄别'
-for (const k of Object.keys(FILES)) {
+for (const k of ['teach', 'side', 'learn']) {
   ok(`合规提示在 ${k} 恰 1 处`, count(code[k], COMPLIANCE) === 1, `实际 ${count(code[k], COMPLIANCE)}`)
 }
-ok('合规提示源文件数 = 4（= 5 处 UI）', Object.keys(FILES).filter(k => count(code[k], COMPLIANCE) === 1).length === 4)
+ok('合规提示源文件数 = 3', ['teach', 'side', 'learn'].filter(k => count(code[k], COMPLIANCE) === 1).length === 3)
+ok('assistant 面不再放合规提示（删冗余说明行拍板，勿回填）',
+  count(code.assistant, COMPLIANCE) === 0, `实际 ${count(code.assistant, COMPLIANCE)}`)
 ok('合规提示带 title 披露', code.teach.includes('title="AI 生成内容可能存在错误，请自行核实"')
-  && code.assistant.includes('title="AI 生成内容可能存在错误，请自行核实"')
   && code.learn.includes('title="AI 生成内容可能存在错误，请自行核实"')
   && code.side.includes('title="AI 生成内容可能存在错误，请自行核实"'))
 
@@ -86,25 +90,31 @@ ok('side 旧输入框小卡片（rounded-lg + bg-input-bg px-2.5 py-1.5）已消
   !has('side', 'rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] px-2.5 py-1.5'))
 ok('side 旧外壳（border-t p-2.5）已消失', !has('side', 'shrink-0 border-t border-[var(--border-color)] p-2.5'))
 
-// ── ③ 气泡本体：rounded-xl + shadow-lg + focus-within 落在卡片上 ───────────────────
+// ── ③ 输入卡外壳：teach/side/assistant 已迁至 inputShells（V1–V9 可切换）；learn 仍用固定气泡 ──
 const BUBBLE = 'rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60'
-for (const k of ['teach', 'side', 'assistant', 'learn']) {
-  ok(`${k} 气泡外壳类名完整`, has(k, BUBBLE))
+for (const k of ['teach', 'side', 'assistant']) {
+  ok(`${k} 输入卡外壳走 shell.wrap（INPUT_SHELLS 统一样式）`, has(k, '${shell.wrap}'))
+  ok(`${k} 顶层取用 useInputShell()`, has(k, 'useInputShell()'))
 }
+ok('learn 输入卡仍为固定气泡外壳类名', has('learn', BUBBLE))
 
-// ── ④ textarea：自身无边框、无底色；焦点上移 ────────────────────────────────────────
-for (const k of ['teach', 'side', 'assistant', 'learn']) {
-  ok(`${k} textarea 已去自身边框/底色`, has(k, 'rounded-none border-0 bg-transparent'))
+// ── ④ textarea：自身无边框、无底色（迁 shell 的三处用 ! important 版，learn 用旧版）──────
+for (const k of ['teach', 'side', 'assistant']) {
+  ok(`${k} textarea 已去自身边框/底色`, has(k, 'bg-transparent! border-0! rounded-none!'))
 }
-for (const k of ['teach', 'side', 'assistant', 'learn']) {
+ok('learn textarea 已去自身边框/底色', has('learn', 'rounded-none border-0 bg-transparent'))
+for (const k of ['teach', 'side', 'learn']) {
   ok(`${k} 保留 rows={2}（自适应高度不在本次范围）`, has(k, 'rows={2}'))
 }
+ok('assistant 保留自适应 rows（窄版 2 行 / 宽版 3 行）', has('assistant', 'rows={isNarrow ? 2 : 3}'))
 ok('side 无意义的三元 rows 已化简', !has('side', 'rows={wide ? 2 : 2}'))
 
 // ── ⑤ 圆形发送键；方块停止只在 #1 / #5 ─────────────────────────────────────────────
-for (const k of ['teach', 'side', 'assistant', 'learn']) {
+for (const k of ['teach', 'side', 'learn']) {
   ok(`${k} 含圆形图标键（w-8 h-8 rounded-full）`, has(k, 'w-8 h-8') && has(k, 'rounded-full'))
 }
+ok('assistant 含圆形图标键（h-7 w-7 rounded-full，2026-09-17 起收小一号）',
+  has('assistant', 'h-7 w-7') && has('assistant', 'rounded-full'))
 const SQUARE = 'w-2.5 h-2.5 rounded-[2px] bg-current'
 ok('teach 停止键 = 圆内方块（恰 1）', count(code.teach, SQUARE) === 1, `实际 ${count(code.teach, SQUARE)}`)
 ok('side 停止键 = 圆内方块（恰 1）', count(code.side, SQUARE) === 1, `实际 ${count(code.side, SQUARE)}`)
@@ -160,12 +170,13 @@ ok('teach 合规提示上方旧占位注释语义保留（合规提示行仍在 
 // 与项目内容列约定一致（quiz L2565 / 学堂 L445 / 工件栏 L154 同为 820）。
 // 消息列按拍板「保持整宽」→ 不对消息区加限宽断言。
 for (const k of ['teach', 'side', 'assistant', 'learn']) {
-  ok(`${k} 输入壳限宽 820 居中（w-full max-w-[820px] mx-auto）`,
-    has(k, 'w-full max-w-[820px] mx-auto'))
+  ok(`${k} 输入壳限宽 820 居中（max-w-[820px] mx-auto）`,
+    has(k, 'max-w-[820px] mx-auto'))
 }
-ok('限宽只落在输入壳，不影响气泡本体类名', code.teach.includes('max-w-[820px] mx-auto px-3 pb-2.5 pt-2')
+ok('限宽只落在输入壳，不影响输入卡本体类名',
+  code.teach.includes('max-w-[820px] mx-auto px-3 pb-2.5 pt-2')
   && code.side.includes('max-w-[820px] mx-auto px-2.5 pb-2.5 pt-2')
-  && code.assistant.includes('max-w-[820px] mx-auto px-3 pb-2.5 pt-2')
+  && code.assistant.includes('max-w-[820px] mx-auto w-full')
   && code.learn.includes('mx-auto ${compact ? \'px-3\' : \'px-4\'} pb-2.5 pt-2'))
 
 console.log(`\nverify-input-bubble: ${pass} PASS / ${fail} FAIL`)

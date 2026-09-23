@@ -74,33 +74,36 @@ check('types 声明 pasteFromClipboard', /pasteFromClipboard:\s*\(\)/.test(typeD
 
 check('FileTree 根容器 tabIndex={0}（右键粘贴的 focus 落点）', /tabIndex=\{0\}/.test(fileTree))
 check('FileTree 接受 rootRef 并挂到根容器', /rootRef\?:/.test(fileTree) && /ref=\{rootRef\}/.test(fileTree))
-check('knowledge 消费共享 VaultTree（粘贴链路宿主）', /<VaultTree/.test(knowIdx))
+check('knowledge 消费共享 VaultTree 并接 rootRef（右键粘贴的 focus 落点）',
+  /<VaultTree/.test(knowIdx) && /rootRef=\{treeRef\}/.test(knowIdx))
 // 焦点守卫口径（2026-09-15 探针双向实测）：Chromium 把「非可编辑焦点」的 paste 事件 target
 // 重定向成 BODY（焦点 focus() 到文件树后 activeElement 是树、e.target 仍是 BODY），而
 // textarea / input / contenteditable 聚焦时 target 指向该元素本身。于是：
 //   按 e.target 判定「在不在文件树内」= 永不进分支 = Ctrl+V 静默死掉（旧错法，钉住不许回来）；
 //   正确写法 = 「target 是 body（= 没有文本接收方）」+ 「activeElement 不在编辑宿主里」双判据。
 check('焦点守卫用 hasTextPasteTarget 双判据（模块级纯函数）',
-  /^function hasTextPasteTarget\(e: ClipboardEvent\)/m.test(pasteTarget))
+  /^export function hasTextPasteTarget\(e: ClipboardEvent\)/m.test(pasteTarget))
 check('判据①：浏览器口径 —— paste.target 是 body 才算「无文本接收方」',
   /t !== document\.body && t !== document\.documentElement\) return true/.test(pasteTarget))
 check('判据②：编辑宿主名单（input/textarea/contenteditable/Monaco）落在模块级纯函数里',
-  /^function isTextEditingTarget\(el: Element \| null\)/m.test(editorIdx) &&
-  /isContentEditable/.test(editorIdx) && /\.monaco-editor/.test(pasteTarget))
+  /^export function isTextEditingTarget\(el: Element \| null\)/m.test(pasteTarget) &&
+  /isContentEditable/.test(pasteTarget) && /\.monaco-editor/.test(pasteTarget))
 check('旧的按 e.target 判定文件树的写法已不存在（否则 Ctrl+V 永久失效）',
   !/closest\?\.\('\[data-kb-filetree\]'\)/.test(pasteTarget))
-check('paste 监听按 isActive 门禁（隐藏模块不抢事件）', /if \(!isActive\) return[\s\S]{0,400}addEventListener\('paste'/.test(pasteTarget))
+// 宿主接线（菜单入口 / 焦点落点 / 提示分流）在知识库模块 —— 编辑器退役后粘贴能力上移到此
+check('paste 监听按 isActive 门禁（隐藏模块不抢事件）', /if \(!isActive\) return[\s\S]{0,400}addEventListener\('paste'/.test(knowIdx))
 check('剪贴板里没有文件时不 preventDefault（文本粘贴放行）',
-  /files\.length === 0\) return[\s\S]{0,200}hasTextPasteTarget/.test(editorIdx) &&
-  /hasTextPasteTarget\(e\)\) return[\s\S]{0,120}e\.preventDefault\(\)/.test(pasteTarget))
+  /files\.length === 0\) return[\s\S]{0,200}hasTextPasteTarget/.test(knowIdx) &&
+  /hasTextPasteTarget\(e\)\) return[\s\S]{0,120}e\.preventDefault\(\)/.test(knowIdx))
 check('右键「粘贴」经 requestPasteFromMenu 走 webContents.paste 链路',
-  /requestPasteFromMenu\b/.test(editorIdx) && /void pasteFromClipboard\(\)/.test(pasteTarget))
-check('菜单粘贴延后一帧再聚焦（避开菜单卸载引发的 blur）', /requestAnimationFrame\(\(\) => \{[\s\S]{0,200}treeRef\.current\?\.focus\(\)/.test(pasteTarget))
-check('右键菜单含「粘贴」入口', /ClipboardPaste size=\{13\}/.test(pasteTarget))
-check('粘贴结果按 skipped 数量分流提示', /已跳过 \$\{res\.skipped\.length\} 项/.test(pasteTarget))
-check('全失败时提示带出具体原因（不吞成一句「粘贴失败」）', /res\.skipped\[0\]\?\.reason/.test(pasteTarget))
+  /requestPasteFromMenu\b/.test(knowIdx) && /void pasteFromClipboard\(\)/.test(knowIdx))
+check('菜单粘贴延后一帧再聚焦（避开菜单卸载引发的 blur）', /requestAnimationFrame\(\(\) => \{[\s\S]{0,200}treeRef\.current\?\.focus\(\)/.test(knowIdx))
+check('右键菜单含「粘贴」入口（点击走 requestPasteFromMenu）',
+  />粘贴<\/button>/.test(knowIdx) && /setTreeMenu\(null\); requestPasteFromMenu\(dirRel\)/.test(knowIdx))
+check('粘贴结果按 skipped 数量分流提示', /已跳过 \$\{res\.skipped\.length\} 项/.test(knowIdx))
+check('全失败时提示带出具体原因（不吞成一句「粘贴失败」）', /res\.skipped\[0\]\?\.reason/.test(knowIdx))
 check('单次上限常量 = 500', /const MAX_PASTE_ITEMS = 500\b/.test(src))
-check('渲染层记下最近点中的目录（落点兜底）', /lastTreeDirRef/.test(pasteTarget))
+check('渲染层记下最近点中的目录（落点兜底）', /lastTreeDirRef/.test(knowIdx))
 check('粘 .md 后失效知识索引', /pasted\.some\(\(n\) => \/\\\.md\$\/i\.test\(n\)\)\) invalidateIndexIfCurrentVault/.test(src))
 check('粘贴用 cp 而非 rename（复制语义，源保留）', /await cp\(src, join\(destDir, finalName\)/.test(src))
 

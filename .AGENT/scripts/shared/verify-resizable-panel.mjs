@@ -203,6 +203,9 @@ let minWidth = 200
 let maxWidth = 400
 let side = 'left'
 const onSnapCloseRef = { current: null }
+// 单击开合回调（2026-09-16 批次 2 起 endDrag 新增的第四条出口：没拖过也没 snap 的一按一抬 = 开合手柄）
+let handleClickCount = 0
+const onHandleClickRef = { current: () => { handleClickCount++ } }
 const DRAG_DEAD_ZONE_PX = ${DEAD_ZONE}
 function endDrag(persist = true) { endDragCount++; ${bodyEnd} }
 function applyDrag(clientX) { ${bodyApply} }
@@ -212,6 +215,7 @@ export const api = {
   reset() { events = []; persisted = [] },
   events: () => events,
   persisted: () => persisted,
+  clicks: () => handleClickCount,
   bodyStyle: () => document.body.style,
   dragRef, widthRef,
   setup({ startX = 100, startW = 240, min = 200, max = 400, s = 'left', snap = null } = {}) {
@@ -221,7 +225,7 @@ export const api = {
     onSnapCloseRef.current = snap
     document.body.style.userSelect = ''
     document.body.style.cursor = ''
-    events = []; persisted = []
+    events = []; persisted = []; handleClickCount = 0
   },
 }
 `,
@@ -245,6 +249,7 @@ check(`位移 < ${DEAD_ZONE}px 不进入拖拽态`, draggingEvents().length === 
 check(`位移 < ${DEAD_ZONE}px 不改宽度`, widthEvents().length === 0)
 api.endDrag()
 check('误触松手不落盘', api.persisted().length === 0, JSON.stringify(api.persisted()))
+check('误触松手 = 单击手柄 → 触发开合回调一次', api.clicks() === 1, `实际 ${api.clicks()}`)
 
 // ② 越过 dead-zone 的那一帧开始真拖（阈值判断必须发生在 setDragging 之前）
 api.setup({ startX: 100, startW: 240 })
@@ -258,6 +263,7 @@ check('继续拖动跟手（宽度 = 起始 + 位移）', widthEvents().at(-1) =
 api.endDrag()
 check('真拖后松手落盘一次且值为最终宽度',
   api.persisted().length === 1 && api.persisted()[0][1] === 260, JSON.stringify(api.persisted()))
+check('真拖后松手不触发开合回调（拖拽与单击互斥）', api.clicks() === 0, `实际 ${api.clicks()}`)
 
 // ③ right 侧镜像：向左拖 = 变宽
 api.setup({ startX: 500, startW: 240, s: 'right' })

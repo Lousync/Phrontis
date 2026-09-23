@@ -78,16 +78,22 @@ check('应用内改名同时登记新旧两条路径',
 check('应用内删除登记自写（不误弹「已在磁盘上被删除」）', /markSelfWrite\(abs\)/.test(wsMgr))
 check('before-quit 关闭监听', /closeVaultWatcher\(\)/.test(mainIdx))
 
-// 渲染层：编辑器 + AI 教学
-check('编辑器消费 ws:fs-changed', /onWsFsChanged\(/.test(editorIdx))
-check('编辑器窗口聚焦兜底重扫（知识区沿用同一机制）', /addEventListener\('focus', onFocus\)/.test(knowIdx))
-check('编辑器手动刷新按钮（RefreshCw + 标题）',
-  /RefreshCw/.test(editorIdx) && /title="刷新资源管理器"/.test(editorIdx))
-check('编辑器刷新走口径 b 全量（workspaceRefreshVault）', /workspaceRefreshVault\(\)/.test(editorIdx))
-check('编辑器刷新不动视图态（未清 dirCache / 未复位 expanded）',
-  !/setDirCache\(\{\}\)[\s\S]{0,200}refreshExplorer/.test(editorIdx))
+// 渲染层：知识库（2026-09-20 阶段四编辑器退役，其文件树迁入知识库）+ AI 教学
+// ★ 知识库的树刷新**不再**走 ws:fs-changed：fsWatcher 每轮改动同时广播 knowledge scope，
+//   知识库经 useDataChanged('knowledge') 重扫（撤销/重做另走 kb-fs-op-changed）。
+//   仍在消费 ws:fs-changed 的只剩 AI 教学 —— 它有自己的树根（工作区段），不吃 knowledge scope。
+//   （本段原断言指向的 editorIdx 随 aaff952 退役消失，却留着引用 ⇒ 脚本自 2026-09-20 起整条跑不起来。）
+check('fsWatcher 每轮改动广播 knowledge scope（知识库树刷新的真实通道）',
+  /broadcastDataChanged\('knowledge'\)/.test(src))
+check('知识库消费 knowledge scope（useDataChanged）', /useDataChanged\('knowledge'/.test(knowIdx))
+check('知识库消费撤销/重做文件操作事件（kb-fs-op-changed）', /kb-fs-op-changed/.test(knowIdx))
 check('AI 教学消费 ws:fs-changed', /onWsFsChanged\(/.test(aiTeachIdx))
-check('AI 教学左栏对称刷新按钮', /title="刷新资源管理器"/.test(aiTeachIdx) && /RefreshCw/.test(aiTeachIdx))
+check('AI 教学窗口聚焦兜底重扫', /addEventListener\('focus', onFocus\)/.test(aiTeachIdx))
+check('AI 教学左栏刷新按钮（RefreshCw + 标题）',
+  /RefreshCw/.test(aiTeachIdx) && /title="刷新资源管理器"/.test(aiTeachIdx))
+check('AI 教学刷新走口径 b 全量（workspaceRefreshVault）', /workspaceRefreshVault\(\)/.test(aiTeachIdx))
+check('AI 教学刷新不动视图态（未清 dirCache）',
+  !/setDirCache\(\{\}\)[\s\S]{0,200}refreshTree/.test(aiTeachIdx))
 check('AiTeachFileTree 接受 refreshSeq 原始类型 prop',
   /refreshSeq\?:\s*number/.test(aiTeachTree) && /refreshSeq\b/.test(aiTeachIdx))
 
