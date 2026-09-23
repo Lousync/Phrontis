@@ -330,6 +330,9 @@ export const bookMarketListQueue = (rootId: string): Promise<{ ok: boolean; task
 /** 封面只读（S4 拍板 ①）：取不到返回 `dataUrl: null`，调用方回落纯色书卡即可，不必当错误处理 */
 export const bookMarketCoverGet = (rootId: string, coverRel: string): Promise<{ ok: boolean; dataUrl: string | null; error?: string }> =>
   a().bookMarketCoverGet(rootId, coverRel)
+/** 彻底删书（书架右键）：书文件→系统回收站 + 清 meta/封面/进度/书签/摘录/导出映射 */
+export const bookMarketDeleteBook = (rootId: string, relPath: string): Promise<{ ok: boolean; errors: string[] }> =>
+  a().bookMarketDeleteBook(rootId, relPath)
 /** 下载队列快照推送（载荷 = **整个队列**，直接整体替换，不做增量合并） */
 export const onBookMarketDownloadProgress = (cb: (p: { rootId: string; tasks: BookDownloadTask[] }) => void): (() => void) =>
   a().onBookMarketDownloadProgress(cb)

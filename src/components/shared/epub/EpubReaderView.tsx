@@ -8,7 +8,7 @@ import { showGlobalConfirm } from '../../../lib/globalConfirm'
 import { useDataChanged } from '../../../lib/dataChanged'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
-import { KB_CBZ_THUMBS, KB_CBZ_THUMB_REQ, KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, KB_READER_STATE_CHANGED, type EpubTocItem } from '../pdf/pdfEvents'
+import { KB_BOOKMARK_DELETE, KB_CBZ_THUMBS, KB_CBZ_THUMB_REQ, KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, KB_READER_STATE_CHANGED, type EpubTocItem } from '../pdf/pdfEvents'
 // 真源（扩展名 / kind / MIME 三张表都在那里）。★ 本文件**不得**再出现 MIME 或书籍扩展名字面量：
 // foliate 的 makeBook() 按 File 的 name/type 分派解码器（view.js:13-21，不看魔数），
 // 自拼 MIME 会重演「所有书都叫 xxx.epub」→ 裸 fb2 当场 UnsupportedTypeError、fbz 被当 EPUB 解包炸掉。
@@ -421,6 +421,25 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
     setBookmarks(next)
     void patchReader({ bookmarks: next })
   }, [patchReader])
+
+  /**
+   * 右栏阅读侧栏 → 阅读器：删除一条书签（见 pdfEvents 的 KB_BOOKMARK_DELETE）。
+   * ★ 必须由阅读器执行而非右栏直接写盘：书签存在 `bkmRef` 这个内存权威数组里，而「加书签」是整数组
+   *   覆盖写 —— 右栏直接改盘，内存里的旧数组会在用户下次加书签时把删掉的条目写回去（静默复活）。
+   */
+  useEffect(() => {
+    const onDel = (e: Event) => {
+      const d = (e as CustomEvent).detail as { relPath?: string; id?: string } | undefined
+      if (!d?.id || d.relPath !== relPath) return
+      const next = bkmRef.current.filter((b) => b.id !== d.id)
+      if (next.length === bkmRef.current.length) return
+      bkmRef.current = next
+      setBookmarks(next)
+      void patchReader({ bookmarks: next })
+    }
+    window.addEventListener(KB_BOOKMARK_DELETE, onDel)
+    return () => window.removeEventListener(KB_BOOKMARK_DELETE, onDel)
+  }, [relPath, patchReader])
 
   /** 应用书页样式（字号/纸色）。每个 section 加载后都要重挂一次 —— style 槽随文档走 */
   const applyStyles = useCallback(() => {

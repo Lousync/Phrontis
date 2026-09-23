@@ -7,7 +7,7 @@ import { useDataChanged } from '../../../lib/dataChanged'
 import { OutlineTree, destToPageNum, loadOutline, type OutlineNode } from './PdfOutlineTree'
 import { PdfThumbGrid } from './PdfThumbGrid'
 import { PdfBookmarkList } from './PdfBookmarkList'
-import { KB_PDF_PAGE_CHANGED, KB_PDF_GOTO_PAGE } from './pdfEvents'
+import { KB_BOOKMARK_DELETE, KB_PDF_PAGE_CHANGED, KB_PDF_GOTO_PAGE } from './pdfEvents'
 // 事件常量已抽到零依赖的 pdfEvents.ts（防 pdfjs 被常量消费方拖进主包）；此处再导出保持既有 import 路径可用
 export { KB_PDF_PAGE_CHANGED, KB_PDF_GOTO_PAGE } from './pdfEvents'
 
@@ -145,6 +145,15 @@ export function PdfRailPanel({ readerDoc }: Props) {
     })
   }, [bookmarks, relPath, rootId])
 
+  /**
+   * 删除书签：**回派给阅读器执行**，本面板不写盘（见 pdfEvents 的 KB_BOOKMARK_DELETE）。
+   * 阅读器写完 patch → broadcastDataChanged('pdfReader') → 上面那个 useDataChanged 把列表刷新。
+   */
+  const onDelete = useCallback((page: number) => {
+    if (!relPath) return
+    window.dispatchEvent(new CustomEvent(KB_BOOKMARK_DELETE, { detail: { relPath, id: String(page) } }))
+  }, [relPath])
+
   if (!relPath) {
     return (
       <div data-wb="pdfRailPanel" data-wb-state="empty" className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-[var(--text-muted)]">
@@ -176,7 +185,7 @@ export function PdfRailPanel({ readerDoc }: Props) {
         <PdfThumbGrid pdf={pdf} numPages={pdf?.numPages ?? 0} current={current} duo={duo} onJump={goto} />
       )}
       {section === 'bookmarks' && (
-        <PdfBookmarkList bookmarks={bookmarks} current={current} duo={duo} onJump={goto} onNote={onNote} />
+        <PdfBookmarkList bookmarks={bookmarks} current={current} duo={duo} onJump={goto} onNote={onNote} onDelete={onDelete} />
       )}
     </div>
   )

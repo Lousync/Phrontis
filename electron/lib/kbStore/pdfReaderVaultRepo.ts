@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { createHash } from 'crypto'
 import { join } from 'path'
 import { exists, kbModulePath, readJson, writeJsonOrThrow } from './jsonStore'
@@ -115,6 +115,24 @@ export function pdfReaderPatchBook(rootId: string, relPath: string, patch: unkno
   return { ok: true, state: next }
 }
 
+// ===== 整本删除（彻底删书联动） =====
+
+/** 删掉一本书的进度 + 书签键（幂等：键不存在即成功）。**不删书文件**（那是 ws:trash 的职责）。 */
+export function pdfReaderRemoveBook(rootId: string, relPath: string): { ok: boolean; error?: string } {
+  const key = pdfBookKey(rootId, relPath)
+  if (!key) return { ok: false, error: '非法的书键' }
+  try { requireCurrentRootId(rootId) } catch (e) { return { ok: false, error: (e as Error).message } }
+  const store = readStore()
+  if (!store.books[key]) return { ok: true }
+  delete store.books[key]
+  try {
+    writeJsonOrThrow(MOD, F_STORE, store)
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+  return { ok: true }
+}
+
 // ===== 封面缓存 =====
 
 /** 封面缓存文件名：<sha1(key)>.png（键派生，方案 §11.5 与进度同键口径） */
@@ -204,4 +222,32 @@ export function pdfReaderCoverGet(rootId: string, relPath: string): string | nul
   } catch {
     return null
   }
+}
+
+/**
+ * 删掉一本书的封面缓存（png 文件 + index 条目），彻底删书联动用。幂等：无索引条目即成功。
+ * `file` 名取自磁盘上的 index.json（可被外部篡改）⇒ 只认**单层文件名**，含分隔符一律不碰盘
+ * （与 `bookCoverAbsPath` 对 `.covers` 的同款口径）。
+ */
+export function pdfReaderCoverRemove(rootId: string, relPath: string): { ok: boolean; error?: string } {
+  const key = pdfBookKey(rootId, relPath)
+  if (!key) return { ok: false, error: '非法的书键' }
+  try { requireCurrentRootId(rootId) } catch (e) { return { ok: false, error: (e as Error).message } }
+  const index = readCoverIndex()
+  const hit = index[key]
+  if (!hit) return { ok: true }
+  delete index[key]
+  try {
+    if (hit.file && !hit.file.includes('/') && !hit.file.includes('\\')) {
+      const dir = kbModulePath(COVER_DIR, '')
+      if (dir) {
+        const abs = join(dir, hit.file)
+        if (existsSync(abs)) unlinkSync(abs)
+      }
+    }
+    writeJsonOrThrow(COVER_DIR, F_COVER_INDEX, index)
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+  return { ok: true }
 }

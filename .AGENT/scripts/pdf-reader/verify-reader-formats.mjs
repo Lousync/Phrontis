@@ -1,6 +1,6 @@
 // 契约验证：书架升级全格式阅读器一期（bookshelf-reader-upgrade-design §S7）。
 //
-// 覆盖十五组断言：
+// 覆盖十六组断言：
 //   ① bookFormats 纯函数用例（扩展名识别 / 展示名 / 常量↔函数一致性）
 //   ② readerStateSchema 纯函数用例（键归一 / patch 白名单 / 修补）
 //   ③ 负向：readerState.json 单写方（只允许出现在 readerStateVaultRepo.ts）
@@ -17,6 +17,8 @@
 //   ⑬ 书签：定位键按 kind 分支 / 空数组可写 / 上限整单拒 + 两个写方共用常量（2026-09-22）
 //   ⑭ 大书体积分档（三档边界含端点 / 文案同口径）+ 读取链路镜像（字节通道 / 预分配 / core 唯一 / IPC 三处）
 //   ⑮ B-24：PDFViewer 内部 ResizeObserver 的捕获窗口与断开（withRoCapture / detachViewerDocument 第二参 / 两处调用点）
+//   ⑯ 删除书签：KB_BOOKMARK_DELETE 的派发侧（右栏三引擎 + PDF 左栏）与承接侧（三个阅读器）双侧接线，
+//     并锁「由持内存权威数组的阅读器执行删除、派发方不得直接写盘」这条防复活纪律
 //
 // 运行（项目根目录）：
 //   node --experimental-strip-types --no-warnings .AGENT/scripts/pdf-reader/verify-reader-formats.mjs
@@ -510,6 +512,111 @@ console.log('\n--- ⑭ 大书体积分档 + 读取链路 ---')
     !/detachViewerDocument\(\s*[A-Za-z_$][\w$]*\s*\)/.test(pdfView))
   // 卸载后清空 ref：避免同一实例被下次卸载重复 disconnect（虽幂等，但留下引用会拴住元素）
   check('卸载路径清空 viewerRoRef（不跨次残留引用）', /viewerRoRef\.current = \[\]/.test(pdfView))
+}
+
+// ===== ⑯ 删除书签：事件回派双侧接线（2026-09-23）=====
+// 防回归点：书签删除**不能由派发方直接写盘**。三个阅读器把书签存在内存权威数组里
+// （`EpubReaderView.bkmRef` / `TxtReaderView.bkmRef` / `PdfReaderView.bookmarks`），而「加书签」
+// 是**整数组覆盖写**；三者又都不监听 readerState / pdfReader 广播。派发方若直接 patch，
+// 阅读器内存里的旧数组会在用户下一次加书签时把删掉的条目写回去 —— **静默复活**，无任何报错。
+// ⇒ 契约锁三件：① 常量与双侧接线在场；② 承接方确实用**自己的内存数组**过滤后再走既有写路径；
+//   ③ 负向：派发方（右栏 / 左栏）不得引入 readerStatePatch / pdfReaderPatch。
+// 运行期判据（含「删完再加一条不会复活」）在 probe 侧。
+{
+  console.log('\n--- ⑯ 删除书签：事件回派双侧接线 ---')
+  const EVENTS = 'src/components/shared/pdf/pdfEvents.ts'
+  const SIDE_PANEL = 'src/components/workbench/ReadingSidePanel.tsx'
+  const RAIL = 'src/components/shared/pdf/PdfRailPanel.tsx'
+  const BM_LIST = 'src/components/shared/pdf/PdfBookmarkList.tsx'
+  const READERS = {
+    foliate: 'src/components/shared/epub/EpubReaderView.tsx',
+    txt: 'src/components/shared/txt/TxtReaderView.tsx',
+    pdf: 'src/components/shared/pdf/PdfReaderView.tsx',
+  }
+
+  // ① 常量本身（零依赖文件，防被 pdfjs 拖进主包 —— 见 pdfEvents 头注）
+  const ev = stripComments(read(EVENTS))
+  check('pdfEvents 导出 KB_BOOKMARK_DELETE 常量',
+    /export const KB_BOOKMARK_DELETE\s*=\s*'kb-bookmark-delete'/.test(ev))
+
+  /** 取「挂监听之前的那段 handler 体」（addEventListener 前 900 字符足够覆盖 onDel 定义） */
+  const handlerOf = (src) => {
+    const i = src.indexOf('addEventListener(KB_BOOKMARK_DELETE')
+    return i < 0 ? '' : src.slice(Math.max(0, i - 900), i + 100)
+  }
+
+  // ② 承接侧：三个阅读器各挂一处、各摘一处，且只认自己那本书
+  for (const [engine, path] of Object.entries(READERS)) {
+    const src = stripComments(read(path))
+    const body = handlerOf(src)
+    check(`承接：${engine} 阅读器挂 KB_BOOKMARK_DELETE 监听`, body.length > 0)
+    check(`承接：${engine} 阅读器在卸载时摘监听`,
+      /removeEventListener\(KB_BOOKMARK_DELETE/.test(src))
+    // 只处理「给我的书」的删除请求（App 侧所有阅读器同屏共存时不得串书）
+    check(`承接：${engine} 阅读器按 relPath 过滤（不串书）`, /d\.relPath !== relPath/.test(body))
+    // ★ 核心：过滤的是**内存权威数组**，不是磁盘读回的值
+    const memArr = engine === 'pdf' ? /bookmarks\.filter\(/ : /bkmRef\.current\.filter\(/
+    check(`承接：${engine} 阅读器用内存权威数组过滤（不是重新读盘）`, memArr.test(body))
+    // 过滤后必须走与「加书签」同一条写路径（否则内存与磁盘分叉）
+    const writePath = engine === 'pdf' ? /scheduleProgress\(\s*{\s*bookmarks: next\s*}/ : /patchReader\(\s*{\s*bookmarks: next\s*}\)/
+    check(`承接：${engine} 阅读器过滤后经既有写路径落盘`, writePath.test(body))
+    // 幂等：目标不存在时不得白写一次（会让 updatedAt 乱跳、撞 patchReader 的冲突检测）
+    check(`承接：${engine} 阅读器长度未变即早退（幂等）`, /next\.length === .*\.length\)\s*return/.test(body))
+  }
+
+  // ③ 派发侧 A：右栏三引擎 + PDF 左栏，id 口径必须与承接侧一致
+  const panel = stripComments(read(SIDE_PANEL))
+  check('派发：右栏有 emitBookmarkDelete 单点封装',
+    /function emitBookmarkDelete\(relPath: string, id: string\)[\s\S]{0,200}KB_BOOKMARK_DELETE/.test(panel))
+  const delCalls = panel.match(/del: \(\) => emitBookmarkDelete\([^)]*\)/g) ?? []
+  check('派发：右栏三条引擎分支各有删除回调（foliate / pdf / txt）', delCalls.length === 3,
+    `实得 ${delCalls.length}：${JSON.stringify(delCalls)}`)
+  check('派发：pdf 分支的 id 用页码串（与 PdfReaderView 的 String(page) 同口径）',
+    /emitBookmarkDelete\(reading\.relPath, String\(bm\.page\)\)/.test(panel))
+  check('派发：foliate / txt 分支的 id 用 BookBookmark.id（两条）',
+    (panel.match(/emitBookmarkDelete\(reading\.relPath, b\.id\)/g) ?? []).length === 2)
+  // 右栏行内删除按钮：外层是 div（不能嵌套 button）⇒ 必须 role/tabIndex 补语义，✕ 上必须 stopPropagation
+  check('派发：右栏书签行改 div[role=button]（button 不能嵌套）',
+    /role="button"[\s\S]{0,400}data-wb="readingMark"/.test(panel) && /tabIndex=\{0\}/.test(panel))
+  check('★ 派发：右栏 ✕ 上 stopPropagation（否则点删除会顺带跳转）',
+    /e\.stopPropagation\(\);\s*m\.del\(\)/.test(panel))
+  check('派发：右栏 ✕ 有 data-wb 锚点（探针按锚点找）', /data-wb="readingMarkDel"/.test(panel))
+  // 具名 group/row：书签区外层已挂 `group`（空态提示的 hover 展开），不具名会让悬停整块时所有 ✕ 一起冒出来
+  check('★ 派发：右栏书签行用具名 group/row（避免外层 group 串味）',
+    /group\/row/.test(panel) && /group-hover\/row:opacity-100/.test(panel))
+
+  // ③ 派发侧 B：PDF 左栏书签区
+  const rail = stripComments(read(RAIL))
+  check('派发：PDF 左栏把删除回派给阅读器（不自建写盘路径）',
+    /new CustomEvent\(KB_BOOKMARK_DELETE,\s*{\s*detail:\s*{\s*relPath,\s*id:\s*String\(page\)\s*}\s*}\)/.test(rail))
+  check('派发：PDF 左栏把 onDelete 透传给 PdfBookmarkList', /onDelete=\{onDelete\}/.test(rail))
+  const list = stripComments(read(BM_LIST))
+  check('派发：PdfBookmarkList 声明 onDelete(page) 入参', /onDelete:\s*\(page: number\)\s*=>\s*void/.test(list))
+  check('派发：PdfBookmarkList 有删除按钮锚点', /data-wb="pdfBookmarkDel"/.test(list))
+
+  // ④ 负向：派发方不得直接写盘（引入任一 patch 通道 = 复活隐患重新打开）
+  check('★ 负向：右栏不引入 readerStatePatch / pdfReaderPatch',
+    !/readerStatePatch|pdfReaderPatch/.test(panel))
+  check('★ 负向：PDF 左栏的删除路径不调用 pdfReaderPatch',
+    !/KB_BOOKMARK_DELETE[\s\S]{0,400}pdfReaderPatch/.test(rail))
+  // 承接侧不得"重新读盘再过滤"（那就是另一条竞态来源）
+  for (const [engine, path] of Object.entries(READERS)) {
+    const body = handlerOf(stripComments(read(path)))
+    check(`★ 负向：${engine} 阅读器的删除 handler 内不读盘`,
+      body.length > 0 && !/readerStateGet|pdfReaderGet/.test(body))
+  }
+}
+
+// 运行期判据在场（防被静默删掉）：上面全是**静态接线** —— 而本功能的核心风险 R1
+//（「已删书签被阅读器内存旧数组写回复活」）是**时序/内存**问题，静态断言永远绿。
+// 真判据只有「删一条 → 再加一条 → 读盘」那条 CDP 探针。删掉它不会有任何报错，故在此钉一条。
+{
+  const probe = 'probes/probe-bookmark-delete.mjs'
+  let src = ''
+  try { src = readFileSync(join(ROOT, '.AGENT', 'scripts', 'workbench-shell', probe), 'utf8') } catch { /* 缺失即 fail */ }
+  check(`运行期判据在场：workbench-shell/${probe}（R1 只有真跑判得出）`, src.length > 0)
+  check('  ★ 探针含「不复活」判据（再加一条后磁盘恰 1 条且不是刚删的）',
+    /keptPara !== deletedPara/.test(src))
 }
 
 console.log(`\n${pass ? '全部通过' : '存在失败项'}`)

@@ -44,6 +44,27 @@ export function getExportEntry(rootId: string, relPath: string): ExcerptExportEn
 }
 
 /**
+ * 删掉某书的导出映射条目（彻底删书联动）。幂等：无映射即成功。
+ * ★ **只删映射，不删那篇「读书笔记」页面**（2026-09-23 拍板）——页面是用户的笔记，不是书的附属；
+ *   书没了笔记也该留着。代价：同名书重下再导出会新建一篇（映射已断），可接受。
+ */
+export function excerptExportRemove(rootId: string, relPath: string): { ok: boolean; error?: string } {
+  const key = exportKey(rootId, relPath)
+  if (!key) return { ok: false, error: '非法的书键' }
+  try { requireCurrentRootId(rootId) } catch (e) { return { ok: false, error: (e as Error).message } }
+  const store = readStore()
+  if (!store.books[key]) return { ok: true }
+  const books = { ...store.books }
+  delete books[key]
+  try {
+    writeJsonOrThrow(MOD, F_STORE, { version: 1, books })
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+  return { ok: true }
+}
+
+/**
  * 导出一本书的全部摘录为知识库「读书笔记」页（方案 C2/C3）。
  * 幂等：重复导出 = 覆盖重写同一篇（保留 id），不产生新页。
  * 自愈：映射指向的页面被用户删除 → 重新创建并回写新 id。

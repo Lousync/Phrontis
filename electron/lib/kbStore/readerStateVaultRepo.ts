@@ -113,3 +113,25 @@ export function readerStatePatchBook(rootId: string, relPath: string, patch: unk
   }
   return { ok: true, state: next }
 }
+
+// ===== 整本删除（彻底删书联动） =====
+
+/**
+ * 删掉一本书的进度 + 书签键（「删书 = 彻底删」的联动项之一）。
+ * 键不存在即视为成功（幂等）——删书时书文件已在回收站，残留键的清理由调用方触发，
+ * 与「文件在不在」无关。**不删书文件**（那是 ws:trash 的职责）。
+ */
+export function readerStateRemoveBook(rootId: string, relPath: string): { ok: boolean; error?: string } {
+  const key = readerKey(rootId, relPath)
+  if (!key) return { ok: false, error: '非法的书键' }
+  try { requireCurrentRootId(rootId) } catch (e) { return { ok: false, error: (e as Error).message } }
+  const store = readStore()
+  if (!store.books[key]) return { ok: true }
+  delete store.books[key]
+  try {
+    writeJsonOrThrow(MOD, F_STORE, store)
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+  return { ok: true }
+}

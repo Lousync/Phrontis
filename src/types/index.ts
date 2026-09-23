@@ -1719,6 +1719,10 @@ export interface ElectronAPI {
   /** 封面只读（S4 拍板 ①）：书架显示书市下到的封面用。路径守卫在主进程
    *  （只认 `.books/.covers/` 下**单层**文件名），越权 / 缺失 / 超限一律 `dataUrl: null` */
   bookMarketCoverGet: (rootId: string, coverRel: string) => Promise<{ ok: boolean; dataUrl: string | null; error?: string }>
+  /** 彻底删书（书架右键入口，2026-09-23）：书文件进系统回收站 + 清 meta/封面/进度/书签/摘录/导出映射。
+   *  best-effort —— `errors` 非空表示有步骤失败（书文件通常已回收，残留 JSON 键不影响使用）。
+   *  已导出成知识库页面的「读书笔记」**不删**。 */
+  bookMarketDeleteBook: (rootId: string, relPath: string) => Promise<{ ok: boolean; errors: string[] }>
   /** 下载队列快照推送（载荷 = **整个队列**，直接整体替换，不做增量合并） */
   onBookMarketDownloadProgress: (cb: (p: { rootId: string; tasks: BookDownloadTask[] }) => void) => () => void
   /** AI 起草的书源草案推送（S5）：渲染层据此切到书市模块并预填「新建书源」表单。

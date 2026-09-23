@@ -7,6 +7,7 @@ import {
 } from '../../lib/kbStore/bookSourceVaultRepo'
 import { probeSourceConnectivity, searchBookSources } from '../../lib/bookMarket/sourceClient'
 import { controlDownload, listDownloadQueue, startDownload } from '../../lib/bookMarket/downloader'
+import { deleteBookEverywhere } from '../../lib/bookDelete'
 
 /**
  * 书市 IPC 注册转发层（方案 §2.3）。
@@ -24,6 +25,7 @@ import { controlDownload, listDownloadQueue, startDownload } from '../../lib/boo
  *   bookMarket:downloadControl  队列逐项 / 批量控制（pause·resume·cancel·retry·pause-all·resume-all·clear-done）
  *   bookMarket:listQueue        当前仓库的队列快照
  *   bookMarket:coverGet         封面字节（**只读**，S4 拍板 ①；书架显示下载来的封面用）
+ *   bookMarket:deleteBook       彻底删书（书架右键入口）→ 书文件进系统回收站 + 清 meta/封面/进度/书签/摘录/导出映射
  *
  * ★ 位置参数 `(rootId, …)`（不是对象）—— 实测约定，同 `pdfReaderRepo.ts`。
  * ★ 写盘一律由 lib 侧广播 `broadcastDataChanged('bookMarket')`；本层只负责
@@ -112,5 +114,21 @@ export function registerBookMarketHandlers(): void {
     } catch (e) {
       return { ok: false, dataUrl: null, error: (e as Error).message }
     }
+  })
+
+  /**
+   * 彻底删书（2026-09-23 拍板：右键菜单入口 + 范围「彻底删」）。
+   *
+   * 本 handler 只做两件事：转发给 `lib/bookDelete.deleteBookEverywhere` + 广播。
+   * 七步清理的实现与顺序约束见那个文件（★ 放 `lib/` 而非 `kbStore/`：
+   * 清理要调 `workspaceManager`，而下沉进 kbStore 会形成 `kbStore → workspaceManager` 循环
+   * ——后者已 import kbStore）。核里不广播，广播留在这里，故核可被运行期探针直接调用。
+   *
+   * 广播 4 个 scope：书架监听 pdfReader/knowledge，右栏监听 readerState/pdfReader/excerpt。
+   */
+  ipcMain.handle('bookMarket:deleteBook', async (_e, rootId: string, relPath: string) => {
+    const r = await deleteBookEverywhere(String(rootId ?? ''), String(relPath ?? ''))
+    for (const s of ['pdfReader', 'knowledge', 'readerState', 'excerpt']) broadcastDataChanged(s)
+    return r
   })
 }

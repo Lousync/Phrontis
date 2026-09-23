@@ -16,6 +16,7 @@ import { resolveDegrade, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/
 import { detectScanMode, resolveScanPages } from '../../../../electron/lib/kbStore/scanDetect'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
 import type { BookScanMode, ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState, ExcerptColor, ExcerptType } from '../../../types'
+import { KB_BOOKMARK_DELETE } from './pdfEvents'
 
 // 同源 worker（v3 classic，兼容 Electron 33 / Chromium 130——v4.5+ 依赖 toHex 未实现）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -865,6 +866,26 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     setBookmarks(next)
     scheduleProgress({ bookmarks: next }, true)
   }, [bookmarks, scheduleProgress])
+
+  /**
+   * 右栏阅读侧栏 / 左栏书签区 → 阅读器：删除一条书签（见 pdfEvents 的 KB_BOOKMARK_DELETE）。
+   * ★ 由阅读器执行而非调用方直接写盘：`bookmarks` 是本组件的内存权威数组，「加书签」整数组覆盖写 ——
+   *   直接写盘的话，用户紧接着加一条书签就会把删掉的页号一起写回去（静默复活）。
+   * PDF 书签身份 = 页码，故 `id` 口径为 `String(page)`。
+   */
+  useEffect(() => {
+    const onDel = (e: Event) => {
+      const d = (e as CustomEvent).detail as { relPath?: string; id?: string } | undefined
+      if (!d?.id || d.relPath !== relPath) return
+      const next = bookmarks.filter((b) => String(b.page) !== d.id)
+      if (next.length === bookmarks.length) return
+      setBookmarks(next)
+      setHasProgressBook(next.length > 0)
+      scheduleProgress({ bookmarks: next }, true)
+    }
+    window.addEventListener(KB_BOOKMARK_DELETE, onDel)
+    return () => window.removeEventListener(KB_BOOKMARK_DELETE, onDel)
+  }, [bookmarks, relPath, scheduleProgress])
 
   // ===== 护眼（方案 §5.9：容器级 filter，书级记忆；不碰全局主题变量）=====
   const toggleEyeCare = useCallback(() => {

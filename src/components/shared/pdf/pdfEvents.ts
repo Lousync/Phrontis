@@ -10,6 +10,19 @@ export const KB_PDF_PAGE_CHANGED = 'kb-pdf-page-changed'
 /** 左栏 → 阅读器：跳页请求 */
 export const KB_PDF_GOTO_PAGE = 'kb-pdf-goto-page'
 
+/**
+ * 右栏阅读侧栏 → 阅读器：**删除一条书签**（detail: `{ relPath, id }`）。
+ *
+ * ★ 为什么必须回派给阅读器、而不是右栏直接 patch：三个阅读器把书签存在**内存权威数组**里
+ *   （`EpubReaderView.bkmRef` / `TxtReaderView.bkmRef` / `PdfReaderView.bookmarks`），而「加书签」
+ *   是**整数组覆盖写**；三者又都不监听 readerState/pdfReader 去刷新书签。
+ *   ⇒ 右栏若直接写盘，阅读器内存里的旧数组会在用户下一次加书签时把删掉的条目**写回去**（静默复活）。
+ *   回派后由阅读器用自己的 ref + `patchReader`（含 expectedUpdatedAt 冲突重试）执行，内存与磁盘始终一致。
+ *
+ * `id` 口径：readerState 系（txt / foliate）用 `BookBookmark.id`；pdf 用 `String(page)`（PDF 书签身份即页码）。
+ */
+export const KB_BOOKMARK_DELETE = 'kb-bookmark-delete'
+
 /** TXT 阅读器 → 右栏阅读侧栏：进度广播（detail: { relPath, kind:'txt', pct }） */
 export const KB_READER_STATE_CHANGED = 'kb-reader-state-changed'
 

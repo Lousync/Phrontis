@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { ArrowLeft, Bookmark, BookmarkPlus, ChevronDown, ChevronUp, Contrast, FileText, Loader2, Search, Type, X } from 'lucide-react'
 import { excerptCreate, excerptList, readerStateGet, readerStatePatch, workspaceReadRange } from '../../../lib/ipc'
 import { useDataChanged } from '../../../lib/dataChanged'
-import { KB_READER_STATE_CHANGED, KB_TXT_GOTO_PARA } from '../pdf/pdfEvents'
+import { KB_BOOKMARK_DELETE, KB_READER_STATE_CHANGED, KB_TXT_GOTO_PARA } from '../pdf/pdfEvents'
 import { decodeWith, detectEncoding, type TextEncoding } from '../../../lib/textDecode'
 import { showToast } from '../../../lib/toast'
 // 书签条数上限：**唯一真源在 schema**（写盘侧会按它整单拒绝），渲染层只读来提前拦并给出提示
@@ -463,6 +463,24 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     setBookmarks(next)
     void patchReader({ bookmarks: next })
   }, [paragraphs, patchReader])
+
+  /**
+   * 右栏阅读侧栏 → 阅读器：删除一条书签（见 pdfEvents 的 KB_BOOKMARK_DELETE）。
+   * 理由同 EpubReaderView：`bkmRef` 是内存权威数组，加书签整数组覆盖写 —— 右栏直接写盘会被复活。
+   */
+  useEffect(() => {
+    const onDel = (e: Event) => {
+      const d = (e as CustomEvent).detail as { relPath?: string; id?: string } | undefined
+      if (!d?.id || d.relPath !== relPath) return
+      const next = bkmRef.current.filter((b) => b.id !== d.id)
+      if (next.length === bkmRef.current.length) return
+      bkmRef.current = next
+      setBookmarks(next)
+      void patchReader({ bookmarks: next })
+    }
+    window.addEventListener(KB_BOOKMARK_DELETE, onDel)
+    return () => window.removeEventListener(KB_BOOKMARK_DELETE, onDel)
+  }, [relPath, patchReader])
 
   // ===== A4 字号 / 纸色（书级记忆）=====
   const changeFont = useCallback((delta: number) => {

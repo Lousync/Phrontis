@@ -1056,3 +1056,40 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **踩到的平台事实（写进探针头注，勿再栽）**：**改代理不清 HTTP 缓存** —— 同一个 URL 在改代理**之前**取过，改完再取会命中缓存**直接成功**（实测 3ms、连代理都没碰），表象是「配了死代理书市却照常成功」。故探针所有「应当失败 / 应当成功」的判定请求一律带**唯一查询串破缓存**，判的是真网络路径。
 
 **验收**：两条探针全绿（16/16 + 29/29，均经变异测试）· 主仓源码零改动（变异后已还原，`git status` 干净）· 设计文档 §9 与实施计划的手工项标注同步结清。
+
+---
+
+## 31. 书架「删除书籍」+ 阅读器「删除书签」（2026-09-23）
+
+**需求**（用户口语）：「将两个删除操作完善一下，一个是删书，一个是删除书签」。方案见 `.claude/plans/delete-book-and-bookmark.md`。
+
+**两条拍板**（2026-09-23 用户）：① 删书入口 = **右键菜单**（封面卡 + 续读卡），范围 = **彻底删**：书文件进系统回收站，进度 / 书签 / 摘录 / 导出映射一并清，**已导出的「读书笔记」页面保留**；② 书签删除要覆盖右栏三引擎（pdf / txt / foliate）**+** PDF 左栏书签列表。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 五个「整本删除」repo 出口（阅读进度 / PDF 进度 / PDF 封面缓存 / 摘录 / 导出映射），统一 `requireCurrentRootId` + `writeJsonOrThrow` | `electron/lib/kbStore/{readerStateVaultRepo,pdfReaderVaultRepo,excerptVaultRepo,excerptExportVaultRepo}.ts` |
+| 2 | 业务核 `deleteBookEverywhere`：七步 + `step()` 单步包裹（收错误不中断）；**顺序硬约束 = 先取 meta → 再移回收站 → 最后清元数据** | `electron/lib/bookDelete.ts`（新） |
+| 3 | IPC `bookMarket:deleteBook` 只转发 + 广播四 scope（`pdfReader` / `knowledge` / `readerState` / `excerpt`） | `electron/database/repositories/bookMarketRepo.ts` |
+| 4 | 右键菜单（`useContextMenuPosition`）+ 危险态确认（三行明示「笔记页保留」）+ 吞噬动画 + `deletingRef` 防广播提前抽卡 | `src/modules/bookshelf/index.tsx` |
+| 5 | 新事件 `KB_BOOKMARK_DELETE`（右栏 / PDF 左栏 → 阅读器，detail `{ relPath, id }`） | `src/components/shared/pdf/pdfEvents.ts` |
+| 6 | 右栏书签行加 hover ✕（外层 `div[role=button]`，**button 不能嵌套**；✕ 上 `stopPropagation`）+ 具名 `group/row` | `src/components/workbench/ReadingSidePanel.tsx` |
+| 7 | 三阅读器接事件：按 `relPath` 过滤 + **用内存权威数组过滤** + 经既有写路径落盘（长度未变即早退） | `{Epub,Txt,Pdf}ReaderView.tsx` |
+| 8 | PDF 左栏书签列表加删除按钮，`onDelete(page)` 回派给阅读器（不自建写盘路径） | `PdfBookmarkList.tsx`·`PdfRailPanel.tsx` |
+
+**核心取舍（B 侧的全部理由）**：三个阅读器把书签存在**内存权威数组**里，而「加书签」是**整数组覆盖写**，且三者都没有 `useDataChanged` 去刷新书签。所以右栏**不能**直接 `readerStatePatch({bookmarks})` —— 阅读器内存里的旧数组会在用户**下一次加书签**时把删掉的条目**写回去**（静默复活，无报错）。⇒ 右栏发窗口事件、阅读器用自己的 ref 执行删除。这条通道有先例（「定位回原文」的 `KB_EPUB_GOTO_CFI` / `KB_TXT_GOTO_PARA`）。
+
+**另外两条不显然的**：
+
+- **业务核放 `lib/` 而非 `kbStore/`**：清理要调 `workspaceManager.trashWorkspacePath`，而下沉进 `kbStore/` 会形成 `kbStore → workspaceManager` 循环（后者已 import `kbStore`）。
+- **`deletingRef`**：主进程写盘后广播会让书架既有的 `useDataChanged` 触发 `load()` 重拉，卡片在动画播完前就被抽走（`.kb-deleting` 白挂）。`load()` 里把「在 `deletingRef` 中、且新清单已没有的」书保留在 UI 上，动画走完再清 ref 重拉一次。
+
+**验收**：
+
+- 契约 `verify-book-delete.mjs`（**60 条**：五个出口 / 七步 + step 包裹 / 顺序 / 广播四 scope / IPC 三处 / UI 六项 / 四条负向 / ⑧ 运行期探针在场）全绿；`verify-reader-formats.mjs` 新增 **§⑯**（**38 条**，事件回派双侧接线 + 四条负向 + 运行期判据在场）全绿。
+- **运行期探针 `probe-book-delete.cjs`（23/23，主进程探针，真实实现 esbuild 打包 + 裸 electron）**：五处 store 删前确实有键（前置断言，防「空验」）→ 删后键全无 + `.books/` 书文件与 `.covers` 封面与 pdfReader 缓存 png 全消失 → ★ **负向：导出出的「读书笔记」页面仍在磁盘上且内容非空** → 幂等：书文件已被外部删掉时再调一次不抛异常、其余五处仍清干净。
+  - 探针当场逮到**夹具**两处坑（非产品缺陷，已写进头注）：① 仓库必须先按真实形态登记（`data/vaults.json` + `settings.json` → `registerWorkspaceHandlers()`），否则「移入回收站」的路径守卫报「未授权的工作区」；② `--external:trash` 不能省 —— trash 是 ESM 且用 `import.meta.url`，打进 CJS 后变 undefined → 运行期 `Invalid URL`。
+- **运行期探针 `probe-bookmark-delete.mjs`（12/12，CDP）**：这是 **R1 回归判据**，静态断言永远绿、只有真跑「删一条 → 再加一条 → 读盘」才判得出：加书签 → 右栏 ✕ 删 → 磁盘清空 + **工具栏态复位** → 换段再加 → ★★ 磁盘**恰 1 条且不是刚删的那条**（内存数组若没跟着删，这里会是 2 条）。
+  - **变异测试（本轮实测）**：把 txt 阅读器删除 handler 里的 `bkmRef.current = next` 去掉（只更新 UI 态、不动内存权威数组）→ **§③ 仍绿、§④ 当场转红**（实得 2 条、`kept=22 deleted=22`，正是 R1 的症状）⇒ 证明 §④ 是 R1 的真判据而非空断言。还原后回绿（`grep 变异测试` = 0，源码零残留）。
+- `tsc --noEmit` 双端 0 错；`npm run build` ✓。
+
+**顺带解掉的一个探针环境限制**：条目 #29 记过「CDP 探针需独占实例，本机单实例锁被占用」——本轮改用 **`tmp/probe-app` 隔离实例**（真实目录 + junction 的 `out`/`node_modules`/`build` ⇒ `app.getAppPath()` 是那个目录名 ⇒ userData = `knowbase (dev probe-app)`，与用户自己的 dev 窗口互不打扰）。宿主脚本 **`.AGENT/scripts/workbench-shell/probes/run-probe-app.mjs`**（自备 app 目录，幂等），配套 seed 加 `--ud "knowbase (dev probe-app)"`。**不必 kill 用户的窗口**。（「junction 绕不开」那条说的是 junction **仓库根** —— 那时 `getAppPath()` 解析回真实路径；探针实例是真实目录，故有效。）

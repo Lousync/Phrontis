@@ -125,6 +125,26 @@ export function excerptDelete(rootId: string, relPath: string, id: string): Exce
   return { ok: true }
 }
 
+/**
+ * 删掉一本书的**全部摘录**（彻底删书联动）。幂等：该书无摘录即成功。
+ * ⚠️ 摘录是用户创作内容，且**回收站救不回**（它在 JSON 里，不在书文件里）——调用方（删书确认框）
+ * 必须把它写进提示文案。
+ */
+export function excerptDeleteBook(rootId: string, relPath: string): ExcerptMutateResult {
+  const key = excerptKey(rootId, relPath)
+  if (!key) return { ok: false, error: '非法的书键' }
+  try { requireCurrentRootId(rootId) } catch (e) { return { ok: false, error: (e as Error).message } }
+  const store = readStore()
+  if (!store.books[key]) return { ok: true }
+  delete store.books[key]
+  try {
+    writeJsonOrThrow(MOD, F_STORE, store)
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+  return { ok: true }
+}
+
 /** 摘录 id：node crypto UUID（与知识库 frontmatter id 同源口径） */
 function randomId(): string {
   return randomUUID()

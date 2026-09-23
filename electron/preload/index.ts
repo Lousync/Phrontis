@@ -676,6 +676,8 @@ const api = {
   bookMarketListQueue: (rootId: string) => ipcRenderer.invoke('bookMarket:listQueue', rootId),
   /** 封面只读（S4 拍板 ①）：越权/缺失/超限一律 dataUrl=null，渲染层回落纯色书卡 */
   bookMarketCoverGet: (rootId: string, coverRel: string) => ipcRenderer.invoke('bookMarket:coverGet', rootId, coverRel),
+  /** 彻底删书：书文件→系统回收站 + 清 meta/封面/进度/书签/摘录/导出映射（best-effort，errors 非空即部分失败） */
+  bookMarketDeleteBook: (rootId: string, relPath: string) => ipcRenderer.invoke('bookMarket:deleteBook', rootId, relPath),
   // 下载队列快照（载荷 = 整个队列，渲染层直接整体替换，不做增量合并）
   onBookMarketDownloadProgress: (cb: (p: { rootId: string; tasks: unknown[] }) => void) => {
     const handler = (_e: unknown, p: { rootId: string; tasks: unknown[] }) => cb(p)

@@ -1,9 +1,13 @@
 import { lazy, useCallback, useEffect, useRef, useState, Suspense } from 'react'
-import { BookOpen, Loader2, Play } from 'lucide-react'
+import { BookOpen, Loader2, Play, Trash2 } from 'lucide-react'
 import {
-  pdfReaderCoverList, pdfReaderListBooks, workspaceGetCurrent,
+  bookMarketDeleteBook, pdfReaderCoverList, pdfReaderListBooks, workspaceGetCurrent,
 } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
+import { useContextMenuPosition } from '../../lib/useContextMenuPosition'
+import { showGlobalConfirm } from '../../lib/globalConfirm'
+import { showToast } from '../../lib/toast'
+import { DeleteWipe } from '../../components/shared/DeleteWipe'
 import type { BookKind, BookListItem } from '../../types'
 import { BookCover } from './BookCover'
 import { bookEngineOf } from '../../../electron/lib/kbStore/bookFormats'
@@ -52,6 +56,13 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
   /** 封面内存缓存 relPath → dataUrl（滚动往返免重复取/渲染） */
   const coverMem = useRef(new Map<string, string>())
   const [, forceTick] = useState(0)
+  /** 删除动画状态（键 = relPath）：animating 播红色吞噬、done 收尾淡出 */
+  const [deletingMap, setDeletingMap] = useState<Map<string, 'animating' | 'done'>>(new Map())
+  /** 正在删除的书（`load()` 据此别把卡片提前抽走；用 ref 因为 load 是 useCallback） */
+  const deletingRef = useRef(new Set<string>())
+  /** 右键菜单锚点（书籍卡片 → 删除书籍） */
+  const [ctxMenu, setCtxMenu] = useState<{ relPath: string; x: number; y: number } | null>(null)
+  const { menuRef: ctxMenuRef, style: ctxMenuStyle } = useContextMenuPosition(ctxMenu)
 
   const load = useCallback(async () => {
     try {
@@ -66,7 +77,16 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
       const [r, cv] = await Promise.all([pdfReaderListBooks(), pdfReaderCoverList()])
       if (!r.ok) throw new Error(r.error ?? 'listBooks failed')
       const nextBooks = r.books ?? []
-      setBooks(nextBooks)
+      // 删除动画进行中的书：磁盘上已经没了，但卡片要留在 UI 上把动画播完 ——
+      // 否则删除后主进程的广播会立刻触发本函数，卡片在动画播完前就被抽走（.kb-deleting 白挂）。
+      // 保留 prev 的顺序，真正新增的书追加在后（网格渲染前还会 byRecent 重排）。
+      setBooks((prev) => {
+        if (!prev) return nextBooks
+        const nextSet = new Set(nextBooks.map((b) => b.relPath))
+        const kept = prev.filter((b) => nextSet.has(b.relPath) || deletingRef.current.has(b.relPath))
+        const keptSet = new Set(kept.map((b) => b.relPath))
+        return [...kept, ...nextBooks.filter((b) => !keptSet.has(b.relPath))]
+      })
       setLoadErr('')
       // 索引命中 = 键存在 + mtime 与当前扫描一致（方案 §3：不符即失效重渲染）
       const hits = new Set<string>()
@@ -94,6 +114,46 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
     coverMem.current.set(relPath, url)
     forceTick((t) => t + 1)
   }, [])
+
+  /**
+   * 右键「删除书籍」：确认 → 播吞噬动画 → 调 IPC → 收尾淡出 → 本地移除。
+   * 时序照抄 knowledge 模块的 deleteWithAnimation：动画整段走完才刷新，卡片不会半途消失。
+   * 主进程那条 handler 内部已广播 pdfReader/knowledge/readerState/excerpt，finally 里的 load() 拿新清单。
+   */
+  const deleteBook = useCallback(async (b: BookListItem) => {
+    if (!rootId || deletingRef.current.has(b.relPath)) return
+    const ok = await showGlobalConfirm({
+      title: '删除书籍',
+      message: `《${b.displayName}》将从书库中删除：\n· 书籍文件移入系统回收站\n· 阅读进度、书签、摘录一并删除，且不可恢复\n· 已导出的「读书笔记」页面保留`,
+      confirmLabel: '删除',
+      cancelLabel: '取消',
+      variant: 'danger',
+    })
+    if (ok !== true) return
+    // 正常路径下书架网格与阅读器不会同屏（阅读时整块换成阅读器），此处只是防线
+    if (reading?.relPath === b.relPath) onCloseBook?.()
+    deletingRef.current.add(b.relPath)
+    setDeletingMap((m) => new Map(m).set(b.relPath, 'animating'))
+    try {
+      const r = await bookMarketDeleteBook(rootId, b.relPath)
+      if (r.ok) showToast({ type: 'success', message: `已删除《${b.displayName}》` })
+      else showToast({ type: 'warning', message: `《${b.displayName}》已删除，但部分清理未完成`, detail: r.errors.join('；') })
+      setDeletingMap((m) => new Map(m).set(b.relPath, 'done'))
+      await new Promise<void>((res) => setTimeout(res, 420))
+    } catch (e) {
+      showToast({ type: 'error', message: '删除失败', detail: String((e as Error)?.message || e) })
+    } finally {
+      deletingRef.current.delete(b.relPath)
+      setDeletingMap((m) => { const n = new Map(m); n.delete(b.relPath); return n })
+      void load()
+    }
+  }, [rootId, reading?.relPath, onCloseBook, load])
+
+  /** 删除动画卡片附加类（.kb-deleting 自带 position:relative + pointer-events:none） */
+  const delCls = (relPath: string) => {
+    const st = deletingMap.get(relPath)
+    return st === 'animating' ? ' kb-deleting' : st === 'done' ? ' kb-deleting kb-done' : ''
+  }
 
   // 左栏 bookshelf 模块态（批次 6）：三件套（目录/缩略图/书签）经 portal 挂进左栏 slot
   const openBook = useCallback((b: BookListItem) => {
@@ -185,11 +245,13 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
                 <button
                   key={`c-${b.relPath}`}
                   onClick={() => openBook(b)}
-                  className="kb-item-in group flex w-[210px] shrink-0 items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 text-left hover:border-[var(--accent)]"
+                  onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ relPath: b.relPath, x: e.clientX, y: e.clientY }) }}
+                  className={`kb-item-in group flex w-[210px] shrink-0 items-center gap-2.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 text-left hover:border-[var(--accent)]${delCls(b.relPath)}`}
                   title={b.kind !== 'pdf' ? `已读 ${b.pct ?? 0}% · 打开继续阅读` : `第 ${b.lastPage} 页 · 打开继续阅读`}
                 >
-                  <div className="w-[44px] shrink-0" style={{ aspectRatio: '3 / 4' }}>
+                  <div className="relative w-[44px] shrink-0" style={{ aspectRatio: '3 / 4' }}>
                     <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={b.displayName} coverRef={b.coverRef} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
+                    {deletingMap.get(b.relPath) === 'animating' && <DeleteWipe />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{b.displayName}</div>
@@ -216,11 +278,13 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
               <button
                 key={b.relPath}
                 onClick={() => openBook(b)}
-                className="kb-item-in group text-left"
+                onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ relPath: b.relPath, x: e.clientX, y: e.clientY }) }}
+                className={`kb-item-in group text-left${delCls(b.relPath)}`}
                 title={b.relPath}
               >
                 <div className="relative transition-shadow group-hover:shadow-[0_8px_22px_rgba(0,0,0,0.14)] rounded-[10px]">
                   <BookCover kind={b.kind} rootId={rootId ?? ''} relPath={b.relPath} name={b.displayName} coverRef={b.coverRef} mtime={b.mtime} cacheHit={coverHits.has(b.relPath) || coverMem.current.has(b.relPath)} onReady={(u) => onCoverReady(b.relPath, u)} />
+                  {deletingMap.get(b.relPath) === 'animating' && <DeleteWipe />}
                   {b.kind === 'pdf' && b.hasProgress && (
                     <span className="absolute bottom-1.5 right-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white">P{b.lastPage}</span>
                   )}
@@ -243,6 +307,33 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
           </div>
         )}
       </div>
+
+      {/* 书籍右键菜单（删除书籍）—— 与 NotebookList 同款：全屏遮罩层捕获外部点击关闭 */}
+      {ctxMenu && (
+        <div className="fixed inset-0 z-[60] kb-pop-layer" onClick={() => setCtxMenu(null)}>
+          <div
+            ref={ctxMenuRef}
+            style={ctxMenuStyle}
+            className="absolute min-w-[170px] rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] py-0.5 shadow-xl"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {(() => {
+              const target = list.find((b) => b.relPath === ctxMenu.relPath)
+              if (!target) return null
+              return (
+                <button
+                  onClick={() => { setCtxMenu(null); void deleteBook(target) }}
+                  data-wb="bookDeleteMenu"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[var(--danger)] transition-colors hover:bg-[var(--danger)]/10"
+                >
+                  <Trash2 size={14} />删除书籍
+                </button>
+              )
+            })()}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

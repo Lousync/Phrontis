@@ -41,18 +41,24 @@ const API_REL = 'src/types/index.ts'
 const IPC_REL = 'src/lib/ipc.ts'
 const REPO_REL = 'electron/database/repositories/bookMarketRepo.ts'
 const READER_REL = 'src/components/shared/epub/EpubReaderView.tsx'
+/** 装载闸（B-16 起体积上限的唯一真相源，零依赖叶子） */
+const GATE_REL = 'electron/lib/kbStore/bookSizeGate.ts'
 const SCHEMA_REL = 'electron/lib/kbStore/bookMarketSchema.ts'
 
 // ===== ① 128MB 两处同值 =====
-console.log('\n--- ① 体积上限：下载器 ↔ 阅读器引擎（两处同值）---')
+console.log('\n--- ① 体积上限：下载器 ↔ 阅读器装载闸（两处同值）---')
 const LITERAL_RE = /MAX_BOOK_BYTES\s*=\s*([0-9*\s]+)/
 const dlMax = (code(DL_REL).match(LITERAL_RE) ?? [])[1]
-const readerMax = (read(READER_REL).match(LITERAL_RE) ?? [])[1]
+// ★ 2026-09-23 改靶：阅读器侧的体积上限**不再是**组件内的 `MAX_BOOK_BYTES`
+//   （B-16「大书体积分档」已把阈值搬到零依赖叶子 `bookSizeGate.ts`：≤128MB 静默 / 128–384MB 确认 / >384MB 拒）。
+//   断言意图不变 —— 「下载器能下到的书，阅读器必须装得下」，两处数值仍必须相等；
+//   只是被测对象从组件常量换成装载闸的静默档。原先读 EpubReaderView 的写法在 B-16 后恒为 NaN（假红）。
+const gateMax = (code(GATE_REL).match(/BOOK_SILENT_MAX\s*=\s*([0-9*\s]+)/) ?? [])[1]
 const evalLiteral = (s) => (s ? s.split('*').reduce((a, b) => a * Number(b.trim()), 1) : NaN)
 check('下载器有 MAX_BOOK_BYTES 常量', !!dlMax, dlMax ?? '未找到')
-check('阅读器有 MAX_BOOK_BYTES 常量', !!readerMax, readerMax ?? '未找到')
-check('★ 两处同值（= 128MB）', evalLiteral(dlMax) === 128 * 1024 * 1024 && evalLiteral(dlMax) === evalLiteral(readerMax),
-  `${evalLiteral(dlMax)} vs ${evalLiteral(readerMax)}`)
+check('装载闸有 BOOK_SILENT_MAX 常量（静默档）', !!gateMax, gateMax ?? '未找到')
+check('★ 两处同值（= 128MB）', evalLiteral(dlMax) === 128 * 1024 * 1024 && evalLiteral(dlMax) === evalLiteral(gateMax),
+  `${evalLiteral(dlMax)} vs ${evalLiteral(gateMax)}`)
 // ★ 2026-09-22 随 S4 挪窝：常量本体搬到**零依赖叶子** `bookMarketSchema.ts`
 //   （下载器与 vaultBookMetaRepo 都要用它，留在 downloader.ts 会形成循环 import），
 //   downloader 改为 re-export 保持既有引用面不变。所以断言改成「真源在 schema」+「下载器仍在用」。
@@ -111,7 +117,8 @@ const ipcSrc = code(IPC_REL)
 const memberOf = (channel) => `bookMarket${channel.split(':')[1][0].toUpperCase()}${channel.split(':')[1].slice(1)}`
 // 2026-09-22 书市 S4：10 → 11 —— 新增**只读**的 `bookMarket:coverGet`（书架显示书市下到的
 // 封面，S4 拍板 ①）。这条数字是「加通道要显式改这里」的闸门，不是许愿池：加通道请连注释一起改。
-check('通道数是 11（书源 5 + 检索 1 + 下载 3 + 队列 1 + 封面只读 1）', channels.length === 11, channels.join(','))
+// 2026-09-23 删书：11 → 12 —— 新增 `bookMarket:deleteBook`（书架右键整本删除，写通道）。
+check('通道数是 12（书源 5 + 检索 1 + 下载 3 + 队列 1 + 封面只读 1 + 删书 1）', channels.length === 12, channels.join(','))
 for (const ch of channels) {
   const member = memberOf(ch)
   const ok = preloadSrc.includes(`ipcRenderer.invoke('${ch}'`)

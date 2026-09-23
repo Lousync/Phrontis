@@ -3,7 +3,7 @@ import { BookMarked, Pencil, Trash2, Check, X, Copy, Crosshair, Info, NotebookPe
 import { excerptDelete, excerptList, excerptPatch, excerptExportEntry, excerptExportNote, pdfReaderGet, readerStateGet, workspaceGetCurrent } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
 import { showToast } from '../../lib/toast'
-import { KB_PDF_PAGE_CHANGED, KB_READER_STATE_CHANGED } from '../shared/pdf/pdfEvents'
+import { KB_BOOKMARK_DELETE, KB_PDF_PAGE_CHANGED, KB_READER_STATE_CHANGED } from '../shared/pdf/pdfEvents'
 import { bookEngineOf } from '../../../electron/lib/kbStore/bookFormats'
 import type { BookBookmark, BookKind, ExcerptItem, ExcerptColor, ExcerptType, ExcerptExportEntry, PdfBookState } from '../../types'
 
@@ -55,6 +55,15 @@ function sourceLabel(e: ExcerptItem): string {
   if (e.kind === 'pdf') return `第 ${e.page ?? '?'} 页`
   if (e.kind === 'txt') return `段 ${(e.paraIndex ?? 0) + 1}`
   return e.chapter?.trim() || '正文'
+}
+
+/**
+ * 派发「删除该书签」给阅读器（**必须回派，右栏不能直接写盘**）。
+ * 理由见 `pdfEvents.ts` 的 `KB_BOOKMARK_DELETE` 注释：阅读器持内存权威数组且是整数组覆盖写，
+ * 右栏直接写盘会被阅读器下一次「加书签」静默复活。
+ */
+function emitBookmarkDelete(relPath: string, id: string): void {
+  window.dispatchEvent(new CustomEvent(KB_BOOKMARK_DELETE, { detail: { relPath, id } }))
 }
 
 interface Props {
@@ -245,6 +254,7 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
           label: b.chapter?.trim() || b.label || ' ',
           title: `跳到 ${b.label || b.chapter || '该书签'}`,
           go: () => onLocateExcerpt?.({ kind: reading.kind, cfi: b.cfi }),
+          del: () => emitBookmarkDelete(reading.relPath, b.id),
         }))
     }
     if (isPdf) {
@@ -254,6 +264,8 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
         label: bm.note || ' ',
         title: bm.note ? `第 ${bm.page} 页 · ${bm.note}` : `第 ${bm.page} 页`,
         go: () => onLocatePdfPage?.(bm.page),
+        // PDF 书签身份即页码 ⇒ id 用页码串（与 PdfReaderView 的监听口径一致）
+        del: () => emitBookmarkDelete(reading.relPath, String(bm.page)),
       }))
     }
     return plainBookmarks
@@ -265,6 +277,7 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
         label: b.label || ' ',
         title: `跳到 ${b.label || `段落 ${b.paraIndex + 1}`}`,
         go: () => onLocateExcerpt?.({ kind: 'txt', paraIndex: b.paraIndex }),
+        del: () => emitBookmarkDelete(reading.relPath, b.id),
       }))
   }, [reading.relPath, reading.kind, isPdf, bookmarks, plainBookmarks, onLocatePdfPage, onLocateExcerpt])
 
@@ -348,16 +361,30 @@ export function ReadingSidePanel({ reading, onLocatePdfPage, onLocateExcerpt }: 
                 </div>
               ) : (
                 markItems.map((m) => (
-                  <button
+                  <div
                     key={m.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={m.go}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); m.go() } }}
                     data-wb="readingMark"
-                    className="kb-item-in group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                    className="kb-item-in group/row flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"
                     title={m.title}
                   >
                     <span className="shrink-0 rounded bg-[var(--bg-hover)] px-1 py-0.5 text-[10px] text-[var(--text-secondary)]">{m.badge}</span>
-                    <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">{m.label}</span>
-                  </button>
+                    <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-secondary)] group-hover/row:text-[var(--text-primary)]">{m.label}</span>
+                    {/* 删除书签：hover 才出（与摘录卡的操作行同款）。外层是 div（不能嵌套 button），
+                        ✕ 上 stopPropagation 防止误触发跳转。用具名 group/row —— 外层书签区还挂着
+                        `group`（空态提示的 hover 展开用），不具名会让「悬停整块时所有 ✕ 一起冒出来」。 */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); m.del() }}
+                      data-wb="readingMarkDel"
+                      title="删除书签"
+                      className="shrink-0 rounded p-0.5 text-[var(--text-muted)] opacity-0 hover:bg-[var(--bg-hover)] hover:text-[var(--danger)] group-hover/row:opacity-100"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
                 ))
               )}
             </div>
