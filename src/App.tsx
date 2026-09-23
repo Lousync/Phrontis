@@ -1080,16 +1080,8 @@ export default function App() {
     window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath, from: 'knowledge' } }))
   }
 
-  // 日程打卡侧边栏：标题栏按钮 + Ctrl+Alt+S 统一入口（v3.4.0 批次4 起语义 = 脱离 toggle）：
-  // - 脱离中 → 吸附回右栏（关独立窗口，控件互斥解除）
-  // - 未脱离 → 脱离为独立桌面窗口（内嵌态已由右栏小工具承担）
-  const toggleDayPanel = useCallback(() => {
-    if (dayPanelDetached) {
-      void window.api?.dayPanelDockBack?.()
-    } else {
-      void window.api?.dayPanelPopout?.()
-    }
-  }, [dayPanelDetached])
+  // 日程打卡侧边栏脱离 toggle（Ctrl+Alt+S）见上方 onDayPanelToggleVisibility 订阅；
+  // 标题栏那枚按钮已于 2026-09-23 隐藏（属未实现的「侧边栏 DIY」方向），故此处不再提供调用入口。
 
   // Ctrl+= / Ctrl+- zoom — synced with settings
   // 作用域仲裁（2026-09-20 反馈「界面缩放和页面缩放冲突」）：正在书架里读 PDF 时，
@@ -1312,10 +1304,7 @@ export default function App() {
     <div className={`flex flex-col h-screen bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)] overflow-hidden ${winRounded ? 'rounded-[var(--window-radius)]' : 'rounded-none'}`}>
       <CodePluginHosts />
       {zenLevel < 2 ? (
-        <TitleBar
-          dayPanelActive={dayPanelDetached}
-          onToggleDayPanel={toggleDayPanel}
-        />
+        <TitleBar />
       ) : (
         <ZenHotZone zenLevel={zenLevel} onZenLevelChange={changeZen} />
       )}

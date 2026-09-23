@@ -8,14 +8,15 @@
 **DesignProcess** — https://github.com/Lousync/DesignProcess （PRIVATE）
 本地路径：`E:\Projects\DesignProcess\`
 
-**定位：软件设计过程的留存库**（不只是文档与原型）——收录「立项 → 调研 → 方案 → 交互原型 → 视觉 → 落地 → 验收」全链路产物。六类目录：
+**定位：软件设计过程的留存库**（不只是文档与原型）——收录「立项 → 调研 → 方案 → 交互原型 → 视觉 → 落地 → 验收」全链路产物。六类目录（另有搁置区）：
 
-- `Phrontis/方案与调研/` — 已搁置 / 已作废 / 已暂缓的方案稿 + 调研与对标注记
+- `Phrontis/方案与调研/` — 已作废、待拍板的设计方案 + 调研与对标注记
 - `Phrontis/已实现设计文档/` — 已落码的设计方案
 - `Phrontis/原型/` — 全部交互原型（HTML / drawio）
 - `Phrontis/视觉与品牌/` — 图标（含完整过程稿）、命名、文案、欢迎页设计
 - `Phrontis/过程记录/` — 决策记录、验收记录、UI 迭代截图
 - `Phrontis/内容与素材/` — 产品内容规划与素材清单
+- `Phrontis/搁置功能与想法/` — **已判过、眼下不做**的功能，连同设计方案、调研与原型整体留档（2026-09-23 建）
 
 该仓库由定时任务自动提交推送：有未提交变更时每日自动 commit + push。
 
@@ -26,7 +27,7 @@
    - 方案**已搁置 / 已作废 / 已暂缓**，不再作为开工依据；
    - 属过程证据（原型、视觉稿、迭代截图、命名与文案），且对应工作已收官。
 2. **归档动作**：从主仓库移到 DesignProcess 对应目录，随该仓库自动提交推送；同时在本文档清单中登记。
-3. **保留在主仓库的**：总纲（rework-master-plan / ai-teaching-module-rework）、**仍在推进的方案**（plugin-api-v2-*、rework-plugin-openness、rework-toolbox-as-plugins、ui-animation-plan）、活跃记录（ui-updates / verification-issues-* / 真机验证）、常驻规范（help-disclosure-pattern）。
+3. **保留在主仓库的**：总纲（rework-master-plan / ai-teaching-module-rework）、**仍在推进的方案**（plugin-api-v2-*、rework-plugin-openness、rework-toolbox-as-plugins、ui-animation-plan）、活跃记录（ui-updates）、待修台账（pending-fixes）、常驻规范（help-disclosure-pattern）。旧的 `verification-issues-*` 与真机验证记录自 2026-09-23 起转入 `Phrontis/过程记录/`。
 4. **被代码注释当规范引用的文档不回迁归档**：`.AGENT/docs/读写分工设计.md` 与 `.AGENT/docs/去库化迁移方案.md` 被 6 处代码注释 + 3 处文档引用（见下），视同常驻规范留在主仓库。
 5. **不再设二级归档区**：原 `docs/archive/`（2026-09-07 建立的本地暂存归档）已于 2026-09-12 整体并入 DesignProcess。本地只保留"活跃文档"一层，完成即一步到位进 DesignProcess，避免两处归档面职责重叠。
 6. **已知取舍**：归档会让主仓库内的相对链接失效（总纲正文按名引用已归档文档）。这是既有事实，主仓库侧不做链接维护，检索以本清单为准。
@@ -81,18 +82,97 @@
 |---|---|---|
 | delete-fx-skin.md | 已实现设计文档 | 删除动效已落码（`src/lib/deleteFx.ts` + `src/components/shared/DeleteWipe.tsx` + `settings.ts` 外观设置项） |
 | auto-update-improvements.md | 已实现设计文档 | 自动更新已落码（`electron/lib/updateService.ts`；CHANGELOG 记有 v2.13.0 事故复盘与三重防护实现） |
-| knowledge-query-design.md | 方案与调研 | 文档头「用户已立项，细节待拍板」，未落码 |
+| knowledge-query-design.md | 搁置功能与想法/库查询 | 文档头「用户已立项，细节待拍板」，未落码；2026-09-23 原型体验后判定「目前不需要」，转入搁置区 |
 | graph-view-design.md | 方案与调研 | 文档头「方案讨论稿，未落地代码」；正式规格已另档（graph-view-ui-spec.md） |
 | theme-system-design.md | 方案与调研 | 文档头「设计讨论稿 v0.1，细节待拍板」 |
 | onboarding-rework-design.md | 方案与调研 | 文档头「方案讨论稿，待拍板后实施」 |
 | ai-teaching-artifacts-pane-design.md | 方案与调研 | 文档头「方案定稿，待排期实现」 |
-| voice-input-design.md | 方案与调研 | 暂缓项目（已论证到落码级后搁置） |
+| voice-input-design.md | 搁置功能与想法/语音输入 | 已论证到落码级后搁置；2026-09-23 追认为长期不做，转入搁置区 |
 | plugin-obsidian-benchmark-20260902.md | 方案与调研 | 已完成的调研注记与对标材料 |
-| plugin-external-integration.md | 方案与调研 | 调研完成（2026-09-02），目标清单未圈定 |
+| plugin-external-integration.md | 搁置功能与想法/外部软件联动 | 调研完成（2026-09-02），目标清单未圈定；2026-09-23 定为长期不做，转入搁置区 |
 | pdf-annotation-roadmap.md | 方案与调研 | 未落码路线图 |
 | soft-copyright-application.md | 内容与素材 | 软著申请材料（资质文件，非设计方案） |
 | kaoyan-408-quiz-mode.md 等考研 4 篇 + knowledge-pack-answer-format.md | 内容与素材 | 产品内容规划与知识包契约，非代码设计 |
 | DEVELOPER.md / ai-test-bridge.md / devbridge-roadmap.md / habit-module-linkage.md | 去重删除 | 与 DP 内同名文件**逐字节相同**，`.AGENT/docs/` 侧为冗余副本，已移出仓库 |
+
+### 2026-09-23 搁置区建立（DP 内移入，非新归档）
+
+三条**已经判过、眼下不做**的材料，从 `Phrontis/方案与调研/` 与桌面（原型）移入新建的 `Phrontis/搁置功能与想法/`（按功能分子目录，原型随设计方案同行）：
+
+| 材料 | 移入去向 | 判定 |
+|---|---|---|
+| knowledge-query-design.md + 桌面原型 `库查询-原型.html` | `Phrontis/搁置功能与想法/库查询/` | 用户 2026-09-23 体验原型后判定「目前不需要」 |
+| voice-input-design.md | `Phrontis/搁置功能与想法/语音输入/` | 2026-09-23 追认为长期不做（原 2026-09-10 判缓） |
+| plugin-external-integration.md | `Phrontis/搁置功能与想法/外部软件联动/` | 2026-09-23 定为长期不做 |
+
+口径：`方案与调研/` 收「还没拍板」的，`搁置功能与想法/` 收「已判过、眼下不做」的——分家的目的是留档时一眼分得清哪些还有机会开工。判定标准与每条复活起点见 DP `Phrontis/搁置功能与想法/README.md`。
+
+### 2026-09-23 主仓 docs/ 清理归档（10 份）
+
+`docs/` 一次清出 10 份已完成使命的文档：7 份已落码的方案 + 3 份旧验收 / 真机记录。
+
+| 文档 | 去向 | 判定依据 |
+|---|---|---|
+| conversation-compaction-design.md | 已实现设计文档 | 会话压缩 C1–C3 全量落码（`agentCompressCore.ts` / `agentCompress.ts` / `agentSessionRepo.ts` / `chatCommands.ts`） |
+| ai-input-bubble-design.md | 已实现设计文档 | 已落码（2026-09-15 `9dc2c3e`，v3.2.0 条目 8） |
+| plugin-phase1-design.md | 已实现设计文档 | C1–C6 全量落码 |
+| notes-merge-phase1-design.md | 已实现设计文档 | Phase 1 已落地（就地编辑 + 共享 MonacoPane / tabPolicy） |
+| notes-merge-phase2-design.md | 已实现设计文档 | Phase 2 已落地——`src/lib/appModules.ts:44`「editor 模块整体退役（2026-09-20 阶段四）」 |
+| note-identity-unify-design.md | 已实现设计文档 | 已落码：`auto:<rel>` 兜底（`mdEntryFields.ts`）、`status` 双态退役（`knowledgeVaultRepo.ts`）、归档清单退役（`knowledgeIndex.ts` 阶段三） |
+| knowledge-index-design.md | 已实现设计文档 | 已落码（`electron/lib/kbStore/knowledgeIndex.ts`，含 2026-09-20 阶段三）；文档头「待评审后分期落码」是过期状态 |
+| verification-issues-20260904.md | 过程记录 | 旧验收问题归集（IC 已实锤定位、修复另开），作过程证据留存 |
+| verification-issues-20260908.md | 过程记录 | 同上 |
+| ai-teaching-真机验证-问题记录-20260907-第二轮.md | 过程记录 | 旧真机验证记录，对应版本已多轮迭代 |
+
+**仍留主仓的**（本轮未动，口径见规则 3）：总纲 `rework-master-plan.md` / `ai-teaching-module-rework.md`；活跃 `ui-animation-plan.md` / `ui-updates.md` / `pending-fixes.md` / `book-market-design.md`（仍在施工）/ `release-notes-design.md`（§9 有 P1 待办）；常驻规范 `help-disclosure-pattern.md`；仍在推进的插件三件套 `rework-plugin-openness.md` / `rework-toolbox-as-plugins.md` / `plugin-api-v2-design.md` + `plugin-api-v2-reference.md`（P3–P7 待做）；文档自述不归档的 `ai-learn-center-design.md` 与其两份原型、`docs/prototypes/ui-animation-prototype.html`。
+
+> **评估过、本轮未归档**：`bookshelf-reader-upgrade-design.md`（一期 S1–S8 已实施，但文档自述「当前支持哪些格式看 `.claude/plans/b-epub-formats.md`」——二期 cbz 未开工，暂留）、`share-card-design.md`（待拍板）、`workbench-split-scope-design.md`（方案定稿、是否已随 v3.4.0 三栏外壳实施待确认）。
+
+### 2026-09-23 `outputs/` 清理归档（21 项）
+
+`outputs/` 一次清出 21 项已完成使命的材料，主仓库从 41 项降到 19 项。
+
+| 材料 | 去向 | 判定依据 |
+|---|---|---|
+| ai-input-style-prototype.html | 原型 | 已落码：`assistantInputStyle` 九套外观（`settings.ts:222`、`ChatBody.tsx:11` useInputShell） |
+| b4-inline-suggest-v2-prototype.html / b4-toggle-prototype.html / b4-inline-suggest-plan.md | 原型 + 已实现设计文档 | B4 内联建议三键已落码（`settings.ts:224-226`、`lib/inlineSuggestTrigger.ts`、`electron/lib/aiAssistant/inlineSuggest.ts`） |
+| b1-ref-mention-plan.md | 已实现设计文档 | @ 引用已落码（`ChatBody.tsx:507`、`agentCompressCore.ts:148` buildRefSkeleton） |
+| b2-perception-plan.md | 已实现设计文档 | 感知模式已落码（`settings.ts:223`、`electron/lib/aiAssistant/perception.ts`） |
+| bookshelf-sidebar-prototype.html | 原型 | B 方案（封面+进度条）已落码（`src/modules/bookshelf/BookshelfSideList.tsx`） |
+| edge-hint-prototype.html | 原型 | 已落码 `34122b4`（`EpubReaderView.tsx:133-141` edgePageHint 四档） |
+| edge-pagebar-prototype.html | 原型 | WorkbenchPageBar / PageTabStrip 已落码（`src/components/workbench/PageTabStrip.tsx`） |
+| notes-toolbar-prototype.html | 原型 | 悬浮栏已落码（`PageEditor.tsx:895` portal 悬浮胶囊，2026-09-20） |
+| plugin-icon-options.html | 原型 | B-9 已落码（`ActivityBar.tsx:26-34` 拼图→包裹箱） |
+| toolbar-label-collapse.html + toolbar-label-collapse-preview.png | 原型 + UI迭代截图 | `.kb-fit` 按宽退化已落码（`PdfReaderView.tsx:1217`、`index.css` .kb-fit 段） |
+| workbench-activity-layer-prototype.html | 原型 | 页面条置顶+胶囊分段已落码（`App.tsx:1524` floatBar） |
+| workbench-split-prototype.html | 原型 | 「两栏共用一条顶栏」已实现并验收（`WorkbenchPageBar.tsx:161/239`） |
+| workbench-tabbar-v2-prototype.html | 原型 | 已落码 `92e3232`（`App.tsx:861` openTabs 恢复标签条） |
+| desk-schedule-panel-plan.md | 已实现设计文档 | 文档头自述「已全部拍板并落地」`be58243` |
+| context-audit-20260916.md | 过程记录 | 会话上下文审计已完成（结论已落 skill / memory），非开工依据 |
+| mid-pane-scroll-fixed.png | 过程记录/UI迭代截图 | 09-17 迭代截图（过程证据，规则 7） |
+| git-panel-prototype.html | 去重删除 | 与 DP `原型/` 内同名文件**逐字节相同**（`diff -q` IDENTICAL）；功能未落码（v3.3.0 git 集成被跳过），过程证据已留存 |
+| bookshelf-reader-prototype.html | 去重删除 | 同上，DP 侧同名副本逐字节相同；一期 S1–S8 已落码 |
+
+**仍留 `outputs/`（19 项）**：4 个被活跃方案按名引用的原型 —— `custom-panel-prototype.html`（`panel-editor-implementation.md`，v3.5.0 ③）、`workbench-split-scope-prototype.html`（`workbench-split-scope-design.md`）、`weave-reader-prototype.html`（`bookshelf-reader-upgrade-design.md`）、`checkin-card-prototype.html`（`share-card-design.md`）；`workbench-review/`（29 png + 4 json，`workbench-split-scope-design.md:6` 按名引用其 `split-instance-probe.json` 作观测证据）；其余待拍板（见下）。
+
+### 2026-09-23 `outputs/` 第二批归档（10 项 · 桌面外壳方向搁置）
+
+用户判定「磁贴桌面 / 模块窗口化 / 桌面枢纽层」三个方向整体不做，10 个原型文件移入 DP `Phrontis/搁置功能与想法/` 的三个新子目录：
+
+| 材料 | 去向 | 判定依据 |
+|---|---|---|
+| desktop-shell-prototype.html | 搁置功能与想法/桌面磁贴外壳 | 磁贴桌面外壳本体；已被 v3.4.0 工作台三栏外壳整体取代（`appModules.ts:40` desktop 从模块清单删除） |
+| app-shell-3col-prototype.html | 搁置功能与想法/桌面磁贴外壳 | 2026-09-15「方向升级」原型（模块窗口 → 三区布局），即三栏外壳前身；正文规格见仍在推进的 `docs/workbench-split-scope-design.md` |
+| desk-add-tile-prototype.html + .css | 搁置功能与想法/桌面磁贴外壳 | 「添加控件面板」交互稿，属磁贴外壳体系 |
+| desk-toolbar-prototype.html | 搁置功能与想法/桌面磁贴外壳 | 「工具条磁贴 + 日程面板卡片化」交互稿 |
+| daypanel-overview-prototype.html | 搁置功能与想法/桌面磁贴外壳 | 今日工作台「概览」Tab（挤压 / 覆盖对比） |
+| periodic-notes-prototype.html / periodic-notes-viz-prototype.html | 搁置功能与想法/桌面磁贴外壳 | 周期笔记磁贴 + 数据可视化 |
+| desktop-window-prototype.html | 搁置功能与想法/模块窗口化 | 模块窗口化（留空位造型 + MAX_H 3→4），代码零命中 |
+| desktop-hub-prototype.html | 搁置功能与想法/桌面枢纽层 | 全屏枢纽 / 卡片墙，代码零命中；核心场景被现有命令面板覆盖 |
+
+> **口径说明**：这三条技术上属「已被三栏外壳取代」，按搁置区 §收录判定（「已被取代者归 `方案与调研/`」）本应进 `方案与调研/`；用户明确指示进搁置区。已在 DP 侧 `搁置功能与想法/README.md` 迁入记录中标注为「将来严格化分界时的首批可回调项」。`desktop` 模块代码仍部分存在于主仓库（`src/modules/desktop/`、`src/daypanel/DayPanelWindowApp.tsx`），属「方向不做」而非「代码作废」。
+
+> **本轮评估未归档、待拍板**（仍留主仓 `outputs/`）：`ai-profile-suggest-prototype.html`（画像建议卡片 UI 是否落码待核）、`layout-customize-prototype.html` + `ob-sidebar-prototype.html`（侧边栏 DIY 三原型，DP 立项待指示）、`right-panel-widgets-prototype.html`（数据图表控件未落码，`RIGHT_PANEL_WIDGET_IDS` 仅 pomo）。
 
 ## 原型归档清单
 

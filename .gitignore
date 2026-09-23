@@ -32,7 +32,8 @@ latest.yml
 
 # 构建产物备份（npm run build 前 mv out out_prev_* 的绕法残留）
 out_prev_*/
-# electron-vite 配置的时间戳备份
+# electron-vite 加载 TS 配置时落盘的临时模块（electron-vite/dist loadConfigFormBundledFile，
+# 正常路径 import 完即 unlink；dev 被硬杀/崩溃时漏删 → 每次残留一个，可随时手删）
 electron.vite.config.*.mjs
 # 原型与截图预览输出
 outputs/

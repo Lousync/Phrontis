@@ -3,7 +3,7 @@ import { useSettings } from '../../lib/SettingsContext'
 import {
   X, Pin, ArrowDownToLine, Loader2, Play,
   Pause, Download, AlertTriangle, RefreshCw, SlidersHorizontal, ExternalLink,
-  CalendarCheck2, UserPlus, MonitorPlay,
+  UserPlus, MonitorPlay,
 } from 'lucide-react'
 import {
   useUpdateStore, updateStartupCheck, updateDownload, updatePause, updateCancel, updateInstall,
@@ -17,14 +17,7 @@ function showToastSafe(message: string): void {
   showToast({ type: 'info', message })
 }
 
-interface TitleBarProps {
-  /** 日程打卡侧边栏当前是否激活（内嵌显示中或独立窗口打开中）。用于按钮高亮 */
-  dayPanelActive?: boolean
-  /** 点击日程打卡侧边栏开关按钮：App 统一处理「脱离态→吸附 / 内嵌态→显示」逻辑 */
-  onToggleDayPanel?: () => void
-}
-
-export function TitleBar({ dayPanelActive = false, onToggleDayPanel }: TitleBarProps = {}) {
+export function TitleBar() {
   const { s: settings, update: updateSetting } = useSettings()
   const badgeEgg = settings.badgeEggActivated
   const [isMaximized, setIsMaximized] = useState(false)
@@ -322,25 +315,11 @@ export function TitleBar({ dayPanelActive = false, onToggleDayPanel }: TitleBarP
               )}
             </div>
           )}
-          {/* 「日程与打卡侧边栏」开关（= VS Code 的 toggle Panel region 语义）。
-              原先与「自定义布局」下拉同属一组；2026-09-17 开发负责人拍板把该菜单整条删除后，
-              活动栏显隐 / 禅模式 / OS 全屏收敛为只留命令面板入口，这里随之从「一组按钮」收回单枚。
-              摆在窗口按钮簇里而不放标题栏最右：Phrontis 的窗口级操作全在左簇，右侧只有绝对定位的搜索框，
-              单摆一枚图标到最右会回到「平白无故冒出来」的观感（原型里把它画在右侧是原型没对齐真机布局） */}
-          <span className="mx-1 h-4 w-px shrink-0 bg-[var(--border-color)]" aria-hidden />
-          <WinBtn
-            onClick={onToggleDayPanel ?? (() => {})}
-            title="日程与打卡侧边栏 (Ctrl+Alt+S)"
-            className="w-9"
-          >
-            <CalendarCheck2
-              size={14}
-              strokeWidth={1.5}
-              className={dayPanelActive ? 'text-[var(--accent)]' : ''}
-              fill={dayPanelActive ? 'var(--accent)' : 'transparent'}
-              fillOpacity={dayPanelActive ? 0.25 : 0}
-            />
-          </WinBtn>
+          {/* 「日程与打卡侧边栏」脱离按钮 —— 2026-09-23 隐藏。
+              原按钮把日程打卡侧边栏脱离为独立桌面窗口（v3.4.0 批次4 起语义）；
+              它属「侧边栏 DIY」方向（面板编辑器，v3.5.0 第 ③ 项），该方向未实现，故收起界面入口。
+              Ctrl+Alt+S 快捷键与 App.tsx 的 toggleDayPanel 逻辑保留，脱离能力未移除；
+              DIY 落地后按 `Phrontis/更新计划/v3.5.0.md` 第 ③ 项决定是否恢复入口。 */}
 
           <WinBtn onClick={togglePin} title={isPinned ? '取消置顶' : '窗口置顶'} className="w-9">
             <Pin size={14} strokeWidth={1.5} fill={isPinned ? 'var(--text-primary)' : 'transparent'} />
