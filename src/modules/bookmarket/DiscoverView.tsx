@@ -95,9 +95,6 @@ export function DiscoverView({ q, setQ, srcFilter, setSrcFilter, sources, loadin
     <>
       <div className="px-4 pb-5 pt-8 text-center">
         <h1 className="m-0 text-[22px] font-medium tracking-[.6px]">书市</h1>
-        <p className="mx-auto mt-2.5 max-w-[520px] text-[12.5px] leading-[1.75] text-[var(--text-muted)]">
-          从书源里找到一本书，直接下载到书架。预置的只有公版与公共目录。
-        </p>
       </div>
 
       <div className={`sticky top-0 z-[5] border-b px-4 pb-3 pt-1.5 transition-colors ${stuck ? 'border-[var(--border-color)]' : 'border-transparent'} bg-[var(--bg-primary)]`}>
