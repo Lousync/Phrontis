@@ -312,11 +312,15 @@ export default function App() {
     return () => { alive = false }
   }, [palette])
 
+  /** 切到某模块。
+   *  守卫（F-4 根治）：传入的 id 必须仍在模块清单里 —— 否则渲染层 switch 无对应 case，
+   *  会得到一个**空白页**（退役模块 id 可能来自旧持久化设置 / 插件命令 / 深链）。
+   *  非清单值时回落到 resolveStartupTab 的同一口径，不静默吞掉。 */
   const openTab = useCallback((tab: TabName) => {
-    setActiveTab(tab)
+    setActiveTab(isTabName(tab) ? tab : resolveStartupTab(undefined, s.activityBarHidden))
     setSidebarOpen(true)
     setPalette(null)
-  }, [])
+  }, [s.activityBarHidden])
 
   /** 插件命令执行分发（plugin-phase1-design C3）：有视图 → 切模块激活；code 插件 → 推常驻 Worker */
   const SLOT_MODULE: Record<string, TabName> = { knowledge: 'knowledge', blog: 'blog', schedule: 'schedule', aiTeach: 'aiTeaching' }
@@ -454,12 +458,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsReady, loaded])
 
-  /** 「知道了」：回到进更新说明之前那个模块（没有来源时退回启动模块） */
+  /** 「知道了」：回到进更新说明之前那个模块（没有来源时退回启动模块）。
+   *  退回必须走 resolveStartupTab 归一化 —— 直接用 s.startupTab 会拿到未迁移的旧值
+   *  （如已退役的 `editor`），openTab 出去就是一个空白标签页（F-4）。 */
   const dismissReleaseNotes = useCallback(() => {
     const prev = tabBeforeNotes.current
     tabBeforeNotes.current = null
-    openTab(prev ?? ((s.startupTab as TabName) || 'blog'))
-  }, [openTab, s.startupTab])
+    openTab(prev ?? resolveStartupTab(s.startupTab, s.activityBarHidden))
+  }, [openTab, s.startupTab, s.activityBarHidden])
 
   // Apply theme class to <html> — reacts to async loaded settings (fixes stale-default bug)
   // 插件主题:先确保 <style> 已注入,再应用主题类(插件主题依赖运行时注入的 CSS 变量)
@@ -689,8 +695,13 @@ export default function App() {
   // Listen for release-notes:open — 设置→关于与更新 / 活动栏齿轮菜单的手动入口。
   // 走事件而非 prop：与 settings:open / help:open / onboarding:show 的既有通道一致，
   // 模块页本身不需要知道是谁把它打开的。
+  // 同时记下来源（F-4）：手动打开也要让「知道了」能回到原模块，否则会另开一个标签页。
   useEffect(() => {
-    const handler = () => { setActiveTab('releaseNotes'); setSidebarOpen(true); setPalette(null) }
+    const handler = () => {
+      const prev = activeTabRef.current
+      tabBeforeNotes.current = prev === 'releaseNotes' ? null : prev
+      setActiveTab('releaseNotes'); setSidebarOpen(true); setPalette(null)
+    }
     window.addEventListener('release-notes:open', handler)
     return () => window.removeEventListener('release-notes:open', handler)
   }, [])
