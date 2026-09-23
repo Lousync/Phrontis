@@ -133,10 +133,10 @@ npm run pack     # build + electron-builder 打包
 | 动效方案与落地进度 | `docs/ui-animation-plan.md` |
 | 帮助披露规范 | `docs/help-disclosure-pattern.md` |
 | 更新说明机制（触发规则 / 数据三层） | `docs/release-notes-design.md` |
-| 未决问题收集 | `docs/verification-issues-*.md`；待修 bug 清单 `docs/pending-fixes.md` |
+| 待修 bug 清单 | `docs/pending-fixes.md`（旧验收记录 `verification-issues-*` 与真机验证记录 2026-09-23 已转入 DP `Phrontis/过程记录/`） |
 | 设计文档 / 原型去哪了 | `docs/DESIGN-ARCHIVE.md` —— 已落码或已搁置的方案与原型统一归档在独立库 **DesignProcess** |
 
-**已评估暂缓、勿重复调研**：语音输入 ASR（`docs/voice-input-design.md` 已论证到落码级）。
+**已评估暂缓、勿重复调研**：语音输入 ASR（方案已论证到落码级；设计稿与同类搁置项在 DP `Phrontis/搁置功能与想法/`）。
 
 ## CodeGraph
 
