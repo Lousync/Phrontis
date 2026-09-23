@@ -1,6 +1,6 @@
 {
   "name": "knowbase",
-  "version": "3.4.0-beta.1",
+  "version": "3.4.0-beta.2",
   "description": "Phrontis — 本地 Windows 桌面知识管理工具（原 Knowbase Programmer Edition）",
   "main": "./out/main/index.js",
   "scripts": {
