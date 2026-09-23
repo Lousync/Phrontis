@@ -39,10 +39,50 @@ let pending: Promise<PdfViewerKit> | null = null
  * `setDocument(null)` 就是卸载：内部走 `_cancelRendering()` + `_resetView()`（清空 viewer DOM、
  * 回收页视图）。但类型声明只收 `PDFDocumentProxy`、运行期才接受 null，所以在这一处集中断言，
  * 免得每个调用点各写一遍 as。
+ *
+ * ⚠️ `setDocument(null)` **不碰** `PDFViewer` 构造器里自建的那个内部 `ResizeObserver`
+ * （pdf_viewer.js:6003 建、:6021 `observe(this.container)`，全文件找不到任何 `disconnect()`
+ * 或 `destroy()`）—— 而活动观察会**拴住**目标容器，目标又被 viewer 引用 ⇒ 每开一次 PDF 就
+ * 永久留一整套 viewer 图。补偿手段是第二参 `observers`：宿主用 `withRoCapture` 收下的实例，
+ * 在这里逐个断开。**两件事分工不同、都要做**：`setDocument(null)` 清视图，`disconnect()` 断观察。
  */
-export function detachViewerDocument(viewer: unknown): void {
+export function detachViewerDocument(viewer: unknown, observers?: readonly ResizeObserver[] | null): void {
   const v = viewer as { setDocument?: (doc: unknown) => void } | null | undefined
   v?.setDocument?.(null)
+  if (observers) {
+    for (const ro of observers) {
+      // 幂等：重复 disconnect 是合法 no-op；单个失败不该拖累其余实例
+      try { ro.disconnect() } catch { /* 忽略 */ }
+    }
+  }
+}
+
+/**
+ * 在 `fn` 的**同步执行窗口**内把 `globalThis.ResizeObserver` 换成捕获版，收集这段时间内
+ * `new ResizeObserver(...)` 出来的实例，然后原样还原（try/finally，异常也还原）。
+ * 下一次宏/微任务之后构造的实例**收不到** —— 这正是我们要的边界：
+ * pdfjs 的 `PDFViewer` 那个内部 RO 全文件只出现在三处（字段初始化 / 构造器 observe / 回调），
+ * 即**只可能建在构造期**，所以「只包 `new PDFViewer(...)` 这一句」足够。
+ *
+ * ★ 若将来升级 pdfjs 后它把 RO 建到构造期之外（比如首次 setDocument 时懒建），这里会**漏收**，
+ *   而漏收不报错、只是那件图又留下来了 —— 靠 `probe-ro-noise.mjs` 的「连开 N 次残留恒 0」兜底。
+ */
+export function withRoCapture<T>(fn: () => T): { result: T; observers: ResizeObserver[] } {
+  const g = globalThis as unknown as { ResizeObserver: typeof ResizeObserver }
+  const Real = g.ResizeObserver
+  const captured: ResizeObserver[] = []
+  class CapturingResizeObserver extends Real {
+    constructor(cb: ResizeObserverCallback) {
+      super(cb)
+      captured.push(this)
+    }
+  }
+  g.ResizeObserver = CapturingResizeObserver as unknown as typeof ResizeObserver
+  try {
+    return { result: fn(), observers: captured }
+  } finally {
+    g.ResizeObserver = Real
+  }
 }
 
 /** 装载官方 viewer 模块（同一 Promise 复用；失败不缓存，允许重试） */

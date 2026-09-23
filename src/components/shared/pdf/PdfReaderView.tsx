@@ -7,7 +7,7 @@ import {
 import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.js?url'
 import type { EventBus as PdfEventBus, PDFLinkService as PdfLinkServiceInstance, PDFViewer as PdfViewerInstance } from 'pdfjs-dist/web/pdf_viewer'
-import { detachViewerDocument, loadPdfViewerKit, type PdfViewerKit } from './pdfViewerKit'
+import { detachViewerDocument, loadPdfViewerKit, withRoCapture, type PdfViewerKit } from './pdfViewerKit'
 import { expandTextLayerHitAreas, markSearchMatches, pageNumberOf, paintExcerptOverlays, textLayerOf } from './pdfPageTools'
 import { openExternal, copyText, excerptCreate, excerptList, pdfReaderGet, pdfReaderPatch, translateInvoke, workspaceReadRange } from '../../../lib/ipc'
 import { useDataChanged } from '../../../lib/dataChanged'
@@ -163,6 +163,12 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   const eventBusRef = useRef<PdfEventBus | null>(null)
   const linkServiceRef = useRef<PdfLinkServiceInstance | null>(null)
   const kitRef = useRef<PdfViewerKit | null>(null)
+  /**
+   * 本次 viewer 构造期 `new` 出来的 `ResizeObserver`（pdfjs 在 `PDFViewer` 构造器里自建一个并
+   * `observe(container)`，且**永不 disconnect**）。由 `withRoCapture` 收下，卸载时交给
+   * `detachViewerDocument` 逐个断开 —— 否则每开一次 PDF 就永久留一整套 viewer 图。
+   */
+  const viewerRoRef = useRef<ResizeObserver[]>([])
   const [viewerReady, setViewerReady] = useState(false)
   /**
    * 页面已 init（官方 `pagesinit`）。**这是一道硬闸门**：在那之前对 viewer 的写操作
@@ -497,23 +503,27 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
         if (!alive) return
         kitRef.current = kit
         bus = new kit.EventBus()
+        const busLocal = bus // 闭包内收窄：外层 bus 是 `| null`（供 cleanup 读），箭头函数里丢窄化
         const linkService = new kit.PDFLinkService({
-          eventBus: bus,
+          eventBus: busLocal,
           // 外链不在应用内导航：target=_blank 触发主进程 setWindowOpenHandler → shell.openExternal
           // （主进程另有 will-navigate 守卫兜底），内部 dest 由 AnnotationLayer 自己的 onclick 走
           // PDFLinkService.goToDestination
           externalLinkTarget: kit.LinkTarget.BLANK,
         })
-        const viewer = new kit.PDFViewer({
+        // ★ 只把 `new PDFViewer` 这一句包进捕获窗口：pdfjs 那个内部 RO 只建在构造期，
+        //   窗口越窄越不会误收别人的观察者（见 withRoCapture 注释）。
+        const { result: viewer, observers } = withRoCapture(() => new kit.PDFViewer({
           container,
           viewer: viewerEl,
-          eventBus: bus,
+          eventBus: busLocal,
           linkService,
           textLayerMode: 1, // TextLayerMode.ENABLE（划选/翻译/摘录的前提）
           annotationMode: 1, // AnnotationMode.ENABLE（只要链接热区，不要可交互表单件）
           maxCanvasPixels: MAX_CANVAS_PIXELS,
-        })
+        }))
         created = viewer
+        viewerRoRef.current = observers
         linkService.setDocument(pdfDoc, null)
         linkService.setViewer(viewer)
         eventBusRef.current = bus
@@ -528,7 +538,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
         bus.on('textlayerrendered', (e: { pageNumber: number }) => handlersRef.current.onTextLayerRendered(e.pageNumber))
 
         viewer.setDocument(pdfDoc)
-        if (!alive) { detachViewerDocument(viewer); return }
+        if (!alive) { detachViewerDocument(viewer, observers); return }
         setViewerReady(true)
       } catch (e) {
         if (alive) setError(`阅读器组件装载失败：${String((e as Error)?.message || e)}`)
@@ -539,7 +549,8 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
       setViewerReady(false)
       setPagesReady(false)
       pagesReadyRef.current = false
-      try { detachViewerDocument(created) } catch { /* 卸载期忽略 */ }
+      try { detachViewerDocument(created, viewerRoRef.current) } catch { /* 卸载期忽略 */ }
+      viewerRoRef.current = []
       viewerRef.current = null
       eventBusRef.current = null
       linkServiceRef.current = null

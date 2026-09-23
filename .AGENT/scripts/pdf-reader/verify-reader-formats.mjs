@@ -1,6 +1,6 @@
 // 契约验证：书架升级全格式阅读器一期（bookshelf-reader-upgrade-design §S7）。
 //
-// 覆盖十四组断言：
+// 覆盖十五组断言：
 //   ① bookFormats 纯函数用例（扩展名识别 / 展示名 / 常量↔函数一致性）
 //   ② readerStateSchema 纯函数用例（键归一 / patch 白名单 / 修补）
 //   ③ 负向：readerState.json 单写方（只允许出现在 readerStateVaultRepo.ts）
@@ -16,6 +16,7 @@
 //   ⑫ A1/A5 拆分函数（detectEncoding / decodeWith / resolveScanPages）
 //   ⑬ 书签：定位键按 kind 分支 / 空数组可写 / 上限整单拒 + 两个写方共用常量（2026-09-22）
 //   ⑭ 大书体积分档（三档边界含端点 / 文案同口径）+ 读取链路镜像（字节通道 / 预分配 / core 唯一 / IPC 三处）
+//   ⑮ B-24：PDFViewer 内部 ResizeObserver 的捕获窗口与断开（withRoCapture / detachViewerDocument 第二参 / 两处调用点）
 //
 // 运行（项目根目录）：
 //   node --experimental-strip-types --no-warnings .AGENT/scripts/pdf-reader/verify-reader-formats.mjs
@@ -419,6 +420,72 @@ console.log('\n--- ⑭ 大书体积分档 + 读取链路 ---')
   // PDF 侧刻意不动：它读的是页片段（几 MB），base64 通道够用，改它是无收益的扩散
   const pdf = stripComments(read('src/components/shared/pdf/PdfReaderView.tsx'))
   check('PDF 侧仍用 base64 通道（本批刻意不动它）', /workspaceReadRange\(/.test(pdf) && !/workspaceReadRangeBytes\(/.test(pdf))
+}
+
+// ===== ⑮ B-24：PDFViewer 内部 ResizeObserver 的捕获与断开（2026-09-23）=====
+// 防回归点：pdfjs 在 PDFViewer 构造器里自建 #resizeObserver 并 observe(container)，**永不 disconnect**
+// （全文件无 destroy()）⇒ 每开一次 PDF 永久留一整套 viewer 图。修法是宿主侧捕获（不能全局换 RO）。
+// 四条正向 + 三条负向，全部源码级；运行期判据在 probe-ro-noise.mjs。
+{
+  console.log('\n--- ⑮ B-24：PDFViewer 内部 RO 的捕获窗口与断开 ---')
+  const kit = stripComments(read('src/components/shared/pdf/pdfViewerKit.ts'))
+  const pdfRaw = read('src/components/shared/pdf/PdfReaderView.tsx')
+  const pdfView = stripComments(pdfRaw)
+
+  // 正向①：捕获工具存在，且是真·继承式包装（能 new 出真实例，不是空实现）
+  check('pdfViewerKit 导出 withRoCapture', /export function withRoCapture/.test(kit))
+  check('★ 捕获用继承包装（class extends Real）而非直接替换成假对象',
+    /class\s+CapturingResizeObserver\s+extends\s+Real/.test(kit))
+  check('★ 捕获后 try/finally 还原（异常路径也必须还原，否则全局污染）',
+    /finally\s*{[\s\S]{0,80}g\.ResizeObserver\s*=\s*Real/.test(kit))
+  check('withRoCapture 返回 { result, observers } 两件',
+    /return\s*{\s*result:/.test(kit) && /observers:/.test(kit))
+
+  // 负向①：**绝不能全局替换** —— 捕获必须在同步窗口内、且必须还原。
+  //   判据：文件里对 `g.ResizeObserver = ` 的赋值恰好两处（换成捕获版 / 还原成 Real），
+  //   多一处 = 有人在别处也动了它（那是全局替换，B-24 明令禁止）。
+  const roAssign = kit.match(/g\.ResizeObserver\s*=/g) ?? []
+  check('★ 负向：`g.ResizeObserver =` 全文恰 2 处（换捕获 + 还原），不是全局替换',
+    roAssign.length === 2, `实际 ${roAssign.length} 处`)
+  check('★ 负向：未在模块顶层（函数体之外）替换 globalThis.ResizeObserver',
+    !/^\s*g\.ResizeObserver\s*=/m.test(kit.split('export function withRoCapture')[0] ?? ''),
+    'withRoCapture 定义之前不得出现赋值')
+
+  // 正向②：detachViewerDocument 的第二参存在且逐个 disconnect（保持可选 = 向后兼容）
+  check('detachViewerDocument 第二参 observers 为可选',
+    /export function detachViewerDocument\(viewer:\s*unknown,\s*observers\?:/.test(kit))
+  check('★ detachViewerDocument 对 observers 逐个 disconnect',
+    /for\s*\(const ro of observers\)/.test(kit) && /ro\.disconnect\(\)/.test(kit))
+  check('★ 保留 setDocument(null)（清视图与断观察是两件事，不能互相替代）',
+    /v\?\.setDocument\?\.\(null\)/.test(kit))
+  // 负向②：setDocument(null) 绝不能成为 disconnect 的**替代**（删了它就等于只断观察不清视图）
+  check('★ 负向：detachViewerDocument 仍先 setDocument(null) 再断观察（顺序不可颠倒/省略）',
+    kit.indexOf('setDocument?.(null)') > -1
+    && kit.indexOf('setDocument?.(null)') < kit.indexOf('for (const ro of observers)'))
+
+  // 正向③：宿主侧真的把构造包进了捕获窗口，且**只包 new PDFViewer 这一句**
+  const wrapCall = /withRoCapture\(\(\)\s*=>\s*new kit\.PDFViewer\(/.test(pdfView)
+  check('PdfReaderView 用 withRoCapture 包住 new kit.PDFViewer', wrapCall)
+  // ★ 关键：捕获窗口必须**紧贴**构造表达式 —— 不得把别的 new 也卷进来（会误收别人的观察者）。
+  //   判据：`withRoCapture(() =>` 与 `new kit.PDFViewer(` 之间只有空白。
+  check('★ 捕获窗口紧贴构造表达式（withRoCapture(() => new kit.PDFViewer( 之间无其它语句）',
+    /withRoCapture\(\(\)\s*=>\s*new kit\.PDFViewer\(/.test(pdfView))
+  // 全文 `new kit.PDFViewer(` 恰 1 处 —— 多一处说明有未被捕获的第二条构造路径（会漏收 ⇒ 又漏一件图）
+  const ctorCount = (pdfView.match(/new kit\.PDFViewer\(/g) ?? []).length
+  check('★ 全文 `new kit.PDFViewer(` 恰 1 处（无绕过捕获窗口的第二条构造路径）',
+    ctorCount === 1, `实际 ${ctorCount} 处`)
+
+  // 正向④：observers 落到 ref，且**两个 detach 点都传了它**（早退 + 卸载；漏一个就漏一件图）
+  check('PdfReaderView 有 viewerRoRef 承接 observers', /const viewerRoRef = useRef<ResizeObserver\[\]>\(\[\]\)/.test(pdfView))
+  check('★ 构造后把 observers 存进 viewerRoRef', /viewerRoRef\.current = observers/.test(pdfView))
+  const detachCalls = pdfView.match(/detachViewerDocument\([^)]*\)/g) ?? []
+  check('★ detachViewerDocument 两处调用点都传了 observers（早退 + 卸载）',
+    detachCalls.length === 2 && detachCalls.every((c) => /observers|viewerRoRef\.current/.test(c)),
+    JSON.stringify(detachCalls))
+  check('★ 负向：不存在只传 viewer 的裸调用（detachViewerDocument(x) 单参形式已绝迹）',
+    !/detachViewerDocument\(\s*[A-Za-z_$][\w$]*\s*\)/.test(pdfView))
+  // 卸载后清空 ref：避免同一实例被下次卸载重复 disconnect（虽幂等，但留下引用会拴住元素）
+  check('卸载路径清空 viewerRoRef（不跨次残留引用）', /viewerRoRef\.current = \[\]/.test(pdfView))
 }
 
 console.log(`\n${pass ? '全部通过' : '存在失败项'}`)
