@@ -17,6 +17,11 @@
  *     这条判据不依赖计数、也不受 GC 时机影响：**只要泄漏还在，它就必然 ≥1**。
  *   ★ 判据 B（现象）：开/关一轮里 `ResizeObserver loop` 告警总数为 **0**（修前 epub 单轮 357~615）。
  *   ★ 判据 C（B-19 的回归位）：pdf / txt 同样为 0（B-19 修好后它们本来就是 0，别被本条改回去）。
+ *   ★ 判据 D（B-24 的回归位，文件末段「连开 20 次 PDF」）：**每开一次 PDF，构造期新建的 RO 都要在
+ *     返回书架时被 disconnect**（`constructed === disconnected`，实测每轮 2/2）、且「良性残留」列恒为 0、
+ *     live 恒 0。这不是「告警判据」—— pdfjs 那件图**不产生任何告警**，只能按「观察还在不在」量。
+ *     ★ 只读判据 D 的残留列不够：源码级契约曾把「错的顺序」锁绿（见 docs/pending-fixes.md B-24 结案），
+ *     所以这条切片必须在**运行期**跑，别拿契约绿当它已验。
  *
  * ★ 为什么不去 devbridge 的日志环读 `/errors`：那口环**折叠紧邻重复**（同消息只留 1 条 + count），
  *   且被 B-19 的 `console-message` 秒级限流压过 —— 一秒钟 166 条在环里只显示成几个 count。
@@ -51,8 +56,13 @@ const { evalJs } = K
 const INSTALL = `(() => {
   if (window.__roNoise) return 'already'
   const Orig = window.ResizeObserver
-  const live = new Map()          // element -> { stack }（当前仍被观察的目标）
+  // element -> { stack, owners:Set<RO> }（当前仍被观察的目标）。
+  // ★ 记 owners 而不是「一个元素一条」：同一元素可能被多个观察者同时观察，
+  //   任一观察者 disconnect/unobserve 不该把别人的观察一并抹掉。
+  const live = new Map()
   const warn = []
+  let constructed = 0
+  let disconnected = 0
   /**
    * 目标分类。★ 判据只能写成「**文档不是主的，且那个文档的 window 已经没了**」——
    * 2026-09-22 实测定死（变异测试：把 patch ⑧ 改回上游的 this.document 之门，重现 347 条告警）：
@@ -97,21 +107,49 @@ const INSTALL = `(() => {
       return out
     },
     liveCount: () => live.size,
+    /**
+     * 计数器（B-24 切片的验收位）：包装 RO **构造**次数 / **收到 disconnect** 次数 / 当前 live 条目数。
+     * 判据：本轮 constructed === disconnected（每次开 PDF 建了两个 RO —— 宿主 measure 一个、pdfjs
+     * viewer 一个 —— 返回后都得断开），否则就是漏了一个。
+     */
+    stats: () => ({ constructed, disconnected, live: live.size }),
+    resetStats: () => { constructed = 0; disconnected = 0 },
   }
   const short = (s) => String(s || '').split('\\n').slice(1, 4).map((x) => x.trim().replace(/\\s+/g, ' ')).join(' <- ').slice(0, 110)
   class RO {
     constructor(cb) {
-      const stack = short((new Error()).stack)
+      constructed++
       this.__inner = new Orig((es, ob) => {
         // 回调里若把目标改到「不可渲染」再撤观察，是合规的；这里只记录，不判断
         return cb(es, ob)
       })
-      this.__stack = stack
+      this.__stack = short((new Error()).stack)
     }
-    observe(el, ...r) { if (el) live.set(el, { stack: this.__stack }); return this.__inner.observe(el, ...r) }
-    unobserve(el, ...r) { live.delete(el); return this.__inner.unobserve(el, ...r) }
+    observe(el, ...r) {
+      if (el) {
+        let rec = live.get(el)
+        if (!rec) { rec = { stack: this.__stack, owners: new Set() }; live.set(el, rec) }
+        rec.owners.add(this)
+      }
+      return this.__inner.observe(el, ...r)
+    }
+    unobserve(el, ...r) {
+      this.__drop(el)
+      return this.__inner.unobserve(el, ...r)
+    }
+    // 从 live 里摘掉「本实例」对 el 的观察；owners 空了才真正删条目（别抹掉别人的观察）
+    __drop(el) {
+      const rec = live.get(el)
+      if (!rec) return
+      rec.owners.delete(this)
+      if (rec.owners.size === 0) live.delete(el)
+    }
     disconnect(...a) {
-      // 无法反查本实例观察了谁 —— 交给调用方在 disconnect 前 unobserve（上游三条 destroy 都是这么写的）
+      // ★ 按实例清账（B-24 收尾加）：一个观察者只能反查「自己 observe 过谁」，所以在
+      //   observe 里把 this 记进 owners（而不是「一个元素一条」）。少了这一步，修复生效后
+      //   benignDetached() 仍会报 1 —— 判据假红。B-24 的主判据就靠它区分真假。
+      for (const el of [...live.keys()]) this.__drop(el)
+      disconnected++
       return this.__inner.disconnect(...a)
     }
   }
@@ -159,36 +197,53 @@ async function waitReady(engine, tries = 40) {
   return false
 }
 
-async function backToShelf() {
-  const hit = await evalJs(`(() => {
-    const b = [...document.querySelectorAll('button')].find((x) => (x.textContent || '').includes('返回书架'))
-    if (!b) return false
-    b.click(); return true
-  })()`)
-  await sleep(900)
-  return hit
+/** 书架卡片数（用 `.books/` 前缀判，避开阅读器自身那堆 `button[title]`：目录/缩略图/书签…） */
+const shelfCards = () => evalJs(`[...document.querySelectorAll('main button[title]')].filter((b) => (b.getAttribute('title') || '').includes('.books/')).length`)
+
+/**
+ * 退到书架并**确认卡片真的在**。连开同一本书时，单次「返回书架」可能没生效
+ * （实测：下一轮仍停在阅读器里 ⇒ 点不到卡片，表象是隔次 no-card）——
+ * 可能要重复点若干次，必要时再点左栏书签。返回最终是否见到卡片。
+ */
+async function exitToShelf() {
+  for (let i = 0; i < 12; i++) {
+    if (await shelfCards() > 0) return true
+    const r = await evalJs(`(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => (x.textContent || '').includes('返回书架'))
+      if (!b) return 'no-back'
+      b.click(); return 'clicked'
+    })()`)
+    await sleep(r === 'clicked' ? 700 : 0)
+    if (r === 'no-back') { await K.openBookshelf(); await sleep(500) }
+  }
+  return (await shelfCards()) > 0
 }
 
 async function cycle(name, engine) {
-  await K.openBookshelf()
+  await exitToShelf()
   await evalJs(`window.__roNoise.reset()`)
-  const clicked = await evalJs(`(() => {
-    const re = new RegExp(${JSON.stringify(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))} + '$')
-    const b = [...document.querySelectorAll('button[title]')].find((x) => re.test(x.getAttribute('title') || ''))
-    if (!b) return 'no-card'
-    b.scrollIntoView({ block: 'center' }); b.click(); return 'ok'
-  })()`)
+  let clicked = 'no-card'
+  for (let i = 0; i < 4; i++) {
+    clicked = await evalJs(`(() => {
+      const re = new RegExp(${JSON.stringify(name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))} + '$')
+      const b = [...document.querySelectorAll('main button[title]')].find((x) => re.test(x.getAttribute('title') || ''))
+      if (!b) return 'no-card'
+      b.scrollIntoView({ block: 'center' }); b.click(); return 'ok'
+    })()`)
+    if (clicked === 'ok') break
+    await exitToShelf()
+  }
   const opened = clicked === 'ok' ? await waitReady(engine) : false
   const st = engine === 'foliate' ? await state() : opened ? 'ready' : null
   const midWarns = await evalJs(`window.__roNoise.warns()`)
   const midDead = await evalJs(`window.__roNoise.leakedFrameTargets()`)
   const midBenign = await evalJs(`window.__roNoise.benignDetached()`)
-  await backToShelf()
-  await sleep(1500)
+  const backed = await exitToShelf()
+  await sleep(1200)
   const afterWarns = await evalJs(`window.__roNoise.warns()`)
   const afterDead = await evalJs(`window.__roNoise.leakedFrameTargets()`)
   const afterBenign = await evalJs(`window.__roNoise.benignDetached()`)
-  return { clicked, opened, st, midWarns, midDead, midBenign, afterWarns, afterDead, afterBenign }
+  return { clicked, opened, st, backed, midWarns, midDead, midBenign, afterWarns, afterDead, afterBenign }
 }
 
 // --- 基线与逐本循环 ---
@@ -220,5 +275,39 @@ for (const r of rows) {
 ok('六种格式每次都确实进到 ready —— 挡住「没打开所以没告警」这类假通过',
   rows.every((r) => r.opened && r.st === 'ready'),
   JSON.stringify(rows.map((r) => [r.kind, r.opened, r.st])))
+
+// --- B-24 切片：连开 20 次 PDF，「良性残留」不得累积 ---
+// 机制：pdfjs 3.11 的 PDFViewer **每次开书**都在构造期自建一个 RO 并 observe(容器)，且无 destroy()
+//   ⇒ 每开一次留一整套 viewer 图（无告警、无自感、单向累积）。补偿 = 宿主 withRoCapture 收下构造期
+//   实例、detachViewerDocument 里逐个 disconnect()。
+// 判据（治本）：这条链断了，容器脱离文档后仍被观察 ⇒ benignDetached() 每轮 +1 ⇒ 本切片必红。
+//   ★ 与判据 A 同风格：不看 GC 时机、不看内存读数，只问「那个观察还在不在」。
+const PDF_BOOK = BOOKS.find((b) => b.kind === 'pdf')
+const PRE = await evalJs(`window.__roNoise.benignDetached()`)
+note('连开 20 次之前的良性残留（应为 0）', String(PRE.length))
+const N_OPEN = 20
+console.log(`\n连开 ${N_OPEN} 次 PDF（每次开→返回，量 RO 是否累积）：`)
+const counts = []
+const balance = []
+let allReady = true
+for (let i = 0; i < N_OPEN; i++) {
+  await evalJs(`window.__roNoise.resetStats()`)
+  const r = await cycle(PDF_BOOK.name, PDF_BOOK.eng)
+  const st = await evalJs(`window.__roNoise.stats()`)
+  if (!(r.opened && r.st === 'ready')) allReady = false
+  counts.push(r.afterBenign.length)
+  // 本轮构造了几个 RO、断了几个：每次开 PDF 应各建 2 个（宿主 measure 一个 + pdfjs viewer 一个）
+  // 且返回后都断掉 ⇒ 相等。这是「主判据」的计数形态，补 benignDetached 只看残留。
+  balance.push(`${st.constructed}/${st.disconnected}`)
+  if (i % 5 === 4 || i === N_OPEN - 1 || i < 3) {
+    console.log(`       第 ${i + 1}/${N_OPEN} 次：良性残留 ${r.afterBenign.length}  constructed/disconnected=${st.constructed}/${st.disconnected}  live=${st.live}`)
+    for (const d of r.afterBenign) console.log(`         ↳ ${d.sel}  ${d.stack}`)
+  }
+}
+ok(`连开 ${N_OPEN} 次 PDF 每次都确实进到 ready（挡住「没打开所以残留 0」的假通过）`, allReady)
+ok(`连开 ${N_OPEN} 次 PDF 每次新建的 RO 都被 disconnect（constructed === disconnected，无漏断）`,
+  balance.every((b) => { const [c, d] = b.split('/').map(Number); return c > 0 && c === d }), JSON.stringify(balance))
+ok(`连开 ${N_OPEN} 次 PDF 后良性残留恒为 0（PDFViewer 的 RO 每次都被 disconnect，不累积）`,
+  PRE.length === 0 && counts.every((c) => c === 0), JSON.stringify(counts))
 
 finish()

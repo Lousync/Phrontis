@@ -45,16 +45,24 @@ let pending: Promise<PdfViewerKit> | null = null
  * 或 `destroy()`）—— 而活动观察会**拴住**目标容器，目标又被 viewer 引用 ⇒ 每开一次 PDF 就
  * 永久留一整套 viewer 图。补偿手段是第二参 `observers`：宿主用 `withRoCapture` 收下的实例，
  * 在这里逐个断开。**两件事分工不同、都要做**：`setDocument(null)` 清视图，`disconnect()` 断观察。
+ *
+ * ★ 两件事还要**解耦**：`setDocument(null)` 在 pdfjs 3.11 下可能同步抛（实测见下方注释），
+ *   所以本函数先断观察者再清视图，且各自独立 try/catch —— 视图清理失败绝不能连累观察者断开。
  */
 export function detachViewerDocument(viewer: unknown, observers?: readonly ResizeObserver[] | null): void {
-  const v = viewer as { setDocument?: (doc: unknown) => void } | null | undefined
-  v?.setDocument?.(null)
+  // ★ 顺序要害（B-24 收尾实测，2026-09-23）：`setDocument(null)` 在 pdfjs 3.11 下**会同步抛**
+  //   （本仓实测 "Cannot read properties of null (reading 'destroy')"）。两件事分工不同，必须解耦：
+  //   **先断观察者、再清视图** —— 若按旧序（先 setDocument）来写，一次抛就把 disconnect 整段跳过，
+  //   B-24 的补偿当场失效；而上层 try/catch 会把异常吞掉，表象只是「静默继续漏」，极难发现。
   if (observers) {
     for (const ro of observers) {
       // 幂等：重复 disconnect 是合法 no-op；单个失败不该拖累其余实例
       try { ro.disconnect() } catch { /* 忽略 */ }
     }
   }
+  const v = viewer as { setDocument?: (doc: unknown) => void } | null | undefined
+  // pdfjs 的视图清理可能抛（见上）；观察者已断，这里不该再把异常抛给调用方
+  try { v?.setDocument?.(null) } catch { /* 忽略 */ }
 }
 
 /**

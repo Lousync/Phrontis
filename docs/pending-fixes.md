@@ -23,7 +23,9 @@
 > **收尾轮（2026-09-22 晚）**：**B-20 / B-21 已修并标 `[x]`**（B-20 = preload 单点扇出 + 新契约脚本；
 > B-21 = vendor patch ⑧ + 新探针 `probe-ro-noise.mjs`，含变异测试）；
 > **B-22 保持开放**是用户 2026-09-22 的显式取舍（「书签只做快速跳转」），**不是漏项**；
-> 新登记 **B-24**（pdfjs `PDFViewer` 留观察者，无告警，排查 B-21 时顺带测出）。
+> **B-23 / B-24 / B-25 / B-26 均已修并标 `[x]`（2026-09-23）** —— B-24 = pdfjs `PDFViewer` 留观察者
+> （采用 A′ 宿主侧捕获式；收尾时另修掉一处 `detachViewerDocument` 的「顺序」缺陷 —— `setDocument(null)`
+> 会抛、把 `disconnect` 整段跳过；详见该条目结案块，是「契约绿 ≠ 运行期验过」的又一实例）。
 > 教训：**并行分支登记新条目前先取另一条线的最大号**（当时主仓已到 B-16，本线从 B-12 续 ⇒ 撞号）。
 
 ---
@@ -1289,7 +1291,7 @@ CFI 与存储值**逐字相同**（探针 note 有记录）⇒ **不换字号 / 
 
 ---
 
-## B-24 pdfjs 的 `PDFViewer` 每开一次 PDF 留一个观察者（无告警，但会拴住整棵 viewer 图）（2026-09-22，P3；排查 B-21 时顺带测出）
+## [x] B-24 pdfjs 的 `PDFViewer` 每开一次 PDF 留一个观察者（无告警，但会拴住整棵 viewer 图）（2026-09-22，P3；排查 B-21 时顺带测出；**2026-09-23 已修**：A′ 宿主侧捕获式，代码本体见 `a7d2fd9`，收尾含一处「顺序」返修）
 
 **现象（无感）**：不用 RO 探针看不出来 —— 反复「开 PDF → 返回书架」不会产生任何告警，
 只是**每开一次**会多留一个仍被观察的 `.kb-pdf-scroll` 节点（B-21 结案时探针的「良性残留」那一列恒为 1）。
@@ -1321,7 +1323,7 @@ CFI 与存储值**逐字相同**（探针 note 有记录）⇒ **不换字号 / 
   ⚠ **这条修不到根上，还会把判据弄绿**（2026-09-22 补注）：RO → 它绑定的回调 → `PDFViewer` 这条引用链
   不因「目标是否脱离」而改变（保活只认「有没有活动观察」），所以换容器**不回收任何 viewer 图**；
   它唯一的效果是让探针那列**读 0** ⇒ 变成「判据绿了、问题还在」的假通过。要复用容器请连带说明为什么还要它。
-- **A′ 宿主侧捕获式（2026-09-22 补记；不需要新依赖，代价最小）**：pdfjs 那份 `pdf_viewer.js` 是
+- **A′ 宿主侧捕获式（2026-09-22 补记；不需要新依赖，代价最小）★ 本条采用、已落码（见下「结案」）**：pdfjs 那份 `pdf_viewer.js` 是
   **普通 npm 依赖**（`pdfjs-dist@^3.11.174`，无 alias、无 patch 工具），所以「A」其实还隐含一个
   载具问题（要引入 `patch-package` + `postinstall`，或把 232KB 的 CJS 文件连同相对 import 一起 vendor）。
   A′ 绕开载具：那个 RO 全文件只出现三处（`:6003` 字段初始化、`:6021` 构造器 observe、`:7374` 回调），
@@ -1335,6 +1337,52 @@ CFI 与存储值**逐字相同**（探针 note 有记录）⇒ **不换字号 / 
 看「良性残留」那一列 —— 现在恒为 1（首次开 PDF 之后），修好后应为 0。
 ★ **只有 A 能让这一列真正归零**（B 是把它涂绿），所以「连开 20 次 → 恒 0」这条验证必须连同
 「`PDFViewer` 实例可回收」一起看，别只读探针的列。
+
+### ★★ B-24 结案（2026-09-23）：A′ 已落码；收尾时抓到并修掉一处「顺序」缺陷（契约绿 ≠ 运行期验过）
+
+**落码（A′；代码本体提交 `a7d2fd9`）**：三处源码 + 一处契约。
+- `src/components/shared/pdf/pdfViewerKit.ts`：`withRoCapture(fn)`（只在 `new PDFViewer(...)` 的**同步窗口**内把
+  `globalThis.ResizeObserver` 换成继承式捕获版，try/finally 还原，返回 `{ result, observers }`）；
+  `detachViewerDocument(viewer, observers?)` 第二参逐个 `disconnect()`。
+- `src/components/shared/pdf/PdfReaderView.tsx`：构造处用捕获版 + `viewerRoRef` 承接 + 两个 detach 点（早退 / 卸载）都传下去。
+- 契约分组 ⑮（`.AGENT/scripts/pdf-reader/verify-reader-formats.mjs`，19 条含负向）。
+
+**⚠ 收尾抓到的高价值缺陷**：`a7d2fd9` 当时**运行期无效** —— `detachViewerDocument` 把 `setDocument(null)` 写在
+`disconnect` **之前**，而 pdfjs 3.11 的 `setDocument(null)` **会同步抛**（实测 `Cannot read properties of null
+(reading 'destroy')`）。一次抛就把 `disconnect` 整段跳过，外层 `try/catch` 又把异常吞掉 ⇒ **每次开 PDF 仍照漏一个**、
+且完全静默（这正是本条「无感」的又一次复现）。
+- 更糟：**契约当时把这个错的顺序锁成了断言**（旧「负向②」要求 `setDocument` 在前）⇒「契约全绿」恰恰掩盖了运行期一直漏。
+  这是本条目判据**必须跑运行期探针、不能只看源码级契约**的直接理由（同 B-21 的教训）。
+- **修正**：`detachViewerDocument` 改成**先断观察者、再 `setDocument(null)`**，两者各自独立 `try/catch`
+  （视图清理失败不得连累观察者断开）；契约负向②改成锁「观察者在前」，并新增「`setDocument(null)` 单独 try/catch」一条。
+
+**运行期主判据**（`probe-ro-noise.mjs` 新增切片「连开 20 次 PDF」；治本，**不看 GC / 内存读数**）：
+包装器按**实例**记「我观察过哪些元素」（`owners` 是 `Set<RO>` 而非「一个元素一条」：`observe` 里加 `this`，
+`disconnect`/`unobserve` 里 `__drop(this)`，owners 空了才删 `live` 条目）。据此断言：
+1. 每次开完 → 返回书架，`constructed === disconnected`（实测每轮 **2/2**：宿主 `measure` RO 一个 + pdfjs viewer RO 一个，返回后都断）；
+2. `benignDetached()`（**主文档**里脱离文档却仍被观察的目标）**恒为 0**；`live` 恒 0；
+3. 每次确实进到 `ready`（挡「没打开所以残留 0」的假通过）。
+★ 判据只问「**那个观察还在不在**」—— 与判据 A 同风格：不看告警条数、不看 GC 时机。
+
+**变异测试（必做；数字留档）**：把 `detachViewerDocument` 的观察者断开整段停掉（`if (false && observers)`）后重跑：
+- `constructed/disconnected` 变成 **2/1**（每轮恰好漏 1）；
+- 良性残留**单调累积** `2,3,4,…,21`（每次 +1）；
+- 两条新断言**当场变红**。还原后即回到 `2/2`、恒 0。
+
+**回归（2026-09-23）**：`npm run build` → 7 条相关探针（ro-noise / pdf-excerpt / excerpt-export / reading-panel / epub / fb2 / cbz）全绿；
+全量契约 **41/41**；`tsc` 双端 0 错。
+
+**探针自身的坑（省后人重走，本次都踩到）**：
+- 包装器的 `disconnect()` **必须按实例清 `live`**，否则修复生效后 `benignDetached()` 仍报 1 ⇒ 判据**假红**（计划 §3.2 已预警）。
+- 连开**同一本书**时，单次「返回书架」可能不生效（下一轮仍停在阅读器）⇒ 点不到卡片、表象是**隔次 `no-card`**。
+  要重试「返回书架」直到书架卡片**真的出现**。判「在不在书架」只能用 `main button[title]` 里含 **`.books/` 前缀**的
+  —— 阅读器自身也有一堆 `button[title]`（目录 / 缩略图 / 书签…），拿它当标志会误判。
+
+**★ 一条通用建议（写给后续）**：RO / 监听器这一族已出现 **5 次**（B-17 / B-19 / B-20 / B-21 / B-24）。
+共性 = **三方引擎的卸载契约不可信、宿主侧必须补偿**（引擎说「我 destroy 了」不等于真把观察/监听撤干净 —— pdfjs 连 `destroy()` 都没有）。
+`withRoCapture` 是「**引擎卸载守卫**」这个工具的第一块。后续再遇同类（foliate / 别的三方组件），优先复用
+「**宿主侧捕获 + 卸载时按实例断开**」这个形状，并在**探针里补一条「连开 N 次残留恒 0」**，而不是只补源码级契约 ——
+本条的教训就是：**源码级契约会把错的顺序也锁绿，只有运行期才知道它到底有没有生效。**
 
 ---
 

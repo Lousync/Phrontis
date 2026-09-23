@@ -458,10 +458,17 @@ console.log('\n--- ⑭ 大书体积分档 + 读取链路 ---')
     /for\s*\(const ro of observers\)/.test(kit) && /ro\.disconnect\(\)/.test(kit))
   check('★ 保留 setDocument(null)（清视图与断观察是两件事，不能互相替代）',
     /v\?\.setDocument\?\.\(null\)/.test(kit))
-  // 负向②：setDocument(null) 绝不能成为 disconnect 的**替代**（删了它就等于只断观察不清视图）
-  check('★ 负向：detachViewerDocument 仍先 setDocument(null) 再断观察（顺序不可颠倒/省略）',
-    kit.indexOf('setDocument?.(null)') > -1
-    && kit.indexOf('setDocument?.(null)') < kit.indexOf('for (const ro of observers)'))
+  // 负向②（B-24 收尾修正，2026-09-23）：顺序**必须**是「先断观察者、再 setDocument(null)」。
+  //   ⚠ 旧契约把顺序写反了（曾要求 setDocument 在前）—— 而 pdfjs 3.11 的 setDocument(null)
+  //   **会同步抛**（"Cannot read properties of null (reading 'destroy')"）：它在前时一次抛就把
+  //   disconnect 整段跳过，上层 try/catch 又把异常吞掉 ⇒ 补偿静默失效、运行期一直漏。
+  //   当时「契约全绿」正是被这条写反的断言锁住的。现按运行期实测事实改正（见 probe-ro-noise 切片）。
+  check('★ 负向：detachViewerDocument 必须先断观察者、再 setDocument(null)（顺序不可颠倒）',
+    kit.indexOf('for (const ro of observers)') > -1
+    && kit.indexOf('for (const ro of observers)') < kit.indexOf('setDocument?.(null)'),
+    '观察者断开必须在 setDocument 之前')
+  check('★ setDocument(null) 单独 try/catch 包裹（视图清理失败不得连累观察者断开）',
+    /try\s*{\s*v\?\.setDocument\?\.\(null\)\s*}\s*catch/.test(kit))
 
   // 正向③：宿主侧真的把构造包进了捕获窗口，且**只包 new PDFViewer 这一句**
   const wrapCall = /withRoCapture\(\(\)\s*=>\s*new kit\.PDFViewer\(/.test(pdfView)
