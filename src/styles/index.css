@@ -1327,6 +1327,23 @@ input:focus, textarea:focus, select:focus {
 .kb-fit-aiquiz { container-name: kb-aiquiz; }
 @container kb-aiquiz (max-width: 260px) { .kb-l1 { display: none; } }
 
+/* ---- ⑥ AI 助手 · 消息操作行 + 会话消耗（ChatBody.tsx 根；N-6）----
+   容器 = ChatBody 根，**三处宿主共用**（悬浮侧栏 / 工作台右栏 AI 态 / 整页 aiChat 标签）
+   —— 所以三处一起退化，验收要三处都看。宿主宽域：右栏 ResizablePanel 240–420px、
+   悬浮侧栏拖到 ≤320px 即 snap 关闭、整页远宽于此。
+
+   实测（Chromium 同引擎复刻真实字体栈 + 真标记，脚本 tmp/measure-aichat-actionrow.mjs；
+   判据 = 每个文字元素的行盒数，>1 即已折成竖排）：
+     · 全行（时间 + 会话消耗 + 复制/重新生成/删除文字）最坏 **355px**
+       —— 往日时间戳 52px + 长消耗串「↑140k ↓2.7k · 42k tokens」107px；低于它先折的是
+       「重新生成」（用户截图里「重新/生成」那一形态）。今天时间戳的形态只要 327px，
+       取最坏值以保证永不折行（口径同上方注释：宁可早一点隐）。
+     · 隐掉消耗后（时间 + 三个钮文字）最坏 **242px** —— 再低「重新生成」折竖排。
+   故两级退化：l1 隐会话消耗（360，含 ~5px 余量），l2 隐按钮文字只留图标（245）。 */
+.kb-fit-aichat { container-name: kb-aichat; }
+@container kb-aichat (max-width: 360px) { .kb-l1 { display: none; } }  /* 会话消耗 ↑… ↓… tokens */
+@container kb-aichat (max-width: 245px) { .kb-l2 { display: none; } }  /* 复制 / 编辑 / 重新生成 / 删除（文字） */
+
 
 
 /* ===== 页面条 Edge Fluent 风格（2026-09-19 反馈「模块标签页没质感」） =====

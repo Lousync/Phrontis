@@ -1853,8 +1853,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               })}
               /* 单激活（2026-09-20 深层修复）：错题本视图打开时本模块当前视图是错题本，
                  页签条目全部转非激活——激活态只落在页面条「错题本」条目上（App quizEntryActive）。
-                 此前页签照常高亮 + 错题本条目也高亮 = 双激活，看起来像同时开了两个页面。 */
-              activeId={showQuizCollection ? null : activePageId}
+                 此前页签照常高亮 + 错题本条目也高亮 = 双激活，看起来像同时开了两个页面。
+                 ★ 2026-09-26 F-8 二修：再并入「模块是不是前台标签」。**activePageId 是模块内部
+                 概念**（当前打开的是哪一页），不表达「知识库是不是前台」——人在别的标签页时
+                 页签组仍按 activePageId 高亮，零散页面看着像打开状态（用户报障）。
+                 判据用模块已有的 isActive prop（App 传 `on = t === activeTab`），不新造通道。 */
+              activeId={!isActive || showQuizCollection ? null : activePageId}
               onSelect={(id) => {
                 void handleOpenPage(id)
                 // 页签组恒挂在页面条上（其他模块激活时也可见），点击 = 要看那个页面：

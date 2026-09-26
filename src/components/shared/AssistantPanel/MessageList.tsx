@@ -37,7 +37,9 @@ function fmtTok(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n)
 }
 
-/** 聚合 assistant 回复的 llm trace 用量，渲染"↑输入 ↓输出 · 合计 tokens"小字 */
+/** 聚合 assistant 回复的 llm trace 用量，渲染"↑输入 ↓输出 · 合计 tokens"小字。
+ *  `.kb-l1` = 容器（ChatBody 根）窄于阈值时先隐它 —— 它是辅助统计，
+ *  排序在动作钮文字（`.kb-l2`）之前（N-6，阈值实测见 index.css ⑥）。 */
 function TokensOf({ trace }: { trace?: AgentTraceStep[] }): ReactNode {
   if (!trace || trace.length === 0) return null
   const llm = trace.filter(s => s.kind === 'llm')
@@ -50,12 +52,12 @@ function TokensOf({ trace }: { trace?: AgentTraceStep[] }): ReactNode {
   }
   if (hasSplit && (p > 0 || c > 0)) {
     return (
-      <span className="text-[var(--text-muted)]" title="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）">
+      <span className="kb-l1 text-[var(--text-muted)]" title="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）">
         ↑{fmtTok(p)} ↓{fmtTok(c)} · {fmtTok(p + c)} tokens
       </span>
     )
   }
-  if (hasTotal && t > 0) return <span className="text-[var(--text-muted)]">≈{fmtTok(t)} tokens</span>
+  if (hasTotal && t > 0) return <span className="kb-l1 text-[var(--text-muted)]">≈{fmtTok(t)} tokens</span>
   return null
 }
 
@@ -194,27 +196,27 @@ export function MessageList({
                 className={`flex items-center gap-0.5 transition-opacity hover:text-[var(--text-primary)] ${copiedIdx === i ? 'opacity-100' : 'opacity-0 group-hover/msg:opacity-100'}`}
                 title="复制">
                 {copiedIdx === i ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
-                {copiedIdx === i ? '已复制' : '复制'}
+                <span className="kb-l2">{copiedIdx === i ? '已复制' : '复制'}</span>
               </button>
               {m.role === 'user' && m.id && !pending && (
                 <button onClick={() => setEditing({ id: m.id!, draft: m.content })}
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-[var(--text-primary)]"
                   title="编辑并重新生成">
-                  <Pencil size={10} /> 编辑
+                  <Pencil size={10} /> <span className="kb-l2">编辑</span>
                 </button>
               )}
               {m.role === 'assistant' && i === messages.length - 1 && !pending && m.id && (
                 <button onClick={onRegenerate}
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-[var(--text-primary)]"
                   title="重新生成">
-                  <RefreshCw size={10} /> 重新生成
+                  <RefreshCw size={10} /> <span className="kb-l2">重新生成</span>
                 </button>
               )}
               {m.role === 'assistant' && m.id && !pending && (
                 <button onClick={() => onDeleteMessage(m.id!)}
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-red-400"
                   title="删除该回复">
-                  <Trash2 size={10} /> 删除
+                  <Trash2 size={10} /> <span className="kb-l2">删除</span>
                 </button>
               )}
             </div>

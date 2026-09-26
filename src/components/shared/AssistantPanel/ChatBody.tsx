@@ -251,8 +251,10 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
 
   return (
     /* 根节点必须 h-full 不能 flex-1（铁律 11）：page 态槽位容器（renderMounted div）是块级，
-       flex-1 在里面不生效 → 高度塌成内容高，输入框跟着消息区飘到面板中上部（2026-09-17 实机反馈） */
-    <div className="flex h-full min-h-0 flex-col" data-assistant-variant={variant}>
+       flex-1 在里面不生效 → 高度塌成内容高，输入框跟着消息区飘到面板中上部（2026-09-17 实机反馈）
+       .kb-fit/-aichat（N-6）：本根同时是**容器查询容器** —— 容器窄于阈值时隐「会话消耗」，
+       更窄再隐动作钮文字（三级退化，阈值与依据见 index.css ⑥）。三处宿主（悬浮/右栏/整页）同源受益。 */
+    <div className="kb-fit kb-fit-aichat flex h-full min-h-0 flex-col" data-assistant-variant={variant}>
       {/* 轻头部：仅在**有控件可放**时才渲染（2026-09-18 反馈轮）。
           悬浮侧栏的头部在其外壳上（本组件不渲染）；感知开关 2026-09-22 二次拍板**改落输入卡
           底部工具行**（与主仓侧栏同位，page / docked 态都在工具行行首）——头部回归纯导航。

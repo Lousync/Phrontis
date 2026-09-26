@@ -14,6 +14,8 @@ import { getFileTypeInfo } from '../../lib/fileTypes'
  * （开发负责人 2026-09-18 拍板：「为图标加页面名，不同的图标来区分是编辑区还是知识库」）。
  *
  * 属性契约：条目自带 `data-pb-item`（页面条空态提示靠 CSS `:has` 判定，不数子节点），
+ * `data-wb-active`（`'1' | '0'`，与 `WorkbenchPageBar` 同口径 —— 两个渲染器对「激活」
+ *   必须给同一个属性契约，否则靠该属性判态的 CSS / 探针在本组上恒失效；台账 F-8 补齐），
  * 以及 `data-tab-rel`（编辑器：激活标签自动滚入可视区依赖）或 `data-tab-id`（知识库）。
  */
 export interface StripItem {
@@ -133,6 +135,7 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
           <div
             data-pb-item
             data-pb-owner={owner}
+            data-wb-active={isActive ? '1' : '0'}
             {...{ [itemAttr]: it.id }}
             draggable={!!onReorder}
             onClick={() => onSelect(it.id)}

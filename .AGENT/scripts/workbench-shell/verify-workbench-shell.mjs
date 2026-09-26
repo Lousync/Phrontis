@@ -380,6 +380,20 @@ ok(/OWNER_COLOR/.test(srcStrip) && /PenLine/.test(srcStrip) && /BookOpen/.test(s
 ok(srcStrip.indexOf('if (items.length === 0) return null') > srcStrip.indexOf('const [draggedId'),
   'F12 页签条 hooks 全在早退之前（React #310 防线）')
 
+/* F13–F14 页签激活态（台账 F-8，2026-09-26）：
+   两个渲染器对同一「激活」概念给过不同属性契约（WorkbenchPageBar 写 data-wb-active、
+   PageTabStrip 一处不写）—— 于是靠该属性判态的 CSS / 探针在知识库页签组上恒失效。
+   本月补属性 + 并把「模块是否前台」并入激活判据（activePageId 只是模块内部概念）。 */
+ok(/data-wb-active=\{isActive \? '1' : '0'\}/.test(srcStrip),
+  'F13 PageTabStrip 写 data-wb-active（与 WorkbenchPageBar 同口径，补契约不一致的缺口）')
+ok(/data-wb-active=\{isActive \? '1' : '0'\}/.test(srcPageBar)
+  && /data-wb-active=\{quizEntryActive \? '1' : '0'\}/.test(srcPageBar),
+  'F13b WorkbenchPageBar 两个渲染点都写 data-wb-active（模块条目 + 错题本合成条目）')
+ok(/activeId=\{!isActive \|\| showQuizCollection \? null : activePageId\}/.test(srcKnowledge),
+  'F14 知识库页签组激活态并入「模块是否前台」（切走后归零，不再让零散页面看着像打开）')
+ok(!/activeId=\{showQuizCollection \? null : activePageId\}/.test(srcKnowledge),
+  'F14b 负向：旧的「只看模块内部 activePageId」写法已移除')
+
 // ===== G. 分屏整轮下线（2026-09-18 晚 · 从 v3.4.0 撤下，改排 v3.5.0）=====
 // 背景：工作台分区精细化（分屏 + 准入收窄 + 跨栏保活）整轮撤下 v3.4.0，重做排期到 v3.5.0。
 // 页面条置顶（F 段）与分屏无关、已完成验证，**保留不动**。
