@@ -212,27 +212,16 @@ function showMainWindow(): void {
   mainWindow.focus()
 }
 
-function createTray(): void {
+// F-3（2026-09-26）：托盘与任务栏图标共用 appIcon.ts 唯一事实源（isPackaged 分叉候选 +
+// 有限重试 + 内嵌真图标兜底）；打包态能从磁盘装载的前提是 package.json extraResources 带出 build/icon.png
+import { loadAppIconSync, loadAppIconWithRetry } from '../lib/appIcon'
+
+async function createTray(): Promise<void> {
   try {
-    const candidates = [
-      join(app.getAppPath(), 'build', 'icon.png'),
-      join(process.resourcesPath ?? '', 'build', 'icon.png'),
-      join(process.resourcesPath ?? '', 'icon.png'),   // 打包后 resources 根兜底
-    ]
-    let img = nativeImage.createEmpty()
-    for (const p of candidates) {
-      if (!p || p === 'icon.png') continue
-      const cand = nativeImage.createFromPath(p)
-      if (!cand.isEmpty()) { img = cand; break }
-    }
-    if (img.isEmpty()) {
-      // 兜底：所有候选路径都失败时用内置 16px 彩色占位（拒绝 Windows 空白托盘白块）
-      img = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAApUlEQVR4nK3MWwvBAByG8X00KZnTNNNY5jDMSkkppZSUUj6U8/k8p8/zuvN3/fLcPz9F+UeB8AtB9YlQ5AE1ekcsfoOW8KFrPozkFaZ+gZU6wzZOKKaPcMwDqpk9PgAze9mdAMxct7YCMHMjtxGAmZv2WgBmbuVXAjBzu7AUgJk7pYUAzNx15gIwc6/8BTBzvzITgJkH7lQAZh7WJgIw88gbC/BLb/8X7Gi3iexmAAAAAElFTkSuQmCC'
-      )
-      console.warn('[Tray] All icon candidates failed to load -> using builtin placeholder')
-    }
-    if (process.platform === 'win32') img = img.resize({ width: 16, height: 16 })
-    tray = new Tray(img)
+    const { img, source } = await loadAppIconWithRetry(4, 400, (m) => console.warn('[Tray]', m))
+    let image = img
+    if (process.platform === 'win32') image = image.resize({ width: 16, height: 16 })
+    tray = new Tray(image)
     tray.setToolTip('Phrontis · 日程打卡')
     const rebuildMenu = () => {
       tray?.setContextMenu(Menu.buildFromTemplate([
@@ -251,7 +240,7 @@ function createTray(): void {
     // 模式变化时刷新托盘单选状态
     onPanelModeChanged(rebuildMenu)
     tray.on('click', showMainWindow)
-    console.log('[Tray] Tray created')
+    console.log('[Tray] Tray created (icon source:', source + ')')
   } catch (e) {
     console.warn('[Tray] Failed to create (non-fatal):', e)
   }
@@ -270,7 +259,7 @@ function createWindow(): void {
     frame: false,                          // 无边框 → 自定义标题栏
     titleBarStyle: 'hidden',              // macOS 隐藏原生标题栏
     transparent: true,                     // 透明底 → 根容器 18px 自绘圆角（最大化时渲染层自动切直角）
-    icon: join(app.getAppPath(), 'build', 'icon.png'),  // 任务栏按钮显式用应用图标（dev 下 electron.exe 无内置图标 → 白板按钮的根因；打包后 exe 自带图标不受影响）
+    icon: loadAppIconSync().img,  // 任务栏按钮显式用应用图标（F-3：与托盘同一事实源；打包态 exe 自带图标仍是最终权威）
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,                         // preload 仅用 contextBridge/ipcRenderer/webUtils,完全兼容沙箱
@@ -1065,7 +1054,7 @@ app.whenReady().then(async () => {
     },
   })
 
-  createTray()
+  void createTray()
 
   // Web 剪藏服务（工具箱「网页剪藏」入口的数据面；127.0.0.1 常驻，随应用启停）
   registerClipperHandlers({

@@ -516,6 +516,23 @@ const srcAiTeach = stripComments(read('src/modules/ai-teaching/index.tsx'))
 ok(!/编辑器顶栏/.test(srcAiTeach),
   'K6 负向：toast 文案不再指向已不存在的「编辑器顶栏」（提示与实际一致）')
 
+// ===== L. 删除清零 ≠ 用户关标签（台账 F-10，2026-09-26 拍板方向 A）=====
+// 缺陷面：「最后一个页面关闭 → 自动关模块标签」被删除动作意外命中 —— 删一条笔记被等价成
+// 「关掉整个知识库标签」，App.closeTab 清 railModule → 左栏弹回总览；树删除连带关签同病，
+// 且 handlePageDeleted 的「删完重开首页」有 await 空窗竞态（effect 抢在重开前看到清零）。
+ok(/if \(deletionClearRef\.current\) \{ deletionClearRef\.current = false; return \}/.test(srcKnowledge),
+  'L1 清零 effect 消费 deletionClear 标记（消费一次即复位，不依赖删除流程的复位时机）')
+// L2 用两个**单行**锚点比位置：仓库源码是 CRLF，多行正则/搜索串会被 \r 绊倒（strip 后亦然）
+const delConsumeAt = srcKnowledge.indexOf('if (deletionClearRef.current)')
+const fullViewGuardAt = srcKnowledge.indexOf('if (showQuizCollection || graphMode || readingMode) return')
+ok(delConsumeAt !== -1 && fullViewGuardAt !== -1 && delConsumeAt < fullViewGuardAt,
+  'L2 消费位于全幅视图守卫之前（守卫早退不留陈旧标记吞掉下一次手动关签）')
+ok(/length === 1 && openPageIdsRef\.current\.includes\(id\)\) deletionClearRef\.current = true/.test(srcKnowledge),
+  'L3 页面删除：仅在「被删页是唯一开着的页」（必然清零）时置位 —— 保证标记必被 effect 消费')
+ok(/willClearAll = openPageIdsRef\.current\.length > 0 && openPageIdsRef\.current\.every/.test(srcKnowledge)
+  && /if \(willClearAll\) deletionClearRef\.current = true/.test(srcKnowledge),
+  'L4 树删除：仅当全部已开页签都在被删路径下（必然清零）时置位（同 handlePageDeleted 口径）')
+
 console.log('\n========================================')
 if (fails.length === 0) {
   console.log(`✅ 全部通过：${pass} 项断言 PASS`)

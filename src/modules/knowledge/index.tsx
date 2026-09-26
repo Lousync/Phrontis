@@ -709,8 +709,13 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   // 最后一个页面关闭 → 自动关闭模块标签（2026-09-19 修复，同 editor 口径）：
   // PAGE_OWNED 模块条目不进页面条，页面清零后模块标签「隐形滞留」——页面条看似全空，
   // 但 activeTab 仍在，左栏不回总览、全关空态不出现。守卫：① 首挂/本就无页面不触发；
-  // ② 错题本/图谱/沉浸阅读任一全幅视图开着不触发（那些视图不依赖页面存在）。
+  // ② 错题本/图谱/沉浸阅读任一全幅视图开着不触发（那些视图不依赖页面存在）；
+  // ③ F-10（2026-09-26 拍板 A）：清零来自**删除**（页面删除 / 文件树删除连带关签）不触发 ——
+  //    删内容 ≠ 关标签，此前删一条笔记会被等价成「关掉整个知识库标签」，左栏被弹回总览。
+  //    标记由本 effect **消费一次即复位**（放在其他守卫之前，防全幅视图早退留下陈旧标记
+  //    吞掉下一次手动关签）；设置方只在「本次删除必然清零」时置位，保证标记必被消费。
   const prevPageCountRef = useRef<number | null>(null)
+  const deletionClearRef = useRef(false)
   const onRequestCloseTabRef = useRef(onRequestCloseTab)
   onRequestCloseTabRef.current = onRequestCloseTab
   useEffect(() => {
@@ -718,6 +723,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     prevPageCountRef.current = openPageIds.length
     if (prev === null || prev === 0) return
     if (openPageIds.length > 0) return
+    if (deletionClearRef.current) { deletionClearRef.current = false; return }
     if (showQuizCollection || graphMode || readingMode) return
     onRequestCloseTabRef.current?.()
   }, [openPageIds.length, showQuizCollection, graphMode, readingMode])
@@ -769,6 +775,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       await deleteKnowledgePage(id)
       // 页面已删除，清除脏标记后直接关闭标签页（无需确认未保存）
       setDirtyPageIds(prev => { const n = new Set(prev); n.delete(id); return n })
+      // F-10：这是唯一开着的页 → 本次必清零，标记「来自删除」，effect 会消费并跳过自动关模块标签。
+      // 连台账待实机确认的竞态（下方 await getKnowledgePages 让出渲染帧，effect 抢在重开前看到清零）
+      // 一起封死：标记被 effect 消费后就地复位，不依赖删除流程自身的复位时机。
+      if (openPageIdsRef.current.length === 1 && openPageIdsRef.current.includes(id)) deletionClearRef.current = true
       forceCloseTab(id)
       // After delete, if no page is active but the chapter still has pages, auto-open first one
       const nextActiveId = activePageIdRef.current
@@ -988,6 +998,13 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         const res = await workspaceTrash(root, node.relPath)
         if (!res.ok) throw new Error(res.error || '删除失败')
       }
+      // F-10：若本次删除会关掉**全部**已开页签（必然清零），标记「来自删除」——
+      // 自动关模块标签的 effect 消费后跳过（删内容 ≠ 关标签，与 handlePageDeleted 同口径）
+      const willClearAll = openPageIdsRef.current.length > 0 && openPageIdsRef.current.every((pid) => {
+        const rel = pid.startsWith('draft:') ? pid.slice('draft:'.length) : allPages.find((p) => p.id === pid)?.path
+        return !!rel && (rel === node.relPath || rel.startsWith(node.relPath + '/'))
+      })
+      if (willClearAll) deletionClearRef.current = true
       closeTabsUnder(node.relPath)
     })
     // 树刷新放到动画整段走完之后（deleteWithAnimation 内部先播收尾淡出再返回，与 NotebookList

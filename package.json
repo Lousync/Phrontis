@@ -72,6 +72,10 @@
       {
         "from": "resources/help",
         "to": "help"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
       }
     ],
     "directories": {
