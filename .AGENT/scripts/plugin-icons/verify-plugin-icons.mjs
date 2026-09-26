@@ -85,8 +85,8 @@ ok(/<PluginIcon size=\{14\} \/>/.test(SRC_SLOT) && /<PluginIcon size=\{12\} clas
   'B6 PluginSlotEntry 两处（共享组件版，供其他模块用）', '')
 ok(/<PluginIcon size=\{15\} className="text-\[var\(--accent\)\] shrink-0" \/>/.test(SRC_BLOGT),
   'B7 博客模板里「来自插件的模板」标记', '')
-ok((SRC_ONB.match(/icon: PluginIcon/g) ?? []).length >= 2 && /<PluginIcon size=\{14\} \/>/.test(SRC_ONB),
-  'B8 新手引导三处（模块卡片 / 场景映射 / InfoRow）', '')
+ok((SRC_ONB.match(/icon: PluginIcon/g) ?? []).length >= 1 && /<PluginIcon size=\{14\} \/>/.test(SRC_ONB),
+  'B8 新手引导两处（模块卡片 / InfoRow；场景选择步骤已删）', '')
 ok(/<PluginIcon size=\{size\} strokeWidth=\{1\.5\}/.test(SRC_ICONIMG),
   'B9 单个插件图标的兜底（PluginIconImg）', '')
 ok(/<PluginIcon size=\{24\} \/>/.test(SRC_APPEAR),

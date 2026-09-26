@@ -1,28 +1,35 @@
 /**
- * 契约脚本：模块清单唯一真相源 + 启动落点
+ * 契约脚本：模块清单唯一真相源
  *
  * 覆盖的缺陷：**把侧边栏模块全部隐藏后重启，应用自动打开回收站**。
  * 根因不是「兜底逻辑写错了」，而是**模块清单被抄在 6 个地方且已经飘了**：
  * 启动候选表里有 `recycle` / `help`，而这两个模块不在活动栏的显隐菜单里（永远隐藏不掉），
- * 于是「前七项全被隐藏」时兜底循环必然走到 recycle。所以本脚本查两件事：
- *   ① 唯一真相源自洽、各消费方不再各抄一份（负向断言：旧字面量必须消失）；
- *   ② `resolveStartupTab` 的行为 —— 穷举全部隐藏组合，结果永不为回收站/帮助等"刻意目的地"。
+ * 于是「前七项全被隐藏」时兜底循环必然走到 recycle。所以本脚本查的是
+ * **唯一真相源自洽、各消费方不再各抄一份**（负向断言：旧字面量必须消失）。
+ *
+ * ★ 2026-09-25 退役说明：**启动落点那半已删**。开发负责人拍板删除「启动时默认显示」设置项，
+ *   启动一律落**工作台**（`activeTab = null`，见 App.tsx）⇒ `resolveStartupTab` /
+ *   `STARTABLE_MODULE_IDS` / `APP_MODULES.startable` 全部退役，原 E 段（隐藏组合穷举）与
+ *   A4/A5/A6/G4 随之删除。本脚本自此只负责「模块清单唯一真相源」这一半；**文件名保留**
+ *   （改名会牵动契约清单与文档指针，收益不抵成本）。
+ *
+ * ★ 2026-09-26 退役说明②：旧八模块活动栏的世界整体收尾 —— 引导「场景选择」步骤（该步写的
+ *   `activityBarHidden` 已无读者）、`activityBarOrder` / `activityBarHidden` 两设置键、
+ *   `activityOrder` / `activityVisibleOrder` 归一化 API 一并退役；原 B6 / C4 / D 段 / F 段
+ *   随之删除。条目顺序/显隐的唯一承载 = 图标条 `railOrder` / `railHidden`（workbench-shell 契约 C1j–C1n 锁）。
  *
  * v3.4.0（工作台三栏外壳）口径：TabName 16 项 —— 删 `desktop`（磁贴壳被三栏外壳替代）、
  * 删 `user`（账户并入设置）；增 `bookshelf` / `aiChat` / `graph`（入口产生型，不当启动落点）；
  * moments 改名「动态」。
  *
  * ★ 2026-09-22 对齐（本脚本此前**已红 16 条**，期望表还停在编辑区退役之前）：
- *   - `56c7e12`（09-19 笔记合并 Phase 2 批次 2）编辑区退役：`bar/startable/palette` 全 false，
- *     且 `resolveStartupTab` 兜底 `editor → knowledge`；该提交**没同步本脚本**；
+ *   - `56c7e12`（09-19 笔记合并 Phase 2 批次 2）编辑区退役：`bar/palette` 全 false；
  *   - `aaff952`（阶段三+四）编辑器物理退役，APP_MODULES 16 → 15 项；
- *   所以下面 A2b / A6 / A6b / D1 / E5 / F3 / G1 / G2 / G3 / G4 的期望一律按**现设计**重算。
- *   改这里的期望前请先确认模块清单真的变了（本脚本是用来抓清单飘移的，不是用来记录愿望的）。
+ *   所以 A2b 的期望按**现设计**重算。改期望前请先确认模块清单真的变了
+ *   （本脚本是用来抓清单飘移的，不是用来记录愿望的）。
  *
- * ★ 2026-09-22 再对齐（书市 S4）：APP_MODULES 15 → **16**（+`bookMarket`，左栏独立整窗模块，
- *   `bar/startable/tile/palette` 全 true）；ActivityBar 固定图标条 4 → 5 项（追加在末尾）。
- *   又一次**有意变更**，不是 drift：G1/G2/G3 期望已同步，且 G2 特意用「存量设置里没有
- *   bookMarket」的形态，证老用户顺序不被新增模块打乱。
+ * ★ 2026-09-22 再对齐（书市 S4）：APP_MODULES 15 → **16**（+`bookMarket`）；
+ *   ActivityBar 固定图标条 4 → 5 项（追加在末尾）。又一次**有意变更**，不是 drift。
  *
  * 与探针的区别：这里**直接 import 真实实现**（`src/lib/appModules.ts`，靠 Node 的
  * `--experimental-strip-types` 剥离类型），而不是照抄一份算法 —— 抄一份正好会掩盖本次这类缺陷。
@@ -34,8 +41,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import {
-  APP_MODULES, BAR_MODULE_IDS, STARTABLE_MODULE_IDS, TILE_MODULE_IDS, PALETTE_MODULES,
-  isTabName, labelOf, normalizeModuleId, activityOrder, activityVisibleOrder, resolveStartupTab,
+  APP_MODULES, BAR_MODULE_IDS, TILE_MODULE_IDS, PALETTE_MODULES,
+  normalizeModuleId,
 } from '../../../src/lib/appModules.ts'
 
 // 仓库根由脚本位置推导（勿写死盘符：在 worktree 里跑会静默读主仓 → 假 PASS）
@@ -82,19 +89,13 @@ console.log('\n=== A. 唯一真相源自洽 ===')
 const ids = APP_MODULES.map((m) => m.id)
 ok(new Set(ids).size === ids.length, 'A2 APP_MODULES 内 id 无重复')
 // 2026-09-22 书市（S4）：16 项（+bookMarket）。它是「左栏独立整窗模块」，进活动栏、
-// 可启动、可作磁贴、进命令面板 —— 与工具箱 / 插件平级（方案 §1.2 第 5 条）。
+// 可作磁贴、进命令面板 —— 与工具箱 / 插件平级（方案 §1.2 第 5 条）。
 ok(ids.length === 16, 'A2b APP_MODULES 覆盖 16 个 TabName（v3.4.0：-desktop -user +bookshelf +aiChat +graph；aaff952 再 -editor；2026-09-22 +bookMarket）', `实际 ${ids.length}`)
 ok(!ids.includes('desktop') && !ids.includes('user'), 'A2c 已删除的 desktop/user 不再出现在清单')
 ok(BAR_MODULE_IDS.every((id) => ids.includes(id)), 'A3 BAR_MODULE_IDS ⊆ APP_MODULES')
-ok(STARTABLE_MODULE_IDS.every((id) => BAR_MODULE_IDS.includes(id)), 'A4 可启动模块 ⊆ 活动栏模块（非活动栏模块不该当落点）')
-const utility = ['recycle', 'help', 'settings', 'releaseNotes', 'devtools', 'bookshelf', 'aiChat', 'graph']
-const leaked = utility.filter((id) => STARTABLE_MODULE_IDS.includes(id))
-ok(leaked.length === 0, 'A5 回收站/帮助/设置/更新说明/开发者工具/书架/AI对话/图谱 都不可作启动项', `漏了 ${leaked.join(',')}`)
-ok(resolveStartupTab(undefined, '[]') === 'knowledge',
-  'A6 启动兜底落点是笔记/知识库（56c7e12 编辑区退役后兜底改为 knowledge：[`编辑区兜底`] 语义由知识库承载）')
-ok(resolveStartupTab('desktop', '[]') === 'knowledge', 'A6b 旧版兜底值 desktop 作为输入时也落笔记（老设置安全）')
+ok(!APP_MODULES.some((m) => 'startable' in m),
+  'A4 `startable` 标记已随启动落点机制退役（2026-09-25 删「启动时默认显示」设置项）')
 console.log(`  活动栏位(${BAR_MODULE_IDS.length})：${BAR_MODULE_IDS.join(', ')}`)
-console.log(`  可启动(${STARTABLE_MODULE_IDS.length})：${STARTABLE_MODULE_IDS.join(', ')}`)
 console.log(`  可作磁贴(${TILE_MODULE_IDS.length})：${TILE_MODULE_IDS.join(', ')}`)
 console.log(`  命令面板(${PALETTE_MODULES.length})：${PALETTE_MODULES.map((m) => m.id).join(', ')}`)
 
@@ -115,15 +116,23 @@ ok(!looseArray('blog', 'schedule', 'knowledge', 'editor').test(srcApp),
 ok(!looseArray('blog', 'schedule', 'knowledge', 'moments').test(srcApp),
   'B2 App.tsx 的小窗 switch-tab 硬编码白名单已删除')
 ok(!/const\s+MODULE_TABS\s*(:|=)/.test(srcApp), 'B3 App.tsx 不再自持 MODULE_TABS（改用 PALETTE_MODULES）')
+ok(!/resolveStartupTab|STARTABLE_MODULE_IDS/.test(srcApp),
+  'B3b App.tsx 已不引用已退役的启动落点 API（resolveStartupTab / STARTABLE_MODULE_IDS）')
 ok(/const\s+RAIL_BUTTONS\s*:[\s\S]*?=\s*\[/.test(srcBar),
   'B4 ActivityBar 图标条为固定 RAIL_BUTTONS 清单（v3.4.0 拍板：不再由 BAR_MODULE_IDS 派生）')
 ok(!/BAR_MODULE_IDS/.test(srcBar),
-  'B4c ActivityBar 不再引用 BAR_MODULE_IDS（图标条 4 项独立拍板，禁手抄回归）')
+  'B4c ActivityBar 不再引用 BAR_MODULE_IDS（图标条 5 项独立拍板，禁手抄回归）')
 ok(!/\[\s*\{\s*id:\s*'desktop'\s*,\s*label:\s*'桌面'/.test(srcBar),
   'B4b 旧的 9 项字面量数组已删除')
 ok(!/const\s+DESK_MODULES\s*:\s*ModuleDef\[\]\s*=\s*\[/.test(srcTiles), 'B5 tiles.tsx 不再自持 DESK_MODULES 字面量（改用 TILE_MODULE_IDS）')
-ok(!/const\s+ACTIVITY_MODS\s*=\s*\[/.test(srcOnb), 'B6 Onboarding 不再自持 ACTIVITY_MODS 字面量')
+ok(!/ACTIVITY_MODS|SCENE_META|activityBarHidden/.test(srcOnb),
+  'B6 Onboarding 已无场景选择残留（ACTIVITY_MODS / SCENE_META / activityBarHidden 写入均删，2026-09-26 该步空转后退役）')
 ok(!/const\s+TABS\s*:\s*\{[^}]*\}\[\]\s*=\s*\[/.test(srcAppear), 'B7 设置页不再自持启动项 TABS 字面量')
+ok(!/STARTUP_ICONS/.test(srcAppear), 'B7b 设置页启动项图标表 STARTUP_ICONS 已随设置项删除')
+ok(!/startupTab/.test(srcSettings) && !/startupTab|activityBarOrder|activityBarHidden/.test(srcSettings),
+  'B7c `startupTab` 与旧活动栏两键（activityBarOrder / activityBarHidden）都已删出 settings（顺序/显隐唯一承载 = railOrder / railHidden）')
+ok(!/activityOrder|activityVisibleOrder/.test(srcModules),
+  'B8b 旧活动栏归一化 API（activityOrder / activityVisibleOrder）已退役（零运行时消费者后删除）')
 ok(!/case\s+'desktop'/.test(srcApp) && !/case\s+'user'/.test(srcApp),
   'B8 App.tsx 已无 desktop/user 渲染分支（v3.4.0 删模块）')
 ok(!/unshift\('desktop'\)/.test(srcBar) && !/unshift\('desktop'\)/.test(srcModules),
@@ -151,100 +160,18 @@ const railIds = (() => {
   return m ? [...m[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((x) => x[1]) : null
 })()
 if (railIds === null) {
-  ok(false, 'C1 ActivityBar RAIL_BUTTONS 覆盖拍板 4 项（AI教学/回收站/插件市场/动态）', '抠不到 RAIL_BUTTONS（结构变了，脚本要跟着改）')
+  ok(false, 'C1 ActivityBar RAIL_BUTTONS 覆盖拍板项', '抠不到 RAIL_BUTTONS（结构变了，脚本要跟着改）')
 } else {
   // 2026-09-22 书市：4 → 5 项（bookMarket **追加在末尾**，现四项位置不动）
   ok(railIds.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket',
     'C1 ActivityBar RAIL_BUTTONS 覆盖 5 项（AI 教学入口 + 回收站/插件市场/动态 + 书市）', `实际 ${railIds.join(',')}`)
 }
 ok(/title="设置"/.test(srcBar), 'C1b 图标条底部设置按钮存在（直开设置标签页）')
-checkCover('C2 设置页 STARTUP_ICONS 覆盖全部可启动模块', keysOfRecord(srcAppear, 'STARTUP_ICONS'), STARTABLE_MODULE_IDS)
 checkCover('C3 tiles.tsx TILE_META 覆盖全部可作磁贴模块', keysOfRecord(srcTiles, 'TILE_META'), TILE_MODULE_IDS)
-checkCover('C4 Onboarding SCENE_META 覆盖全部活动栏模块', keysOfRecord(srcOnb, 'SCENE_META'), BAR_MODULE_IDS)
 
-/* ================= D. settings 默认值 ================= */
-console.log('\n=== D. 设置默认值里不许出现非活动栏 id（本次 bug 的引信） ===')
-const orderDefM = srcSettings.match(/activityBarOrder:\s*\{\s*default:\s*'([^']*)'/)
-ok(!!orderDefM, 'D0 抠到 activityBarOrder 默认值')
-const orderDefault = orderDefM ? JSON.parse(orderDefM[1]) : []
-const strayIds = orderDefault.filter((id) => !BAR_MODULE_IDS.includes(id))
-ok(strayIds.length === 0, 'D1 默认顺序里全部是活动栏模块', `混进了 ${strayIds.join(',')}`)
-ok(!orderDefault.includes('desktop') && !orderDefault.includes('user'), 'D1b 默认顺序不含已删除的 desktop/user')
-console.log(`  默认顺序：${orderDefault.join(', ')}`)
-
-/* ================= E. resolveStartupTab 穷举 ================= */
-console.log('\n=== E. 启动落点穷举（全部隐藏组合 × 各种 startupTab） ===')
-const BAD_LANDINGS = ['recycle', 'help', 'settings', 'releaseNotes', 'devtools', 'bookshelf', 'aiChat', 'graph']
-const subsets = []
-for (let mask = 0; mask < (1 << BAR_MODULE_IDS.length); mask++) {
-  subsets.push(BAR_MODULE_IDS.filter((_, i) => mask & (1 << i)))
-}
-const startupChoices = [undefined, '', 'blog', 'editor', 'desktop', 'recycle', 'help', 'ghost', ...BAR_MODULE_IDS]
-let badLanding = 0, unknownLanding = 0, honored = 0, dishonored = 0, threw = 0
-for (const sub of subsets) {
-  const hidden = JSON.stringify(sub)
-  for (const st of startupChoices) {
-    let got
-    try { got = resolveStartupTab(st, hidden) } catch { threw++; continue }
-    if (BAD_LANDINGS.includes(got)) badLanding++
-    if (!isTabName(got)) unknownLanding++
-    const shouldHonor = typeof st === 'string' && STARTABLE_MODULE_IDS.includes(st) && !sub.includes(st)
-    if (shouldHonor) { if (got === st) honored++; else dishonored++ }
-  }
-}
-const total = subsets.length * startupChoices.length
-console.log(`  遍历 ${subsets.length} 种隐藏组合 × ${startupChoices.length} 种 startupTab = ${total} 次`)
-ok(threw === 0, 'E1 任何组合都不抛异常（坏数据走兜底）', `${threw} 次抛异常`)
-ok(badLanding === 0, 'E2 **落点永不为 回收站/帮助/设置/更新说明/开发者工具/书架/AI对话/图谱**', `${badLanding} 次落到这些模块`)
-ok(unknownLanding === 0, 'E3 落点恒为合法 TabName', `${unknownLanding} 次非法`)
-ok(dishonored === 0, 'E4 startupTab 合法且未隐藏时被原样尊重', `${dishonored} 次被忽略`)
-console.log(`  其中「应当尊重 startupTab」的 ${honored} 次全部命中`)
-
-console.log('\n  —— 定点复现（v3.4.0 兜底口径 = 笔记 / knowledge；editor 已退役）——')
-const CASES = [
-  // [描述, hidden, startupTab, 期望落点]
-  // 前 7 条 = 本脚本立项时的历史形态（「隐藏全部 → 落到回收站」那个 bug），期望值按现兜底重算；
-  // 后 3 条补上「启动项合法且未隐藏时必须被尊重」这一半（否则整张表退化成「恒 knowledge」）。
-  ['隐藏完所有可隐藏模块', JSON.stringify(BAR_MODULE_IDS), 'editor', 'knowledge'],
-  ['隐藏完所有可隐藏模块，启动项=博客（被隐藏）', JSON.stringify(BAR_MODULE_IDS), 'blog', 'knowledge'],
-  ['只隐藏动态一项，启动项=编辑器（已退役）', JSON.stringify(['moments']), 'editor', 'knowledge'],
-  ['什么都没隐藏，启动项=编辑器（已退役）', '[]', 'editor', 'knowledge'],
-  ['只隐藏启动项本身（编辑器）', JSON.stringify(['editor']), 'editor', 'knowledge'],
-  ['启动项=幽灵 id，落兜底', '[]', 'ghost', 'knowledge'],
-  ['旧版兜底值 desktop 作为启动项，落兜底', '[]', 'desktop', 'knowledge'],
-  ['只隐藏动态一项，启动项=博客（合法且未隐藏）', JSON.stringify(['moments']), 'blog', 'blog'],
-  ['什么都没隐藏，启动项=日程', '[]', 'schedule', 'schedule'],
-  ['只隐藏启动项本身（博客）→ 不硬撑，落兜底', JSON.stringify(['blog']), 'blog', 'knowledge'],
-]
-for (const [label, hidden, st, want] of CASES) {
-  const got = resolveStartupTab(st, hidden)
-  ok(got === want, `E5 ${label} → ${want}`, `实际 ${got}`)
-  console.log(`     ${got === want ? '✓' : '✗'} ${label} → 打开「${labelOf(got)}」`)
-}
-// ★ 已知口径（非缺陷，刻意不锁进断言）：兜底值 knowledge 自身也在可隐藏集合里 ——
-//   「把活动栏全隐藏」时兜底会落在一个被隐藏的模块上。现设计如此（兜底必须恒有落点；
-//   activityBarHidden 只影响图标条显隐，不阻止模块打开）。要改这条请先让用户拍板再动断言。
-const allHidden = resolveStartupTab(undefined, JSON.stringify(BAR_MODULE_IDS))
-console.log(`     ⚠ 全部隐藏时兜底落在「${labelOf(allHidden)}」（它自己也在可隐藏集合内 —— 见脚本注释）`)
-
-// 坏数据
-const junk = [undefined, '', 'null', 'not-json', '{}', '123', '["{"', null]
-const junkBad = junk.filter((h) => { try { return !isTabName(resolveStartupTab('blog', h)) } catch { return true } })
-ok(junkBad.length === 0, 'E6 坏 JSON / null / 数字都不炸且落到合法模块', `坏在 ${JSON.stringify(junkBad)}`)
-
-/* ================= F. 活动栏可见顺序 ================= */
-console.log('\n=== F. 活动栏可见顺序（尊重存储 / 缺失补齐 / 陈年 id 过滤） ===')
-ok(!activityOrder('["blog","editor"]').includes('desktop'), 'F1 活动栏顺序不再补 desktop（v3.4.0 桌面外壳已删）')
-ok(activityOrder('["blog","editor"]').length === BAR_MODULE_IDS.length, 'F1b 缺失模块被补齐')
-// 存储顺序被原样尊重 —— v3.4.0 起没有「入口插队」，activityOrder 只做补齐
-ok(activityVisibleOrder('["plugins","blog","moments"]', '[]').slice(0, 3).join(',') === 'plugins,blog,moments',
-  'F3 存储顺序被原样尊重（无插队）',
-  activityVisibleOrder('["plugins","blog","moments"]', '[]').join(','))
-const normalized = activityOrder('["immersive","export","recycle","blog"]')
-ok(normalized.includes('aiTeaching') && !normalized.includes('export') && !normalized.includes('recycle'),
-  'F4 immersive→aiTeaching 且陈年 id（export/recycle）被滤掉', normalized.join(','))
-ok(normalizeModuleId('immersive') === 'aiTeaching', 'F4b normalizeModuleId 归一正确')
-ok(activityVisibleOrder(undefined, undefined).length === BAR_MODULE_IDS.length, 'F5 两个参数都缺省时不崩')
+/* ================= D. normalizeModuleId ================= */
+console.log('\n=== D. 陈年 id 归一（railOrder / railHidden 的解析口径依赖它） ===')
+ok(normalizeModuleId('immersive') === 'aiTeaching', 'D1 normalizeModuleId 归一正确（immersive→aiTeaching）')
 
 /* ================= G. v3.4.0 口径快照（有意变更后锁定的顺序） ================= */
 console.log('\n=== G. v3.4.0 口径快照（锁定新顺序，防后续误动） ===')
@@ -254,17 +181,8 @@ const V340_TILE_ORDER = ['knowledge', 'blog', 'schedule', 'moments', 'aiTeaching
 ok(TILE_MODULE_IDS.join(',') === V340_TILE_ORDER.join(','),
   'G1 磁贴模块清单与 v3.4.0 口径一致', `\n     期望 ${V340_TILE_ORDER.join(',')}\n     实际 ${TILE_MODULE_IDS.join(',')}`)
 
-// 真实用户数据形态：moments 被隐藏时的可见顺序（moments 改名「动态」不影响 id）。
-// 存量设置里仍带着退役的 editor（老用户的存储顺序照抄原样）—— 这里刻意保留它，
-// 用来证「陈年 id 被过滤且不影响其余顺序」这一条。
-// ★ 存量设置里**没有** bookMarket（它是 2026-09-22 新增的）—— 缺失项按声明序补到末尾，
-//   这正是这条断言的另一半价值：老用户的活动栏顺序不会被新增模块打乱，新模块稳稳落尾部。
-const USER_ORDER = '["editor","aiTeaching","knowledge","blog","schedule","moments","toolbox","plugins"]'
-const USER_HIDDEN = '["moments"]'
-const EXPECT_VISIBLE = 'aiTeaching,knowledge,blog,schedule,toolbox,plugins,bookMarket'
-ok(activityVisibleOrder(USER_ORDER, USER_HIDDEN).join(',') === EXPECT_VISIBLE,
-  'G2 真实设置下的活动栏可见顺序与 v3.4.0 口径一致',
-  `\n     期望 ${EXPECT_VISIBLE}\n     实际 ${activityVisibleOrder(USER_ORDER, USER_HIDDEN).join(',')}`)
+// 真实用户数据形态的可见顺序快照已随 `activityVisibleOrder` 退役（其消费键 activityBar* 已删）。
+// 图标条同款口径的顺序断言由 workbench-shell 契约 C1k / C1m 承接。
 
 // 命令面板快照（palette:true；bookshelf/aiChat/graph 刻意不进面板——只能由工作台入口产生；editor 已退役）
 const V340_PALETTE = ['knowledge', 'blog', 'schedule', 'moments', 'aiTeaching', 'toolbox',
@@ -273,13 +191,6 @@ const newPalette = PALETTE_MODULES.map((m) => m.id)
 ok(newPalette.join(',') === V340_PALETTE.join(','),
   'G3 命令面板清单与 v3.4.0 口径一致（desktop/user 已移除，三个新 Tab 不进面板）',
   `\n     期望 ${V340_PALETTE.join(',')}\n     实际 ${newPalette.join(',')}`)
-
-// 设置页启动项：旧 6 项里除 editor（56c7e12 有退役）外一个不能少；desktop 从可启动清单移除（v3.4.0 有意）
-const OLD_STARTUP_OPTS = ['blog', 'schedule', 'knowledge', 'moments', 'toolbox']
-ok(OLD_STARTUP_OPTS.every((id) => STARTABLE_MODULE_IDS.includes(id)), 'G4 设置页启动项没有丢原有选项（editor 除外）')
-ok(!STARTABLE_MODULE_IDS.includes('desktop') && STARTABLE_MODULE_IDS.join(',').length > 0,
-  'G4b desktop 已从可启动清单移除（v3.4.0 有意）')
-console.log(`   设置页启动项（${STARTABLE_MODULE_IDS.length} 个）：${STARTABLE_MODULE_IDS.join(', ')}`)
 
 /* ================= 结果 ================= */
 console.log('\n========================================')

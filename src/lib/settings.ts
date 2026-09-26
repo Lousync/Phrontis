@@ -167,15 +167,17 @@ export const SETTINGS = {
   // 找"第一个没被隐藏的模块"，而 recycle 永远隐藏不掉，于是把侧边栏模块全隐藏后重启就开回收站。
   // 存量用户的活动栏顺序由 ActivityBar 的归一逻辑自行补齐（desktop 顶首位 / 缺失模块追加），
   // 所以这里只保留图标位模块、相对次序不动即可。
-  activityBarOrder: { default: '["blog","schedule","knowledge","moments","toolbox","plugins"]', type: 'json', label: '活动栏图标顺序', group: '活动栏', desc: '活动栏模块图标顺序（JSON）', keywords: ['活动栏', '顺序', '图标', 'activitybar', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  activityBarHidden: { default: '[]', type: 'json', label: '活动栏隐藏模块', group: '活动栏', desc: '活动栏隐藏的模块（JSON）', keywords: ['活动栏', '隐藏', '模块', 'activitybar', 'hidden'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  // 布局：整条活动栏显隐。与上面 activityBarHidden（逐模块显隐）互不干扰——
-  // 本键关的是「活动栏这个容器本身」，入口只有命令面板「布局：隐藏/显示活动栏」一个
-  // （标题栏「自定义布局」下拉已于 2026-09-17 整条删除）。
+  // 图标条（最左窄列）的顺序与显隐（2026-09-25 恢复拖拽排序 + 右键显隐）。
+  // ⚠️ 2026-09-26：旧八模块活动栏的 `activityBarOrder` / `activityBarHidden` 两键已随
+  // v3.4.0 三栏外壳退役删除（运行时早已零消费，只剩引导空写）。图标条是顺序/显隐的唯一承载。
+  // 成员清单唯一真源是 `appModules.RAIL_MODULE_IDS`。
+  railOrder: { default: '["aiTeaching","recycle","plugins","moments","bookMarket"]', type: 'json', label: '图标条顺序', group: '活动栏', desc: '图标条按钮顺序（JSON）', keywords: ['图标条', '顺序', 'activitybar', 'rail', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  railHidden: { default: '[]', type: 'json', label: '图标条隐藏按钮', group: '活动栏', desc: '图标条上被隐藏的按钮（JSON）', keywords: ['图标条', '隐藏', 'activitybar', 'rail', 'hidden'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // 布局：整条活动栏显隐。本键关的是「活动栏这个容器本身」，入口只有命令面板
+  // 「布局：隐藏/显示活动栏」一个（标题栏「自定义布局」下拉已于 2026-09-17 整条删除）。
   // ui:false 与同组两键一致：入口在命令面板，不在设置页（避免与「显示/隐藏模块」混淆）
   activityBarVisible: { default: true, type: 'toggle', label: '显示活动栏', group: '活动栏', desc: '关闭后隐藏最左侧模块活动栏（命令面板「布局：显示活动栏」可随时调回）', keywords: ['活动栏', '布局', '隐藏', '侧边栏', 'activitybar', 'visible', 'layout'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   toolboxHiddenTools: { default: '[]', type: 'json', label: '工具箱隐藏工具', group: '工具箱', desc: '工具箱画廊中隐藏的工具 id 列表（JSON，内置工具用 id，插件工具用 pluginId:toolId）', keywords: ['工具箱', '隐藏', '工具', '显示', 'toolbox', 'hidden'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  startupTab: { default: 'blog', type: 'select', label: '启动时默认显示', group: '启动', desc: '每次打开应用时自动进入的模块', keywords: ['启动', '默认模块', '首页', 'startup', '默认显示', '初始模块'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.startupTab' },
   startupVaultPicker: { default: true, type: 'toggle', label: '每次启动选择仓库', group: '启动', desc: '开启后每次进入应用先显示仓库选择页（已有仓库一键进入）；关闭则直连上次的仓库', keywords: ['启动', '仓库', '选择', '进入', 'vault', 'startup', '切库'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'startup.vaultPicker' },
   summaryWeeklyDay: { default: 0, type: 'select', label: '周总结日', group: '周期总结', desc: '每周在哪一天生成周总结', keywords: ['周总结', '总结日', '每周', '星期', '周几', 'weekly', '周报'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'blog.summaryWeeklyDay' },
   summaryMonthlyMode: { default: 'last', type: 'select', label: '月总结规则', group: '周期总结', desc: '每月总结规则：第一天 / 最后一天 / 固定日', keywords: ['月总结', '总结日', '每月', '月末', '月初', 'monthly', '月报'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'blog.summaryMonthlyMode' },

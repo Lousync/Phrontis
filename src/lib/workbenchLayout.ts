@@ -9,7 +9,7 @@ import type { TabName } from '../types'
  * 持久化，本键只存「非宽度」状态。
  *
  * 解析规则刻意做钝：只收已知键、类型不对的丢弃、坏 JSON 整体走默认 ——
- * 外壳状态坏了绝不能炸启动（同 `resolveStartupTab` 的钝规则哲学）。
+ * 外壳状态坏了绝不能炸启动（同 `appModules` 的钝解析哲学）。
  */
 
 export interface WorkbenchLayout {

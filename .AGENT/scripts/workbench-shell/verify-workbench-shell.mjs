@@ -5,7 +5,7 @@
  *   ① 书签 ↔ 模块映射飘移 —— 书签集合被抄在多处后「错题本」悄悄变成独立模块、
  *      或书签 tab 指向已删除的 TabName（如 desktop）。这里直接 import 真实现做双向断言；
  *   ② workbenchLayout 钝解析回归 —— 坏 JSON / 未知键 / 非法枚举值必须整体落默认，
- *      外壳状态坏了绝不能炸启动（同 resolveStartupTab 哲学）；
+ *      外壳状态坏了绝不能炸启动（同 appModules 的钝解析哲学）；
  *   ③ 模块侧栏 portal 接线 —— 左栏模块态 slot 必须接到 4 个侧栏模块，
  *      错题本定位事件必须两侧（App 派发 + knowledge 监听）同在。
  *
@@ -18,7 +18,7 @@ import {
   WORKBENCH_BOOKMARKS, RAIL_FOLLOW_MAP, WORKBENCH_TABBAR_EXCLUDED,
   parseWorkbenchLayout, DEFAULT_WORKBENCH_LAYOUT,
 } from '../../../src/lib/workbenchLayout.ts'
-import { isTabName } from '../../../src/lib/appModules.ts'
+import { isTabName, RAIL_MODULE_IDS, railOrder, railVisibleOrder, railHiddenIds } from '../../../src/lib/appModules.ts'
 
 // ★ 仓库根按**脚本自身位置**解析，不写死绝对路径（2026-09-22 修正，同 verify-perception 的口径）：
 //   写死会把「在 worktree 里跑」变成「静默校验主仓」——脚本全绿而实际改的是另一棵树，
@@ -121,6 +121,36 @@ const railIds = railM ? [...railM[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((
 ok(railIds?.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket', 'C1 图标条 RAIL_BUTTONS = AI教学/回收站/插件市场/动态/书市', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
 ok(!/id:\s*'toolbox'/.test(railM ? railM[1] : ''), 'C1b 图标条不再含工具箱按钮（入口语义移 ToolLauncherZone）')
 ok(/title="设置"/.test(srcBar), 'C1c 图标条底部设置按钮存在')
+
+/* C1d–C1n 图标条排序 / 右键显隐（2026-09-25 F-1 恢复）。
+   成员是**固定清单**（不改成 BAR_MODULE_IDS 那 8 个），变的只是顺序与显隐来源；
+   真源是 appModules.RAIL_MODULE_IDS，组件 RAIL_BUTTONS 只补图标与名称 —— 两侧做双向断言防漂移。
+   2026-09-26：旧活动栏键 activityBarOrder/Hidden 与归一化 API 已整体退役删除，
+   图标条 = 条目顺序/显隐的唯一承载。 */
+ok(railIds && railIds.join(',') === RAIL_MODULE_IDS.join(','),
+  'C1d ActivityBar 图标表 id 与 appModules.RAIL_MODULE_IDS 一致',
+  railIds ? `组件 ${railIds.join(',')} vs 真源 ${RAIL_MODULE_IDS.join(',')}` : '抠不到')
+ok(/railVisibleOrder\(/.test(srcBar) && /railOrder\(/.test(srcBar),
+  'C1e 图标条渲染顺序走 railOrder / railVisibleOrder 归一化')
+ok(/update\('railOrder'/.test(srcBar) && /update\('railHidden'/.test(srcBar),
+  'C1f 拖拽重排写 railOrder、右键勾选写 railHidden')
+ok(!/activityBarOrder|activityBarHidden/.test(srcBar),
+  'C1g 图标条不消费 activityBar*（旧八模块图标条的键已随 2026-09-26 收尾整体退役删除）')
+ok(/onPointerDown=/.test(srcBar) && /onPointerMove=/.test(srcBar) && /setPointerCapture\(/.test(srcBar),
+  'C1h 重排走 pointer events（铁律 9：图标条在 -webkit-user-drag:none 继承链上，HTML5 拖放静默失败）')
+ok(!/\bdraggable\b/.test(srcBar), 'C1h2 不挂 HTML5 draggable 属性（与 pointer 手势打架）')
+ok(/railDragGuard/.test(srcBar), 'C1h3 手势结束补发 click 的 250ms 兜底窗口在场（铁律 9）')
+ok(/onContextMenu=/.test(srcBar), 'C1i 右键菜单入口在场')
+ok(railOrder(undefined).join(',') === RAIL_MODULE_IDS.join(','),
+  'C1j railOrder 缺省 = RAIL_MODULE_IDS 全量且同序')
+ok(railOrder('["bookMarket","plugins"]').join(',') === 'bookMarket,plugins,aiTeaching,recycle,moments',
+  'C1k railOrder 尊重存量顺序并补齐缺项', railOrder('["bookMarket","plugins"]').join(','))
+ok(!railOrder('["desktop","editor"]').includes('desktop'),
+  'C1l railOrder 丢弃非图标条成员（desktop / editor 等陈年 id）')
+ok(railVisibleOrder(undefined, '["moments","plugins"]').join(',') === 'aiTeaching,recycle,bookMarket',
+  'C1m railVisibleOrder 按 railHidden 剔除', railVisibleOrder(undefined, '["moments","plugins"]').join(','))
+ok(railHiddenIds('["moments"]').length === 1 && railHiddenIds('坏JSON').length === 0,
+  'C1n railHiddenIds 坏 JSON 落空数组')
 
 // C2 左栏 slot 接线：Shell 用 LeftPanel；4 个侧栏模块的 sidebarEl 由 App 按 railModule 条件传入
 ok(/WorkbenchLeftPanel/.test(srcShell) && /modSlotRef/.test(srcShell), 'C2 Shell 左栏 = WorkbenchLeftPanel 且透传 modSlotRef')

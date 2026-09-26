@@ -144,6 +144,9 @@ export function PdfRailPanel({ readerDoc }: Props) {
   const jumpOutline = useCallback(async (node: OutlineNode) => {
     if (!pdf || node.dest === undefined) return
     const p = await destToPageNum(pdf, node.dest)
+    // destToPageNum 返回 1 基；失败兜底同为 1（旧口径如此，保留 —— 跳第 1 页好过静默不跳）。
+    // 守卫必须放行 1：dest 指向第 1 页（getPageIndex=0 → 返回 1）是**合法跳转**，
+    // 若写成 p > 1 会把 F-9 的「点了没反应」原样复发（台账 F-9 修复批注）。
     if (p >= 1) goto(p)
   }, [goto, pdf])
 

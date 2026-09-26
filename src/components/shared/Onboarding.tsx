@@ -1,14 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Archive, ArrowLeft, ArrowRight, BellRing, Bot, BookOpen, CalendarDays, Check,
-  Database, FileText, GraduationCap, Keyboard, ListChecks, MessageCircle, Moon, Network, PenLine,
-  ShieldCheck,
-  Sparkles, Sun, Wrench,
+  Database, GraduationCap, Keyboard, MessageCircle, Moon, Network, PenLine,
+  ShieldCheck, Sparkles, Sun, Wrench,
 } from 'lucide-react'
-import { PluginIcon, BookMarketIcon } from './ModuleIcons'
+import { PluginIcon } from './ModuleIcons'
 import { useSettings } from '../../lib/SettingsContext'
-import { BAR_MODULE_IDS, labelOf } from '../../lib/appModules'
-import type { TabName } from '../../types'
 
 /** 模块图标组件类型：内置 lucide 与 StyleAware 的 PluginIcon 都要能装下。
  *  `typeof PenLine` 是 lucide 的组件类型，装不下 PluginIcon（普通函数组件）——
@@ -27,34 +24,9 @@ const MODULES: { icon: ModuleIconComp; name: string; desc: string }[] = [
   { icon: PluginIcon, name: '插件', desc: '主题 / 预设 / 知识包官方市场' },
 ]
 
-/**
- * 场景选择步骤里每个模块的一句话说明 + 图标（成员与顺序看 appModules 的唯一真相源）。
- * 原文案写着「与 ActivityBar 的 ALL_MODULES 同 id 同序」，但那份手抄清单的实际顺序
- * （editor, knowledge, aiTeaching, schedule, blog, …）与活动栏并不一致 —— 又一处漂移。
- */
-const SCENE_META: Record<string, { desc: string; icon: ModuleIconComp }> = {
-  editor: { desc: '正文写作 · 唯一写入方', icon: PenLine },
-  knowledge: { desc: '双链 · 图谱 · 沉浸阅读', icon: BookOpen },
-  blog: { desc: '每日一篇 · 周月总结', icon: FileText },
-  schedule: { desc: '日历 · 四象限 · 打卡', icon: CalendarDays },
-  moments: { desc: '轻量动态 · 相册', icon: MessageCircle },
-  aiTeaching: { desc: '会话学习 · 视觉转写 · 出题', icon: GraduationCap },
-  toolbox: { desc: '密码本 · 导出 · 局域网互传', icon: Wrench },
-  plugins: { desc: '官方市场 · 主题包', icon: PluginIcon },
-  bookMarket: { desc: '从书源找书 · 下载上架', icon: BookMarketIcon },
-}
-
-/**
- * 场景选择的候选 = 活动栏一级模块（v3.4.0 起桌面外壳已删除，BAR_MODULE_IDS 即全部场景模块）。
- * 带上 `SCENE_META[id]` 存在性判定：将来新增的模块若还没写场景说明，这里自动跳过而不是崩掉。
- */
-const ACTIVITY_MODS: { id: TabName; name: string; desc: string; icon: ModuleIconComp }[] =
-  BAR_MODULE_IDS.filter((id) => SCENE_META[id]).map((id) => ({
-    id, name: labelOf(id), ...SCENE_META[id],
-  }))
-
-/** 活动栏精简默认态：编辑器 + 知识库 + AI教学（docs/slim-activitybar-plan.md） */
-const DEFAULT_TRIO = ['editor', 'knowledge', 'aiTeaching']
+/** 2026-09-26：引导「场景选择」步骤与 `activityBarHidden` 写入链路已整体删除 ——
+ *  该键唯一的读取方（`resolveStartupTab`）随「启动时默认显示」设置项退役，
+ *  勾选不再有任何效果。旧「精简活动栏」的活由 v3.4.0 三栏外壳 + 图标条右键显隐接棒。 */
 
 const SHORTCUTS = [
   { keys: 'Ctrl N', desc: '当前模块新建（日志 / 任务 / 知识页）' },
@@ -65,36 +37,13 @@ const SHORTCUTS = [
 ]
 
 /** 首次启动的新手引导 — 全屏分步向导，完成或跳过后由父级写入 onboardingDone */
-export function Onboarding({ onComplete, onSwitchTab }: { onComplete: () => void; onSwitchTab: (tab: TabName) => void }) {
+export function Onboarding({ onComplete }: { onComplete: () => void }) {
   const { s, update } = useSettings()
   const [step, setStep] = useState(0)
-  const total = 7
+  const total = 6
 
-  // 场景选择状态：默认勾选三件套；sceneTouched 区分「用户真的选过」与「只是路过」
-  const [scenePicked, setScenePicked] = useState<string[]>(DEFAULT_TRIO)
-  const sceneTouchedRef = useRef(false)
-  // 仅首启运行或用户触碰过场景才允许写 activityBarHidden——设置里重开引导浏览不能重置老用户的活动栏
-  const firstRunRef = useRef(!s.onboardingDone)
-
-  const toggleScene = (id: string) => {
-    sceneTouchedRef.current = true
-    setScenePicked(v => {
-      const next = v.includes(id) ? v.filter(x => x !== id) : [...v, id]
-      return next.length ? next : ['editor']
-    })
-  }
-
-  /** 完成/跳过统一收口：按场景选择写 activityBarHidden，再回调完成 */
+  /** 完成/跳过统一收口（无落库动作，纯回调） */
   const finish = () => {
-    if (sceneTouchedRef.current || firstRunRef.current) {
-      const picked = new Set(scenePicked.includes('editor') ? scenePicked : ['editor', ...scenePicked])
-      const hidden = ACTIVITY_MODS.map(m => m.id).filter(id => !picked.has(id))
-      update('activityBarHidden', JSON.stringify(hidden))
-      if (!picked.has(s.startupTab)) {
-        const firstVisible = ACTIVITY_MODS.find(m => picked.has(m.id))
-        if (firstVisible) onSwitchTab(firstVisible.id as TabName)
-      }
-    }
     onComplete()
   }
 
@@ -111,7 +60,6 @@ export function Onboarding({ onComplete, onSwitchTab }: { onComplete: () => void
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-    // deps 带 finish：场景选择变化会重建 finish，保证键盘路径拿到的也是最新所选
   }, [step, finish])
 
   const next = () => (step < total - 1 ? setStep(v => v + 1) : finish())
@@ -164,37 +112,6 @@ export function Onboarding({ onComplete, onSwitchTab }: { onComplete: () => void
 
           {step === 2 && (
             <div>
-              <StepTitle icon={<ListChecks size={15} />} title="你的使用场景" />
-              <p className="text-[12px] text-[var(--text-muted)] leading-relaxed mb-3">
-                多选。选中的模块固定在左侧活动栏，其余随时<strong className="text-[var(--text-secondary)]">右键活动栏</strong>找回。
-              </p>
-              <div className="grid grid-cols-2 gap-2.5">
-                {ACTIVITY_MODS.map(m => {
-                  const on = scenePicked.includes(m.id)
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => toggleScene(m.id)}
-                      className={`flex items-center gap-2.5 p-3 rounded-lg border text-left transition-colors ${
-                        on
-                          ? 'border-[var(--accent)] bg-[var(--accent)]/10'
-                          : 'border-[var(--border-color)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]'
-                      }`}
-                    >
-                      <m.icon size={16} className={`shrink-0 mt-0.5 ${on ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`} />
-                      <span className="min-w-0">
-                        <span className={`block text-[12px] font-medium ${on ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>{m.name}</span>
-                        <span className="block text-[11px] text-[var(--text-muted)] leading-snug mt-0.5">{m.desc}</span>
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {step === 3 && (
-            <div>
               <StepTitle icon={<Bot size={15} />} title="AI 助手与插件" />
               <div className="space-y-2.5">
                 <InfoRow icon={<Bot size={14} />} title="AI 助手 · 边看边问"
@@ -207,7 +124,7 @@ export function Onboarding({ onComplete, onSwitchTab }: { onComplete: () => void
             </div>
           )}
 
-          {step === 4 && (
+          {step === 3 && (
             <div>
               <StepTitle icon={<Sparkles size={15} />} title="按喜好快速设置" />
               <div className="space-y-4">
@@ -216,13 +133,6 @@ export function Onboarding({ onComplete, onSwitchTab }: { onComplete: () => void
                     options={[{ id: 'dark', label: '深色', icon: Moon }, { id: 'light', label: '浅色', icon: Sun }]}
                     value={s.theme}
                     onChange={v => update('theme', v)}
-                  />
-                </QuickRow>
-                <QuickRow label="启动时打开">
-                  <ChoiceGroup
-                    options={[{ id: 'blog', label: '博客' }, { id: 'schedule', label: '任务' }, { id: 'knowledge', label: '知识库' }, { id: 'editor', label: '编辑区' }, { id: 'moments', label: '说说' }]}
-                    value={s.startupTab}
-                    onChange={v => { update('startupTab', v); onSwitchTab(v as TabName) }}
                   />
                 </QuickRow>
                 <QuickRow label="打卡提醒">
@@ -237,7 +147,7 @@ export function Onboarding({ onComplete, onSwitchTab }: { onComplete: () => void
             </div>
           )}
 
-          {step === 5 && (
+          {step === 4 && (
             <div>
               <StepTitle icon={<ShieldCheck size={15} />} title="数据与安全" />
               <div className="space-y-2.5">
@@ -249,7 +159,7 @@ export function Onboarding({ onComplete, onSwitchTab }: { onComplete: () => void
             </div>
           )}
 
-          {step === 6 && (
+          {step === 5 && (
             <div>
               <StepTitle icon={<Keyboard size={15} />} title="快捷键加速，准备出发" />
               <div className="space-y-2 mb-6">

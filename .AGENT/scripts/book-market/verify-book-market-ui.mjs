@@ -57,7 +57,7 @@ console.log('\n--- ① 模块登记（appModules 唯一真相源） ---')
 const modBlock = code(APP_MODULES)
 check('APP_MODULES 有 bookMarket 条目', /id:\s*'bookMarket'/.test(modBlock))
 const bmLine = (modBlock.match(/^.*id:\s*'bookMarket'.*$/m) ?? [''])[0]
-for (const flag of ['bar', 'startable', 'tile', 'palette']) {
+for (const flag of ['bar', 'tile', 'palette']) {
   check(`bookMarket ${flag}: true（与工具箱/插件平级）`, new RegExp(`${flag}:\\s*true`).test(bmLine), bmLine.trim().slice(0, 90))
 }
 check('模块清单仍是编译期可校验的（as const satisfies 在位）', /as const satisfies/.test(modBlock))
@@ -97,8 +97,6 @@ const tables = [
   ['手绘包 HAND_DRAWN', 'src/components/shared/ModuleIcons.tsx', /bookMarket:\s*\w+/],
   ['StyleAware 导出 BookMarketIcon', 'src/components/shared/ModuleIcons.tsx', /export function BookMarketIcon/],
   ['页面条 TAB_ICONS', 'src/components/workbench/WorkbenchPageBar.tsx', /bookMarket:\s*</],
-  ['首启场景 SCENE_META', 'src/components/shared/Onboarding.tsx', /bookMarket:\s*\{/],
-  ['设置页启动项 STARTUP_ICONS', 'src/modules/settings/views/AppearanceView.tsx', /bookMarket:\s*</],
   ['桌面磁贴 TILE_META', 'src/modules/desktop/tiles.tsx', /bookMarket:\s*\{/],
   ['活动栏 RAIL_BUTTONS', 'src/components/shared/ActivityBar.tsx', /id:\s*'bookMarket'/],
 ]

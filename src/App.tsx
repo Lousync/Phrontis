@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { AppWindow } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag, BookKind } from './types'
 
-import { labelOf as tabLabel, resolveStartupTab, isTabName } from './lib/appModules'
+import { labelOf as tabLabel, isTabName } from './lib/appModules'
 import { WORKBENCH_TABBAR_EXCLUDED, AI_ASSISTANT_SHORTCUT_DISABLED } from './lib/workbenchLayout'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchPageBar, PAGE_OWNED } from './components/workbench/WorkbenchPageBar'
@@ -186,7 +186,7 @@ export default function App() {
   const wbLayout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   // 布局 · 活动栏整条显隐。原名「自定义布局」的标题栏下拉已于 2026-09-17 整条删除，
   // 唯一入口收敛到命令面板「布局：隐藏/显示活动栏」（快捷键 Ctrl+Shift+P）。
-  // 与 activityBarHidden（逐模块显隐）互不干扰：这里关的是「活动栏这个容器本身」。
+  // 与逐模块显隐互不干扰：这里关的是「活动栏这个容器本身」。
   // 缺省 true：老仓库 settings.json 里没这个键 → 不因升级被突然藏掉活动栏
   const activityBarVisible = s.activityBarVisible !== false
 
@@ -315,12 +315,12 @@ export default function App() {
   /** 切到某模块。
    *  守卫（F-4 根治）：传入的 id 必须仍在模块清单里 —— 否则渲染层 switch 无对应 case，
    *  会得到一个**空白页**（退役模块 id 可能来自旧持久化设置 / 插件命令 / 深链）。
-   *  非清单值时回落到 resolveStartupTab 的同一口径，不静默吞掉。 */
+   *  非清单值一律不打开任何模块（落回工作台空态），既不硬撑一个兜底模块、也不静默吞掉。 */
   const openTab = useCallback((tab: TabName) => {
-    setActiveTab(isTabName(tab) ? tab : resolveStartupTab(undefined, s.activityBarHidden))
+    setActiveTab(isTabName(tab) ? tab : null)
     setSidebarOpen(true)
     setPalette(null)
-  }, [s.activityBarHidden])
+  }, [])
 
   /** 插件命令执行分发（plugin-phase1-design C3）：有视图 → 切模块激活；code 插件 → 推常驻 Worker */
   const SLOT_MODULE: Record<string, TabName> = { knowledge: 'knowledge', blog: 'blog', schedule: 'schedule', aiTeach: 'aiTeaching' }
@@ -419,22 +419,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, startupChecked, settingsReady])
 
-  // Set startup tab from settings — only on initial load, NOT on subsequent setting changes
-  useEffect(() => {
-    if (!settingsReady || !loaded) return
-    // 口径统一收在 lib/appModules.resolveStartupTab：用户选的启动项可用就用它，否则**桌面兜底**。
-    // 旧实现在这里维护了一张硬编码候选清单，里头含 recycle / help —— 而这两个模块不在活动栏的
-    // 「显示/隐藏模块」菜单里（永远隐藏不掉），于是「把侧边栏模块全隐藏 + 重启」必然落到回收站。
-    // 现在不再做任何逐项回退，从根上消掉这类兜底事故。
-    setActiveTab(resolveStartupTab(s.startupTab, s.activityBarHidden))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsReady, loaded])
+  // 启动不再落到任何模块 —— **工作台（三栏外壳 + 全关空态）就是默认首屏**。
+  // 2026-09-25 拍板：删掉「启动时默认显示」设置项，启动落点那套机制（resolveStartupTab /
+  // 可启动标记）随之退役；activeTab 初值本来就是 null，删掉这段 effect 即达成新口径。
+  // （旧注释保留的教训：曾经的兜底循环含 recycle/help，导致「把侧边栏模块全隐藏 + 重启」开回收站。）
 
   // ---- 更新说明（VS Code 式）：启动按版本判定自动打开 ----
   // 判定在主进程（app.getVersion() vs 仓库 `.knowbase/modules/release-notes/index.json` 的基线），
   // 渲染层只消费结果。延迟 2s：错开 updateStartupCheck() 的 6s（不抢网络/IO），也不与首屏渲染抢。
   // 无当前仓库 / IPC 未就绪 → 静默失败，绝不打扰（更新说明不值得为它弹错误）。
-  const activeTabRef = useRef<TabName | null>('blog')
+  const activeTabRef = useRef<TabName | null>(null)
   useEffect(() => { activeTabRef.current = activeTab }, [activeTab])
   const tabBeforeNotes = useRef<TabName | null>(null)
   const notesCheckedRef = useRef(false)
@@ -458,14 +452,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsReady, loaded])
 
-  /** 「知道了」：回到进更新说明之前那个模块（没有来源时退回启动模块）。
-   *  退回必须走 resolveStartupTab 归一化 —— 直接用 s.startupTab 会拿到未迁移的旧值
-   *  （如已退役的 `editor`），openTab 出去就是一个空白标签页（F-4）。 */
+  /** 「知道了」：回到进更新说明之前那个模块；**没有来源时回工作台空态**
+   *  （启动即工作台，已无「启动项」可退；非法 id 的兜底统一由 openTab 的守卫负责）。 */
   const dismissReleaseNotes = useCallback(() => {
     const prev = tabBeforeNotes.current
     tabBeforeNotes.current = null
-    openTab(prev ?? resolveStartupTab(s.startupTab, s.activityBarHidden))
-  }, [openTab, s.startupTab, s.activityBarHidden])
+    if (prev) openTab(prev)
+    else setActiveTab(null)
+  }, [openTab])
 
   // Apply theme class to <html> — reacts to async loaded settings (fixes stale-default bug)
   // 插件主题:先确保 <style> 已注入,再应用主题类(插件主题依赖运行时注入的 CSS 变量)
@@ -1628,7 +1622,6 @@ export default function App() {
       {onboardingOpen && (
         <Onboarding
           onComplete={() => { update('onboardingDone', true); setOnboardingOpen(false) }}
-          onSwitchTab={tab => setActiveTab(tab)}
         />
       )}
       {importModalOpen && <ImportModal onClose={() => setImportModalOpen(false)} initialBackupPath={importBackupPath} />}

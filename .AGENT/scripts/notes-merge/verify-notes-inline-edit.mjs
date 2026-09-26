@@ -147,7 +147,7 @@ console.log('[8] 更名与归类入口（批次 3）')
   const app = read('src/App.tsx')
   ok(/id: 'knowledge', label: '笔记'/.test(am), '模块更名「笔记」')
   ok(!/id: 'editor'/.test(am), 'editor 活动栏/启动/磁贴/清单条目均已退役（阶段四：模块整体删除）')
-  ok(am.includes("return 'knowledge'"), '启动兜底 = 知识库（editor 退役后）')
+  ok(!/resolveStartupTab/.test(am), '启动落点机制已退役（2026-09-25 删「启动时默认显示」设置项，启动一律落工作台）')
   const srcApp = app
   ok(!srcApp.includes('kb-open-in-editor') || srcApp.includes("'kb-open-note'"), 'App 打开事件已更名 kb-open-note')
   ok(ki.includes('kb-open-note'), 'knowledge 侧事件名同步')

@@ -103,9 +103,9 @@ const appModulesSrc = stripComments(readFileSync(join(ROOT, 'src/lib/appModules.
 const moduleBlock = appModulesSrc.slice(appModulesSrc.indexOf('export const APP_MODULES'), appModulesSrc.indexOf('as const satisfies'))
 const ids = [...moduleBlock.matchAll(/id:\s*'([A-Za-z]+)'/g)].map((m) => m[1])
 // 2026-09-22 书市 S4：15 → 16（+bookMarket）。这是**有意变更**，不是漂移 —— 判据是
-// appModules 里它 bar/startable/tile/palette 全 true 且与工具箱/插件平级（方案 §1.2 第 5 条）。
+// appModules 里它 bar/tile/palette 全 true 且与工具箱/插件平级（方案 §1.2 第 5 条）。
 check('APP_MODULES 仍为 16 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 16, `实得 ${ids.length}: ${ids.join(',')}`)
-check("bookshelf 仍为入口产生型（bar:false / startable:false）", /id:\s*'bookshelf',\s*label:\s*'书架',\s*bar:\s*false,\s*startable:\s*false/.test(moduleBlock))
+check("bookshelf 仍为入口产生型（bar:false / tile:false / palette:false）", /id:\s*'bookshelf',\s*label:\s*'书架',\s*bar:\s*false,\s*tile:\s*false,\s*palette:\s*false/.test(moduleBlock))
 
 // ===== ⑤ pdfLayout 纯函数（批次 3 落地后自动启用）=====
 console.log('\n--- ⑤ pdfLayout 纯函数用例 ---')
