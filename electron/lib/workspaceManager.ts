@@ -43,8 +43,10 @@ const HIDDEN_DIRS = new Set([
 const APP_INTERNAL_DIRS = new Set(['_attachments', '_inbox'])
 
 /** 软件生成项沉底（2026-09-08 用户拍板）：.ignore 等非用户内容不与用户目录混排，固定沉在文件树根列表最下。
- *  新增软件生成文件/目录时登记进此集合即可（AI教学 产物根按设置动态传入，见 ws:listDir）。 */
-const SOFT_ENTRY_NAMES = new Set(['.ignore'])
+ *  新增软件生成文件/目录时登记进此集合即可（AI教学 产物根按设置动态传入，见 ws:listDir）。
+ *  N-5（2026-09-26）：`.assistant/`（AI 助手要求 + 术语表）入列 —— 登记后由 listDirEntries
+ *  的点目录放行规则带出（点前缀目录默认隐藏，名单内的除外），并出现在总览态「软件文件」折叠区。 */
+const SOFT_ENTRY_NAMES = new Set(['.ignore', '.assistant'])
 
 interface RootInfo {
   id: string
@@ -127,7 +129,10 @@ export function listDirEntries(absPath: string): WorkspaceEntry[] {
       const lst = lstatSync(full)
       if (lst.isSymbolicLink()) continue
       if (lst.isDirectory()) {
-        if (name.startsWith('.') || HIDDEN_DIRS.has(name.toLowerCase()) || APP_INTERNAL_DIRS.has(name.toLowerCase())) continue
+        // 点前缀目录默认隐藏（.knowbase / .attachments / .git …）；SOFT_ENTRY_NAMES 登记的除外——
+        // 它们是「软件生成项」，要经 softNames 沉底到软件文件区（N-5：.assistant），不能在这里一刀切掉
+        if (name.startsWith('.') && !SOFT_ENTRY_NAMES.has(name.toLowerCase())) continue
+        if (HIDDEN_DIRS.has(name.toLowerCase()) || APP_INTERNAL_DIRS.has(name.toLowerCase())) continue
         out.push({ name, type: 'dir', size: 0, mtime: lst.mtimeMs })
       } else if (lst.isFile()) {
         out.push({ name, type: 'file', size: lst.size, mtime: lst.mtimeMs })

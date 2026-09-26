@@ -14,7 +14,7 @@ import { getKnowledgeIndex } from './kbStore/knowledgeIndex'
 import { vaultGetPageById, vaultGetCategories, vaultCreatePage } from './kbStore/knowledgeVaultRepo'
 import { searchKnowledge } from './knowledgeSearch'
 import { searchHelp } from './helpService'
-import { vaultCreateEntry } from './kbStore/blogVaultRepo'
+import { vaultCreateEntry, vaultSearchEntries } from './kbStore/blogVaultRepo'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
 import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, type TodoRow } from './kbStore/scheduleVaultRepo'
 // 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
@@ -472,7 +472,9 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.knowledge.search',
     title: '搜索知识库页面',
-    description: '搜索知识库页面，返回 id/标题/摘录/相关度。配好嵌入模型后支持语义检索（问句/换述也能命中），结果 via 字段标注命中方式',
+    // N-7 §五 C：边界声明 —— 博客收在 .knowbase/blog（点前缀规则不在本工具检索域），
+    // 不声明会被模型误以为「搜过了就是没有」，进而到日程/动态乱找（2026-09-24 真实报障）
+    description: '搜索知识库页面，返回 id/标题/摘录/相关度。配好嵌入模型后支持语义检索（问句/换述也能命中），结果 via 字段标注命中方式。只搜知识库页面，不含博客日记——找博客用 builtin.blog.search',
     inputSchema: SEARCH_LIMIT_SCHEMA,
     source: 'builtin',
     enabled: true,
@@ -497,6 +499,43 @@ export function registerBuiltinTools(): void {
     } catch (err) {
       throw new Error(`知识库搜索失败（仓库未就绪？）：${String((err as Error)?.message ?? err)}`)
     }
+  })
+
+  // 1b. builtin.blog.search —— 博客日记检索（N-7 §五 B 拍板：博客在 .knowbase/blog、
+  //     被「.」前缀规则挡在 knowledgeIndex 检索域外是设计结果；给博客单独一个检索工具
+  //     是成本最低且不动既有边界的出路）。tier ondemand（铁律 16 新工具默认折叠），
+  //     需要时模型经 builtin.tool.request 申请；术语表骨架里已给指路。
+  registerTool({
+    name: 'builtin.blog.search',
+    title: '搜索博客日记',
+    description: '按关键词搜索博客日记（每天一篇的日志），匹配标题与正文，返回 日期/标题/摘录。knowledge.search 只搜知识库页面不含博客，找博客内容用本工具',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '关键词（匹配标题与正文）' },
+        limit: { type: 'number', description: '上限, 默认10' },
+      },
+      required: ['query'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'blog',
+  }, args => {
+    const q = str(args.query).trim()
+    if (!q) return []
+    const limit = clamp(Math.floor(num(args.limit, 10)), 1, 50)
+    // 与博客 UI 同一份 .knowbase/blog/*.md（vaultSearchEntries 已按创建时间倒序、内部截 50）
+    const rows = vaultSearchEntries(q)
+    return rows.slice(0, limit).map(e => ({
+      id: e.id,
+      date: e.date,
+      title: e.title,
+      // excerpt 剥 markdown 标记（\x60 = 反引号转义：源码里不能出现裸反引号，
+      // .AGENT 契约的注释剥离状态机不认 regex 字面量，会把它当模板串起点吞掉后续源码）
+      excerpt: (e.contentMd || '').replace(/[#>*\x60[\]~-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120),
+    }))
   })
 
   // 2. builtin.knowledge.read 已退役（2026-09-09 P2）：vault.read(path|id) 收编（id=knowledge.search 返回的页面 id）
@@ -972,7 +1011,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft）默认不在工具列表中。需要执行写操作时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft）默认不在工具列表中。需要执行写操作或检索博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {

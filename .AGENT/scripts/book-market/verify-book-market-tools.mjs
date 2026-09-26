@@ -169,13 +169,20 @@ check('清单里的名字都是真实存在的工具（防手抄错名 → 申�
 // 清单覆盖范围 = 全部 `builtin.*` 写工具。★ `visual.html` 是**已知例外**：它是 AI 教学的
 // 专用写工具，可发现性走 agentService 的专属提示（`tools="visual.html"`），不进这张清单 ——
 // 所以下面既排掉它，又断言那条专属提示确实还在（例外不许变成静默）。
+// N-7（2026-09-26）起清单新增**ondemand 读取工具**这一合法成员：blog.search 不在 core
+// 常驻集，模型只能经本清单 / knowledge.search 边界声明得知其存在（写入类措辞已改「写入类
+// 工具与按需读取工具」）。因此覆盖判据从「与写工具 1:1」放宽为「写工具全覆盖 + 多出项
+// 必须是 ondemand」—— core 可见读工具（如 booksource.list）入清单仍是违规（见上）。
 const writeTools = tools
   .filter((t) => t.requires === 'write' && !t.readOnly && t.name.startsWith('builtin.'))
   .map((t) => t.name.replace(/^builtin\./, ''))
 const missing = writeTools.filter((n) => !reqNames.includes(n))
+const extra = reqNames.filter((n) => !writeTools.includes(n))
 check(`清单覆盖全部内置写工具（写工具 ${writeTools.length} 个 / 清单 ${reqNames.length} 项）`,
-  missing.length === 0 && reqNames.length === writeTools.length,
-  missing.length ? `漏：${missing.join(', ')}` : '一一对应')
+  missing.length === 0 && extra.every((n) => byName.get(`builtin.${n}`)?.tier === 'ondemand'),
+  missing.length ? `漏：${missing.join(', ')}`
+    : `多出项非 ondemand：${extra.filter((n) => byName.get(`builtin.${n}`)?.tier !== 'ondemand').join(', ')}`
+      || `多出项（ondemand 读取）：${extra.join(', ')}`)
 check('例外 visual.html 的可发现性有专属提示（agentService 里点名 + 教模型用 tool.request 申请）',
   /tools="visual\.html"/.test(code('electron/lib/agentService.ts')))
 

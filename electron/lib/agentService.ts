@@ -20,6 +20,7 @@ import {
   createSideLaneSession, listSideLanes, promoteSideLane,
 } from './agentSessionRepo'
 import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceConstraintsForSession, resolveWriteOwnerRel, listSessionFolderIds } from './aiTeachingFolders'
+import { readAssistantGlobalConstraints, readAssistantSessionConstraints, readAssistantGlossary } from './assistantConstraints'
 import { resolveSourcesForInjection } from './aiTeachingSources'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
 import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
@@ -610,7 +611,9 @@ async function runAgentLoop(
       : `\n\n（用户指定的 Skill「${llmOpts.skillName}」不存在或已停用，忽略该指定并正常回答。）`
   // P2（§2.3）：会话约束唯一真相源 = 会话文件夹 CONSTRAINTS.md，每轮发送即时重读（编辑器改动即刻生效）；
   // 2-6 读兼容：仅旧会话未落文件夹时回退 DB sessionInstructions。注入截断防 token 失控。
-  const rawConstraints = resolveConstraintsForInjection(sessionId, getSettingReader())
+  // N-5（2026-09-26）：三层约束是**教学**机制 —— 按 source 门控（此前 globalInstHint 未门控，
+  // 教学全局要求会漏进助手对话，与拍板「独立第二份，不共用」相悖；台账 N-5 前提澄清的本意即如此）。
+  const rawConstraints = source === 'aiTeaching' ? resolveConstraintsForInjection(sessionId, getSettingReader()) : ''
   const sessionInst = rawConstraints.length > 4000
     ? rawConstraints.slice(0, 4000) + '\n…（约束文件过长已截断，全文见会话文件夹 CONSTRAINTS.md）'
     : rawConstraints
@@ -619,7 +622,7 @@ async function runAgentLoop(
     : ''
   // 工作区约束层（v3.1.2 条目6：三层约束补中间档）：{AI教学}/{工作区}/CONSTRAINTS.md 每轮重读，
   // 本工作区所有会话共同遵守；未归属工作区的会话本层零段。截断 3500 取全局层与会话层之间的中间档。
-  const rawWs = readWorkspaceConstraintsForSession(sessionId, getSettingReader()).text ?? ''
+  const rawWs = source === 'aiTeaching' ? (readWorkspaceConstraintsForSession(sessionId, getSettingReader()).text ?? '') : ''
   const wsInst = rawWs.length > 3500
     ? rawWs.slice(0, 3500) + '\n…（工作区要求过长已截断，全文见工作区文件夹 CONSTRAINTS.md）'
     : rawWs
@@ -628,13 +631,37 @@ async function runAgentLoop(
     : ''
   // 全局约束层（.claude/plans/global-constraints.md）：{产物根}/CONSTRAINTS.md 每轮重读，跨工作区/跨会话共同遵守；
   // 冲突裁决链写进提示词：用户当下消息 > 会话层 > 工作区层 > 全局层 > 内置人设。截断 3000 与画像段同量级。
-  const rawGlobal = readGlobalConstraints(getSettingReader()).text ?? ''
+  const rawGlobal = source === 'aiTeaching' ? (readGlobalConstraints(getSettingReader()).text ?? '') : ''
   const globalInst = rawGlobal.length > 3000
     ? rawGlobal.slice(0, 3000) + '\n…（全局要求过长已截断，全文见 AI教学产物根 CONSTRAINTS.md）'
     : rawGlobal
   const globalInstHint = globalInst.trim()
     ? `\n\n【全局要求】（用户设定于 AI教学产物根的 CONSTRAINTS.md，跨工作区所有会话共同遵守，是约束链中最粗、优先级最低的一层；与更细颗粒层或用户当下消息冲突时以更细层为准）\n${globalInst}`
     : ''
+  // N-5：助手**独立**要求注入（.assistant/，2026-09-24 三轮拍板）——与教学三层完全分开，措辞不复用教学口径。
+  // 默认单层（全局），用户从助手面板入口按需升格出会话层；每轮重读，保存后下一轮生效。
+  // 优先级链（拍板 G）：用户当下消息 > 本会话要求 > 全局要求。
+  const assistantConstraintHint = source === 'aiTeaching' ? '' : (() => {
+    const g = readAssistantGlobalConstraints().trim()
+    const sess = readAssistantSessionConstraints(sessionId).trim()
+    const parts: string[] = []
+    if (g) parts.push(
+      `【助手全局要求】（用户设定于仓库 .assistant/CONSTRAINTS.md，所有助手对话共同遵守；与本会话要求或用户当下消息冲突时以更细层为准）\n${g.length > 3000 ? g.slice(0, 3000) + '\n…（全局要求过长已截断）' : g}`,
+    )
+    if (sess) parts.push(
+      `【本会话要求】（用户仅为本对话设定于 .assistant/ 会话文件夹的 CONSTRAINTS.md，优先于全局要求；与用户当下消息冲突时以用户消息为准）\n${sess.length > 4000 ? sess.slice(0, 4000) + '\n…（会话要求过长已截断）' : sess}`,
+    )
+    return parts.length ? '\n\n' + parts.join('\n\n') : ''
+  })()
+  // N-7：术语表注入（别名制，.assistant/glossary.json，预填可改）。解决「用户说博客、AI 乱翻日程」
+  // 的理解层问题；检索能力缺口由 builtin.blog.search 补（两件分开修，见台账 N-7 §一）。
+  // 改动低频 → 放 systemFull 稳定前缀合规（与教学约束同哲学）；文件缺失/坏 JSON → 零注入。
+  const glossaryHint = source === 'aiTeaching' ? '' : (() => {
+    const rows = readAssistantGlossary()
+    if (!rows || rows.length === 0) return ''
+    const lines = rows.map(r => `- ${r.alias} → ${r.name}${r.tools ? `（工具：${r.tools}）` : ''}`)
+    return '\n\n【术语表（用户口径 ↔ 数据域对照）】用户可能用左列的口语称呼指代某类数据；需要检索或写入时按对应工具操作正确的数据域，不要到别的模块乱找（例如找博客日记要用博客的检索工具，不要翻日程或动态）：\n' + lines.join('\n')
+  })()
   // v3.1.2 条目11：支线判定**提前**到规则装配之前——「不出题」与「写工具不可见」都要先知道是不是支线。
   // （原先在下面 laneRow 处才算，晚于本段的 quizRuleHint → 支线照常拿到出题协议。）
   const laneRow = source === 'aiTeaching' ? getAgentSession(sessionId) : undefined
@@ -726,7 +753,7 @@ async function runAgentLoop(
         ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + visualHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
       }
     : undefined
-  const systemFull = baseSystem + globalInstHint + wsInstHint + instHint + profileHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+  const systemFull = baseSystem + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，

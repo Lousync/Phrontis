@@ -1,24 +1,24 @@
 源文件: E:\Projects\KnowledgeRecorder\electron\lib\builtinTools.ts
-工具总数: 33
+工具总数: 34
 
 【core —— 每轮常驻注入】14 个
   builtin.quiz.list                   3290 字符  ~1036 tok  schema  556  [read/quiz]
   builtin.vault.read                  2879 字符  ~ 917 tok  schema  308  [read/-]
   builtin.habits.stats                2438 字符  ~ 684 tok  schema  241  [read/checkin]
+  builtin.tool.request                2301 字符  ~ 818 tok  schema  157  [read/-]
   builtin.quiz.stats                  2280 字符  ~ 693 tok  schema   96  [read/quiz]
-  builtin.tool.request                2275 字符  ~ 802 tok  schema  157  [read/-]
   builtin.schedule.list-todos         1755 字符  ~ 537 tok  schema  164  [read/schedule]
   builtin.vault.list                  1755 字符  ~ 530 tok  schema   97  [read/-]
   builtin.vault.search                1526 字符  ~ 439 tok  schema  161  [read/-]
   builtin.pomodoro.summary            1499 字符  ~ 397 tok  schema   83  [read/pomodoro]
   builtin.vault.resolve-ref           1360 字符  ~ 439 tok  schema  114  [read/-]
+  builtin.knowledge.search            1133 字符  ~ 406 tok  schema  490  [read/knowledge]
   builtin.help.search                 1061 字符  ~ 418 tok  schema  274  [read/-]
-  builtin.knowledge.search             977 字符  ~ 316 tok  schema  490  [read/knowledge]
   builtin.web.read                     932 字符  ~ 308 tok  schema  174  [read/-]
   builtin.web.search                   722 字符  ~ 245 tok  schema  173  [read/-]
-  小计: 24749 字符  ~7761 tok
+  小计: 24931 字符  ~7867 tok
 
-【ondemand —— 默认折叠，tool.request 后才注入】19 个
+【ondemand —— 默认折叠，tool.request 后才注入】20 个
   builtin.quiz.gen-paper              4627 字符  ~1521 tok  schema  631  [write/quiz]
   builtin.booksource.draft            3599 字符  ~1305 tok  schema  790  [write/bookMarket]
   builtin.schedule.create-todo        3014 字符  ~ 955 tok  schema  728  [write/schedule]
@@ -33,15 +33,16 @@
   visual.html                         1210 字符  ~ 478 tok  schema  310  [write/-]
   builtin.blog.create-entry           1186 字符  ~ 369 tok  schema  227  [write/blog]
   builtin.checkin.check-habit         1177 字符  ~ 351 tok  schema  103  [write/checkin]
+  builtin.blog.search                 1090 字符  ~ 376 tok  schema  158  [read/blog]
   builtin.schedule.delete-todo         964 字符  ~ 323 tok  schema  109  [write/schedule]
   builtin.quiz.remove                  936 字符  ~ 311 tok  schema  118  [write/quiz]
   builtin.booksource.list              904 字符  ~ 295 tok  schema   34  [read/bookMarket]
   builtin.quiz.favorite                856 字符  ~ 264 tok  schema  187  [write/quiz]
   builtin.quiz.set-note                774 字符  ~ 239 tok  schema  203  [write/quiz]
-  小计: 34483 字符  ~11479 tok
+  小计: 35573 字符  ~11855 tok
 
-合计若全部装载: ~19240 tok
-实际常驻(默认权限 read 态): ~7761 tok / 轮
+合计若全部装载: ~19722 tok
+实际常驻(默认权限 read 态): ~7867 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】
   全部合规（最大 790 字符：builtin.booksource.draft）

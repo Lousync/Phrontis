@@ -1685,7 +1685,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       : await aiTeachProfileEnsureSession(activeId!).catch(() => null)
     if (!r?.ok || !r.relPath) { showToast({ type: 'error', message: `画像打开失败${r?.error ? `：${r.error}` : ''}` }); return }
     window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
-    showToast({ type: 'info', message: `画像文档已在编辑区打开（${r.created ? '已按骨架创建' : '已有文件'}）· 编辑器顶栏可「← 返回 AI教学」` })
+    showToast({ type: 'info', message: `画像文档已在知识库打开（${r.created ? '已按骨架创建' : '已有文件'}）· 页面条左侧可「← 返回 AI教学」` })
   }, [activeId, activeWs])
   /** 全局要求编辑 = ensure 产物根 CONSTRAINTS.md（缺则落骨架）→ 跳编辑区打开；与全局画像同款交互（global-constraints 方案） */
   const openGlobalConstraints = useCallback(async () => {

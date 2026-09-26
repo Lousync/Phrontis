@@ -58,6 +58,7 @@ import { registerInlineSuggestHandlers } from '../lib/aiAssistant/inlineSuggest'
 import { registerSemanticIndexHandlers } from '../lib/kbStore/semanticIndex'
 import { registerKnowledgeSearchHandlers } from '../lib/knowledgeSearch'
 import { registerAiTeachingFolderHandlers, migrateRootDir as migrateAiTeachRootDir } from '../lib/aiTeachingFolders'
+import { registerAssistantConstraintsHandlers } from '../lib/assistantConstraints'
 import { registerAiTeachingWorkspaceHandlers } from '../lib/aiTeachingWorkspaces'
 import { registerAiTeachingSourceHandlers } from '../lib/aiTeachingSources'
 import { registerAiTeachingProfileHandlers } from '../lib/aiTeachingProfile'
@@ -984,6 +985,8 @@ app.whenReady().then(async () => {
     registerKnowledgeSearchHandlers()
     // AI教学 P1：会话 ⇄ 文件夹绑定（aiTeach:* IPC，总纲 §二）
     registerAiTeachingFolderHandlers((key) => settingsCache[key])
+    // AI 助手独立要求 + 术语表（N-5/N-7）：.assistant/ 的 ensure 入口（注入在 agentService 直读）
+    registerAssistantConstraintsHandlers()
     // AI教学 P5：工作区两层（元数据 .knowbase/modules/aiTeaching/workspaces.json，§3.2-6/3-6）
     registerAiTeachingWorkspaceHandlers((key) => settingsCache[key])
     // AI教学 P6：素材库（SOURCES/{对话夹}/SOURCE.md 登记+区间提取，§3.13 结构 v3）

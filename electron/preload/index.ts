@@ -310,6 +310,11 @@ const api = {
   /** v3.1.2 条目6：工作区约束文档（{工作区}/CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区打开 */
   aiTeachWorkspaceEnsureConstraints: (wsId: string) => ipcRenderer.invoke('aiTeachWorkspace:ensureConstraints', wsId),
   aiTeachWriteConstraints: (id: string, text: string) => ipcRenderer.invoke('aiTeach:writeConstraints', id, text),
+  // N-5/N-7：助手独立要求 + 术语表（.assistant/）——ensure 落文件并返回 relPath 跳知识库打开；
+  // 写入走编辑器既有 ws:writeFile，主进程 agentService 每轮直读注入
+  assistantConstraintsEnsureGlobal: () => ipcRenderer.invoke('assistantConstraints:ensureGlobal'),
+  assistantConstraintsEnsureSession: (id: string) => ipcRenderer.invoke('assistantConstraints:ensureSession', id),
+  assistantConstraintsEnsureGlossary: () => ipcRenderer.invoke('assistantConstraints:ensureGlossary'),
   aiTeachOrganizeDoc: (id: string, title: string, content: string, prefix?: string) => ipcRenderer.invoke('aiTeach:organizeDoc', id, title, content, prefix),
   // AI教学 P5：工作区两层（§3.2-6）
   aiTeachListWorkspaces: () => ipcRenderer.invoke('aiTeach:listWorkspaces'),

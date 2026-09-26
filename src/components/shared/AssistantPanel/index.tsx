@@ -8,6 +8,7 @@ import { getSemanticStatus } from '../../../lib/ipc'
 import { getSelectionAskHost, getAssistantContext } from '../../../lib/assistantContext'
 import { TranslateCard } from '../TranslateCard'
 import { ChatBody } from './ChatBody'
+import { AssistantEntryButton } from './AssistantEntry'
 import { useAssistantChat } from './useAssistantChat'
 import { QuoteChips } from './QuoteChips'
 import type { AgentContextInfo, TabName } from '../../../types'
@@ -449,6 +450,8 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
             {/* 感知模式开关（B2）自本头部**下移**到输入框上方（B-12，2026-09-21 拍板：
                 输入卡内顶部 · 只动侧边栏 · 弱提示跟着走）——见下方 inputTop 的渲染。
                 头部只留导航类控件（会话列表 / 全屏 / 收起），开关贴着它作用的输入区。 */}
+            {/* N-5/N-7 拍板④（原型 A）：助手要求与术语表的常驻入口 —— 面板头部一枚常驻图标 */}
+            <AssistantEntryButton activeId={chat.activeId} />
             <button onClick={() => expandToFull()} title="全屏展开 (Ctrl+Shift+J)"
               className="ml-auto p-1.5 rounded-md text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--accent)_20%,transparent)] transition-colors">
               <Maximize2 size={14} />

@@ -1979,6 +1979,10 @@ export interface ElectronAPI {
   /** v3.1.2 条目6：工作区约束文档（{工作区}/CONSTRAINTS.md）——ensure 落骨架并返回 relPath 跳编辑区；本工作区会话每轮注入 */
   aiTeachWorkspaceEnsureConstraints: (wsId: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; created?: boolean; error?: string }>
   aiTeachWriteConstraints: (id: string, text: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; error?: string }>
+  // N-5/N-7：助手独立要求 + 术语表（.assistant/）——ensure 落文件并返回仓库相对路径；写入走编辑器 ws:writeFile
+  assistantConstraintsEnsureGlobal: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
+  assistantConstraintsEnsureSession: (id: string) => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
+  assistantConstraintsEnsureGlossary: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
   aiTeachOrganizeDoc: (id: string, title: string, content: string, prefix?: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   // P5 工作区两层（§3.2-6；元数据入 .knowbase/modules/aiTeaching/workspaces.json）
   aiTeachListWorkspaces: () => Promise<{ workspaces: AiTeachWorkspaceInfo[]; sessionWs: Record<string, string>; unassignedCount: number; lastWorkspaceId: string | null }>

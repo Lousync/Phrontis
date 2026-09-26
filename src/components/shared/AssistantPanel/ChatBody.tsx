@@ -13,6 +13,7 @@ import { getKnowledgePages, agentUsageGet, llmListProviders, getSemanticStatus }
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
 import { MessageList, fmtTime } from './MessageList'
 import { useAssistantChat } from './useAssistantChat'
+import { AssistantEntryButton } from './AssistantEntry'
 import { AiChatSidebar } from './AiChatSidebar'
 import type { AssistantChatController } from './useAssistantChat'
 import type { AiUsageDay, KnowledgePage } from '../../../types'
@@ -272,6 +273,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
           <span className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
             <Sparkles size={13} className="text-[var(--accent)]" /> AI 助手
           </span>
+          {/* N-5/N-7 拍板④：助手要求与术语表常驻入口（右栏 AI 态头部与悬浮侧栏同位） */}
+          <AssistantEntryButton activeId={activeId} />
           {isNarrow && onExpand && (
             <button onClick={onExpand} title="扩大为完整对话页"
               className="ml-auto rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">

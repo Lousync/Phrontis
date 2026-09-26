@@ -600,6 +600,15 @@ export const aiTeachGlobalEnsureConstraints = (): Promise<AiTeachConstraintsResu
 export const aiTeachWorkspaceEnsureConstraints = (wsId: string): Promise<AiTeachConstraintsResult & { created?: boolean }> => a().aiTeachWorkspaceEnsureConstraints(wsId)
 /** P3b：整理成文档——回答 md 落盘会话文件夹（懒建夹 + 幂等），返回产物相对路径 */
 export const aiTeachOrganizeDoc = (id: string, title: string, content: string, prefix?: string): Promise<AiTeachFolderResult> => a().aiTeachOrganizeDoc(id, title, content, prefix)
+// ===== N-5/N-7：助手独立要求 + 术语表（.assistant/） =====
+// ensure 落文件并返回仓库相对路径（渲染层派 kb-open-note 跳知识库 draft 页签）；写入走编辑器 ws:writeFile
+export interface AssistantFileResult { ok: boolean; relPath?: string; created?: boolean; error?: string }
+/** 全局要求 `.assistant/CONSTRAINTS.md`（空文件，不预填骨架 —— N-5 拍板 H） */
+export const assistantConstraintsEnsureGlobal = (): Promise<AssistantFileResult> => a().assistantConstraintsEnsureGlobal()
+/** 会话要求 `.assistant/{会话id}/CONSTRAINTS.md`（按需升格；仅当前对话生效） */
+export const assistantConstraintsEnsureSession = (id: string): Promise<AssistantFileResult> => a().assistantConstraintsEnsureSession(id)
+/** 术语表 `.assistant/glossary.json`（预填骨架、可改 —— N-7 拍板） */
+export const assistantConstraintsEnsureGlossary = (): Promise<AssistantFileResult> => a().assistantConstraintsEnsureGlossary()
 // P5 工作区两层（§3.2-6）
 export const aiTeachListWorkspaces = () => a().aiTeachListWorkspaces()
 export const aiTeachCreateWorkspace = (name: string) => a().aiTeachCreateWorkspace(name)

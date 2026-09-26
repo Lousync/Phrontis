@@ -318,6 +318,7 @@ export default function App() {
    *  非清单值一律不打开任何模块（落回工作台空态），既不硬撑一个兜底模块、也不静默吞掉。 */
   const openTab = useCallback((tab: TabName) => {
     setActiveTab(isTabName(tab) ? tab : null)
+    setNoteJumpFrom(null)   // 命令面板等手动切换同样清返回 chip（与 handleTabChange 同口径）
     setSidebarOpen(true)
     setPalette(null)
   }, [])
@@ -558,13 +559,20 @@ export default function App() {
   // pending → 永远空态。state+props 不受实例重建影响。
   const [pendingOpenRel, setPendingOpenRel] = useState<string | null>(null)
   // UI 优化条目6：跳转来源记录——kb-open-note 带 from（如 aiTeaching），编辑器出「← 返回 X」chip；
-  // 新跳转覆盖旧来源，任何手动切 Tab（handleTabChange）清除
+  // 新跳转覆盖旧来源，任何手动切 Tab（handleTabChange / openTab）清除
   // 转发给 knowledge 的 kb-open-note-rel 通道（知识页/草稿/PDF/源码统一由文件视图语境消化）。
   // 十余处 dispatch 方零改动；editor 模块代码暂留（不再可达），批次 3 物理清理。
+  // N-4（2026-09-26）：编辑区退役后跳转落到知识库，from 被丢弃、返回 chip 整条断链——
+  // 现把 from 记进 state 并喂给 WorkbenchPageBar 的 lead 槽（prop 一直在、无人喂），chip 复活。
+  const [noteJumpFrom, setNoteJumpFrom] = useState<TabName | null>(null)
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as { relPath?: string; from?: TabName } | undefined
       setActiveTab('knowledge')
+      // from 收口：只认模块清单内的合法 TabName（'desktop' 等非法值不产生 chip）；
+      // from==='knowledge' = 知识库自己派发的（散文件/附件），返回自己毫无意义 → 不记
+      const from = detail?.from
+      setNoteJumpFrom(from && isTabName(from) && from !== 'knowledge' ? from : null)
       if (detail?.relPath) {
         window.dispatchEvent(new CustomEvent('kb-open-note-rel', { detail: { relPath: detail.relPath } }))
       }
@@ -921,6 +929,7 @@ export default function App() {
 
   const handleTabChange = (tab: TabName) => {
     setActiveToolTab(null)  // 切回模块标签时退出工具标签（工具标签关闭走 ✕ / 落点分流）
+    setNoteJumpFrom(null)   // 手动切 Tab 清返回 chip（条目6 口径；chip 自身的返回点击也走这里，消费即清）
     if (tab === activeTab) {
       // 工具箱专属（2026-09-10）：已在工具箱时再点活动栏图标 = 退出当前工具、回到工具箱主界面。
       // 通用行为对图标条无意义 —— v3.4.0 起图标条幂等哲学：重复点击已激活模块 = 无操作
@@ -1497,6 +1506,20 @@ export default function App() {
                       页面视图时激活落在页签组条目上（模块侧 activeId 置 null 配合） */
                    quizEntryActive={quizViewOpen && activeTab === 'knowledge'}
                    hidePages={zenLevel >= 1}
+                   /* N-4：跳转来源返回 chip（「← 返回 X」）。知识库在前台且最近一次 kb-open-note
+                      带了合法 from（如 AI教学 / AI对话）时出现，点它回来源标签；手动切 Tab 即清。
+                      复用 WorkbenchPageBar 现成 lead 槽（prop 在、此前无人喂 —— 正是断链点）。 */
+                   lead={activeTab === 'knowledge' && noteJumpFrom ? (
+                     <button
+                       onClick={() => handleTabChange(noteJumpFrom)}
+                       title={`回到 ${tabLabel(noteJumpFrom)}`}
+                       data-wb="noteReturnChip"
+                       data-wb-return-to={noteJumpFrom}
+                       className="kb-item-in flex items-center gap-0.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                     >
+                       ← 返回 {tabLabel(noteJumpFrom)}
+                     </button>
+                   ) : null}
                  />
               )}
               {/* 整窗模块的「回工作台」入口 = 图标条顶部「工作台」按钮（2026-09-17 bug 修复轮：

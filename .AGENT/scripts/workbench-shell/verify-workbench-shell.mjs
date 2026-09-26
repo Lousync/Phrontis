@@ -482,6 +482,40 @@ ok(staleTabbar.length === 0,
   'I4 探针层无陈旧 tabbar 正向选择残留（条目一律走 [data-wb="pagebar"] [data-wb-tab]）',
   staleTabbar.join(', ') || 'clean')
 
+// ===== J. 总览态「软件文件」折叠区（台账 N-3，2026-09-26 拍板 A+④）=====
+// 缺陷面：refreshRoot 把 softNames 命中项 filter 掉后**没有存到任何 state** —— 总览态对软件条目
+// 不可见也不可达，而契约全绿（无任何断言覆盖「总览态是否承接了 softNames」），正是本丢失溜过的原因。
+const srcOverviewSoft = srcLeft
+ok(/const \[softEntries, setSoftEntries\]/.test(srcOverviewSoft) && /setSoftEntries\(\(res\.entries \?\? \[\]\)\.filter/.test(srcOverviewSoft),
+  'J1 softNames 命中项另存 state（softEntries），不再静默丢弃')
+ok(/data-wb="softSection"/.test(srcOverviewSoft) && /kb-collapse \$\{softOpen/.test(srcOverviewSoft) && /kb-chevron/.test(srcOverviewSoft),
+  'J2 总览态渲染软件文件折叠区（形态照抄 VaultTree：kb-chevron 旋转 + kb-collapse + 计数）')
+ok(/kb\.overviewSoftOpen/.test(srcOverviewSoft),
+  'J3 折叠区 localStorage 记忆（独立键，与树模式 kb.treeSoftOpen 同口径不共用）')
+ok(/openLooseMenu\(ev, e\.name, e\.type\)/.test(srcOverviewSoft) && /type: 'file' \| 'dir'/.test(srcOverviewSoft),
+  'J4 右键菜单泛化到软件条目（拍板④：口径对齐零散文件区，带类型）')
+ok(/data-wb-soft-entry=\{e\.name\}/.test(srcOverviewSoft) && /if \(e\.type === 'file'\) onOpenLooseFile\(e\.name\)/.test(srcOverviewSoft),
+  'J5 软件文件行与零散文件同一打开通道（拍板①：点条目=按默认方式打开；目录不响应点击）')
+ok(/mt-auto border-t/.test(srcOverviewSoft),
+  'J6 折叠区 mt-auto 沉底（VS Code 时间线式，与文件树底部同观感）')
+
+// ===== K. 跳转来源返回 chip（台账 N-4，2026-09-26 拍板 = 原设计平移）=====
+// 缺陷面：编辑区退役后 kb-open-note 改道知识库、detail.from 被丢弃；WorkbenchPageBar 的 lead 槽
+// prop 在、全仓无人喂 —— 返回 chip 整条 Dead Code，「跳得出回不来」。
+ok(/const \[noteJumpFrom, setNoteJumpFrom\] = useState<TabName \| null>\(null\)/.test(srcApp),
+  'K1 App 持跳转来源 state（noteJumpFrom）')
+ok(/setNoteJumpFrom\(from && isTabName\(from\) && from !== 'knowledge' \? from : null\)/.test(srcApp),
+  'K2 kb-open-note handler 记 from（isTabName 收口：desktop 等非法值不产生 chip；from=knowledge 自指不记）')
+ok((srcApp.match(/setNoteJumpFrom\(null\)/g) || []).length >= 2,
+  'K3 手动切 Tab 清 chip（handleTabChange + openTab 两处；handler 的覆盖语义走三元收口）')
+ok(/lead=\{activeTab === 'knowledge' && noteJumpFrom \? \(/.test(srcApp) && /data-wb="noteReturnChip"/.test(srcApp),
+  'K4 lead 槽接线：知识库在前台且带 from 时渲染返回 chip（复用现成 prop，未新造通道）')
+ok(/\{lead && <div className="flex shrink-0 items-center self-center">\{lead\}<\/div>\}/.test(srcPageBar),
+  'K5 WorkbenchPageBar lead 槽渲染在位（prop 契约未被移除）')
+const srcAiTeach = stripComments(read('src/modules/ai-teaching/index.tsx'))
+ok(!/编辑器顶栏/.test(srcAiTeach),
+  'K6 负向：toast 文案不再指向已不存在的「编辑器顶栏」（提示与实际一致）')
+
 console.log('\n========================================')
 if (fails.length === 0) {
   console.log(`✅ 全部通过：${pass} 项断言 PASS`)

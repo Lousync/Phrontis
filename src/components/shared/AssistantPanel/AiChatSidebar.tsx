@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Plus, Trash2, MessageSquare, ListTree, FileEdit, Pencil } from 'lucide-react'
 import { agentSessionChanges, agentRenameSession } from '../../../lib/ipc'
 import { fmtTime } from './MessageList'
+import { AssistantEntryButton } from './AssistantEntry'
 import type { AssistantChatController } from './useAssistantChat'
 import type { SessionFileChange } from '../../../types'
 
@@ -118,8 +119,8 @@ export function AiChatSidebar({ chat, active, container }: Props) {
 
   return createPortal(
     <div data-wb="aiChatSidebar" className="flex min-h-0 flex-1 flex-col">
-      {/* 双 Tab（会话列表 / 会话大纲） */}
-      <div className="flex shrink-0 gap-1 px-2 pb-1.5 pt-1">
+      {/* 双 Tab（会话列表 / 会话大纲）+ 助手定制入口（N-5/N-7 拍板④：page 态的面板头部） */}
+      <div className="flex shrink-0 items-center gap-1 px-2 pb-1.5 pt-1">
         {([
           { key: 'sessions', label: '会话列表', icon: <MessageSquare size={11} /> },
           { key: 'outline', label: '会话大纲', icon: <ListTree size={11} /> },
@@ -140,6 +141,7 @@ export function AiChatSidebar({ chat, active, container }: Props) {
             {t.label}
           </button>
         ))}
+        <AssistantEntryButton activeId={activeId} />
       </div>
 
       {/* 主体 */}

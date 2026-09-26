@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, House, Lock,
-  LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, Clipboard,
+  LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, Clipboard, ChevronRight,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { ConfirmDialog } from '../shared'
@@ -155,17 +155,21 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
   // （2026-09-19 反馈：零散文件支持右键文件操作 → 刷新抽成 refreshRoot，重命名/删除后重拉）
   const [dirs, setDirs] = useState<string[]>([])
   const [loose, setLoose] = useState<string[]>([])
+  // 软件生成条目（N-3）：ws:listDir 返回的 softNames 命中项**另存一份 state**，不再静默丢弃——
+  // 总览态渲染「软件文件」折叠区（形态照抄 VaultTree 底部折叠节：默认收起 + 计数 + localStorage 记忆）
+  const [softEntries, setSoftEntries] = useState<Array<{ name: string; type: 'file' | 'dir' }>>([])
   const rootIdRef = useRef<string | null>(null)
   const refreshRoot = useCallback(async () => {
     try {
       const cur = await workspaceGetCurrent()
-      if (!cur?.rootId) { rootIdRef.current = null; setDirs([]); setLoose([]); return }
+      if (!cur?.rootId) { rootIdRef.current = null; setDirs([]); setLoose([]); setSoftEntries([]); return }
       rootIdRef.current = cur.rootId
       const res = await workspaceListDir(cur.rootId, '')
       if (res.error) return
       const soft = new Set(res.softNames ?? [])
       setDirs((res.entries ?? []).filter((e) => e.type === 'dir' && !soft.has(e.name)).map((e) => e.name))
       setLoose((res.entries ?? []).filter((e) => e.type === 'file' && !soft.has(e.name)).map((e) => e.name))
+      setSoftEntries((res.entries ?? []).filter((e) => soft.has(e.name)).map((e) => ({ name: e.name, type: e.type })))
     } catch { /* 无仓库/未就绪：区留空 */ }
   }, [])
   useEffect(() => { void refreshRoot() }, [refreshRoot])
@@ -178,13 +182,13 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
     return () => window.removeEventListener('vault:changed', onVault)
   }, [refreshRoot])
 
-  // ---- 零散文件右键菜单（2026-09-19 反馈）：打开 / 重命名 / 复制路径 / 删除（回收站） ----
-  const [looseMenu, setLooseMenu] = useState<{ x: number; y: number; file: string } | null>(null)
+  // ---- 零散文件/软件文件右键菜单（2026-09-19 反馈，N-3 泛化到软件条目）：打开 / 重命名 / 复制路径 / 删除（回收站） ----
+  const [looseMenu, setLooseMenu] = useState<{ x: number; y: number; file: string; type: 'file' | 'dir' } | null>(null)
   const [renameBox, setRenameBox] = useState<{ file: string; value: string } | null>(null)
   const [trashTarget, setTrashTarget] = useState<string | null>(null)
-  const openLooseMenu = useCallback((e: React.MouseEvent, file: string) => {
+  const openLooseMenu = useCallback((e: React.MouseEvent, file: string, type: 'file' | 'dir' = 'file') => {
     e.preventDefault()
-    setLooseMenu({ x: e.clientX, y: e.clientY, file })
+    setLooseMenu({ x: e.clientX, y: e.clientY, file, type })
   }, [])
   const doRenameLoose = useCallback(async (file: string, rawName: string) => {
     const newName = rawName.trim()
@@ -214,6 +218,18 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
   }, [looseMenu])
 
   const itemCls = 'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors'
+
+  // 「软件文件」折叠区开合（N-3）：默认收起 + localStorage 记忆，口径同 VaultTree 底部折叠节
+  //（键独立于树模式的 kb.treeSoftOpen——两处折叠面各自记忆）
+  const [softOpen, setSoftOpen] = useState(() => {
+    try { return localStorage.getItem('kb.overviewSoftOpen') === '1' } catch { return false }
+  })
+  const toggleSoftOpen = () => {
+    setSoftOpen((v) => {
+      try { localStorage.setItem('kb.overviewSoftOpen', v ? '0' : '1') } catch { /* 隐私模式静默 */ }
+      return !v
+    })
+  }
 
   return (
     <div data-wb="leftPanel" className="flex h-full flex-col bg-[var(--bg-primary)]">
@@ -406,6 +422,41 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                 ))}
               </div>
             )}
+            {/* 软件文件折叠区（N-3 拍板 A）：形态照抄 VaultTree 底部折叠节（mt-auto 沉底 + kb-chevron +
+                kb-collapse + 计数），数据 = softEntries（softNames 命中项，refreshRoot 另存不再丢弃）。
+                目录行不响应点击（总览态无树展开；要看内容切文件树模式），文件行点开 = 与零散文件同一打开通道 */}
+            {softEntries.length > 0 && (
+              <div data-wb="softSection" className="mt-auto border-t border-[var(--border-color)] p-1.5 pt-1">
+                <div
+                  onClick={toggleSoftOpen}
+                  className="flex items-center gap-1 rounded-md px-1 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)]"
+                  title="软件生成的目录与文件（AI教学 产物、.assistant、.ignore 等）"
+                >
+                  <ChevronRight size={12} className={`kb-chevron shrink-0 text-[var(--text-muted)] ${softOpen ? 'rotate-90' : ''}`} />
+                  <span className="truncate text-[12px] text-[var(--text-muted)]">软件文件</span>
+                  <span className="ml-auto shrink-0 pr-1 text-[10px] text-[var(--text-muted)]">{softEntries.length}</span>
+                </div>
+                <div className={`kb-collapse ${softOpen ? 'open' : ''}`}>
+                  <div className="flex flex-col gap-0.5 pb-1">
+                    {softEntries.map((e) => (
+                      <button
+                        key={e.name}
+                        data-wb-soft-entry={e.name}
+                        onClick={() => { if (e.type === 'file') onOpenLooseFile(e.name) }}
+                        onContextMenu={(ev) => openLooseMenu(ev, e.name, e.type)}
+                        className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}
+                        title={e.type === 'dir' ? '目录 — 到文件树模式查看内容' : undefined}
+                      >
+                        {e.type === 'dir'
+                          ? <Folder size={13} className="shrink-0 text-[var(--text-muted)]" />
+                          : <FileIcon ext={e.name.includes('.') ? e.name.split('.').pop()!.toLowerCase() : ''} size={13} />}
+                        {e.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           {/* 仓库切换只在总览态（顶层）显示——2026-09-17 第四轮反馈拍板④；模块态/树模式不混入 */}
           <div data-wb="vaultBar" className="shrink-0 border-t border-[var(--border-color)] p-1.5">
@@ -428,10 +479,10 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
             onMouseDown={(e) => e.stopPropagation()}
           >
             <button
-              onClick={() => { onOpenLooseFile(looseMenu.file); setLooseMenu(null) }}
+              onClick={() => { if (looseMenu.type === 'dir') onToggleTreeMode(); else onOpenLooseFile(looseMenu.file); setLooseMenu(null) }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
             >
-              <FileText size={13} className="text-[var(--text-muted)]" />打开
+              <FileText size={13} className="text-[var(--text-muted)]" />{looseMenu.type === 'dir' ? '打开（文件树模式）' : '打开'}
             </button>
             <button
               onClick={() => { setRenameBox({ file: looseMenu.file, value: looseMenu.file }); setLooseMenu(null) }}
