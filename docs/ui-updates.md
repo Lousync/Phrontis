@@ -1093,3 +1093,23 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 - `tsc --noEmit` 双端 0 错；`npm run build` ✓。
 
 **顺带解掉的一个探针环境限制**：条目 #29 记过「CDP 探针需独占实例，本机单实例锁被占用」——本轮改用 **`tmp/probe-app` 隔离实例**（真实目录 + junction 的 `out`/`node_modules`/`build` ⇒ `app.getAppPath()` 是那个目录名 ⇒ userData = `knowbase (dev probe-app)`，与用户自己的 dev 窗口互不打扰）。宿主脚本 **`.AGENT/scripts/workbench-shell/probes/run-probe-app.mjs`**（自备 app 目录，幂等），配套 seed 加 `--ud "knowbase (dev probe-app)"`。**不必 kill 用户的窗口**。（「junction 绕不开」那条说的是 junction **仓库根** —— 那时 `getAppPath()` 解析回真实路径；探针实例是真实目录，故有效。）
+
+---
+
+## 32. 反馈修复批次①：图标条拖拽/显隐 · 启动落点 · PDF 目录跳转 · 标签发光 · 助手侧栏窄化（2026-09-25 ~ 09-26）
+
+**来源**：`docs/v3.4.0-feedback.md`（v3.4.0 体验反馈台账）逐条开修的第一批。**根因分析、决策依据与逐条实现细节都在台账里**，本条只做 UI 侧流水索引，避免两处各写一遍（防 drift）。
+
+| 台账条 | 改了什么（用户可见） | 主要落点 |
+|---|---|---|
+| F-1 | 最左图标条恢复「拖拽排序 + 右键勾选显隐」；重排走 **pointer events**（HTML5 拖放在 `-webkit-user-drag:none` 继承链上实机静默失败 = 铁律 9） | `ActivityBar.tsx`·`appModules.ts`（`RAIL_MODULE_IDS`/`railOrder`/`railHidden`）·`settings.ts` |
+| N-8 | 删「设置→外观→启动时默认显示」，启动统一落工作台（三栏外壳 + 全关空态）；`resolveStartupTab` 等整套落点机制连带退役 | `App.tsx`·`appModules.ts`·`AppearanceView.tsx`·`Onboarding.tsx` |
+| F-9 | PDF 左栏目录跳转不再乱跳（dest 首元素 `.num` 是 **PDF 对象号**、不是页号 → 改走 `getPageIndex` 权威换算） | `PdfOutlineTree.tsx`·`PdfRailPanel.tsx` |
+| F-8 | 切到别的标签后，知识库零散页面签不再亮成「打开」态；页签组补 `data-wb-active`（与模块条目同口径） | `knowledge/index.tsx`·`PageTabStrip.tsx` |
+| N-6 | AI 助手侧栏变窄：先隐「会话消耗」，更窄则动作钮只留图标（接上既有 `.kb-fit` 容器查询；阈值 360/245 **实测标定**） | `AssistantPanel/{ChatBody,MessageList,StreamBubble}.tsx`·`styles/index.css` |
+
+**顺带清理（无用户可见面，防后人踩）**：引导「场景选择」步骤删除（该步写的 `activityBarHidden` 已无读者）；`activityBarOrder` / `activityBarHidden` 两键与 `activityOrder` / `activityVisibleOrder` 归一化 API 随旧八模块图标条整体退役。
+
+**验收**：tsc 双端 0 错；全量契约脚本 **53 个全绿**（新增 `verify-outline-dest-page.mjs` 9 项、`verify-kb-fit.mjs` 23 项）；行为探针 `tmp/probe-aichat-kbfit.mjs` 四档宽度实测（阈值分级生效 + 高度链未破）。
+
+**★ 实机状态如实记（勿当成全部已确认）**：**F-9 已由开发负责人实机确认**（「现在能够正常的跳转了」）；**F-1（pointer events 版拖拽）/ F-8 / N-6 尚待实机确认** —— 台账里 `[x]` 一律指「已落码 + 契约全绿」，不等于真机验收通过。
