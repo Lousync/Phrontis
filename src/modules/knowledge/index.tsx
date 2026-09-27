@@ -1771,8 +1771,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     <ImportZone onImport={handleDropImport} onImportPdf={handleDropImportBinary} className="h-full">
       <div className="flex h-full flex-col bg-[var(--bg-primary)]">
         {readingMode ? (
-          /* ===== 沉浸阅读：只保留正文（进场淡入；可能含 iframe/PDF，故只做透明度、不做位移） ===== */
-          <div className="kb-view-fade flex-1 min-w-0 relative">
+          /* ===== 沉浸阅读：只保留正文（进场淡入；可能含 iframe/PDF，故只做透明度、不做位移） =====
+             ★ F-7（2026-09-27）：本容器必须是 **flex 列 + `min-h-0`**，滚动区用 `flex-1 min-h-0`。
+             `min-h-0` 不是装饰 —— flex item 默认 `min-height: auto` 会被内容撑破（铁律 11），
+             于是这条链拿不到「容器高」而是被内容顶成「内容高」，内层滚动区随之无处可滚：
+             表象正是用户报的「沉浸式阅读下页面不能向下滑动」。
+             三条子分支都靠这条链拿高度：md 正文（自带滚动区）· WelcomeHtmlView（wrapper `flex-1`）
+             · FileMetaCard（根 `flex-1`）—— 容器一旦不是 flex 列，后两者的 `flex-1` 直接变成死属性。
+             判据与验证：tmp/probe-f7-immersive.mjs（Chromium 逐字复刻三条分支的类名 + 修复形态对照）。 */
+          <div className="kb-view-fade flex flex-1 min-h-0 min-w-0 flex-col relative">
             {/* 顶部悬停退出区（平时隐形） */}
             <div
               className="absolute top-0 inset-x-0 h-9 z-40 group/rtop cursor-pointer"
@@ -1798,7 +1805,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               /* 欢迎页（唯一放行的 HTML）：整页沙箱渲染，不走 720px 阅读排版 */
               <WelcomeHtmlView path={readingPage.path || '欢迎.html'} />
             ) : (
-            <div className="h-full overflow-y-auto">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               <div className="max-w-[720px] mx-auto px-10 py-14" style={{ fontSize: '15px', lineHeight: 1.9 }}>
                 <h1 className="text-[26px] font-bold leading-snug mb-6">{readingPage?.title || '无标题'}</h1>
                 {/* P1 附件条：PDF/无扩展名附件 → 在阅读器中打开（kb-open-note → 编辑器 PdfReaderView）；图片灰显 */}

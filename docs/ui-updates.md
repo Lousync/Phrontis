@@ -1113,3 +1113,37 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **验收**：tsc 双端 0 错；全量契约脚本 **53 个全绿**（新增 `verify-outline-dest-page.mjs` 9 项、`verify-kb-fit.mjs` 23 项）；行为探针 `tmp/probe-aichat-kbfit.mjs` 四档宽度实测（阈值分级生效 + 高度链未破）。
 
 **★ 实机状态如实记（勿当成全部已确认）**：**F-9 已由开发负责人实机确认**（「现在能够正常的跳转了」）；**F-1（pointer events 版拖拽）/ F-8 / N-6 尚待实机确认** —— 台账里 `[x]` 一律指「已落码 + 契约全绿」，不等于真机验收通过。
+
+---
+
+## 33. F-7 沉浸阅读「页面不能向下滚动」修复（2026-09-27）
+
+**根因**：沉浸分支容器（`knowledge/index.tsx`）是 `flex-1` 的 flex item 却**没有 `min-h-0`** —— flex item 默认 `min-height: auto`，不能收缩到内容高以下，于是它被正文顶成「内容高」而非「容器高」，内层滚动区随之与内容等高 ⇒ 无处可滚（铁律 11 同族病）。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 沉浸容器补 `flex flex-col min-h-0` | `src/modules/knowledge/index.tsx`（沉浸分支根） |
+| 2 | md 正文滚动区 `h-full overflow-y-auto` → `flex-1 min-h-0 overflow-y-auto` | 同上 |
+
+**隐藏面（本条一并修掉）**：沉浸态有**三条**子分支共用这条高度链 —— md 正文 / `WelcomeHtmlView`（wrapper `flex-1`）/ `FileMetaCard`（根 `flex-1`）。容器不是 flex 列时后两者的 `flex-1` 是**死属性**，所以 HTML 页、欢迎页、归档文件在沉浸态同样塌（此前只盘了 md 一条）。
+
+**方法论教训（已写进台账）**：前一轮复刻探针没抓到，是因为它搭的链**每层都是固定高**（`h-full overflow-hidden`），绕开了「flex item + `min-height:auto`」；复刻链必须照抄**每层的定高方式**，只抄层级数量会把病根复刻掉。
+
+**验收**：tsc 双端 0 错 · 全量 55 契约全绿 · `verify-workbench-shell.mjs` 新增 F15/F15b/F15c（→175 项）· 探针 `tmp/probe-f7-immersive.mjs` 三条分支对照（修复前 A/C 滚不动、B 的 iframe 塌成 150px；修复后 A/C 可滚、B 撑满）。**实机待验**。
+
+---
+
+## 34. 反馈修复批次③④（N-3 / N-4 / N-5 / N-7 · F-3 / F-10，2026-09-26 ~ 27）
+
+**来源**：`docs/v3.4.0-feedback.md` 同一台账（批③ = `4014bd3`，批④ = `f7209e4`，台账结构修正 = `ea271c1`）。**逐条根因与实现细节在台账**，本条只做 UI 侧流水索引。
+
+| 台账条 | 改了什么（用户可见） | 主要落点 |
+|---|---|---|
+| N-3 | 总览态左栏恢复「软件文件」折叠区（沉底 + 计数 + 默认收起 + 记忆）；条目右键同零散文件区四项菜单；文件点开即编辑 | `WorkbenchLeftPanel.tsx` |
+| N-4 | AI 教学「编辑画像 / 要求」跳转后可返回（返回 chip 复活） | `ai-teaching/*` |
+| N-5 | AI 助手独立的「要求」落 `.assistant/CONSTRAINTS.md` + 面板常驻编辑入口 | `AssistantPanel/*`·`electron/lib/*` |
+| N-7 | AI 助手术语表（别名制、全局一份、预填可改）+ 博客检索缺口 | `AssistantPanel/*`·`aiTools` |
+| F-3 | 托盘图标紫方块：打包态候选全灭 + 重试 + 内嵌真图标兜底 | `electron/main/*` |
+| F-10 | 删除笔记条目后左栏不再弹回总览态 | `WorkbenchLeftPanel.tsx` |
+
+**验收**：见台账各条的「验证」段（tsc 双端 0 错 + 全量契约全绿 + 各条新增契约）。

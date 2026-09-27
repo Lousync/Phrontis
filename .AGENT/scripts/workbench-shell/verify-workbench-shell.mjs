@@ -394,6 +394,18 @@ ok(/activeId=\{!isActive \|\| showQuizCollection \? null : activePageId\}/.test(
 ok(!/activeId=\{showQuizCollection \? null : activePageId\}/.test(srcKnowledge),
   'F14b 负向：旧的「只看模块内部 activePageId」写法已移除')
 
+/* F15 沉浸阅读高度链（台账 F-7，2026-09-27 修）：
+   容器是 flex item，缺 `min-h-0` ⇒ 默认 `min-height: auto` 被内容撑破（铁律 11）⇒
+   这条链拿不到「容器高」而是「内容高」⇒ 内层滚动区无处可滚 = 用户报的「沉浸阅读不能向下滑」。
+   三条子分支共用这条链（md 正文自带滚动区 / WelcomeHtmlView 的 wrapper `flex-1` /
+   FileMetaCard 根 `flex-1`）—— 容器一旦不是 flex 列，后两者的 flex-1 直接成死属性。 */
+ok(/className="kb-view-fade flex flex-1 min-h-0 min-w-0 flex-col relative"/.test(srcKnowledge),
+  'F15 沉浸阅读容器 = flex 列 + min-h-0（缺 min-h-0 ⇒ 被内容撑破 ⇒ 内层滚不动）')
+ok(/className="flex-1 min-h-0 overflow-y-auto"/.test(srcKnowledge),
+  'F15b 沉浸阅读滚动区用 flex-1 min-h-0（不再靠 h-full 百分比）')
+ok(!/className="h-full overflow-y-auto"/.test(srcKnowledge),
+  'F15c 负向：旧的 h-full overflow-y-auto 滚动区写法已移除')
+
 // ===== G. 分屏整轮下线（2026-09-18 晚 · 从 v3.4.0 撤下，改排 v3.5.0）=====
 // 背景：工作台分区精细化（分屏 + 准入收窄 + 跨栏保活）整轮撤下 v3.4.0，重做排期到 v3.5.0。
 // 页面条置顶（F 段）与分屏无关、已完成验证，**保留不动**。
