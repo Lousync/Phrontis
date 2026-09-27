@@ -1147,3 +1147,23 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 | F-10 | 删除笔记条目后左栏不再弹回总览态 | `WorkbenchLeftPanel.tsx` |
 
 **验收**：见台账各条的「验证」段（tsc 双端 0 错 + 全量契约全绿 + 各条新增契约）。
+
+---
+
+## 35. 沉浸阅读（纯净阅读）左栏自动大纲（N-9，2026-09-27）
+
+**需求**（开发负责人原话）：「纯净阅读模式下如果读的是 md 文档，左侧边栏应该自动变为大纲而不是现在这样左侧边栏没东西」。
+
+**根因**：沉浸态整块内容区（含非沉浸态那份 `sidebarInner` 的 portal）挂在 `readingMode ? … : …` 三元**之外的分支**里 ⇒ 沉浸时左栏 slot **全空**（实机截图只剩 🏠🔒 头部）。不是「切换 tab」，是**沉浸态压根没渲染左栏**。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 新增覆盖位 `immersiveTabOverride`（**不写 `sidebarTab`** —— 那是用户的选择，覆写则退出回不到原栏；归 `null` 即天然还原） | `src/modules/knowledge/index.tsx` |
+| 2 | 进入沉浸：仅 **md** 切大纲（txt / html 无标题结构）；退出：归 `null` | 同上 |
+| 3 | 沉浸分支内自带 `OutlinePanel` portal 进同一 `sidebarEl`（`data-wb="immersiveOutline"`，**不带切换行** = 拍板「只放大纲」） | 同上 |
+| 4 | 沉浸正文自带 `outline:go-to-heading` 消费者（非沉浸态由 Monaco 消费；沉浸态正文是 `MarkdownPreview` 无 Monaco）→ 按标题 id `scrollIntoView`，**复用已有的 `headingId` 锚点** | 同上 |
+| 5 | 沉浸中经 `[[双链]]` 换页：新页非 md 则收起大纲（防错配） | 同上 |
+
+**拍板**：① 只放大纲（不带切换行）② 退出还原进入前的选择 ③ 尊重手动切换 —— ③ 由 ① 自动满足（无切换行 ⇒ 无从手动切走），源码留注释警告「将来加回切换行须补 `userOverrideRef` 闸门」。
+
+**验收**：tsc 双端 0 错 · 全量 55 契约全绿 · `verify-workbench-shell.mjs` 加 F16–F16g（→182 项）· 行为探针 `tmp/probe-immersive-outline-state.mjs` **17/17**（从真源码抠出状态迁移规则驱动，专补「契约锁不住时序」的缺口）。**实机待验**。

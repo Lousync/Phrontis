@@ -406,6 +406,24 @@ ok(/className="flex-1 min-h-0 overflow-y-auto"/.test(srcKnowledge),
 ok(!/className="h-full overflow-y-auto"/.test(srcKnowledge),
   'F15c 负向：旧的 h-full overflow-y-auto 滚动区写法已移除')
 
+/* F16 沉浸阅读左栏自动大纲（2026-09-27 需求，拍板①②③）：
+   沉浸态整块内容区（含非沉浸态那份 sidebarInner 的 portal）挂在三元之外的分支里
+   ⇒ 左栏 slot 全空（实机截图：只剩头部）。故沉浸态自带一份大纲 portal 进去。 */
+ok(/const \[immersiveTabOverride, setImmersiveTabOverride\] = useState<'files' \| 'outline' \| null>\(null\)/.test(srcKnowledge),
+  'F16 覆盖位 immersiveTabOverride 独立于 sidebarTab（不覆写用户选择 ⇒ 退出天然还原）')
+ok(/setImmersiveTabOverride\(ft === 'md' \? 'outline' : null\)/.test(srcKnowledge),
+  'F16b 进入沉浸：仅 md 切大纲（txt / html 无标题结构 ⇒ 不切）')
+ok(/setImmersiveTabOverride\(null\)/.test(srcKnowledge),
+  'F16c 退出沉浸：覆盖位归 null（拍板②还原进入前的选择）')
+ok(/data-wb="immersiveOutline"/.test(srcKnowledge) && /readingMode && sidebarEl && immersiveTabOverride === 'outline' && createPortal/.test(srcKnowledge),
+  'F16d 沉浸态单独 portal 大纲到同一 sidebarEl（挂载点不变，状态留在本组件）')
+ok(!/data-wb="immersiveOutline"[\s\S]{0,900}?setSidebarTab\('files'\)/.test(srcKnowledge),
+  'F16e 沉浸态大纲不带「文件 | 大纲」切换行（拍板①只放大纲 ⇒ 拍板③自动满足）')
+ok(/readingScrollRef/.test(srcKnowledge) && /outline:go-to-heading/.test(srcKnowledge) && /scrollIntoView/.test(srcKnowledge),
+  'F16f 沉浸态自带 outline:go-to-heading 消费者（非沉浸态由 PageEditor/Monaco 消费，沉浸态没有它）')
+ok(/setImmersiveTabOverride\(\(cur\) => \(cur === null \? cur : ft === 'md' \? 'outline' : null\)\)/.test(srcKnowledge),
+  'F16g 沉浸中经双链换页也跟着换（新页非 md ⇒ 收起，防大纲与正文错配）')
+
 // ===== G. 分屏整轮下线（2026-09-18 晚 · 从 v3.4.0 撤下，改排 v3.5.0）=====
 // 背景：工作台分区精细化（分屏 + 准入收窄 + 跨栏保活）整轮撤下 v3.4.0，重做排期到 v3.5.0。
 // 页面条置顶（F 段）与分屏无关、已完成验证，**保留不动**。

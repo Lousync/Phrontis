@@ -84,6 +84,20 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [graphMode, setGraphMode] = useState(false)
   // 左栏「文件 | 大纲」切换（2026-09-19 反馈恢复旧版）：大纲仅 md 页面可用（非 md 激活时自动回落文件树）
   const [sidebarTab, setSidebarTab] = useState<'files' | 'outline'>('files')
+  /**
+   * 沉浸阅读期的左栏覆盖（2026-09-27 需求：「纯净阅读模式读 md 时左栏应有大纲」）。
+   *
+   * **刻意不写 `sidebarTab`** —— 那是**用户的选择**，覆写会让「退出沉浸后回不到原来那一栏」。
+   * 故另立覆盖位：非 null 时左栏按它渲染，null 时回落 `sidebarTab`。
+   * 进出沉浸只改覆盖位 ⇒ 退出即天然还原（拍板②），无需记住/写回旧值。
+   *
+   * 拍板③「尊重用户手动切换」在本形态下**自动成立**：沉浸态左栏刻意**不渲染**
+   * 「文件 | 大纲」切换行（拍板①，纯净），用户无从手动切走。
+   * ⚠️ 若将来在沉浸态加回切换行，必须补一个 userOverrideRef 闸门，否则本注释描述的行为会失效。
+   */
+  const [immersiveTabOverride, setImmersiveTabOverride] = useState<'files' | 'outline' | null>(null)
+  /** 沉浸态正文滚动区（左栏大纲点标题时按 id 定位到这里的标题元素） */
+  const readingScrollRef = useRef<HTMLDivElement | null>(null)
   /** 图谱目录 scope：进入时锁定「当前最深选中目录」的仓库路径；null=全库 */
   const [graphScope, setGraphScope] = useState<{ path: string; name: string } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -562,18 +576,28 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       }
       setReadingPage(p)
       setReadingMode(true)
+      // 左栏自动切大纲（拍板①：只放大纲；仅 md 有标题大纲）。
+      // 范围刻意收在 md：txt / html 走各自分支、无标题结构 ⇒ 不切（覆盖位置 null）。
+      setImmersiveTabOverride(ft === 'md' ? 'outline' : null)
     } catch (e) { console.error(e) }
   }, [])
 
   const exitReading = useCallback(() => {
     setReadingMode(false)
     setReadingPage(null)
+    // 覆盖位归 null ⇒ 左栏回落用户自己的 sidebarTab（拍板②：还原进入前的选择）
+    setImmersiveTabOverride(null)
   }, [])
 
   const openInReading = useCallback(async (pageId: string) => {
     try {
       const p = await getKnowledgePageById(pageId)
-      if (p) setReadingPage(p)
+      if (!p) return
+      setReadingPage(p)
+      // 沉浸中经 [[双链]] 换页也要跟着换左栏（拍板①的延伸）：新页非 md 时收起大纲，
+      // 免得留下「大纲不属于当前文档」的错配。只在已处于沉浸态时更新覆盖位。
+      const ft = (p.fileType || 'md').toLowerCase()
+      setImmersiveTabOverride((cur) => (cur === null ? cur : ft === 'md' ? 'outline' : null))
     } catch (e) { console.error(e) }
   }, [])
 
@@ -1767,6 +1791,27 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     else showToast({ type: 'warning', message: `未找到「${t}」` })
   }, [allPages, openInReading])
 
+  /**
+   * 沉浸态左栏大纲的标题点击（2026-09-27）。
+   *
+   * 非沉浸态那条链是 `outline:go-to-heading` → **PageEditor（Monaco）**消费；沉浸态正文是
+   * `MarkdownPreview`，**没有 Monaco**，故无人消费该事件 ⇒ 必须自带一个消费者。
+   * `MarkdownPreview` 已给每个标题渲染 `id={headingId(text)}`（与 OutlinePanel 的 `parseHeadings`
+   * 同一份生成规则），所以直接按 id `scrollIntoView` 即可，**不需要新增锚点**。
+   * 找不到 id（正文与大纲瞬时不同步，如刚切换页面）时静默忽略 —— 不弹错，避免噪音。
+   */
+  useEffect(() => {
+    if (!readingMode) return
+    const on = (e: Event) => {
+      const id = (e as CustomEvent).detail?.id as string | undefined
+      if (!id || !readingScrollRef.current) return
+      const el = readingScrollRef.current.querySelector<HTMLElement>(`#${CSS.escape(id)}`)
+      el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }
+    window.addEventListener('outline:go-to-heading', on)
+    return () => window.removeEventListener('outline:go-to-heading', on)
+  }, [readingMode])
+
   return (
     <ImportZone onImport={handleDropImport} onImportPdf={handleDropImportBinary} className="h-full">
       <div className="flex h-full flex-col bg-[var(--bg-primary)]">
@@ -1780,6 +1825,25 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
              · FileMetaCard（根 `flex-1`）—— 容器一旦不是 flex 列，后两者的 `flex-1` 直接变成死属性。
              判据与验证：tmp/probe-f7-immersive.mjs（Chromium 逐字复刻三条分支的类名 + 修复形态对照）。 */
           <div className="kb-view-fade flex flex-1 min-h-0 min-w-0 flex-col relative">
+            {/* 沉浸态左栏大纲（2026-09-27 需求 + 拍板①②）。
+                为什么必须在这里单独渲染一份：整块内容区（含非沉浸态那份 `sidebarInner` 的
+                portal）挂在下方 `readingMode ? … : …` 三元**之外的分支**里 —— 沉浸态压根不走那支，
+                左栏 slot 于是全空（用户实机截图：只剩 🏠🔒 头部，内容区一片空白）。
+                故沉浸态自带一份大纲，仍 portal 进同一个 `sidebarEl`（挂载点不变、状态留在本组件）。
+                刻意**不带**「文件 | 大纲」切换行：拍板①「只放大纲」= 纯净；拍板③由此自动满足。
+                `sidebarEl` 为 null（未托管 / 左栏收起）时不渲染，与非沉浸态的显隐口径一致。 */}
+            {readingMode && sidebarEl && immersiveTabOverride === 'outline' && createPortal(
+              <div className="kb-view-in flex min-h-0 flex-1 flex-col" data-wb="immersiveOutline">
+                <OutlinePanel
+                  pageTitle={readingPage?.title || '无标题'}
+                  headings={outlineHeadings}
+                  /* 沉浸态无「文件树」可回（切换行按拍板①不渲染）—— 传空实现保住 props 契约 */
+                  onBackToFile={() => { /* 沉浸态不提供返回文件视图，退出沉浸即可 */ }}
+                  embedded
+                />
+              </div>,
+              sidebarEl,
+            )}
             {/* 顶部悬停退出区（平时隐形） */}
             <div
               className="absolute top-0 inset-x-0 h-9 z-40 group/rtop cursor-pointer"
@@ -1805,7 +1869,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               /* 欢迎页（唯一放行的 HTML）：整页沙箱渲染，不走 720px 阅读排版 */
               <WelcomeHtmlView path={readingPage.path || '欢迎.html'} />
             ) : (
-            <div className="flex-1 min-h-0 overflow-y-auto">
+            <div ref={readingScrollRef} className="flex-1 min-h-0 overflow-y-auto">
               <div className="max-w-[720px] mx-auto px-10 py-14" style={{ fontSize: '15px', lineHeight: 1.9 }}>
                 <h1 className="text-[26px] font-bold leading-snug mb-6">{readingPage?.title || '无标题'}</h1>
                 {/* P1 附件条：PDF/无扩展名附件 → 在阅读器中打开（kb-open-note → 编辑器 PdfReaderView）；图片灰显 */}
