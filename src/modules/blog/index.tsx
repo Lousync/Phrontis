@@ -321,7 +321,7 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
   }, [view, handleToggleOutline])
 
   return (
-    <div className="flex h-full flex-col bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex h-full flex-col">
       {/* 顶部贯通行（图二骨架）已删除（2026-09-18）：与左栏 Sidebar 的「博客」标题重复，
           中栏内容直接顶到页面条下方。快捷动作仍在侧栏搜索框上方。 */}
       <div className="flex min-h-0 flex-1">

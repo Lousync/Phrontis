@@ -300,7 +300,7 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
   const pill = 'flex h-7 items-center gap-1.5 rounded-[8px] border border-[var(--border-color)] px-2.5 text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
 
   return (
-    <div data-wb="bookMarket" className="relative flex h-full flex-col bg-[var(--bg-primary)]">
+    <div data-wb="bookMarket" className="kb-theme-surface relative flex h-full flex-col">
       {/* 模块栏：视图分段 + 两个 pill（新增书源 / 下载） */}
       <div className="flex h-[46px] flex-none items-center gap-2.5 border-b border-[var(--border-color)] px-3.5">
         <div className="flex gap-[2px] rounded-[8px] bg-[var(--bg-tertiary)] p-[2px]">

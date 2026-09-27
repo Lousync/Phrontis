@@ -1167,3 +1167,21 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **拍板**：① 只放大纲（不带切换行）② 退出还原进入前的选择 ③ 尊重手动切换 —— ③ 由 ① 自动满足（无切换行 ⇒ 无从手动切走），源码留注释警告「将来加回切换行须补 `userOverrideRef` 闸门」。
 
 **验收**：tsc 双端 0 错 · 全量 55 契约全绿 · `verify-workbench-shell.mjs` 加 F16–F16g（→182 项）· 行为探针 `tmp/probe-immersive-outline-state.mjs` **17/17**（从真源码抠出状态迁移规则驱动，专补「契约锁不住时序」的缺口）。**实机待验**。
+
+## 36. 主题合集插件 v1.6.0：四季主题（春·嫩芽 / 夏·骄阳 / 秋·金秋 / 冬·初雪）+ 主题背景渐变基建（2026-09-27）
+
+**需求**：主题插件新增春夏秋冬四套主题，每季一个对应主题色，背景要有渐变感。原型 `proto/seasonal-themes.html`（单文件、真实令牌驱动）四轮反馈迭代拍板：秋=金秋麦穗（否掉咖啡色暖褐）、冬=雪白纯净（否掉深色雪夜）、夏=阳光+蓬勃（暖阳白→草色渐变 + 翠叶绿）、春=嫩芽绿。
+
+**机制**：走既有插件 theme 贡献通道——`pluginService.ensurePluginThemeStyles()` 把 colors 表消毒后注入 `html.theme-plugin-knowbase-themes-collection-<idx>` 覆写块，设置 → 外观自动出卡。新增令牌 `--bg-gradient`（渐变停止点带 0.92 alpha，对齐根容器 92% 磨砂玻璃观感）。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 插件 v1.5.0 → 1.6.0，theme 数组追加四季 4 套（各 24 令牌：全基础色板 + `--bg-gradient` + `--glass-edge` + `--drop-*`） | `resources/market-plugins/themes-collection/plugin.json` |
+| 2 | 双通道同步：整包副本进 builtin-plugins——启动时自动安装/升级（正式版已装 1.5.0 → 下次启动免操作升 1.6.0；dev 全新落位） | `resources/builtin-plugins/themes-collection/` |
+| 3 | 渐变基建两工具类：`kb-theme-gradient-img`（仅叠渐变图，App 根/内容壳保留原 color-mix 磨砂底）、`kb-theme-surface`（实底 + 渐变图，替代模块根的 `bg-[var(--bg-primary)]`；缺省 `--bg-gradient` 时 image 为 none，纯色主题零回归） | `src/styles/index.css` |
+| 4 | 消费点铺设：App 根 + 内容卡壳挂 `kb-theme-gradient-img`；31 个模块/面板根容器（knowledge / schedule / blog / toolbox 家族 / settings / 阅读器 / 工作台左栏等）`bg-[var(--bg-primary)]` → `kb-theme-surface` | `src/App.tsx`、`src/modules/**`、`src/components/**` |
+| 5 | 契约脚本：双通道 manifest 一致性 + 离线复刻渲染层 `sanitizeVars` 白名单（防令牌被静默丢弃 → 主题卡不出现）+ 四季必备令牌 / 渐变形态断言 | `.AGENT/scripts/themes-collection/verify-themes.mjs` |
+
+**取舍**：① QuizDataPanel 弹层保留实底（对话框压渐变合理）；② 内置深色 / 浅色不注入 `--bg-gradient`（纯色零回归）；③ CHANGELOG 记录留给下次切版（beta.2 已发布，避免干扰 release-notes 基线）。
+
+**验收**：tsc 双端 0 错 · `verify-themes.mjs` ✓（双通道一致、12 套主题全令牌过消毒器）· 静态检索 h-full 实底仅剩弹层一处 · **实机待验**（重启 dev 后 设置 → 外观 应出现 4 张四季主题卡，切换带 View Transition 交叉淡化）。

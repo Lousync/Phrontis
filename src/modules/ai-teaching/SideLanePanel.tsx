@@ -197,7 +197,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
   const stopped = err !== '' || (!loading && !laneId)
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex flex-col h-full min-h-0">
       {/* 顶栏：支线标识 + 轮数切换 + 关闭。浮层形态下整条顶栏 = 拖拽手柄
           （`cursor-grab` + `select-none`；按钮由 hook 的 INTERACTIVE 豁免，照常可点） */}
       <div

@@ -101,7 +101,7 @@ export function GraphSidebar({ data, activeKey, onSelect, onOpenPage }: Props) {
     : '全库'
 
   return (
-    <div className="flex h-full flex-col min-h-0 bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex h-full flex-col min-h-0">
       {/* 头部：标题 + 两行统计，无说明文 */}
       <div className="shrink-0 px-3 pt-2.5 pb-1">
         <div className="text-[13px] font-semibold text-[var(--text-primary)]">图谱</div>

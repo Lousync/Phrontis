@@ -289,7 +289,7 @@ export function GraphView({ onExit, scopePath, scopeName, onClearScope, onOpenIn
   const kindLabel = (k: string): string => (k === 'tag' ? '标签' : k === 'dangling' ? '未解析引用' : '页面')
 
   return (
-    <div className="kb-view-fade flex-1 flex flex-col overflow-hidden h-full relative bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface kb-view-fade flex-1 flex flex-col overflow-hidden h-full relative">
       {/* 图谱态左栏：分区导航 portal 进 App 左栏 slot（挂载点由 KnowledgeModule 转发） */}
       {sidebarEl && data && createPortal(
         <GraphSidebar

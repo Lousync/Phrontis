@@ -91,6 +91,16 @@ html.theme-light {
   --glass-edge: rgba(255, 255, 255, 0.65);
 }
 
+/* ===== 主题渐变底（主题包经 --bg-gradient 注入，缺省 none 与纯色零差异）=====
+   消费点：App 根/内容壳用 kb-theme-gradient-img（仅叠渐变图，保留原磨砂 color-mix 底）；
+   各模块根容器用 kb-theme-surface（实底 + 渐变图，替代 bg-[var(--bg-primary)]）。
+   季节主题的渐变停止点自带 0.92 alpha，与根容器 92% 磨砂观感对齐。 */
+.kb-theme-gradient-img { background-image: var(--bg-gradient, none); }
+.kb-theme-surface {
+  background-color: var(--bg-primary);
+  background-image: var(--bg-gradient, none);
+}
+
 /* ===== 全局基础 ===== */
 html, body, #root {
   height: 100%;

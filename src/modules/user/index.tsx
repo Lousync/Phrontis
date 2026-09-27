@@ -63,7 +63,7 @@ export function UserModule() {
   const createdAt = profile.createdAt ? new Date(profile.createdAt).toLocaleDateString('zh-CN') : '-'
 
   return (
-    <div className="flex flex-col h-full bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
         <User size={12} />

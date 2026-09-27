@@ -169,7 +169,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
     // 书架自己就拿着清单，这里覆盖一次即可（不在渲染层重算 meta，没有第二份推导）。
     const readingName = books?.find((b) => b.relPath === reading.relPath)?.displayName ?? reading.name
     return (
-      <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+      <div className="kb-theme-surface flex h-full min-h-0 flex-col">
         {/* 2026-09-18：原「返回书架 + 书名」独立行已并入阅读器工具栏。
             两处原因：① 书名此前在模块顶行与阅读器工具栏**各显示一次**（重复）；
             ② 这一行白占掉一整行阅读高度。返回入口不丢 —— 作阅读器工具栏最左的「← 返回书架」
@@ -205,7 +205,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
   // 未打开仓库
   if (rootId === null && books !== null) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-[var(--bg-primary)] text-[var(--text-muted)]">
+      <div className="kb-theme-surface flex h-full flex-col items-center justify-center gap-3 text-[var(--text-muted)]">
         <BookOpen size={40} strokeWidth={1.5} />
         <div className="text-[13.5px]">书架</div>
         <div className="max-w-[280px] text-center text-[11.5px] leading-relaxed">先打开一个仓库，书架会自动收拢 .books 目录里的书</div>
@@ -218,7 +218,7 @@ export function BookshelfModule({ isActive = true, reading = null, onOpenBook, o
   const gridList = [...list].sort(byRecent)
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex h-full min-h-0 flex-col">
       {/* 「书架 N 本」标题横排已删（2026-09-19 反馈：多余——页面条已有书架条目、左栏条目视图亦有头部，
           与博客主区顶部行同口径）。主区直接从续读条/封面网格开始 */}
 

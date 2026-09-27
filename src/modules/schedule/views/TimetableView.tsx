@@ -492,7 +492,7 @@ export function TimetableView({
   }, [onDeleteTodo])
 
   return (
-    <div className="flex h-full flex-col bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex h-full flex-col">
       {/* 工具行 */}
       <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-3 py-1.5 shrink-0 select-none">
         <button onClick={() => setWeekOffset(v => v - 1)} title="上一周"

@@ -232,7 +232,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
   }
 
   return (
-    <div data-wb="leftPanel" className="flex h-full flex-col bg-[var(--bg-primary)]">
+    <div data-wb="leftPanel" className="kb-theme-surface flex h-full flex-col">
       {/* ---- 树模式：仓库顶层目录（不含 .knowbase）+ 根散文件 ----
            2026-09-16 第二轮 UI 反馈：头部只留 ‹ 返回钮（文字装饰与横线删除） */}
       {/* ---- 搜索态（反馈轮新增第四态，优先级最高）：🏠 返回 + 🔒 锁定 + 搜索框 + 结果 ---- */}

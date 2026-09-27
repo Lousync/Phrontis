@@ -133,7 +133,7 @@ export function SettingsModule() {
   useEffect(() => () => { if (flashTimer.current) window.clearTimeout(flashTimer.current) }, [])
 
   return (
-    <div className="flex h-full bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex h-full">
       {/* Left nav */}
       <div className="w-48 shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col">
         <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">

@@ -41,7 +41,7 @@ export function DevToolsModule({ sidebarOpen = true, sidebarWidths = {} as Recor
   const ActiveComponent = active?.component
 
   return (
-    <div className="flex h-full flex-col bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex h-full flex-col">
       {/* 顶部贯通行（图二骨架）已删除（2026-09-18）：左栏工具列表已标明当前工具，
           本模块 dev-only 不进正式产物。 */}
       <div className="flex min-h-0 flex-1">

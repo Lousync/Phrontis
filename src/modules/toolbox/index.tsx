@@ -132,7 +132,7 @@ export function ToolboxModule({ homeSignal = 0 }: ToolboxModuleProps) {
   // 内置工具全屏
   if (activeTool) {
     return (
-      <div className="kb-view-in flex flex-col h-full bg-[var(--bg-primary)]">
+      <div className="kb-theme-surface kb-view-in flex flex-col h-full">
         {renderTool()}
       </div>
     )
@@ -196,7 +196,7 @@ export function ToolboxModule({ homeSignal = 0 }: ToolboxModuleProps) {
     </div>
   )
   return (
-    <div className="flex flex-col h-full bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
         <Wrench size={12} />

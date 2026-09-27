@@ -2403,7 +2403,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   )
 
   return (
-    <div className="h-full flex flex-col min-h-0 bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface h-full flex flex-col min-h-0">
       {/* P5（§3.2-6/页签即会话切换器）：顶栏 = 工作区 chip（返回选择页）+ 对话页签 + 新建任务 + 工具组 */}
       {activeWs ? (
       <>

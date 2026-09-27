@@ -859,7 +859,7 @@ export function PluginsModule() {
   }
 
   return (
-    <div className="flex h-full bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex h-full">
       {/* 左侧面板 */}
       <div className="w-[280px] shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col">
         <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">

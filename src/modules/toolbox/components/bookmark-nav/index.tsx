@@ -201,7 +201,7 @@ export function BookmarkNav({ onBack, sidebarEl, sidebarHosted }: Props) {
     (catName.get(selected)?.name ?? '全部书签')
 
   return (
-    <div className="flex flex-col h-full bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex flex-col h-full">
       {/* 头部 */}
       <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 shrink-0">
         <button

@@ -223,7 +223,7 @@ export function PdfToolkit({ onBack, sidebarEl, sidebarHosted }: { onBack: () =>
   }
 
   return (
-    <div className="flex flex-col h-full bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex flex-col h-full">
       {/* 顶栏 */}
       <div className="shrink-0 flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 flex-wrap">
         <button onClick={onBack} title="返回工具箱"

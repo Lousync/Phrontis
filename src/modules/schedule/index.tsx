@@ -597,7 +597,7 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
   }, [])
 
   return (
-    <div className="flex h-full flex-col bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex h-full flex-col">
       {/* 顶部贯通行：视图切换条 + 视图专属操作 */}
       <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 shrink-0 select-none">
         <CalendarDays size={12} className="text-[var(--text-muted)]" />

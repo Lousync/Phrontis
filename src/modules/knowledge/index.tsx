@@ -1814,7 +1814,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
 
   return (
     <ImportZone onImport={handleDropImport} onImportPdf={handleDropImportBinary} className="h-full">
-      <div className="flex h-full flex-col bg-[var(--bg-primary)]">
+      <div className="kb-theme-surface flex h-full flex-col">
         {readingMode ? (
           /* ===== 沉浸阅读：只保留正文（进场淡入；可能含 iframe/PDF，故只做透明度、不做位移） =====
              ★ F-7（2026-09-27）：本容器必须是 **flex 列 + `min-h-0`**，滚动区用 `flex-1 min-h-0`。

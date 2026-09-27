@@ -632,7 +632,7 @@ export function TxtReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   )
 
   return (
-    <div data-wb="txtReader" data-sel-float-ignore className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+    <div data-wb="txtReader" data-sel-float-ignore className="kb-theme-surface flex h-full min-h-0 flex-col">
       {toolbar}
       {searchOpen && (
         <div key="search" className="kb-view-in flex items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px]">

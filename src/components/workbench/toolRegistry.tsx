@@ -134,7 +134,7 @@ export function PluginToolHost({ tool, onBack }: { tool: PluginTool; onBack: () 
   // V3-2 授权单点化：改用 PluginFrame v2 双轨宿主（v2 报文 → host:rpc 主进程 Gateway 裁决，
   // data.*/kb.store.*/files.* 全可用；v1 报文保留兼容分支服务存量插件）。
   return (
-    <div className="flex flex-col h-full bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex flex-col h-full">
       <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 shrink-0">
         <button
           onClick={onBack}

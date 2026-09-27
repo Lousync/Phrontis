@@ -894,7 +894,7 @@ export function MomentsModule() {
   }
 
   return (
-    <div className="relative flex flex-col h-full bg-[var(--bg-primary)] overflow-hidden">
+    <div className="kb-theme-surface relative flex flex-col h-full overflow-hidden">
       <div ref={pageScrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
         <div className="px-5 pt-4 pb-3">
           <div className="max-w-4xl mx-auto rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] px-5 py-4 flex items-center gap-3">
