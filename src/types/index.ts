@@ -33,7 +33,7 @@ export interface EntryFilter { date?: string; tagId?: string; pinnedOnly?: boole
 export interface CreateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date: string; tags?: string[]; states?: string }
 export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date?: string; isPinned?: boolean; isStarred?: boolean; tags?: string[]; states?: string }
 export interface Tag { id: string; name: string; color: string }
-export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket'
+export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard'
 
 // ===== 更新说明（release notes）=====
 // 主进程侧的同一份契约见 electron/lib/releaseNotes/types.ts
@@ -1447,6 +1447,42 @@ export interface AiTeachProfilePatchResult {
   error?: string
 }
 
+/**
+ * 看板快照（2026-09-27）。
+ *
+ * ⚠️ 类型真源是主进程侧 `electron/database/repositories/dashboardRepo.ts`
+ * —— 两个 tsconfig 互不可见，沿用本仓「跨线类型各侧各声明一次」的做法，改一边要同步另一边。
+ * 这里只声明渲染层**会读**的字段，比主进程那份少了内部实现细节。
+ */
+export interface DashboardSnapshot {
+  /** 本地日 'YYYY-MM-DD'（由主进程给，避免两端算出不同的「今天」） */
+  today: string
+  todos: {
+    overdue: Array<{ id: string; title: string; time: string | null }>
+    today: Array<{ id: string; title: string; time: string | null }>
+    doneToday: number
+    totalToday: number
+  }
+  habit: {
+    streak: number
+    doneToday: number
+    habits: number
+    /** 今日打卡项逐条（反馈 4②：卡列打卡项、可勾选），sort_order 序；color = 习惯色（勾选庆祝用） */
+    items: Array<{ id: string; name: string; done: boolean; color: string }>
+  }
+  usage: {
+    todayMinutes: number
+    /** 'YYYY-MM-DD' → 分钟，缺失日补 0 */
+    days: Record<string, number>
+  }
+  /** 番茄钟专注分钟（与 usage 同跨度同口径，供热力图「专注时长」指标） */
+  pomodoro: {
+    days: Record<string, number>
+  }
+  recentNotes: Array<{ id: string; title: string; path: string; updatedAt: string }>
+  reading: Array<{ relPath: string; displayName: string; pct: number }>
+}
+
 export interface ElectronAPI {
   getPathForFile: (file: File) => string
   pasteFromClipboard: () => Promise<{ ok: boolean }>
@@ -1788,6 +1824,8 @@ export interface ElectronAPI {
   vaultBackupRestoreArchive: (archivePath: string) => Promise<{ ok: boolean; target?: string; written?: number; message?: string }>
   // checkin
   habitGetAll: () => Promise<{ habits: Habit[]; records: HabitRecord[] }>
+  /** 看板快照：主进程一次聚合全部卡片数据（见 DashboardSnapshot） */
+  dashboardGetSnapshot: () => Promise<DashboardSnapshot>
   createHabit: (d: CreateHabitDTO) => Promise<Habit>
   updateHabit: (id: string, d: UpdateHabitDTO) => Promise<Habit>
   deleteHabit: (id: string) => Promise<void>

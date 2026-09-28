@@ -134,8 +134,11 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
  * 2026-09-22 书市（S4）：加 `bookMarket` —— 它是「左栏独立整窗模块」（方案 §1.2 第 5 条），
  * 与工具箱 / 插件同形态；进这份清单同时意味着左右栏与页面条退场（`suppressSides`），
  * 而活动栏图标条仍在 —— 那正是「左栏独立」的语义。
+ *
+ * 2026-09-27 看板：同样是「左栏书签 + 整窗」形态。加进来的效果 = 点开后左右栏与页面条退场，
+ * 且 openTabs 不登记（**不产生标签页**）—— 这正是设计要的「点开占满整窗、不进标签条」。
  */
-export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools', 'moments', 'toolbox', 'plugins', 'recycle', 'settings', 'bookMarket']
+export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools', 'moments', 'toolbox', 'plugins', 'recycle', 'settings', 'bookMarket', 'dashboard']
 
 /**
  * AI 助手快捷键禁用清单（2026-09-22 用户拍板）：这些模块里 **Ctrl+J / Ctrl+Shift+J 一律不响应**。
@@ -154,8 +157,11 @@ export const AI_ASSISTANT_SHORTCUT_DISABLED: readonly TabName[] = ['aiTeaching']
  * 事件定位到模块内「错题本 / 收藏」视图；左栏模块态复用 knowledge 侧栏（错题本按空间分区）。
  * aiChat（2026-09-17 批次5 反馈轮）不占书签：aiChat 标签激活时左栏经 RAIL_FOLLOW_MAP
  * 原位切「AI 会话侧栏」（会话列表/会话大纲 + 底部文件改动），返回/锁定复用模块态头部。
+ *
+ * 2026-09-27 看板：唯一一个「书签 key 与 tab 同名」的成员 —— 点它开的不是某个模块的标签页，
+ * 而是整窗看板（见 WORKBENCH_TABBAR_EXCLUDED）。
  */
-export type RailModule = 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat'
+export type RailModule = 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat' | 'dashboard'
 
 export interface WorkbenchBookmark {
   key: RailModule
@@ -172,8 +178,10 @@ export interface WorkbenchBookmark {
  */
 export const QUIZ_ENTRY_ENABLED = false
 
-/** 书签集合（内置固定 6 项）——契约脚本 verify-workbench-shell.mjs 对此做映射双向断言 */
+/** 书签集合（内置固定项）——契约脚本 verify-workbench-shell.mjs 对此做映射双向断言 */
 export const WORKBENCH_BOOKMARKS: readonly WorkbenchBookmark[] = [
+  // 2026-09-27 看板排首位：它是「打开软件第一眼该看什么」的落点
+  { key: 'dashboard', label: '看板', tab: 'dashboard' },
   { key: 'knowledge', label: '笔记', tab: 'knowledge' },
   { key: 'schedule', label: '日程', tab: 'schedule' },
   { key: 'bookshelf', label: '书架', tab: 'bookshelf' },
@@ -192,6 +200,8 @@ export const BOOKMARK_COLORS: Readonly<Record<RailModule, BookmarkColor>> = {
   bookshelf: { fg: '#35975c', bg: 'rgba(63,174,106,.15)' },
   blog: { fg: '#9157d6', bg: 'rgba(160,107,224,.15)' },
   quiz: { fg: '#c94f4f', bg: 'rgba(217,91,91,.14)' },
+  // 2026-09-27 看板：用主题强调色系（青蓝），与其余五项区分开
+  dashboard: { fg: '#2b8fbd', bg: 'rgba(43,143,189,.15)' },
   // aiChat 不是书签（不进书签区/选显菜单），此色仅满足 Record 全量约束，不被渲染消费
   aiChat: { fg: '#8b7ec8', bg: 'rgba(139,126,200,.14)' },
 }

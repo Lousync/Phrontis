@@ -21,6 +21,7 @@ import { CredentialSheet } from './CredentialSheet'
 import { SourceFormSheet } from './SourceFormSheet'
 import { SourcesView } from './SourcesView'
 import { bookRelPathFor, itemKey, readHintDismissed, writeHintDismissed } from './shared'
+import { ThemeFxLayer } from '../../components/shared/ThemeFxLayer'
 
 /**
  * 书市（整窗独占模块，方案 §1.2 / §11.3）。
@@ -301,8 +302,10 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
 
   return (
     <div data-wb="bookMarket" className="kb-theme-surface relative flex h-full flex-col">
+      {/* 主题氛围特效：垫底画布（2026-09-27 挂载面扩到书市；三块内容层全部 relative z-[1] 压在其上） */}
+      <ThemeFxLayer />
       {/* 模块栏：视图分段 + 两个 pill（新增书源 / 下载） */}
-      <div className="flex h-[46px] flex-none items-center gap-2.5 border-b border-[var(--border-color)] px-3.5">
+      <div className="relative z-[1] flex h-[46px] flex-none items-center gap-2.5 border-b border-[var(--border-color)] px-3.5">
         <div className="flex gap-[2px] rounded-[8px] bg-[var(--bg-tertiary)] p-[2px]">
           <button type="button" className={`${SEG} ${view === 'discover' ? segOn : 'text-[var(--text-secondary)]'}`} onClick={() => setView('discover')}>发现</button>
           <button type="button" className={`${SEG} ${view === 'sources' ? segOn : 'text-[var(--text-secondary)]'}`} onClick={() => setView('sources')}>书源</button>
@@ -326,7 +329,7 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
           收起走 .kb-collapse（外层 grid 常驻，不是条件渲染）—— 铁律 13：一切开合都要有动效。
           文案是 2026-09-22 §九 ④ 订正过的口径：不可读的格式标「暂不支持」，
           而**不是**旧的「EPUB 依赖二期引擎」（epub 引擎早已落地，旧文案是错的）。 */}
-      <Collapsible open={hintOpen} className="flex-none" innerClassName="">{() => (
+      <Collapsible open={hintOpen} className="relative z-[1] flex-none" innerClassName="">{() => (
         <div className="flex items-center gap-2 border-b border-[var(--border-color)] bg-[var(--warning-bg)] px-3.5 py-2 text-[12px] text-[var(--text-secondary)]">
           <Info size={14} strokeWidth={1.7} className="flex-none" />
           <span>
@@ -344,7 +347,7 @@ export function BookMarketModule({ onOpenShelf }: { onOpenShelf?: () => void }) 
       )}</Collapsible>
 
       {/* 舞台：滚动容器与详情抽屉是兄弟 —— 抽屉 absolute 覆盖在舞台上，不随内容滚走 */}
-      <div className="relative min-h-0 flex-1">
+      <div className="relative z-[1] min-h-0 flex-1">
         <div
           ref={scrollRef}
           className="h-full overflow-y-auto"

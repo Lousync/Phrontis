@@ -97,15 +97,20 @@ check('书架挂 useDataChanged(pdfReader)（AI/导入改动界面自动刷新�
 // 2026-09-17 拍板「书架内自渲染」：点书走模块内阅读器，不再借道编辑器
 check('书架点书不再派发 kb-open-note（书架内自渲染）', !bookshelfSrc.includes('kb-open-note'))
 
-// ===== ④ TabName 冻结 16 项 =====
+// ===== ④ TabName 冻结 17 项 =====
 console.log('\n--- ④ TabName 冻结 ---')
 const appModulesSrc = stripComments(readFileSync(join(ROOT, 'src/lib/appModules.ts'), 'utf8'))
 const moduleBlock = appModulesSrc.slice(appModulesSrc.indexOf('export const APP_MODULES'), appModulesSrc.indexOf('as const satisfies'))
 const ids = [...moduleBlock.matchAll(/id:\s*'([A-Za-z]+)'/g)].map((m) => m[1])
 // 2026-09-22 书市 S4：15 → 16（+bookMarket）。这是**有意变更**，不是漂移 —— 判据是
 // appModules 里它 bar/tile/palette 全 true 且与工具箱/插件平级（方案 §1.2 第 5 条）。
-check('APP_MODULES 仍为 16 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 16, `实得 ${ids.length}: ${ids.join(',')}`)
+// 2026-09-27 看板：16 → 17（+dashboard）。同样是**有意变更** —— 它与上面相反，
+// bar/tile/palette **全 false**，入口只在左栏书签（见下一条断言）。
+check('APP_MODULES 仍为 17 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 17, `实得 ${ids.length}: ${ids.join(',')}`)
 check("bookshelf 仍为入口产生型（bar:false / tile:false / palette:false）", /id:\s*'bookshelf',\s*label:\s*'书架',\s*bar:\s*false,\s*tile:\s*false,\s*palette:\s*false/.test(moduleBlock))
+// 看板三 flag 全 false 是**设计**（入口只在左栏书签），不是漏配 —— 它若被误改成
+// 图标条/磁贴/命令面板可见，就是清单漂移。这条断言把「刻意」钉住。
+check("dashboard 为纯书签入口（bar:false / tile:false / palette:false）", /id:\s*'dashboard',\s*label:\s*'看板',\s*bar:\s*false,\s*tile:\s*false,\s*palette:\s*false/.test(moduleBlock))
 
 // ===== ⑤ pdfLayout 纯函数（批次 3 落地后自动启用）=====
 console.log('\n--- ⑤ pdfLayout 纯函数用例 ---')

@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Info, Settings } from 'lucide-react'
 import { getAppVersion } from '../../lib/ipc'
+import { ThemeFxLayer } from '../../components/shared/ThemeFxLayer'
 import { AppearanceView } from './views/AppearanceView'
 import { EditorView } from './views/EditorView'
 import { GeneralView } from './views/GeneralView'
@@ -133,9 +134,11 @@ export function SettingsModule() {
   useEffect(() => () => { if (flashTimer.current) window.clearTimeout(flashTimer.current) }, [])
 
   return (
-    <div className="kb-theme-surface flex h-full">
+    <div className="kb-theme-surface relative flex h-full">
+      {/* 主题氛围特效：垫底画布（左右两栏 z-[1] 压在其上） */}
+      <ThemeFxLayer />
       {/* Left nav */}
-      <div className="w-48 shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col">
+      <div className="relative z-[1] w-48 shrink-0 bg-[var(--bg-secondary)] border-r border-[var(--border-color)] flex flex-col">
         <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
           <Settings size={12} />
           设置
@@ -202,7 +205,7 @@ export function SettingsModule() {
         </div>
 
         {/* Content */}
-        <div ref={contentRef} className="flex-1 overflow-y-auto py-6">
+        <div ref={contentRef} className="relative z-[1] flex-1 overflow-y-auto py-6">
           <div className="max-w-2xl mx-auto px-6">
             {/* 切换大项时内容淡入上移（key 变化触发重挂载 → 动画重播；搜索态与结果视图共用固定 key，
                 避免每次输入都重播） */}

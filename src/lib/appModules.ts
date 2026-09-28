@@ -51,6 +51,10 @@ export const APP_MODULES = [
   // 排在 bar 段末尾是有意的 —— 活动栏图标条（ActivityBar 的 RAIL_BUTTONS）按同一顺序追加，
   // 现有四项的位置一个不动。
   { id: 'bookMarket', label: '书市', bar: true, tile: true, palette: true },
+  // 2026-09-27 看板：入口只在**左栏书签**（WORKBENCH_BOOKMARKS），不在图标条、不做磁贴、
+  // 不进命令面板 —— 所以三个 flag 全 false。它同时进 WORKBENCH_TABBAR_EXCLUDED，
+  // 效果 = 点开整窗铺满且**不产生标签页**。
+  { id: 'dashboard', label: '看板', bar: false, tile: false, palette: false },
   // 以下不进活动栏图标位：只能从设置菜单 / 事件 / 命令打开
   // （「回收站」「帮助」是刻意去才会去的目的地，不该摆在图标条上）
   { id: 'recycle', label: '回收站', bar: false, tile: true, palette: true },

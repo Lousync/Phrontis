@@ -60,9 +60,9 @@ function stripComments(src) {
 /* ================= A. 书签 ↔ 模块映射（唯一真相源双向断言） ================= */
 console.log('\n=== A. 书签映射双向断言（方案 §3.3 / 原型 v15 六书签） ===')
 const keys = WORKBENCH_BOOKMARKS.map((b) => b.key)
-ok(keys.length === 5, 'A1 内置书签固定 5 项（笔记/日程/书架/博客总结/错题本——Phase 2 编辑区退役）', `实际 ${keys.length}`)
+ok(keys.length === 6, 'A1 内置书签固定 6 项（看板 + 笔记/日程/书架/博客总结/错题本）', `实际 ${keys.length}`)
 ok(new Set(keys).size === keys.length, 'A2 书签 key 无重复')
-ok(keys.join(',') === 'knowledge,schedule,bookshelf,blog,quiz', 'A3 书签集合与顺序 = Phase 2 退役后（编辑区书签已移除）', `实际 ${keys.join(',')}`)
+ok(keys.join(',') === 'dashboard,knowledge,schedule,bookshelf,blog,quiz', 'A3 书签集合与顺序（2026-09-27 看板排首位 —— 它是「打开第一眼该看什么」的落点）', `实际 ${keys.join(',')}`)
 ok(WORKBENCH_BOOKMARKS.every((b) => isTabName(b.tab)), 'A4 每个书签的 tab 都是合法 TabName',
   WORKBENCH_BOOKMARKS.filter((b) => !isTabName(b.tab)).map((b) => b.key).join(','))
 const quiz = WORKBENCH_BOOKMARKS.find((b) => b.key === 'quiz')
@@ -205,8 +205,11 @@ ok(/const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED\.inclu
   'C20 EXCLUDED 平级模块激活 = 整窗独占（suppressSides 扩展）')
 ok(/onWorkbench=/.test(srcApp) && /title="工作台"/.test(srcBar) && /onWorkbench\?\.\(\)/.test(srcBar),
   'C20b 整窗模块的「回工作台」入口 = 图标条顶部工作台按钮（2026-09-17 bug 修复轮：右上角浮动钮删除，入口收敛 ActivityBar）')
-ok(/\[\.\.\.openTabs\]\.reverse\(\)\.find\(\(t\) => !isToolTabId\(t\)\)/.test(srcApp) || /openTabs\]\.reverse\(\)\.find/.test(srcApp),
-  'C20c 「返回工作台」落点跳过工具标签（tool: 前缀不是工作台标签）')
+// C20c 口径更新（看板方案 §5 反馈 10，2026-09-27）：按钮不再扫描 openTabs 落「最后文档标签」
+//（旧 `?? knowledge` 兜底会落到没开页面的知识库模块，左栏被错误拉成笔记区）—— 一律回总览态（见 M7）。
+// 「跳过工具标签」的旧断言随之退役：不扫标签列表，tool: 前缀自然无关。
+ok(!/\[\.\.\.openTabs\]\.reverse\(\)\.find/.test(srcApp),
+  'C20c 负向：工作台按钮不再扫描 openTabs 落最后文档标签（一律回总览，见 M7）')
 
 /* ================= D. 批次4：右栏三段 / 工具入口区 / DayPanel 控件迁移（2026-09-17） ================= */
 console.log('\n=== D. 批次4：右栏三段 + 工具入口区 + DayPanel 迁移 ===')
@@ -562,6 +565,44 @@ ok(/length === 1 && openPageIdsRef\.current\.includes\(id\)\) deletionClearRef\.
 ok(/willClearAll = openPageIdsRef\.current\.length > 0 && openPageIdsRef\.current\.every/.test(srcKnowledge)
   && /if \(willClearAll\) deletionClearRef\.current = true/.test(srcKnowledge),
   'L4 树删除：仅当全部已开页签都在被删路径下（必然清零）时置位（同 handlePageDeleted 口径）')
+
+// ===== M. 看板「返回」落顶层（看板方案 §5 反馈 1，2026-09-27）=====
+// 缺陷面：onBack 写死 setRailModule('knowledge') + handleTabChange('knowledge') —— 回工作台落在
+// 笔记区模块态。正确语义 = 总览态（对齐 closeTab 关激活标签收尾 + handleBackToOverview 解锁）。
+// 只切 dashboard case 的窗口比对（handleBackToOverview 自身也含同款收尾，不能全文件搜）。
+const dashCaseAt = srcApp.indexOf("case 'dashboard'")
+const dashCase = dashCaseAt === -1 ? '' : srcApp.slice(dashCaseAt, dashCaseAt + 800)
+ok(dashCase.includes('setActiveToolTab(null)') && dashCase.includes('setActiveTab(null)') && dashCase.includes('setRailModule(null)'),
+  'M1 看板 onBack = 总览态收尾（activeToolTab / activeTab / railModule 一并落 null）')
+ok(!/setRailModule\('knowledge'\)/.test(dashCase) && !/handleTabChange\('knowledge'\)/.test(dashCase),
+  'M2 负向：onBack 不再写死落笔记区（setRailModule(\'knowledge\') / handleTabChange(\'knowledge\') 已移除）')
+ok(/leftLocked/.test(dashCase) && /leftLocked: false/.test(dashCase),
+  'M3 onBack 含锁定态顺带解锁（对齐 handleBackToOverview 的「回总览」语义）')
+
+// ===== M4-M6. 工作台特效垫底 + 半透明薄纱（看板方案 §5 反馈 9，2026-09-27）=====
+// 缺陷面：设计文档旧版把工作台画布挂在 desktop 模块根 —— 那是死代码（从未被 import），
+// 工作台实际从来没有活着的画布。现挂外壳根，!sidesGone 门控（整窗模块自带画布，防双层粒子）。
+const srcWbShell = stripComments(read('src/components/workbench/WorkbenchShell.tsx'))
+const srcRspShared = stripComments(read('src/components/shared/ResizablePanel.tsx'))
+const srcWbLeft = stripComments(read('src/components/workbench/WorkbenchLeftPanel.tsx'))
+ok(/!sidesGone && <ThemeFxLayer \/>/.test(srcWbShell),
+  'M4 外壳根垫底画布在场且带 !sidesGone 门控（整窗模块激活让位，防双层粒子）')
+ok(/translucent \? 'bg-\[color-mix\(in_srgb,var\(--bg-primary\)_72%,transparent\)\]'/.test(srcRspShared)
+  && /<ResizablePanel[\s\S]{0,200}storageKey="wb\.leftWidth"[\s\S]{0,400}translucent/.test(srcWbShell.replace(/\r/g, ''))
+  && /<ResizablePanel[\s\S]{0,200}storageKey="wb\.rightWidth"[\s\S]{0,400}translucent/.test(srcWbShell.replace(/\r/g, '')),
+  'M5 左右栏 ResizablePanel 走 translucent 薄纱（72%），默认仍实底（模块侧栏不受影响）')
+ok(/kb-theme-surface-translucent/.test(srcWbLeft) && !/data-wb="leftPanel" className="kb-theme-surface /.test(srcWbLeft.replace(/\r/g, '')),
+  'M6 左栏表面换半透明档（不带渐变图 —— 0.92 不透明度会盖住粒子）')
+
+// ===== M7-M8. 工作台按钮回总览 + 左栏归位（看板方案 §5 反馈 10，2026-09-27）=====
+// 缺陷面：「工作台」按钮落「最后文档标签 ?? knowledge」—— 落到没开页面的知识库模块，
+// 左栏被跟随拉成笔记区；且跟随 effect 只进不退，中间区清空也不归位顶层。
+ok(/setActiveToolTab\(null\); setActiveTab\(null\); setRailModule\(null\)/.test(srcApp)
+  && !/\?\? 'knowledge'/.test(srcApp),
+  'M7 「工作台」按钮 = 总览态收尾（三态一并落 null；负向：?? knowledge 兜底已移除）')
+ok(/else if \(!activeTab && !activeToolTab\) setRailModule\(null\)/.test(srcApp)
+  && /\[activeTab, activeToolTab, wbLayout\.leftLocked\]/.test(srcApp),
+  'M8 跟随 effect 增加归位分支：中间区真正空了 → 左栏回顶层（工具标签打开不动左栏）')
 
 console.log('\n========================================')
 if (fails.length === 0) {

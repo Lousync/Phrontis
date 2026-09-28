@@ -1,6 +1,6 @@
 // 必须最先引入：IPC 注册幂等包装（dev 下 repo 模块被打包两份时避免重复注册崩溃）
 import './ipcSafe'
-import { app, BrowserWindow, dialog, ipcMain, screen, shell, protocol, clipboard, nativeImage, Menu, net, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, shell, protocol, clipboard, nativeImage, Menu, net, Tray, powerMonitor } from 'electron'
 // 无 GPU/无头环境（AI 驱动真机测试）显式 KNOWBASE_DISABLE_GPU=1 时禁用 GPU 加速，防渲染进程连带崩溃
 if (process.env.KNOWBASE_DISABLE_GPU === '1') {
   app.commandLine.appendSwitch('disable-gpu')
@@ -35,6 +35,7 @@ import { registerBlogSummaryHandlers } from '../database/repositories/blogSummar
 import { registerQuizHandlers } from '../database/repositories/quizRepo'
 import { registerPdfReaderHandlers } from '../database/repositories/pdfReaderRepo'
 import { registerReaderStateHandlers } from '../database/repositories/readerStateRepo'
+import { registerDashboardHandlers } from '../database/repositories/dashboardRepo'
 import { registerExcerptHandlers } from '../database/repositories/excerptRepo'
 import { registerBookMarketHandlers } from '../database/repositories/bookMarketRepo'
 import { startSuperviseScheduler, stopSuperviseScheduler, enqueueExternalPush } from '../lib/pushService'
@@ -42,6 +43,7 @@ import { initScheduleReminders } from '../lib/scheduleReminder'
 import { initPasswordFiller, destroyPasswordFiller } from './passwordFiller'
 import { initDayPanel, disposeDayPanel, getPanelMode, setPanelMode, onPanelModeChanged, isPopoutOpen } from './dayPanelWindow'
 import { registerWindowBus } from './windowBus'
+import { noteFocus, noteSuspended, flushAppUsageNow, startAppUsageCollector } from '../lib/appUsageStore'
 import { registerDevtoolsHandlers } from './devtools'
 import { registerUpdateHandlers } from '../lib/updateService'
 import { registerReleaseNotesHandlers } from '../lib/releaseNotes'
@@ -917,6 +919,7 @@ app.whenReady().then(async () => {
   registerPdfReaderHandlers()
   // 阅读状态（书架升级全格式阅读器一期）：txt 进度两通道
   registerReaderStateHandlers()
+  registerDashboardHandlers()
   // 摘录（阅读器 · 摘录先行批次）：四通道
   registerExcerptHandlers()
   // 书市（book market）：书源 CRUD + 三态探测 + 聚合检索 + 下载队列（S3）
@@ -1042,6 +1045,17 @@ app.whenReady().then(async () => {
   // 跨窗口数据变更总线（data:notify → kb:data-changed），先于任何窗口能力注册
   registerWindowBus()
 
+  // 应用使用时长采集（看板「今日使用」卡与半年使用热力图的数据源，2026-09-27 净新增）。
+  // 记账条件 = 前台 且 未锁屏未休眠。用 app 级 focus/blur 而不是单窗口事件，
+  // 这样多窗口之间来回切不会被误判成「离开应用」。
+  app.on('browser-window-focus', () => noteFocus(true))
+  app.on('browser-window-blur', () => noteFocus(false))
+  powerMonitor.on('suspend', () => noteSuspended(true))
+  powerMonitor.on('resume', () => noteSuspended(false))
+  powerMonitor.on('lock-screen', () => noteSuspended(true))
+  powerMonitor.on('unlock-screen', () => noteSuspended(false))
+  startAppUsageCollector()
+
   // 日程与打卡侧边栏（WeChat 模式：内嵌 + 可脱离；桌面互动模式见 dayPanelWindow.ts）
   initDayPanel({
     getMainWindow: () => mainWindow,
@@ -1106,6 +1120,8 @@ app.on('before-quit', () => {
   closeVaultWatcher()
   // Flush pending settings writes
   if (saveTimer) { clearTimeout(saveTimer); flushSettingsToDisk() }
+  // 应用使用时长：把最后一段结算进日桶并落盘（不能靠 debounce，进程马上就没了）
+  flushAppUsageNow()
 })
 
 // 安全：禁止 webview

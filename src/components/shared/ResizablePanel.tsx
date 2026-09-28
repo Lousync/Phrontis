@@ -41,9 +41,20 @@ interface Props {
   onWidthChange?: (width: number) => void
   /** 单击手柄（未越过 dead-zone 的按下-抬起）= 开合切换。工作台三栏外壳的边缘手柄行为（原型 v15）；不传则单击无操作 */
   onHandleClick?: () => void
+  /**
+   * 展开时给宽度过渡加的延迟 ms（收起时永远不加 —— 收起要立刻响应）。
+   * 用途：看板↔工作台的编排 —— 回工作台时让「中间先淡出、两侧侧栏随后弹出」，
+   * 所以由调用方在「刚从整窗模块返回」的那一帧传 130。不传 = 0，行为与改前一致。
+   */
+  openDelayMs?: number
+  /**
+   * 半透明面板体（看板方案 §5 反馈 9，2026-09-27）：bg-primary 换成 72% 透的薄纱，
+   * 让外壳层垫底的主题特效画布透出来。默认 false = 实底（模块侧栏等照旧）。
+   */
+  translucent?: boolean
 }
 
-export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, visible, className = '', children, initialWidth, showHandle = true, onSnapClose, onSnapOpen, side = 'left', collapsedWidth = 4, growWindow = false, onWidthChange, onHandleClick }: Props) {
+export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, visible, className = '', children, initialWidth, showHandle = true, onSnapClose, onSnapOpen, side = 'left', collapsedWidth = 4, growWindow = false, onWidthChange, onHandleClick, openDelayMs = 0, translucent = false }: Props) {
   const [width, setWidth] = useState(initialWidth ?? defaultWidth)
   const [dragging, setDragging] = useState(false)
   /** pointer capture 不可用时的退路标记（退回 window 监听，老实现同构但带 dead-zone 与统一收尾） */
@@ -275,10 +286,12 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
   return (
     <div
       ref={panelRef}
-      className={`shrink-0 relative flex flex-col bg-[var(--bg-primary)] overflow-hidden ${className}`}
+      className={`shrink-0 relative flex flex-col overflow-hidden ${translucent ? 'bg-[color-mix(in_srgb,var(--bg-primary)_72%,transparent)]' : 'bg-[var(--bg-primary)]'} ${className}`}
       style={{
         width: displayWidth,
-        transition: dragging ? 'none' : 'width 200ms ease-out'
+        transition: dragging ? 'none' : 'width 200ms ease-out',
+        // 展开时可选延迟（收起永远不加）—— 看板→工作台的编排靠它
+        transitionDelay: !dragging && visible && openDelayMs > 0 ? `${openDelayMs}ms` : '0ms',
       }}
     >
       {visible && children}

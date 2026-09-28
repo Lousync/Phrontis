@@ -62,46 +62,34 @@ export interface BookListItem {
   scan?: ScanMode
 }
 
-export function registerPdfReaderHandlers(): void {
-  ipcMain.handle('pdfReader:listBooks', (): { ok: boolean; books?: BookListItem[]; error?: string } => {
-    const cur = getCurrentVault()
-    if (!cur) return { ok: false, error: '当前没有打开的仓库' }
-    try {
-      const scanned = scanVaultBooks()
-      const progress = pdfReaderListProgress(cur.rootId)
-      const readerProgress = readerStateListProgress(cur.rootId)
-      // 书市元数据（书名 / 作者 / 封面）join：**循环外读一次盘**，别每本书读一遍 `.meta.json`。
-      // 键 = bookMetaKey(relPath)，与写入侧（vaultBookMetaRepo）同一口径 —— 飘一点就是
-      // 「书在但显示不出书名」。本地导入的书没有条目 ⇒ 三个字段全空，渲染层自然回落。
-      const meta = bookMetaReadAll().books
-      const books: BookListItem[] = scanned.map((f) => {
-        const m = meta[bookMetaKey(f.relPath) ?? '']
-        // 展示名在此**定稿**（§3.6）：下游 7 处渲染点一律只读 displayName，不再各自兜底
-        const displayName = m?.title || bookDisplayName(f.relPath)
-        const author = m?.author ?? ''
-        const coverRef = m?.coverRel ?? ''
-        // 非 pdf 一律走 readerState.json 的 pct 口径（txt 与 epub 共用；epub 另有 locator，
-        // 但书架清单只画进度条，不需要它）。判据写成 `!== 'pdf'` 而非 `=== 'txt'`：
-        // 再出新格式时默认落这一支（有 pct 就不至于书架显示成「未开始」），不会被漏掉。
-        if (f.kind !== 'pdf') {
-          const st = readerProgress[f.relPath]
-          const pct = st?.pct ?? 0
-          return {
-            relPath: f.relPath,
-            displayName,
-            author,
-            coverRef,
-            size: f.size,
-            mtime: f.mtimeMs,
-            kind: f.kind,
-            lastPage: 0,
-            totalPages: 0,
-            pct,
-            hasProgress: pct > 0,
-            updatedAt: st?.updatedAt ?? null,
-          }
-        }
-        const st = progress[f.relPath]
+/**
+ * 书架清单的实现。抽成普通导出函数供两处共用（IPC handler 与看板聚合）——
+ * 铁律 2：handler 只是转发层，两边必须共用同一实现；否则「书架里显示的书名」
+ * 与「看板在读的书显示的书名」会各飘各的。
+ */
+export function listBooksImpl(): { ok: boolean; books?: BookListItem[]; error?: string } {
+  const cur = getCurrentVault()
+  if (!cur) return { ok: false, error: '当前没有打开的仓库' }
+  try {
+    const scanned = scanVaultBooks()
+    const progress = pdfReaderListProgress(cur.rootId)
+    const readerProgress = readerStateListProgress(cur.rootId)
+    // 书市元数据（书名 / 作者 / 封面）join：**循环外读一次盘**，别每本书读一遍 `.meta.json`。
+    // 键 = bookMetaKey(relPath)，与写入侧（vaultBookMetaRepo）同一口径 —— 飘一点就是
+    // 「书在但显示不出书名」。本地导入的书没有条目 ⇒ 三个字段全空，渲染层自然回落。
+    const meta = bookMetaReadAll().books
+    const books: BookListItem[] = scanned.map((f) => {
+      const m = meta[bookMetaKey(f.relPath) ?? '']
+      // 展示名在此**定稿**（§3.6）：下游 7 处渲染点一律只读 displayName，不再各自兜底
+      const displayName = m?.title || bookDisplayName(f.relPath)
+      const author = m?.author ?? ''
+      const coverRef = m?.coverRel ?? ''
+      // 非 pdf 一律走 readerState.json 的 pct 口径（txt 与 epub 共用；epub 另有 locator，
+      // 但书架清单只画进度条，不需要它）。判据写成 `!== 'pdf'` 而非 `=== 'txt'`：
+      // 再出新格式时默认落这一支（有 pct 就不至于书架显示成「未开始」），不会被漏掉。
+      if (f.kind !== 'pdf') {
+        const st = readerProgress[f.relPath]
+        const pct = st?.pct ?? 0
         return {
           relPath: f.relPath,
           displayName,
@@ -109,19 +97,38 @@ export function registerPdfReaderHandlers(): void {
           coverRef,
           size: f.size,
           mtime: f.mtimeMs,
-          kind: 'pdf',
-          lastPage: st?.lastPage ?? 1,
-          totalPages: st?.totalPages ?? 0,
-          hasProgress: !!st && (st.lastPage > 1 || st.bookmarks.length > 0 || st.scrollRatio > 0),
+          kind: f.kind,
+          lastPage: 0,
+          totalPages: 0,
+          pct,
+          hasProgress: pct > 0,
           updatedAt: st?.updatedAt ?? null,
-          ...(st?.scan ? { scan: st.scan } : {}),
         }
-      })
-      return { ok: true, books }
-    } catch (e) {
-      return { ok: false, error: (e as Error).message }
-    }
-  })
+      }
+      const st = progress[f.relPath]
+      return {
+        relPath: f.relPath,
+        displayName,
+        author,
+        coverRef,
+        size: f.size,
+        mtime: f.mtimeMs,
+        kind: 'pdf',
+        lastPage: st?.lastPage ?? 1,
+        totalPages: st?.totalPages ?? 0,
+        hasProgress: !!st && (st.lastPage > 1 || st.bookmarks.length > 0 || st.scrollRatio > 0),
+        updatedAt: st?.updatedAt ?? null,
+        ...(st?.scan ? { scan: st.scan } : {}),
+      }
+    })
+    return { ok: true, books }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+export function registerPdfReaderHandlers(): void {
+  ipcMain.handle('pdfReader:listBooks', () => listBooksImpl())
 
   ipcMain.handle('pdfReader:get', (_e, rootId: string, relPath: string) => {
     try {

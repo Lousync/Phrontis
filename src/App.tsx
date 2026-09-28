@@ -55,6 +55,7 @@ import { ReleaseNotesModule } from './modules/release-notes'
 // 书市（2026-09-22 · S4）：左栏独立整窗模块。**静态 import** —— 铁律 20 的 lazy 只点名引擎类
 // （monaco / pdfjs / heic-to 宿主），书市纯渲染 + IPC，进主包是对的。
 import { BookMarketModule } from './modules/bookmarket'
+import { DashboardModule } from './modules/dashboard'
 // 左栏书架大纲态（内含 pdfjs —— 必须 lazy，不进主包；见上方模块引入方式注释）
 const PdfRailPanel = lazy(() => import('./components/shared/pdf/PdfRailPanel').then((m) => ({ default: m.PdfRailPanel })))
 // 左栏书架书目条目视图（2026-09-19）：未在读任何书时左栏放书列表（封面 + 书名 + 进度条）
@@ -557,11 +558,16 @@ export default function App() {
   // 旧实现 = window 事件 + 一次性 window pending：保活层（renderMounted）在切 Tab 时
   // 会重建编辑器实例，旧实例的 listener 消费事件后随实例一起被丢弃，新实例拿不到
   // pending → 永远空态。state+props 不受实例重建影响。
-  const [pendingOpenRel, setPendingOpenRel] = useState<string | null>(null)
+  // ★ 反馈 8（2026-09-27）：pendingOpenRel 此前只是声明、未接线 —— kb-open-note handler 仍在
+  // 同步派发 kb-open-note-rel 事件，而知识库模块**冷挂载前没有监听器**，事件必丢（表象：看板
+  // 「最近编辑」首跳只切 Tab、不开页、无返回 chip；第二次点击模块已保活才正常）。现在真正接线：
+  // handler 投递 {relPath, seq}，KnowledgeModule 挂载后经 prop 消费。seq 让同路径连续跳可重触发。
+  const [pendingOpenRel, setPendingOpenRel] = useState<{ relPath: string; seq: number } | null>(null)
+  const pendingOpenRelSeqRef = useRef(0)
+  const consumePendingOpenRel = useCallback(() => setPendingOpenRel(null), [])
   // UI 优化条目6：跳转来源记录——kb-open-note 带 from（如 aiTeaching），编辑器出「← 返回 X」chip；
   // 新跳转覆盖旧来源，任何手动切 Tab（handleTabChange / openTab）清除
-  // 转发给 knowledge 的 kb-open-note-rel 通道（知识页/草稿/PDF/源码统一由文件视图语境消化）。
-  // 十余处 dispatch 方零改动；editor 模块代码暂留（不再可达），批次 3 物理清理。
+  // 转发给 knowledge 的通道见上方 pendingOpenRel（知识页/草稿/PDF/源码统一由文件视图语境消化）。
   // N-4（2026-09-26）：编辑区退役后跳转落到知识库，from 被丢弃、返回 chip 整条断链——
   // 现把 from 记进 state 并喂给 WorkbenchPageBar 的 lead 槽（prop 一直在、无人喂），chip 复活。
   const [noteJumpFrom, setNoteJumpFrom] = useState<TabName | null>(null)
@@ -574,7 +580,8 @@ export default function App() {
       const from = detail?.from
       setNoteJumpFrom(from && isTabName(from) && from !== 'knowledge' ? from : null)
       if (detail?.relPath) {
-        window.dispatchEvent(new CustomEvent('kb-open-note-rel', { detail: { relPath: detail.relPath } }))
+        pendingOpenRelSeqRef.current += 1
+        setPendingOpenRel({ relPath: detail.relPath, seq: pendingOpenRelSeqRef.current })
       }
     }
     window.addEventListener('kb-open-note', handler)
@@ -991,7 +998,11 @@ export default function App() {
     if (wbLayout.leftLocked) return
     const m = activeTab ? RAIL_FOLLOW_MAP[activeTab] : undefined
     if (m) setRailModule(m)
-  }, [activeTab, wbLayout.leftLocked])
+    // 反馈 10（2026-09-27）：中间区真正空了（无模块标签也无工具标签）→ 左栏归位顶层。
+    // 此前跟随只负责「进模块态」，从不归位 —— 任何绕过 closeTab 的清空路径都会把模块态留在左栏。
+    // 工具标签打开时（activeToolTab 非空）不动左栏 ——「不在映射内的标签不碰 railModule」哲学不变。
+    else if (!activeTab && !activeToolTab) setRailModule(null)
+  }, [activeTab, activeToolTab, wbLayout.leftLocked])
 
   // 工具标签 → 左栏工具侧栏态跟随（2026-09-17 右栏优化轮，语义对齐 RAIL_FOLLOW_MAP：
   // 「不在映射内的标签不动左栏」——无侧栏工具/切回文档标签只清工具态，不碰 railModule）。
@@ -1160,6 +1171,21 @@ export default function App() {
       不再呈现为「工作台内的子模块」；EXCLUDED 同时承担「不登记为标签页」的过滤。 */
   const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)
 
+  /**
+   * 看板↔工作台的过渡编排（2026-09-27）：
+   *   进看板 —— 两侧侧栏**立刻**收（收起从来不加延迟），看板内容随后淡入（见 DashboardModule 的入场动效）
+   *   出看板 —— 看板立刻淡出，两侧侧栏**晚 130ms** 再弹（`ResizablePanel.openDelayMs`）
+   * 只在「上一帧是看板、这一帧不是」时给延迟，其余整窗模块（设置/回收站…）维持原样不延迟。
+   */
+  const prevTabRef = useRef<TabName | null>(null)
+  const backFromDashboard = prevTabRef.current === 'dashboard' && activeTab !== 'dashboard'
+  useEffect(() => { prevTabRef.current = activeTab }, [activeTab])
+
+  // 总览空态（看板方案 §5 反馈 9，2026-09-27）：无模块标签也无工具标签 —— 中间卡片壳切半透明档
+  // （并去掉卡片自己的渐变图，0.92 不透明度会把粒子盖没），让外壳垫底的主题特效画布透出来；
+  // 有标签时维持 88% 实感不动（「中间的标签页还是不要做的太透明」）。
+  const centerEmpty = activeTab === null && !activeToolTab
+
   // AI 助手快捷键闸门（2026-09-22 拍板）：AI 教学区自己就是 AI 对话区，在那里 Ctrl+J / Ctrl+Shift+J
   // 一律不响应（详见 AI_ASSISTANT_SHORTCUT_DISABLED 的注释）。
   // ★ 刻意**不**并进上面的 suspendShortcut —— 那个的语义是「宿主接管了 Ctrl+J」，工作台内恒为 true；
@@ -1253,7 +1279,7 @@ export default function App() {
     switch (name) {
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onRequestCloseTab={() => closeTab('knowledge')} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onRequestCloseTab={() => closeTab('knowledge')} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} />
       case 'moments': return <MomentsModule />
       case 'bookshelf': return (
         <BookshelfModule
@@ -1274,6 +1300,28 @@ export default function App() {
       // 书市：书源检索 + 下载上架。「去书架」是原型里没有的功能增量（整窗模块无法自跳 Tab，
       // 原型只能 toast 说明），实机由 App 的回调真跳转（方案 §11.3）
       case 'bookMarket': return <BookMarketModule onOpenShelf={() => handleTabChange('bookshelf')} />
+      // 看板（2026-09-27）：左栏书签入口 + 整窗。它在 WORKBENCH_TABBAR_EXCLUDED 里，
+      // 所以没有左右栏、没有页面条，整个中间栏归它；返回工作台靠看板自己的返回箭头。
+      // ⚠️ 返回时必须一并把 railModule 从 'dashboard' 复位 —— 书签点击会 setRailModule('dashboard')，
+      // 而 dashboard 没有模块侧栏，不复位的话左栏会是一片空白。
+      // 反馈 1（2026-09-27）：复位目标是**顶层（总览态）**，不落笔记区 —— 对齐 closeTab 关激活标签的
+      // 收尾（activeTab / railModule 落 null）+ handleBackToOverview 的锁定态顺带解锁语义。
+      // onOpenBook（反馈 5②）：在读的书卡点条目 → 直接进书架阅读态（与摘录「回到原文」同链；
+      // kind 磁盘推导；单向跳转 —— 拍板不做「返回看板」）。
+      // onJumpSchedule（反馈 3 拍板①）：紧凑档主卡待办超出 4 条收「还有 N 件 → 去日程」——
+      // 原地展开会重新顶出滚动条、与「默认窗口无滚动」矛盾，故跳日程处理。
+      case 'dashboard': return <DashboardModule
+        onBack={() => {
+          setActiveToolTab(null); setActiveTab(null); setRailModule(null)
+          if (wbLayout.leftLocked) update('workbenchLayout', JSON.stringify({ ...wbLayout, leftLocked: false }))
+        }}
+        onOpenBook={(relPath) => {
+          const kind = bookKindOf(relPath) ?? 'pdf'
+          setBookshelfReading({ relPath, name: bookDisplayName(relPath), kind })
+          handleTabChange('bookshelf')
+        }}
+        onJumpSchedule={() => handleTabChange('schedule')}
+      />
       case 'recycle': return <RecycleBinModule isActive={on} />
       case 'settings': return <SettingsModule />
       case 'toolbox': return <ToolboxModule homeSignal={toolboxHomeSignal} />
@@ -1330,7 +1378,10 @@ export default function App() {
             <ActivityBar
               active={activeTab}
               onChange={handleTabChange}
-              onWorkbench={() => handleTabChange(([...openTabs].reverse().find((t) => !isToolTabId(t)) ?? 'knowledge') as TabName)}
+              // 反馈 10（2026-09-27）：「回工作台」= 回**总览态**，不再落「最后文档标签 ?? knowledge」——
+              // 旧兜底会落到一个没开任何页面的知识库模块（中间无页面、左栏却被跟随拉成笔记区）。
+              // 总览态下页面条原样保留各标签，点击即恢复；收尾口径与 closeTab / 反馈1 返回一致。
+              onWorkbench={() => { setActiveToolTab(null); setActiveTab(null); setRailModule(null) }}
               flush={winMax}
             />
           )}
@@ -1373,6 +1424,7 @@ export default function App() {
               onOpenLooseFile={handleOpenLooseFile}
               onPluginBookmark={handleTabChange}
               suppressSides={fullWindowTab}
+              sidesOpenDelayMs={backFromDashboard ? 130 : 0}
               maximized={zenLevel >= 2 || winMax}
               leftSearch={{
                 mode: leftSearchMode,
@@ -1446,7 +1498,11 @@ export default function App() {
                 溢出下移给内层卡片的 `overflow-hidden`，由模块自己的滚动容器接管 → 滚动恢复。
                 与 `docs/release-notes-design.md` §4「模块根节点必须 h-full」是同一类病（高度约束断了）。 */}
             <div className={`min-h-0 transition-all duration-300 ease-out ${zenLevel >= 2 || winMax ? 'flex min-w-0 flex-1' : 'm-1.5 flex min-w-0 flex-1'}`}>
-              <div className={`kb-theme-gradient-img relative flex min-h-0 flex-1 flex-col overflow-hidden transition-all duration-300 ease-out ${zenLevel >= 2 || winMax ? 'bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)]' : 'rounded-xl border border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-primary)_88%,transparent)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}>
+              <div className={`${centerEmpty ? '' : 'kb-theme-gradient-img'} relative flex min-h-0 flex-1 flex-col overflow-hidden transition-all duration-300 ease-out ${zenLevel >= 2 || winMax
+                ? (centerEmpty ? 'bg-[color-mix(in_srgb,var(--bg-primary)_40%,transparent)]' : 'bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)]')
+                : (centerEmpty
+                  ? 'rounded-xl border border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-primary)_30%,transparent)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'
+                  : 'rounded-xl border border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-primary)_88%,transparent)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]')}`}>
               {/* 顶部标签条（v3.4.0 方案 §3.2；2026-09-17 第三轮反馈拍板定稿）：文档标签式动态
                   标签（openTabs，可关闭/拖拽重排/全关空态），模块按钮不上标签栏——模块由书签 /
                   图标条入口打开。整窗模块（EXCLUDED 平级模块）激活时整条隐藏（同 aiTeaching，方案 §2） */}

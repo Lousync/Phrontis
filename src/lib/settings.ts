@@ -126,6 +126,9 @@ export const FONT_SIZE_OPTIONS = [
 
 export const SETTINGS = {
   theme: { default: 'dark', type: 'select', label: '应用主题', group: '主题', desc: '深色 / 浅色配色，以及插件提供的主题包', keywords: ['主题', 'theme', '深色', '浅色', 'dark', 'light', '夜间', '配色'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.theme' },
+  // 主题氛围特效（2026-09-27）：只在激活主题声明了 --theme-fx 时由 AppearanceView 条件渲染（ui:false = 不进搜索/通用渲染，见 docs/theme-fx-design.md §4.3）
+  themeFxEnabled: { default: true, type: 'toggle', label: '主题特效', group: '主题', desc: '四季主题的氛围粒子特效（工作台 / 看板）：樱瓣 / 光束 / 落叶 / 雪', keywords: ['特效', '主题特效', '粒子', '氛围', 'theme fx'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  themeFxDensity: { default: 'mid', type: 'select', label: '粒子密度', group: '主题', desc: '氛围特效的粒子密度：疏 / 中 / 密（需主题特效开启）', keywords: ['密度', '粒子', '特效', 'density'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   editorFont: { default: 'system', type: 'select', label: '字体样式', group: '字体', desc: '编辑器正文使用的字体', keywords: ['字体', 'font', '字体样式', '字型', 'typeface'], section: 'editor', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'editor.font' },
   deleteFxSkin: { default: 'builtin', type: 'select', label: '删除动画皮肤', group: '主题与皮肤', desc: '知识库删除条目时的吞噬特效外观；插件可贡献自定义皮肤', keywords: ['删除动画', '删除特效', '吞噬', '火焰', '进度条', '皮肤', 'fx', 'delete'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.deleteFx' },
   showLineNumbers: { default: true, type: 'toggle', label: '显示行号', group: '显示', desc: '编辑器左侧是否显示行号', keywords: ['行号', '显示行号', 'linenumber', 'line numbers', 'gutter'], section: 'editor', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'editor.lineNumbers' },
@@ -178,6 +181,11 @@ export const SETTINGS = {
   // ui:false 与同组两键一致：入口在命令面板，不在设置页（避免与「显示/隐藏模块」混淆）
   activityBarVisible: { default: true, type: 'toggle', label: '显示活动栏', group: '活动栏', desc: '关闭后隐藏最左侧模块活动栏（命令面板「布局：显示活动栏」可随时调回）', keywords: ['活动栏', '布局', '隐藏', '侧边栏', 'activitybar', 'visible', 'layout'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   toolboxHiddenTools: { default: '[]', type: 'json', label: '工具箱隐藏工具', group: '工具箱', desc: '工具箱画廊中隐藏的工具 id 列表（JSON，内置工具用 id，插件工具用 pluginId:toolId）', keywords: ['工具箱', '隐藏', '工具', '显示', 'toolbox', 'hidden'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // 看板（2026-09-27）：两项都 ui:false —— 入口是看板自己的「编辑卡片」弹层，不进设置页搜索。
+  // dashboardCards 的成员 id 唯一真源是 src/modules/dashboard/cards.tsx 的 CARD_REGISTRY。
+  dashboardCards: { default: '["habit","usage","notes","book","heatmap"]', type: 'json', label: '看板显示的卡片', group: '看板', desc: '看板上显示哪些卡片（JSON 数组；主卡「今天该做的」常驻，不在此列）', keywords: ['看板', '卡片', '显隐', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  dashboardBg: { default: 'mark', type: 'select', label: '看板卡片背景', group: '看板', desc: '看板卡片的美化档位：素色 / 渐变 / 渐变+水印 / 角光', keywords: ['看板', '背景', '美化', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  dashboardUserName: { default: '', type: 'text', label: '看板称呼', group: '看板', desc: '看板问候语里的称呼（「晚上好，志岩」的「志岩」）；空 = 不带称呼。入口在看板 hero：点名字行内改', keywords: ['看板', '称呼', '名字', '问候', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   startupVaultPicker: { default: true, type: 'toggle', label: '每次启动选择仓库', group: '启动', desc: '开启后每次进入应用先显示仓库选择页（已有仓库一键进入）；关闭则直连上次的仓库', keywords: ['启动', '仓库', '选择', '进入', 'vault', 'startup', '切库'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'startup.vaultPicker' },
   summaryWeeklyDay: { default: 0, type: 'select', label: '周总结日', group: '周期总结', desc: '每周在哪一天生成周总结', keywords: ['周总结', '总结日', '每周', '星期', '周几', 'weekly', '周报'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'blog.summaryWeeklyDay' },
   summaryMonthlyMode: { default: 'last', type: 'select', label: '月总结规则', group: '周期总结', desc: '每月总结规则：第一天 / 最后一天 / 固定日', keywords: ['月总结', '总结日', '每月', '月末', '月初', 'monthly', '月报'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'blog.summaryMonthlyMode' },

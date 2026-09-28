@@ -24,6 +24,7 @@ import {
   copyImageUrlToClipboard,
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
+import { ThemeFxLayer } from '../../components/shared/ThemeFxLayer'
 import type { MomentsAlbum, MomentsPost, UserProfile } from '../../types'
 
 type EditorMode = 'create' | 'edit'
@@ -895,7 +896,9 @@ export function MomentsModule() {
 
   return (
     <div className="kb-theme-surface relative flex flex-col h-full overflow-hidden">
-      <div ref={pageScrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+      {/* 主题氛围特效：垫底画布（2026-09-27 挂载面扩到说说；内容层 z-[1] 压在其上，灯箱 z-70 不受影响） */}
+      <ThemeFxLayer />
+      <div ref={pageScrollRef} className="relative z-[1] flex-1 min-h-0 overflow-y-auto overscroll-contain">
         <div className="px-5 pt-4 pb-3">
           <div className="max-w-4xl mx-auto rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] px-5 py-4 flex items-center gap-3">
             <div className="w-12 h-12 rounded-full overflow-hidden border border-[var(--border-color)] bg-[var(--bg-primary)] shrink-0">

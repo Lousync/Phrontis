@@ -49,8 +49,9 @@ if (market && builtin) {
 
 if (market) {
   // 版本与描述
-  if (market.version !== '1.6.0') fail(`version 应为 1.6.0,实际 ${market.version}`)
+  if (market.version !== '1.7.0') fail(`version 应为 1.7.0,实际 ${market.version}`)
   if (!/四季/.test(market.description || '')) fail('description 未提及四季主题')
+  if (!/特效/.test(market.description || '')) fail('description 未提及氛围特效')
 
   // 贡献结构
   const themes = market.contributes?.theme
@@ -74,14 +75,14 @@ if (market) {
         const dropped = keys.filter(k => !kept.some(line => line.startsWith(`${k}:`)))
         fail(`「${t.name}」有 ${keys.length - kept.length} 个令牌会被 sanitizeVars 静默丢弃: ${dropped.join(', ')}`)
       }
-      // 四季主题必备令牌(基础色板 + 渐变 + 玻璃描边 + 拖拽高亮)
+      // 四季主题必备令牌(基础色板 + 渐变 + 玻璃描边 + 拖拽高亮 + 特效种类)
       if (SEASONAL.includes(t.name)) {
         const REQUIRED = ['--bg-primary', '--bg-secondary', '--bg-tertiary', '--bg-hover', '--bg-selected',
           '--activitybar-bg', '--sidebar-bg', '--input-bg', '--card-bg',
           '--text-primary', '--text-secondary', '--text-muted', '--text-disabled',
           '--accent', '--accent-hover', '--danger', '--success', '--warning',
           '--border-color', '--warning-bg', '--drop-bg', '--drop-border',
-          '--glass-edge', '--bg-gradient']
+          '--glass-edge', '--bg-gradient', '--theme-fx']
         for (const k of REQUIRED) {
           if (!(k in (t.colors ?? {}))) fail(`「${t.name}」缺少必备令牌 ${k}`)
         }
@@ -90,6 +91,14 @@ if (market) {
         if (!/rgba\([^)]*0\.92\s*\)/.test(grad)) fail(`「${t.name}」--bg-gradient 停止点应带 0.92 alpha(对齐磨砂玻璃)`)
         if (!t.colors['--bg-gradient'] || sanitizeVars({ '--bg-gradient': t.colors['--bg-gradient'] }).length === 0) {
           fail(`「${t.name}」--bg-gradient 无法通过消毒器(渐变将不生效)`)
+        }
+        // --theme-fx 枚举（内核 ThemeFxLayer 只认这四种；映射见 docs/theme-fx-design.md §1）
+        const FX_ENUM = { '春 · 嫩芽': 'petals', '夏 · 骄阳': 'beams', '秋 · 金秋': 'leaves', '冬 · 初雪': 'snow' }
+        const fx = t.colors?.['--theme-fx']
+        if (FX_ENUM[t.name] === undefined) {
+          if (fx !== undefined) fail(`非四季主题「${t.name}」不应声明 --theme-fx`)
+        } else if (fx !== FX_ENUM[t.name]) {
+          fail(`「${t.name}」--theme-fx 应为 "${FX_ENUM[t.name]}",实际 ${String(fx)}`)
         }
       }
     })

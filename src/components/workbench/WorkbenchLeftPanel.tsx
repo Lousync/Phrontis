@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, House, Lock,
   LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, Clipboard, ChevronRight,
+  LayoutGrid,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { ConfirmDialog } from '../shared'
@@ -34,6 +35,8 @@ const BOOKMARK_ICONS: Record<RailModule, (size: number) => React.ReactNode> = {
   bookshelf: (s) => <BookOpen size={s} />,
   blog: (s) => <NotebookPen size={s} />,
   quiz: (s) => <FileQuestion size={s} />,
+  // 2026-09-27 看板：四格栅格，与其它五项的形状语言区分开
+  dashboard: (s) => <LayoutGrid size={s} />,
   // aiChat 不是书签，此条目仅满足 Record 全量约束，不被书签区渲染消费
   aiChat: (s) => <Bot size={s} />,
 }
@@ -232,7 +235,9 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
   }
 
   return (
-    <div data-wb="leftPanel" className="kb-theme-surface flex h-full flex-col">
+    <div data-wb="leftPanel" className="kb-theme-surface-translucent flex h-full flex-col">
+      {/* 表面用半透明档（看板方案 §5 反馈 9）：外壳垫底的主题特效画布透出来；
+          渐变图刻意不要 —— --bg-gradient 约 0.92 不透明度会把粒子盖没。 */}
       {/* ---- 树模式：仓库顶层目录（不含 .knowbase）+ 根散文件 ----
            2026-09-16 第二轮 UI 反馈：头部只留 ‹ 返回钮（文字装饰与横线删除） */}
       {/* ---- 搜索态（反馈轮新增第四态，优先级最高）：🏠 返回 + 🔒 锁定 + 搜索框 + 结果 ---- */}

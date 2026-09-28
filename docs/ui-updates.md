@@ -1185,3 +1185,18 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **取舍**：① QuizDataPanel 弹层保留实底（对话框压渐变合理）；② 内置深色 / 浅色不注入 `--bg-gradient`（纯色零回归）；③ CHANGELOG 记录留给下次切版（beta.2 已发布，避免干扰 release-notes 基线）。
 
 **验收**：tsc 双端 0 错 · `verify-themes.mjs` ✓（双通道一致、12 套主题全令牌过消毒器）· 静态检索 h-full 实底仅剩弹层一处 · **实机待验**（重启 dev 后 设置 → 外观 应出现 4 张四季主题卡，切换带 View Transition 交叉淡化）。
+
+## 37. 看板收尾（专注时长指标）+ 主题氛围特效落地（2026-09-27）
+
+**看板遗留收齐**：热力图「专注时长」指标从占位接成真实现 —— `dashboardRepo` 聚合番茄场次（`pomoSessionsAll`，半年跨度按日累加）进快照 `pomodoro.days`；`fmtMinutes` 加口径参数（使用/专注）；`Heatmap` 加 `unit` prop；契约脚本新增 F1–F11（72 项 PASS）。
+
+**主题氛围特效**（方案 `docs/theme-fx-design.md`，原型 `proto/theme-fx.html`）：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 内核组件 `ThemeFxLayer`：sprite 预渲染 + 单 rAF + hidden 暂停 + reduced-motion 静帧；消费主题令牌 `--theme-fx`（petals/beams/leaves/snow），内核不认插件 id | `src/components/shared/ThemeFxLayer.tsx` |
+| 2 | 挂载：工作台（`.desk`）+ 看板根容器；画布 z 序最低（z-0，内容层 z≥1），粒子只从留白处透出 | `src/modules/desktop/index.tsx`、`src/modules/dashboard/index.tsx`、`index.css` |
+| 3 | 设置接线：`themeFxEnabled`（默认开）/ `themeFxDensity`（疏/中/密）入 SETTINGS；AppearanceView 仅激活声明了令牌的主题时显示 | `src/lib/settings.ts`、`AppearanceView.tsx` |
+| 4 | 插件 v1.7.0：四季 colors 加 `--theme-fx`，双通道同步，契约脚本扩展令牌枚举校验 | `resources/{market,builtin}-plugins/themes-collection/` |
+
+**验收**：tsc 双端 0 错 · `verify-themes` / `verify-dashboard`（72 项）/ `verify-app-usage`（34 项）全绿 · 原型四轮迭代定稿（速度单位修正 60×、叶形重画、六角结晶、丁达尔加色+环境压暗）· 实机待验（工作台/看板看四季特效 + 设置联动）。

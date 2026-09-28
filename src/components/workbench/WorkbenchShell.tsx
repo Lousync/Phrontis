@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { ResizablePanel } from '../shared/ResizablePanel'
+import { ThemeFxLayer } from '../shared/ThemeFxLayer'
 import { useSettings } from '../../lib/SettingsContext'
 import { parseWorkbenchLayout, type WorkbenchLayout, type RailModule } from '../../lib/workbenchLayout'
 import { WorkbenchLeftPanel } from './WorkbenchLeftPanel'
@@ -40,6 +41,9 @@ interface Props {
   /** 整窗模块形态（方案 §2）：回收站/插件市场/动态/设置/aiTeaching/devtools 激活时中间栏独占——
    *  左右栏**连折叠边条一并退场**（开合回调置空 → displayWidth=0，无残留手柄，见 sidesGone） */
   suppressSides?: boolean
+  /** 两侧栏**展开**时的过渡延迟 ms（收起不加）。由 App 在「刚从整窗模块返回」时给 130，
+   *  实现「中间先淡出、两侧侧栏随后弹出」的编排；平时为 0，行为与改前一致 */
+  sidesOpenDelayMs?: number
   /** 最大化/禅模式 Z2：左右栏卡片随中间内容卡一起方角全屏化（第四轮拍板②） */
   maximized?: boolean
   /** 左栏搜索态（反馈轮：顶栏搜索框删除，全局搜索搬进左栏；瞬态）+ 结果动作回调打包透传 */
@@ -53,7 +57,7 @@ interface Props {
   }
 }
 
-export function WorkbenchShell({ center, right, activeTab, railModule, railTool = null, modSlotRef, modActionsRef, onBookmarkClick, onBookmarkVisibility, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false, maximized = false, leftSearch }: Props) {
+export function WorkbenchShell({ center, right, activeTab, railModule, railTool = null, modSlotRef, modActionsRef, onBookmarkClick, onBookmarkVisibility, onBackToOverview, onOpenLooseFile, onPluginBookmark, suppressSides = false, sidesOpenDelayMs = 0, maximized = false, leftSearch }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
 
@@ -69,6 +73,10 @@ export function WorkbenchShell({ center, right, activeTab, railModule, railTool 
 
   return (
     <div data-wb="shell" className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      {/* 主题氛围特效：外壳层垫底画布（看板方案 §5 反馈 9，2026-09-27）—— 跨左右栏 + 中间栏一张画布，
+          侧栏半透明薄纱（ResizablePanel translucent + 左栏 kb-theme-surface-translucent）让粒子隐现。
+          ★ 整窗模块（sidesGone：看板/设置/说说/书市…）激活时卸载 —— 它们各自带画布，双层粒子会叠加。 */}
+      {!sidesGone && <ThemeFxLayer />}
       {/* ---- 左栏 ---- */}
       <ResizablePanel
         storageKey="wb.leftWidth"
@@ -76,8 +84,10 @@ export function WorkbenchShell({ center, right, activeTab, railModule, railTool 
         defaultWidth={240}
         minWidth={180}
         maxWidth={420}
+        translucent
         visible={!sidesGone && !layout.leftCollapsed}
         collapsedWidth={sidesGone ? 0 : 6}
+        openDelayMs={sidesOpenDelayMs}
         onSnapClose={sidesGone ? undefined : () => patch({ leftCollapsed: true })}
         onSnapOpen={sidesGone ? undefined : () => patch({ leftCollapsed: false })}
         onHandleClick={sidesGone ? undefined : () => patch({ leftCollapsed: !layout.leftCollapsed })}
@@ -118,8 +128,10 @@ export function WorkbenchShell({ center, right, activeTab, railModule, railTool 
         defaultWidth={300}
         minWidth={240}
         maxWidth={420}
+        translucent
         visible={!sidesGone && !layout.rightCollapsed}
         collapsedWidth={sidesGone ? 0 : 6}
+        openDelayMs={sidesOpenDelayMs}
         onSnapClose={sidesGone ? undefined : () => patch({ rightCollapsed: true })}
         onSnapOpen={sidesGone ? undefined : () => patch({ rightCollapsed: false })}
         onHandleClick={sidesGone ? undefined : () => patch({ rightCollapsed: !layout.rightCollapsed })}

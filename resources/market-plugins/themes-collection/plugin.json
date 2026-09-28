@@ -1,9 +1,9 @@
 {
   "id": "knowbase.themes-collection",
   "name": "主题合集",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "author": "Knowbase",
-  "description": "十二套精选主题一键装:GitHub Dark / GitHub Light / 护眼米白纸感 / 赛博朋克夜城 / OpenCode 终端灰 / 手绘线条 v2(纸面+石墨线框+抖动圆角+偏移铅笔阴影+波浪链接) / 水墨(宣纸淡墨+抖动圆角+墨线标题+墨晕阴影) / 水墨·夜(墨池底反白墨线) / 四季包:春·嫩芽、夏·骄阳、秋·金秋、冬·初雪(含季节感背景渐变)。安装后到 设置 → 外观 切换。",
+  "description": "十二套精选主题一键装:GitHub Dark / GitHub Light / 护眼米白纸感 / 赛博朋克夜城 / OpenCode 终端灰 / 手绘线条 v2(纸面+石墨线框+抖动圆角+偏移铅笔阴影+波浪链接) / 水墨(宣纸淡墨+抖动圆角+墨线标题+墨晕阴影) / 水墨·夜(墨池底反白墨线) / 四季包:春·嫩芽、夏·骄阳、秋·金秋、冬·初雪(季节背景渐变 + 氛围粒子特效)。安装后到 设置 → 外观 切换。",
   "type": "declarative",
   "icon": "icon.svg",
   "category": "外观",
@@ -261,7 +261,8 @@
           "--drop-bg": "#e4f1d2",
           "--drop-border": "#418431",
           "--glass-edge": "rgba(255,255,255,0.65)",
-          "--bg-gradient": "linear-gradient(178deg, rgba(252,253,248,0.92) 0%, rgba(245,248,236,0.92) 52%, rgba(236,243,220,0.92) 100%)"
+          "--bg-gradient": "linear-gradient(178deg, rgba(252,253,248,0.92) 0%, rgba(245,248,236,0.92) 52%, rgba(236,243,220,0.92) 100%)",
+          "--theme-fx": "petals"
         }
       },
       {
@@ -290,7 +291,8 @@
           "--drop-bg": "#e2f2cc",
           "--drop-border": "#178343",
           "--glass-edge": "rgba(255,255,255,0.65)",
-          "--bg-gradient": "linear-gradient(178deg, rgba(255,254,242,0.92) 0%, rgba(251,250,224,0.92) 55%, rgba(233,240,196,0.92) 100%)"
+          "--bg-gradient": "linear-gradient(178deg, rgba(255,254,242,0.92) 0%, rgba(251,250,224,0.92) 55%, rgba(233,240,196,0.92) 100%)",
+          "--theme-fx": "beams"
         }
       },
       {
@@ -319,7 +321,8 @@
           "--drop-bg": "#f7ebc5",
           "--drop-border": "#9c6c0c",
           "--glass-edge": "rgba(255,255,255,0.65)",
-          "--bg-gradient": "linear-gradient(178deg, rgba(254,252,244,0.92) 0%, rgba(248,242,221,0.92) 52%, rgba(241,231,195,0.92) 100%)"
+          "--bg-gradient": "linear-gradient(178deg, rgba(254,252,244,0.92) 0%, rgba(248,242,221,0.92) 52%, rgba(241,231,195,0.92) 100%)",
+          "--theme-fx": "leaves"
         }
       },
       {
@@ -348,7 +351,8 @@
           "--drop-bg": "#ddeefa",
           "--drop-border": "#2f74b5",
           "--glass-edge": "rgba(255,255,255,0.65)",
-          "--bg-gradient": "linear-gradient(178deg, rgba(253,254,255,0.92) 0%, rgba(244,249,253,0.92) 52%, rgba(233,242,249,0.92) 100%)"
+          "--bg-gradient": "linear-gradient(178deg, rgba(253,254,255,0.92) 0%, rgba(244,249,253,0.92) 52%, rgba(233,242,249,0.92) 100%)",
+          "--theme-fx": "snow"
         }
       }
     ]

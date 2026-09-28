@@ -18,6 +18,7 @@ import { LayoutGrid, Plus, RefreshCw, Check, ChevronDown, X, GripVertical, Searc
 import { useSettings } from '../../lib/SettingsContext'
 import { useDataChanged } from '../../lib/dataChanged'
 import { searchKnowledgePages } from '../../lib/ipc'
+import { ThemeFxLayer } from '../../components/shared/ThemeFxLayer'
 import {
   parsePresets, clonePresets, newPresetId, newTileId, swapTiles, nextSize,
   clampW, clampH, columnsFor, CELL_UNIT, CELL_GAP,
@@ -513,6 +514,8 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
 
   return (
     <div className={`desk h-full flex flex-col${editing ? ' is-editing' : ''}`}>
+      {/* 主题氛围特效：z 序最低，磁贴与文字都绘制在它之上（.desk-bar/-hero/-scroll 抬 z，见 index.css） */}
+      <ThemeFxLayer />
       {/* 顶栏：刷新（保底）+ 编辑桌面 + 预设 */}
       <div className="desk-bar">
         <div className="desk-bar-right">

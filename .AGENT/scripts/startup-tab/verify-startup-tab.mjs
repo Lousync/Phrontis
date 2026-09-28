@@ -90,7 +90,10 @@ const ids = APP_MODULES.map((m) => m.id)
 ok(new Set(ids).size === ids.length, 'A2 APP_MODULES 内 id 无重复')
 // 2026-09-22 书市（S4）：16 项（+bookMarket）。它是「左栏独立整窗模块」，进活动栏、
 // 可作磁贴、进命令面板 —— 与工具箱 / 插件平级（方案 §1.2 第 5 条）。
-ok(ids.length === 16, 'A2b APP_MODULES 覆盖 16 个 TabName（v3.4.0：-desktop -user +bookshelf +aiChat +graph；aaff952 再 -editor；2026-09-22 +bookMarket）', `实际 ${ids.length}`)
+// 2026-09-27 看板：17 项（+dashboard）。它是「左栏书签 + 整窗」形态 ——
+// 三个 flag 全 false（不进图标条 / 不做磁贴 / 不进命令面板），入口只在左栏书签。
+// 所以 G1 磁贴快照、G3 命令面板快照、C3 TILE_META 覆盖都不受影响，只有本条要改。
+ok(ids.length === 17, 'A2b APP_MODULES 覆盖 17 个 TabName（v3.4.0：-desktop -user +bookshelf +aiChat +graph；aaff952 再 -editor；2026-09-22 +bookMarket；2026-09-27 +dashboard）', `实际 ${ids.length}`)
 ok(!ids.includes('desktop') && !ids.includes('user'), 'A2c 已删除的 desktop/user 不再出现在清单')
 ok(BAR_MODULE_IDS.every((id) => ids.includes(id)), 'A3 BAR_MODULE_IDS ⊆ APP_MODULES')
 ok(!APP_MODULES.some((m) => 'startable' in m),

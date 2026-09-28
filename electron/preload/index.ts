@@ -465,6 +465,8 @@ const api = {
   vaultBackupRestoreArchive: (archivePath: string) => ipcRenderer.invoke('vaultBackup:restoreArchive', archivePath),
   // checkin
   habitGetAll: () => ipcRenderer.invoke('habit:getAll'),
+  // 看板：一次取全部卡片数据（主进程聚合，见 database/repositories/dashboardRepo.ts）
+  dashboardGetSnapshot: () => ipcRenderer.invoke('dashboard:getSnapshot'),
   createHabit: (data: unknown) => ipcRenderer.invoke('habit:create', data),
   updateHabit: (id: string, data: unknown) => ipcRenderer.invoke('habit:update', id, data),
   deleteHabit: (id: string) => ipcRenderer.invoke('habit:delete', id),

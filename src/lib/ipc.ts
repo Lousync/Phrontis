@@ -421,6 +421,10 @@ export const deleteHabit = (id: string) => a().deleteHabit(id)
 export const toggleHabitCheck = (habitId: string, date: string) => a().toggleHabitCheck(habitId, date)
 export const reorderHabits = (orderedIds: string[]) => a().reorderHabits(orderedIds)
 
+// ===== 看板 =====
+/** 一次取全部卡片数据（主进程聚合，见数据库层 dashboardRepo.ts） */
+export const dashboardGetSnapshot = () => a().dashboardGetSnapshot()
+
 // ===== Bookmark Nav =====
 export const bookmarkGetAll = () => a().bookmarkGetAll()
 export const createBookmarkCategory = (d: { name: string; color?: string }) => a().createBookmarkCategory(d)

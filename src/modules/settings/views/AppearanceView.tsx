@@ -57,6 +57,19 @@ export function AppearanceView() {
     ...pluginThemes.map(t => ({ id: t.id, label: t.name, desc: `来自插件「${t.pluginName}」`, icon: <PluginIcon size={24} /> })),
   ]
 
+  // 主题氛围特效（docs/theme-fx-design.md §4.3）：仅当前激活主题声明了 --theme-fx 时显示
+  const fxKind = (() => {
+    const active = pluginThemes.find((pt) => pt.id === s.theme)
+    const v = active?.colors?.['--theme-fx']
+    return v === 'petals' || v === 'beams' || v === 'leaves' || v === 'snow' ? v : null
+  })()
+  const fxOn = s.themeFxEnabled !== false
+  const DENSITY_LABELS = [
+    { id: 'low', label: '疏' },
+    { id: 'mid', label: '中' },
+    { id: 'high', label: '密' },
+  ] as const
+
   return (
     <div>
       <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">外观</h2>
@@ -77,6 +90,49 @@ export function AppearanceView() {
           }))}
         />
       </div>
+
+      {/* 主题氛围特效：仅激活主题声明了 --theme-fx（四季主题）时出现 —— docs/theme-fx-design.md §4.3 */}
+      {fxKind && (
+        <div className="mb-8" data-setting-anchor="appearance.themeFx">
+          <h3 className="text-[12px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-3">主题特效</h3>
+          <p className="text-[11px] text-[var(--text-muted)] mb-3">当前主题的四季氛围粒子（工作台 / 看板）</p>
+          <div className="flex items-center gap-1.5 max-w-xs">
+            {[{ id: false, label: '关' }, { id: true, label: '开' }].map((o) => (
+              <button
+                key={o.label}
+                onClick={() => update('themeFxEnabled', o.id)}
+                className={`flex-1 px-2 py-2 rounded text-[12px] border transition-colors ${
+                  fxOn === o.id
+                    ? 'border-[var(--accent)] bg-[var(--bg-selected)] text-[var(--text-primary)]'
+                    : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          {fxOn && (
+            <div className="mt-3">
+              <p className="text-[11px] text-[var(--text-muted)] mb-2">粒子密度</p>
+              <div className="flex gap-1.5 max-w-xs">
+                {DENSITY_LABELS.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => update('themeFxDensity', d.id)}
+                    className={`flex-1 px-2 py-2 rounded text-[12px] border transition-colors ${
+                      (s.themeFxDensity || 'mid') === d.id
+                        ? 'border-[var(--accent)] bg-[var(--bg-selected)] text-[var(--text-primary)]'
+                        : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 删除动画皮肤(插件可通过 deleteFx 贡献追加自定义龙头/粒子/颜色) */}
       <div className="mb-8" data-setting-anchor="appearance.deleteFx">

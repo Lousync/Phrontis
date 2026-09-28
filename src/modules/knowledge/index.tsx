@@ -68,7 +68,7 @@ interface PageInfo {
   fileType: string
 }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onRequestCloseTab, onStripVisibleChange, onPageTabActivate }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onRequestCloseTab?: () => void; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onRequestCloseTab, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onRequestCloseTab?: () => void; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number } | null; onPendingRelConsumed?: () => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -854,10 +854,19 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     void refreshTreeDir('')
   }, [refreshTreeDir])
 
-  /** 按 relPath 打开（统一通道，Phase 2 批次 2）：树点击与 App 转发的 kb-open-note-rel 共用——
-   *  知识页走页签；无 id md/txt/PDF/代码 → draft 页签（PDF 内嵌阅读器、源码走 Monaco）；不再跳编辑器模块 */
-  const openByRelPath = useCallback((relPath: string) => {
-    const page = allPages.find(p => p.path === relPath)
+  /** 按 relPath 打开（统一通道，Phase 2 批次 2）：树点击与 App 的 pendingRelPath 转发共用——
+   *  知识页走页签；无 id md/txt/PDF/代码 → draft 页签（PDF 内嵌阅读器、源码走 Monaco）；不再跳编辑器模块。
+   *  反馈 8（2026-09-27）：冷挂载时 allPages 是空的（IPC 异步装载），真实页面会在这里被误判成
+   *  「找不到 → 落 draft」。故 miss 时补拉一次全量再找，仍找不到（真·无 id 文件）才落 draft。 */
+  const openByRelPath = useCallback(async (relPath: string) => {
+    let page = allPages.find(p => p.path === relPath)
+    if (!page) {
+      try {
+        const fresh = await getKnowledgePages()
+        setAllPages(fresh)
+        page = fresh.find(p => p.path === relPath)
+      } catch { /* 补拉失败 → 落 draft 兜底 */ }
+    }
     if (page) { void handleOpenPage(page.id); return }
     const name = relPath.slice(relPath.lastIndexOf('/') + 1)
     const dot = name.lastIndexOf('.')
@@ -867,18 +876,22 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
 
   const handleTreeOpenFile = useCallback((node: TreeNode) => {
     if (node.type === 'dir') { handleToggleTreeDir(node.relPath); return }
-    openByRelPath(node.relPath)
+    void openByRelPath(node.relPath)
   }, [openByRelPath, handleToggleTreeDir])
 
-  // App 转发通道：kb-open-note 的所有消费方（快速切换器/AI 引用/书架/aiTeaching/散文件…）改道后由此进入
+  // App 转发通道（反馈 8 改版）：原为监听 `kb-open-note-rel` 事件 —— 但知识库模块**冷挂载前不存在
+  // 监听器**，App 在切 Tab 的同一批次里同步派发事件必然丢失（表象：看板首跳落了空页签、无页面无返回 chip）。
+  // 改走 state+props（ISS-2026-09-04-07 的既定结论，pendingOpenRel 就是为此声明而未接线的）：
+  // pending prop 挂到模块首挂之后依然在，effect 消费即可，无时序竞态。seq 让「同一路径连续跳」可重触发。
+  const pendingRel = pendingRelPath
   useEffect(() => {
-    const onOpen = (e: Event) => {
-      const rel = (e as CustomEvent).detail as { relPath?: string } | undefined
-      if (rel?.relPath) openByRelPath(rel.relPath)
-    }
-    window.addEventListener('kb-open-note-rel', onOpen)
-    return () => window.removeEventListener('kb-open-note-rel', onOpen)
-  }, [openByRelPath])
+    if (!pendingRel) return
+    onPendingRelConsumed?.() // 先消费再打开：打开是 async，避免重渲染后 effect 重跑造成二次打开
+    void openByRelPath(pendingRel.relPath)
+    // 刻意只依赖 pendingRel：openByRelPath 身份随 allPages 变化会重跑本 effect，但 pendingRel 已被
+    // 消费清空，重跑会在 !pendingRel 早退，不会二次打开。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRel])
 
   const parentDirOf = (rel: string): string => { const i = rel.lastIndexOf('/'); return i === -1 ? '' : rel.slice(0, i) }
 

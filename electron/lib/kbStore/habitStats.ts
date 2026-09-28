@@ -181,3 +181,58 @@ export function checkinTotalInWindow(
   }
   return n
 }
+
+/* ================= 连续天数 / 热力序列（看板卡片用，2026-09-27） =================
+ *
+ * 口径与 `src/modules/desktop/useDesktopData.ts` 的 checkinStreak / checkinHeat 对齐
+ * （那个文件是已退役的「桌面磁贴」模块里的旧副本，全仓无引用）。
+ * 逻辑**下沉到这里**而不是在看板仓储里另写一份：这是纯判定，要被契约脚本直接装载；
+ * 将来若桌面磁贴复活，应当 import 这里而不是再抄一遍 —— 同一 app 里两处数字不该打架。
+ */
+
+/** 天序号 → 'YYYY-MM-DD'（与 dayNo 同一 UTC 口径，保证往返一致） */
+function keyOfNo(no: number): string {
+  const d = new Date(no * 86400000)
+  const p = (x: number) => String(x).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`
+}
+
+/** 该日是否有任意一条打卡记录（不限习惯 —— 看板看的是「今天有没有打过」） */
+export function hasCheckinOn(records: Array<{ date: string }>, date: string): boolean {
+  return records.some((r) => r && r.date === date)
+}
+
+/**
+ * 连续打卡天数：从今天往回数。
+ * **今天还没打就从昨天起算** —— 当天还没打卡不该把之前的连续清零（一觉醒来不该归零）。
+ * 上限 400 天：数据异常时不至于把主线程转死。
+ */
+export function checkinCurrentStreak(records: Array<{ date: string }>, today: string): number {
+  let no = dayNo(today)
+  if (!Number.isFinite(no)) return 0
+  if (!hasCheckinOn(records, today)) no -= 1
+  let n = 0
+  while (n < 400) {
+    const k = keyOfNo(no)
+    if (!hasCheckinOn(records, k)) break
+    n += 1
+    no -= 1
+  }
+  return n
+}
+
+/** 最近 n 天（含今天）的打卡序列，**最早的在前**（看板 14 格小热力的数据源） */
+export function checkinHeatSeries(
+  records: Array<{ date: string }>,
+  today: string,
+  n = 14,
+): Array<{ date: string; on: boolean }> {
+  const out: Array<{ date: string; on: boolean }> = []
+  const no = dayNo(today)
+  if (!Number.isFinite(no)) return out
+  for (let i = Math.max(0, n - 1); i >= 0; i--) {
+    const k = keyOfNo(no - i)
+    out.push({ date: k, on: hasCheckinOn(records, k) })
+  }
+  return out
+}
