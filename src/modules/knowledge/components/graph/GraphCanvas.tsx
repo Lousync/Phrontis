@@ -502,11 +502,18 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
     // 惯性由 panV 承接（step 中衰减）；轻微速度直接忽略不启
   }, [onSelect, kick])
 
-  const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault()
-    const canvas = canvasRef.current!
-    const rect = canvas.getBoundingClientRect()
-    zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.18 : 1 / 1.18)
+  // 滚轮缩放必须挂原生非 passive 监听：React 17+ 的 onWheel 在 root 上固定为 passive，
+  // 处理函数里 preventDefault() 无效且每次滚轮刷一条 console 警告（2026-09-28）
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const rect = canvas.getBoundingClientRect()
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.18 : 1 / 1.18)
+    }
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', onWheel)
   }, [zoomAt])
 
   // ---- 生命周期 A（mount）：canvas 尺寸 + ResizeObserver + model 骨架 ----
@@ -665,7 +672,6 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         const md = m.current
         if (md && md.hoverId) { md.hoverId = null; kick() }
       }}
-      onWheel={onWheel}
     />
   )
 })
