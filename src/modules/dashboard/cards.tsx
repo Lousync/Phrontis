@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import {
-  CalendarCheck2, Timer, FileText, BookOpen, LayoutGrid, Check,
+  CalendarCheck2, Timer, FileText, BookOpen, LayoutGrid, Check, ListTodo,
   type LucideIcon,
 } from 'lucide-react'
 import type { DashboardSnapshot } from '../../types'
@@ -28,8 +28,9 @@ export interface CardDef {
   Icon: LucideIcon
   /** 首批默认显示的几张（其余可在「编辑卡片」里勾出来） */
   defaultOn: boolean
-  /** 列跨度 1-3（看板卫星区 3 列网格；缺省 1）。插件大卡用，内置卡不设。 */
-  span?: number
+  /** 默认格子比例（宽 2-6 列 × 高 1-4 行，2026-09-28 栅格化）；用户改过的存 dashboardTileLayout */
+  w: number
+  h: number
 }
 
 export const HUE: Record<CardGroup, string> = {
@@ -40,14 +41,18 @@ export const HUE: Record<CardGroup, string> = {
 }
 
 export const CARD_REGISTRY: readonly CardDef[] = [
+  // 「今天该做的」= 常驻主磁贴（2026-09-28 栅格化降维，拍板：不再独占全宽横幅）：默认 4×2 置顶，
+  // 可拖/可改尺寸，但**不参与显隐勾选** —— 渲染侧强制在场，setting dashboardCards 不含它
+  // （沿用「主卡不在此列」口径，存量设置零迁移）。defaultOn: false 是为了让 settings 默认值不含它。
+  { id: 'todos', label: '今天该做的', group: 'today', Icon: ListTodo, defaultOn: false, w: 2, h: 3 },
   // 「打卡连续」→「今日打卡」（看板方案 §5 反馈 4②，2026-09-27 拍板）：正文改为打卡项列表、可勾选。
   // id 保持 'habit' —— 它是 setting dashboardCards 里存的成员名，改 id 会牵连存量设置。
-  { id: 'habit', label: '今日打卡', group: 'today', Icon: CalendarCheck2, defaultOn: true },
-  { id: 'usage', label: '今日使用', group: 'today', Icon: Timer, defaultOn: true },
-  { id: 'notes', label: '最近编辑', group: 'study', Icon: FileText, defaultOn: true },
+  { id: 'habit', label: '今日打卡', group: 'today', Icon: CalendarCheck2, defaultOn: true, w: 2, h: 2 },
+  { id: 'usage', label: '今日使用', group: 'today', Icon: Timer, defaultOn: true, w: 2, h: 2 },
+  { id: 'notes', label: '最近编辑', group: 'study', Icon: FileText, defaultOn: true, w: 2, h: 2 },
   // 「待复习错题」卡已随反馈 4① 移除（2026-09-27）—— 注册表 / 快照 / 设置默认值三处同步删。
-  { id: 'book', label: '在读的书', group: 'study', Icon: BookOpen, defaultOn: true },
-  { id: 'heatmap', label: '使用热力图', group: 'study', Icon: LayoutGrid, defaultOn: true },
+  { id: 'book', label: '在读的书', group: 'study', Icon: BookOpen, defaultOn: true, w: 2, h: 2 },
+  { id: 'heatmap', label: '使用热力图', group: 'study', Icon: LayoutGrid, defaultOn: true, w: 2, h: 2 },
 ]
 
 /** setting `dashboardCards` 的默认值就是这里拼出来的，别再手抄一份 */
@@ -76,12 +81,17 @@ export function cardBgStyle(bg: CardBg, hue: string): CSSProperties {
 
 /* ==================== 卡片外壳 ==================== */
 
-export function Card({ def, bg, span, children }: { def: CardDef; bg: CardBg; span?: number; children: ReactNode }) {
+export function Card({ def, bg, w = 2, h = 2, children }: { def: CardDef; bg: CardBg; w?: number; h?: number; children: ReactNode }) {
   const hue = HUE[def.group]
   return (
     <section
       className="kb-item-in relative flex flex-col overflow-hidden rounded-[10px] border border-[var(--border-color)] transition-transform duration-150 hover:-translate-y-px"
-      style={{ backgroundColor: 'var(--card-bg)', ...cardBgStyle(bg, hue), ...(span && span > 1 ? { gridColumn: `span ${span} / span ${span}` } : {}) }}
+      style={{
+        backgroundColor: 'var(--card-bg)',
+        ...cardBgStyle(bg, hue),
+        gridColumn: `span ${w} / span ${w}`,
+        gridRow: `span ${h} / span ${h}`,
+      }}
     >
       {/* 水印：出界一半，读作「角落纹样」而不是一块可见图形 */}
       {bg === 'mark' && (
@@ -99,7 +109,7 @@ export function Card({ def, bg, span, children }: { def: CardDef; bg: CardBg; sp
         <span style={{ color: 'var(--accent)' }}><def.Icon size={15} /></span>
         <b className="text-[12.5px] font-semibold text-[var(--text-primary)]">{def.label}</b>
       </div>
-      <div className="relative z-[1] min-h-[92px] px-3 pb-3">{children}</div>
+      <div className="relative z-[1] min-h-0 flex-1 overflow-hidden px-3 pb-3">{children}</div>
     </section>
   )
 }
@@ -170,16 +180,16 @@ function HabitCard({ snap, compact, onToggleHabit }: { snap: DashboardSnapshot; 
   )
 }
 
-function UsageCard({ snap, range, label, compact }: { snap: DashboardSnapshot; range: RangeKey; label: string; compact?: boolean }) {
-  // 口径切换在渲染层做：主进程只给「每天多少分钟」这一件事实，免得两端各算一套
+function UsageCard({ snap, compact }: { snap: DashboardSnapshot; compact?: boolean }) {
+  // 口径固定「今日」（2026-09-28 拍板：区间切换器撤除 —— 它只影响这一张卡，语义不成立）；
+  // 近 7 天柱状图保留（固定跨度，不随任何切换变）。
   const keys = Object.keys(snap.usage.days).sort()
-  const tail = keys.slice(range === 'today' ? -1 : range === 'week' ? -7 : -30)
-  const total = tail.reduce((s, k) => s + (snap.usage.days[k] ?? 0), 0)
+  const total = keys.length > 0 ? (snap.usage.days[keys[keys.length - 1]] ?? 0) : 0
   const last7 = keys.slice(-7).map((k) => snap.usage.days[k] ?? 0)
   const max = Math.max(1, ...last7)
   return (
     <>
-      <Big value={total} unit={`分钟 ${label}`} />
+      <Big value={total} unit="分钟 今日" />
       <Caption>{total >= 60 ? `共 ${Math.floor(total / 60)} 小时 ${total % 60} 分` : '还没到一小时'}</Caption>
       <div className={`mt-3 flex items-end gap-1.5 ${compact ? 'h-[38px]' : 'h-[50px]'}`}>
         {last7.map((v, i) => (
@@ -192,6 +202,66 @@ function UsageCard({ snap, range, label, compact }: { snap: DashboardSnapshot; r
       </div>
       <div className="mt-1 text-center text-[10px] text-[var(--text-muted)]">最近 7 天</div>
     </>
+  )
+}
+
+/** 今天该做的（2026-09-28 主卡降维成磁贴）：待办两栏 + 进度条脚注；空态压成单行。
+ *  常驻 —— 渲染侧强制在场（不在 dashboardCards 勾选清单里），可拖/可改尺寸、无 ×。 */
+function TodoCard({ snap, compact, onMarkDone, onJumpSchedule }: {
+  snap: DashboardSnapshot
+  compact?: boolean
+  onMarkDone?: (id: string) => void
+  onJumpSchedule?: () => void
+}) {
+  const openTodos = [...snap.todos.overdue.map((t) => ({ ...t, late: true })), ...snap.todos.today.map((t) => ({ ...t, late: false }))]
+  // 快照侧本就有上限（overdue 3 + today 4 = 7 条）；窄卡（默认 2×3）单栏，紧凑档再收
+  const shownTodos = compact ? openTodos.slice(0, 4) : openTodos.slice(0, 7)
+  const hiddenTodoCount = openTodos.length - shownTodos.length
+  const donePct = snap.todos.totalToday > 0 ? Math.round((snap.todos.doneToday / snap.todos.totalToday) * 100) : 0
+  return (
+    <div className="flex h-full flex-col">
+      {openTodos.length === 0 ? (
+        <div className="py-1 text-[12.5px] text-[var(--text-muted)]">今天没有待办，清爽一天。</div>
+      ) : (
+        <div className="kb-thin-scroll -mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+          {shownTodos.map((t) => (
+            <div key={t.id} className="flex items-start gap-2.5 break-inside-avoid rounded-md py-1 hover:bg-[var(--bg-hover)]">
+              <button
+                type="button"
+                onClick={() => onMarkDone?.(t.id)}
+                title="标记完成"
+                className="mt-0.5 grid h-[15px] w-[15px] flex-none place-items-center rounded-[4px] border-[1.5px] border-[var(--text-muted)] text-transparent transition-colors hover:border-[var(--accent)]"
+              >
+                <Check size={10} />
+              </button>
+              <div className="min-w-0 flex-1">
+                <div className={`truncate text-[12.5px] ${t.late ? 'text-[var(--danger-ink)]' : 'text-[var(--text-primary)]'}`}>{t.title}</div>
+                <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
+                  {t.time && <span>{t.time}</span>}
+                  {t.late && <span className="rounded-full px-1.5" style={{ background: 'var(--danger-bg)', color: 'var(--danger-ink)' }}>逾期</span>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt-auto flex items-center gap-3 border-t border-[var(--border-color)] pt-1.5 text-[11px] text-[var(--text-muted)]">
+        <span className="flex-none">{snap.todos.doneToday}/{snap.todos.totalToday} 已完成</span>
+        <span className="block h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
+          <i className="block h-full rounded-full bg-[var(--accent)] transition-[width] duration-300" style={{ width: `${donePct}%` }} />
+        </span>
+        {hiddenTodoCount > 0 && (
+          <button
+            type="button"
+            onClick={onJumpSchedule}
+            title="去日程处理剩余待办"
+            className="flex-none rounded-md px-1 py-0.5 text-[11px] text-[var(--accent)] transition-colors hover:bg-[var(--bg-hover)]"
+          >
+            还有 {hiddenTodoCount} 件 → 去日程
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -261,21 +331,20 @@ function HeatmapCard({ snap }: { snap: DashboardSnapshot }) {
 
 /* ==================== 分发 ==================== */
 
-export type RangeKey = 'today' | 'week' | 'month'
-
-export const RANGE_LABEL: Record<RangeKey, string> = { today: '今日', week: '本周', month: '本月' }
-
-export function CardBody({ def, snap, range, compact, onToggleHabit, onOpenNote, onOpenBook }: {
-  def: CardDef; snap: DashboardSnapshot; range: RangeKey
+export function CardBody({ def, snap, compact, onMarkDone, onToggleHabit, onOpenNote, onOpenBook, onJumpSchedule }: {
+  def: CardDef; snap: DashboardSnapshot
   /** 紧凑档（看板方案 §5 反馈 3）：视口 <1000px 时收列表/图表高度，保证默认窗口无滚动条 */
   compact?: boolean
+  onMarkDone?: (id: string) => void
   onToggleHabit?: (habitId: string, pos?: { x: number; y: number }) => void
   onOpenNote?: (relPath: string) => void
   onOpenBook?: (relPath: string) => void
+  onJumpSchedule?: () => void
 }) {
   switch (def.id) {
+    case 'todos': return <TodoCard snap={snap} compact={compact} onMarkDone={onMarkDone} onJumpSchedule={onJumpSchedule} />
     case 'habit': return <HabitCard snap={snap} compact={compact} onToggleHabit={onToggleHabit} />
-    case 'usage': return <UsageCard snap={snap} range={range} label={RANGE_LABEL[range]} compact={compact} />
+    case 'usage': return <UsageCard snap={snap} compact={compact} />
     case 'notes': return <NotesCard snap={snap} compact={compact} onOpenNote={onOpenNote} />
     case 'book': return <BookCard snap={snap} onOpenBook={onOpenBook} />
     case 'heatmap': return <HeatmapCard snap={snap} />

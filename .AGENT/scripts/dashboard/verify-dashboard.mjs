@@ -232,8 +232,8 @@ eq('A25 fmtMinutes 零', fmtMinutes(0), '没有记录')
   // --- 反馈 3：紧凑档 ---
   ok('E15 紧凑档钩子在位（视口 <1000 → compact；resize 只翻布尔）',
     /function useCompactTier[\s\S]{0,400}window\.innerHeight < 1000/.test(index))
-  ok('E16 紧凑档主卡待办限 4 条 + 「去日程」收口（拍板①：原地展开会顶出滚动条）',
-    /openTodos\.slice\(0, 4\)/.test(index) && /onJumpSchedule/.test(index))
+  ok('E16 紧凑档待办限 4 条 + 「去日程」收口（2026-09-28 主卡降维磁贴：逻辑移入 cards.tsx，index 留跳转接线）',
+    /openTodos\.slice\(0, 4\)/.test(cards) && /onJumpSchedule/.test(index))
   ok('E17 App 侧跳日程接线', /onJumpSchedule=\{\(\) => handleTabChange\('schedule'\)\}/.test(app))
   ok('E18 紧凑档收口覆盖三卡（打卡 max-h / 使用柱高 / 最近编辑条数）',
     /compact \? 'max-h-\[111px\]' : 'max-h-\[148px\]'/.test(cards)

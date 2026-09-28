@@ -55,6 +55,8 @@ export function Heatmap({ days, fromKey, toKey, unit = '使用' }: HeatmapProps)
 
   return (
     <div className="relative" ref={wrapRef}>
+      {/* 磁贴栅格化（2026-09-28）：卡可被拉大，但格子封顶 14px 居中 —— 拉大出留白而不是格子无限变大裁切 */}
+      <div className="mx-auto" style={{ maxWidth: model.weeks * 17 + 26 }}>
       {/* 月份标签：与网格共用同一份列模板，才对得齐 */}
       <div
         className="grid gap-[3px] pb-[5px] pl-6 text-[10px] text-[var(--text-muted)]"
@@ -87,6 +89,7 @@ export function Heatmap({ days, fromKey, toKey, unit = '使用' }: HeatmapProps)
             />
           ))}
         </div>
+      </div>
       </div>
 
       {tip && (
