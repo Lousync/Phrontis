@@ -300,7 +300,7 @@ function validateManifest(m: unknown, opts?: { legacy?: boolean }): { manifest: 
         }
       }
       if (key === 'dashboardWidgets') {
-        // 看板控件贡献（2026-09-28）：仅 UI 插件；全局控件 id = `<pluginId>:<wid>`（渲染层拼，与面板编辑器拍板口径一致）
+        // 看板控件贡献（2026-09-28，栅格化后 w/h 版）：仅 UI 插件；全局控件 id = `<pluginId>:<wid>`（渲染层拼）
         if (raw.type !== 'ui') return { error: 'dashboardWidgets 贡献仅 UI 插件(type: ui)可声明' }
         const arr = (raw.contributes as Record<string, unknown>).dashboardWidgets
         if (!Array.isArray(arr) || arr.length === 0 || arr.length > 10) return { error: 'dashboardWidgets 需为 1-10 个控件的数组' }
@@ -311,7 +311,9 @@ function validateManifest(m: unknown, opts?: { legacy?: boolean }): { manifest: 
           if (wids.has(w.wid)) return { error: `dashboardWidgets: 重复的 wid ${w.wid}` }
           wids.add(w.wid)
           if (typeof w.title !== 'string' || !w.title.trim() || w.title.length > 20) return { error: 'dashboardWidgets: title 缺失或过长(≤20)' }
-          if (w.span !== undefined && (typeof w.span !== 'number' || !Number.isInteger(w.span) || w.span < 1 || w.span > 3)) return { error: 'dashboardWidgets: span 仅支持 1-3（列跨度）' }
+          const wv = typeof w.w === 'number' ? Math.round(w.w) : 2
+          const hv = typeof w.h === 'number' ? Math.round(w.h) : 2
+          if (wv < 2 || wv > 6 || hv < 1 || hv > 4) return { error: 'dashboardWidgets: 格子比例 w 仅 2-6、h 仅 1-4' }
         }
       }
       if (key === 'commands') {
@@ -972,10 +974,10 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
     return views
   })
 
-  /** 列出所有已启用插件声明的看板控件（2026-09-28）：仅 UI 插件；控件全局 id 由渲染层拼 `<pluginId>:<wid>` */
+  /** 列出所有已启用插件声明的看板控件（2026-09-28，栅格化 w/h 版）：仅 UI 插件；控件全局 id 由渲染层拼 `<pluginId>:<wid>` */
   ipcMain.handle('plugin:listDashboardWidgets', () => {
     const idx = readIndex()
-    const out: Array<{ pluginId: string; name: string; wid: string; title: string; span: number; entry: string; granted: string[] }> = []
+    const out: Array<{ pluginId: string; name: string; wid: string; title: string; w: number; h: number; entry: string; granted: string[] }> = []
     for (const [id, entry] of Object.entries(idx)) {
       if (!entry.enabled) continue
       const dir = safePathInside(getPluginsRoot(), id)
@@ -993,7 +995,8 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
             name: m.name,
             wid: w.wid,
             title: String(w.title || m.name),
-            span: typeof w.span === 'number' && w.span >= 1 && w.span <= 3 ? w.span : 1,
+            w: typeof w.w === 'number' && w.w >= 2 && w.w <= 6 ? Math.round(w.w) : 2,
+            h: typeof w.h === 'number' && w.h >= 1 && w.h <= 4 ? Math.round(w.h) : 2,
             entry: m.entry,
             granted: entry.grantedCapabilities || [],
           })
