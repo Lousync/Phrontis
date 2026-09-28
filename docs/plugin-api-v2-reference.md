@@ -356,6 +356,7 @@ off()   // 或 await off()
 | `knowledgePages` | `{ space, notebooks[] }` 或 `{ notebook, chapters[] }` | 数据级 A |
 | `tools` | 1-10 条，每条含 `id/name` | UI 专属 |
 | `views` | 1-10 条，每条含 `slot/title`，可选 `mode` | UI 专属 |
+| **`dashboardWidgets`** | 1-10 条，每条含 `wid/title`，可选 `span`(1-3 列跨度) | **新增 · UI 专属** |
 | `tables` | 1-20 张表定义 | UI 专属 · **C 级 · 已 deprecated** |
 | **`store`** | `{ quotaMb?: number; collections?: string[] }` | **新增 · B 级** |
 | **`commands`** | 1-50 条 `{ id, title, keybinding? }` | **新增 · B 级** |
@@ -364,6 +365,29 @@ off()   // 或 await off()
 | **`settings`** | `{ entry, title? }` | **新增 · B 级** |
 
 未列出的键一律拒绝安装（宿主白名单强校验）。
+
+### 5.2.1 `contributes.dashboardWidgets` — 看板控件（2026-09-28）
+
+UI 插件可把自己的界面作为卡片挂到「看板」模块的卫星卡片区。声明后**默认不显示**——用户在看板「编辑卡片 → 插件控件」里勾选；插件卸载/停用后卡片自动消失（设置里的勾选残留无害，渲染侧过滤）。
+
+```json
+{
+  "type": "ui",
+  "entry": "index.html",
+  "contributes": {
+    "dashboardWidgets": [
+      { "wid": "word-count", "title": "今日字数", "span": 1 },
+      { "wid": "review-board", "title": "复习看板", "span": 2 }
+    ]
+  }
+}
+```
+
+- **`wid`**：插件内唯一，`^[a-z0-9][a-z0-9-]{0,39}$`；全局控件 id = **`<pluginId>:<wid>`**（宿主拼，与面板编辑器同口径）。
+- **`title`**：卡片标题，≤20 字符。
+- **`span`**：列跨度 1-3（缺省 1）。行跨度首版不支持——看板是 auto-row 网格，行高不定。
+- **运行形态**：标准卡位内嵌沙箱 iframe（与 `views` 同一套 `PluginFrame` 数据桥/主题变量，正文区高 150px、宽卡更宽），插件按下发主题变量适配明暗色。
+- **校验**：仅 `type: ui` 且带 `entry` 的插件可声明；1-10 条；`wid` 不得重复。
 
 ### 5.3 `capabilities` 取值
 

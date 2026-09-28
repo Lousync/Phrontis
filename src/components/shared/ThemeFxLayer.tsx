@@ -24,11 +24,12 @@ export type ThemeFxKind = 'petals' | 'beams' | 'leaves' | 'snow'
 export type ThemeFxDensity = 'low' | 'mid' | 'high'
 
 const DENSITY: Record<ThemeFxDensity, number> = { low: 0.45, mid: 1, high: 1.8 }
-const BASE_COUNT: Record<ThemeFxKind, number> = { petals: 24, beams: 22, leaves: 18, snow: 64 }
+const BASE_COUNT: Record<ThemeFxKind, number> = { petals: 24, beams: 22, leaves: 18, snow: 140 }
 const FX_KINDS: readonly ThemeFxKind[] = ['petals', 'beams', 'leaves', 'snow']
 
-/** 从根元素读当前主题声明的特效种类；无 / 未知 → null */
-function readFxKind(): ThemeFxKind | null {
+/** 从根元素读当前主题声明的特效种类；无 / 未知 → null。
+ *  唯一真相源（AppearanceView 的特效设置显隐也消费它，勿在别处另写一套判定）。 */
+export function readFxKind(): ThemeFxKind | null {
   const v = getComputedStyle(document.documentElement).getPropertyValue('--theme-fx').trim()
   return (FX_KINDS as readonly string[]).includes(v) ? (v as ThemeFxKind) : null
 }
@@ -173,6 +174,8 @@ interface FxParticle {
   rot?: number; vr?: number
   flip?: number; fs?: number
   tw?: number; tws?: number
+  /** 逐粒透明度（雪的远景层更淡造纵深）；缺省走 draw() 的统一 0.92 */
+  a?: number
 }
 
 interface BeamConf { off: number; w: number; jit: number; phase: number; alpha: number }
@@ -257,11 +260,13 @@ class FxLayer {
       case 'leaves':
         return { s: S.leaves, i: Math.floor(rnd(0, 5)), x: rnd(0, w), y: top ? rnd(-50, 0) : rnd(0, h), size: rnd(13, 19), vy: rnd(0.5, 1.2), sway: rnd(15, 35), ph: rnd(0, 6.28), ps: rnd(0.03, 0.07), rot: rnd(0, 6.28), vr: rnd(-0.025, 0.025), flip: rnd(0, 6.28), fs: rnd(0.02, 0.06) }
       case 'snow': {
-        // 远景 = 虚化雪点（纵深），近景 = 六角结晶（慢旋转）
-        const near = Math.random() < 0.38
+        // 方案 A「细雪·静」（2026-09-28 定稿，proto/snow-tuning.html 四轮对比）：
+        // v1.6.0 的大结晶（34-52px、38%）像卡通贴纸——全面缩小 + 加密 + 放慢，
+        // 远景层更小更淡造纵深，近景只留 12% 小结晶当质感点缀。
+        const near = Math.random() < 0.12
         return near
-          ? { s: S.snowFlakes, i: Math.floor(rnd(0, 3)), x: rnd(0, w), y: top ? rnd(-40, 0) : rnd(0, h), size: rnd(17, 26), vy: rnd(0.5, 1.0), sway: rnd(10, 20), ph: rnd(0, 6.28), ps: rnd(0.03, 0.06), rot: rnd(0, 6.28), vr: rnd(-0.012, 0.012) }
-          : { s: S.snowDot, x: rnd(0, w), y: top ? rnd(-30, 0) : rnd(0, h), size: rnd(3, 6), vy: rnd(0.35, 0.9), sway: rnd(8, 22), ph: rnd(0, 6.28), ps: rnd(0.03, 0.08) }
+          ? { s: S.snowFlakes, i: Math.floor(rnd(0, 3)), x: rnd(0, w), y: top ? rnd(-40, 0) : rnd(0, h), size: rnd(5, 10), vy: rnd(0.4, 0.8), sway: rnd(5, 12), ph: rnd(0, 6.28), ps: rnd(0.02, 0.05), rot: rnd(0, 6.28), vr: rnd(-0.008, 0.008), a: rnd(0.85, 0.95) }
+          : { s: S.snowDot, x: rnd(0, w), y: top ? rnd(-30, 0) : rnd(0, h), size: rnd(2, 4), vy: rnd(0.22, 0.5), sway: rnd(4, 10), ph: rnd(0, 6.28), ps: rnd(0.02, 0.05), a: rnd(0.5, 0.8) }
       }
       case 'beams':
         return { s: S.motes, x: rnd(0, w), y: top ? rnd(h, h + 40) : rnd(0, h), size: rnd(5, 12), vy: -rnd(0.15, 0.35), sway: rnd(6, 16), ph: rnd(0, 6.28), ps: rnd(0.02, 0.05), tw: rnd(0, 6.28), tws: rnd(0.05, 0.12) }
@@ -338,7 +343,9 @@ class FxLayer {
       const img = (Array.isArray(p.s) ? p.s[p.i ?? 0] : p.s) as CanvasImageSource
       const half = p.size
       g.save()
-      g.globalAlpha = p.tw !== undefined ? 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(p.tw)) : 0.92
+      g.globalAlpha = p.tw !== undefined
+        ? 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(p.tw))
+        : (p.a ?? 0.92)
       g.translate(p.x, p.y)
       if (p.rot !== undefined) g.rotate(p.rot)
       if (p.flip !== undefined) g.scale(0.55 + 0.45 * Math.abs(Math.cos(p.flip)), 1)

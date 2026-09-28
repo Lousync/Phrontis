@@ -4,6 +4,7 @@ import { useSettings } from '../../../lib/SettingsContext'
 import { THEME_OPTIONS, BLOG_SIZE_OPTIONS, KNOWLEDGE_SIDEBAR_SIZE_OPTIONS, applyThemeClass } from '../../../lib/settings'
 import { PluginIcon, IconPreview } from '../../../components/shared/ModuleIcons'
 import { ensurePluginThemeStyles, type PluginThemeWithVars } from '../../../lib/pluginService'
+import { readFxKind, type ThemeFxKind } from '../../../components/shared/ThemeFxLayer'
 import { BUILTIN_ICON_PACKS, usePluginIconPacks, type IconModuleId } from '../../../lib/sidebarIcons'
 import { pluginListDeleteFxSkins } from '../../../lib/ipc'
 import { SettingSelect } from '../components/SettingSelect'
@@ -57,12 +58,19 @@ export function AppearanceView() {
     ...pluginThemes.map(t => ({ id: t.id, label: t.name, desc: `来自插件「${t.pluginName}」`, icon: <PluginIcon size={24} /> })),
   ]
 
-  // 主题氛围特效（docs/theme-fx-design.md §4.3）：仅当前激活主题声明了 --theme-fx 时显示
-  const fxKind = (() => {
-    const active = pluginThemes.find((pt) => pt.id === s.theme)
-    const v = active?.colors?.['--theme-fx']
-    return v === 'petals' || v === 'beams' || v === 'leaves' || v === 'snow' ? v : null
-  })()
+  // 主题氛围特效（docs/theme-fx-design.md §4.3）：仅当前激活主题声明了 --theme-fx 时显示。
+  // 真相源 = html 计算样式（readFxKind，与 ThemeFxLayer 同一份判定）—— 不再用 pluginThemes
+  // 异步列表 find(s.theme)：插件列表未就绪/查询失败时区块会消失（2026-09-28 用户报「时有时无」），
+  // 且那套判定不随主题切换重查。主题 class 是 settings 载入后异步挂上的，MutationObserver 跟拍。
+  const [fxKind, setFxKind] = useState<ThemeFxKind | null>(null)
+  useEffect(() => {
+    const read = () => setFxKind(readFxKind())
+    read()
+    const mo = new MutationObserver(read)
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    window.addEventListener('plugins-changed', read)
+    return () => { mo.disconnect(); window.removeEventListener('plugins-changed', read) }
+  }, [])
   const fxOn = s.themeFxEnabled !== false
   const DENSITY_LABELS = [
     { id: 'low', label: '疏' },

@@ -83,7 +83,7 @@ src/
 15. 错题本 `source_space` 推导（`quizRepo.vaultResolveSource`）：上溯**必须走到 space 才 break**，notebook 只赋值不 break。演示数据工具 `.AGENT/scripts/demo-seed/`。
 
 ### AI 工具
-16. **工具 schema 就是每轮成本**（`.AGENT/scripts/ai-tools-audit/`）：core 14 个常驻 ≈7.7k tok/轮，ondemand 17 个默认折叠。新增默认 `tier: 'ondemand'`，单工具 schema **≤800 字符**，**严禁在 description 里罗列返回字段**。
+16. **工具 schema 就是每轮成本**（`.AGENT/scripts/ai-tools-audit/`）：core 13 个常驻 + ondemand 21 个默认折叠（2026-09-28 实数，枚举自 builtinTools.ts）。新增默认 `tier: 'ondemand'`，单工具 schema **≤800 字符**，**严禁在 description 里罗列返回字段**。
 17. 结果侧只做两件事：**拿得少**（默认值 / 上限）、**丢得早**（`MAX_TOOL_RESULT_CHARS=24000` 摘要替代 + `KEEP_RECENT_TOOL_RESULTS=3`）。压缩必须是纯函数且幂等，否则打散 prompt cache。
 18. 新模块接入 AI 工具的接线清单：`DataChangeScope` 加该模块 scope + 对应面板挂 `useDataChanged`（否则表象是「AI 说改好了、界面没反应」）；提供 `*ResolveOrCreate(name)` 命名桥；查询工具**不得**有建标签这类副作用；新写工具同步补 `builtin.tool.request` 的 description 清单。
 19. 出题 → 答题闭环：组卷落成知识库 `.md`，页内每题一个 ` ```quiz ` 围栏；答错自动回流错题本，**题号必须重排 1..N**（`snapshot.no` 是原页序号，沿用会把错题记到别的题上）。契约 `.AGENT/scripts/quiz-tools/verify-quiz-fence.mjs`。
@@ -116,6 +116,7 @@ npm run pack     # build + electron-builder 打包
 - **类型门禁**（build 通过 ≠ 类型正确，必须单独跑）：`npx tsc --noEmit -p tsconfig.node.json` 与 `npx tsc --noEmit -p tsconfig.web.json`。
 - **提交必须用系统 git**（Git Bash 自带的版本会删嵌套分支 ref → 提交变孤儿）。路径与理由见 skill `windows-sandbox-ops` §1。
 - **改动越大越要配独立的契约验证脚本** —— 只跑 tsc 不够。
+- **新功能落地 / 老功能用户可见行为变更后，收尾时必须提醒开发者同步 AI 手册**：`resources/help/*.md` 是 AI 回答「软件怎么用」的唯一语料（`builtin.help.search` 检索），功能与文档不同步 = AI 照旧文档说错话且无任何报错。提醒口径：本次改动涉及哪个模块、`resources/help/` 哪几篇可能受影响、是否需要改写（写作规范与重编流程见 `.AGENT/help-rewrite/README.md`，检索验收跑 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs`）。纯内部重构（无用户可见行为变化）不需要提醒。
 
 ## 提示与设置
 

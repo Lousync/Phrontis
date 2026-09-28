@@ -16,16 +16,19 @@ function avatarColor(domain: string): string {
 interface Props {
   /** 「管理」按钮回调：主窗口语境 = 打开网址导航工具标签；脱离小窗语境 = dayPanelOpenInMain */
   onManage?: () => void
+  /** true = 只显示星标收藏条目（右栏快捷工具语境，2026-09-28）；缺省 = 全部条目（DayPanel 脱离小窗维持原行为） */
+  favoritesOnly?: boolean
 }
 
 /**
  * 网址导航控件（v3.4.0 批次4：DayPanel「导航」Tab 迁入 widgets，方案 §3.7）。
  * **右栏简略视图与脱离小窗共用**（不复制渲染）。自包含数据加载：
  * 搜索 + 分类 chips + 双列书签卡片，点击直达系统浏览器。
+ * favoritesOnly（右栏语境）= 只显示星标收藏条目、隐藏分类 chips —— 快速跳转，不做管理面。
  * 数据与工具箱网址导航同源（同一 bookmarkGetAll IPC）；工具箱的增删改会广播
  * 'bookmark' data-changed，此处监听后自动刷新，保证双侧联通。
  */
-export function NavWidget({ onManage }: Props) {
+export function NavWidget({ onManage, favoritesOnly = false }: Props) {
   const [categories, setCategories] = useState<BookmarkCategory[]>([])
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([])
   const [selected, setSelected] = useState('all')
@@ -45,16 +48,18 @@ export function NavWidget({ onManage }: Props) {
   useDataChanged('bookmark', refresh)
 
   const filtered = useMemo(() => {
-    let list = bookmarks
-    if (selected === 'none') list = list.filter(b => b.categoryId === '')
-    else if (selected !== 'all') list = list.filter(b => b.categoryId === selected)
+    let list = favoritesOnly ? bookmarks.filter(b => b.starred) : bookmarks
+    if (!favoritesOnly) {
+      if (selected === 'none') list = list.filter(b => b.categoryId === '')
+      else if (selected !== 'all') list = list.filter(b => b.categoryId === selected)
+    }
     const q = search.trim().toLowerCase()
     if (q) {
       list = list.filter(b =>
         b.title.toLowerCase().includes(q) || b.url.toLowerCase().includes(q) || b.description.toLowerCase().includes(q))
     }
     return list
-  }, [bookmarks, selected, search])
+  }, [bookmarks, selected, search, favoritesOnly])
 
   const catChips = useMemo(() => [
     { id: 'all', name: '全部' },
@@ -78,21 +83,23 @@ export function NavWidget({ onManage }: Props) {
         />
       </div>
 
-      <div className="flex flex-wrap gap-1">
-        {catChips.map(c => (
-          <button
-            key={c.id}
-            onClick={() => setSelected(c.id)}
-            className={`rounded-full border px-2.5 py-[3px] text-[10.5px] transition-colors ${
-              selected === c.id
-                ? 'border-[var(--accent)] bg-[var(--accent)] text-white'
-                : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]'
-            }`}
-          >
-            {c.name}
-          </button>
-        ))}
-      </div>
+      {!favoritesOnly && (
+        <div className="flex flex-wrap gap-1">
+          {catChips.map(c => (
+            <button
+              key={c.id}
+              onClick={() => setSelected(c.id)}
+              className={`rounded-full border px-2.5 py-[3px] text-[10.5px] transition-colors ${
+                selected === c.id
+                  ? 'border-[var(--accent)] bg-[var(--accent)] text-white'
+                  : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--accent)] hover:text-[var(--accent)]'
+              }`}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-1.5">
         {filtered.map(b => {
@@ -120,7 +127,9 @@ export function NavWidget({ onManage }: Props) {
       </div>
       {filtered.length === 0 && (
         <p className="px-1 py-3 text-center text-xs text-[var(--text-muted)]">
-          {bookmarks.length === 0 ? '还没有书签，去工具箱添加' : '没有匹配的书签'}
+          {favoritesOnly
+            ? (bookmarks.some(b => b.starred) ? '没有匹配的书签' : '还没有收藏的书签——在网址导航工具里点 ⭐ 收藏')
+            : bookmarks.length === 0 ? '还没有书签，去工具箱添加' : '没有匹配的书签'}
         </p>
       )}
 

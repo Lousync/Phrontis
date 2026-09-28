@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, SlidersHorizontal, Check, Pencil } from 'lucide-react'
-import { dashboardGetSnapshot, updateScheduleTodo, toggleHabitCheck } from '../../lib/ipc'
+import { ArrowLeft, SlidersHorizontal, Check, Pencil, Puzzle } from 'lucide-react'
+import { dashboardGetSnapshot, updateScheduleTodo, toggleHabitCheck, pluginListDashboardWidgets } from '../../lib/ipc'
 import { notifyDataChanged, useDataChanged } from '../../lib/dataChanged'
 import { useSettings } from '../../lib/SettingsContext'
 import { showToast } from '../../lib/toast'
 import { burstConfetti, ensureFeedbackStyles } from '../../lib/confetti'
 import { ThemeFxLayer } from '../../components/shared/ThemeFxLayer'
-import type { DashboardSnapshot } from '../../types'
+import { PluginFrame } from '../../components/shared/PluginFrame'
+import type { DashboardSnapshot, PluginDashboardWidget } from '../../types'
 import {
   CARD_REGISTRY, DEFAULT_CARD_IDS, CARD_BG_OPTIONS,
-  Card, CardBody, HEAT_METRICS, RANGE_LABEL,
-  type CardBg, type HeatMetric, type RangeKey,
+  Card, CardBody, RANGE_LABEL,
+  type CardBg, type CardDef, type RangeKey,
 } from './cards'
 
 /**
@@ -70,6 +71,22 @@ function useCompactTier(): boolean {
   return compact
 }
 
+/** 插件看板控件清单（2026-09-28 底层基建）：mount 拉 + plugins-changed 重拉。
+ *  看板与知识库侧栏同属保活面（Tab 首挂后不卸载），插件安装/启停不会自然触发重挂，
+ *  必须订阅事件 —— 与 knowledge/index.tsx:236 同款走法。 */
+function usePluginWidgets(): PluginDashboardWidget[] {
+  const [ws, setWs] = useState<PluginDashboardWidget[]>([])
+  const load = useCallback(() => {
+    void pluginListDashboardWidgets().then(setWs).catch(() => { /* 插件线不可用视为无贡献 */ })
+  }, [])
+  useEffect(() => {
+    load()
+    window.addEventListener('plugins-changed', load)
+    return () => window.removeEventListener('plugins-changed', load)
+  }, [load])
+  return ws
+}
+
 const WEEKDAY = ['日', '一', '二', '三', '四', '五', '六']
 
 export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
@@ -83,7 +100,6 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
   // ck-pop 圈体弹跳的样式由 confetti.ts 懒注入 —— 挂载即注入一次，不依赖「先炸彩纸才注入」的时序
   useEffect(() => { ensureFeedbackStyles() }, [])
   const [range, setRange] = useState<RangeKey>('today')
-  const [metric, setMetric] = useState<HeatMetric>('usage')
   const [popOpen, setPopOpen] = useState(false)
 
   const bg = (s.dashboardBg as CardBg) || 'mark'
@@ -105,11 +121,21 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
     return new Set(DEFAULT_CARD_IDS)
   }, [s.dashboardCards])
 
+  // 插件控件清单：全局 id = `<pluginId>:<wid>`（清单为空 = 无贡献，界面零侵入）
+  const widgets = usePluginWidgets()
+  const widgetIdOf = (w: PluginDashboardWidget) => `${w.pluginId}:${w.wid}`
+
   const toggleCard = (id: string) => {
     const wanted = new Set(shown)
     if (wanted.has(id)) wanted.delete(id); else wanted.add(id)
-    // 存回时按注册表序归一，免得设置里存出一串乱序 id
-    void update('dashboardCards', JSON.stringify(CARD_REGISTRY.filter((c) => wanted.has(c.id)).map((c) => c.id)))
+    // 存回时内置卡按注册表序归一；插件控件 id 不在 CARD_REGISTRY 里，原样保留
+    //（不查 widgets 清单 —— 那是异步的，归一化依赖它会漏勾。卸载插件的残留 id 渲染侧过滤，无害）
+    const builtinIds = new Set(CARD_REGISTRY.map((c) => c.id))
+    const ordered = [
+      ...CARD_REGISTRY.filter((c) => wanted.has(c.id)).map((c) => c.id),
+      ...[...wanted].filter((v) => !builtinIds.has(v)),
+    ]
+    void update('dashboardCards', JSON.stringify(ordered))
   }
 
   const markDone = async (id: string) => {
@@ -234,6 +260,31 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
                       <span>{c.label}</span>
                     </button>
                   ))}
+                  {widgets.length > 0 && (
+                    <>
+                      <div className="px-2 pb-1 pt-1.5 text-[10.5px] text-[var(--text-muted)]">插件控件</div>
+                      {widgets.map((w) => (
+                        <button
+                          key={widgetIdOf(w)}
+                          type="button"
+                          onClick={() => toggleCard(widgetIdOf(w))}
+                          title={widgetIdOf(w)}
+                          className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[12.5px] hover:bg-[var(--bg-hover)]"
+                        >
+                          <span
+                            className="grid h-[15px] w-[15px] flex-none place-items-center rounded-[4px] border"
+                            style={shown.has(widgetIdOf(w))
+                              ? { background: 'var(--accent)', borderColor: 'var(--accent)', color: '#fff' }
+                              : { borderColor: 'var(--text-muted)', color: 'transparent' }}
+                          >
+                            <Check size={10} />
+                          </span>
+                          <span className="truncate">{w.title}</span>
+                          <span className="ml-auto flex-none text-[10px] text-[var(--text-disabled)]">插件</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
                 </div>
               </>
             )}
@@ -355,31 +406,24 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
         <div className={`grid grid-cols-3 gap-3 ${compact ? 'mt-4' : 'mt-5'}`}>
           {CARD_REGISTRY.filter((c) => shown.has(c.id)).map((c) => (
             <Card key={c.id} def={c} bg={bg}>
-              <CardBody def={c} snap={snap} range={range} metric={metric} compact={compact}
+              <CardBody def={c} snap={snap} range={range} compact={compact}
                 onToggleHabit={toggleHabit} onOpenNote={openNote} onOpenBook={onOpenBook} />
             </Card>
           ))}
+          {/* 插件控件卡（2026-09-28 底层基建）：沙箱 iframe 复用 PluginFrame（数据桥/主题变量白拿），
+              正文固定 150px —— 比内置卡 min-h 92 高，宽卡（span>1）+ 固定高即「大卡」体感。
+              显示条件 = 用户勾过（setting dashboardCards）∧ 清单在场（插件被卸载/停用即自然消失）。 */}
+          {widgets.filter((w) => shown.has(widgetIdOf(w))).map((w) => {
+            const def: CardDef = { id: widgetIdOf(w), label: w.title, group: 'plugin', Icon: Puzzle, defaultOn: false, span: w.span }
+            return (
+              <Card key={def.id} def={def} bg={bg} span={w.span}>
+                <div className="h-[150px]">
+                  <PluginFrame pluginId={w.pluginId} entry={w.entry} grantedCapabilities={w.granted} />
+                </div>
+              </Card>
+            )
+          })}
         </div>
-
-        {/* 热力图指标切换器（挂在热力图卡片头部更合适，但卡片是通用壳 —— 放这里做指标入口） */}
-        {shown.has('heatmap') && (
-          <div className={`flex items-center gap-2 text-[11px] text-[var(--text-muted)] ${compact ? 'mt-2' : 'mt-3'}`}>
-            热力图指标
-            <div className="flex rounded-[8px] border border-[var(--border-color)] bg-[var(--bg-secondary)] p-0.5">
-              {HEAT_METRICS.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => setMetric(m.id)}
-                  className={`rounded-md px-2 py-0.5 text-[11px] transition-colors ${metric === m.id ? 'bg-[var(--bg-tertiary)] text-[var(--text-primary)]' : 'hover:text-[var(--text-secondary)]'}`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            <span className="flex-1" />
-          </div>
-        )}
 
       </div>
         </div>

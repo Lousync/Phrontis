@@ -1597,7 +1597,19 @@ cbz 排除的**执行语义原样保留**（派生值对 cbz 仍为 `null`），
 
 ---
 
-## 登记格式（后续条目照此写）
+## [x] B-27 右栏工具箱点工具 → 中间标签页出现但**全空白**，0 报错（2026-09-28，P1；用户实机反馈；**当日已修，改动未提交**：`e2dad19` 引入的「鸡生蛋」死门）
+
+**现象**：冷启动后从右栏「工具箱」区点任意内置工具（密码本 / 网址导航 / …），页面条出现 `tool:<id>` 标签且激活，但中间区整片空白；console.error = 0、无运行时异常（纯渲染门死锁，无任何报错线索）。
+**定位**：`src/App.tsx:1629` 工具标签宿主容器门。
+**根因**：门写成了 `{mountedToolTabs.current.size > 0 && (<div>…{activeToolTab && renderToolMounted(activeToolTab, true)}…</div>)}` —— 容器块被 **ref 空集**拦住 → `renderToolMounted` 永远不被调用 → `mountedToolTabs` 永远填不上（ref 变更也不触发重渲）。`renderToolMounted` 无其他调用点 ⇒ 冷启动后第一次开工具必空白。引入者 = `e2dad19`（分区精细化重构把旧结构里无条件的 `activeToolTab && renderToolMounted(...)` 包进了 ref 门）。
+**修复方向**：门条件必须含 `activeToolTab` 本身：`{(activeToolTab || mountedToolTabs.current.size > 0) && …}`。
+**验证**：探针实例连 dev server 逐一点击六工具（密码本/网址导航/数据导出/习惯打卡/网页剪藏/PDF 工具箱），全部渲染出真实内容区（647×735），console.error = 0 / exceptionThrown = 0；修复前后截图 `tmp/probe-tb-*.png`。tsc web 0 错。
+
+### ★★ B-27 排查中顺带发现（未修，候选新条目）
+
+`closeTab`（`src/App.tsx:906`）**不清理 `mountedToolTabs.current`** —— 工具标签关闭后组件永远 display:none 常驻
+（密码本解锁态、各工具的 IPC 监听器一直活着），每关一支泄漏一支。属保活语义实现缺口，非本轮回归；
+修复方向 = `closeTab` 里 `if (isTool) mountedToolTabs.current.delete(tab)`（关闭即卸载，符合「关=销毁」直觉）。
 
 ```
 ## B-n <一句话现象>（YYYY-MM-DD，P0/P1/P2/P3）

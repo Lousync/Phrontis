@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX } from 'lucide-react'
+import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe } from 'lucide-react'
 import type { BookKind, KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
@@ -97,14 +97,14 @@ interface Props {
 }
 
 /** 切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
- *  图标 = 原型 v16 的彩色 emoji 语言；当前只渲染 RIGHT_PANEL_WIDGET_IDS 内的项（仅番茄钟），
- *  其余 4 项保留在此表里供恢复时直接引用 */
-const WIDGET_META: Record<string, { icon: string; label: string }> = {
-  task: { icon: '✅', label: '今日任务' },
-  habit: { icon: '🔔', label: '今日打卡' },
-  pomo: { icon: '⏰', label: '番茄钟' },
-  password: { icon: '🔑', label: '强密码生成器' },
-  nav: { icon: '🌐', label: '网址导航' },
+ *  图标 = 素色 lucide 线性图标（2026-09-28 用户反馈：弃彩色 emoji，与上方工具入口区同语言）；
+ *  当前只渲染 RIGHT_PANEL_WIDGET_IDS 内的项（番茄钟 + 网址导航），其余 3 项保留供恢复时直接引用 */
+const WIDGET_META: Record<string, { Icon: typeof Timer; label: string }> = {
+  task: { Icon: ListTodo, label: '今日任务' },
+  habit: { Icon: CalendarCheck2, label: '今日打卡' },
+  pomo: { Icon: Timer, label: '番茄钟' },
+  password: { Icon: KeyRound, label: '强密码生成器' },
+  nav: { Icon: Globe, label: '网址导航' },
 }
 
 export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk }: Props) {
@@ -347,13 +347,13 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                       onDrop={(e) => { e.preventDefault(); handleWidgetDrop(id) }}
                       onClick={() => setActiveWidget(id)}
                       title={meta.label}
-                      className={`flex h-8 w-8 items-center justify-center rounded-md text-[17px] leading-none transition-colors ${
+                      className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
                         isActive
-                          ? 'bg-[var(--bg-hover)] shadow-[inset_0_0_0_1px_var(--border-color)]'
-                          : 'hover:bg-[var(--bg-hover)]/60'
+                          ? 'bg-[var(--bg-hover)] text-[var(--accent)] shadow-[inset_0_0_0_1px_var(--border-color)]'
+                          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]/60'
                       } ${dragOverId === id ? 'ring-1 ring-[var(--accent)]' : ''} ${dragId === id ? 'opacity-40' : ''}`}
                     >
-                      {meta.icon}
+                      <meta.Icon size={15} strokeWidth={1.8} />
                     </button>
                   )
                 })}
@@ -370,8 +370,10 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                 </div>
               </div>
 
-              {/* 简略视图：吃满下段剩余、内容垂直居中（m-auto：上下留白均匀，超高归零顶部起滚不被裁）；
-                  DayPanel 系控件脱离中 → 「已在桌面」互斥条目 */}
+              {/* 简略视图：吃满下段剩余。垂直对齐按控件形态分两档（2026-09-28 用户截图反馈）：
+                  番茄钟 = 圆环计时器，居中（m-auto）好看；列表/表单型控件（任务/打卡/密码/导航）
+                  居中会把一两条内容悬在半空、上方大片留白 → 一律贴顶（pt-1 起排）。
+                  超高归零顶部起滚不被裁；DayPanel 系控件脱离中 → 「已在桌面」互斥条目 */}
               <div data-wb="widgetBrief" className="kb-view-fade flex min-h-0 flex-1 flex-col overflow-y-auto px-2.5 pb-2.5 pt-1">
                 {effectiveWidget == null ? (
                   <div className="m-auto text-[11.5px] text-[var(--text-muted)]">小控件均已隐藏，点击上方 ⋯ 恢复</div>
@@ -387,12 +389,12 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                     <span className="text-[10.5px]">点击收回右栏</span>
                   </button>
                 ) : (
-                  <div className="m-auto w-full">
+                  <div className={effectiveWidget === 'pomo' ? 'm-auto w-full' : 'w-full'}>
                     {effectiveWidget === 'task' && <TaskWidget onOpenSchedule={onOpenSchedule} />}
                     {effectiveWidget === 'habit' && <HabitWidget />}
                     {effectiveWidget === 'pomo' && <PomoWidget frameless />}
                     {effectiveWidget === 'password' && <PasswordWidget />}
-                    {effectiveWidget === 'nav' && <NavWidget />}
+                    {effectiveWidget === 'nav' && <NavWidget favoritesOnly />}
                   </div>
                 )}
               </div>
@@ -459,7 +461,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
             return (
               <label key={id} className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[6px] text-[12px] hover:bg-[var(--bg-hover)]">
                 <input type="checkbox" data-ws-widget-id={id} defaultChecked={!layout.widgetsHidden.includes(id)} className="accent-[var(--accent)]" />
-                <span className="shrink-0 text-[13px] leading-none">{meta.icon}</span>
+                <meta.Icon size={12} className="shrink-0 text-[var(--text-muted)]" />
                 <span className="min-w-0 flex-1 truncate">{meta.label}</span>
               </label>
             )

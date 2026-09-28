@@ -3,13 +3,13 @@ import { createPortal } from 'react-dom'
 import {
   Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, House, Lock,
   LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, Clipboard, ChevronRight,
-  LayoutGrid,
+  LayoutGrid, Plus,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { ConfirmDialog } from '../shared'
 import { FileIcon } from '../shared/FileIcon'
 import { useSettings } from '../../lib/SettingsContext'
-import { workspaceGetCurrent, workspaceListDir, workspaceRename, workspaceTrash } from '../../lib/ipc'
+import { workspaceCreateFile, workspaceGetCurrent, workspaceListDir, workspaceRename, workspaceTrash } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { recordFileOp } from '../../lib/fileOpHistory'
 import { useDataChanged } from '../../lib/dataChanged'
@@ -91,7 +91,7 @@ interface Props {
   onToggleLock: () => void
   onToggleTreeMode: () => void
   /** 总览/树模式的散文件点击 → 编辑区打开该文件 */
-  onOpenLooseFile: (relPath: string) => void
+  onOpenLooseFile: (relPath: string, opts?: { startEdit?: boolean }) => void
   /** 插件书签点击（tab 型 action 直开标签） */
   onPluginBookmark: (tab: TabName) => void
   /** 搜索态（v3.4.0 反馈轮：顶栏搜索框删除，全局搜索搬进左栏；瞬态不持久化） */
@@ -212,6 +212,19 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
     await refreshRoot()
     showToast({ type: 'info', message: `已移入回收站：${file}` })
   }, [refreshRoot])
+
+  // 快速草稿（2026-09-28）：零散文件区头部 + 号 → 仓库顶层自动建「草稿.md」（重名主进程自动加 (N) 后缀）
+  // 并直接在编辑器打开——一键进入写作，命名交给后续右键重命名。无 frontmatter id = 自动身份草稿，
+  // 首存时编辑器写回真 UUID（身份统一口径），不会产生「不显示的死文件」。
+  // startEdit = 打开即编辑态（快速草稿专用；普通打开仍阅读优先）。
+  const handleCreateDraft = useCallback(async () => {
+    const root = rootIdRef.current
+    if (!root) { showToast({ type: 'error', message: '未打开仓库' }); return }
+    const res = await workspaceCreateFile(root, '草稿.md')
+    if (!res.ok) { showToast({ type: 'error', message: res.error || '创建失败' }); return }
+    await refreshRoot()
+    onOpenLooseFile(res.relPath, { startEdit: true })
+  }, [onOpenLooseFile, refreshRoot])
   // 菜单 Esc / 外部点击关闭（同 editor 树右键菜单口径）
   useEffect(() => {
     if (!looseMenu) return
@@ -416,17 +429,26 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                 </button>
               ))}
             </div>
-            {loose.length > 0 && (
-              <div className="flex flex-col gap-0.5 border-t border-[var(--border-color)] p-1.5">
-                <div className="px-2.5 pb-0.5 pt-1 text-[10.5px] text-[var(--text-muted)]">零散文件</div>
-                {loose.map((f) => (
-                  <button key={f} onClick={() => onOpenLooseFile(f)} onContextMenu={(e) => openLooseMenu(e, f)} className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}>
-                    <FileIcon ext={f.includes('.') ? f.split('.').pop()!.toLowerCase() : ''} size={13} />
-                    {f}
-                  </button>
-                ))}
+            {/* 零散文件区（2026-09-28 起恒显示：头部 + 号是快速草稿入口，空仓库也要能一键创建） */}
+            <div className="flex flex-col gap-0.5 border-t border-[var(--border-color)] p-1.5">
+              <div className="flex items-center gap-1 pl-2.5 pr-1 pt-1">
+                <span className="text-[10.5px] text-[var(--text-muted)]">零散文件</span>
+                <button
+                  onClick={() => { void handleCreateDraft() }}
+                  title="在仓库顶层新建草稿并打开（重名自动加后缀）"
+                  data-wb="loosePlus"
+                  className="ml-auto rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <Plus size={12} />
+                </button>
               </div>
-            )}
+              {loose.map((f) => (
+                <button key={f} onClick={() => onOpenLooseFile(f)} onContextMenu={(e) => openLooseMenu(e, f)} className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}>
+                  <FileIcon ext={f.includes('.') ? f.split('.').pop()!.toLowerCase() : ''} size={13} />
+                  {f}
+                </button>
+              ))}
+            </div>
             {/* 软件文件折叠区（N-3 拍板 A）：形态照抄 VaultTree 底部折叠节（mt-auto 沉底 + kb-chevron +
                 kb-collapse + 计数），数据 = softEntries（softNames 命中项，refreshRoot 另存不再丢弃）。
                 目录行不响应点击（总览态无树展开；要看内容切文件树模式），文件行点开 = 与零散文件同一打开通道 */}

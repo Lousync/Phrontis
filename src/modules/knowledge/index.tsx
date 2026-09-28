@@ -68,7 +68,7 @@ interface PageInfo {
   fileType: string
 }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onRequestCloseTab, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onRequestCloseTab?: () => void; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number } | null; onPendingRelConsumed?: () => void }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onRequestCloseTab, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onRequestCloseTab?: () => void; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -857,8 +857,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   /** 按 relPath 打开（统一通道，Phase 2 批次 2）：树点击与 App 的 pendingRelPath 转发共用——
    *  知识页走页签；无 id md/txt/PDF/代码 → draft 页签（PDF 内嵌阅读器、源码走 Monaco）；不再跳编辑器模块。
    *  反馈 8（2026-09-27）：冷挂载时 allPages 是空的（IPC 异步装载），真实页面会在这里被误判成
-   *  「找不到 → 落 draft」。故 miss 时补拉一次全量再找，仍找不到（真·无 id 文件）才落 draft。 */
-  const openByRelPath = useCallback(async (relPath: string) => {
+   *  「找不到 → 落 draft」。故 miss 时补拉一次全量再找，仍找不到（真·无 id 文件）才落 draft。
+   *  startInEdit（2026-09-28 快速草稿）：该页首载直接进编辑态（PageEditor 默认阅读优先）。 */
+  const startInEditRef = useRef<string | null>(null)
+  const openByRelPath = useCallback(async (relPath: string, opts?: { startInEdit?: boolean }) => {
     let page = allPages.find(p => p.path === relPath)
     if (!page) {
       try {
@@ -867,6 +869,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         page = fresh.find(p => p.path === relPath)
       } catch { /* 补拉失败 → 落 draft 兜底 */ }
     }
+    if (opts?.startInEdit) startInEditRef.current = page ? page.id : `draft:${relPath}`
     if (page) { void handleOpenPage(page.id); return }
     const name = relPath.slice(relPath.lastIndexOf('/') + 1)
     const dot = name.lastIndexOf('.')
@@ -887,7 +890,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   useEffect(() => {
     if (!pendingRel) return
     onPendingRelConsumed?.() // 先消费再打开：打开是 async，避免重渲染后 effect 重跑造成二次打开
-    void openByRelPath(pendingRel.relPath)
+    void openByRelPath(pendingRel.relPath, { startInEdit: pendingRel.startEdit === true })
     // 刻意只依赖 pendingRel：openByRelPath 身份随 allPages 变化会重跑本 effect，但 pendingRel 已被
     // 消费清空，重跑会在 !pendingRel 早退，不会二次打开。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2245,6 +2248,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 vaultMode={true} // R6 D9 后恒 vault
                 onOpenInEditor={() => handleOpenInEditor(activePageId)}
                 draftRelPath={activePageId.startsWith('draft:') ? activePageId.slice(6) : undefined}
+                startInEdit={startInEditRef.current === activePageId}
                 isActive={isActive}
               />
             </Suspense>

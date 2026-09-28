@@ -196,6 +196,7 @@ const api = {
   pluginUninstall: (id: string) => ipcRenderer.invoke('plugin:uninstall', id),
   pluginGetContribution: (id: string, key: string) => ipcRenderer.invoke('plugin:getContribution', id, key),
   pluginListViews: (slot: unknown) => ipcRenderer.invoke('plugin:listViews', slot),
+  pluginListDashboardWidgets: () => ipcRenderer.invoke('plugin:listDashboardWidgets'),
   pluginListCommands: () => ipcRenderer.invoke('plugin:listCommands'),
   pluginListRenderers: () => ipcRenderer.invoke('plugin:listRenderers'),
   pluginGetSettingsSchema: (id: string) => ipcRenderer.invoke('plugin:getSettingsSchema', id),

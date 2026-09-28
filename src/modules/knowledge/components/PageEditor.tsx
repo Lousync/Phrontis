@@ -56,13 +56,16 @@ interface Props {
    *  走同一套脏状态机与 vault 写路径；无 frontmatter id 的文件在**首次保存时自动补 id**
    *  （ensureFrontmatterId，2026-09-20 身份统一：门槛消失、用户零操作） */
   draftRelPath?: string
+  /** 该页本次打开直接进编辑态（2026-09-28 快速草稿：+ 号建 草稿.md 后打开即写）；
+   *  只影响首载那次（loadPage 的 !isReload 分支），不影响该页后续的阅读/编辑切换 */
+  startInEdit?: boolean
   /** 模块激活态（v3.4.0 修复）：工具栏 portal 到外壳右上角常驻浮层 `#editor-toolbar-slot`，
    *  模块被 display:none 保活时 portal 不会跟着藏——不加这道门槛，铅笔/保存点会飘在当前模块头上
    *  （与编辑器模块 actionsPill 的 isActive 门槛同款，editor/index.tsx 同注释）。 */
   isActive?: boolean
 }
 
-export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, isActive = true }: Props) {
+export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, isActive = true }: Props) {
   const { s, update } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
@@ -74,6 +77,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   // 知识库以阅读优先:md/txt 页面打开即预览(右上角眼睛或 Ctrl+E / Ctrl+/ 切回编辑;vault 模式就地保存)
   const [preview, setPreview] = useState(true)
+  // startInEdit 的 ref 镜像：loadPage（useCallback 依赖不含该 prop）在 effect 里读最新值
+  const startInEditRef = useRef(startInEdit)
+  startInEditRef.current = startInEdit
   // 编辑器保活（2026-09-20 反馈「切换要迅速」）：首入编辑态才挂 MonacoPane，此后阅读态 display:none
   // 藏起不卸载——Monaco 编辑器创建是切换延迟的大头（~200ms），保活后二次切换零重挂、即时出。
   // reveal 时 bump layoutKey（display:none 期间容器尺寸为 0，需要显式 layout()）。
@@ -313,7 +319,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       savedContentRef.current = body; savedTitleRef.current = title; isDirtyRef.current = false
       savedAnnotationRef.current = ''
       onTitleChange?.(title); onContentChange?.(body)
-      if (!isReload) setPreview(ext === 'md' || ext === 'txt')
+      // startInEdit（快速草稿）：本次打开直接落编辑态
+      if (!isReload) setPreview(startInEditRef.current ? false : (ext === 'md' || ext === 'txt'))
     } catch (e) {
       console.error('[PageEditor] draft load failed:', e)
       showToast({ type: 'error', message: '草稿读取失败' })
@@ -337,9 +344,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           onTitleChange?.(p.title)
           // 种子 liveContent(大纲/导出依赖);列表已瘦身,活动页内容以编辑器装载为准
           onContentChange?.(p.contentMd || '')
-          // 非 md/txt 类型(pdf/代码)强制编辑视图;md/txt 保持阅读优先（重读时保持当前态）
+          // 非 md/txt 类型(pdf/代码)强制编辑视图;md/txt 保持阅读优先（重读时保持当前态）。
+          // startInEdit（快速草稿）：本次打开直接落编辑态（该标记只对「建完即开」那一次为 true）
           const ft = (p.fileType || 'md').toLowerCase()
-          if (!isReload) setPreview(ft === 'md' || ft === '' || ft === 'txt')
+          if (!isReload) setPreview(startInEditRef.current ? false : (ft === 'md' || ft === '' || ft === 'txt'))
           // 就地编辑基线（vault 写路径）：可编辑文本类缓存 frontmatter 前缀 + mtime；其余类型清零
           const vaultEditable = ft === 'md' || ft === 'txt' || (ft !== '' && ft !== 'pdf' && ft !== 'xmind' && ft !== 'html')
           if (vaultModeRef.current && p.path && vaultEditable && p.entryKind !== 'file') {

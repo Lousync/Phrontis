@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
-import { ArrowLeft, Globe, Plus, Search, ExternalLink, Pencil, Trash2, Copy, Download, Upload, Check } from 'lucide-react'
+import { ArrowLeft, Globe, Plus, Search, ExternalLink, Pencil, Trash2, Copy, Download, Upload, Check, Star } from 'lucide-react'
 import type { BookmarkCategory, BookmarkItem } from '../../../../types'
 import {
   bookmarkGetAll, createBookmarkItem, deleteBookmarkItem,
-  deleteBookmarkCategory, openBookmarkUrl, pickBookmarkImportFile,
+  deleteBookmarkCategory, openBookmarkUrl, pickBookmarkImportFile, updateBookmarkItem,
 } from '../../../../lib/ipc'
 import { showToast } from '../../../../lib/toast'
 import { notifyDataChanged } from '../../../../lib/dataChanged'
@@ -78,6 +78,19 @@ export function BookmarkNav({ onBack, sidebarEl, sidebarHosted }: Props) {
       setCopiedId(b.id)
       window.setTimeout(() => setCopiedId(null), 1500)
     }).catch(() => {})
+  }, [])
+
+  // 星标收藏（2026-09-28）：乐观更新 + 落盘 + 广播（右栏快捷导航只显示 starred 条目）
+  const handleToggleStar = useCallback(async (b: BookmarkItem) => {
+    const next = !b.starred
+    setBookmarks(cur => cur.map(x => (x.id === b.id ? { ...x, starred: next } : x)))
+    try {
+      await updateBookmarkItem(b.id, { starred: next })
+      notifyDataChanged('bookmark')
+    } catch (e) {
+      console.error('星标失败', e)
+      setBookmarks(cur => cur.map(x => (x.id === b.id ? { ...x, starred: !next } : x)))
+    }
   }, [])
 
   // 删除确认(应用内 ConfirmDialog — Electron 原生 confirm 会破坏键盘焦点,禁止使用)
@@ -321,7 +334,10 @@ export function BookmarkNav({ onBack, sidebarEl, sidebarHosted }: Props) {
                           {(domain[0] ?? '#').toUpperCase()}
                         </span>
                         <div className="min-w-0">
-                          <div className="text-[13px] font-medium text-[var(--text-primary)] truncate">{b.title}</div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">{b.title}</span>
+                            {b.starred && <Star size={11} className="shrink-0 text-[var(--warning, #d97706)]" fill="currentColor" aria-label="已收藏" />}
+                          </div>
                           <div className="text-[11px] text-[var(--text-muted)] truncate">{domain}</div>
                         </div>
                       </div>
@@ -334,6 +350,10 @@ export function BookmarkNav({ onBack, sidebarEl, sidebarHosted }: Props) {
                         <button onClick={() => void handleOpen(b)} title="打开网页"
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] transition-colors">
                           <ExternalLink size={13} />
+                        </button>
+                        <button onClick={() => void handleToggleStar(b)} title={b.starred ? '取消收藏' : '收藏'}
+                          className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] transition-colors">
+                          <Star size={13} className={b.starred ? 'text-[var(--warning, #d97706)]' : ''} fill={b.starred ? 'currentColor' : 'none'} />
                         </button>
                         <button onClick={() => handleCopyLink(b)} title="复制链接"
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] transition-colors">

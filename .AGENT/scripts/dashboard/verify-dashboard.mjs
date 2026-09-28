@@ -285,6 +285,7 @@ eq('A25 fmtMinutes 零', fmtMinutes(0), '没有记录')
   const repo = stripComments(read('electron/database/repositories/dashboardRepo.ts'))
   const types = read('src/types/index.ts')
   const cards = read('src/modules/dashboard/cards.tsx')
+  const srcIndex = read('src/modules/dashboard/index.tsx')
   const heat = read('src/modules/dashboard/Heatmap.tsx')
 
   eq('F1 fmtMinutes 支持口径参数（专注）', fmtMinutes(45, '专注'), '专注 45 分钟')
@@ -297,8 +298,13 @@ eq('A25 fmtMinutes 零', fmtMinutes(0), '没有记录')
     /const days: Record<string, number> = \{\}/.test(repo) && /pomodoro = \{ days \}/.test(repo))
   ok('F7 聚合有跨度与今日边界（不把全历史拉进快照）', /s\.date >= from && s\.date <= today/.test(repo))
   ok('F8 cards.tsx 占位文案已移除（专注指标真的接上了）', !/还没有接入/.test(cards))
-  ok('F9 focus 分支用 pomodoro.days', /metric === 'focus' \? snap\.pomodoro\.days : snap\.usage\.days/.test(cards))
-  ok('F10 文案口径随指标切换（专注 / 使用）', /'专注' : '使用'/.test(cards) && /unit={unit}/.test(cards))
+  // F9/F10 修订（2026-09-28）：热力图指标切换器已撤（用户拍板只留「使用时长」），
+  // 改断言负向：cards.tsx 不得再有 focus 指标分支 / HEAT_METRICS 切换清单。
+  // pomodoro.days 聚合（F4-F7）保留 —— 数据侧口径不变，仅 UI 消费面收窄。
+  ok('F9 热力图只吃 usage.days（专注时长指标已撤，无 focus 分支）',
+    !/metric === 'focus'/.test(cards) && /snap\.usage\.days/.test(cards))
+  ok('F10 切换清单已拔线（HEAT_METRICS / HeatMetric 不复存在）',
+    !/HEAT_METRICS/.test(cards) && !/HeatMetric/.test(cards) && !/HEAT_METRICS/.test(srcIndex))
   ok('F11 Heatmap 接收 unit 并传入 fmtMinutes', /unit\??:\s*string/.test(heat) && /fmtMinutes\(minutes, unit\)/.test(heat))
 }
 

@@ -10,7 +10,8 @@ import type { ToolInvokeCtx } from './aiTools'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault } from './workspaceManager'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { pomoSessionsAll } from './kbStore/pomoVaultRepo'
-import { getKnowledgeIndex } from './kbStore/knowledgeIndex'
+import { getKnowledgeIndex, getKnowledgeTextIndex } from './kbStore/knowledgeIndex'
+import { getGraphIndex } from './kbStore/graphIndex'
 import { vaultGetPageById, vaultGetCategories, vaultCreatePage } from './kbStore/knowledgeVaultRepo'
 import { searchKnowledge } from './knowledgeSearch'
 import { searchHelp } from './helpService'
@@ -538,6 +539,108 @@ export function registerBuiltinTools(): void {
     }))
   })
 
+  // 1c. builtin.knowledge.graph-topology —— 图谱拓扑体检 + 连线建议（DP v3.4.0 第 9 项，2026-09-28）。
+  //     只读、ondemand（铁律 16）。数据全来自 getGraphIndex() 现成字段（unresolved/degree/edges），
+  //     语义建议复用 searchKnowledge（与编辑器「相关笔记」同查询口径，knowledgeSearch.ts similarPages）。
+  registerTool({
+    name: 'builtin.knowledge.graph-topology',
+    title: '图谱拓扑体检与连线建议',
+    description: '知识库链接拓扑。overview：列出断链（[[引用]]解析不到目标页，附可能想链接的现页）、孤岛页（零连线）、枢纽页，供 AI 梳理链接与清理数据债；suggest：对指定页返回语义最相近的候选连线目标（配好嵌入模型效果更好），确认后用 vault.edit 落成 [[双链]]',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['overview', 'suggest'], description: 'overview=图谱体检（默认）；suggest=为一个页面找候选连线' },
+        page: { type: 'string', description: 'suggest 必填：页面相对路径或精确标题' },
+        limit: { type: 'number', description: 'suggest 候选数, 默认6' },
+      },
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'knowledge',
+  }, async args => {
+    const g = getGraphIndex()
+    const pages = g.nodes.filter(n => n.kind === 'page')
+    const idToNode = new Map(g.nodes.map(n => [n.id, n] as const))
+    const titleOf = (id: string): string => idToNode.get(id)?.title ?? id
+
+    // ---- suggest：单页连线建议（二档） ----
+    if (str(args.mode, 'overview') === 'suggest') {
+      const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\.md$/i, '').trim()
+      const key = norm(str(args.page))
+      if (!key) throw new Error('suggest 模式必填 page（页面相对路径或精确标题）')
+      const page = pages.find(n => norm(n.path) === key)
+        ?? pages.find(n => n.title === key)
+        ?? pages.find(n => n.title.toLowerCase() === key.toLowerCase())
+      if (!page) throw new Error(`未找到页面: ${key}（可先 builtin.knowledge.search 确认标题）`)
+      const limit = clamp(Math.floor(num(args.limit, 6)), 1, 12)
+      // 已有连线的页面不再推荐（页-页边；共享标签不算连线）
+      const linked = new Set<string>()
+      for (const e of g.edges) {
+        const other = e.s === page.id ? e.t : (e.t === page.id ? e.s : null)
+        if (other && idToNode.get(other)?.kind === 'page') linked.add(other)
+      }
+      // 查询向量口径与「相关笔记」一致：标题 + 正文前 500 字（knowledgeSearch.ts:170-171）
+      const body = (getKnowledgeTextIndex()[page.id] ?? '').replace(/\s+/g, ' ').slice(0, 500)
+      try {
+        const r = await searchKnowledge({
+          query: `${page.title} ${body}`.trim(),
+          topK: limit,
+          filters: { excludePageIds: [page.id, ...linked] },
+        })
+        return {
+          page: { id: page.id, title: page.title, path: page.path },
+          semantic: r.semantic,
+          candidates: r.hits.map(h => ({
+            pageId: h.pageId, title: h.title, path: h.path,
+            excerpt: (h.excerpt || h.title).slice(0, 120), score: h.score, via: h.via,
+          })),
+          note: '候选已排除与该页已有连线的页面；用户确认后用 builtin.vault.edit 写入 [[标题]] 即成链',
+        }
+      } catch (err) {
+        throw new Error(`连线建议失败（仓库未就绪？）：${String((err as Error)?.message ?? err)}`)
+      }
+    }
+
+    // ---- overview：图谱体检（一档） ----
+    const CAP = 40        // 断链 / 孤岛清单上限（MAX_TOOL_RESULT_CHARS 约束下的口径）
+    const HINT_CAP = 10   // 断链「可能想链接」提示只给前 N 条（每条一次 keyword 检索，尽力而为）
+    const HUB_CAP = 10
+    const orphanRows = pages.filter(n => n.degree === 0)
+    const unresolved = g.unresolved.slice(0, CAP).map(u => ({
+      name: u.name,
+      refs: u.refs.slice(0, 3).map(titleOf),
+      hint: undefined as string | undefined, // 前 HINT_CAP 条由 keyword 检索尽力补上
+    }))
+    for (let i = 0; i < Math.min(HINT_CAP, unresolved.length); i++) {
+      try {
+        const r = await searchKnowledge({ query: unresolved[i].name, topK: 1, mode: 'keyword' })
+        const h = r.hits[0]
+        if (h) unresolved[i].hint = `可能想链接：${h.title}（${h.path}）`
+      } catch { /* hint 是加分项，失败不拦概览 */ }
+    }
+    const hubs = pages.slice().sort((a, b) => b.degree - a.degree).slice(0, HUB_CAP)
+      .map(n => ({ title: n.title, path: n.path, degree: n.degree }))
+    const notes: string[] = []
+    if (g.unresolved.length > CAP) notes.push(`断链仅列前 ${CAP} 条（共 ${g.unresolved.length} 条）`)
+    if (orphanRows.length > CAP) notes.push(`孤岛页仅列前 ${CAP} 条（共 ${orphanRows.length} 页）`)
+    if (pages.length === 0) notes.push('当前仓库没有知识页面（或图谱索引未建）')
+    return {
+      stats: {
+        pages: pages.length,
+        links: g.edges.length,
+        tags: g.nodes.filter(n => n.kind === 'tag').length,
+        unresolved: g.unresolved.length,
+        orphans: orphanRows.length,
+      },
+      unresolved,
+      orphans: orphanRows.slice(0, CAP).map(n => ({ title: n.title, path: n.path })),
+      hubs,
+      ...(notes.length ? { note: notes.join('；') } : {}),
+    }
+  })
+
   // 2. builtin.knowledge.read 已退役（2026-09-09 P2）：vault.read(path|id) 收编（id=knowledge.search 返回的页面 id）
 
   // 3. builtin.habits.list 已退役（2026-09-09 P1）：并入 habits.stats(mode='list')
@@ -1011,7 +1114,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft）默认不在工具列表中。需要执行写操作或检索博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft）默认不在工具列表中。需要执行写操作或检索博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {

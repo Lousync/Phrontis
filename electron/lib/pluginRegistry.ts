@@ -68,7 +68,7 @@ const ENTRY_RE = /^[\w][\w.-]{0,64}\.html$/
 /** code 插件入口：单文件 .js/.mjs（Worker 加载）；拒绝目录/嵌套，防路径穿越 */
 const CODE_ENTRY_RE = /^[\w][\w.-]{0,64}\.(js|mjs)$/
 const ICON_RE = /^[\w][\w.-]{0,64}\.(svg|png|jpg|jpeg|webp|gif)$/i
-const KNOWN_CONTRIBUTIONS = ['blogTemplates', 'theme', 'habitPresets', 'bookmarkPresets', 'pomodoroPresets', 'helpDocs', 'tools', 'skills', 'automationRule', 'knowledgePages', 'sidebarIcons', 'deleteFx', 'tables', 'views', 'commands', 'settings', 'renderers']
+const KNOWN_CONTRIBUTIONS = ['blogTemplates', 'theme', 'habitPresets', 'bookmarkPresets', 'pomodoroPresets', 'helpDocs', 'tools', 'skills', 'automationRule', 'knowledgePages', 'sidebarIcons', 'deleteFx', 'tables', 'views', 'dashboardWidgets', 'commands', 'settings', 'renderers']
 /** Skill 变量名规则（提示词 {{var}} 占位符） */
 const SKILL_VAR_RE = /^[a-zA-Z_][a-zA-Z0-9_]{0,30}$/
 /** Skill 声明依赖的工具名（命名空间规则与 ToolRegistry 一致，一期仅展示不校验执行权） */
@@ -297,6 +297,21 @@ function validateManifest(m: unknown, opts?: { legacy?: boolean }): { manifest: 
           if (typeof v.slot !== 'string' || !/^[a-z][a-z0-9.]{0,40}$/.test(v.slot)) return { error: 'views: slot 非法(如 knowledge.sidebar)' }
           if (typeof v.title !== 'string' || !v.title.trim() || v.title.length > 20) return { error: 'views: title 缺失或过长(≤20)' }
           if (v.mode !== undefined && !['fullscreen', 'panel'].includes(v.mode as string)) return { error: 'views: mode 仅支持 fullscreen / panel' }
+        }
+      }
+      if (key === 'dashboardWidgets') {
+        // 看板控件贡献（2026-09-28）：仅 UI 插件；全局控件 id = `<pluginId>:<wid>`（渲染层拼，与面板编辑器拍板口径一致）
+        if (raw.type !== 'ui') return { error: 'dashboardWidgets 贡献仅 UI 插件(type: ui)可声明' }
+        const arr = (raw.contributes as Record<string, unknown>).dashboardWidgets
+        if (!Array.isArray(arr) || arr.length === 0 || arr.length > 10) return { error: 'dashboardWidgets 需为 1-10 个控件的数组' }
+        const wids = new Set<string>()
+        for (const w of arr as Record<string, unknown>[]) {
+          if (!w || typeof w !== 'object') return { error: 'dashboardWidgets: 控件条目非法' }
+          if (typeof w.wid !== 'string' || !/^[a-z0-9][a-z0-9-]{0,39}$/.test(w.wid)) return { error: 'dashboardWidgets: wid 非法（小写字母/数字/连字符开头，≤40）' }
+          if (wids.has(w.wid)) return { error: `dashboardWidgets: 重复的 wid ${w.wid}` }
+          wids.add(w.wid)
+          if (typeof w.title !== 'string' || !w.title.trim() || w.title.length > 20) return { error: 'dashboardWidgets: title 缺失或过长(≤20)' }
+          if (w.span !== undefined && (typeof w.span !== 'number' || !Number.isInteger(w.span) || w.span < 1 || w.span > 3)) return { error: 'dashboardWidgets: span 仅支持 1-3（列跨度）' }
         }
       }
       if (key === 'commands') {
@@ -955,6 +970,37 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
       } catch { /* 单个插件读取失败不影响其他插件 */ }
     }
     return views
+  })
+
+  /** 列出所有已启用插件声明的看板控件（2026-09-28）：仅 UI 插件；控件全局 id 由渲染层拼 `<pluginId>:<wid>` */
+  ipcMain.handle('plugin:listDashboardWidgets', () => {
+    const idx = readIndex()
+    const out: Array<{ pluginId: string; name: string; wid: string; title: string; span: number; entry: string; granted: string[] }> = []
+    for (const [id, entry] of Object.entries(idx)) {
+      if (!entry.enabled) continue
+      const dir = safePathInside(getPluginsRoot(), id)
+      if (!dir || !existsSync(dir)) continue
+      try {
+        const parsed = readManifestAt(dir)
+        if ('error' in parsed) continue
+        const m = parsed.manifest
+        if (m.type !== 'ui' || !m.entry) continue
+        const ws = (m.contributes?.dashboardWidgets ?? []) as Array<Record<string, unknown>>
+        for (const w of ws) {
+          if (typeof w?.wid !== 'string') continue
+          out.push({
+            pluginId: id,
+            name: m.name,
+            wid: w.wid,
+            title: String(w.title || m.name),
+            span: typeof w.span === 'number' && w.span >= 1 && w.span <= 3 ? w.span : 1,
+            entry: m.entry,
+            granted: entry.grantedCapabilities || [],
+          })
+        }
+      } catch { /* 单个插件读取失败不影响其他插件 */ }
+    }
+    return out
   })
 
   /** 列出所有已启用插件声明的命令（plugin-phase1-design C3）：附首个 view 槽位供宿主导航激活 */

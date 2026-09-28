@@ -562,7 +562,7 @@ export default function App() {
   // 同步派发 kb-open-note-rel 事件，而知识库模块**冷挂载前没有监听器**，事件必丢（表象：看板
   // 「最近编辑」首跳只切 Tab、不开页、无返回 chip；第二次点击模块已保活才正常）。现在真正接线：
   // handler 投递 {relPath, seq}，KnowledgeModule 挂载后经 prop 消费。seq 让同路径连续跳可重触发。
-  const [pendingOpenRel, setPendingOpenRel] = useState<{ relPath: string; seq: number } | null>(null)
+  const [pendingOpenRel, setPendingOpenRel] = useState<{ relPath: string; seq: number; startEdit?: boolean } | null>(null)
   const pendingOpenRelSeqRef = useRef(0)
   const consumePendingOpenRel = useCallback(() => setPendingOpenRel(null), [])
   // UI 优化条目6：跳转来源记录——kb-open-note 带 from（如 aiTeaching），编辑器出「← 返回 X」chip；
@@ -573,7 +573,7 @@ export default function App() {
   const [noteJumpFrom, setNoteJumpFrom] = useState<TabName | null>(null)
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent).detail as { relPath?: string; from?: TabName } | undefined
+      const detail = (e as CustomEvent).detail as { relPath?: string; from?: TabName; startEdit?: boolean } | undefined
       setActiveTab('knowledge')
       // from 收口：只认模块清单内的合法 TabName（'desktop' 等非法值不产生 chip）；
       // from==='knowledge' = 知识库自己派发的（散文件/附件），返回自己毫无意义 → 不记
@@ -581,7 +581,8 @@ export default function App() {
       setNoteJumpFrom(from && isTabName(from) && from !== 'knowledge' ? from : null)
       if (detail?.relPath) {
         pendingOpenRelSeqRef.current += 1
-        setPendingOpenRel({ relPath: detail.relPath, seq: pendingOpenRelSeqRef.current })
+        // startEdit（2026-09-28 快速草稿）：打开即编辑态，只对该次打开生效
+        setPendingOpenRel({ relPath: detail.relPath, seq: pendingOpenRelSeqRef.current, startEdit: detail.startEdit === true })
       }
     }
     window.addEventListener('kb-open-note', handler)
@@ -1100,9 +1101,10 @@ export default function App() {
     if (wbLayout.leftLocked) update('workbenchLayout', JSON.stringify({ ...wbLayout, leftLocked: false }))
   }
 
-  /** 左栏散文件点击 → 知识库文件视图语境打开（Phase 2 批次 2：kb-open-note 统一改道） */
-  const handleOpenLooseFile = (relPath: string) => {
-    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath, from: 'knowledge' } }))
+  /** 左栏散文件点击 → 知识库文件视图语境打开（Phase 2 批次 2：kb-open-note 统一改道）；
+      startEdit = 打开即编辑态（快速草稿专用，2026-09-28） */
+  const handleOpenLooseFile = (relPath: string, opts?: { startEdit?: boolean }) => {
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath, from: 'knowledge', startEdit: opts?.startEdit === true } }))
   }
 
   // 日程打卡侧边栏脱离 toggle（Ctrl+Alt+S）见上方 onDayPanelToggleVisibility 订阅；
@@ -1625,8 +1627,12 @@ export default function App() {
                       </div>
                     ))}
                     {/* 工具标签宿主（批次4，保活）：**绝对定位铺满主栏区域**，不参与上面的 flex 流。
-                        激活的可见，其余已开工具 display:none 常驻（工具内状态如密码本解锁态不丢）。 */}
-                    {mountedToolTabs.current.size > 0 && (
+                        激活的可见，其余已开工具 display:none 常驻（工具内状态如密码本解锁态不丢）。
+                        ⚠️ 门条件必须含 activeToolTab 本身（2026-09-28 实锤）：只看 mountedToolTabs.size
+                        是「鸡生蛋」死门——容器块被 ref 空集拦住 → renderToolMounted 永远不被调用 →
+                        ref 永远空。表象 = 冷启动后第一次点右栏工具入口，标签页出现但中间区全空白
+                        （0 console error，纯渲染门死锁，e2dad19 引入）。 */}
+                    {(activeToolTab || mountedToolTabs.current.size > 0) && (
                       <div
                         className="absolute inset-y-0 left-0 z-20 flex min-h-0 w-full flex-col"
                         style={{ display: activeToolTab ? undefined : 'none' }}

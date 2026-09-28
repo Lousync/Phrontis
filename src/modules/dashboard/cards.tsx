@@ -19,7 +19,7 @@ import { Heatmap } from './Heatmap'
  * ⚠️ `id` 同时是 setting `dashboardCards` 里存的成员名，改名要同步 settings.ts 的默认值。
  */
 
-export type CardGroup = 'today' | 'study' | 'log'
+export type CardGroup = 'today' | 'study' | 'log' | 'plugin'
 
 export interface CardDef {
   id: string
@@ -28,12 +28,15 @@ export interface CardDef {
   Icon: LucideIcon
   /** 首批默认显示的几张（其余可在「编辑卡片」里勾出来） */
   defaultOn: boolean
+  /** 列跨度 1-3（看板卫星区 3 列网格；缺省 1）。插件大卡用，内置卡不设。 */
+  span?: number
 }
 
 export const HUE: Record<CardGroup, string> = {
   today: 'var(--accent)',
   study: 'var(--success-ink)',
   log: 'var(--warning-ink)',
+  plugin: 'var(--accent)',
 }
 
 export const CARD_REGISTRY: readonly CardDef[] = [
@@ -73,12 +76,12 @@ export function cardBgStyle(bg: CardBg, hue: string): CSSProperties {
 
 /* ==================== 卡片外壳 ==================== */
 
-export function Card({ def, bg, children }: { def: CardDef; bg: CardBg; children: ReactNode }) {
+export function Card({ def, bg, span, children }: { def: CardDef; bg: CardBg; span?: number; children: ReactNode }) {
   const hue = HUE[def.group]
   return (
     <section
       className="kb-item-in relative flex flex-col overflow-hidden rounded-[10px] border border-[var(--border-color)] transition-transform duration-150 hover:-translate-y-px"
-      style={{ backgroundColor: 'var(--card-bg)', ...cardBgStyle(bg, hue) }}
+      style={{ backgroundColor: 'var(--card-bg)', ...cardBgStyle(bg, hue), ...(span && span > 1 ? { gridColumn: `span ${span} / span ${span}` } : {}) }}
     >
       {/* 水印：出界一半，读作「角落纹样」而不是一块可见图形 */}
       {bg === 'mark' && (
@@ -242,34 +245,28 @@ function BookCard({ snap, onOpenBook }: { snap: DashboardSnapshot; onOpenBook?: 
   )
 }
 
-function HeatmapCard({ snap, metric }: { snap: DashboardSnapshot; metric: HeatMetric }) {
-  // 两个指标同一张热力图，只换数据源与文案口径
-  const src = metric === 'focus' ? snap.pomodoro.days : snap.usage.days
-  const unit = metric === 'focus' ? '专注' : '使用'
-  const keys = Object.keys(src).sort()
+function HeatmapCard({ snap }: { snap: DashboardSnapshot }) {
+  // 只记录「使用时长」一个指标（2026-09-28 拍板：专注时长切换器撤除，pomodoro 数据仍在快照里备用）
+  const keys = Object.keys(snap.usage.days).sort()
   if (keys.length === 0) {
     return (
       <div className="py-7 text-center text-[12.5px] text-[var(--text-muted)]">
-        {metric === 'focus' ? '还没有专注记录 —— 完成番茄钟后这里会长出格子' : '还没有使用记录'}
+        还没有使用记录
       </div>
     )
   }
-  return <Heatmap days={src} fromKey={keys[0]} toKey={keys[keys.length - 1]} unit={unit} />
+  const days = snap.usage.days
+  return <Heatmap days={days} fromKey={keys[0]} toKey={keys[keys.length - 1]} unit="使用" />
 }
 
 /* ==================== 分发 ==================== */
 
 export type RangeKey = 'today' | 'week' | 'month'
-export type HeatMetric = 'usage' | 'focus'
 
 export const RANGE_LABEL: Record<RangeKey, string> = { today: '今日', week: '本周', month: '本月' }
-export const HEAT_METRICS: ReadonlyArray<{ id: HeatMetric; label: string }> = [
-  { id: 'usage', label: '使用时长' },
-  { id: 'focus', label: '专注时长' },
-]
 
-export function CardBody({ def, snap, range, metric, compact, onToggleHabit, onOpenNote, onOpenBook }: {
-  def: CardDef; snap: DashboardSnapshot; range: RangeKey; metric: HeatMetric
+export function CardBody({ def, snap, range, compact, onToggleHabit, onOpenNote, onOpenBook }: {
+  def: CardDef; snap: DashboardSnapshot; range: RangeKey
   /** 紧凑档（看板方案 §5 反馈 3）：视口 <1000px 时收列表/图表高度，保证默认窗口无滚动条 */
   compact?: boolean
   onToggleHabit?: (habitId: string, pos?: { x: number; y: number }) => void
@@ -281,7 +278,7 @@ export function CardBody({ def, snap, range, metric, compact, onToggleHabit, onO
     case 'usage': return <UsageCard snap={snap} range={range} label={RANGE_LABEL[range]} compact={compact} />
     case 'notes': return <NotesCard snap={snap} compact={compact} onOpenNote={onOpenNote} />
     case 'book': return <BookCard snap={snap} onOpenBook={onOpenBook} />
-    case 'heatmap': return <HeatmapCard snap={snap} metric={metric} />
+    case 'heatmap': return <HeatmapCard snap={snap} />
     default: return null
   }
 }

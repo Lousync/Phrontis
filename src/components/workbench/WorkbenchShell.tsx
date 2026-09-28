@@ -36,7 +36,7 @@ interface Props {
   /** 🔖 书签选显菜单：切换某书签显隐（App 持久化 + 隐藏当前激活书签时退出模块态） */
   onBookmarkVisibility: (key: string) => void
   onBackToOverview: () => void
-  onOpenLooseFile: (relPath: string) => void
+  onOpenLooseFile: (relPath: string, opts?: { startEdit?: boolean }) => void
   onPluginBookmark: (tab: TabName) => void
   /** 整窗模块形态（方案 §2）：回收站/插件市场/动态/设置/aiTeaching/devtools 激活时中间栏独占——
    *  左右栏**连折叠边条一并退场**（开合回调置空 → displayWidth=0，无残留手柄，见 sidesGone） */

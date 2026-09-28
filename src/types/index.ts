@@ -323,6 +323,8 @@ export interface BookmarkItem {
   description: string
   sortOrder: number
   createdAt: string
+  /** 星标收藏（2026-09-28：右栏快捷导航只显示 starred 条目）；缺省 = false */
+  starred?: boolean
 }
 
 // ---- 远程监督 ----
@@ -568,6 +570,18 @@ export interface PluginViewContribution {
   /** fullscreen 覆盖层 / panel 面板 */
   mode: string
   icon?: string
+  granted: string[]
+}
+
+/** 插件看板控件贡献（contributes.dashboardWidgets，2026-09-28）：仅 UI 插件；全局控件 id = `<pluginId>:<wid>` */
+export interface PluginDashboardWidget {
+  pluginId: string
+  /** 插件内控件 id；全局名 = `<pluginId>:<wid>` */
+  wid: string
+  title: string
+  /** 列跨度 1-3（看板卫星区 3 列网格；行跨度首版不做 —— auto-row 网格下需重塑全部内置卡） */
+  span: number
+  entry: string
   granted: string[]
 }
 
@@ -1475,7 +1489,7 @@ export interface DashboardSnapshot {
     /** 'YYYY-MM-DD' → 分钟，缺失日补 0 */
     days: Record<string, number>
   }
-  /** 番茄钟专注分钟（与 usage 同跨度同口径，供热力图「专注时长」指标） */
+  /** 番茄钟专注分钟（与 usage 同跨度同口径）。快照保留备用——热力图 2026-09-28 起只用 usage（专注时长切换器已撤） */
   pomodoro: {
     days: Record<string, number>
   }
@@ -1608,6 +1622,7 @@ export interface ElectronAPI {
   pluginUninstall: (id: string) => Promise<{ success: boolean; message?: string }>
   pluginGetContribution: (id: string, key: string) => Promise<{ ok: boolean; data?: unknown; message?: string }>
   pluginListViews: (slot?: string) => Promise<PluginViewContribution[]>
+  pluginListDashboardWidgets: () => Promise<PluginDashboardWidget[]>
   pluginListCommands: () => Promise<PluginCommandInfo[]>
   pluginListRenderers: () => Promise<PluginRendererInfo[]>
   pluginGetSettingsSchema: (id: string) => Promise<{ schema: PluginSettingItem[] }>
