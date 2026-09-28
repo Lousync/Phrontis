@@ -475,6 +475,13 @@ const api = {
   reorderHabits: (orderedIds: string[]) => ipcRenderer.invoke('habit:reorder', orderedIds),
   // bookmark nav
   bookmarkGetAll: () => ipcRenderer.invoke('bookmark:getAll'),
+  // pet（桌宠，docs/pet-design.md）
+  petGet: () => ipcRenderer.invoke('pet:get'),
+  petFeed: () => ipcRenderer.invoke('pet:feed'),
+  petPetTouch: () => ipcRenderer.invoke('pet:petTouch'),
+  petRename: (name: string) => ipcRenderer.invoke('pet:rename', { name }),
+  petReset: (species: 'dog' | 'cat' | 'cthun') => ipcRenderer.invoke('pet:reset', { species }),
+  petSwitchSpecies: (species: 'dog' | 'cat' | 'cthun') => ipcRenderer.invoke('pet:switchSpecies', { species }),
   createBookmarkCategory: (data: unknown) => ipcRenderer.invoke('bookmark:createCategory', data),
   updateBookmarkCategory: (id: string, data: unknown) => ipcRenderer.invoke('bookmark:updateCategory', id, data),
   deleteBookmarkCategory: (id: string) => ipcRenderer.invoke('bookmark:deleteCategory', id),
@@ -581,6 +588,15 @@ const api = {
     const handler = () => cb()
     ipcRenderer.on('daypanel:toggle-visibility', handler)
     return () => { ipcRenderer.removeListener('daypanel:toggle-visibility', handler) }
+  },
+  // - 主窗口全屏弹窗遮罩开合上报（主窗口渲染层发起 → 主进程广播 main:modal-dim-broadcast）
+  //   dock 是独立 OS 窗口，主窗页内遮罩照不到它 → dock 端据 此 自绘压暗层（lib/mainDimSync.ts）
+  mainModalDimNotify: (dim: boolean) => { ipcRenderer.send('main:modal-dim', { dim }) },
+  // - 订阅弹窗遮罩开合（dock 端消费；主窗口自身忽略）
+  onMainModalDim: (cb: (dim: boolean) => void) => {
+    const handler = (_e: unknown, p: { dim?: boolean }) => cb(!!(p && p.dim))
+    ipcRenderer.on('main:modal-dim-broadcast', handler)
+    return () => { ipcRenderer.removeListener('main:modal-dim-broadcast', handler) }
   },
   // - 小窗内唤起主窗口并切 Tab（tool 可选：目标模块内的子工具深链，如 toolbox 的 bookmark-nav）
   dayPanelOpenInMain: (tab: string, tool?: string) => ipcRenderer.send('daypanel:open-in-main', tab, tool),

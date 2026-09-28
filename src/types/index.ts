@@ -327,6 +327,33 @@ export interface BookmarkItem {
   starred?: boolean
 }
 
+// ---- 桌宠（docs/pet-design.md）----
+export type PetSpecies = 'dog' | 'cat' | 'cthun'
+export interface PetState {
+  version: number
+  /** 当前品种的名字（= names[species]） */
+  name: string
+  /** 每品种各记一个名字（名字跟着宠物走，狗猫各记各的） */
+  names: Record<PetSpecies, string>
+  species: PetSpecies
+  /** 0=幼年 1=成年 */
+  stage: number
+  exp: number
+  hunger: number
+  mood: number
+  ts: number
+}
+export interface PetSnapshot extends PetState {
+  /** 活跃度 0-1（轻联动加成系数） */
+  activity: number
+  usageTodayMinutes: number
+  streak: number
+  notesToday: number
+  aiCallsToday: number
+  /** 本次操作是否跨过升级阈值（仅喂食/摸头返回） */
+  stageUp?: boolean
+}
+
 // ---- 远程监督 ----
 export type SupervisePlatform = 'serverchan' | 'wecom' | 'dingtalk' | 'custom'
 export interface SuperviseConfig {
@@ -573,14 +600,15 @@ export interface PluginViewContribution {
   granted: string[]
 }
 
-/** 插件看板控件贡献（contributes.dashboardWidgets，2026-09-28）：仅 UI 插件；全局控件 id = `<pluginId>:<wid>` */
+/** 插件看板控件贡献（contributes.dashboardWidgets，2026-09-28 栅格化 w/h 版）：仅 UI 插件；全局控件 id = `<pluginId>:<wid>` */
 export interface PluginDashboardWidget {
   pluginId: string
   /** 插件内控件 id；全局名 = `<pluginId>:<wid>` */
   wid: string
   title: string
-  /** 列跨度 1-3（看板卫星区 3 列网格；行跨度首版不做 —— auto-row 网格下需重塑全部内置卡） */
-  span: number
+  /** 格子比例：宽 2-6 列 × 高 1-4 行（缺省 2×2） */
+  w: number
+  h: number
   entry: string
   granted: string[]
 }
@@ -1848,6 +1876,13 @@ export interface ElectronAPI {
   reorderHabits: (orderedIds: string[]) => Promise<void>
   // bookmark nav
   bookmarkGetAll: () => Promise<{ categories: BookmarkCategory[]; bookmarks: BookmarkItem[] }>
+  // pet（桌宠）
+  petGet: () => Promise<PetSnapshot>
+  petFeed: () => Promise<PetSnapshot>
+  petPetTouch: () => Promise<PetSnapshot>
+  petRename: (name: string) => Promise<PetSnapshot>
+  petReset: (species: PetSpecies) => Promise<PetSnapshot>
+  petSwitchSpecies: (species: PetSpecies) => Promise<PetSnapshot>
   createBookmarkCategory: (d: { name: string; color?: string }) => Promise<BookmarkCategory>
   updateBookmarkCategory: (id: string, d: { name?: string; color?: string }) => Promise<BookmarkCategory | null>
   deleteBookmarkCategory: (id: string) => Promise<void>
@@ -1932,6 +1967,9 @@ export interface ElectronAPI {
   onDayPanelToggleVisibility: (cb: () => void) => () => void
   dayPanelOpenInMain: (tab: string, tool?: string) => void
   onMainCommand: (cb: (payload: { type: string; tab?: string; tool?: string }) => void) => () => void
+  /** 主窗口全屏弹窗遮罩开合上报 → dock 小窗跟随压暗（主窗渲染层发起，见 lib/mainDimSync.ts） */
+  mainModalDimNotify: (dim: boolean) => void
+  onMainModalDim: (cb: (dim: boolean) => void) => () => void
   dataNotify: (payload: { scope: string }) => void
   onDataChanged: (cb: (payload: { scope: string }) => void) => () => void
   fillPopupTheme: string

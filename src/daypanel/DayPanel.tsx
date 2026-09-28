@@ -216,6 +216,14 @@ export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widg
     if (isWidget && !widgetInteractive) void window.api?.dayPanelWidgetInteractive?.(true)
   }, [isWidget, widgetInteractive])
 
+  // 主窗口全屏弹窗遮罩 → 本 dock 窗跟随压暗（独立窗口时；内嵌态在主窗内已被遮罩盖住，无需自绘）
+  const [mainDim, setMainDim] = useState(false)
+  useEffect(() => {
+    if (mode !== 'popout') return
+    const off = window.api?.onMainModalDim?.(setMainDim)
+    return () => { off?.() }
+  }, [mode])
+
   // 触碰条：收缩态占满 10px 透明窗口，半透明圆角条 + 待办红点 + 顶部高亮
   if (showTouchStrip) {
     return (
@@ -300,6 +308,12 @@ export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widg
 
   return (
     <div className={containerCls} style={containerStyle} onMouseEnter={onRootMouseEnter} onMouseLeave={onRootMouseLeave}>
+      {/* 主窗弹窗跟随压暗层：在圆角容器内（containerStyle 的 borderRadius + 根 overflow-hidden 裁掉方角），
+          pointer-events-none 保持遮挡期不可交互；opacity 过渡只动透明度（动效铁律） */}
+      <div
+        aria-hidden
+        className={`pointer-events-none absolute inset-0 z-[70] transition-opacity duration-200 ${mainDim ? 'bg-black/35 opacity-100' : 'bg-black/0 opacity-0'}`}
+      />
       {/* 表头：嵌入式下用 WebkitAppRegion: drag 让用户能拖出脱离，独立窗口由 BrowserWindow 自身拖动；
           top-dock 展开态固定贴顶，禁拖（避免用户拖走破坏停靠位置） */}
       <div

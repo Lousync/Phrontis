@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe } from 'lucide-react'
+import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat } from 'lucide-react'
 import type { BookKind, KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
@@ -17,6 +17,7 @@ import { HabitWidget } from './widgets/HabitWidget'
 import { PomoWidget } from './widgets/PomoWidget'
 import { PasswordWidget } from './widgets/PasswordWidget'
 import { NavWidget } from './widgets/NavWidget'
+import { PetWidget } from './widgets/PetWidget'
 import { AiUsagePanel } from './AiUsagePanel'
 import { ReadingSidePanel } from './ReadingSidePanel'
 import { ChatBody } from '../shared/AssistantPanel/ChatBody'
@@ -35,8 +36,8 @@ import type { PluginTool } from '../../lib/pluginService'
  * - 上：🧰 工具箱工具入口区（ToolLauncherZone，方案 §10）；
  * - 中：🕘 最近编辑（常驻卡片，近 7 天最多 6 条；无记录显示空态文案）；
  * - 下：**控件切换条**（原型 v16 形态：一排彩色图标 + ⋯ 选显菜单 + 拖拽排序）+ 简略视图。
- *   2026-09-17 拍板：切换条与 ⋯ 菜单**都只挂番茄钟**（挂载集 = workbenchLayout.RIGHT_PANEL_WIDGET_IDS），
- *   其余控件组件仍在 widgets/ 下由 DayPanel 消费；恢复某控件 = 往该常量加 id。
+ *   2026-09-17 拍板：切换条与 ⋯ 菜单**同走挂载集**（挂载集 = workbenchLayout.RIGHT_PANEL_WIDGET_IDS，
+ *   现为番茄钟 + 网址导航 + 桌宠），其余控件组件仍在 widgets/ 下由 DayPanel 消费；恢复某控件 = 往该常量加 id。
  *
  * **脱离互斥（方案 §3.7）**：DayPanel 四控件整体脱离为独立窗口（dayPanelDetached）时，
  * 对应槽位显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
@@ -94,20 +95,24 @@ interface Props {
   pendingAsk?: string | null
   /** 消费完成回执（App 清空，避免重挂载时重复投递） */
   onConsumePendingAsk?: () => void
+  /** 有富余高度时由「最近编辑」吸收（下段封顶）。策略由 App 决定（当前 = 窗口最大化）；
+   *  本组件只表达「要不要吸收余量」，不耦合窗口状态（E6c 口径）。 */
+  absorbSurplus?: boolean
 }
 
 /** 切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
  *  图标 = 素色 lucide 线性图标（2026-09-28 用户反馈：弃彩色 emoji，与上方工具入口区同语言）；
- *  当前只渲染 RIGHT_PANEL_WIDGET_IDS 内的项（番茄钟 + 网址导航），其余 3 项保留供恢复时直接引用 */
+ *  当前只渲染 RIGHT_PANEL_WIDGET_IDS 内的项（番茄钟 + 网址导航 + 桌宠），其余 3 项保留供恢复时直接引用 */
 const WIDGET_META: Record<string, { Icon: typeof Timer; label: string }> = {
   task: { Icon: ListTodo, label: '今日任务' },
   habit: { Icon: CalendarCheck2, label: '今日打卡' },
   pomo: { Icon: Timer, label: '番茄钟' },
   password: { Icon: KeyRound, label: '强密码生成器' },
   nav: { Icon: Globe, label: '网址导航' },
+  pet: { Icon: Cat, label: '桌宠' },
 }
 
-export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk }: Props) {
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -176,8 +181,8 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
     })
   }
 
-  // 控件区：挂载集 = RIGHT_PANEL_WIDGET_IDS（当前仅番茄钟）∩ 未隐藏，顺序仍走 widgetOrder
-  //（排序语义保留：日后把控件加回挂载集，拖拽顺序即刻生效；当前 1 项时拖拽无感）
+  // 控件区：挂载集 = RIGHT_PANEL_WIDGET_IDS ∩ 未隐藏，顺序仍走 widgetOrder
+  //（排序语义保留：把控件加回挂载集后，拖拽顺序即刻生效）
   const visibleWidgets = useMemo(
     () => layout.widgetOrder.filter((id) => RIGHT_PANEL_WIDGET_IDS.includes(id) && !layout.widgetsHidden.includes(id)),
     [layout.widgetOrder, layout.widgetsHidden],
@@ -309,16 +314,16 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
           <div className="flex min-h-0 flex-1 flex-col">
             <ToolLauncherZone onOpenTool={onOpenTool} onOpenPluginTool={onOpenPluginTool} />
 
-            <RecentEdited onOpenFile={onOpenFile} onOpenPage={onOpenPage} />
+            <RecentEdited onOpenFile={onOpenFile} onOpenPage={onOpenPage} absorbSurplus={absorbSurplus} />
 
             {/* 下段：控件切换条（可拖拽排序 + ⋯ 选显）+ 简略视图。
-                2026-09-17 右栏优化轮：下段改为 flex-1 吃满中段让出的空间——中段「最近编辑」
-                收缩为自适应高度后，控件简略视图拿到最大可用高度（常规内容量全部显示无滚动） */}
-            {/* 下段：控件切换条（原型 v16 的一排彩色图标 + ⋯ 选显，可拖拽排序）+ 简略视图。
+                2026-09-28 二轮：`absorbSurplus`（App 按窗口最大化给）时给下段**封顶**（grow 优先级高 +
+                max-h），多出来的高度改由中段「最近编辑」吸收，避免控件区（尤其桌宠）被撑成一大块留白；
+                未吸收时行为不变（下段 flex-1 吃满）——即「不许在最大化前挤占控件区」。
                 层级：外壳卡(bg-secondary) → 本容器(bg-primary) → 控件内容 → 共两层带边框容器
                 （控件自身不画卡，如 PomoWidget frameless）。
                 内容区不再放文字标题——切换条选中图标即当前控件标识（2026-09-17 反馈：删冗余文字说明） */}
-            <div className="mx-2.5 mb-2.5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)]">
+            <div className={`mx-2.5 mb-2.5 flex min-h-0 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] ${absorbSurplus ? 'grow-[99] basis-0 max-h-[480px]' : 'flex-1'} min-h-[400px]`}>
               <div data-wb="widgetSwitch" className="flex shrink-0 items-center gap-0.5 px-2 pt-2">
                 {visibleWidgets.map((id) => {
                   const meta = WIDGET_META[id]
@@ -389,12 +394,14 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                     <span className="text-[10.5px]">点击收回右栏</span>
                   </button>
                 ) : (
-                  <div className={effectiveWidget === 'pomo' ? 'm-auto w-full' : 'w-full'}>
+                  <div className={effectiveWidget === 'pomo' ? 'm-auto w-full' : effectiveWidget === 'pet' ? 'h-full w-full' : 'w-full'}>
+                    {/* 简略视图容器：番茄钟居中（m-auto）；桌宠要撑满整高才能把内容压到底（h-full） */}
                     {effectiveWidget === 'task' && <TaskWidget onOpenSchedule={onOpenSchedule} />}
                     {effectiveWidget === 'habit' && <HabitWidget />}
                     {effectiveWidget === 'pomo' && <PomoWidget frameless />}
                     {effectiveWidget === 'password' && <PasswordWidget />}
                     {effectiveWidget === 'nav' && <NavWidget favoritesOnly />}
+                    {effectiveWidget === 'pet' && <PetWidget />}
                   </div>
                 )}
               </div>
@@ -474,9 +481,10 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
   )
 }
 
-/** 中段：🕘 最近编辑（常驻卡片——无记录也显示，只占标题 + 一行空态；有记录时自适应高度，
- *  近 7 天最多 6 条（超出截断），剩余空间让给下段控件区） */
-function RecentEdited({ onOpenFile, onOpenPage }: { onOpenFile: (relPath: string) => void; onOpenPage: (pageId: string) => void }) {
+/** 中段：🕘 最近编辑（常驻卡片——无记录也显示，只占标题 + 一行空态）。
+ *  2026-09-28 二轮：`absorbSurplus` 时本卡改为增长项吸收余量（未吸收时仍 shrink-0 按内容高，
+ *  绝不挤占下段控件区）；同时列表增高、条目上限放到 20 条，避免「卡变高了但里面还是空」。 */
+function RecentEdited({ onOpenFile, onOpenPage, absorbSurplus = false }: { onOpenFile: (relPath: string) => void; onOpenPage: (pageId: string) => void; absorbSurplus?: boolean }) {
   const [pages, setPages] = useState<KnowledgePage[]>([])
 
   const refresh = useCallback(async () => {
@@ -497,17 +505,17 @@ function RecentEdited({ onOpenFile, onOpenPage }: { onOpenFile: (relPath: string
         return Number.isFinite(t) && now - t <= REL_MS && now - t >= 0
       })
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      .slice(0, 6)
-  }, [pages])
+      .slice(0, absorbSurplus ? 20 : 6)
+  }, [pages, absorbSurplus])
 
   return (
-    <div data-wb="recentEdited" className="mx-2.5 mt-2 flex shrink-0 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)]">
+    <div data-wb="recentEdited" className={`mx-2.5 mt-2 flex flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] ${absorbSurplus ? 'grow basis-0 min-h-[64px]' : 'shrink max-h-[212px] min-h-[36px]'}`}>
       <div className="flex shrink-0 items-center gap-1.5 px-2.5 pb-1 pt-2 text-[11.5px] font-semibold text-[var(--text-secondary)]">
         <History size={12} className="text-[var(--text-muted)]" />
         最近编辑
         <span className="ml-auto text-[10px] font-normal text-[var(--text-muted)]">近 7 天</span>
       </div>
-      <div className="max-h-[180px] overflow-y-auto px-1.5 pb-1.5">
+      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-1.5">
         {recent.length === 0 ? (
           <div className="px-1.5 py-2.5 text-[11px] text-[var(--text-muted)]">近 7 天没有编辑记录</div>
         ) : recent.map((p) => (

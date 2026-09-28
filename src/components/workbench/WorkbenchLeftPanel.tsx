@@ -221,7 +221,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
     const root = rootIdRef.current
     if (!root) { showToast({ type: 'error', message: '未打开仓库' }); return }
     const res = await workspaceCreateFile(root, '草稿.md')
-    if (!res.ok) { showToast({ type: 'error', message: res.error || '创建失败' }); return }
+    if (!res.ok || !res.relPath) { showToast({ type: 'error', message: res.error || '创建失败' }); return }
     await refreshRoot()
     onOpenLooseFile(res.relPath, { startEdit: true })
   }, [onOpenLooseFile, refreshRoot])

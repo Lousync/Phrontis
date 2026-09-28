@@ -74,6 +74,7 @@ import { Onboarding } from './components/shared/Onboarding'
 import { ImportModal } from './modules/shared/components/ImportModal'
 import { useCheckinReminder } from './lib/useCheckinReminder'
 import { installFileOpUndoShortcuts } from './lib/fileOpHistory'
+import { initModalDimSync } from './lib/mainDimSync'
 import { AssistantPanel } from './components/shared/AssistantPanel'
 import { AiChatTab } from './components/shared/AssistantPanel/ChatBody'
 import { DayPanelWindowApp } from './daypanel/DayPanelWindowApp'
@@ -126,6 +127,9 @@ export default function App() {
   // 文件操作撤销快捷键（Ctrl+Z 撤销 / Ctrl+Shift+Z·Ctrl+Y 重做）：
   // 编辑区与知识库共用一份栈；焦点在 Monaco/输入框时自动让路给文本撤销（isEditingInput）
   useEffect(() => installFileOpUndoShortcuts(), [])
+
+  // 全屏弹窗遮罩 → dock 小窗压暗同步（dock 是独立 OS 窗口，页内遮罩照不到；见 lib/mainDimSync.ts）
+  useEffect(() => { initModalDimSync() }, [])
 
   // 窗口圆角：透明窗口自绘 18px 大圆角；最大化/全屏时切直角（贴满屏幕时圆角会露四角缝）。
   // fsHint = 禅模式已请求全屏的乐观态：Windows 下 enter-full-screen 事件可能迟到或缺失，
@@ -1365,7 +1369,7 @@ export default function App() {
 
   return (
     <RootErrorBoundary>
-    <div className={`kb-theme-gradient-img flex flex-col h-screen bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)] overflow-hidden ${winRounded ? 'rounded-[var(--window-radius)]' : 'rounded-none'}`}>
+    <div className={`kb-theme-gradient-img flex flex-col h-screen bg-[var(--bg-primary)] overflow-hidden [transform:translateZ(0)] ${winRounded ? 'rounded-[var(--window-radius)]' : 'rounded-none'}`}>
       <CodePluginHosts />
       {zenLevel < 2 ? (
         <TitleBar />
@@ -1439,6 +1443,7 @@ export default function App() {
               right={
                 <WorkbenchRightPanel
                   dayPanelDetached={dayPanelDetached}
+                  absorbSurplus={winMax}
                   onDockDayPanel={() => { void window.api?.dayPanelDockBack?.() }}
                   onOpenTool={handleOpenTool}
                   onOpenPluginTool={handleOpenPluginTool}

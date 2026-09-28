@@ -90,7 +90,7 @@ ok(dirty.leftMode === 'overview', 'B3 非法枚举 leftMode 被丢弃')
 ok(dirty.leftCollapsed === false, 'B3b 类型不对的 leftCollapsed 被丢弃')
 ok(dirty.rightTab === 'widgets', 'B3c 非法 rightTab 被丢弃')
 ok(dirty.splitRatio === 0.5, 'B3d 合法 splitRatio 保留')
-ok(dirty.widgetOrder.join(',') === 'task,habit,pomo,password,nav', 'B4 缺失控件按规范序补齐', dirty.widgetOrder.join(','))
+ok(dirty.widgetOrder.join(',') === 'task,habit,pomo,password,nav,pet', 'B4 缺失控件按规范序补齐', dirty.widgetOrder.join(','))
 ok(JSON.stringify(parseWorkbenchLayout('null')).startsWith('{"leftCollapsed":false'), 'B5 null 输入走默认')
 const bmDirty = parseWorkbenchLayout(JSON.stringify({ bookmarksHidden: ['editor', 42, null, 'plugin:x.y'] }))
 ok(bmDirty.bookmarksHidden.length === 2 && bmDirty.bookmarksHidden[0] === 'editor' && bmDirty.bookmarksHidden[1] === 'plugin:x.y',
@@ -275,8 +275,10 @@ console.log('\n=== E. 右栏优化轮：布局权重 + 工具侧栏适配 ===')
 ok(/h-\[196px\]/.test(srcRight) === false, 'E1 简略视图不再固定 196px（自适应+上限，超长才滚动）')
 ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col overflow-y-auto/.test(srcRight.replace(/\n/g, ' ')),
   'E1b 简略视图 = flex-1 吃满下段剩余（显示完常规内容量）')
-ok(!/flex min-h-\[72px\] flex-1/.test(srcRight) && /shrink-0 flex-col overflow-hidden rounded-lg border/.test(srcRight),
-  'E1c 最近编辑不再 flex-1 抢占空间（自适应收缩）')
+ok(/absorbSurplus \? 'grow basis-0 min-h-\[64px\]' : 'shrink max-h-\[212px\] min-h-\[36px\]'/.test(srcRight),
+  'E1c 最近编辑默认可收缩（让位宠物，不挤占下段）；仅 absorbSurplus 时转为增长项吸收余量')
+ok(/absorbSurplus \? 20 : 6/.test(srcRight) && /min-h-0 flex-1 overflow-y-auto px-1\.5 pb-1\.5/.test(srcRight),
+  'E1e absorbSurplus 联动（条目 6→20；列表常驻 flex-1 由卡高约束，卡缩小时滚动）')
 ok(!/if \(recent\.length === 0\) return null/.test(srcRight) && /近 7 天没有编辑记录/.test(srcRight),
   'E1d 最近编辑常驻卡片（无记录显示空态文案，不再整卡消失——2026-09-17 反馈）')
 
@@ -307,15 +309,15 @@ ok(/!wbLayout\.leftLocked && TOOLS_WITH_SIDEBAR\.has\(tid\)/.test(srcApp),
 ok(/railTool=\{railTool\}/.test(srcApp) && /railTool\?/.test(srcShell) && /railModule \|\| railTool/.test(srcLeft),
   'E4d App → Shell → LeftPanel railTool 透传，模块态条件 = railModule || railTool')
 
-// E5 右栏下段：切换条（原型彩色图标）+ 番茄钟形态改造（2026-09-17）
-ok(/RIGHT_PANEL_WIDGET_IDS: readonly string\[\] = \['pomo'\]/.test(srcWbl),
-  'E5 右栏切换条挂载集 = 只番茄钟（RIGHT_PANEL_WIDGET_IDS 单点真相源；恢复控件 = 往这里加 id）')
+// E5 右栏下段：切换条（2026-09-28 由原型彩色 emoji 改版为素色 lucide 线性图标）+ 番茄钟形态改造（2026-09-17）
+ok(/RIGHT_PANEL_WIDGET_IDS: readonly string\[\] = \['pomo', 'nav', 'pet'\]/.test(srcWbl),
+  'E5 右栏切换条挂载集 = 番茄钟 + 网址导航 + 桌宠（RIGHT_PANEL_WIDGET_IDS 单点真相源；恢复控件 = 往这里加 id）')
 ok(/RIGHT_PANEL_WIDGET_IDS\.filter/.test(srcRight) && /RIGHT_PANEL_WIDGET_IDS\.map/.test(srcRight),
-  'E5b 切换条渲染与 ⋯ 选显菜单**同一挂载集**（只列番茄钟一项，两处口径一致）')
-ok(/pomo: \{ icon: '⏰'/.test(srcRight) && /task: \{ icon: '✅'/.test(srcRight),
-  'E5b2 图标表保留原型彩色 emoji（当前只渲染 ⏰ 番茄钟，其余 4 项供恢复引用）')
-ok(/task: \{ icon: '✅'/.test(srcRight) && /pomo: \{ icon: '⏰'/.test(srcRight) && /nav: \{ icon: '🌐'/.test(srcRight),
-  'E5b 切换条图标 = 原型彩色 emoji（✅ 今日任务 / 🔔 打卡 / ⏰ 番茄钟 / 🔑 密码 / 🌐 导航）')
+  'E5b 切换条渲染与 ⋯ 选显菜单**同一挂载集**（两处口径一致，加 id 即两处生效）')
+ok(/pomo: \{ Icon: Timer, label: '番茄钟' \}/.test(srcRight) && /nav: \{ Icon: Globe, label: '网址导航' \}/.test(srcRight) && /pet: \{ Icon: Cat, label: '桌宠' \}/.test(srcRight),
+  'E5b2 切换条图标表 = 素色 lucide 线性图标（弃彩色 emoji；桌宠用 Cat）')
+ok(/effectiveWidget === 'nav' && <NavWidget favoritesOnly \/>/.test(srcRight) && /effectiveWidget === 'pet' && <PetWidget \/>/.test(srcRight),
+  'E5b3 简略视图渲染分支覆盖挂载集全项（nav + pet 均挂实体组件）')
 const srcPomo = stripComments(read('src/components/workbench/widgets/PomoWidget.tsx'))
 ok(/data-wb="pomoRing"/.test(srcPomo) && /strokeDashoffset/.test(srcPomo) && /const RING_CIRC = 2 \* Math\.PI \* RING_R/.test(srcPomo),
   'E5c 专注态环形进度（SVG 环 + stroke-dashoffset 周长派生）')
@@ -328,6 +330,70 @@ ok(/与工具箱同源/.test(srcRight) === false && /小控件均已隐藏/.test
 ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col/.test(srcRight.replace(/\n/g, ' ')) && /m-auto w-full/.test(srcRight),
   'E5g 简略视图内容垂直居中（m-auto：上下留白均匀，超高时归零顶部起滚不被裁）')
 
+// ===== P. 桌宠控件（2026-09-28，docs/pet-design.md）=====
+// 断的是「加了一处忘另一处」：本模块横跨挂载集 → 面板渲染 → IPC 三层 → 主进程 repo → 广播 scope，
+// 任一接线点漏掉都是**静默失败**（图标点了没反应 / 写盘不广播则界面不刷新），无任何报错。
+const srcPetWidget = stripComments(read('src/components/workbench/widgets/PetWidget.tsx'))
+const srcPetRepo = stripComments(read('electron/database/repositories/petRepo.ts'))
+const srcPetVault = stripComments(read('electron/lib/kbStore/petVaultRepo.ts'))
+const srcPreload = stripComments(read('electron/preload/index.ts'))
+const srcIpc = stripComments(read('src/lib/ipc.ts'))
+const srcTypes = stripComments(read('src/types/index.ts'))
+const srcMain = stripComments(read('electron/main/index.ts'))
+const srcDataChanged = stripComments(read('src/lib/dataChanged.ts'))
+
+ok(/import \{ PetWidget \} from '\.\/widgets\/PetWidget'/.test(srcRight) && /effectiveWidget === 'pet' && <PetWidget \/>/.test(srcRight) && /pet: \{ Icon: Cat, label: '桌宠' \}/.test(srcRight),
+  'P1 右栏面板三点接线齐（import + 渲染分支 + WIDGET_META；漏一处 = 图标点了没反应）')
+ok(/export const petGet = /.test(srcIpc) && /export const petFeed = /.test(srcIpc) && /export const petPetTouch = /.test(srcIpc) && /export const petRename = /.test(srcIpc) && /export const petReset = /.test(srcIpc),
+  'P2 ipc.ts 薄封装五方法全在（petGet/Feed/PetTouch/Rename/Reset）')
+ok(/petGet: \(\) => ipcRenderer\.invoke\('pet:get'\)/.test(srcPreload) && /petFeed: \(\) => ipcRenderer\.invoke\('pet:feed'\)/.test(srcPreload) && /petPetTouch: \(\) => ipcRenderer\.invoke\('pet:petTouch'\)/.test(srcPreload) && /petReset: \(species: 'dog' \| 'cat' \| 'cthun'\) => ipcRenderer\.invoke\('pet:reset'/.test(srcPreload),
+  'P3 preload 五桥接通道名对齐 <模块>:<动作>（pet:get/feed/petTouch/rename/reset）')
+ok(/petGet: \(\) => Promise<PetSnapshot>/.test(srcTypes) && /export interface PetSnapshot extends PetState/.test(srcTypes),
+  'P4 types/index.ts 双区同步（DTO 区 PetState/PetSnapshot + api 区五方法声明）')
+ok(/registerPetHandlers\(\)/.test(srcMain) && /import \{ registerPetHandlers \} from '\.\.\/database\/repositories\/petRepo'/.test(srcMain),
+  'P5 main/index.ts 注册 registerPetHandlers（漏注册 = 五个 channel 全无 handler）')
+ok(/ipcMain\.handle\('pet:get'/.test(srcPetRepo) && /broadcastDataChanged\('pet'\)/.test(srcPetRepo),
+  'P6 petRepo = 转发层 + 写操作后广播 scope pet（写盘不广播 = 界面不刷新）')
+ok(/DataChangeScope = [^\n]*\| 'pet'/.test(srcDataChanged),
+  'P7 DataChangeScope 加 pet（与 petRepo 广播字符串同源，拼错即静默不刷新）')
+ok(/useDataChanged\('pet'/.test(srcPetWidget),
+  'P8 PetWidget 订阅 useDataChanged(pet)（他窗/AI 改宠物 → 本控件刷新）')
+ok(/const MOD = 'modules\/pet'/.test(srcPetVault) && /writeJsonOrThrow\(MOD, PET_KEY/.test(srcPetVault),
+  'P9 petVaultRepo 落盘 .knowbase/modules/pet/pet.json（走 writeJsonOrThrow，Vault 唯一真相源）')
+ok(/HUNGER_DECAY_PER_HOUR = 2\.8/.test(srcPetVault) && /STAGE_UP_NEED = 120/.test(srcPetVault) && /FEED_REFUSE_THRESHOLD = 92/.test(srcPetVault),
+  'P10 数值常量与 docs/pet-design.md §五 一致（衰减 2.8/h、升级 120、拒食 92）')
+const POSE_SET = ['base', 'hungry', 'lie', 'pet', 'eat']
+const SPRITE_MISSING = []
+for (const sp of ['dog', 'cat', 'cthun']) for (const st of ['baby', 'adult']) for (const pose of POSE_SET) {
+  if (!existsSync(`${ROOT}/src/assets/pets/${sp}-${st}-${pose}.png`)) SPRITE_MISSING.push(`${sp}-${st}-${pose}`)
+}
+ok(SPRITE_MISSING.length === 0, 'P11 立绘 30 张齐（3 品种 × 2 阶段 × 5 姿态；键名与 PetWidget SPRITE_URLS 同规）', SPRITE_MISSING.join(','))
+const SPRITE_NOALPHA = []
+for (const sp of ['dog', 'cat', 'cthun']) for (const st of ['baby', 'adult']) for (const pose of POSE_SET) {
+  const p = `${ROOT}/src/assets/pets/${sp}-${st}-${pose}.png`
+  // PNG IHDR：偏移 25 = colorType（6=RGBA 带 alpha；2=RGB 无 alpha）
+  if (existsSync(p) && readFileSync(p)[25] !== 6) SPRITE_NOALPHA.push(`${sp}-${st}-${pose}`)
+}
+ok(SPRITE_NOALPHA.length === 0,
+  'P12 立绘带真 alpha 通道（colorType=6；AI 原图是无 alpha 的「棋盘格假透明」，拷回未处理版即穿帮）', SPRITE_NOALPHA.join(','))
+
+// ---- 布局改版 + 切换宠物（2026-09-28 第二轮）----
+ok(/ipcMain\.handle\('pet:switchSpecies'/.test(srcPetRepo) && /petSwitchSpecies: \(species: 'dog' \| 'cat' \| 'cthun'\) => ipcRenderer\.invoke\('pet:switchSpecies'/.test(srcPreload) && /export const petSwitchSpecies = /.test(srcIpc) && /petSwitchSpecies: \(species: PetSpecies\) => Promise<PetSnapshot>/.test(srcTypes),
+  'P13 换品种通道三层接线齐（repo handler + preload + ipc + types；漏一处 = 菜单点了没反应）')
+const switchBody = (srcPetVault.match(/export function vaultPetSwitchSpecies[\s\S]*?\n}/) || [''])[0]
+ok(switchBody && !/defaults\(\)/.test(switchBody) && !/\bexp\s*=/.test(switchBody) && !/\bhunger\s*=/.test(switchBody) && !/\bstage\s*=/.test(switchBody) && !/\bmood\s*=/.test(switchBody),
+  'P14 换品种**保留进度**：函数体不重置任何数值（无 defaults()/exp=/hunger=/stage=/mood=）—— 本轮核心不变量')
+ok(/names: Record<PetSpecies, string>/.test(srcPetVault) && /names: \{ dog: '小狗', cat: '小猫', cthun: '小克苏恩' \}/.test(srcPetVault),
+  'P15 每品种名字表（名字跟着宠物走）+ 默认名 dog=小狗 / cat=小猫 / cthun=小克苏恩')
+ok(/data-wb="petToolbar"/.test(srcPetWidget) && /data-wb="petMenuBtn"/.test(srcPetWidget) && /data-wb="petBottom"/.test(srcPetWidget),
+  'P16 PetWidget 三段结构（顶部工具条 / 中部留白 / 底部贴底组）')
+ok(/data-wb="petMenu"/.test(srcPetWidget) && /petSwitchSpecies\(sp\)/.test(srcPetWidget) && /petReset\(/.test(srcPetWidget),
+  'P17 菜单入口齐（切换宠物走 switchSpecies / 重新养一只走 reset）')
+ok(/className="flex h-full w-full flex-col select-none"/.test(srcPetWidget),
+  'P18 桌宠根节点 h-full（撑满才能贴底；写成 flex-1 在块级槽位里是死属性 → 滚轮没反应）')
+ok(/effectiveWidget === 'pet' \? 'h-full w-full'/.test(srcRight),
+  'P19 右栏给桌宠槽位 h-full（否则根节点 h-full 无高度可依，贴底失效）')
+
 // E6 底层 UI 统一（2026-09-17 第三轮反馈）：右栏外壳对齐左栏 + 番茄钟层级收敛
 ok(/side="right"[\s\S]{0,700}?className=\{sidesGone \|\| maximized \? 'rounded-none border-0' : 'm-1\.5 rounded-xl border border-\[var\(--border-color\)\] shadow-sm'\}/.test(srcShell),
   'E6 右栏外壳 = 左栏同款卡片（m-1.5 + rounded-xl + border + shadow-sm，卡片装饰由外壳承担）')
@@ -337,8 +403,10 @@ ok(!/maximized/.test(srcRight), 'E6c 右栏组件的 maximized prop 随卡片下
 ok(/<PomoWidget frameless \/>/.test(srcRight) && /frameless\?: boolean/.test(srcPomo),
   'E6d 番茄钟在右栏走 frameless（不再画自带卡片，消除卡中卡）')
 ok(!/排序：直接拖拽上方图标/.test(srcRight), 'E6e ⋯ 控件选显菜单不带底部排序说明文字（文案精简）')
-ok(/mx-2\.5 mb-2\.5 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-\[var\(--border-color\)\] bg-\[var\(--bg-primary\)\]/.test(srcRight),
-  'E6f 下段容器 = bg-primary 内容层 + 细边框（与外壳 bg-secondary 形成层次；简略视图本身不画边框，避免卡中卡）')
+ok(/bg-\[var\(--bg-primary\)\] \$\{absorbSurplus \? 'grow-\[99\] basis-0 max-h-\[480px\]' : 'flex-1'\} min-h-\[400px\]/.test(srcRight),
+  'E6f 下段 = bg-primary 内容层 + 细边框；min-h-400 保底（宠物永不被挤），absorbSurplus 时再封顶 max-h-480')
+ok(/absorbSurplus=\{winMax\}/.test(read('src/App.tsx')),
+  'E6g absorbSurplus 由 App 按 winMax 下发（策略在 App，右栏只表达「要不要吸收余量」）')
 
 // ===== F. 页面条置顶（v3.4.0「工作台中间栏头部层级优化」第一项，2026-09-18）=====
 // 形态：中间栏第一行 = 一条页面条（模块条目 + 编辑器页签组 + 知识库页签组），模块内部零头部行；

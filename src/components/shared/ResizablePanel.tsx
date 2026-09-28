@@ -289,17 +289,21 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
       className={`shrink-0 relative flex flex-col overflow-hidden ${translucent ? 'bg-[color-mix(in_srgb,var(--bg-primary)_72%,transparent)]' : 'bg-[var(--bg-primary)]'} ${className}`}
       style={{
         width: displayWidth,
-        transition: dragging ? 'none' : 'width 200ms ease-out',
-        // 展开时可选延迟（收起永远不加）—— 看板→工作台的编排靠它
-        transitionDelay: !dragging && visible && openDelayMs > 0 ? `${openDelayMs}ms` : '0ms',
+        // 延迟并入 transition 简写：**不要**与 transitionDelay 长写并存 —— React 在重渲染时
+        // 同时更新简写与长写会告警（简写会把长写重置，样式不可预测）
+        transition: dragging
+          ? 'none'
+          // 展开时可选延迟（收起永远不加）—— 看板→工作台的编排靠它
+          : `width 200ms ease-out${visible && openDelayMs > 0 ? ` ${openDelayMs}ms` : ''}`,
       }}
     >
       {visible && children}
 
-      {/* 折叠边缘分割条 — 悬停显示蓝色可拖拽条；支持拖拽拉出 + 单击兜底展开 */}
+      {/* 折叠边缘分割条 — 悬停显示蓝色可拖拽条；支持拖拽拉出 + 单击兜底展开
+          （★ 不挂 z-30，同上：显式正 z 在圆角裁切层内会盖过全窗 fixed 遮罩） */}
       {!visible && onSnapOpen && (
         <div
-          className="absolute inset-0 z-30 group"
+          className="absolute inset-0 group"
           style={{ cursor: 'col-resize' }}
           onPointerDown={onEdgePointerDown}
           onPointerMove={(e) => applyEdgeDrag(e.clientX)}
@@ -317,13 +321,16 @@ export function ResizablePanel({ storageKey, defaultWidth, minWidth, maxWidth, v
           · 命中热区 5px 内贴（原 2px 太难抓），视觉线 1px 贴外缘（与外层 border 同位，不外探避免双线）；
           · 按下只登记起点，越过 4px dead-zone 才算真拖（鼠标掠过不再改宽度、也不再落盘）；
           · pointer capture + 四路收尾（见 endDrag 注释）；
-          · 双击复位到默认宽度。 */}
+          · 双击复位到默认宽度。
+          · ★ 不挂 z-30（2026-09-28 实机探针）：圆角裁切(overflow+radius)提升的面板内，
+            显式正 z 的手柄会 painting 到全窗 fixed 遮罩(z-50)之上 → 弹窗打开时右缘漏出
+            1px 亮线（用户报「细小白条」）。z-auto 时 absolute + DOM 靠后已稳压面板内容。 */}
       {visible && showHandle && (
         <div
           role="separator"
           aria-orientation="vertical"
           title="拖拽调整宽度，双击复位"
-          className="absolute top-0 h-full z-30 group"
+          className="absolute top-0 h-full group"
           style={{
             width: HANDLE_HIT_WIDTH_PX,
             cursor: 'col-resize',

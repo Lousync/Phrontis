@@ -28,6 +28,7 @@ import { registerVaultBackupHandlers } from '../database/repositories/vaultBacku
 import { registerRepoConfigHandlers } from '../database/repositories/repoConfigRepo'
 import { registerCheckinHandlers } from '../database/repositories/checkinRepo'
 import { registerBookmarkHandlers } from '../database/repositories/bookmarkRepo'
+import { registerPetHandlers } from '../database/repositories/petRepo'
 import { registerSuperviseHandlers } from '../database/repositories/superviseRepo'
 import { registerSummaryHandlers } from '../database/repositories/summaryRepo'
 import { registerBlogTemplateHandlers } from '../database/repositories/blogTemplateRepo'
@@ -910,6 +911,7 @@ app.whenReady().then(async () => {
   registerVaultBackupHandlers()
   registerCheckinHandlers()
   registerBookmarkHandlers()
+  registerPetHandlers()
   registerSuperviseHandlers()
   registerSummaryHandlers()
   registerBlogSummaryHandlers()

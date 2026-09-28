@@ -19,6 +19,10 @@ export function registerWindowBus(): void {
       }
     }
   })
+  // 主窗口全屏弹窗遮罩开合 → dock 小窗跟随压暗（dock 是独立 OS 窗口，页内遮罩照不到它）
+  ipcMain.on('main:modal-dim', (_event, payload) => {
+    broadcast(BROADCAST_CHANNEL.mainModalDimChanged, { dim: !!(payload && (payload as { dim?: unknown }).dim) })
+  })
 }
 
 /**
@@ -107,4 +111,6 @@ export const BROADCAST_CHANNEL = {
   dayPanelCollapsedChanged: 'daypanel:collapsed-changed',
   /** 小窗（日面板）桌面小组件可交互态变化，载荷 `{ interactive: boolean }` */
   dayPanelWidgetInteractiveChanged: 'daypanel:widget-interactive-changed',
+  /** 主窗口全屏弹窗遮罩开合（dock 跟随压暗），载荷 `{ dim: boolean }`；渲染层发起走 'main:modal-dim' */
+  mainModalDimChanged: 'main:modal-dim-broadcast',
 } as const

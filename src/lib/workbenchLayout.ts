@@ -35,8 +35,8 @@ export interface WorkbenchLayout {
   splitRatio: number | null
 }
 
-/** 右栏控件的规范顺序（缺省序 = 原型 v15 定稿）；DayPanel 四控件 id 沿用 DAY_TABS */
-export const WORKBENCH_WIDGET_IDS = ['task', 'habit', 'pomo', 'password', 'nav'] as const
+/** 右栏控件的规范顺序（缺省序 = 原型 v15 定稿 + 2026-09-28 增桌宠）；DayPanel 四控件 id 沿用 DAY_TABS */
+export const WORKBENCH_WIDGET_IDS = ['task', 'habit', 'pomo', 'password', 'nav', 'pet'] as const
 
 /**
  * 右栏下段**切换条实际挂载的控件集**。
@@ -48,7 +48,7 @@ export const WORKBENCH_WIDGET_IDS = ['task', 'habit', 'pomo', 'password', 'nav']
  * （渲染分支已按 5 个控件的条件渲染保留，加 id 即生效）。
  * 注：widgetsHidden 里的历史 id 若不在本集合内会被自然忽略，无需迁移。
  */
-export const RIGHT_PANEL_WIDGET_IDS: readonly string[] = ['pomo', 'nav']
+export const RIGHT_PANEL_WIDGET_IDS: readonly string[] = ['pomo', 'nav', 'pet']
 
 /**
  * 源自 DayPanel 的四个控件 id（方案 §3.7 互斥判定用）：整体脱离为独立窗口
