@@ -213,6 +213,45 @@ async function main() {
     ok('品牌语 / 署名输入层在位', overlay && overlay.slots.join(',') === 'signature,slogan', String(overlay?.slots))
     ok('寄语输入层尺寸 > 0', overlay && overlay.quoteBox.w > 40 && overlay.quoteBox.h > 10, JSON.stringify(overlay?.quoteBox))
 
+    // ===== 6b) ★ 右侧「分享内容」框可直接点进编辑（焦点互踩回归护栏）=====
+    //  曾经的 bug：右侧表单 textarea 的 onFocus 去开图上那块 autoFocus 源码面板 → 焦点被抢走、
+    //  右侧随即 onBlur、面板又关 → 表现为「点了框打不了字」。契约只锁源码里有没有 promptEditing
+    //  这两串，抓不到；且 case 12 是直接 set value（不经焦点），也抓不到。故此处**真鼠标点 + 真输入**。
+    console.log('\n--- 6b) 右侧表单：内容框可直接点进编辑 ---')
+    const promptBox = await evalJs(`(() => {
+      const ta = document.querySelector('[data-share-prompt-form]')
+      if (!ta) return null
+      ta.scrollIntoView({ block: 'center' })
+      const r = ta.getBoundingClientRect()
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+    })()`)
+    ok('编辑浮层里有「分享内容」表单框', !!promptBox, 'no [data-share-prompt-form]')
+    if (promptBox) {
+      await clickAt(promptBox.x, promptBox.y)
+      await sleep(300)
+      const focusState = await evalJs(`({
+        activeIsForm: document.activeElement === document.querySelector('[data-share-prompt-form]'),
+        overlayOpen: !!document.querySelector('[data-share-prompt-editor]'),
+      })`)
+      ok('★ 点右侧内容框后焦点落在它自己（不被图上源码面板抢走）', focusState?.activeIsForm === true, JSON.stringify(focusState))
+      ok('点右侧内容框不会反向打开图上源码面板', focusState?.overlayOpen === false, JSON.stringify(focusState))
+
+      const TYPED = 'typing' + Date.now().toString(36).slice(-3)
+      await K.send('Input.insertText', { text: TYPED })
+      await sleep(300)
+      const typedOk = await evalJs(`(document.querySelector('[data-share-prompt-form]')?.value ?? '').includes(${JSON.stringify(TYPED)})`)
+      ok('★ 在该框里真的能输入（字符落到 value 上）', typedOk === true, `value=${JSON.stringify(await evalJs(`document.querySelector('[data-share-prompt-form]')?.value`))}`)
+      // 清掉刚输入的探针文本，别影响后续 case 的像素对比基线
+      await evalJs(`(() => {
+        const ta = document.querySelector('[data-share-prompt-form]')
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set
+        setter.call(ta, '')
+        ta.dispatchEvent(new Event('input', { bubbles: true }))
+        return true
+      })()`)
+      await sleep(300)
+    }
+
     // ===== 7) 图上改字 → 落盘 =====
     console.log('\n--- 7) 图上改字 → 设置真的变了（防抖后） ---')
     const MARK = '契约探针改字' + Date.now().toString(36).slice(-4)

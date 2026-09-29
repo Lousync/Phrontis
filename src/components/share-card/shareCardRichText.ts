@@ -147,6 +147,24 @@ let fontsReady: Promise<void> | null = null
  * 再 fetch 成 data URL —— 直接写 `url(...)` 相对路径在 `foreignObject` 里会被当跨源拒掉。
  * 只装载公式真正会用到的几族（Main / Math / Size / AMS），其余留给以后按需加。
  */
+/**
+ * 字体 URL → `@font-face` 里能用的 data URL。
+ *
+ * ★ 已经是 `data:` 的就直接返回，**不要 fetch**（2026-09-29 修）：Vite 会把小于内联阈值的
+ * 资源编译成 `data:font/woff2;base64,…`（实测 `KaTeX_Size3-Regular.woff2` 约 3.6KB），
+ * 而 `fetch(data:…)` 会被 `index.html` 的 CSP 拒掉（未列 `connect-src` → 回退 `default-src 'self'`）。
+ * dev 下字体走 http、不内联，所以正常；**打包后才坏** —— 表现为题目区在打包版里画不出来
+ * （`probe-share-card.mjs` case 12 抓的就是这一条）。其余（未内联的）才需要取字节转 base64。
+ */
+async function inlineFont(url: string): Promise<string> {
+  if (url.startsWith('data:')) return url
+  const buf = await (await fetch(url)).arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  let bin = ''
+  for (let k = 0; k < bytes.length; k++) bin += String.fromCharCode(bytes[k])
+  return `data:font/woff2;base64,${btoa(bin)}`
+}
+
 async function ensureKatexFonts(): Promise<void> {
   if (fontsReady) return fontsReady
   fontsReady = (async () => {
@@ -166,12 +184,8 @@ async function ensureKatexFonts(): Promise<void> {
     const faces: string[] = []
     for (let i = 0; i < mods.length; i++) {
       const url = (mods[i] as { default: string }).default
-      const buf = await (await fetch(url)).arrayBuffer()
-      let bin = ''
-      const bytes = new Uint8Array(buf)
-      for (let k = 0; k < bytes.length; k++) bin += String.fromCharCode(bytes[k])
       const family = `${names[i]}-${styles[i] || 'Regular'}`
-      faces.push(`@font-face{font-family:"${family}";src:url(data:font/woff2;base64,${btoa(bin)}) format('woff2');font-display:block}`)
+      faces.push(`@font-face{font-family:"${family}";src:url(${await inlineFont(url)}) format('woff2');font-display:block}`)
     }
     const st = document.createElement('style')
     st.setAttribute('data-share-card-fonts', '1')

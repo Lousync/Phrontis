@@ -28,6 +28,9 @@ function scaledFont(font: string, k: number): string {
   return font.replace(/(\d+(?:\.\d+)?)px/, (_, n: string) => `${(Number(n) * k).toFixed(2)}px`)
 }
 
+/** 右侧表单的条目顺序（2026-09-29 用户指定）：分享内容区提到第二位 */
+const RIGHT_FORM_ORDER = ['quote', 'prompt', 'slogan', 'signature'] as const
+
 /**
  * 分享卡片编辑浮层（2026-09-29）。
  *
@@ -165,7 +168,7 @@ export function ShareCardEditor({ open, onClose, data, texts, style, theme, prom
             {!promptEditing && (
               <button
                 onMouseDown={(e) => { e.preventDefault(); setPromptEditing(true) }}
-                title="编辑题目"
+                title="编辑分享内容"
                 className="absolute cursor-text rounded-[6px] border border-transparent transition-[border-color,background-color] hover:border-[var(--accent)] hover:bg-[rgba(83,74,183,.06)]"
                 style={{
                   left: pr.x * k,
@@ -197,67 +200,71 @@ export function ShareCardEditor({ open, onClose, data, texts, style, theme, prom
           </div>
         </div>
 
-        {/* 右：同步表单 —— **与图上可编辑项一一对齐**：三个文案槽位 + 题目区，共 4 项。
-            早先漏了题目区（图上能改、右侧没有），数量对不上。 */}
+        {/* 右：同步表单 —— **与图上可编辑项一一对齐**：三个文案槽位 + 分享内容区，共 4 项。
+            早先漏了内容区（图上能改、右侧没有），数量对不上。
+            顺序见 RIGHT_FORM_ORDER（2026-09-29 用户指定：内容区提到第二位）。 */}
         <div className="flex w-[300px] shrink-0 flex-col gap-1 overflow-y-auto border-l border-[var(--border-color)] p-4">
-          {SLOT_ORDER.map((key) => (
-            <div key={key} className="border-b border-dashed border-[var(--border-color)] py-2 last:border-b-0">
-              <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]">
-                {SLOT_LABEL[key]}
-                <button
-                  onClick={() => onResetText(key)}
-                  disabled={texts[key] === DEFAULT_TEXTS[key]}
-                  title="还原默认"
-                  className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] transition-colors hover:text-[var(--accent)] disabled:opacity-30 disabled:hover:text-[var(--text-muted)]"
-                >
-                  <RotateCcw size={11} /> 还原
-                </button>
+          {RIGHT_FORM_ORDER.map((key) => (
+            key === 'prompt' ? (
+              /* 分享内容区（与图上那块对应）。★ 这里**不**挂 onFocus / onBlur 去开合图上那块源码面板：
+                 图上叠的是 `autoFocus` 的 textarea，右侧一聚焦就会被它抢走焦点、右侧随即失焦，
+                 两个 onBlur 互相踩 ⇒「右侧点了框却打不了字」。图上那块面板的开合**只由图上的点击驱动**
+                 （见下方的 promptEditing 状态）。 */
+              <div key="prompt" className="border-b border-dashed border-[var(--border-color)] py-2 last:border-b-0">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]">
+                  分享内容（支持公式）
+                  <button
+                    onClick={() => onChangePrompt('')}
+                    disabled={!prompt}
+                    title="清空"
+                    className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] transition-colors hover:text-[var(--accent)] disabled:opacity-30 disabled:hover:text-[var(--text-muted)]"
+                  >
+                    <RotateCcw size={11} /> 清空
+                  </button>
+                </div>
+                <textarea
+                  data-share-prompt-form
+                  value={prompt}
+                  maxLength={PROMPT_MAX_CHARS}
+                  rows={3}
+                  spellCheck={false}
+                  placeholder={'$x^2$ · **粗** · *斜*'}
+                  onChange={(e) => onChangePrompt(e.target.value)}
+                  className="w-full resize-none rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1 font-mono text-[12px] leading-[1.7] outline-none focus:border-[var(--accent)]"
+                />
+                <div className="mt-1 text-right text-[10px] text-[var(--text-muted)]">
+                  {prompt.length}/{PROMPT_MAX_CHARS}
+                </div>
               </div>
-              <input
-                type="text"
-                value={texts[key]}
-                maxLength={TEXT_LIMITS[key]}
-                placeholder={DEFAULT_TEXTS[key] || '（留空则不显示）'}
-                onFocus={() => setFocused(key)}
-                onBlur={() => setFocused(cur => (cur === key ? null : cur))}
-                onChange={(e) => onChangeText(key, e.target.value)}
-                className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1 text-[12.5px] outline-none focus:border-[var(--accent)]"
-              />
-              <div className="mt-1 text-right text-[10px] text-[var(--text-muted)]">
-                {texts[key].length}/{TEXT_LIMITS[key]}
+            ) : (
+              <div key={key} className="border-b border-dashed border-[var(--border-color)] py-2 last:border-b-0">
+                <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]">
+                  {SLOT_LABEL[key]}
+                  <button
+                    onClick={() => onResetText(key)}
+                    disabled={texts[key] === DEFAULT_TEXTS[key]}
+                    title="还原默认"
+                    className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] transition-colors hover:text-[var(--accent)] disabled:opacity-30 disabled:hover:text-[var(--text-muted)]"
+                  >
+                    <RotateCcw size={11} /> 还原
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={texts[key]}
+                  maxLength={TEXT_LIMITS[key]}
+                  placeholder={DEFAULT_TEXTS[key] || '（留空则不显示）'}
+                  onFocus={() => setFocused(key)}
+                  onBlur={() => setFocused(cur => (cur === key ? null : cur))}
+                  onChange={(e) => onChangeText(key, e.target.value)}
+                  className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1 text-[12.5px] outline-none focus:border-[var(--accent)]"
+                />
+                <div className="mt-1 text-right text-[10px] text-[var(--text-muted)]">
+                  {texts[key].length}/{TEXT_LIMITS[key]}
+                </div>
               </div>
-            </div>
+            )
           ))}
-
-          {/* 第 4 项：题目区（与图上那块对应） */}
-          <div className="border-b border-dashed border-[var(--border-color)] py-2 last:border-b-0">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)]">
-              题目（支持公式）
-              <button
-                onClick={() => onChangePrompt('')}
-                disabled={!prompt}
-                title="清空"
-                className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] transition-colors hover:text-[var(--accent)] disabled:opacity-30 disabled:hover:text-[var(--text-muted)]"
-              >
-                <RotateCcw size={11} /> 清空
-              </button>
-            </div>
-            <textarea
-              data-share-prompt-form
-              value={prompt}
-              maxLength={PROMPT_MAX_CHARS}
-              rows={3}
-              spellCheck={false}
-              placeholder={'$x^2$ · **粗** · *斜*'}
-              onFocus={() => setPromptEditing(true)}
-              onBlur={() => setPromptEditing(false)}
-              onChange={(e) => onChangePrompt(e.target.value)}
-              className="w-full resize-none rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1 font-mono text-[12px] leading-[1.7] outline-none focus:border-[var(--accent)]"
-            />
-            <div className="mt-1 text-right text-[10px] text-[var(--text-muted)]">
-              {prompt.length}/{PROMPT_MAX_CHARS}
-            </div>
-          </div>
         </div>
       </div>
     </ModalShell>
