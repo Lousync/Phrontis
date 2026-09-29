@@ -346,7 +346,7 @@ ok(/import \{ PetWidget \} from '\.\/widgets\/PetWidget'/.test(srcRight) && /eff
   'P1 右栏面板三点接线齐（import + 渲染分支 + WIDGET_META；漏一处 = 图标点了没反应）')
 ok(/export const petGet = /.test(srcIpc) && /export const petFeed = /.test(srcIpc) && /export const petPetTouch = /.test(srcIpc) && /export const petRename = /.test(srcIpc) && /export const petReset = /.test(srcIpc),
   'P2 ipc.ts 薄封装五方法全在（petGet/Feed/PetTouch/Rename/Reset）')
-ok(/petGet: \(\) => ipcRenderer\.invoke\('pet:get'\)/.test(srcPreload) && /petFeed: \(\) => ipcRenderer\.invoke\('pet:feed'\)/.test(srcPreload) && /petPetTouch: \(\) => ipcRenderer\.invoke\('pet:petTouch'\)/.test(srcPreload) && /petReset: \(species: 'dog' \| 'cat' \| 'cthun'\) => ipcRenderer\.invoke\('pet:reset'/.test(srcPreload),
+ok(/petGet: \(\) => ipcRenderer\.invoke\('pet:get'\)/.test(srcPreload) && /petFeed: \(\) => ipcRenderer\.invoke\('pet:feed'\)/.test(srcPreload) && /petPetTouch: \(\) => ipcRenderer\.invoke\('pet:petTouch'\)/.test(srcPreload) && /petReset: \(species: 'dog' \| 'cat'\) => ipcRenderer\.invoke\('pet:reset'/.test(srcPreload),
   'P3 preload 五桥接通道名对齐 <模块>:<动作>（pet:get/feed/petTouch/rename/reset）')
 ok(/petGet: \(\) => Promise<PetSnapshot>/.test(srcTypes) && /export interface PetSnapshot extends PetState/.test(srcTypes),
   'P4 types/index.ts 双区同步（DTO 区 PetState/PetSnapshot + api 区五方法声明）')
@@ -364,12 +364,12 @@ ok(/HUNGER_DECAY_PER_HOUR = 2\.8/.test(srcPetVault) && /STAGE_UP_NEED = 120/.tes
   'P10 数值常量与 docs/pet-design.md §五 一致（衰减 2.8/h、升级 120、拒食 92）')
 const POSE_SET = ['base', 'hungry', 'lie', 'pet', 'eat']
 const SPRITE_MISSING = []
-for (const sp of ['dog', 'cat', 'cthun']) for (const st of ['baby', 'adult']) for (const pose of POSE_SET) {
+for (const sp of ['dog', 'cat']) for (const st of ['baby', 'adult']) for (const pose of POSE_SET) {
   if (!existsSync(`${ROOT}/src/assets/pets/${sp}-${st}-${pose}.png`)) SPRITE_MISSING.push(`${sp}-${st}-${pose}`)
 }
-ok(SPRITE_MISSING.length === 0, 'P11 立绘 30 张齐（3 品种 × 2 阶段 × 5 姿态；键名与 PetWidget SPRITE_URLS 同规）', SPRITE_MISSING.join(','))
+ok(SPRITE_MISSING.length === 0, 'P11 立绘 20 张齐（2 品种 × 2 阶段 × 5 姿态；键名与 PetWidget SPRITE_URLS 同规）', SPRITE_MISSING.join(','))
 const SPRITE_NOALPHA = []
-for (const sp of ['dog', 'cat', 'cthun']) for (const st of ['baby', 'adult']) for (const pose of POSE_SET) {
+for (const sp of ['dog', 'cat']) for (const st of ['baby', 'adult']) for (const pose of POSE_SET) {
   const p = `${ROOT}/src/assets/pets/${sp}-${st}-${pose}.png`
   // PNG IHDR：偏移 25 = colorType（6=RGBA 带 alpha；2=RGB 无 alpha）
   if (existsSync(p) && readFileSync(p)[25] !== 6) SPRITE_NOALPHA.push(`${sp}-${st}-${pose}`)
@@ -378,13 +378,13 @@ ok(SPRITE_NOALPHA.length === 0,
   'P12 立绘带真 alpha 通道（colorType=6；AI 原图是无 alpha 的「棋盘格假透明」，拷回未处理版即穿帮）', SPRITE_NOALPHA.join(','))
 
 // ---- 布局改版 + 切换宠物（2026-09-28 第二轮）----
-ok(/ipcMain\.handle\('pet:switchSpecies'/.test(srcPetRepo) && /petSwitchSpecies: \(species: 'dog' \| 'cat' \| 'cthun'\) => ipcRenderer\.invoke\('pet:switchSpecies'/.test(srcPreload) && /export const petSwitchSpecies = /.test(srcIpc) && /petSwitchSpecies: \(species: PetSpecies\) => Promise<PetSnapshot>/.test(srcTypes),
+ok(/ipcMain\.handle\('pet:switchSpecies'/.test(srcPetRepo) && /petSwitchSpecies: \(species: 'dog' \| 'cat'\) => ipcRenderer\.invoke\('pet:switchSpecies'/.test(srcPreload) && /export const petSwitchSpecies = /.test(srcIpc) && /petSwitchSpecies: \(species: PetSpecies\) => Promise<PetSnapshot>/.test(srcTypes),
   'P13 换品种通道三层接线齐（repo handler + preload + ipc + types；漏一处 = 菜单点了没反应）')
 const switchBody = (srcPetVault.match(/export function vaultPetSwitchSpecies[\s\S]*?\n}/) || [''])[0]
 ok(switchBody && !/defaults\(\)/.test(switchBody) && !/\bexp\s*=/.test(switchBody) && !/\bhunger\s*=/.test(switchBody) && !/\bstage\s*=/.test(switchBody) && !/\bmood\s*=/.test(switchBody),
   'P14 换品种**保留进度**：函数体不重置任何数值（无 defaults()/exp=/hunger=/stage=/mood=）—— 本轮核心不变量')
-ok(/names: Record<PetSpecies, string>/.test(srcPetVault) && /names: \{ dog: '小狗', cat: '小猫', cthun: '小克苏恩' \}/.test(srcPetVault),
-  'P15 每品种名字表（名字跟着宠物走）+ 默认名 dog=小狗 / cat=小猫 / cthun=小克苏恩')
+ok(/names: Record<PetSpecies, string>/.test(srcPetVault) && /names: \{ dog: '小狗', cat: '小猫' \}/.test(srcPetVault),
+  'P15 每品种名字表（名字跟着宠物走）+ 默认名 dog=小狗 / cat=小猫')
 ok(/data-wb="petToolbar"/.test(srcPetWidget) && /data-wb="petMenuBtn"/.test(srcPetWidget) && /data-wb="petBottom"/.test(srcPetWidget),
   'P16 PetWidget 三段结构（顶部工具条 / 中部留白 / 底部贴底组）')
 ok(/data-wb="petMenu"/.test(srcPetWidget) && /petSwitchSpecies\(sp\)/.test(srcPetWidget) && /petReset\(/.test(srcPetWidget),

@@ -328,7 +328,7 @@ export interface BookmarkItem {
 }
 
 // ---- 桌宠（docs/pet-design.md）----
-export type PetSpecies = 'dog' | 'cat' | 'cthun'
+export type PetSpecies = 'dog' | 'cat'
 export interface PetState {
   version: number
   /** 当前品种的名字（= names[species]） */

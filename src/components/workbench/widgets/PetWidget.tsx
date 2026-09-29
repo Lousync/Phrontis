@@ -27,16 +27,6 @@ import catAdultHungry from '../../../assets/pets/cat-adult-hungry.png'
 import catAdultLie from '../../../assets/pets/cat-adult-lie.png'
 import catAdultPet from '../../../assets/pets/cat-adult-pet.png'
 import catAdultEat from '../../../assets/pets/cat-adult-eat.png'
-import cthunBabyBase from '../../../assets/pets/cthun-baby-base.png'
-import cthunBabyHungry from '../../../assets/pets/cthun-baby-hungry.png'
-import cthunBabyLie from '../../../assets/pets/cthun-baby-lie.png'
-import cthunBabyPet from '../../../assets/pets/cthun-baby-pet.png'
-import cthunBabyEat from '../../../assets/pets/cthun-baby-eat.png'
-import cthunAdultBase from '../../../assets/pets/cthun-adult-base.png'
-import cthunAdultHungry from '../../../assets/pets/cthun-adult-hungry.png'
-import cthunAdultLie from '../../../assets/pets/cthun-adult-lie.png'
-import cthunAdultPet from '../../../assets/pets/cthun-adult-pet.png'
-import cthunAdultEat from '../../../assets/pets/cthun-adult-eat.png'
 
 /** 立绘键 → URL（键规范 {species}-{stage}-{pose}.png，与 assets 文件名一一对应） */
 const SPRITE_URLS: Record<string, string> = {
@@ -44,13 +34,11 @@ const SPRITE_URLS: Record<string, string> = {
   'dog-adult-base': dogAdultBase, 'dog-adult-hungry': dogAdultHungry, 'dog-adult-lie': dogAdultLie, 'dog-adult-pet': dogAdultPet, 'dog-adult-eat': dogAdultEat,
   'cat-baby-base': catBabyBase, 'cat-baby-hungry': catBabyHungry, 'cat-baby-lie': catBabyLie, 'cat-baby-pet': catBabyPet, 'cat-baby-eat': catBabyEat,
   'cat-adult-base': catAdultBase, 'cat-adult-hungry': catAdultHungry, 'cat-adult-lie': catAdultLie, 'cat-adult-pet': catAdultPet, 'cat-adult-eat': catAdultEat,
-  'cthun-baby-base': cthunBabyBase, 'cthun-baby-hungry': cthunBabyHungry, 'cthun-baby-lie': cthunBabyLie, 'cthun-baby-pet': cthunBabyPet, 'cthun-baby-eat': cthunBabyEat,
-  'cthun-adult-base': cthunAdultBase, 'cthun-adult-hungry': cthunAdultHungry, 'cthun-adult-lie': cthunAdultLie, 'cthun-adult-pet': cthunAdultPet, 'cthun-adult-eat': cthunAdultEat,
 }
 
 /** 品种显示名（切换菜单 + 单一真相源） */
-const SPECIES_LABEL: Record<PetSpecies, string> = { dog: '小狗', cat: '小猫', cthun: '小克苏恩' }
-const PET_SPECIES_LIST: PetSpecies[] = ['dog', 'cat', 'cthun']
+const SPECIES_LABEL: Record<PetSpecies, string> = { dog: '小狗', cat: '小猫' }
+const PET_SPECIES_LIST: PetSpecies[] = ['dog', 'cat']
 
 const STAGE_UP_NEED = 120
 const CANVAS = 192

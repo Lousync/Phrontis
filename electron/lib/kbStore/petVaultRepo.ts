@@ -22,10 +22,10 @@ import { dateKeyOf } from '../appUsage'
 const MOD = 'modules/pet'
 const PET_KEY = 'pet.json'
 
-export type PetSpecies = 'dog' | 'cat' | 'cthun'
+export type PetSpecies = 'dog' | 'cat'
 
 /** 合法品种集（readRaw 容错 / switch / reset 共用，单一真相源） */
-const PET_SPECIES: readonly PetSpecies[] = ['dog', 'cat', 'cthun']
+const PET_SPECIES: readonly PetSpecies[] = ['dog', 'cat']
 
 function isPetSpecies(v: unknown): v is PetSpecies {
   return typeof v === 'string' && (PET_SPECIES as readonly string[]).includes(v)
@@ -66,7 +66,7 @@ const MOOD_DECAY_EXTRA_LOW_HUNGER = 1.8
 const FEED_REFUSE_THRESHOLD = 92
 
 function defaultNameFor(species: PetSpecies): string {
-  return species === 'cat' ? '小猫' : species === 'cthun' ? '小克苏恩' : '小狗'
+  return species === 'cat' ? '小猫' : '小狗'
 }
 
 /** 名字清洗：非字符串/空白/超 8 字一律处理（旧档或手改容错） */
@@ -76,21 +76,20 @@ function sanitizeName(v: unknown, fallback: string): string {
 
 function defaults(): PetState {
   return {
-    version: 1, name: '小狗', names: { dog: '小狗', cat: '小猫', cthun: '小克苏恩' },
+    version: 1, name: '小狗', names: { dog: '小狗', cat: '小猫' },
     species: 'dog', stage: 0, exp: 0, hunger: 80, mood: 80, ts: Date.now(),
   }
 }
 
 function readRaw(): PetState {
   const s = readJson<PetState>(MOD, PET_KEY, defaults())
-  // 容错：字段缺失/类型漂移时兜底（旧文件或手改）；cthun 晚于旧档加入，走 names 表补默认名
+  // 容错：字段缺失/类型漂移时兜底（旧文件或手改）
   const species: PetSpecies = isPetSpecies(s.species) ? s.species : 'dog'
   // 名字：优先 names 表；旧档只有单个 name → 归到当前品种，其他品种给默认名（一次性迁移，无需单独脚本）
   const rawNames = (s as Partial<PetState>).names
   const names: Record<PetSpecies, string> = {
     dog: sanitizeName(rawNames?.dog ?? (species === 'dog' ? s.name : undefined), defaultNameFor('dog')),
     cat: sanitizeName(rawNames?.cat ?? (species === 'cat' ? s.name : undefined), defaultNameFor('cat')),
-    cthun: sanitizeName(rawNames?.cthun ?? (species === 'cthun' ? s.name : undefined), defaultNameFor('cthun')),
   }
   return {
     version: 1,
