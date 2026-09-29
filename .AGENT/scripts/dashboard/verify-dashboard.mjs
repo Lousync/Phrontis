@@ -252,9 +252,14 @@ eq('A25 fmtMinutes 零', fmtMinutes(0), '没有记录')
   const knowledge = stripComments(read('src/modules/knowledge/index.tsx'))
   ok('E21 负向：App 不再同步派发 kb-open-note-rel（冷挂载无监听器必丢），改投 pendingOpenRel',
     !/kb-open-note-rel/.test(app) && /setPendingOpenRel\(\{\s*relPath/.test(app))
+  // 2026-09-29 放宽字面串：`openByRelPath` 后来加了 `{ startInEdit }` 选项（dashboard 首跳带编辑态），
+  // 原断言把它写成 `void openByRelPath(pendingRel.relPath)` 整句匹配 → 加了参数就永远不命中。
+  // 这里改判「消费调用出现在打开调用之前」，保住原意（先消费再打开，防 effect 重跑二次打开）。
+  const consumeAt = knowledge.indexOf('onPendingRelConsumed?.()')
+  const openAt = knowledge.indexOf('openByRelPath(pendingRel.relPath')
   ok('E22 消费接线：case knowledge 传 pendingRelPath/onPendingRelConsumed，模块侧先消费再打开',
     /pendingRelPath=\{pendingOpenRel\}/.test(app) && /onPendingRelConsumed=\{consumePendingOpenRel\}/.test(app)
-    && knowledge.indexOf('onPendingRelConsumed?.()') < knowledge.indexOf('void openByRelPath(pendingRel.relPath)'))
+    && consumeAt >= 0 && openAt >= 0 && consumeAt < openAt)
   ok('E23 openByRelPath 冷态补拉（allPages 未装载时真实笔记不再误落 draft）',
     /const fresh = await getKnowledgePages\(\)/.test(knowledge) && /setAllPages\(fresh\)/.test(knowledge))
 }
@@ -269,7 +274,11 @@ eq('A25 fmtMinutes 零', fmtMinutes(0), '没有记录')
 
   ok('E1 ResizablePanel 有 openDelayMs 且只作用于展开',
     /openDelayMs\?:\s*number/.test(panel) && /visible\s*&&\s*openDelayMs\s*>\s*0/.test(panel))
-  ok('E2 收起不加延迟（收起要立刻响应）', /!dragging\s*&&\s*visible\s*&&\s*openDelayMs/.test(panel))
+  // 2026-09-29 同步实现形态：`ResizablePanel` 把这里从 `!dragging && visible && openDelayMs`
+  // 重构成三元（`dragging ? 'none' : \`…${visible && openDelayMs > 0 ? …}\``）。语义不变 ——
+  // 拖拽即时、只有「展开（visible）」才加延迟，收起仍立刻响应。断言按当前形态写。
+  ok('E2 收起不加延迟（收起要立刻响应）',
+    /dragging\s*\?\s*'none'/.test(panel) && /visible\s*&&\s*openDelayMs\s*>\s*0/.test(panel))
   ok('E3 WorkbenchShell 把延迟透传给左右两栏',
     (shell.match(/openDelayMs=\{sidesOpenDelayMs\}/g) || []).length === 2)
   ok('E4 App 只在「刚从看板返回」时给延迟',

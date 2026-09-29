@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
-import { ArrowLeft, Check, Pencil, Puzzle } from 'lucide-react'
+import { ArrowLeft, Check, Pencil, Package } from 'lucide-react'
 import { dashboardGetSnapshot, updateScheduleTodo, toggleHabitCheck, pluginListDashboardWidgets } from '../../lib/ipc'
 import { notifyDataChanged, useDataChanged } from '../../lib/dataChanged'
 import { useSettings } from '../../lib/SettingsContext'
@@ -288,7 +288,7 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
     const b = CARD_REGISTRY.find((c) => c.id === id)
     if (b) return b
     const w = widgets.find((x) => widgetIdOf(x) === id)
-    if (w) return { id: widgetIdOf(w), label: w.title, group: 'plugin', Icon: Puzzle, defaultOn: false, w: w.w, h: w.h }
+    if (w) return { id: widgetIdOf(w), label: w.title, group: 'plugin', Icon: Package, defaultOn: false, w: w.w, h: w.h }
     return null
   }
 
@@ -786,7 +786,7 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
                       body={def.group === 'plugin'
                         ? (
                           <span className="mt-1 flex items-center gap-1 text-[11px] text-[var(--text-muted)]">
-                            <Puzzle size={12} />插件控件
+                            <Package size={12} />插件控件
                           </span>
                         )
                         : (
