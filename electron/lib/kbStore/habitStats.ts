@@ -236,3 +236,58 @@ export function checkinHeatSeries(
   }
   return out
 }
+
+/* ---------------- 分享卡片派生（2026-09-29） ----------------
+ * 与上面两条同源：口径只在这里定义一次，分享卡片不另写一套「连续天数 / 周格 / 热力」
+ * （同一 app 里两处数字不该打架）。上溯日序号一律走 dayNo/keyOfNo 的 UTC 口径。
+ */
+
+/** `dayNo` → 所在周的**周一**天序号（JS getUTCDay：0=周日，故周日归上一周的周一） */
+function mondayNoOf(no: number): number {
+  return no - ((utcDow(no) + 6) % 7)
+}
+
+/**
+ * 本周 7 格（**周一为起点**，cells[0] = 周一）。
+ * `done` = 已打卡天数。未来日自然为 false（没有记录即没打）。
+ */
+export function checkinWeekCells(
+  records: Array<{ date: string }>,
+  today: string,
+): { done: number; cells: boolean[] } {
+  const no = dayNo(today)
+  const cells = [false, false, false, false, false, false, false]
+  if (!Number.isFinite(no)) return { done: 0, cells }
+  const mon = mondayNoOf(no)
+  let done = 0
+  for (let i = 0; i < 7; i++) {
+    if (hasCheckinOn(records, keyOfNo(mon + i))) {
+      cells[i] = true
+      done += 1
+    }
+  }
+  return { done, cells }
+}
+
+/**
+ * 近 `weeks` 周的打卡格（**列优先一维数组**：第 c 列 = 第 c 周、行 r = 周一 + r）。
+ * 供分享卡片的马赛克主视觉直接逐格绘制；周一对齐与 `checkinWeekCells` 同一口径。
+ * 长度恒为 `weeks * 7`（数据不足的一侧补 false），空输入返回全 false 而非空数组。
+ */
+export function checkinHeatGrid(
+  records: Array<{ date: string }>,
+  today: string,
+  weeks = 13,
+): boolean[] {
+  const grid = new Array<boolean>(Math.max(0, weeks) * 7).fill(false)
+  const no = dayNo(today)
+  if (!Number.isFinite(no) || weeks <= 0) return grid
+  const lastMon = mondayNoOf(no)                    // 本周周一 = 最后一列的基准
+  for (let c = 0; c < weeks; c++) {
+    const mon = lastMon - (weeks - 1 - c) * 7
+    for (let r = 0; r < 7; r++) {
+      grid[c * 7 + r] = hasCheckinOn(records, keyOfNo(mon + r))
+    }
+  }
+  return grid
+}

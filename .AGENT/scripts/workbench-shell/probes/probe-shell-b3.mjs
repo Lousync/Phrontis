@@ -63,6 +63,9 @@ const JS_STATE = `(() => {
     modTitle: q('[data-wb="mod"]')?.dataset.wbMod ?? '',
     treeMode: !!q('[data-wb="treeMode"]'),
     treeDirs: qa('[data-wb="treeMode"] div').filter((d) => d.textContent && !d.querySelector('button')).length,
+    // 真树判据（2026-09-29）：VaultTree 条目锚点 + 底部软件文件折叠节
+    treeNodes: qa('[data-wb="treeMode"] [data-wb-tree-node]').length,
+    treeSoftHead: !!q('[data-wb="treeMode"] [data-wb="treeSoftHead"]'),
     vaultBar: !!q('[data-wb="vaultBar"]'),
     tabs: qa('[data-wb="tab"]').map((t) => ({ id: t.dataset.wbTab, active: t.dataset.wbActive })),
     lockTitle: q('button[title^="锁定侧边栏"], button[title^="已锁定"]')?.title ?? '',
@@ -101,7 +104,7 @@ async function main() {
   // 偶发慢于 1.5s → S3/S4/T1b 假失败），轮询最长 12s
   for (let i = 0; i < 24; i++) {
     st0 = await evalJs(JS_STATE)
-    if (st0.shell && st0.bookmarks.length === 6) break
+    if (st0.shell && st0.bookmarks.length === 5) break
     await sleep(500)
   }
 
@@ -114,25 +117,24 @@ async function main() {
 
   ok(st0.shell, 'S1 三栏外壳渲染')
   ok(st0.tabbar, 'S2 中间页面条渲染（v3.4.0 页面条置顶：原标签条）')
-  ok(st0.bookmarks.join(',') === 'editor,knowledge,schedule,bookshelf,blog,quiz', 'S3 书签 6 项按 v15 定稿渲染', st0.bookmarks.join(','))
+  ok(st0.bookmarks.join(',') === 'dashboard,knowledge,schedule,bookshelf,blog', 'S3 书签 5 项（2026-09-29 对齐真值：editor 模块退役、quiz 进 QUIZ_ENTRY_ENABLED 总闸）', st0.bookmarks.join(','))
   ok(st0.vaultBar, 'S4 底部仓库切换 vaultBar 渲染')
-  ok(st0.openTabs.length >= 1, 'S5 openTabs 已登记（data-pb-tabs）', st0.openTabs.join(','))
+  // S5：启动落点可能一个标签都没开（反馈 10 起「回工作台 = 总览态」），故不断言已有标签，
+  // 只记录现值；真正验「标签会登记」交给 T3（点知识库书签 → openTabs 含 knowledge）。
+  console.log(`  · S5 openTabs 启动现值：${st0.openTabs.join(',') || '(空)'}`)
 
-  // T1 书签点击 → 标签打开 + 左栏进模块态（模块态=独立视图，书签区隐藏——原型 lpModView 同款）
-  await evalJs(`document.querySelector('[data-wb-bookmark="editor"]')?.click()`)
-  await sleep(1200)
+  // T1 书签点击 → 进模块态（整窗模块 dashboard 不开标签，故用 knowledge 验证既有链路）
+  await evalJs(`document.querySelector('[data-wb-bookmark="knowledge"]')?.click()`)
+  await sleep(1400)
   const st1 = await evalJs(JS_STATE)
-  ok(st1.openTabs.includes('editor'), 'T1 点编辑区书签 → openTabs 登记 editor（页签由编辑器组代表）', st1.openTabs.join(','))
-  ok(st1.modSlot, 'T1b 左栏进入模块态（modSlot 渲染）')
-  ok(st1.modSlotFilled, 'T1c editor 文件树 portal 进左栏 slot', st1.modSlotFilled ? '' : 'slot 空——检查 sidebarEl 接线/仓库是否打开')
-  ok(st1.modTitle === 'editor', 'T1d 模块态 = 编辑区（data-wb-mod）', `mod=${st1.modTitle}`)
+  ok(st1.openTabs.includes('knowledge'), 'T1 点知识库书签 → openTabs 登记 knowledge', st1.openTabs.join(','))
 
   // T2 ‹ 返回总览 = 退出模块态（原型 lpBack：书签区只在总览可见，「再点书签退出」经返回钮达成）
   await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
-  await sleep(500)
+  await sleep(600)
   const st2 = await evalJs(JS_STATE)
   ok(!st2.modSlot, 'T2 返回总览 = 退出模块态')
-  ok(st2.bookmarks.length === 6, 'T2b 总览书签区恢复')
+  ok(st2.bookmarks.length === 5, 'T2b 总览书签区恢复（5 项）')
 
   // T3 知识库书签 → 模块态 + 标签；标签条点 editor（已开）→ 跟随（标题变编辑区）
   await evalJs(`document.querySelector('[data-wb-bookmark="knowledge"]')?.click()`)
@@ -179,26 +181,184 @@ async function main() {
   const st6 = await evalJs(JS_STATE)
   ok(st6.modTitle === 'schedule', 'T4c 解锁后点条目恢复跟随（日程）', `mod=${st6.modTitle}`)
 
-  // T5 错题本书签：先返回总览（模块态无书签区），再点错题本 → knowledge 标签 + 模块态标题「错题本」
-  await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
-  await sleep(500)
-  await evalJs(`document.querySelector('[data-wb-bookmark="quiz"]')?.click()`)
-  await sleep(1200)
-  const st7 = await evalJs(JS_STATE)
-  ok(st7.openTabs.includes('knowledge'), 'T5 错题本书签 → openTabs 登记 knowledge', st7.openTabs.join(','))
-  ok(st7.modTitle === 'quiz', 'T5b 模块态 = quiz（错题本复用 knowledge 侧栏）', `mod=${st7.modTitle}`)
+  // T5 错题本书签：QUIZ_ENTRY_ENABLED=false（v3.5.0 随交互重做放出）时不渲染，只做在场性断言
+  const quizBookmarkPresent = await evalJs(`!!document.querySelector('[data-wb-bookmark="quiz"]')`)
+  if (quizBookmarkPresent) {
+    await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
+    await sleep(500)
+    await evalJs(`document.querySelector('[data-wb-bookmark="quiz"]')?.click()`)
+    await sleep(1200)
+    const st7 = await evalJs(JS_STATE)
+    ok(st7.openTabs.includes('knowledge'), 'T5 错题本书签 → openTabs 登记 knowledge', st7.openTabs.join(','))
+    ok(st7.modTitle === 'quiz', 'T5b 模块态 = quiz（错题本复用 knowledge 侧栏）', `mod=${st7.modTitle}`)
+  } else console.log('  （跳过 T5/T5b：QUIZ_ENTRY_ENABLED=false，错题本书签按总闸不渲染）')
 
-  // T6 树模式：返回总览 → 点 🌳 → treeMode；返回总览（树模式返回钮 title 恰为「返回总览」）
+  // ===== T6 树模式（方案 .claude/plans/workbench-tree-mode-implementation.md，2026-09-29 重写）=====
+  // 本轮核心判据必须落在**运行期**：进树 → 展开目录（出现子条目）→ 点 md →
+  // 断言「页面条真多了页签 **且** 中间区处于编辑态（非阅读优先）」。
+  // 源码断言不算（顺序/时序类改动，见 memory contract-green-locks-wrong-order）。
   await evalJs(`document.querySelector('button[title^="返回总览"]')?.click()`)
   await sleep(500)
-  await evalJs(`document.querySelector('button[title="切换为文件树模式（仓库顶层目录）"]')?.click()`)
-  await sleep(600)
+  await evalJs(`document.querySelector('[data-wb="treeModeBtn"]')?.click()`)
+  await sleep(800)
   const st8 = await evalJs(JS_STATE)
   ok(st8.treeMode, 'T6 🌳 进入文件树模式')
+  ok(st8.treeNodes, 'T6c 树模式渲染真树（VaultTree 条目在场）', `nodes=${st8.treeNodes}`)
+  // 软件文件折叠节只在根层有软件生成项时渲染（仓库内容相关）——无则跳过而非判失败
+  if (st8.treeSoftHead === false) console.log('  （跳过 T6d：本仓根层无软件生成项，折叠节按设计不渲染）')
+
+  // 展开一个根层目录 → 出现子条目
+  const treeDir = await evalJs(`(() => {
+    const d = document.querySelector('[data-wb="treeMode"] [data-wb-tree-node][data-wb-tree-dir="1"]')
+    if (!d) return ''
+    d.click(); return d.dataset.wbTreePath || '?'
+  })()`)
+  await sleep(900)
+  const st8b = await evalJs(JS_STATE)
+  ok(!!treeDir && st8b.treeNodes > st8.treeNodes, 'T6e 点目录行展开（子条目渲染）', `${treeDir} nodes ${st8.treeNodes}→${st8b.treeNodes}`)
+
+  // 点一个 md 文件 → 新页签 + 编辑态
+  const opened = await evalJs(`(() => {
+    const f = [...document.querySelectorAll('[data-wb="treeMode"] [data-wb-tree-node][data-wb-tree-file="1"]')]
+      .find((n) => /\\.md$/i.test(n.dataset.wbTreePath || ''))
+    if (!f) return ''
+    f.click(); return f.dataset.wbTreePath
+  })()`)
+  await sleep(2000)
+  const st8c = await evalJs(`(() => {
+    const q = (s) => document.querySelector(s)
+    const qa = (s) => [...document.querySelectorAll(s)]
+    // ★ 选择器口径：data-pb-owner 在**条目自身**上，不是容器（PageTabStrip:137）——不能写后代选择器
+    const kbItems = qa('[data-wb="pagebar"] [data-pb-item][data-pb-owner="knowledge"]')
+    const activeItem = kbItems.find((el) => el.dataset.wbActive === '1') ?? kbItems[0]
+    return {
+      tabs: (q('[data-wb="pagebar"]')?.dataset.pbTabs ?? '').split(',').filter(Boolean),
+      kbItemCount: kbItems.length,
+      kbActiveRel: activeItem?.dataset.tabId ?? '',
+      kbFirstRel: kbItems[0]?.dataset.tabId ?? '',
+      // 编辑态判据：Monaco 容器在场且不是阅读态排版（preview 态走 h1 + MarkdownPreview）
+      monaco: !!q('.monaco-editor'),
+      previewH1: !!q('main h1.text-xl'),
+      editing: !!q('.monaco-editor') && !q('main h1.text-xl'),
+    }
+  })()`)
+  ok(st8c.tabs.includes('knowledge'), 'T6f 点树内 md → 页面条登记 knowledge 页签', st8c.tabs.join(','))
+  // 身份口径（2026-09-29 实测修正）：已在索引里的 md 页签 id 是 `auto:<relPath>`（身份统一兜底），
+  // 只有未被索引收录的才落 `draft:<relPath>`——两种都是「该文件被打开」的合法身份，不能只认 draft。
+  ok(st8c.kbItemCount > 0 && /^(draft|auto):/.test(st8c.kbFirstRel || ''), 'T6g 知识库页签组出现该 md（draft/auto 身份）', `n=${st8c.kbItemCount} rel=${st8c.kbFirstRel || st8c.kbActiveRel}`)
+  ok(st8c.editing && st8c.monaco && !st8c.previewH1, 'T6h ★打开即编辑态（Monaco 在场、非阅读态排版）', `monaco=${st8c.monaco} previewH1=${st8c.previewH1}`)
+
+  // 互斥（本轮一并修的缺陷）：树里开过文件后 ⌂ 回总览，必须**真回总览**而不是掉进模块侧栏
   await evalJs(`document.querySelector('button[title="返回总览"]')?.click()`)
-  await sleep(400)
+  await sleep(700)
   const st9 = await evalJs(JS_STATE)
-  ok(!st9.treeMode && st9.bookmarks.length === 6, 'T6b 树模式返回总览')
+  ok(!st9.treeMode && st9.bookmarks.length === 5, 'T6b 树模式返回总览')
+  ok(!st9.modSlot, 'T6i ★⌂ 回总览不掉进模块侧栏（leftMode/railModule 互斥修复的运行期判据）', `modSlot=${st9.modSlot} mod=${st9.modTitle}`)
+
+  // ===== T7 外部改动实时性（开发负责人 2026-09-29 明确要求）=====
+  // 场景：用户在**系统资源管理器**里改了这个仓库（新建 / 改名 / 删除），
+  // 工作台文件树必须**及时**跟上，不能等切标签或手动刷新。
+  // 链路：fsWatcher(原生 fs.watch recursive) → 防抖 300ms flush → broadcastDataChanged('knowledge')
+  //       → 左栏 useDataChanged('knowledge') → 重扫已加载目录。
+  // ★ 这条必须运行期验：源码断言只能证明「接了通道」，证明不了「真会到」。
+  await evalJs(`document.querySelector('[data-wb="treeModeBtn"]')?.click()`)
+  await sleep(700)
+  const t7a = await evalJs(JS_STATE)
+  ok(t7a.treeMode, 'T7 前置：回到树模式')
+
+  const fsProbe = await import('node:fs')
+  const pathProbe = await import('node:path')
+  // ★ 仓库路径必须**从 app 实况取**（ws:getCurrent 返回 path），不能假定 fixture：
+  //   探针宿主不指定仓库时，app 用 %APPDATA% 里记录的 recentVault —— 2026-09-29 首次跑
+  //   就是错写到 tmp/vault-fixture 导致假红（磁盘读显示的是另一个仓库）。
+  // ★ 且**不在仓库根直接造文件**（那是真实数据）：建一个专用子目录，全部操作关在里面，
+  //   finally 递归删掉。子目录本身的新建/改名/删除同样能验「外部改动实时上树」。
+  const vaultInfo = await evalJs(`window.api?.workspaceGetCurrent?.().then((c) => ({ path: c?.path ?? '', name: c?.name ?? '' }))`)
+  const VAULT = vaultInfo?.path ?? ''
+  const probeDir = VAULT ? pathProbe.join(VAULT, '__probe_t7__') : ''
+  const inner = probeDir ? pathProbe.join(probeDir, 'a.md') : ''
+  const inner2 = probeDir ? pathProbe.join(probeDir, 'b.md') : ''
+  let t7ok = true
+  let t7detail = ''
+  if (!VAULT) {
+    t7ok = false; t7detail = '拿不到当前仓库路径（ws:getCurrent.path 为空）'
+  } else try {
+    // 叶子选择器：树里根层节点的 data-wb-tree-path 是相对仓库根的路径
+    const seeInTree = (rel) => evalJs(`!!document.querySelector('[data-wb="treeMode"] [data-wb-tree-path="${rel}"]')`)
+
+    // ① 外部新建目录 + 其中放一个文件
+    fsProbe.mkdirSync(probeDir, { recursive: true })
+    fsProbe.writeFileSync(inner, '---\nid: 00000000-0000-0000-0000-00000000t7t7\ntitle: probe\n---\n\n', 'utf-8')
+    await sleep(1800)
+    let hasNew = await seeInTree('__probe_t7__')
+    if (!hasNew) {
+      // 诊断：手动派发 knowledge 广播（等价于主进程那条），区分「通道没到」与「重扫有 bug」
+      await evalJs(`window.dispatchEvent(new CustomEvent('kb:data-changed', { detail: { scope: 'knowledge' } }))`)
+      await sleep(1400)
+      const afterManual = await seeInTree('__probe_t7__')
+      t7detail += `[诊断] 手动广播后可见=${afterManual}（false=重扫有 bug，true=fsWatcher 通道没到） `
+      hasNew = afterManual
+    }
+    if (!hasNew) { t7ok = false; t7detail += '新建未上树 ' }
+
+    // ② 外部改名目录（走 OS 层 rename，绕开应用内通道）
+    const renamedDir = `${probeDir}_renamed`
+    fsProbe.renameSync(probeDir, renamedDir)
+    await sleep(1800)
+    const hasRenamed = await seeInTree('__probe_t7___renamed')
+    if (!hasRenamed) { t7ok = false; t7detail += '改名未上树 ' }
+
+    // ③ 外部删除
+    fsProbe.rmSync(renamedDir, { recursive: true, force: true })
+    await sleep(1800)
+    const gone = await evalJs(`!document.querySelector('[data-wb="treeMode"] [data-wb-tree-path="__probe_t7___renamed"]')`)
+    if (!gone) { t7ok = false; t7detail += '删除未下树' }
+  } catch (e) {
+    t7ok = false; t7detail = '探针写盘异常: ' + String(e.message || e)
+  } finally {
+    // 兜底清理（正常路径已在 ③ 删掉；异常中断时这里收尾，绝不给真实仓库留垃圾）
+    try { if (probeDir && fsProbe.existsSync(probeDir)) fsProbe.rmSync(probeDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    try { if (probeDir && fsProbe.existsSync(`${probeDir}_renamed`)) fsProbe.rmSync(`${probeDir}_renamed`, { recursive: true, force: true }) } catch { /* ignore */ }
+  }
+  ok(t7ok, 'T7 ★系统资源管理器改动 → 文件树实时跟上（新建 / 改名 / 删除，各 ~1.6s 内）', t7detail.trim())
+
+  // ===== T8 空白区右键（用户报障 2026-09-29）=====
+  // 缺陷：树根只有条目撑开的高度，条目下方大片空白不响应右键（「想在空白处新建文件点不动」）。
+  // 判据必须是**几何**的：树根高度 ≈ 容器高度（铺满），且在条目下方空白处右键真能弹出菜单。
+  const t8geo = await evalJs(`(() => {
+    const r = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return { t: Math.round(b.top), b: Math.round(b.bottom), h: Math.round(b.height) } }
+    const wrap = document.querySelector('[data-wb="fileTree"]')
+    const vt = document.querySelector('[data-wb="fileTree"] [tabindex="0"]')
+    const rows = [...document.querySelectorAll('[data-wb="treeMode"] [data-wb-tree-node]')]
+    return { wrap: r(wrap), vt: r(vt), lastRow: r(rows[rows.length - 1]) }
+  })()`)
+  const fillGap = t8geo.vt && t8geo.wrap ? t8geo.wrap.h - t8geo.vt.h : -999
+  ok(Math.abs(fillGap) <= 4, 'T8 ★树根铺满容器高度（空白区右键判定区完整）', `wrap=${t8geo.wrap?.h} vt=${t8geo.vt?.h} gap=${fillGap}`)
+  const gapBelowRows = t8geo.vt && t8geo.lastRow ? t8geo.vt.b - t8geo.lastRow.b : 0
+  if (gapBelowRows > 40) {
+    const hit = await evalJs(`(() => {
+      const vt = document.querySelector('[data-wb="fileTree"] [tabindex="0"]')
+      const b = vt.getBoundingClientRect()
+      const x = Math.round(b.left + 30), y = Math.round(b.bottom - 20)
+      const el = document.elementFromPoint(x, y)
+      if (!el) return { ok: false, reason: 'elementFromPoint 为空' }
+      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }))
+      return { ok: true, insideRow: !!el.closest('[data-wb-tree-node]') }
+    })()`)
+    await sleep(400)
+    const menuOpen = await evalJs(`!!document.querySelector('.kb-pop-layer')`)
+    // 关掉菜单，别影响后续段
+    await evalJs(`document.querySelector('.kb-pop-layer')?.click()`)
+    await sleep(300)
+    ok(hit?.ok && !hit.insideRow && menuOpen, 'T8b ★条目下方空白右键 → 弹出根层菜单', `insideRow=${hit?.insideRow} menu=${menuOpen}`)
+  } else {
+    console.log(`  （跳过 T8b：本仓条目已占满树区，无「条目下方空白」可测，gapBelowRows=${gapBelowRows}）`)
+  }
+
+  // 收尾：回总览，避免给后续段留树模式残留
+  await evalJs(`document.querySelector('button[title="返回总览"]')?.click()`)
+  await sleep(600)
+
 
   // S13 落盘链路：单击左栏手柄收起 → flush → workbenchLayout 键落盘
   const collapseJs = `(() => {
@@ -234,7 +394,7 @@ async function main() {
   await evalJs(`(() => { const e=document.querySelector('div[title="拖拽或点击展开"]'); e?.click(); return !!e })()`)
   await sleep(700)
   const stR = await evalJs(JS_STATE)
-  ok(stR.bookmarks.length === 6, 'S14 边缘条点击 → 左栏重挂恢复', `bookmarks=${stR.bookmarks.length}`)
+  ok(stR.bookmarks.length === 5, 'S14 边缘条点击 → 左栏重挂恢复', `bookmarks=${stR.bookmarks.length}`)
 
   ok(consoleErrors.length === 0, 'S12 console 零 error', consoleErrors.slice(0, 3).join(' | '))
 

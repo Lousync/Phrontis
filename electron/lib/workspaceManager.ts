@@ -909,6 +909,22 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
     }
   })
 
+  /**
+   * 结构性文件操作通道（createFile / mkdir / rename / trash）统一补
+   * `broadcastDataChanged('knowledge')`（方案 .claude/plans/workbench-tree-mode-implementation.md §2.2）。
+   *
+   * **为什么必须广播**：这些通道写盘走的是裸 fs（不经 writeWorkspaceFile），但应用内写盘会被
+   * `markSelfWrite` 登记，fsWatcher 命中即跳过 → 除「调用方自己刷新自己」外**没有任何通道**
+   * 通知知识库列表 / 文件树（铁律 1 的实际缺口）。工作台左栏文件树的跨模块同步依赖它。
+   *
+   * ⚠️ **刻意不加在 `ws:writeFile`（writeWorkspaceFile）里**：那条被自动保存高频调用，
+   * 广播会造成刷新风暴。只加在这四个**结构性低频**通道。
+   *
+   * ⚠️ **`ws:pasteExternal` 也刻意不加**（2026-09-29 与开发负责人确认）：粘贴的多是外来附件
+   * （xlsx / pdf / 图片），它们**不进知识库收录**（收录门槛是 frontmatter id），广播刷不出任何
+   * 可见变化却会白跑一次图谱重算 + 推一次模块状态机（贴图片纯亏）。该通道已有**更精准**的既有
+   * 处理：仅当本批含 `.md` 时才 `invalidateIndexIfCurrentVault`。文件树侧自己重读目录即可。
+   */
   // 新建文件（content 可选：编辑器「新建知识页」一步写入 frontmatter 模板）
   ipcMain.handle('ws:createFile', (_e, rootId: string, relPath: string, content?: string) => {
     try {
@@ -925,6 +941,7 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       }
       if (isKnowledgeIndexSensitive(finalAbs)) invalidateIndexIfCurrentVault(rootId)
       const finalRel = finalName === requestedName ? relPath : relPath.replace(/[^\\/]+$/, finalName)
+      broadcastDataChanged('knowledge')
       return { ok: true, relPath: finalRel, renamed: finalName !== requestedName }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -942,6 +959,7 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       const finalAbs = join(dir, finalName)
       mkdirSync(finalAbs, { recursive: false })
       const finalRel = finalName === requestedName ? relPath : relPath.replace(/[^\\/]+$/, finalName)
+      broadcastDataChanged('knowledge')
       return { ok: true, relPath: finalRel, renamed: finalName !== requestedName }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -1004,6 +1022,7 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
   ipcMain.handle('ws:rename', (_e, rootId: string, oldRel: string, newRel: string) => {
     try {
       renameWorkspacePath(rootId, oldRel, newRel)
+      broadcastDataChanged('knowledge')
       return { ok: true }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -1014,6 +1033,7 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
   ipcMain.handle('ws:trash', async (_e, rootId: string, relPath: string) => {
     try {
       await trashWorkspacePath(rootId, relPath)
+      broadcastDataChanged('knowledge')
       return { ok: true }
     } catch (e) {
       return { ok: false, error: (e as Error).message }

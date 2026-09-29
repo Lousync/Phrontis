@@ -18,7 +18,7 @@ import {
   WORKBENCH_BOOKMARKS, RAIL_FOLLOW_MAP, WORKBENCH_TABBAR_EXCLUDED,
   parseWorkbenchLayout, DEFAULT_WORKBENCH_LAYOUT,
 } from '../../../src/lib/workbenchLayout.ts'
-import { isTabName, RAIL_MODULE_IDS, railOrder, railVisibleOrder, railHiddenIds } from '../../../src/lib/appModules.ts'
+import { isTabName, RAIL_MODULE_IDS, railOrder, railVisibleOrder, railHiddenIds, APP_MODULES } from '../../../src/lib/appModules.ts'
 
 // ★ 仓库根按**脚本自身位置**解析，不写死绝对路径（2026-09-22 修正，同 verify-perception 的口径）：
 //   写死会把「在 worktree 里跑」变成「静默校验主仓」——脚本全绿而实际改的是另一棵树，
@@ -132,6 +132,19 @@ ok(railIds && railIds.join(',') === RAIL_MODULE_IDS.join(','),
   railIds ? `组件 ${railIds.join(',')} vs 真源 ${RAIL_MODULE_IDS.join(',')}` : '抠不到')
 ok(/railVisibleOrder\(/.test(srcBar) && /railOrder\(/.test(srcBar),
   'C1e 图标条渲染顺序走 railOrder / railVisibleOrder 归一化')
+/* C1d2（2026-09-29）：`APP_MODULES[].bar` 曾与真值不符（4 处多标 + 1 处漏标）——
+   v3.4.0 把 knowledge/blog/schedule/toolbox 收进**工作台内**后标记没跟着改，
+   且 recycle 明明在图标条上却标了 false。现要求逐项一致。 */
+{
+  const barIds = APP_MODULES.filter((m) => m.bar).map((m) => m.id)
+  const railSet = new Set(RAIL_MODULE_IDS)
+  const barSet = new Set(barIds)
+  const extra = barIds.filter((id) => !railSet.has(id))
+  const missing = RAIL_MODULE_IDS.filter((id) => !barSet.has(id))
+  ok(extra.length === 0 && missing.length === 0,
+    'C1d2 appModules 的 bar 标记与 RAIL_MODULE_IDS 逐项一致（图标条成员只有一个真源）',
+    `多标 [${extra.join(',')}] 漏标 [${missing.join(',')}]`)
+}
 ok(/update\('railOrder'/.test(srcBar) && /update\('railHidden'/.test(srcBar),
   'C1f 拖拽重排写 railOrder、右键勾选写 railHidden')
 ok(!/activityBarOrder|activityBarHidden/.test(srcBar),
@@ -671,6 +684,107 @@ ok(/setActiveToolTab\(null\); setActiveTab\(null\); setRailModule\(null\)/.test(
 ok(/else if \(!activeTab && !activeToolTab\) setRailModule\(null\)/.test(srcApp)
   && /\[activeTab, activeToolTab, wbLayout\.leftLocked\]/.test(srcApp),
   'M8 跟随 effect 增加归位分支：中间区真正空了 → 左栏回顶层（工具标签打开不动左栏）')
+
+// ===== N1-N12. 左栏文件树模式（方案 .claude/plans/workbench-tree-mode-implementation.md，2026-09-29）=====
+// 缺陷面：树模式原本只做根层只读列表（目录行是死 div，方案 §1.1 定位到行）——
+// 本轮换成真树：复用 VaultTree + ws:* 全套文件操作 + 点文件一律进编辑态。
+const srcTree = stripComments(read('src/components/workbench/WorkbenchFileTree.tsx'))
+const srcTreeRaw = read('src/components/workbench/WorkbenchFileTree.tsx')
+const srcLeftRaw = read('src/components/workbench/WorkbenchLeftPanel.tsx')
+const srcWs = stripComments(read('electron/lib/workspaceManager.ts'))
+const srcKnowledgeTree = stripComments(read('src/modules/knowledge/index.tsx'))
+
+ok(/<VaultTree/.test(srcTree) && /dirCache=\{dirCache\}/.test(srcTree) && /softNames=\{softNames\}/.test(srcTree),
+  'N1 树模式渲染的是复用组件 VaultTree（懒加载 dirCache + 软件文件折叠节 softNames 都在）')
+ok(/onOpenFile=\{\(n\) => \{ setActivePath\(n\.relPath\); onOpenFile\(n\.relPath\) \}\}/.test(srcTree),
+  'N2 点文件 → 上报 relPath 并记高亮（不自己开页签，打开语义留在宿主）')
+ok(/onOpenFile=\{\(rel\) => onOpenLooseFile\(rel, \{ startEdit: true \}\)\}/.test(srcLeftRaw),
+  'N3 宿主接 startEdit: true —— 文件树打开一律进编辑态（不再阅读优先）')
+// 八项文件操作接线齐全（方案 §2.1 表）
+for (const [label, re] of [
+  ['新建文件/文件夹', /workspaceCreateFile\(root, rel\)|workspaceMkdir\(root, rel\)/],
+  ['新建知识页', /crypto\.randomUUID\(\)[\s\S]{0,200}workspaceCreateFile\(root, mdRel/],
+  ['内联重命名', /workspaceRename\(root, relPath, to\)/],
+  ['删除到回收站', /workspaceTrash\(root, node\.relPath\)/],
+  ['复制路径', /navigator\.clipboard\.writeText\(node\.relPath\)/],
+  ['粘贴系统剪贴板', /workspacePasteExternal\(root, dirRel, paths\)/],
+  ['拖拽移动', /const doMove = useCallback/],
+  ['撤销栈登记', /recordFileOp\(\{ kind: 'move'/],
+]) ok(re.test(srcTree), `N4 操作接线：${label}`)
+// 知识页落盘即开（方案 §2.1 表：「落盘即刻打开」）
+ok(/void loadDir\(dirRel\)[\s\S]{0,80}onOpenFile\(mdRel\)/.test(srcTree),
+  'N5 新建知识页 = 补 .md + frontmatter id 模板 → 落盘后立刻打开（即开即编辑）')
+// 分类目录删除分流（否则 categories.json 留脏条目）
+ok(/getKnowledgeCategories\(\)[\s\S]{0,300}c\.path === node\.relPath/.test(srcTree)
+  && /if \(catId\) await deleteKnowledgeCategory\(catId\)/.test(srcTree),
+  'N6 删除分流：目录命中 categories.json 登记项 → deleteKnowledgeCategory（不留脏登记）')
+ok(/清除已开页签残留/.test(srcKnowledgeTree) || /openPageIdsRef\.current/.test(srcKnowledgeTree),
+  'N7 知识库侧已开页签修剪通道在场（跨模块删除后的页签残留回退方案依据）')
+// 右键菜单 portal 到 body（左栏变换容器会改写 fixed 包含块，方案 §2.1）
+ok(/fixed inset-0 z-\[70\] kb-pop-layer/.test(srcTree),
+  'N8 右键菜单 portal 到 body（不走栏内定位 —— 变换容器会压窄菜单）')
+// ★ 本轮核心判据：主进程广播。五处结构写通道必须补，且**不得**加进高频的 writeWorkspaceFile
+const wsCreateAt = srcWs.indexOf("ipcMain.handle('ws:createFile'")
+const wsMkdirAt = srcWs.indexOf("ipcMain.handle('ws:mkdir'")
+const wsPasteAt = srcWs.indexOf("ipcMain.handle('ws:pasteExternal'")
+const wsRenameAt = srcWs.indexOf("ipcMain.handle('ws:rename'")
+const wsTrashAt = srcWs.indexOf("ipcMain.handle('ws:trash'")
+const wsWriteAt = srcWs.indexOf("ipcMain.handle('ws:writeFile'")
+const wsHandlers = [
+  ['createFile', wsCreateAt, wsMkdirAt],
+  ['mkdir', wsMkdirAt, wsPasteAt],
+  ['rename', wsRenameAt, wsTrashAt],
+  ['trash', wsTrashAt, srcWs.indexOf("ipcMain.handle('ws:openInSystem'")],
+]
+for (const [label, at, end] of wsHandlers) {
+  // 精确切到下一个 handler 起点（不靠字符数猜——注释块长度不可控）
+  const body = at === -1 || end === -1 || end <= at ? '' : srcWs.slice(at, end)
+  ok(body.length > 0 && /broadcastDataChanged\('knowledge'\)/.test(body),
+    `N9 ws:${label} 成功后 broadcastDataChanged('knowledge')（跨模块刷新唯一通道）`, `bodyLen=${body.length}`)
+}
+const writeBody = wsWriteAt === -1 ? '' : srcWs.slice(wsWriteAt, srcWs.indexOf("ipcMain.handle('ws:createFile'"))
+ok(!/broadcastDataChanged\('knowledge'\)/.test(writeBody),
+  'N10 负向：ws:writeFile 不广播（自动保存高频调用，广播会造成刷新风暴）')
+// pasteExternal 同样刻意不广播（2026-09-29 与开发负责人确认）：外来附件不进知识库收录，
+// 广播刷不出可见变化却白跑图谱重算；该通道已有「仅含 .md 才失效索引」的更精准既有处理。
+// （editor 侧契约 verify-paste-external.mjs 亦锁同一条负向断言，两处口径必须一致）
+// ★ 窗口必须**精确切到 handler 结束**（取下一个 handler 的起点），不能靠字符数猜——
+//   paste 的注释块很长，固定窗口会跨进 createFile 而误判为「已广播」。
+//   注意 srcWs 已剥注释，故边界用下一个 handler 的源码位置（ws:rename），不能用注释文字。
+const pasteEnd = wsRenameAt
+const pasteBody = wsPasteAt === -1 || pasteEnd === -1 || pasteEnd <= wsPasteAt ? '' : srcWs.slice(wsPasteAt, pasteEnd)
+ok(pasteBody.length > 0 && !/broadcastDataChanged\('knowledge'\)/.test(pasteBody),
+  'N10b 负向：ws:pasteExternal 不广播（收录门槛是 frontmatter id，粘贴外来附件不该惊动知识库）', `bodyLen=${pasteBody.length}`)
+// 互斥修复（方案 §1.2/§2.1）：进模块态 = 放弃树模式，leftMode 落回 overview
+ok(/const exitTreeModeForModule = useCallback/.test(srcApp)
+  && /if \(wbLayout\.leftMode !== 'tree'\) return[\s\S]{0,80}leftMode: 'overview'/.test(srcApp),
+  'N11 leftMode/railModule 互斥收口：exitTreeModeForModule 把 leftMode 落回 overview')
+ok(/handleBookmarkClick[\s\S]{0,200}exitTreeModeForModule\(\)/.test(srcApp)
+  && /const handleTabChange[\s\S]{0,400}exitTreeModeForModule\(\)/.test(srcApp),
+  'N12 书签点击 + 标签/活动栏切换两条显式进模块路径都调用了收口（跟随路径刻意不调，见函数头注）')
+// 用户建议 1/2（2026-09-29 原型体验后追加）：树模式不展示软件文件区 + 顶层给聚焦按钮
+ok(/<VaultTree[\s\S]{0,400}hideSoft/.test(srcTree),
+  'N13 树模式 hideSoft —— 不展示「软件文件」折叠节（命中项从主列表一并剔除）')
+const srcVaultTreeSoft = stripComments(read('src/components/shared/VaultTree.tsx'))
+ok(/hideSoft = false/.test(srcVaultTreeSoft) && /const softSet = depth === 0 && !hideSoft/.test(srcVaultTreeSoft)
+  && /const main = hideSoft && depth === 0/.test(srcVaultTreeSoft),
+  'N13b VaultTree 的 hideSoft 默认 false（其余调用方行为不变），且主列表同样剔除命中项')
+// 聚焦按钮在**宿主**的树模式头部行（与 🏠 同排，开发负责人 2026-09-29 指定）；
+// 树组件侧只按受控 prop 消费，按钮本体不在它里面
+ok(/<FolderFocusButton on=\{treeFocus\}/.test(srcLeftRaw) && /const \[treeFocus, setTreeFocus\] = useState\(false\)/.test(srcLeftRaw),
+  'N14 树模式头部行（🏠 同排）有聚焦按钮 + treeFocus 受控状态（状态留在宿主，不进 settings）')
+ok(/focusOn=\{treeFocus\}/.test(srcLeftRaw) && /onFocusExit=\{\(\) => setTreeFocus\(false\)\}/.test(srcLeftRaw),
+  'N14b 聚焦开关两向接线到树组件（focusOn 进、onFocusExit 出）')
+ok(/focusOn = false/.test(srcTree) && /onFocusLocate=\{/.test(srcTree) && !/<FolderFocusButton/.test(srcTree),
+  'N14c 负向：树组件自身不持按钮（纯受控），只消费 focusOn / onFocusLocate')
+// 空白区右键（2026-09-29 用户报障修复）：树根必须 `min-h-full` —— 外层是 overflow-y-auto 的
+// 滚动容器时 flex-1 子项按内容高度撑开、不拉伸（实测条目只占 279px 而容器 747px），
+// 条目下方大片空白落在容器上 ⇒ `e.target === e.currentTarget` 的空白判定永不成立
+// （表象：「想在空白处右键新建文件，点不动」）。运行期判据在探针 T8。
+ok(/className=\{`flex min-h-full flex-1 flex-col overflow-y-auto/.test(srcVaultTreeSoft),
+  'N15 树根带 min-h-full（滚动容器里的空白区右键判定区铺满可视区）')
+ok(/flex min-h-0 flex-1 flex-col overflow-hidden/.test(srcTree),
+  'N15b 树模式 wrapper 走 flex 列布局（与树根 min-h-full 配套，滚动归树根）')
 
 console.log('\n========================================')
 if (fails.length === 0) {

@@ -23,7 +23,14 @@ import type { TabName } from '../types'
 export interface AppModuleDef {
   id: TabName
   label: string
-  /** 活动栏图标位：参与拖拽排序、右键「显示/隐藏模块」 */
+  /**
+   * 活动栏图标位（整窗模块）：参与拖拽排序、右键「显示/隐藏模块」。
+   *
+   * 2026-09-29 对齐：本字段此前与真实图标条不符（4 处多标 + 1 处漏标）——原因是 v3.4.0
+   * 三栏外壳把 knowledge / blog / schedule / toolbox 收进了**工作台内**（从左栏书签进，
+   * 与「整窗模块」是两种入口类型），但标记没跟着改。现与 `RAIL_MODULE_IDS`（`ActivityBar`
+   * 实际读的成员清单）逐项一致，契约有断言锁住。
+   */
   bar: boolean
   /** 可钉成桌面磁贴 / 出现在桌面「添加控件」面板 */
   tile: boolean
@@ -39,13 +46,16 @@ export interface AppModuleDef {
  * 两者从清单删除；新增 `bookshelf` / `aiChat` / `graph` 三个「入口产生型」Tab。
  */
 export const APP_MODULES = [
-  // 2026-09-20 阶段四：editor 模块整体退役（能力已并入笔记区；桌面磁贴随桌面模块后续专项处理）
-  { id: 'knowledge', label: '笔记', bar: true, tile: true, palette: true },
-  { id: 'blog', label: '博客', bar: true, tile: true, palette: true },
-  { id: 'schedule', label: '日程', bar: true, tile: true, palette: true },
+  // 2026-09-20 阶段四：editor 模块整体退役（能力已并入笔记区）
+  // bar 标记（2026-09-29 对齐）：knowledge/blog/schedule/toolbox 是「工作台内」模块
+  // （入口在左栏书签，不占图标条）；moments/aiTeaching/plugins/bookMarket/recycle 是
+  // 「图标条上的整窗模块」。真源 = RAIL_MODULE_IDS，契约 C1d2 锁一致。
+  { id: 'knowledge', label: '笔记', bar: false, tile: true, palette: true },
+  { id: 'blog', label: '博客', bar: false, tile: true, palette: true },
+  { id: 'schedule', label: '日程', bar: false, tile: true, palette: true },
   { id: 'moments', label: '动态', bar: true, tile: true, palette: true },
   { id: 'aiTeaching', label: 'AI教学', bar: true, tile: true, palette: true },
-  { id: 'toolbox', label: '工具箱', bar: true, tile: true, palette: true },
+  { id: 'toolbox', label: '工具箱', bar: false, tile: true, palette: true },
   { id: 'plugins', label: '插件', bar: true, tile: true, palette: true },
   // 2026-09-22 书市（S4）：左栏独立整窗模块，与工具箱 / 插件平级（方案 §1.2 第 5 条、拍板 ⑤）。
   // 排在 bar 段末尾是有意的 —— 活动栏图标条（ActivityBar 的 RAIL_BUTTONS）按同一顺序追加，
@@ -55,9 +65,9 @@ export const APP_MODULES = [
   // 不进命令面板 —— 所以三个 flag 全 false。它同时进 WORKBENCH_TABBAR_EXCLUDED，
   // 效果 = 点开整窗铺满且**不产生标签页**。
   { id: 'dashboard', label: '看板', bar: false, tile: false, palette: false },
-  // 以下不进活动栏图标位：只能从设置菜单 / 事件 / 命令打开
-  // （「回收站」「帮助」是刻意去才会去的目的地，不该摆在图标条上）
-  { id: 'recycle', label: '回收站', bar: false, tile: true, palette: true },
+  // 回收站：**在图标条上**（RAIL_MODULE_IDS 成员），但刻意不做磁贴之外的其他入口
+  // （「刻意去才会去的目的地」——不进命令面板的是「帮助」那类，回收站保留面板入口）
+  { id: 'recycle', label: '回收站', bar: true, tile: true, palette: true },
   { id: 'help', label: '帮助', bar: false, tile: true, palette: true },
   // v3.4.0 新增「入口产生型」Tab：只能由工作台入口产生（书架=左栏书签、AI对话=⤢、图谱=知识库跳转），
   // 不进命令面板——关掉后想再开，从对应入口再点一次即可（幂等哲学）

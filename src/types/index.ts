@@ -1534,6 +1534,59 @@ export interface DashboardSnapshot {
   reading: Array<{ relPath: string; displayName: string; pct: number }>
 }
 
+/* ================= 分享卡片（右栏第三态，2026-09-29） =================
+ * 与主进程 `database/repositories/shareCardRepo.ts` 的 ShareCardData 逐字段对应
+ * —— 两个 tsconfig 互不可见，沿用本仓「跨线类型各侧各声明一次」的做法，改一边要同步另一边。
+ */
+
+/** 卡片上的三个可编辑文案槽位（同时是模板要存的内容） */
+export interface ShareCardTexts {
+  /** 寄语 / 主文案（书页风格里它就是 hero 大字） */
+  quote: string
+  /** 底部品牌语 */
+  slogan: string
+  /** 落款署名；留空则不显示 */
+  signature: string
+}
+
+/** 一套备选模板 = 风格 + 卡片明暗 + 三处文案 */
+export interface ShareCardTemplate {
+  id: string
+  name: string
+  style: ShareCardStyle
+  theme: 'light' | 'dark'
+  texts: ShareCardTexts
+  /** 内置示例不可删/不可改名 */
+  builtin?: boolean
+}
+
+/** 三套主视觉 */
+export type ShareCardStyle = 'peak' | 'page' | 'heat'
+
+/** `shareCard:get` 的返回值（卡片所需的数据；文案不在其中 —— 文案是渲染层设置） */
+export interface ShareCardData {
+  /** 本地日 'YYYY-MM-DD'（由主进程给，避免两端算出不同的「今天」） */
+  date: string
+  week: { done: number; total: number; cells: boolean[] }
+  heat: { weeks: number; rate: number; grid: boolean[] }
+  /** 官网地址（主进程单一来源） */
+  siteUrl: string
+  /** 官网二维码 PNG dataURL */
+  qrDataUrl: string
+}
+
+/** 分享卡片的持久化状态（设置键 `shareCard` 的 JSON 形状） */
+export interface ShareCardState {
+  templates: ShareCardTemplate[]
+  /** 当前卡片配置（风格 / 明暗 / 文案 / 所选模板 id） */
+  current: { style: ShareCardStyle; theme: 'light' | 'dark'; texts: ShareCardTexts; tplId: string | null }
+  /**
+   * 题目区内容（Markdown 行内语法 + LaTeX），每天现贴。
+   * ★ **刻意不进模板** —— 模板只管版式；题目是内容，进了模板就会「换模板顺手换掉今天的题」。
+   */
+  prompt: string
+}
+
 export interface ElectronAPI {
   getPathForFile: (file: File) => string
   pasteFromClipboard: () => Promise<{ ok: boolean }>
@@ -1877,6 +1930,10 @@ export interface ElectronAPI {
   vaultBackupRestoreArchive: (archivePath: string) => Promise<{ ok: boolean; target?: string; written?: number; message?: string }>
   // checkin
   habitGetAll: () => Promise<{ habits: Habit[]; records: HabitRecord[] }>
+  /** 分享卡片：数字 + 二维码一次取全（主进程聚合，见 ShareCardData） */
+  shareCardGet: () => Promise<ShareCardData>
+  /** 分享卡片另存 PNG（主进程弹保存对话框 → 落盘 → 定位文件） */
+  shareCardSavePng: (data: Uint8Array, defaultName: string) => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
   /** 看板快照：主进程一次聚合全部卡片数据（见 DashboardSnapshot） */
   dashboardGetSnapshot: () => Promise<DashboardSnapshot>
   createHabit: (d: CreateHabitDTO) => Promise<Habit>

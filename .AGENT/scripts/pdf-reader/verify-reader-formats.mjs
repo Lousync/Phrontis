@@ -196,10 +196,17 @@ console.log('\n--- ⑥ DataChangeScope 双侧含 readerState ---')
 console.log('\n--- ⑦ Tab 集合纪律：双集合刻意不同 ---')
 {
   const L = await import('../../../src/lib/workbenchLayout.ts')
-  check('WORKBENCH_PANEL_TAB_IDS 仍 2 项（widgets/ai）', L.WORKBENCH_PANEL_TAB_IDS.length === 2 && !L.WORKBENCH_PANEL_TAB_IDS.includes('reading'))
+  // 2026-09-29：分享卡片作为右栏第三态加入，集合由 2 项扩为 3 项（widgets/ai/share）。
+  // 本用例的冻结意图是「防顺手新增 Tab」——扩展需与本行同步改，改动即留痕。
+  check('WORKBENCH_PANEL_TAB_IDS 为 3 项且不含阅读（条件性入口）',
+    L.WORKBENCH_PANEL_TAB_IDS.length === 3
+    && L.WORKBENCH_PANEL_TAB_IDS.includes('widgets') && L.WORKBENCH_PANEL_TAB_IDS.includes('ai')
+    && L.WORKBENCH_PANEL_TAB_IDS.includes('share') && !L.WORKBENCH_PANEL_TAB_IDS.includes('reading'))
   check('RIGHT_PANEL_TAB_IDS_ALL 含 reading', L.RIGHT_PANEL_TAB_IDS_ALL.includes('reading'))
   const parsed = L.parseWorkbenchLayout(JSON.stringify({ rightTab: 'reading' }))
   check("parseWorkbenchLayout 接受 'reading'", parsed.rightTab === 'reading')
+  const share = L.parseWorkbenchLayout(JSON.stringify({ rightTab: 'share' }))
+  check("parseWorkbenchLayout 接受 'share'", share.rightTab === 'share')
   const fallback = L.parseWorkbenchLayout(JSON.stringify({ rightTab: 'bogus' }))
   check("parseWorkbenchLayout 坏值回落 'widgets'", fallback.rightTab === 'widgets')
   const panel = stripComments(read('src/components/workbench/WorkbenchRightPanel.tsx'))

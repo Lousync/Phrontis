@@ -188,6 +188,13 @@ export const SETTINGS = {
   // 磁贴栅格化（2026-09-28）：布局序 + 格子尺寸，编辑态拖拽/拉角/托盘写入。归一化真源 = tileGrid.ts
   dashboardTileLayout: { default: '[]', type: 'json', label: '看板磁贴布局', group: '看板', desc: '磁贴的布局顺序与格子尺寸（JSON 数组 [{id,w,h}]）；缺的卡按注册表序自动补齐', keywords: ['看板', '磁贴', '布局', '格子', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   dashboardUserName: { default: '', type: 'text', label: '看板称呼', group: '看板', desc: '看板问候语里的称呼（「晚上好，志岩」的「志岩」）；空 = 不带称呼。入口在看板 hero：点名字行内改', keywords: ['看板', '称呼', '名字', '问候', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // 分享卡片（右栏第三态，2026-09-29）：模板 + 当前卡片配置同一键。
+  // 存**全局**而非按库 —— 卡片是「我用软件的方式」，换仓库应跟着走（同 workbenchLayout 口径）。
+  // ui:false：入口就是右栏那一格，不进设置页搜索。形状见 types 的 ShareCardState。
+  // ⚠️ 默认值是**空串**而不是 '{"templates":[],"current":null}'：空串的语义是「还没存过」→
+  //    钝解析落内置三套种子；而 `{"templates":[]}` 的语义是「用户把模板全删光了」→ 必须保持空
+  //    （两者若混为一个值，删光模板会在下次读设置时自己长回来）。
+  shareCard: { default: '', type: 'json', label: '分享卡片', group: '分享卡片', desc: '分享卡片的模板库与当前卡片配置（JSON；形状见 ShareCardState）', keywords: ['分享', '卡片', '打卡图', '模板', '二维码', 'share', 'card'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   startupVaultPicker: { default: true, type: 'toggle', label: '每次启动选择仓库', group: '启动', desc: '开启后每次进入应用先显示仓库选择页（已有仓库一键进入）；关闭则直连上次的仓库', keywords: ['启动', '仓库', '选择', '进入', 'vault', 'startup', '切库'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'startup.vaultPicker' },
   summaryWeeklyDay: { default: 0, type: 'select', label: '周总结日', group: '周期总结', desc: '每周在哪一天生成周总结', keywords: ['周总结', '总结日', '每周', '星期', '周几', 'weekly', '周报'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'blog.summaryWeeklyDay' },
   summaryMonthlyMode: { default: 'last', type: 'select', label: '月总结规则', group: '周期总结', desc: '每月总结规则：第一天 / 最后一天 / 固定日', keywords: ['月总结', '总结日', '每月', '月末', '月初', 'monthly', '月报'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'blog.summaryMonthlyMode' },

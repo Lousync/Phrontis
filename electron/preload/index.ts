@@ -467,6 +467,9 @@ const api = {
   vaultBackupRestoreArchive: (archivePath: string) => ipcRenderer.invoke('vaultBackup:restoreArchive', archivePath),
   // checkin
   habitGetAll: () => ipcRenderer.invoke('habit:getAll'),
+  // 分享卡片：数字一次取全（主进程聚合，见 database/repositories/shareCardRepo.ts）
+  shareCardGet: () => ipcRenderer.invoke('shareCard:get'),
+  shareCardSavePng: (data: Uint8Array, defaultName: string) => ipcRenderer.invoke('shareCard:savePng', { data, defaultName }),
   // 看板：一次取全部卡片数据（主进程聚合，见 database/repositories/dashboardRepo.ts）
   dashboardGetSnapshot: () => ipcRenderer.invoke('dashboard:getSnapshot'),
   createHabit: (data: unknown) => ipcRenderer.invoke('habit:create', data),

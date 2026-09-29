@@ -124,9 +124,9 @@
 | verification-issues-20260908.md | 过程记录 | 同上 |
 | ai-teaching-真机验证-问题记录-20260907-第二轮.md | 过程记录 | 旧真机验证记录，对应版本已多轮迭代 |
 
-**仍留主仓的**（本轮未动，口径见规则 3）：总纲 `rework-master-plan.md` / `ai-teaching-module-rework.md`；活跃 `ui-animation-plan.md` / `ui-updates.md` / `pending-fixes.md` / `book-market-design.md`（仍在施工）/ `release-notes-design.md`（§9 有 P1 待办）；常驻规范 `help-disclosure-pattern.md`；仍在推进的插件三件套 `rework-plugin-openness.md` / `rework-toolbox-as-plugins.md` / `plugin-api-v2-design.md` + `plugin-api-v2-reference.md`（P3–P7 待做）；文档自述不归档的 `ai-learn-center-design.md` 与其两份原型、`docs/prototypes/ui-animation-prototype.html`。
+**仍留主仓的**（2026-09-23 时点，口径见规则 3）：总纲 `rework-master-plan.md` / `ai-teaching-module-rework.md`；活跃 `ui-animation-plan.md` / `ui-updates.md` / `pending-fixes.md` / `book-market-design.md`（仍在施工）/ `release-notes-design.md`（§9 有 P1 待办）/ `v3.4.0-feedback.md` / `workbench-split-scope-design.md`（分屏留 v3.5.0）/ `theme-fx-design.md`（等看板后启动）/ `bookshelf-reader-upgrade-design.md` 的**接任总纲** `.claude/plans/b-epub-formats.md`；常驻规范 `help-disclosure-pattern.md`；仍在推进的插件三件套 `rework-plugin-openness.md` / `rework-toolbox-as-plugins.md` / `plugin-api-v2-design.md` + `plugin-api-v2-reference.md`（P3–P7 待做）；文档自述不归档的 `ai-learn-center-design.md` 与其两份原型、`docs/prototypes/ui-animation-prototype.html`。
 
-> **评估过、本轮未归档**：`bookshelf-reader-upgrade-design.md`（一期 S1–S8 已实施，但文档自述「当前支持哪些格式看 `.claude/plans/b-epub-formats.md`」——二期 cbz 未开工，暂留）、`share-card-design.md`（待拍板）、`workbench-split-scope-design.md`（方案定稿、是否已随 v3.4.0 三栏外壳实施待确认）。
+> **评估过、本轮未归档**（2026-09-23 时点，其中三项已于 2026-09-29 处置，见上文清单）：`bookshelf-reader-upgrade-design.md`（**已归档**——二期四格式全部落码）、`share-card-design.md`（**已归档**——已实现）、`workbench-split-scope-design.md`（**仍留**——分屏已确认留给 v3.5.0，方案活跃）。
 
 ### 2026-09-23 `outputs/` 清理归档（21 项）
 
@@ -175,6 +175,46 @@
 > **本轮评估未归档、待拍板**（仍留主仓 `outputs/`）：`ai-profile-suggest-prototype.html`（画像建议卡片 UI 是否落码待核）、`layout-customize-prototype.html` + `ob-sidebar-prototype.html`（侧边栏 DIY 三原型，DP 立项待指示）、`right-panel-widgets-prototype.html`（数据图表控件未落码，`RIGHT_PANEL_WIDGET_IDS` 仅 pomo）。
 
 ## 原型归档清单
+
+> 归档目标：DesignProcess `Phrontis/原型/`。
+
+### 2026-09-29 主仓 docs/ 归档（4 份）+ 原型归档（10 件）
+
+**设计文档 → `Phrontis/已实现设计文档/`**
+
+| 文档 | 判定依据 |
+|---|---|
+| share-card-design.md | 文档头「已实现（2026-09-29）」；`src/components/share-card/` 落码 + 契约 + 探针 |
+| dashboard-tile-grid-design.md | 已落码：`src/modules/dashboard/tileGrid.ts` + `index.tsx:20` 引用 |
+| pet-design.md | 文档头「已实施 + 已验收」；三轮改版全落码（含布局改版与切换宠物） |
+| bookshelf-reader-upgrade-design.md | 一期（pdf+txt）已实施；二期四格式（epub/fb2/fbz/cbz）**全部落码**（`BookKind` 六格式齐备），真源已转 `.claude/plans/b-epub-formats.md`；本文 §5/§6 只对一期成立，使命终结 |
+
+> **该文档残留一处过期表述**（归档时未改，此处登记）：文档头写「2b = cbz 未开工」，实际 cbz 已于 2026-09-22 落码。该文档已自述「不要拿它判断当前支持哪些格式」，以总纲为准。
+
+**原型 → `Phrontis/原型/`**
+
+| 原型 | 来源 | 判定依据 |
+|---|---|---|
+| workbench-tree-mode-prototype.html | outputs/ | **本会话**工作台左栏文件树模式已落码（`src/components/workbench/WorkbenchFileTree.tsx`） |
+| desktop-pet-adaptive-prototype.html | outputs/ | pet-design.md 已验收 |
+| desktop-pet-layout-prototype.html | outputs/ | 同上（第二轮布局改版已落码） |
+| desktop-pet-prototype.html | outputs/ | 同上（一期） |
+| share-card-panel-prototype.html | outputs/ | share-card-design.md 已实现 |
+| workbench-dashboard-prototype.html | outputs/ | 看板已落码（`src/modules/dashboard/`） |
+| weave-reader-prototype.html | outputs/ | 随 bookshelf-reader-upgrade-design.md 同批归档（该文档按名引用） |
+| dashboard-grid-tiles.html | proto/ | 已落码（`tileGrid.ts`，v7 过 15 项 headless 断言） |
+| dashboard-edit-entry.html | proto/ | 同上 |
+| dashboard-tile-edit.html | proto/ | 同上 |
+| ai-teaching-interaction-prototype.html | tmp/aiteach-interaction-proto/index.html | AI 教学交互感方案集（8 档），754 行完整原型；**归属 DP 原型区**（命名按 `ai-teaching-*-prototype.html` 惯例）。归档时未找到其落码证据，作为交互设计过程稿留存 |
+| ai-input-bubble-prototype.html | tmp/input-bubble-proto/index.html | AI 输入区气泡化原型（5 处：教学 / 侧栏 / 扩后 / 支线），528 行。**补齐 DP 缺口**——DP 已有配套设计文档 `已实现设计文档/ai-input-bubble-design.md` 但一直没有原型。功能已落码（`assistantInputStyle` 九套外观，`settings.ts:241`） |
+
+**仍留主仓的**（被活跃方案按名引用，规则 7）：`outputs/custom-panel-prototype.html`（`panel-editor-implementation.md`，v3.5.0 ③）、`outputs/workbench-split-scope-prototype.html`（`workbench-split-scope-design.md` —— **分屏已确认留给 v3.5.0**）、`outputs/checkin-card-prototype.html`（`share-card-design.md` 的早期稿，主文档已归档但此件仍被计划文件引用）、`outputs/workbench-review/`、`proto/theme-fx.html` + `seasonal-themes.html` + `snow-tuning.html`（`theme-fx-design.md` 待开工，正文按名引用）；待拍板四项：`ai-profile-suggest-prototype.html`、`layout-customize-prototype.html`、`ob-sidebar-prototype.html`、`right-panel-widgets-prototype.html`。
+
+**顺带的工作区清理**：仓库顶层两个一次性日志产物 `build-check.log` / `tmp-vrf.log`（契约脚本的输出重定向残留，未跟踪、零引用、内容过期）已删除。
+
+---
+
+### 2026-09-12 原型归档（历史）
 
 > 归档目标：DesignProcess `Phrontis/原型/`。
 

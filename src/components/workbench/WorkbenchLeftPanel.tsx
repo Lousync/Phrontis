@@ -14,6 +14,8 @@ import { showToast } from '../../lib/toast'
 import { recordFileOp } from '../../lib/fileOpHistory'
 import { useDataChanged } from '../../lib/dataChanged'
 import { WorkbenchSearchPanel } from './WorkbenchSearchPanel'
+import { WorkbenchFileTree } from './WorkbenchFileTree'
+import { FolderFocusButton } from '../shared/FolderFocusButton'
 import { BOOKMARK_COLORS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_ENTRY_ENABLED, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, type RailModule } from '../../lib/workbenchLayout'
 import type { TabName } from '../../types'
 
@@ -235,6 +237,11 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
 
   const itemCls = 'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors'
 
+  // 树模式的目录聚焦开关（开发负责人 2026-09-29：按钮与 🏠 同排）。
+  // 状态刻意留在本组件而非 settings：它是「当前这个树视图怎么看」的临时开关，
+  // 与知识库侧栏的持久化偏好（knowledgeFolderFocus）是两种东西，不共用键。
+  const [treeFocus, setTreeFocus] = useState(false)
+
   // 「软件文件」折叠区开合（N-3）：默认收起 + localStorage 记忆，口径同 VaultTree 底部折叠节
   //（键独立于树模式的 kb.treeSoftOpen——两处折叠面各自记忆）
   const [softOpen, setSoftOpen] = useState(() => {
@@ -266,31 +273,25 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
           />
         ) : null
       ) : treeMode ? (
+        /* 文件树模式（方案 .claude/plans/workbench-tree-mode-implementation.md）：
+            真树 = WorkbenchFileTree（复用 VaultTree + ws:*全套文件操作，点文件 → onOpenLooseFile
+            带 startEdit = 一律进编辑态）。data-wb="treeMode" 锚点保留（既有探针依赖）。 */
         <>
-          <div className="flex h-8 shrink-0 items-center justify-center px-1.5">
+          <div className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
             <button onClick={onToggleTreeMode} title="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
               <House size={13} />
             </button>
+            {/* 目录聚焦开关（开发负责人 2026-09-29 指定：与 🏠 同一排）。
+                语义复用知识库 / 编辑区那套 FolderFocusButton + VaultTree 的 focusOn/onFocusLocate；
+                状态在本组件（树模式内的临时视图开关，不进 settings —— 与知识库的持久化偏好区分）。 */}
+            <FolderFocusButton on={treeFocus} onToggle={() => setTreeFocus((v) => !v)} />
           </div>
-          <div data-wb="treeMode" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-1.5">
-            {dirs.map((d) => (
-              <div key={d} className={`${itemCls} cursor-default text-[var(--text-secondary)]`}>
-                <Folder size={13} className="shrink-0 text-[var(--text-muted)]" />
-                {d}
-              </div>
-            ))}
-            {loose.length > 0 && (
-              <div className="px-2.5 pb-0.5 pt-2 text-[10.5px] text-[var(--text-muted)]">根目录散文件</div>
-            )}
-            {loose.map((f) => (
-              <button key={f} onClick={() => onOpenLooseFile(f)} onContextMenu={(e) => openLooseMenu(e, f)} className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}>
-                <FileIcon ext={f.includes('.') ? f.split('.').pop()!.toLowerCase() : ''} size={13} />
-                {f}
-              </button>
-            ))}
-            {dirs.length === 0 && loose.length === 0 && (
-              <div className="px-2.5 py-6 text-center text-[11.5px] text-[var(--text-muted)]">暂无文件</div>
-            )}
+          <div data-wb="treeMode" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <WorkbenchFileTree
+              focusOn={treeFocus}
+              onFocusExit={() => setTreeFocus(false)}
+              onOpenFile={(rel) => onOpenLooseFile(rel, { startEdit: true })}
+            />
           </div>
         </>
       ) : railModule || railTool ? (
@@ -341,6 +342,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
             <button
               onClick={onToggleTreeMode}
               title="切换为文件树模式（仓库顶层目录）"
+              data-wb="treeModeBtn"
               className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
               <Trees size={13} />

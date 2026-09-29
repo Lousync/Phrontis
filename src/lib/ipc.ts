@@ -424,6 +424,12 @@ export const deleteHabit = (id: string) => a().deleteHabit(id)
 export const toggleHabitCheck = (habitId: string, date: string) => a().toggleHabitCheck(habitId, date)
 export const reorderHabits = (orderedIds: string[]) => a().reorderHabits(orderedIds)
 
+// ===== 分享卡片（右栏第三态）=====
+/** 卡片数字 + 二维码一次取全（主进程聚合，文案不在此 —— 文案是渲染层设置） */
+export const shareCardGet = () => a().shareCardGet()
+/** 另存 PNG：主进程弹保存对话框 → 落盘 → 资源管理器定位 */
+export const shareCardSavePng = (data: Uint8Array, defaultName: string) => a().shareCardSavePng(data, defaultName)
+
 // ===== 看板 =====
 /** 一次取全部卡片数据（主进程聚合，见数据库层 dashboardRepo.ts） */
 export const dashboardGetSnapshot = () => a().dashboardGetSnapshot()

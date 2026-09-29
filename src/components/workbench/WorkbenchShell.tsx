@@ -106,7 +106,14 @@ export function WorkbenchShell({ center, right, activeTab, railModule, railTool 
           bookmarksHidden={layout.bookmarksHidden}
           onBack={onBackToOverview}
           onToggleLock={() => patch({ leftLocked: !layout.leftLocked })}
-          onToggleTreeMode={() => patch({ leftMode: layout.leftMode === 'tree' ? 'overview' : 'tree' })}
+          /* 树模式开合（方案 §1.2 ②；2026-09-29 补）：**出树**方向必须连模块态一起清 ——
+             树里开过文件后跟随 effect 已把 railModule 置成 'knowledge'（树模式分支遮着看不见），
+             只翻 leftMode 的话渲染落回 railModule 侧栏，表象是「🏠 回总览掉进笔记区」。
+             onBackToOverview 正是「清 railModule + railTool + 顺带解锁」的那一处收口，直接复用。 */
+          onToggleTreeMode={() => {
+            if (layout.leftMode === 'tree') { onBackToOverview(); patch({ leftMode: 'overview' }) }
+            else patch({ leftMode: 'tree' })
+          }}
           onOpenLooseFile={onOpenLooseFile}
           onPluginBookmark={onPluginBookmark}
           searchMode={leftSearch?.mode}

@@ -939,9 +939,23 @@ export default function App() {
   // 标签拖拽重排（现成机制恢复）：只调 openTabs 顺序，激活标签跟内容走、不变
   const handleReorder = useCallback((tabs: string[]) => setOpenTabs(tabs), [])
 
+  /** 进模块态 → leftMode 落回总览（树模式互斥修复，方案 §2.1）。
+   *  根因：leftMode 持久化在 workbenchLayout（Shell 读），railModule 是 App 态；树模式渲染分支
+   *  遮蔽模块态，跟随 effect 把 railModule 置了也看不见。两个真实缺陷同根：
+   *  ① 树里开过文件后按 🏠 回总览只翻 leftMode → 渲染落到 railModule 侧栏（不是总览）；
+   *  ② 树模式里点活动栏切模块 → 左栏纹丝不动。
+   *  拍板（2026-09-29）：任何入口进模块态 = 视为放弃树模式，leftMode 一并落回 'overview'。
+   *  ⚠️ 只从「用户显式进模块态」的动作调用（书签 / 活动栏 / 标签条点击），**跟随不动** ——
+   *  树里开文件（kb-open-note → setActiveTab('knowledge')）必须留在树模式（原型交互拍板）。 */
+  const exitTreeModeForModule = useCallback(() => {
+    if (wbLayout.leftMode !== 'tree') return
+    update('workbenchLayout', JSON.stringify({ ...wbLayout, leftMode: 'overview' }))
+  }, [wbLayout, update])
+
   const handleTabChange = (tab: TabName) => {
     setActiveToolTab(null)  // 切回模块标签时退出工具标签（工具标签关闭走 ✕ / 落点分流）
     setNoteJumpFrom(null)   // 手动切 Tab 清返回 chip（条目6 口径；chip 自身的返回点击也走这里，消费即清）
+    exitTreeModeForModule() // 进模块态 → leftMode 落回总览（树模式互斥修复，见函数头注）
     if (tab === activeTab) {
       // 工具箱专属（2026-09-10）：已在工具箱时再点活动栏图标 = 退出当前工具、回到工具箱主界面。
       // 通用行为对图标条无意义 —— v3.4.0 起图标条幂等哲学：重复点击已激活模块 = 无操作
@@ -1077,6 +1091,7 @@ export default function App() {
       错题本 = openTab('knowledge') + kb-locate-quiz-view 定位事件；其余直开对应标签 */
   const handleBookmarkClick = (key: RailModule) => {
     setRailModule(key)
+    exitTreeModeForModule() // 进模块态 → 左栏退出树模式（互斥收口，见 exitTreeModeForModule 头注）
     const b = WORKBENCH_BOOKMARKS.find((x) => x.key === key)
     if (!b) return
     if (key === 'quiz') {

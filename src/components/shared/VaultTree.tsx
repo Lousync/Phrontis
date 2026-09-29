@@ -63,6 +63,9 @@ interface Props {
   /** 软件生成项名单（根层 .ignore / AI教学 产物根等，ws:listDir 附带）：
    *  命中条目从主列表移到底部「软件文件」折叠节（VS Code 时间线式，默认收起） */
   softNames?: string[]
+  /** 隐藏「软件文件」折叠节 + 把命中项从主列表一并剔除（工作台文件树模式用：
+   *  那是给「看自己的笔记」的树，软件生成物是噪音）。默认 false = 既有行为。 */
+  hideSoft?: boolean
   /** 目录聚焦：开启后只显示当前打开文件的目录链 + 同级项，其余骨架化/隐藏（样式 folderFocusStyle） */
   focusOn?: boolean
   /** 点击骨架条 = 退出聚焦并定位（目录展开 / 文件打开） */
@@ -97,7 +100,7 @@ function FileIcon({ name }: { name: string }) {
  * 拖拽：条目均可拖（mime: text/x-kb-rel）；目录与根容器是落点，
  * drop 时把源相对路径移动到目标目录下（主进程 ws:rename 跨目录移动）。
  */
-export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, renaming, onCommitRename, onCancelRename, deletingMap, selectedPath, onSelectDir, softNames, focusOn, onFocusLocate, rootRef }: Props) {
+export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, renaming, onCommitRename, onCancelRename, deletingMap, selectedPath, onSelectDir, softNames, hideSoft = false, focusOn, onFocusLocate, rootRef }: Props) {
   const [dragOver, setDragOver] = useState<string | null>(null)
   /** 删除动画状态（键 = relPath；animating 渲染吞噬 / done 收尾淡出） */
   const delState = (rel: string) => deletingMap?.get(rel)
@@ -185,6 +188,9 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
       <div
         key={e.relPath}
         draggable
+        data-wb-tree-node
+        data-wb-tree-file="1"
+        data-wb-tree-path={e.relPath}
         onDragStart={(ev) => startDrag(ev, e.relPath)}
         className={`group flex items-center gap-1 rounded-md px-1.5 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)] ${activePath === e.relPath ? 'bg-[var(--bg-selected)]/40' : ''} ${focusActive && focusPath === e.relPath ? 'ring-1 ring-inset ring-[var(--accent)]/40' : ''}${delClass(e.relPath)}`}
         style={{ paddingLeft: 6 + depth * 12 }}
@@ -239,6 +245,9 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
         ) : (
           <div
             draggable
+            data-wb-tree-node
+            data-wb-tree-dir="1"
+            data-wb-tree-path={relPath}
             onDragStart={(e) => startDrag(e, relPath)}
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(relPath) }}
             onDragLeave={() => setDragOver((p) => (p === relPath ? null : p))}
@@ -270,9 +279,12 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
           </div>
         ))}
         {(() => {
-          // 软件生成项分组（仅根层）：命中名单的条目移到底部「软件文件」折叠节（VS Code 时间线式）
-          const softSet = depth === 0 && softNames?.length ? new Set(softNames) : null
-          const main = softSet ? entries.filter((e) => !softSet.has(e.name)) : entries
+          // 软件生成项分组（仅根层）：命中名单的条目移到底部「软件文件」折叠节（VS Code 时间线式）。
+          // hideSoft（工作台文件树模式）= 不看软件生成物：命中项从主列表也不出现（整节不渲染）。
+          const softSet = depth === 0 && !hideSoft && softNames?.length ? new Set(softNames) : null
+          const main = hideSoft && depth === 0 && softNames?.length
+            ? entries.filter((e) => !softNames.includes(e.name))
+            : softSet ? entries.filter((e) => !softSet.has(e.name)) : entries
           const softItems = softSet ? entries.filter((e) => softSet.has(e.name)) : []
           const children = (
             <>
@@ -296,6 +308,7 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
                 <div className="mt-auto border-t border-[var(--border-color)] pt-1">
                   <div
                     onClick={toggleSoftOpen}
+                    data-wb="treeSoftHead"
                     className="flex items-center gap-1 rounded-md px-1.5 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)]"
                     style={{ paddingLeft: 6 }}
                     title="软件生成的目录与文件（AI教学 产物、.ignore 过滤规则等）"
@@ -349,7 +362,12 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
          （Chromium 会把非可编辑焦点的 paste 事件 target 重定向成 BODY，见 editor/index.tsx
          的 isTextEditingTarget）——所以这里不需要额外的 data-* 标记。 */
       tabIndex={0}
-      className={`flex flex-1 flex-col overflow-y-auto px-1.5 py-1 outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--accent)]/25 ${dragOver === '' ? 'bg-[var(--accent)]/10' : ''}`}
+      /* ★ min-h-full（2026-09-29 修「空白区右键点不到」）：外层是 overflow-y-auto 的滚动容器时，
+         `flex-1` 子项按**内容高度**撑开、不拉伸 —— 条目只有几行时树根只占几十到几百 px，
+         剩余大片空白落在容器上，`e.target === e.currentTarget` 的空白判定永不成立
+         （表象：想在空白处右键新建文件，点不动）。min-h-full 让树根至少铺满可视区，
+         条目变多时照常由内容撑高（不裁切，滚动仍由外层容器负责）。 */
+      className={`flex min-h-full flex-1 flex-col overflow-y-auto px-1.5 py-1 outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--accent)]/25 ${dragOver === '' ? 'bg-[var(--accent)]/10' : ''}`}
       onDragOver={(e) => { e.preventDefault(); setDragOver('') }}
       onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(null) }}
       onDrop={(e) => dropToDir(e, '')}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat } from 'lucide-react'
+import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat, Share2 } from 'lucide-react'
 import type { BookKind, KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
@@ -20,6 +20,7 @@ import { NavWidget } from './widgets/NavWidget'
 import { PetWidget } from './widgets/PetWidget'
 import { AiUsagePanel } from './AiUsagePanel'
 import { ReadingSidePanel } from './ReadingSidePanel'
+import { ShareCardPanel } from '../share-card/ShareCardPanel'
 import { ChatBody } from '../shared/AssistantPanel/ChatBody'
 import { useAssistantChat } from '../shared/AssistantPanel/useAssistantChat'
 import { QuoteChips } from '../shared/AssistantPanel/QuoteChips'
@@ -28,9 +29,9 @@ import type { PluginTool } from '../../lib/pluginService'
 /**
  * 工作台右栏（v3.4.0 批次4，方案 §2/§8 批次4/§10；原型 v16 定稿）。
  *
- * **双 Tab（🧩 小工具 / 🤖 AI）**：Tab 显隐由 ⋯ 面板 Tab 管理菜单控制（DP 条目6「无 ✕ 关闭」，
+ * **三 Tab（🧩 小工具 / 🤖 AI / 🎨 分享）**：Tab 显隐由 ⋯ 面板 Tab 管理菜单控制（DP 条目6「无 ✕ 关闭」，
  * workbenchLayout.panelTabsHidden 持久化；隐藏激活 Tab 自动切到另一个）。插件可注册面板 Tab
- * 为后续扩展位。
+ * 为后续扩展位。2026-09-29：「分享」作为第三态加入（卡片生成，见 components/share-card/）。
  *
  * **小工具态 = 上中下三段**：
  * - 上：🧰 工具箱工具入口区（ToolLauncherZone，方案 §10）；
@@ -112,6 +113,15 @@ const WIDGET_META: Record<string, { Icon: typeof Timer; label: string }> = {
   pet: { Icon: Cat, label: '桌宠' },
 }
 
+/** 右栏面板 Tab 的图标 / 标题 / ⋯ 菜单名（🧩 小工具 / 🤖 AI / 🎨 分享；阅读是条件性入口，单独渲染） */
+function PanelTabIcon({ id, size }: { id: string; size: number }) {
+  if (id === 'widgets') return <ToolboxIcon size={size} />
+  if (id === 'share') return <Share2 size={size} />
+  return <Bot size={size} />
+}
+const PANEL_TAB_TITLE: Record<string, string> = { widgets: '小工具', ai: 'AI', share: '分享' }
+const PANEL_TAB_LABEL: Record<string, string> = { widgets: '小工具', ai: 'AI 对话 / 面板', share: '分享卡片' }
+
 export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
@@ -130,7 +140,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
   const effectiveTab = layout.rightTab === 'reading'
     ? (readingOn ? 'reading' : visiblePanelTabs[0])
     : (visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0])
-  const setPanelTab = (id: 'widgets' | 'ai' | 'reading') => patch({ rightTab: id })
+  const setPanelTab = (id: (typeof WORKBENCH_PANEL_TAB_IDS)[number]) => patch({ rightTab: id })
 
   // ── B-26 划词引用胶囊（与悬浮侧栏同口径）────────────────────────────────────
   // 选段不进 textarea 明文（那是「用户输入」形态），而是作为引用胶囊显示在输入区上方，
@@ -270,14 +280,14 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               data-wb-rp-tab={id}
               data-wb-rp-active={effectiveTab === id ? '1' : '0'}
               onClick={() => setPanelTab(id)}
-              title={id === 'widgets' ? '小工具' : 'AI'}
+              title={PANEL_TAB_TITLE[id] ?? id}
               className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                 effectiveTab === id
                   ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
                   : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
               }`}
             >
-              {id === 'widgets' ? <ToolboxIcon size={14} /> : <Bot size={14} />}
+              <PanelTabIcon id={id} size={14} />
             </button>
           ))}
           {/* 阅读 Tab：有书在读才出现（条件性入口，不进 ⋯ 菜单）；点击同时展开右栏 */}
@@ -407,6 +417,9 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               </div>
             </div>
           </div>
+        ) : effectiveTab === 'share' ? (
+          /* ---- 分享态（2026-09-29）：卡片预览 + 风格 / 模板 + 复制 / 另存 ---- */
+          <ShareCardPanel />
         ) : effectiveTab === 'reading' && reading ? (
           /* ---- 阅读态（全格式阅读器一期）：书名/进度 + 书签 + 摘录 ---- */
           <ReadingSidePanel reading={reading} onLocatePdfPage={onLocatePdfPage} onLocateExcerpt={onLocateExcerpt} />
@@ -444,8 +457,8 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
           {WORKBENCH_PANEL_TAB_IDS.map((id) => (
             <label key={id} className="flex cursor-pointer items-center gap-2 rounded-md px-2.5 py-[6px] text-[12px] hover:bg-[var(--bg-hover)]">
               <input type="checkbox" data-pt-tab-id={id} defaultChecked={!layout.panelTabsHidden.includes(id)} className="accent-[var(--accent)]" />
-              {id === 'widgets' ? <ToolboxIcon size={12} className="shrink-0 text-[var(--text-muted)]" /> : <Bot size={12} className="shrink-0 text-[var(--text-muted)]" />}
-              <span className="min-w-0 flex-1 truncate">{id === 'widgets' ? '小工具' : 'AI 对话 / 面板'}</span>
+              <PanelTabIcon id={id} size={12} />
+              <span className="min-w-0 flex-1 truncate">{PANEL_TAB_LABEL[id] ?? id}</span>
             </label>
           ))}
         </div>,

@@ -27,6 +27,7 @@ import { registerAttachmentHandlers, getAttachmentFilePath } from '../database/r
 import { registerVaultBackupHandlers } from '../database/repositories/vaultBackupRepo'
 import { registerRepoConfigHandlers } from '../database/repositories/repoConfigRepo'
 import { registerCheckinHandlers } from '../database/repositories/checkinRepo'
+import { registerShareCardHandlers } from '../database/repositories/shareCardRepo'
 import { registerBookmarkHandlers } from '../database/repositories/bookmarkRepo'
 import { registerPetHandlers } from '../database/repositories/petRepo'
 import { registerSuperviseHandlers } from '../database/repositories/superviseRepo'
@@ -910,6 +911,7 @@ app.whenReady().then(async () => {
   registerAttachmentHandlers()
   registerVaultBackupHandlers()
   registerCheckinHandlers()
+  registerShareCardHandlers()
   registerBookmarkHandlers()
   registerPetHandlers()
   registerSuperviseHandlers()

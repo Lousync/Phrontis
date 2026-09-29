@@ -1200,3 +1200,90 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 | 4 | 插件 v1.7.0：四季 colors 加 `--theme-fx`，双通道同步，契约脚本扩展令牌枚举校验 | `resources/{market,builtin}-plugins/themes-collection/` |
 
 **验收**：tsc 双端 0 错 · `verify-themes` / `verify-dashboard`（72 项）/ `verify-app-usage`（34 项）全绿 · 原型四轮迭代定稿（速度单位修正 60×、叶形重画、六角结晶、丁达尔加色+环境压暗）· 实机待验（工作台/看板看四季特效 + 设置联动）。
+
+## 38. 分享卡片落地为右栏第三态（2026-09-29）
+
+原「打卡图」方案（`docs/share-card-design.md`，2026-09-20 待拍板）**入口改到工作台右栏**，并新增「图上文字可编辑」与「我的模板」两条需求。原型 `outputs/share-card-panel-prototype.html` 拍板后落码。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 右栏 Tab 由 2 项扩为 3 项（🧩 小工具 / 🤖 AI / 🎨 分享）；`rightTab` 联合 + `WORKBENCH_PANEL_TAB_IDS` + ⋯ 菜单三处同步 | `src/lib/workbenchLayout.ts`、`WorkbenchRightPanel.tsx` |
+| 2 | 分享态面板：卡片预览（点击进编辑浮层）+ 主视觉 / 卡片明暗切换 + 我的模板 + 复制图片 / 另存 PNG | `src/components/share-card/ShareCardPanel.tsx` |
+| 3 | **canvas 唯一绘制**：预览与导出同一张 1080×1920 canvas；`renderShareCard` 纯函数（不碰 DOM，契约负向断言锁） | `renderShareCard.ts`、`ShareCardCanvas.tsx` |
+| 4 | **图上直接改字**：透明输入层按 `shareCardStyles.slotRects` 的同一份矩形铺在 canvas 上；聚焦期间 canvas 跳过该槽位 ⇒ 中文输入法**组字过程可见** | `ShareCardEditor.tsx`、`shareCardStyles.ts` |
+| 5 | 可编辑三槽位：寄语 / 品牌语 / 署名（空则不显示），逐槽位「还原默认」 | 同上 |
+| 6 | 我的模板：整套快照（风格 + 明暗 + 三处文案）+ 内置 3 套 + 命名 / 重命名 / 删除（**内置也能删**，删光后模板区显示空态、卡片照常可用）；存全局设置 `shareCard`（写入 400ms 防抖） | `shareCardTemplates.ts`、`src/lib/settings.ts` |
+| 7 | 数据层：`shareCard:get`（一次取全）、`shareCard:savePng`（对话框 → 落盘 → 定位文件） | `electron/database/repositories/shareCardRepo.ts` |
+| 8 | 官网地址收敛为**唯一常量** `PRODUCT_SITE`，契约负向断言「`electron/` 与 `src/` 下只允许出现在此文件」 | `electron/lib/productInfo.ts` |
+| 9 | **不另写第二份打卡口径**：`habitStats.ts` 扩 `checkinWeekCells` / `checkinHeatGrid`，分享卡片与看板共用 | `electron/lib/kbStore/{habitStats,shareCardStats}.ts` |
+
+**取舍**：① 卡片用 canvas 单源，故「预览好看、导出跑版」在结构上不可能发生，代价是图上改字要自建透明输入层；② 模板存**全局**设置而非按库（卡片是「我用软件的方式」，换库跟着走）；③ 保留独立卡片明暗开关（不跟随应用主题）；④ 内置模板也能删 —— 为此设置默认值取**空串**（=「还没存过」，落内置种子），与 `{"templates":[]}`（=「用户真删光了」，保持空）严格区分，否则「删了又自己回来」。
+
+**验收**：tsc 双端 0 错 · `electron-vite build` 通过 · `verify-share-card.mjs` 全绿 · 运行期探针 `probe-share-card.mjs` PASS（canvas 1080×1920 / 非空白且不透明 / 换风格与明暗真的重绘 / 浮层三输入层在位 / 图上改字落到设置 / 导出 PNG 的 IHDR 尺寸 / 存模板 +1 / 400ms 防抖窗口内切 Tab 不丢最后一次编辑 / 内置模板可删且删光不复活）· **实机待验**（复制图片 → 微信 `Ctrl+V` 出图，这是最终判据）。
+
+> **探针抓到的两个真 bug**（契约抓不到 —— 源码形状完全正确，只有真跑才暴露）：① 面板卸载时只 `clearTimeout`，
+> 400ms 防抖窗口内切 Tab 会丢掉最后一次文案编辑（改为卸载**补写**）；② 设置默认值与「还没存过」共用一个值，
+> 导致删光模板后重读设置又落回内置种子（表现为「删了又自己回来」；改为默认空串）。两条均固化为探针用例。
+
+## 39. 分享卡片：题目区（LaTeX / Markdown 行内渲染）+ 数据指标暂以占位替代（2026-09-29）
+
+两件事同批落地。
+
+**其一：卡上的数据指标换成占位内容。** 上一版两对数字（今日专注 / 连续打卡）经讨论判定口径都站不住 ——「专注」分不清是番茄钟还是整机使用时长，「连续打卡」只要有**任一**习惯有记录就算打卡日（用户有 5 个习惯、昨天只打一个，卡上仍写「连续 12 天」，用户自己不信）。而替代指标需要**真实使用体感**才能挑，用户当下没有（「还在开发者的视角」）。故整条判为搁置（DP `Phrontis/搁置功能与想法/分享卡片数据指标/`），卡上先放**与数据无关**的占位：日期与星期。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 两个大字位由统计标量改为**日期 / 星期**（刻意不放任何数字 —— 是数字就会被追问算法） | `renderShareCard.ts` |
+| 2 | `ShareCardData` 去掉 `focusMinutesToday` / `streakDays`；`shareCard:get` 相应不再聚合番茄场次 | `electron/database/repositories/shareCardRepo.ts`、`src/types/index.ts` |
+| 3 | `shareCardStats.focusMinutesOn` **保留**（口径函数留着，指标定了直接用），契约仍验它 | `electron/lib/kbStore/shareCardStats.ts` |
+
+**其二：新增题目区（每天贴一道题，支持 LaTeX）。** 场景是「每天刷数学题，选一道放在分享卡片上」；用户明确**题目不进模板**（模板只管版式，题目每天现贴）。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 4 | 行内语法解析：`**粗**` `*斜*` `` `代码` `` `$行内$` `$$整行$$`。**刻意不做块级 Markdown**（定高小块里排不开），认不出的语法原样当文本 | `shareCardRichText.ts` |
+| 5 | **LaTeX 走「离屏图」路线**：KaTeX 排好的 HTML 塞进 SVG `<foreignObject>` → 载成图 → `drawImage` 到卡片 canvas。排版交给浏览器，落地仍是像素 ⇒ **单源铁律不破**（预览=导出），公式也能随卡导出 | 同上 |
+| 6 | KaTeX 的 woff2 **按需内联成 `@font-face` data URL**（外部 URL 在 SVG 转图时会被当跨源拒掉）；字体表与 CSS 各自注入一次并缓存 | 同上 |
+| 7 | KaTeX 用**动态 import** —— `manualChunks` 早已切出独立 chunk，动态引入不改变首屏闭包 | 同上 |
+| 8 | 绘制层仍**不碰 DOM**：排版结果由 `ShareCardCanvas` 异步产出后作为参数传入（`opts.promptImage` / `promptSize`），契约的静态负向断言继续成立 | `renderShareCard.ts`、`ShareCardCanvas.tsx` |
+| 9 | 题目编辑**只在编辑浮层里**：点卡片上图那一位即出源码框，**失焦渲染成公式**。不做透明输入层 —— 那段文本渲染后（公式被 KaTeX 重排）与源码字符位置毫无对应，光标会飘到公式图形之外 | `ShareCardEditor.tsx` |
+| 10 | 题目区存 `ShareCardState.prompt`，**不属于模板**（切模板不动它，也不影响模板的「已修改」标记） | `types` / `shareCardTemplates.ts` |
+| 11 | 卡片去掉「日期 / 星期」两个大字位 —— 中间主体**只留题目区**一个可编辑框（用户 2026-09-29 截图反馈后拍板） | `renderShareCard.ts` |
+| 12 | 题区几何**收进 `shareCardStyles.panelLayout()`**（`promptTop` 起、占到周格行前），绘制 / 编辑占位框 / 输入层共用同一份 | `shareCardStyles.ts` |
+
+**取舍**：① 不做块级 Markdown（定高块排不开）；② 公式源码编辑期间显示原文、失焦才渲染（用户已确认接受）；③ 题目块**定高**而非自适应 —— 内容长短不该把下面的周格行顶得上下乱窜，超出截断补省略号；④ 题目不进模板（模板=版式，题目=内容，混在一起会「换模板顺手换掉今天的题」）；⑤ 右栏面板**不放开题目输入框**，也不写语法说明 —— 编辑入口只有浮层一处；⑥ 中间主体**只放题目**，不再有第二个可编辑区。
+
+> **修掉一个真 bug（截图暴露）**：题区位置早先在 `shareCardRichText.ts` 里**手抄**成 `PROMPT_BLOCK_TOP = 566`，
+> 而 `panelLayout()` 算出的实际位置是 **654** —— 错位 **88px**，表现为「公式渲染跑到框外、编辑占位框与
+> 画出来的块对不上」。根因是同一份几何被抄了两处。已把题区矩形移进 `panelLayout()` 单源产出，
+> 并在契约里加了**几何回归护栏**（逐风格断言矩形落在寄语行之下、周格行之上、不与页脚线重叠 +
+> 静态负向「不得再出现手抄的 `PROMPT_BLOCK_*` 常量」）。
+
+**验收**：tsc 双端 0 错 · `electron-vite build` 通过 · `verify-share-card.mjs` **118 项全绿** · **运行期探针待补跑**（命令见探针文件头注；本轮被用户 dev 实例的单实例锁阻断 —— 机制与排查序见 memory `dev-instance-holds-probe-lock`）。探针 `probe-share-card.mjs` 第 12 条会在题区写入真实积分式后断言**题块内出现足量墨点**，且其扫描区域已改为按新几何取（不再是早先的 y=566）。KaTeX + foreignObject 栅格化已单独用裸 Electron 冒烟验证：一道 `\int_0^1 \frac{x^2}{1+x^3}\,dx` 排出 212×71 px、5598 墨点。
+
+> 探针本轮**未能执行**：用户的 dev 实例（7 个 electron 进程）正占着应用单实例锁，探针实例起不来。
+> 机制与排查序见 memory `dev-instance-holds-probe-lock`。**待用户关闭 dev 后补跑**，命令在探针文件头注。
+
+原「打卡图」方案（`docs/share-card-design.md`，2026-09-20 待拍板）**入口改到工作台右栏**，并新增「图上文字可编辑」与「我的模板」两条需求。原型 `outputs/share-card-panel-prototype.html` 拍板后落码。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 右栏 Tab 由 2 项扩为 3 项（🧩 小工具 / 🤖 AI / 🎨 分享）；`rightTab` 联合 + `WORKBENCH_PANEL_TAB_IDS` + ⋯ 菜单三处同步 | `src/lib/workbenchLayout.ts`、`WorkbenchRightPanel.tsx` |
+| 2 | 分享态面板：卡片预览（点击进编辑浮层）+ 主视觉 / 卡片明暗切换 + 我的模板 + 复制图片 / 另存 PNG | `src/components/share-card/ShareCardPanel.tsx` |
+| 3 | **canvas 唯一绘制**：预览与导出同一张 1080×1920 canvas；`renderShareCard` 纯函数（不碰 DOM，契约负向断言锁） | `renderShareCard.ts`、`ShareCardCanvas.tsx` |
+| 4 | **图上直接改字**：透明输入层按 `shareCardStyles.slotRects` 的同一份矩形铺在 canvas 上；聚焦期间 canvas 跳过该槽位 ⇒ 中文输入法**组字过程可见** | `ShareCardEditor.tsx`、`shareCardStyles.ts` |
+| 5 | 可编辑三槽位：寄语 / 品牌语 / 署名（空则不显示），逐槽位「还原默认」；数字由数据自动填 | 同上 |
+| 6 | 我的模板：整套快照（风格 + 明暗 + 三处文案）+ 内置 3 套 + 命名 / 重命名 / 删除（**内置也能删**）；存全局设置 `shareCard`（写入 400ms 防抖） | `shareCardTemplates.ts`、`src/lib/settings.ts` |
+| 7 | 数据层：`shareCard:get`（打卡 + 番茄 + 二维码一次取全，二维码与官网地址主进程同源）、`shareCard:savePng`（对话框 → 落盘 → 定位文件） | `electron/database/repositories/shareCardRepo.ts` |
+| 8 | 官网地址收敛为**唯一常量**：`PRODUCT_SITE`，契约负向断言「`electron/` 与 `src/` 下只允许出现在此文件」 | `electron/lib/productInfo.ts` |
+| 9 | **不另写第二份打卡口径**：`habitStats.ts` 扩 `checkinWeekCells`（周一为首）/ `checkinHeatGrid`（13 周列优先），分享卡片与看板共用；零依赖 `shareCardStats.ts` 只放 `focusMinutesOn` / `heatRate` | `electron/lib/kbStore/{habitStats,shareCardStats}.ts` |
+
+**取舍**：① 卡片用 canvas 单源，故「预览好看、导出跑版」在结构上不可能发生，代价是图上改字要自建透明输入层（多一段机制，换掉一份必然漂移的第二渲染）；② 数字**不可手改**（分享出去的数字与真实记录一致）；③ 模板存**全局**设置而非按库（卡片是「我用软件的方式」，换库跟着走）；④ 保留独立卡片明暗开关（不跟随应用主题，出图可控）；⑤ **内置模板也能删**，删光后模板区显示空态、卡片照常可用 —— 为此设置默认值取**空串**（=「还没存过」，落内置种子），与 `{"templates":[]}`（=「用户真删光了」，保持空）严格区分，否则会出现「删了又自己回来」。
+
+**验收**：tsc 双端 0 错 · `electron-vite build` 通过 · `verify-share-card.mjs` 82 项全绿 · 运行期探针 `probe-share-card.mjs` 31 项 PASS（canvas 1080×1920 / 非空白且不透明 / 换风格与明暗真的重绘 / 浮层三输入层在位 / 图上改字落到设置 / 导出 PNG 的 IHDR 尺寸 = 1080×1920 / 存模板 +1 / 400ms 防抖窗口内切 Tab 不丢最后一次编辑 / 内置模板可删且删光不复活）· **实机待验**（复制图片 → 微信 `Ctrl+V` 出图，这是最终判据；另存 PNG 的保存对话框）。
+
+> **探针抓到的两个真 bug**：① 面板写入有 400ms 防抖而 Tab 切换会卸载面板，初版卸载时只 `clearTimeout`，
+> 「改完文案立刻切 Tab」会静默丢掉最后一次编辑（改为卸载时**补写**）；② 第一版设置默认值写成
+> `{"templates":[]}`，与「还没存过」共用一个值，导致删光模板后重读设置又落回内置种子 ——
+> 表现为「删了又自己回来」（改为默认空串，并把两者语义显式区分）。
+> 两条都固化成探针用例第 10 / 11 条 —— 契约脚本抓不到这类问题（源码形状完全正确），只有真跑才暴露。

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import type { ScheduleTag, ScheduleTodo } from '../../../types'
 import { X, Plus, Trash2, Check } from 'lucide-react'
 import { localToday } from '../../../lib/date'
@@ -160,7 +161,12 @@ export function TodoEditModal({
     syncDeadline(next)
   }
 
-  return (
+  /* ★ portal 到 body（2026-09-29 修）：本组件此前就地渲染在 ScheduleModule 的 React 树里，
+     而 ScheduleModule 位于**中间栏**内部 —— 于是 `z-50` 只能压住中间栏自己的子树，
+     压不住作为兄弟节点的**右栏**（右栏绘制在其后，遮罩盖不住它；实测右栏中心点
+     elementFromPoint 命中右栏内容而非遮罩）。portal 后弹层与左右栏同处 body 层叠上下文，
+     z-50 正常生效。与 WorkbenchLeftPanel 书签菜单 / AiTeachFileTree 右键菜单同一手法。 */
+  return createPortal(
     <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 ${closing ? 'kb-overlay-out' : 'kb-overlay'}`}>
       <div className={`bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg w-[500px] shadow-2xl ${closing ? 'kb-modal-out' : 'kb-modal-in'}`} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border-color)]">
@@ -384,7 +390,8 @@ export function TodoEditModal({
           >保存</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
