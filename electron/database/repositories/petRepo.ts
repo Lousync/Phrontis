@@ -26,12 +26,12 @@ export function registerPetHandlers(): void {
     broadcastDataChanged('pet')
     return snap
   })
-  ipcMain.handle('pet:switchSpecies', (_e, data: { species: 'dog' | 'cat' }) => {
+  ipcMain.handle('pet:switchSpecies', (_e, data: { species: string }) => {
     const snap = vaultPetSwitchSpecies(data.species)
     broadcastDataChanged('pet')
     return snap
   })
-  ipcMain.handle('pet:reset', (_e, data: { species: 'dog' | 'cat' }) => {
+  ipcMain.handle('pet:reset', (_e, data: { species: string }) => {
     const snap = vaultPetReset(data.species)
     broadcastDataChanged('pet')
     return snap

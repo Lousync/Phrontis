@@ -5,6 +5,7 @@ import { vaultRecordsAll } from './habitVaultRepo'
 import { getKnowledgeIndex } from './knowledgeIndex'
 import { getAiUsageData } from '../agentUsage'
 import { dateKeyOf } from '../appUsage'
+import { isBuiltinPetSpecies, findPluginPet } from '../petSpeciesRegistry'
 
 /**
  * 桌宠 vault 数据仓库（2026-09-28，docs/pet-design.md）。
@@ -22,21 +23,22 @@ import { dateKeyOf } from '../appUsage'
 const MOD = 'modules/pet'
 const PET_KEY = 'pet.json'
 
-export type PetSpecies = 'dog' | 'cat'
-
-/** 合法品种集（readRaw 容错 / switch / reset 共用，单一真相源） */
-const PET_SPECIES: readonly PetSpecies[] = ['dog', 'cat']
+/**
+ * 品种 = 内置（dog/cat）+ 启用中插件贡献的品种（petSpeciesRegistry 实时判定）。
+ * 插件卸载/停用后该品种自动失效：readRaw 容错回落 dog，进度与名字保留（重装恢复）。
+ */
+export type PetSpecies = string
 
 function isPetSpecies(v: unknown): v is PetSpecies {
-  return typeof v === 'string' && (PET_SPECIES as readonly string[]).includes(v)
+  return typeof v === 'string' && (isBuiltinPetSpecies(v) || !!findPluginPet(v))
 }
 
 export interface PetState {
   version: number
   /** 当前品种的名字（= names[species]，冗余存一份便于渲染层直读；写入路径统一同步） */
   name: string
-  /** 每品种各记一个名字（2026-09-28 用户拍板：名字跟着宠物走，狗猫各记各的） */
-  names: Record<PetSpecies, string>
+  /** 每品种各记一个名字（2026-09-28 用户拍板：名字跟着宠物走；键含插件贡献品种） */
+  names: Record<string, string>
   species: PetSpecies
   /** 0=幼年 1=成年 */
   stage: number
@@ -66,7 +68,9 @@ const MOOD_DECAY_EXTRA_LOW_HUNGER = 1.8
 const FEED_REFUSE_THRESHOLD = 92
 
 function defaultNameFor(species: PetSpecies): string {
-  return species === 'cat' ? '小猫' : '小狗'
+  if (species === 'cat') return '小猫'
+  if (species === 'dog') return '小狗'
+  return findPluginPet(species)?.name ?? species
 }
 
 /** 名字清洗：非字符串/空白/超 8 字一律处理（旧档或手改容错） */
@@ -87,9 +91,13 @@ function readRaw(): PetState {
   const species: PetSpecies = isPetSpecies(s.species) ? s.species : 'dog'
   // 名字：优先 names 表；旧档只有单个 name → 归到当前品种，其他品种给默认名（一次性迁移，无需单独脚本）
   const rawNames = (s as Partial<PetState>).names
-  const names: Record<PetSpecies, string> = {
+  const names: Record<string, string> = {
     dog: sanitizeName(rawNames?.dog ?? (species === 'dog' ? s.name : undefined), defaultNameFor('dog')),
     cat: sanitizeName(rawNames?.cat ?? (species === 'cat' ? s.name : undefined), defaultNameFor('cat')),
+  }
+  // 插件贡献品种：只为「在场」品种建名字条目；插件卸载后 species 回落 dog，条目自然消失
+  if (!isBuiltinPetSpecies(species)) {
+    names[species] = sanitizeName(rawNames?.[species] ?? (species === s.species ? s.name : undefined), defaultNameFor(species))
   }
   return {
     version: 1,

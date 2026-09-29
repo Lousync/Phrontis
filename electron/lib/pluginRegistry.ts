@@ -26,6 +26,7 @@ import {
   pluginQuery, pluginInsert, pluginUpdate, pluginDelete, pluginDumpTable,
 } from './pluginDataStore'
 import type { PluginTableDef, WhereCond } from './pluginDataStore'
+import { setPluginPetProvider, PET_SPRITE_KEYS, type PluginPetInfo } from './petSpeciesRegistry'
 
 /**
  * 插件注册表与安装管理。
@@ -68,7 +69,7 @@ const ENTRY_RE = /^[\w][\w.-]{0,64}\.html$/
 /** code 插件入口：单文件 .js/.mjs（Worker 加载）；拒绝目录/嵌套，防路径穿越 */
 const CODE_ENTRY_RE = /^[\w][\w.-]{0,64}\.(js|mjs)$/
 const ICON_RE = /^[\w][\w.-]{0,64}\.(svg|png|jpg|jpeg|webp|gif)$/i
-const KNOWN_CONTRIBUTIONS = ['blogTemplates', 'theme', 'habitPresets', 'bookmarkPresets', 'pomodoroPresets', 'helpDocs', 'tools', 'skills', 'automationRule', 'knowledgePages', 'sidebarIcons', 'deleteFx', 'tables', 'views', 'dashboardWidgets', 'commands', 'settings', 'renderers']
+const KNOWN_CONTRIBUTIONS = ['blogTemplates', 'theme', 'habitPresets', 'bookmarkPresets', 'pomodoroPresets', 'helpDocs', 'tools', 'skills', 'automationRule', 'knowledgePages', 'sidebarIcons', 'deleteFx', 'tables', 'views', 'dashboardWidgets', 'commands', 'settings', 'renderers', 'pets']
 /** Skill 变量名规则（提示词 {{var}} 占位符） */
 const SKILL_VAR_RE = /^[a-zA-Z_][a-zA-Z0-9_]{0,30}$/
 /** Skill 声明依赖的工具名（命名空间规则与 ToolRegistry 一致，一期仅展示不校验执行权） */
@@ -314,6 +315,33 @@ function validateManifest(m: unknown, opts?: { legacy?: boolean }): { manifest: 
           const wv = typeof w.w === 'number' ? Math.round(w.w) : 2
           const hv = typeof w.h === 'number' ? Math.round(w.h) : 2
           if (wv < 2 || wv > 6 || hv < 1 || hv > 4) return { error: 'dashboardWidgets: 格子比例 w 仅 2-6、h 仅 1-4' }
+        }
+      }
+      if (key === 'pets') {
+        // 插件贡献宠物品种（2026-09-29）：仅 UI 插件；speciesId 全局唯一（对内置品种 + 其他插件去重在扫描层做）
+        // 立绘 10 张齐（幼年/成年 × 基础/饥饿/趴睡/被摸/进食），缺一张 = 安装拒收；路径相对包内 + 仅 png + 禁越界
+        if (raw.type !== 'ui') return { error: 'pets 贡献仅 UI 插件(type: ui)可声明' }
+        const arr = (raw.contributes as Record<string, unknown>).pets
+        if (!Array.isArray(arr) || arr.length === 0 || arr.length > 5) return { error: 'pets 需为 1-5 个品种的数组' }
+        const spIds = new Set<string>()
+        for (const p of arr as Record<string, unknown>[]) {
+          if (!p || typeof p !== 'object') return { error: 'pets: 品种条目非法' }
+          if (typeof p.speciesId !== 'string' || !/^[a-z][a-z0-9-]{0,19}$/.test(p.speciesId)) return { error: 'pets: speciesId 非法（小写字母开头，字母/数字/连字符，≤20）' }
+          if (['dog', 'cat'].includes(p.speciesId)) return { error: 'pets: speciesId 与内置品种冲突' }
+          if (spIds.has(p.speciesId)) return { error: `pets: 重复的 speciesId ${p.speciesId}` }
+          spIds.add(p.speciesId)
+          if (typeof p.name !== 'string' || !p.name.trim() || p.name.length > 20) return { error: 'pets: name 缺失或过长(≤20)' }
+          const sp = p.sprites as Record<string, unknown> | undefined
+          if (!sp || typeof sp !== 'object' || Array.isArray(sp)) return { error: 'pets: sprites 缺失（需 10 张立绘映射）' }
+          for (const k of PET_SPRITE_KEYS) {
+            const v = sp[k]
+            if (typeof v !== 'string' || !v) return { error: `pets: sprites 缺少 ${k}` }
+            const norm = v.replace(/\\/g, '/')
+            if (norm.startsWith('/') || norm.split('/').includes('..') || !/\.png$/i.test(norm)) {
+              return { error: `pets: sprites.${k} 路径非法（需包内相对 png 路径，禁止越界）` }
+            }
+          }
+          if (Object.keys(sp).length > PET_SPRITE_KEYS.length) return { error: 'pets: sprites 含未知键（仅允许 10 个立绘键）' }
         }
       }
       if (key === 'commands') {
@@ -809,6 +837,9 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
   if (deps?.getSettingValue) pluginSettingReader = deps.getSettingValue
   // 退役插件清理：必须在注册 IPC 之前跑，避免插件页/知识库侧栏先拿到旧快照
   retirePlugins()
+  // 插件贡献宠物品种：注入实时扫描器（每次调用重扫 index + 清单，启停/卸载零钩子生效）
+  setPluginPetProvider(() => scanPluginPets())
+  ipcMain.handle('plugin:listPets', () => scanPluginPets())
   ipcMain.handle('plugin:fetchRegistry', async () => {
     try {
       const now = Date.now()
@@ -1006,7 +1037,43 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
     return out
   })
 
-  /** 列出所有已启用插件声明的命令（plugin-phase1-design C3）：附首个 view 槽位供宿主导航激活 */
+  /** 扫描所有已启用插件贡献的宠物品种（contributes.pets；同 listDashboardWidgets 走法） */
+  function scanPluginPets(): PluginPetInfo[] {
+    const idx = readIndex()
+    const out: PluginPetInfo[] = []
+    const seen = new Set<string>()
+    for (const [id, entry] of Object.entries(idx)) {
+      if (!entry.enabled) continue
+      const dir = safePathInside(getPluginsRoot(), id)
+      if (!dir || !existsSync(dir)) continue
+      try {
+        const parsed = readManifestAt(dir)
+        if ('error' in parsed) continue
+        const m = parsed.manifest
+        if (m.type !== 'ui') continue
+        const pets = (m.contributes?.pets ?? []) as Array<Record<string, unknown>>
+        for (const p of pets) {
+          if (typeof p?.speciesId !== 'string') continue
+          if (seen.has(p.speciesId)) continue // 多插件撞 speciesId：先到先得（index 顺序稳定）
+          const raw = (p.sprites ?? {}) as Record<string, unknown>
+          const sprites: Record<string, string> = {}
+          for (const k of PET_SPRITE_KEYS) {
+            const v = raw[k]
+            if (typeof v === 'string' && v) sprites[k] = `plugin://${id}/${encodeURI(v.replace(/\\/g, '/'))}`
+          }
+          if (Object.keys(sprites).length !== PET_SPRITE_KEYS.length) continue // 立绘不齐 = 不上架
+          seen.add(p.speciesId)
+          out.push({
+            pluginId: id,
+            speciesId: p.speciesId,
+            name: String(p.name || p.speciesId).trim().slice(0, 20) || p.speciesId,
+            sprites,
+          })
+        }
+      } catch { /* 单个插件读取失败不影响其他插件 */ }
+    }
+    return out
+  }
   ipcMain.handle('plugin:listCommands', () => {
     const idx = readIndex()
     const out: Array<{ pluginId: string; name: string; id: string; title: string; desc?: string; viewSlot?: string; type: string }> = []

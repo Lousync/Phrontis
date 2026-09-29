@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal } from 'lucide-react'
-import { petGet, petFeed, petPetTouch, petRename, petReset, petSwitchSpecies } from '../../../lib/ipc'
+import { petGet, petFeed, petPetTouch, petRename, petReset, petSwitchSpecies, pluginListPets } from '../../../lib/ipc'
 import { useDataChanged } from '../../../lib/dataChanged'
 import { useAnchoredMenu } from '../../../lib/useAnchoredMenu'
-import type { PetSnapshot, PetSpecies } from '../../../types'
+import type { PetSnapshot, PetSpecies, PluginPetInfo } from '../../../types'
 
 // 立绘（AI 生成像素画，docs/pet-design.md §三；命名 {species}-{stage}-{pose}.png）
 import dogBabyBase from '../../../assets/pets/dog-baby-base.png'
@@ -39,6 +39,20 @@ const SPRITE_URLS: Record<string, string> = {
 /** 品种显示名（切换菜单 + 单一真相源） */
 const SPECIES_LABEL: Record<PetSpecies, string> = { dog: '小狗', cat: '小猫' }
 const PET_SPECIES_LIST: PetSpecies[] = ['dog', 'cat']
+
+/** 插件贡献宠物品种（contributes.pets）：mount 拉 + plugins-changed 重拉（与看板插件控件同款走法） */
+function usePluginPets(): PluginPetInfo[] {
+  const [pets, setPets] = useState<PluginPetInfo[]>([])
+  const load = useCallback(() => {
+    void pluginListPets().then(setPets).catch(() => { /* 插件线不可用视为无贡献 */ })
+  }, [])
+  useEffect(() => {
+    load()
+    window.addEventListener('plugins-changed', load)
+    return () => window.removeEventListener('plugins-changed', load)
+  }, [load])
+  return pets
+}
 
 const STAGE_UP_NEED = 120
 const CANVAS = 192
@@ -82,6 +96,7 @@ export function PetWidget() {
   const closeMenu = menu.close
 
   snapRef.current = snap
+  const pluginPets = usePluginPets()
   // canvas 仅在 snap 就绪后才挂载（空态分支提前 return）；渲染循环须随之重跑，否则 rAF 在首帧
   // 拿到 null canvas 直接退出、之后再无 canvas → 立绘永远不画（2026-09-28 探针实锤）
   const ready = snap !== null
@@ -106,6 +121,19 @@ export function PetWidget() {
       imgsRef.current[key] = im
     }
   }, [])
+  // 插件品种立绘预载（键与内置同规：{species}-{stage}-{pose}；素材经 plugin:// 特权协议，不出本地）
+  useEffect(() => {
+    for (const p of pluginPets) {
+      for (const [k, url] of Object.entries(p.sprites)) {
+        const key = `${p.speciesId}-${k}`
+        if (!imgsRef.current[key]) {
+          const im = new Image()
+          im.src = url
+          imgsRef.current[key] = im
+        }
+      }
+    }
+  }, [pluginPets])
 
   const showBubble = useCallback((text: string) => {
     const el = document.getElementById('pet-widget-bubble')
@@ -386,6 +414,23 @@ export function PetWidget() {
               {snap.species === sp && <span className="text-[var(--accent)]">✓</span>}
             </button>
           ))}
+          {pluginPets.length > 0 && (
+            <>
+              <div className="px-2.5 pb-1 pt-1.5 text-[10.5px] tracking-wider text-[var(--text-muted)]">来自插件</div>
+              {pluginPets.map((p) => (
+                <button
+                  key={`${p.pluginId}:${p.speciesId}`}
+                  data-pet-species={p.speciesId}
+                  onClick={() => onSwitchSpecies(p.speciesId)}
+                  className={`flex w-full items-center gap-2 rounded-md px-2.5 py-[6px] text-left text-[12px] hover:bg-[var(--bg-hover)] ${snap.species === p.speciesId ? 'bg-[var(--accent)]/10' : ''}`}
+                >
+                  <img src={p.sprites['baby-base']} alt="" className="h-6 w-6 shrink-0" style={{ imageRendering: 'pixelated' }} />
+                  <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]">{p.name}</span>
+                  {snap.species === p.speciesId && <span className="text-[var(--accent)]">✓</span>}
+                </button>
+              ))}
+            </>
+          )}
           <div className="my-1 border-t border-[var(--border-color)]" />
           <button
             data-wb="petMenuRename"

@@ -328,7 +328,8 @@ export interface BookmarkItem {
 }
 
 // ---- 桌宠（docs/pet-design.md）----
-export type PetSpecies = 'dog' | 'cat'
+/** 品种 = 内置（dog/cat）+ 启用中插件贡献的品种（petSpeciesRegistry 动态判定；插件卸载自动回落 dog） */
+export type PetSpecies = string
 export interface PetState {
   version: number
   /** 当前品种的名字（= names[species]） */
@@ -352,6 +353,14 @@ export interface PetSnapshot extends PetState {
   aiCallsToday: number
   /** 本次操作是否跨过升级阈值（仅喂食/摸头返回） */
   stageUp?: boolean
+}
+/** 插件贡献宠物品种（contributes.pets；立绘经 plugin:// 协议由宿主按需提供） */
+export interface PluginPetInfo {
+  pluginId: string
+  speciesId: string
+  name: string
+  /** 键 = `${stage}-${pose}`（baby/adult × base/hungry/lie/pet/eat），值 = plugin:// 立绘 URL */
+  sprites: Record<string, string>
 }
 
 // ---- 远程监督 ----
@@ -1651,6 +1660,7 @@ export interface ElectronAPI {
   pluginGetContribution: (id: string, key: string) => Promise<{ ok: boolean; data?: unknown; message?: string }>
   pluginListViews: (slot?: string) => Promise<PluginViewContribution[]>
   pluginListDashboardWidgets: () => Promise<PluginDashboardWidget[]>
+  pluginListPets: () => Promise<PluginPetInfo[]>
   pluginListCommands: () => Promise<PluginCommandInfo[]>
   pluginListRenderers: () => Promise<PluginRendererInfo[]>
   pluginGetSettingsSchema: (id: string) => Promise<{ schema: PluginSettingItem[] }>
