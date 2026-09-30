@@ -996,6 +996,16 @@ export interface AiTeachWorkspaceInfo {
   lastActive: string | null
 }
 
+/** AI教学·课程模式（主进程 aiTeachingCourse.ts 同构；docs/ai-teaching-course-mode-plan.md） */
+export type AiTeachCourseUnitStatus = 'todo' | 'learning' | 'check' | 'mastered' | 'review'
+export interface AiTeachCourseUnit { id: string; name: string; goal: string; source: string }
+export interface AiTeachCourseChapter { id: string; name: string; units: AiTeachCourseUnit[] }
+export interface AiTeachCourseOutline { title: string; goal: string; anchor: string; chapters: AiTeachCourseChapter[] }
+export interface AiTeachCourseUnitProgress { status: AiTeachCourseUnitStatus; mastery: number; lastCheckedAt: string | null }
+export interface AiTeachCourseState { enabled: boolean; outline: AiTeachCourseOutline | null; progress: Record<string, AiTeachCourseUnitProgress> }
+export interface AiTeachCourseGenerateInput { goal: string; mode: 'anchor' | 'materials' | 'mixed' | 'free'; anchorText?: string; anchorLabel?: string; modelSpec?: string }
+export interface AiTeachCourseGenProgress { id: string; phase: 'request' | 'reasoning' | 'answer' | 'parsing' | 'done' | 'failed'; delta?: string; model?: string; chars?: number; error?: string }
+
 /** P6 素材库：SOURCE.md 解析条目（§3.13 模板 v2，字段行与模板一一对应） */
 export interface AiTeachSourceEntry {
   no: number
@@ -2150,6 +2160,16 @@ export interface ElectronAPI {
   aiTeachAssignSession: (id: string, wsId: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachUnassignSession: (id: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachSetLastWorkspace: (wsId: string | null) => Promise<{ ok: boolean; error?: string }>
+  // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲）
+  aiTeachCourseGetState: (wsId: string) => Promise<AiTeachCourseState>
+  aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
+  aiTeachCourseSaveOutline: (wsId: string, outline: AiTeachCourseOutline) => Promise<{ ok: boolean; relPath?: string; error?: string }>
+  aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: Partial<AiTeachCourseUnitProgress>) => Promise<{ ok: boolean; error?: string }>
+  aiTeachCourseSetSessionUnit: (sessionId: string, unitId: string | null) => Promise<{ ok: boolean; error?: string }>
+  aiTeachCourseGenerateOutline: (input: AiTeachCourseGenerateInput) => Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }>
+  aiTeachCourseGenerateOutlineStream: (id: string, input: AiTeachCourseGenerateInput) => Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }>
+  onAiTeachCourseGenProgress: (cb: (p: AiTeachCourseGenProgress) => void) => () => void
+  onAiTeachCourseRefresh: (cb: (p: { wsId: string }) => void) => () => void
   aiTeachSrcRead: (id: string) => Promise<AiTeachSourcesResult>
   aiTeachSrcAdd: (id: string, input: AiTeachSourceInput) => Promise<AiTeachSourcesResult>
   aiTeachSrcRemove: (id: string, no: number) => Promise<AiTeachSourcesResult>

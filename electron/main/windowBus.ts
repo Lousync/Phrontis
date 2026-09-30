@@ -71,6 +71,10 @@ export const BROADCAST_CHANNEL = {
   aiTeachNotice: 'aiTeach:notice',
   /** AI教学：网页抓取进度，载荷 `{ sessionId, no, done, total, current }` */
   aiTeachWebCrawlProgress: 'aiTeach:web-crawl-progress',
+  /** AI教学·课程模式：课程大纲/进度变化，载荷 `{ wsId: string }`（课程主页据此重拉） */
+  aiTeachCourseRefresh: 'aiTeach:course-refresh',
+  /** AI教学·课程模式：生成大纲过程事件，载荷 `CourseGenProgress`（`{ id, phase, delta?, model?, chars?, error? }`） */
+  aiTeachCourseGenProgress: 'aiTeach:course-gen-progress',
   /** 仓库文件被主进程改写（AI 写工具落盘），载荷 `{ relPath, mtimeMs? }` */
   wsExternalChange: 'ws:external-change',
   /** 仓库目录发生文件系统变更（外部改动 / 手动刷新），载荷 `{ relPaths: string[], watcherError?: string }`

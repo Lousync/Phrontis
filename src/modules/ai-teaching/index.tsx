@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceListDir, workspaceRefreshVault,
   agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachAssignSession, aiTeachUnassignSession, aiTeachSetLastWorkspace,
+  aiTeachCourseGetState, aiTeachCourseSetSessionUnit, aiTeachCourseSetUnitProgress, aiTeachCourseSetEnabled, onAiTeachCourseRefresh,
   aiTeachSrcRead, aiTeachSrcAdd, aiTeachSrcRemove, aiTeachSrcExtract, aiTeachSrcPick, aiTeachSrcPickDir, aiTeachSrcVisionCheck,
   aiTeachSrcPdfBytes, aiTeachSrcTranscribe, aiTeachSrcPromote,
   aiTeachProfileEnsureGlobal, aiTeachProfileEnsureSession, aiTeachProfileEnsureWorkspace,
   aiTeachProfileWriteSession, aiTeachProfileApplyPatch, getSetting,
 } from '../../lib/ipc'
 import { AiTeachFileTree } from './AiTeachFileTree'
+import { CourseHome, COURSE_ST_LABEL } from './CourseMode'
 import { decidePrepLanding, withDraft, withFold, withStarted } from './prepPolicy'
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
 import { ArtifactsPane } from './ArtifactsPane'
@@ -42,7 +44,7 @@ import { useFloatingWindow } from './useFloatingWindow'
  * ——关掉浮窗不再失联：那条被追问的回答自己就是入口，不必再往主线里塞一条"带回消息"。
  */
 const ANCHOR_LANES_KEY = 'aiTeach.anchorLanes'
-import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourceEntry, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp } from '../../types'
+import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourceEntry, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState } from '../../types'
 
 /**
  * 「AI教学」模块（原 id immersive / 沉浸式 Agent；总纲 docs/ai-teaching-module-rework.md，
@@ -548,6 +550,41 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setWsList(r.workspaces); setWsSessionMap(r.sessionWs); setLastWsId(r.lastWorkspaceId)
   }, [])
   useEffect(() => { void refreshWorkspaces() }, [refreshWorkspaces])
+  // ---------- 课程模式（docs/ai-teaching-course-mode-plan.md）----------
+  const [courseState, setCourseState] = useState<AiTeachCourseState | null>(null)
+  const [courseView, setCourseView] = useState<'home' | 'chat'>('chat')
+  const [courseUnit, setCourseUnit] = useState<string | null>(null)
+  /** 本课会话 id：只有当前会话 = 这一条时，上课 chip 才出现（防止 chip 泄漏到普通会话） */
+  const [courseLessonSid, setCourseLessonSid] = useState<string | null>(null)
+  const courseEnabled = !!courseState?.enabled
+  const courseUnits = useMemo(() => (courseState?.outline?.chapters ?? []).flatMap(c => c.units), [courseState])
+  const reloadCourse = useCallback(async () => {
+    const ws = activeWsRef.current
+    if (!ws || ws === '__none__') { setCourseState(null); return }
+    const s = await aiTeachCourseGetState(ws).catch(() => null)
+    setCourseState(s ?? null)
+  }, [])
+  /** 开启课程模式：写开关 → 重拉 → 落到课程主页（首次无大纲即进建课向导） */
+  const enableCourse = useCallback(async () => {
+    const ws = activeWsRef.current
+    if (!ws || ws === '__none__') return
+    await aiTeachCourseSetEnabled(ws, true).catch(() => null)
+    await reloadCourse()
+    setCourseView('home')
+  }, [reloadCourse])
+  useEffect(() => {
+    setCourseUnit(null); setCourseLessonSid(null)
+    if (!activeWs || activeWs === '__none__') { setCourseState(null); setCourseView('chat'); return }
+    void (async () => {
+      const s = await aiTeachCourseGetState(activeWs).catch(() => null)
+      setCourseState(s ?? null)
+      setCourseView(s?.enabled ? 'home' : 'chat')
+    })()
+  }, [activeWs])
+  useEffect(() => {
+    const off = onAiTeachCourseRefresh((p) => { if (p.wsId === activeWsRef.current) void reloadCourse() })
+    return off
+  }, [reloadCourse])
   const wsActive = activeWs && activeWs !== '__none__' ? wsList.find(w => w.id === activeWs) ?? null : null
   const wsTreeSeg = (() => {
     if (!wsActive) return ''
@@ -1169,6 +1206,34 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     void sendText(text, cid)
   }, [pending, sendText])
 
+  /** 课程模式：进入某知识点的「课」——开新会话、绑定知识点、带上开课指令发首条消息 */
+  const courseStartUnit = useCallback(async (unitId: string, opts?: { quiz?: boolean }) => {
+    const ws = activeWsRef.current
+    if (!ws || ws === '__none__') return
+    const u = courseUnits.find(x => x.id === unitId)
+    const row = await agentNewSession(u?.name ? `课·${u.name}` : '课程学习', 'aiTeaching').catch(() => null)
+    if (!row) { showToast({ type: 'warning', message: '新建会话失败' }); return }
+    await aiTeachAssignSession(row.id, ws).catch(() => null)
+    await aiTeachEnsureSessionFolder(row.id).catch(() => null)
+    await aiTeachCourseSetSessionUnit(row.id, unitId).catch(() => null)
+    setCourseUnit(unitId)
+    setCourseLessonSid(row.id)
+    setActiveId(row.id); setActiveTitle(row.title); activeIdRef.current = row.id
+    setMessages([]); setLastChanges(null); setLiveSteps([]); setArtTabs([]); setArtActive(null)
+    setActiveInstr(''); setInstrRel('')
+    setMidView(opts?.quiz ? 'quiz' : 'chat'); setQuizOpen(false); setLastQuizReport(null)
+    setPrepStarted(true); setPrepTemplate(null); setInput('')
+    setCourseView('chat')
+    void refreshSessions()
+    const cid = crypto.randomUUID()
+    chatIdRef.current = cid
+    const name = u?.name ?? '本知识点'
+    const prompt = opts?.quiz
+      ? `请针对本知识点「${name}」出 3 道单选题（走 quiz 协议），先不要给答案。`
+      : `请开始讲本知识点「${name}」。先给本节目标与前置，再分步精讲；讲完一个新概念就地出一道快检。`
+    void sendText(prompt, cid)
+  }, [courseUnits, refreshSessions, sendText])
+
   /** P7（测验结果联动产物）：整卷答完 → 报告 md 落会话文件夹 `测验·随堂测验 MM-DD HH:mm.md` */
   const handleQuizFinish = useCallback(async (s: { total: number; correctCount: number; records: Array<{ no: number; correct: boolean; picked: string }> }) => {
     const sid = activeIdRef.current
@@ -1207,7 +1272,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     } else {
       showToast({ type: 'error', message: `测验报告落盘失败${r?.error ? `：${r.error}` : ''}` })
     }
-  }, [quizItems, activeTitle, refreshWorkspaces])
+    // 课程模式：检验结果写回当前知识点掌握度（练习驱动 + 写回 progress.json）
+    const ws = activeWsRef.current
+    if (ws && ws !== '__none__' && courseUnit) {
+      const mastery = s.total ? s.correctCount / s.total : 0
+      void aiTeachCourseSetUnitProgress(ws, courseUnit, { status: mastery >= 0.8 ? 'mastered' : 'review', mastery, lastCheckedAt: new Date().toISOString() }).catch(() => null)
+    }
+  }, [quizItems, activeTitle, refreshWorkspaces, courseUnit])
 
   // ---------- P6 素材库（§3.13 结构 v3：SOURCE.md 登记 + 区间提取稿） ----------
   const [srcEntries, setSrcEntries] = useState<AiTeachSourceEntry[]>([])
@@ -2403,7 +2474,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   )
 
   return (
-    <div className="kb-theme-surface h-full flex flex-col min-h-0">
+    <div className="kb-theme-surface h-full flex flex-col min-h-0 relative">
       {/* P5（§3.2-6/页签即会话切换器）：顶栏 = 工作区 chip（返回选择页）+ 对话页签 + 新建任务 + 工具组 */}
       {activeWs ? (
       <>
@@ -2437,6 +2508,23 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             </div>
           )}
         </div>
+        {courseEnabled ? (
+          <div className="shrink-0 flex items-center gap-0.5 p-0.5 rounded-lg bg-[var(--bg-hover)]">
+            <button onClick={() => setCourseView('home')} title="课程主页"
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11.5px] transition-colors ${courseView === 'home' ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>
+              <BookOpen size={12} />课程主页
+            </button>
+            <button onClick={() => setCourseView('chat')} title="上课（当前会话）"
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11.5px] transition-colors ${courseView === 'chat' ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>
+              <MessagesSquare size={12} />上课
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => void enableCourse()} title="开启课程模式（把本工作区变成一门课）"
+            className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors">
+            <BookOpen size={13} /> 开启课程模式
+          </button>
+        )}
         <div className="flex-1 min-w-0 flex items-center gap-0.5 overflow-x-auto">
           {wsSessions.map(s => (
             <div key={s.id} onClick={() => { void openSession(s.id, s.title) }}
@@ -2573,6 +2661,37 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           {/* v3.1.2（开发负责人 2026-09-14）：会话列表区回归，与资源管理器「分区并列共存」——
               形态 A：会话（上，限高可折叠）+ 资源管理器（中，撑满剩余）+ 任务规划（下）。
               折叠任一分区，其余分区自动获得空间（原会话列表区曾因「页签即会话切换器」退役，本次恢复）。 */}
+          {courseEnabled ? (
+            <>
+              <SectionHead open={!collapsedSec.courseOutline} title="课程大纲" onToggle={() => toggleSec('courseOutline')} />
+              <div className={`grid min-h-0 basis-0 transition-[flex-grow,grid-template-rows] duration-200 ease-out ${collapsedSec.courseOutline ? 'grow-0' : 'grow'}`} style={{ gridTemplateRows: collapsedSec.courseOutline ? '0fr' : '1fr' }}>
+                <div className={`overflow-hidden min-h-0 transition-opacity duration-150 ${collapsedSec.courseOutline ? 'invisible opacity-0' : 'opacity-100'}`}>
+                  <div className="h-full overflow-y-auto px-1.5 pb-1.5">
+                    {!courseState?.outline && (
+                      <div className="px-2 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">还没有课程大纲，去中栏「生成课程大纲」。</div>
+                    )}
+                    {(courseState?.outline?.chapters ?? []).map(ch => (
+                      <div key={ch.id}>
+                        <div className="px-2 pt-2 pb-0.5 text-[10.5px] font-semibold text-[var(--text-muted)] tracking-wide">{ch.name}</div>
+                        {ch.units.map(u => {
+                          const st = courseState?.progress[u.id]?.status ?? 'todo'
+                          return (
+                            <div key={u.id} onClick={() => void courseStartUnit(u.id)}
+                              title={u.goal || u.name}
+                              className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer text-[12.5px] transition-colors ${u.id === courseUnit && activeId === courseLessonSid ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                              <span className={`shrink-0 w-2 h-2 rounded-full ${st === 'mastered' ? 'bg-[var(--success)]' : st === 'learning' ? 'bg-[var(--accent)]' : st === 'review' ? 'bg-[var(--danger)]' : st === 'check' ? 'bg-[var(--warning)]' : 'bg-[var(--text-muted)]'}`} title={COURSE_ST_LABEL[st] ?? st} />
+                              <span className="flex-1 min-w-0 truncate">{u.name}</span>
+                              <span className="shrink-0 text-[9.5px] text-[var(--text-muted)]">{COURSE_ST_LABEL[st] ?? st}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (<>
           <SectionHead open={!collapsedSec.sessions} title="会话" onToggle={() => toggleSec('sessions')}
             right={
               /* 菜单必须锚定在本按钮上（顶栏那个 ＋ 的菜单锚在顶栏里，左栏点它会「菜单出现在别处」），
@@ -2631,7 +2750,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               </div>
             </div>
           </div>
-
+          </>)}
           <SectionHead open={!collapsedSec.explorer} title="资源管理器" onToggle={() => toggleSec('explorer')}
             right={(
               /* v3.2.0 条目 ④：与编辑器侧同语义的手动刷新（口径 b 全量：树重扫 + 知识索引/图谱失效
@@ -2654,7 +2773,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 <RefreshCw size={12} className={treeRefreshing ? 'animate-spin' : undefined} />
               </button>
             )} />
-          <div className="grid flex-1 min-h-0 transition-[grid-template-rows] duration-200 ease-out" style={{ gridTemplateRows: collapsedSec.explorer ? '0fr' : '1fr' }}>
+          <div className={`grid min-h-0 basis-0 transition-[flex-grow,grid-template-rows] duration-200 ease-out ${collapsedSec.explorer ? 'grow-0' : 'grow'}`} style={{ gridTemplateRows: collapsedSec.explorer ? '0fr' : '1fr' }}>
             <div className={`overflow-hidden min-h-0 transition-opacity duration-150 ${collapsedSec.explorer ? 'invisible opacity-0' : 'opacity-100'}`}>
               <div className="h-full min-h-0 pb-1">
                 <AiTeachFileTree
@@ -2714,8 +2833,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         </ResizablePanel>
 
         {/* 中栏（工件栏方案 §1.2 定稿）：对话主区固定、永不替换；原 docView/reader 分支整体迁入右缘工件栏页签 */}
-        <section className="flex-1 flex flex-col min-w-0 min-h-0">
-          {midView === 'quiz' ? (
+        <section className="flex-1 flex flex-col min-w-0 min-h-0 relative">
+          {courseEnabled && courseView === 'home' && courseState ? (
+            /* 课程模式：中栏「课程主页」（左栏出大纲树、顶栏出分段器） */
+            <div className="absolute inset-0 z-20 bg-[var(--bg-primary)] overflow-hidden">
+              <CourseHome
+                wsId={(activeWs as string)}
+                wsName={wsActive?.name ?? '课程'}
+                modelSpec={effModel}
+                state={courseState}
+                onStartUnit={(id) => void courseStartUnit(id)}
+                onCheckUnit={(id) => void courseStartUnit(id, { quiz: true })}
+                onReload={() => void reloadCourse()}
+              />
+            </div>
+          ) : midView === 'quiz' ? (
             /* P7（§3.2-7）：题目视图——题目 = 对话回答里的 ```quiz 围栏协议块（QuizParser 解析） */
             <div className="flex-1 flex flex-col min-h-0 relative">
               {midChips}
@@ -3299,6 +3431,17 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           <button type="button" onClick={() => setPickedSkill(null)} title="移除该 Skill"
                             className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"><X size={10} /></button>
                         </span>
+                      </div>
+                    )}
+                    {courseUnit && activeId === courseLessonSid && !pending && (
+                      <div className="mb-1.5 flex flex-wrap gap-1.5 kb-view-in">
+                        {['继续', '考我一道', '换个例子', '为什么'].map(c => (
+                          <button key={c} type="button"
+                            onClick={() => { const cid = crypto.randomUUID(); chatIdRef.current = cid; void sendText(c === '考我一道' ? '考我一道：针对当前知识点出一道单选题' : c, cid) }}
+                            className="px-2.5 py-1 rounded-full border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] transition-colors">
+                            {c}
+                          </button>
+                        ))}
                       </div>
                     )}
                     <div className="relative">

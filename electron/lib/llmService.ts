@@ -1282,6 +1282,16 @@ export function invokeLlmInternal(req: LlmInvokeRequest): Promise<LlmInvokeRespo
   return llmInvoke(req)
 }
 
+/** 兜底模型：第一个启用供应商的第一个模型（当既无本对话模型、也无全局 defaultChatModel 时给一次性调用用） */
+export function firstEnabledModelSpec(): { providerId: string; modelId: string } | null {
+  for (const p of getProviders()) {
+    if (!p.enabled) continue
+    const m = p.models.find(Boolean)
+    if (m) return { providerId: p.id, modelId: m }
+  }
+  return null
+}
+
 // ===== 视觉转写（AI教学 3-21）：多模态一次性调用，不经过会话消息管线 =====
 
 /** 视觉能力启发式（同 reasoningCapable 哲学：名字猜测，真不支持由 API 报错兜底） */
@@ -1315,8 +1325,7 @@ export function findVisionModel(preferredSpec?: string): { provider: ProviderCon
   return null
 }
 
-/** 视觉转写主进程入口（AI教学素材库）：OpenAI 多模态 content 数组直通 adapter */
-export async function visionChat(req: VisionChatRequest): Promise<VisionChatResponse> {
+/** 视觉转写主进程入口（AI教学素材库）：OpenAI 多模态 content 数组直通 adapter */export async function visionChat(req: VisionChatRequest): Promise<VisionChatResponse> {
   const found = findVisionModel(req.modelSpec)
   if (!found) return { ok: false, error: '未找到可用的视觉模型：请在设置→模型供应商 配置支持图片的模型（如 qwen-vl / glm-4v / gpt-4o / kimi-latest，openai-compatible 类型）' }
   const content: unknown[] = [

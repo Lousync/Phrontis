@@ -326,6 +326,26 @@ const api = {
   aiTeachAssignSession: (id: string, wsId: string) => ipcRenderer.invoke('aiTeach:assignSession', id, wsId),
   aiTeachUnassignSession: (id: string) => ipcRenderer.invoke('aiTeach:unassignSession', id),
   aiTeachSetLastWorkspace: (wsId: null | string) => ipcRenderer.invoke('aiTeach:setLastWorkspace', wsId),
+  // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲）
+  aiTeachCourseGetState: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getState', wsId),
+  aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => ipcRenderer.invoke('aiTeachCourse:setEnabled', wsId, enabled),
+  aiTeachCourseSaveOutline: (wsId: string, outline: unknown) => ipcRenderer.invoke('aiTeachCourse:saveOutline', wsId, outline),
+  aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: unknown) => ipcRenderer.invoke('aiTeachCourse:setUnitProgress', wsId, unitId, patch),
+  aiTeachCourseSetSessionUnit: (sessionId: string, unitId: null | string) => ipcRenderer.invoke('aiTeachCourse:setSessionUnit', sessionId, unitId),
+  aiTeachCourseGenerateOutline: (input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutline', input),
+  aiTeachCourseGenerateOutlineStream: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutlineStream', id, input),
+  /** AI教学·课程模式：生成大纲过程事件（`{ id, phase, delta?, model?, chars?, error? }`） */
+  onAiTeachCourseGenProgress: (cb: (p: unknown) => void) => {
+    const handler = (_e: unknown, p: unknown) => cb(p)
+    ipcRenderer.on('aiTeach:course-gen-progress', handler)
+    return () => { ipcRenderer.removeListener('aiTeach:course-gen-progress', handler) }
+  },
+  /** AI教学·课程模式：大纲/进度变化（课程主页据此重拉），载荷 `{ wsId }` */
+  onAiTeachCourseRefresh: (cb: (p: { wsId: string }) => void) => {
+    const handler = (_e: unknown, p: { wsId: string }) => cb(p)
+    ipcRenderer.on('aiTeach:course-refresh', handler)
+    return () => { ipcRenderer.removeListener('aiTeach:course-refresh', handler) }
+  },
   aiTeachSrcRead: (id: string) => ipcRenderer.invoke('aiTeachSrc:read', id),
   aiTeachSrcAdd: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachSrc:add', id, input),
   aiTeachSrcRemove: (id: string, no: number) => ipcRenderer.invoke('aiTeachSrc:remove', id, no),
