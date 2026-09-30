@@ -221,27 +221,53 @@ export interface RichTextImage {
   h: number
 }
 
-/** 一段文本按行内段位拼成 HTML（公式走 KaTeX，其余走 span + 行内样式） */
+/** 一段文本按行内段位拼成 HTML（公式走 KaTeX，其余走 span + 行内样式）
+ *  F-3（2026-09-30 拍板 B）：**整行只由一个公式构成**（无其它文字、忽略纯空白）时，
+ *  按展示型处理并居中 —— 修复「`$…$` 行内公式靠左、不居中」的观感。
+ *  为不改动既有换行渲染口径，行之间仍以 `\n` 衔接（HTML 折叠为空白），只有公式行会因块级 div 断行。 */
 function segmentsToHtml(segs: RichSeg[], katex: { renderToString: (t: string, o?: unknown) => string }): string {
   const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  const parts: string[] = []
-  for (const seg of segs) {
-    if (seg.kind === 'math') {
-      try {
-        const html = katex.renderToString(seg.tex, { output: 'html', throwOnError: false, displayMode: seg.display })
-        parts.push(seg.display ? `<div style="text-align:center;margin:6px 0">${html}</div>` : html)
-      } catch {
-        parts.push(`<span style="color:#c00">${esc(seg.tex)}</span>`)
-      }
-      continue
+  const renderMath = (seg: Extract<RichSeg, { kind: 'math' }>): string => {
+    try {
+      const html = katex.renderToString(seg.tex, { output: 'html', throwOnError: false, displayMode: seg.display })
+      return seg.display ? `<div style="text-align:center;margin:6px 0">${html}</div>` : html
+    } catch {
+      return `<span style="color:#c00">${esc(seg.tex)}</span>`
     }
+  }
+  const renderText = (seg: Extract<RichSeg, { kind: 'text' }>): string => {
     let t = esc(seg.text)
     if (seg.code) t = `<code style="font-family:'Cascadia Code',Consolas,monospace;background:rgba(127,127,127,.14);padding:0 3px;border-radius:3px">${t}</code>`
     if (seg.italic) t = `<i>${t}</i>`
     if (seg.bold) t = `<b>${t}</b>`
-    parts.push(t)
+    return t
   }
-  return parts.join('')
+  // 按 `\n` 切逻辑行
+  const lines: RichSeg[][] = [[]]
+  for (const seg of segs) {
+    if (seg.kind === 'text' && seg.text.includes('\n')) {
+      const parts = seg.text.split('\n')
+      for (let k = 0; k < parts.length; k++) {
+        if (k > 0) lines.push([])
+        if (parts[k]) lines[lines.length - 1].push({ kind: 'text', text: parts[k], bold: seg.bold, italic: seg.italic, code: seg.code })
+      }
+    } else {
+      lines[lines.length - 1].push(seg)
+    }
+  }
+  return lines.map((line) => {
+    const meaningful = line.filter((sg) => !(sg.kind === 'text' && sg.text.trim() === ''))
+    if (meaningful.length === 1 && meaningful[0].kind === 'math') {
+      const m = meaningful[0]
+      try {
+        const html = katex.renderToString(m.tex, { output: 'html', throwOnError: false, displayMode: true })
+        return `<div style="text-align:center;margin:6px 0">${html}</div>`
+      } catch {
+        return `<span style="color:#c00">${esc(m.tex)}</span>`
+      }
+    }
+    return line.map((sg) => (sg.kind === 'math' ? renderMath(sg) : renderText(sg))).join('')
+  }).join('\n')
 }
 
 /**

@@ -952,10 +952,15 @@ export default function App() {
     update('workbenchLayout', JSON.stringify({ ...wbLayout, leftMode: 'overview' }))
   }, [wbLayout, update])
 
+  const lastWorkbenchTabRef = useRef<TabName | null>(null)
   const handleTabChange = (tab: TabName) => {
     setActiveToolTab(null)  // 切回模块标签时退出工具标签（工具标签关闭走 ✕ / 落点分流）
     setNoteJumpFrom(null)   // 手动切 Tab 清返回 chip（条目6 口径；chip 自身的返回点击也走这里，消费即清）
     exitTreeModeForModule() // 进模块态 → leftMode 落回总览（树模式互斥修复，见函数头注）
+    // F-5（2026-09-30）：进「整窗模块」前记下当时的工作台标签，点活动栏「工作台」回来若它仍开着则恢复
+    if (WORKBENCH_TABBAR_EXCLUDED.includes(tab) && activeTab && !WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)) {
+      lastWorkbenchTabRef.current = activeTab
+    }
     if (tab === activeTab) {
       // 工具箱专属（2026-09-10）：已在工具箱时再点活动栏图标 = 退出当前工具、回到工具箱主界面。
       // 通用行为对图标条无意义 —— v3.4.0 起图标条幂等哲学：重复点击已激活模块 = 无操作
@@ -1275,7 +1280,7 @@ export default function App() {
   useEffect(() => {
     rightAskRef.current = {
       accept: () => !fullWindowTab && activeTab !== 'aiChat'
-        && !!rightReading && !wbLayout.panelTabsHidden.includes('ai'),
+        && !wbLayout.panelTabsHidden.includes('ai'),
       ask: (text) => {
         // 与 Ctrl+J 同款两步：先收掉可能开着的浮层（两个 ChatBody 叠着 = 两块对话），再展开右栏 AI
         window.dispatchEvent(new Event('ai-assistant:close'))
@@ -1402,7 +1407,14 @@ export default function App() {
               // 反馈 10（2026-09-27）：「回工作台」= 回**总览态**，不再落「最后文档标签 ?? knowledge」——
               // 旧兜底会落到一个没开任何页面的知识库模块（中间无页面、左栏却被跟随拉成笔记区）。
               // 总览态下页面条原样保留各标签，点击即恢复；收尾口径与 closeTab / 反馈1 返回一致。
-              onWorkbench={() => { setActiveToolTab(null); setActiveTab(null); setRailModule(null) }}
+              onWorkbench={() => {
+                setActiveToolTab(null)
+                // 反馈 F-5（2026-09-30）：恢复「进整窗模块前」的工作台标签（仍在 openTabs 时）；
+                // 否则保留反馈 10 的安全兜底——落总览态，避免旧兜底落到「没开页面的 knowledge」而左栏被拉错。
+                const back = lastWorkbenchTabRef.current
+                if (back && openTabs.includes(back)) { setActiveTab(back) }
+                else { setActiveTab(null); setRailModule(null) }
+              }}
               flush={winMax}
             />
           )}
