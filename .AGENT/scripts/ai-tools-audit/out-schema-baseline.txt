@@ -1,4 +1,4 @@
-源文件: e:\Projects\KnowledgeRecorder\electron\lib\builtinTools.ts
+源文件: E:\Projects\KnowledgeRecorder\electron\lib\builtinTools.ts
 工具总数: 35
 
 【core —— 每轮常驻注入】14 个
@@ -20,7 +20,7 @@
 
 【ondemand —— 默认折叠，tool.request 后才注入】21 个
   builtin.quiz.gen-paper              4627 字符  ~1521 tok  schema  631  [write/quiz]
-  builtin.knowledge.graph-topology    4269 字符  ~1319 tok  schema  264  [read/knowledge]
+  builtin.knowledge.graph-topology    4346 字符  ~1345 tok  schema  264  [read/knowledge]
   builtin.booksource.draft            3599 字符  ~1305 tok  schema  790  [write/bookMarket]
   builtin.schedule.create-todo        3014 字符  ~ 955 tok  schema  728  [write/schedule]
   builtin.vault.edit                  2794 字符  ~ 932 tok  schema  491  [write/-]
@@ -40,9 +40,9 @@
   builtin.booksource.list              904 字符  ~ 295 tok  schema   34  [read/bookMarket]
   builtin.quiz.favorite                856 字符  ~ 264 tok  schema  187  [write/quiz]
   builtin.quiz.set-note                774 字符  ~ 239 tok  schema  203  [write/quiz]
-  小计: 39842 字符  ~13174 tok
+  小计: 39919 字符  ~13200 tok
 
-合计若全部装载: ~21047 tok
+合计若全部装载: ~21073 tok
 实际常驻(默认权限 read 态): ~7873 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】

@@ -123,8 +123,9 @@
 | verification-issues-20260904.md | 过程记录 | 旧验收问题归集（IC 已实锤定位、修复另开），作过程证据留存 |
 | verification-issues-20260908.md | 过程记录 | 同上 |
 | ai-teaching-真机验证-问题记录-20260907-第二轮.md | 过程记录 | 旧真机验证记录，对应版本已多轮迭代 |
+| v3.4.0-beta-feedback.md | 过程记录 | v3.4.0 改版（三栏外壳 / 书架六格式 / 书市）的 **beta 体验反馈台账**，`F-1…F-10` / `N-1…N-9` **全部结案**（2026-09-29 归档）；v3.4.0 正式发版后由主仓**新** `docs/v3.4.0-feedback.md` 接棒，编号**重起 `F-1` / `N-1`**（代码注释里的「台账 F-x / N-x」指本归档件） |
 
-**仍留主仓的**（2026-09-23 时点，口径见规则 3）：总纲 `rework-master-plan.md` / `ai-teaching-module-rework.md`；活跃 `ui-animation-plan.md` / `ui-updates.md` / `pending-fixes.md` / `book-market-design.md`（仍在施工）/ `release-notes-design.md`（§9 有 P1 待办）/ `v3.4.0-feedback.md` / `workbench-split-scope-design.md`（分屏留 v3.5.0）/ `theme-fx-design.md`（等看板后启动）/ `bookshelf-reader-upgrade-design.md` 的**接任总纲** `.claude/plans/b-epub-formats.md`；常驻规范 `help-disclosure-pattern.md`；仍在推进的插件三件套 `rework-plugin-openness.md` / `rework-toolbox-as-plugins.md` / `plugin-api-v2-design.md` + `plugin-api-v2-reference.md`（P3–P7 待做）；文档自述不归档的 `ai-learn-center-design.md` 与其两份原型、`docs/prototypes/ui-animation-prototype.html`。
+**仍留主仓的**（2026-09-23 时点，口径见规则 3）：总纲 `rework-master-plan.md` / `ai-teaching-module-rework.md`；活跃 `ui-animation-plan.md` / `ui-updates.md` / `pending-fixes.md` / `book-market-design.md`（仍在施工）/ `release-notes-design.md`（§9 有 P1 待办）/ `v3.4.0-feedback.md`（**v3.4.0 正式版新台账，2026-09-29 起**；其 beta 前身已归档）/ `workbench-split-scope-design.md`（分屏留 v3.5.0）/ `theme-fx-design.md`（等看板后启动）/ `bookshelf-reader-upgrade-design.md` 的**接任总纲** `.claude/plans/b-epub-formats.md`；常驻规范 `help-disclosure-pattern.md`；仍在推进的插件三件套 `rework-plugin-openness.md` / `rework-toolbox-as-plugins.md` / `plugin-api-v2-design.md` + `plugin-api-v2-reference.md`（P3–P7 待做）；文档自述不归档的 `ai-learn-center-design.md` 与其两份原型、`docs/prototypes/ui-animation-prototype.html`。
 
 > **评估过、本轮未归档**（2026-09-23 时点，其中三项已于 2026-09-29 处置，见上文清单）：`bookshelf-reader-upgrade-design.md`（**已归档**——二期四格式全部落码）、`share-card-design.md`（**已归档**——已实现）、`workbench-split-scope-design.md`（**仍留**——分屏已确认留给 v3.5.0，方案活跃）。
 

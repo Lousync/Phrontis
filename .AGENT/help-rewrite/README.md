@@ -172,9 +172,9 @@ node --experimental-strip-types --no-warnings .AGENT/scripts/help-kb/verify-help
 
 ---
 
-## 八、台账 N-10 条目草案（可直接粘贴进 docs/v3.4.0-feedback.md 功能需求区段）
+## 八、台账「手册通道」条目（**已登记**进 `docs/v3.4.0-feedback.md` 功能需求区段 = `N-1`）
 
-> ## `[ ]` N-10 AI 助手「手册通道」：用法问答自动分流（首条消息 LLM 分类 + 轻量请求形状）
+> ## `[ ]` N-1 AI 助手「手册通道」：用法问答自动分流（首条消息 LLM 分类 + 轻量请求形状）
 >
 > **性质**：新增能力。**状态**：方案已拍板（2026-09-28，P1~P3 全定），待落码。
 >

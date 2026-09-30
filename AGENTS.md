@@ -121,6 +121,7 @@ npm run pack     # build + electron-builder 打包
 - **类型门禁**（build 通过 ≠ 类型正确，必须单独跑）：`npx tsc --noEmit -p tsconfig.node.json` 与 `npx tsc --noEmit -p tsconfig.web.json`。
 - **提交必须用系统 git**（Git Bash 自带的版本会删嵌套分支 ref → 提交变孤儿）。路径与理由见 skill `windows-sandbox-ops` §1。
 - **改动越大越要配独立的契约验证脚本** —— 只跑 tsc 不够。
+- **脚本输出一律不用 emoji**（`scripts/` 与 `.AGENT/scripts/` 下的 `.py` / `.mjs` / `.bat` 都算，`print` 与 `console.log` 同规）。**Windows 控制台默认 GBK**，Python 脚本 `print` 到 emoji 会抛 `UnicodeEncodeError` —— 活干完了却报失败，还会吞掉退出码（2026-09-29 `scripts/publish-release.py` 发布成功后崩在收尾那句）。用纯文字标记：`[OK]` / `[FAIL]` / `PASS` / `FAIL`。存量脚本不强制回改，**新写与改到的脚本一律遵守**。
 - **新功能落地 / 老功能用户可见行为变更后，收尾时必须提醒开发者同步 AI 手册**：`resources/help/*.md` 是 AI 回答「软件怎么用」的唯一语料（`builtin.help.search` 检索），功能与文档不同步 = AI 照旧文档说错话且无任何报错。提醒口径：本次改动涉及哪个模块、`resources/help/` 哪几篇可能受影响、是否需要改写（写作规范与重编流程见 `.AGENT/help-rewrite/README.md`，检索验收跑 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs`）。纯内部重构（无用户可见行为变化）不需要提醒。
 
 ## 提示与设置
@@ -141,6 +142,8 @@ npm run pack     # build + electron-builder 打包
 | 更新说明机制（触发规则 / 数据三层） | `docs/release-notes-design.md` |
 | 主题氛围特效（四季粒子 / 丁达尔，等看板） | `docs/theme-fx-design.md` |
 | 待修 bug 清单 | `docs/pending-fixes.md`（旧验收记录 `verification-issues-*` 与真机验证记录 2026-09-23 已转入 DP `Phrontis/过程记录/`） |
+| v3.4.0 正式版体验反馈 | `docs/v3.4.0-feedback.md`（`F-n` 缺陷/落差 · `N-n` 新需求，编号各从 1 起；beta 前身已归档 DP `Phrontis/过程记录/v3.4.0-beta-feedback.md`） |
+| AI 教学互动性改造计划（3.5.0） | `docs/ai-teaching-interactivity-plan.md` |
 | 设计文档 / 原型去哪了 | `docs/DESIGN-ARCHIVE.md` —— 已落码或已搁置的方案与原型统一归档在独立库 **DesignProcess** |
 
 **已评估暂缓、勿重复调研**：语音输入 ASR（方案已论证到落码级；设计稿与同类搁置项在 DP `Phrontis/搁置功能与想法/`）。

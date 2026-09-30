@@ -189,7 +189,7 @@ def main():
     print(f'icon 安全: {len(icon_issues)} 问题' + ('' if not icon_issues else f' -> {icon_issues}'))
     if icon_issues:
         sys.exit(1)
-    print('质量门通过 ✓')
+    print('[OK] 质量门通过')
 
     # ---- 2. 拉取远程现状 ----
     print('== 准备发布 ==')
@@ -274,7 +274,7 @@ def main():
         print(f'  zip sha256 一致 + 完整性: {"OK" if ok2 else "FAIL"}')
         if not (ok1 and ok2):
             sys.exit(1)
-        print('验证通过 ✓')
+        print('[OK] 验证通过')
 
     print(f'发布完成：{pid} v{args.version}（registry v{new_v}）commit {new_commit[:12]}')
 

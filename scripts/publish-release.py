@@ -21,6 +21,16 @@ import re
 import subprocess
 import sys
 
+# Windows 控制台默认 GBK：输出含非 GBK 字符(emoji 等)时 print 会抛 UnicodeEncodeError,
+# 表现为「发布其实成功了、脚本却报失败」并吞掉退出码(2026-09-29 实际踩到:收尾那句带了个对勾 emoji)。
+# 脚本自身的输出**一律不含 emoji**(规范见仓库根 AGENTS.md「工作流」);这里再把出口兜一道,
+# 万一将来混进不可编码字符,退化成打问号而不是让发布脚本崩在最后一行。
+try:
+    sys.stdout.reconfigure(errors='replace')
+    sys.stderr.reconfigure(errors='replace')
+except Exception:
+    pass
+
 REPO = 'Lousync/Phrontis'
 
 
@@ -161,7 +171,7 @@ def main():
         print('  ! 这是 draft Release,记得发布正式版后客户端才能收到更新')
     if not ok:
         sys.exit(1)
-    print('✅ %s 三件套已发布并验证齐全(%s)' % (tag, REPO))
+    print('[OK] %s 三件套已发布并验证齐全(%s)' % (tag, REPO))
 
 
 if __name__ == '__main__':
