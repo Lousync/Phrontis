@@ -28,6 +28,15 @@ const SESSIONS_FILE = 'agent-sessions.json'
  */
 export type AgentSessionSource = 'assistant' | 'aiTeaching'
 
+/**
+ * 会话通道（台账 N-1「手册通道」）：
+ * - `'manual'` = 使用帮助通道（只检索官方手册、effort off、≤3 轮、不注入教学/感知规则）；
+ * - `'agent'`（或未标记） = 通用助手通道。
+ * 仅 assistant 来源适用；AI 教学（source=aiTeaching）恒走通用通道。
+ * 未标记 = 尚未分类（等同 agent），首条用户消息时一次性分类后写入。
+ */
+export type AgentSessionMode = 'manual' | 'agent'
+
 /** 会话压缩纪要（docs/conversation-compaction-design.md）：覆盖 upto_id 及之前的消息 */
 export interface SessionDigest {
   /** 纪要正文（markdown，生成侧 ≤4000 chars 截断保护） */
@@ -46,6 +55,8 @@ export interface AgentSessionRow {
   instructions?: string
   /** 来源（缺省=assistant；存量老数据无此字段，由 backfillSessionSources 回填） */
   source?: AgentSessionSource
+  /** 通道（N-1 手册通道）：'manual'=使用帮助通道；缺省/'agent'=通用助手。仅 assistant 来源适用 */
+  mode?: AgentSessionMode
   created_at: string
   updated_at: string
   /** 会话压缩纪要（缺省=未压缩）。原消息永不删除，置 null 即回滚 */
@@ -102,6 +113,15 @@ export function createAgentSession(title = '新会话', source: AgentSessionSour
   sessions.push(row)
   globalWriteJson(SESSIONS_FILE, sessions)
   return row
+}
+
+/** 写会话通道（N-1 手册通道）：首条消息分类、或手册通道内检测到操作意图升格时调用。 */
+export function setSessionMode(id: string, mode: AgentSessionMode): void {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row || row.mode === mode) return
+  row.mode = mode
+  globalWriteJson(SESSIONS_FILE, sessions)
 }
 
 /**

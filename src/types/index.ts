@@ -959,6 +959,8 @@ export interface AgentSessionInfo {
   title: string
   /** 来源（缺省=assistant） */
   source?: AgentSessionSource
+  /** 通道（N-1 手册通道）：'manual'=使用帮助；缺省/'agent'=通用助手 */
+  mode?: 'manual' | 'agent'
   /** 会话级全局要求（仅本会话生效；空串/缺省=无） */
   instructions?: string
   createdAt: string
@@ -2201,6 +2203,8 @@ export interface ElectronAPI {
   onAiTeachTreeRefresh: (cb: (p: { dirRel: string }) => void) => () => void
   onAiTeachWebProgress: (cb: (p: { sessionId: string; no: number; done: number; total: number; current: string }) => void) => () => void
   onAiTeachNotice: (cb: (msg: string) => void) => () => void
+  /** N-1 手册通道：助手侧提示（升格 Toast 等），载荷 `{ sessionId, message }` */
+  onAssistantNotice: (cb: (p: { sessionId: string; message: string }) => void) => () => void
   llmCcSwitchList: () => Promise<CcSwitchScanResult>
   llmCcSwitchImport: (ids: string[]) => Promise<CcSwitchImportResult>
 }

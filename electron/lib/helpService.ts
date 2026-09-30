@@ -74,3 +74,8 @@ export function searchHelp(query: string, limit = 3, id?: string): { hits: HelpH
   }
   return searchHelpIn(all, query, limit, id)
 }
+
+/** 手册目录（篇目清单 id+title+category）：供 help.search 返回，模型据此按 id 深读单篇 */
+export function helpCatalog(): Array<{ id: string; title: string; category: string }> {
+  return loadHelpDocs().map((d) => ({ id: d.id, title: d.title, category: d.category }))
+}

@@ -189,7 +189,12 @@ export function AiChatSidebar({ chat, active, container }: Props) {
                   ) : (
                     <>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate">{sess.title}</span>
+                        <span className="block truncate">
+                          {sess.mode === 'manual' && (
+                            <span className="mr-1 rounded bg-[var(--accent)]/12 px-1 py-px text-[9px] font-medium text-[var(--accent)] align-middle">使用帮助</span>
+                          )}
+                          {sess.title}
+                        </span>
                         <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
                       </span>
                       <button

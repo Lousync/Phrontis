@@ -684,5 +684,7 @@ export const aiTeachProfileApplyPatch = (layer: 'global' | 'workspace' | 'sessio
 export const llmReasoningCapable = (model: string): Promise<boolean> => a().llmReasoningCapable(model)
 export const onAiTeachTreeRefresh = (cb: (p: { dirRel: string }) => void) => a().onAiTeachTreeRefresh(cb)
 export const onAiTeachNotice = (cb: (msg: string) => void) => a().onAiTeachNotice(cb)
+/** N-1 手册通道：助手侧提示（升格 Toast 等），载荷 `{ sessionId, message }` */
+export const onAssistantNotice = (cb: (p: { sessionId: string; message: string }) => void) => a().onAssistantNotice(cb)
 export const llmCcSwitchList = (): Promise<CcSwitchScanResult> => a().llmCcSwitchList()
 export const llmCcSwitchImport = (ids: string[]): Promise<CcSwitchImportResult> => a().llmCcSwitchImport(ids)

@@ -390,6 +390,12 @@ const api = {
     ipcRenderer.on('aiTeach:notice', handler)
     return () => { ipcRenderer.removeListener('aiTeach:notice', handler) }
   },
+  /** N-1 手册通道：助手侧提示（手册→通用助手升格 Toast 等），载荷 `{ sessionId, message }` */
+  onAssistantNotice: (cb: (p: { sessionId: string; message: string }) => void) => {
+    const handler = (_e: unknown, p: { sessionId: string; message: string }) => cb(p)
+    ipcRenderer.on('assistant:notice', handler)
+    return () => { ipcRenderer.removeListener('assistant:notice', handler) }
+  },
   llmCcSwitchList: () => ipcRenderer.invoke('llm:ccswitch:list'),
   llmCcSwitchImport: (ids: string[]) => ipcRenderer.invoke('llm:ccswitch:import', ids),
   // 插件安全分级 + 内容包导入

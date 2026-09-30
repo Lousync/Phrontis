@@ -6,7 +6,7 @@ import { useSettings } from '../../../lib/SettingsContext'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentRegenerate, agentEditMessage, agentDeleteMessage,
-  llmListProviders, agentAbort, aiToolsListSkills,
+  llmListProviders, agentAbort, aiToolsListSkills, onAssistantNotice,
 } from '../../../lib/ipc'
 import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo } from '../../../types'
 import { useAgentStream } from './useAgentStream'
@@ -222,6 +222,12 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   }, [])
 
   useEffect(() => { if (active) void refreshSessions() }, [active, refreshSessions])
+
+  // N-1 手册通道：主进程侧提示（手册→通用助手升格）→ Toast + 刷新会话列表（徽标随之变化）
+  useEffect(() => onAssistantNotice((p) => {
+    if (p?.message) showToast({ type: 'info', message: p.message })
+    void refreshSessions()
+  }), [refreshSessions])
 
   /** 以会话库为准刷新消息（发送/重新生成/编辑/删除后统一走这里，拿到落库 id 与 trace） */
   const refreshMessages = useCallback(async (sid: string) => {

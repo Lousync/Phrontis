@@ -14,7 +14,7 @@ import { getKnowledgeIndex, getKnowledgeTextIndex } from './kbStore/knowledgeInd
 import { getGraphIndex } from './kbStore/graphIndex'
 import { vaultGetPageById, vaultGetCategories, vaultCreatePage } from './kbStore/knowledgeVaultRepo'
 import { searchKnowledge } from './knowledgeSearch'
-import { searchHelp } from './helpService'
+import { searchHelp, helpCatalog } from './helpService'
 import { vaultCreateEntry, vaultSearchEntries } from './kbStore/blogVaultRepo'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
 import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, type TodoRow } from './kbStore/scheduleVaultRepo'
@@ -1105,7 +1105,9 @@ export function registerBuiltinTools(): void {
     const id = str(args.id).trim() || undefined
     const limit = clamp(Math.floor(num(args.limit, 3)), 1, 5)
     const { hits, total, hint } = searchHelp(q, limit, id)
-    return { count: hits.length, totalDocs: total, hits, ...(hint ? { hint } : {}) }
+    // N-1 手册通道：结果瘦身（片段截 500 字）+ 附带篇目目录，模型可据 id 深读单篇（不发全文）
+    const slim = hits.map(h => ({ id: h.id, title: h.title, score: h.score, snippet: h.snippet.slice(0, 500) }))
+    return { count: slim.length, totalDocs: total, hits: slim, catalog: helpCatalog(), ...(hint ? { hint } : {}) }
   })
 
   // ===== P3 装载层元工具：写类（tier='ondemand'）默认不在视野，需申请启用 =====

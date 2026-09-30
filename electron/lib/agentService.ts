@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { randomUUID } from 'crypto'
 import { listTools, invokeToolInternal, getSettingReader, checkModulePermission, checkVaultFilePermission } from './aiTools'
 import type { ToolDescription, AiToolInvokeResult } from './aiTools'
@@ -17,8 +18,9 @@ import {
   sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages,
   getMessageById, updateMessageContent, deleteMessage, deleteMessagesAfter,
   getAgentSession, updateAgentSessionInstructions, backfillSessionSources,
-  createSideLaneSession, listSideLanes, promoteSideLane,
+  createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode,
 } from './agentSessionRepo'
+import { MANUAL_CHANNEL_TOOL, MANUAL_MAX_ROUNDS, buildManualSystemPrompt, classifyManualIntent, hasOperationIntent } from './manualChannel'
 import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceConstraintsForSession, resolveWriteOwnerRel, listSessionFolderIds } from './aiTeachingFolders'
 import { readAssistantGlobalConstraints, readAssistantSessionConstraints, readAssistantGlossary } from './assistantConstraints'
 import { resolveSourcesForInjection } from './aiTeachingSources'
@@ -360,7 +362,7 @@ const CHANGE_LABELS: Record<string, string> = {
  */
 const enabledOnDemand = new Map<string, Set<string>>()
 
-function buildToolsPayload(sessionId?: string): {
+function buildToolsPayload(sessionId?: string, only?: string[]): {
   payload: unknown[]
   nameMap: Map<string, string>
   /** 本轮可用的写入类工具注册名集合（requires==='write'），供会话写上限计数 */
@@ -384,10 +386,13 @@ function buildToolsPayload(sessionId?: string): {
   const extraTools = sessionId ? enabledOnDemand.get(sessionId) : undefined
   // 按模块权限预过滤：AI 无权使用的操作不进入其视野（invoke 处另有硬校验兜底）
   const all = listTools().filter(t => t.enabled)
+  const onlySet = only ? new Set(only) : null
   const deniedModules = new Set<string>()
   let deniedVaultFile = false
   let hasOnDemandHidden = false
   const tools: ToolDescription[] = all.filter(t => {
+    // N-1 手册通道：只放行白名单工具（help.search），其余一律不进视野
+    if (onlySet && !onlySet.has(t.name)) return false
     // v3.1.2 条目11：支线旁问**只解答、不改文件**——写类工具一律不进支线视野（硬拦截，非提示词约定）。
     // 与铁律 3 同一机制：requires==='write' 的工具被预过滤出模型视野。这条判定放在最前面，
     // 是为了让 tool.request 也绕不过（即便申请过写工具，支线这边照样 return false）。
@@ -492,7 +497,23 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
   appendAgentMessage(sessionId, 'user', message)
   ensureSessionTitle(sessionId, message)
 
+  // ---- N-1 手册通道：首条消息一次性分类；手册通道内出现操作意图即升格（只升不降） ----
+  if (req.source !== 'aiTeaching') {
+    const row = getAgentSession(sessionId)
+    if (row && row.mode === undefined) {
+      setSessionMode(sessionId, await classifyManualIntent(message, req.modelId))
+    } else if (row?.mode === 'manual' && hasOperationIntent(message)) {
+      setSessionMode(sessionId, 'agent')
+      notifyAssistant(sessionId, '已从「使用帮助」切换到通用助手')
+    }
+  }
+
   return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort, skillName: req.skillName })
+}
+
+/** N-1：向渲染层推一条助手提示（如手册通道→通用助手的升格 Toast） */
+function notifyAssistant(sessionId: string, message: string): void {
+  try { broadcast(BROADCAST_CHANNEL.assistantNotice, { sessionId, message }) } catch { /* 广播失败不影响主流程 */ }
 }
 
 /**
@@ -566,8 +587,11 @@ async function runAgentLoop(
     return { ok: false, sessionId, error: '没有可重新生成的用户消息', trace }
   }
 
+  // N-1 手册通道：仅 assistant 来源、且会话已分类为 manual 时启用（AI 教学恒走通用通道）
+  const runModeRow = getAgentSession(sessionId)
+  const manual = source !== 'aiTeaching' && runModeRow?.mode === 'manual'
   // P3 装载层：工具 payload 可能在循环中重建（tool.request 启用新工具后下一轮生效）
-  let toolsState = buildToolsPayload(sessionId)
+  let toolsState = buildToolsPayload(sessionId, manual ? [MANUAL_CHANNEL_TOOL] : undefined)
   let toolPayload = toolsState.payload
   const { nameMap, deniedModules, deniedVaultFile, skills } = toolsState
   // v3.1.2 条目11：支线写类工具**硬拦截**。模型视野里已经没有写工具（buildToolsPayload 已过滤），
@@ -757,7 +781,10 @@ async function runAgentLoop(
         ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + visualHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
       }
     : undefined
-  const systemFull = baseSystem + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+  // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
+  const systemFull = manual
+    ? buildManualSystemPrompt()
+    : baseSystem + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -801,7 +828,7 @@ async function runAgentLoop(
   let compressed: { covered: number; digestChars: number } | undefined
   const budgetSetting = Math.floor(Number(getSettingReader()('agentContextBudgetTokens')) || 24000)
   // v3.1.2 条目11：支线不参与压缩——上下文 = 自己的历史 + 固化快照，压成纪要会打乱快照语义
-  if (!virtualKickoff && !isSideLane && budgetSetting > 0 && getSettingReader()('agentCompressionEnabled') !== false) {
+  if (!virtualKickoff && !isSideLane && !manual && budgetSetting > 0 && getSettingReader()('agentCompressionEnabled') !== false) {
     const est = estimateTokens(convo.map(m => m.content ?? '').join('\n')) + estimateTokens(JSON.stringify(toolPayload))
     if (est > compressAtTokens(budgetSetting, Number(getSettingReader()('agentCompressAtPercent')))) {
       const cr = await compressSession({ sessionId, modelId: llmOpts?.modelId, effort: llmOpts?.effort })
@@ -833,7 +860,7 @@ async function runAgentLoop(
   const batcher = new DeltaBatcher((e) => emitStream?.(e))
 
   // ---- 循环预算（Agent 第 0+2 层）：轮数可配 + 累计 token 预算，耗尽优雅收场而非报错 ----
-  const maxRounds = clampMaxRounds(getSettingReader()('agentMaxRounds'))
+  const maxRounds = manual ? MANUAL_MAX_ROUNDS : clampMaxRounds(getSettingReader()('agentMaxRounds'))
   const runTokenBudget = clampRunTokenBudget(getSettingReader()('agentRunTokenBudget'))
   let runTokens = 0
   let softLanded = false
@@ -855,7 +882,7 @@ async function runAgentLoop(
     let thinkFrom = 0
     let thinkTo = 0
     const r = await invokeLlmStreamInternal(
-      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: llmOpts?.effort },
+      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort },
       (e) => {
         if (e.type === 'text') batcher.push('text', e.delta)
         else if (e.type === 'reasoning') {
@@ -1082,7 +1109,7 @@ async function runAgentLoop(
   // ---- 轮数/token 预算耗尽：做一次无工具的强制总结轮，把已获取的信息变成交付（第 0 层优雅收场）----
   convo.push({ role: 'user', content: FORCED_SUMMARY_NOTICE })
   const fr = await invokeLlmStreamInternal(
-    { messages: convo, tools: [], signal, providerId, modelId: modelOverride, effort: llmOpts?.effort },
+      { messages: convo, tools: [], signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort },
     (e) => { if (e.type === 'text') batcher.push('text', e.delta) },
   )
   batcher.flush()
