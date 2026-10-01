@@ -6,7 +6,8 @@ import {
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceListDir, workspaceRefreshVault,
   agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachAssignSession, aiTeachUnassignSession, aiTeachSetLastWorkspace,
-  aiTeachCourseGetState, aiTeachCourseSetSessionUnit, aiTeachCourseSetUnitProgress, aiTeachCourseSetEnabled, onAiTeachCourseRefresh,
+  aiTeachCourseGetState, aiTeachCourseSetUnitProgress, aiTeachCourseSetEnabled, onAiTeachCourseRefresh,
+  aiTeachCourseOpenUnit, aiTeachCourseEndLesson, aiTeachCourseFinalizeLesson, aiTeachCourseFinishUnit, aiTeachCourseReadPrevHandoff,
   aiTeachSrcRead, aiTeachSrcAdd, aiTeachSrcRemove, aiTeachSrcExtract, aiTeachSrcPick, aiTeachSrcPickDir, aiTeachSrcVisionCheck,
   aiTeachSrcPdfBytes, aiTeachSrcTranscribe, aiTeachSrcPromote,
   aiTeachProfileEnsureGlobal, aiTeachProfileEnsureSession, aiTeachProfileEnsureWorkspace,
@@ -162,6 +163,22 @@ function msgAnchorTitle(content: string, n: number): string {
   }
   const first = (lines.find(l => l.trim().length > 0) ?? '').trim()
   return first ? first.slice(0, 28) : `回答 ${n + 1}`
+}
+
+/** L4 引用网络：从 AI 回答里抽出 `跳转：<知识点名>` 行（正文剔除，另渲染成跳转 chip） */
+function splitJumps(content: string): { body: string; jumps: string[] } {
+  const jumps: string[] = []
+  const body = String(content ?? '').split('\n').filter((line) => {
+    const m = /^\s*(?:跳转|跳转链接|回顾链接|回顾)[：:]\s*(.+?)\s*$/.exec(line)
+    if (m) { jumps.push(m[1].replace(/[《》"']/g, '').trim()); return false }
+    return true
+  }).join('\n')
+  return { body, jumps }
+}
+
+/** 名称归一（去书名号/引号/标点/空白，大小写不敏感）：让跳转 chip 容忍 AI 输出的写法差异（F3） */
+function normName(s: string): string {
+  return String(s ?? '').replace(/[《》「」『』""''\s·・,，.。:：;；!！?？、\-—_]/g, '').toLowerCase()
 }
 
 interface Template {
@@ -556,8 +573,24 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [courseUnit, setCourseUnit] = useState<string | null>(null)
   /** 本课会话 id：只有当前会话 = 这一条时，上课 chip 才出现（防止 chip 泄漏到普通会话） */
   const [courseLessonSid, setCourseLessonSid] = useState<string | null>(null)
+  /** 当前课时状态：ended → 只读（禁发、结束按钮变只读提示） */
+  const [courseLessonStatus, setCourseLessonStatus] = useState<'open' | 'ended'>('open')
+  /** 上节交接内容（界面条）：进入某课时时读取 */
+  const [prevHandoff, setPrevHandoff] = useState('')
+  const [handoffOpen, setHandoffOpen] = useState(true)
   const courseEnabled = !!courseState?.enabled
+  /** 本课已结束 → 输入区只读 */
+  const courseReadonly = !!courseUnit && activeId === courseLessonSid && courseLessonStatus === 'ended'
   const courseUnits = useMemo(() => (courseState?.outline?.chapters ?? []).flatMap(c => c.units), [courseState])
+  /** L4 引用网络：知识点名（归一化） → 总结篇相对路径（跳转 chip 点击打开） */
+  const courseSummaryByName = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const c of courseState?.outline?.chapters ?? []) for (const u of c.units) {
+      const rel = courseState?.progress[u.id]?.summaryRel
+      if (rel) m.set(normName(u.name), rel)
+    }
+    return m
+  }, [courseState])
   const reloadCourse = useCallback(async () => {
     const ws = activeWsRef.current
     if (!ws || ws === '__none__') { setCourseState(null); return }
@@ -573,7 +606,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setCourseView('home')
   }, [reloadCourse])
   useEffect(() => {
-    setCourseUnit(null); setCourseLessonSid(null)
+    setCourseUnit(null); setCourseLessonSid(null); setCourseLessonStatus('open')
     if (!activeWs || activeWs === '__none__') { setCourseState(null); setCourseView('chat'); return }
     void (async () => {
       const s = await aiTeachCourseGetState(activeWs).catch(() => null)
@@ -585,6 +618,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const off = onAiTeachCourseRefresh((p) => { if (p.wsId === activeWsRef.current) void reloadCourse() })
     return off
   }, [reloadCourse])
+  // 上节交接：进入某课时（当前会话＝本课时）时读取，展示为可折叠交接条
+  useEffect(() => {
+    const sid = activeId
+    if (!courseUnit || !sid || sid !== courseLessonSid) { setPrevHandoff(''); return }
+    let alive = true
+    aiTeachCourseReadPrevHandoff(sid)
+      .then((r) => { if (alive) { setPrevHandoff(r?.ok ? (r.text ?? '') : ''); setHandoffOpen(true) } })
+      .catch(() => { if (alive) setPrevHandoff('') })
+    return () => { alive = false }
+  }, [activeId, courseLessonSid, courseUnit])
   const wsActive = activeWs && activeWs !== '__none__' ? wsList.find(w => w.id === activeWs) ?? null : null
   const wsTreeSeg = (() => {
     if (!wsActive) return ''
@@ -1206,33 +1249,69 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     void sendText(text, cid)
   }, [pending, sendText])
 
-  /** 课程模式：进入某知识点的「课」——开新会话、绑定知识点、带上开课指令发首条消息 */
-  const courseStartUnit = useCallback(async (unitId: string, opts?: { quiz?: boolean }) => {
+  /** 课程模式：打开知识点 = 自动续课（无课时→1 / 进行中→续上 / 已结束→下一节） */
+  const courseOpenUnit = useCallback(async (unitId: string, kind?: string) => {
     const ws = activeWsRef.current
     if (!ws || ws === '__none__') return
-    const u = courseUnits.find(x => x.id === unitId)
-    const row = await agentNewSession(u?.name ? `课·${u.name}` : '课程学习', 'aiTeaching').catch(() => null)
-    if (!row) { showToast({ type: 'warning', message: '新建会话失败' }); return }
-    await aiTeachAssignSession(row.id, ws).catch(() => null)
-    await aiTeachEnsureSessionFolder(row.id).catch(() => null)
-    await aiTeachCourseSetSessionUnit(row.id, unitId).catch(() => null)
+    const r = await aiTeachCourseOpenUnit(ws, unitId, kind).catch(() => null)
+    if (!r?.ok || !r.sessionId) { showToast({ type: 'warning', message: r?.error ?? '打开课时失败' }); return }
     setCourseUnit(unitId)
-    setCourseLessonSid(row.id)
-    setActiveId(row.id); setActiveTitle(row.title); activeIdRef.current = row.id
-    setMessages([]); setLastChanges(null); setLiveSteps([]); setArtTabs([]); setArtActive(null)
-    setActiveInstr(''); setInstrRel('')
-    setMidView(opts?.quiz ? 'quiz' : 'chat'); setQuizOpen(false); setLastQuizReport(null)
-    setPrepStarted(true); setPrepTemplate(null); setInput('')
+    setCourseLessonSid(r.sessionId)
+    setCourseLessonStatus(r.status ?? 'open')
+    await openSession(r.sessionId, `课时${r.order ?? 1}·${r.kind ?? '精讲'}`)
     setCourseView('chat')
-    void refreshSessions()
-    const cid = crypto.randomUUID()
-    chatIdRef.current = cid
-    const name = u?.name ?? '本知识点'
-    const prompt = opts?.quiz
-      ? `请针对本知识点「${name}」出 3 道单选题（走 quiz 协议），先不要给答案。`
-      : `请开始讲本知识点「${name}」。先给本节目标与前置，再分步精讲；讲完一个新概念就地出一道快检。`
-    void sendText(prompt, cid)
-  }, [courseUnits, refreshSessions, sendText])
+    void reloadCourse()
+  }, [openSession, reloadCourse])
+
+  /** 「课时态」左栏：当前知识点的课时列表（按 order 升序；键 = 会话 id） */
+  const courseLessonList = useMemo(() => {
+    if (!courseUnit || !courseState) return []
+    return Object.entries(courseState.lessons ?? {})
+      .filter(([, l]) => l.unitId === courseUnit)
+      .map(([sid, l]) => ({ sid, order: l.order, kind: l.kind, status: l.status }))
+      .sort((a, b) => a.order - b.order)
+  }, [courseState, courseUnit])
+  const courseUnitName = useMemo(() => courseUnits.find(u => u.id === courseUnit)?.name ?? '', [courseUnits, courseUnit])
+  /** 打开已存在的课时（左栏课时列表点选，不新建） */
+  const courseOpenLesson = useCallback(async (unitId: string, sid: string, order: number, kind: string, status: 'open' | 'ended') => {
+    setCourseUnit(unitId); setCourseLessonSid(sid); setCourseLessonStatus(status)
+    await openSession(sid, `课时${order}·${kind}`)
+    setCourseView('chat')
+  }, [openSession])
+
+  /** 结束课时：冻结本节（只读）+ 异步生成 讲义/交接 */
+  const courseEndLesson = useCallback(async () => {
+    const sid = activeIdRef.current
+    if (!sid) return
+    const r = await aiTeachCourseEndLesson(sid).catch(() => null)
+    if (!r?.ok) { showToast({ type: 'error', message: r?.error ?? '结束课时失败' }); return }
+    setCourseLessonStatus('ended')
+    showToast({ type: 'info', message: '本节已结束 · 正在生成讲义与交接…' })
+    void reloadCourse()
+    const f = await aiTeachCourseFinalizeLesson(sid).catch(() => null)
+    if (f?.skipped) showToast({ type: 'info', message: '本节没有内容，未生成交接' })
+    else if (f?.ok) { showToast({ type: 'success', message: '交接已生成（交接.md）' }); void reloadCourse() }
+    else showToast({ type: 'warning', message: `交接生成失败：${f?.error ?? ''}（可手动补写）` })
+  }, [reloadCourse])
+
+  /** 知识点收尾：课时全结束后 → 测验 + 总结篇（F2：带上自测得分以更新掌握度） */
+  const courseFinishUnit = useCallback(async (unitId: string, score?: { correct: number; total: number }) => {
+    const ws = activeWsRef.current
+    if (!ws || ws === '__none__') return
+    const r = await aiTeachCourseFinishUnit(ws, unitId, score).catch(() => null)
+    if (!r?.ok) { showToast({ type: 'error', message: r?.error ?? '收尾失败' }); return }
+    showToast({ type: 'success', message: '已收尾 · 总结篇已生成' })
+    void reloadCourse()
+  }, [reloadCourse])
+
+  /** 收尾后「回炉复习」：状态回「待复习」，可再开课时；总结篇保留 */
+  const courseReopenUnit = useCallback(async (unitId: string) => {
+    const ws = activeWsRef.current
+    if (!ws || ws === '__none__') return
+    await aiTeachCourseSetUnitProgress(ws, unitId, { status: 'review', finished: false }).catch(() => null)
+    showToast({ type: 'info', message: '已回炉：状态回到「待复习」，可再开课时' })
+    void reloadCourse()
+  }, [reloadCourse])
 
   /** P7（测验结果联动产物）：整卷答完 → 报告 md 落会话文件夹 `测验·随堂测验 MM-DD HH:mm.md` */
   const handleQuizFinish = useCallback(async (s: { total: number; correctCount: number; records: Array<{ no: number; correct: boolean; picked: string }> }) => {
@@ -2525,6 +2604,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             <BookOpen size={13} /> 开启课程模式
           </button>
         )}
+        {courseEnabled ? (
+          /* 课程模式：顶栏页签区收起（导航交给左栏「大纲 ⇄ 课时」+ 顶栏分段器），留空撑开把右侧工具推到底 */
+          <div className="flex-1 min-w-0" />
+        ) : (
         <div className="flex-1 min-w-0 flex items-center gap-0.5 overflow-x-auto">
           {wsSessions.map(s => (
             <div key={s.id} onClick={() => { void openSession(s.id, s.title) }}
@@ -2551,6 +2634,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             </div>
           ))}
         </div>
+        )}
         <div className="shrink-0 flex items-center gap-0.5">
 
           {/* P8（§3.14/3-35）+ UI 优化条目13.2（分层入口重构）：顶栏 chip 只开「本主题」层——
@@ -2662,6 +2746,38 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               形态 A：会话（上，限高可折叠）+ 资源管理器（中，撑满剩余）+ 任务规划（下）。
               折叠任一分区，其余分区自动获得空间（原会话列表区曾因「页签即会话切换器」退役，本次恢复）。 */}
           {courseEnabled ? (
+            courseView === 'chat' && courseUnit ? (
+              <>
+                <SectionHead open={!collapsedSec.courseLessons} title={`课时 · ${courseUnitName}`} onToggle={() => toggleSec('courseLessons')}
+                  right={
+                    <button onClick={() => setCourseView('home')} title="返回课程大纲"
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10.5px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors">
+                      <ChevronLeft size={11} />课程大纲
+                    </button>
+                  } />
+                <div className={`grid min-h-0 basis-0 transition-[flex-grow,grid-template-rows] duration-200 ease-out ${collapsedSec.courseLessons ? 'grow-0' : 'grow'}`} style={{ gridTemplateRows: collapsedSec.courseLessons ? '0fr' : '1fr' }}>
+                  <div className={`overflow-hidden min-h-0 transition-opacity duration-150 ${collapsedSec.courseLessons ? 'invisible opacity-0' : 'opacity-100'}`}>
+                    <div className="h-full overflow-y-auto px-1.5 pb-1.5">
+                      {courseLessonList.length === 0 && (
+                        <div className="px-2 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">该知识点还没有课时，点「继续上课」会自动开启课时 1。</div>
+                      )}
+                      {courseLessonList.map(l => {
+                        const cur = l.sid === activeId
+                        return (
+                          <div key={l.sid} onClick={() => void courseOpenLesson(courseUnit, l.sid, l.order, l.kind, l.status)}
+                            title={`课时${l.order}·${l.kind}（${l.status === 'ended' ? '已结束' : '进行中'}）`}
+                            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer text-[12.5px] transition-colors ${cur ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                            <BookOpen size={12} className={`shrink-0 ${l.status === 'ended' ? 'text-[var(--success)]' : 'text-[var(--accent)]'}`} />
+                            <span className="flex-1 min-w-0 truncate">课时{l.order}·{l.kind}</span>
+                            <span className="shrink-0 text-[9.5px] text-[var(--text-muted)]">{l.status === 'ended' ? '已结束' : '进行中'}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : (
             <>
               <SectionHead open={!collapsedSec.courseOutline} title="课程大纲" onToggle={() => toggleSec('courseOutline')} />
               <div className={`grid min-h-0 basis-0 transition-[flex-grow,grid-template-rows] duration-200 ease-out ${collapsedSec.courseOutline ? 'grow-0' : 'grow'}`} style={{ gridTemplateRows: collapsedSec.courseOutline ? '0fr' : '1fr' }}>
@@ -2676,7 +2792,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         {ch.units.map(u => {
                           const st = courseState?.progress[u.id]?.status ?? 'todo'
                           return (
-                            <div key={u.id} onClick={() => void courseStartUnit(u.id)}
+                            <div key={u.id}                               onClick={() => void courseOpenUnit(u.id)}
                               title={u.goal || u.name}
                               className={`group flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer text-[12.5px] transition-colors ${u.id === courseUnit && activeId === courseLessonSid ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
                               <span className={`shrink-0 w-2 h-2 rounded-full ${st === 'mastered' ? 'bg-[var(--success)]' : st === 'learning' ? 'bg-[var(--accent)]' : st === 'review' ? 'bg-[var(--danger)]' : st === 'check' ? 'bg-[var(--warning)]' : 'bg-[var(--text-muted)]'}`} title={COURSE_ST_LABEL[st] ?? st} />
@@ -2691,6 +2807,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 </div>
               </div>
             </>
+            )
           ) : (<>
           <SectionHead open={!collapsedSec.sessions} title="会话" onToggle={() => toggleSec('sessions')}
             right={
@@ -2842,8 +2959,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 wsName={wsActive?.name ?? '课程'}
                 modelSpec={effModel}
                 state={courseState}
-                onStartUnit={(id) => void courseStartUnit(id)}
-                onCheckUnit={(id) => void courseStartUnit(id, { quiz: true })}
+                onStartUnit={(id) => void courseOpenUnit(id)}
+                onFinishUnit={(id, score) => void courseFinishUnit(id, score)}
+                onReopenUnit={(id) => void courseReopenUnit(id)}
                 onReload={() => void reloadCourse()}
               />
             </div>
@@ -2969,9 +3087,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       <div className="min-w-0">
                         {/* P8：```profile 建议块不直显；条目11/12：```plan / ```ask 协议块同样收敛（plan→侧栏、ask→提问卡） */}
                         <MarkdownPreview
-                          content={m.content.replace(/```(profile|plan|ask)[^\n]*\n[\s\S]*?```/g, '')}
+                          content={splitJumps(m.content).body.replace(/```(profile|plan|ask)[^\n]*\n[\s\S]*?```/g, '')}
                           onQuizRetry={retryQuiz}
                         />
+                        {/* L4 引用网络：跳转 chip（AI 输出 `跳转：<知识点名>` → 打开其总结篇） */}
+                        {splitJumps(m.content).jumps.map((name, k) => {
+                          const rel = courseSummaryByName.get(normName(name))
+                          return (
+                            <button key={k} disabled={!rel}
+                              title={rel ? `打开《${name}》总结篇` : '该知识点还没有总结篇（先收尾）'}
+                              onClick={() => { if (rel) window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } })) }}
+                              className="mr-1.5 mt-1.5 inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-[var(--accent)]/50 bg-[var(--accent)]/10 text-[11.5px] text-[var(--accent)] hover:bg-[var(--accent)]/20 disabled:opacity-50 transition-colors">
+                              <ArrowRight size={11} />回顾：{name}
+                            </button>
+                          )
+                        })}
                         {/* 工件栏方案 §2：visual.html 工件卡（对话流唯一形态，HTML 正文永不进流）——数据源=trace 里的 artifact step */}
                         {(m.trace ?? []).some(s => s.artifact) && (
                           <div className="mt-1.5 space-y-1">
@@ -3433,15 +3563,36 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         </span>
                       </div>
                     )}
-                    {courseUnit && activeId === courseLessonSid && !pending && (
-                      <div className="mb-1.5 flex flex-wrap gap-1.5 kb-view-in">
-                        {['继续', '考我一道', '换个例子', '为什么'].map(c => (
-                          <button key={c} type="button"
-                            onClick={() => { const cid = crypto.randomUUID(); chatIdRef.current = cid; void sendText(c === '考我一道' ? '考我一道：针对当前知识点出一道单选题' : c, cid) }}
-                            className="px-2.5 py-1 rounded-full border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] transition-colors">
-                            {c}
-                          </button>
-                        ))}
+                    {courseUnit && activeId === courseLessonSid && prevHandoff && (
+                      <div className="mb-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-hidden kb-view-in">
+                        <button type="button" onClick={() => setHandoffOpen(v => !v)}
+                          className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
+                          <ChevronDown size={12} className={`transition-transform ${handoffOpen ? '' : '-rotate-90'}`} />
+                          上节交接（续上一节课）
+                        </button>
+                        {handoffOpen && (
+                          <div className="px-2.5 pb-2 text-[11.5px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap max-h-[160px] overflow-y-auto">{prevHandoff.replace(/^#[^\n]*\n?/, '')}</div>
+                        )}
+                      </div>
+                    )}
+                    {courseUnit && activeId === courseLessonSid && (
+                      <div className="mb-1.5 flex flex-wrap items-center gap-1.5 kb-view-in">
+                        {courseLessonStatus === 'ended' ? (
+                          <span className="text-[11px] text-[var(--text-muted)]">本节已结束（只读）· 要补充请回课程主页开下一节</span>
+                        ) : (
+                          <>
+                            {!pending && ['继续', '考我一道', '换个例子', '为什么'].map(c => (
+                              <button key={c} type="button"
+                                onClick={() => { const cid = crypto.randomUUID(); chatIdRef.current = cid; void sendText(c === '考我一道' ? '考我一道：针对当前知识点出一道单选题' : c, cid) }}
+                                className="px-2.5 py-1 rounded-full border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] transition-colors">
+                                {c}
+                              </button>
+                            ))}
+                            <span className="flex-1" />
+                            <button type="button" onClick={() => void courseEndLesson()} disabled={pending}
+                              className="px-2.5 py-1 rounded-full border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] disabled:opacity-50 transition-colors">结束课时</button>
+                          </>
+                        )}
                       </div>
                     )}
                     <div className="relative">
@@ -3450,8 +3601,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       )}
                       <textarea ref={inputRef} spellCheck={false} value={input} onChange={e => { setInput(e.target.value); setSlashActive(0) }}
                         onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void doSend() } }}
-                        rows={2} placeholder={quotes.length > 0 ? '针对引用内容提问…（Enter 发送）' : '粘贴资料或输入指令…（Enter 发送，/ 唤起指令）'}
-                        className="w-full appearance-none px-0.5 py-1 text-[13px] resize-none outline-none bg-transparent! border-0! rounded-none!" />
+                        disabled={courseReadonly}
+                        rows={2} placeholder={courseReadonly ? '本节已结束（只读）· 要补充请开下一节' : quotes.length > 0 ? '针对引用内容提问…（Enter 发送）' : '粘贴资料或输入指令…（Enter 发送，/ 唤起指令）'}
+                        className="w-full appearance-none px-0.5 py-1 text-[13px] resize-none outline-none bg-transparent! border-0! rounded-none! disabled:opacity-60" />
                     </div>
                     {composerFooter}
                   </div>

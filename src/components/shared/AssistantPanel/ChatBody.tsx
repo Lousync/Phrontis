@@ -749,12 +749,12 @@ function NoProviderHint({ onGoSettings }: { onGoSettings: () => void }) {
  *  display:none 保活期间 active=false（不刷新供应商/会话），切回标签自动恢复。
  *  会话导航不放对话区抽屉（实机反馈层次混乱）——sidebarEl 传入时把左栏 AI 会话侧栏
  *  （AiChatSidebar：会话列表/会话大纲 + 底部文件改动）portal 进左栏模块态 slot。 */
-export function AiChatTab({ active, sidebarEl }: { active: boolean; sidebarEl?: HTMLElement | null }) {
+export function AiChatTab({ active, sidebarEl, modActionsEl }: { active: boolean; sidebarEl?: HTMLElement | null; modActionsEl?: HTMLElement | null }) {
   const chat = useAssistantChat({ active })
   return (
     <>
       <ChatBody chat={chat} variant="page" active={active} showDrawer={false} />
-      {sidebarEl && <AiChatSidebar chat={chat} active={active} container={sidebarEl} />}
+      {sidebarEl && <AiChatSidebar chat={chat} active={active} container={sidebarEl} modActionsEl={modActionsEl} />}
     </>
   )
 }

@@ -20,6 +20,14 @@ import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
  */
 
 const ANCHOR_FILE = '.session.json'
+
+/** L1：课时文件夹解析器（由 `aiTeachingCourse` 注册，避免 folders↔course 循环 import）。
+ *  返回 `{工作区}/{章号}·{知识点}/课时N·类型` 或 null（非课时）。注册后，本文件的通用建夹入口
+ *  （ensureSessionFolder / organizeDoc）对课时自动落到分层路径。 */
+let lessonFolderResolver: ((sessionId: string, getSetting: (key: string) => unknown) => string | null) | null = null
+export function setLessonFolderResolver(fn: (sessionId: string, getSetting: (key: string) => unknown) => string | null): void {
+  lessonFolderResolver = fn
+}
 const DEFAULT_ROOT_DIR = 'AI教学'
 /** 会话约束文件（P2 §2.3）：AI 注入的唯一真相源，用户可在编辑器直接改 */
 const CONSTRAINTS_FILE = 'CONSTRAINTS.md'
@@ -96,23 +104,25 @@ function anchorMatches(abs: string, sessionId: string): boolean {
   } catch { return false } // 锚点损坏跳过（视为无主文件夹，不删）
 }
 
-/** 扫描根目录定位会话文件夹；P5 起兼容两种布局：`{root}/{会话}` 与 `{root}/{工作区}/{会话}`（深度≤2） */
+/** 有界递归定位会话文件夹（兼容多种布局，深度 ≤4）：
+ *  `{root}/{会话}` · `{root}/{工作区}/{会话}` · `{root}/{工作区}/{章号}·{知识点}/{课时}/`（L1 物理分层） */
 function findSessionFolderRel(rootPath: string, rootDir: string, sessionId: string): string | null {
   const rootAbs = join(rootPath, rootDir)
   if (!existsSync(rootAbs)) return null
-  let names: string[] = []
-  try { names = readdirSync(rootAbs) } catch { return null }
-  for (const name of names) {
-    const abs = join(rootAbs, name)
-    if (anchorMatches(abs, sessionId)) return `${rootDir}/${name}`
-    if (name.startsWith('.') || name === '_templates') continue
-    try {
-      for (const sub of readdirSync(abs)) {
-        if (anchorMatches(join(abs, sub), sessionId)) return `${rootDir}/${name}/${sub}`
-      }
-    } catch { /* 非目录（如普通产物文件）忽略 */ }
+  const walk = (abs: string, rel: string, depth: number): string | null => {
+    if (depth > 4) return null
+    if (anchorMatches(abs, sessionId)) return rel ? `${rootDir}/${rel}` : rootDir
+    let entries: import('fs').Dirent[]
+    try { entries = readdirSync(abs, { withFileTypes: true }) } catch { return null }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue
+      if (e.name.startsWith('.') || e.name === '_templates' || e.name === 'SOURCES' || e.name === 'node_modules' || e.name === '_extracts') continue
+      const hit = walk(join(abs, e.name), rel ? `${rel}/${e.name}` : e.name, depth + 1)
+      if (hit) return hit
+    }
+    return null
   }
-  return null
+  return walk(rootAbs, '', 0)
 }
 
 /** 幂等确保会话文件夹存在：新建对话确认后调用（2-2），P3 产物落盘/旧会话懒创建（2-5）共用。
@@ -127,6 +137,9 @@ export function ensureSessionFolder(sessionId: string, getSetting: (key: string)
     const rootDir = rootDirName(getSetting)
     const existing = findSessionFolderRel(vault.rootPath, rootDir, sessionId)
     if (existing) return { ok: true, relPath: existing }
+    // L1：课时 → 落分层路径（章号·知识点/课时N·类型）
+    const lessonRel = lessonFolderResolver?.(sessionId, getSetting)
+    if (lessonRel) return ensureSessionFolderAt(sessionId, lessonRel, getSetting)
     const wsId = getWorkspaceOfSession(sessionId)
     const baseRel = (wsId && workspaceFolderRel(wsId, getSetting)) || rootDir
     const baseAbs = join(vault.rootPath, baseRel)
@@ -143,6 +156,37 @@ export function ensureSessionFolder(sessionId: string, getSetting: (key: string)
     // `{父层}/SOURCES/SOURCE.md`，由 readSources 懒建；本函数不再触碰素材目录。
     broadcastTreeRefresh(baseRel)
     return { ok: true, relPath: `${baseRel}/${name}` }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+/** L1：在**指定相对路径**建会话文件夹（课时物理分层用）：`{工作区}/{章号}·{知识点}/{课时N·类型}`。
+ *  与 ensureSessionFolder 同样幂等（已存在则返回）；锚点 + CONSTRAINTS 播种逻辑一致。 */
+export function ensureSessionFolderAt(sessionId: string, rel: string, getSetting: (key: string) => unknown): FolderResult {
+  try {
+    if (typeof sessionId !== 'string' || !sessionId) return { ok: false, error: '会话 id 非法' }
+    const vault = getCurrentVault()
+    if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const session = getAgentSession(sessionId)
+    if (!session) return { ok: false, error: '会话不存在' }
+    const rootDir = rootDirName(getSetting)
+    const existing = findSessionFolderRel(vault.rootPath, rootDir, sessionId)
+    if (existing) return { ok: true, relPath: existing }
+    const folderAbs = join(vault.rootPath, rel)
+    mkdirSync(folderAbs, { recursive: true })
+    const wsId = getWorkspaceOfSession(sessionId)
+    const anchor: SessionFolderAnchor = { sessionId, title: session.title, createdAt: session.created_at, v: 1, ...(wsId ? { workspaceId: wsId } : {}) }
+    writeFileSync(join(folderAbs, ANCHOR_FILE), JSON.stringify(anchor, null, 2), 'utf-8')
+    const wsFolder = wsId ? workspaceFolderRel(wsId, getSetting) : null
+    seedConstraintsFromTemplate(
+      folderAbs,
+      wsFolder && join(vault.rootPath, wsFolder, ...CONSTRAINTS_TEMPLATE_REL_SEGMENTS),
+      join(vault.rootPath, rootDir, ...CONSTRAINTS_TEMPLATE_REL_SEGMENTS),
+    )
+    const parentRel = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : rootDir
+    broadcastTreeRefresh(parentRel)
+    return { ok: true, relPath: rel }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -339,6 +383,8 @@ export function renameSessionFolder(sessionId: string, newTitle: string, getSett
     const lastSlash = rel.lastIndexOf('/')
     const parentRel = lastSlash > 0 ? rel.slice(0, lastSlash) : rootDir
     const oldName = lastSlash > 0 ? rel.slice(lastSlash + 1) : rel
+    // L1：课时夹名由结构（课时N·类型）决定，不随会话标题改名
+    if (/^课时\d/.test(oldName)) return { ok: true, relPath: rel }
     const session = getAgentSession(sessionId)
     const created = session?.created_at ?? ''
     const m = /^(\d{2}-\d{2})\s/.exec(oldName)
@@ -542,7 +588,7 @@ export function sourceTemplateText(wsName: string, convName: string): string {
   return [
     '---',
     `workspace: ${wsName || '（未归一层）'}`,
-    `conversation: ${convName}`,
+    `归属: ${convName}`,
     `updated: ${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`,
     '---',
     '',

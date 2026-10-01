@@ -29,9 +29,11 @@ interface Props {
   active: boolean
   /** portal 目标 = 左栏模块态 slot（wbModSlotEl）；null 时不渲染 */
   container: HTMLElement | null
+  /** F-2：左栏模块态头部动作槽（wbModActionsEl）——「助手定制」按钮移到这里（与 🏠/🔒 同排） */
+  modActionsEl?: HTMLElement | null
 }
 
-export function AiChatSidebar({ chat, active, container }: Props) {
+export function AiChatSidebar({ chat, active, container, modActionsEl }: Props) {
   const [tab, setTab] = useState<'sessions' | 'outline'>('sessions')
   const [changes, setChanges] = useState<SessionFileChange[]>([])
   const { sessions, activeId, messages, pending } = chat
@@ -141,7 +143,6 @@ export function AiChatSidebar({ chat, active, container }: Props) {
             {t.label}
           </button>
         ))}
-        <AssistantEntryButton activeId={activeId} />
       </div>
 
       {/* 主体 */}
@@ -281,6 +282,9 @@ export function AiChatSidebar({ chat, active, container }: Props) {
           </div>
         )}
       </div>
+
+      {/* F-2：把「助手定制」按钮移到左栏模块态头部（与 🏠/🔒 同排），不再挤在双 Tab 行 */}
+      {modActionsEl && createPortal(<AssistantEntryButton activeId={activeId} />, modActionsEl)}
 
       {/* 右键菜单（fixed portal 到 body；菜单项点击走容器原生委托，见上方 useEffect） */}
       {menu && container && createPortal(

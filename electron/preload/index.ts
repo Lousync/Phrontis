@@ -331,8 +331,13 @@ const api = {
   aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => ipcRenderer.invoke('aiTeachCourse:setEnabled', wsId, enabled),
   aiTeachCourseSaveOutline: (wsId: string, outline: unknown) => ipcRenderer.invoke('aiTeachCourse:saveOutline', wsId, outline),
   aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: unknown) => ipcRenderer.invoke('aiTeachCourse:setUnitProgress', wsId, unitId, patch),
-  aiTeachCourseSetSessionUnit: (sessionId: string, unitId: null | string) => ipcRenderer.invoke('aiTeachCourse:setSessionUnit', sessionId, unitId),
   aiTeachCourseGenerateOutline: (input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutline', input),
+  aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => ipcRenderer.invoke('aiTeachCourse:openUnit', wsId, unitId, kind),
+  aiTeachCourseEndLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:endLesson', sessionId),
+  aiTeachCourseFinalizeLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:finalizeLesson', sessionId),
+  aiTeachCourseFinishUnit: (wsId: string, unitId: string, score?: { correct: number; total: number }) => ipcRenderer.invoke('aiTeachCourse:finishUnit', wsId, unitId, score),
+  aiTeachCourseReadPrevHandoff: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:readPrevHandoff', sessionId),
+  aiTeachCourseMakeUnitQuiz: (wsId: string, unitId: string) => ipcRenderer.invoke('aiTeachCourse:makeUnitQuiz', wsId, unitId),
   aiTeachCourseGenerateOutlineStream: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutlineStream', id, input),
   /** AI教学·课程模式：生成大纲过程事件（`{ id, phase, delta?, model?, chars?, error? }`） */
   onAiTeachCourseGenProgress: (cb: (p: unknown) => void) => {

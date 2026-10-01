@@ -104,8 +104,8 @@ const ipc = stripComments(read('src/lib/ipc.ts'))
 const agent = stripComments(read('electron/lib/agentService.ts'))
 const bus = stripComments(read('electron/main/windowBus.ts'))
 
-const channels = ['aiTeachCourse:getState', 'aiTeachCourse:setEnabled', 'aiTeachCourse:saveOutline', 'aiTeachCourse:setUnitProgress', 'aiTeachCourse:setSessionUnit', 'aiTeachCourse:generateOutline', 'aiTeachCourse:generateOutlineStream']
-check('主进程注册全部 7 个 handler', channels.every((c) => main.includes(c)), channels.filter((c) => !main.includes(c)).join(','))
+const channels = ['aiTeachCourse:getState', 'aiTeachCourse:setEnabled', 'aiTeachCourse:saveOutline', 'aiTeachCourse:setUnitProgress', 'aiTeachCourse:generateOutline', 'aiTeachCourse:generateOutlineStream', 'aiTeachCourse:openUnit', 'aiTeachCourse:endLesson', 'aiTeachCourse:finalizeLesson', 'aiTeachCourse:finishUnit', 'aiTeachCourse:readPrevHandoff', 'aiTeachCourse:makeUnitQuiz']
+check('主进程注册全部 12 个 handler', channels.every((c) => main.includes(c)), channels.filter((c) => !main.includes(c)).join(','))
 check('主进程导出 registerAiTeachingCourseHandlers', main.includes('export function registerAiTeachingCourseHandlers'), '')
 check('main/index.ts import 了注册器', mainIndex.includes('registerAiTeachingCourseHandlers'), '')
 check('main/index.ts 调用了注册器', /registerAiTeachingCourseHandlers\(/.test(mainIndex), '')
@@ -115,7 +115,7 @@ check('生成走流式（invokeLlmStreamInternal）', main.includes('invokeLlmSt
 check('agentService import 了 buildCourseInjection', agent.includes('buildCourseInjection'), '')
 check('agentService 把 courseHint 拼进 systemFull', agent.includes('+ courseHint +'), '')
 
-const apiMethods = ['aiTeachCourseGetState', 'aiTeachCourseSetEnabled', 'aiTeachCourseSaveOutline', 'aiTeachCourseSetUnitProgress', 'aiTeachCourseSetSessionUnit', 'aiTeachCourseGenerateOutline', 'aiTeachCourseGenerateOutlineStream', 'onAiTeachCourseGenProgress', 'onAiTeachCourseRefresh']
+const apiMethods = ['aiTeachCourseGetState', 'aiTeachCourseSetEnabled', 'aiTeachCourseSaveOutline', 'aiTeachCourseSetUnitProgress', 'aiTeachCourseGenerateOutline', 'aiTeachCourseGenerateOutlineStream', 'aiTeachCourseOpenUnit', 'aiTeachCourseEndLesson', 'aiTeachCourseFinalizeLesson', 'aiTeachCourseFinishUnit', 'aiTeachCourseReadPrevHandoff', 'aiTeachCourseMakeUnitQuiz', 'onAiTeachCourseGenProgress', 'onAiTeachCourseRefresh']
 for (const m of apiMethods) {
   const okPreload = preload.includes(m)
   const okTypes = types.includes(m)
@@ -129,7 +129,11 @@ check('模块 import 了 CourseHome', mod.includes("from './CourseMode'"), '')
 check('模块渲染 CourseHome 覆盖层', mod.includes('<CourseHome'), '')
 check('模块用 onAiTeachCourseRefresh 订阅刷新', mod.includes('onAiTeachCourseRefresh('), '')
 check('检验完成回写知识点掌握度', mod.includes('aiTeachCourseSetUnitProgress(') && mod.includes('courseUnit'), '')
-check('开课绑定知识点', mod.includes('aiTeachCourseSetSessionUnit('), '')
+check('开课走 openUnit（自动续课）', mod.includes('aiTeachCourseOpenUnit('), '')
+check('结束课时接线', mod.includes('aiTeachCourseEndLesson(') && mod.includes('aiTeachCourseFinalizeLesson('), '')
+check('知识点收尾接线', mod.includes('aiTeachCourseFinishUnit('), '')
+check('上节交接界面条接线', mod.includes('aiTeachCourseReadPrevHandoff(') && mod.includes('prevHandoff'), '')
+check('回炉复习接线', mod.includes('courseReopenUnit('), '')
 check('课程主页组件存在', fs.existsSync(path.join(ROOT, 'src/modules/ai-teaching/CourseMode.tsx')), '')
 
 // ---------------------------------------------------------------- 报告

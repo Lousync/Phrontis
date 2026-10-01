@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI教学 · 顶栏页签梳理（课程模式）原型</title>
+<style>
+  :root{
+    --bg:#fff;--bg2:#f6f7f9;--hov:#ececf0;--bd:#e2e4e9;
+    --t1:#1f2328;--t2:#57606a;--t3:#8b949e;--accent:#4f6bed;--accs:rgba(79,107,237,.10);
+    --ok:#2da44e;--warn:#bf8700;--warns:rgba(191,135,0,.14);
+    --ease:cubic-bezier(.22,.68,.32,1);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Segoe UI","Microsoft YaHei",sans-serif;background:#dfe3ea;color:var(--t1);font-size:13px;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:60px 12px 24px;overflow-x:hidden}
+  .ic{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+
+  .switcher{position:fixed;top:10px;left:0;right:0;display:flex;gap:5px;align-items:center;justify-content:center;z-index:60;flex-wrap:wrap;padding:0 12px}
+  .switcher .lb{font-size:11px;color:#6b7280}
+  .switcher button{border:1px solid #c9cdd6;background:#fff;font-family:inherit;font-size:11.5px;color:var(--t2);padding:5px 12px;border-radius:99px;cursor:pointer;transition:.15s}
+  .switcher button:hover{border-color:#8fa0e8;color:var(--accent)}
+  .switcher button.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .switcher .sep{width:1px;height:18px;background:#c2c7d0;margin:0 3px}
+
+  .win{width:min(1180px,97vw);background:var(--bg);border:1px solid #c9cdd6;border-radius:10px;box-shadow:0 18px 48px rgba(20,30,60,.18);overflow:hidden}
+  .tb{height:30px;background:#f0f1f4;border-bottom:1px solid var(--bd);display:flex;align-items:center;padding:0 10px;gap:7px}
+  .tb .logo{width:13px;height:13px;border-radius:3px;background:var(--accent)}.tb .t{font-size:11px;color:var(--t2)}.tb .sp{flex:1}.tb .wc{font-size:11px;color:var(--t3);letter-spacing:3px}
+  .row{display:flex;min-height:190px}
+  .ab{width:46px;flex-shrink:0;background:var(--bg2);border-right:1px solid var(--bd);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:3px}
+  .ab .ai{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--t3)}
+  .ab .ai.on{color:var(--accent);background:var(--accs);position:relative}
+  .ab .ai.on::before{content:"";position:absolute;left:-8px;top:6px;bottom:6px;width:2px;border-radius:2px;background:var(--accent)}
+
+  .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .mh{height:38px;flex-shrink:0;display:flex;align-items:center;gap:5px;padding:0 10px;border-bottom:1px solid var(--bd);background:var(--bg2)}
+  .wschip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--t2);background:var(--bg);border:1px solid var(--bd);border-radius:8px;padding:3px 9px;cursor:pointer;flex-shrink:0}
+  .wschip:hover{border-color:#8fa0e8}
+  .plus{width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--t2);cursor:pointer;flex-shrink:0}
+  .plus:hover{background:var(--hov);color:var(--t1)}
+  .enable{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--t2);padding:3px 8px;border-radius:6px;cursor:pointer;flex-shrink:0}
+  .enable:hover{background:var(--hov);color:var(--accent)}
+  .seg{display:inline-flex;gap:2px;padding:2px;border-radius:8px;background:var(--hov);flex-shrink:0}
+  .seg button{border:none;background:none;font-family:inherit;font-size:11.5px;color:var(--t2);padding:3px 9px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+  .seg button.on{background:var(--bg);color:var(--accent);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .tabstrip{flex:1;min-width:0;display:flex;align-items:center;gap:2px;overflow-x:auto;scrollbar-width:none}
+  .tabstrip::-webkit-scrollbar{display:none}
+  .tab{flex-shrink:0;display:inline-flex;align-items:center;gap:5px;padding:2px 8px;height:22px;border-radius:6px;font-size:11.5px;color:var(--t2);cursor:pointer;max-width:150px;white-space:nowrap}
+  .tab .lbl{overflow:hidden;text-overflow:ellipsis}
+  .tab:hover{background:var(--hov);color:var(--t1)}
+  .tab.on{background:var(--hov);color:var(--t1);box-shadow:inset 0 0 0 1px rgba(79,107,237,.45)}
+  .tab .x{color:var(--t3);opacity:0;font-size:12px;line-height:1}
+  .tab:hover .x{opacity:1}
+  .dropdown{position:relative;flex-shrink:0}
+  .ddbtn{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;height:22px;border-radius:6px;font-size:11.5px;color:var(--accent);background:var(--accs);cursor:pointer;border:1px solid rgba(79,107,237,.3)}
+  .ddlist{position:absolute;left:0;top:100%;margin-top:5px;width:190px;max-height:230px;overflow-y:auto;background:var(--bg);border:1px solid var(--bd);border-radius:9px;box-shadow:0 12px 32px rgba(20,30,60,.18);padding:4px;z-index:20}
+  .ddlist .di{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:6px;font-size:12px;color:var(--t1);cursor:pointer}
+  .ddlist .di:hover{background:var(--hov)}
+  .ddlist .di.on{background:var(--accs);color:var(--accent);font-weight:600}
+  .ddlist .dsep{height:1px;background:var(--bd);margin:4px 2px}
+  .tools{margin-left:auto;flex-shrink:0;display:flex;align-items:center;gap:2px}
+  .tools .tl{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--t2);padding:3px 7px;border-radius:6px;cursor:pointer}
+  .tools .tl:hover{background:var(--hov);color:var(--t1)}
+
+  .body{flex:1;display:flex;min-height:0;background:var(--bg)}
+  .side{width:210px;flex-shrink:0;border-right:1px solid var(--bd);padding:8px 10px;font-size:11.5px;color:var(--t3)}
+  .side .sh{font-size:10.5px;font-weight:600;color:var(--t2);letter-spacing:.3px;margin-bottom:6px;display:flex;align-items:center;gap:5px}
+  .side .it{display:flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;color:var(--t2)}
+  .side .it.on{background:var(--accs);color:var(--accent);font-weight:600}
+  .center{flex:1;display:flex;align-items:center;justify-content:center;color:var(--t3);font-size:12px}
+
+  .cap{margin-top:0;border-top:1px solid var(--bd);background:var(--bg2);padding:11px 14px;font-size:12px;color:var(--t2);line-height:1.7}
+  .cap b{color:var(--t1)}
+  .cap .tag{display:inline-block;font-size:10.5px;font-weight:600;padding:1px 7px;border-radius:99px;margin-right:6px}
+  .tag.bad{background:rgba(207,34,46,.1);color:#cf222e}
+  .tag.good{background:rgba(45,164,78,.12);color:var(--ok)}
+  .tag.mid{background:var(--warns);color:var(--warn)}
+</style>
+</head>
+<body>
+<svg style="display:none" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></symbol>
+  <symbol id="i-pen" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 5h7v7H4zM13 5h7v7h-7zM4 14h7v5H4zM13 14h7v5h-7z"/></symbol>
+</svg>
+
+<div class="switcher" id="sw"></div>
+
+<div class="win">
+  <div class="tb"><span class="logo"></span><span class="t">Phrontis</span><span class="sp"></span><span class="wc">— □ ✕</span></div>
+  <div class="row">
+    <div class="ab">
+      <div class="ai"><svg class="ic"><use href="#i-grid"/></svg></div>
+      <div class="ai on"><svg class="ic"><use href="#i-spark"/></svg></div>
+    </div>
+    <div class="main">
+      <div id="hdr"></div>
+      <div class="body">
+        <div class="side">
+          <div class="sh">课程大纲</div>
+          <div class="it">一、行列式</div>
+          <div class="it on">行列式的概念与阶数</div>
+          <div class="it">行列式的性质</div>
+        </div>
+        <div class="center">（中栏 · 课程主页 / 上课）</div>
+      </div>
+    </div>
+  </div>
+  <div class="cap" id="cap"></div>
+</div>
+
+<script>
+const LESSONS = ['课时10·精讲','课时9·精讲','课时8·精讲']
+const OLD = '行列式的概念与阶数'
+const NORMAL = [OLD,'矩阵笔记','复习计划','行列式综合练习']
+
+const MODES = {
+  now:   { label:'现状（课程模式）', course:true, plan:'now' },
+  a:     { label:'A · 收起整段页签', course:true, plan:'a' },
+  b:     { label:'B · 只留当前课时', course:true, plan:'b' },
+  c:     { label:'C · 折叠下拉', course:true, plan:'c' },
+  plain: { label:'非课程模式（不动）', course:false, plan:'plain' },
+}
+let mode = 'now'
+
+const CAPS = {
+  now:   `<span class="tag bad">问题</span><b>现状</b>：<code>wsSessions.map</code> 把本工作区<b>所有会话</b>都铺成一排页签 —— 课程模式下每开一节课就多一个「课时N」，越堆越长；同一行还挤着工作区 chip / ＋ / 分段器 / 画像 / 会话要求 ⇒ «多、没结构»。`,
+  a:     `<span class="tag good">推荐</span><b>A</b>：课程模式下<b>整段页签收起</b>。导航交给「左栏（大纲 ⇄ 课时）+ 分段器」。顶栏恒定：工作区 chip · ＋ · [课程主页｜上课] · 画像 · 会话要求。<b>代价</b>：非课时的历史会话（旧会话）没入口 —— 一般可接受。`,
+  b:     `<span class="tag mid">备选</span><b>B</b>：只把<b>当前课时</b>留成一个页签。比现状干净，但分段器已表达「在上课」，这个页签仍属冗余。`,
+  c:     `<span class="tag mid">备选</span><b>C</b>：把课时页签<b>折叠成「课时 ×10 ▾」</b>一个下拉。省地方，但多一层结构、要点开才知道有哪些节，反而更绕。`,
+  plain: `<span class="tag good">保持</span><b>非课程模式</b>完全不动 —— 页签仍是会话切换器。课程模式的改动只作用于本工作区开启课程时。`,
+}
+
+function tab(t, active){
+  return `<div class="tab ${active?'on':''}" title="${t}"><span class="lbl">${t}</span><span class="x">×</span></div>`
+}
+
+function header(){
+  const m = MODES[mode]
+  const right = `
+    <div class="tools">
+      <span class="tl"><svg class="ic"><use href="#i-user"/></svg>画像</span>
+      <span class="tl"><svg class="ic"><use href="#i-pen"/></svg>会话要求</span>
+    </div>`
+  const ws = `<span class="wschip"><svg class="ic" style="color:var(--accent)"><use href="#i-book"/></svg>线性代数<svg class="ic" style="width:11px;height:11px"><use href="#i-chev"/></svg></span>
+    <span class="plus"><svg class="ic"><use href="#i-plus"/></svg></span>`
+
+  if(!m.course){
+    return `<div class="mh">${ws}
+      <span class="enable"><svg class="ic"><use href="#i-book"/></svg>开启课程模式</span>
+      <div class="tabstrip">${NORMAL.map((t,i)=>tab(t,i===0)).join('')}</div>
+      ${right}
+    </div>`
+  }
+
+  const seg = `<span class="seg">
+      <button><svg class="ic"><use href="#i-book"/></svg>课程主页</button>
+      <button class="on"><svg class="ic"><use href="#i-spark"/></svg>上课</button>
+    </span>`
+
+  let middle = ''
+  if(m.plan==='now'){
+    middle = `<div class="tabstrip">${LESSONS.map((t,i)=>tab(t,i===0)).join('')}${tab(OLD,false)}</div>`
+  } else if(m.plan==='a'){
+    middle = `<div class="tabstrip"></div>`
+  } else if(m.plan==='b'){
+    middle = `<div class="tabstrip">${tab(LESSONS[0],true)}</div>`
+  } else if(m.plan==='c'){
+    middle = `<div class="tabstrip">
+      <div class="dropdown">
+        <span class="ddbtn" onclick="toggleDd(event)"><svg class="ic"><use href="#i-book"/></svg>课时 ×${LESSONS.length+7}<svg class="ic" style="width:11px;height:11px"><use href="#i-chev"/></svg></span>
+        <div class="ddlist" id="dd" style="display:none">
+          ${['课时10·精讲','课时9·精讲','课时8·精讲','课时7·习题','课时6·精讲','课时5·复习'].map((t,i)=>`<div class="di ${i===0?'on':''}"><svg class="ic"><use href="#i-book"/></svg>${t}</div>`).join('')}
+          <div class="dsep"></div>
+          <div class="di" style="color:var(--t2)">早期会话 · ${OLD}</div>
+        </div>
+      </div>
+    </div>`
+  }
+  return `<div class="mh">${ws}${seg}${middle}${right}</div>`
+}
+
+function toggleDd(e){ e.stopPropagation(); const d=document.getElementById('dd'); if(d) d.style.display = d.style.display==='none'?'block':'none' }
+document.addEventListener('click', () => { const d=document.getElementById('dd'); if(d) d.style.display='none' })
+
+function render(){
+  document.getElementById('hdr').innerHTML = header()
+  document.getElementById('cap').innerHTML = CAPS[mode]
+  document.querySelectorAll('#sw button').forEach(b=>b.classList.toggle('active', b.dataset.m===mode))
+}
+
+document.getElementById('sw').innerHTML =
+  `<span class="lb">顶栏方案：</span>` +
+  ['now','a','b','c'].map((k,i)=>`<button data-m="${k}">${MODES[k].label}</button>`).join('') +
+  `<span class="sep"></span><button data-m="plain">${MODES.plain.label}</button>`
+document.getElementById('sw').addEventListener('click', e => {
+  const b = e.target.closest('button[data-m]'); if(!b) return
+  mode = b.dataset.m; render()
+})
+render()
+</script>
+</body>
+</html>

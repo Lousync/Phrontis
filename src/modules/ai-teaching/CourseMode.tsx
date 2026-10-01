@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, Check, ChevronDown, Play, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
-import type { AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnit } from '../../types'
-import { aiTeachCourseGenerateOutlineStream, aiTeachCourseSaveOutline, onAiTeachCourseGenProgress } from '../../lib/ipc'
+import type { AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnit, AiTeachUnitQuizQuestion } from '../../types'
+import { aiTeachCourseGenerateOutlineStream, aiTeachCourseSaveOutline, aiTeachCourseMakeUnitQuiz, onAiTeachCourseGenProgress } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 
 /**
@@ -48,13 +48,30 @@ interface Props {
   modelSpec?: string
   state: AiTeachCourseState
   onStartUnit: (unitId: string) => void
-  onCheckUnit: (unitId: string) => void
+  onFinishUnit: (unitId: string, score?: { correct: number; total: number }) => void
+  onReopenUnit: (unitId: string) => void
   onReload: () => void
 }
 
-export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onCheckUnit, onReload }: Props) {
+export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFinishUnit, onReopenUnit, onReload }: Props) {
   const [view, setView] = useState<'home' | 'wizard'>('home')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  // L3 收尾自测：先出题 → 作答 → 再生成总结篇
+  const [quiz, setQuiz] = useState<{ unitId: string; qs: AiTeachUnitQuizQuestion[]; i: number; picked: number | null; score: number; done: boolean } | null>(null)
+  const [quizBusy, setQuizBusy] = useState(false)
+
+  const startFinishQuiz = useCallback(async (unitId: string) => {
+    if (quizBusy) return
+    setQuizBusy(true)
+    const r = await aiTeachCourseMakeUnitQuiz(wsId, unitId).catch(() => null)
+    setQuizBusy(false)
+    if (!r?.ok || !r.questions?.length) {
+      showToast({ type: 'warning', message: `出题失败（${r?.error ?? ''}）· 直接生成总结篇` })
+      onFinishUnit(unitId)
+      return
+    }
+    setQuiz({ unitId, qs: r.questions, i: 0, picked: null, score: 0, done: false })
+  }, [quizBusy, wsId, onFinishUnit])
 
   const units = useMemo(() => (state.outline?.chapters ?? []).flatMap(c => c.units), [state.outline])
   const total = units.length
@@ -66,8 +83,22 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onChec
     setCollapsed(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }, [])
 
-  if (view === 'wizard' || !state.outline) {
-    return <Wizard wsName={wsName} wsId={wsId} modelSpec={modelSpec} outline={state.outline} onSaved={() => { onReload(); setView('home') }} onCancel={state.outline ? () => setView('home') : undefined} />
+  if (view === 'wizard') {
+    return <Wizard wsName={wsName} wsId={wsId} modelSpec={modelSpec} outline={state.outline} onSaved={() => { onReload(); setView('home') }} onCancel={() => setView('home')} />
+  }
+  if (!state.outline) {
+    return (
+      <div className="h-full min-h-0 flex items-center justify-center px-6">
+        <div className="w-full max-w-[440px] text-center">
+          <div className="mx-auto w-[46px] h-[46px] rounded-xl bg-[var(--accent)]/12 text-[var(--accent)] flex items-center justify-center"><Sparkles size={22} /></div>
+          <h2 className="mt-4 text-[17px] font-semibold text-[var(--text-primary)]">这个工作区还没有课程大纲</h2>
+          <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">先定「学什么」。生成一份课程大纲（章 → 知识点），之后按知识点上课、检验，进度会自己沉淀。</p>
+          <button onClick={() => setView('wizard')}
+            className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent)] text-white text-[12px] hover:opacity-90 transition-opacity"><Sparkles size={13} />生成课程大纲</button>
+          <div className="mt-3 text-[11px] text-[var(--text-muted)]">也可以直接手动编辑 <code className="font-mono text-[var(--accent)]">课程.md</code></div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -125,6 +156,10 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onChec
                 const st = state.progress[u.id]?.status ?? 'todo'
                 const mastery = state.progress[u.id]?.mastery ?? 0
                 const ai = (u.source || '').startsWith('AI')
+                const uLessons = Object.values(state.lessons ?? {}).filter(l => l.unitId === u.id)
+                const endedN = uLessons.filter(l => l.status === 'ended').length
+                const allEnded = uLessons.length > 0 && endedN === uLessons.length
+                const finished = !!state.progress[u.id]?.finished
                 return (
                   <div key={u.id} className="flex items-center gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] px-3.5 py-2.5 mb-2 hover:border-[var(--accent)]/40 transition-colors">
                     <span className={`w-[26px] h-[26px] rounded-lg flex items-center justify-center text-[11.5px] font-semibold shrink-0 ${ST_CLS[st] ?? ''}`}>
@@ -142,11 +177,20 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onChec
                       <div className="h-[5px] rounded-full bg-[var(--bg-hover)] overflow-hidden"><div className="h-full bg-[var(--accent)]" style={{ width: `${mastery * 100}%` }} /></div>
                       <div className="mt-0.5 text-right text-[10px] text-[var(--text-muted)]">{Math.round(mastery * 100)}%</div>
                     </div>
-                    <div className="flex gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button onClick={() => onStartUnit(u.id)} className="px-2.5 py-1 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] transition-colors">
-                        {st === 'mastered' ? '重温' : st === 'learning' ? '继续' : '开始'}
+                        {finished ? '重温' : uLessons.length ? '继续' : '开始'}
                       </button>
-                      <button onClick={() => onCheckUnit(u.id)} className="px-2.5 py-1 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] transition-colors">检验</button>
+                      {uLessons.length > 0 && <span className="text-[10px] text-[var(--text-muted)] tabular-nums">{endedN}/{uLessons.length} 课时</span>}
+                      {!finished && allEnded && (
+                        <button onClick={() => void startFinishQuiz(u.id)} className="px-2.5 py-1 rounded-md border border-[var(--success)]/40 text-[11.5px] text-[var(--success)] hover:bg-[var(--success)]/10 transition-colors">结束本知识点</button>
+                      )}
+                      {finished && (
+                        <>
+                          <span className="text-[10px] font-semibold text-[var(--success)]">已收尾</span>
+                          <button onClick={() => onReopenUnit(u.id)} className="px-2.5 py-1 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] transition-colors">回炉复习</button>
+                        </>
+                      )}
                     </div>
                   </div>
                 )
@@ -157,6 +201,47 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onChec
         <div className="mt-3 rounded-xl border border-dashed border-[var(--border-color)] py-3 text-center text-[12px] text-[var(--text-muted)] cursor-pointer hover:border-[var(--accent)]/50" onClick={() => setView('wizard')}>
           ＋ 编辑大纲 / 添加知识点（也直接改 课程.md）
         </div>
+        {quiz && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/35 p-4" onClick={() => setQuiz(null)}>
+            <div className="w-[min(560px,94vw)] max-h-[86vh] overflow-y-auto rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              {quiz.done ? (
+                <div>
+                  <div className="text-[15px] font-semibold text-[var(--text-primary)]">自测完成：{quiz.score} / {quiz.qs.length}</div>
+                  <div className="mt-2 text-[12.5px] text-[var(--text-secondary)]">接下来生成这个知识点的总结篇（进入引用网络）。</div>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button onClick={() => setQuiz(null)} className="px-3 py-1.5 rounded-lg border border-[var(--border-color)] text-[12px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50">稍后</button>
+                    <button onClick={() => { const id = quiz.unitId; const sc = { correct: quiz.score, total: quiz.qs.length }; setQuiz(null); onFinishUnit(id, sc) }} className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[12px] hover:opacity-90">生成总结篇</button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="text-[11px] text-[var(--text-muted)]">收尾自测 · {quiz.i + 1} / {quiz.qs.length}</div>
+                  <div className="mt-2 text-[14px] font-semibold text-[var(--text-primary)]">{quiz.qs[quiz.i].q}</div>
+                  <div className="mt-3 space-y-2">
+                    {quiz.qs[quiz.i].options.map((o, k) => (
+                      <button key={k} onClick={() => setQuiz((s) => (s ? { ...s, picked: k } : s))}
+                        className={`w-full text-left rounded-lg border px-3 py-2 text-[12.5px] transition-colors ${quiz.picked === k ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]' : 'border-[var(--border-color)] hover:border-[var(--accent)]/40'}`}>
+                        {'ABCD'[k] ?? k + 1}. {o}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <button disabled={quiz.picked === null}
+                      onClick={() => setQuiz((s) => {
+                        if (!s || s.picked === null) return s
+                        const ok = s.picked === s.qs[s.i].answer
+                        const score = s.score + (ok ? 1 : 0)
+                        return s.i < s.qs.length - 1 ? { ...s, i: s.i + 1, picked: null, score } : { ...s, done: true, score }
+                      })}
+                      className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[12px] hover:opacity-90 disabled:opacity-40">
+                      {quiz.i < quiz.qs.length - 1 ? '下一题' : '提交'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

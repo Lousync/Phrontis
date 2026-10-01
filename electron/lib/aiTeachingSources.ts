@@ -5,6 +5,7 @@ import { getCurrentVault } from './kbStore/vaultContext'
 import { broadcastTreeRefresh, ensureSessionFolder, ensureWriteOwnerFolder, rootDirName, sanitizeTitle, sessionFolder, sourceTemplateText } from './aiTeachingFolders'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { listWorkspaces, workspaceFolderRel } from './aiTeachingWorkspaces'
+import { getSessionUnitFolderRel } from './aiTeachingCourse'
 import { uniqueFileName } from './workspaceManager'
 import { extractPdfRange, extractPptxPages } from './docsReader'
 import { visionChat, findVisionModel } from './llmService'
@@ -164,11 +165,21 @@ function layout(sessionId: string, getSetting: (key: string) => unknown, create:
   if (!sid) return { error: '尚未选择对话' }
   const vault = getCurrentVault()
   if (!vault) return { error: '尚未打开仓库' }
+  const rootDir = rootDirName(getSetting)
+  // L5：本对话若是一节课 → 素材「对话级」上移为「知识点级」：{工作区}/SOURCES/{章号}·{知识点}/SOURCE.md
+  const unitRel = getSessionUnitFolderRel(sid, getSetting)
+  if (unitRel) {
+    const us = unitRel.lastIndexOf('/')
+    const parentRel = us > 0 ? unitRel.slice(0, us) : rootDir
+    const unitSeg = us > 0 ? unitRel.slice(us + 1) : unitRel
+    const dirRel = `${parentRel}/${SOURCES_DIR}/${unitSeg}`
+    if (create) { try { mkdirSync(join(vault.rootPath, dirRel), { recursive: true }) } catch { /* 懒建失败由写入兜底 */ } }
+    return { rootPath: vault.rootPath, rootId: vault.rootId, dirRel, dirAbs: join(vault.rootPath, dirRel), fileRel: `${dirRel}/${SOURCE_FILE}`, convName: unitSeg, wsName: wsNameOf(parentRel, rootDir), scope }
+  }
   const probe = create ? ensureSessionFolder(sid, getSetting) : sessionFolder(sid, getSetting)
   const rel = probe.relPath
   if (!rel) return { error: probe.ok ? '会话文件夹不存在' : (probe.error ?? '会话文件夹不可用') }
   const lastSlash = rel.lastIndexOf('/')
-  const rootDir = rootDirName(getSetting)
   const parentRel = lastSlash > 0 ? rel.slice(0, lastSlash) : rootDir
   const convName = lastSlash > 0 ? rel.slice(lastSlash + 1) : rel
   const dirRel = `${parentRel}/${SOURCES_DIR}/${convName}`
@@ -287,7 +298,7 @@ function rewriteEntries(l: SourcesLayout, entries: SourceEntry[]): { ok: boolean
     const fileAbs = join(l.rootPath, l.fileRel)
     const old = existsSync(fileAbs) ? readFileSync(fileAbs, 'utf-8') : emptyTemplate(l)
     const fm = /^---\n([\s\S]*?)\n---\n?/.exec(old)
-    let head = '---\n' + (fm ? fm[1].split('\n').map(x => x.startsWith('updated:') ? `updated: ${today()}` : x).join('\n') : `workspace: ${l.wsName || '（未归一层）'}\nconversation: ${l.convName || '（工作区级·跨对话共用）'}\nupdated: ${today()}`) + '\n---\n'
+    let head = '---\n' + (fm ? fm[1].split('\n').map(x => x.startsWith('updated:') ? `updated: ${today()}` : x).join('\n') :     `workspace: ${l.wsName || '（未归一层）'}\n归属: ${l.convName || '（工作区级·跨对话共用）'}\nupdated: ${today()}`) + '\n---\n'
     const body = entries.map(entryToBlock).join('\n')
     mkdirSync(l.dirAbs, { recursive: true })
     writeFileSync(fileAbs, `${head}\n# 素材来源登记\n\n${body}`, 'utf-8')

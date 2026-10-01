@@ -1322,7 +1322,7 @@ export default function App() {
       case 'aiTeaching': return <AiTeachingModule isActive={on} zenLevel={zenLevel} onZenLevelChange={changeZen} pendingAsk={pendingAsk} onConsumePendingAsk={() => setPendingAsk(null)} />
       // aiChat = AI 对话中间标签（v3.4.0 批次5，方案 §4）：右栏 AI 态点 ⤢ 进入，关标签自动回右栏小对话。
       // 激活时左栏经 RAIL_FOLLOW_MAP 切 aiChat 模块态——侧栏（会话列表/会话大纲）portal 进 slot
-      case 'aiChat': return <AiChatTab active={on} sidebarEl={on && railModule === 'aiChat' ? wbModSlotEl : null} />
+      case 'aiChat': return <AiChatTab active={on} sidebarEl={on && railModule === 'aiChat' ? wbModSlotEl : null} modActionsEl={on && railModule === 'aiChat' ? wbModActionsEl : null} />
       // 书市：书源检索 + 下载上架。「去书架」是原型里没有的功能增量（整窗模块无法自跳 Tab，
       // 原型只能 toast 说明），实机由 App 的回调真跳转（方案 §11.3）
       case 'bookMarket': return <BookMarketModule onOpenShelf={() => handleTabChange('bookshelf')} />

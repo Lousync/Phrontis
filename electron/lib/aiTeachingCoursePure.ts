@@ -31,6 +31,10 @@ export interface CourseUnitProgress {
   status: CourseUnitStatus
   mastery: number
   lastCheckedAt: string | null
+  /** 知识点是否已收尾（课时全结束 + 出过总结篇） */
+  finished?: boolean
+  /** 总结篇仓库相对路径（收尾后写入；未收尾为 null/缺省） */
+  summaryRel?: string | null
 }
 
 export interface GenerateOutlineInput {
