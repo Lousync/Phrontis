@@ -117,6 +117,9 @@ export default function TerminalPane({ session, active, fontSize, clearSignal, w
       theme: readXtermTheme(),
       ...(windowsPty ? { windowsPty } : {}),
     })
+    // F-9：Ctrl+B 交回工作台（收展左栏）——xterm 不处理该键，也就不会作为 ^B 透传给 shell；
+    // 事件继续冒泡到 window 的 Ctrl+B 处理器（该处理器对 .xterm 显式豁免 isEditingInput）。
+    term.attachCustomKeyEventHandler((e) => !(e.type === 'keydown' && e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'b'))
     const fit = new FitAddon()
     term.loadAddon(fit)
     term.open(host)

@@ -19,7 +19,7 @@ import { CodePluginHosts } from './components/shared/CodePluginHosts'
 import { Toast } from './components/shared/Toast'
 import { FONT_CSS_MAP, applyThemeClass } from './lib/settings'
 import { useSettings } from './lib/SettingsContext'
-import { isEditingInput } from './lib/shortcuts'
+import { isEditingInput, allowsWorkbenchShortcut } from './lib/shortcuts'
 import { registerSelectionAskHost, type SelectionAskHost } from './lib/assistantContext'
 import { setGlobalActiveTab } from './lib/activeTab'
 import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList } from './lib/ipc'
@@ -1187,10 +1187,12 @@ export default function App() {
   }, [s.zoom, s.zoomMin, s.zoomMax, s.zoomStep, update, bookshelfReading, activeTab])
 
   // Ctrl+B — toggle sidebar（Alt 修饰的组合键不拦：Ctrl+Alt+B 归工作台右栏，见下方处理器）
+  // F-9：终端（.xterm）与聊天输入框（[data-wb-keys]）对 Ctrl+B 开豁免——它们里 Ctrl+B 无本地语义，
+  // 工作台键优先，不被 isEditingInput 粗闸门吞掉（xterm 侧另配 attachCustomKeyEventHandler 不发 ^B）。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isEditingInput(e)) return
       if (e.ctrlKey && !e.altKey && e.key === 'b') {
+        if (isEditingInput(e) && !allowsWorkbenchShortcut(e)) return
         e.preventDefault()
         setSidebarOpen(v => !v)
       }

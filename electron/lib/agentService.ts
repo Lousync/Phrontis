@@ -995,9 +995,12 @@ async function runAgentLoop(
             : {}
           // vault 文件写类工具：目标=真实落盘路径（rename 取目标路径 to）；trash 后文件已移走不可跳转
           // visual.html：relPath 一并作 file（右栏「本次改动」条目可点击回工件栏渲染）
+          // knowledge.create-page（F-11）：工具返回的 path 同为仓库内 .md，纳入 file 可点击直达编辑器
           const vaultPath = realName.startsWith('builtin.vault.')
             ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
-            : realName === 'visual.html' ? String(data?.relPath ?? '').trim() : ''
+            : realName === 'visual.html' ? String(data?.relPath ?? '').trim()
+              : realName === 'builtin.knowledge.create-page' ? String(data?.path ?? '').trim()
+                : ''
           const file = realName !== 'builtin.vault.trash' && vaultPath ? vaultPath : undefined
           // 参数里取不到可读目标时，回落到工具结果自带的标题（如 schedule.delete-todo
           // 只收 id，摘要里的 title 是唯一人能看懂的目标）—— 否则删除不会出现在「本次改动」清单里

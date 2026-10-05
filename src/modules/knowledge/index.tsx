@@ -899,6 +899,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const parentDirOf = (rel: string): string => { const i = rel.lastIndexOf('/'); return i === -1 ? '' : rel.slice(0, i) }
 
   const handleTreeMove = useCallback(async (srcRel: string, targetDirRel: string) => {
+    // F-13：分类目录恒在仓库顶层（拍板设计），拖拽移动会同时破坏 categories.json 登记与归类推导，
+    // 直接拒绝（改名仍可用——走 handleTreeRename 的分类通道）。与分类树侧「空间不能移动」同口径。
+    if (categories.some((c) => c.path === srcRel)) {
+      showToast({ type: 'warning', message: '分类目录固定在仓库顶层，不能移动；可重命名' })
+      return
+    }
     const root = await ensureVaultRoot()
     if (!root) return
     const name = srcRel.slice(srcRel.lastIndexOf('/') + 1)
@@ -909,7 +915,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       const page = allPages.find(p => p.path === srcRel)
       if (page) showToast({ type: 'info', message: `已移动「${name}」` })
     } catch { showToast({ type: 'error', message: '移动失败' }) }
-  }, [allPages, ensureVaultRoot, refreshTreeDir])
+  }, [allPages, categories, ensureVaultRoot, refreshTreeDir])
 
   /** 新建分类目录提交（Phase 2 批次 3 收尾）：顶层 mkdir + categories.json 登记（vault 白名单通道）。
    *  分类 = 目录（resolveCategoryIdByPath）：页面拖进该目录即归类。仅支持顶层（子目录层级 = 普通目录嵌套）。
@@ -1065,6 +1071,21 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     const root = await ensureVaultRoot()
     if (!root) return
     const dir = parentDirOf(relPath)
+    // F-13：分类目录改名必须走分类通道（vaultRenameCategory 级联 name/path 与子孙 path、
+    // 并失效重建索引让页面归类跟着变）；纯 fs 改名不碰 categories.json ⇒ 归类失效 + 脏条目。
+    const catHit = categories.find((c) => c.path === relPath)
+    if (catHit) {
+      try {
+        await updateKnowledgeCategory(catHit.id, { name })
+        void refreshTreeDir(dir)
+        void refreshAllPages()
+        refreshCategories()
+        showToast({ type: 'info', message: `已重命名为「${name}」` })
+      } catch (e) {
+        showToast({ type: 'error', message: e instanceof Error ? e.message : '重命名失败' })
+      }
+      return
+    }
     const nextRel = dir ? `${dir}/${name}` : name
     try {
       const res = await workspaceRename(root, relPath, nextRel)
@@ -1077,7 +1098,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     } catch (e) {
       showToast({ type: 'error', message: e instanceof Error ? e.message : '重命名失败' })
     }
-  }, [ensureVaultRoot, refreshTreeDir, refreshAllPages])
+  }, [categories, ensureVaultRoot, refreshTreeDir, refreshAllPages, refreshCategories, updateKnowledgeCategory])
 
 
   const handleBackToList = useCallback(() => {

@@ -32,6 +32,7 @@ import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
+import { UsageRing, fmtTok } from '../../components/shared/UsageRing'
 import { WebSourceDialog } from './components/WebSourceDialog'
 import { SideLanePanel } from './SideLanePanel'
 import { AI_TEXT_CODE_EXT_SET } from '../../lib/aiTextExts'
@@ -289,27 +290,6 @@ function fmtTime(raw?: string | null): string {
   const sameDay = Number(m[1]) === now.getFullYear() && Number(m[2]) === now.getMonth() + 1 && Number(m[3]) === now.getDate()
   return sameDay ? `${m[4]}:${m[5]}` : `${m[2]}-${m[3]} ${m[4]}:${m[5]}`
 }
-function fmtTok(n: number): string { return n >= 10000 ? `${(n / 1000).toFixed(0)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n) }
-
-/** UI 优化条目9②：上下文占用环形指示（纯 SVG，无新依赖）。pct=null → 退化为紧凑数字 chip（优雅降级）。
- *  分档口径与月度预算一致：<70% 常态（accent）、70~85% 警示（warning）、>85% 红（danger）。 */
-function UsageRing({ pct, used }: { pct: number | null; used: number }) {
-  if (pct == null) return <span className="tabular-nums text-[11px] text-[var(--text-secondary)]">≈ {fmtTok(used)}</span>
-  const R = 8
-  const C = 2 * Math.PI * R
-  const clamped = Math.max(0, Math.min(1, pct))
-  const color = pct > 0.85 ? 'var(--danger)' : pct >= 0.7 ? 'var(--warning)' : 'var(--accent)'
-  return (
-    <svg width="22" height="22" viewBox="0 0 22 22" className="shrink-0 -rotate-90" aria-hidden>
-      <circle cx="11" cy="11" r={R} fill="none" stroke="var(--border-color)" strokeWidth="2.5" />
-      <circle cx="11" cy="11" r={R} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round"
-        strokeDasharray={`${(clamped * C).toFixed(1)} ${C.toFixed(1)}`} className="transition-[stroke-dasharray] duration-300" />
-      <text x="11" y="11" transform="rotate(90 11 11)" textAnchor="middle" dominantBaseline="central"
-        fontSize="6.5" fill={color} className="tabular-nums">{Math.round(clamped * 100)}</text>
-    </svg>
-  )
-}
-
 /** 中英混排估算口径（仅用于注入构成摘要的字符→token 折算展示，非计费依据） */
 const CHARS_PER_TOKEN = 2.6
 
@@ -703,8 +683,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // UI 优化条目9②：本轮 system 注入分段（按会话存，主进程随结果回传；用于构成摘要）
   const [injectionMap, setInjectionMap] = useState<Record<string, AiTeachInjectionStats>>({})
   const readUsageSettings = useCallback(() => {
-    void getSettingRaw('aiTeachUsageDetail').then(v => { const s = String(v ?? 'compact'); setUsageDetail(s === 'off' || s === 'detailed' ? s : 'compact') }).catch(() => null)
-    void getSettingRaw('aiTeachCtxWindow').then(v => setCtxWindow(Math.max(0, Math.floor(Number(v) || 0)))).catch(() => null)
+    void getSettingRaw('ctxUsageDetail').then(v => { const s = String(v ?? 'compact'); setUsageDetail(s === 'off' || s === 'detailed' ? s : 'compact') }).catch(() => null)
+    void getSettingRaw('ctxWindow').then(v => setCtxWindow(Math.max(0, Math.floor(Number(v) || 0)))).catch(() => null)
   }, [])
   useEffect(() => { readUsageSettings() }, [readUsageSettings])
   useEffect(() => { if (isActive) readUsageSettings() }, [isActive, readUsageSettings])
@@ -2425,7 +2405,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     )}
                   </div>
                   {/* UI 优化条目9②③：用量指示（圆环/数字降级）——hover 看上下文构成摘要，点击上翻详情面板；
-                      档位由 设置→AI教学 `aiTeachUsageDetail`（off/compact/detailed），窗口大小 `aiTeachCtxWindow` */}
+                      档位由 设置→AI教学 `ctxUsageDetail`（off/compact/detailed），窗口大小 `ctxWindow`（F-12 提为通用键） */}
                   {usageDetail !== 'off' && (
                     <div className="relative group">
                       <button onClick={() => setTokenOpen(v => !v)}

@@ -16,6 +16,7 @@ import { useAssistantChat } from './useAssistantChat'
 import { AssistantEntryButton } from './AssistantEntry'
 import { AiChatSidebar } from './AiChatSidebar'
 import { QuoteChips } from './QuoteChips'
+import { UsageRing, fmtTok } from '../UsageRing'
 import { buildQuotedBody } from './selQuotes'
 import { registerSelectionAskHost } from '../../../lib/assistantContext'
 import type { AssistantChatController } from './useAssistantChat'
@@ -74,6 +75,16 @@ const LIST_WRAP: Record<AssistantBodyVariant, string> = {
 }
 
 /**
+ * 「本次已改动」卡的内容列（F-10）：与输入卡 INPUT_WRAP 同一套水平限宽与内边距，
+ * 否则宽幅下改动卡通栏、输入卡居中收窄，两卡左右边缘不齐。
+ */
+const CARD_WRAP: Record<AssistantBodyVariant, string> = {
+  sidebar: 'max-w-[820px] mx-auto w-full px-3',
+  docked: 'w-full px-2',
+  page: 'max-w-[860px] mx-auto w-full px-4',
+}
+
+/**
  * 输入卡外壳样式已抽至 inputShells.ts（与 AI 教学对话输入框共用，样式统一影响所有 AI 问答面）。
  */
 
@@ -97,6 +108,17 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   // ---- 感知模式（B2）：开关本体在主进程读（检索发生在主进程），渲染层只做「显示 + 切换」----
   // 默认 false（上游 §4.1 拍板）：用户主动开启才检索，绝不替用户多花检索开销。
   const { s: chatSettings, update: updateChatSetting } = useSettings()
+  // F-12：上下文占用指示（与 AI 教学同口径）——取最近一次 LLM 调用的 promptTokens
+  const ctxUsageDetail = chatSettings.ctxUsageDetail ?? 'compact'
+  const ctxWindow = Number(chatSettings.ctxWindow) || 0
+  const ctxUsed = useMemo(() => {
+    const all = [...messages.flatMap(m => m.trace ?? []), ...liveSteps]
+    for (let i = all.length - 1; i >= 0; i--) {
+      const s = all[i]
+      if (s.kind === 'llm' && typeof s.promptTokens === 'number' && s.promptTokens > 0) return s.promptTokens
+    }
+    return 0
+  }, [messages, liveSteps])
   const perceptionOn = chatSettings.aiAssistantPerception === true
   const togglePerception = () => { void updateChatSetting('aiAssistantPerception', !perceptionOn) }
   /** 语义索引是否已配置（未配置 → 开启后显示弱提示「当前按关键词匹配」） */
@@ -360,7 +382,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
 
             {/* 本次改动卡片（AI 执行完成的写操作清单，可一键关闭） */}
             {lastChanges && lastChanges.length > 0 && (
-              <div className={isNarrow ? 'px-2 pb-1 shrink-0' : 'px-3 pb-1 shrink-0'}>
+              <div className={`pb-1 shrink-0 ${CARD_WRAP[variant]}`}>
                 <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-hidden">
                   <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] border-b border-[var(--border-color)]">
                     <Wrench size={10} className="text-[var(--accent)]" />
@@ -482,6 +504,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   <textarea
                     ref={inputRef}
                     spellCheck={false}
+                    data-wb-keys
                     value={input}
                     onChange={e => {
                       const v = e.target.value
@@ -554,6 +577,19 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     <span className={`leading-none ${isNarrow ? 'max-w-[80px] truncate' : 'max-w-[120px] truncate'}`}>{modelLabel}</span>
                     <ChevronDown size={10} />
                   </button>
+                  {/* F-12：上下文占用指示（与 AI 教学同口径，档位设置 ctxUsageDetail / 窗口 ctxWindow 共用） */}
+                  {ctxUsageDetail !== 'off' && (
+                    <span
+                      data-wb="aiCtxUsage"
+                      title={ctxWindow > 0 ? `上下文占用 ${fmtTok(ctxUsed)} / ${fmtTok(ctxWindow)}（窗口大小在 设置→AI教学 配置）` : '本会话最近一次上下文占用（设置模型上下文窗口后按比例着色）'}
+                      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-[var(--text-secondary)]"
+                    >
+                      <UsageRing pct={ctxWindow > 0 ? ctxUsed / ctxWindow : null} used={ctxUsed} />
+                      {ctxUsageDetail === 'detailed' && (
+                        <span className="tabular-nums whitespace-nowrap text-[10.5px]">{ctxWindow > 0 ? `${fmtTok(ctxUsed)}/${fmtTok(ctxWindow)}` : `≈${fmtTok(ctxUsed)}`}</span>
+                      )}
+                    </span>
+                  )}
                   <button
                     onClick={() => setPop(p => (p === 'usage' ? null : 'usage'))}
                     title="Token 消耗"

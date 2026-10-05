@@ -69,8 +69,8 @@ export function AiTeachingView() {
             输入区用量指示
           </span>
           <select
-            value={s.aiTeachUsageDetail || 'compact'}
-            onChange={e => update('aiTeachUsageDetail', e.target.value)}
+            value={s.ctxUsageDetail || 'compact'}
+            onChange={e => update('ctxUsageDetail', e.target.value)}
             className="px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
           >
             <option value="off">隐藏</option>
@@ -85,8 +85,8 @@ export function AiTeachingView() {
           </span>
           <input
             type="number" min={0} step={1000}
-            value={s.aiTeachCtxWindow ?? 0}
-            onChange={e => update('aiTeachCtxWindow', Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+            value={s.ctxWindow ?? 0}
+            onChange={e => update('ctxWindow', Math.max(0, Math.floor(Number(e.target.value) || 0)))}
             className="w-40 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
           />
         </label>

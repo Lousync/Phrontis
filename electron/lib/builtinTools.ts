@@ -842,7 +842,8 @@ export function registerBuiltinTools(): void {
     invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '')
     broadcastDataChanged('knowledge')
     notifyVaultTreeChange(page.path) // v3.1.2 条目9：页面落在可见分类目录，编辑区树同步刷新
-    return { ok: true, id: page.id, title }
+    // path 一并返回：会话写审计据此把本页纳入「改动文件」卡（F-11，可与 vault.* 一样点击直达编辑器）
+    return { ok: true, id: page.id, title, path: page.path }
   })
 
   // 9. builtin.knowledge.append-page 已退役（2026-09-09 P2）：vault.edit(append=true) 收编

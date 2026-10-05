@@ -713,6 +713,16 @@ app.whenReady().then(async () => {
     }
   } catch { /* 坏 JSON 交给权限层兜底（按 read） */ }
 
+  // F-12：用量指示设置提为通用键（AI 教学与 AI 对话共用）——旧键值一次性迁移到新键。
+  try {
+    const renameMap: Array<[string, string]> = [['aiTeachUsageDetail', 'ctxUsageDetail'], ['aiTeachCtxWindow', 'ctxWindow']]
+    let renamed = false
+    for (const [oldKey, newKey] of renameMap) {
+      if (oldKey in settingsCache && !(newKey in settingsCache)) { settingsCache[newKey] = settingsCache[oldKey]; renamed = true }
+    }
+    if (renamed) { if (saveTimer) clearTimeout(saveTimer); saveTimer = setTimeout(flushSettingsToDisk, 500) }
+  } catch { /* 迁移失败不阻断启动 */ }
+
   // 加密自检：确认 safeStorage 密文格式与 secretBox 的假设一致（只告警不阻断，见 secretBox.ts）
   // 目的：把「密文格式变化 / 被误改」这类问题暴露在启动期，而非用户发现「密码全空」时
   try {
