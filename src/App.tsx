@@ -42,6 +42,8 @@ import { BlogModule } from './modules/blog'
 import type { BlogJump } from './modules/blog'
 import type { SummaryKind } from './lib/summary'
 import { ScheduleModule } from './modules/schedule'
+import { AccountingModule } from './modules/accounting'
+import { ACCOUNTING_EDIT_EVENT, ACCOUNTING_NEW_EVENT } from './modules/accounting/shared'
 import { KnowledgeModule } from './modules/knowledge'
 import { MomentsModule } from './modules/moments'
 import { RecycleBinModule } from './modules/recycle'
@@ -599,6 +601,27 @@ export default function App() {
   /** B-26：划词「问 AI」路由到右栏时要投递的选段。走 state+props 而不直接摸右栏输入框 ——
    *  右栏**折叠时整个组件是卸载的**（`ResizablePanel` 只渲染 visible 的子节点），而右栏默认折叠。 */
   const [pendingRightAsk, setPendingRightAsk] = useState<string | null>(null)
+  /** 记账：中央「记一笔 / 编辑某笔」路由到右栏记账面板。同 pendingRightAsk —— 右栏折叠时整个卸载，
+   *  故监听挂 App 层；'new' = 新建，其余 = 待编辑流水 id。展开右栏 + 切记账 Tab 由本层完成。 */
+  const [pendingAccountingEdit, setPendingAccountingEdit] = useState<string | 'new' | null>(null)
+  useEffect(() => {
+    const onEdit = (e: Event) => {
+      const id = (e as CustomEvent<{ id?: string }>).detail?.id
+      if (!id) return
+      setPendingAccountingEdit(id)
+      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'account', rightCollapsed: false }))
+    }
+    const onNew = () => {
+      setPendingAccountingEdit('new')
+      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'account', rightCollapsed: false }))
+    }
+    window.addEventListener(ACCOUNTING_EDIT_EVENT, onEdit)
+    window.addEventListener(ACCOUNTING_NEW_EVENT, onNew)
+    return () => {
+      window.removeEventListener(ACCOUNTING_EDIT_EVENT, onEdit)
+      window.removeEventListener(ACCOUNTING_NEW_EVENT, onNew)
+    }
+  }, [wbLayout, update])
   useEffect(() => {
     const handler = (e: Event) => {
       const d = (e as CustomEvent).detail as { question?: string; source?: { type: string; relPath: string; page: number; excerpt: string } } | undefined
@@ -1360,6 +1383,8 @@ export default function App() {
       case 'terminal': return TerminalModuleDynamic
         ? <TerminalModuleDynamic active={on} sidebarEl={on && railModule === 'terminal' ? wbModSlotEl : null} />
         : <ModuleLoadingFallback />
+      // 记账：工作台内 Tab，中央三视图 + 左栏模块侧栏 portal；录入/导入在右栏「记账」面板
+      case 'accounting': return <AccountingModule isActive={on} sidebarEl={on && railModule === 'accounting' ? wbModSlotEl : null} sidebarHosted={on} />
       case 'settings': return <SettingsModule />
       case 'toolbox': return <ToolboxModule homeSignal={toolboxHomeSignal} />
       case 'plugins': return <PluginsModule />
@@ -1501,6 +1526,10 @@ export default function App() {
                   //   「某格式不支持的功能，侧栏不出对应入口，不做中性空态占位」—— 与 EpubRailPanel 同一口径。
                   //   传 null 即 Tab 消失，且右栏自动回落到首个可见 Tab（WorkbenchRightPanel 的 effectiveTab）。
                   reading={rightReading}
+                  // 记账模块激活 → 右栏出现条件性「记账」面板 Tab（记一笔 + JSON 导入）
+                  accountingActive={activeTab === 'accounting'}
+                  pendingAccountingEdit={pendingAccountingEdit}
+                  onConsumeAccountingEdit={() => setPendingAccountingEdit(null)}
                   // B-26：划词「问 AI」路由过来的选段（宿主在 App，见上面的 rightAskRef 注释）
                   pendingAsk={pendingRightAsk}
                   onConsumePendingAsk={() => setPendingRightAsk(null)}

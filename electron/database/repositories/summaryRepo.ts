@@ -3,6 +3,7 @@ import { vaultTodosAll } from '../../lib/kbStore/scheduleVaultRepo'
 import { vaultRecordsAll, vaultHabitsAll } from '../../lib/kbStore/habitVaultRepo'
 import { vaultListEntries } from '../../lib/kbStore/blogVaultRepo'
 import { pomoSessionCreate, pomoSessionsAll } from '../../lib/kbStore/pomoVaultRepo'
+import { vaultAccountingPeriodStats } from '../../lib/kbStore/accountingVaultRepo'
 import { getKnowledgeIndex } from '../../lib/kbStore/knowledgeIndex'
 import { checkinTotalInWindow, habitPeriodStats } from '../../lib/kbStore/habitStats'
 
@@ -45,7 +46,11 @@ export function registerSummaryHandlers(): void {
       .reduce((sum, r) => sum + (Number(r.minutes) || 0), 0)
     // 打卡：总数与每习惯明细读同一份记录，避免两处各扫一次导致数字对不上
     const records = vaultRecordsAll()
+    // 记账：窗口内收支（复盘统计块「本期支出 / 本期收入」）
+    const money = vaultAccountingPeriodStats(start, end)
     return {
+      accountingIncome: money.income,
+      accountingExpense: money.expense,
       checkins: checkinTotalInWindow(records, start, end),
       blogEntries,
       knowledgePages,

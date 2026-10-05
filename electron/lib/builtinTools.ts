@@ -19,6 +19,7 @@ import { searchHelp, helpCatalog } from './helpService'
 import { vaultCreateEntry, vaultSearchEntries } from './kbStore/blogVaultRepo'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
 import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, type TodoRow } from './kbStore/scheduleVaultRepo'
+import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from './kbStore/accountingVaultRepo'
 // 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
 // 依赖方向已核：pluginEvents 的依赖树不反向 import 本模块，无循环。
 import { emitPluginEvent } from './pluginEvents'
@@ -1056,6 +1057,79 @@ export function registerBuiltinTools(): void {
       : { ok: true, habitId: hit.id, name: hit.name, alreadyChecked: true }
   })
 
+  // 12b. builtin.accounting.import-json —— 记账：导入手机 AI 生成的 JSON（写）
+  registerTool({
+    name: 'builtin.accounting.import-json',
+    title: '导入记账 JSON',
+    description: '把手机 AI 生成的记账 JSON 原文交给本工具落账；自动去重、新分类自动建',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        json: { type: 'string', description: '手机 AI 输出的整段 JSON 原文（含 transactions 数组）' },
+      },
+      required: ['json'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'accounting',
+  }, args => {
+    const json = str(args.json)
+    if (!json.trim()) throw new Error('缺少必填参数: json')
+    const res = vaultAccountingImport(json, 'ai')
+    if (res.error) throw new Error(res.error)
+    if (res.added > 0) broadcastDataChanged('accounting')
+    return { ok: true, added: res.added, skipped: res.skipped, invalid: res.invalid }
+  })
+
+  // 12c. builtin.accounting.query —— 记账：区间查询与收支合计（读）
+  registerTool({
+    name: 'builtin.accounting.query',
+    title: '查询记账流水',
+    description: '按日期区间查询收支流水与合计（复盘用）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start: { type: 'string', description: '开始日期 YYYY-MM-DD，可省略' },
+        end: { type: 'string', description: '结束日期 YYYY-MM-DD，可省略' },
+        type: { type: 'string', description: '筛类型：expense 支出 / income 收入，省略为全部', enum: ['expense', 'income'] },
+        category: { type: 'string', description: '按分类名精确筛，可省略' },
+      },
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'accounting',
+  }, args => {
+    const type = args.type === 'income' ? 'income' as const : args.type === 'expense' ? 'expense' as const : undefined
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(str(args.start)) ? str(args.start) : undefined
+    const end = /^\d{4}-\d{2}-\d{2}$/.test(str(args.end)) ? str(args.end) : undefined
+    const category = str(args.category).trim() || undefined
+    const res = vaultAccountingQuery({ start, end, type, category })
+    return {
+      count: res.count,
+      totalIncome: res.totalIncome,
+      totalExpense: res.totalExpense,
+      items: res.items.slice(0, 60).map(t => ({ date: t.date, type: t.type, amount: t.amount, category: t.category, merchant: t.merchant, note: t.note })),
+    }
+  })
+
+  // 12d. builtin.accounting.balances —— 记账：各账户余额与总额（读）
+  registerTool({
+    name: 'builtin.accounting.balances',
+    title: '查询账户余额',
+    description: '查询记账各账户与总额的当前余额（余额=初始+累计收入-累计支出）',
+    inputSchema: { type: 'object', properties: {} },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'accounting',
+  }, () => vaultAccountingBalances())
+
   // 13. builtin.web.search —— 联网搜索（跨模块通用能力，不设 module：不受 aiModulePermissions 限制）
   registerTool({
     name: 'builtin.web.search',
@@ -1117,7 +1191,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec）默认不在工具列表中。需要执行写操作或检索博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec）默认不在工具列表中。需要执行写操作或检索博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {

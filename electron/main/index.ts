@@ -30,6 +30,7 @@ import { registerCheckinHandlers } from '../database/repositories/checkinRepo'
 import { registerShareCardHandlers } from '../database/repositories/shareCardRepo'
 import { registerBookmarkHandlers } from '../database/repositories/bookmarkRepo'
 import { registerPetHandlers } from '../database/repositories/petRepo'
+import { registerAccountingHandlers } from '../database/repositories/accountingRepo'
 import { registerSuperviseHandlers } from '../database/repositories/superviseRepo'
 import { registerSummaryHandlers } from '../database/repositories/summaryRepo'
 import { registerBlogTemplateHandlers } from '../database/repositories/blogTemplateRepo'
@@ -696,6 +697,22 @@ app.whenReady().then(async () => {
   // Initialize settings cache once at startup
   settingsCache = loadSettingsFromDisk()
 
+  // 记账模块（v3.5.x）默认对 AI 读写：老 settings.json 的 aiModulePermissions 早于本模块、
+  // 缺 accounting 键时权限层会落到默认 read（AI 录账被拒）；这里一次性补齐为 write。无该键时也建一份
+  // （其余模块本就默认 read，与补齐后一致，无回归）。
+  try {
+    const rawPerm = settingsCache['aiModulePermissions']
+    const objPerm: Record<string, unknown> = typeof rawPerm === 'string' && rawPerm.trim()
+      ? (JSON.parse(rawPerm) as Record<string, unknown>)
+      : {}
+    if (objPerm && typeof objPerm === 'object' && !Array.isArray(objPerm) && !('accounting' in objPerm)) {
+      objPerm.accounting = 'write'
+      settingsCache['aiModulePermissions'] = JSON.stringify(objPerm)
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = setTimeout(flushSettingsToDisk, 500)
+    }
+  } catch { /* 坏 JSON 交给权限层兜底（按 read） */ }
+
   // 加密自检：确认 safeStorage 密文格式与 secretBox 的假设一致（只告警不阻断，见 secretBox.ts）
   // 目的：把「密文格式变化 / 被误改」这类问题暴露在启动期，而非用户发现「密码全空」时
   try {
@@ -916,6 +933,7 @@ app.whenReady().then(async () => {
   registerShareCardHandlers()
   registerBookmarkHandlers()
   registerPetHandlers()
+  registerAccountingHandlers()
   registerSuperviseHandlers()
   registerSummaryHandlers()
   registerBlogSummaryHandlers()

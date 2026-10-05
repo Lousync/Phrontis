@@ -33,7 +33,66 @@ export interface EntryFilter { date?: string; tagId?: string; pinnedOnly?: boole
 export interface CreateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date: string; tags?: string[]; states?: string }
 export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date?: string; isPinned?: boolean; isStarred?: boolean; tags?: string[]; states?: string }
 export interface Tag { id: string; name: string; color: string }
-export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal'
+export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal' | 'accounting'
+
+// ===== 记账模块 =====
+// 主进程侧同形状声明见 electron/lib/kbStore/accountingVaultRepo.ts（跨线各侧各声明一次的仓规）
+export type AccountingType = 'expense' | 'income'
+export interface AccountingCategory {
+  id: string
+  name: string
+  color: string
+  kind: AccountingType | 'both'
+  builtin: boolean
+}
+/** 账户（= 支付方式）；当前余额 = initialBalance + 累计收入 − 累计支出（推导） */
+export interface AccountingAccount {
+  id: string
+  name: string
+  color: string
+  initialBalance: number
+  builtin: boolean
+}
+export interface AccountingTransaction {
+  id: string
+  date: string
+  time: string
+  type: AccountingType
+  amount: number
+  category: string
+  payment: string
+  merchant: string
+  note: string
+  source?: string
+  createdAt: string
+  updatedAt: string
+}
+export interface CreateAccountingInput {
+  date?: string
+  time?: string
+  type: AccountingType
+  amount: number
+  category?: string
+  payment?: string
+  merchant?: string
+  note?: string
+  source?: string
+}
+export interface AccountingParseItem {
+  invalid: boolean
+  reason?: string
+  dup: boolean
+  date: string
+  time: string
+  type: AccountingType
+  amount: number
+  category: string
+  payment: string
+  merchant: string
+  note: string
+}
+export interface AccountingParseOutcome { error?: string; items: AccountingParseItem[]; ok: number; dup: number; bad: number }
+export interface AccountingImportOutcome { error?: string; added: number; skipped: number; invalid: number }
 
 // ===== 终端模块（terminal-module-design）=====
 // 主进程侧同形状声明见 electron/lib/terminalService.ts（跨线各侧各声明一次的仓规）
@@ -2005,6 +2064,15 @@ export interface ElectronAPI {
   petRename: (name: string) => Promise<PetSnapshot>
   petReset: (species: PetSpecies) => Promise<PetSnapshot>
   petSwitchSpecies: (species: PetSpecies) => Promise<PetSnapshot>
+  // 记账（accounting）
+  accountingGetAll: () => Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[] }>
+  accountingParseJson: (text: string) => Promise<AccountingParseOutcome>
+  accountingImportJson: (text: string) => Promise<AccountingImportOutcome>
+  accountingCreate: (input: CreateAccountingInput) => Promise<AccountingTransaction>
+  accountingUpdate: (id: string, patch: Partial<AccountingTransaction>) => Promise<AccountingTransaction | null>
+  accountingDelete: (id: string) => Promise<boolean>
+  accountingSetAccountBalance: (id: string, initialBalance: number) => Promise<AccountingAccount | null>
+  accountingCreateAccount: (name: string, initialBalance: number) => Promise<AccountingAccount>
   createBookmarkCategory: (d: { name: string; color?: string }) => Promise<BookmarkCategory>
   updateBookmarkCategory: (id: string, d: { name?: string; color?: string }) => Promise<BookmarkCategory | null>
   deleteBookmarkCategory: (id: string) => Promise<void>
@@ -2031,6 +2099,9 @@ export interface ElectronAPI {
     knowledgePages: number
     pomodoroMinutes: number
     scheduleDone: number
+    /** 记账窗口内收入 / 支出（复盘统计块用） */
+    accountingIncome: number
+    accountingExpense: number
     /** 每习惯明细（次数 / 完成率 / 最长连续）；v3.2.0 条目 13 起提供 */
     habitDetails: HabitPeriodStat[]
   }>

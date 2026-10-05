@@ -19,6 +19,7 @@ const MODULES: ModuleDef[] = [
   { id: 'quiz',      label: '错题本',   desc: '查询错题与薄弱点统计', writeDesc: '按错误类型打标签、写错因备注、加入分组、组卷成练习页' },
   { id: 'bookMarket', label: '书市',    desc: '书源列表与检索状态',   writeDesc: '按草案预填「新建书源」表单（不自动落库）' },
   { id: 'pomodoro',  label: '番茄专注', desc: '专注统计',             writeDesc: '（暂无写操作）' },
+  { id: 'accounting', label: '记账',    desc: '查询收支流水与统计',   writeDesc: '导入/新增/修改流水（AI 录账）' },
 ]
 // 注：bookmarks 模块已随 2026-09-09 工具重构退役（bookmarks.search → vault.search）；
 // 旧设置数据中残留的 bookmarks 键无害（无工具引用即不生效），解析层自动忽略。

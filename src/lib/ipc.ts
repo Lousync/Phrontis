@@ -1,6 +1,7 @@
 import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitPeriodStat, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, LlmUsageBreakdownEntry, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentSessionInfo, AgentSessionSource, AgentSideLaneCreateResult, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, AiUsageDay, SessionFileChange, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginDashboardWidget, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, AiTeachProfileEntry, AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnitProgress, AiTeachCourseGenerateInput, AiTeachCourseGenProgress, CreatePasswordEntryDTO, UpdatePasswordEntryDTO, PdfBookState, PdfBookPatch, BookListItem, ReaderBookState, ReaderStatePatch, ExcerptItem, ExcerptCreatePayload, ExcerptPatch, ExcerptExportEntry, WorkspaceRangeBytesResult, BookSourceInfo, BookSourcePatch, BookSourceCredentialInput, BookSourceConnectivity, BookMarketSearchResponse, BookDownloadRequest, BookDownloadStartResult, BookDownloadTask, BookDownloadAction, PetSpecies, PluginPetInfo, TerminalSessionInfo, TerminalCreateResult, TerminalShellInfo, TerminalAiRecord } from '../types'
 import type { SettingsKey, SettingsValue, AppSettings } from './settings'
 import { SETTINGS_DEFAULTS } from './settings'
+import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingParseOutcome, AccountingImportOutcome, CreateAccountingInput } from '../types'
 const a = () => { if (!window.api) throw new Error('Electron API not available.'); return window.api }
 
 export const getPathForFile = (file: File): string => a().getPathForFile(file)
@@ -472,10 +473,23 @@ export interface PeriodStats {
   knowledgePages: number
   pomodoroMinutes: number
   scheduleDone: number
+  /** 记账窗口内收入 / 支出（复盘统计块用） */
+  accountingIncome: number
+  accountingExpense: number
   /** 每习惯明细（次数 / 完成率 / 最长连续）；v3.2.0 条目 13 起提供 */
   habitDetails: HabitPeriodStat[]
 }
 export const getBlogPeriodStats = (start: string, end: string): Promise<PeriodStats> => a().getBlogPeriodStats(start, end)
+
+// ===== 记账（accounting） =====
+export const accountingGetAll = (): Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[] }> => a().accountingGetAll()
+export const accountingParseJson = (text: string): Promise<AccountingParseOutcome> => a().accountingParseJson(text)
+export const accountingImportJson = (text: string): Promise<AccountingImportOutcome> => a().accountingImportJson(text)
+export const accountingCreate = (input: CreateAccountingInput): Promise<AccountingTransaction> => a().accountingCreate(input)
+export const accountingUpdate = (id: string, patch: Partial<AccountingTransaction>): Promise<AccountingTransaction | null> => a().accountingUpdate(id, patch)
+export const accountingDelete = (id: string): Promise<boolean> => a().accountingDelete(id)
+export const accountingSetAccountBalance = (id: string, initialBalance: number): Promise<AccountingAccount | null> => a().accountingSetAccountBalance(id, initialBalance)
+export const accountingCreateAccount = (name: string, initialBalance: number): Promise<AccountingAccount> => a().accountingCreateAccount(name, initialBalance)
 
 // ===== 层级总结文件（周 / 月 / 年）—— 窗口口径见 lib/summary.ts =====
 export const listSummaries = () => a().listSummaries()

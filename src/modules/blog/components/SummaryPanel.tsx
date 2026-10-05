@@ -37,12 +37,16 @@ export function SummaryStats({ start, end }: { start: string; end: string }) {
     return () => { alive = false }
   }, [start, end])
 
-  const rows: Array<{ label: string; value: string }> = [
+  const fmtMoney = (v: number) => `¥${v.toLocaleString('zh-CN', { minimumFractionDigits: v % 1 ? 2 : 0, maximumFractionDigits: 2 })}`
+  const rows: Array<{ label: string; value: string; cls?: string }> = [
     { label: '坚持打卡', value: `${stats?.checkins ?? '…'} 次` },
     { label: '博客文章', value: `${stats?.blogEntries ?? '…'} 篇` },
     { label: '新建知识页', value: `${stats?.knowledgePages ?? '…'} 个` },
     { label: '番茄钟专注', value: `${stats?.pomodoroMinutes ?? '…'} 分钟` },
     { label: '完成日程任务', value: `${stats?.scheduleDone ?? '…'} 项` },
+    // 记账（v3.5.x）：窗口内收支。stats 未就绪时显示占位，避免闪 0
+    { label: '本期支出', value: stats ? fmtMoney(stats.accountingExpense) : '…', cls: 'text-[var(--money-out,#e06c4f)]' },
+    { label: '本期收入', value: stats ? fmtMoney(stats.accountingIncome) : '…', cls: 'text-[var(--money-in,#2b9e8f)]' },
   ]
 
   // 打卡明细（v3.2.0 条目 13）：与上方「坚持打卡」读同一份统计，此处按习惯拆开。
@@ -55,7 +59,7 @@ export function SummaryStats({ start, end }: { start: string; end: string }) {
         {rows.map((r) => (
           <div key={r.label} className="flex items-baseline justify-between py-2.5 text-[15px] leading-7">
             <span className="text-[var(--text-secondary)]">{r.label}</span>
-            <span className="font-semibold tabular-nums text-[var(--text-primary)]">{r.value}</span>
+            <span className={'font-semibold tabular-nums ' + (r.cls ?? 'text-[var(--text-primary)]')}>{r.value}</span>
           </div>
         ))}
       </div>

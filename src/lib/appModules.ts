@@ -58,6 +58,8 @@ export const APP_MODULES = [
   { id: 'toolbox', label: '工具箱', bar: false, tile: true, palette: true },
   // v3.5.0 终端（docs/terminal-module-design.md）：工作台内模块（左栏书签进，同笔记/日程形态）
   { id: 'terminal', label: '终端', bar: false, tile: true, palette: true },
+  // 记账：工作台内模块（左栏书签进，同笔记/日程形态）
+  { id: 'accounting', label: '记账', bar: false, tile: true, palette: true },
   { id: 'plugins', label: '插件', bar: true, tile: true, palette: true },
   // 2026-09-22 书市（S4）：左栏独立整窗模块，与工具箱 / 插件平级（方案 §1.2 第 5 条、拍板 ⑤）。
   // 排在 bar 段末尾是有意的 —— 活动栏图标条（ActivityBar 的 RAIL_BUTTONS）按同一顺序追加，

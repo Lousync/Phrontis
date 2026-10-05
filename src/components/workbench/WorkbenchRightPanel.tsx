@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat, Share2 } from 'lucide-react'
+import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat, Share2, ReceiptText } from 'lucide-react'
 import type { BookKind, KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
@@ -24,6 +24,7 @@ import { ShareCardPanel } from '../share-card/ShareCardPanel'
 import { ChatBody } from '../shared/AssistantPanel/ChatBody'
 import { useAssistantChat } from '../shared/AssistantPanel/useAssistantChat'
 import { QuoteChips } from '../shared/AssistantPanel/QuoteChips'
+import { AccountingPanel } from '../../modules/accounting/AccountingPanel'
 import type { PluginTool } from '../../lib/pluginService'
 
 /**
@@ -88,6 +89,11 @@ interface Props {
   onOpenChangeFile?: (relPath: string) => void
   /** 有书在读时出现第三个条件 Tab「📖 阅读」（全格式阅读器一期）；null/缺省 = 无书在读 */
   reading?: { relPath: string; name: string; kind: BookKind } | null
+  /** 记账模块激活时出现条件 Tab「🧾 记账」（记一笔 + JSON 导入）；缺省 false */
+  accountingActive?: boolean
+  /** 记账：中央「记一笔 / 编辑某笔」投递（App 层监听，见 App 的 pendingAccountingEdit）；'new' 或流水 id */
+  pendingAccountingEdit?: string | 'new' | null
+  onConsumeAccountingEdit?: () => void
   /** 阅读侧栏「书签 → 定位原文」（仅 pdf）：App 负责切回书架标签 + 派发跳页事件 */
   onLocatePdfPage?: (page: number) => void
   /** 阅读侧栏「摘录 → 定位原文」（pdf 跳页 / txt 跳段）：App 统一切回书架标签再派发 */
@@ -122,7 +128,7 @@ function PanelTabIcon({ id, size }: { id: string; size: number }) {
 const PANEL_TAB_TITLE: Record<string, string> = { widgets: '小工具', ai: 'AI', share: '分享' }
 const PANEL_TAB_LABEL: Record<string, string> = { widgets: '小工具', ai: 'AI 对话 / 面板', share: '分享卡片' }
 
-export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, accountingActive = false, pendingAccountingEdit = null, onConsumeAccountingEdit, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -134,12 +140,15 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
     () => WORKBENCH_PANEL_TAB_IDS.filter((id) => !layout.panelTabsHidden.includes(id)),
     [layout.panelTabsHidden],
   )
-  // 'reading' 是条件性 Tab：有书在读（reading 非空）才可成为有效态；
-  // 关书后回落 widgets/ai（不落 'reading'）——持久化值只在用户点 Tab 时写，关书不改写。
+  // 'reading' / 'account' 是条件性 Tab：条件不满足时回落首个可见面板 Tab（不落条件 Tab）。
+  // 持久化值只在用户点 Tab 时写，条件消失不改写（同 reading 语义）。
   const readingOn = !!reading
+  const accountingOn = !!accountingActive
   const effectiveTab = layout.rightTab === 'reading'
     ? (readingOn ? 'reading' : visiblePanelTabs[0])
-    : (visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0])
+    : layout.rightTab === 'account'
+      ? (accountingOn ? 'account' : visiblePanelTabs[0])
+      : (visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0])
   const setPanelTab = (id: (typeof WORKBENCH_PANEL_TAB_IDS)[number]) => patch({ rightTab: id })
 
   // ── B-26 划词引用胶囊（与悬浮侧栏同口径）────────────────────────────────────
@@ -307,6 +316,23 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               <BookOpen size={14} />
             </button>
           )}
+          {/* 记账 Tab：记账模块激活才出现（条件性入口，不进 ⋯ 菜单）；点击展开右栏并切到记账 */}
+          {accountingActive && (
+            <button
+              data-wb="rpTab"
+              data-wb-rp-tab="account"
+              data-wb-rp-active={effectiveTab === 'account' ? '1' : '0'}
+              onClick={() => patch({ rightTab: 'account', rightCollapsed: false })}
+              title="记账"
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                effectiveTab === 'account'
+                  ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <ReceiptText size={14} />
+            </button>
+          )}
           <div className="ml-auto">
             <button
               ref={ptMoreRef}
@@ -423,6 +449,9 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
         ) : effectiveTab === 'reading' && reading ? (
           /* ---- 阅读态（全格式阅读器一期）：书名/进度 + 书签 + 摘录 ---- */
           <ReadingSidePanel reading={reading} onLocatePdfPage={onLocatePdfPage} onLocateExcerpt={onLocateExcerpt} />
+        ) : effectiveTab === 'account' ? (
+          /* ---- 记账态（记账模块激活时）：记一笔表单 + 手机 AI JSON 导入 ---- */
+          <AccountingPanel pendingEdit={pendingAccountingEdit} onConsumeEdit={onConsumeAccountingEdit} />
         ) : (
           /* ---- AI 态（批次5，方案 §4）：aiChat 标签开着 → token 面板原位替换；否则小对话 + ⤢ ---- */
           aiChatOpen && onOpenChangeFile ? (
