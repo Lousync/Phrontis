@@ -507,7 +507,9 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
   if (req.source !== 'aiTeaching') {
     const row = getAgentSession(sessionId)
     if (row && row.mode === undefined) {
-      setSessionMode(sessionId, await classifyManualIntent(message, req.modelId))
+      // 三分类：manual 走手册通道；agent 与 tech（第三方/通用技术问答）都走通用助手
+      const intent = await classifyManualIntent(message, req.modelId)
+      setSessionMode(sessionId, intent === 'manual' ? 'manual' : 'agent')
     } else if (row?.mode === 'manual' && hasOperationIntent(message)) {
       setSessionMode(sessionId, 'agent')
       notifyAssistant(sessionId, '已从「使用帮助」切换到通用助手')

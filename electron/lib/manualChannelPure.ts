@@ -5,6 +5,16 @@
  * 契约脚本 `.AGENT/scripts/ai-assistant/verify-manual-channel.mjs` 直接 strip-types 后 import。
  */
 
+/**
+ * 首条消息的通道分类结果（三分类）：
+ *   manual = 问本软件（Phrontis）自身怎么用 / 某功能在哪 / 行为不符预期；
+ *   agent  = 要 AI 操作本软件数据（创建 / 修改 / 删除 / 检索仓库内容）；
+ *   tech   = 第三方软件 / 编程 / 通用知识的技术问答（nvim、Python、git、算法…）。
+ * 三分类只为**提高分类准确率**（避免二选一被迫把通用问题判成 manual）；实际通道仍两条：
+ * manual 走手册通道，agent 与 tech 都走通用助手（tech 不单独成通道）。
+ */
+export type ManualIntent = 'manual' | 'agent' | 'tech'
+
 /** 手册通道唯一挂载的工具 */
 export const MANUAL_CHANNEL_TOOL = 'builtin.help.search'
 /** 手册通道轮数上限（拍板：≤2-3 轮） */
@@ -34,7 +44,7 @@ export function hasOperationIntent(text: string): boolean {
 }
 
 /** 分类 few-shot 判例（供契约脚本核对方向与数量） */
-export const FEW_SHOT: Array<[string, 'manual' | 'agent']> = [
+export const FEW_SHOT: Array<[string, ManualIntent]> = [
   ['知识库为什么看不到我的文件？', 'manual'],
   ['怎么备份数据？', 'manual'],
   ['快捷键都有哪些？', 'manual'],
@@ -44,6 +54,11 @@ export const FEW_SHOT: Array<[string, 'manual' | 'agent']> = [
   ['把今天的日记补上', 'agent'],
   ['创建一条明天下午三点的待办', 'agent'],
   ['帮我总结一下这个仓库', 'agent'],
+  // 第三类：第三方软件 / 编程 / 通用技术问答 —— 既不是问本软件，也不是操作数据
+  ['nvim 怎么用分词器', 'tech'],
+  ['Python 里怎么读写文件', 'tech'],
+  ['git rebase 怎么用', 'tech'],
+  ['解释一下快速排序的时间复杂度', 'tech'],
 ]
 
 /** 手册通道 system 提示词（替代通用助手人设；不注入教学/感知/出题/工件规则） */

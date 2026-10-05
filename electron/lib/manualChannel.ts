@@ -1,5 +1,5 @@
 import { invokeLlmInternal, firstEnabledModelSpec } from './llmService'
-import { FEW_SHOT, hasOperationIntent } from './manualChannelPure'
+import { FEW_SHOT, hasOperationIntent, type ManualIntent } from './manualChannelPure'
 
 /**
  * N-1「手册通道」：一次性分类（docs/v3.4.0-feedback.md `N-1`）
@@ -11,6 +11,7 @@ export {
   MANUAL_CHANNEL_TOOL, MANUAL_MAX_ROUNDS, MANUAL_MAX_RESULT_CHARS, MANUAL_SEARCH_LIMIT,
   hasOperationIntent, buildManualSystemPrompt, FEW_SHOT,
 } from './manualChannelPure'
+export type { ManualIntent } from './manualChannelPure'
 
 /** 分类超时（ms）：超时即落通用通道 */
 const CLASSIFY_TIMEOUT_MS = 5000
@@ -30,13 +31,19 @@ function resolveModel(modelSpec?: string): { providerId?: string; modelId?: stri
  * 首条用户消息的通道分类（仅调一次；失败/超时/不确定 → 'agent'）。
  * 命中本地操作词表时直接返回 'agent'，不发起 LLM 调用。
  */
-export async function classifyManualIntent(message: string, modelSpec?: string): Promise<'manual' | 'agent'> {
+export async function classifyManualIntent(message: string, modelSpec?: string): Promise<ManualIntent> {
   const text = String(message ?? '').trim()
   if (!text) return 'agent'
   if (hasOperationIntent(text)) return 'agent'
-  const sys = '你是意图分类器。判断用户消息是「询问这个软件（Phrontis）自身怎么用 / 某功能在哪 / 为什么行为不符合预期」，还是「要 AI 去操作软件数据（创建/修改/删除/检索仓库内容等）」。只输出一个词：manual 或 agent。'
+  const sys = [
+    '你是意图分类器。把用户消息分成三类，只输出一个词：manual / agent / tech。',
+    'manual：询问本软件（Phrontis）自身怎么用 / 某功能在哪 / 为什么某个行为不符合预期。',
+    'agent：要 AI 去操作本软件的数据（创建 / 修改 / 删除 / 检索仓库内容等）。',
+    'tech：与操作数据无关、也不是问本软件，而是第三方软件 / 编程 / 通用知识的技术问答（如 nvim、Python、git、算法等）。',
+    '判断关键：只有明确指向本软件才是 manual；问其它软件或通用知识一律 tech。',
+  ].join('\n')
   const examples = FEW_SHOT.map(([q, a]) => `${q} => ${a}`).join('\n')
-  const user = `判例：\n${examples}\n\n用户消息：${text.slice(0, 400)}\n\n只输出 manual 或 agent：`
+  const user = `判例：\n${examples}\n\n用户消息：${text.slice(0, 400)}\n\n只输出 manual / agent / tech 之一：`
   const { providerId, modelId } = resolveModel(modelSpec)
   try {
     const r = await invokeLlmInternal({
@@ -46,9 +53,10 @@ export async function classifyManualIntent(message: string, modelSpec?: string):
     })
     if (!r.ok) return 'agent'
     const out = String(r.content ?? '').toLowerCase()
-    const isManual = /\bmanual\b/.test(out)
-    const isAgent = /\bagent\b/.test(out)
-    return isManual && !isAgent ? 'manual' : 'agent'
+    // 三选一：先认 tech，再认 manual，其余（含不确定/异常输出）落通用助手
+    if (/\btech\b/.test(out)) return 'tech'
+    if (/\bmanual\b/.test(out)) return 'manual'
+    return 'agent'
   } catch {
     return 'agent'
   }
