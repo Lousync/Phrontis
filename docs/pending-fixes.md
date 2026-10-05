@@ -1611,6 +1611,20 @@ cbz 排除的**执行语义原样保留**（派生值对 cbz 仍为 `null`），
 （密码本解锁态、各工具的 IPC 监听器一直活着），每关一支泄漏一支。属保活语义实现缺口，非本轮回归；
 修复方向 = `closeTab` 里 `if (isTool) mountedToolTabs.current.delete(tab)`（关闭即卸载，符合「关=销毁」直觉）。
 
+---
+
+## [x] B-28 终端切走再切回，左侧边栏空白（2026-10-05，P1；用户实机反馈；**当日已修，改动未提交**：`RAIL_FOLLOW_MAP` 漏登记 terminal）
+
+**现象**：在终端标签切到其他页面再切回终端，左侧边栏（左栏模块槽）变成一片空白；首次进入终端时侧栏（会话列表）正常。
+**定位**：`src/lib/workbenchLayout.ts` 的 `RAIL_FOLLOW_MAP`（缺 `terminal` 键）+ `src/App.tsx` 终端分支的 `sidebarEl={on && railModule === 'terminal' ? wbModSlotEl : null}` 门。
+**根因**：终端模块侧栏是 portal 进左栏模块槽（`wbModSlotEl`），渲染条件 = 终端标签激活 **且** `railModule === 'terminal'`。接终端入书签清单时漏了往 `RAIL_FOLLOW_MAP` 登记 `terminal: 'terminal'`：
+- 书签点击走 `handleBookmarkClick` → 显式 `setRailModule(key)`，所以**首进**正常；
+- 但**经页面条切回**走的是跟随 effect（`App.tsx:1030` `RAIL_FOLLOW_MAP[activeTab]`），查表落空 → `railModule` 停留在上一个模块或已被归位清空 → `sidebarEl = null` → 模块槽空白。
+- 中间页是映射内模块（knowledge / schedule / bookshelf / blog / aiChat）时必现；中间页不在映射内时 `railModule` 不被碰，切回不现。「终端 → 总览 → 页面条切回」同样必现（回总览会清 `railModule`）。
+- 同根连带的第三处：总览瓷贴入口（`App.tsx` 瓷贴点击 `if (m) setRailModule(m)` 同样查这张表）→ 修复前**从瓷贴首进终端侧栏就是空白**，与切回空白同根。
+**修复方向**：`RAIL_FOLLOW_MAP` 补 `terminal: 'terminal'` 一行（三处入口连带全好）；契约 `verify-workbench-shell.mjs` A3 书签清单串 / A6 值域白名单 / A7 自映射键表三处同步（该契约上次跑还在终端入列**之前**，A3 对新书签清单本就已失配——本轮一并归位）。
+**验证**：`verify-workbench-shell.mjs` 全绿；`npx tsc --noEmit -p tsconfig.web.json` 0 错；实机：终端 → 日程 → 页面条切回终端，左栏会话列表在；终端 → 总览 → 页面条切回，同样在。
+
 ```
 ## B-n <一句话现象>（YYYY-MM-DD，P0/P1/P2/P3）
 

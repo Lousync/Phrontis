@@ -119,4 +119,10 @@ export const BROADCAST_CHANNEL = {
   dayPanelWidgetInteractiveChanged: 'daypanel:widget-interactive-changed',
   /** 主窗口全屏弹窗遮罩开合（dock 跟随压暗），载荷 `{ dim: boolean }`；渲染层发起走 'main:modal-dim' */
   mainModalDimChanged: 'main:modal-dim-broadcast',
+  /** 终端 pty 输出，载荷 `{ id, data }`（高频；高频写回走 term:write 的 send，不经此通道） */
+  termData: 'term:data',
+  /** 终端会话退出，载荷 `{ id, exitCode }` */
+  termExit: 'term:exit',
+  /** AI 终端执行记录增改（按 reqId 整条替换；status='pending' 即待确认请求），载荷 `{ record }` */
+  termAiRecord: 'term:ai-record',
 } as const

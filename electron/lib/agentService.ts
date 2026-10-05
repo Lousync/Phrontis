@@ -404,6 +404,12 @@ function buildToolsPayload(sessionId?: string, only?: string[]): {
       return false
     }
     if (denied) return false
+    // 终端模块总闸（docs/terminal-module-design.md §6）：terminalAiExec 关 = 执行工具完全不进视野。
+    // 独立于 aiModulePermissions 的产品开关（默认 false），故在权限门之后单独判。
+    if (t.module === 'terminal' && reader('terminal.aiExec') !== true) {
+      deniedModules.add('terminal')
+      return false
+    }
     // P3 装载层：ondemand 工具仅在会话内被 tool.request 启用后才进入视野
     if (t.tier === 'ondemand' && !extraTools?.has(t.name)) {
       hasOnDemandHidden = true

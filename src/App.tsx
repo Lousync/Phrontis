@@ -801,6 +801,13 @@ export default function App() {
   // 开发者工具 — 仅 DEV 动态加载:打包构建时 import.meta.env.DEV 被静态替换为 false,
   // 动态 import 随之被 tree-shaking 移除,devtools 模块代码不进入产物
   const [DevToolsModuleDynamic, setDevtoolsNode] = useState<React.ComponentType<DevToolsModuleProps> | null>(null)
+  // 终端模块（v3.5.0）— 首次打开该 Tab 才拉 chunk：xterm ≈ 415KB，不进首屏静态闭包（铁律 20 同 monaco/pdfjs 口径）
+  const [TerminalModuleDynamic, setTerminalNode] = useState<React.ComponentType<{ active: boolean; sidebarEl: HTMLElement | null }> | null>(null)
+  useEffect(() => {
+    if (activeTab === 'terminal') {
+      import('./modules/terminal').then(m => setTerminalNode(() => m.default)).catch(() => { /* 加载失败下次激活重试 */ })
+    }
+  }, [activeTab])
   useEffect(() => {
     if (import.meta.env.DEV) {
       import('./modules/devtools').then(m => setDevtoolsNode(() => m.DevToolsModule))
@@ -1349,6 +1356,10 @@ export default function App() {
         onJumpSchedule={() => handleTabChange('schedule')}
       />
       case 'recycle': return <RecycleBinModule isActive={on} />
+      // 终端（v3.5.0，docs/terminal-module-design.md）：工作台内 Tab，动态加载（xterm 不进首屏）；模块侧栏托管会话列表
+      case 'terminal': return TerminalModuleDynamic
+        ? <TerminalModuleDynamic active={on} sidebarEl={on && railModule === 'terminal' ? wbModSlotEl : null} />
+        : <ModuleLoadingFallback />
       case 'settings': return <SettingsModule />
       case 'toolbox': return <ToolboxModule homeSignal={toolboxHomeSignal} />
       case 'plugins': return <PluginsModule />

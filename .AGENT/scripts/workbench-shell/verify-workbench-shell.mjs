@@ -60,17 +60,17 @@ function stripComments(src) {
 /* ================= A. 书签 ↔ 模块映射（唯一真相源双向断言） ================= */
 console.log('\n=== A. 书签映射双向断言（方案 §3.3 / 原型 v15 六书签） ===')
 const keys = WORKBENCH_BOOKMARKS.map((b) => b.key)
-ok(keys.length === 6, 'A1 内置书签固定 6 项（看板 + 笔记/日程/书架/博客总结/错题本）', `实际 ${keys.length}`)
+ok(keys.length === 7, 'A1 内置书签固定 7 项（看板 + 笔记/日程/书架/博客总结/错题本 + 终端 2026-10-05）', `实际 ${keys.length}`)
 ok(new Set(keys).size === keys.length, 'A2 书签 key 无重复')
-ok(keys.join(',') === 'dashboard,knowledge,schedule,bookshelf,blog,quiz', 'A3 书签集合与顺序（2026-09-27 看板排首位 —— 它是「打开第一眼该看什么」的落点）', `实际 ${keys.join(',')}`)
+ok(keys.join(',') === 'dashboard,knowledge,schedule,bookshelf,blog,quiz,terminal', 'A3 书签集合与顺序（2026-09-27 看板排首位 —— 它是「打开第一眼该看什么」的落点；2026-10-05 终端 v3.5.0 入列末位）', `实际 ${keys.join(',')}`)
 ok(WORKBENCH_BOOKMARKS.every((b) => isTabName(b.tab)), 'A4 每个书签的 tab 都是合法 TabName',
   WORKBENCH_BOOKMARKS.filter((b) => !isTabName(b.tab)).map((b) => b.key).join(','))
 const quiz = WORKBENCH_BOOKMARKS.find((b) => b.key === 'quiz')
 ok(quiz?.tab === 'knowledge', 'A5 错题本书签 = knowledge 标签（不占独立 TabName，方案 §3.3）', `实际 ${quiz?.tab}`)
 const followValues = Object.values(RAIL_FOLLOW_MAP)
-ok(followValues.every((v) => ['knowledge', 'schedule', 'bookshelf', 'blog', 'aiChat'].includes(v)),
-  'A6 跟随映射的值域合法（quiz 不由标签触发，不进映射；aiChat 批次5 反馈轮入映射）')
-for (const k of ['knowledge', 'schedule', 'bookshelf', 'blog']) {
+ok(followValues.every((v) => ['knowledge', 'schedule', 'bookshelf', 'blog', 'aiChat', 'terminal'].includes(v)),
+  'A6 跟随映射的值域合法（quiz 不由标签触发，不进映射；aiChat 批次5 反馈轮入映射；terminal 2026-10-05 B-28 入映射）')
+for (const k of ['knowledge', 'schedule', 'bookshelf', 'blog', 'terminal']) {
   ok(RAIL_FOLLOW_MAP[k] === k, `A7 跟随映射 ${k} → 自身`)
 }
 

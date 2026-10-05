@@ -8,6 +8,7 @@ import { writeVisual } from './aiTeachingSources'
 import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
 import type { ToolInvokeCtx } from './aiTools'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault } from './workspaceManager'
+import { aiExec } from './terminalService'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { pomoSessionsAll } from './kbStore/pomoVaultRepo'
 import { getKnowledgeIndex, getKnowledgeTextIndex } from './kbStore/knowledgeIndex'
@@ -1116,7 +1117,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft）默认不在工具列表中。需要执行写操作或检索博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec）默认不在工具列表中。需要执行写操作或检索博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -2197,5 +2198,33 @@ export function registerBuiltinTools(): void {
       draft,
       hint: '草案已送进「新建书源」表单并预填，界面已切到书市。请让用户核对字段、自己填写凭据后点「添加」——本工具不落库，不要说「已添加 / 已保存」',
     }
+  })
+
+  // ===== 终端执行（terminal-module-design）：四道门控链见方案 §6；确认 UI 在终端模块「AI 执行记录」 =====
+  registerTool({
+    name: 'builtin.terminal.exec',
+    title: '执行终端命令',
+    description: '在当前仓库根目录执行一条 shell 命令并返回其输出。每条命令都需用户在终端模块确认后才真正运行，被拒或确认超时则不执行。适合 git / npm 等命令行操作；不能替代业务模块工具',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: '要执行的单条命令（系统 shell：Windows pwsh/PowerShell，macOS/Linux 取 $SHELL）' },
+        timeoutMs: { type: 'number', description: '超时毫秒（默认 30000，上限 300000），超时终止进程' },
+      },
+      required: ['command'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    module: 'terminal',
+    requires: 'write',
+    tier: 'ondemand',
+  }, async args => {
+    const reader = getSettingReader()
+    if (reader('terminal.aiExec') !== true) throw new Error('AI 终端执行未开启（设置 → AI 终端执行）')
+    const cmd = str(args.command).trim()
+    if (!cmd) throw new Error('缺少必填参数: command')
+    const pref = reader('terminal.shell')
+    return aiExec({ command: cmd, timeoutMs: num(args.timeoutMs, 30000), shellPref: typeof pref === 'string' ? pref : undefined })
   })
 }

@@ -33,7 +33,35 @@ export interface EntryFilter { date?: string; tagId?: string; pinnedOnly?: boole
 export interface CreateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date: string; tags?: string[]; states?: string }
 export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date?: string; isPinned?: boolean; isStarred?: boolean; tags?: string[]; states?: string }
 export interface Tag { id: string; name: string; color: string }
-export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard'
+export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal'
+
+// ===== 终端模块（terminal-module-design）=====
+// 主进程侧同形状声明见 electron/lib/terminalService.ts（跨线各侧各声明一次的仓规）
+export interface TerminalSessionInfo {
+  id: string
+  shell: string
+  cwd: string
+  pid: number
+  /** 创建时的列/行数（渲染层据此免掉同尺寸的启动期 resize） */
+  cols: number
+  rows: number
+  exited: boolean
+  exitCode: number | null
+}
+export interface TerminalCreateResult extends TerminalSessionInfo { backlog: string }
+export type TerminalAiStatus = 'pending' | 'running' | 'ok' | 'denied' | 'timeout' | 'error'
+export interface TerminalAiRecord {
+  reqId: string
+  cmd: string
+  cwd: string
+  risky: boolean
+  status: TerminalAiStatus
+  exitCode: number | null
+  durationMs: number | null
+  outputPreview: string
+  time: string
+}
+export interface TerminalShellInfo { file: string; label: string; windowsBuildNumber?: number }
 
 // ===== 更新说明（release notes）=====
 // 主进程侧的同一份契约见 electron/lib/releaseNotes/types.ts
@@ -1932,6 +1960,19 @@ export interface ElectronAPI {
   clipperOpenFolder: () => Promise<{ ok: boolean; error?: string }>
   clipperSelfPing: () => Promise<{ ok: boolean; status?: number; vault?: string | null; error?: string }>
   clipperCheckToken: (candidate: string) => Promise<{ ok: boolean }>
+  // ===== 终端模块（terminal-module-design）：preload 同名契约 =====
+  termCreate: (opts: { cols?: number; rows?: number; shellPref?: string }) => Promise<TerminalCreateResult>
+  termAttach: (id: string) => Promise<{ backlog: string } | null>
+  termWrite: (id: string, data: string) => void
+  termResize: (id: string, cols: number, rows: number) => void
+  termKill: (id: string) => Promise<{ ok: boolean }>
+  termList: () => Promise<{ sessions: TerminalSessionInfo[] }>
+  termDefaultShell: () => Promise<{ file: string; label: string }>
+  termAiRecords: () => Promise<{ records: TerminalAiRecord[] }>
+  termAiRespond: (reqId: string, approved: boolean) => Promise<{ ok: boolean }>
+  onTermData: (cb: (p: { id: string; data: string }) => void) => () => void
+  onTermExit: (cb: (p: { id: string; exitCode: number | null }) => void) => () => void
+  onTermAiRecord: (cb: (p: { record: TerminalAiRecord }) => void) => () => void
   getAttachmentsByOwner: (ownerType: string, ownerId: string) => Promise<AttachmentMeta[]>
   deleteAttachment: (id: string) => Promise<void>
   getAttachmentPath: (id: string) => Promise<string | null>

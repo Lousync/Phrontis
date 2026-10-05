@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, House, Lock,
   LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, Clipboard, ChevronRight,
-  LayoutGrid, Plus,
+  LayoutGrid, Plus, SquareTerminal,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { ConfirmDialog } from '../shared'
@@ -41,6 +41,8 @@ const BOOKMARK_ICONS: Record<RailModule, (size: number) => React.ReactNode> = {
   dashboard: (s) => <LayoutGrid size={s} />,
   // aiChat 不是书签，此条目仅满足 Record 全量约束，不被书签区渲染消费
   aiChat: (s) => <Bot size={s} />,
+  // v3.5.0 终端：工作台内模块书签（docs/terminal-module-design.md）
+  terminal: (s) => <SquareTerminal size={s} />,
 }
 
 /** 插件注册书签的钝解析：只收 tab 型 action，坏条目/坏 JSON 静默丢弃（插件数据不可信外壳） */

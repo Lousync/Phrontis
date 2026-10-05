@@ -95,6 +95,10 @@ src/
 23. 沙箱构建两类故障（EPERM 报错退出 / 永不返回）与退路 → skill `windows-sandbox-ops` §6、§7。
 24. **`CHANGELOG.md` 是「应用内更新说明」的唯一源** —— 改完必须重跑 `.AGENT/scripts/release-notes/build-release-notes.mjs` 生成 `electron/lib/releaseNotes/data.ts`（忘跑 = 页面显示上一版内容，无任何报错；契约脚本 §4 会拦）。触发规则（仅 major.minor 变化时自动打开 / 首装不弹 / **页面成功展示后**才推进基线）的纯函数在 `electron/lib/releaseNotes/judge.ts`（零依赖独立文件，专为让脚本 import）——**改规则必须同步补 `.AGENT/scripts/release-notes/verify-release-notes.mjs` 的用例表**，别把规则写回 `index.ts`。
 
+### 交互
+
+25. **中央模态弹窗只留给严重 / 不可逆警告** —— 常规确认（AI 执行确认、普通二次确认、设置与表单、结果反馈）一律行内化：行内确认卡 / 滑出抽屉 / Toast / 角标脉动，替代模式与判定标准见 `docs/ui-interaction-patterns.md`。存量模态不强制回改，新代码与改到的代码一律遵守。
+
 ---
 
 ## 开发流程
@@ -139,6 +143,7 @@ npm run pack     # build + electron-builder 打包
 | UI 变更流水 | `docs/ui-updates.md` |
 | 动效方案与落地进度 | `docs/ui-animation-plan.md` |
 | 帮助披露规范 | `docs/help-disclosure-pattern.md` |
+| 交互确认与弹窗限制（行内化模式清单） | `docs/ui-interaction-patterns.md` |
 | 更新说明机制（触发规则 / 数据三层） | `docs/release-notes-design.md` |
 | 主题氛围特效（四季粒子 / 丁达尔，等看板） | `docs/theme-fx-design.md` |
 | 待修 bug 清单 | `docs/pending-fixes.md`（旧验收记录 `verification-issues-*` 与真机验证记录 2026-09-23 已转入 DP `Phrontis/过程记录/`） |

@@ -118,6 +118,7 @@ export default defineConfig({
             if (!id.includes('node_modules')) return undefined
             if (id.includes('monaco-editor')) return 'monaco'
             if (id.includes('pdfjs-dist')) return 'pdfjs'
+            if (id.includes('@xterm')) return 'xterm'
             if (id.includes('katex')) return 'katex'
             if (id.includes('highlight.js')) return 'highlight'
             if (id.includes('react-dom') || id.includes('scheduler') || /[\\/]react[\\/]/.test(id)) return 'react-vendor'

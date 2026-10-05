@@ -789,6 +789,31 @@ const api = {
   clipperOpenFolder: () => ipcRenderer.invoke('clipper:openFolder'),
   clipperSelfPing: () => ipcRenderer.invoke('clipper:selfPing'),
   clipperCheckToken: (candidate: string) => ipcRenderer.invoke('clipper:checkToken', candidate),
+  // ===== 终端模块（terminal-module-design）：pty 通道。写/resize 用 send（高频免回执），其余 invoke =====
+  termCreate: (opts: { cols?: number; rows?: number; shellPref?: string }) => ipcRenderer.invoke('term:create', opts),
+  termAttach: (id: string) => ipcRenderer.invoke('term:attach', id),
+  termWrite: (id: string, data: string) => { ipcRenderer.send('term:write', id, data) },
+  termResize: (id: string, cols: number, rows: number) => { ipcRenderer.send('term:resize', id, cols, rows) },
+  termKill: (id: string) => ipcRenderer.invoke('term:kill', id),
+  termList: () => ipcRenderer.invoke('term:list'),
+  termDefaultShell: () => ipcRenderer.invoke('term:defaultShell'),
+  termAiRecords: () => ipcRenderer.invoke('term:aiRecords'),
+  termAiRespond: (reqId: string, approved: boolean) => ipcRenderer.invoke('term:aiRespond', reqId, approved),
+  onTermData: (cb: (p: { id: string; data: string }) => void) => {
+    const handler = (_e: unknown, p: { id: string; data: string }) => cb(p)
+    ipcRenderer.on('term:data', handler)
+    return () => { ipcRenderer.removeListener('term:data', handler) }
+  },
+  onTermExit: (cb: (p: { id: string; exitCode: number | null }) => void) => {
+    const handler = (_e: unknown, p: { id: string; exitCode: number | null }) => cb(p)
+    ipcRenderer.on('term:exit', handler)
+    return () => { ipcRenderer.removeListener('term:exit', handler) }
+  },
+  onTermAiRecord: (cb: (p: { record: unknown }) => void) => {
+    const handler = (_e: unknown, p: { record: unknown }) => cb(p)
+    ipcRenderer.on('term:ai-record', handler)
+    return () => { ipcRenderer.removeListener('term:ai-record', handler) }
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)
