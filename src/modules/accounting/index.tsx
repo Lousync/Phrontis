@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { ReceiptText, BarChart3, NotebookPen, ListOrdered, CalendarDays, Eye, EyeOff } from 'lucide-react'
+import { ReceiptText, BarChart3, NotebookPen, ListOrdered, CalendarDays, Eye, EyeOff, Plus } from 'lucide-react'
 import type { AccountingTransaction } from '../../types'
 import { accountingDelete } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
@@ -27,6 +27,25 @@ const VIEW_BTN: Array<{ id: AccountingView; label: string; Icon: typeof ListOrde
   { id: 'review', label: '复盘', Icon: NotebookPen },
 ]
 
+/** 窄态阈值（px）：容器实测宽度低于此值时，工具条文字收起、只留图标 */
+const NARROW_TOOLBAR_PX = 640
+
+/** 用 ResizeObserver 量容器实宽（窗口缩窄 / 左右栏展开都算），返回是否进入窄态 */
+function useNarrow(ref: { current: HTMLElement | null }, threshold: number): boolean {
+  const [narrow, setNarrow] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? el.clientWidth
+      setNarrow(w < threshold)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref, threshold])
+  return narrow
+}
+
 export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHosted = false }: Props) {
   const { transactions, categories, accounts, reload } = useAccountingData()
   const [view, setView] = useState<AccountingView>('flow')
@@ -38,6 +57,8 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
   const monthInitRef = useRef(false)
 
   const balances = useMemo(() => computeAccountBalances(accounts, transactions), [accounts, transactions])
+  const toolbarRef = useRef<HTMLDivElement | null>(null)
+  const narrow = useNarrow(toolbarRef, NARROW_TOOLBAR_PX)
 
   // 月份初值：当前月；若当前月无流水且有历史，落最近有数据的月份（只初始化一次，不覆盖用户选择）
   useEffect(() => {
@@ -126,40 +147,44 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
     <div className="kb-theme-surface flex h-full min-h-0">
       {sidebarNode}
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-[var(--border-color)] px-4">
-          <span className="text-[14px] font-semibold text-[var(--text-primary)]">记账</span>
-          <span className="text-[11.5px] text-[var(--text-muted)]">{monthLabel(month)} · {filtered.length} 笔</span>
-          <div className="ml-auto flex items-center gap-2">
-            {/* 总余额（默认打码，眼睛按钮显示；隐私） */}
-            <div className="flex items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1">
-              <span className="text-[11.5px] text-[var(--text-muted)]">总余额</span>
-              <span className={'text-[12.5px] font-semibold tabular-nums ' + (balances.total >= 0 ? 'text-[var(--money-in,#2b9e8f)]' : 'text-[var(--money-out,#e06c4f)]')}>
-                {balanceVisible ? money(balances.total) : '••••••'}
-              </span>
-              <button
-                onClick={() => setBalanceVisible((v) => !v)}
-                title={balanceVisible ? '隐藏余额' : '显示余额'}
-                className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
-              >
-                {balanceVisible ? <EyeOff size={13} /> : <Eye size={13} />}
-              </button>
-            </div>
-            <div className="inline-flex overflow-hidden rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+        <div ref={toolbarRef} className="flex h-11 shrink-0 items-center gap-2 whitespace-nowrap border-b border-[var(--border-color)] px-3">
+          <span className="shrink-0 text-[14px] font-semibold text-[var(--text-primary)]">记账</span>
+          {!narrow && <span className="shrink-0 text-[11.5px] text-[var(--text-muted)]">{monthLabel(month)} · {filtered.length} 笔</span>}
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {/* 总余额（默认打码，眼睛按钮显示；窄态整块省略） */}
+            {!narrow && (
+              <div className="flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1">
+                <span className="text-[11.5px] text-[var(--text-muted)]">总余额</span>
+                <span className={'text-[12.5px] font-semibold tabular-nums ' + (balances.total >= 0 ? 'text-[var(--money-in,#2b9e8f)]' : 'text-[var(--money-out,#e06c4f)]')}>
+                  {balanceVisible ? money(balances.total) : '••••••'}
+                </span>
+                <button
+                  onClick={() => setBalanceVisible((v) => !v)}
+                  title={balanceVisible ? '隐藏余额' : '显示余额'}
+                  className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-primary)]"
+                >
+                  {balanceVisible ? <EyeOff size={13} /> : <Eye size={13} />}
+                </button>
+              </div>
+            )}
+            <div className="inline-flex shrink-0 overflow-hidden rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)]">
               {VIEW_BTN.map(({ id, label, Icon }) => (
                 <button
                   key={id}
                   onClick={() => setView(id)}
-                  className={'flex h-7 items-center gap-1.5 px-3 text-[12px] transition-colors ' + (view === id ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]')}
+                  title={label}
+                  className={'flex h-7 shrink-0 items-center gap-1.5 text-[12px] transition-colors ' + (narrow ? 'px-2' : 'px-3') + ' ' + (view === id ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]')}
                 >
-                  <Icon size={13} /> {label}
+                  <Icon size={14} />{!narrow && <span>{label}</span>}
                 </button>
               ))}
             </div>
             <button
               onClick={() => requestNewTransaction()}
-              className="flex h-7 items-center gap-1 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 text-[12px] text-white transition-colors hover:bg-[var(--accent-hover)]"
+              title="记一笔"
+              className="flex h-7 shrink-0 items-center gap-1 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-3 text-[12px] text-white transition-colors hover:bg-[var(--accent-hover)]"
             >
-              记一笔
+              <Plus size={14} />{!narrow && <span>记一笔</span>}
             </button>
           </div>
         </div>

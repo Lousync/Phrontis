@@ -134,7 +134,7 @@ export function AccountingPanel({ pendingEdit = null, onConsumeEdit }: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
-      <div ref={formRef}>
+      <div ref={formRef} className="shrink-0">
         <div className="mb-2 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">{editId ? '编辑这一笔' : '记一笔'}</div>
         <div className="mb-2 flex gap-2">
           <button
@@ -180,25 +180,25 @@ export function AccountingPanel({ pendingEdit = null, onConsumeEdit }: {
         </div>
       </div>
 
-      <div className="mt-5 border-t border-[var(--border-color)] pt-4">
-        <div className="mb-2 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">导入手机 AI 的 JSON</div>
+      <div className="mt-5 flex min-h-[220px] flex-1 flex-col border-t border-[var(--border-color)] pt-4">
+        <div className="mb-2 shrink-0 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">导入手机 AI 的 JSON</div>
         <textarea
           value={json}
           onChange={(e) => { setJson(e.target.value); setPreview(null) }}
           placeholder='{ "version":1, "transactions":[ { "date":"2026-10-05", "type":"expense", "amount":28.5, "category":"餐饮", "payment":"微信", "merchant":"沙县小吃", "note":"午饭" } ] }'
           spellCheck={false}
-          className="h-[104px] w-full resize-y rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] p-2 font-mono text-[11px] leading-relaxed text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+          className="min-h-[104px] w-full flex-1 resize-y rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] p-2 font-mono text-[11px] leading-relaxed text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
         />
-        <div className="mt-1.5 text-[11px] leading-relaxed text-[var(--text-muted)]">
+        <div className="mt-1.5 shrink-0 text-[11px] leading-relaxed text-[var(--text-muted)]">
           最少只要 <b>amount</b> + <b>type</b>，date 省略按今天算。
           <button className="ml-1 text-[var(--accent)] hover:underline" onClick={() => setShowPrompt(true)}>手机端指令模板</button>
         </div>
-        <div className="mt-2 flex gap-2">
+        <div className="mt-2 flex shrink-0 gap-2">
           <button onClick={() => { void doParse() }} className="h-8 flex-1 rounded-md border border-[var(--border-color)] text-[12.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">解析预览</button>
           <button onClick={() => { void doImport() }} disabled={!preview || !!preview.error || preview.ok === 0} className="h-8 flex-1 rounded-md bg-[var(--accent)] text-[12.5px] text-white transition-colors hover:bg-[var(--accent-hover)] disabled:opacity-40">确认导入</button>
         </div>
         {preview && (
-          <div className="mt-2.5 overflow-hidden rounded-md border border-[var(--border-color)]">
+          <div className="mt-2.5 shrink-0 overflow-hidden rounded-md border border-[var(--border-color)]">
             <div className="flex items-center gap-1.5 bg-[var(--bg-tertiary)] px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)]">
               <span>解析预览</span>
               {preview.error
