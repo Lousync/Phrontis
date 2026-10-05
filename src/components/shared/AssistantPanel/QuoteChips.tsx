@@ -1,15 +1,17 @@
 /**
  * 划词引用胶囊条（会话引用形式）：显示在 ChatBody 输入区上方。
  *
- * 两处宿主共用：
+ * 三处宿主共用：
  *   - 悬浮侧栏（AssistantPanel/index.tsx）
  *   - 工作台右栏 docked AI 态（WorkbenchRightPanel.tsx，B-26 补入）
+ *   - aiChat 中间标签整页（ChatBody.tsx 的 AiChatTab，正式版台账 F-8 补入）
  *
  * 行为：折叠态（默认）只显示「N 条对话引用」按钮 + 全部清空按钮；
  *       展开态列出每条引用（截断 3 行）+ 逐条移除。
- *       发送时由宿主的 `prepareBody` 把引用嵌入消息正文（markdown 引用块）并清空。
+ *       发送时由宿主的 `prepareBody`（走 selQuotes.ts 的 buildQuotedBody）把引用嵌入消息正文并清空。
  *
- * ★ 本组件只负责**渲染与交互**，不持有引用数据（数据由宿主 state + ref 管理）。
+ * ★ 本组件只负责**渲染与交互**，不持有引用数据（数据由宿主 state + ref 管理；
+ *   合并格式的真源在 selQuotes.ts）。
  */
 import { useState } from 'react'
 import { Quote, X } from 'lucide-react'

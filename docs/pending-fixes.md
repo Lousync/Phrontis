@@ -1625,6 +1625,26 @@ cbz 排除的**执行语义原样保留**（派生值对 cbz 仍为 `null`），
 **修复方向**：`RAIL_FOLLOW_MAP` 补 `terminal: 'terminal'` 一行（三处入口连带全好）；契约 `verify-workbench-shell.mjs` A3 书签清单串 / A6 值域白名单 / A7 自映射键表三处同步（该契约上次跑还在终端入列**之前**，A3 对新书签清单本就已失配——本轮一并归位）。
 **验证**：`verify-workbench-shell.mjs` 全绿；`npx tsc --noEmit -p tsconfig.web.json` 0 错；实机：终端 → 日程 → 页面条切回终端，左栏会话列表在；终端 → 总览 → 页面条切回，同样在。
 
+---
+
+## B-29 AI 助手回答输出到一半戛然而止，无任何提示（2026-10-05，P1；用户反馈「不好复现」，怀疑超单次 token 上限 —— 代码实锤成立）
+
+**现象**：与 AI 助手聊天，回答经常输出到一半就断，无报错无提示、难以稳定复现。
+**定位**（完整链路，全部实锤）：
+1. 每次请求都带 `max_tokens: 4096` —— `src/lib/settings.ts` `llmMaxTokens` **默认 4096**（`electron/lib/llmService.ts:910-911` clamp 256..32768，`buildOpenAiBody` 原样下发）。★ 该设置 `ui: false`，设置界面**搜不到**，用户无从知晓更无从调整。
+2. 思考模式雪上加霜：开「思考模式」时 `reasoning_effort=medium` 透传给推理型模型，而推理模型的思维链 token **计入 completion 预算** —— 思考先吃掉几百到几千，可见回答更早被截断。长回答 + 思考模式下 4096 非常态性不够。
+3. **`finish_reason` 全链路无人读**：OpenAI 兼容 adapter 的流循环只解析 `choices[0].delta`（`llmService.ts` chatStream），`finish_reason: 'length'`（= 顶到 max_tokens 被截断的**正规信号**）被静默丢弃；`LlmInvokeResponse` 无 stopReason 字段 → agentService 循环只见 `r.ok` → `useAssistantChat.ts` 的 `r.ok` 分支当正常收尾，**零提示**。截断与正常结束在 UI 里完全同形。
+4. 对照（排除项）：网络中断 / 60 秒无数据（llmService 流式空闲超时）会走 `r.ok:false` → Toast「AI 调用失败」，**不是静默**；但「流被服务端**干净关闭**（EOF 且无 [DONE] 帧）」同样被当正常结束 —— 第二处静默点，概率低于第 3 条。
+**根因**：4096 单次输出上限 + 思考 token 挤占预算 + `finish_reason: 'length'` 信号全链路丢弃，三者叠加 = 「断了且无提示」。
+**自查佐证（立即可做）**：被截那几轮的 completion tokens 应 ≈4096 —— 「消耗统计」（AiUsageDay）看当日 completionTokens；或 settings.json 把 `llmMaxTokens` 调到 16384 观察是否还断。
+**修复方向（待拍板）**：
+1. 三个 adapter（OpenAI 兼容 / Anthropic / Ollama）流循环捕获结束原因（`finish_reason` / `stop_reason` / `done_reason`），`LlmInvokeResponse` 加 `stopReason` 透传到渲染层；
+2. UI 按行内化呈现（铁律 25，不弹窗）：`stopReason==='length'` 时消息尾部行内提示「已达单次输出上限，回答被截断」+「继续」动作（带既有上下文续写）；
+3. 默认值 4096 → 16384（思考模型常态宽裕）；`llmMaxTokens` 改 `ui:true` 进设置页（aiTab models，字段已带 aiTab/anchor）；
+4. 「EOF 但未见结束帧」同样标记异常收尾并提示；
+5. 收尾同步手册（模型/消耗相关篇）。
+**验证**：把 `llmMaxTokens` 调小（如 512）必现截断 → 消息尾部出现截断提示；正常短回答无提示；思考模式长回答不再常态性中断。
+
 ```
 ## B-n <一句话现象>（YYYY-MM-DD，P0/P1/P2/P3）
 

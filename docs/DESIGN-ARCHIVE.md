@@ -38,6 +38,7 @@
 
 | 日期 | 文档 | 实现证据 |
 |---|---|---|
+| 2026-10-03 | cs-coach-app-plan.md | **迁出至独立新仓库**（非 DesignProcess）：「CS 学习教练」立项为独立软件 CSTeacher（本地 `E:\Projects\CSTeacher`，GitHub 公开仓），计划稿与交互原型随新仓库维护，主仓库不留副本。缘起 2026-10-03 讨论轮：AI 教学「项目模式」→ 载体拍板为独立应用（Tauri 2 + React，地基复用自本仓库） |
 | 2026-09-07 | rework-vault-layout-implementation.md | P1–P8 全部实现完毕（2026-09-06 验证，57935d5→064d4d3） |
 | 2026-09-07 | rework-vault-account-model.md | vault 账户模型设计定稿，已被上述实现落地取代 |
 | 2026-09-07 | rework-workbench-design.md | Workbench（uiWorkbench / 编辑器组 W3 / 全局侧栏槽）已实现于 App.tsx |

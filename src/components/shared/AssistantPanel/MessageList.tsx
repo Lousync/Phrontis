@@ -1,5 +1,5 @@
-import { useEffect, useRef, type Dispatch, type ReactNode, type SetStateAction } from 'react'
-import { Bot, Check, Copy, Loader2, Pencil, RefreshCw, Square, Trash2, Wrench } from 'lucide-react'
+import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { ArrowDown, Bot, Check, Copy, Loader2, Pencil, RefreshCw, Square, Trash2, Wrench } from 'lucide-react'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { showToast } from '../../../lib/toast'
 import { copyText } from '../../../lib/ipc'
@@ -116,26 +116,43 @@ export interface MessageListProps {
   emptyHint?: ReactNode
   /** 内容区额外 class（全屏可放宽内边距/加 max-width 居中） */
   className?: string
+  /** 「回到底部」浮标开关（正式版台账 F-7，2026-10-05 拍板：只开 aiChat 整页 = ChatBody
+   *  variant='page'；悬浮侧栏 / 右栏 docked / AiLearn 不开 —— 开启时外层才包 relative 宿主） */
+  jumpBottom?: boolean
 }
 
 export function MessageList({
   messages, pending, liveSteps, draft, editing, setEditing, copiedIdx, setCopiedIdx,
-  onRegenerate, onEditSubmit, onDeleteMessage, onAbort, emptyHint, className,
+  onRegenerate, onEditSubmit, onDeleteMessage, onAbort, emptyHint, className, jumpBottom = false,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   /** 是否贴底（用户上滚阅读时不再强制拉回）。初始 true：新会话从底部开始 */
   const stickRef = useRef(true)
+  /** 不贴底时显示「回到底部」浮标（仅 jumpBottom 开启时消费） */
+  const [offBottom, setOffBottom] = useState(false)
 
   // 跟踪「是否贴底」。流式高频注入下，只有贴底才跟随滚动
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const onScroll = (): void => {
-      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+      stickRef.current = atBottom
+      if (jumpBottom) setOffBottom(!atBottom)
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
-  }, [])
+  }, [jumpBottom])
+
+  /** 浮标点击 → 回底。instant 而非 smooth：流式下会与贴底跟随 effect 互相打断（抽搐，
+   *  同 ai-teaching jumpToBottom 的结论）；末尾补一帧 rAF 兜末条消息尚未提交 DOM 的少滚 */
+  const jumpToBottom = (): void => {
+    stickRef.current = true
+    setOffBottom(false)
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+    requestAnimationFrame(() => { const c = scrollRef.current; if (c) c.scrollTop = c.scrollHeight })
+  }
 
   // 内容变化 → 贴底才跟随，且**用 instant 而非 smooth**：
   // 流式下这个 effect 每 60ms 触发一次，smooth 动画会与下一次调用互相打断（表现为滚动抽搐）
@@ -146,7 +163,7 @@ export function MessageList({
     el.scrollTop = el.scrollHeight
   }, [messages, pending, draftSig])
 
-  return (
+  const list = (
     <div
       ref={scrollRef}
       className={className ?? 'h-full overflow-y-auto px-3 py-3 space-y-2'}
@@ -242,6 +259,24 @@ export function MessageList({
           </button>
         </div>
       ))}
+
+      {/* 浮标占位（F-7）：浮标 absolute 不占流，底部预留 12（py-3）+ 36 = 48px，对齐 AI 教学款 */}
+      {jumpBottom && <div className="h-9" aria-hidden />}
+    </div>
+  )
+
+  // 「回到底部」浮标宿主：只有 jumpBottom 开启（page 态）才包 relative 层 ——
+  // AiLearn 把本组件根直接当 flex 子项用（flex-1 写在 className 里），无条件包会断它的高度链。
+  if (!jumpBottom) return list
+  return (
+    <div className="relative h-full">
+      {list}
+      {offBottom && (
+        <button type="button" onClick={jumpToBottom} title="回到底部" aria-label="回到底部"
+          className="kb-pop absolute right-3 bottom-3 z-20 w-9 h-9 rounded-full flex items-center justify-center bg-[var(--bg-primary)] text-[var(--text-secondary)] shadow-lg hover:text-[var(--text-primary)] transition-colors">
+          <ArrowDown size={16} strokeWidth={1.75} />
+        </button>
+      )}
     </div>
   )
 }

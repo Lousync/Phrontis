@@ -275,14 +275,14 @@ async function main() {
   // B1 aiChat 激活 → 左栏经 RAIL_FOLLOW_MAP 切 aiChat 模块态
   const modAi = await evalJs(`document.querySelector('[data-wb="mod"]')?.dataset.wbMod ?? ''`)
   ok(modAi === 'aiChat', 'B1 aiChat 激活 → 左栏模块态跟随（data-wb-mod=aiChat）', `mod=${modAi}`)
-  // B2 侧栏挂载：双 tab（会话列表/会话大纲）+ 新会话钮 + 底部文件改动卡
+  // B2 侧栏挂载：双 tab（会话列表/会话大纲）+ 新会话钮（2026-10-05 文件改动卡删除——与右栏「改动文件」卡重复，负向断言锁删除）
   const side = await evalJs(`(() => {
     const el = document.querySelector('[data-wb="aiChatSidebar"]')
     const tabs = [...document.querySelectorAll('[data-wb="aiSideTab"]')].map((t) => t.dataset.wbAiSideTab)
-    return { there: !!el, tabs, hasNew: !!el?.querySelector('[data-wb="aiSideNew"]'), hasChanges: !!document.querySelector('[data-wb="aiSideChanges"]') }
+    return { there: !!el, tabs, hasNew: !!el?.querySelector('[data-wb="aiSideNew"]'), changesGone: !document.querySelector('[data-wb="aiSideChanges"]') }
   })()`)
-  ok(side.there && side.tabs.join(',') === 'sessions,outline' && side.hasNew && side.hasChanges,
-    'B2 左栏 AI 侧栏挂载（双 tab + 新会话 + 文件改动卡）', JSON.stringify(side))
+  ok(side.there && side.tabs.join(',') === 'sessions,outline' && side.hasNew && side.changesGone,
+    'B2 左栏 AI 侧栏挂载（双 tab + 新会话，文件改动卡已删）', JSON.stringify(side))
   // B3 page 态对话区无抽屉入口（会话导航已移交左栏）
   const pageDrawer = await evalJs(`!!document.querySelector('[data-assistant-variant="page"] button[title="会话列表"]')`)
   ok(!pageDrawer, 'B3 page 态无抽屉按钮（导航交左栏）')

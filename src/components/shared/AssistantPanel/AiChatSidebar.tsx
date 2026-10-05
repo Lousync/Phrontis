@@ -1,22 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, MessageSquare, ListTree, FileEdit, Pencil } from 'lucide-react'
-import { agentSessionChanges, agentRenameSession } from '../../../lib/ipc'
+import { Plus, Trash2, MessageSquare, ListTree, Pencil } from 'lucide-react'
+import { agentRenameSession } from '../../../lib/ipc'
 import { fmtTime } from './MessageList'
 import { AssistantEntryButton } from './AssistantEntry'
 import type { AssistantChatController } from './useAssistantChat'
-import type { SessionFileChange } from '../../../types'
 
 /**
  * 左栏 AI 会话侧栏（v3.4.0 批次5 反馈轮，开发负责人 drawio 简图排版）：
  * aiChat 标签激活时左栏模块态原位挂载（portal 进 wbModSlot，返回/锁定复用左栏头部）。
  *
- * 结构 = 双 Tab（会话列表 / 会话大纲）+ 主体 + 底部「文件改动」卡（本会话 AI 写审计）。
+ * 结构 = 双 Tab（会话列表 / 会话大纲）+ 主体。
+ * （2026-10-05 用户拍板：底部「文件改动」卡删除 —— 与右栏「改动文件」卡重复；本会话写审计
+ * 数据仍在主进程 agentUsage 会话分桶，右栏卡与「本次已改动」卡继续消费。）
  * 取代 page 态对话区内的 overlay 抽屉（实机反馈：抽屉浮层遮空态文字、层次混乱）。
  * 会话数据复用 AiChatTab 的 useAssistantChat 控制器（真源在主进程）。
  */
-
-const POLL_MS = 30_000
 
 /** 大纲节点摘要：首行非空文本，去 markdown 标记，截 64 字 */
 function msgSummary(content: string): string {
@@ -33,9 +32,8 @@ interface Props {
   modActionsEl?: HTMLElement | null
 }
 
-export function AiChatSidebar({ chat, active, container, modActionsEl }: Props) {
+export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
   const [tab, setTab] = useState<'sessions' | 'outline'>('sessions')
-  const [changes, setChanges] = useState<SessionFileChange[]>([])
   const { sessions, activeId, messages, pending } = chat
 
   // ---- 右键菜单（重命名/删除）：portal + 原生事件委托（React 对 body-portal 首个菜单的
@@ -92,18 +90,6 @@ export function AiChatSidebar({ chat, active, container, modActionsEl }: Props) 
       await chat.refreshSessions()
     } catch { /* 重命名失败静默（标题保持旧值） */ }
   }, [renaming, chat])
-
-  // 文件改动（本会话）：activeId 变化 / 轮询 / 回复完成后刷新
-  const refreshChanges = useCallback(async () => {
-    if (!activeId) { setChanges([]); return }
-    try { setChanges(await agentSessionChanges(activeId)) } catch { /* 保持旧数据 */ }
-  }, [activeId])
-  useEffect(() => { void refreshChanges() }, [refreshChanges, messages.length])
-  useEffect(() => {
-    if (!active) return
-    const t = window.setInterval(() => void refreshChanges(), POLL_MS)
-    return () => window.clearInterval(t)
-  }, [active, refreshChanges])
 
   // 大纲数据 = 当前会话已落库消息（乐观插入未落库的不列）
   const outline = useMemo(
@@ -248,38 +234,6 @@ export function AiChatSidebar({ chat, active, container, modActionsEl }: Props) 
               </div>
             )}
           </>
-        )}
-      </div>
-
-      {/* 底部：文件改动（本会话 AI 写审计，方案 §3.8；点击直达编辑器） */}
-      <div data-wb="aiSideChanges" className="shrink-0 border-t border-[var(--border-color)] px-2 py-1.5">
-        <div className="flex items-center gap-1.5 pb-1 text-[10.5px] text-[var(--text-muted)]">
-          <FileEdit size={10} />
-          文件改动
-          <span className="ml-auto">{activeId ? '本会话' : '未选会话'}</span>
-        </div>
-        {changes.length === 0 ? (
-          <div className="pb-0.5 text-[11px] text-[var(--text-muted)]">暂无改动</div>
-        ) : (
-          <div className="max-h-[132px] space-y-0.5 overflow-y-auto">
-            {changes.slice(0, 8).map((c, i) => (
-              <button
-                key={`${c.at}-${i}`}
-                onClick={() => c.file && window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file } }))}
-                disabled={!c.file}
-                title={c.file ? `${c.action} · ${c.file}` : c.action}
-                className="group/cf flex w-full items-center gap-1.5 rounded-md px-1 py-1 text-left transition-colors enabled:hover:bg-[var(--bg-hover)]"
-              >
-                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9.5px] font-semibold ${
-                  c.op === 'A'
-                    ? 'bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]'
-                    : 'bg-[var(--bg-hover)] text-[var(--text-secondary)]'
-                }`}>{c.op}</span>
-                <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-primary)]">{c.target}</span>
-                <span className="shrink-0 text-[9px] text-[var(--text-disabled)]">{c.at.slice(11, 16)}</span>
-              </button>
-            ))}
-          </div>
         )}
       </div>
 

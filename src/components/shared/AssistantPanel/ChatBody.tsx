@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
@@ -15,6 +15,9 @@ import { MessageList, fmtTime } from './MessageList'
 import { useAssistantChat } from './useAssistantChat'
 import { AssistantEntryButton } from './AssistantEntry'
 import { AiChatSidebar } from './AiChatSidebar'
+import { QuoteChips } from './QuoteChips'
+import { buildQuotedBody } from './selQuotes'
+import { registerSelectionAskHost } from '../../../lib/assistantContext'
 import type { AssistantChatController } from './useAssistantChat'
 import type { AiUsageDay, KnowledgePage } from '../../../types'
 
@@ -344,6 +347,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 onEditSubmit={(id, content) => { void editSubmit(id, content) }}
                 onDeleteMessage={id => { void deleteMessage(id) }}
                 onAbort={() => { void abort() }}
+                jumpBottom={variant === 'page'}
                 emptyHint={emptyHint ?? (
                   /* 三态统一：空态在滚动区高度内垂直+水平居中。2026-09-19 反馈：两行引导文字收敛为
                      一个聊天气泡图案（入口语义自明，冗余文案按铁律 12 只收不增）。 */
@@ -748,12 +752,51 @@ function NoProviderHint({ onGoSettings }: { onGoSettings: () => void }) {
 /** aiChat 中间标签的页面态宿主（v3.4.0 批次5）：自带会话控制器，App.tsx 槽位直接渲染本组件。
  *  display:none 保活期间 active=false（不刷新供应商/会话），切回标签自动恢复。
  *  会话导航不放对话区抽屉（实机反馈层次混乱）——sidebarEl 传入时把左栏 AI 会话侧栏
- *  （AiChatSidebar：会话列表/会话大纲 + 底部文件改动）portal 进左栏模块态 slot。 */
+ *  （AiChatSidebar：会话列表/会话大纲 + 底部文件改动）portal 进左栏模块态 slot。
+ *  正式版台账 F-7/F-8（2026-10-05）：本页态开「回到底部」浮标；划词「问 AI」就地接管，
+ *  选段收进本页引用胶囊（不自动发送），不再回退拉起悬浮侧栏。 */
 export function AiChatTab({ active, sidebarEl, modActionsEl }: { active: boolean; sidebarEl?: HTMLElement | null; modActionsEl?: HTMLElement | null }) {
-  const chat = useAssistantChat({ active })
+  // 划词引用：与悬浮侧栏（AssistantPanel）同款 —— state 供 QuoteChips 渲染，ref 镜像供 prepareBody 读取
+  const [selQuotes, setSelQuotes] = useState<string[]>([])
+  const selQuotesRef = useRef<string[]>([])
+  const chat = useAssistantChat({
+    active,
+    prepareBody: useCallback((raw: string) => {
+      // 随发随清：引用以 markdown 引用块并入正文后一次性消费（合并格式单一真源 = buildQuotedBody）
+      const qs = [...selQuotesRef.current]
+      if (qs.length > 0) { selQuotesRef.current = []; setSelQuotes([]) }
+      return buildQuotedBody(qs, raw)
+    }, []),
+  })
+  /** ask 走 ref 镜像：宿主注册只在 active 变化时进出栈，不随控制器/输入框身份重建 */
+  const askRef = useRef<(text: string) => void>(() => {})
+  askRef.current = (text) => {
+    setSelQuotes(prev => {
+      const next = prev.includes(text) ? prev : [...prev, text].slice(-5)
+      selQuotesRef.current = next
+      return next
+    })
+    setTimeout(() => chat.inputRef.current?.focus(), 60)
+  }
+  // 划词「问 AI」就地接管（F-8）：整页激活时接管（此前右栏宿主显式排除 aiChat、本页又没注册
+  // ⇒ 走回退弹悬浮侧栏）。Tab 宿主 display:none 保活 → 必须挂 active 门，否则后台标签会抢别的场景的划词。
+  useEffect(() => {
+    if (!active) return
+    return registerSelectionAskHost({
+      accept: () => true,
+      ask: (text) => askRef.current(text),
+    })
+  }, [active])
+  const quoteRow = (
+    <QuoteChips
+      quotes={selQuotes}
+      onRemove={(i) => setSelQuotes(prev => { const next = prev.filter((_, j) => j !== i); selQuotesRef.current = next; return next })}
+      onRemoveAll={() => { selQuotesRef.current = []; setSelQuotes([]) }}
+    />
+  )
   return (
     <>
-      <ChatBody chat={chat} variant="page" active={active} showDrawer={false} />
+      <ChatBody chat={chat} variant="page" active={active} showDrawer={false} inputTop={quoteRow} />
       {sidebarEl && <AiChatSidebar chat={chat} active={active} container={sidebarEl} modActionsEl={modActionsEl} />}
     </>
   )

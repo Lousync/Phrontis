@@ -11,6 +11,7 @@ import { ChatBody } from './ChatBody'
 import { AssistantEntryButton } from './AssistantEntry'
 import { useAssistantChat } from './useAssistantChat'
 import { QuoteChips } from './QuoteChips'
+import { buildQuotedBody } from './selQuotes'
 import type { AgentContextInfo, TabName } from '../../../types'
 
 /**
@@ -86,13 +87,10 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
     }, [full, learn.last]),
     surfaceOf: useCallback(() => (full ? 'aiLearn' : 'assistant'), [full]),
     prepareBody: useCallback((raw: string) => {
-      // 划词引用（会话引用形式）：以可见的 markdown 引用块并入消息正文，随发随清（单条截断 600 字防刷屏）
+      // 划词引用（会话引用形式）：以可见的 markdown 引用块并入消息正文，随发随清（合并格式单一真源 = buildQuotedBody）
       const qs = [...selQuotesRef.current]
       if (qs.length > 0) { selQuotesRef.current = []; setSelQuotes([]) }
-      const text = qs.length > 0
-        ? qs.map((q, i) => `> 【引用 ${i + 1}】${q.replace(/\s+/g, ' ').trim().slice(0, 600)}${q.replace(/\s+/g, ' ').trim().length > 600 ? '…' : ''}`).join('\n') + (raw ? `\n\n${raw}` : '')
-        : raw
-      return text
+      return buildQuotedBody(qs, raw)
     }, []),
   })
 
