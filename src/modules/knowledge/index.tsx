@@ -482,10 +482,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
   }, [selectedSpaceId])
 
-  const handleImportFolder = async () => {
+  /** 文件夹批量导入主体：对话框选择与拖拽拖入共用。落点 = 当前选中分类，未选中则到根级 */
+  const runFolderImport = async (paths: string[]) => {
     try {
-      const paths = await showFolderDialog()
-      if (!paths || paths.length === 0) return
       const catId = selectedChapterId || null
       for (const folderPath of paths) {
         const result = await importFolder(folderPath, catId)
@@ -499,6 +498,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       refreshCategories(); refreshAllPages()
     } catch (e) { console.error(e); showToast({ type: 'error', message: '导入文件夹失败' }) }
   }
+
+  const handleImportFolder = async () => {
+    const paths = await showFolderDialog()
+    if (!paths || paths.length === 0) return
+    await runFolderImport(paths)
+  }
+
+  /** 拖入文件夹：ImportZone 识别目录后把绝对路径交到这里，与对话框导入同一通道 */
+  const handleDropImportFolders = (paths: string[]) => runFolderImport(paths)
 
   const handleDialogImport = async () => {
     if (writeBlocked('导入')) return
@@ -1850,7 +1858,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   }, [readingMode])
 
   return (
-    <ImportZone onImport={handleDropImport} onImportPdf={handleDropImportBinary} className="h-full">
+    <ImportZone onImport={handleDropImport} onImportPdf={handleDropImportBinary} onImportFolders={handleDropImportFolders} className="h-full">
       <div className="kb-theme-surface flex h-full flex-col">
         {readingMode ? (
           /* ===== 沉浸阅读：只保留正文（进场淡入；可能含 iframe/PDF，故只做透明度、不做位移） =====
