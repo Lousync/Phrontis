@@ -794,15 +794,6 @@ export function addInlinePausedListener(fn: (paused: boolean) => void): () => vo
   inlinePausedListeners.add(fn)
   return () => { inlinePausedListeners.delete(fn) }
 }
-/** 单槽兼容入口（清空后只注册自己）：旧调用方语义不变 */
-export function setInlineSuggestBusyListener(fn: ((busy: boolean) => void) | null): void {
-  inlineBusyListeners.clear()
-  if (fn) inlineBusyListeners.add(fn)
-}
-export function setInlinePausedListener(fn: ((paused: boolean) => void) | null): void {
-  inlinePausedListeners.clear()
-  if (fn) inlinePausedListeners.add(fn)
-}
 
 /** 结算上一次自动请求的采纳结果（自动触发前 / 手动触发前调用） */
 function settleAutoOutcome(): void {
@@ -941,12 +932,5 @@ export function cancelInlineSuggestInFlight(): void {
   void aiInlineSuggestCancel(id).catch(() => { /* 静默 */ })
 }
 
-/** 供外部（大纲/提示）判断当前文档是否处于 [[ 补全上下文 */
-export function wikiContextTarget(text: string): string | null {
-  const lastOpen = text.lastIndexOf('[[')
-  const lastClose = text.lastIndexOf(']]')
-  if (lastOpen === -1 || lastClose > lastOpen) return null
-  return text.slice(lastOpen + 2).trim()
-}
 
 export { wikiTargetTitle }

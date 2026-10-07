@@ -87,15 +87,6 @@ export function parseProfileSections(md: string): ProfileSection[] {
   return out
 }
 
-/** 条目是否合法（渲染层可用同口径做前置校验；主进程侧不信任入参） */
-export function isValidEntry(raw: unknown): raw is ProfileEntry {
-  const e = raw as ProfileEntry | null
-  if (!e || typeof e !== 'object') return false
-  if (e.op !== 'add' && e.op !== 'update' && e.op !== 'remove') return false
-  if (!normalizeField(e.field)) return false
-  if (!String(e.text ?? '').trim()) return false
-  return true
-}
 
 export function applyProfileEntries(
   md: string,

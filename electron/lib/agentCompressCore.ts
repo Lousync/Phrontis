@@ -40,12 +40,6 @@ export interface CompressionRow {
   content: string
 }
 
-/** 对 digest 的只读引用（结构与 agentSessionRepo.SessionDigest 对齐，避免反向依赖） */
-export interface DigestRef {
-  text: string
-  upto_id: string
-  covered: number
-}
 
 /**
  * 检查点之后的消息。返回 null = 检查点在消息列表中已不存在（被删且一致性作废未及）

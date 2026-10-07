@@ -50,37 +50,6 @@ export interface TabCapInput {
   cap?: number
 }
 
-/**
- * 常驻软上限回收（转移规则 5 之外的静默兜底）：只挑「**干净 + 非激活 + 非预览**」的
- * 固定标签，按 LRU 最旧优先，返回要回收的 rel 列表（可能为空）。
- *
- * 三档保护集永不回收：当前激活（回收了等于把用户正在看的文件关掉）、
- * 预览标签（它本来就不计数）、脏标签（回收即丢内容）。
- */
-export function pickTabsToEvict(input: TabCapInput): string[] {
-  const { rels, previewRel, activeRel, dirtyRels, lru, cap = TAB_SOFT_CAP } = input
-  const fixed = rels.filter((r) => r !== previewRel)
-  if (fixed.length <= cap) return []
-  const guarded = new Set<string>([activeRel ?? '', previewRel ?? ''])
-  const dirty = new Set(dirtyRels)
-  const recency = (r: string) => lru.indexOf(r) // -1 = 未记账 → 视为最旧，优先回收
-  return fixed
-    .filter((r) => !guarded.has(r) && !dirty.has(r))
-    .sort((a, b) => recency(a) - recency(b))
-    .slice(0, fixed.length - cap)
-}
-
-/**
- * 循环切换（Ctrl+Tab / Ctrl+Shift+Tab）的落点：顺序 = 标签栏顺序，正向 +1、反向 -1，首尾相接。
- * 无激活标签时正向取首个、反向取末个；切换列表不足 2 个 → null（调用方直接放过这次按键）。
- */
-export function nextTabInCycle(rels: readonly string[], activeRel: string | null, backward = false): string | null {
-  if (rels.length < 2) return null
-  if (!activeRel) return backward ? rels[rels.length - 1] : rels[0]
-  const i = rels.indexOf(activeRel)
-  if (i < 0) return backward ? rels[rels.length - 1] : rels[0]
-  return rels[(i + (backward ? -1 : 1) + rels.length) % rels.length]
-}
 
 /**
  * 关闭标签后的激活落点：**右邻居优先，否则左邻居**，都没有 → null（回到编辑器空态）。

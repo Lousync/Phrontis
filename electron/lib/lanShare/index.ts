@@ -137,9 +137,6 @@ export async function stop(): Promise<{ ok: boolean }> {
   return { ok: true }
 }
 
-export function getStatus(): LanShareStatus {
-  return status()
-}
 
 // ---- IPC ----
 

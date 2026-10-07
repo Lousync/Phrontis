@@ -85,9 +85,6 @@ export const DEFAULT_ACCOUNTS: AccountRow[] = [
 
 // ===== 低层存取 =====
 
-export function vaultAccountingExists(): boolean {
-  return exists(MOD, TX_FILE)
-}
 
 export function vaultAccountingTransactionsAll(): TransactionRow[] {
   const rows = readJson<unknown>(MOD, TX_FILE, [])

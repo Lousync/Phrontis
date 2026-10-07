@@ -45,10 +45,6 @@ const TAGS_FILE = 'tags.json'
 
 // ===== 低层存取（供本 repo 与其他消费方共用） =====
 
-/** 是否已播种：以 todos.json 存在为标记（区分「未迁 vault」与「已迁但为空」） */
-export function vaultScheduleExists(): boolean {
-  return exists(MOD, TODOS_FILE)
-}
 
 /** 全部待办行（文件原序，即 sqlite rowid 序；查询层各自排序，不在此预排） */
 export function vaultTodosAll(): TodoRow[] {
@@ -307,10 +303,6 @@ export function vaultTagsOrdered(): TagRow[] {
   return vaultTagsAll().slice().sort((a, b) => binaryCompare(str(a.name), str(b.name)))
 }
 
-/** SELECT * FROM schedule_tags WHERE id = ? */
-export function vaultFindTag(id: string): TagRow | null {
-  return vaultTagsAll().find((r) => r.id === id) ?? null
-}
 
 /**
  * INSERT INTO schedule_tags (id, name, color) VALUES (?, ?, ?)

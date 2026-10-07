@@ -32,10 +32,6 @@ const RECORDS_FILE = 'records.json'
 function readHabits(): HabitRow[] { return readJson<HabitRow[]>(MOD, HABITS_FILE, []) }
 function readRecords(): RecordRow[] { return readJson<RecordRow[]>(MOD, RECORDS_FILE, []) }
 
-/** habits.json 已存在（区分「未播种」与「已迁 vault 但当前为空」，播种幂等的判据） */
-export function vaultHabitsExists(): boolean {
-  return exists(MOD, HABITS_FILE)
-}
 
 /** 全量习惯行（文件原始顺序，未排序） */
 export function vaultHabitsAll(): HabitRow[] {

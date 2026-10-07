@@ -121,10 +121,6 @@ export async function scanCcSwitch(): Promise<CcSwitchScanResult> {
   }
 }
 
-/** 导入选中项：复用网关的加密存储链路 */
-export function takeCached(id: string): CachedItem | undefined {
-  return cache.get(id)
-}
 
 export interface ImportOutcome {
   imported: number

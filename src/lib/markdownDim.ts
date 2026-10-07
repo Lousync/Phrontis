@@ -196,16 +196,3 @@ export function wikiTargetTitle(content: string): string {
   // 取 | 之前的部分（Obsidian 别名语法：[[目标|别名]]）
   return content.split('|')[0].trim()
 }
-
-/** 抽取全文双链目标（去重），供反链/补全等消费 */
-export function extractWikiTargets(markdown: string): string[] {
-  const targets: string[] = []
-  const seen = new Set<string>()
-  const RE = /\[\[([^\]\n]+)\]\]/g
-  let m: RegExpExecArray | null
-  while ((m = RE.exec(markdown)) !== null) {
-    const t = wikiTargetTitle(m[1])
-    if (t && !seen.has(t)) { seen.add(t); targets.push(t) }
-  }
-  return targets
-}

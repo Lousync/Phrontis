@@ -120,22 +120,9 @@ export function startAppUsageCollector(): void {
   if (typeof tickTimer === 'object' && tickTimer && 'unref' in tickTimer) tickTimer.unref()
 }
 
-/** 停止心跳（测试 / 退出用） */
-export function stopAppUsageCollector(): void {
-  if (tickTimer !== null) { clearInterval(tickTimer); tickTimer = null }
-}
 
 // ---------- 只读出口（供 IPC / 聚合层） ----------
 
-/** 全量日桶（秒） */
-export function getUsageDays(): UsageDays {
-  return { ...load().days }
-}
-
-/** 某天分钟数 */
-export function getUsageMinutesOn(key: string): number {
-  return minutesOn(load().days, key)
-}
 
 /** `[fromKey, toKey]` 闭区间每天分钟数，缺失日补 0（热力图数据源） */
 export function getUsageRange(fromKey: string, toKey: string): Record<string, number> {

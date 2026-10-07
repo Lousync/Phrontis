@@ -179,32 +179,11 @@ export function pdfReaderCoverSave(rootId: string, relPath: string, dataUrl: str
   }
 }
 
-/** 读封面 png 原始字节（渲染层经 coverList 命中后自行用 file 名请求；主进程内部用） */
-export function pdfCoverExists(file: string): boolean {
-  const dir = kbModulePath(COVER_DIR, '')
-  if (!dir) return false
-  return exists(COVER_DIR, file) && statSyncSafe(join(dir, file))
-}
 
 function statSyncSafe(p: string): boolean {
   try { return statSync(p).isFile() } catch { return false }
 }
 
-/** 封面缓存目录是否就绪（渲染层预检用） */
-export function pdfCoverDirReady(): boolean {
-  return !!kbModulePath(COVER_DIR, '')
-}
-
-/** 供书架缓存命中判定：索引 + 磁盘文件双确认 */
-export function pdfReaderCoverHit(rootId: string, relPath: string, pdfMtimeMs: number): string | null {
-  const key = pdfBookKey(rootId, relPath)
-  if (!key) return null
-  const hit = readCoverIndex()[key]
-  if (!hit || hit.mtimeMs !== pdfMtimeMs) return null
-  const dir = kbModulePath(COVER_DIR, '')
-  if (!dir || !existsSync(join(dir, hit.file))) return null
-  return hit.file
-}
 
 /** 读封面 png → dataUrl（渲染层无 fs，缓存命中后经此通道取字节；未命中返回 null） */
 export function pdfReaderCoverGet(rootId: string, relPath: string): string | null {

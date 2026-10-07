@@ -634,19 +634,9 @@ export interface HabitRecordExport { id: string; habitId: string; date: string; 
 // 旧备份文件里的 links 字段导入时会被忽略 —— 不做迁移，历史记录原样保留）
 export interface CheckinExportData { habits: HabitExport[]; records: HabitRecordExport[] }
 export interface BookmarkNavExportData { categories: BookmarkCategory[]; bookmarks: BookmarkItem[] }
-export interface AllExportData {
-  exportVersion: string; exportedAt: string
-  user?: UserExportData & { settings: Record<string, unknown>; stats: UserStats }
-  blog: BlogExportData; schedule: ScheduleExportData; knowledge: KnowledgeExportData
-  passwordVault?: PasswordVaultExportData
-  moments?: MomentsExportData
-  checkin?: CheckinExportData
-  bookmarkNav?: BookmarkNavExportData
-}
 
 export interface ExportFileResult { filePath: string; size: number }
 export interface ExportMarkdownProgress { current: number; total: number; currentFile: string; phase: string }
-export interface ExportMarkdownResult { fileCount: number; totalSize: number; files: { relPath: string; size: number }[] }
 
 export interface PluginRegistryEntry {
   id: string
@@ -2418,11 +2408,6 @@ export interface BookMarketItem {
   readable: boolean
 }
 
-/** 聚合检索结果：**部分源失败不整页报错**（方案 §三 拍板 ⑦），failed 非空时渲染层出灰条 */
-export interface BookMarketSearchResult {
-  items: BookMarketItem[]
-  failed: BookSearchFailure[]
-}
 
 /** 单源失败（只带原因文案，**绝不含凭据**） */
 export interface BookSearchFailure {
@@ -2536,16 +2521,5 @@ export type BookDownloadStartResult =
 export type BookDownloadAction =
   | 'pause' | 'resume' | 'cancel' | 'retry' | 'pause-all' | 'resume-all' | 'clear-done'
 
-/** 书籍元数据（`.books/.meta.json` 的条目；书架 DTO 拼装的上游，方案 §五） */
-export interface BookMetaInfo {
-  relPath: string
-  title: string
-  author: string
-  coverRel: string
-  sourceId: string
-  sourceName: string
-  downloadedAt: string
-  size: number
-}
 
 declare global { interface Window { api: ElectronAPI; devtoolsApi?: DevtoolsAPI } }

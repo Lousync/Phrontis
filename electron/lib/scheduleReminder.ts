@@ -17,8 +17,6 @@ import { readJson, writeJson } from './kbStore/jsonStore'
 const SCHEDULE_MOD = 'modules/schedule'
 const REMINDED_FILE = 'reminders.json'
 
-/** 提前量候选（分钟），与设置项选项一致 */
-export const REMINDER_LEAD_OPTIONS = [15, 30, 60, 1440] as const
 
 /** 去重表：todoId → 已通知过的「提醒时刻」标记 */
 interface RemindedMap { [todoId: string]: string }

@@ -208,14 +208,3 @@ export function bookRequestText(url: string, opts: BookRequestOptions = {}): Pro
   })
 }
 
-/** 取响应头里的 content-type（去参数、小写） */
-export function responseContentType(res: BookResponse): string {
-  return headerOf(res.headers, 'content-type').split(';')[0].trim().toLowerCase()
-}
-
-/** 取 content-length（认不出返回 null） */
-export function responseContentLength(res: BookResponse): number | null {
-  const raw = headerOf(res.headers, 'content-length')
-  const n = Number(raw)
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
-}

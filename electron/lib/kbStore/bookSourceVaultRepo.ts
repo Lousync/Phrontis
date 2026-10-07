@@ -150,11 +150,6 @@ export function bookSourceCredentialFor(rootId: string, id: string): BookSourceC
   return readCredentialStore().creds[sid] ?? null
 }
 
-export function bookSourceHasCredential(rootId: string, id: string): boolean {
-  const src = bookSourceGet(rootId, id)
-  if (!src?.auth) return false
-  return credentialSatisfies(src.auth.type, bookSourceCredentialFor(rootId, id))
-}
 
 // ===== 写 =====
 

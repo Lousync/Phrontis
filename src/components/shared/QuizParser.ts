@@ -204,7 +204,3 @@ export function extractQuizzes(content: string): QuizItem[] {
   return out
 }
 
-/** 仅用于调试：统计一页有多少选择题（工具函数，供 devbridge 或脚本调用） */
-export function countQuizzes(content: string): number {
-  return extractQuizzes(content).length
-}

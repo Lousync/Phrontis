@@ -843,7 +843,6 @@ const devtoolsApi = {
   helpDocsDelete: (fileName: string) => ipcRenderer.invoke('devtools:helpDocs:delete', fileName),
 }
 contextBridge.exposeInMainWorld('devtoolsApi', devtoolsApi)
-export type DevtoolsElectronAPI = typeof devtoolsApi
 
 // AI 测试桥上报通道(仅 DEV):与 devtoolsApi 同款约定 —— 打包版主进程侧
 // 不注册 handler(app.isPackaged 守卫),调用必然被拒,不影响生产行为。
@@ -851,4 +850,3 @@ const devbridgeApi = {
   report: (payload: unknown) => ipcRenderer.invoke('devbridge:report', payload),
 }
 contextBridge.exposeInMainWorld('devbridgeApi', devbridgeApi)
-export type DevbridgeElectronAPI = typeof devbridgeApi

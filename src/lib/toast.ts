@@ -14,6 +14,3 @@ export function showToast(msg: Omit<ToastMessage, 'id'> & { id?: string }): stri
   return id
 }
 
-export function dismissToast(id: string): void {
-  window.dispatchEvent(new CustomEvent('toast:dismiss', { detail: id }))
-}

@@ -28,10 +28,6 @@ function notify(): void {
   for (const fn of listeners) { try { fn() } catch { /* ignore */ } }
 }
 
-export function subscribePluginDownloads(fn: () => void): () => void {
-  listeners.add(fn)
-  return () => { listeners.delete(fn) }
-}
 
 export function getPluginDownloads(): BgDownload[] {
   return cachedSnapshot

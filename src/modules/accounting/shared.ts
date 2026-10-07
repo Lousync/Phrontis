@@ -17,7 +17,6 @@ export function todayStr(): string {
   const n = new Date()
   return `${n.getFullYear()}-${pad2(n.getMonth() + 1)}-${pad2(n.getDate())}`
 }
-export function monthOf(date: string): string { return (date || '').slice(0, 7) }
 export function monthLabel(m: string): string {
   const [y, mm] = m.split('-')
   return `${y}年${Number(mm)}月`

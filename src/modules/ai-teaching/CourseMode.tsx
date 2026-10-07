@@ -33,7 +33,6 @@ const PHASE_LABEL: Record<string, string> = {
 }
 
 export const COURSE_ST_LABEL = ST_LABEL
-export const COURSE_ST_CLS = ST_CLS
 
 const SRC_MODES: Array<{ k: 'anchor' | 'materials' | 'mixed' | 'free'; t: string; d: string }> = [
   { k: 'anchor', t: '官方考纲 / 教材目录', d: 'AI 只做结构化，不发明；每条知识点标出处' },

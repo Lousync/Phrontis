@@ -37,10 +37,6 @@ const MOD = 'modules/moments'
 const POSTS_FILE = 'posts.json'
 const ALBUMS_FILE = 'albums.json'
 
-/** JSON 文件是否已存在（区分「未播种」与「已迁 vault 但当前为空」，作播种标记） */
-export function vaultMomentsExists(): boolean {
-  return exists(MOD, POSTS_FILE)
-}
 
 /** 按表列默认值补齐缺失字段（手工编辑过的 json 也保持表行形状） */
 function normPost(r: Record<string, unknown>): MomentsRow {

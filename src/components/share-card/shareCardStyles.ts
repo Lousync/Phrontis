@@ -141,11 +141,6 @@ export interface PanelLayout {
   weekTop: number
 }
 
-/**
- * 题目区几何：占据「寄语行之下、周格行之上」的全部空间。
- * 宽度 = 内容宽（左右各 PAD），高度 = 到周格行的余量。
- */
-export type PanelRect = { x: number; y: number; w: number; h: number }
 
 /** 面板流式纵向布局（绘制层与输入层共用；题目区矩形也在这里算出来） */
 /**

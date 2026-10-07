@@ -221,21 +221,6 @@ export function checkinCurrentStreak(records: Array<{ date: string }>, today: st
   return n
 }
 
-/** 最近 n 天（含今天）的打卡序列，**最早的在前**（看板 14 格小热力的数据源） */
-export function checkinHeatSeries(
-  records: Array<{ date: string }>,
-  today: string,
-  n = 14,
-): Array<{ date: string; on: boolean }> {
-  const out: Array<{ date: string; on: boolean }> = []
-  const no = dayNo(today)
-  if (!Number.isFinite(no)) return out
-  for (let i = Math.max(0, n - 1); i >= 0; i--) {
-    const k = keyOfNo(no - i)
-    out.push({ date: k, on: hasCheckinOn(records, k) })
-  }
-  return out
-}
 
 /* ---------------- 分享卡片派生（2026-09-29） ----------------
  * 与上面两条同源：口径只在这里定义一次，分享卡片不另写一套「连续天数 / 周格 / 热力」

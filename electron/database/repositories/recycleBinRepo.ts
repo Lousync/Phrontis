@@ -105,10 +105,6 @@ export function recycleBinAdd(entry: { id: string; original_id: string; module: 
   writeBin(rows)
 }
 
-/** 统一读 API：导出/导入去重等读侧使用（替代散布的 SELECT * FROM recycle_bin 直查 SQL） */
-export function recycleBinGetAll(): RecycleBinRow[] {
-  return readBin()
-}
 
 export function registerRecycleBinHandlers(): void {
   // ---- 获取回收站列表（自动清除过期项） ----

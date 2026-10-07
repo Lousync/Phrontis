@@ -176,16 +176,6 @@ export function cancelInlineSuggest(requestId: string): boolean {
   return true
 }
 
-/** 清空全部在途请求（换仓库 / 退出时兜底） */
-export function cancelAllInlineSuggest(): void {
-  for (const ctrl of inflight.values()) ctrl.abort()
-  inflight.clear()
-}
-
-/** 在途请求数（探针 / 调试用） */
-export function inflightInlineSuggestCount(): number {
-  return inflight.size
-}
 
 // ===== IPC 区（范式同 agentCompress.ts:103） =====
 

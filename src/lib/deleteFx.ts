@@ -28,7 +28,3 @@ export function getDeleteFxSkin(): Promise<DeleteFxSkin | null> {
   })()
 }
 
-/** 插件皮肤变更/卸载后调用，清缓存 */
-export function invalidateDeleteFxSkinCache(): void {
-  cache = undefined
-}

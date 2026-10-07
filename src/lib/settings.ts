@@ -84,11 +84,6 @@ export const ENCODING_OPTIONS = [
   { id: 'gb2312',  label: 'GB2312',  desc: '简体中文' },
 ] as const
 
-export const ICON_SIZE_OPTIONS = [
-  { id: 's', label: '小' },
-  { id: 'm', label: '中' },
-  { id: 'l', label: '大' },
-] as const
 
 export const BLOG_SIZE_OPTIONS = [
   { id: 's', label: '紧凑' },
@@ -112,15 +107,6 @@ export const KNOWLEDGE_SIDEBAR_ITEM_VARS: Record<string, Record<string, string>>
   l: { '--kb-row-py': '9px', '--kb-row-py-lg': '12px', '--kb-row-fs': '16px' },
 }
 
-export const FONT_SIZE_OPTIONS = [
-  { id: 12, label: '12px' },
-  { id: 13, label: '13px' },
-  { id: 14, label: '14px' },
-  { id: 15, label: '15px' },
-  { id: 16, label: '16px' },
-  { id: 18, label: '18px' },
-  { id: 20, label: '20px' },
-] as const
 
 // ===== 设置定义 =====
 

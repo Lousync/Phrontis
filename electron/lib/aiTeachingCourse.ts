@@ -71,8 +71,6 @@ const MODULE = 'modules/aiTeaching'
 const OUTLINE_FILE = '课程.md'
 const STATUSES: CourseUnitStatus[] = ['todo', 'learning', 'check', 'mastered', 'review']
 
-/** 课的默认类型（用户可在开课时选） */
-export const LESSON_KINDS = ['精讲', '习题', '复习', '测验', '答疑'] as const
 const DEFAULT_KIND = '精讲'
 
 function statusLabel(s: CourseUnitStatus | undefined): string {

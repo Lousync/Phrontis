@@ -27,10 +27,6 @@ export interface SecretPwdRow {
 const MOD = 'secret'
 const FILE = 'passwords.json'
 
-/** JSON 文件是否已存在（区分「未播种」与「已迁 vault 但当前为空」） */
-export function vaultSecretPasswordsExists(): boolean {
-  return exists(MOD, FILE)
-}
 
 export function vaultPasswordsAll(): SecretPwdRow[] {
   return readJson<SecretPwdRow[]>(MOD, FILE, [])
