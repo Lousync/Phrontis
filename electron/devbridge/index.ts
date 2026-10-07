@@ -66,6 +66,3 @@ export async function startBridge(deps: BridgeDeps = {}): Promise<void> {
   }
 }
 
-export function isBridgeInstalled(): boolean {
-  return installed
-}

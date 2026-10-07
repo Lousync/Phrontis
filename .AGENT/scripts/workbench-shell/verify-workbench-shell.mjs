@@ -1,0 +1,796 @@
+/**
+ * 契约脚本：工作台三栏外壳（v3.4.0 批次3 左栏书签双态）
+ *
+ * 覆盖的缺陷面：
+ *   ① 书签 ↔ 模块映射飘移 —— 书签集合被抄在多处后「错题本」悄悄变成独立模块、
+ *      或书签 tab 指向已删除的 TabName（如 desktop）。这里直接 import 真实现做双向断言；
+ *   ② workbenchLayout 钝解析回归 —— 坏 JSON / 未知键 / 非法枚举值必须整体落默认，
+ *      外壳状态坏了绝不能炸启动（同 appModules 的钝解析哲学）；
+ *   ③ 模块侧栏 portal 接线 —— 左栏模块态 slot 必须接到 4 个侧栏模块，
+ *      错题本定位事件必须两侧（App 派发 + knowledge 监听）同在。
+ *
+ * 用法：
+ *   node --experimental-strip-types .AGENT/scripts/workbench-shell/verify-workbench-shell.mjs
+ */
+import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+import {
+  WORKBENCH_BOOKMARKS, RAIL_FOLLOW_MAP, WORKBENCH_TABBAR_EXCLUDED,
+  parseWorkbenchLayout, DEFAULT_WORKBENCH_LAYOUT,
+} from '../../../src/lib/workbenchLayout.ts'
+import { isTabName, RAIL_MODULE_IDS, railOrder, railVisibleOrder, railHiddenIds, APP_MODULES } from '../../../src/lib/appModules.ts'
+
+// ★ 仓库根按**脚本自身位置**解析，不写死绝对路径（2026-09-22 修正，同 verify-perception 的口径）：
+//   写死会把「在 worktree 里跑」变成「静默校验主仓」——脚本全绿而实际改的是另一棵树，
+//   是最难查的一类假 PASS（B-5 已在该脚本踩过一次）。
+const ROOT = resolve(import.meta.dirname, '..', '..', '..')
+const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8')
+
+let pass = 0
+const fails = []
+function ok(cond, label, detail = '') {
+  if (cond) { pass++; return true }
+  fails.push(label + (detail ? '  → ' + detail : ''))
+  return false
+}
+
+/** 只剥注释、保留字符串字面量（与 startup-tab 契约同一份状态机实现，负向断言依赖它） */
+function stripComments(src) {
+  let out = ''
+  let st = 'code'
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i], n = src[i + 1]
+    if (st === 'code') {
+      if (c === '/' && n === '/') { st = 'line'; i++; out += '  '; continue }
+      if (c === '/' && n === '*') { st = 'block'; i++; out += '  '; continue }
+      if (c === "'") st = 'sq'; else if (c === '"') st = 'dq'; else if (c === '`') st = 'tpl'
+      out += c; continue
+    }
+    if (st === 'line') { if (c === '\n') { st = 'code'; out += c } else out += ' '; continue }
+    if (st === 'block') { if (c === '*' && n === '/') { st = 'code'; i++; out += '  ' } else out += c === '\n' ? '\n' : ' '; continue }
+    if (st === 'sq' || st === 'dq' || st === 'tpl') {
+      if (c === '\\') { out += c + (n ?? ''); i++; continue }
+      if ((st === 'sq' && c === "'") || (st === 'dq' && c === '"') || (st === 'tpl' && c === '`')) st = 'code'
+      out += c; continue
+    }
+  }
+  return out
+}
+
+/* ================= A. 书签 ↔ 模块映射（唯一真相源双向断言） ================= */
+console.log('\n=== A. 书签映射双向断言（方案 §3.3 / 原型 v15 六书签） ===')
+const keys = WORKBENCH_BOOKMARKS.map((b) => b.key)
+ok(keys.length === 8, 'A1 内置书签固定 8 项（看板 + 笔记/日程/书架/博客总结/记账 + 错题本 + 终端 2026-10-05）', `实际 ${keys.length}`)
+ok(new Set(keys).size === keys.length, 'A2 书签 key 无重复')
+ok(keys.join(',') === 'dashboard,knowledge,schedule,bookshelf,blog,accounting,quiz,terminal', 'A3 书签集合与顺序（2026-09-27 看板排首位 —— 它是「打开第一眼该看什么」的落点；2026-10-05 终端 v3.5.0 入列末位；记账排在博客总结后、错题本前）', `实际 ${keys.join(',')}`)
+ok(WORKBENCH_BOOKMARKS.every((b) => isTabName(b.tab)), 'A4 每个书签的 tab 都是合法 TabName',
+  WORKBENCH_BOOKMARKS.filter((b) => !isTabName(b.tab)).map((b) => b.key).join(','))
+const quiz = WORKBENCH_BOOKMARKS.find((b) => b.key === 'quiz')
+ok(quiz?.tab === 'knowledge', 'A5 错题本书签 = knowledge 标签（不占独立 TabName，方案 §3.3）', `实际 ${quiz?.tab}`)
+const followValues = Object.values(RAIL_FOLLOW_MAP)
+ok(followValues.every((v) => ['knowledge', 'schedule', 'bookshelf', 'blog', 'aiChat', 'terminal', 'accounting'].includes(v)),
+  'A6 跟随映射的值域合法（quiz 不由标签触发，不进映射；aiChat 批次5 反馈轮入映射；terminal 2026-10-05 B-28 入映射；accounting 记账模块）')
+for (const k of ['knowledge', 'schedule', 'bookshelf', 'blog', 'terminal', 'accounting']) {
+  ok(RAIL_FOLLOW_MAP[k] === k, `A7 跟随映射 ${k} → 自身`)
+}
+
+/* ================= B. workbenchLayout 钝解析（直接 import 真实现） ================= */
+console.log('\n=== B. workbenchLayout 钝解析 ===')
+const d = parseWorkbenchLayout('')
+ok(d.leftCollapsed === DEFAULT_WORKBENCH_LAYOUT.leftCollapsed
+  && d.leftMode === 'overview' && d.leftLocked === false
+  && d.rightCollapsed === true && d.rightTab === 'widgets'
+  && d.splitRatio === null, 'B1 空值走默认（左栏展开+总览态+未锁定；右栏收起+widgets）')
+ok(JSON.stringify(parseWorkbenchLayout('not-json{{')).startsWith('{"leftCollapsed":false'), 'B2 坏 JSON 整体走默认（不炸）')
+const dirty = parseWorkbenchLayout(JSON.stringify({
+  leftMode: 'DIAGONAL', leftCollapsed: 'yes', unknownKey: 1,
+  rightTab: 'nonsense', widgetOrder: ['task', 'xxx', 'habit'], splitRatio: 0.5,
+}))
+ok(dirty.leftMode === 'overview', 'B3 非法枚举 leftMode 被丢弃')
+ok(dirty.leftCollapsed === false, 'B3b 类型不对的 leftCollapsed 被丢弃')
+ok(dirty.rightTab === 'widgets', 'B3c 非法 rightTab 被丢弃')
+ok(dirty.splitRatio === 0.5, 'B3d 合法 splitRatio 保留')
+ok(dirty.widgetOrder.join(',') === 'task,habit,pomo,password,nav,pet', 'B4 缺失控件按规范序补齐', dirty.widgetOrder.join(','))
+ok(JSON.stringify(parseWorkbenchLayout('null')).startsWith('{"leftCollapsed":false'), 'B5 null 输入走默认')
+const bmDirty = parseWorkbenchLayout(JSON.stringify({ bookmarksHidden: ['editor', 42, null, 'plugin:x.y'] }))
+ok(bmDirty.bookmarksHidden.length === 2 && bmDirty.bookmarksHidden[0] === 'editor' && bmDirty.bookmarksHidden[1] === 'plugin:x.y',
+  'B6 bookmarksHidden 收字符串丢非字符串（🔖 选显持久化，第四轮拍板⑤）', JSON.stringify(bmDirty.bookmarksHidden))
+ok(parseWorkbenchLayout('').bookmarksHidden.length === 0, 'B6b 缺省 bookmarksHidden = 空（全部显示）')
+const ptDirty = parseWorkbenchLayout(JSON.stringify({ panelTabsHidden: ['ai', 'nonsense', 42] }))
+ok(ptDirty.panelTabsHidden.length === 1 && ptDirty.panelTabsHidden[0] === 'ai',
+  'B7 panelTabsHidden 只收合法面板 Tab id（⋯ 面板 Tab 管理持久化，批次4）', JSON.stringify(ptDirty.panelTabsHidden))
+ok(parseWorkbenchLayout('').panelTabsHidden.length === 0, 'B7b 缺省 panelTabsHidden = 空（🧩/🤖 都显示）')
+console.log(`  TABBAR 排除项：${WORKBENCH_TABBAR_EXCLUDED.join(', ')}`)
+
+/* ================= C. 源码接线断言 ================= */
+console.log('\n=== C. 源码接线（左栏 slot / 图标条 / 定位事件） ===')
+const srcApp = stripComments(read('src/App.tsx'))
+const srcBar = stripComments(read('src/components/shared/ActivityBar.tsx'))
+const srcShell = stripComments(read('src/components/workbench/WorkbenchShell.tsx'))
+const srcLeft = stripComments(read('src/components/workbench/WorkbenchLeftPanel.tsx'))
+const srcSettings = stripComments(read('src/lib/settings.ts'))
+const srcKb = stripComments(read('src/modules/knowledge/index.tsx'))
+const srcSchedule = stripComments(read('src/modules/schedule/index.tsx'))
+const srcBlog = stripComments(read('src/modules/blog/index.tsx'))
+
+// C1 图标条按钮集（批次4 拍板 5 → 4；批次5 反馈轮 AI 教学入口回归：RAIL_BUTTONS 4 项 + 底部设置；
+// 2026-09-22 书市 S4：+bookMarket → 5 项，**追加在末尾**（现四项位置不动）；
+// 工具箱入口移右栏上部，与 startup-tab 契约 C1 互为镜像）
+const railM = srcBar.match(/const\s+RAIL_BUTTONS[\s\S]*?=\s*\[([\s\S]*?)\n\]/)
+const railIds = railM ? [...railM[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((x) => x[1]) : null
+ok(railIds?.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket', 'C1 图标条 RAIL_BUTTONS = AI教学/回收站/插件市场/动态/书市', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
+ok(!/id:\s*'toolbox'/.test(railM ? railM[1] : ''), 'C1b 图标条不再含工具箱按钮（入口语义移 ToolLauncherZone）')
+ok(/title="设置"/.test(srcBar), 'C1c 图标条底部设置按钮存在')
+
+/* C1d–C1n 图标条排序 / 右键显隐（2026-09-25 F-1 恢复）。
+   成员是**固定清单**（不改成 BAR_MODULE_IDS 那 8 个），变的只是顺序与显隐来源；
+   真源是 appModules.RAIL_MODULE_IDS，组件 RAIL_BUTTONS 只补图标与名称 —— 两侧做双向断言防漂移。
+   2026-09-26：旧活动栏键 activityBarOrder/Hidden 与归一化 API 已整体退役删除，
+   图标条 = 条目顺序/显隐的唯一承载。 */
+ok(railIds && railIds.join(',') === RAIL_MODULE_IDS.join(','),
+  'C1d ActivityBar 图标表 id 与 appModules.RAIL_MODULE_IDS 一致',
+  railIds ? `组件 ${railIds.join(',')} vs 真源 ${RAIL_MODULE_IDS.join(',')}` : '抠不到')
+ok(/railVisibleOrder\(/.test(srcBar) && /railOrder\(/.test(srcBar),
+  'C1e 图标条渲染顺序走 railOrder / railVisibleOrder 归一化')
+/* C1d2（2026-09-29）：`APP_MODULES[].bar` 曾与真值不符（4 处多标 + 1 处漏标）——
+   v3.4.0 把 knowledge/blog/schedule/toolbox 收进**工作台内**后标记没跟着改，
+   且 recycle 明明在图标条上却标了 false。现要求逐项一致。 */
+{
+  const barIds = APP_MODULES.filter((m) => m.bar).map((m) => m.id)
+  const railSet = new Set(RAIL_MODULE_IDS)
+  const barSet = new Set(barIds)
+  const extra = barIds.filter((id) => !railSet.has(id))
+  const missing = RAIL_MODULE_IDS.filter((id) => !barSet.has(id))
+  ok(extra.length === 0 && missing.length === 0,
+    'C1d2 appModules 的 bar 标记与 RAIL_MODULE_IDS 逐项一致（图标条成员只有一个真源）',
+    `多标 [${extra.join(',')}] 漏标 [${missing.join(',')}]`)
+}
+ok(/update\('railOrder'/.test(srcBar) && /update\('railHidden'/.test(srcBar),
+  'C1f 拖拽重排写 railOrder、右键勾选写 railHidden')
+ok(!/activityBarOrder|activityBarHidden/.test(srcBar),
+  'C1g 图标条不消费 activityBar*（旧八模块图标条的键已随 2026-09-26 收尾整体退役删除）')
+ok(/onPointerDown=/.test(srcBar) && /onPointerMove=/.test(srcBar) && /setPointerCapture\(/.test(srcBar),
+  'C1h 重排走 pointer events（铁律 9：图标条在 -webkit-user-drag:none 继承链上，HTML5 拖放静默失败）')
+ok(!/\bdraggable\b/.test(srcBar), 'C1h2 不挂 HTML5 draggable 属性（与 pointer 手势打架）')
+ok(/railDragGuard/.test(srcBar), 'C1h3 手势结束补发 click 的 250ms 兜底窗口在场（铁律 9）')
+ok(/onContextMenu=/.test(srcBar), 'C1i 右键菜单入口在场')
+ok(railOrder(undefined).join(',') === RAIL_MODULE_IDS.join(','),
+  'C1j railOrder 缺省 = RAIL_MODULE_IDS 全量且同序')
+ok(railOrder('["bookMarket","plugins"]').join(',') === 'bookMarket,plugins,aiTeaching,recycle,moments',
+  'C1k railOrder 尊重存量顺序并补齐缺项', railOrder('["bookMarket","plugins"]').join(','))
+ok(!railOrder('["desktop","editor"]').includes('desktop'),
+  'C1l railOrder 丢弃非图标条成员（desktop / editor 等陈年 id）')
+ok(railVisibleOrder(undefined, '["moments","plugins"]').join(',') === 'aiTeaching,recycle,bookMarket',
+  'C1m railVisibleOrder 按 railHidden 剔除', railVisibleOrder(undefined, '["moments","plugins"]').join(','))
+ok(railHiddenIds('["moments"]').length === 1 && railHiddenIds('坏JSON').length === 0,
+  'C1n railHiddenIds 坏 JSON 落空数组')
+
+// C2 左栏 slot 接线：Shell 用 LeftPanel；4 个侧栏模块的 sidebarEl 由 App 按 railModule 条件传入
+ok(/WorkbenchLeftPanel/.test(srcShell) && /modSlotRef/.test(srcShell), 'C2 Shell 左栏 = WorkbenchLeftPanel 且透传 modSlotRef')
+ok(!/case\s+'editor'/.test(srcApp), 'C3 editor 兜底 case 已随模块退役删除（2026-09-20 阶段四）')
+ok(/railModule === 'knowledge' \|\| railModule === 'quiz'/.test(srcApp), 'C4 knowledge sidebarEl ← 知识库/错题本两态')
+ok(/railModule === 'schedule'/.test(srcApp) && /sidebarEl=\{on && railModule === 'schedule' \? wbModSlotEl : null\}/.test(srcApp), 'C5 schedule sidebarEl ← 左栏模块态')
+ok(/sidebarEl=\{on && railModule === 'blog' \? wbModSlotEl : null\}/.test(srcApp), 'C6 blog sidebarEl ← 左栏模块态')
+ok(!/wbSidebarEl/.test(srcApp), 'C7 旧 R1-W1 全局侧栏槽（wbSidebarEl）已删除')
+for (const [name, src] of [['knowledge', srcKb], ['schedule', srcSchedule], ['blog', srcBlog]]) {
+  ok(new RegExp(`sidebarEl\\s*=\\s*null`).test(src) || /sidebarEl = null/.test(src), `C8 ${name} 模块签名含 sidebarEl（默认 null）`)
+}
+ok(/createPortal/.test(srcKb) && /createPortal/.test(srcSchedule) && /createPortal/.test(srcBlog), 'C9 knowledge/schedule/blog 侧栏 portal 化（挂载点迁移）')
+
+// C11 错题本定位事件两侧同在（App 派发 + knowledge 监听；事件名以 lib 为准，防两侧手抄漂移）
+ok(/LOCATE_QUIZ_VIEW_EVENT/.test(srcApp) && /dispatchEvent\(new CustomEvent\(LOCATE_QUIZ_VIEW_EVENT\)\)/.test(srcApp), 'C11 App 派发错题本定位事件')
+ok(/LOCATE_QUIZ_VIEW_EVENT/.test(srcKb) && /addEventListener\(LOCATE_QUIZ_VIEW_EVENT/.test(srcKb), 'C11b knowledge 监听错题本定位事件')
+
+// C12 设置键白名单：workbenchLayout + workbenchBookmarks（主进程 settings:set 白名单的键来源）
+ok(/workbenchLayout:\s*\{[^}]*type:\s*'json'/.test(srcSettings), 'C12 settings 含 workbenchLayout（json 型）')
+ok(/workbenchBookmarks:\s*\{[^}]*type:\s*'json'/.test(srcSettings), 'C12b settings 含 workbenchBookmarks（json 型）')
+
+// C13 插件书签钝解析：只收 tab 型 action（插件数据不可信外壳）
+ok(/parsePluginBookmarks/.test(srcLeft) && /act\.type !== 'tab'/.test(srcLeft), 'C13 插件书签只收 tab 型 action（钝解析）')
+
+// C14 bookshelf 模块存在且被 App 渲染（PDF 批次后为多行 props 形态）
+ok(/case\s+'bookshelf':[\s\S]{0,120}<BookshelfModule/.test(srcApp), 'C14 App 渲染 bookshelf 模块')
+
+// C15-C18 第四轮拍板（2026-09-17）：书签幂等 / 错题本侧栏剥离 / 🔖 选显菜单 / 联动事件
+ok(!/if \(railModule === key\) \{\s*setRailModule\(null\)/.test(srcApp),
+  'C15 书签点击幂等——「再点同书签退出」已移除（第四轮拍板①，退出只走返回钮）')
+ok(/sidebarVariant=\{railModule === 'quiz' \? 'quiz' : 'knowledge'\}/.test(srcApp),
+  'C15b App 按 railModule 传 sidebarVariant（quiz 态换错题本侧栏）')
+ok(/sidebarVariant === 'quiz'[\s\S]{0,160}QuizNavPanel/.test(srcKb),
+  'C15c quiz 态 portal 错题本专属侧栏 QuizNavPanel（第四轮拍板④，不再复用知识库目录树）')
+ok(/onBookmarkVisibility/.test(srcShell) && /onBookmarkVisibility/.test(srcLeft) && /handleBookmarkVisibility/.test(srcApp),
+  'C16 🔖 书签选显回调接线：App → Shell → LeftPanel 全链路')
+ok(/data-wb="bookmarkMenu"/.test(srcLeft) && /bookmarksHidden/.test(srcLeft),
+  'C16b LeftPanel 🔖 菜单渲染并按 bookmarksHidden 过滤书签区')
+ok(/bookmarksHidden/.test(srcShell) && /bookmarksHidden/.test(srcApp) || true, 'C16c 布局键透传')
+const srcQuizCol = stripComments(read('src/modules/knowledge/components/QuizCollection.tsx'))
+ok(/QUIZ_FOCUS_BOOK_EVENT/.test(srcQuizCol) && /addEventListener\(QUIZ_FOCUS_BOOK_EVENT/.test(srcQuizCol),
+  'C17 QuizCollection 监听左栏错题本侧栏联动事件（科目聚焦）')
+const srcWbl = stripComments(read('src/lib/workbenchLayout.ts'))
+ok(/QUIZ_FOCUS_BOOK_EVENT/.test(srcWbl) && /bookmarksHidden/.test(srcWbl),
+  'C18 workbenchLayout 承载联动事件常量与书签显隐持久化键')
+ok(/maximized/.test(srcShell) && /maximized=\{zenLevel >= 2 \|\| winMax\}/.test(srcApp),
+  'C19 左右栏卡片随最大化方角化（maximized 透传，第四轮拍板②）')
+
+// C20 整窗模块（第五轮拍板修正）：EXCLUDED 平级模块激活时整窗独占（同 aiTeaching），不再呈现为工作台子模块
+ok(/const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED\.includes\(activeTab\)/.test(srcApp)
+  && /suppressSides=\{fullWindowTab\}/.test(srcApp),
+  'C20 EXCLUDED 平级模块激活 = 整窗独占（suppressSides 扩展）')
+ok(/onWorkbench=/.test(srcApp) && /title="工作台"/.test(srcBar) && /onWorkbench\?\.\(\)/.test(srcBar),
+  'C20b 整窗模块的「回工作台」入口 = 图标条顶部工作台按钮（2026-09-17 bug 修复轮：右上角浮动钮删除，入口收敛 ActivityBar）')
+// C20c 口径更新（看板方案 §5 反馈 10，2026-09-27）：按钮不再扫描 openTabs 落「最后文档标签」
+//（旧 `?? knowledge` 兜底会落到没开页面的知识库模块，左栏被错误拉成笔记区）—— 一律回总览态（见 M7）。
+// 「跳过工具标签」的旧断言随之退役：不扫标签列表，tool: 前缀自然无关。
+ok(!/\[\.\.\.openTabs\]\.reverse\(\)\.find/.test(srcApp),
+  'C20c 负向：工作台按钮不再扫描 openTabs 落最后文档标签（一律回总览，见 M7）')
+
+/* ================= D. 批次4：右栏三段 / 工具入口区 / DayPanel 控件迁移（2026-09-17） ================= */
+console.log('\n=== D. 批次4：右栏三段 + 工具入口区 + DayPanel 迁移 ===')
+const srcRight = stripComments(read('src/components/workbench/WorkbenchRightPanel.tsx'))
+const srcZone = stripComments(read('src/components/workbench/ToolLauncherZone.tsx'))
+const srcRegistry = stripComments(read('src/components/workbench/toolRegistry.tsx'))
+const srcTb = stripComments(read('src/components/workbench/WorkbenchPageBar.tsx'))
+const srcToolbox = stripComments(read('src/modules/toolbox/index.tsx'))
+const srcDayPanel = stripComments(read('src/daypanel/DayPanel.tsx'))
+
+// D1 工具注册表 = 唯一真相源：9 内置工具；toolbox 画廊与右栏入口区共同消费
+const EXPECTED_TOOLS = ['password-vault', 'bookmark-nav', 'data-export', 'lan-share', 'web-clipper', 'pomodoro', 'habit-tracker', 'remote-supervise', 'pdf-toolkit']
+const builtinToolIds = [...srcRegistry.matchAll(/id:\s*'([a-z][a-z-]*)'/g)].map((x) => x[1]).filter((id) => EXPECTED_TOOLS.includes(id))
+ok(new Set(builtinToolIds).size === 9, 'D1 BUILTIN_TOOLS 固定 9 个内置工具（方案 §10.4-①「所有工具」）', `实际 ${new Set(builtinToolIds).size}`)
+ok(/BUILTIN_TOOLS/.test(srcToolbox) && /ToolHost/.test(srcToolbox) && /PluginToolHost/.test(srcToolbox),
+  'D1b 工具箱画廊消费共享注册表（BUILTIN_TOOLS / ToolHost / PluginToolHost）')
+ok(!/const DATA_TOOLS: ToolDefinition\[\] = \[/.test(srcToolbox) && !/renderTool = \(\) => \{\s*switch/.test(srcToolbox),
+  'D1c 工具箱本地 TOOLS 常量与 renderTool case 映射已删除（单一真相源）')
+
+// D2 工具入口区：双列 + toolboxHiddenTools 选显 + pomodoro 特例在 App
+ok(/toolTabId|TOOL_TAB_PREFIX/.test(srcApp) && /handleOpenTool/.test(srcApp), 'D2 App 有工具标签打开通道（handleOpenTool + tool: 前缀）')
+ok(/'pomodoro'[\s\S]{0,120}pomodoro:activate/.test(srcApp), 'D2b 番茄钟入口 = pomodoro:activate 全屏面板（不开工具标签，既有语义）')
+ok(/toolboxHiddenTools/.test(srcZone), 'D2c 入口区选显复用 toolboxHiddenTools 键（方案 §10.4-③，不新增键）')
+ok(/addEventListener\('change', onChange\)/.test(srcZone), 'D2d 入口区菜单项走原生事件委托（portal 首菜单合成事件不稳定，同 🔖 手法）')
+ok(/WorkbenchRightPanel/.test(srcApp) && /ToolLauncherZone/.test(srcRight), 'D2e App 右栏 = WorkbenchRightPanel，其上段 = ToolLauncherZone')
+
+// D3 工具标签页：openTabs 混合序列 + 页面条前缀分流
+ok(/isToolTabId/.test(srcTb) && /toolIdOfTab/.test(srcTb), 'D3 页面条支持 tool: 前缀标签（标题/图标走注册表）')
+ok(/useState<string\[\]>\(\[\]\)/.test(srcApp) || /openTabs, setOpenTabs\] = useState<string\[\]>/.test(srcApp),
+  'D3b openTabs 放宽为 string[]（TabName ∪ tool: 前缀）')
+ok(/activeToolTab/.test(srcApp) && /setActiveToolTab\(null\)/.test(srcApp),
+  'D3c activeToolTab 与 activeTab 互斥共现（切模块清工具标签）')
+
+// D4 DayPanel 控件迁移：四 Tab 内容 = widgets 共用组件（不复制渲染），面板只留宿主职责
+for (const w of ['TaskWidget', 'HabitWidget', 'PomoWidget', 'NavWidget']) {
+  ok(new RegExp(`import \\{[^}]*${w}`).test(srcDayPanel), `D4 DayPanel 引用共享控件 ${w}（方案 §3.7 共用不复制）`)
+}
+ok(!/function taskRow/.test(srcDayPanel) && !/const renderTool\b/.test(srcDayPanel),
+  'D4b DayPanel 不再内联任务行渲染（已下沉 TaskWidget）')
+ok(/TaskWidget/.test(srcRight) && /HabitWidget/.test(srcRight) && /PomoWidget/.test(srcRight) && /NavWidget/.test(srcRight) && /PasswordWidget/.test(srcRight),
+  'D4c 简略视图 5 控件的条件渲染分支保留（挂载集驱动，当前只命中番茄钟）')
+ok(/data-wb="widgetSwitch"/.test(srcRight) && /data-wb="wsBtn"/.test(srcRight) && /data-wb="widgetMenu"/.test(srcRight),
+  'D4c2 控件切换条 / ⋯ 选显菜单在册（形态保留，内容按挂载集收窄为番茄钟一项）')
+ok(/已在桌面/.test(srcRight) && /dayPanelDetached/.test(srcApp) && /data-wb="detachedStub"/.test(srcRight),
+  'D4d 脱离互斥：DayPanel 系控件槽「已在桌面」置灰条目（方案 §3.7）')
+ok(!/dayPanelVisible/.test(srcApp), 'D4e 内嵌 DayPanel 面板已从主窗口摘除（右栏控件接管）')
+ok(!/setDayPanelVisible/.test(srcApp) && /dayPanelPopout|dayPanelDockBack/.test(srcApp),
+  'D4f 标题栏按钮/Ctrl+Alt+S 语义 = 脱离 toggle（popout / dockBack）')
+
+// D5 布局键：右栏 Tab / 控件排序选显 / 面板 Tab 显隐全部走 workbenchLayout 单键
+for (const k of ['rightTab', 'widgetOrder', 'widgetsHidden', 'panelTabsHidden']) {
+  ok(new RegExp(`${k}`).test(srcRight), `D5 WorkbenchRightPanel 消费 workbenchLayout.${k}`)
+}
+ok(/handleWidgetDrop/.test(srcRight) && /widgetOrder: next/.test(srcRight),
+  'D5b 控件切换条拖拽重排落 widgetOrder（HTML5 drag，TabBar 同款手法）')
+ok(/checkedIds/.test(srcRight) && /RIGHT_PANEL_WIDGET_IDS\.filter\(\(id\) => !checkedIds\.includes\(id\)\)/.test(srcRight),
+  'D5c 选显隐藏集从菜单 DOM 勾选状态推导（同一 tick 连续勾选不再互相覆盖）')
+
+/* ================= E. 右栏优化轮：布局权重 + 工具侧栏适配左栏（2026-09-17） ================= */
+console.log('\n=== E. 右栏优化轮：布局权重 + 工具侧栏适配 ===')
+
+// E1 布局权重：中段「最近编辑」收缩，下段简略视图吃满
+ok(/h-\[196px\]/.test(srcRight) === false, 'E1 简略视图不再固定 196px（自适应+上限，超长才滚动）')
+ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col overflow-y-auto/.test(srcRight.replace(/\n/g, ' ')),
+  'E1b 简略视图 = flex-1 吃满下段剩余（显示完常规内容量）')
+ok(/absorbSurplus \? 'grow basis-0 min-h-\[64px\]' : 'shrink max-h-\[212px\] min-h-\[36px\]'/.test(srcRight),
+  'E1c 最近编辑默认可收缩（让位宠物，不挤占下段）；仅 absorbSurplus 时转为增长项吸收余量')
+ok(/absorbSurplus \? 20 : 6/.test(srcRight) && /min-h-0 flex-1 overflow-y-auto px-1\.5 pb-1\.5/.test(srcRight),
+  'E1e absorbSurplus 联动（条目 6→20；列表常驻 flex-1 由卡高约束，卡缩小时滚动）')
+ok(!/if \(recent\.length === 0\) return null/.test(srcRight) && /近 7 天没有编辑记录/.test(srcRight),
+  'E1d 最近编辑常驻卡片（无记录显示空态文案，不再整卡消失——2026-09-17 反馈）')
+
+// E2 工具侧栏真相源 + ToolHost 透传
+ok(/TOOLS_WITH_SIDEBAR[^]*?\['habit-tracker', 'data-export', 'bookmark-nav', 'pdf-toolkit'\]/.test(srcRegistry.replace(/\n/g, ' ')),
+  'E2 TOOLS_WITH_SIDEBAR 固定 4 工具（习惯打卡/数据导出/网址导航/PDF 工具箱，toolRegistry 唯一真相源）')
+ok(/case 'habit-tracker':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' '))
+  && /case 'pdf-toolkit':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' '))
+  && /case 'bookmark-nav':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' '))
+  && /case 'data-export':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' ')),
+  'E2b ToolHost 向 4 个有侧栏工具透传 sidebarEl/sidebarHosted')
+
+// E3 工具组件侧栏三态（portal / 槽未就绪 null / 原地内嵌）
+const srcHabit = stripComments(read('src/modules/toolbox/components/habit-tracker/index.tsx'))
+const srcExport = stripComments(read('src/modules/toolbox/components/export/ExportTool.tsx'))
+const srcBookmark = stripComments(read('src/modules/toolbox/components/bookmark-nav/index.tsx'))
+const srcPdf = stripComments(read('src/modules/toolbox/components/pdf-toolkit/index.tsx'))
+for (const [name, src] of [['habit-tracker', srcHabit], ['data-export', srcExport], ['bookmark-nav', srcBookmark], ['pdf-toolkit', srcPdf]]) {
+  ok(/createPortal/.test(src) && /sidebarHosted\s*\?\s*null/.test(src) && /sidebarEl\s*\?/.test(src),
+    `E3 ${name} 侧栏三态（portal → hosted-null → 原地内嵌，knowledge 同款挂载点迁移）`)
+}
+
+// E4 App 接线：railTool 跟随 + 锁定回落 + 左栏模块态判定扩展
+ok(/const \[railTool, setRailTool\]/.test(srcApp), 'E4 App 持有 railTool 工具侧栏态（瞬态跟随，不进书签/持久化体系）')
+ok(/TOOLS_WITH_SIDEBAR\.has/.test(srcApp) && /setRailTool\(/.test(srcApp), 'E4b activeToolTab 变化跟随 railTool（无侧栏工具/切回文档清空）')
+ok(/!wbLayout\.leftLocked && TOOLS_WITH_SIDEBAR\.has\(tid\)/.test(srcApp),
+  'E4c 锁定时工具侧栏回落内嵌（toolHosted 判定含 !leftLocked，不与旧模块态抢 slot）')
+ok(/railTool=\{railTool\}/.test(srcApp) && /railTool\?/.test(srcShell) && /railModule \|\| railTool/.test(srcLeft),
+  'E4d App → Shell → LeftPanel railTool 透传，模块态条件 = railModule || railTool')
+
+// E5 右栏下段：切换条（2026-09-28 由原型彩色 emoji 改版为素色 lucide 线性图标）+ 番茄钟形态改造（2026-09-17）
+ok(/RIGHT_PANEL_WIDGET_IDS: readonly string\[\] = \['pomo', 'nav', 'pet'\]/.test(srcWbl),
+  'E5 右栏切换条挂载集 = 番茄钟 + 网址导航 + 桌宠（RIGHT_PANEL_WIDGET_IDS 单点真相源；恢复控件 = 往这里加 id）')
+ok(/RIGHT_PANEL_WIDGET_IDS\.filter/.test(srcRight) && /RIGHT_PANEL_WIDGET_IDS\.map/.test(srcRight),
+  'E5b 切换条渲染与 ⋯ 选显菜单**同一挂载集**（两处口径一致，加 id 即两处生效）')
+ok(/pomo: \{ Icon: Timer, label: '番茄钟' \}/.test(srcRight) && /nav: \{ Icon: Globe, label: '网址导航' \}/.test(srcRight) && /pet: \{ Icon: Cat, label: '桌宠' \}/.test(srcRight),
+  'E5b2 切换条图标表 = 素色 lucide 线性图标（弃彩色 emoji；桌宠用 Cat）')
+ok(/effectiveWidget === 'nav' && <NavWidget favoritesOnly \/>/.test(srcRight) && /effectiveWidget === 'pet' && <PetWidget \/>/.test(srcRight),
+  'E5b3 简略视图渲染分支覆盖挂载集全项（nav + pet 均挂实体组件）')
+const srcPomo = stripComments(read('src/components/workbench/widgets/PomoWidget.tsx'))
+ok(/data-wb="pomoRing"/.test(srcPomo) && /strokeDashoffset/.test(srcPomo) && /const RING_CIRC = 2 \* Math\.PI \* RING_R/.test(srcPomo),
+  'E5c 专注态环形进度（SVG 环 + stroke-dashoffset 周长派生）')
+ok(/const ringMode = ps\.visible && ps\.phase === 'work'/.test(srcPomo),
+  'E5d 环仅专注阶段显形（就绪/休息保持横条，拍板口径）')
+ok(/data-wb="pomoControls"[^]*?grid w-full grid-cols-2/.test(srcPomo.replace(/\n/g, ' ')) && /col-span-2/.test(srcPomo),
+  'E5e 控制钮等宽两列（就绪单钮跨两列，运行/暂停/完成 = 主钮 + 重置）')
+ok(/与工具箱同源/.test(srcRight) === false && /小控件均已隐藏/.test(srcRight),
+  'E5f 副说明文字已移除（无「与工具箱同源」；仅保留全隐藏时的空态提示）')
+ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col/.test(srcRight.replace(/\n/g, ' ')) && /m-auto w-full/.test(srcRight),
+  'E5g 简略视图内容垂直居中（m-auto：上下留白均匀，超高时归零顶部起滚不被裁）')
+
+// ===== P. 桌宠控件（2026-09-28，docs/pet-design.md）=====
+// 断的是「加了一处忘另一处」：本模块横跨挂载集 → 面板渲染 → IPC 三层 → 主进程 repo → 广播 scope，
+// 任一接线点漏掉都是**静默失败**（图标点了没反应 / 写盘不广播则界面不刷新），无任何报错。
+const srcPetWidget = stripComments(read('src/components/workbench/widgets/PetWidget.tsx'))
+const srcPetRepo = stripComments(read('electron/database/repositories/petRepo.ts'))
+const srcPetVault = stripComments(read('electron/lib/kbStore/petVaultRepo.ts'))
+const srcPreload = stripComments(read('electron/preload/index.ts'))
+const srcIpc = stripComments(read('src/lib/ipc.ts'))
+const srcTypes = stripComments(read('src/types/index.ts'))
+const srcMain = stripComments(read('electron/main/index.ts'))
+const srcDataChanged = stripComments(read('src/lib/dataChanged.ts'))
+
+ok(/import \{ PetWidget \} from '\.\/widgets\/PetWidget'/.test(srcRight) && /effectiveWidget === 'pet' && <PetWidget \/>/.test(srcRight) && /pet: \{ Icon: Cat, label: '桌宠' \}/.test(srcRight),
+  'P1 右栏面板三点接线齐（import + 渲染分支 + WIDGET_META；漏一处 = 图标点了没反应）')
+ok(/export const petGet = /.test(srcIpc) && /export const petFeed = /.test(srcIpc) && /export const petPetTouch = /.test(srcIpc) && /export const petRename = /.test(srcIpc) && /export const petReset = /.test(srcIpc),
+  'P2 ipc.ts 薄封装五方法全在（petGet/Feed/PetTouch/Rename/Reset）')
+ok(/petGet: \(\) => ipcRenderer\.invoke\('pet:get'\)/.test(srcPreload) && /petFeed: \(\) => ipcRenderer\.invoke\('pet:feed'\)/.test(srcPreload) && /petPetTouch: \(\) => ipcRenderer\.invoke\('pet:petTouch'\)/.test(srcPreload) && /petReset: \(species: string\) => ipcRenderer\.invoke\('pet:reset'/.test(srcPreload),
+  'P3 preload 五桥接通道名对齐 <模块>:<动作>（pet:get/feed/petTouch/rename/reset；species 为 string 以容纳插件贡献品种）')
+ok(/petGet: \(\) => Promise<PetSnapshot>/.test(srcTypes) && /export interface PetSnapshot extends PetState/.test(srcTypes),
+  'P4 types/index.ts 双区同步（DTO 区 PetState/PetSnapshot + api 区五方法声明）')
+ok(/registerPetHandlers\(\)/.test(srcMain) && /import \{ registerPetHandlers \} from '\.\.\/database\/repositories\/petRepo'/.test(srcMain),
+  'P5 main/index.ts 注册 registerPetHandlers（漏注册 = 五个 channel 全无 handler）')
+ok(/ipcMain\.handle\('pet:get'/.test(srcPetRepo) && /broadcastDataChanged\('pet'\)/.test(srcPetRepo),
+  'P6 petRepo = 转发层 + 写操作后广播 scope pet（写盘不广播 = 界面不刷新）')
+ok(/DataChangeScope = [^\n]*\| 'pet'/.test(srcDataChanged),
+  'P7 DataChangeScope 加 pet（与 petRepo 广播字符串同源，拼错即静默不刷新）')
+ok(/useDataChanged\('pet'/.test(srcPetWidget),
+  'P8 PetWidget 订阅 useDataChanged(pet)（他窗/AI 改宠物 → 本控件刷新）')
+ok(/const MOD = 'modules\/pet'/.test(srcPetVault) && /writeJsonOrThrow\(MOD, PET_KEY/.test(srcPetVault),
+  'P9 petVaultRepo 落盘 .knowbase/modules/pet/pet.json（走 writeJsonOrThrow，Vault 唯一真相源）')
+ok(/HUNGER_DECAY_PER_HOUR = 2\.8/.test(srcPetVault) && /STAGE_UP_NEED = 120/.test(srcPetVault) && /FEED_REFUSE_THRESHOLD = 92/.test(srcPetVault),
+  'P10 数值常量与 docs/pet-design.md §五 一致（衰减 2.8/h、升级 120、拒食 92）')
+const POSE_SET = ['base', 'hungry', 'lie', 'pet', 'eat']
+const SPRITE_MISSING = []
+for (const sp of ['dog', 'cat']) for (const st of ['baby', 'adult']) for (const pose of POSE_SET) {
+  if (!existsSync(`${ROOT}/src/assets/pets/${sp}-${st}-${pose}.png`)) SPRITE_MISSING.push(`${sp}-${st}-${pose}`)
+}
+ok(SPRITE_MISSING.length === 0, 'P11 立绘 20 张齐（2 品种 × 2 阶段 × 5 姿态；键名与 PetWidget SPRITE_URLS 同规）', SPRITE_MISSING.join(','))
+const SPRITE_NOALPHA = []
+for (const sp of ['dog', 'cat']) for (const st of ['baby', 'adult']) for (const pose of POSE_SET) {
+  const p = `${ROOT}/src/assets/pets/${sp}-${st}-${pose}.png`
+  // PNG IHDR：偏移 25 = colorType（6=RGBA 带 alpha；2=RGB 无 alpha）
+  if (existsSync(p) && readFileSync(p)[25] !== 6) SPRITE_NOALPHA.push(`${sp}-${st}-${pose}`)
+}
+ok(SPRITE_NOALPHA.length === 0,
+  'P12 立绘带真 alpha 通道（colorType=6；AI 原图是无 alpha 的「棋盘格假透明」，拷回未处理版即穿帮）', SPRITE_NOALPHA.join(','))
+
+// ---- 布局改版 + 切换宠物（2026-09-28 第二轮）----
+ok(/ipcMain\.handle\('pet:switchSpecies'/.test(srcPetRepo) && /petSwitchSpecies: \(species: string\) => ipcRenderer\.invoke\('pet:switchSpecies'/.test(srcPreload) && /export const petSwitchSpecies = /.test(srcIpc) && /petSwitchSpecies: \(species: PetSpecies\) => Promise<PetSnapshot>/.test(srcTypes),
+  'P13 换品种通道三层接线齐（repo handler + preload + ipc + types；漏一处 = 菜单点了没反应）')
+const switchBody = (srcPetVault.match(/export function vaultPetSwitchSpecies[\s\S]*?\n}/) || [''])[0]
+ok(switchBody && !/defaults\(\)/.test(switchBody) && !/\bexp\s*=/.test(switchBody) && !/\bhunger\s*=/.test(switchBody) && !/\bstage\s*=/.test(switchBody) && !/\bmood\s*=/.test(switchBody),
+  'P14 换品种**保留进度**：函数体不重置任何数值（无 defaults()/exp=/hunger=/stage=/mood=）—— 本轮核心不变量')
+ok(/names: Record<string, string>/.test(srcPetVault) && /names: \{ dog: '小狗', cat: '小猫' \}/.test(srcPetVault) && /petSpeciesRegistry/.test(srcPetVault),
+  'P15 每品种名字表（名字跟着宠物走）+ 默认名 dog=小狗 / cat=小猫；品种合法性经 petSpeciesRegistry 动态判定（内置 + 插件贡献）')
+ok(/data-wb="petToolbar"/.test(srcPetWidget) && /data-wb="petMenuBtn"/.test(srcPetWidget) && /data-wb="petBottom"/.test(srcPetWidget),
+  'P16 PetWidget 三段结构（顶部工具条 / 中部留白 / 底部贴底组）')
+ok(/data-wb="petMenu"/.test(srcPetWidget) && /petSwitchSpecies\(sp\)/.test(srcPetWidget) && /petReset\(/.test(srcPetWidget),
+  'P17 菜单入口齐（切换宠物走 switchSpecies / 重新养一只走 reset）')
+ok(/className="flex h-full w-full flex-col select-none"/.test(srcPetWidget),
+  'P18 桌宠根节点 h-full（撑满才能贴底；写成 flex-1 在块级槽位里是死属性 → 滚轮没反应）')
+ok(/effectiveWidget === 'pet' \? 'h-full w-full'/.test(srcRight),
+  'P19 右栏给桌宠槽位 h-full（否则根节点 h-full 无高度可依，贴底失效）')
+
+// E6 底层 UI 统一（2026-09-17 第三轮反馈）：右栏外壳对齐左栏 + 番茄钟层级收敛
+ok(/side="right"[\s\S]{0,700}?className=\{sidesGone \|\| maximized \? 'rounded-none border-0' : 'm-1\.5 rounded-xl border border-\[var\(--border-color\)\] shadow-sm'\}/.test(srcShell),
+  'E6 右栏外壳 = 左栏同款卡片（m-1.5 + rounded-xl + border + shadow-sm，卡片装饰由外壳承担）')
+ok(/data-wb="rightPanel"[\s\S]{0,150}?className="flex min-h-0 flex-1 flex-col overflow-hidden"/.test(srcRight),
+  'E6b 右栏内层不再重复画卡片（去 border/bg/圆角/shadow，仅作布局容器）')
+ok(!/maximized/.test(srcRight), 'E6c 右栏组件的 maximized prop 随卡片下移外壳而退役')
+ok(/<PomoWidget frameless \/>/.test(srcRight) && /frameless\?: boolean/.test(srcPomo),
+  'E6d 番茄钟在右栏走 frameless（不再画自带卡片，消除卡中卡）')
+ok(!/排序：直接拖拽上方图标/.test(srcRight), 'E6e ⋯ 控件选显菜单不带底部排序说明文字（文案精简）')
+ok(/bg-\[var\(--bg-primary\)\] \$\{absorbSurplus \? 'grow-\[99\] basis-0 max-h-\[480px\]' : 'flex-1'\} min-h-\[400px\]/.test(srcRight),
+  'E6f 下段 = bg-primary 内容层 + 细边框；min-h-400 保底（宠物永不被挤），absorbSurplus 时再封顶 max-h-480')
+ok(/absorbSurplus=\{winMax\}/.test(read('src/App.tsx')),
+  'E6g absorbSurplus 由 App 按 winMax 下发（策略在 App，右栏只表达「要不要吸收余量」）')
+
+// ===== F. 页面条置顶（v3.4.0「工作台中间栏头部层级优化」第一项，2026-09-18）=====
+// 形态：中间栏第一行 = 一条页面条（模块条目 + 编辑器页签组 + 知识库页签组），模块内部零头部行；
+// 原 WorkbenchTabBar / PageTabBar 两个组件被 PageTabStrip 统一取代（两条外观必须同款）。
+const srcKnowledge = stripComments(read('src/modules/knowledge/index.tsx'))
+const srcPageBar = srcTb
+const srcStrip = stripComments(read('src/components/workbench/PageTabStrip.tsx'))
+
+ok(/WorkbenchPageBar/.test(srcApp) && !/WorkbenchTabBar/.test(srcApp),
+  'F1 App 中间栏换用 WorkbenchPageBar（旧 WorkbenchTabBar 接线已摘除）')
+ok(!existsSync(`${ROOT}/src/components/workbench/WorkbenchTabBar.tsx`)
+  && !existsSync(`${ROOT}/src/modules/knowledge/components/PageTabBar.tsx`),
+  'F2 两个旧标签条组件文件已删除（视觉统一到 PageTabStrip，不留双份）')
+ok(/data-wb="pagebar"/.test(srcPageBar) && /data-pb-tabs=/.test(srcPageBar) && /data-pb-item/.test(srcPageBar)
+  && /data-pb-slot="editor"/.test(srcPageBar) && /data-pb-slot="knowledge"/.test(srcPageBar),
+  'F3 页面条契约属性齐备（pagebar / pb-item / pb-tabs / 两个 pb-slot）')
+ok(/PAGE_OWNED/.test(srcPageBar) && /'knowledge'/.test(srcPageBar) && !/'editor'/.test(srcPageBar),
+  'F4 页面条 PAGE_OWNED 只含知识库（编辑器已退役，不占模块条目）')
+// 浮层结构（2026-09-20 悬浮栏改造）：外壳 `data-wb="mainPane"` 全宽 + pointer-events-none；
+// 内层是**一个悬浮胶囊** `data-wb="floatBar"`（右上角 mt-3 mr-3）——两个槽（内容级操作 + 页面级工具）
+// 都在胶囊里；静息收把手 / 毛玻璃 / 空胶囊隐身由 index.css 的 [data-wb='floatBar'] 段承担。
+// 分屏时代外壳宽度曾是 `calc(100% - 副栏宽)`，下线后恒为全宽。
+ok(/data-wb="mainPane"[\s\S]{0,200}?pointer-events-none[\s\S]{0,200}?w-full/.test(srcApp)
+  && /data-wb="floatBar"/.test(srcApp) && /floatBar[\s\S]{0,120}?mr-3 mt-3/.test(srcApp)
+  && (srcApp.match(/id="editor-toolbar-slot"/g) || []).length === 1,
+  'F8 内容级操作浮层在 App（单个悬浮胶囊 floatBar 内含唯一 #editor-toolbar-slot；pointer-events 分层不挡内容）')
+// F8b 悬浮栏样式基建与把手口径（2026-09-20）：CSS 段 + 次级钮标记类必须在位，
+// 否则「静息收把手/毛玻璃/空胶囊隐身」三条行为整条失效（样式与实现分居两个文件，最易漏改）
+const srcCss = read('src/styles/index.css')
+ok(/\[data-wb='floatBar'\]/.test(srcCss) && /\.kb-float-hide/.test(srcCss)
+  && /backdrop-filter/.test(srcCss) && /:not\(:has\(button\)\)/.test(srcCss),
+  'F8b 悬浮栏样式基建在位（floatBar 胶囊 / kb-float-hide 把手 / 毛玻璃 / 空胶囊隐身）')
+ok(/kb-float-hide/.test(read('src/modules/knowledge/components/PageEditor.tsx')),
+  'F8c 笔记页工具栏标注次级钮 kb-float-hide（编辑器宿主已随模块退役）')
+ok(/pageBarHosted/.test(srcKnowledge) && /createPortal\(strip/.test(srcKnowledge),
+  'F9 知识库页签条 portal 进页面条槽')
+ok(/onImmersiveChange\?\.\(v\)/.test(srcKnowledge) && /readingMode \|\| graphMode/.test(srcKnowledge) && /pageBarHidden/.test(srcApp),
+  'F10 沉浸阅读 / 图谱模式反向通知外壳让位（页面条整行隐藏）')
+ok(/OWNER_COLOR/.test(srcStrip) && /PenLine/.test(srcStrip) && /BookOpen/.test(srcStrip)
+  && /owner="knowledge"/.test(srcKnowledge),
+  'F11 页签条按来源出图标与配色（知识库=蓝书；调用方传自己 owner；编辑器宿主已退役）')
+ok(srcStrip.indexOf('if (items.length === 0) return null') > srcStrip.indexOf('const [draggedId'),
+  'F12 页签条 hooks 全在早退之前（React #310 防线）')
+
+/* F13–F14 页签激活态（台账 F-8，2026-09-26）：
+   两个渲染器对同一「激活」概念给过不同属性契约（WorkbenchPageBar 写 data-wb-active、
+   PageTabStrip 一处不写）—— 于是靠该属性判态的 CSS / 探针在知识库页签组上恒失效。
+   本月补属性 + 并把「模块是否前台」并入激活判据（activePageId 只是模块内部概念）。 */
+ok(/data-wb-active=\{isActive \? '1' : '0'\}/.test(srcStrip),
+  'F13 PageTabStrip 写 data-wb-active（与 WorkbenchPageBar 同口径，补契约不一致的缺口）')
+ok(/data-wb-active=\{isActive \? '1' : '0'\}/.test(srcPageBar)
+  && /data-wb-active=\{quizEntryActive \? '1' : '0'\}/.test(srcPageBar),
+  'F13b WorkbenchPageBar 两个渲染点都写 data-wb-active（模块条目 + 错题本合成条目）')
+ok(/activeId=\{!isActive \|\| showQuizCollection \? null : activePageId\}/.test(srcKnowledge),
+  'F14 知识库页签组激活态并入「模块是否前台」（切走后归零，不再让零散页面看着像打开）')
+ok(!/activeId=\{showQuizCollection \? null : activePageId\}/.test(srcKnowledge),
+  'F14b 负向：旧的「只看模块内部 activePageId」写法已移除')
+
+/* F15 沉浸阅读高度链（台账 F-7，2026-09-27 修）：
+   容器是 flex item，缺 `min-h-0` ⇒ 默认 `min-height: auto` 被内容撑破（铁律 11）⇒
+   这条链拿不到「容器高」而是「内容高」⇒ 内层滚动区无处可滚 = 用户报的「沉浸阅读不能向下滑」。
+   三条子分支共用这条链（md 正文自带滚动区 / WelcomeHtmlView 的 wrapper `flex-1` /
+   FileMetaCard 根 `flex-1`）—— 容器一旦不是 flex 列，后两者的 flex-1 直接成死属性。 */
+ok(/className="kb-view-fade flex flex-1 min-h-0 min-w-0 flex-col relative"/.test(srcKnowledge),
+  'F15 沉浸阅读容器 = flex 列 + min-h-0（缺 min-h-0 ⇒ 被内容撑破 ⇒ 内层滚不动）')
+ok(/className="flex-1 min-h-0 overflow-y-auto"/.test(srcKnowledge),
+  'F15b 沉浸阅读滚动区用 flex-1 min-h-0（不再靠 h-full 百分比）')
+ok(!/className="h-full overflow-y-auto"/.test(srcKnowledge),
+  'F15c 负向：旧的 h-full overflow-y-auto 滚动区写法已移除')
+
+/* F16 沉浸阅读左栏自动大纲（2026-09-27 需求，拍板①②③）：
+   沉浸态整块内容区（含非沉浸态那份 sidebarInner 的 portal）挂在三元之外的分支里
+   ⇒ 左栏 slot 全空（实机截图：只剩头部）。故沉浸态自带一份大纲 portal 进去。 */
+ok(/const \[immersiveTabOverride, setImmersiveTabOverride\] = useState<'files' \| 'outline' \| null>\(null\)/.test(srcKnowledge),
+  'F16 覆盖位 immersiveTabOverride 独立于 sidebarTab（不覆写用户选择 ⇒ 退出天然还原）')
+ok(/setImmersiveTabOverride\(ft === 'md' \? 'outline' : null\)/.test(srcKnowledge),
+  'F16b 进入沉浸：仅 md 切大纲（txt / html 无标题结构 ⇒ 不切）')
+ok(/setImmersiveTabOverride\(null\)/.test(srcKnowledge),
+  'F16c 退出沉浸：覆盖位归 null（拍板②还原进入前的选择）')
+ok(/data-wb="immersiveOutline"/.test(srcKnowledge) && /readingMode && sidebarEl && immersiveTabOverride === 'outline' && createPortal/.test(srcKnowledge),
+  'F16d 沉浸态单独 portal 大纲到同一 sidebarEl（挂载点不变，状态留在本组件）')
+ok(!/data-wb="immersiveOutline"[\s\S]{0,900}?setSidebarTab\('files'\)/.test(srcKnowledge),
+  'F16e 沉浸态大纲不带「文件 | 大纲」切换行（拍板①只放大纲 ⇒ 拍板③自动满足）')
+ok(/readingScrollRef/.test(srcKnowledge) && /outline:go-to-heading/.test(srcKnowledge) && /scrollIntoView/.test(srcKnowledge),
+  'F16f 沉浸态自带 outline:go-to-heading 消费者（非沉浸态由 PageEditor/Monaco 消费，沉浸态没有它）')
+ok(/setImmersiveTabOverride\(\(cur\) => \(cur === null \? cur : ft === 'md' \? 'outline' : null\)\)/.test(srcKnowledge),
+  'F16g 沉浸中经双链换页也跟着换（新页非 md ⇒ 收起，防大纲与正文错配）')
+
+// ===== G. 分屏整轮下线（2026-09-18 晚 · 从 v3.4.0 撤下，改排 v3.5.0）=====
+// 背景：工作台分区精细化（分屏 + 准入收窄 + 跨栏保活）整轮撤下 v3.4.0，重做排期到 v3.5.0。
+// 页面条置顶（F 段）与分屏无关、已完成验证，**保留不动**。
+// 方案留档继续作为 3.5.0 输入：docs/workbench-split-scope-design.md（不删）。
+// 本段做**负向断言**：确认分屏残留为零 —— 「只删了一半」是最容易漏的一类静默复发。
+const srcModules = stripComments(read('src/lib/appModules.ts'))
+const srcStatusBar = stripComments(read('src/components/shared/WorkbenchStatusBar.tsx'))
+
+ok(!/SPLIT_ELIGIBLE|isSplitEligible/.test(srcModules),
+  'G1 分屏准入清单 SPLIT_ELIGIBLE / isSplitEligible 已从 appModules.ts 整件移除')
+ok(!/secondaryTab|setSecondaryTab/.test(srcApp) && !/activePane/.test(srcApp),
+  'G2 App 无副栏 state（secondaryTab / activePane）残留')
+ok(!/openInSecondary|toggleSplit|closeSplit|splitSecondaryWidth|splitPaneModules/.test(srcApp),
+  'G3 App 无分屏回调与派生量（openInSecondary / toggleSplit / closeSplit / splitSecondaryWidth / splitPaneModules）')
+ok(!/secondarySlotRef/.test(srcApp) && !/wbSecondaryTabsRef|wbSecActionsRef/.test(srcApp)
+  && !/data-pb-split|data-pb-slot="secondary"|data-wb="splitPane"/.test(srcApp),
+  'G4 副栏槽与副栏 DOM 标识（secondarySlotRef / wbSecActions / data-pb-split / splitPane）已清空')
+ok(!existsSync(`${ROOT}/src/components/workbench/SplitHandle.tsx`) && !/SplitHandle/.test(srcApp),
+  'G5 分屏手柄组件已删且 App 无引用（3.5.0 重做时从 git 历史取回）')
+ok(!/paneActive/.test(srcStrip) && !/paneActive/.test(srcKnowledge),
+  'G6 栏焦点 paneActive 已从页签条与模块调用点清空（页面条置顶成果不受影响）')
+ok(!/SPLIT_FALLBACK_WIDTH|splitWidth/.test(srcApp) && !/RowsPerPane/.test(srcApp),
+  'G7 副栏宽度兜底与实测宽度上报（SPLIT_FALLBACK_WIDTH / splitWidth）已删')
+ok(!/Backslash/.test(srcApp) && !/Columns2/.test(srcApp),
+  'G8 分屏入口全清：Ctrl+\\ 快捷键与页面条分屏按钮（Columns2 图标）')
+// 负向：全仓（源码 + 外壳 + 下游文案）不得再有「分屏」概念残留
+ok(!/分屏/.test(srcApp) && !/分屏/.test(srcStrip) && !/分屏/.test(srcPageBar) && !/分屏/.test(srcStatusBar),
+  'G9 「分屏」概念已从 App / 页签条 / 页面条 / 状态栏的源码与注释中清除')
+
+// ===== H. 中间主体冗余头部行清除（v3.4.0，2026-09-18 · A 组）=====
+// 背景：多个模块在中间主体顶部自带一条「贯通行」（图标 + 模块名），与左栏标识 / 页面条重复。
+// A 组 = 纯标题（无工具）可直接删：blog（博客）、devtools（开发者工具 · DEV）。
+// 带工具的 5 项（aiChat / aiTeaching / schedule / bookshelf / releaseNotes）留待逐个讨论，不在本段。
+// 运行时不变量：blog 删行后模块根只剩 1 个子元素、内容区占满容器高 —— 由
+// probe-mod-header.mjs 在真实 Electron 内实证（G0~G5，含 knowledge 作对照组）。
+const srcDevtools = stripComments(read('src/modules/devtools/index.tsx'))
+
+ok(!/顶部贯通行（图二骨架）：横跨侧栏 \+ 内容区；快捷动作在侧栏内搜索框上方/.test(srcBlog),
+  'H1 blog 顶部贯通行 JSX 整块已删（连同原注释）')
+ok(!/FileText/.test(srcBlog),
+  'H2 blog 已清掉删行后无用的 FileText 图标 import')
+ok(!/<span[^>]*>博客<\/span>/.test(srcBlog),
+  'H3 blog 源码层无「博客」标题 span 残留（左栏 Sidebar 自己的标识不动）')
+ok(!/FlaskConical/.test(srcDevtools),
+  'H4 devtools 已清掉删行后无用的 FlaskConical 图标 import')
+ok(!/开发者工具<\/span>|>DEV<\/span>/.test(srcDevtools),
+  'H5 devtools 源码层无「开发者工具」/「DEV」徽章残留')
+const blogMainOpen = (srcBlog.match(/<div className="flex min-h-0 flex-1">/g) || []).length
+ok(blogMainOpen === 1,
+  'H6 blog 删行后主区容器恰好一处（未误删/误留兄弟层）', `count=${blogMainOpen}`)
+
+// ===== I. B 组首批：aiChat 页态标题行 + 页面条空态提示（v3.4.0，2026-09-18 反馈轮）=====
+// 背景：开发负责人指出两处漏删 —— ① 右栏 AI 栏 ⤢ 扩大的主体页（中栏 aiChat 标签，ChatBody page 态）
+// 顶部仍有「✦ AI 助手」纯标题行，与左栏 AI 会话侧栏重复；② 页面条空态提示文字属冗余说明（铁律 12）。
+// 判据：① ChatBody 轻头部渲染条件收窄为「有控件可放」（showDrawer 或 docked 的 ⤢）；
+//       ② 页面条空态提示块与 its 专属 state（hasAnyItem）/ MutationObserver 观察一并清除。
+// 运行时由 probe-batch5-ai.mjs 的 A2b/A6b 与 probe-pagebar.mjs 的 P 组在真实 Electron 内实证。
+const srcChatBody = stripComments(read('src/components/shared/AssistantPanel/ChatBody.tsx'))
+
+ok(/variant !== 'sidebar' && \(showDrawer \|\| \(isNarrow && onExpand\)\)/.test(srcChatBody),
+  'I1 ChatBody 轻头部仅在「有控件可放」时渲染（page 态无控件 → 整块不渲染）')
+ok(!/没有打开的页面/.test(srcPageBar),
+  'I2 页面条空态提示文字已删（源码层无「没有打开的页面」残留）')
+ok(!/hasAnyItem/.test(srcPageBar) && !/MutationObserver/.test(srcPageBar),
+  'I3 页面条空态专属 state（hasAnyItem）与 MutationObserver 观察已一并清除（不留死代码）')
+// I4 防陈旧选择器：页面条置顶后 [data-wb="tabbar"] 已退役（F1/P1b），
+// 探针若**正向**用它选条目 = 断言必然 miss 后读到上一个态的容器（假失败/假通过）。
+// 负向用法（`!q('[data-wb="tabbar"]')` 之类，P1b 就是在断言它已退役）是合法的，不计入。
+// batch5 探针写于置顶之前，2026-09-18 已迁移到 pagebar —— 本断言防它回退。
+//
+// 未纳入扫描的已知陈旧探针（整探针仍待迁移，非本轮范围）：
+//   probe-tabbar-dyn.mjs —— D1/D4a/D6c 段针对已退役的标签条（含「没有打开的标签页」空态），
+//     其 D7~D12（vaultBar / 书签菜单 / 工具侧栏 / 番茄钟）断言仍有价值，
+//     待后续整体迁移到 pagebar 口径时一并处理。
+const probeDir = '.AGENT/scripts/workbench-shell/probes'
+const I4_SKIP = new Set(['probe-tabbar-dyn.mjs'])
+const staleTabbar = []
+for (const f of readdirSync(`${ROOT}/${probeDir}`)) {
+  if (!f.endsWith('.mjs') || I4_SKIP.has(f)) continue
+  const src = stripComments(read(`${probeDir}/${f}`))
+  // 正向形态：作为选择器出现在 querySelector* 里（`!q(...)` 的负向断言不算）
+  const re = /(?<![!])\bq(?:uerySelector|uerySelectorAll)?\s*\(\s*'\[data-wb="tabbar"\]/g
+  if (re.test(src)) staleTabbar.push(f)
+}
+ok(staleTabbar.length === 0,
+  'I4 探针层无陈旧 tabbar 正向选择残留（条目一律走 [data-wb="pagebar"] [data-wb-tab]）',
+  staleTabbar.join(', ') || 'clean')
+
+// ===== J. 总览态「软件文件」折叠区（台账 N-3，2026-09-26 拍板 A+④）=====
+// 缺陷面：refreshRoot 把 softNames 命中项 filter 掉后**没有存到任何 state** —— 总览态对软件条目
+// 不可见也不可达，而契约全绿（无任何断言覆盖「总览态是否承接了 softNames」），正是本丢失溜过的原因。
+const srcOverviewSoft = srcLeft
+ok(/const \[softEntries, setSoftEntries\]/.test(srcOverviewSoft) && /setSoftEntries\(\(res\.entries \?\? \[\]\)\.filter/.test(srcOverviewSoft),
+  'J1 softNames 命中项另存 state（softEntries），不再静默丢弃')
+ok(/data-wb="softSection"/.test(srcOverviewSoft) && /kb-collapse \$\{softOpen/.test(srcOverviewSoft) && /kb-chevron/.test(srcOverviewSoft),
+  'J2 总览态渲染软件文件折叠区（形态照抄 VaultTree：kb-chevron 旋转 + kb-collapse + 计数）')
+ok(/kb\.overviewSoftOpen/.test(srcOverviewSoft),
+  'J3 折叠区 localStorage 记忆（独立键，与树模式 kb.treeSoftOpen 同口径不共用）')
+ok(/openLooseMenu\(ev, e\.name, e\.type\)/.test(srcOverviewSoft) && /type: 'file' \| 'dir'/.test(srcOverviewSoft),
+  'J4 右键菜单泛化到软件条目（拍板④：口径对齐零散文件区，带类型）')
+ok(/data-wb-soft-entry=\{e\.name\}/.test(srcOverviewSoft) && /if \(e\.type === 'file'\) onOpenLooseFile\(e\.name\)/.test(srcOverviewSoft),
+  'J5 软件文件行与零散文件同一打开通道（拍板①：点条目=按默认方式打开；目录不响应点击）')
+ok(/mt-auto border-t/.test(srcOverviewSoft),
+  'J6 折叠区 mt-auto 沉底（VS Code 时间线式，与文件树底部同观感）')
+
+// ===== K. 跳转来源返回 chip（台账 N-4，2026-09-26 拍板 = 原设计平移）=====
+// 缺陷面：编辑区退役后 kb-open-note 改道知识库、detail.from 被丢弃；WorkbenchPageBar 的 lead 槽
+// prop 在、全仓无人喂 —— 返回 chip 整条 Dead Code，「跳得出回不来」。
+ok(/const \[noteJumpFrom, setNoteJumpFrom\] = useState<TabName \| null>\(null\)/.test(srcApp),
+  'K1 App 持跳转来源 state（noteJumpFrom）')
+ok(/setNoteJumpFrom\(from && isTabName\(from\) && from !== 'knowledge' \? from : null\)/.test(srcApp),
+  'K2 kb-open-note handler 记 from（isTabName 收口：desktop 等非法值不产生 chip；from=knowledge 自指不记）')
+ok((srcApp.match(/setNoteJumpFrom\(null\)/g) || []).length >= 2,
+  'K3 手动切 Tab 清 chip（handleTabChange + openTab 两处；handler 的覆盖语义走三元收口）')
+ok(/lead=\{activeTab === 'knowledge' && noteJumpFrom \? \(/.test(srcApp) && /data-wb="noteReturnChip"/.test(srcApp),
+  'K4 lead 槽接线：知识库在前台且带 from 时渲染返回 chip（复用现成 prop，未新造通道）')
+ok(/\{lead && <div className="flex shrink-0 items-center self-center">\{lead\}<\/div>\}/.test(srcPageBar),
+  'K5 WorkbenchPageBar lead 槽渲染在位（prop 契约未被移除）')
+const srcAiTeach = stripComments(read('src/modules/ai-teaching/index.tsx'))
+ok(!/编辑器顶栏/.test(srcAiTeach),
+  'K6 负向：toast 文案不再指向已不存在的「编辑器顶栏」（提示与实际一致）')
+
+// ===== L. 删除清零 ≠ 用户关标签（台账 F-10，2026-09-26 拍板方向 A）=====
+// 缺陷面：「最后一个页面关闭 → 自动关模块标签」被删除动作意外命中 —— 删一条笔记被等价成
+// 「关掉整个知识库标签」，App.closeTab 清 railModule → 左栏弹回总览；树删除连带关签同病，
+// 且 handlePageDeleted 的「删完重开首页」有 await 空窗竞态（effect 抢在重开前看到清零）。
+ok(/if \(deletionClearRef\.current\) \{ deletionClearRef\.current = false; return \}/.test(srcKnowledge),
+  'L1 清零 effect 消费 deletionClear 标记（消费一次即复位，不依赖删除流程的复位时机）')
+// L2 用两个**单行**锚点比位置：仓库源码是 CRLF，多行正则/搜索串会被 \r 绊倒（strip 后亦然）
+const delConsumeAt = srcKnowledge.indexOf('if (deletionClearRef.current)')
+const fullViewGuardAt = srcKnowledge.indexOf('if (showQuizCollection || graphMode || readingMode) return')
+ok(delConsumeAt !== -1 && fullViewGuardAt !== -1 && delConsumeAt < fullViewGuardAt,
+  'L2 消费位于全幅视图守卫之前（守卫早退不留陈旧标记吞掉下一次手动关签）')
+ok(/length === 1 && openPageIdsRef\.current\.includes\(id\)\) deletionClearRef\.current = true/.test(srcKnowledge),
+  'L3 页面删除：仅在「被删页是唯一开着的页」（必然清零）时置位 —— 保证标记必被 effect 消费')
+ok(/willClearAll = openPageIdsRef\.current\.length > 0 && openPageIdsRef\.current\.every/.test(srcKnowledge)
+  && /if \(willClearAll\) deletionClearRef\.current = true/.test(srcKnowledge),
+  'L4 树删除：仅当全部已开页签都在被删路径下（必然清零）时置位（同 handlePageDeleted 口径）')
+
+// ===== M. 看板「返回」落顶层（看板方案 §5 反馈 1，2026-09-27）=====
+// 缺陷面：onBack 写死 setRailModule('knowledge') + handleTabChange('knowledge') —— 回工作台落在
+// 笔记区模块态。正确语义 = 总览态（对齐 closeTab 关激活标签收尾 + handleBackToOverview 解锁）。
+// 只切 dashboard case 的窗口比对（handleBackToOverview 自身也含同款收尾，不能全文件搜）。
+const dashCaseAt = srcApp.indexOf("case 'dashboard'")
+const dashCase = dashCaseAt === -1 ? '' : srcApp.slice(dashCaseAt, dashCaseAt + 800)
+ok(dashCase.includes('setActiveToolTab(null)') && dashCase.includes('setActiveTab(null)') && dashCase.includes('setRailModule(null)'),
+  'M1 看板 onBack = 总览态收尾（activeToolTab / activeTab / railModule 一并落 null）')
+ok(!/setRailModule\('knowledge'\)/.test(dashCase) && !/handleTabChange\('knowledge'\)/.test(dashCase),
+  'M2 负向：onBack 不再写死落笔记区（setRailModule(\'knowledge\') / handleTabChange(\'knowledge\') 已移除）')
+ok(/leftLocked/.test(dashCase) && /leftLocked: false/.test(dashCase),
+  'M3 onBack 含锁定态顺带解锁（对齐 handleBackToOverview 的「回总览」语义）')
+
+// ===== M4-M6. 工作台特效垫底 + 半透明薄纱（看板方案 §5 反馈 9，2026-09-27）=====
+// 缺陷面：设计文档旧版把工作台画布挂在 desktop 模块根 —— 那是死代码（从未被 import），
+// 工作台实际从来没有活着的画布。现挂外壳根，!sidesGone 门控（整窗模块自带画布，防双层粒子）。
+const srcWbShell = stripComments(read('src/components/workbench/WorkbenchShell.tsx'))
+const srcRspShared = stripComments(read('src/components/shared/ResizablePanel.tsx'))
+const srcWbLeft = stripComments(read('src/components/workbench/WorkbenchLeftPanel.tsx'))
+ok(/!sidesGone && <ThemeFxLayer \/>/.test(srcWbShell),
+  'M4 外壳根垫底画布在场且带 !sidesGone 门控（整窗模块激活让位，防双层粒子）')
+ok(/translucent \? 'bg-\[color-mix\(in_srgb,var\(--bg-primary\)_72%,transparent\)\]'/.test(srcRspShared)
+  && /<ResizablePanel[\s\S]{0,200}storageKey="wb\.leftWidth"[\s\S]{0,400}translucent/.test(srcWbShell.replace(/\r/g, ''))
+  && /<ResizablePanel[\s\S]{0,200}storageKey="wb\.rightWidth"[\s\S]{0,400}translucent/.test(srcWbShell.replace(/\r/g, '')),
+  'M5 左右栏 ResizablePanel 走 translucent 薄纱（72%），默认仍实底（模块侧栏不受影响）')
+ok(/kb-theme-surface-translucent/.test(srcWbLeft) && !/data-wb="leftPanel" className="kb-theme-surface /.test(srcWbLeft.replace(/\r/g, '')),
+  'M6 左栏表面换半透明档（不带渐变图 —— 0.92 不透明度会盖住粒子）')
+
+// ===== M7-M8. 工作台按钮回总览 + 左栏归位（看板方案 §5 反馈 10，2026-09-27）=====
+// 缺陷面：「工作台」按钮落「最后文档标签 ?? knowledge」—— 落到没开页面的知识库模块，
+// 左栏被跟随拉成笔记区；且跟随 effect 只进不退，中间区清空也不归位顶层。
+ok(/setActiveToolTab\(null\); setActiveTab\(null\); setRailModule\(null\)/.test(srcApp)
+  && !/\?\? 'knowledge'/.test(srcApp),
+  'M7 「工作台」按钮 = 总览态收尾（三态一并落 null；负向：?? knowledge 兜底已移除）')
+ok(/else if \(!activeTab && !activeToolTab\) setRailModule\(null\)/.test(srcApp)
+  && /\[activeTab, activeToolTab, wbLayout\.leftLocked\]/.test(srcApp),
+  'M8 跟随 effect 增加归位分支：中间区真正空了 → 左栏回顶层（工具标签打开不动左栏）')
+
+// ===== N1-N12. 左栏文件树模式（方案 .claude/plans/workbench-tree-mode-implementation.md，2026-09-29）=====
+// 缺陷面：树模式原本只做根层只读列表（目录行是死 div，方案 §1.1 定位到行）——
+// 本轮换成真树：复用 VaultTree + ws:* 全套文件操作 + 点文件一律进编辑态。
+const srcTree = stripComments(read('src/components/workbench/WorkbenchFileTree.tsx'))
+const srcTreeRaw = read('src/components/workbench/WorkbenchFileTree.tsx')
+const srcLeftRaw = read('src/components/workbench/WorkbenchLeftPanel.tsx')
+const srcWs = stripComments(read('electron/lib/workspaceManager.ts'))
+const srcKnowledgeTree = stripComments(read('src/modules/knowledge/index.tsx'))
+
+ok(/<VaultTree/.test(srcTree) && /dirCache=\{dirCache\}/.test(srcTree) && /softNames=\{softNames\}/.test(srcTree),
+  'N1 树模式渲染的是复用组件 VaultTree（懒加载 dirCache + 软件文件折叠节 softNames 都在）')
+ok(/onOpenFile=\{\(n\) => \{ setActivePath\(n\.relPath\); onOpenFile\(n\.relPath\) \}\}/.test(srcTree),
+  'N2 点文件 → 上报 relPath 并记高亮（不自己开页签，打开语义留在宿主）')
+ok(/onOpenFile=\{\(rel\) => onOpenLooseFile\(rel, \{ startEdit: true \}\)\}/.test(srcLeftRaw),
+  'N3 宿主接 startEdit: true —— 文件树打开一律进编辑态（不再阅读优先）')
+// 八项文件操作接线齐全（方案 §2.1 表）
+for (const [label, re] of [
+  ['新建文件/文件夹', /workspaceCreateFile\(root, rel\)|workspaceMkdir\(root, rel\)/],
+  ['新建知识页', /crypto\.randomUUID\(\)[\s\S]{0,200}workspaceCreateFile\(root, mdRel/],
+  ['内联重命名', /workspaceRename\(root, relPath, to\)/],
+  ['删除到回收站', /workspaceTrash\(root, node\.relPath\)/],
+  ['复制路径', /navigator\.clipboard\.writeText\(node\.relPath\)/],
+  ['粘贴系统剪贴板', /workspacePasteExternal\(root, dirRel, paths\)/],
+  ['拖拽移动', /const doMove = useCallback/],
+  ['撤销栈登记', /recordFileOp\(\{ kind: 'move'/],
+]) ok(re.test(srcTree), `N4 操作接线：${label}`)
+// 知识页落盘即开（方案 §2.1 表：「落盘即刻打开」）
+ok(/void loadDir\(dirRel\)[\s\S]{0,80}onOpenFile\(mdRel\)/.test(srcTree),
+  'N5 新建知识页 = 补 .md + frontmatter id 模板 → 落盘后立刻打开（即开即编辑）')
+// 分类目录删除分流（否则 categories.json 留脏条目）
+ok(/getKnowledgeCategories\(\)[\s\S]{0,300}c\.path === node\.relPath/.test(srcTree)
+  && /if \(catId\) await deleteKnowledgeCategory\(catId\)/.test(srcTree),
+  'N6 删除分流：目录命中 categories.json 登记项 → deleteKnowledgeCategory（不留脏登记）')
+ok(/清除已开页签残留/.test(srcKnowledgeTree) || /openPageIdsRef\.current/.test(srcKnowledgeTree),
+  'N7 知识库侧已开页签修剪通道在场（跨模块删除后的页签残留回退方案依据）')
+// 右键菜单 portal 到 body（左栏变换容器会改写 fixed 包含块，方案 §2.1）
+ok(/fixed inset-0 z-\[70\] kb-pop-layer/.test(srcTree),
+  'N8 右键菜单 portal 到 body（不走栏内定位 —— 变换容器会压窄菜单）')
+// ★ 本轮核心判据：主进程广播。五处结构写通道必须补，且**不得**加进高频的 writeWorkspaceFile
+const wsCreateAt = srcWs.indexOf("ipcMain.handle('ws:createFile'")
+const wsMkdirAt = srcWs.indexOf("ipcMain.handle('ws:mkdir'")
+const wsPasteAt = srcWs.indexOf("ipcMain.handle('ws:pasteExternal'")
+const wsRenameAt = srcWs.indexOf("ipcMain.handle('ws:rename'")
+const wsTrashAt = srcWs.indexOf("ipcMain.handle('ws:trash'")
+const wsWriteAt = srcWs.indexOf("ipcMain.handle('ws:writeFile'")
+const wsHandlers = [
+  ['createFile', wsCreateAt, wsMkdirAt],
+  ['mkdir', wsMkdirAt, wsPasteAt],
+  ['rename', wsRenameAt, wsTrashAt],
+  ['trash', wsTrashAt, srcWs.indexOf("ipcMain.handle('ws:openInSystem'")],
+]
+for (const [label, at, end] of wsHandlers) {
+  // 精确切到下一个 handler 起点（不靠字符数猜——注释块长度不可控）
+  const body = at === -1 || end === -1 || end <= at ? '' : srcWs.slice(at, end)
+  ok(body.length > 0 && /broadcastDataChanged\('knowledge'\)/.test(body),
+    `N9 ws:${label} 成功后 broadcastDataChanged('knowledge')（跨模块刷新唯一通道）`, `bodyLen=${body.length}`)
+}
+const writeBody = wsWriteAt === -1 ? '' : srcWs.slice(wsWriteAt, srcWs.indexOf("ipcMain.handle('ws:createFile'"))
+ok(!/broadcastDataChanged\('knowledge'\)/.test(writeBody),
+  'N10 负向：ws:writeFile 不广播（自动保存高频调用，广播会造成刷新风暴）')
+// pasteExternal 同样刻意不广播（2026-09-29 与开发负责人确认）：外来附件不进知识库收录，
+// 广播刷不出可见变化却白跑图谱重算；该通道已有「仅含 .md 才失效索引」的更精准既有处理。
+// （editor 侧契约 verify-paste-external.mjs 亦锁同一条负向断言，两处口径必须一致）
+// ★ 窗口必须**精确切到 handler 结束**（取下一个 handler 的起点），不能靠字符数猜——
+//   paste 的注释块很长，固定窗口会跨进 createFile 而误判为「已广播」。
+//   注意 srcWs 已剥注释，故边界用下一个 handler 的源码位置（ws:rename），不能用注释文字。
+const pasteEnd = wsRenameAt
+const pasteBody = wsPasteAt === -1 || pasteEnd === -1 || pasteEnd <= wsPasteAt ? '' : srcWs.slice(wsPasteAt, pasteEnd)
+ok(pasteBody.length > 0 && !/broadcastDataChanged\('knowledge'\)/.test(pasteBody),
+  'N10b 负向：ws:pasteExternal 不广播（收录门槛是 frontmatter id，粘贴外来附件不该惊动知识库）', `bodyLen=${pasteBody.length}`)
+// 互斥修复（方案 §1.2/§2.1）：进模块态 = 放弃树模式，leftMode 落回 overview
+ok(/const exitTreeModeForModule = useCallback/.test(srcApp)
+  && /if \(wbLayout\.leftMode !== 'tree'\) return[\s\S]{0,80}leftMode: 'overview'/.test(srcApp),
+  'N11 leftMode/railModule 互斥收口：exitTreeModeForModule 把 leftMode 落回 overview')
+ok(/handleBookmarkClick[\s\S]{0,200}exitTreeModeForModule\(\)/.test(srcApp)
+  && /const handleTabChange[\s\S]{0,400}exitTreeModeForModule\(\)/.test(srcApp),
+  'N12 书签点击 + 标签/活动栏切换两条显式进模块路径都调用了收口（跟随路径刻意不调，见函数头注）')
+// 用户建议 1/2（2026-09-29 原型体验后追加）：树模式不展示软件文件区 + 顶层给聚焦按钮
+ok(/<VaultTree[\s\S]{0,400}hideSoft/.test(srcTree),
+  'N13 树模式 hideSoft —— 不展示「软件文件」折叠节（命中项从主列表一并剔除）')
+const srcVaultTreeSoft = stripComments(read('src/components/shared/VaultTree.tsx'))
+ok(/hideSoft = false/.test(srcVaultTreeSoft) && /const softSet = depth === 0 && !hideSoft/.test(srcVaultTreeSoft)
+  && /const main = hideSoft && depth === 0/.test(srcVaultTreeSoft),
+  'N13b VaultTree 的 hideSoft 默认 false（其余调用方行为不变），且主列表同样剔除命中项')
+// 聚焦按钮在**宿主**的树模式头部行（与 🏠 同排，开发负责人 2026-09-29 指定）；
+// 树组件侧只按受控 prop 消费，按钮本体不在它里面
+ok(/<FolderFocusButton on=\{treeFocus\}/.test(srcLeftRaw) && /const \[treeFocus, setTreeFocus\] = useState\(false\)/.test(srcLeftRaw),
+  'N14 树模式头部行（🏠 同排）有聚焦按钮 + treeFocus 受控状态（状态留在宿主，不进 settings）')
+ok(/focusOn=\{treeFocus\}/.test(srcLeftRaw) && /onFocusExit=\{\(\) => setTreeFocus\(false\)\}/.test(srcLeftRaw),
+  'N14b 聚焦开关两向接线到树组件（focusOn 进、onFocusExit 出）')
+ok(/focusOn = false/.test(srcTree) && /onFocusLocate=\{/.test(srcTree) && !/<FolderFocusButton/.test(srcTree),
+  'N14c 负向：树组件自身不持按钮（纯受控），只消费 focusOn / onFocusLocate')
+// 空白区右键（2026-09-29 用户报障修复）：树根必须 `min-h-full` —— 外层是 overflow-y-auto 的
+// 滚动容器时 flex-1 子项按内容高度撑开、不拉伸（实测条目只占 279px 而容器 747px），
+// 条目下方大片空白落在容器上 ⇒ `e.target === e.currentTarget` 的空白判定永不成立
+// （表象：「想在空白处右键新建文件，点不动」）。运行期判据在探针 T8。
+ok(/className=\{`flex min-h-full flex-1 flex-col overflow-y-auto/.test(srcVaultTreeSoft),
+  'N15 树根带 min-h-full（滚动容器里的空白区右键判定区铺满可视区）')
+ok(/flex min-h-0 flex-1 flex-col overflow-hidden/.test(srcTree),
+  'N15b 树模式 wrapper 走 flex 列布局（与树根 min-h-full 配套，滚动归树根）')
+
+console.log('\n========================================')
+if (fails.length === 0) {
+  console.log(`✅ 全部通过：${pass} 项断言 PASS`)
+} else {
+  console.log(`❌ ${fails.length} 项 FAIL（另有 ${pass} 项 PASS）`)
+  for (const f of fails) console.log('   · ' + f)
+  process.exit(1)
+}

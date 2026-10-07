@@ -135,7 +135,6 @@ export function rebuildGraphIndex(): GraphIndexData {
       title: entry.title,
       path: entry.path,
       kind: 'page',
-      status: entry.status === 'draft' ? 'draft' : 'published',
       degree: adj.get(entry.id)?.size ?? 0,
     })
   }

@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:relevance="http://a9.com/-/opensearch/extensions/relevance/1.0/">
+<id>http://www.gutenberg.org/ebooks/55047.opds</id>
+<updated>2026-09-22T11:37:16Z</updated>
+<title>The Gallery of Portraits: with Memoirs. Volume 1 (of 7) by Arthur Thomas Malkin</title>
+<subtitle>Free eBooks since 1971.</subtitle>
+<author>
+<name>Project Gutenberg</name>
+<uri>https://www.gutenberg.org</uri>
+<email>webmaster@gutenberg.org</email>
+</author>
+<icon>https://www.gutenberg.org/gutenberg/favicon.ico</icon>
+<link rel="search" type="application/opensearchdescription+xml" title="Project Gutenberg Catalog Search" href="https://www.gutenberg.org/catalog/osd-books.xml"/>
+<link rel="self" title="This Page" type="application/atom+xml;profile=opds-catalog" href="/ebooks/55047.opds"/>
+<link rel="alternate" type="text/html" title="HTML Page" href="/ebooks/55047"/>
+<link rel="start" title="Start Page" type="application/atom+xml;profile=opds-catalog" href="/ebooks.opds/"/>
+<opensearch:itemsPerPage>25</opensearch:itemsPerPage>
+<opensearch:startIndex>1</opensearch:startIndex>
+<entry>
+<updated>2026-09-22T11:37:16Z</updated>
+<title>The Gallery of Portraits: with Memoirs. Volume 1 (of 7)</title>
+<content type="xhtml">
+<div xmlns="http://www.w3.org/1999/xhtml">
+<p>This edition had all images removed.</p>
+<p>
+Title:
+The Gallery of Portraits: with Memoirs. Volume 1 (of 7)
+</p>
+<p>
+Contents:
+Dante -- Sir H. Davy -- Kosciusko -- Flaxman -- Copernicus -- Milton -- Jas. Watt -- Turenne -- Hon. R. Boyle -- Sir I. Newton -- Michael Angelo -- Moliere -- C. J. Fox -- Bossuet -- Lorenzo de Medici -- Geo. Buchanan -- Fénélon -- Sir C. Wren -- Corneille -- Halley -- Sully -- N. Poussin -- Harvey -- Sir J. Banks.
+</p>
+<p>
+Credits:
+Produced by Richard Tonsing, Chris Curnow and the Online<br />Distributed Proofreading Team at http:<a href="//www.pgdp.net">//www.pgdp.net</a> (This<br />file was produced from images generously made available<br />by The Internet Archive)
+</p>
+<p>
+Summary:
+"The Gallery of Portraits: with Memoirs. Volume 1" by Arthur Thomas Malkin is a historical account written in the early 19th century. This multi-volume collection provides portraits and biographical sketches of notable figures from various fields, likely emphasizing significant contributions to literature, science, and art. The book offers readers insights into the lives and legacies of individuals such as Dante Alighieri, Sir Humphry Davy, and Kosciusko, blending visual depictions with detailed narratives about each person's impact on culture and society.  The opening of this volume presents detailed accounts of several prominent figures, beginning with Dante Alighieri. It narrates his formative years, influences, and the seminal moments of his life, such as his complex relationship with his muse, Beatrice, and his political struggles in Florence during a tumultuous period. The latter part of the opening discusses Sir Humphry Davy, focusing on his early life, scientific achievements, and contributions to chemistry, such as the invention of the safety lamp, showcasing how each figure's life story intertwines with their historical context. The combination of biographical depth and visual artistry promises a rich exploration of the intellectual and cultural currents of the time. (This is an automatically generated summary.)
+</p>
+<p>
+Reading Level:
+Reading ease score: 52.7 (10th to 12th grade). Somewhat difficult to read.
+</p>
+<p>Author: Malkin, Arthur Thomas</p>
+<p>EBook No.: 55047</p>
+<p>Published: Jul 5, 2017</p>
+<p>Downloads: 546</p>
+<p>Language: English</p>
+<p>Subject: Biography</p>
+<p>LoCC: History: Biography</p>
+<p>Category: Text</p>
+<p>Rights: Public domain in the USA.</p>
+</div>
+</content>
+<id>urn:gutenberg:55047:2</id>
+<published>2017-07-05T00:00:00+00:00</published>
+<rights>Public domain in the USA.</rights>
+<author>
+<name>Malkin, Arthur Thomas</name>
+</author>
+<category scheme="http://purl.org/dc/terms/LCSH" term="Biography"/>
+<category scheme="http://purl.org/dc/terms/LCC" term="CT" label="History: Biography"/>
+<category scheme="http://purl.org/dc/terms/DCMIType" term="Text"/>
+<dcterms:language>en</dcterms:language>
+<relevance:score>1</relevance:score>
+<link type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB (no images, older E-readers)" length="322340" href="https://www.gutenberg.org/ebooks/55047.epub.noimages"/>
+<link type="application/x-mobipocket-ebook" rel="http://opds-spec.org/acquisition" title="Kindle (no images)" length="420997" href="https://www.gutenberg.org/ebooks/55047.kindle.noimages"/>
+<link type="image/jpeg" rel="http://opds-spec.org/image" href="https://www.gutenberg.org/cache/epub/55047/pg55047.cover.medium.jpg"/>
+<link type="image/jpeg" rel="http://opds-spec.org/image/thumbnail" href="https://www.gutenberg.org/cache/epub/55047/pg55047.cover.small.jpg"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/author/44244.opds" title="By Malkin, Arthur Thomas…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/19.opds" title="On Biography…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/643.opds" title="In Category: Biographies…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/662.opds" title="In Category: History - Modern (1750+)…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/675.opds" title="In Category: Art…"/>
+</entry>
+<entry>
+<updated>2026-09-22T11:37:16Z</updated>
+<title>The Gallery of Portraits: with Memoirs. Volume 1 (of 7)</title>
+<content type="xhtml">
+<div xmlns="http://www.w3.org/1999/xhtml">
+<p>This edition has images.</p>
+<p>
+Title:
+The Gallery of Portraits: with Memoirs. Volume 1 (of 7)
+</p>
+<p>
+Contents:
+Dante -- Sir H. Davy -- Kosciusko -- Flaxman -- Copernicus -- Milton -- Jas. Watt -- Turenne -- Hon. R. Boyle -- Sir I. Newton -- Michael Angelo -- Moliere -- C. J. Fox -- Bossuet -- Lorenzo de Medici -- Geo. Buchanan -- Fénélon -- Sir C. Wren -- Corneille -- Halley -- Sully -- N. Poussin -- Harvey -- Sir J. Banks.
+</p>
+<p>
+Credits:
+Produced by Richard Tonsing, Chris Curnow and the Online<br />Distributed Proofreading Team at http:<a href="//www.pgdp.net">//www.pgdp.net</a> (This<br />file was produced from images generously made available<br />by The Internet Archive)
+</p>
+<p>
+Summary:
+"The Gallery of Portraits: with Memoirs. Volume 1" by Arthur Thomas Malkin is a historical account written in the early 19th century. This multi-volume collection provides portraits and biographical sketches of notable figures from various fields, likely emphasizing significant contributions to literature, science, and art. The book offers readers insights into the lives and legacies of individuals such as Dante Alighieri, Sir Humphry Davy, and Kosciusko, blending visual depictions with detailed narratives about each person's impact on culture and society.  The opening of this volume presents detailed accounts of several prominent figures, beginning with Dante Alighieri. It narrates his formative years, influences, and the seminal moments of his life, such as his complex relationship with his muse, Beatrice, and his political struggles in Florence during a tumultuous period. The latter part of the opening discusses Sir Humphry Davy, focusing on his early life, scientific achievements, and contributions to chemistry, such as the invention of the safety lamp, showcasing how each figure's life story intertwines with their historical context. The combination of biographical depth and visual artistry promises a rich exploration of the intellectual and cultural currents of the time. (This is an automatically generated summary.)
+</p>
+<p>
+Reading Level:
+Reading ease score: 52.7 (10th to 12th grade). Somewhat difficult to read.
+</p>
+<p>Author: Malkin, Arthur Thomas</p>
+<p>EBook No.: 55047</p>
+<p>Published: Jul 5, 2017</p>
+<p>Downloads: 546</p>
+<p>Language: English</p>
+<p>Subject: Biography</p>
+<p>LoCC: History: Biography</p>
+<p>Category: Text</p>
+<p>Rights: Public domain in the USA.</p>
+</div>
+</content>
+<id>urn:gutenberg:55047:3</id>
+<published>2017-07-05T00:00:00+00:00</published>
+<rights>Public domain in the USA.</rights>
+<author>
+<name>Malkin, Arthur Thomas</name>
+</author>
+<category scheme="http://purl.org/dc/terms/LCSH" term="Biography"/>
+<category scheme="http://purl.org/dc/terms/LCC" term="CT" label="History: Biography"/>
+<category scheme="http://purl.org/dc/terms/DCMIType" term="Text"/>
+<dcterms:language>en</dcterms:language>
+<relevance:score>1</relevance:score>
+<link type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB3 (E-readers incl. Send-to-Kindle)" length="4724347" href="https://www.gutenberg.org/ebooks/55047.epub3.images"/>
+<link type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB (older E-readers)" length="4720962" href="https://www.gutenberg.org/ebooks/55047.epub.images"/>
+<link type="application/x-mobipocket-ebook" rel="http://opds-spec.org/acquisition" title="Kindle" length="4843351" href="https://www.gutenberg.org/ebooks/55047.kf8.images"/>
+<link type="application/x-mobipocket-ebook" rel="http://opds-spec.org/acquisition" title="older Kindles" length="4811348" href="https://www.gutenberg.org/ebooks/55047.kindle.images"/>
+<link type="image/jpeg" rel="http://opds-spec.org/image" href="https://www.gutenberg.org/cache/epub/55047/pg55047.cover.medium.jpg"/>
+<link type="image/jpeg" rel="http://opds-spec.org/image/thumbnail" href="https://www.gutenberg.org/cache/epub/55047/pg55047.cover.small.jpg"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/author/44244.opds" title="By Malkin, Arthur Thomas…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/subject/19.opds" title="On Biography…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/643.opds" title="In Category: Biographies…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/662.opds" title="In Category: History - Modern (1750+)…"/>
+<link type="application/atom+xml;profile=opds-catalog" rel="related" href="/ebooks/bookshelf/675.opds" title="In Category: Art…"/>
+</entry>
+</feed>

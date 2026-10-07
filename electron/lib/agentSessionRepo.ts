@@ -28,6 +28,15 @@ const SESSIONS_FILE = 'agent-sessions.json'
  */
 export type AgentSessionSource = 'assistant' | 'aiTeaching'
 
+/**
+ * 会话通道（台账 N-1「手册通道」）：
+ * - `'manual'` = 使用帮助通道（只检索官方手册、effort off、≤3 轮、不注入教学/感知规则）；
+ * - `'agent'`（或未标记） = 通用助手通道。
+ * 仅 assistant 来源适用；AI 教学（source=aiTeaching）恒走通用通道。
+ * 未标记 = 尚未分类（等同 agent），首条用户消息时一次性分类后写入。
+ */
+export type AgentSessionMode = 'manual' | 'agent'
+
 /** 会话压缩纪要（docs/conversation-compaction-design.md）：覆盖 upto_id 及之前的消息 */
 export interface SessionDigest {
   /** 纪要正文（markdown，生成侧 ≤4000 chars 截断保护） */
@@ -46,10 +55,23 @@ export interface AgentSessionRow {
   instructions?: string
   /** 来源（缺省=assistant；存量老数据无此字段，由 backfillSessionSources 回填） */
   source?: AgentSessionSource
+  /** 通道（N-1 手册通道）：'manual'=使用帮助通道；缺省/'agent'=通用助手。仅 assistant 来源适用 */
+  mode?: AgentSessionMode
   created_at: string
   updated_at: string
   /** 会话压缩纪要（缺省=未压缩）。原消息永不删除，置 null 即回滚 */
   digest?: SessionDigest
+  /**
+   * 支线旁问（v3.1.2 条目11）：挂靠的主线会话 id。缺省 = 非支线。
+   * 与主线物理隔离（独立 sessionId + 独立 .jsonl），删除主线时级联删除。
+   */
+  parentSessionId?: string
+  /** 支线旁问：分叉点的主线消息 id（那个被追问的回答） */
+  branchFromMessageId?: string
+  /** 支线旁问：'side' = 支线（默认不进左栏会话列表）；缺省 / 'main' = 主线可见（升格后置 'main'） */
+  lane?: 'main' | 'side'
+  /** 支线旁问：固化上下文快照（分叉回答全文 + 主线前 K 轮），每轮注入 system。不参与摘要压缩 */
+  sideContext?: string
 }
 
 /** 等价 datetime('now','localtime')：本地时间 "YYYY-MM-DD HH:MM:SS" */
@@ -91,6 +113,72 @@ export function createAgentSession(title = '新会话', source: AgentSessionSour
   sessions.push(row)
   globalWriteJson(SESSIONS_FILE, sessions)
   return row
+}
+
+/** 写会话通道（N-1 手册通道）：首条消息分类、或手册通道内检测到操作意图升格时调用。 */
+export function setSessionMode(id: string, mode: AgentSessionMode): void {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row || row.mode === mode) return
+  row.mode = mode
+  globalWriteJson(SESSIONS_FILE, sessions)
+}
+
+/**
+ * 建一条支线旁问会话（v3.1.2 条目11）。
+ *
+ * 与主线**物理隔离**（独立 sessionId + 独立 .jsonl 消息文件）——这是「追问不污染主线」的
+ * 根本保证，不靠提示词约束。上下文以**固化快照**（`sideContext`）携带，非每轮重算：
+ * 主线后续改动不同步进支线（支线 = 分叉那一刻的快照），且 prompt cache 前缀稳定。
+ *
+ * `lane: 'side'` 表示默认不进左栏会话列表（升格 promoteSideLane 后置 'main'）。
+ */
+export function createSideLaneSession(opts: {
+  parentSessionId: string
+  branchFromMessageId: string
+  /** 固化上下文快照（分叉回答全文 + 主线前 K 轮）；调用方负责截断 */
+  sideContext: string
+  title?: string
+  source?: AgentSessionSource
+}): AgentSessionRow {
+  const row: AgentSessionRow = {
+    id: randomUUID(),
+    title: opts.title?.trim() || '支线旁问',
+    instructions: '',
+    source: opts.source ?? 'aiTeaching',
+    created_at: nowLocal(),
+    updated_at: nowLocal(),
+    parentSessionId: opts.parentSessionId,
+    branchFromMessageId: opts.branchFromMessageId,
+    lane: 'side',
+    sideContext: opts.sideContext,
+  }
+  const sessions = readSessions()
+  sessions.push(row)
+  globalWriteJson(SESSIONS_FILE, sessions)
+  return row
+}
+
+/**
+ * 列出挂靠在某主线会话下的全部支线（含已升格为 'main' 的）。
+ * 供左栏缩进渲染与「删除主线前的支线计数」使用。
+ */
+export function listSideLanes(parentSessionId: string): AgentSessionRow[] {
+  return readSessions().filter((s) => s.parentSessionId === parentSessionId)
+}
+
+/**
+ * 升格支线为正式会话（单向，不可逆）：lane 置 'main' → 进入左栏会话列表显示。
+ * 保留 parentSessionId 以便渲染缩进 + 「支线」徽章；无 parentSessionId 的普通会话返回 false。
+ */
+export function promoteSideLane(laneSessionId: string): boolean {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === laneSessionId)
+  if (!row || !row.parentSessionId) return false
+  row.lane = 'main'
+  row.updated_at = nowLocal()
+  globalWriteJson(SESSIONS_FILE, sessions)
+  return true
 }
 
 /**

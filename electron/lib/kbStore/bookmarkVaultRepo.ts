@@ -23,6 +23,8 @@ export interface VaultBookmark {
   description: string
   sortOrder: number
   createdAt: string
+  /** 星标收藏（2026-09-28：右栏快捷导航只显示 starred 条目）；缺省 = false */
+  starred?: boolean
 }
 
 interface CatRow {
@@ -31,6 +33,8 @@ interface CatRow {
 interface BmRow {
   id: string; category_id: string; title: string; url: string
   description: string; sort_order: number; created_at: string
+  /** 新增可选字段，旧行缺省 = 未收藏（不写死进 JSON，保持存量文件干净） */
+  starred?: boolean
 }
 
 const MOD = 'modules/bookmarks'
@@ -39,7 +43,7 @@ function catRow(d: VaultCategory): CatRow {
   return { id: d.id, name: d.name, color: d.color, sort_order: d.sortOrder, created_at: d.createdAt }
 }
 function bmRow(d: VaultBookmark): BmRow {
-  return { id: d.id, category_id: d.categoryId, title: d.title, url: d.url, description: d.description, sort_order: d.sortOrder, created_at: d.createdAt }
+  return { id: d.id, category_id: d.categoryId, title: d.title, url: d.url, description: d.description, sort_order: d.sortOrder, created_at: d.createdAt, ...(d.starred ? { starred: true } : {}) }
 }
 function readCatRows(): CatRow[] { return readJson<CatRow[]>(MOD, 'categories.json', []) }
 function readBmRows(): BmRow[] { return readJson<BmRow[]>(MOD, 'bookmarks.json', []) }
@@ -49,7 +53,7 @@ export function vaultBookmarksAll(): { categories: VaultCategory[]; bookmarks: V
   const bs = readBmRows().sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at))
   return {
     categories: cs.map((r) => ({ id: r.id, name: r.name, color: r.color, sortOrder: r.sort_order, createdAt: r.created_at })),
-    bookmarks: bs.map((r) => ({ id: r.id, categoryId: r.category_id, title: r.title, url: r.url, description: r.description, sortOrder: r.sort_order, createdAt: r.created_at })),
+    bookmarks: bs.map((r) => ({ id: r.id, categoryId: r.category_id, title: r.title, url: r.url, description: r.description, sortOrder: r.sort_order, createdAt: r.created_at, starred: !!r.starred })),
   }
 }
 
@@ -98,7 +102,7 @@ export function vaultReorderCategories(orderedIds: string[]): void {
   saveCat([...next, ...rest])
 }
 
-export function vaultCreateBookmark(data: { title: string; url: string; description?: string; categoryId?: string }): VaultBookmark {
+export function vaultCreateBookmark(data: { title: string; url: string; description?: string; categoryId?: string; starred?: boolean }): VaultBookmark {
   const rows = readBmRows()
   const d: VaultBookmark = {
     id: randomUUID(),
@@ -108,29 +112,33 @@ export function vaultCreateBookmark(data: { title: string; url: string; descript
     description: data.description || '',
     sortOrder: Date.now(),
     createdAt: new Date().toISOString(),
+    ...(data.starred ? { starred: true } : {}),
   }
   saveBm([...rows, bmRow(d)])
   return d
 }
 
 export function vaultUpdateBookmark(id: string, data: {
-  title?: string; url?: string; description?: string; categoryId?: string | null
+  title?: string; url?: string; description?: string; categoryId?: string | null; starred?: boolean
 }): VaultBookmark | null {
   const rows = readBmRows()
   const i = rows.findIndex((r) => r.id === id)
   if (i < 0) return null
   const cur = rows[i]
+  const starred = data.starred !== undefined ? data.starred : !!cur.starred
   const next: BmRow = {
     ...cur,
     title: data.title !== undefined ? data.title : cur.title,
     url: data.url !== undefined ? data.url : cur.url,
     description: data.description !== undefined ? data.description : cur.description,
     category_id: data.categoryId !== undefined ? (data.categoryId || '') : cur.category_id,
+    ...(starred ? { starred: true } : {}),
   }
+  if (!starred) delete next.starred
   rows[i] = next
   saveBm(rows)
   const r = rows[i]
-  return { id: r.id, categoryId: r.category_id, title: r.title, url: r.url, description: r.description, sortOrder: r.sort_order, createdAt: r.created_at }
+  return { id: r.id, categoryId: r.category_id, title: r.title, url: r.url, description: r.description, sortOrder: r.sort_order, createdAt: r.created_at, starred }
 }
 
 export function vaultDeleteBookmark(id: string): void {

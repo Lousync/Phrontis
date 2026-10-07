@@ -1,5 +1,5 @@
-import { useEffect, useRef, type Dispatch, type ReactNode, type SetStateAction } from 'react'
-import { Bot, Check, Copy, Loader2, Pencil, RefreshCw, Square, Trash2, Wrench } from 'lucide-react'
+import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { ArrowDown, Bot, Check, Copy, Loader2, Pencil, RefreshCw, Square, Trash2, Wrench } from 'lucide-react'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { showToast } from '../../../lib/toast'
 import { copyText } from '../../../lib/ipc'
@@ -37,7 +37,9 @@ function fmtTok(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n)
 }
 
-/** 聚合 assistant 回复的 llm trace 用量，渲染"↑输入 ↓输出 · 合计 tokens"小字 */
+/** 聚合 assistant 回复的 llm trace 用量，渲染"↑输入 ↓输出 · 合计 tokens"小字。
+ *  `.kb-l1` = 容器（ChatBody 根）窄于阈值时先隐它 —— 它是辅助统计，
+ *  排序在动作钮文字（`.kb-l2`）之前（N-6，阈值实测见 index.css ⑥）。 */
 function TokensOf({ trace }: { trace?: AgentTraceStep[] }): ReactNode {
   if (!trace || trace.length === 0) return null
   const llm = trace.filter(s => s.kind === 'llm')
@@ -50,12 +52,12 @@ function TokensOf({ trace }: { trace?: AgentTraceStep[] }): ReactNode {
   }
   if (hasSplit && (p > 0 || c > 0)) {
     return (
-      <span className="text-[var(--text-muted)]" title="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）">
+      <span className="kb-l1 text-[var(--text-muted)]" title="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）">
         ↑{fmtTok(p)} ↓{fmtTok(c)} · {fmtTok(p + c)} tokens
       </span>
     )
   }
-  if (hasTotal && t > 0) return <span className="text-[var(--text-muted)]">≈{fmtTok(t)} tokens</span>
+  if (hasTotal && t > 0) return <span className="kb-l1 text-[var(--text-muted)]">≈{fmtTok(t)} tokens</span>
   return null
 }
 
@@ -114,27 +116,43 @@ export interface MessageListProps {
   emptyHint?: ReactNode
   /** 内容区额外 class（全屏可放宽内边距/加 max-width 居中） */
   className?: string
+  /** 「回到底部」浮标开关（正式版台账 F-7，2026-10-05 拍板：只开 aiChat 整页 = ChatBody
+   *  variant='page'；悬浮侧栏 / 右栏 docked / AiLearn 不开 —— 开启时外层才包 relative 宿主） */
+  jumpBottom?: boolean
 }
 
 export function MessageList({
   messages, pending, liveSteps, draft, editing, setEditing, copiedIdx, setCopiedIdx,
-  onRegenerate, onEditSubmit, onDeleteMessage, onAbort, emptyHint, className,
+  onRegenerate, onEditSubmit, onDeleteMessage, onAbort, emptyHint, className, jumpBottom = false,
 }: MessageListProps) {
-  const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   /** 是否贴底（用户上滚阅读时不再强制拉回）。初始 true：新会话从底部开始 */
   const stickRef = useRef(true)
+  /** 不贴底时显示「回到底部」浮标（仅 jumpBottom 开启时消费） */
+  const [offBottom, setOffBottom] = useState(false)
 
   // 跟踪「是否贴底」。流式高频注入下，只有贴底才跟随滚动
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     const onScroll = (): void => {
-      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+      stickRef.current = atBottom
+      if (jumpBottom) setOffBottom(!atBottom)
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => el.removeEventListener('scroll', onScroll)
-  }, [])
+  }, [jumpBottom])
+
+  /** 浮标点击 → 回底。instant 而非 smooth：流式下会与贴底跟随 effect 互相打断（抽搐，
+   *  同 ai-teaching jumpToBottom 的结论）；末尾补一帧 rAF 兜末条消息尚未提交 DOM 的少滚 */
+  const jumpToBottom = (): void => {
+    stickRef.current = true
+    setOffBottom(false)
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+    requestAnimationFrame(() => { const c = scrollRef.current; if (c) c.scrollTop = c.scrollHeight })
+  }
 
   // 内容变化 → 贴底才跟随，且**用 instant 而非 smooth**：
   // 流式下这个 effect 每 60ms 触发一次，smooth 动画会与下一次调用互相打断（表现为滚动抽搐）
@@ -145,14 +163,14 @@ export function MessageList({
     el.scrollTop = el.scrollHeight
   }, [messages, pending, draftSig])
 
-  return (
+  const list = (
     <div
       ref={scrollRef}
       className={className ?? 'h-full overflow-y-auto px-3 py-3 space-y-2'}
     >
       {messages.length === 0 && !pending && emptyHint}
       {messages.map((m, i) => (
-        <div key={m.id ?? `live-${i}`} className="group/msg">
+        <div key={m.id ?? `live-${i}`} data-msg-id={m.id ?? undefined} className="group/msg">
           {m.role === 'assistant' ? (
             <div className="mr-6 px-3 py-2 rounded-lg text-[12px] leading-relaxed break-words select-text cursor-text bg-[var(--bg-secondary)] border border-[var(--border-color)] [&_.prose-content>:first-child]:mt-0 [&_.prose-content>:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_table]:block [&_table]:overflow-x-auto">
               <MarkdownPreview content={m.content} />
@@ -195,27 +213,27 @@ export function MessageList({
                 className={`flex items-center gap-0.5 transition-opacity hover:text-[var(--text-primary)] ${copiedIdx === i ? 'opacity-100' : 'opacity-0 group-hover/msg:opacity-100'}`}
                 title="复制">
                 {copiedIdx === i ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
-                {copiedIdx === i ? '已复制' : '复制'}
+                <span className="kb-l2">{copiedIdx === i ? '已复制' : '复制'}</span>
               </button>
               {m.role === 'user' && m.id && !pending && (
                 <button onClick={() => setEditing({ id: m.id!, draft: m.content })}
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-[var(--text-primary)]"
                   title="编辑并重新生成">
-                  <Pencil size={10} /> 编辑
+                  <Pencil size={10} /> <span className="kb-l2">编辑</span>
                 </button>
               )}
               {m.role === 'assistant' && i === messages.length - 1 && !pending && m.id && (
                 <button onClick={onRegenerate}
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-[var(--text-primary)]"
                   title="重新生成">
-                  <RefreshCw size={10} /> 重新生成
+                  <RefreshCw size={10} /> <span className="kb-l2">重新生成</span>
                 </button>
               )}
               {m.role === 'assistant' && m.id && !pending && (
                 <button onClick={() => onDeleteMessage(m.id!)}
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-red-400"
                   title="删除该回复">
-                  <Trash2 size={10} /> 删除
+                  <Trash2 size={10} /> <span className="kb-l2">删除</span>
                 </button>
               )}
             </div>
@@ -241,7 +259,24 @@ export function MessageList({
           </button>
         </div>
       ))}
-      <div ref={bottomRef} />
+
+      {/* 浮标占位（F-7）：浮标 absolute 不占流，底部预留 12（py-3）+ 36 = 48px，对齐 AI 教学款 */}
+      {jumpBottom && <div className="h-9" aria-hidden />}
+    </div>
+  )
+
+  // 「回到底部」浮标宿主：只有 jumpBottom 开启（page 态）才包 relative 层 ——
+  // AiLearn 把本组件根直接当 flex 子项用（flex-1 写在 className 里），无条件包会断它的高度链。
+  if (!jumpBottom) return list
+  return (
+    <div className="relative h-full">
+      {list}
+      {offBottom && (
+        <button type="button" onClick={jumpToBottom} title="回到底部" aria-label="回到底部"
+          className="kb-pop absolute right-3 bottom-3 z-20 w-9 h-9 rounded-full flex items-center justify-center bg-[var(--bg-primary)] text-[var(--text-secondary)] shadow-lg hover:text-[var(--text-primary)] transition-colors">
+          <ArrowDown size={16} strokeWidth={1.75} />
+        </button>
+      )}
     </div>
   )
 }

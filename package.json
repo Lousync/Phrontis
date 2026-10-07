@@ -1,6 +1,6 @@
 {
   "name": "knowbase",
-  "version": "3.1.0",
+  "version": "3.4.1",
   "description": "Phrontis — 本地 Windows 桌面知识管理工具（原 Knowbase Programmer Edition）",
   "main": "./out/main/index.js",
   "scripts": {
@@ -9,11 +9,16 @@
     "start": "node scripts/launch.js start",
     "preview": "electron-vite preview",
     "test": "node --experimental-strip-types --no-warnings scripts/test-parse-quick-date.mts",
-    "pack": "electron-vite build && electron-builder --win --publish=never"
+    "pack": "electron-vite build && electron-builder --win --publish=never",
+    "pack:dir": "electron-vite build && electron-builder --win --dir --publish=never"
   },
   "dependencies": {
+    "@lydell/node-pty": "^1.2.0-beta.15",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@monaco-editor/react": "^4.7.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "construct-style-sheets-polyfill": "^3.1.0",
     "d3-force": "^3.0.0",
     "defuddle": "^0.19.3",
     "heic-to": "^1.5.2",
@@ -52,7 +57,8 @@
   },
   "build": {
     "appId": "com.local.knowbase.programmer",
-    "productName": "Knowbase Programmer Edition",
+    "productName": "Phrontis",
+    "artifactName": "Phrontis-${version}-setup.${ext}",
     "extraResources": [
       {
         "from": "resources/builtin-plugins",
@@ -69,6 +75,10 @@
       {
         "from": "resources/help",
         "to": "help"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
       }
     ],
     "directories": {
@@ -76,6 +86,9 @@
     },
     "files": [
       "out/**/*"
+    ],
+    "asarUnpack": [
+      "**/node_modules/@lydell/node-pty*/**"
     ],
     "win": {
       "icon": "build/icon.png",
@@ -95,6 +108,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
-    "npmRebuild": false
+    "npmRebuild": false,
+    "electronDist": "node_modules/electron/dist"
   }
 }

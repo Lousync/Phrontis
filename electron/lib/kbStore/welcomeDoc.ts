@@ -266,7 +266,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
   .m-mi { font-size:12px; color:var(--ink-2); padding:6px 9px; border-radius:6px; }
   .m-mi.hi { background:var(--accent); color:#fff; font-weight:600; }
 
-  /* 迷你知识库 */
+  /* 迷你笔记列表 */
   .m-kb { flex:1; padding:20px 24px; }
   .m-kb h4 {
     font:600 11px/1 ui-monospace, Menlo, monospace; letter-spacing:.1em;
@@ -630,8 +630,8 @@ export function buildWelcomeDocContent(now = new Date()): string {
         <p>所有内容都是文件夹里的文件，用任何编辑器都能直接打开——没有私有格式锁定，数据永远是你的。</p>
       </div></div>
       <div class="law"><span class="law-i">Ⅱ</span><div>
-        <b>编辑器负责写，知识库负责读</b>
-        <p>写东西去编辑器；知识库用来阅读、搜索、连双链、看图谱。知识库里没有「新建」按钮——这不是功能缺失，是分工。</p>
+        <b>写和读，都在笔记区</b>
+        <p>笔记区读写一体：新建一篇直接写（Monaco 编辑器 + 自动保存），同一篇页面转身就是阅读视图——标签、双链、反链、图谱也都在这里，不用在两个模块之间搬内容。</p>
       </div></div>
       <div class="law"><span class="law-i">Ⅲ</span><div>
         <b>以 . 开头的文件夹是软件的地盘</b>
@@ -655,8 +655,8 @@ export function buildWelcomeDocContent(now = new Date()): string {
       <div class="demo-bar">
         <div class="dots3"><i></i><i></i><i></i></div>
         <div class="dtabs">
-          <button class="dtab on" data-view="editor">编辑器</button>
-          <button class="dtab" data-view="kb">知识库</button>
+          <button class="dtab on" data-view="editor">笔记 · 写</button>
+          <button class="dtab" data-view="kb">列表 · 读</button>
           <button class="dtab" data-view="graph">图谱</button>
         </div>
         <button class="icon-btn" id="demoPlay" title="播放 / 暂停">
@@ -678,21 +678,15 @@ export function buildWelcomeDocContent(now = new Date()): string {
             <div class="m-title">我的第一篇笔记</div>
             <div class="m-body"><span id="typeBox"></span><span class="caret" id="caret"></span></div>
             <div class="m-save" id="savePill">已自动保存</div>
-            <div class="m-menu" id="ctxMenu">
-              <div class="m-mi">打开</div>
-              <div class="m-mi">重命名</div>
-              <div class="m-mi hi">归档</div>
-              <div class="m-mi">删除</div>
-            </div>
           </div>
         </div>
 
         <div class="pane" data-pane="kb">
           <div class="m-kb">
-            <h4>知识库 <span id="kbCount">2 个页面</span></h4>
-            <div class="m-page">读书笔记 <span class="pill ok">已归档</span></div>
-            <div class="m-page">周计划 <span class="pill ok">已归档</span></div>
-            <div class="m-page new" id="kbNew">我的第一篇笔记 <span class="pill" id="kbPill">草稿</span></div>
+            <h4>笔记列表 <span id="kbCount">2 个页面</span></h4>
+            <div class="m-page">读书笔记 <span class="pill ok">正式页</span></div>
+            <div class="m-page">周计划 <span class="pill ok">正式页</span></div>
+            <div class="m-page new" id="kbNew">我的第一篇笔记 <span class="pill ok" id="kbPill">已入列</span></div>
           </div>
         </div>
 
@@ -710,17 +704,17 @@ export function buildWelcomeDocContent(now = new Date()): string {
       <div class="demo-foot">
         <div class="demo-dots" id="dots">
           <button data-i="0" class="on">1</button><button data-i="1">2</button>
-          <button data-i="2">3</button><button data-i="3">4</button><button data-i="4">5</button>
+          <button data-i="2">3</button><button data-i="3">4</button>
         </div>
         <p class="demo-cap" id="cap"></p>
       </div>
     </div>
 
     <ol class="steps">
-      <li><b>新建，直接写</b><span class="d">编辑器里按 <kbd>Ctrl</kbd>+<kbd>N</kbd>（或文件树「＋」）。写完不用按保存，它自动保存。</span></li>
-      <li><b>归档，让它变成知识</b><span class="d">新笔记默认是草稿。文件树右键它 →「归档」，知识库才会收录。</span></li>
-      <li><b>去知识库读它</b><span class="d">加标签、星标，用全文搜索瞬间找到。</span></li>
+      <li><b>新建，直接写</b><span class="d">笔记区按 <kbd>Ctrl</kbd>+<kbd>N</kbd>（或文件树「＋」）——新建即入列，不用归档；写完不用按保存，它自动保存。</span></li>
+      <li><b>整理它</b><span class="d">贴标签、加星标、建分类目录——把笔记拖进目录就算归类。</span></li>
       <li><b>连上第一根线</b><span class="d">写第二篇，正文里打 <code>[[第一篇的标题]]</code> 建立双链。</span></li>
+      <li><b>去图谱看它</b><span class="d">双链会把笔记连成一张网，图谱里节点可以拖着玩。</span></li>
     </ol>
 
     <div class="checklist" id="cl">
@@ -732,9 +726,9 @@ export function buildWelcomeDocContent(now = new Date()): string {
         </div>
       </div>
       <div class="cl-sub" id="clSub">勾完这 7 件事，你就出师了</div>
-      <label><input type="checkbox" data-cl="a"><s style="text-decoration:none">写下第一篇笔记，并归档进知识库</s></label>
+      <label><input type="checkbox" data-cl="a"><s style="text-decoration:none">在笔记区按 <kbd>Ctrl</kbd>+<kbd>N</kbd> 写下第一篇笔记</s></label>
       <label><input type="checkbox" data-cl="b"><s style="text-decoration:none">建出第一条双链，去图谱看一眼连线</s></label>
-      <label><input type="checkbox" data-cl="c"><s style="text-decoration:none">逛一圈插件市场，给仓库装一个知识包</s></label>
+      <label><input type="checkbox" data-cl="c"><s style="text-decoration:none">把一本 PDF 拖进书架，划选一段试试「AI 讲题 / 翻译」</s></label>
       <label><input type="checkbox" data-cl="d"><s style="text-decoration:none">导出一次 ZIP 备份，知道恢复方法是「把备份包拖进窗口」</s></label>
       <label><input type="checkbox" data-cl="e"><s style="text-decoration:none">在任意界面按 <kbd>Ctrl</kbd>+<kbd>J</kbd>，问 AI 助手一个当前页面的问题</s></label>
       <label><input type="checkbox" data-cl="f"><s style="text-decoration:none">去 AI 教学登记一份真实资料（PDF 标页码区间），让它讲第一节</s></label>
@@ -753,14 +747,15 @@ export function buildWelcomeDocContent(now = new Date()): string {
         <p class="ai-moto">读任何东西时随手唤起侧栏，边看边问——它带着你正在读的内容回答。</p>
         <ol>
           <li><b>配模型</b>：设置 → AI 工具，选本地 Ollama（离线免费）或在线 API；装过 CC Switch 可一键导入。</li>
-          <li><b>唤起提问</b>：任何模块按 <kbd>Ctrl</kbd>+<kbd>J</kbd>，侧栏从右边滑出，自动带上当前页面。</li>
+          <li><b>唤起提问</b>：任何模块按 <kbd>Ctrl</kbd>+<kbd>J</kbd>，右栏滑出 AI 侧栏，自动带上当前页面；点 <kbd>⤢</kbd> 扩大成中间宽版对话。</li>
+          <li><b>喂它上下文</b>：输入 <code>@</code> 引用仓库里的笔记；开着「感知模式」，它还会自动检索相关笔记作素材，回答带脚注可溯源。</li>
           <li><b>让它动手</b>：搜索笔记、读文件、整理内容——每次工具调用都有审计记录可回看。</li>
         </ol>
 
         <div class="demo sub" id="demoAi">
           <div class="demo-bar">
             <div class="dots3"><i></i><i></i><i></i></div>
-            <span class="demo-name">知识库 · 读一篇笔记</span>
+            <span class="demo-name">笔记 · 读一篇</span>
             <button class="icon-btn" id="aiPlay" title="播放 / 暂停">
               <svg id="aiIcPause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 5v14M15 5v14"/></svg>
               <svg id="aiIcPlay" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M8 5.5v13l11-6.5z"/></svg>
@@ -770,7 +765,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
             <div class="scr">
               <div class="scr-rail"><i></i><i class="on"></i><i></i><i></i><i></i></div>
               <div class="scr-main">
-                <div class="scr-h">知识库 › 虚拟内存 <span class="ctx-tag" id="ctxTag">已附带当前页面</span></div>
+                <div class="scr-h">笔记 › 虚拟内存 <span class="ctx-tag" id="ctxTag">已附带当前页面</span></div>
                 <div class="scr-doc">
                   <h5>虚拟内存</h5>
                   <p class="hl">虚拟内存为每个进程提供独立的地址空间，</p>
@@ -794,7 +789,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
           </div>
         </div>
         <button class="lnk" id="aiReplay">▸ 再演示一次</button>
-        <div class="ai-foot">安全边界：设置 → AI 工具 → 权限，按模块给「禁止 / 只读 / 读写」；没授权的模块 AI 完全碰不到。还能装 MCP 与社区 Skill 扩展能力。</div>
+        <div class="ai-foot">安全边界：设置 → AI 工具 → 权限，按模块给「禁止 / 只读 / 读写」；没授权的模块 AI 完全碰不到。写作时笔记区还会自动出接续建议（浅色续写），<kbd>Alt</kbd>+<kbd>A</kbd> 立即要一条。</div>
       </div>
 
       <div class="ai-panel">
@@ -858,14 +853,14 @@ export function buildWelcomeDocContent(now = new Date()): string {
 
   <!-- 04 -->
   <section id="mods" class="reveal">
-    <div class="sec-head"><span class="sec-no">04</span><h2 class="sec-title">模块速览</h2><span class="sec-note">左侧活动栏一键直达</span></div>
+    <div class="sec-head"><span class="sec-no">04</span><h2 class="sec-title">模块速览</h2><span class="sec-note">左栏书签与图标条直达</span></div>
     <div class="mods">
-      <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 3.5l3 3L7 16H4v-3z"/></svg></span><div><b>编辑器</b><span>目录树、Monaco 编辑、粘贴插图自动入库、右键归档</span></div></div>
-      <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="5" r="2.2"/><circle cx="4.5" cy="14" r="2.2"/><circle cx="15.5" cy="14" r="2.2"/><path d="M8.6 6.7L5.9 12M11.4 6.7l2.7 5.3M6.7 14h6.6"/></svg></span><div><b>知识库 · 图谱</b><span>沉浸阅读、双链 <code>[[]]</code>、标签与全文搜索、配套复习</span></div></div>
+      <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 3.5l3 3L7 16H4v-3z"/></svg></span><div><b>笔记</b><span>读写一体：Monaco 写作、双链 <code>[[]]</code>、沉浸阅读、标签与全文搜索、知识图谱</span></div></div>
+      <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M4 4.5h8a1 1 0 0 1 1 1V16a1.5 1.5 0 0 0-1.5-1.5H4zM12 5.5c1.2-1.6 3-1.6 4 0V16c-1-1.6-2.8-1.6-4 0z"/></svg></span><div><b>书架 · 阅读器</b><span>PDF / TXT 全格式阅读：三排列模式、划词问 AI / 翻译、摘录高亮、进度续读</span></div></div>
       <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3.5" y="3" width="13" height="14" rx="2"/><path d="M6.5 7h7M6.5 10h7M6.5 13h4"/></svg></span><div><b>博客</b><span>长文写作、周月总结，可整体导出静态站点</span></div></div>
       <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="4.5" width="14" height="12" rx="2"/><path d="M3 8.5h14M7 3v3M13 3v3"/></svg></span><div><b>日程 · 打卡</b><span>日历视图与四象限待办，习惯打卡到点提醒</span></div></div>
-      <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M3.5 5.5h13v8h-7l-3.5 3v-3h-2.5z"/></svg></span><div><b>说说</b><span>带心情与图片的碎片记录，构成你的时间线</span></div></div>
-      <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="3" y="6" width="14" height="10" rx="2"/><path d="M7 6V4.5h6V6M3 10h14"/></svg></span><div><b>工具箱</b><span>番茄钟、网址导航、密码本、局域网互传</span></div></div>
+      <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M3.5 5.5h13v8h-7l-3.5 3v-3h-2.5z"/></svg></span><div><b>动态</b><span>带心情与图片的碎片记录，构成你的时间线</span></div></div>
+      <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="3" y="6" width="14" height="10" rx="2"/><path d="M7 6V4.5h6V6M3 10h14"/></svg></span><div><b>工具箱</b><span>番茄钟、网址导航、密码本、局域网互传——右栏工具区一键打开</span></div></div>
       <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M10 3l1.7 4.3L16 9l-4.3 1.7L10 15l-1.7-4.3L4 9l4.3-1.7z"/></svg></span><div><b>AI 侧栏 · AI 教学</b><span>边看边问的侧栏，和用你资料讲课的工作台</span></div></div>
       <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="3" y="3" width="6" height="6" rx="1.5"/><rect x="11" y="3" width="6" height="6" rx="1.5"/><rect x="3" y="11" width="6" height="6" rx="1.5"/><path d="M14 11v6M11 14h6"/></svg></span><div><b>插件</b><span>官方市场：主题、预设、社区技能与知识包，安全分级</span></div></div>
       <div class="mod"><span class="ic-wrap"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="10" cy="10" r="7"/><path d="M8.2 8.2A1.9 1.9 0 0 1 11.8 9c0 1.3-1.8 1.4-1.8 2.6"/><circle cx="10" cy="14.4" r=".7" fill="currentColor"/></svg></span><div><b>帮助</b><span>每个功能的完整手册，右下角一键反馈</span></div></div>
@@ -877,7 +872,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
   <section id="notes" class="reveal">
     <div class="sec-head"><span class="sec-no">05</span><h2 class="sec-title">三个常踩的坑，提前说</h2></div>
     <div class="notes">
-      <div class="note amber"><b>「我写的文件怎么不在知识库里？」</b>新笔记是草稿（文件头带 <code>status: draft</code>），知识库只显示归档后的页面。想全局隐藏某些内容，用仓库根的 <code>.ignore</code> 文件，gitignore 语法。</div>
+      <div class="note amber"><b>「我在外面写的 md 怎么不在列表里？」</b>没有 frontmatter id 的 md 按草稿处理——点开补全即可，也可一键转正式笔记。想全局隐藏某些内容，用仓库根的 <code>.ignore</code> 文件，gitignore 语法。</div>
       <div class="note blue"><b>「换电脑、搬家怎么办？」</b>把整个仓库文件夹拷走即可，全部数据都在里面。日常备份用 工具箱 → 数据导出（ZIP），恢复时把备份包拖进应用窗口。</div>
       <div class="note green"><b>「数据到底在哪里？」</b>只在你这台电脑的这个文件夹里。应用不联网也完全可用；密码本与模型密钥以本机加密存储，离开这台机器无法解密。</div>
     </div>
@@ -902,13 +897,13 @@ export function buildWelcomeDocContent(now = new Date()): string {
 </div>
 
 <div class="ov" id="ov">
-  <div class="ov-card c-n"><b>新建笔记</b>编辑器里多了一个标签页，光标已经就位——直接开始写。</div>
+  <div class="ov-card c-n"><b>新建笔记</b>笔记区多了一个标签页，光标已经就位——直接开始写。</div>
   <div class="ov-card c-j">
     <b>AI 助手</b>它知道你正在读哪一篇。
-    <div class="ai-line">「这篇讲了三件事：仓库是文件夹、编辑器写知识库读、双链把笔记连成网。」</div>
+    <div class="ai-line">「这篇讲了三件事：仓库是文件夹、写和读都在笔记区、双链把笔记连成网。」</div>
   </div>
   <div class="ov-card c-p">
-    <div class="row hi">归档当前笔记<small>Editor</small></div>
+    <div class="row hi">新建一篇笔记<small>Notes</small></div>
     <div class="row">打开 AI 教学<small>Activity</small></div>
     <div class="row">导出 ZIP 备份<small>Toolbox</small></div>
     <div class="row">重看新用户引导<small>Settings</small></div>
@@ -972,44 +967,34 @@ export function buildWelcomeDocContent(now = new Date()): string {
 
   /* ---------- 02 演示播放器 ---------- */
   var panes = $$('.pane'), dtabs = $$('.dtab'), dots = $$('#dots button');
-  var cap = $('#cap'), savePill = $('#savePill'), ctxMenu = $('#ctxMenu'),
-      treeNew = $('#treeNew'), kbNew = $('#kbNew'), kbPill = $('#kbPill'),
+  var cap = $('#cap'), savePill = $('#savePill'),
+      treeNew = $('#treeNew'), kbNew = $('#kbNew'),
       kbCount = $('#kbCount'), typeBox = $('#typeBox'), caret = $('#caret'), graph = $('#graph');
 
-  var TXT_1 = '今天搞懂了 Phrontis：仓库只是一个文件夹，写东西在编辑器，读东西在知识库。';
+  var TXT_1 = '今天搞懂了 Phrontis：仓库只是一个文件夹，写和读都在笔记区完成。';
   var TXT_2 = '再补一句：见 [[我的第一篇笔记]]，两根线就连上了。';
   var TXT_2_HTML = '再补一句：见 <span class="link">[[我的第一篇笔记]]</span>，两根线就连上了。';
 
   var steps = [
-    { view: 'editor', cap: '① 新建笔记，直接写。写完不用按保存——它自己会存。', run: function () {
-        panes; treeNew.classList.remove('show'); ctxMenu.classList.remove('on'); savePill.classList.remove('on');
+    { view: 'editor', cap: '① Ctrl+N 新建一篇，直接写。写完不用按保存——它自己会存。', run: function () {
+        treeNew.classList.remove('show'); savePill.classList.remove('on');
         caret.style.display = '';
         type(typeBox, TXT_1, 42, function () {
           treeNew.classList.add('show');
           savePill.classList.add('on');
         });
       } },
-    { view: 'editor', cap: '② 在文件树右键它 →「归档」。草稿这才正式进入知识库。', run: function () {
-        caret.style.display = 'none';
-        typeBox.textContent = TXT_1;
-        treeNew.classList.add('show'); savePill.classList.add('on');
-        ctxMenu.classList.remove('on');
-        setTimeout(function () { ctxMenu.classList.add('on'); }, 550);
-      } },
-    { view: 'kb', cap: '③ 切到知识库，它已经在列表里了。搜索、标签、星标随你用。', run: function () {
-        kbNew.classList.remove('in'); kbPill.textContent = '草稿'; kbPill.classList.remove('ok'); kbCount.textContent = '2 个页面';
+    { view: 'kb', cap: '② 新建即入列——它已经在列表里了，不用归档。', run: function () {
+        kbNew.classList.remove('in'); kbCount.textContent = '2 个页面';
         void kbNew.offsetWidth;
         kbNew.classList.add('in');
-        setTimeout(function () {
-          kbPill.textContent = '已归档'; kbPill.classList.add('ok'); kbCount.textContent = '3 个页面';
-        }, 700);
+        setTimeout(function () { kbCount.textContent = '3 个页面'; }, 700);
       } },
-    { view: 'editor', cap: '④ 再写一篇，正文里打 [[标题]]，双链就建好了。', run: function () {
-        ctxMenu.classList.remove('on');
+    { view: 'editor', cap: '③ 再写一篇，正文里打 [[标题]]，双链就建好了。', run: function () {
         caret.style.display = '';
         typeThenWrap(typeBox, TXT_2, TXT_2_HTML, 26);
       } },
-    { view: 'graph', cap: '⑤ 打开图谱——节点可以拖着玩，知识网络开始生长。', run: function () {
+    { view: 'graph', cap: '④ 打开图谱——节点可以拖着玩，知识网络开始生长。', run: function () {
         graph.classList.remove('play'); void graph.offsetWidth; graph.classList.add('play');
       } }
   ];
@@ -1020,7 +1005,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
   var GW = 300, GH = 200;
   var gNodes = [
     { x: 150, y: 100, r: 21, home: [150, 100], vx: 0, vy: 0, label: '第一篇', core: true, d: .05 },
-    { x: 232, y: 52,  r: 14, home: [232, 52],  vx: 0, vy: 0, label: '归档', d: .25 },
+    { x: 232, y: 52,  r: 14, home: [232, 52],  vx: 0, vy: 0, label: '反链', d: .25 },
     { x: 258, y: 118, r: 14, home: [258, 118], vx: 0, vy: 0, label: '双链', d: .45 },
     { x: 74,  y: 152, r: 12, home: [74, 152],  vx: 0, vy: 0, label: '标签', d: .6 },
     { x: 188, y: 166, r: 12, home: [188, 166], vx: 0, vy: 0, label: '图谱', d: .75 }
@@ -1138,7 +1123,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
     t.addEventListener('click', function () {
       setPlaying(false);
       var v = t.dataset.view;
-      var map = { editor: 0, kb: 2, graph: 4 };
+      var map = { editor: 0, kb: 1, graph: 3 };
       go(map[v]);
     });
   });
@@ -1215,7 +1200,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
     playBtn: '#aiPlay', pauseIc: '#aiIcPause', playIc: '#aiIcPlay', delay: 3000,
     reset: resetA,
     steps: [
-      { cap: '① 你正在知识库里读一篇笔记。', run: function () {} },
+      { cap: '① 你正在笔记区读一篇笔记。', run: function () {} },
       { cap: '② 按 Ctrl+J —— 侧栏从右边滑出，并自动带上你正在读的这一页。', run: function () {
           aiPane.classList.add('in');
           setTimeout(function () { ctxTag.classList.add('on'); }, 420);
@@ -1252,7 +1237,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
     playBtn: '#tchPlay', pauseIc: '#tchIcPause', playIc: '#tchIcPlay', delay: 3000,
     reset: resetT,
     steps: [
-      { cap: '① 活动栏进 AI 教学，建一个工作区，比如「408 备考」。', run: function () {
+      { cap: '① 左侧图标条进 AI 教学，建一个工作区，比如「408 备考」。', run: function () {
           tWs.classList.add('hot');
           setTimeout(function () { tSes.classList.add('hot'); }, 500);
         } },
@@ -1300,7 +1285,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
   });
 
   /* ---------- 上手清单 ---------- */
-  var KEY = 'kb-welcome-checklist-v2';
+  var KEY = 'kb-welcome-checklist-v3';
   var boxes = $$('#cl input'), ringFg = $('#ringFg'), ringTxt = $('#ringTxt'), clSub = $('#clSub'), cl = $('#cl');
   var RC = 2 * Math.PI * 14;
   ringFg.style.strokeDasharray = RC;

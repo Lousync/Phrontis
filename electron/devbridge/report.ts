@@ -54,7 +54,3 @@ export async function buildReport(): Promise<HealthReport> {
   }
 }
 
-/** 供 report 之外的调用方复用的日志规模（预留） */
-export function logStats(): { size: number; lastSeq: number } {
-  return { size: logRing.size, lastSeq: logRing.lastSeq }
-}

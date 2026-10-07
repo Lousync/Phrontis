@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
-import { recordActivity } from '../../lib/habitLinkService'
 import { emitPluginEvent } from '../../lib/pluginEvents'
 import * as V from '../../lib/kbStore/scheduleVaultRepo'
 
@@ -117,19 +116,18 @@ export function registerScheduleHandlers(): void {
   })
 
   // 更新待办
-  ipcMain.handle('schedule:updateTodo', (e, id: string, data: {
+  ipcMain.handle('schedule:updateTodo', (_e, id: string, data: {
     title?: string; description?: string; date?: string; time?: string | null
     quadrant?: number; taskType?: 'deadline' | 'plan'; tagId?: string | null
     status?: string; endCriteria?: string; parentId?: string | null
     scheduledStart?: number | null; scheduledEnd?: number | null
     snoozeUntil?: string | null
   }) => {
-    // 联动需要状态跃迁判定:先取旧状态,只有 pending → done 才算"完成"事件
-    // (改标题/象限等普通编辑也走本 handler,不能每次都触发)
+    // 状态跃迁判定：先取旧状态，只有 pending → done 才算「完成」事件
+    // （改标题/象限等普通编辑也走本 handler，不能每次都触发）
     const prevStatus = data.status !== undefined ? V.vaultFindTodo(id)?.status : undefined
     const updated = V.vaultUpdateTodo(id, data, new Date().toISOString())
     if (prevStatus !== undefined && prevStatus !== 'done' && data.status === 'done' && updated) {
-      void recordActivity({ source: 'schedule', date: updated.date }, e.sender)
       emitPluginEvent('schedule:todoCompleted', { todoId: id, title: updated.title ?? '' })
     }
     // id 不存在时 vaultUpdateTodo 返回 null 且不改文件

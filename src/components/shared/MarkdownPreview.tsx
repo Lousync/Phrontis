@@ -14,6 +14,7 @@ import { PluginFenceRenderer } from './PluginFenceRenderer'
 import { pluginListRenderers } from '../../lib/ipc'
 import type { PluginRendererInfo } from '../../types'
 import { normalizeAnswerLayout } from '../../lib/answerLayout'
+import { KB_OPEN_EXCERPT_LOC } from './pdf/pdfEvents'
 
 // Same ID generation as parseHeadings() in OutlinePanel — must match for outline navigation
 function headingId(text: string): string {
@@ -54,11 +55,12 @@ interface Props {
   /** 已存在的页面标题集合：不在其中的 wiki 链接渲染为「空链接」虚线样式 */
   knownWikiTitles?: Set<string>
   /** 草稿页标题集合（status: draft = 修改中）：命中渲染半透明「虚化」样式（非正式可点） */
-  draftWikiTitles?: Set<string>
   /** 来源页面 ID（传入后，页面内选择题启用收藏 + 错题上报） */
   pageId?: string
   /** 来源页面标题（用于错题本快照） */
   pageTitle?: string
+  /** quiz 围栏解析失败重试（v3.1.1 条目13）：传入后失败占位卡显示「让 AI 重出新题」按钮 */
+  onQuizRetry?: () => void
 }
 
 /** Unified markdown preview component. Links open via system handler (files → system app, URLs → browser). */
@@ -116,7 +118,22 @@ function FenceWithFallback({ info, code, pageId, pageTitle, children }: {
   )
 }
 
-function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitles, draftWikiTitles, pageId, pageTitle }: Props) {
+/** quiz 围栏解析失败占位卡（条目13）：不再裸显原始 JSON，可一键让 AI 重出 */
+function QuizFailCard({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <div className="my-2.5 px-3 py-2.5 rounded-lg border border-dashed border-[var(--warning)]/40 bg-[var(--bg-secondary)] flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+      <span className="min-w-0 flex-1">题目数据解析失败（AI 输出的 JSON 格式有误，已隐藏原始内容）</span>
+      {onRetry && (
+        <button onClick={onRetry}
+          className="shrink-0 px-2 py-0.5 rounded-md border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+          让 AI 重出新题
+        </button>
+      )}
+    </div>
+  )
+}
+
+function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitles, pageId, pageTitle, onQuizRetry }: Props) {
   // 旧 408 选择题格式 → ```quiz 围栏（供 pre 组件渲染判题卡片）；非选择题块原样保留
   const processedContent = useMemo(() => preprocessContent(content), [content])
 
@@ -135,6 +152,15 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
 
   const handleLinkClick = useCallback((e: React.MouseEvent<HTMLAnchorElement>, href: string) => {
     e.preventDefault()
+    // `kbloc:` = 知识库「读书笔记」页里摘录的「回到原文」链接（摘录导出闭环）。
+    // ★ 单点拦截：在委托给 onLinkClick / openExternal 之前处理，否则会落到下面的默认分支
+    //   被 window.api.openExternal 当外部路径交给系统（报错且有安全风险）。所有渲染面共用这一处。
+    if (/^kbloc:/i.test(href)) {
+      try {
+        window.dispatchEvent(new CustomEvent(KB_OPEN_EXCERPT_LOC, { detail: { href } }))
+      } catch { /* 派发失败不影响页面 */ }
+      return
+    }
     if (onLinkClick) {
       onLinkClick(href)
     } else {
@@ -158,13 +184,15 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
       const child = Array.isArray(children) ? children[0] : children
       const cls = (React.isValidElement(child) && ((child.props as { className?: string }).className || '')) || ''
       if (/language-(spoiler|anim)/.test(cls)) return <>{children}</>
-      // ```quiz 围栏（新规范或旧格式预处理产物）→ 判题卡片；解析失败回退普通代码块
+      // ```quiz 围栏（新规范或旧格式预处理产物）→ 判题卡片；宽容修复仍失败 → 占位卡（条目13，不再裸显 JSON）
       if (/language-(quiz|json)/.test(cls)) {
-        const quiz = parseQuizFence(extractText(children))
+        const src = extractText(children)
+        const quiz = parseQuizFence(src)
         if (quiz) return <QuizCard quiz={quiz} pageId={pageId} pageTitle={pageTitle} />
         if (/language-quiz/.test(cls)) {
-          const fixed = parseQuizFenceLoose(extractText(children))
+          const fixed = parseQuizFenceLoose(src)
           if (fixed) return <QuizCard quiz={fixed} pageId={pageId} pageTitle={pageTitle} />
+          return <QuizFailCard onRetry={onQuizRetry} />
         }
       }
       // 插件渲染器（plugin-phase1-design C6）：命中 lang 且插件已启用 → 内容只读沙箱；失败回退普通代码块
@@ -260,37 +288,37 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
     },
     // Convert [[wiki links]] + 脚注（word^[标注]） in paragraph text to interactive spans
     p({ children }) {
-      return <p>{renderInlineExtras(children, onWikiLink, knownWikiTitles, draftWikiTitles)}</p>
+      return <p>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</p>
     },
     // Also handle wiki links in list items, headings, etc.
     li({ children }) {
-      return <li>{renderInlineExtras(children, onWikiLink, knownWikiTitles, draftWikiTitles)}</li>
+      return <li>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</li>
     },
     h1({ children }) {
       const text = extractText(children)
-      return <h1 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, draftWikiTitles)}</h1>
+      return <h1 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h1>
     },
     h2({ children }) {
       const text = extractText(children)
-      return <h2 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, draftWikiTitles)}</h2>
+      return <h2 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h2>
     },
     h3({ children }) {
       const text = extractText(children)
-      return <h3 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, draftWikiTitles)}</h3>
+      return <h3 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h3>
     },
     h4({ children }) {
       const text = extractText(children)
-      return <h4 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, draftWikiTitles)}</h4>
+      return <h4 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h4>
     },
     h5({ children }) {
       const text = extractText(children)
-      return <h5 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, draftWikiTitles)}</h5>
+      return <h5 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h5>
     },
     h6({ children }) {
       const text = extractText(children)
-      return <h6 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, draftWikiTitles)}</h6>
+      return <h6 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h6>
     },
-  }), [handleLinkClick, onWikiLink, knownWikiTitles, draftWikiTitles, pageId, pageTitle, fenceRenderers])
+  }), [handleLinkClick, onWikiLink, knownWikiTitles, pageId, pageTitle, fenceRenderers, onQuizRetry])
 
   return (
     <div className="prose-content">
@@ -438,11 +466,11 @@ function renderFootnotes(children: React.ReactNode): React.ReactNode {
 }
 
 /** 行内扩展统一入口：先脚注，后双链（脚注词不被双链二次处理） */
-function renderInlineExtras(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>, draftWikiTitles?: Set<string>): React.ReactNode {
-  return renderWikiLinks(renderFootnotes(children), onWikiLink, knownWikiTitles, draftWikiTitles)
+function renderInlineExtras(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>): React.ReactNode {
+  return renderWikiLinks(renderFootnotes(children), onWikiLink, knownWikiTitles)
 }
 
-function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>, draftWikiTitles?: Set<string>): React.ReactNode {
+function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>): React.ReactNode {
   if (!onWikiLink) return children
   return React.Children.map(children, child => {
     if (typeof child === 'string') {
@@ -462,18 +490,15 @@ function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string)
         // The wiki link
         const display = match[1].split('|')[0].trim()
         const exists = knownWikiTitles ? knownWikiTitles.has(display) : true
-        const isDraft = !exists && draftWikiTitles ? draftWikiTitles.has(display) : false
         parts.push(
           <span
             key={key++}
             className={
-              isDraft
-                ? 'text-[var(--accent)]/55 cursor-pointer border-b border-dotted border-[var(--accent)]/45'
-                : exists
-                  ? 'text-[var(--accent)] cursor-pointer hover:underline'
-                  : 'text-[var(--text-muted)]/70 cursor-pointer hover:text-[var(--accent)] border-b border-dashed border-[var(--text-muted)]/50'
+              exists
+                ? 'text-[var(--accent)] cursor-pointer hover:underline'
+                : 'text-[var(--text-muted)]/70 cursor-pointer hover:text-[var(--accent)] border-b border-dashed border-[var(--text-muted)]/50'
             }
-            title={isDraft ? `「${display}」为草稿（修改中），归档后方可阅读` : exists ? display : `创建页面「${display}」`}
+            title={exists ? display : `创建页面「${display}」`}
             onClick={() => onWikiLink(display)}
           >
             {display}
@@ -486,7 +511,7 @@ function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string)
     if (React.isValidElement(child) && (child.props as any)?.children) {
       return React.cloneElement(child, {
         ...(child.props as any),
-        children: renderWikiLinks((child.props as any).children, onWikiLink, knownWikiTitles, draftWikiTitles),
+        children: renderWikiLinks((child.props as any).children, onWikiLink, knownWikiTitles),
       } as any)
     }
     return child

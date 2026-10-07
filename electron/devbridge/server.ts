@@ -120,7 +120,6 @@ function state() {
     ui: getUiState(),
     settingsSummary: {
       theme: deps.getSettingValue?.('theme') ?? null,
-      startupTab: deps.getSettingValue?.('startupTab') ?? null,
     },
   }
 }

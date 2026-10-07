@@ -109,9 +109,9 @@ export function VaultPicker({ onDone, startup = false }: { onDone: (created?: bo
 
   return (
     <div className="fixed inset-0 z-[95] bg-[var(--bg-primary)] flex items-center justify-center select-none">
-      <div className="w-full max-w-[620px] mx-6 -mt-8 max-h-[calc(100vh-64px)] overflow-y-auto">
-        {/* 品牌区（Obsidian 式：图标 + 名称 + 版本） */}
-        <div className="text-center mb-9">
+      <div className="w-full max-w-[620px] mx-6 kb-picker-shell">
+        {/* 品牌区（Obsidian 式：图标 + 名称 + 版本）—— 不参与滚动，滚动只发生在其下的中段 */}
+        <div className="text-center mb-9 shrink-0">
           <img
             src={appIcon}
             alt="Phrontis"
@@ -124,73 +124,76 @@ export function VaultPicker({ onDone, startup = false }: { onDone: (created?: bo
 
         {mode === 'home' ? (
           <div className="vault-picker-step">
-            {startup && (
-              <h2 className="text-[15px] font-semibold text-[var(--text-primary)] mb-4">选择要进入的仓库</h2>
-            )}
-            {/* 快速开始仅在没有任何已有仓库时出现（首次使用的主路径） */}
-            {!startup && !hasRecent && (
-              <button
-                onClick={() => void quickStart()}
-                disabled={busy}
-                className="w-full py-2.5 text-[13px] font-medium text-white bg-[var(--accent)] rounded-md hover:bg-[var(--accent-hover)] transition-colors mb-7 disabled:opacity-60"
-              >
-                快速开始
-              </button>
-            )}
-            {startup && !hasRecent && (
-              <p className="text-[12px] text-[var(--text-muted)] mb-4">还没有登记过仓库——用下面的方式创建一个。</p>
-            )}
-            {hasRecent && (
-              <>
-                <div className="text-[10.5px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1.5 px-1">
-                  {startup ? '已有仓库' : '快速进入'}
-                </div>
-                <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] divide-y divide-[var(--border-color)] mb-7 overflow-hidden">
-                  {recent.map((v, i) => (
-                    <button
-                      key={v.rootId}
-                      autoFocus={startup && i === 0}
-                      onClick={() => void enterVault(v)}
-                      disabled={busy}
-                      title={v.path}
-                      className={`w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 ${startup && i === 0 ? 'bg-[var(--accent)]/5' : ''}`}
-                    >
-                      <span className={`w-4 shrink-0 text-[var(--accent)] ${startup && i === 0 ? '' : 'opacity-50'}`}>
-                        <CornerDownLeft size={14} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[13px] font-medium text-[var(--text-primary)] truncate">
-                          {v.name}
-                          {v.rootId === curId && (
-                            <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-normal text-[var(--accent)] bg-[var(--accent)]/10 align-middle">上次使用</span>
-                          )}
+            <div className="kb-picker-scroll text-center">
+              {startup && (
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)] mb-4">选择要进入的仓库</h2>
+              )}
+              {/* 快速开始仅在没有任何已有仓库时出现（首次使用的主路径） */}
+              {!startup && !hasRecent && (
+                <button
+                  onClick={() => void quickStart()}
+                  disabled={busy}
+                  className="w-full py-2.5 text-[13px] font-medium text-white bg-[var(--accent)] rounded-md hover:bg-[var(--accent-hover)] transition-colors mb-7 disabled:opacity-60"
+                >
+                  快速开始
+                </button>
+              )}
+              {startup && !hasRecent && (
+                <p className="text-[12px] text-[var(--text-muted)] mb-4">还没有登记过仓库——用下面的方式创建一个。</p>
+              )}
+              {hasRecent && (
+                <>
+                  <div className="text-[10.5px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1.5 px-1">
+                    {startup ? '已有仓库' : '快速进入'}
+                  </div>
+                  <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] divide-y divide-[var(--border-color)] mb-7 overflow-hidden">
+                    {recent.map((v, i) => (
+                      <button
+                        key={v.rootId}
+                        autoFocus={startup && i === 0}
+                        onClick={() => void enterVault(v)}
+                        disabled={busy}
+                        title={v.path}
+                        className={`w-full flex items-center gap-3 px-5 py-3 text-left hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 ${startup && i === 0 ? 'bg-[var(--accent)]/5' : ''}`}
+                      >
+                        <span className={`w-4 shrink-0 text-[var(--accent)] ${startup && i === 0 ? '' : 'opacity-50'}`}>
+                          <CornerDownLeft size={14} />
                         </span>
-                        <span className="block text-[11px] text-[var(--text-muted)] truncate mt-0.5">{v.path}</span>
-                      </span>
-                      <span className="shrink-0 text-[11px] text-[var(--text-muted)]">{relTime(v.updatedAt)}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-            <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] px-5 divide-y divide-[var(--border-color)]">
-              <VaultRow
-                icon={<Plus size={15} />}
-                title="新建仓库"
-                desc="在指定文件夹下创建一个新的仓库。"
-                actionLabel="创建"
-                onAction={() => setMode('create')}
-              />
-              <VaultRow
-                icon={<FolderOpen size={15} />}
-                title="打开本地仓库"
-                desc="将一个本地文件夹作为仓库在 Phrontis 中打开。"
-                actionLabel="打开"
-                secondary
-                onAction={() => void openExisting()}
-              />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[13px] font-medium text-[var(--text-primary)] truncate">
+                            {v.name}
+                            {v.rootId === curId && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-normal text-[var(--accent)] bg-[var(--accent)]/10 align-middle">上次使用</span>
+                            )}
+                          </span>
+                          <span className="block text-[11px] text-[var(--text-muted)] truncate mt-0.5">{v.path}</span>
+                        </span>
+                        <span className="shrink-0 text-[11px] text-[var(--text-muted)]">{relTime(v.updatedAt)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] px-5 divide-y divide-[var(--border-color)]">
+                <VaultRow
+                  icon={<Plus size={15} />}
+                  title="新建仓库"
+                  desc="在指定文件夹下创建一个新的仓库。"
+                  actionLabel="创建"
+                  onAction={() => setMode('create')}
+                />
+                <VaultRow
+                  icon={<FolderOpen size={15} />}
+                  title="打开本地仓库"
+                  desc="将一个本地文件夹作为仓库在 Phrontis 中打开。"
+                  actionLabel="打开"
+                  secondary
+                  onAction={() => void openExisting()}
+                />
+              </div>
             </div>
-            <div className="text-center mt-7">
+            {/* 底部链接固定在滚动区之外：中段滚到底也不会把它推走 */}
+            <div className="text-center mt-7 shrink-0">
               {startup ? (
                 <button
                   onClick={() => onDone()}
@@ -209,7 +212,7 @@ export function VaultPicker({ onDone, startup = false }: { onDone: (created?: bo
             </div>
           </div>
         ) : (
-          <div className="vault-picker-step">
+          <div className="vault-picker-step kb-picker-scroll">
             <button
               onClick={() => setMode('home')}
               className="flex items-center gap-1 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors mb-1"

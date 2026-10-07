@@ -207,6 +207,22 @@ function readEnabledSkills(): SkillInfo[] {
   return all
 }
 
+/**
+ * 按注册名取 Skill 提示词（v3.1.1 条目10：/ 弹层显式调用——用户选中后本轮确定性注入，
+ * 不再依赖模型「恰好对应」才自主调用 skill 工具）。只认**启用**的 Skill；未找到返回 null。
+ */
+export function findSkillPrompt(registryName: string): { title: string; prompt: string } | null {
+  try {
+    const name = String(registryName ?? '').trim()
+    if (!name) return null
+    const hit = readEnabledSkills().find(s => s.registryName === name && !s.disabled)
+    if (!hit) return null
+    return { title: hit.title, prompt: hit.prompt }
+  } catch {
+    return null
+  }
+}
+
 // ---- 停用状态（设置项 aiSkillDisabled：registryName 数组，JSON 字符串） ----
 
 let skillDeps: SkillDeps | null = null

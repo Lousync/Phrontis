@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Plus, Maximize2, Zap, ChevronDown, RotateCcw, Trash2, Check, CalendarDays, LayoutGrid } from 'lucide-react'
 import type { ScheduleTodo, ScheduleTag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO } from '../../types'
 import { registerAssistantContext } from '../../lib/assistantContext'
@@ -75,7 +76,7 @@ function localToday(): string {
   return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`
 }
 
-export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar }: { isActive?: boolean; sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void }) {
+export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, sidebarEl = null, sidebarHosted = false }: { isActive?: boolean; sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean }) {
   const now = new Date()
   const today = localToday()
 
@@ -173,11 +174,11 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
   const ym = `${year}-${String(month).padStart(2, '0')}`
 
   // ---- data loading ----
+  // dates 与 deadlineCounts 互相独立（性能 2026-09-20）：原来串行 await，模块首挂的数据等待被拉长一倍
   async function refreshDotDates() {
     try {
-      const dates = await getScheduleDates(ym)
+      const [dates, counts] = await Promise.all([getScheduleDates(ym), getScheduleDeadlineCounts(ym)])
       setDotDates(new Set(dates))
-      const counts = await getScheduleDeadlineCounts(ym)
       setDeadlineCounts(new Map(Object.entries(counts)))
     } catch (e) { console.error(e) }
   }
@@ -207,13 +208,17 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
   }
 
   /** 左栏「周任务」清单：本周（自然周）全部任务，含已完成。复用 vaultTodosForWeek（已按周取数） */
-  async function refreshWeekTasks() {
+  // 必须是稳定引用：下方 `useEffect(..., [trayMode, weekStart, weekEnd, refreshWeekTasks])` 把它列进依赖，
+  // 而它内部又 setWeekTasks（filter 出来的新数组 = 新引用）触发重渲染 —— 引用一旦不稳定，
+  // 这条 effect 就每次渲染都跑一轮 IPC，形成「拉取 → 重渲染 → 再拉取」的空转；
+  // 在「本周」档位下会一直转，顺带不断重渲染本模块，把弹窗里正在输入的内容冲掉。
+  const refreshWeekTasks = useCallback(async () => {
     try {
       const list = await getScheduleWeekTodos(weekStart, weekEnd)
       // 只留自然周区间内的任务（排除「延后候选」），含已完成
       setWeekTasks(list.filter(t => t.date >= weekStart && t.date <= weekEnd))
     } catch (e) { console.error(e) }
-  }
+  }, [weekStart, weekEnd])
 
   async function refreshAll() { await Promise.all([refreshDotDates(), refreshMonthTodos(), refreshUnscheduled()]) }
 
@@ -364,11 +369,19 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
 
   const [showDone, setShowDone] = useState(false)
 
+  /**
+   * 删除任务（级联删子任务、无回收站）。
+   * 删除前先数一次子任务 —— 级联是静默的，一条「已删除（含 n 条子任务）」
+   * 是用户唯一能察觉「连带删了子任务」的反馈。
+   */
   async function handleDelete(id: string) {
+    let subCount = 0
+    try { subCount = (await getScheduleSubtasks(id)).length } catch { /* 计数失败不阻断删除 */ }
     await deleteScheduleTodo(id)
     notifyDataChanged('schedule')
     await refreshAll()
     setWeekRefresh(v => v + 1)
+    showToast({ type: 'info', message: subCount > 0 ? `已删除（含 ${subCount} 条子任务）` : '已删除' })
   }
 
   /** 日程表：卡片拖回「待安排」栏 = 取消排期（清空时段、保留日期） */
@@ -584,7 +597,7 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
   }, [])
 
   return (
-    <div className="flex h-full flex-col bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex h-full flex-col">
       {/* 顶部贯通行：视图切换条 + 视图专属操作 */}
       <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 shrink-0 select-none">
         <CalendarDays size={12} className="text-[var(--text-muted)]" />
@@ -628,7 +641,10 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
       </div>
 
       <div className="flex min-h-0 flex-1">
-      <ResizablePanel storageKey="sidebarWidth_schedule" defaultWidth={280} minWidth={220} maxWidth={450} visible={sidebarOpen} initialWidth={sidebarWidths.sidebarWidth_schedule} onSnapClose={onSnapCloseSidebar} onSnapOpen={onSnapOpenSidebar}>
+      {/* v3.4.0 批次3：左栏模块态（sidebarEl）时侧栏内容 portal 进左栏 slot（挂载点迁移），
+          否则回落原位 ResizablePanel；portal 传 null ⇔ visible=false 不渲染 children，显隐一致 */}
+      {(() => {
+        const sidebarInner = (
         <div className="h-full flex flex-col" style={paneStyle(viewLeaving)}>
           {/* 头部：与编辑器「资源管理器」同款紧凑标题行 */}
           <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
@@ -664,6 +680,7 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
                 quadrantIcon={quadrantIcon}
                 quadrantText={quadrantText}
                 onOpen={openEdit}
+                onDelete={todo => { void handleDelete(todo.id) }}
                 emptyHint={trayMode === 'week' ? <>本周暂无任务<br />在右侧网格排期或勾选完成</> : undefined}
               />
             ) : (
@@ -680,7 +697,17 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
           </div>
           <PluginSlotEntry slot="schedule.sidebar" />
         </div>
-      </ResizablePanel>
+        )
+        return sidebarEl
+          ? createPortal(sidebarOpen ? sidebarInner : null, sidebarEl)
+          : sidebarHosted
+            ? null // Workbench 托管但槽未就绪（左栏收起/翻转瞬间）：渲染 null 等槽重挂后 portal，绝不回落内嵌列（同 editor 口径）
+            : (
+              <ResizablePanel storageKey="sidebarWidth_schedule" defaultWidth={280} minWidth={220} maxWidth={450} visible={sidebarOpen} initialWidth={sidebarWidths.sidebarWidth_schedule} onSnapClose={onSnapCloseSidebar} onSnapOpen={onSnapOpenSidebar}>
+                {sidebarInner}
+              </ResizablePanel>
+            )
+      })()}
 
       <div className="flex-1 flex flex-col overflow-hidden">
         {shownMode === 'week' ? (
@@ -699,6 +726,7 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
               onToggleDone={handleToggleDone}
               onRequestCreate={(dateStr, start, end) => openCreate({ date: dateStr, start, end })}
               onUnschedule={handleUnschedule}
+              onDeleteTodo={todo => { void handleDelete(todo.id) }}
               onChanged={handleScheduleChanged}
             />
           </div>
@@ -913,6 +941,7 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
       <TodoEditModal
         open={modalOpen} initial={modalInitial} tags={tags} onSave={handleSave}
         onClose={() => { setModalOpen(false); setEditTarget(null) }}
+        onDelete={editTarget ? () => { void handleDelete(editTarget.id) } : undefined}
         subtasks={editSubtasks}
         onToggleSubtask={handleToggleSubtask}
         onDeleteSubtask={handleDeleteSubtask}

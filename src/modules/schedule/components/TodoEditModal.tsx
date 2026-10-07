@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import type { ScheduleTag, ScheduleTodo } from '../../../types'
 import { X, Plus, Trash2, Check } from 'lucide-react'
 import { localToday } from '../../../lib/date'
@@ -24,6 +25,8 @@ interface Props {
   subtasks?: ScheduleTodo[]
   onToggleSubtask?: (id: string) => void
   onDeleteSubtask?: (id: string) => void
+  /** 删除主任务（仅编辑已有任务时提供）。级联删子任务、无回收站，由调用方确认口径 */
+  onDelete?: () => void
   onCreateSubtask?: (data: { title: string; date: string; taskType: 'daily' }) => void
   /** 四象限图标方案（设置项 scheduleQuadrantIcon） */
   quadrantIcon?: QuadrantIcon
@@ -36,7 +39,7 @@ interface Props {
 }
 
 export function TodoEditModal({
-  open, initial, tags, onSave, onClose, subtasks, onToggleSubtask, onDeleteSubtask, onCreateSubtask,
+  open, initial, tags, onSave, onClose, subtasks, onToggleSubtask, onDeleteSubtask, onCreateSubtask, onDelete,
   quadrantIcon = 'bars', quadrantOrder = 'ladder', quadrantText = 'show', allowDaily = true,
 }: Props) {
   const [form, setForm] = useState<TodoForm>(initial)
@@ -158,7 +161,12 @@ export function TodoEditModal({
     syncDeadline(next)
   }
 
-  return (
+  /* ★ portal 到 body（2026-09-29 修）：本组件此前就地渲染在 ScheduleModule 的 React 树里，
+     而 ScheduleModule 位于**中间栏**内部 —— 于是 `z-50` 只能压住中间栏自己的子树，
+     压不住作为兄弟节点的**右栏**（右栏绘制在其后，遮罩盖不住它；实测右栏中心点
+     elementFromPoint 命中右栏内容而非遮罩）。portal 后弹层与左右栏同处 body 层叠上下文，
+     z-50 正常生效。与 WorkbenchLeftPanel 书签菜单 / AiTeachFileTree 右键菜单同一手法。 */
+  return createPortal(
     <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/50 ${closing ? 'kb-overlay-out' : 'kb-overlay'}`}>
       <div className={`bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded-lg w-[500px] shadow-2xl ${closing ? 'kb-modal-out' : 'kb-modal-in'}`} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-[var(--border-color)]">
@@ -364,14 +372,26 @@ export function TodoEditModal({
           </Field>
         </div>
 
-        <div className="flex justify-end gap-2 px-5 py-3 border-t border-[var(--border-color)]">
-          <button onClick={onClose} className="px-4 py-1.5 text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">取消</button>
+        <div className="flex items-center gap-2 px-5 py-3 border-t border-[var(--border-color)]">
+          {/* 删除主任务：仅编辑已有任务时出现（新建时 initial.title 为空）。
+              红字弱化、常态透明 —— 与「删除子任务」同源口径，避免误点 */}
+          {onDelete && initial.title && (
+            <button
+              onClick={() => { onClose(); onDelete() }}
+              title="删除这个任务（含其全部子任务，不可恢复）"
+              className="flex items-center gap-1 px-2 py-1.5 rounded text-[12.5px] text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10 transition-colors"
+            >
+              <Trash2 size={13} /> 删除任务
+            </button>
+          )}
+          <button onClick={onClose} className="ml-auto px-4 py-1.5 text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">取消</button>
           <button onClick={handleSave} disabled={!canSave}
             className="px-4 py-1.5 text-[13px] bg-[var(--accent)] text-white rounded hover:bg-[var(--accent-hover)] disabled:opacity-40"
           >保存</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

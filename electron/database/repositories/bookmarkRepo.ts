@@ -32,13 +32,13 @@ export function registerBookmarkHandlers(): void {
   })
 
   ipcMain.handle('bookmark:createBookmark', (_e, data: {
-    title: string; url: string; description?: string; categoryId?: string
+    title: string; url: string; description?: string; categoryId?: string; starred?: boolean
   }) => {
     return vaultCreateBookmark(data)
   })
 
   ipcMain.handle('bookmark:updateBookmark', (_e, id: string, data: {
-    title?: string; url?: string; description?: string; categoryId?: string | null
+    title?: string; url?: string; description?: string; categoryId?: string | null; starred?: boolean
   }) => {
     return vaultUpdateBookmark(id, data)
   })

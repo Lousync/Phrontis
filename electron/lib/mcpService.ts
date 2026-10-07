@@ -12,7 +12,7 @@ import { appendAudit } from './pluginAudit'
  * - stdio 会执行本机任意命令：保存与连通性测试都必须携带 confirmCommand=true（UI 双重确认），
  *   且新条目一律默认禁用，需手动启用
  * - sse/http 仅允许 http(s) URL
- * - 环境变量值 DPAPI 加密落盘；渲染层只回传键名，永远拿不到明文
+ * - 环境变量值加密落盘（secretBox）；渲染层只回传键名，永远拿不到明文
  * 存储：mcp_servers 表 → userData/data/mcp.json（行结构对齐原表，数组顺序 = 创建顺序）
  */
 

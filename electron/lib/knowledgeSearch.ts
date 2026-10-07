@@ -64,7 +64,7 @@ export async function searchKnowledge(opts: {
   const mode = opts.mode ?? 'auto'
   const idx = getKnowledgeIndex()
   const textById = getKnowledgeTextIndex()
-  const pages = idx.pages.filter((p) => p.status !== 'draft' && p.entryKind !== 'file')
+  const pages = idx.pages.filter((p) => p.entryKind !== 'file')
   const terms = opts.query.trim().toLowerCase().split(/\s+/).filter(Boolean)
 
   // ---- 关键词路（始终可用；semantic 模式下仅作融合底座，仍需计算） ----

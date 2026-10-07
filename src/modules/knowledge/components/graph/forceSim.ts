@@ -21,8 +21,6 @@ export interface SimNode extends SimulationNodeDatum {
   path: string
   kind: SimKind
   degree: number
-  /** 页面状态（草稿虚化用）：draft=草稿（修改中，引用方仍显示但虚化） */
-  status?: 'draft' | 'published'
   r: number
   /** 社区簇 id（仅页节点；label propagation 结果） */
   cluster?: number

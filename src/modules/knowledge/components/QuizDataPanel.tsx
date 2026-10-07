@@ -165,8 +165,7 @@ export function QuizDataPanel({ spaceName, onClose, onDataChanged }: {
                               style={{
                                 background: bandTone(b.key),
                                 transform: `scaleX(${grown ? b.count / maxBand : 0})`,
-                                transition: 'transform var(--dur-large) var(--ease-kb)',
-                                transitionDelay: `${i * 40}ms`,
+                                transition: `transform var(--dur-large) var(--ease-kb) ${i * 40}ms`,
                               }}
                             />
                           </div>
@@ -197,8 +196,7 @@ export function QuizDataPanel({ spaceName, onClose, onDataChanged }: {
                               className="block h-full rounded-full origin-left bg-[var(--accent)]"
                               style={{
                                 transform: `scaleX(${grown ? b.total / maxBook : 0})`,
-                                transition: 'transform var(--dur-large) var(--ease-kb)',
-                                transitionDelay: `${i * 40}ms`,
+                                transition: `transform var(--dur-large) var(--ease-kb) ${i * 40}ms`,
                               }}
                             />
                           </div>

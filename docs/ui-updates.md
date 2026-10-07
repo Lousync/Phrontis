@@ -737,3 +737,598 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 **验收**：`tsc --noEmit -p tsconfig.web.json` 本轮改动文件 0 新增错误；`npm run build` 通过。真机冒烟待做：`settings.json` 置 `onboardingDone:false`（并删 `activityBarHidden`）复现首启 → 完成/跳过均得三件套 → 右键找回；设置重开引导走完不点场景 → 活动栏不变。
 
+
+## 18. EPUB 阅读器：侧边点击翻页（2026-09-21）
+
+背景：EPUB 翻页此前只有工具栏按钮与键盘（`←/→/PageUp/PageDown/空格`）。本次补上「点书本左右边缘翻页」，与 PDF 阅读器的边缘点击手感对齐。
+
+改动点：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 内容帧内挂 `mousedown`/`click`/`mousemove`：点左右热区 → `view.prev()/next()`（RTL 书左右语义相反） | `src/components/shared/epub/EpubReaderView.tsx` |
+| 2 | 热区宽 = `min(160px, max(48px, 阅读区宽 × 15%))`，中间留白给划选 | 同上 |
+| 3 | 悬停热区给手型光标（类挂内容文档 `<html>`，样式走 `setStyles` 的 after 槽） | 同上 |
+| 4 | 宿主盒挂 `data-wb="epubHost"`（热区坐标锚点） | 同上 |
+
+三条「不翻页」的排除：① 按下→抬起位移 > 6px 判为划选拖动；② 书内链接（上游 `#handleLinks` 已 `preventDefault`，读 `defaultPrevented`）；③ 命中有高亮的坐标（左键点高亮要出回看卡，`overlayer.hitTest`）。热区里**不**拦 `mousedown`，故从边缘起拖照样能选字。
+
+**关键机制**：判据必须用**宿主坐标**（帧自身矩形 + 帧内坐标换算），不能用 `e.clientX` 直接比。分页器按章铺多个 iframe 并靠平移把当前章挪进可视区，于是帧内坐标既可能超出可见区（帧比宿主盒宽，实测 1830 vs 656，右侧被 `overflow:hidden` 裁掉、点不到），也可能整体偏掉一个帧宽（实测点宿主正中时帧收到 `clientX = 2767` = 327 + 上一章宽度 2440）。按帧内坐标算热区时，「点正中」会被判成「点右边缘」而误翻页。
+
+**顺带修掉的既有 bug**：`view.getContents()` 在 `View` 上不存在（内容列表在 `renderer` 上），此前 `view.d.ts` 的错误声明把它藏到了运行时 → 每次点击抛 `TypeError`，且「点已有高亮 → 回看卡」这条路径自 B 段起整体失效。声明已删，调用点改 `view.renderer.getContents()`。
+
+**验收**：实机探针 `probe-epub-reader.mjs` 第 6.5 步（含两条负向：点正中不翻页 / 从边缘起拖不翻页）全绿，探针退出码 0；`tsc --noEmit -p tsconfig.web.json` 无新增错误；5 个契约脚本全过。排障钩子：置 `window.__kbEdgeDiag = true` 后每个鼠标事件写进宿主 `<html data-kb-edge>`（生产默认关）。
+
+
+## 19. EPUB 左栏收窄：去掉三态切换头，只留目录（2026-09-22）
+
+背景：`EpubRailPanel` 当初照 `PdfRailPanel` 的骨架抄了「目录 / 缩略图 / 书签」三态切换头，后两者是中性空态占位（「EPUB 暂不支持缩略图 / 书签」）—— 点开看到的是空态，读起来像「坏了 / 点了没反应」。而 EPUB 无「页」概念，缩略图格式层面就不存在；书签的定位能力 foliate 有（CFI），但存储口径未定（`TxtBookmark.paraIndex` 是数字）。
+
+拍板口径（2026-09-21）：**某格式不支持的功能，侧栏不出对应入口，不做中性空态占位** —— Tab 头本身就在宣称「这里有东西」，「此格式还有什么」交给文档说更合适。将来某件真正做出来时按同一条规则办：**能用了才出 Tab**。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 删 `section` state 与三态切换头，直接渲染目录树（目录为空仍走「这本 EPUB 没有目录」文案） | `src/components/shared/epub/EpubRailPanel.tsx` |
+| 2 | 连带清 `BookMarked` / `LayoutGrid` / `ListTree` 图标 import 与 `tabCls`（`BookOpen` 仍用于「未选书」空态） | 同上 |
+| 3 | 探针第 4 步：**不再 filter 排除** Tab 名（撤 Tab 后那会变成静默宽容，多出按钮也照样绿），并新增负向断言「面板内不出现切换 Tab / 暂不支持占位」 | `.AGENT/scripts/workbench-shell/probes/probe-epub-reader.mjs` |
+
+**未动**：`data-wb-state` 的语义保持 `empty` =「未选书」、`ready` =「有书在读（目录可有可无）」—— 目录为空**不**改写为 `empty`，否则与「未选书」不可区分（探针与锚点惯例都依赖这个含义）。
+
+**验收**：实机探针 `probe-epub-reader.mjs` 全绿（含新增负向）；`tsc --noEmit` 双端 0 错；6 个契约脚本全过；PDF / TXT 回归探针不受影响（`kb-fit-pdfrail` 样式仍归 `PdfRailPanel` 使用）。
+
+
+## 20. 电子书扩格式：FB2 / FBZ 接入（阶段 2a，2026-09-22）
+
+背景：B 段一期只支持 EPUB。本批按上游方案 `b-epub-formats.md` §六 的分批，把 foliate 引擎的另外两种格式接进来（**fb2 + fbz 先行，cbz 单列 2b**）。核心结论：**两个格式都不需要新阅读器组件** —— 分发发生在**引擎**层（`bookEngineOf`），epub / fb2 / fbz 三者都映到 `'foliate'`。
+
+改动点：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 真相源加两个扩展名 + **三张表各一行**（KIND_BY_EXT / ENGINE_BY_EXT / MIME_BY_EXT）；新增 `bookExtOf` / `bookMimeOf` / `bookDisplayName` | `electron/lib/kbStore/bookFormats.ts` |
+| 2 | 镜像同步：`BookKind` 联合、两个 schema 的 `BOOK_KINDS` | `src/types/index.ts`·`readerStateSchema`·`excerptSchema` |
+| 3 | 阅读器**零格式字面量**：File 的 name/type 与摘录 `kind` 全部由 `bookFormats` 派生 | `src/components/shared/epub/EpubReaderView.tsx` |
+| 4 | CFI 回跳判据由 `kind === 'epub'` 改**引擎**判定（两处派发点） | `src/App.tsx` |
+| 5 | 书签块的格式判据同样改引擎（原写法让 fb2/fbz 的整块书签**静默消失**） | `src/components/workbench/ReadingSidePanel.tsx` |
+| 6 | 主进程整份读白名单补 `.fb2` / `.fbz` | `electron/lib/workspaceManager.ts:227` |
+| 7 | **vendor 第 4 处 patch**：FB2 内建样式表内联进 `<style>`（上游是 `blob:` 样式表，被 CSP `style-src` 拦） | `src/vendor/foliate/fb2.js` |
+| 8 | 探针：抽公共套件 `lib/reader-probe-kit.mjs`（CDP 取帧 / 真输入 / fixture 读写），新增 `make-fb2.mjs` + `probe-fb2-reader.mjs` | `.AGENT/scripts/workbench-shell/probes/` |
+
+**两个静默陷阱**（都改对了才没有报错、只会「看着不对」）：
+
+- **`kind` 与扩展名不是一回事**。fb2/fbz 的摘录若沿用 `kind: 'epub'`，会以 epub 的身份落库、导出分组、参与 `=== 'epub'` 过滤 —— 表象是「高亮不画」「导出并成一段」。故 `excerptSchema` / `excerptExportSchema` 都**显式列出三个格式而绝不写 `else`**（`else` 会把未来任何新格式静默塞进 CFI 校验 / txt 的 paraIndex 模板），末尾另留一个显式拒绝/兜底分支。
+- **foliate 靠 File 的 name/type 分派，不看魔数**（`view.js:13-21`，`isFB2`/`isFBZ` 全是大小写敏感 `endsWith`）。File 名与 MIME 因此必须由真相源派生 —— 恒给 `xxx.epub` 会让裸 fb2 直接 `UnsupportedTypeError`、fbz 被当 EPUB 解包炸掉（zip 里没有 `container.xml`）。契约脚本有负向断言锁住「阅读器内不得出现 MIME / `.epub` 字面量」。
+
+**安全负向的形态与 EPUB 不同**（两条硬约束本身未动）：FB2 的转换器是**白名单映射**（`fb2.js:129` 未知节点名 / 未列属性在**转换期**就被丢弃），所以恶意 fb2 的 `<script>`、`onerror` **根本进不了 DOM**；EPUB 那边是「进得了 DOM、靠 CSP + sandbox 执行不了」。两者都安全，但探针断言必须分开写，照抄会把「本来就进不来」记成「防住了」。
+
+**顺带修掉的探针污染**：`.knowbase/cache/knowledge-index.json` **不校验页文件是否还在**（`getKnowledgeIndex` 只看 schemaVersion / ignoreState 指纹），于是在 app 之外删页会留「幽灵页」—— 表现是下一个探针的页数断言假失败。`seed-probe-vault.mjs --add-books` 现在连带清索引缓存。
+
+**验收**：实机探针 `probe-fb2-reader.mjs` **61 条断言全绿**（含 PATCH ④ 排版靶：章标题居中 / 正文段 margin 归零 / 第二段缩进 1em；图片经 `<binary>` base64 解码；目录 href 是序号串仍能 `view.goTo`；导出按章节分组端到端；重开后 **locator 与关书前逐字相同** = 精确回位而非回落章首）；`probe-epub-reader.mjs`（迁移到公共套件后复跑）与 PDF / TXT / 导出三条回归探针全绿；`tsc --noEmit` 双端 0 错。
+
+> 上游方案 §三「陷阱 2」原判 fb2 的 CFI 是 fake、**只能回到章节开头** —— 实机推翻：`fb2.js` 确实不提供 section 级 cfi（基础部分走 `CFI.fake.fromIndex`），但 foliate 是 `CFI.joinIndir(基础, CFI.fromRange(range))` **拼上真实范围**，故章内精度保留、回跳精确到原处（探针用「重开前后 locator 逐字相同」断言）。
+
+## 21. 电子书扩格式：CBZ 接入（阶段 2b，2026-09-22）
+
+背景：2a 把 fb2 / fbz 接进了 foliate 的**重排**引擎。cbz（图片漫画）虽然复用同一个阅读器组件，**引擎却是另一个**（`fixed-layout.js`，固定版式）—— 这不是「再加一个扩展名」，而是「同一组件下长出第二条形状完全不同的链路」。本批方案 `.claude/plans/b-stage2b-cbz.md`，落码后的偏差与新增待办见其 §九。
+
+**四个拍板**（本轮问定）：右栏「阅读」Tab **不留** · 默认分页**单页** · 缩放**出 fit-page / fit-width 两档** · 页序**打 patch 改自然序**。
+
+改动点：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 真相源加 `.cbz` + 三张表各一行（kind `cbz` / engine **`foliate`** / mime **`application/vnd.comicbook+zip`**，该串必须逐字对，`view.js:14` 的 `isCBZ` 就是拿它比） | `electron/lib/kbStore/bookFormats.ts` |
+| 2 | 镜像同步：`BookKind` 联合、两个 schema 的 `BOOK_KINDS` | `src/types/index.ts`·`readerStateSchema`·`excerptSchema` |
+| 3 | 主进程整份读白名单补 `.cbz`（**安全面变更**） | `electron/lib/workspaceManager.ts` |
+| 4 | **CSP 只加一处**：`img-src` += `blob:` | `index.html` |
+| 5 | **vendor 第 5 处 patch**（只动 `comic-book.js`）：页序自然序（`Intl.Collator('en',{numeric:true})`，locale 必须钉死否则探针会飘）+ 扩展名过滤大小写不敏感（`.PNG` 原本整包被丢）+ 暴露 `book.getPageBlob` 供缩略图取页图字节 | `src/vendor/foliate/comic-book.js` |
+| 6 | 单页 / 缩放 / 工具栏页号：宿主侧解决，**不动 vendor** | `src/components/shared/epub/EpubReaderView.tsx` |
+| 7 | 左栏按**引擎**分叉：`comic` 出缩略图网格、其余仍出目录树；反向按需取图（`KB_CBZ_THUMB_REQ` / `KB_CBZ_THUMBS`） | `EpubRailPanel.tsx`·`pdfEvents.ts` |
+| 8 | 右栏 cbz **不出**第三个 Tab —— **只此一处**（`reading={… && kind !== 'cbz' ? … : null}`）；`railReaderDoc` 不能动（左栏网格靠它） | `src/App.tsx` |
+| 9 | 探针：`make-cbz.mjs`（零依赖手写 PNG + STORED zip，产物字节可复现）+ `probe-cbz-reader.mjs` | `.AGENT/scripts/workbench-shell/probes/` |
+
+**三件本以为要改引擎、实测都不用改**（本批最大的成本节约，都在源码里核对过）：
+
+- **单页**：`fixed-layout.js` 里 `rendition.spread === 'none'` ⇒ 每节一跨页。宿主在 `view.open` **之前**把 `book.rendition.spread` 设成 `'none'` 即可（★ 顺序反了会被读走默认值、静默成对开）。
+- **缩放**：`fixed-layout.js` 只认自己元素上的 `zoom` 属性，`view.js` 全程不转发 —— 但 `view.renderer` 是公开字段，`setAttribute('zoom', …)` 直接生效。
+- **回位 / 进度**：`view.js` 用**章节字节数**重算 `fraction`，`locator` 走 `CFI.fake.fromIndex`。⇒ cbz 的 pct 非 0 但**是字节加权**（不等于页数比例），`readerState.locator` 形如 `epubcfi(/6/8)`，与文本系同一条路，**不需要发明新 locator 口径**。
+
+**三个静默陷阱**：
+
+- **cbz 的每一页是两个 blob URL**：先给页图造一个，再把它塞进 HTML 字符串给这段文档造第二个。`frame-src blob:` 早就有了（阶段 0），缺的是 **`img-src blob:`** —— 少了它画面是「文档加载了、图全裂」，而报错只指向图片，很容易误判成 zip 解包问题。
+- **`view.goTo` 对无效目标返回真值**：目标无效时 `resolveHref` 给 `{index:-1}`，`FixedLayout.goTo` 对不存在的 section **静默 return** ⇒ 整条链返回真值，宿主 `restored = !!ok` 会误判成功。本批不喂无效目标所以没事，但**任何「把 index 拼成字符串塞进 locator」的将来改动都会踩**（`resolveNavigation` 只在 `typeof target === 'number'` 时认 index）。
+- **缩略图必须解码后下采样**：一页画集图解码后 20-30MB，直接把原图塞进 96px 格子 = 每格一份全尺寸位图。走 `createImageBitmap` → `OffscreenCanvas(96px)` → JPEG q0.72 data URL，随即 `bitmap.close()`。产出 5-8KB/页，缓存上限 240 项、按插入序裁剪。
+
+**缩略图是反向按需的**：面板滚到哪要到哪（可见 ± 12 格），阅读器串行处理、页间 `setTimeout(0)` 让出主线程 —— **没人看网格时 CPU 完全空闲**。这条不是保守设计：`view.js` 的 `configure({ useWebWorkers: false })` 让 zip 解包也在主线程。
+
+**摘录在格式层面不存在**（无文本层）：`create-overlayer` 事件根本不发，程序化选中整页拿到的 `selection.toString()` 长度是 **0**。所以这块是**负向断言** —— 不冒浮层、不落 `excerpts.json`、右栏没有「阅读」Tab（实测 `otherTabs = ["widgets","ai"]`）。防的是将来有人给 fixed-layout 接上 overlayer 时静默画错。
+
+**安全负向的形态又是新的**：内联 `<script>` 的 `.svg` 页，三条防线**各自独立**成立 —— ① `<img>` 里的 SVG **任何 MIME 下都不执行脚本**（SVG 作为图片加载时不进脚本解析）；② 内容帧 sandbox 无 `allow-scripts`；③ CSP `script-src 'self'` 无 `'unsafe-inline'`（`blob:` 文档继承父 CSP）。载荷的 `<script>` 与 `onerror` 都写了 `window.` **和 `window.parent.`** 两个方向，宿主标志位全 null。
+
+**验收**：`probe-cbz-reader.mjs` **全绿**（含页序自然序、单页 = blob 帧恰好 1 个、两档缩放的几何等式、翻页落盘与逐字回位、缩略图按需 + 页号↔图色映射（靠 fixture 的**单射**配色反查）、边缘点击翻页、恶意书负向、摘录负向、右栏无阅读 Tab）；`tsc --noEmit` 双端 0 错；6 契约 + 4 条回归探针（epub / fb2 / reading-panel / excerpt-export / pdf）全绿。
+
+**两条已知噪声，都不是本批引入的**（已登记 `docs/pending-fixes.md` B-17 / B-18）：
+
+- **`fixed-layout.js` 的 `#render` 有 ResizeObserver 竞态** —— `#showSpread` 先把 `#left/#right` 置 null 再 `await #createFrame(center)`，窗口期内 `this.#center ?? this.#right` 得 null ⇒ 每次翻页控制台一条未捕获 TypeError。上游 latent bug，被「全居中」（`spread:'none'`）放大成**必现**。**本批不加第 6 处 patch**（patch ⑤ 已被限定在 `comic-book.js`）；页面观感正常（后续那次显式 `#render()` 会纠正版式）。探针把它从错误列表里**显式指名**滤掉，不是通配。
+- **cbz 里的 `.svg` 页是破图** —— `loadBlob(name)` 不传 MIME ⇒ Blob `type=''` ⇒ Chromium 拒解 SVG（PNG/JPEG 靠嗅探照常）。修它要动 vendor，本轮接受（实机画集极少用 SVG 当页）。★ 这条**不是**安全缺口，反而是安全结论的旁证。
+
+## 22. EPUB 书签：foliate 系（epub / fb2 / fbz）快速跳转（2026-09-22）
+
+背景：左栏书签 Tab 在 2026-09-21 被撤掉，理由是**存储口径未定** —— txt 的书签定位键是数字 `paraIndex`，而 foliate 系的定位键是 CFI，两者塞不进一个字段。本次把这件做掉，做法是**不加新文件、不加新 IPC、不加新事件、不动 vendor**：定位键直接用 CFI，与摘录 / 进度 locator 同一口径。
+
+用户拍板（2026-09-22）：**书签只供快速跳转 —— 不写摘录存储、不进「导出为笔记」**。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | `TxtBookmark` → **`BookBookmark`**（一份结构，定位字段全可选：txt 用 `paraIndex`、foliate 系用 `cfi`）；新增 `sanitizeBookmark(v, kind)` **按 kind 分支**决定哪个定位字段合法，**pdf / cbz / 未收录扩展名显式拒绝** | `electron/lib/kbStore/readerStateSchema.ts` |
+| 2 | `sanitizeReaderPatch(patch, kind?)` 多一个入参；repo 侧把 kind 推导**提到校验之前**（定位合法性依赖它） | `readerStateVaultRepo.ts`·`src/types/index.ts`（类型镜像） |
+| 3 | 新增上限 `MAX_BOOKMARKS = 500`，超限**整单拒绝**（与 pct 越界同款，不静默截断）；**两个写方都 import 这个常量**提前拦 + Toast | schema + `TxtReaderView` / `EpubReaderView` |
+| 4 | 阅读器：载入书签、`toggleBookmark`（同一 CFI 再点即移除）、工具栏两态按钮（`data-wb="epubBookmark"`，紧邻字号组，**只对文字层书**出现 = `!isFixedLayoutBook`，与 schema 的 `FOLIATE_KINDS` 一一对应） | `src/components/shared/epub/EpubReaderView.tsx` |
+| 5 | 右栏「阅读」面板书签区：按**引擎**归一成**一个**列表渲染（foliate → 徽标 `§` 走 `onLocateExcerpt({cfi})`；pdf → `P{页}`；txt → `¶{段}`），删掉原先的「本书格式暂不支持书签」说明与三份并列 JSX | `src/components/workbench/ReadingSidePanel.tsx` |
+| 6 | 跳转失败文案通用化（同一通道摘录与书签两处在用，不再写死「这条摘录」） | `EpubReaderView.tsx` |
+
+三个判据层面的取舍：
+
+- **判据一律用引擎**（`bookEngineOf`），不写 `kind === 'epub'` —— 写死会让 fb2 / fbz 的书签「点了没反应且无任何报错」（`App.tsx` 那条注释就是为此留的）。
+- **定位键取整条 CFI、按全等比较**：foliate 的 range CFI 形如 `epubcfi(/6/6!/4,/2[c3],/12/1:55)`（公共父路径 + 逗号分隔子路径），"取第一个逗号之前"会退化成整章，比不判还糟。故不做任何截断式归一。
+- **上限的写方也必须在场**：schema 拒 + `patchReader` 静默失败 =「书签加上又消失」（本地 state 有了、盘上没有）。契约里有一条**源码级断言**锁「两个写方都 import 了 `MAX_BOOKMARKS`」。
+
+**实测结论（探针 note 记录）**：加书签 → 翻走 → 点右栏那一行跳回，**落回处的 CFI 与存储值逐字相同** ⇒ 再点一次确实是「移除」。已知限制：**换字号 / 改窗口宽度会重新分页**，同一屏的 CFI 随之改变 ⇒ 那时再点会加出第二条（两条都跳同一处、可各自删）；不为它发明 CFI 归一化，代码注释与探针 note 都写明了。
+
+**cbz 仍不给右栏 Tab / 不收书签**（整页是图片、无文字层）。引擎 = foliate 是**超集**（cbz 也走 foliate 引擎），契约锁的是「foliate 引擎里不收书签的**差集恰好 = cbz**」—— 将来多一种 foliate 格式时会变红，逼两处同时决策。
+
+**验收**：`probe-epub-reader.mjs` 新增第 8.5 步全绿（加 → 同页再点即移除 → 右栏出现该行 → 翻走按钮回未收藏态 → 点行跳回原处）；`verify-reader-formats.mjs` 新增 ⑬ 组 **40 条**全绿；`tsc --noEmit` 双端 0 错；5 个阅读器契约 + 3 条回归探针（epub / fb2 / reading-panel）全绿。
+
+## 23. 大书装载的可见反馈 + 体积分档确认框（B-16 · 2026-09-22）
+
+背景：一本几十上百 MB 的画集（cbz）打开时，用户只看到转圈 —— 分不清「在加载」和「卡死了」；超过 128MB 则**直接打不开**（报体积超限），连等的机会都没有。用户拍板（2026-09-22）：**「大的先问一句」** —— 体积分档 + 超限前先问一句，而不是一刀切。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 加载覆盖层加**阶段文字**：`正在读取 N%`（真进度，按已读字节算）→ `正在解包排版…`（字节读完切阶段）；延迟 **250ms** 才亮（小书不闪），且**必须亮**（大书要等一秒以上，没文字就等于「像死了」） | `EpubReaderView.tsx` 加载覆盖层（`data-wb="epubLoadPhase"`） |
+| 2 | 三档体积闸门：≤128MB 直接开 · 128–384MB **弹应用级确认框**（写明体积 / 预计耗时 / 预计内存）· >384MB 直接拒绝并给「转 PDF 或拆书」的建议 | `EpubReaderView.tsx`（判据与文案在 `bookSizeGate.ts`） |
+| 3 | 取消**不踢回书架**：停在 error 态并给「仍要打开」按钮（再点 = 复跑装载，且不再追问第二遍）；error 态是**覆盖层**，宿主 DOM 常驻 | 同上（`data-wb="epubLoadErr"` / `epubBigBookRetry`） |
+| 4 | 确认框加探针锚点（`data-wb="globalConfirm*"`），无行为变化 | `GlobalConfirm.tsx` |
+
+**动效**：**无新基建**，全部复用 `docs/ui-animation-plan.md` 的既有令牌 —— 确认框走 `.kb-overlay` / `.kb-modal-in(-out)`（含 170ms 退场，`usePresence` 驱动），「仍要打开」按钮进出用 `.kb-micro-pop`；阶段文字是**纯文本替换**，不叠加过渡（进度数字每跳一次都做动画反而是干扰）。
+
+**交互口径**（两条都从「可逆 + 不产生意外跳转」推出）：
+
+- 闸门放在**读整本之前**（先读 1 字节拿 size 再决定）—— 进了内存再问，就已经把时间和内存都付过了。
+- 「仍要打开」＝**复跑装载流程**（`reloadKey` 递增），不是另一条装载路径；`bigOkKeyRef` 记住「这本已确认过」，所以点它不会再弹第二次框。
+
+**实测**（96.2MB / 126 页 cbz，Windows 本机）：点卡 → 可读 **805ms**（改造前 1.6–2.0s；小书基准 457ms）。阶段文字采样到 `正在读取 50% → 67% → 83% → 正在解包排版…`，百分比非递减。
+
+**已知取舍**：确认框里的耗时 / 内存是**估值**（`READ_EST_MBPS = 120` / `PEAK_MEM_RATIO = 2`，取值对照实测表留了冗余，宁可比预告快）。文案里带「约」字，不承诺精确值。
+
+**验收**：`probe-cbz-bigbook.mjs` **全绿**（整本通道逐字节等值 / 阶段与进度文字 / 分档端到端 / 取消 → 仍要打开）；`verify-reader-formats.mjs` §⑭ **全绿**（含边界端点与文案同口径）；既有 5 契约 + 4 回归探针不回归。
+
+## 24. 边缘翻页提示的判据换成引擎的 atStart / atEnd（B-25 · 2026-09-23）
+
+**现象**（用户实机反馈）：鼠标进**左侧**边缘，手型光标在、点击也翻得动，但那条「上一页」提示动画**始终不出现**；右侧一切正常。
+
+**根因**（实测分叉得出，与最初推测不同）：提示的开关 `canTurn` 拿**取整后的全书百分比**当「还有没有上一屏」的代理（`k === 'l' ? pctRef.current > 0 : pctRef.current < 100`）。后果是**说谎式提示**：书首第一屏没有上一页，左提示**照样亮**。占比越小越离谱 —— 取整让全书前 0.5% 都算 `pct === 0`。
+> 附带澄清：排查中反复出现的「左侧完全不亮」是**探针伪影**（宿主盒两端各约 23px 的事件投递死带，**左右对称**），它解释不了「右侧正常」，不能当根因。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 提示判据改用引擎原生的 `atStart` / `atEnd`（`paginator.js`，即「真的还有上一/下一屏吗」的权威答案），不再碰百分比 | `EpubReaderView.tsx` `paintEdgeHint` |
+| 2 | `foliate-fxl`（cbz）**没实现**这两个属性 → 按 section 序号兜底（`当前 <= 0` / `当前 >= 总页-1`，与页码标签同源）；兜底值在 relocate 时**无条件**算好存 ref | 同上 `fxlEdgeRef` + `onRelocate` |
+
+**用户可见行为**：首屏左不亮、末屏右不亮（真是这样了）；翻过一页后左亮、回退后右亮。重排书**不受影响**（引擎自己答得了）。
+
+**为什么兜底不先判「是不是固定版式」**：那样要在组件里读运行时 `view.isFixedLayout`，而项目契约明令固定版式判据**单点**走 `isFixedLayoutBook = bookKind === 'cbz'`（工具栏要在 `open()` **之前**就渲染对）——本轮先写成带守卫的版本，**当轮就被契约 `verify-epub-formats` ④ 逮住**，改无条件赋值后回绿。
+
+**验收**：`probe-epub-reader.mjs` 新增 **§10**（10 条：书首不亮 → 翻页亮 → 书末不亮 → 回退亮 → cbz 兜底分支第 1/2 页）全绿；**变异测试**把判据还原成百分比版 → 2 条转红；`verify-epub-formats.mjs` ✓；`tsc` 双端 ✓；`npm run build` ✓；同类探针 cbz / fb2 / excerpt-export / reading-panel / cbz-bigbook ✓。
+
+## 25. 阅读器划词「问 AI」改落右栏 AI 对话（B-26 · 2026-09-23）
+
+**现象**（用户实机反馈）：在阅读器里勾画一段、点浮条的「问 AI」，从屏幕右侧滑出一个**悬浮 AI 侧栏**盖住阅读区；期望的是工作台右栏那个原生 AI 助手（即 Ctrl+J 唤出的同一处）。
+
+**根因**（是缺口不是回归）：划词问答只有两个出口 ——「AI 教学就地接管」与「全局悬浮侧栏」，**右栏 AI 态从没被登记成候选宿主**。右栏与悬浮侧栏本就是**同一份会话**（真源在主进程）的两张皮，所以问题纯粹是落点选错。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 右栏 AI 态登记为划词「问 AI」的宿主：选段**填进右栏输入框**（引用形式，**不自动发送**），并把右栏**从折叠拉开**、切到 AI Tab；同时收掉可能开着的浮层（与 Ctrl+J 同款两步） | `App.tsx`（宿主注册 + 选段转交）、`WorkbenchRightPanel.tsx`（挂载后消费） |
+| 2 | 宿主注册表由**单槽改栈**（栈顶接管、注销露出下一个）：否则「常驻宿主被 AI 教学临时顶掉」后会永久失联，表象是「时灵时不灵、与操作顺序有关」 | `src/lib/assistantContext.ts` |
+| 3 | 回退四条全收口在 `accept()`：无书在读 / AI Tab 被 ⋯ 藏掉 / 对话已扩成 aiChat 标签 / 整窗模块 ⇒ **原样回退悬浮侧栏**（点击永远有反应） | `App.tsx` |
+
+**一个关键落点修正**：右栏**折叠时组件是卸载的**（`ResizablePanel` 只渲染可见子节点），而右栏默认折叠 —— 宿主注册若写在右栏组件里，最常见的场景下等于没注册（探针当场照出）。故注册上移到常驻的 `App`，选段经 state 投递给挂载后的右栏消费。
+
+**用户可见行为**：阅读器里划词点「问 AI」→ 右栏自己拉开并停在 AI 对话，选段在输入框里等着你补问题；悬浮浮层不再出现。右栏 AI Tab 被藏掉时，仍然弹悬浮侧栏（不会点了没反应）。
+
+**已知简化**：没有悬浮侧栏那套「N 条对话引用」胶囊（连选多段是**追加**到输入框，不覆盖已有草稿）；引用胶囊下沉进对话体是后续单独一项。
+
+**验收**：新探针 `probe-b26-ask-ai-routing.mjs` **12/12 全绿**（含「藏掉 AI Tab ⇒ 必须回退」的负向与「勾回 ⇒ 又落回右栏」的双向性）；**变异测试**把宿主 `accept()` 恒置 false → 6 条当场转红；`tsc` 双端 ✓；`npm run build` ✓；全量契约 36/41（5 条为主干既有红，逐个确认不读本轮改过的文件）；`probe-ro-noise` ✓。
+> 连带调整：`verify-epub-formats` ⑩(6) 原先按**文本形状**锁「右栏 reading 调用点内联的 cbz 守卫」，抽出 `rightReading` 后过期 —— 已改成「派生处有守卫 **且** 调用点消费该变量」两处同锁（两种变异均转红）。
+
+## 26. 书市：模块 UI + 书架书名收口（S4，2026-09-22）
+
+背景：书市（本地书源检索 → 下载 → 上架书架；方案见 `.claude/plans/book-market-implementation.md`）S0–S3 已落地数据层 / 网络层 / 下载层，本轮补界面，并顺手收口「书架显示的是文件名、不是书名」。
+
+**本轮两条拍板**（都扩大范围，故先问后做 —— 2026-09-22 开发负责人）：① 书架要显示书市下到的封面 → 新增**只读**通道 `bookMarket:coverGet`（通道 10 → 11）；② 书架书卡加一行作者（`meta.author` 非空才渲染）。
+
+改动点：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 模块接线：`APP_MODULES` 15 → 16（`bookMarket` 六个 flag 全真）· `WORKBENCH_TABBAR_EXCLUDED` 7 → 8（整窗独占 ⇒ 左右栏与页面条退场、图标条留着，这正是「左栏独立整窗模块」的语义）· 静态 import + `case 'bookMarket'`（传 `onOpenShelf` 真跳书架，原型里只能 toast） | `src/lib/appModules.ts`·`workbenchLayout.ts`·`App.tsx` |
+| 2 | 图标**六表齐**（缺一即渲染空白）：`IconModuleId` + classic 映射 / `HAND_DRAWN` / `TAB_ICONS` / `SCENE_META` / `TILE_META` / `STARTUP_ICONS`。手绘 = **店招**（篷顶 + 门脸），经典包 = lucide `Store` —— 刻意不用书：书架已有 `BookMarked` | `src/lib/sidebarIcons.tsx`·`ModuleIcons.tsx`·`WorkbenchPageBar.tsx`·`Onboarding.tsx`·`desktop/tiles.tsx`·`settings/views/AppearanceView.tsx` |
+| 3 | 左侧图标条 `RAIL_BUTTONS` 4 → 5，**追加在末尾**（现四项位置不动） | `src/components/shared/ActivityBar.tsx` |
+| 4 | 模块本体：发现页（检索条 / 结果网格 / 骨架 / 空态 / 「部分源未返回」灰条 / 加载更多）· 书卡（格式角标 + 体积 + 暂不支持 / 已上架态）· 详情抽屉 · 书源页（三态圆点 + 启停 + 凭据入口 + 代理输入）· 下载队列浮层 · 四个弹层 | `src/modules/bookmarket/` |
+| 5 | 书架书名收口：`BookListItem.name` → `displayName`（+ `author`·`coverRef`），展示名与作者在**上游定稿**（`meta.title \|\| bookDisplayName(relPath)`），`.meta.json` **循环外读一次** | `electron/database/repositories/pdfReaderRepo.ts` |
+| 6 | 新只读通道 `bookMarket:coverGet`：路径一律经 `bookCoverAbsPath`（内含 `isSafeCoverRel`：只认 `.covers` 下单层文件名），越权 / 超限（`MAX_COVER_BYTES`）/ 读不到一律 `null`（不抛） | `electron/lib/kbStore/vaultBookMetaRepo.ts`·`bookMarketRepo.ts`·`electron/preload/index.ts`·`src/lib/ipc.ts` |
+| 7 | `BookCover` 新增 `coverRef` 分支（模块级 Map 缓存 + 懒取，取不到**原样回落** pdf 首页封面 / 纯色卡）；书架 5 处 `bookDisplayName(` 全改 `b.displayName`，该 import 随之删掉 | `src/modules/bookshelf/` |
+| 8 | 新动效令牌 `.kb-drawer-in` / `.kb-drawer-out`（贴边通高抽屉，220 / 176ms）—— 与 Modal 的区别是**不做缩放** | `src/styles/index.css` + `docs/ui-animation-plan.md` |
+
+**四条不显然的机制**（都不是随手那么写的）：
+
+- **书架是「改名」而不是「加字段」**：全库 `name` 的读取点会**全部编译报错**，逼着逐处确认读的到底是「展示名」还是「文件名」，不会有漏网的旧语义。契约脚本再补一条负向锁（`bookshelf/` 下 `bookDisplayName(` 必须 0 次）。
+- **「已上架」判定复用 `safeBookFileName`**（与下载器 `destFor` 是同一函数），不另写一份命名规则 —— 两边一旦飘了，表象是「明明下过却显示未上架」。
+- **代理输入不新开 IPC**：读写 `settings.bookMarketProxy`。S3 已拍板「代理的唯一写路径是设置机制」，且**不动 `defaultSession`**（否则殃及 `llmService`）。
+- **进度条走 `transition-[width]`**：这是动效文档 §五-①「只动 transform / opacity」的**既有例外**（含书市共 7 处），理由已登记在该文档（宽度是数据本身的直接映射，改 `scaleX` 会让圆角端头在小百分比下被挤扁）。
+
+**有意变更的断言（8 处，勿当 drift 回滚）**：`startup-tab` 的 APP_MODULES 15→16 · RAIL_BUTTONS 5 项 · 磁贴序快照 · 命令面板快照（后两条特意用**存量设置里没有 `bookMarket`** 的形态，证老用户活动栏顺序不被新增模块打乱）；`pdf-reader/verify-pdf-reader` 与 `verify-reader-formats` 的 15→16；`workbench-shell` 的 RAIL_BUTTONS 精确串；`book-market/verify-downloader` 的「通道数恰 10」→ 11。每处都在脚本里就地写了日期与理由。
+
+**实机探针逮到一个产品缺陷（已修）**：`bookMarketSchema.coerceAuth` 旧实现要求 `auth.ref` **非空**才收，而界面新建书源时**根本给不出 id**（id 由主进程 `randomUUID()` 生成，表单只能送空串）⇒ 勾了 Basic 认证的源被**静默降级成 `auth: null`**：行里显示「无需登录」、没有「填凭据」入口、检索也不带 `Authorization` —— 整条凭据链路不可达。修法是让 `ref` 不参与判定（它恒由 `bookSourceUpsert` 改写成源自己的 id），并把 `verify-book-sources.mjs` 里那条「ref 空 ⇒ 判为不完整」的用例改成三条（ref 空 → 仍收 / 缺省 → 收成空串 / 类型非法 → `null`）。
+
+**验收**：新契约 `verify-book-market-ui.mjs` 绿 · 实机探针 `probe-s4-module.mjs` **全绿**（端到端：检索 → 详情 → 下载 → 字节一致落盘 → 上架后书架显示 meta 书名 + 作者 + 封面；另有格式闸、同名冲突、队列四项控制、凭据三态，以及「凭据明文不出现在 `.knowbase` 任何文件」的负向）· S1/S2/S3 探针回归绿（49 / 96 / 99 项）· 全量 43 个契约脚本 37 绿（6 红均为既有、与书市无关）· `tsc --noEmit` 两端 0 错。
+
+**一处已查明、本轮不修**：书市只在挂载时解析当前仓库（`workspaceGetCurrent`），之后靠 `bookMarket` / `knowledge` 广播刷新；而主进程 `adoptVaultDirectory`（换库）**不发** `broadcastDataChanged`，渲染层的 `vault:changed` 事件只有 `WorkbenchLeftPanel` 与 `blog` 在听。今天打不到 —— 用户可见的换库路径（`VaultSwitcher`、`VaultPicker` 启动形态）都是「广播 + **整窗重载**」；但将来若出现「不重载就换库」的路径（P6 导入收尾的 `adoptImportedVault` 最接近），书市与书架会显示上一个库的数据。可选后续：`DataChangeScope` 加 `vault` + 在 `adoptVaultDirectory` 里广播。
+
+## 27. 书市：AI 起草书源（S5，2026-09-23）
+
+用户说一句「把我家 Calibre 配成书源」，AI 把它整理成一份书源草案，**界面自己切到书市并打开「新建书源」表单、字段全部预填**；用户核对、自己填凭据、点「添加」——**草案本身不落库**。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 两枚 AI 工具（均 `tier:'ondemand'`、`module:'bookMarket'`）：`builtin.booksource.list`（读，列已配书源，只回「凭据是否已存」布尔）· `builtin.booksource.draft`（写，起草并把草案广播给界面） | `electron/lib/builtinTools.ts` |
+| 2 | 新广播通道 `bookMarket:source-draft`（载荷 `{ draft }`）——★ **没有伴随的 data-changed scope**：草案不落盘，别顺手配一个 | `electron/main/windowBus.ts` |
+| 3 | 草案总线：`requestSourceDraftPrefill` / `peek` / `clear` + window 事件双轨（模块未挂载时靠暂存补消费）。与 `pluginCommandBus` 的唯一差别是**不设 TTL** | `src/lib/bookSourceDraftBus.ts` |
+| 4 | App 订广播 → 切模块 + 暂存 + toast 说明「界面为什么跳」；模块挂载/已挂载两条路都消费；表单收 `draft` prop（新增态预填，编辑态以源现值优先，**凭据三框恒置空**）· 关闭即弃草案 | `src/App.tsx`·`src/modules/bookmarket/index.tsx`·`SourceFormSheet.tsx` |
+| 5 | 权限页与默认串补 `bookMarket` 一行（`read` 档 = 只看得到、起草被拦） | `AiPermissionsTab.tsx`·`src/lib/settings.ts` |
+
+**四条不显然的机制**：
+
+- **可达性是设计出来的**：本仓**没有任何「read + ondemand」先例** —— 这类工具既不在 `tool.request` 的写工具清单里、也没有专属提示，等于永久不可见。所以 `draft` 的 description 里点名了 `booksource.list`，由契约脚本正/负向双向锁住（清单里只加 `draft`、不加 `list`），另有 `visual.html` 那条「已知例外不许变成静默」的断言。
+- **凭据在结构上进不来**：`draft` 的 `inputSchema` 里没有任何凭据字段（`validateArgs` 会**静默忽略**未知键），返回的草案走白名单拷贝 —— AI 既拿不到也送不进凭据，凭据只能由用户在表单里手输。
+- **起草即校验**：`draft` 复用 repo 的 `isAllowedSourceUrl` / `sanitizeBookSourcePatch`，不另写一套判定。custom 源缺 `mappingJson`、或映射缺 `list/title/download` 任一条，当场明确报错（这正是 §4.1 的痛点：半份映射的源搜不出东西）。
+- **schema 红线下的取舍**：`mapping` 内联对象让 schema 冲到 1185 字符（红线 800），故按施工方案预先授权的退路改用 `mappingJson: string`（现 751 字符）—— 形如 `{"list":"data.books[*]","title":"title","download":"files[0].url"}`，示例写在**工具 description**（不计入 800 预算）里。
+
+**与拍板 ② 的关系**：`window.__kbBookSourceDraft` 这个 dev-only 钩子仍在（`import.meta.env.DEV` 守卫），但**探针不用它**触发那一跳 —— 探针走渲染层的 `aiTools:invoke`，与手动点这个工具完全同一条链路（同一套 `validateArgs` / `checkModulePermission` / 月度上限 / handler），比钩子更真。钩子降级为人工调试口，其生产负向由探针第 ⑨ 段实测锁住（`npm run build` 产物里 `typeof window.__kbBookSourceDraft === 'undefined'`）。
+
+**验收**：新契约 `verify-book-market-tools.mjs` 绿（元数据 / schema 红线 / 凭据负向 / 清单覆盖 17=17 / 通道四处齐 / 接线静态锁）· 新实机探针 `probe-s5-tools.mjs` **全绿（49 项）**：主进程段（在册元数据、**read 档拦写 / write 档放行**、七条入参错误路径、凭据字段送不进）+ 渲染层段（**开场停在别的模块** ⇒ 草案到达自动切书市且**可见**、左栏高亮、跳「书源」视图、表单预填七行映射、认证切到 Basic 而**用户名/密码框为空**、取消即弃且再点「新增书源」是空表单、二次草案走事件路径、点「添加并测试」真落库 + 连通性「已连通」打到 mock OPDS）；另锁两条负向：**草案不落库**（书源文件在点「添加」前未被改写）与**凭据标记值不出现在返回值 / 表单 / 落盘任一字节**。审计基线已按新工具数重生成（core 仍 14 枚 ≈7761 tok/轮 —— 两枚新工具全在 ondemand，每轮零成本）。
+
+## 28. 书市：元数据自愈（S6，2026-09-23）
+
+背景：书市下载的书落在 `<vault>/.books/`，元数据在 `.books/.meta.json`、封面在 `.books/.covers/`。用户完全可能在**文件管理器里直接删书**（这是 .books 设计的预期用法 —— 书是用户可整理的东西）。删掉后两处残留没人管：`.meta.json` 留下孤儿条目（键指向已不存在的文件）、`.covers/` 里留下没人引用的封面（只增不减）。方案与验收口径见 `.claude/plans/s6-metadata-selfheal.md`。
+
+**做法：零新 UI、零新 IPC、纯后台。** 复用已存在的 `vaultBookMetaRepo.bookMetaPruneOrphans()`（扫盘取现存清单 → `pruneOrphanMeta` 比孤儿 → 回收孤儿条目 + 删其封面 → `bookCoverDeleteUnreferenced` 删无引用封面），只在两个触发点接线：
+
+| 触发点 | 位置 | 覆盖场景 |
+|---|---|---|
+| ① 仓库打开（启动恢复 / 换库 / 按 id 打开） | `electron/lib/workspaceManager.ts` `loadVaults` / `adoptVaultDirectory` / `ws:openById` 的 `syncVaultWatcher()` 之后 | 应用**关闭期间**用户在文件管理器删了书 |
+| ② 文件监听 flush | `electron/lib/fsWatcher.ts` `flush()`：本次变更含 `.books/` 前缀路径 → 节流（`PRUNE_THROTTLE_MS = 30s`）触发 | 应用**运行期间**删书，30 秒内自动回收 |
+
+**与方案的一处有意偏离**：方案 §三① 写的是「在三处各贴一份 `try/catch` 调用块」，实际抽成了一个模块内 helper `pruneOrphanBookMetaQuiet()` 在三处各调一次 —— 三份逐字重复的 `try/catch + console.warn` 属铁律 14/21 的「同一常量多处分抄」家族，收成一个具名函数更稳。契约脚本据此断言「helper 恰好 3 处调用且都紧跟 `syncVaultWatcher()`」，而非方案里写的「`bookMetaPruneOrphans` 直接调用 ≥2 次」。
+
+**两条不显然的机制**：
+
+- **事件可达性是 S6 的隐性前提**：`fsWatcher` 的 `IGNORED_SEGMENTS` 里有 `.knowbase` 却**没有** `.books` —— 这不是巧合，是 S6 能成立的原因（`.books/` 的事件必须能抵达 `flush()`）。契约脚本把它锁成显式不变量：一旦有人顺手把 `.books` 加进忽略集，触发点②会**静默死掉**（没报错、只是再也不回收）。
+- **自写回环靠节流掐断**：`prune` 写回 `.meta.json` 会再触发一次 watcher 事件（该写入没走 `markSelfWrite`），若不节流就是「prune → 写盘 → 事件 → prune」的回环。节流窗口 + `prune` 本身「无孤儿即不写盘」两条叠加，实际最多多刷一次，不成环。
+
+**验收**：新契约 `.AGENT/scripts/book-market/verify-book-market-selfheal.mjs` 绿（核心函数四步齐 / 三个打开点接线 / `PRUNE_THROTTLE_MS ≥ 30s` / `.books` 不在忽略集 / 零新 IPC / 零新 UI）· 新实机探针 `probe-s6-selfheal.cjs` **全绿（11 项）** —— 真 electron 主进程里驱动**真实的 fsWatcher 与 workspaceManager**（S6 是纯主进程功能、零 UI，故主进程探针即可完整覆盖，不需要 CDP）：① 运行期从磁盘删书 → 真 `fs.watch` → flush 节流放行 → 条目被实时回收；② **节流负向** —— 刚 prune 过再放一个孤儿，1s 内**不被**回收（证明 30s 窗口真在拦，而非「碰巧回收了」）；③ `adoptImportedVault`（仓库打开）→ 孤儿同步回收 + 孤儿封面一并删 + 恰少 1 条不误伤；④ 幂等（再打开不再变化）。· `tsc --noEmit` 两端 0 错 · S1–S5 契约与探针回归绿。
+
+---
+
+## 29. 仓库选择页：滚动柄「很长 + 位置不对」修复（2026-09-23）
+
+用户报「启动软件选择仓库那个页面中有一个很长的而且位置不太对的上下滑动手柄」。诊断与方案见 `.claude/plans/vault-picker-scrollbar.md`（含三形态可交互原型 `tmp/vaultpicker-scroll-proto.html`）。
+
+**根因**：`VaultPicker.tsx` 的滚动容器是**整块 620px 内容列本身**（`max-h-[calc(100vh-64px)] overflow-y-auto`），品牌区 → 仓库列表 → 新建/打开卡片 → 底部链接全由它一起滚。内容 773px 仅比视口 705px 高一点，于是手柄占轨道 83%（数学上正确）；但因为滚动的是「整列」，手柄**贴内容列右缘**（620px 居中，窗口 1250 时在 x≈945）而非窗口边，且**贯穿品牌区**、压住列表盒右框线 —— 这才是「很长 + 位置不对」的字面来源。全仓其余滚动区一律是「有边界的局部滚动」，本页是唯一整列滚的孤例。
+
+**做法（方案 B）**：品牌与底部链接固定，**只让中段滚动**。新增两个工具类（`src/styles/index.css`）：
+
+- `.kb-picker-shell` —— `flex column` + `max-height: calc(100vh - 48px)`；外层限高是必需的：若只靠内层撑高，内容少时卡片被推到视口顶部（实测偏上 ~130px），外层限高 + 遮罩 `items-center` 才能让短内容自然居中。
+- `.kb-picker-scroll` —— `flex:1 1 auto; min-height:0; overflow-y:auto`；`home` 模式包住「标题→列表→新建/打开卡片」，`create` 模式包住整段（其内容本就短）。
+
+**两条容易踩的**：
+
+- **`-mt-8` 必须去掉**：它原本用来抵消「整列滚 + 顶部锚定」造成的偏上，现在改为居中后保留会再偏上。实测去掉后三种窗口高度都垂直居中（1280×900 / 760 / 620 均对称）。
+- **不能给内层加 `max-h-[min(...)]`**：内层一旦自带 `max-h`，`flex:1 1 auto` 在内容超出时会「反弹」到上限值而非填满外层，滚动条照样贯穿。限高只放在 `.kb-picker-shell` 一处。
+
+**验收**：`tsc --noEmit` 两端 0 错；无头 Edge 三档窗口（1280×900 短列表 / ×760 八个仓库 / ×620 十二个仓库）+ `create` 模式各截图核对 —— 溢出时手柄缩为**贴列表右缘的短柄**、品牌与底部固定；不溢出时整卡片垂直居中。**未在真机 dev 实例中验证**（CDP 探针需独占实例，本机单实例锁被占用），验证面是像素级复刻的无头渲染。
+
+
+---
+
+## 30. 书市：§9 第 10/11 条（代理隔离 / 换机取舍）转为可跑探针（2026-09-23）
+
+**无界面改动**。记在这里是因为它是书市验收面的收尾 —— 设计文档 §9 最后两条原本标着「需真机 dev 实例、自动化不可替代」，本轮复核后确认**两条都是纯主进程语义**，主进程探针即可完整覆盖（判据见记忆 `probe-form-main-vs-cdp`：纯主进程功能不上 CDP）。
+
+**新增两个探针**（`.AGENT/scripts/book-market/`，真实实现 esbuild 打包 + 裸 electron）：
+
+- `probe-910-proxy-isolation.cjs`（**16/16**）—— 死代理下书市 `BookRequestError` + 检索三态 `fail`（书市报错），**同时** `defaultSession.resolveProxy` 仍直连、`net.fetch` 仍成功（LLM 不受影响）。另验：本机/局域网源按 `<local>` 绕行、清空代理回直连（不是「不改动」）、坏代理串不抛异常、`net.fetch` 带书市 session **不读**分区代理（S0 结论的回归锁）。
+- `probe-911-rehost.cjs`（**29/29**）—— vault 整份拷贝后源描述**明文可读且逐项保留**（name/url/kind/enabled/builtin）；异机密文（`enc1:` 头、密钥不属本机 ⇒ 与真实换机同一条解密失败路径）⇒ 凭据读不出、`hasCredential` false、三态 `need-credential` 且**一个请求都不发**；重输凭据后立即恢复连通；密文损坏不阻断源列表。对照：切回原机 vault 凭据仍可读（坏的只有异机密文）。
+
+**变异测试**：把 `applyBookMarketProxy` 改成 no-op → 910 如实转红（2 项）；把 `credentialSatisfies` 改成恒 true → 911 如实转红（2 项）。改回后双绿。
+
+**踩到的平台事实（写进探针头注，勿再栽）**：**改代理不清 HTTP 缓存** —— 同一个 URL 在改代理**之前**取过，改完再取会命中缓存**直接成功**（实测 3ms、连代理都没碰），表象是「配了死代理书市却照常成功」。故探针所有「应当失败 / 应当成功」的判定请求一律带**唯一查询串破缓存**，判的是真网络路径。
+
+**验收**：两条探针全绿（16/16 + 29/29，均经变异测试）· 主仓源码零改动（变异后已还原，`git status` 干净）· 设计文档 §9 与实施计划的手工项标注同步结清。
+
+---
+
+## 31. 书架「删除书籍」+ 阅读器「删除书签」（2026-09-23）
+
+**需求**（用户口语）：「将两个删除操作完善一下，一个是删书，一个是删除书签」。方案见 `.claude/plans/delete-book-and-bookmark.md`。
+
+**两条拍板**（2026-09-23 用户）：① 删书入口 = **右键菜单**（封面卡 + 续读卡），范围 = **彻底删**：书文件进系统回收站，进度 / 书签 / 摘录 / 导出映射一并清，**已导出的「读书笔记」页面保留**；② 书签删除要覆盖右栏三引擎（pdf / txt / foliate）**+** PDF 左栏书签列表。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 五个「整本删除」repo 出口（阅读进度 / PDF 进度 / PDF 封面缓存 / 摘录 / 导出映射），统一 `requireCurrentRootId` + `writeJsonOrThrow` | `electron/lib/kbStore/{readerStateVaultRepo,pdfReaderVaultRepo,excerptVaultRepo,excerptExportVaultRepo}.ts` |
+| 2 | 业务核 `deleteBookEverywhere`：七步 + `step()` 单步包裹（收错误不中断）；**顺序硬约束 = 先取 meta → 再移回收站 → 最后清元数据** | `electron/lib/bookDelete.ts`（新） |
+| 3 | IPC `bookMarket:deleteBook` 只转发 + 广播四 scope（`pdfReader` / `knowledge` / `readerState` / `excerpt`） | `electron/database/repositories/bookMarketRepo.ts` |
+| 4 | 右键菜单（`useContextMenuPosition`）+ 危险态确认（三行明示「笔记页保留」）+ 吞噬动画 + `deletingRef` 防广播提前抽卡 | `src/modules/bookshelf/index.tsx` |
+| 5 | 新事件 `KB_BOOKMARK_DELETE`（右栏 / PDF 左栏 → 阅读器，detail `{ relPath, id }`） | `src/components/shared/pdf/pdfEvents.ts` |
+| 6 | 右栏书签行加 hover ✕（外层 `div[role=button]`，**button 不能嵌套**；✕ 上 `stopPropagation`）+ 具名 `group/row` | `src/components/workbench/ReadingSidePanel.tsx` |
+| 7 | 三阅读器接事件：按 `relPath` 过滤 + **用内存权威数组过滤** + 经既有写路径落盘（长度未变即早退） | `{Epub,Txt,Pdf}ReaderView.tsx` |
+| 8 | PDF 左栏书签列表加删除按钮，`onDelete(page)` 回派给阅读器（不自建写盘路径） | `PdfBookmarkList.tsx`·`PdfRailPanel.tsx` |
+
+**核心取舍（B 侧的全部理由）**：三个阅读器把书签存在**内存权威数组**里，而「加书签」是**整数组覆盖写**，且三者都没有 `useDataChanged` 去刷新书签。所以右栏**不能**直接 `readerStatePatch({bookmarks})` —— 阅读器内存里的旧数组会在用户**下一次加书签**时把删掉的条目**写回去**（静默复活，无报错）。⇒ 右栏发窗口事件、阅读器用自己的 ref 执行删除。这条通道有先例（「定位回原文」的 `KB_EPUB_GOTO_CFI` / `KB_TXT_GOTO_PARA`）。
+
+**另外两条不显然的**：
+
+- **业务核放 `lib/` 而非 `kbStore/`**：清理要调 `workspaceManager.trashWorkspacePath`，而下沉进 `kbStore/` 会形成 `kbStore → workspaceManager` 循环（后者已 import `kbStore`）。
+- **`deletingRef`**：主进程写盘后广播会让书架既有的 `useDataChanged` 触发 `load()` 重拉，卡片在动画播完前就被抽走（`.kb-deleting` 白挂）。`load()` 里把「在 `deletingRef` 中、且新清单已没有的」书保留在 UI 上，动画走完再清 ref 重拉一次。
+
+**验收**：
+
+- 契约 `verify-book-delete.mjs`（**60 条**：五个出口 / 七步 + step 包裹 / 顺序 / 广播四 scope / IPC 三处 / UI 六项 / 四条负向 / ⑧ 运行期探针在场）全绿；`verify-reader-formats.mjs` 新增 **§⑯**（**38 条**，事件回派双侧接线 + 四条负向 + 运行期判据在场）全绿。
+- **运行期探针 `probe-book-delete.cjs`（23/23，主进程探针，真实实现 esbuild 打包 + 裸 electron）**：五处 store 删前确实有键（前置断言，防「空验」）→ 删后键全无 + `.books/` 书文件与 `.covers` 封面与 pdfReader 缓存 png 全消失 → ★ **负向：导出出的「读书笔记」页面仍在磁盘上且内容非空** → 幂等：书文件已被外部删掉时再调一次不抛异常、其余五处仍清干净。
+  - 探针当场逮到**夹具**两处坑（非产品缺陷，已写进头注）：① 仓库必须先按真实形态登记（`data/vaults.json` + `settings.json` → `registerWorkspaceHandlers()`），否则「移入回收站」的路径守卫报「未授权的工作区」；② `--external:trash` 不能省 —— trash 是 ESM 且用 `import.meta.url`，打进 CJS 后变 undefined → 运行期 `Invalid URL`。
+- **运行期探针 `probe-bookmark-delete.mjs`（12/12，CDP）**：这是 **R1 回归判据**，静态断言永远绿、只有真跑「删一条 → 再加一条 → 读盘」才判得出：加书签 → 右栏 ✕ 删 → 磁盘清空 + **工具栏态复位** → 换段再加 → ★★ 磁盘**恰 1 条且不是刚删的那条**（内存数组若没跟着删，这里会是 2 条）。
+  - **变异测试（本轮实测）**：把 txt 阅读器删除 handler 里的 `bkmRef.current = next` 去掉（只更新 UI 态、不动内存权威数组）→ **§③ 仍绿、§④ 当场转红**（实得 2 条、`kept=22 deleted=22`，正是 R1 的症状）⇒ 证明 §④ 是 R1 的真判据而非空断言。还原后回绿（`grep 变异测试` = 0，源码零残留）。
+- `tsc --noEmit` 双端 0 错；`npm run build` ✓。
+
+**顺带解掉的一个探针环境限制**：条目 #29 记过「CDP 探针需独占实例，本机单实例锁被占用」——本轮改用 **`tmp/probe-app` 隔离实例**（真实目录 + junction 的 `out`/`node_modules`/`build` ⇒ `app.getAppPath()` 是那个目录名 ⇒ userData = `knowbase (dev probe-app)`，与用户自己的 dev 窗口互不打扰）。宿主脚本 **`.AGENT/scripts/workbench-shell/probes/run-probe-app.mjs`**（自备 app 目录，幂等），配套 seed 加 `--ud "knowbase (dev probe-app)"`。**不必 kill 用户的窗口**。（「junction 绕不开」那条说的是 junction **仓库根** —— 那时 `getAppPath()` 解析回真实路径；探针实例是真实目录，故有效。）
+
+---
+
+## 32. 反馈修复批次①：图标条拖拽/显隐 · 启动落点 · PDF 目录跳转 · 标签发光 · 助手侧栏窄化（2026-09-25 ~ 09-26）
+
+**来源**：`Phrontis/过程记录/v3.4.0-beta-feedback.md`（DP 库，v3.4.0 改版 **beta** 体验反馈台账；原主仓 `docs/v3.4.0-feedback.md`，2026-09-29 归档）逐条开修的第一批。**根因分析、决策依据与逐条实现细节都在台账里**，本条只做 UI 侧流水索引，避免两处各写一遍（防 drift）。
+
+| 台账条 | 改了什么（用户可见） | 主要落点 |
+|---|---|---|
+| F-1 | 最左图标条恢复「拖拽排序 + 右键勾选显隐」；重排走 **pointer events**（HTML5 拖放在 `-webkit-user-drag:none` 继承链上实机静默失败 = 铁律 9） | `ActivityBar.tsx`·`appModules.ts`（`RAIL_MODULE_IDS`/`railOrder`/`railHidden`）·`settings.ts` |
+| N-8 | 删「设置→外观→启动时默认显示」，启动统一落工作台（三栏外壳 + 全关空态）；`resolveStartupTab` 等整套落点机制连带退役 | `App.tsx`·`appModules.ts`·`AppearanceView.tsx`·`Onboarding.tsx` |
+| F-9 | PDF 左栏目录跳转不再乱跳（dest 首元素 `.num` 是 **PDF 对象号**、不是页号 → 改走 `getPageIndex` 权威换算） | `PdfOutlineTree.tsx`·`PdfRailPanel.tsx` |
+| F-8 | 切到别的标签后，知识库零散页面签不再亮成「打开」态；页签组补 `data-wb-active`（与模块条目同口径） | `knowledge/index.tsx`·`PageTabStrip.tsx` |
+| N-6 | AI 助手侧栏变窄：先隐「会话消耗」，更窄则动作钮只留图标（接上既有 `.kb-fit` 容器查询；阈值 360/245 **实测标定**） | `AssistantPanel/{ChatBody,MessageList,StreamBubble}.tsx`·`styles/index.css` |
+
+**顺带清理（无用户可见面，防后人踩）**：引导「场景选择」步骤删除（该步写的 `activityBarHidden` 已无读者）；`activityBarOrder` / `activityBarHidden` 两键与 `activityOrder` / `activityVisibleOrder` 归一化 API 随旧八模块图标条整体退役。
+
+**验收**：tsc 双端 0 错；全量契约脚本 **53 个全绿**（新增 `verify-outline-dest-page.mjs` 9 项、`verify-kb-fit.mjs` 23 项）；行为探针 `tmp/probe-aichat-kbfit.mjs` 四档宽度实测（阈值分级生效 + 高度链未破）。
+
+**★ 实机状态如实记（勿当成全部已确认）**：**F-9 已由开发负责人实机确认**（「现在能够正常的跳转了」）；**F-1（pointer events 版拖拽）/ F-8 / N-6 尚待实机确认** —— 台账里 `[x]` 一律指「已落码 + 契约全绿」，不等于真机验收通过。
+
+---
+
+## 33. F-7 沉浸阅读「页面不能向下滚动」修复（2026-09-27）
+
+**根因**：沉浸分支容器（`knowledge/index.tsx`）是 `flex-1` 的 flex item 却**没有 `min-h-0`** —— flex item 默认 `min-height: auto`，不能收缩到内容高以下，于是它被正文顶成「内容高」而非「容器高」，内层滚动区随之与内容等高 ⇒ 无处可滚（铁律 11 同族病）。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 沉浸容器补 `flex flex-col min-h-0` | `src/modules/knowledge/index.tsx`（沉浸分支根） |
+| 2 | md 正文滚动区 `h-full overflow-y-auto` → `flex-1 min-h-0 overflow-y-auto` | 同上 |
+
+**隐藏面（本条一并修掉）**：沉浸态有**三条**子分支共用这条高度链 —— md 正文 / `WelcomeHtmlView`（wrapper `flex-1`）/ `FileMetaCard`（根 `flex-1`）。容器不是 flex 列时后两者的 `flex-1` 是**死属性**，所以 HTML 页、欢迎页、归档文件在沉浸态同样塌（此前只盘了 md 一条）。
+
+**方法论教训（已写进台账）**：前一轮复刻探针没抓到，是因为它搭的链**每层都是固定高**（`h-full overflow-hidden`），绕开了「flex item + `min-height:auto`」；复刻链必须照抄**每层的定高方式**，只抄层级数量会把病根复刻掉。
+
+**验收**：tsc 双端 0 错 · 全量 55 契约全绿 · `verify-workbench-shell.mjs` 新增 F15/F15b/F15c（→175 项）· 探针 `tmp/probe-f7-immersive.mjs` 三条分支对照（修复前 A/C 滚不动、B 的 iframe 塌成 150px；修复后 A/C 可滚、B 撑满）。**实机待验**。
+
+---
+
+## 34. 反馈修复批次③④（N-3 / N-4 / N-5 / N-7 · F-3 / F-10，2026-09-26 ~ 27）
+
+**来源**：`Phrontis/过程记录/v3.4.0-beta-feedback.md`（DP 库，同一 beta 台账；批③ = `4014bd3`，批④ = `f7209e4`，台账结构修正 = `ea271c1`）。**逐条根因与实现细节在台账**，本条只做 UI 侧流水索引。
+
+| 台账条 | 改了什么（用户可见） | 主要落点 |
+|---|---|---|
+| N-3 | 总览态左栏恢复「软件文件」折叠区（沉底 + 计数 + 默认收起 + 记忆）；条目右键同零散文件区四项菜单；文件点开即编辑 | `WorkbenchLeftPanel.tsx` |
+| N-4 | AI 教学「编辑画像 / 要求」跳转后可返回（返回 chip 复活） | `ai-teaching/*` |
+| N-5 | AI 助手独立的「要求」落 `.assistant/CONSTRAINTS.md` + 面板常驻编辑入口 | `AssistantPanel/*`·`electron/lib/*` |
+| N-7 | AI 助手术语表（别名制、全局一份、预填可改）+ 博客检索缺口 | `AssistantPanel/*`·`aiTools` |
+| F-3 | 托盘图标紫方块：打包态候选全灭 + 重试 + 内嵌真图标兜底 | `electron/main/*` |
+| F-10 | 删除笔记条目后左栏不再弹回总览态 | `WorkbenchLeftPanel.tsx` |
+
+**验收**：见台账各条的「验证」段（tsc 双端 0 错 + 全量契约全绿 + 各条新增契约）。
+
+---
+
+## 35. 沉浸阅读（纯净阅读）左栏自动大纲（N-9，2026-09-27）
+
+**需求**（开发负责人原话）：「纯净阅读模式下如果读的是 md 文档，左侧边栏应该自动变为大纲而不是现在这样左侧边栏没东西」。
+
+**根因**：沉浸态整块内容区（含非沉浸态那份 `sidebarInner` 的 portal）挂在 `readingMode ? … : …` 三元**之外的分支**里 ⇒ 沉浸时左栏 slot **全空**（实机截图只剩 🏠🔒 头部）。不是「切换 tab」，是**沉浸态压根没渲染左栏**。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 新增覆盖位 `immersiveTabOverride`（**不写 `sidebarTab`** —— 那是用户的选择，覆写则退出回不到原栏；归 `null` 即天然还原） | `src/modules/knowledge/index.tsx` |
+| 2 | 进入沉浸：仅 **md** 切大纲（txt / html 无标题结构）；退出：归 `null` | 同上 |
+| 3 | 沉浸分支内自带 `OutlinePanel` portal 进同一 `sidebarEl`（`data-wb="immersiveOutline"`，**不带切换行** = 拍板「只放大纲」） | 同上 |
+| 4 | 沉浸正文自带 `outline:go-to-heading` 消费者（非沉浸态由 Monaco 消费；沉浸态正文是 `MarkdownPreview` 无 Monaco）→ 按标题 id `scrollIntoView`，**复用已有的 `headingId` 锚点** | 同上 |
+| 5 | 沉浸中经 `[[双链]]` 换页：新页非 md 则收起大纲（防错配） | 同上 |
+
+**拍板**：① 只放大纲（不带切换行）② 退出还原进入前的选择 ③ 尊重手动切换 —— ③ 由 ① 自动满足（无切换行 ⇒ 无从手动切走），源码留注释警告「将来加回切换行须补 `userOverrideRef` 闸门」。
+
+**验收**：tsc 双端 0 错 · 全量 55 契约全绿 · `verify-workbench-shell.mjs` 加 F16–F16g（→182 项）· 行为探针 `tmp/probe-immersive-outline-state.mjs` **17/17**（从真源码抠出状态迁移规则驱动，专补「契约锁不住时序」的缺口）。**实机待验**。
+
+## 36. 主题合集插件 v1.6.0：四季主题（春·嫩芽 / 夏·骄阳 / 秋·金秋 / 冬·初雪）+ 主题背景渐变基建（2026-09-27）
+
+**需求**：主题插件新增春夏秋冬四套主题，每季一个对应主题色，背景要有渐变感。原型 `proto/seasonal-themes.html`（单文件、真实令牌驱动）四轮反馈迭代拍板：秋=金秋麦穗（否掉咖啡色暖褐）、冬=雪白纯净（否掉深色雪夜）、夏=阳光+蓬勃（暖阳白→草色渐变 + 翠叶绿）、春=嫩芽绿。
+
+**机制**：走既有插件 theme 贡献通道——`pluginService.ensurePluginThemeStyles()` 把 colors 表消毒后注入 `html.theme-plugin-knowbase-themes-collection-<idx>` 覆写块，设置 → 外观自动出卡。新增令牌 `--bg-gradient`（渐变停止点带 0.92 alpha，对齐根容器 92% 磨砂玻璃观感）。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 插件 v1.5.0 → 1.6.0，theme 数组追加四季 4 套（各 24 令牌：全基础色板 + `--bg-gradient` + `--glass-edge` + `--drop-*`） | `resources/market-plugins/themes-collection/plugin.json` |
+| 2 | 双通道同步：整包副本进 builtin-plugins——启动时自动安装/升级（正式版已装 1.5.0 → 下次启动免操作升 1.6.0；dev 全新落位） | `resources/builtin-plugins/themes-collection/` |
+| 3 | 渐变基建两工具类：`kb-theme-gradient-img`（仅叠渐变图，App 根/内容壳保留原 color-mix 磨砂底）、`kb-theme-surface`（实底 + 渐变图，替代模块根的 `bg-[var(--bg-primary)]`；缺省 `--bg-gradient` 时 image 为 none，纯色主题零回归） | `src/styles/index.css` |
+| 4 | 消费点铺设：App 根 + 内容卡壳挂 `kb-theme-gradient-img`；31 个模块/面板根容器（knowledge / schedule / blog / toolbox 家族 / settings / 阅读器 / 工作台左栏等）`bg-[var(--bg-primary)]` → `kb-theme-surface` | `src/App.tsx`、`src/modules/**`、`src/components/**` |
+| 5 | 契约脚本：双通道 manifest 一致性 + 离线复刻渲染层 `sanitizeVars` 白名单（防令牌被静默丢弃 → 主题卡不出现）+ 四季必备令牌 / 渐变形态断言 | `.AGENT/scripts/themes-collection/verify-themes.mjs` |
+
+**取舍**：① QuizDataPanel 弹层保留实底（对话框压渐变合理）；② 内置深色 / 浅色不注入 `--bg-gradient`（纯色零回归）；③ CHANGELOG 记录留给下次切版（beta.2 已发布，避免干扰 release-notes 基线）。
+
+**验收**：tsc 双端 0 错 · `verify-themes.mjs` ✓（双通道一致、12 套主题全令牌过消毒器）· 静态检索 h-full 实底仅剩弹层一处 · **实机待验**（重启 dev 后 设置 → 外观 应出现 4 张四季主题卡，切换带 View Transition 交叉淡化）。
+
+## 37. 看板收尾（专注时长指标）+ 主题氛围特效落地（2026-09-27）
+
+**看板遗留收齐**：热力图「专注时长」指标从占位接成真实现 —— `dashboardRepo` 聚合番茄场次（`pomoSessionsAll`，半年跨度按日累加）进快照 `pomodoro.days`；`fmtMinutes` 加口径参数（使用/专注）；`Heatmap` 加 `unit` prop；契约脚本新增 F1–F11（72 项 PASS）。
+
+**主题氛围特效**（方案 `docs/theme-fx-design.md`，原型 `proto/theme-fx.html`）：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 内核组件 `ThemeFxLayer`：sprite 预渲染 + 单 rAF + hidden 暂停 + reduced-motion 静帧；消费主题令牌 `--theme-fx`（petals/beams/leaves/snow），内核不认插件 id | `src/components/shared/ThemeFxLayer.tsx` |
+| 2 | 挂载：工作台（`.desk`）+ 看板根容器；画布 z 序最低（z-0，内容层 z≥1），粒子只从留白处透出 | `src/modules/desktop/index.tsx`、`src/modules/dashboard/index.tsx`、`index.css` |
+| 3 | 设置接线：`themeFxEnabled`（默认开）/ `themeFxDensity`（疏/中/密）入 SETTINGS；AppearanceView 仅激活声明了令牌的主题时显示 | `src/lib/settings.ts`、`AppearanceView.tsx` |
+| 4 | 插件 v1.7.0：四季 colors 加 `--theme-fx`，双通道同步，契约脚本扩展令牌枚举校验 | `resources/{market,builtin}-plugins/themes-collection/` |
+
+**验收**：tsc 双端 0 错 · `verify-themes` / `verify-dashboard`（72 项）/ `verify-app-usage`（34 项）全绿 · 原型四轮迭代定稿（速度单位修正 60×、叶形重画、六角结晶、丁达尔加色+环境压暗）· 实机待验（工作台/看板看四季特效 + 设置联动）。
+
+## 38. 分享卡片落地为右栏第三态（2026-09-29）
+
+原「打卡图」方案（`docs/share-card-design.md`，2026-09-20 待拍板）**入口改到工作台右栏**，并新增「图上文字可编辑」与「我的模板」两条需求。原型 `outputs/share-card-panel-prototype.html` 拍板后落码。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 右栏 Tab 由 2 项扩为 3 项（🧩 小工具 / 🤖 AI / 🎨 分享）；`rightTab` 联合 + `WORKBENCH_PANEL_TAB_IDS` + ⋯ 菜单三处同步 | `src/lib/workbenchLayout.ts`、`WorkbenchRightPanel.tsx` |
+| 2 | 分享态面板：卡片预览（点击进编辑浮层）+ 主视觉 / 卡片明暗切换 + 我的模板 + 复制图片 / 另存 PNG | `src/components/share-card/ShareCardPanel.tsx` |
+| 3 | **canvas 唯一绘制**：预览与导出同一张 1080×1920 canvas；`renderShareCard` 纯函数（不碰 DOM，契约负向断言锁） | `renderShareCard.ts`、`ShareCardCanvas.tsx` |
+| 4 | **图上直接改字**：透明输入层按 `shareCardStyles.slotRects` 的同一份矩形铺在 canvas 上；聚焦期间 canvas 跳过该槽位 ⇒ 中文输入法**组字过程可见** | `ShareCardEditor.tsx`、`shareCardStyles.ts` |
+| 5 | 可编辑三槽位：寄语 / 品牌语 / 署名（空则不显示），逐槽位「还原默认」 | 同上 |
+| 6 | 我的模板：整套快照（风格 + 明暗 + 三处文案）+ 内置 3 套 + 命名 / 重命名 / 删除（**内置也能删**，删光后模板区显示空态、卡片照常可用）；存全局设置 `shareCard`（写入 400ms 防抖） | `shareCardTemplates.ts`、`src/lib/settings.ts` |
+| 7 | 数据层：`shareCard:get`（一次取全）、`shareCard:savePng`（对话框 → 落盘 → 定位文件） | `electron/database/repositories/shareCardRepo.ts` |
+| 8 | 官网地址收敛为**唯一常量** `PRODUCT_SITE`，契约负向断言「`electron/` 与 `src/` 下只允许出现在此文件」 | `electron/lib/productInfo.ts` |
+| 9 | **不另写第二份打卡口径**：`habitStats.ts` 扩 `checkinWeekCells` / `checkinHeatGrid`，分享卡片与看板共用 | `electron/lib/kbStore/{habitStats,shareCardStats}.ts` |
+
+**取舍**：① 卡片用 canvas 单源，故「预览好看、导出跑版」在结构上不可能发生，代价是图上改字要自建透明输入层；② 模板存**全局**设置而非按库（卡片是「我用软件的方式」，换库跟着走）；③ 保留独立卡片明暗开关（不跟随应用主题）；④ 内置模板也能删 —— 为此设置默认值取**空串**（=「还没存过」，落内置种子），与 `{"templates":[]}`（=「用户真删光了」，保持空）严格区分，否则「删了又自己回来」。
+
+**验收**：tsc 双端 0 错 · `electron-vite build` 通过 · `verify-share-card.mjs` 全绿 · 运行期探针 `probe-share-card.mjs` PASS（canvas 1080×1920 / 非空白且不透明 / 换风格与明暗真的重绘 / 浮层三输入层在位 / 图上改字落到设置 / 导出 PNG 的 IHDR 尺寸 / 存模板 +1 / 400ms 防抖窗口内切 Tab 不丢最后一次编辑 / 内置模板可删且删光不复活）· **实机待验**（复制图片 → 微信 `Ctrl+V` 出图，这是最终判据）。
+
+> **探针抓到的两个真 bug**（契约抓不到 —— 源码形状完全正确，只有真跑才暴露）：① 面板卸载时只 `clearTimeout`，
+> 400ms 防抖窗口内切 Tab 会丢掉最后一次文案编辑（改为卸载**补写**）；② 设置默认值与「还没存过」共用一个值，
+> 导致删光模板后重读设置又落回内置种子（表现为「删了又自己回来」；改为默认空串）。两条均固化为探针用例。
+
+## 39. 分享卡片：题目区（LaTeX / Markdown 行内渲染）+ 数据指标暂以占位替代（2026-09-29）
+
+两件事同批落地。
+
+**其一：卡上的数据指标换成占位内容。** 上一版两对数字（今日专注 / 连续打卡）经讨论判定口径都站不住 ——「专注」分不清是番茄钟还是整机使用时长，「连续打卡」只要有**任一**习惯有记录就算打卡日（用户有 5 个习惯、昨天只打一个，卡上仍写「连续 12 天」，用户自己不信）。而替代指标需要**真实使用体感**才能挑，用户当下没有（「还在开发者的视角」）。故整条判为搁置（DP `Phrontis/搁置功能与想法/分享卡片数据指标/`），卡上先放**与数据无关**的占位：日期与星期。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 两个大字位由统计标量改为**日期 / 星期**（刻意不放任何数字 —— 是数字就会被追问算法） | `renderShareCard.ts` |
+| 2 | `ShareCardData` 去掉 `focusMinutesToday` / `streakDays`；`shareCard:get` 相应不再聚合番茄场次 | `electron/database/repositories/shareCardRepo.ts`、`src/types/index.ts` |
+| 3 | `shareCardStats.focusMinutesOn` **保留**（口径函数留着，指标定了直接用），契约仍验它 | `electron/lib/kbStore/shareCardStats.ts` |
+
+**其二：新增题目区（每天贴一道题，支持 LaTeX）。** 场景是「每天刷数学题，选一道放在分享卡片上」；用户明确**题目不进模板**（模板只管版式，题目每天现贴）。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 4 | 行内语法解析：`**粗**` `*斜*` `` `代码` `` `$行内$` `$$整行$$`。**刻意不做块级 Markdown**（定高小块里排不开），认不出的语法原样当文本 | `shareCardRichText.ts` |
+| 5 | **LaTeX 走「离屏图」路线**：KaTeX 排好的 HTML 塞进 SVG `<foreignObject>` → 载成图 → `drawImage` 到卡片 canvas。排版交给浏览器，落地仍是像素 ⇒ **单源铁律不破**（预览=导出），公式也能随卡导出 | 同上 |
+| 6 | KaTeX 的 woff2 **按需内联成 `@font-face` data URL**（外部 URL 在 SVG 转图时会被当跨源拒掉）；字体表与 CSS 各自注入一次并缓存 | 同上 |
+| 7 | KaTeX 用**动态 import** —— `manualChunks` 早已切出独立 chunk，动态引入不改变首屏闭包 | 同上 |
+| 8 | 绘制层仍**不碰 DOM**：排版结果由 `ShareCardCanvas` 异步产出后作为参数传入（`opts.promptImage` / `promptSize`），契约的静态负向断言继续成立 | `renderShareCard.ts`、`ShareCardCanvas.tsx` |
+| 9 | 题目编辑**只在编辑浮层里**：点卡片上图那一位即出源码框，**失焦渲染成公式**。不做透明输入层 —— 那段文本渲染后（公式被 KaTeX 重排）与源码字符位置毫无对应，光标会飘到公式图形之外 | `ShareCardEditor.tsx` |
+| 10 | 题目区存 `ShareCardState.prompt`，**不属于模板**（切模板不动它，也不影响模板的「已修改」标记） | `types` / `shareCardTemplates.ts` |
+| 11 | 卡片去掉「日期 / 星期」两个大字位 —— 中间主体**只留题目区**一个可编辑框（用户 2026-09-29 截图反馈后拍板） | `renderShareCard.ts` |
+| 12 | 题区几何**收进 `shareCardStyles.panelLayout()`**（`promptTop` 起、占到周格行前），绘制 / 编辑占位框 / 输入层共用同一份 | `shareCardStyles.ts` |
+
+**取舍**：① 不做块级 Markdown（定高块排不开）；② 公式源码编辑期间显示原文、失焦才渲染（用户已确认接受）；③ 题目块**定高**而非自适应 —— 内容长短不该把下面的周格行顶得上下乱窜，超出截断补省略号；④ 题目不进模板（模板=版式，题目=内容，混在一起会「换模板顺手换掉今天的题」）；⑤ 右栏面板**不放开题目输入框**，也不写语法说明 —— 编辑入口只有浮层一处；⑥ 中间主体**只放题目**，不再有第二个可编辑区。
+
+> **修掉一个真 bug（截图暴露）**：题区位置早先在 `shareCardRichText.ts` 里**手抄**成 `PROMPT_BLOCK_TOP = 566`，
+> 而 `panelLayout()` 算出的实际位置是 **654** —— 错位 **88px**，表现为「公式渲染跑到框外、编辑占位框与
+> 画出来的块对不上」。根因是同一份几何被抄了两处。已把题区矩形移进 `panelLayout()` 单源产出，
+> 并在契约里加了**几何回归护栏**（逐风格断言矩形落在寄语行之下、周格行之上、不与页脚线重叠 +
+> 静态负向「不得再出现手抄的 `PROMPT_BLOCK_*` 常量」）。
+
+**验收**：tsc 双端 0 错 · `electron-vite build` 通过 · `verify-share-card.mjs` **118 项全绿** · **运行期探针待补跑**（命令见探针文件头注；本轮被用户 dev 实例的单实例锁阻断 —— 机制与排查序见 memory `dev-instance-holds-probe-lock`）。探针 `probe-share-card.mjs` 第 12 条会在题区写入真实积分式后断言**题块内出现足量墨点**，且其扫描区域已改为按新几何取（不再是早先的 y=566）。KaTeX + foreignObject 栅格化已单独用裸 Electron 冒烟验证：一道 `\int_0^1 \frac{x^2}{1+x^3}\,dx` 排出 212×71 px、5598 墨点。
+
+> 探针本轮**未能执行**：用户的 dev 实例（7 个 electron 进程）正占着应用单实例锁，探针实例起不来。
+> 机制与排查序见 memory `dev-instance-holds-probe-lock`。**待用户关闭 dev 后补跑**，命令在探针文件头注。
+
+原「打卡图」方案（`docs/share-card-design.md`，2026-09-20 待拍板）**入口改到工作台右栏**，并新增「图上文字可编辑」与「我的模板」两条需求。原型 `outputs/share-card-panel-prototype.html` 拍板后落码。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 右栏 Tab 由 2 项扩为 3 项（🧩 小工具 / 🤖 AI / 🎨 分享）；`rightTab` 联合 + `WORKBENCH_PANEL_TAB_IDS` + ⋯ 菜单三处同步 | `src/lib/workbenchLayout.ts`、`WorkbenchRightPanel.tsx` |
+| 2 | 分享态面板：卡片预览（点击进编辑浮层）+ 主视觉 / 卡片明暗切换 + 我的模板 + 复制图片 / 另存 PNG | `src/components/share-card/ShareCardPanel.tsx` |
+| 3 | **canvas 唯一绘制**：预览与导出同一张 1080×1920 canvas；`renderShareCard` 纯函数（不碰 DOM，契约负向断言锁） | `renderShareCard.ts`、`ShareCardCanvas.tsx` |
+| 4 | **图上直接改字**：透明输入层按 `shareCardStyles.slotRects` 的同一份矩形铺在 canvas 上；聚焦期间 canvas 跳过该槽位 ⇒ 中文输入法**组字过程可见** | `ShareCardEditor.tsx`、`shareCardStyles.ts` |
+| 5 | 可编辑三槽位：寄语 / 品牌语 / 署名（空则不显示），逐槽位「还原默认」；数字由数据自动填 | 同上 |
+| 6 | 我的模板：整套快照（风格 + 明暗 + 三处文案）+ 内置 3 套 + 命名 / 重命名 / 删除（**内置也能删**）；存全局设置 `shareCard`（写入 400ms 防抖） | `shareCardTemplates.ts`、`src/lib/settings.ts` |
+| 7 | 数据层：`shareCard:get`（打卡 + 番茄 + 二维码一次取全，二维码与官网地址主进程同源）、`shareCard:savePng`（对话框 → 落盘 → 定位文件） | `electron/database/repositories/shareCardRepo.ts` |
+| 8 | 官网地址收敛为**唯一常量**：`PRODUCT_SITE`，契约负向断言「`electron/` 与 `src/` 下只允许出现在此文件」 | `electron/lib/productInfo.ts` |
+| 9 | **不另写第二份打卡口径**：`habitStats.ts` 扩 `checkinWeekCells`（周一为首）/ `checkinHeatGrid`（13 周列优先），分享卡片与看板共用；零依赖 `shareCardStats.ts` 只放 `focusMinutesOn` / `heatRate` | `electron/lib/kbStore/{habitStats,shareCardStats}.ts` |
+
+**取舍**：① 卡片用 canvas 单源，故「预览好看、导出跑版」在结构上不可能发生，代价是图上改字要自建透明输入层（多一段机制，换掉一份必然漂移的第二渲染）；② 数字**不可手改**（分享出去的数字与真实记录一致）；③ 模板存**全局**设置而非按库（卡片是「我用软件的方式」，换库跟着走）；④ 保留独立卡片明暗开关（不跟随应用主题，出图可控）；⑤ **内置模板也能删**，删光后模板区显示空态、卡片照常可用 —— 为此设置默认值取**空串**（=「还没存过」，落内置种子），与 `{"templates":[]}`（=「用户真删光了」，保持空）严格区分，否则会出现「删了又自己回来」。
+
+**验收**：tsc 双端 0 错 · `electron-vite build` 通过 · `verify-share-card.mjs` 82 项全绿 · 运行期探针 `probe-share-card.mjs` 31 项 PASS（canvas 1080×1920 / 非空白且不透明 / 换风格与明暗真的重绘 / 浮层三输入层在位 / 图上改字落到设置 / 导出 PNG 的 IHDR 尺寸 = 1080×1920 / 存模板 +1 / 400ms 防抖窗口内切 Tab 不丢最后一次编辑 / 内置模板可删且删光不复活）· **实机待验**（复制图片 → 微信 `Ctrl+V` 出图，这是最终判据；另存 PNG 的保存对话框）。
+
+> **探针抓到的两个真 bug**：① 面板写入有 400ms 防抖而 Tab 切换会卸载面板，初版卸载时只 `clearTimeout`，
+> 「改完文案立刻切 Tab」会静默丢掉最后一次编辑（改为卸载时**补写**）；② 第一版设置默认值写成
+> `{"templates":[]}`，与「还没存过」共用一个值，导致删光模板后重读设置又落回内置种子 ——
+> 表现为「删了又自己回来」（改为默认空串，并把两者语义显式区分）。
+> 两条都固化成探针用例第 10 / 11 条 —— 契约脚本抓不到这类问题（源码形状完全正确），只有真跑才暴露。
+
+---
+
+## 40. AI教学：左栏随层级切换（大纲态 ⇄ 课时态）+ 空态只给引导（2026-10-01）
+
+**提出（2026-10-01）**：「点击进入知识点后，左侧边栏应该变成课时」；以及「整套体系在显示上有些多了，用户打开软件一看这么多东西还没用就觉得有些累」。
+
+**设计（已出原型并经用户确认）**：`docs/prototypes/ai-teaching-nav-declutter.html`
+
+- 左栏改为**上下文相关**（VS Code 式）：只显示「当前这一层」，不再把课程大纲 / 会话 / 资源管理器叠一起。
+- **大纲态**（`courseView === 'home'`）：左栏 = 课程大纲（章 → 知识点）。
+- **课时态**（`courseView === 'chat'` 且已进入某知识点）：左栏 = 该知识点的课时列表（顶部 ◀「课程大纲」返回）。
+- **空态**：无大纲时只在**中栏**给一句引导 + 一个「生成课程大纲」按钮，点它才进建课向导（原先无大纲直接铺开向导）。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 左栏课程区按 `courseView`/`courseUnit` 二选一渲染：课时列表或课程大纲 | `src/modules/ai-teaching/index.tsx` |
+| 2 | `courseLessonList` = `courseState.lessons` 按 `unitId` 过滤、`order` 升序（键=会话 id）；`courseOpenLesson(unitId, sid, order, kind, status)` 打开已存在课时（**不新建**） | 同上 |
+| 3 | 课时态头部 `SectionHead` 标题 `课时 · {知识点名}`，`right` 放「◀ 课程大纲」返回（`setCourseView('home')`） | 同上 |
+| 4 | 空态引导屏：无 `outline` 时 `CourseHome` 先渲染引导，`view === 'wizard'` 才渲染 `Wizard` | `src/modules/ai-teaching/CourseMode.tsx` |
+
+**取舍**：① 课时列表键用 `lessons` 记录的**会话 id**（`Record<sessionId, AiTeachLessonInfo>`），打开旧课时复用 `openSession`，与「续课」路径同源；② 「资源管理器 / 任务规划」本次**未默认收起**（用户只勾了「空态只给引导」）；③ 中栏课程主页的章节卡片**本次保留**（用户多选题未勾「去重复章节」，留待其拍板是否去重）。
+
+**验收**：tsc web 0 错 · 全量契约 65/65 · 渲染层热更新（无需重启 dev）。
+
+---
+
+## 41. AI教学：课程模式下收起顶栏「会话页签」区（2026-10-01）
+
+**提出（2026-10-01，开发负责人带截图）**：「我觉得这一行有点东西有点过多了有点没有结构感」——截图里顶栏同时挤着 `工作区 chip · ＋ · [课程主页｜上课] · 课时10·精讲 / 课时9·精讲 / 课时8·精讲 / 行列式的概念与阶数 · 画像 · 会话要求`。
+
+**根因（代码核实）**：顶栏中段的页签区是 `wsSessions.map`（`src/modules/ai-teaching/index.tsx:2607`）—— 把**本工作区所有会话**都铺成一排页签。课程模式下每开一节课就多一个「课时N·精讲」页签，越堆越长；且与「左栏大纲/课时 + 顶栏分段器」重复（同一份导航两处出现）。
+
+**设计方案（已出原型 `docs/prototypes/ai-teaching-header-tabs.html`，用户拍板 A）**：
+
+- **课程模式**：顶栏页签区**整段收起**（渲染一个占位 `flex-1`，把右侧工具推到底）。导航统一交给「左栏 大纲 ⇄ 课时」+ 顶栏「课程主页/上课」分段器。
+- **非课程模式**：**完全不动**（页签仍是会话切换器）。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 页签区按 `courseEnabled` 二选一：课程模式渲染占位 `<div className="flex-1 min-w-0" />`，否则渲染原 `wsSessions.map` 页签条 | `src/modules/ai-teaching/index.tsx` |
+
+**取舍**：课程模式下「非课时的历史会话」（迁移进来的旧会话）失去页签入口 —— 由课程结构取代，属预期；若日后要保留，可在左栏加折叠的「其他会话」。备选 B（只留当前课时页签）/ C（折叠下拉）因仍冗余或多一层结构而未采用。
+
+**验收**：tsc web 0 错 · 全量契约 65/65 · 渲染层热更新（无需重启 dev）。

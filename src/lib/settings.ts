@@ -84,11 +84,6 @@ export const ENCODING_OPTIONS = [
   { id: 'gb2312',  label: 'GB2312',  desc: '简体中文' },
 ] as const
 
-export const ICON_SIZE_OPTIONS = [
-  { id: 's', label: '小' },
-  { id: 'm', label: '中' },
-  { id: 'l', label: '大' },
-] as const
 
 export const BLOG_SIZE_OPTIONS = [
   { id: 's', label: '紧凑' },
@@ -112,20 +107,14 @@ export const KNOWLEDGE_SIDEBAR_ITEM_VARS: Record<string, Record<string, string>>
   l: { '--kb-row-py': '9px', '--kb-row-py-lg': '12px', '--kb-row-fs': '16px' },
 }
 
-export const FONT_SIZE_OPTIONS = [
-  { id: 12, label: '12px' },
-  { id: 13, label: '13px' },
-  { id: 14, label: '14px' },
-  { id: 15, label: '15px' },
-  { id: 16, label: '16px' },
-  { id: 18, label: '18px' },
-  { id: 20, label: '20px' },
-] as const
 
 // ===== 设置定义 =====
 
 export const SETTINGS = {
   theme: { default: 'dark', type: 'select', label: '应用主题', group: '主题', desc: '深色 / 浅色配色，以及插件提供的主题包', keywords: ['主题', 'theme', '深色', '浅色', 'dark', 'light', '夜间', '配色'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.theme' },
+  // 主题氛围特效（2026-09-27）：只在激活主题声明了 --theme-fx 时由 AppearanceView 条件渲染（ui:false = 不进搜索/通用渲染，见 docs/theme-fx-design.md §4.3）
+  themeFxEnabled: { default: true, type: 'toggle', label: '主题特效', group: '主题', desc: '四季主题的氛围粒子特效（工作台 / 看板）：樱瓣 / 光束 / 落叶 / 雪', keywords: ['特效', '主题特效', '粒子', '氛围', 'theme fx'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  themeFxDensity: { default: 'mid', type: 'select', label: '粒子密度', group: '主题', desc: '氛围特效的粒子密度：疏 / 中 / 密（需主题特效开启）', keywords: ['密度', '粒子', '特效', 'density'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   editorFont: { default: 'system', type: 'select', label: '字体样式', group: '字体', desc: '编辑器正文使用的字体', keywords: ['字体', 'font', '字体样式', '字型', 'typeface'], section: 'editor', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'editor.font' },
   deleteFxSkin: { default: 'builtin', type: 'select', label: '删除动画皮肤', group: '主题与皮肤', desc: '知识库删除条目时的吞噬特效外观；插件可贡献自定义皮肤', keywords: ['删除动画', '删除特效', '吞噬', '火焰', '进度条', '皮肤', 'fx', 'delete'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.deleteFx' },
   showLineNumbers: { default: true, type: 'toggle', label: '显示行号', group: '显示', desc: '编辑器左侧是否显示行号', keywords: ['行号', '显示行号', 'linenumber', 'line numbers', 'gutter'], section: 'editor', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'editor.lineNumbers' },
@@ -157,13 +146,41 @@ export const SETTINGS = {
   autoSaveDebounceMs: { default: 2000, type: 'number', label: '自动保存延迟', group: '保存', desc: '停止输入后自动保存的延迟时间（可直接输入毫秒）', keywords: ['自动保存', '保存', '防抖', 'autosave', '延迟', 'debounce'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'advanced.autosave', min: 100, max: 30000, step: 100, unit: 'ms' },
   exportStatusClearMs: { default: 5000, type: 'number', label: '导出成功提示时长', group: '导出', desc: '导出成功提示停留时间', keywords: ['导出', '提示', '停留', 'status', '毫秒'], section: 'data', ui: false, scope: 'global', level: 'normal', affects: 'live', unit: 'ms' },
   skipDeleteConfirm_toolboxScript: { default: false, type: 'toggle', label: '工具箱脚本删除确认', group: '删除确认', desc: '跳过工具箱脚本删除确认', keywords: ['删除确认', '工具箱', '脚本', '跳过'], section: 'security', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  /** v3.2.0 第 20 项：画像更新建议里「删除类条目」的二次确认（默认要确认） */
+  skipProfileDeleteConfirm: { default: false, type: 'toggle', label: '画像更新删除确认', group: '删除确认', desc: '跳过「画像更新建议」里删除类条目的二次确认', keywords: ['删除确认', '画像', 'AI教学', '学习者画像', '跳过', 'confirm', 'profile'], section: 'security', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   zoomMin: { default: 0.85, type: 'number', label: '缩放下限', group: '缩放', desc: '界面缩放下限（约束，勿手改）', keywords: ['缩放', '下限', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   zoomMax: { default: 1.5, type: 'number', label: '缩放上限', group: '缩放', desc: '界面缩放上限（约束，勿手改）', keywords: ['缩放', '上限', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   zoomStep: { default: 0.05, type: 'number', label: '缩放步进', group: '缩放', desc: '界面缩放步进（约束，勿手改）', keywords: ['缩放', '步进', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  activityBarOrder: { default: '["editor","blog","schedule","knowledge","moments","toolbox","plugins","export","recycle"]', type: 'json', label: '活动栏图标顺序', group: '活动栏', desc: '活动栏模块图标顺序（JSON）', keywords: ['活动栏', '顺序', '图标', 'activitybar', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  activityBarHidden: { default: '[]', type: 'json', label: '活动栏隐藏模块', group: '活动栏', desc: '活动栏隐藏的模块（JSON）', keywords: ['活动栏', '隐藏', '模块', 'activitybar', 'hidden'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // ⚠️ 默认值里**不能出现**不在活动栏图标位上的 id。这里曾混着 `export`（模块早已不存在）与
+  // `recycle`（回收站已移进底部设置菜单）—— `recycle` 那次是真出过事故：启动兜底会沿着这张顺序表
+  // 找"第一个没被隐藏的模块"，而 recycle 永远隐藏不掉，于是把侧边栏模块全隐藏后重启就开回收站。
+  // 存量用户的活动栏顺序由 ActivityBar 的归一逻辑自行补齐（desktop 顶首位 / 缺失模块追加），
+  // 所以这里只保留图标位模块、相对次序不动即可。
+  // 图标条（最左窄列）的顺序与显隐（2026-09-25 恢复拖拽排序 + 右键显隐）。
+  // ⚠️ 2026-09-26：旧八模块活动栏的 `activityBarOrder` / `activityBarHidden` 两键已随
+  // v3.4.0 三栏外壳退役删除（运行时早已零消费，只剩引导空写）。图标条是顺序/显隐的唯一承载。
+  // 成员清单唯一真源是 `appModules.RAIL_MODULE_IDS`。
+  railOrder: { default: '["aiTeaching","recycle","plugins","moments","bookMarket"]', type: 'json', label: '图标条顺序', group: '活动栏', desc: '图标条按钮顺序（JSON）', keywords: ['图标条', '顺序', 'activitybar', 'rail', 'order'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  railHidden: { default: '[]', type: 'json', label: '图标条隐藏按钮', group: '活动栏', desc: '图标条上被隐藏的按钮（JSON）', keywords: ['图标条', '隐藏', 'activitybar', 'rail', 'hidden'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // 布局：整条活动栏显隐。本键关的是「活动栏这个容器本身」，入口只有命令面板
+  // 「布局：隐藏/显示活动栏」一个（标题栏「自定义布局」下拉已于 2026-09-17 整条删除）。
+  // ui:false 与同组两键一致：入口在命令面板，不在设置页（避免与「显示/隐藏模块」混淆）
+  activityBarVisible: { default: true, type: 'toggle', label: '显示活动栏', group: '活动栏', desc: '关闭后隐藏最左侧模块活动栏（命令面板「布局：显示活动栏」可随时调回）', keywords: ['活动栏', '布局', '隐藏', '侧边栏', 'activitybar', 'visible', 'layout'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   toolboxHiddenTools: { default: '[]', type: 'json', label: '工具箱隐藏工具', group: '工具箱', desc: '工具箱画廊中隐藏的工具 id 列表（JSON，内置工具用 id，插件工具用 pluginId:toolId）', keywords: ['工具箱', '隐藏', '工具', '显示', 'toolbox', 'hidden'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  startupTab: { default: 'blog', type: 'select', label: '启动时默认显示', group: '启动', desc: '每次打开应用时自动进入的模块', keywords: ['启动', '默认模块', '首页', 'startup', '默认显示', '初始模块'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.startupTab' },
+  // 看板（2026-09-27）：两项都 ui:false —— 入口是看板自己的「编辑卡片」弹层，不进设置页搜索。
+  // dashboardCards 的成员 id 唯一真源是 src/modules/dashboard/cards.tsx 的 CARD_REGISTRY。
+  dashboardCards: { default: '["habit","usage","notes","book","heatmap"]', type: 'json', label: '看板显示的卡片', group: '看板', desc: '看板上显示哪些卡片（JSON 数组；主卡「今天该做的」常驻，不在此列）', keywords: ['看板', '卡片', '显隐', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  dashboardBg: { default: 'mark', type: 'select', label: '看板卡片背景', group: '看板', desc: '看板卡片的美化档位：素色 / 渐变 / 渐变+水印 / 角光', keywords: ['看板', '背景', '美化', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // 磁贴栅格化（2026-09-28）：布局序 + 格子尺寸，编辑态拖拽/拉角/托盘写入。归一化真源 = tileGrid.ts
+  dashboardTileLayout: { default: '[]', type: 'json', label: '看板磁贴布局', group: '看板', desc: '磁贴的布局顺序与格子尺寸（JSON 数组 [{id,w,h}]）；缺的卡按注册表序自动补齐', keywords: ['看板', '磁贴', '布局', '格子', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  dashboardUserName: { default: '', type: 'text', label: '看板称呼', group: '看板', desc: '看板问候语里的称呼（「晚上好，志岩」的「志岩」）；空 = 不带称呼。入口在看板 hero：点名字行内改', keywords: ['看板', '称呼', '名字', '问候', 'dashboard'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // 分享卡片（右栏第三态，2026-09-29）：模板 + 当前卡片配置同一键。
+  // 存**全局**而非按库 —— 卡片是「我用软件的方式」，换仓库应跟着走（同 workbenchLayout 口径）。
+  // ui:false：入口就是右栏那一格，不进设置页搜索。形状见 types 的 ShareCardState。
+  // ⚠️ 默认值是**空串**而不是 '{"templates":[],"current":null}'：空串的语义是「还没存过」→
+  //    钝解析落内置三套种子；而 `{"templates":[]}` 的语义是「用户把模板全删光了」→ 必须保持空
+  //    （两者若混为一个值，删光模板会在下次读设置时自己长回来）。
+  shareCard: { default: '', type: 'json', label: '分享卡片', group: '分享卡片', desc: '分享卡片的模板库与当前卡片配置（JSON；形状见 ShareCardState）', keywords: ['分享', '卡片', '打卡图', '模板', '二维码', 'share', 'card'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   startupVaultPicker: { default: true, type: 'toggle', label: '每次启动选择仓库', group: '启动', desc: '开启后每次进入应用先显示仓库选择页（已有仓库一键进入）；关闭则直连上次的仓库', keywords: ['启动', '仓库', '选择', '进入', 'vault', 'startup', '切库'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'startup.vaultPicker' },
   summaryWeeklyDay: { default: 0, type: 'select', label: '周总结日', group: '周期总结', desc: '每周在哪一天生成周总结', keywords: ['周总结', '总结日', '每周', '星期', '周几', 'weekly', '周报'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'blog.summaryWeeklyDay' },
   summaryMonthlyMode: { default: 'last', type: 'select', label: '月总结规则', group: '周期总结', desc: '每月总结规则：第一天 / 最后一天 / 固定日', keywords: ['月总结', '总结日', '每月', '月末', '月初', 'monthly', '月报'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'blog.summaryMonthlyMode' },
@@ -180,6 +197,10 @@ export const SETTINGS = {
   scheduleReminderQuietEnd: { default: '07:30', type: 'time', label: '免打扰结束', group: '截止提醒', desc: '越过该时刻后恢复提醒；免打扰期间错过的提醒会在结束后补发一次', keywords: ['免打扰', '静默', '勿扰', '早晨', 'quiet', '恢复'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'reminder.ddlQuiet' },
   scheduleReminderExternalPush: { default: false, type: 'toggle', label: '同时推送外部通道', group: '截止提醒', desc: '除系统通知外，另通过「远程监督」已配置的 webhook 推送；需先在远程监督中完成配置', keywords: ['外部', '推送', 'webhook', '远程监督', '手机', 'external', 'push'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'reminder.ddlExternal' },
   lanShareAutoStopMinutes: { default: 15, type: 'number', label: '设备传输自动关闭', group: '设备互联', desc: '设备传输无连接自动关闭分钟数', keywords: ['设备传输', '传输', '自动关闭', '超时', 'lanshare'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live', unit: '分钟' },
+  // ---- 终端模块（docs/terminal-module-design.md）：shell / 字号 / AI 执行开关 ----
+  terminalShell: { default: 'auto', type: 'select', label: '终端默认 shell', group: '终端', desc: 'auto=按平台自动（Windows pwsh 7 → PowerShell 5.1；macOS/Linux 取 $SHELL）；也可固定 pwsh / powershell / cmd / zsh / bash。终端工具栏的 shell 牌可与这里互写', keywords: ['终端', 'shell', 'pwsh', 'powershell', 'zsh', 'bash', '命令行', 'terminal'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  terminalFontSize: { default: 13, type: 'number', label: '终端字号', group: '终端', desc: '终端文字大小（px）', keywords: ['终端', '字号', '字体大小', 'terminal', 'font'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'terminal.fontSize', min: 12, max: 18, step: 1, unit: 'px' },
+  terminalAiExec: { default: false, type: 'toggle', label: 'AI 终端执行', group: 'AI 终端', desc: '开启后 AI 可申请 builtin.terminal.exec 工具执行命令：每条命令先在终端模块「AI 执行记录」行内确认（高危命令弹严重警告），关闭 = 工具完全不进入 AI 视野', keywords: ['终端', 'ai', '执行', '命令', 'shell', '权限', 'terminal'], section: 'aiTools', ui: true, scope: 'global', level: 'danger', affects: 'live', anchor: 'terminal.aiExec', aiTab: 'perms' },
   onboardingDone: { default: false, type: 'toggle', label: '新手引导完成', group: '引导', desc: '是否已完成新手引导（由引导流程维护）', keywords: ['引导', '新手', 'onboarding'], section: 'about', ui: false, scope: 'global', level: 'normal', affects: 'live' },
 
   // ---- 更新说明（VS Code 式 tab）：清单由 CHANGELOG 生成，阅读记录落仓库 .knowbase/modules/release-notes/ ----
@@ -200,13 +221,23 @@ export const SETTINGS = {
   agentCompressAtPercent: { default: 80, type: 'number', label: '自动压缩触发线(%)', group: 'Agent 循环', desc: '上下文估算达到历史预算的该百分比时自动压缩（80 = 预算用到八成先压再发）；越低压得越早、压缩调用越频繁，范围 50-100', keywords: ['压缩', '触发', '阈值', '百分比', 'compress', 'threshold'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'builtin', min: 50, max: 100, step: 5 },
   agentCompressModelId: { default: '', type: 'text', label: '压缩专用模型', group: 'Agent 循环', desc: '生成压缩纪要的模型（格式 providerId:modelId），留空用当前会话模型；可指定便宜模型降低压缩成本', keywords: ['压缩', '纪要', '模型', '成本', 'compress', 'model'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'builtin' },
   aiShowThinking: { default: true, type: 'toggle', label: '显示思考过程', group: '对话输出', desc: '推理模型返回的思考链以折叠区实时显示；普通模型没有思考链，此项无效果（自动不出现）', keywords: ['思考', '思考链', '推理', 'thinking', 'reasoning', '过程'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.thinking', aiTab: 'models' },
-  sofficePath: { default: '', type: 'text', label: 'LibreOffice 路径', group: '模型', desc: 'pptx 视觉转写用的 soffice 可执行文件绝对路径（留空=自动探测常见安装位与 PATH）', keywords: ['libreoffice', 'soffice', 'pptx', '视觉转写', '转换'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models' },
+  sofficePath: { default: '', type: 'text', label: 'LibreOffice 路径', group: '模型', desc: 'pptx 视觉转写用的 soffice 可执行文件绝对路径（留空=自动探测：注册表 / 常见安装位 / PATH）', keywords: ['libreoffice', 'soffice', 'pptx', '视觉转写', '转换', '路径', '路径设置'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models', anchor: 'aiTools.sofficePath' },
   webCrawlMaxPages: { default: 80, type: 'number', label: '网页抓取页数上限', group: '模型', desc: '单次「展开网页」批量抓取的最大章节数（防超大站失控）', keywords: ['网页', '抓取', 'crawl', '上限', '素材'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models', min: 1, max: 200, step: 1 },
   webCrawlDelayMs: { default: 300, type: 'number', label: '网页抓取页间隔(ms)', group: '模型', desc: '批量抓取每页间隔（礼貌抓取，单位毫秒）', keywords: ['网页', '抓取', '间隔', 'delay', 'crawl'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models', min: 0, max: 5000, step: 50 },
-  aiModulePermissions: { default: '{"knowledge":"read","blog":"read","schedule":"read","checkin":"read","pomodoro":"read","quiz":"read"}', type: 'json', label: 'AI 模块权限', group: '权限', desc: 'AI 按模块权限：off=禁止 read=只读 write=可读写（JSON）', keywords: ['权限', 'permission', '授权', '模块'], section: 'aiTools', ui: false, scope: 'global', level: 'danger', affects: 'live', aiTab: 'perms' },
+  aiModulePermissions: { default: '{"knowledge":"read","blog":"read","schedule":"read","checkin":"read","pomodoro":"read","quiz":"read","bookMarket":"read","terminal":"write","accounting":"write"}', type: 'json', label: 'AI 模块权限', group: '权限', desc: 'AI 按模块权限：off=禁止 read=只读 write=可读写（JSON）；terminal 模块的可见性另受 terminalAiExec 开关约束；accounting 默认读写以支持 AI 录账', keywords: ['权限', 'permission', '授权', '模块'], section: 'aiTools', ui: false, scope: 'global', level: 'danger', affects: 'live', aiTab: 'perms' },
   assistantWidth: { default: 380, type: 'number', label: 'AI 助手侧栏宽度', group: 'AI 助手', desc: 'AI 助手侧栏宽度', keywords: ['助手', '侧栏', '宽度', 'assistant'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', unit: 'px' },
+  assistantModelId: { default: '', type: 'text', label: 'AI 助手对话模型', group: 'AI 助手', desc: 'AI 助手（侧栏/右栏/aiChat）本轮对话模型（providerId:modelId 串；空=全局默认模型）', keywords: ['助手', '模型', '对话模型', 'assistant', 'model'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  assistantThinking: { default: true, type: 'toggle', label: 'AI 助手思考模式', group: 'AI 助手', desc: '开 = 对话走深度思考（reasoning_effort=medium，慢而全面）；关 = 快速回答（不透传思考参数）。仅对具备思考能力的模型有差异', keywords: ['助手', '思考', '推理', '深度', '快速', 'thinking', 'reasoning', 'assistant'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  assistantInputStyle: { default: 'v1', type: 'text', label: 'AI 助手输入样式', group: 'AI 助手', desc: 'AI 助手输入框外观方案（v1 浅灰填充 / v2 白卡描边 / v3 光晕 / v4 投影 / v5 胶囊 / v6 内凹 / v7 双层嵌套 / v8 下划线 / v9 灰底聚焦描边；外观设置页可切换）', keywords: ['助手', '输入', '输入框', '样式', '外观', 'assistant'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  aiAssistantPerception: { default: false, type: 'toggle', label: 'AI 助手感知模式', group: 'AI 助手', desc: '发送前自动检索知识库，把最相关的笔记素材注入本轮上下文；纯本地检索（至多一次向量化调用，不消耗对话 token）。未配置向量模型时自动降级为关键词匹配', keywords: ['感知', '检索', '召回', '素材', 'rag', 'perception', '语意', '关键词', 'assistant'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models' },
+  aiAssistantInlineSuggest: { default: true, type: 'toggle', label: '编辑器内联建议', group: 'AI 内联建议', desc: '打字停顿后由 AI 续写下一句，以灰色斜体幽灵文字呈现；Tab 采纳、Esc 拒绝、Alt+A 立即要一条', keywords: ['内联', '建议', '续写', '补全', '幽灵', 'ghost', 'inline', 'suggest', 'alt+a', 'assistant'], section: 'editor', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  aiAssistantInlineSuggestAuto: { default: true, type: 'toggle', label: '自动触发', group: 'AI 内联建议', desc: '停 0.8 秒自动出建议（只在句读 / 换行 / 词后这类自然断点，词中间不打扰）；关掉后只在按 Alt+A 时出', keywords: ['内联', '建议', '自动', '触发', '停顿', 'debounce', 'auto', 'inline'], section: 'editor', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  aiAssistantInlineSuggestModelId: { default: '', type: 'text', label: '内联建议模型', group: 'AI 内联建议', desc: '续写用的模型（providerId:modelId；空 = 跟随全局默认）。调用频次远高于对话，建议单独指定便宜快的模型', keywords: ['内联', '建议', '模型', '续写', 'model', 'inline', '成本'], section: 'editor', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   learnProgress: { default: '{"done":[],"last":1}', type: 'json', label: 'AI 学堂学习进度', group: 'AI 助手', desc: '上手路径已完成步骤与当前所在步骤（JSON）', keywords: ['ai 学堂', '上手', '教程', '进度', 'learn'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   dayPanelState: { default: '', type: 'json', label: '日程打卡小窗状态', group: '小窗', desc: '日程打卡小窗位置大小（主进程直写）', keywords: ['小窗', '打卡', 'daypanel', '悬浮'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // ---- 工作台三栏外壳（v3.4.0）：布局状态单键（方案 §3.5）。左右栏宽度由 ResizablePanel 各自持久化（wb.leftWidth / wb.rightWidth），不进本键 ----
+  workbenchLayout: { default: '', type: 'json', label: '工作台布局', group: '工作台', desc: '三栏外壳布局状态（JSON：左右栏收起/左栏模式与锁定/右栏Tab/控件排序选显；空=默认）', keywords: ['工作台', '三栏', '布局', '左栏', '右栏', '书签', '控件', 'workbench', 'layout'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  workbenchBookmarks: { default: '', type: 'json', label: '工作台插件书签', group: '工作台', desc: '插件注册的左栏书签（JSON 数组：id/label/source/action；空=仅内置 6 书签）', keywords: ['工作台', '书签', '插件', 'workbench', 'bookmark'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   scheduleFeedbackLevel: { default: 'medium', type: 'select', label: '任务完成反馈', group: '日程任务', desc: '勾选任务时的反馈动效强度：light=勾选动画 / medium=+粒子与位移 / heavy=+音效与全清庆祝', keywords: ['日程', '任务', '完成', '反馈', '动效', '动画', '勾选', '音效', '反馈感', 'schedule', 'feedback'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'schedule.feedback' },
   scheduleQuadrantIcon: { default: 'bars', type: 'select', label: '四象限图标', group: '日程任务', desc: '四象限选项的图标样式：bars=信号格 / flame=火焰 / step=上升阶梯 / grid=迷你象限', keywords: ['四象限', '象限', '图标', '紧迫', '信号格', '火焰', '阶梯', 'quadrant', 'icon'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'schedule.quadrantIcon' },
   scheduleQuadrantOrder: { default: 'ladder', type: 'select', label: '四象限排序', group: '日程任务', desc: 'ladder=按紧迫度从左到右递增（默认）/ legacy=原顺序（紧急重要·重要不紧急·紧急不重要·不紧急不重要）', keywords: ['四象限', '象限', '排序', '顺序', '紧迫', '阶梯', 'quadrant', 'order'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'schedule.quadrantOrder' },
@@ -221,8 +252,12 @@ export const SETTINGS = {
   fillPopupAlwaysOnTop: { default: true, type: 'toggle', label: '小密码本始终置顶', group: '小窗', desc: '悬浮小密码本（Ctrl+Alt+P）默认盖在所有窗口之上；关闭后退化为普通窗口可被遮挡', keywords: ['小密码本', '置顶', '顶层', 'fill', 'popup', '密码', '悬浮'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   aiTeachRootDir: { default: 'AI教学', type: 'text', label: 'AI教学产物根目录', group: 'AI教学', desc: '会话文件夹所在仓库根目录名；改名会把已有目录一并重命名迁移（占用/权限失败则保留原目录）', keywords: ['AI教学', '教学', '目录', '根目录', '文件夹', '产物', 'aiteach'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live' },
   aiTeachDeleteSessionFolder: { default: 'ask', type: 'select', label: '删除会话时文件夹处理', group: 'AI教学', desc: 'ask=每次询问 / keep=保留文件夹 / delete=会话文件夹一并移入系统回收站', keywords: ['AI教学', '删除', '会话', '文件夹', '回收站', '产物'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live' },
-  aiTeachUsageDetail: { default: 'compact', type: 'select', label: '输入区用量指示档位', group: 'AI教学', desc: 'off=隐藏 / compact=上下文占用圆环（点击看详情）/ detailed=圆环+文字摘要（UI 优化条目9）', keywords: ['AI教学', '用量', 'token', '上下文', '圆环', '预算'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  aiTeachCtxWindow: { default: 0, type: 'number', label: '模型上下文窗口（token）', group: 'AI教学', desc: '0=未设置（用量指示退化为纯数字）；设置后圆环按 上下文占用/窗口 比例分档着色（UI 优化条目9）', keywords: ['AI教学', '上下文', '窗口', 'context', '128k', '圆环'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live', min: 0, max: 4000000, step: 1000 },
+  // F-12：原 aiTeachUsageDetail / aiTeachCtxWindow 提为通用键（AI 教学与 AI 对话共用同一套档位与窗口口径）。
+  // 旧键值由主进程启动时一次性迁移（settingsCache 拷贝，见 electron/main/index.ts）。
+  // F-12 遗留收口（2026-10-07）：控件从「AI教学」设置页迁入「AI 工具 → AI 助手」小节并进设置搜索
+  // （键的语义、消费方与 desc 早已通用化，入口滞留教学页属半成品状态）。
+  ctxUsageDetail: { default: 'compact', type: 'select', label: '上下文占用指示档位', group: 'AI 助手', desc: 'off=隐藏 / compact=上下文占用圆环（点击看详情）/ detailed=圆环+文字摘要；AI 教学与 AI 对话共用', keywords: ['用量', 'token', '上下文', '圆环', '预算', 'context', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxUsageDetail' },
+  ctxWindow: { default: 0, type: 'number', label: '模型上下文窗口（token）', group: 'AI 助手', desc: '0=未设置（占用指示退化为纯数字）；设置后圆环按 上下文占用/窗口 比例分档着色；AI 教学与 AI 对话共用', keywords: ['上下文', '窗口', 'context', '128k', '圆环', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxWindow', min: 0, max: 4000000, step: 1000 },
   // R6 D9：storageKnowledge / storageData / storageBlog 三键已随去库化收官全部退役
   // （知识库/博客/结构化模块恒 vault 文件，无读源分支残留）。
   uiWorkbench: { default: false, type: 'toggle', label: 'Workbench 布局', group: '外壳', desc: '实验性 VS Code 外壳；开启后编辑器文件树移到全局侧栏', keywords: ['workbench', '外壳', '布局', '侧栏', '编辑器组', '状态栏', 'vscode', '活动栏', 'shell', 'layout'], section: 'general', ui: true, scope: 'global', level: 'experimental', affects: 'live', anchor: 'advanced.workbench' },
@@ -238,6 +273,28 @@ export const SETTINGS = {
   pluginTrustedKeys: { default: '', type: 'text', label: '受信公钥 keyring', group: '插件安全', desc: '受信签名公钥 keyring（JSON 或 keyId=公钥）', keywords: ['插件', '公钥', 'keyring', '签名', '信任'], section: 'security', ui: true, scope: 'global', level: 'danger', affects: 'live' , anchor: 'security.pluginKeys' },
   updateMirror: { default: 'https://gh-proxy.com', type: 'text', label: '下载镜像', group: '更新', desc: 'GitHub 加速代理前缀，留空直连', keywords: ['镜像', '加速', '代理', 'github', 'proxy', '下载', 'cdn'], section: 'about', ui: true, scope: 'global', level: 'normal', affects: 'reload', anchor: 'advanced.mirror' },
   aiVaultFilePerm: { default: 'read', type: 'select', label: 'AI vault 文件权限', group: '权限', desc: 'AI vault.* 工具访问仓库文件：off=禁止 read=只读 write=预留', keywords: ['vault', '文件', '权限', '仓库', 'ai', '读写'], section: 'aiTools', ui: false, scope: 'global', level: 'danger', affects: 'live', aiTab: 'perms' },
+
+  // ---- 阅读摘录：上次用色（落 settings，不新开 localStorage；浮条点色即时更新，缺省首色 y） ----
+  excerptLastColor: { default: 'y', type: 'select', label: '上次摘录用色', group: '阅读', desc: '划选摘录默认使用的颜色（点色即更新，落 settings）', keywords: ['摘录', '高亮', '颜色'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+
+  // ---- 阅读器：边缘翻页提示形态（入口在阅读器工具栏，故 ui:false —— 不进设置页）----
+  // 只在 foliate 系阅读器（epub / fb2 / fbz / cbz）有意义：PDF / TXT 没有这对边缘热区，
+  // 故那两支工具栏里不出现该按钮（结构性保证，见 EpubReaderView 头注）。
+  edgePageHint: { default: 'B', type: 'select', label: '边缘翻页提示', group: '阅读', desc: '悬停左右边缘时给出的翻页提示：A 纯渐变 / B 渐变+圆形箭头 / C 书口+箭头 / D 胶囊按钮（默认 B）', keywords: ['阅读', '翻页', '边缘', '热区', '提示', 'epub', 'hint'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+
+  // ---- 桌面外壳（自定义磁贴工作台）----
+  // 布局刻意存**全局**、不进 `.knowbase/`：桌面怎么摆是「这台机器上我怎么用」，
+  // 不是某份资料的一部分；换仓库不该换桌面。详见 src/modules/desktop/layout.ts 顶部说明。
+  desktopPresets: { default: '', type: 'json', label: '桌面布局预设', group: '桌面外壳', desc: '桌面磁贴布局（多套预设 JSON；留空=首次进入时种入默认三套）', keywords: ['桌面', '外壳', '磁贴', '布局', '预设', 'desktop', 'shell', 'tile', '工作台'], section: 'appearance', ui: false, scope: 'global', level: 'experimental', affects: 'live' },
+  desktopActivePreset: { default: 'study', type: 'text', label: '当前桌面预设', group: '桌面外壳', desc: '当前生效的桌面预设 id', keywords: ['桌面', '预设', '当前', 'desktop', 'preset'], section: 'appearance', ui: false, scope: 'global', level: 'experimental', affects: 'live' },
+
+  // ---- 书市：网络代理（书市方案 §三）----
+  // ★ 只作用于**书市自建的 `bookmarket` 分区 session**（`electron/lib/bookMarket/netSession.ts`），
+  //   **不动 defaultSession** —— 动它会连带改道 LLM 对话 / 模型探测 / 自动更新 / 剪藏。
+  //   用户配代理的动机通常只是「书源要能连」，所以这里必须是独立开关而不是全局代理。
+  // ★ 值是 Chromium `--proxy-server` 语法（`http://127.0.0.1:7890` / `socks5://…`）；留空 = 直连。
+  //   `affects: 'live'` 名副其实：`settings:set` 里挂了 `applyBookMarketProxy`，改了立刻生效。
+  bookMarketProxy: { default: '', type: 'text', label: '书市代理', group: '书市', desc: '书市网络请求使用的代理（如 http://127.0.0.1:7890 或 socks5://…），留空直连；只影响书市，不影响 AI 对话与更新', keywords: ['书市', '代理', 'proxy', '网络', 'socks5', '书源', '下载'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'bookMarket.proxy' },
 }
 
 // ===== 边栏面板约束（组件 default/min/max，非用户可改，集中引用） =====

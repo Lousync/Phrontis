@@ -43,10 +43,6 @@ export function quadrantMeta(value: number): QuadrantMeta {
   return QUADRANTS.find(q => q.value === value) ?? QUADRANTS[0]
 }
 
-/** 紧迫度档位（1-4）；未知值退化为 1 */
-export function quadrantLevel(value: number): number {
-  return quadrantMeta(value).level
-}
 
 /**
  * 展示顺序。
@@ -59,10 +55,6 @@ export function orderedQuadrants(order: QuadrantOrder): QuadrantMeta[] {
   return QUADRANTS.slice().sort((a, b) => a.level - b.level)
 }
 
-/** 排序后仅取存储值序列（供分组渲染等用） */
-export function orderedQuadrantValues(order: QuadrantOrder): number[] {
-  return orderedQuadrants(order).map(q => q.value)
-}
 
 /** 低透明度：未点亮的格/柱/火（用 currentColor + opacity，自动适配明暗主题） */
 const DIM = 0.18

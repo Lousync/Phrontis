@@ -5,9 +5,9 @@ import { getVaultKbRoot } from './vaultContext'
 import { encryptSecret, decryptSecret } from '../secretBox'
 
 /**
- * 敏感数据存储（密码本等）：DPAPI 加密 JSON 落盘。
- * 加密复用 secretBox（Electron safeStorage → Windows DPAPI，'enc1:' 前缀），
- * 落盘内容为密文，解密失败返回 null（如密文来自其他机器）。
+ * 敏感数据存储（密码本等）：加密 JSON 落盘。
+ * 加密复用 secretBox（Electron safeStorage；密文机制与格式见 secretBox.ts 头注释），落盘为 'enc1:' 密文。
+ * 解密失败返回 null（如密文来自其他机器——AES 密钥由 DPAPI 绑本机，跨机不可解）。
  */
 
 /** 读加密 JSON；文件不存在返回 null，解密失败返回 null（不把密文当有效值） */

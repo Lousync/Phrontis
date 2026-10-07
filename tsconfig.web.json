@@ -8,7 +8,11 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    // 本文件的用途只有「类型检查」。漏掉 noEmit 时 `tsc -p tsconfig.web.json`
+    // 会在源码旁吐出同名 .js，而 Vite 解析目录导入的扩展名顺序是 .js → .ts → .tsx，
+    // 于是构建/dev 全部改用那份旧快照 —— 新改的 .tsx 静默不生效（2026-09-15 实测过一次）。
+    "noEmit": true
   },
   "include": ["src/**/*"],
   "exclude": ["src/modules/help/docs"]

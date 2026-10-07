@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
-import { Star, ListTree, ChevronLeft, ChevronRight, X, FileText } from 'lucide-react'
-import { Entry, Tag } from '../../types'
-import { getEntries, createEntry, deleteEntry, getEntryById, toggleEntryStar, getSetting, setSetting, openExternal, getTags, workspaceGetCurrent } from '../../lib/ipc'
+import { createPortal } from 'react-dom'
+import { Star, ListTree, ChevronLeft, ChevronRight, X, Edit3 } from 'lucide-react'
+import { Entry, Tag, type SummaryRecord } from '../../types'
+import { getEntries, createEntry, deleteEntry, getEntryById, toggleEntryStar, getSetting, setSetting, openExternal, getTags, workspaceGetCurrent, ensureSummary } from '../../lib/ipc'
 import { useSettings } from '../../lib/SettingsContext'
 import { ConfirmDialog } from '../../components/shared'
 import { PluginSlotEntry } from '../../components/shared/PluginSlotEntry'
@@ -19,11 +20,24 @@ import { EntryList } from './views/EntryList'
 // blog chunk——而 blog 又是默认 Tab，等于首屏照旧加载编辑器。改为进入编辑视图时才加载。
 const MarkdownEditor = lazy(() => import('./components/MarkdownEditor').then((m) => ({ default: m.MarkdownEditor })))
 import { SummaryPanel } from './components/SummaryPanel'
+import { SummaryDoc } from './views/SummaryDoc'
+import type { SummaryKind } from '../../lib/summary'
 
-type BlogView = 'list' | 'editor' | 'detail'
+type BlogView = 'list' | 'editor' | 'detail' | 'summary'
 
-export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar }: {
-  showLineNumbers?: boolean; sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void
+/**
+ * 外部跳转意图（桌面磁贴的日历 / 总结入口、日志尾部的总结入口都走这里）。
+ *
+ * 传递方式照 `kb-open-note` 的成熟范式：**事件只负责把意图送到 App，
+ * 真实 payload 走 state + props**（`pendingOpenRel` 的教训：保活层里靠 window 变量
+ * 会丢事件）。所以这里是一个由 App 下传、消费后回调清空的 prop。
+ */
+export type BlogJump =
+  | { kind: 'date'; date: string }
+  | { kind: 'summary'; summaryKind: SummaryKind; start: string; end: string }
+
+export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, blogJump = null, onBlogJumpConsumed, sidebarEl = null, sidebarHosted = false, modActionsEl = null }: {
+  showLineNumbers?: boolean; sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; blogJump?: BlogJump | null; onBlogJumpConsumed?: () => void; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; modActionsEl?: HTMLElement | null
 }) {
   const { s } = useSettings()
   const [view, setView] = useState<BlogView>('list')
@@ -34,6 +48,8 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
   const [showOutline, setShowOutline] = useState(false)
   const [liveContent, setLiveContent] = useState('')
   const [allTags, setAllTags] = useState<Tag[]>([])
+  /** 正在查看的周/月/年总结（view === 'summary' 时有效） */
+  const [activeSummary, setActiveSummary] = useState<SummaryRecord | null>(null)
 
   const viewRef = useRef(view)
   const selectedIdRef = useRef(selectedId)
@@ -86,6 +102,7 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
   // 回到列表：清除选中态，显示当月文章
   const goToList = useCallback(() => {
     setView('list')
+    setActiveSummary(null)
     setSelectedId(null)
     setSelectedDate(null)
     setShowOutline(false)
@@ -133,16 +150,8 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
     }
   }
 
-  const handleShowAll = useCallback(() => {
-    setView('list')
-    setSelectedId(null)
-    setSelectedDate(null)
-    setSelectedMonth('showAll')
-    setFilterTagId(null)
-    setShowOutline(false)
-    onSnapOpenSidebar?.()
-    loadEntries()
-  }, [loadEntries, onSnapOpenSidebar])
+  // handleShowAll 退役（2026-09-19 反馈）：模块标签页打开默认就是全部文章列表，
+  // 左栏头部的「全部文章」按钮（List 图标）成了纯冗余；列表视图内的「全部」筛选保留
 
   const handleSelectDate = async (date: string | null) => {
     setSelectedDate(date)
@@ -166,6 +175,38 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
       } catch (err) { console.error(err) }
     }
   }
+
+  /** handleSelectDate 每次渲染都是新函数身份（闭包 entries），供跳转 effect 取最新一份 */
+  const selectDateRef = useRef(handleSelectDate)
+  selectDateRef.current = handleSelectDate
+
+  /**
+   * 打开某一段窗口的总结 —— **按需生成**：没有文件就先建再打开（DP v3.2.0 第 12 项拍板②）。
+   * 桌面磁贴、日志尾部入口、外部跳转三条来路都落到这里，保证「同一窗口永远打开同一份文件」。
+   */
+  const openSummary = useCallback(async (kind: SummaryKind, start: string, end: string) => {
+    try {
+      const rec = await ensureSummary(kind, start, end)
+      setActiveSummary(rec)
+      setSelectedId(null)
+      setSelectedDate(null)
+      setShowOutline(false)
+      setView('summary')
+    } catch (err) {
+      console.error('[blog] 打开总结失败', err)
+    }
+  }, [])
+
+  // 消费外部跳转意图（App 下传的 blogJump）：桌面日历点日期 / 点周号月份年份、日志尾部「本期总结」
+  // 入口卡片都从这里进 —— 事件只负责让 App 切 Tab 并把意图存成 state，**消费只此一处**
+  // （blog 不再自己监听同一事件，否则同一次点击会走两遍 ensureSummary）。
+  // 用 ref 取最新回调，意图只在 blogJump 变化时消费一次，消费完立刻让 App 清空（免得切走再切回又跳一次）。
+  useEffect(() => {
+    if (!blogJump) return
+    if (blogJump.kind === 'date') void selectDateRef.current(blogJump.date)
+    else void openSummary(blogJump.summaryKind, blogJump.start, blogJump.end)
+    onBlogJumpConsumed?.()
+  }, [blogJump, openSummary, onBlogJumpConsumed])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -280,14 +321,28 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
   }, [view, handleToggleOutline])
 
   return (
-    <div className="flex h-full flex-col bg-[var(--bg-primary)]">
-      {/* 顶部贯通行（图二骨架）：横跨侧栏 + 内容区；快捷动作在侧栏内搜索框上方 */}
-      <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 shrink-0 select-none">
-        <FileText size={12} className="text-[var(--text-muted)]" />
-        <span className="text-[11.5px] font-medium text-[var(--text-muted)]">博客</span>
-      </div>
+    <div className="kb-theme-surface flex h-full flex-col">
+      {/* 顶部贯通行（图二骨架）已删除（2026-09-18）：与左栏 Sidebar 的「博客」标题重复，
+          中栏内容直接顶到页面条下方。快捷动作仍在侧栏搜索框上方。 */}
       <div className="flex min-h-0 flex-1">
-      <ResizablePanel storageKey="sidebarWidth_blog" defaultWidth={256} minWidth={200} maxWidth={320} visible={sidebarOpen && !showOutline} initialWidth={sidebarWidths.sidebarWidth_blog} onSnapClose={onSnapCloseSidebar} onSnapOpen={onSnapOpenSidebar}>
+      {/* 侧栏头部动作（2026-09-19 反馈）：原 Sidebar「文章」标题行删除，写作/全部文章两钮
+          portal 到左栏模块态头部（🏠 🔒）最右；与侧栏同显隐（收起/大纲态不渲染） */}
+      {modActionsEl && createPortal(
+        <>
+          <button
+            onClick={handleTodayEntry}
+            title={entries.some(e => e.date === localToday()) ? '继续编写今日文章' : '新建今日文章'}
+            className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+          >
+            <Edit3 size={13} />
+          </button>
+        </>,
+        modActionsEl,
+      )}
+      {/* v3.4.0 批次3：左栏模块态（sidebarEl）时侧栏内容 portal 进左栏 slot（挂载点迁移），
+          否则回落原位 ResizablePanel；大纲模式的显隐条件在两形态下保持一致 */}
+      {(() => {
+        const sidebarInner = (
         <div className="h-full flex flex-col">
           <div className="flex-1 overflow-hidden">
             <Sidebar
@@ -295,17 +350,53 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
               starredEntries={starredEntries}
               selectedDate={selectedDate}
               onSelectDate={handleSelectDate}
-              onNewEntry={handleTodayEntry}
-              onShowAll={handleShowAll}
               allTags={allTags}
             />
           </div>
           <PluginSlotEntry slot="blog.sidebar" />
         </div>
-      </ResizablePanel>
+        )
+        // 大纲内嵌形态（2026-09-19 反馈修复）：大纲面板也进左栏槽（embedded + 返回钮头部），
+        // 而不是渲染在模块主区——此前托管形态下 OutlinePanel 落在模块 flex 行里、
+        // 左栏槽 portal null，看起来「大纲跑到中间、左栏空了」
+        const outlineVisible = showOutline && (view === 'editor' || view === 'detail')
+        const outlineInner = (
+          <div className="flex h-full flex-col">
+            <div className="flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] px-2 py-1.5">
+              <button
+                onClick={handleToggleOutline}
+                title="返回文章列表"
+                className="rounded p-0.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--text-primary)]">
+                {view === 'editor' ? (entries.find(e => e.id === selectedId)?.title || '无标题') : (entries.find(e => e.id === selectedId)?.date || '')}
+              </span>
+            </div>
+            <div className="min-h-0 flex-1">
+              <OutlinePanel
+                pageTitle={view === 'editor' ? (entries.find(e => e.id === selectedId)?.title || '') : (entries.find(e => e.id === selectedId)?.date || '')}
+                headings={outlineHeadings}
+                onBackToFile={handleToggleOutline}
+                embedded
+              />
+            </div>
+          </div>
+        )
+        return sidebarEl
+          ? createPortal(outlineVisible ? outlineInner : (sidebarOpen ? sidebarInner : null), sidebarEl)
+          : sidebarHosted
+            ? null // Workbench 托管但槽未就绪（左栏收起/翻转瞬间）：渲染 null 等槽重挂后 portal，绝不回落内嵌列（同 editor 口径）
+            : (
+              <ResizablePanel storageKey="sidebarWidth_blog" defaultWidth={256} minWidth={200} maxWidth={320} visible={sidebarOpen && !showOutline} initialWidth={sidebarWidths.sidebarWidth_blog} onSnapClose={onSnapCloseSidebar} onSnapOpen={onSnapOpenSidebar}>
+                {sidebarInner}
+              </ResizablePanel>
+            )
+      })()}
 
-      {/* Outline panel — replaces sidebar on the left when toggled */}
-      {showOutline && (view === 'editor' || view === 'detail') && (
+      {/* Outline panel — 非托管回落形态：原位独立面板（托管形态已 portal 进左栏槽，见上） */}
+      {!sidebarEl && showOutline && (view === 'editor' || view === 'detail') && (
         <OutlinePanel
           pageTitle={view === 'editor' ? (entries.find(e => e.id === selectedId)?.title || '') : (entries.find(e => e.id === selectedId)?.date || '')}
           headings={outlineHeadings}
@@ -412,6 +503,13 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
               onToggleOutline={handleToggleOutline}
             />
           </Suspense>
+        )}
+        {view === 'summary' && activeSummary && (
+          <SummaryDoc
+            summary={activeSummary}
+            onBack={goToList}
+            onSaved={(saved) => setActiveSummary(saved)}
+          />
         )}
         {view === 'detail' && selectedId && (
           <EntryDetail

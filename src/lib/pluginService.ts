@@ -141,7 +141,9 @@ export async function getPluginHelpDocs(): Promise<PluginHelpDoc[]> {
         id: `plugin-${item.pluginId}-${i}`,
         title: raw.title.trim(),
         category: typeof raw.category === 'string' && raw.category.trim() ? raw.category.trim() : '插件',
-        icon: typeof raw.icon === 'string' && raw.icon.trim() ? raw.icon.trim() : 'Puzzle',
+        // 默认图标名（消费方是 lucide 名字解析）：2026-09-22 B-9 起统一为「插件 = 箱子」，
+        // lucide 的 Package 与左栏手绘 PluginIcon 同构；'Puzzle' 只留给「安装浏览器扩展」那一处。
+        icon: typeof raw.icon === 'string' && raw.icon.trim() ? raw.icon.trim() : 'Package',
         md: raw.contentMd,
       })
     })

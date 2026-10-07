@@ -2,19 +2,28 @@ import { randomUUID } from 'crypto'
 import { readdirSync, lstatSync, readFileSync, statSync, mkdirSync } from 'fs'
 import { join, relative, extname, sep, dirname } from 'path'
 import { listTools, registerTool, getSettingReader, checkModulePermission } from './aiTools'
-import { broadcastDataChanged } from '../main/windowBus'
+import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { webSearch, webReadPage } from './webSearch'
 import { writeVisual } from './aiTeachingSources'
+import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
+import type { ToolInvokeCtx } from './aiTools'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault } from './workspaceManager'
+import { aiExec } from './terminalService'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { pomoSessionsAll } from './kbStore/pomoVaultRepo'
-import { getKnowledgeIndex } from './kbStore/knowledgeIndex'
+import { getKnowledgeIndex, getKnowledgeTextIndex } from './kbStore/knowledgeIndex'
+import { getGraphIndex } from './kbStore/graphIndex'
 import { vaultGetPageById, vaultGetCategories, vaultCreatePage } from './kbStore/knowledgeVaultRepo'
 import { searchKnowledge } from './knowledgeSearch'
-import { searchHelp } from './helpService'
-import { vaultCreateEntry } from './kbStore/blogVaultRepo'
+import { searchHelp, helpCatalog } from './helpService'
+import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries } from './kbStore/blogVaultRepo'
+import { normalizeBlogDate, nearestEntryDates, blogHitExcerpt, splitBlogSearchTerms } from './blogToolsPure'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
-import { vaultTodosAll, vaultCreateTodo } from './kbStore/scheduleVaultRepo'
+import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, type TodoRow } from './kbStore/scheduleVaultRepo'
+import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from './kbStore/accountingVaultRepo'
+// 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
+// 依赖方向已核：pluginEvents 的依赖树不反向 import 本模块，无循环。
+import { emitPluginEvent } from './pluginEvents'
 import { extractDocText } from './docsReader'
 import {
   quizRecordList,
@@ -23,7 +32,10 @@ import {
   quizTagList, quizTagResolveOrCreate,
   quizCollectionList, quizCollectionResolveOrCreate,
 } from '../database/repositories/quizRepo'
+import { bookSourceInfos } from './kbStore/bookSourceVaultRepo'
+import { sanitizeBookSourcePatch, isAllowedSourceUrl, type BookSourceMapping } from './kbStore/bookMarketSchema'
 import { quizDataStats } from './quizDataAdmin'
+import { AI_TEXT_CODE_EXT_SET } from '../../src/lib/aiTextExts'
 import type { ToolJsonSchema } from './aiTools'
 
 /**
@@ -203,17 +215,23 @@ export function childAiAllowed(root: string, childAbs: string): boolean {
   return true
 }
 
-/** 读白名单：.md/.txt（可见区任意处）+ .json（仅 .knowbase/modules） */
+/** 读白名单：.md/.txt/文本类代码文件（可见区任意处）+ .json（仅 .knowbase/modules）。
+ *  代码扩展名走单一真相源 src/lib/aiTextExts.ts（素材库 / 前端同源；配置类 json/yml/yaml/toml/ini 不放开） */
 export function isAiReadableFile(root: string, abs: string): boolean {
   const parts = vaultRelParts(root, abs)
   if (parts.length === 0) return false
   if (!childAiAllowed(root, abs)) return false
   const ext = extname(abs).slice(1).toLowerCase()
   if (ext === 'json') return isModulesJson(parts)
-  return ext === 'md' || ext === 'txt'
+  if (ext === 'md' || ext === 'txt') return true
+  return AI_TEXT_CODE_EXT_SET.has(ext)
 }
 
-/** 递归收集可搜索文本文件（.knowbase 只深入 modules；隐藏区跳过；数量预算封顶） */
+/** 搜索遍历忽略的目录（v3.2.0 条目 9）：依赖/产物目录会吃光 400 个文件预算 → search 静默失效。
+ *  只影响 search 遍历；AI 明确给出路径时 vault.read 仍可读这些目录内的文件 */
+const SEARCH_IGNORE_DIRS = new Set(['node_modules', 'dist', 'out', 'build'])
+
+/** 递归收集可搜索文本文件（.knowbase 只深入 modules；隐藏区跳过；依赖/产物目录忽略；数量预算封顶） */
 function walkAiFiles(root: string, dirAbs: string, out: string[], budget: { count: number }): void {
   if (budget.count >= MAX_VAULT_SEARCH_FILES) return
   let names: string[] = []
@@ -225,7 +243,10 @@ function walkAiFiles(root: string, dirAbs: string, out: string[], budget: { coun
     let st: ReturnType<typeof lstatSync>
     try { st = lstatSync(full) } catch { continue }
     if (st.isSymbolicLink()) continue
-    if (st.isDirectory()) { walkAiFiles(root, full, out, budget); continue }
+    if (st.isDirectory()) {
+      if (!SEARCH_IGNORE_DIRS.has(name.toLowerCase())) walkAiFiles(root, full, out, budget)
+      continue
+    }
     if (!st.isFile()) continue
     if (st.size > MAX_VAULT_SEARCH_FILE) continue
     if (!isAiReadableFile(root, full)) continue
@@ -273,12 +294,55 @@ export function assertAiWritable(root: string, abs: string, expectedMtimeMs: unk
 /** 写入成功后广播「外部变更」（编辑器若正打开该文件会弹三选），沿用 plugin:installed-changed 模式 */
 function broadcastExternalWrite(relPath: string, mtimeMs?: number): void {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { BrowserWindow } = require('electron') as typeof import('electron')
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('ws:external-change', { relPath, mtimeMs })
-    }
+    // v3.1.2 收敛：不再内联 for + require('electron')，走 windowBus 统一出口
+    broadcast(BROADCAST_CHANNEL.wsExternalChange, { relPath, mtimeMs })
   } catch { /* 广播失败不影响写入结果 */ }
+}
+
+/**
+ * v3.1.2 条目9：AI 落盘后的编辑区树联动（此前只有 organizeDoc / writeVisual 做对了）。
+ * vault.write / edit / rename / trash 的成功分支统一调用——广播**受影响文件的父目录**，
+ * 编辑区树与 AI教学自绘树据此重拉，新建/改名/删除的文件无需模块重挂载或手动展开目录即刻出现。
+ * @param rel     变更后的仓库相对路径（trash 传原路径）
+ * @param prevRel rename 专用：源路径的父目录也要刷新（旧条目消失）
+ */
+function notifyVaultTreeChange(rel: string, prevRel?: string): void {
+  const parentOf = (p: string): string => {
+    const norm = p.replace(/\\/g, '/')
+    const i = norm.lastIndexOf('/')
+    return i > 0 ? norm.slice(0, i) : ''
+  }
+  try {
+    broadcastTreeRefresh(parentOf(rel))
+    if (prevRel) broadcastTreeRefresh(parentOf(prevRel))
+  } catch { /* 联动失败不影响写入结果 */ }
+}
+
+/**
+ * v3.1.2 条目10：AI 教学会话的产物落点归一化（工具层兜底，防模型不听话）。
+ *
+ * 判据（两条任一命中即改写为 `{本会话文件夹}/{basename}`）：
+ *  ① 无目录前缀 —— 裸文件名会直接落仓库顶层（用户实际报障现象）；
+ *  ② 首段为 `SOURCES` —— 那是给 AI 读的素材目录，不放产物。
+ * 其余路径（含模型/AI 给出的工作区夹内路径）原样保留；**非教学会话或会话夹不可解析时不改写**
+ * （侧边助手/轻问答没有会话夹概念，强加归一化只会制造怪路径）。
+ * 语义是纯函数（同一 path 反复调用结果一致），不打乱 prompt cache 前缀；会话夹不存在 = 懒建。
+ */
+function normalizeAiTeachingWritePath(rel: string, ctx?: ToolInvokeCtx): string {
+  if (!ctx || ctx.source !== 'aiTeaching') return rel
+  const sid = String(ctx.sessionId ?? '')
+  if (!sid) return rel
+  const norm = rel.replace(/\\/g, '/').replace(/^\/+/, '')
+  const segs = norm.split('/').filter(Boolean)
+  if (!segs.length) return rel
+  const hasDir = segs.length > 1
+  const hitsSources = (segs[0] ?? '').toUpperCase() === 'SOURCES'
+  if (hasDir && !hitsSources) return rel
+  try {
+    const probe = ensureWriteOwnerFolder(sid, getSettingReader())
+    if (!probe.ok || !probe.relPath) return rel
+    return `${probe.relPath}/${segs[segs.length - 1]}`
+  } catch { return rel }
 }
 
 // ===== 六个内置工具 =====
@@ -293,13 +357,128 @@ const SEARCH_LIMIT_SCHEMA = {
   required: ['query'],
 } satisfies ToolJsonSchema
 
+// ---- 日程 AI 写工具的参数归一化（纯函数，供 .AGENT/scripts 抽取验证） ----
+
+/** 待办状态白名单（与 UI 待办勾选同口径：pending ↔ done） */
+const TODO_STATUSES = ['pending', 'done'] as const
+/** 任务类型白名单（与 create-todo / TodoRow.task_type 同口径） */
+const TODO_TASK_TYPES = ['plan', 'deadline', 'daily'] as const
+
+/**
+ * 把 `schedule.update-todo` 的入参归一化为交给 repo 的 patch（camelCase，
+ * 列白名单由 vaultUpdateTodo 负责，本函数不重复一份字段映射 —— AGENTS.md#14）。
+ *
+ * 纯函数：只依赖入参 + 该行当前 task_type，不读盘、无副作用。
+ *
+ * 不变量（与 create-todo 同口径，防脏数据）：
+ * - `time`（截止时刻）只对 deadline 类有意义 —— 非 deadline 即使误传也置 null；
+ *   本次把 taskType 改成非 deadline 时，顺带清掉行上残留的旧截止时刻
+ * - `scheduledStart/End` 是「当天分钟数」0..1440（1440 = 24:00 收尾），非整数/越界直接拒
+ * - `status` / `taskType` 只接受白名单值，避免 AI 手滑写成 'complete' 之类
+ * - `description` / `endCriteria` 的处理保留在此（口径统一、便于将来放开 schema），
+ *   但 update-todo 的 inputSchema **不暴露**这两列：list-todos 不回传它们，
+ *   AI 看不到现值，放行就是盲改覆盖用户写过的内容（静默数据丢失）
+ * 抛错 = 参数非法，调用方原样回给模型（exec.ok=false），不落盘。
+ */
+export function normalizeTodoPatch(args: Record<string, unknown>, currentTaskType: string): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+
+  if (args.title !== undefined) {
+    const t = str(args.title).trim()
+    if (!t) throw new Error('title 不能为空字符串')
+    patch.title = t
+  }
+  // description / endCriteria 允许空串（= 清空该项）
+  for (const key of ['description', 'endCriteria'] as const) {
+    if (args[key] === undefined) continue
+    if (typeof args[key] !== 'string') throw new Error(`${key} 必须是字符串`)
+    patch[key] = args[key]
+  }
+  if (args.date !== undefined) {
+    const d = str(args.date).trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error('date 必须是 YYYY-MM-DD')
+    patch.date = d
+  }
+  if (args.quadrant !== undefined) {
+    if (typeof args.quadrant !== 'number' || !Number.isFinite(args.quadrant)) throw new Error('quadrant 必须是 0..3 的数字')
+    patch.quadrant = clamp(Math.floor(args.quadrant), 0, 3)
+  }
+  if (args.status !== undefined) {
+    const s = str(args.status).trim()
+    if (!(TODO_STATUSES as readonly string[]).includes(s)) throw new Error(`status 只支持 ${TODO_STATUSES.join(' / ')}`)
+    patch.status = s
+  }
+  if (args.taskType !== undefined) {
+    const t = str(args.taskType).trim()
+    if (!(TODO_TASK_TYPES as readonly string[]).includes(t)) throw new Error(`taskType 只支持 ${TODO_TASK_TYPES.join(' / ')}`)
+    patch.taskType = t
+  }
+  if (args.tagId !== undefined) {
+    // null / 空串 = 清掉标签（与 UI 的 tagId: null 同口径）
+    const t = args.tagId === null ? '' : str(args.tagId).trim()
+    patch.tagId = t || null
+  }
+  for (const key of ['scheduledStart', 'scheduledEnd'] as const) {
+    if (args[key] === undefined) continue
+    const v = args[key]
+    if (v === null) { patch[key] = null; continue }
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 1440) {
+      throw new Error(`${key} 必须是 0..1440 的整数分钟数（09:00 = 540；null = 取消排期）`)
+    }
+    patch[key] = v
+  }
+
+  // 截止时刻：只对 deadline 类有意义（与 create-todo 的 finalTime 同口径）
+  const effectiveTaskType = (patch.taskType as string | undefined) ?? currentTaskType
+  if (args.time !== undefined) {
+    const raw = str(args.time).trim().replace('T', ' ')
+    if (!raw) {
+      patch.time = null
+    } else {
+      if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(raw)) throw new Error("time 必须是完整时刻 'YYYY-MM-DD HH:mm'")
+      patch.time = effectiveTaskType === 'deadline' ? raw : null
+    }
+  } else if (patch.taskType !== undefined && effectiveTaskType !== 'deadline') {
+    // 类型改成非 deadline：清掉旧截止时刻，避免 UI 继续按一个语义已失效的时刻排序/提醒
+    patch.time = null
+  }
+
+  if (Object.keys(patch).length === 0) {
+    throw new Error('没有可修改的字段：至少传一个（title/description/date/time/quadrant/taskType/tagId/status/endCriteria/scheduledStart/scheduledEnd）')
+  }
+  return patch
+}
+
+/**
+ * 删除前摘出被删行摘要（标题/日期/时段 + 将被子任务数）—— 误删后的重建线索。
+ * 纯函数：vaultDeleteTodoCascade 是**级联删除且无回收站快照**，行一删就再也读不回来，
+ * 所以摘要必须在删除前算好并回给模型。
+ */
+export function summarizeDeletedTodos(target: TodoRow, rows: TodoRow[]): {
+  id: string; title: string; date: string; time: string
+  scheduledStart: number | null; scheduledEnd: number | null; subtasks: number
+} {
+  const subtasks = rows.filter(r => r.parent_id === target.id).length
+  return {
+    id: target.id,
+    title: target.title,
+    date: target.date,
+    time: target.time ?? '',
+    scheduledStart: target.scheduled_start ?? null,
+    scheduledEnd: target.scheduled_end ?? null,
+    subtasks,
+  }
+}
+
 export function registerBuiltinTools(): void {
 
   // 1. builtin.knowledge.search —— 知识库混合检索（关键词 + 语义，knowledge-index-design §9）
   registerTool({
     name: 'builtin.knowledge.search',
     title: '搜索知识库页面',
-    description: '搜索知识库页面，返回 id/标题/摘录/相关度。配好嵌入模型后支持语义检索（问句/换述也能命中），结果 via 字段标注命中方式',
+    // N-7 §五 C：边界声明 —— 博客收在 .knowbase/blog（点前缀规则不在本工具检索域），
+    // 不声明会被模型误以为「搜过了就是没有」，进而到日程/动态乱找（2026-09-24 真实报障）
+    description: '搜索知识库页面，返回 id/标题/摘录/相关度。配好嵌入模型后支持语义检索（问句/换述也能命中），结果 via 字段标注命中方式。只搜知识库页面，不含博客日记——找博客用 builtin.blog.search',
     inputSchema: SEARCH_LIMIT_SCHEMA,
     source: 'builtin',
     enabled: true,
@@ -323,6 +502,199 @@ export function registerBuiltinTools(): void {
       }))
     } catch (err) {
       throw new Error(`知识库搜索失败（仓库未就绪？）：${String((err as Error)?.message ?? err)}`)
+    }
+  })
+
+  // 1b. builtin.blog.search —— 博客日记检索（N-7 §五 B 拍板：博客在 .knowbase/blog、
+  //     被「.」前缀规则挡在 knowledgeIndex 检索域外是设计结果；给博客单独一个检索工具
+  //     是成本最低且不动既有边界的出路）。tier ondemand（铁律 16 新工具默认折叠），
+  //     需要时模型经 builtin.tool.request 申请；术语表骨架里已给指路。
+  registerTool({
+    name: 'builtin.blog.search',
+    title: '搜索博客日记',
+    description: '按关键词搜索博客日记（每天一篇的日志），匹配标题与正文。多词用空格分隔（全部命中才算命中，AND）；某词结果过多或过少时可拆换关键词分次搜。返回 日期/标题/字数/命中处摘录；读全文用 builtin.blog.read（可按日期直取）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '关键词（匹配标题与正文；多词空格分隔=全部命中）' },
+        limit: { type: 'number', description: '上限, 默认10' },
+      },
+      required: ['query'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'blog',
+  }, args => {
+    const q = str(args.query).trim()
+    if (!q) return []
+    const limit = clamp(Math.floor(num(args.limit, 10)), 1, 50)
+    // 与博客 UI 同一份 .knowbase/blog/*.md（vaultSearchEntries 已按创建时间倒序、内部截 50）
+    // F-15：excerpt 由「固定开头 120 字」改为命中窗口；处置4：多词 AND（拆词在 blogToolsPure），
+    // excerpt 锚定首个命中词（多词命中但整句不在正文时摘录仍落在命中处）
+    const terms = splitBlogSearchTerms(q)
+    const rows = vaultSearchEntries(terms)
+    return rows.slice(0, limit).map(e => ({
+      id: e.id,
+      date: e.date,
+      title: e.title,
+      wordCount: e.wordCount,
+      excerpt: blogHitExcerpt(e.contentMd, terms),
+    }))
+  })
+
+  // 1b-2. builtin.blog.read —— 博客日记全文读取（正式版台账 F-15，2026-10-06 登记）。
+  //     blog.search 只有 120 字摘录，vault.read 两路（id / path）都被 .knowbase 点前缀规则
+  //     挡在索引与白名单外（N-7 既定设计），全文读取链路缺失。repo 层 vaultGetEntryById /
+  //     vaultListEntries({date}) 现成，本工具只做暴露。.knowbase/blog 对通用文件工具维持封闭，
+  //     博客对 AI 入口收敛为 blog.search + blog.read 专用通道（N-2 搁置条目「一处可封死」
+  //     前提不破坏）。tier ondemand（铁律 16）。
+  registerTool({
+    name: 'builtin.blog.read',
+    title: '读取博客日记全文',
+    description: '按 id 或日期读取博客日记全文（Markdown 源文）。通常先 blog.search 拿 id 再读；date 可直取当天（每天一篇）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '日记 id（blog.search 返回）' },
+        date: { type: 'string', description: '日期 YYYY-MM-DD，直取当天日记' },
+        maxChars: { type: 'number', description: '全文截断上限字符, 默认12000' },
+      },
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'blog',
+  }, args => {
+    const id = str(args.id).trim()
+    const dateRaw = str(args.date).trim()
+    if (!id && !dateRaw) throw new Error('缺少参数：id 或 date 至少提供一个')
+    const maxChars = clamp(Math.floor(num(args.maxChars, 12000)), 200, 24000)
+    let entry = id ? vaultGetEntryById(id) : null
+    if (!entry && dateRaw) {
+      const date = normalizeBlogDate(dateRaw, todayLocal())
+      if (!date) throw new Error(`日期无法识别：${dateRaw}（需要 YYYY-MM-DD，如 2026-10-05）`)
+      entry = vaultListEntries({ date })[0] ?? null
+      if (!entry) {
+        // 按日期读是最高频问法，扑空时回附近日期让模型自行纠正（口述日期常差一天）
+        const near = nearestEntryDates(date, vaultListEntries().map(e => e.date), 5)
+        throw new Error(`${date} 没有日记。附近的日记日期：${near.join('、') || '（当前没有任何日记）'}`)
+      }
+    }
+    if (!entry) throw new Error(`未找到日记 id=${id}（可先 blog.search 确认）`)
+    const truncated = entry.contentMd.length > maxChars
+    return {
+      id: entry.id,
+      date: entry.date,
+      title: entry.title,
+      tags: entry.tags.map(t => t.name),
+      wordCount: entry.wordCount,
+      content: truncated ? entry.contentMd.slice(0, maxChars) : entry.contentMd,
+      truncated,
+    }
+  })
+
+  // 1c. builtin.knowledge.graph-topology —— 图谱拓扑体检 + 连线建议（DP v3.4.0 第 9 项，2026-09-28）。
+  //     只读、ondemand（铁律 16）。数据全来自 getGraphIndex() 现成字段（unresolved/degree/edges），
+  //     语义建议复用 searchKnowledge（与编辑器「相关笔记」同查询口径，knowledgeSearch.ts similarPages）。
+  registerTool({
+    name: 'builtin.knowledge.graph-topology',
+    title: '图谱拓扑体检与连线建议',
+    description: '知识库链接拓扑。overview：列出断链（[[引用]]解析不到目标页，附可能想链接的现页）、孤岛页（零连线）、枢纽页，供 AI 梳理链接与清理数据债；suggest：对指定页返回语义最相近的候选连线目标（配好嵌入模型效果更好），确认后用 vault.edit 落成 [[双链]]',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['overview', 'suggest'], description: 'overview=图谱体检（默认）；suggest=为一个页面找候选连线' },
+        page: { type: 'string', description: 'suggest 必填：页面相对路径或精确标题' },
+        limit: { type: 'number', description: 'suggest 候选数, 默认6' },
+      },
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'knowledge',
+  }, async args => {
+    const g = getGraphIndex()
+    const pages = g.nodes.filter(n => n.kind === 'page')
+    const idToNode = new Map(g.nodes.map(n => [n.id, n] as const))
+    const titleOf = (id: string): string => idToNode.get(id)?.title ?? id
+
+    // ---- suggest：单页连线建议（二档） ----
+    if (str(args.mode, 'overview') === 'suggest') {
+      const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\.md$/i, '').trim()
+      const key = norm(str(args.page))
+      if (!key) throw new Error('suggest 模式必填 page（页面相对路径或精确标题）')
+      const page = pages.find(n => norm(n.path) === key)
+        ?? pages.find(n => n.title === key)
+        ?? pages.find(n => n.title.toLowerCase() === key.toLowerCase())
+      if (!page) throw new Error(`未找到页面: ${key}（可先 builtin.knowledge.search 确认标题）`)
+      const limit = clamp(Math.floor(num(args.limit, 6)), 1, 12)
+      // 已有连线的页面不再推荐（页-页边；共享标签不算连线）
+      const linked = new Set<string>()
+      for (const e of g.edges) {
+        const other = e.s === page.id ? e.t : (e.t === page.id ? e.s : null)
+        if (other && idToNode.get(other)?.kind === 'page') linked.add(other)
+      }
+      // 查询向量口径与「相关笔记」一致：标题 + 正文前 500 字（knowledgeSearch.ts:170-171）
+      const body = (getKnowledgeTextIndex()[page.id] ?? '').replace(/\s+/g, ' ').slice(0, 500)
+      try {
+        const r = await searchKnowledge({
+          query: `${page.title} ${body}`.trim(),
+          topK: limit,
+          filters: { excludePageIds: [page.id, ...linked] },
+        })
+        return {
+          page: { id: page.id, title: page.title, path: page.path },
+          semantic: r.semantic,
+          candidates: r.hits.map(h => ({
+            pageId: h.pageId, title: h.title, path: h.path,
+            excerpt: (h.excerpt || h.title).slice(0, 120), score: h.score, via: h.via,
+          })),
+          note: '候选已排除与该页已有连线的页面；用户确认后用 builtin.vault.edit 写入 [[标题]] 即成链',
+        }
+      } catch (err) {
+        throw new Error(`连线建议失败（仓库未就绪？）：${String((err as Error)?.message ?? err)}`)
+      }
+    }
+
+    // ---- overview：图谱体检（一档） ----
+    const CAP = 40        // 断链 / 孤岛清单上限（MAX_TOOL_RESULT_CHARS 约束下的口径）
+    const HINT_CAP = 10   // 断链「可能想链接」提示只给前 N 条（每条一次 keyword 检索，尽力而为）
+    const HUB_CAP = 10
+    const orphanRows = pages.filter(n => n.degree === 0)
+    const unresolved = g.unresolved.slice(0, CAP).map(u => ({
+      name: u.name,
+      refs: u.refs.slice(0, 3).map(titleOf),
+      hint: undefined as string | undefined, // 前 HINT_CAP 条由 keyword 检索尽力补上
+    }))
+    for (let i = 0; i < Math.min(HINT_CAP, unresolved.length); i++) {
+      try {
+        const r = await searchKnowledge({ query: unresolved[i].name, topK: 1, mode: 'keyword' })
+        const h = r.hits[0]
+        if (h) unresolved[i].hint = `可能想链接：${h.title}（${h.path}）`
+      } catch { /* hint 是加分项，失败不拦概览 */ }
+    }
+    const hubs = pages.slice().sort((a, b) => b.degree - a.degree).slice(0, HUB_CAP)
+      .map(n => ({ title: n.title, path: n.path, degree: n.degree }))
+    const notes: string[] = []
+    if (g.unresolved.length > CAP) notes.push(`断链仅列前 ${CAP} 条（共 ${g.unresolved.length} 条）`)
+    if (orphanRows.length > CAP) notes.push(`孤岛页仅列前 ${CAP} 条（共 ${orphanRows.length} 页）`)
+    if (pages.length === 0) notes.push('当前仓库没有知识页面（或图谱索引未建）')
+    return {
+      stats: {
+        pages: pages.length,
+        links: g.edges.length,
+        tags: g.nodes.filter(n => n.kind === 'tag').length,
+        unresolved: g.unresolved.length,
+        orphans: orphanRows.length,
+      },
+      unresolved,
+      orphans: orphanRows.slice(0, CAP).map(n => ({ title: n.title, path: n.path })),
+      hubs,
+      ...(notes.length ? { note: notes.join('；') } : {}),
     }
   })
 
@@ -472,6 +844,15 @@ export function registerBuiltinTools(): void {
         quadrant: q,
         quadrantLabel: QUADRANT[q] ?? '重要不紧急',
         status: str(r.status, 'pending'),
+        // 以下 5 项是 schedule.update-todo 的「编辑正确性」前提（2026-09-13 补齐）：
+        // 看不到已占时段 → 排新任务会撞车；看不到 parentId → 会误编辑/误删子任务；
+        // 看不到 taskType → 分不清 time 字段（deadline 才带）是否还有语义；
+        // 看不到 tagId → create/update 的 tagId 参数根本没有取值来源。
+        taskType: str(r.task_type, 'plan'),
+        tagId: r.tag_id ?? null,
+        scheduledStart: r.scheduled_start ?? null,
+        scheduledEnd: r.scheduled_end ?? null,
+        parentId: r.parent_id ?? null,
       }
     })
   })
@@ -515,7 +896,9 @@ export function registerBuiltinTools(): void {
     // 并广播通知渲染层重取 —— 知识库是保活模块，不通知就看不到（2026-09-10 修）
     invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '')
     broadcastDataChanged('knowledge')
-    return { ok: true, id: page.id, title }
+    notifyVaultTreeChange(page.path) // v3.1.2 条目9：页面落在可见分类目录，编辑区树同步刷新
+    // path 一并返回：会话写审计据此把本页纳入「改动文件」卡（F-11，可与 vault.* 一样点击直达编辑器）
+    return { ok: true, id: page.id, title, path: page.path }
   })
 
   // 9. builtin.knowledge.append-page 已退役（2026-09-09 P2）：vault.edit(append=true) 收编
@@ -614,6 +997,88 @@ export function registerBuiltinTools(): void {
     return { ok: true, id, date, quadrant }
   })
 
+  // 11b. builtin.schedule.update-todo —— 按 id 编辑待办（改期/改时段/改象限/标记完成）
+  //      补写闭环：此前 AI 只有 list-todos(读) + create-todo(写)，建错了改不了、只能人工修。
+  registerTool({
+    name: 'builtin.schedule.update-todo',
+    title: '修改日程待办',
+    description: '按 id 修改待办：改标题/日期/截止时刻/象限/任务类型/标签/完成状态/排期时段。id 必须先由 list-todos 取到。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '待办 id' },
+        title: { type: 'string', description: '标题' },
+        date: { type: 'string', description: '日期 YYYY-MM-DD' },
+        time: { type: 'string', description: "截止时刻 'YYYY-MM-DD HH:mm'，仅 deadline 类" },
+        quadrant: { type: 'number', description: '象限 0紧急重要/1重要不紧急/2紧急不重要/3不紧急不重要' },
+        taskType: { type: 'string', enum: ['plan', 'deadline', 'daily'], description: '任务类型' },
+        tagId: { type: 'string', description: '标签 id，空串=清空' },
+        status: { type: 'string', enum: ['pending', 'done'], description: 'pending 未完成 / done 已完成' },
+        scheduledStart: { type: 'number', description: '排期起点（当天分钟数，09:00=540）' },
+        scheduledEnd: { type: 'number', description: '排期终点（当天分钟数）' },
+        // 刻意不暴露 description / end_criteria：list-todos 不回传这两列，
+        // AI 看不到现值 → 允许改就是「盲改覆盖用户写过的备注」，属静默数据丢失。
+        // （单工具 schema 有 800 字符红线，AGENTS.md#16；这两项省下的正好也是大头）
+      },
+      required: ['id'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    const existing = vaultFindTodo(id)
+    if (!existing) throw new Error(`未找到待办 id=${id}：请先用 list-todos 确认（id 可能已被删除或本就输错）`)
+    // 归一化交给纯函数（含「非 deadline 不带截止时刻」「排期分钟数范围」等不变量），
+    // 字段白名单由 vaultUpdateTodo 兜底 —— 这里不重复一份映射表
+    const patch = normalizeTodoPatch(args, existing.task_type)
+    const updated = vaultUpdateTodo(id, patch, new Date().toISOString())
+    if (!updated) throw new Error(`待办 id=${id} 更新失败（写入期间已被删除？）`)
+    // 与 UI 的 schedule:updateTodo 同口径：只有 pending → done 才算「完成」事件。
+    // 漏了这步的后果是「AI 标记完成的任务，插件收不到 schedule:todoCompleted」。
+    if (existing.status !== 'done' && updated.status === 'done') {
+      emitPluginEvent('schedule:todoCompleted', { todoId: id, title: updated.title ?? '' })
+    }
+    // 主进程写盘后必须广播：日程模块保活（切 Tab 不重载），不通知界面看不到
+    broadcastDataChanged('schedule')
+    return { ok: true, id, title: updated.title, date: updated.date, status: updated.status, fields: Object.keys(patch) }
+  })
+
+  // 11c. builtin.schedule.delete-todo —— 按 id 删除待办（级联删子任务，无回收站）
+  registerTool({
+    name: 'builtin.schedule.delete-todo',
+    title: '删除日程待办',
+    description: '按 id 删除待办（不可恢复，且会连同其全部子任务一起删除）。必须先 list-todos 确认 id 与标题相符再调用，禁止凭记忆或推测删除。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '待办 id（来自 list-todos）' },
+      },
+      required: ['id'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    const rows = vaultTodosAll()
+    const target = rows.find(r => r.id === id)
+    if (!target) throw new Error(`未找到待办 id=${id}：请先用 list-todos 确认（可能已被删除，不要重复删除）`)
+    // 摘要必须在删除前算：cascade 删完行就没了，且 UI 的 schedule:deleteTodo 同样无回收站快照
+    const summary = summarizeDeletedTodos(target, rows)
+    vaultDeleteTodoCascade(id)
+    broadcastDataChanged('schedule')
+    return { ok: true, ...summary }
+  })
+
   // 12. builtin.checkin.check-habit
   registerTool({
     name: 'builtin.checkin.check-habit',
@@ -647,6 +1112,79 @@ export function registerBuiltinTools(): void {
       ? { ok: true, habitId: hit.id, name: hit.name, checked: true }
       : { ok: true, habitId: hit.id, name: hit.name, alreadyChecked: true }
   })
+
+  // 12b. builtin.accounting.import-json —— 记账：导入手机 AI 生成的 JSON（写）
+  registerTool({
+    name: 'builtin.accounting.import-json',
+    title: '导入记账 JSON',
+    description: '把手机 AI 生成的记账 JSON 原文交给本工具落账；自动去重、新分类自动建',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        json: { type: 'string', description: '手机 AI 输出的整段 JSON 原文（含 transactions 数组）' },
+      },
+      required: ['json'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'accounting',
+  }, args => {
+    const json = str(args.json)
+    if (!json.trim()) throw new Error('缺少必填参数: json')
+    const res = vaultAccountingImport(json, 'ai')
+    if (res.error) throw new Error(res.error)
+    if (res.added > 0) broadcastDataChanged('accounting')
+    return { ok: true, added: res.added, skipped: res.skipped, invalid: res.invalid }
+  })
+
+  // 12c. builtin.accounting.query —— 记账：区间查询与收支合计（读）
+  registerTool({
+    name: 'builtin.accounting.query',
+    title: '查询记账流水',
+    description: '按日期区间查询收支流水与合计（复盘用）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        start: { type: 'string', description: '开始日期 YYYY-MM-DD，可省略' },
+        end: { type: 'string', description: '结束日期 YYYY-MM-DD，可省略' },
+        type: { type: 'string', description: '筛类型：expense 支出 / income 收入，省略为全部', enum: ['expense', 'income'] },
+        category: { type: 'string', description: '按分类名精确筛，可省略' },
+      },
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'accounting',
+  }, args => {
+    const type = args.type === 'income' ? 'income' as const : args.type === 'expense' ? 'expense' as const : undefined
+    const start = /^\d{4}-\d{2}-\d{2}$/.test(str(args.start)) ? str(args.start) : undefined
+    const end = /^\d{4}-\d{2}-\d{2}$/.test(str(args.end)) ? str(args.end) : undefined
+    const category = str(args.category).trim() || undefined
+    const res = vaultAccountingQuery({ start, end, type, category })
+    return {
+      count: res.count,
+      totalIncome: res.totalIncome,
+      totalExpense: res.totalExpense,
+      items: res.items.slice(0, 60).map(t => ({ date: t.date, type: t.type, amount: t.amount, category: t.category, merchant: t.merchant, note: t.note })),
+    }
+  })
+
+  // 12d. builtin.accounting.balances —— 记账：各账户余额与总额（读）
+  registerTool({
+    name: 'builtin.accounting.balances',
+    title: '查询账户余额',
+    description: '查询记账各账户与总额的当前余额（余额=初始+累计收入-累计支出）',
+    inputSchema: { type: 'object', properties: {} },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'accounting',
+  }, () => vaultAccountingBalances())
 
   // 13. builtin.web.search —— 联网搜索（跨模块通用能力，不设 module：不受 aiModulePermissions 限制）
   registerTool({
@@ -698,7 +1236,9 @@ export function registerBuiltinTools(): void {
     const id = str(args.id).trim() || undefined
     const limit = clamp(Math.floor(num(args.limit, 3)), 1, 5)
     const { hits, total, hint } = searchHelp(q, limit, id)
-    return { count: hits.length, totalDocs: total, hits, ...(hint ? { hint } : {}) }
+    // N-1 手册通道：结果瘦身（片段截 500 字）+ 附带篇目目录，模型可据 id 深读单篇（不发全文）
+    const slim = hits.map(h => ({ id: h.id, title: h.title, score: h.score, snippet: h.snippet.slice(0, 500) }))
+    return { count: slim.length, totalDocs: total, hits: slim, catalog: helpCatalog(), ...(hint ? { hint } : {}) }
   })
 
   // ===== P3 装载层元工具：写类（tier='ondemand'）默认不在视野，需申请启用 =====
@@ -707,7 +1247,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.create-entry / schedule.create-todo / checkin.check-habit / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper）默认不在工具列表中。需要执行写操作时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -766,7 +1306,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.list',
     title: '列仓库目录',
-    description: '列当前知识仓库某目录下的条目（目录与可读文本文件）；隐藏区(.knowbase 内部非 modules)不出现。用于让 AI 了解仓库结构',
+    description: '列当前知识仓库某目录下的条目（目录与可读文本/代码文件）；隐藏区(.knowbase 内部非 modules)不出现。用于让 AI 了解仓库结构',
     inputSchema: {
       type: 'object',
       properties: {
@@ -808,7 +1348,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.read',
     title: '读仓库文件',
-    description: '读取仓库内文件：.md/.txt 全文（.knowbase/modules/*.json 结构化数据只读）与 .pdf/.pptx 文本提取（扫描版提取为空属预期）。path 与 id 二选一：传 id（knowledge.search 返回的知识页 frontmatter id）可直接读知识页全文。返回 mtimeMs 供后续写回冲突校验。图片/>10MB/保护区文件拒绝',
+    description: '读取仓库内文件：.md/.txt 与文本类代码文件（.html/.js/.py 等）全文（.knowbase/modules/*.json 结构化数据只读）与 .pdf/.pptx 文本提取（扫描版提取为空属预期）。path 与 id 二选一：传 id（knowledge.search 返回的知识页 frontmatter id）可直接读知识页全文。返回 mtimeMs 供后续写回冲突校验。图片/>10MB/保护区文件拒绝',
     inputSchema: {
       type: 'object',
       properties: {
@@ -862,7 +1402,7 @@ export function registerBuiltinTools(): void {
       }
     }
     if (!isAiReadableFile(root, abs)) {
-      throw new Error(`文件不可读：仅支持 .md/.txt（仓库内）与 .knowbase/modules/*.json（只读）；图片与保护区拒绝: ${rel}`)
+      throw new Error(`文件不可读：仅支持 .md/.txt 与文本类代码文件（仓库内）与 .knowbase/modules/*.json（只读）；图片、配置与保护区拒绝: ${rel}`)
     }
     const maxChars = clamp(Math.floor(num(args.maxChars, 8000)), 200, 50000)
     const text = readFileSync(abs, 'utf-8')
@@ -881,7 +1421,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.search',
     title: '搜索仓库内容',
-    description: '在当前知识仓库内按关键词搜索可读文本文件（.md/.txt 与 .knowbase/modules/*.json）内容，返回命中文件与上下文摘录。用于在仓库内定位内容',
+    description: '在当前知识仓库内按关键词搜索可读文本文件（.md/.txt/文本类代码文件与 .knowbase/modules/*.json）内容，返回命中文件与上下文摘录。用于在仓库内定位内容',
     inputSchema: {
       type: 'object',
       properties: {
@@ -942,8 +1482,9 @@ export function registerBuiltinTools(): void {
     requires: 'write',
     tier: 'ondemand',
     vaultFile: 'write',
-  }, args => {
-    const rel = str(args.path).trim()
+  }, (args, ctx) => {
+    // v3.1.2 条目10：教学会话下产物落点归一化（裸文件名 / 仓库顶层 / SOURCES → 改写进本会话文件夹）
+    const rel = normalizeAiTeachingWritePath(str(args.path).trim(), ctx)
     const content = str(args.content)
     if (!rel) throw new Error('缺少必填参数: path')
     if (content.length > 2_000_000) throw new Error('内容过大（>2MB），拒绝写入')
@@ -958,9 +1499,13 @@ export function registerBuiltinTools(): void {
       try { mkdirSync(dirname(abs), { recursive: true }) } catch { /* 目录已存在 */ }
     }
     writeWorkspaceFile(abs, content)
-    if (rel.toLowerCase().endsWith('.md')) invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 与 ws:writeFile 同规则：.md 落盘即失效，知识列表/图谱立即可见
+    if (rel.toLowerCase().endsWith('.md')) {
+      invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 与 ws:writeFile 同规则：.md 落盘即失效，知识列表/图谱立即可见
+      broadcastDataChanged('knowledge') // v3.1.2 条目9：对齐 knowledge.create-page 口径，带 frontmatter 的页即时进列表
+    }
     const st = statSync(abs)
     broadcastExternalWrite(rel, st.mtimeMs)
+    notifyVaultTreeChange(rel) // v3.1.2 条目9：编辑区树即时刷新（此前只发 external-change，新文件树上不出现）
     return { ok: true, path: rel, created: !existing, size: st.size, mtimeMs: st.mtimeMs }
   })
 
@@ -1013,9 +1558,13 @@ export function registerBuiltinTools(): void {
       next = text.slice(0, first) + newText + text.slice(first + oldText.length)
     }
     writeWorkspaceFile(abs, next)
-    if (rel.toLowerCase().endsWith('.md')) invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 同上：edit 后索引/图谱同步刷新
+    if (rel.toLowerCase().endsWith('.md')) {
+      invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 同上：edit 后索引/图谱同步刷新
+      broadcastDataChanged('knowledge') // v3.1.2 条目9：知识库列表/图谱同步重读
+    }
     const after = statSync(abs)
     broadcastExternalWrite(rel, after.mtimeMs)
+    notifyVaultTreeChange(rel) // v3.1.2 条目9：编辑区树即时刷新
     return {
       ok: true,
       path: rel,
@@ -1050,7 +1599,7 @@ export function registerBuiltinTools(): void {
     let pages: Array<{ id: string; title: string; path: string }> = []
     try {
       pages = getKnowledgeIndex().pages
-        .filter(p => p.status !== 'draft' && p.entryKind !== 'file') // 引用锚只指向 md 知识页（非 md 归档文件无标题锚语义）
+        .filter(p => p.entryKind !== 'file') // 引用锚只指向 md 知识页（非 md 文件无标题锚语义）
         .map(p => ({ id: p.id, title: p.title, path: p.path }))
     } catch { /* 索引未就绪时按空处理 */ }
     const exact = pages.filter(p => p.title === want)
@@ -1115,6 +1664,9 @@ export function registerBuiltinTools(): void {
     if (!rootId) throw new Error('仓库上下文未就绪')
     try { mkdirSync(dirname(finalAbs), { recursive: true }) } catch { /* 目录已存在 */ }
     renameWorkspacePath(rootId, rel, finalNewRel)
+    // v3.1.2 条目9：rename/trash 此前连 external-change 都不发；这里补树刷新（源 + 目标父目录）
+    if (finalNewRel.toLowerCase().endsWith('.md') || rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
+    notifyVaultTreeChange(finalNewRel, rel)
     return { ok: true, from: rel, to: finalNewRel }
   })
 
@@ -1149,6 +1701,9 @@ export function registerBuiltinTools(): void {
     const rootId = getCurrentVault()?.rootId
     if (!rootId) throw new Error('仓库上下文未就绪')
     await trashWorkspacePath(rootId, rel)
+    // v3.1.2 条目9：删除后编辑区树与知识库同步（此前无任何广播，文件树上条目还在）
+    if (rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
+    notifyVaultTreeChange(rel)
     return { ok: true, trashed: rel }
   })
 
@@ -1193,7 +1748,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'visual.html',
     title: '生成 HTML 示意图',
-    description: '生成单文件 HTML 示意图辅助讲解，写入本会话 SOURCES/<对话>/visuals/<slug>.html 并自动在右栏工件栏打开。html 为完整自包含单文件：CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）、建议 ≤150 行、画幅 680×400 比例 SVG 为主、中文标注。重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
+    description: '生成单文件 HTML 示意图辅助讲解，写入本会话文件夹 visuals/<slug>.html 并自动在右栏工件栏打开。html 为完整自包含单文件：CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）、建议 ≤150 行、画幅 680×400 比例 SVG 为主、中文标注。配色：文字与背景对比度 ≥4.5:1（深底近白字、浅底深字，禁同色系深浅叠加）。重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1648,5 +2203,158 @@ export function registerBuiltinTools(): void {
       ...(unknownTags.length ? { unknownTags } : {}),
       hint: '练习页已生成，用户可直接打开该页答题；答错的题会自动记入错题本',
     }
+  })
+
+  // ===== 书市工具（2026-09-23，S5）：AI 把口述地址/响应样例整理成书源草案 → 预填表单 =====
+  //
+  // 落点约定（设计文档 §4.2/§4.3、施工方案 §十三）：草案**不落库** —— 工具只做
+  // 「整理 + 广播」，用户在表单里核对字段、亲手填写凭据、点「添加」之后才写盘；
+  // 凭据**永不进 AI 侧**（draft 的 schema 没有 username / password / token，
+  // list 只回「凭据是否已存」布尔，取自 bookSourceInfos 那份出渲染层的同一口径）。
+  // 草案校验复用 repo 的 sanitizeBookSourcePatch / isAllowedSourceUrl —— 不为 AI
+  // 单开一套判定（铁律 2 的同一条理由：同一业务只有一处实现）。
+  //
+  // 装载层：两枚均 ondemand —— 书源配置是低频动作，常驻等于让每个会话每轮白付 token。
+  // ★ 可达性链（写码时核过：全仓**没有** read+ondemand 的先例，而 ondemand 的发现路径
+  //   只有 builtin.tool.request 的写工具清单与 system prompt 的泛化提示 ⇒ 只读工具
+  //   若无人提及就永远进不了模型视野）：tool.request 清单里提 draft → 模型申请后
+  //   draft 进视野 → **draft 的 description 里指一句 list** → 模型需要时再申请 list。
+  //   多一跳，换来两枚的常驻成本都是零。
+
+  // enum 入参严格化：静默降级（如 authType 'Bearer' 被丢弃）会造出「配了但连不上」的源，
+  // 而用户与模型都看不出哪里不对 —— 明确报错才能让模型自我纠正
+  const bookSourceEnum = <T extends string>(v: unknown, allowed: readonly T[], def: T, label: string): T => {
+    const s = str(v).trim().toLowerCase()
+    if (!s) return def
+    if (!(allowed as readonly string[]).includes(s)) throw new Error(`${label} 只能是 ${allowed.join(' / ')}：${str(v)}`)
+    return s as T
+  }
+
+  // 33. builtin.booksource.list —— 查已配置书源（起草前的第一步）
+  registerTool({
+    name: 'builtin.booksource.list',
+    title: '查书源清单',
+    description: '列出用户已配置的书源：名称 / 类型 / 地址 / 检索模板 / 是否需要凭据 / 凭据是否已存 / 启用态 / 是否预置。永远不含凭据内容。起草新书源前可先看这里，避免与已有源重复',
+    inputSchema: { type: 'object', properties: {} },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    requires: 'read',
+    tier: 'ondemand',
+    module: 'bookMarket',
+  }, () => {
+    const rootId = getCurrentVault()?.rootId ?? ''
+    if (!rootId) throw new Error('当前没有打开的仓库：请先在应用中打开知识仓库')
+    const sources = bookSourceInfos(rootId).map(s => ({
+      name: s.name,
+      kind: s.kind,
+      url: s.url,
+      ...(s.searchUrl ? { searchUrl: s.searchUrl } : {}),
+      needsAuth: s.authType !== null,
+      hasCredential: s.hasCredential,
+      enabled: s.enabled,
+      builtin: s.builtin,
+      ...(s.mapping ? { mapping: s.mapping } : {}),
+    }))
+    return { count: sources.length, sources }
+  })
+
+  // 34. builtin.booksource.draft —— 起草书源配置（送进「新建书源」表单预填；本工具不落库）
+  registerTool({
+    name: 'builtin.booksource.draft',
+    title: '起草书源配置',
+    description: '把用户口述的地址（或一段响应样例）整理成一份书源配置草案，送进「新建书源」表单并预填，界面会切到书市 —— 本工具不落库：用户核对字段、自己填写凭据、点「添加」之后才算配好（它既拿不到也不需要凭据）。custom 源的字段映射是主战场：mappingJson 传 JSON 文本，形如 {"list":"data.books[*]","title":"title","download":"files[0].url"}。想先看用户已有书源时，可申请 builtin.booksource.list',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '书源名，如「我家 Calibre」' },
+        url: { type: 'string', description: '源地址（http/https）' },
+        kind: { type: 'string', enum: ['opds', 'custom'], description: 'opds=OPDS 目录（默认）/ custom=JSON 接口' },
+        searchUrl: { type: 'string', description: '检索模板，变量 {base} {query} {page}；省略=用 url' },
+        responseType: { type: 'string', enum: ['json', 'atom'], description: '仅 custom，默认 json' },
+        authType: { type: 'string', enum: ['none', 'basic', 'bearer'], description: '免登录的源填 none（或省略）；仅确实要登录时才填 basic / bearer，凭据由用户手输' },
+        mappingJson: { type: 'string', description: '仅 custom 必填：字段映射的 JSON 文本，键为 list / title / author / cover / summary / download / format，值为取值路径（a.b[*] 数组展开 / a.b[0] 定下标）；list、title、download 必给，下载直链无扩展名时另给 format' },
+      },
+      required: ['name', 'url'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'bookMarket',
+  }, args => {
+    const name = str(args.name).trim()
+    if (!name) throw new Error('缺少必填参数: name')
+    const url = str(args.url).trim()
+    if (!url) throw new Error('缺少必填参数: url')
+    // 地址非法要**明确报错**（与 bookSourceUpsert 同口径）：模型据此纠正后重试，
+    // 而不是把一条坏地址送进表单等用户去发现
+    if (!isAllowedSourceUrl(url)) throw new Error(`地址必须是 http/https 开头：${url}`)
+
+    const kind = bookSourceEnum(args.kind, ['opds', 'custom'] as const, 'opds', 'kind')
+    const authRaw = bookSourceEnum(args.authType, ['basic', 'bearer', 'none'] as const, 'none', 'authType')
+    const authType: 'basic' | 'bearer' | null = authRaw === 'none' ? null : authRaw
+    const searchUrl = str(args.searchUrl).trim()
+    // 映射：schema 里是 `mappingJson` 字符串（800 字符红线的退化形状，见施工方案 §13.2），
+    // 到这里先解析再交给 repo 的校验器 —— 界面 / IPC / AI 三条路共用同一套判定（铁律 2 同理）。
+    // 「源配好了但解析不出结果」正是本需求要消灭的痛点（§4.1），拿不到合法映射就不放行。
+    let mapping: BookSourceMapping | null = null
+    if (kind === 'custom') {
+      const raw = str(args.mappingJson).trim()
+      if (!raw) throw new Error('custom 源必须给出 mappingJson（至少含 list / title / download 三条取值路径）。可让用户提供一段该源的检索响应样例，据此填写')
+      let parsed: unknown
+      try { parsed = JSON.parse(raw) } catch { throw new Error(`mappingJson 不是合法 JSON：${raw.slice(0, 120)}`) }
+      mapping = sanitizeBookSourcePatch({ mapping: parsed })?.mapping ?? null
+      if (!mapping) throw new Error('mappingJson 里 list / title / download 三条取值路径必须都是非空字符串（如 {"list":"data.books[*]","title":"title","download":"files[0].url"}），请修正后重试')
+    }
+    const responseType = bookSourceEnum(args.responseType, ['json', 'atom'] as const, 'json', 'responseType')
+
+    // 草案形状 = 渲染层 BookSourceDraft（预填表单用），**不含任何凭据字段**
+    const draft = {
+      name,
+      kind,
+      url,
+      ...(searchUrl ? { searchUrl } : {}),
+      ...(kind === 'custom' ? { responseType } : {}),
+      ...(authType ? { authType } : {}),
+      ...(mapping ? { mapping } : {}),
+    }
+    // 广播是「主进程 → 渲染层自定义事件」的唯一出口：渲染层据此切到书市模块并预填表单。
+    // 这里**不发 broadcastDataChanged** —— 草案没有写盘，数据变更 scope 一条都不该动。
+    broadcast(BROADCAST_CHANNEL.bookMarketSourceDraft, { draft })
+    return {
+      ok: true,
+      draft,
+      hint: '草案已送进「新建书源」表单并预填，界面已切到书市。请让用户核对字段、自己填写凭据后点「添加」——本工具不落库，不要说「已添加 / 已保存」',
+    }
+  })
+
+  // ===== 终端执行（terminal-module-design）：四道门控链见方案 §6；确认 UI 在终端模块「AI 执行记录」 =====
+  registerTool({
+    name: 'builtin.terminal.exec',
+    title: '执行终端命令',
+    description: '在当前仓库根目录执行一条 shell 命令并返回其输出。每条命令都需用户在终端模块确认后才真正运行，被拒或确认超时则不执行。适合 git / npm 等命令行操作；不能替代业务模块工具',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: '要执行的单条命令（系统 shell：Windows pwsh/PowerShell，macOS/Linux 取 $SHELL）' },
+        timeoutMs: { type: 'number', description: '超时毫秒（默认 30000，上限 300000），超时终止进程' },
+      },
+      required: ['command'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    module: 'terminal',
+    requires: 'write',
+    tier: 'ondemand',
+  }, async args => {
+    const reader = getSettingReader()
+    if (reader('terminal.aiExec') !== true) throw new Error('AI 终端执行未开启（设置 → AI 终端执行）')
+    const cmd = str(args.command).trim()
+    if (!cmd) throw new Error('缺少必填参数: command')
+    const pref = reader('terminal.shell')
+    return aiExec({ command: cmd, timeoutMs: num(args.timeoutMs, 30000), shellPref: typeof pref === 'string' ? pref : undefined })
   })
 }

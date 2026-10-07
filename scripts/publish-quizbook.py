@@ -172,7 +172,7 @@ def main():
         print(f'  zip sha256 一致 + 完整性: {"OK" if ok2 else "FAIL"}')
         if not (ok1 and ok2):
             sys.exit(1)
-    print(f'✅ {PLUGIN_ID} v{ver} 已上架（registry v{new_v}）')
+    print(f'[OK] {PLUGIN_ID} v{ver} 已上架（registry v{new_v}）')
 
 
 if __name__ == '__main__':

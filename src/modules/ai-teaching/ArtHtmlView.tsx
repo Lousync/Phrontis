@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, WheelEvent as ReactWheelEvent } from 'react'
 import { workspaceGetCurrent, workspaceReadFile } from '../../lib/ipc'
 import { collectThemeVars } from './htmlShell'
 
@@ -16,7 +17,16 @@ import { collectThemeVars } from './htmlShell'
  * iframe 始终填满分栏高度，不再依赖 iframe-container 自适应；沙箱内 body{min-height:100% !important}
  * + flex 垂直居中让图矮于画布时居中、高于画布时正常滚动；警告条 absolute 叠在顶部，不挤压 iframe 高度。
  */
-export function ArtHtmlView({ relPath, reloadSeq, fit = false }: { relPath: string; reloadSeq: number; fit?: boolean }) {
+export function ArtHtmlView({ relPath, reloadSeq, fit = false, manualZoom = null, onManualZoom, onEffectiveZoom }: {
+  relPath: string
+  reloadSeq: number
+  fit?: boolean
+  /** 手动缩放（v3.1.1 条目11）：null = 跟随 fit 自动铺满；数值 = 用户手动值覆盖 fit（0.5..6） */
+  manualZoom?: number | null
+  onManualZoom?: (z: number | null) => void
+  /** 有效缩放上报（fit 变化/容器尺寸变化都会带动），工具条百分比展示用 */
+  onEffectiveZoom?: (z: number) => void
+}) {
   const [doc, setDoc] = useState<{ content: string; mtimeMs: number } | null>(null)
   const [readErr, setReadErr] = useState('')
   const [frameErr, setFrameErr] = useState('')
@@ -83,12 +93,44 @@ export function ArtHtmlView({ relPath, reloadSeq, fit = false }: { relPath: stri
     return k
   }, [fit, baseH, avail.h])
 
-  const pushEnv = useCallback(() => {
-    try { frameRef.current?.contentWindow?.postMessage({ __kbArtTheme: collectThemeVars(), __kbArtZoom: fitKRef.current }, '*') } catch { /* iframe 未就绪 */ }
-  }, [])
-  useEffect(() => { pushEnv() }, [themeTick, pushEnv, fitK, frameUrl]) // 明暗/缩放/文档变化重发（未 ready 帧由 __kbArtReady 补）
+  // 手动缩放（条目11）：有效值 = 手动覆盖 ?? fit；上报给工具条展示
+  const effZoom = manualZoom ?? fitK
+  const effZoomRef = useRef(effZoom)
+  effZoomRef.current = effZoom
+  useEffect(() => { onEffectiveZoom?.(effZoom) }, [effZoom, onEffectiveZoom])
 
-  // 宿主消息：仅采信本 iframe 源（§4.3 劫持防护）；保留 box 量高供 fit 用
+  /** 缩放请求统一入口：宿主键控与沙箱转报共用；手动值 clamp 0.5..6，reset 回 fit（null） */
+  const applyZoomReq = useCallback((req: { kind: 'in' | 'out' | 'reset' | 'wheel'; dy?: number }, ov?: number) => {
+    if (!onManualZoom) return
+    if (req.kind === 'reset') { onManualZoom(null); return }
+    const cur = ov ?? effZoomRef.current
+    let next = cur
+    if (req.kind === 'wheel') next = cur * ((req.dy ?? 0) > 0 ? 1 / 1.1 : 1.1)
+    else if (req.kind === 'in') next = cur * 1.25
+    else next = cur / 1.25
+    next = Math.round(Math.max(0.5, Math.min(6, next)) * 100) / 100
+    if (Math.abs(next - cur) > 0.001) onManualZoom(next)
+  }, [onManualZoom])
+
+  // 宿主侧键控（焦点在宿主时；焦点在 iframe 内由沙箱壳捕获转报，onMsg 消费）
+  const onWrapKeyDown = useCallback((e: ReactKeyboardEvent) => {
+    if (!(e.ctrlKey || e.metaKey)) return
+    if (e.key === '=' || e.key === '+') { e.preventDefault(); applyZoomReq({ kind: 'in' }) }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); applyZoomReq({ kind: 'out' }) }
+    else if (e.key === '0') { e.preventDefault(); applyZoomReq({ kind: 'reset' }) }
+  }, [applyZoomReq])
+  const onWrapWheel = useCallback((e: ReactWheelEvent) => {
+    if (!(e.ctrlKey || e.metaKey)) return
+    e.preventDefault()
+    applyZoomReq({ kind: 'wheel', dy: e.deltaY })
+  }, [applyZoomReq])
+
+  const pushEnv = useCallback(() => {
+    try { frameRef.current?.contentWindow?.postMessage({ __kbArtTheme: collectThemeVars(), __kbArtZoom: effZoomRef.current }, '*') } catch { /* iframe 未就绪 */ }
+  }, [])
+  useEffect(() => { pushEnv() }, [themeTick, pushEnv, effZoom, frameUrl]) // 明暗/缩放/文档变化重发（未 ready 帧由 __kbArtReady 补）
+
+  // 宿主消息：仅采信本 iframe 源（§4.3 劫持防护）；保留 box 量高供 fit 用；沙箱转报的手动缩放请求在此消费
   const onMsg = useCallback((e: MessageEvent) => {
     const d = e.data as Record<string, unknown> | null
     if (!d || e.source !== frameRef.current?.contentWindow) return
@@ -96,9 +138,15 @@ export function ArtHtmlView({ relPath, reloadSeq, fit = false }: { relPath: stri
       const b = d.__kbArtBox as { h?: number; sw?: number; vw?: number }
       if (typeof b.h === 'number') setBox({ h: Math.max(1, b.h), sw: Math.max(0, b.sw ?? 0), vw: Math.max(1, b.vw ?? 1) })
     }
+    if (d.__kbArtZoomReq === 'in' || d.__kbArtZoomReq === 'out' || d.__kbArtZoomReq === 'reset') {
+      applyZoomReq({ kind: d.__kbArtZoomReq })
+      return
+    }
+    const zw = d.__kbArtZoomWheel as { dy?: number } | undefined
+    if (zw && typeof zw.dy === 'number') { applyZoomReq({ kind: 'wheel', dy: zw.dy }); return }
     if (typeof d.__kbArtErr === 'string') setFrameErr(d.__kbArtErr)
     else if (d.__kbArtReady === true) pushEnv()
-  }, [pushEnv])
+  }, [pushEnv, applyZoomReq])
   useEffect(() => {
     window.addEventListener('message', onMsg)
     return () => window.removeEventListener('message', onMsg)
@@ -120,7 +168,7 @@ export function ArtHtmlView({ relPath, reloadSeq, fit = false }: { relPath: stri
     )
   }
   return (
-    <div ref={wrapRef} className="relative h-full">
+    <div ref={wrapRef} className="relative h-full" onKeyDown={onWrapKeyDown} onWheel={onWrapWheel}>
       {lines > 150 && !fit && (
         <div className="absolute top-0 left-0 right-0 z-10 px-3 py-1.5 bg-[var(--warning-bg)] border-b border-[var(--warning)]/30 text-[11px] text-[var(--warning)]">
           ⚠ 共 {lines} 行，超出产物约束（≤150 行），渲染可能不佳

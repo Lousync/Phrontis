@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Sun, Moon, Puzzle, Flame } from 'lucide-react'
+import { Sun, Moon, Flame } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { THEME_OPTIONS, BLOG_SIZE_OPTIONS, KNOWLEDGE_SIDEBAR_SIZE_OPTIONS, applyThemeClass } from '../../../lib/settings'
-import { BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon, ToolboxIcon, EditorIcon, IconPreview } from '../../../components/shared/ModuleIcons'
+import { PluginIcon, IconPreview } from '../../../components/shared/ModuleIcons'
 import { ensurePluginThemeStyles, type PluginThemeWithVars } from '../../../lib/pluginService'
+import { readFxKind, type ThemeFxKind } from '../../../components/shared/ThemeFxLayer'
 import { BUILTIN_ICON_PACKS, usePluginIconPacks, type IconModuleId } from '../../../lib/sidebarIcons'
 import { pluginListDeleteFxSkins } from '../../../lib/ipc'
 import { SettingSelect } from '../components/SettingSelect'
@@ -54,8 +55,28 @@ export function AppearanceView() {
 
   const allThemes: { id: string; label: string; desc: string; icon: React.ReactNode }[] = [
     ...THEME_OPTIONS.map(t => ({ id: t.id, label: t.label, desc: THEME_DESCS[t.id] || '', icon: THEME_ICONS[t.id] || <Sun size={24} /> })),
-    ...pluginThemes.map(t => ({ id: t.id, label: t.name, desc: `来自插件「${t.pluginName}」`, icon: <Puzzle size={24} /> })),
+    ...pluginThemes.map(t => ({ id: t.id, label: t.name, desc: `来自插件「${t.pluginName}」`, icon: <PluginIcon size={24} /> })),
   ]
+
+  // 主题氛围特效（docs/theme-fx-design.md §4.3）：仅当前激活主题声明了 --theme-fx 时显示。
+  // 真相源 = html 计算样式（readFxKind，与 ThemeFxLayer 同一份判定）—— 不再用 pluginThemes
+  // 异步列表 find(s.theme)：插件列表未就绪/查询失败时区块会消失（2026-09-28 用户报「时有时无」），
+  // 且那套判定不随主题切换重查。主题 class 是 settings 载入后异步挂上的，MutationObserver 跟拍。
+  const [fxKind, setFxKind] = useState<ThemeFxKind | null>(null)
+  useEffect(() => {
+    const read = () => setFxKind(readFxKind())
+    read()
+    const mo = new MutationObserver(read)
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    window.addEventListener('plugins-changed', read)
+    return () => { mo.disconnect(); window.removeEventListener('plugins-changed', read) }
+  }, [])
+  const fxOn = s.themeFxEnabled !== false
+  const DENSITY_LABELS = [
+    { id: 'low', label: '疏' },
+    { id: 'mid', label: '中' },
+    { id: 'high', label: '密' },
+  ] as const
 
   return (
     <div>
@@ -77,6 +98,49 @@ export function AppearanceView() {
           }))}
         />
       </div>
+
+      {/* 主题氛围特效：仅激活主题声明了 --theme-fx（四季主题）时出现 —— docs/theme-fx-design.md §4.3 */}
+      {fxKind && (
+        <div className="mb-8" data-setting-anchor="appearance.themeFx">
+          <h3 className="text-[12px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-3">主题特效</h3>
+          <p className="text-[11px] text-[var(--text-muted)] mb-3">当前主题的四季氛围粒子（工作台 / 看板）</p>
+          <div className="flex items-center gap-1.5 max-w-xs">
+            {[{ id: false, label: '关' }, { id: true, label: '开' }].map((o) => (
+              <button
+                key={o.label}
+                onClick={() => update('themeFxEnabled', o.id)}
+                className={`flex-1 px-2 py-2 rounded text-[12px] border transition-colors ${
+                  fxOn === o.id
+                    ? 'border-[var(--accent)] bg-[var(--bg-selected)] text-[var(--text-primary)]'
+                    : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          {fxOn && (
+            <div className="mt-3">
+              <p className="text-[11px] text-[var(--text-muted)] mb-2">粒子密度</p>
+              <div className="flex gap-1.5 max-w-xs">
+                {DENSITY_LABELS.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => update('themeFxDensity', d.id)}
+                    className={`flex-1 px-2 py-2 rounded text-[12px] border transition-colors ${
+                      (s.themeFxDensity || 'mid') === d.id
+                        ? 'border-[var(--accent)] bg-[var(--bg-selected)] text-[var(--text-primary)]'
+                        : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
+                    {d.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 删除动画皮肤(插件可通过 deleteFx 贡献追加自定义龙头/粒子/颜色) */}
       <div className="mb-8" data-setting-anchor="appearance.deleteFx">
@@ -118,37 +182,25 @@ export function AppearanceView() {
         />
       </div>
 
-      <div className="mb-8" data-setting-anchor="appearance.startupTab">
-        <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-3">启动时默认显示</h3>
-        <p className="text-[11px] text-[var(--text-muted)] mb-3">每次打开应用时，自动切换到该模块。若该模块被隐藏，则回退到第一个可见模块。</p>
-        <div className="grid grid-cols-3 gap-2 max-w-sm">
-          {(function () {
-            const TABS: { id: string; label: string; icon: React.ReactNode }[] = [
-              { id: 'blog', label: '博客', icon: <BlogIcon size={16} /> },
-              { id: 'schedule', label: '日程', icon: <ScheduleIcon size={16} /> },
-              { id: 'knowledge', label: '知识库', icon: <KnowledgeIcon size={16} /> },
-              { id: 'editor', label: '编辑区', icon: <EditorIcon size={16} /> },
-              { id: 'moments', label: '说说', icon: <MomentsIcon size={16} /> },
-              { id: 'toolbox', label: '工具箱', icon: <ToolboxIcon size={16} /> },
-            ]
-            return TABS.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => update('startupTab', tab.id)}
-                className={`flex items-center gap-1.5 px-2.5 py-2 rounded text-[12px] border transition-colors ${
-                  s.startupTab === tab.id
-                    ? 'border-[var(--accent)] bg-[var(--bg-selected)] text-[var(--text-primary)]'
-                    : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                }`}
-              >
-                <span className={s.startupTab === tab.id ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}>
-                  {tab.icon}
-                </span>
-                {tab.label}
-              </button>
-            ))
-          })()}
-        </div>
+      {/* AI 助手输入样式（批次5 反馈轮：原型 ai-input-style-prototype.html V1-V9 全量落地） */}
+      <div className="mb-8" data-setting-anchor="appearance.assistantInputStyle">
+        <SettingSelect
+          title="AI 助手输入样式"
+          description="AI 助手对话输入框（侧栏 / 右栏 / aiChat 共用）的外观方案。"
+          value={typeof s.assistantInputStyle === 'string' ? s.assistantInputStyle : 'v1'}
+          onChange={id => update('assistantInputStyle', id)}
+          options={[
+            { id: 'v1', label: '浅灰填充', desc: '无边框浅灰底，聚焦时底色加深（默认）', isDefault: true },
+            { id: 'v2', label: '白卡描边', desc: '白底细边框，聚焦时描边转主题色' },
+            { id: 'v3', label: '白卡描边 + 光晕', desc: '描边外发光，聚焦状态最醒目' },
+            { id: 'v4', label: '白卡投影', desc: '无边框靠阴影分层，聚焦时投影抬升' },
+            { id: 'v5', label: '灰底胶囊', desc: '大圆角胶囊形，聚焦底色加深' },
+            { id: 'v6', label: '透明底描边（内凹）', desc: '默认嵌入页面，聚焦浮现浅底' },
+            { id: 'v7', label: '双层嵌套', desc: '外灰壳 + 内白输入条，聚焦内条描边' },
+            { id: 'v8', label: '下划线极简', desc: '无底无框只留底线，聚焦线变主题色' },
+            { id: 'v9', label: '灰底聚焦描边', desc: '平时无边框，聚焦时才显描边' },
+          ]}
+        />
       </div>
 
       <div className="mb-8" data-setting-anchor="appearance.blogCardSize">

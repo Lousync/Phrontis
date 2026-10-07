@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readdirSync, renameSync } from 'fs'
 import { join } from 'path'
-import { BrowserWindow, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { readJson, writeJson } from './kbStore/jsonStore'
 import { listAgentSessions } from './agentSessionRepo'
+import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 
 /**
  * AI教学模块 · 工作区两层（总纲 §3.2-6 / §3.5，P5；决策点 3-6/3-8 按建议：元数据入仓库 `.knowbase/`，工作区跟随当前激活仓库）
@@ -218,10 +219,10 @@ export function setLastWorkspace(wsId: string | null): { ok: boolean; error?: st
   return { ok: true }
 }
 
+/** 树刷新广播：走 windowBus 统一出口 + 通道常量（**不 import aiTeachingFolders 的语义包装** ——
+ *  后者反向 import 本模块，会形成 folders↔workspaces 循环 import） */
 function broadcastTree(dirRel: string): void {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send('aiTeach:tree-refresh', { dirRel })
-  }
+  broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel })
 }
 
 export function registerAiTeachingWorkspaceHandlers(getSetting: (key: string) => unknown): void {

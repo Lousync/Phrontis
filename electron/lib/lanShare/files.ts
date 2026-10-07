@@ -75,20 +75,6 @@ export function removeInboxFile(name: unknown): boolean {
   }
 }
 
-/** 归档：把收件文件移动到目标目录（附件库等），成功后从 inbox 消失 */
-export function moveOutOfInbox(name: unknown, destDir: string): string | null {
-  const p = safeResolveInside(getInboxDir(), name)
-  if (!p || !existsSync(p)) return null
-  if (!existsSync(destDir)) mkdirSync(destDir, { recursive: true })
-  const dest = join(destDir, basename(p))
-  try {
-    copyFileSync(p, dest)
-    unlinkSync(p)
-    return dest
-  } catch {
-    return null
-  }
-}
 
 // ---- outbox（电脑 → 平板） ----
 

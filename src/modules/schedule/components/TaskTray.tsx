@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { ScheduleTodo } from '../../../types'
-import { Zap, Info } from 'lucide-react'
+import { Zap, Info, Trash2 } from 'lucide-react'
 import {
   quadrantMeta, QUADRANT_TEXT_CLASS, QuadrantIconGlyph,
   type QuadrantIcon,
@@ -16,6 +16,10 @@ import { dragGuard, emitScheduleDragStart } from '../timetable'
  * 拖拽用 pointer events：按下后位移超过阈值才真正「起拖」，
  * 事件交给 TimetableView 接管（它掌握网格几何，负责落点判定与提交）；
  * 本栏只负责把任务快照广播出去。落点区域用 `data-tray-drop` 标出来供对方识别。
+ *
+ * 卡片悬停时右上角出现删除钮（2026-09-13 补）：删除入口原先只存在于日视图列表，
+ * 周视图里建错/过期的任务删不掉，必须切到日视图找到那一天。删除钮按下时
+ * **必须 stopPropagation**——否则会同时触发卡片的起拖（pointer 手势）与打开编辑弹窗。
  */
 interface Props {
   todos: ScheduleTodo[]
@@ -23,11 +27,16 @@ interface Props {
   quadrantIcon: QuadrantIcon
   quadrantText: 'show' | 'hide'
   onOpen: (todo: ScheduleTodo) => void
+  /** 删除任务（上层落盘）。本组件先播 180ms 退场动效再回调，避免卡片瞬间消失看不到动画 */
+  onDelete?: (todo: ScheduleTodo) => void
   /** 空态文案（周任务清单与待安排栏文案不同） */
   emptyHint?: ReactNode
 }
 
 const TYPE_LABEL: Record<string, string> = { plan: '计划', daily: '当日', deadline: '截止' }
+
+/** 与 `.kb-item-out` 的过渡时长一致（styles/index.css） */
+const EXIT_MS = 180
 
 const SZ = {
   sm: { title: 'text-[11.5px]', meta: 'text-[10px]', icon: 12, pad: 'px-2 py-1.5', gap: 'mb-1' },
@@ -35,8 +44,21 @@ const SZ = {
   lg: { title: 'text-[13.5px]', meta: 'text-[11px]', icon: 16, pad: 'px-3 py-2.5', gap: 'mb-2' },
 }
 
-export function TaskTray({ todos, iconSize, quadrantIcon, quadrantText, onOpen, emptyHint }: Props) {
+export function TaskTray({ todos, iconSize, quadrantIcon, quadrantText, onOpen, onDelete, emptyHint }: Props) {
   const s = SZ[iconSize]
+  /** 正在退场的卡片 id（播完动画才真正落盘删除） */
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  /** 点删除：先标记退场 → 动画结束再落盘。中途不落盘，卡片才不会在动画播完前被数据刷新移除 */
+  function handleDelete(todo: ScheduleTodo, e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!onDelete || deletingId) return
+    setDeletingId(todo.id)
+    window.setTimeout(() => {
+      setDeletingId(null)
+      onDelete(todo)
+    }, EXIT_MS)
+  }
 
   /** 按下后位移超过阈值才算起拖（否则是一次点击 → 打开编辑） */
   function handleCardPointerDown(todo: ScheduleTodo, e: React.PointerEvent) {
@@ -100,7 +122,7 @@ export function TaskTray({ todos, iconSize, quadrantIcon, quadrantText, onOpen, 
                 if (Date.now() - dragGuard.lastEnd < 250) return
                 onOpen(todo)
               }}
-              className={`kb-item-in group relative flex items-center gap-2 ${s.pad} ${s.gap} bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-md ${done ? 'opacity-60' : 'cursor-grab active:cursor-grabbing hover:border-[var(--accent)]'} transition-colors`}
+              className={`kb-item-in group relative flex items-center gap-2 ${s.pad} ${s.gap} bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-md ${done ? 'opacity-60' : 'cursor-grab active:cursor-grabbing hover:border-[var(--accent)]'} ${deletingId === todo.id ? 'kb-item-out' : ''} transition-colors`}
               title={done ? '已完成（周任务清单含已完成）' : '拖到右侧日程表即可排期'}
             >
               {/* 标签色条 */}
@@ -126,6 +148,18 @@ export function TaskTray({ todos, iconSize, quadrantIcon, quadrantText, onOpen, 
                 </div>
                 <p className={`${s.title} font-medium ${done ? 'text-[var(--text-muted)] line-through' : 'text-[var(--text-primary)]'} mt-0.5 leading-snug truncate`}>{todo.title}</p>
               </div>
+              {/* 删除：始终占位（仅切 opacity），悬停才显现 —— 恒定占位可避免 hover 时标题宽度跳动。
+                  按下时 stopPropagation：否则会同时触发卡片的起拖手势 */}
+              {onDelete && (
+                <button
+                  onClick={e => handleDelete(todo, e)}
+                  onPointerDown={e => e.stopPropagation()}
+                  title="删除"
+                  className="shrink-0 p-1 rounded text-[var(--text-muted)] hover:text-[var(--danger)] opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-colors"
+                >
+                  <Trash2 size={Math.max(12, s.icon - 2)} />
+                </button>
+              )}
             </div>
           )
         })}

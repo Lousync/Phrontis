@@ -144,7 +144,7 @@ export function OutlinePanel({ pageTitle, headings, onBackToFile, embedded = fal
   const matchCount = trimmedQuery ? countNodes(filtered) : headings.length
 
   return (
-    <div className={`flex flex-col h-full ${embedded ? '' : 'w-[260px] shrink-0 border-r border-[var(--border-color)] bg-[var(--bg-primary)]'}`}>
+    <div className={`flex flex-col h-full ${embedded ? '' : 'w-[260px] shrink-0 border-r border-[var(--border-color)] kb-theme-surface'}`}>
       {/* Header — back to file view (only for the standalone panel) */}
       {!embedded && (
         <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--border-color)]">

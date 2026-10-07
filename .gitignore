@@ -2,6 +2,8 @@ node_modules/
 out/
 dist/
 dist-electron/
+# 打包产物目录（含按版本切出的 dist-electron-vXXX / -vXXXb 变体，旧实例锁目录时的绕法产物）
+dist-electron-*/
 data/
 *.db
 *.exe
@@ -13,6 +15,8 @@ Thumbs.db
 .claude/
 # 个人项目偏好（官方约定应加入 .gitignore）；项目规则本体见 AGENTS.md
 CLAUDE.local.md
+# 本机 node 安装目录提示（scripts/start-desktop.bat 读它；绝对机器路径不进版本控制）
+scripts/node-path.local.txt
 .agents/
 .trae/
 .workbuddy/
@@ -23,12 +27,14 @@ CLAUDE.local.md
 proto/
 .codegraph/
 .idea/
+.vscode/
 *.blockmap
 latest.yml
 
 # 构建产物备份（npm run build 前 mv out out_prev_* 的绕法残留）
 out_prev_*/
-# electron-vite 配置的时间戳备份
+# electron-vite 加载 TS 配置时落盘的临时模块（electron-vite/dist loadConfigFormBundledFile，
+# 正常路径 import 完即 unlink；dev 被硬杀/崩溃时漏删 → 每次残留一个，可随时手删）
 electron.vite.config.*.mjs
 # 原型与截图预览输出
 outputs/

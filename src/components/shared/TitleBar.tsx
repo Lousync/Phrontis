@@ -3,11 +3,11 @@ import { useSettings } from '../../lib/SettingsContext'
 import {
   X, Pin, ArrowDownToLine, Loader2, Play,
   Pause, Download, AlertTriangle, RefreshCw, SlidersHorizontal, ExternalLink,
-  CalendarCheck2, UserPlus, MonitorPlay,
+  UserPlus, MonitorPlay,
 } from 'lucide-react'
 import {
   useUpdateStore, updateStartupCheck, updateDownload, updatePause, updateCancel, updateInstall,
-  updateFailKind, updateFailMessage,
+  updateFailKind, updateFailMessage, updateStageText,
 } from '../../lib/updateStore'
 import { MarkdownPreview } from './MarkdownPreview'
 import { openExternal, edgeResizeStart, edgeResizeEnd } from '../../lib/ipc'
@@ -17,16 +17,7 @@ function showToastSafe(message: string): void {
   showToast({ type: 'info', message })
 }
 
-interface TitleBarProps {
-  /** 日程打卡侧边栏当前是否激活（内嵌显示中或独立窗口打开中）。用于按钮高亮 */
-  dayPanelActive?: boolean
-  /** 点击日程打卡侧边栏开关按钮：App 统一处理「脱离态→吸附 / 内嵌态→显示」逻辑 */
-  onToggleDayPanel?: () => void
-  /** 抽屉面板当前实际占宽（0 = 收起）。搜索框以此为偏移锚定主内容区中心，外扩时不漂移 */
-  drawerWidth?: number
-}
-
-export function TitleBar({ dayPanelActive = false, onToggleDayPanel, drawerWidth = 0 }: TitleBarProps = {}) {
+export function TitleBar() {
   const { s: settings, update: updateSetting } = useSettings()
   const badgeEgg = settings.badgeEggActivated
   const [isMaximized, setIsMaximized] = useState(false)
@@ -126,6 +117,8 @@ export function TitleBar({ dayPanelActive = false, onToggleDayPanel, drawerWidth
     : `发现新版本 v${upd.check?.latestVersion},点击查看`
 
   const failKind = updateFailKind(upd.reason)
+  // 非进度类阶段提示(校验中/换镜像);downloading 时为 null,按常规进度渲染
+  const stageText = updateStageText(upd.stage)
 
   function togglePin() {
     const next = !isPinned
@@ -256,9 +249,15 @@ export function TitleBar({ dayPanelActive = false, onToggleDayPanel, drawerWidth
                           style={{ width: `${upd.progress.percent}%` }} />
                       </div>
                       <div className="text-[11px] text-[var(--text-muted)] mb-2">
-                        {upd.phase === 'paused' ? '已暂停 ' : '正在下载 '}{upd.check?.asset?.name} — {upd.progress.percent}%
-                        {upd.progress.totalBytes > 0 && `（${(upd.progress.receivedBytes / 1048576).toFixed(1)} / ${(upd.progress.totalBytes / 1048576).toFixed(1)} MB）`}
-                        {upd.phase === 'paused' && ',继续下载将从断点续传'}
+                        {stageText ? (
+                          <span className="text-[var(--accent)]">{stageText}</span>
+                        ) : (
+                          <>
+                            {upd.phase === 'paused' ? '已暂停 ' : '正在下载 '}{upd.check?.asset?.name} — {upd.progress.percent}%
+                            {upd.progress.totalBytes > 0 && `（${(upd.progress.receivedBytes / 1048576).toFixed(1)} / ${(upd.progress.totalBytes / 1048576).toFixed(1)} MB）`}
+                            {upd.phase === 'paused' && ',继续下载将从断点续传'}
+                          </>
+                        )}
                       </div>
                       <div className="flex items-center gap-2">
                         {upd.phase === 'downloading' ? (
@@ -316,32 +315,17 @@ export function TitleBar({ dayPanelActive = false, onToggleDayPanel, drawerWidth
               )}
             </div>
           )}
-          <WinBtn
-            onClick={onToggleDayPanel ?? (() => {})}
-            title="日程与打卡侧边栏 (Ctrl+Alt+S)"
-            className="w-9"
-          >
-            <CalendarCheck2
-              size={14}
-              strokeWidth={1.5}
-              className={dayPanelActive ? 'text-[var(--accent)]' : ''}
-              fill={dayPanelActive ? 'var(--accent)' : 'transparent'}
-              fillOpacity={dayPanelActive ? 0.25 : 0}
-            />
-          </WinBtn>
+          {/* 「日程与打卡侧边栏」脱离按钮 —— 2026-09-23 隐藏。
+              原按钮把日程打卡侧边栏脱离为独立桌面窗口（v3.4.0 批次4 起语义）；
+              它属「侧边栏 DIY」方向（面板编辑器，v3.5.0 第 ③ 项），该方向未实现，故收起界面入口。
+              Ctrl+Alt+S 快捷键与 App.tsx 的 toggleDayPanel 逻辑保留，脱离能力未移除；
+              DIY 落地后按 `Phrontis/更新计划/v3.5.0.md` 第 ③ 项决定是否恢复入口。 */}
+
           <WinBtn onClick={togglePin} title={isPinned ? '取消置顶' : '窗口置顶'} className="w-9">
             <Pin size={14} strokeWidth={1.5} fill={isPinned ? 'var(--text-primary)' : 'transparent'} />
           </WinBtn>
         </div>
 
-      {/* VS Code 风格居中搜索框：锚定主内容区中心（左移 drawerWidth/2），抽屉外扩时纹丝不动；
-          宽度同步扣除 drawerWidth，展开前后保持不变 */}
-      <div
-        className="absolute -translate-x-1/2 no-drag z-10"
-        style={{ left: `calc(50% - ${drawerWidth / 2}px)`, width: `min(100% - ${180 + drawerWidth}px, 560px)` }}
-      >
-        <div id="titlebar-search" />
-      </div>
       {/* UI 优化条目1.7：最大化态顶栏拖拽恢复 overlay（空白区接管，控件 z-10 保持可点；双击 toggle 还原） */}
       {isMaximized && (
         <div className="absolute inset-0 no-drag z-0" onMouseDown={onMaxTitleDown} onDoubleClick={() => window.api?.maximize()} />

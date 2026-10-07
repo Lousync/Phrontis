@@ -8,7 +8,7 @@ import initSqlJs from 'sql.js'
  * 把用户已配置的供应商一键导入模型网关。
  *
  * 安全约定：
- * - Key 明文只在主进程内存的导入缓存中短暂存在（list 时缓存，import 时取用并立即 DPAPI 加密）
+ * - Key 明文只在主进程内存的导入缓存中短暂存在（list 时缓存，import 时取用并立即加密落盘，secretBox）
  * - 渲染层仅收到打码预览（前6位+***+后4位），全程接触不到明文
  */
 
@@ -121,10 +121,6 @@ export async function scanCcSwitch(): Promise<CcSwitchScanResult> {
   }
 }
 
-/** 导入选中项：复用网关的加密存储链路 */
-export function takeCached(id: string): CachedItem | undefined {
-  return cache.get(id)
-}
 
 export interface ImportOutcome {
   imported: number

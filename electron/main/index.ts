@@ -1,6 +1,6 @@
 // 必须最先引入：IPC 注册幂等包装（dev 下 repo 模块被打包两份时避免重复注册崩溃）
 import './ipcSafe'
-import { app, BrowserWindow, dialog, ipcMain, screen, shell, protocol, clipboard, nativeImage, Menu, net, Tray } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, shell, protocol, clipboard, nativeImage, Menu, net, Tray, powerMonitor } from 'electron'
 // 无 GPU/无头环境（AI 驱动真机测试）显式 KNOWBASE_DISABLE_GPU=1 时禁用 GPU 加速，防渲染进程连带崩溃
 if (process.env.KNOWBASE_DISABLE_GPU === '1') {
   app.commandLine.appendSwitch('disable-gpu')
@@ -10,6 +10,7 @@ import { join, basename, resolve, sep } from 'path'
 import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdirSync, statSync, readdirSync, appendFileSync } from 'fs'
 import { Readable } from 'stream'
 import { getAttachmentsDir } from '../lib/globalPaths'
+import { assertSecretBoxRoundTrip } from '../lib/secretBox'
 import { registerPomodoroBroadcast } from './pomodoroState'
 import { registerEntryHandlers } from '../database/repositories/entryRepo'
 import { registerTagHandlers } from '../database/repositories/tagRepo'
@@ -26,16 +27,26 @@ import { registerAttachmentHandlers, getAttachmentFilePath } from '../database/r
 import { registerVaultBackupHandlers } from '../database/repositories/vaultBackupRepo'
 import { registerRepoConfigHandlers } from '../database/repositories/repoConfigRepo'
 import { registerCheckinHandlers } from '../database/repositories/checkinRepo'
+import { registerShareCardHandlers } from '../database/repositories/shareCardRepo'
 import { registerBookmarkHandlers } from '../database/repositories/bookmarkRepo'
+import { registerPetHandlers } from '../database/repositories/petRepo'
+import { registerAccountingHandlers } from '../database/repositories/accountingRepo'
 import { registerSuperviseHandlers } from '../database/repositories/superviseRepo'
 import { registerSummaryHandlers } from '../database/repositories/summaryRepo'
 import { registerBlogTemplateHandlers } from '../database/repositories/blogTemplateRepo'
+import { registerBlogSummaryHandlers } from '../database/repositories/blogSummaryRepo'
 import { registerQuizHandlers } from '../database/repositories/quizRepo'
+import { registerPdfReaderHandlers } from '../database/repositories/pdfReaderRepo'
+import { registerReaderStateHandlers } from '../database/repositories/readerStateRepo'
+import { registerDashboardHandlers } from '../database/repositories/dashboardRepo'
+import { registerExcerptHandlers } from '../database/repositories/excerptRepo'
+import { registerBookMarketHandlers } from '../database/repositories/bookMarketRepo'
 import { startSuperviseScheduler, stopSuperviseScheduler, enqueueExternalPush } from '../lib/pushService'
 import { initScheduleReminders } from '../lib/scheduleReminder'
 import { initPasswordFiller, destroyPasswordFiller } from './passwordFiller'
 import { initDayPanel, disposeDayPanel, getPanelMode, setPanelMode, onPanelModeChanged, isPopoutOpen } from './dayPanelWindow'
 import { registerWindowBus } from './windowBus'
+import { noteFocus, noteSuspended, flushAppUsageNow, startAppUsageCollector } from '../lib/appUsageStore'
 import { registerDevtoolsHandlers } from './devtools'
 import { registerUpdateHandlers } from '../lib/updateService'
 import { registerReleaseNotesHandlers } from '../lib/releaseNotes'
@@ -48,18 +59,24 @@ import { registerSkillHandlers } from '../lib/skillService'
 import { registerLlmHandlers } from '../lib/llmService'
 import { registerAgentHandlers } from '../lib/agentService'
 import { registerAgentCompressHandlers } from '../lib/agentCompress'
+import { registerInlineSuggestHandlers } from '../lib/aiAssistant/inlineSuggest'
 import { registerSemanticIndexHandlers } from '../lib/kbStore/semanticIndex'
 import { registerKnowledgeSearchHandlers } from '../lib/knowledgeSearch'
 import { registerAiTeachingFolderHandlers, migrateRootDir as migrateAiTeachRootDir } from '../lib/aiTeachingFolders'
+import { registerAssistantConstraintsHandlers } from '../lib/assistantConstraints'
 import { registerAiTeachingWorkspaceHandlers } from '../lib/aiTeachingWorkspaces'
 import { registerAiTeachingSourceHandlers } from '../lib/aiTeachingSources'
 import { registerAiTeachingProfileHandlers } from '../lib/aiTeachingProfile'
+import { registerAiTeachingCourseHandlers } from '../lib/aiTeachingCourse'
 import { registerTranslateHandlers } from '../lib/translateService'
 import { registerPdfHandlers } from '../lib/pdfService'
 import { registerDocsReadHandlers } from '../lib/docsIpc'
 import { registerLanShareHandlers } from '../lib/lanShare'
+import { registerTerminalHandlers } from '../database/repositories/terminalRepo'
+import { applyBookMarketProxy, initBookMarketProxy } from '../lib/bookMarket/netSession'
 import { registerClipperHandlers, startClipperServer, stopClipperServer } from '../lib/clipperServer'
 import { registerWorkspaceHandlers, trashAllRegisteredVaults, clearVaultRegistry } from '../lib/workspaceManager'
+import { closeVaultWatcher } from '../lib/fsWatcher'
 import { registerVaultArchiveHandlers } from '../lib/vaultArchive'
 import { getCurrentVault, setCurrentVault } from '../lib/kbStore/vaultContext'
 import { SETTINGS } from '../../src/lib/settings'
@@ -165,6 +182,16 @@ function flushSettingsToDisk(): void {
 // 允许打包后 file:// 环境下加载本地 module worker（pdf.js 阅读器需要）
 app.commandLine.appendSwitch('allow-file-access-from-files')
 
+// ★ 关闭 Windows「窗口遮挡」判定（2026-09-21 实测根因）：
+//   窗口被别的窗口盖住时，Chromium 会把页面标记为 hidden，连带**冻结 requestAnimationFrame 与
+//   IntersectionObserver**。而 pdf.js 3.11 的渲染步进正是 rAF 驱动的（display/api.js：
+//   `useRequestAnimationFrame: !intentPrint` → `_scheduleNext()` 里走 window.requestAnimationFrame），
+//   于是「被遮挡期间发起的那次渲染」永远不结束：画布一片空白、渲染池的 4 个并发槽被僵尸占满，
+//   之后缩放/滚动触发的重渲全部排不进去 —— 用户看到的就是「中间页不显示 + 缩放不好用」，
+//   且要等下一次滚动（新的一次 IO 投递）才可能自愈。
+//   关掉该判定后，被遮挡期间 rAF/IO 照常投递，渲染能正常收尾，回到前台时页面已经画好。
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+
 // 单实例锁 — 防止多窗口数据不同步（sql.js 内存数据库无跨进程共享能力）
 const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
@@ -192,27 +219,16 @@ function showMainWindow(): void {
   mainWindow.focus()
 }
 
-function createTray(): void {
+// F-3（2026-09-26）：托盘与任务栏图标共用 appIcon.ts 唯一事实源（isPackaged 分叉候选 +
+// 有限重试 + 内嵌真图标兜底）；打包态能从磁盘装载的前提是 package.json extraResources 带出 build/icon.png
+import { loadAppIconSync, loadAppIconWithRetry } from '../lib/appIcon'
+
+async function createTray(): Promise<void> {
   try {
-    const candidates = [
-      join(app.getAppPath(), 'build', 'icon.png'),
-      join(process.resourcesPath ?? '', 'build', 'icon.png'),
-      join(process.resourcesPath ?? '', 'icon.png'),   // 打包后 resources 根兜底
-    ]
-    let img = nativeImage.createEmpty()
-    for (const p of candidates) {
-      if (!p || p === 'icon.png') continue
-      const cand = nativeImage.createFromPath(p)
-      if (!cand.isEmpty()) { img = cand; break }
-    }
-    if (img.isEmpty()) {
-      // 兜底：所有候选路径都失败时用内置 16px 彩色占位（拒绝 Windows 空白托盘白块）
-      img = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAApUlEQVR4nK3MWwvBAByG8X00KZnTNNNY5jDMSkkppZSUUj6U8/k8p8/zuvN3/fLcPz9F+UeB8AtB9YlQ5AE1ekcsfoOW8KFrPozkFaZ+gZU6wzZOKKaPcMwDqpk9PgAze9mdAMxct7YCMHMjtxGAmZv2WgBmbuVXAjBzu7AUgJk7pYUAzNx15gIwc6/8BTBzvzITgJkH7lQAZh7WJgIw88gbC/BLb/8X7Gi3iexmAAAAAElFTkSuQmCC'
-      )
-      console.warn('[Tray] All icon candidates failed to load -> using builtin placeholder')
-    }
-    if (process.platform === 'win32') img = img.resize({ width: 16, height: 16 })
-    tray = new Tray(img)
+    const { img, source } = await loadAppIconWithRetry(4, 400, (m) => console.warn('[Tray]', m))
+    let image = img
+    if (process.platform === 'win32') image = image.resize({ width: 16, height: 16 })
+    tray = new Tray(image)
     tray.setToolTip('Phrontis · 日程打卡')
     const rebuildMenu = () => {
       tray?.setContextMenu(Menu.buildFromTemplate([
@@ -231,7 +247,7 @@ function createTray(): void {
     // 模式变化时刷新托盘单选状态
     onPanelModeChanged(rebuildMenu)
     tray.on('click', showMainWindow)
-    console.log('[Tray] Tray created')
+    console.log('[Tray] Tray created (icon source:', source + ')')
   } catch (e) {
     console.warn('[Tray] Failed to create (non-fatal):', e)
   }
@@ -250,7 +266,7 @@ function createWindow(): void {
     frame: false,                          // 无边框 → 自定义标题栏
     titleBarStyle: 'hidden',              // macOS 隐藏原生标题栏
     transparent: true,                     // 透明底 → 根容器 18px 自绘圆角（最大化时渲染层自动切直角）
-    icon: join(app.getAppPath(), 'build', 'icon.png'),  // 任务栏按钮显式用应用图标（dev 下 electron.exe 无内置图标 → 白板按钮的根因；打包后 exe 自带图标不受影响）
+    icon: loadAppIconSync().img,  // 任务栏按钮显式用应用图标（F-3：与托盘同一事实源；打包态 exe 自带图标仍是最终权威）
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,                         // preload 仅用 contextBridge/ipcRenderer/webUtils,完全兼容沙箱
@@ -258,6 +274,10 @@ function createWindow(): void {
       nodeIntegration: false
     }
   })
+
+  // 缩放分层钳制（2026-09-20）：界面缩放走 s.zoom（rem），PDF 页面缩走阅读器内部 zoom——
+  // 引擎级 zoomFactor（Ctrl+滚轮整页缩放 / 双指捏合）必须关掉，否则三层缩放互相叠加
+  mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
 
   // 安全：主窗口自身永不导航(应用为单页,任何导航请求均为异常/注入行为)。
   // 例外：同 URL 的 reload——Electron 把 location.reload() 也当导航触发本事件，
@@ -285,17 +305,42 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    // ★ B-19：该事件对**子帧**同样触发 —— 书籍内容帧（blob:）在「帧还没加载完就被拆掉/换掉」的
+    //   时序上报 ERR_ABORTED(-3)，那是有意取消、不是窗口级故障。不判主帧就会把它按窗口错误报，
+    //   每次进出书籍各来一条，混在真故障里增加排查噪声。
+    if (!isMainFrame) return
     console.error('[Window] did-fail-load:', { errorCode, errorDescription, validatedURL })
   })
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error('[Window] render-process-gone:', details)
     ;(globalThis as any).__kbLogRendererGone?.(details)
   })
+  // ★ B-19：渲染层 error 级消息**按「来源+消息体」去重限流**再转发。
+  //   一次「退出书籍回书架」实测在 1.45s 内向这里投递 266 条**同一条** RO 环告警；
+  //   无条件转发会把 `npm run dev` 的终端整屏刷掉，真报错被淹没（也正是这批刷屏把 devbridge
+  //   500 条日志环挤爆、吃掉了同段的其它证据）。同一条消息每个窗口只放行一次，
+  //   被压掉的条数在下次放行时标出来 —— **不整条静音**（别的模块可能真出问题）。
+  const rendererLogSeen = new Map<string, { at: number; suppressed: number }>()
+  const RENDERER_LOG_WINDOW_MS = 1000
   mainWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
-    if (level >= 2) {
-      console.error('[Renderer]', message, `(${sourceId}:${line})`)
+    if (level < 2) return
+    const now = Date.now()
+    const key = `${sourceId}:${message}`
+    const prev = rendererLogSeen.get(key)
+    if (prev && now - prev.at < RENDERER_LOG_WINDOW_MS) {
+      prev.suppressed += 1
+      return
     }
+    const suppressed = prev?.suppressed ?? 0
+    rendererLogSeen.set(key, { at: now, suppressed: 0 })
+    // 窗口外且久未出现的键及时回收，防长期挂机无界增长
+    if (rendererLogSeen.size > 200) {
+      for (const [k, v] of rendererLogSeen) {
+        if (now - v.at > 10_000) rendererLogSeen.delete(k)
+      }
+    }
+    console.error('[Renderer]', message, `(${sourceId}:${line})`, suppressed > 0 ? `[+${suppressed} 条同类已折叠]` : '')
   })
 
   // 加载页面
@@ -596,6 +641,12 @@ function registerWindowHandlers(): void {
       }
     }
     settingsCache[key] = value
+    // 书市代理（方案 §三）：改完**立刻**灌进 bookmarket 分区 —— 只作用于书市那座 session，
+    // 不动 defaultSession。失败不打断设置写入（代理串写错不该连带设置都存不下），
+    // 下次 `initBookMarketProxy` 启动时还会再试一次。
+    if (key === 'bookMarketProxy') {
+      void applyBookMarketProxy(typeof value === 'string' ? value : '').catch(() => { /* 见上 */ })
+    }
     // Debounce write to disk — coalesce rapid setSetting calls into one write
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = setTimeout(flushSettingsToDisk, 500)
@@ -645,6 +696,42 @@ app.whenReady().then(async () => {
 
   // Initialize settings cache once at startup
   settingsCache = loadSettingsFromDisk()
+
+  // 记账模块（v3.5.x）默认对 AI 读写：老 settings.json 的 aiModulePermissions 早于本模块、
+  // 缺 accounting 键时权限层会落到默认 read（AI 录账被拒）；这里一次性补齐为 write。无该键时也建一份
+  // （其余模块本就默认 read，与补齐后一致，无回归）。
+  try {
+    const rawPerm = settingsCache['aiModulePermissions']
+    const objPerm: Record<string, unknown> = typeof rawPerm === 'string' && rawPerm.trim()
+      ? (JSON.parse(rawPerm) as Record<string, unknown>)
+      : {}
+    if (objPerm && typeof objPerm === 'object' && !Array.isArray(objPerm) && !('accounting' in objPerm)) {
+      objPerm.accounting = 'write'
+      settingsCache['aiModulePermissions'] = JSON.stringify(objPerm)
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = setTimeout(flushSettingsToDisk, 500)
+    }
+  } catch { /* 坏 JSON 交给权限层兜底（按 read） */ }
+
+  // F-12：用量指示设置提为通用键（AI 教学与 AI 对话共用）——旧键值一次性迁移到新键。
+  try {
+    const renameMap: Array<[string, string]> = [['aiTeachUsageDetail', 'ctxUsageDetail'], ['aiTeachCtxWindow', 'ctxWindow']]
+    let renamed = false
+    for (const [oldKey, newKey] of renameMap) {
+      if (oldKey in settingsCache && !(newKey in settingsCache)) { settingsCache[newKey] = settingsCache[oldKey]; renamed = true }
+    }
+    if (renamed) { if (saveTimer) clearTimeout(saveTimer); saveTimer = setTimeout(flushSettingsToDisk, 500) }
+  } catch { /* 迁移失败不阻断启动 */ }
+
+  // 加密自检：确认 safeStorage 密文格式与 secretBox 的假设一致（只告警不阻断，见 secretBox.ts）
+  // 目的：把「密文格式变化 / 被误改」这类问题暴露在启动期，而非用户发现「密码全空」时
+  try {
+    assertSecretBoxRoundTrip()
+  } catch { /* 自检自身异常不应影响启动 */ }
+
+  // 书市代理灌进 bookmarket 分区（方案 §三）。**不 await**：代理连不上不是启动失败的理由，
+  // 而 session.setProxy 在某些代理下要跟系统代理配置打交道，await 它会把窗口拖晚。
+  void initBookMarketProxy((key) => settingsCache[key]).catch(() => { /* 见上 */ })
 
   // UI 插件页面协议:plugin://{id}/{file}
   // 安全:CSP 锁死网络(none),只允许插件自身源的内联资源;配合渲染层 iframe sandbox 使用
@@ -795,6 +882,18 @@ app.whenReady().then(async () => {
       return false
     }
   })
+  /**
+   * 向发起窗口补发一次真实粘贴命令（编辑器文件树右键「粘贴」用，v3.2.0 条目 ③）。
+   *
+   * Ctrl+V 会自然产生带 `clipboardData.files` 的 paste 事件，但**右键菜单点击是合成动作**，
+   * 拿不到 clipboardData；所以由渲染层先把焦点交给文件树，再请主进程代为执行
+   * `webContents.paste()`，从而复用同一条 paste 链路（落盘见 ws:pasteExternal）。
+   * 用 `e.sender` 而非 mainWindow：多窗口下必须打在发起方（小窗也有编辑器宿主）。
+   */
+  ipcMain.handle('clipboard:paste', (e) => {
+    try { e.sender.paste() } catch { /* 窗口已销毁等：静默 */ }
+    return { ok: true }
+  })
   ipcMain.handle('app:openExternal', async (_e, target: string) => {
     if (typeof target !== 'string' || !target) return
     // 网页链接 → 系统浏览器(仅 http/https,拒绝 file:/自定义协议)
@@ -841,11 +940,24 @@ app.whenReady().then(async () => {
   registerAttachmentHandlers()
   registerVaultBackupHandlers()
   registerCheckinHandlers()
+  registerShareCardHandlers()
   registerBookmarkHandlers()
+  registerPetHandlers()
+  registerAccountingHandlers()
   registerSuperviseHandlers()
   registerSummaryHandlers()
+  registerBlogSummaryHandlers()
   registerBlogTemplateHandlers()
   registerQuizHandlers({ getSettingValue: (key) => settingsCache[key] })
+  // PDF 阅读体验整包（v3.4.0 第 2 项）：进度/书签/封面缓存/导入六通道
+  registerPdfReaderHandlers()
+  // 阅读状态（书架升级全格式阅读器一期）：txt 进度两通道
+  registerReaderStateHandlers()
+  registerDashboardHandlers()
+  // 摘录（阅读器 · 摘录先行批次）：四通道
+  registerExcerptHandlers()
+  // 书市（book market）：书源 CRUD + 三态探测 + 聚合检索 + 下载队列（S3）
+  registerBookMarketHandlers()
   // 开发者工具(内部对 app.isPackaged 自行守卫,打包版不注册任何 handler)
   registerDevtoolsHandlers()
   registerUpdateHandlers({ getSettingValue: (key) => settingsCache[key] })
@@ -853,6 +965,8 @@ app.whenReady().then(async () => {
   registerReleaseNotesHandlers({ getSettingValue: (key) => settingsCache[key] })
   // 设备传输：局域网短时双向互传（工具箱）
   registerLanShareHandlers()
+  // 终端模块（terminal-module-design）：pty 会话 + AI 执行命令通道
+  registerTerminalHandlers({ getSettingValue: (key) => settingsCache[key] })
   // 编辑器工作区（Vault 仓库）：文件服务 + 授权根管理（getSetting 供 AI教学 产物根沉底名单）
   registerWorkspaceHandlers((key) => settingsCache[key])
   // 整仓归档：导出 zip / 导入（剥壳→校验→冲突逐条决策→登记重建，P6）
@@ -891,18 +1005,24 @@ app.whenReady().then(async () => {
     registerAgentHandlers()
     // 会话压缩（conversation-compaction-design）：agent:compressSession（/compress 指令 + 自动预检共用）
     registerAgentCompressHandlers()
+    // B4 编辑器内联建议：ai:inlineSuggest:run / :cancel（手动触发，独立于对话历史）
+    registerInlineSuggestHandlers()
     // 知识语义索引（knowledge-index-design）：设置页状态卡 + 手动重建
     registerSemanticIndexHandlers()
     // 相似笔记（编辑器右栏）检索 handler
     registerKnowledgeSearchHandlers()
     // AI教学 P1：会话 ⇄ 文件夹绑定（aiTeach:* IPC，总纲 §二）
     registerAiTeachingFolderHandlers((key) => settingsCache[key])
+    // AI 助手独立要求 + 术语表（N-5/N-7）：.assistant/ 的 ensure 入口（注入在 agentService 直读）
+    registerAssistantConstraintsHandlers()
     // AI教学 P5：工作区两层（元数据 .knowbase/modules/aiTeaching/workspaces.json，§3.2-6/3-6）
     registerAiTeachingWorkspaceHandlers((key) => settingsCache[key])
     // AI教学 P6：素材库（SOURCES/{对话夹}/SOURCE.md 登记+区间提取，§3.13 结构 v3）
     registerAiTeachingSourceHandlers((key) => settingsCache[key])
     // AI教学 P8：用户画像（全局 userData + 会话 PROFILE.md 两层，§3.14）
     registerAiTeachingProfileHandlers((key) => settingsCache[key])
+    // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲；docs/ai-teaching-course-mode-plan.md）
+    registerAiTeachingCourseHandlers((key) => settingsCache[key])
     // 划词翻译:离线词典 + LLM 翻译/AI 精讲
     registerTranslateHandlers()
     // PDF 工具箱:合并/页面重组/导出
@@ -963,6 +1083,17 @@ app.whenReady().then(async () => {
   // 跨窗口数据变更总线（data:notify → kb:data-changed），先于任何窗口能力注册
   registerWindowBus()
 
+  // 应用使用时长采集（看板「今日使用」卡与半年使用热力图的数据源，2026-09-27 净新增）。
+  // 记账条件 = 前台 且 未锁屏未休眠。用 app 级 focus/blur 而不是单窗口事件，
+  // 这样多窗口之间来回切不会被误判成「离开应用」。
+  app.on('browser-window-focus', () => noteFocus(true))
+  app.on('browser-window-blur', () => noteFocus(false))
+  powerMonitor.on('suspend', () => noteSuspended(true))
+  powerMonitor.on('resume', () => noteSuspended(false))
+  powerMonitor.on('lock-screen', () => noteSuspended(true))
+  powerMonitor.on('unlock-screen', () => noteSuspended(false))
+  startAppUsageCollector()
+
   // 日程与打卡侧边栏（WeChat 模式：内嵌 + 可脱离；桌面互动模式见 dayPanelWindow.ts）
   initDayPanel({
     getMainWindow: () => mainWindow,
@@ -975,7 +1106,7 @@ app.whenReady().then(async () => {
     },
   })
 
-  createTray()
+  void createTray()
 
   // Web 剪藏服务（工具箱「网页剪藏」入口的数据面；127.0.0.1 常驻，随应用启停）
   registerClipperHandlers({
@@ -1023,8 +1154,12 @@ app.on('before-quit', () => {
   stopSuperviseScheduler()
   disposeDayPanel()
   stopClipperServer()
+  // v3.2.0 条目 ④：关掉仓库文件监听（防句柄泄漏、防 dev 重启后重复挂载）
+  closeVaultWatcher()
   // Flush pending settings writes
   if (saveTimer) { clearTimeout(saveTimer); flushSettingsToDisk() }
+  // 应用使用时长：把最后一段结算进日桶并落盘（不能靠 debounce，进程马上就没了）
+  flushAppUsageNow()
 })
 
 // 安全：禁止 webview

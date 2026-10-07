@@ -143,7 +143,7 @@ export function StreamBubble({
             className="flex items-center gap-1 shrink-0 px-2 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-red-400 hover:border-red-400/50 transition-colors"
             title="中断当前请求与工具循环"
           >
-            <Square size={9} className="fill-current" /> 停止
+            <Square size={9} className="fill-current" /> <span className="kb-l2">停止</span>
           </button>
         )}
       </div>

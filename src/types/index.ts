@@ -2,8 +2,26 @@
 
 import type { DictLookupResult, DictStatus, DictWordEntry, DictExchange, TranslateMode, TranslateInvokeRequest, TranslateInvokeResult } from '../lib/translateTypes'
 import type { GraphIndexData, GraphViewConfig } from '../lib/graphTypes'
+import type { SummaryKind } from '../lib/summary'
 
 export type { DictLookupResult, DictStatus, DictWordEntry, DictExchange, TranslateMode, TranslateInvokeRequest, TranslateInvokeResult }
+
+/**
+ * 层级总结（周 / 月 / 年）文件 —— `.knowbase/blog/summaries/summary-<kind>-<start>_<end>.md`。
+ *
+ * 窗口口径是**日历口径**（自然周 / 自然月 / 自然年），与桌面上日历逐格对齐；
+ * 与 `getSummaryWindow`（总结日 −6 天，只做提醒与徽章）是两套，别混用 —— 见 `src/lib/summary.ts` 头部说明。
+ */
+export interface SummaryRecord {
+  id: string
+  kind: SummaryKind
+  start: string
+  end: string
+  title: string
+  contentMd: string
+  createdAt: string
+  updatedAt: string
+}
 
 export interface Entry {
   id: string; title: string; contentMd: string; contentHtml: string
@@ -15,7 +33,94 @@ export interface EntryFilter { date?: string; tagId?: string; pinnedOnly?: boole
 export interface CreateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date: string; tags?: string[]; states?: string }
 export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date?: string; isPinned?: boolean; isStarred?: boolean; tags?: string[]; states?: string }
 export interface Tag { id: string; name: string; color: string }
-export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'user' | 'toolbox' | 'plugins' | 'devtools' | 'editor' | 'aiTeaching' | 'releaseNotes'
+export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal' | 'accounting'
+
+// ===== 记账模块 =====
+// 主进程侧同形状声明见 electron/lib/kbStore/accountingVaultRepo.ts（跨线各侧各声明一次的仓规）
+export type AccountingType = 'expense' | 'income'
+export interface AccountingCategory {
+  id: string
+  name: string
+  color: string
+  kind: AccountingType | 'both'
+  builtin: boolean
+}
+/** 账户（= 支付方式）；当前余额 = initialBalance + 累计收入 − 累计支出（推导） */
+export interface AccountingAccount {
+  id: string
+  name: string
+  color: string
+  initialBalance: number
+  builtin: boolean
+}
+export interface AccountingTransaction {
+  id: string
+  date: string
+  time: string
+  type: AccountingType
+  amount: number
+  category: string
+  payment: string
+  merchant: string
+  note: string
+  source?: string
+  createdAt: string
+  updatedAt: string
+}
+export interface CreateAccountingInput {
+  date?: string
+  time?: string
+  type: AccountingType
+  amount: number
+  category?: string
+  payment?: string
+  merchant?: string
+  note?: string
+  source?: string
+}
+export interface AccountingParseItem {
+  invalid: boolean
+  reason?: string
+  dup: boolean
+  date: string
+  time: string
+  type: AccountingType
+  amount: number
+  category: string
+  payment: string
+  merchant: string
+  note: string
+}
+export interface AccountingParseOutcome { error?: string; items: AccountingParseItem[]; ok: number; dup: number; bad: number }
+export interface AccountingImportOutcome { error?: string; added: number; skipped: number; invalid: number }
+
+// ===== 终端模块（terminal-module-design）=====
+// 主进程侧同形状声明见 electron/lib/terminalService.ts（跨线各侧各声明一次的仓规）
+export interface TerminalSessionInfo {
+  id: string
+  shell: string
+  cwd: string
+  pid: number
+  /** 创建时的列/行数（渲染层据此免掉同尺寸的启动期 resize） */
+  cols: number
+  rows: number
+  exited: boolean
+  exitCode: number | null
+}
+export interface TerminalCreateResult extends TerminalSessionInfo { backlog: string }
+export type TerminalAiStatus = 'pending' | 'running' | 'ok' | 'denied' | 'timeout' | 'error'
+export interface TerminalAiRecord {
+  reqId: string
+  cmd: string
+  cwd: string
+  risky: boolean
+  status: TerminalAiStatus
+  exitCode: number | null
+  durationMs: number | null
+  outputPreview: string
+  time: string
+}
+export interface TerminalShellInfo { file: string; label: string; windowsBuildNumber?: number }
 
 // ===== 更新说明（release notes）=====
 // 主进程侧的同一份契约见 electron/lib/releaseNotes/types.ts
@@ -247,14 +352,8 @@ export interface MomentsPost {
 }
 // ---- 打卡模块 ----
 export type HabitRuleType = 'daily' | 'weekdays' | 'flexible'
-/** 自动打卡来源（跨模块联动），指标现值由主进程从各源表按业务日期反查 */
-export type HabitLinkSource = 'blog' | 'pomodoro' | 'schedule' | 'knowledge'
-export interface HabitLink {
-  source: HabitLinkSource
-  /** 达标阈值：博客=字数，其余=当天累计次数 */
-  threshold: number
-  enabled: boolean
-}
+// v3.2.0 条目 14：「习惯跨模块联动自动打卡」整条拔线 —— 原先这里的
+// HabitLinkSource / HabitLink 两个类型、以及下方 Habit 的 link 字段已随功能移除。
 export interface Habit {
   id: string
   name: string
@@ -267,12 +366,29 @@ export interface Habit {
   sortOrder: number
   archived: boolean
   createdAt: string
-  /** 自动完成联动规则；null = 未绑定 */
-  link?: HabitLink | null
 }
+/** source 保留 'auto' 仅用于兼容历史自动打卡记录（条目 14 之后不再产生新值，界面也不区分来源） */
 export interface HabitRecord { id: string; habitId: string; date: string; source?: 'manual' | 'auto' }
-/** 自动打卡事件（主进程 → 渲染层轻提示） */
-export type HabitAutoCheckin = { habitId: string; habitName: string; date: string }
+/**
+ * 周 / 月 / 年总结面板的「每习惯打卡明细」（v3.2.0 条目 13）。
+ * 判定策略（统计谁、按什么分母算）在主进程纯函数 `electron/lib/kbStore/habitStats.ts`，
+ * 这里只作跨线共享的形状声明 —— 两边改字段必须同步。
+ */
+export interface HabitPeriodStat {
+  id: string
+  name: string
+  color: string
+  ruleType: string
+  weeklyTarget: number
+  /** 窗口内打卡次数 */
+  count: number
+  /** 窗口内计划日天数（flexible 恒为 0 —— 它不以计划日作分母） */
+  planned: number
+  /** 完成率百分比；null = 无可用分母（未设计划日 / 空窗口），界面显示占位而非 0% */
+  rate: number | null
+  /** 窗口内最长连续打卡天数 */
+  longest: number
+}
 export interface CreateHabitDTO {
   name: string; color?: string; ruleType?: HabitRuleType
   ruleDays?: number[]; weeklyTarget?: number; sortOrder?: number
@@ -294,6 +410,44 @@ export interface BookmarkItem {
   description: string
   sortOrder: number
   createdAt: string
+  /** 星标收藏（2026-09-28：右栏快捷导航只显示 starred 条目）；缺省 = false */
+  starred?: boolean
+}
+
+// ---- 桌宠（docs/pet-design.md）----
+/** 品种 = 内置（dog/cat）+ 启用中插件贡献的品种（petSpeciesRegistry 动态判定；插件卸载自动回落 dog） */
+export type PetSpecies = string
+export interface PetState {
+  version: number
+  /** 当前品种的名字（= names[species]） */
+  name: string
+  /** 每品种各记一个名字（名字跟着宠物走，狗猫各记各的） */
+  names: Record<PetSpecies, string>
+  species: PetSpecies
+  /** 0=幼年 1=成年 */
+  stage: number
+  exp: number
+  hunger: number
+  mood: number
+  ts: number
+}
+export interface PetSnapshot extends PetState {
+  /** 活跃度 0-1（轻联动加成系数） */
+  activity: number
+  usageTodayMinutes: number
+  streak: number
+  notesToday: number
+  aiCallsToday: number
+  /** 本次操作是否跨过升级阈值（仅喂食/摸头返回） */
+  stageUp?: boolean
+}
+/** 插件贡献宠物品种（contributes.pets；立绘经 plugin:// 协议由宿主按需提供） */
+export interface PluginPetInfo {
+  pluginId: string
+  speciesId: string
+  name: string
+  /** 键 = `${stage}-${pose}`（baby/adult × base/hungry/lie/pet/eat），值 = plugin:// 立绘 URL */
+  sprites: Record<string, string>
 }
 
 // ---- 远程监督 ----
@@ -421,9 +575,7 @@ export interface KnowledgePage {
   path?: string
   /** frontmatter attachments：仓库内相对路径数组（附件面板/路由阅读器用） */
   attachments?: string[]
-  /** 页面状态：draft=草稿（知识库正式列表不显示，编辑器侧/图谱虚化可见）；published=归档（默认） */
-  status?: 'draft' | 'published'
-  /** 条目种类：file=清单归档的非 md 文件（元信息卡/沙箱渲染，不参与正文/双链）；缺省=md 知识页 */
+  /** 条目种类：file=仓库内的非 md 文件（元信息卡/沙箱渲染，不参与正文/双链）；缺省=md 知识页 */
   entryKind?: 'doc' | 'file'
   /** 文件大小（字节；元信息卡展示） */
   sizeBytes?: number
@@ -478,22 +630,13 @@ export interface HabitExport {
   sortOrder: number; archived: boolean; createdAt: string; updatedAt: string
 }
 export interface HabitRecordExport { id: string; habitId: string; date: string; source?: 'manual' | 'auto' }
-export interface HabitLinkExport { habitId: string; source: HabitLinkSource; threshold: number; enabled: boolean }
-export interface CheckinExportData { habits: HabitExport[]; records: HabitRecordExport[]; links?: HabitLinkExport[] }
+// v3.2.0 条目 14 起：导出数据不再含联动规则（原 HabitLinkExport 与 links 字段已移除，
+// 旧备份文件里的 links 字段导入时会被忽略 —— 不做迁移，历史记录原样保留）
+export interface CheckinExportData { habits: HabitExport[]; records: HabitRecordExport[] }
 export interface BookmarkNavExportData { categories: BookmarkCategory[]; bookmarks: BookmarkItem[] }
-export interface AllExportData {
-  exportVersion: string; exportedAt: string
-  user?: UserExportData & { settings: Record<string, unknown>; stats: UserStats }
-  blog: BlogExportData; schedule: ScheduleExportData; knowledge: KnowledgeExportData
-  passwordVault?: PasswordVaultExportData
-  moments?: MomentsExportData
-  checkin?: CheckinExportData
-  bookmarkNav?: BookmarkNavExportData
-}
 
 export interface ExportFileResult { filePath: string; size: number }
 export interface ExportMarkdownProgress { current: number; total: number; currentFile: string; phase: string }
-export interface ExportMarkdownResult { fileCount: number; totalSize: number; files: { relPath: string; size: number }[] }
 
 export interface PluginRegistryEntry {
   id: string
@@ -540,6 +683,19 @@ export interface PluginViewContribution {
   /** fullscreen 覆盖层 / panel 面板 */
   mode: string
   icon?: string
+  granted: string[]
+}
+
+/** 插件看板控件贡献（contributes.dashboardWidgets，2026-09-28 栅格化 w/h 版）：仅 UI 插件；全局控件 id = `<pluginId>:<wid>` */
+export interface PluginDashboardWidget {
+  pluginId: string
+  /** 插件内控件 id；全局名 = `<pluginId>:<wid>` */
+  wid: string
+  title: string
+  /** 格子比例：宽 2-6 列 × 高 1-4 行（缺省 2×2） */
+  w: number
+  h: number
+  entry: string
   granted: string[]
 }
 
@@ -782,6 +938,10 @@ export interface LlmModelTestResultInfo {
 
 export interface LlmUsageInfo {
   monthTokens: number
+  /** 本月输入 tokens（↑）——与 monthTokens 同源审计聚合，供用量 UI 展示拆分 */
+  monthPromptTokens?: number
+  /** 本月输出 tokens（↓） */
+  monthCompletionTokens?: number
   /** 月度预算上限（已随 faf1b0f 移除限额概念；可选保留兼容沉浸面板） */
   budget?: number
   /** 视觉转写月度 tokens（与回答模型分开统计，2026-09-08） */
@@ -856,6 +1016,14 @@ export type AgentStreamEvent =
   | { kind: 'text'; delta: string }
   | { kind: 'tool-start'; name: string; label: string; target?: string }
 
+/** N-3 多对话并行：助手会话运行态广播（assistant:runstate，全窗口）。
+ *  running = 在跑会话 id 集快照（每次开始/结束都发全量，渲染层整体替换）；
+ *  ended = 结束那一次附带的单次运行结果（ok=false 且 code≠ABORTED → 失败 Toast + 红标） */
+export interface AgentRunStateEvent {
+  running: string[]
+  ended?: { sessionId: string; chatId: string; ok: boolean; code?: string; error?: string }
+}
+
 export interface AgentChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -876,10 +1044,32 @@ export interface AgentSessionInfo {
   title: string
   /** 来源（缺省=assistant） */
   source?: AgentSessionSource
+  /** 通道（N-1 手册通道）：'manual'=使用帮助；缺省/'agent'=通用助手 */
+  mode?: 'manual' | 'agent'
   /** 会话级全局要求（仅本会话生效；空串/缺省=无） */
   instructions?: string
   createdAt: string
   updatedAt: string
+  /** 支线旁问（v3.1.2 条目11）：挂靠的主线会话 id（缺省=非支线）。与主线物理隔离 */
+  parentSessionId?: string
+  /** 支线旁问：分叉点的主线消息 id */
+  branchFromMessageId?: string
+  /** 支线旁问：'side' 默认不进左栏列表；缺省/'main' 可见（升格后置 'main'） */
+  lane?: 'main' | 'side'
+  /** 支线旁问：固化上下文快照（分叉回答 + 主线前 K 轮） */
+  sideContext?: string
+}
+
+/** 建支线结果（agent:createSideLane）：只装上下文不调 LLM */
+export interface AgentSideLaneCreateResult {
+  ok: boolean
+  laneSessionId?: string
+  title?: string
+  /** 就地装载并展示给用户核对的上下文快照 */
+  snapshotText?: string
+  /** 实际采用的轮数（1/3/5 夹取后） */
+  turns?: number
+  error?: string
 }
 
 /** P5 工作区（AI教学两层结构；主进程 aiTeachingWorkspaces.ts 同构） */
@@ -893,11 +1083,23 @@ export interface AiTeachWorkspaceInfo {
   lastActive: string | null
 }
 
+/** AI教学·课程模式（主进程 aiTeachingCourse.ts 同构；docs/ai-teaching-course-mode-plan.md） */
+export type AiTeachCourseUnitStatus = 'todo' | 'learning' | 'check' | 'mastered' | 'review'
+export interface AiTeachCourseUnit { id: string; name: string; goal: string; source: string }
+export interface AiTeachCourseChapter { id: string; name: string; units: AiTeachCourseUnit[] }
+export interface AiTeachCourseOutline { title: string; goal: string; anchor: string; chapters: AiTeachCourseChapter[] }
+export interface AiTeachCourseUnitProgress { status: AiTeachCourseUnitStatus; mastery: number; lastCheckedAt: string | null; finished?: boolean; summaryRel?: string | null }
+export interface AiTeachLessonInfo { unitId: string; order: number; kind: string; status: 'open' | 'ended' }
+export interface AiTeachUnitQuizQuestion { q: string; options: string[]; answer: number; explanation: string }
+export interface AiTeachCourseState { enabled: boolean; outline: AiTeachCourseOutline | null; progress: Record<string, AiTeachCourseUnitProgress>; lessons: Record<string, AiTeachLessonInfo> }
+export interface AiTeachCourseGenerateInput { goal: string; mode: 'anchor' | 'materials' | 'mixed' | 'free'; anchorText?: string; anchorLabel?: string; modelSpec?: string }
+export interface AiTeachCourseGenProgress { id: string; phase: 'request' | 'reasoning' | 'answer' | 'parsing' | 'done' | 'failed'; delta?: string; model?: string; chars?: number; error?: string }
+
 /** P6 素材库：SOURCE.md 解析条目（§3.13 模板 v2，字段行与模板一一对应） */
 export interface AiTeachSourceEntry {
   no: number
   name: string
-  /** url / pptx / pdf / image / md / other（3-27 枚举） */
+  /** url / pptx / pdf / docx / image / md / code / dir / other（3-27 枚举；docx 为 v3.1.2 条目5 新增） */
   type: string
   /** ./文件名（已入库）/ 仓库相对 / 绝对路径 / URL */
   path: string
@@ -908,6 +1110,12 @@ export interface AiTeachSourceEntry {
   /** '-' 或 '✓ → 提取稿文件名'（3-26 程序维护） */
   extracted: string
   note: string
+  /** v3.1.1：条目所属层 —— workspace=工作区主库（跨对话共用），session=对话私有补充（存量） */
+  scope?: 'workspace' | 'session'
+  /** v3.1.1：条目所属素材夹的仓库相对路径（提取稿/原件都相对它；两层合并后必须逐条目携带） */
+  dirRel?: string
+  /** v3.1.1：所属 SOURCE.md 内的原始编号（合并视图编号 ≠ 层内编号时，写操作按它定位） */
+  origNo?: number
 }
 
 /** P6 素材库：登记表单入参（storage=已入库 时 path 为待拷贝原件的来源路径） */
@@ -924,9 +1132,15 @@ export interface AiTeachSourceInput {
 
 export interface AiTeachSourcesResult {
   ok: boolean
+  /** 工作区主库 SOURCE.md 的仓库相对路径（登记入口落这里） */
   relPath?: string | null
   entries?: AiTeachSourceEntry[]
   no?: number
+  /** v3.1.1：两层各自的文件路径（对话级无文件时为 null） */
+  workspaceRel?: string | null
+  sessionRel?: string | null
+  /** v3.1.1：aiTeachSrcPromote 的结果（上收到主库的条目数） */
+  promoted?: number
   /** UI 优化条目5.3：手编/AI 直写 SOURCE.md 的形状异常统计（unnamed=缺编号的小节，dupNo=编号重复被丢弃数） */
   anomalies?: { unnamed: number; dupNo: number }
   error?: string
@@ -981,6 +1195,31 @@ export interface AgentChange {
   target: string
   /** 可点击直达编辑器的仓库内文件 relPath（仅 vault 文件写类工具） */
   file?: string
+}
+
+// ---- AI 用量 / 会话文件改动（v3.4.0 批次5，右栏 token 面板数据源） ----
+
+/** 单日 token 用量聚合（主进程 agentUsage 的渲染层镜像） */
+export interface AiUsageDay {
+  in: number
+  out: number
+  cache: number
+  calls: number
+  /** 按会话分桶的当日消耗（title 为记账时快照） */
+  sessions: Record<string, { title: string; in: number; out: number }>
+}
+
+/** 会话内一次 AI 文件写改动的审计条目（右栏「改动文件」行） */
+export interface SessionFileChange {
+  sessionId: string
+  sessionTitle: string
+  tool: string
+  action: string
+  target: string
+  file?: string
+  /** M=修改 / A=新建 */
+  op: 'M' | 'A'
+  at: string
 }
 
 export interface AgentChatResult {
@@ -1081,6 +1320,206 @@ export interface WorkspaceRangeResult {
   size: number
   truncated: boolean
 }
+
+/** 范围读取的**字节**版本（B-16；foliate 系阅读器整本取字节用，免渲染侧 base64 解码）。
+ *  主进程侧真源 = `electron/lib/workspaceManager.ts` 的 `ReadRangeBytesResult`，两处字段一一对应。 */
+export interface WorkspaceRangeBytesResult {
+  bytes: Uint8Array
+  offset: number
+  size: number
+  truncated: boolean
+}
+
+// ===== PDF 阅读体验整包（v3.4.0 第 2 项）=====
+/** 阅读模式：竖滚（默认）/ 单页 / 双页（≥1240px，低于自动降级单页） */
+export type PdfViewMode = 'scroll' | 'single' | 'duo'
+/** 单本书的阅读状态（vault `.knowbase/modules/pdfReader.json`，键 {rootId}/{relPath}） */
+export interface PdfBookState {
+  /** 冲突检测基准（pdfReader:patch 带 expectedUpdatedAt） */
+  updatedAt: string
+  lastPage: number
+  /** 总页数（0 = 未知）：阅读器首次打开时登记，书架侧栏进度条分母 */
+  totalPages: number
+  /** 竖滚模式页内滚动比例 0..1 */
+  scrollRatio: number
+  mode: PdfViewMode
+  zoom: number
+  eyeCare: boolean
+  bookmarks: Array<{ page: number; note: string; at: string }>
+  /** 扫描版探测结论（缺省 = full；阅读器打开时抽样检测并落盘一次） */
+  scan?: BookScanMode
+  /** 页级降级（A5）：逐页 scanned 布尔；仅 scanMode !== 'full' 时落盘 */
+  scanPages?: boolean[]
+}
+/** pdfReader:patch 白名单载荷（updatedAt 由服务端生成，不接受传入） */
+export type PdfBookPatch = Partial<Pick<PdfBookState, 'lastPage' | 'totalPages' | 'scrollRatio' | 'mode' | 'zoom' | 'eyeCare' | 'bookmarks' | 'scan' | 'scanPages'>>
+/** 书架清单条目（自动库：扫描 join 进度，不落盘）。一期 kind = pdf | txt；B 段加 epub，
+ *  阶段 2a 加 fb2 / fbz（foliate 引擎系，阅读器与左栏零改动复用） */
+export interface BookListItem {
+  relPath: string
+  /**
+   * 展示名 —— **上游拼好，渲染层只读**（方案 §3.6 / S4 收口）。
+   * 取值：`.books/.meta.json` 的 `title` 优先，缺则退回 `bookDisplayName(relPath)`（去扩展名的文件名）。
+   * ★ 渲染层**禁止**再写 `meta?.title || bookDisplayName(...)` 这类兜底 —— 那正是这次要收掉的东西
+   *   （同一条规则曾在 5 处各算一遍；契约脚本 verify-book-market-ui.mjs 有零调用点断言）。
+   */
+  displayName: string
+  /** 作者（`.books/.meta.json` 的 `author`；本地导入的书无 meta ⇒ 空串，渲染层按空不显示） */
+  author: string
+  /** 封面相对引用（`.books/.covers/<hash>.jpg`；无 meta / 未抓到封面 ⇒ 空串）。
+   *  渲染层拿它调 `bookMarketCoverGet` 取字节，取不到就回落原有的纯色书卡 / PDF 首页封面。 */
+  coverRef: string
+  size: number
+  /** 文件 mtimeMs（PDF 封面缓存失效判据） */
+  mtime: number
+  /** 书籍种类（pdf / txt / epub / fb2 / fbz）——唯一真相源 = electron/lib/kbStore/bookFormats.ts 的 BOOK_EXTS，
+   *  渲染层侧此字面量由契约脚本 verify-epub-formats.mjs 双向断言同步（tsconfig.web
+   *  只含 src/**，不能直接复导出主进程文件） */
+  kind: BookKind
+  lastPage: number
+  /** 总页数（0 = 尚未读过/未登记）——书架侧栏进度条分母（非 pdf 恒 0，用 pct） */
+  totalPages: number
+  /** 字节/比例阅读进度 0..100（非 pdf 格式有值：txt 按字节、foliate 系按 fraction） */
+  pct?: number
+  hasProgress: boolean
+  updatedAt: string | null
+  /** 扫描版探测结论（仅 pdf；缺省 = full，阅读器打开时抽样检测并落盘一次） */
+  scan?: BookScanMode
+}
+
+/** 书籍种类（渲染层侧镜像；与 electron/lib/kbStore/bookFormats.ts 保持同步，
+ *  由 `.AGENT/scripts/pdf-reader/verify-epub-formats.mjs` 双向断言 BOOK_EXTS ↔ 本联合）
+ *  B 段加 'epub'；阶段 2a 加 'fb2' / 'fbz'（同为 foliate 引擎）。 */
+export type BookKind = 'pdf' | 'txt' | 'epub' | 'fb2' | 'fbz' | 'cbz'
+
+/** 摘录色板 id（渲染层侧镜像；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
+export const EXCERPT_COLOR_IDS = ['y', 'g', 'b', 'p', 'v'] as const
+export type ExcerptColor = (typeof EXCERPT_COLOR_IDS)[number]
+/** 条目类型（注意：不是 kind —— kind 已被书籍格式 pdf/txt 占用） */
+export type ExcerptType = 'highlight' | 'excerpt' | 'idea'
+/** 色 id → 中文名（浮条 tooltip / 调试用） */
+export const EXCERPT_COLOR_NAMES: Record<ExcerptColor, string> = { y: '黄', g: '绿', b: '蓝', p: '粉', v: '紫' }
+
+/** 扫描版探测结论（渲染层侧镜像；真源 = electron/lib/kbStore/scanDetect.ts，缺省 = full） */
+export type BookScanMode = 'full' | 'partial' | 'no'
+
+/**
+ * 书签（一套结构 + 按 kind 分支的定位字段；真源 = `electron/lib/kbStore/readerStateSchema.ts` 的
+ * `BookBookmark`，此处镜像 —— 改那边记得同步这里）。
+ * - txt → `paraIndex`（+ 可选 `start`/`end`）；
+ * - epub/fb2/fbz → `cfi`（+ 可选 `chapter`）；
+ * - pdf 的书签在 `pdfReader.json`（page），与这里**不同源、不混用**；cbz 不支持。
+ */
+export interface BookBookmark {
+  id: string
+  paraIndex?: number
+  start?: number
+  end?: number
+  cfi?: string
+  chapter?: string
+  label: string
+  at: string
+}
+
+/** 纸色（书级记忆；档位与 PDF eyeCare 对齐） */
+export type ReaderPaper = 'default' | 'sepia' | 'green' | 'dark'
+
+/** readerState:patch 白名单载荷（updatedAt 由服务端生成，不接受传入；pct 可选，书签/字号/纸色可独立写）。
+ *  ★ `kind` 刻意不在白名单 —— 它是 relPath 的纯函数，由主进程按路径推导后覆盖写入。 */
+export type ReaderStatePatch = {
+  pct?: number
+  bookmarks?: BookBookmark[]
+  fontScale?: number
+  paper?: ReaderPaper
+  /** 精确回跳载体（epub = foliate CFI；B 段引入，与 pct 双轨） */
+  locator?: string
+}
+/** 单本书阅读状态（readerState.json 经 IPC 透出；一期 txt，B 段起 epub 共用） */
+export interface ReaderBookState {
+  kind: BookKind
+  /** 阅读进度 0..100 整数（A1 起 = 已加载字节 / 文件总字节；epub = foliate fraction） */
+  pct: number
+  /** 冲突检测基准；patch 时服务端重新生成，客户端只读 */
+  updatedAt: string
+  /** 精确回跳载体（epub = foliate CFI；与 pct 双轨） */
+  locator?: string
+  /** 书签（txt 用 paraIndex、foliate 系用 cfi；按 kind 分支，见 `BookBookmark`） */
+  bookmarks?: BookBookmark[]
+  fontScale?: number
+  paper?: ReaderPaper
+}
+
+/** 归一化选区矩形（相对文本层容器的百分比 0..1，zoom 无关；真源 = electron/lib/kbStore/excerptSchema.ts） */
+export interface ExcerptRect {
+  l: number
+  t: number
+  w: number
+  h: number
+}
+
+/** 摘录条目（excerpts.json 经 IPC 透出） */
+export interface ExcerptItem {
+  id: string
+  kind: BookKind
+  /** pdf 定位：页码 */
+  page?: number
+  /** pdf 高亮：归一化矩形组 */
+  rects?: ExcerptRect[]
+  /** txt 定位：段落序号 */
+  paraIndex?: number
+  /** txt 高亮：段内字符偏移 [start, end) */
+  start?: number
+  end?: number
+  /** epub 定位：foliate CFI 范围串（跳回原文与正文高亮共用） */
+  cfi?: string
+  /** epub 章节标签（导出分组与右栏来源行显示用） */
+  chapter?: string
+  text: string
+  note: string
+  /** 高亮颜色（色板 id；真源 = electron/lib/kbStore/excerptSchema.ts 的 EXCERPT_COLORS，契约脚本断言一致） */
+  color: ExcerptColor
+  /** 条目类型：highlight 高亮 / excerpt 摘录 / idea 想法（注意：不是 kind —— kind 已被书籍格式占用） */
+  type: ExcerptType
+  at: string
+  updatedAt: string
+}
+
+/** 摘录创建载荷（服务端生成 id/at/updatedAt） */
+export interface ExcerptCreatePayload {
+  kind: BookKind
+  text: string
+  note?: string
+  /** 高亮颜色（色板 id） */
+  color?: ExcerptColor
+  /** 条目类型 */
+  type?: ExcerptType
+  /** pdf 必带 */
+  page?: number
+  rects?: ExcerptRect[]
+  /** txt 必带 */
+  paraIndex?: number
+  start?: number
+  end?: number
+  /** epub 必带（foliate CFI 范围串） */
+  cfi?: string
+  /** epub 可选（章节标签） */
+  chapter?: string
+}
+
+export type ExcerptPatch = { note?: string; color?: ExcerptColor; type?: ExcerptType }
+
+/** 摘录导出映射（excerptExports.json 经 IPC 透出）：一本书 ↔ 一篇知识库「读书笔记」页 */
+export interface ExcerptExportEntry {
+  /** 知识库页面 frontmatter id（覆盖重写时原样保留 → 页面身份不变） */
+  pageId: string
+  /** 知识库页面仓库内相对路径（落收件箱） */
+  pagePath: string
+  /** 最近一次导出时间（ISO） */
+  exportedAt: string
+  /** 最近一次导出的摘录条数 */
+  count: number
+}
+
 /** 写文件结果：conflict=true 表示磁盘已被外部修改（或已删除），需用户决策 */
 export interface WorkspaceWriteResult {
   ok: boolean
@@ -1123,8 +1562,133 @@ export type VaultArchiveImportResult =
   | { pending: true; target: string; totalFiles: number; conflicts: VaultArchiveConflictItem[] }
   | { pending?: false; ok?: boolean; canceled?: boolean; written?: number; skipped?: number; renamed?: number; registered?: string; rootId?: string; name?: string; path?: string; error?: string }
 
+/**
+ * 外部文件/目录粘贴结果（ws:pasteExternal，v3.2.0 条目 ③）。
+ * pasted = 落盘后的**最终文件名**（已含重名递增）；skipped = 被拒条目及原因（逐条独立，不中断其余）。
+ * reason 仅表整体失败：empty=剪贴板里没有文件项；notdir=目标不是目录；error=抛错（细节见 error）。
+ */
+export interface WorkspacePasteResult {
+  ok: boolean
+  reason?: 'empty' | 'notdir' | 'error'
+  error?: string
+  pasted: string[]
+  skipped: Array<{ path: string; reason: string }>
+}
+
+/** AI 教学「画像更新建议」的**变化条目**（v3.2.0 第 20 项）。
+ *  形状与主进程 `electron/lib/profilePatch.ts` 的 `ProfileEntry` 必须一致 ——
+ *  一个在渲染层解析、一个在主进程应用，跨进程共享不了模块，故各留一份；**改形状要同时改两处**。 */
+export type AiTeachProfileOp = 'add' | 'update' | 'remove'
+export interface AiTeachProfileEntry {
+  /** 本主题画像的二级标题名（可带 `## ` 前缀） */
+  field: string
+  op: AiTeachProfileOp
+  /** 新内容（不带 `- ` 前缀） */
+  text: string
+  /** 仅 `update`：被替换的原文 */
+  from?: string
+}
+/** `aiTeachProfileApplyPatch` 的返回：哪几条真落了 / 哪几条为什么没落 */
+export interface AiTeachProfilePatchResult {
+  ok: boolean
+  relPath?: string | null
+  applied?: Array<{ field: string; op: AiTeachProfileOp; text: string; note?: string }>
+  skipped?: Array<{ field: string; op: AiTeachProfileOp; text: string; reason: string }>
+  error?: string
+}
+
+/**
+ * 看板快照（2026-09-27）。
+ *
+ * ⚠️ 类型真源是主进程侧 `electron/database/repositories/dashboardRepo.ts`
+ * —— 两个 tsconfig 互不可见，沿用本仓「跨线类型各侧各声明一次」的做法，改一边要同步另一边。
+ * 这里只声明渲染层**会读**的字段，比主进程那份少了内部实现细节。
+ */
+export interface DashboardSnapshot {
+  /** 本地日 'YYYY-MM-DD'（由主进程给，避免两端算出不同的「今天」） */
+  today: string
+  todos: {
+    overdue: Array<{ id: string; title: string; time: string | null }>
+    today: Array<{ id: string; title: string; time: string | null }>
+    doneToday: number
+    totalToday: number
+  }
+  habit: {
+    streak: number
+    doneToday: number
+    habits: number
+    /** 今日打卡项逐条（反馈 4②：卡列打卡项、可勾选），sort_order 序；color = 习惯色（勾选庆祝用） */
+    items: Array<{ id: string; name: string; done: boolean; color: string }>
+  }
+  usage: {
+    todayMinutes: number
+    /** 'YYYY-MM-DD' → 分钟，缺失日补 0 */
+    days: Record<string, number>
+  }
+  /** 番茄钟专注分钟（与 usage 同跨度同口径）。快照保留备用——热力图 2026-09-28 起只用 usage（专注时长切换器已撤） */
+  pomodoro: {
+    days: Record<string, number>
+  }
+  recentNotes: Array<{ id: string; title: string; path: string; updatedAt: string }>
+  reading: Array<{ relPath: string; displayName: string; pct: number }>
+}
+
+/* ================= 分享卡片（右栏第三态，2026-09-29） =================
+ * 与主进程 `database/repositories/shareCardRepo.ts` 的 ShareCardData 逐字段对应
+ * —— 两个 tsconfig 互不可见，沿用本仓「跨线类型各侧各声明一次」的做法，改一边要同步另一边。
+ */
+
+/** 卡片上的三个可编辑文案槽位（同时是模板要存的内容） */
+export interface ShareCardTexts {
+  /** 寄语 / 主文案（书页风格里它就是 hero 大字） */
+  quote: string
+  /** 底部品牌语 */
+  slogan: string
+  /** 落款署名；留空则不显示 */
+  signature: string
+}
+
+/** 一套备选模板 = 风格 + 卡片明暗 + 三处文案 */
+export interface ShareCardTemplate {
+  id: string
+  name: string
+  style: ShareCardStyle
+  theme: 'light' | 'dark'
+  texts: ShareCardTexts
+  /** 内置示例不可删/不可改名 */
+  builtin?: boolean
+}
+
+/** 三套主视觉 */
+export type ShareCardStyle = 'peak' | 'page' | 'heat'
+
+/** `shareCard:get` 的返回值（卡片所需的数据；文案不在其中 —— 文案是渲染层设置） */
+export interface ShareCardData {
+  /** 本地日 'YYYY-MM-DD'（由主进程给，避免两端算出不同的「今天」） */
+  date: string
+  week: { done: number; total: number; cells: boolean[] }
+  heat: { weeks: number; rate: number; grid: boolean[] }
+  /** 官网地址（主进程单一来源） */
+  siteUrl: string
+  /** 官网二维码 PNG dataURL */
+  qrDataUrl: string
+}
+
+/** 分享卡片的持久化状态（设置键 `shareCard` 的 JSON 形状） */
+export interface ShareCardState {
+  templates: ShareCardTemplate[]
+  /** 当前卡片配置（风格 / 明暗 / 文案 / 所选模板 id） */
+  current: { style: ShareCardStyle; theme: 'light' | 'dark'; texts: ShareCardTexts; tplId: string | null }
+  /**
+   * 题目区内容（Markdown 行内语法 + LaTeX），每天现贴。
+   * ★ **刻意不进模板** —— 模板只管版式；题目是内容，进了模板就会「换模板顺手换掉今天的题」。
+   */
+  prompt: string
+}
+
 export interface ElectronAPI {
   getPathForFile: (file: File) => string
+  pasteFromClipboard: () => Promise<{ ok: boolean }>
   copyImage: (src: { path?: string; dataUrl?: string }) => Promise<boolean>
   clearClipboardIfEqual: (text: string) => Promise<boolean>
   copyText: (text: string) => Promise<boolean>
@@ -1189,6 +1753,8 @@ export interface ElectronAPI {
   getKnowledgeBacklinks: (pageId: string) => Promise<KnowledgePage[]>
   getKnowledgeBacklinkContext: (pageId: string) => Promise<KnowledgeBacklinkItem[]>
   getKnowledgeSimilarPages: (pageId: string) => Promise<{ hits: SimilarPageHit[]; semantic?: { enabled: boolean; reason?: string } }>
+  /** 语义索引状态（B2 感知模式弱提示：configured=false → 当前只走关键词路） */
+  getSemanticStatus: () => Promise<{ configured: boolean; model: string; pages: number; chunks: number; generatedAt: string }>
   getKnowledgeManualLinks: (pageId: string) => Promise<KnowledgePage[]>
   addKnowledgeManualLink: (pageId: string, targetId: string) => Promise<{ ok: boolean }>
   removeKnowledgeManualLink: (a: string, b: string) => Promise<{ ok: boolean }>
@@ -1218,11 +1784,12 @@ export interface ElectronAPI {
   openExternal: (filePath: string) => Promise<void>
   getAppVersion: () => Promise<string>
   checkForUpdate: () => Promise<{ ok: boolean; hasUpdate: boolean; currentVersion: string; latestVersion: string; releaseUrl: string; notes: string; asset: { name: string; url: string; size: number } | null; message?: string }>
-  downloadUpdate: (url: string, name: string, size?: number) => Promise<{ success: boolean; filePath?: string; message?: string; paused?: boolean; cancelled?: boolean; receivedBytes?: number; reason?: 'size-mismatch' | 'sha512-mismatch' | 'network' | 'channel-all-failed' | 'cancelled' | 'unknown'; step?: 'download' | 'verify' | 'sha512'; metaMissing?: boolean }>
+  downloadUpdate: (url: string, name: string, size?: number) => Promise<{ success: boolean; filePath?: string; message?: string; paused?: boolean; cancelled?: boolean; receivedBytes?: number; reason?: 'size-mismatch' | 'sha512-mismatch' | 'network' | 'stalled' | 'channel-all-failed' | 'cancelled' | 'unknown'; step?: 'download' | 'verify' | 'sha512'; metaMissing?: boolean }>
   installUpdate: (filePath: string) => Promise<{ success: boolean; message?: string }>
   updatePauseDownload: () => Promise<{ ok: boolean; message?: string }>
   updateCancelDownload: () => Promise<{ ok: boolean; removedPartial?: boolean; message?: string }>
   onUpdateDownloadProgress: (cb: (p: { percent: number; receivedBytes: number; totalBytes: number }) => void) => () => void
+  onUpdateDownloadStage: (cb: (p: { stage: 'downloading' | 'verifying' | 'switching' }) => void) => () => void
   // 更新说明（VS Code 式 tab）
   getReleaseNotesState: () => Promise<ReleaseNotesState>
   markReleaseNotesShown: (version: string) => Promise<{ ok: boolean; error?: string }>
@@ -1235,6 +1802,8 @@ export interface ElectronAPI {
   onPluginInstalledChanged: (cb: () => void) => () => void
   /** AI vault 写工具落盘后的外部变更通知（payload {relPath, mtimeMs}） */
   onWsExternalChange: (cb: (p: { relPath: string; mtimeMs?: number }) => void) => () => void
+  /** v3.2.0 条目 ④：仓库目录发生文件系统变更（外部改动 / watcher 降级告知） */
+  onWsFsChanged: (cb: (p: { relPaths: string[]; watcherError?: string }) => void) => () => void
   pluginInstallFromFile: (grantedCapabilities?: string[]) => Promise<{ success: boolean; message?: string }>
   pluginInstallBundledSample: (filename: string, grantedCapabilities?: string[]) => Promise<{ success: boolean; message?: string }>
   pluginListInstalled: () => Promise<PluginSummary[]>
@@ -1242,6 +1811,8 @@ export interface ElectronAPI {
   pluginUninstall: (id: string) => Promise<{ success: boolean; message?: string }>
   pluginGetContribution: (id: string, key: string) => Promise<{ ok: boolean; data?: unknown; message?: string }>
   pluginListViews: (slot?: string) => Promise<PluginViewContribution[]>
+  pluginListDashboardWidgets: () => Promise<PluginDashboardWidget[]>
+  pluginListPets: () => Promise<PluginPetInfo[]>
   pluginListCommands: () => Promise<PluginCommandInfo[]>
   pluginListRenderers: () => Promise<PluginRendererInfo[]>
   pluginGetSettingsSchema: (id: string) => Promise<{ schema: PluginSettingItem[] }>
@@ -1351,15 +1922,64 @@ export interface ElectronAPI {
   workspacePickImages: (rootId: string) => Promise<{ ok: boolean; images?: VaultStagedImage[]; error?: string }>
   workspaceSaveImage: (rootId: string, payload: { fileName: string; dataBase64: string }) => Promise<{ ok: boolean; name?: string; relPath?: string; error?: string }>
   workspaceReadRange: (rootId: string, relPath: string, offset: number, length: number) => Promise<WorkspaceRangeResult & { error?: string }>
+  workspaceReadRangeBytes: (rootId: string, relPath: string, offset: number, length: number) => Promise<WorkspaceRangeBytesResult & { error?: string }>
+  // ===== PDF 阅读体验整包（v3.4.0 第 2 项）：进度/书签/封面缓存/导入 =====
+  pdfReaderListBooks: () => Promise<{ ok: boolean; books?: BookListItem[]; error?: string }>
+  pdfReaderGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; state?: PdfBookState | null; error?: string }>
+  pdfReaderPatch: (rootId: string, relPath: string, patch: PdfBookPatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; state?: PdfBookState; conflict?: boolean; error?: string }>
+  pdfReaderCoverList: () => Promise<{ ok: boolean; covers?: Record<string, { mtimeMs: number; file: string }>; error?: string }>
+  pdfReaderCoverGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; dataUrl?: string | null; error?: string }>
+  pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => Promise<{ ok: boolean; error?: string }>
+  // ===== 阅读状态（书架升级全格式阅读器一期）：txt 进度 =====
+  readerStateGet: (rootId: string, relPath: string) => Promise<{ ok: boolean; state?: ReaderBookState | null; error?: string }>
+  readerStatePatch: (rootId: string, relPath: string, patch: ReaderStatePatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; state?: ReaderBookState; conflict?: boolean; error?: string }>
+  // ===== 摘录（阅读器 · 摘录先行批次） =====
+  excerptList: (rootId: string, relPath: string) => Promise<{ ok: boolean; excerpts?: ExcerptItem[]; error?: string }>
+  excerptCreate: (rootId: string, relPath: string, payload: ExcerptCreatePayload) => Promise<{ ok: boolean; excerpt?: ExcerptItem; error?: string }>
+  excerptPatch: (rootId: string, relPath: string, id: string, patch: ExcerptPatch, expectedUpdatedAt?: string) => Promise<{ ok: boolean; excerpt?: ExcerptItem; conflict?: boolean; error?: string }>
+  excerptDelete: (rootId: string, relPath: string, id: string) => Promise<{ ok: boolean; error?: string }>
+  /** 查某书的导出映射（右栏书卡头显示「已导出 · N 条」用） */
+  excerptExportEntry: (rootId: string, relPath: string) => Promise<{ ok: boolean; entry?: ExcerptExportEntry | null; error?: string }>
+  /** 导出为知识库「读书笔记」页（每本书一篇；重复导出覆盖重写同一篇，保留页面 id） */
+  excerptExportNote: (rootId: string, relPath: string) => Promise<{ ok: boolean; pageId?: string; pagePath?: string; created?: boolean; count?: number; error?: string }>
+  // ===== 书市（book market）=====
+  /** 书源清单（**只报 hasCredential 布尔**，永不回传凭据本体） */
+  bookMarketListSources: (rootId: string) => Promise<{ ok: boolean; sources?: BookSourceInfo[]; error?: string }>
+  bookMarketUpsertSource: (rootId: string, patch: BookSourcePatch, id?: string) => Promise<{ ok: boolean; source?: BookSourceInfo; error?: string }>
+  bookMarketRemoveSource: (rootId: string, id: string) => Promise<{ ok: boolean; error?: string }>
+  bookMarketSetSourceEnabled: (rootId: string, id: string, enabled: boolean) => Promise<{ ok: boolean; source?: BookSourceInfo; error?: string }>
+  /** 存凭据；`credential` 传 `null` = 清空（不必另开一个「清凭据」通道） */
+  bookMarketSaveCredential: (rootId: string, id: string, credential: BookSourceCredentialInput | null) => Promise<{ ok: boolean; error?: string }>
+  /** 单源连通性三态（会**真打一次请求** —— 只做前置判断会把「地址配了但服务器挂了」误报成已连通） */
+  bookMarketProbeSource: (rootId: string, id: string, query?: string) => Promise<{ ok: boolean; state: BookSourceConnectivity; error?: string }>
+  bookMarketSearch: (rootId: string, query: string, opts?: { sourceIds?: string[]; page?: number }) => Promise<BookMarketSearchResponse>
+  /** 入队下载；`conflict` 缺省 = 先问用户（见 `BookDownloadStartResult`） */
+  bookMarketDownload: (rootId: string, payload: BookDownloadRequest, conflict?: 'overwrite' | 'copy') => Promise<BookDownloadStartResult>
+  bookMarketDownloadControl: (rootId: string, id: string, action: BookDownloadAction) => Promise<{ ok: boolean; error?: string }>
+  bookMarketListQueue: (rootId: string) => Promise<{ ok: boolean; tasks?: BookDownloadTask[]; error?: string }>
+  /** 封面只读（S4 拍板 ①）：书架显示书市下到的封面用。路径守卫在主进程
+   *  （只认 `.books/.covers/` 下**单层**文件名），越权 / 缺失 / 超限一律 `dataUrl: null` */
+  bookMarketCoverGet: (rootId: string, coverRel: string) => Promise<{ ok: boolean; dataUrl: string | null; error?: string }>
+  /** 彻底删书（书架右键入口，2026-09-23）：书文件进系统回收站 + 清 meta/封面/进度/书签/摘录/导出映射。
+   *  best-effort —— `errors` 非空表示有步骤失败（书文件通常已回收，残留 JSON 键不影响使用）。
+   *  已导出成知识库页面的「读书笔记」**不删**。 */
+  bookMarketDeleteBook: (rootId: string, relPath: string) => Promise<{ ok: boolean; errors: string[] }>
+  /** 下载队列快照推送（载荷 = **整个队列**，直接整体替换，不做增量合并） */
+  onBookMarketDownloadProgress: (cb: (p: { rootId: string; tasks: BookDownloadTask[] }) => void) => () => void
+  /** AI 起草的书源草案推送（S5）：渲染层据此切到书市模块并预填「新建书源」表单。
+   *  草案不落库（`builtin.booksource.draft` 只广播、不写盘），也不含凭据字段 */
+  onBookMarketSourceDraft: (cb: (p: { draft: BookSourceDraft }) => void) => () => void
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
-  workspaceSetMdStatus: (rootId: string, relPath: string, draft: boolean) => Promise<{ ok: boolean; error?: string }>
-  /** 全类型归档（docs/vault-archive-all-files-design.md）：md 分流 frontmatter 双态，非 md/目录走清单 */
-  workspaceSetArchiveStatus: (rootId: string, relPath: string, archive: boolean) => Promise<{ ok: boolean; count?: number; error?: string }>
-  workspaceGetArchiveEntries: (rootId: string) => Promise<{ ok: boolean; entries?: Array<{ id: string; path: string; type: 'file' | 'dir'; archivedAt: string }>; error?: string }>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
+  /** 粘贴系统剪贴板里的外部文件/目录到 relDir；srcPaths 由渲染层 paste 事件取得（见 WorkspacePasteResult） */
+  workspacePasteExternal: (rootId: string, relDir: string, srcPaths: string[]) => Promise<WorkspacePasteResult>
   workspaceRename: (rootId: string, oldRel: string, newRel: string) => Promise<{ ok: boolean; error?: string }>
   workspaceTrash: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string }>
+  /** 用系统默认程序打开仓库内文件 / 在资源管理器中定位它（reveal=true）。
+   *  ★ 走 rootId + relPath（主进程 requireInside 解析），绝不接受裸绝对路径——
+   *  通用的 app:openExternal 只放行 userData 目录内路径，仓库文件会被它拦掉。 */
+  workspaceOpenInSystem: (rootId: string, relPath: string, reveal?: boolean) => Promise<{ ok: boolean; error?: string }>
   workspaceStat: (rootId: string, relPath: string) => Promise<{ size: number; mtime: number; isDir: boolean } & { error?: string }>
   workspaceGetRecent: () => Promise<WorkspaceRecent[]>
   workspaceOpenById: (rootId: string) => Promise<{ rootId: string; name: string; path: string } & { error?: string }>
@@ -1374,6 +1994,8 @@ export interface ElectronAPI {
   workspaceForget: (rootId: string) => Promise<{ ok: boolean }>
   workspaceDeleteVault: (rootId: string) => Promise<{ ok?: boolean; deletedCurrent?: boolean; error?: string }>
   workspaceClearCurrentVault: () => Promise<{ ok: boolean; cleared?: string | null }>
+  /** v3.2.0 条目 ④ 保底：手动刷新（口径 b 全量：知识索引/图谱失效 + 归档清单 prune） */
+  workspaceRefreshVault: () => Promise<{ ok: boolean; pruned?: number; error?: string }>
   // P6 整仓归档（zip 全量导出/导入；冲突逐条决策：覆盖/跳过/重命名）
   vaultArchiveExport: () => Promise<{ ok?: boolean; canceled?: boolean; path?: string; files?: number; bytes?: number; error?: string }>
   vaultArchiveImportStart: () => Promise<VaultArchiveImportResult>
@@ -1395,6 +2017,19 @@ export interface ElectronAPI {
   clipperOpenFolder: () => Promise<{ ok: boolean; error?: string }>
   clipperSelfPing: () => Promise<{ ok: boolean; status?: number; vault?: string | null; error?: string }>
   clipperCheckToken: (candidate: string) => Promise<{ ok: boolean }>
+  // ===== 终端模块（terminal-module-design）：preload 同名契约 =====
+  termCreate: (opts: { cols?: number; rows?: number; shellPref?: string }) => Promise<TerminalCreateResult>
+  termAttach: (id: string) => Promise<{ backlog: string } | null>
+  termWrite: (id: string, data: string) => void
+  termResize: (id: string, cols: number, rows: number) => void
+  termKill: (id: string) => Promise<{ ok: boolean }>
+  termList: () => Promise<{ sessions: TerminalSessionInfo[] }>
+  termDefaultShell: () => Promise<{ file: string; label: string }>
+  termAiRecords: () => Promise<{ records: TerminalAiRecord[] }>
+  termAiRespond: (reqId: string, approved: boolean) => Promise<{ ok: boolean }>
+  onTermData: (cb: (p: { id: string; data: string }) => void) => () => void
+  onTermExit: (cb: (p: { id: string; exitCode: number | null }) => void) => () => void
+  onTermAiRecord: (cb: (p: { record: TerminalAiRecord }) => void) => () => void
   getAttachmentsByOwner: (ownerType: string, ownerId: string) => Promise<AttachmentMeta[]>
   deleteAttachment: (id: string) => Promise<void>
   getAttachmentPath: (id: string) => Promise<string | null>
@@ -1407,16 +2042,35 @@ export interface ElectronAPI {
   vaultBackupRestoreArchive: (archivePath: string) => Promise<{ ok: boolean; target?: string; written?: number; message?: string }>
   // checkin
   habitGetAll: () => Promise<{ habits: Habit[]; records: HabitRecord[] }>
+  /** 分享卡片：数字 + 二维码一次取全（主进程聚合，见 ShareCardData） */
+  shareCardGet: () => Promise<ShareCardData>
+  /** 分享卡片另存 PNG（主进程弹保存对话框 → 落盘 → 定位文件） */
+  shareCardSavePng: (data: Uint8Array, defaultName: string) => Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }>
+  /** 看板快照：主进程一次聚合全部卡片数据（见 DashboardSnapshot） */
+  dashboardGetSnapshot: () => Promise<DashboardSnapshot>
   createHabit: (d: CreateHabitDTO) => Promise<Habit>
   updateHabit: (id: string, d: UpdateHabitDTO) => Promise<Habit>
   deleteHabit: (id: string) => Promise<void>
   toggleHabitCheck: (habitId: string, date: string) => Promise<{ checked: boolean }>
   reorderHabits: (orderedIds: string[]) => Promise<void>
-  habitLinkSave: (habitId: string, link: HabitLink | null) => Promise<void>
-  habitLinkRemove: (habitId: string) => Promise<void>
-  onHabitAutoChecked: (cb: (items: HabitAutoCheckin[]) => void) => () => void
   // bookmark nav
   bookmarkGetAll: () => Promise<{ categories: BookmarkCategory[]; bookmarks: BookmarkItem[] }>
+  // pet（桌宠）
+  petGet: () => Promise<PetSnapshot>
+  petFeed: () => Promise<PetSnapshot>
+  petPetTouch: () => Promise<PetSnapshot>
+  petRename: (name: string) => Promise<PetSnapshot>
+  petReset: (species: PetSpecies) => Promise<PetSnapshot>
+  petSwitchSpecies: (species: PetSpecies) => Promise<PetSnapshot>
+  // 记账（accounting）
+  accountingGetAll: () => Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[] }>
+  accountingParseJson: (text: string) => Promise<AccountingParseOutcome>
+  accountingImportJson: (text: string) => Promise<AccountingImportOutcome>
+  accountingCreate: (input: CreateAccountingInput) => Promise<AccountingTransaction>
+  accountingUpdate: (id: string, patch: Partial<AccountingTransaction>) => Promise<AccountingTransaction | null>
+  accountingDelete: (id: string) => Promise<boolean>
+  accountingSetAccountBalance: (id: string, initialBalance: number) => Promise<AccountingAccount | null>
+  accountingCreateAccount: (name: string, initialBalance: number) => Promise<AccountingAccount>
   createBookmarkCategory: (d: { name: string; color?: string }) => Promise<BookmarkCategory>
   updateBookmarkCategory: (id: string, d: { name?: string; color?: string }) => Promise<BookmarkCategory | null>
   deleteBookmarkCategory: (id: string) => Promise<void>
@@ -1443,7 +2097,17 @@ export interface ElectronAPI {
     knowledgePages: number
     pomodoroMinutes: number
     scheduleDone: number
+    /** 记账窗口内收入 / 支出（复盘统计块用） */
+    accountingIncome: number
+    accountingExpense: number
+    /** 每习惯明细（次数 / 完成率 / 最长连续）；v3.2.0 条目 13 起提供 */
+    habitDetails: HabitPeriodStat[]
   }>
+  // 层级总结文件（周 / 月 / 年）—— .knowbase/blog/summaries/
+  listSummaries: () => Promise<SummaryRecord[]>
+  getSummaryById: (id: string) => Promise<SummaryRecord | null>
+  ensureSummary: (kind: SummaryKind, start: string, end: string) => Promise<SummaryRecord>
+  saveSummary: (id: string, contentMd: string) => Promise<SummaryRecord>
   // blog templates
   listBlogTemplates: () => Promise<BlogTemplate[]>
   createBlogTemplate: (d: { name: string; contentMd?: string }) => Promise<BlogTemplate | null>
@@ -1494,6 +2158,9 @@ export interface ElectronAPI {
   onDayPanelToggleVisibility: (cb: () => void) => () => void
   dayPanelOpenInMain: (tab: string, tool?: string) => void
   onMainCommand: (cb: (payload: { type: string; tab?: string; tool?: string }) => void) => () => void
+  /** 主窗口全屏弹窗遮罩开合上报 → dock 小窗跟随压暗（主窗渲染层发起，见 lib/mainDimSync.ts） */
+  mainModalDimNotify: (dim: boolean) => void
+  onMainModalDim: (cb: (dim: boolean) => void) => () => void
   dataNotify: (payload: { scope: string }) => void
   onDataChanged: (cb: (payload: { scope: string }) => void) => () => void
   fillPopupTheme: string
@@ -1553,24 +2220,41 @@ export interface ElectronAPI {
   pdfExport: (payload: { data: Uint8Array; defaultName: string; kind?: 'pdf' | 'txt' }) => Promise<PdfExportResult>
   /** 界面逐页阅读：当前仓库内 .pptx → [{n,text}] */
   docsPptxPages: (relPath: string) => Promise<{ ok: boolean; pages?: Array<{ n: number; text: string }>; total?: number; error?: string }>
-  agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
-  agentRegenerate: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string }) => Promise<AgentChatResult>
+  agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string }) => Promise<AgentChatResult>
+  agentRegenerate: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
   agentStartScene: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string }) => Promise<AgentChatResult>
-  agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: AgentContextInfo; chatId?: string }) => Promise<AgentChatResult>
+  agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: AgentContextInfo; chatId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
   agentDeleteMessage: (sessionId: string, messageId: string) => Promise<boolean>
   /** 会话压缩（/compress 指令 + 自动预检共用）：折叠检查点后旧轮为纪要并推进检查点 */
   agentCompressSession: (req: { sessionId: string; modelId?: string; providerId?: string; effort?: string }) => Promise<AgentCompressResult>
   agentAbort: (chatId: string) => Promise<boolean>
-  /** AgentRunner 实时过程步骤（llm/tool 每步完成即推送，payload {chatId, step}） */
-  onAgentStep: (cb: (p: { chatId: string; step: AgentTraceStep }) => void) => () => void
-  /** AgentRunner 流式增量（思考链 / 正文 / 工具进行中；主进程已合批，payload {chatId, event}） */
-  onAgentStream: (cb: (p: { chatId: string; event: AgentStreamEvent }) => void) => () => void
+  /** N-3 多对话并行：按会话停止（该会话的全部在跑调用一并中止） */
+  agentAbortSession: (sessionId: string) => Promise<boolean>
+  /** B4 编辑器内联建议：手动触发一次续写建议（独立于对话历史） */
+  aiInlineSuggestRun: (req: { requestId: string; text: string; offset: number; relPath?: string; modelId?: string; providerId?: string; effort?: string }) => Promise<{ ok: boolean; text?: string; aborted?: boolean; error?: string }>
+  /** B4 取消在途建议请求 */
+  aiInlineSuggestCancel: (requestId: string) => Promise<{ ok: boolean }>
+  /** AgentRunner 实时过程步骤（llm/tool 每步完成即推送，payload {chatId, sessionId, step}） */
+  onAgentStep: (cb: (p: { chatId: string; sessionId: string; step: AgentTraceStep }) => void) => () => void
+  /** AgentRunner 流式增量（思考链 / 正文 / 工具进行中；主进程已合批，payload {chatId, sessionId, event}） */
+  onAgentStream: (cb: (p: { chatId: string; sessionId: string; event: AgentStreamEvent }) => void) => () => void
+  /** N-3 多对话并行：助手会话运行态（全窗口广播；running = 在跑会话 id 集快照，ended = 单次运行结果） */
+  onAssistantRunState: (cb: (p: AgentRunStateEvent) => void) => () => void
   agentSessions: () => Promise<AgentSessionInfo[]>
   agentNewSession: (title?: string, source?: AgentSessionSource) => Promise<AgentSessionInfo>
   agentMessages: (sessionId: string) => Promise<AgentStoredMessage[]>
+  // ===== AI 用量 / 会话文件改动（v3.4.0 批次5，右栏 token 面板只读）=====
+  agentUsageGet: () => Promise<{ days: Record<string, AiUsageDay> }>
+  agentSessionChanges: (sessionId?: string) => Promise<SessionFileChange[]>
   agentRenameSession: (id: string, title: string) => Promise<boolean>
   agentSetSessionInstructions: (id: string, instructions: string) => Promise<{ ok: boolean; error?: string }>
   agentDeleteSession: (id: string) => Promise<boolean>
+  // ===== v3.1.2 条目11：支线旁问（createSideLane 只装上下文、不调 LLM）=====
+  agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) => Promise<AgentSideLaneCreateResult>
+  /** 列某主线下的支线（含已升格）；删除前计数亦用它 */
+  agentListSideLanes: (parentSessionId: string) => Promise<AgentSessionInfo[]>
+  /** 升格支线为正式会话（单向） */
+  agentPromoteSideLane: (laneSessionId: string) => Promise<boolean>
   // ===== AI教学 P1：会话 ⇄ 文件夹绑定（docs/ai-teaching-module-rework.md §二）=====
   aiTeachEnsureSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
@@ -1578,7 +2262,13 @@ export interface ElectronAPI {
   aiTeachDeleteSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachReadConstraints: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; error?: string }>
   aiTeachGlobalEnsureConstraints: () => Promise<{ ok: boolean; text?: string; relPath?: string | null; created?: boolean; error?: string }>
+  /** v3.1.2 条目6：工作区约束文档（{工作区}/CONSTRAINTS.md）——ensure 落骨架并返回 relPath 跳编辑区；本工作区会话每轮注入 */
+  aiTeachWorkspaceEnsureConstraints: (wsId: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; created?: boolean; error?: string }>
   aiTeachWriteConstraints: (id: string, text: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; error?: string }>
+  // N-5/N-7：助手独立要求 + 术语表（.assistant/）——ensure 落文件并返回仓库相对路径；写入走编辑器 ws:writeFile
+  assistantConstraintsEnsureGlobal: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
+  assistantConstraintsEnsureSession: (id: string) => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
+  assistantConstraintsEnsureGlossary: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
   aiTeachOrganizeDoc: (id: string, title: string, content: string, prefix?: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   // P5 工作区两层（§3.2-6；元数据入 .knowbase/modules/aiTeaching/workspaces.json）
   aiTeachListWorkspaces: () => Promise<{ workspaces: AiTeachWorkspaceInfo[]; sessionWs: Record<string, string>; unassignedCount: number; lastWorkspaceId: string | null }>
@@ -1588,6 +2278,22 @@ export interface ElectronAPI {
   aiTeachAssignSession: (id: string, wsId: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachUnassignSession: (id: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachSetLastWorkspace: (wsId: string | null) => Promise<{ ok: boolean; error?: string }>
+  // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲）
+  aiTeachCourseGetState: (wsId: string) => Promise<AiTeachCourseState>
+  aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
+  aiTeachCourseSaveOutline: (wsId: string, outline: AiTeachCourseOutline) => Promise<{ ok: boolean; relPath?: string; error?: string }>
+  aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: Partial<AiTeachCourseUnitProgress>) => Promise<{ ok: boolean; error?: string }>
+  aiTeachCourseGenerateOutline: (input: AiTeachCourseGenerateInput) => Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }>
+  aiTeachCourseGenerateOutlineStream: (id: string, input: AiTeachCourseGenerateInput) => Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }>
+  // L2 课时生命周期：打开即续课 / 结束课时 / 生成交接；L3 知识点收尾
+  aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => Promise<{ ok: boolean; sessionId?: string; order?: number; kind?: string; status?: 'open' | 'ended'; readonly?: boolean; error?: string }>
+  aiTeachCourseEndLesson: (sessionId: string) => Promise<{ ok: boolean; wsId?: string; unitId?: string; error?: string }>
+  aiTeachCourseFinalizeLesson: (sessionId: string) => Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean }>
+  aiTeachCourseFinishUnit: (wsId: string, unitId: string, score?: { correct: number; total: number }) => Promise<{ ok: boolean; summaryRel?: string; error?: string }>
+  aiTeachCourseReadPrevHandoff: (sessionId: string) => Promise<{ ok: boolean; text: string }>
+  aiTeachCourseMakeUnitQuiz: (wsId: string, unitId: string) => Promise<{ ok: boolean; questions?: AiTeachUnitQuizQuestion[]; error?: string }>
+  onAiTeachCourseGenProgress: (cb: (p: AiTeachCourseGenProgress) => void) => () => void
+  onAiTeachCourseRefresh: (cb: (p: { wsId: string }) => void) => () => void
   aiTeachSrcRead: (id: string) => Promise<AiTeachSourcesResult>
   aiTeachSrcAdd: (id: string, input: AiTeachSourceInput) => Promise<AiTeachSourcesResult>
   aiTeachSrcRemove: (id: string, no: number) => Promise<AiTeachSourcesResult>
@@ -1595,11 +2301,15 @@ export interface ElectronAPI {
   aiTeachSrcPick: () => Promise<{ ok: boolean; path: string | null; error?: string }>
   aiTeachSrcPickDir: () => Promise<{ ok: boolean; path: string | null; error?: string }>
   aiTeachSrcVisionCheck: () => Promise<{ ok: boolean; model?: string; error?: string }>
+  /** LibreOffice 探测（设置页「检测」按钮）；source 说明路径命中来源，便于给用户可读解释 */
+  aiTeachSrcSofficeProbe: (settingPath?: string) => Promise<{ ok: boolean; path?: string; source?: string }>
   aiTeachSrcPdfBytes: (id: string, no: number) => Promise<{ ok: boolean; base64?: string; error?: string }>
   aiTeachSrcTranscribe: (id: string, no: number, pages: { n: number; dataUrl: string }[], modelSpec?: string) => Promise<{ ok: boolean; relPath?: string; model?: string; done?: number[]; skipped?: number[]; failed?: number[]; error?: string }>
   aiTeachSrcWebProbe: (id: string, no: number, anchorUrl?: string) => Promise<WebProbeResult>
   aiTeachSrcWebCrawl: (id: string, no: number, urls: string[]) => Promise<WebCrawlResult>
   aiTeachSrcWebCancel: (id: string) => Promise<{ ok: boolean; error?: string }>
+  /** v3.1.1：把对话级登记（含原件/提取稿复制）上收到工作区主库 */
+  aiTeachSrcPromote: (id: string) => Promise<AiTeachSourcesResult>
   aiTeachProfileReadGlobal: () => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>
   aiTeachProfileWriteGlobal: (text: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachProfileReadSession: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>
@@ -1609,10 +2319,14 @@ export interface ElectronAPI {
   aiTeachProfileEnsureGlobal: () => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
   aiTeachProfileEnsureSession: (id: string) => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
   aiTeachProfileEnsureWorkspace: (id: string) => Promise<{ ok: boolean; relPath?: string; created?: boolean; error?: string }>
+  /** v3.2.0 第 20 项：画像「变化条目」合并写入（上层 mergeOnly 只接受 add） */
+  aiTeachProfileApplyPatch: (layer: 'global' | 'workspace' | 'session', id: string | null, entries: AiTeachProfileEntry[]) => Promise<AiTeachProfilePatchResult>
   llmReasoningCapable: (model: string) => Promise<boolean>
   onAiTeachTreeRefresh: (cb: (p: { dirRel: string }) => void) => () => void
   onAiTeachWebProgress: (cb: (p: { sessionId: string; no: number; done: number; total: number; current: string }) => void) => () => void
   onAiTeachNotice: (cb: (msg: string) => void) => () => void
+  /** N-1 手册通道：助手侧提示（升格 Toast 等），载荷 `{ sessionId, message }` */
+  onAssistantNotice: (cb: (p: { sessionId: string; message: string }) => void) => () => void
   llmCcSwitchList: () => Promise<CcSwitchScanResult>
   llmCcSwitchImport: (ids: string[]) => Promise<CcSwitchImportResult>
 }
@@ -1631,5 +2345,181 @@ export interface DevtoolsAPI {
   helpDocsWrite: (doc: { fileName: string; title: string; category: string; icon: string; body: string }) => Promise<{ ok?: boolean; fileName?: string; error?: string }>
   helpDocsDelete: (fileName: string) => Promise<{ ok?: boolean; error?: string }>
 }
+
+// ===== 书市（book market）=====
+// ★ 镜像声明：主进程侧的真相源在 electron/lib/kbStore/bookMarketSchema.ts（数据形状）与
+//   bookSourceVaultRepo.ts（BookSourceInfo）；这里保持同形，改一处必须改两处。
+//   （主进程不 import src/types —— 与其他模块同惯例，见 electron/lib/releaseNotes/types.ts 头注。）
+// ★★ 安全不变量：跨 IPC 的书源描述**永不含凭据本体** —— 只有 `hasCredential: boolean`。
+
+export type BookSourceKind = 'opds' | 'custom'
+export type BookAuthType = 'basic' | 'bearer'
+/** 响应格式：**唯一职责是选解析器**（atom ⇒ 标准 OPDS 抽取、字段映射不参与；json ⇒ 走 mapping） */
+export type BookResponseType = 'json' | 'atom'
+
+/** 声明式取值路径（只取值、不执行脚本；方案 §三 边界） */
+export interface BookSourceMapping {
+  list: string
+  title: string
+  author?: string
+  cover?: string
+  summary?: string
+  download: string
+  /** 格式字段路径（如 `files[0].format`）—— 直链无扩展名时靠它判可读性与落盘后缀 */
+  format?: string
+}
+
+/** 渲染层可见的书源描述（凭据一律只报「存没存」） */
+export interface BookSourceInfo {
+  id: string
+  name: string
+  kind: BookSourceKind
+  url: string
+  /** 检索 URL 模板（`{base}{query}{page}{isbn}`）；'' = 用 url 原样 */
+  searchUrl: string
+  responseType: BookResponseType
+  authType: BookAuthType | null
+  hasCredential: boolean
+  enabled: boolean
+  builtin: boolean
+  mapping: BookSourceMapping | null
+  createdAt: string
+}
+
+/** 检索结果条目（统一模型；opds 与 custom 源都归一到这一形状） */
+export interface BookMarketItem {
+  sourceId: string
+  sourceName: string
+  title: string
+  author: string
+  /** 简介（OPDS 取 `<summary>` / `<content>`；无则 ''） */
+  summary: string
+  coverUrl: string
+  downloadUrl: string
+  /**
+   * 扩展名（带点小写）；'' = 认不出 → 不可下载。
+   * ★ 取值顺序：源映射的 `format` 字段优先，缺了才从 downloadUrl 推
+   *   （不少自定义源的直链没有扩展名，只从 URL 推会把能下的书判成不能下）。
+   */
+  ext: string
+  /** 服务端给出的体积（null = 未知，闸门放行后由 Content-Length 再判，方案 §4.3） */
+  sizeBytes: number | null
+  /** 命中 BOOK_EXTS ⇒ 可下载且可读；false 时书卡标「暂不支持」并禁用下载 */
+  readable: boolean
+}
+
+
+/** 单源失败（只带原因文案，**绝不含凭据**） */
+export interface BookSearchFailure {
+  sourceId: string
+  name: string
+  reason: string
+}
+
+/** 书源连通性四态（镜像 electron/lib/bookMarket/sourceClient.ts 的 SourceConnectivity）
+ *  `need-credential` = 配置缺凭据 / 服务端 401；`forbidden` = 服务端 403 拒绝访问。 */
+export type BookSourceConnectivity = 'ok' | 'need-credential' | 'forbidden' | 'fail'
+
+/** 新建 / 更新书源的 patch（镜像 bookMarketSchema.BookSourcePatch；**结构上不含任何凭据字段**） */
+export interface BookSourcePatch {
+  name?: string
+  kind?: BookSourceKind
+  url?: string
+  searchUrl?: string
+  responseType?: BookResponseType
+  /** `null` = 改为免认证。`ref` 由主进程恒改写成源 id，故渲染层传什么都无所谓（统一传 ''） */
+  auth?: { type: BookAuthType; ref: string } | null
+  enabled?: boolean
+  mapping?: BookSourceMapping | null
+}
+
+/**
+ * AI 起草的书源草案（S5）—— 主进程 `builtin.booksource.draft` 经
+ * `bookMarket:source-draft` 广播送来的**预填数据**，只用来打开「新建书源」表单。
+ *
+ * ★ 三点口径（每一条都有对应断言，别在别处捡起来用）：
+ *  1. **结构上不含任何凭据字段** —— 凭据只能由用户在表单里手输（走
+ *     `bookMarketSaveCredential`），AI 侧从头到尾拿不到；
+ *  2. 草案**不落库、不落盘**：用户点「添加」才走 `bookMarketUpsertSource`，点取消即弃；
+ *  3. 与 `BookSourcePatch` 的差别只在 `authType`（patch 要 `auth:{type,ref}` 这个
+ *     主进程才认的形状；草案给的是人看的 `authType`，表单自己拼成 patch）。
+ */
+export interface BookSourceDraft {
+  name: string
+  kind: BookSourceKind
+  url: string
+  searchUrl?: string
+  responseType?: BookResponseType
+  authType?: BookAuthType
+  mapping?: BookSourceMapping | null
+}
+
+/** 书源凭据入参 —— **只走 `bookMarketSaveCredential` 一条路**，绝不写进源描述 */
+export interface BookSourceCredentialInput {
+  type: BookAuthType
+  username?: string
+  password?: string
+  token?: string
+}
+
+/** 检索 IPC 返回（ok/error 是信封，items/failed/connectivity 是数据） */
+export interface BookMarketSearchResponse {
+  ok: boolean
+  items?: BookMarketItem[]
+  failed?: BookSearchFailure[]
+  /** 每个源的连通性 —— 书源列表的三态**顺手**就刷新了，不必再发一轮探测请求 */
+  connectivity?: Record<string, BookSourceConnectivity>
+  error?: string
+}
+
+/** 下载队列状态机（方案 §4.1 拍板 ⑬：并发恒 1，队列是内存态，重启即清） */
+export type BookDownloadState = 'queued' | 'down' | 'paused' | 'done' | 'fail'
+
+export interface BookDownloadTask {
+  id: string
+  sourceId: string
+  sourceName: string
+  title: string
+  url: string
+  /** 目标落盘相对路径（仓库内，posix）；排队时即定，便于「已完成」项定位 */
+  relPath: string
+  state: BookDownloadState
+  received: number
+  /** 服务端 Content-Length；0 = 未知（进度条转不确定态） */
+  total: number
+  /** 已自动重试次数（方案 §4.1：失败自动重试 1 次，凭据类失败不空转） */
+  retry: number
+  error?: string
+}
+
+/** 下载入参（镜像 electron/lib/bookMarket/downloader.ts 的 BookDownloadRequest） */
+export interface BookDownloadRequest {
+  sourceId?: string
+  sourceName?: string
+  title: string
+  author?: string
+  downloadUrl: string
+  coverUrl?: string
+  /** 扩展名（带点优先，不带点也收）；不在 BOOK_EXTS 里 → 主进程直接拒（不在书架上出现的格式下了也白下） */
+  ext?: string
+  /** 检索时源给的体积（0 / 缺省 = 未知）—— 主进程先用它挡一次，响应头到了还有一次复核 */
+  sizeBytes?: number
+}
+
+/**
+ * 入队结果。
+ * ★ `conflict: true` = **同名书已存在且用户还没表态**（主进程**不入队**、不留痕迹）——
+ *   渲染层据此弹「覆盖 / 另存副本」，再带 `conflict` 决定调一次 `bookMarketDownload`
+ *   （拍板 ⑩：不静默覆盖）。
+ */
+export type BookDownloadStartResult =
+  | { ok: true; task?: BookDownloadTask }
+  | { ok: false; conflict: true; relPath: string; fileName: string; error?: string }
+  | { ok: false; error: string }
+
+/** 队列控制动作（`pause-all` / `resume-all` / `clear-done` 忽略 id） */
+export type BookDownloadAction =
+  | 'pause' | 'resume' | 'cancel' | 'retry' | 'pause-all' | 'resume-all' | 'clear-done'
+
 
 declare global { interface Window { api: ElectronAPI; devtoolsApi?: DevtoolsAPI } }

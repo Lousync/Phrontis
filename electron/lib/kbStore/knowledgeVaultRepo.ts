@@ -34,17 +34,19 @@ export interface VaultPage {
   path: string
   /** frontmatter attachments 数组：仓库内相对路径（如 .knowbase/_attachments/knowledge_page/<id>/<file>） */
   attachments: string[]
-  /** 页面状态（draft/published）：draft 不出现在知识库正式列表/阅读（编辑器草稿/修改中） */
-  status: 'draft' | 'published'
-  /** 条目种类：doc=md/欢迎页；file=清单归档的非 md 文件（缺省按 doc 消费，向后兼容） */
+  /** 条目种类：doc=md/欢迎页；file=仓库内的非 md 文件（缺省按 doc 消费，向后兼容） */
   entryKind?: 'doc' | 'file'
   /** 文件大小（字节；元信息卡展示） */
   sizeBytes?: number
 }
 
-/** 正式页过滤（草稿隐藏）：知识库列表/阅读/搜索/星标/反链源只含 published */
+/**
+ * 身份统一后（2026-09-20，docs/note-identity-unify-design.md §2）**没有「草稿」这个概念**：
+ * 文件即条目，`status` 双态退役。此函数保留为直通，只为让下游调用点不必同时改（语义 = 全量）。
+ * 它的存在也标注了一处历史：旧口径下这里会滤掉 status=draft 的页。
+ */
 function publishedOnly(list: KnowledgePageIndexEntry[]): KnowledgePageIndexEntry[] {
-  return list.filter((e) => e.status !== 'draft')
+  return list
 }
 
 function requireRoot(): string {
@@ -105,7 +107,6 @@ function entryToPage(entry: KnowledgePageIndexEntry, contentMd = '', attachments
     tags: tagsOf(entry),
     path: entry.path,
     attachments,
-    status: entry.status,
     entryKind: entry.entryKind ?? 'doc',
     sizeBytes: entry.sizeBytes,
   }
@@ -259,12 +260,16 @@ export function vaultCreatePage(data: { title: string; contentMd: string; catego
   const stem = sanitizeFileStem(data.title || '导入页面')
   const name = uniquePageName(dirRel, stem, root)
   const rel = `${dirRel}/${name}`
-  const fm = { id, title: data.title || stem, tags: data.tags ?? [], starred: false, status: 'published' as const, created: now, updated: now }
+  // ★ fileType 必须真写进 frontmatter（B-4）：该参数此前被静默丢弃，而更新路径
+  // （vaultUpdatePage，:210 `if (payload.fileType) fm.fileType = …`）却**会**写 —— 建页时缺、
+  // 首次保存后才有，中间这段窗口下游（大纲 / 沉浸阅读 / AI 续写）全按空串处理。
+  // 显式给了就用给的，没给一律 'md'（本函数落的文件恒是 .md）。
+  const fm = { id, title: data.title || stem, fileType: data.fileType || 'md', tags: data.tags ?? [], starred: false, status: 'published' as const, created: now, updated: now }
   if (!writeVaultFile(rel, serializeMarkdown(fm, data.contentMd ?? ''))) throw new Error('页面文件写入失败')
   invalidateKnowledgeIndex()
   const entry = getKnowledgeIndex().byId[id]
   if (entry) return entryToPage(entry, data.contentMd ?? '')
-  return { id, title: data.title || stem, contentMd: data.contentMd ?? '', contentHtml: '', annotationMd: '', categoryId: data.categoryId ?? null, isStarred: false, sortOrder: 0, fileType: 'md', attachmentId: '', createdAt: now, updatedAt: now, tags: (data.tags ?? []).map((t) => ({ id: t, name: t, color: '' })), path: rel, attachments: [], status: 'published' }
+  return { id, title: data.title || stem, contentMd: data.contentMd ?? '', contentHtml: '', annotationMd: '', categoryId: data.categoryId ?? null, isStarred: false, sortOrder: 0, fileType: 'md', attachmentId: '', createdAt: now, updatedAt: now, tags: (data.tags ?? []).map((t) => ({ id: t, name: t, color: '' })), path: rel, attachments: [] }
 }
 
 /** vault 导入文件夹：递归镜像为目录树（categories.json 条目）+ 文本文件转 frontmatter md；PDF/XMind 落附件目录并以协议引用挂入页面 */
@@ -357,8 +362,8 @@ export function vaultGetPages(categoryId?: string | null): VaultPage[] {
 
 export function vaultGetPageById(id: string): VaultPage | null {
   const entry = getKnowledgeIndex().byId[id]
-  if (!entry || entry.status === 'draft') return null // 草稿（修改中）不出现在知识库阅读
-  // 非 md 归档文件：不读正文（二进制/HTML），渲染方式由渲染层按 entryKind 决定
+  if (!entry) return null
+  // 非 md 文件：不读正文（二进制/HTML），渲染方式由渲染层按 entryKind 决定
   if (isNonMdArchiveEntry(entry)) return entryToPage(entry)
   const doc = readPageDoc(entry)
   return entryToPage(entry, doc.contentMd, doc.attachments)
@@ -379,6 +384,35 @@ export function vaultToggleStar(id: string): VaultPage | null {
   }
   invalidateKnowledgeIndex()
   const fresh = getKnowledgeIndex().byId[id]
+  return fresh ? entryToPage(fresh, doc.body) : null
+}
+
+/**
+ * 摘录导出覆盖重写（方案 C2 硬约束）：**只替换正文 body，frontmatter 原样保留**——
+ * 尤其不能丢 `id`，否则页面变「无 id 的草稿」，知识库直接不显示（不变量 2）。
+ * 风格照 vaultToggleStar：parseMarkdown → 替换 doc.body → serializeMarkdown → writeVaultFile → 失效索引。
+ * 广播交给调用方（IPC 层统一广播，同其余 vault 写函数）。
+ * 返回更新后的页面（含新正文）；页面不存在（被删）返回 null，由调用方走自愈新建分支。
+ */
+export function vaultExportExcerptsNote(pageId: string, contentMd: string): VaultPage | null {
+  const entry = getKnowledgeIndex().byId[pageId]
+  if (!entry) return null
+  if (isWelcomeEntry(entry)) throw new Error(WELCOME_WRITE_DENY)
+  if (isNonMdArchiveEntry(entry)) throw new Error(NON_MD_ARCHIVE_DENY)
+  const abs = join(requireRoot(), entry.path)
+  // 索引说在、盘上已不在（文件被应用外删掉 / 同步工具挪走，索引尚未失效）→ 视同「页不存在」。
+  // 返回 null 走调用方的自愈分支（重建 + 回写新 id），否则 readFileSync 抛 ENOENT 把导出整个打断。
+  if (!existsSync(abs)) {
+    invalidateKnowledgeIndex()
+    return null
+  }
+  const doc = parseMarkdown(readFileSync(abs, 'utf-8'))
+  doc.body = contentMd
+  if (!writeVaultFile(entry.path, serializeMarkdown(doc.frontmatter, doc.body))) {
+    throw new Error('导出笔记写入失败')
+  }
+  invalidateKnowledgeIndex()
+  const fresh = getKnowledgeIndex().byId[pageId]
   return fresh ? entryToPage(fresh, doc.body) : null
 }
 
@@ -456,7 +490,7 @@ export function vaultGetBacklinks(pageId: string): VaultPage[] {
   const srcIds = getGraphIndex().incoming[pageId] || []
   const rows = srcIds
     .map((id) => idx.byId[id])
-    .filter((p): p is KnowledgePageIndexEntry => !!p && p.id !== pageId && p.status !== 'draft')
+    .filter((p): p is KnowledgePageIndexEntry => !!p && p.id !== pageId)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   return rows.map((e) => entryToPage(e, ''))
 }
@@ -473,7 +507,7 @@ export function vaultGetBacklinkContext(pageId: string): VaultBacklinkContextIte
   const out: VaultBacklinkContextItem[] = []
   const sources = srcIds
     .map((id) => idx.byId[id])
-    .filter((p): p is KnowledgePageIndexEntry => !!p && p.id !== pageId && p.status !== 'draft')
+    .filter((p): p is KnowledgePageIndexEntry => !!p && p.id !== pageId)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   for (const src of sources) {
     let excerpt = ''

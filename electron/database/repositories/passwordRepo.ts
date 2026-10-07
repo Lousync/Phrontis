@@ -1,4 +1,4 @@
-// R6 去库化：真相源 = .knowbase/secret/passwords.json（DPAPI，sql.js 路径已移除，D9）
+// R6 去库化：真相源 = .knowbase/secret/passwords.json（'enc1:' 密文，机制见 lib/secretBox.ts 头注释；sql.js 路径已移除，D9）
 import { ipcMain, safeStorage } from 'electron'
 import { randomUUID } from 'crypto'
 import { vaultPasswordsAll, vaultPasswordsSave, type SecretPwdRow } from '../../lib/kbStore/secretVaultRepo'
@@ -18,8 +18,9 @@ interface PasswordRow {
 /** 新建/更新入参中新加的两个可选字段（favorite / group） */
 type EntryMetaInput = { favorite?: boolean; group?: string | null }
 
-// ---- 密码加密(safeStorage/DPAPI) ----
+// ---- 密码加密(safeStorage；密文机制见 lib/secretBox.ts 头注释) ----
 // 密文格式: 'enc1:' + base64(加密字节);无前缀视为历史明文,读取时原样返回。
+// 与 secretBox 同格式但不互相引用(与密码本历史数据兼容)。
 const ENC_PREFIX = 'enc1:'
 
 export function encryptPassword(plain: string): string {
@@ -66,7 +67,7 @@ function vaultNextSortOrder(rows: PasswordRow[]): number {
 /**
  * 新建密码条目（写入 vault 并返回明文行）。
  * 抽出为独立函数：主窗口 passwordVault:create 与悬浮小密码本 fillPopup:createEntry
- * 共用同一份创建逻辑（排序号、时间、DPAPI 加密口径一致），避免两处漂移。
+ * 共用同一份创建逻辑（排序号、时间、加密口径一致），避免两处漂移。
  */
 export function createPasswordEntryRow(data: {
   title?: string; url?: string; username?: string; account?: string; password?: string; notes?: string

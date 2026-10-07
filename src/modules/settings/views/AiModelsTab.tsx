@@ -7,9 +7,9 @@ import { Collapsible } from '../../../components/shared/Collapsible'
 import {
   llmListProviders, llmSaveProvider, llmRemoveProvider, llmToggleProvider,
   llmTestConnection, llmRefreshModels, llmSetDefaultModel, llmGetUsage, llmAddModel, llmTestModel,
-  llmCcSwitchList, llmCcSwitchImport, openExternal, llmUsageBreakdown,
+  llmCcSwitchList, llmCcSwitchImport, openExternal, llmUsageBreakdown, aiTeachSrcSofficeProbe,
 } from '../../../lib/ipc'
-import type { LlmProviderInfo, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, CcSwitchItem, LlmUsageBreakdownEntry } from '../../../types'
+import type { LlmProviderInfo, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, CcSwitchItem, LlmUsageBreakdownEntry, LlmUsageInfo } from '../../../types'
 import { prettyModelName, isOpenCodeFree } from '../../../lib/modelNames'
 
 /** 免费=用户手动标记 ∪ id 含 free（上游不提供该元数据，双轨启发式） */
@@ -31,12 +31,21 @@ const TYPE_LABEL: Record<LlmProviderType, string> = {
   anthropic: 'Anthropic',
 }
 
+/** soffice 探测命中来源 → 可读文案（对应 main 侧 SofficeSource） */
+const SOFFICE_SOURCE_LABEL: Record<string, string> = {
+  setting: '此处填写的路径',
+  env: '环境变量 SOFFICE_PATH',
+  registry: 'Windows 注册表（安装器写入）',
+  candidate: '常见安装位置',
+  path: '系统 PATH',
+}
+
 /** 设置 → AI 工具 → 模型：供应商管理 + 默认模型 + token 预算 */
 export function AiModelsTab() {
   const { s, update } = useSettings()
   const [providers, setProviders] = useState<LlmProviderInfo[]>([])
   const [defaultModel, setDefaultModel] = useState('')
-  const [usage, setUsage] = useState({ monthTokens: 0 })
+  const [usage, setUsage] = useState<LlmUsageInfo>({ monthTokens: 0 })
   const [breakdown, setBreakdown] = useState<{ month: string; entries: LlmUsageBreakdownEntry[] }>({ month: '', entries: [] })
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -44,6 +53,21 @@ export function AiModelsTab() {
   // 模型级可用性测试(选中具体模型后实测,区别于供应商探活)
   const [modelTesting, setModelTesting] = useState(false)
   const [modelTestResult, setModelTestResult] = useState<LlmModelTestResultInfo | null>(null)
+  // LibreOffice 探测结果：纯即时反馈，不持久化（路径本身存在设置里）
+  const [sofficeProbe, setSofficeProbe] = useState<{ ok: boolean; path?: string; source?: string } | null>(null)
+  const [sofficeTesting, setSofficeTesting] = useState(false)
+
+  const testSoffice = async () => {
+    if (sofficeTesting) return
+    setSofficeTesting(true)
+    try {
+      setSofficeProbe(await aiTeachSrcSofficeProbe(s.sofficePath ?? ''))
+    } catch (e) {
+      showToast({ type: 'error', message: `检测失败：${(e as Error).message}` })
+    } finally {
+      setSofficeTesting(false)
+    }
+  }
 
   const testSelectedModel = async () => {
     if (!defaultModel || modelTesting) return
@@ -82,12 +106,18 @@ export function AiModelsTab() {
       {/* 用量统计（仅统计不限额） */}
       <div>
         <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">Token 用量</h2>
-        <p className="text-[12px] text-[var(--text-muted)] mb-4">本月累计消耗（仅统计，不设限额拦截）；每次对话回复下方的 ↑↓ 标记为单轮消耗。</p>
+        <p className="text-[12px] text-[var(--text-muted)] mb-4">本月累计消耗（↑输入 ↓输出，仅统计、不设限额拦截）；每次对话回复下方的 ↑↓ 标记为单轮消耗。</p>
         <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md">
           <div className="flex items-center justify-between text-[13px]">
             <span className="flex items-center gap-2"><Gauge size={14} className="text-[var(--accent)]" />本月 tokens</span>
             <span className="tabular-nums text-[var(--text-secondary)]">{usage.monthTokens.toLocaleString()}</span>
           </div>
+          {(usage.monthPromptTokens != null || usage.monthCompletionTokens != null) && (
+            <div className="mt-0.5 flex items-center justify-end gap-3 text-[11px] tabular-nums text-[var(--text-muted)]">
+              <span>↑ {(usage.monthPromptTokens ?? 0).toLocaleString()} 输入</span>
+              <span>↓ {(usage.monthCompletionTokens ?? 0).toLocaleString()} 输出</span>
+            </div>
+          )}
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
             <label className="flex items-center justify-between gap-3 text-[12px]">
               <span className="text-[var(--text-muted)] mr-2">单次 maxTokens</span>
@@ -103,7 +133,7 @@ export function AiModelsTab() {
                 {breakdown.entries.slice(0, 8).map(e => (
                   <div key={`${e.providerId}-${e.model}`} className="flex items-center justify-between gap-2 text-[11px]">
                     <span className="truncate text-[var(--text-secondary)]" title={`${e.provider} · ${e.model}`}>{e.provider} · {prettyModelName(e.model)}</span>
-                    <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{e.calls} 次 · {e.tokens.toLocaleString()} tok</span>
+                    <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{e.calls} 次 · ↑{e.promptTokens.toLocaleString()} ↓{e.completionTokens.toLocaleString()} · 合计 {e.tokens.toLocaleString()}</span>
                   </div>
                 ))}
               </div>
@@ -131,6 +161,36 @@ export function AiModelsTab() {
             </div>
             <SettingSwitch checked={s.aiShowThinking !== false} onChange={v => { void update('aiShowThinking', v) }} aria-label="显示思考过程" />
           </div>
+        </div>
+      </div>
+
+      {/* LibreOffice 路径：pptx 视觉转写的前置（原 ui:false 无任何入口，只能手改 settings.json） */}
+      <div data-setting-anchor="aiTools.sofficePath">
+        <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">LibreOffice 路径</h2>
+        <p className="text-[12px] text-[var(--text-muted)] mb-4">AI 教学素材的 pptx 视觉转写需先经本机 LibreOffice 转 PDF。留空 = 自动探测（注册表 / 常见安装位 / PATH）；装在自定义目录（如 D 盘）时手动填写 soffice.exe 绝对路径。</p>
+        <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md">
+          <div className="flex items-center gap-2">
+            <input
+              value={s.sofficePath ?? ''}
+              onChange={e => { void update('sofficePath', e.target.value); setSofficeProbe(null) }}
+              placeholder="D:\tools\LibreOffice\program\soffice.exe"
+              spellCheck={false}
+              className="flex-1 min-w-0 px-2.5 py-1.5 rounded border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] text-[var(--text-primary)] placeholder:text-[var(--text-disabled)] outline-none focus:border-[var(--accent)]"
+            />
+            <button onClick={() => { void testSoffice() }} disabled={sofficeTesting}
+              className="shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[12px] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50">
+              {sofficeTesting ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} 检测
+            </button>
+          </div>
+          {sofficeProbe
+            ? (
+              <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
+                {sofficeProbe.ok
+                  ? <>已找到：<span className="text-[var(--text-secondary)] break-all">{sofficeProbe.path}</span>（来源：{SOFFICE_SOURCE_LABEL[sofficeProbe.source ?? ''] ?? sofficeProbe.source}）</>
+                  : '未找到：确认已安装 LibreOffice，或在上方填入 soffice.exe 完整路径后重新检测'}
+              </p>
+            )
+            : <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-muted)]">点「检测」立即验证路径可用性 —— 刚装完或刚改路径都无需重启应用。</p>}
         </div>
       </div>
 
@@ -212,6 +272,51 @@ export function AiModelsTab() {
                 : `✗ ${modelTestResult.error}`}
             </p>
           )}
+        </div>
+      )}
+
+      {/* AI 内联建议（B4）：原在「编辑器」设置页，2026-09-20 反馈迁来模型页统一管理 */}
+      {providers.some(p => p.enabled && p.models.length > 0) && (
+        <div data-setting-anchor="editor.inlineSuggest">
+          <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">AI 内联建议（编辑器）</h2>
+          <p className="text-[12px] text-[var(--text-muted)] mb-3">
+            打字停顿后由 AI 续写下一句（灰色幽灵文字）；Tab 采纳、Esc 拒绝、Alt+A 立即要一条，
+            编辑器右上角胶囊里的 ✨ 可随时开关。调用频次远高于对话，建议单独指定便宜、快的模型。
+          </p>
+          <label className="flex items-center justify-between gap-4 cursor-pointer max-w-md">
+            <span className="text-[13px] text-[var(--text-primary)]">启用内联建议</span>
+            <SettingSwitch
+              checked={s.aiAssistantInlineSuggest !== false}
+              onChange={(v) => update('aiAssistantInlineSuggest', v)}
+            />
+          </label>
+          <div className={`mt-2.5 max-w-md ${s.aiAssistantInlineSuggest === false ? 'opacity-40 pointer-events-none select-none' : ''}`}>
+            <label className="flex items-center justify-between gap-4 cursor-pointer">
+              <span className="text-[13px] text-[var(--text-primary)]">自动触发（停 0.8 秒出建议）</span>
+              <SettingSwitch
+                checked={s.aiAssistantInlineSuggestAuto !== false}
+                onChange={(v) => update('aiAssistantInlineSuggestAuto', v)}
+              />
+            </label>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1.5 mb-3 leading-relaxed max-w-md">
+              自动触发只在自然断点（句读、换行、写完一个词之后）发起，词中间不打扰；连续几次建议都没采纳会自动暂停。
+            </p>
+            <div className="max-w-md">
+              <p className="text-[13px] text-[var(--text-primary)] mb-1.5">内联建议模型</p>
+              <select
+                value={typeof s.aiAssistantInlineSuggestModelId === 'string' ? s.aiAssistantInlineSuggestModelId : ''}
+                onChange={e => update('aiAssistantInlineSuggestModelId', e.target.value)}
+                className="w-full px-2.5 py-2 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] outline-none focus:border-[var(--accent)]">
+                <option value="">跟随全局默认模型（思考型自动换非思考）</option>
+                {providers.filter(p => p.enabled).flatMap(p =>
+                  p.models.map(m => {
+                    const free = isFreeModel(m, freeSet)
+                    return <option key={`${p.id}:${m}`} value={`${p.id}:${m}`}>{free ? '[免费] ' : ''}{prettyModelName(m)}{free ? '' : ` · ${m}`}</option>
+                  })
+                )}
+              </select>
+            </div>
+          </div>
         </div>
       )}
     </div>

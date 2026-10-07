@@ -38,7 +38,7 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
   const [tab, setTab] = useState<AiTab>(initialTab ?? 'builtin')
   // 深链变化(面板再次"去配置模型"时组件可能仍挂载)同步切换
   useEffect(() => { if (initialTab) setTab(initialTab) }, [initialTab])
-  const { s } = useSettings()
+  const { s, update } = useSettings()
   const [usage, setUsage] = useState<AiToolUsage>({ used: 0, limit: 0 })
 
   const refreshUsage = useCallback(async () => {
@@ -79,6 +79,50 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
       {/* 汇总条 */}
       <div data-setting-anchor="aiTools.usage">
         <UsageSummary usage={usage} />
+      </div>
+
+      {/* F-12 遗留收口（2026-10-07）：AI 助手对话显示设置。键早已通用化（AI 教学与 AI 对话共用口径），
+          控件原滞留在「AI教学」设置页且 ui:false 搜不到；迁入本小节常显。
+          放在页签区之外（汇总条与页签内容之间），保证从设置搜索跳锚点时无论当前激活哪个页签都能滚到。 */}
+      <div data-setting-anchor="aiTools.ctxUsageDetail">
+        <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">AI 助手</h2>
+        <p className="text-[12px] text-[var(--text-muted)] mb-4">
+          对话输入区的上下文占用指示，AI 教学与 AI 对话共用同一套档位与窗口口径。
+        </p>
+        <div className="space-y-3 max-w-md">
+          <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+            <span className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
+              <Gauge size={14} className="text-[var(--text-muted)]" />
+              占用指示档位
+            </span>
+            <select
+              value={s.ctxUsageDetail || 'compact'}
+              onChange={e => update('ctxUsageDetail', e.target.value)}
+              className="px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+            >
+              <option value="off">隐藏</option>
+              <option value="compact">紧凑（上下文圆环）</option>
+              <option value="detailed">详细（圆环+文字摘要）</option>
+            </select>
+          </label>
+          <div data-setting-anchor="aiTools.ctxWindow">
+            <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <span className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
+                <Cpu size={14} className="text-[var(--text-muted)]" />
+                模型上下文窗口（token）
+              </span>
+              <input
+                type="number" min={0} step={1000}
+                value={s.ctxWindow ?? 0}
+                onChange={e => update('ctxWindow', Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                className="w-40 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+              />
+            </label>
+            <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed px-1 mt-1.5">
+              0=未设置，用量指示退化为纯数字；设置所选模型的上下文窗口（如 128000）后圆环按占用比例着色（&gt;85% 变红）。
+            </p>
+          </div>
+        </div>
       </div>
 
       {tab === 'builtin' && <BuiltinToolsTab usage={usage} onUsageChange={setUsage} monthlyLimit={s.aiToolMonthlyLimit ?? 0} />}

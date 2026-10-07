@@ -8,8 +8,34 @@ const fillTheme = isFillPopup
 /** 日程与打卡小窗：主进程创建面板窗口时通过 additionalArguments 注入 */
 const isDayPanel = process.argv.includes('--day-panel-window')
 
+// ── `kb:data-changed` 单点扇出（B-20，2026-09-22）──────────────────────────────
+// 改前：`onDataChanged` 每调一次就 `ipcRenderer.on(...)` 一次 ⇒ **订阅者数 = 同屏挂载的
+// useDataChanged 组件数**。全仓 38 个调用点（工作台左右栏 / 各 widget / 阅读器 / 书架 / 知识库面板…），
+// 同屏十几个是正常稳态，而沙箱里 ipcRenderer 的默认上限是 10 ⇒ 每次会话必刷一条
+// `MaxListenersExceededWarning: 11 kb:data-changed listeners added`。
+// 危害不在噪声本身，而在它把两种情形混成同一条消息：①同屏订阅者多（正常）
+// ②某处订了不复位（**真泄漏**）—— 噪声长期在场后，真泄漏来了没人认得出。
+// 现在：无论多少订阅者，ipcRenderer 上永远只有 1 个监听者，广播也只在入口解一次。
+const dataChangedSubs = new Set<(payload: { scope: string }) => void>()
+let dataChangedWired = false
+let dataChangedLeakWarned = false
+/** 稳态观测值十几个（全仓 38 个调用点，实际同屏不可能全挂上）；越过它才提示，避免又变成常态噪声 */
+const DATA_CHANGED_SUB_SOFT_MAX = 50
+function wireDataChanged() {
+  if (dataChangedWired) return
+  dataChangedWired = true
+  ipcRenderer.on('kb:data-changed', (_e, payload: { scope: string }) => {
+    // 遍历副本：某个订阅者在回调里退订（组件恰好此刻卸载）不该让后面的订阅者漏掉这一拍
+    for (const cb of [...dataChangedSubs]) {
+      try { cb(payload) } catch { /* 单个订阅者出错不影响其余 */ }
+    }
+  })
+}
+
 const api = {
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+  // 编辑器文件树右键「粘贴」：请主进程对本窗口补发一次真实 paste 命令（渲染层先交焦点给文件树）
+  pasteFromClipboard: () => ipcRenderer.invoke('clipboard:paste'),
   copyImage: (src: { path?: string; dataUrl?: string }) => ipcRenderer.invoke('clipboard:copyImage', src),
   clearClipboardIfEqual: (text: string) => ipcRenderer.invoke('clipboard:clearIfEqual', text),
   copyText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
@@ -85,6 +111,8 @@ const api = {
   getKnowledgeBacklinks: (pageId: string) => ipcRenderer.invoke('knowledge:getBacklinks', pageId),
   getKnowledgeBacklinkContext: (pageId: string) => ipcRenderer.invoke('knowledge:getBacklinkContext', pageId),
   getKnowledgeSimilarPages: (pageId: string) => ipcRenderer.invoke('knowledge:similarPages', pageId),
+  /** 语义索引状态（B2 感知模式弱提示用：configured=false → 只走关键词路） */
+  getSemanticStatus: () => ipcRenderer.invoke('knowledge:semanticStatus'),
   getKnowledgeManualLinks: (pageId: string) => ipcRenderer.invoke('knowledge:getManualLinks', pageId),
   addKnowledgeManualLink: (pageId: string, targetId: string) => ipcRenderer.invoke('knowledge:addManualLink', pageId, targetId),
   removeKnowledgeManualLink: (a: string, b: string) => ipcRenderer.invoke('knowledge:removeManualLink', a, b),
@@ -124,6 +152,11 @@ const api = {
     ipcRenderer.on('update:download-progress', handler)
     return () => { ipcRenderer.removeListener('update:download-progress', handler) }
   },
+  onUpdateDownloadStage: (cb: (p: { stage: 'downloading' | 'verifying' | 'switching' }) => void) => {
+    const handler = (_e: unknown, p: { stage: 'downloading' | 'verifying' | 'switching' }) => cb(p)
+    ipcRenderer.on('update:download-stage', handler)
+    return () => { ipcRenderer.removeListener('update:download-stage', handler) }
+  },
   // 更新说明（VS Code 式 tab）：清单来自 CHANGELOG，阅读记录落仓库 .knowbase/modules/release-notes/
   getReleaseNotesState: () => ipcRenderer.invoke('releaseNotes:getState'),
   markReleaseNotesShown: (version: string) => ipcRenderer.invoke('releaseNotes:markShown', version),
@@ -148,6 +181,14 @@ const api = {
     ipcRenderer.on('ws:external-change', handler)
     return () => { ipcRenderer.removeListener('ws:external-change', handler) }
   },
+  /** v3.2.0 条目 ④：仓库目录的文件系统变更（外部改动触发，主进程 fsWatcher 广播）。
+   *  relPaths = 本次变更涉及的仓库内 posix 相对路径（拼不出时为空数组 = 「可能有任意变化」）；
+   *  watcherError 仅在监听降级（仓库被删 / 网络盘）时出现一次。 */
+  onWsFsChanged: (cb: (p: { relPaths: string[]; watcherError?: string }) => void) => {
+    const handler = (_e: unknown, p: { relPaths: string[]; watcherError?: string }) => cb(p)
+    ipcRenderer.on('ws:fs-changed', handler)
+    return () => { ipcRenderer.removeListener('ws:fs-changed', handler) }
+  },
   pluginInstallFromFile: (grantedCapabilities?: string[]) => ipcRenderer.invoke('plugin:installFromFile', grantedCapabilities),
   pluginInstallBundledSample: (filename: string, grantedCapabilities?: string[]) => ipcRenderer.invoke('plugin:installBundledSample', filename, grantedCapabilities),
   pluginListInstalled: () => ipcRenderer.invoke('plugin:listInstalled'),
@@ -155,6 +196,8 @@ const api = {
   pluginUninstall: (id: string) => ipcRenderer.invoke('plugin:uninstall', id),
   pluginGetContribution: (id: string, key: string) => ipcRenderer.invoke('plugin:getContribution', id, key),
   pluginListViews: (slot: unknown) => ipcRenderer.invoke('plugin:listViews', slot),
+  pluginListPets: () => ipcRenderer.invoke('plugin:listPets'),
+  pluginListDashboardWidgets: () => ipcRenderer.invoke('plugin:listDashboardWidgets'),
   pluginListCommands: () => ipcRenderer.invoke('plugin:listCommands'),
   pluginListRenderers: () => ipcRenderer.invoke('plugin:listRenderers'),
   pluginGetSettingsSchema: (id: string) => ipcRenderer.invoke('plugin:getSettingsSchema', id),
@@ -220,32 +263,51 @@ const api = {
   pdfOrganize: (payload: { data: Uint8Array; pages: number[]; rotations?: Record<string, number> }) => ipcRenderer.invoke('pdf:organize', payload),
   pdfExport: (payload: { data: Uint8Array; defaultName: string; kind?: 'pdf' | 'txt' }) => ipcRenderer.invoke('pdf:export', payload),
   docsPptxPages: (relPath: string) => ipcRenderer.invoke('docs:pptxPages', relPath),
-  agentChat: (req: { sessionId: string; message: string; context?: unknown; chatId?: string; source?: string; modelId?: string; effort?: string }) => ipcRenderer.invoke('agent:chat', req),
-  agentRegenerate: (req: { sessionId: string; context?: unknown; chatId?: string }) => ipcRenderer.invoke('agent:regenerate', req),
+  agentChat: (req: { sessionId: string; message: string; context?: unknown; chatId?: string; source?: string; modelId?: string; effort?: string; skillName?: string }) => ipcRenderer.invoke('agent:chat', req),
+  agentRegenerate: (req: { sessionId: string; context?: unknown; chatId?: string; effort?: string }) => ipcRenderer.invoke('agent:regenerate', req),
   agentStartScene: (req: { sessionId: string; context?: unknown; chatId?: string; source?: string; modelId?: string }) => ipcRenderer.invoke('agent:startScene', req),
-  agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: unknown; chatId?: string }) => ipcRenderer.invoke('agent:editMessage', req),
+  agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: unknown; chatId?: string; effort?: string }) => ipcRenderer.invoke('agent:editMessage', req),
   agentDeleteMessage: (sessionId: string, messageId: string) => ipcRenderer.invoke('agent:deleteMessage', { sessionId, messageId }),
   /** 会话压缩（/compress 指令 + 自动预检共用）：折叠检查点后旧轮为纪要并推进检查点 */
   agentCompressSession: (req: { sessionId: string; modelId?: string; providerId?: string; effort?: string }) => ipcRenderer.invoke('agent:compressSession', req),
   agentAbort: (chatId: string) => ipcRenderer.invoke('agent:abort', chatId),
-  /** AgentRunner 实时过程步骤（chatId 过滤后驱动前端活动气泡） */
-  onAgentStep: (cb: (p: { chatId: string; step: unknown }) => void) => {
-    const handler = (_e: unknown, p: { chatId: string; step: unknown }) => cb(p)
+  // N-3 多对话并行：按会话停止 + 会话运行态广播（assistant:runstate，全窗口）
+  agentAbortSession: (sessionId: string) => ipcRenderer.invoke('agent:abortSession', sessionId),
+  onAssistantRunState: (cb: (p: unknown) => void) => {
+    const handler = (_e: unknown, p: unknown) => cb(p)
+    ipcRenderer.on('assistant:runstate', handler)
+    return () => { ipcRenderer.removeListener('assistant:runstate', handler) }
+  },
+  /** B4 编辑器内联建议：手动触发一次续写建议（独立于对话历史，不进 prompt cache 前缀） */
+  aiInlineSuggestRun: (req: { requestId: string; text: string; offset: number; relPath?: string; modelId?: string; providerId?: string; effort?: string }) => ipcRenderer.invoke('ai:inlineSuggest:run', req),
+  /** B4 取消在途建议请求（切文档 / 编辑器卸载 / 新请求顶替） */
+  aiInlineSuggestCancel: (requestId: string) => ipcRenderer.invoke('ai:inlineSuggest:cancel', requestId),
+  /** AgentRunner 实时过程步骤（chatId 过滤后驱动前端活动气泡；sessionId 供渲染层按会话分桶） */
+  onAgentStep: (cb: (p: { chatId: string; sessionId: string; step: unknown }) => void) => {
+    const handler = (_e: unknown, p: { chatId: string; sessionId: string; step: unknown }) => cb(p)
     ipcRenderer.on('agent:step', handler)
     return () => { ipcRenderer.removeListener('agent:step', handler) }
   },
   /** 流式增量（思考链 / 正文 / 工具进行中；主进程已按 40ms·64 字符合批） */
-  onAgentStream: (cb: (p: { chatId: string; event: unknown }) => void) => {
-    const handler = (_e: unknown, p: { chatId: string; event: unknown }) => cb(p)
+  onAgentStream: (cb: (p: { chatId: string; sessionId: string; event: unknown }) => void) => {
+    const handler = (_e: unknown, p: { chatId: string; sessionId: string; event: unknown }) => cb(p)
     ipcRenderer.on('agent:stream', handler)
     return () => { ipcRenderer.removeListener('agent:stream', handler) }
   },
   agentSessions: () => ipcRenderer.invoke('agent:sessions'),
   agentNewSession: (title?: string, source?: string) => ipcRenderer.invoke('agent:newSession', title, source),
   agentMessages: (sessionId: string) => ipcRenderer.invoke('agent:messages', sessionId),
+  // AI 用量 / 会话文件改动（v3.4.0 批次5）：右栏 token 面板只读
+  agentUsageGet: () => ipcRenderer.invoke('agent:usage:get'),
+  agentSessionChanges: (sessionId?: string) => ipcRenderer.invoke('agent:sessionChanges:get', sessionId),
   agentRenameSession: (id: string, title: string) => ipcRenderer.invoke('agent:renameSession', id, title),
   agentSetSessionInstructions: (id: string, instructions: string) => ipcRenderer.invoke('agent:setSessionInstructions', id, instructions),
   agentDeleteSession: (id: string) => ipcRenderer.invoke('agent:deleteSession', id),
+  // v3.1.2 条目11：支线旁问（sidetrack）。createSideLane 只装上下文、不调 LLM
+  agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) =>
+    ipcRenderer.invoke('agent:createSideLane', payload),
+  agentListSideLanes: (parentSessionId: string) => ipcRenderer.invoke('agent:listSideLanes', parentSessionId),
+  agentPromoteSideLane: (laneSessionId: string) => ipcRenderer.invoke('agent:promoteSideLane', laneSessionId),
   // AI教学 P1：会话 ⇄ 文件夹绑定
   aiTeachEnsureSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:ensureSessionFolder', id),
   aiTeachSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:sessionFolder', id),
@@ -254,7 +316,14 @@ const api = {
   aiTeachReadConstraints: (id: string) => ipcRenderer.invoke('aiTeach:readConstraints', id),
   /** 全局约束文档（AI教学产物根 CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区打开 */
   aiTeachGlobalEnsureConstraints: () => ipcRenderer.invoke('aiTeachGlobal:ensureConstraints'),
+  /** v3.1.2 条目6：工作区约束文档（{工作区}/CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区打开 */
+  aiTeachWorkspaceEnsureConstraints: (wsId: string) => ipcRenderer.invoke('aiTeachWorkspace:ensureConstraints', wsId),
   aiTeachWriteConstraints: (id: string, text: string) => ipcRenderer.invoke('aiTeach:writeConstraints', id, text),
+  // N-5/N-7：助手独立要求 + 术语表（.assistant/）——ensure 落文件并返回 relPath 跳知识库打开；
+  // 写入走编辑器既有 ws:writeFile，主进程 agentService 每轮直读注入
+  assistantConstraintsEnsureGlobal: () => ipcRenderer.invoke('assistantConstraints:ensureGlobal'),
+  assistantConstraintsEnsureSession: (id: string) => ipcRenderer.invoke('assistantConstraints:ensureSession', id),
+  assistantConstraintsEnsureGlossary: () => ipcRenderer.invoke('assistantConstraints:ensureGlossary'),
   aiTeachOrganizeDoc: (id: string, title: string, content: string, prefix?: string) => ipcRenderer.invoke('aiTeach:organizeDoc', id, title, content, prefix),
   // AI教学 P5：工作区两层（§3.2-6）
   aiTeachListWorkspaces: () => ipcRenderer.invoke('aiTeach:listWorkspaces'),
@@ -264,6 +333,31 @@ const api = {
   aiTeachAssignSession: (id: string, wsId: string) => ipcRenderer.invoke('aiTeach:assignSession', id, wsId),
   aiTeachUnassignSession: (id: string) => ipcRenderer.invoke('aiTeach:unassignSession', id),
   aiTeachSetLastWorkspace: (wsId: null | string) => ipcRenderer.invoke('aiTeach:setLastWorkspace', wsId),
+  // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲）
+  aiTeachCourseGetState: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getState', wsId),
+  aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => ipcRenderer.invoke('aiTeachCourse:setEnabled', wsId, enabled),
+  aiTeachCourseSaveOutline: (wsId: string, outline: unknown) => ipcRenderer.invoke('aiTeachCourse:saveOutline', wsId, outline),
+  aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: unknown) => ipcRenderer.invoke('aiTeachCourse:setUnitProgress', wsId, unitId, patch),
+  aiTeachCourseGenerateOutline: (input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutline', input),
+  aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => ipcRenderer.invoke('aiTeachCourse:openUnit', wsId, unitId, kind),
+  aiTeachCourseEndLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:endLesson', sessionId),
+  aiTeachCourseFinalizeLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:finalizeLesson', sessionId),
+  aiTeachCourseFinishUnit: (wsId: string, unitId: string, score?: { correct: number; total: number }) => ipcRenderer.invoke('aiTeachCourse:finishUnit', wsId, unitId, score),
+  aiTeachCourseReadPrevHandoff: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:readPrevHandoff', sessionId),
+  aiTeachCourseMakeUnitQuiz: (wsId: string, unitId: string) => ipcRenderer.invoke('aiTeachCourse:makeUnitQuiz', wsId, unitId),
+  aiTeachCourseGenerateOutlineStream: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutlineStream', id, input),
+  /** AI教学·课程模式：生成大纲过程事件（`{ id, phase, delta?, model?, chars?, error? }`） */
+  onAiTeachCourseGenProgress: (cb: (p: unknown) => void) => {
+    const handler = (_e: unknown, p: unknown) => cb(p)
+    ipcRenderer.on('aiTeach:course-gen-progress', handler)
+    return () => { ipcRenderer.removeListener('aiTeach:course-gen-progress', handler) }
+  },
+  /** AI教学·课程模式：大纲/进度变化（课程主页据此重拉），载荷 `{ wsId }` */
+  onAiTeachCourseRefresh: (cb: (p: { wsId: string }) => void) => {
+    const handler = (_e: unknown, p: { wsId: string }) => cb(p)
+    ipcRenderer.on('aiTeach:course-refresh', handler)
+    return () => { ipcRenderer.removeListener('aiTeach:course-refresh', handler) }
+  },
   aiTeachSrcRead: (id: string) => ipcRenderer.invoke('aiTeachSrc:read', id),
   aiTeachSrcAdd: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachSrc:add', id, input),
   aiTeachSrcRemove: (id: string, no: number) => ipcRenderer.invoke('aiTeachSrc:remove', id, no),
@@ -271,12 +365,14 @@ const api = {
   aiTeachSrcPick: () => ipcRenderer.invoke('aiTeachSrc:pick'),
   aiTeachSrcPickDir: () => ipcRenderer.invoke('aiTeachSrc:pickDir'),
   aiTeachSrcVisionCheck: () => ipcRenderer.invoke('aiTeachSrc:visionCheck'),
+  aiTeachSrcSofficeProbe: (settingPath?: string) => ipcRenderer.invoke('aiTeachSrc:sofficeProbe', settingPath),
   aiTeachSrcPdfBytes: (id: string, no: number) => ipcRenderer.invoke('aiTeachSrc:pdfBytes', id, no),
   aiTeachSrcTranscribe: (id: string, no: number, pages: { n: number; dataUrl: string }[], modelSpec?: string) => ipcRenderer.invoke('aiTeachSrc:transcribe', id, no, pages, modelSpec),
   /** 网页素材：探测目录/单文章/门户候选 → 批量抓取（进度走 onAiTeachWebProgress）→ 取消 */
   aiTeachSrcWebProbe: (id: string, no: number, anchorUrl?: string) => ipcRenderer.invoke('aiTeachSrc:webProbe', id, no, anchorUrl),
   aiTeachSrcWebCrawl: (id: string, no: number, urls: string[]) => ipcRenderer.invoke('aiTeachSrc:webCrawl', id, no, urls),
   aiTeachSrcWebCancel: (id: string) => ipcRenderer.invoke('aiTeachSrc:webCancel', id),
+  aiTeachSrcPromote: (id: string) => ipcRenderer.invoke('aiTeachSrc:promote', id),
   aiTeachProfileReadGlobal: () => ipcRenderer.invoke('aiTeachProfile:readGlobal'),
   aiTeachProfileWriteGlobal: (text: string) => ipcRenderer.invoke('aiTeachProfile:writeGlobal', text),
   aiTeachProfileReadSession: (id: string) => ipcRenderer.invoke('aiTeachProfile:readSession', id),
@@ -286,6 +382,8 @@ const api = {
   aiTeachProfileEnsureGlobal: () => ipcRenderer.invoke('aiTeachProfile:ensureGlobal'),
   aiTeachProfileEnsureSession: (id: string) => ipcRenderer.invoke('aiTeachProfile:ensureSession', id),
   aiTeachProfileEnsureWorkspace: (id: string) => ipcRenderer.invoke('aiTeachProfile:ensureWorkspace', id),
+  /** v3.2.0 第 20 项：画像「变化条目」合并写入（上层只接受追加） */
+  aiTeachProfileApplyPatch: (layer: string, id: string | null, entries: unknown) => ipcRenderer.invoke('aiTeachProfile:applyPatch', layer, id, entries),
   /** AI教学会话文件夹落盘/改名/删除后的编辑区文件树刷新提示 */
   onAiTeachTreeRefresh: (cb: (p: { dirRel: string }) => void) => {
     const handler = (_e: unknown, p: { dirRel: string }) => cb(p)
@@ -303,6 +401,12 @@ const api = {
     const handler = (_e: unknown, msg: string) => cb(msg)
     ipcRenderer.on('aiTeach:notice', handler)
     return () => { ipcRenderer.removeListener('aiTeach:notice', handler) }
+  },
+  /** N-1 手册通道：助手侧提示（手册→通用助手升格 Toast 等），载荷 `{ sessionId, message }` */
+  onAssistantNotice: (cb: (p: { sessionId: string; message: string }) => void) => {
+    const handler = (_e: unknown, p: { sessionId: string; message: string }) => cb(p)
+    ipcRenderer.on('assistant:notice', handler)
+    return () => { ipcRenderer.removeListener('assistant:notice', handler) }
   },
   llmCcSwitchList: () => ipcRenderer.invoke('llm:ccswitch:list'),
   llmCcSwitchImport: (ids: string[]) => ipcRenderer.invoke('llm:ccswitch:import', ids),
@@ -401,20 +505,34 @@ const api = {
   vaultBackupRestoreArchive: (archivePath: string) => ipcRenderer.invoke('vaultBackup:restoreArchive', archivePath),
   // checkin
   habitGetAll: () => ipcRenderer.invoke('habit:getAll'),
+  // 分享卡片：数字一次取全（主进程聚合，见 database/repositories/shareCardRepo.ts）
+  shareCardGet: () => ipcRenderer.invoke('shareCard:get'),
+  shareCardSavePng: (data: Uint8Array, defaultName: string) => ipcRenderer.invoke('shareCard:savePng', { data, defaultName }),
+  // 看板：一次取全部卡片数据（主进程聚合，见 database/repositories/dashboardRepo.ts）
+  dashboardGetSnapshot: () => ipcRenderer.invoke('dashboard:getSnapshot'),
   createHabit: (data: unknown) => ipcRenderer.invoke('habit:create', data),
   updateHabit: (id: string, data: unknown) => ipcRenderer.invoke('habit:update', id, data),
   deleteHabit: (id: string) => ipcRenderer.invoke('habit:delete', id),
   toggleHabitCheck: (habitId: string, date: string) => ipcRenderer.invoke('habit:toggleCheck', habitId, date),
   reorderHabits: (orderedIds: string[]) => ipcRenderer.invoke('habit:reorder', orderedIds),
-  habitLinkSave: (habitId: string, link: unknown) => ipcRenderer.invoke('habitLink:save', habitId, link),
-  habitLinkRemove: (habitId: string) => ipcRenderer.invoke('habitLink:remove', habitId),
-  onHabitAutoChecked: (cb: (items: unknown) => void) => {
-    const listener = (_e: unknown, items: unknown) => cb(items)
-    ipcRenderer.on('habit:autoChecked', listener)
-    return () => ipcRenderer.removeListener('habit:autoChecked', listener)
-  },
   // bookmark nav
   bookmarkGetAll: () => ipcRenderer.invoke('bookmark:getAll'),
+  // pet（桌宠，docs/pet-design.md）
+  petGet: () => ipcRenderer.invoke('pet:get'),
+  petFeed: () => ipcRenderer.invoke('pet:feed'),
+  petPetTouch: () => ipcRenderer.invoke('pet:petTouch'),
+  petRename: (name: string) => ipcRenderer.invoke('pet:rename', { name }),
+  petReset: (species: string) => ipcRenderer.invoke('pet:reset', { species }),
+  petSwitchSpecies: (species: string) => ipcRenderer.invoke('pet:switchSpecies', { species }),
+  // 记账（accounting）
+  accountingGetAll: () => ipcRenderer.invoke('accounting:getAll'),
+  accountingParseJson: (text: string) => ipcRenderer.invoke('accounting:parseJson', text),
+  accountingImportJson: (text: string) => ipcRenderer.invoke('accounting:importJson', text),
+  accountingCreate: (input: unknown) => ipcRenderer.invoke('accounting:create', input),
+  accountingUpdate: (id: string, patch: unknown) => ipcRenderer.invoke('accounting:update', id, patch),
+  accountingDelete: (id: string) => ipcRenderer.invoke('accounting:delete', id),
+  accountingSetAccountBalance: (id: string, initialBalance: number) => ipcRenderer.invoke('accounting:setAccountBalance', id, initialBalance),
+  accountingCreateAccount: (name: string, initialBalance: number) => ipcRenderer.invoke('accounting:createAccount', name, initialBalance),
   createBookmarkCategory: (data: unknown) => ipcRenderer.invoke('bookmark:createCategory', data),
   updateBookmarkCategory: (id: string, data: unknown) => ipcRenderer.invoke('bookmark:updateCategory', id, data),
   deleteBookmarkCategory: (id: string) => ipcRenderer.invoke('bookmark:deleteCategory', id),
@@ -436,6 +554,11 @@ const api = {
   // period summary (weekly / monthly)
   createPomodoroSession: (minutes: number) => ipcRenderer.invoke('pomodoro:createSession', minutes),
   getBlogPeriodStats: (start: string, end: string) => ipcRenderer.invoke('blog:periodStats', start, end),
+  // 层级总结文件（周 / 月 / 年，.knowbase/blog/summaries/）
+  listSummaries: () => ipcRenderer.invoke('blog:listSummaries'),
+  getSummaryById: (id: string) => ipcRenderer.invoke('blog:getSummaryById', id),
+  ensureSummary: (kind: string, start: string, end: string) => ipcRenderer.invoke('blog:ensureSummary', kind, start, end),
+  saveSummary: (id: string, contentMd: string) => ipcRenderer.invoke('blog:saveSummary', id, contentMd),
   // blog templates
   listBlogTemplates: () => ipcRenderer.invoke('blogTpl:list'),
   createBlogTemplate: (d: unknown) => ipcRenderer.invoke('blogTpl:create', d),
@@ -517,6 +640,15 @@ const api = {
     ipcRenderer.on('daypanel:toggle-visibility', handler)
     return () => { ipcRenderer.removeListener('daypanel:toggle-visibility', handler) }
   },
+  // - 主窗口全屏弹窗遮罩开合上报（主窗口渲染层发起 → 主进程广播 main:modal-dim-broadcast）
+  //   dock 是独立 OS 窗口，主窗页内遮罩照不到它 → dock 端据 此 自绘压暗层（lib/mainDimSync.ts）
+  mainModalDimNotify: (dim: boolean) => { ipcRenderer.send('main:modal-dim', { dim }) },
+  // - 订阅弹窗遮罩开合（dock 端消费；主窗口自身忽略）
+  onMainModalDim: (cb: (dim: boolean) => void) => {
+    const handler = (_e: unknown, p: { dim?: boolean }) => cb(!!(p && p.dim))
+    ipcRenderer.on('main:modal-dim-broadcast', handler)
+    return () => { ipcRenderer.removeListener('main:modal-dim-broadcast', handler) }
+  },
   // - 小窗内唤起主窗口并切 Tab（tool 可选：目标模块内的子工具深链，如 toolbox 的 bookmark-nav）
   dayPanelOpenInMain: (tab: string, tool?: string) => ipcRenderer.send('daypanel:open-in-main', tab, tool),
   // 主窗口接收小窗指令（如切换模块 Tab）
@@ -527,10 +659,19 @@ const api = {
   },
   // 跨窗口数据同步：本窗口数据变更后上报 → 主进程广播给其它窗口（kb:data-changed）
   dataNotify: (payload: { scope: string }) => ipcRenderer.send('data:notify', payload),
+  // 单点扇出（B-20）：只挂一个 ipc 监听者，订阅者进 Set（见文件上方 dataChangedSubs）
   onDataChanged: (cb: (payload: { scope: string }) => void) => {
-    const handler = (_e: unknown, p: { scope: string }) => cb(p)
-    ipcRenderer.on('kb:data-changed', handler)
-    return () => { ipcRenderer.removeListener('kb:data-changed', handler) }
+    wireDataChanged()
+    dataChangedSubs.add(cb)
+    // 越过软上限只提示一次：这是「订了不复位」的信号，别再让真泄漏淹没在同一条告警里
+    if (!dataChangedLeakWarned && dataChangedSubs.size > DATA_CHANGED_SUB_SOFT_MAX) {
+      dataChangedLeakWarned = true
+      console.warn(
+        `[数据同步] onDataChanged 订阅者达 ${dataChangedSubs.size} 个（稳态应十几个）。` +
+        '多半有组件没在 effect cleanup 里调用返回的退订函数 —— 查 src/lib/dataChanged.ts 的 useDataChanged。',
+      )
+    }
+    return () => { dataChangedSubs.delete(cb) }
   },
   fillPopupTheme: fillTheme,
   fillPopupGetEntries: () => ipcRenderer.invoke('fillPopup:getEntries'),
@@ -576,13 +717,62 @@ const api = {
   workspacePickImages: (rootId: string) => ipcRenderer.invoke('ws:pickImagesToAttachments', rootId),
   workspaceSaveImage: (rootId: string, payload: { fileName: string; dataBase64: string }) => ipcRenderer.invoke('ws:saveImageToAttachments', rootId, payload),
   workspaceReadRange: (rootId: string, relPath: string, offset: number, length: number) => ipcRenderer.invoke('ws:readRange', rootId, relPath, offset, length),
+  // 字节版本（B-16）：foliate 系阅读器整本取字节用（免渲染侧 base64 解码）；白名单与防穿越同 ws:readRange
+  workspaceReadRangeBytes: (rootId: string, relPath: string, offset: number, length: number) => ipcRenderer.invoke('ws:readRangeBytes', rootId, relPath, offset, length),
+  // PDF 阅读体验整包（v3.4.0 第 2 项）：进度/书签/封面缓存/导入
+  pdfReaderListBooks: () => ipcRenderer.invoke('pdfReader:listBooks'),
+  pdfReaderGet: (rootId: string, relPath: string) => ipcRenderer.invoke('pdfReader:get', rootId, relPath),
+  pdfReaderPatch: (rootId: string, relPath: string, patch: unknown, expectedUpdatedAt?: string) => ipcRenderer.invoke('pdfReader:patch', rootId, relPath, patch, expectedUpdatedAt),
+  pdfReaderCoverList: () => ipcRenderer.invoke('pdfReader:coverList'),
+  pdfReaderCoverGet: (rootId: string, relPath: string) => ipcRenderer.invoke('pdfReader:coverGet', rootId, relPath),
+  pdfReaderCoverSave: (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number) => ipcRenderer.invoke('pdfReader:coverSave', rootId, relPath, dataUrl, expectedMtimeMs),
+  // 阅读状态（书架升级全格式阅读器一期）：txt 进度
+  readerStateGet: (rootId: string, relPath: string) => ipcRenderer.invoke('readerState:get', rootId, relPath),
+  readerStatePatch: (rootId: string, relPath: string, patch: unknown, expectedUpdatedAt?: string) => ipcRenderer.invoke('readerState:patch', rootId, relPath, patch, expectedUpdatedAt),
+  // 摘录（阅读器 · 摘录先行批次）
+  excerptList: (rootId: string, relPath: string) => ipcRenderer.invoke('excerpt:list', rootId, relPath),
+  excerptCreate: (rootId: string, relPath: string, payload: unknown) => ipcRenderer.invoke('excerpt:create', rootId, relPath, payload),
+  excerptPatch: (rootId: string, relPath: string, id: string, patch: unknown, expectedUpdatedAt?: string) => ipcRenderer.invoke('excerpt:patch', rootId, relPath, id, patch, expectedUpdatedAt),
+  excerptDelete: (rootId: string, relPath: string, id: string) => ipcRenderer.invoke('excerpt:delete', rootId, relPath, id),
+  excerptExportEntry: (rootId: string, relPath: string) => ipcRenderer.invoke('excerpt:exportEntry', rootId, relPath),
+  excerptExportNote: (rootId: string, relPath: string) => ipcRenderer.invoke('excerpt:exportNote', rootId, relPath),
+  // 书市（book market）：书源 CRUD + 三态探测 + 聚合检索 + 下载队列
+  bookMarketListSources: (rootId: string) => ipcRenderer.invoke('bookMarket:listSources', rootId),
+  bookMarketUpsertSource: (rootId: string, patch: unknown, id?: string) => ipcRenderer.invoke('bookMarket:upsertSource', rootId, patch, id),
+  bookMarketRemoveSource: (rootId: string, id: string) => ipcRenderer.invoke('bookMarket:removeSource', rootId, id),
+  bookMarketSetSourceEnabled: (rootId: string, id: string, enabled: boolean) => ipcRenderer.invoke('bookMarket:setSourceEnabled', rootId, id, enabled),
+  // credential 传 null / 缺省 = 清空（不必另开一个「清凭据」通道）
+  bookMarketSaveCredential: (rootId: string, id: string, credential: unknown) => ipcRenderer.invoke('bookMarket:saveCredential', rootId, id, credential),
+  bookMarketProbeSource: (rootId: string, id: string, query?: string) => ipcRenderer.invoke('bookMarket:probeSource', rootId, id, query),
+  bookMarketSearch: (rootId: string, query: string, opts?: unknown) => ipcRenderer.invoke('bookMarket:search', rootId, query, opts),
+  // conflict 缺省 = 「先问用户」：主进程返 conflict 且**不入队**，渲染层弹「覆盖 / 另存副本」后带决定再调一次
+  bookMarketDownload: (rootId: string, payload: unknown, conflict?: 'overwrite' | 'copy') => ipcRenderer.invoke('bookMarket:download', rootId, payload, conflict),
+  bookMarketDownloadControl: (rootId: string, id: string, action: string) => ipcRenderer.invoke('bookMarket:downloadControl', rootId, id, action),
+  bookMarketListQueue: (rootId: string) => ipcRenderer.invoke('bookMarket:listQueue', rootId),
+  /** 封面只读（S4 拍板 ①）：越权/缺失/超限一律 dataUrl=null，渲染层回落纯色书卡 */
+  bookMarketCoverGet: (rootId: string, coverRel: string) => ipcRenderer.invoke('bookMarket:coverGet', rootId, coverRel),
+  /** 彻底删书：书文件→系统回收站 + 清 meta/封面/进度/书签/摘录/导出映射（best-effort，errors 非空即部分失败） */
+  bookMarketDeleteBook: (rootId: string, relPath: string) => ipcRenderer.invoke('bookMarket:deleteBook', rootId, relPath),
+  // 下载队列快照（载荷 = 整个队列，渲染层直接整体替换，不做增量合并）
+  onBookMarketDownloadProgress: (cb: (p: { rootId: string; tasks: unknown[] }) => void) => {
+    const handler = (_e: unknown, p: { rootId: string; tasks: unknown[] }) => cb(p)
+    ipcRenderer.on('bookMarket:download-progress', handler)
+    return () => { ipcRenderer.removeListener('bookMarket:download-progress', handler) }
+  },
+  // AI 起草的书源草案（S5）：主进程 broadcast 推给所有窗口，渲染层切到书市并预填表单。
+  // 与上面的下载进度同款「订阅即返回退订函数」，不做 invoke（草案单向、无回执）
+  onBookMarketSourceDraft: (cb: (p: { draft: unknown }) => void) => {
+    const handler = (_e: unknown, p: { draft: unknown }) => cb(p)
+    ipcRenderer.on('bookMarket:source-draft', handler)
+    return () => { ipcRenderer.removeListener('bookMarket:source-draft', handler) }
+  },
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => ipcRenderer.invoke('ws:writeFile', rootId, relPath, content, expectedMtimeMs),
-  workspaceSetMdStatus: (rootId: string, relPath: string, draft: boolean) => ipcRenderer.invoke('ws:setMdStatus', rootId, relPath, draft),
-  // 全类型归档（docs/vault-archive-all-files-design.md）：md 分流 frontmatter 双态，非 md/目录走清单
-  workspaceSetArchiveStatus: (rootId: string, relPath: string, archive: boolean) => ipcRenderer.invoke('ws:setArchiveStatus', rootId, relPath, archive),
-  workspaceGetArchiveEntries: (rootId: string) => ipcRenderer.invoke('ws:getArchiveEntries', rootId),
+  // 归档三条通道（ws:setMdStatus / ws:setArchiveStatus / ws:getArchiveEntries）已于 2026-09-20 随归档退役删除
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => ipcRenderer.invoke("ws:createFile", rootId, relPath, content),
   workspaceMkdir: (rootId: string, relPath: string) => ipcRenderer.invoke('ws:mkdir', rootId, relPath),
+  // 粘贴系统剪贴板里的外部文件/目录：srcPaths 由渲染层 paste 事件 + webUtils.getPathForFile 取得
+  // （主进程 clipboard.readBuffer('FileNameW') 实测只能拿到第一条，多选会丢文件——见 ws:pasteExternal 注释）
+  workspacePasteExternal: (rootId: string, relDir: string, srcPaths: string[]) => ipcRenderer.invoke('ws:pasteExternal', rootId, relDir, srcPaths),
   workspaceRename: (rootId: string, oldRel: string, newRel: string) => ipcRenderer.invoke('ws:rename', rootId, oldRel, newRel),
   workspaceTrash: (rootId: string, relPath: string) => ipcRenderer.invoke('ws:trash', rootId, relPath),
   workspaceStat: (rootId: string, relPath: string) => ipcRenderer.invoke('ws:stat', rootId, relPath),
@@ -591,6 +781,8 @@ const api = {
   workspaceGetCurrent: () => ipcRenderer.invoke('ws:getCurrent'),
   // 在系统文件管理器中打开当前仓库文件夹（标题栏仓库菜单）
   workspaceRevealVault: () => ipcRenderer.invoke('ws:revealVault'),
+  // 用系统默认程序打开仓库内文件 / 在资源管理器中定位它（B-3）
+  workspaceOpenInSystem: (rootId: string, relPath: string, reveal?: boolean) => ipcRenderer.invoke('ws:openInSystem', rootId, relPath, reveal),
   // 设置 → 新手引导：把《欢迎》导览页（HTML）导入仓库根并收录进知识库（force=true 覆盖已有同名文件）
   workspaceImportWelcomeDoc: (force?: boolean) => ipcRenderer.invoke('ws:importWelcomeDoc', force === true),
   // P8（D8）：重命名当前仓库（展示名同步 登记表/meta/最近列表，不改文件夹名）
@@ -599,6 +791,9 @@ const api = {
   // P7（D6）：删除仓库 = 整仓进 OS 回收站（主进程护栏校验；无提醒弹窗）
   workspaceDeleteVault: (rootId: string) => ipcRenderer.invoke('ws:deleteVault', rootId),
   workspaceClearCurrentVault: () => ipcRenderer.invoke('ws:clearCurrentVault'),
+  /** v3.2.0 条目 ④ 保底：手动「刷新资源管理器」（口径 b 全量 = 知识索引/图谱失效 + 归档清单 prune；
+   *  文件树重扫由渲染层自己做，主进程侧 ws:listDir 无缓存） */
+  workspaceRefreshVault: () => ipcRenderer.invoke('ws:refreshVault') as Promise<{ ok: boolean; pruned?: number; error?: string }>,
   // P6：整仓导出 / 导入（冲突逐条决策：覆盖/跳过/重命名）
   vaultArchiveExport: () => ipcRenderer.invoke('va:export'),
   vaultArchiveImportStart: () => ipcRenderer.invoke('va:importStart'),
@@ -610,6 +805,31 @@ const api = {
   clipperOpenFolder: () => ipcRenderer.invoke('clipper:openFolder'),
   clipperSelfPing: () => ipcRenderer.invoke('clipper:selfPing'),
   clipperCheckToken: (candidate: string) => ipcRenderer.invoke('clipper:checkToken', candidate),
+  // ===== 终端模块（terminal-module-design）：pty 通道。写/resize 用 send（高频免回执），其余 invoke =====
+  termCreate: (opts: { cols?: number; rows?: number; shellPref?: string }) => ipcRenderer.invoke('term:create', opts),
+  termAttach: (id: string) => ipcRenderer.invoke('term:attach', id),
+  termWrite: (id: string, data: string) => { ipcRenderer.send('term:write', id, data) },
+  termResize: (id: string, cols: number, rows: number) => { ipcRenderer.send('term:resize', id, cols, rows) },
+  termKill: (id: string) => ipcRenderer.invoke('term:kill', id),
+  termList: () => ipcRenderer.invoke('term:list'),
+  termDefaultShell: () => ipcRenderer.invoke('term:defaultShell'),
+  termAiRecords: () => ipcRenderer.invoke('term:aiRecords'),
+  termAiRespond: (reqId: string, approved: boolean) => ipcRenderer.invoke('term:aiRespond', reqId, approved),
+  onTermData: (cb: (p: { id: string; data: string }) => void) => {
+    const handler = (_e: unknown, p: { id: string; data: string }) => cb(p)
+    ipcRenderer.on('term:data', handler)
+    return () => { ipcRenderer.removeListener('term:data', handler) }
+  },
+  onTermExit: (cb: (p: { id: string; exitCode: number | null }) => void) => {
+    const handler = (_e: unknown, p: { id: string; exitCode: number | null }) => cb(p)
+    ipcRenderer.on('term:exit', handler)
+    return () => { ipcRenderer.removeListener('term:exit', handler) }
+  },
+  onTermAiRecord: (cb: (p: { record: unknown }) => void) => {
+    const handler = (_e: unknown, p: { record: unknown }) => cb(p)
+    ipcRenderer.on('term:ai-record', handler)
+    return () => { ipcRenderer.removeListener('term:ai-record', handler) }
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)
@@ -623,7 +843,6 @@ const devtoolsApi = {
   helpDocsDelete: (fileName: string) => ipcRenderer.invoke('devtools:helpDocs:delete', fileName),
 }
 contextBridge.exposeInMainWorld('devtoolsApi', devtoolsApi)
-export type DevtoolsElectronAPI = typeof devtoolsApi
 
 // AI 测试桥上报通道(仅 DEV):与 devtoolsApi 同款约定 —— 打包版主进程侧
 // 不注册 handler(app.isPackaged 守卫),调用必然被拒,不影响生产行为。
@@ -631,4 +850,3 @@ const devbridgeApi = {
   report: (payload: unknown) => ipcRenderer.invoke('devbridge:report', payload),
 }
 contextBridge.exposeInMainWorld('devbridgeApi', devbridgeApi)
-export type DevbridgeElectronAPI = typeof devbridgeApi

@@ -93,6 +93,8 @@ export function EditorView() {
           />
         </div>
       </div>
+
+      {/* AI 内联建议设置已迁往「AI 工具 → 模型」页（2026-09-20 反馈：统一设置管理） */}
     </div>
   )
 }

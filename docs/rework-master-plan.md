@@ -97,13 +97,13 @@
 | 4 | [graph-view-design.md](./graph-view-design.md) | 关系图谱：Obsidian 逆向、GraphIndex、d3-force 选型、动画规格 G0-G4 |
 | 5 | [rework-toolbox-as-plugins.md](./rework-toolbox-as-plugins.md) | 工具箱插件化评估：逐工具能力映射、四个新 Gateway 命名空间、试点顺序 |
 | 6 | [plugin-pdf-reader-design.md](./plugin-pdf-reader-design.md) | PDF 阅读器插件：vscode-pdf 架构借鉴、pdf.js 锁 v3 约束、二进制范围通道、文档类型注册表 |
-| 7 | [plugin-external-integration.md](./plugin-external-integration.md) | 外部软件联动：Anki/滴答清单/Habitica/Readwise API 调研、OAuth Connector 框架缺口、待选目标（已暂停，用户弃置） |
+| 7 | [plugin-external-integration.md](./plugin-external-integration.md) | 外部软件联动：Anki/滴答清单/Habitica/Readwise API 调研、OAuth Connector 框架缺口、待选目标（**长期不做**，2026-09-23 定；材料在 DP `Phrontis/搁置功能与想法/外部软件联动/`） |
 | 8 | [agent-file-tools-design.md](./agent-file-tools-design.md) | AI 文件操控工具：Vault 内 list/read/write/edit 工具族、vaultFile 权限域、写入双通道不变量 |
-| 9 | [knowledge-query-design.md](./knowledge-query-design.md) | 库查询（Dataview 式）：QDL JSON 查询描述、knowledgeIndex 之上的查询引擎、saved-queries 落 `.knowbase/modules/knowledge/` |
+| 9 | [knowledge-query-design.md](./knowledge-query-design.md) | 库查询（Dataview 式）：QDL JSON 查询描述、knowledgeIndex 之上的查询引擎、saved-queries 落 `.knowbase/modules/knowledge/`（**已搁置**，2026-09-23 原型体验后判「暂不需要」；材料在 DP `Phrontis/搁置功能与想法/库查询/`） |
 | 10 | [plugin-web-clipper-design.md](./plugin-web-clipper-design.md) | 浏览器剪藏：厚桌面端 clipperServer（127.0.0.1 + token，defuddle 转 md）+ 薄扩展，落 `_inbox/clipper`（判为内置能力，同 lanShare 理由） |
 | 11 | ~~zen-mode-design.md~~ | 禅模式 **已实现**（R25，2026-09-06：Z1/Z2 进出+Esc 退，真机验收通过）；设计文档未落盘，如需归档可从实现反写 |
 
-> 9-11 均为**方案文档、待拍板**（2026-09-02 讨论会话产出），未进入实现排期。
+> 9-11 均为 2026-09-02 讨论会话产出的方案文档。10、11 已落码（剪藏内置能力 / 禅模式 R25）；9 已于 2026-09-23 搁置（原型体验后判「暂不需要」，材料见 DP `Phrontis/搁置功能与想法/`）。
 
 ## 8. 风险清单
 

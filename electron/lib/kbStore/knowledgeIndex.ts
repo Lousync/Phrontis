@@ -1,11 +1,14 @@
-import { existsSync, lstatSync, readFileSync, readdirSync, statSync, type Dirent } from 'fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, type Dirent } from 'fs'
 import { join, relative } from 'path'
 import { randomUUID } from 'crypto'
 import { getCurrentVault, KB_INBOX_DIR } from './vaultContext'
+import { bookKindOf, type BookKind } from './bookFormats'
+// `.books/` 布局常量单源在 bookMarketSchema（零依赖叶子）；书架扫描根 / 元数据 / 封面三处同口径
+import { BOOKS_DIR } from './bookMarketSchema'
 import { readJson, writeJson, deleteFile } from './jsonStore'
 import { parseMarkdown } from './mdStore'
+import { normalizeMdEntryFields } from './mdEntryFields'
 import { WELCOME_DOC_FILENAME } from './welcomeDoc'
-import { findCoveringDirEntry, gcArchiveEntries, isArchivedByManifest, readManifest, type ArchivedManifest } from './archivedFilesRepo'
 import { getVaultIgnore, isDirIgnored, getVaultIgnoreState, auditIgnoreRules, type VaultIgnoreResult, type VaultIgnoreState } from './ignoreFile'
 import { clearSemanticsMemo } from './semanticStore'
 import type { Ignore } from 'ignore'
@@ -55,8 +58,6 @@ export interface KnowledgePageIndexEntry {
   createdAt: string
   updatedAt: string
   mtimeMs: number
-  /** 页面状态（草稿/归档双态）：draft=草稿（知识库正式列表隐藏、图谱虚化/双链仍可引用）；published=归档（默认） */
-  status: 'draft' | 'published'
   /** 正文 [[出链]] 标题集合（R2：反链面板据此反查，不必全文扫） */
   outgoingTitles: string[]
   /**
@@ -86,8 +87,14 @@ export function extractWikiOutlinks(md: string): string[] {
   return out
 }
 
+/** 索引 schema 版本。**语义变更也要 bump**（bump 是唯一能让磁盘缓存失效的杠杆：
+ *  校验只看版本号 + .ignore 指纹，不看文件 mtime）。
+ *  v6（2026-09-21，B-4）：md 条目保证 `fileType` 非空 —— v5 缓存里正式页的 fileType 是空串，
+ *  不 bump 则装了修复的老仓库冷启动仍读旧缓存，表象照旧（大纲按钮仍灰）。 */
+const KNOWLEDGE_INDEX_SCHEMA_VERSION = 6
+
 export interface KnowledgeIndex {
-  schemaVersion: 5
+  schemaVersion: typeof KNOWLEDGE_INDEX_SCHEMA_VERSION
   generatedAt: string
   source: 'vault'
   categories: KnowledgeCategoryIndexEntry[]
@@ -190,6 +197,50 @@ function scanVaultFiles(root: string, dir: string, out: string[], warnings?: str
     } catch {
       // A single unreadable entry must not prevent the rest of the vault indexing.
     }
+  }
+}
+
+/**
+ * v3.4.0 书架「自动库」。2026-09-19 拍板：识别范围限定为**仓库顶层 `.books/` 目录**——
+ * 免得 vault 里散落的 PDF 把书架搞乱；`.books` 是点前缀目录 = 系统区，
+ * 笔记区（md 索引 / 文件树）天然不收录，见 scanVaultFiles 的 dot 分支。
+ * 目录不存在时自动创建（放文件即识别，用户无需手动 mkdir）。
+ * 以 `.books` 为扫描根复用 scanVaultFiles —— 符号链接跳过 / 点子目录跳过等语义照旧；
+ * 返回的 relPath 仍相对仓库根（书键口径不变），只读不建索引、书架清单不落盘。
+ * 书架升级全格式阅读器一期（2026-09-20）：识别范围从硬编码 .pdf 扩为 BOOK_EXTS
+ * （bookKindOf 唯一真相源），返回项补 kind；此处不得再出现扩展名字面量（契约断言）。
+ */
+export function scanVaultBooks(): Array<{ relPath: string; size: number; mtimeMs: number; kind: BookKind }> {
+  const current = getCurrentVault()
+  if (!current) return []
+  const booksDir = join(current.rootPath, BOOKS_DIR)
+  try {
+    if (!existsSync(booksDir)) {
+      mkdirSync(booksDir, { recursive: true })
+      return []
+    }
+    const files: string[] = []
+    scanVaultFiles(booksDir, booksDir, files, undefined, null, undefined)
+    const out: Array<{ relPath: string; size: number; mtimeMs: number; kind: BookKind }> = []
+    for (const abs of files) {
+      const kind = bookKindOf(abs)
+      if (!kind) continue
+      try {
+        const st = statSync(abs)
+        if (!st.isFile()) continue
+        out.push({
+          relPath: relative(current.rootPath, abs).replace(/\\/g, '/'),
+          size: st.size,
+          mtimeMs: st.mtimeMs,
+          kind,
+        })
+      } catch {
+        /* 单个不可读跳过 */
+      }
+    }
+    return out
+  } catch {
+    return []
   }
 }
 
@@ -449,7 +500,7 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
   const warnings: string[] = []
   if (!current) {
     return {
-      schemaVersion: 5,
+      schemaVersion: KNOWLEDGE_INDEX_SCHEMA_VERSION,
       generatedAt: new Date().toISOString(),
       source: 'vault',
       categories: [],
@@ -476,10 +527,8 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
   }
 
   // 第一遍：读入全部条目（目录派生需先知道「所有知识页所在目录」，再统一补建分类）
-  // 全类型归档（§5）：先 GC 对账清单，再读清单；md 由 frontmatter 判定、非 md 由清单判定
-  const gcRemoved = gcArchiveEntries()
-  if (gcRemoved > 0) warnings.push(`归档清单已清理 ${gcRemoved} 个磁盘已消失的条目`)
-  const manifest: ArchivedManifest = readManifest()
+  // 阶段三（2026-09-20）：归档清单（archived-files.json）退役 —— md 按 frontmatter id / auto: 兜底，
+  // 非 md 一律收录，不再有「清单登记才进库」的分支。
   const docs: Array<{ abs: string; rel: string; doc: ReturnType<typeof parseMarkdown>; entryKind: 'doc' | 'file' }> = []
   for (const abs of files) {
     try {
@@ -509,21 +558,14 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
       }
       if (/\.md$/i.test(rel)) {
         const doc = parseMarkdown(readFileSync(abs, 'utf8'))
-        // B1（目录状态优先）：被目录条目覆盖、且自身无 frontmatter id 的普通 md → 自动 id 收录
-        if (!asString(doc.frontmatter.id) && findCoveringDirEntry(rel, manifest)) {
-          const fileName = rel.slice(rel.lastIndexOf('/') + 1)
-          const dot = fileName.lastIndexOf('.')
-          doc.frontmatter.id = `auto:${rel}`
-          if (!asString(doc.frontmatter.title)) doc.frontmatter.title = dot > 0 ? fileName.slice(0, dot) : fileName
-          doc.frontmatter.fileType = 'md'
-          doc.frontmatter.status = 'published'
-        }
+        // 身份与类型缺省一律在此补全（纯函数，契约脚本可测）：id / title / fileType。
+        // ★ fileType 的补全必须对所有 md 生效，不能只写在 auto 分支里（B-4 根因，见该文件头注释）。
+        normalizeMdEntryFields(doc.frontmatter, rel)
         docs.push({ abs, rel, doc, entryKind: 'doc' })
         continue
       }
-      // 非 md：仅清单归档的文件入索引（元信息卡 / html 沙箱）；不读内容（二进制可能很大）
-      if (!isArchivedByManifest(rel, manifest)) continue
-      const exact = manifest.entries.find((e) => e.type === 'file' && e.path === rel)
+      // 非 md：**一律收录**（阶段三 2026-09-20：归档退役后不再需要「清单登记才进库」）——
+      // 元信息卡 / html 沙箱渲染由渲染层按 entryKind 决定；不读内容（二进制可能很大）
       const fileName = rel.slice(rel.lastIndexOf('/') + 1)
       const dot = fileName.lastIndexOf('.')
       docs.push({
@@ -531,10 +573,9 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
         rel,
         doc: {
           frontmatter: {
-            id: exact?.id ?? `auto:${rel}`,
+            id: `auto:${rel}`,
             title: dot > 0 ? fileName.slice(0, dot) : fileName,
             fileType: (dot > 0 ? fileName.slice(dot + 1) : '').toLowerCase(),
-            status: 'published',
             created: mtime,
             updated: mtime,
           },
@@ -588,6 +629,8 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
     try {
       const id = asString(doc.frontmatter.id)
       if (!id) {
+        // 身份统一后不应再有无 id 的文档（md 走上方 auto: 兜底，非 md 由清单/收录分支给 id）——
+        // 真出现说明新增了新的收录分支却忘了给身份，这里保留跳过并告警以便尽早暴露。
         warnings.push(`页面缺少 frontmatter.id，已跳过：${rel}`)
         continue
       }
@@ -596,8 +639,7 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
         continue
       }
       const stat = statSync(abs)
-      // B1（目录状态优先）：路径被目录条目覆盖 → 一律按已归档消费（draft md 放出、图谱不虚化）
-      const coveredByDir = findCoveringDirEntry(rel, manifest) !== null
+      // 身份统一后（2026-09-20 §2）：不再有草稿/归档双态 —— 文件即条目，status 字段已从索引条目移除。
       const entry: KnowledgePageIndexEntry = {
         id,
         title: asString(doc.frontmatter.title) || abs.slice(Math.max(abs.lastIndexOf('\\'), abs.lastIndexOf('/')) + 1).replace(/\.md$/i, ''),
@@ -611,7 +653,6 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
         attachmentId: asString(doc.frontmatter.attachmentId),
         createdAt: asString(doc.frontmatter.created),
         updatedAt: asString(doc.frontmatter.updated),
-        status: coveredByDir || asString(doc.frontmatter.status).toLowerCase() !== 'draft' ? 'published' : 'draft',
         mtimeMs: stat.mtimeMs,
         // 欢迎页不入双链图：它是导览页，正文里的 [[...]] 只是语法示例（见 welcomeHtmlToPlain）
         outgoingTitles: rel === WELCOME_DOC_FILENAME ? [] : extractWikiOutlinks(doc.body),
@@ -644,7 +685,7 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
   })
 
   return {
-    schemaVersion: 5,
+    schemaVersion: KNOWLEDGE_INDEX_SCHEMA_VERSION,
     generatedAt: new Date().toISOString(),
     source: 'vault',
     categories: visibleCategories.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'zh-Hans')),
@@ -667,7 +708,7 @@ function sameIgnoreState(a: VaultIgnoreState | null | undefined, b: VaultIgnoreS
  *
  * 磁盘缓存虽免了重建，但每次 getKnowledgeIndex 仍要走 readJson 的
  * existsSync + statSync + readFileSync + JSON.parse 全同步链（实测 417 页 ≈ 2.3ms/次）。
- * 而该函数被 knowledgeVaultRepo 多处 + AI 工具 / quiz / 附件 / summary / habitLink 高频调用，
+ * 而该函数被 knowledgeVaultRepo 多处 + AI 工具 / quiz / 附件 / summary 高频调用，
  * 单次页面加载累积可达数十毫秒且全程阻塞主进程。
  *
  * 失效条件与磁盘缓存保持一致：.ignore 指纹变化（外部改规则、无 watcher 也感知）或显式 invalidate。
@@ -757,7 +798,7 @@ export function getKnowledgeIndex(forceRebuild = false): KnowledgeIndex {
     const cached = readJson<KnowledgeIndex | null>('cache', 'knowledge-index.json', null)
     if (
       cached &&
-      cached.schemaVersion === 5 &&
+      cached.schemaVersion === KNOWLEDGE_INDEX_SCHEMA_VERSION &&
       cached.source === 'vault' &&
       Array.isArray(cached.pages) &&
       cached.byId &&

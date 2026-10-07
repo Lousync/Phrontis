@@ -189,23 +189,11 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         ctx.stroke()
         ctx.setLineDash([])
       } else {
-        const isDraft = n.status === 'draft'
-        ctx.fillStyle = isDraft ? colors.bg : (en ? colorBySpace(n.path, colors) : colors.accent)
+        // 身份统一后无草稿态（2026-09-20 §2）：页节点一律实心填充，虚化分支退役
+        ctx.fillStyle = en ? colorBySpace(n.path, colors) : colors.accent
         ctx.beginPath()
         ctx.arc(n.x!, n.y!, n.r * ns, 0, Math.PI * 2)
         ctx.fill()
-        if (isDraft) {
-          // 草稿页（修改中）：accent 虚线空心圈 + 轻微虚化——表示被引用但非正式
-          ctx.globalAlpha *= 0.55
-          ctx.strokeStyle = colors.accent
-          ctx.lineWidth = 1.3 / s
-          ctx.setLineDash([3 / s, 3 / s])
-          ctx.beginPath()
-          ctx.arc(n.x!, n.y!, n.r * ns, 0, Math.PI * 2)
-          ctx.stroke()
-          ctx.setLineDash([])
-          ctx.globalAlpha /= 0.55
-        }
       }
       // 选中/悬停环
       if (hoverId === n.id || propsRef.current.selectedId === n.id) {
@@ -514,11 +502,18 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
     // 惯性由 panV 承接（step 中衰减）；轻微速度直接忽略不启
   }, [onSelect, kick])
 
-  const onWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
-    e.preventDefault()
-    const canvas = canvasRef.current!
-    const rect = canvas.getBoundingClientRect()
-    zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.18 : 1 / 1.18)
+  // 滚轮缩放必须挂原生非 passive 监听：React 17+ 的 onWheel 在 root 上固定为 passive，
+  // 处理函数里 preventDefault() 无效且每次滚轮刷一条 console 警告（2026-09-28）
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const rect = canvas.getBoundingClientRect()
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, e.deltaY < 0 ? 1.18 : 1 / 1.18)
+    }
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', onWheel)
   }, [zoomAt])
 
   // ---- 生命周期 A（mount）：canvas 尺寸 + ResizeObserver + model 骨架 ----
@@ -677,7 +672,6 @@ export const GraphCanvas = forwardRef<GraphCanvasHandle, GraphCanvasProps>(funct
         const md = m.current
         if (md && md.hoverId) { md.hoverId = null; kick() }
       }}
-      onWheel={onWheel}
     />
   )
 })

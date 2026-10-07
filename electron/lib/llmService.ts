@@ -1,13 +1,13 @@
 import { ipcMain, net } from 'electron'
 import { randomUUID } from 'crypto'
-import { appendAudit, countMonthLlmTokens, countMonthVisionTokens, countMonthVisionPages, summarizeMonthLlmUsage } from './pluginAudit'
+import { appendAudit, countMonthLlmTokens, countMonthLlmTokensSplit, countMonthVisionTokens, countMonthVisionPages, summarizeMonthLlmUsage } from './pluginAudit'
 import { encryptSecret, decryptSecret } from './secretBox'
 import { scanCcSwitch, importCcSwitchIds, bindCcSwitchSaver } from './ccSwitchImport'
 
 /**
  * Model Gateway —— LLM API 统一接入层（方案 .claude/plans/model-gateway.md）。
  *
- * 职责：Provider 抽象（openai-compatible / ollama）、Key DPAPI 加密落盘、
+ * 职责：Provider 抽象（openai-compatible / ollama）、Key 加密落盘（secretBox）、
  * 连通性测试与模型发现、月度 token 预算硬限制、调用审计（不含消息正文）、tools 参数透传。
  * 边界：网关不代执行工具——tool_calls 原样回传给调用方（AgentRunner 决定执行）。
  */
@@ -21,11 +21,11 @@ export interface ProviderConfig {
   name: string
   type: ProviderType
   baseUrl: string
-  /** DPAPI 密文（enc1: 前缀），永不出主进程 */
+  /** 'enc1:' 密文（secretBox 机制），永不出主进程 */
   apiKeyEncrypted: string
   enabled: boolean
   models: string[]
-  /** 自定义请求头（明文存设置，勿放 API Key 类敏感值——密钥走 apiKey 字段走 DPAPI）。
+  /** 自定义请求头（明文存设置，勿放 API Key 类敏感值——密钥走 apiKey 字段走 secretBox）。
    *  2026-09-08：opencode 等网关要求 x-opencode-session 之类的会话/路由头，按服务商在设置里配 */
   headers?: Record<string, string>
   /** 嵌入模型名（知识语义索引用，knowledge-index-design §6）；不配 = 该供应商不参与嵌入 */
@@ -914,6 +914,26 @@ function resolveLlmTarget(req: LlmInvokeRequest): LlmTarget {
   return { ok: true, provider, model: finalModel, maxTokens }
 }
 
+/**
+ * B4 内联建议的默认模型解析（2026-09-20 反馈：默认跟随对话主模型，思考型会先思考一大段，
+ * 「续写一句」等到天荒地老且白烧 token）。跟随默认链，但默认链命中思考型时降级到
+ * 同供应商的**第一个非思考模型**；用户在设置 aiAssistantInlineSuggestModelId 钉死模型时
+ * 本函数不会被调用（钉死优先级最高，不做任何替换）。全部模型都是思考型 → 保持原样，
+ * 由 inlineSuggest 的思考早停兜底延迟。
+ */
+export function resolveInlineSuggestFallback(): { providerId: string; modelId: string } | null {
+  const def = String(depsRef?.getSettingValue('defaultChatModel') ?? '').trim()
+  if (!def) return null
+  const [pid, mid = ''] = def.split(':')
+  const provider = getProviders().find(x => x.id === pid && x.enabled)
+  if (!provider) return null
+  const target = mid || provider.models[0] || ''
+  if (!target) return null
+  if (!REASONING_MODEL_RE.test(target)) return { providerId: provider.id, modelId: target }
+  const nonThinking = provider.models.find(m => !REASONING_MODEL_RE.test(m))
+  return { providerId: provider.id, modelId: nonThinking ?? target }
+}
+
 /** 流式开关（设置项 aiStreamEnabled，缺省开）：关闭后退回非流式，功能不受损 */
 function streamEnabled(): boolean {
   return depsRef?.getSettingValue('aiStreamEnabled') !== false
@@ -1243,11 +1263,16 @@ export function registerLlmHandlers(deps: {
 
   ipcMain.handle('llm:invoke', (_e, req: LlmInvokeRequest) => llmInvoke(req))
 
-  ipcMain.handle('llm:getUsage', () => ({
-    monthTokens: countMonthLlmTokens(),
-    visionMonthTokens: countMonthVisionTokens(),
-    visionPages: countMonthVisionPages(),
-  }))
+  ipcMain.handle('llm:getUsage', () => {
+    const split = countMonthLlmTokensSplit()
+    return {
+      monthTokens: countMonthLlmTokens(),
+      monthPromptTokens: split.promptTokens,
+      monthCompletionTokens: split.completionTokens,
+      visionMonthTokens: countMonthVisionTokens(),
+      visionPages: countMonthVisionPages(),
+    }
+  })
   // 用量细分（网关补强）：本月按供应商/模型聚合（审计数据源，只读）
   ipcMain.handle('llm:usageBreakdown', () => summarizeMonthLlmUsage())
 }
@@ -1255,6 +1280,16 @@ export function registerLlmHandlers(deps: {
 /** 供 agentService 复用（不经 IPC） */
 export function invokeLlmInternal(req: LlmInvokeRequest): Promise<LlmInvokeResponse> {
   return llmInvoke(req)
+}
+
+/** 兜底模型：第一个启用供应商的第一个模型（当既无本对话模型、也无全局 defaultChatModel 时给一次性调用用） */
+export function firstEnabledModelSpec(): { providerId: string; modelId: string } | null {
+  for (const p of getProviders()) {
+    if (!p.enabled) continue
+    const m = p.models.find(Boolean)
+    if (m) return { providerId: p.id, modelId: m }
+  }
+  return null
 }
 
 // ===== 视觉转写（AI教学 3-21）：多模态一次性调用，不经过会话消息管线 =====
@@ -1290,8 +1325,7 @@ export function findVisionModel(preferredSpec?: string): { provider: ProviderCon
   return null
 }
 
-/** 视觉转写主进程入口（AI教学素材库）：OpenAI 多模态 content 数组直通 adapter */
-export async function visionChat(req: VisionChatRequest): Promise<VisionChatResponse> {
+/** 视觉转写主进程入口（AI教学素材库）：OpenAI 多模态 content 数组直通 adapter */export async function visionChat(req: VisionChatRequest): Promise<VisionChatResponse> {
   const found = findVisionModel(req.modelSpec)
   if (!found) return { ok: false, error: '未找到可用的视觉模型：请在设置→模型供应商 配置支持图片的模型（如 qwen-vl / glm-4v / gpt-4o / kimi-latest，openai-compatible 类型）' }
   const content: unknown[] = [

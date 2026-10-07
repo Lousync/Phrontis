@@ -1,22 +1,22 @@
-vault: E:\演示
-records.json 记录数: 127｜标签定义 10｜分组定义 5｜标签关联行 0｜分组关联行 0
+vault: .AGENT/scripts/ai-tools-audit/measure-tool-schema.mjs
+records.json 记录数: 0｜标签定义 0｜分组定义 0｜标签关联行 0｜分组关联行 0
 
 【quiz.list 单次调用返回体积】（真实数据，question 按源码截断 300 字符）
 limit   withQuestion   字符数    ~tok
-   10   true             3240    1250
-   10   false            2188     645
-   20   true             6289    2460
-   20   false            4372    1311
-   50   true            16747    6990
-   50   false           11124    3626
-  200   true            43752   18116
-  200   false           28327    9194
+   10   true               35       9
+   10   false              35       9
+   20   true               35       9
+   20   false              35       9
+   50   true               35       9
+   50   false              35       9
+  200   true               35       9
+  200   false              35       9
 
-全部 127 条一次拉取: 43752 字符 ≈ 18116 tok
-默认 limit=50:          16747 字符 ≈ 6990 tok
+全部 0 条一次拉取: 35 字符 ≈ 9 tok
+默认 limit=50:          35 字符 ≈ 9 tok
 
 【累积重发放大】agent loop 每轮重发整个 convo —— 第 k 轮的结果会被后续 (N-k) 轮捎带重发
 一个 8 轮的整理任务里，单次 quiz.list 结果平均被重发 4.5 次
-若首轮就拉 limit=50（≈6990 tok），它自身在整任务里累计 ≈ 31455 tok
+若首轮就拉 limit=50（≈9 tok），它自身在整任务里累计 ≈ 41 tok
 
 注：token 为估算（中文 1 字≈1 token，其余 4 字符≈1 token），用于横向比较。

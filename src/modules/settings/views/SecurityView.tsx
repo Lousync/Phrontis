@@ -47,6 +47,11 @@ export function SecurityView() {
             <span className="text-[13px] text-[var(--text-primary)]">跳过章节删除确认对话框</span>
             <SettingSwitch checked={s.skipDeleteConfirm_chapter} onChange={(v) => update('skipDeleteConfirm_chapter', v)} />
           </label>
+          {/* v3.2.0 第 20 项：AI 教学「画像更新建议」里删除类条目的二次确认 */}
+          <label className="flex items-center justify-between cursor-pointer">
+            <span className="text-[13px] text-[var(--text-primary)]">跳过画像更新删除确认对话框</span>
+            <SettingSwitch checked={s.skipProfileDeleteConfirm} onChange={(v) => update('skipProfileDeleteConfirm', v)} />
+          </label>
         </div>
         <p className="text-[11px] text-[var(--text-muted)] mt-2 leading-relaxed">
           关闭"跳过"即恢复删除前的确认弹窗，防止误删。

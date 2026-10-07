@@ -93,22 +93,6 @@ export function vaultLocalToday(): string {
   return vaultLocalNow().slice(0, 10)
 }
 
-/**
- * 是否已播种（幂等标记）：records.json 存在即视为已迁 vault。
- * 用文件存在（而非数组非空）判定——空表播种后仍是合法的「已迁移」态。
- */
-export function vaultQuizHasData(): boolean {
-  return exists(MOD, F_RECORDS)
-}
-
-/** 整表一次性播种（覆盖写五个文件） */
-export function vaultQuizSeedAll(data: VaultQuizSeedData): void {
-  writeJson(MOD, F_RECORDS, data.records)
-  writeJson(MOD, F_COLLECTIONS, data.collections)
-  writeJson(MOD, F_RECORD_COLLECTIONS, data.recordCollections)
-  writeJson(MOD, F_TAGS, data.tags)
-  writeJson(MOD, F_RECORD_TAGS, data.recordTags)
-}
 
 // ===== 低层读写（保序：读回即文件数组序 = 插入序，与 sqlite 无 ORDER BY 查询一致） =====
 

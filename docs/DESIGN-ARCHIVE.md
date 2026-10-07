@@ -8,14 +8,15 @@
 **DesignProcess** — https://github.com/Lousync/DesignProcess （PRIVATE）
 本地路径：`E:\Projects\DesignProcess\`
 
-**定位：软件设计过程的留存库**（不只是文档与原型）——收录「立项 → 调研 → 方案 → 交互原型 → 视觉 → 落地 → 验收」全链路产物。六类目录：
+**定位：软件设计过程的留存库**（不只是文档与原型）——收录「立项 → 调研 → 方案 → 交互原型 → 视觉 → 落地 → 验收」全链路产物。六类目录（另有搁置区）：
 
-- `Knowbase-方案与调研/` — 已搁置 / 已作废 / 已暂缓的方案稿 + 调研与对标注记
-- `Knowbase-已实现设计文档/` — 已落码的设计方案
-- `Knowbase-原型/` — 全部交互原型（HTML / drawio）
-- `Knowbase-视觉与品牌/` — 图标（含完整过程稿）、命名、文案、欢迎页设计
-- `Knowbase-过程记录/` — 决策记录、验收记录、UI 迭代截图
-- `Knowbase-内容与素材/` — 产品内容规划与素材清单
+- `Phrontis/方案与调研/` — 已作废、待拍板的设计方案 + 调研与对标注记
+- `Phrontis/已实现设计文档/` — 已落码的设计方案
+- `Phrontis/原型/` — 全部交互原型（HTML / drawio）
+- `Phrontis/视觉与品牌/` — 图标（含完整过程稿）、命名、文案、欢迎页设计
+- `Phrontis/过程记录/` — 决策记录、验收记录、UI 迭代截图
+- `Phrontis/内容与素材/` — 产品内容规划与素材清单
+- `Phrontis/搁置功能与想法/` — **已判过、眼下不做**的功能，连同设计方案、调研与原型整体留档（2026-09-23 建）
 
 该仓库由定时任务自动提交推送：有未提交变更时每日自动 commit + push。
 
@@ -26,7 +27,7 @@
    - 方案**已搁置 / 已作废 / 已暂缓**，不再作为开工依据；
    - 属过程证据（原型、视觉稿、迭代截图、命名与文案），且对应工作已收官。
 2. **归档动作**：从主仓库移到 DesignProcess 对应目录，随该仓库自动提交推送；同时在本文档清单中登记。
-3. **保留在主仓库的**：总纲（rework-master-plan / ai-teaching-module-rework）、**仍在推进的方案**（plugin-api-v2-*、rework-plugin-openness、rework-toolbox-as-plugins、ui-animation-plan）、活跃记录（ui-updates / verification-issues-* / 真机验证）、常驻规范（help-disclosure-pattern）。
+3. **保留在主仓库的**：总纲（rework-master-plan / ai-teaching-module-rework）、**仍在推进的方案**（plugin-api-v2-*、rework-plugin-openness、rework-toolbox-as-plugins、ui-animation-plan）、活跃记录（ui-updates）、待修台账（pending-fixes）、常驻规范（help-disclosure-pattern）。旧的 `verification-issues-*` 与真机验证记录自 2026-09-23 起转入 `Phrontis/过程记录/`。
 4. **被代码注释当规范引用的文档不回迁归档**：`.AGENT/docs/读写分工设计.md` 与 `.AGENT/docs/去库化迁移方案.md` 被 6 处代码注释 + 3 处文档引用（见下），视同常驻规范留在主仓库。
 5. **不再设二级归档区**：原 `docs/archive/`（2026-09-07 建立的本地暂存归档）已于 2026-09-12 整体并入 DesignProcess。本地只保留"活跃文档"一层，完成即一步到位进 DesignProcess，避免两处归档面职责重叠。
 6. **已知取舍**：归档会让主仓库内的相对链接失效（总纲正文按名引用已归档文档）。这是既有事实，主仓库侧不做链接维护，检索以本清单为准。
@@ -37,6 +38,7 @@
 
 | 日期 | 文档 | 实现证据 |
 |---|---|---|
+| 2026-10-03 | cs-coach-app-plan.md | **迁出至独立新仓库**（非 DesignProcess）：「CS 学习教练」立项为独立软件 CSTeacher（本地 `E:\Projects\CSTeacher`，GitHub 公开仓），计划稿与交互原型随新仓库维护，主仓库不留副本。缘起 2026-10-03 讨论轮：AI 教学「项目模式」→ 载体拍板为独立应用（Tauri 2 + React，地基复用自本仓库） |
 | 2026-09-07 | rework-vault-layout-implementation.md | P1–P8 全部实现完毕（2026-09-06 验证，57935d5→064d4d3） |
 | 2026-09-07 | rework-vault-account-model.md | vault 账户模型设计定稿，已被上述实现落地取代 |
 | 2026-09-07 | rework-workbench-design.md | Workbench（uiWorkbench / 编辑器组 W3 / 全局侧栏槽）已实现于 App.tsx |
@@ -49,7 +51,7 @@
 | 2026-09-07 | agent-immersive-quiz-design.md | 沉浸问答方案已被 AI教学题目视图（P7）取代并实施 |
 | 2026-09-07 | devbridge-roadmap.md | 已实现并实测通过（2026-08-29，feature/devbridge-roadmap 分支） |
 | 2026-09-07 | ai-test-bridge.md | 已实现并实测通过（仅 dev/测试环境启用，生产构建不打包） |
-| 2026-09-07 | habit-module-linkage.md | 已实现（迁移 048 + `electron/lib/habitLinkService.ts`） |
+| 2026-09-07 | habit-module-linkage.md | 已实现（迁移 048 + `electron/lib/habitLinkService.ts`）；**v3.2.0 条目 14 已整体移除**（服务 + 2 个 IPC + 联动 UI），文档仅作历史留存 |
 | 2026-09-07 | DEVELOPER.md | 开发者指南（非设计方案），随本地归档区整体并入留存 |
 | 2026-09-11 | conflict-resolution-design.md | v1（保存时 mtime 校验）已落地 |
 | 2026-09-11 | icon-redesign-record.md | 无影版图标接入 build/，构建验证通过 |
@@ -64,6 +66,16 @@
 | 2026-09-12 | ai-streaming-design.md | `useAgentStream.ts` + `StreamBubble.tsx` + `aiStreamEnabled`/`aiShowThinking` 已落地 |
 | 2026-09-12 | slim-activitybar-plan.md | `Onboarding.tsx` 场景选择步骤 + `activityBarHidden` 写入链路已落地 |
 | 2026-09-12 | vault-archive-all-files-design.md | `electron/lib/kbStore/archivedFilesRepo.ts` 全类型归档已落地 |
+| 2026-09-14 | session-prepare-design.md | 会话「准备态」已落码（v3.1.2 条目 1+7 合并，`d4a584d`，随 v3.1.2 发布）；配套原型同批归档（见原型清单） |
+
+### 2026-09-14 原型（AI 教学 v3.1.2 · 支线旁问 + 会话准备态）
+
+| 原型 | 来源 | 判定依据 |
+|---|---|---|
+| ai-teaching-sidetrack-prototype.html | tmp/ait-sidetrack-proto/ | 支线旁问已落码（`9801d68` P1–P4 三阶段 + `ee823b4` 二次修订：自动回执 / 三条纪律 / 浮窗） |
+| ai-teaching-sidewin-prototype.html | tmp/ait-sidewin-proto/ | 浮窗「拖动 / 八向缩放 / 右缘停靠」已落码（`src/modules/ai-teaching/useFloatingWindow.ts`，`ee823b4`）；目录内的 probe 探针脚本按规则 8 留 `tmp/` 不归档 |
+| ai-teaching-session-prepare-prototype.html | tmp/session-prepare-proto/ | 会话「准备态」已落码（`d4a584d`，配套 session-prepare-design.md 同批归档） |
+| ai-teaching-left-pane-prototype.html | tmp/left-pane-proto/ | 左栏「会话列表 + 资源管理器共存」已落码（`d4a584d` 左栏会话区回归） |
 
 ### 2026-09-12 第二批（口径放宽为「设计过程留存」后）
 
@@ -71,22 +83,142 @@
 |---|---|---|
 | delete-fx-skin.md | 已实现设计文档 | 删除动效已落码（`src/lib/deleteFx.ts` + `src/components/shared/DeleteWipe.tsx` + `settings.ts` 外观设置项） |
 | auto-update-improvements.md | 已实现设计文档 | 自动更新已落码（`electron/lib/updateService.ts`；CHANGELOG 记有 v2.13.0 事故复盘与三重防护实现） |
-| knowledge-query-design.md | 方案与调研 | 文档头「用户已立项，细节待拍板」，未落码 |
+| knowledge-query-design.md | 搁置功能与想法/库查询 | 文档头「用户已立项，细节待拍板」，未落码；2026-09-23 原型体验后判定「目前不需要」，转入搁置区 |
 | graph-view-design.md | 方案与调研 | 文档头「方案讨论稿，未落地代码」；正式规格已另档（graph-view-ui-spec.md） |
 | theme-system-design.md | 方案与调研 | 文档头「设计讨论稿 v0.1，细节待拍板」 |
 | onboarding-rework-design.md | 方案与调研 | 文档头「方案讨论稿，待拍板后实施」 |
 | ai-teaching-artifacts-pane-design.md | 方案与调研 | 文档头「方案定稿，待排期实现」 |
-| voice-input-design.md | 方案与调研 | 暂缓项目（已论证到落码级后搁置） |
+| voice-input-design.md | 搁置功能与想法/语音输入 | 已论证到落码级后搁置；2026-09-23 追认为长期不做，转入搁置区 |
 | plugin-obsidian-benchmark-20260902.md | 方案与调研 | 已完成的调研注记与对标材料 |
-| plugin-external-integration.md | 方案与调研 | 调研完成（2026-09-02），目标清单未圈定 |
+| plugin-external-integration.md | 搁置功能与想法/外部软件联动 | 调研完成（2026-09-02），目标清单未圈定；2026-09-23 定为长期不做，转入搁置区 |
 | pdf-annotation-roadmap.md | 方案与调研 | 未落码路线图 |
 | soft-copyright-application.md | 内容与素材 | 软著申请材料（资质文件，非设计方案） |
 | kaoyan-408-quiz-mode.md 等考研 4 篇 + knowledge-pack-answer-format.md | 内容与素材 | 产品内容规划与知识包契约，非代码设计 |
 | DEVELOPER.md / ai-test-bridge.md / devbridge-roadmap.md / habit-module-linkage.md | 去重删除 | 与 DP 内同名文件**逐字节相同**，`.AGENT/docs/` 侧为冗余副本，已移出仓库 |
 
+### 2026-09-23 搁置区建立（DP 内移入，非新归档）
+
+三条**已经判过、眼下不做**的材料，从 `Phrontis/方案与调研/` 与桌面（原型）移入新建的 `Phrontis/搁置功能与想法/`（按功能分子目录，原型随设计方案同行）：
+
+| 材料 | 移入去向 | 判定 |
+|---|---|---|
+| knowledge-query-design.md + 桌面原型 `库查询-原型.html` | `Phrontis/搁置功能与想法/库查询/` | 用户 2026-09-23 体验原型后判定「目前不需要」 |
+| voice-input-design.md | `Phrontis/搁置功能与想法/语音输入/` | 2026-09-23 追认为长期不做（原 2026-09-10 判缓） |
+| plugin-external-integration.md | `Phrontis/搁置功能与想法/外部软件联动/` | 2026-09-23 定为长期不做 |
+
+口径：`方案与调研/` 收「还没拍板」的，`搁置功能与想法/` 收「已判过、眼下不做」的——分家的目的是留档时一眼分得清哪些还有机会开工。判定标准与每条复活起点见 DP `Phrontis/搁置功能与想法/README.md`。
+
+### 2026-09-23 主仓 docs/ 清理归档（10 份）
+
+`docs/` 一次清出 10 份已完成使命的文档：7 份已落码的方案 + 3 份旧验收 / 真机记录。
+
+| 文档 | 去向 | 判定依据 |
+|---|---|---|
+| conversation-compaction-design.md | 已实现设计文档 | 会话压缩 C1–C3 全量落码（`agentCompressCore.ts` / `agentCompress.ts` / `agentSessionRepo.ts` / `chatCommands.ts`） |
+| ai-input-bubble-design.md | 已实现设计文档 | 已落码（2026-09-15 `9dc2c3e`，v3.2.0 条目 8） |
+| plugin-phase1-design.md | 已实现设计文档 | C1–C6 全量落码 |
+| notes-merge-phase1-design.md | 已实现设计文档 | Phase 1 已落地（就地编辑 + 共享 MonacoPane / tabPolicy） |
+| notes-merge-phase2-design.md | 已实现设计文档 | Phase 2 已落地——`src/lib/appModules.ts:44`「editor 模块整体退役（2026-09-20 阶段四）」 |
+| note-identity-unify-design.md | 已实现设计文档 | 已落码：`auto:<rel>` 兜底（`mdEntryFields.ts`）、`status` 双态退役（`knowledgeVaultRepo.ts`）、归档清单退役（`knowledgeIndex.ts` 阶段三） |
+| knowledge-index-design.md | 已实现设计文档 | 已落码（`electron/lib/kbStore/knowledgeIndex.ts`，含 2026-09-20 阶段三）；文档头「待评审后分期落码」是过期状态 |
+| verification-issues-20260904.md | 过程记录 | 旧验收问题归集（IC 已实锤定位、修复另开），作过程证据留存 |
+| verification-issues-20260908.md | 过程记录 | 同上 |
+| ai-teaching-真机验证-问题记录-20260907-第二轮.md | 过程记录 | 旧真机验证记录，对应版本已多轮迭代 |
+| v3.4.0-beta-feedback.md | 过程记录 | v3.4.0 改版（三栏外壳 / 书架六格式 / 书市）的 **beta 体验反馈台账**，`F-1…F-10` / `N-1…N-9` **全部结案**（2026-09-29 归档）；v3.4.0 正式发版后由主仓**新** `docs/v3.4.0-feedback.md` 接棒，编号**重起 `F-1` / `N-1`**（代码注释里的「台账 F-x / N-x」指本归档件） |
+
+**仍留主仓的**（2026-09-23 时点，口径见规则 3）：总纲 `rework-master-plan.md` / `ai-teaching-module-rework.md`；活跃 `ui-animation-plan.md` / `ui-updates.md` / `pending-fixes.md` / `book-market-design.md`（仍在施工）/ `release-notes-design.md`（§9 有 P1 待办）/ `v3.4.0-feedback.md`（**v3.4.0 正式版新台账，2026-09-29 起**；其 beta 前身已归档）/ `workbench-split-scope-design.md`（分屏留 v3.5.0）/ `theme-fx-design.md`（等看板后启动）/ `bookshelf-reader-upgrade-design.md` 的**接任总纲** `.claude/plans/b-epub-formats.md`；常驻规范 `help-disclosure-pattern.md`；仍在推进的插件三件套 `rework-plugin-openness.md` / `rework-toolbox-as-plugins.md` / `plugin-api-v2-design.md` + `plugin-api-v2-reference.md`（P3–P7 待做）；文档自述不归档的 `ai-learn-center-design.md` 与其两份原型、`docs/prototypes/ui-animation-prototype.html`。
+
+> **评估过、本轮未归档**（2026-09-23 时点，其中三项已于 2026-09-29 处置，见上文清单）：`bookshelf-reader-upgrade-design.md`（**已归档**——二期四格式全部落码）、`share-card-design.md`（**已归档**——已实现）、`workbench-split-scope-design.md`（**仍留**——分屏已确认留给 v3.5.0，方案活跃）。
+
+### 2026-09-23 `outputs/` 清理归档（21 项）
+
+`outputs/` 一次清出 21 项已完成使命的材料，主仓库从 41 项降到 19 项。
+
+| 材料 | 去向 | 判定依据 |
+|---|---|---|
+| ai-input-style-prototype.html | 原型 | 已落码：`assistantInputStyle` 九套外观（`settings.ts:222`、`ChatBody.tsx:11` useInputShell） |
+| b4-inline-suggest-v2-prototype.html / b4-toggle-prototype.html / b4-inline-suggest-plan.md | 原型 + 已实现设计文档 | B4 内联建议三键已落码（`settings.ts:224-226`、`lib/inlineSuggestTrigger.ts`、`electron/lib/aiAssistant/inlineSuggest.ts`） |
+| b1-ref-mention-plan.md | 已实现设计文档 | @ 引用已落码（`ChatBody.tsx:507`、`agentCompressCore.ts:148` buildRefSkeleton） |
+| b2-perception-plan.md | 已实现设计文档 | 感知模式已落码（`settings.ts:223`、`electron/lib/aiAssistant/perception.ts`） |
+| bookshelf-sidebar-prototype.html | 原型 | B 方案（封面+进度条）已落码（`src/modules/bookshelf/BookshelfSideList.tsx`） |
+| edge-hint-prototype.html | 原型 | 已落码 `34122b4`（`EpubReaderView.tsx:133-141` edgePageHint 四档） |
+| edge-pagebar-prototype.html | 原型 | WorkbenchPageBar / PageTabStrip 已落码（`src/components/workbench/PageTabStrip.tsx`） |
+| notes-toolbar-prototype.html | 原型 | 悬浮栏已落码（`PageEditor.tsx:895` portal 悬浮胶囊，2026-09-20） |
+| plugin-icon-options.html | 原型 | B-9 已落码（`ActivityBar.tsx:26-34` 拼图→包裹箱） |
+| toolbar-label-collapse.html + toolbar-label-collapse-preview.png | 原型 + UI迭代截图 | `.kb-fit` 按宽退化已落码（`PdfReaderView.tsx:1217`、`index.css` .kb-fit 段） |
+| workbench-activity-layer-prototype.html | 原型 | 页面条置顶+胶囊分段已落码（`App.tsx:1524` floatBar） |
+| workbench-split-prototype.html | 原型 | 「两栏共用一条顶栏」已实现并验收（`WorkbenchPageBar.tsx:161/239`） |
+| workbench-tabbar-v2-prototype.html | 原型 | 已落码 `92e3232`（`App.tsx:861` openTabs 恢复标签条） |
+| desk-schedule-panel-plan.md | 已实现设计文档 | 文档头自述「已全部拍板并落地」`be58243` |
+| context-audit-20260916.md | 过程记录 | 会话上下文审计已完成（结论已落 skill / memory），非开工依据 |
+| mid-pane-scroll-fixed.png | 过程记录/UI迭代截图 | 09-17 迭代截图（过程证据，规则 7） |
+| git-panel-prototype.html | 去重删除 | 与 DP `原型/` 内同名文件**逐字节相同**（`diff -q` IDENTICAL）；功能未落码（v3.3.0 git 集成被跳过），过程证据已留存 |
+| bookshelf-reader-prototype.html | 去重删除 | 同上，DP 侧同名副本逐字节相同；一期 S1–S8 已落码 |
+
+**仍留 `outputs/`（19 项）**：4 个被活跃方案按名引用的原型 —— `custom-panel-prototype.html`（`panel-editor-implementation.md`，v3.5.0 ③）、`workbench-split-scope-prototype.html`（`workbench-split-scope-design.md`）、`weave-reader-prototype.html`（`bookshelf-reader-upgrade-design.md`）、`checkin-card-prototype.html`（`share-card-design.md`）；`workbench-review/`（29 png + 4 json，`workbench-split-scope-design.md:6` 按名引用其 `split-instance-probe.json` 作观测证据）；其余待拍板（见下）。
+
+### 2026-09-23 `outputs/` 第二批归档（10 项 · 桌面外壳方向搁置）
+
+用户判定「磁贴桌面 / 模块窗口化 / 桌面枢纽层」三个方向整体不做，10 个原型文件移入 DP `Phrontis/搁置功能与想法/` 的三个新子目录：
+
+| 材料 | 去向 | 判定依据 |
+|---|---|---|
+| desktop-shell-prototype.html | 搁置功能与想法/桌面磁贴外壳 | 磁贴桌面外壳本体；已被 v3.4.0 工作台三栏外壳整体取代（`appModules.ts:40` desktop 从模块清单删除） |
+| app-shell-3col-prototype.html | 搁置功能与想法/桌面磁贴外壳 | 2026-09-15「方向升级」原型（模块窗口 → 三区布局），即三栏外壳前身；正文规格见仍在推进的 `docs/workbench-split-scope-design.md` |
+| desk-add-tile-prototype.html + .css | 搁置功能与想法/桌面磁贴外壳 | 「添加控件面板」交互稿，属磁贴外壳体系 |
+| desk-toolbar-prototype.html | 搁置功能与想法/桌面磁贴外壳 | 「工具条磁贴 + 日程面板卡片化」交互稿 |
+| daypanel-overview-prototype.html | 搁置功能与想法/桌面磁贴外壳 | 今日工作台「概览」Tab（挤压 / 覆盖对比） |
+| periodic-notes-prototype.html / periodic-notes-viz-prototype.html | 搁置功能与想法/桌面磁贴外壳 | 周期笔记磁贴 + 数据可视化 |
+| desktop-window-prototype.html | 搁置功能与想法/模块窗口化 | 模块窗口化（留空位造型 + MAX_H 3→4），代码零命中 |
+| desktop-hub-prototype.html | 搁置功能与想法/桌面枢纽层 | 全屏枢纽 / 卡片墙，代码零命中；核心场景被现有命令面板覆盖 |
+
+> **口径说明**：这三条技术上属「已被三栏外壳取代」，按搁置区 §收录判定（「已被取代者归 `方案与调研/`」）本应进 `方案与调研/`；用户明确指示进搁置区。已在 DP 侧 `搁置功能与想法/README.md` 迁入记录中标注为「将来严格化分界时的首批可回调项」。`desktop` 模块代码仍部分存在于主仓库（`src/modules/desktop/`、`src/daypanel/DayPanelWindowApp.tsx`），属「方向不做」而非「代码作废」。
+
+> **本轮评估未归档、待拍板**（仍留主仓 `outputs/`）：`ai-profile-suggest-prototype.html`（画像建议卡片 UI 是否落码待核）、`layout-customize-prototype.html` + `ob-sidebar-prototype.html`（侧边栏 DIY 三原型，DP 立项待指示）、`right-panel-widgets-prototype.html`（数据图表控件未落码，`RIGHT_PANEL_WIDGET_IDS` 仅 pomo）。
+
 ## 原型归档清单
 
-> 归档目标：DesignProcess `Knowbase-原型/`。
+> 归档目标：DesignProcess `Phrontis/原型/`。
+
+### 2026-09-29 主仓 docs/ 归档（4 份）+ 原型归档（10 件）
+
+**设计文档 → `Phrontis/已实现设计文档/`**
+
+| 文档 | 判定依据 |
+|---|---|
+| share-card-design.md | 文档头「已实现（2026-09-29）」；`src/components/share-card/` 落码 + 契约 + 探针 |
+| dashboard-tile-grid-design.md | 已落码：`src/modules/dashboard/tileGrid.ts` + `index.tsx:20` 引用 |
+| pet-design.md | 文档头「已实施 + 已验收」；三轮改版全落码（含布局改版与切换宠物） |
+| bookshelf-reader-upgrade-design.md | 一期（pdf+txt）已实施；二期四格式（epub/fb2/fbz/cbz）**全部落码**（`BookKind` 六格式齐备），真源已转 `.claude/plans/b-epub-formats.md`；本文 §5/§6 只对一期成立，使命终结 |
+
+> **该文档残留一处过期表述**（归档时未改，此处登记）：文档头写「2b = cbz 未开工」，实际 cbz 已于 2026-09-22 落码。该文档已自述「不要拿它判断当前支持哪些格式」，以总纲为准。
+
+**原型 → `Phrontis/原型/`**
+
+| 原型 | 来源 | 判定依据 |
+|---|---|---|
+| workbench-tree-mode-prototype.html | outputs/ | **本会话**工作台左栏文件树模式已落码（`src/components/workbench/WorkbenchFileTree.tsx`） |
+| desktop-pet-adaptive-prototype.html | outputs/ | pet-design.md 已验收 |
+| desktop-pet-layout-prototype.html | outputs/ | 同上（第二轮布局改版已落码） |
+| desktop-pet-prototype.html | outputs/ | 同上（一期） |
+| share-card-panel-prototype.html | outputs/ | share-card-design.md 已实现 |
+| workbench-dashboard-prototype.html | outputs/ | 看板已落码（`src/modules/dashboard/`） |
+| weave-reader-prototype.html | outputs/ | 随 bookshelf-reader-upgrade-design.md 同批归档（该文档按名引用） |
+| dashboard-grid-tiles.html | proto/ | 已落码（`tileGrid.ts`，v7 过 15 项 headless 断言） |
+| dashboard-edit-entry.html | proto/ | 同上 |
+| dashboard-tile-edit.html | proto/ | 同上 |
+| ai-teaching-interaction-prototype.html | tmp/aiteach-interaction-proto/index.html | AI 教学交互感方案集（8 档），754 行完整原型；**归属 DP 原型区**（命名按 `ai-teaching-*-prototype.html` 惯例）。归档时未找到其落码证据，作为交互设计过程稿留存 |
+| ai-input-bubble-prototype.html | tmp/input-bubble-proto/index.html | AI 输入区气泡化原型（5 处：教学 / 侧栏 / 扩后 / 支线），528 行。**补齐 DP 缺口**——DP 已有配套设计文档 `已实现设计文档/ai-input-bubble-design.md` 但一直没有原型。功能已落码（`assistantInputStyle` 九套外观，`settings.ts:241`） |
+
+**仍留主仓的**（被活跃方案按名引用，规则 7）：`outputs/custom-panel-prototype.html`（`panel-editor-implementation.md`，v3.5.0 ③）、`outputs/workbench-split-scope-prototype.html`（`workbench-split-scope-design.md` —— **分屏已确认留给 v3.5.0**）、`outputs/checkin-card-prototype.html`（`share-card-design.md` 的早期稿，主文档已归档但此件仍被计划文件引用）、`outputs/workbench-review/`、`proto/theme-fx.html` + `seasonal-themes.html` + `snow-tuning.html`（`theme-fx-design.md` 待开工，正文按名引用）；待拍板四项：`ai-profile-suggest-prototype.html`、`layout-customize-prototype.html`、`ob-sidebar-prototype.html`、`right-panel-widgets-prototype.html`。
+
+**顺带的工作区清理**：仓库顶层两个一次性日志产物 `build-check.log` / `tmp-vrf.log`（契约脚本的输出重定向残留，未跟踪、零引用、内容过期）已删除。
+
+---
+
+### 2026-09-12 原型归档（历史）
+
+> 归档目标：DesignProcess `Phrontis/原型/`。
 
 | 日期 | 原型 | 配套文档 / 实现证据 |
 |---|---|---|
@@ -126,17 +258,18 @@
 
 | 日期 | 内容 | 去向 |
 |---|---|---|
-| 2026-09-11 | 图标重设计全过程（决策记录 + 终稿 + 过程稿） | `Knowbase-视觉与品牌/图标重设计/` |
-| 2026-09-12 | `name-compare.html`（定名候选对比）、`phrontis-copy-brief.md`、`readme-draft.md`、`Phrontis-plugins-README.md`、`欢迎.html`、`knowledge-recorder-icon-redesign.png` | `Knowbase-视觉与品牌/` |
+| 2026-09-11 | 图标重设计全过程（决策记录 + 终稿 + 过程稿） | `Phrontis/视觉与品牌/图标重设计/` |
+| 2026-09-12 | `name-compare.html`（定名候选对比）、`phrontis-copy-brief.md`、`readme-draft.md`、`Phrontis-plugins-README.md`、`欢迎.html`、`knowledge-recorder-icon-redesign.png` | `Phrontis/视觉与品牌/` |
 | 2026-09-12 | `outputs/icon-final`、`icon-final-noshadow`、`icon-redesign` 三目录 | **去重删除**——与 DP 内 `图标重设计/final-带影版`、`final-无影版`、`过程稿` 目录级零差异（`diff -rq` 确认） |
 
 ## 过程记录归档
 
 | 日期 | 内容 | 去向 |
 |---|---|---|
-| 2026-09-12 | `outputs/` 与 `tmp/proto-shots/` 的设计过程截图 61 张 | `Knowbase-过程记录/UI迭代截图/`（分 欢迎页与宣传页 / 日程与日面板 / AI教学与学习中心 / 底栏与动效 四组） |
-| 2026-09-12 | `Knowbase仓库整合报告-20260910.md` | `Knowbase-过程记录/` |
-| 2026-09-12 | Claude Code plan 文件 25 份（约 175 KB） | `Knowbase-过程记录/Claude 计划文件/` |
+| 2026-09-12 | `outputs/` 与 `tmp/proto-shots/` 的设计过程截图 61 张 | `Phrontis/过程记录/UI迭代截图/`（分 欢迎页与宣传页 / 日程与日面板 / AI教学与学习中心 / 底栏与动效 四组） |
+| 2026-09-12 | `Knowbase仓库整合报告-20260910.md` | `Phrontis/过程记录/` |
+| 2026-09-12 | Claude Code plan 文件 25 份（约 175 KB） | `Phrontis/过程记录/Claude 计划文件/` |
+| 2026-09-13 | 主仓库根目录 `更新计划.md` 整体迁出；DP 侧新建 `更新计划/` 专夹，**按版本分文件**（`vX.Y.Z.md` = 自上一版升级到该版的批次计划，版本号标注在文件名与标题）。批次划分：`v3.1.1.md`（3.1.0→3.1.1，13 项全完成收官）+ `v3.1.2.md`（3.1.1→3.1.2，当前迭代 8 项待办：开场模板预填/会话准备态、Token 用量拆分、/ 弹层透明、扩大态侧栏拖宽、docx 素材、工作区级约束、资料范围纪律；两条旧待办经开发负责人确认不再跟进） | `Phrontis/更新计划/v3.1.1.md`、`v3.1.2.md` |
 
 ## Claude 计划文件归档（2026-09-12）
 
@@ -144,7 +277,7 @@
 
 | 来源 | 数量 | 去向 |
 |---|---|---|
-| `.claude/plans/*.md` | 14 | `Knowbase-过程记录/Claude 计划文件/` |
+| `.claude/plans/*.md` | 14 | `Phrontis/过程记录/Claude 计划文件/` |
 | `.claude/plans/plugins/*.md` | 11 | 同上（扁平化，去掉 plugins 子层） |
 
 **判定的依据**：AI 工作过程产物，非用户视角的设计文档；对应方案**多数已落码或被后续设计取代**（真实设计稿在 `docs/`，已按状态分流至本库）。作为「当时是怎么想出来的」的过程证据留存。
@@ -174,7 +307,7 @@
 
 - `docs/rework-master-plan.md`、`.AGENT/docs/去库化迁移方案.md` 等引用已归档的 rework-* 文档
 - `docs/ai-teaching-module-rework.md` 正文按名引用已归档的 `ai-teaching-prototype.html` / `ai-teaching-layout-builder.html` / `ai-teaching-layout-user-v1.json`
-- `scripts/publish-knowledge-pack.py:23` 写的是 `docs/knowledge-pack-answer-format.md`，该路径**早已失效**（真实文件现位于 DP `Knowbase-内容与素材/`）
+- `scripts/publish-knowledge-pack.py:23` 写的是 `docs/knowledge-pack-answer-format.md`，该路径**早已失效**（真实文件现位于 DP `Phrontis/内容与素材/`）
 
 ## 反向说明：留在主仓库的"旧位置"文档
 

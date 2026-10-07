@@ -49,11 +49,14 @@
 | `.kb-pop` | `opacity + scale(0.96→1) + translateY(6px→0)`，240ms | 菜单、下拉、popover 进场 |
 | `.kb-overlay` | 遮罩 `opacity 0→1` 200ms | 所有 Modal 遮罩 |
 | `.kb-modal-in` | 面板 `scale(0.97→1) + translateY(10px→0)`，280ms | Modal 主体进场 |
+| `.kb-drawer-in` | 面板 `translateX(100%→0)`，220ms（退场 176ms 反向） | 贴边通高抽屉进场（书市条目详情）；与 Modal 的区别见 index.css 该节注释 |
 | `.kb-collapse` | `grid-template-rows 0fr↔1fr` 240ms + 子元素 `overflow:hidden` | 树节点/分组/折叠面板展开收起 |
 | `.kb-chevron` | `transform rotate` 200ms | 所有展开箭头 |
 | `.kb-item-in` | `opacity + translateY(4px)` 200ms，`--ease-kb` | 列表项进场（新增行） |
 | `.kb-item-out` | `opacity→0 + scale(0.98) + 高度塌缩`，180ms | 列表项退场（普通删除，区别于吞噬特效） |
 | `.kb-micro-pop` | `scale 1→0.85→1` 180ms spring | 星标、勾选、开关点击反馈 |
+| `.kb-spin` | `rotate 360°` 0.8s 线性无限循环；形状 = 11px 圆环（描边色可覆盖） | 连续 busy 指示：会话列表「转圈示忙」（N-3）。reduced-motion 降速 2.4s 不停转（运动即语义） |
+| `.kb-dock-hint` | `opacity 0→1 + translateX(12px→0)` 170ms | 可拖动浮窗拖近停靠区时的落位预览块（G 类） |
 | `.kb-theme-vt` | `::view-transition-old/new(root)` 交叉淡化 220ms | 主题切换（View Transition），降级走容器级过渡 |
 
 > 所有类统一包一段 `@media (prefers-reduced-motion: reduce)` 关闭。
@@ -81,6 +84,7 @@
 | 下拉（TitleBar 更新面板、ActivityBar 设置/主题子菜单、语言菜单、更多菜单、sizeMenu、createMenu、「+」新建）| `.kb-pop` 160ms |
 | 各模块自定义 Modal（TodoEditModal、ImportModal、moments 三弹窗、BlogTemplateModal、TagManageModal、plugins 确认框、关联/wiki 选择器）| 统一遮罩+面板组合；优先抽一个共享 `<KbModal>` 壳，一次收敛 |
 | 划词浮钮、AI 悬浮按钮 | `.kb-pop` 180ms spring |
+| 书市条目详情抽屉（右缘通高面板）| `.kb-drawer-in` / `.kb-drawer-out`（220ms / 176ms）—— 贴边面板不做缩放 |
 | Toast | 进：顶部滑入 240ms；出：淡出+上移 180ms；堆叠位移用 transform 过渡 |
 
 ### C. 展开/收起 → `.kb-collapse` + `.kb-chevron`
@@ -97,10 +101,42 @@
 ### E. 状态反馈 → `.kb-micro-pop` / 150ms 色变
 收藏星标（knowledge/blog）、保存圆点颜色、勾选框、plugins 开关（已有）、PdfViewer 适宽选中、TrafficLight 已达标项不动。日历月切换：网格 `.kb-view-in` 弱化版（仅 opacity 180ms）。PDF 翻页：canvas 容器 opacity 120ms 快闪淡入，不拖慢连续翻页。
 
+**已认可的例外：确定型进度条填充走 `transition-[width]`**（DayPanel / PomoWidget / ReadingSidePanel /
+AI 教学上下文条 / 书市下载队列，共 7 处）。它是 §五-①「只动 transform / opacity」的唯一既有例外：
+宽度是**数据本身的直接映射**（不是进场/退场效果），改成 `scaleX` 会让圆角端头在小百分比下被挤扁。
+新写进度条按既有写法办（`h-full rounded-full transition-[width] duration-300 ease-linear`），
+**不要**为它另造 keyframes，也不要顺手把别的东西也改成动 width。
+
 ### F. 主题切换 → View Transition（**不用 wildcard 全局过渡**）
 实测（见 §五）：`html.theme-transitioning * { transition: color/background }` 在 4290 节点下会让主线程卡住 133ms 单帧——**该方案作废**。
 改为 `document.startViewTransition`（Electron 33 = Chromium 130，原生支持）：快照交叉淡化 220ms，逐节点 recalc 成本为零，帧分布与「瞬时切换」完全一致。
 降级路径（不支持时）：只对少数大面积容器（根容器 / 侧栏 / 内容壳）加 200ms 背景过渡，绝不使用 `*` 通配。
+
+### G. 拖拽辅助投影 → `.kb-dock-hint`（2026-09-14 新增）
+可拖动浮窗（AI 教学「支线旁问」）在拖近停靠区时，于落点位置浮现一个预览块，提示「松手会停在这里」。
+只做 `opacity + translateX(12px→0)`，方向与停靠侧一致（从停靠侧滑入）。
+调用方须给元素 `pointer-events-none`——提示压在舞台右缘，不能吃掉正在进行的拖拽手势。
+与「跟手无动画」的边界见 §五-6：跟手的是窗口本体（无动画），提示是状态翻转（有动画）。
+
+### H. 保活浮层显隐 → `.kb-view-toggle`（2026-09-20 新增）
+适用场景：**元素常驻不卸载**的浮层视图（错题本视图等「页签 ↔ 视图」反复切换、内部有大量
+筛选/编辑态不能丢的界面）。这类切换不能用 `.kb-view-fade` 等挂载动画——元素不 remount，
+动画没有重播时机；也不能用条件渲染——卸载即丢状态（与 §C 折叠容器的「外层常驻」同理）。
+用法：外层 wrapper 挂 `kb-view-toggle absolute inset-0` + `aria-hidden={!open}`，
+状态由 `aria-hidden` 属性承载（true = 淡出 + `visibility:hidden` + 不可点）。
+实现只动 `opacity` / `visibility`（visibility 离散属性随 duration 延迟翻转 = 淡出完成后
+才真正不可聚焦），令牌 `--dur-std` / `--ease-kb`，带 `prefers-reduced-motion` 兜底。
+首个使用方：知识库错题本视图（notes-merge，保活哲学与 App Tab 宿主同源）。
+
+### I. 卡内溢出滚动 → `.kb-thin-scroll`（2026-09-27 新增，看板方案 §5 反馈 4②）
+适用场景：**卡片内小列表**溢出时的收口 —— 不截断、不弹层，就地给一条细滚动条；但鼠标不在
+该控件上时滚动条**不可见**（拍板口径：静止态视觉干净，悬停才显形）。
+用法：滚动容器挂 `kb-thin-scroll overflow-y-auto` + 自定 `max-h-*`。
+实现：thumb 4px；静止态 thumb 全透明但**宽度保留**（不因滚动条出现/消失引起内容回弹），
+悬停（`:hover` / `:focus-within`）才着色；Firefox 走 `scrollbar-color` 同口径。
+这不是 transform/opacity 动画（scrollbar 伪元素不支持过渡），是**状态显隐**，
+与 `.kb-edge-strip`（彻底隐藏，`index.css:1395`）的区别：那条是「滚动手势仍在、视觉全无」，
+本条是「悬停可见的细条」。首个使用方：看板「今日打卡」卡列表。
 
 ---
 
@@ -152,7 +188,10 @@ wildcard 方案在 420ms 采样窗口内只渲染出 2 帧 = 界面明显冻结�
 2. 不给列表项、卡片、弹层加常驻 `will-change`（confetti.ts 那次性使用是正确姿势）；
 3. 主题切换禁用通配选择器过渡，统一 View Transition + 容器级降级；
 4. 遮罩层与 backdrop-filter 层解耦；
-5. 所有新增动画仍需在 `prefers-reduced-motion: reduce` 下退化为瞬时。
+5. 所有新增动画仍需在 `prefers-reduced-motion: reduce` 下退化为瞬时；
+6. **拖拽跟手过程一律无动画**（元素本体不许有 transition；位置由 pointer 位移直写内联样式）。
+   唯一允许的例外是「拖拽的辅助投影」——如浮窗拖近停靠区的落位提示（`.kb-dock-hint`，G 类），
+   它不跟手、只是状态翻转提示，故可以有进场动画。
 
 ---
 

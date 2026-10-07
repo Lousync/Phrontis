@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Entry, Tag } from '../../../types'
-import { ChevronRight, ChevronDown, FileText, Search, Star, Hash, Edit3, List } from 'lucide-react'
+import { ChevronRight, ChevronDown, FileText, Search, Star, Hash } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
 import { formatEntryDate, localToday } from '../../../lib/date'
 
@@ -9,8 +9,6 @@ interface SidebarProps {
   starredEntries: Entry[]
   selectedDate: string | null
   onSelectDate: (date: string | null) => void
-  onNewEntry: () => void
-  onShowAll?: () => void
   allTags?: Tag[]
 }
 
@@ -153,11 +151,10 @@ function computeSearchResults(
   return null
 }
 
-export function Sidebar({ entries, starredEntries, selectedDate, onSelectDate, onNewEntry, onShowAll, allTags }: SidebarProps) {
+export function Sidebar({ entries, starredEntries, selectedDate, onSelectDate, allTags }: SidebarProps) {
   const today = localToday()
   const thisYear = new Date().getFullYear().toString()
   const thisMonth = (new Date().getMonth() + 1).toString().padStart(2, '0')
-  const hasToday = entries.some(e => e.date === today)
 
   const [searchQuery, setSearchQuery] = useState('')
   const activeSearch = searchQuery.trim().length > 0
@@ -260,28 +257,8 @@ export function Sidebar({ entries, starredEntries, selectedDate, onSelectDate, o
 
   return (
     <aside className="w-full bg-[var(--bg-secondary)] flex flex-col h-full shrink-0 overflow-x-hidden">
-      {/* 标题行：文章 + 快捷动作 */}
-      <div className="flex items-center gap-1 border-b border-[var(--border-color)] px-2 py-1 text-[11.5px] text-[var(--text-muted)] shrink-0 select-none">
-        <span>文章</span>
-        <div className="ml-auto flex items-center gap-0.5">
-          <button
-            onClick={onNewEntry}
-            title={hasToday ? '继续编写今日文章' : '新建今日文章'}
-            className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-          >
-            <Edit3 size={13} />
-          </button>
-          {onShowAll && (
-            <button
-              onClick={onShowAll}
-              title="全部文章"
-              className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-            >
-              <List size={13} />
-            </button>
-          )}
-        </div>
-      </div>
+      {/* 「文章」标题行已删（2026-09-19 反馈）：写作/全部文章两钮上移到左栏模块态头部最右
+          （blog/index.tsx portal 到 modActionsEl），侧栏直接从收藏/归档开始 */}
 
       {/* 收藏 */}
       {starredEntries.length > 0 && (

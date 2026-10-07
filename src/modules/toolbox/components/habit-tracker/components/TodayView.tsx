@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { Check, Plus, PartyPopper, Zap } from 'lucide-react'
-import type { Habit, HabitRecord, HabitLinkSource } from '../../../../../types'
+import { Check, Plus, PartyPopper } from 'lucide-react'
+import type { Habit, HabitRecord } from '../../../../../types'
 import { formatLocalDate, isPlannedOn, ruleSummary, buildRecordIndex, getWeekStart } from '../dateUtils'
 import { burstConfetti, celebrateAllDone, ensureFeedbackStyles } from '../../../../../lib/confetti'
 
@@ -12,10 +12,6 @@ interface Props {
 }
 
 const WEEK_FULL = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-
-const LINK_LABELS: Record<HabitLinkSource, string> = {
-  blog: '写日志', pomodoro: '番茄专注', schedule: '日程任务', knowledge: '知识页面',
-}
 
 export function TodayView({ habits, records, onToggle, onNew }: Props) {
   const today = useMemo(() => new Date(), [])
@@ -140,14 +136,8 @@ export function TodayView({ habits, records, onToggle, onNew }: Props) {
                   {done && <Check size={14} strokeWidth={3} className="text-white" />}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className={`text-[14px] ${done ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]'} flex items-center gap-1.5`}>
+                  <div className={`text-[14px] ${done ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}`}>
                     {h.name}
-                    {h.link?.enabled && (
-                      <span title={`达成「${LINK_LABELS[h.link.source]}」目标即自动打卡`}
-                        className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-px rounded-full border border-[var(--border-color)] text-[var(--text-muted)]">
-                        <Zap size={9} /> {LINK_LABELS[h.link.source]}
-                      </span>
-                    )}
                   </div>
                   <div className="text-[11px] text-[var(--text-muted)]">{ruleSummary(h)}</div>
                 </div>

@@ -170,9 +170,3 @@ export function randomToken(): string {
 
 export type Gateway = ReturnType<typeof createGateway>
 
-// ---------- 错误码常量（v2 文档 §4.5） ----------
-export const GATEWAY_ERRORS = {
-  EBRIDGE: 'EBRIDGE', ECAPABILITY: 'ECAPABILITY', EPARAM: 'EPARAM',
-  EPATH: 'EPATH', ENOTFOUND: 'ENOTFOUND', ECONFLICT: 'ECONFLICT',
-  ELIMIT: 'ELIMIT', EDISABLED: 'EDISABLED', EHOST: 'EHOST', EINTERNAL: 'EINTERNAL',
-} as const

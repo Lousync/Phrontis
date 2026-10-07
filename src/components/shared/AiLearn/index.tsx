@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import {
-  Sparkles, X, Plus, Trash2, Send, Check, ChevronLeft, ChevronRight, Minimize2,
+  Sparkles, X, Plus, Trash2, ArrowUp, Check, ChevronLeft, ChevronRight, Minimize2,
   FileText, Wrench, BookOpen, MessageSquare, HelpCircle, Settings2, Loader2, Quote,
 } from 'lucide-react'
 import { MarkdownPreview } from '../MarkdownPreview'
+import { ResizablePanel } from '../ResizablePanel'
 import { MessageList, type UiMessage } from '../AssistantPanel/MessageList'
 import type { StreamDraft } from '../AssistantPanel/useAgentStream'
 import { loadHelpDocs, type HelpDoc } from '../../../modules/help/docsLoader'
@@ -118,24 +119,33 @@ function Composer({ placeholder, onSend, disabled, compact }: {
     setDraft('')
   }
   return (
-    <div className={`flex shrink-0 items-end gap-2 border-t border-[var(--border-color)] bg-[var(--bg-secondary)] ${compact ? 'px-3 py-2.5' : 'px-4 py-2.5'}`}>
-      <textarea
-        rows={2}
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); push() } }}
-        placeholder={placeholder}
-        className={`flex-1 resize-none rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] ${
-          compact ? 'px-2.5 py-2 text-[12px]' : 'px-3 py-2 text-[12.5px]'
-        }`}
-      />
-      <button
-        onClick={push}
-        disabled={disabled || !draft.trim()}
-        className={`flex shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-white transition-opacity hover:opacity-90 disabled:opacity-40 ${compact ? 'h-9 w-9' : 'h-9 w-9'}`}
-      >
-        {disabled ? <Loader2 size={13} className="animate-spin" /> : <Send size={compact ? 13 : 14} />}
-      </button>
+    <div className={`shrink-0 w-full max-w-[820px] mx-auto ${compact ? 'px-3' : 'px-4'} pb-2.5 pt-2`}>
+      <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60">
+        <textarea
+          rows={2}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); push() } }}
+          placeholder={placeholder}
+          className={`w-full resize-none rounded-none border-0 bg-transparent px-0.5 py-1 text-[var(--text-primary)] outline-none ${
+            compact ? 'text-[12px]' : 'text-[12.5px]'
+          }`}
+        />
+        <div className="flex items-center gap-2 mt-0.5">
+          <span
+            className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none"
+            title="AI 生成内容可能存在错误，请自行核实"
+          >AI 生成内容，请注意甄别</span>
+          <button
+            onClick={push}
+            disabled={disabled || !draft.trim()}
+            title="发送"
+            className="w-8 h-8 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all"
+          >
+            {disabled ? <Loader2 size={13} className="animate-spin" /> : <ArrowUp size={15} />}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -579,22 +589,46 @@ export function AiLearnShell({ tab, onTabChange, onCollapse, onClose, active, pr
       </div>
 
       <div className="flex min-h-0 flex-1">
-        {/* 左栏：三个页签共用容器，切换时不重排 */}
-        <Col d={50} active={active} className="flex w-[236px] shrink-0 flex-col border-r border-[var(--border-color)] bg-[var(--bg-secondary)]">
-          {tab === 'learn' ? stepList : tab === 'chat' ? sessionList : helpCatalog}
-        </Col>
+        {/* 左栏（v3.1.2 条目4）：可拖拽调宽、不可收起——接既有 ResizablePanel，
+            宽度持久化于 sidebarWidth_aiLearnLeft；不传 onSnapClose → 无收起态。
+            Col 仅保留入场 stagger 动画，宽度/边框/底色交给 ResizablePanel */}
+        <ResizablePanel
+          storageKey="sidebarWidth_aiLearnLeft"
+          defaultWidth={236}
+          minWidth={180}
+          maxWidth={360}
+          visible
+          side="left"
+          className="border-r border-[var(--border-color)] bg-[var(--bg-secondary)]"
+        >
+          <Col d={50} active={active} className="flex min-h-0 flex-1 flex-col">
+            {tab === 'learn' ? stepList : tab === 'chat' ? sessionList : helpCatalog}
+          </Col>
+        </ResizablePanel>
 
         {/* 中栏 */}
         <Col d={95} active={active} className="min-w-0 flex-1 overflow-hidden bg-[var(--bg-primary)]">
           {tab === 'learn' ? lessonPane : tab === 'chat' ? chatCenter : <HelpDocView doc={activeHelp} />}
         </Col>
 
-        {/* 右栏 */}
-        <Col d={140} active={active} className="flex w-[366px] shrink-0 flex-col border-l border-[var(--border-color)] bg-[var(--bg-primary)]">
-          {tab === 'learn' ? <FollowChat chat={chat} lesson={lesson} />
-            : tab === 'chat' ? chatInfo
-              : <FollowChat chat={chat} lesson={lesson} docMode docTitle={activeHelp?.title} />}
-        </Col>
+        {/* 右栏（v3.1.2 条目4）：同上，持久化于 sidebarWidth_aiLearnRight。
+            底色由内层 Col 的 bg-primary 撑满（ResizablePanel 内置 bg-secondary，
+            不在 className 里覆盖以免同类名竞争顺序不确定） */}
+        <ResizablePanel
+          storageKey="sidebarWidth_aiLearnRight"
+          defaultWidth={366}
+          minWidth={240}
+          maxWidth={480}
+          visible
+          side="right"
+          className="border-l border-[var(--border-color)]"
+        >
+          <Col d={140} active={active} className="flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
+            {tab === 'learn' ? <FollowChat chat={chat} lesson={lesson} />
+              : tab === 'chat' ? chatInfo
+                : <FollowChat chat={chat} lesson={lesson} docMode docTitle={activeHelp?.title} />}
+          </Col>
+        </ResizablePanel>
       </div>
     </div>
   )

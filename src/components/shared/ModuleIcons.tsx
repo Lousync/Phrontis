@@ -10,9 +10,13 @@ import { useSidebarIconNode, type IconModuleId } from '../../lib/sidebarIcons'
 interface IconProps {
   size?: number
   className?: string
+  /** 线宽覆盖（默认 1.6）。**大尺寸下 1.6 偏粗** —— 插件市场空态那个 40px 图标原本就是 1.2（2026-09-22 B-9）。
+   *  ★ 只有手绘包跟随此值：classic140 包自带 1.5、插件 SVG 包是第三方 `<svg>` 原样注入，
+   *    两者「各显其形」是本图标系统的既有设计，不为统一线宽去改它们。 */
+  strokeWidth?: number
 }
 
-function Svg({ size = 24, className, children }: IconProps & { children: React.ReactNode }) {
+function Svg({ size = 24, className, strokeWidth, children }: IconProps & { children: React.ReactNode }) {
   return (
     <svg
       width={size}
@@ -20,7 +24,7 @@ function Svg({ size = 24, className, children }: IconProps & { children: React.R
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={1.6}
+      strokeWidth={strokeWidth ?? 1.6}
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
@@ -151,28 +155,23 @@ function SettingsIconHandDrawn(props: IconProps) {
   )
 }
 
-/** 插件：拼图块——圆角主体 + 顶部凸起 + 右侧凹槽 */
-function PluginIconHandDrawn(props: IconProps) {  return (
+/** 插件：包裹箱（2026-09-17 由「拼图块」改为「立体箱」）。
+ *
+ *  几何与经典细线包的 lucide `Package` 同构（六边形箱体剪影 + 顶面两条棱 + 正面中缝 + 箱盖折痕），
+ *  但笔法走项目手绘：线宽 1.6、圆角更大、折痕端点落在各棱中点。
+ *  两包并存的用意：切「侧边栏图标风格」时各显其形（手绘=这个，经典细线=lucide Package），
+ *  而不是换成一张只差 0.1px 线宽的同一个图标。 */
+function PluginIconHandDrawn(props: IconProps) {
+  return (
     <Svg {...props}>
-      {/* 轮廓：四圆角主体，顶部中央凸出半圆，右侧中央内陷半圆 */}
-      <path d="
-        M 6 7
-        a 1 1 0 0 1 1 -1
-        h 3
-        a 2 2 0 0 0 4 0
-        h 3
-        a 1 1 0 0 1 1 1
-        v 2.5
-        a 1.5 1.5 0 0 1 0 3
-        V 15
-        a 1 1 0 0 1 -1 1
-        h -10
-        a 1 1 0 0 1 -1 -1
-        V 7
-        Z
-      " />
-      {/* 中心连接点：实心小圆点，呼应"接入/扩展"语义 */}
-      <circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none" />
+      {/* 箱体剪影：上顶点 → 右腰 → 右下 → 底部 → 左下 → 左腰 → 闭合（圆角由 stroke-linejoin 撑起） */}
+      <path d="M12 3.5 20.1 8.1v7.7L12 20.4 3.9 15.8V8.1Z" />
+      {/* 顶面两条棱：左腰中点 → 顶面下顶点 → 右腰中点 */}
+      <path d="M3.9 8.1 12 12.65l8.1-4.55" />
+      {/* 正面中缝：顶面下顶点 → 箱底 */}
+      <path d="M12 12.65v7.75" />
+      {/* 箱盖折痕：左上棱中点 → 顶面右棱中点 */}
+      <path d="m7.95 5.8 8.1 4.55" />
     </Svg>
   )
 }
@@ -199,16 +198,43 @@ function EditorIconHandDrawn(props: IconProps) {
     </Svg>
   )
 }
+
+/** 书市：店招（斜顶篷 + 篷褶 + 门脸门洞）。
+ *
+ *  几何与经典细线包的 lucide `Store` 同构（斜顶 + 篷檐 + 褶子 + 门洞），笔法走项目手绘：
+ *  线宽 1.6、褶子只画四道大弧（lucide 是六道小波）、门洞圆角更大。
+ *  **为什么不画一本书**：书架已有 `BookMarked`、插件市场已有箱子（`Package`），
+ *  第三个「书形」图标只会让三者认混；「书的市场 = 铺面」比再画一本书更好认。
+ *  两包并存的规则同 PluginIcon：切图标风格时各显其形（手绘=这个，经典细线=lucide Store）。 */
+function BookMarketIconHandDrawn(props: IconProps) {
+  return (
+    <Svg {...props}>
+      {/* 斜顶轮廓：左檐上斜到顶、右檐按下斜收，顶面留一段平顶 */}
+      <path d="M3.4 9.4 5.7 5.5a1.4 1.4 0 0 1 1.2-.7h10.2a1.4 1.4 0 0 1 1.2.7l2.3 3.9" />
+      {/* 篷檐横线 */}
+      <path d="M3.4 9.4h17.2" />
+      {/* 篷褶：四道等宽浅弧（rx 2.15 / ry 1.7，4×4.3 = 与篷檐同宽） */}
+      <path d="M3.4 9.4a2.15 1.7 0 0 0 4.3 0" />
+      <path d="M7.7 9.4a2.15 1.7 0 0 0 4.3 0" />
+      <path d="M12 9.4a2.15 1.7 0 0 0 4.3 0" />
+      <path d="M16.3 9.4a2.15 1.7 0 0 0 4.3 0" />
+      {/* 店身两壁 */}
+      <path d="M5.3 11.2v7.4a1.4 1.4 0 0 0 1.4 1.4h10.6a1.4 1.4 0 0 0 1.4-1.4v-7.4" />
+      {/* 门洞 */}
+      <path d="M9.7 20v-4.3a1.3 1.3 0 0 1 1.3-1.3h2a1.3 1.3 0 0 1 1.3 1.3V20" />
+    </Svg>
+  )
+}
 // ===== 风格感知包装(设置→外观→侧边栏图标;default 走上方手绘实现) =====
 
-function StyleAware({ moduleId, Fallback, size = 24, className }: IconProps & {
+function StyleAware({ moduleId, Fallback, size = 24, className, strokeWidth }: IconProps & {
   moduleId: IconModuleId
   Fallback: (props: IconProps) => React.ReactElement
 }) {
   const { s } = useSettings()
   const node = useSidebarIconNode(s.sidebarIconStyle ?? 'default', moduleId, size, className)
   if (node) return <>{node}</>
-  return <Fallback size={size} className={className} />
+  return <Fallback size={size} className={className} strokeWidth={strokeWidth} />
 }
 
 const HAND_DRAWN: Record<IconModuleId, (props: IconProps) => React.ReactElement> = {
@@ -219,6 +245,7 @@ const HAND_DRAWN: Record<IconModuleId, (props: IconProps) => React.ReactElement>
   aiTeaching: AiTeachingIconHandDrawn,
   toolbox: ToolboxIconHandDrawn,
   plugins: PluginIconHandDrawn,
+  bookMarket: BookMarketIconHandDrawn,
   recycle: RecycleIconHandDrawn,
   help: HelpIconHandDrawn,
   user: UserIconHandDrawn,
@@ -233,12 +260,11 @@ export function KnowledgeIcon(props: IconProps) { return <StyleAware moduleId="k
 export function MomentsIcon(props: IconProps) { return <StyleAware moduleId="moments" Fallback={MomentsIconHandDrawn} {...props} /> }
 export function AiTeachingIcon(props: IconProps) { return <StyleAware moduleId="aiTeaching" Fallback={AiTeachingIconHandDrawn} {...props} /> }
 export function ToolboxIcon(props: IconProps) { return <StyleAware moduleId="toolbox" Fallback={ToolboxIconHandDrawn} {...props} /> }
-export function ExportIcon(props: IconProps) { return <StyleAware moduleId="export" Fallback={ExportIconHandDrawn} {...props} /> }
-export function RecycleIcon(props: IconProps) { return <StyleAware moduleId="recycle" Fallback={RecycleIconHandDrawn} {...props} /> }
 export function HelpIcon(props: IconProps) { return <StyleAware moduleId="help" Fallback={HelpIconHandDrawn} {...props} /> }
 export function UserIcon(props: IconProps) { return <StyleAware moduleId="user" Fallback={UserIconHandDrawn} {...props} /> }
 export function SettingsIcon(props: IconProps) { return <StyleAware moduleId="settings" Fallback={SettingsIconHandDrawn} {...props} /> }
 export function PluginIcon(props: IconProps) { return <StyleAware moduleId="plugins" Fallback={PluginIconHandDrawn} {...props} /> }
+export function BookMarketIcon(props: IconProps) { return <StyleAware moduleId="bookMarket" Fallback={BookMarketIconHandDrawn} {...props} /> }
 export function EditorIcon(props: IconProps) { return <StyleAware moduleId="editor" Fallback={EditorIconHandDrawn} {...props} /> }
 
 /** 任意包预览:设置→外观 的图标选择器用它渲染每个包的效果 */

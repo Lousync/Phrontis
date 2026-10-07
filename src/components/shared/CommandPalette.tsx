@@ -82,6 +82,7 @@ export function CommandPalette({ placeholder, items, loading = false, emptyHint,
 
   return (
     <div
+      data-wb="palette"
       className={`fixed inset-0 z-[80] flex items-start justify-center pt-[13vh] bg-black/25 ${closing ? 'kb-overlay-out' : 'kb-overlay'}`}
       onMouseDown={closeSoon}
     >

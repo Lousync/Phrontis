@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Check, Zap } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Check } from 'lucide-react'
 import type { Habit, HabitRecord } from '../../../../../types'
-import { formatLocalDate, isPlannedOn, ruleSummary, buildRecordIndex, buildRecordSourceIndex, isSameDay } from '../dateUtils'
+import { formatLocalDate, isPlannedOn, ruleSummary, buildRecordIndex, isSameDay } from '../dateUtils'
 import { burstConfetti } from '../../../../../lib/confetti'
 
 interface Props {
@@ -19,7 +19,6 @@ export function CalendarView({ habits, records, onToggle }: Props) {
   const [selected, setSelected] = useState<string | null>(null)
 
   const idx = useMemo(() => buildRecordIndex(records), [records])
-  const sourceIdx = useMemo(() => buildRecordSourceIndex(records), [records])
   const active = habits.filter(h => !h.archived)
 
   // 月历格子（周一起始）
@@ -132,8 +131,6 @@ export function CalendarView({ habits, records, onToggle }: Props) {
             )}
             {plannedOn(selectedDate).map(h => {
               const done = idx.get(h.id)?.has(selected) ?? false
-              // 自动打卡:浅一档填充 + 闪电角标,与手动打卡区分
-              const isAuto = sourceIdx.get(h.id)?.get(selected) === 'auto'
               return (
                 <button
                   key={h.id}
@@ -142,15 +139,10 @@ export function CalendarView({ habits, records, onToggle }: Props) {
                 >
                   <span key={done ? 'd' : 'u'}
                     className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${done ? 'ck-pop' : ''}`}
-                    style={done ? { backgroundColor: isAuto ? `${h.color}66` : h.color, borderColor: h.color } : { borderColor: h.color }}>
-                    {done && (isAuto ? <Zap size={11} strokeWidth={2.5} className="text-white" /> : <Check size={12} strokeWidth={3} className="text-white" />)}
+                    style={done ? { backgroundColor: h.color, borderColor: h.color } : { borderColor: h.color }}>
+                    {done && <Check size={12} strokeWidth={3} className="text-white" />}
                   </span>
                   <span className={`flex-1 text-[13px] ${done ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}`}>{h.name}</span>
-                  {isAuto && (
-                    <span title="由其他模块联动自动打卡" className="flex items-center gap-0.5 text-[10px] px-1.5 py-px rounded-full border border-[var(--border-color)] text-[var(--text-muted)]">
-                      <Zap size={9} /> 自动
-                    </span>
-                  )}
                   <span className="text-[11px] text-[var(--text-muted)]">{ruleSummary(h)}</span>
                 </button>
               )

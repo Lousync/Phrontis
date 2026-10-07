@@ -1,9 +1,12 @@
-import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitLink, HabitAutoCheckin, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, LlmUsageBreakdownEntry, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentSessionInfo, AgentSessionSource, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, CreatePasswordEntryDTO, UpdatePasswordEntryDTO } from '../types'
+import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitPeriodStat, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, LlmUsageBreakdownEntry, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentRunStateEvent, AgentSessionInfo, AgentSessionSource, AgentSideLaneCreateResult, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, AiUsageDay, SessionFileChange, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginDashboardWidget, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, AiTeachProfileEntry, AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnitProgress, AiTeachCourseGenerateInput, AiTeachCourseGenProgress, CreatePasswordEntryDTO, UpdatePasswordEntryDTO, PdfBookState, PdfBookPatch, BookListItem, ReaderBookState, ReaderStatePatch, ExcerptItem, ExcerptCreatePayload, ExcerptPatch, ExcerptExportEntry, WorkspaceRangeBytesResult, BookSourceInfo, BookSourcePatch, BookSourceCredentialInput, BookSourceConnectivity, BookMarketSearchResponse, BookDownloadRequest, BookDownloadStartResult, BookDownloadTask, BookDownloadAction, PetSpecies, PluginPetInfo, TerminalSessionInfo, TerminalCreateResult, TerminalShellInfo, TerminalAiRecord } from '../types'
 import type { SettingsKey, SettingsValue, AppSettings } from './settings'
 import { SETTINGS_DEFAULTS } from './settings'
+import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingParseOutcome, AccountingImportOutcome, CreateAccountingInput } from '../types'
 const a = () => { if (!window.api) throw new Error('Electron API not available.'); return window.api }
 
 export const getPathForFile = (file: File): string => a().getPathForFile(file)
+/** 请主进程对本窗口补发一次真实 paste（文件树右键「粘贴」用；渲染层需先交焦点给文件树） */
+export const pasteFromClipboard = (): Promise<{ ok: boolean }> => a().pasteFromClipboard()
 export const copyImage = (src: { path?: string; dataUrl?: string }): Promise<boolean> => a().copyImage(src)
 export const copyText = (text: string): Promise<boolean> => a().copyText(text)
 
@@ -100,6 +103,8 @@ export const searchKnowledgePages = (q: string) => a().searchKnowledgePages(q)
 export const getKnowledgeBacklinks = (pageId: string) => a().getKnowledgeBacklinks(pageId)
 export const getKnowledgeBacklinkContext = (pageId: string) => a().getKnowledgeBacklinkContext(pageId)
 export const getKnowledgeSimilarPages = (pageId: string) => a().getKnowledgeSimilarPages(pageId)
+/** 语义索引状态（B2 感知模式弱提示） */
+export const getSemanticStatus = () => a().getSemanticStatus()
 export const getKnowledgeManualLinks = (pageId: string) => a().getKnowledgeManualLinks(pageId)
 export const addKnowledgeManualLink = (pageId: string, targetId: string) => a().addKnowledgeManualLink(pageId, targetId)
 export const removeKnowledgeManualLink = (pageIdA: string, pageIdB: string) => a().removeKnowledgeManualLink(pageIdA, pageIdB)
@@ -143,6 +148,7 @@ export const installUpdate = (filePath: string) => a().installUpdate(filePath)
 export const updatePauseDownload = () => a().updatePauseDownload()
 export const updateCancelDownload = () => a().updateCancelDownload()
 export const onUpdateDownloadProgress = (cb: (p: { percent: number; receivedBytes: number; totalBytes: number }) => void) => a().onUpdateDownloadProgress(cb)
+export const onUpdateDownloadStage = (cb: (p: { stage: 'downloading' | 'verifying' | 'switching' }) => void) => a().onUpdateDownloadStage(cb)
 // 更新说明（VS Code 式 tab）
 export const getReleaseNotesState = () => a().getReleaseNotesState()
 export const markReleaseNotesShown = (version: string) => a().markReleaseNotesShown(version)
@@ -154,6 +160,8 @@ export const pluginInstall = (url: string, grantedCapabilities?: string[]) => a(
 export const onPluginInstalledChanged = (cb: () => void) => a().onPluginInstalledChanged(cb)
 /** AI vault 写工具落盘后的外部变更通知 */
 export const onWsExternalChange = (cb: (p: { relPath: string; mtimeMs?: number }) => void) => a().onWsExternalChange(cb)
+/** v3.2.0 条目 ④：仓库目录发生文件系统变更（外部改动 / watcher 降级告知） */
+export const onWsFsChanged = (cb: (p: { relPaths: string[]; watcherError?: string }) => void) => a().onWsFsChanged(cb)
 export const pluginInstallFromFile = (grantedCapabilities?: string[]) => a().pluginInstallFromFile(grantedCapabilities)
 /** 一键安装内置示例插件（开发期从工作区 samples/ 读，prod 后续用 extraResources 预置） */
 export const pluginInstallBundledSample = (filename: string, grantedCapabilities?: string[]) => a().pluginInstallBundledSample(filename, grantedCapabilities)
@@ -163,6 +171,9 @@ export const pluginUninstall = (id: string) => a().pluginUninstall(id)
 export const pluginGetContribution = (id: string, key: string) => a().pluginGetContribution(id, key)
 /** 列出已启用插件声明的视图挂载点（可按 slot 过滤） */
 export const pluginListViews = (slot?: string): Promise<PluginViewContribution[]> => a().pluginListViews(slot)
+/** 列出已启用插件声明的看板控件（2026-09-28；全局控件 id = `<pluginId>:<wid>`，渲染层拼） */
+export const pluginListDashboardWidgets = (): Promise<PluginDashboardWidget[]> => a().pluginListDashboardWidgets()
+export const pluginListPets = (): Promise<PluginPetInfo[]> => a().pluginListPets()
 /** 列出已启用插件声明的命令（plugin-phase1-design C3；附首个 view 槽位供导航激活） */
 export const pluginListCommands = (): Promise<PluginCommandInfo[]> => a().pluginListCommands()
 /** 已启用插件声明的 fenced-code 渲染器（plugin-phase1-design C6） */
@@ -281,13 +292,65 @@ export const workspacePickImages = (rootId: string) => a().workspacePickImages(r
 export const workspaceSaveImage = (rootId: string, payload: { fileName: string; dataBase64: string }) => a().workspaceSaveImage(rootId, payload)
 export const workspaceReadFile = (rootId: string, relPath: string) => a().workspaceReadFile(rootId, relPath)
 export const workspaceReadRange = (rootId: string, relPath: string, offset: number, length: number) => a().workspaceReadRange(rootId, relPath, offset, length)
-export const workspaceSetMdStatus = (rootId: string, relPath: string, draft: boolean) => a().workspaceSetMdStatus(rootId, relPath, draft)
-/** 全类型归档（docs/vault-archive-all-files-design.md §4.1）：md 走 frontmatter 双态，非 md/目录走清单 */
-export const workspaceSetArchiveStatus = (rootId: string, relPath: string, archive: boolean): Promise<{ ok: boolean; count?: number; error?: string }> =>
-  a().workspaceSetArchiveStatus(rootId, relPath, archive)
-/** 归档清单条目（渲染层右键菜单态：目录是否已归档） */
-export const workspaceGetArchiveEntries = (rootId: string): Promise<{ ok: boolean; entries?: Array<{ id: string; path: string; type: 'file' | 'dir'; archivedAt: string }>; error?: string }> =>
-  a().workspaceGetArchiveEntries(rootId)
+/** 范围读取的**字节**版本（B-16）：foliate 系阅读器整本取字节用，免渲染侧 base64 解码。
+ *  结果形状 = `WorkspaceRangeBytesResult & { error? }`（失败时**只有** error 字段，成功时没有它）。 */
+export const workspaceReadRangeBytes = (rootId: string, relPath: string, offset: number, length: number): Promise<WorkspaceRangeBytesResult & { error?: string }> =>
+  a().workspaceReadRangeBytes(rootId, relPath, offset, length)
+// ===== PDF 阅读体验整包（v3.4.0 第 2 项）：进度/书签/封面缓存/导入 =====
+export const pdfReaderListBooks = (): Promise<{ ok: boolean; books?: BookListItem[]; error?: string }> => a().pdfReaderListBooks()
+export const pdfReaderGet = (rootId: string, relPath: string): Promise<{ ok: boolean; state?: PdfBookState | null; error?: string }> => a().pdfReaderGet(rootId, relPath)
+export const pdfReaderPatch = (rootId: string, relPath: string, patch: PdfBookPatch, expectedUpdatedAt?: string): Promise<{ ok: boolean; state?: PdfBookState; conflict?: boolean; error?: string }> =>
+  a().pdfReaderPatch(rootId, relPath, patch, expectedUpdatedAt)
+export const pdfReaderCoverList = (): Promise<{ ok: boolean; covers?: Record<string, { mtimeMs: number; file: string }>; error?: string }> => a().pdfReaderCoverList()
+export const pdfReaderCoverGet = (rootId: string, relPath: string): Promise<{ ok: boolean; dataUrl?: string | null; error?: string }> => a().pdfReaderCoverGet(rootId, relPath)
+export const pdfReaderCoverSave = (rootId: string, relPath: string, dataUrl: string, expectedMtimeMs: number): Promise<{ ok: boolean; error?: string }> =>
+  a().pdfReaderCoverSave(rootId, relPath, dataUrl, expectedMtimeMs)
+// ===== 阅读状态（书架升级全格式阅读器一期）：txt 进度 =====
+export const readerStateGet = (rootId: string, relPath: string): Promise<{ ok: boolean; state?: ReaderBookState | null; error?: string }> => a().readerStateGet(rootId, relPath)
+export const readerStatePatch = (rootId: string, relPath: string, patch: ReaderStatePatch, expectedUpdatedAt?: string): Promise<{ ok: boolean; state?: ReaderBookState; conflict?: boolean; error?: string }> =>
+  a().readerStatePatch(rootId, relPath, patch, expectedUpdatedAt)
+// ===== 书市（book market）=====
+/** 书源清单（**只报 hasCredential 布尔**，永不回传凭据本体） */
+export const bookMarketListSources = (rootId: string): Promise<{ ok: boolean; sources?: BookSourceInfo[]; error?: string }> => a().bookMarketListSources(rootId)
+export const bookMarketUpsertSource = (rootId: string, patch: BookSourcePatch, id?: string): Promise<{ ok: boolean; source?: BookSourceInfo; error?: string }> =>
+  a().bookMarketUpsertSource(rootId, patch, id)
+export const bookMarketRemoveSource = (rootId: string, id: string): Promise<{ ok: boolean; error?: string }> => a().bookMarketRemoveSource(rootId, id)
+export const bookMarketSetSourceEnabled = (rootId: string, id: string, enabled: boolean): Promise<{ ok: boolean; source?: BookSourceInfo; error?: string }> =>
+  a().bookMarketSetSourceEnabled(rootId, id, enabled)
+/** 存凭据；`null` = 清空 */
+export const bookMarketSaveCredential = (rootId: string, id: string, credential: BookSourceCredentialInput | null): Promise<{ ok: boolean; error?: string }> =>
+  a().bookMarketSaveCredential(rootId, id, credential)
+export const bookMarketProbeSource = (rootId: string, id: string, query?: string): Promise<{ ok: boolean; state: BookSourceConnectivity; error?: string }> =>
+  a().bookMarketProbeSource(rootId, id, query)
+/** 聚合检索（部分源失败只进 failed[]，不整页报错） */
+export const bookMarketSearch = (rootId: string, query: string, opts?: { sourceIds?: string[]; page?: number }): Promise<BookMarketSearchResponse> =>
+  a().bookMarketSearch(rootId, query, opts)
+/** 入队下载；`conflict` 缺省 = 先问用户 */
+export const bookMarketDownload = (rootId: string, payload: BookDownloadRequest, conflict?: 'overwrite' | 'copy'): Promise<BookDownloadStartResult> =>
+  a().bookMarketDownload(rootId, payload, conflict)
+export const bookMarketDownloadControl = (rootId: string, id: string, action: BookDownloadAction): Promise<{ ok: boolean; error?: string }> =>
+  a().bookMarketDownloadControl(rootId, id, action)
+export const bookMarketListQueue = (rootId: string): Promise<{ ok: boolean; tasks?: BookDownloadTask[]; error?: string }> => a().bookMarketListQueue(rootId)
+/** 封面只读（S4 拍板 ①）：取不到返回 `dataUrl: null`，调用方回落纯色书卡即可，不必当错误处理 */
+export const bookMarketCoverGet = (rootId: string, coverRel: string): Promise<{ ok: boolean; dataUrl: string | null; error?: string }> =>
+  a().bookMarketCoverGet(rootId, coverRel)
+/** 彻底删书（书架右键）：书文件→系统回收站 + 清 meta/封面/进度/书签/摘录/导出映射 */
+export const bookMarketDeleteBook = (rootId: string, relPath: string): Promise<{ ok: boolean; errors: string[] }> =>
+  a().bookMarketDeleteBook(rootId, relPath)
+/** 下载队列快照推送（载荷 = **整个队列**，直接整体替换，不做增量合并） */
+export const onBookMarketDownloadProgress = (cb: (p: { rootId: string; tasks: BookDownloadTask[] }) => void): (() => void) =>
+  a().onBookMarketDownloadProgress(cb)
+// ===== 摘录（阅读器 · 摘录先行批次） =====
+export const excerptList = (rootId: string, relPath: string): Promise<{ ok: boolean; excerpts?: ExcerptItem[]; error?: string }> => a().excerptList(rootId, relPath)
+export const excerptCreate = (rootId: string, relPath: string, payload: ExcerptCreatePayload): Promise<{ ok: boolean; excerpt?: ExcerptItem; error?: string }> =>
+  a().excerptCreate(rootId, relPath, payload)
+export const excerptPatch = (rootId: string, relPath: string, id: string, patch: ExcerptPatch, expectedUpdatedAt?: string): Promise<{ ok: boolean; excerpt?: ExcerptItem; conflict?: boolean; error?: string }> =>
+  a().excerptPatch(rootId, relPath, id, patch, expectedUpdatedAt)
+export const excerptDelete = (rootId: string, relPath: string, id: string): Promise<{ ok: boolean; error?: string }> => a().excerptDelete(rootId, relPath, id)
+/** 查某书的导出映射（右栏书卡头显示「已导出 · N 条」用） */
+export const excerptExportEntry = (rootId: string, relPath: string): Promise<{ ok: boolean; entry?: ExcerptExportEntry | null; error?: string }> => a().excerptExportEntry(rootId, relPath)
+/** 导出为知识库「读书笔记」页（每本书一篇，重复导出覆盖重写同一篇） */
+export const excerptExportNote = (rootId: string, relPath: string): Promise<{ ok: boolean; pageId?: string; pagePath?: string; created?: boolean; count?: number; error?: string }> => a().excerptExportNote(rootId, relPath)
 /** UI 优化条目5.3：应用内文件落盘后广播 `kb:file-saved`，供按需回读的消费方（AI教学右栏素材库 /
  *  会话要求弹层）即时同步。主进程程序写入另发 `aiTeach:tree-refresh`；应用外编辑由消费方在激活/聚焦时回读。 */
 export const workspaceWriteFile = (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) =>
@@ -297,8 +360,12 @@ export const workspaceWriteFile = (rootId: string, relPath: string, content: str
   })
 export const workspaceCreateFile = (rootId: string, relPath: string, content?: string) => a().workspaceCreateFile(rootId, relPath, content)
 export const workspaceMkdir = (rootId: string, relPath: string) => a().workspaceMkdir(rootId, relPath)
+/** 粘贴系统剪贴板里的外部文件/目录到 relDir（srcPaths 由 paste 事件侧取得，见 types） */
+export const workspacePasteExternal = (rootId: string, relDir: string, srcPaths: string[]) => a().workspacePasteExternal(rootId, relDir, srcPaths)
 export const workspaceRename = (rootId: string, oldRel: string, newRel: string) => a().workspaceRename(rootId, oldRel, newRel)
 export const workspaceTrash = (rootId: string, relPath: string) => a().workspaceTrash(rootId, relPath)
+/** 用系统默认程序打开仓库内文件 / reveal=true 时在资源管理器中定位它（B-3 归档元信息卡） */
+export const workspaceOpenInSystem = (rootId: string, relPath: string, reveal = false) => a().workspaceOpenInSystem(rootId, relPath, reveal)
 export const workspaceStat = (rootId: string, relPath: string) => a().workspaceStat(rootId, relPath)
 export const workspaceGetRecent = () => a().workspaceGetRecent()
 export const workspaceOpenById = (rootId: string) => a().workspaceOpenById(rootId)
@@ -316,6 +383,8 @@ export const workspaceForget = (rootId: string) => a().workspaceForget(rootId)
 // P7（D6）：删除当前仓库 = 整仓进 OS 回收站（不弹提醒窗，回收站可还原兜底）
 export const workspaceDeleteVault = (rootId: string): Promise<{ ok?: boolean; deletedCurrent?: boolean; error?: string }> => a().workspaceDeleteVault(rootId)
 export const workspaceClearCurrentVault = () => a().workspaceClearCurrentVault()
+/** v3.2.0 条目 ④ 保底：手动刷新（口径 b 全量：知识索引/图谱失效 + 归档清单 prune） */
+export const workspaceRefreshVault = () => a().workspaceRefreshVault()
 // P6：整仓归档（导出 zip / 导入 + 冲突逐条决策）
 export const vaultArchiveExport = () => a().vaultArchiveExport()
 export const vaultArchiveImportStart = () => a().vaultArchiveImportStart()
@@ -355,18 +424,33 @@ export const updateHabit = (id: string, d: UpdateHabitDTO) => a().updateHabit(id
 export const deleteHabit = (id: string) => a().deleteHabit(id)
 export const toggleHabitCheck = (habitId: string, date: string) => a().toggleHabitCheck(habitId, date)
 export const reorderHabits = (orderedIds: string[]) => a().reorderHabits(orderedIds)
-export const habitLinkSave = (habitId: string, link: HabitLink | null) => a().habitLinkSave(habitId, link)
-export const habitLinkRemove = (habitId: string) => a().habitLinkRemove(habitId)
-export const onHabitAutoChecked = (cb: (items: HabitAutoCheckin[]) => void) => a().onHabitAutoChecked(cb)
+
+// ===== 分享卡片（右栏第三态）=====
+/** 卡片数字 + 二维码一次取全（主进程聚合，文案不在此 —— 文案是渲染层设置） */
+export const shareCardGet = () => a().shareCardGet()
+/** 另存 PNG：主进程弹保存对话框 → 落盘 → 资源管理器定位 */
+export const shareCardSavePng = (data: Uint8Array, defaultName: string) => a().shareCardSavePng(data, defaultName)
+
+// ===== 看板 =====
+/** 一次取全部卡片数据（主进程聚合，见数据库层 dashboardRepo.ts） */
+export const dashboardGetSnapshot = () => a().dashboardGetSnapshot()
 
 // ===== Bookmark Nav =====
 export const bookmarkGetAll = () => a().bookmarkGetAll()
+
+// ===== Pet（桌宠）=====
+export const petGet = () => a().petGet()
+export const petFeed = () => a().petFeed()
+export const petPetTouch = () => a().petPetTouch()
+export const petRename = (name: string) => a().petRename(name)
+export const petReset = (species: PetSpecies) => a().petReset(species)
+export const petSwitchSpecies = (species: PetSpecies) => a().petSwitchSpecies(species)
 export const createBookmarkCategory = (d: { name: string; color?: string }) => a().createBookmarkCategory(d)
 export const updateBookmarkCategory = (id: string, d: { name?: string; color?: string }) => a().updateBookmarkCategory(id, d)
 export const deleteBookmarkCategory = (id: string) => a().deleteBookmarkCategory(id)
 export const reorderBookmarkCategories = (orderedIds: string[]) => a().reorderBookmarkCategories(orderedIds)
 export const createBookmarkItem = (d: { title: string; url: string; description?: string; categoryId?: string }) => a().createBookmarkItem(d)
-export const updateBookmarkItem = (id: string, d: { title?: string; url?: string; description?: string; categoryId?: string | null }) => a().updateBookmarkItem(id, d)
+export const updateBookmarkItem = (id: string, d: { title?: string; url?: string; description?: string; categoryId?: string | null; starred?: boolean }) => a().updateBookmarkItem(id, d)
 export const deleteBookmarkItem = (id: string) => a().deleteBookmarkItem(id)
 export const openBookmarkUrl = (url: string) => a().openBookmarkUrl(url)
 export const pickBookmarkImportFile = () => a().pickBookmarkImportFile()
@@ -389,8 +473,29 @@ export interface PeriodStats {
   knowledgePages: number
   pomodoroMinutes: number
   scheduleDone: number
+  /** 记账窗口内收入 / 支出（复盘统计块用） */
+  accountingIncome: number
+  accountingExpense: number
+  /** 每习惯明细（次数 / 完成率 / 最长连续）；v3.2.0 条目 13 起提供 */
+  habitDetails: HabitPeriodStat[]
 }
 export const getBlogPeriodStats = (start: string, end: string): Promise<PeriodStats> => a().getBlogPeriodStats(start, end)
+
+// ===== 记账（accounting） =====
+export const accountingGetAll = (): Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[] }> => a().accountingGetAll()
+export const accountingParseJson = (text: string): Promise<AccountingParseOutcome> => a().accountingParseJson(text)
+export const accountingImportJson = (text: string): Promise<AccountingImportOutcome> => a().accountingImportJson(text)
+export const accountingCreate = (input: CreateAccountingInput): Promise<AccountingTransaction> => a().accountingCreate(input)
+export const accountingUpdate = (id: string, patch: Partial<AccountingTransaction>): Promise<AccountingTransaction | null> => a().accountingUpdate(id, patch)
+export const accountingDelete = (id: string): Promise<boolean> => a().accountingDelete(id)
+export const accountingSetAccountBalance = (id: string, initialBalance: number): Promise<AccountingAccount | null> => a().accountingSetAccountBalance(id, initialBalance)
+export const accountingCreateAccount = (name: string, initialBalance: number): Promise<AccountingAccount> => a().accountingCreateAccount(name, initialBalance)
+
+// ===== 层级总结文件（周 / 月 / 年）—— 窗口口径见 lib/summary.ts =====
+export const listSummaries = () => a().listSummaries()
+export const getSummaryById = (id: string) => a().getSummaryById(id)
+export const ensureSummary = (kind: 'week' | 'month' | 'year', start: string, end: string) => a().ensureSummary(kind, start, end)
+export const saveSummary = (id: string, contentMd: string) => a().saveSummary(id, contentMd)
 
 // ===== Blog Templates =====
 export const listBlogTemplates = () => a().listBlogTemplates()
@@ -472,26 +577,46 @@ export const pdfExport = (payload: { data: Uint8Array; defaultName: string; kind
 /** 界面逐页阅读：当前仓库内 .pptx → [{n,text}] */
 export const docsPptxPages = (relPath: string): Promise<{ ok: boolean; pages?: Array<{ n: number; text: string }>; total?: number; error?: string }> => a().docsPptxPages(relPath)
 
-export const agentChat = (sessionId: string, message: string, context?: AgentContextInfo, chatId?: string, source?: string, modelId?: string, effort?: 'off' | 'low' | 'medium' | 'high'): Promise<AgentChatResult> => a().agentChat({ sessionId, message, context, chatId, source, modelId, effort })
-export const agentRegenerate = (sessionId: string, context?: AgentContextInfo, chatId?: string): Promise<AgentChatResult> => a().agentRegenerate({ sessionId, context, chatId })
+export const agentChat = (sessionId: string, message: string, context?: AgentContextInfo, chatId?: string, source?: string, modelId?: string, effort?: 'off' | 'low' | 'medium' | 'high', skillName?: string): Promise<AgentChatResult> => a().agentChat({ sessionId, message, context, chatId, source, modelId, effort, skillName })
+export const agentRegenerate = (sessionId: string, context?: AgentContextInfo, chatId?: string, effort?: 'off' | 'low' | 'medium' | 'high'): Promise<AgentChatResult> => a().agentRegenerate({ sessionId, context, chatId, effort })
 /** 场景/模板启动：不落任何用户消息，用虚拟首轮触发（聊天区第一条即 AI 回复） */
 export const agentStartScene = (sessionId: string, chatId?: string, source?: string, modelId?: string): Promise<AgentChatResult> => a().agentStartScene({ sessionId, chatId, source, modelId })
-export const agentEditMessage = (sessionId: string, messageId: string, message: string, context?: AgentContextInfo, chatId?: string): Promise<AgentChatResult> => a().agentEditMessage({ sessionId, messageId, message, context, chatId })
+export const agentEditMessage = (sessionId: string, messageId: string, message: string, context?: AgentContextInfo, chatId?: string, effort?: 'off' | 'low' | 'medium' | 'high'): Promise<AgentChatResult> => a().agentEditMessage({ sessionId, messageId, message, context, chatId, effort })
 export const agentDeleteMessage = (sessionId: string, messageId: string): Promise<boolean> => a().agentDeleteMessage(sessionId, messageId)
 /** 会话压缩（conversation-compaction-design）：/compress 指令触发；自动预检在主进程内不走此通道 */
 export const agentCompressSession = (req: { sessionId: string; modelId?: string; providerId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }): Promise<AgentCompressResult> => a().agentCompressSession(req)
+
+/** B4 编辑器内联建议：手动触发一次续写（独立于对话历史，不进 prompt cache 前缀） */
+export const aiInlineSuggestRun = (req: { requestId: string; text: string; offset: number; relPath?: string; modelId?: string; providerId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }): Promise<{ ok: boolean; text?: string; aborted?: boolean; error?: string }> => a().aiInlineSuggestRun(req)
+/** B4 取消在途建议请求 */
+export const aiInlineSuggestCancel = (requestId: string): Promise<{ ok: boolean }> => a().aiInlineSuggestCancel(requestId)
 export const agentAbort = (chatId: string): Promise<boolean> => a().agentAbort(chatId)
+/** N-3 多对话并行：按会话停止（该会话全部在跑调用一并中止） */
+export const agentAbortSession = (sessionId: string): Promise<boolean> => a().agentAbortSession(sessionId)
 /** 保存/清除会话级全局要求（仅该会话后续轮次生效，空串=清除） */
 export const agentSetSessionInstructions = (id: string, instructions: string): Promise<{ ok: boolean; error?: string }> => a().agentSetSessionInstructions(id, instructions)
 /** AgentRunner 实时过程步骤（chatId 过滤用；渲染层据此驱动活动气泡） */
-export const onAgentStep = (cb: (p: { chatId: string; step: AgentTraceStep }) => void) => a().onAgentStep(cb)
+export const onAgentStep = (cb: (p: { chatId: string; sessionId: string; step: AgentTraceStep }) => void) => a().onAgentStep(cb)
 /** 流式增量（思考链 / 正文 / 工具进行中）：与 onAgentStep 合起来才是完整过程时间线 */
-export const onAgentStream = (cb: (p: { chatId: string; event: AgentStreamEvent }) => void) => a().onAgentStream(cb)
+export const onAgentStream = (cb: (p: { chatId: string; sessionId: string; event: AgentStreamEvent }) => void) => a().onAgentStream(cb)
+/** N-3 多对话并行：助手会话运行态（running 快照 + 单次 ended 结果），三宿主共享订阅（assistantRunStore 单例） */
+export const onAssistantRunState = (cb: (p: AgentRunStateEvent) => void) => a().onAssistantRunState(cb)
 export const agentSessions = (): Promise<AgentSessionInfo[]> => a().agentSessions()
 export const agentNewSession = (title?: string, source?: AgentSessionSource): Promise<AgentSessionInfo> => a().agentNewSession(title, source)
 export const agentMessages = (sessionId: string): Promise<AgentStoredMessage[]> => a().agentMessages(sessionId)
+/** AI token 用量（按日聚合；右栏 token 面板「今日消耗 / 会话 TOP」数据源） */
+export const agentUsageGet = (): Promise<{ days: Record<string, AiUsageDay> }> => a().agentUsageGet()
+/** 会话文件改动审计（不传 sessionId = 本次运行全部，按时间倒序） */
+export const agentSessionChanges = (sessionId?: string): Promise<SessionFileChange[]> => a().agentSessionChanges(sessionId)
 export const agentRenameSession = (id: string, title: string): Promise<boolean> => a().agentRenameSession(id, title)
 export const agentDeleteSession = (id: string): Promise<boolean> => a().agentDeleteSession(id)
+// ===== v3.1.2 条目11：支线旁问（sidetrack）=====
+/** 建支线：只装上下文快照、不调 LLM（点按钮/装载阶段零请求） */
+export const agentCreateSideLane = (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }): Promise<AgentSideLaneCreateResult> => a().agentCreateSideLane(payload)
+/** 列某主线下的支线（含已升格）；删除主线前的支线计数亦用它 */
+export const agentListSideLanes = (parentSessionId: string): Promise<AgentSessionInfo[]> => a().agentListSideLanes(parentSessionId)
+/** 升格支线为正式会话（单向，不可降级） */
+export const agentPromoteSideLane = (laneSessionId: string): Promise<boolean> => a().agentPromoteSideLane(laneSessionId)
 // ===== AI教学 P1：会话 ⇄ 文件夹绑定 =====
 export interface AiTeachFolderResult { ok: boolean; relPath?: string | null; error?: string }
 /** 幂等确保会话文件夹存在（新建对话确认 / P3 产物落盘懒创建共用） */
@@ -510,8 +635,19 @@ export const aiTeachReadConstraints = (id: string): Promise<AiTeachConstraintsRe
 export const aiTeachWriteConstraints = (id: string, text: string): Promise<AiTeachConstraintsResult> => a().aiTeachWriteConstraints(id, text)
 /** 全局约束文档（AI教学产物根 CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区；跨会话每轮注入 */
 export const aiTeachGlobalEnsureConstraints = (): Promise<AiTeachConstraintsResult & { created?: boolean }> => a().aiTeachGlobalEnsureConstraints()
+/** v3.1.2 条目6：工作区约束文档（{工作区}/CONSTRAINTS.md）：ensure 落骨架并返回 relPath 跳编辑区；本工作区会话每轮注入 */
+export const aiTeachWorkspaceEnsureConstraints = (wsId: string): Promise<AiTeachConstraintsResult & { created?: boolean }> => a().aiTeachWorkspaceEnsureConstraints(wsId)
 /** P3b：整理成文档——回答 md 落盘会话文件夹（懒建夹 + 幂等），返回产物相对路径 */
 export const aiTeachOrganizeDoc = (id: string, title: string, content: string, prefix?: string): Promise<AiTeachFolderResult> => a().aiTeachOrganizeDoc(id, title, content, prefix)
+// ===== N-5/N-7：助手独立要求 + 术语表（.assistant/） =====
+// ensure 落文件并返回仓库相对路径（渲染层派 kb-open-note 跳知识库 draft 页签）；写入走编辑器 ws:writeFile
+export interface AssistantFileResult { ok: boolean; relPath?: string; created?: boolean; error?: string }
+/** 全局要求 `.assistant/CONSTRAINTS.md`（空文件，不预填骨架 —— N-5 拍板 H） */
+export const assistantConstraintsEnsureGlobal = (): Promise<AssistantFileResult> => a().assistantConstraintsEnsureGlobal()
+/** 会话要求 `.assistant/{会话id}/CONSTRAINTS.md`（按需升格；仅当前对话生效） */
+export const assistantConstraintsEnsureSession = (id: string): Promise<AssistantFileResult> => a().assistantConstraintsEnsureSession(id)
+/** 术语表 `.assistant/glossary.json`（预填骨架、可改 —— N-7 拍板） */
+export const assistantConstraintsEnsureGlossary = (): Promise<AssistantFileResult> => a().assistantConstraintsEnsureGlossary()
 // P5 工作区两层（§3.2-6）
 export const aiTeachListWorkspaces = () => a().aiTeachListWorkspaces()
 export const aiTeachCreateWorkspace = (name: string) => a().aiTeachCreateWorkspace(name)
@@ -520,6 +656,21 @@ export const aiTeachDeleteWorkspace = (id: string) => a().aiTeachDeleteWorkspace
 export const aiTeachAssignSession = (id: string, wsId: string) => a().aiTeachAssignSession(id, wsId)
 export const aiTeachUnassignSession = (id: string) => a().aiTeachUnassignSession(id)
 export const aiTeachSetLastWorkspace = (wsId: string | null) => a().aiTeachSetLastWorkspace(wsId)
+// AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲；docs/ai-teaching-course-mode-plan.md）
+export const aiTeachCourseGetState = (wsId: string): Promise<AiTeachCourseState> => a().aiTeachCourseGetState(wsId)
+export const aiTeachCourseSetEnabled = (wsId: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> => a().aiTeachCourseSetEnabled(wsId, enabled)
+export const aiTeachCourseSaveOutline = (wsId: string, outline: AiTeachCourseOutline): Promise<{ ok: boolean; relPath?: string; error?: string }> => a().aiTeachCourseSaveOutline(wsId, outline)
+export const aiTeachCourseSetUnitProgress = (wsId: string, unitId: string, patch: Partial<AiTeachCourseUnitProgress>): Promise<{ ok: boolean; error?: string }> => a().aiTeachCourseSetUnitProgress(wsId, unitId, patch)
+export const aiTeachCourseGenerateOutline = (input: AiTeachCourseGenerateInput): Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }> => a().aiTeachCourseGenerateOutline(input)
+export const aiTeachCourseGenerateOutlineStream = (id: string, input: AiTeachCourseGenerateInput): Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }> => a().aiTeachCourseGenerateOutlineStream(id, input)
+export const aiTeachCourseOpenUnit = (wsId: string, unitId: string, kind?: string) => a().aiTeachCourseOpenUnit(wsId, unitId, kind)
+export const aiTeachCourseEndLesson = (sessionId: string) => a().aiTeachCourseEndLesson(sessionId)
+export const aiTeachCourseFinalizeLesson = (sessionId: string) => a().aiTeachCourseFinalizeLesson(sessionId)
+export const aiTeachCourseFinishUnit = (wsId: string, unitId: string, score?: { correct: number; total: number }) => a().aiTeachCourseFinishUnit(wsId, unitId, score)
+export const aiTeachCourseReadPrevHandoff = (sessionId: string) => a().aiTeachCourseReadPrevHandoff(sessionId)
+export const aiTeachCourseMakeUnitQuiz = (wsId: string, unitId: string) => a().aiTeachCourseMakeUnitQuiz(wsId, unitId)
+export const onAiTeachCourseGenProgress = (cb: (p: AiTeachCourseGenProgress) => void) => a().onAiTeachCourseGenProgress(cb)
+export const onAiTeachCourseRefresh = (cb: (p: { wsId: string }) => void) => a().onAiTeachCourseRefresh(cb)
 // P6 素材库（§3.13 结构 v3）
 export const aiTeachSrcRead = (id: string) => a().aiTeachSrcRead(id)
 export const aiTeachSrcAdd = (id: string, input: AiTeachSourceInput) => a().aiTeachSrcAdd(id, input)
@@ -528,6 +679,7 @@ export const aiTeachSrcExtract = (id: string, no: number) => a().aiTeachSrcExtra
 export const aiTeachSrcPick = () => a().aiTeachSrcPick()
 export const aiTeachSrcPickDir = () => a().aiTeachSrcPickDir()
 export const aiTeachSrcVisionCheck = () => a().aiTeachSrcVisionCheck()
+export const aiTeachSrcSofficeProbe = (settingPath?: string) => a().aiTeachSrcSofficeProbe(settingPath)
 // 3-21 视觉转写（手动档）
 export const aiTeachSrcPdfBytes = (id: string, no: number) => a().aiTeachSrcPdfBytes(id, no)
 export const aiTeachSrcTranscribe = (id: string, no: number, pages: { n: number; dataUrl: string }[], modelSpec?: string) => a().aiTeachSrcTranscribe(id, no, pages, modelSpec)
@@ -535,6 +687,8 @@ export const aiTeachSrcTranscribe = (id: string, no: number, pages: { n: number;
 export const aiTeachSrcWebProbe = (id: string, no: number, anchorUrl?: string) => a().aiTeachSrcWebProbe(id, no, anchorUrl)
 export const aiTeachSrcWebCrawl = (id: string, no: number, urls: string[]) => a().aiTeachSrcWebCrawl(id, no, urls)
 export const aiTeachSrcWebCancel = (id: string) => a().aiTeachSrcWebCancel(id)
+/** v3.1.1：对话级登记上收到工作区主库（原件/提取稿一并复制，对话夹保留） */
+export const aiTeachSrcPromote = (id: string) => a().aiTeachSrcPromote(id)
 export const onAiTeachWebProgress = (cb: (p: { sessionId: string; no: number; done: number; total: number; current: string }) => void) => window.api.onAiTeachWebProgress(cb)
 // P8 用户画像（§3.14 两层 PROFILE.md）；UI 优化条目8.2.2 加工作区第三层（全局/工作区/会话）
 export const aiTeachProfileReadGlobal = () => a().aiTeachProfileReadGlobal()
@@ -546,9 +700,28 @@ export const aiTeachProfileWriteWorkspace = (id: string, text: string) => a().ai
 export const aiTeachProfileEnsureGlobal = () => a().aiTeachProfileEnsureGlobal()
 export const aiTeachProfileEnsureSession = (id: string) => a().aiTeachProfileEnsureSession(id)
 export const aiTeachProfileEnsureWorkspace = (id: string) => a().aiTeachProfileEnsureWorkspace(id)
+/** v3.2.0 第 20 项：按「变化条目」合并写入画像（session 可整段替换；workspace / global 仅追加） */
+export const aiTeachProfileApplyPatch = (layer: 'global' | 'workspace' | 'session', id: string | null, entries: AiTeachProfileEntry[]) =>
+  a().aiTeachProfileApplyPatch(layer, id, entries)
 /** P3b：模型是否支持思考强度（主进程单一真相源正则） */
 export const llmReasoningCapable = (model: string): Promise<boolean> => a().llmReasoningCapable(model)
 export const onAiTeachTreeRefresh = (cb: (p: { dirRel: string }) => void) => a().onAiTeachTreeRefresh(cb)
 export const onAiTeachNotice = (cb: (msg: string) => void) => a().onAiTeachNotice(cb)
+/** N-1 手册通道：助手侧提示（升格 Toast 等），载荷 `{ sessionId, message }` */
+export const onAssistantNotice = (cb: (p: { sessionId: string; message: string }) => void) => a().onAssistantNotice(cb)
 export const llmCcSwitchList = (): Promise<CcSwitchScanResult> => a().llmCcSwitchList()
 export const llmCcSwitchImport = (ids: string[]): Promise<CcSwitchImportResult> => a().llmCcSwitchImport(ids)
+
+// ===== Terminal（terminal-module-design） =====
+export const termCreate = (opts: { cols?: number; rows?: number; shellPref?: string }): Promise<TerminalCreateResult> => a().termCreate(opts)
+export const termAttach = (id: string): Promise<{ backlog: string } | null> => a().termAttach(id)
+export const termWrite = (id: string, data: string): void => a().termWrite(id, data)
+export const termResize = (id: string, cols: number, rows: number): void => a().termResize(id, cols, rows)
+export const termKill = (id: string): Promise<{ ok: boolean }> => a().termKill(id)
+export const termList = (): Promise<{ sessions: TerminalSessionInfo[] }> => a().termList()
+export const termDefaultShell = (): Promise<TerminalShellInfo> => a().termDefaultShell()
+export const termAiRecords = (): Promise<{ records: TerminalAiRecord[] }> => a().termAiRecords()
+export const termAiRespond = (reqId: string, approved: boolean): Promise<{ ok: boolean }> => a().termAiRespond(reqId, approved)
+export const onTermData = (cb: (p: { id: string; data: string }) => void) => a().onTermData(cb)
+export const onTermExit = (cb: (p: { id: string; exitCode: number | null }) => void) => a().onTermExit(cb)
+export const onTermAiRecord = (cb: (p: { record: TerminalAiRecord }) => void) => a().onTermAiRecord(cb)

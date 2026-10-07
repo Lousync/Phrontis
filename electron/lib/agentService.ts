@@ -1,23 +1,34 @@
 import { ipcMain } from 'electron'
+import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { randomUUID } from 'crypto'
 import { listTools, invokeToolInternal, getSettingReader, checkModulePermission, checkVaultFilePermission } from './aiTools'
 import type { ToolDescription, AiToolInvokeResult } from './aiTools'
+import { buildAttachedRefsInjection } from './aiAssistant/refSkeleton'
+import { readVaultRefText } from './aiAssistant/refText'
+import { runPerception } from './aiAssistant/perception'
+import { buildPerceptionInjection } from './aiAssistant/perceptionBudget'
 import { invokeLlmStreamInternal } from './llmService'
 import { estimateTokens, trimHistoryByBudget } from './agentContextBudget'
 import { compressAtTokens, composeContextWithDigest, rowsAfterDigest } from './agentCompressCore'
 import { compressSession } from './agentCompress'
-import type { SessionDigest } from './agentSessionRepo'
+import type { SessionDigest, AgentMessageRow } from './agentSessionRepo'
 import { clampMaxRounds, clampRunTokenBudget, isParallelSafe, partitionToolBatches, PARALLEL_CHUNK, PARALLEL_HINT, FINAL_ROUND_NOTICE, FORCED_SUMMARY_NOTICE } from './agentLoopPolicy'
 import {
   createAgentSession, listAgentSessions, renameAgentSession, deleteAgentSession,
   sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages,
   getMessageById, updateMessageContent, deleteMessage, deleteMessagesAfter,
   getAgentSession, updateAgentSessionInstructions, backfillSessionSources,
+  createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode,
 } from './agentSessionRepo'
-import { resolveConstraintsForInjection, readGlobalConstraints, listSessionFolderIds } from './aiTeachingFolders'
+import { MANUAL_CHANNEL_TOOL, MANUAL_MAX_ROUNDS, buildManualSystemPrompt, classifyManualIntent, hasOperationIntent } from './manualChannel'
+import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceConstraintsForSession, resolveWriteOwnerRel, listSessionFolderIds } from './aiTeachingFolders'
+import { readAssistantGlobalConstraints, readAssistantSessionConstraints, readAssistantGlossary } from './assistantConstraints'
 import { resolveSourcesForInjection } from './aiTeachingSources'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
-import { listWorkspaces } from './aiTeachingWorkspaces'
+import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
+import { buildCourseInjection } from './aiTeachingCourse'
+import { findSkillPrompt } from './skillService'
+import { recordAiUsage, recordSessionFileChange, getAiUsageData, getSessionChanges } from './agentUsage'
 
 /**
  * 最小 AgentRunner —— 「用户消息 → LLM 决策 → ToolRegistry 执行 → 结果回喂」循环。
@@ -38,6 +49,26 @@ import { listWorkspaces } from './aiTeachingWorkspaces'
  * （mcp 工具的 readOnly:false 是「不保证只读」的保守标记，不等于写操作，计入会大量误伤）。
  */
 const MAX_SESSION_WRITES = 7
+
+/**
+ * 支线旁问纪律（v3.1.2 条目11 · 2026-09-14 定稿）。
+ *
+ * 定位：支线**唯一职责 = 解答主线某条回答里没讲透的零碎小知识点**。它不是「平行会话」——
+ * 因此不承担重讲、不产生产物、不出题；疑问多说明主线本身没讲透，合合理的做法是回主线重讲。
+ * 三条硬边界 = 不改文件 / 不出题 / 只答这一点，外加「回答要精简」。
+ *
+ * 声明为**最高优先级**：用于盖过工作区 CONSTRAINTS 骨架里「每节课结尾附 3 道自测题」这类
+ * 针对主线课程的一般性要求（那类要求对支线不但无意义，还会把职责带偏）。
+ * 与工具层的硬拦截（`buildToolsPayload` 对支线过滤写类工具）配套——提示词管「想不到」，
+ * 工具层管「想到了也做不到」。
+ */
+const SIDE_LANE_DISCIPLINE =
+  '\n\n【支线旁问纪律（最高优先级，覆盖下文一切与之冲突的要求）】本条对话是从主线会话某条回答分叉出来的**独立支线**。'
+  + '你的唯一职责：解答用户就那一点提出的**零碎小知识点**问题。三条硬边界：'
+  + '① **不改文件**——不调用任何写入类工具（你也确实未被授予），不产出文档 / 图示 / 题目；'
+  + '② **不出题**——即使内容适合测验也不输出题卡；用户想做题时，提示回主线出题；'
+  + '③ **只答这一点**——聚焦被追问的内容，不重讲主线、不展开主线其他部分、不做流程规划。'
+  + '回答要**精简**：直给要点，不铺垫、不复述上下文、不写长篇；举例也用最短的。'
 
 /** 注册表名含点号，OpenAI function name 仅允许 [a-zA-Z0-9_-] —— 双向映射 */
 function toFnName(registryName: string): string {
@@ -198,6 +229,8 @@ export interface AgentChatRequest {
   modelId?: string
   /** P3b：思考强度（仅推理型模型实际透传 reasoning_effort，主进程侧守卫） */
   effort?: 'off' | 'low' | 'medium' | 'high'
+  /** v3.1.1 条目10：/ 弹层显式选中的 Skill 注册名——本轮确定性注入其提示词（一次性，不落会话） */
+  skillName?: string
 }
 
 /** 单次请求对用户数据的写改动（供 UI 列出「本次改了哪些文件/条目」） */
@@ -243,11 +276,26 @@ export interface AiTeachInjectionStats {
 /** 进行中的对话 → 中断控制器（用户点击停止时触发） */
 const activeChats = new Map<string, AbortController>()
 
+/** N-3 多对话并行：进行中对话 → 所属会话（agent:abortSession 按会话停止 + 运行态广播按会话归并） */
+const activeChatSessions = new Map<string, string>()
+
 /** signal → 步骤事件推送器（withAbort 注入发起窗口 sender，仅目标窗口收流） */
 const stepEmitters = new WeakMap<AbortSignal, (step: AgentTraceStep) => void>()
 
 /** signal → 流式增量推送器（与 stepEmitters 同机制；WeakMap 随 signal 一并回收） */
 const streamEmitters = new WeakMap<AbortSignal, (event: AgentStreamEvent) => void>()
+
+/** N-3：当前在跑的会话 id 去重集合（一个会话同时只有一个循环在跑，防御性去重） */
+function runningSessionIds(): string[] {
+  return [...new Set(activeChatSessions.values())]
+}
+
+/** N-3：会话运行态广播（全窗口；开始/结束各一发，结束附 ended 结果供角标/失败 Toast 分发） */
+function broadcastRunState(ended?: { sessionId: string; chatId: string; ok: boolean; code?: string; error?: string }): void {
+  try {
+    broadcast(BROADCAST_CHANNEL.assistantRunState, { running: runningSessionIds(), ...(ended ? { ended } : {}) })
+  } catch { /* 广播失败不影响主流程 */ }
+}
 
 /**
  * 增量合批：**绝不每 token 一次 IPC**。
@@ -290,6 +338,8 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   'builtin.blog.create-entry': '新建日记',
   'builtin.schedule.list-todos': '查看待办',
   'builtin.schedule.create-todo': '创建待办',
+  'builtin.schedule.update-todo': '修改待办',
+  'builtin.schedule.delete-todo': '删除待办',
   'builtin.checkin.check-habit': '习惯打卡',
   'builtin.habits.stats': '统计习惯',
   'builtin.pomodoro.summary': '统计番茄',
@@ -315,6 +365,8 @@ const CHANGE_LABELS: Record<string, string> = {
   'builtin.knowledge.create-page': '新建知识页',
   'builtin.blog.create-entry': '新建日记',
   'builtin.schedule.create-todo': '创建待办',
+  'builtin.schedule.update-todo': '修改待办',
+  'builtin.schedule.delete-todo': '删除待办',
   'builtin.checkin.check-habit': '习惯打卡',
   'visual.html': '生成示意图',
 }
@@ -325,7 +377,7 @@ const CHANGE_LABELS: Record<string, string> = {
  */
 const enabledOnDemand = new Map<string, Set<string>>()
 
-function buildToolsPayload(sessionId?: string): {
+function buildToolsPayload(sessionId?: string, only?: string[]): {
   payload: unknown[]
   nameMap: Map<string, string>
   /** 本轮可用的写入类工具注册名集合（requires==='write'），供会话写上限计数 */
@@ -342,14 +394,24 @@ function buildToolsPayload(sessionId?: string): {
   skills: Array<{ registryName: string; title: string; description: string }>
 } {
   const reader = getSettingReader()
+  // v3.1.2 条目11：本会话是否为支线旁问——决定写类工具是否进入模型视野
+  const laneSession = sessionId ? getAgentSession(sessionId) : undefined
+  const isSideLaneSession = !!(laneSession?.parentSessionId && laneSession.lane === 'side')
   // 本会话已启用的 ondemand 工具（tool.request 申请，会话内持久）
   const extraTools = sessionId ? enabledOnDemand.get(sessionId) : undefined
   // 按模块权限预过滤：AI 无权使用的操作不进入其视野（invoke 处另有硬校验兜底）
   const all = listTools().filter(t => t.enabled)
+  const onlySet = only ? new Set(only) : null
   const deniedModules = new Set<string>()
   let deniedVaultFile = false
   let hasOnDemandHidden = false
   const tools: ToolDescription[] = all.filter(t => {
+    // N-1 手册通道：只放行白名单工具（help.search），其余一律不进视野
+    if (onlySet && !onlySet.has(t.name)) return false
+    // v3.1.2 条目11：支线旁问**只解答、不改文件**——写类工具一律不进支线视野（硬拦截，非提示词约定）。
+    // 与铁律 3 同一机制：requires==='write' 的工具被预过滤出模型视野。这条判定放在最前面，
+    // 是为了让 tool.request 也绕不过（即便申请过写工具，支线这边照样 return false）。
+    if (isSideLaneSession && t.requires === 'write') return false
     const denied = checkModulePermission(t, reader)
     if (denied && t.module) deniedModules.add(t.module)
     if (!denied && t.vaultFile && checkVaultFilePermission(t, reader)) {
@@ -357,6 +419,12 @@ function buildToolsPayload(sessionId?: string): {
       return false
     }
     if (denied) return false
+    // 终端模块总闸（docs/terminal-module-design.md §6）：terminalAiExec 关 = 执行工具完全不进视野。
+    // 独立于 aiModulePermissions 的产品开关（默认 false），故在权限门之后单独判。
+    if (t.module === 'terminal' && reader('terminal.aiExec') !== true) {
+      deniedModules.add('terminal')
+      return false
+    }
     // P3 装载层：ondemand 工具仅在会话内被 tool.request 启用后才进入视野
     if (t.tier === 'ondemand' && !extraTools?.has(t.name)) {
       hasOnDemandHidden = true
@@ -411,9 +479,24 @@ const SYSTEM_PROMPT_BASE = [
 function buildSystemPrompt(context?: AgentContextInfo): string {
   if (!context) return SYSTEM_PROMPT_BASE
   let dataText = ''
-  try {
-    dataText = JSON.stringify(context.data ?? {}, null, 0)
-  } catch { /* ignore */ }
+  // ★ 前缀稳定红线（B2 纠正）：**这里只能放逐字稳定的内容**。
+  // system + tools 是 prompt cache 前缀，一旦每轮变化（如 @ 引用骨架、感知素材）
+  // 就会让整段 system + core 14 工具（≈7.7k tok）逐轮重算。
+  // @ 引用骨架与感知素材已挪到 `composeContextWithDigest` 的 extraPrefix（首条 user 消息层）。
+  // 本函数的入参 `context` 也由渲染层每轮现算，故只放「本轮正在看什么」这类
+  // 短摘要 + 去重后的元数据（不含被引用笔记的正文骨架）。
+  const refs = Array.isArray((context.data as Record<string, unknown> | undefined)?.attachedFiles)
+    ? (context.data as Record<string, unknown>).attachedFiles as Array<{ title?: string; path?: string }>
+    : []
+  if (refs.length > 0) {
+    // 只列标题与路径（告诉模型「用户引用了这几篇」，正文骨架走 extraPrefix）
+    dataText = '用户为本轮对话引用了以下知识库笔记（其骨架见本轮消息开头的注入段）：\n' +
+      refs.map((r) => `— 《${String(r?.title ?? '')}》（${String(r?.path ?? '')}）`).join('\n')
+  } else {
+    try {
+      dataText = JSON.stringify(context.data ?? {}, null, 0)
+    } catch { /* ignore */ }
+  }
   if (dataText.length > 6000) dataText = dataText.slice(0, 6000) + '…(截断)'
   return SYSTEM_PROMPT_BASE +
     `\n\n【当前上下文】用户正在查看：${context.label}（类型 ${context.type}）。` +
@@ -435,7 +518,25 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
   appendAgentMessage(sessionId, 'user', message)
   ensureSessionTitle(sessionId, message)
 
-  return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort })
+  // ---- N-1 手册通道：首条消息一次性分类；手册通道内出现操作意图即升格（只升不降） ----
+  if (req.source !== 'aiTeaching') {
+    const row = getAgentSession(sessionId)
+    if (row && row.mode === undefined) {
+      // 三分类：manual 走手册通道；agent 与 tech（第三方/通用技术问答）都走通用助手
+      const intent = await classifyManualIntent(message, req.modelId)
+      setSessionMode(sessionId, intent === 'manual' ? 'manual' : 'agent')
+    } else if (row?.mode === 'manual' && hasOperationIntent(message)) {
+      setSessionMode(sessionId, 'agent')
+      notifyAssistant(sessionId, '已从「使用帮助」切换到通用助手')
+    }
+  }
+
+  return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort, skillName: req.skillName })
+}
+
+/** N-1：向渲染层推一条助手提示（如手册通道→通用助手的升格 Toast） */
+function notifyAssistant(sessionId: string, message: string): void {
+  try { broadcast(BROADCAST_CHANNEL.assistantNotice, { sessionId, message }) } catch { /* 广播失败不影响主流程 */ }
 }
 
 /**
@@ -463,6 +564,27 @@ function assembleAgentHistory(sessionId: string): {
   }
 }
 
+/**
+ * 构建支线旁问的**固化上下文快照**（v3.1.2 条目11）。
+ *
+ * 内容 = 分叉点回答全文 + 主线此前 K 轮（每轮 = user + assistant）。
+ * 截断口径：快照过长时**保留尾部**（分叉回答在末尾，必须留下），丢掉最早的前轮。
+ * 纯函数、无副作用——只在 `agent:createSideLane` 建支线时算一次，之后随会话持久化。
+ */
+function buildSideLaneSnapshot(parentSessionId: string, anchor: AgentMessageRow | null, turns: number): string {
+  const rows = getAgentMessages(parentSessionId).filter(m => m.role === 'user' || m.role === 'assistant')
+  const fmt = (r: AgentMessageRow): string => `${r.role === 'user' ? '用户' : 'AI'}：${r.content}`
+  let anchorIdx = anchor ? rows.findIndex(m => m.id === anchor.id) : rows.length - 1
+  if (anchorIdx === -1) anchorIdx = rows.length - 1
+  const before = rows.slice(Math.max(0, anchorIdx - turns * 2), anchorIdx)
+  const parts: string[] = []
+  if (before.length > 0) parts.push(`— 主线此前 ${Math.ceil(before.length / 2)} 轮 —\n` + before.map(fmt).join('\n\n'))
+  if (anchor) parts.push(`— 被追问的回答（分叉点）—\n${anchor.content}`)
+  const CAP = 6000
+  const text = parts.join('\n\n')
+  return text.length > CAP ? text.slice(-CAP) : text
+}
+
 /** 从会话库当前内容直接推理（不追加新用户消息）——重新生成/编辑重推共用 */
 async function runAgentLoop(
   sessionId: string,
@@ -470,7 +592,7 @@ async function runAgentLoop(
   signal: AbortSignal,
   trace: AgentTraceStep[],
   source?: string,
-  llmOpts?: { modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' },
+  llmOpts?: { modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string },
   /**
    * allowEmptyHistory：场景/模板启动专用。会话刚建、尚无用户消息时放行，
    * 用一条**不落库**的虚拟首轮触发——聊天区第一条即 AI 回复，
@@ -488,10 +610,22 @@ async function runAgentLoop(
     return { ok: false, sessionId, error: '没有可重新生成的用户消息', trace }
   }
 
+  // N-1 手册通道：仅 assistant 来源、且会话已分类为 manual 时启用（AI 教学恒走通用通道）
+  const runModeRow = getAgentSession(sessionId)
+  const manual = source !== 'aiTeaching' && runModeRow?.mode === 'manual'
   // P3 装载层：工具 payload 可能在循环中重建（tool.request 启用新工具后下一轮生效）
-  let toolsState = buildToolsPayload(sessionId)
+  let toolsState = buildToolsPayload(sessionId, manual ? [MANUAL_CHANNEL_TOOL] : undefined)
   let toolPayload = toolsState.payload
   const { nameMap, deniedModules, deniedVaultFile, skills } = toolsState
+  // v3.1.2 条目11：支线写类工具**硬拦截**。模型视野里已经没有写工具（buildToolsPayload 已过滤），
+  // 但 nameMap 命中不到时会 fallback 把 `__` 还原成 `.`——模型幻觉出的 builtin.vault.write 会被还原成
+  // 真名并**真的落盘**。所以这里再兜一道：支线 + 写工具 → 直接拒绝，不执行。
+  const runSessionRow = source === 'aiTeaching' ? getAgentSession(sessionId) : undefined
+  const runIsSideLane = !!(runSessionRow?.parentSessionId && runSessionRow.lane === 'side')
+  // 只在支线会话构造（不依赖可见性的写工具全集）——非支线时为 undefined，零开销
+  const writeToolUniverse = runIsSideLane
+    ? new Set(listTools().filter(t => t.requires === 'write').map(t => t.name))
+    : undefined
   const deniedHint = deniedModules.size > 0
     ? `\n\n【权限提示】以下模块用户尚未授权 AI 操作：${[...deniedModules].join('、')}。若用户请求这些模块的操作，请如实说明当前未授权，并提示可在 设置 → AI 工具 → 权限 中开启后重试。`
     : ''
@@ -515,31 +649,79 @@ async function runAgentLoop(
       skills.map(s => `- ${s.title}（${s.registryName}）：${s.description.slice(0, 120)}`).join('\n') +
       '\nSkill 是声明式提示词资产。当用户请求恰好对应某个 Skill 的能力时，调用该 skill 工具获取提示词并遵循执行；不确定时优先用通用内置工具。'
     : ''
+  // v3.1.1 条目10：/ 弹层显式指定 Skill —— 本轮确定性注入其提示词（一次性，不落会话、不进缓存前缀之外的历史）。
+  // 显式指定优先于「模型恰好对应才调 skill 工具」的自主判断；仍低于用户当下消息的直接指令。
+  const explicitSkill = llmOpts?.skillName ? findSkillPrompt(llmOpts.skillName) : null
+  const explicitSkillHint = !llmOpts?.skillName
+    ? ''
+    : explicitSkill
+      ? `\n\n【用户显式指定 Skill：${explicitSkill.title}】用户发送本条消息时明确指定使用该 Skill，以下为其提示词全文，**优先遵循执行**（优先级高于你对 Skill 的自主选择判断，仍以用户消息中的直接指令为最高）：\n${explicitSkill.prompt.length > 6000 ? explicitSkill.prompt.slice(0, 6000) + '\n…（Skill 提示词过长已截断）' : explicitSkill.prompt}`
+      : `\n\n（用户指定的 Skill「${llmOpts.skillName}」不存在或已停用，忽略该指定并正常回答。）`
   // P2（§2.3）：会话约束唯一真相源 = 会话文件夹 CONSTRAINTS.md，每轮发送即时重读（编辑器改动即刻生效）；
   // 2-6 读兼容：仅旧会话未落文件夹时回退 DB sessionInstructions。注入截断防 token 失控。
-  const rawConstraints = resolveConstraintsForInjection(sessionId, getSettingReader())
+  // N-5（2026-09-26）：三层约束是**教学**机制 —— 按 source 门控（此前 globalInstHint 未门控，
+  // 教学全局要求会漏进助手对话，与拍板「独立第二份，不共用」相悖；台账 N-5 前提澄清的本意即如此）。
+  const rawConstraints = source === 'aiTeaching' ? resolveConstraintsForInjection(sessionId, getSettingReader()) : ''
   const sessionInst = rawConstraints.length > 4000
     ? rawConstraints.slice(0, 4000) + '\n…（约束文件过长已截断，全文见会话文件夹 CONSTRAINTS.md）'
     : rawConstraints
   const instHint = sessionInst
-    ? `\n\n【本会话要求】（用户为此对话单独设定于 CONSTRAINTS.md，优先于全局要求遵守；与用户消息冲突时以用户当下消息为准）\n${sessionInst}`
+    ? `\n\n【本会话要求】（用户为此对话单独设定于 CONSTRAINTS.md，是约束链中最细、优先级最高的一层；与用户消息冲突时以用户当下消息为准）\n${sessionInst}`
+    : ''
+  // 工作区约束层（v3.1.2 条目6：三层约束补中间档）：{AI教学}/{工作区}/CONSTRAINTS.md 每轮重读，
+  // 本工作区所有会话共同遵守；未归属工作区的会话本层零段。截断 3500 取全局层与会话层之间的中间档。
+  const rawWs = source === 'aiTeaching' ? (readWorkspaceConstraintsForSession(sessionId, getSettingReader()).text ?? '') : ''
+  const wsInst = rawWs.length > 3500
+    ? rawWs.slice(0, 3500) + '\n…（工作区要求过长已截断，全文见工作区文件夹 CONSTRAINTS.md）'
+    : rawWs
+  const wsInstHint = wsInst.trim()
+    ? `\n\n【工作区要求】（用户为本工作区所有会话共同设定于 {工作区}/CONSTRAINTS.md，次于本会话要求、优先于全局要求；与更细颗粒层或用户当下消息冲突时以更细层为准）\n${wsInst}`
     : ''
   // 全局约束层（.claude/plans/global-constraints.md）：{产物根}/CONSTRAINTS.md 每轮重读，跨工作区/跨会话共同遵守；
-  // 冲突裁决链写进提示词：用户当下消息 > 会话层 > 全局层 > 内置人设。截断 3000 与画像段同量级。
-  const rawGlobal = readGlobalConstraints(getSettingReader()).text ?? ''
+  // 冲突裁决链写进提示词：用户当下消息 > 会话层 > 工作区层 > 全局层 > 内置人设。截断 3000 与画像段同量级。
+  const rawGlobal = source === 'aiTeaching' ? (readGlobalConstraints(getSettingReader()).text ?? '') : ''
   const globalInst = rawGlobal.length > 3000
     ? rawGlobal.slice(0, 3000) + '\n…（全局要求过长已截断，全文见 AI教学产物根 CONSTRAINTS.md）'
     : rawGlobal
   const globalInstHint = globalInst.trim()
-    ? `\n\n【全局要求】（用户设定于 AI教学产物根的 CONSTRAINTS.md，所有会话共同遵守；与上方本会话要求或用户当下消息冲突时，以会话要求与当下消息为准）\n${globalInst}`
+    ? `\n\n【全局要求】（用户设定于 AI教学产物根的 CONSTRAINTS.md，跨工作区所有会话共同遵守，是约束链中最粗、优先级最低的一层；与更细颗粒层或用户当下消息冲突时以更细层为准）\n${globalInst}`
     : ''
+  // N-5：助手**独立**要求注入（.assistant/，2026-09-24 三轮拍板）——与教学三层完全分开，措辞不复用教学口径。
+  // 默认单层（全局），用户从助手面板入口按需升格出会话层；每轮重读，保存后下一轮生效。
+  // 优先级链（拍板 G）：用户当下消息 > 本会话要求 > 全局要求。
+  const assistantConstraintHint = source === 'aiTeaching' ? '' : (() => {
+    const g = readAssistantGlobalConstraints().trim()
+    const sess = readAssistantSessionConstraints(sessionId).trim()
+    const parts: string[] = []
+    if (g) parts.push(
+      `【助手全局要求】（用户设定于仓库 .assistant/CONSTRAINTS.md，所有助手对话共同遵守；与本会话要求或用户当下消息冲突时以更细层为准）\n${g.length > 3000 ? g.slice(0, 3000) + '\n…（全局要求过长已截断）' : g}`,
+    )
+    if (sess) parts.push(
+      `【本会话要求】（用户仅为本对话设定于 .assistant/ 会话文件夹的 CONSTRAINTS.md，优先于全局要求；与用户当下消息冲突时以用户消息为准）\n${sess.length > 4000 ? sess.slice(0, 4000) + '\n…（会话要求过长已截断）' : sess}`,
+    )
+    return parts.length ? '\n\n' + parts.join('\n\n') : ''
+  })()
+  // N-7：术语表注入（别名制，.assistant/glossary.json，预填可改）。解决「用户说博客、AI 乱翻日程」
+  // 的理解层问题；检索能力缺口由 builtin.blog.search 补（两件分开修，见台账 N-7 §一）。
+  // 改动低频 → 放 systemFull 稳定前缀合规（与教学约束同哲学）；文件缺失/坏 JSON → 零注入。
+  const glossaryHint = source === 'aiTeaching' ? '' : (() => {
+    const rows = readAssistantGlossary()
+    if (!rows || rows.length === 0) return ''
+    const lines = rows.map(r => `- ${r.alias} → ${r.name}${r.tools ? `（工具：${r.tools}）` : ''}`)
+    return '\n\n【术语表（用户口径 ↔ 数据域对照）】用户可能用左列的口语称呼指代某类数据；需要检索或写入时按对应工具操作正确的数据域，不要到别的模块乱找（例如找博客日记要用博客的检索工具，不要翻日程或动态）：\n' + lines.join('\n')
+  })()
+  // v3.1.2 条目11：支线判定**提前**到规则装配之前——「不出题」与「写工具不可见」都要先知道是不是支线。
+  // （原先在下面 laneRow 处才算，晚于本段的 quizRuleHint → 支线照常拿到出题协议。）
+  const laneRow = source === 'aiTeaching' ? getAgentSession(sessionId) : undefined
+  const isSideLane = !!(laneRow?.parentSessionId && laneRow.lane === 'side')
   // P3a（§3.8-2 标题规则，3-13 拍板）：AI教学会话每条回答首行带三级标题，供快速定位条取锚点标题
   const titleRuleHint = source === 'aiTeaching'
     ? '\n\n【回答标题规则（AI教学）】每条回答的第一行必须是一个简短标题，形如 `### 这里写标题`（不超过 20 字，概括本回答核心内容），标题后换行写正文；标题行之前不得有任何其他文字。该标题用于用户在对话流中快速定位每条回答。'
     : ''
-  // P7（§3.2-7 题目视图）：AI教学出题走知识库 quiz 围栏协议，题目面板/答题组件直接解析复用
-  const quizRuleHint = source === 'aiTeaching'
-    ? '\n\n【出题格式规则（AI教学）】当用户要求出题/测验/练习时，除开场说明与收尾提示外，每道题单独输出一个 ```quiz 围栏代码块，块内是一个 JSON 对象（不要注释、不要多个对象）：{"no":1,"points":"2分","question":"题干（支持 markdown）","options":[{"key":"A","text":"选项一"},{"key":"B","text":"选项二"},{"key":"C","text":"选项三"},{"key":"D","text":"选项四"}],"answer":"A","explanation":"答案解析（支持 markdown）"}。answer 的值必须是 options 中某个 key；默认四选一。围栏块之间可换行连续排列，客户端会自动收集进「题目」视图供答题。注意：围栏语言必须是 quiz（\u0060\u0060\u0060quiz），写成 json 或不带语言都不会被渲染成题卡。'
+  // P7（§3.2-7 题目视图）：AI教学出题走知识库 quiz 围栏协议，题目面板/答题组件直接解析复用。
+  // v3.1.2 条目11：**支线不出题**（硬边界）——支线只解答零碎小知识点，出题是主线的职责。
+  const quizRuleHint = source === 'aiTeaching' && !isSideLane
+    ? '\n\n【出题格式规则（AI教学）】当用户要求出题/测验/练习时，除开场说明与收尾提示外，每道题单独输出一个 ```quiz 围栏代码块，块内是一个 JSON 对象（不要注释、不要多个对象）：{"no":1,"question":"题干（支持 markdown）","options":[{"key":"A","text":"选项一"},{"key":"B","text":"选项二"},{"key":"C","text":"选项三"},{"key":"D","text":"选项四"}],"answer":"A","explanation":"答案解析（支持 markdown）"}。不要输出 points 分值字段（客户端不渲染分值）。answer 的值必须是 options 中某个 key；默认四选一。围栏块之间可换行连续排列，客户端会自动收集进「题目」视图供答题。注意：围栏语言必须是 quiz（\u0060\u0060\u0060quiz），写成 json 或不带语言都不会被渲染成题卡。JSON 字符串值内部禁止出现未转义的英文双引号——题干/选项/解析里需要引用术语时一律用中文引号『』或“”，否则 JSON 被截断、题目渲染失败。'
     : ''
   // UI 优化条目11A（任务规划激活）：阶段推进时输出 ```plan 围栏 → 左栏「任务规划」渲染为带状态进度列表
   const planRuleHint = source === 'aiTeaching'
@@ -547,7 +729,7 @@ async function runAgentLoop(
     : ''
   // UI 优化条目12/13（提问模式）：需要用户选择/澄清时输出 ```ask 围栏 → 输入区变形为选择卡
   const askRuleHint = source === 'aiTeaching'
-    ? '\n\n【提问模式协议（AI教学）】当你需要用户做选择、澄清或确认才能继续时（方案二选一、参数不明确、流程确认等），在回答正文末尾输出一个 ```ask 围栏代码块，块内是一个 JSON 对象（不要注释）：{"question":"一句话问题","options":["选项一","选项二"],"allowCustom":true}。规则：选项 2~6 个、每项不超过 20 字且可直接作为用户的回答发出；allowCustom=true 表示也允许用户自由输入；一次回答最多一个 ask 块；客户端会把提问渲染成交互选择卡，正文里不要再重复罗列同样的选项。整卷式批量提问（如诊断问卷）时块内改为 JSON 数组，每个元素形如 {"question":"问题","options":["选项A","选项B","选项C"]}，用户会整卷作答后统一发回。正式出题仍走 ```quiz 协议，两者不得混用；无需用户确认时不要输出 ask。'
+    ? '\n\n【提问模式协议（AI教学）】当你需要用户做选择、澄清或确认才能继续时（方案二选一、参数不明确、流程确认等），在回答正文末尾输出一个 ```ask 围栏代码块，块内是一个 JSON 对象（不要注释）：{"question":"一句话问题","options":["选项一","选项二"],"allowCustom":true}。规则：选项 2~6 个、每项不超过 20 字且可直接作为用户的回答发出；allowCustom=true 表示也允许用户自由输入；一次回答最多一个 ask 块；客户端会把提问渲染成交互选择卡，正文里不要再重复罗列同样的选项。整卷式批量提问（如诊断问卷）时块内改为 JSON 数组，每个元素形如 {"question":"问题","options":["选项A","选项B","选项C"]}，用户会整卷作答后统一发回。正式出题仍走 ```quiz 协议，两者不得混用；无需用户确认时不要输出 ask。JSON 字符串值内部禁止未转义英文双引号——需要引用时一律用中文引号，否则 JSON 被截断、提问卡渲染失败。'
     : ''
   // P6（§3.13/3-29）：素材目录实时注入（SOURCE.md 条目+提取稿路径+编号引用规则）；无登记则零注入
   const sourcesHint = source === 'aiTeaching' ? (() => {
@@ -559,13 +741,58 @@ async function runAgentLoop(
     ? '\n\n【示意图工具 visual.html（AI教学）】讲解命中以下四类内容且画图能显著帮助理解时，调用 visual.html 工具生成单文件 HTML 示意图：' +
       '① 抽象概念需具象化 ② 过程/演变有先后 ③ 结构/对比（多对象关系）④ 函数图像/几何图形。纯文字/表格够用的不要画。' +
       '用户明确说「画个示意图/图示一下」时必须调用。若工具列表中没有 visual.html，先用 builtin.tool.request（tools="visual.html"）申请。' +
-      '产物约束：单文件自包含、CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）、不超过 150 行。画幅：SVG 用 viewBox（如 680×400）定比例 + style="width:100%;height:auto" 自适应，禁止外层固定 px 宽度与 min-height/100vh——客户端按栏宽渲染并会自动等比放大到全屏，流式宽度才能铺满。中文标注、示意而非网页（无复杂交互/多页）。' +
+      '产物约束：单文件自包含、CSS/SVG/JS 全内联、不引用任何外部资源（无 CDN/网络图片/外链字体）、不超过 150 行。配色对比度：正文与背景 ≥4.5:1（WCAG AA）——深底只配近白文字（#FFFFFF/#E5E7EB），浅底只配深灰/黑文字；禁止同色系深浅叠加（深蓝底配深灰字、白底配浅灰正文这类翻车形态）；强调色 ≤3 种。画幅：SVG 用 viewBox（如 680×400）定比例 + style="width:100%;height:auto" 自适应，禁止外层固定 px 宽度与 min-height/100vh——客户端按栏宽渲染并会自动等比放大到全屏，流式宽度才能铺满。中文标注、示意而非网页（无复杂交互/多页）。' +
       '文档内禁止写 <meta http-equiv> CSP 与 <base> 标签（宿主统一注入安全策略，自带 CSP 会因策略取交集禁掉脚本）。' +
       'slug 用 kebab-case 小写英文；title 给中文短标题。HTML 全文只作为工具参数传递，**绝不把 HTML 源码写进回答正文或 markdown 代码块**；生成后在回答里用一句话说明右侧工件栏已打开该图。'
     : ''
   // P8（§3.14）+ UI 优化条目8.2.2：三层学习者画像注入（全局 → 工作区 → 会话，细颗粒覆盖粗颗粒）
   // + 更新建议协议（3-33 Plan B）
   const profileHint = source === 'aiTeaching' ? resolveProfilesForInjection(sessionId, getSettingReader()) : ''
+  // 课程模式（docs/ai-teaching-course-mode-plan.md）：工作区开启课程模式时注入「课程目标 + 当前知识点 + 掌握度 + 待复习」，
+  // 让模型从「答完这一问」转为「上好这门课」。未开启/无大纲 → 空串（零成本）。
+  const courseHint = source === 'aiTeaching' ? buildCourseInjection(sessionId, getSettingReader()) : ''
+  // v3.1.2 条目8+10：AI教学「取材范围」与「产物落点」两条纪律共用一次会话夹解析（避免重复 stat）
+  // 条目11：支线的落点跟随**主线**会话夹（`{主线夹}/支线·{标题}/`），不新建自己的夹
+  const aiTeachScope = source === 'aiTeaching' ? (() => {
+    const wsId = getWorkspaceOfSession(sessionId)
+    const wsRel = wsId ? workspaceFolderRel(wsId, getSettingReader()) : null
+    const sessionRel = resolveWriteOwnerRel(sessionId, getSettingReader())
+    return { wsRel, sessionRel }
+  })() : null
+  // v3.1.2 条目8：资料范围纪律（AI教学恒注入——无素材时更要防全仓乱扫，故不搭在 sourcesHint 上）。
+  // 默认只读材料登记项 + 本工作区夹；用户当前消息明确点名时才放开。长度控制百字级，防缓存前缀膨胀。
+  const scopeRuleHint = aiTeachScope ? (() => {
+    const { wsRel, sessionRel } = aiTeachScope
+    const scope1 = '① 素材目录（SOURCE.md）中登记的文件 / 提取稿 / 链接'
+    const scope2 = wsRel
+      ? `② 本工作区文件夹 \`${wsRel}/\` 内的内容（含本会话产物${sessionRel ? `，本会话文件夹为 \`${sessionRel}/\`` : ''}）`
+      : '② 本会话产物所在文件夹'
+    return '\n\n【资料范围纪律（AI教学）】取材默认只限两处：' + scope1 + '；' + scope2 + '。'
+      + '除非用户在当前消息中明确要求扩大范围（如「在整个仓库找一下 X」「看看我仓库里有没有 Y」），'
+      + '否则不要用 vault.search / vault.read 扫描整个仓库，也不要读工作区文件夹之外的仓库内容。'
+      + '用户明确要求时按其指定范围放开；要引用范围内的其他内容时先说明意图，不要自行扩大检索面。'
+  })() : ''
+  // v3.1.2 条目10：产物落点纪律（与条目8 是同一枚硬币两面：一个管读哪、一个管写哪）。
+  // 实时给出本会话文件夹相对路径；工具层还有一道归一化兜底（builtinTools.normalizeAiTeachingWritePath）。
+  const writeScopeHint = aiTeachScope ? (() => {
+    const { wsRel, sessionRel } = aiTeachScope
+    const dest = sessionRel
+      ? `\`${sessionRel}/\``
+      : (wsRel ? `\`${wsRel}/\` 下本会话的文件夹` : '本会话对应的文件夹')
+    return '\n\n【产物落点纪律（AI教学）】你创建或生成的一切文档（讲义、笔记、测验、总结等）统一写入本会话文件夹 ' + dest
+      + '（调用工具时 path 要带上该目录前缀，不要只给裸文件名）。'
+      + '禁止写入 `SOURCES/`（那是给你读的素材目录，不是放产物的）、禁止写仓库顶层或工作区文件夹根目录。'
+      + '用户在当前消息里明确指定了路径时，以用户指定的路径为准。'
+  })() : ''
+  // v3.1.2 条目11：支线旁问上下文（仅带 sideContext 的会话注入）。快照在建支线时固化，跨轮稳定 → 不扰动缓存前缀。
+  // 升格为正式会话（lane='main'）后仍保留来源快照，只是不再套「支线纪律」措辞。
+  // laneRow / isSideLane 已在前面规则装配处算好（纪律必须早于出题协议，故提前）。
+  const sideLaneHint = laneRow?.sideContext
+    ? (isSideLane
+        ? SIDE_LANE_DISCIPLINE + '\n\n【支线上下文快照（分叉时刻固化）】被追问的回答 + 主线前若干轮：\n'
+        : '\n\n【来源上下文（快照）】本条对话由主线会话的一条回答升格而来，以下是其来源快照（仅供参考背景；后续进展以本对话自身历史为准）。\n')
+      + laneRow.sideContext
+    : ''
   const baseSystem = buildSystemPrompt(context)
   // UI 优化条目9②：教学会话的注入分段用量（字符数，渲染层按 ≈2.6 字/token 折算做构成摘要）
   const injection: AiTeachInjectionStats | undefined = source === 'aiTeaching'
@@ -574,15 +801,47 @@ async function runAgentLoop(
         constraintChars: sessionInst.length,
         profileChars: profileHint.length,
         sourcesChars: sourcesHint.length,
-        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + visualHint.length,
+        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + visualHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
       }
     : undefined
-  const systemFull = baseSystem + globalInstHint + instHint + profileHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + PARALLEL_HINT
+  // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
+  const systemFull = manual
+    ? buildManualSystemPrompt()
+    : baseSystem + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+
+  // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
+  // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
+  // 逐字稳定才命中（core 14 工具 ≈7.7k tok/轮）。B1 初版误放进 buildSystemPrompt，
+  // 引用一变前缀就失效；B2 纠正（开发负责人 2026-09-18 拍板「一并纠正」）。
+  // 本段只对**本轮**有效，也因此不该沉淀成系统的长期人设。
+  const contextRefs = Array.isArray((context?.data as Record<string, unknown> | undefined)?.attachedFiles)
+    ? (context!.data as Record<string, unknown>).attachedFiles as Array<{ pageId?: string; title?: string; path?: string }>
+    : []
+  const refInjection = contextRefs.length > 0
+    ? buildAttachedRefsInjection(contextRefs.map((r) => ({
+        title: String(r?.title ?? ''),
+        path: String(r?.path ?? ''),
+        raw: readVaultRefText(String(r?.path ?? '')),
+      })))
+    : ''
+  // 感知模式（B2）：开关开启时先检索知识库，把最相关素材注入。
+  // 排除已 @ 引用的 pageId —— 同一篇不重复占两段预算。全路零命中 / 检索异常 → 空串，照常发请求。
+  const perceptionOn = getSettingReader()('aiAssistantPerception') === true
+  let perceptionInjection = ''
+  if (perceptionOn && !virtualKickoff) {
+    const lastUser = [...history].reverse().find((m) => m.role === 'user')
+    const pr = await runPerception(String(lastUser?.content ?? ''), {
+      excludePageIds: contextRefs.map((r) => String(r?.pageId ?? '')).filter(Boolean),
+    })
+    if (pr && pr.items.length > 0) perceptionInjection = buildPerceptionInjection({ items: pr.items, dropped: pr.dropped })
+  }
+  const requestInjection = [refInjection, perceptionInjection].filter(Boolean).join('\n\n')
+
   // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
   let convo: AgentMessage[] = [
     { role: 'system', content: systemFull },
-    ...composeContextWithDigest(asm.digest?.text, history),
+    ...composeContextWithDigest(asm.digest?.text, history, requestInjection),
   ]
 
   // ---- 自动压缩预检（会话压缩 §6.1）：逼近触发线时先把旧轮折叠为纪要再发送 ----
@@ -591,7 +850,8 @@ async function runAgentLoop(
   // （检查点推进 → base 变小）；无可压段时 skipped 不调 LLM；失败静默回退现有裁剪。
   let compressed: { covered: number; digestChars: number } | undefined
   const budgetSetting = Math.floor(Number(getSettingReader()('agentContextBudgetTokens')) || 24000)
-  if (!virtualKickoff && budgetSetting > 0 && getSettingReader()('agentCompressionEnabled') !== false) {
+  // v3.1.2 条目11：支线不参与压缩——上下文 = 自己的历史 + 固化快照，压成纪要会打乱快照语义
+  if (!virtualKickoff && !isSideLane && !manual && budgetSetting > 0 && getSettingReader()('agentCompressionEnabled') !== false) {
     const est = estimateTokens(convo.map(m => m.content ?? '').join('\n')) + estimateTokens(JSON.stringify(toolPayload))
     if (est > compressAtTokens(budgetSetting, Number(getSettingReader()('agentCompressAtPercent')))) {
       const cr = await compressSession({ sessionId, modelId: llmOpts?.modelId, effort: llmOpts?.effort })
@@ -599,7 +859,7 @@ async function runAgentLoop(
         compressed = { covered: cr.covered, digestChars: cr.digestChars ?? 0 }
         asm = assembleAgentHistory(sessionId)
         history = asm.history
-        convo = [{ role: 'system', content: systemFull }, ...composeContextWithDigest(asm.digest?.text, history)]
+        convo = [{ role: 'system', content: systemFull }, ...composeContextWithDigest(asm.digest?.text, history, requestInjection)]
       }
     }
   }
@@ -623,7 +883,7 @@ async function runAgentLoop(
   const batcher = new DeltaBatcher((e) => emitStream?.(e))
 
   // ---- 循环预算（Agent 第 0+2 层）：轮数可配 + 累计 token 预算，耗尽优雅收场而非报错 ----
-  const maxRounds = clampMaxRounds(getSettingReader()('agentMaxRounds'))
+  const maxRounds = manual ? MANUAL_MAX_ROUNDS : clampMaxRounds(getSettingReader()('agentMaxRounds'))
   const runTokenBudget = clampRunTokenBudget(getSettingReader()('agentRunTokenBudget'))
   let runTokens = 0
   let softLanded = false
@@ -645,7 +905,7 @@ async function runAgentLoop(
     let thinkFrom = 0
     let thinkTo = 0
     const r = await invokeLlmStreamInternal(
-      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: llmOpts?.effort },
+      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort },
       (e) => {
         if (e.type === 'text') batcher.push('text', e.delta)
         else if (e.type === 'reasoning') {
@@ -674,7 +934,17 @@ async function runAgentLoop(
     }
     trace.push(llmStep)
     stepEmitters.get(signal)?.(llmStep) // 实时过程：渲染层活动气泡
-    if (r.ok) runTokens += r.tokens
+    if (r.ok) {
+      runTokens += r.tokens
+      // token 用量记账（批次5，方案 §4）：每轮 LLM 一笔，按日落盘；会话分桶供「会话消耗 TOP」
+      recordAiUsage({
+        sessionId,
+        sessionTitle: getAgentSession(sessionId)?.title ?? '',
+        promptTokens: r.promptTokens,
+        completionTokens: r.completionTokens,
+        cachedTokens: r.cachedTokens,
+      })
+    }
     if (!r.ok) return { ok: false, sessionId, error: r.error, code: r.code, trace }
 
     if (!r.toolCalls || r.toolCalls.length === 0) {
@@ -740,12 +1010,23 @@ async function runAgentLoop(
             : {}
           // vault 文件写类工具：目标=真实落盘路径（rename 取目标路径 to）；trash 后文件已移走不可跳转
           // visual.html：relPath 一并作 file（右栏「本次改动」条目可点击回工件栏渲染）
+          // knowledge.create-page（F-11）：工具返回的 path 同为仓库内 .md，纳入 file 可点击直达编辑器
           const vaultPath = realName.startsWith('builtin.vault.')
             ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
-            : realName === 'visual.html' ? String(data?.relPath ?? '').trim() : ''
+            : realName === 'visual.html' ? String(data?.relPath ?? '').trim()
+              : realName === 'builtin.knowledge.create-page' ? String(data?.path ?? '').trim()
+                : ''
           const file = realName !== 'builtin.vault.trash' && vaultPath ? vaultPath : undefined
-          const target = vaultPath || String(args?.title ?? args?.date ?? args?.name ?? '').trim().slice(0, 120)
-          if (target) changes.push({ tool: realName, action: label, target, ...(file ? { file } : {}) })
+          // 参数里取不到可读目标时，回落到工具结果自带的标题（如 schedule.delete-todo
+          // 只收 id，摘要里的 title 是唯一人能看懂的目标）—— 否则删除不会出现在「本次改动」清单里
+          const target = vaultPath || String(args?.title ?? args?.date ?? args?.name ?? data?.title ?? '').trim().slice(0, 120)
+          if (target) {
+            const change = { tool: realName, action: label, target, ...(file ? { file } : {}) }
+            changes.push(change)
+            // 会话文件改动审计（批次5，方案 §3.8）：仅 vault 内文件写（file 非空可直达编辑器），
+            // 内存按会话分桶，右栏 token 面板「改动文件」控件拉取
+            if (file) recordSessionFileChange(sessionId, change, getAgentSession(sessionId)?.title ?? '')
+          }
         }
       }
       // 单条结果超上限时截断为合法摘要（见 capToolResult 说明）
@@ -759,6 +1040,18 @@ async function runAgentLoop(
 
     /** 串行件：写上限判定 + visual 时序事件 + 执行 + 记账（原逐条路径，行为不变） */
     const runSingleToolCall = async (tc: { id: string }, realName: string, args: Record<string, unknown>): Promise<void> => {
+      // v3.1.2 条目11：支线拒绝一切写入（含模型幻觉调用）——不执行、不落盘，直接回喂让模型改用文字回答
+      if (writeToolUniverse?.has(realName)) {
+        const laneDenyStep: AgentTraceStep = { kind: 'tool', name: realName, ok: false, durationMs: 0, summary: '支线旁问不允许写入' }
+        trace.push(laneDenyStep)
+        stepEmitters.get(signal)?.(laneDenyStep)
+        convo.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: JSON.stringify({ ok: false, error: '支线旁问不改文件：本条对话只解答问题、不执行任何写入操作。请直接用文字回答用户。' }),
+        })
+        return
+      }
       // 会话写上限：单次请求内写入类工具最多 MAX_SESSION_WRITES 次（防失控循环刷盘）。
       // 动态读 toolsState.writeTools——tool.request 启用新写工具后重建的集合要立即生效
       if (toolsState.writeTools.has(realName)) {
@@ -842,13 +1135,22 @@ async function runAgentLoop(
   // ---- 轮数/token 预算耗尽：做一次无工具的强制总结轮，把已获取的信息变成交付（第 0 层优雅收场）----
   convo.push({ role: 'user', content: FORCED_SUMMARY_NOTICE })
   const fr = await invokeLlmStreamInternal(
-    { messages: convo, tools: [], signal, providerId, modelId: modelOverride, effort: llmOpts?.effort },
+      { messages: convo, tools: [], signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort },
     (e) => { if (e.type === 'text') batcher.push('text', e.delta) },
   )
   batcher.flush()
   const frStep: AgentTraceStep = { kind: 'llm', ok: fr.ok, durationMs: 0, tokens: fr.ok ? fr.tokens : undefined, summary: fr.ok ? '预算耗尽总结轮' : undefined }
   trace.push(frStep)
   stepEmitters.get(signal)?.(frStep)
+  if (fr.ok) {
+    recordAiUsage({
+      sessionId,
+      sessionTitle: getAgentSession(sessionId)?.title ?? '',
+      promptTokens: fr.promptTokens,
+      completionTokens: fr.completionTokens,
+      cachedTokens: fr.cachedTokens,
+    })
+  }
   if (fr.ok && fr.content.trim()) {
     const changesText = changes.length > 0
       ? '\n\n——\n本次改动：\n' + changes.map((c, idx) => `${idx + 1}. ${c.action}「${c.target}」`).join('\n')
@@ -900,39 +1202,55 @@ async function agentEditAndRegen(req: AgentChatRequest & { messageId: string }, 
 }
 
 export function registerAgentHandlers(): void {
-  // 仅向发起窗口推送 agent:step 过程事件（chatId 过滤由渲染层做），复用 activeChats 生命周期
+  // 仅向发起窗口推送 agent:step 过程事件（chatId 过滤由渲染层做），复用 activeChats 生命周期。
+  // N-3 多对话并行：载荷补 sessionId（渲染层按会话分桶，切回运行中会话即恢复实时流）；
+  // 运行态则全窗口广播（三个宿主 + 会话列表的转圈/角标都以此为准，真源在主进程）。
   const withAbort = async (
     chatId: string,
+    sessionId: string,
     sender: Electron.WebContents | undefined,
     fn: (signal: AbortSignal) => Promise<AgentChatResult>
   ) => {
     const ctrl = new AbortController()
     activeChats.set(chatId, ctrl)
+    activeChatSessions.set(chatId, sessionId)
+    broadcastRunState()
     if (sender && !sender.isDestroyed()) {
       stepEmitters.set(ctrl.signal, (step) => {
-        if (!sender.isDestroyed()) sender.send('agent:step', { chatId, step })
+        if (!sender.isDestroyed()) sender.send('agent:step', { chatId, sessionId, step })
       })
       // 流式增量：与 agent:step 平行，只发发起窗口（多窗口下另一窗口看不到流，与同类产品一致）
       streamEmitters.set(ctrl.signal, (event) => {
-        if (!sender.isDestroyed()) sender.send('agent:stream', { chatId, event })
+        if (!sender.isDestroyed()) sender.send('agent:stream', { chatId, sessionId, event })
       })
     }
+    let result: AgentChatResult | undefined
     try {
-      return await fn(ctrl.signal)
+      result = await fn(ctrl.signal)
+      return result
     } finally {
       activeChats.delete(chatId)
+      activeChatSessions.delete(chatId)
+      const res = result as AgentChatResult | undefined
+      broadcastRunState({
+        sessionId,
+        chatId,
+        ok: !!res?.ok,
+        ...(res?.code ? { code: res.code } : {}),
+        ...(res && !res.ok ? { error: res.error } : {}),
+      })
       stepEmitters.delete(ctrl.signal)
       streamEmitters.delete(ctrl.signal)
     }
   }
   ipcMain.handle('agent:chat', (e, req: AgentChatRequest) =>
-    withAbort(String(req?.chatId ?? '') || randomUUID(), e.sender, signal => agentChat(req, signal, String(req?.chatId ?? ''))))
+    withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentChat(req, signal, String(req?.chatId ?? ''))))
   ipcMain.handle('agent:regenerate', (e, req: AgentChatRequest) =>
-    withAbort(String(req?.chatId ?? '') || randomUUID(), e.sender, signal => agentRegenerate(req, signal)))
+    withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentRegenerate(req, signal)))
   ipcMain.handle('agent:startScene', (e, req: AgentChatRequest) =>
-    withAbort(String(req?.chatId ?? '') || randomUUID(), e.sender, signal => agentStartScene(req, signal)))
+    withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentStartScene(req, signal)))
   ipcMain.handle('agent:editMessage', (e, req: AgentChatRequest & { messageId: string }) =>
-    withAbort(String(req?.chatId ?? '') || randomUUID(), e.sender, signal => agentEditAndRegen(req, signal)))
+    withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentEditAndRegen(req, signal)))
   ipcMain.handle('agent:deleteMessage', (_e, payload: { sessionId?: unknown; messageId?: unknown }) => {
     // v2 存储按会话分文件：删除需定位会话文件，渲染层随消息一并传 sessionId
     const p = (payload ?? {}) as { sessionId?: unknown; messageId?: unknown }
@@ -941,6 +1259,14 @@ export function registerAgentHandlers(): void {
   })
   ipcMain.handle('agent:abort', (_e, chatId: string) => {
     activeChats.get(String(chatId ?? ''))?.abort()
+    return true
+  })
+  // N-3：按会话停止（渲染层「停止」按钮以激活会话语义调用；该会话的全部在跑调用一并中止）
+  ipcMain.handle('agent:abortSession', (_e, sessionId: string) => {
+    const sid = String(sessionId ?? '')
+    for (const [cid, s] of activeChatSessions) {
+      if (s === sid) activeChats.get(cid)?.abort()
+    }
     return true
   })
   // R26 真机验证发现的跨层缺口（agent:* 出口未做 snake_case→camelCase 映射）：
@@ -999,6 +1325,10 @@ export function registerAgentHandlers(): void {
       source === 'aiTeaching' ? 'aiTeaching' : 'assistant',
     )))
   ipcMain.handle('agent:messages', (_e, id: string) => getAgentMessages(String(id ?? '')).map(camelRow))
+  // AI 用量 / 会话文件改动（v3.4.0 批次5，方案 §4/§3.8）：右栏 token 面板只读
+  ipcMain.handle('agent:usage:get', () => getAiUsageData())
+  ipcMain.handle('agent:sessionChanges:get', (_e, sessionId?: string) =>
+    getSessionChanges(typeof sessionId === 'string' && sessionId ? sessionId : undefined))
   ipcMain.handle('agent:renameSession', (_e, id: string, title: string) => {
     if (typeof id === 'string' && typeof title === 'string' && title.trim()) renameAgentSession(id, title.trim())
     return true
@@ -1010,7 +1340,39 @@ export function registerAgentHandlers(): void {
     return { ok: true }
   })
   ipcMain.handle('agent:deleteSession', (_e, id: string) => {
-    deleteAgentSession(String(id ?? ''))
+    const sid = String(id ?? '')
+    // v3.1.2 条目11：级联删除挂在该会话下的**未升格**支线（连同各自 .jsonl 消息文件）。
+    // 已升格（lane='main'）的支线是用户明确要留下来的正式会话，不该跟着主线陪葬。
+    // 渲染层在删除前用 agent:listSideLanes 取支线数做确认文案，确认后才调到这里。
+    for (const lane of listSideLanes(sid)) if (lane.lane === 'side') deleteAgentSession(lane.id)
+    deleteAgentSession(sid)
     return true
   })
+
+  // ===== v3.1.2 条目11：支线旁问（sidetrack）=====
+  // 建支线：只做「固化上下文快照 + 建独立会话」，**不调 LLM**（点按钮与装载阶段零请求）。
+  ipcMain.handle('agent:createSideLane', (_e, payload: { parentSessionId?: unknown; anchorMessageId?: unknown; contextTurns?: unknown }) => {
+    const p = (payload ?? {}) as { parentSessionId?: unknown; anchorMessageId?: unknown; contextTurns?: unknown }
+    const parentSessionId = String(p.parentSessionId ?? '')
+    if (!parentSessionId || !sessionExists(parentSessionId)) return { ok: false, error: '主线会话不存在' }
+    const anchorMessageId = String(p.anchorMessageId ?? '')
+    const anchor = anchorMessageId ? getMessageById(parentSessionId, anchorMessageId) : null
+    const turns = Math.min(5, Math.max(1, Math.floor(Number(p.contextTurns)) || 3))
+    const snapshotText = buildSideLaneSnapshot(parentSessionId, anchor, turns)
+    const titleCore = (anchor?.content ?? '').replace(/^#{1,6}\s*/gm, '').replace(/\s+/g, ' ').trim().slice(0, 16)
+    const lane = createSideLaneSession({
+      parentSessionId,
+      branchFromMessageId: anchor?.id ?? '',
+      sideContext: snapshotText,
+      title: titleCore ? `支线·${titleCore}` : '支线旁问',
+      source: 'aiTeaching',
+    })
+    return { ok: true, laneSessionId: lane.id, title: lane.title, snapshotText, turns }
+  })
+  // 列某主线下的支线（含已升格）：左栏缩进渲染 + 删除前计数
+  ipcMain.handle('agent:listSideLanes', (_e, parentSessionId: string) =>
+    listSideLanes(String(parentSessionId ?? '')).map(camelRow))
+  // 升格支线为正式会话（单向）：lane 置 'main' → 进左栏列表
+  ipcMain.handle('agent:promoteSideLane', (_e, laneSessionId: string) =>
+    promoteSideLane(String(laneSessionId ?? '')))
 }

@@ -1,4 +1,5 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { ipcMain } from 'electron'
+import { broadcast, BROADCAST_CHANNEL } from './windowBus'
 
 /**
  * 番茄钟状态跨窗口中转（轻量版）。
@@ -34,9 +35,7 @@ let snapshot: PomodoroSnapshot = {
 }
 
 function broadcastToAll(payload: PomodoroSnapshot): void {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send('pomodoro:state-broadcast', payload)
-  }
+  broadcast(BROADCAST_CHANNEL.pomodoroStateBroadcast, payload)
 }
 
 export function registerPomodoroBroadcast(): void {

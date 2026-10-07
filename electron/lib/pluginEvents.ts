@@ -11,7 +11,7 @@
  * 背压：无 ACK 通道，用轻量限流代替——每插件 10 秒窗口 ≤64 条，超出丢弃计数，
  * 窗口重置后随下一条送达 {dropped}（防 runaway 插件刷爆渲染层）。
  */
-import { BrowserWindow } from 'electron'
+import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 
 export const KNOWN_PLUGIN_EVENTS: Record<string, { capability: string }> = {
   'knowledge:pageSaved': { capability: 'knowledge' },
@@ -98,7 +98,5 @@ export function emitPluginEvent(event: string, payload: unknown): void {
 
 function deliver(pluginId: string, event: string, payload: unknown, dropped: number): void {
   const msg = { pluginId, event, payload, ...(dropped > 0 ? { dropped } : {}) }
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send('plugin:event', msg)
-  }
+  broadcast(BROADCAST_CHANNEL.pluginEvent, msg)
 }

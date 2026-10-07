@@ -12,11 +12,16 @@ import { ipcMain, BrowserWindow } from 'electron'
 export function registerWindowBus(): void {
   ipcMain.on('data:notify', (event, payload) => {
     if (!payload || typeof payload !== 'object' || typeof (payload as { scope?: unknown }).scope !== 'string') return
+    // 此通道由渲染层发起、须**排除发送方**（发送方已本地广播），故不走 broadcast() —— 保留显式循环
     for (const w of BrowserWindow.getAllWindows()) {
       if (w.webContents !== event.sender && !w.isDestroyed()) {
-        w.webContents.send('kb:data-changed', payload)
+        w.webContents.send(BROADCAST_CHANNEL.kbDataChanged, payload)
       }
     }
+  })
+  // 主窗口全屏弹窗遮罩开合 → dock 小窗跟随压暗（dock 是独立 OS 窗口，页内遮罩照不到它）
+  ipcMain.on('main:modal-dim', (_event, payload) => {
+    broadcast(BROADCAST_CHANNEL.mainModalDimChanged, { dim: !!(payload && (payload as { dim?: unknown }).dim) })
   })
 }
 
@@ -31,7 +36,95 @@ export function registerWindowBus(): void {
  * scope 取值与 src/lib/dataChanged.ts 的 DataChangeScope 对齐。
  */
 export function broadcastDataChanged(scope: string): void {
+  broadcast(BROADCAST_CHANNEL.kbDataChanged, { scope })
+}
+
+/**
+ * 主进程 → 渲染层的**自定义事件广播**唯一出口（v3.1.2 收敛）。
+ *
+ * 与 `broadcastDataChanged` 的分工：后者是「数据变更」这条特定业务通道（载荷固定 `{ scope }`）；
+ * 本函数是**裸广播**，凡主进程要主动推给所有窗口的自定义事件都走它。
+ *
+ * 收敛原因：此前「挨个窗口 for + send」的样板在 10+ 处各写一遍，其中 `aiTeach:tree-refresh`
+ * 更是有**六份等价实现**（aiTeachingFolders / Sources / Profile×3 / Workspaces）——通道协议
+ * （channel 名 + 载荷形状）没有唯一真相源，改协议只改一处会**静默失效**（不报错，只是界面不刷新）。
+ *
+ * 语义与 `broadcastDataChanged` 一致：主进程发起 → 发给**所有**窗口（无发送方排除概念；
+ * 需要排除发送方的走 `registerWindowBus` 的 data:notify 通道）。
+ * `payload` 省略时不带参数 send（保持与 `webContents.send(channel)` 等价，避免多传一个 undefined）。
+ */
+export function broadcast(channel: string, payload?: unknown): void {
   for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send('kb:data-changed', { scope })
+    if (w.isDestroyed()) continue
+    if (payload === undefined) w.webContents.send(channel)
+    else w.webContents.send(channel, payload)
   }
 }
+
+/** 主进程 → 渲染层广播通道名（**唯一真相源，改协议只改这里**）；渲染层订阅端为字符串字面量 */
+export const BROADCAST_CHANNEL = {
+  /** 数据变更（主进程侧主动广播；渲染层 DataChangeScope） */
+  kbDataChanged: 'kb:data-changed',
+  /** AI教学：编辑区树 / AI教学自绘树刷新，载荷 `{ dirRel: string }` */
+  aiTeachTreeRefresh: 'aiTeach:tree-refresh',
+  /** AI教学：模块内提示条，载荷 `string` */
+  aiTeachNotice: 'aiTeach:notice',
+  /** AI教学：网页抓取进度，载荷 `{ sessionId, no, done, total, current }` */
+  aiTeachWebCrawlProgress: 'aiTeach:web-crawl-progress',
+  /** AI教学·课程模式：课程大纲/进度变化，载荷 `{ wsId: string }`（课程主页据此重拉） */
+  aiTeachCourseRefresh: 'aiTeach:course-refresh',
+  /** AI教学·课程模式：生成大纲过程事件，载荷 `CourseGenProgress`（`{ id, phase, delta?, model?, chars?, error? }`） */
+  aiTeachCourseGenProgress: 'aiTeach:course-gen-progress',
+  /** N-1 手册通道：助手侧提示（如升格 Toast），载荷 `{ sessionId, message }` */
+  assistantNotice: 'assistant:notice',
+  /** N-3 多对话并行：助手会话运行态（全窗口），载荷 AgentRunStateEvent `{ running: sessionId[], ended? }` */
+  assistantRunState: 'assistant:runstate',
+  /** 仓库文件被主进程改写（AI 写工具落盘），载荷 `{ relPath, mtimeMs? }` */
+  wsExternalChange: 'ws:external-change',
+  /** 仓库目录发生文件系统变更（外部改动 / 手动刷新），载荷 `{ relPaths: string[], watcherError?: string }`
+   *  —— relPaths 为仓库内 posix 相对路径（拼不出时为空数组 = 「可能有任意变化」）；
+   *  watcherError 仅在监听降级（仓库被删/网络盘）时出现一次，见 lib/fsWatcher.ts */
+  wsFsChanged: 'ws:fs-changed',
+  /** 插件事件投递，载荷 `{ pluginId, event, payload, dropped? }` */
+  pluginEvent: 'plugin:event',
+  /** 插件安装/启停状态变化，无载荷 */
+  pluginInstalledChanged: 'plugin:installed-changed',
+  /** 插件下载进度，载荷 `{ key, received, total, percent, host }` */
+  pluginDownloadProgress: 'plugin:download-progress',
+  /** 应用更新下载进度，载荷 `{ percent, receivedBytes, totalBytes }` */
+  updateDownloadProgress: 'update:download-progress',
+  /** 应用更新下载阶段，载荷 `{ stage: 'downloading' | 'verifying' | 'switching' }`
+   *  —— 进度无变化时的可读反馈（校验空窗 / 换通道），见 updateService.ts */
+  updateDownloadStage: 'update:download-stage',
+  /** 书市下载队列快照，载荷 `{ rootId, tasks: BookDownloadTask[] }`
+   *  —— ★ 推的是**整个队列**而不是单条任务的增量：队列只有个位数项，
+   *  快照让渲染层不必做合并（增量协议一旦漏推一个终态，表象就是「卡在 99%」，
+   *  而这正是 updateService 那条通道踩过的坑）。`rootId` 供渲染层过滤别的仓库的队列，
+   *  见 lib/bookMarket/downloader.ts 的 `pushProgress` */
+  bookMarketDownloadProgress: 'bookMarket:download-progress',
+  /** 书市：AI 起草的书源草案，载荷 `{ draft: BookSourceDraft }`
+   *  —— S5 的「工具 → 表单」那一跳：渲染层收到后切到书市模块、打开「新建书源」
+   *  表单并预填。★ 草案**不落库、不落盘**（用户点「添加」才走 bookMarket:upsertSource），
+   *  所以本通道没有伴随的 data-changed scope —— 别顺手配一个 */
+  bookMarketSourceDraft: 'bookMarket:source-draft',
+  /** 番茄钟状态广播，载荷 PomodoroSnapshot */
+  pomodoroStateBroadcast: 'pomodoro:state-broadcast',
+  /** 小窗（日面板）状态变化，载荷 `{ detached, mode, collapsed, widgetInteractive }` */
+  dayPanelStateChanged: 'daypanel:state-changed',
+  /** 小窗（日面板）形态切换，载荷 `{ mode: PanelMode }` */
+  dayPanelModeChanged: 'daypanel:mode-changed',
+  /** 小窗（日面板）显示/隐藏切换意图，无载荷 */
+  dayPanelToggleVisibility: 'daypanel:toggle-visibility',
+  /** 小窗（日面板）top-dock 收缩态变化，载荷 `{ collapsed: boolean }` */
+  dayPanelCollapsedChanged: 'daypanel:collapsed-changed',
+  /** 小窗（日面板）桌面小组件可交互态变化，载荷 `{ interactive: boolean }` */
+  dayPanelWidgetInteractiveChanged: 'daypanel:widget-interactive-changed',
+  /** 主窗口全屏弹窗遮罩开合（dock 跟随压暗），载荷 `{ dim: boolean }`；渲染层发起走 'main:modal-dim' */
+  mainModalDimChanged: 'main:modal-dim-broadcast',
+  /** 终端 pty 输出，载荷 `{ id, data }`（高频；高频写回走 term:write 的 send，不经此通道） */
+  termData: 'term:data',
+  /** 终端会话退出，载荷 `{ id, exitCode }` */
+  termExit: 'term:exit',
+  /** AI 终端执行记录增改（按 reqId 整条替换；status='pending' 即待确认请求），载荷 `{ record }` */
+  termAiRecord: 'term:ai-record',
+} as const

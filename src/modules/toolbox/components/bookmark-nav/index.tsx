@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ArrowLeft, Globe, Plus, Search, ExternalLink, Pencil, Trash2, Copy, Download, Upload, Check } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { ArrowLeft, Globe, Plus, Search, ExternalLink, Pencil, Trash2, Copy, Download, Upload, Check, Star } from 'lucide-react'
 import type { BookmarkCategory, BookmarkItem } from '../../../../types'
 import {
   bookmarkGetAll, createBookmarkItem, deleteBookmarkItem,
-  deleteBookmarkCategory, openBookmarkUrl, pickBookmarkImportFile,
+  deleteBookmarkCategory, openBookmarkUrl, pickBookmarkImportFile, updateBookmarkItem,
 } from '../../../../lib/ipc'
 import { showToast } from '../../../../lib/toast'
 import { notifyDataChanged } from '../../../../lib/dataChanged'
@@ -12,8 +13,9 @@ import { buildJsonExport, buildHtmlExport, parseJsonImport, parseHtmlImport, dom
 import { CategorySidebar } from './components/CategorySidebar'
 import { BookmarkEditModal, CategoryEditModal } from './components/BookmarkModals'
 import { localToday } from '../../../../lib/date'
+import type { ToolSidebarProps } from '../../../../components/workbench/toolRegistry'
 
-interface Props { onBack: () => void }
+interface Props extends ToolSidebarProps { onBack: () => void }
 
 const AVATAR_COLORS = ['#EF4444', '#EA580C', '#CA8A04', '#059669', '#0D9488', '#027A74', '#2563EB', '#7C3AED', '#C026D3', '#64748B']
 
@@ -23,7 +25,7 @@ function avatarColor(domain: string): string {
   return AVATAR_COLORS[h % AVATAR_COLORS.length]
 }
 
-export function BookmarkNav({ onBack }: Props) {
+export function BookmarkNav({ onBack, sidebarEl, sidebarHosted }: Props) {
   const [categories, setCategories] = useState<BookmarkCategory[]>([])
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([])
   const [selected, setSelected] = useState('all')
@@ -76,6 +78,19 @@ export function BookmarkNav({ onBack }: Props) {
       setCopiedId(b.id)
       window.setTimeout(() => setCopiedId(null), 1500)
     }).catch(() => {})
+  }, [])
+
+  // 星标收藏（2026-09-28）：乐观更新 + 落盘 + 广播（右栏快捷导航只显示 starred 条目）
+  const handleToggleStar = useCallback(async (b: BookmarkItem) => {
+    const next = !b.starred
+    setBookmarks(cur => cur.map(x => (x.id === b.id ? { ...x, starred: next } : x)))
+    try {
+      await updateBookmarkItem(b.id, { starred: next })
+      notifyDataChanged('bookmark')
+    } catch (e) {
+      console.error('星标失败', e)
+      setBookmarks(cur => cur.map(x => (x.id === b.id ? { ...x, starred: !next } : x)))
+    }
   }, [])
 
   // 删除确认(应用内 ConfirmDialog — Electron 原生 confirm 会破坏键盘焦点,禁止使用)
@@ -199,7 +214,7 @@ export function BookmarkNav({ onBack }: Props) {
     (catName.get(selected)?.name ?? '全部书签')
 
   return (
-    <div className="flex flex-col h-full bg-[var(--bg-primary)]">
+    <div className="kb-theme-surface flex flex-col h-full">
       {/* 头部 */}
       <div className="flex items-center gap-2 border-b border-[var(--border-color)] px-2 py-1 shrink-0">
         <button
@@ -247,18 +262,26 @@ export function BookmarkNav({ onBack }: Props) {
       </div>
 
       <div className="flex flex-1 min-h-0">
-        {/* 左栏分类 */}
-        <div className="w-52 shrink-0 border-r border-[var(--border-color)] min-h-0">
-          <CategorySidebar
-            categories={categories}
-            bookmarks={bookmarks}
-            selected={selected}
-            onSelect={setSelected}
-            onNew={() => setCategoryEditor({ mode: 'create' })}
-            onEdit={c => setCategoryEditor({ mode: 'edit', category: c })}
-            onDelete={c => void handleDeleteCategory(c)}
-          />
-        </div>
+        {/* 左栏分类。2026-09-17 右栏优化轮：标签页语境 sidebarEl 非空时 portal 进
+            工作台左栏模块态 slot（挂载点迁移，状态留在本组件）；槽未就绪渲染 null 等槽。 */}
+        {(() => {
+          const sidebarInner = (
+            <CategorySidebar
+              categories={categories}
+              bookmarks={bookmarks}
+              selected={selected}
+              onSelect={setSelected}
+              onNew={() => setCategoryEditor({ mode: 'create' })}
+              onEdit={c => setCategoryEditor({ mode: 'edit', category: c })}
+              onDelete={c => void handleDeleteCategory(c)}
+            />
+          )
+          return sidebarEl
+            ? createPortal(<div className="h-full w-full min-h-0">{sidebarInner}</div>, sidebarEl)
+            : sidebarHosted
+              ? null
+              : <div className="w-52 shrink-0 border-r border-[var(--border-color)] min-h-0">{sidebarInner}</div>
+        })()}
 
         {/* 主区 */}
         <div className="flex-1 flex flex-col min-w-0">
@@ -311,7 +334,10 @@ export function BookmarkNav({ onBack }: Props) {
                           {(domain[0] ?? '#').toUpperCase()}
                         </span>
                         <div className="min-w-0">
-                          <div className="text-[13px] font-medium text-[var(--text-primary)] truncate">{b.title}</div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">{b.title}</span>
+                            {b.starred && <Star size={11} className="shrink-0 text-[var(--warning, #d97706)]" fill="currentColor" aria-label="已收藏" />}
+                          </div>
                           <div className="text-[11px] text-[var(--text-muted)] truncate">{domain}</div>
                         </div>
                       </div>
@@ -324,6 +350,10 @@ export function BookmarkNav({ onBack }: Props) {
                         <button onClick={() => void handleOpen(b)} title="打开网页"
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] transition-colors">
                           <ExternalLink size={13} />
+                        </button>
+                        <button onClick={() => void handleToggleStar(b)} title={b.starred ? '取消收藏' : '收藏'}
+                          className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] transition-colors">
+                          <Star size={13} className={b.starred ? 'text-[var(--warning, #d97706)]' : ''} fill={b.starred ? 'currentColor' : 'none'} />
                         </button>
                         <button onClick={() => handleCopyLink(b)} title="复制链接"
                           className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] transition-colors">

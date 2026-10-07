@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow, dialog, app, shell } from 'electron'
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync, openSync, readSync, closeSync } from 'fs'
-import { basename, join, relative, resolve, sep, extname, dirname } from 'path'
+import { basename, join, relative, resolve, sep, extname, dirname, isAbsolute } from 'path'
+import { cp } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { setCurrentVault, ensureKbRoot, readCurrentVaultId, getCurrentVault, ATTACHMENTS_DIR, readRecentVaults, forgetRecentVault, markRecentDeleted, clearRecentDeleted, setVaultMetaName } from './kbStore/vaultContext'
 import { writeWelcomeDocOnce, importWelcomeDoc, getWelcomeDocState, WELCOME_DOC_FILENAME } from './kbStore/welcomeDoc'
@@ -9,8 +10,9 @@ import { invalidateGraphIndex } from './kbStore/graphIndex'
 import { emitPluginEvent } from './pluginEvents'
 import { IGNORE_FILE_NAME } from './kbStore/ignoreFile'
 import { parseMarkdown, serializeMarkdown } from './kbStore/mdStore'
-import { addArchiveEntry, removeArchiveEntry, renameArchiveEntries, readManifest, relPosixOf } from './kbStore/archivedFilesRepo'
 import { broadcastDataChanged } from '../main/windowBus'
+import { syncVaultWatcher, markSelfWrite } from './fsWatcher'
+import { bookMetaPruneOrphans } from './kbStore/vaultBookMetaRepo'
 import { globalReadJson, globalWriteJson } from './globalJsonStore'
 import { isAllowedClearRoot, trashVaultFolder } from './vaultDelete'
 import { rootDirName } from './aiTeachingFolders'
@@ -28,6 +30,7 @@ import { rootDirName } from './aiTeachingFolders'
 
 const MAX_EDIT_SIZE = 10 * 1024 * 1024 // >10MB 拒绝编辑（只读）
 const MAX_OPEN_SIZE = 50 * 1024 * 1024 // >50MB 拒绝打开
+const MAX_PASTE_ITEMS = 500 // 单次粘贴条目上限（超出部分记为 skipped，不静默丢弃）
 const BINARY_NUL_RATIO = 0.05 // 前 512 字节 NUL 占比 >5% 判二进制
 const HIDDEN_DIRS = new Set([
   '.git', 'node_modules', 'out', 'dist', '.obsidian', '__pycache__',
@@ -40,8 +43,10 @@ const HIDDEN_DIRS = new Set([
 const APP_INTERNAL_DIRS = new Set(['_attachments', '_inbox'])
 
 /** 软件生成项沉底（2026-09-08 用户拍板）：.ignore 等非用户内容不与用户目录混排，固定沉在文件树根列表最下。
- *  新增软件生成文件/目录时登记进此集合即可（AI教学 产物根按设置动态传入，见 ws:listDir）。 */
-const SOFT_ENTRY_NAMES = new Set(['.ignore'])
+ *  新增软件生成文件/目录时登记进此集合即可（AI教学 产物根按设置动态传入，见 ws:listDir）。
+ *  N-5（2026-09-26）：`.assistant/`（AI 助手要求 + 术语表）入列 —— 登记后由 listDirEntries
+ *  的点目录放行规则带出（点前缀目录默认隐藏，名单内的除外），并出现在总览态「软件文件」折叠区。 */
+const SOFT_ENTRY_NAMES = new Set(['.ignore', '.assistant'])
 
 interface RootInfo {
   id: string
@@ -124,7 +129,10 @@ export function listDirEntries(absPath: string): WorkspaceEntry[] {
       const lst = lstatSync(full)
       if (lst.isSymbolicLink()) continue
       if (lst.isDirectory()) {
-        if (name.startsWith('.') || HIDDEN_DIRS.has(name.toLowerCase()) || APP_INTERNAL_DIRS.has(name.toLowerCase())) continue
+        // 点前缀目录默认隐藏（.knowbase / .attachments / .git …）；SOFT_ENTRY_NAMES 登记的除外——
+        // 它们是「软件生成项」，要经 softNames 沉底到软件文件区（N-5：.assistant），不能在这里一刀切掉
+        if (name.startsWith('.') && !SOFT_ENTRY_NAMES.has(name.toLowerCase())) continue
+        if (HIDDEN_DIRS.has(name.toLowerCase()) || APP_INTERNAL_DIRS.has(name.toLowerCase())) continue
         out.push({ name, type: 'dir', size: 0, mtime: lst.mtimeMs })
       } else if (lst.isFile()) {
         out.push({ name, type: 'file', size: lst.size, mtime: lst.mtimeMs })
@@ -151,6 +159,25 @@ export function uniqueFileName(parentAbs: string, baseName: string): string {
   const stem = baseName.slice(0, baseName.length - ext.length)
   for (let i = 1; i < 10_000; i++) {
     const next = `${stem}(${i})${ext}`
+    if (!existsSync(join(parentAbs, next))) return next
+  }
+  return baseName // 兜底（理论不可达）
+}
+
+/**
+ * VS Code 风格重名递增（粘贴外部文件专用，与 `uniqueFileName` 的 `(N)` 口径**故意不同**）：
+ * `a.md` → `a copy.md` → `a copy 2.md` → `a copy 3.md`；无扩展名的目录同规则（`subdir copy`）。
+ *
+ * 为什么要两套口径：`uniqueFileName` 服务于「新建文件撞名」，`a(1).md` 是系统惯例；
+ * 而「粘贴」是对标 VS Code/资源管理器的复制语义，用户看到 `xxx copy.md` 才知道这是副本。
+ * 两者都是**纯函数**（只读 existsSync），供契约脚本直接断言。
+ */
+export function vscodeCopyName(parentAbs: string, baseName: string): string {
+  if (!existsSync(join(parentAbs, baseName))) return baseName
+  const ext = extname(baseName)
+  const stem = baseName.slice(0, baseName.length - ext.length)
+  for (let i = 0; i < 10_000; i++) {
+    const next = i === 0 ? `${stem} copy${ext}` : `${stem} copy ${i + 1}${ext}`
     if (!existsSync(join(parentAbs, next))) return next
   }
   return baseName // 兜底（理论不可达）
@@ -195,8 +222,17 @@ export function readWorkspaceFile(absPath: string): ReadFileResult {
 
 // ===== 二进制范围读取（PDF 阅读器懒加载通道，plugin-pdf-reader-design §4）=====
 
-/** 范围读取白名单扩展名：范围通道 = 二进制放行口，只允许可视化文档类型（防变成任意二进制窃取口） */
-const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg']
+/** 范围读取白名单扩展名：范围通道 = 二进制放行口，只允许可视化文档类型（防变成任意二进制窃取口）。
+ *  ★ 扩容属**安全面变更**（提交信息须写明理由）：
+ *  - txt = 一期（2026-09-20）：TxtReaderView 经 range 分块读 .books 样书（20MB 上限由渲染层限）
+ *  - epub = B 段（2026-09-21）：EpubReaderView 整份取字节后交 foliate 解包（zip 需从头读中央目录）；
+ *    只读不写、仍受 pathGuard 与「仅当前仓库内」约束。
+ *  - fb2 | fbz = 阶段 2a（2026-09-22）：同一 foliate 阅读器（EpubReaderView）接管 fb2/fbz ——
+ *    fbz 是 zip 封装，同 epub 需整份读；fb2 是纯 XML，本可走 loadFile，但阅读器只有一条整本读路径，
+ *    且两类书都受 128MB 上限与「只读」约束，风险面与 epub 完全一致。
+ *  - cbz = 阶段 2b（2026-09-22）：zip 封装的图片漫画，同 fbz 需整份读（中央目录在尾部）。
+ *    同上受 128MB 上限与「只读」约束；**页图只能靠整份 zip 解包**，无更窄的读法。 */
+const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'txt', 'epub', 'fb2', 'fbz', 'cbz']
 
 export interface ReadRangeResult {
   /** base64 编码的 [offset, offset+len) 段数据（不足段取到文件尾） */
@@ -209,11 +245,47 @@ export interface ReadRangeResult {
   truncated: boolean
 }
 
+export interface ReadRangeBytesResult {
+  /** [offset, offset+len) 段的原始字节（不足段取到文件尾） */
+  bytes: Uint8Array
+  /** 本段实际起始字节偏移 */
+  offset: number
+  /** 文件总字节数 */
+  size: number
+  /** 本段是否截断（end < size） */
+  truncated: boolean
+}
+
 /**
  * 范围读取：open+read 精确读段（不整文件载入内存），仅白名单扩展名放行。
  * 纯逻辑可冒烟（不依赖 electron）。
  */
 export function readWorkspaceRange(absPath: string, offset: unknown, length: unknown): ReadRangeResult | { error: string } {
+  const r = readRangeBuffer(absPath, offset, length)
+  if ('error' in r) return r
+  return { data: r.buf.toString('base64'), offset: r.offset, size: r.size, truncated: r.truncated }
+}
+
+/**
+ * `readWorkspaceRange` 的**字节**版本（B-16 · 2026-09-22）：同一个读段实现，只是不做 base64。
+ *
+ * 为什么值得单开一个通道：整本取字节的阅读器（foliate 系）原先拿 base64 再在渲染侧
+ * `atob` + 逐字节解码，实测 96MB 里解码占 ~660ms（总读取链路 1.5s）。改传 `Uint8Array` 后
+ * 这一段**整段消失**，而 IPC 传输本身不变（实测两种载荷同为 ~160MB/s，那是 V8 结构化克隆的天花板，
+ * 换载荷换不动它）。PDF 侧仍走 base64 老通道 —— pdf.js 要的是可 range 的字符串分片，不动它。
+ *
+ * ★ 白名单 / 偏移 / 越界逻辑只有 `readRangeBuffer` 一份：两个出口共用，别在这里复制条件。
+ */
+export function readWorkspaceRangeBytes(absPath: string, offset: unknown, length: unknown): ReadRangeBytesResult | { error: string } {
+  const r = readRangeBuffer(absPath, offset, length)
+  if ('error' in r) return r
+  // 视图而非拷贝：Buffer.alloc 出来的底层 ArrayBuffer 就是这一段（byteOffset/byteLength 已在其中），
+  // 而结构化克隆会由 Electron 自己把字节复制出去 ⇒ 这里再复制一次纯属浪费（8MB ≈ 2ms，但白花的）。
+  return { bytes: new Uint8Array(r.buf.buffer, r.buf.byteOffset, r.buf.byteLength), offset: r.offset, size: r.size, truncated: r.truncated }
+}
+
+/** 读段的唯一实现（白名单 / 偏移归一 / 越界截断）。返回原始 Buffer，由两个出口各自决定怎么过 IPC。 */
+function readRangeBuffer(absPath: string, offset: unknown, length: unknown): { buf: Buffer; offset: number; size: number; truncated: boolean } | { error: string } {
   try {
     const ext = extname(absPath).slice(1).toLowerCase()
     // 白名单扩展名；无扩展名文件按 %PDF- 头探测放行（知识库旧附件丢扩展名的 PDF）
@@ -233,13 +305,13 @@ export function readWorkspaceRange(absPath: string, offset: unknown, length: unk
     const want = Math.max(0, Math.floor(Number(length) || 0))
     const end = Math.min(st.size, start + want)
     if (start >= st.size) {
-      return { data: '', offset: start, size: st.size, truncated: false }
+      return { buf: Buffer.alloc(0), offset: start, size: st.size, truncated: false }
     }
     const fd = openSync(absPath, 'r')
     try {
       const buf = Buffer.alloc(end - start)
       readSync(fd, buf, 0, buf.length, start)
-      return { data: buf.toString('base64'), offset: start, size: st.size, truncated: end < st.size }
+      return { buf, offset: start, size: st.size, truncated: end < st.size }
     } finally {
       closeSync(fd)
     }
@@ -280,6 +352,9 @@ export function detectConflict(absPath: string, expectedMtimeMs: number | null |
 
 /** 原子写：临时文件 + rename 覆盖（对标数据库写盘策略，防半写损坏） */
 export function writeWorkspaceFile(absPath: string, content: string): void {
+  // v3.2.0 条目 ④：落盘前登记「这条路径的变更出自我自己」——fsWatcher 命中即跳过，
+  // 否则应用内保存会被监听器当成外部修改，弹「文件已被外部修改」冲突三选（自打自脸）
+  markSelfWrite(absPath)
   const real = absPath
   const tmp = join(real, `..`, `.kb-tmp-${randomUUID()}`)
   try {
@@ -316,6 +391,20 @@ function registryNow(): string {
   return new Date().toISOString()
 }
 
+/**
+ * S6 元数据自愈：清理 `.meta.json` 中磁盘已不存在的孤儿条目与孤儿封面。
+ * 幂等、失败不阻塞、无新 IPC / 无新 UI。触发点 = 仓库打开（启动恢复 / 换库 / 按 id 打开），
+ * 覆盖「应用关闭期间用户在文件管理器删了书」；运行期删书由 fsWatcher 节流兜底。
+ */
+function pruneOrphanBookMetaQuiet(): void {
+  try {
+    const result = bookMetaPruneOrphans()
+    if (!result.ok && result.error) console.warn('[bookMetaPruneOrphans] 扫描失败:', result.error)
+  } catch (e) {
+    console.warn('[bookMetaPruneOrphans] 扫描异常:', (e as Error).message)
+  }
+}
+
 function loadVaults(): void {
   // P8 设备级自愈：settings.json.recentVaults 有而登记表没有的条目（库缺/损坏），
   // 磁盘上确实存在且含 .knowbase → 回登记（最近列表即第二注册表）。
@@ -345,6 +434,9 @@ function loadVaults(): void {
       ensureKbRoot(cur.name)
       // 启动恢复也过一遍一次性布局迁移（P4 博客收拢；幂等）
       runLayoutMigrations(cur.rootPath)
+      // v3.2.0 条目 ④：启动即给当前仓库挂上文件监听
+      syncVaultWatcher()
+      pruneOrphanBookMetaQuiet()
     }
   } catch {
     /* 登记表未就绪等：忽略，openDir 时重新登记 */
@@ -418,6 +510,9 @@ function adoptVaultDirectory(rootPath: string, name?: string): { rootId: string;
   ensureKbRoot(vaultName)
   if (isFirstInit) writeWelcomeDocOnce(rootPath)
   runLayoutMigrations(rootPath)
+  // v3.2.0 条目 ④：仓库（换）了 → 文件监听对准它
+  syncVaultWatcher()
+  pruneOrphanBookMetaQuiet()
   return { rootId: id, name: vaultName, path: rootPath }
 }
 
@@ -561,32 +656,8 @@ function isKnowledgeIndexSensitive(relPath: string): boolean {
 }
 
 /**
- * md 归档双态核心（ws:setMdStatus 与 ws:setArchiveStatus 共用）：
- * draft=true 转草稿；draft=false 归档（缺 id 注入 id 与 title，否则知识索引仍跳过）。
- * §9.3-3 双保险：.ignore 拒绝被归档注入 frontmatter id（UI 层已隐藏入口，此守卫防
- * AI/插件直调 IPC 绕过；大小写不敏感与 findIgnoreFile 同口径）。
+ * md 归档双态核心（ws:setMdStatus 与 ws:setArchiveStatus 共用）——随归档能力于 2026-09-20 退役。
  */
-function setMdStatusImpl(rootId: string, abs: string, draft: boolean): { ok: boolean; error?: string } {
-  if (basename(abs).toLowerCase() === IGNORE_FILE_NAME) {
-    return { ok: false, error: '.ignore 是过滤规则文件，不能归档为知识页' }
-  }
-  const doc = parseMarkdown(readFileSync(abs, 'utf-8'))
-  if (draft) {
-    doc.frontmatter.status = 'draft'
-  } else {
-    delete doc.frontmatter.status
-    if (!doc.frontmatter.id || typeof doc.frontmatter.id !== 'string') {
-      doc.frontmatter.id = randomUUID()
-      if (!doc.frontmatter.title || typeof doc.frontmatter.title !== 'string') {
-        doc.frontmatter.title = basename(abs).replace(/\.md$/i, '')
-      }
-    }
-  }
-  writeWorkspaceFile(abs, serializeMarkdown(doc.frontmatter, doc.body))
-  invalidateIndexIfCurrentVault(rootId)
-  invalidateGraphIndex() // 图谱节点 status（draft 虚化）需重建缓存
-  return { ok: true }
-}
 /** 重命名/移动（跨目录；ws:rename 与 AI vault.rename 共用同一语义，成功后失效索引） */
 export function renameWorkspacePath(rootId: string, oldRel: string, newRel: string): void {
   const from = requireInside(rootId, oldRel)
@@ -596,10 +667,11 @@ export function renameWorkspacePath(rootId: string, oldRel: string, newRel: stri
   // 目标父目录缺失时自动补建父链（renameSync 不建父目录）——移动语义的 mkdir -p，
   // 与「新建目录」的 ws:mkdir（重名自动加后缀）严格区分，绝不产生 (1) 镜像目录
   mkdirSync(dirname(to), { recursive: true })
+  // v3.2.0 条目 ④：应用内改名/移动同样登记自写（否则监听器会把「我自己刚改的」当成外部改动，
+  // 正在编辑的文件会误弹三选）；新旧两条路径都登记
+  markSelfWrite(from)
+  markSelfWrite(to)
   renameSync(from, to)
-  // 归档清单跟随（全类型归档 §4.2）：文件条目精确改 path、目录条目及其下条目前缀级联；
-  // 清单按当前仓库落盘（jsonStore 作用域），非当前仓库的 rename 不动清单
-  if (getCurrentVault()?.rootId === rootId) renameArchiveEntries(oldRel, newRel)
   invalidateIndexIfCurrentVault(rootId)
 }
 
@@ -607,6 +679,9 @@ export function renameWorkspacePath(rootId: string, oldRel: string, newRel: stri
 export async function trashWorkspacePath(rootId: string, relPath: string): Promise<void> {
   const abs = requireInside(rootId, relPath)
   if (!existsSync(abs)) throw new Error('文件不存在')
+  // v3.2.0 条目 ④：应用内删除登记自写（正被编辑的文件由编辑器自己关闭标签，
+  // 不该再走「文件已在磁盘上被删除」三选——那是给外部删除准备的）
+  markSelfWrite(abs)
   const trash = (await import('trash')).default
   await trash([abs])
   invalidateIndexIfCurrentVault(rootId)
@@ -801,6 +876,17 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
     }
   })
 
+  // 同上的**字节**版本（B-16）：foliate 系阅读器整本取字节，免掉渲染侧 base64 解码那 ~660ms/96MB。
+  // 与 ws:readRange 共用 readRangeBuffer，白名单与防穿越语义完全一致。
+  ipcMain.handle('ws:readRangeBytes', (_e, rootId: string, relPath: string, offset: unknown, length: unknown) => {
+    try {
+      const abs = requireInside(rootId, relPath)
+      return readWorkspaceRangeBytes(abs, offset, length)
+    } catch (e) {
+      return { error: (e as Error).message }
+    }
+  })
+
   // 写文件（原子写 + 保存冲突检测）
   // expectedMtimeMs 为打开文件时记录的磁盘 mtime；不一致说明被外部改过 → 拒绝写入，交渲染层决策
   ipcMain.handle('ws:writeFile', (_e, rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => {
@@ -823,6 +909,22 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
     }
   })
 
+  /**
+   * 结构性文件操作通道（createFile / mkdir / rename / trash）统一补
+   * `broadcastDataChanged('knowledge')`（方案 .claude/plans/workbench-tree-mode-implementation.md §2.2）。
+   *
+   * **为什么必须广播**：这些通道写盘走的是裸 fs（不经 writeWorkspaceFile），但应用内写盘会被
+   * `markSelfWrite` 登记，fsWatcher 命中即跳过 → 除「调用方自己刷新自己」外**没有任何通道**
+   * 通知知识库列表 / 文件树（铁律 1 的实际缺口）。工作台左栏文件树的跨模块同步依赖它。
+   *
+   * ⚠️ **刻意不加在 `ws:writeFile`（writeWorkspaceFile）里**：那条被自动保存高频调用，
+   * 广播会造成刷新风暴。只加在这四个**结构性低频**通道。
+   *
+   * ⚠️ **`ws:pasteExternal` 也刻意不加**（2026-09-29 与开发负责人确认）：粘贴的多是外来附件
+   * （xlsx / pdf / 图片），它们**不进知识库收录**（收录门槛是 frontmatter id），广播刷不出任何
+   * 可见变化却会白跑一次图谱重算 + 推一次模块状态机（贴图片纯亏）。该通道已有**更精准**的既有
+   * 处理：仅当本批含 `.md` 时才 `invalidateIndexIfCurrentVault`。文件树侧自己重读目录即可。
+   */
   // 新建文件（content 可选：编辑器「新建知识页」一步写入 frontmatter 模板）
   ipcMain.handle('ws:createFile', (_e, rootId: string, relPath: string, content?: string) => {
     try {
@@ -839,6 +941,7 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       }
       if (isKnowledgeIndexSensitive(finalAbs)) invalidateIndexIfCurrentVault(rootId)
       const finalRel = finalName === requestedName ? relPath : relPath.replace(/[^\\/]+$/, finalName)
+      broadcastDataChanged('knowledge')
       return { ok: true, relPath: finalRel, renamed: finalName !== requestedName }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -856,73 +959,70 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       const finalAbs = join(dir, finalName)
       mkdirSync(finalAbs, { recursive: false })
       const finalRel = finalName === requestedName ? relPath : relPath.replace(/[^\\/]+$/, finalName)
+      broadcastDataChanged('knowledge')
       return { ok: true, relPath: finalRel, renamed: finalName !== requestedName }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
   })
 
-  // 双态模型：置/去 .md 的 frontmatter status: draft（draft=true=转草稿[保留 id 供虚化锚定]，false=归档为知识页）
   /**
-   * md 归档双态通道（ws:setMdStatus 原语义保留；ws:setArchiveStatus 对 md 分流到同一实现）。
-   * draft=true 转草稿；draft=false 归档（缺 id 注入）。
+   * 粘贴系统剪贴板里的外部文件/目录到仓库内某个目录（v3.2.0 条目 ③）。
+   *
+   * **路径来源为什么在渲染层**：主进程侧唯一的读法是 `clipboard.readBuffer('FileNameW')`，
+   * 实测（2026-09-15 探针，Electron 33.2.0 / win32）它**只能拿到第一条路径**、且载荷里没有
+   * DROPFILES 头——同一次剪贴板，PS 回读 3/3、渲染层 paste 事件 3/3、主进程只得 1/3，
+   * 即多选会**静默丢文件**。故改由渲染层 `paste` 事件 + `webUtils.getPathForFile` 取全量路径
+   * （Electron 32+ 官方路线，File.path 已移除），本通道只负责落盘。
+   *
+   * 因而 `srcPaths` 是**不可信输入**，逐条校验（绝对路径 / 真实存在 / 非符号链接）；
+   * 目标目录仍由 requireInside 单向守——渲染层永远只说 `{ rootId, relDir }`，不接触落盘绝对路径。
    */
-  ipcMain.handle('ws:setMdStatus', (_e, rootId: string, relPath: string, draft: unknown) => {
+  ipcMain.handle('ws:pasteExternal', async (_e, rootId: string, relDir: string, srcPaths: unknown) => {
+    const skipped: Array<{ path: string; reason: string }> = []
+    const pasted: string[] = []
     try {
-      return setMdStatusImpl(rootId, requireInside(rootId, relPath), draft === true)
+      const destDir = requireInside(rootId, relDir)
+      const list = Array.isArray(srcPaths)
+        ? srcPaths.filter((p): p is string => typeof p === 'string' && p.length > 0)
+        : []
+      if (list.length === 0) return { ok: false, reason: 'empty', pasted, skipped }
+      if (!statSync(destDir).isDirectory()) return { ok: false, reason: 'notdir', pasted, skipped }
+
+      for (let i = 0; i < list.length; i++) {
+        const src = list[i]
+        if (i >= MAX_PASTE_ITEMS) { skipped.push({ path: src, reason: `超出单次上限 ${MAX_PASTE_ITEMS}` }); continue }
+        try {
+          if (!isAbsolute(src)) { skipped.push({ path: src, reason: '不是绝对路径' }); continue }
+          const lst = lstatSync(src) // lstat：不跟随符号链接，避免把仓库外内容链进来
+          if (lst.isSymbolicLink()) { skipped.push({ path: src, reason: '符号链接' }); continue }
+          const name = basename(src)
+          if (!name) { skipped.push({ path: src, reason: '无法解析文件名' }); continue }
+          // 把某目录粘进它自己（或其子孙）会无限递归；把仓库根粘进仓库同理
+          if (isInside(src, destDir)) { skipped.push({ path: src, reason: '目标位于源目录内' }); continue }
+          const finalName = vscodeCopyName(destDir, name)
+          await cp(src, join(destDir, finalName), { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true })
+          pasted.push(finalName)
+        } catch (err) {
+          skipped.push({ path: src, reason: (err as Error).message })
+        }
+      }
+      if (pasted.some((n) => /\.md$/i.test(n))) invalidateIndexIfCurrentVault(rootId)
+      return { ok: pasted.length > 0, pasted, skipped }
     } catch (e) {
-      return { ok: false, error: (e as Error).message }
+      return { ok: false, reason: 'error', error: (e as Error).message, pasted, skipped }
     }
   })
 
-  /**
-   * 全类型归档统一通道（docs/vault-archive-all-files-design.md §4.1）：
-   * - md → setMdStatusImpl（frontmatter 双态，archive 取反为 draft）
-   * - 非 md / 目录 → 归档清单 addArchiveEntry / removeArchiveEntry
-   * 成功后失效索引 + 广播 knowledge（主进程写操作必须广播，保活模块才能重读）。
-   */
-  ipcMain.handle('ws:setArchiveStatus', (_e, rootId: string, relPath: string, archive: unknown) => {
-    try {
-      const abs = requireInside(rootId, relPath)
-      const rel = relPosixOf(requireRoot(rootId).rootPath, abs)
-      if (basename(abs).toLowerCase() === IGNORE_FILE_NAME) {
-        return { ok: false, error: '.ignore 是过滤规则文件，不能归档' }
-      }
-      if (/\.md$/i.test(rel)) {
-        const res = setMdStatusImpl(rootId, abs, archive !== true)
-        if (res.ok) broadcastDataChanged('knowledge')
-        return res
-      }
-      const isDir = statSync(abs).isDirectory()
-      if (archive === true) {
-        const { count } = addArchiveEntry(rel, isDir ? 'dir' : 'file')
-        invalidateIndexIfCurrentVault(rootId)
-        broadcastDataChanged('knowledge')
-        return { ok: true, count }
-      }
-      removeArchiveEntry(rel)
-      invalidateIndexIfCurrentVault(rootId)
-      broadcastDataChanged('knowledge')
-      return { ok: true }
-    } catch (e) {
-      return { ok: false, error: (e as Error).message }
-    }
-  })
-
-  // 归档清单读取（渲染层右键菜单态：目录是否已归档）
-  ipcMain.handle('ws:getArchiveEntries', (_e, rootId: string) => {
-    try {
-      requireRoot(rootId)
-      return { ok: true, entries: readManifest().entries }
-    } catch (e) {
-      return { ok: false, error: (e as Error).message }
-    }
-  })
+  // 归档能力于 2026-09-20 整体退役（阶段三，docs/note-identity-unify-design.md §3）：
+  // `ws:setMdStatus` / `ws:setArchiveStatus` / `ws:getArchiveEntries` 三条通道与 `archivedFilesRepo` 一并删除。
+  // 想隐藏 = 写 .ignore；想分层 = 挪进目录（目录即分类）。
 
   // 重命名/移动（新旧路径都必须在根内；实现见模块级 renameWorkspacePath）
   ipcMain.handle('ws:rename', (_e, rootId: string, oldRel: string, newRel: string) => {
     try {
       renameWorkspacePath(rootId, oldRel, newRel)
+      broadcastDataChanged('knowledge')
       return { ok: true }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
@@ -933,7 +1033,27 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
   ipcMain.handle('ws:trash', async (_e, rootId: string, relPath: string) => {
     try {
       await trashWorkspacePath(rootId, relPath)
+      broadcastDataChanged('knowledge')
       return { ok: true }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
+
+  // 用系统默认程序打开仓库内文件 / 在资源管理器中定位（B-3 归档元信息卡）
+  // ★ 信任边界与 ws:trash 一致：只收 rootId + relPath，绝对路径一律经 requireInside 解析，
+  //   渲染层无法借此打开仓库外的任意文件。通用的 app:openExternal 只放行 userData 内的路径，
+  //   仓库文件会被它的安全拦截挡掉，故必须单开这条通道。
+  ipcMain.handle('ws:openInSystem', async (_e, rootId: string, relPath: string, reveal?: boolean) => {
+    try {
+      const abs = requireInside(rootId, relPath)
+      if (!existsSync(abs)) return { ok: false, error: '文件不存在（可能已被移动或删除）' }
+      if (reveal === true) {
+        shell.showItemInFolder(abs)
+        return { ok: true }
+      }
+      const err = await shell.openPath(abs)
+      return err ? { ok: false, error: err } : { ok: true }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
@@ -971,6 +1091,9 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       // 切换仓库后失效新仓库缓存（多仓库陈旧兜底，与 ws:openDir 同策略）
       invalidateIndexIfCurrentVault(r.id)
       invalidateGraphIndex()
+      // v3.2.0 条目 ④：切仓库 → 监听跟随（旧仓库的改动不再触发刷新）
+      syncVaultWatcher()
+      pruneOrphanBookMetaQuiet()
       return { rootId: r.id, name: r.name, path: r.rootPath }
     } catch (e) {
       return { error: (e as Error).message }
@@ -1058,6 +1181,8 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       setCurrentVault(null)
       invalidateKnowledgeIndex()
       invalidateGraphIndex()
+      // v3.2.0 条目 ④：当前仓库被删 → 关掉监听（目录已进回收站）
+      syncVaultWatcher()
     }
     return { ok: true, deletedCurrent: wasCurrent }
   })
@@ -1069,7 +1194,31 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
     setCurrentVault(null)
     invalidateKnowledgeIndex()
     invalidateGraphIndex()
+    // v3.2.0 条目 ④：退出仓库 → 关掉监听
+    syncVaultWatcher()
     return { ok: true, cleared: was }
+  })
+
+  /**
+   * v3.2.0 条目 ④ 保底机制：手动「刷新资源管理器」（口径 (b) 全量）。
+   *
+   * 语义对齐 VS Code 的 `workbench.action.files.refreshExplorer`，但本项目「文件树」与
+   * 「知识索引 / 归档清单」是两套缓存 → 全量口径 = 文件树（渲染层重扫已加载目录，见
+   * `src/modules/editor/index.tsx`）+ 知识索引/图谱失效 + 归档清单僵尸条目清理，
+   * 避免「树刷新了、知识库还是旧的」这种半刷新态。
+   *
+   * 主进程侧**不需要读目录**：`ws:listDir` 没有缓存（每次实时 readdir），所以这个按钮
+   * 从定义上就读不到旧值、不存在「假刷新」——这也正是它能当真保底的根本原因。
+   */
+  ipcMain.handle('ws:refreshVault', () => {
+    const cur = getCurrentVault()
+    if (!cur) return { ok: false, error: '当前没有打开的仓库' }
+    if (!existsSync(cur.rootPath)) return { ok: false, error: '仓库文件夹不存在（可能已被移动或删除）' }
+    invalidateKnowledgeIndex()
+    invalidateGraphIndex()
+    // 归档清单 prune（gcArchiveEntries）随归档退役一并移除（2026-09-20 §3）
+    broadcastDataChanged('knowledge')
+    return { ok: true, pruned: 0 }
   })
 }
 
@@ -1095,6 +1244,8 @@ export async function trashAllRegisteredVaults(): Promise<{ trashed: number; err
   setCurrentVault(null)
   invalidateKnowledgeIndex()
   invalidateGraphIndex()
+  // v3.2.0 条目 ④：全部仓库已进回收站 → 关掉监听
+  syncVaultWatcher()
   return { trashed, errors }
 }
 
