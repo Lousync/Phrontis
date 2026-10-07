@@ -16,7 +16,7 @@ import type { ReleaseNoteHighlight } from './types'
 
 export const RELEASE_NOTE_HIGHLIGHTS: readonly ReleaseNoteHighlight[] = [
   {
-    version: '3.5.0',
+    version: '3.4.1',
     section: '记账',
     title: '手机 AI 记的账，一键导进来',
     tag: '新增',
@@ -42,7 +42,7 @@ export const RELEASE_NOTE_HIGHLIGHTS: readonly ReleaseNoteHighlight[] = [
     },
   },
   {
-    version: '3.5.0',
+    version: '3.4.1',
     section: '终端',
     title: '内置真终端，AI 跑命令先给你看',
     tag: '新增',
@@ -57,7 +57,7 @@ export const RELEASE_NOTE_HIGHLIGHTS: readonly ReleaseNoteHighlight[] = [
     ],
   },
   {
-    version: '3.5.0',
+    version: '3.4.1',
     section: 'AI 教学',
     title: '从大纲到检验：课程模式',
     tag: '新增',
@@ -72,7 +72,7 @@ export const RELEASE_NOTE_HIGHLIGHTS: readonly ReleaseNoteHighlight[] = [
     ],
   },
   {
-    version: '3.5.0',
+    version: '3.4.1',
     section: 'AI 助手',
     title: '软件怎么用，直接问 AI',
     tag: '新增',
