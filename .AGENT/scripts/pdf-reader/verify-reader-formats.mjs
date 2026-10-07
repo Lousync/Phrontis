@@ -238,14 +238,16 @@ console.log('\n--- ⑨ decodeText：编码探测（hex 内联样本） ---')
 }
 
 // ===== ⑩ TabName 冻结 =====
-console.log('\n--- ⑩ TabName 冻结（仍 17 项） ---')
+console.log('\n--- ⑩ TabName 冻结（仍 19 项） ---')
 {
   const appModulesSrc = stripComments(read('src/lib/appModules.ts'))
   const moduleBlock = appModulesSrc.slice(appModulesSrc.indexOf('export const APP_MODULES'), appModulesSrc.indexOf('as const satisfies'))
   const ids = [...moduleBlock.matchAll(/id:\s*'([A-Za-z]+)'/g)].map((m) => m[1])
   // 2026-09-22 书市 S4：15 → 16（+bookMarket）。有意变更（方案 §1.2 第 5 条），与上面「仍 16 项」的小节标题对齐。
   // 2026-09-27 看板：16 → 17（+dashboard）。有意变更，不是漂移 —— 见 verify-pdf-reader ④ 的说明。
-  check('APP_MODULES 仍为 17 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 17, `实得 ${ids.length}: ${ids.join(',')}`)
+  // 2026-10-08 v3.5.0：17 → 19（+terminal +accounting）。两者都是「工作台内模块」（bar:false /
+  //   tile:true / palette:true），同笔记/日程形态 —— 有意变更，见 verify-pdf-reader ④ 的说明。
+  check('APP_MODULES 仍为 19 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 19, `实得 ${ids.length}: ${ids.join(',')}`)
 }
 
 // ===== ⑪ 扫描版探测（轻量方案） =====
@@ -613,6 +615,47 @@ console.log('\n--- ⑭ 大书体积分档 + 读取链路 ---')
     check(`★ 负向：${engine} 阅读器的删除 handler 内不读盘`,
       body.length > 0 && !/readerStateGet|pdfReaderGet/.test(body))
   }
+}
+
+// ===== ⑰ 书签「同一处」起点归一化（B-22 · 2026-10-08）=====
+// 防回归点：重新分页（换字号 / 拉窗口）会改变 relocate 范围 CFI 的两端 —— 全等比对失配，
+// 同一处再点会加出第二条。归一化到**范围起点**（vendor `collapse`）作为比较键；存盘仍是原始 CFI。
+// ★ 不能只折叠到父路径：跨段范围的父是章节容器，那样「整章算一处」（B-22 的警示）。
+// 运行期判据在 probe-epub-reader.mjs 的 8.5 步（改字号后跳回不再加第二条）。
+{
+  console.log('\n--- ⑰ 书签同一处：起点归一化（B-22）---')
+  const { bookmarkCfiKey } = await import('../../../src/lib/bookmarkCfi.ts')
+
+  const RANGE = 'epubcfi(/6/6!/4/2,/2,/14/1:54)'
+  check('归一化：同起点不同终点 → 同键（忽略会漂移的 end）',
+    bookmarkCfiKey(RANGE) === bookmarkCfiKey('epubcfi(/6/6!/4/2,/2,/16/1:10)'))
+  check('归一化：键 = 范围起点（vendor collapse 形式）',
+    bookmarkCfiKey(RANGE) === 'epubcfi(/6/6!/4/2/2)', bookmarkCfiKey(RANGE))
+  check('归一化：点 CFI 原样返回（不误伤）',
+    bookmarkCfiKey('epubcfi(/6/4!/4/2/1:0)') === 'epubcfi(/6/4!/4/2/1:0)')
+  const CROSS = 'epubcfi(/6/6!/4,/2[c3],/12/1:55)'
+  check('★ 归一化不退化成父路径（跨段范围不整章算一处）',
+    bookmarkCfiKey(CROSS) !== 'epubcfi(/6/6!/4)' && bookmarkCfiKey(CROSS) === 'epubcfi(/6/6!/4/2[c3])',
+    bookmarkCfiKey(CROSS))
+  check('归一化：不同起点 → 不同键（不会把两处并成一处）',
+    bookmarkCfiKey(RANGE) !== bookmarkCfiKey('epubcfi(/6/6!/4/2,/4,/14/1:54)'))
+  check('归一化：幂等（key(key(x)) === key(x)）',
+    bookmarkCfiKey(bookmarkCfiKey(RANGE)) === bookmarkCfiKey(RANGE))
+  check('归一化：空串 → 空串（不产出假 CFI）', bookmarkCfiKey('') === '')
+
+  const ep = stripComments(read('src/components/shared/epub/EpubReaderView.tsx'))
+  check('接线：EpubReaderView 导入 bookmarkCfiKey', /import\s*\{\s*bookmarkCfiKey\s*\}/.test(ep))
+  check('接线：toggleBookmark 用归一化键判存在', /bookmarkCfiKey\(b\.cfi\)\s*===\s*key/.test(ep))
+  check('★ 负向：不再有 `b.cfi === cfi` / `b.cfi === pageCfi` 全等比对',
+    !/\.cfi === cfi\b/.test(ep) && !/\.cfi === pageCfi\b/.test(ep))
+  check('接线：按钮已收藏态用归一化（pageMarked）',
+    /data-wb-marked=\{pageMarked/.test(ep) && /const pageMarked = useMemo/.test(ep))
+
+  // 运行期判据在场：改字号重排后跳回不再加第二条
+  let probe = ''
+  try { probe = read('.AGENT/scripts/workbench-shell/probes/probe-epub-reader.mjs') } catch { /* 缺失即 fail */ }
+  check('运行期判据在场：probe-epub-reader 含「改字号后跳回不再加第二条」',
+    /epubFontInc/.test(probe) && /B-22/.test(probe))
 }
 
 // 运行期判据在场（防被静默删掉）：上面全是**静态接线** —— 而本功能的核心风险 R1

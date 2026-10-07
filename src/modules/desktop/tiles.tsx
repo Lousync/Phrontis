@@ -14,6 +14,7 @@ import {
   ListTodo, CalendarCheck, FileClock, PieChart, FolderTree, MessageSquare,
   BookOpen, Trash2, LifeBuoy, History, FlaskConical, LayoutGrid,
   Clock, CalendarDays, Activity, ChevronLeft, ChevronRight,
+  SquareTerminal, Wallet,
 } from 'lucide-react'
 import {
   EditorIcon, BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon,
@@ -668,6 +669,9 @@ const TILE_META: Record<string, { desc: string; icon: (size: number) => ReactNod
   moments: { desc: '发布与回顾', icon: (s) => <MomentsIcon size={s} /> },
   aiTeaching: { desc: '讲义 / 研读 / 出题', icon: (s) => <AiTeachingIcon size={s} /> },
   toolbox: { desc: '零散小工具', icon: (s) => <ToolboxIcon size={s} /> },
+  // v3.5.0 终端 / 记账（工作台内模块，同笔记/日程形态；图标与左栏书签同一对 lucide 图标）
+  terminal: { desc: '内置终端 · 多会话', icon: (s) => <SquareTerminal size={s} /> },
+  accounting: { desc: '流水 / 统计 / 复盘', icon: (s) => <Wallet size={s} /> },
   plugins: { desc: '已装插件管理', icon: (s) => <PluginIcon size={s} /> },
   bookMarket: { desc: '从书源找书并下载上架', icon: (s) => <BookMarketIcon size={s} /> },
   recycle: { desc: '找回删掉的内容', icon: (s) => <Trash2 size={s} /> },
@@ -682,7 +686,8 @@ const TILE_META: Record<string, { desc: string; icon: (size: number) => ReactNod
  *
  * 旧实现在这里独立声明了一份 13 项的字面量，注释还写着「新增模块时三处都要补」——
  * 那份注释描述的正是问题本身。现在**只保留图标与说明**，成员与顺序一律来自
- * `lib/appModules` 的唯一真相源（`tile` 标记），新增模块只需在真相源里标一个 `tile: true`。
+ * `lib/appModules` 的唯一真相源（`tile` 标记）。★ 新增模块：真相源里标 `tile: true` **之外**，
+ * 还得在此补一条「图标 + 说明」—— 否则 `DESK_MODULES` 会展开出 undefined（C3 契约断言覆盖）。
  */
 export const DESK_MODULES: ModuleDef[] = TILE_MODULE_IDS.map((tab) => ({
   tab,

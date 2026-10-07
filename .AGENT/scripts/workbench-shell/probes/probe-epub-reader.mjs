@@ -29,9 +29,10 @@
  *   8) 返回书架 → 重开 → 位置从 CFI 恢复（回到第三章那一页，不是回首页）
  *   8.5) 书签（2026-09-22）：工具栏加书签 → readerState.json 落 CFI → **同一页再点即移除（盘上回到 0 条）**
  *        → 再加 → 右栏「阅读」面板出现该行（徽标 §）→ 翻走（按钮回未收藏态）→ 点该行跳回原处。
- *        ★ 顺序刻意「先同页验移除、再验跳转」：同一页 CFI 必然相同，故"再点 = 移除"是确定性的；
- *          而「跳回后当前 CFI 是否仍全等」不确定（换字号/窗口会变）→ 放最后**只记 note 不判失败**，
- *          否则这条探针会在无关改动下变红（已知限制见 EpubReaderView.toggleBookmark 注释）。
+ *        ★ 顺序刻意「先同页验移除、再验跳转」：同一页 CFI 必然相同，故"再点 = 移除"是确定性的。
+ *   8.6) B-22（2026-10-08）：改字号重新分页 → 点右栏书签行跳回存储 CFI → 按钮仍为已收藏（起点归一化）
+ *        → 再点 = 移除（盘上 0 条，不是加出第二条）。全等比对在此场景会因范围 end 漂移失配；
+ *        归一化实现见 `src/lib/bookmarkCfi.ts` 与 `docs/pending-fixes.md` B-22。
  *   9) ★ 恶意书负向：三种载荷各占一章，逐一验「载荷在 DOM 里 + 一句都没执行 + 宿主清白」
  *
  * ★ fixture 前置复位（探针**必须**自带，不能只靠 seed 脚本）：
@@ -179,8 +180,21 @@ async function main() {
     if (marks.length > 0) break
     await sleep(300)
   }
-  ok('Overlayer 高亮真的画上了（draw-annotation → <g fill> 落 #efb84c）',
-    Array.isArray(marks) && marks.includes('#efb84c'), JSON.stringify(marks))
+  // 期望色**不写死**：新建摘录用的是 settings 的「上次用色」(excerptLastColor)，dev 环境可能已被
+  // 上一轮手动操作改掉 —— 写死黄色会在无关状态下假红（实测本机为 'v' → #9188e8）。
+  // 改为读该摘录 color 对应的色板值：从应用 CSS `.kb-exc-<id>` 的 --exc 取（与 EpubReaderView 的
+  // HL_FILL 应同值）。这条同时验证「画的颜色 = 摘录的颜色」这个真正不变量。
+  const expectedFill = String(await evalJs(`(() => {
+    const el = document.createElement('span')
+    el.className = 'kb-exc-' + ${JSON.stringify(String(epubEx?.color ?? 'y'))}
+    document.body.appendChild(el)
+    const v = getComputedStyle(el).getPropertyValue('--exc').trim()
+    el.remove()
+    return v
+  })()`))
+  ok('Overlayer 高亮真的画上了（draw-annotation → <g fill> = 摘录色板色）',
+    !!expectedFill && Array.isArray(marks) && marks.includes(expectedFill),
+    `expected=${expectedFill} got=${JSON.stringify(marks)}`)
 
   // ===== 5.5) 点已有高亮 → 回看卡（此路径曾因 `view.getContents()` 不存在而整体失效）=====
   const hl = await pierceHighlightRect()
@@ -427,7 +441,25 @@ async function main() {
   ok('点右栏书签行 → 跳回加书签处（进度回到该值附近）', Math.abs(pctBack - pctAtMark) <= 3, `now=${pctBack} mark=${pctAtMark}`)
   const cfiMatched = (await markAttr()) === '1'
   note('跳回后当前 CFI 与存储值的稳定性',
-    cfiMatched ? '全等 ⇒ 在此处再点一次即移除' : '⚠ 不等 ⇒ 在此处再点会加出第二条（已知限制，非失败）')
+    cfiMatched ? '已收藏 ⇒ 在此处再点一次即移除' : '⚠ 未收藏 ⇒ 起点归一化未命中（见下 8.6 断言）')
+
+  // ===== 8.6) B-22：改字号重新分页后，回到同一处不再加出第二条 =====
+  // 归一化判据（起点）只在这个场景起作用：全等比对会因范围 end 漂移失配 → 加出第二条。
+  // 步骤：放大字号重排 → 点右栏书签行跳回存储的 CFI → 按钮仍应为已收藏态 → 再点 = 移除（盘上 0 条）。
+  {
+    const before = (stateOf(BOOK)?.bookmarks ?? []).length
+    await evalJs(`(() => { document.querySelector('[data-wb="epubFontInc"]')?.click(); return true })()`)
+    await sleep(1200)
+    await evalJs(`(() => { document.querySelector('[data-wb="readingMark"]')?.click(); return true })()`)
+    await sleep(1600)
+    const marked = await markAttr()
+    ok('B-22：改字号重排后跳回同一处，书签按钮仍为已收藏态（起点归一化生效）',
+      before === 1 && marked === '1', `before=${before} marked=${marked}`)
+    await clickMark()
+    const after = (stateOf(BOOK)?.bookmarks ?? []).length
+    ok('B-22：此时再点书签 = 移除（盘上 0 条，而不是加出第二条）',
+      (await waitAttr(MARK, 'data-wb-marked', '0')) && after === 0, `after=${after}`)
+  }
 
   // ===== 9) ★ 恶意书负向 =====
   ok('点「返回书架」准备开恶意书', await backToShelf())

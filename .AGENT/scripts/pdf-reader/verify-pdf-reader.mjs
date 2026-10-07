@@ -6,7 +6,7 @@
 //   ② 负向断言：`.knowbase/modules/pdfReader.json` 的读写路径只允许出现在
 //      pdfReaderVaultRepo.ts（唯一写方）；用共用剥注释器，防止注释里的说明文字假命中。
 //   ③ DataChangeScope 双侧含 'pdfReader'（渲染层 union + 主进程 broadcastDataChanged 调用）。
-//   ④ TabName 仍 16 项（APP_MODULES 行数）——防止后续批次顺手新增 TabName（方案 §0.2 冻结）。
+//   ④ TabName 仍 19 项（APP_MODULES 行数）——防止后续批次顺手新增 TabName（方案 §0.2 冻结）。
 //   ⑤ pdfLayout 纯函数用例（批次 3 落地后启用，本批次自动跳过）。
 //
 // 运行（项目根目录）：
@@ -97,7 +97,7 @@ check('书架挂 useDataChanged(pdfReader)（AI/导入改动界面自动刷新�
 // 2026-09-17 拍板「书架内自渲染」：点书走模块内阅读器，不再借道编辑器
 check('书架点书不再派发 kb-open-note（书架内自渲染）', !bookshelfSrc.includes('kb-open-note'))
 
-// ===== ④ TabName 冻结 17 项 =====
+// ===== ④ TabName 冻结 19 项 =====
 console.log('\n--- ④ TabName 冻结 ---')
 const appModulesSrc = stripComments(readFileSync(join(ROOT, 'src/lib/appModules.ts'), 'utf8'))
 const moduleBlock = appModulesSrc.slice(appModulesSrc.indexOf('export const APP_MODULES'), appModulesSrc.indexOf('as const satisfies'))
@@ -106,7 +106,9 @@ const ids = [...moduleBlock.matchAll(/id:\s*'([A-Za-z]+)'/g)].map((m) => m[1])
 // appModules 里它 bar/tile/palette 全 true 且与工具箱/插件平级（方案 §1.2 第 5 条）。
 // 2026-09-27 看板：16 → 17（+dashboard）。同样是**有意变更** —— 它与上面相反，
 // bar/tile/palette **全 false**，入口只在左栏书签（见下一条断言）。
-check('APP_MODULES 仍为 17 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 17, `实得 ${ids.length}: ${ids.join(',')}`)
+// 2026-10-08 v3.5.0：17 → 19（+terminal +accounting）。两者都是「工作台内模块」——
+// bar:false（入口在左栏书签，不占图标条）/ tile:true / palette:true，同笔记/日程形态。
+check('APP_MODULES 仍为 19 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 19, `实得 ${ids.length}: ${ids.join(',')}`)
 check("bookshelf 仍为入口产生型（bar:false / tile:false / palette:false）", /id:\s*'bookshelf',\s*label:\s*'书架',\s*bar:\s*false,\s*tile:\s*false,\s*palette:\s*false/.test(moduleBlock))
 // 看板三 flag 全 false 是**设计**（入口只在左栏书签），不是漏配 —— 它若被误改成
 // 图标条/磁贴/命令面板可见，就是清单漂移。这条断言把「刻意」钉住。

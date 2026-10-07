@@ -8,6 +8,7 @@ import { showGlobalConfirm } from '../../../lib/globalConfirm'
 import { useDataChanged } from '../../../lib/dataChanged'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
+import { bookmarkCfiKey } from '../../../lib/bookmarkCfi'
 import { KB_BOOKMARK_DELETE, KB_CBZ_THUMBS, KB_CBZ_THUMB_REQ, KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, KB_READER_STATE_CHANGED, type EpubTocItem } from '../pdf/pdfEvents'
 // 真源（扩展名 / kind / MIME 三张表都在那里）。★ 本文件**不得**再出现 MIME 或书籍扩展名字面量：
 // foliate 的 makeBook() 按 File 的 name/type 分派解码器（view.js:13-21，不看魔数），
@@ -272,6 +273,12 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
    * 与 `pct` 写在同一处。★ 别改成「渲染时读 ref」：那样图标会慢一拍且行为依赖别处 setState。
    */
   const [pageCfi, setPageCfi] = useState('')
+  /**
+   * 书签按钮「已收藏」判据：按**起点归一化**的 CFI 比对（B-22）—— 全等比对在重新分页
+   * （换字号 / 拉窗口）后会失配，同一处再点会加出第二条。存盘仍是原始 CFI，只有比较归一。
+   */
+  const pageCfiKey = useMemo(() => bookmarkCfiKey(pageCfi), [pageCfi])
+  const pageMarked = useMemo(() => bookmarks.some((b) => bookmarkCfiKey(b.cfi) === pageCfiKey), [bookmarks, pageCfiKey])
   const [capture, setCapture] = useState<{ rect: SelectionRect; cfi: string; text: string } | null>(null)
   const [notePop, setNotePop] = useState<{ rect: SelectionRect; excerpt: ExcerptItem } | null>(null)
 
@@ -385,19 +392,21 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
   }, [])
 
   /**
-   * 书签切换（2026-09-22）：当前视口 = 当前 relocate 的 CFI，同一处再点一次即移除。
+   * 书签切换（2026-09-22；B-22 起点归一化 2026-10-08）：当前视口 = 当前 relocate 的 CFI，
+   * 同一处再点一次即移除。
    *
-   * - **定位键 = 整条 CFI 字符串**（与 txt 用 paraIndex 同理，只是 foliate 系的"位置"就是 CFI）。
-   *   判定用全等、不做任何截断：folio 的 range CFI 形如 `epubcfi(/6/6!/4/2,/2,/14/1:54)`
-   *   （公共父路径 + 逗号分隔的两个子路径），"取第一个逗号之前"会退化成整章 —— 比不判还糟。
-   * - **已知限制**：换字号 / 改窗口宽度会重新分页 → 同一屏的 CFI 与存储值不同 → 再点会加出第二条。
-   *   两条都跳同一处且可各自删，故不为此发明 CFI 归一化（口径与摘录 / 进度一致：存原样）。
+   * - **存盘 = 原始 range CFI**（形如 `epubcfi(/6/6!/4/2,/2,/14/1:54)`，与摘录 / 进度同口径）；
+   *   `goTo` 跳转语义不变。
+   * - **判「同一处」按起点归一化比对**（`bookmarkCfiKey`）：换字号 / 拉窗口重新分页会让范围两端
+   *   （尤其 `end`）漂移，全等比对会失配 → 同一处再点加出第二条（B-22）。归一化只用于比较。
+   *   ★ 不能只折叠到**父路径** —— 对跨段范围会退化成整章（见 `src/lib/bookmarkCfi.ts`）。
    * - 与 txt 一致：不写摘录、不进「导出为笔记」（书签只供快速跳转）。
    */
   const toggleBookmark = useCallback(() => {
     const cfi = cfiRef.current
     if (!cfi) return
-    const exists = bkmRef.current.find((b) => b.cfi === cfi)
+    const key = bookmarkCfiKey(cfi)
+    const exists = bkmRef.current.find((b) => bookmarkCfiKey(b.cfi) === key)
     let next: BookBookmark[]
     if (exists) {
       next = bkmRef.current.filter((b) => b.id !== exists.id)
@@ -1137,11 +1146,11 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
         <>
           {/* 书签：只对文字层书有意义（cbz 整页是图片，且 schema 侧 `FOLIATE_KINDS` 不收 cbz ——
               放在这个分支里，按钮可见性 = 可存性，不会出现"存了但从没出现过"的孤儿条目）。
-              判定 = 当前 CFI 全等（见 toggleBookmark 的已知限制）。 */}
-          <button onClick={toggleBookmark} data-wb="epubBookmark" data-wb-marked={bookmarks.some((b) => b.cfi === pageCfi) ? '1' : '0'}
-            title={bookmarks.some((b) => b.cfi === pageCfi) ? '移除本页书签' : '收藏本页书签'}
-            className={`flex items-center gap-1 rounded p-0.5 ${bookmarks.some((b) => b.cfi === pageCfi) ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-            {bookmarks.some((b) => b.cfi === pageCfi) ? <Bookmark size={14} /> : <BookmarkPlus size={14} />}<span className="kb-l1">书签</span>
+              判定 = 当前 CFI 与已存书签按**起点归一化**比对（B-22，见 bookmarkCfiKey）。 */}
+          <button onClick={toggleBookmark} data-wb="epubBookmark" data-wb-marked={pageMarked ? '1' : '0'}
+            title={pageMarked ? '移除本页书签' : '收藏本页书签'}
+            className={`flex items-center gap-1 rounded p-0.5 ${pageMarked ? 'text-[var(--accent)]' : 'hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+            {pageMarked ? <Bookmark size={14} /> : <BookmarkPlus size={14} />}<span className="kb-l1">书签</span>
           </button>
           <button onClick={() => changeFont(-0.1)} title="缩小字号" data-wb="epubFontDec"
             className="flex items-center rounded p-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Type size={13} /><span className="text-[10px]">−</span></button>
