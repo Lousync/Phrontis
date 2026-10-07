@@ -47,7 +47,7 @@ const GLOSSARY_SKELETON: { 说明: string; rows: GlossaryRow[] } = {
   说明: 'AI 助手术语表：让 AI 与用户对同一功能的命名理解统一。alias=用户可能的说法；name=规范数据域名；tools=对应的 AI 工具（可省略）。直接编辑本文件，保存后下一轮对话生效。',
   rows: [
     { alias: '笔记 / 页面 / 笔记区 / 知识库', name: '知识库页面', tools: 'builtin.knowledge.search / builtin.knowledge.create-page' },
-    { alias: '博客 / 日志 / 日记', name: '博客日记（每天一篇）', tools: 'builtin.blog.search / builtin.blog.create-entry' },
+    { alias: '博客 / 日志 / 日记', name: '博客日记（每天一篇）', tools: 'builtin.blog.search / builtin.blog.read / builtin.blog.create-entry' },
     { alias: '日程 / 待办 / 任务 / 计划', name: '日程待办', tools: 'builtin.schedule.list-todos / builtin.schedule.create-todo / builtin.schedule.update-todo' },
     { alias: '打卡 / 习惯', name: '习惯打卡', tools: 'builtin.habits.stats / builtin.checkin.check-habit' },
     { alias: '错题 / 题目 / 试卷', name: '错题本', tools: 'builtin.quiz.list / builtin.quiz.stats / builtin.quiz.gen-paper' },

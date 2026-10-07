@@ -83,7 +83,7 @@ src/
 15. 错题本 `source_space` 推导（`quizRepo.vaultResolveSource`）：上溯**必须走到 space 才 break**，notebook 只赋值不 break。演示数据工具 `.AGENT/scripts/demo-seed/`。
 
 ### AI 工具
-16. **工具 schema 就是每轮成本**（`.AGENT/scripts/ai-tools-audit/`）：core 13 个常驻 + ondemand 21 个默认折叠（2026-09-28 实数，枚举自 builtinTools.ts）。新增默认 `tier: 'ondemand'`，单工具 schema **≤800 字符**，**严禁在 description 里罗列返回字段**。
+16. **工具 schema 就是每轮成本**（`.AGENT/scripts/ai-tools-audit/`）：core 14 个常驻 + ondemand 26 个默认折叠（2026-10-07 实数，枚举自 builtinTools.ts）。新增默认 `tier: 'ondemand'`，单工具 schema **≤800 字符**，**严禁在 description 里罗列返回字段**。
 17. 结果侧只做两件事：**拿得少**（默认值 / 上限）、**丢得早**（`MAX_TOOL_RESULT_CHARS=24000` 摘要替代 + `KEEP_RECENT_TOOL_RESULTS=3`）。压缩必须是纯函数且幂等，否则打散 prompt cache。
 18. 新模块接入 AI 工具的接线清单：`DataChangeScope` 加该模块 scope + 对应面板挂 `useDataChanged`（否则表象是「AI 说改好了、界面没反应」）；提供 `*ResolveOrCreate(name)` 命名桥；查询工具**不得**有建标签这类副作用；新写工具同步补 `builtin.tool.request` 的 description 清单。
 19. 出题 → 答题闭环：组卷落成知识库 `.md`，页内每题一个 ` ```quiz ` 围栏；答错自动回流错题本，**题号必须重排 1..N**（`snapshot.no` 是原页序号，沿用会把错题记到别的题上）。契约 `.AGENT/scripts/quiz-tools/verify-quiz-fence.mjs`。

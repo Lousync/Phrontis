@@ -16,7 +16,8 @@ import { getGraphIndex } from './kbStore/graphIndex'
 import { vaultGetPageById, vaultGetCategories, vaultCreatePage } from './kbStore/knowledgeVaultRepo'
 import { searchKnowledge } from './knowledgeSearch'
 import { searchHelp, helpCatalog } from './helpService'
-import { vaultCreateEntry, vaultSearchEntries } from './kbStore/blogVaultRepo'
+import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries } from './kbStore/blogVaultRepo'
+import { normalizeBlogDate, nearestEntryDates, blogHitExcerpt } from './blogToolsPure'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
 import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, type TodoRow } from './kbStore/scheduleVaultRepo'
 import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from './kbStore/accountingVaultRepo'
@@ -511,11 +512,11 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.blog.search',
     title: '搜索博客日记',
-    description: '按关键词搜索博客日记（每天一篇的日志），匹配标题与正文，返回 日期/标题/摘录。knowledge.search 只搜知识库页面不含博客，找博客内容用本工具',
+    description: '按关键词搜索博客日记（每天一篇的日志），匹配标题与正文，返回 日期/标题/字数/命中处摘录。整段子串匹配，多词请拆开分次搜；读全文用 builtin.blog.read（可按日期直取）',
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '关键词（匹配标题与正文）' },
+        query: { type: 'string', description: '关键词（匹配标题与正文；多词拆开分次搜）' },
         limit: { type: 'number', description: '上限, 默认10' },
       },
       required: ['query'],
@@ -531,14 +532,67 @@ export function registerBuiltinTools(): void {
     const limit = clamp(Math.floor(num(args.limit, 10)), 1, 50)
     // 与博客 UI 同一份 .knowbase/blog/*.md（vaultSearchEntries 已按创建时间倒序、内部截 50）
     const rows = vaultSearchEntries(q)
+    // 正式版台账 F-15：excerpt 由「固定开头 120 字」改为命中窗口（命中在正文中段时
+    // 旧摘录不含命中处，模型无法确认是否目标篇目）；剥 markdown 逻辑在 blogToolsPure
     return rows.slice(0, limit).map(e => ({
       id: e.id,
       date: e.date,
       title: e.title,
-      // excerpt 剥 markdown 标记（\x60 = 反引号转义：源码里不能出现裸反引号，
-      // .AGENT 契约的注释剥离状态机不认 regex 字面量，会把它当模板串起点吞掉后续源码）
-      excerpt: (e.contentMd || '').replace(/[#>*\x60[\]~-]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120),
+      wordCount: e.wordCount,
+      excerpt: blogHitExcerpt(e.contentMd, q),
     }))
+  })
+
+  // 1b-2. builtin.blog.read —— 博客日记全文读取（正式版台账 F-15，2026-10-06 登记）。
+  //     blog.search 只有 120 字摘录，vault.read 两路（id / path）都被 .knowbase 点前缀规则
+  //     挡在索引与白名单外（N-7 既定设计），全文读取链路缺失。repo 层 vaultGetEntryById /
+  //     vaultListEntries({date}) 现成，本工具只做暴露。.knowbase/blog 对通用文件工具维持封闭，
+  //     博客对 AI 入口收敛为 blog.search + blog.read 专用通道（N-2 搁置条目「一处可封死」
+  //     前提不破坏）。tier ondemand（铁律 16）。
+  registerTool({
+    name: 'builtin.blog.read',
+    title: '读取博客日记全文',
+    description: '按 id 或日期读取博客日记全文（Markdown 源文）。通常先 blog.search 拿 id 再读；date 可直取当天（每天一篇）',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '日记 id（blog.search 返回）' },
+        date: { type: 'string', description: '日期 YYYY-MM-DD，直取当天日记' },
+        maxChars: { type: 'number', description: '全文截断上限字符, 默认12000' },
+      },
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'blog',
+  }, args => {
+    const id = str(args.id).trim()
+    const dateRaw = str(args.date).trim()
+    if (!id && !dateRaw) throw new Error('缺少参数：id 或 date 至少提供一个')
+    const maxChars = clamp(Math.floor(num(args.maxChars, 12000)), 200, 24000)
+    let entry = id ? vaultGetEntryById(id) : null
+    if (!entry && dateRaw) {
+      const date = normalizeBlogDate(dateRaw, todayLocal())
+      if (!date) throw new Error(`日期无法识别：${dateRaw}（需要 YYYY-MM-DD，如 2026-10-05）`)
+      entry = vaultListEntries({ date })[0] ?? null
+      if (!entry) {
+        // 按日期读是最高频问法，扑空时回附近日期让模型自行纠正（口述日期常差一天）
+        const near = nearestEntryDates(date, vaultListEntries().map(e => e.date), 5)
+        throw new Error(`${date} 没有日记。附近的日记日期：${near.join('、') || '（当前没有任何日记）'}`)
+      }
+    }
+    if (!entry) throw new Error(`未找到日记 id=${id}（可先 blog.search 确认）`)
+    const truncated = entry.contentMd.length > maxChars
+    return {
+      id: entry.id,
+      date: entry.date,
+      title: entry.title,
+      tags: entry.tags.map(t => t.name),
+      wordCount: entry.wordCount,
+      content: truncated ? entry.contentMd.slice(0, maxChars) : entry.contentMd,
+      truncated,
+    }
   })
 
   // 1c. builtin.knowledge.graph-topology —— 图谱拓扑体检 + 连线建议（DP v3.4.0 第 9 项，2026-09-28）。
@@ -1192,7 +1246,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec）默认不在工具列表中。需要执行写操作或检索博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
