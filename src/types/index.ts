@@ -1026,6 +1026,14 @@ export type AgentStreamEvent =
   | { kind: 'text'; delta: string }
   | { kind: 'tool-start'; name: string; label: string; target?: string }
 
+/** N-3 多对话并行：助手会话运行态广播（assistant:runstate，全窗口）。
+ *  running = 在跑会话 id 集快照（每次开始/结束都发全量，渲染层整体替换）；
+ *  ended = 结束那一次附带的单次运行结果（ok=false 且 code≠ABORTED → 失败 Toast + 红标） */
+export interface AgentRunStateEvent {
+  running: string[]
+  ended?: { sessionId: string; chatId: string; ok: boolean; code?: string; error?: string }
+}
+
 export interface AgentChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -2230,14 +2238,18 @@ export interface ElectronAPI {
   /** 会话压缩（/compress 指令 + 自动预检共用）：折叠检查点后旧轮为纪要并推进检查点 */
   agentCompressSession: (req: { sessionId: string; modelId?: string; providerId?: string; effort?: string }) => Promise<AgentCompressResult>
   agentAbort: (chatId: string) => Promise<boolean>
+  /** N-3 多对话并行：按会话停止（该会话的全部在跑调用一并中止） */
+  agentAbortSession: (sessionId: string) => Promise<boolean>
   /** B4 编辑器内联建议：手动触发一次续写建议（独立于对话历史） */
   aiInlineSuggestRun: (req: { requestId: string; text: string; offset: number; relPath?: string; modelId?: string; providerId?: string; effort?: string }) => Promise<{ ok: boolean; text?: string; aborted?: boolean; error?: string }>
   /** B4 取消在途建议请求 */
   aiInlineSuggestCancel: (requestId: string) => Promise<{ ok: boolean }>
-  /** AgentRunner 实时过程步骤（llm/tool 每步完成即推送，payload {chatId, step}） */
-  onAgentStep: (cb: (p: { chatId: string; step: AgentTraceStep }) => void) => () => void
-  /** AgentRunner 流式增量（思考链 / 正文 / 工具进行中；主进程已合批，payload {chatId, event}） */
-  onAgentStream: (cb: (p: { chatId: string; event: AgentStreamEvent }) => void) => () => void
+  /** AgentRunner 实时过程步骤（llm/tool 每步完成即推送，payload {chatId, sessionId, step}） */
+  onAgentStep: (cb: (p: { chatId: string; sessionId: string; step: AgentTraceStep }) => void) => () => void
+  /** AgentRunner 流式增量（思考链 / 正文 / 工具进行中；主进程已合批，payload {chatId, sessionId, event}） */
+  onAgentStream: (cb: (p: { chatId: string; sessionId: string; event: AgentStreamEvent }) => void) => () => void
+  /** N-3 多对话并行：助手会话运行态（全窗口广播；running = 在跑会话 id 集快照，ended = 单次运行结果） */
+  onAssistantRunState: (cb: (p: AgentRunStateEvent) => void) => () => void
   agentSessions: () => Promise<AgentSessionInfo[]>
   agentNewSession: (title?: string, source?: AgentSessionSource) => Promise<AgentSessionInfo>
   agentMessages: (sessionId: string) => Promise<AgentStoredMessage[]>

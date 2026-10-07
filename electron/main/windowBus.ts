@@ -77,6 +77,8 @@ export const BROADCAST_CHANNEL = {
   aiTeachCourseGenProgress: 'aiTeach:course-gen-progress',
   /** N-1 手册通道：助手侧提示（如升格 Toast），载荷 `{ sessionId, message }` */
   assistantNotice: 'assistant:notice',
+  /** N-3 多对话并行：助手会话运行态（全窗口），载荷 AgentRunStateEvent `{ running: sessionId[], ended? }` */
+  assistantRunState: 'assistant:runstate',
   /** 仓库文件被主进程改写（AI 写工具落盘），载荷 `{ relPath, mtimeMs? }` */
   wsExternalChange: 'ws:external-change',
   /** 仓库目录发生文件系统变更（外部改动 / 手动刷新），载荷 `{ relPaths: string[], watcherError?: string }`

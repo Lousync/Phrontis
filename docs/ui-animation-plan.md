@@ -55,6 +55,7 @@
 | `.kb-item-in` | `opacity + translateY(4px)` 200ms，`--ease-kb` | 列表项进场（新增行） |
 | `.kb-item-out` | `opacity→0 + scale(0.98) + 高度塌缩`，180ms | 列表项退场（普通删除，区别于吞噬特效） |
 | `.kb-micro-pop` | `scale 1→0.85→1` 180ms spring | 星标、勾选、开关点击反馈 |
+| `.kb-spin` | `rotate 360°` 0.8s 线性无限循环；形状 = 11px 圆环（描边色可覆盖） | 连续 busy 指示：会话列表「转圈示忙」（N-3）。reduced-motion 降速 2.4s 不停转（运动即语义） |
 | `.kb-dock-hint` | `opacity 0→1 + translateX(12px→0)` 170ms | 可拖动浮窗拖近停靠区时的落位预览块（G 类） |
 | `.kb-theme-vt` | `::view-transition-old/new(root)` 交叉淡化 220ms | 主题切换（View Transition），降级走容器级过渡 |
 

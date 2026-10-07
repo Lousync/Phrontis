@@ -15,6 +15,7 @@ import { MessageList, fmtTime } from './MessageList'
 import { useAssistantChat } from './useAssistantChat'
 import { AssistantEntryButton } from './AssistantEntry'
 import { AiChatSidebar } from './AiChatSidebar'
+import { SessionRunMark } from './SessionRunMark'
 import { QuoteChips } from './QuoteChips'
 import { UsageRing, fmtTok } from '../UsageRing'
 import { buildQuotedBody } from './selQuotes'
@@ -95,7 +96,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     slashSkills, editing, setEditing, copiedIdx, setCopiedIdx, deletingId,
     drawerMounted, drawerOpen, toggleDrawer, closeDrawer,
     send, newSession, loadSession, removeSession, regenerate, editSubmit, deleteMessage,
-    abort, dismissChanges,
+    abort, dismissChanges, runStateOf,
     modelId, setModelId, thinking, setThinking, attachedFiles, setAttachedFiles,
     contextInfo, contextRemoved, dismissContext, restoreContext,
   } = chat
@@ -342,6 +343,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                           <span className="block truncate">{sess.title}</span>
                           <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
                         </span>
+                        <SessionRunMark mark={runStateOf(sess.id)} />
                         <button
                           onClick={e => { e.stopPropagation(); void removeSession(sess.id) }}
                           className={`shrink-0 p-0.5 rounded ${deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 group-hover:opacity-100 hover:text-red-400'}`}

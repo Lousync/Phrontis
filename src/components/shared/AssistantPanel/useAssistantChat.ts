@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { showToast } from '../../../lib/toast'
 import { handleChatCommand } from '../../../lib/chatCommands'
 import { getAssistantContext } from '../../../lib/assistantContext'
@@ -6,10 +6,14 @@ import { useSettings } from '../../../lib/SettingsContext'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentRegenerate, agentEditMessage, agentDeleteMessage,
-  llmListProviders, agentAbort, aiToolsListSkills, onAssistantNotice,
+  llmListProviders, agentAbortSession, aiToolsListSkills, onAssistantNotice,
 } from '../../../lib/ipc'
 import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo } from '../../../types'
-import { useAgentStream } from './useAgentStream'
+import type { StreamDraft } from '../../../lib/agentStreamCore'
+import {
+  MAX_PARALLEL, subscribeAssistantRunState, getRunBucket, isSessionRunning, runningSessionCount,
+  runMarkOf, beginRun, endRun, markSessionViewed, unmarkSessionViewed, takeEndedFor,
+} from '../../../lib/assistantRunStore'
 import type { UiMessage } from './MessageList'
 
 /**
@@ -23,6 +27,10 @@ import type { UiMessage } from './MessageList'
  * 会话数据真源在主进程（agentSessions/agentMessages），多实例各自拉取；发送后以
  * refreshMessages 按会话库对齐，切换宿主不丢历史。宿主特有行为通过 options 注入：
  * 上下文优先级链、发送前正文预处理（划词引用）、chatCommand surface。
+ *
+ * N-3 多对话并行（docs/assistant-parallel-design.md）：运行态/流式草稿的真源上移 ——
+ * 三宿主共享 assistantRunStore（sessionId 分桶），pending 从「hook 全局布尔」改为
+ * 「目标会话是否在跑」；切走会话不终止运行，切回恢复实时流，后台完成/失败有角标与 Toast。
  */
 
 export interface AssistantChatOptions {
@@ -49,9 +57,10 @@ export interface AssistantChatController {
   input: string
   setInput: (v: string) => void
   inputRef: React.RefObject<HTMLTextAreaElement | null>
+  /** 激活会话是否在跑（N-3：会话级 pending —— 别的会话在跑不占本会话的锁） */
   pending: boolean
   liveSteps: AgentTraceStep[]
-  draft: ReturnType<typeof useAgentStream>['draft']
+  draft: StreamDraft | null
   lastChanges: AgentChange[] | null
   compressing: boolean
   pickedSkill: SkillInfo | null
@@ -77,6 +86,8 @@ export interface AssistantChatController {
   dismissChanges: () => void
   /** 主动刷新会话列表（宿主切换等场景） */
   refreshSessions: () => Promise<void>
+  /** N-3 会话列表运行态标记（running=转圈 / unread=完成未读蓝点 / failed=失败红标） */
+  runStateOf: (sid: string) => 'running' | 'failed' | 'unread' | null
   /** 对话模型（providerId:modelId 串；空 = 全局默认）——settings 持久化 */
   modelId: string
   setModelId: (v: string) => void
@@ -168,7 +179,6 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [input, setInput] = useState('')
-  const [pending, setPending] = useState(false)
   // / 弹层（指令 + 已装 Skill）与 Skill 显式调用 chip、压缩进行时占位
   const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
   const [pickedSkill, setPickedSkill] = useState<SkillInfo | null>(null)
@@ -192,12 +202,33 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerMounted, setDrawerMounted] = useState(false)
   const drawerTimerRef = useRef<number | null>(null)
-  const chatIdRef = useRef<string>('')
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   /** 当前会话 id 的实时镜像：回复返回时判断用户是否已切换会话 */
   const activeIdRef = useRef<string | null>(null)
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
-  const { draft, liveSteps, begin: beginStream, end: endStream } = useAgentStream(chatIdRef)
+
+  // ===== N-3 多对话并行：运行态/流式草稿来自共享 store（三宿主单例） =====
+  // store 60ms 节流 notify → bump 重渲染，pending/draft/liveSteps 每次渲染按激活会话现读
+  const [, bumpRunVersion] = useReducer((x: number) => x + 1, 0)
+  /** refreshMessages 的稳定引用：store 订阅回调（声明在前）触达后定义的刷新函数用 */
+  const refreshMessagesRef = useRef<((sid: string) => Promise<void>) | null>(null)
+  useEffect(() => subscribeAssistantRunState(() => {
+    // 后台完成时正被本宿主查看（本宿主不是发起方、没有 finally 兜底）→ 补一次消息对齐
+    const sid = activeIdRef.current
+    if (sid && takeEndedFor(sid)) void refreshMessagesRef.current?.(sid)
+    bumpRunVersion()
+  }), [])
+  const pending = isSessionRunning(activeId)
+  const runBucket = getRunBucket(activeId)
+  const draft = runBucket?.draft ?? null
+  const liveSteps = runBucket?.liveSteps ?? []
+
+  // 查看登记（计数制，多宿主对称进出）：进入清角标，离开撤销「查看中」
+  useEffect(() => {
+    if (!activeId) return
+    markSessionViewed(activeId)
+    return () => unmarkSessionViewed(activeId)
+  }, [activeId])
 
   // 卸载时清理抽屉定时器
   useEffect(() => {
@@ -237,6 +268,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       if (activeIdRef.current === sid) setMessages(rows.map(toUi))
     } catch { /* keep current */ }
   }, [])
+  refreshMessagesRef.current = refreshMessages
 
   const openDrawer = useCallback(() => {
     if (drawerTimerRef.current !== null) {
@@ -298,9 +330,14 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     // 其他宿主原样返回 raw）。返回空串 = 无可发送内容，取消本次发送
     const body = options.prepareBody ? options.prepareBody(raw) : raw
     if (!body) return
-    // 排队请求不静默丢弃：明确告知正在回复中（可点停止）
-    if (pending) {
-      showToast({ type: 'info', message: '正在回复上一条消息，请等待完成或点击「停止」' })
+    // N-3 会话级占锁：只有「本会话」在跑才拦（别的会话在跑互不影响，可并行）
+    if (isSessionRunning(activeIdRef.current)) {
+      showToast({ type: 'info', message: '本对话正在回复中，请等待完成或点击「停止」' })
+      return
+    }
+    // N-3 并行上限：全进程（含 AI 教学占用）同时在跑 ≥ MAX_PARALLEL 时不再新开
+    if (runningSessionCount() >= MAX_PARALLEL) {
+      showToast({ type: 'info', message: `已有 ${MAX_PARALLEL} 个对话在运行，请等一个完成再发` })
       return
     }
     // 斜杠指令（/compress 等）：命中即拦截执行，不进对话（置于 pending 检查后，避免生成中并发压缩）
@@ -338,11 +375,9 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     }
     setMessages(prev => [...prev, { role: 'user', content: body, createdAt: nowLocal() }])
     setInput('')
-    setPending(true)
-    beginStream()
+    beginRun(sid)
     setLastChanges(null)
     const cid = crypto.randomUUID()
-    chatIdRef.current = cid
     try {
       // Skill chip 随消息一次性消费，发出即清
       const sk = pickedSkill
@@ -365,22 +400,23 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       // 以会话库为准刷新（拿到落库 id/trace；中止时仅剩用户消息也保持一致）
       await refreshMessages(sid)
     } finally {
-      endStream()
-      setPending(false)
+      endRun(sid)
       void refreshSessions()
     }
-  }, [input, pending, pickedSkill, refreshMessages, refreshSessions, beginStream, endStream, options, attachedFiles, modelId, thinking, contextRemoved, resolveCtx])
+  }, [input, pickedSkill, refreshMessages, refreshSessions, options, attachedFiles, modelId, thinking, contextRemoved, resolveCtx])
 
   /** 重新生成最后一条回复（末条为助手消息时可用） */
   const regenerate = useCallback(async () => {
     const sid = activeIdRef.current
-    if (!sid || pending) return
+    if (!sid || isSessionRunning(sid)) return
+    if (runningSessionCount() >= MAX_PARALLEL) {
+      showToast({ type: 'info', message: `已有 ${MAX_PARALLEL} 个对话在运行，请等一个完成再试` })
+      return
+    }
     if (messages.length === 0 || messages[messages.length - 1].role !== 'assistant') return
-    setPending(true)
-    beginStream()
+    beginRun(sid)
     setLastChanges(null)
     const cid = crypto.randomUUID()
-    chatIdRef.current = cid
     try {
       const r = await agentRegenerate(sid, (contextRemoved ? null : resolveCtx()) ?? undefined, cid, thinking ? 'medium' : 'off')
       if (r.code === 'ABORTED') showToast({ type: 'info', message: '已停止生成' })
@@ -388,22 +424,23 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
       await refreshMessages(sid)
     } finally {
-      endStream()
-      setPending(false)
+      endRun(sid)
       void refreshSessions()
     }
-  }, [pending, messages, refreshMessages, refreshSessions, beginStream, endStream, thinking, contextRemoved, resolveCtx])
+  }, [messages, refreshMessages, refreshSessions, thinking, contextRemoved, resolveCtx])
 
   /** 改写用户消息并重推其后回复 */
   const editSubmit = useCallback(async (messageId: string, content: string) => {
     const sid = activeIdRef.current
-    if (!sid || pending) return
+    if (!sid || isSessionRunning(sid)) return
+    if (runningSessionCount() >= MAX_PARALLEL) {
+      showToast({ type: 'info', message: `已有 ${MAX_PARALLEL} 个对话在运行，请等一个完成再试` })
+      return
+    }
     setEditing(null)
-    setPending(true)
-    beginStream()
+    beginRun(sid)
     setLastChanges(null)
     const cid = crypto.randomUUID()
-    chatIdRef.current = cid
     try {
       const r = await agentEditMessage(sid, messageId, content, (contextRemoved ? null : resolveCtx()) ?? undefined, cid, thinking ? 'medium' : 'off')
       if (r.code === 'ABORTED') showToast({ type: 'info', message: '已停止生成' })
@@ -411,11 +448,10 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
       await refreshMessages(sid)
     } finally {
-      endStream()
-      setPending(false)
+      endRun(sid)
       void refreshSessions()
     }
-  }, [pending, refreshMessages, refreshSessions, beginStream, endStream, thinking, contextRemoved, resolveCtx])
+  }, [refreshMessages, refreshSessions, thinking, contextRemoved, resolveCtx])
 
   /** 删除单条消息（助手消息删除后可用「重新生成」补回） */
   const deleteMessage = useCallback(async (messageId: string) => {
@@ -425,9 +461,13 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     await refreshMessages(sid)
   }, [refreshMessages])
 
+  /** 停止当前会话的运行（N-3：按会话中止 —— 该会话全部在跑调用一并停，别的会话不受影响） */
   const abort = useCallback(async () => {
-    await agentAbort(chatIdRef.current)
+    const sid = activeIdRef.current
+    if (sid) await agentAbortSession(sid)
   }, [])
+
+  const runStateOf = useCallback((sid: string) => runMarkOf(sid), [])
 
   return {
     sessions,
@@ -440,6 +480,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     pending,
     liveSteps,
     draft,
+    runStateOf,
     lastChanges,
     compressing,
     pickedSkill,

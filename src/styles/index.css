@@ -736,6 +736,25 @@ input:focus, textarea:focus, select:focus {
 }
 .kb-micro-pop { animation: 180ms kb-micro-pop var(--ease-kb-spring); }
 
+/* --- E2 状态反馈：连续旋转（N-3 会话运行态「转圈示忙」等 busy 指示） ---
+   只动 transform（铁律 13）；尺寸/描边由调用方决定，令牌只管形状 + 转。
+   reduced-motion 兜底 = 降速而非停转：运动即语义（在跑），停转会被误读成卡死。 */
+@keyframes kb-rotate {
+  to { transform: rotate(360deg); }
+}
+.kb-spin {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  border: 1.5px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: 9999px;
+  animation: kb-rotate 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kb-spin { animation-duration: 2.4s; }
+}
+
 /* --- G 停靠落位提示：可拖动浮窗拖近停靠区时浮现「会落到这里」的预览块 ---
    只在拖拽（跟手）过程出现，位移方向即出现方向 → 用 translateX 从停靠侧滑入；
    元素本身 `pointer-events:none`（调用方给），不会吃掉正在进行的拖拽手势。

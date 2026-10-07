@@ -271,19 +271,26 @@ const api = {
   /** 会话压缩（/compress 指令 + 自动预检共用）：折叠检查点后旧轮为纪要并推进检查点 */
   agentCompressSession: (req: { sessionId: string; modelId?: string; providerId?: string; effort?: string }) => ipcRenderer.invoke('agent:compressSession', req),
   agentAbort: (chatId: string) => ipcRenderer.invoke('agent:abort', chatId),
+  // N-3 多对话并行：按会话停止 + 会话运行态广播（assistant:runstate，全窗口）
+  agentAbortSession: (sessionId: string) => ipcRenderer.invoke('agent:abortSession', sessionId),
+  onAssistantRunState: (cb: (p: unknown) => void) => {
+    const handler = (_e: unknown, p: unknown) => cb(p)
+    ipcRenderer.on('assistant:runstate', handler)
+    return () => { ipcRenderer.removeListener('assistant:runstate', handler) }
+  },
   /** B4 编辑器内联建议：手动触发一次续写建议（独立于对话历史，不进 prompt cache 前缀） */
   aiInlineSuggestRun: (req: { requestId: string; text: string; offset: number; relPath?: string; modelId?: string; providerId?: string; effort?: string }) => ipcRenderer.invoke('ai:inlineSuggest:run', req),
   /** B4 取消在途建议请求（切文档 / 编辑器卸载 / 新请求顶替） */
   aiInlineSuggestCancel: (requestId: string) => ipcRenderer.invoke('ai:inlineSuggest:cancel', requestId),
-  /** AgentRunner 实时过程步骤（chatId 过滤后驱动前端活动气泡） */
-  onAgentStep: (cb: (p: { chatId: string; step: unknown }) => void) => {
-    const handler = (_e: unknown, p: { chatId: string; step: unknown }) => cb(p)
+  /** AgentRunner 实时过程步骤（chatId 过滤后驱动前端活动气泡；sessionId 供渲染层按会话分桶） */
+  onAgentStep: (cb: (p: { chatId: string; sessionId: string; step: unknown }) => void) => {
+    const handler = (_e: unknown, p: { chatId: string; sessionId: string; step: unknown }) => cb(p)
     ipcRenderer.on('agent:step', handler)
     return () => { ipcRenderer.removeListener('agent:step', handler) }
   },
   /** 流式增量（思考链 / 正文 / 工具进行中；主进程已按 40ms·64 字符合批） */
-  onAgentStream: (cb: (p: { chatId: string; event: unknown }) => void) => {
-    const handler = (_e: unknown, p: { chatId: string; event: unknown }) => cb(p)
+  onAgentStream: (cb: (p: { chatId: string; sessionId: string; event: unknown }) => void) => {
+    const handler = (_e: unknown, p: { chatId: string; sessionId: string; event: unknown }) => cb(p)
     ipcRenderer.on('agent:stream', handler)
     return () => { ipcRenderer.removeListener('agent:stream', handler) }
   },

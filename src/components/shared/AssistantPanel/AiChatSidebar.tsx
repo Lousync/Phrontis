@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Plus, Trash2, MessageSquare, ListTree, Pencil } from 'lucide-react'
 import { agentRenameSession } from '../../../lib/ipc'
 import { fmtTime } from './MessageList'
+import { SessionRunMark } from './SessionRunMark'
 import { AssistantEntryButton } from './AssistantEntry'
 import type { AssistantChatController } from './useAssistantChat'
 
@@ -34,7 +35,7 @@ interface Props {
 
 export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
   const [tab, setTab] = useState<'sessions' | 'outline'>('sessions')
-  const { sessions, activeId, messages, pending } = chat
+  const { sessions, activeId, messages, pending, runStateOf } = chat
 
   // ---- 右键菜单（重命名/删除）：portal + 原生事件委托（React 对 body-portal 首个菜单的
   //      合成 click 分发会话内首次失效——🔖 菜单同坑同修，见 WorkbenchLeftPanel 注释）----
@@ -184,6 +185,7 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
                         </span>
                         <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
                       </span>
+                      <SessionRunMark mark={runStateOf(sess.id)} />
                       <button
                         onClick={e => { e.stopPropagation(); void chat.removeSession(sess.id) }}
                         className={`shrink-0 rounded p-0.5 ${chat.deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100'}`}

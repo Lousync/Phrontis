@@ -276,11 +276,26 @@ export interface AiTeachInjectionStats {
 /** 进行中的对话 → 中断控制器（用户点击停止时触发） */
 const activeChats = new Map<string, AbortController>()
 
+/** N-3 多对话并行：进行中对话 → 所属会话（agent:abortSession 按会话停止 + 运行态广播按会话归并） */
+const activeChatSessions = new Map<string, string>()
+
 /** signal → 步骤事件推送器（withAbort 注入发起窗口 sender，仅目标窗口收流） */
 const stepEmitters = new WeakMap<AbortSignal, (step: AgentTraceStep) => void>()
 
 /** signal → 流式增量推送器（与 stepEmitters 同机制；WeakMap 随 signal 一并回收） */
 const streamEmitters = new WeakMap<AbortSignal, (event: AgentStreamEvent) => void>()
+
+/** N-3：当前在跑的会话 id 去重集合（一个会话同时只有一个循环在跑，防御性去重） */
+function runningSessionIds(): string[] {
+  return [...new Set(activeChatSessions.values())]
+}
+
+/** N-3：会话运行态广播（全窗口；开始/结束各一发，结束附 ended 结果供角标/失败 Toast 分发） */
+function broadcastRunState(ended?: { sessionId: string; chatId: string; ok: boolean; code?: string; error?: string }): void {
+  try {
+    broadcast(BROADCAST_CHANNEL.assistantRunState, { running: runningSessionIds(), ...(ended ? { ended } : {}) })
+  } catch { /* 广播失败不影响主流程 */ }
+}
 
 /**
  * 增量合批：**绝不每 token 一次 IPC**。
@@ -1187,39 +1202,55 @@ async function agentEditAndRegen(req: AgentChatRequest & { messageId: string }, 
 }
 
 export function registerAgentHandlers(): void {
-  // 仅向发起窗口推送 agent:step 过程事件（chatId 过滤由渲染层做），复用 activeChats 生命周期
+  // 仅向发起窗口推送 agent:step 过程事件（chatId 过滤由渲染层做），复用 activeChats 生命周期。
+  // N-3 多对话并行：载荷补 sessionId（渲染层按会话分桶，切回运行中会话即恢复实时流）；
+  // 运行态则全窗口广播（三个宿主 + 会话列表的转圈/角标都以此为准，真源在主进程）。
   const withAbort = async (
     chatId: string,
+    sessionId: string,
     sender: Electron.WebContents | undefined,
     fn: (signal: AbortSignal) => Promise<AgentChatResult>
   ) => {
     const ctrl = new AbortController()
     activeChats.set(chatId, ctrl)
+    activeChatSessions.set(chatId, sessionId)
+    broadcastRunState()
     if (sender && !sender.isDestroyed()) {
       stepEmitters.set(ctrl.signal, (step) => {
-        if (!sender.isDestroyed()) sender.send('agent:step', { chatId, step })
+        if (!sender.isDestroyed()) sender.send('agent:step', { chatId, sessionId, step })
       })
       // 流式增量：与 agent:step 平行，只发发起窗口（多窗口下另一窗口看不到流，与同类产品一致）
       streamEmitters.set(ctrl.signal, (event) => {
-        if (!sender.isDestroyed()) sender.send('agent:stream', { chatId, event })
+        if (!sender.isDestroyed()) sender.send('agent:stream', { chatId, sessionId, event })
       })
     }
+    let result: AgentChatResult | undefined
     try {
-      return await fn(ctrl.signal)
+      result = await fn(ctrl.signal)
+      return result
     } finally {
       activeChats.delete(chatId)
+      activeChatSessions.delete(chatId)
+      const res = result as AgentChatResult | undefined
+      broadcastRunState({
+        sessionId,
+        chatId,
+        ok: !!res?.ok,
+        ...(res?.code ? { code: res.code } : {}),
+        ...(res && !res.ok ? { error: res.error } : {}),
+      })
       stepEmitters.delete(ctrl.signal)
       streamEmitters.delete(ctrl.signal)
     }
   }
   ipcMain.handle('agent:chat', (e, req: AgentChatRequest) =>
-    withAbort(String(req?.chatId ?? '') || randomUUID(), e.sender, signal => agentChat(req, signal, String(req?.chatId ?? ''))))
+    withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentChat(req, signal, String(req?.chatId ?? ''))))
   ipcMain.handle('agent:regenerate', (e, req: AgentChatRequest) =>
-    withAbort(String(req?.chatId ?? '') || randomUUID(), e.sender, signal => agentRegenerate(req, signal)))
+    withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentRegenerate(req, signal)))
   ipcMain.handle('agent:startScene', (e, req: AgentChatRequest) =>
-    withAbort(String(req?.chatId ?? '') || randomUUID(), e.sender, signal => agentStartScene(req, signal)))
+    withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentStartScene(req, signal)))
   ipcMain.handle('agent:editMessage', (e, req: AgentChatRequest & { messageId: string }) =>
-    withAbort(String(req?.chatId ?? '') || randomUUID(), e.sender, signal => agentEditAndRegen(req, signal)))
+    withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentEditAndRegen(req, signal)))
   ipcMain.handle('agent:deleteMessage', (_e, payload: { sessionId?: unknown; messageId?: unknown }) => {
     // v2 存储按会话分文件：删除需定位会话文件，渲染层随消息一并传 sessionId
     const p = (payload ?? {}) as { sessionId?: unknown; messageId?: unknown }
@@ -1228,6 +1259,14 @@ export function registerAgentHandlers(): void {
   })
   ipcMain.handle('agent:abort', (_e, chatId: string) => {
     activeChats.get(String(chatId ?? ''))?.abort()
+    return true
+  })
+  // N-3：按会话停止（渲染层「停止」按钮以激活会话语义调用；该会话的全部在跑调用一并中止）
+  ipcMain.handle('agent:abortSession', (_e, sessionId: string) => {
+    const sid = String(sessionId ?? '')
+    for (const [cid, s] of activeChatSessions) {
+      if (s === sid) activeChats.get(cid)?.abort()
+    }
     return true
   })
   // R26 真机验证发现的跨层缺口（agent:* 出口未做 snake_case→camelCase 映射）：
