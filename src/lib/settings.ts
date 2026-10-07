@@ -268,8 +268,10 @@ export const SETTINGS = {
   aiTeachDeleteSessionFolder: { default: 'ask', type: 'select', label: '删除会话时文件夹处理', group: 'AI教学', desc: 'ask=每次询问 / keep=保留文件夹 / delete=会话文件夹一并移入系统回收站', keywords: ['AI教学', '删除', '会话', '文件夹', '回收站', '产物'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live' },
   // F-12：原 aiTeachUsageDetail / aiTeachCtxWindow 提为通用键（AI 教学与 AI 对话共用同一套档位与窗口口径）。
   // 旧键值由主进程启动时一次性迁移（settingsCache 拷贝，见 electron/main/index.ts）。
-  ctxUsageDetail: { default: 'compact', type: 'select', label: '上下文占用指示档位', group: 'AI教学', desc: 'off=隐藏 / compact=上下文占用圆环（点击看详情）/ detailed=圆环+文字摘要；AI 教学与 AI 对话共用', keywords: ['用量', 'token', '上下文', '圆环', '预算', 'context'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  ctxWindow: { default: 0, type: 'number', label: '模型上下文窗口（token）', group: 'AI教学', desc: '0=未设置（占用指示退化为纯数字）；设置后圆环按 上下文占用/窗口 比例分档着色；AI 教学与 AI 对话共用', keywords: ['上下文', '窗口', 'context', '128k', '圆环'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live', min: 0, max: 4000000, step: 1000 },
+  // F-12 遗留收口（2026-10-07）：控件从「AI教学」设置页迁入「AI 工具 → AI 助手」小节并进设置搜索
+  // （键的语义、消费方与 desc 早已通用化，入口滞留教学页属半成品状态）。
+  ctxUsageDetail: { default: 'compact', type: 'select', label: '上下文占用指示档位', group: 'AI 助手', desc: 'off=隐藏 / compact=上下文占用圆环（点击看详情）/ detailed=圆环+文字摘要；AI 教学与 AI 对话共用', keywords: ['用量', 'token', '上下文', '圆环', '预算', 'context', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxUsageDetail' },
+  ctxWindow: { default: 0, type: 'number', label: '模型上下文窗口（token）', group: 'AI 助手', desc: '0=未设置（占用指示退化为纯数字）；设置后圆环按 上下文占用/窗口 比例分档着色；AI 教学与 AI 对话共用', keywords: ['上下文', '窗口', 'context', '128k', '圆环', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxWindow', min: 0, max: 4000000, step: 1000 },
   // R6 D9：storageKnowledge / storageData / storageBlog 三键已随去库化收官全部退役
   // （知识库/博客/结构化模块恒 vault 文件，无读源分支残留）。
   uiWorkbench: { default: false, type: 'toggle', label: 'Workbench 布局', group: '外壳', desc: '实验性 VS Code 外壳；开启后编辑器文件树移到全局侧栏', keywords: ['workbench', '外壳', '布局', '侧栏', '编辑器组', '状态栏', 'vscode', '活动栏', 'shell', 'layout'], section: 'general', ui: true, scope: 'global', level: 'experimental', affects: 'live', anchor: 'advanced.workbench' },
