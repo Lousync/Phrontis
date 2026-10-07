@@ -69,6 +69,20 @@ console.log('\n=== 5. blogHitExcerpt：命中窗口 ===')
   const long = P.blogHitExcerpt('短文', 'x'.repeat(500))
   check('超长查询：窗口不撑爆（≤200 字符）', long.length <= 200, String(long.length))
 }
+console.log('\n=== 5b. 处置4：多词拆词 + AND 匹配 + 词表锚定 ===')
+{
+  check('拆词：空格分隔', JSON.stringify(P.splitBlogSearchTerms('项目 复盘')) === JSON.stringify(['项目', '复盘']), JSON.stringify(P.splitBlogSearchTerms('项目 复盘')))
+  check('拆词：中西文逗号/顿号/分号切分', P.splitBlogSearchTerms('项目，复盘、总结；回顾').length === 4, JSON.stringify(P.splitBlogSearchTerms('项目，复盘、总结；回顾')))
+  check('拆词：去重 + 统一小写', JSON.stringify(P.splitBlogSearchTerms('AI ai AI')) === JSON.stringify(['ai']), JSON.stringify(P.splitBlogSearchTerms('AI ai AI')))
+  check('拆词：空串 → 空表', P.splitBlogSearchTerms('  ').length === 0, '')
+  check('AND：两词都在正文 → 命中', P.matchBlogEntry('t', '这里有项目也有复盘', ['项目', '复盘']) === true, '')
+  check('AND：一词在标题一词在正文 → 命中', P.matchBlogEntry('项目', '正文有复盘', ['项目', '复盘']) === true, '')
+  check('AND：缺一个词 → 不命中', P.matchBlogEntry('t', '只有项目', ['项目', '复盘']) === false, '')
+  check('AND：空词表 → 不命中', P.matchBlogEntry('t', 'b', []) === false, '')
+  const body = '开头。' + '垫'.repeat(150) + '复盘内容在这里'
+  const got = P.blogHitExcerpt(body, ['项目', '复盘'])
+  check('词表锚定：首个命中词做窗口', got.includes('复盘内容在这里') && !got.startsWith('开头。'), got)
+}
 
 // ---------------------------------------------------------------- B. 接线静态断言
 console.log('\n=== 6. builtinTools.ts：blog.read 注册与红线 ===')
@@ -116,11 +130,13 @@ if (block) {
 console.log('\n=== 7. builtinTools.ts：blog.search 增强与 import 接线 ===')
 const searchBlock = blockOf('builtin.blog.search')
 check('blog.search 返回 wordCount', !!searchBlock && /wordCount:\s*e\.wordCount/.test(searchBlock), '')
-check('blog.search 摘录走命中窗口 blogHitExcerpt', !!searchBlock && /excerpt:\s*blogHitExcerpt\(e\.contentMd,\s*q\)/.test(searchBlock), '')
+check('blog.search 摘录走命中窗口 blogHitExcerpt（词表锚定）', !!searchBlock && /excerpt:\s*blogHitExcerpt\(e\.contentMd,\s*terms\)/.test(searchBlock), '')
+check('blog.search 多词 AND（splitBlogSearchTerms + 词表入参）', !!searchBlock && /const terms = splitBlogSearchTerms\(q\)/.test(searchBlock) && /vaultSearchEntries\(terms\)/.test(searchBlock), '')
+check('blog.search description 声明 AND 语义', !!searchBlock && /全部命中才算命中，AND/.test(searchBlock), '')
 check('blog.search description 指路 blog.read', !!searchBlock && /builtin\.blog\.read/.test(searchBlock), '')
 check('import 补 vaultGetEntryById / vaultListEntries',
   /import\s*\{[^}]*vaultGetEntryById[^}]*vaultListEntries[^}]*\}\s*from\s*'\.\/kbStore\/blogVaultRepo'/.test(tools), '')
-check('import blogToolsPure', /import\s*\{\s*normalizeBlogDate,\s*nearestEntryDates,\s*blogHitExcerpt\s*\}\s*from\s*'\.\/blogToolsPure'/.test(tools), '')
+check('import blogToolsPure（含 splitBlogSearchTerms）', /import\s*\{\s*normalizeBlogDate,\s*nearestEntryDates,\s*blogHitExcerpt,\s*splitBlogSearchTerms\s*\}\s*from\s*'\.\/blogToolsPure'/.test(tools), '')
 
 console.log('\n=== 8. builtin.tool.request 清单 + 术语表指路（铁律 18） ===')
 const reqAt = tools.indexOf("name: 'builtin.tool.request'")

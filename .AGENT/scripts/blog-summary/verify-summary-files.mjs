@@ -105,12 +105,14 @@ export function getVaultKbRoot() { return current ? current.rootPath + '/.knowba
 `, 'utf-8')
 
 slice('src/lib/summary.ts', 'summary.mjs')
+slice('electron/lib/blogToolsPure.ts', 'blogToolsPure.mjs')
 slice('electron/lib/kbStore/mdStore.ts', 'mdStore.mjs', [
   [/from '\.\/vaultContext'/, "from './vaultContext.mjs'"],
 ])
 slice('electron/lib/kbStore/blogVaultRepo.ts', 'blogVaultRepo.mjs', [
   [/from '\.\/vaultContext'/, "from './vaultContext.mjs'"],
   [/from '\.\/mdStore'/, "from './mdStore.mjs'"],
+  [/from '\.\.\/blogToolsPure'/, "from './blogToolsPure.mjs'"],
   [/import \{ summaryFileName, summaryLabel, type SummaryKind \} from '[^']*'/, "import { summaryFileName, summaryLabel } from './summary.mjs'"],
 ])
 

@@ -3,6 +3,7 @@ import { dirname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { getCurrentVault } from './vaultContext'
 import { parseMarkdown, serializeMarkdown } from './mdStore'
+import { splitBlogSearchTerms, matchBlogEntry } from '../blogToolsPure'
 // 总结文件命名与窗口口径的**单一真相源**在渲染层 `src/lib/summary.ts`（纯函数、无副作用），
 // 主进程直接引它而不是各写一份 —— 否则「磁贴点周号算出的窗口」与「落盘文件名」迟早对不上。
 // 先例：`electron/main/index.ts` 引 `src/lib/settings`。
@@ -206,10 +207,12 @@ export function vaultGetEntryById(id: string): VaultBlogEntry | null {
   return doc ? docToEntry(doc) : null
 }
 
-export function vaultSearchEntries(q: string): VaultBlogEntry[] {
-  const s = q.toLowerCase()
+export function vaultSearchEntries(q: string | string[]): VaultBlogEntry[] {
+  // F-15 处置4：多词 AND —— 字符串入参自动拆词（空白/逗号顿号分号），词表入参直接用。
+  // 每个词在「标题或正文」命中才算命中；单词与旧整段子串匹配一致，多词是旧匹配的严格超集。
+  const terms = Array.isArray(q) ? q.map(x => x.toLowerCase()).filter(Boolean) : splitBlogSearchTerms(q)
   return readAllDocs()
-    .filter((d) => strOf(d.fm, 'title').toLowerCase().includes(s) || d.body.toLowerCase().includes(s))
+    .filter((d) => matchBlogEntry(strOf(d.fm, 'title'), d.body, terms))
     .sort((a, b) => strOf(b.fm, 'created').localeCompare(strOf(a.fm, 'created')))
     .slice(0, 50)
     .map(docToEntry)
@@ -467,7 +470,3 @@ export function vaultUpdateSummary(id: string, data: { contentMd?: string; title
   return docToSummary({ path: doc.path, fm, body })
 }
 
-/** 便于冒烟/测试定位数据目录 */
-export const __blogRoot = blogRoot
-/** 便于冒烟/测试定位总结分区 */
-export const __summaryRoot = summaryRoot

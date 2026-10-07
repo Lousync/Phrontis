@@ -17,7 +17,7 @@ import { vaultGetPageById, vaultGetCategories, vaultCreatePage } from './kbStore
 import { searchKnowledge } from './knowledgeSearch'
 import { searchHelp, helpCatalog } from './helpService'
 import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries } from './kbStore/blogVaultRepo'
-import { normalizeBlogDate, nearestEntryDates, blogHitExcerpt } from './blogToolsPure'
+import { normalizeBlogDate, nearestEntryDates, blogHitExcerpt, splitBlogSearchTerms } from './blogToolsPure'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
 import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, type TodoRow } from './kbStore/scheduleVaultRepo'
 import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from './kbStore/accountingVaultRepo'
@@ -512,11 +512,11 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.blog.search',
     title: '搜索博客日记',
-    description: '按关键词搜索博客日记（每天一篇的日志），匹配标题与正文，返回 日期/标题/字数/命中处摘录。整段子串匹配，多词请拆开分次搜；读全文用 builtin.blog.read（可按日期直取）',
+    description: '按关键词搜索博客日记（每天一篇的日志），匹配标题与正文。多词用空格分隔（全部命中才算命中，AND）；某词结果过多或过少时可拆换关键词分次搜。返回 日期/标题/字数/命中处摘录；读全文用 builtin.blog.read（可按日期直取）',
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '关键词（匹配标题与正文；多词拆开分次搜）' },
+        query: { type: 'string', description: '关键词（匹配标题与正文；多词空格分隔=全部命中）' },
         limit: { type: 'number', description: '上限, 默认10' },
       },
       required: ['query'],
@@ -531,15 +531,16 @@ export function registerBuiltinTools(): void {
     if (!q) return []
     const limit = clamp(Math.floor(num(args.limit, 10)), 1, 50)
     // 与博客 UI 同一份 .knowbase/blog/*.md（vaultSearchEntries 已按创建时间倒序、内部截 50）
-    const rows = vaultSearchEntries(q)
-    // 正式版台账 F-15：excerpt 由「固定开头 120 字」改为命中窗口（命中在正文中段时
-    // 旧摘录不含命中处，模型无法确认是否目标篇目）；剥 markdown 逻辑在 blogToolsPure
+    // F-15：excerpt 由「固定开头 120 字」改为命中窗口；处置4：多词 AND（拆词在 blogToolsPure），
+    // excerpt 锚定首个命中词（多词命中但整句不在正文时摘录仍落在命中处）
+    const terms = splitBlogSearchTerms(q)
+    const rows = vaultSearchEntries(terms)
     return rows.slice(0, limit).map(e => ({
       id: e.id,
       date: e.date,
       title: e.title,
       wordCount: e.wordCount,
-      excerpt: blogHitExcerpt(e.contentMd, q),
+      excerpt: blogHitExcerpt(e.contentMd, terms),
     }))
   })
 

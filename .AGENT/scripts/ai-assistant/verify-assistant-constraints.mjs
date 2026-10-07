@@ -132,8 +132,8 @@ const blogSearchDecl = rawBt.slice(rawBt.indexOf("name: 'builtin.blog.search'") 
 ok(/tier: 'ondemand'/.test(blogSearchDecl), 'E2 blog.search tier=ondemand（铁律 16：新工具默认折叠，≈7.7k tok/轮的常驻集不扩）')
 ok(/readOnly: true/.test(blogSearchDecl) && /module: 'blog'/.test(blogSearchDecl),
   'E3 blog.search 只读 + 归 blog 模块（权限体系按模块预过滤）')
-ok(/vaultSearchEntries\(q\)/.test(rawBt) && /import \{ vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries \} from '\.\/kbStore\/blogVaultRepo'/.test(rawBt),
-  'E4 复用 blogVaultRepo 的 vaultSearchEntries / vaultGetEntryById（与博客 UI 同一份 .knowbase/blog 数据；后两者为正式版台账 F-15 blog.read 补）')
+ok(/vaultSearchEntries\(terms\)/.test(rawBt) && /import \{ vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries \} from '\.\/kbStore\/blogVaultRepo'/.test(rawBt),
+  'E4 复用 blogVaultRepo 的 vaultSearchEntries / vaultGetEntryById（与博客 UI 同一份 .knowbase/blog 数据；词表入参 = 正式版台账 F-15 处置4 多词 AND）')
 const reqDesc = rawBt.slice(rawBt.indexOf("name: 'builtin.tool.request'"), rawBt.indexOf("name: 'builtin.tool.request'") + 1200)
 ok(/blog\.search/.test(reqDesc),
   'E5 builtin.tool.request 的 description 清单补 blog.search（铁律 18：ondemand 工具的申请指路）')

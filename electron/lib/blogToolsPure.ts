@@ -41,17 +41,45 @@ export function nearestEntryDates(target: string, dates: string[], n = 5): strin
 /**
  * search 摘录：剥 markdown 后取「正文命中处前后各 radius 字」的窗口（F-15：
  * 固定取开头 120 字时，命中在正文中段的摘录根本不含命中处，模型无法确认是否目标篇目）。
- * 仅标题命中（正文无命中词）回落开头 2×radius 字 —— 与旧行为一致。
+ * query 可传拆好的词表（F-15 处置4 多词检索）—— 依次找**首个命中词**做窗口锚点，
+ * 多词 AND 命中但整句不在正文时摘录仍能落在命中处。
+ * 仅标题命中（正文无任何命中词）回落开头 2×radius 字 —— 与旧行为一致。
  */
-export function blogHitExcerpt(contentMd: string, query: string, radius = 60): string {
+export function blogHitExcerpt(contentMd: string, query: string | string[], radius = 60): string {
   const plain = (contentMd || '').replace(MD_NOISE_RE, ' ').replace(WS_RE, ' ').trim()
   if (!plain) return ''
-  const q = (query || '').trim().toLowerCase()
-  if (!q) return plain.slice(0, radius * 2)
-  const idx = plain.toLowerCase().indexOf(q)
+  const qs = (Array.isArray(query) ? query : [query]).map(x => (x || '').trim().toLowerCase()).filter(Boolean)
+  if (!qs.length) return plain.slice(0, radius * 2)
+  const lower = plain.toLowerCase()
+  let idx = -1
+  let q = ''
+  for (const term of qs) {
+    idx = lower.indexOf(term)
+    if (idx >= 0) { q = term; break }
+  }
   if (idx < 0) return plain.slice(0, radius * 2)
   const qlen = Math.min(q.length, 60) // 防超长查询把窗口撑成全文
   const start = Math.max(0, idx - radius)
   const end = Math.min(plain.length, idx + qlen + radius)
   return (start > 0 ? '…' : '') + plain.slice(start, end).trim() + (end < plain.length ? '…' : '')
+}
+
+/**
+ * F-15 处置4：search 拆词 —— 空白（含全角空格）与中西文逗号/顿号/分号切分，
+ * 去空去重保序，统一小写（检索口径大小写不敏感）。
+ */
+export function splitBlogSearchTerms(q: string): string[] {
+  return [...new Set((q || '').toLowerCase().split(/[\s,，、;；]+/).map(t => t.trim()).filter(Boolean))]
+}
+
+/**
+ * F-15 处置4：多词 AND 语义 —— 每个词都在「标题或正文」命中才算命中。
+ * 单词查询与旧整段子串匹配完全一致；多词时 AND 是旧匹配的严格超集
+ * （含完整子串必含全部词），对既有调用方零回归。
+ */
+export function matchBlogEntry(title: string, body: string, terms: string[]): boolean {
+  if (!terms.length) return false
+  const t = (title || '').toLowerCase()
+  const b = (body || '').toLowerCase()
+  return terms.every(term => t.includes(term) || b.includes(term))
 }
