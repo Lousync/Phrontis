@@ -4,17 +4,14 @@ import { ArrowLeft, Eye, Code, Plus, X, Trash2, ListTree, ImagePlus, LayoutTempl
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { BlogTemplateModal } from './BlogTemplateModal'
 import { showToast } from '../../../lib/toast'
-import { uploadImageFile, insertImageAtCursor, isImageFile, IMAGE_OWNER } from '../../../lib/editorImage'
+import { uploadImageFile, imageMarkdown, isImageFile, IMAGE_OWNER } from '../../../lib/editorImage'
 import { useSettings } from '../../../lib/SettingsContext'
 import { getGlobalActiveTab } from '../../../lib/activeTab'
 import { ConfirmDialog } from '../../../components/shared'
 import { SummaryPanel } from './SummaryPanel'
-import Editor, { type OnMount } from '@monaco-editor/react'
-import { MonacoErrorBoundary } from '../../../components/shared/MonacoErrorBoundary'
-import { bindEditorTheme } from '../../../lib/editorTheme'
-// Monaco 运行时装配下沉到宿主组件：不随应用入口进首屏 chunk（性能 2026-09-10）
-import '../../../lib/monaco-setup'
-import type * as Monaco from 'monaco-editor'
+// 共享 Monaco 宿主（含「弃用受控 value + 最小 diff 保光标」修复，2026-09-20）：
+// 博文编辑器原先直接用受控 <Editor value>，中文输入时光标跳文末 / 乱字，此处改为 MonacoPane。
+import { MonacoPane, type MonacoPaneHandle } from '../../../components/shared/MonacoPane'
 import type { Tag } from '../../../types'
 
 interface Props {
@@ -48,7 +45,7 @@ export function MarkdownEditor({ entryId, showLineNumbers, zoom = 1, onSave, onC
   const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false)
   const [unsavedAction, setUnsavedAction] = useState<(() => void) | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
+  const paneRef = useRef<MonacoPaneHandle | null>(null)
   const entryIdRef = useRef(entryId)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const contentRef = useRef(contentMd)
@@ -98,64 +95,25 @@ export function MarkdownEditor({ entryId, showLineNumbers, zoom = 1, onSave, onC
   }, [])
 
   // ===== Inline image insertion (paste / drag / toolbar) =====
-  const insertImageFiles = useCallback(async (files: File[]) => {
-    const editor = editorRef.current
-    if (!editor) return
-    for (const f of files) {
-      if (!isImageFile(f)) continue
-      try {
-        const meta = await uploadImageFile(f, IMAGE_OWNER.blog, entryIdRef.current)
-        insertImageAtCursor(editor, meta)
-      } catch {
-        showToast({ type: 'error', message: `图片「${f.name}」插入失败` })
-      }
+  /** 上传单张图 → 返回可插入的 md（MonacoPane 在光标/落点处插入） */
+  const handleImageToMarkdown = useCallback(async (f: File): Promise<string | null> => {
+    if (!isImageFile(f)) return null
+    try {
+      const meta = await uploadImageFile(f, IMAGE_OWNER.blog, entryIdRef.current)
+      return imageMarkdown(meta)
+    } catch {
+      showToast({ type: 'error', message: `图片「${f.name}」插入失败` })
+      return null
     }
   }, [])
 
-  const handleEditorMount: OnMount = useCallback((editor: Monaco.editor.IStandaloneCodeEditor) => {
-    editorRef.current = editor
-    const dom = editor.getDomNode()
-    if (!dom) return
-
-    const onPaste = (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items
-      if (!items) return
-      const files: File[] = []
-      for (const it of Array.from(items)) {
-        if (it.kind === 'file' && it.type.startsWith('image/')) {
-          const f = it.getAsFile()
-          if (f) files.push(f)
-        }
-      }
-      if (files.length === 0) return
-      e.preventDefault()
-      e.stopPropagation()
-      void insertImageFiles(files)
+  /** 工具栏「图片」按钮：上传后在光标处插入 */
+  const insertImageFiles = useCallback(async (files: File[]) => {
+    for (const f of files) {
+      const md = await handleImageToMarkdown(f)
+      if (md) paneRef.current?.insertAtCursor(md)
     }
-
-    const onDragOver = (e: DragEvent) => {
-      if (e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files')) {
-        e.preventDefault()
-      }
-    }
-
-    const onDrop = (e: DragEvent) => {
-      const files = e.dataTransfer?.files
-      if (!files || files.length === 0) return
-      const imageFiles = Array.from(files).filter(f => isImageFile(f))
-      if (imageFiles.length === 0) return
-      e.preventDefault()
-      e.stopPropagation()
-      const target = editor.getTargetAtClientPoint(e.clientX, e.clientY)
-      if (target?.position) editor.setPosition(target.position)
-      editor.focus()
-      void insertImageFiles(imageFiles)
-    }
-
-    dom.addEventListener('paste', onPaste, true)
-    dom.addEventListener('dragover', onDragOver, true)
-    dom.addEventListener('drop', onDrop, true)
-  }, [insertImageFiles])
+  }, [handleImageToMarkdown])
 
   const checkUnsaved = useCallback(() => {
     if (isDirtyRef.current) {
@@ -274,12 +232,7 @@ export function MarkdownEditor({ entryId, showLineNumbers, zoom = 1, onSave, onC
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
       } else {
         // Editing mode: use Monaco editor API
-        const ed = editorRef.current
-        if (ed) {
-          ed.revealLineInCenter(line)
-          ed.setPosition({ lineNumber: line, column: 1 })
-          ed.focus()
-        }
+        paneRef.current?.revealLine(line)
       }
     }
     window.addEventListener('outline:go-to-heading', handler)
@@ -418,37 +371,39 @@ export function MarkdownEditor({ entryId, showLineNumbers, zoom = 1, onSave, onC
             </div>
           </div>
         ) : (
-          <MonacoErrorBoundary>
-            <Editor
-              language="markdown"
-              value={contentMd}
-              onChange={handleChange}
-              onMount={handleEditorMount}
-              beforeMount={monaco => bindEditorTheme(monaco)}
-              theme="knowbase-auto"
-              loading={<div className="flex items-center justify-center h-full text-[var(--text-muted)]">加载编辑器...</div>}
-            options={{
-              fontSize: Math.round(s.editorFontSize * zoom),
+          <MonacoPane
+            ref={paneRef}
+            doc={{
+              relPath: `blog/${entryId}.md`,
+              modelPath: `kb://blog/${entryId}`,
+              content: contentMd,
+              language: 'markdown',
+              binary: false,
+              editable: true,
+              truncated: false,
+              size: contentMd.length,
+            }}
+            onChange={(_rel, v) => handleChange(v)}
+            fontSize={Math.round(s.editorFontSize * zoom)}
+            dimEnabled={false}
+            inlineSuggestEnabled={false}
+            inlineSuggestAuto={false}
+            layoutKey={zoom}
+            onPasteImage={handleImageToMarkdown}
+            onDropImage={handleImageToMarkdown}
+            editorOptions={{
               fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
               lineNumbers: showLineNumbers ? 'on' : 'off',
-              minimap: { enabled: false },
               wordWrap: 'on',
               smoothScrolling: true,
               cursorBlinking: 'smooth',
               cursorSmoothCaretAnimation: 'on',
               renderWhitespace: 'selection',
               renderLineHighlight: 'line',
-              scrollBeyondLastLine: false,
-              automaticLayout: true,
-              padding: { top: 16, bottom: 16 },
-              overviewRulerLanes: 0,
-              hideCursorInOverviewRuler: true,
-              overviewRulerBorder: false,
               folding: true,
               lineDecorationsWidth: 0,
               lineNumbersMinChars: 3,
               guides: { indentation: true },
-              tabSize: 2,
               insertSpaces: true,
               selectionHighlight: true,
               occurrencesHighlight: 'off',
@@ -456,9 +411,9 @@ export function MarkdownEditor({ entryId, showLineNumbers, zoom = 1, onSave, onC
               matchBrackets: 'always',
               unicodeHighlight: { nonBasicASCII: false, ambiguousCharacters: false, invisibleCharacters: false },
               placeholder: '开始写作...',
+              padding: { top: 16, bottom: 16 },
             }}
-            />
-          </MonacoErrorBoundary>
+          />
         )}
       </div>
 

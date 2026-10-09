@@ -16,6 +16,8 @@ import { getAgentSession } from './agentSessionRepo'
 // 素材类型识别的代码扩展名清单与 AI 读白名单同源（v3.2.0 条目 9 三处合一）：
 // 连带效果 = 素材库不再把 json/yml/yaml/toml/ini 五个配置类识别为 code（拍板④ 配置类不放开）
 import { AI_TEXT_CODE_EXTS } from '../../src/lib/aiTextExts'
+// 思维导图 JSON 的判别/计数与渲染层同一实现（单真相源，勿复刻）
+import { parseMindmap, countNodes } from '../../src/lib/mindmap'
 
 /**
  * AI教学模块 · 素材库（总纲 docs/ai-teaching-module-rework.md §3.13 结构 v3，P6）
@@ -315,6 +317,44 @@ function readEntries(l: SourcesLayout): SourceEntry[] {
   try { return parseSourceMd(readFileSync(p, 'utf-8')) } catch { return [] }
 }
 
+/**
+ * 按工作区夹**直读工作区主库** `{工作区夹}/SOURCES/SOURCE.md` 的条目（不依赖会话）。
+ * 课程模式「修订大纲」据此拿素材清单 + 做变更快照比对（不引入会话耦合）。
+ */
+export function readWorkspaceSourceEntries(wsFolderRel: string, rootPath: string): SourceEntry[] {
+  const folder = String(wsFolderRel ?? '').trim()
+  if (!folder || !rootPath) return []
+  const abs = join(rootPath, folder, SOURCES_DIR, SOURCE_FILE)
+  if (!existsSync(abs)) return []
+  try { return parseSourceMd(readFileSync(abs, 'utf-8')) } catch { return [] }
+}
+
+/**
+ * 读某条素材可用的「正文」（课程大纲生成 / 修订用，**单次 LLM 调用、无 vault 读工具**，故需直接返回正文）：
+ * ① 有提取稿指针（`已提取 ✓ → file`）→ 读提取稿（指针也可能指向一个**目录**，如网页抓取 `web/{slug}/`）；
+ * ② md / code 正文型素材 → 直接读其自身文件；
+ * ③ **dir 目录素材**（用户常把「一章的扫描/提取稿」放一个文件夹后登记为素材）→ 递归读目录内全部文本文件；
+ * ④ 目标解析为目录时统一走 readTextDirBody；其余（pdf/pptx 扫描件等，无提取稿）→ 返回空串（只能给清单，别编造）。
+ */
+export function readSourceEntryBody(dirAbs: string, rootPath: string, e: SourceEntry): string {
+  const cands: string[] = []
+  const m = /^✓\s*→\s*(.+)$/.exec(String(e.extracted ?? ''))
+  if (m) cands.push(join(dirAbs, m[1].trim()))
+  if (e.type === 'md' || e.type === 'code' || e.type === 'dir') {
+    const abs = resolveMaterialAbs({ dirAbs, rootPath }, e.path || '')
+    if (abs) cands.push(abs)
+  }
+  for (const abs of cands) {
+    if (!abs || !existsSync(abs)) continue
+    try {
+      const st = statSync(abs)
+      if (st.isDirectory()) { const t = readTextDirBody(abs); if (t.trim()) return t }
+      else if (st.isFile()) { const t = readTextSmart(abs); if (t.trim()) return t }
+    } catch { /* 该候选不可读，试下一个 */ }
+  }
+  return ''
+}
+
 // ===== 两层合并（v3.1.1：工作区主库 + 对话私有补充）=====
 
 /** 合并读的条目：带来源作用域与所属素材夹（提取稿/原件都相对该目录），并保留重编号前的原编号 */
@@ -558,6 +598,41 @@ export function writeVisual(
     broadcastTreeRefresh(sessionRel)
     const lines = body.replace(/\r\n/g, '\n').split('\n').length
     return { ok: true, relPath: `${sessionRel}/visuals/${fname}`, lines }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+/** mindmap 工具产物：
+ *  写 `{会话夹}/mindmaps/<slug>.json`（结构同 writeVisual——会话产物、非课程素材，落会话文件夹）；
+ *  重名不覆盖（-v2/-v3 递增）。slug 白名单校验 + 结构校验（复用 `src/lib/mindmap.parseMindmap`，
+ *  与渲染层识别同一判据）+ 大小上限。不登记 SOURCE.md、不参与素材注入。 */
+export function writeMindmap(
+  sessionId: string, slug: string, jsonText: string,
+  getSetting: (key: string) => unknown,
+): { ok: boolean; relPath?: string; nodes?: number; error?: string } {
+  try {
+    const s = String(slug ?? '').trim()
+    if (!/^[a-z0-9](?:[a-z0-9._-]{0,60}[a-z0-9])?$/.test(s) || s.includes('..')) {
+      return { ok: false, error: `slug 不合法（要求 kebab-case 小写英文/数字，如 binary-tree-traversal）：${s.slice(0, 40)}` }
+    }
+    const body = String(jsonText ?? '')
+    if (!body.trim()) return { ok: false, error: '思维导图 JSON 为空' }
+    if (body.length > 256 * 1024) return { ok: false, error: '思维导图超过 256KB，拒绝写入' }
+    const doc = parseMindmap(body)
+    if (!doc) return { ok: false, error: '不是合法的思维导图 JSON（需含 kind:"mindmap" 与 root.text）' }
+    const probe = ensureWriteOwnerFolder(sessionId, getSetting)
+    if (!probe.ok || !probe.relPath) return { ok: false, error: probe.error ?? '会话文件夹不可用' }
+    const vault = getCurrentVault()
+    if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const sessionRel = probe.relPath
+    const dirAbs = join(vault.rootPath, sessionRel, 'mindmaps')
+    mkdirSync(dirAbs, { recursive: true })
+    let fname = `${s}.json`
+    for (let v = 2; existsSync(join(dirAbs, fname)) && v <= 99; v++) fname = `${s}-v${v}.json`
+    writeFileSync(join(dirAbs, fname), body, 'utf-8')
+    broadcastTreeRefresh(sessionRel)
+    return { ok: true, relPath: `${sessionRel}/mindmaps/${fname}`, nodes: countNodes(doc.root) }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -893,6 +968,8 @@ export function webCrawlCancel(sessionId: string): { ok: boolean; error?: string
 const TEXT_EXTS = new Set(['md', 'markdown', 'txt', 'csv', 'json', 'yml', 'yaml', 'toml', 'ini', 'xml', 'html', 'css', 'js', 'ts', 'jsx', 'tsx', 'py', 'c', 'h', 'cpp', 'java', 'cs', 'go', 'rs', 'rb', 'php', 'sh', 'bat', 'sql', 'vue'])
 const DIR_LIST_LIMIT = 120
 const DIR_LIST_DEPTH = 4
+/** 目录素材正文总量上限（大纲生成单次注入，防超长；一章的提取稿通常在数千到两万字内） */
+const DIR_BODY_LIMIT = 20000
 
 function listDirFilesRecursive(dirAbs: string, out: { rel: string; bin: boolean }[], relBase = '', depth = 0): void {
   if (depth > DIR_LIST_DEPTH || out.length >= DIR_LIST_LIMIT) return
@@ -909,6 +986,29 @@ function listDirFilesRecursive(dirAbs: string, out: { rel: string; bin: boolean 
       out.push({ rel, bin: !TEXT_EXTS.has(ext) })
     }
   }
+}
+
+/**
+ * 读「目录素材」正文：递归收集文本文件（复用 listDirFilesRecursive），按文件名排序，
+ * 每个文件加 `### 文件：{rel}` 小标题后拼接；非文本文件跳过；总量截 DIR_BODY_LIMIT。
+ * 与 readSourceEntryBody 同用途 —— 把目录内容**直接**变成可注入 prompt 的正文。
+ */
+function readTextDirBody(dirAbs: string): string {
+  const files: { rel: string; bin: boolean }[] = []
+  listDirFilesRecursive(dirAbs, files)
+  const texts = files.filter(f => !f.bin).sort((a, b) => a.rel.localeCompare(b.rel))
+  const parts: string[] = []
+  let total = 0
+  for (const f of texts) {
+    if (total >= DIR_BODY_LIMIT) break
+    let body = ''
+    try { body = readTextSmart(join(dirAbs, f.rel)) } catch { continue }
+    if (!body.trim()) continue
+    const chunk = body.length > DIR_BODY_LIMIT - total ? body.slice(0, DIR_BODY_LIMIT - total) : body
+    parts.push(`### 文件：${f.rel}\n${chunk}`)
+    total += chunk.length
+  }
+  return parts.join('\n\n')
 }
 
 /**

@@ -70,8 +70,9 @@ export function rebuildGraphIndex(): GraphIndexData {
   const resolver = createLinkResolver(idx)
 
   // 有向引用（页→页 resolved），自环跳过
-  // 非 md 归档文件（entryKind==='file'）无正文无出链，不进图谱（docs/vault-archive-all-files-design.md §6）
-  const graphPages = idx.pages.filter((e) => e.entryKind !== 'file')
+  // 非 md 归档文件（entryKind==='file'）无正文无出链，不进图谱（docs/vault-archive-all-files-design.md §6）；
+  // ★ 例外：思维导图（isMindmap）进图谱——它可被 [[导图标题]] 引用、也可作为节点被跳转
+  const graphPages = idx.pages.filter((e) => e.entryKind !== 'file' || e.isMindmap)
   const srcToDst = new Map<string, Set<string>>() // src -> resolved targets
   const tagPages = new Map<string, Set<string>>() // tagName -> pageIds
   const unresolvedMap = new Map<string, Set<string>>() // name -> source pageIds

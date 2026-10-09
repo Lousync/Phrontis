@@ -9,18 +9,25 @@ import { appendAudit, countMonthInvocations, listAudit, summarizeArgs } from './
 
 // ===== 类型 =====
 
-/** 入参校验用 JSON Schema 的 M1 子集：type/properties/required/description */
+/** 入参校验用 JSON Schema 的 M1 子集：type/properties/required/description（递归结构用 object/array） */
+export interface ToolSchemaProp {
+  type: 'string' | 'number' | 'boolean' | 'object' | 'array'
+  description?: string
+  minimum?: number
+  maximum?: number
+  enum?: string[]
+  /** required 字符串参数显式允许空串（如 edit.newText：'' = 删除片段）。缺省空串按缺失拒，防 AI 漏参 */
+  allowEmpty?: boolean
+  /** type:'object' 的子字段（透传给模型；校验只做浅层 typeof） */
+  properties?: Record<string, ToolSchemaProp>
+  /** type:'array' 的元素结构 */
+  items?: ToolSchemaProp
+  required?: string[]
+}
+
 export interface ToolJsonSchema {
   type: 'object'
-  properties?: Record<string, {
-    type: 'string' | 'number' | 'boolean'
-    description?: string
-    minimum?: number
-    maximum?: number
-    enum?: string[]
-    /** required 字符串参数显式允许空串（如 edit.newText：'' = 删除片段）。缺省空串按缺失拒，防 AI 漏参 */
-    allowEmpty?: boolean
-  }>
+  properties?: Record<string, ToolSchemaProp>
   required?: string[]
 }
 
@@ -152,6 +159,12 @@ export function validateArgs(schema: ToolJsonSchema, args: Record<string, unknow
       }
       case 'boolean':
         if (typeof v !== 'boolean') return `参数 ${key} 应为布尔值`
+        break
+      case 'object':
+        if (typeof v !== 'object' || v === null || Array.isArray(v)) return `参数 ${key} 应为对象`
+        break
+      case 'array':
+        if (!Array.isArray(v)) return `参数 ${key} 应为数组`
         break
     }
   }

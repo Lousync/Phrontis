@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { BookOpen, Check, ChevronDown, Play, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
-import type { AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnit, AiTeachUnitQuizQuestion } from '../../types'
-import { aiTeachCourseGenerateOutlineStream, aiTeachCourseSaveOutline, aiTeachCourseMakeUnitQuiz, onAiTeachCourseGenProgress } from '../../lib/ipc'
+import { Check, ChevronDown, Play, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
+import type { AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnit, AiTeachUnitQuizQuestion, AiTeachSourceItem, AiTeachOutlineAdditions } from '../../types'
+import {
+  aiTeachCourseGenerateOutlineStream, aiTeachCourseSaveOutline, aiTeachCourseMakeUnitQuiz, onAiTeachCourseGenProgress,
+  aiTeachCourseGetSourceChanges, aiTeachCourseReviseOutlineStream, aiTeachCourseApplyAdditions,
+} from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 
 /**
@@ -35,11 +38,16 @@ const PHASE_LABEL: Record<string, string> = {
 export const COURSE_ST_LABEL = ST_LABEL
 
 const SRC_MODES: Array<{ k: 'anchor' | 'materials' | 'mixed' | 'free'; t: string; d: string }> = [
-  { k: 'anchor', t: '官方考纲 / 教材目录', d: 'AI 只做结构化，不发明；每条知识点标出处' },
-  { k: 'materials', t: '已有素材 / 提取稿', d: '从你提供的教材/课件文本里抽知识点' },
-  { k: 'mixed', t: '锚定 + 允许补充', d: '以依据为主，缺的由 AI 补并标明' },
+  { k: 'anchor', t: '官方考纲 / 教材目录', d: '粘贴文本，AI 只做结构化、不发明' },
+  { k: 'materials', t: '已有素材 / 提取稿', d: '勾选已登记素材，从其中抽知识点' },
+  { k: 'mixed', t: '锚定 + 允许补充', d: '以依据/素材为主，缺的由 AI 补并标明' },
   { k: 'free', t: '只有目标，无来源', d: 'AI 自由生成，你事后审改（最不可控）' },
 ]
+
+/** 素材键（与主进程 sourceKey 同口径）：name\0path —— 用于勾选回传 */
+const srcKey = (it: { name: string; path: string }): string => `${String(it.name ?? '').trim()}\u0000${String(it.path ?? '').trim()}`
+/** 是否提供正文：有提取稿，或本身是 md/code 文本素材、dir 目录素材（可读其文件/目录内文本） */
+const hasBody = (it: AiTeachSourceItem): boolean => /^✓\s*→\s*.+/.test(String(it.extracted ?? '')) || it.type === 'md' || it.type === 'code' || it.type === 'dir'
 
 interface Props {
   wsId: string
@@ -58,6 +66,7 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFini
   // L3 收尾自测：先出题 → 作答 → 再生成总结篇
   const [quiz, setQuiz] = useState<{ unitId: string; qs: AiTeachUnitQuizQuestion[]; i: number; picked: number | null; score: number; done: boolean } | null>(null)
   const [quizBusy, setQuizBusy] = useState(false)
+  const [showRevise, setShowRevise] = useState(false)
 
   const startFinishQuiz = useCallback(async (unitId: string) => {
     if (quizBusy) return
@@ -102,11 +111,11 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFini
 
   return (
     <div className="h-full min-h-0 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[880px] px-8 py-7">
-        <div className="flex items-start gap-4">
-          <div className="min-w-0">
-            <h1 className="text-[21px] font-semibold text-[var(--text-primary)]">{state.outline.title || wsName}</h1>
-            {state.outline.goal && <div className="mt-1.5 text-[12px] text-[var(--text-secondary)]">🎯 {state.outline.goal}</div>}
+      <div className="kb-fit kb-fit-aicourse mx-auto w-full max-w-[880px] px-6 py-6">
+        <div className="flex items-start gap-x-4 gap-y-3 flex-wrap">
+          <div className="min-w-0 flex-1 basis-[220px]">
+            <h1 className="text-[21px] font-semibold text-[var(--text-primary)] line-clamp-2" title={state.outline.title || wsName}>{state.outline.title || wsName}</h1>
+            {state.outline.goal && <div className="mt-1.5 text-[12px] text-[var(--text-secondary)] line-clamp-2" title={state.outline.goal}>🎯 {state.outline.goal}</div>}
             {state.outline.anchor && (
               <div className="mt-2 flex items-center gap-2 text-[11.5px]">
                 <span className="px-1.5 py-0.5 rounded bg-[var(--success)]/15 text-[var(--success)] font-semibold">来源锚定：{state.outline.anchor}</span>
@@ -114,14 +123,16 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFini
             )}
           </div>
           <div className="ml-auto flex items-center gap-4 shrink-0">
-            <div className="text-right">
+            <div className="kb-l2 text-right">
               <div className="text-[20px] font-bold text-[var(--accent)]">{done}<span className="text-[12px] font-normal text-[var(--text-muted)]"> / {total} 已掌握</span></div>
-              <div className="mt-1.5 h-[5px] w-[130px] rounded-full bg-[var(--border-color)] overflow-hidden">
+              <div className="kb-l1 mt-1.5 h-[5px] w-[130px] rounded-full bg-[var(--border-color)] overflow-hidden">
                 <div className="h-full bg-[var(--accent)] transition-all" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
               </div>
             </div>
             <button onClick={() => setView('wizard')}
               className="px-2.5 py-1 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] transition-colors">编辑大纲</button>
+            <button onClick={() => setShowRevise(true)}
+              className="px-2.5 py-1 rounded-md border border-[var(--accent)]/45 text-[11.5px] text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors">＋ 修订大纲</button>
           </div>
         </div>
 
@@ -241,8 +252,200 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFini
             </div>
           </div>
         )}
+        {showRevise && state.outline && (
+          <ReviseDrawer wsId={wsId} modelSpec={modelSpec} onClose={() => setShowRevise(false)} onApplied={onReload} />
+        )}
       </div>
     </div>
+  )
+}
+
+/**
+ * 修订大纲抽屉：① 素材变更（比对 SOURCE.md 快照）② 新要求 → AI 只增补 → 勾选确认写回。
+ * 产出形状 = 增补清单（非整份大纲），从数据上杜绝改动现有条目；写入保留现有 id/进度。
+ */
+function ReviseDrawer({ wsId, modelSpec, onClose, onApplied }: { wsId: string; modelSpec?: string; onClose: () => void; onApplied: () => void }) {
+  const [items, setItems] = useState<AiTeachSourceItem[] | null>(null)
+  const [req, setReq] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [phase, setPhase] = useState('')
+  const [err, setErr] = useState('')
+  const [additions, setAdditions] = useState<AiTeachOutlineAdditions | null>(null)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [applying, setApplying] = useState(false)
+  const genIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    void aiTeachCourseGetSourceChanges(wsId)
+      .then(r => { if (alive) setItems(r.ok && r.items ? r.items : []) })
+      .catch(() => { if (alive) setItems([]) })
+    return () => { alive = false }
+  }, [wsId])
+
+  useEffect(() => onAiTeachCourseGenProgress((p) => {
+    if (!p || p.id !== genIdRef.current) return
+    setPhase(p.phase)
+    if (p.phase === 'failed') setErr(p.error ?? '生成失败')
+  }), [])
+
+  const changed = (items ?? []).filter(i => i.change)
+  const canGen = !!req.trim() || changed.length > 0
+  const PH: Record<string, string> = { request: '已发送请求，等待模型响应…', reasoning: '模型正在推理…', answer: '模型正在生成增补建议…', parsing: '正在解析增补 JSON…' }
+
+  const gen = useCallback(async () => {
+    if (busy || !canGen) return
+    const id = crypto.randomUUID(); genIdRef.current = id
+    setBusy(true); setPhase('request'); setErr(''); setAdditions(null); setPicked(new Set())
+    try {
+      const r = await aiTeachCourseReviseOutlineStream(id, { wsId, requirement: req.trim(), useSources: true, modelSpec })
+      if (!r.ok || !r.additions) { setErr(r.error ?? '生成失败'); return }
+      setAdditions(r.additions)
+      const keys = new Set<string>()
+      r.additions.toExisting.forEach((_, i) => keys.add('to:' + i))
+      r.additions.newChapters.forEach((c, ci) => c.units.forEach((_, ui) => keys.add(`ch:${ci}:${ui}`)))
+      setPicked(keys)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally { setBusy(false); setPhase('') }
+  }, [busy, canGen, wsId, req, modelSpec])
+
+  const toggle = useCallback((k: string) => setPicked(prev => {
+    const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n
+  }), [])
+
+  const apply = useCallback(async () => {
+    if (!additions || applying) return
+    const filtered: AiTeachOutlineAdditions = {
+      toExisting: additions.toExisting.filter((_, i) => picked.has('to:' + i)),
+      newChapters: additions.newChapters
+        .map((c, ci) => ({ name: c.name, units: c.units.filter((_, ui) => picked.has(`ch:${ci}:${ui}`)) }))
+        .filter(c => c.units.length > 0),
+    }
+    const n = filtered.toExisting.length + filtered.newChapters.reduce((a, c) => a + c.units.length, 0)
+    if (n === 0) { showToast({ type: 'warning', message: '没有勾选任何增补项' }); return }
+    setApplying(true)
+    const r = await aiTeachCourseApplyAdditions(wsId, filtered).catch(() => null)
+    setApplying(false)
+    if (!r?.ok) { showToast({ type: 'error', message: r?.error ?? '写入失败' }); return }
+    showToast({ type: 'success', message: `已增补 ${r.added} 个知识点 → 课程.md` })
+    onApplied(); onClose()
+  }, [additions, picked, applying, wsId, onApplied, onClose])
+
+  return (
+    <>
+      <div className="fixed inset-0 z-[60] bg-black/35 kb-overlay" onClick={onClose} />
+      <div className="fixed right-0 top-0 z-[61] h-full w-[560px] max-w-[94vw] flex flex-col bg-[var(--bg-primary)] border-l border-[var(--border-color)] shadow-2xl kb-pop">
+        <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-[var(--border-color)]">
+          <span className="text-[15px] font-semibold text-[var(--text-primary)]">修订大纲</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--warning)]/15 text-[var(--warning)] font-semibold">只增补</span>
+          <button onClick={onClose} className="ml-auto text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">✕</button>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-4">
+          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2.5 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">
+            以<strong className="text-[var(--text-primary)]">现有大纲为基础</strong>：AI 先比对 SOURCE.md 找出新增/变更的素材，再结合你的新要求，只<strong className="text-[var(--accent)]">新增</strong>知识点/章，<strong>不动</strong>现有条目，已有掌握度/课时不受影响。
+          </div>
+
+          <div className="mt-4 text-[12.5px] font-semibold text-[var(--text-primary)]">① 素材变更 <span className="font-normal text-[var(--text-muted)]">— 比对 SOURCE.md</span></div>
+          <div className="mt-2 rounded-lg border border-[var(--border-color)] overflow-hidden">
+            {items === null ? (
+              <div className="px-3 py-2.5 text-[11.5px] text-[var(--text-muted)]">读取中…</div>
+            ) : items.length === 0 ? (
+              <div className="px-3 py-2.5 text-[11.5px] text-[var(--text-muted)]">工作区还没有登记素材</div>
+            ) : items.map(it => (
+              <div key={`${it.no}-${it.name}`} className="flex items-center gap-2 px-3 py-1.5 border-b last:border-b-0 border-[var(--border-color)] text-[11.5px]">
+                <span className="font-mono text-[var(--text-muted)] w-7 shrink-0">#{it.no}</span>
+                <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">{it.name}</span>
+                {it.change === 'new' && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent)]/12 text-[var(--accent)] font-semibold">新增</span>}
+                {it.change === 'updated' && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[var(--warning)]/15 text-[var(--warning)] font-semibold">已更新</span>}
+                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-hover)] text-[var(--text-muted)]">{it.type}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1.5 text-[10.5px] text-[var(--text-muted)]">
+            {changed.length
+              ? `检测到 ${changed.length} 项变更（${changed.filter(c => c.change === 'new').length} 新增 · ${changed.filter(c => c.change === 'updated').length} 更新）`
+              : '未检测到素材变更'}
+          </div>
+
+          <div className="mt-4 text-[12.5px] font-semibold text-[var(--text-primary)]">② 新的要求 / 想补充什么</div>
+          <textarea value={req} onChange={e => setReq(e.target.value)} rows={3}
+            placeholder={'例如：\n· 内存管理太薄，想要更细的虚存专题\n· 多加点调度算法的例题单元'}
+            className="mt-2 w-full rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none resize-y focus:border-[var(--accent)]" />
+
+          {busy && (
+            <div className="mt-3 flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+              <span className="w-[14px] h-[14px] rounded-full border-2 border-[var(--border-color)] border-t-[var(--accent)] animate-spin" />
+              {PH[phase] ?? '处理中…'}
+            </div>
+          )}
+          {err && !busy && <div className="mt-3 text-[11.5px] text-[var(--danger)] break-all">{err}</div>}
+
+          {additions && !busy && (
+            <div className="mt-4">
+              {additions.toExisting.length > 0 && (
+                <div className="mb-3">
+                  <div className="text-[12px] font-semibold text-[var(--text-secondary)] mb-1.5">在现有章节新增 · {additions.toExisting.length} 项</div>
+                  {additions.toExisting.map((a, i) => {
+                    const k = 'to:' + i; const on = picked.has(k)
+                    return (
+                      <button key={k} onClick={() => toggle(k)}
+                        className={`w-full text-left flex items-start gap-2.5 rounded-lg border px-3 py-2 mb-1.5 transition-colors ${on ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border-color)] hover:border-[var(--accent)]/40'}`}>
+                        <span className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0 ${on ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'border-[var(--text-muted)]'}`}>{on ? '✓' : ''}</span>
+                        <span className="min-w-0">
+                          <span className="block text-[12.5px] font-semibold text-[var(--text-primary)]">{a.name}
+                            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-hover)] text-[var(--text-muted)] font-normal">{a.chapterName || a.chapterId || '现有章'}</span>
+                          </span>
+                          {a.why && <span className="block text-[10.5px] text-[var(--text-muted)] mt-0.5">{a.why}</span>}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {additions.newChapters.map((c, ci) => (
+                <div key={'nc' + ci} className="mb-3">
+                  <div className="text-[12px] font-semibold text-[var(--text-secondary)] mb-1.5">新增章节「{c.name}」· {c.units.length} 项</div>
+                  {c.units.map((u, ui) => {
+                    const k = `ch:${ci}:${ui}`; const on = picked.has(k)
+                    return (
+                      <button key={k} onClick={() => toggle(k)}
+                        className={`w-full text-left flex items-start gap-2.5 rounded-lg border px-3 py-2 mb-1.5 transition-colors ${on ? 'border-[var(--accent)] bg-[var(--accent)]/10' : 'border-[var(--border-color)] hover:border-[var(--accent)]/40'}`}>
+                        <span className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0 ${on ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'border-[var(--text-muted)]'}`}>{on ? '✓' : ''}</span>
+                        <span className="min-w-0">
+                          <span className="block text-[12.5px] font-semibold text-[var(--text-primary)]">{u.name}</span>
+                          {u.why && <span className="block text-[10.5px] text-[var(--text-muted)] mt-0.5">{u.why}</span>}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
+              <div className="text-[10.5px] text-[var(--text-muted)]">✻ 未勾选的建议不会写入；现有条目一律不动。</div>
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-t border-[var(--border-color)] bg-[var(--bg-secondary)]">
+          {!additions ? (
+            <button onClick={() => void gen()} disabled={busy || !canGen}
+              className="px-3.5 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[12px] hover:opacity-90 disabled:opacity-40 transition-opacity">
+              {busy ? '生成中…' : '生成增补建议'}
+            </button>
+          ) : (
+            <>
+              <button onClick={() => { setAdditions(null); void gen() }} disabled={busy}
+                className="px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] text-[12px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] transition-colors">重新生成</button>
+              <button onClick={() => void apply()} disabled={applying || picked.size === 0}
+                className="ml-auto px-3.5 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[12px] hover:opacity-90 disabled:opacity-40 transition-opacity">
+                {applying ? '写入中…' : `确认写入（${picked.size}）`}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -254,6 +457,9 @@ function Wizard({ wsName, wsId, modelSpec, outline, onSaved, onCancel }: { wsNam
   const [anchorText, setAnchorText] = useState('')
   const [busy, setBusy] = useState(false)
   const [draft, setDraft] = useState<AiTeachCourseOutline | null>(outline)
+  // 登记素材清单 + 勾选（materials / mixed 模式）
+  const [srcItems, setSrcItems] = useState<AiTeachSourceItem[] | null>(null)
+  const [pickedSrc, setPickedSrc] = useState<Set<string>>(new Set())
   // 生成过程（流式）：让用户看到「走到哪一步」，失败也能看到模型原文与错误点
   const [genPhase, setGenPhase] = useState('')
   const [genModel, setGenModel] = useState('')
@@ -265,6 +471,20 @@ function Wizard({ wsName, wsId, modelSpec, outline, onSaved, onCancel }: { wsNam
   const genIdRef = useRef<string | null>(null)
 
   useEffect(() => { setDraft(outline) }, [outline])
+
+  // 拉登记素材（默认全选）
+  useEffect(() => {
+    let alive = true
+    void aiTeachCourseGetSourceChanges(wsId)
+      .then(r => {
+        if (!alive) return
+        const list = r.ok && r.items ? r.items : []
+        setSrcItems(list)
+        setPickedSrc(new Set(list.map(srcKey)))
+      })
+      .catch(() => { if (alive) { setSrcItems([]); setPickedSrc(new Set()) } })
+    return () => { alive = false }
+  }, [wsId])
 
   useEffect(() => {
     const off = onAiTeachCourseGenProgress((p) => {
@@ -279,21 +499,39 @@ function Wizard({ wsName, wsId, modelSpec, outline, onSaved, onCancel }: { wsNam
     return off
   }, [])
 
+  const needsAnchor = mode === 'anchor' || mode === 'mixed'
+  const needsSources = mode === 'materials' || mode === 'mixed'
+  const toggleSrc = useCallback((k: string) => setPickedSrc(prev => {
+    const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n
+  }), [])
+
   const gen = useCallback(async () => {
     if (busy) return
-    if (!goal.trim() && !anchorText.trim()) { showToast({ type: 'warning', message: '请先填写学习目标，或粘贴考纲/目录文本' }); return }
+    const hasBasis = (needsAnchor && anchorText.trim()) || (needsSources && pickedSrc.size > 0)
+    if (!goal.trim() && !hasBasis) {
+      showToast({ type: 'warning', message: needsSources ? '请填写学习目标，或勾选依据素材' : '请先填写学习目标，或粘贴考纲/目录文本' })
+      return
+    }
     const id = crypto.randomUUID()
     genIdRef.current = id
     setGenPhase('request'); setGenModel(''); setGenReasoning(''); setGenAnswer(''); setGenErr(''); setGenOpen(true)
     setBusy(true)
     try {
-      const r = await aiTeachCourseGenerateOutlineStream(id, { goal: goal.trim(), mode, anchorText: anchorText.trim(), anchorLabel: anchorLabel.trim(), modelSpec })
+      const r = await aiTeachCourseGenerateOutlineStream(id, {
+        goal: goal.trim(),
+        mode,
+        anchorText: needsAnchor ? anchorText.trim() : '',
+        anchorLabel: mode === 'materials' ? '已登记素材' : anchorLabel.trim(),
+        wsId,
+        sourceKeys: needsSources ? [...pickedSrc] : undefined,
+        modelSpec,
+      })
       if (!r.ok || !r.outline) { setGenErr(r.error ?? '生成失败'); setGenPhase('failed'); showToast({ type: 'error', message: r.error ?? '生成失败' }); return }
       if (!r.outline.title) r.outline.title = wsName
       setDraft(r.outline)
       showToast({ type: 'info', message: `已生成 ${r.outline.chapters.length} 章 / ${r.outline.chapters.reduce((n, c) => n + c.units.length, 0)} 个知识点，请核对` })
     } finally { setBusy(false) }
-  }, [busy, goal, mode, anchorText, anchorLabel, wsName, modelSpec])
+  }, [busy, goal, mode, anchorText, anchorLabel, needsAnchor, needsSources, pickedSrc, wsId, wsName, modelSpec])
 
   const save = useCallback(async () => {
     if (!draft) return
@@ -315,6 +553,9 @@ function Wizard({ wsName, wsId, modelSpec, outline, onSaved, onCancel }: { wsNam
     return { ...d, chapters: d.chapters.map((c, i) => i !== ci ? c : { ...c, units: [...c.units, { id: `u${n}`, name: '新知识点', goal: '', source: '手动添加' }] }) }
   })
   const addChapter = () => setDraft(d => d ? { ...d, chapters: [...d.chapters, { id: `c${d.chapters.length + 1}`, name: `第${d.chapters.length + 1}章`, units: [] }] } : d)
+
+  const srcCount = srcItems?.length ?? 0
+  const extractedCount = (srcItems ?? []).filter(hasBody).length
 
   return (
     <div className="h-full min-h-0 overflow-y-auto">
@@ -341,16 +582,56 @@ function Wizard({ wsName, wsId, modelSpec, outline, onSaved, onCancel }: { wsNam
                 </button>
               ))}
             </div>
-            {mode !== 'free' && (
+
+            {needsAnchor && (
               <input value={anchorLabel} onChange={e => setAnchorLabel(e.target.value)} placeholder="依据名称，如 考研 408 考纲"
                 className="mt-3 w-full rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
             )}
+
+            {/* 素材勾选表（materials / mixed）：默认全选 */}
+            {needsSources && (
+              <div className="mt-3">
+                <div className="flex items-center gap-2 text-[12px]">
+                  <span className="font-semibold text-[var(--text-primary)]">依据素材</span>
+                  <span className="text-[11px] text-[var(--text-muted)]">{pickedSrc.size}/{srcCount}{extractedCount ? ` · ${extractedCount} 份有正文` : ''}</span>
+                  <button
+                    onClick={() => setPickedSrc(pickedSrc.size === srcCount ? new Set() : new Set((srcItems ?? []).map(srcKey)))}
+                    className="ml-auto text-[11.5px] text-[var(--accent)] hover:underline">
+                    {pickedSrc.size === srcCount && srcCount > 0 ? '全不选' : '全选'}
+                  </button>
+                </div>
+                <div className="mt-1.5 rounded-lg border border-[var(--border-color)] overflow-hidden">
+                  {srcItems === null ? (
+                    <div className="px-3 py-2.5 text-[11.5px] text-[var(--text-muted)]">读取登记素材…</div>
+                  ) : srcItems.length === 0 ? (
+                    <div className="px-3 py-2.5 text-[11.5px] text-[var(--text-muted)]">工作区还没有登记素材，请先到素材库登记（或改用「官方考纲/教材目录」粘贴文本）</div>
+                  ) : srcItems.map(it => {
+                    const k = srcKey(it); const on = pickedSrc.has(k); const ex = hasBody(it)
+                    return (
+                      <button key={k} onClick={() => toggleSrc(k)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 border-b last:border-b-0 border-[var(--border-color)] text-left hover:bg-[var(--bg-hover)] transition-colors">
+                        <span className={`w-4 h-4 rounded border flex items-center justify-center text-[10px] shrink-0 ${on ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'border-[var(--text-muted)]'}`}>{on ? '✓' : ''}</span>
+                        <span className="font-mono text-[var(--text-muted)] text-[11px] w-7 shrink-0">#{it.no}</span>
+                        <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--text-secondary)]">{it.name}</span>
+                        {ex
+                          ? <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[var(--success)]/15 text-[var(--success)] font-semibold">有正文</span>
+                          : <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-hover)] text-[var(--text-muted)]">{it.type}·仅清单</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="mt-1 text-[10.5px] text-[var(--text-muted)]">「有正文」= 有提取稿，或本身就是 md/文本素材、目录素材（AI 会直接读其内容）；其余仅提供清单信息，AI 不会据此臆造。</div>
+              </div>
+            )}
+
             <textarea value={goal} onChange={e => setGoal(e.target.value)} placeholder="学习目标，如：备考 408 操作系统，三轮过完，重点虚存与调度" rows={2}
               className="mt-2 w-full rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none resize-y focus:border-[var(--accent)]" />
-            {mode !== 'free' && (
+
+            {needsAnchor && (
               <textarea value={anchorText} onChange={e => setAnchorText(e.target.value)} placeholder="粘贴考纲 / 教材目录文本（AI 只据此拆分，不发明）" rows={4}
                 className="mt-2 w-full rounded-lg border border-[var(--border-color)] bg-[var(--input-bg)] px-3 py-2 text-[12.5px] text-[var(--text-primary)] outline-none resize-y focus:border-[var(--accent)]" />
             )}
+
             <button onClick={() => void gen()} disabled={busy}
               className="mt-3 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent)] text-white text-[12px] hover:opacity-90 disabled:opacity-50 transition-opacity">
               {busy ? <><RotateCcw size={13} className="animate-spin" /> 正在拆解…</> : <><Sparkles size={13} /> {draft ? '重新生成大纲' : '生成课程大纲'}</>}

@@ -42,6 +42,10 @@ export interface GenerateOutlineInput {
   mode: 'anchor' | 'materials' | 'mixed' | 'free'
   anchorText?: string
   anchorLabel?: string
+  /** 当前工作区 id（materials/mixed 模式据此读取已登记素材） */
+  wsId?: string
+  /** 勾选的登记素材键（`sourceKey(name,path)`）；缺省 = 全部已登记素材 */
+  sourceKeys?: string[]
   /** 'providerId:modelId'；缺省 = 主进程 defaultChatModel */
   modelSpec?: string
 }
@@ -166,4 +170,135 @@ export function parseOutlineJson(text: string): CourseOutline | null {
     }
   }
   return null
+}
+
+// ===== 课程修订（只增补）：SOURCE 快照 diff + 增补合并（纯函数，2026-10-08）=====
+
+export interface SourceSnapshotEntry { key: string; no: number; name: string; path: string; extracted: string }
+
+/** 快照匹配键：name + path（重编号不影响） */
+export function sourceKey(name: unknown, path: unknown): string {
+  return `${String(name ?? '').trim()}\u0000${String(path ?? '').trim()}`
+}
+
+/** 由当前 SOURCE 条目生成快照（写大纲时存一份，供下次比对） */
+export function sourceSnapshot(entries: ReadonlyArray<{ no: number; name: string; path: string; extracted: string }>): SourceSnapshotEntry[] {
+  return (entries ?? []).map((e) => ({
+    key: sourceKey(e.name, e.path),
+    no: Number(e.no) || 0,
+    name: String(e.name ?? ''),
+    path: String(e.path ?? ''),
+    extracted: String(e.extracted ?? ''),
+  }))
+}
+
+/** 当前条目 vs 快照：键不存在=新增；extracted 变=已更新；否则 null */
+export function diffSources<T extends { no: number; name: string; path: string; extracted: string }>(
+  baseline: ReadonlyArray<SourceSnapshotEntry>, current: ReadonlyArray<T>,
+): Array<T & { change: 'new' | 'updated' | null }> {
+  const base = new Map((baseline ?? []).map((b) => [b.key, b]))
+  return (current ?? []).map((e) => {
+    const b = base.get(sourceKey(e.name, e.path))
+    const change: 'new' | 'updated' | null = !b ? 'new' : (b.extracted !== String(e.extracted ?? '') ? 'updated' : null)
+    return { ...e, change }
+  })
+}
+
+export interface OutlineUnitAdd { chapterId?: string; chapterName?: string; name: string; goal?: string; source?: string; why?: string }
+export interface OutlineChapterAdd { name: string; units: Array<{ name: string; goal?: string; source?: string; why?: string }> }
+export interface OutlineAdditions { toExisting: OutlineUnitAdd[]; newChapters: OutlineChapterAdd[] }
+
+function s(v: unknown): string { return String(v ?? '').trim() }
+
+function coerceAdditions(obj: unknown): OutlineAdditions | null {
+  if (!obj || typeof obj !== 'object') return null
+  const o = obj as { toExisting?: unknown; newChapters?: unknown }
+  const toExisting: OutlineUnitAdd[] = []
+  if (Array.isArray(o.toExisting)) {
+    for (const it of o.toExisting) {
+      const u = (it ?? {}) as Record<string, unknown>
+      const name = s(u.name)
+      if (!name) continue
+      toExisting.push({
+        chapterId: s(u.chapterId) || undefined,
+        chapterName: s(u.chapterName ?? u.chapter) || undefined,
+        name, goal: s(u.goal) || undefined, source: s(u.source) || undefined, why: s(u.why) || undefined,
+      })
+    }
+  }
+  const newChapters: OutlineChapterAdd[] = []
+  if (Array.isArray(o.newChapters)) {
+    for (const ch of o.newChapters) {
+      const c = (ch ?? {}) as { name?: unknown; units?: unknown }
+      const cname = s(c.name)
+      const units: OutlineChapterAdd['units'] = []
+      if (Array.isArray(c.units)) {
+        for (const it of c.units) {
+          const u = (it ?? {}) as Record<string, unknown>
+          const name = s(u.name)
+          if (!name) continue
+          units.push({ name, goal: s(u.goal) || undefined, source: s(u.source) || undefined, why: s(u.why) || undefined })
+        }
+      }
+      if (cname && units.length) newChapters.push({ name: cname, units })
+    }
+  }
+  if (!toExisting.length && !newChapters.length) return null
+  return { toExisting, newChapters }
+}
+
+/** 从模型返回抽「增补」JSON（```json 围栏 → 全文；配对扫描 + 从后往前取） */
+export function normalizeAdditions(rawText: string): OutlineAdditions | null {
+  const text = String(rawText ?? '')
+  const bodies: string[] = []
+  const fenceRe = /```(?:json)?\s*([\s\S]*?)```/g
+  let m: RegExpExecArray | null
+  while ((m = fenceRe.exec(text))) bodies.push(m[1])
+  bodies.push(text)
+  for (const body of bodies) {
+    const cands = balancedJsonObjects(body)
+    for (let i = cands.length - 1; i >= 0; i--) {
+      let obj: unknown
+      try { obj = JSON.parse(cands[i]) } catch { continue }
+      const out = coerceAdditions(obj)
+      if (out) return out
+    }
+  }
+  return null
+}
+
+/**
+ * 只增补合并：**现有章节/知识点 id 一律保留**；新条目取递增 id；同名同章去重。
+ * 定位不到的现有章（chapterId/chapterName 都对不上）→ 丢弃该项（不新建、不改动现有）。
+ */
+export function mergeOutlineAdditions(outline: CourseOutline, additions: OutlineAdditions): { outline: CourseOutline; added: number } {
+  const chapters: CourseChapter[] = (outline?.chapters ?? []).map((c) => ({ ...c, units: c.units.map((u) => ({ ...u })) }))
+  let maxUnit = 0
+  let maxChap = 0
+  chapters.forEach((c, ci) => {
+    maxChap = Math.max(maxChap, parseInt(/\d+/.exec(c.id)?.[0] ?? String(ci + 1), 10) || ci + 1)
+    c.units.forEach((u) => { maxUnit = Math.max(maxUnit, parseInt(/\d+/.exec(u.id)?.[0] ?? '0', 10) || 0) })
+  })
+  let added = 0
+  const namesIn = (c: CourseChapter): Set<string> => new Set(c.units.map((u) => cleanField(u.name)))
+  for (const a of additions?.toExisting ?? []) {
+    if (!a?.name) continue
+    let ch = a.chapterId ? chapters.find((c) => c.id === a.chapterId) : undefined
+    if (!ch && a.chapterName) ch = chapters.find((c) => cleanField(c.name) === cleanField(a.chapterName))
+    if (!ch) continue
+    if (namesIn(ch).has(cleanField(a.name))) continue
+    ch.units.push({ id: `u${++maxUnit}`, name: cleanField(a.name), goal: cleanField(a.goal ?? ''), source: cleanField(a.source ?? '') || 'AI 增补' })
+    added += 1
+  }
+  for (const nc of additions?.newChapters ?? []) {
+    if (!nc?.units?.length) continue
+    const ch: CourseChapter = { id: `c${++maxChap}`, name: cleanField(nc.name), units: [] }
+    for (const u of nc.units) {
+      if (!cleanField(u.name) || namesIn(ch).has(cleanField(u.name))) continue
+      ch.units.push({ id: `u${++maxUnit}`, name: cleanField(u.name), goal: cleanField(u.goal ?? ''), source: cleanField(u.source ?? '') || 'AI 增补' })
+      added += 1
+    }
+    if (ch.units.length) chapters.push(ch)
+  }
+  return { outline: { ...outline, chapters }, added }
 }

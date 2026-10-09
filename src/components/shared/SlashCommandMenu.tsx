@@ -34,15 +34,18 @@ function shortDesc(d: string): string {
   return s.length > 40 ? s.slice(0, 40) + '…' : s
 }
 
-/** 合并两张候选表（指令在前、Skill 在后），调用面只需各自拉一次 skills 列表 */
-export function buildSlashItems(skills: SkillInfo[]): SlashMenuItem[] {
-  const cmds: SlashMenuItem[] = CHAT_COMMANDS.map((c) => ({
-    kind: 'command',
-    name: c.name,
-    title: `/${c.name}`,
-    desc: shortDesc(c.desc),
-    search: `${c.name} ${c.desc}`,
-  }))
+/** 合并候选表（指令在前、Skill 在后）。`extra` 供调用面注入面内专属指令（如 AI 教学的 /mindmap）。 */
+export function buildSlashItems(skills: SkillInfo[], extra: SlashMenuItem[] = []): SlashMenuItem[] {
+  const cmds: SlashMenuItem[] = [
+    ...CHAT_COMMANDS.map((c) => ({
+      kind: 'command' as const,
+      name: c.name,
+      title: `/${c.name}`,
+      desc: shortDesc(c.desc),
+      search: `${c.name} ${c.desc}`,
+    })),
+    ...extra,
+  ]
   const sks: SlashMenuItem[] = (skills ?? [])
     .filter((s) => !s.disabled)
     .map((s) => ({ kind: 'skill', name: s.registryName, title: s.title, desc: shortDesc(s.description), search: `${s.title} ${s.description}` }))

@@ -1,9 +1,10 @@
 /** 工件栏页签模型（docs/ai-teaching-artifacts-pane-design.md §1.4/§2）：
- *  md=讲义/提取稿/报告（原 docView）；html=visual.html 示意图产物（含「生成中」占位）；pptx=逐页阅读（原 reader） */
+ *  md=讲义/提取稿/报告（原 docView）；html=visual.html 示意图产物（含「生成中」占位）；pptx=逐页阅读（原 reader）；
+ *  mindmap=思维导图 JSON（会话产物，共享 MindMapView 渲染） */
 export interface ArtTab {
   /** 稳定 id：常规=rel；生成中占位=gen:<slug> */
   id: string
-  kind: 'md' | 'html' | 'pptx'
+  kind: 'md' | 'html' | 'pptx' | 'mindmap'
   /** 仓库相对路径（生成中占位为空串） */
   rel: string
   /** 页签/工件卡展示名 */

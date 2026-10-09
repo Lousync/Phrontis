@@ -4,7 +4,7 @@ import { join, relative, extname, sep, dirname } from 'path'
 import { listTools, registerTool, getSettingReader, checkModulePermission } from './aiTools'
 import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { webSearch, webReadPage } from './webSearch'
-import { writeVisual } from './aiTeachingSources'
+import { writeVisual, writeMindmap } from './aiTeachingSources'
 import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
 import type { ToolInvokeCtx } from './aiTools'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault } from './workspaceManager'
@@ -1247,7 +1247,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1770,6 +1770,39 @@ export function registerBuiltinTools(): void {
     const r = writeVisual(sid, str(args.slug), String(args.html ?? ''), getSettingReader())
     if (!r.ok) throw new Error(r.error ?? '示意图写入失败')
     return { relPath: r.relPath, lines: r.lines }
+  })
+
+  // 25. mindmap —— 生成思维导图 JSON 写入会话 mindmaps/（工件栏 / 笔记区可交互渲染）
+  registerTool({
+    name: 'mindmap',
+    title: '生成思维导图',
+    description: '把一段内容整理成思维导图，写入本会话文件夹 mindmaps/<slug>.json 并在右栏工件栏打开。' +
+      'root 为递归结构，每个节点形如 { text, ref?, children? }：text 必须是一行短短语；' +
+      'ref 可选，为「知识库笔记」或「另一张思维导图」的仓库相对路径（.md 笔记 / .json 导图），用于节点点击跳转；children 为子节点数组。' +
+      '树深 ≤6、节点总数 ≤120。只把结构交给本工具，**绝不把 JSON 写进回答正文或代码块**，生成后用一句话说明右侧已打开。' +
+      '重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: '文件名（kebab-case 小写英文/数字，如 binary-tree-traversal；不带 .json 后缀）' },
+        title: { type: 'string', description: '导图中文标题（工件卡与页签展示，如「二叉树遍历」）' },
+        root: { type: 'object', description: '根节点，递归结构 { text, ref?, children? }；ref 可指向知识库笔记(.md)或另一张思维导图(.json)（详见工具说明）' },
+      },
+      required: ['slug', 'title', 'root'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    // 不设 module：产物固定落 AI教学会话目录，权限由 sessionId 归属兜底（无会话即拒绝）
+  }, (args, ctx) => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid) throw new Error('mindmap 仅可在 AI教学对话中使用（当前会话无归属文件夹）')
+    const doc = { kind: 'mindmap', version: 1, title: str(args.title), root: args.root }
+    const r = writeMindmap(sid, str(args.slug), JSON.stringify(doc), getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '思维导图写入失败')
+    return { relPath: r.relPath, nodes: r.nodes }
   })
 
   // =====================================================================

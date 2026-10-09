@@ -11,6 +11,7 @@ import { copyImageUrlToClipboard, workspaceGetCurrent, workspaceReadImage } from
 import { preprocessContent, parseQuizFence, parseQuizFenceLoose } from './QuizParser'
 import { QuizCard } from './QuizCard'
 import { PluginFenceRenderer } from './PluginFenceRenderer'
+import { MermaidBlock } from './MermaidBlock'
 import { pluginListRenderers } from '../../lib/ipc'
 import type { PluginRendererInfo } from '../../types'
 import { normalizeAnswerLayout } from '../../lib/answerLayout'
@@ -61,6 +62,8 @@ interface Props {
   pageTitle?: string
   /** quiz 围栏解析失败重试（v3.1.1 条目13）：传入后失败占位卡显示「让 AI 重出新题」按钮 */
   onQuizRetry?: () => void
+  /** 高亮的 wiki 链接标题（关联网络「引用/被引用」定位用）：命中该标题的 [[ ]] 加 `.kb-wiki-flash` */
+  highlightWiki?: string
 }
 
 /** Unified markdown preview component. Links open via system handler (files → system app, URLs → browser). */
@@ -133,7 +136,7 @@ function QuizFailCard({ onRetry }: { onRetry?: () => void }) {
   )
 }
 
-function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitles, pageId, pageTitle, onQuizRetry }: Props) {
+function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitles, pageId, pageTitle, onQuizRetry, highlightWiki }: Props) {
   // 旧 408 选择题格式 → ```quiz 围栏（供 pre 组件渲染判题卡片）；非选择题块原样保留
   const processedContent = useMemo(() => preprocessContent(content), [content])
 
@@ -198,6 +201,8 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
       // 插件渲染器（plugin-phase1-design C6）：命中 lang 且插件已启用 → 内容只读沙箱；失败回退普通代码块
       const langMatch = cls.match(/language-([a-z0-9-]+)/i)
       const fenceLang = langMatch?.[1]?.toLowerCase()
+      // ```mermaid 围栏 → Mermaid 渲染（动态 chunk；失败回退普通代码块）
+      if (fenceLang === 'mermaid') return <MermaidBlock code={extractText(children)} />
       if (fenceLang) {
         const r = fenceRenderers.get(fenceLang)
         if (r) {
@@ -288,37 +293,37 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
     },
     // Convert [[wiki links]] + 脚注（word^[标注]） in paragraph text to interactive spans
     p({ children }) {
-      return <p>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</p>
+      return <p>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</p>
     },
     // Also handle wiki links in list items, headings, etc.
     li({ children }) {
-      return <li>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</li>
+      return <li>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</li>
     },
     h1({ children }) {
       const text = extractText(children)
-      return <h1 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h1>
+      return <h1 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h1>
     },
     h2({ children }) {
       const text = extractText(children)
-      return <h2 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h2>
+      return <h2 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h2>
     },
     h3({ children }) {
       const text = extractText(children)
-      return <h3 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h3>
+      return <h3 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h3>
     },
     h4({ children }) {
       const text = extractText(children)
-      return <h4 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h4>
+      return <h4 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h4>
     },
     h5({ children }) {
       const text = extractText(children)
-      return <h5 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h5>
+      return <h5 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h5>
     },
     h6({ children }) {
       const text = extractText(children)
-      return <h6 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h6>
+      return <h6 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h6>
     },
-  }), [handleLinkClick, onWikiLink, knownWikiTitles, pageId, pageTitle, fenceRenderers, onQuizRetry])
+  }), [handleLinkClick, onWikiLink, knownWikiTitles, pageId, pageTitle, fenceRenderers, onQuizRetry, highlightWiki])
 
   return (
     <div className="prose-content">
@@ -466,11 +471,11 @@ function renderFootnotes(children: React.ReactNode): React.ReactNode {
 }
 
 /** 行内扩展统一入口：先脚注，后双链（脚注词不被双链二次处理） */
-function renderInlineExtras(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>): React.ReactNode {
-  return renderWikiLinks(renderFootnotes(children), onWikiLink, knownWikiTitles)
+function renderInlineExtras(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>, highlightWiki?: string): React.ReactNode {
+  return renderWikiLinks(renderFootnotes(children), onWikiLink, knownWikiTitles, highlightWiki)
 }
 
-function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>): React.ReactNode {
+function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>, highlightWiki?: string): React.ReactNode {
   if (!onWikiLink) return children
   return React.Children.map(children, child => {
     if (typeof child === 'string') {
@@ -493,10 +498,12 @@ function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string)
         parts.push(
           <span
             key={key++}
+            data-wiki={display}
             className={
-              exists
+              (exists
                 ? 'text-[var(--accent)] cursor-pointer hover:underline'
-                : 'text-[var(--text-muted)]/70 cursor-pointer hover:text-[var(--accent)] border-b border-dashed border-[var(--text-muted)]/50'
+                : 'text-[var(--text-muted)]/70 cursor-pointer hover:text-[var(--accent)] border-b border-dashed border-[var(--text-muted)]/50')
+              + (exists && display === highlightWiki ? ' kb-wiki-flash' : '')
             }
             title={exists ? display : `创建页面「${display}」`}
             onClick={() => onWikiLink(display)}

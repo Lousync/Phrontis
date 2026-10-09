@@ -630,22 +630,17 @@ const srcAiTeach = stripComments(read('src/modules/ai-teaching/index.tsx'))
 ok(!/编辑器顶栏/.test(srcAiTeach),
   'K6 负向：toast 文案不再指向已不存在的「编辑器顶栏」（提示与实际一致）')
 
-// ===== L. 删除清零 ≠ 用户关标签（台账 F-10，2026-09-26 拍板方向 A）=====
-// 缺陷面：「最后一个页面关闭 → 自动关模块标签」被删除动作意外命中 —— 删一条笔记被等价成
-// 「关掉整个知识库标签」，App.closeTab 清 railModule → 左栏弹回总览；树删除连带关签同病，
-// 且 handlePageDeleted 的「删完重开首页」有 await 空窗竞态（effect 抢在重开前看到清零）。
-ok(/if \(deletionClearRef\.current\) \{ deletionClearRef\.current = false; return \}/.test(srcKnowledge),
-  'L1 清零 effect 消费 deletionClear 标记（消费一次即复位，不依赖删除流程的复位时机）')
-// L2 用两个**单行**锚点比位置：仓库源码是 CRLF，多行正则/搜索串会被 \r 绊倒（strip 后亦然）
-const delConsumeAt = srcKnowledge.indexOf('if (deletionClearRef.current)')
-const fullViewGuardAt = srcKnowledge.indexOf('if (showQuizCollection || graphMode || readingMode) return')
-ok(delConsumeAt !== -1 && fullViewGuardAt !== -1 && delConsumeAt < fullViewGuardAt,
-  'L2 消费位于全幅视图守卫之前（守卫早退不留陈旧标记吞掉下一次手动关签）')
-ok(/length === 1 && openPageIdsRef\.current\.includes\(id\)\) deletionClearRef\.current = true/.test(srcKnowledge),
-  'L3 页面删除：仅在「被删页是唯一开着的页」（必然清零）时置位 —— 保证标记必被 effect 消费')
-ok(/willClearAll = openPageIdsRef\.current\.length > 0 && openPageIdsRef\.current\.every/.test(srcKnowledge)
-  && /if \(willClearAll\) deletionClearRef\.current = true/.test(srcKnowledge),
-  'L4 树删除：仅当全部已开页签都在被删路径下（必然清零）时置位（同 handlePageDeleted 口径）')
+// ===== L. 关最后一个页签不再自动关「笔记」模块标签（2026-10-09 口径变更）=====
+// 旧行为（2026-09-19）：页面清零即 onRequestCloseTab → App.closeTab('knowledge') 清 railModule，
+// 左栏回总览；并配套 deletionClear 标记区分「删除清零 ≠ 用户关签」。用户反馈：关最后一个页面
+// 后本意是继续在笔记区从文件树开别的文件，左栏却被弹回总览。
+// 新口径：清零不再关模块标签（左栏停在文件树、中间走空态）；删除/关签不再需要区分，机制整体移除。
+ok(!/deletionClearRef/.test(srcKnowledge) && !/prevPageCountRef/.test(srcKnowledge) && !/onRequestCloseTab/.test(srcKnowledge),
+  'L1 知识库不再持有「清零即关模块标签」机制（deletionClearRef / prevPageCountRef / onRequestCloseTab 全无）')
+ok(!/onRequestCloseTab/.test(srcApp),
+  'L2 App 不再向知识库传 onRequestCloseTab（负向：自动关标签通道已断）')
+ok(/activePageId \? \(/.test(srcKnowledge) && /<FileText size=\{48\}/.test(srcKnowledge),
+  'L3 无活动页时仍走空态占位（模块标签与左栏保留，中间显空态，可继续从树开文件）')
 
 // ===== M. 看板「返回」落顶层（看板方案 §5 反馈 1，2026-09-27）=====
 // 缺陷面：onBack 写死 setRailModule('knowledge') + handleTabChange('knowledge') —— 回工作台落在

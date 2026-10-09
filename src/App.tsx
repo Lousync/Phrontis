@@ -1267,6 +1267,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullWindowTab, wbLayout, update])
 
+  // 笔记区「关联网络」右轨打开 → 自动收起工作台右栏（两个右栏同开太挤；2026-10-09 反馈）。
+  // 单向：关联网络关掉不自动恢复右栏（用户拍板）。
+  useEffect(() => {
+    const handler = () => {
+      if (wbLayout.rightCollapsed) return
+      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightCollapsed: true }))
+    }
+    window.addEventListener('kb-collapse-right-panel', handler)
+    return () => window.removeEventListener('kb-collapse-right-panel', handler)
+  }, [wbLayout, update])
+
   // Ctrl+J — 上下文路由（2026-09-21 用户拍板）：工作台内唤出**右栏 AI 侧栏**（再按收起）；
   // 整窗模块不拦，由悬浮 AssistantPanel 自己的监听处理（唤出悬浮 AI 助手）。
   // 工作台分支先派 ai-assistant:close 收掉可能开着的浮层 —— 右栏与浮层同为 ChatBody，
@@ -1337,7 +1348,7 @@ export default function App() {
     switch (name) {
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onRequestCloseTab={() => closeTab('knowledge')} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} />
       case 'moments': return <MomentsModule />
       case 'bookshelf': return (
         <BookshelfModule

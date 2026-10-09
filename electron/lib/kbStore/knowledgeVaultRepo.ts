@@ -480,6 +480,10 @@ export interface VaultBacklinkContextItem {
   fileType: string
   updatedAt: string
   excerpt: string
+  /** 源页里命中本页的 `[[…]]` 原文（别名取 `|` 前段）——渲染层据此在源页正文定位高亮 */
+  linkText: string
+  /** 源页仓库相对路径——跨页定位时匹配目标页 */
+  path: string
 }
 
 /** 反链源页列表（knowledge:getBacklinks vault 分支，DTO 对齐 sqlite 版 mapPage 的骨架字段） */
@@ -511,14 +515,17 @@ export function vaultGetBacklinkContext(pageId: string): VaultBacklinkContextIte
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   for (const src of sources) {
     let excerpt = ''
+    let linkText = ''
     try {
       const raw = readFileSync(join(root, src.path), 'utf-8')
       const re = /\[\[([^\]]+)\]\]/g
       let m: RegExpExecArray | null
       let hitIdx = -1
       while ((m = re.exec(raw)) !== null) {
-        if (resolver.resolve(m[1].split('|')[0]) === pageId) {
+        const t = m[1].split('|')[0].trim()
+        if (resolver.resolve(t) === pageId) {
           hitIdx = m.index
+          linkText = t
           break
         }
       }
@@ -536,6 +543,8 @@ export function vaultGetBacklinkContext(pageId: string): VaultBacklinkContextIte
       fileType: src.fileType.replace(/^\./, '').toLowerCase(),
       updatedAt: src.updatedAt,
       excerpt,
+      linkText,
+      path: src.path,
     })
   }
   return out

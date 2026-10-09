@@ -11,6 +11,8 @@ import { normalizeMdEntryFields } from './mdEntryFields'
 import { WELCOME_DOC_FILENAME } from './welcomeDoc'
 import { getVaultIgnore, isDirIgnored, getVaultIgnoreState, auditIgnoreRules, type VaultIgnoreResult, type VaultIgnoreState } from './ignoreFile'
 import { clearSemanticsMemo } from './semanticStore'
+// 导图 JSON 的判别与渲染层同一实现（单真相源）：索引据此取 JSON title + 标 isMindmap
+import { parseMindmap } from '../../../src/lib/mindmap'
 import type { Ignore } from 'ignore'
 
 /**
@@ -73,6 +75,12 @@ export interface KnowledgePageIndexEntry {
   entryKind?: 'doc' | 'file'
   /** 文件大小（字节，元信息卡展示）；undefined = 旧缓存 */
   sizeBytes?: number
+  /**
+   * 内容是思维导图（`.json` + `kind:"mindmap"`）：仍属 `entryKind:'file'`（无正文/不进搜索/语义），
+   * 但 `title` 取 JSON 的 title（供 `[[导图标题]]` 双链解析），且作为图谱节点参与双链。
+   * undefined = 非导图或旧缓存。
+   */
+  isMindmap?: boolean
 }
 
 /** 抽取 md 正文中的 [[wiki link]] 出链标题（别名取 | 前段，去重） */
@@ -90,8 +98,10 @@ export function extractWikiOutlinks(md: string): string[] {
 /** 索引 schema 版本。**语义变更也要 bump**（bump 是唯一能让磁盘缓存失效的杠杆：
  *  校验只看版本号 + .ignore 指纹，不看文件 mtime）。
  *  v6（2026-09-21，B-4）：md 条目保证 `fileType` 非空 —— v5 缓存里正式页的 fileType 是空串，
- *  不 bump 则装了修复的老仓库冷启动仍读旧缓存，表象照旧（大纲按钮仍灰）。 */
-const KNOWLEDGE_INDEX_SCHEMA_VERSION = 6
+ *  不 bump 则装了修复的老仓库冷启动仍读旧缓存，表象照旧（大纲按钮仍灰）。
+ *  v7（2026-10-09）：导图 `.json` 条目 title 取 JSON 的 title + 标 isMindmap —— 不 bump
+ *  则老仓库冷启动仍读旧缓存（title=文件名），`[[导图标题]]` 解析不到、图谱无导图节点。 */
+const KNOWLEDGE_INDEX_SCHEMA_VERSION = 7
 
 export interface KnowledgeIndex {
   schemaVersion: typeof KNOWLEDGE_INDEX_SCHEMA_VERSION
@@ -529,7 +539,7 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
   // 第一遍：读入全部条目（目录派生需先知道「所有知识页所在目录」，再统一补建分类）
   // 阶段三（2026-09-20）：归档清单（archived-files.json）退役 —— md 按 frontmatter id / auto: 兜底，
   // 非 md 一律收录，不再有「清单登记才进库」的分支。
-  const docs: Array<{ abs: string; rel: string; doc: ReturnType<typeof parseMarkdown>; entryKind: 'doc' | 'file' }> = []
+  const docs: Array<{ abs: string; rel: string; doc: ReturnType<typeof parseMarkdown>; entryKind: 'doc' | 'file'; isMindmap?: boolean }> = []
   for (const abs of files) {
     try {
       const rel = relative(current.rootPath, abs).replace(/\\/g, '/')
@@ -568,13 +578,25 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
       // 元信息卡 / html 沙箱渲染由渲染层按 entryKind 决定；不读内容（二进制可能很大）
       const fileName = rel.slice(rel.lastIndexOf('/') + 1)
       const dot = fileName.lastIndexOf('.')
+      // 思维导图 JSON（kind:"mindmap"）：读小文件取 JSON 的 title（供 [[导图标题]] 双链解析），
+      // 并标 isMindmap（图谱据此把导图纳入节点）。非导图 / 超限 / 读失败 → 维持 title=文件名。
+      let title = dot > 0 ? fileName.slice(0, dot) : fileName
+      let isMindmap = false
+      if (/\.json$/i.test(rel)) {
+        try {
+          if (statSync(abs).size <= 256 * 1024) {
+            const mm = parseMindmap(readFileSync(abs, 'utf8'))
+            if (mm) { title = mm.title || title; isMindmap = true }
+          }
+        } catch { /* 非导图 / 读失败：忽略，维持文件名 */ }
+      }
       docs.push({
         abs,
         rel,
         doc: {
           frontmatter: {
             id: `auto:${rel}`,
-            title: dot > 0 ? fileName.slice(0, dot) : fileName,
+            title,
             fileType: (dot > 0 ? fileName.slice(dot + 1) : '').toLowerCase(),
             created: mtime,
             updated: mtime,
@@ -582,6 +604,7 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
           body: '',
         },
         entryKind: 'file',
+        isMindmap,
       })
     } catch {
       warnings.push(`页面读取失败，已跳过：${relative(current.rootPath, abs)}`)
@@ -625,7 +648,7 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
   const pages: KnowledgePageIndexEntry[] = []
   const byId: Record<string, KnowledgePageIndexEntry> = {}
 
-  for (const { abs, rel, doc, entryKind } of docs) {
+  for (const { abs, rel, doc, entryKind, isMindmap } of docs) {
     try {
       const id = asString(doc.frontmatter.id)
       if (!id) {
@@ -659,6 +682,7 @@ export function rebuildKnowledgeIndex(): KnowledgeIndex {
         entryKind,
         sizeBytes: stat.size,
         frontmatter: sanitizeFrontmatterForIndex(doc.frontmatter),
+        ...(isMindmap ? { isMindmap: true } : {}),
       }
       pages.push(entry)
       byId[id] = entry

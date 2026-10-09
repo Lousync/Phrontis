@@ -62,6 +62,9 @@ export async function handleChatCommand(raw: string, ctx: ChatCommandCtx): Promi
   const text = raw.trim()
   if (!text.startsWith('/')) return false
   const name = text.slice(1).trim().split(/\s+/)[0]?.toLowerCase() ?? ''
+  // /mindmap 在 AI 教学面是「放行给 LLM」的指令：不进 CHAT_COMMANDS（不 toast、不拦截），
+  // 由模型据 system 注入的 mindmap 规则调用 mindmap 工具。其余聊天面维持「未知指令」。
+  if (name === 'mindmap' && ctx.surface === 'aiTeaching') return false
   const cmd = CHAT_COMMANDS.find((c) => c.name === name)
   if (!cmd) {
     showToast({ type: 'info', message: `未知指令 ${text.split(/\s+/)[0]}。可用指令：${chatCommandHint()}` })

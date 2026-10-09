@@ -345,6 +345,10 @@ const api = {
   aiTeachCourseFinishUnit: (wsId: string, unitId: string, score?: { correct: number; total: number }) => ipcRenderer.invoke('aiTeachCourse:finishUnit', wsId, unitId, score),
   aiTeachCourseReadPrevHandoff: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:readPrevHandoff', sessionId),
   aiTeachCourseMakeUnitQuiz: (wsId: string, unitId: string) => ipcRenderer.invoke('aiTeachCourse:makeUnitQuiz', wsId, unitId),
+  aiTeachCourseGetSourceChanges: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getSourceChanges', wsId),
+  aiTeachCourseReviseOutlineStream: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachCourse:reviseOutlineStream', id, input),
+  aiTeachCourseApplyAdditions: (wsId: string, additions: unknown) => ipcRenderer.invoke('aiTeachCourse:applyAdditions', wsId, additions),
+  aiTeachCourseOpenAssistant: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:openAssistant', wsId),
   aiTeachCourseGenerateOutlineStream: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutlineStream', id, input),
   /** AI教学·课程模式：生成大纲过程事件（`{ id, phase, delta?, model?, chars?, error? }`） */
   onAiTeachCourseGenProgress: (cb: (p: unknown) => void) => {

@@ -585,6 +585,10 @@ export interface KnowledgeBacklinkItem {
   id: string; title: string; fileType: string
   updatedAt: string
   excerpt: string
+  /** 源页里命中本页的 `[[…]]` 原文（别名取 `|` 前段）——正文定位高亮用 */
+  linkText?: string
+  /** 源页仓库相对路径——跨页定位匹配用 */
+  path?: string
 }
 /** 相似笔记条目（编辑器右栏「相关笔记」，A3-3；via=命中方式 keyword/semantic/hybrid） */
 export interface SimilarPageHit {
@@ -998,8 +1002,8 @@ export interface AgentTraceStep {
   summary?: string
   /** visual.html「生成中」实时事件（agent:step 专用，不落库）：{slug,title} */
   args?: Record<string, unknown>
-  /** visual.html 成功产物（落库随消息 trace）：对话流工件卡数据源 */
-  artifact?: { rel: string; title: string; lines: number; slug: string }
+  /** 产物工具（visual.html / mindmap）成功产物（落库随消息 trace）：对话流工件卡数据源 */
+  artifact?: { rel: string; title: string; lines: number; slug: string; kind?: 'html' | 'mindmap'; nodes?: number }
   /** 过程旁白（落库）：带工具轮次里模型输出的说明文本，历史回看用 */
   processText?: string
   /** 思考耗时 ms（落库；reasoning 全文不落库） */
@@ -1092,8 +1096,15 @@ export interface AiTeachCourseUnitProgress { status: AiTeachCourseUnitStatus; ma
 export interface AiTeachLessonInfo { unitId: string; order: number; kind: string; status: 'open' | 'ended' }
 export interface AiTeachUnitQuizQuestion { q: string; options: string[]; answer: number; explanation: string }
 export interface AiTeachCourseState { enabled: boolean; outline: AiTeachCourseOutline | null; progress: Record<string, AiTeachCourseUnitProgress>; lessons: Record<string, AiTeachLessonInfo> }
-export interface AiTeachCourseGenerateInput { goal: string; mode: 'anchor' | 'materials' | 'mixed' | 'free'; anchorText?: string; anchorLabel?: string; modelSpec?: string }
+export interface AiTeachCourseGenerateInput { goal: string; mode: 'anchor' | 'materials' | 'mixed' | 'free'; anchorText?: string; anchorLabel?: string; wsId?: string; sourceKeys?: string[]; modelSpec?: string }
 export interface AiTeachCourseGenProgress { id: string; phase: 'request' | 'reasoning' | 'answer' | 'parsing' | 'done' | 'failed'; delta?: string; model?: string; chars?: number; error?: string }
+
+/** 课程修订（只增补）：SOURCE 变更标记 + 增补建议（主进程 aiTeachingCoursePure.ts 同构） */
+export interface AiTeachSourceItem { no: number; name: string; type: string; path: string; extracted: string; change: 'new' | 'updated' | null }
+export interface AiTeachCourseReviseInput { wsId: string; requirement: string; useSources?: boolean; modelSpec?: string }
+export interface AiTeachOutlineUnitAdd { chapterId?: string; chapterName?: string; name: string; goal?: string; source?: string; why?: string }
+export interface AiTeachOutlineChapterAdd { name: string; units: Array<{ name: string; goal?: string; source?: string; why?: string }> }
+export interface AiTeachOutlineAdditions { toExisting: AiTeachOutlineUnitAdd[]; newChapters: AiTeachOutlineChapterAdd[] }
 
 /** P6 素材库：SOURCE.md 解析条目（§3.13 模板 v2，字段行与模板一一对应） */
 export interface AiTeachSourceEntry {
@@ -2292,6 +2303,10 @@ export interface ElectronAPI {
   aiTeachCourseFinishUnit: (wsId: string, unitId: string, score?: { correct: number; total: number }) => Promise<{ ok: boolean; summaryRel?: string; error?: string }>
   aiTeachCourseReadPrevHandoff: (sessionId: string) => Promise<{ ok: boolean; text: string }>
   aiTeachCourseMakeUnitQuiz: (wsId: string, unitId: string) => Promise<{ ok: boolean; questions?: AiTeachUnitQuizQuestion[]; error?: string }>
+  aiTeachCourseGetSourceChanges: (wsId: string) => Promise<{ ok: boolean; items?: AiTeachSourceItem[]; error?: string }>
+  aiTeachCourseReviseOutlineStream: (id: string, input: AiTeachCourseReviseInput) => Promise<{ ok: boolean; additions?: AiTeachOutlineAdditions; error?: string }>
+  aiTeachCourseApplyAdditions: (wsId: string, additions: AiTeachOutlineAdditions) => Promise<{ ok: boolean; added?: number; error?: string }>
+  aiTeachCourseOpenAssistant: (wsId: string) => Promise<{ ok: boolean; sessionId?: string; error?: string }>
   onAiTeachCourseGenProgress: (cb: (p: AiTeachCourseGenProgress) => void) => () => void
   onAiTeachCourseRefresh: (cb: (p: { wsId: string }) => void) => () => void
   aiTeachSrcRead: (id: string) => Promise<AiTeachSourcesResult>

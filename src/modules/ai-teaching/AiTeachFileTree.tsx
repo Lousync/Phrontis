@@ -110,7 +110,9 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
   }, [loadDir])
 
   const openFile = useCallback((n: TreeNode) => {
-    if (n.name.toLowerCase().endsWith('.md')) onOpenMd(n.relPath)
+    const nm = n.name.toLowerCase()
+    // md / 导图 JSON / pptx → 右栏工件栏开页签（不跳模块，左聊右看）；html 走渲染预览；其余走外部
+    if (nm.endsWith('.md') || nm.endsWith('.json') || nm.endsWith('.pptx')) onOpenMd(n.relPath)
     else if (/\.html?$/i.test(n.name) && onOpenHtml) onOpenHtml(n.relPath) // visual 示意图等 html → 工件栏渲染页签
     else onOpenExternal(n.relPath)
   }, [onOpenMd, onOpenHtml, onOpenExternal])
@@ -190,7 +192,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
     }
     const items: ReturnType<typeof menuItems> = []
     if (node.type === 'dir') items.push({ label: '＋ 新建文件', run: () => doCreate(node.relPath, 'file') }, { label: '＋ 新建文件夹', run: () => doCreate(node.relPath, 'dir') })
-    if (node.type === 'file' && node.name.toLowerCase().endsWith('.md')) items.push({ label: '打开阅读', run: () => onOpenMd(node.relPath) })
+    if (node.type === 'file' && (node.name.toLowerCase().endsWith('.md') || node.name.toLowerCase().endsWith('.json') || node.name.toLowerCase().endsWith('.pptx'))) items.push({ label: '打开阅读', run: () => onOpenMd(node.relPath) })
     if (node.type === 'file' && /\.html?$/i.test(node.name) && onOpenHtml) items.push({ label: '打开渲染预览', run: () => onOpenHtml(node.relPath) })
     items.push({ label: '重命名', run: () => startRename(node) })
     items.push({ label: '复制（到剪贴板）', run: () => { setClip({ rel: node.relPath, name: node.name, isDir: node.type === 'dir' }); showToast({ type: 'info', message: `已复制「${node.name}」，到目标目录右键粘贴（仅文件）` }) } })

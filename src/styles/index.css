@@ -727,6 +727,18 @@ input:focus, textarea:focus, select:focus {
   pointer-events: none;
 }
 
+/* --- D2 关联网络：正文里定位到的双链高亮（背景闪一下） ---
+   只动背景/box-shadow（不碰 layout）；reduced-motion 兜底为静态底色。 */
+@keyframes kb-wiki-flash {
+  0%   { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+  100% { background: transparent; }
+}
+.kb-wiki-flash {
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent);
+  animation: kb-wiki-flash 1.6s ease-out 1 both;
+}
+
 /* --- E 状态反馈：微回弹 --- */
 @keyframes kb-micro-pop {
   0%   { transform: scale(1); }
@@ -779,8 +791,10 @@ input:focus, textarea:focus, select:focus {
   .kb-modal-in, .kb-modal-out, .kb-pop, .kb-drawer-in, .kb-drawer-out,
   .kb-toast-in, .kb-toast-out,
   .kb-item-in, .kb-micro-pop, .kb-dock-hint,
+  .kb-wiki-flash,
   .kb-overlay > :first-child, .kb-overlay-out > :first-child,
   .kb-pop-layer > :first-child { animation: none; }
+  .kb-wiki-flash { background: color-mix(in srgb, var(--accent) 22%, transparent); }
   .kb-collapse { transition: none; }
   .kb-collapse > * { transition: none; }
   .kb-chevron { transition: none; }
@@ -1385,6 +1399,15 @@ input:focus, textarea:focus, select:focus {
 .kb-fit-aichat { container-name: kb-aichat; }
 @container kb-aichat (max-width: 360px) { .kb-l1 { display: none; } }  /* 会话消耗 ↑… ↓… tokens */
 @container kb-aichat (max-width: 245px) { .kb-l2 { display: none; } }  /* 复制 / 编辑 / 重新生成 / 删除（文字） */
+
+/* ---- ⑦ AI 教学 · 课程主页头部（CourseMode.tsx CourseHome）----
+   课程主页挂中栏（flex-1），会被左栏「课程大纲」树 + 右缘工件栏（打开课程.md 时占 24%~60%）
+   一起挤压。头部是 flex 死排，CJK 标题会逐字换行成竖排。三级退化：
+   ① 标题限 2 行（line-clamp-2，防竖排）；② 先隐进度条（保留 N/M 数字）；③ 再隐整块进度。
+   阈值=进度条 130px + 数字 ~110px + 右侧两按钮的估算，低于即退。 */
+.kb-fit-aicourse { container-name: kb-aicourse; }
+@container kb-aicourse (max-width: 560px) { .kb-l1 { display: none; } }  /* 进度条 */
+@container kb-aicourse (max-width: 430px) { .kb-l2 { display: none; } }  /* 整块进度（数字 + 条） */
 
 
 

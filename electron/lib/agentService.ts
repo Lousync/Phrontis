@@ -187,8 +187,8 @@ export interface AgentTraceStep {
   summary?: string
   /** visual.html 实时占位事件（仅 agent:step 推送，不落库）：{slug,title}——渲染层据此开「生成中」页签 */
   args?: Record<string, unknown>
-  /** visual.html 成功产物（落库，随消息 trace 持久）：渲染层画工件卡 + 占位页签原地转正式 */
-  artifact?: { rel: string; title: string; lines: number; slug: string }
+  /** 产物工具（visual.html / mindmap）成功产物（落库，随消息 trace 持久）：渲染层画工件卡 + 占位页签原地转正式 */
+  artifact?: { rel: string; title: string; lines: number; slug: string; kind?: 'html' | 'mindmap'; nodes?: number }
   /** 过程旁白：带工具轮次里模型输出的说明文本（落库供历史回看；
    *  最终轮正文是回复本体，已在消息 content 里，不重复存） */
   processText?: string
@@ -348,6 +348,7 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   'builtin.help.search': '检索帮助',
   'builtin.tool.request': '申请工具',
   'visual.html': '生成示意图',
+  'mindmap': '生成思维导图',
 }
 
 /** 工具入参 → 过程时间线的目标文案（正在读/写哪个对象）；取不到则留空 */
@@ -369,6 +370,7 @@ const CHANGE_LABELS: Record<string, string> = {
   'builtin.schedule.delete-todo': '删除待办',
   'builtin.checkin.check-habit': '习惯打卡',
   'visual.html': '生成示意图',
+  'mindmap': '生成思维导图',
 }
 
 /**
@@ -745,6 +747,13 @@ async function runAgentLoop(
       '文档内禁止写 <meta http-equiv> CSP 与 <base> 标签（宿主统一注入安全策略，自带 CSP 会因策略取交集禁掉脚本）。' +
       'slug 用 kebab-case 小写英文；title 给中文短标题。HTML 全文只作为工具参数传递，**绝不把 HTML 源码写进回答正文或 markdown 代码块**；生成后在回答里用一句话说明右侧工件栏已打开该图。'
     : ''
+  // 思维导图（方案 .AGENT/.claude/plans/ai-teaching-mindmap.md）：整理结构的产物工具，与 visual.html 并列（串行）
+  const mindmapHint = source === 'aiTeaching'
+    ? '\n\n【思维导图工具 mindmap（AI教学）】用户明确要「思维导图 / 脑图 / 整理结构 / 知识框架」时，调用 mindmap 工具把内容整理成树状结构：' +
+      'root 为递归节点 { text, ref?, children? }，text 用一行短短语；节点对应知识库里的某篇笔记（或另一张思维导图）时，ref 填其仓库相对路径（.md 笔记 / .json 导图），点击可跳转。' +
+      '树深 ≤6、节点总数 ≤120，超出的先归纳再输出。只把结构交给工具，**绝不把 JSON 写进回答正文**；生成后用一句话说明右侧工件栏已打开。' +
+      '若工具列表中没有 mindmap，先用 builtin.tool.request（tools="mindmap"）申请。'
+    : ''
   // P8（§3.14）+ UI 优化条目8.2.2：三层学习者画像注入（全局 → 工作区 → 会话，细颗粒覆盖粗颗粒）
   // + 更新建议协议（3-33 Plan B）
   const profileHint = source === 'aiTeaching' ? resolveProfilesForInjection(sessionId, getSettingReader()) : ''
@@ -801,13 +810,13 @@ async function runAgentLoop(
         constraintChars: sessionInst.length,
         profileChars: profileHint.length,
         sourcesChars: sourcesHint.length,
-        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + visualHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
+        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + visualHint.length + mindmapHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
       }
     : undefined
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+    : baseSystem + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + mindmapHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -989,14 +998,16 @@ async function runAgentLoop(
         durationMs,
         summary: exec.ok ? undefined : String(exec.message).slice(0, 200),
       }
-      // visual.html 成功产物落 trace（小字段，不含 HTML）：渲染层工件卡数据源 + 占位页签原地转正式
-      if (realName === 'visual.html' && exec.ok && typeof exec.data === 'object' && exec.data !== null) {
+      // visual.html / mindmap 成功产物落 trace（小字段，不含全文）：渲染层工件卡数据源 + 占位页签原地转正式
+      if ((realName === 'visual.html' || realName === 'mindmap') && exec.ok && typeof exec.data === 'object' && exec.data !== null) {
         const d = exec.data as Record<string, unknown>
         toolStep.artifact = {
           rel: String(d.relPath ?? ''),
           title: String(args?.title ?? '').slice(0, 80),
           lines: Number(d.lines ?? 0),
           slug: String(args?.slug ?? ''),
+          kind: realName === 'mindmap' ? 'mindmap' : 'html',
+          nodes: realName === 'mindmap' ? Number(d.nodes ?? 0) : undefined,
         }
       }
       trace.push(toolStep)
@@ -1013,7 +1024,7 @@ async function runAgentLoop(
           // knowledge.create-page（F-11）：工具返回的 path 同为仓库内 .md，纳入 file 可点击直达编辑器
           const vaultPath = realName.startsWith('builtin.vault.')
             ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
-            : realName === 'visual.html' ? String(data?.relPath ?? '').trim()
+            : (realName === 'visual.html' || realName === 'mindmap') ? String(data?.relPath ?? '').trim()
               : realName === 'builtin.knowledge.create-page' ? String(data?.path ?? '').trim()
                 : ''
           const file = realName !== 'builtin.vault.trash' && vaultPath ? vaultPath : undefined
@@ -1068,11 +1079,11 @@ async function runAgentLoop(
         }
         sessionWrites++
       }
-      // visual.html 生成时序 §3.4：调用前推「生成中」实时事件（仅 slug/title 小字段，绝不带 html 全文；
+      // visual.html / mindmap 生成时序 §3.4：调用前推「生成中」实时事件（仅 slug/title 小字段，绝不带全文；
       // 不落库——渲染层据此在工件栏开占位页签，给即时反馈）
-      if (realName === 'visual.html') {
+      if (realName === 'visual.html' || realName === 'mindmap') {
         stepEmitters.get(signal)?.({
-          kind: 'tool', name: 'visual.html', ok: true, durationMs: 0,
+          kind: 'tool', name: realName, ok: true, durationMs: 0,
           args: { slug: String(args?.slug ?? ''), title: String(args?.title ?? '') },
         })
       }

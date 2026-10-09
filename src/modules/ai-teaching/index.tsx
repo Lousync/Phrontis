@@ -8,6 +8,7 @@ import {
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachAssignSession, aiTeachUnassignSession, aiTeachSetLastWorkspace,
   aiTeachCourseGetState, aiTeachCourseSetUnitProgress, aiTeachCourseSetEnabled, onAiTeachCourseRefresh,
   aiTeachCourseOpenUnit, aiTeachCourseEndLesson, aiTeachCourseFinalizeLesson, aiTeachCourseFinishUnit, aiTeachCourseReadPrevHandoff,
+  aiTeachCourseOpenAssistant,
   aiTeachSrcRead, aiTeachSrcAdd, aiTeachSrcRemove, aiTeachSrcExtract, aiTeachSrcPick, aiTeachSrcPickDir, aiTeachSrcVisionCheck,
   aiTeachSrcPdfBytes, aiTeachSrcTranscribe, aiTeachSrcPromote,
   aiTeachProfileEnsureGlobal, aiTeachProfileEnsureSession, aiTeachProfileEnsureWorkspace,
@@ -26,6 +27,17 @@ import { extractQuizzes, looseJsonParse } from '../../components/shared/QuizPars
 import { showToast } from '../../lib/toast'
 import { handleChatCommand } from '../../lib/chatCommands'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../../components/shared/SlashCommandMenu'
+import { looksLikeMindMap } from '../../lib/mindmap'
+
+/** AI 教学面专属斜杠指令：/mindmap。不进 CHAT_COMMANDS（由 handleChatCommand 在 aiTeaching 面放行给 LLM，
+ *  模型据 system 注入的 mindmap 规则调用 mindmap 工具）。 */
+const MINDMAP_SLASH_ITEM: SlashMenuItem = {
+  kind: 'command',
+  name: 'mindmap',
+  title: '/mindmap',
+  desc: '把当前对话 / 指定笔记整理成思维导图',
+  search: 'mindmap 思维导图 脑图 整理结构 知识框架',
+}
 import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { registerSelectionAskHost } from '../../lib/assistantContext'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
@@ -520,6 +532,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (!rootId) { showToast({ type: 'error', message: '尚未打开仓库' }); return }
     const r = await workspaceReadFile(rootId, rel).catch(() => null)
     if (!r || typeof r.content !== 'string') { showToast({ type: 'error', message: '读取文档失败' }); return }
+    // 思维导图 JSON：按内容识别（kind:"mindmap"）→ 导图页签；其余按 md 阅读页签
+    if (looksLikeMindMap(r.content)) {
+      openArtTab({ id: rel, kind: 'mindmap', rel, name: opts?.title || opts?.name || rel.split('/').pop() || rel, title: opts?.title })
+      return
+    }
     openArtTab({ id: rel, kind: 'md', rel, name: opts?.name ?? rel.split('/').pop() ?? rel, content: r.content })
   }, [openArtTab])
   const reloadArtTab = useCallback((tab: ArtTab) => {
@@ -549,7 +566,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   useEffect(() => { void refreshWorkspaces() }, [refreshWorkspaces])
   // ---------- 课程模式（docs/ai-teaching-course-mode-plan.md）----------
   const [courseState, setCourseState] = useState<AiTeachCourseState | null>(null)
-  const [courseView, setCourseView] = useState<'home' | 'chat'>('chat')
+  const [courseView, setCourseView] = useState<'home' | 'chat' | 'assist'>('chat')
+  /** 课程助手会话 id（整门课唯一；切到「课程助手」档时指向它） */
+  const [assistantSid, setAssistantSid] = useState<string | null>(null)
   const [courseUnit, setCourseUnit] = useState<string | null>(null)
   /** 本课会话 id：只有当前会话 = 这一条时，上课 chip 才出现（防止 chip 泄漏到普通会话） */
   const [courseLessonSid, setCourseLessonSid] = useState<string | null>(null)
@@ -586,7 +605,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setCourseView('home')
   }, [reloadCourse])
   useEffect(() => {
-    setCourseUnit(null); setCourseLessonSid(null); setCourseLessonStatus('open')
+    setCourseUnit(null); setCourseLessonSid(null); setCourseLessonStatus('open'); setAssistantSid(null)
     if (!activeWs || activeWs === '__none__') { setCourseState(null); setCourseView('chat'); return }
     void (async () => {
       const s = await aiTeachCourseGetState(activeWs).catch(() => null)
@@ -627,6 +646,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const artOpenInEditor = useCallback((rel: string) => {
     window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))
   }, [])
+  /** 导图节点 ref 点击 → 在工件栏开该笔记页签（左聊右看，不跳模块） */
+  const artOpenRef = useCallback((rel: string) => { void openArtFile(rel) }, [openArtFile])
   const wsSessions = useMemo(
     () => sessions.filter(s => (wsSessionMap[s.id] ?? '__none__') === (activeWs ?? '__none__')),
     [sessions, wsSessionMap, activeWs],
@@ -887,25 +908,30 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     return onAgentStep(({ chatId, step }) => {
       if (chatId !== chatIdRef.current) return
       setLiveSteps(prev => [...prev.slice(-29), step])
-      if (step.name === 'visual.html' && step.args && !step.artifact) {
+      const isProduct = step.name === 'visual.html' || step.name === 'mindmap'
+      if (isProduct && step.args && !step.artifact) {
         const slug = String(step.args.slug ?? '')
-        const title = String(step.args.title ?? '') || '示意图'
+        const isMind = step.name === 'mindmap'
+        const title = String(step.args.title ?? '') || (isMind ? '思维导图' : '示意图')
         setArtTabs(prev => [...prev.filter(t => !(t.generating && t.slug === slug)),
-          { id: `gen:${slug || title}`, kind: 'html' as const, rel: '', name: '生成中…', generating: true, slug, title }])
+          { id: `gen:${slug || title}`, kind: isMind ? 'mindmap' : 'html', rel: '', name: '生成中…', generating: true, slug, title }])
         setArtActive(`gen:${slug || title}`)
       }
       if (step.artifact && step.ok) {
         const a = step.artifact
         if (!a.rel) return
+        const kind = a.kind ?? 'html'
         setArtTabs(prev => {
           const rest = prev.filter(t => !(t.generating && a.slug && t.slug === a.slug))
-          return rest.some(t => t.id === a.rel) ? rest : [...rest, { id: a.rel, kind: 'html' as const, rel: a.rel, name: a.title || a.rel.split('/').pop() || a.rel, title: a.title, lines: a.lines }]
+          return rest.some(t => t.id === a.rel) ? rest : [...rest, { id: a.rel, kind, rel: a.rel, name: a.title || a.rel.split('/').pop() || a.rel, title: a.title, lines: a.lines }]
         })
         setArtActive(cur => cur === `gen:${a.slug}` ? a.rel : cur)
-        showToast({ type: 'info', message: `✓ 示意图已生成：${a.rel.split('/').pop()}（${a.lines} 行）` })
+        showToast({ type: 'info', message: kind === 'mindmap'
+          ? `✓ 思维导图已生成：${a.rel.split('/').pop()}（${a.nodes ?? 0} 节点）`
+          : `✓ 示意图已生成：${a.rel.split('/').pop()}（${a.lines} 行）` })
       }
       // 工具失败：清掉「生成中」占位页签（禁关页签不能因失败卡死）；停止生成同理（setPending(false) 处兜底）
-      if (step.name === 'visual.html' && !step.ok && !step.artifact) {
+      if (isProduct && !step.ok && !step.artifact) {
         setArtTabs(prev => prev.filter(t => !t.generating))
         setArtActive(cur => cur?.startsWith('gen:') ? null : cur)
       }
@@ -1010,7 +1036,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // ---- / 弹层派生态（v3.1.1 条目10）：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
   const slashQuery = input.startsWith('/') && !/[\s\n]/.test(input.slice(1)) && input.length > 1 ? input.slice(1) : (input === '/' ? '' : null)
   const slashItems = useMemo(
-    () => filterSlashItems(buildSlashItems(slashSkills), slashQuery ?? ''),
+    () => filterSlashItems(buildSlashItems(slashSkills, [MINDMAP_SLASH_ITEM]), slashQuery ?? ''),
     [slashSkills, slashQuery],
   )
   const slashOpen = slashQuery !== null
@@ -1257,6 +1283,18 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setCourseUnit(unitId); setCourseLessonSid(sid); setCourseLessonStatus(status)
     await openSession(sid, `课时${order}·${kind}`)
     setCourseView('chat')
+  }, [openSession])
+
+  /** 打开课程助手（整门课唯一会话；无大纲也可用）：切到助手档并指向该会话 */
+  const courseOpenAssistant = useCallback(async () => {
+    const ws = activeWsRef.current
+    if (!ws || ws === '__none__') return
+    const r = await aiTeachCourseOpenAssistant(ws).catch(() => null)
+    if (!r?.ok || !r.sessionId) { showToast({ type: 'warning', message: r?.error ?? '打开课程助手失败' }); return }
+    setAssistantSid(r.sessionId)
+    await openSession(r.sessionId, '课程助手')
+    setPrepStarted(true) // 助手会话不走「准备态」（那是开课选模板用的），直接进对话
+    setCourseView('assist')
   }, [openSession])
 
   /** 结束课时：冻结本节（只读）+ 异步生成 讲义/交接 */
@@ -2573,9 +2611,19 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11.5px] transition-colors ${courseView === 'home' ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>
               <BookOpen size={12} />课程主页
             </button>
-            <button onClick={() => setCourseView('chat')} title="上课（当前会话）"
+            <button onClick={() => {
+                setCourseView('chat')
+                if (activeId === assistantSid && courseLessonSid) {
+                  const l = courseState?.lessons?.[courseLessonSid]
+                  void openSession(courseLessonSid, l ? `课时${l.order}·${l.kind}` : '课时')
+                }
+              }} title="上课（当前会话）"
               className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11.5px] transition-colors ${courseView === 'chat' ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>
               <MessagesSquare size={12} />上课
+            </button>
+            <button onClick={() => void courseOpenAssistant()} title="课程助手（整门课的规划 / 整理 / 答疑）"
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11.5px] transition-colors ${courseView === 'assist' ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>
+              <Sparkles size={12} />课程助手
             </button>
           </div>
         ) : (
@@ -3087,13 +3135,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           <div className="mt-1.5 space-y-1">
                             {(m.trace ?? []).filter(s => s.artifact).map((s, k) => {
                               const a = s.artifact as NonNullable<typeof s.artifact>
+                              const isMind = a.kind === 'mindmap'
                               return (
                                 <button key={k} onClick={() => { void openArtFile(a.rel, { title: a.title, lines: a.lines }) }} title={a.rel}
                                   className="w-full max-w-[440px] flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] hover:border-[var(--accent)]/50 transition-colors text-left">
-                                  <ImageIcon size={13} className="shrink-0 text-[var(--accent)]" />
+                                  {isMind ? <GitBranch size={13} className="shrink-0 text-[var(--accent)]" /> : <ImageIcon size={13} className="shrink-0 text-[var(--accent)]" />}
                                   <span className="min-w-0 flex-1">
                                     <span className="block truncate text-[12px] text-[var(--text-primary)]">{a.title || a.rel.split('/').pop()}</span>
-                                    <span className="block truncate text-[10px] text-[var(--text-muted)]">{a.rel} · {a.lines} 行 · 单文件自包含</span>
+                                    <span className="block truncate text-[10px] text-[var(--text-muted)]">{isMind ? `思维导图 · ${a.nodes ?? 0} 节点` : `${a.rel} · ${a.lines} 行 · 单文件自包含`}</span>
                                   </span>
                                   <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">在工件栏打开 →</span>
                                 </button>
@@ -3648,6 +3697,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               onTalkPage={talkArtPage}
               pending={pending}
               onEdit={artOpenInEditor}
+              onOpenRef={artOpenRef}
             />
           </div>
         )}

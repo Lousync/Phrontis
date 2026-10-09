@@ -1,6 +1,6 @@
 {
   "name": "knowbase",
-  "version": "3.4.1",
+  "version": "3.5.0",
   "description": "Phrontis — 本地 Windows 桌面知识管理工具（原 Knowbase Programmer Edition）",
   "main": "./out/main/index.js",
   "scripts": {
@@ -9,8 +9,8 @@
     "start": "node scripts/launch.js start",
     "preview": "electron-vite preview",
     "test": "node --experimental-strip-types --no-warnings scripts/test-parse-quick-date.mts",
-    "pack": "electron-vite build && electron-builder --win --publish=never",
-    "pack:dir": "electron-vite build && electron-builder --win --dir --publish=never"
+    "pack": "node scripts/pack.mjs",
+    "pack:dir": "node scripts/pack.mjs --dir-only"
   },
   "dependencies": {
     "@lydell/node-pty": "^1.2.0-beta.15",
@@ -28,6 +28,7 @@
     "katex": "^0.18.4",
     "linkedom": "^0.18.13",
     "lucide-react": "^1.0.0",
+    "mermaid": "^12.1.0",
     "monaco-editor": "0.56.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
@@ -82,7 +83,7 @@
       }
     ],
     "directories": {
-      "output": "dist-electron"
+      "output": "packs"
     },
     "files": [
       "out/**/*"

@@ -1,11 +1,13 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, Eye, Edit3, Star, FileText, ChevronDown, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, MoreHorizontal, ListChecks, Sparkles, RefreshCw } from 'lucide-react'
+import { Trash2, Eye, Edit3, Star, FileText, ChevronDown, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, MoreHorizontal, ListChecks, Sparkles } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
+import { MindMapView } from '../../../components/shared/MindMapView'
+import { looksLikeMindMap } from '../../../lib/mindmap'
 import { QuizMode } from '../../../components/shared/QuizMode'
 import { extractQuizzes } from '../../../components/shared/QuizParser'
-import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem, SimilarPageHit } from '../../../types'
-import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, getKnowledgeSimilarPages, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent, workspaceOpenInSystem } from '../../../lib/ipc'
+import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem } from '../../../types'
+import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent, workspaceOpenInSystem } from '../../../lib/ipc'
 import { splitFrontmatter, joinFrontmatter, ensureFrontmatterId, bumpFrontmatterUpdated } from '../../../lib/frontmatter'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
@@ -91,9 +93,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     setEditRevealTick(t => t + 1)
   }, [preview])
   const [backlinks, setBacklinks] = useState<KnowledgeBacklinkItem[]>([])
-  // 相似笔记（A3-3：标题+首段语义/关键词混合召回，排除自身）
-  const [similar, setSimilar] = useState<SimilarPageHit[]>([])
-  const [similarLoading, setSimilarLoading] = useState(false)
+  /** 跨页定位：点「被引用」条目 → 记下 {源页里引用本页的链接文本, 源页 rel}，待源页正文就绪后定位高亮 */
+  const [pendingLocate, setPendingLocate] = useState<{ title: string; relPath: string } | null>(null)
+  /** 高亮态：关联网络定位到的 wiki 标题（传给 MarkdownPreview 的 highlightWiki；1.7s 后清） */
+  const [flashWiki, setFlashWiki] = useState<string | null>(null)
   // 手动关联（双向）
   const [manualLinks, setManualLinks] = useState<KnowledgePage[]>([])
   const [linkPickerOpen, setLinkPickerOpen] = useState(false)
@@ -140,6 +143,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const pageRef = useRef(page)
   const fileTypeRef = useRef(fileType)
   const tagsRef = useRef<KnowledgeTag[]>([])
+  /** 阅读态正文滚动容器（引用/被引用条目定位高亮用） */
+  const previewRef = useRef<HTMLDivElement>(null)
   const isDirtyRef = useRef(false)
   const savedContentRef = useRef('')
   /**
@@ -234,6 +239,24 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         size: content.length,
       }
     : null
+  /** 思维导图 JSON：按内容识别（判别字段 kind:"mindmap"）→ 渲染共享 MindMapView。
+   *  笔记区 / 文件树 / kb-open-note 打开均命中此处（导图 JSON 非 .md 知识页，不出现在知识库目录树）。
+   *  ★ 归档 `.json` 页的 `content` 从不加载（走元信息卡），故必须**主动读一次**文件做判别。 */
+  const [isMindMapFile, setIsMindMapFile] = useState(false)
+  useEffect(() => {
+    if (fileType !== 'json' || !page?.path) { setIsMindMapFile(false); return }
+    let alive = true
+    void (async () => {
+      try {
+        const cur = await workspaceGetCurrent()
+        const rid = (cur as { rootId?: string } | null)?.rootId
+        if (!rid) return
+        const r = await workspaceReadFile(rid, page.path as string)
+        if (alive && r && typeof r.content === 'string') setIsMindMapFile(looksLikeMindMap(r.content))
+      } catch { /* 读取失败即非导图 */ }
+    })()
+    return () => { alive = false }
+  }, [fileType, page?.path])
   /** 当前生效的编辑器实例：共享宿主优先，legacy 兜底分支用自有 ref */
   const activeEditor = () => paneRef.current?.getEditor() ?? editorRef.current
 
@@ -367,12 +390,6 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         }
       }),
       getKnowledgeBacklinkContext(pageId).then(setBacklinks),
-      // 相似笔记：随页面装载刷新（保存后经 kb-reload-detail 重读也会再触发）；失败静默空态
-      setSimilarLoading(true),
-      getKnowledgeSimilarPages(pageId)
-        .then(r => setSimilar(r.hits ?? []))
-        .catch(() => setSimilar([]))
-        .finally(() => setSimilarLoading(false)),
       // 手动关联是旧 DB-only 通道，仓库读源模式下主进程统一拒绝（抛错刷屏）→ vault 模式直接空态，不发调用
       vaultModeRef.current ? Promise.resolve(setManualLinks([])) : getKnowledgeManualLinks(pageId).then(setManualLinks),
       getKnowledgeTags().then(setAllTags)
@@ -384,6 +401,13 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   }, [pageId, draftRelPath])
 
   useEffect(() => { loadPage() }, [loadPage])
+
+  // 关联网络（引用列表）右轨打开 → 通知 App 收起工作台右栏（两个右栏同开太挤；2026-10-09 反馈）。
+  // 单向：关联网络关掉不自动恢复右栏（用户拍板）。
+  useEffect(() => {
+    if (!showBacklinks) return
+    window.dispatchEvent(new CustomEvent('kb-collapse-right-panel'))
+  }, [showBacklinks])
 
   // keep-alive 阅读页重读：激活时（编辑器保存/删除后切回知识库）广播 kb-reload-detail
   const loadPageRef = useRef(loadPage)
@@ -563,6 +587,46 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
   /** 已知页面标题集合（供预览区分空链接） */
   const knownWikiTitles = useMemo(() => new Set(allPages.map(p => p.title)), [allPages])
+
+  /** 引用（出链）：从当前页正文解析 `[[…]]`（去重保序），按 allPages 标题 resolve → 可跳 / 未解析 */
+  const outgoing = useMemo(() => {
+    const out: Array<{ title: string; exists: boolean }> = []
+    const seen = new Set<string>()
+    const re = /\[\[([^\]]+)\]\]/g
+    let m: RegExpExecArray | null
+    while ((m = re.exec(content)) !== null) {
+      const t = m[1].split('|')[0].trim()
+      if (!t || seen.has(t)) continue
+      seen.add(t)
+      out.push({ title: t, exists: allPages.some(p => p.title === t) })
+    }
+    return out
+  }, [content, allPages])
+
+  /** 在阅读态正文里定位到 `[[title]]` 处并高亮（「引用」条目点击 / 「被引用」跨页定位共用）。
+   *  返回是否命中——跨页定位据此「命中才清待定位态、未命中随正文就绪重试」。
+   *  高亮走 React 态（`flashWiki` → MarkdownPreview 的 `highlightWiki`）——**禁 imperative 加类**：
+   *  重渲染会把 React 管理的 className 覆盖回去，命令式加的类留不住。 */
+  const locateWiki = useCallback((title: string): boolean => {
+    const root = previewRef.current
+    let el: HTMLElement | null = null
+    try { el = (root ?? document).querySelector(`[data-wiki="${CSS.escape(title)}"]`) as HTMLElement | null } catch { el = null }
+    if (!el) return false
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setFlashWiki(null)                                   // 先移除，保证同名连续定位也能重放动画
+    window.setTimeout(() => setFlashWiki(title), 0)
+    window.setTimeout(() => setFlashWiki(cur => (cur === title ? null : cur)), 1700)
+    return true
+  }, [])
+
+  // 跨页定位（被引用）：命中才清待定位态；未命中随正文就绪（content 变化）重试；5s 总兜底清。
+  useEffect(() => {
+    if (!pendingLocate) return
+    const hard = window.setTimeout(() => setPendingLocate(null), 5000)
+    if (page?.path !== pendingLocate.relPath) return () => window.clearTimeout(hard)
+    const id = window.setTimeout(() => { if (locateWiki(pendingLocate.title)) setPendingLocate(null) }, 120)
+    return () => { window.clearTimeout(hard); window.clearTimeout(id) }
+  }, [content, page?.path, pendingLocate, locateWiki])
 
   useEffect(() => {
     if (!page) return
@@ -902,8 +966,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     <div className="flex-1 flex overflow-hidden">
       {/* Toolbar — portal 进外壳右上悬浮胶囊（2026-09-20 改悬浮栏）
           标 kb-float-hide = 次级钮：胶囊静息态收成小把手时隐藏，悬停/焦点进入才展开（样式见 index.css）
-          isActive 门槛：隐藏保活时停掉 portal，否则工具栏飘在当前模块头上（2026-09-19 修复） */}
-      {toolbarSlot && isActive && createPortal(
+          isActive 门槛：隐藏保活时停掉 portal，否则工具栏飘在当前模块头上（2026-09-19 修复）
+          isMindMapFile：导图视图自带工具条，不挂这颗悬浮胶囊（2026-10-09 反馈） */}
+      {toolbarSlot && isActive && !isMindMapFile && createPortal(
         <>
           {!isPdfFile && !vaultMode && (
             <div className="relative kb-float-hide">
@@ -1068,7 +1133,13 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       {/* Main editing area */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Content */}
-        {isArchiveFile ? (
+        {isMindMapFile && page?.path ? (
+          /* 思维导图 JSON：按内容识别（kind:"mindmap"）→ 渲染共享 MindMapView。
+             必须排在 isArchiveFile 之前——.json 归档条目默认落元信息卡，会遮蔽导图分支 */
+          <div className="flex-1 min-h-0 flex">
+            <MindMapView relPath={page.path} showSource />
+          </div>
+        ) : isArchiveFile ? (
           /* 归档非 md 文件：html 沙箱渲染（kbview 白名单③）；文本类可切只读内容视图（B-3 方案 A）；
              其余（含二进制）元信息卡，卡上提供「在系统中打开 / 在文件夹中显示」（B-3 方案 B） */
           isArchiveHtml && page?.path ? (
@@ -1149,13 +1220,14 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         ) : isWelcomeHtml && page?.path ? (
           <WelcomeHtmlView path={page.path} />
         ) : preview ? (
-          <div className="flex-1 overflow-y-auto px-6 pb-6 pt-14">
+          <div ref={previewRef} className="flex-1 overflow-y-auto px-6 pb-6 pt-14">
             <h1 className="text-xl font-bold text-[var(--text-primary)] mb-3">{title}</h1>
             <MarkdownPreview
               content={content}
               pageId={pageId}
               pageTitle={title}
               knownWikiTitles={knownWikiTitles}
+              highlightWiki={flashWiki ?? undefined}
               onWikiLink={title => {
                 resolveInternalLink(title)
               }}
@@ -1478,46 +1550,35 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   </>
                 )}
 
-                {/* 反向链接（带上下文摘录） */}
+                {/* 引用（出链）：本页正文里的 [[…]]；点条目 → 在正文定位到该链接并高亮 */}
+                <div className="flex items-center gap-1 px-3 pt-3 pb-1">
+                  <Link2 size={11} className="text-[var(--text-muted)]" />
+                  <span className="flex-1 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">引用 · {outgoing.length}</span>
+                </div>
+                {outgoing.map(o => (
+                  <div key={o.title} onClick={() => locateWiki(o.title)}
+                    className="px-3 py-1.5 cursor-pointer hover:bg-[var(--bg-hover)] border-b border-[var(--border-color)]">
+                    <span className="text-[12px] truncate block" style={{ color: o.exists ? 'var(--accent)' : 'var(--text-muted)' }}>
+                      {o.exists ? o.title : `${o.title}（未解析）`}
+                    </span>
+                  </div>
+                ))}
+                {outgoing.length === 0 && (
+                  <p className="px-3 py-1 text-[10px] text-[var(--text-muted)] leading-relaxed">本页暂无 [[链接]]。</p>
+                )}
+
+                {/* 被引用（反链，带上下文摘录）：点条目 → 跳源页 + 定位到源页引用本页处并高亮 */}
                 <div className="flex items-center gap-1 px-3 pt-3 pb-1">
                   <StickyNote size={11} className="text-[var(--text-muted)]" />
                   <span className="flex-1 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">被引用 · {backlinks.length}</span>
                 </div>
                 {backlinks.map(bl => (
-                  <div key={bl.id} onClick={() => onNavigate(bl.id)} className="px-3 py-1.5 cursor-pointer hover:bg-[var(--bg-hover)] border-b border-[var(--border-color)]">
+                  <div key={bl.id}
+                    onClick={() => { setPendingLocate(bl.path ? { title: bl.linkText || bl.title, relPath: bl.path } : null); onNavigate(bl.id) }}
+                    className="px-3 py-1.5 cursor-pointer hover:bg-[var(--bg-hover)] border-b border-[var(--border-color)]">
                     <span className="text-[12px] text-[var(--text-primary)] truncate block">{bl.title || '无标题'}</span>
-                    {bl.excerpt && (
-                      <p className="mt-0.5 text-[10px] leading-snug text-[var(--text-muted)] line-clamp-3">{bl.excerpt}</p>
-                    )}
                   </div>
                 ))}
-
-                {/* 相关笔记（A3-3：标题+首段混合召回；via=关键词/语义/混合） */}
-                <div className="flex items-center gap-1 px-3 pt-3 pb-1">
-                  <Sparkles size={11} className="text-[var(--text-muted)]" />
-                  <span className="flex-1 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wide">相关笔记 · {similar.length}</span>
-                  <button
-                    onClick={() => { if (pageId) { setSimilarLoading(true); void getKnowledgeSimilarPages(pageId).then(r => setSimilar(r.hits ?? [])).catch(() => setSimilar([])).finally(() => setSimilarLoading(false)) } }}
-                    className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors"
-                    title="重新查找相关笔记"
-                  >
-                    <RefreshCw size={11} className={similarLoading ? 'animate-spin' : ''} />
-                  </button>
-                </div>
-                {similar.map(s => (
-                  <div key={s.pageId} onClick={() => onNavigate(s.pageId)} className="px-3 py-1.5 cursor-pointer hover:bg-[var(--bg-hover)] border-b border-[var(--border-color)]">
-                    <span className="text-[12px] text-[var(--text-primary)] truncate block">{s.title || '无标题'}</span>
-                    {s.excerpt && (
-                      <p className="mt-0.5 text-[10px] leading-snug text-[var(--text-muted)] line-clamp-2">{s.excerpt}</p>
-                    )}
-                    <span className="mt-0.5 inline-block text-[9px] px-1 rounded bg-[var(--bg-tertiary)] text-[var(--text-muted)]">
-                      {s.via === 'semantic' ? '语义' : s.via === 'hybrid' ? '混合' : '关键词'}
-                    </span>
-                  </div>
-                ))}
-                {!similarLoading && similar.length === 0 && (
-                  <p className="px-3 py-1 text-[10px] text-[var(--text-muted)] leading-relaxed">暂无相关笔记。</p>
-                )}
               </div>
         </div>
       </ResizablePanel>

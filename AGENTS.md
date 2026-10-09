@@ -119,13 +119,14 @@ src/
 ```bash
 npm run dev      # electron-vite dev（端口 7173）；启动前删掉 ELECTRON_RUN_AS_NODE
 npm run build    # electron-vite build —— 不做类型检查
-npm run pack     # build + electron-builder 打包
+npm run pack     # build + electron-builder 打包 → 产物落 packs/<版本号>[-N]（见下）
 ```
 
 - **类型门禁**（build 通过 ≠ 类型正确，必须单独跑）：`npx tsc --noEmit -p tsconfig.node.json` 与 `npx tsc --noEmit -p tsconfig.web.json`。
 - **提交必须用系统 git**（Git Bash 自带的版本会删嵌套分支 ref → 提交变孤儿）。路径与理由见 skill `windows-sandbox-ops` §1。
 - **改动越大越要配独立的契约验证脚本** —— 只跑 tsc 不够。
 - **版本号口径**：修复 / 补丁进当前线（如 `3.4.x`）；**新功能**抬到下一个 `minor`（如 `3.5.0`），不给新功能发 `3.4.z`。发版：抬 `package.json` → 改 `CHANGELOG.md` 段名 → 重跑 `.AGENT/scripts/release-notes/build-release-notes.mjs`（否则应用内更新说明停上一版且无报错，见铁律 24）→ `npm run pack` → `python scripts/publish-release.py --version <ver>`。
+- **打包产物规范**（2026-10-08 拍板）：`npm run pack`（= `node scripts/pack.mjs`）产物统一落仓库根 **`packs/`**，**目录名＝当前版本号**（如 `packs/3.4.1`）；**版本号没抬就重复打包**时自动追加 `-1`/`-2`…（如 `packs/3.4.1-1`，**不覆盖**上一份）。`scripts/publish-release.py` 的 `--dir` 缺省即去 `packs/<版本>[-N]` 取**后缀最大**者，无需再手传。旧的 `dist-electron/` 为历史目录（已弃），electron-builder 的 `build.directories.output` 基础值已改 `packs`，实际版本子目录由 `scripts/pack.mjs` 覆盖。
 - **脚本输出一律不用 emoji**（`scripts/` 与 `.AGENT/scripts/` 下的 `.py` / `.mjs` / `.bat` 都算，`print` 与 `console.log` 同规）。**Windows 控制台默认 GBK**，Python 脚本 `print` 到 emoji 会抛 `UnicodeEncodeError` —— 活干完了却报失败，还会吞掉退出码（2026-09-29 `scripts/publish-release.py` 发布成功后崩在收尾那句）。用纯文字标记：`[OK]` / `[FAIL]` / `PASS` / `FAIL`。存量脚本不强制回改，**新写与改到的脚本一律遵守**。
 - **新功能落地 / 老功能用户可见行为变更后，收尾时必须提醒开发者同步 AI 手册**：`resources/help/*.md` 是 AI 回答「软件怎么用」的唯一语料（`builtin.help.search` 检索），功能与文档不同步 = AI 照旧文档说错话且无任何报错。提醒口径：本次改动涉及哪个模块、`resources/help/` 哪几篇可能受影响、是否需要改写（写作规范与重编流程见 `.AGENT/help-rewrite/README.md`，检索验收跑 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs`）。纯内部重构（无用户可见行为变化）不需要提醒。
 

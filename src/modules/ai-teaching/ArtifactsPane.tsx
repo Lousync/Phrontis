@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame } from 'lucide-react'
+import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame, Network } from 'lucide-react'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
+import { MindMapView } from '../../components/shared/MindMapView'
 import { ArtHtmlView } from './ArtHtmlView'
 import type { ArtTab } from './artifacts'
 
@@ -11,7 +12,7 @@ import type { ArtTab } from './artifacts'
  * expanded（宿主管状态）= 原位占满内容区放大阅读（仿编辑器全屏，非弹窗），页签行 ⤢/⤡ 切换、Esc 退出；
  * 页签列表为会话内存态（切会话清空），阅读位置记忆 per-rel 保存在本组件（跨会话不失效）。
  */
-function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggleExpanded, onActivate, onClose, onReload, onPptxPage, onTalkPage, pending, onEdit }: {
+function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggleExpanded, onActivate, onClose, onReload, onPptxPage, onTalkPage, pending, onEdit, onOpenRef }: {
   tabs: ArtTab[]
   activeId: string | null
   widthPx: number
@@ -25,6 +26,8 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
   onTalkPage: (tab: ArtTab) => void
   pending: boolean
   onEdit: (rel: string) => void
+  /** 导图节点 ref 点击 → 在工件栏开该笔记页签（左聊右看不跳模块） */
+  onOpenRef: (rel: string) => void
 }) {
   const tab = tabs.find(t => t.id === activeId) ?? null
   const mdScrollRef = useRef<HTMLDivElement>(null)
@@ -68,7 +71,9 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
     ? <FileText size={11} className="shrink-0 text-[var(--accent)]" />
     : t.kind === 'pptx'
       ? <Presentation size={11} className="shrink-0 text-[var(--accent)]" />
-      : <ImageIcon size={11} className="shrink-0 text-[var(--accent)]" />
+      : t.kind === 'mindmap'
+        ? <Network size={11} className="shrink-0 text-[var(--accent)]" />
+        : <ImageIcon size={11} className="shrink-0 text-[var(--accent)]" />
 
   return (
     <div className="h-full flex flex-col min-h-0 bg-[var(--bg-secondary)] border-l border-[var(--border-color)]">
@@ -101,7 +106,7 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
       {tab && (
         <div className="shrink-0 flex items-center gap-2 px-2.5 py-1 bg-[var(--bg-primary)] border-b border-[var(--border-color)] text-[10.5px] select-none min-w-0">
           <span className="flex-1 min-w-0 truncate text-[var(--text-muted)]" title={tab.rel || ''}>
-            {tab.generating ? `visuals/${tab.slug ?? ''}.html（生成中）` : `${tab.rel}${tab.lines ? ` · ${tab.lines} 行` : ''}`}
+            {tab.generating ? (tab.kind === 'mindmap' ? `mindmaps/${tab.slug ?? ''}.json（生成中）` : `visuals/${tab.slug ?? ''}.html（生成中）`) : `${tab.rel}${tab.lines ? ` · ${tab.lines} 行` : ''}`}
           </span>
           {!tab.generating && tab.rel && (
             <button onClick={() => onEdit(tab.rel)} title="在编辑器中打开（可编辑保存后 ⟳ 刷新）"
@@ -144,8 +149,8 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
         ) : tab.generating ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-[12px] text-[var(--text-muted)]">
             <div className="w-[26px] h-[26px] rounded-full border-[3px] border-[var(--border-color)] border-t-[var(--accent)] animate-spin" />
-            <div>visual.html 正在生成示意图…</div>
-            <div className="text-[10.5px]">产出将写入会话 visuals/ 目录 · 单文件自包含</div>
+            <div>{tab.kind === 'mindmap' ? 'mindmap 正在生成思维导图…' : 'visual.html 正在生成示意图…'}</div>
+            <div className="text-[10.5px]">{tab.kind === 'mindmap' ? '产出将写入会话 mindmaps/ 目录' : '产出将写入会话 visuals/ 目录 · 单文件自包含'}</div>
           </div>
         ) : tab.kind === 'md' ? (
           <>
@@ -176,6 +181,10 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
               onManualZoom={z => setManualZoom(tab.rel, z)}
               onEffectiveZoom={z => reportEffZoom(tab.rel, z)}
             />
+          </div>
+        ) : tab.kind === 'mindmap' ? (
+          <div className="kb-art-in flex-1 min-h-0">
+            <MindMapView relPath={tab.rel} showExport showSource onRef={onOpenRef} />
           </div>
         ) : (
           /* pptx 逐页阅读并入页签（§1.4：页码即内容） */

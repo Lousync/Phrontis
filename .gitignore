@@ -4,6 +4,8 @@ dist/
 dist-electron/
 # 打包产物目录（含按版本切出的 dist-electron-vXXX / -vXXXb 变体，旧实例锁目录时的绕法产物）
 dist-electron-*/
+# 打包产物统一目录（规范见 AGENTS.md「工作流」：packs/<版本号>[-N]）
+packs/
 data/
 *.db
 *.exe
