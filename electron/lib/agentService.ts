@@ -733,6 +733,10 @@ async function runAgentLoop(
   const askRuleHint = source === 'aiTeaching'
     ? '\n\n【提问模式协议（AI教学）】当你需要用户做选择、澄清或确认才能继续时（方案二选一、参数不明确、流程确认等），在回答正文末尾输出一个 ```ask 围栏代码块，块内是一个 JSON 对象（不要注释）：{"question":"一句话问题","options":["选项一","选项二"],"allowCustom":true}。规则：选项 2~6 个、每项不超过 20 字且可直接作为用户的回答发出；allowCustom=true 表示也允许用户自由输入；一次回答最多一个 ask 块；客户端会把提问渲染成交互选择卡，正文里不要再重复罗列同样的选项。整卷式批量提问（如诊断问卷）时块内改为 JSON 数组，每个元素形如 {"question":"问题","options":["选项A","选项B","选项C"]}，用户会整卷作答后统一发回。正式出题仍走 ```quiz 协议，两者不得混用；无需用户确认时不要输出 ask。JSON 字符串值内部禁止未转义英文双引号——需要引用时一律用中文引号，否则 JSON 被截断、提问卡渲染失败。'
     : ''
+  // 对话驱动建课：把课程大纲给用户过目时输出 ```outline 围栏 → 渲染成草稿卡（满意才「正式生成」落盘）
+  const outlineRuleHint = source === 'aiTeaching'
+    ? '\n\n【大纲草稿协议（AI教学）】当你把课程大纲给用户过目时，除正文说明外，输出一个 ```outline 围栏代码块，块内是一个 JSON 对象（不要注释）：{"title":"课程名","goal":"一句话目标","chapters":[{"name":"章名","units":[{"name":"知识点名","goal":"该点学习目标","source":"出处"}]}]}。规则：**分批**——先只展开第一章（其余章只给 name、units 用空数组表示未展开）；用户满意后由客户端「正式生成」按钮落盘（你也可调 course.outline.write）；用户要改就更新草稿、重新发这个围栏。围栏语言必须是 outline（\u0060\u0060\u0060outline）。JSON 字符串值内部禁止未转义英文双引号——需要引用时一律用中文引号『』或“”。'
+    : ''
   // P6（§3.13/3-29）：素材目录实时注入（SOURCE.md 条目+提取稿路径+编号引用规则）；无登记则零注入
   const sourcesHint = source === 'aiTeaching' ? (() => {
     const cat = resolveSourcesForInjection(sessionId, getSettingReader())
@@ -810,13 +814,13 @@ async function runAgentLoop(
         constraintChars: sessionInst.length,
         profileChars: profileHint.length,
         sourcesChars: sourcesHint.length,
-        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + visualHint.length + mindmapHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
+        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + outlineRuleHint.length + visualHint.length + mindmapHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
       }
     : undefined
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + mindmapHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+    : baseSystem + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，

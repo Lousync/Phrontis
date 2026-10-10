@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, renameSync } from 'fs'
-import { dirname, join } from 'path'
+import { dirname, isAbsolute, join } from 'path'
 import { ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { readJson, writeJson } from './kbStore/jsonStore'
 import { getWorkspaceOfSession, workspaceFolderRel, assignSession } from './aiTeachingWorkspaces'
-import { ensureSessionFolder, ensureSessionFolderAt, sessionFolder, setLessonFolderResolver, setAssistantFolderResolver } from './aiTeachingFolders'
-import { renameWorkspacePath } from './workspaceManager'
+import { ensureSessionFolder, ensureSessionFolderAt, sessionFolder, setLessonFolderResolver, setAssistantFolderResolver, resolveWriteOwnerRel, sanitizeTitle } from './aiTeachingFolders'
+import { writeInventoryIndex, todayLocal } from './aiTeachingInventory'
+import { renameWorkspacePath, uniqueFileName } from './workspaceManager'
 import { createAgentSession, getAgentMessages, getAgentSession, sessionExists } from './agentSessionRepo'
 import { invokeLlmInternal, invokeLlmStreamInternal, firstEnabledModelSpec } from './llmService'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
@@ -13,6 +14,8 @@ import {
   parseCourseMd,
   rewriteCourseMd,
   parseOutlineJson,
+  normalizeOutline,
+  cleanField,
   sourceSnapshot,
   diffSources,
   normalizeAdditions,
@@ -553,9 +556,9 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
   const done = units.filter((u) => s.units[u.id]?.status === 'mastered').length
   const lines: string[] = []
   if (isAssistant) {
-    lines.push('【课程助手（顾问）上下文（AI教学·课程模式）】')
+    lines.push('【教学助手上下文（AI 教学 · 对话驱动建课）】')
     lines.push(`课程：${outline?.title || '未命名'} · 目标：${outline?.goal || '未设定'}`)
-    lines.push('你是这门课的**课程顾问**，不是授课教师：帮用户做整体规划（进度 / 侧重 / 复习节奏）、梳理知识结构、按素材内容整理或提炼要点、回答对某知识点的疑问；不要逐知识点开讲、不要产生课时或出快检卡。')
+    lines.push('你是这门课的**教学助手**：负责跟用户定学习目标、清点与分章素材、生成/展开课程大纲、整理与答疑。**不要**逐知识点开讲（那是上课时的事），也不要出课时或快检卡。')
     if (hasOutline) {
       lines.push('课程大纲（章 → 知识点 · 掌握度/状态）：')
       for (const c of outline!.chapters) {
@@ -569,9 +572,9 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
       const review = units.filter((u) => s.units[u.id]?.status === 'review')
       if (review.length) lines.push(`待复习（薄弱）：${review.map((u) => u.name).join('、')}`)
     } else {
-      lines.push('（本工作区还没有课程大纲；可在中栏「课程主页」生成。你现在可先帮用户规划、整理已登记素材。）')
+      lines.push('（本工作区还没有课程大纲。按流程引导：先聊清学习目标、清点素材，条件够就询问用户"是否生成大纲"，确认后再生成为草稿。）')
     }
-    lines.push('【只读约束】本轮你只能读取与回答：不要生成文件、不要修改课程大纲；若用户要求落盘（生成笔记 / 思维导图 / 改大纲），说明这是下一步能力。')
+    lines.push('【建课流程与工具】① 素材里若有 pdf/pptx，先提醒用户把它们转写成 md（可在素材库对该素材做「提取稿」），确认后再继续；② 用 inventory 清点目录素材（**先清点再分章**，别把整个目录硬读进上下文）；③ 与用户定好目标、素材就绪后，问「是否生成大纲」；④ 生成的大纲**先作为对话里的草稿给用户看**，用户满意后才调 course.outline.write 落盘（**分批**：先只给第一章，用户学完再说「展开下一章」用 append=true 追加）；⑤ 删知识点用 course.outline.remove-unit（已学过的会被拒绝，需先用 course.organize.archive 整理归档、给用户看后再删）；⑥ course.organize.archive 的归档位置默认会话 output/，也可由用户/你指定目录，归档后必须把**绝对路径**告诉用户。落盘只走这些工具，不要另造文件；改大纲前先与用户确认。')
     return '\n\n' + lines.join('\n')
   }
   // 教师分支（上课 / 课时）：仅当有大纲（上面已挡）
@@ -886,12 +889,143 @@ export function applyOutlineAdditions(wsId: string, additions: OutlineAdditions,
   return { ok: true, added }
 }
 
+// ===== 对话驱动建课（Phase 2）：教学助手通过工具调用的业务函数 =====
+// 原则：助手只做编排；落盘一律走这里（复用 writeCourseOutline / 进度文件 / 素材函数），
+// 不开 .knowbase 白名单，写工具仍受 requires:'write' 权限过滤。
+
+export interface InventoryToolResult {
+  ok: boolean
+  relPath?: string
+  sourceName?: string
+  classification?: 'organized' | 'flat' | 'empty'
+  totalFiles?: number
+  totalChars?: number
+  subdirs?: { name: string; fileCount: number; chars: number }[]
+  pendingTranscribe?: { rel: string; ext: string }[]
+  fingerprint?: string
+  error?: string
+}
+
+/** 清点某工作区的登记素材（按名称或 `#编号`）→ 写 `SOURCES/{素材名}.index.md`，返回摘要。 */
+export function inventoryWorkspaceSource(wsId: string, ref: unknown, getSetting: (key: string) => unknown): InventoryToolResult {
+  const vault = getCurrentVault()
+  if (!vault) return { ok: false, error: '尚未打开仓库' }
+  const folder = workspaceFolderRel(String(wsId ?? ''), getSetting)
+  if (!folder) return { ok: false, error: '工作区不存在' }
+  const all = wsSources(String(wsId ?? ''), getSetting)
+  if (!all.length) return { ok: false, error: '本工作区还没有登记素材；先在素材库添加' }
+  const raw = String(ref ?? '').trim()
+  const no = /^#?(\d+)$/.exec(raw)?.[1]
+  const e = no ? all.find((x) => x.no === Number(no)) : all.find((x) => x.name === raw) ?? all.find((x) => x.name.includes(raw))
+  if (!e) return { ok: false, error: `找不到素材「${raw}」。现有：${all.map((x) => `#${x.no} ${x.name}`).join('、')}` }
+  if (e.type !== 'dir') return { ok: false, error: `「${e.name}」不是目录素材（${e.type}）。单个 pdf/pptx 请先转写为 md 再使用` }
+  const dirAbs = !e.path || e.path === '-' ? '' : (isAbsolute(e.path) ? e.path : join(vault.rootPath, e.path))
+  if (!dirAbs) return { ok: false, error: `素材「${e.name}」未登记路径` }
+  const w = writeInventoryIndex(join(vault.rootPath, folder), e.name, e.path, dirAbs, todayLocal())
+  if (!w.ok) return { ok: false, error: w.error }
+  return {
+    ok: true, relPath: w.relPath, sourceName: e.name,
+    classification: w.scan?.classification, totalFiles: w.scan?.totalFiles, totalChars: w.scan?.totalChars,
+    subdirs: w.scan?.subdirs, pendingTranscribe: w.scan?.pendingTranscribe, fingerprint: w.fingerprint,
+  }
+}
+
+export interface OutlineDraft {
+  title?: string
+  goal?: string
+  anchor?: string
+  chapters?: { name?: string; units?: { name?: string; goal?: string; source?: string }[] }[]
+  /** true=追加进现大纲（展开新章/补知识点）；缺省/false=首次生成（覆盖） */
+  append?: boolean
+}
+
+/** 助手写入/展开课程大纲：append=false 首次生成（覆盖）；append=true 按章名合并增补（保留既有 id/进度）。 */
+export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, getSetting: (key: string) => unknown): { ok: boolean; mode?: 'create' | 'append'; added?: number; chapters?: number; relPath?: string; error?: string } {
+  const id = String(wsId ?? '')
+  if (!id) return { ok: false, error: '缺少工作区' }
+  if (!getCurrentVault()) return { ok: false, error: '尚未打开仓库' }
+  const norm = normalizeOutline(draft) // { title, goal, anchor, chapters[with ids] }
+  if (!norm) return { ok: false, error: '大纲为空或不合法（需含 chapters[].units[].name）' }
+  const existing = readCourseOutline(id, getSetting)
+  const hasExisting = !!existing && existing.chapters.length > 0 && draft?.append !== false
+  if (!hasExisting) {
+    const outline: CourseOutline = {
+      title: norm.title || existing?.title || '',
+      goal: norm.goal || existing?.goal || '',
+      anchor: norm.anchor || existing?.anchor || '',
+      chapters: norm.chapters,
+    }
+    const w = writeCourseOutline(id, outline, getSetting)
+    return w.ok ? { ok: true, mode: 'create', chapters: outline.chapters.length, relPath: w.relPath } : { ok: false, error: w.error }
+  }
+  // 增补：章名对齐现有章 → 追加其知识点；否则整章新增
+  const additions: OutlineAdditions = { toExisting: [], newChapters: [] }
+  for (const ch of norm.chapters) {
+    const ex = existing!.chapters.find((c) => cleanField(c.name) === cleanField(ch.name))
+    if (ex) for (const u of ch.units) additions.toExisting.push({ chapterId: ex.id, name: u.name, goal: u.goal, source: u.source })
+    else additions.newChapters.push({ name: ch.name, units: ch.units.map((u) => ({ name: u.name, goal: u.goal, source: u.source })) })
+  }
+  const r = applyOutlineAdditions(id, additions, getSetting)
+  return r.ok ? { ok: true, mode: 'append', added: r.added } : { ok: false, error: r.error }
+}
+
+/** 删除知识点：未学习(todo/无进度) 直接删；已学/学一半 → 拒绝并要求先「整理对话并归档」。 */
+export function removeCourseUnit(wsId: string, ref: unknown, getSetting: (key: string) => unknown): { ok: boolean; removed?: string; needOrganize?: boolean; unitId?: string; unitName?: string; status?: string; error?: string } {
+  const id = String(wsId ?? '')
+  const outline = readCourseOutline(id, getSetting)
+  if (!outline) return { ok: false, error: '该工作区还没有课程大纲' }
+  const raw = String(ref ?? '').trim()
+  let hit: { chapterId: string; unitId: string; name: string } | null = null
+  for (const c of outline.chapters) for (const u of c.units) if (u.id === raw || u.name === raw) { hit = { chapterId: c.id, unitId: u.id, name: u.name }; break }
+  if (!hit) return { ok: false, error: `找不到知识点「${raw}」` }
+  const f = readProgressFile()
+  const st = wsState(f, id)
+  const status = st.units[hit.unitId]?.status ?? 'todo'
+  if (status !== 'todo') {
+    return { ok: false, needOrganize: true, unitId: hit.unitId, unitName: hit.name, status, error: `知识点「${hit.name}」已学习（${status}），直接删会丢学习记录：请先用「整理对话并归档」把这段对话存档，再删除` }
+  }
+  const next: CourseOutline = { ...outline, chapters: outline.chapters.map((c) => ({ ...c, units: c.units.filter((u) => u.id !== hit!.unitId) })) }
+  const w = writeCourseOutline(id, next, getSetting)
+  if (!w.ok) return { ok: false, error: w.error }
+  delete st.units[hit.unitId]
+  persist(f)
+  broadcastCourse(id)
+  return { ok: true, removed: hit.name }
+}
+
+/** 整理页归档：写入 target（仓库相对目录）或默认会话 output/；返回相对路径与**绝对路径**。 */
+export function archiveOrganizedPage(sessionId: string, title: unknown, content: unknown, target: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string } {
+  const vault = getCurrentVault()
+  if (!vault) return { ok: false, error: '尚未打开仓库' }
+  let rel = String(target ?? '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+  if (!rel) { const owner = resolveWriteOwnerRel(String(sessionId ?? ''), getSetting); if (!owner) return { ok: false, error: '无法确定归档目录' }; rel = owner }
+  if (rel.split('/').some((s) => s.startsWith('.'))) return { ok: false, error: '归档目录非法（不能写入隐藏/点目录）' }
+  try {
+    const dirAbs = join(vault.rootPath, rel)
+    mkdirSync(dirAbs, { recursive: true })
+    const base = sanitizeTitle(String(title ?? '整理'))
+    const fname = uniqueFileName(dirAbs, base.endsWith('.md') ? base : `${base}.md`)
+    writeFileSync(join(dirAbs, fname), String(content ?? '').replace(/\r\n/g, '\n'), 'utf-8')
+    broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: rel })
+    return { ok: true, relPath: `${rel}/${fname}`, absPath: join(dirAbs, fname) }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
 // ===== IPC 注册 =====
 
 export function registerAiTeachingCourseHandlers(getSetting: (key: string) => unknown): void {
   ipcMain.handle('aiTeachCourse:getState', (_e, wsId: string) => getCourseState(String(wsId ?? ''), getSetting))
   ipcMain.handle('aiTeachCourse:setEnabled', (_e, wsId: string, enabled: boolean) => setCourseEnabled(String(wsId ?? ''), !!enabled))
-  ipcMain.handle('aiTeachCourse:saveOutline', (_e, wsId: string, outline: CourseOutline) => writeCourseOutline(String(wsId ?? ''), outline, getSetting))
+  ipcMain.handle('aiTeachCourse:saveOutline', (_e, wsId: string, outline: CourseOutline) =>
+    writeCourseOutline(String(wsId ?? ''), outline, getSetting))
+  // 对话驱动建课：草稿卡「正式生成」→ 助手同款写入口径（append 增补 / 首次覆盖）
+  ipcMain.handle('aiTeachCourse:writeOutlineDraft', (_e, wsId: string, draft: OutlineDraft) =>
+    writeOutlineFromAssistant(String(wsId ?? ''), draft ?? {}, getSetting))
+  // 对话驱动建课：删知识点（已学的会被拒绝，需先整理归档）——与助手工具同口径
+  ipcMain.handle('aiTeachCourse:removeUnit', (_e, wsId: string, unit: string) =>
+    removeCourseUnit(String(wsId ?? ''), unit, getSetting))
   ipcMain.handle('aiTeachCourse:setUnitProgress', (_e, wsId: string, unitId: string, patch: Partial<CourseUnitProgress>) =>
     setUnitProgress(String(wsId ?? ''), String(unitId ?? ''), patch ?? {}))
   ipcMain.handle('aiTeachCourse:generateOutline', (_e, input: GenerateOutlineInput) =>

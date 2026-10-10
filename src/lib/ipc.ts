@@ -659,6 +659,8 @@ export const aiTeachSetLastWorkspace = (wsId: string | null) => a().aiTeachSetLa
 // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲；docs/ai-teaching-course-mode-plan.md）
 export const aiTeachCourseGetState = (wsId: string): Promise<AiTeachCourseState> => a().aiTeachCourseGetState(wsId)
 export const aiTeachCourseSetEnabled = (wsId: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> => a().aiTeachCourseSetEnabled(wsId, enabled)
+export const aiTeachCourseWriteOutlineDraft = (wsId: string, draft: unknown): Promise<{ ok: boolean; mode?: string; added?: number; chapters?: number; relPath?: string; error?: string }> => a().aiTeachCourseWriteOutlineDraft(wsId, draft)
+export const aiTeachCourseRemoveUnit = (wsId: string, unit: string): Promise<{ ok: boolean; removed?: string; needOrganize?: boolean; unitId?: string; unitName?: string; status?: string; error?: string }> => a().aiTeachCourseRemoveUnit(wsId, unit)
 export const aiTeachCourseSaveOutline = (wsId: string, outline: AiTeachCourseOutline): Promise<{ ok: boolean; relPath?: string; error?: string }> => a().aiTeachCourseSaveOutline(wsId, outline)
 export const aiTeachCourseSetUnitProgress = (wsId: string, unitId: string, patch: Partial<AiTeachCourseUnitProgress>): Promise<{ ok: boolean; error?: string }> => a().aiTeachCourseSetUnitProgress(wsId, unitId, patch)
 export const aiTeachCourseGenerateOutline = (input: AiTeachCourseGenerateInput): Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }> => a().aiTeachCourseGenerateOutline(input)

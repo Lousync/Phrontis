@@ -2300,6 +2300,8 @@ export interface ElectronAPI {
   // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲）
   aiTeachCourseGetState: (wsId: string) => Promise<AiTeachCourseState>
   aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
+  aiTeachCourseWriteOutlineDraft: (wsId: string, draft: unknown) => Promise<{ ok: boolean; mode?: string; added?: number; chapters?: number; relPath?: string; error?: string }>
+  aiTeachCourseRemoveUnit: (wsId: string, unit: string) => Promise<{ ok: boolean; removed?: string; needOrganize?: boolean; unitId?: string; unitName?: string; status?: string; error?: string }>
   aiTeachCourseSaveOutline: (wsId: string, outline: AiTeachCourseOutline) => Promise<{ ok: boolean; relPath?: string; error?: string }>
   aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: Partial<AiTeachCourseUnitProgress>) => Promise<{ ok: boolean; error?: string }>
   aiTeachCourseGenerateOutline: (input: AiTeachCourseGenerateInput) => Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }>

@@ -335,7 +335,12 @@ const api = {
   aiTeachSetLastWorkspace: (wsId: null | string) => ipcRenderer.invoke('aiTeach:setLastWorkspace', wsId),
   // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲）
   aiTeachCourseGetState: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getState', wsId),
-  aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => ipcRenderer.invoke('aiTeachCourse:setEnabled', wsId, enabled),
+  aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) =>
+    ipcRenderer.invoke('aiTeachCourse:setEnabled', wsId, enabled),
+  aiTeachCourseWriteOutlineDraft: (wsId: string, draft: unknown) =>
+    ipcRenderer.invoke('aiTeachCourse:writeOutlineDraft', wsId, draft),
+  aiTeachCourseRemoveUnit: (wsId: string, unit: string) =>
+    ipcRenderer.invoke('aiTeachCourse:removeUnit', wsId, unit),
   aiTeachCourseSaveOutline: (wsId: string, outline: unknown) => ipcRenderer.invoke('aiTeachCourse:saveOutline', wsId, outline),
   aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: unknown) => ipcRenderer.invoke('aiTeachCourse:setUnitProgress', wsId, unitId, patch),
   aiTeachCourseGenerateOutline: (input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutline', input),

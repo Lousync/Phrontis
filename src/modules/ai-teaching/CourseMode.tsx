@@ -4,6 +4,7 @@ import type { AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnit, AiTea
 import {
   aiTeachCourseGenerateOutlineStream, aiTeachCourseSaveOutline, aiTeachCourseMakeUnitQuiz, onAiTeachCourseGenProgress,
   aiTeachCourseGetSourceChanges, aiTeachCourseReviseOutlineStream, aiTeachCourseApplyAdditions,
+  aiTeachCourseRemoveUnit,
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 
@@ -58,10 +59,11 @@ interface Props {
   onFinishUnit: (unitId: string, score?: { correct: number; total: number }) => void
   onReopenUnit: (unitId: string) => void
   onReload: () => void
+  /** 对话驱动建课：跳回对话（跟教学助手说目标/改大纲） */
+  onGoChat?: () => void
 }
 
-export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFinishUnit, onReopenUnit, onReload }: Props) {
-  const [view, setView] = useState<'home' | 'wizard'>('home')
+export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFinishUnit, onReopenUnit, onReload, onGoChat }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   // L3 收尾自测：先出题 → 作答 → 再生成总结篇
   const [quiz, setQuiz] = useState<{ unitId: string; qs: AiTeachUnitQuizQuestion[]; i: number; picked: number | null; score: number; done: boolean } | null>(null)
@@ -81,6 +83,14 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFini
     setQuiz({ unitId, qs: r.questions, i: 0, picked: null, score: 0, done: false })
   }, [quizBusy, wsId, onFinishUnit])
 
+  const doRemoveUnit = useCallback(async (u: { id: string; name: string }) => {
+    const st = state.progress[u.id]?.status ?? 'todo'
+    if (st !== 'todo') { showToast({ type: 'warning', message: `「${u.name}」已学习：请先让教学助手把这段对话整理归档，再删除` }); return }
+    const r = await aiTeachCourseRemoveUnit(wsId, u.id).catch(() => null)
+    if (r?.ok) { showToast({ type: 'info', message: `已删除知识点：${u.name}` }); onReload() }
+    else showToast({ type: 'error', message: `删除失败${r?.error ? `：${r.error}` : ''}` })
+  }, [wsId, state.progress, onReload])
+
   const units = useMemo(() => (state.outline?.chapters ?? []).flatMap(c => c.units), [state.outline])
   const total = units.length
   const done = units.filter(u => state.progress[u.id]?.status === 'mastered').length
@@ -91,18 +101,17 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFini
     setCollapsed(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }, [])
 
-  if (view === 'wizard') {
-    return <Wizard wsName={wsName} wsId={wsId} modelSpec={modelSpec} outline={state.outline} onSaved={() => { onReload(); setView('home') }} onCancel={() => setView('home')} />
-  }
   if (!state.outline) {
     return (
       <div className="h-full min-h-0 flex items-center justify-center px-6">
-        <div className="w-full max-w-[440px] text-center">
+        <div className="w-full max-w-[460px] text-center">
           <div className="mx-auto w-[46px] h-[46px] rounded-xl bg-[var(--accent)]/12 text-[var(--accent)] flex items-center justify-center"><Sparkles size={22} /></div>
-          <h2 className="mt-4 text-[17px] font-semibold text-[var(--text-primary)]">这个工作区还没有课程大纲</h2>
-          <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">先定「学什么」。生成一份课程大纲（章 → 知识点），之后按知识点上课、检验，进度会自己沉淀。</p>
-          <button onClick={() => setView('wizard')}
-            className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent)] text-white text-[12px] hover:opacity-90 transition-opacity"><Sparkles size={13} />生成课程大纲</button>
+          <h2 className="mt-4 text-[17px] font-semibold text-[var(--text-primary)]">还没有课程大纲</h2>
+          <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--text-secondary)]">回到对话，跟<b>教学助手</b>说你的学习目标和素材——它会先清点素材、给你一份大纲草稿，你确认满意后再正式生成。</p>
+          {onGoChat && (
+            <button onClick={onGoChat}
+              className="mt-4 inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[var(--accent)] text-white text-[12px] hover:opacity-90 transition-opacity"><Sparkles size={13} />去和教学助手聊聊</button>
+          )}
           <div className="mt-3 text-[11px] text-[var(--text-muted)]">也可以直接手动编辑 <code className="font-mono text-[var(--accent)]">课程.md</code></div>
         </div>
       </div>
@@ -129,10 +138,10 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFini
                 <div className="h-full bg-[var(--accent)] transition-all" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
               </div>
             </div>
-            <button onClick={() => setView('wizard')}
-              className="px-2.5 py-1 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] transition-colors">编辑大纲</button>
-            <button onClick={() => setShowRevise(true)}
-              className="px-2.5 py-1 rounded-md border border-[var(--accent)]/45 text-[11.5px] text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors">＋ 修订大纲</button>
+            {onGoChat && (
+              <button onClick={onGoChat} title="改大纲 / 展开下一章 / 删知识点：对教学助手说"
+                className="px-2.5 py-1 rounded-md border border-[var(--accent)]/45 text-[11.5px] text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors">改大纲（对助手说）</button>
+            )}
           </div>
         </div>
 
@@ -201,6 +210,8 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFini
                           <button onClick={() => onReopenUnit(u.id)} className="px-2.5 py-1 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)] transition-colors">回炉复习</button>
                         </>
                       )}
+                      <button onClick={() => void doRemoveUnit(u)} title={st !== 'todo' ? '已学习：需先让助手整理归档再删' : '删除知识点'}
+                        className="p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors"><Trash2 size={12} /></button>
                     </div>
                   </div>
                 )
@@ -208,8 +219,8 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFini
             </div>
           )
         })}
-        <div className="mt-3 rounded-xl border border-dashed border-[var(--border-color)] py-3 text-center text-[12px] text-[var(--text-muted)] cursor-pointer hover:border-[var(--accent)]/50" onClick={() => setView('wizard')}>
-          ＋ 编辑大纲 / 添加知识点（也直接改 课程.md）
+        <div className="mt-3 rounded-xl border border-dashed border-[var(--border-color)] py-3 text-center text-[12px] text-[var(--text-muted)]">
+          要加下一章？对<b>教学助手</b>说「展开下一章」即可（也可直接改 <code className="font-mono text-[var(--accent)]">课程.md</code>）
         </div>
         {quiz && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/35 p-4" onClick={() => setQuiz(null)}>

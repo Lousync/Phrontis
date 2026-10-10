@@ -6,6 +6,11 @@ import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/wind
 import { webSearch, webReadPage } from './webSearch'
 import { writeVisual, writeMindmap } from './aiTeachingSources'
 import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
+import { getWorkspaceOfSession } from './aiTeachingWorkspaces'
+import {
+  inventoryWorkspaceSource, writeOutlineFromAssistant, removeCourseUnit, archiveOrganizedPage,
+  type OutlineDraft,
+} from './aiTeachingCourse'
 import type { ToolInvokeCtx } from './aiTools'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault } from './workspaceManager'
 import { aiExec } from './terminalService'
@@ -1247,7 +1252,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1803,6 +1808,84 @@ export function registerBuiltinTools(): void {
     const r = writeMindmap(sid, str(args.slug), JSON.stringify(doc), getSettingReader())
     if (!r.ok) throw new Error(r.error ?? '思维导图写入失败')
     return { relPath: r.relPath, nodes: r.nodes }
+  })
+
+  // ===== 对话驱动建课（Phase 2，2026-10-11）：教学助手工具 =====
+  // 助手只编排；落盘一律走 aiTeachingCourse 的业务函数（复用大纲/进度/素材实现），
+  // 不开 .knowbase 白名单，写工具仍受 requires:'write' 权限过滤（铁律 3）。
+  const requireAiTeachWs = (ctx?: ToolInvokeCtx): string => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid) throw new Error('仅可在 AI 教学对话中使用')
+    const wsId = getWorkspaceOfSession(sid)
+    if (!wsId) throw new Error('当前对话未归属工作区')
+    return wsId
+  }
+
+  // 26. inventory —— 清点 dir 素材（先清点再分章，避开整目录截断）
+  registerTool({
+    name: 'inventory',
+    title: '清点素材目录',
+    description: '清点本工作区登记的「目录(dir)素材」：递归统计文件数/字数、判定顶层是否已按子文件夹分类、列出待转写的 pdf/pptx、抽取每文件小标题，写入 SOURCES/{素材名}.index.md。用于"先清点、再分章"，避免整个目录被截断。仅对 dir 素材有效（单个 pdf/pptx 需先转写为 md）。',
+    inputSchema: { type: 'object', properties: { source: { type: 'string', description: '素材名称或编号（如 操作系统资料 或 #1）' } }, required: ['source'] },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => inventoryWorkspaceSource(requireAiTeachWs(ctx), str(args.source), getSettingReader()))
+
+  // 27. course.outline.write —— 写入/展开课程大纲（分批：先第一章，学完再 append）
+  registerTool({
+    name: 'course.outline.write',
+    title: '写入/展开课程大纲',
+    description: '把课程大纲写入本工作区（人读人改的 课程.md）。append 缺省/false = 首次生成（覆盖）；append=true = 按章名合并增补、保留既有知识点与进度，用于"展开下一章"。分批：先只给第一章，学完再加下一章。务必先在对话里把草稿给用户看过、确认后再调用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '课程名（首次可给）' },
+        goal: { type: 'string', description: '一句话学习目标（首次可给）' },
+        append: { type: 'boolean', description: 'true=追加进现大纲；缺省/false=首次覆盖生成' },
+        chapters: { type: 'array', items: { type: 'object' }, description: '[{ name, units:[{ name, goal, source }] }]' },
+      },
+      required: ['chapters'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const r = writeOutlineFromAssistant(requireAiTeachWs(ctx), { title: str(args.title), goal: str(args.goal), append: !!args.append, chapters: args.chapters as OutlineDraft['chapters'] }, getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '写入大纲失败')
+    return r
+  })
+
+  // 28. course.outline.remove-unit —— 删除知识点（已学 → 拒绝，要求先整理归档）
+  registerTool({
+    name: 'course.outline.remove-unit',
+    title: '删除知识点',
+    description: '从课程大纲删除一个知识点。未学习(todo)的直接删；已学习/学一半的会返回 needOrganize=true 并拒绝——请先用「整理对话并归档」把这段对话存档，再删除。参数 unit = 知识点名称或 id。',
+    inputSchema: { type: 'object', properties: { unit: { type: 'string', description: '知识点名称或 id' } }, required: ['unit'] },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const r = removeCourseUnit(requireAiTeachWs(ctx), str(args.unit), getSettingReader())
+    if (!r.ok && !r.needOrganize) throw new Error(r.error ?? '删除失败')
+    return r
+  })
+
+  // 29. course.organize.archive —— 整理页归档（默认 output/，可指定目录，返回绝对路径）
+  registerTool({
+    name: 'course.organize.archive',
+    title: '整理对话并归档',
+    description: '把一段内容整理成 markdown 一页并归档到指定目录。target 给仓库相对目录（可先用 vault.list/search 定位并自行判断最贴切的目录）；缺省落本会话产物目录 output/。返回相对路径与**绝对路径**（务必把绝对路径告诉用户，说明放到了哪里）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '页面标题（作文件名）' },
+        content: { type: 'string', description: 'markdown 正文' },
+        target: { type: 'string', description: '仓库相对目录；缺省=会话 output/' },
+      },
+      required: ['title', 'content'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid) throw new Error('仅可在 AI 教学对话中使用')
+    const r = archiveOrganizedPage(sid, str(args.title), str(args.content), str(args.target), getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '归档失败')
+    return r
   })
 
   // =====================================================================

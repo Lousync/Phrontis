@@ -6,7 +6,7 @@ import {
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceListDir, workspaceRefreshVault,
   agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachAssignSession, aiTeachUnassignSession, aiTeachSetLastWorkspace,
-  aiTeachCourseGetState, aiTeachCourseSetUnitProgress, aiTeachCourseSetEnabled, onAiTeachCourseRefresh,
+  aiTeachCourseGetState, aiTeachCourseSetUnitProgress, aiTeachCourseSetEnabled, aiTeachCourseWriteOutlineDraft, onAiTeachCourseRefresh,
   aiTeachCourseOpenUnit, aiTeachCourseEndLesson, aiTeachCourseFinalizeLesson, aiTeachCourseFinishUnit, aiTeachCourseReadPrevHandoff,
   aiTeachCourseOpenAssistant,
   aiTeachSrcRead, aiTeachSrcAdd, aiTeachSrcRemove, aiTeachSrcExtract, aiTeachSrcPick, aiTeachSrcPickDir, aiTeachSrcVisionCheck,
@@ -577,7 +577,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   /** 上节交接内容（界面条）：进入某课时时读取 */
   const [prevHandoff, setPrevHandoff] = useState('')
   const [handoffOpen, setHandoffOpen] = useState(true)
-  const courseEnabled = !!courseState?.enabled
+  // 对话驱动建课（2026-10-11）：整个 AI 教学区即此模式，不再有「课程模式」开关——
+  // 只要有激活工作区就算开启（CourseHome / 大纲树 / 顶栏分段器恒可用）。
+  const courseEnabled = !!activeWs && activeWs !== '__none__'
   /** 本课已结束 → 输入区只读 */
   const courseReadonly = !!courseUnit && activeId === courseLessonSid && courseLessonStatus === 'ended'
   const courseUnits = useMemo(() => (courseState?.outline?.chapters ?? []).flatMap(c => c.units), [courseState])
@@ -617,6 +619,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const off = onAiTeachCourseRefresh((p) => { if (p.wsId === activeWsRef.current) void reloadCourse() })
     return off
   }, [reloadCourse])
+  // 对话驱动建课：进入工作区即把课程态打开（不再有开关；主进程据此注入课程上下文/助手人设）
+  useEffect(() => {
+    const ws = activeWs
+    if (!ws || ws === '__none__') return
+    if (courseState && !courseState.enabled) { void aiTeachCourseSetEnabled(ws, true).then(() => reloadCourse()).catch(() => null) }
+  }, [activeWs, courseState, reloadCourse])
   // 上节交接：进入某课时（当前会话＝本课时）时读取，展示为可折叠交接条
   useEffect(() => {
     const sid = activeId
@@ -1814,6 +1822,33 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     () => (profileFence ? parseProfileFence(profileFence.raw) : null),
     [profileFence],
   )
+  /** 对话驱动建课：最新一条 assistant 回答里的 ```outline 围栏 = 课程大纲草稿（用户满意才正式落盘） */
+  const outlineFence = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i]
+      if (m.role !== 'assistant') continue
+      const mt = /```outline[^\n]*\n([\s\S]*?)```/.exec(m.content)
+      return mt ? mt[1].trim() : null
+    }
+    return null
+  }, [messages])
+  type OutlineDraftUi = { title?: string; goal?: string; chapters?: { name?: string; units?: { name?: string; goal?: string; source?: string }[] }[] }
+  const outlineDraft = useMemo<OutlineDraftUi | null>(() => {
+    if (!outlineFence) return null
+    try {
+      const o = JSON.parse(outlineFence) as OutlineDraftUi
+      return o && Array.isArray(o.chapters) ? o : null
+    } catch { return null }
+  }, [outlineFence])
+  const [outlineCardHidden, setOutlineCardHidden] = useState(false)
+  useEffect(() => { setOutlineCardHidden(false) }, [outlineFence, activeId])
+  const commitOutlineDraft = useCallback(async () => {
+    const ws = activeWs && activeWs !== '__none__' ? activeWs : ''
+    if (!ws || !outlineDraft) { showToast({ type: 'warning', message: '缺少工作区或大纲草稿' }); return }
+    const r = await aiTeachCourseWriteOutlineDraft(ws, outlineDraft).catch(() => null)
+    if (r?.ok) { showToast({ type: 'info', message: '已生成课程大纲' }); setOutlineCardHidden(true) }
+    else showToast({ type: 'error', message: `生成失败${r?.error ? `：${r.error}` : ''}` })
+  }, [activeWs, outlineDraft])
   /** 建议一变（或换会话）就重建勾选副本：默认全勾，层级回本主题，安静入口收起 */
   useEffect(() => {
     setProfRows(profileSuggestion?.mode === 'entries' ? profileSuggestion.entries.map((e) => ({ ...e, checked: true })) : [])
@@ -2991,6 +3026,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 onFinishUnit={(id, score) => void courseFinishUnit(id, score)}
                 onReopenUnit={(id) => void courseReopenUnit(id)}
                 onReload={() => void reloadCourse()}
+                onGoChat={() => setCourseView('chat')}
               />
             </div>
           ) : midView === 'quiz' ? (
@@ -3115,7 +3151,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       <div className="min-w-0">
                         {/* P8：```profile 建议块不直显；条目11/12：```plan / ```ask 协议块同样收敛（plan→侧栏、ask→提问卡） */}
                         <MarkdownPreview
-                          content={splitJumps(m.content).body.replace(/```(profile|plan|ask)[^\n]*\n[\s\S]*?```/g, '')}
+                          content={splitJumps(m.content).body.replace(/```(profile|plan|ask|outline)[^\n]*\n[\s\S]*?```/g, '')}
                           onQuizRetry={retryQuiz}
                         />
                         {/* L4 引用网络：跳转 chip（AI 输出 `跳转：<知识点名>` → 打开其总结篇） */}
@@ -3255,6 +3291,38 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 )}
               </div>
 
+              {/* 对话驱动建课：```outline 草稿卡 —— 满意才「正式生成」落 课程.md */}
+              {outlineDraft && !outlineCardHidden && (
+                <div className="shrink-0 w-full max-w-[820px] mx-auto px-3 pb-1.5 pt-1.5">
+                  <div className="kb-pop rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <BookOpen size={12} className="shrink-0 text-[var(--accent)]" />
+                      <span className="text-[12.5px] font-medium text-[var(--text-primary)]">课程大纲草稿</span>
+                      <span className="text-[10.5px] text-[var(--text-muted)]">对话内 · 未落盘</span>
+                    </div>
+                    <div className="mt-1.5 text-[12px] text-[var(--text-secondary)]">{outlineDraft.title || '课程大纲'}{outlineDraft.goal ? ` · ${outlineDraft.goal}` : ''}</div>
+                    <div className="mt-1.5 flex flex-col gap-1 max-h-[220px] overflow-auto">
+                      {(outlineDraft.chapters || []).map((c, i) => (
+                        <div key={i} className="rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5">
+                          <div className="text-[12px] font-medium text-[var(--text-primary)]">
+                            第{i + 1}章 {c.name || '（未命名）'}
+                            {(!c.units || !c.units.length) && <span className="ml-1.5 text-[10.5px] font-normal text-[var(--text-muted)]">🔒 未展开（学完上一章再展开）</span>}
+                          </div>
+                          {(c.units || []).map((u, k) => (
+                            <div key={k} className="mt-0.5 pl-3 text-[11.5px] text-[var(--text-secondary)]">· {u.name}</div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-2 flex justify-end gap-2">
+                      <button type="button" onClick={() => setOutlineCardHidden(true)}
+                        className="px-2.5 py-1 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">继续修改</button>
+                      <button type="button" onClick={() => void commitOutlineDraft()}
+                        className="px-3 py-1 rounded-md bg-[var(--accent)] text-white text-[11.5px] hover:bg-[var(--accent-hover)] transition-colors">正式生成</button>
+                    </div>
+                  </div>
+                </div>
+              )}
               {/* v3.2.0 第 20 项 · 安静入口：节流窗口内不再自动弹卡片，只留一行可点开的提示
                   （拍板口径：不打断心流但不错过 —— 点一下即展开完整卡片） */}
               {profQuiet && (

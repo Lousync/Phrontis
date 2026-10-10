@@ -197,7 +197,7 @@ check('大纲 prompt 排除导语/教学目标等元信息', main.includes('教�
 
 console.log('\n=== 6b. 课程助手（整门课唯一会话 · 顾问注入）===')
 check('主进程导出 openCourseAssistant 并使用 assistantSessionId', main.includes('export function openCourseAssistant') && main.includes('assistantSessionId'), '')
-check('顾问注入分支存在（课程顾问 / 只读约束 / 不逐点开讲）', main.includes('课程顾问') && main.includes('只读约束') && main.includes('不要逐知识点开讲'), '')
+  check('助手注入分支存在（教学助手 / 不逐点开讲 / 建课工具指引）', main.includes('教学助手') && main.includes('逐知识点开讲') && main.includes('course.outline.write'), '')
 check('顾问注入无大纲也可用（不提前 return）', main.includes('!hasOutline && !isAssistant'), '')
 check('渲染层第三档「课程助手」+ assist 视图 + 打开函数', mod.includes('课程助手') && mod.includes("courseView === 'assist'") && mod.includes('courseOpenAssistant'), '')
 
