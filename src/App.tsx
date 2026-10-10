@@ -43,7 +43,7 @@ import type { BlogJump } from './modules/blog'
 import type { SummaryKind } from './lib/summary'
 import { ScheduleModule } from './modules/schedule'
 import { AccountingModule } from './modules/accounting'
-import { ACCOUNTING_EDIT_EVENT, ACCOUNTING_NEW_EVENT } from './modules/accounting/shared'
+import { ACCOUNTING_EDIT_EVENT, ACCOUNTING_NEW_EVENT, ACCOUNTING_RECUR_NEW_EVENT, ACCOUNTING_RECUR_EDIT_EVENT } from './modules/accounting/shared'
 import { KnowledgeModule } from './modules/knowledge'
 import { MomentsModule } from './modules/moments'
 import { RecycleBinModule } from './modules/recycle'
@@ -604,22 +604,40 @@ export default function App() {
   /** 记账：中央「记一笔 / 编辑某笔」路由到右栏记账面板。同 pendingRightAsk —— 右栏折叠时整个卸载，
    *  故监听挂 App 层；'new' = 新建，其余 = 待编辑流水 id。展开右栏 + 切记账 Tab 由本层完成。 */
   const [pendingAccountingEdit, setPendingAccountingEdit] = useState<string | 'new' | null>(null)
+  /** 记账·定期收支：左栏「＋ 新增 / 编辑」路由到右栏记账面板的规则表单。同 pendingAccountingEdit——
+   *  右栏折叠时 AccountingPanel 整个卸载（收不到 window 事件），故由 App 存 state + 展开右栏后经 prop 投递。 */
+  const [pendingAccountingRule, setPendingAccountingRule] = useState<string | 'new' | null>(null)
   useEffect(() => {
+    const openAccountTab = () => update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'account', rightCollapsed: false }))
     const onEdit = (e: Event) => {
       const id = (e as CustomEvent<{ id?: string }>).detail?.id
       if (!id) return
       setPendingAccountingEdit(id)
-      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'account', rightCollapsed: false }))
+      openAccountTab()
     }
     const onNew = () => {
       setPendingAccountingEdit('new')
-      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'account', rightCollapsed: false }))
+      openAccountTab()
+    }
+    const onRecurNew = () => {
+      setPendingAccountingRule('new')
+      openAccountTab()
+    }
+    const onRecurEdit = (e: Event) => {
+      const id = (e as CustomEvent<{ id?: string }>).detail?.id
+      if (!id) return
+      setPendingAccountingRule(id)
+      openAccountTab()
     }
     window.addEventListener(ACCOUNTING_EDIT_EVENT, onEdit)
     window.addEventListener(ACCOUNTING_NEW_EVENT, onNew)
+    window.addEventListener(ACCOUNTING_RECUR_NEW_EVENT, onRecurNew)
+    window.addEventListener(ACCOUNTING_RECUR_EDIT_EVENT, onRecurEdit)
     return () => {
       window.removeEventListener(ACCOUNTING_EDIT_EVENT, onEdit)
       window.removeEventListener(ACCOUNTING_NEW_EVENT, onNew)
+      window.removeEventListener(ACCOUNTING_RECUR_NEW_EVENT, onRecurNew)
+      window.removeEventListener(ACCOUNTING_RECUR_EDIT_EVENT, onRecurEdit)
     }
   }, [wbLayout, update])
   useEffect(() => {
@@ -1543,6 +1561,8 @@ export default function App() {
                   accountingActive={activeTab === 'accounting'}
                   pendingAccountingEdit={pendingAccountingEdit}
                   onConsumeAccountingEdit={() => setPendingAccountingEdit(null)}
+                  pendingAccountingRule={pendingAccountingRule}
+                  onConsumeAccountingRule={() => setPendingAccountingRule(null)}
                   // B-26：划词「问 AI」路由过来的选段（宿主在 App，见上面的 rightAskRef 注释）
                   pendingAsk={pendingRightAsk}
                   onConsumePendingAsk={() => setPendingRightAsk(null)}

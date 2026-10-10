@@ -32,11 +32,14 @@ interface Props {
   /** v3.2.0 条目 ④：父组件持有的刷新计数（原始类型 prop，不破坏 memo）——自增即重扫已加载目录。
    *  两个来源共用它：外部文件系统变更广播、左栏头部的「刷新资源管理器」按钮 */
   refreshSeq?: number
+  /** 收藏（v3.6.0）：isPinned / onTogglePin 收**仓库相对路径**；文件右键菜单「钉到收藏 / 取消收藏」用 */
+  isPinned?: (rel: string) => boolean
+  onTogglePin?: (rel: string, name: string) => void
 }
 
 interface CtxState { x: number; y: number; node: TreeNode | null }
 
-function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenExternal, refreshSeq }: Props) {
+function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenExternal, refreshSeq, isPinned, onTogglePin }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [rootDir, setRootDir] = useState('AI教学')
   const [dirCache, setDirCache] = useState<DirCache>({})
@@ -198,6 +201,11 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
     items.push({ label: '复制（到剪贴板）', run: () => { setClip({ rel: node.relPath, name: node.name, isDir: node.type === 'dir' }); showToast({ type: 'info', message: `已复制「${node.name}」，到目标目录右键粘贴（仅文件）` }) } })
     items.push({ label: '创建副本', run: () => void doDuplicate(node.relPath, node.type === 'dir') })
     items.push({ label: '复制路径', run: () => { void navigator.clipboard.writeText(`${base}/${node.relPath}`).catch(() => null) } })
+    // 收藏（v3.6.0）：文件可钉到左栏顶部「收藏」（rel 用仓库相对路径）
+    if (node.type === 'file' && onTogglePin) {
+      const repoRel = `${base}/${node.relPath}`
+      items.push({ label: isPinned?.(repoRel) ? '取消收藏' : '★ 钉到收藏', run: () => onTogglePin(repoRel, node.name) })
+    }
     void dirRel
     items.push({ label: '删除（回收站）', run: () => void doDelete(node), danger: true })
     return items

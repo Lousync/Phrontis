@@ -4,6 +4,8 @@ export interface ToastMessage {
   message: string
   detail?: string   // help section id: 'shortcuts' | 'editor' | etc.
   duration?: number // ms, default 5000
+  /** 可选动作按钮（如「撤销」）；点击后自动关闭该 toast */
+  action?: { label: string; onClick: () => void }
 }
 
 export function showToast(msg: Omit<ToastMessage, 'id'> & { id?: string }): string {

@@ -1124,12 +1124,20 @@ function copyInto(srcAbs: string, dstDir: string): { name: string; error?: strin
  * 上收成功的条目从对话级 SOURCE.md 移除（合并视图里已由主库承载，留着会重复）；
  * 原件缺失等异常条目原地保留。未提取的 URL/引用条目只迁登记、零文件操作。
  */
-export function promoteSessionSources(sessionId: string, getSetting: (key: string) => unknown): SourcesResult & { promoted?: number } {
+export function promoteSessionSources(sessionId: string, getSetting: (key: string) => unknown, onlyNos?: number[]): SourcesResult & { promoted?: number } {
   try {
     const cl = layout(sessionId, getSetting, false, 'session')
     if ('error' in cl) return { ok: false, error: cl.error }
     const convEntries = readEntries(cl)
     if (convEntries.length === 0) return { ok: true, promoted: 0 }
+    // onlyNos（合并视图编号）→ 本层原始编号；不给=全部上收（原「一键上收」行为）。
+    // 粒度下放到单条：选中哪条收哪条，未选中的原样留在对话级。
+    let targetRawNos: Set<number> | null = null
+    if (Array.isArray(onlyNos) && onlyNos.length > 0) {
+      const m = readMerged(sessionId, getSetting)
+      targetRawNos = new Set(m.entries.filter(x => x.scope === 'session' && onlyNos.includes(x.no)).map(x => x.origNo))
+      if (targetRawNos.size === 0) return { ok: true, promoted: 0 }
+    }
     const ws = layout(sessionId, getSetting, true, 'workspace')
     if ('error' in ws) return { ok: false, error: ws.error }
     mkdirSync(ws.dirAbs, { recursive: true })
@@ -1137,7 +1145,9 @@ export function promoteSessionSources(sessionId: string, getSetting: (key: strin
     let no = wsEntries.reduce((m, e) => Math.max(m, e.no), 0)
     const promoted: SourceEntry[] = []
     const kept: SourceEntry[] = []
+    let failed = 0
     for (const e of convEntries) {
+      if (targetRawNos && !targetRawNos.has(e.no)) { kept.push(e); continue } // 未选中的条目原样留在对话级
       let path = e.path
       let extracted = e.extracted
       let ok = true
@@ -1172,7 +1182,7 @@ export function promoteSessionSources(sessionId: string, getSetting: (key: strin
         }
       }
       if (ok) promoted.push({ ...e, no: ++no, path, extracted })
-      else kept.push(e)
+      else { kept.push(e); failed++ }
     }
     if (promoted.length > 0) {
       const w = rewriteEntries(ws, [...wsEntries, ...promoted])
@@ -1190,7 +1200,7 @@ export function promoteSessionSources(sessionId: string, getSetting: (key: strin
     return {
       ok: true, promoted: promoted.length, relPath: ws.fileRel, entries: m.entries,
       workspaceRel: m.ws?.fileRel ?? null, sessionRel: m.conv?.fileRel ?? null,
-      ...(kept.length > 0 ? { error: `${kept.length} 条因文件异常留在对话级（可重试）` } : {}),
+      ...(failed > 0 ? { error: `${failed} 条因文件异常留在对话级（可重试）` } : {}),
     }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
@@ -1223,7 +1233,8 @@ export function registerAiTeachingSourceHandlers(getSetting: (key: string) => un
     webCrawlSource(String(sessionId ?? ''), Number(no), urls, getSetting))
   ipcMain.handle('aiTeachSrc:webCancel', (_e, sessionId: string) => webCrawlCancel(String(sessionId ?? '')))
   // 存量上收：对话级登记（含原件/提取稿复制）迁入工作区主库
-  ipcMain.handle('aiTeachSrc:promote', (_e, sessionId: string) => promoteSessionSources(String(sessionId ?? ''), getSetting))
+  ipcMain.handle('aiTeachSrc:promote', (_e, sessionId: string, nos?: number[]) =>
+    promoteSessionSources(String(sessionId ?? ''), getSetting, Array.isArray(nos) ? nos.map(Number).filter(Number.isFinite) : undefined))
   // 入库浏览：系统文件选择器（表单「已入库」用；返回绝对路径给 add 拷贝）
   ipcMain.handle('aiTeachSrc:pick', async () => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null

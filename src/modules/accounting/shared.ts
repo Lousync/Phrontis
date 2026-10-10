@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { accountingGetAll } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
-import { sumAmount, computeAccountBalances, type AccountBalance } from '../../lib/accountingPure'
-import type { AccountingTransaction, AccountingCategory, AccountingAccount } from '../../types'
+import { sumAmount, computeAccountBalances, recurringNextDue, recurringStatus, recurringMonthlyTotal, type AccountBalance } from '../../lib/accountingPure'
+import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingRecurring } from '../../types'
 
 // 金额求和与账户余额口径下沉到零依赖纯函数（供契约脚本 import），此处再导出保持既有引用不变
-export { sumAmount, computeAccountBalances }
+export { sumAmount, computeAccountBalances, recurringNextDue, recurringStatus, recurringMonthlyTotal }
 export type { AccountBalance }
 
 /**
@@ -58,25 +58,38 @@ export function requestNewTransaction(): void {
   window.dispatchEvent(new CustomEvent(ACCOUNTING_NEW_EVENT))
 }
 
+// ===== 定期收支：左栏「新增 / 编辑规则」→ 右栏面板规则表单 =====
+export const ACCOUNTING_RECUR_NEW_EVENT = 'kb-accounting-new-recurring'
+export const ACCOUNTING_RECUR_EDIT_EVENT = 'kb-accounting-edit-recurring'
+export function requestNewRecurring(): void {
+  window.dispatchEvent(new CustomEvent(ACCOUNTING_RECUR_NEW_EVENT))
+}
+export function requestEditRecurring(id: string): void {
+  window.dispatchEvent(new CustomEvent(ACCOUNTING_RECUR_EDIT_EVENT, { detail: { id } }))
+}
+
 // ===== 数据加载 =====
 export function useAccountingData(): {
   transactions: AccountingTransaction[]
   categories: AccountingCategory[]
   accounts: AccountingAccount[]
+  recurring: AccountingRecurring[]
   reload: () => Promise<void>
 } {
   const [transactions, setTransactions] = useState<AccountingTransaction[]>([])
   const [categories, setCategories] = useState<AccountingCategory[]>([])
   const [accounts, setAccounts] = useState<AccountingAccount[]>([])
+  const [recurring, setRecurring] = useState<AccountingRecurring[]>([])
   const reload = useCallback(async (): Promise<void> => {
     try {
       const res = await accountingGetAll()
       setTransactions(res?.transactions ?? [])
       setCategories(res?.categories ?? [])
       setAccounts(res?.accounts ?? [])
+      setRecurring(res?.recurring ?? [])
     } catch { /* 仓库未打开时静默 */ }
   }, [])
   useEffect(() => { void reload() }, [reload])
   useDataChanged('accounting', () => { void reload() })
-  return { transactions, categories, accounts, reload }
+  return { transactions, categories, accounts, recurring, reload }
 }

@@ -68,8 +68,60 @@ export interface AccountingTransaction {
   merchant: string
   note: string
   source?: string
+  /** 定期收支生成的流水：所属规则 id（去重键的一部分） */
+  recurringId?: string
+  /** 定期收支生成的流水：本次应扣日 YYYY-MM-DD（去重键 = recurringId + recurringDue） */
+  recurringDue?: string
   createdAt: string
   updatedAt: string
+}
+/** 定期收支周期：每月几号 / 每 N 天 */
+export type AccountingRecurringMode = 'monthly' | 'interval'
+/**
+ * 定期收支规则。真相源 `.knowbase/modules/accounting/recurring.json`。
+ * monthly：用 day；interval：用 intervalDays。lastPostedDate 为「上次扣费日」（幂等 + 追赶起点）。
+ */
+export interface AccountingRecurring {
+  id: string
+  name: string
+  type: AccountingType
+  amount: number
+  category: string
+  payment: string
+  merchant: string
+  note: string
+  mode: AccountingRecurringMode
+  day: number | null
+  intervalDays: number | null
+  lastPostedDate: string
+  endDate: string
+  enabled: boolean
+  autoPost: boolean
+  createdAt: string
+  updatedAt: string
+}
+export interface CreateAccountingRecurringInput {
+  name: string
+  type: AccountingType
+  amount: number
+  category?: string
+  payment?: string
+  merchant?: string
+  note?: string
+  mode: AccountingRecurringMode
+  day?: number | null
+  intervalDays?: number | null
+  /** 上次扣费日（建规则时填，决定下次与补记起点） */
+  lastPostedDate: string
+  endDate?: string
+  enabled?: boolean
+  autoPost?: boolean
+}
+/** 结算结果：本次自动记入的流水（撤销时按 id 删除） */
+export interface AccountingRecurringSettleResult {
+  added: number
+  total: number
+  items: Array<{ id: string; ruleId: string; name: string; amount: number; due: string }>
 }
 export interface CreateAccountingInput {
   date?: string
@@ -1165,6 +1217,13 @@ export interface AiTeachSourcesResult {
   error?: string
 }
 
+/** AI教学·左栏「收藏」：钉住的文档（rel = 仓库相对路径；按工作区分组，存 .knowbase/modules/aiTeaching/favorites.json） */
+export interface AiTeachFavorite {
+  rel: string
+  name: string
+  addedAt: string
+}
+
 /** 网页素材目录展开：章节条目（probe 返回，渲染层勾选） */
 export interface WebCrawlChapter {
   no: number
@@ -2082,11 +2141,16 @@ export interface ElectronAPI {
   petReset: (species: PetSpecies) => Promise<PetSnapshot>
   petSwitchSpecies: (species: PetSpecies) => Promise<PetSnapshot>
   // 记账（accounting）
-  accountingGetAll: () => Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[] }>
+  accountingGetAll: () => Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[]; recurring: AccountingRecurring[] }>
   accountingParseJson: (text: string) => Promise<AccountingParseOutcome>
   accountingImportJson: (text: string) => Promise<AccountingImportOutcome>
   accountingCreate: (input: CreateAccountingInput) => Promise<AccountingTransaction>
   accountingUpdate: (id: string, patch: Partial<AccountingTransaction>) => Promise<AccountingTransaction | null>
+  accountingRecurringCreate: (input: CreateAccountingRecurringInput) => Promise<AccountingRecurring>
+  accountingRecurringUpdate: (id: string, patch: Partial<AccountingRecurring>) => Promise<AccountingRecurring | null>
+  accountingRecurringDelete: (id: string) => Promise<boolean>
+  accountingRecurringPost: (id: string) => Promise<{ ok: boolean; error?: string; due?: string }>
+  accountingRecurringSettle: () => Promise<AccountingRecurringSettleResult>
   accountingDelete: (id: string) => Promise<boolean>
   accountingSetAccountBalance: (id: string, initialBalance: number) => Promise<AccountingAccount | null>
   accountingCreateAccount: (name: string, initialBalance: number) => Promise<AccountingAccount>
@@ -2333,8 +2397,12 @@ export interface ElectronAPI {
   aiTeachSrcWebProbe: (id: string, no: number, anchorUrl?: string) => Promise<WebProbeResult>
   aiTeachSrcWebCrawl: (id: string, no: number, urls: string[]) => Promise<WebCrawlResult>
   aiTeachSrcWebCancel: (id: string) => Promise<{ ok: boolean; error?: string }>
-  /** v3.1.1：把对话级登记（含原件/提取稿复制）上收到工作区主库 */
-  aiTeachSrcPromote: (id: string) => Promise<AiTeachSourcesResult>
+  /** v3.1.1：把对话级登记（含原件/提取稿复制）上收到工作区主库；nos 给了=只上收这些合并编号的条目（粒度下放到单条） */
+  aiTeachSrcPromote: (id: string, nos?: number[]) => Promise<AiTeachSourcesResult>
+  /** AI教学·左栏「收藏」：按工作区列出 / 钉住 / 取消（rel = 仓库相对路径） */
+  aiTeachFavList: (wsId: string) => Promise<AiTeachFavorite[]>
+  aiTeachFavAdd: (wsId: string, rel: string, name: string) => Promise<AiTeachFavorite[]>
+  aiTeachFavRemove: (wsId: string, rel: string) => Promise<AiTeachFavorite[]>
   aiTeachProfileReadGlobal: () => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>
   aiTeachProfileWriteGlobal: (text: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachProfileReadSession: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>

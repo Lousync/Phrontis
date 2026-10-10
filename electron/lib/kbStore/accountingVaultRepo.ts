@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { exists, readJson, writeJsonOrThrow } from './jsonStore'
+import { planRecurringSettle, recurringNextDue, monthDue } from '../../../src/lib/accountingPure'
 
 /**
  * 记账 vault 数据仓库（v3.5.x 新模块）。
@@ -31,8 +32,12 @@ export interface TransactionRow {
   toPayment?: string
   merchant: string
   note: string
-  /** manual | phone-json | ai */
+  /** manual | phone-json | ai | recurring */
   source: string
+  /** 定期收支生成的流水：所属规则 id */
+  recurringId?: string
+  /** 定期收支生成的流水：本次应扣日 YYYY-MM-DD（去重键 = recurringId + recurringDue） */
+  recurringDue?: string
   createdAt: string
   updatedAt: string
 }
@@ -451,4 +456,201 @@ export function vaultAccountingPeriodStats(start: string, end: string): { income
     else if (t.type === 'expense') expense += t.amount  // 转账不计收支
   }
   return { income: Math.round(income * 100) / 100, expense: Math.round(expense * 100) / 100 }
+}
+
+// ===== 定期收支（recurring） =====
+// 存储：.knowbase/modules/accounting/recurring.json；生成的流水 = 普通 TransactionRow + recurringId/recurringDue。
+// 结算计划走零依赖纯函数 planRecurringSettle（src/lib/accountingPure.ts，渲染层/契约共用）。
+
+const RECUR_FILE = 'recurring.json'
+
+/** 定期收支规则（与渲染层 src/types AccountingRecurring 同形状，跨线各声明一次） */
+export interface RecurringRow {
+  id: string
+  name: string
+  type: AccountingType
+  amount: number
+  category: string
+  payment: string
+  merchant: string
+  note: string
+  /** monthly：每月 day 号；interval：每 intervalDays 天 */
+  mode: 'monthly' | 'interval'
+  day: number | null
+  intervalDays: number | null
+  /** 上次扣费日 YYYY-MM-DD（幂等去重 + 追赶起点） */
+  lastPostedDate: string
+  /** 到期日 YYYY-MM-DD（空 = 不过期） */
+  endDate: string
+  enabled: boolean
+  autoPost: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export function vaultAccountingRecurringAll(): RecurringRow[] {
+  const rows = readJson<unknown>(MOD, RECUR_FILE, [])
+  return Array.isArray(rows) ? (rows as RecurringRow[]) : []
+}
+
+function saveRecurring(rows: RecurringRow[]): void {
+  writeJsonOrThrow(MOD, RECUR_FILE, rows)
+}
+
+function clampInt(v: unknown, lo: number, hi: number, fallback: number): number {
+  const n = Math.round(Number(v))
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(lo, Math.min(hi, n))
+}
+
+function isDate(s: unknown): boolean { return /^\d{4}-\d{2}-\d{2}$/.test(String(s)) }
+
+export interface CreateRecurringInput {
+  name: string
+  type: AccountingType
+  amount: number
+  category?: string
+  payment?: string
+  merchant?: string
+  note?: string
+  mode: 'monthly' | 'interval'
+  day?: number | null
+  intervalDays?: number | null
+  lastPostedDate: string
+  endDate?: string
+  enabled?: boolean
+  autoPost?: boolean
+}
+
+export function vaultAccountingCreateRecurring(input: CreateRecurringInput): RecurringRow {
+  const name = String(input.name || '').trim()
+  if (!name) throw new Error('名称不能为空')
+  const amount = normalizeAmount(input.amount)
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('金额必须大于 0')
+  const type: AccountingType = input.type === 'income' ? 'income' : 'expense'
+  const mode = input.mode === 'interval' ? 'interval' : 'monthly'
+  const now = new Date().toISOString()
+  const row: RecurringRow = {
+    id: randomUUID(), name, type, amount,
+    category: vaultAccountingResolveOrCreateCategory(input.category || '其他', type),
+    payment: vaultAccountingResolveOrCreateAccount(input.payment || ''),
+    merchant: String(input.merchant || '').trim(), note: String(input.note || '').trim(),
+    mode,
+    day: mode === 'monthly' ? clampInt(input.day, 1, 31, 1) : null,
+    intervalDays: mode === 'interval' ? clampInt(input.intervalDays, 1, 3660, 30) : null,
+    lastPostedDate: isDate(input.lastPostedDate) ? String(input.lastPostedDate) : todayLocal(),
+    endDate: isDate(input.endDate) ? String(input.endDate) : '',
+    enabled: input.enabled !== false, autoPost: input.autoPost !== false,
+    createdAt: now, updatedAt: now,
+  }
+  saveRecurring([...vaultAccountingRecurringAll(), row])
+  return row
+}
+
+export function vaultAccountingUpdateRecurring(id: string, patch: Partial<RecurringRow>): RecurringRow | null {
+  const rows = vaultAccountingRecurringAll()
+  const idx = rows.findIndex((r) => r.id === id)
+  if (idx < 0) return null
+  const cur = rows[idx]
+  const next: RecurringRow = { ...cur }
+  if (typeof patch.name === 'string' && patch.name.trim()) next.name = patch.name.trim()
+  if (patch.type === 'expense' || patch.type === 'income') next.type = patch.type
+  if (patch.amount !== undefined) {
+    const a = normalizeAmount(patch.amount)
+    if (!Number.isFinite(a) || a <= 0) throw new Error('金额必须大于 0')
+    next.amount = a
+  }
+  const kind: AccountingType = next.type === 'income' ? 'income' : 'expense'
+  if (typeof patch.category === 'string') next.category = vaultAccountingResolveOrCreateCategory(patch.category || '其他', kind)
+  if (typeof patch.payment === 'string') next.payment = vaultAccountingResolveOrCreateAccount(patch.payment)
+  if (typeof patch.merchant === 'string') next.merchant = patch.merchant.trim()
+  if (typeof patch.note === 'string') next.note = patch.note.trim()
+  if (patch.mode === 'monthly' || patch.mode === 'interval') next.mode = patch.mode
+  if (next.mode === 'monthly') {
+    if (patch.day !== undefined) next.day = clampInt(patch.day, 1, 31, 1)
+    next.intervalDays = null
+  } else {
+    if (patch.intervalDays !== undefined) next.intervalDays = clampInt(patch.intervalDays, 1, 3660, 30)
+    next.day = null
+  }
+  if (isDate(patch.lastPostedDate)) next.lastPostedDate = String(patch.lastPostedDate)
+  if (typeof patch.endDate === 'string') next.endDate = isDate(patch.endDate) ? patch.endDate : ''
+  if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled
+  if (typeof patch.autoPost === 'boolean') next.autoPost = patch.autoPost
+  next.updatedAt = new Date().toISOString()
+  rows[idx] = next
+  saveRecurring(rows)
+  return next
+}
+
+export function vaultAccountingDeleteRecurring(id: string): boolean {
+  const rows = vaultAccountingRecurringAll()
+  const next = rows.filter((r) => r.id !== id)
+  if (next.length === rows.length) return false
+  saveRecurring(next)
+  return true
+}
+
+export interface RecurringSettleResult {
+  added: number
+  total: number
+  items: Array<{ id: string; ruleId: string; name: string; amount: number; due: string }>
+}
+
+/** 结算（幂等，写盘）：把「应记但没记」的应扣日补成普通流水，并推进各规则 lastPostedDate */
+export function vaultAccountingSettleRecurring(today = todayLocal()): RecurringSettleResult {
+  const rules = vaultAccountingRecurringAll()
+  const txs = vaultAccountingTransactionsAll()
+  const plan = planRecurringSettle(rules, txs, today)
+  if (plan.length === 0) return { added: 0, total: 0, items: [] }
+  const now = new Date().toISOString()
+  const ruleMap = new Map(rules.map((r) => [r.id, r]))
+  const added: TransactionRow[] = []
+  const items: RecurringSettleResult['items'] = []
+  for (const p of plan) {
+    const r = ruleMap.get(p.ruleId)
+    if (!r) continue
+    const tx: TransactionRow = {
+      id: randomUUID(), date: p.due, time: '', type: r.type, amount: r.amount,
+      category: vaultAccountingResolveOrCreateCategory(r.category || '其他', r.type),
+      payment: vaultAccountingResolveOrCreateAccount(r.payment),
+      merchant: r.merchant, note: r.note || '定期收支自动记入', source: 'recurring',
+      recurringId: r.id, recurringDue: p.due, createdAt: now, updatedAt: now,
+    }
+    added.push(tx)
+    items.push({ id: tx.id, ruleId: r.id, name: r.name, amount: r.amount, due: p.due })
+  }
+  if (added.length === 0) return { added: 0, total: 0, items: [] }
+  vaultAccountingTransactionsSave([...txs, ...added])
+  const nextRules = rules.map((r) => {
+    const dues = plan.filter((p) => p.ruleId === r.id).map((p) => p.due).sort()
+    if (dues.length === 0) return r
+    return { ...r, lastPostedDate: dues[dues.length - 1], updatedAt: now }
+  })
+  saveRecurring(nextRules)
+  const total = Math.round(added.filter((t) => t.type === 'expense').reduce((a, b) => a + b.amount, 0) * 100) / 100
+  return { added: added.length, total, items }
+}
+
+/** 手动记入当前周期（左栏「记入」按钮）：本月应扣日 / 下次应扣日，且必须 ≤ 今天 */
+export function vaultAccountingPostRecurring(id: string, today = todayLocal()): { ok: boolean; error?: string; due?: string } {
+  const rules = vaultAccountingRecurringAll()
+  const r = rules.find((x) => x.id === id)
+  if (!r) return { ok: false, error: '规则不存在' }
+  const t = new Date(`${today}T00:00:00`)
+  const due = r.mode === 'monthly' ? monthDue(t.getFullYear(), t.getMonth() + 1, r.day || 1) : recurringNextDue(r)
+  if (due > today) return { ok: false, error: '还没到扣费日' }
+  const txs = vaultAccountingTransactionsAll()
+  if (txs.some((x) => x.recurringId === r.id && x.recurringDue === due)) return { ok: false, error: '该周期已记入' }
+  const now = new Date().toISOString()
+  const tx: TransactionRow = {
+    id: randomUUID(), date: due, time: '', type: r.type, amount: r.amount,
+    category: vaultAccountingResolveOrCreateCategory(r.category || '其他', r.type),
+    payment: vaultAccountingResolveOrCreateAccount(r.payment),
+    merchant: r.merchant, note: r.note || '定期收支手动记入', source: 'recurring',
+    recurringId: r.id, recurringDue: due, createdAt: now, updatedAt: now,
+  }
+  vaultAccountingTransactionsSave([...txs, tx])
+  if (due > r.lastPostedDate) saveRecurring(rules.map((x) => (x.id === r.id ? { ...x, lastPostedDate: due, updatedAt: now } : x)))
+  return { ok: true, due }
 }

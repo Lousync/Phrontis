@@ -4,7 +4,9 @@ import {
   vaultAccountingParseJson, vaultAccountingImport,
   vaultAccountingCreate, vaultAccountingUpdate, vaultAccountingDelete,
   vaultAccountingSetAccountBalance, vaultAccountingCreateAccount,
-  type CreateTransactionInput, type TransactionRow,
+  vaultAccountingRecurringAll, vaultAccountingCreateRecurring, vaultAccountingUpdateRecurring,
+  vaultAccountingDeleteRecurring, vaultAccountingSettleRecurring, vaultAccountingPostRecurring,
+  type CreateTransactionInput, type TransactionRow, type CreateRecurringInput, type RecurringRow,
 } from '../../lib/kbStore/accountingVaultRepo'
 import { broadcastDataChanged } from '../../main/windowBus'
 
@@ -20,7 +22,39 @@ export function registerAccountingHandlers(): void {
     transactions: vaultAccountingTransactionsAll(),
     categories: vaultAccountingCategoriesAll(),
     accounts: vaultAccountingAccountsAll(),
+    recurring: vaultAccountingRecurringAll(),
   }))
+
+  // ----- 定期收支（recurring）-----
+  ipcMain.handle('accounting:recurringCreate', (_e, input: CreateRecurringInput) => {
+    const row = vaultAccountingCreateRecurring(input)
+    broadcastDataChanged('accounting')
+    return row
+  })
+
+  ipcMain.handle('accounting:recurringUpdate', (_e, id: string, patch: Partial<RecurringRow>) => {
+    const row = vaultAccountingUpdateRecurring(id, patch)
+    if (row) broadcastDataChanged('accounting')
+    return row
+  })
+
+  ipcMain.handle('accounting:recurringDelete', (_e, id: string) => {
+    const ok = vaultAccountingDeleteRecurring(id)
+    if (ok) broadcastDataChanged('accounting')
+    return ok
+  })
+
+  ipcMain.handle('accounting:recurringPost', (_e, id: string) => {
+    const res = vaultAccountingPostRecurring(id)
+    if (res.ok) broadcastDataChanged('accounting')
+    return res
+  })
+
+  ipcMain.handle('accounting:recurringSettle', () => {
+    const res = vaultAccountingSettleRecurring()
+    if (res.added > 0) broadcastDataChanged('accounting')
+    return res
+  })
 
   ipcMain.handle('accounting:setAccountBalance', (_e, id: string, initialBalance: number) => {
     const row = vaultAccountingSetAccountBalance(id, initialBalance)

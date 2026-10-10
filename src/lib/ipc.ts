@@ -1,7 +1,7 @@
-import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitPeriodStat, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, LlmUsageBreakdownEntry, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentRunStateEvent, AgentSessionInfo, AgentSessionSource, AgentSideLaneCreateResult, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, AiUsageDay, SessionFileChange, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginDashboardWidget, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, AiTeachProfileEntry, AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnitProgress, AiTeachCourseGenerateInput, AiTeachCourseGenProgress, AiTeachCourseReviseInput, AiTeachOutlineAdditions, CreatePasswordEntryDTO, UpdatePasswordEntryDTO, PdfBookState, PdfBookPatch, BookListItem, ReaderBookState, ReaderStatePatch, ExcerptItem, ExcerptCreatePayload, ExcerptPatch, ExcerptExportEntry, WorkspaceRangeBytesResult, BookSourceInfo, BookSourcePatch, BookSourceCredentialInput, BookSourceConnectivity, BookMarketSearchResponse, BookDownloadRequest, BookDownloadStartResult, BookDownloadTask, BookDownloadAction, PetSpecies, PluginPetInfo, TerminalSessionInfo, TerminalCreateResult, TerminalShellInfo, TerminalAiRecord } from '../types'
+import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitPeriodStat, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, LlmUsageBreakdownEntry, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentRunStateEvent, AgentSessionInfo, AgentSessionSource, AgentSideLaneCreateResult, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, AiUsageDay, SessionFileChange, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginDashboardWidget, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, AiTeachProfileEntry, AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnitProgress, AiTeachCourseGenerateInput, AiTeachCourseGenProgress, AiTeachCourseReviseInput, AiTeachOutlineAdditions, CreatePasswordEntryDTO, UpdatePasswordEntryDTO, PdfBookState, PdfBookPatch, BookListItem, ReaderBookState, ReaderStatePatch, ExcerptItem, ExcerptCreatePayload, ExcerptPatch, ExcerptExportEntry, WorkspaceRangeBytesResult, BookSourceInfo, AiTeachFavorite, BookSourcePatch, BookSourceCredentialInput, BookSourceConnectivity, BookMarketSearchResponse, BookDownloadRequest, BookDownloadStartResult, BookDownloadTask, BookDownloadAction, PetSpecies, PluginPetInfo, TerminalSessionInfo, TerminalCreateResult, TerminalShellInfo, TerminalAiRecord } from '../types'
 import type { SettingsKey, SettingsValue, AppSettings } from './settings'
 import { SETTINGS_DEFAULTS } from './settings'
-import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingParseOutcome, AccountingImportOutcome, CreateAccountingInput } from '../types'
+import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingRecurring, AccountingParseOutcome, AccountingImportOutcome, CreateAccountingInput, CreateAccountingRecurringInput, AccountingRecurringSettleResult } from '../types'
 const a = () => { if (!window.api) throw new Error('Electron API not available.'); return window.api }
 
 export const getPathForFile = (file: File): string => a().getPathForFile(file)
@@ -482,7 +482,7 @@ export interface PeriodStats {
 export const getBlogPeriodStats = (start: string, end: string): Promise<PeriodStats> => a().getBlogPeriodStats(start, end)
 
 // ===== 记账（accounting） =====
-export const accountingGetAll = (): Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[] }> => a().accountingGetAll()
+export const accountingGetAll = (): Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[]; recurring: AccountingRecurring[] }> => a().accountingGetAll()
 export const accountingParseJson = (text: string): Promise<AccountingParseOutcome> => a().accountingParseJson(text)
 export const accountingImportJson = (text: string): Promise<AccountingImportOutcome> => a().accountingImportJson(text)
 export const accountingCreate = (input: CreateAccountingInput): Promise<AccountingTransaction> => a().accountingCreate(input)
@@ -490,6 +490,11 @@ export const accountingUpdate = (id: string, patch: Partial<AccountingTransactio
 export const accountingDelete = (id: string): Promise<boolean> => a().accountingDelete(id)
 export const accountingSetAccountBalance = (id: string, initialBalance: number): Promise<AccountingAccount | null> => a().accountingSetAccountBalance(id, initialBalance)
 export const accountingCreateAccount = (name: string, initialBalance: number): Promise<AccountingAccount> => a().accountingCreateAccount(name, initialBalance)
+export const accountingRecurringCreate = (input: CreateAccountingRecurringInput): Promise<AccountingRecurring> => a().accountingRecurringCreate(input)
+export const accountingRecurringUpdate = (id: string, patch: Partial<AccountingRecurring>): Promise<AccountingRecurring | null> => a().accountingRecurringUpdate(id, patch)
+export const accountingRecurringDelete = (id: string): Promise<boolean> => a().accountingRecurringDelete(id)
+export const accountingRecurringPost = (id: string): Promise<{ ok: boolean; error?: string; due?: string }> => a().accountingRecurringPost(id)
+export const accountingRecurringSettle = (): Promise<AccountingRecurringSettleResult> => a().accountingRecurringSettle()
 
 // ===== 层级总结文件（周 / 月 / 年）—— 窗口口径见 lib/summary.ts =====
 export const listSummaries = () => a().listSummaries()
@@ -694,7 +699,10 @@ export const aiTeachSrcWebProbe = (id: string, no: number, anchorUrl?: string) =
 export const aiTeachSrcWebCrawl = (id: string, no: number, urls: string[]) => a().aiTeachSrcWebCrawl(id, no, urls)
 export const aiTeachSrcWebCancel = (id: string) => a().aiTeachSrcWebCancel(id)
 /** v3.1.1：对话级登记上收到工作区主库（原件/提取稿一并复制，对话夹保留） */
-export const aiTeachSrcPromote = (id: string) => a().aiTeachSrcPromote(id)
+export const aiTeachSrcPromote = (id: string, nos?: number[]) => a().aiTeachSrcPromote(id, nos)
+export const aiTeachFavList = (wsId: string): Promise<AiTeachFavorite[]> => a().aiTeachFavList(wsId)
+export const aiTeachFavAdd = (wsId: string, rel: string, name: string): Promise<AiTeachFavorite[]> => a().aiTeachFavAdd(wsId, rel, name)
+export const aiTeachFavRemove = (wsId: string, rel: string): Promise<AiTeachFavorite[]> => a().aiTeachFavRemove(wsId, rel)
 export const onAiTeachWebProgress = (cb: (p: { sessionId: string; no: number; done: number; total: number; current: string }) => void) => window.api.onAiTeachWebProgress(cb)
 // P8 用户画像（§3.14 两层 PROFILE.md）；UI 优化条目8.2.2 加工作区第三层（全局/工作区/会话）
 export const aiTeachProfileReadGlobal = () => a().aiTeachProfileReadGlobal()

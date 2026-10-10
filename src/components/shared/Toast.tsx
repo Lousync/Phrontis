@@ -133,8 +133,16 @@ function ToastItem({ toast: t, closing = false, onDismiss }: { toast: ActiveToas
         <div className="flex-1 min-w-0">
           <p className="text-[13px] text-[var(--text-primary)] leading-relaxed">{t.message}</p>
 
-          {(t.detail || t.type === 'error') && (
+          {(t.detail || t.type === 'error' || t.action) && (
             <div className="flex items-center gap-2 mt-2">
+              {t.action && (
+                <button
+                  onClick={() => { t.action!.onClick(); onDismiss(t.id) }}
+                  className="text-[11px] font-medium text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                >
+                  {t.action.label}
+                </button>
+              )}
               {t.detail && (
                 <button
                   onClick={handleDetail}

@@ -68,6 +68,7 @@ import { registerAiTeachingWorkspaceHandlers } from '../lib/aiTeachingWorkspaces
 import { registerAiTeachingSourceHandlers } from '../lib/aiTeachingSources'
 import { registerAiTeachingProfileHandlers } from '../lib/aiTeachingProfile'
 import { registerAiTeachingCourseHandlers } from '../lib/aiTeachingCourse'
+import { registerAiTeachingFavoriteHandlers } from '../lib/aiTeachingFavorites'
 import { registerTranslateHandlers } from '../lib/translateService'
 import { registerPdfHandlers } from '../lib/pdfService'
 import { registerDocsReadHandlers } from '../lib/docsIpc'
@@ -1023,6 +1024,8 @@ app.whenReady().then(async () => {
     registerAiTeachingProfileHandlers((key) => settingsCache[key])
     // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲；docs/ai-teaching-course-mode-plan.md）
     registerAiTeachingCourseHandlers((key) => settingsCache[key])
+    // AI教学·左栏「收藏」（favorites.json：钉住活文档随手翻）
+    registerAiTeachingFavoriteHandlers((key) => settingsCache[key])
     // 划词翻译:离线词典 + LLM 翻译/AI 精讲
     registerTranslateHandlers()
     // PDF 工具箱:合并/页面重组/导出

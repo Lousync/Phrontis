@@ -75,8 +75,9 @@ export function FlowView({ transactions, categories, onEdit, onDelete }: {
                     ? <span className="flex h-2.5 w-2.5 shrink-0 items-center justify-center text-[12px] leading-none text-[var(--text-muted)]">↔</span>
                     : <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: catColor(categories, t.category) }} />}
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] text-[var(--text-primary)]">
-                      {isTransfer ? `${t.payment || '—'} → ${t.toPayment || '—'}` : (t.merchant || t.category || '未分类')}
+                    <div className="flex items-center gap-1.5 text-[13px] text-[var(--text-primary)]">
+                      <span className="truncate">{isTransfer ? `${t.payment || '—'} → ${t.toPayment || '—'}` : (t.merchant || t.category || '未分类')}</span>
+                      {t.recurringId && <span className="shrink-0 rounded bg-[var(--accent)]/12 px-1 text-[9.5px] leading-[15px] text-[var(--accent)]">🔁 定期</span>}
                     </div>
                     <div className="mt-0.5 truncate text-[11px] text-[var(--text-muted)]">
                       {isTransfer

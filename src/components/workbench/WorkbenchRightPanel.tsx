@@ -94,6 +94,9 @@ interface Props {
   /** 记账：中央「记一笔 / 编辑某笔」投递（App 层监听，见 App 的 pendingAccountingEdit）；'new' 或流水 id */
   pendingAccountingEdit?: string | 'new' | null
   onConsumeAccountingEdit?: () => void
+  /** 记账·定期收支：左栏「＋ 新增 / 编辑」投递到规则表单（'new' 或规则 id）；同 pendingAccountingEdit */
+  pendingAccountingRule?: string | 'new' | null
+  onConsumeAccountingRule?: () => void
   /** 阅读侧栏「书签 → 定位原文」（仅 pdf）：App 负责切回书架标签 + 派发跳页事件 */
   onLocatePdfPage?: (page: number) => void
   /** 阅读侧栏「摘录 → 定位原文」（pdf 跳页 / txt 跳段）：App 统一切回书架标签再派发 */
@@ -128,7 +131,7 @@ function PanelTabIcon({ id, size }: { id: string; size: number }) {
 const PANEL_TAB_TITLE: Record<string, string> = { widgets: '小工具', ai: 'AI', share: '分享' }
 const PANEL_TAB_LABEL: Record<string, string> = { widgets: '小工具', ai: 'AI 对话 / 面板', share: '分享卡片' }
 
-export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, accountingActive = false, pendingAccountingEdit = null, onConsumeAccountingEdit, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, accountingActive = false, pendingAccountingEdit = null, onConsumeAccountingEdit, pendingAccountingRule = null, onConsumeAccountingRule, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -451,7 +454,8 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
           <ReadingSidePanel reading={reading} onLocatePdfPage={onLocatePdfPage} onLocateExcerpt={onLocateExcerpt} />
         ) : effectiveTab === 'account' ? (
           /* ---- 记账态（记账模块激活时）：记一笔表单 + 手机 AI JSON 导入 ---- */
-          <AccountingPanel pendingEdit={pendingAccountingEdit} onConsumeEdit={onConsumeAccountingEdit} />
+          <AccountingPanel pendingEdit={pendingAccountingEdit} onConsumeEdit={onConsumeAccountingEdit}
+            pendingRule={pendingAccountingRule} onConsumeRule={onConsumeAccountingRule} />
         ) : (
           /* ---- AI 态（批次5，方案 §4）：aiChat 标签开着 → token 面板原位替换；否则小对话 + ⤢ ---- */
           aiChatOpen && onOpenChangeFile ? (
