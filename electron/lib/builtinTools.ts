@@ -1150,7 +1150,7 @@ export function registerBuiltinTools(): void {
       properties: {
         start: { type: 'string', description: '开始日期 YYYY-MM-DD，可省略' },
         end: { type: 'string', description: '结束日期 YYYY-MM-DD，可省略' },
-        type: { type: 'string', description: '筛类型：expense 支出 / income 收入，省略为全部', enum: ['expense', 'income'] },
+        type: { type: 'string', description: '筛类型：expense 支出 / income 收入 / transfer 转账，省略为全部', enum: ['expense', 'income', 'transfer'] },
         category: { type: 'string', description: '按分类名精确筛，可省略' },
       },
     },
@@ -1160,7 +1160,7 @@ export function registerBuiltinTools(): void {
     tier: 'ondemand',
     module: 'accounting',
   }, args => {
-    const type = args.type === 'income' ? 'income' as const : args.type === 'expense' ? 'expense' as const : undefined
+    const type = args.type === 'income' ? 'income' as const : args.type === 'expense' ? 'expense' as const : args.type === 'transfer' ? 'transfer' as const : undefined
     const start = /^\d{4}-\d{2}-\d{2}$/.test(str(args.start)) ? str(args.start) : undefined
     const end = /^\d{4}-\d{2}-\d{2}$/.test(str(args.end)) ? str(args.end) : undefined
     const category = str(args.category).trim() || undefined
@@ -1177,7 +1177,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.accounting.balances',
     title: '查询账户余额',
-    description: '查询记账各账户与总额的当前余额（余额=初始+累计收入-累计支出）',
+    description: '查询记账各账户与总额的当前余额（余额=初始+累计收入-累计支出；转账在账户间移动，不计收支、不影响总额）',
     inputSchema: { type: 'object', properties: {} },
     source: 'builtin',
     enabled: true,

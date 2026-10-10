@@ -213,6 +213,10 @@ function s(v: unknown): string { return String(v ?? '').trim() }
 function coerceAdditions(obj: unknown): OutlineAdditions | null {
   if (!obj || typeof obj !== 'object') return null
   const o = obj as { toExisting?: unknown; newChapters?: unknown }
+  // ★ 形状判定（2026-10-09 修）：只要出现 toExisting / newChapters 任一**数组**键，即视为「增补响应」；
+  //   两个数组都为空（模型对「无需增补 / 只想删除」的正确回答）也是合法结果，交上层提示「无增补」。
+  //   二者都不是数组（任意 JSON、非增补对象）才判为不可解析 → null。
+  if (!Array.isArray(o.toExisting) && !Array.isArray(o.newChapters)) return null
   const toExisting: OutlineUnitAdd[] = []
   if (Array.isArray(o.toExisting)) {
     for (const it of o.toExisting) {
@@ -243,7 +247,6 @@ function coerceAdditions(obj: unknown): OutlineAdditions | null {
       if (cname && units.length) newChapters.push({ name: cname, units })
     }
   }
-  if (!toExisting.length && !newChapters.length) return null
   return { toExisting, newChapters }
 }
 

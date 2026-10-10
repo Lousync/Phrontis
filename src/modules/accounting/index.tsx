@@ -84,7 +84,7 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
 
   const catCounts = useMemo(() => {
     const m = new Map<string, number>()
-    for (const t of monthTx) m.set(t.category, (m.get(t.category) ?? 0) + 1)
+    for (const t of monthTx) { if (t.type === 'transfer') continue; m.set(t.category, (m.get(t.category) ?? 0) + 1) }  // 转账无分类，不进分类侧栏
     return m
   }, [monthTx])
 

@@ -67,19 +67,28 @@ export function FlowView({ transactions, categories, onEdit, onDelete }: {
               </span>
             </div>
             {rows.map((t) => {
+              const isTransfer = t.type === 'transfer'
               const isOut = t.type === 'expense'
               return (
                 <div key={t.id} className="group flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition-colors hover:bg-[var(--bg-hover)]">
-                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: catColor(categories, t.category) }} />
+                  {isTransfer
+                    ? <span className="flex h-2.5 w-2.5 shrink-0 items-center justify-center text-[12px] leading-none text-[var(--text-muted)]">↔</span>
+                    : <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: catColor(categories, t.category) }} />}
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] text-[var(--text-primary)]">{t.merchant || t.category || '未分类'}</div>
+                    <div className="truncate text-[13px] text-[var(--text-primary)]">
+                      {isTransfer ? `${t.payment || '—'} → ${t.toPayment || '—'}` : (t.merchant || t.category || '未分类')}
+                    </div>
                     <div className="mt-0.5 truncate text-[11px] text-[var(--text-muted)]">
-                      {t.category || '未分类'}{t.note ? ` · ${t.note}` : ''}{t.time ? ` · ${t.time}` : ''}
+                      {isTransfer
+                        ? `转账${t.note ? ` · ${t.note}` : ''}${t.time ? ` · ${t.time}` : ''}`
+                        : `${t.category || '未分类'}${t.note ? ` · ${t.note}` : ''}${t.time ? ` · ${t.time}` : ''}`}
                     </div>
                   </div>
-                  {t.payment && <span className="shrink-0 rounded-[10px] border border-[var(--border-color)] px-2 py-0.5 text-[10.5px] text-[var(--text-secondary)]">{t.payment}</span>}
-                  <span className={'min-w-[84px] shrink-0 text-right text-[13.5px] font-semibold tabular-nums ' + (isOut ? 'text-[var(--money-out,#e06c4f)]' : 'text-[var(--money-in,#2b9e8f)]')}>
-                    {isOut ? '-' : '+'}{money(t.amount).replace('¥', '')}
+                  {isTransfer
+                    ? <span className="shrink-0 rounded-[10px] border border-[var(--border-color)] px-2 py-0.5 text-[10.5px] text-[var(--text-secondary)]">转账</span>
+                    : t.payment && <span className="shrink-0 rounded-[10px] border border-[var(--border-color)] px-2 py-0.5 text-[10.5px] text-[var(--text-secondary)]">{t.payment}</span>}
+                  <span className={'min-w-[84px] shrink-0 text-right text-[13.5px] font-semibold tabular-nums ' + (isTransfer ? 'text-[var(--text-secondary)]' : isOut ? 'text-[var(--money-out,#e06c4f)]' : 'text-[var(--money-in,#2b9e8f)]')}>
+                    {isTransfer ? money(t.amount) : (isOut ? '-' : '+') + money(t.amount).replace('¥', '')}
                   </span>
                   <span className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                     <button onClick={() => onEdit(t.id)} title="编辑" className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"><Pencil size={14} /></button>

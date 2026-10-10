@@ -384,6 +384,12 @@ function ReviseDrawer({ wsId, modelSpec, onClose, onApplied }: { wsId: string; m
 
           {additions && !busy && (
             <div className="mt-4">
+              {additions.toExisting.length === 0 && additions.newChapters.length === 0 && (
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-3 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">
+                  AI 没有给出需要<strong className="text-[var(--text-primary)]">增补</strong>的知识点。
+                  <br />「修订大纲」只做增补、<strong className="text-[var(--text-primary)]">不能删除或改写</strong>现有条目——若要删除或调整，请在课程主页点「编辑课程大纲」手动改。
+                </div>
+              )}
               {additions.toExisting.length > 0 && (
                 <div className="mb-3">
                   <div className="text-[12px] font-semibold text-[var(--text-secondary)] mb-1.5">在现有章节新增 · {additions.toExisting.length} 项</div>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Copy, X } from 'lucide-react'
-import type { AccountingType, AccountingParseOutcome, AccountingTransaction } from '../../types'
+import type { AccountingTxType, AccountingParseOutcome, AccountingTransaction } from '../../types'
 import { accountingCreate, accountingUpdate, accountingParseJson, accountingImportJson } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { catColor, money, todayStr, useAccountingData } from './shared'
@@ -33,7 +33,8 @@ const PHONE_PROMPT = [
   '}',
   '',
   '规则：',
-  '- type 只能是 expense（支出）或 income（收入）；',
+  '- type 只能是 expense（支出）/ income（收入）/ transfer（转账）；',
+  '- 转账（transfer）时另给 "payment"（转出账户）与 "toPayment"（转入账户），不要给 category；',
   '- amount 为正数，单位元，可带小数；',
   '- date 省略则按当天；',
   '- category / payment / merchant / note 没有就省略；',
@@ -49,11 +50,12 @@ export function AccountingPanel({ pendingEdit = null, onConsumeEdit }: {
 }) {
   const { transactions, categories, accounts, reload } = useAccountingData()
   const [editId, setEditId] = useState<string | null>(null)
-  const [type, setType] = useState<AccountingType>('expense')
+  const [type, setType] = useState<AccountingTxType>('expense')
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(todayStr())
   const [category, setCategory] = useState('')
   const [payment, setPayment] = useState('微信')
+  const [toPayment, setToPayment] = useState('')
   const [merchant, setMerchant] = useState('')
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
@@ -69,13 +71,13 @@ export function AccountingPanel({ pendingEdit = null, onConsumeEdit }: {
   txRef.current = transactions
 
   const catsForType = useMemo(
-    () => categories.filter((c) => c.kind === type || c.kind === 'both'),
+    () => (type === 'transfer' ? [] : categories.filter((c) => c.kind === type || c.kind === 'both')),
     [categories, type],
   )
 
   const clearForm = useCallback(() => {
     setEditId(null); setType('expense'); setAmount(''); setDate(todayStr())
-    setCategory(''); setPayment('微信'); setMerchant(''); setNote('')
+    setCategory(''); setPayment('微信'); setToPayment(''); setMerchant(''); setNote('')
   }, [])
 
   // App 投递的「记一笔 / 编辑某笔」→ 回填表单（展开右栏与切 Tab 已由 App 完成）
@@ -87,7 +89,7 @@ export function AccountingPanel({ pendingEdit = null, onConsumeEdit }: {
       const t = txRef.current.find((x) => x.id === pendingEdit)
       if (t) {
         setEditId(t.id); setType(t.type); setAmount(String(t.amount)); setDate(t.date)
-        setCategory(t.category); setPayment(t.payment); setMerchant(t.merchant); setNote(t.note)
+        setCategory(t.category); setPayment(t.payment); setToPayment(t.toPayment ?? ''); setMerchant(t.merchant); setNote(t.note)
       }
     }
     requestAnimationFrame(() => { formRef.current?.scrollIntoView({ block: 'start' }); amountRef.current?.focus() })
@@ -103,14 +105,22 @@ export function AccountingPanel({ pendingEdit = null, onConsumeEdit }: {
   const save = async (): Promise<void> => {
     const amt = parseFloat(amount)
     if (!Number.isFinite(amt) || amt <= 0) { showToast({ type: 'warning', message: '金额要大于 0' }); return }
+    if (type === 'transfer') {
+      if (!payment || !toPayment) { showToast({ type: 'warning', message: '请选择转出与转入账户' }); return }
+      if (payment === toPayment) { showToast({ type: 'warning', message: '转出与转入账户不能相同' }); return }
+    }
     setSaving(true)
     try {
       if (editId) {
-        await accountingUpdate(editId, { type, amount: amt, date, category, payment, merchant, note })
+        await accountingUpdate(editId, type === 'transfer'
+          ? { type, amount: amt, date, payment, toPayment, merchant: '', category: '', note }
+          : { type, amount: amt, date, category, payment, merchant, note })
         showToast({ type: 'info', message: '已更新这一笔' })
       } else {
-        await accountingCreate({ type, amount: amt, date, category: category || undefined, payment, merchant, note, source: 'manual' })
-        showToast({ type: 'success', message: type === 'expense' ? `已记支出 ${money(amt)}` : `已记收入 ${money(amt)}` })
+        await accountingCreate(type === 'transfer'
+          ? { type, amount: amt, date, payment, toPayment, note, source: 'manual' }
+          : { type, amount: amt, date, category: category || undefined, payment, merchant, note, source: 'manual' })
+        showToast({ type: 'success', message: type === 'transfer' ? `已转账 ${money(amt)}` : type === 'expense' ? `已记支出 ${money(amt)}` : `已记收入 ${money(amt)}` })
       }
       clearForm(); await reload()
     } catch (e) {
@@ -145,6 +155,11 @@ export function AccountingPanel({ pendingEdit = null, onConsumeEdit }: {
             onClick={() => setType('income')}
             className={'h-8 flex-1 rounded-md border text-[12.5px] transition-colors ' + (type === 'income' ? 'border-[var(--money-in,#2b9e8f)] bg-[color-mix(in_srgb,var(--money-in,#2b9e8f)_14%,transparent)] font-semibold text-[var(--money-in,#2b9e8f)]' : 'border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]')}
           >收入</button>
+          <button
+            onClick={() => { setType('transfer'); setCategory('') }}
+            title="账户之间转移资金，不计入收支"
+            className={'h-8 flex-1 rounded-md border text-[12.5px] transition-colors ' + (type === 'transfer' ? 'border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] font-semibold text-[var(--accent)]' : 'border-[var(--border-color)] bg-[var(--bg-tertiary)] text-[var(--text-secondary)]')}
+          >转账</button>
         </div>
         <div className="mb-2 grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-1"><span className="text-[11px] text-[var(--text-secondary)]">金额（元）</span>
@@ -154,23 +169,42 @@ export function AccountingPanel({ pendingEdit = null, onConsumeEdit }: {
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} />
           </label>
         </div>
-        <label className="mb-2 flex flex-col gap-1"><span className="text-[11px] text-[var(--text-secondary)]">分类</span>
-          <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
-            <option value="">未分类</option>
-            {catsForType.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-          </select>
-        </label>
-        <div className="mb-2 grid grid-cols-2 gap-2">
-          <label className="flex flex-col gap-1"><span className="text-[11px] text-[var(--text-secondary)]">支付方式</span>
-            <select value={payment} onChange={(e) => setPayment(e.target.value)} className={inputCls}>
-              <option value="">—</option>
-              {accounts.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1"><span className="text-[11px] text-[var(--text-secondary)]">商户 / 对象</span>
-            <input type="text" placeholder="可选" value={merchant} onChange={(e) => setMerchant(e.target.value)} className={inputCls} />
-          </label>
-        </div>
+        {type === 'transfer' ? (
+          <div className="mb-2 grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1"><span className="text-[11px] text-[var(--text-secondary)]">转出账户</span>
+              <select value={payment} onChange={(e) => setPayment(e.target.value)} className={inputCls}>
+                <option value="">—</option>
+                {accounts.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1"><span className="text-[11px] text-[var(--text-secondary)]">转入账户</span>
+              <select value={toPayment} onChange={(e) => setToPayment(e.target.value)} className={inputCls}>
+                <option value="">—</option>
+                {accounts.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+              </select>
+            </label>
+          </div>
+        ) : (
+          <>
+            <label className="mb-2 flex flex-col gap-1"><span className="text-[11px] text-[var(--text-secondary)]">分类</span>
+              <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputCls}>
+                <option value="">未分类</option>
+                {catsForType.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            </label>
+            <div className="mb-2 grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-1"><span className="text-[11px] text-[var(--text-secondary)]">支付方式</span>
+                <select value={payment} onChange={(e) => setPayment(e.target.value)} className={inputCls}>
+                  <option value="">—</option>
+                  {accounts.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1"><span className="text-[11px] text-[var(--text-secondary)]">商户 / 对象</span>
+                <input type="text" placeholder="可选" value={merchant} onChange={(e) => setMerchant(e.target.value)} className={inputCls} />
+              </label>
+            </div>
+          </>
+        )}
         <label className="mb-2 flex flex-col gap-1"><span className="text-[11px] text-[var(--text-secondary)]">备注</span>
           <input type="text" placeholder="可选" value={note} onChange={(e) => setNote(e.target.value)} className={inputCls} />
         </label>

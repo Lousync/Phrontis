@@ -38,6 +38,8 @@ export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' 
 // ===== 记账模块 =====
 // 主进程侧同形状声明见 electron/lib/kbStore/accountingVaultRepo.ts（跨线各侧各声明一次的仓规）
 export type AccountingType = 'expense' | 'income'
+/** 交易类型：收支之外多一个「转账」（账户间移动资金，不计入收支统计、不影响总额） */
+export type AccountingTxType = 'expense' | 'income' | 'transfer'
 export interface AccountingCategory {
   id: string
   name: string
@@ -57,10 +59,12 @@ export interface AccountingTransaction {
   id: string
   date: string
   time: string
-  type: AccountingType
+  type: AccountingTxType
   amount: number
   category: string
   payment: string
+  /** 转账专用：转入账户（type==='transfer' 时，payment = 转出账户） */
+  toPayment?: string
   merchant: string
   note: string
   source?: string
@@ -70,10 +74,12 @@ export interface AccountingTransaction {
 export interface CreateAccountingInput {
   date?: string
   time?: string
-  type: AccountingType
+  type: AccountingTxType
   amount: number
   category?: string
   payment?: string
+  /** 转账专用：转入账户 */
+  toPayment?: string
   merchant?: string
   note?: string
   source?: string
@@ -84,10 +90,12 @@ export interface AccountingParseItem {
   dup: boolean
   date: string
   time: string
-  type: AccountingType
+  type: AccountingTxType
   amount: number
   category: string
   payment: string
+  /** 转账专用：转入账户 */
+  toPayment?: string
   merchant: string
   note: string
 }

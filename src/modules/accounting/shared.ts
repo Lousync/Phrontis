@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { accountingGetAll } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
-import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingType } from '../../types'
+import { sumAmount, computeAccountBalances, type AccountBalance } from '../../lib/accountingPure'
+import type { AccountingTransaction, AccountingCategory, AccountingAccount } from '../../types'
+
+// 金额求和与账户余额口径下沉到零依赖纯函数（供契约脚本 import），此处再导出保持既有引用不变
+export { sumAmount, computeAccountBalances }
+export type { AccountBalance }
 
 /**
  * 记账模块共享工具：格式化、窗口口径、跨组件事件、数据加载 hook。
@@ -23,9 +28,6 @@ export function monthLabel(m: string): string {
 }
 export function money(n: number): string {
   return `${n < 0 ? '-' : ''}¥${Math.abs(n).toLocaleString('zh-CN', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 })}`
-}
-export function sumAmount(list: AccountingTransaction[], type: AccountingType): number {
-  return list.filter((t) => t.type === type).reduce((a, b) => a + b.amount, 0)
 }
 const WD = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 export function dayLabel(date: string): { d: string; w: string } {
@@ -77,46 +79,4 @@ export function useAccountingData(): {
   useEffect(() => { void reload() }, [reload])
   useDataChanged('accounting', () => { void reload() })
   return { transactions, categories, accounts, reload }
-}
-
-// ===== 账户余额（推导：初始余额 + 累计收入 − 累计支出） =====
-export interface AccountBalance {
-  id: string
-  name: string
-  color: string
-  initialBalance: number
-  income: number
-  expense: number
-  balance: number
-  /** 未归户流水（payment 为空或账户已不存在） */
-  loose?: boolean
-}
-
-export function computeAccountBalances(
-  accounts: AccountingAccount[],
-  transactions: AccountingTransaction[],
-): { list: AccountBalance[]; total: number } {
-  const byName = new Map<string, { income: number; expense: number }>()
-  for (const t of transactions) {
-    const key = t.payment || ''
-    const e = byName.get(key) ?? { income: 0, expense: 0 }
-    if (t.type === 'income') e.income += t.amount; else e.expense += t.amount
-    byName.set(key, e)
-  }
-  const known = new Set(accounts.map((a) => a.name))
-  const list: AccountBalance[] = accounts.map((a) => {
-    const e = byName.get(a.name) ?? { income: 0, expense: 0 }
-    return { id: a.id, name: a.name, color: a.color, initialBalance: a.initialBalance, income: e.income, expense: e.expense, balance: a.initialBalance + e.income - e.expense }
-  })
-  // 未归户（有流水但 payment 为空 / 账户不存在）单列
-  let looseIncome = 0, looseExpense = 0
-  for (const [k, e] of byName) {
-    if (k && known.has(k)) continue
-    looseIncome += e.income; looseExpense += e.expense
-  }
-  if (looseIncome || looseExpense) {
-    list.push({ id: '__loose', name: '未指定', color: '#7a7a7a', initialBalance: 0, income: looseIncome, expense: looseExpense, balance: looseIncome - looseExpense, loose: true })
-  }
-  const total = list.reduce((a, b) => a + b.balance, 0)
-  return { list, total: Math.round(total * 100) / 100 }
 }

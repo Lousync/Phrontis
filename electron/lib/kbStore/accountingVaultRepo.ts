@@ -12,6 +12,8 @@ import { exists, readJson, writeJsonOrThrow } from './jsonStore'
  */
 
 export type AccountingType = 'expense' | 'income'
+/** 交易类型：收支之外多一个「转账」（账户间移动资金，不计入收支、不影响总额） */
+export type AccountingTxType = 'expense' | 'income' | 'transfer'
 
 export interface TransactionRow {
   id: string
@@ -19,12 +21,14 @@ export interface TransactionRow {
   date: string
   /** HH:mm 或 '' */
   time: string
-  type: AccountingType
+  type: AccountingTxType
   /** 正数，元 */
   amount: number
   /** 分类名（denormalized，重命名需回写；v1 无重命名 UI） */
   category: string
   payment: string
+  /** 转账专用：转入账户（type==='transfer' 时，payment = 转出账户） */
+  toPayment?: string
   merchant: string
   note: string
   /** manual | phone-json | ai */
@@ -193,7 +197,7 @@ function normalizeAmount(v: unknown): number {
   return Math.round(Math.abs(n) * 100) / 100
 }
 
-function fingerprint(t: { date: string; type: AccountingType; amount: number; merchant: string; note: string }): string {
+function fingerprint(t: { date: string; type: AccountingTxType; amount: number; merchant: string; note: string }): string {
   return [t.date, t.type, Number(t.amount).toFixed(2), t.merchant || '', t.note || ''].join('|')
 }
 
@@ -205,10 +209,11 @@ export interface ParsedItem {
   dup: boolean
   date: string
   time: string
-  type: AccountingType
+  type: AccountingTxType
   amount: number
   category: string
   payment: string
+  toPayment?: string
   merchant: string
   note: string
 }
@@ -240,9 +245,11 @@ export function vaultAccountingParseJson(text: string): ParseOutcome {
   arr.forEach((r, i) => {
     const o = (r ?? {}) as Record<string, unknown>
     const amount = normalizeAmount(o.amount)
-    const type: AccountingType | null = o.type === 'income' ? 'income' : o.type === 'expense' ? 'expense' : null
-    if (!Number.isFinite(amount) || amount <= 0 || !type) {
-      items.push({ invalid: true, reason: `第 ${i + 1} 条缺 amount 或 type`, dup: false, date: '', time: '', type: 'expense', amount: 0, category: '', payment: '', merchant: '', note: '' })
+    const type: AccountingTxType | null = o.type === 'income' ? 'income' : o.type === 'expense' ? 'expense' : o.type === 'transfer' ? 'transfer' : null
+    const toPaymentRaw = String(o.toPayment ?? o.to ?? '').trim()
+    if (!Number.isFinite(amount) || amount <= 0 || !type || (type === 'transfer' && !toPaymentRaw)) {
+      const reason = type === 'transfer' && !toPaymentRaw ? `第 ${i + 1} 条转账缺转入账户` : `第 ${i + 1} 条缺 amount 或 type`
+      items.push({ invalid: true, reason, dup: false, date: '', time: '', type: 'expense', amount: 0, category: '', payment: '', merchant: '', note: '' })
       bad++
       return
     }
@@ -254,8 +261,9 @@ export function vaultAccountingParseJson(text: string): ParseOutcome {
       time: /^\d{1,2}:\d{2}/.test(timeRaw) ? timeRaw.slice(0, 5) : '',
       type,
       amount,
-      category: String(o.category ?? '').trim() || '其他',
+      category: type === 'transfer' ? '' : (String(o.category ?? '').trim() || '其他'),
       payment: String(o.payment ?? '').trim(),
+      toPayment: type === 'transfer' ? toPaymentRaw : undefined,
       merchant: String(o.merchant ?? '').trim(),
       note: String(o.note ?? '').trim(),
     }
@@ -281,8 +289,10 @@ export function vaultAccountingImport(text: string, source = 'phone-json'): Impo
     if (it.dup) { skipped++; continue }
     added.push({
       id: randomUUID(),       date: it.date, time: it.time, type: it.type, amount: it.amount,
-      category: vaultAccountingResolveOrCreateCategory(it.category, it.type),
-      payment: vaultAccountingResolveOrCreateAccount(it.payment), merchant: it.merchant, note: it.note,
+      category: it.type === 'transfer' ? '' : vaultAccountingResolveOrCreateCategory(it.category, it.type),
+      payment: vaultAccountingResolveOrCreateAccount(it.payment),
+      toPayment: it.type === 'transfer' ? vaultAccountingResolveOrCreateAccount(it.toPayment || '') : undefined,
+      merchant: it.merchant, note: it.note,
       source, createdAt: now, updatedAt: now,
     })
   }
@@ -295,10 +305,12 @@ export function vaultAccountingImport(text: string, source = 'phone-json'): Impo
 export interface CreateTransactionInput {
   date?: string
   time?: string
-  type: AccountingType
+  type: AccountingTxType
   amount: number
   category?: string
   payment?: string
+  /** 转账专用：转入账户 */
+  toPayment?: string
   merchant?: string
   note?: string
   source?: string
@@ -307,13 +319,19 @@ export interface CreateTransactionInput {
 export function vaultAccountingCreate(input: CreateTransactionInput): TransactionRow {
   const amount = normalizeAmount(input.amount)
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('金额必须大于 0')
-  if (input.type !== 'expense' && input.type !== 'income') throw new Error('type 必须是 expense 或 income')
+  if (input.type !== 'expense' && input.type !== 'income' && input.type !== 'transfer') throw new Error('type 必须是 expense / income / transfer')
   const now = new Date().toISOString()
   const date = /^\d{4}-\d{2}-\d{2}$/.test(String(input.date)) ? String(input.date) : todayLocal()
+  const isTransfer = input.type === 'transfer'
+  const payment = vaultAccountingResolveOrCreateAccount(input.payment || '')
+  const toPayment = isTransfer ? vaultAccountingResolveOrCreateAccount(input.toPayment || '') : ''
+  if (isTransfer && (!payment || !toPayment)) throw new Error('转账需要转出与转入账户')
+  if (isTransfer && payment === toPayment) throw new Error('转出与转入账户不能相同')
   const row: TransactionRow = {
     id: randomUUID(), date, time: input.time || '', type: input.type, amount,
-    category: vaultAccountingResolveOrCreateCategory(input.category || '其他', input.type),
-    payment: vaultAccountingResolveOrCreateAccount(input.payment || ''), merchant: input.merchant || '', note: input.note || '',
+    category: input.type === 'transfer' ? '' : vaultAccountingResolveOrCreateCategory(input.category || '其他', input.type),
+    payment, toPayment: isTransfer ? toPayment : undefined,
+    merchant: input.merchant || '', note: input.note || '',
     source: input.source || 'manual', createdAt: now, updatedAt: now,
   }
   vaultAccountingTransactionsSave([...vaultAccountingTransactionsAll(), row])
@@ -328,14 +346,24 @@ export function vaultAccountingUpdate(id: string, patch: Partial<TransactionRow>
   const next: TransactionRow = { ...cur }
   if (typeof patch.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(patch.date)) next.date = patch.date
   if (typeof patch.time === 'string') next.time = patch.time
-  if (patch.type === 'expense' || patch.type === 'income') next.type = patch.type
+  if (patch.type === 'expense' || patch.type === 'income' || patch.type === 'transfer') next.type = patch.type
   if (patch.amount !== undefined) {
     const a = normalizeAmount(patch.amount)
     if (!Number.isFinite(a) || a <= 0) throw new Error('金额必须大于 0')
     next.amount = a
   }
-  if (typeof patch.category === 'string') next.category = vaultAccountingResolveOrCreateCategory(patch.category, next.type)
-  if (typeof patch.payment === 'string') next.payment = vaultAccountingResolveOrCreateAccount(patch.payment)
+  if (next.type === 'transfer') {
+    if (typeof patch.payment === 'string') next.payment = vaultAccountingResolveOrCreateAccount(patch.payment)
+    if (typeof patch.toPayment === 'string') next.toPayment = vaultAccountingResolveOrCreateAccount(patch.toPayment)
+    next.category = ''
+    if (!next.payment || !next.toPayment) throw new Error('转账需要转出与转入账户')
+    if (next.payment === next.toPayment) throw new Error('转出与转入账户不能相同')
+  } else {
+    const kind: AccountingType = next.type === 'income' ? 'income' : 'expense'
+    if (typeof patch.category === 'string') next.category = vaultAccountingResolveOrCreateCategory(patch.category, kind)
+    if (typeof patch.payment === 'string') next.payment = vaultAccountingResolveOrCreateAccount(patch.payment)
+    next.toPayment = undefined  // 非转账不留转入账户（类型从 transfer 切回收支时清掉）
+  }
   if (typeof patch.merchant === 'string') next.merchant = patch.merchant
   if (typeof patch.note === 'string') next.note = patch.note
   next.updatedAt = new Date().toISOString()
@@ -354,7 +382,7 @@ export function vaultAccountingDelete(id: string): boolean {
 
 // ===== 查询 / 统计 =====
 
-export interface QueryInput { start?: string; end?: string; type?: AccountingType; category?: string }
+export interface QueryInput { start?: string; end?: string; type?: AccountingTxType; category?: string }
 
 export function vaultAccountingQuery(input: QueryInput = {}): {
   count: number
@@ -370,39 +398,45 @@ export function vaultAccountingQuery(input: QueryInput = {}): {
     (!category || t.category === category),
   ).sort((a, b) => (a.date === b.date ? (b.time || '').localeCompare(a.time || '') : b.date.localeCompare(a.date)))
   let totalIncome = 0, totalExpense = 0
-  for (const t of items) { if (t.type === 'income') totalIncome += t.amount; else totalExpense += t.amount }
+  for (const t of items) { if (t.type === 'income') totalIncome += t.amount; else if (t.type === 'expense') totalExpense += t.amount }  // 转账不计收支
   return { count: items.length, totalIncome: Math.round(totalIncome * 100) / 100, totalExpense: Math.round(totalExpense * 100) / 100, items }
 }
 
 /**
- * 各账户当前余额（推导：initialBalance + 累计收入 − 累计支出）+ 总额。
- * 供 AI 工具读账；与渲染层 computeAccountBalances 同口径。
+ * 各账户当前余额（推导：initialBalance + 累计收入 − 累计支出 + 累计转入 − 累计转出）+ 总额。
+ * 供 AI 工具读账；与渲染层 computeAccountBalances（src/lib/accountingPure.ts）同口径。
+ * 转账（type='transfer'）在账户间移动：payment 转出、toPayment 转入，不计收支、不影响总额。
  */
 export function vaultAccountingBalances(): {
   total: number
   accounts: Array<{ name: string; initialBalance: number; income: number; expense: number; balance: number }>
 } {
   const accounts = vaultAccountingAccountsAll()
-  const byName = new Map<string, { income: number; expense: number }>()
-  for (const t of vaultAccountingTransactionsAll()) {
-    const key = t.payment || ''
-    const e = byName.get(key) ?? { income: 0, expense: 0 }
-    if (t.type === 'income') e.income += t.amount; else e.expense += t.amount
+  type Acc = { income: number; expense: number; tIn: number; tOut: number }
+  const byName = new Map<string, Acc>()
+  const acc = (key: string): Acc => {
+    const e = byName.get(key) ?? { income: 0, expense: 0, tIn: 0, tOut: 0 }
     byName.set(key, e)
+    return e
+  }
+  for (const t of vaultAccountingTransactionsAll()) {
+    if (t.type === 'income') acc(t.payment || '').income += t.amount
+    else if (t.type === 'expense') acc(t.payment || '').expense += t.amount
+    else if (t.type === 'transfer') { acc(t.payment || '').tOut += t.amount; acc(t.toPayment || '').tIn += t.amount }
   }
   const known = new Set(accounts.map((a) => a.name))
   const list = accounts.map((a) => {
-    const e = byName.get(a.name) ?? { income: 0, expense: 0 }
+    const e = byName.get(a.name) ?? { income: 0, expense: 0, tIn: 0, tOut: 0 }
     return {
       name: a.name, initialBalance: a.initialBalance,
       income: Math.round(e.income * 100) / 100, expense: Math.round(e.expense * 100) / 100,
-      balance: Math.round((a.initialBalance + e.income - e.expense) * 100) / 100,
+      balance: Math.round((a.initialBalance + e.income - e.expense + e.tIn - e.tOut) * 100) / 100,
     }
   })
-  let looseIncome = 0, looseExpense = 0
-  for (const [k, e] of byName) { if (k && known.has(k)) continue; looseIncome += e.income; looseExpense += e.expense }
-  if (looseIncome || looseExpense) {
-    list.push({ name: '未指定', initialBalance: 0, income: Math.round(looseIncome * 100) / 100, expense: Math.round(looseExpense * 100) / 100, balance: Math.round((looseIncome - looseExpense) * 100) / 100 })
+  let looseIncome = 0, looseExpense = 0, looseIn = 0, looseOut = 0
+  for (const [k, e] of byName) { if (k && known.has(k)) continue; looseIncome += e.income; looseExpense += e.expense; looseIn += e.tIn; looseOut += e.tOut }
+  if (looseIncome || looseExpense || looseIn || looseOut) {
+    list.push({ name: '未指定', initialBalance: 0, income: Math.round(looseIncome * 100) / 100, expense: Math.round(looseExpense * 100) / 100, balance: Math.round((looseIncome - looseExpense + looseIn - looseOut) * 100) / 100 })
   }
   const total = Math.round(list.reduce((a, b) => a + b.balance, 0) * 100) / 100
   return { total, accounts: list }
@@ -413,7 +447,8 @@ export function vaultAccountingPeriodStats(start: string, end: string): { income
   let income = 0, expense = 0
   for (const t of vaultAccountingTransactionsAll()) {
     if (t.date < start || t.date > end) continue
-    if (t.type === 'income') income += t.amount; else expense += t.amount
+    if (t.type === 'income') income += t.amount
+    else if (t.type === 'expense') expense += t.amount  // 转账不计收支
   }
   return { income: Math.round(income * 100) / 100, expense: Math.round(expense * 100) / 100 }
 }

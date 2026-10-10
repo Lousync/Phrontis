@@ -114,6 +114,11 @@ const add = normalizeAdditions(addRaw)
 check('normalizeAdditions：围栏 JSON 可解析', add !== null && add.toExisting.length === 1 && add.newChapters.length === 1, JSON.stringify(add))
 check('normalizeAdditions：空 name 项被丢弃', add.toExisting.length === 1, '')
 check('normalizeAdditions：非增补文本返回 null', normalizeAdditions('没有增补') === null, '')
+// ★ 2026-10-09 修：合法但零增补（模型对「无需增补 / 只想删除」的正确回答）不得判为解析失败
+const emptyAdd = normalizeAdditions('```json\n{"toExisting":[],"newChapters":[]}\n```')
+check('normalizeAdditions：合法零增补 → 空对象（非 null）', emptyAdd !== null && emptyAdd.toExisting.length === 0 && emptyAdd.newChapters.length === 0, JSON.stringify(emptyAdd))
+check('normalizeAdditions：只带一个键也算合法零增补', (() => { const a = normalizeAdditions('{"toExisting":[]}'); return a !== null && a.toExisting.length === 0 && a.newChapters.length === 0 })(), '')
+check('normalizeAdditions：既无 toExisting 也无 newChapters 的 JSON → null', normalizeAdditions('{"foo":1}') === null, '')
 const noisyAdd = '推理一下 {"x":1} 最终：{"toExisting":[{"chapterName":"二","name":"新点"}],"newChapters":[]} 完。'
 check('normalizeAdditions：思考噪声取答案', normalizeAdditions(noisyAdd)?.toExisting[0]?.name === '新点', '')
 
