@@ -2646,14 +2646,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11.5px] transition-colors ${courseView === 'home' ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>
               <BookOpen size={12} />课程主页
             </button>
-            <button onClick={() => {
+            <button disabled={!courseLessonSid} onClick={() => {
                 setCourseView('chat')
                 if (activeId === assistantSid && courseLessonSid) {
                   const l = courseState?.lessons?.[courseLessonSid]
                   void openSession(courseLessonSid, l ? `课时${l.order}·${l.kind}` : '课时')
                 }
-              }} title="上课（当前会话）"
-              className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11.5px] transition-colors ${courseView === 'chat' ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>
+              }} title={courseLessonSid ? '上课（回到当前课时）' : '还没有正在进行的课时——先到「课程主页」点一个知识点开始上课'}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[11.5px] transition-colors ${!courseLessonSid ? 'text-[var(--text-muted)] opacity-45 cursor-not-allowed' : courseView === 'chat' ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>
               <MessagesSquare size={12} />上课
             </button>
             <button onClick={() => void courseOpenAssistant()} title="课程助手（整门课的规划 / 整理 / 答疑）"

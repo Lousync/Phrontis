@@ -2,6 +2,7 @@ import * as path from 'path'
 import * as os from 'os'
 import * as fs from 'fs'
 import initSqlJs from 'sql.js'
+import { ccSwitchProviderType } from './ccSwitchPure'
 
 /**
  * CC Switch 导入器 —— 读取 ~/.cc-switch/cc-switch.db（新版 SSOT SQLite），
@@ -31,14 +32,6 @@ let cache = new Map<string, CachedItem>()
 function maskKey(k: string): string {
   if (!k) return ''
   return k.length > 12 ? k.slice(0, 6) + '***' + k.slice(-4) : '***'
-}
-
-function inferType(baseUrl: string): CcSwitchItem['type'] {
-  let host = ''
-  try { host = new URL(baseUrl).hostname } catch { /* ignore */ }
-  if (host === 'localhost' || host === '127.0.0.1') return 'ollama'
-  if (/anthropic/i.test(baseUrl)) return 'anthropic'
-  return 'openai-compatible'
 }
 
 function extractFromToml(toml: string): string | null {
@@ -75,7 +68,7 @@ function extractItems(rows: any[]): CcSwitchItem[] {
       }
 
       baseUrl = baseUrl.replace(/\/+$/, '')
-      const type = inferType(baseUrl)
+      const type = ccSwitchProviderType(appType, baseUrl)
       const dedup = `${type}|${baseUrl}|${apiKey}`
       if (seen.has(dedup)) continue
       seen.add(dedup)

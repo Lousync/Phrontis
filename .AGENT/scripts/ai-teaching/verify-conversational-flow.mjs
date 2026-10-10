@@ -26,6 +26,7 @@ console.log('\n[流程改造] index.tsx')
 check('课程态恒开（不再依赖 courseState.enabled 开关）', mod.includes('const courseEnabled = !!activeWs && activeWs !== ') && !mod.includes('const courseEnabled = !!courseState?.enabled'))
 check('进入工作区自动开启课程态', mod.includes('aiTeachCourseSetEnabled(ws, true)'))
 check('CourseHome 传 onGoChat（跳回对话）', mod.includes("onGoChat={() => setCourseView('chat')}"))
+check('「上课」无课时时禁用（不再点了没反应）', mod.includes('disabled={!courseLessonSid}'))
 
 console.log('\n[课程主页] CourseMode.tsx')
 check('新增 onGoChat prop', cm.includes('onGoChat?: () => void'))
