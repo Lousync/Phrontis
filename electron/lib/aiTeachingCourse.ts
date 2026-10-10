@@ -4,7 +4,7 @@ import { ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { readJson, writeJson } from './kbStore/jsonStore'
 import { getWorkspaceOfSession, workspaceFolderRel, assignSession } from './aiTeachingWorkspaces'
-import { ensureSessionFolder, ensureSessionFolderAt, sessionFolder, setLessonFolderResolver } from './aiTeachingFolders'
+import { ensureSessionFolder, ensureSessionFolderAt, sessionFolder, setLessonFolderResolver, setAssistantFolderResolver } from './aiTeachingFolders'
 import { renameWorkspacePath } from './workspaceManager'
 import { createAgentSession, getAgentMessages, getAgentSession, sessionExists } from './agentSessionRepo'
 import { invokeLlmInternal, invokeLlmStreamInternal, firstEnabledModelSpec } from './llmService'
@@ -388,6 +388,21 @@ function lessonFolderRel(sessionId: string, getSetting: (key: string) => unknown
 
 // L1：注册课时文件夹解析器给 aiTeachingFolders（避免 folders↔course 循环 import）
 setLessonFolderResolver(lessonFolderRel)
+
+/** 课程助手物理文件夹相对路径 `{工作区}/课程助手`（**固定名、无日期**，一个工作区一个）；非助手返回 null。
+ *  产物统一落其下 `output/`（由 aiTeachingFolders 的 write-owner 逻辑拼），元数据仍在夹顶层。 */
+function assistantFolderRel(sessionId: string, getSetting: (key: string) => unknown): string | null {
+  if (!sessionId) return null
+  const f = readProgressFile()
+  for (const [wsId, st] of Object.entries(f.workspaces)) {
+    if (st?.assistantSessionId === sessionId) {
+      const wsFolder = workspaceFolderRel(wsId, getSetting)
+      return wsFolder ? `${wsFolder}/课程助手` : null
+    }
+  }
+  return null
+}
+setAssistantFolderResolver(assistantFolderRel)
 
 /** L5：会话所属知识点的文件夹相对路径 `{工作区}/{章号}·{知识点}`（画像第三层落点）；非课时返回 null */
 export function getSessionUnitFolderRel(sessionId: string, getSetting: (key: string) => unknown): string | null {

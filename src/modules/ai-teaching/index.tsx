@@ -4073,7 +4073,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             </button>
           </div>
           <div className="mt-8 text-[11px] text-[var(--text-muted)] leading-relaxed">
-            对话产物目录：<code className="px-1 rounded bg-[var(--bg-hover)]">{treeBase}/{'{MM-DD 会话标题}'}/</code>；删除工作区只解除归属，文件夹与对话保留。
+            对话产物目录：<code className="px-1 rounded bg-[var(--bg-hover)]">{treeBase}/{'{MM-DD 会话标题}'}/</code>；「课程助手」固定为 <code className="px-1 rounded bg-[var(--bg-hover)]">{treeBase}/{'{工作区}/课程助手/output'}/</code>。删除工作区只解除归属，文件夹与对话保留。
           </div>
         </div>
         {wsModal && (

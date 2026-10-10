@@ -203,9 +203,15 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
     applyView()
   }, [layout, applyView])
 
-  // 依赖 activeView：map ⇄ source 切换会重建画布 DOM（见内容区分支 key），
-  // 若只在挂载时跑一次，切回 map 后新画布既没滚轮监听、也不会自动 fit。
-  useEffect(() => { const id = requestAnimationFrame(fit); return () => cancelAnimationFrame(id) }, [fit, activeView])
+  // 自动 fit 的触发时机：① 载入/切换文档（doc 换引用）② map ⇄ source 切换（画布 DOM 重建，
+  // 见内容区分支 key）③ 首挂。★ 绝不能依赖 fit —— fit 的引用随 layout（含 foldVersion）变化，
+  // 会让折叠 / 增删 / 改字（均为原地改同一 doc 对象、只靠 foldVersion 触发重渲染）也重跑 fit，
+  // 把视角拉成「适应画布」。原地改不换 doc 引用，正是我们要的「结构变、视角静默」。
+  useEffect(() => {
+    const id = requestAnimationFrame(fit)
+    return () => cancelAnimationFrame(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, activeView])
 
   // 容器尺寸变化（首挂时可能 0 宽/切换 Tab/窗口缩放）→ 未手动调整过就自动 fit
   useEffect(() => {
@@ -380,15 +386,15 @@ export function MindMapView({ relPath, showExport, showSource, view, onViewChang
   return (
     <div className="h-full w-full flex flex-col min-h-0">
       {/* 工具条 */}
-      <div className="shrink-0 h-10 flex items-center gap-2 px-3 border-b border-[var(--border-color)] text-[12px] select-none">
-        <span className="font-medium text-[var(--text-primary)] truncate">
+      <div className="shrink-0 min-h-10 flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1 border-b border-[var(--border-color)] text-[12px] select-none">
+        <span className="min-w-0 flex-1 font-medium text-[var(--text-primary)] truncate">
           {doc?.title || '思维导图'}
           <span className="ml-1.5 text-[var(--text-muted)] font-normal">思维导图 · {doc ? countNodes(doc.root) : 0} 节点</span>
         </span>
         {activeView === 'map' && doc && saveState !== 'saved' && (
           <span className="shrink-0 text-[10.5px] text-[var(--text-muted)]">{saveState === 'saving' ? '保存中…' : '未保存'}</span>
         )}
-        <div className="ml-auto flex items-center gap-1.5 shrink-0">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
           {activeView === 'map' && doc && (
             <>
               <button type="button" onClick={undo} disabled={!canUndo} title="撤销 (Ctrl+Z)"

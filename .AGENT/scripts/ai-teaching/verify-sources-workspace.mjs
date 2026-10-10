@@ -23,6 +23,7 @@ const types = read('src/types/index.ts')
 const preload = read('electron/preload/index.ts')
 const ipc = read('src/lib/ipc.ts')
 const agent = read('electron/lib/agentService.ts')
+const course = read('electron/lib/aiTeachingCourse.ts')
 
 let pass = 0
 let fail = 0
@@ -74,6 +75,19 @@ const createSeg = (() => {
 check('建夹不再播种对话级 SOURCES/SOURCE.md（登记收敛工作区主库）', createSeg.length > 0 && !createSeg.includes('sourceTemplateText(') && !createSeg.includes("join(baseAbs, 'SOURCES')"))
 check('对话改名仍同步存量素材夹（合并读按夹名定位，不改会丢）', folders.includes("join(parentAbs, 'SOURCES', oldName)"))
 check('删对话仍回收存量素材夹（跟随同一设置）', folders.includes('SOURCES/${rel.slice(lastSlash + 1)}'))
+
+// ---- 课程助手：固定夹名（无日期）+ 产物落 output/ ----
+console.log('\n[课程助手夹] aiTeachingFolders.ts / aiTeachingCourse.ts')
+check('folders 暴露 setAssistantFolderResolver（助手夹解析器注册点）', folders.includes('export function setAssistantFolderResolver'))
+check('folders 有 isCourseAssistant 判定并查询解析器', folders.includes('function isCourseAssistant') && folders.includes('assistantFolderResolver?.(sessionId, getSetting)'))
+check('ensureSessionFolder 课时判定后接助手判定（固定夹名路径）', /lessonRel[\s\S]{0,120}assistantFolderResolver\?\.\(sessionId, getSetting\)/.test(folders))
+check('resolveWriteOwnerRel 助手产物落 ${base}/output', folders.includes('${base}/output'))
+check('ensureWriteOwnerFolder 助手落 ${base.relPath}/output', folders.includes('${base.relPath}/output'))
+check('organizeDoc 助手讲义/测验落 output', folders.includes('${ensured.relPath}/output') && folders.includes('isCourseAssistant(sessionId, getSetting)'))
+check('建夹冲突保护：异会话锚点占用则 uniqueFileName 改名（不覆盖）', folders.includes('anchorMatches(folderAbs, sessionId)') && folders.includes('uniqueFileName(dirAbs,'))
+check('course 导出 assistantFolderRel 且按 assistantSessionId 反查工作区', course.includes('function assistantFolderRel') && course.includes('assistantSessionId === sessionId'))
+check('course 注册 setAssistantFolderResolver（镜像课时解析器）', course.includes('setAssistantFolderResolver(assistantFolderRel)'))
+check('助手夹名固定「课程助手」（无日期前缀）', course.includes('/课程助手') && !/assistantFolderRel[\s\S]{0,200}datePrefix/.test(course))
 
 // ---- 渲染层 ----
 console.log('\n[渲染层] index.tsx')

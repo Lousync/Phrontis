@@ -124,12 +124,20 @@ async function main() {
   check('导图渲染：节点数 = 5', n1 === 5, 'got ' + n1)
   await shot('10-mindmap')
 
+  // 回归：折叠 / 展开不得触发自动 fit（结构变、视角应静默）
+  const stageScale = async () => await evalR(`(()=>{const c=document.querySelector('.mm-canvas'); if(!c) return null; const st=c.querySelector('.origin-top-left')||c.firstElementChild; const m=(st.getAttribute('style')||'').match(/scale\\(([^)]+)\\)/); return m?parseFloat(m[1]):null})()`)
+  const scaleBeforeFold = await stageScale()
+
   await clickNode('分支甲')
   await sleep(400)
   check('单击折叠：5 → 3', (await evalR(`document.querySelectorAll('.mm-node').length`)) === 3)
+  const scaleAfterFold = await stageScale()
+  check('折叠不触发自动 fit（scale 不变）', typeof scaleBeforeFold === 'number' && Math.abs(scaleAfterFold - scaleBeforeFold) < 1e-3, `${scaleBeforeFold} -> ${scaleAfterFold}`)
   await clickNode('分支甲')
   await sleep(400)
   check('再点展开：3 → 5', (await evalR(`document.querySelectorAll('.mm-node').length`)) === 5)
+  const scaleAfterExpand = await stageScale()
+  check('展开不触发自动 fit（scale 不变）', typeof scaleAfterExpand === 'number' && Math.abs(scaleAfterExpand - scaleBeforeFold) < 1e-3, `${scaleBeforeFold} -> ${scaleAfterExpand}`)
 
   await evalR(`window.__kbRef = []; window.addEventListener('kb-open-note', e => { window.__kbRef.push(e.detail && e.detail.relPath) }); 'ok'`)
   await clickNode('叶子一')
