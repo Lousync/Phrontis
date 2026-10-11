@@ -80,6 +80,14 @@ async function waitFor(expr, ms = 6000, step = 200) {
   return false
 }
 
+/** 真键盘（CDP Input）：合成 KeyboardEvent 的 target 是 window，会绕过真实焦点与捕获顺序，
+ *  测不出「菜单 Esc 该不该连带把笔记关掉」这类问题。 */
+async function pressEscape() {
+  const base = { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 }
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
+}
+
 /** 切档：写设置 + 广播（SettingsContext 只在 'settings-imported' 里重拉，直接写盘不触发重渲染） */
 async function setWritingMode(mode) {
   await evalJs(`(async () => {
@@ -199,16 +207,25 @@ async function main() {
     'P2c 菜单含 以纯文本形式粘贴 / 全选')
   ok(!st.menuLabels.some((l) => l.includes('新建数据库')), 'P2d 负向：不含「新建数据库」（本项目不做）')
   await shot('note-surface-02-menu-source')
-  await evalJs(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
-  await sleep(400)
+  await pressEscape()
+  await sleep(500)
   st = await evalJs(JS_STATE)
-  ok(!st.menu, 'P2e Esc 关闭菜单')
+  ok(!st.menu, 'P2e Esc 关闭菜单（真键盘；且不连带把笔记关掉）')
 
   // ---- P3 切即时渲染档 ----
-  // ★ 实测口径：`settings-imported` 会让模块树重挂（笔记页随之关闭）——这是既有外壳行为，
-  //   不是本次改动引入的；故切档后**重新打开笔记**，再断言引擎。
+  // ★ 切档**不该关掉笔记**：早先即时渲染档在挂载时崩过一次（跨行替换装饰走 ViewPlugin），
+  //   表象正是「设置一改，笔记页没了、中栏空白、工具栏消失」——故这里先断言「切完还在」，
+  //   再（幂等地）重新打开一次，保证后续断言有确定的起点。
   await setWritingMode('live')
-  await sleep(600)
+  await sleep(1500)
+  const stillOpen = await evalJs(`(() => ({
+    toolbar: document.querySelector('button[title^="切换到编辑"], button[title^="切换到预览"]')?.getAttribute('title') ?? null,
+    engine: document.querySelectorAll('.monaco-editor, .cm-editor').length,
+    cm: document.querySelectorAll('.cm-editor').length,
+    liveHost: document.querySelectorAll('.kb-live-pane').length,
+  }))()`)
+  ok(stillOpen.toolbar !== null, 'P3z ★ 切档不关笔记：工具栏仍在（模块未被重挂/未崩）', JSON.stringify(stillOpen))
+  ok(stillOpen.cm >= 1 && stillOpen.liveHost >= 1, 'P3y ★ 切档后当场就换成即时渲染档（无需重开笔记）', JSON.stringify(stillOpen))
   const reopened = await openNoteInEdit()
   await waitFor(`!!document.querySelector('.cm-editor')`, 10000)
   await sleep(800)
@@ -238,8 +255,14 @@ async function main() {
   ok(!st.cmText.includes('**'), 'P4h ★ 非光标块的行内标记被隐藏（正文看不到 **）', st.cmText.slice(0, 120))
   ok(!st.cmText.includes('| --- |'), 'P4i ★ 表格分隔行被 widget 取代', st.cmText.slice(0, 160))
   // 块级公式在文档下半部，可能落在视口外 → 先滚到底再断言（可见区间只渲染视口内的块）
-  await evalJs(`(() => { const s = document.querySelector('.cm-scroller'); if (s) s.scrollTop = s.scrollHeight; return true })()`)
-  await sleep(800)
+  await evalJs(`(() => {
+    const v = window.__kbLive
+    if (v) { v.scrollDOM.scrollTop = v.scrollDOM.scrollHeight; return true }
+    const s = document.querySelector('.cm-scroller')
+    if (s) s.scrollTop = s.scrollHeight
+    return false
+  })()`)
+  await sleep(1200)
   const stBottom = await evalJs(JS_STATE)
   ok(!stBottom.cmText.includes('$$'), 'P4j ★ 块级公式标记被 widget 取代（滚到底后可见区间重算）', stBottom.cmText.slice(-160))
   ok(stBottom.katex >= 2, 'P4k 行内 + 块级公式都渲染（滚动后重算装饰）', String(stBottom.katex))

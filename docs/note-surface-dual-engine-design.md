@@ -97,7 +97,7 @@ PageEditor（知识库就地编辑）
 | `tsc --noEmit`（node / web） | 0 错 |
 | `electron-vite build` | 通过（CM6 独立 chunk `LiveMarkdownPane-*.js`，lazy） |
 | 契约 `.AGENT/scripts/notes-surface/verify-note-surface.mjs` | **146 PASS / 0 FAIL**（含用假引擎跑真动作的表驱动断言：包裹 / 幂等段落 / 块级落点 / 脚注三态 / 菜单树完整性 / 单写者与惰性的负向断言） |
-| 探针 `.AGENT/scripts/notes-surface/probe-note-surface.mjs`（隔离实例 + CDP 真 DOM） | **26 PASS / 0 FAIL**（源码档在场 → 两档右键菜单 → 切档后 CM6 渲染各类块且标记被隐藏 → 光标块回源码 → 菜单动作真落进文档并渲染 → 切回源码档不残留 → console 零 error） |
+| 探针 `.AGENT/scripts/notes-surface/probe-note-surface.mjs`（隔离实例 + CDP 真 DOM） | **28 PASS / 0 FAIL**（源码档在场 → 两档右键菜单 → **切档不关笔记、当场换成即时渲染档** → CM6 渲染各类块且标记被隐藏 → 光标块回源码 → 菜单动作真落进文档并渲染 → 切回源码档不残留 → console 零 error） |
 
 探针跑法（隔离 userData，不动开发机数据）：
 
