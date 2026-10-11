@@ -203,6 +203,7 @@ const api = {
   pluginGetContribution: (id: string, key: string) => ipcRenderer.invoke('plugin:getContribution', id, key),
   pluginListViews: (slot: unknown) => ipcRenderer.invoke('plugin:listViews', slot),
   pluginListPets: () => ipcRenderer.invoke('plugin:listPets'),
+  pluginListMascots: () => ipcRenderer.invoke('plugin:listMascots'),
   pluginListDashboardWidgets: () => ipcRenderer.invoke('plugin:listDashboardWidgets'),
   pluginListCommands: () => ipcRenderer.invoke('plugin:listCommands'),
   pluginListRenderers: () => ipcRenderer.invoke('plugin:listRenderers'),

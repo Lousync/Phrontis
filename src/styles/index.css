@@ -1594,3 +1594,24 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
 @media (prefers-reduced-motion: reduce) {
   .kb-edge-hint, .kb-edge-hint .chip { transition: none; }
 }
+
+/* ---- AI 输入区吉祥物（.claude/plans/ai-composer-mascot.md）----
+   挂在输入卡（position:relative）内：壳绝对定位于卡上沿右缘、脚踩卡边；四周不吃事件。
+   动效只动 transform，带 prefers-reduced-motion 兜底。 */
+.kb-mascot-anchor {
+  position: absolute;
+  right: 8px;
+  bottom: 100%;
+  z-index: 1;
+  pointer-events: none;
+  line-height: 0;
+}
+.kb-mascot { display: block; transform-origin: bottom center; }
+.kb-mascot-active { animation: kb-mascot-bob 1.1s ease-in-out infinite; }
+@keyframes kb-mascot-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kb-mascot-active { animation: none; }
+}

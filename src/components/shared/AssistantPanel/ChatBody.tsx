@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
 import { useSettings } from '../../../lib/SettingsContext'
+import { AiMascotAnchor } from '../AiMascot/AiMascotAnchor'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { useInputShell } from './inputShells'
 import { getKnowledgePages, agentUsageGet, llmListProviders, getSemanticStatus } from '../../../lib/ipc'
@@ -488,6 +489,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 输入卡 = 无边框浅底大圆角（参考主流 AI 输入框：底色分层替代描边，聚焦时加深） */}
             <div className={`shrink-0 mx-auto ${INPUT_WRAP[variant]} pb-2.5 pt-2`}>
               <div ref={inputCardRef} className={`relative px-2.5 pt-2 pb-2 ${shell.wrap}`}>
+                <AiMascotAnchor />
                 {/* 弱提示升格（B-12 四次拍板 2026-09-22，方案 A）：暖色提示条，与悬浮侧栏同款
                     —— 琥珀底 + 警告图标 + 「去配置」直达；只描述当前状态，不阻断、无「知道了」记忆（H5）。
                     色板走主题 token `--warning` / `--warning-bg`，勿写死色值 */}

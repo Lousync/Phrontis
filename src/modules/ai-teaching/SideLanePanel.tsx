@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { agentAbort, agentChat, agentCreateSideLane, agentDeleteSession, agentMessages, agentSessions } from '../../lib/ipc'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
+import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
@@ -353,7 +354,8 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
 
       {/* 输入区 */}
       <div className="shrink-0 w-full max-w-[820px] mx-auto px-2.5 pb-2.5 pt-2">
-        <div className={`px-3 pt-2.5 pb-2 ${shell.wrap}`}>
+        <div className={`relative px-3 pt-2.5 pb-2 ${shell.wrap}`}>
+          <AiMascotAnchor />
           <textarea
             ref={inputRef}
             value={input}

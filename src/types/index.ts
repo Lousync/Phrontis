@@ -510,6 +510,33 @@ export interface PluginPetInfo {
   sprites: Record<string, string>
 }
 
+/** 插件贡献的 AI 输入区吉祥物（contributes.mascot；帧图经 plugin:// 供给，见 .claude/plans/ai-composer-mascot.md） */
+export interface PluginMascotInfo {
+  pluginId: string
+  id: string
+  name: string
+  /** 每帧毫秒（缺省 80） */
+  frameMs: number
+  /** 逻辑格 × 每格像素（缺省 2px；默认 52×36 格） */
+  grid: { cell: number; w: number; h: number }
+  /** 站位（本版仅 'composer'） */
+  anchor: string
+  /** 状态 → 动画名（键落在 sheets 内）；缺省用动画名本身 */
+  states: Record<string, string>
+  /** 动画表：动画名 → { 本体 / 墨色遮罩（plugin:// URL）+ 帧数 / 裁切框 / 静止帧 } */
+  sheets: Record<string, { body: string; ink: string | null; frames: number; box: number[]; still: number }>
+  /** 空闲小节目（动画名数组） */
+  idleExtras: string[]
+  /** 点击反应（动画名；点左半 / 右半 / 连点 ≥4 次）——缺省则点击无反应 */
+  tapLeft?: string
+  tapRight?: string
+  tapFlail?: string
+  /** 工作分档：忙 1 / 2 / ≥3 个会话各演哪个动画（缺省只用 states.working） */
+  workingTiers?: string[]
+  /** 空闲多少毫秒后入睡（需 sheets 有 'sleeping'/'waking'；缺省 60000） */
+  sleepAfterMs?: number
+}
+
 // ---- 远程监督 ----
 export type SupervisePlatform = 'serverchan' | 'wecom' | 'dingtalk' | 'custom'
 export interface SuperviseConfig {
@@ -764,6 +791,8 @@ export interface PluginRegistryEntry {
   size?: number
   checksum?: string
   updatedAt?: string
+  /** 适配的应用版本要求（形如 ">=3.5.0"）——市场列表/详情展示用；真正的安装门禁在插件清单的 engineVersion */
+  engineVersion?: string
 }
 
 export type PluginRiskLevel = 'S' | 'A' | 'B' | 'C'
@@ -1964,6 +1993,7 @@ export interface ElectronAPI {
   pluginListViews: (slot?: string) => Promise<PluginViewContribution[]>
   pluginListDashboardWidgets: () => Promise<PluginDashboardWidget[]>
   pluginListPets: () => Promise<PluginPetInfo[]>
+  pluginListMascots: () => Promise<PluginMascotInfo[]>
   pluginListCommands: () => Promise<PluginCommandInfo[]>
   pluginListRenderers: () => Promise<PluginRendererInfo[]>
   pluginGetSettingsSchema: (id: string) => Promise<{ schema: PluginSettingItem[] }>

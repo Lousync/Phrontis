@@ -48,6 +48,7 @@ import { UsageRing, fmtTok } from '../../components/shared/UsageRing'
 import { WebSourceDialog } from './components/WebSourceDialog'
 import { SideLanePanel } from './SideLanePanel'
 import { SideLaneCenter } from './SideLaneCenter'
+import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
 import { AI_TEXT_CODE_EXT_SET } from '../../lib/aiTextExts'
 import { useFloatingWindow } from './useFloatingWindow'
 
@@ -3788,7 +3789,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 {composerFooter}
                 </>
                 ) : (
-                  <div className={`px-3 pt-2.5 pb-2 ${shell.wrap}`}>
+                  <div className={`relative px-3 pt-2.5 pb-2 ${shell.wrap}`}>
+                    <AiMascotAnchor />
                     {quotes.length > 0 && (
                       <div className="mb-1.5">
                         {/* 引用胶囊（会话引用形式）：不展示全文只报条数，点开管理；× 一键全清 */}
