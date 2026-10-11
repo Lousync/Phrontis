@@ -1049,7 +1049,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // ---- / 弹层派生态（v3.1.1 条目10）：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
   const slashQuery = input.startsWith('/') && !/[\s\n]/.test(input.slice(1)) && input.length > 1 ? input.slice(1) : (input === '/' ? '' : null)
   const slashItems = useMemo(
-    () => filterSlashItems(buildSlashItems(slashSkills, [MINDMAP_SLASH_ITEM]), slashQuery ?? ''),
+    () => filterSlashItems(buildSlashItems(slashSkills, [MINDMAP_SLASH_ITEM], 'aiTeaching'), slashQuery ?? ''),
     [slashSkills, slashQuery],
   )
   const slashOpen = slashQuery !== null

@@ -8,7 +8,7 @@ import {
   agentChat, agentRegenerate, agentEditMessage, agentDeleteMessage,
   llmListProviders, agentAbortSession, aiToolsListSkills, onAssistantNotice,
 } from '../../../lib/ipc'
-import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo } from '../../../types'
+import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo, AgentSessionSource } from '../../../types'
 import type { StreamDraft } from '../../../lib/agentStreamCore'
 import {
   MAX_PARALLEL, subscribeAssistantRunState, getRunBucket, isSessionRunning, runningSessionCount,
@@ -42,10 +42,22 @@ export interface AssistantChatOptions {
    * 所以宿主可以安全闭包引用本组件里声明在 hook 之后的 ref；但**别在 render 期调用它**（TDZ 崩页）。
    */
   resolveContext?: () => AgentContextInfo | null
-  /** / 指令的执行面（悬浮版随全屏态切换；其余宿主固定 assistant） */
-  surfaceOf?: () => 'assistant' | 'aiLearn'
+  /** / 指令的执行面（悬浮版随全屏态切换；其余宿主固定 assistant；日程助手传 'schedule'） */
+  surfaceOf?: () => 'assistant' | 'aiLearn' | 'schedule'
   /** 发送前正文预处理（悬浮版并入划词引用块并清空；返回处理后正文） */
   prepareBody?: (body: string) => string
+  /**
+   * 会话来源（日程助手 P1）：缺省 = 通用助手（列表排除 aiTeaching）。
+   * 传 'schedule' 时——会话列表只列 schedule 来源、新建会话带此来源、发送经 agentChat 透传
+   * （主进程据此注入日程人设与工具面），与通用助手**物理隔离**、列表互不可见。
+   */
+  sessionSource?: AgentSessionSource
+  /**
+   * 「一天一个会话」（日程助手）：激活且当前无活动会话时，自动载入**今天创建**的会话
+   * （按 createdAt 日期判定）；今天还没有就新建一条（标题 = 今天日期）。配合右栏 Tab 切走即卸载，
+   * 实现「今天开的对话，下次打开还在」。
+   */
+  autoResumeToday?: boolean
 }
 
 /** 对话 UI（ChatBody / 全屏学堂 bridge）消费的控制器面 */
@@ -76,7 +88,7 @@ export interface AssistantChatController {
   toggleDrawer: () => void
   closeDrawer: () => void
   send: (override?: string) => Promise<void>
-  newSession: () => Promise<void>
+  newSession: (title?: string) => Promise<void>
   loadSession: (id: string) => Promise<void>
   removeSession: (id: string) => Promise<void>
   regenerate: () => Promise<void>
@@ -84,8 +96,8 @@ export interface AssistantChatController {
   deleteMessage: (id: string) => Promise<void>
   abort: () => Promise<void>
   dismissChanges: () => void
-  /** 主动刷新会话列表（宿主切换等场景） */
-  refreshSessions: () => Promise<void>
+  /** 主动刷新会话列表（宿主切换等场景）；返回刷新后的列表供调用方同步使用 */
+  refreshSessions: () => Promise<AgentSessionInfo[]>
   /** N-3 会话列表运行态标记（running=转圈 / unread=完成未读蓝点 / failed=失败红标） */
   runStateOf: (sid: string) => 'running' | 'failed' | 'unread' | null
   /** 对话模型（providerId:modelId 串；空 = 全局默认）——settings 持久化 */
@@ -113,6 +125,19 @@ function nowLocal(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+/** 今天 YYYY-MM-DD（本地时区；「一天一个会话」按它判定） */
+function todayYmd(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+/** 今天的会话默认标题（如「10月11日 周六」） */
+function todayLabel(): string {
+  const d = new Date()
+  const wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()]
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${wd}`
+}
+
 /** 落库消息 → UI 消息（保留 id 供编辑/删除/重新生成定位） */
 function toUi(m: AgentStoredMessage): UiMessage {
   return {
@@ -137,7 +162,8 @@ function contextKeyOf(c: AgentContextInfo | null): string | null {
 }
 
 export function useAssistantChat(options: AssistantChatOptions): AssistantChatController {
-  const { active } = options
+  const { active, sessionSource } = options
+  const autoResumeToday = options.autoResumeToday === true
   /**
    * 界面上下文解析（宿主可注入优先级链，缺省 = 当前界面）。
    *
@@ -203,6 +229,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const [drawerMounted, setDrawerMounted] = useState(false)
   const drawerTimerRef = useRef<number | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  /** send 的自引用（提示型指令 /简报 的 onSend 用）：避免在 send 内部直接递归引用自身 */
+  const sendRef = useRef<((override?: string) => Promise<void>) | null>(null)
   /** 当前会话 id 的实时镜像：回复返回时判断用户是否已切换会话 */
   const activeIdRef = useRef<string | null>(null)
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
@@ -245,12 +273,16 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     aiToolsListSkills().then(r => setSlashSkills(r.skills)).catch(() => setSlashSkills([]))
   }, [active])
 
-  const refreshSessions = useCallback(async () => {
+  const refreshSessions = useCallback(async (): Promise<AgentSessionInfo[]> => {
     try {
-      // 只列「通用助手」来源：AI 教学有自己的会话列表（同表存储，按 source 分流）
-      setSessions((await agentSessions()).filter(x => x.source !== 'aiTeaching'))
-    } catch { /* ignore */ }
-  }, [])
+      // 按来源分流（同表存储）：日程助手只列 schedule；通用助手排除 aiTeaching
+      // （AI 教学有自己的会话列表）。两者列表互不可见。
+      const all = await agentSessions()
+      const list = sessionSource ? all.filter(x => x.source === sessionSource) : all.filter(x => x.source !== 'aiTeaching')
+      setSessions(list)
+      return list
+    } catch { return [] }
+  }, [sessionSource])
 
   useEffect(() => { if (active) void refreshSessions() }, [active, refreshSessions])
 
@@ -303,14 +335,30 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     } catch { setMessages([]) }
   }, [closeDrawer])
 
-  const newSession = useCallback(async () => {
-    const sRow = await agentNewSession().catch(() => null)
+  const newSession = useCallback(async (title?: string) => {
+    const sRow = await agentNewSession(title, sessionSource).catch(() => null)
     if (!sRow) return
     setSessions(prev => [sRow, ...prev])
     setActiveId(sRow.id)
     setMessages([])
     closeDrawer()
-  }, [closeDrawer])
+  }, [closeDrawer, sessionSource])
+
+  // 「一天一个会话」（日程助手）：激活且当前无活动会话时，自动载入今天创建的会话；没有则新建一条。
+  // 右栏 Tab 切走即卸载（WorkbenchRightPanel 条件渲染）→ 再次打开时本效果重跑，回到今天的会话。
+  useEffect(() => {
+    if (!active || !autoResumeToday) return
+    let cancelled = false
+    void (async () => {
+      const list = await refreshSessions()
+      if (cancelled || activeIdRef.current) return
+      const today = todayYmd()
+      const mine = list.filter(s => (s.createdAt ?? '').slice(0, 10) === today)
+      if (mine.length > 0) await loadSession(mine[0].id)
+      else await newSession(todayLabel())
+    })()
+    return () => { cancelled = true }
+  }, [active, autoResumeToday, refreshSessions, loadSession, newSession])
 
   const removeSession = useCallback(async (id: string) => {
     if (deletingId !== id) {
@@ -346,6 +394,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
         sessionId: activeIdRef.current ?? '',
         surface: options.surfaceOf ? options.surfaceOf() : 'assistant',
         onProgress: p => setCompressing(p.active),
+        // 提示型指令（/简报 等）：命中即把 prompt 当作用户消息发出（走正常 send 流程）
+        onSend: (t) => { void sendRef.current?.(t) },
       })) {
         if (!override) setInput('')
         return
@@ -353,7 +403,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     }
     let sid = activeIdRef.current
     if (!sid) {
-      const sRow = await agentNewSession().catch(() => null)
+      const sRow = await agentNewSession(undefined, sessionSource).catch(() => null)
       if (!sRow) return
       sid = sRow.id
       setActiveId(sid)
@@ -382,7 +432,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       // Skill chip 随消息一次性消费，发出即清
       const sk = pickedSkill
       setPickedSkill(null)
-      const r = await agentChat(sid, body, finalCtx ?? undefined, cid, undefined, modelId || undefined, thinking ? 'medium' : 'off', sk?.registryName)
+      const r = await agentChat(sid, body, finalCtx ?? undefined, cid, sessionSource, modelId || undefined, thinking ? 'medium' : 'off', sk?.registryName)
       // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
       if (r.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要` })
       // 用户在等待期间切换了会话：回复已落库，但不注入当前视图
@@ -403,7 +453,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       endRun(sid)
       void refreshSessions()
     }
-  }, [input, pickedSkill, refreshMessages, refreshSessions, options, attachedFiles, modelId, thinking, contextRemoved, resolveCtx])
+  }, [input, pickedSkill, refreshMessages, refreshSessions, options, attachedFiles, modelId, thinking, contextRemoved, resolveCtx, sessionSource])
+  sendRef.current = send
 
   /** 重新生成最后一条回复（末条为助手消息时可用） */
   const regenerate = useCallback(async () => {

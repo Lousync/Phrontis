@@ -26,7 +26,7 @@ const SESSIONS_FILE = 'agent-sessions.json'
  * 会话来源：用于把「通用 AI 助手」（侧栏 / AI 学堂）与「AI 教学」的会话列表互相隔离。
  * 二者共用同一张会话表（同一份存储、同一套 AgentRunner），只在列表展示上按来源分流。
  */
-export type AgentSessionSource = 'assistant' | 'aiTeaching'
+export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule'
 
 /**
  * 会话通道（台账 N-1「手册通道」）：

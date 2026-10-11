@@ -12,6 +12,8 @@ import { preprocessContent, parseQuizFence, parseQuizFenceLoose } from './QuizPa
 import { QuizCard } from './QuizCard'
 import { PluginFenceRenderer } from './PluginFenceRenderer'
 import { MermaidBlock } from './MermaidBlock'
+import { SchedulePreviewCard } from '../../modules/schedule/SchedulePreviewCard'
+import { parseSchedulePreviewFence } from '../../modules/schedule/previewPure'
 import { pluginListRenderers } from '../../lib/ipc'
 import type { PluginRendererInfo } from '../../types'
 import { normalizeAnswerLayout } from '../../lib/answerLayout'
@@ -197,6 +199,11 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
           if (fixed) return <QuizCard quiz={fixed} pageId={pageId} pageTitle={pageTitle} />
           return <QuizFailCard onRetry={onQuizRetry} />
         }
+      }
+      // ```schedule-preview 围栏（日程助手排期预览卡）→ 迷你周表卡片；非法回退普通代码块
+      if (/language-schedule-preview/.test(cls)) {
+        const card = parseSchedulePreviewFence(extractText(children))
+        if (card) return <SchedulePreviewCard data={card} />
       }
       // 插件渲染器（plugin-phase1-design C6）：命中 lang 且插件已启用 → 内容只读沙箱；失败回退普通代码块
       const langMatch = cls.match(/language-([a-z0-9-]+)/i)

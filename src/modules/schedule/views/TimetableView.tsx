@@ -811,6 +811,7 @@ function Block({
         )}
         <div className={`font-semibold leading-snug text-[var(--text-primary)] ${tiny ? 'truncate' : ''} ${isDone ? 'line-through' : ''}`}
           style={{ fontSize: fz }}>
+          {todo.recurringId && <span className="mr-0.5" title="固定日程">🔁</span>}
           {todo.title}
         </div>
         {!compact && (

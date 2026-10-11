@@ -88,6 +88,12 @@ const api = {
   getScheduleTags: () => ipcRenderer.invoke('schedule:getTags'),
   createScheduleTag: (name: string, color?: string) => ipcRenderer.invoke('schedule:createTag', name, color),
   deleteScheduleTag: (id: string) => ipcRenderer.invoke('schedule:deleteTag', id),
+  scheduleRecurringList: () => ipcRenderer.invoke('schedule:recurringList'),
+  scheduleRecurringCreate: (input: unknown) => ipcRenderer.invoke('schedule:recurringCreate', input),
+  scheduleRecurringUpdate: (id: string, patch: unknown) => ipcRenderer.invoke('schedule:recurringUpdate', id, patch),
+  scheduleRecurringDelete: (id: string) => ipcRenderer.invoke('schedule:recurringDelete', id),
+  scheduleRecurringSettle: () => ipcRenderer.invoke('schedule:recurringSettle'),
+  scheduleRecurringUndoSettle: (todoIds: string[], restore: unknown) => ipcRenderer.invoke('schedule:recurringUndoSettle', todoIds, restore),
   /** 日程截止提醒的系统通知被点击 → 主窗口切到日程模块（主进程 scheduleReminder.ts 发出） */
   onScheduleReminderClick: (cb: () => void) => {
     const handler = () => cb()

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
   Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu, Radar, MessagesSquare, TriangleAlert,
-  RotateCcw,
+  RotateCcw, CalendarDays,
 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
 import { useSettings } from '../../../lib/SettingsContext'
@@ -21,6 +21,7 @@ import { UsageRing, fmtTok } from '../UsageRing'
 import { buildQuotedBody } from './selQuotes'
 import { registerSelectionAskHost } from '../../../lib/assistantContext'
 import type { AssistantChatController } from './useAssistantChat'
+import type { ChatSurface } from '../../../lib/chatCommands'
 import type { AiUsageDay, KnowledgePage } from '../../../types'
 
 /**
@@ -38,6 +39,14 @@ export type AssistantBodyVariant = 'sidebar' | 'docked' | 'page'
  * 契约脚本 `verify-perception.mjs` C2/C3 断言此处**只此一份字面量**（list-drift 防线）。
  */
 export const MAX_ATTACHED_REFS = 4
+
+/** 日程助手会话的日期标签（如「10月11日 周日」）——「一天一个会话」列表按日期展示 */
+function schedDayLabel(iso: string): string {
+  const d = new Date(iso)
+  if (!Number.isFinite(d.getTime())) return iso
+  const wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()]
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${wd}`
+}
 
 interface ChatBodyProps {
   chat: AssistantChatController
@@ -59,6 +68,14 @@ interface ChatBodyProps {
   showDrawer?: boolean
   /** 左栏 AI 会话侧栏 portal 目标（AiChatTab 专用；传入即挂侧栏） */
   sidebarEl?: HTMLElement | null
+  /**
+   * 聊天面标识（日程助手 P1）：'schedule' 时裁剪通用助手专属控件——
+   * 隐藏 @ 引用 / 附件 / 感知开关 / 模型选择 / 上下文占用 / Token 消耗 / Skill，
+   * 且 `/` 弹层只出日程指令（`/简报` 体系）。缺省 = 通用助手宽面。
+   */
+  surface?: ChatSurface
+  /** 头部标题覆盖（缺省「AI 助手」；日程助手传「日程助手」） */
+  headerTitle?: string
 }
 
 /** 输入容器 padding 与最大宽（按形态） */
@@ -89,8 +106,10 @@ const CARD_WRAP: Record<AssistantBodyVariant, string> = {
  * 输入卡外壳样式已抽至 inputShells.ts（与 AI 教学对话输入框共用，样式统一影响所有 AI 问答面）。
  */
 
-export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyHint, inputTop, inputBarLeft, showDrawer = true, sidebarEl }: ChatBodyProps) {
+export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyHint, inputTop, inputBarLeft, showDrawer = true, sidebarEl, surface, headerTitle }: ChatBodyProps) {
+  const scheduleMode = surface === 'schedule'
   const {
+
     sessions, providersOk, activeId, messages, input, setInput, inputRef, pending,
     liveSteps, draft, lastChanges, compressing, pickedSkill, setPickedSkill,
     slashSkills, editing, setEditing, copiedIdx, setCopiedIdx, deletingId,
@@ -243,8 +262,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   const [slashActive, setSlashActive] = useState(0)
   const slashQuery = input.startsWith('/') && !/[\s\n]/.test(input.slice(1)) && input.length > 1 ? input.slice(1) : (input === '/' ? '' : null)
   const slashItems = useMemo(
-    () => filterSlashItems(buildSlashItems(slashSkills), slashQuery ?? ''),
-    [slashSkills, slashQuery],
+    () => filterSlashItems(buildSlashItems(scheduleMode ? [] : slashSkills, [], surface), slashQuery ?? ''),
+    [slashSkills, slashQuery, scheduleMode, surface],
   )
   const slashOpen = slashQuery !== null
   /** 弹层选中：指令 → 补全到输入框（回车执行走既有拦截链）；Skill → 挂 chip、清输入继续写正文 */
@@ -297,10 +316,13 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
             </button>
           )}
           <span className="flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-primary)]">
-            <Sparkles size={13} className="text-[var(--accent)]" /> AI 助手
+            {scheduleMode
+              ? <CalendarDays size={13} className="text-[var(--accent)]" />
+              : <Sparkles size={13} className="text-[var(--accent)]" />}
+            {headerTitle ?? 'AI 助手'}
           </span>
-          {/* N-5/N-7 拍板④：助手要求与术语表常驻入口（右栏 AI 态头部与悬浮侧栏同位） */}
-          <AssistantEntryButton activeId={activeId} />
+          {/* N-5/N-7 拍板④：助手要求与术语表常驻入口（右栏 AI 态头部与悬浮侧栏同位）；日程助手不适用 */}
+          {!scheduleMode && <AssistantEntryButton activeId={activeId} />}
           {isNarrow && onExpand && (
             <button onClick={onExpand} title="扩大为完整对话页"
               className="ml-auto rounded p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
@@ -340,7 +362,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                           activeId === sess.id ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                         }`}>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate">{sess.title}</span>
+                          {/* 日程助手「一天一个会话」：列表按**日期**展示（会话标题是首条消息，不如日期直观） */}
+                          <span className="block truncate">{scheduleMode ? schedDayLabel(sess.createdAt) : sess.title}</span>
                           <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
                         </span>
                         <SessionRunMark mark={runStateOf(sess.id)} />
@@ -470,7 +493,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   </span>
                 )}
 
-                {attachedFiles.length > 0 && (
+                {!scheduleMode && attachedFiles.length > 0 && (
                   <div className="mb-1 flex flex-wrap gap-1">
                     {attachedFiles.map(f => (
                       <span key={f.pageId} className="inline-flex max-w-full items-center gap-1 rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-1.5 py-0.5 text-[10.5px] text-[var(--text-secondary)]">
@@ -491,7 +514,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     正在压缩对话历史…（可能数十秒，期间暂不能发送）
                   </div>
                 )}
-                {pickedSkill && (
+                {!scheduleMode && pickedSkill && (
                   <span className="mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
                     <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
                     <span className="truncate">Skill：{pickedSkill.title} · 本轮显式生效</span>
@@ -513,7 +536,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       setInput(v); setSlashActive(0)
                       // @ 唤起：本次输入**新插入了一个 `@`**，且它落在行首或空白之后
                       // （`@` 是 ASCII 直输、不进 composition，中文输入法场景天然安全）
-                      if (atPosRef.current === null && v.length === input.length + 1) {
+                      // 日程助手面关闭 @ 引用（差异化：不读仓库笔记）
+                      if (!scheduleMode && atPosRef.current === null && v.length === input.length + 1) {
                         const caret = e.target.selectionStart
                         const at = caret - 1
                         if (v[at] === '@' && (at === 0 || /\s/.test(v[at - 1]))) {
@@ -538,7 +562,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       if (atPosRef.current !== null) syncAtQuery(e.currentTarget.value, e.currentTarget.selectionStart)
                     }}
                     rows={isNarrow ? 2 : 3}
-                    placeholder="问问任何事…（@ 引用笔记 / Enter 发送）"
+                    placeholder={scheduleMode ? '对日程助手说…（/ 唤起指令 · Enter 发送）' : '问问任何事…（@ 引用笔记 / Enter 发送）'}
                     className={`w-full appearance-none px-0.5 py-1 text-[12px] resize-none outline-none bg-transparent! border-0! rounded-none! ${shell.ta ?? ''}`}
                   />
                   {/* ↑ bg-transparent! 等 Tailwind v4 important 修饰符：styles/index.css 的全局
@@ -550,9 +574,10 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     → 📎 附加文件 / 对话模型 / 消耗查看 —— 发送钮右置 */}
                 <div className="relative flex items-center gap-0.5 mt-1">
                   {inputBarLeft}
-                  {variant !== 'sidebar' && (
+                  {variant !== 'sidebar' && !scheduleMode && (
                     <PerceptionToggle on={perceptionOn} onToggle={togglePerception} />
                   )}
+                  {!scheduleMode && (<>
                   <button
                     onClick={() => setPop(p => (p === 'files' ? null : 'files'))}
                     title="添加文件作为上下文（模型按需读取全文）"
@@ -603,6 +628,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     <Coins size={12} />
                     {!isNarrow && <span className="leading-none">消耗</span>}
                   </button>
+                  </>)}
                   <span className="flex-1" />
                   <button onClick={() => { void send() }} disabled={pending || compressing || !input.trim()} title="发送"
                     className="h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">

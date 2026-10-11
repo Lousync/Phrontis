@@ -44,6 +44,7 @@ import type { SummaryKind } from './lib/summary'
 import { ScheduleModule } from './modules/schedule'
 import { AccountingModule } from './modules/accounting'
 import { ACCOUNTING_EDIT_EVENT, ACCOUNTING_NEW_EVENT, ACCOUNTING_RECUR_NEW_EVENT, ACCOUNTING_RECUR_EDIT_EVENT } from './modules/accounting/shared'
+import { SCHEDULE_OPEN_ASSISTANT_EVENT } from './modules/schedule/shared'
 import { KnowledgeModule } from './modules/knowledge'
 import { MomentsModule } from './modules/moments'
 import { RecycleBinModule } from './modules/recycle'
@@ -639,6 +640,13 @@ export default function App() {
       window.removeEventListener(ACCOUNTING_RECUR_NEW_EVENT, onRecurNew)
       window.removeEventListener(ACCOUNTING_RECUR_EDIT_EVENT, onRecurEdit)
     }
+  }, [wbLayout, update])
+  // 日程「＋ 一句话加任务」→ 展开右栏 + 切到「日程助手」Tab（同记账：右栏折叠时面板已卸载，
+  // 监听必须挂 App 层；聚焦输入由 ScheduleAssistantPanel 挂载时自理）
+  useEffect(() => {
+    const onOpenScheduleAssistant = () => update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'schedule', rightCollapsed: false }))
+    window.addEventListener(SCHEDULE_OPEN_ASSISTANT_EVENT, onOpenScheduleAssistant)
+    return () => window.removeEventListener(SCHEDULE_OPEN_ASSISTANT_EVENT, onOpenScheduleAssistant)
   }, [wbLayout, update])
   useEffect(() => {
     const handler = (e: Event) => {
@@ -1559,6 +1567,8 @@ export default function App() {
                   reading={rightReading}
                   // 记账模块激活 → 右栏出现条件性「记账」面板 Tab（记一笔 + JSON 导入）
                   accountingActive={activeTab === 'accounting'}
+                  // 日程模块激活 → 右栏出现条件性「日程助手」Tab（日程 AI 化 P1）
+                  scheduleActive={activeTab === 'schedule'}
                   pendingAccountingEdit={pendingAccountingEdit}
                   onConsumeAccountingEdit={() => setPendingAccountingEdit(null)}
                   pendingAccountingRule={pendingAccountingRule}

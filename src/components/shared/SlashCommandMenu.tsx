@@ -11,7 +11,7 @@
  */
 import { useMemo } from 'react'
 import type { SkillInfo } from '../../types'
-import { CHAT_COMMANDS } from '../../lib/chatCommands'
+import { commandsForSurface, type ChatSurface } from '../../lib/chatCommands'
 import { Zap, Wrench, Check } from 'lucide-react'
 
 export interface SlashMenuItem {
@@ -34,10 +34,13 @@ function shortDesc(d: string): string {
   return s.length > 40 ? s.slice(0, 40) + '…' : s
 }
 
-/** 合并候选表（指令在前、Skill 在后）。`extra` 供调用面注入面内专属指令（如 AI 教学的 /mindmap）。 */
-export function buildSlashItems(skills: SkillInfo[], extra: SlashMenuItem[] = []): SlashMenuItem[] {
+/**
+ * 合并候选表（指令在前、Skill 在后）。`extra` 供调用面注入面内专属指令（如 AI 教学的 /mindmap）。
+ * `surface` 非空时按聊天面过滤内置指令（日程助手只出 `/简报` 体系，通用助手只出 `/compress`）。
+ */
+export function buildSlashItems(skills: SkillInfo[], extra: SlashMenuItem[] = [], surface?: ChatSurface): SlashMenuItem[] {
   const cmds: SlashMenuItem[] = [
-    ...CHAT_COMMANDS.map((c) => ({
+    ...commandsForSurface(surface).map((c) => ({
       kind: 'command' as const,
       name: c.name,
       title: `/${c.name}`,

@@ -1,18 +1,21 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Maximize2, Zap, ChevronDown, RotateCcw, Trash2, Check, CalendarDays, LayoutGrid } from 'lucide-react'
-import type { ScheduleTodo, ScheduleTag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO } from '../../types'
+import { Plus, Maximize2, Zap, ChevronDown, RotateCcw, Trash2, Check, CalendarDays, LayoutGrid, Sparkles } from 'lucide-react'
+import type { ScheduleTodo, ScheduleTag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, ScheduleRecurring } from '../../types'
 import { registerAssistantContext } from '../../lib/assistantContext'
 import {
   getScheduleTodos, getScheduleDates, getScheduleMonthTodos, getScheduleDeadlineCounts,
   createScheduleTodo, updateScheduleTodo, deleteScheduleTodo, getScheduleTags, getScheduleSubtasks,
   getScheduleUnscheduledTodos, getScheduleWeekTodos,
-  createScheduleTag, deleteScheduleTag, getSetting, setSetting
+  createScheduleTag, deleteScheduleTag, getSetting, setSetting,
+  scheduleRecurringList, scheduleRecurringSettle, scheduleRecurringUndoSettle
 } from '../../lib/ipc'
 import { CalendarView } from './views/CalendarView'
 import type { ViewMode } from './types'
 import { mondayOfWeek, dayFromMonday, toDateStr } from './timetable'
 import { ViewSwitcher } from './components/ViewSwitcher'
+import { RecurringRulesPanel } from './components/RecurringRulesPanel'
+import { requestScheduleAssistant, SCHEDULE_OPEN_WEEK_EVENT } from './shared'
 import { TaskTray } from './components/TaskTray'
 import { TimetableView } from './views/TimetableView'
 import { TodoItem } from './components/TodoItem'
@@ -118,6 +121,8 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
   const [subtasksMap, setSubtasksMap] = useState<Record<string, ScheduleTodo[]>>({})
   /** 日程表「待安排」栏：全部未排期的顶层未完成任务（三类任务都可进） */
   const [unscheduled, setUnscheduled] = useState<ScheduleTodo[]>([])
+  /** 固定日程（重复任务）规则 */
+  const [recurring, setRecurring] = useState<ScheduleRecurring[]>([])
   /** 递增信号：排期变化后通知 TimetableView 重取本周数据 */
   const [weekRefresh, setWeekRefresh] = useState(0)
 
@@ -207,6 +212,10 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
     } catch (e) { console.error(e) }
   }
 
+  const refreshRecurring = useCallback(async () => {
+    try { setRecurring(await scheduleRecurringList()) } catch (e) { console.error(e) }
+  }, [])
+
   /** 左栏「周任务」清单：本周（自然周）全部任务，含已完成。复用 vaultTodosForWeek（已按周取数） */
   // 必须是稳定引用：下方 `useEffect(..., [trayMode, weekStart, weekEnd, refreshWeekTasks])` 把它列进依赖，
   // 而它内部又 setWeekTasks（filter 出来的新数组 = 新引用）触发重渲染 —— 引用一旦不稳定，
@@ -220,7 +229,28 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
     } catch (e) { console.error(e) }
   }, [weekStart, weekEnd])
 
-  async function refreshAll() { await Promise.all([refreshDotDates(), refreshMonthTodos(), refreshUnscheduled()]) }
+  async function refreshAll() { await Promise.all([refreshDotDates(), refreshMonthTodos(), refreshUnscheduled(), refreshRecurring()]) }
+
+  // 固定日程：打开模块时结算一次（幂等，补齐当周应生成），可撤销
+  const recSettledRef = useRef(false)
+  useEffect(() => {
+    if (recSettledRef.current) return
+    recSettledRef.current = true
+    void (async () => {
+      try {
+        const res = await scheduleRecurringSettle()
+        if (res.added > 0) {
+          const ids = res.items.map((i) => i.id)
+          showToast({
+            type: 'success', duration: 9000,
+            message: `已生成固定日程 ${res.added} 项`,
+            action: { label: '撤销', onClick: () => { void (async () => { await scheduleRecurringUndoSettle(ids, res.restore).catch(() => { }); await refreshAll() })() } },
+          })
+          await refreshAll()
+        }
+      } catch { /* 仓库未打开等，忽略 */ }
+    })()
+  }, [refreshAll])
 
   const loadTags = useCallback(async () => {
     try {
@@ -281,6 +311,14 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
     setViewMode(mode)
     setSetting('scheduleViewMode', mode)
   }
+
+  // 排期预览卡「打开周日程」→ 切到「周日程」视图（不自动切，用户点才触发）
+  useEffect(() => {
+    const onOpenWeek = () => handleViewModeChange('week')
+    window.addEventListener(SCHEDULE_OPEN_WEEK_EVENT, onOpenWeek)
+    return () => window.removeEventListener(SCHEDULE_OPEN_WEEK_EVENT, onOpenWeek)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function openQuadrantChart() { await refreshMonthTodos(); setQuadrantOpen(true) }
 
@@ -606,6 +644,13 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
           <span className="text-[11.5px] font-medium text-[var(--text-muted)] truncate">{viewTitle}</span>
         )}
         <div className="ml-auto flex items-center gap-0.5">
+          <button
+            onClick={requestScheduleAssistant}
+            title="一句话加任务（打开日程助手）"
+            className="mr-1 flex items-center gap-1 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-2 py-[3px] text-[11.5px] text-white transition-opacity hover:opacity-90"
+          >
+            <Sparkles size={12} /> 一句话加任务
+          </button>
           {viewMode === 'quadrant' && (
             <button onClick={openQuadrantChart} title="打开象限图"
               className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
@@ -672,6 +717,8 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
               </>
             )}
           </div>
+          {/* 固定日程（重复任务）：用户手动入口 + 规则列表（不随视图切换） */}
+          <RecurringRulesPanel rules={recurring} onReload={refreshRecurring} />
           <div className="flex-1 min-h-0 overflow-hidden">
             {shownMode === 'week' ? (
               <TaskTray

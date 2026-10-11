@@ -21,8 +21,8 @@ export interface WorkbenchLayout {
   leftLocked: boolean
   /** 右栏收起 */
   rightCollapsed: boolean
-  /** 右栏 Tab：小工具 / AI / 分享 + 条件性 'reading' / 'account'（见 RIGHT_PANEL_TAB_IDS_ALL） */
-  rightTab: 'widgets' | 'ai' | 'share' | 'reading' | 'account'
+  /** 右栏 Tab：小工具 / AI / 分享 + 条件性 'reading' / 'account' / 'schedule'（见 RIGHT_PANEL_TAB_IDS_ALL） */
+  rightTab: 'widgets' | 'ai' | 'share' | 'reading' | 'account' | 'schedule'
   /** 右栏控件排序（今日任务 task / 今日打卡 habit / 番茄钟 pomo / 网址导航 nav / 密码生成器 password） */
   widgetOrder: string[]
   /** 右栏隐藏的控件 id（⋯ 菜单选显） */
@@ -71,7 +71,7 @@ export const WORKBENCH_PANEL_TAB_IDS = ['widgets', 'ai', 'share'] as const
  * 关书回落逻辑在 WorkbenchRightPanel.effectiveTab（回落到 widgets/ai，不改持久化值的语义见彼处）。
  * 两集合刻意不同，勿合并（防 list-drift：契约脚本双向断言）。
  */
-export const RIGHT_PANEL_TAB_IDS_ALL = ['widgets', 'ai', 'share', 'reading', 'account'] as const
+export const RIGHT_PANEL_TAB_IDS_ALL = ['widgets', 'ai', 'share', 'reading', 'account', 'schedule'] as const
 
 export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   leftCollapsed: false,
@@ -101,7 +101,7 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       if (o.leftMode === 'overview' || o.leftMode === 'tree') base.leftMode = o.leftMode
       if (typeof o.leftLocked === 'boolean') base.leftLocked = o.leftLocked
       if (typeof o.rightCollapsed === 'boolean') base.rightCollapsed = o.rightCollapsed
-      if (o.rightTab === 'widgets' || o.rightTab === 'ai' || o.rightTab === 'share' || o.rightTab === 'reading' || o.rightTab === 'account') base.rightTab = o.rightTab
+      if (o.rightTab === 'widgets' || o.rightTab === 'ai' || o.rightTab === 'share' || o.rightTab === 'reading' || o.rightTab === 'account' || o.rightTab === 'schedule') base.rightTab = o.rightTab
       if (Array.isArray(o.widgetOrder)) {
         const known = new Set<string>(WORKBENCH_WIDGET_IDS)
         const filtered = o.widgetOrder.filter((x): x is string => typeof x === 'string' && known.has(x))

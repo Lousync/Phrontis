@@ -591,6 +591,9 @@ export interface ScheduleTodo {
    * 缺省 / null = 未打盹。本轮日程改造新增的唯一字段。
    */
   snoozeUntil?: string | null
+  /** 固定日程（重复任务）生成的待办：来源规则 id + 本次日期 */
+  recurringId?: string | null
+  recurringDue?: string | null
   createdAt: string; updatedAt: string
   tag?: ScheduleTag | null
   subtasks?: ScheduleTodo[]
@@ -609,6 +612,50 @@ export interface UpdateScheduleTodoDTO {
   scheduledStart?: number | null; scheduledEnd?: number | null
   /** 提醒「稍后」目标时间；传 null 表示清除打盹 */
   snoozeUntil?: string | null
+}
+
+// 固定日程（重复任务）—— 与主进程 src/lib/scheduleRecurringPure.ts 的 ScheduleRecurring 同形状
+export interface ScheduleRecurring {
+  id: string
+  title: string
+  /** weekly：每周 weekdays；monthly：每月 day 号；interval：每 intervalDays 天 */
+  freq: 'weekly' | 'monthly' | 'interval'
+  /** 0=周一 … 6=周日（仅 weekly 用） */
+  weekdays: number[]
+  day: number | null
+  intervalDays: number | null
+  /** 排期时段（当天分钟数，540=09:00） */
+  startMin: number
+  endMin: number
+  taskType: 'plan' | 'deadline' | 'daily'
+  quadrant: number
+  tagId: string | null
+  enabled: boolean
+  /** 到期日 YYYY-MM-DD（空 = 长期） */
+  endDate: string
+  lastPostedDate: string
+  createdAt: string
+  updatedAt: string
+}
+export interface CreateScheduleRecurringDTO {
+  title: string
+  freq: 'weekly' | 'monthly' | 'interval'
+  weekdays?: number[]
+  day?: number | null
+  intervalDays?: number | null
+  startMin: number
+  endMin?: number | null
+  taskType?: 'plan' | 'deadline' | 'daily'
+  quadrant?: number
+  tagId?: string | null
+  enabled?: boolean
+  endDate?: string
+  lastPostedDate?: string
+}
+export interface ScheduleRecurringSettleResult {
+  added: number
+  items: Array<{ id: string; ruleId: string; title: string; due: string }>
+  restore: Array<{ ruleId: string; lastPostedDate: string }>
 }
 
 // knowledge
@@ -1101,7 +1148,7 @@ export interface AgentContextInfo {
 
 /** 会话来源：把「通用 AI 助手」（侧栏 / AI 学堂）与「AI 教学」的会话列表互相隔离。
  *  二者同表存储、同一套 AgentRunner，仅列表展示分流。与主进程 agentSessionRepo 同构。 */
-export type AgentSessionSource = 'assistant' | 'aiTeaching'
+export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule'
 
 export interface AgentSessionInfo {
   id: string
@@ -1813,6 +1860,13 @@ export interface ElectronAPI {
   getScheduleTags: () => Promise<ScheduleTag[]>
   createScheduleTag: (n: string, c?: string) => Promise<ScheduleTag>
   deleteScheduleTag: (id: string) => Promise<void>
+  /** 固定日程（重复任务） */
+  scheduleRecurringList: () => Promise<ScheduleRecurring[]>
+  scheduleRecurringCreate: (d: CreateScheduleRecurringDTO) => Promise<ScheduleRecurring>
+  scheduleRecurringUpdate: (id: string, patch: Partial<ScheduleRecurring>) => Promise<ScheduleRecurring | null>
+  scheduleRecurringDelete: (id: string) => Promise<boolean>
+  scheduleRecurringSettle: () => Promise<ScheduleRecurringSettleResult>
+  scheduleRecurringUndoSettle: (todoIds: string[], restore: Array<{ ruleId: string; lastPostedDate: string }>) => Promise<number>
   /** 日程截止提醒的系统通知被点击 → 主窗口切到日程模块 */
   onScheduleReminderClick: (cb: () => void) => () => void
   // knowledge (Scheme A)

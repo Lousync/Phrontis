@@ -24,7 +24,8 @@ import { searchHelp, helpCatalog } from './helpService'
 import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries } from './kbStore/blogVaultRepo'
 import { normalizeBlogDate, nearestEntryDates, blogHitExcerpt, splitBlogSearchTerms } from './blogToolsPure'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
-import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, type TodoRow } from './kbStore/scheduleVaultRepo'
+import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, vaultScheduleRecurringAll, vaultScheduleCreateRecurring, vaultScheduleUpdateRecurring, vaultScheduleDeleteRecurring, type TodoRow } from './kbStore/scheduleVaultRepo'
+import { hmToMin, minToHm } from '../../src/lib/scheduleRecurringPure'
 import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from './kbStore/accountingVaultRepo'
 // 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
 // 依赖方向已核：pluginEvents 的依赖树不反向 import 本模块，无循环。
@@ -814,6 +815,36 @@ export function registerBuiltinTools(): void {
     return { windowDays: days, totalMinutes, totalSessions, days: out }
   })
 
+  // 6b. builtin.time.now —— 当前时间（**核心只读工具**：通用助手 / 日程助手 / AI 教学 三面处处可用）
+  // 模型自身不知道「今天几号 / 现在几点」，靠此工具定位；schema 极小，常驻成本可忽略。
+  registerTool({
+    name: 'builtin.time.now',
+    title: '获取当前时间',
+    description: '返回当前日期、星期、时刻（本地时区）与本周一/周日。需要知道今天几号、星期几、现在几点时调用。',
+    inputSchema: { type: 'object', properties: {} },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+  }, () => {
+    const now = new Date()
+    const p = (n: number) => String(n).padStart(2, '0')
+    const fmt = (d: Date) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    const date = fmt(now)
+    const hhmm = `${p(now.getHours())}:${p(now.getMinutes())}`
+    const mon = new Date(now); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7))
+    const sun = new Date(mon); sun.setDate(sun.getDate() + 6)
+    return {
+      date,
+      weekday: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()],
+      time: hhmm,
+      datetime: `${date} ${hhmm}`,
+      iso: now.toISOString(),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      weekMonday: fmt(mon),
+      weekSunday: fmt(sun),
+    }
+  })
+
   // 7. builtin.schedule.list-todos —— 日程待办查询（读）
   registerTool({
     name: 'builtin.schedule.list-todos',
@@ -855,6 +886,8 @@ export function registerBuiltinTools(): void {
         // 看不到 tagId → create/update 的 tagId 参数根本没有取值来源。
         taskType: str(r.task_type, 'plan'),
         tagId: r.tag_id ?? null,
+        // 完成标准/目标（plan 类）：AI 需要能「看见」已有目标，否则无从判断进度与关联
+        endCriteria: r.end_criteria ?? '',
         scheduledStart: r.scheduled_start ?? null,
         scheduledEnd: r.scheduled_end ?? null,
         parentId: r.parent_id ?? null,
@@ -956,6 +989,7 @@ export function registerBuiltinTools(): void {
         taskType: { type: 'string', enum: ['plan', 'deadline', 'daily'], description: "任务类型：plan 计划 / deadline 截止类 / daily 零碎当天完成，默认 plan" },
         time: { type: 'string', description: "截止时刻，完整格式 'YYYY-MM-DD HH:mm'（deadline 类才带）；仅当文本里识别出明确时间承诺才传，否则不传、不编造" },
         tagId: { type: 'string', description: '标签 ID（来自 schedule:getTags 或列表结果），可选' },
+        endCriteria: { type: 'string', description: '完成标准/目标（仅 plan 计划类有意义，如「能默写第三章公式」），可选' },
         scheduledStart: { type: 'number', description: '排期起点（当天分钟数 0-1439，如 09:00=540），配合 date 与 scheduledEnd 落格；可选' },
         scheduledEnd: { type: 'number', description: '排期终点（当天分钟数），可选' },
       },
@@ -990,7 +1024,9 @@ export function registerBuiltinTools(): void {
     vaultCreateTodo({
       id, title, description: '', date, time: finalTime, quadrant,
       task_type: taskType, tag_id: tagId, status: 'pending', sort_order: 0,
-      end_criteria: '', parent_id: null,
+      // 完成标准只在 plan 计划类带（与 UI 的 endCriteria 同口径：非 plan 丢弃，避免脏数据）
+      end_criteria: taskType === 'plan' ? str(args.endCriteria).trim() : '',
+      parent_id: null,
       // AI 建的任务默认不排期（除非显式传 scheduledStart/End），落进「待安排」栏等着被拖进日程表
       scheduled_start: scheduledStart, scheduled_end: scheduledEnd,
       snooze_until: null,
@@ -1082,6 +1118,129 @@ export function registerBuiltinTools(): void {
     vaultDeleteTodoCascade(id)
     broadcastDataChanged('schedule')
     return { ok: true, ...summary }
+  })
+
+  // ===== 固定日程（重复任务）=====
+  // 11d. builtin.schedule.list-recurring —— 固定日程查询（读）
+  registerTool({
+    name: 'builtin.schedule.list-recurring',
+    title: '查询固定日程',
+    description: '列出全部固定日程（重复任务）规则：id / 标题 / 重复方式 / 时段 / 是否启用',
+    inputSchema: { type: 'object', properties: {} },
+    source: 'builtin', enabled: true, readOnly: true, module: 'schedule',
+  }, () => {
+    return vaultScheduleRecurringAll().map(r => ({
+      id: r.id, title: r.title, freq: r.freq,
+      weekdays: r.weekdays, day: r.day, intervalDays: r.intervalDays,
+      start: minToHm(r.startMin), end: minToHm(r.endMin),
+      enabled: r.enabled, endDate: r.endDate,
+    }))
+  })
+
+  // 11e. builtin.schedule.create-recurring —— 创建固定日程（写）
+  registerTool({
+    name: 'builtin.schedule.create-recurring',
+    title: '创建固定日程',
+    description: '创建固定日程（重复任务，如「每周六下午洗衣服」）。freq=weekly 传 weekdays（0=周一…6=周日，可多个）；monthly 传 day（每月几号）；interval 传 intervalDays。start/end 为 HH:mm，会占日程表时间格（end 缺省 = start+1 小时）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '事项（如 洗衣服洗袜子）' },
+        freq: { type: 'string', enum: ['weekly', 'monthly', 'interval'], description: '重复方式' },
+        weekdays: { type: 'array', items: { type: 'number' }, description: '每周几（0=周一…6=周日），freq=weekly 时用' },
+        day: { type: 'number', description: '每月几号 1-31，freq=monthly 时用' },
+        intervalDays: { type: 'number', description: '每几天一次，freq=interval 时用' },
+        start: { type: 'string', description: '时段起点 HH:mm（如 14:00）' },
+        end: { type: 'string', description: '时段终点 HH:mm（缺省 = start+1 小时）' },
+        quadrant: { type: 'number', description: '0紧急重要/1重要不紧急/2紧急不重要/3不重要，默认1' },
+        tagId: { type: 'string', description: '标签 id，可选' },
+        endDate: { type: 'string', description: '重复到哪天为止 YYYY-MM-DD，可选（长期不传）' },
+      },
+      required: ['title', 'freq'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const freqRaw = str(args.freq)
+    const freq = (['weekly', 'monthly', 'interval'] as const).includes(freqRaw as 'weekly') ? (freqRaw as 'weekly' | 'monthly' | 'interval') : 'weekly'
+    const startMin = hmToMin(str(args.start), 540)
+    const endMin = args.end !== undefined ? hmToMin(str(args.end), startMin + 60) : startMin + 60
+    const row = vaultScheduleCreateRecurring({
+      title: str(args.title), freq,
+      weekdays: Array.isArray(args.weekdays) ? args.weekdays.map((n) => num(n, 0)) : [],
+      day: typeof args.day === 'number' ? args.day : null,
+      intervalDays: typeof args.intervalDays === 'number' ? args.intervalDays : null,
+      startMin, endMin, quadrant: num(args.quadrant, 1),
+      tagId: str(args.tagId).trim() ? str(args.tagId).trim() : null,
+      endDate: str(args.endDate),
+    })
+    broadcastDataChanged('schedule')
+    return { ok: true, id: row.id, title: row.title, freq: row.freq, start: minToHm(row.startMin), end: minToHm(row.endMin) }
+  })
+
+  // 11f. builtin.schedule.update-recurring —— 修改固定日程（写）
+  registerTool({
+    name: 'builtin.schedule.update-recurring',
+    title: '修改固定日程',
+    description: '按 id 修改固定日程：改标题 / 重复方式（weekdays / day / intervalDays）/ 时段（start / end，HH:mm）/ 暂停启用（enabled）/ 结束日期。id 必须先由 list-recurring 取到。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '固定日程 id（来自 list-recurring）' },
+        title: { type: 'string', description: '标题' },
+        freq: { type: 'string', enum: ['weekly', 'monthly', 'interval'], description: '重复方式' },
+        weekdays: { type: 'array', items: { type: 'number' }, description: '每周几（0=周一…6=周日）' },
+        day: { type: 'number', description: '每月几号 1-31' },
+        intervalDays: { type: 'number', description: '每几天一次' },
+        start: { type: 'string', description: '时段起点 HH:mm' },
+        end: { type: 'string', description: '时段终点 HH:mm' },
+        enabled: { type: 'boolean', description: 'true 启用 / false 暂停' },
+        endDate: { type: 'string', description: '重复到哪天为止 YYYY-MM-DD（空串 = 长期）' },
+        quadrant: { type: 'number', description: '象限 0..3' },
+        tagId: { type: 'string', description: '标签 id（空串=清空）' },
+      },
+      required: ['id'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    const patch: Record<string, unknown> = {}
+    if (args.title !== undefined) patch.title = str(args.title)
+    if (args.freq !== undefined) patch.freq = str(args.freq)
+    if (Array.isArray(args.weekdays)) patch.weekdays = args.weekdays.map((n) => num(n, 0))
+    if (typeof args.day === 'number') patch.day = args.day
+    if (typeof args.intervalDays === 'number') patch.intervalDays = args.intervalDays
+    if (args.start !== undefined) patch.startMin = hmToMin(str(args.start), 540)
+    if (args.end !== undefined) patch.endMin = hmToMin(str(args.end), 600)
+    if (typeof args.enabled === 'boolean') patch.enabled = args.enabled
+    if (args.endDate !== undefined) patch.endDate = str(args.endDate)
+    if (typeof args.quadrant === 'number') patch.quadrant = args.quadrant
+    if (args.tagId !== undefined) patch.tagId = str(args.tagId).trim() || null
+    if (Object.keys(patch).length === 0) throw new Error('没有可修改的字段')
+    const row = vaultScheduleUpdateRecurring(id, patch as never)
+    if (!row) throw new Error(`未找到固定日程 id=${id}：请先用 list-recurring 确认`)
+    broadcastDataChanged('schedule')
+    return { ok: true, id: row.id, title: row.title, enabled: row.enabled }
+  })
+
+  // 11g. builtin.schedule.delete-recurring —— 删除固定日程（写）
+  registerTool({
+    name: 'builtin.schedule.delete-recurring',
+    title: '删除固定日程',
+    description: '按 id 删除固定日程（规则删除；已生成的待办保留）。必须先 list-recurring 确认 id 与标题相符再调用。',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: '固定日程 id（来自 list-recurring）' } },
+      required: ['id'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    const ok = vaultScheduleDeleteRecurring(id)
+    if (!ok) throw new Error(`未找到固定日程 id=${id}：请先用 list-recurring 确认`)
+    broadcastDataChanged('schedule')
+    return { ok: true, id }
   })
 
   // 12. builtin.checkin.check-habit
@@ -1252,7 +1411,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {

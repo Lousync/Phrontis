@@ -29,6 +29,7 @@ import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiT
 import { buildCourseInjection } from './aiTeachingCourse'
 import { findSkillPrompt } from './skillService'
 import { recordAiUsage, recordSessionFileChange, getAiUsageData, getSessionChanges } from './agentUsage'
+import { vaultTodosAll } from './kbStore/scheduleVaultRepo'
 
 /**
  * 最小 AgentRunner —— 「用户消息 → LLM 决策 → ToolRegistry 执行 → 结果回喂」循环。
@@ -427,8 +428,10 @@ function buildToolsPayload(sessionId?: string, only?: string[]): {
       deniedModules.add('terminal')
       return false
     }
-    // P3 装载层：ondemand 工具仅在会话内被 tool.request 启用后才进入视野
-    if (t.tier === 'ondemand' && !extraTools?.has(t.name)) {
+    // P3 装载层：ondemand 工具仅在会话内被 tool.request 启用后才进入视野。
+    // 例外：显式白名单（`only`，如手册通道 / 日程助手）内的工具视为「已启用」——
+    // 白名单本身就是调用方对可见性的明确决定。
+    if (t.tier === 'ondemand' && !onlySet?.has(t.name) && !extraTools?.has(t.name)) {
       hasOnDemandHidden = true
       return false
     }
@@ -506,6 +509,80 @@ function buildSystemPrompt(context?: AgentContextInfo): string {
     '\n用户的问题大概率与该上下文相关；若需要更多数据仍应调用工具。'
 }
 
+// ===== 日程助手（source === 'schedule'）—— docs / .claude/plans/schedule-assistant-p1.md =====
+/** 日程助手工具白名单：只把日程工具放进模型视野（与通用助手的宽工具面分化，铁律 16：少工具 = 少误触/少 token） */
+const SCHEDULE_TOOL_NAMES = [
+  'builtin.schedule.list-todos',
+  'builtin.schedule.create-todo',
+  'builtin.schedule.update-todo',
+  'builtin.schedule.delete-todo',
+  'builtin.schedule.list-recurring',
+  'builtin.schedule.create-recurring',
+  'builtin.schedule.update-recurring',
+  'builtin.schedule.delete-recurring',
+]
+
+/** 日程助手人设/规则（逐字稳定 → 进 system，命中 prompt cache 前缀） */
+const SCHEDULE_PERSONA = [
+  '\n\n【日程助手】你是 Phrontis 的「日程助手」——只负责日程/待办的排程、优先级与提醒，不处理知识库、记账、学习、博客等其它事务。规则：',
+  '1. 只使用日程相关工具（schedule.*）；其它模块的工具不可用，也不要尝试。',
+  // 任务类型（三类，务必建对；这是最容易出错的地方）
+  '2. 任务分三类，按语义选对 taskType：',
+  '   · deadline（截止类）——有「截止时刻」的任务（交报告、考试、报名/提交截止）。必须 taskType:"deadline" 且 time 用**完整时刻** "YYYY-MM-DD HH:mm"（说不出具体时刻就取当天 23:59）；**不要**传 scheduledStart/scheduledEnd（截止类不占时间格，只画一条红线）。',
+  '   · plan（计划类 / 目标类）——要推进但无固定截止的目标（复习完第三章、写完论文初稿）。taskType:"plan"；可在 endCriteria 写「完成标准 / 目标」（如「能默写全部公式」）。',
+  '   · daily（零碎）——当天随手完成的小事。taskType:"daily"；不传 time、不传 endCriteria。',
+  // 两种「时间」严格区分
+  '3. 两种时间语义严格分开：**排期时段** scheduledStart/scheduledEnd（当天分钟数，09:00=540；「X 点做 Y 小时」→ end = start + Y*60）是「排进日程表时间格」；**截止时刻** time 是「几点前必须完成」。一句话里两种都可能出现，按语义分别处理：「周五 23:59 前交报告」= 截止类（deadline+time）；「明天下午 3 点复习 2 小时」= 计划类 + 排期 15:00–17:00。',
+  // 时间敏感：相对时间必须换算成具体日期
+  '4. 对时间要敏感：系统在【日程数据】里给出了**当前日期、星期、时刻**（「现在：YYYY-MM-DD 周X HH:mm」）与本周一/下周一。以它为锚点把相对时间换算成**具体日期（必要时含时刻）**再动手——今天/明天/后天、本周X / 下周X / 下下周X、这周末、X 天后、月底；「过会儿 / 今晚 / 2 小时后」也按当前时刻算。上午≈09:00、中午≈12:00、下午≈14:00、晚上≈19:00（用户给了具体钟点就按用户的）。不要凭印象猜日期或现在几点；换算不确定就先问一句。',
+  // 批量排期预览
+  '5. 要把「待安排」批量排进周表时，先给一份**排期预览**：在正文里输出一个 ```schedule-preview 围栏代码块，块内是 JSON（不要注释）：{"title":"本周排期","items":[{"date":"YYYY-MM-DD","start":"HH:mm","end":"HH:mm","title":"任务名"}]}；再用一两句说明是否与已有安排冲突。等用户确认后再用 update-todo 逐条落盘；**只排非 deadline 的任务**（截止类不占格）。未经确认不要批量改期。',
+  // 改期 / 改截止
+  '6. 改期 / 取消排期用 update-todo 的 scheduledStart/scheduledEnd（传 null = 移除时段）；改截止时刻用 update-todo 的 time（并确保 taskType 仍为 "deadline"）。',
+  // 固定日程（重复任务）
+  '7. 固定日程（重复任务）：用户说「每周X / 每月X号 / 每N天 + 事项」（如「每周六下午洗衣服」「每月 1 号交房租」）时，用 **create-recurring** 建**重复规则**（freq + weekdays/day/intervalDays + start/end 时段），**不要**建成一次性待办；建之前可先用 list-recurring 看是否已存在同名规则。改规则用 update-recurring（先 list-recurring 取 id）；暂停传 enabled:false；取消用 delete-recurring。注意区分：改「规则」（以后每次都变）用 update-recurring，只改「某一次」的待办才用 update-todo。',
+  // 回答口径
+  '8. 回答简洁，用简体中文。涉及时间用「周三 10/14 19:00–20:30」这类明确写法，便于用户对照日程表。',
+].join('\n')
+
+function pad2(n: number): string { return String(n).padStart(2, '0') }
+function ymd(d: Date): string { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` }
+function fmtMinOfDay(m: number): string { return `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}` }
+function weekdayZh(d: Date): string { return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()] }
+/** 该日期所在周的周一（周一为一周之始） */
+function mondayOf(d: Date): Date { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
+
+/**
+ * 日程数据快照（每轮现算）——今日 / 逾期 / 近 3 天 DDL / 待安排。
+ * 逐字会变，故走**首条 user 消息层**（requestInjection）而非 system，避免打散 prompt cache。
+ * 总条数截断 ≤ ~40 条，防上下文膨胀。
+ */
+function buildScheduleInjection(): string {
+  const now = new Date()
+  const today = ymd(now)
+  const in3 = ymd(new Date(now.getTime() + 3 * 86400000))
+  const rows = vaultTodosAll().filter(r => r.status !== 'done' && !r.parent_id)
+  const when = (r: { scheduled_start?: number | null; scheduled_end?: number | null }): string =>
+    r.scheduled_start != null ? ` ${fmtMinOfDay(r.scheduled_start)}–${fmtMinOfDay(r.scheduled_end ?? r.scheduled_start)}` : ''
+  const fmt = (r: typeof rows[number]): string =>
+    `— ${r.title}（${r.date}${when(r)}${r.task_type === 'deadline' ? ` · DDL${r.time ? ' ' + r.time : ''}` : ''}）`
+  const todayRows = rows.filter(r => r.date === today)
+  const overdue = rows.filter(r => typeof r.date === 'string' && r.date !== '' && r.date < today)
+  const nearDdl = rows.filter(r => r.task_type === 'deadline' && r.date >= today && r.date <= in3)
+  const unscheduled = rows.filter(r => r.scheduled_start == null && r.scheduled_end == null && r.task_type !== 'deadline')
+  const cap = <T,>(arr: T[], n: number): T[] => arr.slice(0, n)
+  // 时间锚点：当前日期 + 星期 + **时刻** + 本周一/下周一（消除「本周X / 下周X」歧义，模型据此推算相对时间）
+  const thisMon = mondayOf(now)
+  const nextMon = new Date(thisMon); nextMon.setDate(nextMon.getDate() + 7)
+  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`
+  const parts: string[] = [`现在：${today} ${weekdayZh(now)} ${hhmm}（本周一 ${ymd(thisMon)} · 下周一 ${ymd(nextMon)}）`]
+  parts.push(todayRows.length ? `【今天 ${todayRows.length} 项】\n${cap(todayRows, 15).map(fmt).join('\n')}` : '【今天】暂无待办')
+  if (overdue.length) parts.push(`【逾期 ${overdue.length} 项】\n${cap(overdue, 10).map(fmt).join('\n')}`)
+  if (nearDdl.length) parts.push(`【近 3 天 DDL ${nearDdl.length} 项】\n${cap(nearDdl, 10).map(fmt).join('\n')}`)
+  if (unscheduled.length) parts.push(`【待安排 ${unscheduled.length} 项】\n${cap(unscheduled, 15).map(r => `— ${r.title}`).join('\n')}`)
+  return '\n\n【日程数据（本轮快照）】\n' + parts.join('\n')
+}
+
 async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: string): Promise<AgentChatResult> {
   const trace: AgentTraceStep[] = []
   const message = String(req?.message ?? '').trim()
@@ -514,14 +591,15 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
   // ---- 会话保障 ----
   let sessionId = String(req.sessionId ?? '')
   if (sessionId && !sessionExists(sessionId)) sessionId = ''
-  if (!sessionId) sessionId = createAgentSession('新会话', req.source === 'aiTeaching' ? 'aiTeaching' : 'assistant').id
+  if (!sessionId) sessionId = createAgentSession('新会话', req.source === 'aiTeaching' ? 'aiTeaching' : req.source === 'schedule' ? 'schedule' : 'assistant').id
 
   // ---- 落库用户消息 + 自动标题 ----
   appendAgentMessage(sessionId, 'user', message)
   ensureSessionTitle(sessionId, message)
 
   // ---- N-1 手册通道：首条消息一次性分类；手册通道内出现操作意图即升格（只升不降） ----
-  if (req.source !== 'aiTeaching') {
+  // 日程助手不走手册通道（req.source==='schedule' 恒走通用通道，见 runAgentLoop 的 manual 判定）
+  if (req.source !== 'aiTeaching' && req.source !== 'schedule') {
     const row = getAgentSession(sessionId)
     if (row && row.mode === undefined) {
       // 三分类：manual 走手册通道；agent 与 tech（第三方/通用技术问答）都走通用助手
@@ -613,10 +691,13 @@ async function runAgentLoop(
   }
 
   // N-1 手册通道：仅 assistant 来源、且会话已分类为 manual 时启用（AI 教学恒走通用通道）
+  // 来源：显式传入优先；缺省按会话记录回推（regenerate / edit 等不带 source 的路径）——
+  // 否则日程助手会话在这些路径会退化成通用助手（人设/工具面/摘要全丢）。
+  if (!source && sessionId) source = getAgentSession(sessionId)?.source
   const runModeRow = getAgentSession(sessionId)
-  const manual = source !== 'aiTeaching' && runModeRow?.mode === 'manual'
+  const manual = source !== 'aiTeaching' && source !== 'schedule' && runModeRow?.mode === 'manual'
   // P3 装载层：工具 payload 可能在循环中重建（tool.request 启用新工具后下一轮生效）
-  let toolsState = buildToolsPayload(sessionId, manual ? [MANUAL_CHANNEL_TOOL] : undefined)
+  let toolsState = buildToolsPayload(sessionId, manual ? [MANUAL_CHANNEL_TOOL] : source === 'schedule' ? SCHEDULE_TOOL_NAMES : undefined)
   let toolPayload = toolsState.payload
   const { nameMap, deniedModules, deniedVaultFile, skills } = toolsState
   // v3.1.2 条目11：支线写类工具**硬拦截**。模型视野里已经没有写工具（buildToolsPayload 已过滤），
@@ -806,6 +887,9 @@ async function runAgentLoop(
         : '\n\n【来源上下文（快照）】本条对话由主线会话的一条回答升格而来，以下是其来源快照（仅供参考背景；后续进展以本对话自身历史为准）。\n')
       + laneRow.sideContext
     : ''
+  // 日程助手（source==='schedule'）：人设进 system（逐字稳定）；数据快照进首条 user 消息层（每轮现算）
+  const schedulePersona = source === 'schedule' ? SCHEDULE_PERSONA : ''
+  const scheduleHint = source === 'schedule' ? buildScheduleInjection() : ''
   const baseSystem = buildSystemPrompt(context)
   // UI 优化条目9②：教学会话的注入分段用量（字符数，渲染层按 ≈2.6 字/token 折算做构成摘要）
   const injection: AiTeachInjectionStats | undefined = source === 'aiTeaching'
@@ -820,7 +904,7 @@ async function runAgentLoop(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+    : baseSystem + schedulePersona + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -848,7 +932,7 @@ async function runAgentLoop(
     })
     if (pr && pr.items.length > 0) perceptionInjection = buildPerceptionInjection({ items: pr.items, dropped: pr.dropped })
   }
-  const requestInjection = [refInjection, perceptionInjection].filter(Boolean).join('\n\n')
+  const requestInjection = [scheduleHint, refInjection, perceptionInjection].filter(Boolean).join('\n\n')
 
   // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
@@ -1337,7 +1421,7 @@ export function registerAgentHandlers(): void {
   ipcMain.handle('agent:newSession', (_e, title?: string, source?: string) =>
     camelRow(createAgentSession(
       typeof title === 'string' && title.trim() ? title.trim() : '新会话',
-      source === 'aiTeaching' ? 'aiTeaching' : 'assistant',
+      source === 'aiTeaching' ? 'aiTeaching' : source === 'schedule' ? 'schedule' : 'assistant',
     )))
   ipcMain.handle('agent:messages', (_e, id: string) => getAgentMessages(String(id ?? '')).map(camelRow))
   // AI 用量 / 会话文件改动（v3.4.0 批次5，方案 §4/§3.8）：右栏 token 面板只读
