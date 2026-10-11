@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Plus } from 'lucide-react'
+import { SIDEBAR_HEADER_ICON } from './sidebarHeaderIcon'
 
 /** 菜单项：key 由调用方定义语义（本组件不认识具体业务），icon 已带色，note 是右侧灰色小字 */
 export interface TreeNewMenuItem {
@@ -58,7 +59,7 @@ export function TreeNewButton({ items, onPick, title = '新建…' }: {
             : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
         }`}
       >
-        <Plus size={13} />
+        <Plus {...SIDEBAR_HEADER_ICON} />
       </button>
       {open && createPortal(
         <div

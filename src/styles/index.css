@@ -209,6 +209,12 @@ input:focus, textarea:focus, select:focus {
   content-visibility: auto;
   contain-intrinsic-size: auto 156px;
 }
+/* 文件树行（VaultTree 行高 28px）：展开/收起文件夹的高度动画会被「视口外行仍参与布局/绘制」拖卡，
+   content-visibility:auto 让视口外行不参与绘制，滚回来才渲染（估值=行高 28px，与 .kb-cv-sm 区分）。 */
+.kb-cv-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
+}
 
 /* ===== Markdown 标记淡化（编辑器弱化版 Live Preview，光标所在行除外）=====
    Monaco inline decoration 的类直接落在包裹 token 的 span 上——token 的 mtk 颜色在

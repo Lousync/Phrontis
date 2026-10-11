@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff } from 'lucide-react'
+import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp } from 'lucide-react'
 import { PluginIcon } from '../../components/shared/ModuleIcons'
 import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_ENTRY_ENABLED, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
@@ -34,7 +34,12 @@ import { VaultTree, type DirCache, type TreeNode, type CreateIntent, type Create
 import { recordFileOp } from '../../lib/fileOpHistory'
 import { useDataChanged } from '../../lib/dataChanged'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
-import { useContextMenuPosition } from '../../lib/useContextMenuPosition'
+import { FileContextMenu, type FileMenuEntry } from '../../components/shared/FileContextMenu'
+import { TreeExpandButton } from '../../components/shared/TreeExpandButton'
+import { SIDEBAR_HEADER_ICON } from '../../components/shared/sidebarHeaderIcon'
+import { TREE_SORT_OPTIONS, getTreeSortMode, setTreeSortMode, type TreeSortMode } from '../../lib/treeSort'
+import { loadTreeSubtree } from '../../lib/treeExpand'
+import { duplicateWorkspaceFile } from '../../lib/fileDuplicate'
 import { NotebookList } from './components/NotebookList'
 import { ChapterPanel } from './components/ChapterPanel'
 // Monaco 宿主单独 lazy：PageEditor 内联了 @monaco-editor/react，而 monaco 主包 8.3MB
@@ -112,6 +117,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const dirCacheRef = useRef<DirCache>({})
   dirCacheRef.current = dirCache
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']))
+  /** 展开集镜像 ref：toggle 里判「已展开 / 已加载」用（避免闭包旧值） */
+  const expandedDirsRef = useRef(expandedDirs)
+  expandedDirsRef.current = expandedDirs
+  // 文件树头部（2026-10-11）：排序（与工作台文件树共用 kb.treeSort 偏好）+ 全部展开/关闭
+  const [treeSort, setTreeSort] = useState<TreeSortMode>(() => getTreeSortMode())
+  const changeTreeSort = (m: TreeSortMode) => { setTreeSort(m); setTreeSortMode(m) }
+  const [sortMenuPos, setSortMenuPos] = useState<{ x: number; y: number } | null>(null)
+  // 头部按钮＝「展开/收起选中目录的子树」开关（未选中＝根/全部）；选中变化在 onSelectDir 里复位
+  const [treeSubtreeExpanded, setTreeSubtreeExpanded] = useState(false)
   const [treeCreating, setTreeCreating] = useState<CreateIntent | null>(null)
   /** 文件树重命名态（B-2）：非空 = 该条目原地换成内联输入行 */
   const [treeRenaming, setTreeRenaming] = useState<RenameIntent | null>(null)
@@ -126,7 +140,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null)
   // 树右键菜单定位：测量后 clamp 进视口（此前是「菜单高度按常量 160 估」的写法，
   // B-2 加了删除/重命名两项后估值必然失真 → 复用本模块既有 hook，与 NotebookList/ChapterPanel 同源）
-  const { menuRef: treeMenuRef, style: treeMenuStyle } = useContextMenuPosition(treeMenu)
+  // treeMenu 的定位/外观/关闭由共享 FileContextMenu 负责（原 useContextMenuPosition 已并入该组件）
   /** 新建分类目录的命名走文件树内联输入（B-13）：原 `catDraft` 居中浮层整条通道已删——
    *  两条创建路径并存本身就是分叉源，命名方式现已与新建知识页/目录/文件完全一致。 */
   const vaultRootRef = useRef<string | null>(null)
@@ -828,14 +842,42 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   }, [ensureVaultRoot])
 
   const handleToggleTreeDir = useCallback((rel: string) => {
+    if (expandedDirsRef.current.has(rel)) {
+      setExpandedDirs(prev => { const next = new Set(prev); next.delete(rel); return next })
+      return
+    }
+    const open = () => setExpandedDirs(prev => (prev.has(rel) ? prev : new Set(prev).add(rel)))
+    // 首次展开先拉数据再展开：否则高度动画在空内容上播放（与工台文件树同口径，2026-10-11）
+    if (dirCacheRef.current[rel]) open()
+    else void refreshTreeDir(rel).then(open)
+  }, [refreshTreeDir])
+
+  /** 目录递归展开（右键「展开此目录（含子目录）」）：只加载点中的子树，带上限 */
+  const expandDirRecursive = useCallback(async (rel: string) => {
+    const root = await ensureVaultRoot()
+    if (!root) return
+    const { cache, dirs, truncated } = await loadTreeSubtree(root, rel)
+    setDirCache(prev => ({ ...prev, ...cache }))
+    setExpandedDirs(prev => new Set([...prev, ...dirs]))
+    if (truncated) showToast({ type: 'warning', message: '目录过多，仅展开前 2000 个' })
+  }, [ensureVaultRoot])
+
+  /** 目录递归收起：移除该目录及其所有子孙的展开态（rel='' = 全部关闭且根保留） */
+  const collapseDirRecursive = useCallback((rel: string) => {
+    if (rel === '') { setExpandedDirs(new Set([''])); return }
     setExpandedDirs(prev => {
       const next = new Set(prev)
-      if (next.has(rel)) { next.delete(rel); return next }
-      next.add(rel)
-      if (!dirCache[rel]) void refreshTreeDir(rel)
+      for (const p of prev) if (p === rel || p.startsWith(rel + '/')) next.delete(p)
       return next
     })
-  }, [dirCache, refreshTreeDir])
+  }, [])
+
+  // 头部按钮：展开/收起「选中目录」的子树（未选中＝根/全部）
+  const toggleTreeSubtree = () => {
+    const rel = selectedDirRel ?? ''
+    if (treeSubtreeExpanded) { collapseDirRecursive(rel); setTreeSubtreeExpanded(false) }
+    else { void expandDirRecursive(rel); setTreeSubtreeExpanded(true) }
+  }
 
   useEffect(() => {
     // 文件视图装载根层（树常驻左栏，展开态自然延续）
@@ -2000,7 +2042,33 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
           <TreeNewButton items={treeNewItems} onPick={handleTreeNewPick} title="新建知识页 / 目录 / 分类目录" />,
           modActionsEl,
         )}
-        {/* 聚焦按钮上移（2026-09-19 反馈）：portal 到左栏模块态头部动作槽（🏠 🔒 最右）。
+        {/* 排序 + 全部展开/关闭（2026-10-11）：同槽 portal，排在「＋」之后、聚焦按钮之前；
+            显隐口径与聚焦按钮完全一致（非知识库形态 / 选中空间 / 图谱态不渲染） */}
+        {modActionsEl && sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal(
+          <button
+            onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSortMenuPos({ x: r.left, y: r.bottom + 6 }) }}
+            title="排序方式"
+            data-wb="kbTreeSortBtn"
+            className={`rounded p-1 transition-colors ${sortMenuPos ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+          >
+            {(treeSort === 'name-desc' || treeSort === 'mtime-desc')
+              ? <ArrowDownNarrowWide {...SIDEBAR_HEADER_ICON} />
+              : <ArrowUpNarrowWide {...SIDEBAR_HEADER_ICON} />}
+          </button>,
+          modActionsEl,
+        )}
+        {modActionsEl && sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal(
+          <TreeExpandButton
+            expanded={treeSubtreeExpanded}
+            onClick={toggleTreeSubtree}
+            dataWb="kbTreeSubtreeBtn"
+            title={treeSubtreeExpanded
+              ? (selectedDirRel ? '收起此目录（含子目录）' : '全部关闭')
+              : (selectedDirRel ? '展开此目录（含子目录）' : '展开全部（含子目录）')}
+          />,
+          modActionsEl,
+        )}
+        {/* 聚焦按钮上移（2026-09-19 反馈）：portal 到左栏模块态头部动作槽；2026-10-11 起排在**最后＝最右**。
             与侧栏同显隐口径：非知识库形态（quiz）/选中空间（行原本就不显示）/图谱态不渲染 */}
         {modActionsEl && createPortal(
           sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode ? (
@@ -2010,6 +2078,19 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             />
           ) : null,
           modActionsEl,
+        )}
+        {sortMenuPos && (
+          <FileContextMenu
+            x={sortMenuPos.x}
+            y={sortMenuPos.y}
+            onClose={() => setSortMenuPos(null)}
+            items={TREE_SORT_OPTIONS.map((o) => ({
+              key: o.value,
+              label: o.label,
+              icon: treeSort === o.value ? <Check size={15} /> : <span className="inline-block w-[15px]" />,
+              onSelect: () => changeTreeSort(o.value),
+            }))}
+          />
         )}
         {(() => {
           const sidebarInner = (
@@ -2048,6 +2129,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   rootRef={treeRef}
                   dirCache={dirCache}
                   expanded={expandedDirs}
+                  sort={treeSort}
                   activePath={allPages.find(p => p.id === activePageId)?.path ?? (activePageId?.startsWith('draft:') ? activePageId.slice(6) : null)}
                   onToggleDir={(p) => { lastTreeDirRef.current = p; handleToggleTreeDir(p) }}
                   onOpenFile={(n) => { lastTreeDirRef.current = parentDirOf(n.relPath); handleTreeOpenFile(n) }}
@@ -2073,7 +2155,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   /* 选中目录（B-7）：头部「＋」/ Ctrl+N 的落点来源。点目录行或点文件行（其父目录）都会上报，
                      受控——树本身不持选中态 */
                   selectedPath={selectedDirRel}
-                  onSelectDir={setSelectedDirRel}
+                  onSelectDir={(rel) => { setSelectedDirRel(rel); setTreeSubtreeExpanded(false) }}
                   renaming={treeRenaming}
                   onCommitRename={(rel, name) => { void handleTreeRename(rel, name) }}
                   onCancelRename={() => setTreeRenaming(null)}
@@ -2083,55 +2165,51 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                     命名合并进文件树内联输入——与新建知识页/目录/文件同一机制，即 VS Code 式。
                     分类目录语义不变：顶层 mkdir + categories.json 登记，**恒落仓库根层**
                     （所以它的内联输入行固定在根层末尾，不跟随选中目录，头部「＋」菜单项也已标「根层」）。 */}
-                {treeMenu && createPortal(
-                  /* fixed 菜单必须 portal 到 body：侧栏随批次3 portal 挂进左栏后，
-                     左栏面板的变换/收缩容器会让 fixed 的包含块变成窄栏——菜单被压成竖条
-                     （2026-09-19 反馈截图）。同 WorkbenchLeftPanel 书签菜单的 portal 模式。 */
-                  <div className="fixed inset-0 z-[70]" onMouseDown={() => setTreeMenu(null)} onContextMenu={e => { e.preventDefault(); setTreeMenu(null) }}>
-                    <div
-                      ref={treeMenuRef}
-                      className="absolute min-w-[150px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-lg kb-pop"
-                      style={treeMenuStyle}
-                      onMouseDown={e => e.stopPropagation()}
-                    >
-                      {(() => {
-                        const dirRel = treeMenu.node.type === 'dir' ? treeMenu.node.relPath : parentDirOf(treeMenu.node.relPath)
-                        // 条目自身动作（B-2）：根容器（relPath === ''）是虚拟节点，没有删除/重命名语义
-                        const self = treeMenu.node.relPath !== '' ? treeMenu.node : null
-                        return (
-                          <>
-                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'file' }) }}>新建文件</button>
-                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'dir' }) }}>新建目录</button>
-                            {/* B-13：分类目录也走树内联命名（恒落根层，不吃 node 的 dirRel） */}
-                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel: '', type: 'category' }) }}>新建分类目录</button>
-                            {/* 粘贴系统剪贴板里的文件/目录（Ctrl+V 同名功能的菜单入口；焦点随后交给文件树）。
-                                2026-09-23 恢复：编辑器退役时该入口随模块丢失（Ctrl+V 路径当时已上移），
-                                而 pasteFromClipboard IPC / VaultTree 的 rootRef+tabIndex 基建一直留着。 */}
-                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); requestPasteFromMenu(dirRel) }}>粘贴</button>
-                            {treeMenu.node.type === 'file' && (
-                              <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); handleTreeOpenFile(treeMenu.node) }}>打开</button>
-                            )}
-                            {self && (
-                              <>
-                                <div className="my-1 border-t border-[var(--border-color)]" />
-                                <button
-                                  data-wb="treeRenameItem"
-                                  className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                                  onClick={() => { setTreeMenu(null); setTreeRenaming({ relPath: self.relPath }) }}
-                                >重命名</button>
-                                <button
-                                  data-wb="treeDeleteItem"
-                                  className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--danger)] hover:bg-[var(--bg-hover)]"
-                                  onClick={() => { setTreeMenu(null); void handleTreeDelete(self) }}
-                                >删除</button>
-                              </>
-                            )}
-                          </>
-                        )
-                      })()}
-                    </div>
-                  </div>,
-                  document.body,
+                {treeMenu && (
+                  <FileContextMenu
+                    x={treeMenu.x}
+                    y={treeMenu.y}
+                    onClose={() => setTreeMenu(null)}
+                    items={(() => {
+                      const node = treeMenu.node
+                      const dirRel = node.type === 'dir' ? node.relPath : parentDirOf(node.relPath)
+                      // 条目自身动作（B-2）：根容器（relPath === ''）是虚拟节点，没有删除/重命名语义
+                      const self = node.relPath !== '' ? node : null
+                      const items: FileMenuEntry[] = [
+                        { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => setTreeCreating({ dirRel, type: 'file' }) },
+                        { key: 'newDir', label: '新建目录', icon: <FolderPlus size={15} />, onSelect: () => setTreeCreating({ dirRel, type: 'dir' }) },
+                        // B-13：分类目录也走树内联命名（恒落根层，不吃 node 的 dirRel）
+                        { key: 'newCat', label: '新建分类目录', icon: <FolderTree size={15} />, onSelect: () => setTreeCreating({ dirRel: '', type: 'category' }) },
+                        { key: 'paste', label: '粘贴', icon: <ClipboardPaste size={15} />, onSelect: () => requestPasteFromMenu(dirRel) },
+                      ]
+                      if (node.type === 'file') items.push({ key: 'open', label: '打开', icon: <FileText size={15} />, onSelect: () => handleTreeOpenFile(node) })
+                      if (self && self.type === 'dir') {
+                        items.push({ separator: true })
+                        items.push({ key: 'expandDir', label: '展开此目录（含子目录）', icon: <ChevronsUpDown size={15} />, onSelect: () => void expandDirRecursive(self.relPath) })
+                        items.push({ key: 'collapseDir', label: '收起此目录', icon: <ChevronsDownUp size={15} />, onSelect: () => collapseDirRecursive(self.relPath) })
+                      }
+                      if (self) {
+                        items.push({ separator: true })
+                        items.push({ key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => setTreeRenaming({ relPath: self.relPath }) })
+                        if (self.type === 'file') items.push({
+                          key: 'dup', label: '创建副本', icon: <CopyPlus size={15} />,
+                          onSelect: () => {
+                            void (async () => {
+                              const root = await ensureVaultRoot()
+                              if (!root) return
+                              const r = await duplicateWorkspaceFile(root, self.relPath).catch(() => null)
+                              if (!r || r.ok === false) { showToast({ type: 'error', message: r?.error || '创建副本失败' }); return }
+                              void refreshTreeDir(parentDirOf(self.relPath))
+                              showToast({ type: 'info', message: `已生成副本 ${r.relPath?.split('/').pop() ?? ''}` })
+                            })()
+                          },
+                        })
+                        items.push({ separator: true })
+                        items.push({ key: 'delete', label: '删除', icon: <Trash2 size={15} />, danger: true, onSelect: () => void handleTreeDelete(self) })
+                      }
+                      return items
+                    })()}
+                  />
                 )}
               </div>
             ) : (

@@ -5,6 +5,7 @@ import { Entry, Tag, type SummaryRecord } from '../../types'
 import { getEntries, createEntry, deleteEntry, getEntryById, toggleEntryStar, getSetting, setSetting, openExternal, getTags, workspaceGetCurrent, ensureSummary } from '../../lib/ipc'
 import { useSettings } from '../../lib/SettingsContext'
 import { ConfirmDialog } from '../../components/shared'
+import { SIDEBAR_HEADER_ICON } from '../../components/shared/sidebarHeaderIcon'
 import { PluginSlotEntry } from '../../components/shared/PluginSlotEntry'
 import { registerAssistantContext } from '../../lib/assistantContext'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
@@ -334,7 +335,7 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
             title={entries.some(e => e.date === localToday()) ? '继续编写今日文章' : '新建今日文章'}
             className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
           >
-            <Edit3 size={13} />
+            <Edit3 {...SIDEBAR_HEADER_ICON} />
           </button>
         </>,
         modActionsEl,

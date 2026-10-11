@@ -366,6 +366,8 @@ export const workspaceWriteFile = (rootId: string, relPath: string, content: str
     return r
   })
 export const workspaceCreateFile = (rootId: string, relPath: string, content?: string) => a().workspaceCreateFile(rootId, relPath, content)
+/** 创建副本：按字节复制仓库内文件（文本/二进制通吃）；重名主进程自动加后缀 */
+export const workspaceCopyFile = (rootId: string, srcRel: string, dstRel: string): Promise<{ ok: boolean; relPath?: string; renamed?: boolean; error?: string }> => a().workspaceCopyFile(rootId, srcRel, dstRel)
 export const workspaceMkdir = (rootId: string, relPath: string) => a().workspaceMkdir(rootId, relPath)
 /** 粘贴系统剪贴板里的外部文件/目录到 relDir（srcPaths 由 paste 事件侧取得，见 types） */
 export const workspacePasteExternal = (rootId: string, relDir: string, srcPaths: string[]) => a().workspacePasteExternal(rootId, relDir, srcPaths)

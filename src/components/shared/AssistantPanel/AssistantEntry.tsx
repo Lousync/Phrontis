@@ -4,6 +4,7 @@ import { ScrollText, SlidersHorizontal, FileJson, MessagesSquare } from 'lucide-
 import { assistantConstraintsEnsureGlobal, assistantConstraintsEnsureSession, assistantConstraintsEnsureGlossary } from '../../../lib/ipc'
 import { showToast } from '../../../lib/toast'
 import { useAnchoredMenu } from '../../../lib/useAnchoredMenu'
+import { SIDEBAR_HEADER_ICON } from '../sidebarHeaderIcon'
 
 /**
  * AI 助手面板头部常驻入口（v3.4.0 台账 N-5/N-7，2026-09-24 拍板④⑤：原型 A）。
@@ -49,7 +50,7 @@ export function AssistantEntryButton({ activeId }: { activeId: string | null }) 
           ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]'
           : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
       >
-        <SlidersHorizontal size={14} />
+        <SlidersHorizontal {...SIDEBAR_HEADER_ICON} />
       </button>
       {open && pos && createPortal(
         <div

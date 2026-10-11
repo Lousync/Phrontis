@@ -1,5 +1,6 @@
 import { Plus, Pencil, Trash2, Inbox, Globe } from 'lucide-react'
 import type { BookmarkCategory, BookmarkItem } from '../../../../../types'
+import { SIDEBAR_HEADER_ICON } from '../../../../../components/shared/sidebarHeaderIcon'
 
 interface Props {
   categories: BookmarkCategory[]
@@ -45,7 +46,7 @@ export function CategorySidebar({ categories, bookmarks, selected, onSelect, onN
         <button onClick={onNew}
           className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           title="新建分类">
-          <Plus size={15} />
+          <Plus {...SIDEBAR_HEADER_ICON} />
         </button>
       </div>
 
