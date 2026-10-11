@@ -47,18 +47,16 @@ import { useInputShell } from '../../components/shared/AssistantPanel/inputShell
 import { UsageRing, fmtTok } from '../../components/shared/UsageRing'
 import { WebSourceDialog } from './components/WebSourceDialog'
 import { SideLanePanel } from './SideLanePanel'
+import { SideLaneCenter } from './SideLaneCenter'
 import { AI_TEXT_CODE_EXT_SET } from '../../lib/aiTextExts'
 import { useFloatingWindow } from './useFloatingWindow'
 
 /**
- * 锚点回答 → 支线映射（localStorage）：被追问的那条回答下方据此出现「支线追问 · 已开」，
- * 重启后依然能重新打开原支线。
- *
- * v3.1.2 条目11（2026-09-14 改）：登记时机由「用户手动带回主线时」改为**开窗即自动登记**
- * ——关掉浮窗不再失联：那条被追问的回答自己就是入口，不必再往主线里塞一条"带回消息"。
+ * v3.1.2 条目11：支线旁问。锚点回答 → 支线映射**由会话库派生**（见下方 anchorLanes）——
+ * `agent:listSideLanes` 带回的每条支线都带 `branchFromMessageId`，据此在回答下方显示
+ * 「支线追问 · 已开」（点击进右栏支线中心重开）；不再落 localStorage（修掉清缓存/换机即失联）。
  */
-const ANCHOR_LANES_KEY = 'aiTeach.anchorLanes'
-import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourceEntry, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState } from '../../types'
+import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentChange, AgentChatResult, AiTeachInjectionStats, LlmUsageInfo, LlmProviderInfo, LlmVisionModelInfo, AiTeachWorkspaceInfo, AiTeachSourceEntry, AiTeachFavorite, SkillInfo, AiTeachProfileEntry, AiTeachProfileOp, AiTeachCourseState } from '../../types'
 
 /**
  * 「AI教学」模块（原 id immersive / 沉浸式 Agent；总纲 docs/ai-teaching-module-rework.md，
@@ -445,7 +443,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     else { const v = !rightOpen; setRightOpen(v); localStorage.setItem('aiTeach.rightOpen', v ? '1' : '0'); setSrcVisible(v) }
   }
   /** 打开素材库（顶栏 chip / 贴边条专用——自动收起态下 rightOpen 意图已是 true，翻转逻辑不适用） */
-  const openSources = () => { setRightOpen(true); localStorage.setItem('aiTeach.rightOpen', '1'); setSrcVisible(true) }
+  const openSources = () => { setRightOpen(true); localStorage.setItem('aiTeach.rightOpen', '1'); setSrcVisible(true); setRailTab('sources') }
   // Ctrl+B 切左侧栏 / Ctrl+Alt+B 切右侧栏（2026-09-08 用户反馈补齐，对齐 VS Code 侧栏习惯）。
   // 模块级快捷键：仅本模块激活时生效；焦点在输入控件内不拦截；deps 随开合状态刷新闭包
   useEffect(() => {
@@ -734,11 +732,34 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // v3.1.2 条目11：支线旁问面板（浮层 / 右栏宽轨）。null=关闭。
   // parentSessionId 在打开瞬间锁定——面板开着时切主线会话不会把支线挪到别的会话下。
   const [sideLane, setSideLane] = useState<{ parentSessionId: string; anchorMessageId: string; parentTitle: string; openLaneId?: string } | null>(null)
-  const [sideLaneWide, setSideLaneWide] = useState(false)
-  /** 锚点回答 → 支线映射：被追问的回答消息 id → 支线（回答下方按钮据此重开） */
-  const [anchorLanes, setAnchorLanes] = useState<Record<string, { laneId: string; laneTitle: string }>>(() => {
-    try { return JSON.parse(localStorage.getItem(ANCHOR_LANES_KEY) || '{}') as Record<string, { laneId: string; laneTitle: string }> } catch { return {} }
-  })
+  // 右栏分区：支线中心 ⇄ 素材库（.claude/plans/ai-teaching-side-lane-center.md §3.1）
+  const [railTab, setRailTab] = useState<'lanes' | 'sources'>(() => (localStorage.getItem('aiTeach.railTab') === 'sources' ? 'sources' : 'lanes'))
+  // 记住上次分区选择（默认支线；一旦用户切到素材库即保持）
+  useEffect(() => { try { localStorage.setItem('aiTeach.railTab', railTab) } catch { /* ignore */ } }, [railTab])
+  /** 当前会话的支线清单（含派生字段）：右栏中心 / 计数 / 锚点 chip 映射共用。数据源=会话库（不再靠 localStorage） */
+  const [laneInfos, setLaneInfos] = useState<AgentSideLaneInfo[]>([])
+  /** 打开右栏支线中心的请求（锚点 chip 触发；中心按 requestSeq 重新响应） */
+  const [centerReq, setCenterReq] = useState<{ kind: 'open'; laneId: string } | { kind: 'create'; anchorMessageId: string } | null>(null)
+  const [centerSeq, setCenterSeq] = useState(0)
+  const refreshLanes = useCallback(async () => {
+    const sid = activeIdRef.current
+    if (!sid) { setLaneInfos([]); return }
+    const rows = await agentListSideLanes(sid).catch(() => [] as AgentSideLaneInfo[])
+    setLaneInfos(rows.filter(r => r.lane !== 'main')) // 已升格的从左栏看，右栏移除
+  }, [])
+  /** 锚点回答 → 支线映射：由会话库派生（branchFromMessageId），回答下方 chip 据此显示「已开 / 就这点追问」 */
+  const anchorLanes = useMemo(() => {
+    const m: Record<string, { laneId: string; laneTitle: string }> = {}
+    for (const l of laneInfos) if (l.branchFromMessageId) m[l.branchFromMessageId] = { laneId: l.id, laneTitle: l.title }
+    return m
+  }, [laneInfos])
+  /** 打开右栏支线中心（锚点 chip 用）：确保右栏可见并切到「支线」分区；关掉浮窗避免同一条支线两处并存 */
+  const openCenter = useCallback((req: { kind: 'open'; laneId: string } | { kind: 'create'; anchorMessageId: string }) => {
+    setSideLane(null)        // 关掉浮窗：同一条支线不在两处并存
+    openSources()            // 先展开右栏（会切到素材库分区）…
+    setRailTab('lanes')      // …再切回支线分区（批量更新，以最后一次为准）
+    setCenterReq(req); setCenterSeq(s => s + 1)
+  }, [openSources])
   // PPT 逐页阅读已并入工件栏 pptx 页签（工件栏方案 §1.4，原 reader 中栏互斥态退役）
   // UI 优化条目6B：中栏导航状态（对话/题目 · 工件栏激活页签）随变化落到本会话持久化键
   useEffect(() => {
@@ -858,8 +879,31 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const ok = await agentPromoteSideLane(laneId).catch(() => false)
     if (!ok) { showToast({ type: 'error', message: '升格失败' }); return }
     await refreshSessions()
+    void refreshLanes()
     showToast({ type: 'info', message: '已升格为正式会话（见左栏主线会话下方）' })
-  }, [refreshSessions])
+  }, [refreshSessions, refreshLanes])
+
+  /** 右栏支线中心「引用到主线」：把支线末条 AI 回答作为引用胶囊放进主线输入框（不自动发送） */
+  const quoteFromLane = useCallback((text: string) => {
+    const t = text.trim()
+    if (!t) { showToast({ type: 'warning', message: '这条支线还没有可引用的回答' }); return }
+    setQuotes(prev => { const next = prev.includes(t) ? prev : [...prev, t].slice(-5); quotesRef.current = next; return next })
+    setQuotesOpen(true)
+    setTimeout(() => inputRef.current?.focus(), 60)
+    showToast({ type: 'info', message: '已引用到主线输入框（未发送，可继续编辑）' })
+  }, [])
+
+  /** 右栏支线中心「浮出窗口」：与右栏同一条支线（openLaneId 承接，不重建会话） */
+  const floatFromCenter = useCallback((laneId: string) => {
+    setSideLane({ parentSessionId: activeIdRef.current ?? '', anchorMessageId: '', parentTitle: activeTitle, openLaneId: laneId })
+  }, [activeTitle])
+
+  /** 浮窗「停靠」/ 拖到右缘松手：收回右栏支线中心（不再另开宽轨面板——右栏中心就是它的家） */
+  const dockLane = useCallback(() => {
+    const lid = activeLaneIdRef.current || sideLane?.openLaneId || ''
+    setSideLane(null)
+    if (lid) openCenter({ kind: 'open', laneId: lid })
+  }, [sideLane?.openLaneId, openCenter])
 
   /** v3.2.0 第 19 项：返回消息条数——`openSession` 用它校正「准备态」判据（快照说未开讲、但会话已有消息）。 */
   const refreshMessages = useCallback(async (sid: string): Promise<number> => {
@@ -880,35 +924,23 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    * 登记时点选在**首条消息**而非开窗瞬间：一句没发的空支线不该在主线留下「已开」入口
    * （空支线由面板卸载时回收，两面互为补集，不存在「有内容却无入口」的空档）。
    */
-  /** 当前打开支线的会话 id（首条消息后才有值）——供切换浮层/宽轨形态时承接，避免重挂时重建会话丢内容 */
+  /** 当前打开支线的会话 id——浮窗「停靠」时用它把该支线交回右栏中心（避免重挂时新建空支线） */
   const activeLaneIdRef = useRef('')
-  const noteLaneReady = useCallback((anchorMessageId: string, laneId: string, laneTitle: string) => {
+  /** 支线首条消息发出（浮窗内新建路径）→ 刷新支线清单与锚点映射（数据源归位会话库后，回执即重扫） */
+  const noteLaneReady = useCallback((_anchorMessageId: string, laneId: string, _laneTitle: string) => {
     activeLaneIdRef.current = laneId
-    if (!anchorMessageId) return
-    setAnchorLanes(prev => {
-      const next = { ...prev, [anchorMessageId]: { laneId, laneTitle } }
-      try { localStorage.setItem(ANCHOR_LANES_KEY, JSON.stringify(next)) } catch { /* ignore */ }
-      return next
-    })
-  }, [])
+    void refreshLanes()
+  }, [refreshLanes])
 
-  /**
-   * 切换支线形态（浮层 ⇄ 右栏宽轨）——两者是**不同挂载点**，重挂时若不带 `openLaneId` 会重新建会话
-   * （旧支线连同已追问内容变孤儿）。已发过消息的支线带上 `activeLaneIdRef` 作 `openLaneId`
-   * → 新形态**载入同一条**（不丢内容）；未发送的支线不带（新形态重建无损失，旧空支线由面板卸载回收）。
-   */
-  const toggleSideLaneWide = useCallback((wide: boolean) => {
-    setSideLaneWide(wide)
-    const lid = activeLaneIdRef.current
-    if (lid) setSideLane(prev => (prev && !prev.openLaneId ? { ...prev, openLaneId: lid } : prev))
-  }, [])
-  // 换锚点 / 关面板时清掉上一次的承接 id，避免切形态承载到错误的支线
+  // 换锚点 / 关面板时清掉上一次的承接 id，避免停靠承载到错误的支线
   useEffect(() => {
     activeLaneIdRef.current = sideLane?.openLaneId ?? ''
   }, [sideLane?.anchorMessageId, sideLane?.openLaneId])
 
   // 打开 AI教学 Tab 时同步会话
   useEffect(() => { void refreshSessions() }, [refreshSessions, isActive])
+  // 支线清单随当前会话 / 激活态刷新（右栏中心 / 锚点 chip / 计数）
+  useEffect(() => { void refreshLanes() }, [activeId, refreshLanes, isActive])
   // P1 重命名会话（双击列表行）：agentRenameSession + 文件夹同步改名
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
@@ -2219,11 +2251,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const floatWin = useFloatingWindow({
     storageKey: 'aiTeach.sideLaneWin',
     stageRef: rowRef,
-    enabled: !!sideLane && !sideLaneWide,
+    enabled: !!sideLane,
     defaultW: 380, defaultH: 560, minW: 300, minH: 260,
-    // 拖到右缘松手停靠 = 与「⤢ 停靠」按钮同一条路径：必须走 toggleSideLaneWide 承接 openLaneId，
-    // 否则宽轨形态拿到 undefined 会**新建一条空支线**（已追问的内容看着"消失"，切回浮层又靠 ref 接回）。
-    onDock: () => toggleSideLaneWide(true),
+    // 拖到右缘松手 = 与「⤢ 停靠」按钮同一条路径：收回右栏支线中心（不再另开宽轨面板）
+    onDock: () => dockLane(),
   })
   /** 窄窗兜底（§1.3）：<1100px 工件栏降宽至 40% */
   const artPctEff = rowW > 0 && rowW < 1100 ? Math.min(artPct, 40) : artPct
@@ -3322,13 +3353,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         {/* UI 优化条目4：操作条升格为轻 chip 条（11.5px+图标，对齐顶栏 chip 规范）；时间戳坏数据不渲染 */}
                         <div className="text-[11.5px] mt-1.5 flex items-center gap-1.5 -ml-1.5">
                           {/* v3.1.2 条目11：支线旁问入口（与整理成文档/复制/轨迹同簇）。
-                              已开过支线的回答 → 按钮变「支线追问 · 已开」并高亮，点击**重开原支线**：
-                              锚点回答自己就是入口，关掉浮窗也不失联（映射落 localStorage，重启仍在）。 */}
+                              已开过支线的回答 → 按钮变「支线追问 · 已开」并高亮，点击在**右栏支线中心**重开原支线；
+                              未开过 → 「就这点追问」在右栏中心新建一条（打开即输入，创建即已读）。
+                              数据源=会话库派生（anchorLanes），不再依赖 localStorage。 */}
                           {(() => {
                             const al = m.id ? anchorLanes[m.id] : undefined
                             return (
-                              <button onClick={() => { setSideLaneWide(false); setSideLane({ parentSessionId: activeId ?? '', anchorMessageId: m.id ?? '', parentTitle: activeTitle, openLaneId: al?.laneId }) }}
-                                title={al ? '这条回答已开过支线，点击重新打开' : '就这条回答的某一点开独立深挖线，不打断主线节奏'}
+                              <button onClick={() => openCenter(al ? { kind: 'open', laneId: al.laneId } : { kind: 'create', anchorMessageId: m.id ?? '' })}
+                                title={al ? '这条回答已开过支线，点击在右栏重新打开' : '就这条回答的某一点开独立深挖线，不打断主线节奏'}
                                 className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${al ? 'text-[var(--accent)] hover:bg-[var(--bg-hover)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
                                 <GitBranch size={12} />{al ? '支线追问 · 已开' : '就这点追问'}
                               </button>
@@ -3854,26 +3886,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           )}
         </section>
 
-        {/* v3.1.2 条目11：支线旁问 宽轨形态（贴右栏）——作为中栏的**兄弟节点**插入（不覆盖对话区，并列占宽），
-            这才是「中栏不遮挡」；宽度可拖并持久化（复用 ResizablePanel）。 */}
-        {sideLane && sideLaneWide && (
-          <ResizablePanel side="right" storageKey="aiTeach.sideLaneWidth" defaultWidth={440} minWidth={320} maxWidth={720}
-            visible className="border-l border-[var(--border-color)] kb-view-in">
-            <SideLanePanel
-              key={sideLane.openLaneId ?? sideLane.anchorMessageId}
-              parentSessionId={sideLane.parentSessionId}
-              parentTitle={sideLane.parentTitle}
-              anchorMessageId={sideLane.anchorMessageId}
-              openLaneId={sideLane.openLaneId}
-              wide
-              onClose={() => setSideLane(null)}
-              onToggleWide={() => toggleSideLaneWide(false)}
-              onLaneReady={(lid, ltitle) => noteLaneReady(sideLane.anchorMessageId, lid, ltitle)}
-              onPromote={promoteLane}
-            />
-          </ResizablePanel>
-        )}
-
         {/* 工件栏（docs/ai-teaching-artifacts-pane-design.md §1.2）：分隔条可拖 24%~60%、双击复位 46、宽度持久化。
             无打开页签即不渲染——工件栏没有主动展开把手（2026-09-09 用户拍板：右缘把手与素材库拉出条冲突），
             打开任意文件/工件卡自动出现，关掉全部页签自动消失 */}
@@ -3921,6 +3933,19 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         <ResizablePanel side="right" storageKey="aiTeach.rightWidth" defaultWidth={280} minWidth={240} maxWidth={420}
           visible={srcVisible} onSnapClose={() => toggleSide('right')}>
           <div className="h-full min-h-0 flex flex-col">
+          {/* 右栏分区切换（plan §3.1）：支线中心 ⇄ 素材库 */}
+          <div className="shrink-0 flex items-center gap-1 border-b border-[var(--border-color)] px-1.5 py-1 bg-[var(--bg-secondary)]">
+            <button onClick={() => setRailTab('lanes')}
+              className={`flex-1 inline-flex items-center justify-center gap-1 px-1.5 py-1 rounded-md text-[11.5px] transition-colors ${railTab === 'lanes' ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+              <GitBranch size={11} />支线{laneInfos.length > 0 ? ` ${laneInfos.length}` : ''}
+            </button>
+            <button onClick={() => setRailTab('sources')}
+              className={`flex-1 inline-flex items-center justify-center gap-1 px-1.5 py-1 rounded-md text-[11.5px] transition-colors ${railTab === 'sources' ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+              <Paperclip size={11} />素材库{srcEntries.length > 0 ? `（${srcEntries.length}）` : ''}
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 relative">
+          <div className={`absolute inset-0 flex flex-col min-h-0 ${railTab === 'lanes' ? 'hidden' : ''}`}>
           <div className="shrink-0">
             {/* 素材库标题行（文字按容器宽度退化，见 styles/index.css 的 .kb-fit 段）。
                 ⚠️ 本行宽 = 右栏 ResizablePanel（240–420px 可调），没有 `shrink-0` 时
@@ -4091,6 +4116,21 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           </div>
           </div>
           </div>
+          <div className={`absolute inset-0 ${railTab === 'lanes' ? '' : 'hidden'}`}>
+            <SideLaneCenter
+              parentSessionId={activeId ?? ''}
+              parentTitle={activeTitle}
+              request={centerReq}
+              requestSeq={centerSeq}
+              onFloat={floatFromCenter}
+              onQuote={quoteFromLane}
+              onPromote={(lid) => void promoteLane(lid)}
+              onChanged={() => void refreshLanes()}
+              suppressLaneId={sideLane?.openLaneId ?? null}
+            />
+          </div>
+          </div>
+          </div>
         </ResizablePanel>
         {/* 右缘透明拉出条（2026-09-08 用户拍板：收起后面板彻底消失，但右缘保留透明拉出条——
             默认透明，悬停显示蓝色高亮竖条。两种展开方式：点击直接展开 / 按住向左拖过
@@ -4145,11 +4185,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           </div>
         )}
 
-        {/* 支线旁问浮窗（v3.1.2 补强，2026-09-14）：挂在**行容器末尾**，`absolute` 于整行
-            （舞台 = rowRef，见 useFloatingWindow）。原先挂在中栏内部只能在中栏里浮，
-            现在可跨左栏/中栏/工件栏自由拖动 + 八向缩放（热区见 floatWin.handles）。
-            把它推到最右缘推不动时出现落位提示，松手自动转宽轨 —— 与宽轨态统一为「同一个窗口的两态」。 */}
-        {sideLane && !sideLaneWide && floatWin.ready && (
+        {/* 支线旁问浮窗：挂在**行容器末尾**（`absolute` 于整行，舞台 = rowRef，见 useFloatingWindow）。
+            可跨左栏/中栏/工件栏自由拖动 + 八向缩放（热区见 floatWin.handles）。
+            推到最右缘出现落位提示，松手「停靠」= 收回**右栏支线中心**（同一处，不再另开宽轨面板）。 */}
+        {sideLane && floatWin.ready && (
           <div className="absolute z-40 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl overflow-hidden kb-pop"
             style={floatWin.style}>
             <SideLanePanel
@@ -4159,7 +4198,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               anchorMessageId={sideLane.anchorMessageId}
               openLaneId={sideLane.openLaneId}
               onClose={() => setSideLane(null)}
-              onToggleWide={() => toggleSideLaneWide(true)}
+              onDock={dockLane}
               onLaneReady={(lid, ltitle) => noteLaneReady(sideLane.anchorMessageId, lid, ltitle)}
               onPromote={promoteLane}
               titleDrag={{ onPointerDown: floatWin.onTitlePointerDown, onDoubleClick: floatWin.onTitleDoubleClick }}

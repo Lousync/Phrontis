@@ -1185,6 +1185,22 @@ export interface AgentSideLaneCreateResult {
   error?: string
 }
 
+/** 支线清单项（agent:listSideLanes）：会话行 + 派生字段，供右栏「支线中心」（见 plan §4.5） */
+export interface AgentSideLaneInfo extends AgentSessionInfo {
+  /** 运行态：进行中 / 已答 / 已中断 */
+  laneStatus?: 'run' | 'done' | 'cut'
+  /** 上次打开（已读）时间；null/缺省 = 从未打开 */
+  laneSeenAt?: string | null
+  /** 最近一条 AI 回答时间（未读判定基准） */
+  lastAssistantAt?: string
+  /** 是否有未读（后台来了新回答 / 从未打开） */
+  unread?: boolean
+  /** 正文摘要（前 200 字，供本会话内搜索） */
+  excerpt?: string
+  /** 来源回答标题（分叉点主线回答首行，供列表展示与搜索） */
+  anchorTitle?: string
+}
+
 /** P5 工作区（AI教学两层结构；主进程 aiTeachingWorkspaces.ts 同构） */
 export interface AiTeachWorkspaceInfo {
   id: string
@@ -2392,10 +2408,12 @@ export interface ElectronAPI {
   agentSetSessionPinned: (id: string, pinned: boolean) => Promise<boolean>
   // ===== v3.1.2 条目11：支线旁问（createSideLane 只装上下文、不调 LLM）=====
   agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) => Promise<AgentSideLaneCreateResult>
-  /** 列某主线下的支线（含已升格）；删除前计数亦用它 */
-  agentListSideLanes: (parentSessionId: string) => Promise<AgentSessionInfo[]>
+  /** 列某主线下的支线（含已升格）；带派生字段（unread/laneStatus/excerpt） */
+  agentListSideLanes: (parentSessionId: string) => Promise<AgentSideLaneInfo[]>
   /** 升格支线为正式会话（单向） */
   agentPromoteSideLane: (laneSessionId: string) => Promise<boolean>
+  /** 打开支线详情即已读（写 lane_seen_at） */
+  agentMarkSideLaneRead: (laneId: string) => Promise<boolean>
   // ===== AI教学 P1：会话 ⇄ 文件夹绑定（docs/ai-teaching-module-rework.md §二）=====
   aiTeachEnsureSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>

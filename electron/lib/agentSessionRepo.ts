@@ -74,6 +74,10 @@ export interface AgentSessionRow {
   lane?: 'main' | 'side'
   /** 支线旁问：固化上下文快照（分叉回答全文 + 主线前 K 轮），每轮注入 system。不参与摘要压缩 */
   sideContext?: string
+  /** 支线旁问：运行态 'run' 进行中 / 'done' 已答 / 'cut' 已中断（缺省 run） */
+  lane_status?: 'run' | 'done' | 'cut'
+  /** 支线旁问：上次打开（已读）的本地时间串；缺省 = 从未打开 */
+  lane_seen_at?: string
 }
 
 /** 等价 datetime('now','localtime')：本地时间 "YYYY-MM-DD HH:MM:SS" */
@@ -169,6 +173,7 @@ export function createSideLaneSession(opts: {
     branchFromMessageId: opts.branchFromMessageId,
     lane: 'side',
     sideContext: opts.sideContext,
+    lane_status: 'run',
   }
   const sessions = readSessions()
   sessions.push(row)
@@ -194,6 +199,33 @@ export function promoteSideLane(laneSessionId: string): boolean {
   if (!row || !row.parentSessionId) return false
   row.lane = 'main'
   row.updated_at = nowLocal()
+  globalWriteJson(SESSIONS_FILE, sessions)
+  return true
+}
+
+/**
+ * 支线运行态：'done' 已答 / 'cut' 已中断（见 .claude/plans/ai-teaching-side-lane-center.md）。
+ * 仅对挂靠主线的支线生效；普通会话 no-op。
+ */
+export function setSideLaneStatus(id: string, status: 'run' | 'done' | 'cut'): void {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row || !row.parentSessionId) return
+  if (row.lane_status === status) return
+  row.lane_status = status
+  row.updated_at = nowLocal()
+  globalWriteJson(SESSIONS_FILE, sessions)
+}
+
+/**
+ * 标记支线已读（打开详情时调）：只写 lane_seen_at，**不** bump updated_at
+ * ——读一下不该把会话顶到列表最上。返回是否命中。
+ */
+export function markSideLaneSeen(id: string, at: string = nowLocal()): boolean {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row || row.lane === 'main') return false
+  row.lane_seen_at = at
   globalWriteJson(SESSIONS_FILE, sessions)
   return true
 }

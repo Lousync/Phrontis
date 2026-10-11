@@ -315,6 +315,7 @@ const api = {
     ipcRenderer.invoke('agent:createSideLane', payload),
   agentListSideLanes: (parentSessionId: string) => ipcRenderer.invoke('agent:listSideLanes', parentSessionId),
   agentPromoteSideLane: (laneSessionId: string) => ipcRenderer.invoke('agent:promoteSideLane', laneSessionId),
+  agentMarkSideLaneRead: (laneId: string) => ipcRenderer.invoke('agent:markSideLaneRead', laneId),
   // AI教学 P1：会话 ⇄ 文件夹绑定
   aiTeachEnsureSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:ensureSessionFolder', id),
   aiTeachSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:sessionFolder', id),

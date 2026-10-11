@@ -11,7 +11,7 @@ import { invokeLlmStreamInternal } from './llmService'
 import { estimateTokens, trimHistoryByBudget } from './agentContextBudget'
 import { compressAtTokens, composeContextWithDigest, rowsAfterDigest } from './agentCompressCore'
 import { compressSession } from './agentCompress'
-import type { SessionDigest, AgentMessageRow } from './agentSessionRepo'
+import type { SessionDigest, AgentMessageRow, AgentSessionRow } from './agentSessionRepo'
 import { clampMaxRounds, clampRunTokenBudget, isParallelSafe, partitionToolBatches, PARALLEL_CHUNK, PARALLEL_HINT, FINAL_ROUND_NOTICE, FORCED_SUMMARY_NOTICE } from './agentLoopPolicy'
 import {
   createAgentSession, listAgentSessions, renameAgentSession, deleteAgentSession,
@@ -19,6 +19,7 @@ import {
   getMessageById, updateMessageContent, deleteMessage, deleteMessagesAfter,
   getAgentSession, updateAgentSessionInstructions, backfillSessionSources,
   createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode, setSessionPinned,
+  setSideLaneStatus, markSideLaneSeen,
 } from './agentSessionRepo'
 import { MANUAL_CHANNEL_TOOL, MANUAL_MAX_ROUNDS, buildManualSystemPrompt, classifyManualIntent, hasOperationIntent } from './manualChannel'
 import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceConstraintsForSession, resolveWriteOwnerRel, listSessionFolderIds } from './aiTeachingFolders'
@@ -31,6 +32,7 @@ import { listFavorites } from './aiTeachingFavorites'
 import { findSkillPrompt } from './skillService'
 import { recordAiUsage, recordSessionFileChange, getAiUsageData, getSessionChanges } from './agentUsage'
 import { vaultTodosAll } from './kbStore/scheduleVaultRepo'
+import { computeLaneUnread, deriveLaneStatus } from './sideLaneMeta'
 
 /**
  * 最小 AgentRunner —— 「用户消息 → LLM 决策 → ToolRegistry 执行 → 结果回喂」循环。
@@ -612,7 +614,10 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
     }
   }
 
-  return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort, skillName: req.skillName })
+  const result = await runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort, skillName: req.skillName })
+  // 支线旁问：按本轮结果落运行态（成功 done / 其余 cut）；普通会话 no-op
+  setSideLaneStatus(sessionId, result.ok ? 'done' : 'cut')
+  return result
 }
 
 /** N-1：向渲染层推一条助手提示（如手册通道→通用助手的升格 Toast） */
@@ -1310,6 +1315,34 @@ async function agentEditAndRegen(req: AgentChatRequest & { messageId: string }, 
   return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort })
 }
 
+/**
+ * 支线清单投影（.claude/plans/ai-teaching-side-lane-center.md §4.3）：
+ * 在原会话行上补「未读 / 运行态 / 末条 AI 时间 / 正文摘要」等派生字段，供右栏支线中心使用。
+ * 支线数量少（每主线个位数），逐条读 .jsonl 计算可接受。
+ */
+function buildSideLaneInfo(row: AgentSessionRow): Record<string, unknown> {
+  const msgs = getAgentMessages(row.id)
+  const last = msgs[msgs.length - 1]
+  const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant')
+  const excerpt = msgs.map((m) => m.content).join('\n').replace(/\s+/g, ' ').trim().slice(0, 200)
+  // 来源回答标题（分叉点那条主线回答的首行）：仅用于展示与搜索，缺锚点则空
+  const anchorMsg = row.branchFromMessageId && row.parentSessionId ? getMessageById(row.parentSessionId, row.branchFromMessageId) : null
+  const anchorTitle = (anchorMsg?.content ?? '').replace(/^#{1,6}\s*/gm, '').replace(/\s+/g, ' ').trim().slice(0, 40)
+  return {
+    ...row,
+    // camel 别名（与 camelRow 口径一致，渲染层按 camel 消费）
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    // 支线派生
+    laneStatus: deriveLaneStatus(row.lane_status, last ? (last.role as 'user' | 'assistant') : '', false),
+    laneSeenAt: row.lane_seen_at ?? null,
+    lastAssistantAt: lastAssistant?.created_at ?? '',
+    unread: computeLaneUnread({ hasMessages: msgs.length > 0, lastAssistantAt: lastAssistant?.created_at, laneSeenAt: row.lane_seen_at }),
+    excerpt,
+    anchorTitle,
+  }
+}
+
 export function registerAgentHandlers(): void {
   // 仅向发起窗口推送 agent:step 过程事件（chatId 过滤由渲染层做），复用 activeChats 生命周期。
   // N-3 多对话并行：载荷补 sessionId（渲染层按会话分桶，切回运行中会话即恢复实时流）；
@@ -1391,6 +1424,8 @@ export function registerAgentHandlers(): void {
       createdAt: typeof row.created_at === 'string' && row.created_at ? row.created_at : (row.createdAt ?? ''),
       updatedAt: typeof row.updated_at === 'string' && row.updated_at ? row.updated_at : (row.updatedAt ?? ''),
       pinnedAt: typeof row.pinned_at === 'string' && row.pinned_at ? row.pinned_at : (row.pinnedAt ?? null),
+      laneStatus: row.lane_status ?? row.laneStatus,
+      laneSeenAt: row.lane_seen_at ?? row.laneSeenAt ?? null,
       sessionId: typeof row.session_id === 'string' ? row.session_id : (row.sessionId ?? ''),
       traceJson: typeof row.trace_json === 'string' ? row.trace_json : (row.traceJson ?? null),
     } as T
@@ -1484,10 +1519,13 @@ export function registerAgentHandlers(): void {
     })
     return { ok: true, laneSessionId: lane.id, title: lane.title, snapshotText, turns }
   })
-  // 列某主线下的支线（含已升格）：左栏缩进渲染 + 删除前计数
+  // 列某主线下的支线（含已升格）：右栏支线中心 + 左栏缩进渲染 + 删除前计数；带派生字段（unread/laneStatus/excerpt）
   ipcMain.handle('agent:listSideLanes', (_e, parentSessionId: string) =>
-    listSideLanes(String(parentSessionId ?? '')).map(camelRow))
+    listSideLanes(String(parentSessionId ?? '')).map(buildSideLaneInfo))
   // 升格支线为正式会话（单向）：lane 置 'main' → 进左栏列表
   ipcMain.handle('agent:promoteSideLane', (_e, laneSessionId: string) =>
     promoteSideLane(String(laneSessionId ?? '')))
+  // 打开支线详情即已读：写 lane_seen_at（不 bump updated_at）
+  ipcMain.handle('agent:markSideLaneRead', (_e, laneId: string) =>
+    markSideLaneSeen(String(laneId ?? '')))
 }
