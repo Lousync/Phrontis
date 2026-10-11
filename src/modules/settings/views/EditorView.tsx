@@ -48,6 +48,8 @@ export function EditorView() {
         />
         <p className="text-[11px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
           可直接输入任意字号（10-40px），或点预设档位；输入越界会提示且不生效。
+          <br />
+          本项只作用于<span className="text-[var(--text-secondary)]">源码档</span>编辑器；即时渲染档跟随界面正文字号，与阅读态预览保持一致（整体缩放走 Ctrl +/−）。
         </p>
       </div>
 

@@ -239,12 +239,44 @@ input:focus, textarea:focus, select:focus {
    注：动效由 Monaco 内建（ghost 淡入），插不进铁律 13 的令牌体系，属既有例外。 */
 .monaco-editor .ghost-text { font-style: italic; }
 
-/* ===== Markdown 预览样式 ===== */
-.prose-content h1 { font-size: 1.75rem; font-weight: 700; margin: 1.25rem 0 0.5rem; color: var(--text-primary); padding-bottom: 0.35rem; border-bottom: var(--divider-style); }
-.prose-content h2 { font-size: 1.4rem; font-weight: 600; margin: 1rem 0 0.4rem; color: var(--text-primary); padding-bottom: 0.25rem; border-bottom: var(--heading-rule); }
-.prose-content h3 { font-size: 1.15rem; font-weight: 600; margin: 0.75rem 0 0.3rem; color: var(--text-primary); }
-.prose-content p { margin: 0.4rem 0; line-height: 1.75; }
-.prose-content strong { color: var(--text-primary); font-weight: 700; }
+/* ===== 共享排版令牌（Markdown 正文）=====
+   ★ 单一真相：正文排版有两套渲染器 —— 阅读态预览（react-markdown + `.prose-content`）
+     与即时渲染档写作面（CodeMirror 6 + `.kb-live-*`）。两边的**尺寸/间距/颜色只能引用这里的值**，
+     不许各自写死：分头维护必然悄悄漂移（2026-10-11 实测差：基准字号 13 vs 16、
+     H1 无/有下划线、代码块无/有语法高亮 —— 见 `.AGENT/scripts/notes-surface/compare-live-vs-preview.mjs`）。
+   基准 = **根字号**（`App.tsx` 把缩放写成 `html{font-size: zoom×16px}`），故 rem 会随 Ctrl +/- 整体缩放，
+   两侧同步缩放；即时渲染档不再跟随「编辑器字号」设置（那只作用于源码档 Monaco）。
+   消费点：`.prose-content` 文本级规则 + 预览/写作面共用的 `.kb-md-atom` 原子块 + `.kb-live-*` 行级规则。 */
+:root {
+  --md-h1-size: 1.75rem;  --md-h1-weight: 700;
+  --md-h2-size: 1.4rem;   --md-h2-weight: 600;
+  --md-h3-size: 1.15rem;  --md-h3-weight: 600;
+  --md-h4-size: 1.05rem;  --md-h4-weight: 600;
+  --md-h5-size: 1rem;     --md-h5-weight: 600;
+  --md-h6-size: 0.95rem;  --md-h6-weight: 600;
+  --md-heading-line-height: 1.35;
+  --md-line-height: 1.75;
+  --md-strong-weight: 700;
+  --md-code-bg: rgba(128, 128, 128, 0.12);
+  --md-code-radius: 3px;
+  --md-code-pad: 0.125rem 0.375rem;
+  --md-code-size: 0.875em;
+  --md-pre-pad: 1rem;
+  --md-table-pad: 0.4rem 0.6rem;
+  --md-quote-pad-left: 1rem;
+  --md-atom-gap: 0.6rem;
+}
+
+/* ===== Markdown 预览样式（阅读态）===== */
+.prose-content h1 { font-size: var(--md-h1-size); font-weight: var(--md-h1-weight); line-height: var(--md-heading-line-height); margin: 1.25rem 0 0.5rem; color: var(--text-primary); padding-bottom: 0.35rem; border-bottom: var(--divider-style); }
+.prose-content h2 { font-size: var(--md-h2-size); font-weight: var(--md-h2-weight); line-height: var(--md-heading-line-height); margin: 1rem 0 0.4rem; color: var(--text-primary); padding-bottom: 0.25rem; border-bottom: var(--heading-rule); }
+.prose-content h3 { font-size: var(--md-h3-size); font-weight: var(--md-h3-weight); line-height: var(--md-heading-line-height); margin: 0.75rem 0 0.3rem; color: var(--text-primary); }
+/* h4–h6：此前**没有任何规则**（回落到正文，等于普通文字）—— 补齐，与即时渲染档同一批令牌 */
+.prose-content h4 { font-size: var(--md-h4-size); font-weight: var(--md-h4-weight); line-height: var(--md-heading-line-height); margin: 0.6rem 0 0.25rem; color: var(--text-primary); }
+.prose-content h5 { font-size: var(--md-h5-size); font-weight: var(--md-h5-weight); line-height: var(--md-heading-line-height); margin: 0.6rem 0 0.25rem; color: var(--text-primary); }
+.prose-content h6 { font-size: var(--md-h6-size); font-weight: var(--md-h6-weight); line-height: var(--md-heading-line-height); margin: 0.6rem 0 0.25rem; color: var(--text-secondary); }
+.prose-content p { margin: 0.4rem 0; line-height: var(--md-line-height); }
+.prose-content strong { color: var(--text-primary); font-weight: var(--md-strong-weight); }
 .prose-content em { color: var(--text-secondary); font-style: italic; }
 .prose-content ul, .prose-content ol { padding-left: 1.5rem; margin: 0.4rem 0; }
 .prose-content ul { list-style-type: disc; }
@@ -255,31 +287,39 @@ input:focus, textarea:focus, select:focus {
 .prose-content ol ol ol { list-style-type: lower-roman; }
 .prose-content li { margin: 0.2rem 0; }
 .prose-content li > ol, .prose-content li > ul { padding-left: 1.25rem; }
+/* 任务列表：li 里已有复选框，不能再画项目符号（此前是「• ☐ 文本」双标记）。
+   两种选择器都写：remark-gfm 会给 li/ul 加类，`:has()` 兜底其它渲染路径。 */
+.prose-content li.task-list-item,
+.prose-content li:has(> input[type="checkbox"]) { list-style: none; }
+.prose-content ul.contains-task-list,
+.prose-content ul:has(> li > input[type="checkbox"]) { padding-left: 0.25rem; }
 .prose-content blockquote {
   border-left: var(--quote-bar);
-  padding-left: 1rem; margin: 0.6rem 0;
+  padding-left: var(--md-quote-pad-left); margin: 0.6rem 0;
   color: var(--text-secondary);
 }
 .prose-content code {
-  background: rgba(128,128,128,0.12);
-  padding: 0.125rem 0.375rem; border-radius: 3px;
-  font-size: 0.875em; font-family: var(--font-mono);
+  background: var(--md-code-bg);
+  padding: var(--md-code-pad); border-radius: var(--md-code-radius);
+  font-size: var(--md-code-size); font-family: var(--font-mono);
 }
-.prose-content pre {
+/* `.kb-md-atom` = 预览与即时渲染档**共用的原子块作用域**（写作面的表格/代码块 widget 直接产出同样的
+   DOM 结构并挂这个类）—— 两边共用同一条规则，一致性由构造保证，不靠两处对齐数值。 */
+:is(.prose-content, .kb-md-atom) pre {
   background: var(--bg-primary); border: 1px solid var(--border-color);
-  padding: 1rem; border-radius: var(--radius-card); overflow-x: auto; margin: 0.6rem 0;
+  padding: var(--md-pre-pad); border-radius: var(--radius-card); overflow-x: auto; margin: var(--md-atom-gap) 0;
   box-shadow: var(--shadow-card);
 }
-.prose-content pre code { background: none; padding: 0; }
-.prose-content img { max-width: 100%; border-radius: var(--radius-btn); margin: 0.5rem 0; }
+:is(.prose-content, .kb-md-atom) pre code { background: none; padding: 0; }
+:is(.prose-content, .kb-md-atom) img { max-width: 100%; border-radius: var(--radius-btn); margin: 0.5rem 0; }
 .prose-content hr { border: none; border-top: var(--divider-style); margin: 1.2rem 0; }
 .prose-content a { color: var(--accent); text-decoration: none; }
 .prose-content a:hover { text-decoration: var(--link-hover-deco); }
-.prose-content table { border-collapse: collapse; width: 100%; margin: 0.6rem 0; }
-.prose-content th, .prose-content td {
-  border: 1px solid var(--border-color); padding: 0.4rem 0.6rem; text-align: left;
+:is(.prose-content, .kb-md-atom) table { border-collapse: collapse; width: 100%; margin: var(--md-atom-gap) 0; }
+:is(.prose-content, .kb-md-atom) th, :is(.prose-content, .kb-md-atom) td {
+  border: 1px solid var(--border-color); padding: var(--md-table-pad); text-align: left;
 }
-.prose-content th { background: var(--bg-tertiary); font-weight: 600; }
+:is(.prose-content, .kb-md-atom) th { background: var(--bg-tertiary); font-weight: 600; }
 
 .prose-content del { color: var(--text-muted); text-decoration: line-through; }
 .prose-content input[type="checkbox"] {
@@ -293,28 +333,30 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--text-disabled); font-size: 0.85em; font-family: inherit;
 }
 
-/* ===== 代码语法高亮（highlight.js → 项目 CSS 变量） ===== */
-.prose-content .hljs-keyword  { color: var(--accent); }
-.prose-content .hljs-string   { color: var(--success); }
-.prose-content .hljs-comment  { color: var(--text-muted); font-style: italic; }
-.prose-content .hljs-number   { color: var(--warning); }
-.prose-content .hljs-title    { color: var(--accent); }
-.prose-content .hljs-type     { color: var(--accent); }
-.prose-content .hljs-meta     { color: var(--text-muted); }
-.prose-content .hljs-built_in { color: var(--accent); }
-.prose-content .hljs-attr     { color: var(--warning); }
-.prose-content .hljs-params   { color: var(--text-primary); }
-.prose-content .hljs-literal  { color: var(--accent); }
-.prose-content .hljs-variable { color: var(--text-primary); }
-.prose-content .hljs-selector-class { color: var(--warning); }
-.prose-content .hljs-selector-tag   { color: var(--accent); }
-.prose-content .hljs-symbol   { color: var(--success); }
-.prose-content .hljs-function { color: var(--warning); }
-.prose-content .hljs-property { color: var(--text-primary); }
-.prose-content .hljs-name     { color: var(--accent); }
-.prose-content .hljs-tag      { color: var(--accent); }
-.prose-content .hljs-addition { color: var(--success); }
-.prose-content .hljs-deletion { color: var(--danger); }
+/* ===== 代码语法高亮（highlight.js → 项目 CSS 变量）=====
+   作用域 `:is(.prose-content, .kb-md-atom)`：阅读态预览与即时渲染档的代码块 widget
+   **同一个 highlight.js + 同一套配色**（写作面的代码卡片因此与预览逐色一致）。 */
+:is(.prose-content, .kb-md-atom) .hljs-keyword  { color: var(--accent); }
+:is(.prose-content, .kb-md-atom) .hljs-string   { color: var(--success); }
+:is(.prose-content, .kb-md-atom) .hljs-comment  { color: var(--text-muted); font-style: italic; }
+:is(.prose-content, .kb-md-atom) .hljs-number   { color: var(--warning); }
+:is(.prose-content, .kb-md-atom) .hljs-title    { color: var(--accent); }
+:is(.prose-content, .kb-md-atom) .hljs-type     { color: var(--accent); }
+:is(.prose-content, .kb-md-atom) .hljs-meta     { color: var(--text-muted); }
+:is(.prose-content, .kb-md-atom) .hljs-built_in { color: var(--accent); }
+:is(.prose-content, .kb-md-atom) .hljs-attr     { color: var(--warning); }
+:is(.prose-content, .kb-md-atom) .hljs-params   { color: var(--text-primary); }
+:is(.prose-content, .kb-md-atom) .hljs-literal  { color: var(--accent); }
+:is(.prose-content, .kb-md-atom) .hljs-variable { color: var(--text-primary); }
+:is(.prose-content, .kb-md-atom) .hljs-selector-class { color: var(--warning); }
+:is(.prose-content, .kb-md-atom) .hljs-selector-tag   { color: var(--accent); }
+:is(.prose-content, .kb-md-atom) .hljs-symbol   { color: var(--success); }
+:is(.prose-content, .kb-md-atom) .hljs-function { color: var(--warning); }
+:is(.prose-content, .kb-md-atom) .hljs-property { color: var(--text-primary); }
+:is(.prose-content, .kb-md-atom) .hljs-name     { color: var(--accent); }
+:is(.prose-content, .kb-md-atom) .hljs-tag      { color: var(--accent); }
+:is(.prose-content, .kb-md-atom) .hljs-addition { color: var(--success); }
+:is(.prose-content, .kb-md-atom) .hljs-deletion { color: var(--danger); }
 
 /* ===== 工具类 ===== */
 .drag-region { -webkit-app-region: drag; }
@@ -1618,57 +1660,62 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
 
 /* ===== 即时渲染档写作面（CodeMirror 6；docs/note-surface-dual-engine-design.md）=====
    非光标块按排版渲染：这里只管「渲染成什么样」，隐藏标记由 CM6 装饰负责。
-   颜色一律走主题 token，字号以编辑器字号为基准（em 相对父级 fontSize，随设置 × 缩放自动跟随）。 */
+   ★ 尺寸/颜色一律引用上方「共享排版令牌」`--md-*` —— 与阅读态预览同一批数值，
+     由 `.AGENT/scripts/notes-surface/compare-live-vs-preview.mjs` 在真窗口里逐项断言（不一致即红）。
+   ★ 基准字号 = **根字号**（CM6 主题里写 `1rem`，随 Ctrl +/- 缩放），不再跟随「编辑器字号」设置
+     （那只作用于源码档 Monaco）；2026-10-11 拍板：即时渲染档与预览像素级一致优先。 */
 .kb-live-pane { min-height: 0; }
 .kb-live-pane .cm-editor { height: 100%; }
 
 .kb-live-h1, .kb-live-h2, .kb-live-h3, .kb-live-h4, .kb-live-h5, .kb-live-h6 {
   font-weight: 600;
-  line-height: 1.35;
+  line-height: var(--md-heading-line-height);
   color: var(--text-primary);
 }
-.kb-live-h1 { font-size: 1.7em; }
-.kb-live-h2 { font-size: 1.45em; }
-.kb-live-h3 { font-size: 1.25em; }
-.kb-live-h4 { font-size: 1.12em; }
-.kb-live-h5 { font-size: 1.02em; }
-.kb-live-h6 { font-size: 0.95em; color: var(--text-secondary); }
+.kb-live-h1 { font-size: var(--md-h1-size); font-weight: var(--md-h1-weight); padding-bottom: 0.35rem; border-bottom: var(--divider-style); }
+.kb-live-h2 { font-size: var(--md-h2-size); font-weight: var(--md-h2-weight); padding-bottom: 0.25rem; border-bottom: var(--heading-rule); }
+.kb-live-h3 { font-size: var(--md-h3-size); font-weight: var(--md-h3-weight); }
+.kb-live-h4 { font-size: var(--md-h4-size); font-weight: var(--md-h4-weight); }
+.kb-live-h5 { font-size: var(--md-h5-size); font-weight: var(--md-h5-weight); }
+.kb-live-h6 { font-size: var(--md-h6-size); font-weight: var(--md-h6-weight); color: var(--text-secondary); }
 
-.kb-live-strong { font-weight: 650; }
-.kb-live-em { font-style: italic; }
+.kb-live-strong { font-weight: var(--md-strong-weight); }
+.kb-live-em { font-style: italic; color: var(--text-secondary); }
 .kb-live-strike { text-decoration: line-through; color: var(--text-muted); }
 .kb-live-code {
-  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
-  font-size: 0.92em;
-  padding: 0.1em 0.32em;
-  border-radius: 4px;
-  background: var(--input-bg, var(--bg-secondary));
+  font-family: var(--font-mono);
+  font-size: var(--md-code-size);
+  padding: var(--md-code-pad);
+  border-radius: var(--md-code-radius);
+  background: var(--md-code-bg);
   color: var(--text-primary);
 }
-.kb-live-link { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+/* 链接与预览一致：常态无下划线，悬停才出（此前常驻下划线） */
+.kb-live-link { color: var(--accent); text-decoration: none; }
+.kb-live-link:hover { text-decoration: var(--link-hover-deco); }
 
-.kb-live-quote { border-left: 2px solid color-mix(in srgb, var(--accent) 55%, var(--border-color)); padding-left: 10px !important; color: var(--text-secondary); }
+.kb-live-quote { border-left: var(--quote-bar); padding-left: var(--md-quote-pad-left) !important; color: var(--text-secondary); }
+/* 围栏底色只在**光标进入代码块、回源码态**时可见（渲染态由代码卡片接管） */
 .kb-live-codeblock { background: color-mix(in srgb, var(--bg-secondary) 70%, transparent); }
 .kb-live-bullet { color: var(--text-muted); padding-right: 2px; }
 .kb-live-task { vertical-align: middle; margin-right: 2px; accent-color: var(--accent); }
-.kb-live-hr { display: inline-block; width: 100%; height: 0; border-top: 1px solid var(--border-color); vertical-align: middle; }
+.kb-live-hr { display: inline-block; width: 100%; height: 0; border-top: var(--divider-style); vertical-align: middle; }
 
+/* 图片：外层只管行内布局，尺寸/圆角走 `.kb-md-atom` 共用规则（与预览同一套） */
 .kb-live-img { display: inline-block; max-width: 100%; vertical-align: bottom; }
-.kb-live-img img { max-width: 100%; max-height: 60vh; border-radius: 6px; display: block; }
 .kb-live-img-loading { min-width: 60px; min-height: 24px; background: var(--input-bg, var(--bg-secondary)); border-radius: 6px; }
 .kb-live-img-broken { min-width: 120px; min-height: 24px; border: 1px dashed var(--border-color); border-radius: 6px; }
 
 .kb-live-math { padding: 0 1px; }
 .kb-live-math-block { display: block; text-align: center; padding: 4px 0; overflow-x: auto; }
 
+/* 表格 / 代码块 widget：DOM 与预览同构 + 挂 `.kb-md-atom`，样式由共用规则供（不在这里重复数值） */
 .kb-live-table-wrap { overflow-x: auto; padding: 2px 0; }
-.kb-live-table { border-collapse: collapse; font-size: 0.94em; }
-.kb-live-table th, .kb-live-table td {
-  border: 1px solid var(--border-color);
-  padding: 3px 8px;
-  text-align: left;
+.kb-live-codecard-inner { position: relative; }
+.kb-live-codecard-lang {
+  position: absolute; top: 0.25rem; right: 0.5rem;
+  font-size: 10px; color: var(--text-muted); opacity: 0.4; user-select: none;
 }
-.kb-live-table th { background: var(--bg-secondary); font-weight: 600; }
 
 /* ===== 编辑器右键菜单（两档共用；NoteContextMenu.tsx）===== */
 .kb-menu {

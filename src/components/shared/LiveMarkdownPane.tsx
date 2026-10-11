@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useImperativeHandle, useRef, forwardRef } from 'react'
-import { EditorState, Compartment, Prec, StateEffect, StateField, type Extension, type Range } from '@codemirror/state'
+import { EditorState, Prec, StateEffect, StateField, type Extension, type Range } from '@codemirror/state'
 import {
   EditorView, Decoration, WidgetType, keymap, drawSelection, dropCursor, highlightSpecialChars,
   rectangularSelection, crosshairCursor, type DecorationSet, ViewPlugin, type ViewUpdate,
@@ -26,6 +26,10 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { syntaxTree, foldGutter, foldKeymap, indentOnInput, bracketMatching } from '@codemirror/language'
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, startCompletion } from '@codemirror/autocomplete'
 import katex from 'katex'
+// 代码块语法高亮：与阅读态预览**同一个库、同一套配色**（预览侧 rehype-highlight 底层就是 highlight.js），
+// 于是「即时渲染档的代码卡片」与预览逐色一致。`lib/common` 是官方「常用语言」入口（约 37 种，
+// 远小于全量构建），且本文件本身是 lazy chunk，不进首屏静态闭包（铁律 20）。
+import hljs from 'highlight.js/lib/common'
 import { loadWikiTargets } from '../../lib/wikiLinkSuggest'
 import { getCachedVaultImage, loadVaultImage, normalizeVaultRel } from '../../lib/attachmentImage'
 import { runNoteAction, type NoteActionId } from '../../lib/noteActions'
@@ -36,8 +40,6 @@ export interface LiveMarkdownPaneProps {
   content: string
   /** 内容变更回调（relPath 由宿主回填） */
   onChange: (value: string) => void
-  /** 正文字号（跟随设置 × 缩放） */
-  fontSize: number
   /** 粘贴/拖拽图片：返回要插入的 md 文本（null = 放弃）；仅 markdown 文档传入 */
   onPasteImage?: (file: File) => Promise<string | null>
   onDropImage?: (file: File) => Promise<string | null>
@@ -106,7 +108,8 @@ class ImageWidget extends WidgetType {
   eq(o: ImageWidget): boolean { return o.src === this.src && o.alt === this.alt && o.rel === this.rel }
   toDOM(): HTMLElement {
     const wrap = document.createElement('span')
-    wrap.className = 'kb-live-img'
+    // 尺寸/圆角走 `.kb-md-atom img` 共用规则（与预览同一套），这里只管行内布局
+    wrap.className = 'kb-live-img kb-md-atom'
     const img = document.createElement('img')
     img.alt = this.alt
     img.loading = 'lazy'
@@ -195,7 +198,9 @@ class TableWidget extends WidgetType {
     const rows = this.src.split('\n').filter((l) => l.trim())
     const cells = (line: string) => line.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
     const wrap = document.createElement('div')
-    wrap.className = 'kb-live-table-wrap'
+    // `kb-md-atom`：与阅读态预览**共用同一条 CSS**（`:is(.prose-content, .kb-md-atom) table/th/td`），
+    // 所以这里不再自己写一遍宽度/内边距/表头底色 —— 数值只有一处，改预览即改写作面。
+    wrap.className = 'kb-live-table-wrap kb-md-atom'
     const table = document.createElement('table')
     table.className = 'kb-live-table'
     if (rows.length >= 1) {
@@ -225,6 +230,44 @@ class TableWidget extends WidgetType {
     }
     wrap.appendChild(table)
     return wrap
+  }
+}
+
+/**
+ * 围栏代码块 → 只读卡片（光标进入整块回源码，与表格同一套语义）。
+ *
+ * 为什么用 widget 而不是「给代码行上类 + CM6 语法高亮」：预览的代码块是 `<pre>` 卡片 + highlight.js
+ * 着色，编辑器若自己接 CM6 高亮，**配色与语言集都和预览不是同一套**（markdown 语言不带嵌套语言解析，
+ * 还得另装 @codemirror/language-data）。这里直接产出与预览**同构的 DOM**并挂 `.kb-md-atom`，
+ * 两边共用同一条 CSS 与同一个 highlight.js —— 一致性由构造保证，不靠人工对齐数值。
+ */
+class CodeBlockWidget extends WidgetType {
+  constructor(readonly code: string, readonly lang: string) { super() }
+  eq(o: CodeBlockWidget): boolean { return o.code === this.code && o.lang === this.lang }
+  toDOM(): HTMLElement {
+    const outer = document.createElement('div')
+    outer.className = 'kb-md-atom'
+    const pre = document.createElement('pre')
+    const inner = document.createElement('div')
+    inner.className = 'kb-live-codecard-inner'
+    if (this.lang) {
+      const tag = document.createElement('span')
+      tag.className = 'kb-live-codecard-lang'
+      tag.textContent = this.lang
+      inner.appendChild(tag)
+    }
+    const code = document.createElement('code')
+    code.className = this.lang ? `hljs language-${this.lang}` : 'hljs'
+    if (this.lang && hljs.getLanguage(this.lang)) {
+      // highlight.js 输出的是**已转义**的 HTML（只含 <span class="hljs-*">），与预览侧同源同色
+      code.innerHTML = hljs.highlight(this.code, { language: this.lang, ignoreIllegals: true }).value
+    } else {
+      code.textContent = this.code
+    }
+    inner.appendChild(code)
+    pre.appendChild(inner)
+    outer.appendChild(pre)
+    return outer
   }
 }
 
@@ -308,10 +351,19 @@ function buildDecorations(state: EditorState, areas: readonly { from: number; to
           return
         }
         if (name === 'FencedCode' || name === 'CodeBlock') {
-          const a = doc.lineAt(node.from).number
-          const b = doc.lineAt(node.to).number
-          for (let n = a; n <= b; n++) addLine(doc.line(n).from, 'kb-live-codeblock')
-          return
+          if (containsCursor(node.from, node.to)) {
+            // 光标进入 → 整块回源码；底色帮辨认块范围（渲染态由下面的代码卡片接管）
+            const a = doc.lineAt(node.from).number
+            const b = doc.lineAt(node.to).number
+            for (let n = a; n <= b; n++) addLine(doc.line(n).from, 'kb-live-codeblock')
+          } else {
+            const info = node.node.getChild('CodeInfo')
+            const codeText = node.node.getChild('CodeText')
+            const lang = info ? state.sliceDoc(info.from, info.to).trim() : ''
+            const code = codeText ? state.sliceDoc(codeText.from, codeText.to) : state.sliceDoc(node.from, node.to)
+            addReplace(node.from, node.to, new CodeBlockWidget(code, lang))
+          }
+          return false
         }
         if (name === 'ListItem') return  // 交给 ListMark / TaskMarker 各自处理
         // 块级渲染（替换）：光标进入就不替，整块回源码
@@ -338,9 +390,22 @@ function buildDecorations(state: EditorState, areas: readonly { from: number; to
           return false
         }
         if (name === 'ListMark') {
+          const line = doc.lineAt(node.from)
+          // 嵌套层级由**行首缩进**推出（不用遍历深度：视口切片会让「父列表在视口外」的项算成 0 层）
+          const indent = (/^[ \t]*/.exec(line.text)?.[0] ?? '').replace(/\t/g, '    ').length
+          const depth = Math.min(2, Math.floor(indent / 2))
+          const rest = line.text.slice(indent)
+          const raw = state.sliceDoc(node.from, node.to)
+          if (/^[-*+]\s+\[[ xX]\]/.test(rest)) {
+            // 任务行由复选框充当标记，不能再画项目符号（此前是「• ☐ 文本」双标记；预览侧同步修）
+            const lead = /^[-*+]\s+/.exec(rest)?.[0] ?? ''
+            if (!hitsActiveLine(node.from, node.to)) addHide(node.from, node.from + lead.length)
+            return false
+          }
           if (!hitsActiveLine(node.from, node.to)) {
-            const raw = state.sliceDoc(node.from, node.to)
-            addReplace(node.from, node.to, new BulletWidget(/^\d/.test(raw) ? raw.trim() : '•'))
+            // 与预览的 disc / circle / square 同层同形；有序列表沿用源里的序号（预览会重编号，另条）
+            const marker = /^\d/.test(raw) ? raw.trim() : (['•', '○', '▪'][depth] ?? '•')
+            addReplace(node.from, node.to, new BulletWidget(marker))
           }
           return false
         }
@@ -456,11 +521,14 @@ const liveViewportPlugin = ViewPlugin.fromClass(
   },
 )
 
-/** 主题：字号 / 字体 / 选中色跟随应用 token（渲染态用正文字体，代码用等宽） */
-function liveTheme(fontSize: number): Extension {
+/** 主题：字号 / 字体 / 选中色跟随应用 token（渲染态用正文字体，代码用等宽）
+ *  ★ 字号 = `1rem`（根字号，`App.tsx` 把缩放写成 `html{font-size}`）—— 与阅读态预览同一基准、
+ *    随 Ctrl +/- 同步缩放。**不再跟随「编辑器字号」设置**（那只作用于源码档 Monaco）：
+ *    2026-10-11 拍板「即时渲染档与预览像素级一致」优先于「写作字号自选」。 */
+function liveTheme(): Extension {
   return EditorView.theme({
     '&': {
-      fontSize: `${fontSize}px`,
+      fontSize: '1rem',
       fontFamily: 'var(--font-sans, system-ui, sans-serif)',
       color: 'var(--text-primary)',
       backgroundColor: 'transparent',
@@ -504,7 +572,7 @@ function applyTextDiff(view: EditorView, next: string): void {
 
 /** 立即把外部文本落进模型（组合输入期间由调用方延后） */
 export const LiveMarkdownPane = forwardRef<NoteEngineHandle, LiveMarkdownPaneProps>(function LiveMarkdownPane(
-  { content, onChange, fontSize, onPasteImage, onDropImage, onContextMenu, onCursorOffset, initialCursorOffset }, ref,
+  { content, onChange, onPasteImage, onDropImage, onContextMenu, onCursorOffset, initialCursorOffset }, ref,
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -515,7 +583,6 @@ export const LiveMarkdownPane = forwardRef<NoteEngineHandle, LiveMarkdownPanePro
   const cursorRef = useRef(onCursorOffset); cursorRef.current = onCursorOffset
   const composingRef = useRef(false)
   const pendingRef = useRef<string | null>(null)
-  const fontSizeComp = useRef(new Compartment())
 
   // 契约实现与快捷键共用同一份（`makeCmHandle`）——见文件末尾的说明
   useImperativeHandle(ref, () => makeCmHandle(() => viewRef.current), [])
@@ -538,7 +605,8 @@ export const LiveMarkdownPane = forwardRef<NoteEngineHandle, LiveMarkdownPanePro
       autocompletion({ override: [wikiCompletionSource as never], activateOnTyping: true, closeOnBlur: true }),
       livePreviewField,
       liveViewportPlugin,
-      fontSizeComp.current.of(liveTheme(fontSize)),
+      // 字号固定 1rem（= 根字号）：不再随「编辑器字号」设置变化，故不需要 Compartment 重配置
+      liveTheme(),
       Prec.high(keymap.of([
         // 编辑器内组合键：两档语义一致（源码档同键位见 MonacoPane 的 addCommand），
         // 且都经同一份动作表下达 —— 不会出现「菜单能加粗、快捷键行为不一样」
@@ -642,13 +710,6 @@ export const LiveMarkdownPane = forwardRef<NoteEngineHandle, LiveMarkdownPanePro
     if (composingRef.current) { pendingRef.current = content; return }
     applyTextDiff(view, content)
   }, [content])
-
-  // 字号跟随设置 × 缩放
-  useEffect(() => {
-    const view = viewRef.current
-    if (!view) return
-    view.dispatch({ effects: fontSizeComp.current.reconfigure(liveTheme(fontSize)) })
-  }, [fontSize])
 
   // 换文件（同一实例被复用）时把该文件上次的光标位置还回去
   useEffect(() => {

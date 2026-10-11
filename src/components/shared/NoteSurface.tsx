@@ -125,7 +125,6 @@ export const NoteSurface = forwardRef<NoteSurfaceHandle, Props>(function NoteSur
             ref={liveRef}
             content={doc.content}
             onChange={(v) => onChange(relPath, v)}
-            fontSize={fontSize ?? 13}
             onPasteImage={onPasteImage}
             onDropImage={onDropImage}
             onCursorOffset={(off) => noteCursor('live', off)}

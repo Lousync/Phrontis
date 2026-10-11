@@ -84,27 +84,54 @@ PageEditor（知识库就地编辑）
 |---|---|---|
 | P0 | 设置项 + 契约 + 宿主 + 单写者闸门 + 光标记账 + 右键菜单（两档） | ✅ |
 | P1 | CM6 渲染 / 回源码 / 列表与配对 / 快捷键 / 图片 / 公式 / 表格只读 | ✅ |
+| P1.5 | **排版与阅读态逐项一致**（2026-10-11）：共享令牌 `--md-*` + 共用原子作用域 `.kb-md-atom`，代码块卡片化 + highlight.js，基准字号改跟随正文字号 | ✅ |
 | P2 | `[[` 候选共用数据层 + 两档补全；脚注 / 插图 / 大纲跳转走契约 | ✅ |
 | P3 | **AI 续写（ghost text）在即时渲染档**：暂未提供（该档不渲染 ✨ 钮，避免点了没反应） | ⏳ 待做 |
 | P4 | 禅模式 / 打字机 / 折叠等细节对齐 | ⏳ 待做 |
 
 **明确不做**：中间档「淡化+」· 跨档撤销搬运 · 同屏双引擎 · 表格内 grid 编辑 · mermaid 渲染 · 块引用 `^id` · 拖拽块排序 · 「新建数据库」。
 
+## 6.1 排版对齐（2026-10-11 追加）
+
+**起因**：即时渲染档与预览看起来"不太一样"。实测（`compare-live-vs-preview.mjs`）发现两侧是两套独立样式表，差异 14 项，最大一条是**基准字号 13px vs 16px**（差 23%）。
+
+**治理结构（防再次漂移）**：
+
+1. **共享排版令牌**：`src/styles/index.css` 新增 `:root { --md-* }`（h1–h6 字号字重、行高、行内代码、代码卡、表格、引用条）。`.prose-content` 与 `.kb-live-*` **都只引用令牌**，不许各写数值（契约 C11h 负向锁住）。
+2. **共用原子作用域 `.kb-md-atom`**：表格 / 代码块 / 图片 widget 产出**与预览同构的 DOM** 并挂这个类，CSS 写成 `:is(.prose-content, .kb-md-atom) …` —— 一致性由构造保证，不靠两处对数值。
+3. **基准字号 = 根字号**：CM6 主题写 `1rem`（`App.tsx` 把缩放写成 `html{font-size: zoom×16px}`），与预览同基准；「编辑器字号」设置**从此只管源码档**。
+4. **代码块卡片化**：`CodeBlockWidget` 用 highlight.js（`lib/common`，与预览同一个库、同一套 `.hljs-*` 配色，且该 chunk 与预览共用、不重复打包）产出 `<pre><code class="hljs language-js">` + 语言标签；光标进入整块回源码（与表格同一套语义）。
+
+**有意保留的差异**（写进探针 EXEMPT，防被误当 bug 回改）：任务复选框可点性（编辑态可点 / 阅读态不可点）· 预览顶部多一行页面标题 · 文档总高度（编辑器必须显示空行）· 列表与引用行高（阅读态继承 1.5 / 编辑器统一 1.75）· 有序列表序号（编辑器沿用源序号，预览会重编号）。
+
+**下一轮待办（2026-10-11 记录，未做）**：
+
+- 有序列表**重编号**（`1. 1. 1.` 在预览里显示 1/2/3，编辑器仍显示 1/1/1）——需要按同层连续项计数，且要处理与源缩进的关系。
+- 列表/引用**行高**对齐到阅读态的 1.5（可选；当前刻意统一 1.75，改了要复查光标几何）。
+- 嵌套列表**缩进**对齐（现在靠源里的前导空格；改成 padding 会与源文本叠加或在光标行跳变，需专门设计）。
+- 即时渲染档的 `Ctrl F` 查找（CM6 需接 `@codemirror/search`）。
+- 图片元素的排版断言（对比 fixture 里还没有真图片，`compare-live-vs-preview.mjs` 未覆盖 `img`）。
+
 ## 7. 验证
 
-| 门禁 | 结果 |
+| 门禁 | 结果（2026-10-11 排版对齐后复跑） |
 |---|---|
 | `tsc --noEmit`（node / web） | 0 错 |
-| `electron-vite build` | 通过（CM6 独立 chunk `LiveMarkdownPane-*.js`，lazy） |
-| 契约 `.AGENT/scripts/notes-surface/verify-note-surface.mjs` | **146 PASS / 0 FAIL**（含用假引擎跑真动作的表驱动断言：包裹 / 幂等段落 / 块级落点 / 脚注三态 / 菜单树完整性 / 单写者与惰性的负向断言） |
-| 探针 `.AGENT/scripts/notes-surface/probe-note-surface.mjs`（隔离实例 + CDP 真 DOM） | **28 PASS / 0 FAIL**（源码档在场 → 两档右键菜单 → **切档不关笔记、当场换成即时渲染档** → CM6 渲染各类块且标记被隐藏 → 光标块回源码 → 菜单动作真落进文档并渲染 → 切回源码档不残留 → console 零 error） |
+| `electron-vite build` | 通过（CM6 独立 chunk `LiveMarkdownPane-*.js`，lazy；highlight.js 与预览共用同一 chunk，无重复打包） |
+| 契约 `.AGENT/scripts/notes-surface/verify-note-surface.mjs` | **171 PASS / 0 FAIL**（含用假引擎跑真动作的表驱动断言 + C11「排版单一真相」源码层负向断言） |
+| 探针 `.AGENT/scripts/notes-surface/probe-note-surface.mjs`（隔离实例 + CDP 真 DOM） | **32 PASS / 0 FAIL**（源码档在场 → 两档右键菜单 → **切档不关笔记、当场换成即时渲染档** → CM6 渲染各类块且标记被隐藏 → 代码块卡片 + 语法高亮 → 光标块回源码（含代码块来回） → 菜单动作真落进文档并渲染 → 切回源码档不残留 → console 零 error） |
+| 排版一致性探针 `.AGENT/scripts/notes-surface/compare-live-vs-preview.mjs`（隔离实例 + computedStyle 逐项比对） | **57 PASS / 0 FAIL**（44 项排版数值两侧必须相等 + 代码卡/高亮/语言标签 + 视口内块级公式必须渲染 + 列表标记 + console 零 error；有意差异列在 EXEMPT 只打印不判失败） |
+| 手册检索 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs` | **54/54 用例通过**（新增《笔记 · 写作模式与编辑器》8 条用例全第 1 名命中） |
 
 探针跑法（隔离 userData，不动开发机数据）：
 
 ```bash
 node .AGENT/scripts/workbench-shell/probes/seed-probe-vault.mjs --ud "knowbase (dev probe-app)"
 node .AGENT/scripts/workbench-shell/probes/run-probe-app.mjs .AGENT/scripts/notes-surface/probe-note-surface.mjs
+node .AGENT/scripts/workbench-shell/probes/run-probe-app.mjs .AGENT/scripts/notes-surface/compare-live-vs-preview.mjs
 ```
+
+> 两个探针都必须**先 build**（跑的是 `out/` 产物）；`compare-live-vs-preview.mjs` 会把截图与 computedStyle JSON 落到 `tmp/probe-shots/`，改样式后可重跑复核。
 
 调试钩子：`window.__kbLive`（CM6 `EditorView` 实例，与 `__kbTerm` / `__kb_inline_trigger` 同范式）——探针靠它读「菜单动作到底改没改到文档」。
 
@@ -112,4 +139,6 @@ node .AGENT/scripts/workbench-shell/probes/run-probe-app.mjs .AGENT/scripts/note
 
 - **`PageEditor` 不再直接渲染引擎**：既有契约脚本里「PageEditor 消费共享宿主」那条仍成立（它仍从 `MonacoPane` 取 `cancelInlineSuggestInFlight`），另有 `.AGENT/scripts/notes-surface/` 新脚本守住新结构。
 - **博客编辑器 / 归档文本 / 导图视图不受影响**（仍直接用 `MonacoPane`，写作模式设置只作用于知识库笔记正文）。
-- **AI 手册需同步**：`resources/help/` 是 AI 回答「软件怎么用」的唯一语料，写作模式与右键菜单属用户可见新功能（见 DP `v3.5.0.md` 的「AI 使用手册同步」条目）。
+- **「编辑器字号」语义收窄**（2026-10-11）：该项从此只作用于**源码档**（Monaco）；即时渲染档跟随界面正文字号（与阅读态一致）。设置说明、`EditorView` 提示与 AI 手册已同步。
+- **阅读态预览也有改动**：补齐 h4–h6 样式、任务列表去掉「• ☐」双标记、代码块相关规则改为 `:is(.prose-content, .kb-md-atom)` 双作用域（`.prose-content` 有 19 处消费者，改动均为**加法**：既有取值不变，仅新增选择器与 h4–h6）。
+- **AI 手册已同步**：新增《笔记 · 写作模式与编辑器》（含字号口径与不支持项）。

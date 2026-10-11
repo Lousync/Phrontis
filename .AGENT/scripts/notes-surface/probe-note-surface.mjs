@@ -115,6 +115,10 @@ const JS_STATE = `(() => ({
   katex: document.querySelectorAll('.cm-content .katex').length,
   hr: document.querySelectorAll('.kb-live-hr').length,
   codeblock: document.querySelectorAll('.kb-live-codeblock').length,
+  // 代码块渲染态 = 与预览同构的卡片（.kb-md-atom pre）+ highlight.js 着色 + 语言标签
+  codeCard: document.querySelectorAll('.cm-content .kb-md-atom pre').length,
+  codeLang: document.querySelectorAll('.kb-live-codecard-lang').length,
+  hljs: document.querySelectorAll('.cm-content [class*=hljs-]').length,
 }))()`
 
 async function main() {
@@ -251,7 +255,11 @@ async function main() {
   ok(st.task === 2, 'P4d 两个复选框渲染成可点的 checkbox', String(st.task))
   ok(st.table >= 1, 'P4e 表格渲染成 <table>（只读渲染）', String(st.table))
   ok(st.katex >= 1, 'P4f 公式经 KaTeX 渲染', String(st.katex))
-  ok(st.codeblock >= 1, 'P4g 代码块底色行在场', String(st.codeblock))
+  // 代码块：2026-10-11 起改为**与预览同构的卡片 widget**（卡片 + highlight.js 着色 + 语言标签），
+  // 不再是「给代码行上底色」——那版与阅读态差得远（无边框/无高亮），见 compare-live-vs-preview.mjs。
+  ok(st.codeCard >= 1 && st.codeLang >= 1, 'P4g 代码块渲染成卡片 + 语言标签（.kb-md-atom pre）', JSON.stringify({ card: st.codeCard, lang: st.codeLang }))
+  ok(st.hljs >= 1, 'P4g2 代码块带 highlight.js 着色 token（与预览同一套配色）', String(st.hljs))
+  ok(st.codeblock === 0, 'P4g3 光标不在代码块时不留围栏底色行（整块由卡片取代）', String(st.codeblock))
   ok(!st.cmText.includes('**'), 'P4h ★ 非光标块的行内标记被隐藏（正文看不到 **）', st.cmText.slice(0, 120))
   ok(!st.cmText.includes('| --- |'), 'P4i ★ 表格分隔行被 widget 取代', st.cmText.slice(0, 160))
   // 块级公式在文档下半部，可能落在视口外 → 先滚到底再断言（可见区间只渲染视口内的块）
@@ -262,8 +270,19 @@ async function main() {
     if (s) s.scrollTop = s.scrollHeight
     return false
   })()`)
-  await sleep(1200)
+  // ★ 等条件成立再断言，别用固定 sleep：视口投递是 rAF 延迟的，冷启动首跑会慢半拍（曾假红一次）
+  await waitFor(`(() => { const t = document.querySelector('.cm-content')?.innerText ?? ''; return !t.includes('$$') })()`, 8000)
   const stBottom = await evalJs(JS_STATE)
+  console.log('[diag] bottom:', JSON.stringify(await evalJs(`(() => {
+    const s = document.querySelector('.cm-scroller')
+    return {
+      scrollTop: s ? Math.round(s.scrollTop) : null,
+      scrollHeight: s ? s.scrollHeight : null,
+      katex: document.querySelectorAll('.cm-content .katex').length,
+      codeCard: document.querySelectorAll('.cm-content .kb-md-atom pre').length,
+      head: window.__kbLive?.state?.selection?.main?.head,
+    }
+  })()`)))
   ok(!stBottom.cmText.includes('$$'), 'P4j ★ 块级公式标记被 widget 取代（滚到底后可见区间重算）', stBottom.cmText.slice(-160))
   ok(stBottom.katex >= 2, 'P4k 行内 + 块级公式都渲染（滚动后重算装饰）', String(stBottom.katex))
 
@@ -284,6 +303,32 @@ async function main() {
   st = await evalJs(JS_STATE)
   ok(wentToBold && st.cmText.includes('**'), 'P5 ★ 光标进入该块后回源码（标记重新可见，可编辑）', st.cmText.slice(0, 160))
   await shot('note-surface-04-live-source-block')
+
+  // ---- P5b 代码块同一套语义：点进去回源码（围栏重新可见），移开再变回卡片 ----
+  const wentToCode = await evalJs(`(() => {
+    const el = [...document.querySelectorAll('.cm-line')].find(l => l.textContent.includes('const a = 1'))
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: r.left + 6, clientY: r.top + r.height / 2 }))
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: r.left + 6, clientY: r.top + r.height / 2 }))
+    return true
+  })()`)
+  await sleep(600)
+  const stCode = await evalJs(JS_STATE)
+  ok(wentToCode && stCode.codeblock >= 1 && stCode.cmText.includes('```'),
+    'P5b ★ 光标进入代码块后回源码（围栏 ``` 重新可见）', JSON.stringify({ block: stCode.codeblock, hasFence: stCode.cmText.includes('```') }))
+  // 移开光标（点回加粗那一行）→ 卡片回来
+  await evalJs(`(() => {
+    const el = [...document.querySelectorAll('.cm-line')].find(l => l.textContent.includes('加粗'))
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: r.left + 6, clientY: r.top + r.height / 2 }))
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: r.left + 6, clientY: r.top + r.height / 2 }))
+    return true
+  })()`)
+  await sleep(600)
+  const stBack = await evalJs(JS_STATE)
+  ok(stBack.codeCard >= 1 && stBack.codeblock === 0, 'P5c 光标移开后代码块变回卡片', JSON.stringify({ card: stBack.codeCard, block: stBack.codeblock }))
 
   // ---- P6 即时渲染档右键 + 真插入一条分隔线 ----
   await evalJs(`(() => {

@@ -310,9 +310,36 @@ ok(read('src/lib/ipc.ts').includes('readClipboardText'), 'C9c ipc 封装 readCli
 ok(read('src/types/index.ts').includes('readClipboardText'), 'C9d ElectronAPI 类型补齐')
 
 // ---- C10 渲染层样式 ----
-for (const cls of ['.kb-live-h1', '.kb-live-strong', '.kb-live-code', '.kb-live-quote', '.kb-live-table', '.kb-live-img', '.kb-live-task']) {
+for (const cls of ['.kb-live-h1', '.kb-live-strong', '.kb-live-code', '.kb-live-quote', '.kb-live-img', '.kb-live-task', '.kb-live-codecard-lang', '.kb-live-math-block']) {
   ok(SRC_CSS.includes(cls), `C10 样式含 ${cls}`)
 }
+
+// ---- C11 排版单一真相（阅读态预览与即时渲染档共用令牌，不许各写数值）----
+// 背景：2026-10-11 实测两侧漂移（基准字号 13 vs 16、H1 无/有下划线、代码块无/有语法高亮…）。
+// 治理 = 「共享排版令牌 `--md-*`」+「共用原子作用域 `.kb-md-atom`」；运行时由
+// `.AGENT/scripts/notes-surface/compare-live-vs-preview.mjs` 逐项断言，这里锁源码层不漂。
+ok(SRC_CSS.includes('--md-h1-size'), 'C11a 共享排版令牌块存在（--md-*）')
+for (const tok of ['--md-h1-size', '--md-h2-size', '--md-code-bg', '--md-code-pad', '--md-pre-pad', '--md-table-pad', '--md-quote-pad-left', '--md-strong-weight', '--md-heading-line-height']) {
+  ok(SRC_CSS.includes(`var(${tok})`), `C11b 有规则消费 ${tok}`)
+}
+ok(/\.prose-content h1 \{[^}]*var\(--md-h1-size\)/.test(SRC_CSS), 'C11c 预览 h1 字号取自令牌')
+ok(/\.kb-live-h1 \{[^}]*var\(--md-h1-size\)/.test(SRC_CSS), 'C11d 写作面 h1 字号取自令牌')
+ok(/\.prose-content h4 \{/.test(SRC_CSS) && /\.kb-live-h4 \{/.test(SRC_CSS), 'C11e h4–h6 两侧都有规则（预览此前缺失，回落到正文）')
+ok(SRC_CSS.includes('.kb-md-atom'), 'C11f 预览与写作面共用原子作用域 .kb-md-atom')
+{
+  // 锚点必须带注释开头：令牌块的说明文字里也出现过「即时渲染档写作面」四个字
+  const liveCss = SRC_CSS.slice(SRC_CSS.indexOf('/* ===== 即时渲染档写作面'), SRC_CSS.indexOf('/* ===== 编辑器右键菜单'))
+  ok(liveCss.length > 0, 'C11g 定位到写作面样式块（供下面两条负向断言）')
+  ok(!/font-size:\s*[\d.]+em/.test(liveCss), 'C11h 负向：写作面不再写死 em 字号（必须走令牌）')
+}
+ok(SRC_LIVE.includes("fontSize: '1rem'"), 'C11i 写作面基准字号 = 1rem（根字号，与预览同基准）')
+ok(!SRC_LIVE.includes('liveTheme(fontSize)') && !SRC_LIVE.includes('fontSizeComp'), 'C11j 负向：写作面不再按「编辑器字号」重配置')
+ok(SRC_LIVE.includes("'kb-live-table-wrap kb-md-atom'") && SRC_LIVE.includes("'kb-live-img kb-md-atom'"), 'C11k 表格/图片 widget 挂共用原子作用域')
+ok(SRC_LIVE.includes("outer.className = 'kb-md-atom'"), 'C11l 代码块 widget 挂共用原子作用域')
+ok(SRC_LIVE.includes("from 'highlight.js/lib/common'"), 'C11m 代码高亮与预览同一个库（highlight.js）')
+ok(SRC_LIVE.includes('new CodeBlockWidget'), 'C11n 围栏代码块走卡片 widget（与预览同构 DOM）')
+ok(SRC_LIVE.includes("['•', '○', '▪']"), 'C11o 无序列表按层换标记（• / ○ / ▪）')
+ok(SRC_LIVE.includes('[-*+]\\s+\\[[ xX]\\]'), 'C11p 任务行不再画项目符号（双标记修复）')
 
 // ===================== 结果 =====================
 
