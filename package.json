@@ -13,6 +13,14 @@
     "pack:dir": "node scripts/pack.mjs --dir-only"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
+    "@lezer/markdown": "^1.8.0",
     "@lydell/node-pty": "^1.2.0-beta.15",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@monaco-editor/react": "^4.7.0",
@@ -25,7 +33,7 @@
     "highlight.js": "^11.11.1",
     "iconv-lite": "^0.7.2",
     "ignore": "^5.3.2",
-    "katex": "^0.18.4",
+    "katex": "^0.18.11",
     "linkedom": "^0.18.13",
     "lucide-react": "^1.0.0",
     "mermaid": "^12.1.0",

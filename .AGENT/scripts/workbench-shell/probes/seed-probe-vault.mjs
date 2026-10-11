@@ -34,6 +34,47 @@ for (const d of ['.knowbase', 'AI教学', '学习笔记']) mkdirSync(join(fixtur
 writeFileSync(join(fixture, 'README.md'), '# 探针 fixture\n\n仅供 probe-shell-b3 使用。\n', 'utf8')
 writeFileSync(join(fixture, '学习笔记', '笔记一.md'), '# 笔记一\n\nfixture 内容。\n', 'utf8')
 
+// 1a-bis 双写作面探针（probe-note-surface.mjs）：一篇覆盖「标题 / 加粗 / 行内代码 / 引用 /
+//   任务列表 / 表格 / 行内与块级公式 / 代码围栏」的富格式页——即时渲染档的各类 widget 与
+//   标记隐藏都要有东西可断言。带 frontmatter id（无 id 的 md 是草稿，知识库不显示）。
+writeFileSync(
+  join(fixture, '写作面探针.md'),
+  [
+    '---',
+    'id: probe-note-surface',
+    'title: 写作面探针',
+    'tags: [探针]',
+    '---',
+    '',
+    '# 一级标题',
+    '',
+    '这是**加粗**与*斜体*与`行内代码`。',
+    '',
+    '> 引用一行',
+    '',
+    '- [ ] 待办一',
+    '- [x] 待办二',
+    '',
+    '| A | B |',
+    '| --- | --- |',
+    '| 1 | 2 |',
+    '',
+    '行内公式 $a^2+b^2=c^2$ 在此。',
+    '',
+    '$$',
+    '\\int_0^1 x\\,dx',
+    '$$',
+    '',
+    '```js',
+    'const a = 1',
+    '```',
+    '',
+    '结尾段落。',
+    '',
+  ].join('\n'),
+  'utf8',
+)
+
 // 1b. B1 @ 引用（probe-batch5-ai E 组）需要 ≥5 个**可引用**页面（带 frontmatter id 的 doc，
 //     非欢迎页）——chip 上限 4 篇要加到第 5 篇才验得出「超限被拒」。
 //     无 frontmatter id 的 md 是草稿、知识库不显示，所以这批必须带 id。

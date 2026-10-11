@@ -7,7 +7,8 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import { Copy } from 'lucide-react'
 import { showToast } from '../../lib/toast'
-import { copyImageUrlToClipboard, workspaceGetCurrent, workspaceReadImage } from '../../lib/ipc'
+import { copyImageUrlToClipboard } from '../../lib/ipc'
+import { normalizeVaultRel, getCachedVaultImage, loadVaultImage } from '../../lib/attachmentImage'
 import { preprocessContent, parseQuizFence, parseQuizFenceLoose } from './QuizParser'
 import { QuizCard } from './QuizCard'
 import { PluginFenceRenderer } from './PluginFenceRenderer'
@@ -352,41 +353,13 @@ export const MarkdownPreview = React.memo(MarkdownPreviewInner)
 const WIKI_RE = /\[\[([^\]]+)\]\]/
 
 // ===== P3：仓库根相对路径图片解析（D1 附件区 .attachments/，兼容旧 .knowbase/_attachments/ 与根 _attachments/）=====
-// md 中形如 `![x](.attachments/2026-09/x.png)` 的链接对渲染进程不可直接取回（无文件系统 http 服务），
-// 统一经 ws:readImage（主进程附件白名单 + resolveSafe 越界防护）解析为 data:URI，进程内缓存。
-const vaultRelImgCache = new Map<string, string>()
-let vaultRelRootIdPromise: Promise<string | null> | null = null
-
-function normalizeVaultRel(src: string): string | null {
-  let s = src
-  try { s = decodeURIComponent(s) } catch { /* 含 % 的原始名按字面处理 */ }
-  for (let guard = 0; guard < 10; guard++) {
-    if (s.startsWith('../')) { s = s.slice(3); continue }
-    if (s.startsWith('./')) { s = s.slice(2); continue }
-    break
-  }
-  if (/^\.attachments\//i.test(s) || /^\.knowbase\/_attachments\//i.test(s) || /^_attachments\//i.test(s)) return s
-  return null
-}
-
+// 取回逻辑已抽到 `src/lib/attachmentImage.ts`（即时渲染档的编辑器内联图片共用同一份规则与缓存）。
 function VaultRelImg({ rel, alt, ...props }: { rel: string } & React.ImgHTMLAttributes<HTMLImageElement>) {
-  const cached = vaultRelImgCache.get(rel) ?? null
-  const [dataUrl, setDataUrl] = useState<string | null>(cached)
+  const [dataUrl, setDataUrl] = useState<string | null>(() => getCachedVaultImage(rel))
   useEffect(() => {
     if (dataUrl) return
     let alive = true
-    void (async () => {
-      try {
-        if (!vaultRelRootIdPromise) vaultRelRootIdPromise = workspaceGetCurrent().then((cur) => cur?.rootId ?? null)
-        const rootId = await vaultRelRootIdPromise
-        if (!rootId) return
-        const res = await workspaceReadImage(rootId, rel)
-        if (res.dataUrl && alive) {
-          vaultRelImgCache.set(rel, res.dataUrl)
-          setDataUrl(res.dataUrl)
-        }
-      } catch { /* 取回失败保持原生渲染（破图可见，不崩预览） */ }
-    })()
+    void loadVaultImage(rel).then((url) => { if (url && alive) setDataUrl(url) })
     return () => { alive = false }
   }, [rel, dataUrl])
   if (!dataUrl) {

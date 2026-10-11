@@ -53,6 +53,18 @@ export function EditorView() {
 
       <div data-setting-anchor="editor.lineNumbers">
         <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-3">显示</h3>
+        <div data-setting-anchor="editor.writingMode" className="mb-4 max-w-md">
+          <SettingSelect
+            title="写作模式"
+            description="源码 = 编辑 Markdown 原文（配合标记淡化）；即时渲染 = 按排版显示，光标所在段落回到原文。两档各自记住光标位置，撤销历史不跨档"
+            value={(s.editorWritingMode as string) ?? 'source'}
+            onChange={(v) => update('editorWritingMode', v)}
+            options={[
+              { id: 'source', label: '源码', desc: 'Markdown 原文 + 标记淡化（既有手感）', isDefault: true },
+              { id: 'live', label: '即时渲染', desc: '标题 / 加粗 / 图片 / 公式 / 表格直接出效果' },
+            ]}
+          />
+        </div>
         <label className="flex items-center justify-between gap-4 cursor-pointer max-w-md">
           <span className="text-[13px] text-[var(--text-primary)]">显示行号</span>
           <SettingSwitch checked={s.showLineNumbers} onChange={(v) => update('showLineNumbers', v)} />

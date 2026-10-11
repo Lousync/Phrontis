@@ -39,6 +39,7 @@ const api = {
   copyImage: (src: { path?: string; dataUrl?: string }) => ipcRenderer.invoke('clipboard:copyImage', src),
   clearClipboardIfEqual: (text: string) => ipcRenderer.invoke('clipboard:clearIfEqual', text),
   copyText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
+  readClipboardText: () => ipcRenderer.invoke('clipboard:readText'),
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
   close: () => ipcRenderer.invoke('window:close'),

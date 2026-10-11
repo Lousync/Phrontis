@@ -1865,6 +1865,7 @@ export interface ElectronAPI {
   copyImage: (src: { path?: string; dataUrl?: string }) => Promise<boolean>
   clearClipboardIfEqual: (text: string) => Promise<boolean>
   copyText: (text: string) => Promise<boolean>
+  readClipboardText: () => Promise<string>
   minimize: () => Promise<void>
   maximize: () => Promise<void>
   close: () => Promise<void>

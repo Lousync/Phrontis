@@ -6,11 +6,15 @@ import { bindEditorTheme, applyEditorTheme, setEditorThemeVariant } from '../../
 // Monaco 运行时装配（worker 注册 + loader 本地化）下沉到宿主组件：不随应用入口进首屏 chunk（性能 2026-09-10）
 import '../../lib/monaco-setup'
 import { dimMarkdownText, markdownWikiHighlights, wikiTargetTitle, type DimCls } from '../../lib/markdownDim'
-import { getKnowledgePages, aiInlineSuggestRun, aiInlineSuggestCancel } from '../../lib/ipc'
+import { aiInlineSuggestRun, aiInlineSuggestCancel } from '../../lib/ipc'
+// `[[` 候选规则（缓存 / 匹配 / 排序 / 截断）与即时渲染档共用一处真相
+import { invalidateWikiCache, loadWikiTargets } from '../../lib/wikiLinkSuggest'
+// 写作面契约：源码档与即时渲染档实现同一份接口（docs/note-surface-dual-engine-design.md）
+import type { NoteBlockContext, NoteEngineHandle, NoteSelection } from '../../lib/noteEngine'
+import { runNoteAction } from '../../lib/noteActions'
 // B4 自动触发闸门（纯函数：触发点判定 / 冷却记账 / 常量；零依赖便于契约脚本 import）
 import { AUTO_DEBOUNCE_MS, INITIAL_AUTO_STATE, afterAutoResult, canAutoRequest, isTriggerPoint, reviveByManual, type AutoState } from '../../lib/inlineSuggestTrigger'
 import { MonacoErrorBoundary } from './MonacoErrorBoundary'
-import type { KnowledgePage } from '../../types/index'
 
 /**
  * 全仓共享 Monaco 编辑宿主（笔记合并 Phase 1 P1b，docs/notes-merge-phase1-design.md §1.2）。
@@ -64,9 +68,20 @@ interface Props {
   onInlineSuggestBusy?: (busy: boolean) => void
   /** B4 自动暂停态回调（连续若干次建议没被采纳 → 暂停自动，直到手动唤醒） */
   onInlineSuggestPaused?: (paused: boolean) => void
+  /** 光标偏移变化（切档记忆：宿主 NoteSurface 按「文件 × 档位」记账） */
+  onCursorOffset?: (offset: number) => void
+  /** 编辑器右键：接管为应用自己的写作菜单（不传则走 Monaco 自带菜单） */
+  onContextMenu?: (e: MouseEvent) => void
+  /** 首次挂载要落的光标位置（切档记忆；`undefined` = 不动） */
+  initialCursorOffset?: number
 }
 
-export interface MonacoPaneHandle {
+/**
+ * 源码档句柄 = 写作面契约 + 该档专属能力（AI 续写 / 原始编辑器实例）。
+ * 扩展 `NoteEngineHandle` 是为了让 tsc 把「两档契约一致」这条约束钉死在类型上：
+ * 少实现一个方法就编译不过，而不是等到运行时才发现某个菜单项在某一档静默失效。
+ */
+export interface MonacoPaneHandle extends NoteEngineHandle {
   /** 大纲跳转：滚动到指定行并聚焦 */
   revealLine(line: number): void
   /** P3 插图：在光标处插入文本（多张图依次调用），插入后聚焦 */
@@ -75,7 +90,7 @@ export interface MonacoPaneHandle {
   triggerInlineSuggest(): boolean
   /** 聚焦编辑器（知识库就地编辑：进入编辑态即聚焦） */
   focus(): void
-  /** 取原始编辑器实例（脚注选区操作等少数高级用法；慎用，勿存引用） */
+  /** 取原始编辑器实例（源码档专属：AI 续写状态 / 旧调用点兜底；勿存引用） */
   getEditor(): Monaco.editor.IStandaloneCodeEditor | null
   /** 立即收起当前 ghost text（AI 建议总开关关闭时调用；无可见建议时静默） */
   hideInlineSuggest(): void
@@ -92,29 +107,14 @@ const DIM_PREFIX: Record<DimCls, string> = {
   wiki: 'kb-md-wiki',
 }
 
-// ---- [[ 补全数据源缓存：仓库全部知识页（title→用于匹配）----
-// 30s 内复用；换文档/换仓库经 onDidChangeModel 触发失效由 installCompletion 的失效钩子处理。
-let pageCache: { at: number; pages: KnowledgePage[] } | null = null
-const PAGE_CACHE_TTL = 30_000
-
-async function getPagesCached(): Promise<KnowledgePage[]> {
-  const now = Date.now()
-  if (pageCache && now - pageCache.at < PAGE_CACHE_TTL) return pageCache.pages
-  try {
-    const pages = await getKnowledgePages()
-    pageCache = { at: now, pages }
-    return pages
-  } catch {
-    return pageCache?.pages ?? []
-  }
-}
+// ---- `[[` 补全数据源：候选规则与缓存已抽到 `src/lib/wikiLinkSuggest.ts`（与即时渲染档共用）----
 
 /** 编辑器面板级错误边界已提升为全仓共享 MonacoErrorBoundary（V-7：blog/knowledge 两处
  *  Editor 同暴露面，见 src/components/shared/MonacoErrorBoundary.tsx） */
 
 /** 编辑器「大纲」导航句柄透传 */
 export const MonacoPane = forwardRef<MonacoPaneHandle, Props>(function MonacoPane(
-  { doc, onChange, dimEnabled = true, layoutKey = 0, zen = false, typewriter = false, zenPaper = true, fontSize, editorOptions, onPasteImage, onDropImage, inlineSuggestEnabled = true, inlineSuggestAuto = true, onInlineSuggestBusy, onInlineSuggestPaused },
+  { doc, onChange, dimEnabled = true, layoutKey = 0, zen = false, typewriter = false, zenPaper = true, fontSize, editorOptions, onPasteImage, onDropImage, inlineSuggestEnabled = true, inlineSuggestAuto = true, onInlineSuggestBusy, onInlineSuggestPaused, onCursorOffset, onContextMenu, initialCursorOffset },
   ref,
 ) {
   const hostRef = useRef<MonacoPaneHandle | null>(null)
@@ -125,6 +125,15 @@ export const MonacoPane = forwardRef<MonacoPaneHandle, Props>(function MonacoPan
     focus: () => hostRef.current?.focus(),
     getEditor: () => hostRef.current?.getEditor() ?? null,
     hideInlineSuggest: () => hostRef.current?.hideInlineSuggest(),
+    // ---- 写作面契约其余部分（两档同签名，见 noteEngine.ts）----
+    getSelection: () => hostRef.current?.getSelection() ?? null,
+    replaceRange: (from, to, text, selectFrom, selectTo) => hostRef.current?.replaceRange(from, to, text, selectFrom, selectTo),
+    getBlockContext: () => hostRef.current?.getBlockContext() ?? null,
+    getCursorOffset: () => hostRef.current?.getCursorOffset() ?? 0,
+    setCursorOffset: (offset: number) => hostRef.current?.setCursorOffset(offset),
+    selectAll: () => hostRef.current?.selectAll(),
+    getRaw: () => hostRef.current?.getRaw() ?? null,
+    triggerWikiSuggest: () => hostRef.current?.triggerWikiSuggest?.(),
   }), [])
 
   if (!doc) {
@@ -149,7 +158,7 @@ export const MonacoPane = forwardRef<MonacoPaneHandle, Props>(function MonacoPan
       </div>
     )
   }
-  return <MonacoHost ref={hostRef} doc={doc} onChange={onChange} dimEnabled={dimEnabled} layoutKey={layoutKey} zen={zen} typewriter={typewriter} zenPaper={zenPaper} fontSize={fontSize} editorOptions={editorOptions} onPasteImage={onPasteImage} onDropImage={onDropImage} inlineSuggestEnabled={inlineSuggestEnabled} inlineSuggestAuto={inlineSuggestAuto} onInlineSuggestBusy={onInlineSuggestBusy} onInlineSuggestPaused={onInlineSuggestPaused} />
+  return <MonacoHost ref={hostRef} doc={doc} onChange={onChange} dimEnabled={dimEnabled} layoutKey={layoutKey} zen={zen} typewriter={typewriter} zenPaper={zenPaper} fontSize={fontSize} editorOptions={editorOptions} onPasteImage={onPasteImage} onDropImage={onDropImage} inlineSuggestEnabled={inlineSuggestEnabled} inlineSuggestAuto={inlineSuggestAuto} onInlineSuggestBusy={onInlineSuggestBusy} onInlineSuggestPaused={onInlineSuggestPaused} onCursorOffset={onCursorOffset} onContextMenu={onContextMenu} initialCursorOffset={initialCursorOffset} />
 })
 
 /** model → relPath（内联建议的 relPath 参数取真实 relPath，不受命名空间 modelPath 影响） */
@@ -204,8 +213,8 @@ function applyTextDiff(ed: Monaco.editor.IStandaloneCodeEditor, next: string): v
 }
 
 /** 有效文档的 Monaco 宿主；hooks 集中在子组件，doc 为 null 时父组件卸载它（满足 hooks 规则） */
-const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props['onChange']; dimEnabled: boolean; layoutKey: number; zen: boolean; typewriter: boolean; zenPaper: boolean; fontSize?: number; editorOptions?: Props['editorOptions']; onPasteImage?: Props['onPasteImage']; onDropImage?: Props['onDropImage']; inlineSuggestEnabled: boolean; inlineSuggestAuto: boolean; onInlineSuggestBusy?: Props['onInlineSuggestBusy']; onInlineSuggestPaused?: Props['onInlineSuggestPaused'] }>(
-  function MonacoHost({ doc, onChange, dimEnabled, layoutKey, zen, typewriter, zenPaper = true, fontSize, editorOptions, onPasteImage, onDropImage, inlineSuggestEnabled = true, inlineSuggestAuto = true, onInlineSuggestBusy, onInlineSuggestPaused }, ref) {
+const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props['onChange']; dimEnabled: boolean; layoutKey: number; zen: boolean; typewriter: boolean; zenPaper: boolean; fontSize?: number; editorOptions?: Props['editorOptions']; onPasteImage?: Props['onPasteImage']; onDropImage?: Props['onDropImage']; inlineSuggestEnabled: boolean; inlineSuggestAuto: boolean; onInlineSuggestBusy?: Props['onInlineSuggestBusy']; onInlineSuggestPaused?: Props['onInlineSuggestPaused']; onCursorOffset?: Props['onCursorOffset']; onContextMenu?: Props['onContextMenu']; initialCursorOffset?: Props['initialCursorOffset'] }>(
+  function MonacoHost({ doc, onChange, dimEnabled, layoutKey, zen, typewriter, zenPaper = true, fontSize, editorOptions, onPasteImage, onDropImage, inlineSuggestEnabled = true, inlineSuggestAuto = true, onInlineSuggestBusy, onInlineSuggestPaused, onCursorOffset, onContextMenu, initialCursorOffset }, ref) {
     const dimEnabledRef = useRef(dimEnabled)
     dimEnabledRef.current = dimEnabled
     /** P3 粘贴/拖拽拦截回调透传（监听器只挂一次，不随 prop 变化重挂） */
@@ -213,6 +222,14 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
     pasteImageRef.current = onPasteImage
     const dropImageRef = useRef<Props['onDropImage']>(onDropImage)
     dropImageRef.current = onDropImage
+    /** 光标记账 / 右键接管回调（监听器只挂一次，读 ref 取最新值） */
+    const cursorCbRef = useRef<Props['onCursorOffset']>(onCursorOffset)
+    cursorCbRef.current = onCursorOffset
+    const menuCbRef = useRef<Props['onContextMenu']>(onContextMenu)
+    menuCbRef.current = onContextMenu
+    /** 首挂要落的光标位置（切档记忆）：onMount 里读 ref，避免闭包拿到旧值 */
+    const initialCursorRef = useRef<Props['initialCursorOffset']>(initialCursorOffset)
+    initialCursorRef.current = initialCursorOffset
     /** 禅聚焦淡化 + 打字机（ref 透传进 onMount 闭包） */
     const zenDimRef = useRef(zen)
     zenDimRef.current = zen
@@ -296,7 +313,11 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
       smoothRafRef.current = requestAnimationFrame(step)
     }, [])
 
-    useImperativeHandle(ref, () => ({
+    /**
+     * 写作面契约实现（源码档）。抽成工厂是为了让**快捷键**与**命令式句柄**共用同一份实现 ——
+     * Ctrl+B 与右键菜单的「加粗」走的是同一段代码，不会各写一份然后行为漂移。
+     */
+    const buildHandle = useCallback((): MonacoPaneHandle => ({
       revealLine: (line: number) => {
         const editor = editorRef.current
         if (!editor) return
@@ -328,10 +349,108 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
         // 定位真触发点做顺序断言，这里的字面量会污染 indexOf。
         try { void editor.trigger('kb-ghost-hide', 'editor.action.inlineSuggest.hide', null) } catch { /* 静默 */ }
       },
+      // ---- 写作面契约其余部分（与即时渲染档同语义，见 src/lib/noteEngine.ts）----
+      getSelection: (): NoteSelection | null => {
+        const ed = editorRef.current
+        const model = ed?.getModel()
+        const sel = ed?.getSelection()
+        if (!ed || !model || !sel) return null
+        return {
+          text: model.getValueInRange(sel),
+          from: model.getOffsetAt(sel.getStartPosition()),
+          to: model.getOffsetAt(sel.getEndPosition()),
+        }
+      },
+      replaceRange: (from, to, text, selectFrom, selectTo) => {
+        const ed = editorRef.current
+        const model = ed?.getModel()
+        if (!ed || !model) return
+        const max = model.getValueLength()
+        const f = Math.max(0, Math.min(from, max))
+        const t = Math.max(f, Math.min(to, max))
+        const start = model.getPositionAt(f)
+        const end = model.getPositionAt(t)
+        ed.executeEdits('kb-note-action', [{
+          range: { startLineNumber: start.lineNumber, startColumn: start.column, endLineNumber: end.lineNumber, endColumn: end.column },
+          text,
+          forceMoveMarkers: true,
+        }])
+        const a = model.getPositionAt(f + (selectFrom ?? text.length))
+        const b = model.getPositionAt(f + (selectTo ?? text.length))
+        ed.setSelection({ startLineNumber: a.lineNumber, startColumn: a.column, endLineNumber: b.lineNumber, endColumn: b.column })
+        ed.focus()
+      },
+      getBlockContext: (): NoteBlockContext | null => {
+        const ed = editorRef.current
+        const model = ed?.getModel()
+        const pos = ed?.getPosition()
+        if (!ed || !model || !pos) return null
+        const lineText = model.getLineContent(pos.lineNumber)
+        const sel = ed.getSelection()
+        const from = sel ? model.getOffsetAt(sel.getStartPosition()) : model.getOffsetAt(pos)
+        const to = sel ? model.getOffsetAt(sel.getEndPosition()) : from
+        return {
+          lineText,
+          lineFrom: model.getOffsetAt({ lineNumber: pos.lineNumber, column: 1 }),
+          lineTo: model.getOffsetAt({ lineNumber: pos.lineNumber, column: lineText.length + 1 }),
+          prevLineEmpty: pos.lineNumber <= 1 || model.getLineContent(pos.lineNumber - 1).trim() === '',
+          selection: { text: sel ? model.getValueInRange(sel) : '', from, to },
+        }
+      },
+      getCursorOffset: (): number => {
+        const ed = editorRef.current
+        const model = ed?.getModel()
+        const pos = ed?.getPosition()
+        return ed && model && pos ? model.getOffsetAt(pos) : 0
+      },
+      setCursorOffset: (offset: number) => {
+        const ed = editorRef.current
+        const model = ed?.getModel()
+        if (!ed || !model) return
+        const p = model.getPositionAt(Math.max(0, Math.min(offset, model.getValueLength())))
+        ed.setPosition(p)
+        ed.revealPositionInCenterIfOutsideViewport(p)
+      },
+      selectAll: () => {
+        const ed = editorRef.current
+        const model = ed?.getModel()
+        if (!ed || !model) return
+        const last = model.getLineCount()
+        ed.setSelection({ startLineNumber: 1, startColumn: 1, endLineNumber: last, endColumn: model.getLineMaxColumn(last) })
+        ed.focus()
+      },
+      getRaw: () => editorRef.current,
+      triggerWikiSuggest: () => {
+        const ed = editorRef.current
+        if (!ed) return
+        try { void ed.trigger('kb-note-menu', 'editor.action.triggerSuggest', null) } catch { /* 静默 */ }
+      },
     }), [])
+
+    useImperativeHandle(ref, buildHandle, [buildHandle])
 
     const onMount = useCallback<OnMount>((editor, monaco) => {
       editorRef.current = editor
+      // 切档记忆：首挂把上次的光标位置还回去（Monaco 就绪后才有效，故放在这里而不是 effect 里）
+      if (initialCursorRef.current !== undefined) {
+        const model = editor.getModel()
+        if (model) {
+          const p = model.getPositionAt(Math.max(0, Math.min(initialCursorRef.current, model.getValueLength())))
+          editor.setPosition(p)
+          editor.revealPositionInCenterIfOutsideViewport(p)
+        }
+      }
+      // 右键接管：关掉 Monaco 自带菜单（否则两套菜单会叠在一起）
+      if (menuCbRef.current) editor.updateOptions({ contextmenu: false })
+      // 编辑器内组合键：与右键菜单同语义（同一个动作表 = 同一段实现）
+      const handleNow = (): MonacoPaneHandle => buildHandle()
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB, () => { void runNoteAction('fmt-bold', handleNow()) })
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI, () => { void runNoteAction('fmt-italic', handleNow()) })
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => { void runNoteAction('link-external', handleNow()) })
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Digit1, () => { void runNoteAction('para-h1', handleNow()) })
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Digit2, () => { void runNoteAction('para-h2', handleNow()) })
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Digit3, () => { void runNoteAction('para-h3', handleNow()) })
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.Digit0, () => { void runNoteAction('para-text', handleNow()) })
       relPathByModel.set(editor.getModel()!, doc.relPath)
       // 禅模式在挂载时即生效（[zen] effect 跑在 Monaco 异步挂载完成前，editorRef 尚为 null）
       if (zenDimRef.current) {
@@ -399,7 +518,7 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
       // 换文档时先清掉旧 model 的 decoration，再对新 model 重算；同时失效补全缓存 + 记账 relPath
       editor.onDidChangeModel(() => {
         collection.set([])
-        pageCache = null
+        invalidateWikiCache()
         const m = editor.getModel()
         if (m) relPathByModel.set(m, doc.relPath)
         schedule()
@@ -407,6 +526,9 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
       editor.onDidChangeModelContent(() => schedule())
       editor.onDidChangeCursorPosition((e) => {
         schedule()
+        // 光标记账（切档记忆）：宿主 NoteSurface 按「文件 × 档位」存偏移
+        const m = editor.getModel()
+        if (m && cursorCbRef.current) cursorCbRef.current(m.getOffsetAt(e.position))
         // 打字机滚动（iA Writer/Typora 式）：平滑滚动至光标行垂直居中
         if (typewriterRef.current) {
           const line = e.position?.lineNumber ?? 0
@@ -569,13 +691,23 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
           editor.focus()
           insertDropped(files)
         }
+        // 写作菜单：接管右键（应用自己的写作菜单与即时渲染档共用一份定义）
+        const onContextMenuCapture = (ev: Event): void => {
+          const cb = menuCbRef.current
+          if (!cb) return
+          ev.preventDefault()
+          ev.stopPropagation()
+          cb(ev as MouseEvent)
+        }
         domNode.addEventListener('paste', onPasteCapture, true)
         domNode.addEventListener('dragover', onDragOverCapture, true)
         domNode.addEventListener('drop', onDropCapture, true)
+        domNode.addEventListener('contextmenu', onContextMenuCapture, true)
         editor.onDidDispose(() => {
           domNode.removeEventListener('paste', onPasteCapture, true)
           domNode.removeEventListener('dragover', onDragOverCapture, true)
           domNode.removeEventListener('drop', onDropCapture, true)
+          domNode.removeEventListener('contextmenu', onContextMenuCapture, true)
           domNode.removeEventListener('compositionstart', onCompositionStart, true)
           domNode.removeEventListener('compositionend', onCompositionEnd, true)
         })
@@ -608,6 +740,16 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
       if (composingRef.current) { pendingSyncRef.current = doc.content; return }
       applyTextDiff(ed, doc.content)
     }, [doc.content])
+
+    // 切档记忆：同一实例内换文件时把该文件上次的光标位置还回去（首挂由 onMount 负责）
+    useEffect(() => {
+      if (initialCursorOffset === undefined) return
+      const ed = editorRef.current
+      const model = ed?.getModel()
+      if (!ed || !model) return
+      const p = model.getPositionAt(Math.max(0, Math.min(initialCursorOffset, model.getValueLength())))
+      ed.setPosition(p)
+    }, [initialCursorOffset])
 
     // 禅模式开关：隐藏行号 + 字号微增；打字机开 → 动态大留白（首尾行可居中），关 → 固定大留白
     useEffect(() => {
@@ -703,13 +845,8 @@ function installWikiCompletion(monaco: typeof Monaco): void {
       if (lastOpen === -1 || lastClose > lastOpen) return { suggestions: [] }
 
       const query = linePrefix.slice(lastOpen + 2).trim()
-      const pages = await getPagesCached()
-      const lower = query.toLowerCase()
-      const matches = pages
-        .filter((p) => !lower || p.title.toLowerCase().includes(lower))
-        // 显式按最近更新排序，保证候选顺序稳定可预期（不依赖索引内部顺序）
-        .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
-        .slice(0, 10)
+      // 候选规则与即时渲染档共用（src/lib/wikiLinkSuggest.ts）：缓存 / 匹配 / 排序 / 截断
+      const matches = await loadWikiTargets(query)
 
       return {
         suggestions: matches.map((p) => ({

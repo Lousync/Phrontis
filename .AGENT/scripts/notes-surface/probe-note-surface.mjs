@@ -1,0 +1,349 @@
+/**
+ * 双写作面运行时探针（源码档 Monaco / 即时渲染档 CM6 + 编辑器右键菜单）
+ * 方案：`docs/note-surface-dual-engine-design.md`
+ *
+ * 要证的事（契约脚本只能证明源码接线，这里证明**真跑起来是对的**）：
+ *   P1 默认（源码档）打开笔记进编辑态 = Monaco 在场
+ *   P2 源码档右键 → 应用自己的写作菜单出现（不是 Monaco 自带菜单），Esc 能关
+ *   P3 切到即时渲染档（设置 + 广播）→ CM6 在场，且 **Monaco 不在场**（单写者：同文件只挂一个引擎）
+ *   P4 即时渲染真的渲染了：标题/加粗/引用/任务/表格/公式/代码块各自的 DOM 在场，
+ *      且**标记被隐藏**（正文里看不到 `**` 与 `| --- |`）—— 这是「即时渲染」与「淡化」的分水岭
+ *   P5 光标所在块回源码：把光标放到加粗那一行，该行的 `**` 必须重新出现（否则等于不可编辑）
+ *   P6 即时渲染档右键菜单同样出现，且点「插入 → 分隔线」真的落进文档并渲染成分隔线 widget
+ *   P7 切回源码档 → Monaco 回来、CM6 退场（来回切不残留）
+ *   P8 console 零 error
+ *
+ * 用法（隔离实例，不动用户 dev 数据；必须先 build）：
+ *   node .AGENT/scripts/workbench-shell/probes/seed-probe-vault.mjs --ud "knowbase (dev probe-app)"
+ *   node .AGENT/scripts/workbench-shell/probes/run-probe-app.mjs \
+ *     .AGENT/scripts/notes-surface/probe-note-surface.mjs
+ */
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join, dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const DEBUG_PORT = Number(process.env.KNOWBASE_PROBE_PORT ?? 9222)
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
+const SHOT_DIR = join(ROOT, 'tmp', 'probe-shots')
+const NOTE_REL = '写作面探针.md'
+
+async function waitPage() {
+  for (let i = 0; i < 60; i++) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`, { signal: AbortSignal.timeout(1500) })
+      const targets = await res.json()
+      const page = targets.find((t) => t.type === 'page' && !/devtools/.test(t.url || ''))
+      if (page && page.webSocketDebuggerUrl) return page
+    } catch { /* electron 未起，继续等 */ }
+    await sleep(500)
+  }
+  throw new Error('CDP page target 未出现')
+}
+
+let ws
+let msgId = 0
+const pending = new Map()
+const consoleErrors = []
+function send(method, params = {}) {
+  return new Promise((res, rej) => {
+    const id = ++msgId
+    pending.set(id, { resolve: res, reject: rej })
+    ws.send(JSON.stringify({ id, method, params }))
+  })
+}
+async function evalJs(expr) {
+  const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true })
+  if (r.exceptionDetails) throw new Error('evaluate 异常: ' + JSON.stringify(r.exceptionDetails).slice(0, 400))
+  return r.result?.value
+}
+async function shot(name) {
+  try {
+    mkdirSync(SHOT_DIR, { recursive: true })
+    const r = await send('Page.captureScreenshot', { format: 'png' })
+    const p = join(SHOT_DIR, name + '.png')
+    writeFileSync(p, Buffer.from(r.data, 'base64'))
+    return p
+  } catch (e) { return 'shot 失败: ' + String(e.message).slice(0, 120) }
+}
+const results = []
+function ok(cond, label, detail = '') {
+  results.push({ pass: !!cond, label, detail })
+  return !!cond
+}
+async function waitFor(expr, ms = 6000, step = 200) {
+  const t0 = Date.now()
+  while (Date.now() - t0 < ms) {
+    try { if (await evalJs(expr)) return true } catch { /* 页面切换中 */ }
+    await sleep(step)
+  }
+  return false
+}
+
+/** 切档：写设置 + 广播（SettingsContext 只在 'settings-imported' 里重拉，直接写盘不触发重渲染） */
+async function setWritingMode(mode) {
+  await evalJs(`(async () => {
+    try { await window.api.setSetting('editorWritingMode', ${JSON.stringify(mode)}) } catch {}
+    window.dispatchEvent(new Event('settings-imported'))
+    return true
+  })()`)
+  await sleep(1200)
+}
+
+const JS_STATE = `(() => ({
+  monaco: document.querySelectorAll('.monaco-editor').length,
+  cm: document.querySelectorAll('.cm-editor').length,
+  cmText: (document.querySelector('.cm-content')?.innerText ?? ''),
+  cmLines: [...document.querySelectorAll('.cm-line')].map(l => (l.className || '-') + ' :: ' + l.textContent.slice(0, 26)),
+  menu: !!document.querySelector('[data-wb="noteContextMenu"]'),
+  menuLabels: [...document.querySelectorAll('[data-wb="noteContextMenu"] button')].map(b => b.innerText.trim()),
+  h1: document.querySelectorAll('.kb-live-h1').length,
+  strong: document.querySelectorAll('.kb-live-strong').length,
+  em: document.querySelectorAll('.kb-live-em').length,
+  code: document.querySelectorAll('.kb-live-code').length,
+  quote: document.querySelectorAll('.kb-live-quote').length,
+  task: document.querySelectorAll('.kb-live-task').length,
+  table: document.querySelectorAll('.kb-live-table').length,
+  katex: document.querySelectorAll('.cm-content .katex').length,
+  hr: document.querySelectorAll('.kb-live-hr').length,
+  codeblock: document.querySelectorAll('.kb-live-codeblock').length,
+}))()`
+
+async function main() {
+  const page = await waitPage()
+  ws = new WebSocket(page.webSocketDebuggerUrl)
+  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej })
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data)
+    if (m.id && pending.has(m.id)) {
+      const p = pending.get(m.id)
+      pending.delete(m.id)
+      if (m.error) p.reject(new Error(JSON.stringify(m.error)))
+      else p.resolve(m.result)
+      return
+    }
+    if (m.method === 'Runtime.consoleAPICalled' && m.params?.type === 'error') {
+      consoleErrors.push((m.params.args ?? []).map((a) => a.value ?? a.description ?? '').join(' ').slice(0, 300))
+    }
+    if (m.method === 'Runtime.exceptionThrown') {
+      consoleErrors.push('exception: ' + (m.params?.exceptionDetails?.text ?? '').slice(0, 300))
+    }
+  }
+  await send('Runtime.enable')
+  await send('Page.enable')
+
+  // 设置回默认档（探针可能被上一次跑残留的 live 影响）
+  await evalJs(`(async () => { try { await window.api.setSetting('editorWritingMode', 'source') } catch {}; window.dispatchEvent(new Event('settings-imported')); return true })()`)
+  await sleep(1500)
+
+  // 页面内错误收集器：effect 里抛的异常不会被 React 错误边界捕获，必须从 window 层收
+  await evalJs(`(() => {
+    window.__probeErrors = []
+    const origErr = console.error.bind(console)
+    console.error = (...a) => {
+      try { window.__probeErrors.push(a.map(x => (x && x.message) ? x.message : String(x)).join(' ').slice(0, 500)) } catch {}
+      origErr(...a)
+    }
+    window.addEventListener('error', (e) => window.__probeErrors.push('window.error: ' + (e.message || e.error?.message || '')))
+    window.addEventListener('unhandledrejection', (e) => window.__probeErrors.push('rejection: ' + (e.reason?.message || String(e.reason))))
+    return true
+  })()`)
+
+  // ---- 打开 fixture 笔记（可复用：切档后模块会重挂，笔记要重新打开）----
+  async function openNoteInEdit() {
+    await evalJs(`document.querySelector('[data-wb-bookmark="knowledge"]')?.click()`)
+    await sleep(1000)
+    await evalJs(`window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: ${JSON.stringify(NOTE_REL)} } }))`)
+    await sleep(2500)
+    // 知识库默认以阅读态打开 → 点「切换到编辑」
+    const clicked = await evalJs(`(() => {
+      const b = document.querySelector('button[title^="切换到编辑"]')
+      if (!b) return false
+      b.click()
+      return true
+    })()`)
+    await waitFor(`!!document.querySelector('.monaco-editor, .cm-editor')`, 9000)
+    await sleep(500)
+    return clicked
+  }
+
+  const clickedEdit = await openNoteInEdit()
+  ok(clickedEdit, 'P0 笔记以阅读态打开并点进编辑态', String(clickedEdit))
+  const afterEdit = await evalJs(`(() => ({
+    monaco: document.querySelectorAll('.monaco-editor').length,
+    cm: document.querySelectorAll('.cm-editor').length,
+    toolbarPreviewBtn: document.querySelector('button[title^="切换到编辑"], button[title^="切换到预览"]')?.getAttribute('title') ?? null,
+    pagebar: !!document.querySelector('[data-wb="pagebar"]'),
+  }))()`)
+  console.log('[diag] 点编辑后:', JSON.stringify(afterEdit), 'errors=', JSON.stringify(consoleErrors.slice(0, 3)))
+
+  // ---- P1 源码档 ----
+  let st = await evalJs(JS_STATE)
+  ok(st.monaco >= 1 && st.cm === 0, 'P1 默认源码档 = Monaco 在场、CM6 不在场', JSON.stringify({ monaco: st.monaco, cm: st.cm }))
+  await shot('note-surface-01-source')
+
+  // ---- P2 源码档右键菜单 ----
+  const rightClickedSource = await evalJs(`(() => {
+    const el = document.querySelector('.monaco-editor')
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 60, clientY: r.top + 40 }))
+    return true
+  })()`)
+  await sleep(500)
+  st = await evalJs(JS_STATE)
+  ok(rightClickedSource && st.menu, 'P2a 源码档右键弹出应用自己的写作菜单', JSON.stringify(st.menuLabels.slice(0, 6)))
+  ok(st.menuLabels.some((l) => l.includes('新增链接')) && st.menuLabels.some((l) => l.includes('文本格式')) && st.menuLabels.some((l) => l.includes('插入')),
+    'P2b 菜单含 新增链接 / 文本格式 / 插入', JSON.stringify(st.menuLabels))
+  ok(st.menuLabels.some((l) => l.includes('以纯文本形式粘贴')) && st.menuLabels.some((l) => l.includes('全选')),
+    'P2c 菜单含 以纯文本形式粘贴 / 全选')
+  ok(!st.menuLabels.some((l) => l.includes('新建数据库')), 'P2d 负向：不含「新建数据库」（本项目不做）')
+  await shot('note-surface-02-menu-source')
+  await evalJs(`window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`)
+  await sleep(400)
+  st = await evalJs(JS_STATE)
+  ok(!st.menu, 'P2e Esc 关闭菜单')
+
+  // ---- P3 切即时渲染档 ----
+  // ★ 实测口径：`settings-imported` 会让模块树重挂（笔记页随之关闭）——这是既有外壳行为，
+  //   不是本次改动引入的；故切档后**重新打开笔记**，再断言引擎。
+  await setWritingMode('live')
+  await sleep(600)
+  const reopened = await openNoteInEdit()
+  await waitFor(`!!document.querySelector('.cm-editor')`, 10000)
+  await sleep(800)
+  const liveDiag = await evalJs(`(() => ({
+    cm: document.querySelectorAll('.cm-editor').length,
+    monaco: document.querySelectorAll('.monaco-editor').length,
+    fallback: document.body.innerText.includes('即时渲染档加载中'),
+    liveHost: document.querySelectorAll('.kb-live-pane').length,
+    previewBtn: document.querySelector('button[title^="切换到编辑"], button[title^="切换到预览"]')?.getAttribute('title') ?? null,
+  }))()`)
+  const pageErrors = await evalJs(`window.__probeErrors ?? []`)
+  console.log('[diag] 切 live 后重开笔记:', JSON.stringify(liveDiag), 'reopened=', reopened, 'errors=', JSON.stringify(pageErrors.slice(0, 4)))
+  st = await evalJs(JS_STATE)
+  ok(st.cm >= 1, 'P3a 切档后 CM6 在场', JSON.stringify({ cm: st.cm }))
+  ok(st.monaco === 0, 'P3b ★ 单写者：同一文件此刻 Monaco 不在场（两引擎不同挂）', JSON.stringify({ monaco: st.monaco }))
+  await shot('note-surface-03-live')
+
+  // ---- P4 渲染与标记隐藏 ----
+  console.log('[diag] live 逐行:', JSON.stringify(st.cmLines.slice(0, 24)))
+  ok(st.h1 >= 1, 'P4a 标题行渲染（.kb-live-h1）', String(st.h1))
+  ok(st.strong >= 1 && st.em >= 1 && st.code >= 1, 'P4b 加粗/斜体/行内代码各自上类', JSON.stringify({ s: st.strong, e: st.em, c: st.code }))
+  ok(st.quote >= 1, 'P4c 引用行渲染（左条）', String(st.quote))
+  ok(st.task === 2, 'P4d 两个复选框渲染成可点的 checkbox', String(st.task))
+  ok(st.table >= 1, 'P4e 表格渲染成 <table>（只读渲染）', String(st.table))
+  ok(st.katex >= 1, 'P4f 公式经 KaTeX 渲染', String(st.katex))
+  ok(st.codeblock >= 1, 'P4g 代码块底色行在场', String(st.codeblock))
+  ok(!st.cmText.includes('**'), 'P4h ★ 非光标块的行内标记被隐藏（正文看不到 **）', st.cmText.slice(0, 120))
+  ok(!st.cmText.includes('| --- |'), 'P4i ★ 表格分隔行被 widget 取代', st.cmText.slice(0, 160))
+  // 块级公式在文档下半部，可能落在视口外 → 先滚到底再断言（可见区间只渲染视口内的块）
+  await evalJs(`(() => { const s = document.querySelector('.cm-scroller'); if (s) s.scrollTop = s.scrollHeight; return true })()`)
+  await sleep(800)
+  const stBottom = await evalJs(JS_STATE)
+  ok(!stBottom.cmText.includes('$$'), 'P4j ★ 块级公式标记被 widget 取代（滚到底后可见区间重算）', stBottom.cmText.slice(-160))
+  ok(stBottom.katex >= 2, 'P4k 行内 + 块级公式都渲染（滚动后重算装饰）', String(stBottom.katex))
+
+  // ---- P5 光标所在块回源码 ----
+  // 先滚回顶部（上一步为了看块级公式滚到了底部；行元素虽在 DOM 里，但视口外的坐标点不落位）
+  await evalJs(`(() => { const s = document.querySelector('.cm-scroller'); if (s) s.scrollTop = 0; return true })()`)
+  await sleep(700)
+  // 点进「这是**加粗**与…」那一行：该行的 ** 必须重新可见
+  const wentToBold = await evalJs(`(() => {
+    const el = [...document.querySelectorAll('.cm-line')].find(l => l.textContent.includes('加粗'))
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: r.left + 6, clientY: r.top + r.height / 2 }))
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: r.left + 6, clientY: r.top + r.height / 2 }))
+    return true
+  })()`)
+  await sleep(600)
+  st = await evalJs(JS_STATE)
+  ok(wentToBold && st.cmText.includes('**'), 'P5 ★ 光标进入该块后回源码（标记重新可见，可编辑）', st.cmText.slice(0, 160))
+  await shot('note-surface-04-live-source-block')
+
+  // ---- P6 即时渲染档右键 + 真插入一条分隔线 ----
+  await evalJs(`(() => {
+    const el = document.querySelector('.cm-content')
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 60, clientY: r.top + 40 }))
+    return true
+  })()`)
+  await sleep(500)
+  st = await evalJs(JS_STATE)
+  ok(st.menu, 'P6a 即时渲染档右键同样弹出写作菜单', JSON.stringify(st.menuLabels.slice(0, 5)))
+  // 展开「插入」子菜单 → 点「分隔线」
+  await evalJs(`(() => {
+    const b = [...document.querySelectorAll('[data-wb="noteContextMenu"] button')].find(x => x.innerText.trim().startsWith('插入'))
+    b?.click()
+    return !!b
+  })()`)
+  await sleep(400)
+  const docBeforeHr = await evalJs(`window.__kbLive?.state.doc.toString() ?? '(无钩子)'`)
+  const clickedHr = await evalJs(`(() => {
+    const b = [...document.querySelectorAll('[data-wb="noteContextMenu"] button')].find(x => x.innerText.trim() === '分隔线')
+    if (!b) return false
+    b.click()
+    return true
+  })()`)
+  await sleep(900)
+  const docAfterHr = await evalJs(`window.__kbLive?.state.doc.toString() ?? '(无钩子)'`)
+  console.log('[diag] 分隔线动作前后文档:', JSON.stringify({ beforeTail: docBeforeHr.slice(-60), afterTail: docAfterHr.slice(-60), grew: docAfterHr.length - docBeforeHr.length }))
+  // 插入后光标就在那条 `---` 上（该行按规则回源码），把光标挪走再看 widget
+  await evalJs(`(() => {
+    const el = [...document.querySelectorAll('.cm-line')].find(l => l.textContent.includes('一级标题'))
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: r.left + 6, clientY: r.top + r.height / 2 }))
+    el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: r.left + 6, clientY: r.top + r.height / 2 }))
+    return true
+  })()`)
+  await sleep(700)
+  const hrDiag = await evalJs(`(() => ({
+    doc: (window.__kbLive?.state.doc.toString() ?? '').replace(/\\n/g, '⏎'),
+    lines: [...document.querySelectorAll('.cm-line')].map((l, i) => i + '[' + (l.className.replace('cm-line','').trim() || '-') + ']' + l.textContent.slice(0, 18)),
+    hr: document.querySelectorAll('.kb-live-hr').length,
+    errors: (window.__probeErrors ?? []).slice(0, 3),
+  }))()`)
+  console.log('[diag] 插分隔线后:', JSON.stringify(hrDiag))
+  st = await evalJs(JS_STATE)
+  ok(clickedHr, 'P6b 子菜单可展开并点到「分隔线」')
+  ok(st.hr >= 1, 'P6c ★ 菜单动作真的落进文档并渲染成分隔线（菜单 → 动作表 → 引擎 → 装饰 全链路通）', String(st.hr))
+  await shot('note-surface-05-live-insert-hr')
+  // 撤销，别把 fixture 弄脏（也顺带验撤销栈可用）
+  await evalJs(`(() => {
+    const el = document.querySelector('.cm-content')
+    if (!el) return false
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true }))
+    return true
+  })()`)
+  await sleep(500)
+
+  // ---- P7 切回源码档 ----
+  await setWritingMode('source')
+  await waitFor(`!!document.querySelector('.monaco-editor')`, 10000)
+  await sleep(600)
+  st = await evalJs(JS_STATE)
+  ok(st.monaco >= 1 && st.cm === 0, 'P7 切回源码档 = Monaco 回来、CM6 退场（来回切不残留）', JSON.stringify({ monaco: st.monaco, cm: st.cm }))
+  await shot('note-surface-06-back-to-source')
+
+  // ---- P8 console ----
+  ok(consoleErrors.length === 0, 'P8 console 零 error', consoleErrors.slice(0, 3).join(' | '))
+
+  // 结果
+  const failed = results.filter((r) => !r.pass)
+  console.log('\n===== 双写作面探针 =====')
+  for (const r of results) console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.label}${r.detail ? '  -> ' + r.detail : ''}`)
+  console.log(`\n${results.length - failed.length} PASS / ${failed.length} FAIL`)
+  ws.close()
+  process.exit(failed.length ? 1 : 0)
+}
+
+main().catch((e) => {
+  console.error('探针异常:', e)
+  // 异常也要把已收集的断言打出来（否则只看到一句异常，不知道走到哪一步）
+  for (const r of results) console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${r.label}${r.detail ? '  -> ' + r.detail : ''}`)
+  console.error('consoleErrors:', JSON.stringify(consoleErrors.slice(0, 8)))
+  process.exit(1)
+})

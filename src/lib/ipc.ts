@@ -9,6 +9,8 @@ export const getPathForFile = (file: File): string => a().getPathForFile(file)
 export const pasteFromClipboard = (): Promise<{ ok: boolean }> => a().pasteFromClipboard()
 export const copyImage = (src: { path?: string; dataUrl?: string }): Promise<boolean> => a().copyImage(src)
 export const copyText = (text: string): Promise<boolean> => a().copyText(text)
+/** 读剪贴板文本（编辑器右键「粘贴 / 以纯文本形式粘贴」；与 copyText 同走主进程代理） */
+export const readClipboardText = (): Promise<string> => a().readClipboardText()
 
 // ===== Typed settings =====
 

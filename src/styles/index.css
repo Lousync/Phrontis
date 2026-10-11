@@ -1615,3 +1615,84 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
 @media (prefers-reduced-motion: reduce) {
   .kb-mascot-active { animation: none; }
 }
+
+/* ===== 即时渲染档写作面（CodeMirror 6；docs/note-surface-dual-engine-design.md）=====
+   非光标块按排版渲染：这里只管「渲染成什么样」，隐藏标记由 CM6 装饰负责。
+   颜色一律走主题 token，字号以编辑器字号为基准（em 相对父级 fontSize，随设置 × 缩放自动跟随）。 */
+.kb-live-pane { min-height: 0; }
+.kb-live-pane .cm-editor { height: 100%; }
+
+.kb-live-h1, .kb-live-h2, .kb-live-h3, .kb-live-h4, .kb-live-h5, .kb-live-h6 {
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+.kb-live-h1 { font-size: 1.7em; }
+.kb-live-h2 { font-size: 1.45em; }
+.kb-live-h3 { font-size: 1.25em; }
+.kb-live-h4 { font-size: 1.12em; }
+.kb-live-h5 { font-size: 1.02em; }
+.kb-live-h6 { font-size: 0.95em; color: var(--text-secondary); }
+
+.kb-live-strong { font-weight: 650; }
+.kb-live-em { font-style: italic; }
+.kb-live-strike { text-decoration: line-through; color: var(--text-muted); }
+.kb-live-code {
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-size: 0.92em;
+  padding: 0.1em 0.32em;
+  border-radius: 4px;
+  background: var(--input-bg, var(--bg-secondary));
+  color: var(--text-primary);
+}
+.kb-live-link { color: var(--accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+
+.kb-live-quote { border-left: 2px solid color-mix(in srgb, var(--accent) 55%, var(--border-color)); padding-left: 10px !important; color: var(--text-secondary); }
+.kb-live-codeblock { background: color-mix(in srgb, var(--bg-secondary) 70%, transparent); }
+.kb-live-bullet { color: var(--text-muted); padding-right: 2px; }
+.kb-live-task { vertical-align: middle; margin-right: 2px; accent-color: var(--accent); }
+.kb-live-hr { display: inline-block; width: 100%; height: 0; border-top: 1px solid var(--border-color); vertical-align: middle; }
+
+.kb-live-img { display: inline-block; max-width: 100%; vertical-align: bottom; }
+.kb-live-img img { max-width: 100%; max-height: 60vh; border-radius: 6px; display: block; }
+.kb-live-img-loading { min-width: 60px; min-height: 24px; background: var(--input-bg, var(--bg-secondary)); border-radius: 6px; }
+.kb-live-img-broken { min-width: 120px; min-height: 24px; border: 1px dashed var(--border-color); border-radius: 6px; }
+
+.kb-live-math { padding: 0 1px; }
+.kb-live-math-block { display: block; text-align: center; padding: 4px 0; overflow-x: auto; }
+
+.kb-live-table-wrap { overflow-x: auto; padding: 2px 0; }
+.kb-live-table { border-collapse: collapse; font-size: 0.94em; }
+.kb-live-table th, .kb-live-table td {
+  border: 1px solid var(--border-color);
+  padding: 3px 8px;
+  text-align: left;
+}
+.kb-live-table th { background: var(--bg-secondary); font-weight: 600; }
+
+/* ===== 编辑器右键菜单（两档共用；NoteContextMenu.tsx）===== */
+.kb-menu {
+  min-width: 188px;
+  padding: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  box-shadow: var(--shadow-lg, 0 10px 30px rgba(0, 0, 0, 0.35));
+  font-size: 12.5px;
+  color: var(--text-primary);
+  transform-origin: top left;
+}
+.kb-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 5px;
+  color: inherit;
+  transition: background-color var(--dur-micro, 120ms) var(--ease-kb, ease);
+}
+.kb-menu-item:hover:not(:disabled) { background: var(--bg-hover); }
+.kb-menu-item:disabled { opacity: 0.45; cursor: default; }
+.kb-menu-icon { width: 14px; display: inline-flex; justify-content: center; color: var(--text-muted); flex-shrink: 0; }
+.kb-menu-sep { height: 1px; margin: 4px 6px; background: var(--border-color); }

@@ -11,7 +11,7 @@ import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext,
 import { splitFrontmatter, joinFrontmatter, ensureFrontmatterId, bumpFrontmatterUpdated } from '../../../lib/frontmatter'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
-import { uploadImageFile, insertImageAtCursor, isImageFile, imageMarkdown, IMAGE_OWNER } from '../../../lib/editorImage'
+import { uploadImageFile, isImageFile, imageMarkdown, IMAGE_OWNER } from '../../../lib/editorImage'
 import { FILE_LANG_OPTIONS, getFileTypeInfo } from '../../../lib/fileTypes'
 import { isEditingInput } from '../../../lib/shortcuts'
 import { getGlobalActiveTab } from '../../../lib/activeTab'
@@ -25,7 +25,13 @@ import { isTextViewableExt } from '../../../lib/aiTextExts'
 import Editor, { type OnMount } from '@monaco-editor/react'
 // 共享 Monaco 宿主（P1b）：就地编辑换用与编辑器模块同一份装配——[[ 补全 / B4 内联建议 /
 // 淡化装饰 / 粘贴与拖图拦截全部随之带入；legacy <Editor> 分支仅服务非 vault 旧数据兜底
-import { MonacoPane, cancelInlineSuggestInFlight, type MonacoPaneHandle } from '../../../components/shared/MonacoPane'
+// 共享写作面宿主（双写作面方案 2026-10-09）：源码档 Monaco / 即时渲染档 CM6 由设置二选一，
+// 右键菜单与「[[ 补全 / 图片 / 脚注」在两档同源；本组件只经 NoteSurfaceHandle 契约操作。
+import { NoteSurface, type NoteSurfaceHandle } from '../../../components/shared/NoteSurface'
+import { cancelInlineSuggestInFlight } from '../../../components/shared/MonacoPane'
+import { runNoteAction } from '../../../lib/noteActions'
+import { invalidateWikiCache } from '../../../lib/wikiLinkSuggest'
+import type { NoteEngineId } from '../../../lib/noteEngine'
 import { MonacoErrorBoundary } from '../../../components/shared/MonacoErrorBoundary'
 import type * as Monaco from 'monaco-editor'
 import { bindEditorTheme } from '../../../lib/editorTheme'
@@ -167,8 +173,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const isCodeFileRef = useRef(false)
   const isPdfFileRef = useRef(false)
   const vaultModeRef = useRef(vaultMode)
-  // 共享 MonacoPane 句柄（P1b）：大纲跳转 / 插图 / 脚注经它拿编辑器实例
-  const paneRef = useRef<MonacoPaneHandle | null>(null)
+  // 共享写作面句柄（P1b / 双写作面 2026-10-09）：大纲跳转 / 插图 / 脚注经契约下达，
+  // 不直接依赖某个引擎（源码档 Monaco 与即时渲染档 CM6 同签名）
+  const paneRef = useRef<NoteSurfaceHandle | null>(null)
   // B4 内联建议请求态/暂停态（知识库编辑态的可观测信号；Phase 2 批次 2 随编辑器退役补齐入口）
   const [inlineBusy, setInlineBusy] = useState(false)
   const [inlinePaused, setInlinePaused] = useState(false)
@@ -257,8 +264,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     })()
     return () => { alive = false }
   }, [fileType, page?.path])
-  /** 当前生效的编辑器实例：共享宿主优先，legacy 兜底分支用自有 ref */
-  const activeEditor = () => paneRef.current?.getEditor() ?? editorRef.current
+  /** legacy 兜底分支（非 vault 旧数据）的 Monaco 实例；写作面操作一律走 paneRef 契约 */
+  const activeEditor = () => editorRef.current
+  /** 写作模式：设置值 + 文档类型门槛（即时渲染只对 Markdown 生效，其余一律源码档） */
+  const writingMode: NoteEngineId = ((s.editorWritingMode as string) ?? 'source') === 'live' && fileType === 'md' ? 'live' : 'source'
 
   useEffect(() => { contentRef.current = content }, [content])
   useEffect(() => { pageIdRef.current = pageId }, [pageId])
@@ -687,12 +696,17 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         const el = document.getElementById(id)
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
       } else {
-        // Editing mode: use Monaco editor API
-        const ed = activeEditor()
-        if (ed) {
-          ed.revealLineInCenter(line)
-          ed.setPosition({ lineNumber: line, column: 1 })
-          ed.focus()
+        // Editing mode: 经写作面契约滚动定位（两档同签名）
+        const pane = paneRef.current
+        if (pane) {
+          pane.revealLine(line)
+        } else {
+          const ed = activeEditor()
+          if (ed) {
+            ed.revealLineInCenter(line)
+            ed.setPosition({ lineNumber: line, column: 1 })
+            ed.focus()
+          }
         }
       }
     }
@@ -701,15 +715,16 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   }, [preview])
 
   // ===== Inline image insertion (paste / drag / toolbar) — md/txt only =====
+  // 走写作面契约：源码档与即时渲染档同一段实现（即时渲染档另有自己的粘贴/拖拽拦截）
   const insertImageFiles = useCallback(async (files: File[]) => {
     if (isCodeFileRef.current || isPdfFileRef.current) return
-    const editor = activeEditor()
-    if (!editor) return
+    const pane = paneRef.current
+    if (!pane) return
     for (const f of files) {
       if (!isImageFile(f)) continue
       try {
         const meta = await uploadImageFile(f, IMAGE_OWNER.knowledge, pageIdRef.current)
-        insertImageAtCursor(editor, meta)
+        pane.insertAtCursor(imageMarkdown(meta))
       } catch {
         showToast({ type: 'error', message: `图片「${f.name}」插入失败` })
       }
@@ -728,28 +743,16 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   }, [])
 
   // ===== 脚注：选中词语包裹为 `word^[标注]`，阅读/预览态点击展开 =====
+  // 实现走共享动作表（右键菜单「插入 → 脚注」同一段代码），两档同行为
   const insertFootnote = useCallback(() => {
-    const editor = activeEditor()
-    const model = editor?.getModel()
-    const sel = editor?.getSelection()
-    if (!editor || !model || !sel) return
-    const selected = model.getValueInRange(sel)
-    if (!selected.trim() || selected.includes('\n')) {
-      showToast({ type: 'info', message: '请先在编辑器中选中要标注的单词或短语（单行）' })
-      return
+    const pane = paneRef.current
+    if (!pane) return
+    const out = runNoteAction('ins-footnote', pane)
+    if (out instanceof Promise) {
+      void out.then((r) => { if (!r.ok) showToast({ type: 'info', message: r.message }) })
+    } else if (!out.ok) {
+      showToast({ type: 'info', message: out.message })
     }
-    const base = selected.trim().replace(/\^\[[^\]]*\]$/, '')
-    const text = `${base}^[注释]`
-    editor.executeEdits('footnote', [{ range: sel, text }])
-    // 选中占位文字「注释」，直接输入即替换
-    const end = editor.getSelection()
-    if (end) {
-      editor.setSelection({
-        startLineNumber: end.endLineNumber, startColumn: end.endColumn - 3,
-        endLineNumber: end.endLineNumber, endColumn: end.endColumn - 1,
-      })
-    }
-    editor.focus()
   }, [])
 
   // Monaco mount handler — register wiki-link completion provider
@@ -953,6 +956,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           contentMd: `# ${title}\n\n`,
         })
         showToast({ type: 'info', message: `页面「${title}」已创建` })
+        // 新建页要让 `[[` 候选立刻能选到它（候选缓存 30s，否则刚建的页要等半分钟才出现）
+        invalidateWikiCache()
         onUpdate()
         onNavigate(created.id)
       } catch (e) {
@@ -1031,8 +1036,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               ② 红绿是色盲最难区分的一对（约占男性 8%）且四态共用同一个 Sparkles →
                  关闭态**额外叠一条斜杠**（传统「禁用」语汇），颜色不再是唯一信号。
               ★ 短路顺序刻意保持：`inlineBusy` 恒在最前（生成中优先级最高），`inlinePaused` 插在
-                 「开」判定之后 —— 这是探针语义依赖的既有顺序，改色不改序。 */}
-          {fileType === 'md' && !preview && (() => {
+                 「开」判定之后 —— 这是探针语义依赖的既有顺序，改色不改序。
+              ★ 即时渲染档（2026-10-09）暂不提供 AI 续写 → 该档不渲染这颗钮（免得点了没反应）。 */}
+          {fileType === 'md' && !preview && writingMode === 'source' && (() => {
             const inlineOn = s.aiAssistantInlineSuggest !== false
             const inlineStateClass = inlineBusy
               ? 'text-[var(--success)]'
@@ -1298,15 +1304,17 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
             </div>
           </div>
         ) : null}
-        {/* MonacoPane 保活（2026-09-20 反馈「切换要迅速」）：首入编辑态挂载，此后阅读态 display:none
-            藏起不卸载——Monaco 编辑器创建是切换延迟大头（~200ms），保活后二次切换零重挂、即时出。
+        {/* 写作面保活（2026-09-20 反馈「切换要迅速」）：首入编辑态挂载，此后阅读态 display:none
+            藏起不卸载——引擎创建是切换延迟大头（Monaco ~200ms / CM6 同量级），保活后二次切换零重挂。
             reveal 时 bump layoutKey（隐藏期间容器尺寸为 0，需显式 layout()）；外部内容变更经
-            doc 最小 diff 同步，隐藏期间模型保持新鲜。onOpenInEditor 入口随编辑器模块退役删除。 */}
+            doc 最小 diff 同步，隐藏期间模型保持新鲜。写作模式由设置 `editorWritingMode` 决定
+            （即时渲染档只对 .md 生效，其余文档强制源码档）。 */}
         {paneDoc && editorEverMounted && (
           <div className={preview ? 'hidden' : 'min-h-0 flex-1'}>
-            <MonacoPane
+            <NoteSurface
               ref={paneRef}
               doc={paneDoc}
+              mode={writingMode}
               onChange={(_rel, v) => { setContent(v); onContentChange?.(v) }}
               fontSize={Math.round(s.editorFontSize * zoom)}
               editorOptions={{
@@ -1327,6 +1335,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 selectionHighlight: true,
                 quickSuggestions: true,
                 suggest: { showWords: false },
+                // 右键交给应用自己的写作菜单（NoteSurface 统一接管，两档同一份）
+                contextmenu: false,
               }}
               onPasteImage={handleImageToMarkdown}
               onDropImage={handleImageToMarkdown}

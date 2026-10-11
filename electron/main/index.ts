@@ -864,6 +864,14 @@ app.whenReady().then(async () => {
       return true
     } catch { return false }
   })
+  // 通用文本读取（编辑器右键「粘贴 / 以纯文本形式粘贴」）：渲染层不直连 navigator.clipboard，
+  // 与 writeText 同口径走主进程代理；上限 1MB 同上
+  ipcMain.handle('clipboard:readText', () => {
+    try {
+      const t = clipboard.readText()
+      return typeof t === 'string' && t.length <= 1024 * 1024 ? t : ''
+    } catch { return '' }
+  })
   ipcMain.handle('clipboard:copyImage', (_e, src: { path?: string; dataUrl?: string }) => {
     try {
       let img: Electron.NativeImage | null = null
