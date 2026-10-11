@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
@@ -8,7 +8,7 @@ import {
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachAssignSession, aiTeachUnassignSession, aiTeachSetLastWorkspace,
   aiTeachCourseGetState, aiTeachCourseSetUnitProgress, aiTeachCourseSetEnabled, aiTeachCourseWriteOutlineDraft, onAiTeachCourseRefresh,
   aiTeachCourseOpenUnit, aiTeachCourseEndLesson, aiTeachCourseFinalizeLesson, aiTeachCourseFinishUnit, aiTeachCourseReadPrevHandoff,
-  aiTeachCourseOpenAssistant,
+  aiTeachCourseOpenAssistant, aiTeachCourseOpenChapterReview,
   aiTeachSrcRead, aiTeachSrcAdd, aiTeachSrcRemove, aiTeachSrcExtract, aiTeachSrcPick, aiTeachSrcPickDir, aiTeachSrcVisionCheck,
   aiTeachSrcPdfBytes, aiTeachSrcTranscribe, aiTeachSrcPromote, aiTeachFavList, aiTeachFavAdd, aiTeachFavRemove,
   aiTeachProfileEnsureGlobal, aiTeachProfileEnsureSession, aiTeachProfileEnsureWorkspace,
@@ -570,6 +570,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   /** 课程助手会话 id（整门课唯一；切到「课程助手」档时指向它） */
   const [assistantSid, setAssistantSid] = useState<string | null>(null)
   const [courseUnit, setCourseUnit] = useState<string | null>(null)
+  /** 当前打开的章末复习课所属章 id（null = 不在复习课） */
+  const [courseReviewChapter, setCourseReviewChapter] = useState<string | null>(null)
   /** 本课会话 id：只有当前会话 = 这一条时，上课 chip 才出现（防止 chip 泄漏到普通会话） */
   const [courseLessonSid, setCourseLessonSid] = useState<string | null>(null)
   /** 当前课时状态：ended → 只读（禁发、结束按钮变只读提示） */
@@ -607,7 +609,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setCourseView('home')
   }, [reloadCourse])
   useEffect(() => {
-    setCourseUnit(null); setCourseLessonSid(null); setCourseLessonStatus('open'); setAssistantSid(null)
+    setCourseUnit(null); setCourseReviewChapter(null); setCourseLessonSid(null); setCourseLessonStatus('open'); setAssistantSid(null)
     if (!activeWs || activeWs === '__none__') { setCourseState(null); setCourseView('chat'); return }
     void (async () => {
       const s = await aiTeachCourseGetState(activeWs).catch(() => null)
@@ -1275,6 +1277,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const r = await aiTeachCourseOpenUnit(ws, unitId, kind).catch(() => null)
     if (!r?.ok || !r.sessionId) { showToast({ type: 'warning', message: r?.error ?? '打开课时失败' }); return }
     setCourseUnit(unitId)
+    setCourseReviewChapter(null)
     setCourseLessonSid(r.sessionId)
     setCourseLessonStatus(r.status ?? 'open')
     await openSession(r.sessionId, `课时${r.order ?? 1}·${r.kind ?? '精讲'}`)
@@ -1291,9 +1294,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       .sort((a, b) => a.order - b.order)
   }, [courseState, courseUnit])
   const courseUnitName = useMemo(() => courseUnits.find(u => u.id === courseUnit)?.name ?? '', [courseUnits, courseUnit])
+  const courseReviewChapterName = useMemo(() => courseState?.outline?.chapters.find(c => c.id === courseReviewChapter)?.name ?? '', [courseState, courseReviewChapter])
   /** 打开已存在的课时（左栏课时列表点选，不新建） */
   const courseOpenLesson = useCallback(async (unitId: string, sid: string, order: number, kind: string, status: 'open' | 'ended') => {
-    setCourseUnit(unitId); setCourseLessonSid(sid); setCourseLessonStatus(status)
+    setCourseUnit(unitId); setCourseReviewChapter(null); setCourseLessonSid(sid); setCourseLessonStatus(status)
     await openSession(sid, `课时${order}·${kind}`)
     setCourseView('chat')
   }, [openSession])
@@ -1309,6 +1313,20 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setPrepStarted(true) // 助手会话不走「准备态」（那是开课选模板用的），直接进对话
     setCourseView('assist')
   }, [openSession])
+
+  /** 打开章末复习课（每章一个会话，懒建）：点进和课程助手讨论本章复习 */
+  const courseOpenChapterReview = useCallback(async (chapterId: string) => {
+    const ws = activeWsRef.current
+    if (!ws || ws === '__none__') return
+    const r = await aiTeachCourseOpenChapterReview(ws, chapterId).catch(() => null)
+    if (!r?.ok || !r.sessionId) { showToast({ type: 'warning', message: r?.error ?? '打开复习课失败' }); return }
+    setCourseUnit(null)
+    setCourseReviewChapter(chapterId)
+    setCourseLessonSid(null)
+    await openSession(r.sessionId, '复习课')
+    setCourseView('chat')
+    void reloadCourse()
+  }, [openSession, reloadCourse])
 
   /** 结束课时：冻结本节（只读）+ 异步生成 讲义/交接 */
   const courseEndLesson = useCallback(async () => {
@@ -2871,8 +2889,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       <FileText size={11} className="shrink-0 text-[var(--text-muted)]" />
                       <button onClick={() => { void openArtFile(f.rel, { name: f.name }) }} title={f.rel}
                         className="min-w-0 flex-1 truncate text-left text-[12px] text-[var(--text-primary)]">{f.name.replace(/\.md$/i, '')}</button>
-                      <button onClick={() => { void togglePin(f.rel, f.name) }} title="取消收藏"
-                        className="shrink-0 opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-400 transition-opacity"><X size={10} /></button>
+                      <button onClick={() => { void togglePin(f.rel, f.name) }} title="取消钉选"
+                        className="shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"><X size={11} /></button>
                     </div>
                   ))}
                 </div>
@@ -2914,6 +2932,35 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   </div>
                 </div>
               </>
+            ) : courseView === 'chat' && courseReviewChapter ? (
+              <>
+                <SectionHead open={!collapsedSec.courseReview} title={`复习课 · ${courseReviewChapterName}`} onToggle={() => toggleSec('courseReview')}
+                  right={
+                    <button onClick={() => { setCourseReviewChapter(null); setCourseView('home') }} title="返回课程大纲"
+                      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10.5px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--accent)] transition-colors">
+                      <ChevronLeft size={11} />课程大纲
+                    </button>
+                  } />
+                <div className={`grid min-h-0 basis-0 transition-[flex-grow,grid-template-rows] duration-200 ease-out ${collapsedSec.courseReview ? 'grow-0' : 'grow'}`} style={{ gridTemplateRows: collapsedSec.courseReview ? '0fr' : '1fr' }}>
+                  <div className={`overflow-hidden min-h-0 transition-opacity duration-150 ${collapsedSec.courseReview ? 'invisible opacity-0' : 'opacity-100'}`}>
+                    <div className="flex h-full flex-col gap-1.5 overflow-y-auto px-1.5 pb-1.5">
+                      <div className="px-2 pt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">章末复习课：和课程助手讨论回顾本章知识点；结论可生成《复习讲义》落盘到本章目录。</div>
+                      <button onClick={() => sendQuick('请把本次复习的结论整理成《复习讲义》并落盘到本章目录。')}
+                        className="mx-1 flex items-center justify-center gap-1.5 rounded-md border border-[var(--accent)]/45 px-2 py-1.5 text-[11.5px] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10">
+                        <Repeat size={12} /> 生成复习讲义（对助手说）
+                      </button>
+                      {courseReviewChapter && courseState?.reviews?.[courseReviewChapter]?.rel && (
+                        <button onClick={() => { const rel = courseState!.reviews[courseReviewChapter]!.rel!; void openArtFile(rel, { name: rel.split('/').pop() || '复习讲义.md' }) }}
+                          className="mx-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[11.5px] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]">
+                          <FileText size={12} className="shrink-0 text-[var(--text-muted)]" />
+                          <span className="min-w-0 flex-1 truncate">复习讲义</span>
+                          <span className="shrink-0 text-[10px] text-[var(--accent)]">→</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
             ) : (
             <>
               <SectionHead open={!collapsedSec.courseOutline} title="课程大纲" onToggle={() => toggleSec('courseOutline')} />
@@ -2938,6 +2985,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             </div>
                           )
                         })}
+                        <div onClick={() => void courseOpenChapterReview(ch.id)}
+                          title="章末复习课：和课程助手讨论本章复习"
+                          className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer text-[12.5px] transition-colors ${courseReviewChapter === ch.id ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+                          <Repeat size={12} className="shrink-0 text-[var(--accent)]" />
+                          <span className="flex-1 min-w-0 truncate">复习课</span>
+                          {courseState?.reviews?.[ch.id]?.rel
+                            ? <span className="shrink-0 text-[9.5px] text-[var(--accent)]">讲义</span>
+                            : <span className="shrink-0 text-[9.5px] text-[var(--text-muted)]">章末</span>}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -3101,6 +3157,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 onStartUnit={(id) => void courseOpenUnit(id)}
                 onFinishUnit={(id, score) => void courseFinishUnit(id, score)}
                 onReopenUnit={(id) => void courseReopenUnit(id)}
+                onOpenChapterReview={(chapterId) => void courseOpenChapterReview(chapterId)}
                 onReload={() => void reloadCourse()}
                 onGoChat={() => void courseOpenAssistant()}
               />

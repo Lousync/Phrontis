@@ -1,16 +1,9 @@
 /**
- * 日程模块与工作台外壳的事件桥（日程 AI 化 P1）。
+ * 日程模块与工作台外壳的事件桥（日程 AI 化）。
  *
- * 「＋ 一句话加任务」要展开**工作台右栏**并切到「🗓 日程助手」Tab —— 而右栏折叠时
- * 整个 WorkbenchRightPanel 是卸载的（ResizablePanel 只渲染 visible 子节点），
- * 故与记账同款：中央模块只派发事件，由 App 层监听并改 workbenchLayout。
+ * 排期预览卡 / 「打开周日程」只派发 window 事件，由日程助手面板与日程模块各自消费；
+ * 日程助手本身经工作台右栏「🗓 日程助手」页签进入。
  */
-export const SCHEDULE_OPEN_ASSISTANT_EVENT = 'kb-schedule-open-assistant'
-
-/** 中央「＋ 一句话加任务」→ 展开右栏 + 切到日程助手 Tab（并聚焦输入，由面板挂载时自理） */
-export function requestScheduleAssistant(): void {
-  window.dispatchEvent(new CustomEvent(SCHEDULE_OPEN_ASSISTANT_EVENT))
-}
 
 // ===== 排期预览卡（助手消息里的 ```schedule-preview 围栏）=====
 /** 卡上「确认排入」→ 面板代发一条确认消息，模型据上一条预览落盘 */

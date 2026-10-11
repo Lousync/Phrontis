@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, MessageSquare, ListTree, Pencil } from 'lucide-react'
+import { Plus, Trash2, MessageSquare, ListTree, Pencil, Star } from 'lucide-react'
 import { agentRenameSession } from '../../../lib/ipc'
 import { fmtTime } from './MessageList'
 import { SessionRunMark } from './SessionRunMark'
 import { AssistantEntryButton } from './AssistantEntry'
 import type { AssistantChatController } from './useAssistantChat'
+import type { AgentSessionInfo } from '../../../types'
 
 /**
  * 左栏 AI 会话侧栏（v3.4.0 批次5 反馈轮，开发负责人 drawio 简图排版）：
@@ -36,6 +37,13 @@ interface Props {
 export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
   const [tab, setTab] = useState<'sessions' | 'outline'>('sessions')
   const { sessions, activeId, messages, pending, runStateOf } = chat
+
+  // 「★ 收藏」分区：钉住的会话按钉住时间倒序置顶；其余照常（列表已按更新时间倒序）
+  const pinned = useMemo(
+    () => sessions.filter(s => s.pinnedAt).sort((a, b) => (b.pinnedAt || '').localeCompare(a.pinnedAt || '')),
+    [sessions],
+  )
+  const rest = useMemo(() => sessions.filter(s => !s.pinnedAt), [sessions])
 
   // ---- 右键菜单（重命名/删除）：portal + 原生事件委托（React 对 body-portal 首个菜单的
   //      合成 click 分发会话内首次失效——🔖 菜单同坑同修，见 WorkbenchLeftPanel 注释）----
@@ -72,6 +80,10 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
         requestAnimationFrame(() => renameRef.current?.select())
         return
       }
+      if (t.dataset.aiMenuItem === 'pin') {
+        void chat.togglePin(menu.sessionId)
+        return
+      }
       if (t.dataset.aiMenuItem === 'delete') {
         // 走 controller 的双击确认语义：第一次 = 进入确认态（条目删除钮变红提示），再点执行
         void chat.removeSession(menu.sessionId)
@@ -105,6 +117,72 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
   }
 
   if (!container) return null
+
+  /** 会话行（收藏分区与全部列表共用）。行尾 ★ = 钉住 / 取消钉住 */
+  const renderRow = (sess: AgentSessionInfo) => (
+    <div
+      key={sess.id}
+      data-wb="aiSideSession"
+      data-wb-ai-session={sess.id}
+      onClick={() => { void chat.loadSession(sess.id) }}
+      onContextMenu={e => {
+        e.preventDefault()
+        setMenu({ sessionId: sess.id, x: e.clientX, y: e.clientY })
+      }}
+      className={`kb-item-in group flex cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 text-[12px] transition-colors ${
+        activeId === sess.id
+          ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]'
+          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+      }`}
+    >
+      {renaming?.id === sess.id ? (
+        <input
+          ref={renameRef}
+          value={renaming.draft}
+          onChange={e => setRenaming({ id: sess.id, draft: e.target.value })}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void submitRename() }
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRenaming(null) }
+          }}
+          onBlur={() => { void submitRename() }}
+          onClick={e => e.stopPropagation()}
+          spellCheck={false}
+          className="min-w-0 flex-1 rounded border border-[var(--accent)]/60 bg-[var(--bg-primary)] px-1 py-0.5 text-[12px] text-[var(--text-primary)] outline-none"
+        />
+      ) : (
+        <>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">
+              {sess.mode === 'manual' && (
+                <span className="mr-1 rounded bg-[var(--accent)]/12 px-1 py-px text-[9px] font-medium text-[var(--accent)] align-middle">使用帮助</span>
+              )}
+              {sess.title}
+            </span>
+            <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
+          </span>
+          <SessionRunMark mark={runStateOf(sess.id)} />
+          <button
+            onClick={e => { e.stopPropagation(); void chat.togglePin(sess.id) }}
+            className={`shrink-0 rounded p-0.5 transition-opacity ${
+              sess.pinnedAt
+                ? 'text-[var(--warning)]'
+                : 'text-[var(--text-disabled)] opacity-0 hover:text-[var(--warning)] group-hover:opacity-100'
+            }`}
+            title={sess.pinnedAt ? '取消钉住' : '钉住到收藏'}
+          >
+            <Star size={11} fill={sess.pinnedAt ? 'currentColor' : 'none'} />
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); void chat.removeSession(sess.id) }}
+            className={`shrink-0 rounded p-0.5 ${chat.deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100'}`}
+            title={chat.deletingId === sess.id ? '再点一次确认删除' : '删除会话（右键更多操作）'}
+          >
+            <Trash2 size={11} />
+          </button>
+        </>
+      )}
+    </div>
+  )
 
   return createPortal(
     <div data-wb="aiChatSidebar" className="flex min-h-0 flex-1 flex-col">
@@ -143,60 +221,20 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
             >
               <Plus size={12} /> 新会话
             </button>
-            <div className="space-y-0.5">
-              {sessions.map(sess => (
-                <div
-                  key={sess.id}
-                  data-wb="aiSideSession"
-                  data-wb-ai-session={sess.id}
-                  onClick={() => { void chat.loadSession(sess.id) }}
-                  onContextMenu={e => {
-                    e.preventDefault()
-                    setMenu({ sessionId: sess.id, x: e.clientX, y: e.clientY })
-                  }}
-                  className={`kb-item-in group flex cursor-pointer items-center gap-1 rounded-md px-2 py-1.5 text-[12px] transition-colors ${
-                    activeId === sess.id
-                      ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]'
-                      : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                  }`}
-                >
-                  {renaming?.id === sess.id ? (
-                    <input
-                      ref={renameRef}
-                      value={renaming.draft}
-                      onChange={e => setRenaming({ id: sess.id, draft: e.target.value })}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void submitRename() }
-                        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setRenaming(null) }
-                      }}
-                      onBlur={() => { void submitRename() }}
-                      onClick={e => e.stopPropagation()}
-                      spellCheck={false}
-                      className="min-w-0 flex-1 rounded border border-[var(--accent)]/60 bg-[var(--bg-primary)] px-1 py-0.5 text-[12px] text-[var(--text-primary)] outline-none"
-                    />
-                  ) : (
-                    <>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate">
-                          {sess.mode === 'manual' && (
-                            <span className="mr-1 rounded bg-[var(--accent)]/12 px-1 py-px text-[9px] font-medium text-[var(--accent)] align-middle">使用帮助</span>
-                          )}
-                          {sess.title}
-                        </span>
-                        <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
-                      </span>
-                      <SessionRunMark mark={runStateOf(sess.id)} />
-                      <button
-                        onClick={e => { e.stopPropagation(); void chat.removeSession(sess.id) }}
-                        className={`shrink-0 rounded p-0.5 ${chat.deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100'}`}
-                        title={chat.deletingId === sess.id ? '再点一次确认删除' : '删除会话（右键更多操作）'}
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </>
-                  )}
+            {pinned.length > 0 && (
+              <>
+                <div className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5 text-[10.5px] text-[var(--text-muted)]">
+                  <Star size={11} className="shrink-0 text-[var(--warning)]" fill="currentColor" />
+                  收藏
+                  <span className="h-px flex-1 bg-[var(--border-color)]" />
                 </div>
-              ))}
+                <div className="space-y-0.5">{pinned.map(renderRow)}</div>
+                <div className="mx-1.5 my-1 h-px bg-[var(--border-color)]" />
+                <div className="px-2 pb-0.5 text-[10.5px] text-[var(--text-muted)]">全部会话</div>
+              </>
+            )}
+            <div className="space-y-0.5">
+              {rest.map(renderRow)}
               {sessions.length === 0 && (
                 <div className="px-2 py-6 text-center text-[11.5px] text-[var(--text-muted)]">暂无会话</div>
               )}
@@ -255,6 +293,13 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             <Pencil size={12} className="shrink-0" /> 重命名
+          </button>
+          <button
+            data-ai-menu-item="pin"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <Star size={12} className="shrink-0" fill={sessions.find(s => s.id === menu.sessionId)?.pinnedAt ? 'currentColor' : 'none'} />
+            {sessions.find(s => s.id === menu.sessionId)?.pinnedAt ? '取消钉住' : '钉住到收藏'}
           </button>
           <button
             data-ai-menu-item="delete"

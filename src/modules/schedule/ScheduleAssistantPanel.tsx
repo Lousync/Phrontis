@@ -61,13 +61,9 @@ export function ScheduleAssistantPanel() {
       surface="schedule"
       headerTitle="日程助手"
       emptyHint={
-        <div className="flex flex-col items-center gap-1.5 px-4 text-center">
-          <CalendarDays size={18} className="text-[var(--accent)]" />
+        <div className="flex h-full flex-col items-center justify-center gap-1.5 px-4 text-center">
+          <CalendarDays size={22} strokeWidth={1.5} className="text-[var(--text-disabled)]" />
           <span className="text-[12.5px] text-[var(--text-secondary)]">日程助手</span>
-          <span className="text-[11.5px] leading-relaxed text-[var(--text-muted)]">
-            一句话加任务——带时间会<b className="text-[var(--text-secondary)]">直接排进日程表</b>；<br />
-            也可以把「待安排」排进这周、出今日简报。
-          </span>
         </div>
       }
       inputTop={

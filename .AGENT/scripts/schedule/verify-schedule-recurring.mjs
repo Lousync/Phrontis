@@ -78,8 +78,8 @@ const as = read('electron/lib/agentService.ts')
 check('SCHEDULE_TOOL_NAMES 含 recurring', as.includes("'builtin.schedule.create-recurring'") && as.includes("'builtin.schedule.delete-recurring'"))
 check('人设讲固定日程', as.includes('固定日程（重复任务）') && as.includes('create-recurring'))
 
-console.log('\n[手册] resources/help/日程与打卡小窗.md')
-check('补「固定日程」段', read('resources/help/日程与打卡小窗.md').includes('固定日程'))
+console.log('\n[手册] resources/help/日程助手与固定日程.md')
+check('补「固定日程」段', read('resources/help/日程助手与固定日程.md').includes('固定日程'))
 
 console.log(`\n断言: ${pass} PASS, ${fail} FAIL`)
 process.exit(fail > 0 ? 1 : 0)

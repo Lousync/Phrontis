@@ -1161,6 +1161,8 @@ export interface AgentSessionInfo {
   instructions?: string
   createdAt: string
   updatedAt: string
+  /** 钉住时间（「★ 收藏」分区）：有值 = 已钉住（值用于收藏内排序）；缺省 / null = 未钉住 */
+  pinnedAt?: string | null
   /** 支线旁问（v3.1.2 条目11）：挂靠的主线会话 id（缺省=非支线）。与主线物理隔离 */
   parentSessionId?: string
   /** 支线旁问：分叉点的主线消息 id */
@@ -1201,8 +1203,9 @@ export interface AiTeachCourseChapter { id: string; name: string; units: AiTeach
 export interface AiTeachCourseOutline { title: string; goal: string; anchor: string; chapters: AiTeachCourseChapter[] }
 export interface AiTeachCourseUnitProgress { status: AiTeachCourseUnitStatus; mastery: number; lastCheckedAt: string | null; finished?: boolean; summaryRel?: string | null }
 export interface AiTeachLessonInfo { unitId: string; order: number; kind: string; status: 'open' | 'ended' }
+export interface AiTeachChapterReview { sessionId: string; rel: string | null }
 export interface AiTeachUnitQuizQuestion { q: string; options: string[]; answer: number; explanation: string }
-export interface AiTeachCourseState { enabled: boolean; outline: AiTeachCourseOutline | null; progress: Record<string, AiTeachCourseUnitProgress>; lessons: Record<string, AiTeachLessonInfo> }
+export interface AiTeachCourseState { enabled: boolean; outline: AiTeachCourseOutline | null; progress: Record<string, AiTeachCourseUnitProgress>; lessons: Record<string, AiTeachLessonInfo>; reviews: Record<string, AiTeachChapterReview> }
 export interface AiTeachCourseGenerateInput { goal: string; mode: 'anchor' | 'materials' | 'mixed' | 'free'; anchorText?: string; anchorLabel?: string; wsId?: string; sourceKeys?: string[]; modelSpec?: string }
 export interface AiTeachCourseGenProgress { id: string; phase: 'request' | 'reasoning' | 'answer' | 'parsing' | 'done' | 'failed'; delta?: string; model?: string; chars?: number; error?: string }
 
@@ -2386,6 +2389,7 @@ export interface ElectronAPI {
   agentRenameSession: (id: string, title: string) => Promise<boolean>
   agentSetSessionInstructions: (id: string, instructions: string) => Promise<{ ok: boolean; error?: string }>
   agentDeleteSession: (id: string) => Promise<boolean>
+  agentSetSessionPinned: (id: string, pinned: boolean) => Promise<boolean>
   // ===== v3.1.2 条目11：支线旁问（createSideLane 只装上下文、不调 LLM）=====
   agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) => Promise<AgentSideLaneCreateResult>
   /** 列某主线下的支线（含已升格）；删除前计数亦用它 */
@@ -2435,6 +2439,7 @@ export interface ElectronAPI {
   aiTeachCourseReviseOutlineStream: (id: string, input: AiTeachCourseReviseInput) => Promise<{ ok: boolean; additions?: AiTeachOutlineAdditions; error?: string }>
   aiTeachCourseApplyAdditions: (wsId: string, additions: AiTeachOutlineAdditions) => Promise<{ ok: boolean; added?: number; error?: string }>
   aiTeachCourseOpenAssistant: (wsId: string) => Promise<{ ok: boolean; sessionId?: string; error?: string }>
+  aiTeachCourseOpenChapterReview: (wsId: string, chapterId: string) => Promise<{ ok: boolean; sessionId?: string; error?: string }>
   onAiTeachCourseGenProgress: (cb: (p: AiTeachCourseGenProgress) => void) => () => void
   onAiTeachCourseRefresh: (cb: (p: { wsId: string }) => void) => () => void
   aiTeachSrcRead: (id: string) => Promise<AiTeachSourcesResult>

@@ -622,6 +622,7 @@ export const agentUsageGet = (): Promise<{ days: Record<string, AiUsageDay> }> =
 export const agentSessionChanges = (sessionId?: string): Promise<SessionFileChange[]> => a().agentSessionChanges(sessionId)
 export const agentRenameSession = (id: string, title: string): Promise<boolean> => a().agentRenameSession(id, title)
 export const agentDeleteSession = (id: string): Promise<boolean> => a().agentDeleteSession(id)
+export const agentSetSessionPinned = (id: string, pinned: boolean): Promise<boolean> => a().agentSetSessionPinned(id, pinned)
 // ===== v3.1.2 条目11：支线旁问（sidetrack）=====
 /** 建支线：只装上下文快照、不调 LLM（点按钮/装载阶段零请求） */
 export const agentCreateSideLane = (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }): Promise<AgentSideLaneCreateResult> => a().agentCreateSideLane(payload)
@@ -687,6 +688,7 @@ export const aiTeachCourseGetSourceChanges = (wsId: string) => a().aiTeachCourse
 export const aiTeachCourseReviseOutlineStream = (id: string, input: AiTeachCourseReviseInput) => a().aiTeachCourseReviseOutlineStream(id, input)
 export const aiTeachCourseApplyAdditions = (wsId: string, additions: AiTeachOutlineAdditions) => a().aiTeachCourseApplyAdditions(wsId, additions)
 export const aiTeachCourseOpenAssistant = (wsId: string) => a().aiTeachCourseOpenAssistant(wsId)
+export const aiTeachCourseOpenChapterReview = (wsId: string, chapterId: string) => a().aiTeachCourseOpenChapterReview(wsId, chapterId)
 export const onAiTeachCourseGenProgress = (cb: (p: AiTeachCourseGenProgress) => void) => a().onAiTeachCourseGenProgress(cb)
 export const onAiTeachCourseRefresh = (cb: (p: { wsId: string }) => void) => a().onAiTeachCourseRefresh(cb)
 // P6 素材库（§3.13 结构 v3）

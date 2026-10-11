@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
   Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu, Radar, MessagesSquare, TriangleAlert,
-  RotateCcw, CalendarDays,
+  RotateCcw, CalendarDays, Star,
 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
 import { useSettings } from '../../../lib/SettingsContext'
@@ -22,7 +22,7 @@ import { buildQuotedBody } from './selQuotes'
 import { registerSelectionAskHost } from '../../../lib/assistantContext'
 import type { AssistantChatController } from './useAssistantChat'
 import type { ChatSurface } from '../../../lib/chatCommands'
-import type { AiUsageDay, KnowledgePage } from '../../../types'
+import type { AiUsageDay, KnowledgePage, AgentSessionInfo } from '../../../types'
 
 /**
  * AI 助手对话体（v3.4.0 批次5）：消息区 + 会话抽屉 + 改动卡 + 输入区的共用 UI。
@@ -114,7 +114,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     liveSteps, draft, lastChanges, compressing, pickedSkill, setPickedSkill,
     slashSkills, editing, setEditing, copiedIdx, setCopiedIdx, deletingId,
     drawerMounted, drawerOpen, toggleDrawer, closeDrawer,
-    send, newSession, loadSession, removeSession, regenerate, editSubmit, deleteMessage,
+    send, newSession, loadSession, removeSession, togglePin, regenerate, editSubmit, deleteMessage,
     abort, dismissChanges, runStateOf,
     modelId, setModelId, thinking, setThinking, attachedFiles, setAttachedFiles,
     contextInfo, contextRemoved, dismissContext, restoreContext,
@@ -355,29 +355,64 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     <Plus size={12} /> 新会话
                   </button>
                   <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-1">
-                    {sessions.map(sess => (
-                      <div key={sess.id}
-                        onClick={() => { void loadSession(sess.id) }}
-                        className={`kb-item-in group flex items-center gap-1 px-2 py-1.5 rounded-md cursor-pointer text-[12px] transition-colors ${
-                          activeId === sess.id ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                        }`}>
-                        <span className="min-w-0 flex-1">
-                          {/* 日程助手「一天一个会话」：列表按**日期**展示（会话标题是首条消息，不如日期直观） */}
-                          <span className="block truncate">{scheduleMode ? schedDayLabel(sess.createdAt) : sess.title}</span>
-                          <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
-                        </span>
-                        <SessionRunMark mark={runStateOf(sess.id)} />
-                        <button
-                          onClick={e => { e.stopPropagation(); void removeSession(sess.id) }}
-                          className={`shrink-0 p-0.5 rounded ${deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 group-hover:opacity-100 hover:text-red-400'}`}
-                          title={deletingId === sess.id ? '再点一次确认删除' : '删除会话'}>
-                          <Trash2 size={11} />
-                        </button>
-                      </div>
-                    ))}
-                    {sessions.length === 0 && (
-                      <p className="text-[11px] text-[var(--text-muted)] text-center pt-3">暂无历史会话</p>
-                    )}
+                    {(() => {
+                      // 「★ 收藏」分区（仅通用助手；日程助手「一天一会话」不适用）
+                      const pinEnabled = !scheduleMode
+                      const pinnedList = pinEnabled
+                        ? sessions.filter(s => s.pinnedAt).sort((a, b) => (b.pinnedAt || '').localeCompare(a.pinnedAt || ''))
+                        : []
+                      const restList = pinEnabled ? sessions.filter(s => !s.pinnedAt) : sessions
+                      const row = (sess: AgentSessionInfo) => (
+                        <div key={sess.id}
+                          onClick={() => { void loadSession(sess.id) }}
+                          className={`kb-item-in group flex items-center gap-1 px-2 py-1.5 rounded-md cursor-pointer text-[12px] transition-colors ${
+                            activeId === sess.id ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                          }`}>
+                          <span className="min-w-0 flex-1">
+                            {/* 日程助手「一天一个会话」：列表按**日期**展示（会话标题是首条消息，不如日期直观） */}
+                            <span className="block truncate">{scheduleMode ? schedDayLabel(sess.createdAt) : sess.title}</span>
+                            <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
+                          </span>
+                          <SessionRunMark mark={runStateOf(sess.id)} />
+                          {pinEnabled && (
+                            <button
+                              onClick={e => { e.stopPropagation(); void togglePin(sess.id) }}
+                              className={`shrink-0 p-0.5 rounded transition-opacity ${
+                                sess.pinnedAt ? 'text-[var(--warning)]' : 'text-[var(--text-disabled)] opacity-0 group-hover:opacity-100 hover:text-[var(--warning)]'
+                              }`}
+                              title={sess.pinnedAt ? '取消钉住' : '钉住到收藏'}>
+                              <Star size={11} fill={sess.pinnedAt ? 'currentColor' : 'none'} />
+                            </button>
+                          )}
+                          <button
+                            onClick={e => { e.stopPropagation(); void removeSession(sess.id) }}
+                            className={`shrink-0 p-0.5 rounded ${deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 group-hover:opacity-100 hover:text-red-400'}`}
+                            title={deletingId === sess.id ? '再点一次确认删除' : '删除会话'}>
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      )
+                      return (
+                        <>
+                          {pinnedList.length > 0 && (
+                            <>
+                              <div className="flex items-center gap-1.5 px-2 pt-1.5 pb-0.5 text-[10.5px] text-[var(--text-muted)]">
+                                <Star size={11} className="shrink-0 text-[var(--warning)]" fill="currentColor" />
+                                收藏
+                                <span className="h-px flex-1 bg-[var(--border-color)]" />
+                              </div>
+                              {pinnedList.map(row)}
+                              <div className="mx-1.5 my-1 h-px bg-[var(--border-color)]" />
+                              <div className="px-2 pb-0.5 text-[10.5px] text-[var(--text-muted)]">全部会话</div>
+                            </>
+                          )}
+                          {restList.map(row)}
+                          {sessions.length === 0 && (
+                            <p className="text-[11px] text-[var(--text-muted)] text-center pt-3">暂无历史会话</p>
+                          )}
+                        </>
+                      )
+                    })()}
                   </div>
                 </div>
               )}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronDown, Play, Plus, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, Play, Plus, Repeat, RotateCcw, Sparkles, Trash2, X } from 'lucide-react'
 import type { AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnit, AiTeachUnitQuizQuestion, AiTeachSourceItem, AiTeachOutlineAdditions } from '../../types'
 import {
   aiTeachCourseGenerateOutlineStream, aiTeachCourseSaveOutline, aiTeachCourseMakeUnitQuiz, onAiTeachCourseGenProgress,
@@ -58,12 +58,14 @@ interface Props {
   onStartUnit: (unitId: string) => void
   onFinishUnit: (unitId: string, score?: { correct: number; total: number }) => void
   onReopenUnit: (unitId: string) => void
+  /** 章末复习课：点进和课程助手讨论本章复习 */
+  onOpenChapterReview: (chapterId: string) => void
   onReload: () => void
   /** 对话驱动建课：跳回对话（跟教学助手说目标/改大纲） */
   onGoChat?: () => void
 }
 
-export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFinishUnit, onReopenUnit, onReload, onGoChat }: Props) {
+export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFinishUnit, onReopenUnit, onOpenChapterReview, onReload, onGoChat }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   // L3 收尾自测：先出题 → 作答 → 再生成总结篇
   const [quiz, setQuiz] = useState<{ unitId: string; qs: AiTeachUnitQuizQuestion[]; i: number; picked: number | null; score: number; done: boolean } | null>(null)
@@ -216,6 +218,22 @@ export function CourseHome({ wsId, wsName, modelSpec, state, onStartUnit, onFini
                   </div>
                 )
               })}
+              {!closed && (
+                <button onClick={() => onOpenChapterReview(ch.id)} title="点进和课程助手讨论本章复习"
+                  className="mt-1 flex w-full items-center gap-3 rounded-xl border border-dashed border-[var(--accent)]/45 bg-[var(--accent)]/5 px-3.5 py-2.5 text-left transition-colors hover:border-[var(--accent)]/70 hover:bg-[var(--accent)]/10">
+                  <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-lg bg-[var(--accent)]/15 text-[var(--accent)]"><Repeat size={13} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold text-[var(--text-primary)]">复习课</span>
+                      <span className="rounded px-1.5 py-0.5 text-[9.5px] font-semibold bg-[var(--accent)]/12 text-[var(--accent)]">章末</span>
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11.5px] text-[var(--text-secondary)]">回顾本章知识点 · 和课程助手讨论后生成复习讲义</span>
+                  </span>
+                  {state.reviews?.[ch.id]?.rel && (
+                    <span className="shrink-0 text-[11px] font-medium text-[var(--accent)]">复习讲义 →</span>
+                  )}
+                </button>
+              )}
             </div>
           )
         })}

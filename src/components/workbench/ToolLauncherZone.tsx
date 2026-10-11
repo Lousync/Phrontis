@@ -111,7 +111,7 @@ export function ToolLauncherZone({ onOpenTool, onOpenPluginTool }: Props) {
   const pluginVis = pluginTools.filter((t) => !hiddenIds.has(`${t.pluginId}:${t.toolId}`))
   const zoneEmpty = leftTools.length === 0 && rightTools.length === 0 && pluginVis.length === 0
 
-  const rowCls = 'group flex min-w-0 items-center gap-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-[5px] text-left text-[11.5px] text-[var(--text-primary)] transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-hover)]'
+  const rowCls = 'group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-[5px] text-left text-[11.5px] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]'
 
   const renderPluginRow = (t: PluginTool) => {
     const id = `${t.pluginId}:${t.toolId}`
@@ -125,10 +125,10 @@ export function ToolLauncherZone({ onOpenTool, onOpenPluginTool }: Props) {
     )
   }
 
-  // 底色口径（2026-09-17 右栏对齐左栏）：外壳卡 = bg-secondary，三段内容层 = bg-primary + 细边框，
-  // 层次由底色差承担；原「段与外卡同色、只靠边框区分」看着像同色面板叠在卡上
+  // 扁平口径（2026-10-11 用户反馈「右栏线条与左栏不统一」）：去掉内部卡片边框与不透明底，
+  // 改用与左栏同款的分节线（border-t / border-b）+ 透明底 —— 不再有「卡中卡」。
   return (
-    <div data-wb="toolsZone" className="mx-2.5 mt-2.5 shrink-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] p-2">
+    <div data-wb="toolsZone" className="shrink-0 border-b border-[var(--border-color)] px-2.5 pb-2 pt-2">
       {/* 标题行 */}
       <div className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[11.5px] font-semibold text-[var(--text-secondary)]">
         <Wrench size={12} className="text-[var(--text-muted)]" />

@@ -84,12 +84,12 @@ check('MarkdownPreview 渲染 schedule-preview 围栏', read('src/components/sha
 
 const app = read('src/App.tsx')
 check('App: scheduleActive={activeTab===\'schedule\'}', app.includes("scheduleActive={activeTab === 'schedule'}"))
-check('App: 监听打开日程助手事件', app.includes('SCHEDULE_OPEN_ASSISTANT_EVENT'))
+check('App: 已移除「一句话加任务」事件桥', !app.includes('SCHEDULE_OPEN_ASSISTANT_EVENT'))
 
 const sidx = read('src/modules/schedule/index.tsx')
-check('日程顶栏「一句话加任务」', sidx.includes('requestScheduleAssistant') && sidx.includes('一句话加任务'))
+check('日程顶栏已移除「一句话加任务」（入口 = 右栏页签）', !sidx.includes('一句话加任务') && !sidx.includes('requestScheduleAssistant'))
 check('日程模块切周视图事件', sidx.includes('SCHEDULE_OPEN_WEEK_EVENT'))
-check('shared.ts 事件桥齐全', ['SCHEDULE_OPEN_ASSISTANT_EVENT', 'SCHEDULE_PREVIEW_CONFIRM_EVENT', 'SCHEDULE_PREVIEW_ADJUST_EVENT', 'SCHEDULE_OPEN_WEEK_EVENT'].every((e) => read('src/modules/schedule/shared.ts').includes(e)))
+check('shared.ts 事件桥齐全', ['SCHEDULE_PREVIEW_CONFIRM_EVENT', 'SCHEDULE_PREVIEW_ADJUST_EVENT', 'SCHEDULE_OPEN_WEEK_EVENT'].every((e) => read('src/modules/schedule/shared.ts').includes(e)))
 
 // ---------- 任务类型语义（截止类 / 目标类） ----------
 console.log('\n[任务类型] 截止类 deadline / 目标类 plan+endCriteria')
@@ -125,8 +125,9 @@ check('newSession 支持标题', uac.includes('newSession: (title?: string) => P
 check('面板开启 autoResumeToday', read('src/modules/schedule/ScheduleAssistantPanel.tsx').includes('autoResumeToday: true'))
 
 // ---------- 手册 ----------
-console.log('\n[手册] resources/help/日程与打卡小窗.md')
-check('补「日程助手」段', read('resources/help/日程与打卡小窗.md').includes('日程助手'))
+console.log('\n[手册] resources/help/日程助手与固定日程.md')
+check('「日程助手」篇存在', read('resources/help/日程助手与固定日程.md').includes('日程助手'))
+check('小窗篇已移出日程助手内容', !read('resources/help/日程与打卡小窗.md').includes('日程助手'))
 
 console.log(`\n断言: ${pass} PASS, ${fail} FAIL`)
 process.exit(fail > 0 ? 1 : 0)

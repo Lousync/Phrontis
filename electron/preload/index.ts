@@ -309,6 +309,7 @@ const api = {
   agentRenameSession: (id: string, title: string) => ipcRenderer.invoke('agent:renameSession', id, title),
   agentSetSessionInstructions: (id: string, instructions: string) => ipcRenderer.invoke('agent:setSessionInstructions', id, instructions),
   agentDeleteSession: (id: string) => ipcRenderer.invoke('agent:deleteSession', id),
+  agentSetSessionPinned: (id: string, pinned: boolean) => ipcRenderer.invoke('agent:setSessionPinned', id, pinned),
   // v3.1.2 条目11：支线旁问（sidetrack）。createSideLane 只装上下文、不调 LLM
   agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) =>
     ipcRenderer.invoke('agent:createSideLane', payload),
@@ -360,6 +361,7 @@ const api = {
   aiTeachCourseReviseOutlineStream: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachCourse:reviseOutlineStream', id, input),
   aiTeachCourseApplyAdditions: (wsId: string, additions: unknown) => ipcRenderer.invoke('aiTeachCourse:applyAdditions', wsId, additions),
   aiTeachCourseOpenAssistant: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:openAssistant', wsId),
+  aiTeachCourseOpenChapterReview: (wsId: string, chapterId: string) => ipcRenderer.invoke('aiTeachCourse:openChapterReview', wsId, chapterId),
   aiTeachCourseGenerateOutlineStream: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutlineStream', id, input),
   /** AI教学·课程模式：生成大纲过程事件（`{ id, phase, delta?, model?, chars?, error? }`） */
   onAiTeachCourseGenProgress: (cb: (p: unknown) => void) => {

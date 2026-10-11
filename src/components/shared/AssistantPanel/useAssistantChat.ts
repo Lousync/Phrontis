@@ -4,7 +4,7 @@ import { handleChatCommand } from '../../../lib/chatCommands'
 import { getAssistantContext } from '../../../lib/assistantContext'
 import { useSettings } from '../../../lib/SettingsContext'
 import {
-  agentSessions, agentNewSession, agentMessages, agentDeleteSession,
+  agentSessions, agentNewSession, agentMessages, agentDeleteSession, agentSetSessionPinned,
   agentChat, agentRegenerate, agentEditMessage, agentDeleteMessage,
   llmListProviders, agentAbortSession, aiToolsListSkills, onAssistantNotice,
 } from '../../../lib/ipc'
@@ -91,6 +91,8 @@ export interface AssistantChatController {
   newSession: (title?: string) => Promise<void>
   loadSession: (id: string) => Promise<void>
   removeSession: (id: string) => Promise<void>
+  /** 钉住 / 取消钉住会话（通用助手左栏「★ 收藏」分区）：乐观更新 + 落盘 */
+  togglePin: (id: string) => Promise<void>
   regenerate: () => Promise<void>
   editSubmit: (id: string, content: string) => Promise<void>
   deleteMessage: (id: string) => Promise<void>
@@ -372,6 +374,20 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     if (activeIdRef.current === id) { setActiveId(null); setMessages([]) }
   }, [deletingId])
 
+  /** 钉住 / 取消钉住（通用助手「★ 收藏」分区）：乐观更新，落盘失败再拉库对齐 */
+  const togglePin = useCallback(async (id: string) => {
+    const cur = sessions.find(s => s.id === id)
+    const next = !cur?.pinnedAt
+    setSessions(prev => prev.map(s => (s.id === id ? { ...s, pinnedAt: next ? new Date().toISOString() : null } : s)))
+    try {
+      const ok = await agentSetSessionPinned(id, next)
+      if (!ok) void refreshSessions()
+    } catch {
+      showToast({ type: 'error', message: '钉住失败' })
+      void refreshSessions()
+    }
+  }, [sessions, refreshSessions])
+
   const send = useCallback(async (override?: string) => {
     const raw = (override ?? input).trim()
     // 宿主预处理（悬浮版：划词引用块并入正文并清空——body 为空但仍有引用时返回纯引用正文；
@@ -550,6 +566,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     newSession,
     loadSession,
     removeSession,
+    togglePin,
     regenerate,
     editSubmit,
     deleteMessage,

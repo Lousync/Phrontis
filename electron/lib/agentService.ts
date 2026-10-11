@@ -18,7 +18,7 @@ import {
   sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages,
   getMessageById, updateMessageContent, deleteMessage, deleteMessagesAfter,
   getAgentSession, updateAgentSessionInstructions, backfillSessionSources,
-  createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode,
+  createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode, setSessionPinned,
 } from './agentSessionRepo'
 import { MANUAL_CHANNEL_TOOL, MANUAL_MAX_ROUNDS, buildManualSystemPrompt, classifyManualIntent, hasOperationIntent } from './manualChannel'
 import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceConstraintsForSession, resolveWriteOwnerRel, listSessionFolderIds } from './aiTeachingFolders'
@@ -27,6 +27,7 @@ import { resolveSourcesForInjection } from './aiTeachingSources'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
 import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { buildCourseInjection } from './aiTeachingCourse'
+import { listFavorites } from './aiTeachingFavorites'
 import { findSkillPrompt } from './skillService'
 import { recordAiUsage, recordSessionFileChange, getAiUsageData, getSessionChanges } from './agentUsage'
 import { vaultTodosAll } from './kbStore/scheduleVaultRepo'
@@ -845,6 +846,15 @@ async function runAgentLoop(
   // 课程模式（docs/ai-teaching-course-mode-plan.md）：工作区开启课程模式时注入「课程目标 + 当前知识点 + 掌握度 + 待复习」，
   // 让模型从「答完这一问」转为「上好这门课」。未开启/无大纲 → 空串（零成本）。
   const courseHint = source === 'aiTeaching' ? buildCourseInjection(sessionId, getSettingReader()) : ''
+  // 收藏（v3.6.0）：让 AI 感知到当前工作区钉在左栏「收藏」的文档（只读注入，无工具；用户自己挑出来常看的）
+  const favoritesHint = source === 'aiTeaching' ? (() => {
+    const wsId = getWorkspaceOfSession(sessionId)
+    if (!wsId) return ''
+    const favs = listFavorites(wsId)
+    if (favs.length === 0) return ''
+    return '\n\n【收藏的文档（AI教学）】用户当前工作区钉在左栏顶部「收藏」的文档（用户自己挑出来常看的，区别于素材与产物；需要时可优先引用）：\n'
+      + favs.map((f) => `— ${f.name.replace(/\.md$/i, '')}（${f.rel}）`).join('\n')
+  })() : ''
   // v3.1.2 条目8+10：AI教学「取材范围」与「产物落点」两条纪律共用一次会话夹解析（避免重复 stat）
   // 条目11：支线的落点跟随**主线**会话夹（`{主线夹}/支线·{标题}/`），不新建自己的夹
   const aiTeachScope = source === 'aiTeaching' ? (() => {
@@ -904,7 +914,7 @@ async function runAgentLoop(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+    : baseSystem + schedulePersona + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -1380,6 +1390,7 @@ export function registerAgentHandlers(): void {
       ...row,
       createdAt: typeof row.created_at === 'string' && row.created_at ? row.created_at : (row.createdAt ?? ''),
       updatedAt: typeof row.updated_at === 'string' && row.updated_at ? row.updated_at : (row.updatedAt ?? ''),
+      pinnedAt: typeof row.pinned_at === 'string' && row.pinned_at ? row.pinned_at : (row.pinnedAt ?? null),
       sessionId: typeof row.session_id === 'string' ? row.session_id : (row.sessionId ?? ''),
       traceJson: typeof row.trace_json === 'string' ? row.trace_json : (row.traceJson ?? null),
     } as T
@@ -1446,6 +1457,11 @@ export function registerAgentHandlers(): void {
     for (const lane of listSideLanes(sid)) if (lane.lane === 'side') deleteAgentSession(lane.id)
     deleteAgentSession(sid)
     return true
+  })
+  // 钉住 / 取消钉住会话（通用助手左栏「★ 收藏」分区）
+  ipcMain.handle('agent:setSessionPinned', (_e, id: string, pinned: boolean) => {
+    if (typeof id !== 'string' || !id) return false
+    return setSessionPinned(id, pinned === true)
   })
 
   // ===== v3.1.2 条目11：支线旁问（sidetrack）=====

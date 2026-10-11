@@ -8,7 +8,7 @@ import { writeVisual, writeMindmap } from './aiTeachingSources'
 import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
 import { getWorkspaceOfSession } from './aiTeachingWorkspaces'
 import {
-  inventoryWorkspaceSource, writeOutlineFromAssistant, removeCourseUnit, archiveOrganizedPage,
+  inventoryWorkspaceSource, writeOutlineFromAssistant, removeCourseUnit, archiveOrganizedPage, writeChapterReviewDoc,
   type OutlineDraft,
 } from './aiTeachingCourse'
 import type { ToolInvokeCtx } from './aiTools'
@@ -1411,7 +1411,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive / course.review.write）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -2044,6 +2044,25 @@ export function registerBuiltinTools(): void {
     if (!sid) throw new Error('仅可在 AI 教学对话中使用')
     const r = archiveOrganizedPage(sid, str(args.title), str(args.content), str(args.target), getSettingReader())
     if (!r.ok) throw new Error(r.error ?? '归档失败')
+    return r
+  })
+
+  // 30. course.review.write —— 章末复习课：把复习结论整理成《复习讲义》落盘到本章目录
+  registerTool({
+    name: 'course.review.write',
+    title: '写入复习讲义',
+    description: '在**章末复习课**会话中，把本次复习的结论整理成《复习讲义》写入本章目录（{章号}·{章名}/复习讲义.md，覆盖同名）。content = markdown 正文。返回相对路径与**绝对路径**（务必把绝对路径告诉用户）。仅在复习课会话中可用。',
+    inputSchema: {
+      type: 'object',
+      properties: { content: { type: 'string', description: '复习讲义 markdown 正文' } },
+      required: ['content'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid) throw new Error('仅可在 AI 教学对话中使用')
+    const r = writeChapterReviewDoc(sid, str(args.content), getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '写入复习讲义失败')
     return r
   })
 

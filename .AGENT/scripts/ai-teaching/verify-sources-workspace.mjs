@@ -96,14 +96,14 @@ check('记录对话级路径（上收入口的显隐依据）', renderer.include
 check('卡片路径按条目所属层（e.dirRel 回退主库推导）', renderer.includes('e.dirRel || (srcFileRel'))
 check('会话存量条目带「对话」角标', renderer.includes("e.scope === 'session' && ("))
 check('「上收」按钮：有存量且有对话时出现', renderer.includes('{srcSessionRel && activeId && (') && renderer.includes('doPromoteSources()'))
-check('doPromoteSources 调 aiTeachSrcPromote（确认弹窗保护）', renderer.includes('aiTeachSrcPromote(activeId)') && renderer.includes("'上收素材到工作区主库'"))
+check('doPromoteSources 调 aiTeachSrcPromote（确认弹窗保护）', renderer.includes('aiTeachSrcPromote(activeId, nos)') && renderer.includes("'上收素材到工作区主库'"))
 check('＋素材不再门控 activeId（未建对话也能登记）', !renderer.includes('{activeId && (\n                  <button onClick={() => {\n                    setSrcForm('))
 
 // ---- IPC 四层 ----
 console.log('\n[IPC] promote 四层接线')
 check('主进程注册 aiTeachSrc:promote', src.includes("ipcMain.handle('aiTeachSrc:promote'"))
-check('preload 暴露 aiTeachSrcPromote', preload.includes("aiTeachSrcPromote: (id: string) => ipcRenderer.invoke('aiTeachSrc:promote', id)"))
-check('types 声明 aiTeachSrcPromote', types.includes('aiTeachSrcPromote: (id: string) => Promise<AiTeachSourcesResult>'))
+check('preload 暴露 aiTeachSrcPromote', preload.includes("aiTeachSrcPromote: (id: string, nos?: number[]) => ipcRenderer.invoke('aiTeachSrc:promote', id, nos)"))
+check('types 声明 aiTeachSrcPromote', types.includes('aiTeachSrcPromote: (id: string, nos?: number[]) => Promise<AiTeachSourcesResult>'))
 check('ipc.ts 封装 aiTeachSrcPromote', ipc.includes('export const aiTeachSrcPromote'))
 check('agentService 注入仍走 resolveSourcesForInjection', agent.includes('resolveSourcesForInjection(sessionId, getSettingReader())'))
 

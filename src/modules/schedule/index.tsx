@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Maximize2, Zap, ChevronDown, RotateCcw, Trash2, Check, CalendarDays, LayoutGrid, Sparkles } from 'lucide-react'
+import { Plus, Maximize2, Zap, ChevronDown, RotateCcw, Trash2, Check, CalendarDays, LayoutGrid } from 'lucide-react'
 import type { ScheduleTodo, ScheduleTag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, ScheduleRecurring } from '../../types'
 import { registerAssistantContext } from '../../lib/assistantContext'
 import {
@@ -15,7 +15,7 @@ import type { ViewMode } from './types'
 import { mondayOfWeek, dayFromMonday, toDateStr } from './timetable'
 import { ViewSwitcher } from './components/ViewSwitcher'
 import { RecurringRulesPanel } from './components/RecurringRulesPanel'
-import { requestScheduleAssistant, SCHEDULE_OPEN_WEEK_EVENT } from './shared'
+import { SCHEDULE_OPEN_WEEK_EVENT } from './shared'
 import { TaskTray } from './components/TaskTray'
 import { TimetableView } from './views/TimetableView'
 import { TodoItem } from './components/TodoItem'
@@ -644,13 +644,6 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
           <span className="text-[11.5px] font-medium text-[var(--text-muted)] truncate">{viewTitle}</span>
         )}
         <div className="ml-auto flex items-center gap-0.5">
-          <button
-            onClick={requestScheduleAssistant}
-            title="一句话加任务（打开日程助手）"
-            className="mr-1 flex items-center gap-1 rounded-md border border-[var(--accent)] bg-[var(--accent)] px-2 py-[3px] text-[11.5px] text-white transition-opacity hover:opacity-90"
-          >
-            <Sparkles size={12} /> 一句话加任务
-          </button>
           {viewMode === 'quadrant' && (
             <button onClick={openQuadrantChart} title="打开象限图"
               className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">

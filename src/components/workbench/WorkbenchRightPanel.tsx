@@ -385,8 +385,8 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                 层级：外壳卡(bg-secondary) → 本容器(bg-primary) → 控件内容 → 共两层带边框容器
                 （控件自身不画卡，如 PomoWidget frameless）。
                 内容区不再放文字标题——切换条选中图标即当前控件标识（2026-09-17 反馈：删冗余文字说明） */}
-            <div className={`mx-2.5 mb-2.5 flex min-h-0 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] ${absorbSurplus ? 'grow-[99] basis-0 max-h-[480px]' : 'flex-1'} min-h-[400px]`}>
-              <div data-wb="widgetSwitch" className="flex shrink-0 items-center gap-0.5 px-2 pt-2">
+            <div className={`flex min-h-0 flex-col overflow-hidden ${absorbSurplus ? 'grow-[99] basis-0 max-h-[480px]' : 'flex-1'} min-h-[400px]`}>
+              <div data-wb="widgetSwitch" className="flex shrink-0 items-center gap-0.5 px-2.5 pt-2">
                 {visibleWidgets.map((id) => {
                   const meta = WIDGET_META[id]
                   if (!meta) return null
@@ -581,7 +581,7 @@ function RecentEdited({ onOpenFile, onOpenPage, absorbSurplus = false }: { onOpe
   }, [pages, absorbSurplus])
 
   return (
-    <div data-wb="recentEdited" className={`mx-2.5 mt-2 flex flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] ${absorbSurplus ? 'grow basis-0 min-h-[64px]' : 'shrink max-h-[212px] min-h-[36px]'}`}>
+    <div data-wb="recentEdited" className={`flex flex-col overflow-hidden border-b border-[var(--border-color)] px-2.5 pb-1.5 pt-2 ${absorbSurplus ? 'grow basis-0 min-h-[64px]' : 'shrink max-h-[212px] min-h-[36px]'}`}>
       <div className="flex shrink-0 items-center gap-1.5 px-2.5 pb-1 pt-2 text-[11.5px] font-semibold text-[var(--text-secondary)]">
         <History size={12} className="text-[var(--text-muted)]" />
         最近编辑

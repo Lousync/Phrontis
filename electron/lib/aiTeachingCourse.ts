@@ -56,11 +56,20 @@ export interface LessonInfo {
   status: 'open' | 'ended'
 }
 
+/** 章末复习课（每章一个；会话懒建，内容由与课程助手讨论得出） */
+export interface ChapterReview {
+  sessionId: string
+  /** 复习讲义仓库相对路径（未生成为 null） */
+  rel: string | null
+}
+
 export interface CourseState {
   enabled: boolean
   outline: CourseOutline | null
   progress: Record<string, CourseUnitProgress>
   lessons: Record<string, LessonInfo>
+  /** 章末复习课：chapterId → 会话 id + 复习讲义相对路径 */
+  reviews: Record<string, ChapterReview>
 }
 
 interface WsCourseState {
@@ -74,6 +83,8 @@ interface WsCourseState {
   sourceBaseline?: SourceSnapshotEntry[]
   /** 课程助手会话 id（整门课唯一，懒建；不写入 lessons，故不计课时/进度） */
   assistantSessionId?: string
+  /** 章末复习课：chapterId → 会话 id + 复习讲义相对路径（懒建；不写入 lessons，故不计课时/进度） */
+  reviews?: Record<string, ChapterReview>
 }
 
 interface ProgressFile {
@@ -236,6 +247,7 @@ export function getCourseState(wsId: string, getSetting: (key: string) => unknow
     outline: readCourseOutline(wsId, getSetting),
     progress: s.units,
     lessons: s.lessons,
+    reviews: s.reviews ?? {},
   }
 }
 
@@ -333,6 +345,85 @@ export function openCourseAssistant(wsId: string, _getSetting: (key: string) => 
   return { ok: true, sessionId: row.id }
 }
 
+// ===== 章末复习课（每章一个；会话懒建，内容由与课程助手讨论得出）=====
+
+/** 找会话是否为某章的复习课会话 → { wsId, chapterId } */
+function findReviewBySession(sessionId: string): { wsId: string; chapterId: string } | null {
+  if (!sessionId) return null
+  const f = readProgressFile()
+  for (const [wsId, st] of Object.entries(f.workspaces)) {
+    const rs = st?.reviews
+    if (!rs) continue
+    for (const [chapterId, r] of Object.entries(rs)) if (r?.sessionId === sessionId) return { wsId, chapterId }
+  }
+  return null
+}
+
+/**
+ * 打开/取某章的「复习课」会话：每章一个、懒建、不绑知识点（不计课时/进度）。
+ * - 已存在且会话仍在 → 直接返回；否则新建普通会话（source='aiTeaching'）并入工作区。
+ * - 内容由用户与课程助手讨论得出；结论落盘走 writeChapterReviewDoc。
+ */
+export function openChapterReview(wsId: string, chapterId: string, getSetting: (key: string) => unknown): { ok: boolean; sessionId?: string; error?: string } {
+  if (!getCurrentVault()) return { ok: false, error: '尚未打开仓库' }
+  const id = String(wsId ?? '').trim()
+  const cid = String(chapterId ?? '').trim()
+  if (!id || !cid) return { ok: false, error: '缺少参数' }
+  const outline = readCourseOutline(id, getSetting)
+  const chapter = (outline?.chapters ?? []).find((c) => c.id === cid)
+  if (!chapter) return { ok: false, error: '章不存在' }
+  const f = readProgressFile()
+  const s = wsState(f, id)
+  if (!s.reviews) s.reviews = {}
+  const existing = s.reviews[cid]
+  if (existing?.sessionId && sessionExists(existing.sessionId)) return { ok: true, sessionId: existing.sessionId }
+  const row = createAgentSession(`复习课·${chapter.name}`, 'aiTeaching')
+  assignSession(row.id, id)
+  s.reviews[cid] = { sessionId: row.id, rel: existing?.rel ?? null }
+  persist(f)
+  broadcastCourse(id)
+  return { ok: true, sessionId: row.id }
+}
+
+/** 章级文件夹相对路径 `{工作区}/{章号}·{章名}`（复习讲义落点） */
+export function chapterFolderRel(wsId: string, chapterId: string, getSetting: (key: string) => unknown): string | null {
+  const wsFolder = workspaceFolderRel(wsId, getSetting)
+  if (!wsFolder) return null
+  const outline = readCourseOutline(wsId, getSetting)
+  const safe = (t: string) => String(t).replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim() || '未命名'
+  let no = 1
+  let name = '复习'
+  ;(outline?.chapters ?? []).forEach((c, ci) => { if (c.id === chapterId) { no = ci + 1; name = c.name } })
+  return `${wsFolder}/${no}·${safe(name)}`
+}
+
+/** 写「复习讲义」到本章目录并记录 rel（会话须是复习课会话）。返回相对/绝对路径。 */
+export function writeChapterReviewDoc(sessionId: string, content: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string } {
+  const vault = getCurrentVault()
+  if (!vault) return { ok: false, error: '尚未打开仓库' }
+  const hit = findReviewBySession(String(sessionId ?? ''))
+  if (!hit) return { ok: false, error: '仅可在复习课会话中生成复习讲义' }
+  const dirRel = chapterFolderRel(hit.wsId, hit.chapterId, getSetting)
+  if (!dirRel) return { ok: false, error: '无法确定章目录' }
+  try {
+    const dirAbs = join(vault.rootPath, dirRel)
+    mkdirSync(dirAbs, { recursive: true })
+    const fname = '复习讲义.md'
+    writeFileSync(join(dirAbs, fname), String(content ?? '').replace(/\r\n/g, '\n'), 'utf-8')
+    const relPath = `${dirRel}/${fname}`
+    const f = readProgressFile()
+    const s = wsState(f, hit.wsId)
+    if (!s.reviews) s.reviews = {}
+    s.reviews[hit.chapterId] = { sessionId: s.reviews[hit.chapterId]?.sessionId ?? String(sessionId), rel: relPath }
+    persist(f)
+    broadcastCourse(hit.wsId)
+    broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel })
+    return { ok: true, relPath, absPath: join(dirAbs, fname) }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
 /** 结束课时：本节冻结（只读） */
 export function endLesson(sessionId: string): { ok: boolean; wsId?: string; unitId?: string; error?: string } {
   const wsId = getWorkspaceOfSession(sessionId)
@@ -378,7 +469,11 @@ function lessonFolderRel(sessionId: string, getSetting: (key: string) => unknown
   const wsFolder = workspaceFolderRel(wsId, getSetting)
   if (!wsFolder) return null
   const f = readProgressFile()
-  const l = wsState(f, wsId).lessons[sessionId]
+  const st = wsState(f, wsId)
+  // 章末复习课会话：落章级文件夹 {工作区}/{章号}·{章名}（无 课时N 子夹）
+  const revChapter = Object.entries(st.reviews ?? {}).find(([, r]) => r?.sessionId === sessionId)?.[0]
+  if (revChapter) return chapterFolderRel(wsId, revChapter, getSetting)
+  const l = st.lessons[sessionId]
   if (!l) return null
   const outline = readCourseOutline(wsId, getSetting)
   let chapterNo = 1
@@ -409,6 +504,7 @@ setAssistantFolderResolver(assistantFolderRel)
 
 /** L5：会话所属知识点的文件夹相对路径 `{工作区}/{章号}·{知识点}`（画像第三层落点）；非课时返回 null */
 export function getSessionUnitFolderRel(sessionId: string, getSetting: (key: string) => unknown): string | null {
+  if (findReviewBySession(sessionId)) return null // 复习课无「所属知识点」层
   const rel = lessonFolderRel(sessionId, getSetting)
   return rel ? rel.slice(0, rel.lastIndexOf('/')) : null
 }
@@ -548,6 +644,8 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
   if (!s.enabled) return ''
   // 课程助手会话（整门课一个）走「顾问」分支：**无大纲也可用**（冷启动即可聊规划/整理素材）
   const isAssistant = !!s.assistantSessionId && sessionId === s.assistantSessionId
+  // 章末复习课会话：走「复习」分支（本章知识点 + 掌握度 + 复习人设）
+  const reviewHit = findReviewBySession(sessionId)
   const outline = readCourseOutline(wsId, getSetting)
   const hasOutline = !!outline && outline.chapters.length > 0
   if (!hasOutline && !isAssistant) return ''
@@ -575,6 +673,25 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
       lines.push('（本工作区还没有课程大纲。按流程引导：先聊清学习目标、清点素材，条件够就询问用户"是否生成大纲"，确认后再生成为草稿。）')
     }
     lines.push('【建课流程与工具】① 素材里若有 pdf/pptx，先提醒用户把它们转写成 md（可在素材库对该素材做「提取稿」），确认后再继续；② 用 inventory 清点目录素材（**先清点再分章**，别把整个目录硬读进上下文）；③ 与用户定好目标、素材就绪后，问「是否生成大纲」；④ 生成的大纲**先作为对话里的草稿给用户看**，用户满意后才调 course.outline.write 落盘（**分批**：先只给第一章，用户学完再说「展开下一章」用 append=true 追加）；⑤ 删知识点用 course.outline.remove-unit（已学过的会被拒绝，需先用 course.organize.archive 整理归档、给用户看后再删）；⑥ course.organize.archive 的归档位置默认会话 output/，也可由用户/你指定目录，归档后必须把**绝对路径**告诉用户。落盘只走这些工具，不要另造文件；改大纲前先与用户确认。')
+    return '\n\n' + lines.join('\n')
+  }
+  // 复习课分支：章末复习（本章知识点串讲 + 查漏补缺，不引入新知识点）
+  if (reviewHit && reviewHit.wsId === wsId) {
+    const chapter = outline!.chapters.find((c) => c.id === reviewHit.chapterId)
+    lines.push('【复习课上下文（AI教学 · 章末复习）】')
+    lines.push(`课程：${outline!.title || '未命名'} · 目标：${outline!.goal || '未设定'}`)
+    lines.push(`这是针对「${chapter?.name ?? '本章'}」的**章末复习课**：帮学生把本章已学知识点串成体系、查漏补缺，**不引入新知识点**。`)
+    if (chapter) {
+      lines.push('本章知识点（含掌握度/状态）：')
+      for (const u of chapter.units) {
+        const p = s.units[u.id]
+        lines.push(`  · ${u.name}（${statusLabel(p?.status)}，掌握度 ${Math.round((p?.mastery ?? 0) * 100)}%${u.goal ? `，目标：${u.goal}` : ''}）`)
+      }
+      const weak = chapter.units.filter((u) => s.units[u.id]?.status === 'review')
+      if (weak.length) lines.push(`本章薄弱（待复习）：${weak.map((u) => u.name).join('、')}`)
+    }
+    lines.push('复习方式**由你和学生讨论决定**：可按学生要求逐块回顾、出题检验、或把零散点串成体系。**先问学生想怎么过**，别自顾自开讲。')
+    lines.push('当复习讨论到一定阶段、结论成型时，**主动提议**「把本次复习整理成《复习讲义》落盘」，学生同意后调用 course.review.write 写入本章目录；写好后把落盘路径告诉学生。')
     return '\n\n' + lines.join('\n')
   }
   // 教师分支（上课 / 课时）：仅当有大纲（上面已挡）
@@ -1051,4 +1168,7 @@ export function registerAiTeachingCourseHandlers(getSetting: (key: string) => un
     applyOutlineAdditions(String(wsId ?? ''), additions ?? { toExisting: [], newChapters: [] }, getSetting))
   // 课程助手（整门课唯一会话；无大纲也可用）
   ipcMain.handle('aiTeachCourse:openAssistant', (_e, wsId: string) => openCourseAssistant(String(wsId ?? ''), getSetting))
+  // 章末复习课（每章一个，懒建）
+  ipcMain.handle('aiTeachCourse:openChapterReview', (_e, wsId: string, chapterId: string) =>
+    openChapterReview(String(wsId ?? ''), String(chapterId ?? ''), getSetting))
 }

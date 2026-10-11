@@ -59,6 +59,8 @@ export interface AgentSessionRow {
   mode?: AgentSessionMode
   created_at: string
   updated_at: string
+  /** 钉住时间（「★ 收藏」分区）：有值 = 已钉住（值用于收藏内排序）；缺省 = 未钉住。仅通用助手用 */
+  pinned_at?: string
   /** 会话压缩纪要（缺省=未压缩）。原消息永不删除，置 null 即回滚 */
   digest?: SessionDigest
   /**
@@ -122,6 +124,21 @@ export function setSessionMode(id: string, mode: AgentSessionMode): void {
   if (!row || row.mode === mode) return
   row.mode = mode
   globalWriteJson(SESSIONS_FILE, sessions)
+}
+
+/**
+ * 钉住 / 取消钉住会话（通用助手左栏「★ 收藏」分区）。
+ * pinned=true 记当前时间（收藏内按钉住时间倒序）；false 清除字段。
+ * 返回是否命中该会话。
+ */
+export function setSessionPinned(id: string, pinned: boolean): boolean {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row) return false
+  if (pinned) row.pinned_at = nowLocal()
+  else delete row.pinned_at
+  globalWriteJson(SESSIONS_FILE, sessions)
+  return true
 }
 
 /**
