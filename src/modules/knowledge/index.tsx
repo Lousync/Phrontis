@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp } from 'lucide-react'
+import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2, BookOpen } from 'lucide-react'
 import { PluginIcon } from '../../components/shared/ModuleIcons'
 import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_ENTRY_ENABLED, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
@@ -73,7 +73,7 @@ interface PageInfo {
   fileType: string
 }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, secondaryPageIds = [], secondaryActiveId = null, secondaryBarEl = null, secondaryContentEl = null, splitDisabled = false, onSplitPage, onSecondaryActivate, onMergeSplit, onRemoveSecondary }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; secondaryPageIds?: string[]; secondaryActiveId?: string | null; secondaryBarEl?: HTMLElement | null; secondaryContentEl?: HTMLElement | null; splitDisabled?: boolean; onSplitPage?: (pageId: string, orientation: 'row' | 'column') => void; onSecondaryActivate?: (pageId: string) => void; onMergeSplit?: () => void; onRemoveSecondary?: (pageId: string) => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -244,6 +244,14 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
   }, [activePageId])
   useEffect(() => { selectedCategoryIdRef.current = selectedCategoryId }, [selectedCategoryId])
+  // 页面级分屏：被挪到副栏的页面若正是主栏激活页 → 主栏让位到第一个「留在主栏」的页面
+  useEffect(() => {
+    if (!secondaryPageIds.length) return
+    if (activePageId && secondaryPageIds.includes(activePageId)) {
+      const next = openPageIds.find((id) => !secondaryPageIds.includes(id))
+      if (next) setActivePageId(next)
+    }
+  }, [secondaryPageIds, activePageId, openPageIds])
   useEffect(() => { selectedChapterIdRef.current = selectedChapterId }, [selectedChapterId])
 
   // 插件视图挂载点：加载声明了 knowledge.sidebar 的 C 级模块插件
@@ -1989,7 +1997,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             <PageTabStrip
               owner="knowledge"
               itemAttr="data-tab-id"
-              items={openPageIds.map((id) => {
+              items={openPageIds.filter((pid) => !secondaryPageIds.includes(pid)).map((id) => {
                 const info = openPageInfos[id]
                 const pinned = pinnedPageIds.has(id) || dirtyPageIds.has(id)
                 return {
@@ -2021,13 +2029,31 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               onContextMenu={(e, id) => handleTabContextMenu(e, id)}
             />
           )
-          if (pageBarHosted) return pageBarEl ? createPortal(strip, pageBarEl) : null
-          /* 兜底形态（未托管）：顶部就是本模块自己的页签行，没页签也留一条同高的空行 */
-          return (
-            <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5">
-              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{strip}</div>
-            </div>
-          )
+          // 副栏页签条（被挪到副栏的页面）：portal 进 App 副栏段槽
+          const itemFor = (id: string) => {
+            const info = openPageInfos[id]
+            const pinned = pinnedPageIds.has(id) || dirtyPageIds.has(id)
+            return { id, title: info?.title || '加载中…', preview: !pinned, pinned, badge: info?.fileType ? getFileTypeInfo(info.fileType).badge : undefined }
+          }
+          const secItems = secondaryPageIds.filter((id) => openPageIds.includes(id)).map(itemFor)
+          const secondaryStrip = (secondaryBarEl && secItems.length > 0) ? createPortal(
+            <PageTabStrip
+              owner="knowledge"
+              itemAttr="data-tab-id"
+              items={secItems}
+              activeId={secondaryActiveId}
+              onSelect={(id) => { onSecondaryActivate?.(id); onPageTabActivate?.() }}
+              onClose={(id) => onRemoveSecondary?.(id)}
+            />, secondaryBarEl,
+          ) : null
+          const mainEl = pageBarHosted
+            ? (pageBarEl ? createPortal(strip, pageBarEl) : null)
+            : (
+              <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5">
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{strip}</div>
+              </div>
+            )
+          return <>{mainEl}{secondaryStrip}</>
         })()}
         <div className="kb-view-fade flex min-h-0 flex-1">
         {/* L1: File / Outline tabs — file tab drills into ChapterPanel when a notebook is selected */}
@@ -2344,6 +2370,16 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         )}
       </div>
 
+      {/* 副栏页面视图（页面级分屏）：portal 进 App 副栏内容槽。第二步先占位，第四步接入真实 PageEditor。 */}
+      {secondaryContentEl && secondaryPageIds.length > 0 && createPortal(
+        <div className="flex h-full flex-col items-center justify-center text-[var(--text-muted)]">
+          <BookOpen size={40} className="opacity-20" />
+          <div className="mt-3 text-[13px] text-[var(--text-secondary)]">{openPageInfos[secondaryActiveId ?? '']?.title || '页面'}</div>
+          <div className="mt-1 text-[11px] opacity-70">副栏 · 页面视图（占位）</div>
+        </div>,
+        secondaryContentEl,
+      )}
+
       {/* 页签右键菜单：固定/取消固定 + 关闭族 */}
       {tabCtx && (
         <div className="fixed inset-0 z-[70] kb-pop-layer" onClick={() => setTabCtx(null)} onContextMenu={(e) => { e.preventDefault(); setTabCtx(null) }}>
@@ -2352,6 +2388,19 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             style={{ left: tabCtx.x, top: tabCtx.y }}
             onClick={(e) => e.stopPropagation()}
           >
+            {onSplitPage && (
+              <>
+                <button disabled={splitDisabled} onClick={() => { const pid = tabCtx.pageId; setTabCtx(null); onSplitPage(pid, 'row') }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-40">
+                  <Columns2 size={13} className="text-[var(--text-muted)]" />向右拆分
+                </button>
+                <button disabled={splitDisabled} onClick={() => { const pid = tabCtx.pageId; setTabCtx(null); onSplitPage(pid, 'column') }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-40">
+                  <Rows2 size={13} className="text-[var(--text-muted)]" />向下拆分
+                </button>
+                <div className="mx-2 my-0.5 border-t border-[var(--border-color)]" />
+              </>
+            )}
             <button onClick={() => { const pid = tabCtx.pageId; setTabCtx(null); handleTogglePin(pid) }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
               {pinnedPageIds.has(tabCtx.pageId) ? <PinOff size={13} className="text-[var(--text-muted)]" /> : <Pin size={13} className="text-[var(--text-muted)]" />}
