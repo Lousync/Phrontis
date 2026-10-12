@@ -142,6 +142,13 @@ ok(!/display:\s*t\s*===\s*activeTab\s*\?\s*undefined\s*:\s*'none'/.test(srcApp),
 ok(!/className="absolute inset-y-0 left-0 z-20 flex min-h-0 w-full flex-col"/.test(srcApp), 'E2 工具宿主不得退回绝对定位铺满（会盖另一栏）')
 ok(!/activeTab\s*===\s*null\s*&&\s*!activeToolTab/.test(srcApp), 'E3 空态不得退回「只看 activeTab」')
 
+/* ================= F. 知识库文件页签右键触发分屏 ================= */
+console.log('\n=== F. 知识库页签右键触发分屏 ===')
+const srcKb = stripComments(read('src/modules/knowledge/index.tsx'))
+ok(/onSplitModule\?:\s*\(orientation:\s*'row'\s*\|\s*'column'\)\s*=>\s*void/.test(srcKb), 'F1 KnowledgeModule 暴露 onSplitModule prop')
+ok(/向右拆分/.test(srcKb) && /向下拆分/.test(srcKb), 'F2 知识库页签右键菜单含向右/向下拆分')
+ok(/onSplitModule=\{\(o\)\s*=>/.test(srcApp), 'F3 App 向 KnowledgeModule 传 onSplitModule（页签右键可触发分屏）')
+
 /* ================= 结果 ================= */
 console.log(`\n==== 分屏契约：通过 ${pass}，失败 ${fails.length} ====`)
 if (fails.length) {
