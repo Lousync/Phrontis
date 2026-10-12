@@ -1654,7 +1654,7 @@ export default function App() {
         showQuizEntry={QUIZ_ENTRY_ENABLED && quizViewOpen && hasKb}
         quizEntryActive={quizViewOpen && g.active === 'knowledge'}
         hidePages={zenLevel >= 1}
-        paneActive={g.id === activeGroupId}
+        paneActive={splitActive && g.id === activeGroupId}
         lead={g.active === 'knowledge' && noteJumpFrom ? (
           <button
             onClick={() => handleTabChange(noteJumpFrom)}

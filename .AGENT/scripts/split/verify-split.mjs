@@ -113,7 +113,7 @@ ok(/groups\.length\s*===\s*1\s*\?\s*renderPageBar\(groups\[0\]\)/.test(srcApp), 
 ok(/onContextMenu=\{\(e,\s*id\)\s*=>\s*openPageBarMenu\(/.test(srcApp), 'B20 页面条条目 onContextMenu 接线')
 ok(/label:\s*'向右拆分'/.test(srcApp) && /label:\s*'向下拆分'/.test(srcApp), 'B21 右键菜单含向右/向下拆分')
 ok(/label:\s*'移到另一栏'/.test(srcApp) && /label:\s*'合并回主栏'/.test(srcApp), 'B22 右键菜单含移到另一栏/合并回主栏')
-ok(/paneActive=\{g\.id\s*===\s*activeGroupId\}/.test(srcApp), 'B23 页面条 paneActive 按活动组')
+ok(/paneActive=\{splitActive\s*&&\s*g\.id\s*===\s*activeGroupId\}/.test(srcApp), 'B23 页面条 paneActive = splitActive 且活动组（单栏不上底色，防回归）')
 ok(/const\s+toolGroupIdx\s*=\s*\(\(\)\s*=>/.test(srcApp), 'B24 工具宿主按栏归位 toolGroupIdx')
 ok(/!visibleToolTab\s*&&\s*groups\.every\(\(g\)\s*=>\s*g\.active\s*===\s*null\)/.test(srcApp), 'B25 空态 = 所有组均空且无工具')
 
