@@ -40,8 +40,10 @@ interface Props {
   itemAttr: 'data-tab-rel' | 'data-tab-id'
   onSelect: (id: string) => void
   onClose: (id: string) => void
-  /** 组内拖拽重排；不传 = 该组条目不可拖（编辑器文件标签改前就没有重排，保持一致） */
+  /** 组内拖拽重排；不传 = 该组条目不可重排（编辑器文件标签改前就没有重排，保持一致） */
   onReorder?: (ids: string[]) => void
+  /** 跨栏拖入（页面级分屏）：拖动的页面不属于本组时回调（拖到本条 = 移到本栏） */
+  onExternalDrop?: (dragId: string) => void
   onTogglePin?: (id: string) => void
   onContextMenu?: (e: React.MouseEvent, id: string) => void
 }
@@ -52,8 +54,10 @@ const OWNER_COLOR: Record<'editor' | 'knowledge', string> = {
   knowledge: '#4f6ef2',
 }
 
-export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClose, onReorder, onTogglePin, onContextMenu }: Props) {
+export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClose, onReorder, onExternalDrop, onTogglePin, onContextMenu }: Props) {
   const [draggedId, setDraggedId] = useState<string | null>(null)
+  // 可拖：能组内重排 或 能跨栏（跨栏时本组通常无 onReorder）
+  const canDrag = !!onReorder || !!onExternalDrop
 
   const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
     e.dataTransfer.effectAllowed = 'move'
@@ -94,20 +98,30 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
     e.preventDefault()
     e.stopPropagation()
     ;(e.currentTarget as HTMLElement).style.boxShadow = ''
-    if (!onReorder) return
     const srcId = e.dataTransfer.getData('text/plain')
     if (!srcId || srcId === targetId) return
     const ids = items.map((it) => it.id)
     const srcIdx = ids.indexOf(srcId)
+    // 拖动的页面不属于本组 → 跨栏（App 移动页面对侧）
+    if (srcIdx === -1) { onExternalDrop?.(srcId); return }
+    if (!onReorder) return
     const dstIdx = ids.indexOf(targetId)
-    if (srcIdx === -1 || dstIdx === -1) return
+    if (dstIdx === -1) return
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const side = e.clientX < rect.left + rect.width / 2 ? 'left' : 'right'
     ids.splice(srcIdx, 1)
     const insertIdx = side === 'right' ? ids.indexOf(targetId) + 1 : ids.indexOf(targetId)
     ids.splice(insertIdx, 0, srcId)
     onReorder(ids)
-  }, [items, onReorder])
+  }, [items, onReorder, onExternalDrop])
+
+  // 落在整条页签条空白处：拖动页面不属于本组 → 跨栏
+  const handleStripDrop = useCallback((e: React.DragEvent) => {
+    const srcId = e.dataTransfer.getData('text/plain')
+    if (!srcId || items.some((it) => it.id === srcId)) return
+    e.preventDefault()
+    onExternalDrop?.(srcId)
+  }, [items, onExternalDrop])
 
   // hooks 一律在早退之前（React #310：早退后再声明 hook 会整屏崩）
   if (items.length === 0) return null
@@ -116,6 +130,8 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
     <div
       data-pb-group={owner}
       className="flex min-w-0 items-end gap-1"
+      onDragOver={canDrag ? (e) => { if (onExternalDrop) e.preventDefault() } : undefined}
+      onDrop={canDrag ? handleStripDrop : undefined}
     >
       {items.map((it, i) => {
         const isActive = it.id === activeId
@@ -137,17 +153,17 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
             data-pb-owner={owner}
             data-wb-active={isActive ? '1' : '0'}
             {...{ [itemAttr]: it.id }}
-            draggable={!!onReorder}
+            draggable={canDrag}
             onClick={() => onSelect(it.id)}
             onDoubleClick={onTogglePin ? () => onTogglePin(it.id) : undefined}
             onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
             onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(it.id) } }}
             onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, it.id) } : undefined}
-            onDragStart={onReorder ? (e) => handleDragStart(e, it.id) : undefined}
-            onDragEnd={onReorder ? handleDragEnd : undefined}
-            onDragOver={onReorder ? (e) => handleDragOver(e, it.id) : undefined}
-            onDragLeave={onReorder ? handleDragLeave : undefined}
-            onDrop={onReorder ? (e) => handleDrop(e, it.id) : undefined}
+            onDragStart={canDrag ? (e) => handleDragStart(e, it.id) : undefined}
+            onDragEnd={canDrag ? handleDragEnd : undefined}
+            onDragOver={canDrag ? (e) => handleDragOver(e, it.id) : undefined}
+            onDragLeave={canDrag ? handleDragLeave : undefined}
+            onDrop={canDrag ? (e) => handleDrop(e, it.id) : undefined}
             title={tip}
             className={`kb-edge-tab group flex max-w-[220px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
               isDragged ? 'opacity-40' : ''
