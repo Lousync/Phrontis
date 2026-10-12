@@ -1,0 +1,488 @@
+{
+  "id": "knowbase.mascot-desk-companions",
+  "name": "书桌伙伴 · AI 吉祥物",
+  "version": "1.0.0",
+  "type": "ui",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "author": "Knowbase",
+  "description": "三只像素小伙伴站在 AI 输入卡上沿，随 AI 活动切换动作：纸灵（温和的纸片）、小墨（墨滴精灵）、枭枭（夜读猫头鹰）。安装后到 设置 → AI 助手 → 吉祥物 里选一只。",
+  "category": "外观",
+  "riskLevel": "B",
+  "capabilities": [],
+  "contributes": {
+    "mascot": [
+      {
+        "id": "papy",
+        "name": "纸灵",
+        "frameMs": 110,
+        "grid": {
+          "cell": 2,
+          "w": 52,
+          "h": 40
+        },
+        "anchor": "composer",
+        "states": {
+          "idle": "idle",
+          "thinking": "thinking",
+          "working": "working",
+          "sweeping": "sweeping",
+          "notification": "notification",
+          "error": "error",
+          "attention": "attention"
+        },
+        "sheets": {
+          "idle": {
+            "body": "sheets/papy-idle.png",
+            "frames": 24,
+            "box": [
+              16,
+              18,
+              20,
+              21
+            ],
+            "still": 0
+          },
+          "thinking": {
+            "body": "sheets/papy-thinking.png",
+            "frames": 32,
+            "box": [
+              16,
+              10,
+              21,
+              29
+            ],
+            "still": 0
+          },
+          "working": {
+            "body": "sheets/papy-working.png",
+            "frames": 24,
+            "box": [
+              16,
+              18,
+              20,
+              21
+            ],
+            "still": 0
+          },
+          "sweeping": {
+            "body": "sheets/papy-sweeping.png",
+            "frames": 24,
+            "box": [
+              14,
+              19,
+              25,
+              20
+            ],
+            "still": 0
+          },
+          "notification": {
+            "body": "sheets/papy-notification.png",
+            "frames": 16,
+            "box": [
+              20,
+              6,
+              14,
+              32
+            ],
+            "still": 0
+          },
+          "error": {
+            "body": "sheets/papy-error.png",
+            "frames": 20,
+            "box": [
+              15,
+              18,
+              22,
+              21
+            ],
+            "still": 0
+          },
+          "attention": {
+            "body": "sheets/papy-attention.png",
+            "frames": 28,
+            "box": [
+              16,
+              14,
+              20,
+              24
+            ],
+            "still": 0
+          },
+          "sleeping": {
+            "body": "sheets/papy-sleeping.png",
+            "frames": 28,
+            "box": [
+              14,
+              18,
+              25,
+              21
+            ],
+            "still": 0
+          },
+          "waking": {
+            "body": "sheets/papy-waking.png",
+            "frames": 12,
+            "box": [
+              16,
+              14,
+              20,
+              24
+            ],
+            "still": 0
+          },
+          "poke-left": {
+            "body": "sheets/papy-poke-left.png",
+            "frames": 12,
+            "box": [
+              14,
+              18,
+              22,
+              21
+            ],
+            "still": 0
+          },
+          "poke-right": {
+            "body": "sheets/papy-poke-right.png",
+            "frames": 12,
+            "box": [
+              16,
+              18,
+              22,
+              21
+            ],
+            "still": 0
+          },
+          "tickle": {
+            "body": "sheets/papy-tickle.png",
+            "frames": 16,
+            "box": [
+              14,
+              18,
+              24,
+              21
+            ],
+            "still": 0
+          }
+        },
+        "tapLeft": "poke-left",
+        "tapRight": "poke-right",
+        "tapFlail": "tickle"
+      },
+      {
+        "id": "inkling",
+        "name": "小墨",
+        "frameMs": 80,
+        "grid": {
+          "cell": 2,
+          "w": 52,
+          "h": 40
+        },
+        "anchor": "composer",
+        "states": {
+          "idle": "idle",
+          "thinking": "thinking",
+          "working": "working",
+          "sweeping": "sweeping",
+          "notification": "notification",
+          "error": "error",
+          "attention": "attention"
+        },
+        "sheets": {
+          "idle": {
+            "body": "sheets/inkling-idle.png",
+            "frames": 24,
+            "box": [
+              17,
+              14,
+              18,
+              22
+            ],
+            "still": 0
+          },
+          "thinking": {
+            "body": "sheets/inkling-thinking.png",
+            "frames": 32,
+            "box": [
+              17,
+              4,
+              20,
+              32
+            ],
+            "still": 0
+          },
+          "working": {
+            "body": "sheets/inkling-working.png",
+            "frames": 24,
+            "box": [
+              17,
+              14,
+              18,
+              22
+            ],
+            "still": 0
+          },
+          "sweeping": {
+            "body": "sheets/inkling-sweeping.png",
+            "frames": 24,
+            "box": [
+              12,
+              19,
+              28,
+              20
+            ],
+            "still": 0
+          },
+          "notification": {
+            "body": "sheets/inkling-notification.png",
+            "frames": 16,
+            "box": [
+              17,
+              10,
+              18,
+              26
+            ],
+            "still": 0
+          },
+          "error": {
+            "body": "sheets/inkling-error.png",
+            "frames": 20,
+            "box": [
+              16,
+              14,
+              20,
+              22
+            ],
+            "still": 0
+          },
+          "attention": {
+            "body": "sheets/inkling-attention.png",
+            "frames": 28,
+            "box": [
+              15,
+              11,
+              23,
+              24
+            ],
+            "still": 0
+          },
+          "sleeping": {
+            "body": "sheets/inkling-sleeping.png",
+            "frames": 28,
+            "box": [
+              12,
+              18,
+              28,
+              21
+            ],
+            "still": 0
+          },
+          "waking": {
+            "body": "sheets/inkling-waking.png",
+            "frames": 12,
+            "box": [
+              15,
+              11,
+              23,
+              24
+            ],
+            "still": 0
+          },
+          "poke-left": {
+            "body": "sheets/inkling-poke-left.png",
+            "frames": 12,
+            "box": [
+              15,
+              14,
+              20,
+              22
+            ],
+            "still": 0
+          },
+          "poke-right": {
+            "body": "sheets/inkling-poke-right.png",
+            "frames": 12,
+            "box": [
+              17,
+              14,
+              20,
+              22
+            ],
+            "still": 0
+          },
+          "tickle": {
+            "body": "sheets/inkling-tickle.png",
+            "frames": 16,
+            "box": [
+              15,
+              14,
+              21,
+              22
+            ],
+            "still": 0
+          }
+        },
+        "tapLeft": "poke-left",
+        "tapRight": "poke-right",
+        "tapFlail": "tickle"
+      },
+      {
+        "id": "owlie",
+        "name": "枭枭",
+        "frameMs": 80,
+        "grid": {
+          "cell": 2,
+          "w": 52,
+          "h": 40
+        },
+        "anchor": "composer",
+        "states": {
+          "idle": "idle",
+          "thinking": "thinking",
+          "working": "working",
+          "sweeping": "sweeping",
+          "notification": "notification",
+          "error": "error",
+          "attention": "attention"
+        },
+        "sheets": {
+          "idle": {
+            "body": "sheets/owlie-idle.png",
+            "frames": 24,
+            "box": [
+              13,
+              9,
+              26,
+              29
+            ],
+            "still": 0
+          },
+          "thinking": {
+            "body": "sheets/owlie-thinking.png",
+            "frames": 32,
+            "box": [
+              13,
+              3,
+              26,
+              35
+            ],
+            "still": 0
+          },
+          "working": {
+            "body": "sheets/owlie-working.png",
+            "frames": 24,
+            "box": [
+              13,
+              9,
+              26,
+              29
+            ],
+            "still": 0
+          },
+          "sweeping": {
+            "body": "sheets/owlie-sweeping.png",
+            "frames": 24,
+            "box": [
+              13,
+              7,
+              27,
+              31
+            ],
+            "still": 0
+          },
+          "notification": {
+            "body": "sheets/owlie-notification.png",
+            "frames": 16,
+            "box": [
+              13,
+              7,
+              26,
+              31
+            ],
+            "still": 0
+          },
+          "error": {
+            "body": "sheets/owlie-error.png",
+            "frames": 20,
+            "box": [
+              12,
+              9,
+              28,
+              29
+            ],
+            "still": 0
+          },
+          "attention": {
+            "body": "sheets/owlie-attention.png",
+            "frames": 28,
+            "box": [
+              10,
+              6,
+              29,
+              31
+            ],
+            "still": 0
+          },
+          "sleeping": {
+            "body": "sheets/owlie-sleeping.png",
+            "frames": 28,
+            "box": [
+              13,
+              6,
+              27,
+              32
+            ],
+            "still": 0
+          },
+          "waking": {
+            "body": "sheets/owlie-waking.png",
+            "frames": 12,
+            "box": [
+              10,
+              6,
+              29,
+              31
+            ],
+            "still": 0
+          },
+          "poke-left": {
+            "body": "sheets/owlie-poke-left.png",
+            "frames": 12,
+            "box": [
+              11,
+              9,
+              28,
+              29
+            ],
+            "still": 0
+          },
+          "poke-right": {
+            "body": "sheets/owlie-poke-right.png",
+            "frames": 12,
+            "box": [
+              13,
+              9,
+              28,
+              29
+            ],
+            "still": 0
+          },
+          "tickle": {
+            "body": "sheets/owlie-tickle.png",
+            "frames": 16,
+            "box": [
+              12,
+              9,
+              28,
+              29
+            ],
+            "still": 0
+          }
+        },
+        "tapLeft": "poke-left",
+        "tapRight": "poke-right",
+        "tapFlail": "tickle"
+      }
+    ]
+  }
+}

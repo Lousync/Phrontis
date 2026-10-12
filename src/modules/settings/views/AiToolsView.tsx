@@ -7,13 +7,14 @@ import {
   mcpListServers, mcpAddServer, mcpRemoveServer, mcpToggleServer, mcpRefreshTools, mcpTestConnection,
   aiToolsListSkills, aiToolsCopySkillPrompt, aiToolsInstallSkill, aiToolsInstallSkillFromFile, aiToolsUninstallSkill, aiToolsToggleSkill,
   llmListProviders,
+  pluginListMascots, onPluginInstalledChanged,
 } from '../../../lib/ipc'
 import { AiModelsTab } from './AiModelsTab'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { AiPermissionsTab } from './AiPermissionsTab'
 import { CollapseList } from '../components/CollapseList'
 import { SettingListPanel } from '../components/SettingListPanel'
-import type { AgentToolInfo, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpTestResult, SkillInfo, SkillInstallResult } from '../../../types'
+import type { AgentToolInfo, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpTestResult, SkillInfo, SkillInstallResult, PluginMascotInfo } from '../../../types'
 
 const SOURCE_LABEL: Record<AgentToolInfo['source'], string> = {
   builtin: '内置',
@@ -40,6 +41,20 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
   useEffect(() => { if (initialTab) setTab(initialTab) }, [initialTab])
   const { s, update } = useSettings()
   const [usage, setUsage] = useState<AiToolUsage>({ used: 0, limit: 0 })
+  const [mascots, setMascots] = useState<PluginMascotInfo[]>([])
+
+  // 已安装插件的吉祥物角色（供「吉祥物」下拉）；安装/启停/卸载后刷新
+  useEffect(() => {
+    let alive = true
+    const load = (): void => {
+      pluginListMascots()
+        .then(l => { if (alive) setMascots(l) })
+        .catch(() => { if (alive) setMascots([]) })
+    }
+    load()
+    const off = onPluginInstalledChanged(load)
+    return () => { alive = false; off() }
+  }, [])
 
   const refreshUsage = useCallback(async () => {
     try {
@@ -120,6 +135,29 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
             </label>
             <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed px-1 mt-1.5">
               0=未设置，用量指示退化为纯数字；设置所选模型的上下文窗口（如 128000）后圆环按占用比例着色（&gt;85% 变红）。
+            </p>
+          </div>
+          <div data-setting-anchor="ai.mascot">
+            <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <span className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
+                <Sparkles size={14} className="text-[var(--text-muted)]" />
+                吉祥物
+              </span>
+              <select
+                value={typeof s.aiMascot === 'string' ? s.aiMascot : 'auto'}
+                onChange={e => update('aiMascot', e.target.value)}
+                className="px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+              >
+                <option value="auto">自动（用已安装的）</option>
+                <option value="placeholder">内置占位</option>
+                {mascots.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                <option value="off">关闭</option>
+              </select>
+            </label>
+            <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed px-1 mt-1.5">
+              {mascots.length === 0
+                ? '尚未安装吉祥物角色；到插件市场安装「书桌伙伴 · AI 吉祥物」后即可在此选择。'
+                : '有 AI 输入框的地方（对话主区 / 侧边对话 / 放大态 / 支线旁问 / 日程问答）在输入卡上沿显示所选角色，随 AI 活动切换小动作。'}
             </p>
           </div>
         </div>

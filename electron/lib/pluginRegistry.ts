@@ -367,50 +367,57 @@ function validateManifest(m: unknown, opts?: { legacy?: boolean }): { manifest: 
       }
       if (key === 'mascot') {
         // 插件贡献 AI 输入区吉祥物（.claude/plans/ai-composer-mascot.md）：仅 UI 插件；
-        // 帧图走包内相对 png（宿主拼 plugin://）；states 的动画名必须落在 sheets 里
+        // 一个插件可贡献 1-8 只（数组）；帧图走包内相对 png（宿主拼 plugin://）；states 的动画名必须落在 sheets 里
         if (raw.type !== 'ui') return { error: 'mascot 贡献仅 UI 插件(type: ui)可声明' }
-        const mo = (raw.contributes as Record<string, unknown>).mascot as Record<string, unknown> | undefined
-        if (!mo || typeof mo !== 'object' || Array.isArray(mo)) return { error: 'mascot 需为对象' }
-        if (typeof mo.id !== 'string' || !/^[a-z][a-z0-9-]{0,19}$/.test(mo.id)) return { error: 'mascot: id 非法（小写字母开头，字母/数字/连字符，≤20）' }
-        if (typeof mo.name !== 'string' || !mo.name.trim() || mo.name.length > 20) return { error: 'mascot: name 缺失或过长(≤20)' }
-        const frameMs = mo.frameMs === undefined ? 80 : mo.frameMs
-        if (typeof frameMs !== 'number' || !(frameMs >= 20 && frameMs <= 1000)) return { error: 'mascot: frameMs 需为 20-1000 的数' }
-        if (mo.grid !== undefined) {
-          const g = mo.grid as Record<string, unknown>
-          if (!g || typeof g !== 'object' || Array.isArray(g)) return { error: 'mascot: grid 非法' }
-          if (typeof g.cell !== 'number' || !(g.cell >= 1 && g.cell <= 8)) return { error: 'mascot: grid.cell 需 1-8' }
-          if (typeof g.w !== 'number' || typeof g.h !== 'number' || !(g.w > 0 && g.h > 0)) return { error: 'mascot: grid.w/h 需为正数' }
-        }
-        const sheets = mo.sheets as Record<string, unknown> | undefined
-        if (!sheets || typeof sheets !== 'object' || Array.isArray(sheets)) return { error: 'mascot: sheets 缺失（动画表）' }
-        const sheetKeys = Object.keys(sheets)
-        if (sheetKeys.length === 0 || sheetKeys.length > 40) return { error: 'mascot: sheets 需 1-40 张' }
-        for (const k of sheetKeys) {
-          const s = sheets[k] as Record<string, unknown> | undefined
-          if (!s || typeof s !== 'object' || Array.isArray(s)) return { error: `mascot: sheets.${k} 非法` }
-          for (const side of ['body', 'ink'] as const) {
-            const v = s[side]
-            if (v === undefined) continue
-            if (typeof v !== 'string' || !v) return { error: `mascot: sheets.${k}.${side} 需为非空字符串` }
-            const norm = v.replace(/\\/g, '/')
-            if (norm.startsWith('/') || norm.split('/').includes('..') || !/\.png$/i.test(norm)) return { error: `mascot: sheets.${k}.${side} 路径非法（需包内相对 png）` }
+        const arr = (raw.contributes as Record<string, unknown>).mascot
+        if (!Array.isArray(arr) || arr.length === 0 || arr.length > 8) return { error: 'mascot 需为 1-8 只吉祥物的数组' }
+        const mascotIds = new Set<string>()
+        for (const item of arr as Record<string, unknown>[]) {
+          const mo = item
+          if (!mo || typeof mo !== 'object' || Array.isArray(mo)) return { error: 'mascot: 条目需为对象' }
+          if (typeof mo.id !== 'string' || !/^[a-z][a-z0-9-]{0,19}$/.test(mo.id)) return { error: 'mascot: id 非法（小写字母开头，字母/数字/连字符，≤20）' }
+          if (mascotIds.has(mo.id)) return { error: `mascot: 重复的 id ${mo.id}` }
+          mascotIds.add(mo.id)
+          if (typeof mo.name !== 'string' || !mo.name.trim() || mo.name.length > 20) return { error: 'mascot: name 缺失或过长(≤20)' }
+          const frameMs = mo.frameMs === undefined ? 80 : mo.frameMs
+          if (typeof frameMs !== 'number' || !(frameMs >= 20 && frameMs <= 1000)) return { error: 'mascot: frameMs 需为 20-1000 的数' }
+          if (mo.grid !== undefined) {
+            const g = mo.grid as Record<string, unknown>
+            if (!g || typeof g !== 'object' || Array.isArray(g)) return { error: 'mascot: grid 非法' }
+            if (typeof g.cell !== 'number' || !(g.cell >= 1 && g.cell <= 8)) return { error: 'mascot: grid.cell 需 1-8' }
+            if (typeof g.w !== 'number' || typeof g.h !== 'number' || !(g.w > 0 && g.h > 0)) return { error: 'mascot: grid.w/h 需为正数' }
           }
-          if (typeof s.frames !== 'number' || !Number.isInteger(s.frames) || s.frames < 1) return { error: `mascot: sheets.${k}.frames 需为正整数` }
-          const box = s.box
-          if (!Array.isArray(box) || box.length !== 4 || !box.every((n) => typeof n === 'number' && n >= 0)) return { error: `mascot: sheets.${k}.box 需 4 个非负数` }
-          if (s.still !== undefined && (typeof s.still !== 'number' || s.still < 0 || s.still >= (s.frames as number))) return { error: `mascot: sheets.${k}.still 非法` }
-        }
-        if (mo.states !== undefined) {
-          const states = mo.states as Record<string, unknown>
-          if (!states || typeof states !== 'object' || Array.isArray(states)) return { error: 'mascot: states 非法' }
-          for (const [sk, av] of Object.entries(states)) {
-            if (!MASCOT_STATES.has(sk)) return { error: `mascot: states 含未知状态 ${sk}` }
-            if (typeof av !== 'string' || !Object.prototype.hasOwnProperty.call(sheets, av)) return { error: `mascot: states.${sk} 指向未知动画 ${String(av)}` }
+          const sheets = mo.sheets as Record<string, unknown> | undefined
+          if (!sheets || typeof sheets !== 'object' || Array.isArray(sheets)) return { error: 'mascot: sheets 缺失（动画表）' }
+          const sheetKeys = Object.keys(sheets)
+          if (sheetKeys.length === 0 || sheetKeys.length > 40) return { error: 'mascot: sheets 需 1-40 张' }
+          for (const k of sheetKeys) {
+            const s = sheets[k] as Record<string, unknown> | undefined
+            if (!s || typeof s !== 'object' || Array.isArray(s)) return { error: `mascot: sheets.${k} 非法` }
+            for (const side of ['body', 'ink'] as const) {
+              const v = s[side]
+              if (v === undefined) continue
+              if (typeof v !== 'string' || !v) return { error: `mascot: sheets.${k}.${side} 需为非空字符串` }
+              const norm = v.replace(/\\/g, '/')
+              if (norm.startsWith('/') || norm.split('/').includes('..') || !/\.png$/i.test(norm)) return { error: `mascot: sheets.${k}.${side} 路径非法（需包内相对 png）` }
+            }
+            if (typeof s.frames !== 'number' || !Number.isInteger(s.frames) || s.frames < 1) return { error: `mascot: sheets.${k}.frames 需为正整数` }
+            const box = s.box
+            if (!Array.isArray(box) || box.length !== 4 || !box.every((n) => typeof n === 'number' && n >= 0)) return { error: `mascot: sheets.${k}.box 需 4 个非负数` }
+            if (s.still !== undefined && (typeof s.still !== 'number' || s.still < 0 || s.still >= (s.frames as number))) return { error: `mascot: sheets.${k}.still 非法` }
           }
-        }
-        if (mo.idleExtras !== undefined) {
-          const extras = mo.idleExtras
-          if (!Array.isArray(extras) || extras.some((e) => typeof e !== 'string' || !Object.prototype.hasOwnProperty.call(sheets, e))) return { error: 'mascot: idleExtras 需为 sheets 内的动画名数组' }
+          if (mo.states !== undefined) {
+            const states = mo.states as Record<string, unknown>
+            if (!states || typeof states !== 'object' || Array.isArray(states)) return { error: 'mascot: states 非法' }
+            for (const [sk, av] of Object.entries(states)) {
+              if (!MASCOT_STATES.has(sk)) return { error: `mascot: states 含未知状态 ${sk}` }
+              if (typeof av !== 'string' || !Object.prototype.hasOwnProperty.call(sheets, av)) return { error: `mascot: states.${sk} 指向未知动画 ${String(av)}` }
+            }
+          }
+          if (mo.idleExtras !== undefined) {
+            const extras = mo.idleExtras
+            if (!Array.isArray(extras) || extras.some((e) => typeof e !== 'string' || !Object.prototype.hasOwnProperty.call(sheets, e))) return { error: 'mascot: idleExtras 需为 sheets 内的动画名数组' }
+          }
         }
       }
       if (key === 'commands') {
@@ -1147,12 +1154,13 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
   }
 
   /**
-   * 扫描所有已启用插件贡献的 AI 输入区吉祥物（contributes.mascot；同 scanPluginPets 走法）。
-   * 帧图拼成 `plugin://{id}/{path}`；先到先得（取第一个启用插件的吉祥物）。
+   * 扫描所有已启用插件贡献的 AI 输入区吉祥物（contributes.mascot 数组；同 scanPluginPets 走法）。
+   * 帧图拼成 `plugin://{id}/{path}`；**收集全部**（多插件 / 单插件多只），供设置里选角色。
    * 与渲染层 `PluginMascotInfo`（src/types）保持一致。
    */
   function scanPluginMascots(): PluginMascotInfo[] {
     const idx = readIndex()
+    const out: PluginMascotInfo[] = []
     for (const [id, entry] of Object.entries(idx)) {
       if (!entry.enabled) continue
       const dir = safePathInside(getPluginsRoot(), id)
@@ -1162,45 +1170,49 @@ export function registerPluginHandlers(deps?: { getSettingValue?: (key: string) 
         if ('error' in parsed) continue
         const m = parsed.manifest
         if (m.type !== 'ui') continue
-        const mo = (m.contributes?.mascot ?? null) as Record<string, unknown> | null
-        if (!mo || typeof mo.id !== 'string') continue
-        const grid = (mo.grid ?? {}) as Record<string, unknown>
-        const rawSheets = (mo.sheets ?? {}) as Record<string, Record<string, unknown>>
-        const sheets: PluginMascotInfo['sheets'] = {}
-        for (const [k, s] of Object.entries(rawSheets)) {
-          const b = String(s.body ?? '').replace(/\\/g, '/')
-          const inkRaw = typeof s.ink === 'string' ? s.ink.replace(/\\/g, '/') : ''
-          sheets[k] = {
-            body: `plugin://${id}/${encodeURI(b)}`,
-            ink: inkRaw ? `plugin://${id}/${encodeURI(inkRaw)}` : null,
-            frames: typeof s.frames === 'number' ? s.frames : 1,
-            box: Array.isArray(s.box) ? (s.box as number[]).slice(0, 4) : [0, 0, 0, 0],
-            still: typeof s.still === 'number' ? s.still : 0,
+        const list = m.contributes?.mascot
+        if (!Array.isArray(list)) continue
+        for (const item of list as Record<string, unknown>[]) {
+          const mo = item
+          if (!mo || typeof mo.id !== 'string') continue
+          const grid = (mo.grid ?? {}) as Record<string, unknown>
+          const rawSheets = (mo.sheets ?? {}) as Record<string, Record<string, unknown>>
+          const sheets: PluginMascotInfo['sheets'] = {}
+          for (const [k, s] of Object.entries(rawSheets)) {
+            const b = String(s.body ?? '').replace(/\\/g, '/')
+            const inkRaw = typeof s.ink === 'string' ? s.ink.replace(/\\/g, '/') : ''
+            sheets[k] = {
+              body: `plugin://${id}/${encodeURI(b)}`,
+              ink: inkRaw ? `plugin://${id}/${encodeURI(inkRaw)}` : null,
+              frames: typeof s.frames === 'number' ? s.frames : 1,
+              box: Array.isArray(s.box) ? (s.box as number[]).slice(0, 4) : [0, 0, 0, 0],
+              still: typeof s.still === 'number' ? s.still : 0,
+            }
           }
+          out.push({
+            pluginId: id,
+            id: mo.id,
+            name: String(mo.name || mo.id).trim().slice(0, 20) || mo.id,
+            frameMs: typeof mo.frameMs === 'number' ? mo.frameMs : 80,
+            grid: {
+              cell: typeof grid.cell === 'number' ? grid.cell : 2,
+              w: typeof grid.w === 'number' ? grid.w : 52,
+              h: typeof grid.h === 'number' ? grid.h : 36,
+            },
+            anchor: 'composer',
+            states: (mo.states && typeof mo.states === 'object') ? (mo.states as Record<string, string>) : {},
+            sheets,
+            idleExtras: Array.isArray(mo.idleExtras) ? (mo.idleExtras as string[]) : [],
+            ...(typeof mo.tapLeft === 'string' ? { tapLeft: mo.tapLeft } : {}),
+            ...(typeof mo.tapRight === 'string' ? { tapRight: mo.tapRight } : {}),
+            ...(typeof mo.tapFlail === 'string' ? { tapFlail: mo.tapFlail } : {}),
+            ...(Array.isArray(mo.workingTiers) ? { workingTiers: (mo.workingTiers as unknown[]).filter((x): x is string => typeof x === 'string') } : {}),
+            ...(typeof mo.sleepAfterMs === 'number' ? { sleepAfterMs: mo.sleepAfterMs } : {}),
+          })
         }
-        return [{
-          pluginId: id,
-          id: mo.id,
-          name: String(mo.name || mo.id).trim().slice(0, 20) || mo.id,
-          frameMs: typeof mo.frameMs === 'number' ? mo.frameMs : 80,
-          grid: {
-            cell: typeof grid.cell === 'number' ? grid.cell : 2,
-            w: typeof grid.w === 'number' ? grid.w : 52,
-            h: typeof grid.h === 'number' ? grid.h : 36,
-          },
-          anchor: 'composer',
-          states: (mo.states && typeof mo.states === 'object') ? (mo.states as Record<string, string>) : {},
-          sheets,
-          idleExtras: Array.isArray(mo.idleExtras) ? (mo.idleExtras as string[]) : [],
-          ...(typeof mo.tapLeft === 'string' ? { tapLeft: mo.tapLeft } : {}),
-          ...(typeof mo.tapRight === 'string' ? { tapRight: mo.tapRight } : {}),
-          ...(typeof mo.tapFlail === 'string' ? { tapFlail: mo.tapFlail } : {}),
-          ...(Array.isArray(mo.workingTiers) ? { workingTiers: (mo.workingTiers as unknown[]).filter((x): x is string => typeof x === 'string') } : {}),
-          ...(typeof mo.sleepAfterMs === 'number' ? { sleepAfterMs: mo.sleepAfterMs } : {}),
-        }]
       } catch { /* 单个插件读取失败不影响其他插件 */ }
     }
-    return []
+    return out
   }
 
   ipcMain.handle('plugin:listCommands', () => {
