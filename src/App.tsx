@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy, Fragment, type CSSProperties } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy, Fragment, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { AppWindow } from 'lucide-react'
+import { AppWindow, Columns2, Rows2, Minimize2, X } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag, BookKind } from './types'
 
 import { labelOf as tabLabel, isTabName } from './lib/appModules'
@@ -9,6 +9,7 @@ import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchPageBar, PAGE_OWNED } from './components/workbench/WorkbenchPageBar'
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
 import { ToolHost, PluginToolHost, TOOLS_WITH_SIDEBAR, isToolTabId, toolIdOfTab, toolTabId } from './components/workbench/toolRegistry'
+import { FileContextMenu, type FileMenuEntry } from './components/shared/FileContextMenu'
 import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, QUIZ_ENTRY_ENABLED, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT, type RailModule } from './lib/workbenchLayout'
 
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
@@ -142,11 +143,66 @@ export default function App() {
   const [splitRatio, setSplitRatio] = useState(0.5)
   void setSplitOrientation
   void setSplitRatio
+  // 分隔条拖拽以「内容区」几何为准（页面条那一行的分隔条只是视觉对齐，也走它调比例）
+  const splitContainerRef = useRef<HTMLDivElement | null>(null)
   const splitActive = groups.length > 1
   // 单栏：模块容器沿用 flex-1 撑满（现状）；两栏：按所属组 order + flexGrow=ratio 排布，分隔条插在中间
   const paneStyleFor = useCallback((gi: number): CSSProperties => splitActive
     ? { order: gi * 2, flexGrow: gi === 0 ? splitRatio : 1 - splitRatio, flexShrink: 1, flexBasis: 0 }
     : {}, [splitActive, splitRatio])
+  // 右键菜单锚点（页面条条目）
+  const [pbMenu, setPbMenu] = useState<{ x: number; y: number; gid: 'g1' | 'g2'; tabId: string } | null>(null)
+  const openPageBarMenu = (e: { clientX: number; clientY: number }, gid: 'g1' | 'g2', tabId: string) =>
+    setPbMenu({ x: e.clientX, y: e.clientY, gid, tabId })
+  /** 拆分：把该标签移入新建的第二组（仅单栏可用）。方向 row=左右 / column=上下。 */
+  const splitTabToNewGroup = (gid: 'g1' | 'g2', tabId: string, orientation: 'row' | 'column') => {
+    setSplitOrientation(orientation)
+    setSplitRatio(0.5)
+    setGroups((gs) => {
+      const src = gs.find((g) => g.id === gid)
+      if (!src || gs.length > 1) return gs
+      const srcTabs = src.tabs.filter((t) => t !== tabId)
+      return [
+        { ...src, tabs: srcTabs, active: src.active === tabId ? (srcTabs[srcTabs.length - 1] ?? null) : src.active },
+        { id: 'g2', tabs: [tabId], active: tabId },
+      ]
+    })
+    setActiveGroupId('g2')
+    activeGroupIdRef.current = 'g2'
+  }
+  /** 合并：副组标签并回主组、删副组、回单栏（关空 / 「合并回主栏」共用）。 */
+  const mergeGroupsToPrimary = useCallback(() => {
+    setGroups((gs) => {
+      if (gs.length < 2) return gs
+      const [g1, g2] = gs
+      return [{ ...g1, tabs: Array.from(new Set([...g1.tabs, ...g2.tabs])), active: g1.active ?? g2.active }]
+    })
+    setActiveGroupId('g1')
+    activeGroupIdRef.current = 'g1'
+  }, [])
+  // 副组被关空 → 自动合并回单栏（已定）
+  useEffect(() => {
+    if (groups.length > 1 && groups[1].tabs.length === 0) mergeGroupsToPrimary()
+  }, [groups, mergeGroupsToPrimary])
+  // 分隔条拖拽调比例（夹 0.2~0.8；pointer 事件避免 HTML5 拖放静默失败）
+  const startSplitDrag = (e: ReactPointerEvent) => {
+    e.preventDefault()
+    const container = splitContainerRef.current
+    if (!container) return
+    const rect = container.getBoundingClientRect()
+    const move = (ev: PointerEvent) => {
+      const ratio = splitOrientation === 'column'
+        ? (ev.clientY - rect.top) / rect.height
+        : (ev.clientX - rect.left) / rect.width
+      setSplitRatio(Math.min(0.8, Math.max(0.2, ratio)))
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [sidebarWidths, setSidebarWidths] = useState<Record<string, number>>({})
   const [importModalOpen, setImportModalOpen] = useState(false)
@@ -1541,6 +1597,7 @@ export default function App() {
         onSelect={(id) => selectInGroup(g.id, id)}
         onClose={(id) => closeInGroup(g.id, id)}
         onReorder={(tabs) => reorderInGroup(g.id, tabs)}
+        onContextMenu={(e, id) => openPageBarMenu(e, g.id, id)}
         editorSlotRef={hasEditor ? wbEditorPageRef : noopRef}
         knowledgeSlotRef={hasKb ? wbKnowledgePageRef : noopRef}
         showQuizEntry={QUIZ_ENTRY_ENABLED && quizViewOpen && hasKb}
@@ -1560,6 +1617,21 @@ export default function App() {
       />
     )
   }
+
+  const pbMenuItems: FileMenuEntry[] = pbMenu ? (() => {
+    const { gid, tabId } = pbMenu
+    const items: FileMenuEntry[] = [
+      { key: 'split-right', label: '向右拆分', icon: <Columns2 size={15} />, disabled: splitActive, onSelect: () => splitTabToNewGroup(gid, tabId, 'row') },
+      { key: 'split-down', label: '向下拆分', icon: <Rows2 size={15} />, disabled: splitActive, onSelect: () => splitTabToNewGroup(gid, tabId, 'column') },
+    ]
+    if (splitActive) {
+      items.push({ separator: true })
+      items.push({ key: 'merge', label: '合并回主栏', icon: <Minimize2 size={15} />, onSelect: mergeGroupsToPrimary })
+    }
+    items.push({ separator: true })
+    items.push({ key: 'close', label: '关闭', icon: <X size={15} />, onSelect: () => closeInGroup(gid, tabId) })
+    return items
+  })() : []
 
   return (
     <RootErrorBoundary>
@@ -1732,7 +1804,7 @@ export default function App() {
                   {groups.map((g, i) => (
                     <Fragment key={g.id}>
                       {i > 0 && (
-                        <div className={`kb-pane-divider${splitOrientation === 'column' ? ' is-col' : ''}`} style={{ order: i * 2 - 1 }} aria-hidden />
+                        <div className={`kb-pane-divider${splitOrientation === 'column' ? ' is-col' : ''}`} style={{ order: i * 2 - 1 }} onPointerDown={startSplitDrag} aria-hidden />
                       )}
                       <div
                         className="flex min-w-0"
@@ -1759,7 +1831,7 @@ export default function App() {
                       模块内 useState 全归零（实机探针实证过：知识库页签组 items 2 → 0）。
                       已验证的错路：① 挂跨父节点稳定 key（key 只在同父节点内有效）；
                       ② createPortal 换 target（一样重挂）。 */}
-                  <div className="relative flex min-h-0 min-w-0 flex-1" style={{ flexDirection: splitOrientation }}>
+                  <div ref={splitContainerRef} className="relative flex min-h-0 min-w-0 flex-1" style={{ flexDirection: splitOrientation }}>
                     {/* 内容级操作浮层（v3.4.0 页面条置顶）：插图/大纲/预览/保存全部 的胶囊，
                         以及知识库页面级动作槽 `#editor-toolbar-slot`。
                         ★ 2026-09-20：两者收进**一个悬浮胶囊**（data-wb="floatBar"，样式见
@@ -1802,6 +1874,7 @@ export default function App() {
                         key="__pane_divider"
                         className={`kb-pane-divider${splitOrientation === 'column' ? ' is-col' : ''}`}
                         style={{ order: 1 }}
+                        onPointerDown={startSplitDrag}
                         aria-hidden
                       />
                     )}
@@ -1880,6 +1953,7 @@ export default function App() {
       {/* UI 优化条目1.7：最大化态边缘/顶栏拖拽恢复热区（Edge 式 v2，随 winMax 挂载/卸载） */}
       {winMax && <WindowResizeHandles />}
       <Toast />
+      {pbMenu && <FileContextMenu x={pbMenu.x} y={pbMenu.y} items={pbMenuItems} onClose={() => setPbMenu(null)} />}
       <GlobalConfirm />
       {vaultPickOpen && <VaultPicker onDone={(created) => { setVaultPickOpen(false); if (!s.onboardingDone) setOnboardingOpen(true); if (created) setActiveTab('knowledge') }} />}
       {startupPickerOpen && <VaultPicker startup onDone={() => setStartupPickerOpen(false)} />}
