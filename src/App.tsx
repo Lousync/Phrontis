@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy, Fragment, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { AppWindow } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag, BookKind } from './types'
@@ -137,6 +137,16 @@ export default function App() {
       tabs: x && !g.tabs.includes(x) ? [...g.tabs, x] : g.tabs,
     }))
   }, [patchGroup])
+  // ---- 分屏两栏（步2）：两栏上限 · secondary = g2 存在即开启 · 分隔条比例 ----
+  const [splitOrientation, setSplitOrientation] = useState<'row' | 'column'>('row')
+  const [splitRatio, setSplitRatio] = useState(0.5)
+  void setSplitOrientation
+  void setSplitRatio
+  const splitActive = groups.length > 1
+  // 单栏：模块容器沿用 flex-1 撑满（现状）；两栏：按所属组 order + flexGrow=ratio 排布，分隔条插在中间
+  const paneStyleFor = useCallback((gi: number): CSSProperties => splitActive
+    ? { order: gi * 2, flexGrow: gi === 0 ? splitRatio : 1 - splitRatio, flexShrink: 1, flexBasis: 0 }
+    : {}, [splitActive, splitRatio])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [sidebarWidths, setSidebarWidths] = useState<Record<string, number>>({})
   const [importModalOpen, setImportModalOpen] = useState(false)
@@ -201,6 +211,8 @@ export default function App() {
   const wbKnowledgePageRef = useCallback((node: HTMLDivElement | null) => { setWbKnowledgePageEl(node) }, [])
   const [wbContentActionsEl, setWbContentActionsEl] = useState<HTMLElement | null>(null)
   const wbContentActionsRef = useCallback((node: HTMLDivElement | null) => { setWbContentActionsEl(node) }, [])
+  // 分屏：非承载组的页面条要吃下同一组 slot prop 但不夺槽（模块页签组只 portal 到拥有它的那条）。
+  const noopRef = useCallback((_node: HTMLDivElement | null) => {}, [])
   // 知识库沉浸阅读 / 图谱模式：模块自己让整条页面条隐藏（那些形态下外壳行也该让位，模块内无法触及）
   const [knowledgeImmersive, setKnowledgeImmersive] = useState(false)
   const handleKnowledgeImmersive = useCallback((v: boolean) => setKnowledgeImmersive(v), [])
@@ -1040,6 +1052,47 @@ export default function App() {
     setActiveTab(tab); setSidebarOpen(true); window.dispatchEvent(new CustomEvent('tab-switched'))
   }
 
+  // ---- 分屏：按组选中 / 关闭 / 重排（点某组的标签 = 该组成为活动组）----
+  const selectInGroup = (gid: 'g1' | 'g2', id: string) => {
+    setActiveGroupId(gid)
+    activeGroupIdRef.current = gid
+    if (isToolTabId(id)) {
+      patchGroup(gid, (g) => ({ ...g, active: id, tabs: g.tabs.includes(id) ? g.tabs : [...g.tabs, id] }))
+      // 重复点击已激活的工具标签也跟随左栏（跟随 effect 只认 state 变化，同值不触发）
+      if (!wbLayout.leftLocked) {
+        const tid = toolIdOfTab(id)
+        setRailTool(TOOLS_WITH_SIDEBAR.has(tid) ? tid : null)
+      }
+    } else if (id === 'quiz') {
+      // 错题本合成条目（2026-09-19）：回知识库标签 + 定位错题本视图（同错题本书签路径）
+      handleTabChange('knowledge')
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent(LOCATE_QUIZ_VIEW_EVENT)), 100)
+      if (!wbLayout.leftLocked) setRailModule('quiz')
+    } else {
+      const t = id as TabName
+      handleTabChange(t)
+      // 点击标签（含重复点击已激活标签）→ 左栏若不在该模块态则切过去；锁定时不跟随。
+      // 特判：knowledge 标签当前显示错题本子视图时保持 quiz 态（否则点「知识库」会把左栏错切成目录树）
+      if (!wbLayout.leftLocked) {
+        const m = t === 'knowledge' && quizViewOpen ? 'quiz' : RAIL_FOLLOW_MAP[t]
+        if (m) setRailModule(m)
+      }
+    }
+  }
+  const closeInGroup = (gid: 'g1' | 'g2', id: string) => {
+    // 错题本合成条目的 ✕ = 请求关闭错题本视图（视图关 → QUIZ_VIEW_TOGGLED 回流收条目）
+    if (id === 'quiz') {
+      quizTabCloseRef.current = true
+      window.dispatchEvent(new CustomEvent(QUIZ_VIEW_CLOSE_REQUEST_EVENT))
+      quizTabCloseRef.current = false
+      return
+    }
+    setActiveGroupId(gid)
+    activeGroupIdRef.current = gid
+    closeTab(id)
+  }
+  const reorderInGroup = (gid: 'g1' | 'g2', tabs: string[]) => patchGroup(gid, (g) => ({ ...g, tabs }))
+
   // ---- 工具标签页（v3.4.0 批次4，方案 §10.2）----
   // 右栏工具入口点击 → 中间开对应工具标签页；重复点击同入口 = 激活已有标签（openTabs includes
   // 判定 + openTabs 登记处去重），关闭走文档标签通用 ✕。番茄钟特例 = 既有 pomodoro:activate
@@ -1475,6 +1528,39 @@ export default function App() {
     )
   }
 
+  /* 顶部页面条（分屏：每组一条）。单栏时返回单个 bar（DOM 与改前一致）；两栏时由调用处包进带
+     order/flexGrow 的容器并插入分隔条。portal 槽（编辑器/知识库页签组）只挂「拥有该模块标签的组」——
+     否则模块的页签组会 portal 到错误的条上。 */
+  const renderPageBar = (g: WbGroup) => {
+    const hasKb = g.tabs.includes('knowledge')
+    const hasEditor = g.tabs.includes('editor')
+    return (
+      <WorkbenchPageBar
+        tabs={g.tabs}
+        active={g.active}
+        onSelect={(id) => selectInGroup(g.id, id)}
+        onClose={(id) => closeInGroup(g.id, id)}
+        onReorder={(tabs) => reorderInGroup(g.id, tabs)}
+        editorSlotRef={hasEditor ? wbEditorPageRef : noopRef}
+        knowledgeSlotRef={hasKb ? wbKnowledgePageRef : noopRef}
+        showQuizEntry={QUIZ_ENTRY_ENABLED && quizViewOpen && hasKb}
+        quizEntryActive={quizViewOpen && g.active === 'knowledge'}
+        hidePages={zenLevel >= 1}
+        lead={g.active === 'knowledge' && noteJumpFrom ? (
+          <button
+            onClick={() => handleTabChange(noteJumpFrom)}
+            title={`回到 ${tabLabel(noteJumpFrom)}`}
+            data-wb="noteReturnChip"
+            data-wb-return-to={noteJumpFrom}
+            className="kb-item-in flex items-center gap-0.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+          >
+            ← 返回 {tabLabel(noteJumpFrom)}
+          </button>
+        ) : null}
+      />
+    )
+  }
+
   return (
     <RootErrorBoundary>
     <div className={`kb-theme-gradient-img flex flex-col h-screen bg-[var(--bg-primary)] overflow-hidden [transform:translateZ(0)] ${winRounded ? 'rounded-[var(--window-radius)]' : 'rounded-none'}`}>
@@ -1641,73 +1727,23 @@ export default function App() {
                   原「子模块标签条」取消——编辑器 / 知识库由各自页面条目代表，模块切换走左栏书签 / 图标条。
                   整窗模块（EXCLUDED 平级模块）激活时整条隐藏（同 aiTeaching，方案 §2）；
                   知识库沉浸阅读 / 图谱模式由模块反向通知让位（pageBarHidden）。 */}
-              {!fullWindowTab && !pageBarHidden && (
-                <WorkbenchPageBar
-                  tabs={openTabs}
-                  active={activeToolTab ?? activeTab}
-                  onSelect={(id) => {
-                    if (isToolTabId(id)) {
-                      setActiveTab(null)
-                      setActiveToolTab(id)
-                      // 重复点击已激活的工具标签也跟随左栏（跟随 effect 只认 state 变化，同值不触发）
-                      if (!wbLayout.leftLocked) {
-                        const tid = toolIdOfTab(id)
-                        setRailTool(TOOLS_WITH_SIDEBAR.has(tid) ? tid : null)
-                      }
-                    } else if (id === 'quiz') {
-                      // 错题本合成条目（2026-09-19）：回知识库标签 + 定位错题本视图（同错题本书签路径）
-                      handleTabChange('knowledge')
-                      window.setTimeout(() => window.dispatchEvent(new CustomEvent(LOCATE_QUIZ_VIEW_EVENT)), 100)
-                      if (!wbLayout.leftLocked) setRailModule('quiz')
-                    } else {
-                      const t = id as TabName
-                      handleTabChange(t)
-                      // 2026-09-17 反馈拍板：点击标签（含重复点击已激活标签）→ 左栏若不在该模块态则切过去；
-                      // 锁定时左栏归用户所有，不跟随（与 RAIL_FOLLOW 跟随语义一致）。
-                      // 特判：knowledge 标签当前显示错题本子视图时保持 quiz 态（否则点「知识库」会把错题本的左栏错切成目录树）
-                      if (!wbLayout.leftLocked) {
-                        const m = t === 'knowledge' && quizViewOpen ? 'quiz' : RAIL_FOLLOW_MAP[t]
-                        if (m) setRailModule(m)
-                      }
-                    }
-                  }}
-                  onClose={(id) => {
-                    // 错题本合成条目的 ✕ = 请求关闭错题本视图（视图关 → QUIZ_VIEW_TOGGLED 回流收条目）；
-                    // 标记来源 → 回流时对齐「关标签=回总览」（否则回流写死回知识库树态，2026-09-19 反馈）
-                    if (id === 'quiz') {
-                      quizTabCloseRef.current = true
-                      window.dispatchEvent(new CustomEvent(QUIZ_VIEW_CLOSE_REQUEST_EVENT))
-                      quizTabCloseRef.current = false
-                      return
-                    }
-                    closeTab(id)
-                  }}
-                  onReorder={handleReorder}
-                  editorSlotRef={wbEditorPageRef}
-                  knowledgeSlotRef={wbKnowledgePageRef}
-                  /* 错题本条目暂收（QUIZ_ENTRY_ENABLED 总闸，v3.5.0 随交互重做放出）——
-                     onSelect/onClose 的 'quiz' 分支保留（死代码但 harmless，重做时直接接线） */
-                  showQuizEntry={QUIZ_ENTRY_ENABLED && quizViewOpen && openTabs.includes('knowledge')}
-                   /* 单激活（2026-09-20）：激活 = knowledge 标签在前台**且**当前视图是错题本；
-                      页面视图时激活落在页签组条目上（模块侧 activeId 置 null 配合） */
-                   quizEntryActive={quizViewOpen && activeTab === 'knowledge'}
-                   hidePages={zenLevel >= 1}
-                   /* N-4：跳转来源返回 chip（「← 返回 X」）。知识库在前台且最近一次 kb-open-note
-                      带了合法 from（如 AI教学 / AI对话）时出现，点它回来源标签；手动切 Tab 即清。
-                      复用 WorkbenchPageBar 现成 lead 槽（prop 在、此前无人喂 —— 正是断链点）。 */
-                   lead={activeTab === 'knowledge' && noteJumpFrom ? (
-                     <button
-                       onClick={() => handleTabChange(noteJumpFrom)}
-                       title={`回到 ${tabLabel(noteJumpFrom)}`}
-                       data-wb="noteReturnChip"
-                       data-wb-return-to={noteJumpFrom}
-                       className="kb-item-in flex items-center gap-0.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                     >
-                       ← 返回 {tabLabel(noteJumpFrom)}
-                     </button>
-                   ) : null}
-                 />
-              )}
+              {!fullWindowTab && !pageBarHidden && (groups.length === 1 ? renderPageBar(groups[0]) : (
+                <div className="flex min-h-0 min-w-0" style={{ flexDirection: splitOrientation }}>
+                  {groups.map((g, i) => (
+                    <Fragment key={g.id}>
+                      {i > 0 && (
+                        <div className={`kb-pane-divider${splitOrientation === 'column' ? ' is-col' : ''}`} style={{ order: i * 2 - 1 }} aria-hidden />
+                      )}
+                      <div
+                        className="flex min-w-0"
+                        style={{ order: i * 2, flexGrow: i === 0 ? splitRatio : 1 - splitRatio, flexShrink: 1, flexBasis: 0 }}
+                      >
+                        {renderPageBar(g)}
+                      </div>
+                    </Fragment>
+                  ))}
+                </div>
+              ))}
               {/* 整窗模块的「回工作台」入口 = 图标条顶部「工作台」按钮（2026-09-17 bug 修复轮：
                   原右上角浮动「工作台」按钮删除——入口统一收敛到 ActivityBar，避免同一功能两处入口） */}
               {/* 编辑器组（W3 · Editor Groups v1）：主栏渲染。
@@ -1723,7 +1759,7 @@ export default function App() {
                       模块内 useState 全归零（实机探针实证过：知识库页签组 items 2 → 0）。
                       已验证的错路：① 挂跨父节点稳定 key（key 只在同父节点内有效）；
                       ② createPortal 换 target（一样重挂）。 */}
-                  <div className="relative flex min-h-0 min-w-0 flex-1">
+                  <div className="relative flex min-h-0 min-w-0 flex-1" style={{ flexDirection: splitOrientation }}>
                     {/* 内容级操作浮层（v3.4.0 页面条置顶）：插图/大纲/预览/保存全部 的胶囊，
                         以及知识库页面级动作槽 `#editor-toolbar-slot`。
                         ★ 2026-09-20：两者收进**一个悬浮胶囊**（data-wb="floatBar"，样式见
@@ -1744,16 +1780,31 @@ export default function App() {
                     {/* 模块容器序列：可见模块撑满（flex-1），其余 display:none 常驻保活。
                         ISS-2026-09-04-02 / -07：可见与隐藏模块必须在**同一个 keyed 数组**里，
                         否则可见↔隐藏换子节点槽位会被 React 按位置卸载重建。 */}
-                    {rowModules.map((t) => (
+                    {rowModules.map((t) => {
+                      // 保活 + 分屏：容器恒为同一父节点的 keyed 数组；可见性 = 某组的 active；
+                      // 两栏时用 flex order + flexGrow(ratio) 排布，**绝不换父节点**（换父=重挂=useState 归零）。
+                      const gi = groups.findIndex((g) => g.active === t)
+                      const visible = gi !== -1
+                      return (
+                        <div
+                          key={t}
+                          data-pane="main"
+                          data-group={visible ? groups[gi].id : undefined}
+                          className="relative flex min-h-0 flex-1 flex-col"
+                          style={{ display: visible ? undefined : 'none', minWidth: 0, ...(visible ? paneStyleFor(gi) : null) }}
+                        >
+                          {renderMounted(t, t === activeTab)}
+                        </div>
+                      )
+                    })}
+                    {splitActive && (
                       <div
-                        key={t}
-                        data-pane="main"
-                        className="relative flex min-h-0 flex-1 flex-col"
-                        style={{ display: t === activeTab ? undefined : 'none', minWidth: 0 }}
-                      >
-                        {renderMounted(t, t === activeTab)}
-                      </div>
-                    ))}
+                        key="__pane_divider"
+                        className={`kb-pane-divider${splitOrientation === 'column' ? ' is-col' : ''}`}
+                        style={{ order: 1 }}
+                        aria-hidden
+                      />
+                    )}
                     {/* 工具标签宿主（批次4，保活）：**绝对定位铺满主栏区域**，不参与上面的 flex 流。
                         激活的可见，其余已开工具 display:none 常驻（工具内状态如密码本解锁态不丢）。
                         ⚠️ 门条件必须含 activeToolTab 本身（2026-09-28 实锤）：只看 mountedToolTabs.size
