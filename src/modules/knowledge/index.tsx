@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2, BookOpen } from 'lucide-react'
+import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2 } from 'lucide-react'
 import { PluginIcon } from '../../components/shared/ModuleIcons'
 import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_ENTRY_ENABLED, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
@@ -2372,13 +2372,32 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         )}
       </div>
 
-      {/* 副栏页面视图（页面级分屏）：portal 进 App 副栏内容槽。第二步先占位，第四步接入真实 PageEditor。 */}
-      {secondaryContentEl && secondaryPageIds.length > 0 && createPortal(
-        <div className="flex h-full flex-col items-center justify-center text-[var(--text-muted)]">
-          <BookOpen size={40} className="opacity-20" />
-          <div className="mt-3 text-[13px] text-[var(--text-secondary)]">{openPageInfos[secondaryActiveId ?? '']?.title || '页面'}</div>
-          <div className="mt-1 text-[11px] opacity-70">副栏 · 页面视图（占位）</div>
-        </div>,
+      {/* 副栏页面视图（页面级分屏）：portal 进 App 副栏内容槽。独立 PageEditor 实例，
+          isActive=false → 不挂右上悬浮工具栏（那颗槽是主栏单例 `#editor-toolbar-slot`，两实例会打架）。 */}
+      {secondaryContentEl && secondaryPageIds.length > 0 && secondaryActiveId && createPortal(
+        <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-[var(--text-muted)]">正在加载编辑器…</div>}>
+          <PageEditor
+            pageId={secondaryActiveId}
+            categories={categories}
+            allPages={allPages}
+            zoom={zoom}
+            onBack={() => onRemoveSecondary?.(secondaryActiveId)}
+            onDeleted={() => { handlePageDeleted(secondaryActiveId); onRemoveSecondary?.(secondaryActiveId) }}
+            onNavigate={handleOpenPage}
+            onUpdate={handleRefresh}
+            onTitleChange={handleTitleChange}
+            onFileTypeChange={handleFileTypeChange}
+            onContentChange={() => {}}
+            onTagsChange={handleSearchRefresh}
+            onMarkDirty={handleMarkDirty}
+            onClearDirty={handleClearDirty}
+            onRequestReading={enterReading}
+            vaultMode={true}
+            draftRelPath={secondaryActiveId.startsWith('draft:') ? secondaryActiveId.slice(6) : undefined}
+            startInEdit={false}
+            isActive={false}
+          />
+        </Suspense>,
         secondaryContentEl,
       )}
 
