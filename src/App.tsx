@@ -1848,28 +1848,31 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  {pageSplitActive && (
-                    <div
-                      className={`kb-pane-divider${pageSplit!.orientation === 'column' ? ' is-col' : ''}`}
-                      style={{ order: 1 }}
-                      onPointerDown={startPageSplitDrag}
-                      aria-hidden
-                    />
-                  )}
-                  {pageSplitActive && (
-                    <div
-                      ref={wbSecondaryContentRef}
-                      data-pane="g2"
-                      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
-                      style={{ order: 2, flexGrow: 1 - pageSplit!.ratio, flexShrink: 1, flexBasis: 0 }}
-                    />
-                  )}
                   {/* AI 助手右下浮钮已移除（2026-09-16）：AI 对话入口迁移（批次5 中间栏 aiChat 标签），
                       Ctrl+J 链路保留不受影响（ai-assistant:toggle 事件链路随浮钮一并废除，2026-09-22 清理） */}
                   {/* 番茄钟全屏面板：挂在内容卡片内（而非 main），只覆盖主内容区 ——
                       否则会盖住右侧的任务栏（DayPanel），表现为「进入番茄钟任务栏被关闭/唤不出」 */}
                   <PomodoroPanel />
                 </div>
+                {/* 分隔条与副栏必须与「主栏 div」平级（同为 pageSplitContainerRef 的直接子节点）。
+                    ⚠️ 不能写进主栏 div 内：主栏是 flex-col，flexGrow 会作用在纵轴上，
+                    副栏会塌成主栏底部的横条、容器右侧留白（2026-10-12 实机复现）。 */}
+                {pageSplitActive && (
+                  <div
+                    className={`kb-pane-divider${pageSplit!.orientation === 'column' ? ' is-col' : ''}`}
+                    style={{ order: 1 }}
+                    onPointerDown={startPageSplitDrag}
+                    aria-hidden
+                  />
+                )}
+                {pageSplitActive && (
+                  <div
+                    ref={wbSecondaryContentRef}
+                    data-pane="g2"
+                    className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+                    style={{ order: 2, flexGrow: 1 - pageSplit!.ratio, flexShrink: 1, flexBasis: 0 }}
+                  />
+                )}
               </div>
               </div>
             </div>

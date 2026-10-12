@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2 } from 'lucide-react'
 import { PluginIcon } from '../../components/shared/ModuleIcons'
@@ -223,13 +223,23 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   // ---- 页签右键菜单（固定/关闭族） ----
   const [tabCtx, setTabCtx] = useState<{ x: number; y: number; pageId: string } | null>(null)
   const handleTabContextMenu = useCallback((e: React.MouseEvent, pageId: string) => {
-    // 粗夹取：菜单约 170×140，避免贴屏幕右/下缘溢出
-    setTabCtx({
-      x: Math.min(e.clientX, window.innerWidth - 180),
-      y: Math.min(e.clientY, window.innerHeight - 150),
-      pageId,
-    })
+    // 只记原始落点：菜单尺寸要渲染后才知道，夹取交给下面的 useLayoutEffect（菜单约 170×210，
+    // 用估算值夹取在菜单变高时会贴边/出屏）。
+    setTabCtx({ x: e.clientX, y: e.clientY, pageId })
   }, [])
+  /** 页签右键菜单：实测面板尺寸后夹进视口（照 src/components/shared/FileContextMenu 口径，8px 边距） */
+  const tabCtxPanelRef = useRef<HTMLDivElement | null>(null)
+  const [tabCtxPos, setTabCtxPos] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!tabCtx) { setTabCtxPos(null); return }
+    const el = tabCtxPanelRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setTabCtxPos({
+      left: Math.max(8, Math.min(tabCtx.x, window.innerWidth - r.width - 8)),
+      top: Math.max(8, Math.min(tabCtx.y, window.innerHeight - r.height - 8)),
+    })
+  }, [tabCtx])
 
   const openPageIdsRef = useRef(openPageIds)
   const activePageIdRef = useRef(activePageId)
@@ -2444,12 +2454,19 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         secondaryContentEl,
       )}
 
-      {/* 页签右键菜单：固定/取消固定 + 关闭族 */}
-      {tabCtx && (
+      {/* 页签右键菜单：固定/取消固定 + 关闭族。
+          ★ 必须 portal 到 document.body（照 src/components/shared/FileContextMenu 口径）：
+          本菜单写在 KnowledgeModule 的渲染树里，而模块容器是**保活**的
+          （App.tsx: `display: t === activeTab ? undefined : 'none'`）。祖先一旦 display:none，
+          整棵子树不生成盒子 —— 于是「人在别的模块时右键页签」会 setTabCtx 成功、菜单也生成了，
+          却因为没有盒子而不可见（表象：右键没反应；切回笔记模块后菜单突然冒出来）。
+          fixed 定位救不了这种情况：fixed 只脱离包含块，不脱离 display:none 的祖先。 */}
+      {tabCtx && createPortal((
         <div className="fixed inset-0 z-[70] kb-pop-layer" onClick={() => setTabCtx(null)} onContextMenu={(e) => { e.preventDefault(); setTabCtx(null) }}>
           <div
+            ref={tabCtxPanelRef}
             className="absolute min-w-[160px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-xl"
-            style={{ left: tabCtx.x, top: tabCtx.y }}
+            style={tabCtxPos ?? { left: tabCtx.x, top: tabCtx.y, visibility: 'hidden' }}
             onClick={(e) => e.stopPropagation()}
           >
             {onSplitPage && (
@@ -2485,7 +2502,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             </button>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* Unsaved changes confirm dialog */}
       <ConfirmDialog

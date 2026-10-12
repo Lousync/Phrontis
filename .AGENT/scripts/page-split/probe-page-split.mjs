@@ -337,6 +337,9 @@ try {
           secText: secContent ? (secContent.textContent || '').trim().slice(0, 120) : '',
           mainPaneRect: main ? (() => { const r = main.getBoundingClientRect(); return { x: Math.round(r.left), w: Math.round(r.width) } })() : null,
           secRect: secContent ? (() => { const r = secContent.getBoundingClientRect(); return { x: Math.round(r.left), w: Math.round(r.width) } })() : null,
+          // 副栏父容器主轴必须是 row（分屏容器）。若 g2/分隔条被写进主栏 div 内，
+          // 父容器会是 flex-col，副栏就塌成主栏底部横条（2026-10-12 实机复现的嵌套 bug）。
+          secParentDir: secContent ? getComputedStyle(secContent.parentElement).flexDirection : null,
         }
       })()`)
       info('拆分为 row 后 DOM', JSON.stringify(splitState))
@@ -349,6 +352,7 @@ try {
       ok(splitState.secMonaco >= 1, 'P10 副栏渲染出真实编辑器实例（Monaco 在场）', `secMonaco=${splitState.secMonaco}, total=${splitState.monaco}`)
       ok(splitState.secText.length > 0, 'P11 副栏内容非空（渲染了页面正文/骨架）', splitState.secText)
       ok(splitState.mainPaneRect && splitState.secRect && splitState.secRect.x > splitState.mainPaneRect.x, 'P12 副栏在主栏右侧（row 布局几何正确）', JSON.stringify({ main: splitState.mainPaneRect, sec: splitState.secRect }))
+      ok(splitState.secParentDir === 'row', 'P12b 副栏父容器主轴为 row（分隔条/副栏是主栏的同级，不得嵌进主栏 div 内）', `secParentDir=${splitState.secParentDir}`)
       await shot('split-02-row-split')
 
       // ---- 3. 再拆应置灰 ----
