@@ -43,6 +43,7 @@ const PageEditor = lazy(() => import('./components/PageEditor').then((m) => ({ d
 import { PageTabStrip } from '../../components/workbench/PageTabStrip'
 import { getFileTypeInfo } from '../../lib/fileTypes'
 import { GraphView } from './components/graph/GraphView'
+import { emptyNav, pushNav, stepNav, canNavBack, canNavForward, type NavState } from './navHistory'
 import { QuizCollection } from './components/QuizCollection'
 import { QuizNavPanel } from './components/QuizNavPanel'
 import { ConfirmDialog } from '../../components/shared'
@@ -569,6 +570,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   // --- 沉浸阅读模式 ---
   const [readingMode, setReadingMode] = useState(false)
   const [readingPage, setReadingPage] = useState<KnowledgePage | null>(null)
+  /** 顶栏 ← → 的「页面访问历史」（2026-10-11 拍板 D3：模块内共享一条 / 上限 50 / 不落盘） */
+  const [nav, setNav] = useState<NavState>(emptyNav)
+  const navRef = useRef(nav)
+  navRef.current = nav
 
   const enterReading = useCallback(async () => {
     const id = activePageIdRef.current
@@ -601,6 +606,8 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     try {
       const p = await getKnowledgePageById(pageId)
       if (!p) return
+      // 沉浸阅读内的双链跳转同样计入页面历史（拍板 D4：← → 语义 = 回到刚才看过的页面）
+      setNav((s) => pushNav(s, pageId))
       setReadingPage(p)
       // 沉浸中经 [[双链]] 换页也要跟着换左栏（拍板①的延伸）：新页非 md 时收起大纲，
       // 免得留下「大纲不属于当前文档」的错配。只在已处于沉浸态时更新覆盖位。
@@ -639,6 +646,8 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       const ft = (p.fileType || 'md').toLowerCase()
       if (ft !== 'md' && ft !== 'txt' && ft !== 'html') { showToast({ type: 'warning', message: '沉浸阅读仅支持 md / txt 页面' }); return }
       setGraphMode(false)
+      // 图谱卡片「在阅读器中打开」也是一次页面访问 → 计入历史（否则从图谱跳进来后 ← 是灰的）
+      setNav((s) => pushNav(s, pageId))
       setReadingPage(p)
       setReadingMode(true)
     } catch (e) { console.error(e) }
@@ -651,11 +660,14 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   }, [])
 
   // --- tab management (VS Code preview mode) ---
-  const handleOpenPage = useCallback(async (pageId: string, infoOverride?: PageInfo) => {
+  const handleOpenPage = useCallback(async (pageId: string, infoOverride?: PageInfo, opts?: { fromHistory?: boolean }) => {
     // 错题本是知识库内容区的全幅子视图（2026-09-20 反馈）：开着时点页签只改了保活模块内部
     // activePageId，视图盖着什么都看不见 = 「点了没反应」。任何页面打开/切换先收错题本视图
     // （QUIZ_VIEW_TOGGLED {open:false} 回流 → App 收页面条错题本条目 + 左栏回笔记态）。
     if (showQuizCollectionRef.current) toggleQuizCollection(false)
+    // 入栈（拍板 D3）：打开新页、以及**切到已开页签**都算一次访问；从历史回退/前进时跳过
+    // （opts.fromHistory）—— 否则「后退」自己会再压一条，形成原地打转。
+    if (!opts?.fromHistory) setNav((s) => pushNav(s, pageId))
     // info：页签标题/类型（草稿直入编辑时由调用方自带，Phase 2 批次 1）
     let info: PageInfo | undefined = infoOverride
     if (!infoOverride) {
@@ -705,6 +717,23 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
 
     setActivePageId(pageId)
   }, [allLoosePages, chapterPages, starredPages, toggleQuizCollection])
+
+  /**
+   * 顶栏 ← → 的取数（拍板 D3 / D4）：
+   *   · 单条栈、模块内共享，上限 50，不落盘；
+   *   · **失效条目跳过**（页面被删 / 页签被关）—— 不跳过的话表象正是「点了没反应」；
+   *   · 回退/前进复用 handleOpenPage（带 fromHistory 跳过一次入栈），
+   *     于是「脏页确认」「预览槽替换」等既有页签策略照旧生效，不另开一条旁路。
+   */
+  const navValid = useCallback((id: string) => (
+    openPageIdsRef.current.includes(id) || allPages.some((p) => p.id === id)
+  ), [allPages])
+  const navStep = useCallback((dir: -1 | 1) => {
+    const { state, id } = stepNav(navRef.current, dir, navValid)
+    if (!id) return
+    setNav(state)
+    void handleOpenPage(id, undefined, { fromHistory: true })
+  }, [navValid, handleOpenPage])
 
   const handleCloseTab = useCallback((pageId: string) => {
     // Check unsaved changes
@@ -1436,6 +1465,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         if (e.key === 'Escape') { e.preventDefault(); exitReading() }
         return
       }
+      // Alt+← / Alt+→ —— 顶栏「页面历史」的键盘入口（2026-10-11 拍板 D2）。
+      // 刻意放在 isEditingInput 守卫**之前**：带 Alt 的方向键不是文本编辑操作，在编辑器里也该生效；
+      // preventDefault 同时挡掉 Chromium 自带的「Alt+← 后退」（否则会变成窗口级历史跳转）。
+      if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault()
+        navStep(e.key === 'ArrowLeft' ? -1 : 1)
+        return
+      }
+
       if (isEditingInput(e)) return
 
       // Ctrl+N — 新建知识页：文件树内联创建（Phase 2 批次 2：frontmatter id 直接写入，不再借道编辑器）
@@ -1537,7 +1575,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, readingMode, enterReading, exitReading, treeLandDir])
+  }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, readingMode, enterReading, exitReading, treeLandDir, navStep])
 
   // ---- 外部文件粘贴（2026-09-20 阶段四：能力自编辑器模块上移，随其退役）----
   // 资源管理器里 Ctrl+C 文件 → 本模块 Ctrl+V：剪贴板带 File 列表且没有文本接收方时接管，
@@ -2253,6 +2291,11 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 draftRelPath={activePageId.startsWith('draft:') ? activePageId.slice(6) : undefined}
                 startInEdit={startInEditRef.current === activePageId}
                 isActive={isActive}
+                initialFileType={openPageInfos[activePageId]?.fileType}
+                canNavBack={canNavBack(nav)}
+                canNavForward={canNavForward(nav)}
+                onNavBack={() => navStep(-1)}
+                onNavForward={() => navStep(1)}
               />
             </Suspense>
           ) : (

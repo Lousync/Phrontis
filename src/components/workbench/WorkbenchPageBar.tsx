@@ -155,8 +155,9 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
          items-end 让条目沉底，overflow-x-clip 只拦首尾条目内凹弧的水平外溢、不裁垂直融合。 */
       className="relative flex h-9 shrink-0 select-none items-end overflow-x-clip bg-[var(--bg-secondary)] px-1.5"
     >
-      {/* hairline：页面条与内容区的分隔线（激活条目处被同色条目盖住） */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[var(--border-color)]" />
+      {/* 2026-10-11（拍板 A2）：页面条底部那道 hairline **已删**。
+          原来它承担「页面条 vs 内容区」的分界，但顶栏改为无分隔线（与正文连成一整片）之后，
+          留着它就只剩这一处硬边、反而突兀。现在的分界由底色差 + 激活页签的隆起形表达。 */}
       {/* 模块条目 + 两个模块的页签组 + 尾部动作 */}
       <div data-pb-main className="flex min-w-0 flex-1 items-end gap-1 px-1.5 self-stretch">
         {lead && <div className="flex shrink-0 items-center self-center">{lead}</div>}

@@ -563,7 +563,13 @@ ok(/from '\.\.\/lib\/aiAssistant\/inlineSuggest'/.test(SRC_MAIN),
 
 // J10 渲染层接线
 const SRC_MONACO = stripComments(read('src/components/shared/MonacoPane.tsx'))
-const SRC_EDITOR = stripComments(read('src/modules/knowledge/components/PageEditor.tsx'))
+// 2026-10-11：AI 续写四态钮从 PageEditor 的悬浮胶囊搬到了顶栏组件（NoteTopBar）——
+// 断言点的锚点文本与四态短路顺序**一字未改**，只是采样文件跟着搬；两份拼在一起采样，
+// 这样「搬走的部分」与「留在 PageEditor 的部分」（如 J17d 的 inlineOn 判据）都能被同一批断言覆盖。
+const SRC_EDITOR = stripComments(
+  read('src/modules/knowledge/components/PageEditor.tsx') + '\n' +
+  read('src/modules/knowledge/components/NoteTopBar.tsx'),
+)
 ok(/registerInlineCompletionsProvider\(\s*'markdown'/.test(SRC_MONACO),
   'J10a 注册 markdown 语言的 inline completions provider（仅 md）', '')
 ok(/inlineCompletionInstalled/.test(SRC_MONACO),

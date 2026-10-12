@@ -20,6 +20,7 @@ import { ConfirmDialog } from '../../../components/shared'
 import { ResizablePanel } from '../../../components/shared/ResizablePanel'
 import { WelcomeHtmlView } from './WelcomeHtmlView'
 import { FileMetaCard } from './FileMetaCard'
+import { NoteTopBar } from './NoteTopBar'
 import { ArchiveTextView } from './ArchiveTextView'
 import { isTextViewableExt } from '../../../lib/aiTextExts'
 import Editor, { type OnMount } from '@monaco-editor/react'
@@ -71,18 +72,28 @@ interface Props {
    *  模块被 display:none 保活时 portal 不会跟着藏——不加这道门槛，铅笔/保存点会飘在当前模块头上
    *  （与编辑器模块 actionsPill 的 isActive 门槛同款，editor/index.tsx 同注释）。 */
   isActive?: boolean
+  /** 首载即知的文件类型（模块页签元信息 openPageInfos）：顶栏与格式标签依赖它，
+   *  不预置则 loadPage 完成前会先按 '' 渲染一帧（表象：顶栏 / 格式标签闪一下）。 */
+  initialFileType?: string
+  /** 顶栏左端「页面历史」四件（2026-10-11 对齐 Obsidian）：栈在模块层，这里只消费结果 */
+  canNavBack?: boolean
+  canNavForward?: boolean
+  onNavBack?: () => void
+  onNavForward?: () => void
 }
 
-export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, isActive = true }: Props) {
+export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, isActive = true, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward }: Props) {
   const { s, update } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   /** 归档「查看内容」态（B-3）：见下方 isArchiveTextView；换页重置，不跨页继承展开态 */
   const [archiveShowContent, setArchiveShowContent] = useState(false)
-  const [fileType, setFileTypeState] = useState('')
+  const [fileType, setFileTypeState] = useState(initialFileType)
   const [showLangMenu, setShowLangMenu] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
+  /** 顶栏 ⋮ 里「文件格式」二级子菜单（拍板 C2：⋮ 与编辑器右键菜单两处都有） */
+  const [showFmtMenu, setShowFmtMenu] = useState(false)
   // 知识库以阅读优先:md/txt 页面打开即预览(右上角眼睛或 Ctrl+E / Ctrl+/ 切回编辑;vault 模式就地保存)
   const [preview, setPreview] = useState(true)
   // startInEdit 的 ref 镜像：loadPage（useCallback 依赖不含该 prop）在 effect 里读最新值
@@ -443,7 +454,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         // inlineOnRef）——用户按了键却零反馈，正是「不能用、不知为何」的另一半来源。
         // 只有「确实因为关闭」才提示（其余 false 分支：没挂编辑器 / 非 markdown / 空文档）。
         void getSetting('aiAssistantInlineSuggest').then((v) => {
-          if (v === false) showToast({ type: 'info', message: 'AI 续写建议已关闭', detail: '点击工具条的 ✨ 开启后再按 Alt+A' })
+          if (v === false) showToast({ type: 'info', message: 'AI 续写建议已关闭', detail: '点击 ✨ 开启后再按 Alt+A' })
         })
       }
     }
@@ -755,6 +766,64 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     }
   }, [])
 
+  /**
+   * 文件格式落点（**唯一实现，三处共用**）：顶栏 ⋮ 的二级子菜单 / 编辑器右键菜单 / 旧胶囊的格式 chip。
+   * 三个副作用与既有 chip 逐条一致：改渲染态类型、非文本类强制退出阅读态、回报父级 + 状态栏。
+   * 为什么抽出来：拍板 C2 要求「⋮ 里有、右键菜单里也有」，两处各写一份必然漂移。
+   */
+  const applyFileType = useCallback((ext: string, label?: string) => {
+    setFileTypeState(ext)
+    setShowLangMenu(false)
+    if (ext !== '' && ext !== 'md' && ext !== 'txt') setPreview(false)
+    onFileTypeChange?.(ext)
+    window.dispatchEvent(new CustomEvent('status-filetype', { detail: label ?? getFileTypeInfo(ext).label }))
+  }, [onFileTypeChange])
+
+  /** 是否 md 笔记：决定走「新顶栏」还是「旧悬浮胶囊」（拍板 E1：本轮只覆盖 md，其余保持现状） */
+  const isMdNote = fileType === 'md'
+
+  /** AI 续写总开关（顶栏常驻钮）：开着点 = 关闭 —— 掐在途请求 + 收起 ghost + 关设置总闸 */
+  const handleToggleInline = useCallback(() => {
+    if (s.aiAssistantInlineSuggest !== false) {
+      cancelInlineSuggestInFlight()
+      paneRef.current?.hideInlineSuggest()
+      update('aiAssistantInlineSuggest', false)
+    } else {
+      update('aiAssistantInlineSuggest', true)
+    }
+  }, [s.aiAssistantInlineSuggest, update])
+
+  /**
+   * Ctrl+Shift+I 插图 / Ctrl+Alt+F 脚注 —— 顶栏把它们收进 ⋮ 之后的**键盘补偿**（拍板 E2）。
+   *
+   * 为什么单独一个 effect、且**不吃 isEditingInput 闸门**（与上面的 Alt+A 同款）：
+   * 这两个动作都发生在编辑器里，而 isEditingInput 对 `.monaco-editor` 内恒返回 true ——
+   * 放进那个闸门后面 = 主用法下按了没反应。
+   *
+   * 为什么脚注不是 Ctrl+Shift+F：那个组合已被全局左栏搜索占用（App.tsx 的全局键处理）。
+   *
+   * ⚠️ 本 effect 必须**声明在 insertFootnote 之后** —— 依赖数组里直接引用它，
+   *    写在前面会撞 TDZ（TS2448/TS2454，铁律 11 里那条「effect 依赖数组注意 TDZ」）。
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (getGlobalActiveTab() !== 'knowledge') return
+      if (preview) return // 阅读态没有写作面，动作落不下去（顶栏 ⋮ 里那两项同样只在编辑态出现）
+      if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === 'i' || e.key === 'I')) {
+        e.preventDefault()
+        imageInputRef.current?.click()
+        return
+      }
+      if (e.ctrlKey && e.altKey && !e.shiftKey && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault()
+        insertFootnote()
+        return
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [insertFootnote, preview])
+
   // Monaco mount handler — register wiki-link completion provider
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor
@@ -973,7 +1042,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           标 kb-float-hide = 次级钮：胶囊静息态收成小把手时隐藏，悬停/焦点进入才展开（样式见 index.css）
           isActive 门槛：隐藏保活时停掉 portal，否则工具栏飘在当前模块头上（2026-09-19 修复）
           isMindMapFile：导图视图自带工具条，不挂这颗悬浮胶囊（2026-10-09 反馈） */}
-      {toolbarSlot && isActive && !isMindMapFile && createPortal(
+      {/* 旧悬浮胶囊：**非 md 保持现状**（拍板 E1）—— md 的动作已搬到顶栏；md 下这里不 portal，
+          胶囊由 index.css 的 :not(:has(button)) 规则自动隐身，不留空丸。 */}
+      {toolbarSlot && isActive && !isMindMapFile && !isMdNote && createPortal(
         <>
           {!isPdfFile && !vaultMode && (
             <div className="relative kb-float-hide">
@@ -988,13 +1059,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   onMouseLeave={() => setShowLangMenu(false)}>
                   {FILE_LANG_OPTIONS.map(opt => (
                     <button key={opt.ext}
-                      onClick={() => {
-                        setFileTypeState(opt.ext)
-                        setShowLangMenu(false)
-                        if (opt.ext !== '' && opt.ext !== 'md' && opt.ext !== 'txt') setPreview(false)
-                        onFileTypeChange?.(opt.ext)
-                        window.dispatchEvent(new CustomEvent('status-filetype', { detail: opt.label }))
-                      }}
+                      onClick={() => applyFileType(opt.ext, opt.label)}
                       className={`w-full text-left px-3 py-1.5 text-[11px] ${fileType === opt.ext ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
                     >{opt.label}</button>
                   ))}
@@ -1138,6 +1203,111 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
       {/* Main editing area */}
       <div className="flex-1 flex flex-col overflow-hidden">
+        {/* 笔记区顶栏（2026-10-11 对齐 Obsidian，仅 md）：**行内渲染、不 portal** ——
+            fileType / saving / preview / AI 四态的真源都在本组件里，走 portal 等于再造一个真源（方案 §1①）。
+            位置 = 主栏最顶端（页面条正下方）；右侧「关联网络」面板打开时它只跨笔记列、不压面板，
+            与 Obsidian「笔记头跨笔记面板、右栏是独立面」同款口径。
+
+            按钮集（拍板 C1/C2/C3）：左 ← → 页面历史 / 中 文件名 + 保存点 / 右 ✨AI 续写 + 阅读切换 + ⋮；
+            原来胶囊上的插图、脚注、文件格式、收藏、关联、沉浸阅读、刷题、删除全部收进 ⋮。 */}
+        {isMdNote && (
+          <NoteTopBar
+            title={title}
+            titleHint={page.path || title}
+            saving={saving}
+            canBack={canNavBack}
+            canForward={canNavForward}
+            onBack={() => onNavBack?.()}
+            onForward={() => onNavForward?.()}
+            preview={preview}
+            onToggleView={() => setPreview(v => !v)}
+            showInline={!preview && writingMode === 'source'}
+            inlineOn={s.aiAssistantInlineSuggest !== false}
+            inlineBusy={inlineBusy}
+            inlinePaused={inlinePaused}
+            onToggleInline={handleToggleInline}
+            moreOpen={showMoreMenu}
+            onToggleMore={() => setShowMoreMenu(v => !v)}
+            onCloseMore={() => { setShowMoreMenu(false); setShowFmtMenu(false) }}
+            moreMenu={(
+              <>
+                <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">页面</div>
+                {!isWelcomeHtml && !isArchiveFile && (
+                  <button onClick={() => { handleToggleStar(); setShowMoreMenu(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    <Star key={page.isStarred ? 'on' : 'off'} size={13} className={`kb-micro-pop ${page.isStarred ? 'text-[var(--warning)]' : ''}`} fill={page.isStarred ? 'currentColor' : 'none'} />
+                    {page.isStarred ? '取消收藏' : '收藏页面'}
+                  </button>
+                )}
+                {!vaultMode && (
+                  <button onClick={() => { setShowBacklinks(true); setLinkPickerOpen(true); setShowMoreMenu(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    <Link2 size={13} />添加关联
+                  </button>
+                )}
+                {onRequestReading && (
+                  <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    <BookOpen size={13} />沉浸阅读
+                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">Ctrl+Shift+R</span>
+                  </button>
+                )}
+                {quizzes.length > 0 && (
+                  <button onClick={() => { setQuizMode(true); setShowMoreMenu(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    <ListChecks size={13} />刷题模式
+                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">{quizzes.length} 题</span>
+                  </button>
+                )}
+
+                <div className="my-1 border-t border-[var(--border-color)]" />
+                <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">写作</div>
+                {!preview && (
+                  <button onClick={() => { insertFootnote(); setShowMoreMenu(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    <StickyNote size={13} />插入脚注
+                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">Ctrl+Alt+F</span>
+                  </button>
+                )}
+                {!preview && (
+                  <button onClick={() => { imageInputRef.current?.click(); setShowMoreMenu(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    <ImagePlus size={13} />插入图片
+                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">Ctrl+Shift+I</span>
+                  </button>
+                )}
+                {/* 文件格式：二级子菜单，往**左**展开 —— 菜单本身贴右缘，往右会出屏（同原型） */}
+                <div className="relative" onMouseLeave={() => setShowFmtMenu(false)}>
+                  <button
+                    onMouseEnter={() => setShowFmtMenu(true)}
+                    onClick={() => setShowFmtMenu(v => !v)}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
+                  >
+                    <FileText size={13} />文件格式
+                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">{getFileTypeInfo(fileType).label}</span>
+                    <ChevronRight size={12} className="opacity-60" />
+                  </button>
+                  {showFmtMenu && (
+                    <div className="kb-pop absolute right-[calc(100%+4px)] top-[-5px] z-50 max-h-64 w-36 overflow-y-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-xl">
+                      {FILE_LANG_OPTIONS.map(opt => (
+                        <button key={opt.ext || 'md'}
+                          onClick={() => { applyFileType(opt.ext, opt.label); setShowMoreMenu(false); setShowFmtMenu(false) }}
+                          className={`w-full px-3 py-1.5 text-left text-[12px] transition-colors ${fileType === opt.ext ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
+                        >{opt.label}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="my-1 border-t border-[var(--border-color)]" />
+                <button onClick={() => { setShowMoreMenu(false); handleDelete() }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--danger)]/10 hover:text-[var(--danger)] transition-colors">
+                  <Trash2 size={13} />删除页面
+                </button>
+              </>
+            )}
+          />
+        )}
         {/* Content */}
         {isMindMapFile && page?.path ? (
           /* 思维导图 JSON：按内容识别（kind:"mindmap"）→ 渲染共享 MindMapView。
@@ -1342,6 +1512,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               onDropImage={handleImageToMarkdown}
               inlineSuggestEnabled={s.aiAssistantInlineSuggest !== false}
               inlineSuggestAuto={s.aiAssistantInlineSuggestAuto !== false}
+              onFileType={(ext) => applyFileType(ext)}
               onInlineSuggestBusy={setInlineBusy}
               onInlineSuggestPaused={handleInlinePaused}
               layoutKey={editRevealTick}

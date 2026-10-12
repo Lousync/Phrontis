@@ -21,6 +21,11 @@ export function ShortcutsView() {
           <Row keys={['Ctrl', 'S']} desc="立即保存当前页面" />
           <Row keys={['Ctrl', '/']} desc="切换 Markdown 预览（仅 md / txt 文件）" />
           <Row keys={['Escape']} desc="关闭弹窗后返回页面列表" />
+          {/* 2026-10-11 笔记区顶栏改造的配套快捷键（拍板 D2 页面历史 / E2 插图脚注的键盘补偿） */}
+          <Row keys={['Alt', '←']} desc="页面历史：后退（笔记区顶栏最左那颗箭头）" />
+          <Row keys={['Alt', '→']} desc="页面历史：前进" />
+          <Row keys={['Ctrl', 'Shift', 'I']} desc="插入图片（顶栏 ⋮ 里也有）" />
+          <Row keys={['Ctrl', 'Alt', 'F']} desc="插入脚注（先选中词语；顶栏 ⋮ 里也有）" />
         </Group>
 
         <Group anchor="shortcuts.kbSidebar" label="知识库 — 侧栏">

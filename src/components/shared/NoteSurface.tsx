@@ -53,10 +53,12 @@ interface Props {
   onInlineSuggestBusy?: (busy: boolean) => void
   onInlineSuggestPaused?: (paused: boolean) => void
   layoutKey?: number
+  /** 右键菜单「文件格式」的落点（拍板 C2：⋮ 与右键菜单两处都有）；缺省则菜单不显示该组 */
+  onFileType?: (ext: string) => void
 }
 
 export const NoteSurface = forwardRef<NoteSurfaceHandle, Props>(function NoteSurface(
-  { doc, onChange, mode, fontSize, editorOptions, onPasteImage, onDropImage, inlineSuggestEnabled, inlineSuggestAuto, onInlineSuggestBusy, onInlineSuggestPaused, layoutKey },
+  { doc, onChange, mode, fontSize, editorOptions, onPasteImage, onDropImage, inlineSuggestEnabled, inlineSuggestAuto, onInlineSuggestBusy, onInlineSuggestPaused, onFileType, layoutKey },
   ref,
 ) {
   const monacoRef = useRef<MonacoPaneHandle | null>(null)
@@ -152,7 +154,7 @@ export const NoteSurface = forwardRef<NoteSurfaceHandle, Props>(function NoteSur
         />
       )}
       {menu && (
-        <NoteContextMenu x={menu.x} y={menu.y} engine={menu.engine} onClose={() => setMenu(null)} />
+        <NoteContextMenu x={menu.x} y={menu.y} engine={menu.engine} onFileType={onFileType} onClose={() => setMenu(null)} />
       )}
     </>
   )
