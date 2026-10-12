@@ -147,9 +147,9 @@ export default function App() {
   const splitContainerRef = useRef<HTMLDivElement | null>(null)
   const splitActive = groups.length > 1
   // 单栏：模块容器沿用 flex-1 撑满（现状）；两栏：按所属组 order + flexGrow=ratio 排布，分隔条插在中间
-  const paneStyleFor = useCallback((gi: number): CSSProperties => splitActive
+  const paneStyleFor = useCallback((gi: number, on: boolean): CSSProperties => on
     ? { order: gi * 2, flexGrow: gi === 0 ? splitRatio : 1 - splitRatio, flexShrink: 1, flexBasis: 0 }
-    : {}, [splitActive, splitRatio])
+    : {}, [splitRatio])
   // 右键菜单锚点（页面条条目）
   const [pbMenu, setPbMenu] = useState<{ x: number; y: number; gid: 'g1' | 'g2'; tabId: string } | null>(null)
   const openPageBarMenu = (e: { clientX: number; clientY: number }, gid: 'g1' | 'g2', tabId: string) =>
@@ -1427,6 +1427,8 @@ export default function App() {
       一样**与工作台平级**——激活时整窗独占（左右栏与标签条隐藏，见 suppressSides），
       不再呈现为「工作台内的子模块」；EXCLUDED 同时承担「不登记为标签页」的过滤。 */
   const fullWindowTab = activeTab !== null && WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)
+  // 分屏实际生效的排布开关：整窗模块激活时暂隐分屏（按现状整窗渲染），组状态原样保留，切回即恢复（计划 §6.1）
+  const layoutSplit = splitActive && !fullWindowTab
 
   /**
    * 看板↔工作台的过渡编排（2026-09-27）：
@@ -1606,18 +1608,20 @@ export default function App() {
       default: return null
     }
   }
-  /** 槽位级保活挂载：首次出现在任意栏后常驻（display:none 保活） */
-  function renderMounted(name: TabName, on: boolean) {
-    if (on) mountedTabs.current.add(name)
-    if (!on && !mountedTabs.current.has(name)) return null
+  /** 槽位级保活挂载：首次出现在任意栏后常驻（display:none 保活）。
+   *  分屏下 active 与 visible 分离：visible=该模块出现在某栏（决定 display 与保活），
+   *  active=它属于**焦点组**（决定左栏侧栏槽归属 / isActive 语义）——两栏可见但只有一栏是焦点。 */
+  function renderMounted(name: TabName, active: boolean, visible: boolean) {
+    if (visible) mountedTabs.current.add(name)
+    if (!visible && !mountedTabs.current.has(name)) return null
     // Suspense 不产生 DOM 节点，容器布局与改前一致；fallback 只在该模块 chunk 首次拉取期间出现。
     // 切 Tab 动效（docs/ui-animation-plan.md A 类）：display:none → 显示时浏览器会重新起播 CSS 动画，
     // 所以同一个 kb-view-fade 类在每次切换时自动重放，无需卸载重建（保活语义不变）。
     // 这里用**纯淡入**而非 kb-view-in：模块容器内含 Monaco / PDF canvas / 插件 iframe，
     // 位移动画会把整棵子树提升为合成层重新栅格化（见计划文档 §五 风险表）。
     return (
-      <div key={name} className="kb-view-fade flex-1 min-h-0" style={on ? undefined : { display: 'none' }}>
-        <Suspense fallback={<ModuleLoadingFallback />}>{renderModuleContent(name, on)}</Suspense>
+      <div key={name} className="kb-view-fade flex-1 min-h-0" style={visible ? undefined : { display: 'none' }}>
+        <Suspense fallback={<ModuleLoadingFallback />}>{renderModuleContent(name, active)}</Suspense>
       </div>
     )
   }
@@ -1910,20 +1914,22 @@ export default function App() {
                       // 保活 + 分屏：容器恒为同一父节点的 keyed 数组；可见性 = 某组的 active；
                       // 两栏时用 flex order + flexGrow(ratio) 排布，**绝不换父节点**（换父=重挂=useState 归零）。
                       const gi = groups.findIndex((g) => g.active === t)
-                      const visible = gi !== -1
+                      // 整窗模块激活时（fullWindowTab）只有焦点组的模块可见，其余暂隐（组状态不丢）
+                      const visible = gi !== -1 && (!fullWindowTab || groups[gi].id === activeGroupId)
                       return (
                         <div
                           key={t}
                           data-pane="main"
                           data-group={visible ? groups[gi].id : undefined}
                           className="relative flex min-h-0 flex-1 flex-col"
-                          style={{ display: visible ? undefined : 'none', minWidth: 0, ...(visible ? paneStyleFor(gi) : null) }}
+                          style={{ display: visible ? undefined : 'none', minWidth: 0, ...(visible ? paneStyleFor(gi, layoutSplit) : null) }}
+                          onMouseDown={() => { if (activeGroupId !== groups[gi].id) { setActiveGroupId(groups[gi].id); activeGroupIdRef.current = groups[gi].id } }}
                         >
-                          {renderMounted(t, t === activeTab)}
+                          {renderMounted(t, t === activeTab, visible)}
                         </div>
                       )
                     })}
-                    {splitActive && (
+                    {layoutSplit && (
                       <div
                         key="__pane_divider"
                         className={`kb-pane-divider${splitOrientation === 'column' ? ' is-col' : ''}`}
@@ -1932,7 +1938,8 @@ export default function App() {
                         aria-hidden
                       />
                     )}
-                    {/* 工具标签宿主（批次4，保活）：**绝对定位铺满主栏区域**，不参与上面的 flex 流。
+                    {/* 工具标签宿主（批次4，保活）：分屏下作为**焦点栏的 flex 子项**（order/flexGrow=ratio），
+                        落在焦点栏而不是铺满整个内容区（否则会盖住另一栏的可视模块）。
                         激活的可见，其余已开工具 display:none 常驻（工具内状态如密码本解锁态不丢）。
                         ⚠️ 门条件必须含 activeToolTab 本身（2026-09-28 实锤）：只看 mountedToolTabs.size
                         是「鸡生蛋」死门——容器块被 ref 空集拦住 → renderToolMounted 永远不被调用 →
@@ -1940,8 +1947,8 @@ export default function App() {
                         （0 console error，纯渲染门死锁，e2dad19 引入）。 */}
                     {(activeToolTab || mountedToolTabs.current.size > 0) && (
                       <div
-                        className="absolute inset-y-0 left-0 z-20 flex min-h-0 w-full flex-col"
-                        style={{ display: activeToolTab ? undefined : 'none' }}
+                        className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+                        style={{ display: activeToolTab ? undefined : 'none', ...paneStyleFor(groups.findIndex((g) => g.id === activeGroupId), layoutSplit) }}
                       >
                         {activeToolTab && renderToolMounted(activeToolTab, true)}
                         {Array.from(mountedToolTabs.current)
@@ -1949,9 +1956,9 @@ export default function App() {
                           .map((t) => renderToolMounted(t, false))}
                       </div>
                     )}
-                    {/* 全关空态（2026-09-17 拍板③）：无激活模块且无工具标签时显示引导页；
+                    {/* 全关空态（2026-09-17 拍板③）：**所有组均无激活**且无工具标签时显示引导页；
                         绝对定位铺满主栏区域（不参与 flex 流，避免挤动两栏几何）。 */}
-                    {activeTab === null && !activeToolTab && (
+                    {!activeToolTab && groups.every((g) => g.active === null) && (
                       /* 空态只留图标（2026-09-19 反馈：不要文字说明，页面简画） */
                       <div
                         className="absolute inset-y-0 left-0 z-20 flex w-full flex-col items-center justify-center pb-16"
