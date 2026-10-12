@@ -1544,7 +1544,7 @@ export default function App() {
     switch (name) {
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} splitActive={splitActive} onSplitModule={(o) => { const g = groups.find((x) => x.tabs.includes('knowledge')); splitTabToNewGroup(g?.id ?? activeGroupIdRef.current, 'knowledge', o) }} onMergePanes={mergeGroupsToPrimary} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} splitActive={splitActive} onSplitModule={(o) => { const g = groups.find((x) => x.tabs.includes('knowledge')); splitTabToNewGroup(g?.id ?? activeGroupIdRef.current, 'knowledge', o) }} onMergePanes={mergeGroupsToPrimary} splitDisabled={splitActive || (groups.find((x) => x.tabs.includes('knowledge'))?.tabs.length ?? 0) <= 1} />
       case 'moments': return <MomentsModule />
       case 'bookshelf': return (
         <BookshelfModule
@@ -1670,11 +1670,16 @@ export default function App() {
     )
   }
 
+  // 拆分项置灰条件：已两栏，或源栏只剩这一个标签（移走会清空 → 被自动合并 = 点了没反应）
+  const splitDisabledFor = (gid: 'g1' | 'g2') => {
+    const g = groups.find((x) => x.id === gid)
+    return splitActive || !g || g.tabs.length <= 1
+  }
   const pbMenuItems: FileMenuEntry[] = pbMenu ? (() => {
     const { gid, tabId } = pbMenu
     const items: FileMenuEntry[] = [
-      { key: 'split-right', label: '向右拆分', icon: <Columns2 size={15} />, disabled: splitActive, onSelect: () => splitTabToNewGroup(gid, tabId, 'row') },
-      { key: 'split-down', label: '向下拆分', icon: <Rows2 size={15} />, disabled: splitActive, onSelect: () => splitTabToNewGroup(gid, tabId, 'column') },
+      { key: 'split-right', label: '向右拆分', icon: <Columns2 size={15} />, disabled: splitDisabledFor(gid), onSelect: () => splitTabToNewGroup(gid, tabId, 'row') },
+      { key: 'split-down', label: '向下拆分', icon: <Rows2 size={15} />, disabled: splitDisabledFor(gid), onSelect: () => splitTabToNewGroup(gid, tabId, 'column') },
     ]
     if (splitActive) {
       items.push({ separator: true })

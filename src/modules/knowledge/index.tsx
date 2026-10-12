@@ -73,7 +73,7 @@ interface PageInfo {
   fileType: string
 }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, splitActive = false, onSplitModule, onMergePanes }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; splitActive?: boolean; onSplitModule?: (orientation: 'row' | 'column') => void; onMergePanes?: () => void }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, splitActive = false, onSplitModule, onMergePanes, splitDisabled = false }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; splitActive?: boolean; onSplitModule?: (orientation: 'row' | 'column') => void; onMergePanes?: () => void; splitDisabled?: boolean }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -2354,11 +2354,11 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
           >
             {onSplitModule && (
               <>
-                <button disabled={splitActive} onClick={() => { setTabCtx(null); onSplitModule('row') }}
+                <button disabled={splitDisabled} onClick={() => { setTabCtx(null); onSplitModule('row') }}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-40">
                   <Columns2 size={13} className="text-[var(--text-muted)]" />向右拆分
                 </button>
-                <button disabled={splitActive} onClick={() => { setTabCtx(null); onSplitModule('column') }}
+                <button disabled={splitDisabled} onClick={() => { setTabCtx(null); onSplitModule('column') }}
                   className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-40">
                   <Rows2 size={13} className="text-[var(--text-muted)]" />向下拆分
                 </button>

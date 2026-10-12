@@ -148,6 +148,9 @@ const srcKb = stripComments(read('src/modules/knowledge/index.tsx'))
 ok(/onSplitModule\?:\s*\(orientation:\s*'row'\s*\|\s*'column'\)\s*=>\s*void/.test(srcKb), 'F1 KnowledgeModule 暴露 onSplitModule prop')
 ok(/向右拆分/.test(srcKb) && /向下拆分/.test(srcKb), 'F2 知识库页签右键菜单含向右/向下拆分')
 ok(/onSplitModule=\{\(o\)\s*=>/.test(srcApp), 'F3 App 向 KnowledgeModule 传 onSplitModule（页签右键可触发分屏）')
+ok(/const\s+splitDisabledFor\s*=\s*\(gid/.test(srcApp) && /disabled:\s*splitDisabledFor\(gid\)/.test(srcApp), 'F4 源栏仅剩一个标签时拆分项置灰（避免空合并「点了没反应」）')
+ok(/splitDisabled=\{splitActive\s*\|\|/.test(srcApp), 'F5 App 向 KnowledgeModule 传 splitDisabled')
+ok(/disabled=\{splitDisabled\}/.test(srcKb), 'F6 知识库拆分项受 splitDisabled 控制')
 
 /* ================= 结果 ================= */
 console.log(`\n==== 分屏契约：通过 ${pass}，失败 ${fails.length} ====`)
