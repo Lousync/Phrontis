@@ -330,6 +330,17 @@ async function main() {
   const stBack = await evalJs(JS_STATE)
   ok(stBack.codeCard >= 1 && stBack.codeblock === 0, 'P5c 光标移开后代码块变回卡片', JSON.stringify({ card: stBack.codeCard, block: stBack.codeblock }))
 
+  // ---- P5d 查找面板：真键盘 Ctrl+F 打开、Esc 关闭（源码档 Monaco 的 find widget 对齐项）----
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'f', code: 'KeyF', windowsVirtualKeyCode: 70, nativeVirtualKeyCode: 70, modifiers: 2 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'f', code: 'KeyF', windowsVirtualKeyCode: 70, nativeVirtualKeyCode: 70, modifiers: 2 })
+  const searchOpened = await waitFor(`!!document.querySelector('.cm-panel.cm-search')`, 4000)
+  const searchInputFocused = await evalJs(`document.activeElement === document.querySelector('.cm-panel.cm-search input[name=search]')`)
+  ok(searchOpened, 'P5d ★ 即时渲染档 Ctrl+F 打开查找面板（.cm-panel.cm-search）', String(searchOpened))
+  ok(searchInputFocused, 'P5d2 打开后焦点落在查找输入框（可直接打字）', String(searchInputFocused))
+  await pressEscape()
+  const searchClosed = await waitFor(`!document.querySelector('.cm-panel.cm-search')`, 4000)
+  ok(searchClosed, 'P5d3 Esc 关闭查找面板', String(searchClosed))
+
   // ---- P6 即时渲染档右键 + 真插入一条分隔线 ----
   await evalJs(`(() => {
     const el = document.querySelector('.cm-content')

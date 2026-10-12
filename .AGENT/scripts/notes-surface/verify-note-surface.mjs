@@ -340,6 +340,9 @@ ok(SRC_LIVE.includes("from 'highlight.js/lib/common'"), 'C11m 代码高亮与预
 ok(SRC_LIVE.includes('new CodeBlockWidget'), 'C11n 围栏代码块走卡片 widget（与预览同构 DOM）')
 ok(SRC_LIVE.includes("['•', '○', '▪']"), 'C11o 无序列表按层换标记（• / ○ / ▪）')
 ok(SRC_LIVE.includes('[-*+]\\s+\\[[ xX]\\]'), 'C11p 任务行不再画项目符号（双标记修复）')
+ok(SRC_LIVE.includes("from '@codemirror/search'") && SRC_LIVE.includes('searchKeymap') && SRC_LIVE.includes('search({ top: true })'),
+  'C11q 查找面板接线（Ctrl+F，与源码档 Monaco find widget 对齐）')
+ok(SRC_LIVE.includes('listDepth') && SRC_LIVE.includes('orderedMarker'), 'C11r 列表层级走语法树祖先链 + 有序重编号')
 
 // ===================== 结果 =====================
 

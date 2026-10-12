@@ -25,6 +25,8 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { syntaxTree, foldGutter, foldKeymap, indentOnInput, bracketMatching } from '@codemirror/language'
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, startCompletion } from '@codemirror/autocomplete'
+// 查找：源码档 Monaco 自带 find widget（Ctrl+F），即时渲染档此前没有对应能力 —— 2026-10-11 补齐
+import { search, searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import katex from 'katex'
 // 代码块语法高亮：与阅读态预览**同一个库、同一套配色**（预览侧 rehype-highlight 底层就是 highlight.js），
 // 于是「即时渲染档的代码卡片」与预览逐色一致。`lib/common` 是官方「常用语言」入口（约 37 种，
@@ -627,6 +629,39 @@ function liveTheme(): Extension {
       fontSize: '12px',
     },
     '.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: 'var(--bg-selected)', color: 'var(--text-primary)' },
+    // 查找面板（Ctrl+F）：CM6 自带面板是浅色默认样式，这里换成应用 token，与源码档 Monaco 的 find widget 观感一致
+    '.cm-panels': {
+      backgroundColor: 'var(--bg-secondary)',
+      color: 'var(--text-primary)',
+      borderTop: '1px solid var(--border-color)',
+    },
+    '.cm-panel.cm-search': { padding: '6px 8px', fontSize: '12px' },
+    '.cm-panel.cm-search input, .cm-panel.cm-search button, .cm-panel.cm-search label': { fontSize: '12px' },
+    // ★ CM6 的查找输入框**没有 type 属性**（只设 name），选择器别写 input[type=text] —— 会一条都不命中
+    '.cm-panel.cm-search input': {
+      backgroundColor: 'var(--input-bg)',
+      color: 'var(--text-primary)',
+      border: '1px solid var(--border-color)',
+      borderRadius: '4px',
+      padding: '2px 6px',
+      outline: 'none',
+    },
+    '.cm-panel.cm-search button': {
+      backgroundColor: 'var(--bg-tertiary)',
+      color: 'var(--text-primary)',
+      border: '1px solid var(--border-color)',
+      borderRadius: '4px',
+      padding: '2px 8px',
+      cursor: 'pointer',
+    },
+    '.cm-panel.cm-search button:hover': { backgroundColor: 'var(--bg-hover)' },
+    '.cm-panel.cm-search label': { color: 'var(--text-secondary)' },
+    '.cm-panel.cm-search [name=close]': { color: 'var(--text-secondary)', fontSize: '16px', padding: '0 6px' },
+    '.cm-searchMatch': {
+      backgroundColor: 'color-mix(in srgb, var(--warning) 32%, transparent)',
+      outline: '1px solid color-mix(in srgb, var(--warning) 55%, transparent)',
+    },
+    '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'color-mix(in srgb, var(--accent) 45%, transparent)' },
   })
 }
 
@@ -679,6 +714,9 @@ export const LiveMarkdownPane = forwardRef<NoteEngineHandle, LiveMarkdownPanePro
       EditorView.lineWrapping,
       markdown({ base: markdownLanguage, addKeymap: true }),
       autocompletion({ override: [wikiCompletionSource as never], activateOnTyping: true, closeOnBlur: true }),
+      // 查找（Ctrl+F / Ctrl+G 下一个 / Esc 关闭）+ 选中词自动高亮 —— 与源码档 Monaco 的 find widget 对齐
+      search({ top: true }),
+      highlightSelectionMatches(),
       livePreviewField,
       liveViewportPlugin,
       // 字号固定 1rem（= 根字号）：不再随「编辑器字号」设置变化，故不需要 Compartment 重配置
@@ -694,7 +732,7 @@ export const LiveMarkdownPane = forwardRef<NoteEngineHandle, LiveMarkdownPanePro
         { key: 'Mod-Alt-3', run: (v) => { runCmAction(v, 'para-h3'); return true } },
         { key: 'Mod-Alt-0', run: (v) => { runCmAction(v, 'para-text'); return true } },
       ])),
-      keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...foldKeymap, ...completionKeymap, indentWithTab]),
+      keymap.of([...closeBracketsKeymap, ...searchKeymap, ...defaultKeymap, ...historyKeymap, ...foldKeymap, ...completionKeymap, indentWithTab]),
       // 图片粘贴 / 拖拽（复用宿主的 editorImage 业务函数）
       EditorView.domEventHandlers({
         paste: (e, view) => {

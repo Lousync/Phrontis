@@ -115,6 +115,11 @@ export const RELEASE_NOTES = [
             "lead": "编辑器内快捷键",
             "rest": "`Ctrl+B` 加粗、`Ctrl+I` 斜体、`Ctrl+K` 外部链接、`Ctrl+Alt+1/2/3/0` 标题与正文（两档一致）",
             "sub": []
+          },
+          {
+            "lead": "查找（Ctrl+F）",
+            "rest": "即时渲染档也能 `Ctrl+F` 打开查找面板（`Ctrl+G` / `F3` 下一个、`Esc` 关闭），选中文字自动高亮同名处 —— 与源码档 Monaco 的 find widget 对齐",
+            "sub": []
           }
         ]
       },
