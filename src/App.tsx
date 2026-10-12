@@ -465,6 +465,23 @@ export default function App() {
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
   }, [])
+  // 页面级分屏持久化：settings 就绪后恢复一次；此后变化写回 wbLayout.pageSplit。
+  const pageSplitRestoredRef = useRef(false)
+  useEffect(() => {
+    if (!settingsReady || pageSplitRestoredRef.current) return
+    pageSplitRestoredRef.current = true
+    const ps = wbLayout.pageSplit
+    if (!ps) return
+    setPageSplit({ orientation: ps.orientation, ratio: ps.ratio, secondaryPageIds: ps.secondaryPageIds, secondaryActiveId: ps.secondaryActiveId ?? ps.secondaryPageIds[0] ?? null })
+  }, [settingsReady, wbLayout])
+  useEffect(() => {
+    if (!settingsReady || !pageSplitRestoredRef.current) return
+    const next = pageSplit
+      ? { orientation: pageSplit.orientation, ratio: pageSplit.ratio, secondaryPageIds: pageSplit.secondaryPageIds, secondaryActiveId: pageSplit.secondaryActiveId }
+      : null
+    if (JSON.stringify(wbLayout.pageSplit ?? null) === JSON.stringify(next)) return
+    update('workbenchLayout', JSON.stringify({ ...wbLayout, pageSplit: next }))
+  }, [settingsReady, pageSplit, wbLayout, update])
 
   // 启动检测当前仓库：无 → 仓库选择页（VaultPicker，新老用户统一）；有且开启「每次启动选择仓库」→ 启动形态选择页
   // sessionStorage 一次性标记：应用内切库会整窗 reload（数据激活重读约定），热重载不再打扰；冷启动才重新出页
