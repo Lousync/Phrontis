@@ -23,6 +23,38 @@ function formatSize(bytes?: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
+/**
+ * 文件信息行（路径 / 尺寸 / 修改时间）—— 元信息卡与页面 `⋮` 的「文件信息」弹层**同源**（批 1，2026-10-12）。
+ *
+ * 为什么抽出来：批 1 之后非 md 文本类不再落元信息卡（直接进可编辑落点），
+ * 但「这个文件多大 / 在哪 / 什么时候改的」仍是用户要的信息，收进 `⋮` 里给。
+ * 两处各写一份必然漂移（本项目已因「清单各持一份」吃过多次 drift，见 aiTextExts.ts 头注）。
+ *
+ * `formatSize` 保持模块私有：外部要展示尺寸一律走本组件，不另抄一份换算。
+ */
+export function FileInfoRows({ path, sizeBytes, updatedAt, className = '' }: {
+  path?: string
+  sizeBytes?: number
+  updatedAt?: string
+  className?: string
+}) {
+  return (
+    <div className={`space-y-1.5 ${className}`}>
+      {path && (
+        <div className="flex items-center gap-2 text-[11.5px] text-[var(--text-secondary)] min-w-0">
+          <Archive size={12} className="shrink-0 text-[var(--text-muted)]" />
+          <span className="truncate" title={path}>{path}</span>
+        </div>
+      )}
+      <div className="flex items-center gap-2 text-[11.5px] text-[var(--text-secondary)]">
+        <HardDrive size={12} className="shrink-0 text-[var(--text-muted)]" />
+        <span>{formatSize(sizeBytes)}</span>
+        {updatedAt && <span className="text-[var(--text-muted)]">· 修改于 {new Date(updatedAt).toLocaleString()}</span>}
+      </div>
+    </div>
+  )
+}
+
 export function FileMetaCard({ title, fileType, path, updatedAt, sizeBytes, viewable = false, onView, onOpenInSystem, onRevealInFolder }: {
   title: string
   fileType: string
@@ -63,19 +95,7 @@ export function FileMetaCard({ title, fileType, path, updatedAt, sizeBytes, view
           </div>
         </div>
 
-        <div className="space-y-1.5 mb-5">
-          {path && (
-            <div className="flex items-center gap-2 text-[11.5px] text-[var(--text-secondary)] min-w-0">
-              <Archive size={12} className="shrink-0 text-[var(--text-muted)]" />
-              <span className="truncate" title={path}>{path}</span>
-            </div>
-          )}
-          <div className="flex items-center gap-2 text-[11.5px] text-[var(--text-secondary)]">
-            <HardDrive size={12} className="shrink-0 text-[var(--text-muted)]" />
-            <span>{formatSize(sizeBytes)}</span>
-            {updatedAt && <span className="text-[var(--text-muted)]">· 修改于 {new Date(updatedAt).toLocaleString()}</span>}
-          </div>
-        </div>
+        <FileInfoRows path={path} sizeBytes={sizeBytes} updatedAt={updatedAt} className="mb-5" />
 
         {/* 主按钮：仅文本类出现（二进制无处可「查看」） */}
         {viewable && (

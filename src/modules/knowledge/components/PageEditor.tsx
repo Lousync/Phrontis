@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { Trash2, Eye, Edit3, Star, FileText, ChevronDown, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, MoreHorizontal, ListChecks, Sparkles } from 'lucide-react'
+import { Trash2, Eye, Edit3, Star, FileText, ChevronDown, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, MoreHorizontal, ListChecks, Sparkles, Info, FolderSearch, Copy } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
@@ -19,7 +19,7 @@ import { visibleKnowledgeTags } from '../../../lib/knowledgeTags'
 import { ConfirmDialog } from '../../../components/shared'
 import { ResizablePanel } from '../../../components/shared/ResizablePanel'
 import { WelcomeHtmlView } from './WelcomeHtmlView'
-import { FileMetaCard } from './FileMetaCard'
+import { FileMetaCard, FileInfoRows } from './FileMetaCard'
 import { NoteTopBar } from './NoteTopBar'
 import { ArchiveTextView } from './ArchiveTextView'
 import { isTextViewableExt } from '../../../lib/aiTextExts'
@@ -87,13 +87,33 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
-  /** 归档「查看内容」态（B-3）：见下方 isArchiveTextView；换页重置，不跨页继承展开态 */
-  const [archiveShowContent, setArchiveShowContent] = useState(false)
   const [fileType, setFileTypeState] = useState(initialFileType)
   const [showLangMenu, setShowLangMenu] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   /** 顶栏 ⋮ 里「文件格式」二级子菜单（拍板 C2：⋮ 与编辑器右键菜单两处都有） */
   const [showFmtMenu, setShowFmtMenu] = useState(false)
+  /** ⋮ 里「文件信息」小卡（批 1）：文本类不再落元信息卡后，路径 / 尺寸 / 修改时间的落点 */
+  const [showFileInfo, setShowFileInfo] = useState(false)
+  /** html 的「源码 ⇄ 沙箱渲染」（批 1 拍板：默认仍是沙箱渲染，只加出口）。
+   *  换页重置——不同 html 之间不该继承上一个的源码态。 */
+  const [htmlSource, setHtmlSource] = useState(false)
+  useEffect(() => { setHtmlSource(false) }, [pageId])
+  /** 「文件信息」小卡的关闭：外点 / Esc（照 NoteTopBar 的 moreMenu 口径，捕获阶段不依赖冒泡顺序） */
+  useEffect(() => {
+    if (!showFileInfo) return
+    const onDown = (e: MouseEvent): void => {
+      const t = e.target as HTMLElement | null
+      if (t?.closest?.('[data-wb="peFileInfoCard"],[data-wb="peFileInfo"]')) return
+      setShowFileInfo(false)
+    }
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') setShowFileInfo(false) }
+    window.addEventListener('mousedown', onDown, true)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('mousedown', onDown, true)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [showFileInfo])
   // 知识库以阅读优先:md/txt 页面打开即预览(右上角眼睛或 Ctrl+E / Ctrl+/ 切回编辑;vault 模式就地保存)
   const [preview, setPreview] = useState(true)
   // startInEdit 的 ref 镜像：loadPage（useCallback 依赖不含该 prop）在 effect 里读最新值
@@ -208,11 +228,23 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   // 就地编辑（笔记合并 Phase 1，docs/notes-merge-phase1-design.md §1.1）：
   // vault 写路径三件套 = 当前仓库 rootId + 装载时的 frontmatter 前缀 + mtime 冲突基线
   const vaultRootRef = useRef<string | null>(null)
+  /** 渲染用 rootId —— **state，不是 ref**（批 1，2026-10-12 修竞态）。
+   *
+   *  病根：PDF 阅读器的渲染条件依赖 rootId，而 `vaultRootRef` 是 ref ⇒ 改它不触发重渲染。
+   *  而 rootId 与页面数据是 `loadPage` 里**两条并发 IPC 链**（`workspaceGetCurrent` vs
+   *  `getKnowledgePageById`），谁先落地不确定：页面数据先到就渲染一次，那时 rootId 还是 null
+   *  ⇒ 仓库内 PDF 落到「旧版附件不在仓库内，请使用本地工具打开」的降级分支，
+   *  之后 rootId 填上也**再没有一次重渲染**把它救回来。
+   *
+   *  `vaultRootRef` 保留：`doSave` / `handleArchiveOpenInSystem` 需要**同步**读它
+   *  （保存路径里不能再 await 一次当前仓库）。两者一律经 `adoptVaultRoot` 同步写入，不各写各的。 */
+  const [vaultRootId, setVaultRootId] = useState<string | null>(null)
+  const adoptVaultRoot = useCallback((id: string | null) => {
+    vaultRootRef.current = id
+    setVaultRootId(prev => (prev === id ? prev : id))
+  }, [])
   const vaultPrefixRef = useRef('')
   const vaultMtimeRef = useRef(0)
-
-  // 换页重置归档「查看内容」态（B-3）：归档页之间切换不该继承上一个的展开态
-  useEffect(() => { setArchiveShowContent(false) }, [pageId])
 
   /** 归档文件「在系统中打开」/「在文件夹中显示」（B-3 方案 B）：经主进程 ws:openInSystem
    *  （rootId + relPath → requireInside 解析后 shell.openPath / showItemInFolder）。
@@ -222,12 +254,25 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     if (!rel) { showToast({ type: 'warning', message: '该条目没有关联的仓库文件' }); return }
     if (!vaultRootRef.current) {
       const cur = await workspaceGetCurrent()
-      vaultRootRef.current = cur?.rootId ?? null
+      adoptVaultRoot(cur?.rootId ?? null)
     }
     const root = vaultRootRef.current
     if (!root) { showToast({ type: 'warning', message: '当前没有打开的仓库' }); return }
     const res = await workspaceOpenInSystem(root, rel, reveal)
     if (!res?.ok) showToast({ type: 'error', message: res?.error || '打开失败' })
+  }, [])
+
+  /** 复制仓库相对路径（批 1）：走主进程剪贴板通道（`src/lib/ipc.ts` 的 copyText）——
+   *  渲染层不直连 `navigator.clipboard`，与 noteActions 的剪贴板动作同一口径。 */
+  const handleCopyRelPath = useCallback(async () => {
+    const rel = pageRef.current?.path
+    if (!rel) { showToast({ type: 'warning', message: '该条目没有关联的仓库文件' }); return }
+    try {
+      const { copyText } = await import('../../../lib/ipc')
+      const ok = await copyText(rel)
+      if (ok) showToast({ type: 'success', message: '已复制相对路径', detail: rel })
+      else showToast({ type: 'error', message: '复制失败' })
+    } catch { showToast({ type: 'error', message: '复制失败' }) }
   }, [])
 
   const isCodeFile = fileType !== '' && fileType !== 'md' && fileType !== 'txt' && fileType !== 'pdf' && fileType !== 'xmind'
@@ -240,15 +285,37 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
    *  html 走同一沙箱 iframe（kbview 白名单③收清单内归档 html）；其余类型元信息卡，不进 Monaco/预览 */
   const isArchiveFile = page?.entryKind === 'file'
   const isArchiveHtml = isArchiveFile && fileType === 'html'
-  /** 归档文本类可在应用内**只读**查看（B-3 方案 A）：扩展名命中 TEXT_VIEWABLE_EXT_SET——
-   *  含 json / 配置类，比「AI 可读」名单宽（查看只需"能解码成文本"，不涉写入） */
+  /** 归档文本类：扩展名命中 TEXT_VIEWABLE_EXT_SET —— 批 1 起这是**可编辑落点的候选集合**。
+   *  含 json / 配置类，比「AI 可读」名单宽（只需"能解码成文本"，不涉写入）。
+   *  ★ 编辑入口就锁在这个集合内（批 1 拍板 2026-10-12）：主进程 `ws:writeFile` 没有扩展名白名单，
+   *  所以「能编辑哪些文件」这件事只由渲染层这一处决定 —— 改它就是改能力面，不是改样式。 */
   const isArchiveTextView = isArchiveFile && !isArchiveHtml && isTextViewableExt(fileType)
+
+  /** 文本类归档文件的**自读结果**（批 1）。索引对 entryKind:'file' 不读内容
+   *  （knowledgeIndex.ts 注释「不读内容（二进制可能很大）」），所以落点只能由自读结果决定：
+   *    · `binary` / `oversize-open`（>50MB） ⇒ 退回元信息卡（无法按文本打开）
+   *    · `oversize-edit`（>10MB，主进程 `editable:false`） ⇒ ArchiveTextView 只读打开
+   *    · 其余 ⇒ 可编辑 MonacoPane（正文灌进 content，走既有脏状态机 + 自动保存）
+   *  `null` = 尚未读回 / 不适用。 */
+  const [textFile, setTextFile] = useState<{ editable: boolean; reason: 'binary' | 'oversize-open' | 'oversize-edit' | null } | null>(null)
+  /** html 的源码态：走文本落点（可编辑 MonacoPane）。默认 false = 沙箱渲染（拍板：默认不变，只加出口）。
+   *  欢迎页与归档 html 都适用（两者共用 WelcomeHtmlView 渲染分支）。 */
+  const htmlSourceEditable = (isWelcomeHtml || isArchiveHtml) && htmlSource && !!page?.path
+  /** 文本类是否走文本落点（可编辑 or 超限只读）—— 二进制 / 超大打开不进这里，落元信息卡 */
+  const archiveTextOpenable = isArchiveTextView && textFile !== null
+    && textFile.reason !== 'binary' && textFile.reason !== 'oversize-open'
+  /** 需要按需自读正文的目标：归档文本类 + html 源码态（两者的索引正文都是空的） */
+  const textSelfReadTarget = isArchiveTextView || htmlSourceEditable
+
   /** 就地编辑的共享宿主文档（P1b）：可编辑文本类 + 仓库内路径才走 MonacoPane；
-   *  modelPath 命名空间防与编辑器模块同名文件共享 Monaco model（onChange/外部监听会打架）。 */
-  const paneDoc = vaultMode && page?.path && !isWelcomeHtml && !isArchiveFile && !isPdfFile
+   *  modelPath 命名空间防与编辑器模块同名文件共享 Monaco model（onChange/外部监听会打架）。
+   *  批 1：归档文本类与 html 源码态也走这里，归档用 `kb://archive-edit/…`（与知识页正文隔离）。 */
+  const paneDoc = vaultMode && page?.path && !isPdfFile
+    && (!isWelcomeHtml || htmlSourceEditable)
+    && (!isArchiveFile || archiveTextOpenable || htmlSourceEditable)
     ? {
         relPath: page.path,
-        modelPath: `kb://knowledge/${page.path}`,
+        modelPath: isArchiveFile ? `kb://archive-edit/${page.path}` : `kb://knowledge/${page.path}`,
         content,
         language: getFileTypeInfo(fileType).monacoLang,
         binary: false,
@@ -275,6 +342,56 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     })()
     return () => { alive = false }
   }, [fileType, page?.path])
+
+  /** 文本类归档文件：按需自读 → 决定落点（批 1）。
+   *
+   *  为什么必须自读：索引对 `entryKind:'file'` 的正文恒为空，`loadPage` 灌进 content 的是 `''`，
+   *  不读就只会渲染出一个空编辑器。`ArchiveTextView` 用同一手法（「给 path 自读」约定）。
+   *
+   *  ★ 三条硬纪律：
+   *   ① **超限不灌 content**：>10MB 走 `ArchiveTextView` 自读，不把 10MB 字符串塞进本组件的
+   *      `content` state —— 那会让自动保存的脏态比较和一批派生计算（题号 / 双链）白跑一遍。
+   *   ② **绝不 `splitFrontmatter`**：非 md 没有 frontmatter 语义，而一个以 `---` 开头的 `.py`
+   *      会被切掉开头（`loadVaultBaseline` 只服务 md/txt，归档条目本就走 else 分支）。
+   *   ③ **同步 `savedContentRef`**：否则灌进 content 的那一刻，自动保存的 effect
+   *      （`content !== savedContentRef.current`）会立刻把刚读到的内容当成用户改动回写一次。 */
+  useEffect(() => {
+    if (!textSelfReadTarget || !page?.path) { setTextFile(null); return }
+    let alive = true
+    void (async () => {
+      try {
+        const cur = await workspaceGetCurrent()
+        const root = cur?.rootId ?? null
+        if (!root) return
+        adoptVaultRoot(root)
+        const r = await workspaceReadFile(root, page.path as string)
+        if (!alive) return
+        if (!r || r.error) { setTextFile({ editable: false, reason: 'binary' }); return }
+        if (r.truncated) { setTextFile({ editable: false, reason: 'oversize-open' }); return }
+        if (r.binary) { setTextFile({ editable: false, reason: 'binary' }); return }
+        if (r.editable === false) {
+          // >10MB：只读打开，正文交给 ArchiveTextView 自己读（纪律①）
+          setTextFile({ editable: false, reason: 'oversize-edit' })
+          return
+        }
+        const body = typeof r.content === 'string' ? r.content : ''
+        vaultPrefixRef.current = ''                       // 纪律②：非 md 无 frontmatter 前缀
+        vaultMtimeRef.current = typeof r.mtimeMs === 'number' && r.mtimeMs > 0 ? r.mtimeMs : 0
+        setContent(body)
+        savedContentRef.current = body                    // 纪律③
+        isDirtyRef.current = false
+        onContentChange?.(body)
+        /* 纪律④「文本类落地 = 直接编辑」（批 1 拍板）：`loadPage` 的 setPreview 规则是
+           `ft === 'txt'` ⇒ 阅读态，那是给 **txt 知识页**定的；归档 .txt 也要直接进编辑态，
+           否则用户点开一个仓库里的 .txt 先看到的是 Markdown 渲染（而 .txt 并无 Markdown 语义）。 */
+        setPreview(false)
+        setTextFile({ editable: true, reason: null })
+      } catch {
+        if (alive) setTextFile({ editable: false, reason: 'binary' })
+      }
+    })()
+    return () => { alive = false }
+  }, [textSelfReadTarget, page?.path, pageId])
   /** legacy 兜底分支（非 vault 旧数据）的 Monaco 实例；写作面操作一律走 paneRef 契约 */
   const activeEditor = () => editorRef.current
   /** 写作模式：设置值 + 文档类型门槛（即时渲染只对 Markdown 生效，其余一律源码档） */
@@ -315,7 +432,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     try {
       if (!vaultRootRef.current) {
         const cur = await workspaceGetCurrent()
-        vaultRootRef.current = cur?.rootId ?? null
+        adoptVaultRoot(cur?.rootId ?? null)
       }
       const root = vaultRootRef.current
       if (!root) return
@@ -336,7 +453,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     try {
       if (!vaultRootRef.current) {
         const cur = await workspaceGetCurrent()
-        vaultRootRef.current = cur?.rootId ?? null
+        adoptVaultRoot(cur?.rootId ?? null)
       }
       const root = vaultRootRef.current
       if (!root) return
@@ -375,7 +492,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     if (draftRelPath) { void loadDraftPage(draftRelPath, isReload); return }
     // vaultRoot 预热（PDF 内嵌阅读器需要 rootId；一次性，全局复用）
     if (vaultModeRef.current && !vaultRootRef.current) {
-      void workspaceGetCurrent().then(cur => { vaultRootRef.current = cur?.rootId ?? null }).catch(() => {})
+      void workspaceGetCurrent().then(cur => adoptVaultRoot(cur?.rootId ?? null)).catch(() => {})
     }
     Promise.all([
       getKnowledgePageById(pageId).then(p => {
@@ -1152,7 +1269,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               阅读态只留「编辑」单按钮（就地编辑，Phase 1 起写路径本就在本模块） */}
           {/* 更多操作:收藏 / 关联 / 沉浸阅读 / 删除 */}
           <div className="relative">
-            <button onClick={() => setShowMoreMenu(v => !v)}
+            <button data-wb="peMore" onClick={() => setShowMoreMenu(v => !v)}
               className={`p-1.5 rounded transition-colors ${showMoreMenu ? 'text-[var(--text-primary)] bg-[var(--bg-hover)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
               title="更多操作">
               <MoreHorizontal size={15} />
@@ -1187,6 +1304,41 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     <span className="ml-auto text-[10px] text-[var(--text-disabled)]">{quizzes.length} 题</span>
                   </button>
                 )}
+                {/* 「文件」组（批 1，2026-10-12）：非 md 的 ⋮ 在批 1 之前几乎是空的 ——
+                    关联/删除要 !vaultMode（知识库内恒 false）、收藏排除归档条目、文件格式同样要 !vaultMode。
+                    而 vaultMode 恒 true（knowledge/index.tsx「R6 D9 后恒 vault」）⇒ 仓库内 PDF/HTML/代码
+                    的 ⋮ 里只剩一条分隔线。这组把「在系统中打开 / 在文件夹中显示 / 复制相对路径」搬进来，
+                    并补上文本类不再落元信息卡后无处安放的「文件信息」。
+                    ★ 批 2 统一顶栏时这组**原样搬进**顶栏的 ⋮（锚点 data-wb 保持不变，探针可复用）。 */}
+                {!isMdNote && (
+                  <>
+                    <div className="my-1 border-t border-[var(--border-color)]" />
+                    <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">文件</div>
+                    {(isWelcomeHtml || isArchiveHtml) && (
+                      <button data-wb="peHtmlSource" onClick={() => { setHtmlSource(v => !v); setShowMoreMenu(false) }}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                        {htmlSource ? <Eye size={13} /> : <FileText size={13} />}
+                        {htmlSource ? '看渲染' : '看源码'}
+                      </button>
+                    )}
+                    <button data-wb="peFileInfo" onClick={() => { setShowFileInfo(true); setShowMoreMenu(false) }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                      <Info size={13} />文件信息
+                    </button>
+                    <button data-wb="peOpenInSystem" onClick={() => { void handleArchiveOpenInSystem(false); setShowMoreMenu(false) }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                      <ExternalLink size={13} />在系统中打开
+                    </button>
+                    <button data-wb="peRevealInFolder" onClick={() => { void handleArchiveOpenInSystem(true); setShowMoreMenu(false) }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                      <FolderSearch size={13} />在文件夹中显示
+                    </button>
+                    <button data-wb="peCopyRelPath" onClick={() => { void handleCopyRelPath(); setShowMoreMenu(false) }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                      <Copy size={13} />复制相对路径
+                    </button>
+                  </>
+                )}
                 <div className="my-1 border-t border-[var(--border-color)]" />
                 {!vaultMode && (
                   <button onClick={() => { setShowMoreMenu(false); handleDelete() }}
@@ -1194,6 +1346,16 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     <Trash2 size={13} />删除页面
                   </button>
                 )}
+              </div>
+            )}
+            {/* 「文件信息」小卡（批 1）：挂在同一个 relative 容器里，与 ⋮ 菜单同锚点 */}
+            {showFileInfo && (
+              <div data-wb="peFileInfoCard" className="absolute top-full right-0 z-50 mt-1 w-64 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
+                <FileInfoRows path={page?.path} sizeBytes={page?.sizeBytes} updatedAt={page?.updatedAt} />
+                <button onClick={() => setShowFileInfo(false)}
+                  className="mt-2.5 w-full rounded-md border border-[var(--border-color)] py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">
+                  关闭
+                </button>
               </div>
             )}
           </div>
@@ -1315,31 +1477,11 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           <div className="flex-1 min-h-0 flex">
             <MindMapView relPath={page.path} showSource />
           </div>
-        ) : isArchiveFile ? (
-          /* 归档非 md 文件：html 沙箱渲染（kbview 白名单③）；文本类可切只读内容视图（B-3 方案 A）；
-             其余（含二进制）元信息卡，卡上提供「在系统中打开 / 在文件夹中显示」（B-3 方案 B） */
-          isArchiveHtml && page?.path ? (
-            <WelcomeHtmlView path={page.path} />
-          ) : isArchiveTextView && archiveShowContent && page?.path ? (
-            <ArchiveTextView
-              path={page.path}
-              fileType={fileType}
-              fontSize={Math.round(s.editorFontSize * zoom)}
-              onBack={() => setArchiveShowContent(false)}
-            />
-          ) : (
-            <FileMetaCard
-              title={title}
-              fileType={fileType}
-              path={page?.path}
-              updatedAt={page?.updatedAt}
-              sizeBytes={page?.sizeBytes}
-              viewable={isArchiveTextView}
-              onView={() => setArchiveShowContent(true)}
-              onOpenInSystem={() => { void handleArchiveOpenInSystem(false) }}
-              onRevealInFolder={() => { void handleArchiveOpenInSystem(true) }}
-            />
-          )
+        ) : (isWelcomeHtml || isArchiveHtml) && page?.path ? (
+          /* html 两处落点在此**合流**（批 1）：欢迎页（唯一放行的仓库根 html）与归档 html 都走沙箱 iframe。
+             原先欢迎页分支排在 pdf 之后、归档 html 埋在 isArchiveFile 里 —— 合流后专门视图一律优先。
+             `htmlSource` 为真时返回 null，把这一格让给下方的 paneDoc 块（可编辑 MonacoPane 显示源码）。 */
+          htmlSource ? null : <WelcomeHtmlView path={page.path} />
         ) : isXmindFile ? (
           <div className="flex flex-col flex-1 overflow-hidden">
             <div className="flex-1 flex flex-col items-center justify-center gap-4 text-[var(--text-secondary)]">
@@ -1361,12 +1503,40 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               </button>
             </div>
           </div>
-        ) : isPdfFile && page?.path && vaultRootRef.current ? (
-          /* Phase 2 批次 2：PdfReaderView 内嵌（共享层组件，编辑器退役后知识库直接承载阅读）；
-             划词 AI / 续读进度 / 三模式全部随组件带来 */
+        ) : isPdfFile && page?.path && vaultRootId ? (
+          /* ★ 批 1 落点修正（2026-10-12）：这一段原本排在 `isArchiveFile` **之后**，
+             而仓库内的非 md 文件全是 entryKind:'file' ⇒ 本分支对仓库内 PDF **完全不可达**，
+             用户打开仓库里的 PDF 看到的是一张元信息卡。同一坑已踩过一次并留了记录（见上方导图分支注释
+             「会遮蔽导图分支」），导图那次补了、PDF 这次没补。
+             现在的顺序是：导图 → html → xmind → PDF → 文本类 → 元信息卡（兜底）。
+             ★ 条件用 `vaultRootId`（state）而不是 `vaultRootRef.current`：ref 变更不触发重渲染，
+             与页面数据的并发装载会造成「落到下方 legacy 分支就再也回不来」的竞态。 */
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-[var(--text-muted)]">正在加载阅读器…</div>}>
-            <PdfReaderView key={page.path} rootId={vaultRootRef.current} relPath={page.path} name={title || 'PDF 文档'} />
+            <PdfReaderView key={page.path} rootId={vaultRootId} relPath={page.path} name={title || 'PDF 文档'} />
           </Suspense>
+        ) : archiveTextOpenable && page?.path && textFile?.reason === 'oversize-edit' ? (
+          /* 文本类但超过编辑上限（>10MB，主进程 editable:false）：只读打开。
+             正文交给 ArchiveTextView 自读，**不灌进本组件的 content state**（见自读 effect 纪律①）。 */
+          <ArchiveTextView
+            path={page.path}
+            fileType={fileType}
+            fontSize={Math.round(s.editorFontSize * zoom)}
+            banner={`文件 ${Math.round((page.sizeBytes ?? 0) / 1024 / 1024)} MB，超过 10 MB 编辑上限，以只读方式打开`}
+          />
+        ) : isArchiveFile && !archiveTextOpenable ? (
+          /* 归档兜底（批 1 收口）：只有**无法按文本打开**的类型才落到这里 ——
+             二进制（detectBinary / %PDF- 头命中）、超过 50 MB 打开上限、以及未识别类型。
+             文本类已在上方各自的分支里被接走（可编辑落点直接落到下方的 paneDoc 块），
+             故本卡不再提供「查看内容」—— 那条两跳的路已被可编辑落点取代。 */
+          <FileMetaCard
+            title={title}
+            fileType={fileType}
+            path={page?.path}
+            updatedAt={page?.updatedAt}
+            sizeBytes={page?.sizeBytes}
+            onOpenInSystem={() => { void handleArchiveOpenInSystem(false) }}
+            onRevealInFolder={() => { void handleArchiveOpenInSystem(true) }}
+          />
         ) : isPdfFile ? (
           <div className="flex flex-col flex-1 overflow-hidden">
             <div className="flex items-center gap-2 px-2 py-1 border-b border-[var(--border-color)] shrink-0">
@@ -1393,9 +1563,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               </button>
             </div>
           </div>
-        ) : isWelcomeHtml && page?.path ? (
-          <WelcomeHtmlView path={page.path} />
         ) : preview ? (
+          /* 阅读态（仅 md / txt 知识页会走到这里；归档文本类已在自读 effect 里强制 preview=false，
+             即「文本类落地 = 直接编辑」）。欢迎页的 iframe 已上移到专门视图区，不再在此兜底。 */
           <div ref={previewRef} className="flex-1 overflow-y-auto px-6 pb-6 pt-14">
             <h1 className="text-xl font-bold text-[var(--text-primary)] mb-3">{title}</h1>
             <MarkdownPreview

@@ -7,6 +7,8 @@ import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribu
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { WelcomeHtmlView } from './components/WelcomeHtmlView'
 import { FileMetaCard } from './components/FileMetaCard'
+import { ArchiveTextView } from './components/ArchiveTextView'
+import { isTextViewableExt } from '../../lib/aiTextExts'
 import { registerAssistantContext } from '../../lib/assistantContext'
 import {
   getKnowledgeCategories, createKnowledgeCategory, updateKnowledgeCategory, deleteKnowledgeCategory,
@@ -1976,9 +1978,23 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             </div>
 
             {readingPage && (readingPage.entryKind ?? 'doc') === 'file' ? (
-              /* 归档非 md 文件（全类型归档 D1/D2）：html 沙箱渲染，其余元信息卡 */
+              /* 归档非 md 文件（全类型归档 D1/D2）：
+                 · html → 沙箱渲染
+                 · 文本类 → **只读文本视图**（批 1 修，2026-10-12）
+                 · 其余（二进制 / 超大 / 未识别）→ 元信息卡
+                 ★ 为什么要修：`enterReading` 明确放行 md / txt / html（见其内注释与那条
+                 「沉浸阅读仅支持 md / txt 页面」的提示），而这里原先对**所有** entryKind==='file'
+                 一律元信息卡 ⇒ 打开仓库里一个 `.txt` 再进沉浸阅读，屏幕上跳出的是一张
+                 「该文件不是 markdown 知识页，知识库中仅展示元信息」的卡。无竞态、必现。
+                 与 PageEditor 的内容分支同一处根因（归档兜底遮蔽了专门视图），故同批一起收口。 */
               (readingPage.fileType || '').toLowerCase() === 'html' && readingPage.path ? (
                 <WelcomeHtmlView path={readingPage.path} />
+              ) : readingPage.path && isTextViewableExt((readingPage.fileType || '').toLowerCase()) ? (
+                <ArchiveTextView
+                  path={readingPage.path}
+                  fileType={(readingPage.fileType || '').toLowerCase()}
+                  fontSize={Math.round(15 * zoom)}
+                />
               ) : (
                 <FileMetaCard title={readingPage.title} fileType={readingPage.fileType || ''} path={readingPage.path} updatedAt={readingPage.updatedAt} sizeBytes={readingPage.sizeBytes} />
               )
