@@ -6,14 +6,22 @@ publish-mascot-pack.py — 书桌伙伴（AI 吉祥物）插件发布到远程�
 流程：质量门（zip/src 一致性 + mascot 清单合规复刻校验 + 引用 PNG 存在 + icon 安全）
       → 本地生成 zip + 新 registry.json / CHANGELOG.md
       → gh api git data API 链（blob→tree→commit→ref）一次原子提交
-      → 验证（registry 可见 + zip sha256 一致）
+      → 验证（registry 可见 + zip sha256 一致 + 被删旧包确实消失）
 
 用法：
-  python scripts/publish-mascot-pack.py --version 1.0.0
-      [--pack-dir resources/market-plugins/knowbase.mascot-desk-companions]
-      [--name "书桌伙伴 · AI 吉祥物"] [--desc "..."] [--changelog "..."]
-      [--icon-name knowbase.mascot-desk-companions-icon.svg]
-      [--dry-run] [--no-verify]
+  新增条目：
+    python scripts/publish-mascot-pack.py --version 1.0.0
+        [--pack-dir resources/market-plugins/knowbase.mascot-desk-companions]
+        [--name "书桌伙伴 · AI 吉祥物"] [--desc "..."] [--changelog "..."]
+        [--icon-name knowbase.mascot-desk-companions-icon.svg]
+        [--dry-run] [--no-verify]
+
+  更新已上架条目（同 id 已存在时必须显式声明 --update，否则退出）：
+    python scripts/publish-mascot-pack.py --version 1.0.1 --update [--drop-old-zip]
+        [--pack-dir ...] [--name ...] [--desc ...] [--changelog "..."]
+
+  更新场景只改 version / size / downloadUrl / updatedAt（以及显式传入的 name / description），
+  其余字段（author / category / riskLevel / engineVersion / contributions / iconUrl）沿用远程条目现值。
 
 依赖：gh CLI 已认证（gh api 走代理，curl 直连本机 SSL 失败）。
 """
@@ -30,6 +38,9 @@ import zipfile
 
 REPO = 'Lousync/Phrontis-plugins'
 BRANCH = 'main'
+DEFAULT_NAME = '书桌伙伴 · AI 吉祥物'
+DEFAULT_DESC = '三只像素小伙伴（纸灵 / 小墨 / 枭枭）站在 AI 输入卡上沿，随 AI 活动切换动作；到 设置 → AI 助手 → 吉祥物 里选一只。'
+DEFAULT_CHANGELOG = '三只像素吉祥物，随 AI 活动切换动作'
 MASCOT_STATES = {'idle', 'thinking', 'working', 'sweeping', 'notification', 'error', 'attention'}
 ENTRY_RE = re.compile(r'^[\w][\w.-]{0,64}\.html$')
 ICON_RE = re.compile(r'^[\w][\w.-]{0,64}\.(svg|png|jpg|jpeg|webp|gif)$', re.I)
@@ -47,6 +58,12 @@ def run_gh(args, input_data=None):
 
 def gh_json(args, input_data=None):
     return json.loads(run_gh(args, input_data))
+
+
+def gh_ok(args):
+    """只问成败不退出——用于验证「某文件已删除」这类预期失败。"""
+    r = subprocess.run(['gh', 'api'] + args, capture_output=True, text=True, encoding='utf-8')
+    return r.returncode == 0
 
 
 def b64(path):
@@ -180,10 +197,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--pack-dir', default='resources/market-plugins/knowbase.mascot-desk-companions')
     ap.add_argument('--version', required=True)
-    ap.add_argument('--name', default='书桌伙伴 · AI 吉祥物')
-    ap.add_argument('--desc', default='三只像素小伙伴（纸灵 / 小墨 / 枭枭）站在 AI 输入卡上沿，随 AI 活动切换动作；到 设置 → AI 助手 → 吉祥物 里选一只。')
+    ap.add_argument('--name', default=None, help='缺省：新增用内置默认名；更新沿用远程条目现值')
+    ap.add_argument('--desc', default=None, help='缺省：新增用内置默认描述；更新沿用远程条目现值')
     ap.add_argument('--icon-name', default='knowbase.mascot-desk-companions-icon.svg')
     ap.add_argument('--changelog', default='')
+    ap.add_argument('--update', action='store_true', help='更新市场里已存在的同 id 条目（默认只允许新增；已存在则退出）')
+    ap.add_argument('--drop-old-zip', action='store_true', help='更新场景：删除上一条 registry 指向的旧版本 zip（默认保留）')
     ap.add_argument('--tmp', default=os.environ.get('TEMP', '/tmp'))
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--no-verify', action='store_true')
@@ -224,31 +243,63 @@ def main():
     old_v = reg.get('registryVersion', 0)
     new_v = old_v + 1
     changelog = fetch_remote('CHANGELOG.md')
-    if any(p['id'] == pid for p in reg['plugins']):
-        print('!! 远程已存在 %s，请先处理重复条目（更新场景需另行编写更新逻辑）' % pid)
+    existing = next((p for p in reg['plugins'] if p.get('id') == pid), None)
+    if existing and not args.update:
+        print('!! 远程已存在 %s，如需更新请加 --update' % pid)
+        sys.exit(1)
+    if not existing and args.update:
+        print('!! 远程没有 %s，--update 只能更新已存在条目' % pid)
         sys.exit(1)
 
     today = datetime.date.today().isoformat()
-    entry = {
-        'id': pid,
-        'name': args.name,
-        'version': args.version,
-        'description': args.desc,
-        'author': 'Knowbase',
-        'downloadUrl': 'https://raw.githubusercontent.com/%s/main/plugins/%s-%s.zip' % (REPO, pid, args.version),
-        'iconUrl': 'https://raw.githubusercontent.com/%s/main/plugins/%s' % (REPO, args.icon_name),
-        'category': '外观',
-        'riskLevel': 'B',
-        'contributions': ['mascot'],
-        'size': zip_size,
-        'updatedAt': today,
-    }
+    if existing:
+        # 更新：只动版本相关字段，其余（author / category / riskLevel / engineVersion / contributions / iconUrl）沿用现值
+        entry = dict(existing)
+        entry['version'] = args.version
+        entry['size'] = zip_size
+        entry['updatedAt'] = today
+        entry['downloadUrl'] = 'https://raw.githubusercontent.com/%s/main/plugins/%s-%s.zip' % (REPO, pid, args.version)
+        if args.name:
+            entry['name'] = args.name
+        if args.desc:
+            entry['description'] = args.desc
+        for i, p in enumerate(reg['plugins']):
+            if p.get('id') == pid:
+                reg['plugins'][i] = entry
+                break
+    else:
+        entry = {
+            'id': pid,
+            'name': args.name or DEFAULT_NAME,
+            'version': args.version,
+            'description': args.desc or DEFAULT_DESC,
+            'author': 'Knowbase',
+            'downloadUrl': 'https://raw.githubusercontent.com/%s/main/plugins/%s-%s.zip' % (REPO, pid, args.version),
+            'iconUrl': 'https://raw.githubusercontent.com/%s/main/plugins/%s' % (REPO, args.icon_name),
+            'category': '外观',
+            'riskLevel': 'B',
+            'contributions': ['mascot'],
+            'size': zip_size,
+            'updatedAt': today,
+        }
+        reg['plugins'].append(entry)
     reg['registryVersion'] = new_v
-    reg['plugins'].append(entry)
 
+    dropped = []
+    if existing and args.drop_old_zip:
+        old_rel = 'plugins/%s-%s.zip' % (pid, existing.get('version'))
+        new_rel = 'plugins/%s-%s.zip' % (pid, args.version)
+        if old_rel == new_rel:
+            print('!! 旧包与新包同路径（版本号没抬），跳过删除')
+        elif not gh_ok(['repos/%s/contents/%s' % (REPO, old_rel)]):
+            print('!! 远程没有旧包 %s，跳过删除' % old_rel)
+        else:
+            dropped.append(old_rel)
+
+    verb = '更新插件' if existing else '新增插件'
+    note = args.changelog or (DEFAULT_CHANGELOG if not existing else '例行更新')
     marker = '## %s\n' % today
-    item = '- **新增插件 · 书桌伙伴 · AI 吉祥物 v%s**：%s（registry v%d）\n' % (
-        args.version, (args.changelog or '三只像素吉祥物，随 AI 活动切换动作'), new_v)
+    item = '- **%s · %s v%s**：%s（registry v%d）\n' % (verb, entry['name'], args.version, note, new_v)
     if marker in changelog:
         changelog = changelog.replace(marker, marker + '\n' + item, 1)
     else:
@@ -260,6 +311,8 @@ def main():
     open(reg_f, 'w', encoding='utf-8', newline='\n').write(json.dumps(reg, ensure_ascii=False, indent=2) + '\n')
     open(cl_f, 'w', encoding='utf-8', newline='\n').write(changelog)
     print('registry v%d -> v%d（%d 条目），条目与 CHANGELOG 已生成' % (old_v, new_v, len(reg['plugins'])))
+    if dropped:
+        print('待删除旧包: %s' % ', '.join(dropped))
 
     # ---- 3. git data API 链 ----
     print('== 发布（git data API 链）==')
@@ -278,9 +331,13 @@ def main():
         blobs[path] = gh_json(['repos/%s/git/blobs' % REPO, '-X', 'POST', '--input', '-'], input_data=body)['sha']
         print('  blob %s: %s' % (path, blobs[path][:12]))
     tree_items = [{'path': p, 'mode': '100644', 'type': 'blob', 'sha': s} for p, s in blobs.items()]
+    for p in dropped:
+        tree_items.append({'path': p, 'mode': '100644', 'type': 'blob', 'sha': None})
+        print('  blob %s: (删除)' % p)
     new_tree = gh_json(['repos/%s/git/trees' % REPO, '-X', 'POST', '--input', '-'],
                        input_data=json.dumps({'base_tree': base_tree, 'tree': tree_items}))['sha']
-    msg = 'feat(registry): %s v%s（registry v%d）' % (pid, args.version, new_v)
+    kind = 'chore' if existing else 'feat'
+    msg = '%s(registry): %s v%s（registry v%d）' % (kind, pid, args.version, new_v)
     new_commit = gh_json(['repos/%s/git/commits' % REPO, '-X', 'POST', '--input', '-'],
                          input_data=json.dumps({'message': msg, 'tree': new_tree, 'parents': [main_sha]}, ensure_ascii=False))['sha']
     gh_json(['repos/%s/git/refs/heads/%s' % (REPO, BRANCH), '-X', 'PATCH', '--input', '-'],
@@ -299,7 +356,9 @@ def main():
             f.write(base64.b64decode(gh_json([api])['content']))
         ok2 = hashlib.sha256(open(down, 'rb').read()).hexdigest() == hashlib.sha256(open(zp, 'rb').read()).hexdigest() and zipfile.ZipFile(down).testzip() is None
         print('  zip sha256 一致 + 完整性: %s' % ('OK' if ok2 else 'FAIL'))
-        if not (ok1 and ok2):
+        ok3 = all(not gh_ok(['repos/%s/contents/%s' % (REPO, p)]) for p in dropped)
+        print('  旧包已删除 (%d 个): %s' % (len(dropped), 'OK' if ok3 else 'FAIL'))
+        if not (ok1 and ok2 and ok3):
             sys.exit(1)
         print('[OK] 验证通过')
 
