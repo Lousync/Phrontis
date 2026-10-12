@@ -281,7 +281,7 @@ export function AiModelsTab() {
           <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">AI 内联建议（编辑器）</h2>
           <p className="text-[12px] text-[var(--text-muted)] mb-3">
             打字停顿后由 AI 续写下一句（灰色幽灵文字）；Tab 采纳、Esc 拒绝、Alt+A 立即要一条，
-            编辑器右上角胶囊里的 ✨ 可随时开关。调用频次远高于对话，建议单独指定便宜、快的模型。
+            笔记顶栏右侧的 ✨ 可随时开关。调用频次远高于对话，建议单独指定便宜、快的模型。
           </p>
           <label className="flex items-center justify-between gap-4 cursor-pointer max-w-md">
             <span className="text-[13px] text-[var(--text-primary)]">启用内联建议</span>

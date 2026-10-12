@@ -438,22 +438,22 @@ ok(/data-wb="pagebar"/.test(srcPageBar) && /data-pb-tabs=/.test(srcPageBar) && /
   'F3 页面条契约属性齐备（pagebar / pb-item / pb-tabs / 两个 pb-slot）')
 ok(/PAGE_OWNED/.test(srcPageBar) && /'knowledge'/.test(srcPageBar) && !/'editor'/.test(srcPageBar),
   'F4 页面条 PAGE_OWNED 只含知识库（编辑器已退役，不占模块条目）')
-// 浮层结构（2026-09-20 悬浮栏改造）：外壳 `data-wb="mainPane"` 全宽 + pointer-events-none；
-// 内层是**一个悬浮胶囊** `data-wb="floatBar"`（右上角 mt-3 mr-3）——两个槽（内容级操作 + 页面级工具）
-// 都在胶囊里；静息收把手 / 毛玻璃 / 空胶囊隐身由 index.css 的 [data-wb='floatBar'] 段承担。
-// 分屏时代外壳宽度曾是 `calc(100% - 副栏宽)`，下线后恒为全宽。
-ok(/data-wb="mainPane"[\s\S]{0,200}?pointer-events-none[\s\S]{0,200}?w-full/.test(srcApp)
-  && /data-wb="floatBar"/.test(srcApp) && /floatBar[\s\S]{0,120}?mr-3 mt-3/.test(srcApp)
-  && (srcApp.match(/id="editor-toolbar-slot"/g) || []).length === 1,
-  'F8 内容级操作浮层在 App（单个悬浮胶囊 floatBar 内含唯一 #editor-toolbar-slot；pointer-events 分层不挡内容）')
-// F8b 悬浮栏样式基建与把手口径（2026-09-20）：CSS 段 + 次级钮标记类必须在位，
-// 否则「静息收把手/毛玻璃/空胶囊隐身」三条行为整条失效（样式与实现分居两个文件，最易漏改）
+// 浮层结构已退役（批 2，2026-10-12，docs/nonmd-topbar-design.md）：原 `data-wb="mainPane"` 外壳 +
+// `data-wb="floatBar"` 悬浮胶囊 + `#editor-toolbar-slot` + `.kb-float-hide` 把手口径**整条删除** ——
+// md 的动作 2026-10-11 已搬进 `NoteTopBar`，非 md 的动作批 2 也搬进去了 ⇒ 胶囊的两个槽都没有写入方
+// （其中 `wbContentActionsEl` 自 v3.4.0「页面条置顶」起就是死代码）。顶栏改为**行内渲染**，
+// 不再 portal 到主栏单例槽。故 F8 系转为**负向断言**：任何一处残留都说明退役没做干净。
+ok(!/data-wb="mainPane"/.test(srcApp) && !/data-wb="floatBar"/.test(srcApp)
+  && !/id="editor-toolbar-slot"/.test(srcApp) && !/wbContentActions/.test(srcApp),
+  'F8 内容级操作浮层已退役（App 侧无 mainPane / floatBar / #editor-toolbar-slot / wbContentActions）')
+// F8b 悬浮栏样式基建同批退役：CSS 段与次级钮标记类都必须消失 ——
+// 否则「DOM 没了、样式留着」= 一段永不生效的死样式（样式与实现分居两个文件，最易漏改）
 const srcCss = read('src/styles/index.css')
-ok(/\[data-wb='floatBar'\]/.test(srcCss) && /\.kb-float-hide/.test(srcCss)
-  && /backdrop-filter/.test(srcCss) && /:not\(:has\(button\)\)/.test(srcCss),
-  'F8b 悬浮栏样式基建在位（floatBar 胶囊 / kb-float-hide 把手 / 毛玻璃 / 空胶囊隐身）')
-ok(/kb-float-hide/.test(read('src/modules/knowledge/components/PageEditor.tsx')),
-  'F8c 笔记页工具栏标注次级钮 kb-float-hide（编辑器宿主已随模块退役）')
+ok(!/\[data-wb='floatBar'\]/.test(srcCss) && !/\.kb-float-hide/.test(srcCss)
+  && !/:not\(:has\(button\)\)/.test(srcCss),
+  'F8b 悬浮栏样式基建已退役（CSS 侧无 floatBar / kb-float-hide / 空胶囊隐身规则）')
+ok(!/kb-float-hide/.test(read('src/modules/knowledge/components/PageEditor.tsx')),
+  'F8c 笔记页不再标 kb-float-hide 次级钮（工具栏改由顶栏承载，胶囊的把手语义一并退役）')
 ok(/pageBarHosted/.test(srcKnowledge) && /createPortal\(strip/.test(srcKnowledge),
   'F9 知识库页签条 portal 进页面条槽')
 ok(/onImmersiveChange\?\.\(v\)/.test(srcKnowledge) && /readingMode \|\| graphMode/.test(srcKnowledge) && /pageBarHidden/.test(srcApp),

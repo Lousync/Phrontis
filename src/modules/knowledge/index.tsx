@@ -2422,7 +2422,6 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 onOpenInEditor={() => handleOpenInEditor(activePageId)}
                 draftRelPath={activePageId.startsWith('draft:') ? activePageId.slice(6) : undefined}
                 startInEdit={startInEditRef.current === activePageId}
-                isActive={isActive}
                 initialFileType={openPageInfos[activePageId]?.fileType}
                 canNavBack={canNavBack(nav)}
                 canNavForward={canNavForward(nav)}
@@ -2441,8 +2440,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         )}
       </div>
 
-      {/* 副栏页面视图（页面级分屏）：portal 进 App 副栏内容槽。独立 PageEditor 实例，
-          isActive=false → 不挂右上悬浮工具栏（那颗槽是主栏单例 `#editor-toolbar-slot`，两实例会打架）。 */}
+      {/* 副栏页面视图（页面级分屏）：portal 进 App 副栏内容槽。独立 PageEditor 实例 ——
+          两栏各挂各的顶栏（与 Obsidian 同款）。批 2 起非 md 也是顶栏，且顶栏是**行内渲染**、
+          不再 portal 到主栏单例槽，故两实例不会打架（原来那颗 `#editor-toolbar-slot` 已退役）。 */}
       {secondaryContentEl && secondaryPageIds.length > 0 && secondaryActiveId && createPortal(
         <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-[var(--text-muted)]">正在加载编辑器…</div>}>
           <PageEditor
@@ -2464,7 +2464,6 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             vaultMode={true}
             draftRelPath={secondaryActiveId.startsWith('draft:') ? secondaryActiveId.slice(6) : undefined}
             startInEdit={false}
-            isActive={false}
           />
         </Suspense>,
         secondaryContentEl,

@@ -5,8 +5,10 @@
  * 覆盖的缺陷面（每条都是「不报错但坏掉」的类型）：
  *   ① **历史栈规则写飞** —— 前进分支不截断 / 与栈顶重复入栈 / 超上限不丢最旧 / 失效条目被跳过
  *      （失效不跳过 = 点了没反应，用户只当按钮坏了）→ 用纯函数跑用例表；
- *   ② **顶栏只在 md 生效**被写漏 —— 非 md 同时出现顶栏与悬浮胶囊（两套按钮重叠）或 md 下胶囊
- *      仍挂着一颗空丸（真源 = index.css 的 `:not(:has(button))` 隐身规则 + PageEditor 的 `!isMdNote` 门）；
+ *   ② **顶栏与旧胶囊并存**被写漏 —— 2026-10-11 那版是「md 顶栏 / 非 md 胶囊」二分（两套按钮重叠的
+ *      风险靠 `!isMdNote` 门 + index.css 的空胶囊隐身规则挡住）。**批 2（2026-10-12）把胶囊整条退役**，
+ *      顶栏对所有非导图类型生效 ⇒ 这条缺陷面反向成立：**任何胶囊残留都是回归**
+ *      （负向断言见本文件 B9/B9b，以及 .AGENT/scripts/nonmd-topbar/verify-nonmd-topbar.mjs）；
  *   ③ **分隔线回来了** —— 顶栏 / 页面条任一处再长出 hairline，就破坏了「与正文连成一整片」的拍板；
  *   ④ **文件格式只剩一处** —— 拍板要求 ⋮ 与编辑器右键菜单**两处都有**，且落点只有一个（applyFileType）；
  *   ⑤ **Alt+←/→ 被 isEditingInput 吞掉** —— 顺序写反的后果是「编辑器里按了没反应」，而这是主用法；
@@ -90,7 +92,7 @@ const SRC_ACTIONS = stripComments(read('src/lib/noteActions.ts'))
 const SRC_PAGEBAR = stripComments(read('src/components/workbench/WorkbenchPageBar.tsx'))
 
 // ---- B1 顶栏组件与锚点 ----
-for (const a of ['noteTopBar', 'noteTopBack', 'noteTopForward', 'noteTopTitle', 'noteSaveDot', 'noteTopMore', 'noteTopMoreMenu']) {
+for (const a of ['noteTopBar', 'noteTopBack', 'noteTopForward', 'noteTopTitle', 'noteTopSubtitle', 'noteSaveDot', 'noteTopMore', 'noteTopMoreMenu']) {
   ok(SRC_TOPBAR.includes(`data-wb="${a}"`), `B1 顶栏锚点 ${a}`)
 }
 for (const a of ['inlineSuggestBtn', 'inlineBusy', 'inlinePaused', 'inlineOffSlash']) {
@@ -102,12 +104,26 @@ ok(!/h-px/.test(SRC_TOPBAR), 'B5 负向：顶栏不得有 hairline（拍板：�
 ok(!/runNoteAction|noteActions/.test(SRC_TOPBAR),
   'B6 负向：顶栏组件保持「纯展示」（不自己执行写作动作，菜单内容由 PageEditor 传入）')
 
-// ---- B7 md 分流：顶栏只在 md，胶囊只在非 md ----
-ok(/const isMdNote = fileType === 'md'/.test(SRC_PAGE), 'B7 分流判据唯一：isMdNote = fileType === \'md\'')
-ok(/\{isMdNote && \(\s*<NoteTopBar/.test(SRC_PAGE), 'B8 md 笔记渲染顶栏')
-ok(/!isMdNote && createPortal/.test(SRC_PAGE),
-  'B9 旧悬浮胶囊只在非 md 时 portal（md 下不 portal → 胶囊被 index.css 的空胶囊规则隐身）')
+// ---- B7 顶栏门槛（批 2 起 = 非导图 + 非 PDF 沉浸）----
+ok(/const isMdNote = fileType === 'md'/.test(SRC_PAGE),
+  'B7 判据唯一：isMdNote = fileType === \'md\'（批 2 起它只决定「顶栏给哪些钮」，不再决定挂不挂顶栏）')
+ok(/\{!isMindMapFile && !pdfImmersive && \([\s\S]{0,120}?<NoteTopBar/.test(SRC_PAGE),
+  'B8 顶栏门槛 = 非导图 + 非 PDF 沉浸（导图自带工具条；沉浸由阅读器上报，见 B10e）')
+ok(!/createPortal/.test(SRC_PAGE),
+  'B9 负向：PageEditor 不再 portal 任何工具栏（顶栏改为行内渲染 —— 分屏两栏各挂各的）')
+ok(!/floatBar|kb-float-hide|editor-toolbar-slot/.test(SRC_PAGE),
+  'B9b 负向：悬浮胶囊的类名与槽 id 在 PageEditor 零残留（批 2 退役）')
 ok(SRC_PAGE.includes('initialFileType'), 'B10 文件类型预置（避免顶栏 loadPage 完成前闪一帧）')
+ok(/showSaveDot=\{!!paneDoc\}/.test(SRC_PAGE),
+  'B10b 保存点只对有真实保存动作的类型显示（paneDoc 非空 ⟺ 落可编辑 MonacoPane）')
+ok(/showViewToggle=\{isMdNote\}/.test(SRC_PAGE) && /showInline=\{isMdNote &&/.test(SRC_PAGE),
+  'B10c 阅读切换 / ✨续写钮只给 md（非 md 没有预览态与 ghost text，给了就是点了没反应的假按钮）')
+ok(/subtitle=\{isPdfFile && pdfPages > 0/.test(SRC_PAGE) && /onDocInfo=\{/.test(SRC_PAGE),
+  'B10d PDF 页数经 onDocInfo 上移顶栏中段（批 2「合并公共部分」）')
+ok(/onImmersiveChange=\{setPdfImmersive\}/.test(SRC_PAGE) && /setPdfImmersive\(false\)/.test(SRC_PAGE),
+  'B10e PDF 沉浸态上报 + 换页复位（不复位 ⇒ 换到别的文件顶栏仍不显示）')
+ok(/chrome="reader-only"/.test(SRC_PAGE),
+  'B10f 知识库内 PDF 阅读器退成只留阅读控件（书架走默认 full，一行不动）')
 
 // ---- B11 页面条 hairline 已删 ----
 ok(!/bottom-0 h-px bg-\[var\(--border-color\)\]/.test(SRC_PAGEBAR),
@@ -116,8 +132,8 @@ ok(!/bottom-0 h-px bg-\[var\(--border-color\)\]/.test(SRC_PAGEBAR),
 // ---- B12 文件格式两处都有、落点只有一个 ----
 ok((SRC_PAGE.match(/const applyFileType = useCallback/g) || []).length === 1,
   'B12 文件格式落点只有一处实现（applyFileType）')
-ok((SRC_PAGE.match(/applyFileType\(/g) || []).length >= 3,
-  'B13 至少三处消费同一落点（⋮ 二级子菜单 / 旧胶囊 chip / 右键菜单回调）',
+ok((SRC_PAGE.match(/applyFileType\(/g) || []).length >= 2,
+  'B13 至少两处消费同一落点（⋮ 二级子菜单 / 右键菜单回调）—— 批 2 起「旧胶囊 chip」那处随胶囊退役',
   String((SRC_PAGE.match(/applyFileType\(/g) || []).length))
 ok(/FILE_LANG_OPTIONS/.test(SRC_PAGE) && SRC_PAGE.includes('文件格式'),
   'B14 ⋮ 菜单内有「文件格式」二级子菜单（清单取 FILE_LANG_OPTIONS，不另抄一份）')

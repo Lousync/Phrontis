@@ -1,6 +1,5 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
-import { createPortal } from 'react-dom'
-import { Trash2, Eye, Edit3, Star, FileText, ChevronDown, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, MoreHorizontal, ListChecks, Sparkles, Info, FolderSearch, Copy } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
+import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
@@ -68,10 +67,6 @@ interface Props {
   /** 该页本次打开直接进编辑态（2026-09-28 快速草稿：+ 号建 草稿.md 后打开即写）；
    *  只影响首载那次（loadPage 的 !isReload 分支），不影响该页后续的阅读/编辑切换 */
   startInEdit?: boolean
-  /** 模块激活态（v3.4.0 修复）：工具栏 portal 到外壳右上角常驻浮层 `#editor-toolbar-slot`，
-   *  模块被 display:none 保活时 portal 不会跟着藏——不加这道门槛，铅笔/保存点会飘在当前模块头上
-   *  （与编辑器模块 actionsPill 的 isActive 门槛同款，editor/index.tsx 同注释）。 */
-  isActive?: boolean
   /** 首载即知的文件类型（模块页签元信息 openPageInfos）：顶栏与格式标签依赖它，
    *  不预置则 loadPage 完成前会先按 '' 渲染一帧（表象：顶栏 / 格式标签闪一下）。 */
   initialFileType?: string
@@ -82,13 +77,12 @@ interface Props {
   onNavForward?: () => void
 }
 
-export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, isActive = true, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward }: Props) {
+export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward }: Props) {
   const { s, update } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [fileType, setFileTypeState] = useState(initialFileType)
-  const [showLangMenu, setShowLangMenu] = useState(false)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   /** 顶栏 ⋮ 里「文件格式」二级子菜单（拍板 C2：⋮ 与编辑器右键菜单两处都有） */
   const [showFmtMenu, setShowFmtMenu] = useState(false)
@@ -97,7 +91,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   /** html 的「源码 ⇄ 沙箱渲染」（批 1 拍板：默认仍是沙箱渲染，只加出口）。
    *  换页重置——不同 html 之间不该继承上一个的源码态。 */
   const [htmlSource, setHtmlSource] = useState(false)
-  useEffect(() => { setHtmlSource(false) }, [pageId])
+  /* 换页重置（批 1 的 html 源码态 + 批 2 的 PDF 上报值）：不同文件之间不该继承上一个的态。
+     pdfPages / pdfImmersive 必须在这里复位 —— PdfReaderView 按 page.path 重挂，它的内部
+     `immersive` 归零，外层不复位就会「换到别的文件顶栏仍然不显示」。 */
+  useEffect(() => { setHtmlSource(false); setPdfPages(0); setPdfImmersive(false) }, [pageId])
   /** 「文件信息」小卡的关闭：外点 / Esc（照 NoteTopBar 的 moreMenu 口径，捕获阶段不依赖冒泡顺序） */
   useEffect(() => {
     if (!showFileInfo) return
@@ -168,11 +165,11 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   /** 右侧「关联网络」（关联 + 反向链接）默认收起：正文优先占满宽度，需要时从右缘点击/拖出再展开。
    *  仅本地 state（不持久化）——每次打开页面都是收起态，不用去翻上次的开关。 */
   const [showBacklinks, setShowBacklinks] = useState(false)
-  // Toolbar portals: render the editor toolbar into the tab bar row (merged layer 1 + 2)
-  const [toolbarSlot, setToolbarSlot] = useState<HTMLElement | null>(null)
-  useLayoutEffect(() => {
-    setToolbarSlot(document.getElementById('editor-toolbar-slot'))
-  }, [])
+  /** PDF 页数 / 沉浸态（批 2）：由内嵌 PdfReaderView 上报 —— 顶栏中段的「N 页」与
+   *  「沉浸时顶栏一并隐藏」都靠它。★ 阅读器按 page.path 重挂，它的内部 state 归零而外层不会，
+   *  故 pageId 变化时必须复位（见下方 setHtmlSource(false) 那个 effect）。 */
+  const [pdfPages, setPdfPages] = useState(0)
+  const [pdfImmersive, setPdfImmersive] = useState(false)
   const MAX_TAGS = 5
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const contentRef = useRef(content)
@@ -200,7 +197,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const retryRef = useRef<string | null>(null)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const showDeleteConfirmRef = useRef(showDeleteConfirm)
-  const showLangMenuRef = useRef(showLangMenu)
+  /** PDF 沉浸态的 ref 镜像（批 2）：Esc 守卫要用它，而那个 keydown effect 的依赖刻意只有
+   *  `[doSave, onBack]`（把 state 塞进去会让每次沉浸切换都重挂监听）。 */
+  const pdfImmersiveRef = useRef(false)
   const isCodeFileRef = useRef(false)
   const isPdfFileRef = useRef(false)
   const vaultModeRef = useRef(vaultMode)
@@ -214,8 +213,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const inlinePauseNotifiedRef = useRef(false)
   /**
    * 自动通道进入 / 离开暂停。**除角标外要给一次可见提示**（B-5 方案 D）：
-   * 原先暂停的唯一信号是胶囊右上角 1.5px 灰点，而胶囊静息态还会 `opacity: .62 + scale(.97)`
-   * → 基本看不见，用户只会觉得「AI 建议莫名其妙没了」。
+   * 原先暂停的唯一信号是 ✨ 钮右上角 1.5px 灰点，而它当时挂在**右上悬浮胶囊**里 ——
+   * 那颗胶囊静息态还会 `opacity: .62 + scale(.97)` → 灰点基本看不见，用户只会觉得
+   * 「AI 建议莫名其妙没了」。（批 2 起 ✨ 已随顶栏行内渲染，胶囊整条退役；这条提示仍然保留 ——
+   * 灰点本身依旧是弱信号，不能只靠它。）
    * 回调来自 MonacoPane 的模块级广播（宿主侧 setState），只可能发生在事件回调里，不会撞 render 期。
    */
   const handleInlinePaused = useCallback((paused: boolean) => {
@@ -404,7 +405,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   useEffect(() => { fileTypeRef.current = fileType }, [fileType])
   useEffect(() => { tagsRef.current = entryTags }, [entryTags])
   useEffect(() => { showDeleteConfirmRef.current = showDeleteConfirm }, [showDeleteConfirm])
-  useEffect(() => { showLangMenuRef.current = showLangMenu }, [showLangMenu])
+  useEffect(() => { pdfImmersiveRef.current = pdfImmersive }, [pdfImmersive])
   useEffect(() => { isCodeFileRef.current = isCodeFile }, [isCodeFile])
   useEffect(() => { isPdfFileRef.current = isPdfFile }, [isPdfFile])
   useEffect(() => { vaultModeRef.current = vaultMode }, [vaultMode])
@@ -802,10 +803,15 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       // Escape — back to list (respect modals)
       if (e.key === 'Escape') {
         if (showDeleteConfirmRef.current) return
-        if (showLangMenuRef.current) {
-          setShowLangMenu(false)
-          return
-        }
+        /* ★ 批 2 修（2026-10-12）：PDF 沉浸态下 Esc 的第一语义是「退出沉浸」。
+           PdfReaderView 自己的 window keydown 会处理它，但它**既不 preventDefault 也不
+           stopPropagation**（见 PdfReaderView 的「Esc 逐级退出」分支），而下面这段是
+           「关掉当前页签」⇒ 同一个 Esc 会**先退出沉浸、再把页面关掉**（用户视角：按 Esc 笔记没了）。
+           两个监听都在 window 上，`stopPropagation` 也拦不住同元素的兄弟监听，故只能在这边让路。
+           ★ 为什么以前写不出这道守卫：`immersive` 是阅读器的**内部 state**，外层无从得知；
+           批 2 加了 onImmersiveChange 上报，才第一次有条件判「我现在在 PDF 沉浸里」。
+           判据用 ref 镜像：那个 keydown effect 的依赖刻意只有 [doSave, onBack]。 */
+        if (pdfImmersiveRef.current) return
         e.preventDefault()
         if (checkUnsaved()) { setUnsavedAction(() => onBack); return }
         onBack()
@@ -884,19 +890,21 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   }, [])
 
   /**
-   * 文件格式落点（**唯一实现，三处共用**）：顶栏 ⋮ 的二级子菜单 / 编辑器右键菜单 / 旧胶囊的格式 chip。
-   * 三个副作用与既有 chip 逐条一致：改渲染态类型、非文本类强制退出阅读态、回报父级 + 状态栏。
+   * 文件格式落点（**唯一实现，两处共用**）：顶栏 ⋮ 的二级子菜单 / 编辑器右键菜单。
+   * 副作用与既有 chip 逐条一致：改渲染态类型、非文本类强制退出阅读态、回报父级 + 状态栏。
    * 为什么抽出来：拍板 C2 要求「⋮ 里有、右键菜单里也有」，两处各写一份必然漂移。
+   * ★ 批 2：非 md 刻意**不给**这个入口（扩展名来自文件名、`onFileTypeChange` 只改内存不落盘
+   * ⇒ 对非 md 是假按钮），故原来那处「旧胶囊的格式 chip」已随胶囊退役。
    */
   const applyFileType = useCallback((ext: string, label?: string) => {
     setFileTypeState(ext)
-    setShowLangMenu(false)
     if (ext !== '' && ext !== 'md' && ext !== 'txt') setPreview(false)
     onFileTypeChange?.(ext)
     window.dispatchEvent(new CustomEvent('status-filetype', { detail: label ?? getFileTypeInfo(ext).label }))
   }, [onFileTypeChange])
 
-  /** 是否 md 笔记：决定走「新顶栏」还是「旧悬浮胶囊」（拍板 E1：本轮只覆盖 md，其余保持现状） */
+  /** 是否 md 笔记（批 2：不再是「顶栏 vs 胶囊」的开关 —— 顶栏对所有非导图类型都挂；
+   *  它现在只决定顶栏里**给哪些钮**：阅读切换 / ✨续写 / md 专属的 ⋮ 菜单）。 */
   const isMdNote = fileType === 'md'
 
   /** AI 续写总开关（顶栏常驻钮）：开着点 = 关闭 —— 掐在途请求 + 收起 ghost + 关设置总闸 */
@@ -1153,245 +1161,62 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     })()
   }
 
+  /** ⋮ 里的项数（批 2 拍板②「空则隐藏 ⋮」的判据）：
+   *  md 恒有「沉浸阅读」（`onRequestReading` 由模块恒传）⇒ ≥1；
+   *  非 md 恒有「文件信息 / 在系统中打开 / 在文件夹中显示 / 复制相对路径」四项，html 多一项「看源码」、
+   *  txt / html 多一项「沉浸阅读」。
+   *  ★ 现状下两边都恒 > 0 ⇒ 这条守卫是**潜伏**的（见 docs/nonmd-topbar-design.md §三·②）：
+   *  拍板保留它，是为了将来收窄 ⋮ 项时自动生效，而不是等那时才发现按钮点了没反应。 */
+  const moreMenuItemCount = isMdNote
+    ? 1
+    : 4 + ((isWelcomeHtml || isArchiveHtml) ? 1 : 0)
+      + ((fileType === 'txt' || fileType === 'html') && onRequestReading ? 1 : 0)
+
   return (
     <div className="flex-1 flex overflow-hidden">
-      {/* Toolbar — portal 进外壳右上悬浮胶囊（2026-09-20 改悬浮栏）
-          标 kb-float-hide = 次级钮：胶囊静息态收成小把手时隐藏，悬停/焦点进入才展开（样式见 index.css）
-          isActive 门槛：隐藏保活时停掉 portal，否则工具栏飘在当前模块头上（2026-09-19 修复）
-          isMindMapFile：导图视图自带工具条，不挂这颗悬浮胶囊（2026-10-09 反馈） */}
-      {/* 旧悬浮胶囊：**非 md 保持现状**（拍板 E1）—— md 的动作已搬到顶栏；md 下这里不 portal，
-          胶囊由 index.css 的 :not(:has(button)) 规则自动隐身，不留空丸。 */}
-      {toolbarSlot && isActive && !isMindMapFile && !isMdNote && createPortal(
-        <>
-          {!isPdfFile && !vaultMode && (
-            <div className="relative kb-float-hide">
-              <button onClick={() => setShowLangMenu(v => !v)}
-                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] transition-colors"
-                title="切换文件格式">
-                {getFileTypeInfo(fileType).label}
-                <ChevronDown size={11} />
-              </button>
-              {showLangMenu && (
-                <div className="absolute top-full right-0 mt-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded shadow-xl z-50 w-36 max-h-60 overflow-y-auto"
-                  onMouseLeave={() => setShowLangMenu(false)}>
-                  {FILE_LANG_OPTIONS.map(opt => (
-                    <button key={opt.ext}
-                      onClick={() => applyFileType(opt.ext, opt.label)}
-                      className={`w-full text-left px-3 py-1.5 text-[11px] ${fileType === opt.ext ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-                    >{opt.label}</button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          <span
-            className={`w-2.5 h-2.5 rounded-full shrink-0 ${saving ? 'bg-[var(--warning)] animate-pulse' : 'bg-green-500'}`}
-            title={saving ? '保存中…' : '已保存'}
-          />
-          {!isCodeFile && !isPdfFile && !preview && (
-            <button onClick={insertFootnote} className="kb-float-hide p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" title="脚注：选中词语后点击，加自己的标注（阅读时点击展开）">
-              <StickyNote size={15} />
-            </button>
-          )}
-          {!isCodeFile && !isPdfFile && !preview && (
-            <button onClick={() => imageInputRef.current?.click()} className="kb-float-hide p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors" title="插入图片">
-              <ImagePlus size={15} />
-            </button>
-          )}
-          {!isCodeFile && !isPdfFile && !isWelcomeHtml && !isArchiveFile && (
-            <button onClick={() => setPreview(v => !v)} className={`kb-float-hide p-1.5 rounded text-xs ${preview ? 'bg-[var(--accent)] text-white' : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`} title={preview ? '切换到编辑 (Ctrl+E / Ctrl+/)' : '切换到预览 (Ctrl+E / Ctrl+/)'}>
-              {preview ? <Edit3 size={15} /> : <Eye size={15} />}
-            </button>
-          )}
-          {/* B4 内联建议总开关（2026-09-20 反馈：原「触发一次」定位不明、开了关不掉。
-              现语义：开着点 = **立即关闭**（掐在途请求 + 收起 ghost + 关设置总闸）；
-              关着点 = 打开。单次要一条仍按 Alt+A；自动触发由设置里「自动触发」管。
-              data-wb 锚点保持（探针 G 系依赖 inlineSuggestBtn / inlineBusy / inlinePaused）；
-              关闭态以 data-wb-inline-off 表达（探针 G3/G6/G7 断言同步更新）。
-
-              ★ B-6 四态配色（2026-09-21 拍板）：开=绿常亮 / 关=红（降一级）/ 生成中=绿闪 / 暂停=黄。
-              为什么收起态也要靠颜色：工具栏 `[data-wb='floatBar']` 静息时会 display:none 掉
-              所有 `.kb-float-hide` 次级钮，而 ✨ **没标该类** —— 它常年可见但语义只差一档灰度。
-              两条实施取舍：
-              ① 「关」借用了 `--danger`（项目里红色专指危险/删除）→ 按拍板**降一级表达**：
-                 同色 + `opacity-70`（hover 回满），与「删除红」拉开体感；
-              ② 红绿是色盲最难区分的一对（约占男性 8%）且四态共用同一个 Sparkles →
-                 关闭态**额外叠一条斜杠**（传统「禁用」语汇），颜色不再是唯一信号。
-              ★ 短路顺序刻意保持：`inlineBusy` 恒在最前（生成中优先级最高），`inlinePaused` 插在
-                 「开」判定之后 —— 这是探针语义依赖的既有顺序，改色不改序。
-              ★ 即时渲染档（2026-10-09）暂不提供 AI 续写 → 该档不渲染这颗钮（免得点了没反应）。 */}
-          {fileType === 'md' && !preview && writingMode === 'source' && (() => {
-            const inlineOn = s.aiAssistantInlineSuggest !== false
-            const inlineStateClass = inlineBusy
-              ? 'text-[var(--success)]'
-              : !inlineOn
-                ? 'text-[var(--danger)] opacity-70 hover:opacity-100'
-                : inlinePaused
-                  ? 'text-[var(--warning)]'
-                  : 'text-[var(--success)]'
-            return (
-              <>
-                {inlineBusy && <span data-wb="inlineBusy" className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--success)]" title="AI 续写请求中…" />}
-                <button
-                  onClick={() => {
-                    if (inlineOn) {
-                      cancelInlineSuggestInFlight()
-                      paneRef.current?.hideInlineSuggest()
-                      update('aiAssistantInlineSuggest', false)
-                    } else {
-                      update('aiAssistantInlineSuggest', true)
-                    }
-                  }}
-                  data-wb="inlineSuggestBtn"
-                  {...(inlineOn ? {} : { 'data-wb-inline-off': '1' })}
-                  title={inlineBusy ? 'AI 续写建议：生成中…' : inlineOn ? 'AI 续写建议：已开启 · 点击关闭（单次要一条按 Alt+A）' : 'AI 续写建议：已关闭 · 点击开启'}
-                  className={`relative rounded p-1.5 transition-colors hover:bg-[var(--bg-hover)] ${inlineStateClass}`}
-                >
-                  <Sparkles size={15} className={inlineBusy ? 'animate-pulse' : ''} />
-                  {/* 关闭态的形状差异（色盲兜底）。静态旋转，不走 transition-transform —— 铁律 13
-                      的 `.kb-chevron` 约束针对的是「要动画的 rotate-*」，此处不需要动画。 */}
-                  {!inlineOn && (
-                    <span
-                      aria-hidden
-                      data-wb="inlineOffSlash"
-                      className="pointer-events-none absolute left-0 right-0 top-1/2 h-[1.5px] rounded-full bg-current"
-                      style={{ transform: 'rotate(-45deg)' }}
-                    />
-                  )}
-                  {/* 暂停角标：保留（探针 G11/G11b 依赖此锚点）。**配色刻意中立**——
-                      按钮本身已变黄表达「暂停」，角标再黄就糊成一团；灰点在黄图标旁是清晰可辨的独立标记。 */}
-                  {inlinePaused && inlineOn && <span data-wb="inlinePaused" className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--text-disabled)]" />}
-                </button>
-              </>
-            )
-          })()}
-          {/* 「在编辑器打开」按钮已删（2026-09-20 反馈）：编辑器模块退役后语义不明，
-              阅读态只留「编辑」单按钮（就地编辑，Phase 1 起写路径本就在本模块） */}
-          {/* 更多操作:收藏 / 关联 / 沉浸阅读 / 删除 */}
-          <div className="relative">
-            <button data-wb="peMore" onClick={() => setShowMoreMenu(v => !v)}
-              className={`p-1.5 rounded transition-colors ${showMoreMenu ? 'text-[var(--text-primary)] bg-[var(--bg-hover)]' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}
-              title="更多操作">
-              <MoreHorizontal size={15} />
-            </button>
-            {showMoreMenu && (
-              <div className="absolute top-full right-0 mt-1 bg-[var(--bg-secondary)] border border-[var(--border-color)] rounded shadow-xl z-50 w-44 py-1"
-                onMouseLeave={() => setShowMoreMenu(false)}>
-                {/* 欢迎页/归档非 md 文件不走 frontmatter 收藏（会毁掉文件，主进程同样拒绝） */}
-                {!isWelcomeHtml && !isArchiveFile && (
-                  <button onClick={() => { handleToggleStar(); setShowMoreMenu(false) }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                    <Star key={page.isStarred ? 'on' : 'off'} size={13} className={`kb-micro-pop ${page.isStarred ? 'text-[var(--warning)]' : ''}`} fill={page.isStarred ? 'currentColor' : 'none'} />
-                    {page.isStarred ? '取消收藏' : '收藏页面'}
-                  </button>
-                )}
-                {!vaultMode && (
-                  <button onClick={() => { setShowBacklinks(true); setLinkPickerOpen(true); setShowMoreMenu(false) }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                    <Link2 size={13} />添加关联
-                  </button>
-                )}
-                {(fileType === 'md' || fileType === 'txt') && onRequestReading && (                  <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                    <BookOpen size={13} />沉浸阅读
-                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">Ctrl+Shift+R</span>
-                  </button>
-                )}
-                {quizzes.length > 0 && (
-                  <button onClick={() => { setQuizMode(true); setShowMoreMenu(false) }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                    <ListChecks size={13} />刷题模式
-                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">{quizzes.length} 题</span>
-                  </button>
-                )}
-                {/* 「文件」组（批 1，2026-10-12）：非 md 的 ⋮ 在批 1 之前几乎是空的 ——
-                    关联/删除要 !vaultMode（知识库内恒 false）、收藏排除归档条目、文件格式同样要 !vaultMode。
-                    而 vaultMode 恒 true（knowledge/index.tsx「R6 D9 后恒 vault」）⇒ 仓库内 PDF/HTML/代码
-                    的 ⋮ 里只剩一条分隔线。这组把「在系统中打开 / 在文件夹中显示 / 复制相对路径」搬进来，
-                    并补上文本类不再落元信息卡后无处安放的「文件信息」。
-                    ★ 批 2 统一顶栏时这组**原样搬进**顶栏的 ⋮（锚点 data-wb 保持不变，探针可复用）。 */}
-                {!isMdNote && (
-                  <>
-                    <div className="my-1 border-t border-[var(--border-color)]" />
-                    <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">文件</div>
-                    {(isWelcomeHtml || isArchiveHtml) && (
-                      <button data-wb="peHtmlSource" onClick={() => { setHtmlSource(v => !v); setShowMoreMenu(false) }}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                        {htmlSource ? <Eye size={13} /> : <FileText size={13} />}
-                        {htmlSource ? '看渲染' : '看源码'}
-                      </button>
-                    )}
-                    <button data-wb="peFileInfo" onClick={() => { setShowFileInfo(true); setShowMoreMenu(false) }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                      <Info size={13} />文件信息
-                    </button>
-                    <button data-wb="peOpenInSystem" onClick={() => { void handleArchiveOpenInSystem(false); setShowMoreMenu(false) }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                      <ExternalLink size={13} />在系统中打开
-                    </button>
-                    <button data-wb="peRevealInFolder" onClick={() => { void handleArchiveOpenInSystem(true); setShowMoreMenu(false) }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                      <FolderSearch size={13} />在文件夹中显示
-                    </button>
-                    <button data-wb="peCopyRelPath" onClick={() => { void handleCopyRelPath(); setShowMoreMenu(false) }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                      <Copy size={13} />复制相对路径
-                    </button>
-                  </>
-                )}
-                <div className="my-1 border-t border-[var(--border-color)]" />
-                {!vaultMode && (
-                  <button onClick={() => { setShowMoreMenu(false); handleDelete() }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--danger)]/10 hover:text-[var(--danger)] transition-colors">
-                    <Trash2 size={13} />删除页面
-                  </button>
-                )}
-              </div>
-            )}
-            {/* 「文件信息」小卡（批 1）：挂在同一个 relative 容器里，与 ⋮ 菜单同锚点 */}
-            {showFileInfo && (
-              <div data-wb="peFileInfoCard" className="absolute top-full right-0 z-50 mt-1 w-64 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
-                <FileInfoRows path={page?.path} sizeBytes={page?.sizeBytes} updatedAt={page?.updatedAt} />
-                <button onClick={() => setShowFileInfo(false)}
-                  className="mt-2.5 w-full rounded-md border border-[var(--border-color)] py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">
-                  关闭
-                </button>
-              </div>
-            )}
-          </div>
-        </>,
-        toolbarSlot
-      )}
 
       {/* Main editing area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* 笔记区顶栏（2026-10-11 对齐 Obsidian，仅 md）：**行内渲染、不 portal** ——
+        {/* 笔记区顶栏（2026-10-11 对齐 Obsidian）：**行内渲染、不 portal** ——
             fileType / saving / preview / AI 四态的真源都在本组件里，走 portal 等于再造一个真源（方案 §1①）。
             位置 = 主栏最顶端（页面条正下方）；右侧「关联网络」面板打开时它只跨笔记列、不压面板，
             与 Obsidian「笔记头跨笔记面板、右栏是独立面」同款口径。
 
             按钮集（拍板 C1/C2/C3）：左 ← → 页面历史 / 中 文件名 + 保存点 / 右 ✨AI 续写 + 阅读切换 + ⋮；
-            原来胶囊上的插图、脚注、文件格式、收藏、关联、沉浸阅读、刷题、删除全部收进 ⋮。 */}
-        {isMdNote && (
+            原来胶囊上的插图、脚注、文件格式、收藏、关联、沉浸阅读、刷题、删除全部收进 ⋮。
+
+            ★ 批 2（2026-10-12，docs/nonmd-topbar-design.md）：门槛从 `isMdNote` 放开到**非导图**，
+            非 md 的右上悬浮胶囊（`[data-wb='floatBar']`）整条退役 —— 它的动作全部搬到这里。
+            两处例外：① 导图自带工具条（与胶囊同一门槛口径，2026-10-09 反馈）；
+            ② PDF 沉浸态由阅读器上报（`pdfImmersive`，见 PdfReaderView 的 onImmersiveChange）。 */}
+        {!isMindMapFile && !pdfImmersive && (
+          <div className="relative shrink-0">
           <NoteTopBar
             title={title}
             titleHint={page.path || title}
+            subtitle={isPdfFile && pdfPages > 0 ? `${pdfPages} 页` : undefined}
             saving={saving}
+            /* 保存点（批 2 拍板①）：只有「有真实保存动作」的类型才显示。`paneDoc` 非空 ⟺ 落可编辑
+               MonacoPane（md / 可编辑文本类 / html 源码态）⇒ 那些有防抖自动保存，绿点是真信号；
+               PDF / 图片 / 二进制 / 导图 / 超限只读文本没有保存动作，恒亮是假信号。 */
+            showSaveDot={!!paneDoc}
             canBack={canNavBack}
             canForward={canNavForward}
             onBack={() => onNavBack?.()}
             onForward={() => onNavForward?.()}
             preview={preview}
             onToggleView={() => setPreview(v => !v)}
-            showInline={!preview && writingMode === 'source'}
+            showViewToggle={isMdNote}
+            showInline={isMdNote && !preview && writingMode === 'source'}
             inlineOn={s.aiAssistantInlineSuggest !== false}
             inlineBusy={inlineBusy}
             inlinePaused={inlinePaused}
             onToggleInline={handleToggleInline}
+            showMore={moreMenuItemCount > 0}
             moreOpen={showMoreMenu}
             onToggleMore={() => setShowMoreMenu(v => !v)}
             onCloseMore={() => { setShowMoreMenu(false); setShowFmtMenu(false) }}
-            moreMenu={(
+            moreMenu={isMdNote ? (
               <>
                 <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">页面</div>
                 {!isWelcomeHtml && !isArchiveFile && (
@@ -1467,8 +1292,61 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   <Trash2 size={13} />删除页面
                 </button>
               </>
+            ) : (
+              /* 非 md 的 ⋮（批 2）：批 1 那个「文件」组**原样搬进来** —— 五个 data-wb 锚点一字不改
+                 （peHtmlSource / peFileInfo / peOpenInSystem / peRevealInFolder / peCopyRelPath），
+                 批 1 的探针 probe-content-routing.mjs §3.5/§3.6 可直接复用。
+                 另加「沉浸阅读」，门槛对齐模块层 enterReading（knowledge/index.tsx：md / txt / html）。
+                 ★ 刻意**不给**「文件格式」钮：`handleFileTypeChange` 只在内存里改 fileType、不落盘，
+                 而非 md 的扩展名来自文件名 ⇒ 加了就是一个重启即失效的假按钮
+                 （原型 index.html:750-753 的取舍记录）。 */
+              <>
+                <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">文件</div>
+                {(isWelcomeHtml || isArchiveHtml) && (
+                  <button data-wb="peHtmlSource" onClick={() => { setHtmlSource(v => !v); setShowMoreMenu(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    {htmlSource ? <Eye size={13} /> : <FileText size={13} />}
+                    {htmlSource ? '看渲染' : '看源码'}
+                  </button>
+                )}
+                <button data-wb="peFileInfo" onClick={() => { setShowFileInfo(true); setShowMoreMenu(false) }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                  <Info size={13} />文件信息
+                </button>
+                <button data-wb="peOpenInSystem" onClick={() => { void handleArchiveOpenInSystem(false); setShowMoreMenu(false) }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                  <ExternalLink size={13} />在系统中打开
+                </button>
+                <button data-wb="peRevealInFolder" onClick={() => { void handleArchiveOpenInSystem(true); setShowMoreMenu(false) }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                  <FolderSearch size={13} />在文件夹中显示
+                </button>
+                <button data-wb="peCopyRelPath" onClick={() => { void handleCopyRelPath(); setShowMoreMenu(false) }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                  <Copy size={13} />复制相对路径
+                </button>
+                {(fileType === 'txt' || fileType === 'html') && onRequestReading && (
+                  <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    <BookOpen size={13} />沉浸阅读
+                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">Ctrl+Shift+R</span>
+                  </button>
+                )}
+              </>
             )}
           />
+          {/* 「文件信息」小卡（批 1）：批 2 从胶囊搬到这里 —— 挂顶栏自己的 relative 容器，
+              与 ⋮ 同锚点（⋮ 在顶栏右端，卡片贴右缘即落在它正下方）。 */}
+          {showFileInfo && (
+            <div data-wb="peFileInfoCard" className="kb-pop absolute right-2 top-full z-50 mt-1 w-64 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
+              <FileInfoRows path={page?.path} sizeBytes={page?.sizeBytes} updatedAt={page?.updatedAt} />
+              <button onClick={() => setShowFileInfo(false)}
+                className="mt-2.5 w-full rounded-md border border-[var(--border-color)] py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">
+                关闭
+              </button>
+            </div>
+          )}
+          </div>
         )}
         {/* Content */}
         {isMindMapFile && page?.path ? (
@@ -1512,7 +1390,19 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
              ★ 条件用 `vaultRootId`（state）而不是 `vaultRootRef.current`：ref 变更不触发重渲染，
              与页面数据的并发装载会造成「落到下方 legacy 分支就再也回不来」的竞态。 */
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-[var(--text-muted)]">正在加载阅读器…</div>}>
-            <PdfReaderView key={page.path} rootId={vaultRootId} relPath={page.path} name={title || 'PDF 文档'} />
+            <PdfReaderView
+              key={page.path}
+              rootId={vaultRootId}
+              relPath={page.path}
+              name={title || 'PDF 文档'}
+              /* 批 2「合并公共部分」：知识库内本阅读器上方另有统一顶栏，它已承担「文件名 + N 页」，
+                 故这条栏退成只留阅读控件（书架阅读态走默认 'full'，一行不动）。 */
+              chrome="reader-only"
+              onDocInfo={(i) => setPdfPages(i.pages)}
+              /* 沉浸态上报：`immersive` 是阅读器的内部 state，它沉浸时只藏自己的栏 ——
+                 不补这个回调就会「正文进沉浸、顶栏还挂着」。 */
+              onImmersiveChange={setPdfImmersive}
+            />
           </Suspense>
         ) : archiveTextOpenable && page?.path && textFile?.reason === 'oversize-edit' ? (
           /* 文本类但超过编辑上限（>10MB，主进程 editable:false）：只读打开。
@@ -1662,8 +1552,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 cursorBlinking: 'smooth',
                 cursorSmoothCaretAnimation: 'on',
                 renderWhitespace: 'selection',
-                /* 56px「正文避让」已撤（2026-09-20 反馈：顶部空一大块）——悬浮胶囊收窄后
-                   不再需要整块避让，与内容轻微重叠由半透明毛玻璃自持 */
+                /* 56px「正文避让」已撤（2026-09-20 反馈：顶部空一大块）——当年悬浮胶囊收窄后
+                   不再需要整块避让，与内容轻微重叠由半透明毛玻璃自持；
+                   批 2 胶囊整条退役、工具栏改走顶栏，避让这件事更无从谈起 */
                 overviewRulerLanes: 0,
                 hideCursorInOverviewRuler: true,
                 overviewRulerBorder: false,

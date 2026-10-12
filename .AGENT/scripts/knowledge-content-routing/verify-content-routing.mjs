@@ -43,6 +43,8 @@ const SRC_PAGE = stripComments(read('src/modules/knowledge/components/PageEditor
 const SRC_MODULE = stripComments(read('src/modules/knowledge/index.tsx'))
 const SRC_CARD = stripComments(read('src/modules/knowledge/components/FileMetaCard.tsx'))
 const SRC_ARCHIVE_VIEW = stripComments(read('src/modules/knowledge/components/ArchiveTextView.tsx'))
+// 批 2（2026-10-12）：⋮ 按钮搬进了顶栏组件，锚点也随之落在那里
+const SRC_TOPBAR = stripComments(read('src/modules/knowledge/components/NoteTopBar.tsx'))
 
 // ===================== A 组：分支顺序（结构断言，按括号深度解析）=====================
 
@@ -190,12 +192,20 @@ for (const [anchor, label] of [
 }
 ok(SRC_PAGE.includes('data-wb="peFileInfoCard"') && SRC_PAGE.includes('<FileInfoRows'),
   'D2 「文件信息」小卡用 FileInfoRows 渲染（与元信息卡同源）')
-ok(SRC_PAGE.includes('data-wb="peMore"'),
-  'D2b 非 md 的 ⋮ 按钮带稳定锚点 peMore（探针靠它点开菜单；批 2 搬到顶栏后锚点沿用）')
+ok(SRC_TOPBAR.includes('data-wb="noteTopMore"') && !SRC_PAGE.includes('data-wb="peMore"'),
+  'D2b 非 md 的 ⋮ 用顶栏的稳定锚点 noteTopMore（批 2：按钮搬进 NoteTopBar，胶囊那颗 peMore 随胶囊退役；探针已同步）')
 ok(SRC_CARD.includes('export function FileInfoRows') && /<FileInfoRows /.test(SRC_CARD),
   'D3 FileMetaCard 导出并使用 FileInfoRows（同一份信息行，两处不各写一份）')
-ok(/!isMdNote && \([\s\S]{0,900}peFileInfo/.test(SRC_PAGE),
-  'D4 「文件」组只在非 md 出现（md 的 ⋮ 分段一行不改，拍板 E1 的范围锁）')
+{
+  // D4（批 2 改写）：原来断言 `!isMdNote && (…peFileInfo`，现在「文件」组是 ⋮ 菜单的 **else 分支**。
+  // 用下标比较而不是长距离正则 —— md 菜单有 80+ 行，任何窗口值都是拍脑袋。
+  const m = SRC_PAGE.indexOf('moreMenu={isMdNote ? (')
+  const elseAt = m > -1 ? SRC_PAGE.indexOf(') : (', m) : -1
+  const infoAt = elseAt > -1 ? SRC_PAGE.indexOf('peFileInfo', elseAt) : -1
+  ok(m > -1 && elseAt > -1 && infoAt > -1 && infoAt - elseAt < 1200,
+    'D4 「文件」组只在非 md 出现（批 2：它是 ⋮ 菜单的 else 分支；md 菜单一字不改，拍板 E1 的范围锁）',
+    `moreMenu@${m} else@${elseAt} peFileInfo@${infoAt}`)
+}
 ok(/const \{ copyText \} = await import\('\.\.\/\.\.\/\.\.\/lib\/ipc'\)/.test(SRC_PAGE),
   'D5 复制相对路径走主进程剪贴板通道（渲染层不直连 navigator.clipboard）')
 
@@ -213,8 +223,8 @@ ok(/const htmlSourceEditable = \(isWelcomeHtml \|\| isArchiveHtml\) && htmlSourc
   'E4 html 源码态同时覆盖欢迎页与归档 html')
 ok(/const \[htmlSource, setHtmlSource\] = useState\(false\)/.test(SRC_PAGE),
   'E5 ★ html 默认仍是沙箱渲染（htmlSource 初值 false —— 默认行为不变，只加出口）')
-ok(/useEffect\(\(\) => \{ setHtmlSource\(false\) \}, \[pageId\]\)/.test(SRC_PAGE),
-  'E6 换页重置 html 源码态（不跨页继承）')
+ok(/useEffect\(\(\) => \{ setHtmlSource\(false\); setPdfPages\(0\); setPdfImmersive\(false\) \}, \[pageId\]\)/.test(SRC_PAGE),
+  'E6 换页重置 html 源码态（批 2 起同一个 effect 兼复位 PDF 上报的页数 / 沉浸态）')
 ok(/htmlSource \? null : <WelcomeHtmlView path=\{page\.path\} \/>/.test(SRC_PAGE),
   'E7 渲染分支：htmlSource 为真时让位给下方 paneDoc 块（源码 Monaco），否则沙箱 iframe')
 ok(SRC_PAGE.includes('data-wb="peHtmlSource"'),

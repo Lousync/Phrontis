@@ -363,23 +363,23 @@ try {
       await cdp.key('Escape', 'Escape', 27)
       await sleep(300)
 
-      // ---- 4. 副栏顶栏（NoteTopBar）与工具栏槽 ----
+      // ---- 4. 副栏顶栏（NoteTopBar）—— 批 2 起顶栏行内渲染，工具栏单例槽已退役 ----
       const topbar = await cdp.evalJs(`(() => {
         const bars = [...document.querySelectorAll('[data-wb="noteTopBar"]')]
-        const slot = document.getElementById('editor-toolbar-slot')
         const secContent = document.querySelector('[data-pane="g2"]')
         return {
           barCount: bars.length,
           inSecondary: secContent ? secContent.querySelectorAll('[data-wb="noteTopBar"]').length : 0,
           backBtns: bars.map(b => !!b.querySelector('[data-wb="noteTopBack"]')),
-          slotChildren: slot ? slot.children.length : -1,
-          slotInSecondary: !!(secContent && secContent.querySelector('#editor-toolbar-slot')),
+          slotExists: !!document.getElementById('editor-toolbar-slot'),
+          floatBarCount: document.querySelectorAll('[data-wb="floatBar"]').length,
           monacoCount: document.querySelectorAll('.monaco-editor').length,
         }
       })()`)
       info('前置：副栏/主栏顶栏与工具栏槽', JSON.stringify(topbar))
       ok(topbar.inSecondary >= 1, 'P14 副栏渲染了自己的笔记顶栏 NoteTopBar', JSON.stringify(topbar))
-      ok(topbar.slotInSecondary === false, 'P15 副栏没有工具栏槽（isActive=false 生效，未抢主栏单例槽）')
+      ok(topbar.slotExists === false && topbar.floatBarCount === 0,
+        'P15 工具栏单例槽与悬浮胶囊均已退役（批 2：顶栏行内渲染，两栏各挂各的，不再存在抢槽）')
       ok(topbar.barCount === 2, 'P16 两栏各一套顶栏（共 2 个 noteTopBar）', `count=${topbar.barCount}`)
       await shot('split-03-two-topbars')
 

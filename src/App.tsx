@@ -163,7 +163,8 @@ export default function App() {
 
   // v3.4.0「页面条置顶」（2026-09-18）：中间栏页面条内的两个页签组槽 —— 编辑器与知识库
   // 各自把现有页签条 portal 进来（与上面 wbModSlotEl 同款手法与托管语义）。
-  // 另有一个内容级操作槽（插图/大纲/预览/保存全部 的胶囊），挂在内容区右上角浮层里。
+  // ★ 当年还有一个「内容级操作槽」（插图/大纲/预览/保存全部 的悬浮胶囊）挂在内容区右上角浮层里，
+  // 批 2（2026-10-12）随胶囊整条退役 —— 知识库的动作已全部收进 NoteTopBar。
   const [wbEditorPageEl, setWbEditorPageEl] = useState<HTMLElement | null>(null)
   const wbEditorPageRef = useCallback((node: HTMLDivElement | null) => { setWbEditorPageEl(node) }, [])
   const [wbKnowledgePageEl, setWbKnowledgePageEl] = useState<HTMLElement | null>(null)
@@ -176,8 +177,6 @@ export default function App() {
   const wbSecondaryContentRef = useCallback((node: HTMLDivElement | null) => { setWbSecondaryContentEl(node) }, [])
   // 拖分隔条改比例：以内容区几何为准
   const pageSplitContainerRef = useRef<HTMLDivElement | null>(null)
-  const [wbContentActionsEl, setWbContentActionsEl] = useState<HTMLElement | null>(null)
-  const wbContentActionsRef = useCallback((node: HTMLDivElement | null) => { setWbContentActionsEl(node) }, [])
   // 知识库沉浸阅读 / 图谱模式：模块自己让整条页面条隐藏（那些形态下外壳行也该让位，模块内无法触及）
   const [knowledgeImmersive, setKnowledgeImmersive] = useState(false)
   const handleKnowledgeImmersive = useCallback((v: boolean) => setKnowledgeImmersive(v), [])
@@ -1790,23 +1789,15 @@ export default function App() {
                       已验证的错路：① 挂跨父节点稳定 key（key 只在同父节点内有效）；
                       ② createPortal 换 target（一样重挂）。 */}
                   <div className="relative flex min-h-0 min-w-0 flex-1">
-                    {/* 内容级操作浮层（v3.4.0 页面条置顶）：插图/大纲/预览/保存全部 的胶囊，
-                        以及知识库页面级动作槽 `#editor-toolbar-slot`。
-                        ★ 2026-09-20：两者收进**一个悬浮胶囊**（data-wb="floatBar"，样式见
-                        styles/index.css 的 [data-wb='floatBar'] 段）——半透明毛玻璃底，
-                        静息态收成小把手（次级钮标 .kb-float-hide 者在非悬停时隐藏），
-                        模块只需给次级按钮加类，展开/淡出由 CSS 自持，无需上报状态。
-                        `pointer-events-none` 外壳保证空白区不挡内容点击；胶囊本体 auto。
-                        该 id 必须保留 —— knowledge/components/PageEditor.tsx 按 id 全局查它做 portal。 */}
-                    <div
-                      data-wb="mainPane"
-                      className="pointer-events-none absolute inset-y-0 left-0 z-30 flex w-full items-start justify-end"
-                    >
-                      <div data-wb="floatBar" className="pointer-events-auto mr-3 mt-3">
-                        <div ref={wbContentActionsRef} className="flex items-center" />
-                        <div id="editor-toolbar-slot" className="flex items-center gap-0.5" />
-                      </div>
-                    </div>
+                    {/* 内容级操作浮层已退役（批 2，2026-10-12，docs/nonmd-topbar-design.md）：
+                        这里原是 `data-wb="mainPane"` 外壳 + `data-wb="floatBar"` 悬浮胶囊，内含
+                        「内容级动作槽」与知识库页面级动作槽 `#editor-toolbar-slot`（半透明毛玻璃底、
+                        静息收成小把手、次级钮标 `.kb-float-hide`、空胶囊靠 `:not(:has(button))` 隐身）。
+                        ★ 为什么整条删掉：md 的动作 2026-10-11 已搬进 `NoteTopBar`，非 md 的动作
+                        批 2 也搬进去了 ⇒ 胶囊的两个槽都没有写入方。其中 `wbContentActionsEl`
+                        自 v3.4.0「页面条置顶」之后就一直是**死代码**（全仓无写入方）。
+                        ★ 顶栏是**行内渲染**，不再 portal 到主栏单例槽 ⇒ 分屏两栏各挂各的顶栏，
+                        不存在两实例抢槽的问题。 */}
                     {/* 模块容器序列：可见模块撑满（flex-1），其余 display:none 常驻保活。
                         ISS-2026-09-04-02 / -07：可见与隐藏模块必须在**同一个 keyed 数组**里，
                         否则可见↔隐藏换子节点槽位会被 React 按位置卸载重建。 */}

@@ -62,7 +62,7 @@ interface Props {
   onDropImage?: (file: File) => Promise<string | null>
   /** B4 内联建议开关（设置 aiAssistantInlineSuggest；关时快捷键不发起请求） */
   inlineSuggestEnabled?: boolean
-  /** B4 自动触发开关（设置 aiAssistantInlineSuggestAuto；关 = 仅手动 Alt+A / 胶囊按钮） */
+  /** B4 自动触发开关（设置 aiAssistantInlineSuggestAuto；关 = 仅手动 Alt+A / 顶栏 ✨ 钮） */
   inlineSuggestAuto?: boolean
   /** B4 请求态回调（true = 正在生成），供编辑器状态栏微标 */
   onInlineSuggestBusy?: (busy: boolean) => void
@@ -545,7 +545,7 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
       // ---- B4 内联建议（AI 续写 ghost text）----
       // provider 注册一次（language 级，同 installWikiCompletion）；触发入口按编辑器实例装配。
       installInlineCompletion(monaco)
-      // 触发入口：Alt+A / 胶囊按钮 / 自动通道 → 走 Monaco 内建命令 editor.action.inlineSuggest.trigger。
+      // 触发入口：Alt+A / 顶栏 ✨ 钮 / 自动通道 → 走 Monaco 内建命令 editor.action.inlineSuggest.trigger。
       // 该命令的 precondition 只有 EditorContextKeys.writable（已核实产物 monaco-lFGDj3sW.js
       // 的 TriggerInlineSuggestionAction），不要求 inlineSuggestionVisible → 手动触发可行。
       // explicit 默认 true：显式请求的 ghost text 在打字/移光标时自动消失，不必自己管生命周期。
@@ -562,7 +562,7 @@ const MonacoHost = forwardRef<MonacoPaneHandle, { doc: PaneDoc; onChange: Props[
           .catch(() => { /* 触发失败静默：不打断写作 */ })
         return true
       }
-      // 手动入口（Alt+A / 胶囊按钮）：显式「我现在要」→ 唤醒自动 + 重置冷却计数，
+      // 手动入口（Alt+A / 顶栏 ✨ 钮）：显式「我现在要」→ 唤醒自动 + 重置冷却计数，
       // 且**不看触发点判定**（用户说了才算）。
       triggerInlineRef.current = (): boolean => {
         settleAutoOutcome()
@@ -876,7 +876,7 @@ let inlineProviderHandle: Monaco.IDisposable | null = null
 /** 在途请求 id（新请求顶替 / 编辑器卸载时取消前次；同一时刻只允许一条在途） */
 let inlineInFlightId: string | null = null
 /**
- * 「点火」时间戳：只有手动触发（Alt+A / 胶囊按钮）才置位。
+ * 「点火」时间戳：只有手动触发（Alt+A / 顶栏 ✨ 钮）才置位。
  *
  * 为什么需要：Monaco 在打字 / 移光标时也会自动调 provider（InlineCompletionTriggerKind.Automatic），
  * 那不是本功能的设计（「仅手动触发，零常驻开销」）→ 未点火一律返回空，绝不给 LLM 发请求。
@@ -898,7 +898,7 @@ function armInlineSuggest(): void {
  *
  * 语义：**每一次自动请求在被下一次自动请求「结算」时**，看它有没有被采纳；
  * 连续 AUTO_PAUSE_STREAK 次没人采纳 → 暂停自动（这个时段显然不需要它），
- * 直到用户手动 Alt+A / 点胶囊按钮（那是明确的「我现在要」）才唤醒。
+ * 直到用户手动 Alt+A / 点顶栏 ✨ 钮（那是明确的「我现在要」）才唤醒。
  * 手动请求不进这套账（用户主动要的，不该被冷却影响）。
  */
 let inlineAutoState: AutoState = { ...INITIAL_AUTO_STATE }

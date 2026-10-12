@@ -73,7 +73,7 @@ async function clickSel(sel, waitMs = 700) {
 const MENU_STATE = `JSON.stringify((function () {
   var has = function (s) { return !!document.querySelector(s) };
   return {
-    more: has('[data-wb="peMore"]'),
+    more: has('[data-wb="noteTopMore"]'),
     info: has('[data-wb="peFileInfo"]'),
     openSys: has('[data-wb="peOpenInSystem"]'),
     reveal: has('[data-wb="peRevealInFolder"]'),
@@ -96,6 +96,10 @@ const SIGNATURE = `JSON.stringify((function () {
   var monaco = scope.querySelectorAll('.monaco-editor').length;
   var banner = !!q('[data-wb="archiveViewBanner"]');
   var topbar = !!q('[data-wb="noteTopBar"]');
+  /* 批 2（2026-10-12）适配：顶栏现在对**所有非导图类型**都挂（非 md 的悬浮胶囊已退役）
+     ⇒ **不能再用「有顶栏」当 md 的判据**。换成顶栏里的「阅读切换」钮 ——
+     它的门槛是 showViewToggle = isMdNote，只有 md 有。 */
+  var isMd = topbar && !!q('[data-wb="noteTopViewToggle"]');
   var pdf = !!q('.kb-pdf-scope');
   var meta = !!q('[data-wb="metaOpenInSystem"]');
   var frame = q('iframe[src^="kbview://"]');
@@ -103,11 +107,15 @@ const SIGNATURE = `JSON.stringify((function () {
   if (pdf) kind = 'pdf-reader';
   else if (meta) kind = 'meta-card';
   else if (frame) kind = 'html-sandbox';
-  else if (monaco > 0) kind = topbar ? 'md-editor' : (banner ? 'text-oversize-readonly' : 'text-editable');
+  else if (monaco > 0) kind = isMd ? 'md-editor' : (banner ? 'text-oversize-readonly' : 'text-editable');
   return {
-    kind: kind, monaco: monaco, banner: banner, topbar: topbar,
+    kind: kind, monaco: monaco, banner: banner, topbar: topbar, isMd: isMd,
     pdf: pdf, meta: meta, iframe: !!frame,
     title: (q('[data-wb="noteTopTitle"]') || {}).textContent || null,
+    subtitle: (q('[data-wb="noteTopSubtitle"]') || {}).textContent || null,
+    saveDot: !!q('[data-wb="noteSaveDot"]'),
+    viewToggle: !!q('[data-wb="noteTopViewToggle"]'),
+    floatBar: document.querySelectorAll('[data-wb="floatBar"]').length,
   };
 })())`
 
@@ -196,9 +204,9 @@ async function main() {
       console.log('  [SKIP] 文本类：仓库里没有这类文件')
     } else {
       await openByRel(textRel)
-      const menuOpened = await clickSel('[data-wb="peMore"]')
+      const menuOpened = await clickSel('[data-wb="noteTopMore"]')
       if (!menuOpened) {
-        console.log('  [SKIP] 点不到 ⋮（找不到可见的 [data-wb="peMore"]）—— 当前页很可能不是非 md 落点')
+        console.log('  [SKIP] 点不到 ⋮（找不到可见的 [data-wb="noteTopMore"]）—— 当前页很可能不是非 md 落点')
       } else {
         const m = await menuState()
         ok(!!m, 'C1 能读到 ⋮ 菜单状态', String(m))
@@ -224,7 +232,7 @@ async function main() {
     } else {
       const sig1 = await openByRel(htmlRel)
       ok(sig1.kind === 'html-sandbox', `D1 html 默认落沙箱渲染（${htmlRel}）`, `实际 ${sig1.kind}`)
-      const menuOpened = await clickSel('[data-wb="peMore"]')
+      const menuOpened = await clickSel('[data-wb="noteTopMore"]')
       const m = menuOpened ? await menuState() : null
       ok(!!m?.htmlSrc, 'D2 ⋮ 里有「看源码」（peHtmlSource）')
       if (m?.htmlSrc) {
@@ -232,7 +240,7 @@ async function main() {
         let p2 = null
         try { p2 = JSON.parse(await evalJs(SIGNATURE)) } catch { /* 下面按 null 报 */ }
         ok(p2?.kind === 'text-editable', 'D3 点「看源码」→ 进可编辑源码（Monaco，无沙箱 iframe）', `实际 ${p2?.kind}`)
-        const reopened = await clickSel('[data-wb="peMore"]')
+        const reopened = await clickSel('[data-wb="noteTopMore"]')
         if (reopened) {
           await clickSel('[data-wb="peHtmlSource"]', 1800)
           let p3 = null
@@ -243,13 +251,51 @@ async function main() {
     }
   }
 
+  console.log('\n§3.7 批 2 统一顶栏（非 md 也挂顶栏 + 胶囊退役 + 保存点条件）')
+  {
+    const cases = [
+      ['PDF', pick(by, ['pdf']), true, '批 2「合并公共部分」：页数上移顶栏中段'],
+      ['文本类', pick(by, ['py', 'js', 'ts', 'txt', 'csv', 'log']), false, '有真实防抖自动保存 ⇒ 绿点保留'],
+      ['HTML', pick(by, ['html']), false, '沙箱渲染，无保存动作'],
+      ['图片', imgRel, false, '批 3 之前仍是元信息卡'],
+      ['二进制', binRel, false, '无保存动作'],
+    ]
+    for (const [label, rel, expectPages, why] of cases) {
+      if (!rel) { console.log(`  [SKIP] ${label}：仓库里没有这类文件`); continue }
+      const sig = await openByRel(rel)
+      ok(sig.floatBar === 0, `T ${label} 悬浮胶囊已退役（floatBar 计数 0）`, `实际 ${sig.floatBar}`)
+      ok(sig.topbar === true, `T ${label} 非 md 也挂统一顶栏（noteTopBar）`,
+        JSON.stringify({ kind: sig.kind, topbar: sig.topbar }))
+      ok(sig.viewToggle === false, `T ${label} 不给「阅读切换」钮（非 md 无预览态 ⇒ 给了是点了没反应的假按钮）`)
+      const expectDot = sig.kind === 'text-editable'
+      ok(sig.saveDot === expectDot,
+        `T ${label} 保存点${expectDot ? '显示' : '隐藏'}（批 2 拍板①：只对有真实保存动作的类型显示）· ${why}`,
+        JSON.stringify({ kind: sig.kind, saveDot: sig.saveDot }))
+      if (expectPages) ok(/页$/.test(sig.subtitle || ''), `T ${label} 顶栏中段带「N 页」`, String(sig.subtitle))
+    }
+    // ⋮ 里**不给**「文件格式」（批 2 的范围锁）
+    const fmtRel = pick(by, ['py', 'js', 'ts', 'txt', 'csv', 'log'])
+    if (fmtRel) {
+      await openByRel(fmtRel)
+      if (await clickSel('[data-wb="noteTopMore"]')) {
+        const hasFmt = await evalJs(`String([].slice.call(document.querySelectorAll('[data-wb="noteTopMoreMenu"] button')).some(function (b) { return (b.textContent || '').indexOf('文件格式') >= 0 }))`)
+        ok(hasFmt === 'false' || hasFmt === false,
+          'T 非 md 的 ⋮ 不给「文件格式」（只改内存不落盘 + 扩展名来自文件名 ⇒ 重启即失效的假按钮）',
+          String(hasFmt))
+      }
+    }
+  }
+
   console.log('\n§4 落点汇总')
   for (const o of opened) console.log('  · ' + o)
 
-  console.log('\n§5 需要在真机上手点的两条（探针刻意不做）')
-  console.log('  · 写通道：打开一个 .py/.txt，改一个字 → 右上绿点转橙再转绿 → 关掉再打开，改动还在')
+  console.log('\n§5 需要在真机上手点的（探针刻意不做）')
+  console.log('  · 写通道（批 1）：打开一个 .py/.txt，改一个字 → **顶栏中段绿点**转橙再转绿 → 关掉再打开，改动还在')
   console.log('    （判定依据：保存走 ws:writeFile，非 md 不注入 frontmatter —— 打开文件确认没有多出 --- 头）')
-  console.log('  · 沉浸阅读：打开仓库里的 .txt → 胶囊 ⋮ → 沉浸阅读 → 应显示只读正文，**不是**「该文件不是 markdown 知识页」的卡')
+  console.log('  · 沉浸阅读（批 1）：打开仓库里的 .txt → 顶栏 ⋮ → 沉浸阅读 → 应显示只读正文，**不是**「该文件不是 markdown 知识页」的卡')
+  console.log('  · PDF 沉浸（批 2）：打开仓库里的 PDF → 阅读器那条栏点「沉浸」→ **顶栏也要一起消失**（正文占满）；Esc 退出后顶栏回来，且**页面页签不该被关掉**（批 2 顺带修的 Esc 冲突，见设计 §4.4）')
+  console.log('  · PDF 合并（批 2）：同页核对「书名只出现一次」—— 顶栏中段是书名 + N 页，阅读器那条只剩阅读控件')
+  console.log('  · 分屏（批 2）：把非 md 拖到副栏 → **两栏各挂各的顶栏**（与 Obsidian 同款），互不抢槽')
 
   console.log('')
   if (fails.length === 0) {

@@ -6,8 +6,9 @@
  *      空/非字符串 id 过滤；合法数据往返。
  *   ② 接线断链 —— 拆分/合并/移动/移除页面、跨栏拖入、副栏页签条/内容 portal、分隔条、
  *      持久化读写：任一环漏接会「按钮点了没反应」而无报错。
- *   ③ 保活与槽冲突 —— 主栏模块容器结构不动；副栏 PageEditor 必须 isActive=false，
- *      否则两实例抢主栏单例槽 #editor-toolbar-slot。
+ *   ③ 保活与槽冲突 —— 主栏模块容器结构不动；副栏 PageEditor 必须是独立实例。
+ *      批 2（2026-10-12）起顶栏改为**行内渲染**，主栏单例工具栏槽与悬浮胶囊整条退役
+ *      ⇒ 原来「两实例抢槽」的隐患在结构上不再可能，反例锁换成「槽与胶囊零残留」。
  *   ④ 范围锁 —— 分屏模型只装「页面」，模块标签不得进（模块整体不分栏）。
  *
  * 用法：
@@ -126,7 +127,14 @@ ok(/if\s*\(srcIdx\s*===\s*-1\)\s*\{\s*onExternalDrop\?\.\(srcId\)/.test(srcStrip
 
 /* ================= F. 保活 / 槽冲突（反例锁） ================= */
 console.log('\n=== F. 保活与槽冲突 ===')
-ok(/secondaryContentEl\s*&&\s*secondaryPageIds\.length\s*>\s*0\s*&&\s*secondaryActiveId\s*&&\s*createPortal\([\s\S]{0,1600}?isActive=\{false\}/.test(srcKb), 'F1 副栏 PageEditor 必须 isActive={false}（否则抢主栏单例工具栏槽）')
+// F1（批 2，2026-10-12 改写）：原来锁的是「副栏 PageEditor 必须 isActive={false}」——
+// 那条防的是两个实例抢**主栏单例**工具栏槽 `#editor-toolbar-slot`。批 2 把顶栏改成**行内渲染**、
+// 那颗槽整条退役 ⇒ 抢槽这件事在结构上不再可能，`isActive` prop 也随之删除。
+// 反例锁换成「槽与悬浮胶囊零残留」+「副栏确实渲染了自己的顶栏」：
+ok(!/editor-toolbar-slot|floatBar|kb-float-hide/.test(srcKb) && !/editor-toolbar-slot|floatBar/.test(srcApp),
+  'F1 主栏单例工具栏槽与悬浮胶囊已退役（顶栏行内渲染 ⇒ 不存在抢槽，故 isActive prop 一并删除）')
+ok(/secondaryContentEl\s*&&\s*secondaryPageIds\.length\s*>\s*0\s*&&\s*secondaryActiveId\s*&&\s*createPortal\([\s\S]{0,1600}?<PageEditor/.test(srcKb),
+  'F1b 副栏仍是独立 PageEditor 实例（两栏各挂各的顶栏，与 Obsidian 同款）')
 ok(!/className="flex min-h-0 flex-1">\s*<div className="relative flex min-h-0 min-w-0 flex-1 flex-col"/.test(srcApp), 'F2 主栏内容行不得退回未挂 ref 的旧结构')
 
 /* ================= 结果 ================= */

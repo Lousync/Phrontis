@@ -9,8 +9,12 @@
  *   也让它能被契约脚本按锚点做静态断言。
  *
  * 锚点纪律（`.AGENT/scripts` 下的探针依赖，改名会让断言失配）：
- *   · 新增：noteTopBar / noteTopBack / noteTopForward / noteTopTitle / noteSaveDot / noteTopMore / noteTopMoreMenu
+ *   · 新增：noteTopBar / noteTopBack / noteTopForward / noteTopTitle / noteTopSubtitle / noteSaveDot /
+ *     noteTopMore / noteTopMoreMenu
  *   · **从旧悬浮胶囊原样搬来**：inlineSuggestBtn / inlineBusy / inlinePaused / inlineOffSlash
+ *     （那颗胶囊已于批 2 整条退役，见 docs/nonmd-topbar-design.md；锚点名字保持不变）
+ *   · `noteSaveDot` / `noteTopMore` 是**条件锚点**（批 2）：前者只对有保存动作的类型出现，
+ *     后者在 `showMore={false}` 时整个不渲染 —— 探针断言它们时必须先断言适用前提。
  *
  * 视觉口径（拍板）：40px 高、**不画分隔线**、不设底色（继承主题底，与正文连成一整片）。
  */
@@ -23,8 +27,14 @@ export interface NoteTopBarProps {
   title: string
   /** 悬停提示（给完整路径） */
   titleHint?: string
+  /** 中段次要文本（批 2：PDF 的「N 页」）。锚点 noteTopSubtitle */
+  subtitle?: string
   /** 保存中（绿点 → 橙闪） */
   saving: boolean
+  /** 是否显示中段保存点（默认 true）。批 2 口径：只有「有真实保存动作」的类型才显示 ——
+   *  可编辑文本类有防抖自动保存 ⇒ 保留；PDF / 图片 / 二进制 / 导图 / 超限只读文本 ⇒ 隐藏。
+   *  理由：绿点在无保存动作的类型上是**假信号**（见 docs/nonmd-topbar-design.md §三·①）。 */
+  showSaveDot?: boolean
   canBack: boolean
   canForward: boolean
   onBack: () => void
@@ -32,6 +42,9 @@ export interface NoteTopBarProps {
   /** 当前是阅读视图；图标语义对齐 Obsidian：编辑态给「书」、阅读态给「笔」 */
   preview: boolean
   onToggleView: () => void
+  /** 是否显示阅读/编辑切换钮（默认 true）。批 2：非 md 现状没有预览态（`isArchiveFile` 恒 true
+   *  把胶囊那颗钮挡掉了）⇒ 传 false，免得点了没反应。 */
+  showViewToggle?: boolean
   /** 是否显示 ✨ 常驻钮：阅读态与即时渲染档不显示（那里没有 ghost text，显示等于点不动） */
   showInline?: boolean
   /** AI 续写四态（拍板 C1：常驻钮，不放进菜单） */
@@ -39,6 +52,10 @@ export interface NoteTopBarProps {
   inlineBusy: boolean
   inlinePaused: boolean
   onToggleInline: () => void
+  /** `⋮` 是否渲染（默认 true）。批 2 拍板：菜单无内容时**整个不渲染**（不是渲染成禁用态）。
+   *  ★ 现状下这是**潜伏守卫**：非 md 的「文件」组恒有 4 项、md 的「沉浸阅读」恒在 ⇒ 实际不会触发。
+   *  将来 ⋮ 项被收窄时它自动生效（见 docs/nonmd-topbar-design.md §三·②）。 */
+  showMore?: boolean
   /** `⋮` 菜单开合（内容由 PageEditor 以 moreMenu 传入，本组件不关心菜单里有啥） */
   moreOpen: boolean
   onToggleMore: () => void
@@ -47,11 +64,11 @@ export interface NoteTopBarProps {
 }
 
 export function NoteTopBar({
-  title, titleHint, saving, canBack, canForward, onBack, onForward,
-  preview, onToggleView,
+  title, titleHint, subtitle, saving, showSaveDot = true, canBack, canForward, onBack, onForward,
+  preview, onToggleView, showViewToggle = true,
   showInline = true,
   inlineOn, inlineBusy, inlinePaused, onToggleInline,
-  moreOpen, onToggleMore, onCloseMore, moreMenu,
+  showMore = true, moreOpen, onToggleMore, onCloseMore, moreMenu,
 }: NoteTopBarProps) {
   const rootRef = useRef<HTMLDivElement | null>(null)
 
@@ -99,11 +116,16 @@ export function NoteTopBar({
         <span data-wb="noteTopTitle" title={titleHint} className="truncate text-[13.5px] font-medium text-[var(--text-primary)]">
           {title}
         </span>
-        <span
-          data-wb="noteSaveDot"
-          title={saving ? '保存中…' : '已保存'}
-          className={`h-[7px] w-[7px] shrink-0 rounded-full ${saving ? 'animate-pulse bg-[var(--warning)]' : 'bg-[var(--success)]'}`}
-        />
+        {subtitle && (
+          <span data-wb="noteTopSubtitle" className="shrink-0 text-[11.5px] text-[var(--text-muted)]">{subtitle}</span>
+        )}
+        {showSaveDot && (
+          <span
+            data-wb="noteSaveDot"
+            title={saving ? '保存中…' : '已保存'}
+            className={`h-[7px] w-[7px] shrink-0 rounded-full ${saving ? 'animate-pulse bg-[var(--warning)]' : 'bg-[var(--success)]'}`}
+          />
+        )}
       </div>
 
       {/* 右：常驻 ✨ / 阅读切换 / ⋮ */}
@@ -136,10 +158,13 @@ export function NoteTopBar({
         {/* 阅读/编辑切换：同一个钮双向切换。`data-view` 是给探针的**状态锚点** ——
             按 title 文案找按钮会在改文案时静默假红（2026-10-11 顶栏改版后
             「切换到预览」变成「切换到阅读视图」，两个探针各红了一片）。 */}
-        <button data-wb="noteTopViewToggle" data-view={preview ? 'preview' : 'edit'} onClick={onToggleView} title={preview ? '切换到编辑 (Ctrl+E / Ctrl+/)' : '切换到阅读视图 (Ctrl+E / Ctrl+/)'} className={iconBtn}>
-          {preview ? <PenLine size={17} /> : <BookOpen size={17} />}
-        </button>
+        {showViewToggle && (
+          <button data-wb="noteTopViewToggle" data-view={preview ? 'preview' : 'edit'} onClick={onToggleView} title={preview ? '切换到编辑 (Ctrl+E / Ctrl+/)' : '切换到阅读视图 (Ctrl+E / Ctrl+/)'} className={iconBtn}>
+            {preview ? <PenLine size={17} /> : <BookOpen size={17} />}
+          </button>
+        )}
 
+        {showMore && (
         <div className="relative">
           <button
             data-wb="noteTopMore"
@@ -159,6 +184,7 @@ export function NoteTopBar({
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   )
