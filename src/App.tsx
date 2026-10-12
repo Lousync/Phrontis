@@ -1122,11 +1122,6 @@ export default function App() {
       return next
     })
   }, [groups, activeTab, activeToolTab, kbStripVisible, quizViewOpen])
-  // 标签拖拽重排（现成机制恢复）：只调**活动组**的标签顺序，激活标签跟内容走、不变
-  const handleReorder = useCallback((tabs: string[]) => {
-    patchGroup(activeGroupIdRef.current, (g) => ({ ...g, tabs }))
-  }, [patchGroup])
-
   /** 进模块态 → leftMode 落回总览（树模式互斥修复，方案 §2.1）。
    *  根因：leftMode 持久化在 workbenchLayout（Shell 读），railModule 是 App 态；树模式渲染分支
    *  遮蔽模块态，跟随 effect 把 railModule 置了也看不见。两个真实缺陷同根：
