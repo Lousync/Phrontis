@@ -33,6 +33,16 @@ export interface WorkbenchLayout {
   bookmarksHidden: string[]
   /** 分屏比例（主栏:副栏，0~1；null = 未分屏） */
   splitRatio: number | null
+  /** 页面级分屏（只搬页面标签）：null = 单栏。见 App pageSplit 状态。 */
+  pageSplit: PageSplitLayout | null
+}
+
+/** 页面级分屏状态（App 的持久化形态）。secondaryPageIds 存页面 id，恢复时由模块二次净化。 */
+export interface PageSplitLayout {
+  orientation: 'row' | 'column'
+  ratio: number
+  secondaryPageIds: string[]
+  secondaryActiveId: string | null
 }
 
 /** 右栏控件的规范顺序（缺省序 = 原型 v15 定稿 + 2026-09-28 增桌宠）；DayPanel 四控件 id 沿用 DAY_TABS */
@@ -84,6 +94,7 @@ export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   panelTabsHidden: [],
   bookmarksHidden: [],
   splitRatio: null,
+  pageSplit: null,
 }
 
 export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchLayout {
@@ -121,6 +132,16 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       }
       if (o.splitRatio === null || (typeof o.splitRatio === 'number' && Number.isFinite(o.splitRatio))) {
         base.splitRatio = o.splitRatio as number | null
+      }
+      if (o.pageSplit && typeof o.pageSplit === 'object' && !Array.isArray(o.pageSplit)) {
+        const ps = o.pageSplit as Record<string, unknown>
+        const ori: 'row' | 'column' | null = ps.orientation === 'column' ? 'column' : ps.orientation === 'row' ? 'row' : null
+        const ratio = typeof ps.ratio === 'number' && Number.isFinite(ps.ratio) ? Math.min(0.8, Math.max(0.2, ps.ratio)) : 0.5
+        const ids = Array.isArray(ps.secondaryPageIds)
+          ? ps.secondaryPageIds.filter((x): x is string => typeof x === 'string' && x.length > 0)
+          : []
+        const active = typeof ps.secondaryActiveId === 'string' ? ps.secondaryActiveId : null
+        if (ori && ids.length > 0) base.pageSplit = { orientation: ori, ratio, secondaryPageIds: ids, secondaryActiveId: active }
       }
     }
   } catch { /* 坏 JSON 走默认 */ }

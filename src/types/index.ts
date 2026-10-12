@@ -2153,6 +2153,8 @@ export interface ElectronAPI {
   onBookMarketSourceDraft: (cb: (p: { draft: BookSourceDraft }) => void) => () => void
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
+  /** 创建副本：按字节复制仓库内文件（文本/二进制通吃）；重名主进程自动加后缀 */
+  workspaceCopyFile: (rootId: string, srcRel: string, dstRel: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   /** 粘贴系统剪贴板里的外部文件/目录到 relDir；srcPaths 由渲染层 paste 事件取得（见 WorkspacePasteResult） */
   workspacePasteExternal: (rootId: string, relDir: string, srcPaths: string[]) => Promise<WorkspacePasteResult>

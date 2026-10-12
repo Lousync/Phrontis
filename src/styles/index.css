@@ -209,6 +209,12 @@ input:focus, textarea:focus, select:focus {
   content-visibility: auto;
   contain-intrinsic-size: auto 156px;
 }
+/* 文件树行（VaultTree 行高 28px）：展开/收起文件夹的高度动画会被「视口外行仍参与布局/绘制」拖卡，
+   content-visibility:auto 让视口外行不参与绘制，滚回来才渲染（估值=行高 28px，与 .kb-cv-sm 区分）。 */
+.kb-cv-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
+}
 
 /* ===== Markdown 标记淡化（编辑器弱化版 Live Preview，光标所在行除外）=====
    Monaco inline decoration 的类直接落在包裹 token 的 span 上——token 的 mtk 颜色在
@@ -750,6 +756,17 @@ input:focus, textarea:focus, select:focus {
 .kb-chevron {
   transition: transform var(--dur-std) var(--ease-kb), rotate var(--dur-std) var(--ease-kb);
 }
+
+/* --- 分屏分隔条（页面级两栏）：瞬时几何、不做尺寸过渡；只给自身 hover 反馈 --- */
+.kb-pane-divider {
+  flex: none;
+  align-self: stretch;
+  background: var(--border-color);
+  transition: background var(--dur-std) var(--ease-kb);
+}
+.kb-pane-divider:not(.is-col) { width: 5px; cursor: col-resize; }
+.kb-pane-divider.is-col { height: 5px; cursor: row-resize; }
+.kb-pane-divider:hover { background: var(--accent); opacity: .5; }
 
 /* --- D 列表增删 --- */
 @keyframes kb-item-in {

@@ -966,6 +966,29 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
     }
   })
 
+  // 复制文件（创建副本）：按**字节**复制，文本/二进制（png/pdf/pptx…）通吃——
+  // 渲染层的 read+create 只能过文本，会把二进制读坏，故必须走本通道。
+  // 重名自动加后缀（复用 uniqueFileName，同 ws:createFile/ws:mkdir 口径）。
+  ipcMain.handle('ws:copy', (_e, rootId: string, srcRel: string, dstRel: string) => {
+    try {
+      const srcAbs = requireInside(rootId, srcRel)
+      if (!statSync(srcAbs).isFile()) return { ok: false, error: '只能复制文件（目录暂不支持）' }
+      const requestedAbs = requireInside(rootId, dstRel)
+      const dir = dirname(requestedAbs)
+      mkdirSync(dir, { recursive: true })
+      const requestedName = basename(requestedAbs)
+      const finalName = uniqueFileName(dir, requestedName)
+      const finalAbs = join(dir, finalName)
+      copyFileSync(srcAbs, finalAbs)
+      if (isKnowledgeIndexSensitive(finalAbs)) invalidateIndexIfCurrentVault(rootId)
+      const finalRel = finalName === requestedName ? dstRel : dstRel.replace(/[^\\/]+$/, finalName)
+      broadcastDataChanged('knowledge')
+      return { ok: true, relPath: finalRel, renamed: finalName !== requestedName }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
+
   /**
    * 粘贴系统剪贴板里的外部文件/目录到仓库内某个目录（v3.2.0 条目 ③）。
    *

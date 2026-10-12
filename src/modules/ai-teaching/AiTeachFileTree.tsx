@@ -1,7 +1,9 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Link2, Trash2, Star, FileText, BookOpen, Eye } from 'lucide-react'
+import { FileContextMenu, type FileMenuEntry } from '../../components/shared/FileContextMenu'
+import { duplicateWorkspaceFile } from '../../lib/fileDuplicate'
 import {
-  workspaceGetCurrent, workspaceListDir, workspaceReadFile, workspaceCreateFile,
+  workspaceGetCurrent, workspaceListDir, workspaceCreateFile,
   workspaceMkdir, workspaceRename, workspaceTrash, getSettingRaw, onAiTeachTreeRefresh,
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
@@ -157,20 +159,12 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
   }
   const doDuplicate = async (rel: string, isDir: boolean) => {
     if (!rootId) return
-    if (isDir) { showToast({ type: 'warning', message: '暂不支持复制文件夹（P4 范围）' }); return }
-    const src = `${base}/${rel}`
-    const read = await workspaceReadFile(rootId, src).catch(() => null)
-    if (!read || typeof read.content !== 'string') { showToast({ type: 'error', message: '读取源文件失败' }); return }
+    if (isDir) { showToast({ type: 'warning', message: '暂不支持复制文件夹' }); return }
+    const r = await duplicateWorkspaceFile(rootId, `${base}/${rel}`).catch(() => null)
+    if (!r || r.ok === false) { showToast({ type: 'error', message: r?.error || '创建副本失败' }); return }
     const dir = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
-    const dot = rel.lastIndexOf('.')
-    const stem = dot > 0 ? rel.slice(0, dot) : rel
-    const ext = dot > 0 ? rel.slice(dot) : ''
-    let cand = `${dir ? `${dir}/` : ''}${stem} 副本${ext}`
-    for (let i = 2; (dirCache[dir] ?? []).some(e => e.name === cand.split('/').pop()); i++) cand = `${dir ? `${dir}/` : ''}${stem} 副本 ${i}${ext}`
-    const r = await workspaceCreateFile(rootId, `${base}/${cand}`, read.content).catch(() => null)
-    if (r && r.ok === false) { showToast({ type: 'error', message: `副本创建失败：${r.error ?? ''}` }); return }
     void loadDir(dir)
-    showToast({ type: 'info', message: `已生成副本 ${cand.split('/').pop()}` })
+    showToast({ type: 'info', message: `已生成副本 ${r.relPath?.split('/').pop() ?? ''}` })
   }
   const doDelete = async (n: TreeNode) => {
     if (!rootId) return
@@ -183,31 +177,42 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
     void loadDir(parent)
   }
 
-  const menuItems = (node: TreeNode | null): Array<{ label: string; run: () => void; danger?: boolean; disabled?: boolean }> => {
-    const dirRel = node ? (node.type === 'dir' ? node.relPath : node.relPath.includes('/') ? node.relPath.slice(0, node.relPath.lastIndexOf('/')) : '') : ''
+  const menuItems = (node: TreeNode | null): FileMenuEntry[] => {
     if (!node || node.relPath === '') {
       // 根（产物目录本身，含 VaultTree 空白区右键合成的 '' 节点）：只能新建/粘贴，不可改名删除
       return [
-        { label: '＋ 新建文件', run: () => doCreate('', 'file') },
-        { label: '＋ 新建文件夹', run: () => doCreate('', 'dir') },
-        clip ? { label: `粘贴「${clip.name}」`, run: () => void doDuplicate(clip.rel, clip.isDir), disabled: clip.isDir } : { label: '（剪贴板为空）', run: () => {}, disabled: true },
+        { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => doCreate('', 'file') },
+        { key: 'newDir', label: '新建文件夹', icon: <FolderPlus size={15} />, onSelect: () => doCreate('', 'dir') },
+        clip
+          ? { key: 'paste', label: `粘贴「${clip.name}」`, icon: <ClipboardPaste size={15} />, disabled: clip.isDir, onSelect: () => void doDuplicate(clip.rel, clip.isDir) }
+          : { key: 'paste', label: '（剪贴板为空）', icon: <ClipboardPaste size={15} />, disabled: true, onSelect: () => {} },
       ]
     }
-    const items: ReturnType<typeof menuItems> = []
-    if (node.type === 'dir') items.push({ label: '＋ 新建文件', run: () => doCreate(node.relPath, 'file') }, { label: '＋ 新建文件夹', run: () => doCreate(node.relPath, 'dir') })
-    if (node.type === 'file' && (node.name.toLowerCase().endsWith('.md') || node.name.toLowerCase().endsWith('.json') || node.name.toLowerCase().endsWith('.pptx'))) items.push({ label: '打开阅读', run: () => onOpenMd(node.relPath) })
-    if (node.type === 'file' && /\.html?$/i.test(node.name) && onOpenHtml) items.push({ label: '打开渲染预览', run: () => onOpenHtml(node.relPath) })
-    items.push({ label: '重命名', run: () => startRename(node) })
-    items.push({ label: '复制（到剪贴板）', run: () => { setClip({ rel: node.relPath, name: node.name, isDir: node.type === 'dir' }); showToast({ type: 'info', message: `已复制「${node.name}」，到目标目录右键粘贴（仅文件）` }) } })
-    items.push({ label: '创建副本', run: () => void doDuplicate(node.relPath, node.type === 'dir') })
-    items.push({ label: '复制路径', run: () => { void navigator.clipboard.writeText(`${base}/${node.relPath}`).catch(() => null) } })
+    const items: FileMenuEntry[] = []
+    if (node.type === 'dir') {
+      items.push(
+        { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => doCreate(node.relPath, 'file') },
+        { key: 'newDir', label: '新建文件夹', icon: <FolderPlus size={15} />, onSelect: () => doCreate(node.relPath, 'dir') },
+        { separator: true },
+      )
+    }
+    if (node.type === 'file' && (node.name.toLowerCase().endsWith('.md') || node.name.toLowerCase().endsWith('.json') || node.name.toLowerCase().endsWith('.pptx'))) {
+      items.push({ key: 'read', label: '打开阅读', icon: <BookOpen size={15} />, onSelect: () => onOpenMd(node.relPath) })
+    }
+    if (node.type === 'file' && /\.html?$/i.test(node.name) && onOpenHtml) {
+      items.push({ key: 'preview', label: '打开渲染预览', icon: <Eye size={15} />, onSelect: () => onOpenHtml(node.relPath) })
+    }
+    items.push({ key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => startRename(node) })
+    items.push({ key: 'copy', label: '复制（到剪贴板）', icon: <ClipboardPaste size={15} />, onSelect: () => { setClip({ rel: node.relPath, name: node.name, isDir: node.type === 'dir' }); showToast({ type: 'info', message: `已复制「${node.name}」，到目标目录右键粘贴（仅文件）` }) } })
+    items.push({ key: 'dup', label: '创建副本', icon: <CopyPlus size={15} />, onSelect: () => void doDuplicate(node.relPath, node.type === 'dir') })
+    items.push({ key: 'copyPath', label: '复制路径', icon: <Link2 size={15} />, onSelect: () => { void navigator.clipboard.writeText(`${base}/${node.relPath}`).catch(() => null) } })
     // 收藏（v3.6.0）：文件可钉到左栏顶部「收藏」（rel 用仓库相对路径）
     if (node.type === 'file' && onTogglePin) {
       const repoRel = `${base}/${node.relPath}`
-      items.push({ label: isPinned?.(repoRel) ? '取消收藏' : '★ 钉到收藏', run: () => onTogglePin(repoRel, node.name) })
+      items.push({ key: 'pin', label: isPinned?.(repoRel) ? '取消收藏' : '★ 钉到收藏', icon: <Star size={15} />, onSelect: () => onTogglePin(repoRel, node.name) })
     }
-    void dirRel
-    items.push({ label: '删除（回收站）', run: () => void doDelete(node), danger: true })
+    items.push({ separator: true })
+    items.push({ key: 'delete', label: '删除（回收站）', icon: <Trash2 size={15} />, danger: true, onSelect: () => void doDelete(node) })
     return items
   }
 
@@ -247,18 +252,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
       </div>
 
       {ctx && (
-        <div className="fixed inset-0 z-[70] kb-pop-layer" onClick={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null) }}>
-          {/* UI 优化条目7：w-max 显式内容宽（修 shrink-to-fit+ w-full 子项测量歧义导致的拉宽），长文案换行兜底，钳制按实际宽 */}
-          <div className="absolute min-w-[160px] w-max max-w-[280px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl py-1"
-            style={{ left: Math.min(ctx.x, window.innerWidth - 290), top: Math.min(ctx.y, window.innerHeight - 300) }}>
-            {menuItems(ctx.node).map((it, i) => (
-              <button key={i} disabled={it.disabled} onClick={() => { setCtx(null); it.run() }}
-                className={`w-full text-left px-3 py-1.5 text-[12px] leading-snug transition-colors disabled:opacity-40 ${it.danger ? 'text-red-400 hover:bg-[var(--bg-hover)]' : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}>
-                {it.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <FileContextMenu x={ctx.x} y={ctx.y} items={menuItems(ctx.node)} onClose={() => setCtx(null)} />
       )}
     </div>
   )
