@@ -725,6 +725,12 @@ input:focus, textarea:focus, select:focus {
 .kb-pane-divider.is-col { height: 5px; cursor: row-resize; }
 .kb-pane-divider:hover { background: var(--accent); opacity: .5; }
 
+/* 分屏：活动组页面条底色高亮（匹配原型 hl-tint，无边框）。属性选择器抬特化，
+   压过 Tailwind 的 bg-[var(--bg-secondary)]（同为单类，靠源序不可靠）。 */
+[data-wb="pagebar"].kb-pane-active {
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-secondary));
+}
+
 /* --- D 列表增删 --- */
 @keyframes kb-item-in {
   from { opacity: 0; transform: translateY(6px); }

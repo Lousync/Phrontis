@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy, Fragment, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { AppWindow, Columns2, Rows2, Minimize2, X } from 'lucide-react'
+import { AppWindow, Columns2, Rows2, Minimize2, X, ArrowLeftRight } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag, BookKind } from './types'
 
 import { labelOf as tabLabel, isTabName } from './lib/appModules'
@@ -180,9 +180,31 @@ export default function App() {
     setActiveGroupId('g1')
     activeGroupIdRef.current = 'g1'
   }, [])
+  /** 跨栏移动：把标签移入目标组（插在 beforeId 之前，null=尾部）；目标组成为活动组。 */
+  const moveTabToGroup = (tabId: string, targetGid: 'g1' | 'g2', beforeId: string | null) => {
+    setGroups((gs) => {
+      const srcG = gs.find((g) => g.tabs.includes(tabId))
+      if (!srcG || srcG.id === targetGid) return gs
+      return gs.map((g) => {
+        if (g.id === srcG.id) {
+          const tabs = g.tabs.filter((t) => t !== tabId)
+          return { ...g, tabs, active: g.active === tabId ? (tabs[tabs.length - 1] ?? null) : g.active }
+        }
+        if (g.id === targetGid) {
+          const tabs = [...g.tabs]
+          const idx = beforeId ? tabs.indexOf(beforeId) : -1
+          if (idx >= 0) tabs.splice(idx, 0, tabId); else tabs.push(tabId)
+          return { ...g, tabs, active: tabId }
+        }
+        return g
+      })
+    })
+    setActiveGroupId(targetGid)
+    activeGroupIdRef.current = targetGid
+  }
   // 副组被关空 → 自动合并回单栏（已定）
   useEffect(() => {
-    if (groups.length > 1 && groups[1].tabs.length === 0) mergeGroupsToPrimary()
+    if (groups.length > 1 && (groups[0].tabs.length === 0 || groups[1].tabs.length === 0)) mergeGroupsToPrimary()
   }, [groups, mergeGroupsToPrimary])
   // 分隔条拖拽调比例（夹 0.2~0.8；pointer 事件避免 HTML5 拖放静默失败）
   const startSplitDrag = (e: ReactPointerEvent) => {
@@ -290,6 +312,35 @@ export default function App() {
   const workbench = !!s.uiWorkbench
   // 工作台布局（workbenchLayout 键钝解析）：左栏锁定/树模式供跟随与左栏交互用
   const wbLayout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
+  // 分屏持久化：settings 就绪后恢复一次；此后 groups/方向/比例/活动组变化即写回 wbLayout.split。
+  // 仅两栏时持久化（单栏 = null，保持「重启不恢复标签」的既有行为）。
+  const validTab = (x: string) => isTabName(x) || isToolTabId(x) || x === 'quiz'
+  const splitRestoredRef = useRef(false)
+  useEffect(() => {
+    if (!settingsReady || splitRestoredRef.current) return
+    splitRestoredRef.current = true
+    const sp = wbLayout.split
+    if (!sp) return
+    const gs = sp.groups.map((g) => ({
+      id: g.id,
+      tabs: g.tabs.filter(validTab),
+      active: g.active && validTab(g.active) ? g.active : null,
+    }))
+    if (!gs.some((g) => g.id === 'g1')) gs.unshift({ id: 'g1', tabs: [], active: null })
+    setGroups(gs)
+    setSplitOrientation(sp.orientation)
+    setSplitRatio(sp.ratio)
+    setActiveGroupId(sp.activeGroupId)
+    activeGroupIdRef.current = sp.activeGroupId
+  }, [settingsReady, wbLayout])
+  useEffect(() => {
+    if (!settingsReady || !splitRestoredRef.current) return
+    const split = splitActive
+      ? { orientation: splitOrientation, ratio: splitRatio, activeGroupId, groups: groups.map((g) => ({ id: g.id, tabs: g.tabs, active: g.active })) }
+      : null
+    if (JSON.stringify(wbLayout.split ?? null) === JSON.stringify(split)) return
+    update('workbenchLayout', JSON.stringify({ ...wbLayout, split }))
+  }, [settingsReady, splitActive, splitOrientation, splitRatio, activeGroupId, groups, wbLayout, update])
   // 布局 · 活动栏整条显隐。原名「自定义布局」的标题栏下拉已于 2026-09-17 整条删除，
   // 唯一入口收敛到命令面板「布局：隐藏/显示活动栏」（快捷键 Ctrl+Shift+P）。
   // 与逐模块显隐互不干扰：这里关的是「活动栏这个容器本身」。
@@ -1598,11 +1649,13 @@ export default function App() {
         onClose={(id) => closeInGroup(g.id, id)}
         onReorder={(tabs) => reorderInGroup(g.id, tabs)}
         onContextMenu={(e, id) => openPageBarMenu(e, g.id, id)}
+        onDropExternal={(dragId, beforeId) => moveTabToGroup(dragId, g.id, beforeId)}
         editorSlotRef={hasEditor ? wbEditorPageRef : noopRef}
         knowledgeSlotRef={hasKb ? wbKnowledgePageRef : noopRef}
         showQuizEntry={QUIZ_ENTRY_ENABLED && quizViewOpen && hasKb}
         quizEntryActive={quizViewOpen && g.active === 'knowledge'}
         hidePages={zenLevel >= 1}
+        paneActive={g.id === activeGroupId}
         lead={g.active === 'knowledge' && noteJumpFrom ? (
           <button
             onClick={() => handleTabChange(noteJumpFrom)}
@@ -1626,6 +1679,7 @@ export default function App() {
     ]
     if (splitActive) {
       items.push({ separator: true })
+      items.push({ key: 'to-other', label: '移到另一栏', icon: <ArrowLeftRight size={15} />, onSelect: () => moveTabToGroup(tabId, gid === 'g1' ? 'g2' : 'g1', null) })
       items.push({ key: 'merge', label: '合并回主栏', icon: <Minimize2 size={15} />, onSelect: mergeGroupsToPrimary })
     }
     items.push({ separator: true })

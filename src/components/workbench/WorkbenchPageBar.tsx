@@ -91,6 +91,8 @@ interface Props {
   onReorder: (tabs: string[]) => void
   /** 条目右键（拆分 / 移动到另一栏 / 关闭分屏，由 App 提供；不传则无右键菜单） */
   onContextMenu?: (e: React.MouseEvent, id: string) => void
+  /** 跨栏拖入（分屏）：拖动的标签不属于本条时回调（beforeId=落点条目，落在空白处为 null） */
+  onDropExternal?: (dragId: string, beforeId: string | null) => void
   /** 主栏编辑器页签组槽（模块 portal 目标） */
   editorSlotRef: (node: HTMLDivElement | null) => void
   /** 知识库页签组槽 */
@@ -105,9 +107,11 @@ interface Props {
   lead?: React.ReactNode
   /** 隐藏页签组（禅模式 Z1+） */
   hidePages?: boolean
+  /** 分屏：本条是否为活动组（底色高亮，见 .kb-pane-active） */
+  paneActive?: boolean
 }
 
-export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, onContextMenu, editorSlotRef, knowledgeSlotRef, showQuizEntry = false, quizEntryActive = false, trail = null, lead = null, hidePages = false }: Props) {
+export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, onContextMenu, onDropExternal, editorSlotRef, knowledgeSlotRef, showQuizEntry = false, quizEntryActive = false, trail = null, lead = null, hidePages = false, paneActive = false }: Props) {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const dragIdRef = useRef<string | null>(null)
@@ -135,16 +139,27 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, o
 
   const handleDrop = (e: React.DragEvent, targetId: string) => {
     e.preventDefault()
+    e.stopPropagation()
     const raw = dragIdRef.current ?? e.dataTransfer.getData('text/plain')
     setDragOverId(null)
     if (!raw || raw === targetId) return
     const next = [...visible]
     const from = next.indexOf(raw)
+    // 跨栏（分屏）：拖动的标签不在本条 → 交给 App 移动到目标组（插在 targetId 之前）
+    if (from === -1) { onDropExternal?.(raw, targetId); return }
     const to = next.indexOf(targetId)
-    if (from === -1 || to === -1) return
+    if (to === -1) return
     next.splice(from, 1)
     next.splice(to, 0, raw)
     reorderTo(next)
+  }
+
+  // 落在本条的空白处（非具体条目）：跨栏则移动到目标组尾部；组内空白忽略
+  const handleRowDrop = (e: React.DragEvent) => {
+    const raw = dragIdRef.current ?? e.dataTransfer.getData('text/plain')
+    if (!raw || visible.includes(raw)) return
+    e.preventDefault()
+    onDropExternal?.(raw, null)
   }
 
   return (
@@ -155,7 +170,9 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, o
       /* Edge Fluent（2026-09-19）：行底不用 border-b（滚动槽的 overflow 会裁掉负 margin 贴边），
          改为行内 hairline 子元素——激活条目（positioned、DOM 靠后）自然盖住它形成「与内容区同体」；
          items-end 让条目沉底，overflow-x-clip 只拦首尾条目内凹弧的水平外溢、不裁垂直融合。 */
-      className="relative flex h-9 shrink-0 select-none items-end overflow-x-clip bg-[var(--bg-secondary)] px-1.5"
+      className={`relative flex h-9 shrink-0 select-none items-end overflow-x-clip bg-[var(--bg-secondary)] px-1.5${paneActive ? ' kb-pane-active' : ''}`}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+      onDrop={handleRowDrop}
     >
       {/* hairline：页面条与内容区的分隔线（激活条目处被同色条目盖住） */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[var(--border-color)]" />
