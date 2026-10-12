@@ -8,27 +8,22 @@ import { ensureSessionFolder, ensureSessionFolderAt, sessionFolder, setLessonFol
 import { writeInventoryIndex, todayLocal } from './aiTeachingInventory'
 import { renameWorkspacePath, uniqueFileName } from './workspaceManager'
 import { createAgentSession, getAgentMessages, getAgentSession, sessionExists } from './agentSessionRepo'
-import { invokeLlmInternal, invokeLlmStreamInternal, firstEnabledModelSpec } from './llmService'
+import { invokeLlmInternal, firstEnabledModelSpec } from './llmService'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import {
   parseCourseMd,
   rewriteCourseMd,
-  parseOutlineJson,
   normalizeOutline,
   cleanField,
   sourceSnapshot,
-  diffSources,
-  normalizeAdditions,
   mergeOutlineAdditions,
-  sourceKey,
   type CourseOutline,
   type CourseUnitProgress,
   type CourseUnitStatus,
-  type GenerateOutlineInput,
   type OutlineAdditions,
   type SourceSnapshotEntry,
 } from './aiTeachingCoursePure'
-import { readWorkspaceSourceEntries, readSourceEntryBody, type SourceEntry } from './aiTeachingSources'
+import { readWorkspaceSourceEntries, type SourceEntry } from './aiTeachingSources'
 
 /**
  * AI教学 · 课程模式（docs/ai-teaching-course-mode-plan.md）
@@ -43,7 +38,7 @@ import { readWorkspaceSourceEntries, readSourceEntryBody, type SourceEntry } fro
  */
 
 export { parseCourseMd, rewriteCourseMd, parseOutlineJson } from './aiTeachingCoursePure'
-export type { CourseChapter, CourseOutline, CourseUnit, CourseUnitProgress, CourseUnitStatus, GenerateOutlineInput } from './aiTeachingCoursePure'
+export type { CourseChapter, CourseOutline, CourseUnit, CourseUnitProgress, CourseUnitStatus } from './aiTeachingCoursePure'
 
 /** 一节课（课时）：一条会话 + 一个产物夹，挂在某知识点下，线性推进 */
 export interface LessonInfo {
@@ -170,53 +165,15 @@ function wsSources(wsId: string, getSetting: (key: string) => unknown): SourceEn
   return readWorkspaceSourceEntries(folder, vault.rootPath)
 }
 
-/** 写大纲成功后刷新 SOURCE 快照（供下次修订比对「素材变更」；机器维护，失败不阻断） */
+/** 写大纲成功后刷新 SOURCE 快照（机器维护，失败不阻断）。
+ *  ★ 当前**只写不读** —— 比对「素材变更」的唯一读者是 2026-10-11 删除的「修订大纲」抽屉；
+ *  保留快照是为将来做「素材变更提醒」时不必重建。 */
 function refreshSourceBaseline(wsId: string, getSetting: (key: string) => unknown): void {
   try {
     const f = readProgressFile()
     wsState(f, wsId).sourceBaseline = sourceSnapshot(wsSources(wsId, getSetting))
     persist(f)
   } catch { /* 快照失败不阻断大纲保存 */ }
-}
-
-/** 单份素材正文上限 / 素材内容总量上限（一章的扫描提取稿常超 1.2 万字，旧值会把后半章截掉） */
-const MATERIAL_BODY_CAP = 20000
-const MATERIAL_TOTAL_CAP = 40000
-
-/**
- * 按用户勾选的登记素材拼「素材内容」依据文本。
- * 正文来源：① 提取稿指针；② md/code 素材自身文件；③ dir 目录素材递归读内部文本（见 readSourceEntryBody）。
- * keys 为空 = 取全部已登记素材。返回 bodyCount 供调用方判断「有没有真正文」。
- */
-function buildMaterialsAnchor(wsId: string, keys: string[] | undefined, getSetting: (key: string) => unknown): { text: string; pickedCount: number; bodyCount: number } {
-  const vault = getCurrentVault()
-  if (!vault) return { text: '', pickedCount: 0, bodyCount: 0 }
-  const folder = workspaceFolderRel(wsId, getSetting)
-  if (!folder) return { text: '', pickedCount: 0, bodyCount: 0 }
-  const all = wsSources(wsId, getSetting)
-  const picked = Array.isArray(keys) && keys.length ? all.filter((e) => keys.includes(sourceKey(e.name, e.path))) : all
-  const dirAbs = join(vault.rootPath, folder, 'SOURCES')
-  const blocks: string[] = []
-  let bodyCount = 0
-  for (const e of picked) {
-    const body = readSourceEntryBody(dirAbs, vault.rootPath, e)
-    if (body.trim()) {
-      bodyCount += 1
-      blocks.push(`【素材 #${e.no}：${e.name}${e.type === 'dir' ? '（目录）' : ''}】\n${body.slice(0, MATERIAL_BODY_CAP)}`)
-    } else {
-      blocks.push(`【素材 #${e.no}：${e.name}】（${e.type}${e.range && e.range !== '-' ? ` p${e.range}` : ''}）${e.note ? '· ' + e.note : ''} ——（无正文：无提取稿、非文本素材、或目录内无可读文本）`)
-    }
-  }
-  return { text: blocks.join('\n\n').slice(0, MATERIAL_TOTAL_CAP), pickedCount: picked.length, bodyCount }
-}
-
-/** materials/mixed 模式下据此拿素材内容；其余模式返回空 */
-function outlineMaterials(input: GenerateOutlineInput, getSetting: (key: string) => unknown): { text: string; pickedCount: number; bodyCount: number } {
-  const mode = input?.mode ?? 'free'
-  if (mode !== 'materials' && mode !== 'mixed') return { text: '', pickedCount: 0, bodyCount: 0 }
-  const wsId = String(input?.wsId ?? '')
-  if (!wsId) return { text: '', pickedCount: 0, bodyCount: 0 }
-  return buildMaterialsAnchor(wsId, input?.sourceKeys, getSetting)
 }
 
 export function writeCourseOutline(wsId: string, outline: CourseOutline, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; error?: string } {
@@ -228,7 +185,7 @@ export function writeCourseOutline(wsId: string, outline: CourseOutline, getSett
     mkdirSync(dirname(abs), { recursive: true })
     writeFileSync(abs, rewriteCourseMd(outline), 'utf-8')
     migrateUnitFolderPrefixes(wsId, getSetting) // F4：章号/章名变更 → 同步重命名知识点夹
-    refreshSourceBaseline(wsId, getSetting) // 刷新素材快照（下次修订据此算「素材变更」）
+    refreshSourceBaseline(wsId, getSetting) // 刷新素材快照（当前只写不读，见该函数头注）
     broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: loc.dirRel.replace(/\\/g, '/') })
     broadcastCourse(wsId)
     return { ok: true, relPath: loc.rel }
@@ -721,61 +678,9 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
   return '\n\n' + lines.join('\n')
 }
 
-// ===== AI 生成大纲（一次性 LLM 调用，接真模型）=====
+// ===== 模型解析（defaultModel 用）=====
 
-// ===== AI 生成大纲（接真模型；支持流式过程反馈）=====
-
-/** 生成过程事件（经广播通道回渲染层，供建课向导显示「卡在哪一步」） */
-export interface CourseGenProgress {
-  id: string
-  phase: 'request' | 'reasoning' | 'answer' | 'parsing' | 'done' | 'failed'
-  /** 流式增量（reasoning / answer 阶段） */
-  delta?: string
-  model?: string
-  chars?: number
-  error?: string
-}
-
-function buildOutlinePrompt(input: GenerateOutlineInput, materialsText: string): { sys: string; user: string } {
-  const goal = String(input?.goal ?? '').trim()
-  const anchorText = String(input?.anchorText ?? '').trim()
-  const mode = input?.mode ?? 'free'
-  const sys = '你是课程设计助手。把用户提供的学习目标/依据拆成「章 → 知识点」两级大纲。只输出一个 JSON 对象（可用 ```json 围栏包裹），不要任何解释文字。'
-    + '只把「真正的知识内容」（概念 / 定义 / 定理 / 性质 / 方法 / 公式 / 典型例题）作为知识点；'
-    + '**不要**把章节导语、教学目标、考试目标 / 考情分析、重难点提示、学习要求、知识结构总览、复习建议这类'
-    + '**元信息 / 框架性内容**当作知识点——某份素材整篇只是导语 / 框架就跳过它，只从其余素材抽取实质内容。'
-  const schema = 'JSON 结构：{"title":"课程名","goal":"一句话学习目标","anchor":"依据名称（无则空串）","chapters":[{"name":"章名","units":[{"name":"知识点名","goal":"该知识点的学习目标","source":"出处，如 考纲 §2.1 / 素材 #2，或 AI 补充"}]}]}'
-  const modeHint = mode === 'free'
-    ? '本次无权威依据：请依据学科通识生成，宁多勿缺；每个知识点的 source 写「AI 补充」。'
-    : mode === 'materials'
-      ? '本次依据 = 下面「素材内容」中用户勾选的登记素材：**只**据这些素材抽取知识点，不要发明素材之外的内容；本知识点 source 标「素材 #n」。素材若是目录，其内部文件已用「### 文件：…」分隔，可据此对应各节/各页，务必覆盖到，不要只看开头。'
-      : mode === 'mixed'
-        ? '本次以「依据文本 / 素材内容」为主，缺的由你补充并显式标「AI 补充」。'
-        : '本次有权威依据：请**只**依据下面给出的「依据文本」拆分知识点，不要发明依据里没有的内容；source 写出它在依据中的位置。'
-  const granularity = '知识点粒度：拆到「一个可独立讲解、可出题检验的最小概念」为止（如一个定义、一条定理、一种方法）；依据里的一小节/一段通常对应多个知识点，**不要**把一整节压成一个。'
-  const basis: string[] = []
-  if (anchorText) basis.push(`依据文本：\n${anchorText.slice(0, 12000)}`)
-  if (materialsText) basis.push(`素材内容（用户勾选的登记素材）：\n${materialsText}`)
-  const basisBlock = basis.length ? basis.join('\n\n') : '（无依据）'
-  const user = `学习目标：${goal || '（见依据）'}\n\n依据名称：${String(input?.anchorLabel ?? '').trim() || '（无）'}\n${basisBlock}\n\n${schema}\n${granularity}\n${modeHint}`
-  return { sys, user }
-}
-
-/** 解析模型返回内容 → 大纲；失败时给出可读原因（含原文片段） */
-function finishOutline(rawContent: string, input: GenerateOutlineInput, model: string): { ok: boolean; outline?: CourseOutline; error?: string } {
-  const content = String(rawContent ?? '')
-  const outline = parseOutlineJson(content)
-  if (!outline) {
-    const snippet = content.replace(/\s+/g, ' ').slice(0, 160)
-    return { ok: false, error: `模型未返回可解析的大纲 JSON（${model || '未知模型'}）。原文片段：${snippet || '（空回复）'}` }
-  }
-  const goal = String(input?.goal ?? '').trim()
-  if (goal && !outline.goal) outline.goal = goal
-  if (!outline.anchor && input?.anchorLabel) outline.anchor = String(input.anchorLabel)
-  return { ok: true, outline }
-}
-
-/** 解析本次要用的模型：优先对话模型 → 全局 defaultChatModel（由 invoke 侧兜底）→ 第一个启用供应商 */
+/** 解析要用的模型：显式 spec（`pid:mid`）→ 全局 defaultChatModel（由 invoke 侧兜底）→ 第一个启用供应商 */
 function resolveOutlineModel(input: { modelSpec?: string }): { providerId?: string; modelId?: string; label: string } {
   const spec = String(input?.modelSpec ?? '').trim()
   const ci = spec.indexOf(':')
@@ -786,78 +691,6 @@ function resolveOutlineModel(input: { modelSpec?: string }): { providerId?: stri
     if (fb) { providerId = fb.providerId; modelId = fb.modelId }
   }
   return { providerId, modelId, label: providerId && modelId ? `${providerId}:${modelId}` : (modelId || '默认配置') }
-}
-
-/** materials 模式的可用性校验：没选素材 / 选了但没有真正文 → 给出可操作提示 */
-function materialsGuard(mode: string, mat: { pickedCount: number; bodyCount: number }): string {
-  if (mode !== 'materials') return ''
-  if (mat.pickedCount === 0) return '请先勾选至少一个依据素材'
-  if (mat.bodyCount === 0) return '所选素材没有可提取的正文（既无提取稿、也不是 md/文本素材、目录内也没有可读文本）。请先在素材库对 pdf 做「提取稿」，或改选文本类素材，或改用「官方考纲/教材目录」粘贴文本'
-  return ''
-}
-
-export async function generateCourseOutline(input: GenerateOutlineInput, getSetting: (key: string) => unknown): Promise<{ ok: boolean; outline?: CourseOutline; error?: string }> {
-  const goal = String(input?.goal ?? '').trim()
-  const anchorText = String(input?.anchorText ?? '').trim()
-  const mat = outlineMaterials(input, getSetting)
-  const guard = materialsGuard(input?.mode ?? 'free', mat)
-  if (guard) return { ok: false, error: guard }
-  if (!goal && !anchorText && !mat.text) return { ok: false, error: '请先填写学习目标，或提供依据（考纲/目录文本，或勾选登记素材）' }
-  const { sys, user } = buildOutlinePrompt(input, mat.text)
-  const { providerId, modelId } = resolveOutlineModel(input)
-  try {
-    const r = await invokeLlmInternal({ providerId, modelId, effort: 'off', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] })
-    if (!r.ok) return { ok: false, error: r.error }
-    return finishOutline(r.content, input, r.model)
-  } catch (e) {
-    return { ok: false, error: (e as Error).message }
-  }
-}
-
-/** 流式生成：把「请求/推理/回答/解析/完成/失败」逐段回传（emit），便于 UI 显示过程与定位失败点 */
-export async function generateCourseOutlineStream(
-  id: string,
-  input: GenerateOutlineInput,
-  getSetting: (key: string) => unknown,
-  emit: (p: CourseGenProgress) => void,
-): Promise<{ ok: boolean; outline?: CourseOutline; error?: string }> {
-  const goal = String(input?.goal ?? '').trim()
-  const anchorText = String(input?.anchorText ?? '').trim()
-  const mat = outlineMaterials(input, getSetting)
-  const guard = materialsGuard(input?.mode ?? 'free', mat)
-  if (guard) {
-    emit({ id, phase: 'failed', error: guard })
-    return { ok: false, error: guard }
-  }
-  if (!goal && !anchorText && !mat.text) {
-    const error = '请先填写学习目标，或提供依据（考纲/目录文本，或勾选登记素材）'
-    emit({ id, phase: 'failed', error })
-    return { ok: false, error }
-  }
-  const { sys, user } = buildOutlinePrompt(input, mat.text)
-  const { providerId, modelId, label } = resolveOutlineModel(input)
-  emit({ id, phase: 'request', model: label })
-  let content = ''
-  try {
-    const r = await invokeLlmStreamInternal(
-      { providerId, modelId, effort: 'off', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] },
-      (e) => {
-        if (e.type === 'text') { content += e.delta; emit({ id, phase: 'answer', delta: e.delta }) }
-        else if (e.type === 'reasoning') { emit({ id, phase: 'reasoning', delta: e.delta }) }
-      },
-    )
-    if (!r.ok) { emit({ id, phase: 'failed', error: r.error }); return { ok: false, error: r.error } }
-    emit({ id, phase: 'parsing', chars: r.content.length, model: r.model })
-    const result = finishOutline(r.content, input, r.model)
-    emit(result.ok
-      ? { id, phase: 'done', model: r.model }
-      : { id, phase: 'failed', error: result.error })
-    return result
-  } catch (e) {
-    const error = (e as Error).message
-    emit({ id, phase: 'failed', error })
-    return { ok: false, error }
-  }
 }
 
 // ===== L3 收尾测验：一次性出题 =====
@@ -904,96 +737,7 @@ export async function makeUnitQuiz(wsId: string, unitId: string, getSetting: (ke
   return { ok: true, questions: q }
 }
 
-// ===== 课程修订（只增补）：素材变更 + AI 增补建议 =====
-
-/** 素材变更条目（渲染层展示用）：change = 新增 / 已更新 / 无 */
-export interface SourceItem { no: number; name: string; type: string; path: string; extracted: string; change: 'new' | 'updated' | null }
-
-/** 当前工作区素材 + 与上次快照的变更标记 */
-export function getSourceChanges(wsId: string, getSetting: (key: string) => unknown): { ok: boolean; items?: SourceItem[]; error?: string } {
-  try {
-    const f = readProgressFile()
-    const s = wsState(f, wsId)
-    const items = diffSources(s.sourceBaseline ?? [], wsSources(wsId, getSetting)).map((e) => ({
-      no: e.no, name: e.name, type: e.type, path: e.path, extracted: e.extracted, change: e.change,
-    }))
-    return { ok: true, items }
-  } catch (e) { return { ok: false, error: (e as Error).message } }
-}
-
-function buildRevisePrompt(outline: CourseOutline, items: SourceItem[], requirement: string): { sys: string; user: string } {
-  const outlineLines = outline.chapters.map((c) => {
-    const us = c.units.map((u) => `    - ${u.id} | ${u.name}${u.goal ? ` | ${u.goal}` : ''}`).join('\n')
-    return `  [${c.id}] ${c.name}\n${us}`
-  }).join('\n') || '（暂无章节）'
-  const srcList = items.map((i) => `${i.change === 'new' ? '[新增] ' : i.change === 'updated' ? '[已更新] ' : ''}#${i.no} ${i.name}（${i.type}）${i.path}`).join('\n') || '（工作区没有登记素材）'
-  const changed = items.filter((i) => i.change)
-  const changedList = changed.length
-    ? changed.map((i) => `${i.change === 'new' ? '[新增]' : '[已更新]'} #${i.no} ${i.name}`).join('\n')
-    : '（无）'
-  const sys = '你是课程设计助手。你会收到一份**现有课程大纲**、自上次修订以来**素材的变更**、全部已登记素材、以及用户的**新要求**。'
-    + '你的任务是**只在现有大纲上增补**新的知识点/章，**绝不修改、删除、重排任何现有条目**。'
-    + '只输出一个 JSON 对象（可用 ```json 围栏包裹），不要任何解释文字。'
-  const schema = 'JSON 结构：{"toExisting":[{"chapterId":"现有章的 id（如 c2）","name":"新知识点名","goal":"该点学习目标","source":"出处，如 素材#4 / 考纲 §2.1 / AI 补充","why":"一句理由"}],'
-    + '"newChapters":[{"name":"新章名","units":[{"name":"知识点名","goal":"目标","source":"出处","why":"理由"}]}]}。'
-    + '若确无需要增补，输出 {"toExisting":[],"newChapters":[]}。'
-  const user = `现有大纲（**只作参考，不要改动**；章用 [id] 标注）：\n${outlineLines}\n\n`
-    + `自上次修订以来的素材变更：\n${changedList}\n\n全部已登记素材：\n${srcList}\n\n`
-    + `用户新要求（可空）：\n${requirement || '（无——请仅据素材变更，对现有大纲查漏补缺）'}\n\n${schema}`
-  return { sys, user }
-}
-
-/** 流式生成「增补建议」（产出 OutlineAdditions，不含对现有条目的任何改动） */
-export async function reviseCourseOutlineStream(
-  id: string,
-  input: { wsId: string; requirement?: string; modelSpec?: string },
-  getSetting: (key: string) => unknown,
-  emit: (p: CourseGenProgress) => void,
-): Promise<{ ok: boolean; additions?: OutlineAdditions; error?: string }> {
-  const wsId = String(input?.wsId ?? '')
-  const outline = readCourseOutline(wsId, getSetting)
-  if (!outline) { const e = '该工作区还没有课程大纲'; emit({ id, phase: 'failed', error: e }); return { ok: false, error: e } }
-  const requirement = String(input?.requirement ?? '').trim()
-  const f = readProgressFile()
-  const s = wsState(f, wsId)
-  const items: SourceItem[] = diffSources(s.sourceBaseline ?? [], wsSources(wsId, getSetting)).map((e) => ({
-    no: e.no, name: e.name, type: e.type, path: e.path, extracted: e.extracted, change: e.change,
-  }))
-  const hasChanges = items.some((i) => i.change)
-  if (!requirement && !hasChanges) {
-    const e = '没有素材变更，也没有填写新要求——先补充一项再修订'
-    emit({ id, phase: 'failed', error: e })
-    return { ok: false, error: e }
-  }
-  const { sys, user } = buildRevisePrompt(outline, items, requirement)
-  const { providerId, modelId, label } = resolveOutlineModel(input)
-  emit({ id, phase: 'request', model: label })
-  let content = ''
-  try {
-    const r = await invokeLlmStreamInternal(
-      { providerId, modelId, effort: 'off', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] },
-      (e) => {
-        if (e.type === 'text') { content += e.delta; emit({ id, phase: 'answer', delta: e.delta }) }
-        else if (e.type === 'reasoning') { emit({ id, phase: 'reasoning', delta: e.delta }) }
-      },
-    )
-    if (!r.ok) { emit({ id, phase: 'failed', error: r.error }); return { ok: false, error: r.error } }
-    emit({ id, phase: 'parsing', chars: r.content.length, model: r.model })
-    const additions = normalizeAdditions(r.content)
-    if (!additions) {
-      const snippet = r.content.replace(/\s+/g, ' ').slice(0, 160)
-      const error = `模型未返回可解析的增补 JSON（${r.model || '未知模型'}）。原文片段：${snippet || '（空回复）'}`
-      emit({ id, phase: 'failed', error })
-      return { ok: false, error }
-    }
-    emit({ id, phase: 'done', model: r.model })
-    return { ok: true, additions }
-  } catch (e) {
-    const error = (e as Error).message
-    emit({ id, phase: 'failed', error })
-    return { ok: false, error }
-  }
-}
+// ===== 大纲增补（只增补合并）：助手工具 course.outline.write(append=true) 的落盘口径 =====
 
 /** 写入增补（只增补合并，保留现有 id/进度） */
 export function applyOutlineAdditions(wsId: string, additions: OutlineAdditions, getSetting: (key: string) => unknown): { ok: boolean; added?: number; error?: string } {
@@ -1135,8 +879,6 @@ export function archiveOrganizedPage(sessionId: string, title: unknown, content:
 export function registerAiTeachingCourseHandlers(getSetting: (key: string) => unknown): void {
   ipcMain.handle('aiTeachCourse:getState', (_e, wsId: string) => getCourseState(String(wsId ?? ''), getSetting))
   ipcMain.handle('aiTeachCourse:setEnabled', (_e, wsId: string, enabled: boolean) => setCourseEnabled(String(wsId ?? ''), !!enabled))
-  ipcMain.handle('aiTeachCourse:saveOutline', (_e, wsId: string, outline: CourseOutline) =>
-    writeCourseOutline(String(wsId ?? ''), outline, getSetting))
   // 对话驱动建课：草稿卡「正式生成」→ 助手同款写入口径（append 增补 / 首次覆盖）
   ipcMain.handle('aiTeachCourse:writeOutlineDraft', (_e, wsId: string, draft: OutlineDraft) =>
     writeOutlineFromAssistant(String(wsId ?? ''), draft ?? {}, getSetting))
@@ -1145,10 +887,6 @@ export function registerAiTeachingCourseHandlers(getSetting: (key: string) => un
     removeCourseUnit(String(wsId ?? ''), unit, getSetting))
   ipcMain.handle('aiTeachCourse:setUnitProgress', (_e, wsId: string, unitId: string, patch: Partial<CourseUnitProgress>) =>
     setUnitProgress(String(wsId ?? ''), String(unitId ?? ''), patch ?? {}))
-  ipcMain.handle('aiTeachCourse:generateOutline', (_e, input: GenerateOutlineInput) =>
-    generateCourseOutline(input ?? { goal: '', mode: 'free' }, getSetting))
-  ipcMain.handle('aiTeachCourse:generateOutlineStream', (_e, id: string, input: GenerateOutlineInput) =>
-    generateCourseOutlineStream(String(id ?? ''), input ?? { goal: '', mode: 'free' }, getSetting, (p) => broadcast(BROADCAST_CHANNEL.aiTeachCourseGenProgress, p)))
   // L2 课时
   ipcMain.handle('aiTeachCourse:openUnit', (_e, wsId: string, unitId: string, kind?: string) =>
     openUnit(String(wsId ?? ''), String(unitId ?? ''), kind, getSetting))
@@ -1160,12 +898,6 @@ export function registerAiTeachingCourseHandlers(getSetting: (key: string) => un
   ipcMain.handle('aiTeachCourse:readPrevHandoff', (_e, sessionId: string) => ({ ok: true, text: readPrevHandoff(String(sessionId ?? ''), getSetting) }))
   // L3 收尾测验：一次性出题
   ipcMain.handle('aiTeachCourse:makeUnitQuiz', (_e, wsId: string, unitId: string) => makeUnitQuiz(String(wsId ?? ''), String(unitId ?? ''), getSetting))
-  // 课程修订（只增补）：素材变更 / 流式增补建议 / 写入
-  ipcMain.handle('aiTeachCourse:getSourceChanges', (_e, wsId: string) => getSourceChanges(String(wsId ?? ''), getSetting))
-  ipcMain.handle('aiTeachCourse:reviseOutlineStream', (_e, id: string, input: { wsId: string; requirement?: string; modelSpec?: string }) =>
-    reviseCourseOutlineStream(String(id ?? ''), input ?? { wsId: '', requirement: '' }, getSetting, (p) => broadcast(BROADCAST_CHANNEL.aiTeachCourseGenProgress, p)))
-  ipcMain.handle('aiTeachCourse:applyAdditions', (_e, wsId: string, additions: OutlineAdditions) =>
-    applyOutlineAdditions(String(wsId ?? ''), additions ?? { toExisting: [], newChapters: [] }, getSetting))
   // 课程助手（整门课唯一会话；无大纲也可用）
   ipcMain.handle('aiTeachCourse:openAssistant', (_e, wsId: string) => openCourseAssistant(String(wsId ?? ''), getSetting))
   // 章末复习课（每章一个，懒建）

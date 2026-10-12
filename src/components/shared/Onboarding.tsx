@@ -13,13 +13,13 @@ import { useSettings } from '../../lib/SettingsContext'
 type ModuleIconComp = React.ComponentType<{ size?: number; className?: string }>
 
 const MODULES: { icon: ModuleIconComp; name: string; desc: string }[] = [
-  { icon: PenLine, name: '编辑器', desc: 'Markdown 正文写作 · 唯一写入方' },
-  { icon: BookOpen, name: '博客 · 日志', desc: '每日写作、标签与周月总结' },
-  { icon: CalendarDays, name: '任务', desc: '日程安排与四象限管理' },
-  { icon: Network, name: '知识库', desc: '双链笔记、PDF 与知识网络' },
-  { icon: MessageCircle, name: '说说', desc: '轻量动态与相册记录' },
-  { icon: GraduationCap, name: 'AI 教学', desc: '会话学习、视觉转写与自动出题' },
-  { icon: Wrench, name: '工具箱', desc: '番茄钟、习惯打卡、数据导出等 8 个工具' },
+  { icon: PenLine, name: '笔记', desc: 'Markdown 正文写作 · 知识库与文件树都在这里' },
+  { icon: BookOpen, name: '博客', desc: '每日写作、标签与周月总结' },
+  { icon: CalendarDays, name: '日程', desc: '任务安排、固定日程与打卡' },
+  { icon: Network, name: '知识图谱', desc: '双链关系可视化 · 从笔记模块进入' },
+  { icon: MessageCircle, name: '动态', desc: '轻量动态与相册记录' },
+  { icon: GraduationCap, name: 'AI 教学', desc: '对话驱动建课、上课与检验' },
+  { icon: Wrench, name: '工具箱', desc: '番茄钟、习惯打卡、数据导出等工具' },
   { icon: Bot, name: 'AI 助手', desc: '本地模型驱动，边看边问（Ctrl+J）' },
   { icon: PluginIcon, name: '插件', desc: '主题 / 预设 / 知识包官方市场' },
 ]

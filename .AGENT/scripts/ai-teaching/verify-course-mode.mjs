@@ -33,7 +33,7 @@ const pureSrc = read(PURE_REL)
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-verify-'))
 const tmpFile = path.join(tmpDir, 'aiTeachingCoursePure.mjs')
 fs.writeFileSync(tmpFile, stripTypeScriptTypes(pureSrc, { mode: 'strip' }))
-const { parseCourseMd, rewriteCourseMd, parseOutlineJson, balancedJsonObjects, cleanField, sourceSnapshot, diffSources, normalizeAdditions, mergeOutlineAdditions } = await import(pathToFileURL(tmpFile).href)
+const { parseCourseMd, rewriteCourseMd, parseOutlineJson, balancedJsonObjects, cleanField, sourceKey, sourceSnapshot, mergeOutlineAdditions } = await import(pathToFileURL(tmpFile).href)
 
 console.log('\n=== 1. parseCourseMd：解析章/知识点/来源 ===')
 const sample = [
@@ -94,33 +94,16 @@ const twoObjs = '{"a":{"b":1}} 中间 {"title":"T4","chapters":[{"name":"C","uni
 check('多候选从后往前取（后者为大纲）', parseOutlineJson(twoObjs)?.title === 'T4', JSON.stringify(parseOutlineJson(twoObjs)))
 check('balancedJsonObjects 配对扫描出 2 个顶层对象', balancedJsonObjects('{"a":{"b":1}} tail {"c":2}').length === 2, '')
 
-console.log('\n=== 4b. 课程修订纯函数：SOURCE 快照 diff / 增补解析 / 只增补合并 ===')
+console.log('\n=== 4b. 课程增补纯函数：SOURCE 快照 / 只增补合并 ===')
+// 2026-10-11：修订抽屉与其流式「增补 JSON」解析（diffSources / normalizeAdditions）随三条死通道一并删除
+// （无渲染入口；修订走提示词 + 工具 course.outline.write(append=true)）。此处只覆盖仍在用的纯函数。
 const base = sourceSnapshot([
   { no: 1, name: '概念.pdf', path: './a.pdf', extracted: '-' },
   { no: 2, name: '考纲.md', path: './b.md', extracted: '✓ → b-p1-9.md' },
 ])
-const differ = diffSources(base, [
-  { no: 1, name: '概念.pdf', path: './a.pdf', extracted: '-' },
-  { no: 2, name: '考纲.md', path: './b.md', extracted: '✓ → b-p1-20.md' },
-  { no: 3, name: '实验.md', path: './c.md', extracted: '-' },
-])
-check('diffSources：未变=null', differ[0].change === null, JSON.stringify(differ[0]))
-check('diffSources：提取指针变=updated', differ[1].change === 'updated', JSON.stringify(differ[1]))
-check('diffSources：键不存在=new', differ[2].change === 'new', JSON.stringify(differ[2]))
-check('diffSources：无快照时全为 new', diffSources([], differ).every((d) => d.change === 'new'), '')
-
-const addRaw = '```json\n{"toExisting":[{"chapterId":"c2","name":"MLFQ","goal":"多级队列","source":"素材#4","why":"调度偏薄"},{"name":"","chapter":"c2"}],"newChapters":[{"name":"三、虚拟内存","units":[{"name":"页面置换","why":"细虚存"}]}]}\n```'
-const add = normalizeAdditions(addRaw)
-check('normalizeAdditions：围栏 JSON 可解析', add !== null && add.toExisting.length === 1 && add.newChapters.length === 1, JSON.stringify(add))
-check('normalizeAdditions：空 name 项被丢弃', add.toExisting.length === 1, '')
-check('normalizeAdditions：非增补文本返回 null', normalizeAdditions('没有增补') === null, '')
-// ★ 2026-10-09 修：合法但零增补（模型对「无需增补 / 只想删除」的正确回答）不得判为解析失败
-const emptyAdd = normalizeAdditions('```json\n{"toExisting":[],"newChapters":[]}\n```')
-check('normalizeAdditions：合法零增补 → 空对象（非 null）', emptyAdd !== null && emptyAdd.toExisting.length === 0 && emptyAdd.newChapters.length === 0, JSON.stringify(emptyAdd))
-check('normalizeAdditions：只带一个键也算合法零增补', (() => { const a = normalizeAdditions('{"toExisting":[]}'); return a !== null && a.toExisting.length === 0 && a.newChapters.length === 0 })(), '')
-check('normalizeAdditions：既无 toExisting 也无 newChapters 的 JSON → null', normalizeAdditions('{"foo":1}') === null, '')
-const noisyAdd = '推理一下 {"x":1} 最终：{"toExisting":[{"chapterName":"二","name":"新点"}],"newChapters":[]} 完。'
-check('normalizeAdditions：思考噪声取答案', normalizeAdditions(noisyAdd)?.toExisting[0]?.name === '新点', '')
+check('sourceSnapshot：键取 name+path（重编号不影响）', base.length === 2 && base[0].key === sourceKey('概念.pdf', './a.pdf'), JSON.stringify(base[0]))
+check('sourceSnapshot：原样保留 no/name/path/extracted', base[1].no === 2 && base[1].name === '考纲.md' && base[1].path === './b.md' && base[1].extracted === '✓ → b-p1-9.md', JSON.stringify(base[1]))
+check('sourceSnapshot：空输入 → 空数组', sourceSnapshot([]).length === 0 && sourceSnapshot(undefined).length === 0, '')
 
 const baseOutline = { title: 'T', goal: '', anchor: '', chapters: [
   { id: 'c1', name: '一', units: [{ id: 'u1', name: 'a', goal: '', source: '' }] },
@@ -150,18 +133,23 @@ const ipc = stripComments(read('src/lib/ipc.ts'))
 const agent = stripComments(read('electron/lib/agentService.ts'))
 const bus = stripComments(read('electron/main/windowBus.ts'))
 
-const channels = ['aiTeachCourse:getState', 'aiTeachCourse:setEnabled', 'aiTeachCourse:saveOutline', 'aiTeachCourse:setUnitProgress', 'aiTeachCourse:generateOutline', 'aiTeachCourse:generateOutlineStream', 'aiTeachCourse:openUnit', 'aiTeachCourse:endLesson', 'aiTeachCourse:finalizeLesson', 'aiTeachCourse:finishUnit', 'aiTeachCourse:readPrevHandoff', 'aiTeachCourse:makeUnitQuiz', 'aiTeachCourse:getSourceChanges', 'aiTeachCourse:reviseOutlineStream', 'aiTeachCourse:applyAdditions', 'aiTeachCourse:openAssistant']
-check('主进程注册全部 16 个 handler', channels.every((c) => main.includes(c)), channels.filter((c) => !main.includes(c)).join(','))
+const channels = ['aiTeachCourse:getState', 'aiTeachCourse:setEnabled', 'aiTeachCourse:writeOutlineDraft', 'aiTeachCourse:removeUnit', 'aiTeachCourse:setUnitProgress', 'aiTeachCourse:openUnit', 'aiTeachCourse:endLesson', 'aiTeachCourse:finalizeLesson', 'aiTeachCourse:finishUnit', 'aiTeachCourse:readPrevHandoff', 'aiTeachCourse:makeUnitQuiz', 'aiTeachCourse:openAssistant', 'aiTeachCourse:openChapterReview']
+check('主进程注册全部 13 个 handler', channels.every((c) => main.includes(c)), channels.filter((c) => !main.includes(c)).join(','))
+// 负向（2026-10-11 后续）：一次性 / 流式大纲生成 + 保存三条死通道已删（零渲染调用点）；
+// 建课活路径 = 对话里 ```outline 草稿 → 「正式生成」→ writeOutlineDraft。
+check('主进程不再注册大纲生成/保存三通道', !main.includes('aiTeachCourse:saveOutline') && !main.includes('aiTeachCourse:generateOutline'), '')
+// 负向（2026-10-11）：修订三通道已删——无渲染入口；修订能力走提示词 + 工具 course.outline.write(append=true)
+check('主进程不再注册修订三通道', !main.includes('aiTeachCourse:getSourceChanges') && !main.includes('aiTeachCourse:reviseOutlineStream') && !main.includes('aiTeachCourse:applyAdditions'), '')
 check('主进程导出 registerAiTeachingCourseHandlers', main.includes('export function registerAiTeachingCourseHandlers'), '')
 check('main/index.ts import 了注册器', mainIndex.includes('registerAiTeachingCourseHandlers'), '')
 check('main/index.ts 调用了注册器', /registerAiTeachingCourseHandlers\(/.test(mainIndex), '')
 check('windowBus 新增课程广播通道', bus.includes("aiTeachCourseRefresh: 'aiTeach:course-refresh'"), '')
-check('windowBus 新增生成过程通道', bus.includes("aiTeachCourseGenProgress: 'aiTeach:course-gen-progress'"), '')
-check('生成走流式（invokeLlmStreamInternal）', main.includes('invokeLlmStreamInternal'), '')
+check('windowBus 不再有生成过程通道（死链已删）', !bus.includes('aiTeachCourseGenProgress') && !bus.includes('course-gen-progress'), '')
+check('课程模块不再有一次性 / 流式大纲生成（死链已删）', !main.includes('invokeLlmStreamInternal') && !main.includes('function generateCourseOutline') && !main.includes('function buildOutlinePrompt'), '')
 check('agentService import 了 buildCourseInjection', agent.includes('buildCourseInjection'), '')
 check('agentService 把 courseHint 拼进 systemFull', agent.includes('+ courseHint +'), '')
 
-const apiMethods = ['aiTeachCourseGetState', 'aiTeachCourseSetEnabled', 'aiTeachCourseSaveOutline', 'aiTeachCourseSetUnitProgress', 'aiTeachCourseGenerateOutline', 'aiTeachCourseGenerateOutlineStream', 'aiTeachCourseOpenUnit', 'aiTeachCourseEndLesson', 'aiTeachCourseFinalizeLesson', 'aiTeachCourseFinishUnit', 'aiTeachCourseReadPrevHandoff', 'aiTeachCourseMakeUnitQuiz', 'onAiTeachCourseGenProgress', 'onAiTeachCourseRefresh', 'aiTeachCourseGetSourceChanges', 'aiTeachCourseReviseOutlineStream', 'aiTeachCourseApplyAdditions', 'aiTeachCourseOpenAssistant']
+const apiMethods = ['aiTeachCourseGetState', 'aiTeachCourseSetEnabled', 'aiTeachCourseWriteOutlineDraft', 'aiTeachCourseRemoveUnit', 'aiTeachCourseSetUnitProgress', 'aiTeachCourseOpenUnit', 'aiTeachCourseEndLesson', 'aiTeachCourseFinalizeLesson', 'aiTeachCourseFinishUnit', 'aiTeachCourseReadPrevHandoff', 'aiTeachCourseMakeUnitQuiz', 'onAiTeachCourseRefresh', 'aiTeachCourseOpenAssistant', 'aiTeachCourseOpenChapterReview']
 for (const m of apiMethods) {
   const okPreload = preload.includes(m)
   const okTypes = types.includes(m)
@@ -182,18 +170,25 @@ check('上节交接界面条接线', mod.includes('aiTeachCourseReadPrevHandoff(
 check('回炉复习接线', mod.includes('courseReopenUnit('), '')
 check('课程主页组件存在', fs.existsSync(path.join(ROOT, 'src/modules/ai-teaching/CourseMode.tsx')), '')
 const course = stripComments(read('src/modules/ai-teaching/CourseMode.tsx'))
-check('课程主页有「修订大纲」入口 + 抽屉组件', course.includes('修订大纲') && course.includes('function ReviseDrawer'), '')
-check('修订抽屉调三层 IPC', course.includes('aiTeachCourseGetSourceChanges(') && course.includes('aiTeachCourseReviseOutlineStream(') && course.includes('aiTeachCourseApplyAdditions('), '')
-check('主进程实现修订三函数', main.includes('function getSourceChanges') && main.includes('function reviseCourseOutlineStream') && main.includes('function applyOutlineAdditions'), '')
-check('主进程按勾选素材拼依据（buildMaterialsAnchor + sourceKeys）', main.includes('buildMaterialsAnchor') && main.includes('sourceKeys'), '')
-check('工作区素材直读函数存在', read('electron/lib/aiTeachingSources.ts').includes('export function readWorkspaceSourceEntries'), '')
-check('向导用勾选表（sourceKeys 回传 + 有正文标记）', course.includes('sourceKeys') && course.includes('有正文'), '')
-check('主进程读素材正文含「md/文本素材自身文件」', main.includes('readSourceEntryBody') && read('electron/lib/aiTeachingSources.ts').includes('export function readSourceEntryBody'), '')
+// 负向断言（2026-10-11）：无渲染入口的平行实现——「修订大纲」抽屉与「建课向导」已整体删除。
+// 修订能力保留在**提示词 + 工具**里：用户跟课程助手说「改大纲 / 展开下一章」→ course.outline.write(append=true)。
+check('CourseMode 已删无入口的 ReviseDrawer', !course.includes('function ReviseDrawer'), '')
+check('CourseMode 已删无入口的 Wizard（建课向导）', !course.includes('function Wizard'), '')
+check('CourseMode 不再直调修订三通道', !course.includes('aiTeachCourseGetSourceChanges(') && !course.includes('aiTeachCourseReviseOutlineStream(') && !course.includes('aiTeachCourseApplyAdditions('), '')
+check('主进程保留 applyOutlineAdditions（活路径：course.outline.write append=true）', main.includes('function applyOutlineAdditions'), '')
+check('主进程已删修订三函数', !main.includes('function getSourceChanges') && !main.includes('function buildRevisePrompt') && !main.includes('function reviseCourseOutlineStream'), '')
+// 负向（2026-10-11 后续）：建课向导已删 → 一次性生成专用的「按勾选素材拼依据 + 直读素材正文」
+// （buildMaterialsAnchor / outlineMaterials / readSourceEntryBody / readTextDirBody / DIR_BODY_LIMIT）整体下线；
+// 素材库 aiTeachSrc:* 与 resolveSourcesForInjection 的目录清单注入仍是活路径（见下条）。
+check('主进程已删按勾选素材拼依据（buildMaterialsAnchor / outlineMaterials）', !main.includes('buildMaterialsAnchor') && !main.includes('outlineMaterials'), '')
+check('工作区素材直读函数存在（SOURCE 快照 / 清单仍用）', read('electron/lib/aiTeachingSources.ts').includes('export function readWorkspaceSourceEntries'), '')
 const sources = read('electron/lib/aiTeachingSources.ts')
-check('主进程读素材正文支持「目录素材」（readTextDirBody + dir 分支）', sources.includes('function readTextDirBody') && sources.includes("e.type === 'dir'"), '')
-check('目录素材正文递归读文本文件', sources.includes('listDirFilesRecursive') && sources.includes('DIR_BODY_LIMIT'), '')
-check('大纲 prompt 含知识点粒度要求（不要一整节压成一个）', main.includes('一个可独立讲解') && main.includes('不要'), '')
-check('大纲 prompt 排除导语/教学目标等元信息', main.includes('教学目标') && main.includes('知识结构总览') && main.includes('元信息'), '')
+check('已删一次性生成专用正文读取器（readSourceEntryBody / readTextDirBody / DIR_BODY_LIMIT）', !main.includes('readSourceEntryBody') && !sources.includes('readSourceEntryBody') && !sources.includes('readTextDirBody') && !sources.includes('DIR_BODY_LIMIT'), '')
+check('目录素材清单仍递归读取（resolveSourcesForInjection 活路径）', sources.includes('function listDirFilesRecursive') && sources.includes("e.type === 'dir' && e.path"), '')
+// 粒度 / 元信息两条规则由已删的 buildOutlinePrompt **搬进活路径**的 outlineRuleHint（```outline 草稿协议，agentService.ts），
+// 按围栏协议口径锁住，防再次丢失。
+check('outlineRuleHint 含知识点粒度要求（一个可独立讲解的最小概念 / 不要一整节压成一个）', agent.includes('知识点粒度：拆到「一个可独立讲解、可出题检验的最小概念」为止') && agent.includes('**不要**把一整节压成一个'), '')
+check('outlineRuleHint 排除导语/教学目标等元信息', agent.includes('**不要**把章节导语、教学目标、考试目标 / 考情分析、重难点提示、学习要求、知识结构总览、复习建议这类元信息当作知识点'), '')
 
 console.log('\n=== 6b. 课程助手（整门课唯一会话 · 顾问注入）===')
 check('主进程导出 openCourseAssistant 并使用 assistantSessionId', main.includes('export function openCourseAssistant') && main.includes('assistantSessionId'), '')

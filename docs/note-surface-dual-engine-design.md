@@ -38,7 +38,7 @@ PageEditor（知识库就地编辑）
 | `src/lib/wikiLinkSuggest.ts` | `[[` 候选规则（缓存/匹配/排序/截断）——两档共用一处真相 |
 | `src/lib/attachmentImage.ts` | 仓库相对附件取回（阅读态与编辑器内联图片共用一份缓存与归一化） |
 
-设置项：`editorWritingMode`（`source` / `live`，设备级，默认 `source` —— 默认不改现有手感），入口 `设置 → 编辑器 → 写作模式`。**非 Markdown 文档一律回落源码档**（即时渲染只对 Markdown 有意义）。
+设置项：`editorWritingMode`（`source` / `live`，设备级，默认 `source` —— 默认不改现有手感），入口 `设置 → 编辑器与阅读 → 写作模式`。**非 Markdown 文档一律回落源码档**（即时渲染只对 Markdown 有意义）。
 
 ## 3. 即时渲染档实现要点
 

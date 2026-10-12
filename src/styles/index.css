@@ -1745,3 +1745,40 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
 .kb-menu-item:disabled { opacity: 0.45; cursor: default; }
 .kb-menu-icon { width: 14px; display: inline-flex; justify-content: center; color: var(--text-muted); flex-shrink: 0; }
 .kb-menu-sep { height: 1px; margin: 4px 6px; background: var(--border-color); }
+
+/* ===== 图片查看器（批 3，2026-10-13；ImageViewer.tsx / ImageToolbar.tsx）=====
+   为什么棋盘格要有独立类：它得按**格式**决定铺不铺（jpg / bmp 从格式定义上就不带 alpha
+   通道，给它们铺格子是白铺 —— 用户看到的是一堆格子，不是任何信息）。
+   判定在 `src/lib/imageFormats.ts` 的 imageMayHaveAlpha，调用方传布尔进来。
+   两个色阶由 color-mix 从主题变量派生，**不新增主题令牌**（否则每套主题都要各补一遍）。 */
+.kb-img-canvas { position: relative; overflow: hidden; }
+.kb-img-checker {
+  background-color: var(--bg-secondary);
+  background-image:
+    linear-gradient(45deg, color-mix(in srgb, var(--text-primary) 7%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--text-primary) 7%, transparent) 75%),
+    linear-gradient(45deg, color-mix(in srgb, var(--text-primary) 7%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--text-primary) 7%, transparent) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+/* 三层分开：外层定位、中层平移、内层旋转/尺寸。
+   每层的 transform 只有一个来源，不会互相覆盖（合成一层的写法会被后者整个替换掉）。 */
+.kb-img-stage { position: absolute; left: 50%; top: 50%; }
+.kb-img-rot { transform-origin: 50% 50%; }
+.kb-img-rot img { display: block; -webkit-user-drag: none; user-select: none; }
+/* will-change 只在拖拽期间挂（铁律 13：不给常驻元素加 will-change）。
+   一张大图被提升成合成层是实打实的显存开销，而它只在拖拽那几百毫秒里有意义。 */
+.kb-img-canvas[data-dragging='1'] .kb-img-stage { will-change: transform; }
+/* 光标只在「真能拖」时变成抓手（图小于视口时 clampPan 会把它按回中心，拖了等于没拖） */
+.kb-img-canvas[data-pannable='1'] { cursor: grab; }
+.kb-img-canvas[data-pannable='1'][data-dragging='1'] { cursor: grabbing; }
+/* 放大到 4 倍以上切最近邻 —— 否则「凑近看像素」这件事被插值糊掉 */
+.kb-img-canvas[data-zoom='far'] .kb-img-rot img { image-rendering: pixelated; }
+/* 沉浸态的浮条（那里没有顶栏可放，见 ImageToolbar 头注） */
+.kb-img-toolbar-float {
+  position: absolute; right: 14px; bottom: 14px; z-index: 15;
+  padding: 3px 5px; border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
+}

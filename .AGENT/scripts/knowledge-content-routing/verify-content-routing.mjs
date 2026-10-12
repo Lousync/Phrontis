@@ -45,6 +45,8 @@ const SRC_CARD = stripComments(read('src/modules/knowledge/components/FileMetaCa
 const SRC_ARCHIVE_VIEW = stripComments(read('src/modules/knowledge/components/ArchiveTextView.tsx'))
 // 批 2（2026-10-12）：⋮ 按钮搬进了顶栏组件，锚点也随之落在那里
 const SRC_TOPBAR = stripComments(read('src/modules/knowledge/components/NoteTopBar.tsx'))
+/** 批 3：FileInfoRows 上移到 shared（图片异常态卡也要用，shared 反向依赖 module 是层次倒挂） */
+const SRC_INFO = stripComments(read('src/components/shared/FileInfoRows.tsx'))
 
 // ===================== A 组：分支顺序（结构断言，按括号深度解析）=====================
 
@@ -95,6 +97,8 @@ if (chain) {
     ['html 合流（WelcomeHtmlView）', '(isWelcomeHtml || isArchiveHtml) && page?.path ?'],
     ['XMind 提示卡', 'isXmindFile ?'],
     ['PDF 阅读器（PdfReaderView）', 'isPdfFile && page?.path && vaultRootId ?'],
+    // 批 3（2026-10-13）：图片查看器与 PDF 并列，同属「专门视图」
+    ['图片查看器（ImageViewer）', 'isImagePage && page?.path && vaultRootId ?'],
     ['文本类超限只读（ArchiveTextView）', "archiveTextOpenable && page?.path && textFile?.reason === 'oversize-edit' ?"],
     ['归档兜底（FileMetaCard）', 'isArchiveFile && !archiveTextOpenable ?'],
     ['legacy PDF（不在仓库内）', 'isPdfFile ?'],
@@ -117,7 +121,7 @@ if (chain) {
     }
   }
   ok(ordered, 'A3 ★ 分支顺序正确：专门视图一律排在归档兜底之前（防第三次被遮蔽）', broke)
-  ok(present.length === HEADS.length, 'A4 八个分支头全部在场（没有分支被悄悄删掉）',
+  ok(present.length === HEADS.length, 'A4 九个分支头全部在场（没有分支被悄悄删掉）',
     `在场 ${present.length}/${HEADS.length}`)
 
   // 归档兜底必须晚于 PDF —— 这就是本轮修的那个 bug，单独立一条，失败信息最直白
@@ -126,6 +130,14 @@ if (chain) {
   ok(pdfIdx >= 0 && archIdx >= 0 && pdfIdx < archIdx,
     'A5 ★ PDF 阅读器分支早于归档兜底（仓库内 PDF 全是 entryKind:file，反了就等于永远看不到阅读器）',
     `pdf@${pdfIdx} archive@${archIdx}`)
+
+  // 批 3（2026-10-13）：图片同一个坑 —— 仓库内图片也全是 entryKind:file
+  const imgIdx = chain.indexOf('isImagePage && page?.path && vaultRootId ?')
+  ok(imgIdx >= 0 && archIdx >= 0 && imgIdx < archIdx,
+    'A5b ★ 图片分支早于归档兜底（同一个根因：仓库内图片全是 entryKind:file，反了就是一张元信息卡）',
+    `img@${imgIdx} archive@${archIdx}`)
+  ok(chain.includes('svgSourceEditable ? null'),
+    'A5c SVG 源码态用内层 `? null` 让位给 paneDoc（与 html 那格同形态，不新增「互斥」语义）')
 
   // 文本类可编辑落点不得被归档兜底吃掉
   ok(chain.includes('!archiveTextOpenable'),
@@ -175,8 +187,10 @@ ok(/archiveTextOpenable = isArchiveTextView && textFile !== null[\s\S]{0,120}rea
   'C2 archiveTextOpenable 的判定式：必须同时排除二进制与超大打开')
 ok(/modelPath: isArchiveFile \? `kb:\/\/archive-edit\/\$\{page\.path\}` : `kb:\/\/knowledge\/\$\{page\.path\}`/.test(SRC_PAGE),
   'C3 归档文本类用独立 Monaco model 命名空间（与知识页正文隔离，防 onChange / 外部监听打架）')
-ok(/const paneDoc = vaultMode && page\?\.path && !isPdfFile[\s\S]{0,160}\(!isWelcomeHtml \|\| htmlSourceEditable\)[\s\S]{0,160}\(!isArchiveFile \|\| archiveTextOpenable \|\| htmlSourceEditable\)/.test(SRC_PAGE),
-  'C4 paneDoc 对归档文本类与 html 源码态放行，其余归档条目仍然排除')
+ok(/const paneDoc = vaultMode && page\?\.path && !isPdfFile[\s\S]{0,300}\(!isWelcomeHtml \|\| htmlSourceEditable\)[\s\S]{0,300}\(!isArchiveFile \|\| archiveTextOpenable \|\| htmlSourceEditable \|\| svgSourceEditable\)/.test(SRC_PAGE),
+  'C4 paneDoc 对归档文本类 / html 源码态 / svg 源码态放行，其余归档条目仍然排除')
+ok(/&& \(!isImagePage \|\| svgSourceEditable\)/.test(SRC_PAGE),
+  'C4b ★ 图片只在「SVG 且切到源码态」时才落 Monaco（渲染态图片没有可编辑正文）')
 ok(/if \(\/\\\.md\$\/i\.test\(rel\)\)/.test(SRC_PAGE),
   'C5 负向锁：保存路径的 frontmatter 注入仍只对 .md 生效（非 md 写裸正文）')
 
@@ -194,15 +208,17 @@ ok(SRC_PAGE.includes('data-wb="peFileInfoCard"') && SRC_PAGE.includes('<FileInfo
   'D2 「文件信息」小卡用 FileInfoRows 渲染（与元信息卡同源）')
 ok(SRC_TOPBAR.includes('data-wb="noteTopMore"') && !SRC_PAGE.includes('data-wb="peMore"'),
   'D2b 非 md 的 ⋮ 用顶栏的稳定锚点 noteTopMore（批 2：按钮搬进 NoteTopBar，胶囊那颗 peMore 随胶囊退役；探针已同步）')
-ok(SRC_CARD.includes('export function FileInfoRows') && /<FileInfoRows /.test(SRC_CARD),
-  'D3 FileMetaCard 导出并使用 FileInfoRows（同一份信息行，两处不各写一份）')
+ok(SRC_INFO.includes('export function FileInfoRows') && SRC_CARD.includes("from '../../../components/shared/FileInfoRows'") && /<FileInfoRows /.test(SRC_CARD),
+  'D3 FileInfoRows 住在 shared 且 FileMetaCard 用它（批 3 上移：图片异常态卡也要用，shared 反向依赖 module 是层次倒挂）')
 {
   // D4（批 2 改写）：原来断言 `!isMdNote && (…peFileInfo`，现在「文件」组是 ⋮ 菜单的 **else 分支**。
   // 用下标比较而不是长距离正则 —— md 菜单有 80+ 行，任何窗口值都是拍脑袋。
+  // 批 3：窗口从 1200 抬到 2000 —— else 分支里多了 SVG 的「看源码」一项（7 行），
+  // 它排在「文件信息」之前。窗口值只用来确认「在同一分支内」，不是精确布局断言。
   const m = SRC_PAGE.indexOf('moreMenu={isMdNote ? (')
   const elseAt = m > -1 ? SRC_PAGE.indexOf(') : (', m) : -1
   const infoAt = elseAt > -1 ? SRC_PAGE.indexOf('peFileInfo', elseAt) : -1
-  ok(m > -1 && elseAt > -1 && infoAt > -1 && infoAt - elseAt < 1200,
+  ok(m > -1 && elseAt > -1 && infoAt > -1 && infoAt - elseAt < 2000,
     'D4 「文件」组只在非 md 出现（批 2：它是 ⋮ 菜单的 else 分支；md 菜单一字不改，拍板 E1 的范围锁）',
     `moreMenu@${m} else@${elseAt} peFileInfo@${infoAt}`)
 }
@@ -223,8 +239,8 @@ ok(/const htmlSourceEditable = \(isWelcomeHtml \|\| isArchiveHtml\) && htmlSourc
   'E4 html 源码态同时覆盖欢迎页与归档 html')
 ok(/const \[htmlSource, setHtmlSource\] = useState\(false\)/.test(SRC_PAGE),
   'E5 ★ html 默认仍是沙箱渲染（htmlSource 初值 false —— 默认行为不变，只加出口）')
-ok(/useEffect\(\(\) => \{ setHtmlSource\(false\); setPdfPages\(0\); setPdfImmersive\(false\) \}, \[pageId\]\)/.test(SRC_PAGE),
-  'E6 换页重置 html 源码态（批 2 起同一个 effect 兼复位 PDF 上报的页数 / 沉浸态）')
+ok(/useEffect\(\(\) => \{\s*setHtmlSource\(false\); setSvgSource\(false\); setPdfPages\(0\); setPdfImmersive\(false\)/.test(SRC_PAGE),
+  'E6 换页重置 html 源码态（批 2 起同一个 effect 兼复位 PDF 上报的页数 / 沉浸态；批 3 又兼了 svg 源码态）')
 ok(/htmlSource \? null : <WelcomeHtmlView path=\{page\.path\} \/>/.test(SRC_PAGE),
   'E7 渲染分支：htmlSource 为真时让位给下方 paneDoc 块（源码 Monaco），否则沙箱 iframe')
 ok(SRC_PAGE.includes('data-wb="peHtmlSource"'),

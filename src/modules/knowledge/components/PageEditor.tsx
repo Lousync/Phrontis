@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
-import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy } from 'lucide-react'
+import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
@@ -18,10 +18,23 @@ import { visibleKnowledgeTags } from '../../../lib/knowledgeTags'
 import { ConfirmDialog } from '../../../components/shared'
 import { ResizablePanel } from '../../../components/shared/ResizablePanel'
 import { WelcomeHtmlView } from './WelcomeHtmlView'
-import { FileMetaCard, FileInfoRows } from './FileMetaCard'
+import { FileMetaCard } from './FileMetaCard'
+// 文件信息行（批 3 起住在 shared：图片异常态卡也要用，shared 反向依赖 module 是层次倒挂）
+import { FileInfoRows } from '../../../components/shared/FileInfoRows'
 import { NoteTopBar } from './NoteTopBar'
 import { ArchiveTextView } from './ArchiveTextView'
 import { isTextViewableExt } from '../../../lib/aiTextExts'
+// 图片查看（批 3，2026-10-13）：画布与控件簇都是**受控纯视图**，视图态的真源在本组件 ——
+// 控件位拍板 D7 = 顶栏内联，而顶栏在图片视图上方，组件没法往祖先的槽里塞东西（除非 portal，
+// 批 2 已否决）。几何算式一律走 lib/imageView.ts（纯函数 + 契约脚本）。
+import { ImageViewer } from '../../../components/shared/image/ImageViewer'
+import { ImageToolbar } from '../../../components/shared/image/ImageToolbar'
+import { ImageStateCard } from '../../../components/shared/image/ImageStateCard'
+import { useVaultImage } from '../../../components/shared/image/useVaultImage'
+import { useImageView } from '../../../components/shared/image/useImageView'
+import { useImageViewKeys } from '../../../components/shared/image/useImageViewKeys'
+import { imageMayHaveAlpha, isRenderableImageExt } from '../../../lib/imageFormats'
+import type { ViewBox } from '../../../lib/imageView'
 import Editor, { type OnMount } from '@monaco-editor/react'
 // 共享 Monaco 宿主（P1b）：就地编辑换用与编辑器模块同一份装配——[[ 补全 / B4 内联建议 /
 // 淡化装饰 / 粘贴与拖图拦截全部随之带入；legacy <Editor> 分支仅服务非 vault 旧数据兜底
@@ -94,7 +107,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   /* 换页重置（批 1 的 html 源码态 + 批 2 的 PDF 上报值）：不同文件之间不该继承上一个的态。
      pdfPages / pdfImmersive 必须在这里复位 —— PdfReaderView 按 page.path 重挂，它的内部
      `immersive` 归零，外层不复位就会「换到别的文件顶栏仍然不显示」。 */
-  useEffect(() => { setHtmlSource(false); setPdfPages(0); setPdfImmersive(false) }, [pageId])
+  useEffect(() => {
+    setHtmlSource(false); setSvgSource(false); setPdfPages(0); setPdfImmersive(false)
+    // 图片视图态由 useImageView 的 resetKey 复位（传 page.path），此处不再手动 set
+  }, [pageId])
   /** 「文件信息」小卡的关闭：外点 / Esc（照 NoteTopBar 的 moreMenu 口径，捕获阶段不依赖冒泡顺序） */
   useEffect(() => {
     if (!showFileInfo) return
@@ -170,6 +186,11 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
    *  故 pageId 变化时必须复位（见下方 setHtmlSource(false) 那个 effect）。 */
   const [pdfPages, setPdfPages] = useState(0)
   const [pdfImmersive, setPdfImmersive] = useState(false)
+  /** SVG 源码态（批 3）：与 `htmlSource` 平行的一个开关。
+   *  ★ 刻意**不**把 svg 加进 `TEXT_VIEWABLE_EXT_SET` —— 那个集合是「文本类落点候选」，
+   *  加进去会让**每次打开 SVG** 都触发一次自读 + `setPreview(false)`（白读一遍 XML），
+   *  只为了一个默认关闭的源码态。见下方 `svgSourceEditable`。 */
+  const [svgSource, setSvgSource] = useState(false)
   const MAX_TAGS = 5
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const contentRef = useRef(content)
@@ -292,6 +313,15 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
    *  所以「能编辑哪些文件」这件事只由渲染层这一处决定 —— 改它就是改能力面，不是改样式。 */
   const isArchiveTextView = isArchiveFile && !isArchiveHtml && isTextViewableExt(fileType)
 
+  /** 图片页（批 3）：仓库内可渲染的图片文件 → 独立查看器落点。
+   *  ★ 取名 `isImagePage` 而不是 `isImageFile`：本文件已从 `editorImage` 导入了同名的
+   *  `isImageFile(file: File)`（判**上传的 File 对象**，插图路径用），重名会把它遮蔽掉。 */
+  const isImagePage = isArchiveFile && isRenderableImageExt(fileType)
+  const isSvgImage = isImagePage && fileType === 'svg'
+  /** SVG 源码态：与 `htmlSourceEditable` 平行。为真时图片分支返回 null，把这一格让给
+   *  下方 `paneDoc` 的 Monaco（XML 高亮）—— 形态与 html 那格完全一致。 */
+  const svgSourceEditable = isSvgImage && svgSource && !!page?.path
+
   /** 文本类归档文件的**自读结果**（批 1）。索引对 entryKind:'file' 不读内容
    *  （knowledgeIndex.ts 注释「不读内容（二进制可能很大）」），所以落点只能由自读结果决定：
    *    · `binary` / `oversize-open`（>50MB） ⇒ 退回元信息卡（无法按文本打开）
@@ -305,15 +335,17 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   /** 文本类是否走文本落点（可编辑 or 超限只读）—— 二进制 / 超大打开不进这里，落元信息卡 */
   const archiveTextOpenable = isArchiveTextView && textFile !== null
     && textFile.reason !== 'binary' && textFile.reason !== 'oversize-open'
-  /** 需要按需自读正文的目标：归档文本类 + html 源码态（两者的索引正文都是空的） */
-  const textSelfReadTarget = isArchiveTextView || htmlSourceEditable
+  /** 需要按需自读正文的目标：归档文本类 + html 源码态 + svg 源码态（三者的索引正文都是空的） */
+  const textSelfReadTarget = isArchiveTextView || htmlSourceEditable || svgSourceEditable
 
   /** 就地编辑的共享宿主文档（P1b）：可编辑文本类 + 仓库内路径才走 MonacoPane；
    *  modelPath 命名空间防与编辑器模块同名文件共享 Monaco model（onChange/外部监听会打架）。
    *  批 1：归档文本类与 html 源码态也走这里，归档用 `kb://archive-edit/…`（与知识页正文隔离）。 */
   const paneDoc = vaultMode && page?.path && !isPdfFile
+    // 图片：只有「SVG 且切到源码态」才落可编辑 Monaco；渲染态图片没有可编辑的正文
+    && (!isImagePage || svgSourceEditable)
     && (!isWelcomeHtml || htmlSourceEditable)
-    && (!isArchiveFile || archiveTextOpenable || htmlSourceEditable)
+    && (!isArchiveFile || archiveTextOpenable || htmlSourceEditable || svgSourceEditable)
     ? {
         relPath: page.path,
         modelPath: isArchiveFile ? `kb://archive-edit/${page.path}` : `kb://knowledge/${page.path}`,
@@ -393,6 +425,29 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     })()
     return () => { alive = false }
   }, [textSelfReadTarget, page?.path, pageId])
+
+  /* ==================== 图片查看（批 3） ==================== */
+
+  /** 只在真落图片视图时启用取回 —— 其余类型传 null 让 hook 停在 idle，一个 IPC 都不发。
+   *  SVG 源码态同样不取：那时要看的是 XML 文本，不是像素。 */
+  const imgWanted = isImagePage && !svgSourceEditable && !!page?.path
+  const img = useVaultImage(imgWanted ? vaultRootId : null, imgWanted ? (page?.path ?? null) : null)
+
+  /** 权威尺寸：解码后由 `<img>` 的 naturalWidth/Height 回填；解码前是文件头解析值（可能为 null）。
+   *  用 useMemo 稳住引用 —— 视图控制器以它为依赖。 */
+  const natW = img.dims?.w ?? 0
+  const natH = img.dims?.h ?? 0
+  const imgNat = useMemo<ViewBox | null>(() => (natW > 0 && natH > 0 ? { w: natW, h: natH } : null), [natW, natH])
+  /** 图片真的可交互（有像素）—— 控件、⋮ 的「查看」组、快捷键都以此为准 */
+  const imgReady = img.status === 'ready' && !!imgNat
+
+  /** 视图态控制器（几何算式在 lib/imageView.ts，两个宿主共用同一个 hook）。
+   *  `resetKey` 传路径：缩放/旋转/平移是「这一张图」的状态，换图必须复位。 */
+  const iv = useImageView(imgNat, page?.path ?? null)
+  useImageViewKeys(imgReady, iv.fit, iv.rotate)
+
+  /* ======================================================== */
+
   /** legacy 兜底分支（非 vault 旧数据）的 Monaco 实例；写作面操作一律走 paneRef 契约 */
   const activeEditor = () => editorRef.current
   /** 写作模式：设置值 + 文档类型门槛（即时渲染只对 Markdown 生效，其余一律源码档） */
@@ -1170,7 +1225,12 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const moreMenuItemCount = isMdNote
     ? 1
     : 4 + ((isWelcomeHtml || isArchiveHtml) ? 1 : 0)
-      + ((fileType === 'txt' || fileType === 'html') && onRequestReading ? 1 : 0)
+      // SVG 源码态（批 3）
+      + (isSvgImage ? 1 : 0)
+      // 「查看」组（批 3）：只在图片真渲染出来时出现 —— 过大 / 解码失败时没有可缩放的东西
+      + (imgReady ? 4 : 0)
+      // 沉浸阅读：门槛与模块层 enterReading 对齐（md / txt / html + 批 3 放行的图片）
+      + ((fileType === 'txt' || fileType === 'html' || isImagePage) && onRequestReading ? 1 : 0)
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -1194,12 +1254,22 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           <NoteTopBar
             title={title}
             titleHint={page.path || title}
-            subtitle={isPdfFile && pdfPages > 0 ? `${pdfPages} 页` : undefined}
+            /* 中段次要文本：图片给像素尺寸（= PDF 的「N 页」那个位置），PDF 给页数。
+               ★ 刻意**不带**文件大小 —— 那是「文件信息」里的事，塞进顶栏会与尺寸抢注意力。
+               图片的尺寸取自 `<img>` 解码后的权威值（naturalWidth/Height），故 SVG 也能给。 */
+            subtitle={
+              isImagePage && natW > 0 ? `${natW} × ${natH}`
+                : isPdfFile && pdfPages > 0 ? `${pdfPages} 页`
+                  : undefined
+            }
             saving={saving}
-            /* 保存点（批 2 拍板①）：只有「有真实保存动作」的类型才显示。`paneDoc` 非空 ⟺ 落可编辑
-               MonacoPane（md / 可编辑文本类 / html 源码态）⇒ 那些有防抖自动保存，绿点是真信号；
-               PDF / 图片 / 二进制 / 导图 / 超限只读文本没有保存动作，恒亮是假信号。 */
-            showSaveDot={!!paneDoc}
+            /* 保存点（批 2 拍板①）：只有「有真实保存动作」的类型才显示。★ `paneDoc` 非空**不等于**可编辑 ——
+               >10MB 的文本类也会让 `paneDoc` 非空（`archiveTextOpenable` 只排除 binary / oversize-open），
+               而它的渲染分支在下方被 `ArchiveTextView`（只读）接走 ⇒ 这里必须再排掉 `oversize-edit`，
+               否则「超限只读文本恒亮已保存」正是这条拍板要消灭的假信号（2026-10-13 修）。
+               其余：md / 可编辑文本类 / html 源码态 / SVG 源码态有防抖自动保存，绿点是真信号；
+               PDF / 图片 / 二进制 / 导图没有保存动作。 */
+            showSaveDot={!!paneDoc && textFile?.reason !== 'oversize-edit'}
             canBack={canNavBack}
             canForward={canNavForward}
             onBack={() => onNavBack?.()}
@@ -1212,6 +1282,21 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
             inlineBusy={inlineBusy}
             inlinePaused={inlinePaused}
             onToggleInline={handleToggleInline}
+            /* 图片控件位（批 3 拍板 D7 = 顶栏内联）：图片态下顶栏的 showViewToggle / showInline /
+               showSaveDot 三者全为假，右侧本来只剩 ⋮ ⇒ 这一簇是**零新增行高**，这是选 A 的全部理由。
+               只在真渲染出像素时才给 —— 过大 / 解码失败时没有可缩放的东西，
+               给了就是一批点了没反应的按钮。 */
+            rightSlot={imgReady ? (
+              <ImageToolbar
+                variant="inline"
+                scale={iv.view.scale}
+                fit={iv.view.fit}
+                rot={iv.view.rot}
+                onZoom={iv.zoom}
+                onFit={iv.fit}
+                onRotate={iv.rotate}
+              />
+            ) : undefined}
             showMore={moreMenuItemCount > 0}
             moreOpen={showMoreMenu}
             onToggleMore={() => setShowMoreMenu(v => !v)}
@@ -1309,6 +1394,14 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     {htmlSource ? '看渲染' : '看源码'}
                   </button>
                 )}
+                {/* SVG 源码态（批 3）：与上面 html 那条同款，锚点分开是为了让探针能分辨两种文件 */}
+                {isSvgImage && (
+                  <button data-wb="peSvgSource" onClick={() => { setSvgSource(v => !v); setShowMoreMenu(false) }}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    {svgSource ? <Eye size={13} /> : <FileText size={13} />}
+                    {svgSource ? '看图片' : '看源码'}
+                  </button>
+                )}
                 <button data-wb="peFileInfo" onClick={() => { setShowFileInfo(true); setShowMoreMenu(false) }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                   <Info size={13} />文件信息
@@ -1325,7 +1418,35 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                   <Copy size={13} />复制相对路径
                 </button>
-                {(fileType === 'txt' || fileType === 'html') && onRequestReading && (
+                {/* 「查看」组（批 3 拍板 D10）：⋮ 是「非 md 全部动作」的落点，与批 2 的口径一致；
+                    也给纯键盘用户一个入口。★ 只在图片真渲染出来时出现（见 moreMenuItemCount）。 */}
+                {imgReady && (
+                  <>
+                    <div className="my-1 border-t border-[var(--border-color)]" />
+                    <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">查看</div>
+                    <button data-wb="imgMenuFit" onClick={() => { iv.fit('fit'); setShowMoreMenu(false) }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                      <Maximize size={13} />适应窗口
+                      <span className="ml-auto text-[10px] text-[var(--text-disabled)]">0</span>
+                    </button>
+                    <button data-wb="imgMenuActual" onClick={() => { iv.fit('actual'); setShowMoreMenu(false) }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                      <Square size={12} />实际大小
+                      <span className="ml-auto text-[10px] text-[var(--text-disabled)]">1</span>
+                    </button>
+                    <button data-wb="imgMenuRotateL" onClick={() => { iv.rotate(-90); setShowMoreMenu(false) }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                      <RotateCcw size={13} />向左旋转
+                      <span className="ml-auto text-[10px] text-[var(--text-disabled)]">[</span>
+                    </button>
+                    <button data-wb="imgMenuRotateR" onClick={() => { iv.rotate(90); setShowMoreMenu(false) }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                      <RotateCw size={13} />向右旋转
+                      <span className="ml-auto text-[10px] text-[var(--text-disabled)]">]</span>
+                    </button>
+                  </>
+                )}
+                {(fileType === 'txt' || fileType === 'html' || isImagePage) && onRequestReading && (
                   <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <BookOpen size={13} />沉浸阅读
@@ -1404,6 +1525,43 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               onImmersiveChange={setPdfImmersive}
             />
           </Suspense>
+        ) : isImagePage && page?.path && vaultRootId ? (
+          /* 图片（批 3，2026-10-13）：独立查看器，与 PDF 并列排在归档兜底之前。
+             ★ `svgSourceEditable` 为真时返回 null，把这一格让给下方兄弟块 `{paneDoc && …}` 的
+             Monaco（XML 高亮）—— 与上一格 html 源码态**完全同一个形态**：条件不含 `!svgSource`，
+             靠内层返回 null 让位。这样契约 A3/A5 解析条件链先后时不必新增「互斥」语义。
+             ★ 条件用 `vaultRootId`（state）而不是 ref：ref 变更不触发重渲染，
+             与页面数据的并发装载会造成「落到下面兜底卡就再也回不来」的竞态（批 1 踩过）。 */
+          svgSourceEditable ? null
+            : img.status === 'ready' && img.url ? (
+              <ImageViewer
+                url={img.url}
+                nat={imgNat}
+                view={iv.view}
+                /* 底色按格式自动（拍板 D9）：jpg / bmp 从格式定义上就不带 alpha，铺棋盘格是白铺 */
+                checker={imageMayHaveAlpha(fileType)}
+                onViewport={iv.onViewport}
+                onPan={iv.pan}
+                onZoom={iv.zoom}
+                onDoubleClick={iv.doubleClick}
+                onDecoded={img.onDecoded}
+                onDecodeError={img.onDecodeError}
+              />
+            ) : (
+              <ImageStateCard
+                kind={img.status === 'loading' || img.status === 'idle' ? 'loading' : img.status === 'toobig' ? 'toobig' : 'broken'}
+                name={title || page.path}
+                path={page.path}
+                sizeBytes={img.sizeBytes || page.sizeBytes}
+                updatedAt={page.updatedAt}
+                dims={img.dims}
+                limit={img.limit}
+                error={img.error}
+                onOpenInSystem={() => { void handleArchiveOpenInSystem(false) }}
+                onRevealInFolder={() => { void handleArchiveOpenInSystem(true) }}
+                onRetry={img.reload}
+              />
+            )
         ) : archiveTextOpenable && page?.path && textFile?.reason === 'oversize-edit' ? (
           /* 文本类但超过编辑上限（>10MB，主进程 editable:false）：只读打开。
              正文交给 ArchiveTextView 自读，**不灌进本组件的 content state**（见自读 effect 纪律①）。 */

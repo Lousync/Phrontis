@@ -68,21 +68,21 @@ ok(/\{!isMindMapFile && !pdfImmersive && \(/.test(PAGE),
 ok(!/\{isMdNote && \(\s*<NoteTopBar/.test(PAGE), 'B2 负向：旧的「仅 md 挂顶栏」门槛已删除')
 ok(/const moreMenuItemCount = isMdNote/.test(PAGE) && /showMore=\{moreMenuItemCount > 0\}/.test(PAGE),
   'B3 ⋮ 空则隐藏的判据接了真值（moreMenuItemCount > 0）—— 现状恒真，是**潜伏守卫**，见设计 §三·②')
-ok(/showSaveDot=\{!!paneDoc\}/.test(PAGE),
-  'B4 保存点判据 = paneDoc 非空（落可编辑 MonacoPane ⟺ 有真实防抖自动保存）')
+ok(/showSaveDot=\{!!paneDoc && textFile\?\.reason !== 'oversize-edit'\}/.test(PAGE),
+  'B4 保存点判据 = paneDoc 非空**且**非 oversize-edit 只读文本（★ paneDoc 非空 ≠ 可编辑：>10MB 的文本类也会让 paneDoc 非空，而它的渲染分支被 ArchiveTextView 只读接走）')
 ok(/showViewToggle=\{isMdNote\}/.test(PAGE), 'B5 阅读切换只给 md（非 md 无预览态）')
 ok(/showInline=\{isMdNote && !preview && writingMode === 'source'\}/.test(PAGE),
   'B6 ✨续写只给 md 的源码档（非 md 没有 ghost text）')
-ok(/subtitle=\{isPdfFile && pdfPages > 0 \? `\$\{pdfPages\} 页` : undefined\}/.test(PAGE),
-  'B7 PDF 页数上移顶栏中段')
+ok(/subtitle=\{[\s\S]{0,320}isPdfFile && pdfPages > 0 \? `\$\{pdfPages\} 页`[\s\S]{0,24}: undefined/.test(PAGE),
+  'B7 PDF 页数上移顶栏中段（批 3：同一处先给图片像素尺寸，PDF 页数退成第二档）')
 ok(/moreMenu=\{isMdNote \? \(/.test(PAGE), 'B8 ⋮ 菜单按 isMdNote 分流（md 菜单一字不改，作对照基准）')
 for (const a of ['peHtmlSource', 'peFileInfo', 'peOpenInSystem', 'peRevealInFolder', 'peCopyRelPath']) {
   ok(PAGE.includes(`data-wb="${a}"`), `B9 批 1 锚点原样搬进顶栏：${a}`)
 }
 ok(!/data-wb="peMore"/.test(PAGE) && !/data-wb="peMore"/.test(TOP),
   'B10 负向：胶囊那颗 ⋮ 的锚点 peMore 已删（顶栏的 ⋮ 用 noteTopMore）')
-ok(/\(fileType === 'txt' \|\| fileType === 'html'\) && onRequestReading/.test(PAGE),
-  'B11 非 md 的「沉浸阅读」门槛对齐模块层 enterReading（knowledge/index.tsx：md / txt / html）')
+ok(/\(fileType === 'txt' \|\| fileType === 'html' \|\| isImagePage\) && onRequestReading/.test(PAGE),
+  'B11 非 md 的「沉浸阅读」门槛对齐模块层 enterReading（knowledge/index.tsx：md / txt / html + 批 3 放行的图片）')
 ok((PAGE.match(/文件格式/g) || []).length === 1,
   'B12 负向：非 md 的 ⋮ 不给「文件格式」（全仓只剩 md 菜单那一处 —— 只改内存不落盘 ⇒ 假按钮）',
   String((PAGE.match(/文件格式/g) || []).length))
@@ -133,8 +133,8 @@ ok(/onDocInfo=\{\(i\) => setPdfPages\(i\.pages\)\}/.test(PAGE) && /onImmersiveCh
   'D9 PageEditor 接住两个上报')
 ok(/setPdfPages\(0\); setPdfImmersive\(false\)/.test(PAGE) && /\}, \[pageId\]\)/.test(PAGE),
   'D10 换页复位（阅读器按 page.path 重挂、内部 state 归零，外层不复位 ⇒ 换到别的文件顶栏永远不显示）')
-ok(/setHtmlSource\(false\); setPdfPages\(0\); setPdfImmersive\(false\)/.test(PAGE),
-  'D11 复位挂在原有的 html 源码态 effect 上（不新造一个 effect，两处重置同一批换页语义）')
+ok(/setHtmlSource\(false\); setSvgSource\(false\); setPdfPages\(0\); setPdfImmersive\(false\)/.test(PAGE),
+  'D11 复位仍挂在**原有的**那个换页 effect 上（批 3 又兼了 svg 源码态，没有新造第二个 effect）')
 
 // ===================== E 组：既有契约已同批同步（否则新代码把旧契约悄悄打红）=====================
 

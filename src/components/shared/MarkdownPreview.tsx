@@ -355,21 +355,42 @@ const WIKI_RE = /\[\[([^\]]+)\]\]/
 // ===== P3：仓库根相对路径图片解析（D1 附件区 .attachments/，兼容旧 .knowbase/_attachments/ 与根 _attachments/）=====
 // 取回逻辑已抽到 `src/lib/attachmentImage.ts`（即时渲染档的编辑器内联图片共用同一份规则与缓存）。
 function VaultRelImg({ rel, alt, ...props }: { rel: string } & React.ImgHTMLAttributes<HTMLImageElement>) {
-  const [dataUrl, setDataUrl] = useState<string | null>(() => getCachedVaultImage(rel))
+  const [url, setUrl] = useState<string | null>(() => getCachedVaultImage(rel))
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
-    if (dataUrl) return
+    const cached = getCachedVaultImage(rel)
+    if (cached) { setUrl(cached); setFailed(false); return }
+    setUrl(null); setFailed(false)
     let alive = true
-    void loadVaultImage(rel).then((url) => { if (url && alive) setDataUrl(url) })
+    void loadVaultImage(rel).then((u) => {
+      if (!alive) return
+      if (u) setUrl(u)
+      else setFailed(true)
+    })
     return () => { alive = false }
-  }, [rel, dataUrl])
-  if (!dataUrl) {
+  }, [rel])
+  if (url) return <img src={url} alt={alt} {...props} />
+  /* 破图与加载中**必须分开**（批 3，2026-10-13）：本批把仓库内任意图片路径都放开了，
+     打错一个字的概率随之上升；而原先两者都落「图片加载中…」⇒ 一个永远转不完的加载态。
+     ★ 与 `LiveMarkdownPane` 的 `ImageWidget` 对齐 —— 那边早就有 `kb-live-img-broken` 分支，
+     预览这边缺了，属于两个消费者之间的行为漂移。 */
+  if (failed) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-1 my-1 rounded border border-dashed border-[var(--border-color)] bg-[var(--bg-secondary)] text-[12px] text-[var(--text-muted)]">
-        <span>🖼️</span><span>图片加载中…</span>
+      <span
+        data-wb="mdImgBroken"
+        title={rel}
+        className="inline-flex items-center gap-1.5 px-2 py-1 my-1 rounded border border-dashed border-[var(--danger)] bg-[var(--bg-secondary)] text-[12px] text-[var(--danger)]"
+      >
+        <span>图片无法显示</span>
+        <span className="font-mono text-[11px] opacity-80 truncate max-w-[220px]">{rel}</span>
       </span>
     )
   }
-  return <img src={dataUrl} alt={alt} {...props} />
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2 py-1 my-1 rounded border border-dashed border-[var(--border-color)] bg-[var(--bg-secondary)] text-[12px] text-[var(--text-muted)]">
+      <span>🖼️</span><span>图片加载中…</span>
+    </span>
+  )
 }
 
 /** Extract plain text from React children for heading ID generation */

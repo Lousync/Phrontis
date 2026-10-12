@@ -863,8 +863,8 @@ ok(/triggerInlineSuggest\(\)\)\s*return/.test(SRC_EDITOR) &&
     'J17c 三色令牌齐备（生成中/开 = success，暂停 = warning，关 = danger）', '')
   ok(/opacity-70/.test(stateExpr),
     'J17c2 ★ 「关」为降级红（opacity-70，不借 --danger 的满色强度）', '')
-  ok(/const inlineOn = s\.aiAssistantInlineSuggest !== false/.test(SRC_EDITOR),
-    'J17d 四种状态的判据取自设置真值（不是本地影子 state）', '')
+  ok(/s\.aiAssistantInlineSuggest !== false/.test(SRC_EDITOR) && /inlineOn=\{/.test(SRC_EDITOR),
+    'J17d 四种状态的判据取自设置真值（不是本地影子 state）—— 批 2 起 ✨ 搬进 NoteTopBar，该值经 prop 下传', '')
 }
 ok(/data-wb="inlineOffSlash"/.test(SRC_EDITOR),
   'J17e ★ 关闭态有斜杠元素（色盲兜底：颜色不是唯一信号）', '')

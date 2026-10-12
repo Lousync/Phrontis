@@ -231,8 +231,15 @@ export function readWorkspaceFile(absPath: string): ReadFileResult {
  *    fbz 是 zip 封装，同 epub 需整份读；fb2 是纯 XML，本可走 loadFile，但阅读器只有一条整本读路径，
  *    且两类书都受 128MB 上限与「只读」约束，风险面与 epub 完全一致。
  *  - cbz = 阶段 2b（2026-09-22）：zip 封装的图片漫画，同 fbz 需整份读（中央目录在尾部）。
- *    同上受 128MB 上限与「只读」约束；**页图只能靠整份 zip 解包**，无更窄的读法。 */
-const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'txt', 'epub', 'fb2', 'fbz', 'cbz']
+ *    同上受 128MB 上限与「只读」约束；**页图只能靠整份 zip 解包**，无更窄的读法。
+ *  - avif = 批 3（2026-10-13）：笔记区图片查看器。**理由**：图片取回统一走本通道
+ *    （不走 `ws:readImage` —— 那条的白名单是「附件区」，管不了仓库里任意位置的图片，
+ *    而扩它等于再开一扇能力相同的门）。png/jpg/jpeg/webp/gif/bmp/svg 七种**早已在列**
+ *    （当初为 PDF 封面与 cbz 加的），故本批只补 avif 一项；`.ico` 同批评估后**刻意不收**
+ *    （仓库内罕见，不值得再动一次安全面）。风险面与既有图片格式完全一致：
+ *    只读、pathGuard 内、无写通道、渲染侧另受 32MB 与 1 亿像素两道守卫
+ *    （`src/lib/imageFormats.ts` 的 MAX_IMAGE_BYTES / MAX_IMAGE_PIXELS）。 */
+const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'avif', 'txt', 'epub', 'fb2', 'fbz', 'cbz']
 
 export interface ReadRangeResult {
   /** base64 编码的 [offset, offset+len) 段数据（不足段取到文件尾） */

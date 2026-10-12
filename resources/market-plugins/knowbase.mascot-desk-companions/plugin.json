@@ -6,7 +6,7 @@
   "entry": "index.html",
   "icon": "icon.svg",
   "author": "Knowbase",
-  "description": "三只像素小伙伴站在 AI 输入卡上沿，随 AI 活动切换动作：纸灵（温和的纸片）、小墨（墨滴精灵）、枭枭（夜读猫头鹰）。安装后到 设置 → AI 助手 → 吉祥物 里选一只。",
+  "description": "三只像素小伙伴站在 AI 输入卡上沿，随 AI 活动切换动作：纸灵（温和的纸片）、小墨（墨滴精灵）、枭枭（夜读猫头鹰）。安装后到 设置 → AI 工具 → 吉祥物 里选一只。",
   "category": "外观",
   "riskLevel": "B",
   "capabilities": [],

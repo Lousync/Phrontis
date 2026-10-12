@@ -416,8 +416,8 @@ ok(!/maximized/.test(srcRight), 'E6c 右栏组件的 maximized prop 随卡片下
 ok(/<PomoWidget frameless \/>/.test(srcRight) && /frameless\?: boolean/.test(srcPomo),
   'E6d 番茄钟在右栏走 frameless（不再画自带卡片，消除卡中卡）')
 ok(!/排序：直接拖拽上方图标/.test(srcRight), 'E6e ⋯ 控件选显菜单不带底部排序说明文字（文案精简）')
-ok(/bg-\[var\(--bg-primary\)\] \$\{absorbSurplus \? 'grow-\[99\] basis-0 max-h-\[480px\]' : 'flex-1'\} min-h-\[400px\]/.test(srcRight),
-  'E6f 下段 = bg-primary 内容层 + 细边框；min-h-400 保底（宠物永不被挤），absorbSurplus 时再封顶 max-h-480')
+ok(/flex min-h-0 flex-col overflow-hidden \$\{absorbSurplus \? 'grow-\[99\] basis-0 max-h-\[480px\]' : 'flex-1'\} min-h-\[400px\]/.test(srcRight),
+  'E6f 下段容器 = min-h-400 保底（宠物永不被挤），absorbSurplus 时再封顶 max-h-480')
 ok(/absorbSurplus=\{winMax\}/.test(read('src/App.tsx')),
   'E6g absorbSurplus 由 App 按 winMax 下发（策略在 App，右栏只表达「要不要吸收余量」）')
 
@@ -523,8 +523,8 @@ ok(!/secondaryTab|setSecondaryTab/.test(srcApp) && !/activePane/.test(srcApp),
 ok(!/openInSecondary|toggleSplit|closeSplit|splitSecondaryWidth|splitPaneModules/.test(srcApp),
   'G3 App 无分屏回调与派生量（openInSecondary / toggleSplit / closeSplit / splitSecondaryWidth / splitPaneModules）')
 ok(!/secondarySlotRef/.test(srcApp) && !/wbSecondaryTabsRef|wbSecActionsRef/.test(srcApp)
-  && !/data-pb-split|data-pb-slot="secondary"|data-wb="splitPane"/.test(srcApp),
-  'G4 副栏槽与副栏 DOM 标识（secondarySlotRef / wbSecActions / data-pb-split / splitPane）已清空')
+  && !/data-pb-split|data-wb="splitPane"/.test(srcApp),
+  'G4 旧分屏的副栏槽与 DOM 标识（secondarySlotRef / wbSecActions / data-pb-split / splitPane）已清空')
 ok(!existsSync(`${ROOT}/src/components/workbench/SplitHandle.tsx`) && !/SplitHandle/.test(srcApp),
   'G5 分屏手柄组件已删且 App 无引用（3.5.0 重做时从 git 历史取回）')
 ok(!/paneActive/.test(srcStrip) && !/paneActive/.test(srcKnowledge),
@@ -533,9 +533,16 @@ ok(!/SPLIT_FALLBACK_WIDTH|splitWidth/.test(srcApp) && !/RowsPerPane/.test(srcApp
   'G7 副栏宽度兜底与实测宽度上报（SPLIT_FALLBACK_WIDTH / splitWidth）已删')
 ok(!/Backslash/.test(srcApp) && !/Columns2/.test(srcApp),
   'G8 分屏入口全清：Ctrl+\\ 快捷键与页面条分屏按钮（Columns2 图标）')
-// 负向：全仓（源码 + 外壳 + 下游文案）不得再有「分屏」概念残留
-ok(!/分屏/.test(srcApp) && !/分屏/.test(srcStrip) && !/分屏/.test(srcPageBar) && !/分屏/.test(srcStatusBar),
-  'G9 「分屏」概念已从 App / 页签条 / 页面条 / 状态栏的源码与注释中清除')
+// G9（2026-10-13 重写）：原断言是「『分屏』概念已从 App / 页签条 / 页面条 / 状态栏的源码与注释中清除」——
+//   那是**旧工作台分屏**退役时立的负向断言，而 v3.5.0 又加回了**页面级分屏**（App 的 pageSplit /
+//   data-pb-slot="secondary" / 页签右键「向右拆分 · 向下拆分」）。旧断言与现状相反，改为对当前实现的
+//   **正向**断言：既锁住新形态，也不至于退回旧形态（旧标识仍由 G4 / G5 / G7 / G8 负向锁着）。
+ok(/data-pb-slot="secondary"/.test(srcApp) && /wbSecondaryPageRef/.test(srcApp),
+  'G9 页面级分屏的副栏槽仍在（App 的 data-pb-slot="secondary" + wbSecondaryPageRef）')
+ok(/pageSplit/.test(srcApp) && /pageSplit/.test(read('src/lib/workbenchLayout.ts')),
+  'G9b 页面级分屏的状态与持久化口径仍在（App.pageSplit + workbenchLayout 的 wbLayout.pageSplit）')
+ok(/向右拆分/.test(srcKnowledge) && /向下拆分/.test(srcKnowledge),
+  'G9c 页签右键的「向右拆分 / 向下拆分」入口仍在（knowledge/index.tsx）')
 
 // ===== H. 中间主体冗余头部行清除（v3.4.0，2026-09-18 · A 组）=====
 // 背景：多个模块在中间主体顶部自带一条「贯通行」（图标 + 模块名），与左栏标识 / 页面条重复。
@@ -723,8 +730,16 @@ ok(/getKnowledgeCategories\(\)[\s\S]{0,300}c\.path === node\.relPath/.test(srcTr
 ok(/清除已开页签残留/.test(srcKnowledgeTree) || /openPageIdsRef\.current/.test(srcKnowledgeTree),
   'N7 知识库侧已开页签修剪通道在场（跨模块删除后的页签残留回退方案依据）')
 // 右键菜单 portal 到 body（左栏变换容器会改写 fixed 包含块，方案 §2.1）
-ok(/fixed inset-0 z-\[70\] kb-pop-layer/.test(srcTree),
-  'N8 右键菜单 portal 到 body（不走栏内定位 —— 变换容器会压窄菜单）')
+/* ★ 2026-10-13（批 3 期间校正）：这条原先断言层类名出现在 `WorkbenchFileTree.tsx` 里，
+   而文件树菜单重做（2026-10-12）之后，树**不再自己写菜单** —— 它把条目交给共享组件
+   `src/components/shared/FileContextMenu.tsx`（一颗组件服务 6 个调用点，是本仓
+   「清单各持一份必然漂移」那条教训的直接产物）。层类名于是正确地住在共享组件里。
+   断言的**意图**（菜单不能被栏内变换容器压窄）没变，只是落点变了：
+   拆成两条 —— ① 共享组件里确实 portal 到 body；② 文件树确实用的是它，而不是又内联了一套。 */
+ok(/fixed inset-0 z-\[70\] kb-pop-layer/.test(stripComments(read('src/components/shared/FileContextMenu.tsx'))),
+  'N8 右键菜单 portal 到 body（共享组件 FileContextMenu：`fixed inset-0 z-[70] kb-pop-layer`）')
+ok(/<FileContextMenu[\s\S]{0,200}onClose=/.test(srcTree),
+  'N8b 文件树用的是那颗共享菜单（不内联第二套 —— 否则层类名该在树里，两条断言一起红）')
 // ★ 本轮核心判据：主进程广播。五处结构写通道必须补，且**不得**加进高频的 writeWorkspaceFile
 const wsCreateAt = srcWs.indexOf("ipcMain.handle('ws:createFile'")
 const wsMkdirAt = srcWs.indexOf("ipcMain.handle('ws:mkdir'")
@@ -769,8 +784,8 @@ ok(/<VaultTree[\s\S]{0,400}hideSoft/.test(srcTree),
   'N13 树模式 hideSoft —— 不展示「软件文件」折叠节（命中项从主列表一并剔除）')
 const srcVaultTreeSoft = stripComments(read('src/components/shared/VaultTree.tsx'))
 ok(/hideSoft = false/.test(srcVaultTreeSoft) && /const softSet = depth === 0 && !hideSoft/.test(srcVaultTreeSoft)
-  && /const main = hideSoft && depth === 0/.test(srcVaultTreeSoft),
-  'N13b VaultTree 的 hideSoft 默认 false（其余调用方行为不变），且主列表同样剔除命中项')
+  && /const mainRaw = hideSoft && depth === 0/.test(srcVaultTreeSoft),
+  'N13b VaultTree 的 hideSoft 默认 false（其余调用方行为不变），且主列表（mainRaw）同样剔除命中项')
 // 聚焦按钮在**宿主**的树模式头部行（与 🏠 同排，开发负责人 2026-09-29 指定）；
 // 树组件侧只按受控 prop 消费，按钮本体不在它里面
 ok(/<FolderFocusButton on=\{treeFocus\}/.test(srcLeftRaw) && /const \[treeFocus, setTreeFocus\] = useState\(false\)/.test(srcLeftRaw),

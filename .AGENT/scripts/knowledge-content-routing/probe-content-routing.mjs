@@ -79,6 +79,12 @@ const MENU_STATE = `JSON.stringify((function () {
     reveal: has('[data-wb="peRevealInFolder"]'),
     copy: has('[data-wb="peCopyRelPath"]'),
     htmlSrc: has('[data-wb="peHtmlSource"]'),
+    /* 批 3（2026-10-13）新增 */
+    svgSrc: has('[data-wb="peSvgSource"]'),
+    menuFit: has('[data-wb="imgMenuFit"]'),
+    menuActual: has('[data-wb="imgMenuActual"]'),
+    menuRotL: has('[data-wb="imgMenuRotateL"]'),
+    menuRotR: has('[data-wb="imgMenuRotateR"]'),
     infoCard: has('[data-wb="peFileInfoCard"]'),
   };
 })())`
@@ -102,15 +108,28 @@ const SIGNATURE = `JSON.stringify((function () {
   var isMd = topbar && !!q('[data-wb="noteTopViewToggle"]');
   var pdf = !!q('.kb-pdf-scope');
   var meta = !!q('[data-wb="metaOpenInSystem"]');
+  /* 图片（批 3，2026-10-13）：真渲染出来是 imageCanvas；过大 / 解码失败落 imgStateCard。
+     两者都是「图片落点」，但必须分开报 —— 混成一个 kind 就分不清
+     「查看器没接上」和「这张图确实超限了」。 */
+  var imgCanvas = !!q('[data-wb="imageCanvas"]');
+  var imgCard = q('[data-wb="imgStateCard"]');
   var frame = q('iframe[src^="kbview://"]');
   var kind = 'unknown';
   if (pdf) kind = 'pdf-reader';
+  else if (imgCanvas) kind = 'image-viewer';
+  else if (imgCard) kind = 'image-blocked';
   else if (meta) kind = 'meta-card';
   else if (frame) kind = 'html-sandbox';
   else if (monaco > 0) kind = isMd ? 'md-editor' : (banner ? 'text-oversize-readonly' : 'text-editable');
   return {
     kind: kind, monaco: monaco, banner: banner, topbar: topbar, isMd: isMd,
     pdf: pdf, meta: meta, iframe: !!frame,
+    imageCanvas: imgCanvas,
+    imageBlocked: imgCard ? (imgCard.getAttribute('data-kind') || '1') : null,
+    imgToolbar: !!q('[data-wb="imageToolbar"]'),
+    imgToolbarVariant: (q('[data-wb="imageToolbar"]') || {}).getAttribute
+      ? (q('[data-wb="imageToolbar"]') || {}).getAttribute('data-variant') : null,
+    imgZoom: (q('[data-wb="imgZoomLevel"]') || {}).textContent || null,
     title: (q('[data-wb="noteTopTitle"]') || {}).textContent || null,
     subtitle: (q('[data-wb="noteTopSubtitle"]') || {}).textContent || null,
     saveDot: !!q('[data-wb="noteSaveDot"]'),
@@ -187,14 +206,34 @@ async function main() {
     ok(sig.kind === expect, `${label}「${rel}」落点 = ${expect}`, `实际 ${sig.kind}${why ? ' · ' + why : ''}`)
   }
 
-  console.log('\n§3 图片与二进制应仍落元信息卡（批 3 之前的行为）')
-  const imgRel = pick(by, ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'])
+  console.log('\n§3 图片应落查看器、二进制仍落元信息卡')
+  /* 批 3（2026-10-13）改了这一条：此前图片期望 meta-card，现在真渲染。
+     若这张图超过 32MB 或 1 亿像素，落点会是 image-blocked（那是对的，不是回归）——
+     故下面把两种都接受，但要求「至少不是 meta-card」。 */
+  const imgRel = pick(by, ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif', 'svg'])
   const binRel = pick(by, ['zip', '7z', 'exe', 'dat', 'bin'])
-  for (const [label, rel] of [['图片', imgRel], ['二进制', binRel]]) {
-    if (!rel) { console.log(`  [SKIP] ${label}：仓库里没有这类文件`); continue }
-    const sig = await openByRel(rel)
-    opened.push(`${label}: ${rel} → ${sig.kind}`)
-    ok(sig.kind === 'meta-card', `${label}「${rel}」落点 = meta-card（批 3 会把图片改成渲染）`, `实际 ${sig.kind}`)
+  if (imgRel) {
+    const sig = await openByRel(imgRel)
+    opened.push(`图片: ${imgRel} → ${sig.kind}`)
+    ok(sig.kind === 'image-viewer' || sig.kind === 'image-blocked',
+      `图片「${imgRel}」落点 = 图片查看器（批 3；超限/损坏时落 image-blocked）`,
+      `实际 ${sig.kind}${sig.imageBlocked ? '（data-kind=' + sig.imageBlocked + '）' : ''}`)
+    if (sig.kind === 'image-viewer') {
+      ok(sig.imgToolbar === true, '图片顶栏里有控件簇（imageToolbar）')
+      ok(sig.imgToolbarVariant === 'inline', '笔记区控件簇是 inline 变体（拍板 D7 顶栏内联）', String(sig.imgToolbarVariant))
+      ok(/^\d+%$/.test(sig.imgZoom || ''), '控件簇里有缩放百分比读数', String(sig.imgZoom))
+      ok(/^\d+ × \d+$/.test(sig.subtitle || ''), '顶栏中段是「宽 × 高」像素尺寸', String(sig.subtitle))
+      ok(sig.saveDot === false, '图片不显示保存点（无保存动作 ⇒ 绿点是假信号）')
+    }
+  } else {
+    console.log('  [SKIP] 图片：仓库里没有图片文件（换一个有 png/jpg 的仓库再跑）')
+  }
+  if (binRel) {
+    const sig = await openByRel(binRel)
+    opened.push(`二进制: ${binRel} → ${sig.kind}`)
+    ok(sig.kind === 'meta-card', `二进制「${binRel}」落点 = meta-card`, `实际 ${sig.kind}`)
+  } else {
+    console.log('  [SKIP] 二进制：仓库里没有这类文件')
   }
 
   console.log('\n§3.5 ⋮「文件」组（非 md 才有；自动点开菜单核对）')
@@ -257,7 +296,7 @@ async function main() {
       ['PDF', pick(by, ['pdf']), true, '批 2「合并公共部分」：页数上移顶栏中段'],
       ['文本类', pick(by, ['py', 'js', 'ts', 'txt', 'csv', 'log']), false, '有真实防抖自动保存 ⇒ 绿点保留'],
       ['HTML', pick(by, ['html']), false, '沙箱渲染，无保存动作'],
-      ['图片', imgRel, false, '批 3 之前仍是元信息卡'],
+      ['图片', imgRel, false, '批 3：真渲染进查看器，无保存动作'],
       ['二进制', binRel, false, '无保存动作'],
     ]
     for (const [label, rel, expectPages, why] of cases) {
@@ -286,6 +325,83 @@ async function main() {
     }
   }
 
+  console.log('\n§3.8 批 3 图片查看器（⋮ 查看组 / 缩放 / SVG 源码态）')
+  {
+    if (!imgRel) {
+      console.log('  [SKIP] 图片：仓库里没有图片文件')
+    } else {
+      const sig = await openByRel(imgRel)
+      if (sig.kind !== 'image-viewer') {
+        console.log(`  [SKIP] 「${imgRel}」落点是 ${sig.kind}（超限或解码失败）—— 查看器交互无法验`)
+      } else {
+        // ⋮ 里的「查看」组（拍板 D10）
+        if (await clickSel('[data-wb="noteTopMore"]')) {
+          const m = await menuState()
+          ok(!!(m?.menuFit && m?.menuActual && m?.menuRotL && m?.menuRotR),
+            'I1 ⋮ 里有「查看」组四项（适应窗口 / 实际大小 / 向左旋转 / 向右旋转）', JSON.stringify(m))
+          ok(!!m && !m.svgSrc, 'I2 非 SVG 的图片不该出现「看源码」')
+          // 点「实际大小」→ 缩放读数应变成 100%
+          if (m?.menuActual) {
+            await clickSel('[data-wb="imgMenuActual"]', 700)
+            const z = await evalJs(`(function(){var e=document.querySelector('[data-wb="imgZoomLevel"]');return e?e.textContent:null})()`)
+            ok(z === '100%', 'I3 点「实际大小」→ 缩放读数 = 100%', String(z))
+            if (await clickSel('[data-wb="noteTopMore"]')) {
+              await clickSel('[data-wb="imgMenuFit"]', 700)
+              const z2 = await evalJs(`(function(){var e=document.querySelector('[data-wb="imgZoomLevel"]');return e?e.textContent:null})()`)
+              ok(z2 !== null && z2 !== '100%', 'I4 点「适应窗口」→ 读数不再停在 100%（这张图大于视口）', String(z2))
+            }
+          }
+          // 旋转：画布上的旋转层 transform 应变成 rotate(90deg)
+          if (await clickSel('[data-wb="noteTopMore"]')) {
+            if (await clickSel('[data-wb="imgMenuRotateR"]', 600)) {
+              const rot = await evalJs(`(function(){var e=document.querySelector('.kb-img-rot');return e?e.style.transform:null})()`)
+              ok(/rotate\(90deg\)/.test(String(rot)), 'I5 点「向右旋转」→ 旋转层 transform = rotate(90deg)', String(rot))
+            }
+          }
+        } else {
+          console.log('  [SKIP] 点不到 ⋮')
+        }
+        // 快捷键：0 适应窗口 / 1 实际大小（无修饰键）
+        await action('ui.key', { key: '1' })
+        await sleep(500)
+        const z3 = await evalJs(`(function(){var e=document.querySelector('[data-wb="imgZoomLevel"]');return e?e.textContent:null})()`)
+        ok(z3 === '100%', 'I6 快捷键 1 → 实际大小 100%（无修饰键，不占应用级 UI 缩放）', String(z3))
+        await action('ui.key', { key: '0' })
+        await sleep(500)
+        const z4 = await evalJs(`(function(){var e=document.querySelector('[data-wb="imgZoomLevel"]');return e?e.textContent:null})()`)
+        ok(z4 !== '100%', 'I7 快捷键 0 → 适应窗口', String(z4))
+      }
+    }
+  }
+
+  console.log('\n§3.9 批 3 SVG 双落点（默认渲染 + ⋮ 切源码）')
+  {
+    const svgRel = pick(by, ['svg'])
+    if (!svgRel) {
+      console.log('  [SKIP] SVG：仓库里没有 .svg 文件')
+    } else {
+      const s1 = await openByRel(svgRel)
+      ok(s1.kind === 'image-viewer' || s1.kind === 'image-blocked',
+        `SVG 默认落图片查看器（${svgRel}）`, `实际 ${s1.kind}`)
+      if (s1.kind === 'image-viewer' && await clickSel('[data-wb="noteTopMore"]')) {
+        const m = await menuState()
+        ok(!!m?.svgSrc, 'J1 SVG 的 ⋮ 里有「看源码」（peSvgSource）')
+        if (m?.svgSrc) {
+          await clickSel('[data-wb="peSvgSource"]', 1800)
+          let s2 = null
+          try { s2 = JSON.parse(await evalJs(SIGNATURE)) } catch { /* 下面按 null 报 */ }
+          ok(s2?.kind === 'text-editable', 'J2 点「看源码」→ 进可编辑 Monaco（XML 高亮）', `实际 ${s2?.kind}`)
+          if (await clickSel('[data-wb="noteTopMore"]')) {
+            await clickSel('[data-wb="peSvgSource"]', 1800)
+            let s3 = null
+            try { s3 = JSON.parse(await evalJs(SIGNATURE)) } catch { /* 同上 */ }
+            ok(s3?.kind === 'image-viewer', 'J3 再点「看图片」→ 回到查看器', `实际 ${s3?.kind}`)
+          }
+        }
+      }
+    }
+  }
+
   console.log('\n§4 落点汇总')
   for (const o of opened) console.log('  · ' + o)
 
@@ -296,6 +412,12 @@ async function main() {
   console.log('  · PDF 沉浸（批 2）：打开仓库里的 PDF → 阅读器那条栏点「沉浸」→ **顶栏也要一起消失**（正文占满）；Esc 退出后顶栏回来，且**页面页签不该被关掉**（批 2 顺带修的 Esc 冲突，见设计 §4.4）')
   console.log('  · PDF 合并（批 2）：同页核对「书名只出现一次」—— 顶栏中段是书名 + N 页，阅读器那条只剩阅读控件')
   console.log('  · 分屏（批 2）：把非 md 拖到副栏 → **两栏各挂各的顶栏**（与 Obsidian 同款），互不抢槽')
+  console.log('  · 图片手势（批 3）：打开一张 png → Ctrl+滚轮在图上滚 → **光标下那个像素钉住不动**（不是整体平移）；')
+  console.log('    拖拽到边缘 → 图不会丢（夹在「边缘 + 48px」）；双击 → 适应窗口 ⇄ 100% 来回切；')
+  console.log('    [ ] 旋转 → 90/270 时适应比例跟着换（长边竖过来不溢出）；png 的透明区应露出**棋盘格**底，jpg 则是纯色')
+  console.log('  · 图片沉浸（批 3）：图片 → ⋮ → 沉浸阅读 → 控件退成右下角浮条（沉浸态没有顶栏）；Esc 退出后回到笔记区')
+  console.log('  · md 内联图片（批 3）：在一个 .md 里写 `![](图片/你的图.png)`（**非** .attachments/ 路径）→ 阅读态应能显示；')
+  console.log('    引用一个不存在的路径 → 应显示破图占位而不是把整页搞坏')
 
   console.log('')
   if (fails.length === 0) {

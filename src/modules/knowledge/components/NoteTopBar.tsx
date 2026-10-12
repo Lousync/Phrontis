@@ -47,6 +47,19 @@ export interface NoteTopBarProps {
   showViewToggle?: boolean
   /** 是否显示 ✨ 常驻钮：阅读态与即时渲染档不显示（那里没有 ghost text，显示等于点不动） */
   showInline?: boolean
+  /**
+   * 右簇中、`⋮` 之前的内联槽（批 3，2026-10-13）：图片的缩放/旋转控件走这里。
+   *
+   * 为什么是「槽」而不是让图片组件自己渲染控件：控件必须**物理上**长在顶栏里（拍板 D7），
+   * 而顶栏在图片视图**上方** —— 组件没法往祖先的槽里塞东西，除非 portal；
+   * 批 2 已拍板顶栏「行内渲染、不 portal」（走 portal 等于再造一个真源）。
+   * 所以图片的视图状态上提到 `PageEditor`，这里只收一个已经渲染好的节点。
+   *
+   * ★ 与已退役的 `#editor-toolbar-slot`（悬浮胶囊的 portal 槽，批 2 删）**无关** ——
+   * 那个是 portal 到主栏单例槽，这个是行内 JSX，真源仍在调用方。
+   * 名字刻意不叫 `toolbarSlot`，免得与那段历史混淆。
+   */
+  rightSlot?: ReactNode
   /** AI 续写四态（拍板 C1：常驻钮，不放进菜单） */
   inlineOn: boolean
   inlineBusy: boolean
@@ -67,6 +80,7 @@ export function NoteTopBar({
   title, titleHint, subtitle, saving, showSaveDot = true, canBack, canForward, onBack, onForward,
   preview, onToggleView, showViewToggle = true,
   showInline = true,
+  rightSlot,
   inlineOn, inlineBusy, inlinePaused, onToggleInline,
   showMore = true, moreOpen, onToggleMore, onCloseMore, moreMenu,
 }: NoteTopBarProps) {
@@ -163,6 +177,10 @@ export function NoteTopBar({
             {preview ? <PenLine size={17} /> : <BookOpen size={17} />}
           </button>
         )}
+
+        {/* 调用方内联槽（批 3：图片的缩放/旋转控件）。位置在「控件在前、溢出在后」的常规次序上：
+            阅读切换之后、⋮ 之前。图片态下 showViewToggle / showInline 皆为假 ⇒ 这里是零新增行高。 */}
+        {rightSlot}
 
         {showMore && (
         <div className="relative">

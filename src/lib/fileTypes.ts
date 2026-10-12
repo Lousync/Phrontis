@@ -62,6 +62,22 @@ const INFO: Record<string, FileTypeInfo> = {
   'text':{ext:'text',label:'纯文本',     badge:'TEXT', icon:'text',     color:'var(--text-muted)',     placeholder:'开始编写...',           monacoLang:'plaintext' },
   'markdown':{ext:'markdown',label:'Markdown',badge:'MD',icon:'file',color:'var(--accent)',        placeholder:'开始写 Markdown...',    monacoLang:'markdown' },
   'xmind':{ext:'xmind',label:'XMind 思维导图',badge:'XMind',icon: 'file', color: '#f86a5c',             placeholder: 'XMind 思维导图 — 外部应用打开',  monacoLang: 'plaintext' },
+  /* ---- 以下于 2026-10-13 补齐（批 3「图片渲染与查看」）----
+     动机：这批之前 `INFO` 里**一个图片条目都没有** ⇒ 图片走兜底：
+     `label` 等于大写扩展名、badge 与色块都是灰的、`monacoLang` 是 plaintext。
+     图片本身现在有了查看器，元信息卡与「过大 / 解码失败」卡都要用这里的 label / color。
+     ★ 只补 `INFO`，**不补 `FILE_LANG_OPTIONS`** —— 那份是「转换文件格式」菜单
+     （把 .md 改成 .py 之类），把 .md 改成 .png 是没有语义的（同批 1 补 csv/log 的取舍）。
+     `monacoLang` 对图片无意义（永远不进 Monaco），给 plaintext；
+     唯一的例外是 svg —— 它的源码态要落 Monaco，给 xml 才有高亮。 */
+  'png': { ext:'png',  label:'PNG 图片',  badge:'PNG',  icon:'file', color:'#4a9eff', placeholder:'PNG 图片',  monacoLang:'plaintext' },
+  'jpg': { ext:'jpg',  label:'JPEG 图片', badge:'JPG',  icon:'file', color:'#f0932b', placeholder:'JPEG 图片', monacoLang:'plaintext' },
+  'jpeg':{ ext:'jpeg', label:'JPEG 图片', badge:'JPG',  icon:'file', color:'#f0932b', placeholder:'JPEG 图片', monacoLang:'plaintext' },
+  'gif': { ext:'gif',  label:'GIF 动图',  badge:'GIF',  icon:'file', color:'#a55eea', placeholder:'GIF 动图',  monacoLang:'plaintext' },
+  'webp':{ ext:'webp', label:'WebP 图片', badge:'WEBP', icon:'file', color:'#26de81', placeholder:'WebP 图片', monacoLang:'plaintext' },
+  'bmp': { ext:'bmp',  label:'BMP 位图',  badge:'BMP',  icon:'file', color:'#8395a7', placeholder:'BMP 位图',  monacoLang:'plaintext' },
+  'avif':{ ext:'avif', label:'AVIF 图片', badge:'AVIF', icon:'file', color:'#45aaf2', placeholder:'AVIF 图片', monacoLang:'plaintext' },
+  'svg': { ext:'svg',  label:'SVG 矢量图',badge:'SVG',  icon:'file', color:'#ff9f43', placeholder:'SVG 矢量图', monacoLang:'xml' },
 }
 
 export function getFileTypeInfo(ext: string): FileTypeInfo {

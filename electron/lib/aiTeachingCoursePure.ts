@@ -37,19 +37,6 @@ export interface CourseUnitProgress {
   summaryRel?: string | null
 }
 
-export interface GenerateOutlineInput {
-  goal: string
-  mode: 'anchor' | 'materials' | 'mixed' | 'free'
-  anchorText?: string
-  anchorLabel?: string
-  /** 当前工作区 id（materials/mixed 模式据此读取已登记素材） */
-  wsId?: string
-  /** 勾选的登记素材键（`sourceKey(name,path)`）；缺省 = 全部已登记素材 */
-  sourceKeys?: string[]
-  /** 'providerId:modelId'；缺省 = 主进程 defaultChatModel */
-  modelSpec?: string
-}
-
 /** 字段清洗：去换行、把 `|` 换成全角，避免破坏行格式 */
 export function cleanField(v: unknown): string {
   return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\|/g, '／').trim()
@@ -172,7 +159,7 @@ export function parseOutlineJson(text: string): CourseOutline | null {
   return null
 }
 
-// ===== 课程修订（只增补）：SOURCE 快照 diff + 增补合并（纯函数，2026-10-08）=====
+// ===== 课程增补（只增补）：SOURCE 快照 + 增补合并（纯函数，2026-10-08）=====
 
 export interface SourceSnapshotEntry { key: string; no: number; name: string; path: string; extracted: string }
 
@@ -181,7 +168,9 @@ export function sourceKey(name: unknown, path: unknown): string {
   return `${String(name ?? '').trim()}\u0000${String(path ?? '').trim()}`
 }
 
-/** 由当前 SOURCE 条目生成快照（写大纲时存一份，供下次比对） */
+/** 由当前 SOURCE 条目生成快照（写大纲时存一份）。
+ *  ★ 当前**只写不读**：唯一读者是 2026-10-11 删除的「修订大纲」抽屉；保留这份快照是为了
+ *  将来做「素材变更提醒」时不必重建。 */
 export function sourceSnapshot(entries: ReadonlyArray<{ no: number; name: string; path: string; extracted: string }>): SourceSnapshotEntry[] {
   return (entries ?? []).map((e) => ({
     key: sourceKey(e.name, e.path),
@@ -192,83 +181,9 @@ export function sourceSnapshot(entries: ReadonlyArray<{ no: number; name: string
   }))
 }
 
-/** 当前条目 vs 快照：键不存在=新增；extracted 变=已更新；否则 null */
-export function diffSources<T extends { no: number; name: string; path: string; extracted: string }>(
-  baseline: ReadonlyArray<SourceSnapshotEntry>, current: ReadonlyArray<T>,
-): Array<T & { change: 'new' | 'updated' | null }> {
-  const base = new Map((baseline ?? []).map((b) => [b.key, b]))
-  return (current ?? []).map((e) => {
-    const b = base.get(sourceKey(e.name, e.path))
-    const change: 'new' | 'updated' | null = !b ? 'new' : (b.extracted !== String(e.extracted ?? '') ? 'updated' : null)
-    return { ...e, change }
-  })
-}
-
 export interface OutlineUnitAdd { chapterId?: string; chapterName?: string; name: string; goal?: string; source?: string; why?: string }
 export interface OutlineChapterAdd { name: string; units: Array<{ name: string; goal?: string; source?: string; why?: string }> }
 export interface OutlineAdditions { toExisting: OutlineUnitAdd[]; newChapters: OutlineChapterAdd[] }
-
-function s(v: unknown): string { return String(v ?? '').trim() }
-
-function coerceAdditions(obj: unknown): OutlineAdditions | null {
-  if (!obj || typeof obj !== 'object') return null
-  const o = obj as { toExisting?: unknown; newChapters?: unknown }
-  // ★ 形状判定（2026-10-09 修）：只要出现 toExisting / newChapters 任一**数组**键，即视为「增补响应」；
-  //   两个数组都为空（模型对「无需增补 / 只想删除」的正确回答）也是合法结果，交上层提示「无增补」。
-  //   二者都不是数组（任意 JSON、非增补对象）才判为不可解析 → null。
-  if (!Array.isArray(o.toExisting) && !Array.isArray(o.newChapters)) return null
-  const toExisting: OutlineUnitAdd[] = []
-  if (Array.isArray(o.toExisting)) {
-    for (const it of o.toExisting) {
-      const u = (it ?? {}) as Record<string, unknown>
-      const name = s(u.name)
-      if (!name) continue
-      toExisting.push({
-        chapterId: s(u.chapterId) || undefined,
-        chapterName: s(u.chapterName ?? u.chapter) || undefined,
-        name, goal: s(u.goal) || undefined, source: s(u.source) || undefined, why: s(u.why) || undefined,
-      })
-    }
-  }
-  const newChapters: OutlineChapterAdd[] = []
-  if (Array.isArray(o.newChapters)) {
-    for (const ch of o.newChapters) {
-      const c = (ch ?? {}) as { name?: unknown; units?: unknown }
-      const cname = s(c.name)
-      const units: OutlineChapterAdd['units'] = []
-      if (Array.isArray(c.units)) {
-        for (const it of c.units) {
-          const u = (it ?? {}) as Record<string, unknown>
-          const name = s(u.name)
-          if (!name) continue
-          units.push({ name, goal: s(u.goal) || undefined, source: s(u.source) || undefined, why: s(u.why) || undefined })
-        }
-      }
-      if (cname && units.length) newChapters.push({ name: cname, units })
-    }
-  }
-  return { toExisting, newChapters }
-}
-
-/** 从模型返回抽「增补」JSON（```json 围栏 → 全文；配对扫描 + 从后往前取） */
-export function normalizeAdditions(rawText: string): OutlineAdditions | null {
-  const text = String(rawText ?? '')
-  const bodies: string[] = []
-  const fenceRe = /```(?:json)?\s*([\s\S]*?)```/g
-  let m: RegExpExecArray | null
-  while ((m = fenceRe.exec(text))) bodies.push(m[1])
-  bodies.push(text)
-  for (const body of bodies) {
-    const cands = balancedJsonObjects(body)
-    for (let i = cands.length - 1; i >= 0; i--) {
-      let obj: unknown
-      try { obj = JSON.parse(cands[i]) } catch { continue }
-      const out = coerceAdditions(obj)
-      if (out) return out
-    }
-  }
-  return null
-}
 
 /**
  * 只增补合并：**现有章节/知识点 id 一律保留**；新条目取递增 id；同名同章去重。

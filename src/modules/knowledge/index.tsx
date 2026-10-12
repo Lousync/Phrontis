@@ -61,6 +61,9 @@ import { PluginFrame } from '../../components/shared/PluginFrame'
 import { ImportZone } from '../shared/components/ImportZone'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
 import { FolderFocusButton } from '../../components/shared/FolderFocusButton'
+// 图片沉浸态（批 3，2026-10-13）：自带视图态与浮条控件（沉浸态没有顶栏可放控件）
+import { ImmersiveImageView } from '../../components/shared/image/ImmersiveImageView'
+import { isRenderableImageExt } from '../../lib/imageFormats'
 import { TreeNewButton, type TreeNewMenuItem } from '../../components/shared/TreeNewButton'
 import { isEditingInput } from '../../lib/shortcuts'
 import { getGlobalActiveTab } from '../../lib/activeTab'
@@ -619,8 +622,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       if (!p) return
       const ft = (p.fileType || 'md').toLowerCase()
       // html（欢迎页）也可沉浸阅读：整页 iframe，阅读布局分支见下方渲染
-      if (ft !== 'md' && ft !== 'txt' && ft !== 'html') {
-        showToast({ type: 'warning', message: '沉浸阅读仅支持 md / txt 页面' })
+      // 图片（批 3，2026-10-13）：全屏纯净看图，落点是 ImmersiveImageView（控件退成浮条 ——
+      // 沉浸态按定义没有顶栏，见该组件头注）
+      if (ft !== 'md' && ft !== 'txt' && ft !== 'html' && !isRenderableImageExt(ft)) {
+        showToast({ type: 'warning', message: '沉浸阅读仅支持 md / txt / html / 图片' })
         return
       }
       setReadingPage(p)
@@ -992,6 +997,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     const dst = targetDirRel ? `${targetDirRel}/${name}` : name
     try {
       await workspaceRename(root, srcRel, dst)
+      /* 撤销栈（2026-10-13 修，与 WorkbenchFileTree.doMove 对齐）：此前知识库侧栏这两条移动入口
+         （拖拽 / 「将文件移动到…」）都不记 fileOpHistory，同一动作在工作台文件树里能 Ctrl+Z、
+         在这里撤不回来 —— 铁律 5「撤销栈两个编辑区共用」要避免的正是这种不对称。 */
+      recordFileOp({ kind: 'move', rootId: root, from: srcRel, to: dst, name })
       void refreshTreeDir(parentDirOf(srcRel)); void refreshTreeDir(targetDirRel)
       const page = allPages.find(p => p.path === srcRel)
       if (page) showToast({ type: 'info', message: `已移动「${name}」` })
@@ -1166,7 +1175,6 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       const res = await workspaceRename(root, relPath, nextRel)
       if (!res.ok) { showToast({ type: 'error', message: res.error || '重命名失败' }); return }
       recordFileOp({ kind: 'move', rootId: root, from: relPath, to: nextRel, name })
-      window.dispatchEvent(new CustomEvent('kb-file-moved', { detail: { srcRel: relPath, dstRel: nextRel } }))
       void refreshTreeDir(dir)
       void refreshAllPages()
       showToast({ type: 'info', message: `已重命名为「${name}」` })
@@ -1368,7 +1376,6 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       if (!res.ok) { showToast({ type: 'error', message: res.error || '移动失败' }); return false }
       // 记入跨模块撤销栈：编辑区与知识库共用一份，Ctrl+Z 可撤回（kb-fs-op-changed 回流刷新）
       recordFileOp({ kind: 'move', rootId: cur.rootId, from: srcRel, to: dstRel, name: base })
-      window.dispatchEvent(new CustomEvent('kb-file-moved', { detail: { srcRel, dstRel } })) // 通知编辑器刷新树
       showToast({ type: 'info', message: `已移动 ${label} → ${dstDirRel || '仓库根目录'}` })
       return true
     } catch (e) {
@@ -2009,6 +2016,19 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                  与 PageEditor 的内容分支同一处根因（归档兜底遮蔽了专门视图），故同批一起收口。 */
               (readingPage.fileType || '').toLowerCase() === 'html' && readingPage.path ? (
                 <WelcomeHtmlView path={readingPage.path} />
+              ) : readingPage.path && isRenderableImageExt(readingPage.fileType || '') ? (
+                /* 图片（批 3，2026-10-13）：与笔记区同一个查看器，只是控件从顶栏槽退成浮条。
+                   ★ 顺序在文本类之前：图片扩展名不在 TEXT_VIEWABLE_EXT_SET 里，两者本不重叠，
+                   但把「专门视图优先」这条口径写死在这里，将来若有人把 svg 加进那个集合，
+                   也不会出现「SVG 在沉浸态变成一坨 XML 文本」。 */
+                <ImmersiveImageView
+                  relPath={readingPage.path}
+                  name={readingPage.title}
+                  sizeBytes={readingPage.sizeBytes}
+                  updatedAt={readingPage.updatedAt}
+                  onOpenInSystem={() => { void openTreeInSystem(readingPage.path as string, false) }}
+                  onRevealInFolder={() => { void openTreeInSystem(readingPage.path as string, true) }}
+                />
               ) : readingPage.path && isTextViewableExt((readingPage.fileType || '').toLowerCase()) ? (
                 <ArchiveTextView
                   path={readingPage.path}

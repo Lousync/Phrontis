@@ -36,7 +36,8 @@ writeFileSync(join(fixture, '学习笔记', '笔记一.md'), '# 笔记一\n\nfix
 
 // 1a-bis 双写作面探针（probe-note-surface.mjs）：一篇覆盖「标题 / 加粗 / 行内代码 / 引用 /
 //   任务列表 / 表格 / 行内与块级公式 / 代码围栏」的富格式页——即时渲染档的各类 widget 与
-//   标记隐藏都要有东西可断言。带 frontmatter id（无 id 的 md 是草稿，知识库不显示）。
+//   标记隐藏都要有东西可断言。带 frontmatter id（页面身份；无 id 的 md 走 auto: 兜底照样进库，
+//   这里写 id 是为了让探针能断言身份字段本身）。
 writeFileSync(
   join(fixture, '写作面探针.md'),
   [
@@ -148,7 +149,7 @@ writeFileSync(
 
 // 1b. B1 @ 引用（probe-batch5-ai E 组）需要 ≥5 个**可引用**页面（带 frontmatter id 的 doc，
 //     非欢迎页）——chip 上限 4 篇要加到第 5 篇才验得出「超限被拒」。
-//     无 frontmatter id 的 md 是草稿、知识库不显示，所以这批必须带 id。
+//     无 id 的 md 走 auto: 兜底照样进库，但这里必须带 id —— 断言要的是真实身份字段。
 for (let i = 1; i <= 6; i++) {
   const dir = join(fixture, '引用测试')
   mkdirSync(dir, { recursive: true })

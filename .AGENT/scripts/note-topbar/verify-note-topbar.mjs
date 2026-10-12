@@ -114,12 +114,12 @@ ok(!/createPortal/.test(SRC_PAGE),
 ok(!/floatBar|kb-float-hide|editor-toolbar-slot/.test(SRC_PAGE),
   'B9b 负向：悬浮胶囊的类名与槽 id 在 PageEditor 零残留（批 2 退役）')
 ok(SRC_PAGE.includes('initialFileType'), 'B10 文件类型预置（避免顶栏 loadPage 完成前闪一帧）')
-ok(/showSaveDot=\{!!paneDoc\}/.test(SRC_PAGE),
-  'B10b 保存点只对有真实保存动作的类型显示（paneDoc 非空 ⟺ 落可编辑 MonacoPane）')
+ok(/showSaveDot=\{!!paneDoc && textFile\?\.reason !== 'oversize-edit'\}/.test(SRC_PAGE),
+  'B10b 保存点只对有真实保存动作的类型显示（paneDoc 非空**且**非 oversize-edit 只读文本；★ paneDoc 非空 ≠ 可编辑）')
 ok(/showViewToggle=\{isMdNote\}/.test(SRC_PAGE) && /showInline=\{isMdNote &&/.test(SRC_PAGE),
   'B10c 阅读切换 / ✨续写钮只给 md（非 md 没有预览态与 ghost text，给了就是点了没反应的假按钮）')
-ok(/subtitle=\{isPdfFile && pdfPages > 0/.test(SRC_PAGE) && /onDocInfo=\{/.test(SRC_PAGE),
-  'B10d PDF 页数经 onDocInfo 上移顶栏中段（批 2「合并公共部分」）')
+ok(/subtitle=\{[\s\S]{0,320}isPdfFile && pdfPages > 0/.test(SRC_PAGE) && /onDocInfo=\{/.test(SRC_PAGE),
+  'B10d PDF 页数经 onDocInfo 上移顶栏中段（批 2「合并公共部分」；批 3 同一处先给图片像素尺寸）')
 ok(/onImmersiveChange=\{setPdfImmersive\}/.test(SRC_PAGE) && /setPdfImmersive\(false\)/.test(SRC_PAGE),
   'B10e PDF 沉浸态上报 + 换页复位（不复位 ⇒ 换到别的文件顶栏仍不显示）')
 ok(/chrome="reader-only"/.test(SRC_PAGE),

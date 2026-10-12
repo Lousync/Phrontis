@@ -3184,7 +3184,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               <CourseHome
                 wsId={(activeWs as string)}
                 wsName={wsActive?.name ?? '课程'}
-                modelSpec={effModel}
                 state={courseState}
                 onStartUnit={(id) => void courseOpenUnit(id)}
                 onFinishUnit={(id, score) => void courseFinishUnit(id, score)}
