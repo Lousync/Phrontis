@@ -695,13 +695,20 @@ ok(/onOpenFile=\{\(n\) => \{ setActivePath\(n\.relPath\); onOpenFile\(n\.relPath
   'N2 点文件 → 上报 relPath 并记高亮（不自己开页签，打开语义留在宿主）')
 ok(/onOpenFile=\{\(rel\) => onOpenLooseFile\(rel, \{ startEdit: true \}\)\}/.test(srcLeftRaw),
   'N3 宿主接 startEdit: true —— 文件树打开一律进编辑态（不再阅读优先）')
-// 八项文件操作接线齐全（方案 §2.1 表）
+// 文件操作接线齐全（方案 §2.1 表；2026-10-12 由八项扩到十项 —— 右键菜单对齐 Obsidian 后
+// 「复制路径」变二级菜单、「将文件移动到…」与「系统打开 / 资源管理器定位」是新入口）
 for (const [label, re] of [
   ['新建文件/文件夹', /workspaceCreateFile\(root, rel\)|workspaceMkdir\(root, rel\)/],
   ['新建知识页', /crypto\.randomUUID\(\)[\s\S]{0,200}workspaceCreateFile\(root, mdRel/],
   ['内联重命名', /workspaceRename\(root, relPath, to\)/],
   ['删除到回收站', /workspaceTrash\(root, node\.relPath\)/],
-  ['复制路径', /navigator\.clipboard\.writeText\(node\.relPath\)/],
+  // ★ 2026-10-12 改写：原来锁 `navigator.clipboard.writeText(node.relPath)`（渲染层直连剪贴板）。
+  // 现在「复制路径」是二级菜单（仓库相对路径 / 完整路径），并统一走主进程 `copyText` ——
+  // 批 1 定的口径就是「渲染层不直连 navigator.clipboard」。
+  ['复制路径（二级：相对 / 完整，走主进程剪贴板）',
+    /key: 'copyPath'[\s\S]{0,160}?submenu: \[[\s\S]{0,220}?copyTreePath\(node\.relPath, 'rel'\)[\s\S]{0,140}?copyTreePath\(node\.relPath, 'abs'\)/],
+  ['将文件移动到…（目录搜索弹层）', /key: 'moveTo'[\s\S]{0,200}?<DirPicker/],
+  ['系统打开 / 资源管理器定位', /workspaceOpenInSystem\(root, rel, reveal\)/],
   ['粘贴系统剪贴板', /workspacePasteExternal\(root, dirRel, paths\)/],
   ['拖拽移动', /const doMove = useCallback/],
   ['撤销栈登记', /recordFileOp\(\{ kind: 'move'/],

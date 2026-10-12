@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2 } from 'lucide-react'
+import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2, Link2, ExternalLink, FolderSearch, FolderInput } from 'lucide-react'
 import { PluginIcon } from '../../components/shared/ModuleIcons'
 import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_ENTRY_ENABLED, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
@@ -25,6 +25,7 @@ import {
   workspaceRename, workspaceGetCurrent, workspaceTrash,
   workspaceListDir, workspaceCreateFile, workspaceMkdir,
   workspacePasteExternal, pasteFromClipboard, getPathForFile,
+  copyText, workspaceOpenInSystem,
 } from '../../lib/ipc'
 import { hasTextPasteTarget } from '../../lib/pasteTarget'
 import { notifyDataChanged } from '../../lib/dataChanged'
@@ -37,6 +38,7 @@ import { recordFileOp } from '../../lib/fileOpHistory'
 import { useDataChanged } from '../../lib/dataChanged'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { FileContextMenu, type FileMenuEntry } from '../../components/shared/FileContextMenu'
+import { DirPicker } from '../../components/shared/DirPicker'
 import { TreeExpandButton } from '../../components/shared/TreeExpandButton'
 import { SIDEBAR_HEADER_ICON } from '../../components/shared/sidebarHeaderIcon'
 import { TREE_SORT_OPTIONS, getTreeSortMode, setTreeSortMode, type TreeSortMode } from '../../lib/treeSort'
@@ -1432,11 +1434,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     if (ok) refreshCategories()
   }
 
-  /** 复制条目路径（vault：页面/目录均为仓库内文件；abs=含仓库根的绝对路径） */
-  const handleCopyPath = useCallback(async (type: 'category' | 'page', id: string, mode: 'abs' | 'rel') => {
-    const rel = type === 'page'
-      ? (allPages.find((x) => x.id === id)?.path ?? '')
-      : (categories.find((x) => x.id === id)?.path ?? '')
+  /** 复制路径的**核心**（2026-10-12 抽出）：rel → 剪贴板；abs 时前缀仓库根。
+   *  两个消费方：分类树 / 笔记本的 handleCopyPath（按 id 找 rel）、文件树右键的「复制路径 ▸」（直接有 rel）。
+   *  ★ 顺手统一到主进程剪贴板通道 `copyText` —— 批 1 定的口径是「渲染层不直连 navigator.clipboard」。 */
+  const copyPathText = useCallback(async (rel: string, mode: 'abs' | 'rel') => {
     if (!rel) { showToast({ type: 'warning', message: '该条目暂无仓库文件路径（历史数据）' }); return }
     try {
       let text = rel
@@ -1445,10 +1446,29 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         if (!cur?.path) { showToast({ type: 'error', message: '未打开仓库' }); return }
         text = `${cur.path.replace(/\\/g, '/')}/${rel}`
       }
-      await navigator.clipboard.writeText(text)
+      const ok = await copyText(text)
+      if (!ok) { showToast({ type: 'error', message: '复制失败' }); return }
       showToast({ type: 'info', message: mode === 'abs' ? '已复制完整路径' : '已复制仓库相对路径' })
     } catch { showToast({ type: 'error', message: '复制失败' }) }
-  }, [allPages, categories])
+  }, [])
+
+  /** 复制条目路径（vault：页面/目录均为仓库内文件；abs=含仓库根的绝对路径） */
+  const handleCopyPath = useCallback(async (type: 'category' | 'page', id: string, mode: 'abs' | 'rel') => {
+    const rel = type === 'page'
+      ? (allPages.find((x) => x.id === id)?.path ?? '')
+      : (categories.find((x) => x.id === id)?.path ?? '')
+    await copyPathText(rel, mode)
+  }, [allPages, categories, copyPathText])
+
+  /** 文件树右键「使用默认应用打开 / 在系统资源管理器中显示」（2026-10-12）：
+   *  与批 2 非 md 顶栏 ⋮ 的 handleArchiveOpenInSystem 走**同一个主进程通道**（workspaceOpenInSystem），
+   *  不新开能力面。 */
+  const openTreeInSystem = useCallback(async (rel: string, reveal: boolean) => {
+    const root = await ensureVaultRoot()
+    if (!root) return
+    const res = await workspaceOpenInSystem(root, rel, reveal)
+    if (!res?.ok) showToast({ type: 'error', message: res?.error || '打开失败' })
+  }, [ensureVaultRoot])
 
   // --- sort (up/down reorder) ---
   const handleSortCategory = async (id: string, direction: 'up' | 'down') => {
@@ -2267,23 +2287,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                       const dirRel = node.type === 'dir' ? node.relPath : parentDirOf(node.relPath)
                       // 条目自身动作（B-2）：根容器（relPath === ''）是虚拟节点，没有删除/重命名语义
                       const self = node.relPath !== '' ? node : null
-                      const items: FileMenuEntry[] = [
-                        { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => setTreeCreating({ dirRel, type: 'file' }) },
-                        { key: 'newDir', label: '新建目录', icon: <FolderPlus size={15} />, onSelect: () => setTreeCreating({ dirRel, type: 'dir' }) },
-                        // B-13：分类目录也走树内联命名（恒落根层，不吃 node 的 dirRel）
-                        { key: 'newCat', label: '新建分类目录', icon: <FolderTree size={15} />, onSelect: () => setTreeCreating({ dirRel: '', type: 'category' }) },
-                        { key: 'paste', label: '粘贴', icon: <ClipboardPaste size={15} />, onSelect: () => requestPasteFromMenu(dirRel) },
-                      ]
-                      if (node.type === 'file') items.push({ key: 'open', label: '打开', icon: <FileText size={15} />, onSelect: () => handleTreeOpenFile(node) })
-                      if (self && self.type === 'dir') {
+                      const items: FileMenuEntry[] = []
+
+                      /* ---- 文件条目（2026-10-12 对齐 Obsidian，docs/file-menu-rework-design.md）----
+                         只放「对这个文件做什么」：「新建 / 粘贴」已移走，只留**文件夹条目与空白处**
+                         （Obsidian 同款口径）。Obsidian 那 13 项里本轮做 8 项，其余 4 项已拍板不做。 */
+                      if (self && self.type === 'file') {
+                        items.push({ key: 'open', label: '打开', icon: <FileText size={15} />, onSelect: () => handleTreeOpenFile(node) })
                         items.push({ separator: true })
-                        items.push({ key: 'expandDir', label: '展开此目录（含子目录）', icon: <ChevronsUpDown size={15} />, onSelect: () => void expandDirRecursive(self.relPath) })
-                        items.push({ key: 'collapseDir', label: '收起此目录', icon: <ChevronsDownUp size={15} />, onSelect: () => collapseDirRecursive(self.relPath) })
-                      }
-                      if (self) {
-                        items.push({ separator: true })
-                        items.push({ key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => setTreeRenaming({ relPath: self.relPath }) })
-                        if (self.type === 'file') items.push({
+                        items.push({
                           key: 'dup', label: '创建副本', icon: <CopyPlus size={15} />,
                           onSelect: () => {
                             void (async () => {
@@ -2296,6 +2308,50 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                             })()
                           },
                         })
+                        items.push({
+                          key: 'moveTo', label: '将文件移动到…', icon: <FolderInput size={15} />,
+                          popover: (
+                            <DirPicker
+                              sourceRel={self.relPath}
+                              onPick={(dst) => { setTreeMenu(null); void handleTreeMove(self.relPath, dst) }}
+                              onCancel={() => setTreeMenu(null)}
+                            />
+                          ),
+                        })
+                        items.push({ separator: true })
+                        items.push({
+                          key: 'copyPath', label: '复制路径', icon: <Link2 size={15} />,
+                          submenu: [
+                            { label: '仓库相对路径', onSelect: () => void copyPathText(self.relPath, 'rel') },
+                            { label: '完整路径', onSelect: () => void copyPathText(self.relPath, 'abs') },
+                          ],
+                        })
+                        items.push({ separator: true })
+                        items.push({ key: 'openSys', label: '使用默认应用打开', icon: <ExternalLink size={15} />, onSelect: () => void openTreeInSystem(self.relPath, false) })
+                        items.push({ key: 'reveal', label: '在系统资源管理器中显示', icon: <FolderSearch size={15} />, onSelect: () => void openTreeInSystem(self.relPath, true) })
+                        items.push({ separator: true })
+                        items.push({ key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => setTreeRenaming({ relPath: self.relPath }) })
+                        items.push({ separator: true })
+                        items.push({ key: 'delete', label: '删除', icon: <Trash2 size={15} />, danger: true, onSelect: () => void handleTreeDelete(self) })
+                        return items
+                      }
+
+                      /* ---- 文件夹条目 / 空白处（虚拟根）：**保持原样** ---- */
+                      items.push(
+                        { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => setTreeCreating({ dirRel, type: 'file' }) },
+                        { key: 'newDir', label: '新建目录', icon: <FolderPlus size={15} />, onSelect: () => setTreeCreating({ dirRel, type: 'dir' }) },
+                        // B-13：分类目录也走树内联命名（恒落根层，不吃 node 的 dirRel）
+                        { key: 'newCat', label: '新建分类目录', icon: <FolderTree size={15} />, onSelect: () => setTreeCreating({ dirRel: '', type: 'category' }) },
+                        { key: 'paste', label: '粘贴', icon: <ClipboardPaste size={15} />, onSelect: () => requestPasteFromMenu(dirRel) },
+                      )
+                      if (self && self.type === 'dir') {
+                        items.push({ separator: true })
+                        items.push({ key: 'expandDir', label: '展开此目录（含子目录）', icon: <ChevronsUpDown size={15} />, onSelect: () => void expandDirRecursive(self.relPath) })
+                        items.push({ key: 'collapseDir', label: '收起此目录', icon: <ChevronsDownUp size={15} />, onSelect: () => collapseDirRecursive(self.relPath) })
+                      }
+                      if (self) {
+                        items.push({ separator: true })
+                        items.push({ key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => setTreeRenaming({ relPath: self.relPath }) })
                         items.push({ separator: true })
                         items.push({ key: 'delete', label: '删除', icon: <Trash2 size={15} />, danger: true, onSelect: () => void handleTreeDelete(self) })
                       }
