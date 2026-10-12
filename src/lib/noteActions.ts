@@ -12,6 +12,27 @@
 
 import type { NoteEngineHandle, NoteBlockContext, NoteSelection } from './noteEngine'
 
+/**
+ * 文件格式动作的 id 空间（2026-10-11 拍板 C2：⋮ 与编辑器右键菜单两处都有「文件格式」）。
+ *
+ * 为什么用模板字面量而不是给每个扩展名列一个成员：格式清单的真源是
+ * `src/lib/fileTypes.ts` 的 FILE_LANG_OPTIONS，加一种语言不该来改本文件的联合类型。
+ *
+ * ⚠️ **执行权不在本文件**：改格式要动 PageEditor 的渲染态、还要把类型回报父级与状态栏，
+ * 而本文件只经 NoteEngineHandle 做事（且刻意保持零加载期依赖，便于契约脚本直接 import）。
+ * 所以 NoteContextMenu 见到 `fmt-ext:` 前缀的动作会转交宿主的 onFileType，不进 runNoteAction。
+ * ⚠️ 清单本身也**不由本文件导入**（那会给本文件加一条静态依赖，破坏上面那条契约）。
+ */
+export type FileTypeActionId = `fmt-ext:${string}`
+
+export const fileTypeActionId = (ext: string): FileTypeActionId => `fmt-ext:${ext}`
+
+/** 取格式动作里的扩展名；不是格式动作则 null */
+export function fileTypeOfAction(id: string | undefined): string | null {
+  if (!id || !id.startsWith('fmt-ext:')) return null
+  return id.slice('fmt-ext:'.length)
+}
+
 export type NoteActionId =
   // 链接
   | 'link-wiki'
@@ -53,7 +74,8 @@ export interface NoteMenuNode {
   /** 分隔线节点：只有 sep */
   sep?: boolean
   label?: string
-  action?: NoteActionId
+  /** 普通写作动作，或文件格式动作（后者由菜单组件转交宿主，见 fileTypeOfAction） */
+  action?: NoteActionId | FileTypeActionId
   children?: NoteMenuNode[]
   /** lucide 图标名（组件侧映射，数据层不引图标库） */
   icon?: string
@@ -127,7 +149,8 @@ const fail = (message: string): NoteActionResult => ({ ok: false, message })
 // ===== 菜单项可用性（灰显判定，两档共用）=====
 
 /** 需要「单行非空选区」的动作（脚注 / 格式化在有选区时才包裹，无选区则插占位 —— 都可用） */
-export function isNoteActionEnabled(id: NoteActionId, ctx: NoteBlockContext | null): boolean {
+export function isNoteActionEnabled(id: NoteActionId | FileTypeActionId, ctx: NoteBlockContext | null): boolean {
+  if (fileTypeOfAction(id) !== null) return true
   if (id === 'ins-footnote') {
     const s = ctx?.selection
     return Boolean(s && s.text.trim() && !s.text.includes('\n'))
@@ -167,13 +190,16 @@ function wrapInline(engine: NoteEngineHandle, marker: string, placeholder: strin
  * - 光标在非空行 → 空一行再插（同理：紧贴段落会让 `---` 变成 setext 标题下划线）。
  *
  * `selectText` 给定时选中这段文本（表格首格 / 代码块空行等）。
+ * 返回值额外带 `at` = 插入块在文档里的起点：即时渲染档的表格 widget 靠它交接焦点（见 `focusBlockCell`）。
  */
+type InsertBlockResult = { ok: true; at: number } | { ok: false; message: string }
+
 function insertBlock(
   engine: NoteEngineHandle,
   ctx: NoteBlockContext,
   text: string,
   selectText?: string,
-): NoteActionResult {
+): InsertBlockResult {
   const hasSel = ctx.selection.from !== ctx.selection.to
   const onEmptyLine = ctx.lineText.trim() === ''
   let from: number
@@ -198,7 +224,7 @@ function insertBlock(
   } else {
     engine.replaceRange(from, to, body)
   }
-  return OK
+  return { ok: true, at: from + Math.max(0, body.indexOf(text)) }
 }
 
 const LEADING_MARKS = /^(#{1,6}\s+|>\s?|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+)+/
@@ -281,7 +307,13 @@ export function runNoteAction(id: NoteActionId, engine: NoteEngineHandle): NoteA
       engine.replaceRange(sel.from, sel.to, text, text.length - 3, text.length - 1)
       return OK
     }
-    case 'ins-table': return insertBlock(engine, ctx, TABLE_TPL, '列 1')
+    // 表格：即时渲染档里表格是**渲染态 widget**（单元格就地编辑），所以不选源码文本，
+    // 而是把焦点交给首格（`focusBlockCell`，源码档不实现 → 仍是「插完选中首格」的旧行为）。
+    case 'ins-table': {
+      const r = insertBlock(engine, ctx, TABLE_TPL)
+      if (r.ok) engine.focusBlockCell?.(r.at)
+      return r
+    }
     case 'ins-callout': return insertBlock(engine, ctx, '> [!note] 标注标题\n> 正文', '标注标题')
     case 'ins-hr': return insertBlock(engine, ctx, '---')
     case 'ins-code': return insertBlock(engine, ctx, '```\n\n```', '\n')

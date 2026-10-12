@@ -1714,6 +1714,13 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
 
 /* 表格 / 代码块 widget：DOM 与预览同构 + 挂 `.kb-md-atom`，样式由共用规则供（不在这里重复数值） */
 .kb-live-table-wrap { overflow-x: auto; padding: 2px 0; }
+/* 单元格就地编辑（对齐 Obsidian；2026-10-11）：正在编辑的那一格给一圈强调色。
+   只在 :focus 生效 —— 不参与「与预览逐项一致」的比对（预览没有可编辑单元格）。 */
+.kb-live-table th[contenteditable]:focus,
+.kb-live-table td[contenteditable]:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -2px;
+}
 .kb-live-codecard-inner { position: relative; }
 .kb-live-codecard-lang {
   position: absolute; top: 0.25rem; right: 0.5rem;

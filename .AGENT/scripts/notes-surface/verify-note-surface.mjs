@@ -41,7 +41,7 @@ function makeEngine(text, selFrom, selTo) {
   let doc = text
   let from = selFrom ?? 0
   let to = selTo ?? from
-  const stats = { wikiSuggest: 0, selectAll: 0 }
+  const stats = { wikiSuggest: 0, selectAll: 0, blockCell: null }
   const engine = {
     insertAtCursor(t) { doc = doc.slice(0, from) + t + doc.slice(to); from = to = from + t.length },
     revealLine() { /* 无 UI */ },
@@ -71,6 +71,7 @@ function makeEngine(text, selFrom, selTo) {
     selectAll() { stats.selectAll++; from = 0; to = doc.length },
     getRaw: () => null,
     triggerWikiSuggest() { stats.wikiSuggest++ },
+    focusBlockCell(pos) { stats.blockCell = pos },
   }
   return { engine, peek: () => ({ doc, from, to, ...stats }) }
 }
@@ -121,7 +122,10 @@ function runSync(id, text, selFrom, selTo) {
   const t = runSync('ins-table', '')
   ok(t.doc.startsWith('| 列 1 | 列 2 | 列 3 |'), 'A3a 表格模板表头', t.doc.split('\n')[0])
   ok(t.doc.includes('| --- | --- | --- |'), 'A3b 表格模板分隔行')
-  ok(t.doc.slice(t.from, t.to) === '列 1', 'A3c 插完选中首格（直接改名）', t.doc.slice(t.from, t.to))
+  // 2026-10-11 改：表格在即时渲染档是**渲染表 + 单元格就地编辑**，故不再「选中源码里的首格」，
+  // 而是把焦点交给首格（`focusBlockCell`）；源码档不实现该方法 → 仍是插完选中首格的旧行为
+  ok(t.blockCell === 0, 'A3c 插完把焦点交给首格（即时渲染档走 focusBlockCell）', String(t.blockCell))
+  ok(t.doc.slice(t.from, t.to) === '', 'A3c2 不再选中源码文本（选中会落在被替换的 widget 区间里）', JSON.stringify(t.doc.slice(t.from, t.to)))
   const hr = runSync('ins-hr', '')
   ok(hr.doc === '---', 'A3d 分隔线', hr.doc)
   const code = runSync('ins-code', '')
@@ -241,6 +245,8 @@ const SRC_PAGE = stripComments(read('src/modules/knowledge/components/PageEditor
 const SRC_SETTINGS = stripComments(read('src/lib/settings.ts'))
 const SRC_EDITORVIEW = stripComments(read('src/modules/settings/views/EditorView.tsx'))
 const SRC_CSS = read('src/styles/index.css')
+// 脚注：即时渲染档的 widget 复用预览那份工具类，两边字符串必须逐字相同（C12l/C12m 互锁）
+const SRC_PREVIEW = stripComments(read('src/components/shared/MarkdownPreview.tsx'))
 
 // ---- C1 设置项 ----
 ok(/editorWritingMode:\s*\{[^}]*default:\s*'source'/.test(SRC_SETTINGS), 'C1a 设置 editorWritingMode 默认 source（默认不改现有手感）')
@@ -343,6 +349,49 @@ ok(SRC_LIVE.includes('[-*+]\\s+\\[[ xX]\\]'), 'C11p 任务行不再画项目符�
 ok(SRC_LIVE.includes("from '@codemirror/search'") && SRC_LIVE.includes('searchKeymap') && SRC_LIVE.includes('search({ top: true })'),
   'C11q 查找面板接线（Ctrl+F，与源码档 Monaco find widget 对齐）')
 ok(SRC_LIVE.includes('listDepth') && SRC_LIVE.includes('orderedMarker'), 'C11r 列表层级走语法树祖先链 + 有序重编号')
+
+// ---- C12 表格「渲染态就地编辑」（2026-10-11 对齐 Obsidian）+ 脚注即时渲染 ----
+// 背景：此前语义是「光标进入表格 → 整块回源码」，于是「插入表格」把你丢进管道符里；
+// Obsidian 是直接在渲染后的表格里打字。改法见 LiveMarkdownPane 文件头的表格段。
+ok(!/name === 'Table'[\s\S]{0,220}containsCursor/.test(SRC_LIVE), 'C12a 负向：表格不再按「光标进入回源码」处理（永远渲染成表）')
+ok(SRC_LIVE.includes("cell.contentEditable = 'true'") && SRC_LIVE.includes("cell.contentEditable"), 'C12b 单元格显式 contentEditable（CM6 给 widget 根设 false，格内 true 即成为编辑宿主）')
+ok(SRC_LIVE.includes('commitTableCell') && SRC_LIVE.includes('view.dispatch({ changes: { from: ref.from, to: ref.to, insert: clean } })'),
+  'C12c 格内改动写回源文本（最小替换，只动这一格的正文区间）')
+ok(SRC_LIVE.includes('widget.src = src.slice') && /eq\(o: TableWidget\): boolean \{ return o\.src === this\.src \}/.test(SRC_LIVE),
+  'C12d 写回前同步 widget.src ⇒ 重建时 eq 判等、DOM 不被重建（格内光标与输入法不丢）')
+ok(SRC_LIVE.includes('tableRangeOf') && SRC_LIVE.includes('view.posAtDOM') && SRC_LIVE.includes("n.name !== 'Table'"),
+  'C12e 单元格源区间每次从文档现算（posAtDOM + 语法树找 Table），不缓存偏移')
+ok(SRC_LIVE.includes('moveTableCell') && SRC_LIVE.includes('addTableRow') && SRC_LIVE.includes('focusCellNear'),
+  'C12f Tab/Shift+Tab 换格、Enter 下行、末行加一行')
+ok(SRC_LIVE.includes("if (mod && key === 'z')") && SRC_LIVE.includes('undo(view)'), 'C12g 格内 Ctrl+Z 交给 CM6（原生 contenteditable 撤销会与源脱钩）')
+ok(SRC_LIVE.includes("if (mod && (key === 'b' || key === 'i' || key === 'u'))"), 'C12h 负向：格内拦掉原生富文本命令（Ctrl+B/I/U 会改 DOM 而源不动）')
+ok(SRC_LIVE.includes('focusBlockCell') && SRC_ACTIONS.includes('engine.focusBlockCell?.(r.at)'), 'C12i 插入表格后把焦点交给首格（两档共用的可选契约）')
+ok(SRC_CSS.includes('th[contenteditable]:focus') && SRC_CSS.includes('td[contenteditable]:focus'), 'C12j 正在编辑的单元格有强调色描边')
+// 脚注：与预览同一批 Tailwind 类名（外观由同一份 CSS 供），气泡 fixed + 视口回夹
+ok(SRC_LIVE.includes('FootnoteWidget') && SRC_LIVE.includes('FN_RE'), 'C12k 脚注在即时渲染档也渲染（与预览一致）')
+ok(SRC_LIVE.includes("border-b border-dashed border-[var(--accent)] cursor-help hover:bg-[var(--accent)]/10 transition-colors"),
+  'C12l 脚注词复用预览那份工具类（同一批 class ⇒ 同一批数值）')
+ok(SRC_PREVIEW.includes("border-b border-dashed border-[var(--accent)] cursor-help hover:bg-[var(--accent)]/10 transition-colors"),
+  'C12m 预览侧那份仍在（两边字符串必须逐字相同，漂了就红）')
+ok(SRC_LIVE.includes("tip.className = `${FN_TIP_CLS} fixed z-[9999]") && SRC_LIVE.includes('Math.min(r.left, window.innerWidth - w - 8)'),
+  'C12n 脚注气泡 fixed + 视口回夹（absolute 会被 .cm-scroller 的 overflow 裁掉）')
+ok(SRC_LIVE.includes('closeFootnoteTip') && SRC_LIVE.includes('destroy(): void { closeFootnoteTip() }'), 'C12o 气泡在点外部 / Esc / 滚动 / widget 被换掉时收掉')
+
+// ---- C13 右键菜单与子菜单都不被屏幕边缘截断（2026-10-11 反馈）----
+// 根因两条：① 尺寸用 getBoundingClientRect 量，`.kb-pop` 进场是 scale(0.94)，量到的是缩小 6% 的尺寸；
+// ② 子菜单完全没有出屏处理（右缘右键 → 往右展开的子菜单整块在窗口外）。
+ok(SRC_MENU.includes('offsetWidth') && SRC_MENU.includes('offsetHeight'), 'C13a 菜单用 offsetWidth/Height 量（不受进场 transform 影响）')
+ok(!SRC_MENU.includes('r.width') && !SRC_MENU.includes('rect.width') && SRC_MENU.includes('window.innerWidth - w - EDGE'),
+  'C13b 负向：不再拿 rect 的宽高算出屏回夹（anchor 的 rect 只用来取 left/top）')
+ok(SRC_MENU.includes('function SubMenu') && SRC_MENU.includes('if (left + w > window.innerWidth - EDGE) left = Math.max(EDGE, r.left - w + gap)'),
+  'C13c 子菜单右边放不下就翻到左侧')
+ok(SRC_MENU.includes('if (top + h > window.innerHeight - EDGE) top = window.innerHeight - EDGE - h'), 'C13d 子菜单下边放不下就上移（贴底右键不再被截）')
+ok(SRC_MENU.includes('overflowY') && SRC_MENU.includes('maxHeight'), 'C13e 极矮窗口兜底：子菜单内部滚动而不是整块溢出')
+{
+  const hook = read('src/lib/useContextMenuPosition.ts')
+  ok(hook.includes('offsetWidth') && hook.includes('offsetHeight'), 'C13f 共享 hook（文件树 / 书签 / 章节等 8 处菜单）同因同修')
+  ok(!hook.includes('rect.width - EDGE_MARGIN'), 'C13g 负向：hook 不再用 rect 尺寸回夹')
+}
 
 // ===================== 结果 =====================
 

@@ -21,7 +21,7 @@ import {
   EditorView, Decoration, WidgetType, keymap, drawSelection, dropCursor, highlightSpecialChars,
   rectangularSelection, crosshairCursor, type DecorationSet, ViewPlugin, type ViewUpdate,
 } from '@codemirror/view'
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from '@codemirror/commands'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { syntaxTree, foldGutter, foldKeymap, indentOnInput, bracketMatching } from '@codemirror/language'
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, startCompletion } from '@codemirror/autocomplete'
@@ -106,6 +106,9 @@ const HEADING_CLASS: Record<string, string> = {
 /** 空隐藏装饰：替换为空（不可见，且天然成为原子的跳过单元） */
 const HIDE = Decoration.replace({})
 
+/** 正则类装饰（公式 / 脚注）的扫描外扩量：跨行块被视口边缘切开时，靠它仍能整体命中 */
+const SCAN_PAD = 400
+
 class ImageWidget extends WidgetType {
   constructor(readonly src: string, readonly alt: string, readonly rel: string | null) { super() }
   eq(o: ImageWidget): boolean { return o.src === this.src && o.alt === this.alt && o.rel === this.rel }
@@ -159,6 +162,91 @@ class HrWidget extends WidgetType {
   }
 }
 
+// ===== 脚注：`词^[注释]`（Pandoc 风格行内脚注）=====
+//
+// 阅读态预览把它渲染成「虚线下划线的词 + 上标「注」，点击展开注释」（MarkdownPreview 的 FootnoteWord）。
+// 此前即时渲染档完全没有这条，于是菜单「插入 → 脚注」插完什么都看不到 —— 与表格同一类落差。
+//
+// 外观**直接复用预览那份 Tailwind 工具类**（同一批 class 字符串 ⇒ 同一批 CSS 数值，
+// 不靠人工抄；`compare-live-vs-preview.mjs` 会逐项断言）。注释气泡在编辑器里是 `position: fixed`
+// 并按词的位置夹进视口 —— 预览那份 `absolute` 会被 `.cm-scroller` 的 overflow 裁掉。
+
+/** 与 `MarkdownPreview.tsx` 的 FootnoteWord 同一批类名（改那边记得同步，探针会拦） */
+const FN_WORD_CLS = 'border-b border-dashed border-[var(--accent)] cursor-help hover:bg-[var(--accent)]/10 transition-colors'
+const FN_SUP_CLS = 'ml-0.5 text-[9px] text-[var(--accent)]'
+const FN_TIP_CLS = 'block px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl text-[12px] leading-relaxed text-[var(--text-primary)] whitespace-normal text-left'
+const FN_RE = /([\w\u4e00-\u9fff'-]+)\^\[([^\]]+)\]/
+
+let fnTipEl: HTMLElement | null = null
+
+const onTipOutside = (e: MouseEvent): void => {
+  const t = e.target as HTMLElement | null
+  if (fnTipEl && !fnTipEl.contains(t) && !t?.closest?.('.kb-live-footnote')) closeFootnoteTip()
+}
+const onTipKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') closeFootnoteTip() }
+const onTipScroll = (): void => closeFootnoteTip()
+
+/** 关掉脚注气泡（唯一实例；点外部 / 滚动 / Esc / 再点一次词都走它） */
+function closeFootnoteTip(): void {
+  if (!fnTipEl) return
+  fnTipEl.remove()
+  fnTipEl = null
+  document.removeEventListener('mousedown', onTipOutside, true)
+  document.removeEventListener('keydown', onTipKey, true)
+  window.removeEventListener('scroll', onTipScroll, true)
+}
+
+/** 在词下方弹注释气泡：fixed 定位 + 视口回夹（编辑器里没有「页面滚动」这一层，气泡必须自己贴住视口） */
+function openFootnoteTip(anchor: HTMLElement, word: string, note: string): void {
+  closeFootnoteTip()
+  const tip = document.createElement('div')
+  tip.className = `${FN_TIP_CLS} fixed z-[9999] w-72 max-w-[80vw]`
+  tip.dataset.wb = 'liveFootnoteTip'
+  const head = document.createElement('span')
+  head.className = 'block text-[10px] text-[var(--text-disabled)] mb-0.5'
+  head.textContent = `脚注 · ${word}`
+  tip.appendChild(head)
+  tip.appendChild(document.createTextNode(note))
+  document.body.appendChild(tip)
+  const r = anchor.getBoundingClientRect()
+  const w = tip.offsetWidth
+  const h = tip.offsetHeight
+  tip.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`
+  tip.style.top = `${Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8))}px`
+  fnTipEl = tip
+  document.addEventListener('mousedown', onTipOutside, true)
+  document.addEventListener('keydown', onTipKey, true)
+  window.addEventListener('scroll', onTipScroll, true)
+}
+
+class FootnoteWidget extends WidgetType {
+  constructor(readonly word: string, readonly note: string) { super() }
+  eq(o: FootnoteWidget): boolean { return o.word === this.word && o.note === this.note }
+  /** widget 被换掉（光标移到那行 / 出视口）时把气泡一起收掉，别留一个悬空的浮层 */
+  destroy(): void { closeFootnoteTip() }
+  toDOM(): HTMLElement {
+    const wrap = document.createElement('span')
+    wrap.className = 'kb-live-footnote relative inline-block'
+    const word = document.createElement('span')
+    word.className = FN_WORD_CLS
+    word.title = '点击查看脚注'
+    word.textContent = this.word
+    const sup = document.createElement('sup')
+    sup.className = FN_SUP_CLS
+    sup.textContent = '注'
+    word.appendChild(sup)
+    // 不抢 CM6 的选区：按下时挡掉默认行为，点击只负责开关气泡
+    word.addEventListener('mousedown', (e) => e.preventDefault())
+    word.addEventListener('click', (e) => {
+      e.stopPropagation()
+      if (fnTipEl) closeFootnoteTip()
+      else openFootnoteTip(word, this.word, this.note)
+    })
+    wrap.appendChild(word)
+    return wrap
+  }
+}
+
 class BulletWidget extends WidgetType {
   constructor(readonly text: string) { super() }
   eq(o: BulletWidget): boolean { return o.text === this.text }
@@ -193,13 +281,212 @@ class CheckboxWidget extends WidgetType {
   ignoreEvent(): boolean { return false }
 }
 
-/** GFM 表格 → 只读渲染（光标进入表格时整块回源码） */
+// ===== 表格：渲染态**就地编辑**（对齐 Obsidian；2026-10-11 反馈后改）=====
+//
+// 此前语义是「光标进入表格 → 整块回源码」，于是「插入表格」把你丢进 `| 列 1 | 列 2 |` 的管道符里，
+// 与 Obsidian「直接在渲染后的表格里打字」不一样。现在改为：**表格在即时渲染档永远是渲染表**，
+// 单元格本身可编辑（`contentEditable`），打字即写回源文本的最小替换；原表源码只在源码档可见。
+//
+// 三条让这件事成立的机制（都是 CM6 的既定行为，不是绕路）：
+// ① CM6 给 widget 根节点设 `contentEditable=false`，而单元格显式 `true` ⇒ 单元格成为**编辑宿主**，
+//    编辑被浏览器限制在这一格内（退格不会并格、Enter 不会裂表）；
+// ② widget 的 `ignoreEvent()` 默认 true ⇒ CM6 不接管格内事件，且 `readMutation` 对 widget tile
+//    直接 return null（格内 DOM 改动不会被当成文档改动）；
+// ③ 写回源之后把**本 widget 实例**的 `src` 同步成新文本 ⇒ 重建时 `eq` 判等、CM6 保留这块 DOM，
+//    格内光标与输入法候选不会因为每次按键重建 DOM 而丢。
+//
+// 单元格的源区间**每次从文档现算**（`posAtDOM` + 语法树找 Table 节点），不缓存偏移：
+// 表格上方增删内容、表格自己增减行都不会让映射失效。
+
+/** 单元格正文的源区间（已去掉两侧空白、已反转义，替换时只动正文，`| ` 这类排版空格原地保留） */
+interface TableCellRef { text: string; from: number; to: number }
+
+/** 按**未转义**的 `|` 切一行；`\|` 是格内的字面管道符 */
+function splitTableRow(text: string, base: number): TableCellRef[] {
+  const cells: TableCellRef[] = []
+  const push = (a: number, b: number): void => {
+    let s = a
+    let e = b
+    while (s < e && /\s/.test(text[s])) s++
+    while (e > s && /\s/.test(text[e - 1])) e--
+    cells.push({ text: text.slice(s, e).replace(/\\\|/g, '|'), from: base + s, to: base + e })
+  }
+  const lead = /^\s*\|/.exec(text)
+  let at = lead ? lead[0].length : 0
+  for (let i = at; i < text.length; i++) {
+    if (text[i] === '\\') { i++; continue }
+    if (text[i] === '|') { push(at, i); at = i + 1 }
+  }
+  // 行尾那一段是「收尾的 `|` 之后的空白」就不算一格（与 `| a | b |` 的直觉一致）
+  if (at < text.length && !(cells.length > 0 && text.slice(at).trim() === '')) push(at, text.length)
+  return cells
+}
+
+interface TableRowRef { from: number; cells: TableCellRef[] }
+
+/** 表格源文本 → 行（空行剔除；`from` 为绝对偏移，`base` 传表格在文档里的起点） */
+function tableRows(src: string, base: number): TableRowRef[] {
+  const out: TableRowRef[] = []
+  let at = base
+  for (const line of src.split('\n')) {
+    if (line.trim()) out.push({ from: at, cells: splitTableRow(line, at) })
+    at += line.length + 1
+  }
+  return out
+}
+
+/** 对齐方式：取分隔行（第 2 行）的 `:---` 形态，与预览的 `text-align` 同口径 */
+function tableAligns(rows: TableRowRef[]): string[] {
+  if (rows.length < 2) return []
+  return rows[1].cells.map((c) => (/^:-+:$/.test(c.text) ? 'center' : /-+:$/.test(c.text) ? 'right' : /^:-+/.test(c.text) ? 'left' : ''))
+}
+
+/** 表格在文档里的**当前**区间：从 widget 内的 DOM 反查（CM6 对 widget 的 posAtDOM = 区间起点） */
+function tableRangeOf(view: EditorView, dom: HTMLElement): { from: number; to: number } | null {
+  let pos: number
+  try { pos = view.posAtDOM(dom) } catch { return null }
+  const tree = syntaxTree(view.state)
+  let n: SyntaxNode | null = tree.resolveInner(Math.max(0, Math.min(pos, view.state.doc.length)), 1)
+  while (n && n.name !== 'Table') n = n.parent
+  return n ? { from: n.from, to: n.to } : null
+}
+
+/** 格内纯文本：`<br>` 算换行（粘贴多行时浏览器会插 `<br>`，`textContent` 会把这些行粘成一行） */
+function cellText(el: HTMLElement): string {
+  let out = ''
+  for (const n of Array.from(el.childNodes)) {
+    if (n.nodeType === Node.TEXT_NODE) out += n.nodeValue ?? ''
+    else if (n.nodeName === 'BR') out += '\n'
+    else out += cellText(n as HTMLElement)
+  }
+  return out
+}
+
+/** 把某一格的 DOM 文本写回源（最小替换：只动这一格的正文区间） */
+function commitTableCell(view: EditorView, widget: TableWidget, cell: HTMLElement): void {
+  const wrap = cell.closest('.kb-live-table-wrap') as HTMLElement | null
+  if (!wrap) return
+  const range = tableRangeOf(view, wrap)
+  if (!range) return
+  const src = view.state.sliceDoc(range.from, range.to)
+  const ref = tableRows(src, range.from)[Number(cell.dataset.row)]?.cells[Number(cell.dataset.col)]
+  if (!ref) return
+  // 单元格里不能有换行（GFM 表格按行解析）也不能有裸 `|`：换行压成空格、管道符转义
+  const clean = cellText(cell).replace(/\s*\n+\s*/g, ' ').replace(/\|/g, '\\|')
+  if (clean === ref.text.replace(/\|/g, '\\|')) return
+  // ★ 先让本实例跟上新文本（见文件头 ③），再落盘 —— 否则每次按键都会重建 DOM、光标与输入法全丢
+  widget.src = src.slice(0, ref.from - range.from) + clean + src.slice(ref.to - range.from)
+  view.dispatch({ changes: { from: ref.from, to: ref.to, insert: clean } })
+}
+
+/** 聚焦一格（`select` = 连内容一起选中，给「刚插入的表格」用） */
+function focusCell(cell: HTMLElement | null, select: boolean): void {
+  if (!cell) return
+  cell.focus()
+  const sel = window.getSelection()
+  if (!sel) return
+  const r = document.createRange()
+  r.selectNodeContents(cell)
+  if (!select) r.collapse(false)
+  sel.removeAllRanges()
+  sel.addRange(r)
+}
+
+/** 文档位置 → 它所在的表格 widget 根节点（插入 / 加行之后按位置找回 DOM 用）。
+ *  ★ 不用 `domAtPos`：块级 widget 的边界位置上，它可能给到「块之前/之后的那个行元素」，
+ *    再 `closest` 就找不到表格了（首版栽在这）。改为遍历在场的表格 widget，用 `posAtDOM`
+ *    逐个比位置，取「起点 ≤ pos 且最大」的那个 —— 多张表也不会认错。 */
+function tableWrapAt(view: EditorView, pos: number): HTMLElement | null {
+  let best: HTMLElement | null = null
+  let bestFrom = -1
+  for (const wrap of Array.from(view.contentDOM.querySelectorAll<HTMLElement>('.kb-live-table-wrap'))) {
+    let from: number
+    try { from = view.posAtDOM(wrap) } catch { continue }
+    if (from <= pos && from > bestFrom) { bestFrom = from; best = wrap }
+  }
+  return best
+}
+
+/** 下一帧按位置找回表格 DOM 并聚焦某格（`row < 0` = 最后一行） */
+function focusCellNear(view: EditorView, pos: number, row: number, col: number, select = false): void {
+  requestAnimationFrame(() => {
+    const wrap = tableWrapAt(view, pos)
+    if (!wrap) return
+    const trs = wrap.querySelectorAll('tr')
+    const tr = row < 0 ? trs[trs.length - 1] : (wrap.querySelector(`[data-row="${row}"]`)?.closest('tr') ?? null)
+    focusCell(tr?.querySelector<HTMLElement>(`[data-col="${col}"]`) ?? null, select)
+  })
+}
+
+/** 末行再按 Tab / Enter → 追加一行空行（对齐 Obsidian），焦点落到新行同列 */
+function addTableRow(view: EditorView, wrap: HTMLElement, cell: HTMLElement): void {
+  const range = tableRangeOf(view, wrap)
+  const cols = wrap.querySelectorAll('tr')[0]?.children.length ?? 1
+  if (!range) return
+  const col = Number(cell.dataset.col)
+  const src = view.state.sliceDoc(range.from, range.to)
+  const line = `|${'  |'.repeat(cols)}`
+  view.dispatch({ changes: { from: range.to, to: range.to, insert: (src.endsWith('\n') ? '' : '\n') + line } })
+  focusCellNear(view, range.to, -1, col)
+}
+
+/** 单元格间移动：Tab / Shift+Tab = 前后一格（最后一格 → 加一行）；Enter = 下一行同列（末行 → 加一行） */
+function moveTableCell(view: EditorView, cell: HTMLElement, dir: number): void {
+  const wrap = cell.closest('.kb-live-table-wrap') as HTMLElement | null
+  const table = wrap?.querySelector('table')
+  if (!wrap || !table) return
+  if (dir !== 0) {
+    const cells = Array.from(table.querySelectorAll<HTMLElement>('th[contenteditable], td[contenteditable]'))
+    const next = cells[cells.indexOf(cell) + dir]
+    if (next) { focusCell(next, false); return }
+    if (dir < 0) { focusCell(cells[0] ?? null, false); return }
+    addTableRow(view, wrap, cell)
+    return
+  }
+  const col = Number(cell.dataset.col)
+  const nextTr = cell.closest('tr')?.nextElementSibling as HTMLElement | null
+  const next = nextTr?.querySelector<HTMLElement>(`[data-col="${col}"]`)
+  if (next) { focusCell(next, false); return }
+  addTableRow(view, wrap, cell)
+}
+
+/** 格内组合键：Tab/Enter 换格、Esc 退出、撤销重做交给 CM6（原生 contenteditable 的撤销改的是 DOM，会与源脱钩） */
+function onTableCellKeyDown(view: EditorView, cell: HTMLElement, e: KeyboardEvent): void {
+  const mod = e.ctrlKey || e.metaKey
+  const key = e.key.toLowerCase()
+  if (mod && (key === 'b' || key === 'i' || key === 'u')) { e.preventDefault(); return }  // 原生富文本命令会改 DOM 而源不动
+  if (mod && key === 'z') { e.preventDefault(); if (e.shiftKey) redo(view); else undo(view); return }
+  if (mod && key === 'y') { e.preventDefault(); redo(view); return }
+  if (e.key === 'Escape') { e.preventDefault(); cell.blur(); view.focus(); return }
+  if (e.key === 'Tab' || e.key === 'Enter') {
+    e.preventDefault()
+    moveTableCell(view, cell, e.key === 'Tab' ? (e.shiftKey ? -1 : 1) : 0)
+  }
+}
+
+/** 建一格：可编辑 + 记住行列（行列都用**源里的行号**，分隔行不渲染但行号不塌陷） */
+function makeTableCell(view: EditorView, widget: TableWidget, tag: 'th' | 'td', ref: TableCellRef, row: number, col: number, align: string): HTMLElement {
+  const cell = document.createElement(tag)
+  cell.textContent = ref.text
+  cell.spellcheck = false
+  cell.contentEditable = 'true'
+  cell.dataset.row = String(row)
+  cell.dataset.col = String(col)
+  if (align) cell.style.textAlign = align
+  cell.addEventListener('input', (e) => { if (!(e as InputEvent).isComposing) commitTableCell(view, widget, cell) })
+  cell.addEventListener('compositionend', () => commitTableCell(view, widget, cell))
+  cell.addEventListener('keydown', (e) => onTableCellKeyDown(view, cell, e))
+  cell.addEventListener('focus', () => cell.classList.add('kb-live-cell-edit'))
+  cell.addEventListener('blur', () => cell.classList.remove('kb-live-cell-edit'))
+  return cell
+}
+
+/** GFM 表格 → 渲染表（单元格就地可编辑；分隔行不渲染，它是对齐信息的载体，源码档里改） */
 class TableWidget extends WidgetType {
-  constructor(readonly src: string) { super() }
+  constructor(public src: string) { super() }
   eq(o: TableWidget): boolean { return o.src === this.src }
-  toDOM(): HTMLElement {
-    const rows = this.src.split('\n').filter((l) => l.trim())
-    const cells = (line: string) => line.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
+  toDOM(view: EditorView): HTMLElement {
+    const rows = tableRows(this.src, 0)
     const wrap = document.createElement('div')
     // `kb-md-atom`：与阅读态预览**共用同一条 CSS**（`:is(.prose-content, .kb-md-atom) table/th/td`），
     // 所以这里不再自己写一遍宽度/内边距/表头底色 —— 数值只有一处，改预览即改写作面。
@@ -207,26 +494,16 @@ class TableWidget extends WidgetType {
     const table = document.createElement('table')
     table.className = 'kb-live-table'
     if (rows.length >= 1) {
-      const aligns = rows.length >= 2 ? cells(rows[1]).map((c) => (/^:-+:$/.test(c) ? 'center' : /-+:$/.test(c) ? 'right' : /^:-+/.test(c) ? 'left' : '')) : []
+      const aligns = tableAligns(rows)
       const head = document.createElement('thead')
       const tr = document.createElement('tr')
-      cells(rows[0]).forEach((c, i) => {
-        const th = document.createElement('th')
-        th.textContent = c
-        if (aligns[i]) th.style.textAlign = aligns[i]
-        tr.appendChild(th)
-      })
+      rows[0].cells.forEach((c, i) => tr.appendChild(makeTableCell(view, this, 'th', c, 0, i, aligns[i])))
       head.appendChild(tr)
       table.appendChild(head)
       const body = document.createElement('tbody')
-      for (const line of rows.slice(2)) {
+      for (let r = 2; r < rows.length; r++) {
         const trb = document.createElement('tr')
-        cells(line).forEach((c, i) => {
-          const td = document.createElement('td')
-          td.textContent = c
-          if (aligns[i]) td.style.textAlign = aligns[i]
-          trb.appendChild(td)
-        })
+        rows[r].cells.forEach((c, i) => trb.appendChild(makeTableCell(view, this, 'td', c, r, i, aligns[i])))
         body.appendChild(trb)
       }
       table.appendChild(body)
@@ -445,8 +722,9 @@ function buildDecorations(state: EditorState, areas: readonly { from: number; to
           return
         }
         // 块级渲染（替换）：光标进入就不替，整块回源码
+        // ★ 表格是**唯一例外**：它永远渲染成表（单元格就地可编辑），不回源码 —— 见文件头的表格段
         if (name === 'Table') {
-          if (!containsCursor(node.from, node.to)) addReplace(node.from, node.to, new TableWidget(state.sliceDoc(node.from, node.to)))
+          addReplace(node.from, node.to, new TableWidget(state.sliceDoc(node.from, node.to)))
           return false
         }
         if (name === 'HorizontalRule') {
@@ -513,19 +791,37 @@ function buildDecorations(state: EditorState, areas: readonly { from: number; to
 
     // 公式：lezer 的 markdown 解析器不含数学语法（项目里数学是 remark-math 的扩展），
     // 故这里按可见区间做一次正则扫描；代码区间跳过（避免把代码里的 $ 当公式）。
-    const text = state.sliceDoc(visible.from, visible.to)
+    //
+    // ★ 扫描范围比可见区间**外扩 `SCAN_PAD`**：块级公式是跨行的，视口顶刚好切在 `$$` 中间时，
+    //   只扫可见区间就只剩一个 `$$` ⇒ 正则不命中 ⇒ 半截公式留在源码态（2026-10-11 探针逮到）。
+    //   外扩后「公式整体在视口外」仍不渲染（那是正确的：视口外不需要 DOM），只是不再被切一半。
+    const scanFrom = Math.max(0, visible.from - SCAN_PAD)
+    const scanTo = Math.min(state.doc.length, visible.to + SCAN_PAD)
+    const text = state.sliceDoc(scanFrom, scanTo)
     const scan = (re: RegExp, display: boolean): void => {
       for (const m of text.matchAll(re)) {
         if (m.index === undefined) continue
-        const from = visible.from + m.index
+        const from = scanFrom + m.index
         const to = from + m[0].length
         if (containsCursor(from, to) || hitsActiveLine(from, to)) continue
         if (isInsideCode(tree, from, to)) continue
-        addReplace(from, to, new MathWidget(display ? m[1] : m[1], display))
+        addReplace(from, to, new MathWidget(m[1], display))
       }
     }
     scan(/\$\$([\s\S]*?)\$\$/g, true)
     scan(/(?<!\$)\$(?!\$)([^$\n]+?)\$(?!\$)/g, false)
+
+    // 脚注：与公式同理（lezer 的 markdown 语法不含 `^[...]`），按同一段外扩区间正则扫描。
+    // 命中即把**整个 `词^[注释]`**换成脚注 widget（预览也是整词带虚线下划线），
+    // 光标所在行照旧回源码 —— 想改注释文字就把光标移到那行。
+    for (const m of text.matchAll(new RegExp(FN_RE.source, 'g'))) {
+      if (m.index === undefined) continue
+      const from = scanFrom + m.index
+      const to = from + m[0].length
+      if (containsCursor(from, to) || hitsActiveLine(from, to)) continue
+      if (isInsideCode(tree, from, to)) continue
+      addReplace(from, to, new FootnoteWidget(m[1], m[2]))
+    }
   }
 
   ranges.sort((a, b) => a.from - b.from || a.value.startSide - b.value.startSide)
@@ -810,6 +1106,7 @@ export const LiveMarkdownPane = forwardRef<NoteEngineHandle, LiveMarkdownPanePro
       view.contentDOM.removeEventListener('compositionend', onCompEnd, true)
       view.destroy()
       viewRef.current = null
+      closeFootnoteTip()
       const w = window as unknown as Record<string, unknown>
       if (w.__kbLive === view) delete w.__kbLive
     }
@@ -918,6 +1215,13 @@ function makeCmHandle(getView: () => EditorView | null): NoteEngineHandle {
     triggerWikiSuggest: () => {
       const view = getView()
       if (view) startCompletion(view)
+    },
+    // 「插入表格」后把焦点交给首格（对齐 Obsidian：插完就能直接打字）。
+    // 表格在即时渲染档是渲染态 widget，光标落在源码区间里没有意义，故焦点直接进单元格。
+    focusBlockCell: (pos: number) => {
+      const view = getView()
+      if (!view) return
+      focusCellNear(view, pos, 0, 0, true)
     },
   }
 }

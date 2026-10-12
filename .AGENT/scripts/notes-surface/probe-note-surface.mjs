@@ -11,7 +11,9 @@
  *   P5 光标所在块回源码：把光标放到加粗那一行，该行的 `**` 必须重新出现（否则等于不可编辑）
  *   P6 即时渲染档右键菜单同样出现，且点「插入 → 分隔线」真的落进文档并渲染成分隔线 widget
  *   P7 切回源码档 → Monaco 回来、CM6 退场（来回切不残留）
- *   P8 console 零 error
+ *   P8 表格渲染态**就地编辑**：真点单元格 → 打字写回源 → Tab 换格 / Esc 退出 / 格内 Ctrl+Z 撤销，
+ *      且「插入 → 表格」插完焦点直接进首格（对齐 Obsidian，2026-10-11）
+ *   P9 console 零 error
  *
  * 用法（隔离实例，不动用户 dev 数据；必须先 build）：
  *   node .AGENT/scripts/workbench-shell/probes/seed-probe-vault.mjs --ud "knowbase (dev probe-app)"
@@ -83,9 +85,36 @@ async function waitFor(expr, ms = 6000, step = 200) {
 /** 真键盘（CDP Input）：合成 KeyboardEvent 的 target 是 window，会绕过真实焦点与捕获顺序，
  *  测不出「菜单 Esc 该不该连带把笔记关掉」这类问题。 */
 async function pressEscape() {
-  const base = { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 }
+  await pressKey('Escape', 'Escape', 27)
+}
+
+/** 通用真键盘按下（非文本键；文本用 `Input.insertText`，那才是输入法/打字的真实通路） */
+async function pressKey(key, code, vk) {
+  const base = { key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk }
   await send('Input.dispatchKeyEvent', { type: 'keyDown', ...base })
   await send('Input.dispatchKeyEvent', { type: 'keyUp', ...base })
+}
+
+/** 右键菜单里某个菜单项的中心点（供真鼠标移动/点击；找不到返回 null） */
+async function menuItemPoint(text) {
+  return evalJs(`(() => {
+    const b = [...document.querySelectorAll('[data-wb="noteContextMenu"] button')].find(x => x.innerText.trim() === ${JSON.stringify(text)})
+    if (!b) return null
+    const r = b.getBoundingClientRect()
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }
+  })()`)
+}
+
+/**
+ * 把（CDP）指针停到一个不压任何菜单的角落。
+ * ★ 子菜单的展开跟随**悬停**（onMouseEnter），而本机物理鼠标停在哪儿是不确定的 ——
+ *   菜单正好弹在物理指针下时，浏览器会补发 mouseover，把 openSub 抢到另一项上，
+ *   于是「点插入、展开的却是文件格式」这种偶发红（2026-10-11 连踩两次）。
+ *   探针每次开菜单前先把指针停走，结果才与物理鼠标位置无关。
+ */
+async function parkPointer() {
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 700, y: 20 })
+  await sleep(150)
 }
 
 /** 切档：写设置 + 广播（SettingsContext 只在 'settings-imported' 里重拉，直接写盘不触发重渲染） */
@@ -223,12 +252,16 @@ async function main() {
   await setWritingMode('live')
   await sleep(1500)
   const stillOpen = await evalJs(`(() => ({
-    toolbar: document.querySelector('button[title^="切换到编辑"], button[title^="切换到预览"]')?.getAttribute('title') ?? null,
+    // ★ 用 data-wb 锚点，别按 title 文本找：顶栏改版后标题是「切换到阅读视图」，按旧文案会假红
+    toolbar: document.querySelector('[data-wb="noteTopTitle"]')?.textContent ?? null,
+    viewToggle: !!document.querySelector('[data-wb="noteTopViewToggle"]'),
+    doc: (document.querySelector('.cm-content')?.innerText ?? '').slice(0, 20),
     engine: document.querySelectorAll('.monaco-editor, .cm-editor').length,
     cm: document.querySelectorAll('.cm-editor').length,
     liveHost: document.querySelectorAll('.kb-live-pane').length,
   }))()`)
-  ok(stillOpen.toolbar !== null, 'P3z ★ 切档不关笔记：工具栏仍在（模块未被重挂/未崩）', JSON.stringify(stillOpen))
+  ok(stillOpen.toolbar !== null && stillOpen.viewToggle && stillOpen.doc.length > 0,
+    'P3z ★ 切档不关笔记：顶栏与正文都还在（模块未被重挂/未崩）', JSON.stringify(stillOpen))
   ok(stillOpen.cm >= 1 && stillOpen.liveHost >= 1, 'P3y ★ 切档后当场就换成即时渲染档（无需重开笔记）', JSON.stringify(stillOpen))
   const reopened = await openNoteInEdit()
   await waitFor(`!!document.querySelector('.cm-editor')`, 10000)
@@ -342,6 +375,7 @@ async function main() {
   ok(searchClosed, 'P5d3 Esc 关闭查找面板', String(searchClosed))
 
   // ---- P6 即时渲染档右键 + 真插入一条分隔线 ----
+  await parkPointer()
   await evalJs(`(() => {
     const el = document.querySelector('.cm-content')
     if (!el) return false
@@ -352,21 +386,19 @@ async function main() {
   await sleep(500)
   st = await evalJs(JS_STATE)
   ok(st.menu, 'P6a 即时渲染档右键同样弹出写作菜单', JSON.stringify(st.menuLabels.slice(0, 5)))
-  // 展开「插入」子菜单 → 点「分隔线」
-  await evalJs(`(() => {
-    const b = [...document.querySelectorAll('[data-wb="noteContextMenu"] button')].find(x => x.innerText.trim().startsWith('插入'))
-    b?.click()
-    return !!b
-  })()`)
-  await sleep(400)
+  // 展开「插入」子菜单 → 点「分隔线」：走**真鼠标**（悬停展开 + 真点击），见 P8h 的说明
+  const insertPt6 = await menuItemPoint('插入')
+  if (insertPt6) { await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: insertPt6.x, y: insertPt6.y }); await sleep(400) }
   const docBeforeHr = await evalJs(`window.__kbLive?.state.doc.toString() ?? '(无钩子)'`)
-  const clickedHr = await evalJs(`(() => {
-    const b = [...document.querySelectorAll('[data-wb="noteContextMenu"] button')].find(x => x.innerText.trim() === '分隔线')
-    if (!b) return false
-    b.click()
-    return true
-  })()`)
+  const hrPt = await menuItemPoint('分隔线')
+  if (hrPt) {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: hrPt.x, y: hrPt.y })
+    await sleep(200)
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: hrPt.x, y: hrPt.y, button: 'left', clickCount: 1 })
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: hrPt.x, y: hrPt.y, button: 'left', clickCount: 1 })
+  }
   await sleep(900)
+  const clickedHr = !!hrPt
   const docAfterHr = await evalJs(`window.__kbLive?.state.doc.toString() ?? '(无钩子)'`)
   console.log('[diag] 分隔线动作前后文档:', JSON.stringify({ beforeTail: docBeforeHr.slice(-60), afterTail: docAfterHr.slice(-60), grew: docAfterHr.length - docBeforeHr.length }))
   // 插入后光标就在那条 `---` 上（该行按规则回源码），把光标挪走再看 widget
@@ -399,6 +431,113 @@ async function main() {
   })()`)
   await sleep(500)
 
+  // ---- P8 表格：渲染态就地编辑（对齐 Obsidian；2026-10-11 反馈后改）----
+  // 要证：① 真点单元格能把焦点交给它（contentEditable 生效）；② 打字**写回源文本**；
+  //       ③ 打字期间 DOM 不被重建（焦点不丢）；④ Tab 换格、Esc 退出；⑤ 格内 Ctrl+Z 走 CM6 撤销；
+  //       ⑥ 「插入 → 表格」后焦点直接进首格。
+  const cellRect = await evalJs(`(() => {
+    const c = document.querySelector('.kb-live-table td[data-row="2"][data-col="0"]')
+    if (!c) return null
+    c.scrollIntoView({ block: 'center' })
+    const r = c.getBoundingClientRect()
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), text: c.textContent }
+  })()`)
+  if (cellRect) {
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: cellRect.x, y: cellRect.y, button: 'left', clickCount: 1 })
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: cellRect.x, y: cellRect.y, button: 'left', clickCount: 1 })
+  }
+  await sleep(400)
+  const cellFocus = await evalJs(`(() => {
+    const a = document.activeElement
+    return { tag: a?.tagName ?? null, ce: a?.getAttribute?.('contenteditable') ?? null, row: a?.dataset?.row ?? null, col: a?.dataset?.col ?? null }
+  })()`)
+  ok(cellRect && cellFocus.ce === 'true' && cellFocus.row === '2' && cellFocus.col === '0',
+    'P8a ★ 真点单元格 = 焦点进格且 contentEditable 生效（渲染表里能编辑）', JSON.stringify(cellFocus))
+
+  await send('Input.insertText', { text: '九' })
+  await sleep(500)
+  const typed = await evalJs(`(() => ({
+    doc: window.__kbLive?.state.doc.toString() ?? '',
+    cell: document.querySelector('.kb-live-table td[data-row="2"][data-col="0"]')?.textContent ?? null,
+    focused: document.activeElement?.dataset?.row === '2' && document.activeElement?.dataset?.col === '0',
+  }))()`)
+  ok(/1九|九1/.test(typed.doc), 'P8b ★ 格内打字写回源文本（管道符语法没让用户碰）', JSON.stringify(typed.doc.split('\n').slice(-6)))
+  ok(/1九|九1/.test(typed.cell ?? ''), 'P8c 格内 DOM 同步显示（不是只改了源）', String(typed.cell))
+  ok(typed.focused, 'P8d ★ 打字期间 DOM 没被重建（焦点仍在同一格 = 光标与输入法不丢）')
+
+  await pressKey('Tab', 'Tab', 9)
+  await sleep(400)
+  const afterTab = await evalJs(`(() => {
+    const a = document.activeElement
+    return { row: a?.dataset?.row ?? null, col: a?.dataset?.col ?? null, text: a?.textContent ?? null }
+  })()`)
+  ok(afterTab.col === '1' && afterTab.row === '2', 'P8e Tab 换到下一格（同层右移）', JSON.stringify(afterTab))
+
+  await pressEscape()
+  await sleep(400)
+  const afterEsc = await evalJs(`(() => ({ tag: document.activeElement?.tagName ?? null, cell: document.activeElement?.dataset?.row ?? null }))()`)
+  ok(afterEsc.cell == null, 'P8f Esc 退出单元格（焦点还给编辑器）', JSON.stringify(afterEsc))
+
+  // 格内 Ctrl+Z → CM6 撤销（原生 contenteditable 撤销改的是 DOM，会与源脱钩）
+  const backToCell = await evalJs(`(() => {
+    const c = document.querySelector('.kb-live-table td[data-row="2"][data-col="0"]')
+    if (!c) return false
+    c.focus()
+    return document.activeElement === c
+  })()`)
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 2 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 2 })
+  await sleep(600)
+  const undone = await evalJs(`window.__kbLive?.state.doc.toString() ?? ''`)
+  ok(backToCell && !/九/.test(undone), 'P8g 格内 Ctrl+Z 走 CM6 撤销（源文本回退，不与 DOM 脱钩）', JSON.stringify(undone.split('\n').slice(-6)))
+
+  // ---- P8h 插入 → 表格：插完焦点直接进首格（对齐 Obsidian「插完就能打字」）----
+  // 走**真鼠标**（移到「插入」→ 子菜单展开 → 移到「表格」→ 点击）：程序化 .click() 会绕开
+  // 悬停展开这条真实路径，也会被「鼠标停在哪」影响（首版就因此偶发红）。
+  const tablesBefore = await evalJs(`document.querySelectorAll('.kb-live-table').length`)
+  await parkPointer()
+  await evalJs(`(() => {
+    const el = document.querySelector('.cm-content')
+    if (!el) return false
+    const r = el.getBoundingClientRect()
+    el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 60, clientY: r.top + 40 }))
+    return true
+  })()`)
+  await sleep(450)
+  const insertPt = await menuItemPoint('插入')
+  if (insertPt) {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: insertPt.x, y: insertPt.y })
+    await sleep(350)
+  }
+  const tablePt = await menuItemPoint('表格')
+  if (tablePt) {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: tablePt.x, y: tablePt.y })
+    await sleep(250)
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: tablePt.x, y: tablePt.y, button: 'left', clickCount: 1 })
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: tablePt.x, y: tablePt.y, button: 'left', clickCount: 1 })
+  }
+  await sleep(900)
+  const inserted = await evalJs(`(() => {
+    const a = document.activeElement
+    return {
+      tables: document.querySelectorAll('.kb-live-table').length,
+      menuOpen: !!document.querySelector('[data-wb="noteContextMenu"]'),
+      ce: a?.getAttribute?.('contenteditable') ?? null,
+      row: a?.dataset?.row ?? null, col: a?.dataset?.col ?? null, text: a?.textContent ?? null,
+    }
+  })()`)
+  console.log('[diag] 插入表格后:', JSON.stringify({ insertPt, tablePt, ...inserted }))
+  ok(!!insertPt && !!tablePt && inserted.tables === tablesBefore + 1,
+    'P8h ★ 菜单「插入 → 表格」真的落进文档并渲染成表', JSON.stringify({ before: tablesBefore, after: inserted.tables, insertPt: !!insertPt, tablePt: !!tablePt }))
+  ok(inserted.ce === 'true' && inserted.row === '0' && inserted.col === '0', 'P8i ★ 插完焦点直接进首格（不用再点一下）', JSON.stringify({ ce: inserted.ce, row: inserted.row, col: inserted.col, text: inserted.text }))
+  await shot('note-surface-07-table-edit')
+  // 撤掉这张表，别把 fixture 弄脏（顺带再走一遍格内 Ctrl+Z 通路）
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 2 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 2 })
+  await sleep(600)
+  const tablesAfterUndo = await evalJs(`document.querySelectorAll('.kb-live-table').length`)
+  ok(tablesAfterUndo === tablesBefore, 'P8j 撤销后表格回到原状（fixture 不留脏数据）', JSON.stringify({ after: tablesAfterUndo }))
+
   // ---- P7 切回源码档 ----
   await setWritingMode('source')
   await waitFor(`!!document.querySelector('.monaco-editor')`, 10000)
@@ -407,8 +546,8 @@ async function main() {
   ok(st.monaco >= 1 && st.cm === 0, 'P7 切回源码档 = Monaco 回来、CM6 退场（来回切不残留）', JSON.stringify({ monaco: st.monaco, cm: st.cm }))
   await shot('note-surface-06-back-to-source')
 
-  // ---- P8 console ----
-  ok(consoleErrors.length === 0, 'P8 console 零 error', consoleErrors.slice(0, 3).join(' | '))
+  // ---- P9 console ----
+  ok(consoleErrors.length === 0, 'P9 console 零 error', consoleErrors.slice(0, 3).join(' | '))
 
   // 结果
   const failed = results.filter((r) => !r.pass)

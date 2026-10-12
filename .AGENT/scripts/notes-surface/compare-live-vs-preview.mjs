@@ -173,6 +173,10 @@ const snapFor = (mode) => `(() => {
     liLine: cs(live ? q('.cm-line.kb-live-li') : q('.prose-content li')),
     img: cs(imgEl),
     imgLoaded: imgEl ? (imgEl.complete && imgEl.naturalWidth > 0) : null,
+    // 脚注：两侧的「词」span 都带 title="点击查看脚注"（同一份语义锚点），上标都是它的子节点
+    fnWord: cs(q('[title="点击查看脚注"]')),
+    fnSup: cs(q('[title="点击查看脚注"] sup')),
+    fnCount: (live ? q('.cm-content') : prose)?.querySelectorAll('[title="点击查看脚注"]').length ?? 0,
     relIndent0: relIndent(liEl0),
     relIndent1: relIndent(liEl1),
     langTag: (live ? q('.kb-live-codecard-lang') : null)?.textContent ?? null,
@@ -228,6 +232,10 @@ const CHECKS = [
   ['代码高亮色', (s) => s.hljsColor],
   ['公式字号', (s) => s.katex?.fontSize],
   ['分隔线颜色', (s) => s.hr?.borderTopColor],
+  ['脚注下划线样式', (s) => s.fnWord?.borderBottomStyle],
+  ['脚注下划线色', (s) => s.fnWord?.borderBottomColor],
+  ['脚注上标色', (s) => s.fnSup?.color],
+  ['脚注上标字号', (s) => s.fnSup?.fontSize],
 ]
 
 /** 有意保留的差异（不是漂移，写在这里防被误当 bug 回改） */
@@ -256,13 +264,37 @@ async function scrollToMath() {
   const moved = await evalJs(`(() => {
     const v = window.__kbLive
     if (!v) return false
-    const idx = v.state.doc.toString().indexOf('\\\\int_0^1')
+    const doc = v.state.doc.toString()
+    // ★ 用**块级公式的起始 \`$$\`** 定位（行内公式是单 \`$\`，不会撞）。
+    //   早先按中段 \`\\int_0^1\` 定位：滚过去后开头的 \`$$\` 恰好被切在视口上方，
+    //   正则只看到一个 \`$$\` ⇒ 半截公式留在源码态 ⇒ 假红（2026-10-11，文档加长后触发）。
+    const idx = doc.indexOf('$$')
     if (idx < 0) return false
     const block = v.lineBlockAt(idx)
-    v.scrollDOM.scrollTop = Math.max(0, block.top - 60)
+    v.scrollDOM.scrollTop = Math.max(0, block.top - 40)
     return true
   })()`)
   const shown = await waitFor(`document.querySelectorAll('.cm-content .kb-live-math-block').length >= 1`, 6000)
+  await sleep(300)
+  return moved && shown
+}
+
+/**
+ * 把脚注那一行滚进视口，再取一张快照。
+ * 为什么单独滚：脚注在文档中段，顶/底两张快照都照不到它（顶快照只到任务列表、底快照从公式下半截开始），
+ * 不专门滚一次，脚注四项断言会拿到 null 而「看似通过」或整片假红。
+ */
+async function scrollToFootnote() {
+  const moved = await evalJs(`(() => {
+    const v = window.__kbLive
+    if (!v) return false
+    const idx = v.state.doc.toString().indexOf('^[')
+    if (idx < 0) return false
+    const line = v.state.doc.lineAt(idx)
+    v.scrollDOM.scrollTop = Math.max(0, v.lineBlockAt(line.from).top - 140)
+    return true
+  })()`)
+  const shown = await waitFor(`document.querySelectorAll('.cm-content .kb-live-footnote').length >= 1`, 6000)
   await sleep(300)
   return moved && shown
 }
@@ -313,7 +345,9 @@ async function main() {
     await sleep(1000)
     await evalJs(`window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: ${JSON.stringify(NOTE_REL)} } }))`)
     await sleep(2500)
-    await evalJs(`(() => { const b = document.querySelector('button[title^="切换到编辑"]'); if (b) b.click(); return true })()`)
+    // ★ 按 `data-view` 状态锚点找钮，别按 title 文案：文案一改（「切换到预览」→「切换到阅读视图」）
+    //   这里会静默不点，整份「阅读态」快照全 null，65 项全红却看不出原因（2026-10-11 踩过）。
+    await evalJs(`(() => { const b = document.querySelector('[data-wb="noteTopViewToggle"][data-view="preview"]'); if (b) b.click(); return !!b })()`)
     await waitFor(`!!document.querySelector('.monaco-editor, .cm-editor')`, 9000)
     await sleep(600)
   }
@@ -345,10 +379,15 @@ async function main() {
   // 块级公式在文档中段：单独滚到它再断言「视口内必须真的渲染」
   const mathShown = await scrollToMath()
   const liveMath = await evalJs(snapFor('live'))
+  // 脚注也在中段（顶/底两张都照不到）：单独滚一次，否则那几项断言拿不到值
+  const fnShown = await scrollToFootnote()
+  const liveFn = await evalJs(snapFor('live'))
+  /** 即时渲染档的视口快照合集：CM6 只装饰视口内的块，任何一项都要在多张里取并集 */
+  const LIVE_SNAPS = [liveSnap, liveBottom, liveMath, liveFn]
 
   // ---- 同篇的预览（阅读态）----
   const toPreview = await evalJs(`(() => {
-    const b = document.querySelector('button[title^="切换到预览"]')
+    const b = document.querySelector('[data-wb="noteTopViewToggle"][data-view="edit"]')
     if (!b) return false
     b.click(); return true
   })()`)
@@ -365,7 +404,7 @@ async function main() {
 
   mkdirSync(SHOT_DIR, { recursive: true })
   writeFileSync(join(SHOT_DIR, 'cmp-styles.json'),
-    JSON.stringify({ live: liveSnap, preview: prevSnap, liveBottom, liveMath, previewBottom: prevBottom }, null, 2), 'utf8')
+    JSON.stringify({ live: liveSnap, preview: prevSnap, liveBottom, liveMath, liveFn, previewBottom: prevBottom }, null, 2), 'utf8')
 
   console.log('\nS1 两侧都在场')
   ok(liveOk && liveSnap?.live === true, '即时渲染档：CM6 在场', String(liveSnap?.live))
@@ -374,35 +413,43 @@ async function main() {
 
   console.log('\nS2 逐项排版一致（computedStyle 比对；数值容差 0.5px = 设备像素对齐）')
   for (const [label, get] of CHECKS) {
-    // 顶/底两张快照取并集：CM6 只装饰视口内的块，单张覆盖不全（hr / 代码卡 / 公式在下方）
-    const a = firstOf([liveSnap, liveBottom, liveMath], get)
+    // 多张视口快照取并集：CM6 只装饰视口内的块，单张覆盖不全（hr / 代码卡 / 公式 / 脚注在下方）
+    const a = firstOf(LIVE_SNAPS, get)
     const b = firstOf([prevSnap, prevBottom], get)
     ok(a != null && sameStyle(a, b), label, `即时渲染=${a} / 预览=${b}`)
   }
+  // 脚注**渲染数**单独断言：它必须真的 > 0，不能靠「两边都是 0」蒙过去（首版就是这么假绿的）
+  const fnLive = firstOf(LIVE_SNAPS, (s) => (s.fnCount ? s.fnCount : null))
+  ok(fnLive === 2, '即时渲染档脚注渲染数（含嵌在加粗里的那处）', String(fnLive))
+  ok(prevSnap?.fnCount === 2, '预览侧脚注渲染数', String(prevSnap?.fnCount))
 
   console.log('\nS3 代码块：卡片结构 + 语法高亮（预览有的写作面也得有）')
-  ok(liveSnap?.hljsCount > 0, '即时渲染档代码块有 highlight.js 着色 token', `token=${liveSnap?.hljsCount}`)
-  ok(liveSnap?.langTag === 'js', '即时渲染档代码卡显示语言标签', String(liveSnap?.langTag))
+  // 代码块在文档中段：多张快照取并集（CM6 只装饰视口内的块，单张覆盖不全）
+  const hljsLive = firstOf(LIVE_SNAPS, (s) => (s.hljsCount ? s.hljsCount : null))
+  const langLive = firstOf(LIVE_SNAPS, (s) => s.langTag)
+  ok(hljsLive > 0, '即时渲染档代码块有 highlight.js 着色 token', `token=${hljsLive}`)
+  ok(langLive === 'js', '即时渲染档代码卡显示语言标签', String(langLive))
   ok(prevSnap?.hljsCount > 0 && prevSnap?.previewLangTag === 'js', '预览侧同样有着色与语言标签',
     JSON.stringify({ n: prevSnap?.hljsCount, tag: prevSnap?.previewLangTag }))
 
   console.log('\nS3b 视口内必须真的渲染（滚到块级公式时不许留源码）')
-  console.log(`  [diag] math: 滚到位=${mathShown} 块公式=${liveMath?.mathBlocks} 行内公式=${liveMath?.mathInline} 残留围栏=${liveMath?.rawMathFence}`)
+  console.log(`  [diag] math: 滚到位=${mathShown} 块公式=${liveMath?.mathBlocks} 行内公式=${liveMath?.mathInline} 残留围栏=${liveMath?.rawMathFence} | 脚注: 滚到位=${fnShown} 数=${liveFn?.fnCount}`)
   ok(mathShown && liveMath?.mathBlocks >= 1, '块级公式在视口内时渲染为公式（不是 $$ 源码）', `渲染数=${liveMath?.mathBlocks}`)
   ok(liveMath?.rawMathFence === false, '可见行里不残留 $$ 围栏', String(liveMath?.rawMathFence))
+  ok(fnShown && liveFn?.fnCount >= 1, '脚注在视口内时渲染成脚注词（不是 ^[...] 源码）', `渲染数=${liveFn?.fnCount}`)
 
   console.log('\nS4 列表：标记 / 重编号 / 缩进 / 任务行')
-  const bulletsLive = firstOf([liveSnap, liveBottom, liveMath], (s) => s.bullets?.length ? s.bullets : null)
+  const bulletsLive = firstOf(LIVE_SNAPS, (s) => s.bullets?.length ? s.bullets : null)
   ok(JSON.stringify(bulletsLive) === JSON.stringify(['•', '•', '○', '1.', '2.', 'a.']),
     '即时渲染档：无序按层换标记（• / ○）+ 有序重编号并按层换 a.', JSON.stringify(bulletsLive))
   ok(prevSnap?.nestedUlStyle === 'circle', '预览侧嵌套无序为 circle（与写作面同层同形）', String(prevSnap?.nestedUlStyle))
-  const taskText = firstOf([liveSnap, liveBottom, liveMath], (s) => s.taskLineText)
+  const taskText = firstOf(LIVE_SNAPS, (s) => s.taskLineText)
   ok(taskText != null && !/[•\-*]/.test(taskText.slice(0, 2)),
     '任务行不再画项目符号（修「• ☐ 文本」双标记）', String(taskText))
   ok(prevSnap?.taskLiListStyle === 'none', '预览侧任务 li 同样去掉项目符号', String(prevSnap?.taskLiListStyle))
-  const r0l = firstOf([liveSnap, liveBottom, liveMath], (s) => s.relIndent0)
+  const r0l = firstOf(LIVE_SNAPS, (s) => s.relIndent0)
   const r0p = firstOf([prevSnap, prevBottom], (s) => s.relIndent0)
-  const r1l = firstOf([liveSnap, liveBottom, liveMath], (s) => s.relIndent1)
+  const r1l = firstOf(LIVE_SNAPS, (s) => s.relIndent1)
   const r1p = firstOf([prevSnap, prevBottom], (s) => s.relIndent1)
   console.log(`  [diag] 相对段落缩进: live=${r0l}/${r1l}  prev=${r0p}/${r1p}`)
   ok(r0l != null && r0p != null && Math.abs(r0l - r0p) <= 2,
