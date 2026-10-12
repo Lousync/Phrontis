@@ -1438,7 +1438,7 @@ export default function App() {
   // 总览空态（看板方案 §5 反馈 9，2026-09-27）：无模块标签也无工具标签 —— 中间卡片壳切半透明档
   // （并去掉卡片自己的渐变图，0.92 不透明度会把粒子盖没），让外壳垫底的主题特效画布透出来；
   // 有标签时维持 88% 实感不动（「中间的标签页还是不要做的太透明」）。
-  const centerEmpty = activeTab === null && !activeToolTab
+  const centerEmpty = groups.every((g) => g.active === null)
 
   // AI 助手快捷键闸门（2026-09-22 拍板）：AI 教学区自己就是 AI 对话区，在那里 Ctrl+J / Ctrl+Shift+J
   // 一律不响应（详见 AI_ASSISTANT_SHORTCUT_DISABLED 的注释）。
@@ -1685,6 +1685,19 @@ export default function App() {
     items.push({ key: 'close', label: '关闭', icon: <X size={15} />, onSelect: () => closeInGroup(gid, tabId) })
     return items
   })() : []
+
+  // 工具标签宿主位置：单宿主（保活：跨栏移动也不重挂），按「焦点组优先，否则另一组（若其 active 是工具）」
+  // 落到对应栏。两栏各自都开工具是极端情形，此处只呈现优先组的那一个（已知限制）。
+  const toolGroupIdx = (() => {
+    const focus = groups.findIndex((g) => g.id === activeGroupId)
+    const order = [focus, ...groups.map((_, i) => i).filter((i) => i !== focus)]
+    for (const i of order) {
+      const g = groups[i]
+      if (g && typeof g.active === 'string' && isToolTabId(g.active)) return i
+    }
+    return -1
+  })()
+  const visibleToolTab = toolGroupIdx >= 0 ? groups[toolGroupIdx].active : null
 
   return (
     <RootErrorBoundary>
@@ -1933,27 +1946,27 @@ export default function App() {
                         aria-hidden
                       />
                     )}
-                    {/* 工具标签宿主（批次4，保活）：分屏下作为**焦点栏的 flex 子项**（order/flexGrow=ratio），
-                        落在焦点栏而不是铺满整个内容区（否则会盖住另一栏的可视模块）。
-                        激活的可见，其余已开工具 display:none 常驻（工具内状态如密码本解锁态不丢）。
-                        ⚠️ 门条件必须含 activeToolTab 本身（2026-09-28 实锤）：只看 mountedToolTabs.size
+                    {/* 工具标签宿主（批次4，保活）：**单宿主**（跨栏移动也不重挂），作为**所在栏的 flex 子项**
+                        （order/flexGrow=ratio），落在拥有该工具标签的那一栏，而不是铺满内容区（否则盖住另一栏）。
+                        定位见上方 toolGroupIdx；激活的可见，其余已开工具 display:none 常驻（工具内状态不丢）。
+                        ⚠️ 门条件必须含 visibleToolTab 本身（2026-09-28 实锤）：只看 mountedToolTabs.size
                         是「鸡生蛋」死门——容器块被 ref 空集拦住 → renderToolMounted 永远不被调用 →
                         ref 永远空。表象 = 冷启动后第一次点右栏工具入口，标签页出现但中间区全空白
                         （0 console error，纯渲染门死锁，e2dad19 引入）。 */}
-                    {(activeToolTab || mountedToolTabs.current.size > 0) && (
+                    {(visibleToolTab || mountedToolTabs.current.size > 0) && (
                       <div
                         className="relative flex min-h-0 min-w-0 flex-1 flex-col"
-                        style={{ display: activeToolTab ? undefined : 'none', ...paneStyleFor(groups.findIndex((g) => g.id === activeGroupId), layoutSplit) }}
+                        style={{ display: visibleToolTab ? undefined : 'none', ...paneStyleFor(Math.max(0, toolGroupIdx), layoutSplit) }}
                       >
-                        {activeToolTab && renderToolMounted(activeToolTab, true)}
+                        {visibleToolTab && renderToolMounted(visibleToolTab, true)}
                         {Array.from(mountedToolTabs.current)
-                          .filter((t) => t !== activeToolTab)
+                          .filter((t) => t !== visibleToolTab)
                           .map((t) => renderToolMounted(t, false))}
                       </div>
                     )}
                     {/* 全关空态（2026-09-17 拍板③）：**所有组均无激活**且无工具标签时显示引导页；
                         绝对定位铺满主栏区域（不参与 flex 流，避免挤动两栏几何）。 */}
-                    {!activeToolTab && groups.every((g) => g.active === null) && (
+                    {!visibleToolTab && groups.every((g) => g.active === null) && (
                       /* 空态只留图标（2026-09-19 反馈：不要文字说明，页面简画） */
                       <div
                         className="absolute inset-y-0 left-0 z-20 flex w-full flex-col items-center justify-center pb-16"
