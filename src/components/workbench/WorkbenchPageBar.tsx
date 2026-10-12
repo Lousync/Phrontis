@@ -89,6 +89,8 @@ interface Props {
   onSelect: (id: string) => void
   onClose: (id: string) => void
   onReorder: (tabs: string[]) => void
+  /** 条目右键（拆分 / 移动到另一栏 / 关闭分屏，由 App 提供；不传则无右键菜单） */
+  onContextMenu?: (e: React.MouseEvent, id: string) => void
   /** 主栏编辑器页签组槽（模块 portal 目标） */
   editorSlotRef: (node: HTMLDivElement | null) => void
   /** 知识库页签组槽 */
@@ -105,7 +107,7 @@ interface Props {
   hidePages?: boolean
 }
 
-export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, editorSlotRef, knowledgeSlotRef, showQuizEntry = false, quizEntryActive = false, trail = null, lead = null, hidePages = false }: Props) {
+export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, onContextMenu, editorSlotRef, knowledgeSlotRef, showQuizEntry = false, quizEntryActive = false, trail = null, lead = null, hidePages = false }: Props) {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const dragIdRef = useRef<string | null>(null)
@@ -180,6 +182,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
                 onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragId && dragId !== id) setDragOverId(id) }}
                 onDrop={(e) => handleDrop(e, id)}
                 onClick={() => onSelect(id)}
+                onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, id) } : undefined}
                 onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id) } }}
                 title={tabLabel(id)}
                 className={`kb-edge-tab group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${

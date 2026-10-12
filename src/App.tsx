@@ -105,7 +105,38 @@ export default function App() {
   // 2026-09-17 第三轮反馈：允许全部标签关闭（拍板③）→ activeTab 可为 null = 空态（无激活模块）。
   // 初始 null = settings 恢复前的空窗（占位改 null 而非 'blog'：'blog' 会被 openTabs 登记
   // 成假标签——settings 在 mount 前往往已 ready，ready 判定拦不住；null 由 !activeTab 守卫天然拦住）。
-  const [activeTab, setActiveTab] = useState<TabName | null>(null)
+  // ---- 工作台标签宿主：组模型（分屏两栏的地基）----
+  // 顶层页签 = 模块(TabName) + 工具(`tool:<id>`)。步1 只有 g1；openTabs / activeTab / activeToolTab
+  // 一律**派生** —— 外部消费方（ActivityBar / rail 跟随 / 右栏 AI / 上报 / 快捷键）零改动。
+  interface WbGroup { id: 'g1' | 'g2'; tabs: string[]; active: string | null }
+  const [groups, setGroups] = useState<WbGroup[]>([{ id: 'g1', tabs: [], active: null }])
+  const [activeGroupId, setActiveGroupId] = useState<'g1' | 'g2'>('g1')
+  void setActiveGroupId
+  const activeGroupIdRef = useRef<'g1' | 'g2'>('g1')
+  activeGroupIdRef.current = activeGroupId
+  const activeGroup = groups.find((g) => g.id === activeGroupId) ?? groups[0]
+  const activeEntry = activeGroup.active
+  const activeTab: TabName | null = activeEntry && !isToolTabId(activeEntry) ? (activeEntry as TabName) : null
+  const activeToolTab: string | null = activeEntry && isToolTabId(activeEntry) ? activeEntry : null
+  const openTabs = useMemo(() => Array.from(new Set(groups.flatMap((g) => g.tabs))), [groups])
+  const patchGroup = useCallback((id: 'g1' | 'g2', fn: (g: WbGroup) => WbGroup) => {
+    setGroups((gs) => gs.map((g) => (g.id === id ? fn(g) : g)))
+  }, [])
+  /** 兼容层：同名 setter 全部改写「活动组」——调用点零改动 */
+  const setActiveTab = useCallback((x: TabName | null) => {
+    patchGroup(activeGroupIdRef.current, (g) => ({
+      ...g,
+      active: x,
+      tabs: x && !WORKBENCH_TABBAR_EXCLUDED.includes(x) && !g.tabs.includes(x) ? [...g.tabs, x] : g.tabs,
+    }))
+  }, [patchGroup])
+  const setActiveToolTab = useCallback((x: string | null) => {
+    patchGroup(activeGroupIdRef.current, (g) => ({
+      ...g,
+      active: x,
+      tabs: x && !g.tabs.includes(x) ? [...g.tabs, x] : g.tabs,
+    }))
+  }, [patchGroup])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [sidebarWidths, setSidebarWidths] = useState<Record<string, number>>({})
   const [importModalOpen, setImportModalOpen] = useState(false)
@@ -399,13 +430,7 @@ export default function App() {
 
   useCheckinReminder()
   const mountedTabs = useRef<Set<TabName>>(new Set())  // keep modules alive after first visit
-  /** 中间标签条显示的已打开 Tab（v3.4.0）：只能由入口产生，无「＋新建」按钮；activeTab 变化时自动追加（见下方 effect）。
-      2026-09-17 拍板：恢复为标签条数据源（文档标签式，可关闭/拖拽/全关空态），可关闭与重排由 closeTab / handleReorder 消费。
-      批次4 起元素放宽为 string：模块标签 = TabName，工具标签 = `tool:<toolId>`（右栏工具入口区产生，不占 TabName）。 */
-  const [openTabs, setOpenTabs] = useState<string[]>([])
-  /** 激活的工具标签页（`tool:<toolId>` | null）。与 activeTab 互斥共现：工具标签激活时 activeTab=null
-      （模块保活层照常 display:none 常驻），激活模块标签时清空。批次4 方案 §10.2「点击入口 → 中间开工具标签页」。 */
-  const [activeToolTab, setActiveToolTab] = useState<string | null>(null)
+  // openTabs / activeToolTab 已在上方「标签宿主组模型」处**派生**（`groups` 并集 / 活动组的 active）。
 
   // 启动检测当前仓库：无 → 仓库选择页（VaultPicker，新老用户统一）；有且开启「每次启动选择仓库」→ 启动形态选择页
   // sessionStorage 一次性标记：应用内切库会整窗 reload（数据激活重读约定），热重载不再打扰；冷启动才重新出页
@@ -936,14 +961,7 @@ export default function App() {
   // EXCLUDED = 图标条功能面板（回收站/插件/工具箱/动态/设置）与 aiTeaching/devtools，
   // 点击只切换视图不登记标签（第四轮反馈拍板②），图标条常驻可随时返回。
   // 批次4：工具标签（activeToolTab）同批登记——模块与工具标签共用一条 openTabs 序列。
-  useEffect(() => {
-    if (!activeTab || WORKBENCH_TABBAR_EXCLUDED.includes(activeTab)) return
-    setOpenTabs((ts) => (ts.includes(activeTab) ? ts : [...ts, activeTab]))
-  }, [activeTab])
-  useEffect(() => {
-    if (!activeToolTab) return
-    setOpenTabs((ts) => (ts.includes(activeToolTab) ? ts : [...ts, activeToolTab]))
-  }, [activeToolTab])
+  // 「打开即登记标签」已并入 setActiveTab / setActiveToolTab（组模型侧），此处不再需要同步 effect。
 
   // quizViewOpen / 页签组可见性（2026-09-19）：声明在 closeTab 之前——其全关判定 deps 渲染期就要读
   const [quizViewOpen, setQuizViewOpen] = useState(false)
@@ -958,34 +976,37 @@ export default function App() {
   // （旧「右邻居优先落点」语义保留在编辑器/知识库内部的文档页签 landingAfterClose，模块级标签不用。）
   const closeTab = useCallback((tab: string) => {
     // 阅读态清空的唯一事实源（全格式阅读器一期）：书架标签删除 → 右栏阅读入口随之消失
-    // （右栏 reading prop 以 openTabs.includes('bookshelf') 为前提，但清 state 是无条件的彻底收口）
     if (tab === 'bookshelf') setBookshelfReading(null)
-    const i = openTabs.indexOf(tab)
-    if (i === -1) return
-    let next = openTabs.filter((t) => t !== tab)
+    if (!groups.some((g) => g.tabs.includes(tab))) return
     const isTool = isToolTabId(tab)
     const isActive = isTool ? activeToolTab === tab : activeTab === tab
-    if (isActive) {
-      setActiveToolTab(null)
-      setActiveTab(null)
-      setRailModule(null)
-    }
     // 全关兜底（2026-09-19 反馈：关掉博客后左栏转到笔记）：剩余标签全部「不可见」=
-    // PAGE_OWNED 空壳（模块条目不进页面条、无停靠页面时页签组也不出现）→ 用户视角已无
-    // 标签页，按全关收尾：清掉隐形空壳、activeTab/左栏回总览。可见性由模块上报。
+    // PAGE_OWNED 空壳（模块条目不进页面条、无停靠页面时页签组也不出现）→ 用户视角已无标签页，
+    // 按全关收尾：清掉隐形空壳、active/左栏回总览。可见性由模块上报。
     const tabVisible = (t: string) =>
       isToolTabId(t) || !PAGE_OWNED.includes(t) ||
       (t === 'knowledge' && (kbStripVisible || quizViewOpen))
-    if (!next.some(tabVisible)) {
-      next = next.filter((t) => !PAGE_OWNED.includes(t))
-      setActiveToolTab(null)
-      setActiveTab(null)
-      setRailModule(null)
-    }
-    setOpenTabs(next)
-  }, [openTabs, activeTab, activeToolTab, kbStripVisible, quizViewOpen])
-  // 标签拖拽重排（现成机制恢复）：只调 openTabs 顺序，激活标签跟内容走、不变
-  const handleReorder = useCallback((tabs: string[]) => setOpenTabs(tabs), [])
+    const remaining = groups.flatMap((g) => g.tabs).filter((t) => t !== tab)
+    const willEmpty = !remaining.some(tabVisible)
+    if (isActive || willEmpty) setRailModule(null)
+    setGroups((gs) => {
+      let next = gs.map((g) => g.tabs.includes(tab)
+        ? { ...g, tabs: g.tabs.filter((t) => t !== tab), active: g.active === tab ? null : g.active }
+        : g)
+      if (!next.flatMap((g) => g.tabs).some(tabVisible)) {
+        next = next.map((g) => ({
+          ...g,
+          tabs: g.tabs.filter((t) => !PAGE_OWNED.includes(t)),
+          active: g.active && PAGE_OWNED.includes(g.active) ? null : g.active,
+        }))
+      }
+      return next
+    })
+  }, [groups, activeTab, activeToolTab, kbStripVisible, quizViewOpen])
+  // 标签拖拽重排（现成机制恢复）：只调**活动组**的标签顺序，激活标签跟内容走、不变
+  const handleReorder = useCallback((tabs: string[]) => {
+    patchGroup(activeGroupIdRef.current, (g) => ({ ...g, tabs }))
+  }, [patchGroup])
 
   /** 进模块态 → leftMode 落回总览（树模式互斥修复，方案 §2.1）。
    *  根因：leftMode 持久化在 workbenchLayout（Shell 读），railModule 是 App 态；树模式渲染分支
@@ -1105,7 +1126,7 @@ export default function App() {
           setActiveTab(null)
           setRailModule(null)
         }
-        if (!kbStripVisible) setOpenTabs((ts) => ts.filter((t) => t !== 'knowledge'))
+        if (!kbStripVisible) setGroups((gs) => gs.map((g) => ({ ...g, tabs: g.tabs.filter((t) => t !== 'knowledge') })))
         return
       }
       setRailModule(open ? 'quiz' : 'knowledge')
