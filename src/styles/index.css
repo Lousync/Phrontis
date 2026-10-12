@@ -714,22 +714,6 @@ input:focus, textarea:focus, select:focus {
 .kb-chevron {
   transition: transform var(--dur-std) var(--ease-kb), rotate var(--dur-std) var(--ease-kb);
 }
-/* --- 分屏分隔条（模块级两栏）：瞬时几何、不做尺寸过渡；只给自身 hover 反馈 --- */
-.kb-pane-divider {
-  flex: none;
-  align-self: stretch;
-  background: var(--border-color);
-  transition: background var(--dur-std) var(--ease-kb);
-}
-.kb-pane-divider:not(.is-col) { width: 5px; cursor: col-resize; }
-.kb-pane-divider.is-col { height: 5px; cursor: row-resize; }
-.kb-pane-divider:hover { background: var(--accent); opacity: .5; }
-
-/* 分屏：活动组页面条底色高亮（匹配原型 hl-tint，无边框）。属性选择器抬特化，
-   压过 Tailwind 的 bg-[var(--bg-secondary)]（同为单类，靠源序不可靠）。 */
-[data-wb="pagebar"].kb-pane-active {
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg-secondary));
-}
 
 /* --- D 列表增删 --- */
 @keyframes kb-item-in {

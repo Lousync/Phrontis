@@ -33,16 +33,6 @@ export interface WorkbenchLayout {
   bookmarksHidden: string[]
   /** 分屏比例（主栏:副栏，0~1；null = 未分屏） */
   splitRatio: number | null
-  /** 分屏两栏（模块级）：null = 单栏。见 App 标签宿主组模型。 */
-  split: SplitLayout | null
-}
-
-/** 分屏两栏状态（App 组模型的持久化形态）。tabs 存字符串 id，恢复时由 App 二次净化。 */
-export interface SplitLayout {
-  orientation: 'row' | 'column'
-  ratio: number
-  activeGroupId: 'g1' | 'g2'
-  groups: { id: 'g1' | 'g2'; tabs: string[]; active: string | null }[]
 }
 
 /** 右栏控件的规范顺序（缺省序 = 原型 v15 定稿 + 2026-09-28 增桌宠）；DayPanel 四控件 id 沿用 DAY_TABS */
@@ -94,7 +84,6 @@ export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   panelTabsHidden: [],
   bookmarksHidden: [],
   splitRatio: null,
-  split: null,
 }
 
 export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchLayout {
@@ -132,27 +121,6 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       }
       if (o.splitRatio === null || (typeof o.splitRatio === 'number' && Number.isFinite(o.splitRatio))) {
         base.splitRatio = o.splitRatio as number | null
-      }
-      if (o.split && typeof o.split === 'object' && !Array.isArray(o.split)) {
-        const sp = o.split as Record<string, unknown>
-        const ori: 'row' | 'column' | null = sp.orientation === 'column' ? 'column' : sp.orientation === 'row' ? 'row' : null
-        const ratio = typeof sp.ratio === 'number' && Number.isFinite(sp.ratio)
-          ? Math.min(0.8, Math.max(0.2, sp.ratio))
-          : 0.5
-        const agid: 'g1' | 'g2' = sp.activeGroupId === 'g2' ? 'g2' : 'g1'
-        const groups: SplitLayout['groups'] = Array.isArray(sp.groups)
-          ? (sp.groups as unknown[])
-              .filter((g): g is Record<string, unknown> => !!g && typeof g === 'object' && !Array.isArray(g))
-              .map((g) => ({
-                id: (g.id === 'g2' ? 'g2' : 'g1') as 'g1' | 'g2',
-                tabs: Array.isArray(g.tabs) ? g.tabs.filter((t): t is string => typeof t === 'string') : [],
-                active: typeof g.active === 'string' ? g.active : null,
-              }))
-              .filter((g, i, arr) => arr.findIndex((x) => x.id === g.id) === i)
-              .sort((a, b) => (a.id === b.id ? 0 : a.id === 'g1' ? -1 : 1))
-          : []
-        if (!groups.some((g) => g.id === 'g1')) groups.unshift({ id: 'g1', tabs: [], active: null })
-        if (ori && groups.length >= 1) base.split = { orientation: ori, ratio, activeGroupId: agid, groups: groups.slice(0, 2) }
       }
     }
   } catch { /* 坏 JSON 走默认 */ }
