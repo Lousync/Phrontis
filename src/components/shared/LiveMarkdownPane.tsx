@@ -33,6 +33,7 @@ import hljs from 'highlight.js/lib/common'
 import { loadWikiTargets } from '../../lib/wikiLinkSuggest'
 import { getCachedVaultImage, loadVaultImage, normalizeVaultRel } from '../../lib/attachmentImage'
 import { runNoteAction, type NoteActionId } from '../../lib/noteActions'
+import type { SyntaxNode } from '@lezer/common'
 import type { NoteBlockContext, NoteEngineHandle, NoteSelection } from '../../lib/noteEngine'
 
 export interface LiveMarkdownPaneProps {
@@ -271,6 +272,62 @@ class CodeBlockWidget extends WidgetType {
   }
 }
 
+// ===== 列表：层级 / 标记 / 缩进（全部与阅读态预览对齐）=====
+
+/** 无序标记：与预览的 disc / circle / square 同层同形 */
+const BULLETS = ['•', '○', '▪']
+
+/** 列表层级（0 = 顶层）：走**整棵语法树的祖先链** —— 既不用行首缩进猜，也不受可见区间切片影响 */
+function listDepth(node: SyntaxNode): number {
+  let d = -1
+  for (let p: SyntaxNode | null = node; p; p = p.parent) {
+    if (p.name === 'BulletList' || p.name === 'OrderedList') d++
+  }
+  return Math.max(0, d)
+}
+
+/** 26 进制小写字母（1 → a），与预览 `list-style: lower-alpha` 同形 */
+function alphaNum(n: number): string {
+  return String.fromCharCode(97 + ((n - 1) % 26))
+}
+
+/** 小写罗马数字（与预览 `list-style: lower-roman` 同形；列表项数不会大） */
+function romanNum(n: number): string {
+  const table: [number, string][] = [[10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']]
+  let v = n
+  let out = ''
+  for (const [num, sym] of table) while (v >= num) { out += sym; v -= num }
+  return out || 'i'
+}
+
+/**
+ * 有序列表标记 = **重编号**（源里常写成 `1. 1. 1.`，阅读态显示 1/2/3），并按层换 `a.` / `i.`。
+ * 序号 = 同层**前面**有几个兄弟 ListItem（走整棵树，不看视口）。
+ */
+function orderedMarker(node: SyntaxNode, depth: number): string {
+  const item = node.parent
+  const list = item?.parent
+  let n = 1
+  for (let ch = list?.firstChild; ch; ch = ch.nextSibling) {
+    if (ch.name !== 'ListItem') continue
+    if (item && ch.from >= item.from) break
+    n++
+  }
+  if (depth === 1) return `${alphaNum(n)}.`
+  if (depth >= 2) return `${romanNum(n)}.`
+  return `${n}.`
+}
+
+/**
+ * 列表缩进：阅读态是「容器 24px + 每层 20px」，编辑器行内边距基准是 16px，故 = 16 + 24 + 20×层。
+ * 源里的前导空格由调用方隐藏（否则「源缩进 + 这里的 padding」叠加成双倍缩进）。
+ * **光标所在行不给 style** —— 那一行按「回源码」规则显示，保留真实缩进才好编辑（与标记重现同一套语义）。
+ */
+function listIndentStyle(node: SyntaxNode, onCursor: boolean): string | null {
+  if (onCursor) return null
+  return `padding-left: ${40 + listDepth(node) * 20}px`
+}
+
 /** 解析 `![alt](src)` / alt 与 src（src 可能是仓库相对附件） */
 function parseImage(node: { from: number; to: number }, text: string): { alt: string; src: string } | null {
   const raw = text.slice(node.from, node.to)
@@ -365,7 +422,26 @@ function buildDecorations(state: EditorState, areas: readonly { from: number; to
           }
           return false
         }
-        if (name === 'ListItem') return  // 交给 ListMark / TaskMarker 各自处理
+        if (name === 'ListItem') {
+          // 行级类给「行高 / 缩进」用：列表行在阅读态是 1.5 行高（段落 1.75）。
+          // ★ 这里**不能 `return false`** —— 那会剪掉子树，ListMark / TaskMarker 就轮不到了。
+          const a = doc.lineAt(node.from).number
+          const b = doc.lineAt(node.to).number
+          const firstLine = doc.line(a)
+          const indentStyle = listIndentStyle(node.node, hitsActiveLine(node.from, node.to))
+          if (indentStyle) {
+            const lead = /^[ \t]*/.exec(firstLine.text)?.[0] ?? ''
+            if (lead) addHide(firstLine.from, firstLine.from + lead.length)
+          }
+          for (let n = a; n <= b; n++) {
+            const ln = doc.line(n)
+            ranges.push(Decoration.line({
+              class: 'kb-live-li',
+              attributes: n === a && indentStyle ? { style: indentStyle } : undefined,
+            }).range(ln.from))
+          }
+          return
+        }
         // 块级渲染（替换）：光标进入就不替，整块回源码
         if (name === 'Table') {
           if (!containsCursor(node.from, node.to)) addReplace(node.from, node.to, new TableWidget(state.sliceDoc(node.from, node.to)))
@@ -391,10 +467,9 @@ function buildDecorations(state: EditorState, areas: readonly { from: number; to
         }
         if (name === 'ListMark') {
           const line = doc.lineAt(node.from)
-          // 嵌套层级由**行首缩进**推出（不用遍历深度：视口切片会让「父列表在视口外」的项算成 0 层）
-          const indent = (/^[ \t]*/.exec(line.text)?.[0] ?? '').replace(/\t/g, '    ').length
-          const depth = Math.min(2, Math.floor(indent / 2))
-          const rest = line.text.slice(indent)
+          // 层级走**整棵语法树的祖先链**（不用行首缩进猜，也不受「可见区间切片」影响）
+          const depth = listDepth(node.node)
+          const rest = line.text.replace(/^[ \t]*/, '')
           const raw = state.sliceDoc(node.from, node.to)
           if (/^[-*+]\s+\[[ xX]\]/.test(rest)) {
             // 任务行由复选框充当标记，不能再画项目符号（此前是「• ☐ 文本」双标记；预览侧同步修）
@@ -403,8 +478,9 @@ function buildDecorations(state: EditorState, areas: readonly { from: number; to
             return false
           }
           if (!hitsActiveLine(node.from, node.to)) {
-            // 与预览的 disc / circle / square 同层同形；有序列表沿用源里的序号（预览会重编号，另条）
-            const marker = /^\d/.test(raw) ? raw.trim() : (['•', '○', '▪'][depth] ?? '•')
+            // 与预览的 disc / circle / square 同层同形；有序列表**重编号**并按层换 a. / i.
+            // （源里常写成 `1. 1. 1.`，阅读态显示 1/2/3 —— 编辑器不重编号就永远差一截）
+            const marker = /^\d/.test(raw) ? orderedMarker(node.node, depth) : (BULLETS[depth] ?? '•')
             addReplace(node.from, node.to, new BulletWidget(marker))
           }
           return false

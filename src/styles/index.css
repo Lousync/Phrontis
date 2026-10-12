@@ -1695,6 +1695,9 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
 .kb-live-link:hover { text-decoration: var(--link-hover-deco); }
 
 .kb-live-quote { border-left: var(--quote-bar); padding-left: var(--md-quote-pad-left) !important; color: var(--text-secondary); }
+/* 列表行 / 引用行：阅读态这两类行高是继承来的 1.5（段落才是 1.75），对齐之（2026-10-11）。
+   行高按行生效不影响其它行 —— CM6 逐行量高，探针里连光标几何一起复核。 */
+.cm-line.kb-live-li, .cm-line.kb-live-quote { line-height: 1.5; }
 /* 围栏底色只在**光标进入代码块、回源码态**时可见（渲染态由代码卡片接管） */
 .kb-live-codeblock { background: color-mix(in srgb, var(--bg-secondary) 70%, transparent); }
 .kb-live-bullet { color: var(--text-muted); padding-right: 2px; }

@@ -102,15 +102,20 @@ PageEditor（知识库就地编辑）
 3. **基准字号 = 根字号**：CM6 主题写 `1rem`（`App.tsx` 把缩放写成 `html{font-size: zoom×16px}`），与预览同基准；「编辑器字号」设置**从此只管源码档**。
 4. **代码块卡片化**：`CodeBlockWidget` 用 highlight.js（`lib/common`，与预览同一个库、同一套 `.hljs-*` 配色，且该 chunk 与预览共用、不重复打包）产出 `<pre><code class="hljs language-js">` + 语言标签；光标进入整块回源码（与表格同一套语义）。
 
-**有意保留的差异**（写进探针 EXEMPT，防被误当 bug 回改）：任务复选框可点性（编辑态可点 / 阅读态不可点）· 预览顶部多一行页面标题 · 文档总高度（编辑器必须显示空行）· 列表与引用行高（阅读态继承 1.5 / 编辑器统一 1.75）· 有序列表序号（编辑器沿用源序号，预览会重编号）。
+**有意保留的差异**（写进探针 EXEMPT，防被误当 bug 回改）：任务复选框可点性（编辑态可点 / 阅读态不可点）· 预览顶部多一行页面标题 · 文档总高度（编辑器必须显示空行）· 列表缩进的 ±2px 容差（两侧量法不同）。
+
+**2026-10-11 第二轮（列表与图片收口，已完成）**：
+
+- **有序列表重编号**：源里写 `1. 1. 1.` 时编辑器也显示 1/2/3（此前只有阅读态重编号）；层级走**整棵语法树的祖先链**（`listDepth`），不受「可见区间切片」影响；并按层换 `a.` / `i.`（对应阅读态的 `lower-alpha` / `lower-roman`）。
+- **列表缩进对齐**：编辑器给列表首行设 `padding-left = 16 + 24 + 20×层`，并**隐藏源里的前导空格**（否则「源缩进 + padding」叠加）；光标所在行不设 —— 该行按「回源码」规则显示，保留真实缩进才好编辑。实测两侧相对段落的缩进**完全相等**（顶层 24px / 嵌套 44px）。
+- **行高对齐**：列表行与引用行改为 1.5（阅读态这两类是继承来的 1.5，段落才是 1.75）。
+- **图片断言**：对比 fixture 加了一张 data:URI 图片，两侧的 `border-radius / max-width / margin` 与「真的加载出来（naturalWidth > 0）」都进断言。
+- **探针自身两处修正**（都是假红，值得记）：① CM6 只装饰视口内的块 → 单张快照覆盖不全，改为**顶 / 底 / 公式三张快照取并集**；② 编辑器侧的 computed 值是**设备像素对齐后的 used 值**（本机 DPR 1.5 → 1px 读成 0.667px、3px 读成 2.667px）→ 数值比对加 **0.5px 容差**（真差异都 ≥1px，容差不掩盖问题）。
 
 **下一轮待办（2026-10-11 记录，未做）**：
 
-- 有序列表**重编号**（`1. 1. 1.` 在预览里显示 1/2/3，编辑器仍显示 1/1/1）——需要按同层连续项计数，且要处理与源缩进的关系。
-- 列表/引用**行高**对齐到阅读态的 1.5（可选；当前刻意统一 1.75，改了要复查光标几何）。
-- 嵌套列表**缩进**对齐（现在靠源里的前导空格；改成 padding 会与源文本叠加或在光标行跳变，需专门设计）。
-- 即时渲染档的 `Ctrl F` 查找（CM6 需接 `@codemirror/search`）。
-- 图片元素的排版断言（对比 fixture 里还没有真图片，`compare-live-vs-preview.mjs` 未覆盖 `img`）。
+- 即时渲染档的 `Ctrl F` 查找（CM6 需接 `@codemirror/search`，依赖已在 `package.json` 里、尚未接线）。
+- 列表「松散项」（项内多行）的续行缩进：目前只给首行上 padding，续行仍是基准缩进（fixture 未覆盖）。
 
 ## 7. 验证
 
@@ -120,7 +125,7 @@ PageEditor（知识库就地编辑）
 | `electron-vite build` | 通过（CM6 独立 chunk `LiveMarkdownPane-*.js`，lazy；highlight.js 与预览共用同一 chunk，无重复打包） |
 | 契约 `.AGENT/scripts/notes-surface/verify-note-surface.mjs` | **171 PASS / 0 FAIL**（含用假引擎跑真动作的表驱动断言 + C11「排版单一真相」源码层负向断言） |
 | 探针 `.AGENT/scripts/notes-surface/probe-note-surface.mjs`（隔离实例 + CDP 真 DOM） | **32 PASS / 0 FAIL**（源码档在场 → 两档右键菜单 → **切档不关笔记、当场换成即时渲染档** → CM6 渲染各类块且标记被隐藏 → 代码块卡片 + 语法高亮 → 光标块回源码（含代码块来回） → 菜单动作真落进文档并渲染 → 切回源码档不残留 → console 零 error） |
-| 排版一致性探针 `.AGENT/scripts/notes-surface/compare-live-vs-preview.mjs`（隔离实例 + computedStyle 逐项比对） | **57 PASS / 0 FAIL**（44 项排版数值两侧必须相等 + 代码卡/高亮/语言标签 + 视口内块级公式必须渲染 + 列表标记 + console 零 error；有意差异列在 EXEMPT 只打印不判失败） |
+| 排版一致性探针 `.AGENT/scripts/notes-surface/compare-live-vs-preview.mjs`（隔离实例 + computedStyle 逐项比对） | **65 PASS / 0 FAIL**（48 项排版数值两侧相等（数值容差 0.5px = 设备像素对齐）+ 代码卡/高亮/语言标签 + 视口内块级公式必须渲染 + 列表标记与重编号 + 相对缩进 + 图片加载 + console 零 error；有意差异列在 EXEMPT 只打印不判失败） |
 | 手册检索 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs` | **54/54 用例通过**（新增《笔记 · 写作模式与编辑器》8 条用例全第 1 名命中） |
 
 探针跑法（隔离 userData，不动开发机数据）：

@@ -88,7 +88,7 @@ const PROPS = [
   'borderLeftWidth', 'borderLeftColor', 'borderLeftStyle',
   'borderTopWidth', 'borderTopColor',
   'backgroundColor', 'borderRadius', 'fontFamily', 'textDecorationLine',
-  'listStyleType', 'textAlign', 'borderCollapse', 'boxShadow', 'width',
+  'listStyleType', 'textAlign', 'borderCollapse', 'boxShadow', 'width', 'maxWidth',
 ]
 
 /**
@@ -108,6 +108,11 @@ const snapFor = (mode) => `(() => {
     return o
   }
   const byText = (sel, t) => [...document.querySelectorAll(sel)].find(e => (e.textContent || '').includes(t)) || null
+  /** 取**最后一个**文本命中：阅读态的嵌套 li 会把子项文字也算进父 li 的 textContent */
+  const byTextLast = (sel, t) => {
+    const all = [...document.querySelectorAll(sel)].filter(e => (e.textContent || '').includes(t))
+    return all.length ? all[all.length - 1] : null
+  }
   const q = (s) => document.querySelector(s)
   const prose = q('.prose-content')
   const base = cs(live ? q('.cm-content') : prose)
@@ -116,8 +121,34 @@ const snapFor = (mode) => `(() => {
   const taskLine = [...document.querySelectorAll('.cm-line')].find(l => (l.textContent || '').includes('待办一'))
   const bullets = [...document.querySelectorAll('.kb-live-bullet')].map(b => b.textContent)
   const firstHljs = (live ? q('.cm-content') : prose)?.querySelector('[class*=hljs-]')
+  // 「相对缩进」= 列表内容相对**普通段落**的缩进量。两侧量法不同（编辑器看 padding-left，
+  // 阅读态看真实文本左边界），但表达的是同一件事，故可直接比对。
+  const textLeft = (el) => {
+    if (!el) return null
+    const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    let n
+    while ((n = w.nextNode())) {
+      if ((n.nodeValue || '').trim()) {
+        const r = document.createRange(); r.selectNodeContents(n)
+        const b = r.getBoundingClientRect()
+        if (b.width > 0) return Math.round(b.left)
+      }
+    }
+    return null
+  }
+  const paraEl = live ? byText('.cm-line', '普通段落') : byText('.prose-content p', '普通段落')
+  const relIndent = (el) => {
+    if (!el || !paraEl) return null
+    if (live) return Math.round(parseFloat(getComputedStyle(el).paddingLeft) - parseFloat(getComputedStyle(paraEl).paddingLeft))
+    const a = textLeft(el); const b = textLeft(paraEl)
+    return (a == null || b == null) ? null : a - b
+  }
+  const liEl0 = live ? byText('.cm-line', '无序一') : byText('.prose-content li', '无序一')
+  const liEl1 = live ? byText('.cm-line', '嵌套一项') : byTextLast('.prose-content li', '嵌套一项')
+  const imgEl = live ? q('.kb-live-img img') : q('.prose-content img')
   return {
     live,
+    dpr: window.devicePixelRatio,
     docHeight: scroller ? scroller.scrollHeight : null,
     base: { fontSize: base?.fontSize, fontFamily: base?.fontFamily, lineHeight: base?.lineHeight, color: base?.color },
     h1: cs(live ? q('.cm-line.kb-live-h1') : q('.prose-content h1')),
@@ -139,6 +170,11 @@ const snapFor = (mode) => `(() => {
     preCode: cs(live ? q('.kb-md-atom pre code') : q('.prose-content pre code')),
     katex: cs(live ? q('.cm-content .katex') : q('.prose-content .katex')),
     hr: cs(live ? q('.kb-live-hr') : q('.prose-content hr')),
+    liLine: cs(live ? q('.cm-line.kb-live-li') : q('.prose-content li')),
+    img: cs(imgEl),
+    imgLoaded: imgEl ? (imgEl.complete && imgEl.naturalWidth > 0) : null,
+    relIndent0: relIndent(liEl0),
+    relIndent1: relIndent(liEl1),
     langTag: (live ? q('.kb-live-codecard-lang') : null)?.textContent ?? null,
     previewLangTag: (prose?.querySelector('pre')?.querySelector('span') ?? null)?.textContent ?? null,
     hljsColor: firstHljs ? getComputedStyle(firstHljs).color : null,
@@ -181,6 +217,9 @@ const CHECKS = [
   ['链接颜色', (s) => s.link?.color], ['链接下划线', (s) => s.link?.textDecorationLine],
   ['引用条宽', (s) => s.quote?.borderLeftWidth], ['引用条色', (s) => s.quote?.borderLeftColor],
   ['引用左内边距', (s) => s.quote?.paddingLeft], ['引用文字色', (s) => s.quote?.color],
+  ['引用行高', (s) => s.quote?.lineHeight], ['列表行高', (s) => s.liLine?.lineHeight],
+  ['图片圆角', (s) => s.img?.borderRadius], ['图片最大宽', (s) => s.img?.maxWidth],
+  ['图片外边距', (s) => s.img?.marginTop],
   ['表格边框合并', (s) => s.table?.borderCollapse], ['表格字号', (s) => s.table?.fontSize],
   ['表头底色', (s) => s.th?.backgroundColor], ['表头内边距', (s) => s.th?.paddingTop],
   ['代码卡底色', (s) => s.pre?.backgroundColor], ['代码卡圆角', (s) => s.pre?.borderRadius],
@@ -196,8 +235,7 @@ const EXEMPT = [
   ['任务复选框可点性', '编辑态可点（勾选写回正文）/ 阅读态 pointer-events:none —— 有意'],
   ['预览顶部页面标题', '阅读态额外渲染页面标题 h1，编辑态标题在页面条上 —— 有意'],
   ['文档总高度', '编辑器必须显示空行（可点到、可输入），阅读态空行折叠成段间距 —— 有意'],
-  ['列表/引用行高', '阅读态 li/blockquote 继承 1.5、编辑器统一 1.75 —— 有意（不追继承默认值）'],
-  ['有序列表序号', '编辑器沿用源里写的序号（预览会重编号）—— 已知项，另条处理'],
+  ['列表缩进的 ±2px', '两侧量法不同（编辑器量 padding、阅读态量文本左边界），容差 2px —— 有意'],
 ]
 
 /** 把当前档位的滚动容器拨到顶/底（CM6 是 .cm-scroller，预览是外层 overflow-y-auto） */
@@ -208,6 +246,43 @@ async function scrollTo(mode, where) {
   const v = await evalJs(js)
   await sleep(500)
   return v
+}
+
+/**
+ * 把块级公式滚进视口（**不动光标** —— 动光标会让该块按「回源码」规则显示，就验不到渲染了）。
+ * 用 CM6 自己的高度表算目标位置：`lineBlockAt(公式起点).top`，比按比例瞎滚可靠。
+ */
+async function scrollToMath() {
+  const moved = await evalJs(`(() => {
+    const v = window.__kbLive
+    if (!v) return false
+    const idx = v.state.doc.toString().indexOf('\\\\int_0^1')
+    if (idx < 0) return false
+    const block = v.lineBlockAt(idx)
+    v.scrollDOM.scrollTop = Math.max(0, block.top - 60)
+    return true
+  })()`)
+  const shown = await waitFor(`document.querySelectorAll('.cm-content .kb-live-math-block').length >= 1`, 6000)
+  await sleep(300)
+  return moved && shown
+}
+
+/** 数值型样式容差 0.5px：编辑器侧的 computed 值是**设备像素对齐后的 used 值**（DPR 1.5 下
+ *  1px → 0.667px、3px → 2.667px），与阅读态同一份 CSS 却读出差值 —— 环境差异，不是样式差异。 */
+const asNum = (v) => {
+  if (typeof v === 'number') return v
+  if (typeof v === 'string' && /^-?[\d.]+px$/.test(v)) return parseFloat(v)
+  return null
+}
+const sameStyle = (a, b) => {
+  const na = asNum(a); const nb = asNum(b)
+  if (na != null && nb != null) return Math.abs(na - nb) <= 0.5
+  return a === b
+}
+/** 取第一个非空值：CM6 只装饰视口内的块，单张快照覆盖不全 → 顶/底两张合起来看 */
+const firstOf = (snaps, get) => {
+  for (const s of snaps) { const v = get(s); if (v != null) return v }
+  return null
 }
 
 async function main() {
@@ -264,11 +339,12 @@ async function main() {
   const liveShotTop = await shot('cmp-live-top')
   const liveSnap = await evalJs(snapFor('live'))
   await scrollTo('live', 'bottom')
-  // 视口投递是 rAF 延迟的：等「块级公式已渲染」成立再断言，别用固定 sleep（冷启动首跑会假红）
-  await waitFor(`document.querySelectorAll('.cm-content .kb-live-math-block').length >= 1`, 8000)
-  await sleep(300)
+  await sleep(1200)
   const liveShot = await shot('cmp-live-bottom')
   const liveBottom = await evalJs(snapFor('live'))
+  // 块级公式在文档中段：单独滚到它再断言「视口内必须真的渲染」
+  const mathShown = await scrollToMath()
+  const liveMath = await evalJs(snapFor('live'))
 
   // ---- 同篇的预览（阅读态）----
   const toPreview = await evalJs(`(() => {
@@ -289,18 +365,19 @@ async function main() {
 
   mkdirSync(SHOT_DIR, { recursive: true })
   writeFileSync(join(SHOT_DIR, 'cmp-styles.json'),
-    JSON.stringify({ live: liveSnap, preview: prevSnap, liveBottom, previewBottom: prevBottom }, null, 2), 'utf8')
+    JSON.stringify({ live: liveSnap, preview: prevSnap, liveBottom, liveMath, previewBottom: prevBottom }, null, 2), 'utf8')
 
   console.log('\nS1 两侧都在场')
   ok(liveOk && liveSnap?.live === true, '即时渲染档：CM6 在场', String(liveSnap?.live))
   ok(toPreview && prevOk && prevSnap?.live === false, '预览：prose-content 在场且档位判定正确', String(prevSnap?.live))
-  console.log(`  [diag] live 光标 head=${liveSnap?.selHead}`)
+  console.log(`  [diag] live 光标 head=${liveSnap?.selHead} DPR=${liveSnap?.dpr}`)
 
-  console.log('\nS2 逐项排版一致（computedStyle 比对）')
+  console.log('\nS2 逐项排版一致（computedStyle 比对；数值容差 0.5px = 设备像素对齐）')
   for (const [label, get] of CHECKS) {
-    const a = get(liveSnap)
-    const b = get(prevSnap)
-    ok(a != null && a === b, label, `即时渲染=${a} / 预览=${b}`)
+    // 顶/底两张快照取并集：CM6 只装饰视口内的块，单张覆盖不全（hr / 代码卡 / 公式在下方）
+    const a = firstOf([liveSnap, liveBottom, liveMath], get)
+    const b = firstOf([prevSnap, prevBottom], get)
+    ok(a != null && sameStyle(a, b), label, `即时渲染=${a} / 预览=${b}`)
   }
 
   console.log('\nS3 代码块：卡片结构 + 语法高亮（预览有的写作面也得有）')
@@ -309,18 +386,34 @@ async function main() {
   ok(prevSnap?.hljsCount > 0 && prevSnap?.previewLangTag === 'js', '预览侧同样有着色与语言标签',
     JSON.stringify({ n: prevSnap?.hljsCount, tag: prevSnap?.previewLangTag }))
 
-  console.log('\nS3b 视口内必须真的渲染（滚到底时块级公式不许留源码）')
-  console.log(`  [diag] bottom: 块公式=${liveBottom?.mathBlocks} 行内公式=${liveBottom?.mathInline} 残留围栏=${liveBottom?.rawMathFence}`)
-  ok(liveBottom?.mathBlocks >= 1, '滚到底后块级公式渲染为公式（不是 $$ 源码）', `渲染数=${liveBottom?.mathBlocks}`)
-  ok(liveBottom?.rawMathFence === false, '滚到底后可见行里不残留 $$ 围栏', String(liveBottom?.rawMathFence))
+  console.log('\nS3b 视口内必须真的渲染（滚到块级公式时不许留源码）')
+  console.log(`  [diag] math: 滚到位=${mathShown} 块公式=${liveMath?.mathBlocks} 行内公式=${liveMath?.mathInline} 残留围栏=${liveMath?.rawMathFence}`)
+  ok(mathShown && liveMath?.mathBlocks >= 1, '块级公式在视口内时渲染为公式（不是 $$ 源码）', `渲染数=${liveMath?.mathBlocks}`)
+  ok(liveMath?.rawMathFence === false, '可见行里不残留 $$ 围栏', String(liveMath?.rawMathFence))
 
-  console.log('\nS4 列表标记')
-  ok(JSON.stringify(liveSnap?.bullets) === JSON.stringify(['•', '•', '○', '1.', '2.']),
-    '即时渲染档：无序按层换标记（• / ○）+ 有序沿用源序号', JSON.stringify(liveSnap?.bullets))
+  console.log('\nS4 列表：标记 / 重编号 / 缩进 / 任务行')
+  const bulletsLive = firstOf([liveSnap, liveBottom, liveMath], (s) => s.bullets?.length ? s.bullets : null)
+  ok(JSON.stringify(bulletsLive) === JSON.stringify(['•', '•', '○', '1.', '2.', 'a.']),
+    '即时渲染档：无序按层换标记（• / ○）+ 有序重编号并按层换 a.', JSON.stringify(bulletsLive))
   ok(prevSnap?.nestedUlStyle === 'circle', '预览侧嵌套无序为 circle（与写作面同层同形）', String(prevSnap?.nestedUlStyle))
-  ok(liveSnap?.taskLineText != null && !/[•\-*]/.test(liveSnap.taskLineText.slice(0, 2)),
-    '任务行不再画项目符号（修「• ☐ 文本」双标记）', String(liveSnap?.taskLineText))
+  const taskText = firstOf([liveSnap, liveBottom, liveMath], (s) => s.taskLineText)
+  ok(taskText != null && !/[•\-*]/.test(taskText.slice(0, 2)),
+    '任务行不再画项目符号（修「• ☐ 文本」双标记）', String(taskText))
   ok(prevSnap?.taskLiListStyle === 'none', '预览侧任务 li 同样去掉项目符号', String(prevSnap?.taskLiListStyle))
+  const r0l = firstOf([liveSnap, liveBottom, liveMath], (s) => s.relIndent0)
+  const r0p = firstOf([prevSnap, prevBottom], (s) => s.relIndent0)
+  const r1l = firstOf([liveSnap, liveBottom, liveMath], (s) => s.relIndent1)
+  const r1p = firstOf([prevSnap, prevBottom], (s) => s.relIndent1)
+  console.log(`  [diag] 相对段落缩进: live=${r0l}/${r1l}  prev=${r0p}/${r1p}`)
+  ok(r0l != null && r0p != null && Math.abs(r0l - r0p) <= 2,
+    '顶层列表相对段落的缩进与阅读态一致（±2px）', `live=${r0l} prev=${r0p}`)
+  ok(r1l != null && r1p != null && Math.abs(r1l - r1p) <= 2,
+    '嵌套列表相对段落的缩进与阅读态一致（±2px）', `live=${r1l} prev=${r1p}`)
+
+  console.log('\nS4b 图片')
+  const imgL = firstOf([liveSnap, liveBottom, liveMath], (s) => s.imgLoaded)
+  const imgP = firstOf([prevSnap, prevBottom], (s) => s.imgLoaded)
+  ok(imgL === true && imgP === true, '两侧图片都真的加载出来（naturalWidth > 0）', JSON.stringify({ live: imgL, prev: imgP }))
 
   console.log('\nS5 运行时零错误')
   ok(consoleErrors.length === 0, 'console 无 error / 无未捕获异常', JSON.stringify(consoleErrors.slice(0, 3)))
