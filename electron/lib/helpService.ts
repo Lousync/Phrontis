@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { existsSync, readdirSync, readFileSync } from 'fs'
 import { join, resolve } from 'path'
-import { searchHelpIn, parseFrontmatter, parseList, tokenize as coreTokenize } from './helpRetrieval'
+import { searchHelpIn, parseFrontmatter, parseList, stripGenMarkers, tokenize as coreTokenize } from './helpRetrieval'
 import type { HelpDocRaw, HelpHit } from './helpRetrieval'
 
 /**
@@ -55,7 +55,8 @@ export function loadHelpDocs(): HelpDocRaw[] {
         title: parsed.meta.title || id,
         category: parsed.meta.category || '未分类',
         keywords: parseList(parsed.meta.keywords),
-        body: parsed.body,
+        // 生成区标记是构建期脚手架（表格由真源生成），不能出现在帮助中心与 AI 语料里
+        body: stripGenMarkers(parsed.body),
       })
     } catch { /* 单篇失败不影响其它 */ }
   }

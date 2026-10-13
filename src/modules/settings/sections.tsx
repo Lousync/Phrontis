@@ -134,22 +134,31 @@ const ENTRY_ITEMS: SettingItem[] = [
   { id: 'advanced.storage', section: 'data', group: '备份与恢复', label: '整仓备份',
     desc: '整仓备份恢复（.knowbase 整包 zip）与数据导出', keywords: ['仓库', 'vault', '备份', '恢复', '导出', 'storage', '存储'] },
   // ===== 快捷键 =====
-  // ★ 2026-10-13 与 ShortcutsView.tsx 逐行对账后同步：这 9 条的 desc / keywords / group
-  //   必须与该组件实际的组名、组内键位一致，否则设置搜索会把「ctrl p」跳到错的组。
+  // ★ 2026-10-13 L1 真源化之后：这 11 条的 id / group 必须与 src/lib/commandRegistry.ts 的
+  //   COMMAND_GROUPS 一一对应（组数、组名、顺序三者对齐），否则设置搜索会跳到错的组或空锚
+  //   —— 契约 §5 断言这个双射。desc / keywords 仍**手写**：它们是检索排序的第一杠杆
+  //   （见 docs/ui-updates.md §44 记的「keywords 也会抢别人的分」），不随真源生成。
   { id: 'shortcuts.global', section: 'shortcuts', group: '全局', label: '全局快捷键',
-    desc: '侧栏折叠、命令面板、快速打开、全局搜索（左栏搜索态）、缩放、AI 助手、小窗', keywords: ['全局', '侧栏', '折叠', 'escape', 'esc', '关闭弹窗', 'ctrl b', '命令面板', 'ctrl shift p', '快速打开', 'ctrl o', 'ctrl p', 'ctrl shift f', '反引号', '缩放', 'ctrl j', 'ai 助手', '全局搜索'] },
+    desc: '侧栏折叠、命令面板、快速打开、全局搜索（左栏搜索态）、缩放、AI 助手与小窗、撤销重做', keywords: ['全局', '侧栏', '折叠', 'escape', 'esc', '关闭弹窗', 'ctrl b', '命令面板', 'ctrl shift p', '快速打开', 'ctrl o', 'ctrl p', 'ctrl shift f', '反引号', '缩放', 'ctrl j', 'ai 助手', '全局搜索', '全屏学堂', 'ctrl shift j', '右栏', 'ctrl alt b', '撤销', '重做', 'ctrl z', 'ctrl y'] },
   { id: 'shortcuts.kbEditor', section: 'shortcuts', group: '知识库 — 编辑器', label: '知识库编辑器快捷键',
     desc: '保存、阅读编辑切换、页面历史、AI 内联续写、插图脚注', keywords: ['保存', '预览', 'ctrl s', 'markdown 预览', 'ctrl /', 'ctrl e', '页面历史', 'alt', '后退', '前进', '内联建议', '续写', 'alt a', '插图', '脚注', 'ctrl shift i', 'ctrl alt f'] },
+  // 真源新增组（B1 收录范围）：写作面这 8 键此前只在手册里，设置页从来没有
+  { id: 'shortcuts.kbWriting', section: 'shortcuts', group: '知识库 — 写作面', label: '知识库写作面快捷键',
+    desc: '加粗、斜体、链接、标题档与正文、查找', keywords: ['写作面', '编辑器内', '加粗', '斜体', '链接', '标题', '正文', '查找', 'markdown', 'ctrl b', 'ctrl i', 'ctrl k', 'ctrl alt 1', 'ctrl alt 0', 'ctrl f'] },
   { id: 'shortcuts.kbSidebar', section: 'shortcuts', group: '知识库 — 侧栏', label: '知识库侧栏快捷键',
     desc: '重命名、删除、复制剪切粘贴选中项', keywords: ['重命名', 'f2', '删除', '侧栏', 'rename', '复制', '剪切', '粘贴', 'ctrl c', 'ctrl x', 'ctrl v'] },
   { id: 'shortcuts.kbTabs', section: 'shortcuts', group: '知识库 — Tab 管理', label: '知识库 Tab 快捷键',
     desc: '新建 / 关闭 / 切换标签页', keywords: ['tab', '标签页', '新建页面', '新建知识页', '关闭', '切换', 'ctrl w', 'ctrl tab'] },
   { id: 'shortcuts.kbReading', section: 'shortcuts', group: '知识库 — 阅读', label: '知识库阅读快捷键',
     desc: '沉浸阅读进出', keywords: ['沉浸阅读', 'ctrl shift r', 'escape', '阅读'] },
-  // 原 id 为 shortcuts.editorModule —— 该模块 2026-09-20 已物理退役，组内只剩 PDF 三行是真的，
-  // 故改组为「PDF 阅读器」。anchor id 随之改名（全仓只有本文件与 ShortcutsView 引用它，无兼容负担）。
-  { id: 'shortcuts.pdfKeys', section: 'shortcuts', group: 'PDF 阅读器', label: 'PDF 阅读器快捷键',
-    desc: 'PDF 内搜索、翻页', keywords: ['pdf', 'pdf 搜索', 'ctrl f', '翻页', 'pageup', 'pagedown', '下一页', '上一页', '空格'] },
+  // 原 id 为 shortcuts.editorModule —— 该模块 2026-09-20 已物理退役，组内只剩 PDF 那几行是真的，
+  // 故改组。2026-10-13 组名再由「PDF 阅读器」改为「电子书阅读器」（翻页键 PDF 与 EPUB 都吃）；
+  // anchor id 仍是 shortcuts.pdfKeys（内部标识，跟着改会牵动深链与契约，对用户不可见）。
+  { id: 'shortcuts.pdfKeys', section: 'shortcuts', group: '电子书阅读器', label: '电子书阅读器快捷键',
+    desc: 'PDF 内搜索、翻页、缩放，翻页键电子书同样适用', keywords: ['pdf', 'pdf 搜索', 'ctrl f', '翻页', 'pageup', 'pagedown', '下一页', '上一页', '空格', '缩放', 'ctrl 0', 'ctrl =', '电子书', 'epub', '阅读器'] },
+  // 真源新增组：图片查看器四键（都不带修饰键）此前只在手册里
+  { id: 'shortcuts.imageKeys', section: 'shortcuts', group: '图片查看器', label: '图片查看器快捷键',
+    desc: '适应窗口、实际大小、左右旋转', keywords: ['图片', '看图', '查看图片', '适应窗口', '实际大小', '旋转', '向左旋转', '向右旋转', '0', '1'] },
   { id: 'shortcuts.blogKeys', section: 'shortcuts', group: '博客', label: '博客快捷键',
     desc: '新建今日文章、保存并关闭、预览、大纲', keywords: ['博客快捷键', '新建文章', 'ctrl n', '保存并关闭', '大纲', 'ctrl alt o'] },
   { id: 'shortcuts.scheduleKeys', section: 'shortcuts', group: '日程', label: '日程快捷键',

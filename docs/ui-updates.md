@@ -1493,3 +1493,73 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 **未做（如实记）**：设置页那行「**所有可用的**键盘快捷键一览」在补齐约 18 行前仍名不副实 —— 本次没改这句文案（属产品措辞取舍，等 L1）。另：设置页键帽用 `<span>`、工作台空态三条用 `<kbd>`，两处语义不一致，本次未统一。
 
+---
+
+## 45. 指令表真源化（L1）：设置页 / 设置搜索 / 手册改由一份真源驱动（2026-10-13）
+
+方案：`docs/command-registry-plan.md`（含 A/B/C 三条拍板项）。本轮落地 **P0 + P1**；P2（手册表格生成）与 P3（命令面板增强）未做。
+
+**动机**：同一批键位在四处各写一遍，且已开始互相漂移 —— ① 设置页 `ShortcutsView.tsx` 手写行 ② 设置搜索 `sections.tsx` 手写 9 条 ③ 手册 `resources/help/键盘快捷键.md` 手写 11 张表 ④ `App.tsx` 的 `buildCommandItems()`（16 条**全都不带键位**）。§44 查出并修掉的那 8 处不符，根源就是「没有一份能对账的真源」。
+
+**拍板**：**B1**（真源覆盖全部有键位的命令）本轮生效；A1（面板门控隐藏）与 C1（手册只生成表格区）归 P2/P3。
+
+**真源**：新增 `src/lib/commandRegistry.ts` —— **11 组 / 61 条命令 / 63 个代码锚**。三条设计约束：零依赖（不 import React/DOM/electron）· 只写**可擦除语法**（禁 enum/namespace/参数属性，否则 strip-types 直接抛错）· `run` 不进真源（要 React 状态，App 侧留 `id → run` 绑定表，P3 做双射）。命名避让既有的 `src/lib/shortcuts.ts`（运行期按键闸门纯函数，不是清单）。真源能被 Node 直接 import（`node --experimental-strip-types`，本仓 42 个脚本已走这条路），所以生成器与契约都不需要 esbuild/打包 —— 顺带绕开沙箱里 esbuild 拉子进程 EPERM 那条老路。
+
+**设置页变化**：**42 行 / 9 组 → 61 行 / 11 组**。
+
+| 变化 | 内容 |
+|---|---|
+| 新组「知识库 — 写作面」 | 8 键：`Ctrl+B/I/K`、`Ctrl+Alt+1/2/3`、`Ctrl+Alt+0`、`Ctrl+F`（手册里一直有、设置页从来没有；源码档 `MonacoPane.tsx:447-453`、即时渲染档 `LiveMarkdownPane.tsx:1023-1029` 两档同键） |
+| 新组「图片查看器」 | 4 键：`0`/`1`/`[`/`]`（`useImageViewKeys.ts:28-31`） |
+| 全局补 4 条 | `Ctrl+Shift+J`（全屏学堂）、`Ctrl+Alt+B`（切右栏）、撤销 `Ctrl+Z`、重做 `Ctrl+Shift+Z`/`Ctrl+Y` |
+| PDF 组补 3 条 | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` 缩放 |
+| 副标题 | 「**所有可用的**键盘快捷键一览」自本次起名副其实（原来约 18 行没登记） |
+
+设置页的 `Row`/`Group` 渲染结构未动（键帽仍是 `<span>` + `min-w-[20px]`，`data-setting-anchor` 语义不变），只把数据源换成真源；`Row` 的入参从 `keys`/`alts` 二选一简化为 `chords: string[][]`。`sections.tsx` 的搜索索引 9 → 11 条，`desc`/`keywords` 仍**手写**（检索排序的第一杠杆，不随真源生成）。
+
+**真源一落地就查出来的三件事**：
+
+1. **图片查看器那 4 个键，代码里是有的**（`src/components/shared/image/useImageViewKeys.ts:28-31`）。§44 的对账原型把它们标成 `doc`（意为「只在手册里、代码里没找到」）—— 那是我当时 grep 限定 `*.tsx`、漏了 `.ts` 造成的假阴性。真源里已改成真锚。
+2. **跨模块重复键不是十处 ad-hoc 判断，而是一套统一闸门**：`Ctrl+S`/`Ctrl+N`/`Ctrl+/`/`Delete` 在两个模块都占键，但 `blog/index.tsx:215` 与 `PageEditor.tsx:840` 的 handler 首行都是 `if (getGlobalActiveTab() !== '本模块') return`。契约跑出 **9 组共用键位**，每一组都已把「谁先接管」写成真源的 `conflictNote`（§6 强制非空，缺一条即 FAIL）。唯一「同 scope 同键」的是 Escape 在笔记内的两条（返回列表 / 退出沉浸），用条件说明区分。
+3. **手册完全没有 PDF 一节**：`Ctrl+F`/`PageDown`/`空格`/`PageUp` 四条里手册只记了写作面那个 `Ctrl+F`，PDF 的 7 个键一个都没记。归 P2 生成时补。
+
+**一处真回归（被全量套件当场抓到并修好）**：`verify-perception.mjs` 的 **J12a** 原本是**文本解析** `ShortcutsView.tsx` 找 `Alt+A` —— 设置页改成数据驱动后必然误报（234 通过 / 1 失败）。已把 J12 三项改指真源（`COMMANDS` 取 `Alt+A` 归属、`Ctrl+Alt+S` 占用者不得声称续写），**235 项全绿**。教训与 §44 同源：**「读了这张表的文本」的契约不止一份**，改数据源要把它们一起找出来（全量套件就是那个发现机制）。
+
+**渲染等价契约抓到的两个真陷阱**（都写进脚本注释了）：
+
+- 组间分隔符**不能按文本数**：`Ctrl` `/`（切换预览）那枚**键帽**的文本也是 `/`，按 `>/<` 数会把键帽当分隔符 → kbEditor 组被数成 2 个（1 真 + 1 假）。改为按 class 认（分隔符有 `px-0.5`，键帽有 `min-w-[20px]`）。
+- 脚本里那个**外层模板字面量**再次咬人：注释里写反引号会把模板提前结束掉（§44 那次的 SSR 脚本栽过一次，这次又在注释里犯）。
+
+**契约变化**：
+
+| 脚本 | 变化 |
+|---|---|
+| `.AGENT/scripts/commands/verify-commands-registry.mjs`（新） | §1 结构（组/条/id 唯一/键帽 token 白名单/锚点可解析）· §5 设置搜索索引双射 · §6 撞车。PASS：11 组 / 61 条 / 63 锚 / 9 组共用键位 |
+| `.AGENT/scripts/commands/verify-commands-render.mjs`（新） | 渲染等价：**期望值全部由真源投影得到**（组锚点序列、每组行数、每组键帽序列、每组分隔符个数），所以不是「拿 61 比 61」，而是「DOM 必须逐字等于真源的投影」。PASS：**43 项** |
+| `.AGENT/scripts/settings/verify-shortcuts-table.mjs` | **不再解析 JSX**，改 import 真源（断言从正则切文本升级为类型化数据）：**54 → 58 项**。新增 A9/A10（表确实由真源驱动、手写键位字面量不许复活）；**H8/H9 按约定翻转**为「必须存在」并拆出 H9c（PDF 缩放 3 键） |
+| `.AGENT/scripts/ai-assistant/verify-perception.mjs` | J12 三项改指真源（见上） |
+
+**验收**：tsc node 0 错 · tsc web 0 错 · 新契约 §1/§5/§6 全绿 · 渲染等价 43/43 · 旧契约 58/58 · `verify-perception` 235/235 · `verify-empty-state-hints` 42/42 · 全量 **98 个契约 / 10 红**（与基线**同一批**：ACL 低信任标签 · conpty 命名管道 EPERM · esbuild 子进程 EPERM · junction 建不了 · 工具清单不符 · `schemaVersion` 未抬 · habit-link 误报 · tray-icon · ai-teaching 两条；本轮新增的两个契约都在套件里跑过且绿）。
+
+**未做**：手册表格仍是手写（P2 用 `<!-- GEN:keytable group=… -->` 生成区 + 生成器 + 契约 §4）· 命令面板仍是老的子串过滤、不显示键位、无最近使用（P3，`src/lib/fuzzy.ts` + `PaletteContext` 门控）· 密码本真正可改键仍无（新功能）· 设置页 `<span>` 与空态 `<kbd>` 仍未统一。
+
+---
+
+### 45.1 P2：AI 手册的表格区改由真源生成（同日）
+
+**改法**（C1：只生成表格区，散文与 keywords 手写 —— keywords 是检索排序杠杆，全量生成会把 §43 记的那类调优冲掉）：手册 `resources/help/键盘快捷键.md` 的每张表包进 `<!-- GEN:keytable ids=… -->` … `<!-- /GEN -->`，生成器 `.AGENT/scripts/commands/build-shortcuts-doc.mjs` 用真源重写标记内的表（`--check` 只比对、不一致非零退出；无时间戳，重跑零 diff，同铁律 24 的 CHANGELOG → `data.ts` 模式）。
+
+`ids` 是**编辑层面的归节决定**（手册的节 ≠ 设置页的组：手册有「编辑器内（写作面）」「笔记顶栏（页面历史）」「日程与打卡小窗」这种按界面区域命名的节），但它受契约约束：**61 条命令必须在全部标记里恰好各出现一次**（完整划分）—— 漏一条、重复收录都跑不过契约，编辑自由不会退化成漏登记。手册因此从 8 张表 / 约 35 行变成 **10 张表 / 61 行**，并补上了两节：**「PDF 阅读器」**（此前整节缺失，PDF 的 7 个键一个都没记）与**「密码本」**。
+
+**标记必须在读盘层剥掉**（`electron/lib/helpRetrieval.ts` 新增 `stripGenMarkers`，`helpService.loadHelpDocs` 调用）：帮助中心用 `MarkdownPreview`（react-markdown，未装 `rehype-raw`）渲染，HTML 注释会原样显示成文字；AI 的检索语料也不该混进 `GEN:keytable ids=…` 这种噪声。两处共用同一个 `loadHelpDocs` ⇒ 在唯一入口剥一次（同铁律 6 的「只插一处」思路）。
+
+**生成器首跑就撞到两个真问题**：
+
+1. **反引号键帽会把手册炸掉**：`Ctrl` + 反引号 按常规包成单反引号会拼出**三连反引号**，Markdown 把连续三个反引号当**代码围栏** —— 那一行连同后面内容直接烂掉，而生成器不会报错。真源里把该键帽投影成「反引号」二字（这也是本页生成之前手写时的既有写法），契约 §7 加负向断言锁死不许复发。
+2. **AI 精读上限的假警报**：检索契约报「《键盘快捷键》正文 4683 字符 > 4000，超出部分 AI 读不到」。查下来是**量错了**——契约拿未剥标记的正文算长度，10 处标记约 990 字符把它顶过了上限；真实消费者（`loadHelpDocs`）剥完标记只有 **3696**，没超、AI 读得到全篇。已把契约改成与消费者同一条路径（`stripGenMarkers` 之后再量），结构警告回到基线 **16 条**。这条值得记：**契约的度量口径必须跟着消费者走**，否则它会一边报假警报、一边在真超限时被无视。
+
+**顺带查出的第四处覆盖缺口**：真源原以为 PDF 只吃 `PageUp` / `PageDown` / `空格`，实际 **`←` / `→` 两个阅读器都吃**（`PdfReaderView.tsx:1187-1188`、`EpubReaderView.tsx:624-625`）⇒ 已补进 `pdf-next` / `pdf-prev`（代码锚 63 → 65）。同时确认电子书阅读器的 `onHostKeyDown` 对 `ctrl/meta/alt` 一律 `return false`（`EpubReaderView.tsx:623,838`），所以**页内搜索与缩放只对 PDF 生效**，这条已写进手册的散文与真源的 `note`。**组名已改（开发负责人拍板）**：设置页那一组与手册那一节都改名为「**电子书阅读器**」—— 翻页那几枚键 PDF 与电子书（EPUB）两个阅读器都吃，只叫「PDF 阅读器」名不副实。**anchor id 与命令 id 仍是 `shortcuts.pdfKeys` / `pdf-*`**：内部标识跟着改会牵动设置搜索锚点、深链与契约，且对用户不可见，故不动（真源里留了注释说明这处「名与 id 不一致」是刻意的）。
+
+**验收**：tsc node 0 错 · tsc web 0 错 · 真源契约 §1/§4/§5/§6/§7 全绿（10 处标记 / 61 条恰好各一次 / 表 = 生成结果）· 生成器 `--check` 幂等绿 · 渲染等价 43/43 · 旧契约 58/58 · `verify-perception` 235/235 · `verify-help-retrieval` **109/109、结构警告 16 条（与基线一致）** · 全量 **98 个契约 / 10 红**（与基线同批）。
+
+**未做**：命令面板增强（P3）· 手册的「首节 = 全篇摘要」规范缺口（§43 就记过：本篇无一级标题与首节摘要，生成器只管表、不管这个）。

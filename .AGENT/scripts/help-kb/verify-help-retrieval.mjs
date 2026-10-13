@@ -24,7 +24,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseFrontmatter, parseList, searchHelpIn } from '../../../electron/lib/helpRetrieval.ts'
+import { parseFrontmatter, parseList, stripGenMarkers, searchHelpIn } from '../../../electron/lib/helpRetrieval.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..', '..')
@@ -51,7 +51,11 @@ function loadDocs() {
         hasTitle: Boolean(parsed.meta.title),
         category: parsed.meta.category || '未分类',
         keywords: parseList(parsed.meta.keywords),
-        body: parsed.body,
+        // ★ 必须与消费者（helpService.loadHelpDocs）一致：走 stripGenMarkers 之后再算长度。
+        //   手册的表格区由真源生成，标记 `<!-- GEN:keytable ids=… -->` 是构建期脚手架，
+        //   消费者看不到它们 —— 这里若拿未剥标记的正文量长度，10 处标记≈990 字符会凭空
+        //   把《键盘快捷键》顶过 4000 上限，报出**AI 读不到尾部**的假警报（真值 3696，没超）。
+        body: stripGenMarkers(parsed.body),
       })
     } catch { /* 单篇失败不影响其它 */ }
   }

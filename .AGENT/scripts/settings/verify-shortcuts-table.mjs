@@ -1,9 +1,9 @@
 /**
- * 契约脚本：设置 → 快捷键「指令表」与代码实际判定的对账（v3.5.0，2026-10-13）
+ * 契约脚本：设置 → 快捷键「指令表」的**内容判据**（v3.5.0，2026-10-13）
  *
  * 为什么需要它：
- *   这张表是**手写的**（不是从真源生成的），所以「表里写了一套、代码里是另一套」没有任何机制
- *   会发现。2026-10-13 做了一次逐行对账，一次找出 8 处不符 —— 其中 4 处是"写了但不存在"的：
+ *   这张表过去是**手写的**，所以「表里写了一套、代码里是另一套」没有任何机制会发现。
+ *   2026-10-13 逐行对账一次找出 8 处不符 —— 其中 4 处是"写了但不存在"的：
  *     · `Ctrl` + 反引号 描述的是早已删除的「底部搜索面板」
  *     · `Ctrl+P` 错挂在「知识库 — 阅读」组（代码里是全局拦截）
  *     · `Ctrl+Shift+F` 代码里有、表里整条缺失
@@ -11,16 +11,25 @@
  *   本脚本把结论锁住；负向断言一律先 `stripComments`，否则注释里的说明文字会被当成真实内容
  *   （本文件的头注里就写着那些过期文案，正是现成靶子）。
  *
- * 口径：**只锁「写错了的」**（会让用户读到错误信息），不锁「漏登记的」。
- *   完整性（全局缺 Ctrl+Shift+J / Ctrl+Alt+B / Ctrl+Z·Y，及整块缺的「写作面 10 键」「图片查看器 4 键」）
- *   归 L1「真源化」处理 —— 届时本脚本应由「表 ↔ 真源 ↔ 生成物」三方对账取代，H 组是那个交接标记。
+ * ★ 2026-10-13 L1 真源化之后的分工（两边别搞混）：
+ *   · 表的**数据源**已是 src/lib/commandRegistry.ts（真源）。本脚本因此**不再解析
+ *     ShortcutsView.tsx 的 JSX 文本**，改成直接 import 真源 —— 断言从「正则切文本」
+ *     升级为「类型化数据」，重构组件不再凭空弄挂契约。
+ *   · 结构类断言（组数 / 条数 / 键帽 token / 锚点可解析 / 撞车）在
+ *     .AGENT/scripts/commands/verify-commands-registry.mjs，本脚本不重复。
+ *   · 本脚本守**内容判据**：这批具体键位归哪个组、死键有没有复活、代码里那个分支还在不在、
+ *     手册同没同步、设置搜索索引挪没挪 —— 即「真源里这条写得对不对」。
  *
- * 用法：
- *   node .AGENT/scripts/settings/verify-shortcuts-table.mjs
+ * 口径：只锁「写错了的」（会让用户读到错误信息）与「曾经漏登记、现已补齐」的那批。
+ *   H 组原本是「已知缺口」的交接标记，L1 落地时按约定**翻转**为「必须存在」，不是删掉。
+ *
+ * 用法（本脚本 import 了 .ts 真源）：
+ *   node --experimental-strip-types --no-warnings .AGENT/scripts/settings/verify-shortcuts-table.mjs
  */
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { stripComments, walkSourceFiles } from '../shared/strip-comments.mjs'
+import { COMMANDS, COMMAND_GROUPS, commandsOfGroup } from '../../../src/lib/commandRegistry.ts'
 
 const ROOT = resolve(import.meta.dirname, '..', '..', '..')
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8')
@@ -34,63 +43,60 @@ function ok(cond, label, detail = '') {
   return false
 }
 
-// ---------- 解析 ShortcutsView 的组与行 ----------
+// ---------- 数据源：真源 ----------
+// 刻意**不再**解析 ShortcutsView.tsx 的 JSX：表已由真源驱动，解析 JSX 只会让重构组件时
+// 凭空弄挂契约。下面把真源投影成与旧脚本同形的结构（anchor / label / rows[].combos），
+// 好让 A–I 各组判据保持原意不变。SRC 仍然保留 —— G 组要看 Row 组件的渲染代码。
 const SRC = stripComments(read('src/modules/settings/views/ShortcutsView.tsx'))
 
-function parseGroups(src) {
-  const out = []
-  const re = /<Group\s+anchor="([^"]+)"\s+label="([^"]+)">([\s\S]*?)<\/Group>/g
-  for (const m of src.matchAll(re)) {
-    const rows = [...m[3].matchAll(/<Row\s+([\s\S]*?)\/>/g)].map((r) => r[1])
-    out.push({
-      anchor: m[1],
-      label: m[2],
-      body: m[3],
-      rows: rows.map((t) => {
-        const altsM = t.match(/alts=\{\[([\s\S]*?)\]\}/)
-        const keysM = t.match(/keys=\{\[([\s\S]*?)\]\}/)
-        const seg = altsM ? altsM[1] : (keysM ? keysM[1] : '')
-        let groups = [...seg.matchAll(/\[([^\]]*)\]/g)]
-          .map((g) => [...g[1].matchAll(/'([^']*)'/g)].map((x) => x[1]))
-          .filter((g) => g.length)
-        if (!groups.length) {
-          const flat = [...seg.matchAll(/'([^']*)'/g)].map((x) => x[1])
-          if (flat.length) groups = [flat]
-        }
-        return { text: t, groups, combos: groups.map((g) => g.join('+')), multi: !!altsM }
-      }),
-    })
-  }
-  return out
-}
-
-const GROUPS = parseGroups(SRC)
+const GROUPS = COMMAND_GROUPS.map((g) => ({
+  anchor: g.anchor,
+  label: g.label,
+  groupId: g.id,
+  rows: commandsOfGroup(g.id).map((c) => ({
+    id: c.id,
+    text: c.desc,
+    groups: c.keys,
+    combos: c.keys.map((k) => k.join('+')),
+    multi: c.keys.length > 1,
+  })),
+}))
 const ALL_COMBOS = GROUPS.flatMap((g) => g.rows.flatMap((r) => r.combos))
 const groupOf = (anchor) => GROUPS.find((g) => g.anchor === anchor)
 const combosIn = (anchor) => (groupOf(anchor)?.rows ?? []).flatMap((r) => r.combos)
+/** 真源里**用户可见**的文案（label + desc）。负向断言只用它 —— note 是给开发者看的备注，
+ *  里面会引用过期文案（如「原表写『可在设置改键』」），把 note 也算进去必然假报。 */
+const VISIBLE_TEXT = COMMANDS.map((c) => `${c.label} ${c.desc}`).join('\n')
 
 // ============================================================
-// A. 结构：解析得到 9 组，且已无失效内容
+// A. 结构：真源 11 组 / 61 条，表由真源驱动，且已无失效内容
 // ============================================================
-ok(GROUPS.length === 9, `A1 解析出 9 个快捷键组`, `实际 ${GROUPS.length}: ${GROUPS.map((g) => g.label).join(' / ')}`)
+ok(GROUPS.length === 11, `A1 真源 ${GROUPS.length} 个快捷键组（B1 收录范围）`,
+  `实际 ${GROUPS.length}: ${GROUPS.map((g) => g.label).join(' / ')}`)
 ok(GROUPS.every((g) => g.rows.length > 0), 'A2 每组至少有一行',
   GROUPS.filter((g) => !g.rows.length).map((g) => g.label).join(', '))
-ok(ALL_COMBOS.length >= 30, `A3 表内共 ${ALL_COMBOS.length} 个键位组合（>=30）`)
+ok(ALL_COMBOS.length >= 60, `A3 真源内共 ${ALL_COMBOS.length} 个键位组合（>=60）`)
 
 // 「编辑器模块」整组失效：模块 2026-09-20 阶段四物理退役，组里只剩 PDF 三行是真的
-ok(!SRC.includes('编辑器模块'), 'A4 ShortcutsView 已无「编辑器模块」分组（模块已物理退役）')
-ok(!SRC.includes('shortcuts.editorModule'), 'A5 ShortcutsView 已无 shortcuts.editorModule 锚点')
+ok(!GROUPS.some((g) => g.label.includes('编辑器模块')) && !VISIBLE_TEXT.includes('编辑器模块'),
+  'A4 真源已无「编辑器模块」分组与文案（模块已物理退役）')
+ok(!GROUPS.some((g) => g.anchor === 'shortcuts.editorModule'),
+  'A5 真源已无 shortcuts.editorModule 锚点')
 ok(!has('src/modules/editor'), 'A6 src/modules/editor 确实不存在（A4/A5 的前提）')
 
 const SECTIONS = stripComments(read('src/modules/settings/sections.tsx'))
 ok(!SECTIONS.includes('shortcuts.editorModule'), 'A7 sections.tsx 已无 shortcuts.editorModule（否则设置搜索跳空锚）')
-ok(SRC.includes('shortcuts.pdfKeys') && SECTIONS.includes('shortcuts.pdfKeys'),
-  'A8 「PDF 阅读器」组在组件与设置索引两侧都登记了（anchor id 成对）')
+ok(groupOf('shortcuts.pdfKeys') !== undefined && SECTIONS.includes('shortcuts.pdfKeys'),
+  'A8 「PDF 阅读器」组在真源与设置索引两侧都登记了（anchor id 成对）')
+// A9/A10 —— 真源化的意义就在这两条：表必须真的由真源驱动，且手写行不许复活
+ok(SRC.includes('commandRegistry'), 'A9 ShortcutsView 确实 import 了真源（表不再是手写行）')
+ok(!/<Row\s+keys=\{/.test(SRC) && !/<Row\s+alts=\{/.test(SRC),
+  'A10 ShortcutsView 里已无手写键位字面量（keys=/alts= 写法都不该再出现）')
 
 // ============================================================
 // B. 死键 Ctrl+Shift+S：表里删了，且独立复核"代码里确实没有"
 // ============================================================
-ok(!SRC.includes("'Ctrl', 'Shift', 'S'"), 'B1 表里已删「Ctrl+Shift+S 保存全部」（死键）')
+ok(!ALL_COMBOS.includes('Ctrl+Shift+S'), 'B1 真源里已无「Ctrl+Shift+S 保存全部」（死键）')
 ok(!read('resources/help/键盘快捷键.md').includes('`Ctrl` `Shift` `S`'), 'B2 帮助手册里也已删该行')
 
 // 独立复核：全仓 .ts/.tsx 里 Ctrl+S 的处理只有笔记与博客两处，且都是 e.key === 's'（不含 Shift）
@@ -152,7 +158,7 @@ ok(/e\.altKey && !e\.ctrlKey && !e\.shiftKey && \(e\.key === 'a' \|\| e\.key ===
 const PDFC = combosIn('shortcuts.pdfKeys')
 ok(['Ctrl+F', 'PageDown', 'PageUp'].every((k) => PDFC.includes(k)),
   'E1 PDF 组含 Ctrl+F / PageDown / PageUp', PDFC.join(' | '))
-ok(groupOf('shortcuts.pdfKeys')?.label === 'PDF 阅读器', 'E2 组名是「PDF 阅读器」',
+ok(groupOf('shortcuts.pdfKeys')?.label === '电子书阅读器', 'E2 组名是「电子书阅读器」（2026-10-13 由「PDF 阅读器」改名：翻页键 EPUB 也吃）',
   String(groupOf('shortcuts.pdfKeys')?.label))
 const PDFV = stripComments(read('src/components/shared/pdf/PdfReaderView.tsx'))
 ok(/e\.key === 'f'/.test(PDFV) && /PageDown/.test(PDFV) && /PageUp/.test(PDFV),
@@ -161,7 +167,7 @@ ok(/e\.key === 'f'/.test(PDFV) && /PageDown/.test(PDFV) && /PageUp/.test(PDFV),
 // ============================================================
 // F. 密码本「可改键」这句不实描述：两侧都删了，且独立复核设置真源里确实没有该设置项
 // ============================================================
-ok(!SRC.includes('可在设置改键'), 'F1 表里已删「可在设置改键」')
+ok(!VISIBLE_TEXT.includes('可在设置改键'), 'F1 真源的用户可见文案里已无「可在设置改键」（note 里的历史备注不算）')
 ok(!SECTIONS.includes('可配置键位'), 'F2 设置索引里已删「可配置键位」')
 const SETTINGS = stripComments(read('src/lib/settings.ts'))
 ok(!SETTINGS.includes('fillPopupShortcut'),
@@ -173,11 +179,11 @@ ok(/globalShortcut\.register\(shortcutKey/.test(FILLER),
   'F5 该键是系统级 globalShortcut（表里标「系统级」是对的）')
 
 // ============================================================
-// G. Row 组件支持 alts（多组同效键）——没有它 C1/E1 那几行会渲染成一长串键帽
+// G. Row 组件渲染多组同效键 —— 没有它 C1/E1 那几行会渲染成一长串键帽
 // ============================================================
 const rowBody = SRC.slice(SRC.indexOf('function Row'))
-ok(/alts/.test(rowBody) && /keys/.test(rowBody), 'G1 Row 同时支持 keys（单组）与 alts（多组）')
-ok(/\{gi > 0 &&/.test(rowBody), 'G2 alts 组间有分隔符（gi>0 才画）')
+ok(/chords/.test(rowBody), 'G1 Row 接收 chords（多组同效键；真源里 keys 就是 string[][]）')
+ok(/\{gi > 0 &&/.test(rowBody), 'G2 组间有分隔符（gi>0 才画）')
 // JSX 里的文本子节点是裸的（`>/<`），不是被引号包起来的字符串 —— 第一种写法曾误报
 ok(/>\/</.test(rowBody) || /'\/'/.test(rowBody), 'G3 分隔符是 /')
 const multiRows = GROUPS.flatMap((g) => g.rows).filter((r) => r.multi)
@@ -207,14 +213,25 @@ ok(/key: 'Mod-b'/.test(LMP) && /key: 'Mod-i'/.test(LMP) && /key: 'Mod-k'/.test(L
    /key: 'Mod-Alt-0'/.test(LMP),
   'H7 即时渲染档 keymap 同键位（两档一致，手册那句"键位一致"成立）')
 
-// 已知缺口（L1 补齐后**翻转本组断言**，别默默删掉）：
-//   全局缺 Ctrl+Shift+J / Ctrl+Alt+B / Ctrl+Z·Ctrl+Shift+Z·Ctrl+Y；
-//   整块缺「笔记—写作面 8 键」与「图片查看器 4 键」（这两块只在手册里，设置页没有）
-const KNOWN_MISSING_GLOBAL = [['Ctrl+Shift+J'], ['Ctrl+Alt+B'], ['Ctrl+Z']]
-ok(KNOWN_MISSING_GLOBAL.every((c) => !ALL_COMBOS.includes(c.join('+'))),
-  'H8 [已知缺口] 全局仍缺 Ctrl+Shift+J / Ctrl+Alt+B / Ctrl+Z —— L1 补齐后请翻转本断言并更新头注')
-ok(!combosIn('shortcuts.kbEditor').includes('Ctrl+B') && !ALL_COMBOS.includes('0'),
-  'H9 [已知缺口] 「写作面 8 键」与「图片查看器 4 键」仍未进设置页 —— 同上')
+// H8/H9 —— 原本是「已知缺口」的交接标记，2026-10-13 L1（B1 收录范围：11 组 / 61 条）落地时
+//   **按约定翻转**（不是删掉）：缺口已补齐，现在锁的是「必须存在」，防有人把它们删回去。
+const FILLED_GLOBAL = ['Ctrl+Shift+J', 'Ctrl+Alt+B', 'Ctrl+Z', 'Ctrl+Shift+Z', 'Ctrl+Y']
+ok(FILLED_GLOBAL.every((k) => combosIn('shortcuts.global').includes(k)),
+  'H8 [已翻转] 全局组已补齐 Ctrl+Shift+J / Ctrl+Alt+B / 撤销重做（Ctrl+Z、Ctrl+Shift+Z、Ctrl+Y）',
+  `全局组现有: ${combosIn('shortcuts.global').join(' | ')}`)
+const WRITING_KEYS = ['Ctrl+B', 'Ctrl+I', 'Ctrl+K', 'Ctrl+Alt+1', 'Ctrl+Alt+2', 'Ctrl+Alt+3', 'Ctrl+Alt+0', 'Ctrl+F']
+const IMAGE_KEYS = ['0', '1', '[', ']']
+const PDF_ZOOM = ['Ctrl+=', 'Ctrl+-', 'Ctrl+0']
+ok(WRITING_KEYS.every((k) => combosIn('shortcuts.kbWriting').includes(k)),
+  'H9a [已翻转] 「知识库 — 写作面」8 键已进设置页',
+  `写作面组现有: ${combosIn('shortcuts.kbWriting').join(' | ')}`)
+ok(IMAGE_KEYS.every((k) => combosIn('shortcuts.imageKeys').includes(k)) &&
+   groupOf('shortcuts.imageKeys')?.label === '图片查看器',
+  'H9b [已翻转] 「图片查看器」4 键已进设置页',
+  `图片组现有: ${combosIn('shortcuts.imageKeys').join(' | ')}`)
+ok(PDF_ZOOM.every((k) => combosIn('shortcuts.pdfKeys').includes(k)),
+  'H9c [已翻转] PDF 缩放 3 键已进设置页（这三条此前连手册都没有）',
+  `PDF 组现有: ${combosIn('shortcuts.pdfKeys').join(' | ')}`)
 
 // ============================================================
 // I. Ctrl+O 撞车已解（2026-10-13 用户拍板：博客大纲改键到 Ctrl+Alt+O）
