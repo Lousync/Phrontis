@@ -422,6 +422,8 @@ export default function App() {
     // 监听端在知识库模块（handleTreeNewPick），不在这里直接创建 —— 读写分工铁律：
     // 建页的写入只发生在知识库文件树/编辑器那条通道上。
     'kb-new': () => window.dispatchEvent(new CustomEvent('kb-editor-new-page')),
+    // 新建 / 打开今日文章：同 kb-new，走模块自己的跨模块事件（监听端在博客模块）
+    'blog-new': () => window.dispatchEvent(new CustomEvent('blog-new-entry')),
   })
 
   const buildCommandItems = (): PaletteItem[] => {

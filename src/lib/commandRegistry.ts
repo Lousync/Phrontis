@@ -107,7 +107,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'sidebar', label: '折叠 / 展开侧栏', desc: '展开 / 折叠侧栏',
     keys: [['Ctrl', 'B']], group: 'global', scope: 'global', palette: true,
     conflictNote: '编辑器（Monaco / LiveMarkdown）内归「加粗」，App 侧靠 isEditingInput 对 .monaco-editor 让位（src/lib/shortcuts.ts）',
-    sources: ['src/App.tsx:1356'],
+    sources: ['src/App.tsx:1362'],
   },
   {
     id: 'escape', label: '关闭弹窗 / 返回列表', desc: '关闭弹窗 / 返回列表',
@@ -136,7 +136,7 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'ai-side', label: 'AI 助手', desc: 'AI 助手开关（工作台右栏；整窗模块下为悬浮助手）',
     keys: [['Ctrl', 'J']], group: 'global', scope: 'global', palette: true,
-    sources: ['src/App.tsx:1449', 'src/components/shared/AssistantPanel/index.tsx:164'],
+    sources: ['src/App.tsx:1455', 'src/components/shared/AssistantPanel/index.tsx:164'],
   },
   {
     id: 'ai-full', label: 'AI 助手 · 全屏学堂', desc: 'AI 助手：进入全屏学堂',
@@ -151,7 +151,7 @@ export const COMMANDS: CommandDef[] = [
     // 否则会列出一条「点了没反应」的命令
     requires: { workbench: true, fullWindowTab: false },
     note: '整窗模块下左右栏本就退场，handler 里 fullWindowTab 早退（App.tsx:1388）',
-    sources: ['src/App.tsx:1421'],
+    sources: ['src/App.tsx:1427'],
   },
   {
     id: 'undo', label: '撤销文件操作', desc: '撤销上一文件操作（重命名 / 删除 / 移动）',
@@ -168,13 +168,13 @@ export const COMMANDS: CommandDef[] = [
     id: 'zoom-in', label: '界面放大', desc: '界面放大',
     keys: [['Ctrl', '=']], group: 'global', scope: 'global', palette: true,
     conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1335）',
-    sources: ['src/App.tsx:1336'],
+    sources: ['src/App.tsx:1342'],
   },
   {
     id: 'zoom-out', label: '界面缩小', desc: '界面缩小',
     keys: [['Ctrl', '-']], group: 'global', scope: 'global', palette: true,
     conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1335）',
-    sources: ['src/App.tsx:1341'],
+    sources: ['src/App.tsx:1347'],
   },
   {
     id: 'sys-day', label: '日程与打卡小窗开关', desc: '日程与打卡小窗开关（系统级）',
@@ -408,7 +408,9 @@ export const COMMANDS: CommandDef[] = [
   // ---------------------------------------------------------------- 博客
   {
     id: 'blog-new', label: '新建 / 打开今日文章', desc: '新建 / 打开今日文章',
-    keys: [['Ctrl', 'N']], group: 'blogKeys', scope: 'blog', palette: false,
+    keys: [['Ctrl', 'N']], group: 'blogKeys', scope: 'blog', palette: true,
+    // 只在博客模块激活时出现（同 kb-new：Ctrl+N 三个模块都有，靠 tabs 区分）
+    requires: { tabs: ['blog'] },
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门），与笔记 / 日程的 Ctrl+N 各管各的',
     sources: ['src/modules/blog/index.tsx:218'],
   },
@@ -428,7 +430,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'blog-outline', label: '切换大纲', desc: '切换大纲（编辑器 / 详情态）',
     keys: [['Ctrl', 'Alt', 'O']], group: 'blogKeys', scope: 'blog', palette: false,
     note: '2026-10-13 改键：原为 Ctrl+O，与全局「快速打开文件」撞车（两条 window 监听都会跑）',
-    sources: ['src/modules/blog/index.tsx:315'],
+    sources: ['src/modules/blog/index.tsx:329'],
   },
   {
     id: 'blog-back', label: '返回列表', desc: '从编辑器 / 详情返回列表',

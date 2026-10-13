@@ -237,7 +237,16 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
       }
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // 「新建 / 打开今日文章」的**跨模块入口**（2026-10-13）：命令面板派发 `blog-new-entry`。
+    // 与知识库模块同一手法（那边补的是 kb-editor-new-page）—— 动作只在模块内有一份（handleTodayEntry），
+    // 外部只负责把意图递进来；要不要响应由调用方的门控决定（palette 侧 requires.tabs: ['blog']）。
+    // handleTodayEntry 是 async（建页要落盘）⇒ 必须显式丢弃 Promise，不能直接当 void 返回
+    const onNewEntry = (): void => { void handleTodayEntry() }
+    window.addEventListener('blog-new-entry', onNewEntry)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('blog-new-entry', onNewEntry)
+    }
   }, [handleTodayEntry, goToList, loadEntries])
 
   const starredEntries = entries.filter(e => e.isStarred)

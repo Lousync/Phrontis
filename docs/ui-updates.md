@@ -1619,4 +1619,18 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 **下一步**：面板要再纳模块命令，得先给模块开可调用通道。摸底结论是**只有 kb-new 能靠现有事件复用**；`blog-new` / `sch-new` / `kb-immersive` / `kb-preview` 这类动作都还只在各模块自己的 keydown 分支里，需要按知识库这次的同一手法（抽出回调 + 补一个跨模块事件）逐模块做。
 
+---
+
+### 45.4 第二个模块通道：blog-new（新建 / 打开今日文章）进面板（同日）
+
+按 §45.3 定下的手法做完第二个模块：博客模块的 keydown effect 里顺手挂了 `blog-new-entry` 监听端（动作就是它自己的 `handleTodayEntry`，未新写逻辑），真源把 `blog-new` 标上 `palette: true` + `requires: { tabs: ['blog'] }`，App 绑定表加一条派发。契约 §8 相应加一条「blog-new 只在博客激活时出现」（矩阵本来就带 `activeTab` 维度，加一条断言即可）。
+
+**tsc 抓到我一个真错误**：`const onNewEntry = (): void => handleTodayEntry()` 报 `TS2322: Type 'Promise<void>' is not assignable to type 'void'` —— `handleTodayEntry` 是 async（建页要落盘）。改成 `{ void handleTodayEntry() }`。与知识库那次不同（那边 `handleTreeNewPick` 是同步的），**每个模块的类型签名得各自看**，不能照抄。
+
+**第三次锚漂移，而且暴露了弱检查的边界**：这次一跑就红了 2 个锚（`App.tsx:1356`、`blog/index.tsx:315`）。查下来更有价值的一点是：**上一个提交（`bee9915`）里的 App 锚其实已经偏移了约 3 行，只是恰好落在非空行上、躲过了弱检查** —— 也就是说「契约绿」不等于「锚是对的」。已按 grep 实测值把 6 个锚全部重算（App 5 个 + blog 1 个，仍按**降序**替换防级联）。
+
+> 如实记：锚检查的强度边界现在有三次实证 —— 第二次 4/9 被抓、第三次 2/6 被抓，**其余靠人工 grep 复核**。锚是文档级指针（帮人找到代码），精确的行为判据一律在内容契约里，这个分工是刻意的；但「锚偏了几行还能通过」确实是个已知弱点，若日后想收紧，得给锚配「该行应含的 token」而不是只判非空。
+
+**验收**：tsc node 0 错 · tsc web 0 错 · 真源契约 §1/§2/§4/§5/§6/§7/§8 全绿 · 其余契约与全量套件见提交时的运行记录（本次为 99 个契约 / 10 红，与基线同批）。
+
 

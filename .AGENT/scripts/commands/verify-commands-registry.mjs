@@ -98,7 +98,7 @@ for (const c of COMMANDS) {
 }
 check('键帽 token 合法（修饰键在前、末位主键、无重复/未知）', tokenBad.length === 0, tokenBad.slice(0, 6).join(' | '))
 
-check(`palette:true 的条数 10`, COMMANDS.filter((c) => c.palette).length === 10,
+check(`palette:true 的条数 11`, COMMANDS.filter((c) => c.palette).length === 11,
   `实际 ${COMMANDS.filter((c) => c.palette).length}`)
 // ★ 不变量（2026-10-13 起，kb-new 进面板后取代了原先「只标 global」的过渡口径）：
 //   非 global scope 的命令想进面板**必须声明 requires** —— 否则它会在错的上下文里出现
@@ -274,6 +274,9 @@ check('right-panel 只在「工作台且非整窗模块」时出现',
 check('kb-new 只在笔记模块激活时出现',
   CTXS.every((c, i) => has(i, 'kb-new') === (c.activeTab === 'knowledge')),
   CTXS.map((c, i) => `${c.activeTab ?? 'null'}:${has(i, 'kb-new') ? '有' : '无'}`).join(' '))
+check('blog-new 只在博客模块激活时出现',
+  CTXS.every((c, i) => has(i, 'blog-new') === (c.activeTab === 'blog')),
+  CTXS.map((c, i) => `${c.activeTab ?? 'null'}:${has(i, 'blog-new') ? '有' : '无'}`).join(' '))
 const noReq = COMMANDS.filter((c) => c.palette && !c.requires).map((c) => c.id)
 check('无 requires 的命令在所有上下文下都出现', byCtx.every((list) => noReq.every((id) => list.some((c) => c.id === id))),
   `无 requires 的: ${noReq.join(',')}`)
