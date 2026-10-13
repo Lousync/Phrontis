@@ -200,7 +200,10 @@ console.log('\n=== E ⋮ 菜单 ===')
   for (const a of ['imgMenuFit', 'imgMenuActual', 'imgMenuRotateL', 'imgMenuRotateR']) {
     ok(new RegExp(`data-wb="${a}"`).test(page), `E4 查看组锚点 ${a}`)
   }
-  ok(/\{imgReady && \([\s\S]{0,400}查看/.test(page), 'E5 查看组只在图片真渲染出来时出现')
+  /* E5 判据 2026-10-13 改形：原来按**文案**找（`{imgReady && (` 之后 400 字内出现「查看」）——
+     而「查看」正是那个被整条去掉的分组标题（见 docs/ui-updates.md §56）⇒ 文案一改就假红。
+     现在按**锚点**找（imgMenuFit 是这一组的第一条），与 E4 同源：文案可以改，锚点不许漂。 */
+  ok(/\{imgReady && \([\s\S]{0,400}data-wb="imgMenuFit"/.test(page), 'E5 查看组只在图片真渲染出来时出现')
   ok(/\+ \(isSvgImage \? 1 : 0\)/.test(page) && /\+ \(imgReady \? 4 : 0\)/.test(page),
     'E6 moreMenuItemCount 如实计入两项新增')
   ok(/fileType === 'html' \|\| isImagePage\) && onRequestReading/.test(page),

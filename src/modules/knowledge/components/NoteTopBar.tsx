@@ -21,6 +21,7 @@
 
 import { useEffect, useRef, type ReactNode } from 'react'
 import { BookOpen, ChevronLeft, ChevronRight, MoreHorizontal, PenLine, Sparkles } from 'lucide-react'
+import { NoteMoreMenu } from './NoteMoreMenu'
 
 export interface NoteTopBarProps {
   /** 文档名（拍板 B2：只显示文件名，不带扩展名） */
@@ -194,11 +195,10 @@ export function NoteTopBar({
             <MoreHorizontal size={17} />
           </button>
           {moreOpen && (
-            <div
-              data-wb="noteTopMoreMenu"
-              className="kb-pop absolute right-0 top-full z-50 mt-1 w-44 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-xl"
-            >
-              {moreMenu}
+            /* 锚点留在这一层（探针按 `[data-wb="noteTopMoreMenu"] button` 找条目）；
+               「高度封顶 + 内部滚动」在 `NoteMoreMenu`（那段要 state，而本组件有**零 state** 的硬不变量）。 */
+            <div data-wb="noteTopMoreMenu" className="kb-pop absolute right-0 top-full z-50 mt-1 w-44">
+              <NoteMoreMenu>{moreMenu}</NoteMoreMenu>
             </div>
           )}
         </div>

@@ -64,10 +64,13 @@ const PdfReaderView = lazy(() => import('../../../components/shared/pdf/PdfReade
      `text-[10px] text-[var(--text-secondary)]`，与命令面板的键帽是两种视觉、两种对比度。
 
    ★ 二级菜单（复制路径 ▸）**往左开**：⋮ 本身贴在窗口右缘，往右必出屏 —— 与同文件已有的
-     「文件格式 ▸」（`right-[calc(100%+4px)]`）同一口径。 */
-function MoreGroup({ title }: { title: string }) {
-  return <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">{title}</div>
-}
+     「文件格式 ▸」（`right-[calc(100%+4px)]`）同一口径。
+
+   ★ **分组标题已整条去掉**（2026-10-13，开发者反馈「不用这个小标题，菜单就能短一截」）：
+     6 个标题（页面 / 写作 / 编辑 / 布局 / 文件 / 系统）合计占掉约一成高度，而它们提供的信息
+     分隔线已经给了（分组边界 = 那条横线）。⇒ 现在只剩 `MoreSep`，不再有 `MoreGroup`。
+     注意：原来「系统」那组**没有**自己的分隔线（靠标题分隔），去标题时必须补一条，
+     否则「导出为 PDF…」与「在系统中打开」会黏成一块。 */
 function MoreSep() {
   return <div className="my-1 border-t border-[var(--border-color)]" />
 }
@@ -79,7 +82,12 @@ function MoreItem({ anchor, icon, label, kbd, danger, disabled, onClick }: {
       className={`w-full flex items-center gap-2 px-3 py-1.5 text-[12px] transition-colors ${disabled
         ? 'cursor-default text-[var(--text-disabled)]'
         : danger
-          ? 'text-[var(--text-secondary)] hover:bg-[var(--danger)]/10 hover:text-[var(--danger)]'
+          /* 危险条（删除）**常亮红**（2026-10-13 开发者反馈「最后的删除按钮标成红色」）：
+             文案与图标的两个字面量与共享的 `FileContextMenu` 危险项**逐字符相同** ——
+             同一个语义在 ⋮ 与文件/编辑器右键两处必须同款，否则同一件事两种长相。
+             ★ 已量：`--danger` 当文字在菜单底上，默认深色 3.31:1、14 套主题最低 2.89:1（12px 小字 AA 线 4.5）。
+               阈值不达标的取舍与抬亮候选留在 `docs/v3.5.0-feedback.md` F-3，改一处即可切换。 */
+          ? 'text-[var(--danger)] hover:bg-[var(--bg-hover)]'
           : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
       {icon}
       {label}
@@ -87,22 +95,50 @@ function MoreItem({ anchor, icon, label, kbd, danger, disabled, onClick }: {
     </button>
   )
 }
-function MoreSub({ anchor, icon, label, items }: {
-  anchor?: string; icon: ReactNode; label: string; items: Array<{ label: string; onSelect: () => void }>
+/** 二级子菜单（复制路径 ▸ / 文件格式 ▸ 共用一段）。
+ *
+ *  ★ **往左开**（`right-[calc(100%+4px)]`）：⋮ 贴在窗口右缘，往右必出屏。
+ *  ★ **放不下就朝上开**（2026-10-13 起必需）：⋮ 现在被封顶 + 内部滚动（见 NoteTopBar 的 `menuMaxH`），
+ *    贴底的子菜单会被这个滚动容器切掉半截 —— 打开前比一次「本行下方还剩多少」，
+ *    不够就把子菜单改成**底对齐**（`bottom:-5`），它便朝上长出容器。
+ *    `need` 是按行高估的（12px 字 + py-1.5 ≈ 27px/行，另加容器 py-1 的 8px），再乘 1 行余量 ——
+ *    只用来决定「朝上还是朝下」，估偏一行无副作用。
+ *  ★ `note` = 行尾说明（文件格式右侧那个「Markdown」），与键帽同槽位，二选一。
+ *  ★ `active` = 子菜单里的当前项（文件格式用），给 `bg-selected` 底。 */
+function MoreSub({ anchor, icon, label, note, items }: {
+  anchor?: string; icon: ReactNode; label: string; note?: string
+  items: Array<{ label: string; onSelect: () => void; active?: boolean }>
 }) {
   const [open, setOpen] = useState(false)
+  const [flip, setFlip] = useState(false)
+  const btnRef = useRef<HTMLButtonElement | null>(null)
+  const openAt = (): void => {
+    const el = btnRef.current
+    const box = el?.closest('[data-wb="noteTopMoreMenu"]') as HTMLElement | null
+    if (el && box) {
+      const r = el.getBoundingClientRect()
+      const b = box.getBoundingClientRect()
+      const need = items.length * 27 + 8 + 27
+      setFlip(r.bottom + need > b.bottom && r.top - need > b.top)
+    }
+    setOpen(true)
+  }
   return (
     <div className="relative" onMouseLeave={() => setOpen(false)}>
-      <button data-wb={anchor} onMouseEnter={() => setOpen(true)} onClick={() => setOpen(v => !v)}
+      <button ref={btnRef} data-wb={anchor} onMouseEnter={openAt} onClick={() => (open ? setOpen(false) : openAt())}
         className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
         {icon}{label}
-        <ChevronRight size={12} className="ml-auto shrink-0 opacity-60" />
+        {note && <span className="ml-auto shrink-0 text-[10px] text-[var(--text-secondary)]">{note}</span>}
+        <ChevronRight size={12} className={`${note ? '' : 'ml-auto '}shrink-0 opacity-60`} />
       </button>
       {open && (
-        <div className="kb-pop absolute right-[calc(100%+4px)] top-[-5px] z-50 w-40 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-xl">
+        <div style={flip ? { bottom: -5 } : { top: -5 }}
+          className="kb-pop absolute right-[calc(100%+4px)] z-50 max-h-72 w-40 overflow-y-auto overscroll-contain rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-xl">
           {items.map(it => (
             <button key={it.label} onClick={it.onSelect}
-              className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+              className={`w-full px-3 py-1.5 text-left text-[12px] transition-colors ${it.active
+                ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]'
+                : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
               {it.label}
             </button>
           ))}
@@ -118,7 +154,6 @@ function MoreSplitGroup({ disabled, onPick }: { disabled: boolean; onPick: (o: '
   return (
     <>
       <MoreSep />
-      <MoreGroup title="布局" />
       <MoreItem anchor="peSplitRow" icon={<PanelRight size={13} />} label="左右分屏" disabled={disabled}
         onClick={() => onPick('row')} />
       <MoreItem anchor="peSplitCol" icon={<PanelTop size={13} />} label="上下分屏" disabled={disabled}
@@ -200,8 +235,6 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const [content, setContent] = useState('')
   const [fileType, setFileTypeState] = useState(initialFileType)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
-  /** 顶栏 ⋮ 里「文件格式」二级子菜单（拍板 C2：⋮ 与编辑器右键菜单两处都有） */
-  const [showFmtMenu, setShowFmtMenu] = useState(false)
   /** ⋮ 里「文件信息」小卡（批 1）：文本类不再落元信息卡后，路径 / 尺寸 / 修改时间的落点 */
   const [showFileInfo, setShowFileInfo] = useState(false)
   /** html 的「源码 ⇄ 沙箱渲染」（批 1 拍板：默认仍是沙箱渲染，只加出口）。
@@ -1518,10 +1551,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
             showMore={moreMenuItemCount > 0}
             moreOpen={showMoreMenu}
             onToggleMore={() => setShowMoreMenu(v => !v)}
-            onCloseMore={() => { setShowMoreMenu(false); setShowFmtMenu(false) }}
+            onCloseMore={() => setShowMoreMenu(false)}
             moreMenu={isMdNote ? (
               <>
-                <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">页面</div>
                 {!isWelcomeHtml && !isArchiveFile && (
                   <button onClick={() => { handleToggleStar(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
@@ -1582,8 +1614,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     onClick={() => { setInlineBacklinks(v => !v); setShowMoreMenu(false) }} />
                 )}
 
-                <div className="my-1 border-t border-[var(--border-color)]" />
-                <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">写作</div>
+                <MoreSep />
                 {!preview && (
                   <button onClick={() => { insertFootnote(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
@@ -1598,28 +1629,16 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">Ctrl+Shift+I</span>
                   </button>
                 )}
-                {/* 文件格式：二级子菜单，往**左**展开 —— 菜单本身贴右缘，往右会出屏（同原型） */}
-                <div className="relative" onMouseLeave={() => setShowFmtMenu(false)}>
-                  <button
-                    onMouseEnter={() => setShowFmtMenu(true)}
-                    onClick={() => setShowFmtMenu(v => !v)}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-                  >
-                    <FileText size={13} />文件格式
-                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{getFileTypeInfo(fileType).label}</span>
-                    <ChevronRight size={12} className="opacity-60" />
-                  </button>
-                  {showFmtMenu && (
-                    <div className="kb-pop absolute right-[calc(100%+4px)] top-[-5px] z-50 max-h-64 w-36 overflow-y-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-xl">
-                      {FILE_LANG_OPTIONS.map(opt => (
-                        <button key={opt.ext || 'md'}
-                          onClick={() => { applyFileType(opt.ext, opt.label); setShowMoreMenu(false); setShowFmtMenu(false) }}
-                          className={`w-full px-3 py-1.5 text-left text-[12px] transition-colors ${fileType === opt.ext ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}
-                        >{opt.label}</button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                {/* 文件格式：二级子菜单，往**左**展开 —— 菜单本身贴右缘，往右会出屏（同原型）。
+                    2026-10-13 起改用 `MoreSub`（原来是自己写的一段 `relative` + `showFmtMenu`）：
+                    ⋮ 加了「封顶 + 内部滚动」之后，凡贴底的子菜单都会被滚动容器切掉，
+                    而「放不下就朝上开」的判定只该有一份 ⇒ 两个子菜单合并到同一个原语。 */} 
+                <MoreSub icon={<FileText size={13} />} label="文件格式" note={getFileTypeInfo(fileType).label}
+                  items={FILE_LANG_OPTIONS.map(opt => ({
+                    label: opt.label,
+                    active: fileType === opt.ext,
+                    onSelect: () => { applyFileType(opt.ext, opt.label); setShowMoreMenu(false) },
+                  }))} />
 
                 {/* 编辑组（2026-10-13 能力补齐）：查找 / 替换原先只有快捷键（Ctrl+F / Ctrl+H），
                     菜单里没有入口 —— 键盘用户之外的路径等于不存在。★ 只在「源码档 + 编辑态」出现：
@@ -1627,7 +1646,6 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 {canFindReplace && (
                   <>
                     <MoreSep />
-                    <MoreGroup title="编辑" />
                     <MoreItem anchor="peFind" icon={<Search size={13} />} label="查找…" kbd="Ctrl+F"
                       onClick={() => { runEditorAction('actions.find'); setShowMoreMenu(false) }} />
                     <MoreItem anchor="peReplace" icon={<Replace size={13} />} label="替换…" kbd="Ctrl+H"
@@ -1646,7 +1664,6 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     与文件树右键（重命名 / 将文件移动到… / 创建副本 / 复制路径 ▸ / 删除）不对齐。
                     每条都靠可选 prop 门控：模块层没接就**不出现**（不做点了没反应的假按钮）。 */}
                 <MoreSep />
-                <MoreGroup title="文件" />
                 {onRenameRequest && (
                   <MoreItem anchor="peRename" icon={<Pencil size={13} />} label="重命名" onClick={openRename} />
                 )}
@@ -1678,7 +1695,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   <MoreItem anchor="peExportPdf" icon={<Download size={13} />} label="导出为 PDF…"
                     onClick={() => { setShowMoreMenu(false); onExportPdfRequest() }} />
                 )}
-                <MoreGroup title="系统" />
+                {/* 「系统」组原来靠标题与上一条分隔 —— 标题去掉后必须补一条分隔线，
+                    否则「导出为 PDF…」与「在系统中打开」会黏成一块（去掉标题的连带项）。 */}
+                <MoreSep />
                 <MoreItem anchor="peSystemOpen" icon={<ExternalLink size={13} />} label="在系统中打开"
                   onClick={() => { void handleArchiveOpenInSystem(false); setShowMoreMenu(false) }} />
                 <MoreItem anchor="peReveal" icon={<FolderSearch size={13} />} label="在文件夹中显示"
@@ -1700,7 +1719,6 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                  而非 md 的扩展名来自文件名 ⇒ 加了就是一个重启即失效的假按钮
                  （原型 index.html:750-753 的取舍记录）。 */
               <>
-                <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">文件</div>
                 {(isWelcomeHtml || isArchiveHtml) && (
                   <button data-wb="peHtmlSource" onClick={() => { setHtmlSource(v => !v); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
@@ -1761,8 +1779,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     也给纯键盘用户一个入口。★ 只在图片真渲染出来时出现（见 moreMenuItemCount）。 */}
                 {imgReady && (
                   <>
-                    <div className="my-1 border-t border-[var(--border-color)]" />
-                    <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">查看</div>
+                    <MoreSep />
                     <button data-wb="imgMenuFit" onClick={() => { iv.fit('fit'); setShowMoreMenu(false) }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                       <Maximize size={13} />适应窗口

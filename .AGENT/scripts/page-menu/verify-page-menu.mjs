@@ -329,9 +329,86 @@ check('沉浸退出热区补了 data-wb（否则打印样式抓不到它）', MO
     block.length > 0 && !/flex-1|overflow-y-auto/.test(block))
 }
 
+// ---------------------------------------------------------------- §12 菜单收短 / 不切底 / 删除标红（批 1c-1，2026-10-13）
+
+console.log('\n§12 菜单太长的三条整改：去分组标题 / 高度封顶可滚 / 删除常亮红')
+
+const TOPBAR = read('src/modules/knowledge/components/NoteTopBar.tsx')
+const MOREMENU = read('src/modules/knowledge/components/NoteMoreMenu.tsx')
+const FCM = read('src/components/shared/FileContextMenu.tsx')
+
+/** 剥注释（**只给下面几条"负向"断言用**）。
+ *  为什么需要：源码注释里会写到被删掉的老写法（「不再有 MoreGroup」「不是写死 max-h-[calc(100vh…)]」），
+ *  难道让注释把自己的断言判红？—— 那正是本轮踩到的假红。
+ *  这里的剥离是**简化版**：本文件被测的两处源码不含「带 `/*` 的正则字面量」，
+ *  所以不需要别的契约那台状态机（它懂字符串与正则，也正因此更难写对）。 */
+const noComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+const PAGE_NC = noComments(PAGE)
+const TOPBAR_NC = noComments(TOPBAR)
+const MOREMENU_NC = noComments(MOREMENU)
+
+// ① 分组标题整条退役（6 个标题约占一成高度，分隔线已提供同样的信息）
+check('负向：PageEditor 里不再有 MoreGroup（连定义一起删掉，不留半死代码）',
+  !PAGE_NC.includes('function MoreGroup(') && !PAGE_NC.includes('<MoreGroup'),
+  PAGE_NC.includes('function MoreGroup(') ? '定义还在' : PAGE_NC.includes('<MoreGroup') ? '还有引用' : '定义与引用都 0 处')
+check('负向：也不再有「分组标题」那种手写 div（md 的页面 / 写作 + 非 md 的文件 / 查看）',
+  !/className="px-3 pb-1 pt-1\.5 text-\[10px\] text-\[var\(--text-muted\)\]"/.test(PAGE))
+check('★ 连带项：「系统」组原来靠标题分隔，去标题后必须补分隔线（否则两条黏成一块）',
+  /<MoreSep \/>\s*\n\s*<MoreItem anchor="peSystemOpen"/.test(PAGE))
+check('分组边界仍由 MoreSep 表达（至少在位 4 条：写作 / 编辑 / 布局 / 文件…）',
+  (PAGE.match(/<MoreSep \/>/g) || []).length >= 4, `${(PAGE.match(/<MoreSep \/>/g) || []).length} 处`)
+check('负向：不存在「去标题顺手把分隔线也删了」的写法（MoreSep 定义仍在且被用）',
+  /function MoreSep\(\)/.test(PAGE) && PAGE.includes('<MoreSep />'))
+
+// ② 高度封顶 + 内部滚动（不然窗口一矮，底部的删除就点不到）
+check('★ 弹层壳独立成组件（顶栏有「零 state」硬不变量，这段要 state ⇒ 不能写进 NoteTopBar）',
+  /export function NoteMoreMenu\(/.test(MOREMENU) && /<NoteMoreMenu>\{moreMenu\}<\/NoteMoreMenu>/.test(TOPBAR))
+check('顶栏侧仍零 state（A9 的不变量由「抽出去」保住，而不是放宽断言）',
+  !/useState/.test(TOPBAR_NC))
+check('锚点仍留在顶栏那一层（探针 `[data-wb="noteTopMoreMenu"] button` 照旧命中）',
+  TOPBAR_NC.includes('data-wb="noteTopMoreMenu"'))
+check('菜单容器可滚 + 不把滚动传给正文',
+  /className="[^"]*overflow-y-auto overscroll-contain/.test(MOREMENU))
+check('★ 封顶高度是**实测**的（视口底 − 菜单顶 − 12），不是写死的 vh 算式',
+  /window\.innerHeight - el\.getBoundingClientRect\(\)\.top - 12/.test(MOREMENU)
+  && /style=\{maxH === null \? undefined : \{ maxHeight: maxH \}\}/.test(MOREMENU))
+check('负向：没有写死 `max-h-[calc(100vh…`（菜单顶上方还压着标题栏 + 页签条 + 顶栏，写死必漏一截）',
+  !/max-h-\[calc\(100vh/.test(MOREMENU_NC))
+check('用 useLayoutEffect（绘制前就封顶，不闪一下"长菜单"）', /useLayoutEffect\(\(\) => \{/.test(MOREMENU))
+check('窗口 resize 重算（否则改窗口大小后封顶值过期）',
+  /window\.addEventListener\('resize', fit\)/.test(MOREMENU) && /removeEventListener\('resize', fit\)/.test(MOREMENU))
+check('有下限兜底（Math.max(160…)，窗口极矮时不会退化成 0 高度）', /Math\.max\(160,/.test(MOREMENU))
+
+// ③ 二级子菜单：滚动容器会切掉贴底的子菜单 ⇒ 必须「放不下就朝上开」
+check('MoreSub 有翻转判定（比一次「本行下方还剩多少」）',
+  /const \[flip, setFlip\] = useState\(false\)/.test(PAGE)
+  && /setFlip\(r\.bottom \+ need > b\.bottom && r\.top - need > b\.top\)/.test(PAGE))
+check('翻转走 style（朝下 `top:-5` / 朝上 `bottom:-5`），不再写死 top-[-5px]',
+  /style=\{flip \? \{ bottom: -5 \} : \{ top: -5 \}\}/.test(PAGE) && !PAGE.includes('top-\[-5px\]'))
+check('子菜单自身也限高 + 不外溢滚动（文件格式那种 8 项的长子菜单）',
+  /max-h-72 w-40 overflow-y-auto overscroll-contain/.test(PAGE))
+check('★ 文件格式并到同一个原语（原来是自己写的一段 relative + showFmtMenu）',
+  /<MoreSub icon=\{<FileText size=\{13\} \/>\} label="文件格式" note=\{getFileTypeInfo\(fileType\)\.label\}/.test(PAGE))
+check('负向：`showFmtMenu` 那套 state 已清干净（残留 = 死代码 + 两套子菜单逻辑）',
+  !/FmtMenu/.test(PAGE_NC), '注释里提到旧名字不算')
+check('子菜单的当前项仍给选中底色（fileType === opt.ext）', /active: fileType === opt\.ext/.test(PAGE))
+
+// ④ 删除条常亮红（而不是只在悬停时变红）
+const DANGER_RECIPE = "'text-[var(--danger)] hover:bg-[var(--bg-hover)]'"
+check('★ MoreItem 的危险分支 = 常亮红 + 中性悬停底', PAGE.includes(DANGER_RECIPE))
+check('负向：旧的「只在悬停时变红」写法已消失（那是"平时看不出是危险项"）',
+  !PAGE.includes("hover:bg-[var(--danger)]/10 hover:text-[var(--danger)]"))
+check('★ 与共享右键菜单的危险项**同一份字面量**（同一语义不许两处两种长相）',
+  FCM.includes(DANGER_RECIPE),
+  FCM.includes(DANGER_RECIPE) ? 'FileContextMenu 同款' : 'FileContextMenu 不是这一份 —— 要么同步它，要么改这里')
+check('两条删除（md 的「删除页面」/ 非 md 的「删除文件」）都走 danger',
+  (PAGE.match(/danger icon=\{<Trash2 size=\{13\} \/>\}/g) || []).length === 2)
+
+// ---------------------------------------------------------------- 收尾
+
 console.log('')
 if (failures === 0) {
-  console.log('PASS  页面 ⋮ 批 1b：六个动作接到位 / 删除不再是假按钮 / 导入进可达菜单 / 门控与反例齐全')
+  console.log('PASS  页面 ⋮ 批 1b + 1c-1：动作接到位 / 删除不再是假按钮 / 导入进可达菜单 / 菜单不再切底 / 删除常亮红')
   process.exit(0)
 }
 console.error(`FAIL  ${failures} 项未通过`)
