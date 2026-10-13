@@ -133,6 +133,28 @@ for (const c of COMMANDS) {
 }
 check(`代码锚全部可解析（${anchorCount} 个，另有 ${docOnly} 个 doc）`, anchorBad.length === 0, anchorBad.slice(0, 6).join(' | '))
 
+// ---------------------------------------------------------------- §2 id ↔ App 绑定表双射
+
+console.log('\n§2 命令面板绑定表（真源 palette:true ↔ App.tsx 的 buildPaletteBindings）')
+
+const APP_SRC = stripComments(readFileSync(resolve(ROOT, 'src/App.tsx'), 'utf8'))
+const from = APP_SRC.indexOf('const buildPaletteBindings')
+const to = APP_SRC.indexOf('const buildCommandItems')
+const bindSeg = from >= 0 && to > from ? APP_SRC.slice(from, to) : ''
+const bindKeys = [...bindSeg.matchAll(/^\s+'([A-Za-z0-9_-]+)':/gm)].map((m) => m[1])
+const wantIds = COMMANDS.filter((c) => c.palette).map((c) => c.id)
+
+check(`绑定表可解析（读到 ${bindKeys.length} 个键）`, bindSeg.length > 0 && bindKeys.length > 0,
+  '切不出 buildPaletteBindings 段 —— 该函数被改名了？契约的解析锚要跟着改')
+check('真源声明 palette:true 的都接了动作（否则面板里列出来却点了没反应）',
+  wantIds.every((id) => bindKeys.includes(id)),
+  `缺绑定: ${wantIds.filter((id) => !bindKeys.includes(id)).join(',') || '无'}`)
+check('绑定表里没有真源之外的幽灵键（否则是绕过真源偷偷接命令）',
+  bindKeys.every((id) => wantIds.includes(id)),
+  `幽灵: ${bindKeys.filter((id) => !wantIds.includes(id)).join(',') || '无'}`)
+check('双射成立（两侧条数相等且互为子集）', bindKeys.length === wantIds.length,
+  `绑定 ${bindKeys.length} / 声明 ${wantIds.length}`)
+
 // ---------------------------------------------------------------- §5 设置搜索索引
 
 console.log('\n§5 设置搜索索引（sections.tsx 的 shortcuts.* 与真源组一一对应）')
@@ -223,6 +245,34 @@ const loadedBody = stripGenMarkers(parsedDoc ? parsedDoc.body : '')
 check('stripGenMarkers 剥净了（帮助中心渲染与 AI 语料都看不到脚手架）',
   !/GEN:keytable/.test(loadedBody) && !/<!--\s*\/GEN/.test(loadedBody))
 check('只剥标记、不剥内容（剥完表格仍在）', loadedBody.includes('| 快捷键 | 功能 |'))
+
+// ---------------------------------------------------------------- §8 面板门控
+
+console.log('\n§8 面板门控（声明式条件，4 种上下文穷举）')
+
+const CTXS = [
+  { workbench: true, fullWindowTab: false },
+  { workbench: true, fullWindowTab: true },
+  { workbench: false, fullWindowTab: false },
+  { workbench: false, fullWindowTab: true },
+]
+const byCtx = CTXS.map((c) => paletteCommands(c))
+check('4 种上下文下都能算出来，且结果都是真源子集',
+  byCtx.every((list) => list.every((c) => COMMANDS.includes(c))), '')
+check('right-panel 只在「工作台且非整窗模块」时出现（其余三种隐藏）',
+  byCtx[0].some((c) => c.id === 'right-panel') &&
+  !byCtx[1].some((c) => c.id === 'right-panel') &&
+  !byCtx[2].some((c) => c.id === 'right-panel') &&
+  !byCtx[3].some((c) => c.id === 'right-panel'),
+  CTXS.map((c, i) => `${c.workbench}/${c.fullWindowTab}:${byCtx[i].some((x) => x.id === 'right-panel') ? '有' : '无'}`).join(' '))
+const noReq = COMMANDS.filter((c) => c.palette && !c.requires).map((c) => c.id)
+check('无 requires 的命令在 4 种上下文下都出现', byCtx.every((list) => noReq.every((id) => list.some((c) => c.id === id))),
+  `无 requires 的: ${noReq.join(',')}`)
+// ★ 打错字段名 = 门控**永不生效**且没有任何报错（gateAllows 只读它认识的键）—— 必须机器拦
+const KNOWN_GATE_KEYS = ['workbench', 'fullWindowTab']
+const badGate = COMMANDS.filter((c) => c.requires && Object.keys(c.requires).some((k) => !KNOWN_GATE_KEYS.includes(k)))
+check('requires 只用已声明的字段（写错字段名会让门控静默失效）', badGate.length === 0,
+  badGate.map((c) => `${c.id}: ${Object.keys(c.requires).join(',')}`).join(' | '))
 
 // ---------------------------------------------------------------- 收尾
 

@@ -106,7 +106,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'sidebar', label: '折叠 / 展开侧栏', desc: '展开 / 折叠侧栏',
     keys: [['Ctrl', 'B']], group: 'global', scope: 'global', palette: true,
     conflictNote: '编辑器（Monaco / LiveMarkdown）内归「加粗」，App 侧靠 isEditingInput 对 .monaco-editor 让位（src/lib/shortcuts.ts）',
-    sources: ['src/App.tsx:1322'],
+    sources: ['src/App.tsx:1356'],
   },
   {
     id: 'escape', label: '关闭弹窗 / 返回列表', desc: '关闭弹窗 / 返回列表',
@@ -118,24 +118,24 @@ export const COMMANDS: CommandDef[] = [
     id: 'palette', label: '命令面板', desc: '命令面板',
     keys: [['Ctrl', 'Shift', 'P']], group: 'global', scope: 'global', palette: false,
     note: '刻意不进命令面板自身（自指）——buildEmptyHints / buildCommandItems 都遵守这条',
-    sources: ['src/App.tsx:298'],
+    sources: ['src/App.tsx:299'],
   },
   {
     id: 'quick-open', label: '快速打开文件', desc: '快速打开文件（按标题 / 路径搜仓库页面）',
     keys: [['Ctrl', 'O']], group: 'global', scope: 'global', palette: true,
     note: '2026-10-13 博客大纲改键 Ctrl+Alt+O 让位给本键（原先两条 window 监听都会跑）',
-    sources: ['src/App.tsx:314'],
+    sources: ['src/App.tsx:315'],
   },
   {
     id: 'global-search', label: '全局搜索', desc: '全局搜索（左栏搜索态：标题、正文、目录、标签）',
     keys: [['Ctrl', 'P'], ['Ctrl', '`'], ['Ctrl', 'Shift', 'F']], group: 'global', scope: 'global', palette: true,
     note: '三个键同效、都指向左栏搜索态（App.tsx:304 与 :309 同一去向）。原表把这仨拆散且 Ctrl+P 错挂在「知识库 — 阅读」下',
-    sources: ['src/App.tsx:304', 'src/App.tsx:309'],
+    sources: ['src/App.tsx:305', 'src/App.tsx:310'],
   },
   {
     id: 'ai-side', label: 'AI 助手', desc: 'AI 助手开关（工作台右栏；整窗模块下为悬浮助手）',
     keys: [['Ctrl', 'J']], group: 'global', scope: 'global', palette: true,
-    sources: ['src/App.tsx:1415', 'src/components/shared/AssistantPanel/index.tsx:164'],
+    sources: ['src/App.tsx:1449', 'src/components/shared/AssistantPanel/index.tsx:164'],
   },
   {
     id: 'ai-full', label: 'AI 助手 · 全屏学堂', desc: 'AI 助手：进入全屏学堂',
@@ -150,7 +150,7 @@ export const COMMANDS: CommandDef[] = [
     // 否则会列出一条「点了没反应」的命令
     requires: { workbench: true, fullWindowTab: false },
     note: '整窗模块下左右栏本就退场，handler 里 fullWindowTab 早退（App.tsx:1388）',
-    sources: ['src/App.tsx:1387'],
+    sources: ['src/App.tsx:1421'],
   },
   {
     id: 'undo', label: '撤销文件操作', desc: '撤销上一文件操作（重命名 / 删除 / 移动）',
@@ -166,14 +166,14 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'zoom-in', label: '界面放大', desc: '界面放大',
     keys: [['Ctrl', '=']], group: 'global', scope: 'global', palette: true,
-    conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1301）',
-    sources: ['src/App.tsx:1302'],
+    conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1335）',
+    sources: ['src/App.tsx:1336'],
   },
   {
     id: 'zoom-out', label: '界面缩小', desc: '界面缩小',
     keys: [['Ctrl', '-']], group: 'global', scope: 'global', palette: true,
-    conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1301）',
-    sources: ['src/App.tsx:1307'],
+    conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1335）',
+    sources: ['src/App.tsx:1341'],
   },
   {
     id: 'sys-day', label: '日程与打卡小窗开关', desc: '日程与打卡小窗开关（系统级）',

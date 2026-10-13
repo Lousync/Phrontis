@@ -1563,3 +1563,36 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **验收**：tsc node 0 错 · tsc web 0 错 · 真源契约 §1/§4/§5/§6/§7 全绿（10 处标记 / 61 条恰好各一次 / 表 = 生成结果）· 生成器 `--check` 幂等绿 · 渲染等价 43/43 · 旧契约 58/58 · `verify-perception` 235/235 · `verify-help-retrieval` **109/109、结构警告 16 条（与基线一致）** · 全量 **98 个契约 / 10 红**（与基线同批）。
 
 **未做**：命令面板增强（P3）· 手册的「首节 = 全篇摘要」规范缺口（§43 就记过：本篇无一级标题与首节摘要，生成器只管表、不管这个）。
+
+---
+
+### 45.2 P3：命令面板增强（L2，同日）
+
+**四处增强**：
+
+| # | 增强 | 落点 |
+|---|---|---|
+| 1 | **真源里的可执行命令进面板**（9 条全局动作：折叠侧栏、全局搜索、快速打开、AI 助手、切右栏、撤销、重做、放大、缩小），排在最前，按真源的组名分组 | `App.tsx` `buildCommandItems` + `buildPaletteBindings` |
+| 2 | **面板显示键帽** —— 面板此前根本不知道快捷键（它自己那 16 条「打开模块 / 布局切换」在真源里都没有键位）；键位来自真源，只显示**第一组**同效键（行窄，完整清单在设置页指令表里） | `CommandPalette.tsx` |
+| 3 | **模糊匹配**：`label`/`hint`/`group` 三处 `includes` 的或运算 → `src/lib/fuzzy.ts` 的 `filterAndRank`（多词是 **AND**、键位文本可搜、子序列兜底、同分保持输入顺序） | `src/lib/fuzzy.ts`（新）+ `CommandPalette.tsx` |
+| 4 | **最近使用**：执行过的命令置顶成一组（存 `localStorage` 键 `kb.palette.recents`，上限 8）。刻意**不进 `SETTINGS`** —— 那是配置真源，最近使用是渲染层私有状态 | `CommandPalette.tsx` |
+
+**契约**（都是「错了也不报错」的那类，所以每条都有判据）：
+
+| 契约 | 锁什么 |
+|---|---|
+| `verify-palette-fuzzy.mjs`（新，**32 项**） | ★ **不丢召回**（旧口径 `includes` 能命中的，新口径必然也命中 —— 逐条枚举，这是本次改造最大的风险面）· 排序确定（同分保持输入顺序，否则同一查询两次结果会跳）· 多词是 AND（输「打开 设置」不再把十一条「打开 X」都排前面）· 子序列纯函数 |
+| `verify-commands-registry.mjs` §2（新） | **真源 `palette:true` ↔ App 绑定表双射**：真源声明了却没接动作 = 面板里列出来点了没反应；绑定表里多出真源没有的 = 绕过真源偷偷接命令。两边都拦 |
+| `verify-commands-registry.mjs` §8（新） | 门控（拍板 A1）用**声明式条件**（`requires`），4 种上下文穷举：`right-panel` 只在「工作台且非整窗模块」时出现；★ 并加了一条 **打错字段名 = 门控静默失效** 的拦网（`gateAllows` 只读它认识的键，写成 `workbenchShell` 会永不生效且无任何报错） |
+
+**这一轮撞到的三件事**：
+
+1. **契约抓到了我自己造成的锚漂移**：往 `App.tsx` 加了 1 行 import + 33 行绑定表之后，真源里 9 个 `src/App.tsx:<行号>` 锚全部偏移（4 个落到空行被拦下，另外 5 个落在别的代码行上、**躲过了弱检查**）。已按新行号全部重定位，连 3 处写在 `conflictNote` 散文里的 `App.tsx:1301`（作用域仲裁）也一并改到 `1335`。**如实记**：锚检查只保证「文件在 + 行号在范围内 + 该行非空」，落点对不对靠内容契约 —— 这次是 4/9 被抓、5/9 靠人工复核。
+2. **`ai-full`（`Ctrl+Shift+J` 全屏学堂）降为不进面板**：它的动作在 `AssistantPanel` 组件内部（`expandToFull`，还带 `aiShortcutDisabled` / `suspendShortcut` 两道闸），没有对外通道；硬塞要新拉一根事件线，属新功能。真源里写了 `note` 说明，**没有为了凑数造一条点了没反应的绑定**。
+3. **`tsc` 抓到两处改名漏改**：`CommandPalette` 的键盘处理里还留着 `filtered.length` / `filtered[idx]`（已换成 `entries`）。这正是「build 通过 ≠ 类型正确」那条门禁的价值。
+
+**验收**：tsc node 0 错 · tsc web 0 错 · `verify-palette-fuzzy` 32/32 · 真源契约 §1/§2/§4/§5/§6/§7/§8 全绿 · 渲染等价 43/43 · 旧契约 58/58 · `verify-empty-state-hints` 42/42 · 全量 **99 个契约 / 10 红**（套件按 `verify-*.mjs` 收录，本轮我新增的 3 个 —— registry / render / fuzzy —— 都在其中且全绿；10 红与基线同批）。
+
+**未做**：真机目测（devbridge 无实例；受限会话里起 Chromium 会撞 crashpad 拒绝）—— 面板的键帽与「最近使用」只经过 SSR/契约级验证，**外观没经过人眼** · 模块内的命令（`Ctrl+F` / PDF 缩放 / 博客大纲等 52 条）仍是 `palette:false`，要进面板得先给它们定 `requires` 门控（本次只给 `right-panel` 用了门控机制）。
+
+

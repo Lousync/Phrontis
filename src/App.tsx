@@ -76,7 +76,8 @@ import { PomodoroPanel } from './modules/toolbox/components/PomodoroPanel'
 import { Onboarding } from './components/shared/Onboarding'
 import { ImportModal } from './modules/shared/components/ImportModal'
 import { useCheckinReminder } from './lib/useCheckinReminder'
-import { installFileOpUndoShortcuts } from './lib/fileOpHistory'
+import { installFileOpUndoShortcuts, undoFileOp, redoFileOp } from './lib/fileOpHistory'
+import { paletteCommands, groupLabelOf } from './lib/commandRegistry'
 import { initModalDimSync } from './lib/mainDimSync'
 import { AssistantPanel } from './components/shared/AssistantPanel'
 import { AiChatTab } from './components/shared/AssistantPanel/ChatBody'
@@ -396,7 +397,40 @@ export default function App() {
     { id: 'ai-assistant', label: 'AI 助手', keys: ['Ctrl', 'J'], icon: <Bot size={15} />, run: toggleWorkbenchAi },
   ]
 
+  // 真源里 palette:true 的命令 → 动作绑定表（v3.5.0 L2，2026-10-13）。
+  // ★ 契约 .AGENT/scripts/commands/verify-commands-registry.mjs §2 对它做**双射检查**：
+  //   这里的每个键必须在真源里标了 palette:true；真源里每条 palette:true 也必须在这里有绑定，
+  //   少一边都 FAIL（防「真源声明了但点了没反应」与「偷偷多接一条真源里没有的命令」）。
+  // ★ 键直接用真源 id（不另加前缀）：与本文件既有的 open-* / toggle-* / plugin-cmd-* 不冲突，
+  //   而且面板「最近使用」就是拿这个 id 落 localStorage 的 —— 改名会让用户的历史失效。
+  // ★ 写成函数而不是 const 对象：这个对象引用了 `fullWindowTab`，它声明在本文件 **1358 行**
+  //   （本函数之后）—— 写成 const 对象会在每次渲染时踩 TDZ（铁律 11 记过这类坑）。
+  const buildPaletteBindings = (): Record<string, () => void> => ({
+    'sidebar': () => setSidebarOpen(v => !v),
+    'global-search': () => setLeftSearchMode(true),
+    'quick-open': () => openQuickOpen(),
+    'ai-side': () => toggleWorkbenchAi(),
+    'right-panel': () => {
+      if (fullWindowTab) return   // 与 Ctrl+Alt+B 同口径（App.tsx:1388）
+      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightCollapsed: !wbLayout.rightCollapsed }))
+    },
+    'undo': () => { void undoFileOp() },
+    'redo': () => { void redoFileOp() },
+    'zoom-in': () => update('zoom', Math.min(s.zoomMax, +(s.zoom + s.zoomStep).toFixed(2))),
+    'zoom-out': () => update('zoom', Math.max(s.zoomMin, +(s.zoom - s.zoomStep).toFixed(2))),
+  })
+
   const buildCommandItems = (): PaletteItem[] => {
+    // ★ 真源里标了 palette:true 的命令排在最前（都带键位；门控不过的不列）—— 面板此前
+    //   完全不知道快捷键，正是 L1 真源化才让它有了键位可显示（见 docs/ui-updates.md §45）。
+    const bind = buildPaletteBindings()
+    const items: PaletteItem[] = paletteCommands({ workbench, fullWindowTab }).map((c) => ({
+      id: c.id,
+      label: c.label,
+      group: groupLabelOf(c.group),
+      keys: c.keys,
+      run: bind[c.id] ?? (() => {}),
+    }))
     const tabs: Array<{ id: TabName; label: string; hint?: string }> = [
       { id: 'knowledge', label: '打开 笔记', hint: '阅读 / 编辑 / 导航' },
       { id: 'aiTeaching', label: '打开 AI教学', hint: '讲义 / 研读 / 出题' },
@@ -410,13 +444,13 @@ export default function App() {
       { id: 'help', label: '打开 帮助' },
       { id: 'releaseNotes', label: '打开 更新说明', hint: '本版做了什么' },
     ]
-    const items: PaletteItem[] = tabs.map((t) => ({
+    items.push(...tabs.map((t) => ({
       id: `open-${t.id}`,
       label: t.label,
       hint: t.hint,
       group: '打开模块',
       run: () => openTab(t.id),
-    }))
+    })))
     items.push(
       { id: 'toggle-workbench', label: workbench ? '布局：切回 旧布局' : '布局：启用 Workbench 外壳（实验）', group: '界面设置', run: () => { update('uiWorkbench', !workbench); setPalette(null) } },
       { id: 'toggle-lineno', label: s.showLineNumbers ? '编辑器：隐藏行号' : '编辑器：显示行号', group: '界面设置', run: () => { update('showLineNumbers', !s.showLineNumbers); setPalette(null) } },
