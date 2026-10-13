@@ -25,7 +25,7 @@ import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntri
 import { normalizeBlogDate, nearestEntryDates, blogHitExcerpt, splitBlogSearchTerms } from './blogToolsPure'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
 import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, vaultScheduleRecurringAll, vaultScheduleCreateRecurring, vaultScheduleUpdateRecurring, vaultScheduleDeleteRecurring, type TodoRow } from './kbStore/scheduleVaultRepo'
-import { hmToMin, minToHm } from '../../src/lib/scheduleRecurringPure'
+import { hmToMin, minToHm, parseScheduleWeekdays, recurringFreqLabel } from '../../src/lib/scheduleRecurringPure'
 import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from './kbStore/accountingVaultRepo'
 // 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
 // 依赖方向已核：pluginEvents 的依赖树不反向 import 本模块，无循环。
@@ -1141,13 +1141,16 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.schedule.create-recurring',
     title: '创建固定日程',
-    description: '创建固定日程（重复任务，如「每周六下午洗衣服」）。freq=weekly 传 weekdays（0=周一…6=周日，可多个）；monthly 传 day（每月几号）；interval 传 intervalDays。start/end 为 HH:mm，会占日程表时间格（end 缺省 = start+1 小时）。',
+    description: '创建固定日程（重复任务，如「每周六下午洗衣服」）。freq=weekly 必填 weekdays（传「周一」…「周日」这样的字符串，可多个）；monthly 传 day（每月几号）；interval 传 intervalDays。start/end 为 HH:mm，会占日程表时间格（end 缺省 = start+1 小时）。建好会立刻把本周该出现的待办排进日程表。',
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: '事项（如 洗衣服洗袜子）' },
         freq: { type: 'string', enum: ['weekly', 'monthly', 'interval'], description: '重复方式' },
-        weekdays: { type: 'array', items: { type: 'number' }, description: '每周几（0=周一…6=周日），freq=weekly 时用' },
+        /* ★ 2026-10-13（F-6）：这里原来写「0=周一…6=周日」，模型按 JS `getDay()` 想事（周日=0、周六=6）
+           ⇒ 说「周六」传 6，我们这边 6 = 周日，整整差一天（实机复现）。改成**字符串 enum**：
+           模型从清单里挑，不必记任何刻度；数字仍收（按 ISO 1=周一…6=周六、7=周日，0 也当周日）。 */
+        weekdays: { type: 'array', items: { type: 'string', enum: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] }, description: '每周几（可多个）；freq=weekly 时必填' },
         day: { type: 'number', description: '每月几号 1-31，freq=monthly 时用' },
         intervalDays: { type: 'number', description: '每几天一次，freq=interval 时用' },
         start: { type: 'string', description: '时段起点 HH:mm（如 14:00）' },
@@ -1164,9 +1167,15 @@ export function registerBuiltinTools(): void {
     const freq = (['weekly', 'monthly', 'interval'] as const).includes(freqRaw as 'weekly') ? (freqRaw as 'weekly' | 'monthly' | 'interval') : 'weekly'
     const startMin = hmToMin(str(args.start), 540)
     const endMin = args.end !== undefined ? hmToMin(str(args.end), startMin + 60) : startMin + 60
+    // 星期几：字符串 / ISO 数字都收；非法值**报错**而不是静默夹成周一（F-6）
+    const wd = parseScheduleWeekdays(args.weekdays)
+    if (!wd.ok) throw new Error(wd.error)
+    if (freq === 'weekly' && wd.mon0.length === 0) {
+      throw new Error('freq=weekly 必须给 weekdays（如 ["周六"]）—— 空数组会得到一条永远不生效的规则')
+    }
     const row = vaultScheduleCreateRecurring({
       title: str(args.title), freq,
-      weekdays: Array.isArray(args.weekdays) ? args.weekdays.map((n) => num(n, 0)) : [],
+      weekdays: wd.mon0,
       day: typeof args.day === 'number' ? args.day : null,
       intervalDays: typeof args.intervalDays === 'number' ? args.intervalDays : null,
       startMin, endMin, quadrant: num(args.quadrant, 1),
@@ -1174,7 +1183,9 @@ export function registerBuiltinTools(): void {
       endDate: str(args.endDate),
     })
     broadcastDataChanged('schedule')
-    return { ok: true, id: row.id, title: row.title, freq: row.freq, start: minToHm(row.startMin), end: minToHm(row.endMin) }
+    /* ★ 回显人话（F-6）：原来只回 id/title/freq/start/end —— 模型写错星期几自己也不知道
+       （实机里它首轮还自信地回复「每周六」）。现在回 `repeat`，模型当轮即可自查。 */
+    return { ok: true, id: row.id, title: row.title, freq: row.freq, repeat: recurringFreqLabel(row), start: minToHm(row.startMin), end: minToHm(row.endMin) }
   })
 
   // 11f. builtin.schedule.update-recurring —— 修改固定日程（写）
@@ -1188,7 +1199,7 @@ export function registerBuiltinTools(): void {
         id: { type: 'string', description: '固定日程 id（来自 list-recurring）' },
         title: { type: 'string', description: '标题' },
         freq: { type: 'string', enum: ['weekly', 'monthly', 'interval'], description: '重复方式' },
-        weekdays: { type: 'array', items: { type: 'number' }, description: '每周几（0=周一…6=周日）' },
+        weekdays: { type: 'array', items: { type: 'string', enum: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] }, description: '每周几（可多个；字符串，与 create 同口径）' },
         day: { type: 'number', description: '每月几号 1-31' },
         intervalDays: { type: 'number', description: '每几天一次' },
         start: { type: 'string', description: '时段起点 HH:mm' },
@@ -1207,7 +1218,11 @@ export function registerBuiltinTools(): void {
     const patch: Record<string, unknown> = {}
     if (args.title !== undefined) patch.title = str(args.title)
     if (args.freq !== undefined) patch.freq = str(args.freq)
-    if (Array.isArray(args.weekdays)) patch.weekdays = args.weekdays.map((n) => num(n, 0))
+    if (args.weekdays !== undefined) {
+      const wd = parseScheduleWeekdays(args.weekdays)
+      if (!wd.ok) throw new Error(wd.error)
+      patch.weekdays = wd.mon0
+    }
     if (typeof args.day === 'number') patch.day = args.day
     if (typeof args.intervalDays === 'number') patch.intervalDays = args.intervalDays
     if (args.start !== undefined) patch.startMin = hmToMin(str(args.start), 540)
@@ -1220,7 +1235,8 @@ export function registerBuiltinTools(): void {
     const row = vaultScheduleUpdateRecurring(id, patch as never)
     if (!row) throw new Error(`未找到固定日程 id=${id}：请先用 list-recurring 确认`)
     broadcastDataChanged('schedule')
-    return { ok: true, id: row.id, title: row.title, enabled: row.enabled }
+    // 同 create：回显人话（「每周六」），模型当轮可自查星期几有没有设错（F-6）
+    return { ok: true, id: row.id, title: row.title, enabled: row.enabled, repeat: recurringFreqLabel(row) }
   })
 
   // 11g. builtin.schedule.delete-recurring —— 删除固定日程（写）
@@ -1451,7 +1467,7 @@ export function registerBuiltinTools(): void {
     }
     const deniedHint = denied.length
       ? `以下工具未启用：${denied.map(d => `${d.name}（模块「${d.module}」${d.reason}）`).join('；')}。`
-        + '请在回答中如实告知用户该操作未执行，并提示可在 设置 → AI 工具 → 权限 中把对应模块调为「读写」后重试；不要声称已完成。'
+        + '请在回答中如实告知用户该操作未执行，并提示可在 设置 → AI → 权限 中把对应模块调为「读写」后重试；不要声称已完成。'
       : undefined
     return {
       ok: true,
@@ -1464,7 +1480,7 @@ export function registerBuiltinTools(): void {
     }
   })
 
-  // ===== vault.* 仓库文件只读工具（B1）：受 vaultFile 权限域（设置 → AI 工具 → 权限 → 仓库文件）控制 =====
+  // ===== vault.* 仓库文件只读工具（B1）：受 vaultFile 权限域（设置 → AI → 权限 → 仓库文件）控制 =====
 
   // 14. builtin.vault.list —— 列仓库目录（AI 视角，禁区自动隐藏）
   registerTool({
@@ -2645,7 +2661,7 @@ export function registerBuiltinTools(): void {
     tier: 'ondemand',
   }, async args => {
     const reader = getSettingReader()
-    if (reader('terminal.aiExec') !== true) throw new Error('AI 终端执行未开启（设置 → AI 工具 → 权限 → 终端执行）')
+    if (reader('terminal.aiExec') !== true) throw new Error('AI 终端执行未开启（设置 → AI → 权限 → 终端执行）')
     const cmd = str(args.command).trim()
     if (!cmd) throw new Error('缺少必填参数: command')
     const pref = reader('terminal.shell')

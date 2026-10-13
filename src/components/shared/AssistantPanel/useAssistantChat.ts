@@ -277,10 +277,17 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
 
   const refreshSessions = useCallback(async (): Promise<AgentSessionInfo[]> => {
     try {
-      // 按来源分流（同表存储）：日程助手只列 schedule；通用助手排除 aiTeaching
-      // （AI 教学有自己的会话列表）。两者列表互不可见。
+      // 按来源分流（同表存储）：日程助手只列 schedule；通用助手**只列 assistant**
+      // （AI 教学有自己的会话列表）。三者列表互不可见。
+      // ★ 2026-10-13（F-8）：默认分支原来是**排除法**（`!== 'aiTeaching'`）—— 第三来源 `schedule`
+      //   落地时没回头补这一条 ⇒ 日程助手的会话混进了通用助手列表（三个宿主都不传 sessionSource，
+      //   全走这个分支）。改成**白名单**语义：以后再加来源不会重犯，写 `!==` 就得记得回来加一条。
+      //   `?? 'assistant'`：存量老数据无 source 字段（由 backfillSessionSources 回填），
+      //   兜底按通用助手算，与 agentSessionRepo 的缺省口径一致。
       const all = await agentSessions()
-      const list = sessionSource ? all.filter(x => x.source === sessionSource) : all.filter(x => x.source !== 'aiTeaching')
+      const list = sessionSource
+        ? all.filter(x => x.source === sessionSource)
+        : all.filter(x => (x.source ?? 'assistant') === 'assistant')
       setSessions(list)
       return list
     } catch { return [] }

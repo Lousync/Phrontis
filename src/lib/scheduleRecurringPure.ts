@@ -23,6 +23,8 @@ function fmtDate(d: Date): string {
 function addDays(s: string, n: number): string {
   const d = parseDate(s); d.setDate(d.getDate() + n); return fmtDate(d)
 }
+/** 加 n 天（导出给写侧结算算上界用；口径与内部同一个） */
+export function addDaysTo(s: string, n: number): string { return addDays(s, n) }
 /** 周一为 0 … 周日为 6（与规则 weekdays 口径一致） */
 function weekdayMon0(d: Date): number { return (d.getDay() + 6) % 7 }
 function clampDay(year: number, month: number, day: number): number {
@@ -65,6 +67,64 @@ export function endOfWeek(dateStr: string): string {
   const d = parseDate(dateStr)
   const mon0 = weekdayMon0(d)
   return addDays(dateStr, 6 - mon0)
+}
+
+/* ===== 星期几入参解析（2026-10-13，F-6）=====
+   只给**跨进程的入参**用（AI 工具），落盘口径永远是「周一=0」那套。
+
+   为什么要有它：工具的 schema 原来写「0=周一…6=周日」，而模型天然按 JS `Date.getDay()`
+   （周日=0 … 周六=6）想事 —— 说「周六」传了 6，我们这边 6 = **周日**，整整差一天
+   （实机已复现：模型在会话里自己承认「工具里 0=周一…6=周日，我填了 6，实际落在了周日」）。
+   教训：**自造刻度**（0=周一）不能出现在要人/模型记住的地方 —— 本仓其它地方一律
+   `(getDay()+6)%7` 现算，只有这个跨进程契约需要"记住"。
+
+   现在的口径：主路径传**字符串**（`周六` / `星期六` / `sat`，工具 schema 里是 enum ⇒ 模型不必记数字）；
+   数字仍然收，按 **ISO 1..7**（1=周一 … 6=周六、7=周日）解释，并**额外容忍 JS 的 0=周日** ——
+   周一…周六 在两套刻度里**数值相同**（都是 1..6），只有「周日」是 7（ISO）/ 0（JS），两个都收
+   ⇒ 无论模型按 ISO 还是按 JS 想，都不会再错位。
+   非法值**不再静默夹成周一**（原来 clampInt(n,0,6,0) 会把 9 变成周一），而是回一句能照做的错误。 */
+const CN_DAY: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 }
+const EN_DAY: Record<string, number> = {
+  mon: 1, monday: 1, tue: 2, tues: 2, tuesday: 2, wed: 3, weds: 3, wednesday: 3,
+  thu: 4, thur: 4, thurs: 4, thursday: 4, fri: 5, friday: 5, sat: 6, saturday: 6, sun: 7, sunday: 7,
+}
+/** ISO（1=周一…7=周日，0 当周日）→ 落盘刻度（0=周一…6=周日） */
+function isoToMon0(n: number): number { return n === 0 || n === 7 ? 6 : n - 1 }
+
+export type WeekdayParseResult =
+  | { ok: true; mon0: number[]; text: string }
+  | { ok: false; error: string }
+
+/** 解析 `weekdays` 入参：字符串（`周六`/`sat`）或数字（ISO 1..7，0 也当周日）都收。
+ *  返回的 `mon0` 已去重排序（落盘口径），`text` 是人话（「周六」「周一、三」）—— 供工具**回显**，
+ *  让模型当轮就能自查（原来返回值不回显 weekdays，模型写错了自己也不知道）。 */
+export function parseScheduleWeekdays(input: unknown): WeekdayParseResult {
+  const arr = Array.isArray(input) ? input : (input === undefined || input === null || input === '' ? [] : [input])
+  const out: number[] = []
+  for (const raw of arr) {
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      const n = Math.trunc(raw)
+      if (n < 0 || n > 7) {
+        return { ok: false, error: `weekdays 里的 ${raw} 不是合法星期：数字按 1=周一 … 6=周六、7=周日（0 也当周日），或直接传「周六」这样的字符串` }
+      }
+      out.push(isoToMon0(n)); continue
+    }
+    if (typeof raw === 'string') {
+      const s = raw.trim().toLowerCase().replace(/\s+/g, '')
+      const cn = /^(?:周|星期|礼拜)?([一二三四五六日天1-7])$/.exec(s)
+      if (cn) {
+        const k = cn[1]
+        const iso = /^[1-7]$/.test(k) ? Number(k) : CN_DAY[k]
+        out.push(isoToMon0(iso)); continue
+      }
+      const en = EN_DAY[s]
+      if (en) { out.push(isoToMon0(en)); continue }
+      return { ok: false, error: `weekdays 里的「${raw}」认不出是星期几：可用「周一」…「周日」，或 1=周一 … 7=周日` }
+    }
+    return { ok: false, error: `weekdays 只接受星期字符串（如「周六」）或数字，收到 ${JSON.stringify(raw)}` }
+  }
+  const mon0 = [...new Set(out)].sort((a, b) => a - b)
+  return { ok: true, mon0, text: mon0.map((i) => WEEKDAY_CN[i]).join('、') }
 }
 
 export interface ScheduleRecurringDue { ruleId: string; due: string }

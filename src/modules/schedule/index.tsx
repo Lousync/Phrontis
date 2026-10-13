@@ -279,7 +279,16 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
   useEffect(() => { trayModeRef.current = trayMode }, [trayMode])
   const refreshWeekRef = useRef(refreshWeekTasks)
   useEffect(() => { refreshWeekRef.current = refreshWeekTasks }, [refreshWeekTasks])
-  useDataChanged('schedule', () => { refreshAllRef.current(); loadTagsRef.current(); if (trayModeRef.current === 'week') void refreshWeekRef.current() })
+  /* ★ 2026-10-13（F-5）：广播回调里**必须也推进周网格的取数代次**。
+     原来它只刷列表 + 左栏周清单（`trayMode==='week'` 那条分支），而周网格 `TimetableView`
+     的取数只依赖 `[load, refreshSignal]`、自己不订阅广播 ⇒ 别处（AI 工具 / 另一个窗口 / 小窗）
+     写进来的固定日程待办**不会**出现在网格上，非得切走 Tab 再切回来（靠 `isActive` 重取）才看见。
+     有了这一句，写侧结算生成完 → 广播 → 网格重取，一步到位。 */
+  useDataChanged('schedule', () => {
+    refreshAllRef.current(); loadTagsRef.current()
+    if (trayModeRef.current === 'week') void refreshWeekRef.current()
+    setWeekRefresh(v => v + 1)
+  })
 
   // 周任务清单跟随 trayMode / weekOffset（翻页看历史周）拉取
   useEffect(() => { if (trayMode === 'week') void refreshWeekTasks() }, [trayMode, weekStart, weekEnd, refreshWeekTasks])

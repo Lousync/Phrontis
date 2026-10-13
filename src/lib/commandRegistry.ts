@@ -187,13 +187,13 @@ export const COMMANDS: CommandDef[] = [
     id: 'kb-save', label: '立即保存', desc: '立即保存当前页面',
     keys: [['Ctrl', 'S']], group: 'kbEditor', scope: 'note', palette: false,
     conflictNote: '按当前激活模块分发：handler 首行 getGlobalActiveTab() !== 本模块就 return（src/lib/activeTab.ts）',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1046 @ if (e.ctrlKey && e.key ==='],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1078 @ if (e.ctrlKey && e.key ==='],
   },
   {
     id: 'kb-preview', label: '阅读 ⇄ 编辑切换', desc: '阅读 ⇄ 编辑切换（仅 md / txt 文件）',
     keys: [['Ctrl', '/'], ['Ctrl', 'E']], group: 'kbEditor', scope: 'note', palette: false,
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门），与博客的 Ctrl+/ 各管各的',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1056 @ ) || (e.ctrlKey && (e.key ==='],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1088 @ ) || (e.ctrlKey && (e.key ==='],
   },
   {
     id: 'kb-editor-esc', label: '返回页面列表', desc: '关闭弹窗后返回页面列表',
@@ -216,17 +216,17 @@ export const COMMANDS: CommandDef[] = [
     id: 'kb-ai-inline', label: 'AI 内联续写建议', desc: 'AI 内联续写建议：立即要一条（Tab 采纳 / Esc 拒绝；平时停顿会自动出）',
     keys: [['Alt', 'A']], group: 'kbEditor', scope: 'note', palette: false,
     note: '原表把它挂在已退役的「编辑器模块」组下；实际判定在 PageEditor.tsx:779（笔记编辑态）',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:827 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:859 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
     id: 'kb-image', label: '插入图片', desc: '插入图片（顶栏 ⋮ 里也有）',
     keys: [['Ctrl', 'Shift', 'I']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1196 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1228 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
   },
   {
     id: 'kb-footnote', label: '插入脚注', desc: '插入脚注（先选中词语；顶栏 ⋮ 里也有）',
     keys: [['Ctrl', 'Alt', 'F']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1201 @ if (e.ctrlKey && e.altKey && !e.shiftKey && (e.k'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1233 @ if (e.ctrlKey && e.altKey && !e.shiftKey && (e.k'],
   },
 
   // ---------------------------------------------------------------- 知识库 — 写作面
@@ -463,7 +463,7 @@ export const COMMANDS: CommandDef[] = [
     // 只在日程模块激活时出现（第三条模块内命令；同 kb-new / blog-new）
     requires: { tabs: ['schedule'] },
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门），与笔记 / 博客的 Ctrl+N 各管各的',
-    sources: ['src/modules/schedule/index.tsx:628 @ if (e.ctrlKey && e.key ==='],
+    sources: ['src/modules/schedule/index.tsx:637 @ if (e.ctrlKey && e.key ==='],
   },
   {
     id: 'sch-close', label: '关闭弹窗', desc: '关闭弹窗（编辑 / 四象限 / 标签管理）',

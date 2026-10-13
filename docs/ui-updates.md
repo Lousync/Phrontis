@@ -2060,6 +2060,89 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 全部结论来自代码路径 + 契约断言 + 度量脚本；② 菜单**条目数**没减（只减了标题）—— 若真机上仍嫌长，下一步是批 1c 的「条目重排 / 合并同类」；
 ③ 危险红的对比度取舍见 ④，**没有**把它写成闸门（`verify-keycap-contrast` 的三级暗文字仍是那套阈值，不牵扯菜单危险色）。
 
+## 57. 四条使用反馈的修复：日程两条 + 笔记切页 + 会话串味（2026-10-13，F-5 ~ F-8）
+
+**来源**：开发者 2026-10-13 的四条反馈（台账 `docs/v3.5.0-feedback.md` F-5 ~ F-8），先只读定位到 `文件:行`，再动手。
+**纪律**：每条都先**核实真机证据**（磁盘 JSON / 会话日志）再改码；两条改法的依据是"模型自己在会话里承认了"与"实机待办零条"。
+
+### F-5 日程助手建好固定日程，日程表上看不到
+
+- **根因（已核 + 真机数据闭合）**：规则（`recurring.json`）与待办（`todos.json`）是两层，日程表只渲染**结算出来的待办**；
+  而结算**全仓只有一处调用** —— 日程模块挂载时跑一次（`src/modules/schedule/index.tsx` 带 `recSettledRef` 守卫）。
+  模块 Tab 是 `display:none` **保活**的（切 Tab 不卸载）⇒ 用户建规则时模块早就挂过了，数据变更广播只刷列表、**不会重新结算**。
+  真机：`E:\生活与记录` 里 4 条规则 / `todos.json` 是空的 `[]`（mtime 早于规则创建）。
+- **改法（写侧负责，不依赖 UI 挂载）**：
+  1. `electron/lib/kbStore/scheduleVaultRepo.ts` 新增 `settleAfterWrite()`，在 `vaultScheduleCreateRecurring` / `vaultScheduleUpdateRecurring` 落盘后顺手结算
+     —— 建规则的两条通道（AI 工具 / 手动画板走 IPC）**都**经过这两个函数 ⇒ 一处改、两条路径同时修好；
+  2. **上界照顾边界**：默认仍是「本周日」，但若这条规则的**下一次**落在本周日之后（例如周日建「每周一」），就取那一次 ——
+     否则"刚建的这条"要等到下周才看得见。首次应生成日直接复用结算计划纯函数取第一条（不另写一套迭代）；
+  3. `electron/database/repositories/scheduleRepo.ts` 的四条 recurring handler **补广播**（铁律 1：主进程写盘后唯一刷新通道）——
+     此前它们一条都没有，于是别的窗口 / AI 通道写进来时本窗口不知道；
+  4. `src/modules/schedule/index.tsx` 的 `schedule` 广播回调**推进周网格取数代次**（`setWeekRefresh`）——
+     周网格 `TimetableView` 只依赖 `[load, refreshSignal]`、自己不订阅广播，原来非得切走 Tab 再切回来才更新。
+
+### F-6 让助手设在「周六」，实际落在「周日」
+
+- **根因（铁证：模型自己在会话日志里承认）**：工具 schema 写的是「`weekdays`：0=周一…6=周日」，而模型天然按 JS `Date.getDay()`
+  （周日=0 … 周六=6）想事 ⇒ 说「周六」传了 `6`，我们这边 `6` = **周日**。存储 / 生成 / UI / 契约四处口径本来就统一（周一=0），
+  偏差只来自**传进来的数字**；而 `normWeekdays` 把越界值静默夹成周一、返回值**不回显 weekdays**（模型写错自己也不知道）。
+- **改法（不靠记忆刻度）**：
+  1. `src/lib/scheduleRecurringPure.ts` 新增纯函数 `parseScheduleWeekdays()`（可被契约直接测）：
+     **字符串**（`周六` / `星期六` / `礼拜天` / `sat` / `sunday`）与**数字**都收 —— 数字按 ISO **1=周一…6=周六、7=周日**，并**容忍 JS 的 0=周日**
+     （周一…周六 在两套刻度里数值相同，只有周日是 7/0，两个都收 ⇒ 无论按 ISO 还是按 JS 想都不会错位）；
+     非法值**报错**（附可用写法），不再静默夹成周一；
+  2. 工具 schema 的 `weekdays` 改成**字符串 enum**（`['周一'…'周日']`）—— 模型从清单里挑，不必记任何数字；
+  3. **返回值回显人话**：`create/update-recurring` 都回 `repeat`（如「周六」），模型当轮即可自查；
+  4. 空 `weekdays` 直接报错（空数组 = 一条永远不生效的规则，原来也是静默的）。
+
+### F-7 笔记区：从空文件切走，切过去的那页不显示内容
+
+- **根因（已核的代码事实 + 负结果）**：`loadPage` **取不到页面时什么都不做**（`if (p)` 之外没有"加载中 / 取不到"分支去动 content）
+  ⇒ 界面**静默停在上一页的正文**上：从**空**文件切走 = 停在空白（看着像"新文件没内容"）；
+  从**有内容**的文件切走 = 上一页正文还在（看着"正常"，其实是**假正常**）。两条症状是同一个缺陷的两种表象。
+  先排除掉的假设（免得下轮重查）：加载路径**没有**空内容早退 · 0 字节**不会**被误判成二进制（`detectBinary` 显式 `n===0 → false`）·
+  `splitFrontmatter('')` 无特殊分支 · 「上一页空正文写进新页」在 vault 模式**不可达**（`doSave` 同步取 rel）· 与在途的 AI 设置改动无关。
+- **改法**：
+  1. **迟到即丢弃**：`loadPage` 的 `.then` 先校验 `pageIdRef.current === requested`；`loadVaultBaseline` 收 `expectPageId` 并在写入前校验
+     （它写的是**保存基线**：frontmatter 前缀 + mtime，写串了比显示错更严重）；`loadDraftPage` 同款守卫；
+  2. **取不到要看得见**：重试一次（索引重建有延迟）仍取不到 ⇒ 置 `loadMiss`，顶栏下方出现一条提示条
+     （`data-wb="peLoadMiss"`：说明 + 「重试」钮，且**明说"下面显示的可能还是上一页的内容"**）——不再静默、也不再默默 `onBack()`；
+     命中即复位 `retryRef`（原来单槽且不复位 ⇒ 同一 pageId 一生只重试一次，而编辑器实例随 Tab 常驻整个会话）；
+  3. **归档类（非 md）自愈**：归档条目的正文由自读 effect 补（索引侧 `contentMd` 恒空），而它不会在 `isReload` 重读后重跑
+     ⇒ 内容置空后**永不自愈**（对 `.txt / .json / .cpp` 是确定性空白）。补 `selfReadTick`，只在"重读 + 归档条目"时推进（首次装载不推，免得大文件读两遍）。
+- **★ 未验的**：真机上**到底是哪条路径**让 `getKnowledgePageById` 失败，静态读不出来（要探针；沙箱起不了 Chromium）。
+  所以本次守的是**失败时的行为**（可见 + 不静默 + 不覆盖新页），而不是某一条具体成因。探针配方（4 行日志）写在台账 F-7。
+
+### F-8 日程助手的会话混进普通 AI 助手的列表
+
+- **根因（一行）**：`src/components/shared/AssistantPanel/useAssistantChat.ts:283` 的默认分支用**排除法**（只排 `aiTeaching`），
+  第三来源 `schedule` 没排；而通用助手的**三个宿主都不传 `sessionSource`** ⇒ 全走这条分支。
+- **改法**：改成**白名单**语义（`(x.source ?? 'assistant') === 'assistant'`；`?? 'assistant'` 兜底存量无 source 的老数据，
+  与 `agentSessionRepo` 的缺省口径一致 —— 老数据由 `backfillSessionSources` 回填）。
+  同类反向泄漏一并修：`src/modules/ai-teaching/index.tsx` 的 `s.source !== 'assistant'` → `s.source === 'aiTeaching'`
+  （原来 `schedule` 行也满足它，会在「无工作区」桶里混进教学左栏）。
+  ⚠️ 来源字面量只能改在 `useAssistantChat.ts`：`verify-perception.mjs` 有一条负向断言锁着「`AssistantPanel/index.tsx` 里不许出现 `aiTeaching`」。
+
+### F-4 dev 控制台那行 `plugin:// self-test ... 404`（顺带修）
+
+- **根因**：启动自测**无条件取** `resources/builtin-plugins` 下第一个目录去 fetch `<id>/index.html`，而两个内置插件都没有它
+  （`knowbase-skill-pack` 是 `declarative` 纯技能包、`themes-collection` 只有 icon.svg + plugin.json）⇒ **必然 404 的假报错**。
+- **改法**：按「有没有 `index.html`」挑；都没有就记一行 `self-test skipped: 内置插件均无 UI 入口`（也进 `plugin-debug.log`），不再报一个不存在的错。
+
+**契约**：新增两个 · `verify-schedule-recurring.mjs` 增 F-5/F-6 段（纯函数 12 条 + 接线 9 条，含负向「schema 不再是数字形态」——
+★ 第一版负向写成"源码里不许出现那句话"，被我**自己的解释注释**判红，改成按**形状**卡）·
+`verify-schedule-assistant.mjs` 增 3 条（默认分支白名单 + 负向排除法 + AI 教学侧白名单）·
+`verify-note-load.mjs`（新，24 条：迟到守卫 5 / 可见提示 12 / 归档自愈 3 / 反例与回归 3）·
+`verify-plugin-selftest.mjs`（新，9 条，含"两个内置插件确实都没有 index.html"的**真值断言**）。
+
+**验收**：tsc node 0 / web 0 · 真源契约 61 条 / 66 锚全绿（6 处锚漂移全部自动重定位）· 上述四契约 + 既有受影响契约全绿 ·
+手册检索 117/117（《日程助手与固定日程》补了一句"建好当周就能在日程表上看到它"）· 全量扫描见本轮结论。
+
+**未做（如实记）**：① F-7 的**具体成因**仍要真机探针；② 顺带查出的「切页会静默丢弃上一页尚未落盘的防抖保存」
+（`autoSaveDebounceMs` 默认 **2000ms** ⇒ 打完字 2 秒内切页，那次编辑不会落盘）**本轮没修** —— 它不是一行能改的：
+`doSave` 读的是 `pageRef.current` 与**当前的** frontmatter 前缀 / mtime 基线，而切页时两者都已指向新页 ⇒
+直接 flush 会把上一页的正文写进新页。正确改法要按页捕获 `{rel, prefix, mtime, content}` 快照（已记台账 F-9，留作下一批）。
+
 
 
 

@@ -1,6 +1,6 @@
 import { exists, readJson, writeJsonOrThrow } from './jsonStore'
 import { randomUUID } from 'crypto'
-import { planScheduleRecurringSettle, endOfWeek, type ScheduleRecurring } from '../../../src/lib/scheduleRecurringPure'
+import { planScheduleRecurringSettle, endOfWeek, addDaysTo, type ScheduleRecurring } from '../../../src/lib/scheduleRecurringPure'
 
 /**
  * 日程 vault 数据仓库（去库化 P2）：storageData=vault 时日程的真相源。
@@ -393,7 +393,26 @@ export function vaultScheduleCreateRecurring(input: CreateScheduleRecurringInput
   }
   if (row.endMin <= row.startMin) row.endMin = Math.min(1440, row.startMin + 60)
   saveRecurring([...vaultScheduleRecurringAll(), row])
+  settleAfterWrite(row)
   return row
+}
+
+/** 写侧结算（2026-10-13，F-5）：建 / 改规则之后**立刻**把该生成的待办补齐。
+ *
+ *  为什么必须写在写侧：结算原来**全仓只有一处调用** —— 日程模块挂载时跑一次（带 `recSettledRef` 守卫，
+ *  `src/modules/schedule/index.tsx`）。而模块 Tab 是 `display:none` **保活**的（切 Tab 不卸载）
+ *  ⇒ 用户建规则时模块**早就挂过了**，随后的数据变更广播只刷列表、**不会重新结算**
+ *  ⇒ 表象 = 规则进了「固定日程」列表、日程表里什么都没有。
+ *  （2026-10-13 实机复现：`recurring.json` 4 条规则 / `todos.json` 是空的 `[]`。）
+ *
+ *  上界：默认仍是「本周日」；但若这条规则的**下一次**落在本周日之后（例如周日建「每周一」），
+ *  就取那一次 —— 否则"刚建的这条"要等到下周才看得见。首次应生成日直接复用结算计划纯函数取第一条，
+ *  不另写一套迭代（口径永远一致）。
+ *  ★ 幂等：结算内部按 `(recurringId, recurringDue)` 去重，重复调用不会重复生成。 */
+function settleAfterWrite(rule: ScheduleRecurring, today = todayLocal()): number {
+  const first = planScheduleRecurringSettle([rule], vaultTodosAll(), today, addDaysTo(today, 400))[0]?.due
+  const horizon = first && first > endOfWeek(today) ? first : endOfWeek(today)
+  return vaultScheduleSettleRecurring(today, horizon).added
 }
 
 export function vaultScheduleUpdateRecurring(id: string, patch: Partial<ScheduleRecurring>): ScheduleRecurring | null {
@@ -420,6 +439,8 @@ export function vaultScheduleUpdateRecurring(id: string, patch: Partial<Schedule
   next.updatedAt = new Date().toISOString()
   rows[idx] = next
   saveRecurring(rows)
+  // 改完也补一次（改了星期几 / 时段 / 重新启用之后，本周该出现的待办要立刻跟上；幂等）
+  settleAfterWrite(next)
   return next
 }
 

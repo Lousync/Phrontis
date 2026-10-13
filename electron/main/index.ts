@@ -1050,7 +1050,13 @@ app.whenReady().then(async () => {
     const builtinDir = app.isPackaged ? join(process.resourcesPath, 'builtin-plugins') : builtinDirDev
     try {
       if (existsSync(builtinDir)) {
-        const first = readdirSync(builtinDir, { withFileTypes: true }).find(d => d.isDirectory())
+        const dirs = readdirSync(builtinDir, { withFileTypes: true }).filter(d => d.isDirectory())
+        /* ★ 只挑**真有 UI 入口**（`index.html`）的内置插件做自测（2026-10-13，F-4）。
+           原来是无条件取第一个目录去 fetch `index.html` —— 而两个内置插件都没有它：
+           `knowbase-skill-pack` 是 `type: 'declarative'` 的纯技能包（只贡献 skills），
+           `themes-collection` 只有 icon.svg + plugin.json ⇒ 每次启动都打一行 **恒 404 的假报错**
+           （开发者反馈「控制台有报错」）。没有 UI 入口就**跳过并说明**，不再报一个不存在的错。 */
+        const first = dirs.find(d => existsSync(join(builtinDir, d.name, 'index.html')))
         if (first) {
           // 注意:插件 id 以 manifest 为准,可能与目录名不同
           let manifestId = first.name
@@ -1067,6 +1073,10 @@ app.whenReady().then(async () => {
               console.log(`[plugin://] self-test: ${manifestId}/index.html -> HTTP ${r.status}`)
             })
             .catch(e => { pluginDebugLog(`self-test failed: ${e}`); console.error('[plugin://] self-test failed:', e) })
+        } else {
+          // 没有 UI 入口的内置插件：跳过并说明（一行，不再是一条恒 404 的"报错"）
+          pluginDebugLog(`self-test skipped: 内置插件都没有 index.html（${dirs.map(d => d.name).join('、') || '目录为空'}）`)
+          console.log('[plugin://] self-test skipped: 内置插件均无 UI 入口（declarative / 主题包）')
         }
       } else {
         pluginDebugLog(`self-test skipped: builtin dir missing ${builtinDir}`)

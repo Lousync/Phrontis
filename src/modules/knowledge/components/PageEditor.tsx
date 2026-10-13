@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, type ReactNode } from 'react'
-import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace, Pencil, FolderInput, Files, Crosshair, PanelRight, PanelTop, Tag, Download } from 'lucide-react'
+import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace, Pencil, FolderInput, Files, Crosshair, PanelRight, PanelTop, Tag, Download, AlertTriangle } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
@@ -297,7 +297,8 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     }
   }, [showRename, showMove, showProps])
   // 换页复位：弹层不该跨页留着（与上面那批档位复位同口径）
-  useEffect(() => { setShowRename(false); setShowMove(false); setShowProps(false) }, [pageId])
+  // 换页复位（F-7 追加 loadMiss）：上一个 pageId 的"取不到"提示不该跟着新页继续挂着
+  useEffect(() => { setShowRename(false); setShowMove(false); setShowProps(false); setLoadMiss(null) }, [pageId])
   // 知识库以阅读优先:md/txt 页面打开即预览(右上角眼睛或 Ctrl+E / Ctrl+/ 切回编辑;vault 模式就地保存)
   const [preview, setPreview] = useState(true)
   // startInEdit 的 ref 镜像：loadPage（useCallback 依赖不含该 prop）在 effect 里读最新值
@@ -391,6 +392,16 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const pageIdRef = useRef(pageId)
   /** 已重试过的 pageId（索引重建延迟：新建/转正后立即打开时 getKnowledgePageById 可能 404 一次） */
   const retryRef = useRef<string | null>(null)
+  /* ===== 装载态（2026-10-13，F-7）=====
+     反馈：「从一个空文件切换到其他文件时，切过去的那个文件不显示内容」。
+     已核的代码事实：`loadPage` 取不到页面时**不设置任何状态、也不清空内容** ⇒ 界面**静默停在上一页的正文**上。
+     从**空**文件切走时"停在空白"看起来就是「新文件没内容」；从有内容的文件切走时上一页正文还在，
+     看起来"正常显示" —— 两条症状其实是同一个缺陷的两种表象（**"有内容那半"是假正常**）。
+     处置：① 取不到 → 给一句能看见的话 + 重试钮（`loadMiss`），不再静默、也不再默默 `onBack()`；
+           ② 三条异步装载链补"迟到即丢弃"的守卫（见 `loadPage` / `loadVaultBaseline` / `loadDraftPage`）；
+           ③ 归档类（非 md）正文由自读 effect 补，而它原来不会在 isReload 重读后重跑 ⇒ 补 `selfReadTick`。 */
+  const [loadMiss, setLoadMiss] = useState<string | null>(null)
+  const [selfReadTick, setSelfReadTick] = useState(0)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const showDeleteConfirmRef = useRef(showDeleteConfirm)
   /** PDF 沉浸态的 ref 镜像（批 2）：Esc 守卫要用它，而那个 keydown effect 的依赖刻意只有
@@ -616,7 +627,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       }
     })()
     return () => { alive = false }
-  }, [textSelfReadTarget, page?.path, pageId])
+  }, [textSelfReadTarget, page?.path, pageId, selfReadTick])
 
   /* ==================== 图片查看（批 3） ==================== */
 
@@ -688,7 +699,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
   /** 就地编辑（vault 写路径）：装载时缓存 frontmatter 前缀与磁盘 mtime（冲突基线）。
    *  读失败 = 文件已被外部删除 → mtime 置 0，保存时按「重建」语义不带基线（同编辑器 missing 口径）。 */
-  const loadVaultBaseline = useCallback(async (rel: string) => {
+  const loadVaultBaseline = useCallback(async (rel: string, expectPageId?: string) => {
     try {
       if (!vaultRootRef.current) {
         const cur = await workspaceGetCurrent()
@@ -697,6 +708,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       const root = vaultRootRef.current
       if (!root) return
       const res = await workspaceReadFile(root, rel)
+      /* 迟到即丢弃（F-7）：用户已经切到别的页时，这一份读的是**上一页**的文件 ——
+         写进 ref 就等于把上一页的 frontmatter 前缀 / mtime 当成新页的保存基线
+         （轻则保存时把 id/updated 写串，重则冲突检测用错基线）。 */
+      if (expectPageId && pageIdRef.current !== expectPageId) return
       const fm = splitFrontmatter(res?.content ?? '')
       vaultPrefixRef.current = fm?.prefix ?? ''
       vaultMtimeRef.current = typeof res?.mtimeMs === 'number' && res.mtimeMs > 0 ? res.mtimeMs : 0
@@ -734,6 +749,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         vaultMtimeRef.current = 0
       }
       const pseudo = { id: `draft:${rel}`, path: rel, title, contentMd: body, fileType: ext, tags: [] } as unknown as KnowledgePage
+      // 迟到即丢弃（F-7）：await 期间用户可能已经切到别的页 —— 不拦就会把这一页的正文/标题盖到新页上
+      if (pageIdRef.current !== `draft:${rel}`) return
+      setLoadMiss(null)
       pageRef.current = pseudo
       setPage(pseudo); setTitle(title); setContent(body); setFileTypeState(ext); setEntryTags([])
       savedContentRef.current = body; savedTitleRef.current = title; isDirtyRef.current = false
@@ -754,9 +772,15 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     if (vaultModeRef.current && !vaultRootRef.current) {
       void workspaceGetCurrent().then(cur => adoptVaultRoot(cur?.rootId ?? null)).catch(() => {})
     }
+    const requested = pageId
     Promise.all([
       getKnowledgePageById(pageId).then(p => {
+        // ★ 迟到即丢弃（F-7）：连点两个页签时，先发的那次可能后到 —— 不拦就会用旧页的
+        //   page / content / savedContentRef 覆盖新页（这正是"切过去显示的是上一页"的来源之一）。
+        if (pageIdRef.current !== requested) return
         if (p) {
+          retryRef.current = null   // 成功即复位：下一次"索引还没重建"仍然值得重试一次
+          setLoadMiss(null)
           setPage(p); setTitle(p.title); setContent(p.contentMd); setFileTypeState(p.fileType || ''); setEntryTags(p.tags || [])
           savedContentRef.current = p.contentMd || ''; savedTitleRef.current = p.title; isDirtyRef.current = false
           savedAnnotationRef.current = p.annotationMd || ''
@@ -771,19 +795,27 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           // 就地编辑基线（vault 写路径）：可编辑文本类缓存 frontmatter 前缀 + mtime；其余类型清零
           const vaultEditable = ft === 'md' || ft === 'txt' || (ft !== '' && ft !== 'pdf' && ft !== 'xmind' && ft !== 'html')
           if (vaultModeRef.current && p.path && vaultEditable && p.entryKind !== 'file') {
-            void loadVaultBaseline(p.path)
+            void loadVaultBaseline(p.path, requested)
           } else {
             vaultPrefixRef.current = ''
             vaultMtimeRef.current = 0
           }
-        } else if (pageRef.current) {
-          // 页面消失：可能是删除/转草稿，也可能是索引尚未重建（新建/转正后立即打开）→ 每个 pageId 重试一次再退
+          /* 归档类（非 md）的正文**不由这里给**：索引对 entryKind:'file' 的 contentMd 恒为空，
+             正文靠下方那个自读 effect 补。而 isReload 重读时 `page?.path` 没变 ⇒ 那个 effect 不会重跑
+             ⇒ 内容被置空后**永不自愈**（F-7 第 2 条：对 .txt / .json / .cpp 这类目标是确定性空白）。
+             这里补一次"代次"，让它在重读后重新自读。只在 isReload 时补，首次装载由 path 变化自然触发
+             （否则大文件会被读两遍）。 */
+          if (isReload && p.entryKind === 'file') setSelfReadTick(t => t + 1)
+        } else {
+          /* ★ 取不到这一页（F-7）：原来这里**什么都不做**（界面静默停在上一页正文），
+             重试一次之后也只是 `onBack()` 默默退回去。两者都会让人误判成"这一页是空的"。
+             现在：先按 pageId 重试一次（索引重建有延迟），仍取不到就给一句能看见的话 + 重试钮。 */
           if (retryRef.current !== pageId) {
             retryRef.current = pageId
             setTimeout(() => { loadPageRef.current() }, 500)
             return
           }
-          onBack()
+          setLoadMiss(requested)
         }
       }),
       getKnowledgeBacklinkContext(pageId).then(setBacklinks),
@@ -1924,6 +1956,18 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               </button>
             </div>
           )}
+          </div>
+        )}
+        {/* 取不到页面时的可见提示（F-7，2026-10-13）：原来这里什么都没有 —— 界面就停在上一页的正文上，
+            "从空文件切走 ⇒ 一片空白"正是这么来的。给一句能看见的话 + 重试钮，页面真没了用户自己关页签。 */}
+        {loadMiss && (
+          <div data-wb="peLoadMiss" className="kb-view-in flex shrink-0 items-center gap-2 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[12px] text-[var(--text-secondary)]">
+            <AlertTriangle size={13} className="shrink-0 text-[var(--warning)]" />
+            <span className="min-w-0 flex-1 truncate">这一页暂时读不到（可能索引还在重建）。下面显示的可能还是上一页的内容。</span>
+            <button onClick={() => { setLoadMiss(null); retryRef.current = null; loadPageRef.current() }}
+              className="shrink-0 rounded border border-[var(--border-color)] px-2 py-0.5 text-[11.5px] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">
+              重试
+            </button>
           </div>
         )}
         {/* Content */}

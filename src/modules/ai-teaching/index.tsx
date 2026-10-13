@@ -129,7 +129,7 @@ function rangeFieldMeta(type: string): { label: string; from: string; to: string
   if (type === 'docx') {
     return {
       label: '页码', from: '起始页', to: '结束页',
-      title: '按 Word 转成 PDF 后阅读器显示的页码（本机 LibreOffice 分页可能与 Word 中看到的不同），不是书页印刷页码；未装 LibreOffice 时可在「设置 → AI 工具 → 模型 → LibreOffice 路径」指定',
+      title: '按 Word 转成 PDF 后阅读器显示的页码（本机 LibreOffice 分页可能与 Word 中看到的不同），不是书页印刷页码；未装 LibreOffice 时可在「设置 → AI → 工具 → LibreOffice 路径」指定',
     }
   }
   return { label: '页码', from: '起始页', to: '结束页', title: '按 PDF/幻灯片自身的第几页（阅读器显示页码），不是书页印刷页码' }
@@ -421,7 +421,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    *
    * 单一真源是**设置键 aiTeachVisionModel**（2026-10-13 决策 D）。此前它只存在 localStorage 的
    * `aiTeach.visionModel`，是个隐藏设置 —— 设置页搜不到、也不随设置迁移（换电脑就丢）。
-   * 现在设置入口在「设置 → AI 工具 → 教学」，这里与它是同一个键（老 localStorage 值按决策 E 退役）。
+   * 现在设置入口在「设置 → AI → 教学」，这里与它是同一个键（老 localStorage 值按决策 E 退役）。
    */
   const [visionModel, setVisionModel] = useState('')
   const [visionList, setVisionList] = useState<LlmVisionModelInfo[]>([])
@@ -430,7 +430,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setVisionModel(val)
     void setSettingRaw('aiTeachVisionModel', val)
   }
-  // 读设置键（与「设置 → AI 工具 → 教学」同一真源）
+  // 读设置键（与「设置 → AI → 教学」同一真源）
   useEffect(() => {
     void getSettingRaw('aiTeachVisionModel').then(v => setVisionModel(String(v ?? ''))).catch(() => null)
   }, [])
@@ -862,11 +862,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [])
 
   const refreshSessions = useCallback(async () => {
-    // 只保留 AI 教学来源的会话：助手侧栏 / AI 学堂的会话有自己的列表（同表存储，按 source 分流）。
+    // 只保留 AI 教学来源的会话：助手侧栏 / AI 学堂 / 日程助手都有自己的列表（同表存储，按 source 分流）。
+    // ★ 2026-10-13（F-8）：原来是排除法（`!== 'assistant'`）—— `schedule` 行也满足它，
+    //   于是日程助手的会话会在「无工作区」桶里混进教学左栏。改成白名单，与 useAssistantChat 同一口径。
     // v3.1.2 条目11：未升格的支线（lane='side'）不进主列表——它们只活在浮层/宽轨里；
     // 升格后 lane='main'，随主线行缩进显示（见 wsSessionTree）。
     const list = (await agentSessions().catch(() => []))
-      .filter(s => s.source !== 'assistant' && !(s.parentSessionId && s.lane === 'side'))
+      .filter(s => s.source === 'aiTeaching' && !(s.parentSessionId && s.lane === 'side'))
     setSessions(list)
     // P5：选择页状态（activeWs=null）不自动开会话；进工作区后只在本工作区会话里选
     const cur = activeIdRef.current ? list.find(s => s.id === activeIdRef.current) : undefined
@@ -1562,7 +1564,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     title={!rangeValid
                       ? '还没登记页码区间——点击填写；确定后为同一原件新增一条带区间的条目（原件不重复拷贝），随后即可视觉转写'
                       : visionBusy?.no === e.no ? visionBusy.label : (e.type === 'pptx' || e.type === 'docx')
-                        ? `视觉转写：${e.type === 'docx' ? 'Word 文档' : 'pptx'} 先经本机 LibreOffice 转 PDF 再逐页转写（需已安装 LibreOffice；装在自定义目录时可在「设置 → AI 工具 → 模型 → LibreOffice 路径」手动指定，无需重启）；文本提取多数情况下已够用`
+                        ? `视觉转写：${e.type === 'docx' ? 'Word 文档' : 'pptx'} 先经本机 LibreOffice 转 PDF 再逐页转写（需已安装 LibreOffice；装在自定义目录时可在「设置 → AI → 工具 → LibreOffice 路径」手动指定，无需重启）；文本提取多数情况下已够用`
                         : '视觉转写：把登记区间的页面交给视觉模型转写（>12 页自动分批、断点续转），并入提取稿后可编辑。点击可中途停止'}
                     className="flex items-center gap-1 text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50 transition-colors">
                     {visionBusy?.no === e.no ? <Loader2 size={9} className="animate-spin" /> : <Eye size={9} />}
@@ -2689,7 +2691,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                                   <div className="h-full rounded-full" style={{ width: `${Math.min(100, (monthTokens / budget) * 100)}%`, background: monthTokens / budget > 0.85 ? '#a32d2d' : '#185fa5' }} />
                                 </div>
                               ) : (
-                                <div className="text-[10.5px] text-[var(--text-muted)]">未设月度预算（设置 → AI 工具 可配置上限）</div>
+                                <div className="text-[10.5px] text-[var(--text-muted)]">未设月度预算（设置 → AI 可配置上限）</div>
                               )}
                             </div>
                           </div>

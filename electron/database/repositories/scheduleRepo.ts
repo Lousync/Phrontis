@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
 import { emitPluginEvent } from '../../lib/pluginEvents'
+import { broadcastDataChanged } from '../../main/windowBus'
 import * as V from '../../lib/kbStore/scheduleVaultRepo'
 import type { ScheduleRecurring } from '../../../src/lib/scheduleRecurringPure'
 
@@ -158,13 +159,32 @@ export function registerScheduleHandlers(): void {
   })
 
   // ===== 固定日程（recurring）=====
+  /* ★ 2026-10-13（F-5）：这四条**写盘后必须广播**（铁律 1：主进程写盘后唯一刷新通道）。
+     此前它们一条广播都没有 —— 日程模块只靠"自己的操作自己刷"，于是
+     ① 另一个窗口 / 另一条通道（AI 工具）写进来时本窗口不知道；
+     ② 周网格（TimetableView）只在"切 Tab 重取"时才看见新数据。
+     顺带：建/改规则现在由 repo 层顺手结算（`settleAfterWrite`），生成出来的待办也靠这条广播到界面。 */
   ipcMain.handle('schedule:recurringList', () => V.vaultScheduleRecurringAll())
-  ipcMain.handle('schedule:recurringCreate', (_e, input: V.CreateScheduleRecurringInput) =>
-    V.vaultScheduleCreateRecurring(input))
-  ipcMain.handle('schedule:recurringUpdate', (_e, id: string, patch: Partial<ScheduleRecurring>) =>
-    V.vaultScheduleUpdateRecurring(id, patch))
-  ipcMain.handle('schedule:recurringDelete', (_e, id: string) => V.vaultScheduleDeleteRecurring(id))
-  ipcMain.handle('schedule:recurringSettle', () => V.vaultScheduleSettleRecurring())
+  ipcMain.handle('schedule:recurringCreate', (_e, input: V.CreateScheduleRecurringInput) => {
+    const row = V.vaultScheduleCreateRecurring(input)
+    broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:recurringUpdate', (_e, id: string, patch: Partial<ScheduleRecurring>) => {
+    const row = V.vaultScheduleUpdateRecurring(id, patch)
+    if (row) broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:recurringDelete', (_e, id: string) => {
+    const ok = V.vaultScheduleDeleteRecurring(id)
+    if (ok) broadcastDataChanged('schedule')
+    return ok
+  })
+  ipcMain.handle('schedule:recurringSettle', () => {
+    const res = V.vaultScheduleSettleRecurring()
+    if (res.added > 0) broadcastDataChanged('schedule')
+    return res
+  })
   ipcMain.handle('schedule:recurringUndoSettle', (_e, todoIds: string[], restore: Array<{ ruleId: string; lastPostedDate: string }>) =>
     V.vaultScheduleUndoSettleRecurring(todoIds, restore))
 }
