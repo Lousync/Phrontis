@@ -170,16 +170,59 @@ check(`键帽对比度 ${themes.length}/${themes.length} 达标（≥${KBD_MIN}:
 check(`面板标签对比度达标（≥${LABEL_MIN}:1，见文件头注为何不是 4.5）`, labelFail.length === 0,
   labelFail.length ? `不达标：${labelFail.join('、')}` : `最低 ${Math.min(...rows.map((r) => r.label ?? 99)).toFixed(2)}:1`)
 
-// 负向（证明上面那条不是空转）：把旧的用法喂进同一个算式，必须是不达标的
-const oldRatio = ratio(builtinDark['--text-disabled'], builtinDark['--input-bg'])
-check('反例：旧的 text-disabled 写法在默认深色下确实不达标（证明这条闸门有效）',
-  oldRatio !== null && oldRatio < 3, `旧值 ${oldRatio === null ? 'n/a' : oldRatio.toFixed(2)}:1`)
+// 负向（证明上面那条不是空转）：把改前的键帽色喂进同一个算式，必须是不达标的。
+// ★ 这里用**写死的历史值**（默认深色当年的 --text-disabled / --input-bg），
+//   不要改成读主题令牌 —— 令牌在 2026-10-13 的方案 A 里已经被抬亮，读它会变成"量新值"，
+//   这条反例就失去意义了。
+const oldRatio = ratio('#555555', '#3c3c3c')
+check('反例：改前的键帽色（#555555 on #3c3c3c）确实不达标（证明这条闸门有效）',
+  oldRatio !== null && oldRatio < 2, `实际 ${oldRatio === null ? 'n/a' : oldRatio.toFixed(2)}:1`)
+
+// ---------------------------------------------------------------- §4 三级暗文字（方案 A）
+
+console.log('\n§4 三级暗文字：secondary / muted / disabled（2026-10-13 方案 A）')
+
+// 方案 A（开发者拍板）= 提亮令牌本身，而不是逐处改 152 个调用点。连带项：三级是一把**梯子**，
+// 只抬 disabled 会让它亮过 muted（默认深色 muted 原为 2.55 ⇒ 梯子会倒）⇒ muted 必须一起抬。
+const PANELS = ['--bg-primary', '--bg-secondary', '--bg-tertiary', '--bg-hover', '--card-bg']
+const LADDER = [
+  ['--text-secondary', 4.5],
+  ['--text-muted', 4.0],
+  ['--text-disabled', 3.5],
+]
+const ladderFail = []
+const ladderRows = []
+for (const t of themes) {
+  const bgs = PANELS.map((k) => t.colors[k]).filter(Boolean)
+  const minOf = (key) => {
+    const v = resolve(t.colors, key)
+    return v === null ? null : Math.min(...bgs.map((bg) => ratio(v, bg)))
+  }
+  const vals = LADDER.map(([k]) => minOf(k))
+  ladderRows.push({ theme: t.name, vals })
+  LADDER.forEach(([k, min], i) => {
+    if (vals[i] === null || vals[i] < min) ladderFail.push(`${t.name}/${k}(${vals[i] === null ? 'n/a' : vals[i].toFixed(2)})`)
+  })
+  if (!(vals[0] > vals[1] && vals[1] > vals[2])) ladderFail.push(`${t.name}/梯子倒置(${vals.map((v) => v === null ? 'n/a' : v.toFixed(2)).join('>')})`)
+}
+console.log('         ' + pad('主题', 20) + pad('secondary', 14) + pad('muted', 14) + 'disabled')
+for (const r of ladderRows) console.log('         ' + pad(r.theme, 18) + r.vals.map((v) => pad(v === null ? 'n/a' : v.toFixed(2), 14)).join(''))
+check(`三级暗文字全部达标（secondary ≥4.5 / muted ≥4.0 / disabled ≥3.5，且梯子不倒）`,
+  ladderFail.length === 0, ladderFail.length ? `不达标：${ladderFail.slice(0, 8).join('、')}` : `${themes.length} 套主题逐条列出`)
+
+// ★ 如实交代（**不作为闸门**）：输入框占位符落在 --input-bg 上，深色主题里它是最亮的面，
+//   梯子在那里放不下（disabled 要够亮就会亮过 secondary）。占位符要不要独立令牌是另一件事，
+//   这里只把数值打印出来，避免"改了 A 就以为占位符也达标了"。
+const ph = themes.map((t) => ({ n: t.name, r: ratio(resolve(t.colors, '--text-disabled'), t.colors['--input-bg']) }))
+const phBad = ph.filter((x) => x.r !== null && x.r < 4.5)
+console.log(`         [信息] 占位符面（--input-bg）：${ph.length - phBad.length}/${ph.length} 套 ≥4.5；` +
+  `低于 4.5 的是 ${phBad.map((x) => `${x.n}(${x.r.toFixed(2)})`).join('、') || '无'}`)
 
 // ---------------------------------------------------------------- 收尾
 
 console.log('')
 if (failures === 0) {
-  console.log(`PASS  键帽对比度：${themes.length} 套主题全部达标（键帽 ≥${KBD_MIN} / 标签 ≥${LABEL_MIN}）`)
+  console.log(`PASS  对比度：键帽 ${themes.length} 套 ≥${KBD_MIN} · 面板标签 ≥${LABEL_MIN} · 三级暗文字 ${themes.length} 套达标且梯子不倒`)
   process.exit(0)
 }
 console.error(`FAIL  ${failures} 项未通过`)

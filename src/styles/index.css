@@ -19,8 +19,8 @@
   /* 文字 */
   --text-primary: #cccccc;
   --text-secondary: #969696;
-  --text-muted: #6a6a6a;
-  --text-disabled: #555555;
+  --text-muted: #8b8b8b;
+  --text-disabled: #828282;
 
   /* 强调 */
   --accent: #007acc;
@@ -84,8 +84,8 @@ html.theme-light {
 
   --text-primary: #333333;
   --text-secondary: #666666;
-  --text-muted: #999999;
-  --text-disabled: #aaaaaa;
+  --text-muted: #707070;
+  --text-disabled: #797979;
 
   --accent: #0078d4;
   --accent-hover: #106ebe;
