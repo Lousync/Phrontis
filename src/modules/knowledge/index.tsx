@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2, Link2, ExternalLink, FolderSearch, FolderInput } from 'lucide-react'
+import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2, Link2, ExternalLink, FolderSearch, FolderInput, House } from 'lucide-react'
 import { PluginIcon } from '../../components/shared/ModuleIcons'
 import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_ENTRY_ENABLED, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
@@ -81,7 +81,7 @@ interface PageInfo {
   fileType: string
 }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, secondaryPageIds = [], secondaryActiveId = null, secondaryBarEl = null, secondaryContentEl = null, splitDisabled = false, onSplitPage, onSecondaryActivate, onMergeSplit, onRemoveSecondary, onMovePageToPane }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; secondaryPageIds?: string[]; secondaryActiveId?: string | null; secondaryBarEl?: HTMLElement | null; secondaryContentEl?: HTMLElement | null; splitDisabled?: boolean; onSplitPage?: (pageId: string, orientation: 'row' | 'column') => void; onSecondaryActivate?: (pageId: string) => void; onMergeSplit?: () => void; onRemoveSecondary?: (pageId: string) => void; onMovePageToPane?: (pageId: string) => void }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, secondaryPageIds = [], secondaryActiveId = null, secondaryBarEl = null, secondaryContentEl = null, splitDisabled = false, onSplitPage, onSecondaryActivate, onMergeSplit, onRemoveSecondary, onMovePageToPane, onBackToWorkbench }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; secondaryPageIds?: string[]; secondaryActiveId?: string | null; secondaryBarEl?: HTMLElement | null; secondaryContentEl?: HTMLElement | null; splitDisabled?: boolean; onSplitPage?: (pageId: string, orientation: 'row' | 'column') => void; onSecondaryActivate?: (pageId: string) => void; onMergeSplit?: () => void; onRemoveSecondary?: (pageId: string) => void; onMovePageToPane?: (pageId: string) => void; onBackToWorkbench?: () => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -2506,8 +2506,25 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               />
             </Suspense>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-[var(--text-muted)]">
+            /* 无活动页面的空态（2026-09-19 反馈：只留图标，不要文字说明）。
+               2026-10-13 补「回工作台」入口：本模块是 PAGE_OWNED（无页面时**页面条上不出现条目**），
+               于是「关掉最后一个页面」之后页面条为空、左上角「工作台」按钮在工作台内模块态又是幂等
+               no-op（ActivityBar 的 `if (!inWorkbench)`）⇒ **这个状态没有任何鼠标路径回总空态**
+               （实测于 devbridge：点「工作台」画面零变化）。那三条快捷指令在总空态里，用户却到不了。
+               按钮即该缺口的唯一出口；不加说明文字（口径不变，只加一个动作）。 */
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-[var(--text-muted)]">
               <FileText size={48} className="opacity-25" />
+              {onBackToWorkbench && (
+                <button
+                  type="button"
+                  onClick={onBackToWorkbench}
+                  title="回到工作台（中间空态，带命令面板 / 快速打开文件 / AI 助手三条快捷指令）"
+                  className="kb-item-in flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <House size={14} />
+                  <span>回工作台</span>
+                </button>
+              )}
             </div>
           )}
         </div>

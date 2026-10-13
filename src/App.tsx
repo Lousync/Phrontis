@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy } from 'react'
 import { createPortal } from 'react-dom'
-import { AppWindow } from 'lucide-react'
+import { Bot, Command, FileSearch } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag, BookKind } from './types'
 
 import { labelOf as tabLabel, isTabName } from './lib/appModules'
@@ -15,6 +15,7 @@ import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
 import { ZenHotZone } from './components/shared/ZenHotZone'
 import { WorkbenchStatusBar } from './components/shared/WorkbenchStatusBar'
 import { CommandPalette, type PaletteItem } from './components/shared/CommandPalette'
+import { WorkbenchEmptyState, type WorkbenchHint } from './components/workbench/WorkbenchEmptyState'
 import { CodePluginHosts } from './components/shared/CodePluginHosts'
 import { Toast } from './components/shared/Toast'
 import { FONT_CSS_MAP, applyThemeClass } from './lib/settings'
@@ -221,6 +222,29 @@ export default function App() {
 
   // R1-W2：命令面板 / 快速切换器（Ctrl+Shift+P / Ctrl+O），两布局均可用（docs/rework-workbench-design.md §3）
   const [palette, setPalette] = useState<null | 'command' | 'file'>(null)
+  // ---- 空态三条指令的动作真源（v3.5.0，2026-10-13）----------------------------------------
+  // 工作台全关空态要摆「打开命令面板 / 快速打开文件 / AI 助手」三条可点击提示，它们各自
+  // 都已有别的调用方（前两条 = 全局快捷键监听；第三条 = Ctrl+J 路由）。**动作只能有一份实现**：
+  // 三个 useCallback 就是那份唯一真相源，快捷键 / Ctrl+J / 空态提示三处一律调它们。
+  // 反面教材：把 AI 助手那段 update('workbenchLayout', …) 内联进 effect 里，空态就只能照抄
+  // 一遍 —— 之后权重、折叠判定一改就必然漂移。契约 verify-empty-state-hints.mjs 有断言锁。
+  const openCommandPalette = useCallback(() => {
+    setPalette((p) => (p === 'command' ? null : 'command'))
+  }, [])
+  const openQuickOpen = useCallback(() => {
+    setPalette((p) => (p === 'file' ? null : 'file'))
+  }, [])
+  /** 唤出 / 收起右栏 AI 助手。★ 不含「整窗模块下让位」的闸门 —— 那是**快捷键路由**的事
+   *  （整窗模块里 Ctrl+J 归悬浮 AssistantPanel 处理，见下方 Ctrl+J effect 的 early return），
+   *  而空态提示只可能在全关空态出现（那时 activeTab 恒为 null，闸门必然放行）。 */
+  const toggleWorkbenchAi = useCallback(() => {
+    // 先派 ai-assistant:close 收掉可能开着的浮层：右栏与浮层同为 ChatBody，
+    // 叠着会出现两块对话（且浮层盖在右栏正上方，视觉上像同一个东西）。
+    window.dispatchEvent(new Event('ai-assistant:close'))
+    // 开 = 右栏可见且停在 AI Tab → 再按 = 收起；否则唤出（展开右栏并切到 AI Tab）
+    const open = !wbLayout.rightCollapsed && wbLayout.rightTab === 'ai'
+    update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'ai', rightCollapsed: open }))
+  }, [wbLayout, update])
   const [fileItems, setFileItems] = useState<PaletteItem[]>([])
   const [fileLoading, setFileLoading] = useState(false)
   // 插件命令（plugin-phase1-design C3）：命令面板聚合 + 执行分发（切模块激活视图 / 推常驻 Worker）
@@ -273,7 +297,7 @@ export default function App() {
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.key === 'P' || e.key === 'p')) {
         e.preventDefault()
-        setPalette((p) => (p === 'command' ? null : 'command'))
+        openCommandPalette()
         return
       }
       // 左栏搜索态快捷键（反馈轮：顶栏搜索框删除后，Ctrl+P / Ctrl+` / Ctrl+Shift+F 全部指向左栏搜索）
@@ -289,14 +313,15 @@ export default function App() {
       }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault()
-        setPalette((p) => (p === 'file' ? null : 'file'))
+        openQuickOpen()
         return
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // 依赖带全：退禅兜底需要读到当前禅档位 / 激活模块 / 面板态，重挂监听比 ref 镜像直白
-  }, [zenLevel, activeTab, palette, changeZen])
+    // （openCommandPalette / openQuickOpen 是稳定引用，进数组只为过 exhaustive-deps）
+  }, [zenLevel, activeTab, palette, changeZen, openCommandPalette, openQuickOpen])
 
   // 快速切换器数据源：知识页索引（默认 vault 读源带 path → 经 kb-open-note 在编辑器组打开）
   useEffect(() => {
@@ -360,6 +385,16 @@ export default function App() {
     showToast({ type: 'info', message: '该插件没有可打开的视图' })
     setPalette(null)
   }, [openTab])
+
+  /** 空态三条指令提示（v3.5.0，2026-10-13）：**刻意不进上面的面板清单** ——
+   *  三条里的「打开命令面板」若进 buildCommandItems 就是自指（面板里出现「打开命令面板」）。
+   *  本函数只做「文案 + 键位 + 图标 → 已抽好的动作函数」的绑定，动作实现一律在上方 useCallback。
+   *  为什么是这三条：判据 =「界面上看不见、只能靠快捷键记忆的能力」（详见 WorkbenchEmptyState 头注）。 */
+  const buildEmptyHints = (): WorkbenchHint[] => [
+    { id: 'palette', label: '打开命令面板', keys: ['Ctrl', 'Shift', 'P'], icon: <Command size={15} />, run: openCommandPalette },
+    { id: 'quick-open', label: '快速打开文件', keys: ['Ctrl', 'O'], icon: <FileSearch size={15} />, run: openQuickOpen },
+    { id: 'ai-assistant', label: 'AI 助手', keys: ['Ctrl', 'J'], icon: <Bot size={15} />, run: toggleWorkbenchAi },
+  ]
 
   const buildCommandItems = (): PaletteItem[] => {
     const tabs: Array<{ id: TabName; label: string; hint?: string }> = [
@@ -1373,22 +1408,18 @@ export default function App() {
 
   // Ctrl+J — 上下文路由（2026-09-21 用户拍板）：工作台内唤出**右栏 AI 侧栏**（再按收起）；
   // 整窗模块不拦，由悬浮 AssistantPanel 自己的监听处理（唤出悬浮 AI 助手）。
-  // 工作台分支先派 ai-assistant:close 收掉可能开着的浮层 —— 右栏与浮层同为 ChatBody，
-  // 叠着会出现两块对话（且浮层盖在右栏正上方，视觉上像同一个东西）。
+  // 动作本体已抽到 toggleWorkbenchAi（唯一真相源，空态「AI 助手」提示调同一份）；
+  // 本 effect 只负责**路由**：整窗模块 early return + 拦默认行为。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j')) return
       if (fullWindowTab) return // 整窗模块：悬浮助手自己的监听处理
       e.preventDefault()
-      window.dispatchEvent(new Event('ai-assistant:close'))
-      // 开 = 右栏可见且停在 AI Tab → 再按 = 收起；否则唤出（展开右栏并切到 AI Tab）
-      const open = !wbLayout.rightCollapsed && wbLayout.rightTab === 'ai'
-      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'ai', rightCollapsed: open }))
+      toggleWorkbenchAi()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullWindowTab, wbLayout, update])
+  }, [fullWindowTab, toggleWorkbenchAi])
 
   /** 「有书在读」的统一口径：右栏阅读 Tab 与 B-26 划词路由**共用这一份**
    *  （两处各写一遍必然漂移 —— cbz 那条排除尤其容易被漏掉）。cbz 不给：整页是图片、无文字层。 */
@@ -1441,7 +1472,7 @@ export default function App() {
     switch (name) {
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} secondaryPageIds={pageSplit?.secondaryPageIds ?? []} secondaryActiveId={pageSplit?.secondaryActiveId ?? null} secondaryBarEl={wbSecondaryPageEl} secondaryContentEl={wbSecondaryContentEl} splitDisabled={pageSplitActive} onSplitPage={splitPageToPane} onSecondaryActivate={setSecondaryActive} onMergeSplit={mergePagePanes} onRemoveSecondary={removePageFromPane} onMovePageToPane={movePageToPane} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} secondaryPageIds={pageSplit?.secondaryPageIds ?? []} secondaryActiveId={pageSplit?.secondaryActiveId ?? null} secondaryBarEl={wbSecondaryPageEl} secondaryContentEl={wbSecondaryContentEl} splitDisabled={pageSplitActive} onSplitPage={splitPageToPane} onSecondaryActivate={setSecondaryActive} onMergeSplit={mergePagePanes} onRemoveSecondary={removePageFromPane} onMovePageToPane={movePageToPane} onBackToWorkbench={() => { setActiveToolTab(null); setActiveTab(null); setRailModule(null) }} />
       case 'moments': return <MomentsModule />
       case 'bookshelf': return (
         <BookshelfModule
@@ -1829,14 +1860,11 @@ export default function App() {
                       </div>
                     )}
                     {/* 全关空态（2026-09-17 拍板③）：无激活模块且无工具标签时显示引导页；
-                        绝对定位铺满主栏区域（不参与 flex 流，避免挤动两栏几何）。 */}
+                        绝对定位铺满主栏区域（不参与 flex 流，避免挤动两栏几何）。
+                        2026-10-13：图标下补三条指令提示（组件 = components/workbench/WorkbenchEmptyState，
+                        动作真源 = 上方 openCommandPalette / openQuickOpen / toggleWorkbenchAi）。 */}
                     {activeTab === null && !activeToolTab && (
-                      /* 空态只留图标（2026-09-19 反馈：不要文字说明，页面简画） */
-                      <div
-                        className="absolute inset-y-0 left-0 z-20 flex w-full flex-col items-center justify-center pb-16"
-                      >
-                        <AppWindow size={44} strokeWidth={1.2} className="text-[var(--text-disabled)]" />
-                      </div>
+                      <WorkbenchEmptyState hints={buildEmptyHints()} />
                     )}
                   </div>
                   {/* AI 助手右下浮钮已移除（2026-09-16）：AI 对话入口迁移（批次5 中间栏 aiChat 标签），
