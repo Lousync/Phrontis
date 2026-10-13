@@ -75,7 +75,7 @@ ok(/showInline=\{isMdNote && !preview && writingMode === 'source'\}/.test(PAGE),
   'B6 ✨续写只给 md 的源码档（非 md 没有 ghost text）')
 ok(/subtitle=\{[\s\S]{0,320}isPdfFile && pdfPages > 0 \? `\$\{pdfPages\} 页`[\s\S]{0,24}: undefined/.test(PAGE),
   'B7 PDF 页数上移顶栏中段（批 3：同一处先给图片像素尺寸，PDF 页数退成第二档）')
-ok(/moreMenu=\{isMdNote \? \(/.test(PAGE), 'B8 ⋮ 菜单按 isMdNote 分流（md 菜单一字不改，作对照基准）')
+ok(/moreMenu=\{isMdNote \? \(/.test(PAGE), 'B8 ⋮ 菜单按 isMdNote 分流（★ 2026-10-13 起 md 那一支**已有增补**：「查看源码 / 看渲染」，见 notes-surface 契约 C8e~C8m；本断言只锁分流本身）')
 for (const a of ['peHtmlSource', 'peFileInfo', 'peOpenInSystem', 'peRevealInFolder', 'peCopyRelPath']) {
   ok(PAGE.includes(`data-wb="${a}"`), `B9 批 1 锚点原样搬进顶栏：${a}`)
 }

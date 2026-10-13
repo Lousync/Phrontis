@@ -67,7 +67,7 @@ md 有顶栏（`NoteTopBar`，2026-10-11 落地），非 md 只有**右上角一
   - **导图不挂**：它自带工具条（与胶囊同一门槛口径，`PageEditor.tsx:1161` 的原注释）
   - **PDF 沉浸时不挂**：见 4.3
 - 右段菜单：`moreMenu={isMdNote ? md 菜单 : 非 md 菜单}`
-  - md 菜单**一字不改**（作对照基准）
+  - md 菜单**一字不改**（作对照基准）—— ★ **2026-10-13 更新**：md 那一支此后**有增补**（`⋮` 加「查看源码 / 看渲染」，本页临时切档、不写设置），见 `docs/ui-updates.md` §46 与契约 `verify-note-surface.mjs` C8e~C8m。上面这句是**批 2 当时的范围陈述**，不是现状；分流结构本身未变。
   - 非 md 菜单 = 批 1 那个「文件」组**原样搬入**，五个锚点不变：
     `peHtmlSource` / `peFileInfo` / `peOpenInSystem` / `peRevealInFolder` / `peCopyRelPath`
   - 加一条「沉浸阅读」，门槛对齐模块层 `enterReading`（`knowledge/index.tsx:620`：md / txt / html）
@@ -145,7 +145,7 @@ md 有顶栏（`NoteTopBar`，2026-10-11 落地），非 md 只有**右上角一
 
 - 图片渲染（批 3）
 - 导图挂顶栏（它自带工具条，要单独拍板）
-- md 的顶栏与菜单（**一字不改**，作对照基准）
+- md 的顶栏与菜单（**一字不改**，作对照基准）—— ★ 同上：这条是**批 2 的范围锁**，2026-10-13 起 md 菜单已有增补（「查看源码 / 看渲染」，见 `docs/ui-updates.md` §46）
 - 非 md 的「文件格式」钮（原型刻意不给：`handleFileTypeChange` 只在内存改、不落盘，
   而非 md 的扩展名来自文件名 ⇒ 加了就是一个重启即失效的假按钮）
 - `verify-workbench-shell.mjs` 的 5 条**既有** FAIL（E6f / G4 / G9 / N8 / N13b，与本次无关）

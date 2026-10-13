@@ -104,11 +104,17 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   /** html 的「源码 ⇄ 沙箱渲染」（批 1 拍板：默认仍是沙箱渲染，只加出口）。
    *  换页重置——不同 html 之间不该继承上一个的源码态。 */
   const [htmlSource, setHtmlSource] = useState(false)
-  /* 换页重置（批 1 的 html 源码态 + 批 2 的 PDF 上报值）：不同文件之间不该继承上一个的态。
+  /**
+   * md 的「查看源码 / 看渲染」（2026-10-13）：**本页临时**的档位覆盖，`null` = 跟随设置
+   * `editorWritingMode`。刻意不落设置 —— 全局档位仍归设置页管，这里只是「这一页我想看一眼原文」。
+   * 换页重置（同 htmlSource 口径）：不同笔记之间不该继承上一个的源码态。
+   */
+  const [srcOverride, setSrcOverride] = useState<boolean | null>(null)
+  /* 换页重置（批 1 的 html 源码态 + 批 2 的 PDF 上报值 + md 的临时档位）：不同文件之间不该继承上一个的态。
      pdfPages / pdfImmersive 必须在这里复位 —— PdfReaderView 按 page.path 重挂，它的内部
      `immersive` 归零，外层不复位就会「换到别的文件顶栏仍然不显示」。 */
   useEffect(() => {
-    setHtmlSource(false); setSvgSource(false); setPdfPages(0); setPdfImmersive(false)
+    setHtmlSource(false); setSvgSource(false); setPdfPages(0); setPdfImmersive(false); setSrcOverride(null)
     // 图片视图态由 useImageView 的 resetKey 复位（传 page.path），此处不再手动 set
   }, [pageId])
   /** 「文件信息」小卡的关闭：外点 / Esc（照 NoteTopBar 的 moreMenu 口径，捕获阶段不依赖冒泡顺序） */
@@ -450,8 +456,16 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
   /** legacy 兜底分支（非 vault 旧数据）的 Monaco 实例；写作面操作一律走 paneRef 契约 */
   const activeEditor = () => editorRef.current
-  /** 写作模式：设置值 + 文档类型门槛（即时渲染只对 Markdown 生效，其余一律源码档） */
-  const writingMode: NoteEngineId = ((s.editorWritingMode as string) ?? 'source') === 'live' && fileType === 'md' ? 'live' : 'source'
+  /** 写作模式：设置值 → **本页临时覆盖**（⋮ 的「查看源码 / 看渲染」）→ 文档类型门槛
+   *  （即时渲染只对 Markdown 生效，其余一律源码档）。
+   *  `srcOverride` 只在内存里存活（换页复位），不写设置 —— 覆盖期间设置页显示的仍是全局档位，
+   *  两者不冲突：设置决定默认，⋮ 只决定「这一页这次」。 */
+  const settingIsLive = ((s.editorWritingMode as string) ?? 'source') === 'live'
+  const effectiveSource = srcOverride ?? !settingIsLive
+  const writingMode: NoteEngineId = (!effectiveSource && fileType === 'md') ? 'live' : 'source'
+  /** ⋮ 那条菜单项显示哪个动作：按**点了会看到什么**给，不按当前档位。
+   *  阅读态（渲染页）与即时渲染档都算「正在看渲染」⇒ 给「查看源码」；只有源码档（编辑态）给「看渲染」。 */
+  const mdSourceItemShowsSource = preview || !effectiveSource
 
   useEffect(() => { contentRef.current = content }, [content])
   useEffect(() => { pageIdRef.current = pageId }, [pageId])
@@ -1331,6 +1345,23 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     <span className="ml-auto text-[10px] text-[var(--text-disabled)]">{quizzes.length} 题</span>
                   </button>
                 )}
+                {/* 查看源码 / 看渲染（2026-10-13）：**本页临时**切档，不改全局设置 `editorWritingMode`。
+                    ★ 阅读态下也出现（md 默认就是阅读态打开）：点它顺带退出阅读态，否则在默认状态下
+                      「查看源码」点了看不见任何变化 —— 那正是「点了没反应」的假按钮。
+                    ★ 反向那一档必须一起给：单向覆盖没有回来的路，用户只能去设置页改全局档位。
+                    ★ 文案口径：**按点了会看到什么给**（`mdSourceItemShowsSource`），不按当前档位 ——
+                      否则默认源码档 + 阅读态下会显示「看渲染」，而用户眼前明明就是渲染好的内容。
+                    与 HTML / SVG 的「看源码」同词（那两处在「文件」组），三处一起看不会觉得是两套说法。 */}
+                <button data-wb="peMdSource"
+                  onClick={() => {
+                    if (mdSourceItemShowsSource) { setPreview(false); setSrcOverride(true) }
+                    else setSrcOverride(false)
+                    setShowMoreMenu(false)
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                  {mdSourceItemShowsSource ? <FileText size={13} /> : <Eye size={13} />}
+                  {mdSourceItemShowsSource ? '查看源码' : '看渲染'}
+                </button>
 
                 <div className="my-1 border-t border-[var(--border-color)]" />
                 <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">写作</div>

@@ -309,6 +309,31 @@ ok(!/<MonacoPane/.test(SRC_PAGE), 'C8b 负向：PageEditor 不再直接渲染某
 ok(/mode=\{writingMode\}/.test(SRC_PAGE), 'C8c 档位由设置下发')
 ok(SRC_PAGE.includes('writingMode === \'source\'') , 'C8d 即时渲染档不渲染 AI 续写钮（暂未提供，避免点了没反应）')
 
+// ---- C8e~：⋮ 的「查看源码 / 看渲染」（2026-10-13）----
+// 这是唯一一个**只改本页档位、不写设置**的入口。下面每条各对应一个真实退化：
+//   ① 只给一个方向 ⇒ 单向覆盖没有回来的路，用户只能去设置页改全局档位；
+//   ② 标签按**当前档位**给 ⇒ 在默认源码档 + 阅读态下会显示「看渲染」，而用户眼前就是渲染好的内容（说谎）；
+//   ③ 阅读态下不处理 preview ⇒ md 默认就是阅读态打开，点了什么也看不见（假按钮）。
+ok(SRC_PAGE.includes('data-wb="peMdSource"'), 'C8e ⋮ 里有「查看源码 / 看渲染」项（锚点 peMdSource）')
+ok(/const \[srcOverride, setSrcOverride\] = useState<boolean \| null>\(null\)/.test(SRC_PAGE),
+  'C8f 覆盖是本页临时 state（null = 跟随设置）')
+ok(/const effectiveSource = srcOverride \?\? !settingIsLive/.test(SRC_PAGE),
+  'C8g 生效档位 = 临时覆盖 ?? 设置值')
+ok(/setSrcOverride\(null\)[\s\S]{0,200}?\}, \[pageId\]\)/.test(SRC_PAGE),
+  'C8h 换页复位（不同笔记之间不继承源码态）')
+ok(/const mdSourceItemShowsSource = preview \|\| !effectiveSource/.test(SRC_PAGE),
+  'C8i 标签按「点了会看到什么」给（阅读态与即时渲染档都算在看渲染）')
+{
+  const i = SRC_PAGE.indexOf('data-wb="peMdSource"')
+  const item = i >= 0 ? SRC_PAGE.slice(i, i + 700) : ''
+  ok(/setPreview\(false\)/.test(item), 'C8j 点它顺带退出阅读态（否则默认阅读态下点了没反应）')
+  ok(/setSrcOverride\(true\)/.test(item) && /setSrcOverride\(false\)/.test(item),
+    'C8k 两个方向都有（单向覆盖没有回来的路）')
+  ok(item.includes('查看源码') && item.includes('看渲染'), 'C8l 文案与 HTML / SVG 的「看源码 / 看渲染」同词')
+  ok(item.length > 0 && !/setSetting\(/.test(item),
+    'C8m 负向：这条不写设置（`editorWritingMode` 仍归设置页管；`item.length > 0` 是防空串假通过）')
+}
+
 // ---- C9 剪贴板通道（主进程代理，渲染层不直连 navigator.clipboard）----
 ok(read('electron/main/index.ts').includes("clipboard:readText"), 'C9a 主进程新增 clipboard:readText')
 ok(read('electron/preload/index.ts').includes('readClipboardText'), 'C9b preload 暴露 readClipboardText')
