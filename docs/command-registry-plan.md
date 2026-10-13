@@ -134,7 +134,7 @@ export const COMMANDS: CommandDef[]
 | §3 渲染等价 | 真组件 SSR：行数 == 真源条数 · 每组锚点齐全 · 键帽 chip 数与分隔符正确（沿用 `tmp\shortcuts-view\render-check.mjs` 的 esbuild+SSR 手法，搬进契约） |
 | §4 手册同步 | 跑生成器比对 `键盘快捷键.md`（不一致 FAIL 并提示重跑）；标记双射 |
 | §5 搜索索引 | 真源组 ↔ `sections.tsx` 的 `shortcuts.*` 双射 |
-| §6 撞车 | 同 scope 同键 = FAIL；跨 scope 同键 = 必须两边都声明 scope，且**全局侧存在让位判据**（当前即 `App.tsx:1301`）—— 把 §2.3 的仲裁锁住，防它被删掉 |
+| §6 撞车 | 同 scope 同键 = FAIL；跨 scope 同键 = 必须两边都声明 scope，且**全局侧存在让位判据**（当前即 `App.tsx:1356`）—— 把 §2.3 的仲裁锁住，防它被删掉 |
 | §7 手册内容 | 「写作面 / 图片查看器 / PDF 缩放」等组的键位与代码锚一致 |
 
 存量 `.AGENT\scripts\settings\verify-shortcuts-table.mjs`（54 项）：**不删**。§44 那 8 组「内容判据」（死键复查、`Ctrl+O` 不再被博客占用、密码本不实承诺等）继续由它守；结构类断言（行数 / 组数）移交给新契约，避免两处各说一遍。其中两条是**翻转标记**，L1 落地时必须翻转而不是删：
@@ -180,7 +180,7 @@ export const COMMANDS: CommandDef[]
 | 真源用了不可擦除语法 → 契约脚本直接 import 失败 | §2.1 硬约束 + tsc 双端门禁 |
 | 手册生成器在沙箱里跑不动 | 生成器是纯 Node 文件读写，不拉子进程、不依赖 esbuild |
 | 一个 58 条的真源要逐条复核 `sources` | 原型底账已核过一轮（含 `src` 锚与 `drift` 标记），P0 以「锚仍指向预期代码」为验收，不重做考古 |
-| 跨 scope 同键的仲裁判据被后人删掉 | 契约 §6 锁（当前锚 `App.tsx:1301`） |
+| 跨 scope 同键的仲裁判据被后人删掉 | 契约 §6 锁（当前锚 `App.tsx:1356`） |
 
 ## 9. 明确不做
 

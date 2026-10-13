@@ -26,10 +26,35 @@ export const KB_PDF_GOTO_PAGE = 'kb-pdf-goto-page'
  *
  * ★ 为什么必须判可见、不能广播给所有实例：`resetFit()` 末尾会 `scheduleProgress({ zoom: 1 })`，
  *   800ms 后**写盘**（pdfReaderPatch）。广播 = 用户在笔记里看附件，后台那本书的阅读进度被顺手
- *   改写一条。阅读器自己的 `Ctrl+0` 分支目前**没有**这个守卫 —— 同一个副作用在键盘路径上仍然
- *   存在（属既有行为，未在本轮改动，见 docs/ui-updates.md §45.8 的「相邻发现」）。
+ *   改写一条。
+ *
+ * ★ 键盘路径也已补上同一守卫（2026-10-13，K-1）：阅读器自己的 `Ctrl+0` / 翻页键同样是**无条件**的
+ *   window keydown，被收起那个实例原先照样响应；现在整个 handler 开头就判「读不到可见的根节点
+ *   就早退」（见 `PdfReaderView.tsx` 快捷键 effect）。下面那个探针就是同一条判据的对外形态。
  */
 export const KB_PDF_ZOOM_FIT = 'kb-pdf-zoom-fit'
+
+/**
+ * 屏幕上**此刻**是否存在可见的 PDF 阅读器实例？（App 侧「全局界面缩放要不要让位」的判据）
+ *
+ * 为什么要探 DOM、而不是让 App 自己记一份状态：Tab 是 `display:none` 保活，书架与笔记编辑器
+ * 各自可能挂着一个阅读器，而**笔记侧那个的 relPath 只有 `PageEditor` 知道** —— App 无从回答
+ * 「现在读的是哪本、在哪个 Tab」。可见性反而是两边都能问的东西：被 `display:none` 收起的实例
+ * `offsetParent === null`（同款判据：上面 KB_PDF_ZOOM_FIT 头注、`MindMapView.tsx:170`）。
+ *
+ * ★ 标记写在阅读器根 div 上（`data-kb-pdf-root`），两处都写字面量：JSX 属性一处、下列选择器一处。
+ *   只改一侧 ⇒ 探针恒 `false` ⇒ 笔记侧 Ctrl+= 又变回双重缩放，且**零报错**；所以
+ *   `verify-palette-channels.mjs` §3 专门把这两处对账（含反例）。
+ *
+ * ★ 只在按键那一刻调用（一次 Ctrl 加/减号一次同步查询），不要放进渲染期或高频路径。
+ */
+export function hasVisiblePdfReader(): boolean {
+  const roots = document.querySelectorAll<HTMLElement>('[data-kb-pdf-root]')
+  for (const el of Array.from(roots)) {
+    if (el.offsetParent !== null) return true
+  }
+  return false
+}
 
 /**
  * 右栏阅读侧栏 → 阅读器：**删除一条书签**（detail: `{ relPath, id }`）。

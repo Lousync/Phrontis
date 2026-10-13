@@ -1696,6 +1696,8 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 **相邻发现（既有行为，本轮没改）**：① 阅读器自己的 `Ctrl+0` 分支**没有**可见守卫，所以键盘路径上那个副作用仍然在（在笔记里读 PDF 附件时按 `Ctrl+0`，后台书架那本书也会被写一条 zoom 进度）；② 同一处让位判定（`App.tsx:1349` 的 `bookshelfReading && activeTab === 'bookshelf'`）只覆盖书架那个挂载点 —— 在笔记里打开 PDF 附件时按 `Ctrl+=` / `Ctrl+-`，**阅读器页面缩放与全局界面缩放会同时生效**（双重缩放）。两处都是「挂载点从 1 个变 2 个」之后没跟上，修法各约一行，等拍板。
 
+**★ 2026-10-13 当日已修（台账 K-1 / K-2，见 §50）**：键盘分支补上了同一可见守卫（且守整个 handler，不只是缩放键）；让位判定放宽为「书架 Tab 在读 **或** 屏幕上有可见的阅读器」（探针 `hasVisiblePdfReader()` 在 `src/components/shared/pdf/pdfEvents.ts`，那行仲裁现位于 `src/App.tsx:1356`）。
+
 **新增契约 `.AGENT/scripts/commands/verify-palette-channels.mjs`**：在此之前，面板通道只有真源契约 §2 的「palette:true ↔ App 绑定表」双射 —— 那条动作**指向的通道有没有监听端**没人管（§45.3 记的死事件就是靠人发现的）。新契约锁三层：① 绑定表里派发出去的 6 条通道逐条要求有监听端（**名单式**断言：新增通道必须同步该文件，避免悄悄多出一条没人管的派发）；② 反例断言「不存在的通道名零命中」，防匹配器恒真；③ pdf-zoom-fit 的运行期口径（可见守卫在 `resetFit()` **之前**、`Ctrl+0` 与面板同一个动作源、绑定表用常量派发而非手抄字符串、真源锚里含运行期承接点）。
 
 **它第一版就自伤了一次**：真源 `sources` 里**原样引用**了监听端那行代码当锚（`…:1239 @ window.addEventListener(KB_PDF_ZOOM_FIT, onZoomFit)`），于是「真源里抄的代码」被算成了监听端 —— **监听端真被删掉时契约照样绿**。已把真源文件排除出扫描范围，并加一条断言把排除本身也锁住。
@@ -1826,6 +1828,29 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **发行依赖（不在本轮范围）**：内置 2 套随应用走；**12 套插件主题要用户拿到，得重打包「主题合集」插件 + 更新市场 registry**（该插件版本在本仓源码里已是 `1.7.0`）。
 
 **验收**：tsc node 0 错 · tsc web 0 错 · 对比度契约 PASS（键帽 14/14、标签 14/14、三级暗文字 14/14 且梯子不倒）· themes-collection 契约 PASS（双通道一致）· empty-state-hints 42/42 · workbench-shell 248/248 · 全量 **101 个契约 / 10 红**（与基线同批）。可视核对页重新生成：`tmp/keycap-themes-preview.html`（现在同时画键帽与三级梯子 + 占位符那行）。
+
+
+## 50. 阅读器「第二个挂载点」收尾：键盘可见守卫 + 全局缩放让位（K-1 / K-2，2026-10-13）
+
+**来源**：§45.8 的「相邻发现」两条 —— 在反馈台账 `docs/v3.5.0-feedback.md` 里编号 K-1 / K-2，开发者拍板「K1K2 一起收了吧」。两条同源（阅读器挂载点从 1 个变 2 个之后，两处判定没跟上），且共用同一套可见性判据，一次改完最省。
+
+**K-1：阅读器自己的键盘 handler 补上可见守卫。** 原先只有命令面板那条通道判了可见性，键盘那条是**无条件**的 `window` keydown —— Tab 是 `display:none` 保活，被收起那个实例照样响应：在笔记里按 `Ctrl+0` 会把后台那本书的进度写成 `zoom:1`（`resetFit()` 末尾 `scheduleProgress` 800ms 后落盘），翻页键（`PageDown` / `←→` / 空格）也会推着那本书走一格。**改法是 handler 开头的早退**（读不到可见根节点就整体 return）—— 守的是整个 handler 而不是只守缩放键：`display:none` 的元素收不到鼠标，键盘同样不该作用在看不见的东西上。
+
+**K-2：全局缩放的让位判定放宽。** 原判据（`src/App.tsx` 的 `bookshelfReading && activeTab === 'bookshelf'`）是「阅读器只有一个挂载点」时代的写法；笔记编辑器里那个 PDF 附件（`src/modules/knowledge/components/PageEditor.tsx`）不满足它，于是 `Ctrl+=` **同时**动作：界面缩放一档 + 附件放大一档（`preventDefault()` 只拦浏览器默认行为，拦不住另一个监听器）。现在两条判据并列：① 书架 Tab + 开着书（原样，任何书类型都算）；② 屏幕上有可见的 `PdfReaderView`。
+
+**为什么 ② 只能问 DOM**：App 侧拿不到笔记侧实例的 `relPath`（只有 `PageEditor` 知道），也没法从 Tab 名推出「那个 Tab 里有没有 PDF」。可见性是两边都能问的东西 —— 新增 `src/components/shared/pdf/pdfEvents.ts` 的 `hasVisiblePdfReader()`：查根节点标记 `data-kb-pdf-root`，`offsetParent !== null` 才算可见（被 `display:none` 收起的实例不计入）。它是**同步 DOM 查询**，只在按键那一刻调用一次，不进渲染期。
+
+**两处字面量的对账**：标记写在 JSX（阅读器根 div）、选择器写在 `pdfEvents` —— 只改一侧 ⇒ 探针恒 `false` ⇒ 笔记侧又变回双重缩放，且**零报错**。契约 §3 因此把两侧一起锁：从 `pdfEvents` 的选择器里**解析出属性名**，再要求阅读器根 div 带着同一个名字（附反例：改名后的属性必须不匹配）。
+
+**契约新增 9 条（`verify-palette-channels.mjs` §3）**：K-1 的「键盘 handler 里可见守卫必须在第一个动作 `stepPage` 之前」；K-2 的「让位判定里出现 `hasVisiblePdfReader()` 且原书架判据没被替换」；探针「按 `offsetParent` 判可见、且不是恒真桩」；三条各自配**反例**（把守卫删掉 / 把探针去掉 / 把属性改名 ⇒ 匹配器必须不认），证明断言不是空转。
+
+**锚漂移第四次，且这次撞到了工具的一个边界**：`PdfReaderView.tsx` +6 行、`App.tsx` +7 行 ⇒ **13 个锚**漂移。`tmp/relocate-anchors.mjs` 只在「指纹唯一命中」时自动改写，而 PDF 那 4 条缩放/搜索锚的指纹**互相高度相似**（都含 `(e.ctrlKey || e.metaKey)) {`），漂移后各自命中 2~4 处 ⇒ 它按设计**拒绝改写任何内容**（连唯一的那 9 条也不动）。处理：先用 `tmp/fix-anchors-k1k2.mjs` 按内容消歧改掉那 4 条（带次数断言），再让原工具自动改掉剩下 9 条 —— 最终 **66/66、0 人工**。**教训**：指纹要写成「能认出这一行」的片段，别用多行共有的尾巴（同族锚会一起漂，然后互相撞）。
+
+**顺带修掉的过期散文行号**：真源 `pdf-zoom-in` 的 `conflictNote` 里写的 `App.tsx:1301` 早已过期（原实际在 1349），本次改到当前行 1356；两处 `App.tsx:1388`（`right-panel` 的整窗早退）、`PdfReaderView.tsx:1187 / 1188`（`pdf-next` / `pdf-prev` 的 note）与 `App.tsx` 内部注释里的同类引用同步更新。
+
+**验收**：tsc node 0 错 · tsc web 0 错 · 真源契约 11 组 / 61 条 / 66 锚全绿（锚 66/66、0 人工）· 面板通道契约 PASS（6 条派发全有监听端 + 3 条新反例）· `verify-commands-registry` 的 pdf-zoom-fit 跨双 Tab 门控仍绿。
+
+> **真机目测仍然缺失（如实记）**：本会话所在受限沙箱起不来 Chromium（见 §45 系列同一说明），K-1 / K-2 的结论来自**代码路径 + 契约断言**，不是人眼看出来的。改后待真机跑一轮复现确认：① 笔记里按 `Ctrl+0` 不再动后台那本书的进度；② 笔记里按 `Ctrl+=` / `Ctrl+-` 只放大 PDF 附件、界面缩放不动。
 
 
 

@@ -69,7 +69,7 @@ const EpubRailPanel = lazy(() => import('./components/shared/epub/EpubRailPanel'
 
 import { FillPopup } from './modules/toolbox/components/FillPopup'
 import { VaultPicker } from './components/shared/VaultPicker'
-import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA, KB_EPUB_GOTO_CFI, KB_OPEN_EXCERPT_LOC, KB_PDF_ZOOM_FIT } from './components/shared/pdf/pdfEvents'
+import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA, KB_EPUB_GOTO_CFI, KB_OPEN_EXCERPT_LOC, KB_PDF_ZOOM_FIT, hasVisiblePdfReader } from './components/shared/pdf/pdfEvents'
 import { bookDisplayName, bookEngineOf, bookKindOf } from '../electron/lib/kbStore/bookFormats'
 import { PomodoroProvider } from './modules/toolbox/hooks/PomodoroContext'
 import { PomodoroPanel } from './modules/toolbox/components/PomodoroPanel'
@@ -411,7 +411,7 @@ export default function App() {
     'quick-open': () => openQuickOpen(),
     'ai-side': () => toggleWorkbenchAi(),
     'right-panel': () => {
-      if (fullWindowTab) return   // 与 Ctrl+Alt+B 同口径（App.tsx:1388）
+      if (fullWindowTab) return   // 与 Ctrl+Alt+B 同口径（App.tsx:1395）
       update('workbenchLayout', JSON.stringify({ ...wbLayout, rightCollapsed: !wbLayout.rightCollapsed }))
     },
     'undo': () => { void undoFileOp() },
@@ -1341,12 +1341,19 @@ export default function App() {
   // 标题栏那枚按钮已于 2026-09-23 隐藏（属未实现的「侧边栏 DIY」方向），故此处不再提供调用入口。
 
   // Ctrl+= / Ctrl+- zoom — synced with settings
-  // 作用域仲裁（2026-09-20 反馈「界面缩放和页面缩放冲突」）：正在书架里读 PDF 时，
-  // 这组快捷键归阅读器页面缩放（PdfReaderView 自行处理），全局界面缩放让位
+  // 作用域仲裁（2026-09-20 反馈「界面缩放和页面缩放冲突」）：正在读 PDF 时，这组快捷键归阅读器
+  // 页面缩放（PdfReaderView 自行处理），全局界面缩放让位。判据两条 —— ★ 第二条是 2026-10-13
+  // （K-2）补的，因为阅读器后来多了一个挂载点（笔记编辑器里的 PDF 附件）：
+  //   ① 书架 Tab + 开着书：App 侧有 state，任何书类型都算（现状，不动）；
+  //   ② 屏幕上有**可见的** PdfReaderView：笔记侧那个实例的 relPath 只有 PageEditor 知道，
+  //      App 拿不到，只能问可见性（探针见 pdfEvents.ts 的 hasVisiblePdfReader，隐藏实例不计入）。
+  // 少了 ② 的表象：笔记里按 Ctrl+= → 界面缩放一档 + 附件也放大一档（两个 window 监听器谁也拦不住谁，
+  // preventDefault 只拦浏览器默认行为，不拦另一个监听器）。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return
-      if (bookshelfReading && activeTab === 'bookshelf' && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '_')) return
+      const zoomKey = e.key === '=' || e.key === '+' || e.key === '-' || e.key === '_'
+      if (zoomKey && ((bookshelfReading && activeTab === 'bookshelf') || hasVisiblePdfReader())) return
       if (e.code === 'Equal' || e.code === 'NumpadAdd') {
         e.preventDefault()
         const n = Math.min(s.zoomMax, +(s.zoom + s.zoomStep).toFixed(2))

@@ -1182,6 +1182,12 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
   // 快捷键：PageUp/Down、←→ 翻页、Ctrl+F 搜索、Esc 逐级退出（INPUT 焦点守卫）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // ★ 可见性守卫（2026-10-13，K-1）：Tab 是 display:none 保活 ⇒ 被收起那个实例的 window
+      //   keydown 照样触发。少了这条，在笔记里按 Ctrl+0 会顺手把后台那本书的进度写成 zoom:1
+      //   （resetFit 末尾的 scheduleProgress 800ms 后落盘），翻页键也会推着它走一格。
+      //   判据同命令面板那条通道（pdfEvents.ts 的 KB_PDF_ZOOM_FIT 头注）与 MindMapView.tsx:170。
+      const root = rootRef.current
+      if (!root || root.offsetParent === null) return
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
       if (e.key === 'PageDown' || e.key === 'ArrowRight' || (e.key === ' ' && !immersive)) { e.preventDefault(); stepPage(1) }
@@ -1406,7 +1412,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
   }
 
   return (
-    <div ref={rootRef} data-sel-float-ignore className={`kb-pdf-scope relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)] ${immersive ? 'kb-pdf-scope-immersive' : ''}`}>
+    <div ref={rootRef} data-kb-pdf-root="" data-sel-float-ignore className={`kb-pdf-scope relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)] ${immersive ? 'kb-pdf-scope-immersive' : ''}`}>
       {toolbar}
       {effectiveScan !== 'full' && (
         <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1 text-[11px] text-[var(--text-tertiary)]" data-wb="scanHint">

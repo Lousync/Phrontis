@@ -107,7 +107,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'sidebar', label: '折叠 / 展开侧栏', desc: '展开 / 折叠侧栏',
     keys: [['Ctrl', 'B']], group: 'global', scope: 'global', palette: true,
     conflictNote: '编辑器（Monaco / LiveMarkdown）内归「加粗」，App 侧靠 isEditingInput 对 .monaco-editor 让位（src/lib/shortcuts.ts）',
-    sources: ['src/App.tsx:1370 @ if (e.ctrlKey && !e.altKey && e.key ==='],
+    sources: ['src/App.tsx:1377 @ if (e.ctrlKey && !e.altKey && e.key ==='],
   },
   {
     id: 'escape', label: '关闭弹窗 / 返回列表', desc: '关闭弹窗 / 返回列表',
@@ -136,7 +136,7 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'ai-side', label: 'AI 助手', desc: 'AI 助手开关（工作台右栏；整窗模块下为悬浮助手）',
     keys: [['Ctrl', 'J']], group: 'global', scope: 'global', palette: true,
-    sources: ['src/App.tsx:1463 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
+    sources: ['src/App.tsx:1470 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
   },
   {
     id: 'ai-full', label: 'AI 助手 · 全屏学堂', desc: 'AI 助手：进入全屏学堂',
@@ -147,11 +147,11 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'right-panel', label: '切换工作台右栏', desc: '切换工作台右栏（折叠 / 展开）',
     keys: [['Ctrl', 'Alt', 'B']], group: 'global', scope: 'global', palette: true,
-    // 整窗模块下左右栏本就退场（handler 里 fullWindowTab 早退，App.tsx:1388）⇒ 面板里也隐藏，
+    // 整窗模块下左右栏本就退场（handler 里 fullWindowTab 早退，App.tsx:1395）⇒ 面板里也隐藏，
     // 否则会列出一条「点了没反应」的命令
     requires: { workbench: true, fullWindowTab: false },
-    note: '整窗模块下左右栏本就退场，handler 里 fullWindowTab 早退（App.tsx:1388）',
-    sources: ['src/App.tsx:1435 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
+    note: '整窗模块下左右栏本就退场，handler 里 fullWindowTab 早退（App.tsx:1395）',
+    sources: ['src/App.tsx:1442 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
   },
   {
     id: 'undo', label: '撤销文件操作', desc: '撤销上一文件操作（重命名 / 删除 / 移动）',
@@ -167,14 +167,14 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'zoom-in', label: '界面放大', desc: '界面放大',
     keys: [['Ctrl', '=']], group: 'global', scope: 'global', palette: true,
-    conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1349）',
-    sources: ['src/App.tsx:1350 @ NumpadAdd'],
+    conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1356）',
+    sources: ['src/App.tsx:1357 @ NumpadAdd'],
   },
   {
     id: 'zoom-out', label: '界面缩小', desc: '界面缩小',
     keys: [['Ctrl', '-']], group: 'global', scope: 'global', palette: true,
-    conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1349）',
-    sources: ['src/App.tsx:1355 @ NumpadSubtract'],
+    conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1356）',
+    sources: ['src/App.tsx:1362 @ NumpadSubtract'],
   },
   {
     id: 'sys-day', label: '日程与打卡小窗开关', desc: '日程与打卡小窗开关（系统级）',
@@ -351,31 +351,31 @@ export const COMMANDS: CommandDef[] = [
     id: 'pdf-find', label: 'PDF 内搜索', desc: 'PDF 阅读器内搜索',
     keys: [['Ctrl', 'F']], group: 'pdfKeys', scope: 'pdf', palette: false,
     conflictNote: '与写作面的 Ctrl+F 同键：焦点在 PDF 阅读器时归阅读器自处理',
-    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1193 @ && (e.ctrlKey || e.metaKey)) {'],
+    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1199 @ && (e.ctrlKey || e.metaKey)) {'],
   },
   {
     id: 'pdf-next', label: 'PDF 下一页', desc: 'PDF 下一页',
     keys: [['PageDown'], ['空格'], ['→']], group: 'pdfKeys', scope: 'pdf', palette: false,
-    note: '三枚键两个阅读器都吃（PDF: PdfReaderView.tsx:1187；电子书: EpubReaderView.tsx:625）',
-    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1187 @ && !immersive)) { e.preventDefault(); stepPage(1', 'src/components/shared/epub/EpubReaderView.tsx:625 @ ) { void v.next(); return true }'],
+    note: '三枚键两个阅读器都吃（PDF: PdfReaderView.tsx:1193；电子书: EpubReaderView.tsx:625）',
+    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1193 @ && !immersive)) { e.preventDefault(); stepPage(1', 'src/components/shared/epub/EpubReaderView.tsx:625 @ ) { void v.next(); return true }'],
   },
   {
     id: 'pdf-prev', label: 'PDF 上一页', desc: 'PDF 上一页',
     keys: [['PageUp'], ['←']], group: 'pdfKeys', scope: 'pdf', palette: false,
-    note: '同上（PDF: PdfReaderView.tsx:1188；电子书: EpubReaderView.tsx:624）',
-    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1188 @ ) { e.preventDefault(); stepPage(-1) }', 'src/components/shared/epub/EpubReaderView.tsx:624 @ ) { void v.prev(); return true }'],
+    note: '同上（PDF: PdfReaderView.tsx:1194；电子书: EpubReaderView.tsx:624）',
+    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1194 @ ) { e.preventDefault(); stepPage(-1) }', 'src/components/shared/epub/EpubReaderView.tsx:624 @ ) { void v.prev(); return true }'],
   },
   {
     id: 'pdf-zoom-in', label: 'PDF 放大', desc: 'PDF 放大',
     keys: [['Ctrl', '=']], group: 'pdfKeys', scope: 'pdf', palette: false,
-    conflictNote: '与全局「界面放大」同键：PDF 阅读态接管，全局缩放在 App.tsx:1301 让位',
-    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1190 @ ) && (e.ctrlKey || e.metaKey)) { e.preventDefaul'],
+    conflictNote: '与全局「界面放大」同键：PDF 阅读态接管，全局缩放在 App.tsx:1356 让位',
+    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1196 @ ) && (e.ctrlKey || e.metaKey)) { e.preventDefaul'],
   },
   {
     id: 'pdf-zoom-out', label: 'PDF 缩小', desc: 'PDF 缩小',
     keys: [['Ctrl', '-']], group: 'pdfKeys', scope: 'pdf', palette: false,
     conflictNote: '与全局「界面缩小」同键：同上，PDF 阅读态接管',
-    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1191 @ ) && (e.ctrlKey || e.metaKey)) { e.preventDefaul'],
+    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1197 @ ) && (e.ctrlKey || e.metaKey)) { e.preventDefaul'],
   },
   {
     id: 'pdf-zoom-fit', label: 'PDF 适应窗口', desc: 'PDF 适应窗口',
@@ -386,8 +386,8 @@ export const COMMANDS: CommandDef[] = [
     requires: { tabs: ['knowledge', 'bookshelf'] },
     note: '三条 PDF 缩放键此前从未进过设置页，手册《键盘快捷键》也没有 PDF 一节（P2 生成时一并补）。本条 2026-10-13 进面板；与它同键的 pdf-zoom-in / pdf-zoom-out **不进** —— 面板里已经有全局「界面放大 / 缩小」（zoom-in / zoom-out），再加一对同名近义命令会互相干扰（也用不着：阅读器里 Ctrl+= / Ctrl+- 本来就生效）',
     sources: [
-      'src/components/shared/pdf/PdfReaderView.tsx:1192 @ && (e.ctrlKey || e.metaKey)) { e.preventDefault(',
-      'src/components/shared/pdf/PdfReaderView.tsx:1239 @ window.addEventListener(KB_PDF_ZOOM_FIT, onZoomFit)',
+      'src/components/shared/pdf/PdfReaderView.tsx:1198 @ && (e.ctrlKey || e.metaKey)) { e.preventDefault(',
+      'src/components/shared/pdf/PdfReaderView.tsx:1245 @ window.addEventListener(KB_PDF_ZOOM_FIT, onZoomFit)',
     ],
   },
 

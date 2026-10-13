@@ -14,6 +14,11 @@
  *      隐藏 Tab 里那个阅读器会被顺手写一条 zoom 进度（resetFit 末尾的 scheduleProgress 会落盘）；
  *   ③ 通道名单不许缩水：新增模块通道时必须同步本文件的 EXPECTED_CHANNELS。
  *
+ * ★ 2026-10-13 扩（K-1 / K-2）：可见性这条判据原先只长在命令面板那一半 —— 阅读器自己的键盘
+ *   handler（K-1）与 App 侧全局缩放的让位判定（K-2）都没跟上「阅读器多了一个挂载点（笔记编辑器
+ *   里的 PDF 附件）」这件事实。§3 现在把三处（面板通道 / 键盘 handler / 全局缩放让位）连同
+ *   「探针标记两侧对账」一起锁住，每条都配反例。
+ *
  * 跑法（项目根目录）：
  *   node --experimental-strip-types --no-warnings .AGENT/scripts/commands/verify-palette-channels.mjs
  * 期望：末尾 PASS 且 exit=0
@@ -129,6 +134,61 @@ const keyBranch = keyIdx >= 0 ? PDF_VIEW.slice(keyIdx, keyIdx + 160) : ''
 check("键盘 Ctrl+0 分支仍调 resetFit（两条路径同一个动作源）",
   keyIdx >= 0 && /resetFit\(\)/.test(keyBranch), keyBranch.trim().slice(0, 90))
 
+// ★ K-1（2026-10-13）：键盘 handler 原先**没有**可见性守卫 —— 被收起那个实例照样响应 window keydown。
+const keyHandlerOf = (src) => {
+  const i = src.indexOf('const onKey = (e: KeyboardEvent) => {')
+  const j = i >= 0 ? src.indexOf("window.addEventListener('keydown', onKey)", i) : -1
+  return i >= 0 && j > i ? src.slice(i, j) : ''
+}
+const keyGuardOK = (src) => {
+  const body = keyHandlerOf(src)
+  return /offsetParent === null/.test(body) && body.indexOf('offsetParent === null') < body.indexOf('stepPage(1)')
+}
+check('键盘 handler 切得出来（切错会让下面两条空转）', keyHandlerOf(PDF_VIEW).length > 200,
+  `${keyHandlerOf(PDF_VIEW).length} 字符`)
+check('★ 键盘分支也先判可见性（K-1：被收起的实例一律不动键盘）', keyGuardOK(PDF_VIEW),
+  '守卫必须在第一个动作 stepPage 之前')
+check('反例（K-1 的旧形态）：把守卫删掉后同一条匹配器必须不认',
+  !keyGuardOK(PDF_VIEW.replace('if (!root || root.offsetParent === null) return', '')),
+  '删掉后仍判为「有守卫」= 匹配器空转')
+
+// ★ K-2（2026-10-13）：全局缩放的让位判定原先只认「书架 Tab + 在读」，漏了笔记侧那个挂载点。
+const zoomHeadOf = (src) => {
+  const i = src.indexOf('NumpadAdd')
+  return i >= 0 ? src.slice(Math.max(0, i - 900), i) : ''
+}
+const yieldOK = (src) => {
+  const head = zoomHeadOf(src)
+  return /hasVisiblePdfReader\(\)/.test(head) && /activeTab === 'bookshelf'/.test(head)
+    && /e\.key === '='/.test(head) && /e\.key === '-'/.test(head)
+}
+check('全局缩放的 keydown 处理器切得出来（切错会让下面两条空转）', zoomHeadOf(APP).length > 200,
+  '锚点：App.tsx 里的 NumpadAdd')
+check('★ 让位判定认第二个挂载点（K-2：笔记侧 PDF 附件也让位）', yieldOK(APP),
+  '缺这条 = 笔记里 Ctrl+= 界面缩放与附件缩放同时生效')
+check('反例（K-2 的旧形态）：去掉可见性探针后同一条匹配器必须不认',
+  !yieldOK(APP.replace(' || hasVisiblePdfReader()', '')),
+  '去掉后仍判为「已放宽」= 匹配器空转')
+
+// 探针两侧对账：标记写在阅读器根 div 上、选择器写在 pdfEvents —— 只改一侧 ⇒ 探针恒 false（零报错）
+const attrMatch = EVENTS_SRC.match(/querySelectorAll[^(]*\(\s*'\[([a-z0-9-]+)\]'/)
+const probeAttr = attrMatch ? attrMatch[1] : ''
+const rootRefIdx = PDF_VIEW.indexOf('ref={rootRef}')
+const rootTag = rootRefIdx >= 0
+  ? PDF_VIEW.slice(PDF_VIEW.lastIndexOf('<div', rootRefIdx), PDF_VIEW.indexOf('>', rootRefIdx) + 1)
+  : ''
+const probeIdx = EVENTS_SRC.indexOf('function hasVisiblePdfReader')
+const probe = probeIdx >= 0 ? EVENTS_SRC.slice(probeIdx, probeIdx + 400) : ''
+check('可见性探针存在于 pdfEvents（App 与阅读器共用同一条判据）', probe.length > 0)
+check('探针找的属性名解析成功（解析不到会让下面两条空转）', !!probeAttr, probeAttr || '未解析到')
+check(`阅读器根节点带着探针要找的属性（${probeAttr || '?'}）`,
+  !!rootTag && rootTag.includes(probeAttr), rootTag.slice(0, 110))
+check('反例：同一条匹配器对改名后的属性不认（证明上一条不是恒真）',
+  !!probeAttr && !!rootTag && !rootTag.includes(probeAttr + '-renamed'), `${probeAttr}-renamed 不该命中`)
+check('探针按 offsetParent 判可见，且不是恒真桩',
+  /offsetParent !== null/.test(probe) && probe.indexOf('offsetParent !== null') < probe.indexOf('return true'),
+  '判据必须先于 return true')
+
 const bindIdx = seg.indexOf("'pdf-zoom-fit'")
 const binding = bindIdx >= 0 ? seg.slice(bindIdx, bindIdx + 240) : ''
 check('App 绑定表用常量派发（不是手抄字符串 —— 手抄的改名后不报错）',
@@ -143,7 +203,7 @@ check('真源里 pdf-zoom-fit 的锚包含运行期承接点（面板路径不�
 
 console.log('')
 if (failures === 0) {
-  console.log(`PASS  面板通道：${dispatched.length} 条派发 / 全部有监听端 / pdf-zoom-fit 口径完整`)
+  console.log(`PASS  面板通道：${dispatched.length} 条派发 / 全部有监听端 / pdf-zoom-fit 与全局缩放让位口径完整（含 K-1 K-2）`)
   process.exit(0)
 }
 console.error(`FAIL  ${failures} 项未通过`)
