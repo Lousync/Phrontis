@@ -1595,4 +1595,28 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 **未做**：真机目测（devbridge 无实例；受限会话里起 Chromium 会撞 crashpad 拒绝）—— 面板的键帽与「最近使用」只经过 SSR/契约级验证，**外观没经过人眼** · 模块内的命令（`Ctrl+F` / PDF 缩放 / 博客大纲等 52 条）仍是 `palette:false`，要进面板得先给它们定 `requires` 门控（本次只给 `right-panel` 用了门控机制）。
 
+---
+
+### 45.3 模块内命令首次进面板（kb-new）+ 修掉一个「派发端还在、监听端没了」的死事件（同日）
+
+**死事件（真 bug，本次修掉）**：`src/modules/desktop/index.tsx:203` 一直在派发 `kb-editor-new-page`（那 180ms 的注释自己写着「留给编辑器 Tab 挂载 + 注册监听」），但**全仓没有任何监听端** —— 它随 2026-09-20 阶段四物理退役的「编辑器」模块一起没了。后果：桌面那枚「新建」只完成「打开一页」，**「建页 + 内联命名」那一步静默什么都不做**。与 §44 的 `Ctrl+Shift+S` 死键**同一家族**：派发端还在、监听端随模块退役一起消失、零报错。
+
+修法：监听端补在知识库模块（它才是建页的宿主），动作复用**已有的** `handleTreeNewPick('knowledge')`（文件树「＋」那个回调），不另写一份创建逻辑 —— 读写分工铁律：建页的写入只发生在文件树/编辑器这条通道上。顺带把 `Ctrl+N` 分支里**内联的三行**（`treeLandDir()` + 展开目录 + `setTreeCreating`）也改成调同一个回调：原先「＋」与 `Ctrl+N` 是同一动作的两份实现，改落点逻辑时容易只改一处。
+
+**面板侧**：`kb-new` 成为**第一条进面板的模块内命令** —— `palette: true` + `requires: { tabs: ['knowledge'] }`，绑定走上面那条既有事件（面板与桌面「新建」共用一条通道）。门控机制因此长出**模块维度**：`PaletteContext` 加 `activeTab`，`requires.tabs` 只在列出的模块激活时放行（`Ctrl+N` 在笔记/博客/日程都有，不门控就是三条命令抢同一个键）。
+
+**契约随之变化**：
+
+| 契约 | 变化 |
+|---|---|
+| `verify-commands-registry.mjs` §1 | 原「只给 scope=global 的标 palette」是 P0 过渡口径，**换成不变量**：非 global 的 palette 命令**必须**声明 `requires`（否则会在错的上下文出现） |
+| 同上 §8 | 上下文矩阵 4 种 → **7 种**（加 `activeTab` 维度）：`kb-new` 只在笔记激活时出现；`right-panel` 仍只在「工作台且非整窗模块」出现；★ 新增一条 **`requires.tabs` 的模块名必须出现在 `src/lib/appModules.ts`** 的拦网 —— 把 `knowledge` 写成 `knowlege` 会让该命令**永远不出现且零报错** |
+| `verify-tree-create-channels.mjs` C1 | 原断言「`treeLandDir()` 出现 ≥2 处」因去重而失效（现在只在共用回调里出现 1 处）。**结构其实更强了**，故换口径并新增 C1b/C1c：`Ctrl+N` 必须调 `handleTreeNewPick('knowledge')`、跨模块事件必须接同一个动作 |
+
+**又抓到一次锚漂移（同一机制，第二次）**：给知识库模块插入监听端后，真源里 8 个 `src/modules/knowledge/index.tsx:<行号>` 锚整体后移 14 行，其中 1 个落到空行被契约拦下。已全部重定位（**降序替换** —— 升序会把刚写进去的新行号当成旧行号二次改写，这是这次差点踩到的级联坑）。
+
+**验收**：tsc node 0 错 · tsc web 0 错 · 真源契约 §1/§2/§4/§5/§6/§7/§8 全绿 · `verify-tree-create-channels` 20/20（修复后）· 渲染等价 43/43 · 旧契约 58/58 · fuzzy 32/32 · `verify-empty-state-hints` 42/42 · `verify-notes-inline-edit` 67/0 · 检索 109/109（结构警告 16 条）· 生成器 `--check` 幂等 · 全量 **99 个契约 / 10 红**（与基线同批）。
+
+**下一步**：面板要再纳模块命令，得先给模块开可调用通道。摸底结论是**只有 kb-new 能靠现有事件复用**；`blog-new` / `sch-new` / `kb-immersive` / `kb-preview` 这类动作都还只在各模块自己的 keydown 分支里，需要按知识库这次的同一手法（抽出回调 + 补一个跨模块事件）逐模块做。
+
 

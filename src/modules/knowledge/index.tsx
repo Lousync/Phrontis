@@ -1086,6 +1086,20 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     setTreeCreating({ dirRel, type: key as 'knowledge' | 'dir' })
   }, [treeLandDir])
 
+  /**
+   * 「新建知识页」的**跨模块入口**（2026-10-13）：桌面「新建」与命令面板都派发 `kb-editor-new-page`。
+   * ★ 这个事件此前**没有监听端** —— 它原本由 2026-09-20 阶段四物理退役的「编辑器」模块注册，
+   *   于是 desktop/index.tsx:203 那一下静默落空（桌面「新建」只完成「打开一页」、建页那步什么都不做），
+   *   与 §44 记的 `Ctrl+Shift+S` 死键同一家族：**派发端还在、监听端随模块一起没了、零报错**。
+   * 动作本体复用文件树「＋」的 handleTreeNewPick，不另写一份创建逻辑（读写分工铁律：
+   * 建页的写入只发生在编辑器/文件树这一条通道）。
+   */
+  useEffect(() => {
+    const onNewPage = (): void => handleTreeNewPick('knowledge')
+    window.addEventListener('kb-editor-new-page', onNewPage)
+    return () => window.removeEventListener('kb-editor-new-page', onNewPage)
+  }, [handleTreeNewPick])
+
   // 选中目录只在「知识库文件视图」语境下有意义：进空间 / 图谱态即清空（B-7）
   useEffect(() => {
     if (selectedSpaceId || graphMode) setSelectedDirRel(null)
@@ -1566,12 +1580,11 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       if (isEditingInput(e)) return
 
       // Ctrl+N — 新建知识页：文件树内联创建（Phase 2 批次 2：frontmatter id 直接写入，不再借道编辑器）
-      // 落点自 B-7 起跟随「选中目录」（原为恒落仓库根），与头部「＋」共用 treeLandDir()
+      // 落点自 B-7 起跟随「选中目录」（原为恒落仓库根）。动作与文件树「＋」、桌面「新建」、
+      // 命令面板**共用 handleTreeNewPick 一处**（原先这里内联三行，与「＋」是同一动作的两份实现）
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'n' || e.key === 'N')) {
         e.preventDefault()
-        const dirRel = treeLandDir()
-        if (dirRel) setExpandedDirs((prev) => (prev.has(dirRel) ? prev : new Set(prev).add(dirRel)))
-        setTreeCreating({ dirRel, type: 'knowledge' })
+        handleTreeNewPick('knowledge')
         return
       }
 
@@ -1664,7 +1677,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, readingMode, enterReading, exitReading, treeLandDir, navStep])
+  }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, readingMode, enterReading, exitReading, treeLandDir, navStep, handleTreeNewPick])
 
   // ---- 外部文件粘贴（2026-09-20 阶段四：能力自编辑器模块上移，随其退役）----
   // 资源管理器里 Ctrl+C 文件 → 本模块 Ctrl+V：剪贴板带 File 列表且没有文本接收方时接管，

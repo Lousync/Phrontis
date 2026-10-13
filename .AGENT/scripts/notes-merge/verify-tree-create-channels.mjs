@@ -79,10 +79,18 @@ ok(/onCommitCreate\?: \(dirRel: string, type: CreateType, rawName: string\)/.tes
 
 console.log('\n=== C. 落点唯一真相源 + 「＋」显隐口径（B-7） ===\n')
 
+// ★ 2026-10-13 起这条断言换了口径（原为「treeLandDir() 出现 ≥2 处」）：Ctrl+N 与文件树「＋」
+//   现在**共用同一个回调 handleTreeNewPick**，treeLandDir 只在它内部调用一次 —— 结构更强
+//   （原先两处各写一遍同样的三行，改落点逻辑时容易只改一处），故断言随之改成「共用回调」。
 const landUses = [...SRC_KNOW.matchAll(/treeLandDir\(\)/g)].length
-ok(landUses >= 2,
-  'C1 ★ `treeLandDir()` 是「＋」与 Ctrl+N 共用的唯一落点来源（≥2 处调用）',
+ok(landUses >= 1,
+  'C1 ★ `treeLandDir()` 是「＋」/ Ctrl+N / 桌面「新建」/ 命令面板共用的唯一落点来源',
   `实际 ${landUses} 处`)
+// Ctrl+N 走共用回调，而不是自己再写一遍创建逻辑
+ok(/\(e\.key === 'n' \|\| e\.key === 'N'\)\s*\)\s*\{\s*e\.preventDefault\(\)\s*handleTreeNewPick\('knowledge'\)/.test(SRC_KNOW),
+  "C1b ★ Ctrl+N 调 handleTreeNewPick('knowledge')，不自己内联创建逻辑（单一动作源）", '')
+ok(/const onNewPage = \(\): void => handleTreeNewPick\('knowledge'\)/.test(SRC_KNOW),
+  'C1c ★ 跨模块事件 kb-editor-new-page 也接到同一个动作（桌面「新建」/ 命令面板共用）', '')
 ok(!/setTreeCreating\(\{\s*dirRel:\s*'',\s*type:\s*'knowledge'\s*\}\)/.test(SRC_KNOW),
   "C2 ★ 负向：Ctrl+N 不得退回硬编码 dirRel:''（那会让「选中目录」对该快捷键静默失效）", '')
 ok(/const treeLandDir = useCallback\(\(\) => selectedDirRelRef\.current \?\? '', \[\]\)/.test(SRC_KNOW),

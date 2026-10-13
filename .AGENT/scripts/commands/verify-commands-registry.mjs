@@ -98,11 +98,14 @@ for (const c of COMMANDS) {
 }
 check('键帽 token 合法（修饰键在前、末位主键、无重复/未知）', tokenBad.length === 0, tokenBad.slice(0, 6).join(' | '))
 
-check(`palette:true 的条数 9`, COMMANDS.filter((c) => c.palette).length === 9,
+check(`palette:true 的条数 10`, COMMANDS.filter((c) => c.palette).length === 10,
   `实际 ${COMMANDS.filter((c) => c.palette).length}`)
-const paletteNonGlobal = COMMANDS.filter((c) => c.palette && c.scope !== 'global')
-check('P0 口径：只给 scope=global 的标 palette', paletteNonGlobal.length === 0,
-  paletteNonGlobal.map((c) => c.id).join(' '))
+// ★ 不变量（2026-10-13 起，kb-new 进面板后取代了原先「只标 global」的过渡口径）：
+//   非 global scope 的命令想进面板**必须声明 requires** —— 否则它会在错的上下文里出现
+//   （Ctrl+N 在笔记 / 博客 / 日程都有，不门控就是三条命令抢同一个键）。
+const ungatedNonGlobal = COMMANDS.filter((c) => c.palette && c.scope !== 'global' && !c.requires)
+check('非 global 的 palette 命令必须声明 requires（否则会在错的上下文出现）', ungatedNonGlobal.length === 0,
+  ungatedNonGlobal.map((c) => c.id).join(' '))
 
 // ---- sources 锚点：文件存在 + 行号在范围内 + 该行非空 ----
 const lineCache = new Map()
@@ -248,31 +251,44 @@ check('只剥标记、不剥内容（剥完表格仍在）', loadedBody.includes
 
 // ---------------------------------------------------------------- §8 面板门控
 
-console.log('\n§8 面板门控（声明式条件，4 种上下文穷举）')
+console.log('\n§8 面板门控（声明式条件，含模块维度，7 种上下文穷举）')
 
+const BASE = { workbench: true, fullWindowTab: false, activeTab: null }
 const CTXS = [
-  { workbench: true, fullWindowTab: false },
-  { workbench: true, fullWindowTab: true },
-  { workbench: false, fullWindowTab: false },
-  { workbench: false, fullWindowTab: true },
+  { ...BASE },
+  { ...BASE, fullWindowTab: true },
+  { ...BASE, workbench: false },
+  { ...BASE, workbench: false, fullWindowTab: true },
+  { workbench: true, fullWindowTab: false, activeTab: 'knowledge' },
+  { workbench: true, fullWindowTab: false, activeTab: 'blog' },
+  { workbench: false, fullWindowTab: true, activeTab: 'knowledge' },
 ]
 const byCtx = CTXS.map((c) => paletteCommands(c))
-check('4 种上下文下都能算出来，且结果都是真源子集',
+const has = (i, id) => byCtx[i].some((c) => c.id === id)
+check(`${CTXS.length} 种上下文下都能算出来，且结果都是真源子集`,
   byCtx.every((list) => list.every((c) => COMMANDS.includes(c))), '')
-check('right-panel 只在「工作台且非整窗模块」时出现（其余三种隐藏）',
-  byCtx[0].some((c) => c.id === 'right-panel') &&
-  !byCtx[1].some((c) => c.id === 'right-panel') &&
-  !byCtx[2].some((c) => c.id === 'right-panel') &&
-  !byCtx[3].some((c) => c.id === 'right-panel'),
-  CTXS.map((c, i) => `${c.workbench}/${c.fullWindowTab}:${byCtx[i].some((x) => x.id === 'right-panel') ? '有' : '无'}`).join(' '))
+check('right-panel 只在「工作台且非整窗模块」时出现',
+  CTXS.every((c, i) => has(i, 'right-panel') === (c.workbench && !c.fullWindowTab)),
+  CTXS.map((c, i) => `${c.workbench}/${c.fullWindowTab}:${has(i, 'right-panel') ? '有' : '无'}`).join(' '))
+// ★ kb-new 是第一条「模块内命令进面板」，门控维度就是 activeTab
+check('kb-new 只在笔记模块激活时出现',
+  CTXS.every((c, i) => has(i, 'kb-new') === (c.activeTab === 'knowledge')),
+  CTXS.map((c, i) => `${c.activeTab ?? 'null'}:${has(i, 'kb-new') ? '有' : '无'}`).join(' '))
 const noReq = COMMANDS.filter((c) => c.palette && !c.requires).map((c) => c.id)
-check('无 requires 的命令在 4 种上下文下都出现', byCtx.every((list) => noReq.every((id) => list.some((c) => c.id === id))),
+check('无 requires 的命令在所有上下文下都出现', byCtx.every((list) => noReq.every((id) => list.some((c) => c.id === id))),
   `无 requires 的: ${noReq.join(',')}`)
 // ★ 打错字段名 = 门控**永不生效**且没有任何报错（gateAllows 只读它认识的键）—— 必须机器拦
-const KNOWN_GATE_KEYS = ['workbench', 'fullWindowTab']
+const KNOWN_GATE_KEYS = ['workbench', 'fullWindowTab', 'tabs']
 const badGate = COMMANDS.filter((c) => c.requires && Object.keys(c.requires).some((k) => !KNOWN_GATE_KEYS.includes(k)))
 check('requires 只用已声明的字段（写错字段名会让门控静默失效）', badGate.length === 0,
   badGate.map((c) => `${c.id}: ${Object.keys(c.requires).join(',')}`).join(' | '))
+// ★ 同理：requires.tabs 里把模块名写错（knowledge -> knowlege）= 该命令**永远不出现**且零报错，
+//   所以对着模块清单（src/lib/appModules.ts，模块唯一真源）核一遍。
+const appModulesSrc = readFileSync(resolve(ROOT, 'src/lib/appModules.ts'), 'utf8')
+const tabsUsed = [...new Set(COMMANDS.flatMap((c) => c.requires?.tabs ?? []))]
+const badTabs = tabsUsed.filter((t) => !appModulesSrc.includes(t))
+check('requires.tabs 里的模块名都在 src/lib/appModules.ts 里', badTabs.length === 0,
+  `可疑: ${badTabs.join(',') || '无'} ｜ 用到: ${tabsUsed.join(',')}`)
 
 // ---------------------------------------------------------------- 收尾
 

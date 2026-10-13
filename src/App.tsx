@@ -418,13 +418,17 @@ export default function App() {
     'redo': () => { void redoFileOp() },
     'zoom-in': () => update('zoom', Math.min(s.zoomMax, +(s.zoom + s.zoomStep).toFixed(2))),
     'zoom-out': () => update('zoom', Math.max(s.zoomMin, +(s.zoom - s.zoomStep).toFixed(2))),
+    // 新建知识页：走**已有**的跨模块事件（面板与桌面「新建」共用同一条），
+    // 监听端在知识库模块（handleTreeNewPick），不在这里直接创建 —— 读写分工铁律：
+    // 建页的写入只发生在知识库文件树/编辑器那条通道上。
+    'kb-new': () => window.dispatchEvent(new CustomEvent('kb-editor-new-page')),
   })
 
   const buildCommandItems = (): PaletteItem[] => {
     // ★ 真源里标了 palette:true 的命令排在最前（都带键位；门控不过的不列）—— 面板此前
     //   完全不知道快捷键，正是 L1 真源化才让它有了键位可显示（见 docs/ui-updates.md §45）。
     const bind = buildPaletteBindings()
-    const items: PaletteItem[] = paletteCommands({ workbench, fullWindowTab }).map((c) => ({
+    const items: PaletteItem[] = paletteCommands({ workbench, fullWindowTab, activeTab }).map((c) => ({
       id: c.id,
       label: c.label,
       group: groupLabelOf(c.group),

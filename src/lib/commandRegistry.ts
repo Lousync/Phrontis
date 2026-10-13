@@ -69,8 +69,9 @@ export interface CommandDef {
   /**
    * 面板门控（拍板 A1）：**不满足时隐藏**这条命令。字段缺省 = 该维度不构成前提。
    * 只写声明式条件（可被契约用上下文矩阵穷举），不要写成函数 —— 函数会藏状态、也测不全。
+   * `tabs` = 只在列出的模块激活时出现（跨模块同键命令靠它区分：Ctrl+N 在笔记/博客/日程都有）。
    */
-  requires?: { workbench?: boolean; fullWindowTab?: boolean }
+  requires?: { workbench?: boolean; fullWindowTab?: boolean; tabs?: string[] }
   /**
    * 与别的命令共用同一组键时的仲裁说明（短句）。
    * 契约 §6 会强制：凡参与「被两条以上命令共用」的键位，本字段必须非空 —— 也就是说
@@ -204,12 +205,12 @@ export const COMMANDS: CommandDef[] = [
     id: 'kb-back', label: '页面历史：后退', desc: '页面历史：后退（笔记区顶栏最左那颗箭头）',
     keys: [['Alt', '←']], group: 'kbEditor', scope: 'note', palette: false,
     note: '对账原型曾把本键锚到 PageEditor.tsx:623 —— 那是 Alt+A 的位置，真实判据在 knowledge/index.tsx',
-    sources: ['src/modules/knowledge/index.tsx:1560'],
+    sources: ['src/modules/knowledge/index.tsx:1574'],
   },
   {
     id: 'kb-fwd', label: '页面历史：前进', desc: '页面历史：前进',
     keys: [['Alt', '→']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1560'],
+    sources: ['src/modules/knowledge/index.tsx:1574'],
   },
   {
     id: 'kb-ai-inline', label: 'AI 内联续写建议', desc: 'AI 内联续写建议：立即要一条（Tab 采纳 / Esc 拒绝；平时停顿会自动出）',
@@ -290,53 +291,55 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'sb-copy', label: '复制选中项', desc: '复制选中的页面 / 目录到内部剪贴板（非输入框时）',
     keys: [['Ctrl', 'C']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1610'],
+    sources: ['src/modules/knowledge/index.tsx:1623'],
   },
   {
     id: 'sb-cut', label: '剪切选中项', desc: '剪切选中的页面 / 目录（非输入框时）',
     keys: [['Ctrl', 'X']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1623'],
+    sources: ['src/modules/knowledge/index.tsx:1636'],
   },
   {
     id: 'sb-paste', label: '粘贴到选中目标', desc: '粘贴内部剪贴板到选中目标（非输入框时）',
     keys: [['Ctrl', 'V']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1636'],
+    sources: ['src/modules/knowledge/index.tsx:1649'],
   },
 
   // ---------------------------------------------------------------- 知识库 — Tab 管理
   {
     id: 'kb-new', label: '新建知识页', desc: '新建知识页（文件树内联命名，落点跟随选中目录）',
-    keys: [['Ctrl', 'N']], group: 'kbTabs', scope: 'note', palette: false,
+    keys: [['Ctrl', 'N']], group: 'kbTabs', scope: 'note', palette: true,
+    // 只在笔记模块激活时出现：Ctrl+N 在笔记 / 博客 / 日程都有，靠 tabs 区分（A1 的门控）
+    requires: { tabs: ['knowledge'] },
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门）：笔记 / 博客 / 日程都占 Ctrl+N，各管各的',
-    sources: ['src/modules/knowledge/index.tsx:1570'],
+    sources: ['src/modules/knowledge/index.tsx:1585'],
   },
   {
     id: 'kb-close-tab', label: '关闭当前 Tab', desc: '关闭当前打开的 Tab 页',
     keys: [['Ctrl', 'W']], group: 'kbTabs', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1585'],
+    sources: ['src/modules/knowledge/index.tsx:1600'],
   },
   {
     id: 'kb-next-tab', label: '下一个 Tab', desc: '切换到下一个 Tab',
     keys: [['Ctrl', 'Tab']], group: 'kbTabs', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1593'],
+    sources: ['src/modules/knowledge/index.tsx:1606'],
   },
   {
     id: 'kb-prev-tab', label: '上一个 Tab', desc: '切换到上一个 Tab',
     keys: [['Ctrl', 'Shift', 'Tab']], group: 'kbTabs', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1593'],
+    sources: ['src/modules/knowledge/index.tsx:1606'],
   },
 
   // ---------------------------------------------------------------- 知识库 — 阅读
   {
     id: 'kb-immersive', label: '沉浸阅读进出', desc: '沉浸阅读进出',
     keys: [['Ctrl', 'Shift', 'R']], group: 'kbReading', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1578'],
+    sources: ['src/modules/knowledge/index.tsx:1593'],
   },
   {
     id: 'kb-immersive-esc', label: '沉浸阅读退出', desc: '沉浸阅读退出',
     keys: [['Escape']], group: 'kbReading', scope: 'note', palette: false,
     conflictNote: '仅沉浸阅读态接管 Escape；非沉浸态归「返回页面列表」',
-    sources: ['src/modules/knowledge/index.tsx:1578'],
+    sources: ['src/modules/knowledge/index.tsx:1593'],
   },
 
   // ---------------------------------------------------------------- 电子书阅读器（PDF + EPUB）
@@ -484,6 +487,8 @@ export interface PaletteContext {
   workbench: boolean
   /** 当前激活的是否整窗模块（左右栏退场） */
   fullWindowTab: boolean
+  /** 当前激活的模块标签（工具标签 / 空态时为 null） */
+  activeTab: string | null
 }
 
 /** 单条命令在给定上下文下是否可用（字段缺省 = 该维度不构成前提） */
@@ -492,6 +497,7 @@ export function gateAllows(c: CommandDef, ctx: PaletteContext): boolean {
   if (!r) return true
   if (r.workbench !== undefined && r.workbench !== ctx.workbench) return false
   if (r.fullWindowTab !== undefined && r.fullWindowTab !== ctx.fullWindowTab) return false
+  if (r.tabs !== undefined && !(ctx.activeTab !== null && r.tabs.includes(ctx.activeTab))) return false
   return true
 }
 
