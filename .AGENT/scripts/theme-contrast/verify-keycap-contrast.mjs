@@ -210,9 +210,11 @@ for (const r of ladderRows) console.log('         ' + pad(r.theme, 18) + r.vals.
 check(`三级暗文字全部达标（secondary ≥4.5 / muted ≥4.0 / disabled ≥3.5，且梯子不倒）`,
   ladderFail.length === 0, ladderFail.length ? `不达标：${ladderFail.slice(0, 8).join('、')}` : `${themes.length} 套主题逐条列出`)
 
-// ★ 如实交代（**不作为闸门**）：输入框占位符落在 --input-bg 上，深色主题里它是最亮的面，
-//   梯子在那里放不下（disabled 要够亮就会亮过 secondary）。占位符要不要独立令牌是另一件事，
-//   这里只把数值打印出来，避免"改了 A 就以为占位符也达标了"。
+// ★ 如实交代（**不作为闸门，也不是漏项**）：输入框占位符落在 --input-bg 上，深色主题里它是最亮的面，
+//   梯子在那里放不下（disabled 要够亮就会亮过 secondary）。占位符要不要独立令牌**已于 2026-10-13 拍板：
+//   不给**（一打字就消失，值不上多一支令牌；VS Code 有 input.placeholderForeground，我们选择不做）。
+//   ⇒ 这一列**保持只打印、不设闸门**；数字留在输出里，将来想复议随时能看。
+//   **不要把它加进闸门，也不要把它"修"成达标** —— 那是决定，不是漏项（台账 docs/v3.5.0-feedback.md F-2）。
 const ph = themes.map((t) => ({ n: t.name, r: ratio(resolve(t.colors, '--text-disabled'), t.colors['--input-bg']) }))
 const phBad = ph.filter((x) => x.r !== null && x.r < 4.5)
 console.log(`         [信息] 占位符面（--input-bg）：${ph.length - phBad.length}/${ph.length} 套 ≥4.5；` +
