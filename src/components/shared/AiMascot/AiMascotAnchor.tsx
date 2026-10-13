@@ -29,7 +29,17 @@ export const AiMascotAnchor = memo(function AiMascotAnchor() {
     const load = (): void => {
       pluginListMascots()
         .then(l => { if (alive) setList(l) })
-        .catch(() => { if (alive) setList([]) }) // 插件线不可用视为无贡献 → 用占位
+        /**
+         * 读不到角色清单 ⇒ 回落内置占位（**显示上**与「真没装」同款，这是对的：装饰件不该弹错）。
+         * ★ 但 2026-10-13 之前这里连日志都不留，于是「插件线不可用」与「没装插件」在**任何地方**
+         *   都无从区分 —— 设置页也因此把前者说成了「尚未安装吉祥物角色」（F-1）。现在至少留一条
+         *   控制台痕迹；给用户看的那种区分在设置页（AiToolsView 的 mascotDiag）。
+         */
+        .catch((e) => {
+          if (!alive) return
+          setList([])
+          console.warn('[mascot] 吉祥物清单读取失败，本次回落内置占位：', e)
+        })
     }
     load()
     const off = onPluginInstalledChanged(load)

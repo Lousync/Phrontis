@@ -76,5 +76,31 @@ check('设置项保留 anchor ai.mascot', /aiMascot:[\s\S]{0,500}?anchor:\s*'ai\
 const at = read('src/modules/settings/views/AiToolsView.tsx')
 check('设置面板有吉祥物选择控件', at.includes('data-setting-anchor="ai.mascot"') && at.includes('pluginListMascots'))
 
+// ---- 空列表的自诊断（F-1，2026-10-13）----
+// 背景：开发者装了吉祥物插件，设置里却只有「自动 / 内置占位 / 关闭」三项，而提示语写的是
+// 「尚未安装吉祥物角色」—— 五种完全不同的状态被说成同一句话，用户无从判断，只能来问。
+// 这几条锁「每种状态都说自己的话」，以及「不许再把失败吞成空数组」。
+console.log('\n[设置] 吉祥物空列表的自诊断（F-1）')
+check('设置页交叉核对已安装插件清单（不新增主进程通道）',
+  at.includes('pluginListInstalled') && at.includes("includes('mascot')"))
+for (const [state, why] of [
+  ['unavailable', '通道不可用'],
+  ['stale', '已装已启用却没读出来（后台没跟上）'],
+  ['disabled', '装了但未启用'],
+  ['broken', '插件没能加载起来'],
+  ['none', '真的没装'],
+]) {
+  check(`五种空态之一在册：${state}（${why}）`, at.includes(`'${state}'`))
+}
+check('「真没装」仍保留原文案（文案只收不删）', at.includes('尚未安装吉祥物角色'))
+check('「装了没启用」指路到 设置 → 插件', /state === 'disabled'[\s\S]{0,300}?设置 → 插件/.test(at))
+check('「后台没跟上」明说要重启应用', /state === 'stale'[\s\S]{0,300}?重启应用/.test(at))
+// ★ 负向：这一条正是本次要消灭的写法 —— catch 里直接当"没有角色"，把异常伪装成"没装"
+check('负向：设置页不再把 mascots 失败吞成空数组',
+  !/pluginListMascots\(\)\s*\n?\s*\.then\([\s\S]{0,120}?\.catch\(\(\)\s*=>\s*\{[^}]*setMascots\(\[\]\)/.test(at) &&
+  /setMascotDiag\(\{ state: 'unavailable'/.test(at))
+check('挂载壳失败时留控制台痕迹（不再零痕迹）', /catch\(\(e\)\s*=>\s*\{[\s\S]{0,200}?console\.warn\('\[mascot\]/.test(anchor))
+check('挂载壳仍回落内置占位（显示行为不变）', anchor.includes('<PlaceholderMascot'))
+
 console.log(`\n断言: ${pass} PASS, ${fail} FAIL`)
 process.exit(fail > 0 ? 1 : 0)

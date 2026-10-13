@@ -7,14 +7,14 @@ import {
   mcpListServers, mcpAddServer, mcpRemoveServer, mcpToggleServer, mcpRefreshTools, mcpTestConnection,
   aiToolsListSkills, aiToolsCopySkillPrompt, aiToolsInstallSkill, aiToolsInstallSkillFromFile, aiToolsUninstallSkill, aiToolsToggleSkill,
   llmListProviders,
-  pluginListMascots, onPluginInstalledChanged,
+  pluginListMascots, pluginListInstalled, onPluginInstalledChanged,
 } from '../../../lib/ipc'
 import { AiModelsTab } from './AiModelsTab'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { AiPermissionsTab } from './AiPermissionsTab'
 import { CollapseList } from '../components/CollapseList'
 import { SettingListPanel } from '../components/SettingListPanel'
-import type { AgentToolInfo, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpTestResult, SkillInfo, SkillInstallResult, PluginMascotInfo } from '../../../types'
+import type { AgentToolInfo, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpTestResult, SkillInfo, SkillInstallResult, PluginMascotInfo, PluginSummary } from '../../../types'
 
 const SOURCE_LABEL: Record<AgentToolInfo['source'], string> = {
   builtin: '内置',
@@ -42,14 +42,53 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
   const { s, update } = useSettings()
   const [usage, setUsage] = useState<AiToolUsage>({ used: 0, limit: 0 })
   const [mascots, setMascots] = useState<PluginMascotInfo[]>([])
+  /**
+   * 空列表的**五种真相**（F-1，2026-10-13）。此前这里只有一句「尚未安装吉祥物角色」，
+   * 而"真没装 / 装了但没启用 / 装了但没加载起来 / 后台插件线没跟上 / 扫描抛错"五种情况
+   * 看起来一模一样 —— 开发者 2026-10-13 就是这么被卡住的（截图里那句正是空列表文案）。
+   * 判据全部来自**既有 IPC**（mascots + installed 两份清单交叉），不新增主进程通道：
+   * 主进程恰好是最不该依赖的一环（铁律 8：dev 主进程没有热重载，它可能还停在旧版本）。
+   *   ok          ── 有角色（正常）；
+   *   none        ── 没有任何已装插件声明 mascot：真的没装；
+   *   disabled    ── 有插件声明了 mascot 但**未启用**（扫描只收 enabled）；
+   *   broken      ── 有插件没加载起来（缺文件 / 清单校验没过）；
+   *   stale       ── 已装、已启用、却仍没角色 ⇒ 后台没跟上（重启应用）；
+   *   unavailable ── mascots 那条 IPC 直接抛错（通道不存在 / 主进程异常）。
+   */
+  const [mascotDiag, setMascotDiag] = useState<{ state: 'ok' | 'none' | 'disabled' | 'broken' | 'stale' | 'unavailable'; names: string[] }>({ state: 'ok', names: [] })
 
   // 已安装插件的吉祥物角色（供「吉祥物」下拉）；安装/启停/卸载后刷新
   useEffect(() => {
     let alive = true
     const load = (): void => {
-      pluginListMascots()
-        .then(l => { if (alive) setMascots(l) })
-        .catch(() => { if (alive) setMascots([]) })
+      void (async () => {
+        let list: PluginMascotInfo[] = []
+        try {
+          list = await pluginListMascots()
+        } catch {
+          // ★ 以前这里是 .catch(() => setMascots([]))：把"通道不可用"伪装成"没装"，
+          //   用户看到的是「尚未安装吉祥物角色」——一句谎话。现在如实说并且能自诊断。
+          if (!alive) return
+          setMascots([])
+          setMascotDiag({ state: 'unavailable', names: [] })
+          return
+        }
+        if (!alive) return
+        setMascots(list)
+        if (list.length > 0) { setMascotDiag({ state: 'ok', names: [] }); return }
+        // 空列表：拿**已安装插件清单**交叉判断到底是哪种空（该 IPC 是老通道，旧主进程也有）
+        let installed: PluginSummary[] = []
+        try { installed = await pluginListInstalled() } catch { installed = [] }
+        if (!alive) return
+        const declares = installed.filter(p => (p.contributions ?? []).includes('mascot'))
+        const enabledDeclares = declares.filter(p => p.enabled && !p.broken)
+        if (enabledDeclares.length > 0) { setMascotDiag({ state: 'stale', names: enabledDeclares.map(p => p.name) }); return }
+        const disabledDeclares = declares.filter(p => !p.enabled)
+        if (disabledDeclares.length > 0) { setMascotDiag({ state: 'disabled', names: disabledDeclares.map(p => p.name) }); return }
+        const broken = installed.filter(p => p.broken)
+        if (broken.length > 0) { setMascotDiag({ state: 'broken', names: broken.map(p => p.name) }); return }
+        setMascotDiag({ state: 'none', names: [] })
+      })()
     }
     load()
     const off = onPluginInstalledChanged(load)
@@ -155,9 +194,17 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
               </select>
             </label>
             <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed px-1 mt-1.5">
-              {mascots.length === 0
-                ? '尚未安装吉祥物角色；到插件市场安装「书桌伙伴 · AI 吉祥物」后即可在此选择。'
-                : '有 AI 输入框的地方（对话主区 / 侧边对话 / 放大态 / 支线旁问 / 日程问答）在输入卡上沿显示所选角色，随 AI 活动切换小动作。'}
+              {mascots.length > 0
+                ? '有 AI 输入框的地方（对话主区 / 侧边对话 / 放大态 / 支线旁问 / 日程问答）在输入卡上沿显示所选角色，随 AI 活动切换小动作。'
+                : mascotDiag.state === 'unavailable'
+                  ? '读不到吉祥物清单（插件线不可用）—— 若刚更新过版本或正在开发模式，先把应用整个重启一次（开发模式下只刷新界面不够，后台不会跟着更新）；仍不行请把这一行报给开发者。'
+                  : mascotDiag.state === 'stale'
+                    ? `已安装并启用了 ${mascotDiag.names.join('、')}，但没能读出角色 —— 多半是后台（主进程）还停在旧版本，重启应用后再看。`
+                    : mascotDiag.state === 'disabled'
+                      ? `已安装 ${mascotDiag.names.join('、')}，但它当前未启用 —— 到 设置 → 插件 里启用后，这里就会出现可选角色。`
+                      : mascotDiag.state === 'broken'
+                        ? `有插件没能加载起来（${mascotDiag.names.join('、')}）—— 到 设置 → 插件 看它的报错（文件缺失或清单校验没过）。`
+                        : '尚未安装吉祥物角色；到插件市场安装「书桌伙伴 · AI 吉祥物」后即可在此选择。'}
             </p>
           </div>
         </div>
