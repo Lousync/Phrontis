@@ -1434,3 +1434,62 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 
 ---
 
+## 44. 设置 → 快捷键「指令表」逐行对账与修正（2026-10-13）
+
+**动机**：做「命令面板增强 + 指令表真源化」（L1+L2）之前先把现表与代码对齐 —— 否则真源会照着一份错的表建。原以为只有 4 处不符（`Ctrl` + 反引号描述过期 / `Ctrl+P` 分组错位 / `Ctrl+Shift+F` 漏登记 / 密码本「可在设置改键」写了不存在的功能），**逐行核完是 8 组**。对账原型与 58 条命令底账：`tmp/command-registry-proto/index.html`（不进 git）。
+
+**8 组不符**（每处的代码判据都写进了 `ShortcutsView.tsx` 头注）：
+
+| # | 表里写的 | 代码实际 | 类别 |
+|---|---|---|---|
+| 1 | `Ctrl` + 反引号 =「全局搜索底部面板（仅 Workbench 布局）」 | `App.tsx:304` 与 `Ctrl+P` 同分支 → **左栏搜索态**；「底部面板」这个东西已随顶栏搜索框删除而消失 | 描述过期 |
+| 2 | `Ctrl+P` 挂在「知识库 — 阅读」叫「知识库快速搜索」 | 同上，**全局**拦截、与模块无关（帮助手册一直记在「全局」，手册是对的） | 分组错位 |
+| 3 | `Ctrl+Shift+F` **整条没有** | `App.tsx:309` 与上两者同效 | 漏登记 |
+| 4 | 密码本「系统级；**可在设置改键**」 | `settings.ts`（设置唯一真源）里**没有这个设置项**；`passwordFiller.ts:143` 直接读 `settings.json` 裸键 `fillPopupShortcut` ⇒ 只能手改 JSON | 写了不存在的功能 |
+| 5 | 「编辑器模块」整组（6 行） | 模块 **2026-09-20 阶段四物理退役**（`src/modules/editor` 不存在，`verify-notes-inline-edit` 有断言锁） | 整组失效 |
+| 6 | `Ctrl+Shift+S` 保存全部打开文件 | **全仓无任何处理**（grep 只命中两张表与 `sections.tsx` 的 keywords） | 死键 |
+| 7 | `Ctrl+S` 保存当前文件（挂在退役模块下） | 与知识库「立即保存」重复 | 冗余 |
+| 8 | `Alt+A` 归「编辑器模块」 | 实际是**笔记编辑态**的（`PageEditor.tsx:623`；同处注释即写「随编辑器退役补齐入口」） | 归属错 |
+
+**顺带发现的两处（表里漏，未改归 L1）**：`Ctrl+/` 漏了同效的 `Ctrl+E`（`PageEditor.tsx:852` 同一分支）；`Ctrl+N` 的「新建零散页面」是旧口径（现为文件树内联创建、落点跟随选中目录）。
+
+**修改**：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 三键同效合成一行并归「全局」（`Ctrl+P` / `Ctrl` + 反引号 / `Ctrl+Shift+F`）；为它给 `Row` 加 `alts` 支持，组间用 `/` 分隔。行数 **44 → 42**（-2 死键与重复行、-1 与全局那行合并、+1 博客大纲改键后登记） | `src/modules/settings/views/ShortcutsView.tsx` |
+| 2 | 「编辑器模块」组 → **「PDF 阅读器」**（组内真有的三行 `Ctrl+F`/`PageDown·空格`/`PageUp` 归位）；`Alt+A` 移入「知识库 — 编辑器」；删死键与重复行 | 同上 |
+| 3 | anchor id `shortcuts.editorModule` → `shortcuts.pdfKeys`（全仓只此两文件引用，无兼容负担）；组名/desc/keywords 同步；`Ctrl+P` 的 keywords 从 `kbReading` 移到 `global`（否则设置搜索「ctrl p」跳错组） | `src/modules/settings/sections.tsx` |
+| 4 | 手册删掉退役的「## 编辑器」小节（它内部还自相矛盾：同一份文档里 `Ctrl+N` 一处写「根目录内联命名」、一处写「跳转编辑器进入命名」），并改掉后者的过期口径 | `resources/help/键盘快捷键.md` |
+| 5 | 新契约 **45 项**：锁住 8 组修正 + 独立复核「死键确实没有处理」「设置真源确实没有该设置项」+ 两个写作档位确实注册了那 10 个键位 | `.AGENT/scripts/settings/verify-shortcuts-table.mjs`（新） |
+
+**取舍**：① **只修「写错了的」，不补「漏登记的」** —— 完整性（全局缺 `Ctrl+Shift+J` / `Ctrl+Alt+B` / `Ctrl+Z·Shift+Z·Y`；整块缺「写作面 8 键」「图片查看器 4 键」「PDF 缩放 3 键」，合计约 18 行）归 L1 真源化一次解决；手抄补齐既会与 L1 撞车，也修不掉病根（表本来就是手写的）。契约 H8/H9 把「仍是缺口」记成**翻转标记**，L1 补齐后必须翻转而非删掉。② L1 的落法建议：**不要解析 md 对账，而要从真源生成 md**（复用铁律 24 的 release-notes 生成 + 比对模式）—— md 里 `` `Ctrl` `Alt` `1` / `2` / `3` `` 这种合并写法没法可靠解析（`/` 既是分隔符又是键位本身）。③ 密码本「可改键」**改成真的**属新功能，本次只删不实描述。
+
+**`Ctrl+O` 撞车（本轮已按拍板修掉）**：`Ctrl+O` 原本被绑两次 —— 全局快速打开（`App.tsx:314`）与博客大纲开关（`blog/index.tsx:315`，仅 editor/detail 态）。两者都是 window 级监听，而 App 那条**没有** `isEditingInput` 闸门，故焦点不在输入控件时**两个动作会一起发生**（博客那条后注册，`preventDefault` 已经晚了）。
+
+**拍板（2026-10-13）：博客大纲改键到 `Ctrl+Alt+O`**（与 `Ctrl+Alt+B` 切右栏 / `Ctrl+Alt+F` 脚注同家族），全局 `Ctrl+O` 不变。
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | 判定加 `e.altKey` 并排除 Shift，`e.key` 走 `toLowerCase()`（CapsLock 下是 `'O'`）；同处留注释写清撞车机制 | `src/modules/blog/index.tsx` |
+| 2 | 两处按钮提示 `大纲 (Ctrl+O)` → `大纲 (Ctrl+Alt+O)`（**必须同步改**，契约 I5 锁「两处旧串都不存在」防只改一处） | `src/modules/blog/index.tsx`·`components/MarkdownEditor.tsx` |
+| 3 | 表与手册登记新键（设置页「博客」组 + 手册「博客」表） | `ShortcutsView.tsx`·`sections.tsx`·`resources/help/键盘快捷键.md` |
+| 4 | 契约新增 I 组 **9 项**：博客不再占裸 `Ctrl+O` / 新判定形状 / 两处提示 / **全局那条保持不变** / **全仓除 App 外无第二处裸 `Ctrl+O`**（防新撞车） | `.AGENT/scripts/settings/verify-shortcuts-table.mjs` |
+
+顺带确认一个**一度被怀疑但不成立**的撞车：`Ctrl+Alt+B` 在 AI 教学里另有同键（切其右侧栏），但 AI 教学是整窗模块、`App.tsx:1388` 有 `if (fullWindowTab) return` 早退 ⇒ **实际不冲突**，未动。
+
+**验收**：tsc 双端 0 错 · 契约 **54/54**（45 → 加 I 组 9 项）· 真组件 SSR 渲染自检 **20/20**（`tmp/shortcuts-view/render-check.mjs`，断到「三选一那行 = 7 枚键帽 + 2 个分隔符」，源码契约断不到这一层）· `verify-perception.mjs` **235 项全绿**（它读 `ShortcutsView` 的 `Alt+A`）· `verify-help-retrieval.mjs` **109/109** · 全量 **96 个契约 10 红**，与改动前**同一批**，逐个确认**没有一个读本轮改过的文件**（红项为既有环境性/主干红：ACL 低信任标签 · conpty 命名管道 EPERM · esbuild 拉子进程 EPERM · junction 建不了 · 工具清单不符 · `schemaVersion` 未抬 · habit-link 误报 · tray-icon · ai-teaching 两条）。
+
+**devbridge 在运行实例上实测（双向都验到了）**：
+
+| 实测 | 结果 |
+|---|---|
+| 设置 → 快捷键页 | 9 组锚点顺序正确、**42 行**、「PDF 阅读器」在而「编辑器模块 / 保存全部 / 可在设置改键」全无、三选一行 **7 枚键帽 + 2 个分隔符**、`Alt+A` 落在知识库编辑器组、阅读组只剩 `Ctrl+Shift+R` / `Escape` |
+| 进博客详情态看按钮提示 | `title="大纲 (Ctrl+Alt+O)"` |
+| 按**裸 `Ctrl+O`** | 快速打开面板弹出 ✓、模块侧栏槽**纹丝不动**（大纲没被切）✓ |
+| 按 **`Ctrl+Alt+O`** | 侧栏槽换成大纲面板 ✓、**面板没弹** ✓；再按一次回到文章归档 ✓（可逆） |
+
+实测只做纯导航点击，已把窗口还原到总空态（实测 `[data-wb="empty"]` 可见 941px、三条提示在、页面条 0 标签）。
+
+**未做（如实记）**：设置页那行「**所有可用的**键盘快捷键一览」在补齐约 18 行前仍名不副实 —— 本次没改这句文案（属产品措辞取舍，等 L1）。另：设置页键帽用 `<span>`、工作台空态三条用 `<kbd>`，两处语义不一致，本次未统一。
+

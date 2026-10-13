@@ -134,24 +134,28 @@ const ENTRY_ITEMS: SettingItem[] = [
   { id: 'advanced.storage', section: 'data', group: '备份与恢复', label: '整仓备份',
     desc: '整仓备份恢复（.knowbase 整包 zip）与数据导出', keywords: ['仓库', 'vault', '备份', '恢复', '导出', 'storage', '存储'] },
   // ===== 快捷键 =====
+  // ★ 2026-10-13 与 ShortcutsView.tsx 逐行对账后同步：这 9 条的 desc / keywords / group
+  //   必须与该组件实际的组名、组内键位一致，否则设置搜索会把「ctrl p」跳到错的组。
   { id: 'shortcuts.global', section: 'shortcuts', group: '全局', label: '全局快捷键',
-    desc: '侧栏折叠、命令面板、快速打开、缩放、AI 助手、全局搜索等', keywords: ['全局', '侧栏', '折叠', 'escape', 'esc', '关闭弹窗', 'ctrl b', '命令面板', 'ctrl shift p', '快速打开', 'ctrl o', '缩放', 'ctrl j', 'ai 助手', '全局搜索'] },
+    desc: '侧栏折叠、命令面板、快速打开、全局搜索（左栏搜索态）、缩放、AI 助手、小窗', keywords: ['全局', '侧栏', '折叠', 'escape', 'esc', '关闭弹窗', 'ctrl b', '命令面板', 'ctrl shift p', '快速打开', 'ctrl o', 'ctrl p', 'ctrl shift f', '反引号', '缩放', 'ctrl j', 'ai 助手', '全局搜索'] },
   { id: 'shortcuts.kbEditor', section: 'shortcuts', group: '知识库 — 编辑器', label: '知识库编辑器快捷键',
-    desc: '保存、Markdown 预览、返回列表', keywords: ['保存', '预览', 'ctrl s', 'markdown 预览', 'ctrl /'] },
+    desc: '保存、阅读编辑切换、页面历史、AI 内联续写、插图脚注', keywords: ['保存', '预览', 'ctrl s', 'markdown 预览', 'ctrl /', 'ctrl e', '页面历史', 'alt', '后退', '前进', '内联建议', '续写', 'alt a', '插图', '脚注', 'ctrl shift i', 'ctrl alt f'] },
   { id: 'shortcuts.kbSidebar', section: 'shortcuts', group: '知识库 — 侧栏', label: '知识库侧栏快捷键',
     desc: '重命名、删除、复制剪切粘贴选中项', keywords: ['重命名', 'f2', '删除', '侧栏', 'rename', '复制', '剪切', '粘贴', 'ctrl c', 'ctrl x', 'ctrl v'] },
   { id: 'shortcuts.kbTabs', section: 'shortcuts', group: '知识库 — Tab 管理', label: '知识库 Tab 快捷键',
-    desc: '新建 / 关闭 / 切换标签页', keywords: ['tab', '标签页', '新建页面', '关闭', '切换', 'ctrl w', 'ctrl tab'] },
+    desc: '新建 / 关闭 / 切换标签页', keywords: ['tab', '标签页', '新建页面', '新建知识页', '关闭', '切换', 'ctrl w', 'ctrl tab'] },
   { id: 'shortcuts.kbReading', section: 'shortcuts', group: '知识库 — 阅读', label: '知识库阅读快捷键',
-    desc: '沉浸阅读、快速搜索', keywords: ['沉浸阅读', '快速搜索', 'ctrl shift r', 'ctrl p', 'escape', '阅读'] },
-  { id: 'shortcuts.editorModule', section: 'shortcuts', group: '编辑器模块', label: '编辑器模块快捷键',
-    desc: '保存文件、PDF 阅读器搜索与翻页', keywords: ['编辑器', '保存全部', 'ctrl shift s', 'pdf', 'pdf 搜索', 'ctrl f', '翻页', 'pageup', 'pagedown'] },
+    desc: '沉浸阅读进出', keywords: ['沉浸阅读', 'ctrl shift r', 'escape', '阅读'] },
+  // 原 id 为 shortcuts.editorModule —— 该模块 2026-09-20 已物理退役，组内只剩 PDF 三行是真的，
+  // 故改组为「PDF 阅读器」。anchor id 随之改名（全仓只有本文件与 ShortcutsView 引用它，无兼容负担）。
+  { id: 'shortcuts.pdfKeys', section: 'shortcuts', group: 'PDF 阅读器', label: 'PDF 阅读器快捷键',
+    desc: 'PDF 内搜索、翻页', keywords: ['pdf', 'pdf 搜索', 'ctrl f', '翻页', 'pageup', 'pagedown', '下一页', '上一页', '空格'] },
   { id: 'shortcuts.blogKeys', section: 'shortcuts', group: '博客', label: '博客快捷键',
-    desc: '新建今日文章、保存并关闭、预览', keywords: ['博客快捷键', '新建文章', 'ctrl n', '保存并关闭'] },
+    desc: '新建今日文章、保存并关闭、预览、大纲', keywords: ['博客快捷键', '新建文章', 'ctrl n', '保存并关闭', '大纲', 'ctrl alt o'] },
   { id: 'shortcuts.scheduleKeys', section: 'shortcuts', group: '日程', label: '日程快捷键',
     desc: '新建任务、关闭弹窗、置顶停靠、桌面小组件', keywords: ['日程快捷键', '新建任务', '任务', 'ctrl n', 'ctrl alt s', '置顶停靠', '桌面小组件', 'ctrl alt up', 'ctrl alt down'] },
   { id: 'shortcuts.passwordKeys', section: 'shortcuts', group: '密码本', label: '密码本快捷键',
-    desc: '密码填充弹窗（可配置键位）', keywords: ['密码', '密码填充', '填充弹窗', 'ctrl alt p', 'password', 'fill'] },
+    desc: '密码填充弹窗开关（系统级）', keywords: ['密码', '密码填充', '填充弹窗', 'ctrl alt p', 'password', 'fill'] },
 
   // ===== 提醒 =====
     { id: 'reminder.enable', section: 'modules', group: '打卡提醒', label: '启用打卡提醒',

@@ -307,12 +307,17 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
     })
   }, [onSnapCloseSidebar, onSnapOpenSidebar])
 
-  // Ctrl+O toggle outline
+  // Ctrl+Alt+O toggle outline
+  // ★ 2026-10-13 改键：原为 Ctrl+O，与 App.tsx:314 的**全局快速打开文件**撞车 —— 两条都是
+  //   window 级监听，而 App 那条没有焦点闸门（本条的 isEditingInput 只是自保），于是焦点不在
+  //   输入控件时两个动作会**一起发生**：既弹出快速打开面板、又切了大纲，而本条后注册、
+  //   preventDefault 已经来不及。改用 Ctrl+Alt+O 后与 Ctrl+Alt+B（切右栏）/ Ctrl+Alt+F（脚注）
+  //   同家族。两处按钮提示（本文件 :566 与 MarkdownEditor.tsx:308）必须同步改，契约有断言锁。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (getGlobalActiveTab() !== 'blog') return
       if (isEditingInput(e)) return
-      if (e.ctrlKey && e.key === 'o' && (view === 'editor' || view === 'detail')) {
+      if (e.ctrlKey && e.altKey && !e.shiftKey && e.key.toLowerCase() === 'o' && (view === 'editor' || view === 'detail')) {
         e.preventDefault()
         handleToggleOutline()
       }
@@ -563,7 +568,7 @@ function EntryDetail({ entryId, onEdit, onDelete, onBack, onToggleOutline }: {
             <button onClick={onBack} className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">← 返回列表</button>
             <div className="flex gap-2">
               {onToggleOutline && (
-                <button onClick={onToggleOutline} className="p-1.5 rounded hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]" title="大纲 (Ctrl+O)">
+                <button onClick={onToggleOutline} className="p-1.5 rounded hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]" title="大纲 (Ctrl+Alt+O)">
                   <ListTree size={16} />
                 </button>
               )}

@@ -305,7 +305,7 @@ export function MarkdownEditor({ entryId, showLineNumbers, zoom = 1, onSave, onC
           {onToggleOutline && (
             <button onClick={onToggleOutline}
               className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
-              title="大纲 (Ctrl+O)">
+              title="大纲 (Ctrl+Alt+O)">
               <ListTree size={13} />
               大纲
             </button>
