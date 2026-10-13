@@ -98,7 +98,7 @@ for (const c of COMMANDS) {
 }
 check('键帽 token 合法（修饰键在前、末位主键、无重复/未知）', tokenBad.length === 0, tokenBad.slice(0, 6).join(' | '))
 
-check(`palette:true 的条数 12`, COMMANDS.filter((c) => c.palette).length === 12,
+check(`palette:true 的条数 14`, COMMANDS.filter((c) => c.palette).length === 14,
   `实际 ${COMMANDS.filter((c) => c.palette).length}`)
 // ★ 不变量（2026-10-13 起，kb-new 进面板后取代了原先「只标 global」的过渡口径）：
 //   非 global scope 的命令想进面板**必须声明 requires** —— 否则它会在错的上下文里出现
@@ -303,6 +303,12 @@ check('blog-new 只在博客模块激活时出现',
 check('sch-new 只在日程模块激活时出现',
   CTXS.every((c, i) => has(i, 'sch-new') === (c.activeTab === 'schedule')),
   CTXS.map((c, i) => `${c.activeTab ?? 'null'}:${has(i, 'sch-new') ? '有' : '无'}`).join(' '))
+// L2 第三批：笔记内的两条（关闭当前标签页 / 沉浸阅读进出）—— 门控同样只认 activeTab
+for (const id of ['kb-close-tab', 'kb-immersive']) {
+  check(`${id} 只在笔记模块激活时出现`,
+    CTXS.every((c, i) => has(i, id) === (c.activeTab === 'knowledge')),
+    CTXS.map((c, i) => `${c.activeTab ?? 'null'}:${has(i, id) ? '有' : '无'}`).join(' '))
+}
 const noReq = COMMANDS.filter((c) => c.palette && !c.requires).map((c) => c.id)
 check('无 requires 的命令在所有上下文下都出现', byCtx.every((list) => noReq.every((id) => list.some((c) => c.id === id))),
   `无 requires 的: ${noReq.join(',')}`)

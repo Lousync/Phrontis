@@ -426,6 +426,9 @@ export default function App() {
     'blog-new': () => window.dispatchEvent(new CustomEvent('blog-new-entry')),
     // 新建任务：同上（监听端在日程模块）
     'sch-new': () => window.dispatchEvent(new CustomEvent('schedule-new-task')),
+    // 笔记模块内的两条：关闭当前标签页 / 沉浸阅读进出（监听端都在知识库模块）
+    'kb-close-tab': () => window.dispatchEvent(new CustomEvent('kb-close-active-tab')),
+    'kb-immersive': () => window.dispatchEvent(new CustomEvent('kb-toggle-immersive')),
   })
 
   const buildCommandItems = (): PaletteItem[] => {

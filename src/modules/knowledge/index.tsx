@@ -1100,6 +1100,26 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     return () => window.removeEventListener('kb-editor-new-page', onNewPage)
   }, [handleTreeNewPick])
 
+  /**
+   * 两条「模块内命令」的跨模块入口（2026-10-13，L2 第三批）：命令面板派发这两个事件。
+   * 动作直接复用既有回调（handleCloseTab / enterReading），不新写逻辑 —— 与前两批
+   * （kb-editor-new-page / blog-new-entry / schedule-new-task）同一手法。
+   * 门控在调用方：真源里这两条都要求 activeTab === 'knowledge'，故本监听端不再自查。
+   */
+  useEffect(() => {
+    const onCloseTab = (): void => {
+      const id = activePageIdRef.current
+      if (id) handleCloseTab(id)
+    }
+    const onImmersive = (): void => { void enterReading() }
+    window.addEventListener('kb-close-active-tab', onCloseTab)
+    window.addEventListener('kb-toggle-immersive', onImmersive)
+    return () => {
+      window.removeEventListener('kb-close-active-tab', onCloseTab)
+      window.removeEventListener('kb-toggle-immersive', onImmersive)
+    }
+  }, [handleCloseTab, enterReading])
+
   // 选中目录只在「知识库文件视图」语境下有意义：进空间 / 图谱态即清空（B-7）
   useEffect(() => {
     if (selectedSpaceId || graphMode) setSelectedDirRel(null)
