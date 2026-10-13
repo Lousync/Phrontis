@@ -165,7 +165,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
               <div className="space-y-2 mb-6">
                 {SHORTCUTS.map(sc => (
                   <div key={sc.keys} className="flex items-center gap-3">
-                    <kbd className="min-w-[92px] text-center px-2 py-1 rounded bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-primary)]">{sc.keys}</kbd>
+                    <kbd className="kb-kbd min-w-[92px] justify-center px-2 py-1 rounded text-[11px]">{sc.keys}</kbd>
                     <span className="text-[12px] text-[var(--text-secondary)]">{sc.desc}</span>
                   </div>
                 ))}

@@ -78,7 +78,7 @@ export function WorkbenchEmptyState({ hints }: Props) {
               {h.keys.map((k) => (
                 <kbd
                   key={k}
-                  className="rounded border border-[var(--border-color)] bg-[var(--bg-primary)] px-1 py-[3px] font-mono text-[10px] leading-none text-[var(--text-disabled)]"
+                  className="kb-kbd rounded px-1 py-[3px] text-[10px] leading-none"
                 >
                   {k}
                 </kbd>

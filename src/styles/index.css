@@ -56,6 +56,18 @@
   --window-radius: 18px;
   --glass-edge: rgba(255, 255, 255, 0.08);
 
+  /* ===== 键帽 / 快捷键芯片（.kb-kbd，2026-10-13）=====
+     为什么单独立令牌：键帽此前用 --text-disabled（语义是「禁用」，天生低对比）。
+     实测 14 套主题（内置 2 + 插件包 12）现状**全部**在 1.48 ~ 2.76:1 —— 不是某套主题的问题，
+     是「把禁用色当信息色用」。改取 --text-primary 作前景（主题保证正文色在自家底色上可读），
+     实测 14/14 ≥ 4.5:1，达到小字 AA。
+     ★ 值一律写成 **var() 引用**而不是字面色：插件主题只覆写自己那几支色板，引用会跟着它们走；
+       写成字面色就只有内置主题是对的，插件主题会照旧看不清（这是本条最容易踩空的地方）。
+     判据与逐主题数值：.AGENT/scripts/theme-contrast/verify-keycap-contrast.mjs */
+  --kbd-fg: var(--text-primary);
+  --kbd-bg: var(--input-bg);
+  --kbd-border: var(--border-color);
+
 }
 
 /* ===== 主题覆写（通过 html.theme-<id> 控制，新增主题只需加一个同名块）===== */
@@ -89,6 +101,20 @@ html.theme-light {
   --drop-border: #0078d4;
 
   --glass-edge: rgba(255, 255, 255, 0.65);
+}
+
+/* ===== 键帽 / 快捷键芯片 =====
+   颜色语义走 --kbd-*（见上方 :root），尺寸 / 间距 / 圆角由各调用点自定。
+   为什么要抽成一个类：键帽出现在**四处**（命令面板 / 设置·快捷键指令表 / 工作台空态 /
+   首启引导），原先各写一份颜色，其中三处写的是 --text-disabled ⇒ 每一套主题都看不清。
+   一个类 = 一处改、四处对；契约锁「四处都用它、且不许再退回 --text-disabled」。 */
+.kb-kbd {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  color: var(--kbd-fg);
+  background: var(--kbd-bg);
+  border: 1px solid var(--kbd-border);
 }
 
 /* ===== 主题渐变底（主题包经 --bg-gradient 注入，缺省 none 与纯色零差异）=====

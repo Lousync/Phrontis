@@ -91,9 +91,11 @@ ok(/h\.keys\.map\(\(k\) => \([\s\S]{0,200}?<kbd/.test(srcEmpty),
   'A10 键帽逐枚渲染（Ctrl / Shift / P 各自一枚，不是一串文本）')
 ok(!/@keyframes|<style/.test(srcEmpty) && !/transition-all/.test(srcEmpty),
   'A11 负向：不自造动效、不用 transition-all 凑（复用既有令牌）')
-const tokenCls = (srcEmpty.match(/kb-(?!item-in)[a-z-]+/g) || [])
+// ★ 2026-10-13 放宽一次（口径不变、名单加一项）：本条要防的是「牵入别的**动效**令牌类」，
+//   而键帽现在走 .kb-kbd —— 它是颜色基线类（对比度修复，见 theme-contrast 契约），不是动效。
+const tokenCls = (srcEmpty.match(/kb-(?!item-in\b)(?!kbd\b)[a-z-]+/g) || [])
 ok(tokenCls.length === 0,
-  'A12 负向：组件只消费 kb-item-in 一个动效工具类，不牵入其它令牌类', tokenCls.join(','))
+  'A12 负向：组件只消费 kb-item-in（动效）与 kb-kbd（键帽颜色基线）两个令牌类，不牵入其它', tokenCls.join(','))
 
 /* ================= B. App 接线（动作唯一真相源） ================= */
 console.log('\n=== B. App.tsx 接线 ===')

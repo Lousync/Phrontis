@@ -127,7 +127,9 @@ export function FileContextMenu({ x, y, items, onClose }: {
                 <span className={`shrink-0 ${it.danger ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]'}`}>{it.icon}</span>
               )}
               <span className="min-w-0 truncate">{it.label}</span>
-              {it.note && <span className="ml-auto shrink-0 pl-2.5 text-[10px] text-[var(--text-disabled)]">{it.note}</span>}
+              {/* note（键位 / 说明）：2026-10-13 由 --text-disabled 改 --text-secondary ——
+                  禁用色的对比度在 14 套主题里全部 <3:1，而这是要读的信息（同 .kb-kbd 的整改） */}
+              {it.note && <span className="ml-auto shrink-0 pl-2.5 text-[10px] text-[var(--text-secondary)]">{it.note}</span>}
               {(it.submenu || it.popover) && (
                 <span className="ml-auto shrink-0 pl-2 text-[var(--text-muted)]" aria-hidden>›</span>
               )}

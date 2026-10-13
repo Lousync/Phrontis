@@ -201,7 +201,9 @@ export function NoteContextMenu({ x, y, engine, onFileType, onClose }: NoteConte
       >
         {Icon ? <Icon size={14} className="kb-menu-icon" /> : <span className="kb-menu-icon" />}
         <span className="flex-1 text-left">{node.label}</span>
-        {node.hint && <span className="text-[10px] text-[var(--text-disabled)] ml-3">{node.hint}</span>}
+        {/* 键位提示（如 Ctrl+B）：2026-10-13 由 --text-disabled 改 --text-secondary ——
+            禁用色的对比度在 14 套主题里全部 <3:1，而这是要读的信息（同 .kb-kbd 的整改） */}
+        {node.hint && <span className="text-[10px] text-[var(--text-secondary)] ml-3">{node.hint}</span>}
       </button>
     )
   }

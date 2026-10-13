@@ -1335,14 +1335,14 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <BookOpen size={13} />沉浸阅读
-                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">Ctrl+Shift+R</span>
+                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">Ctrl+Shift+R</span>
                   </button>
                 )}
                 {quizzes.length > 0 && (
                   <button onClick={() => { setQuizMode(true); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <ListChecks size={13} />刷题模式
-                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">{quizzes.length} 题</span>
+                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{quizzes.length} 题</span>
                   </button>
                 )}
                 {/* 查看源码 / 看渲染（2026-10-13）：**本页临时**切档，不改全局设置 `editorWritingMode`。
@@ -1369,14 +1369,14 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   <button onClick={() => { insertFootnote(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <StickyNote size={13} />插入脚注
-                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">Ctrl+Alt+F</span>
+                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">Ctrl+Alt+F</span>
                   </button>
                 )}
                 {!preview && (
                   <button onClick={() => { imageInputRef.current?.click(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <ImagePlus size={13} />插入图片
-                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">Ctrl+Shift+I</span>
+                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">Ctrl+Shift+I</span>
                   </button>
                 )}
                 {/* 文件格式：二级子菜单，往**左**展开 —— 菜单本身贴右缘，往右会出屏（同原型） */}
@@ -1387,7 +1387,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
                   >
                     <FileText size={13} />文件格式
-                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">{getFileTypeInfo(fileType).label}</span>
+                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{getFileTypeInfo(fileType).label}</span>
                     <ChevronRight size={12} className="opacity-60" />
                   </button>
                   {showFmtMenu && (
@@ -1458,22 +1458,22 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     <button data-wb="imgMenuFit" onClick={() => { iv.fit('fit'); setShowMoreMenu(false) }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                       <Maximize size={13} />适应窗口
-                      <span className="ml-auto text-[10px] text-[var(--text-disabled)]">0</span>
+                      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">0</span>
                     </button>
                     <button data-wb="imgMenuActual" onClick={() => { iv.fit('actual'); setShowMoreMenu(false) }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                       <Square size={12} />实际大小
-                      <span className="ml-auto text-[10px] text-[var(--text-disabled)]">1</span>
+                      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">1</span>
                     </button>
                     <button data-wb="imgMenuRotateL" onClick={() => { iv.rotate(-90); setShowMoreMenu(false) }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                       <RotateCcw size={13} />向左旋转
-                      <span className="ml-auto text-[10px] text-[var(--text-disabled)]">[</span>
+                      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">[</span>
                     </button>
                     <button data-wb="imgMenuRotateR" onClick={() => { iv.rotate(90); setShowMoreMenu(false) }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                       <RotateCw size={13} />向右旋转
-                      <span className="ml-auto text-[10px] text-[var(--text-disabled)]">]</span>
+                      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">]</span>
                     </button>
                   </>
                 )}
@@ -1481,7 +1481,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <BookOpen size={13} />沉浸阅读
-                    <span className="ml-auto text-[10px] text-[var(--text-disabled)]">Ctrl+Shift+R</span>
+                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">Ctrl+Shift+R</span>
                   </button>
                 )}
               </>
@@ -1809,7 +1809,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               )
             )}
             {visibleEntryTags.length > 0 && (
-              <span className="text-[10px] text-[var(--text-disabled)] ml-1">{visibleEntryTags.length}/{MAX_TAGS}</span>
+              <span className="text-[10px] text-[var(--text-secondary)] ml-1">{visibleEntryTags.length}/{MAX_TAGS}</span>
             )}
         </div>
       </div>

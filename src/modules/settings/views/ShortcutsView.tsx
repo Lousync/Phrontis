@@ -57,11 +57,11 @@ function Row({ chords, desc }: { chords: string[][]; desc: string }) {
       <div className="flex items-center gap-1 shrink-0">
         {chords.map((g, gi) => (
           <span key={gi} className="flex items-center gap-1">
-            {gi > 0 && <span className="px-0.5 text-[10px] text-[var(--text-disabled)]">/</span>}
+            {gi > 0 && <span className="px-0.5 text-[10px] text-[var(--text-secondary)]">/</span>}
             {g.map((k, i) => (
               <span
                 key={i}
-                className="inline-flex items-center px-1.5 py-0.5 text-[11px] font-mono bg-[var(--input-bg)] border border-[var(--border-color)] rounded text-[var(--text-secondary)] min-w-[20px] justify-center"
+                className="kb-kbd px-1.5 py-0.5 text-[11px] rounded min-w-[20px] justify-center"
               >
                 {k}
               </span>

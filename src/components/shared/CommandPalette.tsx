@@ -142,7 +142,7 @@ export function CommandPalette({ placeholder, items, loading = false, emptyHint,
             autoComplete="off"
             className="flex-1 bg-transparent outline-none text-[13px] text-[var(--text-primary)] placeholder-[var(--text-muted)]"
           />
-          <span className="shrink-0 text-[10px] text-[var(--text-disabled)] border border-[var(--border-color)] rounded px-1 py-0.5">Esc</span>
+          <span className="kb-kbd shrink-0 rounded px-1 py-0.5 text-[10px]">Esc</span>
         </div>
 
         {/* 结果列表 */}
@@ -164,7 +164,7 @@ export function CommandPalette({ placeholder, items, loading = false, emptyHint,
               return (
                 <div key={it.id}>
                   {showGroup && (
-                    <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-disabled)]">
+                    <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
                       {group}
                     </div>
                   )}
@@ -178,15 +178,16 @@ export function CommandPalette({ placeholder, items, loading = false, emptyHint,
                   >
                     <span className={`flex-1 truncate ${selected ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>{it.label}</span>
                     {it.hint && (
-                      <span className="shrink-0 truncate max-w-[38%] text-[10.5px] text-[var(--text-disabled)]">{it.hint}</span>
+                      <span className="shrink-0 truncate max-w-[38%] text-[10.5px] text-[var(--text-secondary)]">{it.hint}</span>
                     )}
-                    {/* 键帽：只显示第一组同效键（行窄）；完整清单在 设置 → 快捷键 的指令表里 */}
+                    {/* 键帽：只显示第一组同效键（行窄）；完整清单在 设置 → 快捷键 的指令表里。
+                        颜色走 .kb-kbd 令牌（2026-10-13：原先写 --text-disabled，14 套主题全部 <3:1）。 */}
                     {chord && (
                       <span className="shrink-0 flex items-center gap-0.5">
                         {chord.map((k, ki) => (
                           <span
                             key={ki}
-                            className="inline-flex items-center px-1 py-0.5 text-[10px] font-mono bg-[var(--input-bg)] border border-[var(--border-color)] rounded text-[var(--text-disabled)]"
+                            className="kb-kbd rounded px-1 py-0.5 text-[10px]"
                           >
                             {k}
                           </span>
