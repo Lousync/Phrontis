@@ -1332,3 +1332,24 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **取舍**：课程模式下「非课时的历史会话」（迁移进来的旧会话）失去页签入口 —— 由课程结构取代，属预期；若日后要保留，可在左栏加折叠的「其他会话」。备选 B（只留当前课时页签）/ C（折叠下拉）因仍冗余或多一层结构而未采用。
 
 **验收**：tsc web 0 错 · 全量契约 65/65 · 渲染层热更新（无需重启 dev）。
+
+---
+
+## 42. AI 吉祥物：换角色的入口搜不到（2026-10-12）
+
+**提出（2026-10-12，用户反馈）**：「就是我发现现在似乎没有换这种小宠物的入口」——装了吉祥物插件后，找不到在哪把吉祥物换成插件贡献的角色。
+
+**现状（代码核实）**：换角色只有一处入口，即 `设置 → AI 工具 → 吉祥物` 下拉（`src/modules/settings/views/AiToolsView.tsx:140-162`；在 AI 工具页的常显区、页签之上，屏幕矮时要往下滚一点才看得到），点吉祥物本体只触发戳一下反应（`MascotPlayer` 的 `tapLeft / tapRight / tapFlail`）。该 key 在 schema 里是 `ui: false`，而设置搜索索引只收 `ui: true` 且声明了 anchor 的项（`src/modules/settings/sections.tsx:88`），故搜「吉祥物 / 宠物 / 小动物 / mascot」全部落空——表象就是「没有入口」。
+
+**根因**：同小节的 `ctxUsageDetail` / `ctxWindow` 在 v3.4.0 反馈收口时就已靠 `ui: true` 才能被搜到（见 `docs/v3.4.0-feedback.md`），**唯有 `aiMascot` 漏改**；视图侧 `data-setting-anchor="ai.mascot"` 与 schema 的 `anchor` 早已就位，缺的只是这一个开关。
+
+**改动**：
+
+| # | 改动 | 位置 |
+|---|---|---|
+| 1 | `ui: false → true`（不改控件、不加 DOM 锚点）；keywords 补 `小宠物 / 换一只 / 换角色` | `src/lib/settings.ts` |
+| 2 | 手册去掉「**设置里的搜索框搜不到它**，只能手动进这一页」，改为可搜直达 | `resources/help/AI 助手 · 吉祥物.md` |
+
+**取舍**：不给吉祥物本体加切换菜单、不进「宠物」模块的换宠入口——现有下拉已覆盖全部选项（自动 / 内置占位 / 指定某只 / 关闭），缺的只是可达性；点本体保留戳一下反应不变。跳转落到 `aiTools` 后会切到默认页签 `builtin`，但锚点在页签区之外，任何页签都滚得到。
+
+**验收**：`searchSettings('吉祥物' / '小宠物' / '宠物' / '小动物' / '换一只' / '换角色' / 'mascot' / '书桌伙伴')` 均命中 `ai.mascot`（rank 1）· 无关词（`小螃蟹` / `吉祥物xyz` / `qqqq`）不命中 · tsc web 0 错 · tsc node 0 错 · 手册检索契约 PASS。
