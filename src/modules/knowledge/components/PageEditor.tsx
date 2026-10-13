@@ -209,7 +209,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
      pdfPages / pdfImmersive 必须在这里复位 —— PdfReaderView 按 page.path 重挂，它的内部
      `immersive` 归零，外层不复位就会「换到别的文件顶栏仍然不显示」。 */
   useEffect(() => {
-    setHtmlSource(false); setSvgSource(false); setPdfPages(0); setPdfImmersive(false); setSrcOverride(null)
+    setHtmlSource(false); setSvgSource(false); setPdfPages(0); setPdfImmersive(false); setSrcOverride(null); setInlineBacklinks(false)
     // 图片视图态由 useImageView 的 resetKey 复位（传 page.path），此处不再手动 set
   }, [pageId])
   /** 「文件信息」小卡的关闭：外点 / Esc（照 NoteTopBar 的 moreMenu 口径，捕获阶段不依赖冒泡顺序） */
@@ -270,6 +270,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     setEditRevealTick(t => t + 1)
   }, [preview])
   const [backlinks, setBacklinks] = useState<KnowledgeBacklinkItem[]>([])
+  /** 内联反链开关（2026-10-13 批 2「在标签页中显示反向链接」）：**本页临时**、换页复位、不写设置 ——
+   *  右栏「关联网络」已经是常驻入口，这是「这一篇我想在正文末尾顺手看一眼谁引用了我」。
+   *  只在**阅读态**生效（编辑态下写作面占满整块，下面没有位置放它，见 ⋮ 那枚开关的门控）。 */
+  const [inlineBacklinks, setInlineBacklinks] = useState(false)
   /** 跨页定位：点「被引用」条目 → 记下 {源页里引用本页的链接文本, 源页 rel}，待源页正文就绪后定位高亮 */
   const [pendingLocate, setPendingLocate] = useState<{ title: string; relPath: string } | null>(null)
   /** 高亮态：关联网络定位到的 wiki 标题（传给 MarkdownPreview 的 highlightWiki；1.7s 后清） */
@@ -1537,6 +1541,21 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   {mdSourceItemShowsSource ? '查看源码' : '看渲染'}
                 </button>
 
+                {/* 在标签页中显示反向链接（2026-10-13 批 2）：把「被引用」从右栏搬进正文末尾 ——
+                    这条能力的重点是「不开侧栏也能看到谁引用了我」。
+                    ★ 只在**阅读态**出现：编辑态下写作面占满整块、下面没有位置放它（要放得改写作面
+                      布局，属另一件事），阅读态才是「看这一页」的地方 —— 只在真能用的时候给，
+                      不做点了没反应的假按钮（本仓一直在防这个）。
+                    ★ 本页临时开关（换页复位、不写设置），与上面「查看源码 / 看渲染」同一个手法。 */}
+                {preview && (
+                  <MoreItem anchor="peInlineBacklinks"
+                    icon={inlineBacklinks ? <Eye size={13} /> : <Link2 size={13} />}
+                    label={inlineBacklinks
+                      ? '隐藏反向链接'
+                      : `在标签页中显示反向链接${backlinks.length ? `（${backlinks.length}）` : ''}`}
+                    onClick={() => { setInlineBacklinks(v => !v); setShowMoreMenu(false) }} />
+                )}
+
                 <div className="my-1 border-t border-[var(--border-color)]" />
                 <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">写作</div>
                 {!preview && (
@@ -1978,6 +1997,35 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 }
               }}
             />
+            {/* 内联反链（2026-10-13 批 2）：⋮ 那枚开关打开时，在正文末尾列出来源页 + 引用上下文摘录。
+                条目点击与右栏「关联网络 · 被引用」**同一个动作**（跳源页 + 定位到源页引用本页处并高亮），
+                走同一套 setPendingLocate + onNavigate，不另写跳转。 */}
+            {inlineBacklinks && (
+              <section data-wb="kbInlineBacklinks" className="mt-10 border-t border-[var(--border-color)] pt-4">
+                <div className="mb-2.5 flex items-center gap-1.5">
+                  <Link2 size={12} className="text-[var(--text-muted)]" />
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">反向链接 · {backlinks.length}</span>
+                </div>
+                {backlinks.length === 0 ? (
+                  <p className="text-[12px] text-[var(--text-muted)]">还没有别的笔记用双链引用这一页。</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {backlinks.map(bl => (
+                      <li key={bl.id}>
+                        <button data-wb="kbBacklinkItem"
+                          onClick={() => { setPendingLocate(bl.path ? { title: bl.linkText || bl.title, relPath: bl.path } : null); onNavigate(bl.id) }}
+                          className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-left transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-hover)]">
+                          <span className="block truncate text-[12.5px] text-[var(--text-primary)]">{bl.title || '无标题'}</span>
+                          {bl.excerpt && (
+                            <span className="mt-1 block text-[11.5px] leading-relaxed text-[var(--text-secondary)] line-clamp-2">{bl.excerpt}</span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
           </div>
         ) : !paneDoc ? (
           <div className="flex flex-col flex-1 overflow-hidden">

@@ -164,6 +164,33 @@ check('反例：契约里那个「锚点两态」匹配器对不存在的锚点�
   !hasAnchor(PAGE, 'peNoSuchAnchorXYZ'))
 check('反例：不存在的处理函数名匹配不到（证明 §1 的匹配器不是恒真）', !MOD.includes('handleNoSuchThingByRel'))
 
+// ---------------------------------------------------------------- §9 在标签页中显示反向链接（批 2）
+
+console.log('\n§9 在标签页中显示反向链接：内联反链（批 2）')
+
+check('开关是**本页临时** state（不写设置 —— 右栏「关联网络」已是常驻入口）',
+  /const \[inlineBacklinks, setInlineBacklinks\] = useState\(false\)/.test(PAGE))
+check('换页复位（与同批那几个档位复位写在同一处）',
+  /setSrcOverride\(null\); setInlineBacklinks\(false\)/.test(PAGE))
+check('负向：内联反链不写设置（`setSetting` 不许出现在这条链路里）', (() => {
+  const i = PAGE.indexOf('const [inlineBacklinks, setInlineBacklinks]')
+  const seg = i >= 0 ? PAGE.slice(i, i + 700) : ''
+  return seg.length > 0 && !/setSetting\(/.test(seg)
+})())
+check('★ 只在阅读态出现（编辑态下写作面占满、下面没位置放；给了就是假按钮）',
+  /\{preview && \(\s*\n\s*<MoreItem anchor="peInlineBacklinks"/.test(PAGE))
+check('开关标签带条目数（不为 0 时才带），打开后变成「隐藏反向链接」',
+  /在标签页中显示反向链接\$\{backlinks\.length \? `（\$\{backlinks\.length\}）` : ''\}/.test(PAGE)
+  && PAGE.includes("? '隐藏反向链接'"))
+check('渲染在阅读态正文**之内**、且在 MarkdownPreview 之后（同一滚动容器里，跟着正文一起滚）',
+  PAGE.indexOf('data-wb="kbInlineBacklinks"') > PAGE.indexOf('<MarkdownPreview'))
+check('条目点击复用右栏「被引用」同一套动作（setPendingLocate + onNavigate，不另写跳转）',
+  /onClick=\{\(\) => \{ setPendingLocate\(bl\.path \? \{ title: bl\.linkText \|\| bl\.title, relPath: bl\.path \} : null\); onNavigate\(bl\.id\) \}\}/.test(PAGE))
+check('比右栏那条多给一个引用上下文摘录（右栏只给标题）', /\{bl\.excerpt && \(/.test(PAGE))
+check('空态有话说（不是一片空白）', PAGE.includes('还没有别的笔记用双链引用这一页。'))
+check('段落锚点 + 条目标签都在（探针可定位）', hasAnchor(PAGE, 'kbInlineBacklinks') && hasAnchor(PAGE, 'kbBacklinkItem'))
+check('反例：不存在的锚点匹配不到（防空转）', !hasAnchor(PAGE, 'kbNoSuchPanelXYZ'))
+
 console.log('')
 if (failures === 0) {
   console.log('PASS  页面 ⋮ 批 1b：六个动作接到位 / 删除不再是假按钮 / 导入进可达菜单 / 门控与反例齐全')
