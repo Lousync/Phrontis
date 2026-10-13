@@ -107,7 +107,12 @@ const ungatedNonGlobal = COMMANDS.filter((c) => c.palette && c.scope !== 'global
 check('非 global 的 palette 命令必须声明 requires（否则会在错的上下文出现）', ungatedNonGlobal.length === 0,
   ungatedNonGlobal.map((c) => c.id).join(' '))
 
-// ---- sources 锚点：文件存在 + 行号在范围内 + 该行非空 ----
+// ---- sources 锚点：文件存在 + 行号在范围内 + **该行含声明的指纹** ----
+// ★ 2026-10-13 收紧：原先只判「非空、不是闭合符」，实测三次漂移里只有一部分被抓到
+//   （第二次 4/9、第三次 2/6），偏了几行但落在别的代码行上就会**静默通过**。
+//   现在每个代码锚都必须带指纹：`'src/App.tsx:299 @ ((e.ctrlKey'` —— 行一移动或改内容，
+//   指纹就不再出现在那一行 ⇒ FAIL。代价是改到被锚定的那行时要顺手更新指纹（这正是想要的：
+//   锚指错了本来就该有人看一眼）。指纹用 .AGENT 里的脚本按当前真实内容生成，不手抄。
 const lineCache = new Map()
 const fileLines = (p) => {
   if (!lineCache.has(p)) {
@@ -124,17 +129,20 @@ for (const c of COMMANDS) {
   for (const s of c.sources) {
     if (s === 'doc') { docOnly++; continue }
     anchorCount++
-    const m = /^(.+):(\d+)$/.exec(s)
+    const m = /^(.+):(\d+)(?:\s+@\s+(.+))?$/.exec(s)
     if (!m) { anchorBad.push(`${c.id}: 锚格式错 "${s}"`); continue }
     const lines = fileLines(m[1])
     if (!lines) { anchorBad.push(`${c.id}: 文件不存在 "${m[1]}"`); continue }
     const n = Number(m[2])
     if (!(n >= 1 && n <= lines.length)) { anchorBad.push(`${c.id}: 行号越界 ${s}（共 ${lines.length} 行）`); continue }
-    const text = (lines[n - 1] ?? '').trim()
-    if (text.length === 0 || /^[)}\];]+$/.test(text)) anchorBad.push(`${c.id}: 锚落在空行/闭合符上 ${s}`)
+    const tok = m[3]
+    if (!tok) { anchorBad.push(`${c.id}: 锚缺指纹 "${s}"（补 " @ 该行片段"，否则行号漂移躲过检查）`); continue }
+    const text = lines[n - 1] ?? ''
+    if (text.trim().length === 0 || /^[)}\];]+$/.test(text.trim())) anchorBad.push(`${c.id}: 锚落在空行/闭合符上 ${s}`)
+    else if (!text.includes(tok)) anchorBad.push(`${c.id}: 锚行不含指纹 "${tok}" ← ${s}（代码动了？核对锚再更新指纹）`)
   }
 }
-check(`代码锚全部可解析（${anchorCount} 个，另有 ${docOnly} 个 doc）`, anchorBad.length === 0, anchorBad.slice(0, 6).join(' | '))
+check(`代码锚可解析且指纹对得上（${anchorCount} 个，另有 ${docOnly} 个 doc）`, anchorBad.length === 0, anchorBad.slice(0, 6).join(' | '))
 
 // ---------------------------------------------------------------- §2 id ↔ App 绑定表双射
 
