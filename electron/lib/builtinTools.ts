@@ -2645,7 +2645,7 @@ export function registerBuiltinTools(): void {
     tier: 'ondemand',
   }, async args => {
     const reader = getSettingReader()
-    if (reader('terminal.aiExec') !== true) throw new Error('AI 终端执行未开启（设置 → AI 终端执行）')
+    if (reader('terminal.aiExec') !== true) throw new Error('AI 终端执行未开启（设置 → AI 工具 → 权限 → 终端执行）')
     const cmd = str(args.command).trim()
     if (!cmd) throw new Error('缺少必填参数: command')
     const pref = reader('terminal.shell')

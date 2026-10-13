@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Sparkles, X, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat } from 'lucide-react'
 import {
   agentSessions, agentNewSession, agentMessages, agentDeleteSession,
-  agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
+  agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceListDir, workspaceRefreshVault,
   agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachAssignSession, aiTeachUnassignSession, aiTeachSetLastWorkspace,
@@ -416,14 +416,24 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [convoModel, setConvoModel] = useState('')
   const [convoEffort, setConvoEffort] = useState<Effort>('off')
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
-  /** 视觉转写模型（素材转写用，全局级与回答模型分开）：'' = 自动按模型名识别；格式 providerId:model */
-  const [visionModel, setVisionModel] = useState(() => localStorage.getItem('aiTeach.visionModel') ?? '')
+  /**
+   * 视觉转写模型（素材转写用，与回答模型分开）：'' = 自动按模型名识别；格式 providerId:model。
+   *
+   * 单一真源是**设置键 aiTeachVisionModel**（2026-10-13 决策 D）。此前它只存在 localStorage 的
+   * `aiTeach.visionModel`，是个隐藏设置 —— 设置页搜不到、也不随设置迁移（换电脑就丢）。
+   * 现在设置入口在「设置 → AI 工具 → 教学」，这里与它是同一个键（老 localStorage 值按决策 E 退役）。
+   */
+  const [visionModel, setVisionModel] = useState('')
   const [visionList, setVisionList] = useState<LlmVisionModelInfo[]>([])
   const [showAllVision, setShowAllVision] = useState(false)
   const pickVision = (val: string): void => {
     setVisionModel(val)
-    try { if (val) localStorage.setItem('aiTeach.visionModel', val); else localStorage.removeItem('aiTeach.visionModel') } catch { /* 隐私模式忽略 */ }
+    void setSettingRaw('aiTeachVisionModel', val)
   }
+  // 读设置键（与「设置 → AI 工具 → 教学」同一真源）
+  useEffect(() => {
+    void getSettingRaw('aiTeachVisionModel').then(v => setVisionModel(String(v ?? ''))).catch(() => null)
+  }, [])
   const [providerList, setProviderList] = useState<LlmProviderInfo[]>([])
   const [modelCapable, setModelCapable] = useState(false)
   const [organized, setOrganized] = useState<Record<string, string>>({})

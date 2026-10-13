@@ -95,6 +95,8 @@ async function translateInvoke(req: TranslateInvokeRequest): Promise<TranslateIn
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
+    // 划词翻译是单次调用、无对话上下文：固定用途名（会话头要稳定，不能是随机值）
+    sessionId: 'translate',
   })
   if (!r.ok) {
     return { ok: false, mode, error: r.error, code: r.code ?? 'LLM_ERROR', dict }

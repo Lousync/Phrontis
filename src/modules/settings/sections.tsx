@@ -69,7 +69,7 @@ export const SECTIONS: SectionDef[] = [
   { id: 'security',   label: '安全与隐私', icon: <ShieldCheck size={16} />,   keywords: ['安全', '隐私', '删除确认', '插件安全', '签名', '密钥'] },
   { id: 'aiTools',    label: 'AI 工具',   icon: <Bot size={16} />,            keywords: ['AI', '工具', 'agent', '智能体', 'ai', '助手', '模型', 'mcp', 'skill'] },
   { id: 'shortcuts',  label: '快捷键',    icon: <Keyboard size={16} />,       keywords: ['快捷键', 'shortcut', '键盘', 'keyboard', '按键'] },
-  { id: 'modules',    label: '模块设置',  icon: <Boxes size={16} />,          keywords: ['模块', '博客', 'blog', '日程', '提醒', '打卡', '导出', '错题', '高级', 'AI教学'] },
+  { id: 'modules',    label: '模块设置',  icon: <Boxes size={16} />,          keywords: ['模块', '博客', 'blog', '日程', '提醒', '打卡', '导出', '错题', '高级'] },
   { id: 'about',      label: '关于',      icon: <Info size={16} />,           keywords: ['关于', '更新', '版本', '升级', '镜像', '引导', 'about', 'update'] },
 ]
 
@@ -107,21 +107,29 @@ const ENTRY_ITEMS: SettingItem[] = [
   // ===== 博客 =====
   { id: 'blog.templates', section: 'modules', group: '博客模板', label: '博客模板',
     desc: '写日记时一键套用的 Markdown 模板', keywords: ['模板', '博客模板', '新建模板', 'template', '套用', 'markdown'] },
-  // ===== AI 工具 =====
-  { id: 'aiTools.usage', section: 'aiTools', group: '工具调用量', label: '工具调用量',
-    desc: '本自然月 AI 工具累计调用次数', keywords: ['用量', '调用量', '额度', '统计', 'usage', '次数', '本月'] },
-  { id: 'aiTools.builtin', section: 'aiTools', group: '内置工具', label: '内置工具清单', aiTab: 'builtin',
-    desc: '官方内置只读工具，不可关闭', keywords: ['内置工具', '工具', 'tool', '注册表', '只读'] },
-  { id: 'aiTools.audit', section: 'aiTools', group: '最近调用', label: '最近调用记录', aiTab: 'builtin',
-    desc: '最近 10 条调用审计记录', keywords: ['审计', '日志', '记录', 'audit', '调用记录', '历史'] },
-  { id: 'aiTools.mcp', section: 'aiTools', group: 'MCP 服务器', label: 'MCP 服务器', aiTab: 'mcp',
-    desc: '连接外部 Model Context Protocol 服务器', keywords: ['mcp', '服务器', '外部工具', 'server', 'sse', 'stdio', '连接'] },
-  { id: 'aiTools.skill', section: 'aiTools', group: 'Skill 技能', label: 'Skill 技能', aiTab: 'skill',
-    desc: '插件提供的声明式提示词资产', keywords: ['skill', '技能', '提示词', 'prompt', '资产'] },
+  // ===== AI 工具（2026-10-13 按域重排为 6 页签：模型 / 权限 / 工具 / 对话 / 用量 / 教学）=====
+  // 入口项的 aiTab 必须与 src/lib/settings.ts 的 AiTab 口径一致，且锚点在对应视图里真的存在
+  // （契约 .AGENT/scripts/settings/verify-ai-tab-anchors.mjs 断言这三件事）。
   { id: 'aiTools.models', section: 'aiTools', group: '模型', label: '模型配置', aiTab: 'models',
     desc: 'AI 模型与 API 密钥配置', keywords: ['模型', 'model', 'api', 'key', '密钥', '大模型', 'llm', '配置模型'] },
   { id: 'aiTools.perms', section: 'aiTools', group: '权限', label: '调用权限', aiTab: 'perms',
     desc: 'AI 工具调用的权限控制', keywords: ['权限', 'permission', '授权', '允许', '拒绝', '安全'] },
+  { id: 'aiTools.builtin', section: 'aiTools', group: '内置工具', label: '内置工具清单', aiTab: 'tools',
+    desc: '官方内置只读工具，不可关闭', keywords: ['内置工具', '工具', 'tool', '注册表', '只读'] },
+  { id: 'aiTools.mcp', section: 'aiTools', group: 'MCP 服务器', label: 'MCP 服务器', aiTab: 'tools',
+    desc: '连接外部 Model Context Protocol 服务器', keywords: ['mcp', '服务器', '外部工具', 'server', 'sse', 'stdio', '连接'] },
+  { id: 'aiTools.skill', section: 'aiTools', group: 'Skill 技能', label: 'Skill 技能', aiTab: 'tools',
+    desc: '插件提供的声明式提示词资产', keywords: ['skill', '技能', '提示词', 'prompt', '资产'] },
+  { id: 'aiTools.audit', section: 'aiTools', group: '最近调用', label: '最近调用记录', aiTab: 'tools',
+    desc: '最近 10 条调用审计记录', keywords: ['审计', '日志', '记录', 'audit', '调用记录', '历史'] },
+  { id: 'aiTools.chat', section: 'aiTools', group: '对话', label: '对话与助手', aiTab: 'chat',
+    desc: '感知模式、上下文占用指示、吉祥物、Agent 循环预算', keywords: ['对话', '助手', '感知', '上下文', '吉祥物', '循环', '预算', 'chat', 'agent'] },
+  { id: 'aiTools.usage', section: 'aiTools', group: '用量', label: '工具调用量', aiTab: 'usage',
+    desc: '本自然月 AI 工具累计调用次数', keywords: ['用量', '调用量', '额度', '统计', 'usage', '次数', '本月'] },
+  { id: 'aiTools.llmUsage', section: 'aiTools', group: '用量', label: '模型 token 用量', aiTab: 'usage',
+    desc: '本月 LLM 输入/输出 token 与按供应商模型细分', keywords: ['token', '用量', '模型', '消耗', '输入', '输出', '细分', 'llm', 'usage'] },
+  { id: 'aiTools.teach', section: 'aiTools', group: '教学', label: 'AI 教学产物', aiTab: 'teach',
+    desc: '教学会话文件夹根目录、删除联动与图片转写模型', keywords: ['ai教学', '教学', '产物', '文件夹', '转写', '视觉', '图片', 'teach'] },
   // ===== 高级 =====
   { id: 'advanced.update', section: 'about', group: '关于与更新', label: '检查更新',
     desc: '当前版本号与在线更新', keywords: ['更新', '升级', '版本', '检查更新', 'update', 'version', '新版本'] },

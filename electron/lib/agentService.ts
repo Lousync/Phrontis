@@ -1017,7 +1017,7 @@ async function runAgentLoop(
     let thinkFrom = 0
     let thinkTo = 0
     const r = await invokeLlmStreamInternal(
-      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort },
+      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort, sessionId },
       (e) => {
         if (e.type === 'text') batcher.push('text', e.delta)
         else if (e.type === 'reasoning') {
@@ -1249,7 +1249,7 @@ async function runAgentLoop(
   // ---- 轮数/token 预算耗尽：做一次无工具的强制总结轮，把已获取的信息变成交付（第 0 层优雅收场）----
   convo.push({ role: 'user', content: FORCED_SUMMARY_NOTICE })
   const fr = await invokeLlmStreamInternal(
-      { messages: convo, tools: [], signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort },
+      { messages: convo, tools: [], signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort, sessionId },
     (e) => { if (e.type === 'text') batcher.push('text', e.delta) },
   )
   batcher.flush()

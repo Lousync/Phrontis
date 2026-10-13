@@ -122,6 +122,9 @@ export async function runInlineSuggest(req: InlineSuggestRequest): Promise<Inlin
         // 内联建议不透传 effort：reasoning_effort 只影响「是否发参数」，思考型模型默认照样思考；
         // 真正的延迟控制靠下面的 reasoning 早停 + 建议用户在设置里给续写单独选非思考模型。
         signal: ctrl.signal,
+        // 编辑器续写没有"对话"概念，但会话头必须稳定（每敲一次换 ID 会打散提示缓存），
+        // 所以给一个固定的用途名而不是随机值。
+        sessionId: 'inline-suggest',
       },
       (e) => {
         if (e.type === 'text') {

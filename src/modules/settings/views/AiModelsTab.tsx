@@ -1,16 +1,17 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Bot, Gauge, Plus, Trash2, RefreshCw, Loader2, Star, Pencil, Import } from 'lucide-react'
+import { Bot, Plus, Trash2, RefreshCw, Loader2, Star, Pencil, Import } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { Collapsible } from '../../../components/shared/Collapsible'
 import {
   llmListProviders, llmSaveProvider, llmRemoveProvider, llmToggleProvider,
-  llmTestConnection, llmRefreshModels, llmSetDefaultModel, llmGetUsage, llmAddModel, llmTestModel,
-  llmCcSwitchList, llmCcSwitchImport, openExternal, llmUsageBreakdown, aiTeachSrcSofficeProbe,
+  llmTestConnection, llmRefreshModels, llmSetDefaultModel, llmAddModel, llmTestModel,
+  llmCcSwitchList, llmCcSwitchImport, openExternal, aiTeachSrcSofficeProbe,
+  llmSetModelFamily,
 } from '../../../lib/ipc'
-import type { LlmProviderInfo, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, CcSwitchItem, LlmUsageBreakdownEntry, LlmUsageInfo } from '../../../types'
-import { prettyModelName, isOpenCodeFree } from '../../../lib/modelNames'
+import type { LlmProviderInfo, LlmProviderType, LlmModelFamily, LlmTestResultInfo, LlmModelTestResultInfo, CcSwitchItem } from '../../../types'
+import { prettyModelName, isOpenCodeFree, familyHintOf } from '../../../lib/modelNames'
 
 /** 免费=用户手动标记 ∪ id 含 free（上游不提供该元数据，双轨启发式） */
 export function parseFreeSet(raw: string): Set<string> {
@@ -29,6 +30,42 @@ const TYPE_LABEL: Record<LlmProviderType, string> = {
   'openai-compatible': 'OpenAI 兼容',
   ollama: 'Ollama 本地',
   anthropic: 'Anthropic',
+  'openai-responses': 'OpenAI Responses',
+}
+
+/** 供应商 type → 默认协议族（与主进程 FAMILY_BY_TYPE 同口径；ollama 无协议族概念） */
+const FAMILY_BY_TYPE: Partial<Record<LlmProviderType, LlmModelFamily>> = {
+  'openai-compatible': 'chat',
+  'openai-responses': 'responses',
+  anthropic: 'messages',
+}
+
+const FAMILY_LABEL: Record<LlmModelFamily, string> = {
+  chat: '对话补全',
+  messages: 'Messages',
+  responses: 'Responses',
+}
+
+/** 某模型实际走哪个协议：逐模型覆盖优先，其次跟随供应商默认 */
+function effectiveFamily(p: LlmProviderInfo, model: string): LlmModelFamily | null {
+  return p.modelFamilies?.[model] ?? FAMILY_BY_TYPE[p.type] ?? null
+}
+
+/**
+ * 已知的 opencode 旧地址 → 官方地址（2026-10-13）。
+ * 官方文档给的 Go 端点是 `https://opencode.ai/inference/go/v1`；旧地址还能用，但模型清单
+ * 与官方差 10 个（旧清单没有 glm-5.1 / claude-haiku-5-5 / qwen3.7-max 等）。
+ * 不自动改用户正在用的地址 —— 万一新地址不认这把 Key 会当场用不了，所以只给一个行内按钮。
+ */
+const LEGACY_BASE_URL: Record<string, string> = {
+  'https://opencode.ai/zen/go/v1': 'https://opencode.ai/inference/go/v1',
+  'https://opencode.ai/zen/go': 'https://opencode.ai/inference/go/v1',
+}
+
+/** 归一化后查旧地址表（忽略结尾斜杠与大小写） */
+function officialUrlFor(baseUrl: string): string | null {
+  const key = baseUrl.trim().replace(/\/+$/, '').toLowerCase()
+  return LEGACY_BASE_URL[key] ?? null
 }
 
 /** soffice 探测命中来源 → 可读文案（对应 main 侧 SofficeSource） */
@@ -45,8 +82,6 @@ export function AiModelsTab() {
   const { s, update } = useSettings()
   const [providers, setProviders] = useState<LlmProviderInfo[]>([])
   const [defaultModel, setDefaultModel] = useState('')
-  const [usage, setUsage] = useState<LlmUsageInfo>({ monthTokens: 0 })
-  const [breakdown, setBreakdown] = useState<{ month: string; entries: LlmUsageBreakdownEntry[] }>({ month: '', entries: [] })
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
   const [ccsOpen, setCcsOpen] = useState(false)
@@ -87,11 +122,9 @@ export function AiModelsTab() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [r, u, b] = await Promise.all([llmListProviders(), llmGetUsage(), llmUsageBreakdown()])
+      const r = await llmListProviders()
       setProviders(r.providers)
       setDefaultModel(r.defaultChatModel)
-      setUsage(u)
-      setBreakdown(b)
     } finally {
       setLoading(false)
     }
@@ -103,45 +136,6 @@ export function AiModelsTab() {
 
   return (
     <div className="space-y-8">
-      {/* 用量统计（仅统计不限额） */}
-      <div>
-        <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">Token 用量</h2>
-        <p className="text-[12px] text-[var(--text-muted)] mb-4">本月累计消耗（↑输入 ↓输出，仅统计、不设限额拦截）；每次对话回复下方的 ↑↓ 标记为单轮消耗。</p>
-        <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md">
-          <div className="flex items-center justify-between text-[13px]">
-            <span className="flex items-center gap-2"><Gauge size={14} className="text-[var(--accent)]" />本月 tokens</span>
-            <span className="tabular-nums text-[var(--text-secondary)]">{usage.monthTokens.toLocaleString()}</span>
-          </div>
-          {(usage.monthPromptTokens != null || usage.monthCompletionTokens != null) && (
-            <div className="mt-0.5 flex items-center justify-end gap-3 text-[11px] tabular-nums text-[var(--text-muted)]">
-              <span>↑ {(usage.monthPromptTokens ?? 0).toLocaleString()} 输入</span>
-              <span>↓ {(usage.monthCompletionTokens ?? 0).toLocaleString()} 输出</span>
-            </div>
-          )}
-          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
-            <label className="flex items-center justify-between gap-3 text-[12px]">
-              <span className="text-[var(--text-muted)] mr-2">单次 maxTokens</span>
-              <input type="number" min={256} max={32768} value={String(s.llmMaxTokens ?? 4096)}
-                onChange={e => { void update('llmMaxTokens', Math.min(32768, Math.max(256, Math.floor(Number(e.target.value) || 4096)))) }}
-                className="w-28 px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] text-right outline-none focus:border-[var(--accent)]" />
-            </label>
-          </div>
-          {breakdown.entries.length > 0 && (
-            <div className="mt-3 pt-2.5 border-t border-[var(--border-color)]">
-              <p className="text-[11px] text-[var(--text-muted)] mb-1.5">按供应商/模型细分（{breakdown.month}）</p>
-              <div className="space-y-1">
-                {breakdown.entries.slice(0, 8).map(e => (
-                  <div key={`${e.providerId}-${e.model}`} className="flex items-center justify-between gap-2 text-[11px]">
-                    <span className="truncate text-[var(--text-secondary)]" title={`${e.provider} · ${e.model}`}>{e.provider} · {prettyModelName(e.model)}</span>
-                    <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{e.calls} 次 · ↑{e.promptTokens.toLocaleString()} ↓{e.completionTokens.toLocaleString()} · 合计 {e.tokens.toLocaleString()}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* 对话输出（docs/ai-streaming-design.md §5.4） */}
       <div data-setting-anchor="aiTools.stream">
         <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">对话输出</h2>
@@ -160,6 +154,16 @@ export function AiModelsTab() {
               <div className="text-[11px] text-[var(--text-muted)] leading-relaxed">推理模型的思考链以折叠区实时显示；普通模型没有思考链，自动不出现</div>
             </div>
             <SettingSwitch checked={s.aiShowThinking !== false} onChange={v => { void update('aiShowThinking', v) }} aria-label="显示思考过程" />
+          </div>
+          {/* 单次 maxTokens（原在「Token 用量」卡里，随统计一起搬走时留在这里更贴题：它管的是输出长度） */}
+          <div className="flex items-center justify-between gap-3 pt-1 border-t border-[var(--border-color)]">
+            <div className="min-w-0">
+              <div className="text-[13px] text-[var(--text-primary)]">单次输出上限</div>
+              <div className="text-[11px] text-[var(--text-muted)] leading-relaxed">单次调用最多生成多少 token（256 ~ 32768），越小越省费用</div>
+            </div>
+            <input type="number" min={256} max={32768} value={String(s.llmMaxTokens ?? 4096)}
+              onChange={e => { void update('llmMaxTokens', Math.min(32768, Math.max(256, Math.floor(Number(e.target.value) || 4096)))) }}
+              className="w-28 shrink-0 px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] text-right outline-none focus:border-[var(--accent)]" />
           </div>
         </div>
       </div>
@@ -323,6 +327,114 @@ export function AiModelsTab() {
   )
 }
 
+/**
+ * 逐模型协议面板（2026-10-13）。
+ *
+ * 存在的理由：opencode Go 官方口径是 "Each model is served by one API family" —— 同一个
+ * baseUrl、同一把 Key 下，模型分属 `/chat/completions`、`/messages`、`/responses` 三条路径。
+ * 所以协议必须能按模型覆盖；能一键按官方端点表预填，用户就不必手工标 32 个模型。
+ */
+function ModelFamilyPanel({ p, onChanged }: { p: LlmProviderInfo; onChanged: () => Promise<void> }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const fallback = FAMILY_BY_TYPE[p.type] ?? null
+  const marked = p.models.filter(m => p.modelFamilies?.[m]).length
+  const fillable = p.models.filter(m => {
+    const h = familyHintOf(m)
+    return h != null && p.modelFamilies?.[m] !== h
+  })
+
+  /** 一次性写回整份协议映射（比逐条 IPC 少写 30 多次设置文件） */
+  const saveFamilies = async (next: Record<string, LlmModelFamily>) => {
+    const r = await llmSaveProvider({
+      id: p.id, name: p.name, type: p.type, baseUrl: p.baseUrl,
+      headers: p.headers, modelFamilies: next,
+    })
+    if (!r.ok) showToast({ type: 'error', message: r.error ?? '协议设置保存失败' })
+    await onChanged()
+  }
+
+  /** 单条改动走定点 IPC（只动这一个键，不重发整份供应商草稿） */
+  const setOne = async (model: string, family: LlmModelFamily | '') => {
+    const r = await llmSetModelFamily(p.id, model, family)
+    if (!r.ok) showToast({ type: 'error', message: r.error ?? '协议设置失败' })
+    await onChanged()
+  }
+
+  const fillFromHints = async () => {
+    if (busy || fillable.length === 0) return
+    setBusy(true)
+    try {
+      const next = { ...(p.modelFamilies ?? {}) }
+      for (const m of fillable) next[m] = familyHintOf(m) as LlmModelFamily
+      await saveFamilies(next)
+      showToast({ type: 'info', message: `已按官方端点表标记 ${fillable.length} 个模型的协议` })
+    } finally { setBusy(false) }
+  }
+
+  const clearAll = async () => {
+    if (busy || marked === 0) return
+    setBusy(true)
+    try {
+      await saveFamilies({})
+      showToast({ type: 'info', message: '已清除协议标记，全部跟随默认协议' })
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="mt-1.5">
+      <div className="flex items-center gap-2 flex-wrap text-[11px] text-[var(--text-muted)]">
+        <span>
+          协议：默认 {fallback ? FAMILY_LABEL[fallback] : 'Ollama 原生'}
+          {marked > 0 ? ` · ${marked} 个模型单独指定` : ''}
+        </span>
+        {fillable.length > 0 && (
+          <button onClick={() => { void fillFromHints() }} disabled={busy}
+            title="按 opencode Go 官方端点表预填：GPT/Grok 走 Responses、Claude/Qwen/MiniMax 走 Messages，其余走对话补全"
+            className="px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors">
+            {busy ? '处理中…' : `按官方端点表标记（${fillable.length}）`}
+          </button>
+        )}
+        {marked > 0 && (
+          <button onClick={() => { void clearAll() }} disabled={busy}
+            className="px-1.5 py-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
+            清除标记
+          </button>
+        )}
+        <button onClick={() => setOpen(v => !v)}
+          className="px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
+          {open ? '收起逐模型协议' : '逐模型协议'}
+        </button>
+      </div>
+      <Collapsible open={open} innerClassName="">{() => (
+        <div className="mt-2 rounded-md border border-[var(--border-color)] max-h-56 overflow-y-auto">
+          {p.models.map(m => {
+            const hint = familyHintOf(m)
+            return (
+              <div key={m} className="flex items-center gap-2 px-2.5 py-1.5 border-b border-[var(--border-color)] last:border-b-0">
+                <span className="min-w-0 flex-1 truncate text-[11px] font-mono text-[var(--text-secondary)]" title={m}>{m}</span>
+                {hint && (
+                  <span className="shrink-0 text-[10px] text-[var(--text-muted)]" title="官方端点表标注的协议">
+                    官方 {FAMILY_LABEL[hint]}
+                  </span>
+                )}
+                <select value={p.modelFamilies?.[m] ?? ''}
+                  onChange={e => { void setOne(m, e.target.value as LlmModelFamily | '') }}
+                  className="shrink-0 px-1.5 py-0.5 rounded border border-[var(--border-color)] bg-[var(--input-bg)] text-[11px] outline-none focus:border-[var(--accent)]">
+                  <option value="">跟随默认（{fallback ? FAMILY_LABEL[fallback] : '原生'}）</option>
+                  <option value="chat">对话补全</option>
+                  <option value="messages">Messages</option>
+                  <option value="responses">Responses</option>
+                </select>
+              </div>
+            )
+          })}
+        </div>
+      )}</Collapsible>
+    </div>
+  )
+}
+
 function ProviderCard({ p, onChanged, onSetDefault }: {
   p: LlmProviderInfo
   onChanged: () => Promise<void>
@@ -333,6 +445,26 @@ function ProviderCard({ p, onChanged, onSetDefault }: {
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<LlmTestResultInfo | null>(null)
   const [manualModel, setManualModel] = useState('')
+  const [switchingUrl, setSwitchingUrl] = useState(false)
+  const officialUrl = officialUrlFor(p.baseUrl)
+
+  /** 换到官方地址：只改 baseUrl，Key / 自定义头 / 协议标记原样保留 */
+  const switchToOfficial = async () => {
+    if (!officialUrl || switchingUrl) return
+    setSwitchingUrl(true)
+    try {
+      const r = await llmSaveProvider({
+        id: p.id, name: p.name, type: p.type, baseUrl: officialUrl,
+        headers: p.headers, modelFamilies: p.modelFamilies,
+      })
+      if (!r.ok) { showToast({ type: 'error', message: r.error ?? '地址替换失败' }); return }
+      const rr = await llmRefreshModels(p.id)
+      showToast(rr.ok
+        ? { type: 'info', message: `已换到官方地址，发现 ${rr.models.length} 个模型` }
+        : { type: 'error', message: `地址已换，但拉取模型失败：${rr.error}` })
+      await onChanged()
+    } finally { setSwitchingUrl(false) }
+  }
 
   return (
     <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
@@ -346,9 +478,21 @@ function ProviderCard({ p, onChanged, onSetDefault }: {
         </label>
       </div>
       <p className="text-[11px] text-[var(--text-muted)] mt-1 truncate font-mono">{p.baseUrl}</p>
+      {officialUrl && (
+        <p className="text-[11px] mt-1 leading-relaxed">
+          <span className="text-[var(--text-muted)]">这是 opencode 的旧地址，官方现已改用 </span>
+          <span className="font-mono text-[var(--text-secondary)]">{officialUrl}</span>
+          <span className="text-[var(--text-muted)]">（模型清单多 10 个）。</span>
+          <button onClick={() => { void switchToOfficial() }} disabled={switchingUrl}
+            className="ml-1.5 px-1.5 py-0.5 rounded border border-[var(--accent)]/50 text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-40 transition-colors">
+            {switchingUrl ? '替换中…' : '换成官方地址'}
+          </button>
+        </p>
+      )}
       <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
         {p.models.length > 0 ? `${p.models.length} 个模型` : '未拉取模型'} · {p.hasKey ? '已配置 Key' : '无 Key'}{p.embeddingModel ? ` · 语义:${p.embeddingModel}` : ''}
       </p>
+      {p.models.length > 0 && <ModelFamilyPanel p={p} onChanged={onChanged} />}
       <div className="flex items-center gap-1 mt-1.5">
         <input value={manualModel} onChange={e => setManualModel(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && manualModel.trim()) { void llmAddModel(p.id, manualModel.trim()).then(r => { if (r.ok) { setManualModel(''); showToast({ type: 'info', message: `已添加模型 ${manualModel}` }); return onChanged() } }) } }}
@@ -412,15 +556,16 @@ function ProviderForm({ onDone, initial }: { onDone: () => Promise<void>; initia
         <input value={name} onChange={e => setName(e.target.value)} placeholder="例如 DeepSeek"
           className="w-full px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] outline-none focus:border-[var(--accent)]" />
       </Row>
-      <Row label="类型">
+      <Row label="默认协议（个别模型走别的协议时，保存后到供应商卡片的「逐模型协议」里单独指定）">
         <select value={type} onChange={e => setType(e.target.value as LlmProviderType)}
           className="w-full px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] outline-none focus:border-[var(--accent)]">
-          <option value="openai-compatible">OpenAI 兼容（DeepSeek/Moonshot/Qwen/GLM…）</option>
+          <option value="openai-compatible">OpenAI 兼容 · /chat/completions（DeepSeek / Moonshot / Qwen / GLM…）</option>
+          <option value="openai-responses">OpenAI Responses · /responses（GPT / Grok / Muse Spark 等）</option>
+          <option value="anthropic">Anthropic Messages · /messages（Claude 系列）</option>
           <option value="ollama">Ollama 本地（http://localhost:11434）</option>
-          <option value="anthropic">Anthropic（Claude 系列）</option>
         </select>
       </Row>
-      <Row label="Base URL（含版本路径，如 https://api.deepseek.com/v1）">
+      <Row label="Base URL（含版本路径，如 https://api.deepseek.com/v1；opencode Go 为 https://opencode.ai/inference/go/v1）">
         <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder={type === 'ollama' ? 'http://localhost:11434' : 'https://…/v1'}
           className="w-full px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] font-mono outline-none focus:border-[var(--accent)]" />
       </Row>
@@ -432,10 +577,14 @@ function ProviderForm({ onDone, initial }: { onDone: () => Promise<void>; initia
         <input value={embeddingModel} onChange={e => setEmbeddingModel(e.target.value)}
           className="w-full px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] font-mono outline-none focus:border-[var(--accent)]" />
       </Row>
-      <Row label="自定义请求头（JSON，可选——opencode 等网关要求的路由头在此填，如 {&quot;x-opencode-session&quot;:&quot;knowbase&quot;}）">
+      <Row label="自定义请求头（JSON，可选——opencode 等网关的路由头在此填，如 {&quot;x-opencode-session&quot;:&quot;knowbase&quot;}）">
         <textarea value={headersText} onChange={e => setHeadersText(e.target.value)} rows={2}
           placeholder='{"x-opencode-session": "knowbase"}'
           className="w-full px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] font-mono outline-none focus:border-[var(--accent)] resize-none" />
+        <span className="block text-[11px] text-[var(--text-muted)] mt-1 leading-relaxed">
+          这里填的值会被<b>按对话覆盖</b>：官方要求每个对话一个稳定 ID 才能吃到路由与提示缓存优化，
+          常量值会让所有对话共用一个会话。填任何非空值即可，实际发送的是当前对话的 ID。
+        </span>
       </Row>
       <div className="flex items-center gap-2">
         <button disabled={testing || !baseUrl.trim()} onClick={async () => { setTesting(true); try { setTestResult(await llmTestConnection({ type, baseUrl })) } finally { setTesting(false) } }}

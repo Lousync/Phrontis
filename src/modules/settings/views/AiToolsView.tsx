@@ -1,19 +1,22 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Bot, Gauge, RefreshCw, ShieldCheck, Server, Plus, Plug, Trash2, AlertTriangle, Loader2, Sparkles, Store, Copy, Cpu, Upload } from 'lucide-react'
+import { Bot, Gauge, RefreshCw, ShieldCheck, Server, Plus, Plug, Trash2, AlertTriangle, Loader2, Sparkles, Store, Copy, Cpu, Upload, MessageSquare, BarChart3, GraduationCap, FolderOpen } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
 import {
   aiToolsList, aiToolsGetRecentAudit,
   mcpListServers, mcpAddServer, mcpRemoveServer, mcpToggleServer, mcpRefreshTools, mcpTestConnection,
-  aiToolsListSkills, aiToolsCopySkillPrompt, aiToolsInstallSkill, aiToolsInstallSkillFromFile, aiToolsUninstallSkill, aiToolsToggleSkill,
+  aiToolsListSkills, aiToolsCopySkillPrompt, aiToolsInstallSkillFromFile, aiToolsInstallSkillFromFolder, aiToolsUninstallSkill, aiToolsToggleSkill,
   llmListProviders,
   pluginListMascots, pluginListInstalled, onPluginInstalledChanged,
 } from '../../../lib/ipc'
 import { AiModelsTab } from './AiModelsTab'
+import { AiUsageTab } from './AiUsageTab'
+import { AiTeachingView } from './AiTeachingView'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { AiPermissionsTab } from './AiPermissionsTab'
 import { CollapseList } from '../components/CollapseList'
 import { SettingListPanel } from '../components/SettingListPanel'
+import type { AiTab } from '../../../lib/settings'
 import type { AgentToolInfo, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpTestResult, SkillInfo, SkillInstallResult, PluginMascotInfo, PluginSummary } from '../../../types'
 
 const SOURCE_LABEL: Record<AgentToolInfo['source'], string> = {
@@ -32,14 +35,31 @@ const MODULE_LABEL: Record<string, string> = {
   quiz: '错题本',
 }
 
-type AiTab = 'builtin' | 'mcp' | 'skill' | 'models' | 'perms'
+/**
+ * 页签清单（2026-10-13 按域重排：5 → 6）。
+ *
+ * 旧页签 mixed 了多个域：工具清单 / 月度上限 / Agent 循环预算全挤在「内置工具」里，
+ * 而「工具调用量」汇总条与「AI 助手」两块**常驻在页签区之外** —— 切页签它们纹丝不动，
+ * 看起来就是"这个页面把好几件事糊在一起"。新口径一个页签一个域：
+ * 模型（怎么接）· 权限（能动什么）· 工具（有哪些）· 对话（怎么跑）· 用量（用掉多少）· 教学。
+ */
+const AI_TABS = [
+  ['models', '模型', <Cpu key="c" size={14} />],
+  ['perms', '权限', <ShieldCheck key="p" size={14} />],
+  ['tools', '工具', <Bot key="b" size={14} />],
+  ['chat', '对话', <MessageSquare key="m" size={14} />],
+  ['usage', '用量', <BarChart3 key="g" size={14} />],
+  ['teach', '教学', <GraduationCap key="t" size={14} />],
+] as const
 
-/** 设置 → AI 工具：月度用量汇总 + 内置工具清单 + MCP 外部服务器管理 + Skill 提示词资产 */
+/**
+ * 设置 → AI 工具：一个页签一个域 —— 模型 / 权限 / 工具 / 对话 / 用量 / 教学。
+ * 默认落在「模型」：AI 设置里最先要配的就是模型，旧默认是「内置工具」（只读清单，看完就没事干了）。
+ */
 export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
-  const [tab, setTab] = useState<AiTab>(initialTab ?? 'builtin')
+  const [tab, setTab] = useState<AiTab>(initialTab ?? 'models')
   // 深链变化(面板再次"去配置模型"时组件可能仍挂载)同步切换
   useEffect(() => { if (initialTab) setTab(initialTab) }, [initialTab])
-  const { s, update } = useSettings()
   const [usage, setUsage] = useState<AiToolUsage>({ used: 0, limit: 0 })
   const [mascots, setMascots] = useState<PluginMascotInfo[]>([])
   /**
@@ -108,13 +128,7 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
     <div className="space-y-6">
       {/* 页签 */}
       <div className="flex items-center gap-1 border-b border-[var(--border-color)] flex-wrap">
-        {([
-          ['builtin', '内置工具', <Bot key="b" size={14} />],
-          ['mcp', 'MCP', <Server key="m" size={14} />],
-          ['skill', 'Skill', <Sparkles key="s" size={14} />],
-          ['models', '模型', <Cpu key="c" size={14} />],
-          ['perms', '权限', <ShieldCheck key="p" size={14} />],
-        ] as const).map(([id, label, icon]) => (
+        {AI_TABS.map(([id, label, icon]) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -130,21 +144,73 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
         ))}
       </div>
 
-      {/* 汇总条 */}
-      <div data-setting-anchor="aiTools.usage">
-        <UsageSummary usage={usage} />
-      </div>
+      {/* 每个页签一个域。此前「工具调用量」汇总条与「AI 助手」两块常驻在这里（页签区之外），
+          切页签它们纹丝不动 —— 那正是"一个页面糊了好几件事"的来源。现已各自归位：
+          工具调用量 → 用量页签；AI 助手/感知/Agent 循环 → 对话页签。 */}
+      {tab === 'models' && <div data-setting-anchor="aiTools.models"><AiModelsTab /></div>}
 
-      {/* F-12 遗留收口（2026-10-07）：AI 助手对话显示设置。键早已通用化（AI 教学与 AI 对话共用口径），
-          控件原滞留在「AI教学」设置页且 ui:false 搜不到；迁入本小节常显。
-          放在页签区之外（汇总条与页签内容之间），保证从设置搜索跳锚点时无论当前激活哪个页签都能滚到。 */}
-      <div data-setting-anchor="aiTools.ctxUsageDetail">
+      {tab === 'perms' && <div data-setting-anchor="aiTools.perms"><AiPermissionsTab /></div>}
+
+      {tab === 'tools' && (
+        <div className="space-y-8">
+          <BuiltinToolsTab />
+          <McpServersTab onInvoked={refreshUsage} />
+          <SkillsTab />
+        </div>
+      )}
+
+      {tab === 'chat' && <ChatTab mascots={mascots} mascotDiag={mascotDiag} />}
+
+      {tab === 'usage' && <AiUsageTab usage={usage} onUsageChange={setUsage} />}
+
+      {tab === 'teach' && <div data-setting-anchor="aiTools.teach"><AiTeachingView /></div>}
+    </div>
+  )
+}
+
+// ===== 对话页签 =====
+
+/**
+ * 设置 → AI 工具 → 对话（2026-10-13 独立成页签）。
+ *
+ * 装的是"对话怎么跑"：助手感知、上下文占用指示、吉祥物、Agent 循环预算。
+ * 这些原来散在两处 —— 档位/窗口/吉祥物**常驻在页签区之外**（切页签纹丝不动，看着像页面串了域），
+ * Agent 循环预算则埋在「内置工具」页签里（去找工具清单的人不会想到预算在这儿）。
+ */
+function ChatTab({ mascots, mascotDiag }: {
+  mascots: PluginMascotInfo[]
+  mascotDiag: { state: 'ok' | 'none' | 'disabled' | 'broken' | 'stale' | 'unavailable'; names: string[] }
+}) {
+  const { s, update } = useSettings()
+  return (
+    <div className="space-y-8">
+      <div data-setting-anchor="aiTools.chat">
         <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">AI 助手</h2>
         <p className="text-[12px] text-[var(--text-muted)] mb-4">
-          对话输入区的上下文占用指示，AI 教学与 AI 对话共用同一套档位与窗口口径。
+          对话输入区的行为与显示，AI 教学与 AI 对话共用同一套档位与窗口口径。
         </p>
         <div className="space-y-3 max-w-md">
-          <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+          {/* 感知模式（2026-10-13）：此前 ui:true 却无 anchor ⇒ 被 schemaKeyItems 静默排除在
+              设置搜索之外，只能在 AI 助手面板里点到。现在给出设置页落点。 */}
+          <div data-setting-anchor="aiTools.perception">
+            <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <span className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
+                <Sparkles size={14} className="text-[var(--text-muted)]" />
+                感知模式（发送前自动检索笔记）
+              </span>
+              <SettingSwitch
+                checked={s.aiAssistantPerception === true}
+                onChange={v => update('aiAssistantPerception', v)}
+                aria-label="AI 助手感知模式"
+              />
+            </label>
+            <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed px-1 mt-1.5">
+              发送前自动检索知识库，把最相关的笔记素材注入本轮上下文；纯本地检索（至多一次向量化调用，不消耗对话 token）。
+              未配置向量模型时自动降级为关键词匹配。也可在 AI 助手面板顶部随时开关。
+            </p>
+          </div>
+
+          <label data-setting-anchor="aiTools.ctxUsageDetail" className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
             <span className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
               <Gauge size={14} className="text-[var(--text-muted)]" />
               占用指示档位
@@ -159,6 +225,7 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
               <option value="detailed">详细（圆环+文字摘要）</option>
             </select>
           </label>
+
           <div data-setting-anchor="aiTools.ctxWindow">
             <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
               <span className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
@@ -176,6 +243,7 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
               0=未设置，用量指示退化为纯数字；设置所选模型的上下文窗口（如 128000）后圆环按占用比例着色（&gt;85% 变红）。
             </p>
           </div>
+
           <div data-setting-anchor="ai.mascot">
             <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
               <span className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
@@ -210,61 +278,14 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
         </div>
       </div>
 
-      {tab === 'builtin' && <BuiltinToolsTab usage={usage} onUsageChange={setUsage} monthlyLimit={s.aiToolMonthlyLimit ?? 0} />}
-      {tab === 'mcp' && <McpServersTab onInvoked={refreshUsage} />}
-      {tab === 'skill' && <SkillsTab />}
-      {tab === 'models' && <div data-setting-anchor="aiTools.models"><AiModelsTab /></div>}
-
-      {tab === 'perms' && <div data-setting-anchor="aiTools.perms"><AiPermissionsTab /></div>}
+      <AgentLoopPanel />
     </div>
   )
 }
 
-// ===== 汇总条 =====
-
-function UsageSummary({ usage }: { usage: AiToolUsage }) {
-  const pct = usage.limit > 0 ? Math.min(100, Math.round((usage.used / usage.limit) * 100)) : 0
-  const overLimit = usage.limit > 0 && usage.used >= usage.limit
-  return (
-    <div>
-      <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">工具调用量</h2>
-      <p className="text-[12px] text-[var(--text-muted)] mb-4">
-        本自然月内所有 AI 工具调用次数（内置工具与 MCP 外部工具均计入）。
-      </p>
-      <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md">
-        <div className="flex items-center justify-between text-[13px]">
-          <span className="flex items-center gap-2 text-[var(--text-primary)]">
-            <Gauge size={14} className="text-[var(--accent)]" />
-            本月调用
-          </span>
-          <span className={`tabular-nums ${overLimit ? 'text-red-400' : 'text-[var(--text-secondary)]'}`}>
-            {usage.used} / {usage.limit > 0 ? usage.limit : '不限'}
-          </span>
-        </div>
-        {usage.limit > 0 && (
-          <div className="mt-2 h-1.5 rounded-full bg-[var(--bg-hover)] overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${overLimit ? 'bg-red-500' : 'bg-[var(--accent)]'}`}
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ===== 内置工具页签 =====
-
-function BuiltinToolsTab({ usage, onUsageChange, monthlyLimit }: {
-  usage: AiToolUsage
-  onUsageChange: (u: AiToolUsage) => void
-  monthlyLimit: number
-}) {
+/** Agent 循环预算（轮数 / token 预算 / 上下文裁剪；Agent 第 0+2 层）。原埋在「内置工具」页签里。 */
+function AgentLoopPanel() {
   const { s, update } = useSettings()
-  const [tools, setTools] = useState<AgentToolInfo[]>([])
-  const [recentAudit, setRecentAudit] = useState<AuditEntryInfo[]>([])
-  const [loading, setLoading] = useState(true)
   const agentMaxRounds = s.agentMaxRounds ?? 16
   const agentRunTokenBudget = s.agentRunTokenBudget ?? 500000
   const agentContextBudgetTokens = s.agentContextBudgetTokens ?? 24000
@@ -279,6 +300,94 @@ function BuiltinToolsTab({ usage, onUsageChange, monthlyLimit }: {
     }).catch(() => setCompressModelOptions([]))
   }, [])
 
+  return (
+    <div data-setting-anchor="aiTools.agentLoop">
+      <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">Agent 循环</h2>
+      <p className="text-[12px] text-[var(--text-muted)] mb-4">
+        控制单次请求的推理预算：轮数或累计 token 触顶后自动总结收场（不丢弃已获取的信息）。互相独立的工具调用会并发执行以减少轮数消耗。
+      </p>
+      <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md space-y-2.5">
+        <label className="flex items-center justify-between gap-3 text-[13px]">
+          <span className="text-[var(--text-primary)]">最大推理轮数</span>
+          <input
+            type="number"
+            min={2}
+            max={64}
+            value={String(agentMaxRounds)}
+            onChange={e => { void update('agentMaxRounds', Math.min(64, Math.max(2, Math.floor(Number(e.target.value) || 16)))) }}
+            className="w-24 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] text-right outline-none focus:border-[var(--accent)]"
+          />
+        </label>
+        <label className="flex items-center justify-between gap-3 text-[13px]">
+          <span className="text-[var(--text-primary)]">单次 token 预算</span>
+          <input
+            type="number"
+            min={0}
+            step={50000}
+            value={String(agentRunTokenBudget)}
+            onChange={e => { void update('agentRunTokenBudget', Math.max(0, Math.floor(Number(e.target.value) || 0))) }}
+            className="w-24 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] text-right outline-none focus:border-[var(--accent)]"
+          />
+        </label>
+        <label className="flex items-center justify-between gap-3 text-[13px]">
+          <span className="text-[var(--text-primary)]">历史上下文预算</span>
+          <input
+            type="number"
+            min={0}
+            step={2000}
+            value={String(agentContextBudgetTokens)}
+            onChange={e => { void update('agentContextBudgetTokens', Math.max(0, Math.floor(Number(e.target.value) || 0))) }}
+            className="w-24 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] text-right outline-none focus:border-[var(--accent)]"
+          />
+        </label>
+        <label className="flex items-center justify-between gap-3 text-[13px]">
+          <span className="text-[var(--text-primary)]">自动压缩触发线</span>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={50}
+              max={100}
+              step={5}
+              value={String(agentCompressAtPercent)}
+              onChange={e => { void update('agentCompressAtPercent', Math.min(100, Math.max(50, Math.floor(Number(e.target.value) || 80)))) }}
+              className="w-24 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] text-right outline-none focus:border-[var(--accent)]"
+            />
+            <span className="text-[12px] text-[var(--text-muted)]">%</span>
+          </div>
+        </label>
+        <div className="flex items-center justify-between gap-3 text-[13px]">
+          <span className="text-[var(--text-primary)]">历史自动压缩</span>
+          <SettingSwitch checked={agentCompressionEnabled} onChange={v => { void update('agentCompressionEnabled', v) }} aria-label="历史自动压缩" />
+        </div>
+        <label className="flex items-center justify-between gap-3 text-[13px]">
+          <span className="text-[var(--text-primary)] shrink-0">压缩专用模型</span>
+          <select
+            value={agentCompressModelId}
+            onChange={e => { void update('agentCompressModelId', e.target.value) }}
+            className="w-44 px-2 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] truncate"
+          >
+            <option value="">跟随当前会话模型</option>
+            {compressModelOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        <p className="text-[11px] text-[var(--text-muted)]">
+          历史上下文预算控制带进模型的历史消息量，0 表示不裁剪（不推荐：长会话费用会快速上涨）。
+          开启自动压缩后，上下文达到触发线（历史预算的百分比）时先把较早的对话折叠为持久化纪要再发送（代替直接丢弃）；
+          也可随时在聊天框输入 /compress 手动压缩。
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ===== 工具页签 · 内置工具 =====
+
+/** 只读的内置工具清单与最近调用记录。月度上限搬去「用量」页签、Agent 循环预算搬去「对话」页签。 */
+function BuiltinToolsTab() {
+  const [tools, setTools] = useState<AgentToolInfo[]>([])
+  const [recentAudit, setRecentAudit] = useState<AuditEntryInfo[]>([])
+  const [loading, setLoading] = useState(true)
+
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
@@ -292,115 +401,8 @@ function BuiltinToolsTab({ usage, onUsageChange, monthlyLimit }: {
 
   useEffect(() => { void refresh() }, [refresh])
 
-  const pct = usage.limit > 0 ? Math.min(100, Math.round((usage.used / usage.limit) * 100)) : 0
-
   return (
     <div className="space-y-8">
-      {/* 月度上限 */}
-      <div data-setting-anchor="aiTools.monthlyLimit">
-        <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">月度调用上限</h2>
-        <p className="text-[12px] text-[var(--text-muted)] mb-4">
-          达到上限后调用将被拒绝，0 表示不限制。
-        </p>
-        <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md">
-          <span className="text-[13px] text-[var(--text-primary)]">每月最多调用次数</span>
-          <input
-            type="number"
-            min={0}
-            value={String(monthlyLimit)}
-            onChange={e => {
-              const n = Math.max(0, Math.floor(Number(e.target.value) || 0))
-              void update('aiToolMonthlyLimit', n)
-              onUsageChange({ ...usage, limit: n })
-            }}
-            className="w-24 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] text-right outline-none focus:border-[var(--accent)]"
-          />
-        </label>
-        {usage.limit > 0 && (
-          <div className="mt-2 h-1 rounded-full bg-[var(--bg-hover)] overflow-hidden max-w-md">
-            <div className="h-full bg-[var(--accent)]" style={{ width: `${pct}%` }} />
-          </div>
-        )}
-      </div>
-
-      {/* Agent 循环预算（轮数 / token 预算 / 上下文裁剪；Agent 第 0+2 层） */}
-      <div data-setting-anchor="aiTools.agentLoop">
-        <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">Agent 循环</h2>
-        <p className="text-[12px] text-[var(--text-muted)] mb-4">
-          控制单次请求的推理预算：轮数或累计 token 触顶后自动总结收场（不丢弃已获取的信息）。互相独立的工具调用会并发执行以减少轮数消耗。
-        </p>
-        <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md space-y-2.5">
-          <label className="flex items-center justify-between gap-3 text-[13px]">
-            <span className="text-[var(--text-primary)]">最大推理轮数</span>
-            <input
-              type="number"
-              min={2}
-              max={64}
-              value={String(agentMaxRounds)}
-              onChange={e => { void update('agentMaxRounds', Math.min(64, Math.max(2, Math.floor(Number(e.target.value) || 16)))) }}
-              className="w-24 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] text-right outline-none focus:border-[var(--accent)]"
-            />
-          </label>
-          <label className="flex items-center justify-between gap-3 text-[13px]">
-            <span className="text-[var(--text-primary)]">单次 token 预算</span>
-            <input
-              type="number"
-              min={0}
-              step={50000}
-              value={String(agentRunTokenBudget)}
-              onChange={e => { void update('agentRunTokenBudget', Math.max(0, Math.floor(Number(e.target.value) || 0))) }}
-              className="w-24 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] text-right outline-none focus:border-[var(--accent)]"
-            />
-          </label>
-          <label className="flex items-center justify-between gap-3 text-[13px]">
-            <span className="text-[var(--text-primary)]">历史上下文预算</span>
-            <input
-              type="number"
-              min={0}
-              step={2000}
-              value={String(agentContextBudgetTokens)}
-              onChange={e => { void update('agentContextBudgetTokens', Math.max(0, Math.floor(Number(e.target.value) || 0))) }}
-              className="w-24 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] text-right outline-none focus:border-[var(--accent)]"
-            />
-          </label>
-          <label className="flex items-center justify-between gap-3 text-[13px]">
-            <span className="text-[var(--text-primary)]">自动压缩触发线</span>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="number"
-                min={50}
-                max={100}
-                step={5}
-                value={String(agentCompressAtPercent)}
-                onChange={e => { void update('agentCompressAtPercent', Math.min(100, Math.max(50, Math.floor(Number(e.target.value) || 80)))) }}
-                className="w-24 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] text-right outline-none focus:border-[var(--accent)]"
-              />
-              <span className="text-[12px] text-[var(--text-muted)]">%</span>
-            </div>
-          </label>
-          <div className="flex items-center justify-between gap-3 text-[13px]">
-            <span className="text-[var(--text-primary)]">历史自动压缩</span>
-            <SettingSwitch checked={agentCompressionEnabled} onChange={v => { void update('agentCompressionEnabled', v) }} aria-label="历史自动压缩" />
-          </div>
-          <label className="flex items-center justify-between gap-3 text-[13px]">
-            <span className="text-[var(--text-primary)] shrink-0">压缩专用模型</span>
-            <select
-              value={agentCompressModelId}
-              onChange={e => { void update('agentCompressModelId', e.target.value) }}
-              className="w-44 px-2 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] truncate"
-            >
-              <option value="">跟随当前会话模型</option>
-              {compressModelOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </label>
-          <p className="text-[11px] text-[var(--text-muted)]">
-            历史上下文预算控制带进模型的历史消息量，0 表示不裁剪（不推荐：长会话费用会快速上涨）。
-            开启自动压缩后，上下文达到触发线（历史预算的百分比）时先把较早的对话折叠为持久化纪要再发送（代替直接丢弃）；
-           也可随时在聊天框输入 /compress 手动压缩。
-          </p>
-        </div>
-      </div>
-
       {/* 内置工具只读列表（popover 悬浮：展开覆盖下方内容，不推挤） */}
       <div data-setting-anchor="aiTools.builtin">
         <SettingListPanel
@@ -788,7 +790,6 @@ function SkillsTab() {
   const [skills, setSkills] = useState<SkillInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [installing, setInstalling] = useState(false)
-  const [dragOver, setDragOver] = useState(false)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
@@ -819,10 +820,10 @@ function SkillsTab() {
     await refresh()
   }
 
-  const handleInstallBuffer = async (data: ArrayBuffer, name: string) => {
+  const handlePickFolder = async () => {
     setInstalling(true)
     try {
-      await finishInstall(await aiToolsInstallSkill(new Uint8Array(data), name), name)
+      await finishInstall(await aiToolsInstallSkillFromFolder())
     } finally {
       setInstalling(false)
     }
@@ -835,22 +836,6 @@ function SkillsTab() {
     } finally {
       setInstalling(false)
     }
-  }
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragOver(false)
-    const file = e.dataTransfer.files?.[0]
-    if (!file) return
-    if (!file.name.toLowerCase().endsWith('.zip')) {
-      showToast({ type: 'error', message: '仅支持 .zip 格式的 Skill 包' })
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = () => { void handleInstallBuffer(reader.result as ArrayBuffer, file.name) }
-    reader.onerror = () => showToast({ type: 'error', message: '读取文件失败' })
-    reader.readAsArrayBuffer(file)
   }
 
   const handleUninstall = async (s: SkillInfo) => {
@@ -881,7 +866,7 @@ function SkillsTab() {
         <div>
           <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">Skill 技能</h2>
           <p className="text-[12px] text-[var(--text-muted)]">
-            声明式提示词资产，AI 助手会引用它们。可拖入 zip 独立安装，或来自插件贡献。
+            声明式提示词资产，AI 助手会引用它们。可安装 Skill 文件夹或 .zip 包，也可来自插件贡献。
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -889,10 +874,16 @@ function SkillsTab() {
             className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
             <RefreshCw size={14} />
           </button>
-          <button onClick={() => { void handlePickFile() }} disabled={installing}
+          <button onClick={() => { void handlePickFolder() }} disabled={installing}
+            title="选中 Skill 自身的文件夹（内含 SKILL.md 或 skill.json）"
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[12px] bg-[var(--accent)] text-white hover:opacity-90 disabled:opacity-40 transition-opacity">
-            {installing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
-            安装 Skill
+            {installing ? <Loader2 size={13} className="animate-spin" /> : <FolderOpen size={13} />}
+            选择文件夹安装
+          </button>
+          <button onClick={() => { void handlePickFile() }} disabled={installing}
+            title="安装已经打包好的 .zip Skill 包"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[12px] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors">
+            <Upload size={13} /> .zip 包
           </button>
           <button onClick={() => window.dispatchEvent(new CustomEvent('plugins:open'))}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[12px] border border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
@@ -901,28 +892,19 @@ function SkillsTab() {
         </div>
       </div>
 
-      {/* 拖拽安装区 */}
-      <div
-        onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
-        onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }}
-        onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setDragOver(false) }}
-        onDrop={handleDrop}
-        onClick={() => { void handlePickFile() }}
-        className={`mt-4 max-w-md rounded-lg border-2 border-dashed px-4 py-5 text-center cursor-pointer transition-colors ${
-          dragOver
-            ? 'border-[var(--accent)] bg-[var(--bg-selected)]'
-            : 'border-[var(--border-color)] hover:border-[var(--text-disabled)]'
-        }`}
-      >
-        <div className="flex flex-col items-center gap-1.5">
-          <Upload size={20} className={dragOver ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'} />
-          <p className="text-[12px] text-[var(--text-secondary)]">
-            {installing ? '安装中…' : dragOver ? '释放以安装' : '拖入 Skill 包（.zip）到此处，或点击选择文件'}
-          </p>
-          <p className="text-[11px] text-[var(--text-muted)]">
-            支持 SKILL.md 或 skill.json 格式（详见帮助文档）
-          </p>
-        </div>
+      {/* 2026-10-13：这里原本是一个"拖入 .zip"的拖拽区，而它**从来没收到过事件** ——
+          src/App.tsx 在 document 捕获阶段把任何 .zip 拖放都吃掉去开「整仓备份恢复」弹窗了
+          （onDrop 里 preventDefault + stopPropagation）。也就是说界面在教用户做一件做不到的事，
+          AI 手册里也这么写。现在换成明确可点的「选择文件夹安装」（Skill 的本体本来就是文件夹），
+          .zip 包保留为次要入口，拖拽区与相关文案一并撤掉。 */}
+      <div className="mt-4 max-w-md rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3.5 py-3">
+        <p className="text-[11.5px] text-[var(--text-secondary)] leading-relaxed">
+          安装方式：<b>选中 Skill 自身的文件夹</b>（内含 <code>SKILL.md</code> 或 <code>skill.json</code>）即可，不必先打包；
+          也支持现成的 <code>.zip</code> 包。
+        </p>
+        <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed mt-1">
+          若选中的文件夹里含多个 Skill，会明确提示你改选具体那一个 —— 不会替你随便挑一个装。
+        </p>
       </div>
 
       <div className="space-y-2 mt-4 max-w-md">
@@ -971,7 +953,7 @@ function SkillsTab() {
         ))}
         {!loading && skills.length === 0 && (
           <p className="text-[12px] text-[var(--text-muted)] px-1">
-            暂无已装 Skill。拖入 zip 独立安装，或安装含 skills 贡献的插件包（官方示例：AI 技能包）。
+            暂无已装 Skill。点「选择文件夹安装」装一个（或安装含 skills 贡献的插件包，官方示例：AI 技能包）。
           </p>
         )}
       </div>

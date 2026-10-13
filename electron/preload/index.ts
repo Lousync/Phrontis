@@ -472,6 +472,7 @@ const api = {
   // export
   showExportSaveDialog: (opts: unknown) => ipcRenderer.invoke('export:showSaveDialog', opts),
   writeExportTextFile: (filePath: string, content: string, encoding?: string) => ipcRenderer.invoke('export:writeTextFile', filePath, content, encoding),
+  writeExportPdf: (filePath: string) => ipcRenderer.invoke('export:writePdf', filePath),
 
   // toolbox - scripts CRUD
   getToolboxScripts: () => ipcRenderer.invoke('toolbox:getScripts'),

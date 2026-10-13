@@ -782,7 +782,7 @@ export async function transcribeVision(sessionId: string, no: number, pages: { n
     let failedReason = ''
     let visionTokens = 0
     for (const p of list) {
-      const r = await visionChat({ system: VISION_SYSTEM, prompt: `这是教材第 ${p.n} 页，请转写整页。`, images: [p.dataUrl], modelSpec })
+      const r = await visionChat({ system: VISION_SYSTEM, prompt: `这是教材第 ${p.n} 页，请转写整页。`, images: [p.dataUrl], modelSpec, sessionId: `${sessionId}:vision:${no}` })
       const t = (r.text ?? '').trim()
       if (r.ok && t) { done.push({ n: p.n, md: t }); model = r.model ?? model; visionTokens += (r as { tokens?: number }).tokens ?? 0 }
       else { failed.push(p.n); if (!failedReason && r.error) failedReason = r.error }

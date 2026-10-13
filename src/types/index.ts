@@ -1028,7 +1028,14 @@ export interface SkillInstallResult {
 
 // ===== 模型网关 + AI 对话 =====
 
-export type LlmProviderType = 'openai-compatible' | 'ollama' | 'anthropic'
+export type LlmProviderType = 'openai-compatible' | 'ollama' | 'anthropic' | 'openai-responses'
+
+/**
+ * 模型级协议归属。同一端点下的模型可能分属不同 API 族（opencode Go 官方口径：
+ * "Each model is served by one API family"），所以协议要能按模型逐条覆盖。
+ * 未在 provider.modelFamilies 里列出的模型，跟随供应商 type。
+ */
+export type LlmModelFamily = 'chat' | 'messages' | 'responses'
 
 /** 脱敏后的供应商信息（Key 相关字段永不回传） */
 export interface LlmProviderInfo {
@@ -1039,6 +1046,8 @@ export interface LlmProviderInfo {
   enabled: boolean
   hasKey: boolean
   models: string[]
+  /** 逐模型协议覆盖（空对象 = 全部跟随 type） */
+  modelFamilies?: Record<string, LlmModelFamily>
   headers?: Record<string, string>
   /** 嵌入模型名（空串=未配置；知识语义检索用） */
   embeddingModel: string
@@ -1055,8 +1064,11 @@ export interface LlmProviderDraft {
   /** 仅新增/更换时传入；编辑留空保留旧密文 */
   apiKey?: string
   enabled?: boolean
-  /** 自定义请求头（opencode 等网关要求 x-opencode-session 之类路由头时在此配置） */
+  /** 自定义请求头（opencode 等网关要求 x-opencode-session 之类路由头时在此配置）。
+   *  这里填的值是常量；实际请求会按对话覆盖成真实会话 ID（见主进程 withSessionHeaders）。 */
   headers?: Record<string, string>
+  /** 逐模型协议覆盖（键=模型 ID，值=chat/messages/responses） */
+  modelFamilies?: Record<string, LlmModelFamily>
   /** 嵌入模型名（知识语义索引用）；不配 = 该供应商不参与嵌入 */
   embeddingModel?: string
 }
@@ -2043,6 +2055,8 @@ export interface ElectronAPI {
   restoreUserFromImport: (data: UserImportData) => Promise<{ success: boolean }>
   showExportSaveDialog: (opts: { defaultName: string; filters: { name: string; extensions: string[] }[] }) => Promise<{ filePath: string | null }>
   writeExportTextFile: (filePath: string, content: string, encoding?: string) => Promise<ExportFileResult>
+  /** 页面导出 PDF（2026-10-13）：把**当前窗口**打成 PDF 写到已授权路径（渲染层不碰字节） */
+  writeExportPdf: (filePath: string) => Promise<{ ok: boolean; filePath?: string; size?: number; error?: string }>
   // toolbox
   getToolboxScripts: () => Promise<ToolboxScript[]>
   getToolboxScriptById: (id: string) => Promise<ToolboxScript | null>
@@ -2371,6 +2385,8 @@ export interface ElectronAPI {
   aiToolsCopySkillPrompt: (pluginId: string, skillId: string) => Promise<boolean>
   aiToolsInstallSkill: (data: Uint8Array, fileName?: string) => Promise<SkillInstallResult>
   aiToolsInstallSkillFromFile: () => Promise<SkillInstallResult>
+  /** 选中一个 Skill 文件夹安装（2026-10-13：替代原先那个收不到事件的拖拽区） */
+  aiToolsInstallSkillFromFolder: () => Promise<SkillInstallResult>
   aiToolsUninstallSkill: (id: string) => Promise<SkillInstallResult>
   aiToolsToggleSkill: (registryName: string, enabled: boolean) => Promise<SkillInstallResult & { disabled?: boolean }>
   // Model gateway + agent
@@ -2381,6 +2397,7 @@ export interface ElectronAPI {
   llmTestConnection: (draft: { type: LlmProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string> }) => Promise<LlmTestResultInfo>
   llmVisionModels: () => Promise<{ models: LlmVisionModelInfo[] }>
   llmRefreshModels: (id: string) => Promise<{ ok: boolean; models: string[]; error?: string }>
+  llmSetModelFamily: (id: string, model: string, family: LlmModelFamily | '') => Promise<{ ok: boolean; modelFamilies?: Record<string, LlmModelFamily>; error?: string }>
   llmAddModel: (id: string, model: string) => Promise<{ ok: boolean; models: string[]; error?: string }>
   llmSetDefaultModel: (value: string) => Promise<{ ok: boolean }>
   llmTestModel: (providerId: string, model: string) => Promise<LlmModelTestResultInfo>

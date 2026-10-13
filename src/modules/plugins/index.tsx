@@ -46,7 +46,7 @@ const CONTRIBUTION_HINTS: Record<string, string> = {
   tools: '工具箱「插件工具」区可见',
   automationRule: '自动化规则(Tier1 预留)',
   knowledgePages: '导入到知识库(创建空间/笔记本/章节/页面)',
-  skills: '提示词技能,设置 → AI 工具 → Skill 中查看、停用与独立安装',
+  skills: '提示词技能,设置 → AI 工具 → 工具 中查看、停用与独立安装',
 }
 const CAPABILITY_LABELS: Record<string, string> = {
   clipboard: '剪贴板写入',

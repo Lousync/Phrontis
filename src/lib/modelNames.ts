@@ -1,23 +1,73 @@
 /**
- * OpenCode（Zen/Go 端点）模型目录 —— 友好名称与免费标记的静态映射。
- * 背景：上游 /models 只返回原始 ID 且不含免费元数据；CC Switch 的美化名来自其本地目录。
+ * OpenCode 模型目录 —— 友好名称、免费标记与协议归属的静态映射。
+ * 背景：上游 /models 只返回 {id, object, created, owned_by}，既无免费元数据也无协议元数据。
  * 维护约定：上游改名/上新时更新此表；未知 ID 回退到机械美化，不会显示错误信息。
+ * 官方来源：https://opencode.ai/v2/docs/console/go （2026-10-13 抄录）
  */
+import type { LlmModelFamily } from '../types'
 
-/** 实测确认的免费模型（2026-08 对照 opencode Zen/Go 双端点 /models 数据） */
+/**
+ * 官方 Go 端点的免费模型（2026-10-13 官方定价表：这两条 Free / 月额度 Unlimited）。
+ *
+ * 注意：本表只是**补充**——`isFreeModel` 的 `free` 字样正则已经覆盖了绝大多数情况
+ * （Zen 端点的 `*-free` 族全部命中），这里放的是"官方免费但 id 看不出"的兜底位。
+ * 反例警示：`space-bunny` 在 Go 上是**付费**模型（$0.15/$0.60），不要标免费。
+ */
 const KNOWN_FREE = new Set([
-  // Zen 主端点专属的 -free 后缀族
-  'hy3-free',
-  'mimo-v2.5-free',
-  'muse-spark-1.2-contributor-free',
-  'nemotron-3.5-lightning-free',
-  'nemotron-3-ultra-free',
-  'deepseek-v4-flash-free',
-  'laguna-s-2.1-free',
-  'x-preview-f-free',
-  // Go 端点专属免费
-  'ox-alpha-free',
+  'longcat-2.5-preview-free',
+  'step-5-preview-free',
 ])
+
+/**
+ * 模型 → 协议族（官方 Go 端点表原文抄录）。
+ *
+ * 官方口径：**"Each model is served by one API family."** 同一个 baseUrl、同一把 Key 下，
+ * 模型分属三条路径：`/chat/completions`（20 个）· `/messages`（6 个）· `/responses`（6 个）。
+ * 用途：新建 opencode Go 供应商时据此预填 `modelFamilies`，用户不必手工逐条标协议；
+ * 不在表内的模型不预填（跟随端点默认协议），可在模型页单独覆盖。
+ */
+export const MODEL_FAMILY_HINTS: Record<string, LlmModelFamily> = {
+  // /v1/responses（OpenAI Responses 协议）
+  'grok-4.7': 'responses',
+  'grok-4.6': 'responses',
+  'gpt-6-luna': 'responses',
+  'gpt-5.6-luna': 'responses',
+  'muse-spark-1.3-contributor': 'responses',
+  'muse-spark-1.2-contributor': 'responses',
+  // /v1/messages（Anthropic Messages 协议）
+  'claude-haiku-5-5': 'messages',
+  'minimax-m3': 'messages',
+  'minimax-m2.7': 'messages',
+  'qwen3.8-max': 'messages',
+  'qwen3.8-flash': 'messages',
+  'qwen3.7-plus': 'messages',
+  // /v1/chat/completions（OpenAI 兼容）
+  'glm-5.3-flash': 'chat',
+  'glm-5.3': 'chat',
+  'glm-5.2': 'chat',
+  'kimi-k3': 'chat',
+  'kimi-k2.7-code': 'chat',
+  'kimi-k2.6': 'chat',
+  'longcat-2.0': 'chat',
+  'deepseek-v4.1-flash': 'chat',
+  'deepseek-v4-pro': 'chat',
+  'deepseek-v4-flash': 'chat',
+  'deepseek-v4-flash-vision-exp': 'chat',
+  'mimo-v2.6-flash': 'chat',
+  'mimo-v2.6-pro': 'chat',
+  'mimo-v2.5': 'chat',
+  'mimo-v2.5-pro': 'chat',
+  'hy4-preview': 'chat',
+  'hy3': 'chat',
+  'space-bunny': 'chat',
+  'longcat-2.5-preview-free': 'chat',
+  'step-5-preview-free': 'chat',
+}
+
+/** 取模型的官方协议提示；不在表内返回 null（= 跟随端点默认协议） */
+export function familyHintOf(id: string): LlmModelFamily | null {
+  return MODEL_FAMILY_HINTS[id] ?? null
+}
 
 /** 手工维护的美化名（仅放无法机械推导或官方写法特殊的条目） */
 const PRETTY_OVERRIDES: Record<string, string> = {
@@ -38,7 +88,6 @@ const PRETTY_OVERRIDES: Record<string, string> = {
   'mimo-v2.5-omni': 'MiMo V2.5 Omni',
   'muse-spark-1.2-contributor': 'Muse Spark 1.2 Contributor',
   'muse-spark-1.2': 'Muse Spark 1.2',
-  'ox-alpha-free': 'Ox Alpha Free (Unlimited)',
   'longcat-2.0': 'LongCat 2.0',
   'gpt-5.6-luna': 'GPT-5.6 Luna',
 }

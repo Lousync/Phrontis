@@ -1,6 +1,7 @@
-import { ShieldCheck, AlertTriangle, Wrench, FileText } from 'lucide-react'
+import { ShieldCheck, AlertTriangle, Wrench, FileText, Terminal } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
+import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 
 type Perm = 'off' | 'read' | 'write'
 
@@ -47,6 +48,7 @@ export function AiPermissionsTab() {
   const perms = parsePerms(s.aiModulePermissions ?? '{}')
   const anyWrite = MODULES.some(m => perms[m.id] === 'write')
   const vaultPerm: Perm = s.aiVaultFilePerm === 'off' || s.aiVaultFilePerm === 'read' || s.aiVaultFilePerm === 'write' ? s.aiVaultFilePerm : 'read'
+  const terminalAiExec = s.terminalAiExec === true
 
   const setPerm = (moduleId: string, perm: Perm) => {
     const next = { ...perms, [moduleId]: perm }
@@ -117,9 +119,42 @@ export function AiPermissionsTab() {
         })}
       </div>
 
+      {/* AI 终端执行（2026-10-13）。
+          schema 里 terminalAiExec 一直是 ui:true + anchor:'terminal.aiExec' + aiTab:'perms'，
+          但**从未在任何视图渲染过** —— 设置搜索能搜到它、点进去却没有落点，实际只能手改
+          settings.json。它是安全开关（level:'danger'），所以现在补上落点并把两道门的关系写清。 */}
+      <div data-setting-anchor="terminal.aiExec">
+        <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">终端执行</h2>
+        <p className="text-[12px] text-[var(--text-muted)] leading-relaxed max-w-md">
+          开启后 AI 才能申请 <code>builtin.terminal.exec</code> 工具执行命令。<b>每条命令都会先在终端模块的
+          「AI 执行记录」里做一次行内确认</b>（高危命令给严重警告），不会无人值守地跑。
+          关闭 = 该工具完全不进入 AI 的视野 —— 不是「点了会被拒」，是模型根本看不到它。
+        </p>
+        <div className="mt-3 max-w-md">
+          <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] cursor-pointer">
+            <span className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
+              <Terminal size={14} className={terminalAiExec ? 'text-[var(--accent)]' : 'text-[var(--text-disabled)]'} />
+              允许 AI 申请执行终端命令
+            </span>
+            <SettingSwitch
+              checked={terminalAiExec}
+              onChange={v => {
+                void update('terminalAiExec', v)
+                showToast({ type: v ? 'warning' : 'info', message: v ? '已允许 AI 申请执行终端命令（每条仍需行内确认）' : '已禁止 AI 使用终端工具' })
+              }}
+              aria-label="AI 终端执行"
+            />
+          </label>
+          <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed px-1 mt-1.5">
+            默认关闭。本开关与上面模块权限里的「终端」是两道独立的门：本开关决定工具<b>是否存在</b>，
+            模块权限决定它<b>能读还是能写</b>；两者都放开才真正可用。
+          </p>
+        </div>
+      </div>
+
       <p className="flex items-center gap-1.5 text-[11px] text-[var(--text-disabled)] max-w-md">
         <ShieldCheck size={12} />
-        外部 MCP 工具不受本页约束（其启停在「MCP」页签单独控制）。
+        外部 MCP 工具不受本页约束（其启停在「工具」页签单独控制）。
       </p>
     </div>
   )

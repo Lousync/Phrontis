@@ -546,7 +546,7 @@ export async function finalizeLesson(sessionId: string, getSetting: (key: string
   const { providerId, modelId } = defaultModel()
   const sys = '你是助教。根据这一节课的对话，写一份交给下一节课的「交接」。只输出四段 markdown，简体中文，简洁具体。'
   const user = `本课对话记录：\n${transcriptOf(sessionId) || '（本节没有对话）'}\n\n请严格按下面四段输出：\n- 本节要点：…\n- 掌握情况：…（哪里会了、哪里卡）\n- 遗留问题：…（没讲完/没搞懂的）\n- 下节建议：…（从哪继续、练什么）`
-  const r = await invokeLlmInternal({ providerId, modelId, effort: 'off', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] })
+  const r = await invokeLlmInternal({ providerId, modelId, effort: 'off', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }], sessionId })
   const body = r.ok ? r.content.trim() : `（交接自动生成失败：${r.error}——可手动补写）`
   const title = getAgentSession(sessionId)?.title ?? '本课'
   return writeFolderFile(sessionId, '交接.md', `# 交接 · ${title}\n\n${body}\n`, getSetting)
@@ -569,7 +569,7 @@ export async function finishUnit(wsId: string, unitId: string, getSetting: (key:
   const { providerId, modelId } = defaultModel()
   const sys = `你是课程助教。为知识点「${unit.name}」写一篇收尾总结（总结篇），用于日后回顾。`
   const user = `知识点：${unit.name}\n目标：${unit.goal || '（未设）'}\n\n各课时要点汇总：\n${merged || '（暂无）'}\n\n请输出 markdown：核心方法 / 易错点 / 关联知识 / 自检清单 四部分，简洁。`
-  const r = await invokeLlmInternal({ providerId, modelId, effort: 'off', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] })
+  const r = await invokeLlmInternal({ providerId, modelId, effort: 'off', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }], sessionId: `course:${wsId}:${unitId}:summary` })
   const body = r.ok ? r.content.trim() : `（总结自动生成失败：${r.error}——可手动补写）`
   const wsFolder = workspaceFolderRel(wsId, getSetting)
   if (!wsFolder) return { ok: false, error: '工作区不存在' }
@@ -730,7 +730,7 @@ export async function makeUnitQuiz(wsId: string, unitId: string, getSetting: (ke
   const { providerId, modelId } = defaultModel()
   const sys = '你是出题老师。根据给定知识点的学习记录，出 3 道单选题，只输出 JSON 数组，不要解释文字。'
   const user = `知识点：${unit.name}\n目标：${unit.goal || '（未设）'}\n学习记录：\n${merged || '（暂无）'}\n\n输出 JSON 数组，每项：{"q":"题干","options":["A项","B项","C项","D项"],"answer":0,"explanation":"解析"}（answer 是正确项的 0-based 下标）。只输出 JSON。`
-  const r = await invokeLlmInternal({ providerId, modelId, effort: 'off', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] })
+  const r = await invokeLlmInternal({ providerId, modelId, effort: 'off', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }], sessionId: `course:${wsId}:${unitId}:quiz` })
   if (!r.ok) return { ok: false, error: r.error }
   const q = parseQuizJson(r.content)
   if (!q) return { ok: false, error: '模型未返回可解析的题目 JSON' }
