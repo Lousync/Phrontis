@@ -1178,6 +1178,51 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     void refreshTreeDir(parentDirOf(node.relPath))
   }, [ensureVaultRoot, categories, confirmVaultCategoryDelete, deleteWithAnimation, closeTabsUnder, refreshTreeDir])
 
+  /* ===== ⋮ 的文件级动作（2026-10-13 批 1b「页面菜单能力补齐」）=====
+     PageEditor 只发请求、自己不动盘：这几个动作会改仓库相对路径或动页签，必须由模块层统一
+     —— 刷树 / 刷 allPages / 记撤销栈 / 连带关页签全在既有那几个 handleTreeXxx 里。
+     重命名与移动**直接复用** handleTreeRename / handleTreeMove（下一段就是），这里只补三个按
+     relPath 的落点。 */
+
+  /** ⋮「删除」落点：复用文件树那条（系统回收站 + 危险确认 + 连带关页签）。
+   *  ★ 构造一个只带 relPath / type 的 TreeNode —— handleTreeDelete 只读这两个字段
+   *    （取 name、判 isDir），不需要完整的工作区条目字段。 */
+  const handleDeleteByRel = useCallback((rel: string) => {
+    if (!rel) return
+    void handleTreeDelete({ relPath: rel, type: 'file' } as TreeNode)
+  }, [handleTreeDelete])
+
+  /** ⋮「创建副本」落点：与文件树右键同一通道（duplicateWorkspaceFile），刷父目录让副本立刻出现。
+   *  ★ 不自动打开副本 —— 与文件树右键行为一致。 */
+  const handleDuplicateByRel = useCallback(async (rel: string) => {
+    if (!rel) return
+    const root = await ensureVaultRoot()
+    if (!root) return
+    const r = await duplicateWorkspaceFile(root, rel).catch(() => null)
+    if (!r || r.ok === false) { showToast({ type: 'error', message: r?.error || '创建副本失败' }); return }
+    void refreshTreeDir(parentDirOf(rel))
+    showToast({ type: 'info', message: `已生成副本 ${r.relPath?.split('/').pop() ?? ''}` })
+  }, [ensureVaultRoot, refreshTreeDir])
+
+  /** ⋮「在文件列表中显示当前文件」：切到文件视图 + 展开全部祖先目录 + 滚进视野。
+   *  树是纯 props 驱动（VaultTree），行上有 `data-wb-tree-path` 锚点 —— 这里只驱动宿主的
+   *  expandedDirs 与滚动，**不动树组件本身**。
+   *  ★ 两帧后才滚：目录展开是异步的（子目录懒加载 + setState），当帧行还没渲染出来。
+   *  ★ 找不到就给一句提示 —— 不静默（可能是 .ignore 规则收起了这一条）。 */
+  const handleLocateInTree = useCallback((rel: string) => {
+    if (!rel) return
+    setSidebarTab('files')
+    const parts = rel.split('/')
+    const dirs = ['']
+    for (let i = 1; i < parts.length; i++) dirs.push(parts.slice(0, i).join('/'))
+    setExpandedDirs(prev => new Set([...prev, ...dirs]))
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(`[data-wb-tree-path="${CSS.escape(rel)}"]`)
+      if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      else showToast({ type: 'warning', message: '文件列表里没找到这一条（可能被 .ignore 规则收起）' })
+    }))
+  }, [])
+
   /** 文件树重命名（B-2 同批补）：workspaceRename + 记入撤销栈（重命名属「移动」语义，
    *  与 moveVaultPath 同一通道，Ctrl+Z 可撤回）。成功后刷新父目录并通知编辑器侧树同步。 */
   const handleTreeRename = useCallback(async (relPath: string, rawName: string) => {
@@ -2397,6 +2442,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                         { key: 'newCat', label: '新建分类目录', icon: <FolderTree size={15} />, onSelect: () => setTreeCreating({ dirRel: '', type: 'category' }) },
                         { key: 'paste', label: '粘贴', icon: <ClipboardPaste size={15} />, onSelect: () => requestPasteFromMenu(dirRel) },
                       )
+                      /* 导入（2026-10-13 批 1b「页面菜单能力补齐」）：两个处理函数**本来就在**
+                         （handleDialogImport / handleImportFolder，拖拽那条通道一直在用），此前只有
+                         那两套**没有任何渲染入口**的旧右键菜单里才有菜单项 ⇒ 用户根本摸不到。
+                         放在目录 / 空白组：导入要指定落在哪个目录，语义上属「在这建东西」。 */
+                      items.push({ separator: true })
+                      items.push(
+                        { key: 'importFiles', label: '导入文件…', icon: <FilePlus size={15} />, onSelect: () => void handleDialogImport() },
+                        { key: 'importFolder', label: '导入文件夹…', icon: <FolderPlus size={15} />, onSelect: () => void handleImportFolder() },
+                      )
                       if (self && self.type === 'dir') {
                         items.push({ separator: true })
                         items.push({ key: 'expandDir', label: '展开此目录（含子目录）', icon: <ChevronsUpDown size={15} />, onSelect: () => void expandDirRecursive(self.relPath) })
@@ -2536,6 +2590,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 canNavForward={canNavForward(nav)}
                 onNavBack={() => navStep(-1)}
                 onNavForward={() => navStep(1)}
+                /* ⋮ 的文件级动作（2026-10-13 批 1b）：实现都在这层（改名 / 移动要连带刷树与页签、
+                   删除要连带关页签），PageEditor 只发请求。分屏归页签组管 —— 与页签右键同一个入口。 */
+                onRenameRequest={(rel, name) => void handleTreeRename(rel, name)}
+                onMoveRequest={(rel, dst) => void handleTreeMove(rel, dst)}
+                onDuplicateRequest={(rel) => void handleDuplicateByRel(rel)}
+                onLocateRequest={handleLocateInTree}
+                onDeleteRequest={handleDeleteByRel}
+                onSplitRequest={onSplitPage ? (o) => onSplitPage(activePageId, o) : undefined}
+                splitDisabled={splitDisabled}
               />
             </Suspense>
           ) : (
@@ -2590,6 +2653,13 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             vaultMode={true}
             draftRelPath={secondaryActiveId.startsWith('draft:') ? secondaryActiveId.slice(6) : undefined}
             startInEdit={false}
+            /* 副栏的 ⋮ 同样给文件级动作（两个栏位各挂各的顶栏，能力不该只有主栏有）。
+               ★ 唯独**不给分屏**：分屏的入口是主栏页签组的事，副栏再拆一次没有语义。 */
+            onRenameRequest={(rel, name) => void handleTreeRename(rel, name)}
+            onMoveRequest={(rel, dst) => void handleTreeMove(rel, dst)}
+            onDuplicateRequest={(rel) => void handleDuplicateByRel(rel)}
+            onLocateRequest={handleLocateInTree}
+            onDeleteRequest={handleDeleteByRel}
           />
         </Suspense>,
         secondaryContentEl,

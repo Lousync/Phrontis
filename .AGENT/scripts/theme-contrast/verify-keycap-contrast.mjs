@@ -140,7 +140,13 @@ for (const [file, label] of [
   const src = read(file)
   const all = (src.match(/text-\[var\(--text-disabled\)\]/g) || []).length
   const placeholder = (src.match(/placeholder:text-\[var\(--text-disabled\)\]/g) || []).length
-  check(`${label}不再用禁用色（占位符除外）`, all === placeholder, `共 ${all} 处，其中占位符 ${placeholder} 处`)
+  /* 真禁用态（2026-10-13 页面菜单能力补齐批 1b 起）：⋮ 的分屏项在「分屏已满」时置灰 ——
+     禁用态用禁用色是**对的**（它就是这个语义），被禁的是「键位提示 / 说明文字」这类标签。
+     写法固定成下面这一种，其它任何形状都不算 ⇒ 混进来就红（判据仍然会拦新误用）。 */
+  const disabledState = (src.match(/cursor-default text-\[var\(--text-disabled\)\]/g) || []).length
+  const plain = all - placeholder - disabledState
+  check(`${label}不再用禁用色（占位符与真禁用态除外）`, plain === 0,
+    `共 ${all} 处 = 占位符 ${placeholder} + 禁用态 ${disabledState} + 违规 ${plain}`)
 }
 
 // ---------------------------------------------------------------- §3 逐主题对比度

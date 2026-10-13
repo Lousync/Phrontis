@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, type ReactNode } from 'react'
-import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace } from 'lucide-react'
+import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace, Pencil, FolderInput, Files, Crosshair, PanelRight, PanelTop } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
@@ -21,6 +21,8 @@ import { WelcomeHtmlView } from './WelcomeHtmlView'
 import { FileMetaCard } from './FileMetaCard'
 // 文件信息行（批 3 起住在 shared：图片异常态卡也要用，shared 反向依赖 module 是层次倒挂）
 import { FileInfoRows } from '../../../components/shared/FileInfoRows'
+// 目录选择弹层（「将文件移动到…」）：与文件树右键同一个组件，本组件只负责给它一个定位槽
+import { DirPicker } from '../../../components/shared/DirPicker'
 import { NoteTopBar } from './NoteTopBar'
 import { ArchiveTextView } from './ArchiveTextView'
 import { isTextViewableExt } from '../../../lib/aiTextExts'
@@ -69,14 +71,16 @@ function MoreGroup({ title }: { title: string }) {
 function MoreSep() {
   return <div className="my-1 border-t border-[var(--border-color)]" />
 }
-function MoreItem({ anchor, icon, label, kbd, danger, onClick }: {
-  anchor?: string; icon: ReactNode; label: string; kbd?: string; danger?: boolean; onClick: () => void
+function MoreItem({ anchor, icon, label, kbd, danger, disabled, onClick }: {
+  anchor?: string; icon: ReactNode; label: string; kbd?: string; danger?: boolean; disabled?: boolean; onClick: () => void
 }) {
   return (
-    <button data-wb={anchor} onClick={onClick}
-      className={`w-full flex items-center gap-2 px-3 py-1.5 text-[12px] transition-colors ${danger
-        ? 'text-[var(--text-secondary)] hover:bg-[var(--danger)]/10 hover:text-[var(--danger)]'
-        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+    <button data-wb={anchor} disabled={disabled} onClick={onClick}
+      className={`w-full flex items-center gap-2 px-3 py-1.5 text-[12px] transition-colors ${disabled
+        ? 'cursor-default text-[var(--text-disabled)]'
+        : danger
+          ? 'text-[var(--text-secondary)] hover:bg-[var(--danger)]/10 hover:text-[var(--danger)]'
+          : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
       {icon}
       {label}
       {kbd && <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">{kbd}</span>}
@@ -105,6 +109,21 @@ function MoreSub({ anchor, icon, label, items }: {
         </div>
       )}
     </div>
+  )
+}
+
+/** 布局组（左右 / 上下分屏，2026-10-13 批 1b）：md 与非 md 两个分支共用同一段 ——
+ *  分屏此前只藏在页签右键里，同一个动作两个入口只给了一个。`disabled` 与页签右键同源。 */
+function MoreSplitGroup({ disabled, onPick }: { disabled: boolean; onPick: (o: 'row' | 'column') => void }) {
+  return (
+    <>
+      <MoreSep />
+      <MoreGroup title="布局" />
+      <MoreItem anchor="peSplitRow" icon={<PanelRight size={13} />} label="左右分屏" disabled={disabled}
+        onClick={() => onPick('row')} />
+      <MoreItem anchor="peSplitCol" icon={<PanelTop size={13} />} label="上下分屏" disabled={disabled}
+        onClick={() => onPick('column')} />
+    </>
   )
 }
 
@@ -143,9 +162,30 @@ interface Props {
   canNavForward?: boolean
   onNavBack?: () => void
   onNavForward?: () => void
+  /* ===== ⋮ 的文件级动作（2026-10-13 批 1b「能力补齐」）=====
+     这六件事的**实现留在模块层**：改名 / 移动会改仓库相对路径，必须连带刷新文件树与页签
+     （页签的 id 与 relPath 绑着），删要走系统回收站 + 危险确认 + 连带关页签，分屏归页签组管。
+     本组件只发请求，自己一律不动盘。全部可选：没传就**不出现**（不做点了没反应的假按钮）。 */
+  /** 重命名：`newName` 是含扩展名的文件名，模块层走 handleTreeRename（含分类通道与撤销栈） */
+  onRenameRequest?: (relPath: string, newName: string) => void
+  /** 将文件移动到…：`targetDirRel` 为空串表示仓库根 */
+  onMoveRequest?: (relPath: string, targetDirRel: string) => void
+  /** 创建副本（模块层 duplicateWorkspaceFile + 刷新父目录） */
+  onDuplicateRequest?: (relPath: string) => void
+  /** 在文件列表中显示当前文件：切到文件视图 + 展开祖先目录 + 滚进视野 */
+  onLocateRequest?: (relPath: string) => void
+  /** 删除：模块层 handleTreeDelete（系统回收站 + 危险确认 + 连带关页签）。
+   *  ★ 没接这个 prop 时回落本组件原来的 `handleDelete`；接了就走真删除 ——
+   *  原路在仓库模式下是**假按钮**（`handleDelete` 第一句 `if (vaultMode)` 就弹提示返回，
+   *  而知识库模块**恒传** `vaultMode={true}`）。 */
+  onDeleteRequest?: (relPath: string) => void
+  /** 左右 / 上下分屏（页签右键同款动作） */
+  onSplitRequest?: (orientation: 'row' | 'column') => void
+  /** 分屏已满（页签右键那条会置灰，这里同步） */
+  splitDisabled?: boolean
 }
 
-export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward }: Props) {
+export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward, onRenameRequest, onMoveRequest, onDuplicateRequest, onLocateRequest, onDeleteRequest, onSplitRequest, splitDisabled = false }: Props) {
   const { s, update } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
@@ -188,6 +228,32 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       window.removeEventListener('keydown', onKey, true)
     }
   }, [showFileInfo])
+  /* ===== ⋮ 的两个弹层（2026-10-13 批 1b）=====
+     都与「文件信息」小卡共用 ⋮ 正下方那个槽位（`absolute right-2 top-full kb-pop`），
+     所以**同一时刻只开一个**（打开任一个前先把另两个关掉）。 */
+  /** 重命名：输入框放这儿，**不复用树内联改名** —— 树可能收起 / 侧栏关着 / 停在大纲页，
+   *  那时内联输入行根本不渲染，表象就是「点了没反应」。 */
+  const [showRename, setShowRename] = useState(false)
+  const [renameDraft, setRenameDraft] = useState('')
+  /** 将文件移动到…：内容直接用共享 DirPicker（它只管内容与键盘，定位交给宿主） */
+  const [showMove, setShowMove] = useState(false)
+  useEffect(() => {
+    if (!showRename && !showMove) return
+    const onDown = (e: MouseEvent): void => {
+      const t = e.target as HTMLElement | null
+      if (t?.closest?.('[data-wb="peRenameCard"],[data-wb="peRename"],[data-wb="peMoveCard"],[data-wb="peMove"]')) return
+      setShowRename(false); setShowMove(false)
+    }
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') { setShowRename(false); setShowMove(false) } }
+    window.addEventListener('mousedown', onDown, true)
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('mousedown', onDown, true)
+      window.removeEventListener('keydown', onKey, true)
+    }
+  }, [showRename, showMove])
+  // 换页复位：弹层不该跨页留着（与上面那批档位复位同口径）
+  useEffect(() => { setShowRename(false); setShowMove(false) }, [pageId])
   // 知识库以阅读优先:md/txt 页面打开即预览(右上角眼睛或 Ctrl+E / Ctrl+/ 切回编辑;vault 模式就地保存)
   const [preview, setPreview] = useState(true)
   // startInEdit 的 ref 镜像：loadPage（useCallback 依赖不含该 prop）在 effect 里读最新值
@@ -1194,6 +1260,37 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     }
   }
 
+  /* ===== ⋮ 的文件级动作（2026-10-13 批 1b）=====
+     一律传 `page.path`（仓库相对路径）—— 模块层那四个入口吃的就是 relPath。
+     全部可选 prop：没接就**不渲染**那一项（见下面两个分支的门控），不做点了没反应的假按钮。 */
+  const pageRel = () => pageRef.current?.path ?? ''
+  const openRename = () => {
+    setRenameDraft(pageRel().split('/').pop() ?? '')
+    setShowFileInfo(false); setShowMove(false); setShowRename(true)
+    setShowMoreMenu(false)
+  }
+  const submitRename = () => {
+    const rel = pageRel()
+    const next = renameDraft.trim()
+    setShowRename(false)
+    if (!rel || !next || !onRenameRequest) return
+    onRenameRequest(rel, next)
+  }
+  const requestMove = (targetDirRel: string) => {
+    const rel = pageRel()
+    setShowMove(false)
+    if (!rel || !onMoveRequest) return
+    onMoveRequest(rel, targetDirRel)
+  }
+  /** 删除：接了模块层就走系统回收站（与文件树同一个 handleTreeDelete：危险确认 + 连带关页签）；
+   *  没接（旧调用点）才回落原来的 handleDelete。★ 原来这条路在仓库模式下是**假按钮** ——
+   *  `handleDelete` 第一句 `if (vaultMode)` 就弹提示返回，而模块**恒传** `vaultMode={true}`。 */
+  const requestDelete = () => {
+    const rel = pageRel()
+    if (onDeleteRequest && rel) { onDeleteRequest(rel); return }
+    void handleDelete()
+  }
+
   const handleToggleStar = async () => {
     if (!page) return
     try {
@@ -1412,7 +1509,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <BookOpen size={13} />沉浸阅读
-                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">Ctrl+Shift+R</span>
+                    <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">Ctrl+Shift+R</span>
                   </button>
                 )}
                 {quizzes.length > 0 && (
@@ -1446,14 +1543,14 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   <button onClick={() => { insertFootnote(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <StickyNote size={13} />插入脚注
-                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">Ctrl+Alt+F</span>
+                    <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">Ctrl+Alt+F</span>
                   </button>
                 )}
                 {!preview && (
                   <button onClick={() => { imageInputRef.current?.click(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <ImagePlus size={13} />插入图片
-                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">Ctrl+Shift+I</span>
+                    <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">Ctrl+Shift+I</span>
                   </button>
                 )}
                 {/* 文件格式：二级子菜单，往**左**展开 —— 菜单本身贴右缘，往右会出屏（同原型） */}
@@ -1493,11 +1590,33 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   </>
                 )}
 
-                {/* 文件组（2026-10-13 能力补齐）：md 页此前**没有**任何路径 / 系统类入口，
-                    与文件树右键（使用默认应用打开 / 在系统资源管理器中显示 / 复制路径 ▸）不对齐。
-                    复制路径给二级两档（相对 / 完整），与模块层 copyPathText 同一口径。 */}
+                {/* 布局组（2026-10-13 批 1b）：分屏此前只藏在页签右键里 —— 同一个动作两个入口只给一个。
+                    调用方负责关菜单（`onPick` 里 close），组件本身只画。 */}
+                {onSplitRequest && (
+                  <MoreSplitGroup disabled={splitDisabled}
+                    onPick={(o) => { onSplitRequest(o); setShowMoreMenu(false) }} />
+                )}
+
+                {/* 文件组（2026-10-13 能力补齐 + 批 1b）：md 页此前**没有**任何文件级入口，
+                    与文件树右键（重命名 / 将文件移动到… / 创建副本 / 复制路径 ▸ / 删除）不对齐。
+                    每条都靠可选 prop 门控：模块层没接就**不出现**（不做点了没反应的假按钮）。 */}
                 <MoreSep />
                 <MoreGroup title="文件" />
+                {onRenameRequest && (
+                  <MoreItem anchor="peRename" icon={<Pencil size={13} />} label="重命名" onClick={openRename} />
+                )}
+                {onDuplicateRequest && (
+                  <MoreItem anchor="peDuplicate" icon={<Files size={13} />} label="创建副本"
+                    onClick={() => { const rel = pageRel(); setShowMoreMenu(false); if (rel) onDuplicateRequest(rel) }} />
+                )}
+                {onMoveRequest && (
+                  <MoreItem anchor="peMove" icon={<FolderInput size={13} />} label="将文件移动到…"
+                    onClick={() => { setShowFileInfo(false); setShowRename(false); setShowMove(true); setShowMoreMenu(false) }} />
+                )}
+                {onLocateRequest && (
+                  <MoreItem anchor="peLocate" icon={<Crosshair size={13} />} label="在文件列表中显示"
+                    onClick={() => { const rel = pageRel(); setShowMoreMenu(false); if (rel) onLocateRequest(rel) }} />
+                )}
                 <MoreSub anchor="peCopyPath" icon={<Copy size={13} />} label="复制路径" items={[
                   { label: '仓库相对路径', onSelect: () => { void handleCopyPath('rel'); setShowMoreMenu(false) } },
                   { label: '完整路径', onSelect: () => { void handleCopyPath('abs'); setShowMoreMenu(false) } },
@@ -1509,8 +1628,11 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   onClick={() => { void handleArchiveOpenInSystem(true); setShowMoreMenu(false) }} />
 
                 <MoreSep />
-                <MoreItem danger icon={<Trash2 size={13} />} label="删除页面"
-                  onClick={() => { setShowMoreMenu(false); handleDelete() }} />
+                {/* 删除（批 1b 换成真删除）：接了模块层走系统回收站 + 危险确认 + 连带关页签；
+                    没接才回落本组件原来的 handleDelete。★ 原来那条在仓库模式下只弹一句提示
+                    （模块恒传 vaultMode=true）—— 补这一批时顺手修掉的假按钮。 */}
+                <MoreItem anchor="peDelete" danger icon={<Trash2 size={13} />} label="删除页面"
+                  onClick={() => { setShowMoreMenu(false); requestDelete() }} />
               </>
             ) : (
               /* 非 md 的 ⋮（批 2）：批 1 那个「文件」组**原样搬进来** —— 五个 data-wb 锚点一字不改
@@ -1557,6 +1679,27 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   { label: '仓库相对路径', onSelect: () => { void handleCopyPath('rel'); setShowMoreMenu(false) } },
                   { label: '完整路径', onSelect: () => { void handleCopyPath('abs'); setShowMoreMenu(false) } },
                 ]} />
+                {/* 文件级动作（2026-10-13 批 1b）：非 md 此前也没有重命名 / 移动 / 副本 / 定位 ——
+                    与文件树右键和 md 兄弟都不对齐。每条靠可选 prop 门控，模块层没接就不出现。 */}
+                {onRenameRequest && (
+                  <MoreItem anchor="peRename" icon={<Pencil size={13} />} label="重命名" onClick={openRename} />
+                )}
+                {onDuplicateRequest && (
+                  <MoreItem anchor="peDuplicate" icon={<Files size={13} />} label="创建副本"
+                    onClick={() => { const rel = pageRel(); setShowMoreMenu(false); if (rel) onDuplicateRequest(rel) }} />
+                )}
+                {onMoveRequest && (
+                  <MoreItem anchor="peMove" icon={<FolderInput size={13} />} label="将文件移动到…"
+                    onClick={() => { setShowFileInfo(false); setShowRename(false); setShowMove(true); setShowMoreMenu(false) }} />
+                )}
+                {onLocateRequest && (
+                  <MoreItem anchor="peLocate" icon={<Crosshair size={13} />} label="在文件列表中显示"
+                    onClick={() => { const rel = pageRel(); setShowMoreMenu(false); if (rel) onLocateRequest(rel) }} />
+                )}
+                {onSplitRequest && (
+                  <MoreSplitGroup disabled={splitDisabled}
+                    onPick={(o) => { onSplitRequest(o); setShowMoreMenu(false) }} />
+                )}
                 {/* 「查看」组（批 3 拍板 D10）：⋮ 是「非 md 全部动作」的落点，与批 2 的口径一致；
                     也给纯键盘用户一个入口。★ 只在图片真渲染出来时出现（见 moreMenuItemCount）。 */}
                 {imgReady && (
@@ -1566,22 +1709,22 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     <button data-wb="imgMenuFit" onClick={() => { iv.fit('fit'); setShowMoreMenu(false) }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                       <Maximize size={13} />适应窗口
-                      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">0</span>
+                      <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">0</span>
                     </button>
                     <button data-wb="imgMenuActual" onClick={() => { iv.fit('actual'); setShowMoreMenu(false) }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                       <Square size={12} />实际大小
-                      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">1</span>
+                      <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">1</span>
                     </button>
                     <button data-wb="imgMenuRotateL" onClick={() => { iv.rotate(-90); setShowMoreMenu(false) }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                       <RotateCcw size={13} />向左旋转
-                      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">[</span>
+                      <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">[</span>
                     </button>
                     <button data-wb="imgMenuRotateR" onClick={() => { iv.rotate(90); setShowMoreMenu(false) }}
                       className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                       <RotateCw size={13} />向右旋转
-                      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">]</span>
+                      <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">]</span>
                     </button>
                   </>
                 )}
@@ -1589,14 +1732,66 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   <button onClick={() => { onRequestReading(); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <BookOpen size={13} />沉浸阅读
-                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">Ctrl+Shift+R</span>
+                    <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">Ctrl+Shift+R</span>
                   </button>
+                )}
+                {/* 删除（2026-10-13 批 1b）：非 md 的 ⋮ 此前**没有**删除入口（只有 md 有），
+                    而 md 那条在仓库模式下又是假按钮 —— 现在两边同一个落点：模块层
+                    handleTreeDelete（系统回收站 + 危险确认 + 连带关页签）。 */}
+                {onDeleteRequest && (
+                  <>
+                    <MoreSep />
+                    <MoreItem anchor="peDelete" danger icon={<Trash2 size={13} />} label="删除文件"
+                      onClick={() => { setShowMoreMenu(false); requestDelete() }} />
+                  </>
                 )}
               </>
             )}
           />
+          {/* 「重命名」弹层（2026-10-13 批 1b）：输入框跟着 ⋮ 走，**不复用树内联改名** ——
+              树可能收起 / 侧栏停在「大纲」页 / 整个左栏关着，那时内联输入行根本不渲染，
+              表象就是「点了没反应，只能再去左栏找」。Enter 提交、Esc 取消（外点由上面的 effect 收）。 */}
+          {showRename && (
+            <div data-wb="peRenameCard" className="kb-pop absolute right-2 top-full z-50 mt-1 w-72 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
+              <div className="mb-2 text-[11px] text-[var(--text-secondary)]">重命名（含扩展名）</div>
+              <input
+                data-wb="peRenameInput"
+                autoFocus
+                value={renameDraft}
+                onChange={(e) => setRenameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); submitRename() }
+                  else if (e.key === 'Escape') { e.preventDefault(); setShowRename(false) }
+                }}
+                className="w-full rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2 py-1 text-[12px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+              />
+              <div className="mt-2.5 flex justify-end gap-2">
+                <button onClick={() => setShowRename(false)}
+                  className="rounded-md border border-[var(--border-color)] px-2.5 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">
+                  取消
+                </button>
+                <button onClick={submitRename}
+                  className="rounded-md border border-[var(--accent)] px-2.5 py-1 text-[11.5px] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10">
+                  确定
+                </button>
+              </div>
+            </div>
+          )}
+          {/* 「将文件移动到…」弹层：内容直接用共享 DirPicker（它只管内容与键盘，定位交给这里）。
+              rootId 传本组件同步持有的那个 —— 它可能还没解析出来，DirPicker 会自己兜底查当前仓库。 */}
+          {showMove && page?.path && (
+            <div data-wb="peMoveCard" className="kb-pop absolute right-2 top-full z-50 mt-1 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 shadow-xl">
+              <DirPicker
+                rootId={vaultRootId ?? undefined}
+                sourceRel={page.path}
+                onPick={(dst) => requestMove(dst)}
+                onCancel={() => setShowMove(false)}
+              />
+            </div>
+          )}
           {/* 「文件信息」小卡（批 1）：批 2 从胶囊搬到这里 —— 挂顶栏自己的 relative 容器，
-              与 ⋮ 同锚点（⋮ 在顶栏右端，卡片贴右缘即落在它正下方）。 */}
+              与 ⋮ 同锚点（⋮ 在顶栏右端，卡片贴右缘即落在它正下方）。
+              批 1b：它与上面两个新弹层共用这个槽位 ⇒ 打开任一个前先把另两个关掉（见 openRename / peMove 分支）。 */}
           {showFileInfo && (
             <div data-wb="peFileInfoCard" className="kb-pop absolute right-2 top-full z-50 mt-1 w-64 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
               <FileInfoRows path={page?.path} sizeBytes={page?.sizeBytes} updatedAt={page?.updatedAt} />

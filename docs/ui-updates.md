@@ -1883,6 +1883,39 @@ absolute min-w-[160px] w-max max-w-[280px]   ← width: max-content，强制等�
 **范围与未做（如实记）**：这一批**没有**重排既有条目、没有改既有条目的叫法（那要连带重写三份契约，留批 1b 收尾时一并做）；⋮ 里已有的 9 项「没有真源 id」的问题也还没解决（方案 §3.5 的菜单↔真源双向登记属结构批）。批 1b = 模块层管道六条（重命名 / 将文件移动到… / 创建副本 / 在文件列表中定位 / 删除（含修掉 `vaultMode` 下「删除页面」只弹提示的假按钮）/ 左右·上下分屏）+ 文件树菜单补「导入文件… / 导入文件夹…」（两个处理函数都已存在，纯接线）。
 
 
+## 52. 页面 ⋮ 菜单能力补齐 · 批 1b：模块层管道六条 + 导入进可达菜单（2026-10-13）
+
+**来源**：同 §51（方案 `docs/page-menu-capability-plan.md`）。这一批做**会改仓库相对路径或动页签**的那几条 —— 实现必须留在模块层，`PageEditor` 只发请求。
+
+**① 六个可选 prop（PageEditor ← 模块层）**：`onRenameRequest` / `onMoveRequest` / `onDuplicateRequest` / `onLocateRequest` / `onDeleteRequest` / `onSplitRequest`（+ `splitDisabled`）。两个 `PageEditor` 调用点（主栏 / 副栏）都传 —— **漏传 = 那个栏位的 ⋮ 直接少几项，且零报错**，所以契约同时锁住「门控在位」与「两处都传」。副栏**刻意不给分屏**（分屏是主栏页签组的事）。
+
+**② 复用而不是新造**（每条都在契约里锁住）：重命名 → `handleTreeRename`（含分类通道、撤销栈、刷树 + 刷 allPages + 页签改名）；移动 → `handleTreeMove`；删除 → `handleTreeDelete`；副本 → `duplicateWorkspaceFile`；导入 → `handleDialogImport` / `handleImportFolder`。模块层只新增三个「按 relPath」的小落点（`handleDeleteByRel` / `handleDuplicateByRel` / `handleLocateInTree`）。
+
+**★ ③ 顺手修掉一个真缺陷：「删除页面」在仓库模式下是假按钮。** `handleDelete`（`PageEditor.tsx`）第一句就是 `if (vaultMode) { toast('仓库文件模式：删除请在编辑器模块操作'); return }`，而知识库模块**恒传** `vaultMode={true}`（`knowledge/index.tsx`）⇒ 这条菜单项**点了只弹一句提示、什么都不删**。现在改成：先走 `onDeleteRequest`（模块层 `handleTreeDelete`：系统回收站 + 危险确认 + 连带关页签），**没接才回落**原路。非 md 的 ⋮ 也补了「删除文件」（此前非 md 根本没有删除入口）。
+
+**④ 两个弹层挂在 ⋮ 正下方那个槽位**（与「文件信息」小卡同一个 `absolute right-2 top-full kb-pop`）：重命名的输入框、`DirPicker` 的目录选择。三者**同一时刻只开一个**（打开前先关另两个），外点 / `Esc` 关闭，换页复位。
+- **重命名的输入框刻意不复用树内联改名**：树可能收起、侧栏停在大纲页、整个左栏关着 —— 那时内联输入行根本不渲染，表象就是「点了没反应，只能再去左栏找」。
+- 移动复用共享 `DirPicker`（批 4 做的那个），`rootId` 拿不到时由它自己兜底查当前仓库。
+
+**⑤ 「在文件列表中显示当前文件」**：切到文件视图 + 展开**全部祖先目录** + 按行锚点 `data-wb-tree-path` 滚进视野（`scrollIntoView({ block: 'center', behavior: 'smooth' })`）。**两帧后才滚** —— 目录展开是异步的（子目录懒加载 + setState），当帧行还没渲染出来；找不到就给一句提示（可能是 `.ignore` 规则收起），**不静默**。树组件本身（`VaultTree`）一个字没改，只驱动宿主的 `expandedDirs`。
+
+**⑥ 「导入文件… / 导入文件夹…」进文件树的目录 / 空白组**：两个处理函数（`handleDialogImport` / `handleImportFolder`）**本来就在**（拖拽那条通道一直在用），此前菜单项只躺在**两套没有任何渲染入口**的旧右键菜单里（`ChapterPanel` / `NotebookList`，全仓零实例）⇒ 用户根本摸不到。放在目录 / 空白组而不是页面 ⋮：导入要指定落在哪个目录，语义上属「在这建东西」。
+
+**⑦ 键帽统一（方案 §3.2 的收尾）**：⋮ 里**既有**的 8 处键位提示（沉浸阅读 `Ctrl+Shift+R` ×2、`Ctrl+Alt+F`、`Ctrl+Shift+I`、图片组的 `0 / 1 / [ / ]`）从裸 `text-[10px] text-[var(--text-secondary)]` 换成 `.kb-kbd` 键帽 —— 此前同一信息在命令面板是键帽、在菜单是裸文本。刻意不动的两处：文件格式的当前档位标签、刷题题数 —— 那是**标签**不是键位。
+
+**⑧ 主题契约的判据随之精确化**：`verify-keycap-contrast.mjs` 原先要求「这些文件里 `--text-disabled` 的处数 = 占位符前缀的处数」。批 1b 起 ⋮ 多了一处**真禁用态**（分屏已满时置灰）—— 禁用态用禁用色是**对的**。判据改成「占位符 + 真禁用态（写法固定为 `cursor-default text-[var(--text-disabled)]`）+ 违规 = 0」，新增的第三档必须逐字匹配，别种形状混进来照样红。
+
+**★ 锚漂移 16 处，并且撞出工具自身的洞**：`PageEditor.tsx` +142 行、`knowledge/index.tsx` +45 行 ⇒ 16 个锚漂移。`tmp/relocate-anchors.mjs` 跑完**没写回**：`kb-back` / `kb-fwd` **共用同一串旧值**（同指一行），第一条 replace 之后第二条再也找不到自己的旧串 ⇒ 打一行「未在真源里找到锚串」就 `process.exit(1)`，**整批都不写**（前面已改的也白改）。修法：同一串只处理一次（`done` 集合）。修完 66/66、0 人工。**另有一处命令行的坑**：`node x.mjs | Select-Object -Last N` 会在脚本写盘前掐掉管道（broken pipe），表现是「脚本像跑了、文件没变」—— 收集脚本输出请先赋给变量。真源里两处散文行号（`kb-back` 的 note、`kb-ai-inline` 的 note）同步更新，其中前者改成**不写行号**（写一次漂一次）。
+
+**新增契约 `.AGENT/scripts/page-menu/verify-page-menu.mjs`**（8 组、含反例）：六个 prop 的声明与两处传递 · 复用而非新造（5 条匹配）· 删除的优先级与「旧提示仍在」的反例 · 重命名弹层（Enter/Esc、只开一个、换页复位、种子是文件名）· `DirPicker` · 定位（切视图 / 展开祖先 / 行锚点 / 两帧 / 找不到给提示）· 分屏（共用段 + 门控 + 与页签右键同源）· 导入两条（复用既有 handler + 「可达的那份只有一处」）· 门控与两条反例。
+
+**AI 手册同步**：`resources/help/工作台左栏与文件树模式.md` 的 ⋮ 那一行重写（md 与非 md 共有的文件级动作 + 各自多的那些）。★ 该篇正文**本来就在 4000 上限**，加内容后 4046 → 删掉「已退役的悬浮胶囊」那句历史说明、收紧「自动刷新」两段，回到 4000 以内（结构警告 16，与基线一致）。
+
+**验收**：tsc node 0 / web 0 · 真源契约 61 条 / **66 锚全绿**（锚 66/66、0 人工）· 新契约 `verify-page-menu` PASS · note-surface **205/205** · nonmd-topbar **54/54** · note-topbar **58/58** · content-routing **79/79** · image-viewer **124/124** · workbench-shell **248/248** · notes-inline-edit **67/67** · 主题对比度契约 PASS · 手册检索 **109/109**（结构警告 16，与基线一致）。
+
+**未做（如实记）**：① 既有条目的**叫法统一与重排**（页面→视图、把非 md 那四项挪进系统组、「在系统中打开」与文件树的「使用默认应用打开」并成一句）留到后续收尾；② **菜单项 ↔ 真源双向登记**没做（⋮ 里既有 9 项仍无 id）；③ 两套**死右键菜单**（`ChapterPanel` / `NotebookList`）仍在树里 —— 本次只把「导入」的能力接到可达入口，旧组件没删（它们还 import 着，删要单独确认影响面）；④ 批 2~4 的三条新写（内联反链 / 导出 PDF / 增加笔记属性）未开始；⑤ **真机目测仍缺**（沙箱起不来 Chromium），本批结论来自代码路径 + 契约断言。
+
+
 
 
 
