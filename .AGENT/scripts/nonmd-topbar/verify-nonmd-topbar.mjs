@@ -76,8 +76,14 @@ ok(/showInline=\{isMdNote && !preview && writingMode === 'source'\}/.test(PAGE),
 ok(/subtitle=\{[\s\S]{0,320}isPdfFile && pdfPages > 0 \? `\$\{pdfPages\} 页`[\s\S]{0,24}: undefined/.test(PAGE),
   'B7 PDF 页数上移顶栏中段（批 3：同一处先给图片像素尺寸，PDF 页数退成第二档）')
 ok(/moreMenu=\{isMdNote \? \(/.test(PAGE), 'B8 ⋮ 菜单按 isMdNote 分流（★ 2026-10-13 起 md 那一支**已有增补**：「查看源码 / 看渲染」，见 notes-surface 契约 C8e~C8m；本断言只锁分流本身）')
+/**
+ * 锚点写法两态（2026-10-13 页面菜单能力补齐）：⋮ 的条目原语 `MoreItem` / `MoreSub` 把锚点收成
+ * `anchor` 属性（渲染到 DOM 里仍是 `data-wb="…"`，所以**运行时选择器与两份探针一字不改**，
+ * 变的只有源码文本形状）。两种形状都算「锚点在」，删掉则两者皆无 ⇒ 断言不空转。
+ */
+const pageHasAnchor = (a) => PAGE.includes(`data-wb="${a}"`) || PAGE.includes(`anchor="${a}"`)
 for (const a of ['peHtmlSource', 'peFileInfo', 'peOpenInSystem', 'peRevealInFolder', 'peCopyRelPath']) {
-  ok(PAGE.includes(`data-wb="${a}"`), `B9 批 1 锚点原样搬进顶栏：${a}`)
+  ok(pageHasAnchor(a), `B9 批 1 锚点原样搬进顶栏：${a}`)
 }
 ok(!/data-wb="peMore"/.test(PAGE) && !/data-wb="peMore"/.test(TOP),
   'B10 负向：胶囊那颗 ⋮ 的锚点 peMore 已删（顶栏的 ⋮ 用 noteTopMore）')

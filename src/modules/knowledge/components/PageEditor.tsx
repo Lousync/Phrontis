@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
-import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, type ReactNode } from 'react'
+import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
@@ -52,6 +52,61 @@ import { bindEditorTheme } from '../../../lib/editorTheme'
 import '../../../lib/monaco-setup'
 // PDF 阅读器（Phase 2 批次 2）：共享层组件内嵌知识库——编辑器退役后阅读承载移到本模块
 const PdfReaderView = lazy(() => import('../../../components/shared/pdf/PdfReaderView').then((m) => ({ default: m.PdfReaderView })))
+
+/* ===== ⋮ 菜单的条目原语（2026-10-13「能力补齐」时抽出）=====
+   为什么抽：⋮ 里每一项原本都是 5 行样板（图标 + 文案 + 可选键位 + 悬停态 + 危险色），
+   本轮要往两个分支各补好几条，照原样复制就是几十行重复代码；抽出来后新增一条只写一行，
+   **样式与键帽也只剩一处**（改一次两处一起变）。
+
+   ★ 键位提示走 `.kb-kbd` 键帽（2026-10-13 F-2 统一的那套令牌）：此前 ⋮ 里是裸
+     `text-[10px] text-[var(--text-secondary)]`，与命令面板的键帽是两种视觉、两种对比度。
+
+   ★ 二级菜单（复制路径 ▸）**往左开**：⋮ 本身贴在窗口右缘，往右必出屏 —— 与同文件已有的
+     「文件格式 ▸」（`right-[calc(100%+4px)]`）同一口径。 */
+function MoreGroup({ title }: { title: string }) {
+  return <div className="px-3 pb-1 pt-1.5 text-[10px] text-[var(--text-muted)]">{title}</div>
+}
+function MoreSep() {
+  return <div className="my-1 border-t border-[var(--border-color)]" />
+}
+function MoreItem({ anchor, icon, label, kbd, danger, onClick }: {
+  anchor?: string; icon: ReactNode; label: string; kbd?: string; danger?: boolean; onClick: () => void
+}) {
+  return (
+    <button data-wb={anchor} onClick={onClick}
+      className={`w-full flex items-center gap-2 px-3 py-1.5 text-[12px] transition-colors ${danger
+        ? 'text-[var(--text-secondary)] hover:bg-[var(--danger)]/10 hover:text-[var(--danger)]'
+        : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+      {icon}
+      {label}
+      {kbd && <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">{kbd}</span>}
+    </button>
+  )
+}
+function MoreSub({ anchor, icon, label, items }: {
+  anchor?: string; icon: ReactNode; label: string; items: Array<{ label: string; onSelect: () => void }>
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative" onMouseLeave={() => setOpen(false)}>
+      <button data-wb={anchor} onMouseEnter={() => setOpen(true)} onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+        {icon}{label}
+        <ChevronRight size={12} className="ml-auto shrink-0 opacity-60" />
+      </button>
+      {open && (
+        <div className="kb-pop absolute right-[calc(100%+4px)] top-[-5px] z-50 w-40 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-xl">
+          {items.map(it => (
+            <button key={it.label} onClick={it.onSelect}
+              className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
 interface Props {
   pageId: string
@@ -290,17 +345,34 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     if (!res?.ok) showToast({ type: 'error', message: res?.error || '打开失败' })
   }, [])
 
-  /** 复制仓库相对路径（批 1）：走主进程剪贴板通道（`src/lib/ipc.ts` 的 copyText）——
-   *  渲染层不直连 `navigator.clipboard`，与 noteActions 的剪贴板动作同一口径。 */
-  const handleCopyRelPath = useCallback(async () => {
+  /** 复制路径（2026-10-13 能力补齐）：一档扩成**二级两档** —— 「仓库相对路径」直接复制，
+   *  「完整路径」取当前仓库根拼前缀。与模块层 `copyPathText`（knowledge/index.tsx）同一口径、
+   *  同一个主进程剪贴板通道（渲染层不直连 `navigator.clipboard`）。 */
+  const handleCopyPath = useCallback(async (mode: 'rel' | 'abs') => {
     const rel = pageRef.current?.path
     if (!rel) { showToast({ type: 'warning', message: '该条目没有关联的仓库文件' }); return }
     try {
+      let text = rel
+      if (mode === 'abs') {
+        const cur = await workspaceGetCurrent()
+        if (!cur?.path) { showToast({ type: 'error', message: '未打开仓库' }); return }
+        text = `${cur.path.replace(/\\/g, '/')}/${rel}`
+      }
       const { copyText } = await import('../../../lib/ipc')
-      const ok = await copyText(rel)
-      if (ok) showToast({ type: 'success', message: '已复制相对路径', detail: rel })
+      const ok = await copyText(text)
+      if (ok) showToast({ type: 'success', message: mode === 'abs' ? '已复制完整路径' : '已复制相对路径', detail: text })
       else showToast({ type: 'error', message: '复制失败' })
     } catch { showToast({ type: 'error', message: '复制失败' }) }
+  }, [])
+
+  /** 查找 / 替换（2026-10-13 能力补齐）：直接跑 Monaco 的两个内置 action，不另写一套查找 UI。
+   *  ★ 即时渲染档（CM6）没有 Monaco（`getEditor()` 返回 null）⇒ 菜单里**不出现**这两项
+   *    （见 md 分支的 `canFindReplace` 门控），与 `ed-find` 只在源码档生效的现状一致。 */
+  const runEditorAction = useCallback((action: 'actions.find' | 'editor.action.startFindReplaceAction') => {
+    const ed = paneRef.current?.getEditor()
+    if (!ed) { showToast({ type: 'warning', message: '查找 / 替换只对源码档可用' }); return }
+    ed.focus()
+    void ed.getAction(action)?.run()
   }, [])
 
   const isCodeFile = fileType !== '' && fileType !== 'md' && fileType !== 'txt' && fileType !== 'pdf' && fileType !== 'xmind'
@@ -466,6 +538,10 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   /** ⋮ 那条菜单项显示哪个动作：按**点了会看到什么**给，不按当前档位。
    *  阅读态（渲染页）与即时渲染档都算「正在看渲染」⇒ 给「查看源码」；只有源码档（编辑态）给「看渲染」。 */
   const mdSourceItemShowsSource = preview || !effectiveSource
+  /** 查找 / 替换的可达性（2026-10-13 能力补齐）：Monaco 只在「源码档 + 编辑态」看得见 ——
+   *  阅读态下写作面是 `display:none` 保活（`paneRef` 拿得到实例但看不见），即时渲染档（CM6）
+   *  压根没有 Monaco。两种情况跑 action 都是空动作 ⇒ 菜单里直接不出现（不做假按钮）。 */
+  const canFindReplace = !preview && writingMode === 'source'
 
   useEffect(() => { contentRef.current = content }, [content])
   useEffect(() => { pageIdRef.current = pageId }, [pageId])
@@ -1232,8 +1308,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
 
   /** ⋮ 里的项数（批 2 拍板②「空则隐藏 ⋮」的判据）：
    *  md 恒有「沉浸阅读」（`onRequestReading` 由模块恒传）⇒ ≥1；
-   *  非 md 恒有「文件信息 / 在系统中打开 / 在文件夹中显示 / 复制相对路径」四项，html 多一项「看源码」、
-   *  txt / html 多一项「沉浸阅读」。
+   *  非 md 恒有「文件信息 / 在系统中打开 / 在文件夹中显示 / 复制路径 ▸」四项，html 多一项「看源码」、
+   *  txt / html 多一项「沉浸阅读」。（2026-10-13 能力补齐：第四项由「复制相对路径」升级为二级两档，
+   *  仍是**一项**，故下面的 4 不变。）
    *  ★ 现状下两边都恒 > 0 ⇒ 这条守卫是**潜伏**的（见 docs/nonmd-topbar-design.md §三·②）：
    *  拍板保留它，是为了将来收窄 ⋮ 项时自动生效，而不是等那时才发现按钮点了没反应。 */
   const moreMenuItemCount = isMdNote
@@ -1402,11 +1479,38 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   )}
                 </div>
 
-                <div className="my-1 border-t border-[var(--border-color)]" />
-                <button onClick={() => { setShowMoreMenu(false); handleDelete() }}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--danger)]/10 hover:text-[var(--danger)] transition-colors">
-                  <Trash2 size={13} />删除页面
-                </button>
+                {/* 编辑组（2026-10-13 能力补齐）：查找 / 替换原先只有快捷键（Ctrl+F / Ctrl+H），
+                    菜单里没有入口 —— 键盘用户之外的路径等于不存在。★ 只在「源码档 + 编辑态」出现：
+                    阅读态下写作面是 display:none 保活、即时渲染档没有 Monaco，给了就是假按钮。 */}
+                {canFindReplace && (
+                  <>
+                    <MoreSep />
+                    <MoreGroup title="编辑" />
+                    <MoreItem anchor="peFind" icon={<Search size={13} />} label="查找…" kbd="Ctrl+F"
+                      onClick={() => { runEditorAction('actions.find'); setShowMoreMenu(false) }} />
+                    <MoreItem anchor="peReplace" icon={<Replace size={13} />} label="替换…" kbd="Ctrl+H"
+                      onClick={() => { runEditorAction('editor.action.startFindReplaceAction'); setShowMoreMenu(false) }} />
+                  </>
+                )}
+
+                {/* 文件组（2026-10-13 能力补齐）：md 页此前**没有**任何路径 / 系统类入口，
+                    与文件树右键（使用默认应用打开 / 在系统资源管理器中显示 / 复制路径 ▸）不对齐。
+                    复制路径给二级两档（相对 / 完整），与模块层 copyPathText 同一口径。 */}
+                <MoreSep />
+                <MoreGroup title="文件" />
+                <MoreSub anchor="peCopyPath" icon={<Copy size={13} />} label="复制路径" items={[
+                  { label: '仓库相对路径', onSelect: () => { void handleCopyPath('rel'); setShowMoreMenu(false) } },
+                  { label: '完整路径', onSelect: () => { void handleCopyPath('abs'); setShowMoreMenu(false) } },
+                ]} />
+                <MoreGroup title="系统" />
+                <MoreItem anchor="peSystemOpen" icon={<ExternalLink size={13} />} label="在系统中打开"
+                  onClick={() => { void handleArchiveOpenInSystem(false); setShowMoreMenu(false) }} />
+                <MoreItem anchor="peReveal" icon={<FolderSearch size={13} />} label="在文件夹中显示"
+                  onClick={() => { void handleArchiveOpenInSystem(true); setShowMoreMenu(false) }} />
+
+                <MoreSep />
+                <MoreItem danger icon={<Trash2 size={13} />} label="删除页面"
+                  onClick={() => { setShowMoreMenu(false); handleDelete() }} />
               </>
             ) : (
               /* 非 md 的 ⋮（批 2）：批 1 那个「文件」组**原样搬进来** —— 五个 data-wb 锚点一字不改
@@ -1445,10 +1549,14 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                   <FolderSearch size={13} />在文件夹中显示
                 </button>
-                <button data-wb="peCopyRelPath" onClick={() => { void handleCopyRelPath(); setShowMoreMenu(false) }}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                  <Copy size={13} />复制相对路径
-                </button>
+                {/* 复制路径（2026-10-13 能力补齐）：原先只有「相对」一档，而文件树右键早就是
+                    「相对 / 完整」二级两档 —— 同一件事两个入口两种能力，这里统一成二级两档。
+                    ★ 锚点 `peCopyRelPath` 保留不改名（内容路由契约 D1 与两条探针都按它找），
+                      标签从「复制相对路径」改成「复制路径」。 */}
+                <MoreSub anchor="peCopyRelPath" icon={<Copy size={13} />} label="复制路径" items={[
+                  { label: '仓库相对路径', onSelect: () => { void handleCopyPath('rel'); setShowMoreMenu(false) } },
+                  { label: '完整路径', onSelect: () => { void handleCopyPath('abs'); setShowMoreMenu(false) } },
+                ]} />
                 {/* 「查看」组（批 3 拍板 D10）：⋮ 是「非 md 全部动作」的落点，与批 2 的口径一致；
                     也给纯键盘用户一个入口。★ 只在图片真渲染出来时出现（见 moreMenuItemCount）。 */}
                 {imgReady && (

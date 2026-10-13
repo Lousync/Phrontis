@@ -196,13 +196,47 @@ ok(/if \(\/\\\.md\$\/i\.test\(rel\)\)/.test(SRC_PAGE),
 
 // ===================== D 组：⋮ 的「文件」组与文件信息 =====================
 
+/**
+ * 锚点写法两态（2026-10-13 页面菜单能力补齐）：⋮ 的条目原语 `MoreItem` / `MoreSub` 把锚点收成
+ * `anchor` 属性（渲染到 DOM 仍是 `data-wb="…"` ⇒ 运行时选择器与两份探针一字不改，
+ * 变的是源码文本形状）。两种写法都算「锚点在」，删掉则两者皆无 ⇒ 断言不空转。
+ */
+const pageHasAnchor = (a) => SRC_PAGE.includes(`data-wb="${a}"`) || SRC_PAGE.includes(`anchor="${a}"`)
 for (const [anchor, label] of [
   ['peFileInfo', '文件信息'],
   ['peOpenInSystem', '在系统中打开'],
   ['peRevealInFolder', '在文件夹中显示'],
-  ['peCopyRelPath', '复制相对路径'],
+  // 2026-10-13：这一项由「复制相对路径」（一档）升级为「复制路径 ▸」（相对 / 完整 两档）——
+  // 与文件树右键同能力。锚点名保留，标签改了；运行时的 peCopyRelPath 选择器仍然有效。
+  ['peCopyRelPath', '复制路径 ▸'],
 ]) {
-  ok(SRC_PAGE.includes(`data-wb="${anchor}"`), `D1 ⋮ 有「${label}」项（锚点 ${anchor}）`)
+  ok(pageHasAnchor(anchor), `D1 ⋮ 有「${label}」项（锚点 ${anchor}）`)
+}
+
+// ---- D5：2026-10-13「页面菜单能力补齐」批 1a —— md 分支的路径 / 系统 / 编辑入口 ----
+// 背景：md 页的 ⋮ 此前**一个文件级入口都没有**（只有收藏 / 关联 / 沉浸 / 刷题 / 源码档 / 脚注 / 图片 / 格式），
+// 而它的非 md 兄弟与文件树右键都有 → 同一件事两个入口两种能力。这一批把 md 补齐到同一水平。
+for (const [anchor, label] of [
+  ['peCopyPath', '复制路径 ▸'],
+  ['peSystemOpen', '在系统中打开'],
+  ['peReveal', '在文件夹中显示'],
+  ['peFind', '查找…'],
+  ['peReplace', '替换…'],
+]) {
+  ok(pageHasAnchor(anchor), `D5 md 分支有「${label}」（锚点 ${anchor}）`)
+}
+ok(/const canFindReplace = !preview && writingMode === 'source'/.test(SRC_PAGE) && /\{canFindReplace && \(/.test(SRC_PAGE),
+  'D5b ★ 查找 / 替换只在「源码档 + 编辑态」出现（阅读态下写作面是 display:none 保活、即时渲染档没有 Monaco ⇒ 给了就是假按钮）')
+ok(/handleCopyPath\('rel'\)/.test(SRC_PAGE) && /handleCopyPath\('abs'\)/.test(SRC_PAGE) && /copyPathText/.test(SRC_PAGE) === false,
+  'D5c 复制路径两档都在（相对直接复制 / 完整拼仓库根），且不再沿用模块层那个只服务树的名字')
+ok(/const ok = await copyText\(text\)/.test(SRC_PAGE) && !/navigator\.clipboard\.writeText/.test(SRC_PAGE),
+  'D5d 负向：路径复制走主进程 copyText，渲染层不直连 navigator.clipboard')
+ok(/<MoreSub anchor="peCopyRelPath"/.test(SRC_PAGE),
+  'D5e 非 md 的「复制路径」也升级成二级两档（此前只有「相对」一档）')
+{
+  // 反例（负向验证）：D5 的匹配器对**不存在的锚点**必须不认，否则上面五条是空转
+  const fake = 'peNoSuchAnchorXYZ'
+  ok(!pageHasAnchor(fake), 'D5f 反例：不存在的锚点匹配不到（证明 pageHasAnchor 不空转）')
 }
 ok(SRC_PAGE.includes('data-wb="peFileInfoCard"') && SRC_PAGE.includes('<FileInfoRows'),
   'D2 「文件信息」小卡用 FileInfoRows 渲染（与元信息卡同源）')
