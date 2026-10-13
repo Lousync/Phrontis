@@ -65,5 +65,15 @@ rem worktree instead of a hard-coded path (the previous version always
 rem cd'd into the main checkout).
 cd /d "%~dp0.."
 
+rem Always keep this window open when the app exits: the dev server
+rem can print its failure after the child is already gone, and a
+rem short-lived console is exactly how that error gets lost. The same
+rem output is written to logs\launch-last.log by start-desktop.js.
 "%NODE_EXE%" "scripts\start-desktop.js"
-if errorlevel 1 pause
+set "RC=%ERRORLEVEL%"
+echo.
+echo [launcher] start-desktop.js exited with code %RC%.
+echo [launcher] Full output: logs\launch-last.log
+echo [launcher] Press any key to close this window.
+pause >nul
+exit /b %RC%
