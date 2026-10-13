@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, type ReactNode } from 'react'
-import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace, Pencil, FolderInput, Files, Crosshair, PanelRight, PanelTop } from 'lucide-react'
+import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace, Pencil, FolderInput, Files, Crosshair, PanelRight, PanelTop, Tag } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
@@ -127,6 +127,11 @@ function MoreSplitGroup({ disabled, onPick }: { disabled: boolean; onPick: (o: '
   )
 }
 
+/* 「笔记属性」的 frontmatter 读改住在 `src/lib/fmProps.ts`（零依赖纯函数）——
+   放 lib 才能被契约脚本直接 import 做真值断言（这里是「会不会静默毁数据」的地方，
+   必须真跑而不是拿源码文本猜）。头注里写着核心纪律：**绝不重建整块前缀**。 */
+import { parseFmPropRows, applyFmPropRows, type FmPropRow } from '../../../lib/fmProps'
+
 interface Props {
   pageId: string
   categories: KnowledgeCategory[]
@@ -237,23 +242,26 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const [renameDraft, setRenameDraft] = useState('')
   /** 将文件移动到…：内容直接用共享 DirPicker（它只管内容与键盘，定位交给宿主） */
   const [showMove, setShowMove] = useState(false)
+  /** 笔记属性（2026-10-13 批 4）：编辑 frontmatter 的单行属性；只读项见 parseFmPropRows 的头注 */
+  const [showProps, setShowProps] = useState(false)
+  const [propRows, setPropRows] = useState<FmPropRow[]>([])
   useEffect(() => {
-    if (!showRename && !showMove) return
+    if (!showRename && !showMove && !showProps) return
     const onDown = (e: MouseEvent): void => {
       const t = e.target as HTMLElement | null
-      if (t?.closest?.('[data-wb="peRenameCard"],[data-wb="peRename"],[data-wb="peMoveCard"],[data-wb="peMove"]')) return
-      setShowRename(false); setShowMove(false)
+      if (t?.closest?.('[data-wb="peRenameCard"],[data-wb="peRename"],[data-wb="peMoveCard"],[data-wb="peMove"],[data-wb="pePropsCard"],[data-wb="peProps"]')) return
+      setShowRename(false); setShowMove(false); setShowProps(false)
     }
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') { setShowRename(false); setShowMove(false) } }
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') { setShowRename(false); setShowMove(false); setShowProps(false) } }
     window.addEventListener('mousedown', onDown, true)
     window.addEventListener('keydown', onKey, true)
     return () => {
       window.removeEventListener('mousedown', onDown, true)
       window.removeEventListener('keydown', onKey, true)
     }
-  }, [showRename, showMove])
+  }, [showRename, showMove, showProps])
   // 换页复位：弹层不该跨页留着（与上面那批档位复位同口径）
-  useEffect(() => { setShowRename(false); setShowMove(false) }, [pageId])
+  useEffect(() => { setShowRename(false); setShowMove(false); setShowProps(false) }, [pageId])
   // 知识库以阅读优先:md/txt 页面打开即预览(右上角眼睛或 Ctrl+E / Ctrl+/ 切回编辑;vault 模式就地保存)
   const [preview, setPreview] = useState(true)
   // startInEdit 的 ref 镜像：loadPage（useCallback 依赖不含该 prop）在 effect 里读最新值
@@ -1270,9 +1278,24 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const pageRel = () => pageRef.current?.path ?? ''
   const openRename = () => {
     setRenameDraft(pageRel().split('/').pop() ?? '')
-    setShowFileInfo(false); setShowMove(false); setShowRename(true)
+    setShowFileInfo(false); setShowMove(false); setShowProps(false); setShowRename(true)
     setShowMoreMenu(false)
   }
+  /** 笔记属性（批 4）：打开时从前缀现读一份副本做 draft（改坏了关掉即可，不碰磁盘） */
+  const openProps = () => {
+    setPropRows(parseFmPropRows(vaultPrefixRef.current))
+    setShowFileInfo(false); setShowRename(false); setShowMove(false); setShowProps(true)
+    setShowMoreMenu(false)
+  }
+  /** 保存属性：外科手术写回前缀 → 立刻落盘（与 Ctrl+S 同一条 doSave；不动正文、不经过缓冲区） */
+  const saveProps = () => {
+    const next = applyFmPropRows(vaultPrefixRef.current, propRows)
+    vaultPrefixRef.current = next
+    setShowProps(false)
+    void doSave(titleRef.current, contentRef.current).then(() => { setSaving(false); onClearDirty?.() })
+  }
+  const setPropAt = (i: number, patch: Partial<FmPropRow>) =>
+    setPropRows(rows => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
   const submitRename = () => {
     const rel = pageRel()
     const next = renameDraft.trim()
@@ -1630,7 +1653,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 )}
                 {onMoveRequest && (
                   <MoreItem anchor="peMove" icon={<FolderInput size={13} />} label="将文件移动到…"
-                    onClick={() => { setShowFileInfo(false); setShowRename(false); setShowMove(true); setShowMoreMenu(false) }} />
+                    onClick={() => { setShowFileInfo(false); setShowRename(false); setShowProps(false); setShowMove(true); setShowMoreMenu(false) }} />
                 )}
                 {onLocateRequest && (
                   <MoreItem anchor="peLocate" icon={<Crosshair size={13} />} label="在文件列表中显示"
@@ -1640,6 +1663,11 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   { label: '仓库相对路径', onSelect: () => { void handleCopyPath('rel'); setShowMoreMenu(false) } },
                   { label: '完整路径', onSelect: () => { void handleCopyPath('abs'); setShowMoreMenu(false) } },
                 ]} />
+                {/* 笔记属性（2026-10-13 批 4）：frontmatter 的可视化编辑。此前只能切源码档改，
+                    而源码档里 frontmatter 与正文混在一起，改一个 tag 得先认得出哪几行是元数据。
+                    ★ 只认**单行** `key: value`（值跨行的只读），见 parseFmPropRows 头注：绝不为好看
+                      去重建整块前缀 —— 那会把 YAML 列表压平 = 静默毁数据。 */}
+                <MoreItem anchor="peProps" icon={<Tag size={13} />} label="笔记属性…" onClick={openProps} />
                 <MoreGroup title="系统" />
                 <MoreItem anchor="peSystemOpen" icon={<ExternalLink size={13} />} label="在系统中打开"
                   onClick={() => { void handleArchiveOpenInSystem(false); setShowMoreMenu(false) }} />
@@ -1678,7 +1706,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     {svgSource ? '看图片' : '看源码'}
                   </button>
                 )}
-                <button data-wb="peFileInfo" onClick={() => { setShowFileInfo(true); setShowMoreMenu(false) }}
+                <button data-wb="peFileInfo" onClick={() => { setShowRename(false); setShowMove(false); setShowProps(false); setShowFileInfo(true); setShowMoreMenu(false) }}
                   className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                   <Info size={13} />文件信息
                 </button>
@@ -1709,7 +1737,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 )}
                 {onMoveRequest && (
                   <MoreItem anchor="peMove" icon={<FolderInput size={13} />} label="将文件移动到…"
-                    onClick={() => { setShowFileInfo(false); setShowRename(false); setShowMove(true); setShowMoreMenu(false) }} />
+                    onClick={() => { setShowFileInfo(false); setShowRename(false); setShowProps(false); setShowMove(true); setShowMoreMenu(false) }} />
                 )}
                 {onLocateRequest && (
                   <MoreItem anchor="peLocate" icon={<Crosshair size={13} />} label="在文件列表中显示"
@@ -1806,6 +1834,55 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 onPick={(dst) => requestMove(dst)}
                 onCancel={() => setShowMove(false)}
               />
+            </div>
+          )}
+          {/* 「笔记属性」弹层（批 4）：与上面两个弹层同一个槽位。可编辑的只有**单行** `key: value`；
+              值跨行的（YAML 列表 / 嵌套）与 `id` 一律只读 —— 见 parseFmPropRows 头注。
+              「保存属性」= 外科手术写回前缀 + 立刻 doSave（与 Ctrl+S 同一条路），不动正文。 */}
+          {showProps && (
+            <div data-wb="pePropsCard" className="kb-pop absolute right-2 top-full z-50 mt-1 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
+              <div className="mb-2 flex items-center gap-1.5">
+                <Tag size={12} className="text-[var(--text-muted)]" />
+                <span className="text-[11px] text-[var(--text-secondary)]">笔记属性（frontmatter）</span>
+              </div>
+              {propRows.length === 0 && (
+                <p className="mb-2 text-[11.5px] text-[var(--text-muted)]">这一页还没有属性，在下面加一条即可。</p>
+              )}
+              <div className="max-h-72 space-y-1.5 overflow-y-auto">
+                {propRows.map((r, i) => (
+                  <div key={`${r.key}-${i}`} className="flex items-center gap-1.5">
+                    <input data-wb="pePropKey" value={r.key} disabled={r.readonly} placeholder="键"
+                      onChange={e => setPropAt(i, { key: e.target.value })}
+                      className={`w-24 shrink-0 rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[11.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] ${r.readonly ? 'opacity-55' : ''}`} />
+                    <input data-wb="pePropValue" value={r.value} disabled={r.readonly} placeholder="值"
+                      onChange={e => setPropAt(i, { value: e.target.value })}
+                      className={`min-w-0 flex-1 rounded border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-1.5 py-0.5 text-[11.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] ${r.readonly ? 'opacity-55' : ''}`} />
+                    <button disabled={r.readonly}
+                      title={r.readonly ? '这一条只读（id 是身份，或值跨行）' : '删除这一条'}
+                      onClick={() => setPropRows(rows => rows.filter((_, idx) => idx !== i))}
+                      className={`shrink-0 rounded p-0.5 transition-colors ${r.readonly ? 'cursor-default text-[var(--text-disabled)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]'}`}>
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setPropRows(rows => [...rows, { key: '', value: '', line: -1 }])}
+                className="mt-2 flex w-full items-center justify-center gap-1 rounded-md border border-dashed border-[var(--border-color)] py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">
+                <Plus size={12} />新增属性
+              </button>
+              {propRows.some(r => r.readonly) && (
+                <p className="mt-2 text-[11px] leading-relaxed text-[var(--text-muted)]">灰掉的项不改：<code>id</code> 是这一页的身份；值跨行的（列表 / 嵌套）请到源码档改。</p>
+              )}
+              <div className="mt-2.5 flex justify-end gap-2">
+                <button onClick={() => setShowProps(false)}
+                  className="rounded-md border border-[var(--border-color)] px-2.5 py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">
+                  取消
+                </button>
+                <button data-wb="pePropsSave" onClick={saveProps}
+                  className="rounded-md border border-[var(--accent)] px-2.5 py-1 text-[11.5px] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10">
+                  保存属性
+                </button>
+              </div>
             </div>
           )}
           {/* 「文件信息」小卡（批 1）：批 2 从胶囊搬到这里 —— 挂顶栏自己的 relative 容器，

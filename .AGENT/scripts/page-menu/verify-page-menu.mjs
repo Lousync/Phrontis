@@ -22,6 +22,8 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { parseFmPropRows, applyFmPropRows } from '../../../src/lib/fmProps.ts'
+
 const ROOT = resolve(import.meta.dirname, '..', '..', '..')
 const read = (p) => readFileSync(resolve(ROOT, p), 'utf8').replace(/\r\n/g, '\n')
 
@@ -96,8 +98,19 @@ console.log('\n§3 重命名：弹层输入（不复用树内联改名）')
 check('有重命名弹层与输入框锚点', hasAnchor(PAGE, 'peRenameCard') && hasAnchor(PAGE, 'peRenameInput'))
 check('Enter 提交 / Esc 取消', /if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); submitRename\(\) \}/.test(PAGE)
   && /else if \(e\.key === 'Escape'\)/.test(PAGE))
-check('打开前先关掉另两个弹层（三者共用 ⋮ 下方那个槽位）',
-  /setShowFileInfo\(false\); setShowMove\(false\); setShowRename\(true\)/.test(PAGE))
+check('打开前先关掉另两个弹层（三者共用 ⋮ 下方那个槽位）', (() => {
+  /* 批 4 起共用槽位的是**四个**弹层（文件信息 / 重命名 / 移动到… / 笔记属性）⇒ 断言从「写死那一行」
+     改成**不变量**：每个 opener 附近都必须出现另外三个的 `setShowXxx(false)`。
+     少关一个的后果就是两层弹层叠在一起（长文里尤其明显）。 */
+  const all = ['setShowRename(false)', 'setShowMove(false)', 'setShowProps(false)', 'setShowFileInfo(false)']
+  for (const open of ['setShowRename(true)', 'setShowMove(true)', 'setShowProps(true)', 'setShowFileInfo(true)']) {
+    const at = PAGE.indexOf(open)
+    const seg = at >= 0 ? PAGE.slice(Math.max(0, at - 320), at + 40) : ''
+    const missing = all.filter(s => s !== open.replace('true', 'false') && !seg.includes(s))
+    if (at < 0 || missing.length) return false
+  }
+  return true
+})())
 check('外点 / Esc 关闭并认自己的锚点（捕获阶段，不依赖冒泡顺序）',
   /peRenameCard[\s\S]{0,400}addEventListener\('mousedown'/.test(PAGE) && /addEventListener\('keydown'/.test(PAGE))
 check('换页复位弹层（不同文件之间不继承）', /\}, \[pageId\]\)/.test(PAGE))
@@ -190,6 +203,68 @@ check('比右栏那条多给一个引用上下文摘录（右栏只给标题）'
 check('空态有话说（不是一片空白）', PAGE.includes('还没有别的笔记用双链引用这一页。'))
 check('段落锚点 + 条目标签都在（探针可定位）', hasAnchor(PAGE, 'kbInlineBacklinks') && hasAnchor(PAGE, 'kbBacklinkItem'))
 check('反例：不存在的锚点匹配不到（防空转）', !hasAnchor(PAGE, 'kbNoSuchPanelXYZ'))
+
+// ---------------------------------------------------------------- §10 笔记属性（批 4）
+
+console.log('\n§10 笔记属性：frontmatter 读改（纯函数真值断言 —— 这里是会不会静默毁数据的地方）')
+
+const FM = [
+  '---',
+  'id: abc-123',
+  'title: 我的笔记',
+  'tags:',
+  '  - 學習',
+  '  - 复习',
+  'pinned: true',
+  '---',
+  '',
+  '# 正文',
+].join('\n')
+const rows0 = parseFmPropRows(FM)
+const rowOf = (k) => rows0.find(r => r.key === k)
+check('解析出四条属性', rows0.map(r => r.key).join(',') === 'id,title,tags,pinned', rows0.map(r => r.key).join(','))
+
+check('★ `id` 只读（身份 —— 删了它这一页就是另一篇）', rowOf('id')?.readonly === true)
+check('★ 值跨行的 `tags` 只读（下一行以 `- ` 开头）', rowOf('tags')?.readonly === true)
+check('单行的 title / pinned 可编辑', rowOf('title')?.readonly === false && rowOf('pinned')?.readonly === false)
+
+{
+  // 改一个单行值：**只有那一行变**，其余逐字相同
+  const rows = rows0.map(r => (r.key === 'title' ? { ...r, value: '改过的标题' } : r))
+  const out = applyFmPropRows(FM, rows)
+  const a = FM.split('\n'), b = out.split('\n')
+  const diff = a.filter((l, i) => l !== b[i])
+  check('改单行值：输出与原文只有一行不同', diff.length === 1 && b.includes('title: 改过的标题'), `差异 ${diff.length} 行`)
+  check('★ 负向：多行结构**没有被压平**（`- 學習` 那两行原样还在）',
+    out.includes('  - 學習') && out.includes('  - 复习') && out.includes('tags:\n  - 學習\n  - 复习'))
+  check('正文与前后 `---` 不受影响', out.endsWith('---\n\n# 正文') && out.startsWith('---\n'))
+}
+{
+  // 只读行即使被改也不动（界面禁用之外的第二道闸）
+  const rows = rows0.map(r => (r.key === 'tags' || r.key === 'id' ? { ...r, key: 'HACKED', value: 'x' } : r))
+  const out = applyFmPropRows(FM, rows)
+  check('★ 只读行即使被改也不动（id / tags 原样）', out.includes('id: abc-123') && out.includes('tags:') && !out.includes('HACKED'))
+}
+{
+  // 键清空 = 删除这一条
+  const rows = rows0.map(r => (r.key === 'pinned' ? { ...r, key: '' } : r))
+  const out = applyFmPropRows(FM, rows)
+  check('键清空 = 删掉这一条（其余不动）', !out.includes('pinned') && out.includes('title: 我的笔记'))
+}
+{
+  // 新增行：插在闭合 `---` 之前
+  const rows = [...rows0, { key: 'status', value: '进行中', line: -1 }]
+  const out = applyFmPropRows(FM, rows)
+  const lines = out.split('\n')
+  const at = lines.indexOf('status: 进行中')
+  check('新增属性落在闭合 `---` 之前', at > 0 && lines[at + 1] === '---', `下标 ${at}`)
+  check('新增后原有属性一条不少', ['id: abc-123', 'title: 我的笔记', 'pinned: true'].every(s => out.includes(s)))
+}
+{
+  // 无 frontmatter：不凭空造一块出来
+  check('没有 frontmatter ⇒ 解析为空', parseFmPropRows('# 纯正文').length === 0)
+  check('没有 frontmatter ⇒ 写回原样返回（不凭空注入）', applyFmPropRows('# 纯正文', []) === '# 纯正文')
+}
 
 console.log('')
 if (failures === 0) {
