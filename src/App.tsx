@@ -424,6 +424,8 @@ export default function App() {
     'kb-new': () => window.dispatchEvent(new CustomEvent('kb-editor-new-page')),
     // 新建 / 打开今日文章：同 kb-new，走模块自己的跨模块事件（监听端在博客模块）
     'blog-new': () => window.dispatchEvent(new CustomEvent('blog-new-entry')),
+    // 新建任务：同上（监听端在日程模块）
+    'sch-new': () => window.dispatchEvent(new CustomEvent('schedule-new-task')),
   })
 
   const buildCommandItems = (): PaletteItem[] => {

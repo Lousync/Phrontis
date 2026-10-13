@@ -98,7 +98,7 @@ for (const c of COMMANDS) {
 }
 check('键帽 token 合法（修饰键在前、末位主键、无重复/未知）', tokenBad.length === 0, tokenBad.slice(0, 6).join(' | '))
 
-check(`palette:true 的条数 11`, COMMANDS.filter((c) => c.palette).length === 11,
+check(`palette:true 的条数 12`, COMMANDS.filter((c) => c.palette).length === 12,
   `实际 ${COMMANDS.filter((c) => c.palette).length}`)
 // ★ 不变量（2026-10-13 起，kb-new 进面板后取代了原先「只标 global」的过渡口径）：
 //   非 global scope 的命令想进面板**必须声明 requires** —— 否则它会在错的上下文里出现
@@ -143,6 +143,20 @@ for (const c of COMMANDS) {
   }
 }
 check(`代码锚可解析且指纹对得上（${anchorCount} 个，另有 ${docOnly} 个 doc）`, anchorBad.length === 0, anchorBad.slice(0, 6).join(' | '))
+
+// ★ 指纹本身也要够具体：`@  `（纯空白）或 `@ i`（一个字母）会让 line.includes() 恒真/近乎恒真
+//   —— 形同没设防，而契约照样绿。**这两种退化都是实现时真踩过的**（空白片段被判成「全文件唯一」；
+//   PowerShell 里对字符串取 [0] 取的是首字符），所以必须机器拦。
+const weakFp = []
+for (const c of COMMANDS) {
+  for (const s of c.sources) {
+    if (s === 'doc') continue
+    const mm = /^(.+):(\d+)(?:\s+@\s+(.+))?$/.exec(s)
+    const tok = mm?.[3] ?? ''
+    if (tok.trim().length < 5 || !/\S/.test(tok)) weakFp.push(`${c.id}: "${tok}"`)
+  }
+}
+check('锚指纹都够具体（≥5 个非空白字符）', weakFp.length === 0, weakFp.slice(0, 6).join(' | '))
 
 // ---------------------------------------------------------------- §2 id ↔ App 绑定表双射
 
@@ -269,6 +283,7 @@ const CTXS = [
   { ...BASE, workbench: false, fullWindowTab: true },
   { workbench: true, fullWindowTab: false, activeTab: 'knowledge' },
   { workbench: true, fullWindowTab: false, activeTab: 'blog' },
+  { workbench: true, fullWindowTab: false, activeTab: 'schedule' },
   { workbench: false, fullWindowTab: true, activeTab: 'knowledge' },
 ]
 const byCtx = CTXS.map((c) => paletteCommands(c))
@@ -285,6 +300,9 @@ check('kb-new 只在笔记模块激活时出现',
 check('blog-new 只在博客模块激活时出现',
   CTXS.every((c, i) => has(i, 'blog-new') === (c.activeTab === 'blog')),
   CTXS.map((c, i) => `${c.activeTab ?? 'null'}:${has(i, 'blog-new') ? '有' : '无'}`).join(' '))
+check('sch-new 只在日程模块激活时出现',
+  CTXS.every((c, i) => has(i, 'sch-new') === (c.activeTab === 'schedule')),
+  CTXS.map((c, i) => `${c.activeTab ?? 'null'}:${has(i, 'sch-new') ? '有' : '无'}`).join(' '))
 const noReq = COMMANDS.filter((c) => c.palette && !c.requires).map((c) => c.id)
 check('无 requires 的命令在所有上下文下都出现', byCtx.every((list) => noReq.every((id) => list.some((c) => c.id === id))),
   `无 requires 的: ${noReq.join(',')}`)

@@ -631,7 +631,15 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
       }
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // 「新建任务」的**跨模块入口**（2026-10-13）：命令面板派发 `schedule-new-task`。
+    // 与知识库（kb-editor-new-page）/ 博客（blog-new-entry）同一手法：动作仍只有一份（openCreate）。
+    // 本 effect 的 deps 沿用既有的 []（openCreate 只闭包 setState，恒等语义足够）。
+    const onNewTask = (): void => openCreate()
+    window.addEventListener('schedule-new-task', onNewTask)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('schedule-new-task', onNewTask)
+    }
   }, [])
 
   return (
