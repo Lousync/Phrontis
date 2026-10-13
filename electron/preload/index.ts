@@ -246,6 +246,7 @@ const api = {
   aiToolsCopySkillPrompt: (pluginId: string, skillId: string) => ipcRenderer.invoke('aiTools:copySkillPrompt', pluginId, skillId),
   aiToolsInstallSkill: (data: Uint8Array, fileName?: string) => ipcRenderer.invoke('aiTools:installSkill', data, fileName),
   aiToolsInstallSkillFromFile: () => ipcRenderer.invoke('aiTools:installSkillFromFile'),
+  aiToolsInstallSkillFromFolder: () => ipcRenderer.invoke('aiTools:installSkillFromFolder'),
   aiToolsUninstallSkill: (id: string) => ipcRenderer.invoke('aiTools:uninstallSkill', id),
   aiToolsToggleSkill: (registryName: string, enabled: boolean) => ipcRenderer.invoke('aiTools:toggleSkill', registryName, enabled),
   // Model gateway + agent
