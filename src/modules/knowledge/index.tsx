@@ -19,7 +19,7 @@ import {
   showImportOpenDialog, readImportFiles, importPdf, importPdfFile, importBinaryFile, importBinary,
   showFolderDialog, importFolder,
   duplicateKnowledgePage, duplicateKnowledgeCategory,
-  showExportSaveDialog, writeExportTextFile,
+  showExportSaveDialog, writeExportTextFile, writeExportPdf,
   getKnowledgeTags, pluginListViews, getKnowledgeGraph,
   getKnowledgeIndexWarnings,
   workspaceRename, workspaceGetCurrent, workspaceTrash,
@@ -642,6 +642,54 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     // 覆盖位归 null ⇒ 左栏回落用户自己的 sidebarTab（拍板②：还原进入前的选择）
     setImmersiveTabOverride(null)
   }, [])
+
+  /**
+   * ⋮「导出为 PDF…」（2026-10-13 页面菜单能力补齐批 3）。
+   * 顺序刻意是「先定落点、再排版、最后打印」：用户在对话框里取消时**什么都不发生**
+   * （尤其不会先切进沉浸态再退出来，白白闪一下）。
+   *
+   * 为什么借沉浸面打印：`webContents.printToPDF` 打的是**当前窗口**，而沉浸态本来就是
+   * 为阅读优化的单栏排版（App 层读 `readingMode` 把标题栏 / 左右栏 / 页面条全收了），
+   * 比在普通阅读态里靠一整套打印样式去藏可靠得多；另有一段 `@media print` 兜底（藏左栏 /
+   * 沉浸退出热区 / 各类弹层）。
+   *
+   * ★ 不进撤销栈、不写仓库：导出物在仓库外（用户自己选的位置），仓库不会被污染成 PDF 页面。
+   */
+  const [exportingPdf, setExportingPdf] = useState(false)
+  const exportActivePdf = useCallback(async () => {
+    if (exportingPdf) return
+    const id = activePageIdRef.current
+    const p = id ? allPages.find((x) => x.id === id) : null
+    if (!p) { showToast({ type: 'warning', message: '请先打开一个页面' }); return }
+    /* ★ 文件名清洗**刻意不用正则**：正则字面量里那个 `"` 会让契约脚本的「剥注释」状态机以为进了
+       字符串字面量，从此把注释当活代码 → F1 那类「零残留」断言会假红（2026-10-13 真踩过一回）。
+       这里用一份非法字符表 + 逐字符替换，语义一样（Windows 文件名非法字符）。 */
+    const ILLEGAL_NAME_CHARS = '<>:"/\\|?*'
+    const sanitize = (s: string) => [...s].map((ch) => (ILLEGAL_NAME_CHARS.includes(ch) ? '_' : ch)).join('')
+    const suggested = sanitize(p.title || '未命名') || '未命名'
+    const { filePath } = await showExportSaveDialog({
+      defaultName: `${suggested}.pdf`,
+      filters: [{ name: 'PDF 文件', extensions: ['pdf'] }],
+    })
+    if (!filePath) return
+    setExportingPdf(true)
+    const wasReading = readingMode
+    showToast({ type: 'info', message: '正在导出 PDF…' })
+    try {
+      if (!wasReading) await enterReading()
+      // 等版面稳定：进沉浸是 setState + 重渲染，正文里还可能挂着图片/字体
+      await new Promise((r) => setTimeout(r, 450))
+      const res = await writeExportPdf(filePath)
+      if (res?.ok) showToast({ type: 'success', message: '已导出 PDF', detail: filePath })
+      else showToast({ type: 'error', message: res?.error || '导出失败' })
+    } catch {
+      showToast({ type: 'error', message: '导出失败' })
+    } finally {
+      // ★ 沉浸态是**我们借的**：用户没要求进，就还回去（本来就在沉浸态则保持不动）
+      if (!wasReading) exitReading()
+      setExportingPdf(false)
+    }
+  }, [exportingPdf, readingMode, enterReading, exitReading, allPages])
 
   const openInReading = useCallback(async (pageId: string) => {
     try {
@@ -2068,8 +2116,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               </div>,
               sidebarEl,
             )}
-            {/* 顶部悬停退出区（平时隐形） */}
+            {/* 顶部悬停退出区（平时隐形）。★ data-wb 是给「导出 PDF」的打印样式用的：
+                导出会临时进沉浸态打印，这一条热区若不打掉就会在 PDF 顶部印出一个「退出阅读」条。 */}
             <div
+              data-wb="immersiveExitZone"
               className="absolute top-0 inset-x-0 h-9 z-40 group/rtop cursor-pointer"
               onClick={exitReading}
               title="退出沉浸阅读 (Esc)"
@@ -2599,6 +2649,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 onDeleteRequest={handleDeleteByRel}
                 onSplitRequest={onSplitPage ? (o) => onSplitPage(activePageId, o) : undefined}
                 splitDisabled={splitDisabled}
+                /* 导出 PDF（批 3）：只给主栏 —— 它借的是模块层的沉浸阅读态，而 enterReading 认的是
+                   **主栏活动页**；副栏挂了这项就会导出「另一篇」。 */
+                onExportPdfRequest={exportActivePdf}
               />
             </Suspense>
           ) : (

@@ -30,7 +30,14 @@ function ok(cond, label, detail = '') {
   return false
 }
 
-/** 只剥注释、保留字符串字面量（与 verify-workbench-shell 同一份状态机实现） */
+/**
+ * 只剥注释、保留字符串字面量（与 verify-workbench-shell 同一份状态机实现）
+ *
+ * ★ 已知局限（2026-10-13 真踩过）：**它不认正则字面量**。源码里出现 `/[…"…]/` 这种
+ *   正则内含引号的写法时，状态机会以为进了字符串字面量、此后一路错位 —— 于是**注释被当成活代码**，
+ *   F1 这种「零残留」断言就会假红（当时现象：注释里那句 `#editor-toolbar-slot` 被算进命中）。
+ *   处理：被测源码别在正则字面量里写引号（改用字符表 + 逐字符判断）；本契约的判据不动。
+ */
 function stripComments(src) {
   let out = ''
   let st = 'code'

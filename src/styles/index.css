@@ -1808,3 +1808,22 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
   backdrop-filter: blur(8px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.32);
 }
+
+/* ===== 打印 / 导出 PDF（2026-10-13 页面菜单能力补齐批 3）=====
+   导出走主进程 `webContents.printToPDF`（打的是**当前窗口**），所以「只留正文」这件事由渲染层负责。
+   主手段是**临时进沉浸阅读态**（App 层读 `readingMode` 就会把标题栏 / 左右栏 / 页面条收掉）；
+   这一段是 `@media print` **兜底**：万一没进沉浸态、或沉浸态仍留着交互壳，也不会打进 PDF。
+   ★ 只藏交互壳，绝不藏正文容器 —— 藏错一个就是「导出空白 PDF」。 */
+@media print {
+  [data-wb="leftPanel"],
+  [data-wb="rightPanel"],
+  [data-wb="immersiveExitZone"],
+  [data-wb="noteTopBar"],
+  [data-wb="noteTopMoreMenu"],
+  [data-wb="peFileInfoCard"],
+  [data-wb="peRenameCard"],
+  [data-wb="peMoveCard"],
+  [data-wb="pePropsCard"] {
+    display: none !important;
+  }
+}

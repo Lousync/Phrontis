@@ -266,6 +266,69 @@ check('单行的 title / pinned 可编辑', rowOf('title')?.readonly === false &
   check('没有 frontmatter ⇒ 写回原样返回（不凭空注入）', applyFmPropRows('# 纯正文', []) === '# 纯正文')
 }
 
+// ---------------------------------------------------------------- §11 导出为 PDF（批 3）
+
+console.log('\n§11 导出为 PDF：四层接线 + 借沉浸面打印 + 打印样式兜底（批 3）')
+
+const EXPORT = read('electron/database/repositories/exportRepo.ts')
+const PRELOAD = read('electron/preload/index.ts')
+const TYPES = read('src/types/index.ts')
+const IPC_LIB = read('src/lib/ipc.ts')
+const CSS = read('src/styles/index.css')
+
+// ①~④ 四层接线：少任何一层 = 点了没反应且零报错（这是本仓踩过的老坑）
+check('① 主进程注册 export:writePdf 且用 webContents.printToPDF',
+  /ipcMain\.handle\('export:writePdf'/.test(EXPORT) && /webContents\.printToPDF\(/.test(EXPORT))
+check('② preload 暴露 writeExportPdf', /writeExportPdf: \(filePath: string\) => ipcRenderer\.invoke\('export:writePdf'/.test(PRELOAD))
+check('③ ElectronAPI 类型声明补齐', /writeExportPdf: \(filePath: string\) => Promise<\{ ok: boolean/.test(TYPES))
+check('④ src/lib/ipc.ts 封装', /export const writeExportPdf = \(filePath: string\)/.test(IPC_LIB))
+
+// 安全口径：与文本导出同一条「保存对话框授权」闸门
+check('★ 只写保存对话框授权过的路径（渲染层被注入也覆写不了任意文件）',
+  /if \(!isWritePathAuthorized\(filePath\)\) throw new Error/.test(EXPORT)
+  && (EXPORT.split('isWritePathAuthorized(filePath)').length - 1) >= 2)
+check('落点走保存对话框（不自己拼路径）',
+  /showExportSaveDialog\(\{/.test(MOD) && /name: 'PDF 文件', extensions: \['pdf'\]/.test(MOD))
+check('默认文件名做了非法字符清洗（★ 刻意用字符表而非正则 —— 正则里的引号会把契约的剥注释状态机带偏）',
+  /const ILLEGAL_NAME_CHARS = '<>:"\/\\\\\|\?\*'/.test(MOD) && /const suggested = sanitize\(p\.title \|\| '未命名'\)/.test(MOD))
+
+// 打印选项：底色要留住（否则深色主题打出白底黑字的花脸）
+check('printBackground: true（主题底色 / 代码块底色要留）', /printBackground: true/.test(EXPORT))
+check('A4 + 页边距', /pageSize: 'A4'/.test(EXPORT) && /margins: \{ top: 0\.6/.test(EXPORT))
+
+// 时序：先定落点，再排版打印；取消就什么都不做
+check('★ 用户在对话框里取消 ⇒ 直接返回（不先切沉浸再退出来白闪一下）',
+  (() => {
+    const i = MOD.indexOf("if (!filePath) return")
+    const j = MOD.indexOf('if (!wasReading) await enterReading()')
+    return i >= 0 && j > i
+  })())
+check('★ 沉浸态是借的：finally 里还回去（本来就在沉浸态则不动）',
+  /const wasReading = readingMode/.test(MOD) && /finally \{/.test(MOD)
+  && /if \(!wasReading\) exitReading\(\)/.test(MOD))
+check('等版面稳定（进沉浸是 setState + 重渲染，正文里还可能挂着图片/字体）',
+  /await new Promise\(\(r\) => setTimeout\(r, 450\)\)/.test(MOD))
+check('防重入（连点两次不会打两份）', /if \(exportingPdf\) return/.test(MOD) && /setExportingPdf\(false\)/.test(MOD))
+
+// 门控与归属
+check('PageEditor 侧门控：没接这个 prop 就不出现那一项', /\{onExportPdfRequest && \(/.test(PAGE))
+check('★ 只给主栏（enterReading 认的是主栏活动页，副栏挂了会导出另一篇）',
+  (MOD.split('onExportPdfRequest=').length - 1) === 1)
+
+// 打印样式兜底
+check('@media print 存在且打掉了沉浸态「退出阅读」热区',
+  /@media print \{/.test(CSS) && /\[data-wb="immersiveExitZone"\]/.test(CSS))
+check('沉浸退出热区补了 data-wb（否则打印样式抓不到它）', MOD.includes('data-wb="immersiveExitZone"'))
+{
+  // ★ 负向：@media print 块里**不许**出现正文容器的类名 —— 藏错一个就是「导出空白 PDF」
+  const at = CSS.indexOf('@media print {')
+  // 收尾用 '\n}'（LF / CRLF 都能命中：'\r\n}' 里含 '\n}'）
+  const end = at >= 0 ? CSS.indexOf('\n}', at) : -1
+  const block = at >= 0 && end > at ? CSS.slice(at, end + 2) : ''
+  check('反例：打印样式只藏交互壳，不碰正文容器（block 内无 flex-1 / overflow-y-auto）',
+    block.length > 0 && !/flex-1|overflow-y-auto/.test(block))
+}
+
 console.log('')
 if (failures === 0) {
   console.log('PASS  页面 ⋮ 批 1b：六个动作接到位 / 删除不再是假按钮 / 导入进可达菜单 / 门控与反例齐全')

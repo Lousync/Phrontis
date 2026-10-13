@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense, type ReactNode } from 'react'
-import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace, Pencil, FolderInput, Files, Crosshair, PanelRight, PanelTop, Tag } from 'lucide-react'
+import { Trash2, Eye, Star, FileText, ExternalLink, X, ChevronRight, ChevronLeft, Plus, ImagePlus, StickyNote, Link2, BookOpen, ListChecks, Sparkles, Info, FolderSearch, Copy, Maximize, Square, RotateCcw, RotateCw, Search, Replace, Pencil, FolderInput, Files, Crosshair, PanelRight, PanelTop, Tag, Download } from 'lucide-react'
 import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
@@ -188,9 +188,12 @@ interface Props {
   onSplitRequest?: (orientation: 'row' | 'column') => void
   /** 分屏已满（页签右键那条会置灰，这里同步） */
   splitDisabled?: boolean
+  /** 导出为 PDF（2026-10-13 批 3）：模块层负责「保存对话框 → 临时进沉浸阅读态 → 打印 → 还回去」，
+   *  本组件只发请求 —— 沉浸态归模块层（`readingMode`），PageEditor 管不到它。 */
+  onExportPdfRequest?: () => void
 }
 
-export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward, onRenameRequest, onMoveRequest, onDuplicateRequest, onLocateRequest, onDeleteRequest, onSplitRequest, splitDisabled = false }: Props) {
+export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward, onRenameRequest, onMoveRequest, onDuplicateRequest, onLocateRequest, onDeleteRequest, onSplitRequest, splitDisabled = false, onExportPdfRequest }: Props) {
   const { s, update } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
@@ -1668,6 +1671,13 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                     ★ 只认**单行** `key: value`（值跨行的只读），见 parseFmPropRows 头注：绝不为好看
                       去重建整块前缀 —— 那会把 YAML 列表压平 = 静默毁数据。 */}
                 <MoreItem anchor="peProps" icon={<Tag size={13} />} label="笔记属性…" onClick={openProps} />
+                {/* 导出为 PDF（批 3，2026-10-13）：模块层负责「保存对话框 → 临时进沉浸阅读态 → 打印 →
+                    还回去」；本组件只发请求。落点由用户在系统对话框里选（导出物不落进仓库，
+                    免得知识库多出一个 PDF 附件条目）。 */}
+                {onExportPdfRequest && (
+                  <MoreItem anchor="peExportPdf" icon={<Download size={13} />} label="导出为 PDF…"
+                    onClick={() => { setShowMoreMenu(false); onExportPdfRequest() }} />
+                )}
                 <MoreGroup title="系统" />
                 <MoreItem anchor="peSystemOpen" icon={<ExternalLink size={13} />} label="在系统中打开"
                   onClick={() => { void handleArchiveOpenInSystem(false); setShowMoreMenu(false) }} />

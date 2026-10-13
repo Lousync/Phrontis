@@ -54,4 +54,32 @@ export function registerExportHandlers(): void {
     const size = statSync(filePath).size
     return { filePath, size }
   })
+
+  /**
+   * 页面导出 PDF（2026-10-13 页面菜单能力补齐批 3）：
+   * **打印的是当前主窗口**（`printToPDF`），所以渲染层得先把版面切成「只留正文」——
+   * 走的是「临时进沉浸阅读态 + 一段 @media print 兜底样式」。
+   *
+   * 为什么由主进程打而不是渲染层自己拼 PDF：Electron 只有 `webContents.printToPDF` 这一条路，
+   * 它能完整复用我们现有的排版（主题变量、代码高亮、表格、图片），另拼一套 PDF 排版必然漂。
+   *
+   * 安全口径与文本导出**完全一致**：只写「刚由保存对话框返回过」的路径（`isWritePathAuthorized`），
+   * 渲染层被注入也覆写不了任意系统文件。
+   */
+  ipcMain.handle('export:writePdf', async (_e, filePath: string) => {
+    if (!isWritePathAuthorized(filePath)) throw new Error('写入路径未经过保存对话框授权,已拒绝')
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    if (!win) return { ok: false, error: '没有可打印的窗口' }
+    try {
+      const buf = await win.webContents.printToPDF({
+        printBackground: true,     // 主题底色 / 代码块底色要留住（否则深色主题打出白底黑字的花脸）
+        pageSize: 'A4',
+        margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 }, // 英寸
+      })
+      writeFileSync(filePath, buf)
+      return { ok: true, filePath, size: statSync(filePath).size }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : '导出失败' }
+    }
+  })
 }
