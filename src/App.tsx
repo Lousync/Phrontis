@@ -69,7 +69,7 @@ const EpubRailPanel = lazy(() => import('./components/shared/epub/EpubRailPanel'
 
 import { FillPopup } from './modules/toolbox/components/FillPopup'
 import { VaultPicker } from './components/shared/VaultPicker'
-import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA, KB_EPUB_GOTO_CFI, KB_OPEN_EXCERPT_LOC } from './components/shared/pdf/pdfEvents'
+import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA, KB_EPUB_GOTO_CFI, KB_OPEN_EXCERPT_LOC, KB_PDF_ZOOM_FIT } from './components/shared/pdf/pdfEvents'
 import { bookDisplayName, bookEngineOf, bookKindOf } from '../electron/lib/kbStore/bookFormats'
 import { PomodoroProvider } from './modules/toolbox/hooks/PomodoroContext'
 import { PomodoroPanel } from './modules/toolbox/components/PomodoroPanel'
@@ -429,6 +429,9 @@ export default function App() {
     // 笔记模块内的两条：关闭当前标签页 / 沉浸阅读进出（监听端都在知识库模块）
     'kb-close-tab': () => window.dispatchEvent(new CustomEvent('kb-close-active-tab')),
     'kb-immersive': () => window.dispatchEvent(new CustomEvent('kb-toggle-immersive')),
+    // PDF 适应窗口：与阅读器自己的 Ctrl+0 是同一个动作（走 pdfEvents 的 KB_PDF_ZOOM_FIT，
+    // 监听端只让**当前可见**的那个阅读器响应 —— 两个实例并存与可见性判定的理由见该常量头注）
+    'pdf-zoom-fit': () => window.dispatchEvent(new CustomEvent(KB_PDF_ZOOM_FIT)),
   })
 
   const buildCommandItems = (): PaletteItem[] => {

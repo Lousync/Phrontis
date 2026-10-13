@@ -98,7 +98,7 @@ for (const c of COMMANDS) {
 }
 check('键帽 token 合法（修饰键在前、末位主键、无重复/未知）', tokenBad.length === 0, tokenBad.slice(0, 6).join(' | '))
 
-check(`palette:true 的条数 14`, COMMANDS.filter((c) => c.palette).length === 14,
+check(`palette:true 的条数 15`, COMMANDS.filter((c) => c.palette).length === 15,
   `实际 ${COMMANDS.filter((c) => c.palette).length}`)
 // ★ 不变量（2026-10-13 起，kb-new 进面板后取代了原先「只标 global」的过渡口径）：
 //   非 global scope 的命令想进面板**必须声明 requires** —— 否则它会在错的上下文里出现
@@ -273,7 +273,7 @@ check('只剥标记、不剥内容（剥完表格仍在）', loadedBody.includes
 
 // ---------------------------------------------------------------- §8 面板门控
 
-console.log('\n§8 面板门控（声明式条件，含模块维度，7 种上下文穷举）')
+console.log('\n§8 面板门控（声明式条件，含模块维度，8 种上下文穷举）')
 
 const BASE = { workbench: true, fullWindowTab: false, activeTab: null }
 const CTXS = [
@@ -284,6 +284,7 @@ const CTXS = [
   { workbench: true, fullWindowTab: false, activeTab: 'knowledge' },
   { workbench: true, fullWindowTab: false, activeTab: 'blog' },
   { workbench: true, fullWindowTab: false, activeTab: 'schedule' },
+  { workbench: true, fullWindowTab: false, activeTab: 'bookshelf' },
   { workbench: false, fullWindowTab: true, activeTab: 'knowledge' },
 ]
 const byCtx = CTXS.map((c) => paletteCommands(c))
@@ -309,6 +310,16 @@ for (const id of ['kb-close-tab', 'kb-immersive']) {
     CTXS.every((c, i) => has(i, id) === (c.activeTab === 'knowledge')),
     CTXS.map((c, i) => `${c.activeTab ?? 'null'}:${has(i, id) ? '有' : '无'}`).join(' '))
 }
+// L2 第四批：PDF 适应窗口（pdf-zoom-fit）—— 唯一一条**门控跨两个 Tab** 的命令。
+// 阅读器有两个挂载点（书架里读书 / 笔记里打开的 PDF 附件），两处都可能要这条命令；
+// 而"到底该哪一个实例响应"不是门控能表达的（要看是否可见），交给运行期的可见性兜底 ——
+// 见 .AGENT/scripts/commands/verify-palette-channels.mjs 的磁盘态断言。
+check('pdf-zoom-fit 门控跨两个 Tab（书架 / 笔记），其它 Tab 下不出现',
+  CTXS.every((c, i) => has(i, 'pdf-zoom-fit') === (c.activeTab === 'bookshelf' || c.activeTab === 'knowledge')),
+  CTXS.map((c, i) => `${c.activeTab ?? 'null'}:${has(i, 'pdf-zoom-fit') ? '有' : '无'}`).join(' '))
+check('跨 Tab 门控的命令必须在 requires.tabs 里列全两个模块名',
+  (commandById('pdf-zoom-fit')?.requires?.tabs ?? []).join(',') === 'knowledge,bookshelf',
+  `实际 ${JSON.stringify(commandById('pdf-zoom-fit')?.requires ?? null)}`)
 const noReq = COMMANDS.filter((c) => c.palette && !c.requires).map((c) => c.id)
 check('无 requires 的命令在所有上下文下都出现', byCtx.every((list) => noReq.every((id) => list.some((c) => c.id === id))),
   `无 requires 的: ${noReq.join(',')}`)

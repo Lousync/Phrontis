@@ -16,7 +16,7 @@ import { resolveDegrade, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/
 import { detectScanMode, resolveScanPages } from '../../../../electron/lib/kbStore/scanDetect'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
 import type { BookScanMode, ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState, ExcerptColor, ExcerptType } from '../../../types'
-import { KB_BOOKMARK_DELETE, KB_BOOKMARK_SECTION_SHOW } from './pdfEvents'
+import { KB_BOOKMARK_DELETE, KB_BOOKMARK_SECTION_SHOW, KB_PDF_ZOOM_FIT } from './pdfEvents'
 
 // 同源 worker（v3 classic，兼容 Electron 33 / Chromium 130——v4.5+ 依赖 toHex 未实现）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -1225,6 +1225,20 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome
     window.addEventListener('kb-pdf-goto-page', on)
     return () => window.removeEventListener('kb-pdf-goto-page', on)
   }, [goPage, relPath])
+
+  // 命令面板「PDF 适应窗口」承接（动作与上面 Ctrl+0 分支同一个 resetFit，不新写逻辑）。
+  // ★ 只认**当前可见**的那个实例：Tab 是 display:none 保活，书架一本 + 笔记里打开的 PDF 附件
+  //   一本可能同时挂着。显示态判定用 `offsetParent === null`，理由与副作用（resetFit 会写盘
+  //   一条 zoom 进度）见 pdfEvents.ts 里 KB_PDF_ZOOM_FIT 的头注。
+  useEffect(() => {
+    const onZoomFit = () => {
+      const root = rootRef.current
+      if (!root || root.offsetParent === null) return
+      resetFit()
+    }
+    window.addEventListener(KB_PDF_ZOOM_FIT, onZoomFit)
+    return () => window.removeEventListener(KB_PDF_ZOOM_FIT, onZoomFit)
+  }, [resetFit])
 
   // ===== 渲染 =====
   const toolbar = (

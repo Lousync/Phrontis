@@ -11,6 +11,27 @@ export const KB_PDF_PAGE_CHANGED = 'kb-pdf-page-changed'
 export const KB_PDF_GOTO_PAGE = 'kb-pdf-goto-page'
 
 /**
+ * 命令面板 → PDF 阅读器：**整页适配**（与阅读器里按 `Ctrl+0` 是同一个 `resetFit()`）。
+ *
+ * 为什么要这条事件：`Ctrl+0` 只活在阅读器自己的 window keydown 里，而命令面板在 App 侧 ——
+ * 面板要让「适应窗口」成为一条可执行命令，就必须有一条跨模块通道（与 kb-editor-new-page 同构）。
+ *
+ * ★ 口径（2026-10-13 拍板）：**detail 不带 relPath，由「当前可见的那个阅读器」响应**。
+ *   理由：Tab 是 `display:none` 保活（App.tsx 的 rowModules 注释），所以可能同时挂着两个
+ *   PdfReaderView 实例 —— 书架 Tab 里一本、笔记编辑器里打开的 PDF 附件一本。
+ *   若照抄 KB_PDF_GOTO_PAGE 的 relPath 口径，派发方就得先知道「现在读的是哪本」，
+ *   而笔记侧那个实例的 relPath 只有 PageEditor 知道，App 拿不到。
+ *   所以改用**可见性**判定：`rootRef.current.offsetParent === null` ⇔ 所在 Tab 已被
+ *   `display:none` 收起（本仓同款判据：MindMapView.tsx:170）。
+ *
+ * ★ 为什么必须判可见、不能广播给所有实例：`resetFit()` 末尾会 `scheduleProgress({ zoom: 1 })`，
+ *   800ms 后**写盘**（pdfReaderPatch）。广播 = 用户在笔记里看附件，后台那本书的阅读进度被顺手
+ *   改写一条。阅读器自己的 `Ctrl+0` 分支目前**没有**这个守卫 —— 同一个副作用在键盘路径上仍然
+ *   存在（属既有行为，未在本轮改动，见 docs/ui-updates.md §45.8 的「相邻发现」）。
+ */
+export const KB_PDF_ZOOM_FIT = 'kb-pdf-zoom-fit'
+
+/**
  * 右栏阅读侧栏 → 阅读器：**删除一条书签**（detail: `{ relPath, id }`）。
  *
  * ★ 为什么必须回派给阅读器、而不是右栏直接 patch：三个阅读器把书签存在**内存权威数组**里
