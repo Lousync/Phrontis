@@ -4,6 +4,7 @@
   "description": "Phrontis — 本地 Windows 桌面知识管理工具（原 Knowbase Programmer Edition）",
   "main": "./out/main/index.js",
   "scripts": {
+    "predev": "node .AGENT/scripts/acl-integrity-guard/verify-integrity-labels.mjs --root node_modules",
     "dev": "node scripts/launch.js dev",
     "build": "electron-vite build",
     "start": "node scripts/launch.js start",
