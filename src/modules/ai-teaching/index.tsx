@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Sparkles, X, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat } from 'lucide-react'
 import {
-  agentSessions, agentNewSession, agentMessages, agentDeleteSession,
+  agentSessions, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceListDir, workspaceRefreshVault,
   agentRenameSession, aiTeachEnsureSessionFolder, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
@@ -14,6 +14,8 @@ import {
   aiTeachProfileEnsureGlobal, aiTeachProfileEnsureSession, aiTeachProfileEnsureWorkspace,
   aiTeachProfileWriteSession, aiTeachProfileApplyPatch, getSetting,
 } from '../../lib/ipc'
+// 新建会话走包装层：会话随仓库走，无仓库时要给提示而不是静默失败
+import { newAgentSession } from '../../lib/agentSession'
 import { AiTeachFileTree } from './AiTeachFileTree'
 import { CourseHome, COURSE_ST_LABEL } from './CourseMode'
 import { decidePrepLanding, withDraft, withFold, withStarted } from './prepPolicy'
@@ -1147,7 +1149,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // 新建任务（模板）：播种场景规则到 CONSTRAINTS.md，再进「准备态」由用户备好首条消息后手动开讲
   // （v3.1.2 条目7：原先此处 void startScene(row.id) 自动空发首轮——已摘除，改为零 LLM 调用）
   const newTask = useCallback(async (tpl: Template) => {
-    const row = await agentNewSession(`${tpl.label}`, 'aiTeaching').catch(() => null)
+    const row = await newAgentSession(`${tpl.label}`, 'aiTeaching')
     if (!row) return
     // P5：先归属当前工作区（元数据真相源），再建夹——ensure 在主进程读归属决定两层路径
     if (activeWs && activeWs !== '__none__') await aiTeachAssignSession(row.id, activeWs).catch(() => null)
@@ -1188,7 +1190,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const q = pendingAsk.question
     onConsumePendingAsk?.()
     void (async () => {
-      const row = await agentNewSession('PDF 划词', 'aiTeaching').catch(() => null)
+      const row = await newAgentSession('PDF 划词', 'aiTeaching')
       if (!row) { showToast({ type: 'warning', message: '新建会话失败，请手动新建后重试' }); return }
       if (activeWs && activeWs !== '__none__') await aiTeachAssignSession(row.id, activeWs).catch(() => null)
       setActiveId(row.id); setActiveTitle(row.title); activeIdRef.current = row.id

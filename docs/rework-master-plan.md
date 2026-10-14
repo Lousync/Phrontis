@@ -38,6 +38,7 @@
 │ Vault = 唯一真相源：<仓库>/…/*.md（frontmatter）            │
 │         + .knowbase/modules/*.json（结构化模块）            │
 │         + .knowbase/config.json（仓库级设置）               │
+│         + .knowbase/agent/（AI 会话：索引 + 每会话 jsonl）   │
 │ 附件 _attachments/ · 密码 secretStore(DPAPI)               │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -54,7 +55,7 @@
 |---|---|
 | 全部模块数据（博客/日程/知识库索引/说说/打卡/书签/体重/quiz/wordbook…） | 主题、字体、缩放、窗口布局 |
 | user_profile（账户身份） | **最近仓库列表**（切账户入口） |
-| AI 会话历史、插件安装状态与配置 | 锁屏密码 |
+| **AI 会话历史** `.knowbase/agent/`（2026-10-13 由全局改为随仓库，见 §5 R3 注） | 锁屏密码 · 插件安装状态与配置 |
 | 仓库级设置 config.json（图谱参数等） | 全局设置 settings.json |
 | GraphIndex / knowledgeIndex 缓存 | DPAPI 加密密钥（机器绑定） |
 
@@ -69,7 +70,7 @@
 | **R0 数据地基** | knowledgeIndex ✅ → 双读源开关 `storage.knowledge` → knowledgeRepo vault 读路径 → 迁移器产品化 | 原 P0 | ✅ 收官（2026-09-02） |
 | **R1 Workbench 化** | App.tsx 骨架：活动栏/侧栏视图/编辑器组/状态栏 → 命令面板 + 快速切换器 | 外壳线 | ✅ W1-W3（骨架/命令面板/分屏 v1） |
 | **R2 编辑器与链接** | 双链跳转/反链面板（GraphIndex）→ 全局搜索（底部面板）→ Breadcrumbs → Editor Groups 分屏 | 外壳线+原阶段3/5 | ✅ 反链/搜索/分屏 + 编辑器 [[ 补全、大纲、wiki 常驻高亮（Breadcrumbs 挂账） |
-| **R3 数据层推广** | 博客(.md) → 说说/日程/打卡/书签 → 密码本(加密) → quiz/wordbook(仓库级)+agent/mcp(全局) | 原 P1-P4 | ✅ 博客/书签/wordbook + 目录重构 + 插件 vault 适配（小模块留 sqlite 为拍板决定） |
+| **R3 数据层推广** | 博客(.md) → 说说/日程/打卡/书签 → 密码本(加密) → quiz/wordbook(仓库级)+agent/mcp(全局) | 原 P1-P4 | ✅ 博客/书签/wordbook + 目录重构 + 插件 vault 适配（小模块留 sqlite 为拍板决定）。**注（2026-10-13）**：`agent` 一项由「全局」改为**随仓库**（`.knowbase/agent/`）—— 当时按 sqlite 时代 `knowledge.db` 在 userData 的既成事实划为全局，与 §4 表格「跟账户走」的口径相反；用户发现「对话跨仓库可看」后拍板改为仓库级，`mcp` 仍是全局。存量会话的认领见 `docs/agent-sessions-vault-plan.md` |
 | **R4 图谱** | G0-G4（GraphIndex→物理动画→交互→过滤→增删动画），入口在知识库模块 | 原 阶段6 | ✅ G0-G3 + A8 收尾（含设置持久化），G4 其余挂账 |
 | **R5 分栏预览**（原 Live Preview，**2026-09-03 用户拍板改方案**） | ~~CodeMirror 6 所见即所得~~ → **编辑区分栏：左 Monaco 编辑 / 右 MarkdownPreview 实时渲染**（复用现有 react-markdown 基建，不引入 CM6） | 原 阶段4 | ✅ 落地（预览开关 + 双链跳转 + localStorage 记忆） |
 | **R6 去库收尾**（2026-09-07 拍板 D9：彻底 JSON 化） | R6-a 小模块逐个迁 `.knowbase/` JSON（schedule→moments→habit→weight→password(DPAPI)→quiz，每模块：vaultRepo+渲染层双读+迁移器+回收站/导出适配）→ R6-b 双读源开关 `storageKnowledge` 下线（固定 vault）→ R6-c 移除 sql.js（connection/migrations/repositories DB 分支清理）→ R6-d 备份适配（纯 `.knowbase` 打包）→ R6-e 全量回归+打包验证 | 原 P5 + D9 | 🔜 计划定稿待开工 |

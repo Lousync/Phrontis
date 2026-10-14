@@ -9,6 +9,11 @@ import {
   REASONING_MODEL_RE,
   type ProviderType, type ModelFamily, type PureChatResult,
 } from './llmProtocolPure'
+import {
+  migrateProvider, activeAccountOf, activeAccountKeyEnc, providerUsable,
+  sanitizeAccountInfo, appendAccount, removeAccount,
+  type ProviderAccount,
+} from './llmAccountPure'
 
 /**
  * Model Gateway —— LLM API 统一接入层（方案 .claude/plans/model-gateway.md）。
@@ -25,15 +30,34 @@ import {
 export type { ProviderType, ModelFamily } from './llmProtocolPure'
 export { REASONING_MODEL_RE }
 
+/**
+ * 端点内的一个账号（2026-10-13，按原型 tmp/ai-settings-proto 的「账号列表」落地）。
+ *
+ * 为什么账号是**端点内部的第二层**，而不是"同一个端点再建一条供应商"：
+ * Key 是加密且**不可回读**的（渲染层只拿得到 hasKey），换账号时没法把旧 Key 读出来搬过去，
+ * 所以每个账号必须有自己独立的永久 Key 槽；而模型 spec 指向的是**端点 id**，
+ * 于是切换当前账号时那 5 处模型槽位（对话默认 / AI 助手 / 编辑器续写 / 长对话压缩 / 视觉转写）
+ * 一处都不用改，两个账号还共用同一份模型清单（不用各拉一遍 /models）。
+ * 规则本体见 llmAccountPure.ts。
+ */
+export type { ProviderAccount } from './llmAccountPure'
+
 export interface ProviderConfig {
   id: string
   name: string
   type: ProviderType
   baseUrl: string
-  /** 'enc1:' 密文（secretBox 机制），永不出主进程 */
+  /** 'enc1:' 密文（secretBox 机制），永不出主进程。
+   *  2026-10-13 起它是**当前账号** Key 的兼容镜像 —— 真正的 Key 住在 accounts[] 里，
+   *  取值一律走 activeKeyOf(p)，不要再直接读这个字段。 */
   apiKeyEncrypted: string
   enabled: boolean
   models: string[]
+  /** 端点内的账号（同一 baseUrl / 协议 / 请求头 / 模型清单，只有 Key 各自独立）。
+   *  旧记录没有这个字段：读盘时由 migrateProvider 用 apiKeyEncrypted 生成首个账号。 */
+  accounts?: ProviderAccount[]
+  /** 当前生效的账号 id —— 模型 spec 不含账号，切换它不动任何模型槽位 */
+  activeAccountId?: string
   /** 逐模型的协议覆盖；未列出的模型跟随 type（见 familyOf）。 */
   modelFamilies?: Record<string, ModelFamily>
   /** 自定义请求头（明文存设置，勿放 API Key 类敏感值——密钥走 apiKey 字段走 secretBox）。
@@ -223,12 +247,27 @@ function getProviders(): ProviderConfig[] {
   try {
     const raw = String(depsRef?.getSettingValue('modelProviders') ?? '')
     const arr = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? (arr as ProviderConfig[]) : []
+    if (!Array.isArray(arr)) return []
+    const list = arr as ProviderConfig[]
+    // 一次性迁移到「账号」模型（旧记录只有单个 apiKeyEncrypted）；真有改动才回写，不是每次读都写盘
+    if (list.some(p => migrateProvider(p, randomUUID))) saveProviders(list)
+    return list
   } catch { return [] }
 }
 
 function saveProviders(list: ProviderConfig[]): void {
   depsRef?.setSettingValue('modelProviders', JSON.stringify(list))
+}
+
+// ===== 账号（端点内部的第二层）=====
+// 规则本体（迁移 / 取当前账号 / 可用性 / 脱敏 / 增删）住在 llmAccountPure.ts（零依赖，
+// 供契约脚本真跑）；这里只负责把它接到 node 的 uuid 与 secretBox 上。
+
+/** 取当前账号的明文 Key（**只在主进程内存中出现**，密文与明文都不落日志）。
+ *  有账号时只认当前账号那把，不回退到别的账号 —— 否则"切换"就成了摆设。 */
+function activeKeyOf(p: ProviderConfig): string {
+  const enc = activeAccountKeyEnc(p)
+  return enc ? decryptSecret(enc) : ''
 }
 
 // ===== URL 安全校验 =====
@@ -287,11 +326,8 @@ function userAgent(): string {
 
 function authHeaders(p: ProviderConfig, sessionId?: string): Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json', 'User-Agent': userAgent() }
-  if (p.apiKeyEncrypted) {
-    // 解密仅在内存中进行，密文与明文都不落日志
-    const key = decryptSecret(p.apiKeyEncrypted)
-    if (key) h['Authorization'] = `Bearer ${key}`
-  }
+  const key = activeKeyOf(p)
+  if (key) h['Authorization'] = `Bearer ${key}` // 解密仅在内存中进行，密文与明文都不落日志
   return { ...h, ...withSessionHeaders(p.headers, sessionId) }
 }
 
@@ -318,10 +354,8 @@ function anthropicHeaders(p: ProviderConfig, sessionId?: string): Record<string,
     'anthropic-version': '2023-06-01',
     'User-Agent': userAgent(),
   }
-  if (p.apiKeyEncrypted) {
-    const key = decryptSecret(p.apiKeyEncrypted)
-    if (key) h['x-api-key'] = key
-  }
+  const key = activeKeyOf(p)
+  if (key) h['x-api-key'] = key
   return { ...h, ...withSessionHeaders(p.headers, sessionId) }
 }
 
@@ -1247,15 +1281,24 @@ export async function invokeLlmStreamInternal(
 
 // ===== IPC =====
 
+/** 账号信息的对外形状：**永不含密文**，渲染层只拿得到 hasKey（负向断言见 llm-accounts 契约） */
+const sanitizeAccount = sanitizeAccountInfo
+
 function sanitizeInfo(p: ProviderConfig, defaultChatModel: string) {
+  const acct = activeAccountOf(p)
   return {
     id: p.id,
     name: p.name,
     type: p.type,
     baseUrl: p.baseUrl,
     enabled: p.enabled,
-    hasKey: !!p.apiKeyEncrypted,
+    hasKey: !!acct?.keyEncrypted || (!p.accounts?.length && !!p.apiKeyEncrypted),
     models: p.models,
+    /** 账号列表（端点内部的第二层）；切换当前账号不改任何模型 spec */
+    accounts: (p.accounts ?? []).map(sanitizeAccount),
+    activeAccountId: acct?.id ?? '',
+    /** 端点整体可用（端点启用 且 至少一个账号可用）—— 模型选择器据此收候选 */
+    usable: providerUsable(p),
     /** 逐模型协议覆盖（渲染层据此显示协议标记；未列出的跟随 type） */
     modelFamilies: p.modelFamilies ?? {},
     headers: p.headers ?? {},
@@ -1314,7 +1357,15 @@ function saveProviderDraft(draft: {
   if (draft.modelFamilies !== undefined) p.modelFamilies = modelFamilies
   p.embeddingModel = typeof draft.embeddingModel === 'string' && draft.embeddingModel.trim() ? draft.embeddingModel.trim() : undefined
   if (typeof draft.apiKey === 'string' && draft.apiKey.length > 0) {
-    p.apiKeyEncrypted = encryptSecret(draft.apiKey) // 明文只在此瞬间存在，随即加密
+    const enc = encryptSecret(draft.apiKey) // 明文只在此瞬间存在，随即加密
+    p.apiKeyEncrypted = enc // 兼容镜像：旧读法仍能拿到当前账号的 Key
+    const acct = activeAccountOf(p)
+    if (acct) acct.keyEncrypted = enc
+    else {
+      const id = randomUUID()
+      p.accounts = [{ id, name: '默认', keyEncrypted: enc, enabled: true }]
+      p.activeAccountId = id
+    }
   }
   depsRef?.setSettingValue('modelProviders', JSON.stringify(list))
   return { ok: true, id: p.id }
@@ -1363,14 +1414,102 @@ export function registerLlmHandlers(deps: {
     return { ok: true }
   })
 
-  ipcMain.handle('llm:testConnection', async (_e, draft: { type: ProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string> }) => {
+  // ===== 账号（端点内部的第二层，2026-10-13 按原型落地）=====
+
+  /** 加一个账号：同一端点换一把 Key（地址 / 协议 / 请求头 / 模型清单全部复用） */
+  ipcMain.handle('llm:addAccount', (_e, payload: { providerId: string; name?: string; apiKey?: string }) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === payload?.providerId)
+    if (!p) return { ok: false, error: '供应商不存在' }
+    const key = String(payload?.apiKey ?? '').trim()
+    if (!key && p.type !== 'ollama') return { ok: false, error: '请粘贴这个账号的 API Key' }
+    const name = String(payload?.name ?? '').trim()
+    const acct = appendAccount(p, { name, keyEncrypted: key ? encryptSecret(key) : '' }, randomUUID)
+    saveProviders(list)
+    return { ok: true, id: acct.id, accounts: (p.accounts ?? []).map(sanitizeAccount), activeAccountId: acct.id }
+  })
+
+  /**
+   * 切换当前账号。**只改 activeAccountId** —— 模型 spec 指向端点 id，所以 5 处模型槽位
+   * 一处都不用改（这正是"账号做成端点内部第二层"的全部理由，契约里有负向断言锁）。
+   */
+  ipcMain.handle('llm:setActiveAccount', (_e, providerId: string, accountId: string) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === providerId)
+    if (!p) return { ok: false, error: '供应商不存在' }
+    const acct = (p.accounts ?? []).find(a => a.id === accountId)
+    if (!acct) return { ok: false, error: '账号不存在' }
+    p.activeAccountId = acct.id
+    p.apiKeyEncrypted = acct.keyEncrypted // 兼容镜像
+    saveProviders(list)
+    return { ok: true, activeAccountId: acct.id }
+  })
+
+  /** 改账号：重命名 / 换 Key（重输）/ 启用停用。只传要改的字段。 */
+  ipcMain.handle('llm:updateAccount', (_e, payload: { providerId: string; accountId: string; name?: string; apiKey?: string; enabled?: boolean }) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === payload?.providerId)
+    if (!p) return { ok: false, error: '供应商不存在' }
+    const acct = (p.accounts ?? []).find(a => a.id === payload?.accountId)
+    if (!acct) return { ok: false, error: '账号不存在' }
+    if (typeof payload.name === 'string' && payload.name.trim()) acct.name = payload.name.trim()
+    if (typeof payload.enabled === 'boolean') acct.enabled = payload.enabled
+    if (typeof payload.apiKey === 'string' && payload.apiKey.length > 0) {
+      acct.keyEncrypted = encryptSecret(payload.apiKey)
+    }
+    if (acct.id === p.activeAccountId) p.apiKeyEncrypted = acct.keyEncrypted
+    saveProviders(list)
+    return { ok: true, accounts: (p.accounts ?? []).map(sanitizeAccount) }
+  })
+
+  /** 删账号与它的 Key；删掉的若是当前账号，自动切到剩下的第一个 */
+  ipcMain.handle('llm:removeAccount', (_e, providerId: string, accountId: string) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === providerId)
+    if (!p) return { ok: false, error: '供应商不存在' }
+    if (!removeAccount(p, accountId)) return { ok: false, error: '账号不存在' }
+    saveProviders(list)
+    return { ok: true, accounts: (p.accounts ?? []).map(sanitizeAccount), activeAccountId: p.activeAccountId ?? '' }
+  })
+
+  /** 测试指定账号（用它的 Key 真拉一次 /models），结果记回账号行供界面显示 */
+  ipcMain.handle('llm:testAccount', async (_e, providerId: string, accountId: string) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === providerId)
+    if (!p) return { ok: false, error: '供应商不存在', latencyMs: 0 }
+    const acct = (p.accounts ?? []).find(a => a.id === accountId)
+    if (!acct) return { ok: false, error: '账号不存在', latencyMs: 0 }
+    // 只把这一把 Key 交给适配器：accounts 收成单元素 + 它的 id 设为当前
+    const scoped: ProviderConfig = { ...p, accounts: [acct], activeAccountId: acct.id }
+    const started = Date.now()
+    try {
+      const models = await getAdapter(scoped.type).listModels(scoped)
+      acct.lastLatencyMs = Date.now() - started
+      acct.lastTestedAt = new Date().toISOString()
+      saveProviders(list)
+      return { ok: true, latencyMs: acct.lastLatencyMs, models }
+    } catch (err) {
+      acct.lastLatencyMs = Date.now() - started
+      acct.lastTestedAt = new Date().toISOString()
+      saveProviders(list)
+      return { ok: false, latencyMs: acct.lastLatencyMs, error: String((err as Error)?.message ?? err) }
+    }
+  })
+
+  ipcMain.handle('llm:testConnection', async (_e, draft: { type: ProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string>; accountId?: string }) => {
     const urlCheck = validateProviderUrl(String(draft?.baseUrl ?? ''))
     if (!urlCheck.ok) return { ok: false, error: urlCheck.error, latencyMs: 0 }
     // 传 id（服务商卡片测试）= 用存档 Key 与自定义头测——裸测不带鉴权，对要求鉴权的
     // 网关必然 401（2026-09-08 用户实锤）。添加表单无 id，用表单明文 apiKey/headers。
+    // 传 accountId（2026-10-13）= 测**指定账号**那把 Key，而不是当前账号。
     const saved = draft?.id ? getProviders().find(x => x.id === draft.id) : undefined
-    const temp: ProviderConfig = saved
-      ? { ...saved, headers: { ...(saved.headers ?? {}), ...(draft.headers ?? {}) } }
+    let scoped = saved
+    if (saved && draft.accountId) {
+      const a = (saved.accounts ?? []).find(x => x.id === draft.accountId)
+      if (a) scoped = { ...saved, accounts: [a], activeAccountId: a.id }
+    }
+    const temp: ProviderConfig = scoped
+      ? { ...scoped, headers: { ...(scoped.headers ?? {}), ...(draft.headers ?? {}) } }
       : {
           id: '__test__', name: 'test', type: draft.type, baseUrl: urlCheck.url,
           apiKeyEncrypted: typeof draft.apiKey === 'string' && draft.apiKey ? encryptSecret(draft.apiKey) : '',
@@ -1415,7 +1554,7 @@ export function registerLlmHandlers(deps: {
   // 视觉转写模型选择列表只显示这些，非视觉模型不再出现
   ipcMain.handle('llm:visionModels', () => {
     const models: Array<{ spec: string; providerName: string; model: string }> = []
-    for (const p of getProviders().filter(p => p.enabled && p.type === 'openai-compatible')) {
+    for (const p of getProviders().filter(p => providerUsable(p) && p.type === 'openai-compatible')) {
       for (const m of p.models) {
         if (VISION_MODEL_RE.test(m)) models.push({ spec: `${p.id}:${m}`, providerName: p.name, model: m })
       }

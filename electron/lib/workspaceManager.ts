@@ -11,6 +11,7 @@ import { emitPluginEvent } from './pluginEvents'
 import { IGNORE_FILE_NAME } from './kbStore/ignoreFile'
 import { parseMarkdown, serializeMarkdown } from './kbStore/mdStore'
 import { broadcastDataChanged } from '../main/windowBus'
+import { adoptLegacyAgentSessionsToVault } from './agentSessionRepo'
 import { syncVaultWatcher, markSelfWrite } from './fsWatcher'
 import { bookMetaPruneOrphans } from './kbStore/vaultBookMetaRepo'
 import { globalReadJson, globalWriteJson } from './globalJsonStore'
@@ -576,13 +577,22 @@ function migrateBlogLayoutIntoKnowbase(rootPath: string): void {
   } catch { /* 目录不可读：跳过 */ }
 }
 
-/** 打开/创建/恢复仓库时的一次性布局迁移（P4 起 = 博客收拢；失败不阻断进入） */
+/**
+ * 打开/创建/恢复仓库时的一次性布局迁移（P4 起 = 博客收拢；失败不阻断进入）。
+ *
+ * 2026-10-13 加入第二条：**存量 AI 会话认领**（会话改为随仓库走，见
+ * docs/agent-sessions-vault-plan.md）。三处调用点（启动恢复 / adoptVaultDirectory /
+ * 导入合并）正是「仓库成为当前仓库」的全部入口，认领器自身幂等且进程内只试一次，
+ * 所以挂在这里即可，不必在各调用点重写一遍。
+ */
 function runLayoutMigrations(rootPath: string): void {
   try {
     migrateBlogLayoutIntoKnowbase(rootPath)
   } catch (e) {
     console.warn('[vault-layout] Blog layout migration failed (non-blocking):', (e as Error)?.message || e)
   }
+  // 存量 AI 会话 → 当前仓库（幂等；失败只留日志，原全局文件不动）
+  adoptLegacyAgentSessionsToVault()
 }
 
 // ===== 附件落盘（P3 编辑器插图：选图/粘贴共用；D1 目标 = 仓库根 .attachments/<年-月>/）=====

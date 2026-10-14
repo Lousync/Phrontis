@@ -1037,6 +1037,22 @@ export type LlmProviderType = 'openai-compatible' | 'ollama' | 'anthropic' | 'op
  */
 export type LlmModelFamily = 'chat' | 'messages' | 'responses'
 
+/**
+ * 端点内的一个账号（2026-10-13，按原型 tmp/ai-settings-proto 的「账号列表」落地）。
+ * 同一 baseUrl / 协议 / 请求头 / 模型清单，只有 Key 各自独立加密 —— 所以换账号
+ * 不用重输地址与协议，也不会把上一个账号的 Key 覆盖掉。
+ * **密文永不回传**：渲染层只拿得到 hasKey。
+ */
+export interface LlmAccountInfo {
+  id: string
+  name: string
+  enabled: boolean
+  hasKey: boolean
+  /** 最近一次「测试这个账号」的往返耗时与时间点 */
+  lastLatencyMs?: number
+  lastTestedAt?: string
+}
+
 /** 脱敏后的供应商信息（Key 相关字段永不回传） */
 export interface LlmProviderInfo {
   id: string
@@ -1044,8 +1060,15 @@ export interface LlmProviderInfo {
   type: LlmProviderType
   baseUrl: string
   enabled: boolean
+  /** 当前账号是否已配 Key（旧口径；账号级看 accounts[].hasKey） */
   hasKey: boolean
   models: string[]
+  /** 端点内的账号（switch activeAccountId 不改变任何模型 spec） */
+  accounts: LlmAccountInfo[]
+  /** 当前生效账号 id（空 = 无账号） */
+  activeAccountId: string
+  /** 端点整体可用 = 端点启用 且 至少一个账号可用；不可用端点的模型不进模型选择器 */
+  usable: boolean
   /** 逐模型协议覆盖（空对象 = 全部跟随 type） */
   modelFamilies?: Record<string, LlmModelFamily>
   headers?: Record<string, string>
@@ -2394,7 +2417,13 @@ export interface ElectronAPI {
   llmSaveProvider: (draft: LlmProviderDraft) => Promise<{ ok: boolean; id?: string; error?: string }>
   llmRemoveProvider: (id: string) => Promise<{ ok: boolean }>
   llmToggleProvider: (id: string, enabled: boolean) => Promise<{ ok: boolean }>
-  llmTestConnection: (draft: { type: LlmProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string> }) => Promise<LlmTestResultInfo>
+  llmTestConnection: (draft: { type: LlmProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string>; accountId?: string }) => Promise<LlmTestResultInfo>
+  // 账号（端点内部的第二层，2026-10-13）：同一端点换一把 Key，地址/协议/请求头/模型清单全复用
+  llmAddAccount: (payload: { providerId: string; name?: string; apiKey?: string }) => Promise<{ ok: boolean; id?: string; accounts?: LlmAccountInfo[]; activeAccountId?: string; error?: string }>
+  llmSetActiveAccount: (providerId: string, accountId: string) => Promise<{ ok: boolean; activeAccountId?: string; error?: string }>
+  llmUpdateAccount: (payload: { providerId: string; accountId: string; name?: string; apiKey?: string; enabled?: boolean }) => Promise<{ ok: boolean; accounts?: LlmAccountInfo[]; error?: string }>
+  llmRemoveAccount: (providerId: string, accountId: string) => Promise<{ ok: boolean; accounts?: LlmAccountInfo[]; activeAccountId?: string; error?: string }>
+  llmTestAccount: (providerId: string, accountId: string) => Promise<{ ok: boolean; latencyMs: number; models?: string[]; error?: string }>
   llmVisionModels: () => Promise<{ models: LlmVisionModelInfo[] }>
   llmRefreshModels: (id: string) => Promise<{ ok: boolean; models: string[]; error?: string }>
   llmSetModelFamily: (id: string, model: string, family: LlmModelFamily | '') => Promise<{ ok: boolean; modelFamilies?: Record<string, LlmModelFamily>; error?: string }>
@@ -2440,6 +2469,8 @@ export interface ElectronAPI {
   agentSessions: () => Promise<AgentSessionInfo[]>
   agentNewSession: (title?: string, source?: AgentSessionSource) => Promise<AgentSessionInfo>
   agentMessages: (sessionId: string) => Promise<AgentStoredMessage[]>
+  /** 存量会话认领的一次性告知（会话随仓库走）：取走即删，无则 null */
+  agentTakeAdoptNotice: () => Promise<{ sessions: number; messages: number; vaultName: string; at: string } | null>
   // ===== AI 用量 / 会话文件改动（v3.4.0 批次5，右栏 token 面板只读）=====
   agentUsageGet: () => Promise<{ days: Record<string, AiUsageDay> }>
   agentSessionChanges: (sessionId?: string) => Promise<SessionFileChange[]>

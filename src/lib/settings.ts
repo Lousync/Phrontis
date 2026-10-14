@@ -201,7 +201,7 @@ export const SETTINGS = {
   // ---- 终端模块（docs/terminal-module-design.md）：shell / 字号 / AI 执行开关 ----
   terminalShell: { default: 'auto', type: 'select', label: '终端默认 shell', group: '终端', desc: 'auto=按平台自动（Windows pwsh 7 → PowerShell 5.1；macOS/Linux 取 $SHELL）；也可固定 pwsh / powershell / cmd / zsh / bash。终端工具栏的 shell 牌可与这里互写', keywords: ['终端', 'shell', 'pwsh', 'powershell', 'zsh', 'bash', '命令行', 'terminal'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   terminalFontSize: { default: 13, type: 'number', label: '终端字号', group: '终端', desc: '终端文字大小（px）', keywords: ['终端', '字号', '字体大小', 'terminal', 'font'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'terminal.fontSize', min: 12, max: 18, step: 1, unit: 'px' },
-  terminalAiExec: { default: false, type: 'toggle', label: 'AI 终端执行', group: 'AI 终端', desc: '开启后 AI 可申请 builtin.terminal.exec 工具执行命令：每条命令先在终端模块「AI 执行记录」行内确认（高危命令弹严重警告），关闭 = 工具完全不进入 AI 视野', keywords: ['终端', 'ai', '执行', '命令', 'shell', '权限', 'terminal'], section: 'aiTools', ui: true, scope: 'global', level: 'danger', affects: 'live', anchor: 'terminal.aiExec', aiTab: 'perms' },
+  terminalAiExec: { default: false, type: 'toggle', label: 'AI 终端执行', group: 'AI 终端', desc: '开启后 AI 可申请 builtin.terminal.exec 工具执行命令：每条命令先在终端模块「AI 执行记录」行内确认（高危命令给出严重警告）；关闭后该工具不进入 AI 视野', keywords: ['终端', 'ai', '执行', '命令', 'shell', '权限', 'terminal'], section: 'aiTools', ui: true, scope: 'global', level: 'danger', affects: 'live', anchor: 'terminal.aiExec', aiTab: 'perms' },
   onboardingDone: { default: false, type: 'toggle', label: '新手引导完成', group: '引导', desc: '是否已完成新手引导（由引导流程维护）', keywords: ['引导', '新手', 'onboarding'], section: 'about', ui: false, scope: 'global', level: 'normal', affects: 'live' },
 
   // ---- 更新说明（VS Code 式 tab）：清单由 CHANGELOG 生成，阅读记录落仓库 .knowbase/modules/release-notes/ ----
@@ -209,34 +209,34 @@ export const SETTINGS = {
   releaseNotesAutoOpen: { default: true, type: 'toggle', label: '新版本时自动打开更新说明', group: '更新说明', desc: '中间版本号（x.y）变化后的首次启动，自动打开一页更新说明；修正版（x.y.z）不打扰', keywords: ['更新说明', '更新日志', '发布说明', '新版本', '自动打开', 'release notes', 'changelog'], section: 'about', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'advanced.releaseNotes' },
   releaseNotesKeepHistory: { default: true, type: 'toggle', label: '在仓库中保留更新说明存档', group: '更新说明', desc: '把当前版本的更新说明与阅读记录写进仓库 .knowbase/modules/release-notes/，换电脑拷走仓库一并带走', keywords: ['更新说明', '存档', '保留', '阅读记录', 'release notes', 'knowbase'], section: 'about', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'advanced.releaseNotes' },
   badgeEggActivated: { default: false, type: 'toggle', label: '角标彩蛋', group: '彩蛋', desc: '彩蛋：标题栏角标变为 YHAz（外观页输入 YHAz 激活）', keywords: ['彩蛋', '角标', 'YHAz', 'badge'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  aiToolMonthlyLimit: { default: 0, type: 'number', label: '月度调用上限', group: '工具调用', desc: '每月最多调用次数，0 表示不限制', keywords: ['上限', '限制', '每月', '调用上限', 'limit', '额度', '配额'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.monthlyLimit', aiTab: 'tools', min: 0, max: 1000000, step: 10 },
+  aiToolMonthlyLimit: { default: 0, type: 'number', label: '月度调用上限', group: '工具调用', desc: '每月最多调用次数，0 表示不限制', keywords: ['上限', '限制', '每月', '调用上限', 'limit', '额度', '配额'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.monthlyLimit', aiTab: 'usage', min: 0, max: 1000000, step: 10 },
   aiSkillDisabled: { default: '[]', type: 'json', label: '停用 Skill', group: 'Skill', desc: '停用的 Skill 注册名列表（JSON）', keywords: ['skill', '停用', '禁用', '技能'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'tools' },
   modelProviders: { default: '', type: 'json', label: '模型供应商', group: '模型', desc: 'LLM 供应商列表（加密存储，渲染层不可解）', keywords: ['模型', '供应商', 'provider', 'llm'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models' },
   defaultChatModel: { default: '', type: 'text', label: '默认对话模型', group: '模型', desc: '默认对话模型（格式 providerId:modelId）', keywords: ['模型', '默认', 'chat', 'model'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models' },
-  llmMaxTokens: { default: 4096, type: 'number', label: '单次 maxTokens 上限', group: '模型', desc: '单次调用 maxTokens 上限', keywords: ['token', 'maxTokens', '上限', '输出长度'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models', min: 128, max: 131072, step: 256 },
-  aiStreamEnabled: { default: true, type: 'toggle', label: '流式输出', group: '对话输出', desc: 'AI 回复逐字输出并实时显示工具调用过程；关闭后退回一次性返回（供应商不支持流式时也会自动回退）', keywords: ['流式', '逐字', '打字机', 'stream', '输出', '过程', '时间线'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.stream', aiTab: 'models' },
-  agentMaxRounds: { default: 16, type: 'number', label: '最大推理轮数', group: 'Agent 循环', desc: '单次请求内 LLM 决策轮数上限，耗尽后自动做一次总结收场（不会丢弃已获取的信息）；复杂任务可调大', keywords: ['轮数', '推理', 'agent', '上限', '循环', '迭代'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 2, max: 64, step: 1 },
-  agentRunTokenBudget: { default: 500000, type: 'number', label: '单次请求 token 预算', group: 'Agent 循环', desc: '各轮累计 token 达到此值即进入总结收场（防止失控循环烧费用），0 表示不限制', keywords: ['token', '预算', '费用', '上限', '失控'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 0, max: 10000000, step: 50000 },
-  agentContextBudgetTokens: { default: 24000, type: 'number', label: '历史上下文预算', group: 'Agent 循环', desc: '注入模型的历史消息按 token 预算裁剪（保首尾、中间轮丢弃），0 表示不裁剪', keywords: ['上下文', '历史', '裁剪', 'token', '预算'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 0, max: 200000, step: 2000 },
-  agentCompressionEnabled: { default: true, type: 'toggle', label: '历史自动压缩', group: 'Agent 循环', desc: '上下文达到触发线时自动把较早的对话折叠为持久化纪要（代替直接丢弃），也可随时输入 /compress 手动触发；关闭后退回裁剪', keywords: ['压缩', '纪要', 'compact', 'compress', '上下文', '历史'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat' },
-  agentCompressAtPercent: { default: 80, type: 'number', label: '自动压缩触发线(%)', group: 'Agent 循环', desc: '上下文估算达到历史预算的该百分比时自动压缩（80 = 预算用到八成先压再发）；越低压得越早、压缩调用越频繁，范围 50-100', keywords: ['压缩', '触发', '阈值', '百分比', 'compress', 'threshold'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 50, max: 100, step: 5 },
-  agentCompressModelId: { default: '', type: 'text', label: '压缩专用模型', group: 'Agent 循环', desc: '生成压缩纪要的模型（格式 providerId:modelId），留空用当前会话模型；可指定便宜模型降低压缩成本', keywords: ['压缩', '纪要', '模型', '成本', 'compress', 'model'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat' },
-  aiShowThinking: { default: true, type: 'toggle', label: '显示思考过程', group: '对话输出', desc: '推理模型返回的思考链以折叠区实时显示；普通模型没有思考链，此项无效果（自动不出现）', keywords: ['思考', '思考链', '推理', 'thinking', 'reasoning', '过程'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.thinking', aiTab: 'models' },
-  sofficePath: { default: '', type: 'text', label: 'LibreOffice 路径', group: '模型', desc: 'pptx 视觉转写用的 soffice 可执行文件绝对路径（留空=自动探测：注册表 / 常见安装位 / PATH）', keywords: ['libreoffice', 'soffice', 'pptx', '视觉转写', '转换', '路径', '路径设置'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models', anchor: 'aiTools.sofficePath' },
-  webCrawlMaxPages: { default: 80, type: 'number', label: '网页抓取页数上限', group: '模型', desc: '单次「展开网页」批量抓取的最大章节数（防超大站失控）', keywords: ['网页', '抓取', 'crawl', '上限', '素材'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models', min: 1, max: 200, step: 1 },
-  webCrawlDelayMs: { default: 300, type: 'number', label: '网页抓取页间隔(ms)', group: '模型', desc: '批量抓取每页间隔（礼貌抓取，单位毫秒）', keywords: ['网页', '抓取', '间隔', 'delay', 'crawl'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models', min: 0, max: 5000, step: 50 },
-  aiModulePermissions: { default: '{"knowledge":"read","blog":"read","schedule":"read","checkin":"read","pomodoro":"read","quiz":"read","bookMarket":"read","terminal":"write","accounting":"write"}', type: 'json', label: 'AI 模块权限', group: '权限', desc: 'AI 按模块权限：off=禁止 read=只读 write=可读写（JSON）；terminal 模块的可见性另受 terminalAiExec 开关约束；accounting 默认读写以支持 AI 录账', keywords: ['权限', 'permission', '授权', '模块'], section: 'aiTools', ui: false, scope: 'global', level: 'danger', affects: 'live', aiTab: 'perms' },
+  llmMaxTokens: { default: 4096, type: 'number', label: '单次 maxTokens 上限', group: '模型', desc: '单次回复最多生成的 token 数；数值越小费用越低，设置过小将截断较长回复', keywords: ['token', 'maxTokens', '上限', '输出长度', '回复长度', '单次回复上限', '单次 maxTokens 上限'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models', min: 128, max: 131072, step: 256 },
+  aiStreamEnabled: { default: true, type: 'toggle', label: '流式输出', group: '对话输出', desc: 'AI 回复逐字输出并实时显示工具调用过程；关闭后改为一次性返回（供应商不支持流式时同样自动回退）', keywords: ['流式', '逐字', '打字机', 'stream', '输出', '过程', '时间线'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.stream', aiTab: 'chat' },
+  agentMaxRounds: { default: 16, type: 'number', label: '最大推理轮数', group: 'Agent 循环', desc: '单次任务里 AI 最多决策几轮，用满后自动做一次总结收场（不会丢弃已获取的信息）；复杂任务可调大', keywords: ['轮数', '推理', 'agent', '上限', '循环', '迭代', '最多思考几轮', '单次任务最多思考几轮', '最大推理轮数'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 2, max: 64, step: 1 },
+  agentRunTokenBudget: { default: 500000, type: 'number', label: '单次 token 预算', group: 'Agent 循环', desc: '单次任务累计消耗的 token 达到此值即总结收场（防止循环失控产生过高费用），0 表示不限制', keywords: ['token', '预算', '费用', '上限', '失控', '花费上限', '单次任务花费上限', '单次 token 预算'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 0, max: 10000000, step: 50000 },
+  agentContextBudgetTokens: { default: 24000, type: 'number', label: '历史上下文预算', group: 'Agent 循环', desc: '发给模型的历史对话按 token 预算裁剪（保留首尾、中间轮次丢弃），0 表示不裁剪', keywords: ['上下文', '历史', '裁剪', 'token', '预算', '带多少历史', '带多少历史对话', '历史上下文预算'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 0, max: 200000, step: 2000 },
+  agentCompressionEnabled: { default: true, type: 'toggle', label: '历史自动压缩', group: 'Agent 循环', desc: '历史对话占用到触发线时，先将较早的对话压缩为持久化纪要再发送（而非直接丢弃），也可随时输入 /compress 手动触发；关闭后退回裁剪', keywords: ['压缩', '纪要', 'compact', 'compress', '上下文', '历史', '长对话先总结', '历史自动压缩'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat' },
+  agentCompressAtPercent: { default: 80, type: 'number', label: '自动压缩触发线(%)', group: 'Agent 循环', desc: '历史用量达到该百分比时先总结再发送（80 表示用到八成时先总结）；数值越低触发越早、总结调用越频繁，范围 50-100', keywords: ['压缩', '触发', '阈值', '百分比', 'compress', 'threshold', '触发总结', '用掉多少历史就触发总结', '自动压缩触发线'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 50, max: 100, step: 5 },
+  agentCompressModelId: { default: '', type: 'text', label: '长对话压缩摘要模型', group: '模型', desc: '生成压缩纪要的模型（格式 providerId:modelId），留空跟随当前会话模型；可指定成本较低的模型以降低压缩开销。在「哪个场景用哪个模型」表里设置', keywords: ['压缩', '纪要', '模型', '成本', 'compress', 'model', '场景'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models' },
+  aiShowThinking: { default: true, type: 'toggle', label: '显示思考过程', group: '对话输出', desc: '推理模型返回的思考链以折叠区实时显示；普通模型不返回思考链，此项无效果', keywords: ['思考', '思考链', '推理', 'thinking', 'reasoning', '过程'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.thinking', aiTab: 'chat' },
+  sofficePath: { default: '', type: 'text', label: 'LibreOffice 路径', group: '工具', desc: 'pptx / docx 视觉转写用的 soffice 可执行文件绝对路径（留空表示自动探测：Windows 注册表、常见安装位置、系统 PATH）', keywords: ['libreoffice', 'soffice', 'pptx', '视觉转写', '转换', '路径', '路径设置'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', aiTab: 'tools', anchor: 'aiTools.sofficePath' },
+  webCrawlMaxPages: { default: 80, type: 'number', label: '网页抓取页数上限', group: '工具', desc: '单次「展开网页」批量抓取的最大章节数（防止超大型站点抓取失控）', keywords: ['网页', '抓取', 'crawl', '上限', '素材'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', aiTab: 'tools', anchor: 'aiTools.crawlPages', min: 1, max: 200, step: 1 },
+  webCrawlDelayMs: { default: 300, type: 'number', label: '网页抓取页间隔(ms)', group: '工具', desc: '批量抓取时每页之间的间隔（单位：毫秒）', keywords: ['网页', '抓取', '间隔', 'delay', 'crawl'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', aiTab: 'tools', anchor: 'aiTools.crawlDelay', min: 0, max: 5000, step: 50 },
+  aiModulePermissions: { default: '{"knowledge":"read","blog":"read","schedule":"read","checkin":"read","pomodoro":"read","quiz":"read","bookMarket":"read","terminal":"write","accounting":"write"}', type: 'json', label: 'AI 模块权限', group: '权限', desc: 'AI 按模块权限：off=禁止 read=只读 write=可读写（JSON）；terminal 模块的可见性另受 terminalAiExec 开关约束；accounting 默认读写以支持 AI 记账', keywords: ['权限', 'permission', '授权', '模块'], section: 'aiTools', ui: false, scope: 'global', level: 'danger', affects: 'live', aiTab: 'perms' },
   assistantWidth: { default: 380, type: 'number', label: 'AI 助手侧栏宽度', group: 'AI 助手', desc: 'AI 助手侧栏宽度', keywords: ['助手', '侧栏', '宽度', 'assistant'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', unit: 'px' },
-  assistantModelId: { default: '', type: 'text', label: 'AI 助手对话模型', group: 'AI 助手', desc: 'AI 助手（侧栏/右栏/aiChat）本轮对话模型（providerId:modelId 串；空=全局默认模型）', keywords: ['助手', '模型', '对话模型', 'assistant', 'model'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  assistantThinking: { default: true, type: 'toggle', label: 'AI 助手思考模式', group: 'AI 助手', desc: '开 = 对话走深度思考（reasoning_effort=medium，慢而全面）；关 = 快速回答（不透传思考参数）。仅对具备思考能力的模型有差异', keywords: ['助手', '思考', '推理', '深度', '快速', 'thinking', 'reasoning', 'assistant'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  assistantModelId: { default: '', type: 'text', label: 'AI 助手对话模型', group: '模型', desc: 'AI 助手（侧栏 / 右栏 / aiChat）本轮使用的模型（providerId:modelId；空 = 跟随对话默认）。在「哪个场景用哪个模型」表里设置', keywords: ['助手', '模型', '对话模型', 'assistant', 'model', '场景'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models' },
+  assistantThinking: { default: true, type: 'toggle', label: '助手深度思考', group: 'AI 助手', desc: '开启：助手对话使用深度思考（较慢但更全面）；关闭：快速回答。仅对具备思考能力的模型有差异', keywords: ['助手', '思考', '推理', '深度', '快速', 'thinking', 'reasoning', 'assistant', '深度思考'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.assistantThinking', aiTab: 'chat' },
   assistantInputStyle: { default: 'v1', type: 'text', label: 'AI 助手输入样式', group: 'AI 助手', desc: 'AI 助手输入框外观方案（v1 浅灰填充 / v2 白卡描边 / v3 光晕 / v4 投影 / v5 胶囊 / v6 内凹 / v7 双层嵌套 / v8 下划线 / v9 灰底聚焦描边；外观设置页可切换）', keywords: ['助手', '输入', '输入框', '样式', '外观', 'assistant'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   // 2026-10-13：补 anchor（此前 ui:true 却无 anchor ⇒ 被 schemaKeyItems 静默排除在设置搜索之外，
   // 只能在 AI 助手面板里点到）；页签归属改为「对话」——它管的是对话怎么跑，不是模型怎么接。
-  aiAssistantPerception: { default: false, type: 'toggle', label: 'AI 助手感知模式', group: 'AI 助手', desc: '发送前自动检索知识库，把最相关的笔记素材注入本轮上下文；纯本地检索（至多一次向量化调用，不消耗对话 token）。未配置向量模型时自动降级为关键词匹配', keywords: ['感知', '检索', '召回', '素材', 'rag', 'perception', '语意', '关键词', 'assistant'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.perception', aiTab: 'chat' },
-  aiMascot: { default: 'auto', type: 'select', label: 'AI 输入区吉祥物', group: 'AI 助手', desc: '有 AI 输入框的地方（对话主区 / 侧边对话 / 放大态 / 支线旁问 / 日程问答）在输入卡上沿显示一只吉祥物，随 AI 活动切换小动作。可选「自动」（用已安装的吉祥物）、「内置占位」或指定某只角色；「关闭」即消失', keywords: ['吉祥物', '角色', '待机', '宠物', '小宠物', '小动物', '书桌伙伴', '换一只', '换角色', 'mascot', '输入框', 'assistant'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'ai.mascot', aiTab: 'chat' },
-  aiAssistantInlineSuggest: { default: true, type: 'toggle', label: '编辑器内联建议', group: 'AI 内联建议', desc: '打字停顿后由 AI 续写下一句，以灰色斜体幽灵文字呈现；Tab 采纳、Esc 拒绝、Alt+A 立即要一条', keywords: ['内联', '建议', '续写', '补全', '幽灵', 'ghost', 'inline', 'suggest', 'alt+a', 'assistant'], section: 'editor', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  aiAssistantInlineSuggestAuto: { default: true, type: 'toggle', label: '自动触发', group: 'AI 内联建议', desc: '停 0.8 秒自动出建议（只在句读 / 换行 / 词后这类自然断点，词中间不打扰）；关掉后只在按 Alt+A 时出', keywords: ['内联', '建议', '自动', '触发', '停顿', 'debounce', 'auto', 'inline'], section: 'editor', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  aiAssistantInlineSuggestModelId: { default: '', type: 'text', label: '内联建议模型', group: 'AI 内联建议', desc: '续写用的模型（providerId:modelId；空 = 跟随全局默认）。调用频次远高于对话，建议单独指定便宜快的模型', keywords: ['内联', '建议', '模型', '续写', 'model', 'inline', '成本'], section: 'editor', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  aiAssistantPerception: { default: false, type: 'toggle', label: 'AI 助手感知模式', group: 'AI 助手', desc: '发送前自动检索知识库，将最相关的笔记内容注入本轮上下文；检索在本地完成（至多一次向量化调用，不消耗对话 token）。未配置向量模型时自动降级为关键词匹配', keywords: ['感知', '检索', '召回', '素材', 'rag', 'perception', '语意', '关键词', 'assistant'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.perception', aiTab: 'chat' },
+  aiMascot: { default: 'auto', type: 'select', label: 'AI 输入区吉祥物', group: 'AI 助手', desc: '有 AI 输入框的地方（对话主区 / 侧边对话 / 放大态 / 支线旁问 / 日程问答）在输入卡上沿显示吉祥物，并随 AI 活动切换动作。可选「自动」（使用已安装的吉祥物）、「内置占位」或指定角色；选择「关闭」则不显示', keywords: ['吉祥物', '角色', '待机', '宠物', '小宠物', '小动物', '书桌伙伴', '换一只', '换角色', 'mascot', '输入框', 'assistant'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'ai.mascot', aiTab: 'chat' },
+  aiAssistantInlineSuggest: { default: true, type: 'toggle', label: '编辑器内联建议', group: 'AI 内联建议', desc: '打字停顿后由 AI 续写下一句，以浅灰提示文字呈现；Tab 采纳、Esc 拒绝、Alt+A 立即请求', keywords: ['内联', '建议', '续写', '补全', '幽灵', 'ghost', 'inline', 'suggest', 'alt+a', 'assistant'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.inlineSuggest', aiTab: 'chat' },
+  aiAssistantInlineSuggestAuto: { default: true, type: 'toggle', label: '自动触发', group: 'AI 内联建议', desc: '停顿 0.8 秒后自动给出建议（仅在句读、换行、词后等自然断点触发）；关闭后仅按 Alt+A 时给出', keywords: ['内联', '建议', '自动', '触发', '停顿', 'debounce', 'auto', 'inline'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.inlineSuggestAuto', aiTab: 'chat' },
+  aiAssistantInlineSuggestModelId: { default: '', type: 'text', label: '内联建议模型', group: '模型', desc: '续写用的模型（providerId:modelId；空 = 跟随对话默认）。调用频次远高于对话，建议单独指定成本较低、响应较快的模型。在「哪个场景用哪个模型」表里设置', keywords: ['内联', '建议', '模型', '续写', 'model', 'inline', '成本', '场景'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models' },
   learnProgress: { default: '{"done":[],"last":1}', type: 'json', label: 'AI 学堂学习进度', group: 'AI 助手', desc: '上手路径已完成步骤与当前所在步骤（JSON）', keywords: ['ai 学堂', '上手', '教程', '进度', 'learn'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   dayPanelState: { default: '', type: 'json', label: '日程打卡小窗状态', group: '小窗', desc: '日程打卡小窗位置大小（主进程直写）', keywords: ['小窗', '打卡', 'daypanel', '悬浮'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   // ---- 工作台三栏外壳（v3.4.0）：布局状态单键（方案 §3.5）。左右栏宽度由 ResizablePanel 各自持久化（wb.leftWidth / wb.rightWidth），不进本键 ----
@@ -256,7 +256,7 @@ export const SETTINGS = {
   fillPopupAlwaysOnTop: { default: true, type: 'toggle', label: '小密码本始终置顶', group: '小窗', desc: '悬浮小密码本（Ctrl+Alt+P）默认盖在所有窗口之上；关闭后退化为普通窗口可被遮挡', keywords: ['小密码本', '置顶', '顶层', 'fill', 'popup', '密码', '悬浮'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   // 2026-10-13：AI 教学的三项从「模块设置」迁到「AI 工具 → 教学」——它们本来就是 AI 设置，
   // 放在模块设置里等于"AI 设置分散在两处"。同时补 anchor（此前 ui:true 无 anchor ⇒ 搜不到）。
-  aiTeachRootDir: { default: 'AI教学', type: 'text', label: 'AI教学产物根目录', group: 'AI教学', desc: '会话文件夹所在仓库根目录名；改名会把已有目录一并重命名迁移（占用/权限失败则保留原目录）', keywords: ['AI教学', '教学', '目录', '根目录', '文件夹', '产物', 'aiteach'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTeach.rootDir', aiTab: 'teach' },
+  aiTeachRootDir: { default: 'AI教学', type: 'text', label: 'AI教学产物根目录', group: 'AI教学', desc: '会话文件夹所在仓库根目录名；重命名会一并迁移已有目录（目录被占用或权限不足时保留原目录）', keywords: ['AI教学', '教学', '目录', '根目录', '文件夹', '产物', 'aiteach'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTeach.rootDir', aiTab: 'teach' },
   aiTeachDeleteSessionFolder: { default: 'ask', type: 'select', label: '删除会话时文件夹处理', group: 'AI教学', desc: 'ask=每次询问 / keep=保留文件夹 / delete=会话文件夹一并移入系统回收站', keywords: ['AI教学', '删除', '会话', '文件夹', '回收站', '产物'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTeach.deleteSessionFolder', aiTab: 'teach' },
   /**
    * 视觉转写模型（2026-10-13，决策 D）。
@@ -265,13 +265,13 @@ export const SETTINGS = {
    * AI 教学素材库里的选择器改为读写这个键。
    * 留空 = 自动在已启用的供应商里挑一个疑似支持图片的模型。
    */
-  aiTeachVisionModel: { default: '', type: 'text', label: '图片视觉转写模型', group: 'AI教学', desc: '转写教材图片用的模型（格式 providerId:modelId）；留空=自动挑选。与对话模型分开设置——转写量大且只需认得清字，用便宜的小模型更划算', keywords: ['视觉', '转写', '图片', 'ocr', '多模态', 'vision', '模型', '教材', 'aiteach'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTeach.visionModel', aiTab: 'teach' },
+  aiTeachVisionModel: { default: '', type: 'text', label: '图片视觉转写模型', group: '模型', desc: '转写教材图片用的模型（格式 providerId:modelId）；留空=自动挑选。与对话模型分开设置——转写量大且只需识别文字时，使用成本较低的模型更经济。在「哪个场景用哪个模型」表里设置', keywords: ['视觉', '转写', '图片', 'ocr', '多模态', 'vision', '模型', '教材', 'aiteach', '场景'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTeach.visionModel', aiTab: 'models' },
   // F-12：原 aiTeachUsageDetail / aiTeachCtxWindow 提为通用键（AI 教学与 AI 对话共用同一套档位与窗口口径）。
   // 旧键值由主进程启动时一次性迁移（settingsCache 拷贝，见 electron/main/index.ts）。
   // F-12 遗留收口（2026-10-07）：控件从「AI教学」设置页迁入「AI 工具 → AI 助手」小节并进设置搜索
   // （键的语义、消费方与 desc 早已通用化，入口滞留教学页属半成品状态）。
   ctxUsageDetail: { default: 'compact', type: 'select', label: '上下文占用指示档位', group: 'AI 助手', desc: 'off=隐藏 / compact=上下文占用圆环（点击看详情）/ detailed=圆环+文字摘要；AI 教学与 AI 对话共用', keywords: ['用量', 'token', '上下文', '圆环', '预算', 'context', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxUsageDetail', aiTab: 'chat' },
-  ctxWindow: { default: 0, type: 'number', label: '模型上下文窗口（token）', group: 'AI 助手', desc: '0=未设置（占用指示退化为纯数字）；设置后圆环按 上下文占用/窗口 比例分档着色；AI 教学与 AI 对话共用', keywords: ['上下文', '窗口', 'context', '128k', '圆环', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxWindow', aiTab: 'chat', min: 0, max: 4000000, step: 1000 },
+  ctxWindow: { default: 0, type: 'number', label: '模型上下文窗口（token）', group: 'AI 助手', desc: '0 = 未设置（占用指示仅显示数字）；设置后圆环按占用比例分档着色；AI 教学与 AI 对话共用', keywords: ['上下文', '窗口', 'context', '128k', '圆环', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxWindow', aiTab: 'chat', min: 0, max: 4000000, step: 1000 },
   // R6 D9：storageKnowledge / storageData / storageBlog 三键已随去库化收官全部退役
   // （知识库/博客/结构化模块恒 vault 文件，无读源分支残留）。
   uiWorkbench: { default: false, type: 'toggle', label: 'Workbench 布局', group: '外壳', desc: '实验性 VS Code 外壳；开启后编辑器文件树移到全局侧栏', keywords: ['workbench', '外壳', '布局', '侧栏', '编辑器组', '状态栏', 'vscode', '活动栏', 'shell', 'layout'], section: 'general', ui: true, scope: 'global', level: 'experimental', affects: 'live', anchor: 'advanced.workbench' },
@@ -286,7 +286,7 @@ export const SETTINGS = {
   pluginRequireSignature: { default: false, type: 'toggle', label: '插件强制签名', group: '插件安全', desc: '市场插件强制签名校验', keywords: ['插件', '签名', '校验', 'signature'], section: 'security', ui: true, scope: 'global', level: 'danger', affects: 'live' , anchor: 'security.pluginSignature' },
   pluginTrustedKeys: { default: '', type: 'text', label: '受信公钥 keyring', group: '插件安全', desc: '受信签名公钥 keyring（JSON 或 keyId=公钥）', keywords: ['插件', '公钥', 'keyring', '签名', '信任'], section: 'security', ui: true, scope: 'global', level: 'danger', affects: 'live' , anchor: 'security.pluginKeys' },
   updateMirror: { default: 'https://gh-proxy.com', type: 'text', label: '下载镜像', group: '更新', desc: 'GitHub 加速代理前缀，留空直连', keywords: ['镜像', '加速', '代理', 'github', 'proxy', '下载', 'cdn'], section: 'about', ui: true, scope: 'global', level: 'normal', affects: 'reload', anchor: 'advanced.mirror' },
-  aiVaultFilePerm: { default: 'read', type: 'select', label: 'AI vault 文件权限', group: '权限', desc: 'AI vault.* 工具访问仓库文件：off=禁止 read=只读 write=预留', keywords: ['vault', '文件', '权限', '仓库', 'ai', '读写'], section: 'aiTools', ui: false, scope: 'global', level: 'danger', affects: 'live', aiTab: 'perms' },
+  aiVaultFilePerm: { default: 'read', type: 'select', label: 'AI vault 文件权限', group: '权限', desc: 'AI vault.* 工具访问仓库文件：off=禁止 read=只读 write=可读写（新建 / 覆写 / 局部编辑 / 移动 / 移入回收站）', keywords: ['vault', '文件', '权限', '仓库', 'ai', '读写'], section: 'aiTools', ui: false, scope: 'global', level: 'danger', affects: 'live', aiTab: 'perms' },
 
   // ---- 阅读摘录：上次用色（落 settings，不新开 localStorage；浮条点色即时更新，缺省首色 y） ----
   excerptLastColor: { default: 'y', type: 'select', label: '上次摘录用色', group: '阅读', desc: '划选摘录默认使用的颜色（点色即更新，落 settings）', keywords: ['摘录', '高亮', '颜色'], section: 'modules', ui: false, scope: 'global', level: 'normal', affects: 'live' },
@@ -358,3 +358,43 @@ export type AppSettings = { [K in SettingsKey]: SettingsValue<K> }
 export const SETTINGS_DEFAULTS: AppSettings = Object.fromEntries(
   Object.entries(SETTINGS).map(([k, v]) => [k, (v as { default: unknown }).default])
 ) as AppSettings
+
+// ===== 「复位」的范围规则（2026-10-13）=====
+//
+// ★ 出处先说清：这个按钮**原型没有定义** —— tmp/ai-settings-proto 的全部产物（含 12 张 DOM 快照）
+//   都搜不到「复位」二字；它是从原型截图里读出来的一个按钮，位置在页签行右侧。
+//   所以按最合理的语义实现：**把当前页签的设置恢复为默认值**。
+//   规则放在这里（而不是另开一个文件）有一个硬理由：`settings.ts` 是**零依赖**的，
+//   契约脚本能直接 `import` 它真跑这几条规矩；而另开文件就得 import settings，
+//   那条链在裸 `node` 下解析不了（node 需要显式扩展名），等于规则无法被验证。
+//
+// 两条规矩：
+//   1. 只动 `section === 'aiTools'` 且 `aiTab === 当前页签` 的键 —— 复位是"这一页"的事；
+//   2. **`level: 'danger'` 的键一律不参与** —— 它们是安全边界与整块授权（终端执行开关、
+//      模块权限、仓库文件权限），"恢复默认"顺手把 AI 的权限放开是最不该发生的一类事故。
+//      权限页因此算出**空范围**，界面上那个按钮要置灰并说明原因。
+
+/** 额外排除（非 danger 级但同样不该被复位顺手改掉的键）；目前为空 */
+export const RESET_EXTRA_EXCLUDED: string[] = []
+
+interface ResettableEntry { section?: string; aiTab?: string; level?: string; default?: unknown }
+
+function entryOf(key: string): ResettableEntry | undefined {
+  return SETTINGS[key as SettingsKey] as unknown as ResettableEntry | undefined
+}
+
+/** 当前页签下可以被「复位」的键 */
+export function resetKeysForTab(tab: AiTab): string[] {
+  return Object.keys(SETTINGS).filter(k => {
+    const m = entryOf(k)
+    if (!m || m.section !== 'aiTools' || m.aiTab !== tab) return false
+    if (m.level === 'danger') return false
+    if (RESET_EXTRA_EXCLUDED.includes(k)) return false
+    return true
+  })
+}
+
+/** 某个键的默认值（复位时写回的就是它） */
+export function defaultOf(key: string): unknown {
+  return entryOf(key)?.default
+}

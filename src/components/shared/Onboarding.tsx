@@ -115,11 +115,11 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
               <StepTitle icon={<Bot size={15} />} title="AI 助手与插件" />
               <div className="space-y-2.5">
                 <InfoRow icon={<Bot size={14} />} title="AI 助手 · 边看边问"
-                  desc="Ctrl+J 随时唤起；设置 → AI 工具 中配置本地（Ollama）或在线模型，支持 CC Switch 一键导入。对话可调用本地工具并全程留痕" />
+                  desc="Ctrl+J 随时唤起；设置 → AI 中配置本地（Ollama）或在线模型，支持 CC Switch 一键导入。对话可调用本地工具并全程留痕" />
                 <InfoRow icon={<PluginIcon size={14} />} title="插件 · 官方市场"
                   desc="插件页一键安装主题、番茄预设与知识包（如 408 考研学习空间，一键导入 148 页学习内容）；S/A/B 三级安全审核" />
                 <InfoRow icon={<ShieldCheck size={14} />} title="按模块授权"
-                  desc="设置 → AI 工具 → 权限 中按模块控制 AI 能力边界（禁止 / 只读 / 读写），未授权模块 AI 完全无法触达" />
+                  desc="设置 → AI → 权限 中按模块控制 AI 能力边界（禁止 / 只读 / 读写），未授权模块 AI 完全无法触达" />
               </div>
             </div>
           )}

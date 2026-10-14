@@ -21,6 +21,8 @@ import {
   createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode, setSessionPinned,
   setSideLaneStatus, markSideLaneSeen,
 } from './agentSessionRepo'
+import { takeAdoptNotice } from './agentAdoptNotice'
+import { getCurrentVault } from './kbStore/vaultContext'
 import { MANUAL_CHANNEL_TOOL, MANUAL_MAX_ROUNDS, buildManualSystemPrompt, classifyManualIntent, hasOperationIntent } from './manualChannel'
 import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceConstraintsForSession, resolveWriteOwnerRel, listSessionFolderIds } from './aiTeachingFolders'
 import { readAssistantGlobalConstraints, readAssistantSessionConstraints, readAssistantGlossary } from './assistantConstraints'
@@ -716,10 +718,10 @@ async function runAgentLoop(
     ? new Set(listTools().filter(t => t.requires === 'write').map(t => t.name))
     : undefined
   const deniedHint = deniedModules.size > 0
-    ? `\n\n【权限提示】以下模块用户尚未授权 AI 操作：${[...deniedModules].join('、')}。若用户请求这些模块的操作，请如实说明当前未授权，并提示可在 设置 → AI 工具 → 权限 中开启后重试。`
+    ? `\n\n【权限提示】以下模块用户尚未授权 AI 操作：${[...deniedModules].join('、')}。若用户请求这些模块的操作，请如实说明当前未授权，并提示可在 设置 → AI → 权限 中开启后重试。`
     : ''
   const vaultFileHint = deniedVaultFile
-    ? '\n\n【权限提示】仓库文件读写（vault.* 工具）当前被权限限制。若用户请求操作仓库内笔记文件（列目录/读文件/搜内容），请如实说明需在 设置 → AI 工具 → 权限 → 仓库文件 中开启后重试。'
+    ? '\n\n【权限提示】仓库文件读写（vault.* 工具）当前被权限限制。若用户请求操作仓库内笔记文件（列目录/读文件/搜内容），请如实说明需在 设置 → AI → 权限 → 仓库文件 中开启后重试。'
     : ''
   // P3：存在被折叠的 ondemand 工具时，告知申请机制（写类工具默认不在视野）
   const toolsHint = toolsState.hasOnDemandHidden
@@ -1464,12 +1466,18 @@ export function registerAgentHandlers(): void {
     ensureSessionSources()
     return listAgentSessions().map(camelRow)
   })
-  ipcMain.handle('agent:newSession', (_e, title?: string, source?: string) =>
-    camelRow(createAgentSession(
+  ipcMain.handle('agent:newSession', (_e, title?: string, source?: string) => {
+    // 会话随仓库走（2026-10-13）：没有当前仓库就没有可写的位置。
+    // 渲染层 4 个调用点都是 `.catch(() => null)`，这里抛出即退化为「建不了会话」+ 我们给的提示。
+    if (!getCurrentVault()) throw new Error('尚未打开仓库，无法新建对话')
+    return camelRow(createAgentSession(
       typeof title === 'string' && title.trim() ? title.trim() : '新会话',
       source === 'aiTeaching' ? 'aiTeaching' : source === 'schedule' ? 'schedule' : 'assistant',
-    )))
+    ))
+  })
   ipcMain.handle('agent:messages', (_e, id: string) => getAgentMessages(String(id ?? '')).map(camelRow))
+  // 存量会话认领的一次性告知（会话随仓库走）：取走即删，只会被展示一次
+  ipcMain.handle('agent:takeAdoptNotice', () => takeAdoptNotice())
   // AI 用量 / 会话文件改动（v3.4.0 批次5，方案 §4/§3.8）：右栏 token 面板只读
   ipcMain.handle('agent:usage:get', () => getAiUsageData())
   ipcMain.handle('agent:sessionChanges:get', (_e, sessionId?: string) =>

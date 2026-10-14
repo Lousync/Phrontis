@@ -438,6 +438,26 @@ ok(/data-wb="pagebar"/.test(srcPageBar) && /data-pb-tabs=/.test(srcPageBar) && /
   'F3 页面条契约属性齐备（pagebar / pb-item / pb-tabs / 两个 pb-slot）')
 ok(/PAGE_OWNED/.test(srcPageBar) && /'knowledge'/.test(srcPageBar) && !/'editor'/.test(srcPageBar),
   'F4 页面条 PAGE_OWNED 只含知识库（编辑器已退役，不占模块条目）')
+// ===== F16 页面条横向溢出（2026-10-13，docs/v3.4.0-feedback.md 的 F-16 条）=====
+// 病根是三条叠加：模块条目数量无上限且 `shrink-0`（一多就把后面的槽整块顶出行）+
+// 行容器 `overflow-x-clip`（禁止滚动 ⇒ 顶出去就**够不到**）+ 知识库槽把滚动条藏了（**看不出能滚**）。
+// 所以断言也要成对：溢出区**自己得能滚**、**得让得出宽度**，而行容器**不能**被改成滚动容器。
+// 行为侧（该滚到哪、什么时候出渐隐、滚轮要不要劫持）另有一份：verify-strip-overflow.mjs。
+const kbSlotCls = (srcPageBar.match(/data-pb-slot="knowledge"[^>]*?className=\{`([^`]*)`\}/s) ?? [])[1] ?? ''
+ok(/data-pb-scroll="module"/.test(srcPageBar)
+  && /data-pb-scroll="module"[^]{0,260}?kb-edge-strip/.test(srcPageBar)
+  && /data-pb-scroll="module"[^]{0,260}?overflow-x-auto/.test(srcPageBar)
+  && /data-pb-scroll="module"[^]{0,260}?px-2 -ml-2/.test(srcPageBar),
+  'F16a 模块条目区自成一个横向滚动容器（data-pb-scroll=module + kb-edge-strip + overflow-x-auto + 弧位 px-2/-ml-2）')
+ok(/relative flex min-w-0 shrink items-end gap-1/.test(srcPageBar),
+  'F16b 模块条目区让得出宽度（shrink + min-w-0：行不够时自己缩，不再把后面的槽顶出行外）')
+ok(!!kbSlotCls && !/overflow-x-auto/.test(kbSlotCls) && !/kb-edge-strip/.test(kbSlotCls) && /shrink-0/.test(kbSlotCls),
+  'F16c 知识库槽不再自己滚（滚动与渐隐交给 PageTabStrip 一份实现），且宽度口径不变：shrink-0 + max-w-[50%] = 按内容占宽至多半行 —— 行宽不够时由模块条目区让宽', kbSlotCls)
+ok(/overflow-x-clip/.test(srcPageBar),
+  'F16d 负向：行容器仍是 overflow-x-clip（行本身绝不能变滚动容器 —— 横向滚动条占盒高会把激活条目从行底顶起，内凹弧还会被纵向裁掉）')
+ok(/useStripScroll/.test(srcStrip) && /StripEdges/.test(srcStrip)
+  && /data-pb-scroll="group"/.test(srcStrip) && /overflow-x-auto px-2 -ml-2/.test(srcStrip),
+  'F16e 页签条自带滚动 + 两侧渐隐 + 弧位（主栏页面条与副栏分屏槽共用同一个渲染器）')
 // 浮层结构已退役（批 2，2026-10-12，docs/nonmd-topbar-design.md）：原 `data-wb="mainPane"` 外壳 +
 // `data-wb="floatBar"` 悬浮胶囊 + `#editor-toolbar-slot` + `.kb-float-hide` 把手口径**整条删除** ——
 // md 的动作 2026-10-11 已搬进 `NoteTopBar`，非 md 的动作批 2 也搬进去了 ⇒ 胶囊的两个槽都没有写入方

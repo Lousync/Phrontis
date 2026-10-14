@@ -4,10 +4,12 @@ import { handleChatCommand } from '../../../lib/chatCommands'
 import { getAssistantContext } from '../../../lib/assistantContext'
 import { useSettings } from '../../../lib/SettingsContext'
 import {
-  agentSessions, agentNewSession, agentMessages, agentDeleteSession, agentSetSessionPinned,
+  agentSessions, agentMessages, agentDeleteSession, agentSetSessionPinned,
   agentChat, agentRegenerate, agentEditMessage, agentDeleteMessage,
   llmListProviders, agentAbortSession, aiToolsListSkills, onAssistantNotice,
 } from '../../../lib/ipc'
+// 新建会话走包装层：会话随仓库走，无仓库时要给提示而不是静默失败
+import { newAgentSession } from '../../../lib/agentSession'
 import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo, AgentSessionSource } from '../../../types'
 import type { StreamDraft } from '../../../lib/agentStreamCore'
 import {
@@ -345,7 +347,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   }, [closeDrawer])
 
   const newSession = useCallback(async (title?: string) => {
-    const sRow = await agentNewSession(title, sessionSource).catch(() => null)
+    const sRow = await newAgentSession(title, sessionSource)
     if (!sRow) return
     setSessions(prev => [sRow, ...prev])
     setActiveId(sRow.id)
@@ -426,7 +428,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     }
     let sid = activeIdRef.current
     if (!sid) {
-      const sRow = await agentNewSession(undefined, sessionSource).catch(() => null)
+      const sRow = await newAgentSession(undefined, sessionSource)
       if (!sRow) return
       sid = sRow.id
       setActiveId(sid)

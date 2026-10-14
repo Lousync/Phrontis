@@ -12,10 +12,13 @@ import {
 import { AiModelsTab } from './AiModelsTab'
 import { AiUsageTab } from './AiUsageTab'
 import { AiTeachingView } from './AiTeachingView'
+import { AiToolsAdvanced } from './AiToolsAdvanced'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { AiPermissionsTab } from './AiPermissionsTab'
 import { CollapseList } from '../components/CollapseList'
 import { SettingListPanel } from '../components/SettingListPanel'
+import { SectionHead } from './SectionHead'
+import { SETTINGS, resetKeysForTab, defaultOf } from '../../../lib/settings'
 import type { AiTab } from '../../../lib/settings'
 import type { AgentToolInfo, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpTestResult, SkillInfo, SkillInstallResult, PluginMascotInfo, PluginSummary } from '../../../types'
 
@@ -53,13 +56,29 @@ const AI_TABS = [
 ] as const
 
 /**
- * 设置 → AI 工具：一个页签一个域 —— 模型 / 权限 / 工具 / 对话 / 用量 / 教学。
+ * 设置 → AI：一个页签一个域 —— 模型 / 权限 / 工具 / 对话 / 用量 / 教学。
  * 默认落在「模型」：AI 设置里最先要配的就是模型，旧默认是「内置工具」（只读清单，看完就没事干了）。
  */
 export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
+  const { update } = useSettings()
   const [tab, setTab] = useState<AiTab>(initialTab ?? 'models')
   // 深链变化(面板再次"去配置模型"时组件可能仍挂载)同步切换
   useEffect(() => { if (initialTab) setTab(initialTab) }, [initialTab])
+  /**
+   * 「复位」：把**当前页签**的设置恢复为默认值。
+   * 范围规则在 lib/settings.ts 的 resetKeysForTab（纯函数，契约真跑）—— 两条硬规矩：
+   * 只动本页签的键；`level:'danger'` 的键一律不参与（安全边界不能被"恢复默认"顺手放开）。
+   * 因此权限页会算出空范围，按钮置灰并说明原因。
+   */
+  const [confirmReset, setConfirmReset] = useState(false)
+  const resetKeys = resetKeysForTab(tab)
+  const doReset = () => {
+    if (!confirmReset) { setConfirmReset(true); setTimeout(() => setConfirmReset(false), 3000); return }
+    for (const k of resetKeys) void update(k as keyof typeof SETTINGS, defaultOf(k) as never)
+    setConfirmReset(false)
+    showToast({ type: 'info', message: `已把本页 ${resetKeys.length} 项恢复为默认值` })
+  }
+  useEffect(() => { setConfirmReset(false) }, [tab])
   const [usage, setUsage] = useState<AiToolUsage>({ used: 0, limit: 0 })
   const [mascots, setMascots] = useState<PluginMascotInfo[]>([])
   /**
@@ -126,7 +145,7 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
 
   return (
     <div className="space-y-6">
-      {/* 页签 */}
+      {/* 页签 + 复位（复位只作用于**当前页签**；安全开关不参与，见 settings.ts 的 resetKeysForTab） */}
       <div className="flex items-center gap-1 border-b border-[var(--border-color)] flex-wrap">
         {AI_TABS.map(([id, label, icon]) => (
           <button
@@ -142,6 +161,19 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
             {label}
           </button>
         ))}
+        <button
+          onClick={doReset}
+          disabled={resetKeys.length === 0}
+          title={resetKeys.length === 0
+            ? '本页只有安全开关（终端执行 / 模块权限 / 仓库文件权限），它们不参与复位'
+            : `把本页这 ${resetKeys.length} 项恢复为默认值（安全开关不参与）`}
+          className={`ml-auto mb-1 px-2.5 py-1 rounded-md text-[11.5px] border transition-colors ${
+            confirmReset
+              ? 'border-red-500 text-red-400 hover:bg-red-500/10'
+              : 'border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'
+          } disabled:opacity-35 disabled:cursor-not-allowed`}>
+          {confirmReset ? '再点一次：恢复默认' : '复位'}
+        </button>
       </div>
 
       {/* 每个页签一个域。此前「工具调用量」汇总条与「AI 助手」两块常驻在这里（页签区之外），
@@ -156,6 +188,7 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
           <BuiltinToolsTab />
           <McpServersTab onInvoked={refreshUsage} />
           <SkillsTab />
+          <AiToolsAdvanced />
         </div>
       )}
 
@@ -171,7 +204,7 @@ export function AiToolsView({ initialTab }: { initialTab?: AiTab } = {}) {
 // ===== 对话页签 =====
 
 /**
- * 设置 → AI 工具 → 对话（2026-10-13 独立成页签）。
+ * 设置 → AI → 对话（2026-10-13 独立成页签）。
  *
  * 装的是"对话怎么跑"：助手感知、上下文占用指示、吉祥物、Agent 循环预算。
  * 这些原来散在两处 —— 档位/窗口/吉祥物**常驻在页签区之外**（切页签纹丝不动，看着像页面串了域），
@@ -184,11 +217,30 @@ function ChatTab({ mascots, mascotDiag }: {
   const { s, update } = useSettings()
   return (
     <div className="space-y-8">
+      {/* 回复方式（2026-10-13 按原型从「模型」页归位到这里）：
+          它管的是"AI 怎么回"，不是"用哪个模型" —— 留在模型页就是混域。 */}
+      <div data-setting-anchor="aiTools.stream">
+        <SectionHead title="回复方式" className="mb-4" />
+        <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md space-y-3.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[13px] text-[var(--text-primary)]">流式输出</div>
+              <div className="text-[11px] text-[var(--text-muted)] leading-relaxed">逐字输出回复并实时显示工具调用过程；供应商不支持时自动回退。</div>
+            </div>
+            <SettingSwitch checked={s.aiStreamEnabled !== false} onChange={v => { void update('aiStreamEnabled', v) }} aria-label="流式输出" />
+          </div>
+          <div data-setting-anchor="aiTools.thinking" className="flex items-center justify-between gap-3 pt-3.5 border-t border-[var(--border-color)]">
+            <div className="min-w-0">
+              <div className="text-[13px] text-[var(--text-primary)]">显示思考过程</div>
+              <div className="text-[11px] text-[var(--text-muted)] leading-relaxed">推理模型的思考链以折叠区实时显示；普通模型不返回思考链。</div>
+            </div>
+            <SettingSwitch checked={s.aiShowThinking !== false} onChange={v => { void update('aiShowThinking', v) }} aria-label="显示思考过程" />
+          </div>
+        </div>
+      </div>
+
       <div data-setting-anchor="aiTools.chat">
-        <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">AI 助手</h2>
-        <p className="text-[12px] text-[var(--text-muted)] mb-4">
-          对话输入区的行为与显示，AI 教学与 AI 对话共用同一套档位与窗口口径。
-        </p>
+        <SectionHead title="AI 助手" className="mb-4" />
         <div className="space-y-3 max-w-md">
           {/* 感知模式（2026-10-13）：此前 ui:true 却无 anchor ⇒ 被 schemaKeyItems 静默排除在
               设置搜索之外，只能在 AI 助手面板里点到。现在给出设置页落点。 */}
@@ -205,10 +257,21 @@ function ChatTab({ mascots, mascotDiag }: {
               />
             </label>
             <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed px-1 mt-1.5">
-              发送前自动检索知识库，把最相关的笔记素材注入本轮上下文；纯本地检索（至多一次向量化调用，不消耗对话 token）。
-              未配置向量模型时自动降级为关键词匹配。也可在 AI 助手面板顶部随时开关。
+              发送前自动检索知识库并注入最相关的笔记；检索在本地完成，不消耗对话 token；未配置向量模型时降级为关键词匹配。
             </p>
           </div>
+
+          <label data-setting-anchor="aiTools.assistantThinking" className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+            <span className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
+              <Sparkles size={14} className="text-[var(--text-muted)]" />
+              助手深度思考
+            </span>
+            <SettingSwitch
+              checked={s.assistantThinking !== false}
+              onChange={v => update('assistantThinking', v)}
+              aria-label="助手深度思考"
+            />
+          </label>
 
           <label data-setting-anchor="aiTools.ctxUsageDetail" className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
             <span className="flex items-center gap-2 text-[13px] text-[var(--text-primary)]">
@@ -240,7 +303,7 @@ function ChatTab({ mascots, mascotDiag }: {
               />
             </label>
             <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed px-1 mt-1.5">
-              0=未设置，用量指示退化为纯数字；设置所选模型的上下文窗口（如 128000）后圆环按占用比例着色（&gt;85% 变红）。
+              0 表示不显示圆环、仅保留数字；填写所选模型的上下文窗口（如 128000）后，圆环按占用比例着色。
             </p>
           </div>
 
@@ -263,16 +326,39 @@ function ChatTab({ mascots, mascotDiag }: {
             </label>
             <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed px-1 mt-1.5">
               {mascots.length > 0
-                ? '有 AI 输入框的地方（对话主区 / 侧边对话 / 放大态 / 支线旁问 / 日程问答）在输入卡上沿显示所选角色，随 AI 活动切换小动作。'
+                ? '在含 AI 输入框的界面（对话主区、侧边对话、放大态、支线旁问、日程问答）的输入卡上沿显示所选角色。'
                 : mascotDiag.state === 'unavailable'
-                  ? '读不到吉祥物清单（插件线不可用）—— 若刚更新过版本或正在开发模式，先把应用整个重启一次（开发模式下只刷新界面不够，后台不会跟着更新）；仍不行请把这一行报给开发者。'
+                  ? '无法读取吉祥物清单（插件通道不可用）。若刚更新过版本或处于开发模式，请完整重启应用（开发模式下仅刷新界面不会更新主进程）；若仍无法读取，请将本行信息反馈给开发者。'
                   : mascotDiag.state === 'stale'
-                    ? `已安装并启用了 ${mascotDiag.names.join('、')}，但没能读出角色 —— 多半是后台（主进程）还停在旧版本，重启应用后再看。`
+                    ? `已安装并启用了 ${mascotDiag.names.join('、')}，但未能读取角色，通常为主进程版本未同步；请重启应用后重试。`
                     : mascotDiag.state === 'disabled'
-                      ? `已安装 ${mascotDiag.names.join('、')}，但它当前未启用 —— 到 设置 → 插件 里启用后，这里就会出现可选角色。`
+                      ? `已安装 ${mascotDiag.names.join('、')}，但当前未启用；请在 设置 → 插件 中启用后重试。`
                       : mascotDiag.state === 'broken'
-                        ? `有插件没能加载起来（${mascotDiag.names.join('、')}）—— 到 设置 → 插件 看它的报错（文件缺失或清单校验没过）。`
-                        : '尚未安装吉祥物角色；到插件市场安装「书桌伙伴 · AI 吉祥物」后即可在此选择。'}
+                        ? `有插件未能加载（${mascotDiag.names.join('、')}）；请在 设置 → 插件 中查看其报错（文件缺失或清单校验未通过）。`
+                        : '尚未安装吉祥物角色；可在插件市场安装「书桌伙伴 · AI 吉祥物」后选择。'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 编辑器续写（2026-10-13 按原型从「模型」页归位）：
+          开关与"自动触发"属"怎么跑"，模型槽位在「模型 → 哪个场景用哪个模型」里。 */}
+      <div data-setting-anchor="aiTools.inlineSuggest">
+        <SectionHead title="编辑器续写" className="mb-4"
+          hint="打字停顿后由 AI 续写下一句，以浅灰提示文字呈现。Tab 采纳、Esc 拒绝、Alt+A 立即请求；调用频率较高，建议在「模型」页签中单独指定成本较低、响应较快的模型。" />
+        <div className="max-w-md space-y-3">
+          <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+            <span className="text-[13px] text-[var(--text-primary)]">启用内联建议</span>
+            <SettingSwitch checked={s.aiAssistantInlineSuggest !== false} onChange={v => { void update('aiAssistantInlineSuggest', v) }} aria-label="启用内联建议" />
+          </label>
+          <div data-setting-anchor="aiTools.inlineSuggestAuto"
+            className={s.aiAssistantInlineSuggest === false ? 'opacity-40 pointer-events-none select-none' : ''}>
+            <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <span className="text-[13px] text-[var(--text-primary)]">自动触发（停 0.8 秒出建议）</span>
+              <SettingSwitch checked={s.aiAssistantInlineSuggestAuto !== false} onChange={v => { void update('aiAssistantInlineSuggestAuto', v) }} aria-label="自动触发" />
+            </label>
+            <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed px-1 mt-1.5">
+              仅在自然断点（句读、换行、写完一个词）发起；连续多次未采纳将自动暂停。
             </p>
           </div>
         </div>
@@ -283,7 +369,7 @@ function ChatTab({ mascots, mascotDiag }: {
   )
 }
 
-/** Agent 循环预算（轮数 / token 预算 / 上下文裁剪；Agent 第 0+2 层）。原埋在「内置工具」页签里。 */
+/** Agent 循环预算（轮数 / 花费 / 上下文裁剪；Agent 第 0+2 层）。原埋在「内置工具」页签里。 */
 function AgentLoopPanel() {
   const { s, update } = useSettings()
   const agentMaxRounds = s.agentMaxRounds ?? 16
@@ -291,21 +377,11 @@ function AgentLoopPanel() {
   const agentContextBudgetTokens = s.agentContextBudgetTokens ?? 24000
   const agentCompressionEnabled = s.agentCompressionEnabled !== false
   const agentCompressAtPercent = s.agentCompressAtPercent ?? 80
-  const agentCompressModelId = s.agentCompressModelId ?? ''
-  // 压缩专用模型下拉：全部供应商的全部模型（'' = 跟随当前会话模型）
-  const [compressModelOptions, setCompressModelOptions] = useState<Array<{ value: string; label: string }>>([])
-  useEffect(() => {
-    void llmListProviders().then(({ providers }) => {
-      setCompressModelOptions(providers.flatMap(p => (p.models ?? []).map(m => ({ value: `${p.id}:${m}`, label: `${p.name} / ${m}` }))))
-    }).catch(() => setCompressModelOptions([]))
-  }, [])
 
   return (
     <div data-setting-anchor="aiTools.agentLoop">
-      <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">Agent 循环</h2>
-      <p className="text-[12px] text-[var(--text-muted)] mb-4">
-        控制单次请求的推理预算：轮数或累计 token 触顶后自动总结收场（不丢弃已获取的信息）。互相独立的工具调用会并发执行以减少轮数消耗。
-      </p>
+      <SectionHead title="Agent 循环" className="mb-4"
+        hint="控制单次任务的成本与深度：思考轮数或累计 token 达到上限后自动总结收场，不丢弃已获取的信息；相互独立的工具调用会并发执行。" />
       <div className="px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] max-w-md space-y-2.5">
         <label className="flex items-center justify-between gap-3 text-[13px]">
           <span className="text-[var(--text-primary)]">最大推理轮数</span>
@@ -359,21 +435,9 @@ function AgentLoopPanel() {
           <span className="text-[var(--text-primary)]">历史自动压缩</span>
           <SettingSwitch checked={agentCompressionEnabled} onChange={v => { void update('agentCompressionEnabled', v) }} aria-label="历史自动压缩" />
         </div>
-        <label className="flex items-center justify-between gap-3 text-[13px]">
-          <span className="text-[var(--text-primary)] shrink-0">压缩专用模型</span>
-          <select
-            value={agentCompressModelId}
-            onChange={e => { void update('agentCompressModelId', e.target.value) }}
-            className="w-44 px-2 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)] truncate"
-          >
-            <option value="">跟随当前会话模型</option>
-            {compressModelOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </label>
         <p className="text-[11px] text-[var(--text-muted)]">
-          历史上下文预算控制带进模型的历史消息量，0 表示不裁剪（不推荐：长会话费用会快速上涨）。
-          开启自动压缩后，上下文达到触发线（历史预算的百分比）时先把较早的对话折叠为持久化纪要再发送（代替直接丢弃）；
-          也可随时在聊天框输入 /compress 手动压缩。
+          「历史上下文预算」决定发送给模型的历史消息量，0 表示不裁剪（长会话成本增长较快）。开启「历史自动压缩」后，
+          达到触发线会先将较早的对话压缩为纪要再发送；也可在聊天框输入 /compress 手动总结。
         </p>
       </div>
     </div>
@@ -417,7 +481,7 @@ function BuiltinToolsTab() {
               <RefreshCw size={14} />
             </button>
           }
-          description="官方提供的只读工具，未来 Agent 与外部客户端经由统一注册表调用。不可关闭以保证透明。"
+          description="官方提供的只读工具，不可关闭，以保证调用透明。"
           items={tools.map(t => ({
             id: t.name,
             label: t.name,
@@ -443,7 +507,7 @@ function BuiltinToolsTab() {
           anchorId="aiTools.audit"
           titleClassName="text-[15px] font-medium text-[var(--text-primary)]"
         >
-          <p className="text-[12px] text-[var(--text-muted)] mb-3">最近 10 条审计记录（含入参摘要与耗时，不含返回内容）。</p>
+          <p className="text-[12px] text-[var(--text-muted)] mb-3">最近 10 条审计记录（含入参摘要与耗时）。</p>
           <div className="space-y-1.5 max-w-md">
             {recentAudit.map(e => <AuditRow key={e.id} entry={e} />)}
             {recentAudit.length === 0 && <p className="text-[12px] text-[var(--text-muted)]">暂无调用记录</p>}
@@ -506,7 +570,7 @@ function McpServersTab({ onInvoked }: { onInvoked: () => void }) {
   const handleRefreshTools = async (sv: McpServerInfo) => {
     const r = await mcpRefreshTools(sv.id)
     if (!r.ok) showToast({ type: 'error', message: `刷新失败：${r.error}` })
-    else showToast({ type: 'info', message: `发现 ${r.tools.length} 个工具` })
+    else showToast({ type: 'info', message: `检测到 ${r.tools.length} 个工具` })
     await refresh()
   }
 
@@ -524,13 +588,9 @@ function McpServersTab({ onInvoked }: { onInvoked: () => void }) {
 
   return (
     <div data-setting-anchor="aiTools.mcp">
-      <div className="flex items-center justify-between max-w-md">
-        <div>
-          <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">MCP 服务器</h2>
-          <p className="text-[12px] text-[var(--text-muted)]">
-            连接外部 Model Context Protocol 服务器，其工具将并入统一注册表。最多同时连接 {servers[0]?.maxConnections ?? 5} 个。
-          </p>
-        </div>
+      <div className="flex items-start justify-between gap-2 max-w-md">
+        <SectionHead title="MCP 服务器" className="mb-0 min-w-0"
+          hint={<>连接外部 MCP 服务器，其工具并入统一注册表；最多同时连接 {servers[0]?.maxConnections ?? 5} 个。</>} />
         <div className="flex items-center gap-1 shrink-0">
           <button onClick={() => { void refresh() }} title="刷新"
             className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
@@ -579,7 +639,7 @@ function McpServersTab({ onInvoked }: { onInvoked: () => void }) {
           </div>
         ))}
         {!loading && servers.length === 0 && (
-          <p className="text-[12px] text-[var(--text-muted)] px-1">尚未添加 MCP 服务器。点击右上角「添加服务器」开始。</p>
+          <p className="text-[12px] text-[var(--text-muted)] px-1">尚未添加 MCP 服务器。点击右上角「添加服务器」即可开始。</p>
         )}
       </div>
 
@@ -642,7 +702,7 @@ function AddServerWizard({ onClose, onSaved }: { onClose: () => void; onSaved: (
     setSaving(true)
     try {
       const sv = await mcpAddServer(buildDraft())
-      showToast({ type: 'info', message: `「${sv.name}」已保存（默认禁用，打开开关即连接）` })
+      showToast({ type: 'info', message: `「${sv.name}」已保存（默认为禁用状态，开启开关后连接）` })
       await onSaved()
     } catch (err) {
       showToast({ type: 'error', message: `保存失败：${String((err as Error)?.message ?? err)}` })
@@ -747,7 +807,7 @@ function AddServerWizard({ onClose, onSaved }: { onClose: () => void; onSaved: (
                 </div>
               )}
               <p className="text-[11px] text-[var(--text-muted)]">
-                保存后服务器处于<b>禁用</b>状态，需在列表中打开开关才会真正连接。
+                保存后服务器处于<b>禁用</b>状态，需在列表中开启开关后才会连接。
               </p>
             </div>
           )}
@@ -813,7 +873,7 @@ function SkillsTab() {
 
   const finishInstall = async (r: SkillInstallResult, installingName?: string) => {
     if (r.success) {
-      showToast({ type: 'info', message: `「${r.skill?.title ?? installingName ?? 'Skill'}」已安装，AI 助手立即可用` })
+      showToast({ type: 'info', message: `「${r.skill?.title ?? installingName ?? 'Skill'}」已安装，AI 助手可立即使用` })
     } else if (r.message !== '已取消') {
       showToast({ type: 'error', message: `安装失败：${r.message ?? '未知错误'}` })
     }
@@ -862,13 +922,9 @@ function SkillsTab() {
 
   return (
     <div data-setting-anchor="aiTools.skill">
-      <div className="flex items-center justify-between max-w-md">
-        <div>
-          <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">Skill 技能</h2>
-          <p className="text-[12px] text-[var(--text-muted)]">
-            声明式提示词资产，AI 助手会引用它们。可安装 Skill 文件夹或 .zip 包，也可来自插件贡献。
-          </p>
-        </div>
+      <div className="flex items-start justify-between gap-2 max-w-md">
+        <SectionHead title="Skill 技能" className="mb-0 min-w-0"
+          hint="声明式提示词资产，AI 助手会引用。可装 Skill 文件夹或 .zip 包，也可来自插件贡献。" />
         <div className="flex items-center gap-1 shrink-0">
           <button onClick={() => { void refresh() }} title="刷新"
             className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
@@ -897,15 +953,9 @@ function SkillsTab() {
           （onDrop 里 preventDefault + stopPropagation）。也就是说界面在教用户做一件做不到的事，
           AI 手册里也这么写。现在换成明确可点的「选择文件夹安装」（Skill 的本体本来就是文件夹），
           .zip 包保留为次要入口，拖拽区与相关文案一并撤掉。 */}
-      <div className="mt-4 max-w-md rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3.5 py-3">
-        <p className="text-[11.5px] text-[var(--text-secondary)] leading-relaxed">
-          安装方式：<b>选中 Skill 自身的文件夹</b>（内含 <code>SKILL.md</code> 或 <code>skill.json</code>）即可，不必先打包；
-          也支持现成的 <code>.zip</code> 包。
-        </p>
-        <p className="text-[11px] text-[var(--text-disabled)] leading-relaxed mt-1">
-          若选中的文件夹里含多个 Skill，会明确提示你改选具体那一个 —— 不会替你随便挑一个装。
-        </p>
-      </div>
+      <p className="mt-3 max-w-md text-[11px] text-[var(--text-disabled)] leading-relaxed">
+        安装方式：选择 Skill 自身的文件夹（内含 <code>SKILL.md</code> 或 <code>skill.json</code>）即可，无需预先打包；若所选文件夹包含多个 Skill，将要求指定其中一个。
+      </p>
 
       <div className="space-y-2 mt-4 max-w-md">
         {skills.map(s => (
@@ -953,7 +1003,7 @@ function SkillsTab() {
         ))}
         {!loading && skills.length === 0 && (
           <p className="text-[12px] text-[var(--text-muted)] px-1">
-            暂无已装 Skill。点「选择文件夹安装」装一个（或安装含 skills 贡献的插件包，官方示例：AI 技能包）。
+            暂无已安装的 Skill。可通过「选择文件夹安装」安装，或安装含 skills 贡献的插件包（官方示例：AI 技能包）。
           </p>
         )}
       </div>

@@ -576,7 +576,13 @@ export const llmListProviders = (): Promise<{ providers: LlmProviderInfo[]; defa
 export const llmSaveProvider = (d: LlmProviderDraft): Promise<{ ok: boolean; id?: string; error?: string }> => a().llmSaveProvider(d)
 export const llmRemoveProvider = (id: string): Promise<{ ok: boolean }> => a().llmRemoveProvider(id)
 export const llmToggleProvider = (id: string, enabled: boolean): Promise<{ ok: boolean }> => a().llmToggleProvider(id, enabled)
-export const llmTestConnection = (d: { type: LlmProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string> }): Promise<LlmTestResultInfo> => a().llmTestConnection(d)
+export const llmTestConnection = (d: { type: LlmProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string>; accountId?: string }): Promise<LlmTestResultInfo> => a().llmTestConnection(d)
+// 账号（端点内部的第二层，2026-10-13）：同一端点换一把 Key，地址/协议/请求头/模型清单全复用
+export const llmAddAccount = (payload: { providerId: string; name?: string; apiKey?: string }) => a().llmAddAccount(payload)
+export const llmSetActiveAccount = (providerId: string, accountId: string) => a().llmSetActiveAccount(providerId, accountId)
+export const llmUpdateAccount = (payload: { providerId: string; accountId: string; name?: string; apiKey?: string; enabled?: boolean }) => a().llmUpdateAccount(payload)
+export const llmRemoveAccount = (providerId: string, accountId: string) => a().llmRemoveAccount(providerId, accountId)
+export const llmTestAccount = (providerId: string, accountId: string) => a().llmTestAccount(providerId, accountId)
 export const llmVisionModels = () => a().llmVisionModels()
 export const llmRefreshModels = (id: string): Promise<{ ok: boolean; models: string[]; error?: string }> => a().llmRefreshModels(id)
 export const llmSetModelFamily = (id: string, model: string, family: LlmModelFamily | ''): Promise<{ ok: boolean; modelFamilies?: Record<string, LlmModelFamily>; error?: string }> => a().llmSetModelFamily(id, model, family)
@@ -625,6 +631,12 @@ export const onAssistantRunState = (cb: (p: AgentRunStateEvent) => void) => a().
 export const agentSessions = (): Promise<AgentSessionInfo[]> => a().agentSessions()
 export const agentNewSession = (title?: string, source?: AgentSessionSource): Promise<AgentSessionInfo> => a().agentNewSession(title, source)
 export const agentMessages = (sessionId: string): Promise<AgentStoredMessage[]> => a().agentMessages(sessionId)
+/**
+ * 存量会话认领的一次性告知（会话随仓库走，2026-10-13）：取走即删，无则 null。
+ * 为什么要「取」而不是等主进程广播：切仓库的收尾是整窗重载，当场广播的 Toast 会被抹掉。
+ */
+export const agentTakeAdoptNotice = (): Promise<{ sessions: number; messages: number; vaultName: string; at: string } | null> =>
+  a().agentTakeAdoptNotice()
 /** AI token 用量（按日聚合；右栏 token 面板「今日消耗 / 会话 TOP」数据源） */
 export const agentUsageGet = (): Promise<{ days: Record<string, AiUsageDay> }> => a().agentUsageGet()
 /** 会话文件改动审计（不传 sessionId = 本次运行全部，按时间倒序） */

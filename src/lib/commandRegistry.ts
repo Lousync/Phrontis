@@ -107,7 +107,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'sidebar', label: '折叠 / 展开侧栏', desc: '展开 / 折叠侧栏',
     keys: [['Ctrl', 'B']], group: 'global', scope: 'global', palette: true,
     conflictNote: '编辑器（Monaco / LiveMarkdown）内归「加粗」，App 侧靠 isEditingInput 对 .monaco-editor 让位（src/lib/shortcuts.ts）',
-    sources: ['src/App.tsx:1377 @ if (e.ctrlKey && !e.altKey && e.key ==='],
+    sources: ['src/App.tsx:1401 @ if (e.ctrlKey && !e.altKey && e.key ==='],
   },
   {
     id: 'escape', label: '关闭弹窗 / 返回列表', desc: '关闭弹窗 / 返回列表',
@@ -136,7 +136,7 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'ai-side', label: 'AI 助手', desc: 'AI 助手开关（工作台右栏；整窗模块下为悬浮助手）',
     keys: [['Ctrl', 'J']], group: 'global', scope: 'global', palette: true,
-    sources: ['src/App.tsx:1470 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
+    sources: ['src/App.tsx:1494 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
   },
   {
     id: 'ai-full', label: 'AI 助手 · 全屏学堂', desc: 'AI 助手：进入全屏学堂',
@@ -151,7 +151,7 @@ export const COMMANDS: CommandDef[] = [
     // 否则会列出一条「点了没反应」的命令
     requires: { workbench: true, fullWindowTab: false },
     note: '整窗模块下左右栏本就退场，handler 里 fullWindowTab 早退（App.tsx:1395）',
-    sources: ['src/App.tsx:1442 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
+    sources: ['src/App.tsx:1466 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
   },
   {
     id: 'undo', label: '撤销文件操作', desc: '撤销上一文件操作（重命名 / 删除 / 移动）',
@@ -167,14 +167,14 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'zoom-in', label: '界面放大', desc: '界面放大',
     keys: [['Ctrl', '=']], group: 'global', scope: 'global', palette: true,
-    conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1356）',
-    sources: ['src/App.tsx:1357 @ NumpadAdd'],
+    conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1380）',
+    sources: ['src/App.tsx:1381 @ NumpadAdd'],
   },
   {
     id: 'zoom-out', label: '界面缩小', desc: '界面缩小',
     keys: [['Ctrl', '-']], group: 'global', scope: 'global', palette: true,
-    conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1356）',
-    sources: ['src/App.tsx:1362 @ NumpadSubtract'],
+    conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1380）',
+    sources: ['src/App.tsx:1386 @ NumpadSubtract'],
   },
   {
     id: 'sys-day', label: '日程与打卡小窗开关', desc: '日程与打卡小窗开关（系统级）',
@@ -213,7 +213,7 @@ export const COMMANDS: CommandDef[] = [
     sources: ['src/modules/knowledge/index.tsx:1687 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
-    id: 'kb-ai-inline', label: 'AI 内联续写建议', desc: 'AI 内联续写建议：立即要一条（Tab 采纳 / Esc 拒绝；平时停顿会自动出）',
+    id: 'kb-ai-inline', label: 'AI 内联续写建议', desc: 'AI 内联续写建议：立即请求一条（Tab 采纳 / Esc 拒绝；停顿后自动给出）',
     keys: [['Alt', 'A']], group: 'kbEditor', scope: 'note', palette: false,
     note: '原表把它挂在已退役的「编辑器模块」组下；实际判定在 PageEditor.tsx:779（笔记编辑态）',
     sources: ['src/modules/knowledge/components/PageEditor.tsx:859 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],

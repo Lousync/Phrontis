@@ -272,8 +272,8 @@ async function invokeTool(
       ok: false,
       code: permErr,
       message: permErr === 'MODULE_READONLY'
-        ? `模块「${moduleName}」对 AI 授权为只读，本操作被拒绝。可在 设置 → AI 工具 → 权限 中调整`
-        : `模块「${moduleName}」已对 AI 关闭，本操作被拒绝。可在 设置 → AI 工具 → 权限 中调整`,
+        ? `模块「${moduleName}」对 AI 授权为只读，本操作被拒绝。可在 设置 → AI → 权限 中调整`
+        : `模块「${moduleName}」已对 AI 关闭，本操作被拒绝。可在 设置 → AI → 权限 中调整`,
     }
   }
 
@@ -286,8 +286,8 @@ async function invokeTool(
         ok: false,
         code: fileErr,
         message: fileErr === 'VAULTFILE_READONLY'
-          ? '仓库文件对 AI 仅开放只读，写入类操作被拒绝。可在 设置 → AI 工具 → 权限 → 仓库文件 中调整为读写'
-          : '仓库文件已对 AI 关闭，本操作被拒绝。可在 设置 → AI 工具 → 权限 → 仓库文件 中调整',
+          ? '仓库文件对 AI 仅开放只读，写入类操作被拒绝。可在 设置 → AI → 权限 → 仓库文件 中调整为读写'
+          : '仓库文件已对 AI 关闭，本操作被拒绝。可在 设置 → AI → 权限 → 仓库文件 中调整',
       }
     }
   }
@@ -302,7 +302,7 @@ async function invokeTool(
     return {
       ok: false,
       code: 'LIMIT_EXCEEDED',
-      message: `本月调用次数已达上限（${usage.used}/${usage.limit}），请在 设置 → AI 工具 中调整`,
+      message: `本月调用次数已达上限（${usage.used}/${usage.limit}），请在 设置 → AI 中调整`,
     }
   }
 

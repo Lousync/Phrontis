@@ -1529,6 +1529,20 @@ input:focus, textarea:focus, select:focus {
 .kb-edge-strip { scrollbar-width: none; }
 .kb-edge-strip::-webkit-scrollbar { display: none; }
 
+/* 页面条横向溢出提示（台账 F-16，2026-10-13）：溢出区在「还有藏起来的条目」那一侧盖一层渐隐。
+   为什么不用滚动条：横向滚动条占 4px 盒高，会把激活条目从行底顶起来 —— 与上面 .kb-edge-strip
+   藏滚动条是同一个原因（那条注释里的 2026-09-19 反馈）。渐隐是纯覆盖层，不动布局、不占宽。
+   两片常驻、只切 opacity（data-on），出现/消失才走得动过渡；定位基准 = useStripScroll 的
+   调用约定：滚动容器外面必须有一层 relative 包裹层。 */
+.kb-strip-fade {
+  position: absolute; top: 0; bottom: 0; width: 18px; z-index: 2;
+  pointer-events: none; opacity: 0; transition: opacity .12s;
+}
+.kb-strip-fade[data-on='1'] { opacity: 1; }
+.kb-strip-fade-l { left: 0; background: linear-gradient(to right, var(--bg-secondary), transparent); }
+.kb-strip-fade-r { right: 0; background: linear-gradient(to left, var(--bg-secondary), transparent); }
+@media (prefers-reduced-motion: reduce) { .kb-strip-fade { transition: none; } }
+
 /* 悬停才现形的细滚动条（看板方案 §5 反馈 4②，2026-09-27）：卡内列表溢出用小滚动条滚动，
    但鼠标不在该控件上时滚动条不可见（拍板口径）。静止时 thumb 全透明占位（宽度保留，
    不因滚动条出现/消失引起内容回弹）；悬停容器（本体或 focus-within）才显 thumb。

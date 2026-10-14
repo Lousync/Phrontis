@@ -4,6 +4,7 @@ import { PluginIcon, BookMarketIcon } from '../shared/ModuleIcons'
 import type { TabName } from '../../types'
 import { labelOf } from '../../lib/appModules'
 import { isToolTabId, toolIdOfTab, findTool } from './toolRegistry'
+import { useStripScroll, StripEdges } from './useStripScroll'
 
 /**
  * 工作台中间栏**页面条**（v3.4.0「页面条置顶」，2026-09-18）。
@@ -113,6 +114,8 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
 
   const visible = tabs.filter((t) => !PAGE_OWNED.includes(t))
   const reorderTo = (next: string[]) => onReorder(applyReorder(tabs, visible, next))
+  // 模块条目区的横向溢出（F-16）：激活变化 / 条目数变化后把激活条目滚回视野
+  const moduleScroll = useStripScroll(`${active ?? ''}|${visible.length}`)
 
   const handleDragStart = (e: React.DragEvent, id: string) => {
     e.dataTransfer.effectAllowed = 'move'
@@ -161,83 +164,110 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
       {/* 模块条目 + 两个模块的页签组 + 尾部动作 */}
       <div data-pb-main className="flex min-w-0 flex-1 items-end gap-1 px-1.5 self-stretch">
         {lead && <div className="flex shrink-0 items-center self-center">{lead}</div>}
-        {visible.map((id, i) => {
-          const isActive = id === active
-          // Edge 细分隔线：与左邻都是非激活条目时才画（悬停任一侧由 CSS :has/相邻选择器淡出）
-          const prevId = i > 0 ? visible[i - 1] : null
-          const showSep = prevId !== null && prevId !== active && id !== active
-          return (
-            <Fragment key={id}>
-              {showSep && <div className="kb-edge-sep" />}
+        {/* 模块条目区（台账 F-16，2026-10-13）：**必须自己可滚、并且让得出宽度**。
+            修前它是数据主区的直接子元素 + `shrink-0`：条目数量无上限，一多就把后面的
+            知识库页签槽整块顶出可视区——行容器 `overflow-x-clip` 是「禁止滚动」，
+            于是那些页签既够不到、也看不出还有（用户截图就是这个表象）。
+            现在：溢出由本区自己横滚，宽度按 flex 让出去，行内各区永远各占其位。
+            外面这层 relative 只给渐隐定位，宽度由里层滚动容器决定（不带 flex-1：
+            基础尺寸 = 内容宽度，行不够时才缩）。
+            滚动容器上的 `px-2 -ml-2` 是**给内凹弧留的位置**：滚动容器会把溢出的部分裁掉，
+            而激活条目两侧各有一道 8px 内凹弧（`.kb-edge-tab-active::before/::after`，
+            画在条目**外侧**）—— 不留位置，第一个条目的左弧一进滚动容器就被裁掉，
+            Edge 的「与内容区连体」就缺一个角。两侧各留 8px 内边距即弧的落点，
+            再用 -ml-2 把整条挪回原位（净位移 0）。 */}
+        <div className="relative flex min-w-0 shrink items-end gap-1">
+          <div
+            ref={moduleScroll.setNode}
+            data-pb-scroll="module"
+            className="kb-edge-strip flex min-w-0 items-end gap-1 overflow-x-auto px-2 -ml-2"
+          >
+            {visible.map((id, i) => {
+              const isActive = id === active
+              // Edge 细分隔线：与左邻都是非激活条目时才画（悬停任一侧由 CSS :has/相邻选择器淡出）
+              const prevId = i > 0 ? visible[i - 1] : null
+              const showSep = prevId !== null && prevId !== active && id !== active
+              return (
+                <Fragment key={id}>
+                  {showSep && <div className="kb-edge-sep" />}
+                  <div
+                    data-pb-item
+                    data-pb-owner="module"
+                    data-wb="tab"
+                    data-wb-tab={id}
+                    data-wb-active={isActive ? '1' : '0'}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, id)}
+                    onDragEnd={handleDragEnd}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragId && dragId !== id) setDragOverId(id) }}
+                    onDrop={(e) => handleDrop(e, id)}
+                    onClick={() => onSelect(id)}
+                    onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id) } }}
+                    title={tabLabel(id)}
+                    className={`kb-edge-tab group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
+                      isActive
+                        ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
+                        : 'h-[30px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                    }`}
+                  >
+                    <span className={`shrink-0 ${isActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{tabIcon(id)}</span>
+                    <span className="max-w-[140px] truncate">{tabLabel(id)}</span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onClose(id) }}
+                      onAuxClick={(e) => e.stopPropagation()}
+                      title="关闭标签页"
+                      className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
+                        isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      }`}
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                </Fragment>
+              )
+            })}
+            {/* 错题本专属条目（合成条目，非 openTabs 成员）：视图态随错题本开合 */}
+            {showQuizEntry && (
               <div
                 data-pb-item
                 data-pb-owner="module"
                 data-wb="tab"
-                data-wb-tab={id}
-                data-wb-active={isActive ? '1' : '0'}
-                draggable
-                onDragStart={(e) => handleDragStart(e, id)}
-                onDragEnd={handleDragEnd}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (dragId && dragId !== id) setDragOverId(id) }}
-                onDrop={(e) => handleDrop(e, id)}
-                onClick={() => onSelect(id)}
-                onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id) } }}
-                title={tabLabel(id)}
-                className={`kb-edge-tab group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
-                  isActive
+                data-wb-tab="quiz"
+                data-wb-active={quizEntryActive ? '1' : '0'}
+                onClick={() => onSelect('quiz')}
+                title="错题本 / 收藏"
+                className={`kb-edge-tab group flex shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
+                  quizEntryActive
                     ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
                     : 'h-[30px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                 }`}
               >
-                <span className={`shrink-0 ${isActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{tabIcon(id)}</span>
-                <span className="max-w-[140px] truncate">{tabLabel(id)}</span>
+                <span className={`shrink-0 ${quizEntryActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{TAB_ICONS.quiz}</span>
+                <span>错题本</span>
                 <button
-                  onClick={(e) => { e.stopPropagation(); onClose(id) }}
+                  onClick={(e) => { e.stopPropagation(); onClose('quiz') }}
                   onAuxClick={(e) => e.stopPropagation()}
-                  title="关闭标签页"
-                  className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
-                    isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                  title="关闭错题本"
+                  className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
+                    quizEntryActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                   }`}
                 >
                   <X size={11} />
                 </button>
               </div>
-            </Fragment>
-          )
-        })}
-        {/* 错题本专属条目（合成条目，非 openTabs 成员）：视图态随错题本开合 */}
-        {showQuizEntry && (
-          <div
-            data-pb-item
-            data-pb-owner="module"
-            data-wb="tab"
-            data-wb-tab="quiz"
-            data-wb-active={quizEntryActive ? '1' : '0'}
-            onClick={() => onSelect('quiz')}
-            title="错题本 / 收藏"
-            className={`kb-edge-tab group flex shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
-              quizEntryActive
-                ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
-                : 'h-[30px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-            }`}
-          >
-            <span className={`shrink-0 ${quizEntryActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{TAB_ICONS.quiz}</span>
-            <span>错题本</span>
-            <button
-              onClick={(e) => { e.stopPropagation(); onClose('quiz') }}
-              onAuxClick={(e) => e.stopPropagation()}
-              title="关闭错题本"
-              className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
-                quizEntryActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-              }`}
-            >
-              <X size={11} />
-            </button>
+            )}
           </div>
-        )}
+          <StripEdges edges={moduleScroll.edges} />
+        </div>
         {/* 知识库页签组槽：紧跟模块条目从左排起（2026-09-19 反馈：原排在 flex-1 编辑器槽之后，
-            页签组被顶到行最右端、贴着右栏，看起来像排错位置）。 */}
-        <div ref={knowledgeSlotRef} data-pb-slot="knowledge" className={`kb-edge-strip flex min-w-0 shrink-0 max-w-[50%] items-end gap-1 overflow-x-auto ${hidePages ? 'hidden' : ''}`} />
+            页签组被顶到行最右端、贴着右栏，看起来像排错位置）。
+            F-16 起本槽**不再自己滚**：滚动 / 渐隐 / 激活滚入视野都在 PageTabStrip 里（那条页签条
+            在副栏分屏里也会 portal 出去，逻辑收在组件内才是一份）；本槽只负责占位与上限。
+            宽度口径保持不变（`shrink-0 max-w-[50%]` = 按内容占宽、至多半行）——**这是有意的优先级**：
+            笔记页签是用户正在处理的东西，行宽不够时让它**优先保住**，由数量无上限的模块条目区去让宽
+            （它已经可滚 + 激活自动归位，少吃一点宽度仍然够得到）。`max-w-[50%]` 是**上限**不是定宽，
+            页签少时按内容占宽，不会白占半行。 */}
+        <div ref={knowledgeSlotRef} data-pb-slot="knowledge" className={`flex min-w-0 shrink-0 max-w-[50%] items-end gap-1 ${hidePages ? 'hidden' : ''}`} />
         {/* 主栏编辑器页签组槽：flex-1 让组内横向滚动（组内容器带 overflow-x-auto） */}
         <div ref={editorSlotRef} data-pb-slot="editor" className={`flex min-w-0 flex-1 items-end gap-1 ${hidePages ? 'hidden' : ''}`} />
         {trail && <div className="self-center ml-1 flex shrink-0 items-center gap-0.5">{trail}</div>}

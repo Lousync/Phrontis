@@ -255,6 +255,12 @@ const api = {
   llmRemoveProvider: (id: string) => ipcRenderer.invoke('llm:removeProvider', id),
   llmToggleProvider: (id: string, enabled: boolean) => ipcRenderer.invoke('llm:toggleProvider', id, enabled),
   llmTestConnection: (draft: unknown) => ipcRenderer.invoke('llm:testConnection', draft),
+  // 账号（端点内部的第二层，2026-10-13）：同一端点换一把 Key，地址/协议/请求头/模型清单全复用
+  llmAddAccount: (payload: unknown) => ipcRenderer.invoke('llm:addAccount', payload),
+  llmSetActiveAccount: (providerId: string, accountId: string) => ipcRenderer.invoke('llm:setActiveAccount', providerId, accountId),
+  llmUpdateAccount: (payload: unknown) => ipcRenderer.invoke('llm:updateAccount', payload),
+  llmRemoveAccount: (providerId: string, accountId: string) => ipcRenderer.invoke('llm:removeAccount', providerId, accountId),
+  llmTestAccount: (providerId: string, accountId: string) => ipcRenderer.invoke('llm:testAccount', providerId, accountId),
   llmRefreshModels: (id: string) => ipcRenderer.invoke('llm:refreshModels', id),
   llmAddModel: (id: string, model: string) => ipcRenderer.invoke('llm:addModel', id, model),
   llmSetDefaultModel: (value: string) => ipcRenderer.invoke('llm:setDefaultModel', value),
@@ -306,6 +312,8 @@ const api = {
   agentSessions: () => ipcRenderer.invoke('agent:sessions'),
   agentNewSession: (title?: string, source?: string) => ipcRenderer.invoke('agent:newSession', title, source),
   agentMessages: (sessionId: string) => ipcRenderer.invoke('agent:messages', sessionId),
+  // 存量会话认领的一次性告知（会话随仓库走）；取走即删
+  agentTakeAdoptNotice: () => ipcRenderer.invoke('agent:takeAdoptNotice'),
   // AI 用量 / 会话文件改动（v3.4.0 批次5）：右栏 token 面板只读
   agentUsageGet: () => ipcRenderer.invoke('agent:usage:get'),
   agentSessionChanges: (sessionId?: string) => ipcRenderer.invoke('agent:sessionChanges:get', sessionId),

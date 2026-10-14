@@ -23,7 +23,7 @@ import { useSettings } from './lib/SettingsContext'
 import { isEditingInput, allowsWorkbenchShortcut } from './lib/shortcuts'
 import { registerSelectionAskHost, type SelectionAskHost } from './lib/assistantContext'
 import { setGlobalActiveTab } from './lib/activeTab'
-import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList } from './lib/ipc'
+import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList, agentTakeAdoptNotice } from './lib/ipc'
 import { getPluginTools } from './lib/pluginService'
 import { requestPluginViewActivation, dispatchCodePluginAction } from './lib/pluginCommandBus'
 import { requestSourceDraftPrefill } from './lib/bookSourceDraftBus'
@@ -618,6 +618,30 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsReady, loaded])
 
+  // ---- 存量 AI 会话认领的一次性告知（会话随仓库走，2026-10-13）----
+  // 认领发生在主进程「仓库成为当前仓库」时，而切库收尾是整窗重载——当场广播的 Toast 会被抹掉，
+  // 所以主进程留成待取文件，这里启动后取一次（主进程侧取走即删，只会展示一次）。
+  // 延迟 600ms：错开首屏渲染；更新说明的 2s 自动打开不冲突（Toast 在右下角，各走各的）。
+  const adoptNoticeCheckedRef = useRef(false)
+  useEffect(() => {
+    if (!settingsReady || !loaded || adoptNoticeCheckedRef.current) return
+    adoptNoticeCheckedRef.current = true
+    let alive = true
+    const timer = window.setTimeout(() => {
+      agentTakeAdoptNotice()
+        .then((n) => {
+          if (!alive || !n) return
+          showToast({
+            type: 'info',
+            message: `已把 ${n.sessions} 条历史会话归入仓库「${n.vaultName}」`,
+            detail: 'AI 对话自本版起随仓库走，不再跨仓库共享；原数据仍保留在应用数据目录下。',
+          })
+        })
+        .catch(() => { /* 静默：告知失败不值得为它弹错误 */ })
+    }, 600)
+    return () => { alive = false; window.clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsReady, loaded])
   /** 「知道了」：回到进更新说明之前那个模块；**没有来源时回工作台空态**
    *  （启动即工作台，已无「启动项」可退；非法 id 的兜底统一由 openTab 的守卫负责）。 */
   const dismissReleaseNotes = useCallback(() => {
@@ -929,7 +953,7 @@ export default function App() {
     return () => window.removeEventListener('ai-learn:goto', handler)
   }, [])
 
-  // Listen for plugins:open — navigate to plugins tab (e.g. 设置→AI 工具→Skill 跳市场)
+  // Listen for plugins:open — navigate to plugins tab (e.g. 设置 → AI→Skill 跳市场)
   useEffect(() => {
     const handler = () => { setActiveTab('plugins'); setSidebarOpen(true) }
     window.addEventListener('plugins:open', handler)

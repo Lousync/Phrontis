@@ -111,7 +111,10 @@ const leftover = DEAD_COPY.filter(s => view.includes(s))
 check('不再教用户"拖入 .zip"（用户可见文案已撤净）', leftover.length === 0, leftover.join(' / '))
 check('保留一条说明来龙去脉的注释（别再手滑加回拖拽区）', view.includes('从来没收到过事件'))
 check('.zip 包作为次要入口保留（能力没丢）', view.includes('aiToolsInstallSkillFromFile()'))
-check('界面说明了"多个 Skill 时不会替你挑"', view.includes('不会替你随便挑一个装'))
+// 2026-10-13 文案减负 + 语气升级：这句从卡片里的一段话压成一行、措辞也改过两次。
+// 断言只锁**内容要点**（提到"多个 Skill"、并且"要求指定其中一个"），不锁某一句原话 ——
+// 否则每次改文案都要动契约，契约就成了文案的副本。
+check('界面说明了"多个 Skill 时不会替你挑"', view.includes('包含多个 Skill') && view.includes('要求指定其中一个'))
 
 console.log(`\n断言: ${pass} PASS, ${fail} FAIL`)
 process.exit(fail > 0 ? 1 : 0)

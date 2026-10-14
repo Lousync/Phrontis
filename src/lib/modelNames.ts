@@ -103,13 +103,28 @@ const BRAND_PREFIX: Record<string, string> = {
   minimax: 'MiniMax', mimo: 'MiMo', nemotron: 'Nemotron', longcat: 'LongCat',
 }
 
+/**
+ * 版本号段（`5.2` / `v4` / `k2` / `1.6`）→ 全大写；其余段只把首字母大写。
+ *
+ * ★ 2026-10-13 修：这里原先对品牌词**之后的每一段都 toUpperCase**，
+ *   于是 `deepseek-chat` 显示成 “DeepSeek CHAT”、`kimi-k2-turbo` 显示成 “Kimi K2 TURBO”。
+ *   这段字符串直接出现在模型选择器与下拉里，一个大小写问题就让整个列表看起来像没做完。
+ *   口径来自原型（tmp/ai-settings-proto 里按修好的样子渲染）：
+ *   只有纯版本号段才全大写，普通单词只首字母大写。
+ */
+function capTail(part: string): string {
+  if (/^\d/.test(part)) return part.toUpperCase()          // 5.2 / 1.6
+  if (/^[a-z]\d+(\.\d+)?$/i.test(part)) return part.toUpperCase() // v4 / k2 / m2.5
+  return part.charAt(0).toUpperCase() + part.slice(1)
+}
+
 /** 模型 ID → 友好名称（未知 ID 机械美化：分段+品牌大小写） */
 export function prettyModelName(id: string): string {
   if (PRETTY_OVERRIDES[id]) return PRETTY_OVERRIDES[id]
   const parts = id.split('-')
   const first = parts[0]?.toLowerCase() ?? ''
   if (BRAND_PREFIX[first]) {
-    const rest = parts.slice(1).map(p => p.toUpperCase()).join(' ')
+    const rest = parts.slice(1).map(capTail).join(' ')
     return `${BRAND_PREFIX[first]} ${rest}`.trim()
   }
   return parts.map(p => {
