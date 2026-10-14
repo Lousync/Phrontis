@@ -339,8 +339,8 @@ registerTool({
   复用同一个 `uniqueVersionedName`）；字节上限 30MB。
 - 大小写/回落：`slug` 缺省回落 `image`（方案 §12 D3）——**占位页签与完成事件必须用同一条回落规则**，
   否则空 slug 时占位页签匹配不上，屏幕上留一个禁关的「生成中…」（落码时按 `slug || 'image'` 两处对齐）。
-- 契约：`verify-ai-teaching-tools.mjs` 共 43 条（新增阶段二 22 条）；`verify-image-tool.mjs` 新增 §11
-  「产物落点分流」9 条。
+- 契约：`verify-ai-teaching-tools.mjs` 共 43 条（19 条既有 + **新增阶段二 24 条**）；`verify-image-tool.mjs`
+  新增 §11「产物落点分流」9 条；`verify-help-retrieval.mjs` 用例 139 → **142**（+3 条教学面问句）。
 
 **仍未做（阶段二之外，刻意）**：运行期探针（§9 的 mock 端点 + CDP 全链路断言）——静态契约与构建门禁已全绿，
 真机观感与 IPC 全链路仍需那一跑；生图模型的确切 ID 与返回形状（§11 风险 1/2）同样只能真机验证。
