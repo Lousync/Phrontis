@@ -91,8 +91,10 @@ ok(/className="kb-fit kb-fit-aichat[^"]*"/.test(chatBody),
   '④a ChatBody 根挂 .kb-fit .kb-fit-aichat（三处宿主共用同一容器）')
 ok(/className="kb-l1 text-\[var\(--text-muted\)\]"/.test(msgList),
   '④b 会话消耗（TokensOf）挂 .kb-l1 —— 窄容器先隐它')
-ok((msgList.match(/<span className="kb-l2">/g) ?? []).length === 4,
-  '④c 四个动作钮文字各挂 .kb-l2（复制 / 编辑 / 重新生成 / 删除）',
+// 2026-10-14（v3.5.1 断点续跑）：「继续」是本动作行的第 5 颗钮（只在挂着可续现场的那条消息上出现），
+// 它的文字同样必须挂 .kb-l2 —— 否则窄容器下它会先于其它钮被压成竖排。
+ok((msgList.match(/<span className="kb-l2">/g) ?? []).length === 5,
+  '④c 五个动作钮文字各挂 .kb-l2（复制 / 编辑 / 继续 / 重新生成 / 删除）',
   `实得 ${(msgList.match(/<span className="kb-l2">/g) ?? []).length} 处`)
 const aichatRules = rules.filter((r) => r.name === 'kb-aichat')
 ok(aichatRules.some((r) => r.level === 1 && r.px === 360) && aichatRules.some((r) => r.level === 2 && r.px === 245),

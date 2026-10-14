@@ -606,6 +606,8 @@ export const docsPptxPages = (relPath: string): Promise<{ ok: boolean; pages?: A
 
 export const agentChat = (sessionId: string, message: string, context?: AgentContextInfo, chatId?: string, source?: string, modelId?: string, effort?: 'off' | 'low' | 'medium' | 'high', skillName?: string): Promise<AgentChatResult> => a().agentChat({ sessionId, message, context, chatId, source, modelId, effort, skillName })
 export const agentRegenerate = (sessionId: string, context?: AgentContextInfo, chatId?: string, effort?: 'off' | 'low' | 'medium' | 'high'): Promise<AgentChatResult> => a().agentRegenerate({ sessionId, context, chatId, effort })
+/** A 方案（断点续跑）：从中断卡的断点继续，不追加用户消息、不新建会话 */
+export const agentResume = (sessionId: string, context?: AgentContextInfo, chatId?: string, source?: AgentSessionSource, modelId?: string, effort?: 'off' | 'low' | 'medium' | 'high'): Promise<AgentChatResult> => a().agentResume({ sessionId, context, chatId, source, modelId, effort })
 /** 场景/模板启动：不落任何用户消息，用虚拟首轮触发（聊天区第一条即 AI 回复） */
 export const agentStartScene = (sessionId: string, chatId?: string, source?: string, modelId?: string): Promise<AgentChatResult> => a().agentStartScene({ sessionId, chatId, source, modelId })
 export const agentEditMessage = (sessionId: string, messageId: string, message: string, context?: AgentContextInfo, chatId?: string, effort?: 'off' | 'low' | 'medium' | 'high'): Promise<AgentChatResult> => a().agentEditMessage({ sessionId, messageId, message, context, chatId, effort })

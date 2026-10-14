@@ -99,7 +99,10 @@ async function translateInvoke(req: TranslateInvokeRequest): Promise<TranslateIn
     sessionId: 'translate',
   })
   if (!r.ok) {
-    return { ok: false, mode, error: r.error, code: r.code ?? 'LLM_ERROR', dict }
+    // 归因 P0 起 r.code 细化成 25 个归因码 + 3 个配置码；划词翻译的错误标签（TranslateInvokeResult）
+    // 只认配置类三码，其余一律 LLM_ERROR —— 与本轮之前的行为逐字一致（以前也只有这三码或 undefined）。
+    const cfg = r.code === 'PROVIDER_NOT_FOUND' || r.code === 'PROVIDER_DISABLED' || r.code === 'NO_DEFAULT_MODEL' ? r.code : undefined
+    return { ok: false, mode, error: r.error, code: cfg ?? 'LLM_ERROR', dict }
   }
   const markdown = r.content.trim()
   if (markdown) upsertTranslationCache(key, mode, text, markdown, r.model)

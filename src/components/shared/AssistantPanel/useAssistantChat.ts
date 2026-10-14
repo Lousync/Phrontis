@@ -5,12 +5,12 @@ import { getAssistantContext } from '../../../lib/assistantContext'
 import { useSettings } from '../../../lib/SettingsContext'
 import {
   agentSessions, agentMessages, agentDeleteSession, agentSetSessionPinned,
-  agentChat, agentRegenerate, agentEditMessage, agentDeleteMessage,
+  agentChat, agentRegenerate, agentResume, agentEditMessage, agentDeleteMessage,
   llmListProviders, agentAbortSession, aiToolsListSkills, onAssistantNotice,
 } from '../../../lib/ipc'
 // 新建会话走包装层：会话随仓库走，无仓库时要给提示而不是静默失败
 import { newAgentSession } from '../../../lib/agentSession'
-import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo, AgentSessionSource } from '../../../types'
+import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo, AgentSessionSource, ResumeInfo } from '../../../types'
 import type { StreamDraft } from '../../../lib/agentStreamCore'
 import {
   MAX_PARALLEL, subscribeAssistantRunState, getRunBucket, isSessionRunning, runningSessionCount,
@@ -96,6 +96,13 @@ export interface AssistantChatController {
   /** 钉住 / 取消钉住会话（通用助手左栏「★ 收藏」分区）：乐观更新 + 落盘 */
   togglePin: (id: string) => Promise<void>
   regenerate: () => Promise<void>
+  /**
+   * 从断点继续（A 方案，2026-10-14）：中断卡上的「继续」。
+   * 不追加用户消息；现场（含 carry）由主进程一次性 claim。仅 `resumeInfo` 指向的那条消息可触发。
+   */
+  resume: () => Promise<void>
+  /** 本会话最近一次中断留下的可续现场（无 = null）；`resumeInfo.messageId` 就是挂按钮的那条消息 */
+  resumeInfo: ResumeInfo | null
   editSubmit: (id: string, content: string) => Promise<void>
   deleteMessage: (id: string) => Promise<void>
   abort: () => Promise<void>
@@ -244,16 +251,27 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const [, bumpRunVersion] = useReducer((x: number) => x + 1, 0)
   /** refreshMessages 的稳定引用：store 订阅回调（声明在前）触达后定义的刷新函数用 */
   const refreshMessagesRef = useRef<((sid: string) => Promise<void>) | null>(null)
+  /** 同上：会话列表（可续现场的出口）也要能在订阅回调里刷新 */
+  const refreshSessionsRef = useRef<(() => Promise<AgentSessionInfo[]>) | null>(null)
   useEffect(() => subscribeAssistantRunState(() => {
     // 后台完成时正被本宿主查看（本宿主不是发起方、没有 finally 兜底）→ 补一次消息对齐
     const sid = activeIdRef.current
-    if (sid && takeEndedFor(sid)) void refreshMessagesRef.current?.(sid)
+    if (sid && takeEndedFor(sid)) {
+      void refreshMessagesRef.current?.(sid)
+      // 中断现场写在会话行上：后台那一次是以别的宿主/窗口发起的，这里必须重拉才拿得到「继续」
+      void refreshSessionsRef.current?.()
+    }
     bumpRunVersion()
   }), [])
   const pending = isSessionRunning(activeId)
   const runBucket = getRunBucket(activeId)
   const draft = runBucket?.draft ?? null
   const liveSteps = runBucket?.liveSteps ?? []
+  /**
+   * 可续现场（A 方案）：真源在主进程会话行的 resume（出口已 toResumeInfo 裁剪，**不含 carry**）。
+   * 只认本会话那一份 —— 别的会话的中断不该在当前视图冒出「继续」。
+   */
+  const resumeInfo = activeId ? (sessions.find(s => s.id === activeId)?.resumeInfo ?? null) : null
 
   // 查看登记（计数制，多宿主对称进出）：进入清角标，离开撤销「查看中」
   useEffect(() => {
@@ -296,6 +314,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   }, [sessionSource])
 
   useEffect(() => { if (active) void refreshSessions() }, [active, refreshSessions])
+  refreshSessionsRef.current = refreshSessions
 
   // N-1 手册通道：主进程侧提示（手册→通用助手升格）→ Toast + 刷新会话列表（徽标随之变化）
   useEffect(() => onAssistantNotice((p) => {
@@ -467,13 +486,20 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       }
       if (r.ok && r.reply !== undefined) {
         if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
-      } else if (r.code === 'ABORTED') {
-        showToast({ type: 'info', message: '已停止生成' })
+      } else if (r.code === 'USER_ABORTED') {
+        showToast({ type: 'info', message: '已停止生成 · 可点「继续」接着做' })
       } else {
-        showToast({ type: 'error', message: `AI 调用失败：${r.error ?? '未知错误'}` })
+        // 有可续现场（几乎每种中断都有）：明确告诉用户按钮在哪，别让他以为只能重来
+        const canResume = r.interruption?.resumable === true
+        showToast({ type: 'error', message: `AI 调用失败：${r.error ?? '未知错误'}${canResume ? ' · 可点「继续」接着做' : ''}` })
       }
       // 以会话库为准刷新（拿到落库 id/trace；中止时仅剩用户消息也保持一致）
       await refreshMessages(sid)
+    } catch (err) {
+      // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）——这里兜住并留日志
+      console.error('[assistant] send 未捕获异常', err)
+      showToast({ type: 'error', message: `AI 调用异常：${String((err as Error)?.message ?? err)}` })
+      await refreshMessages(sid).catch(() => { /* 刷新失败不掩盖原始异常 */ })
     } finally {
       endRun(sid)
       void refreshSessions()
@@ -495,15 +521,58 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     const cid = crypto.randomUUID()
     try {
       const r = await agentRegenerate(sid, (contextRemoved ? null : resolveCtx()) ?? undefined, cid, thinking ? 'medium' : 'off')
-      if (r.code === 'ABORTED') showToast({ type: 'info', message: '已停止生成' })
-      else if (!r.ok) showToast({ type: 'error', message: `重新生成失败：${r.error ?? '未知错误'}` })
+      if (r.code === 'USER_ABORTED') showToast({ type: 'info', message: '已停止生成 · 可点「继续」接着做' })
+      else if (!r.ok) {
+        const again = r.interruption?.resumable === true ? ' · 可点「继续」接着做' : ''
+        showToast({ type: 'error', message: `重新生成失败：${r.error ?? '未知错误'}${again}` })
+      }
       else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
       await refreshMessages(sid)
+    } catch (err) {
+      // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
+      console.error('[assistant] regenerate 未捕获异常', err)
+      showToast({ type: 'error', message: `重新生成异常：${String((err as Error)?.message ?? err)}` })
+      await refreshMessages(sid).catch(() => { /* 刷新失败不掩盖原始异常 */ })
     } finally {
       endRun(sid)
       void refreshSessions()
     }
   }, [messages, refreshMessages, refreshSessions, thinking, contextRemoved, resolveCtx])
+
+  /**
+   * 从断点继续（A 方案）：不追加用户消息 —— 主进程用会话行里那份现场（含 carry）拼一次续跑注入，
+   * 拼在 convo 末尾（前缀不变 → prompt cache 不受影响）。守卫与 send 同款：
+   * 本会话在跑 / 全局并发上限都不发请求；现场由主进程 claim，重复点击第二次会如实报「没有可继续的中断点」。
+   */
+  const resume = useCallback(async () => {
+    const sid = activeIdRef.current
+    if (!sid || isSessionRunning(sid)) return
+    if (runningSessionCount() >= MAX_PARALLEL) {
+      showToast({ type: 'info', message: `已有 ${MAX_PARALLEL} 个对话在运行，请等一个完成再试` })
+      return
+    }
+    beginRun(sid)
+    setLastChanges(null)
+    const cid = crypto.randomUUID()
+    try {
+      const r = await agentResume(sid, (contextRemoved ? null : resolveCtx()) ?? undefined, cid, sessionSource, modelId || undefined, thinking ? 'medium' : 'off')
+      if (r.code === 'USER_ABORTED') showToast({ type: 'info', message: '已停止 · 可继续' })
+      else if (!r.ok) {
+        const again = r.interruption?.resumable === true ? ' · 可再点一次「继续」' : ''
+        showToast({ type: 'error', message: `继续失败：${r.error ?? '未知错误'}${again}` })
+      } else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
+      await refreshMessages(sid)
+    } catch (err) {
+      // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
+      console.error('[assistant] resume 未捕获异常', err)
+      showToast({ type: 'error', message: `继续异常：${String((err as Error)?.message ?? err)}` })
+      await refreshMessages(sid).catch(() => { /* 刷新失败不掩盖原始异常 */ })
+    } finally {
+      endRun(sid)
+      // 现场写回会话行（成功即已清空）→ 重拉列表才能让「继续」正确消失/出现
+      void refreshSessions()
+    }
+  }, [contextRemoved, modelId, refreshMessages, refreshSessions, resolveCtx, sessionSource, thinking])
 
   /** 改写用户消息并重推其后回复 */
   const editSubmit = useCallback(async (messageId: string, content: string) => {
@@ -519,10 +588,18 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     const cid = crypto.randomUUID()
     try {
       const r = await agentEditMessage(sid, messageId, content, (contextRemoved ? null : resolveCtx()) ?? undefined, cid, thinking ? 'medium' : 'off')
-      if (r.code === 'ABORTED') showToast({ type: 'info', message: '已停止生成' })
-      else if (!r.ok) showToast({ type: 'error', message: `修改失败：${r.error ?? '未知错误'}` })
+      if (r.code === 'USER_ABORTED') showToast({ type: 'info', message: '已停止生成 · 可点「继续」接着做' })
+      else if (!r.ok) {
+        const again = r.interruption?.resumable === true ? ' · 可点「继续」接着做' : ''
+        showToast({ type: 'error', message: `修改失败：${r.error ?? '未知错误'}${again}` })
+      }
       else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
       await refreshMessages(sid)
+    } catch (err) {
+      // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
+      console.error('[assistant] editSubmit 未捕获异常', err)
+      showToast({ type: 'error', message: `修改异常：${String((err as Error)?.message ?? err)}` })
+      await refreshMessages(sid).catch(() => { /* 刷新失败不掩盖原始异常 */ })
     } finally {
       endRun(sid)
       void refreshSessions()
@@ -577,6 +654,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     removeSession,
     togglePin,
     regenerate,
+    resume,
+    resumeInfo,
     editSubmit,
     deleteMessage,
     abort,

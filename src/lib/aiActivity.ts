@@ -66,7 +66,7 @@ function ensureStarted(): void {
     emitBusy(p.running.length)
     const e = p.ended
     if (e) {
-      if (!e.ok && e.code !== 'ABORTED') { moment('error', 2600); return }
+      if (!e.ok && e.code !== 'USER_ABORTED') { moment('error', 2600); return }
       if (e.ok) { moment('attention', 2400); return }
     }
     recompute()

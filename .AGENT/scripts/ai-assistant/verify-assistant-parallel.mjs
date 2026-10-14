@@ -66,7 +66,7 @@ check('MAX_PARALLEL = 3', /export const MAX_PARALLEL = 3/.test(store), '')
 check('IPC 单次订阅（懒挂载，防三宿主重复 Toast）', /if \(subscribed\) return\s*$/.test(store.replace(/\r/g, '')) || /if \(subscribed\) return/.test(store), '')
 check('流式按 sessionId 入桶（切回恢复实时流）', /onAgentStream\(\(\{ sessionId, event \}\)/.test(store) && /buckets\.get\(sessionId\)/.test(store), '')
 check('ended 分发：ABORTED 静默 / 失败 Toast / 后台完成 unread',
-  /ended\.code === 'ABORTED'/.test(store) && /showToast\(\{ type: 'error', message: `后台对话失败/.test(store) && /unreadIds\.add\(ended\.sessionId\)/.test(store), '')
+  /ended\.code === 'USER_ABORTED'/.test(store) && /showToast\(\{ type: 'error', message: `后台对话被中断/.test(store) && /unreadIds\.add\(ended\.sessionId\)/.test(store), '')
 check('viewed 计数制（多宿主对称进出）',
   /viewedCounts\.set\(sid,\s*\(viewedCounts\.get\(sid\) \?\? 0\) \+ 1\)/.test(store) && /export function unmarkSessionViewed/.test(store), '')
 check('runMarkOf 优先级 running > failed > unread',

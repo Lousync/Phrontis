@@ -5,6 +5,8 @@ import { getCurrentVault, getVaultKbRoot } from './kbStore/vaultContext'
 import { globalDataDir } from './globalJsonStore'
 import { writeAdoptNotice } from './agentAdoptNotice'
 import { adoptLegacyGlobalAgentStore, type AdoptResult } from './agentSessionMigrate'
+// 类型专用导入（零运行时代价）：续跑现场的结构真源在 agentInterruptPure，仓库不另立一份
+import type { SessionResume } from './agentInterruptPure'
 import {
   appendMessage, deleteMessageById, deleteMessagesAfterId, deleteMessagesFile,
   getMessagesPage, migrateLegacyMessages, readMessages, updateMessageContent as storeUpdateMessageContent,
@@ -99,6 +101,14 @@ export interface AgentSessionRow {
   pinned_at?: string
   /** 会话压缩纪要（缺省=未压缩）。原消息永不删除，置 null 即回滚 */
   digest?: SessionDigest
+  /**
+   * 续跑现场（A 方案 §3.1，2026-10-14）：最近一次中断留下的断点。缺省 = 无可续点。
+   *
+   * 为什么放会话行、不放消息行：语义上「一个会话只有一个可续的断点（最近一次）」，天然幂等；
+   * 且它带 6k 字符的 carry 正文，放消息行会被 `agent:messages` 全量发给渲染层。
+   * 出口裁剪：`agent:sessions` 只发 toResumeInfo()（见 agentService），**绝不带 carry**。
+   */
+  resume?: SessionResume
   /**
    * 支线旁问（v3.1.2 条目11）：挂靠的主线会话 id。缺省 = 非支线。
    * 与主线物理隔离（独立 sessionId + 独立 .jsonl），删除主线时级联删除。
@@ -405,15 +415,48 @@ export function deleteAgentSession(id: string): void {
   if (keptSessions.length !== sessions.length) writeSessions(keptSessions)
 }
 
+/**
+ * 写回/清除续跑现场（null = 清除）。
+ * 与 updateSessionDigest 同款：**不动 updated_at**（中断不该把会话顶到列表最上）。
+ * 调用方（agentService.interruptResult）用 try/catch 包住：记不上现场不能改变本次调用的返回结果。
+ */
+export function updateSessionResume(id: string, resume: SessionResume | null): void {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row) return
+  if (resume) row.resume = resume
+  else delete row.resume
+  writeSessions(sessions)
+}
+
+/**
+ * 消息删改 → 续跑现场作废（与 invalidateDigestOnMutation 同构，但**更宽**）。
+ *
+ * 为什么宽：断点绑在**具体那条中断消息**上（resume.message_id），而删改任何一条消息都可能让
+ * 「现场」与实际历史对不上（改了用户消息 = 任务本身变了；删了中断卡 = 按钮挂的消息没了）。
+ * 作废的代价只是「继续」消失（用户可重新发消息），留着错的代价是续跑一个已经变了的任务。
+ */
+function invalidateResumeOnMutation(sessionId: string): void {
+  try {
+    if (!getAgentSession(sessionId)?.resume) return
+    updateSessionResume(sessionId, null)
+  } catch { /* 作废失败不阻断消息操作本身 */ }
+}
+
 export function sessionExists(id: string): boolean {
   return readSessions().some((s) => s.id === id)
 }
 
-/** 追加消息并刷新会话活跃时间（消息落盘 = 单行 append，O(本条消息)） */
-export function appendAgentMessage(sessionId: string, role: 'user' | 'assistant', content: string, trace?: unknown): void {
+/**
+ * 追加消息并刷新会话活跃时间（消息落盘 = 单行 append，O(本条消息)）。
+ * 返回新消息 id（A 方案：中断卡要把「继续」按钮挂在自己的 id 上）。
+ * `role==='user'` 时**清空续跑现场**：用户改主意发了新消息 = 旧现场作废（中断卡保留为历史）。
+ */
+export function appendAgentMessage(sessionId: string, role: 'user' | 'assistant', content: string, trace?: unknown): string {
   ensureMigrated()
+  const id = randomUUID()
   appendMessage(requireAgentDir(), {
-    id: randomUUID(),
+    id,
     session_id: sessionId,
     role,
     content,
@@ -424,8 +467,11 @@ export function appendAgentMessage(sessionId: string, role: 'user' | 'assistant'
   const row = sessions.find((s) => s.id === sessionId)
   if (row) {
     row.updated_at = nowLocal()
+    // 新用户消息 = 现场作废（顺序无所谓：同一次写入里一起落盘）
+    if (role === 'user') delete row.resume
     writeSessions(sessions)
   }
+  return id
 }
 
 /** 首条用户消息自动成为会话标题（仅当仍是默认标题时） */
@@ -480,12 +526,14 @@ export function updateMessageContent(sessionId: string, id: string, content: str
   ensureMigrated()
   storeUpdateMessageContent(requireAgentDir(), sessionId, id, content)
   invalidateDigestOnMutation(sessionId, id, 'at')
+  invalidateResumeOnMutation(sessionId)
 }
 
 export function deleteMessage(sessionId: string, id: string): void {
   ensureMigrated()
   deleteMessageById(requireAgentDir(), sessionId, id)
   invalidateDigestOnMutation(sessionId, id, 'at')
+  invalidateResumeOnMutation(sessionId)
 }
 
 /** 删除某条消息之后的所有消息（重新生成/编辑重推时清掉旧回复） */
@@ -493,4 +541,5 @@ export function deleteMessagesAfter(sessionId: string, messageId: string): void 
   ensureMigrated()
   deleteMessagesAfterId(requireAgentDir(), sessionId, messageId)
   invalidateDigestOnMutation(sessionId, messageId, 'after')
+  invalidateResumeOnMutation(sessionId)
 }

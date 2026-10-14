@@ -115,7 +115,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     liveSteps, draft, lastChanges, compressing, pickedSkill, setPickedSkill,
     slashSkills, editing, setEditing, copiedIdx, setCopiedIdx, deletingId,
     drawerMounted, drawerOpen, toggleDrawer, closeDrawer,
-    send, newSession, loadSession, removeSession, togglePin, regenerate, editSubmit, deleteMessage,
+    send, newSession, loadSession, removeSession, togglePin, regenerate, resume, resumeInfo, editSubmit, deleteMessage,
     abort, dismissChanges, runStateOf,
     modelId, setModelId, thinking, setThinking, attachedFiles, setAttachedFiles,
     contextInfo, contextRemoved, dismissContext, restoreContext,
@@ -427,6 +427,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 copiedIdx={copiedIdx}
                 setCopiedIdx={setCopiedIdx}
                 onRegenerate={() => { void regenerate() }}
+                resumeInfo={resumeInfo}
+                onResume={() => { void resume() }}
                 onEditSubmit={(id, content) => { void editSubmit(id, content) }}
                 onDeleteMessage={id => { void deleteMessage(id) }}
                 jumpBottom={variant === 'page'}

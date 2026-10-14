@@ -280,6 +280,8 @@ const api = {
   docsPptxPages: (relPath: string) => ipcRenderer.invoke('docs:pptxPages', relPath),
   agentChat: (req: { sessionId: string; message: string; context?: unknown; chatId?: string; source?: string; modelId?: string; effort?: string; skillName?: string }) => ipcRenderer.invoke('agent:chat', req),
   agentRegenerate: (req: { sessionId: string; context?: unknown; chatId?: string; effort?: string }) => ipcRenderer.invoke('agent:regenerate', req),
+  // A 方案：从断点续跑（中断卡上的「继续」）；不追加用户消息，现场由主进程一次性 claim
+  agentResume: (req: { sessionId: string; context?: unknown; chatId?: string; source?: string; modelId?: string; effort?: string }) => ipcRenderer.invoke('agent:resume', req),
   agentStartScene: (req: { sessionId: string; context?: unknown; chatId?: string; source?: string; modelId?: string }) => ipcRenderer.invoke('agent:startScene', req),
   agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: unknown; chatId?: string; effort?: string }) => ipcRenderer.invoke('agent:editMessage', req),
   agentDeleteMessage: (sessionId: string, messageId: string) => ipcRenderer.invoke('agent:deleteMessage', { sessionId, messageId }),

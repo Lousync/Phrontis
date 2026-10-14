@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
-import { ArrowDown, Check, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react'
+import { ArrowDown, Check, Copy, Pencil, Play, RefreshCw, Trash2 } from 'lucide-react'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { showToast } from '../../../lib/toast'
 import { copyText } from '../../../lib/ipc'
 import { StreamBubble } from './StreamBubble'
 import { ToolSummary, type TraceRowView } from './ToolSummary'
 import type { StreamDraft } from './useAgentStream'
-import type { AgentTraceStep } from '../../../types'
+import type { AgentTraceStep, ResumeInfo } from '../../../types'
 
 /**
  * 共用消息流（侧栏 AI 与 AI 学堂全屏对话同一份渲染，避免两套逻辑分叉）。
@@ -103,6 +103,12 @@ export interface MessageListProps {
   copiedIdx: number | null
   setCopiedIdx: Dispatch<SetStateAction<number | null>>
   onRegenerate: () => void
+  /**
+   * A 方案（断点续跑）：本会话最近一次中断留下的可续现场（来自 useAssistantChat 的 resumeInfo）。
+   * 只有 `resumeInfo.messageId === 那条消息 id` 才出「继续」—— 别的消息上没有可续的断点。
+   */
+  resumeInfo?: ResumeInfo | null
+  onResume?: () => void
   onEditSubmit: (id: string, content: string) => void
   onDeleteMessage: (id: string) => void
   /** 空态提示（侧栏与全屏文案不同） */
@@ -116,7 +122,7 @@ export interface MessageListProps {
 
 export function MessageList({
   messages, pending, liveSteps, draft, editing, setEditing, copiedIdx, setCopiedIdx,
-  onRegenerate, onEditSubmit, onDeleteMessage, emptyHint, className, jumpBottom = false,
+  onRegenerate, resumeInfo, onResume, onEditSubmit, onDeleteMessage, emptyHint, className, jumpBottom = false,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   /** 是否贴底（用户上滚阅读时不再强制拉回）。初始 true：新会话从底部开始 */
@@ -229,6 +235,14 @@ export function MessageList({
                   className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-[var(--text-primary)]"
                   title="编辑并重新生成">
                   <Pencil size={10} /> <span className="kb-l2">编辑</span>
+                </button>
+              )}
+              {/* A 方案：只有「挂着可续现场的那条中断消息」才有「继续」（现场由主进程 claim 一次） */}
+              {m.role === 'assistant' && m.id && !pending && onResume && resumeInfo && resumeInfo.messageId === m.id && (
+                <button onClick={onResume}
+                  className="flex items-center gap-0.5 opacity-0 group-hover/msg:opacity-100 transition-opacity hover:text-[var(--text-primary)]"
+                  title={resumeInfo.reason ? `从断点继续（上次中断：${resumeInfo.reason}）` : '从断点继续'}>
+                  <Play size={9} /> <span className="kb-l2">继续</span>
                 </button>
               )}
               {m.role === 'assistant' && i === messages.length - 1 && !pending && m.id && (

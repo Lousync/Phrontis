@@ -14,6 +14,11 @@ import {
   sanitizeAccountInfo, appendAccount, removeAccount,
   type ProviderAccount,
 } from './llmAccountPure'
+import {
+  attachFacts, rawFailure, rawFromError, classifyFailure, friendlyReason,
+  interruptionOfStopReason, interruptionDetailOf, STOP_REASON_NO_TERMINATOR,
+  type Interruption, type InterruptionDetail, type InterruptCode,
+} from './llmFailurePure'
 
 /**
  * Model Gateway —— LLM API 统一接入层（方案 .claude/plans/model-gateway.md）。
@@ -108,6 +113,8 @@ interface ChatResult {
   /** OpenAI 线格式的 assistant 消息（多轮回喂时原样使用） */
   assistantMessage: ChatMessage
   usage: LlmUsage
+  /** 上游停止原因（finish_reason / stop_reason / done_reason / 'no-terminator'）—— G5 = B-29 判据 */
+  stopReason?: string
   rawError?: never
 }
 
@@ -128,37 +135,103 @@ const STREAM_FIRST_BYTE_MS = 60_000
 const STREAM_IDLE_MS = 60_000
 
 /**
- * 流式超时：首字节 60s + 空闲 60s（每次收到数据块重置定时器）。
+ * 流式超时三阶段（归因方案 §4.1 —— 语义必须分明，否则三种超时又会糊成一团）：
+ * ① 连接：net.fetch() → 响应头到达（`CONNECT_TIMEOUT_MS` 30s；此前它是死常数，见 G7）
+ * ② 首字节：响应头到达 → 第一个数据帧（60s）
+ * ③ 空闲：帧 → 帧（60s，每帧重置）
  * 不可用 AbortSignal.timeout(TOTAL_TIMEOUT_MS)——那会在第 300 秒掐断正常长流。
+ * 超时归属由「fetch 是否已 resolve」+「收到几段数据」决定，**不靠耗时猜测**。
  */
-function createStreamAbort(external: AbortSignal | undefined): {
+export interface StreamStats {
+  /** 收到几个数据段（判「零输出 vs 收了一半」的关键判据） */
+  chunks: number
+  /** 已产出多少字符（content.length / text.length） */
+  chars: number
+  /** 是否见过正常结束帧（[DONE] / message_stop / done / response.completed） */
+  terminator: boolean
+  /** 上游停止原因（finish_reason / stop_reason / done_reason；未见结束帧补 'no-terminator'） */
+  stopReason?: string
+}
+
+interface StreamAbortHandle {
   signal: AbortSignal
+  /** 响应头已到（fetch resolve）→ 连接阶段结束，转首字节计时 */
+  connected: () => void
+  /** 每个数据段：转空闲计时 + 记段数 */
   chunk: () => void
-  timedOut: () => boolean
+  timedOutKind: () => 'connect' | 'first-byte' | 'idle' | null
+  /** 外部 signal 已 abort（用户点停止）—— 优先于任何超时（B-0） */
+  externalAborted: () => boolean
+  stats: StreamStats
   dispose: () => void
-} {
+}
+
+function createStreamAbort(external: AbortSignal | undefined): StreamAbortHandle {
   const ctrl = new AbortController()
+  const stats: StreamStats = { chunks: 0, chars: 0, terminator: false }
   let timer: ReturnType<typeof setTimeout> | null = null
-  let timedOut = false
-  const arm = (ms: number): void => {
+  let timedOutKind: 'connect' | 'first-byte' | 'idle' | null = null
+  const arm = (ms: number, kind: 'connect' | 'first-byte' | 'idle'): void => {
     if (timer) clearTimeout(timer)
-    timer = setTimeout(() => { timedOut = true; ctrl.abort() }, ms)
+    timer = setTimeout(() => { timedOutKind = kind; ctrl.abort() }, ms)
   }
   const onExternal = (): void => ctrl.abort()
   if (external) {
     if (external.aborted) ctrl.abort()
     else external.addEventListener('abort', onExternal, { once: true })
   }
-  arm(STREAM_FIRST_BYTE_MS)
+  arm(CONNECT_TIMEOUT_MS, 'connect')
   return {
     signal: ctrl.signal,
-    chunk: () => arm(STREAM_IDLE_MS),
-    timedOut: () => timedOut,
+    connected: () => arm(STREAM_FIRST_BYTE_MS, 'first-byte'),
+    chunk: () => { stats.chunks++; arm(STREAM_IDLE_MS, 'idle') },
+    timedOutKind: () => timedOutKind,
+    externalAborted: () => !!external?.aborted,
+    stats,
     dispose: () => {
       if (timer) clearTimeout(timer)
       if (external) external.removeEventListener('abort', onExternal)
     },
   }
+}
+
+// ---- 采集搬运：状态码 / 上游原话 / 段数 / 结束帧 → RawFailure（归一不读中文文案）----
+
+/**
+ * 上游错误体 → 机器可读码与原话。
+ * 只认 `error.code` / `error.type` / `error.message`（**不认顶层 type**：Anthropic 的
+ * `type:'error'` 是帧类型、不是错误码，认了会把所有错误帧归一成同一个码）。
+ */
+function upstreamFactsOf(json: any): { upstreamCode?: string; upstreamMessage?: string } {
+  const e = json?.error
+  const code = String(e?.code ?? e?.type ?? '').trim()
+  const raw = typeof e === 'string' ? e : String(e?.message ?? json?.message ?? '')
+  const message = raw.replace(/\s+/g, ' ').trim().slice(0, 300)
+  return { ...(code ? { upstreamCode: code } : {}), ...(message ? { upstreamMessage: message } : {}) }
+}
+
+/** 非 200 响应：状态 + 未截断的上游原话（300）一起带走（不再只有拼好的中文串） */
+function httpFailure(message: string, status: number, json: any, started: number): Error {
+  return attachFacts(new Error(message), {
+    layer: 'http',
+    httpStatus: status,
+    ...upstreamFactsOf(json),
+    elapsedMs: Date.now() - started,
+  })
+}
+
+/** 适配器 catch 出口：把「超时归属 + 段数 + 已产出 + 结束帧」并进采集面后原样抛出 */
+function failStream(err: unknown, sa: StreamAbortHandle, started: number): never {
+  const raw = rawFromError(err, {
+    externalAborted: sa.externalAborted(),
+    ...(sa.timedOutKind() ? { timedOut: sa.timedOutKind() as 'connect' | 'first-byte' | 'idle' } : {}),
+    receivedChunks: sa.stats.chunks,
+    partialChars: sa.stats.chars,
+    sawTerminator: sa.stats.terminator,
+    ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}),
+    elapsedMs: Date.now() - started,
+  })
+  throw attachFacts(err, raw)
 }
 
 /**
@@ -424,11 +497,12 @@ const openAiCompatibleAdapter: Adapter = {
       body: JSON.stringify(buildOpenAiBody(req, false)),
     }, req.signal)
     if (status !== 200 || !json) {
-      throw Object.assign(new Error(friendlyHttpError(status, json)), { latencyMs: Date.now() - started })
+      throw Object.assign(httpFailure(friendlyHttpError(status, json), status, json, started), { latencyMs: Date.now() - started })
     }
     return parseOpenAiChoice(json)
   },
   async chatStream(p, req, onEvent) {
+    const started = Date.now()
     const sa = createStreamAbort(req.signal)
     try {
       const res = await net.fetch(`${p.baseUrl}/chat/completions`, {
@@ -437,8 +511,10 @@ const openAiCompatibleAdapter: Adapter = {
         body: JSON.stringify(buildOpenAiBody(req, true)),
         signal: sa.signal,
       })
+      sa.connected() // 响应头已到：连接阶段结束，转首字节计时（超时归属靠它分辨）
       if (res.status !== 200) {
-        throw new Error(friendlyHttpError(res.status, parseWholeJson(await res.text())))
+        const json = parseWholeJson(await res.text())
+        throw httpFailure(friendlyHttpError(res.status, json), res.status, json, started)
       }
       // 网关忽略 stream：整体 JSON 回退（功能可用，仅失去过程感）
       if (!isSseResponse(res)) {
@@ -455,18 +531,29 @@ const openAiCompatibleAdapter: Adapter = {
         sa.chunk()
         const data = sseData(frame)
         if (!data) continue
-        if (data === '[DONE]') break
+        if (data === '[DONE]') { sa.stats.terminator = true; break }
         const json = parseWholeJson(data)
         if (!json) continue // 心跳 / 非 JSON 帧：丢弃，绝不抛
-        const d = json?.choices?.[0]?.delta ?? {}
+        // G1（归因 P0）：SSE 内的 error 帧此前完全不看 —— 上游报错会被当成正常回答，内容半截
+        if (json.error) {
+          const up = upstreamFactsOf(json)
+          throw attachFacts(new Error(up.upstreamMessage ?? '上游在流中报错'), {
+            layer: 'stream-frame', ...up, elapsedMs: Date.now() - started,
+          })
+        }
+        const choice = json?.choices?.[0] ?? {}
+        // G5 = B-29：上游停止原因（'length' = 撞 max_tokens 被截断）此前没人读
+        if (typeof choice.finish_reason === 'string' && choice.finish_reason) sa.stats.stopReason = choice.finish_reason
+        const d = choice.delta ?? {}
         if (typeof d?.content === 'string' && d.content) {
           content += d.content
+          sa.stats.chars += d.content.length
           onEvent({ type: 'text', delta: d.content })
         }
         // 思考链字段名各家不一（reasoning_content / reasoning）：见到即归一化，不做模型名预判
         const rc = typeof d?.reasoning_content === 'string' ? d.reasoning_content
           : typeof d?.reasoning === 'string' ? d.reasoning : ''
-        if (rc) onEvent({ type: 'reasoning', delta: rc })
+        if (rc) { sa.stats.chars += rc.length; onEvent({ type: 'reasoning', delta: rc }) }
         if (Array.isArray(d?.tool_calls)) {
           for (const tc of d.tool_calls) {
             // 流式 tool_calls 是分片：id/name 仅首片给，arguments 逐片累加
@@ -475,7 +562,7 @@ const openAiCompatibleAdapter: Adapter = {
             if (tc?.id) cur.id = String(tc.id)
             if (tc?.function?.name) cur.name = String(tc.function.name)
             const argDelta = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : ''
-            if (argDelta) cur.args += argDelta
+            if (argDelta) { cur.args += argDelta; sa.stats.chars += argDelta.length }
             acc.set(idx, cur)
             onEvent({
               type: 'tool_call', index: idx,
@@ -492,6 +579,8 @@ const openAiCompatibleAdapter: Adapter = {
           }
         }
       }
+      // G4：干净 EOF 与正常结束同形 —— 未见结束帧就标出来（上层据此提示「回答被上游截断」）
+      if (!sa.stats.terminator) sa.stats.stopReason = STOP_REASON_NO_TERMINATOR
       const toolCalls: ToolCallNormalized[] = [...acc.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([i, t]) => ({ id: t.id || `call_${i}`, name: t.name, arguments: t.args || '{}' }))
@@ -507,10 +596,12 @@ const openAiCompatibleAdapter: Adapter = {
       }
       onEvent({ type: 'usage', ...usage })
       onEvent({ type: 'done' })
-      return { content, toolCalls, assistantMessage, usage }
+      return {
+        content, toolCalls, assistantMessage, usage,
+        ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}),
+      }
     } catch (err) {
-      if (sa.timedOut()) throw new Error('流式响应超时（60 秒无数据）')
-      throw err
+      failStream(err, sa, started) // 超时归属 + 段数 + 结束帧并进采集面后原样抛出
     } finally {
       sa.dispose()
     }
@@ -584,15 +675,21 @@ const ollamaAdapter: Adapter = {
     return ((json?.models ?? []).map((m: any) => String(m?.name)).filter(Boolean)) as string[]
   },
   async chat(p, req) {
+    const started = Date.now()
     const { status, json } = await httpJson(`${ollamaBase(p)}/api/chat`, {
       method: 'POST',
       headers: {},
       body: JSON.stringify(buildOllamaBody(req, false)),
     }, req.signal)
-    if (status !== 200 || !json) throw new Error(`HTTP ${status}`)
+    // G3（归因 P0）：非 200 此前只抛 `HTTP 404`，错误体（如 model "x" not found）整个丢掉
+    if (status !== 200 || !json) {
+      const detail = typeof json?.error === 'string' ? `：${json.error.replace(/\s+/g, ' ').slice(0, 200)}` : ''
+      throw httpFailure(`HTTP ${status}${detail}`, status, json, started)
+    }
     return parseOllamaWhole(json)
   },
   async chatStream(p, req, onEvent) {
+    const started = Date.now()
     const sa = createStreamAbort(req.signal)
     try {
       const res = await net.fetch(`${ollamaBase(p)}/api/chat`, {
@@ -601,7 +698,11 @@ const ollamaAdapter: Adapter = {
         body: JSON.stringify(buildOllamaBody(req, true)),
         signal: sa.signal,
       })
-      if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
+      sa.connected() // 响应头已到：连接阶段结束，转首字节计时
+      if (res.status !== 200) {
+        const json = parseWholeJson(await res.text())
+        throw httpFailure(`HTTP ${res.status}`, res.status, json, started)
+      }
       // 网关/服务忽略 stream 时返回 application/json（非 NDJSON）→ 整体回退
       const ctype = String(res.headers.get('content-type') ?? '')
       if (ctype.includes('application/json') && !ctype.includes('ndjson')) {
@@ -618,18 +719,28 @@ const ollamaAdapter: Adapter = {
         sa.chunk()
         const json = parseWholeJson(line)
         if (!json) continue
+        // NDJSON 里的 error 行（如 model "x" not found）此前被忽略 → 当正常回答
+        if (json.error) {
+          const up = upstreamFactsOf(json)
+          throw attachFacts(new Error(up.upstreamMessage ?? 'Ollama 在流中报错'), {
+            layer: 'stream-frame', ...up, elapsedMs: Date.now() - started,
+          })
+        }
         const m = json.message ?? {}
         if (typeof m.content === 'string' && m.content) {
           content += m.content
+          sa.stats.chars += m.content.length
           onEvent({ type: 'text', delta: m.content })
         }
         if (typeof m.thinking === 'string' && m.thinking) {
+          sa.stats.chars += m.thinking.length
           onEvent({ type: 'reasoning', delta: m.thinking })
         }
         if (Array.isArray(m.tool_calls)) {
           const got = parseOllamaToolCalls(m.tool_calls)
           for (const tc of got) {
             toolCalls.push({ ...tc, id: `call_${toolCalls.length}` })
+            sa.stats.chars += tc.arguments.length
             onEvent({ type: 'tool_call', index: toolCalls.length - 1, name: tc.name, argsDelta: tc.arguments })
           }
         }
@@ -639,8 +750,14 @@ const ollamaAdapter: Adapter = {
             completionTokens: Number(json.eval_count ?? 0),
           }
         }
-        if (json.done) break
+        // G5 = B-29：done_reason（'length' = 撞 num_predict 被截断）此前没人读
+        if (json.done) {
+          sa.stats.terminator = true
+          if (typeof json.done_reason === 'string' && json.done_reason) sa.stats.stopReason = json.done_reason
+          break
+        }
       }
+      if (!sa.stats.terminator) sa.stats.stopReason = STOP_REASON_NO_TERMINATOR
       const assistantMessage: ChatMessage = {
         role: 'assistant',
         content,
@@ -652,10 +769,12 @@ const ollamaAdapter: Adapter = {
       }
       onEvent({ type: 'usage', ...usage })
       onEvent({ type: 'done' })
-      return { content, toolCalls, assistantMessage, usage }
+      return {
+        content, toolCalls, assistantMessage, usage,
+        ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}),
+      }
     } catch (err) {
-      if (sa.timedOut()) throw new Error('流式响应超时（60 秒无数据）')
-      throw err
+      failStream(err, sa, started)
     } finally {
       sa.dispose()
     }
@@ -758,13 +877,14 @@ const anthropicAdapter: Adapter = {
     return ((json?.data ?? []).map((m: any) => String(m?.id)).filter(Boolean)) as string[]
   },
   async chat(p, req) {
+    const started = Date.now()
     const { status, json } = await httpJson(`${anthropicBase(p)}/v1/messages`, {
       method: 'POST',
       headers: anthropicHeaders(p, req.sessionId),
       body: JSON.stringify(buildAnthropicBody(req, false)),
     })
     if (status !== 200 || !json) {
-      throw new Error(`HTTP ${status}: ${String(json?.error?.message ?? '').slice(0, 200) || '响应解析失败'}`)
+      throw httpFailure(`HTTP ${status}: ${String(json?.error?.message ?? '').slice(0, 200) || '响应解析失败'}`, status, json, started)
     }
     let text = ''
     const toolCalls: ToolCallNormalized[] = []
@@ -791,6 +911,7 @@ const anthropicAdapter: Adapter = {
     }
   },
   async chatStream(p, req, onEvent) {
+    const started = Date.now()
     const sa = createStreamAbort(req.signal)
     try {
       const res = await net.fetch(`${anthropicBase(p)}/v1/messages`, {
@@ -799,9 +920,10 @@ const anthropicAdapter: Adapter = {
         body: JSON.stringify(buildAnthropicBody(req, true)),
         signal: sa.signal,
       })
+      sa.connected() // 响应头已到：连接阶段结束，转首字节计时
       if (res.status !== 200) {
         const json = parseWholeJson(await res.text())
-        throw new Error(`HTTP ${res.status}: ${String(json?.error?.message ?? '').slice(0, 200) || '响应解析失败'}`)
+        throw httpFailure(`HTTP ${res.status}: ${String(json?.error?.message ?? '').slice(0, 200) || '响应解析失败'}`, res.status, json, started)
       }
       let text = ''
       let usage: LlmUsage = { promptTokens: 0, completionTokens: 0 }
@@ -814,6 +936,14 @@ const anthropicAdapter: Adapter = {
         const json = parseWholeJson(data)
         if (!json) continue
         const type = String(json.type ?? '')
+        // G2（归因 P0）：此前只认 5 种 type、不认 error —— Anthropic 最常见的失败
+        // （overloaded_error 529）就此消失，用户看到「正常回答、内容半截」
+        if (type === 'error') {
+          const up = upstreamFactsOf(json)
+          throw attachFacts(new Error(up.upstreamMessage ?? 'Anthropic 在流中报错'), {
+            layer: 'stream-frame', ...up, elapsedMs: Date.now() - started,
+          })
+        }
         if (type === 'message_start') {
           // message_start 里就带完整的输入侧用量（含缓存命中量），一次取齐
           usage = {
@@ -830,23 +960,30 @@ const anthropicAdapter: Adapter = {
           const d = json.delta ?? {}
           if (d.type === 'text_delta' && d.text) {
             text += String(d.text)
+            sa.stats.chars += String(d.text).length
             onEvent({ type: 'text', delta: String(d.text) })
           } else if (d.type === 'thinking_delta' && d.thinking) {
+            sa.stats.chars += String(d.thinking).length
             onEvent({ type: 'reasoning', delta: String(d.thinking) })
           } else if (d.type === 'input_json_delta') {
             const idx = Number(json.index ?? 0)
             const cur = blocks.get(idx)
             if (cur) {
               cur.json += String(d.partial_json ?? '')
+              sa.stats.chars += String(d.partial_json ?? '').length
               onEvent({ type: 'tool_call', index: idx, name: cur.name || undefined, argsDelta: String(d.partial_json ?? '') })
             }
           }
         } else if (type === 'message_delta') {
           usage = { ...usage, completionTokens: Number(json.usage?.output_tokens ?? 0) }
+          // G5 = B-29：stop_reason（'max_tokens' = 被截断）此前只取 usage、不看它
+          if (typeof json.delta?.stop_reason === 'string' && json.delta.stop_reason) sa.stats.stopReason = json.delta.stop_reason
         } else if (type === 'message_stop') {
+          sa.stats.terminator = true
           break
         }
       }
+      if (!sa.stats.terminator) sa.stats.stopReason = STOP_REASON_NO_TERMINATOR
       const toolCalls: ToolCallNormalized[] = [...blocks.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([i, b]) => ({ id: b.id || `call_${i}`, name: b.name, arguments: b.json || '{}' }))
@@ -858,10 +995,10 @@ const anthropicAdapter: Adapter = {
         toolCalls,
         assistantMessage: buildAssistantMessage(text, toolCalls),
         usage,
+        ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}),
       }
     } catch (err) {
-      if (sa.timedOut()) throw new Error('流式响应超时（60 秒无数据）')
-      throw err
+      failStream(err, sa, started)
     } finally {
       sa.dispose()
     }
@@ -900,11 +1037,12 @@ const openAiResponsesAdapter: Adapter = {
       body: JSON.stringify(buildResponsesBody(req, false)),
     }, req.signal)
     if (status !== 200 || !json) {
-      throw Object.assign(new Error(friendlyHttpError(status, json)), { latencyMs: Date.now() - started })
+      throw Object.assign(httpFailure(friendlyHttpError(status, json), status, json, started), { latencyMs: Date.now() - started })
     }
     return toChatResult(parseResponsesWhole(json))
   },
   async chatStream(p, req, onEvent) {
+    const started = Date.now()
     const sa = createStreamAbort(req.signal)
     try {
       const res = await net.fetch(`${p.baseUrl}/responses`, {
@@ -913,8 +1051,10 @@ const openAiResponsesAdapter: Adapter = {
         body: JSON.stringify(buildResponsesBody(req, true)),
         signal: sa.signal,
       })
+      sa.connected() // 响应头已到：连接阶段结束，转首字节计时
       if (res.status !== 200) {
-        throw new Error(friendlyHttpError(res.status, parseWholeJson(await res.text())))
+        const json = parseWholeJson(await res.text())
+        throw httpFailure(friendlyHttpError(res.status, json), res.status, json, started)
       }
       // 网关忽略 stream：整体 JSON 回退（功能可用，仅失去过程感）
       if (!isSseResponse(res)) {
@@ -933,7 +1073,8 @@ const openAiResponsesAdapter: Adapter = {
       for await (const frame of readFrames(res)) {
         sa.chunk()
         const data = sseData(frame)
-        if (!data || data === '[DONE]') continue
+        if (!data) continue
+        if (data === '[DONE]') { sa.stats.terminator = true; continue }
         const json = parseWholeJson(data)
         if (!json) continue // 心跳 / 非 JSON 帧：丢弃，绝不抛
         const u = json.usage ?? json.response?.usage
@@ -947,11 +1088,11 @@ const openAiResponsesAdapter: Adapter = {
         const type = String(json.type ?? '')
         if (type === 'response.output_text.delta') {
           const d = String(json.delta ?? '')
-          if (d) { text += d; onEvent({ type: 'text', delta: d }) }
+          if (d) { text += d; sa.stats.chars += d.length; onEvent({ type: 'text', delta: d }) }
         } else if (type === 'response.reasoning_summary_text.delta' || type === 'response.reasoning_text.delta') {
           // 思考链走独立事件（与另两条适配器同口径：只发事件，不落库）
           const d = String(json.delta ?? '')
-          if (d) onEvent({ type: 'reasoning', delta: d })
+          if (d) { sa.stats.chars += d.length; onEvent({ type: 'reasoning', delta: d }) }
         } else if (type === 'response.output_item.added') {
           const it = json.item ?? {}
           if (it.type === 'function_call') {
@@ -959,7 +1100,7 @@ const openAiResponsesAdapter: Adapter = {
             const cur = acc.get(idx) ?? { id: '', name: '', args: '' }
             if (it.call_id) cur.id = String(it.call_id)
             if (it.name) cur.name = String(it.name)
-            if (typeof it.arguments === 'string' && it.arguments) cur.args += it.arguments
+            if (typeof it.arguments === 'string' && it.arguments) { cur.args += it.arguments; sa.stats.chars += it.arguments.length }
             acc.set(idx, cur)
             onEvent({ type: 'tool_call', index: idx, id: cur.id || undefined, name: cur.name || undefined })
           }
@@ -967,25 +1108,34 @@ const openAiResponsesAdapter: Adapter = {
           const idx = Number(json.output_index ?? 0)
           const d = String(json.delta ?? '')
           const cur = acc.get(idx) ?? { id: '', name: '', args: '' }
-          if (d) { cur.args += d; onEvent({ type: 'tool_call', index: idx, argsDelta: d }) }
+          if (d) { cur.args += d; sa.stats.chars += d.length; onEvent({ type: 'tool_call', index: idx, argsDelta: d }) }
           acc.set(idx, cur)
         } else if (type === 'response.completed' || type === 'response.incomplete') {
           whole = parseResponsesWhole(json.response ?? {})
+          sa.stats.terminator = true
+          // G5 = B-29：此前 `incomplete` 当正常完成 —— 撞 max_output_tokens 被截断却毫无提示
+          if (type === 'response.incomplete' || String(json.response?.status ?? '') === 'incomplete') {
+            sa.stats.stopReason = String(json?.response?.incomplete_details?.reason ?? 'incomplete')
+          }
           break
         } else if (type === 'response.failed' || type === 'error') {
-          const detail = String(json?.response?.error?.message ?? json?.message ?? json?.response?.error?.code ?? '')
-          throw new Error(detail.slice(0, 200) || 'Responses 接口返回失败事件')
+          // 这条适配器原本就有（当样板）；本轮把上游码/原话一起采下来，不再只留一句中文
+          const errObj = json?.response?.error ?? json?.error ?? json
+          const up = upstreamFactsOf({ error: errObj })
+          throw attachFacts(new Error(up.upstreamMessage ?? 'Responses 接口返回失败事件'), {
+            layer: 'stream-frame', ...up, elapsedMs: Date.now() - started,
+          })
         }
       }
+      if (!sa.stats.terminator) sa.stats.stopReason = STOP_REASON_NO_TERMINATOR
       // 合并：完成事件的完整 output 优先，任一侧为空时用另一侧兜底 —— 这样即使上游改了事件名
       // （我们没认出来），只要 response.completed 到了，结果仍然正确，最多退化成非流式体验。
       const merged = mergeResponsesResult(whole, collectResponsesToolCalls(acc), text, usage)
       onEvent({ type: 'usage', ...merged.usage })
       onEvent({ type: 'done' })
-      return toChatResult(merged)
+      return { ...toChatResult(merged), ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}) }
     } catch (err) {
-      if (sa.timedOut()) throw new Error('流式响应超时（60 秒无数据）')
-      throw err
+      failStream(err, sa, started)
     } finally {
       sa.dispose()
     }
@@ -1069,6 +1219,13 @@ export interface LlmInvokeRequest {
   sessionId?: string
 }
 
+/** 网关失败码 = 归因码 ∪ 配置类码（配置类在发请求前就知道，没有采集面） */
+export type LlmInvokeFailCode =
+  | InterruptCode
+  | 'PROVIDER_NOT_FOUND'
+  | 'PROVIDER_DISABLED'
+  | 'NO_DEFAULT_MODEL'
+
 export type LlmInvokeResponse = {
   ok: true
   content: string
@@ -1082,10 +1239,20 @@ export type LlmInvokeResponse = {
   cachedTokens?: number
   /** 故障转移：本次实际应答的供应商 ≠ 默认供应商时，记录被接管的默认供应商名（网关补强） */
   fallbackFrom?: string
+  /** 上游停止原因（G5 = B-29 判据） */
+  stopReason?: string
+  /** ok=true 但输出被截断（LLM_OUTPUT_TRUNCATED / LLM_STREAM_TRUNCATED）：正文追加提示且可续写 */
+  interruption?: Interruption
+  /** 归因诊断细节（截断时也有；不含正文与 Key） */
+  detail?: InterruptionDetail
 } | {
   ok: false
   error: string
-  code?: 'PROVIDER_NOT_FOUND' | 'PROVIDER_DISABLED' | 'NO_DEFAULT_MODEL'
+  code?: LlmInvokeFailCode
+  /** 归因结果（归因 P0 的唯一真源）—— 上层只读它，不再各自解析错误文案 */
+  interruption?: Interruption
+  /** 归因诊断细节（不含正文与 Key） */
+  detail?: InterruptionDetail
 }
 
 type LlmTarget =
@@ -1141,11 +1308,6 @@ function streamEnabled(): boolean {
   return depsRef?.getSettingValue('aiStreamEnabled') !== false
 }
 
-/** 供应商级错误（网络/超时/限频/上游 5xx）→ 触发故障转移；参数/鉴权类错误换供应商也没用 */
-function isProviderLevelError(error: string): boolean {
-  return /timeout|timed?\s*out|fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|socket|网络|HTTP 5\d\d|HTTP 429|限频/i.test(error)
-}
-
 async function llmInvokeOnce(provider: ProviderConfig, model: string, req: LlmInvokeRequest, maxTokens: number): Promise<LlmInvokeResponse> {
   const adapter = adapterFor(provider, model)
   const started = Date.now()
@@ -1159,12 +1321,15 @@ async function llmInvokeOnce(provider: ProviderConfig, model: string, req: LlmIn
       signal: req.signal,
       sessionId: req.sessionId,
     })
+    const trunc = interruptionOfStopReason(r.stopReason)
     appendAudit(provider.id, 'llm.invoke', {
       provider: provider.name,
       model,
       tokens: r.usage.promptTokens + r.usage.completionTokens,
       promptTokens: r.usage.promptTokens,
       completionTokens: r.usage.completionTokens,
+      ...(r.usage.cachedTokens ? { cachedTokens: r.usage.cachedTokens } : {}),
+      ...(trunc ? { code: trunc.code, stopReason: r.stopReason } : {}),
       durationMs: Date.now() - started,
       ok: true,
     })
@@ -1177,16 +1342,30 @@ async function llmInvokeOnce(provider: ProviderConfig, model: string, req: LlmIn
       tokens: r.usage.promptTokens + r.usage.completionTokens,
       promptTokens: r.usage.promptTokens,
       completionTokens: r.usage.completionTokens,
+      ...(r.usage.cachedTokens ? { cachedTokens: r.usage.cachedTokens } : {}),
+      ...(r.stopReason ? { stopReason: r.stopReason } : {}),
+      ...(trunc ? { interruption: trunc } : {}),
     }
   } catch (err) {
+    const raw = rawFromError(err, {
+      externalAborted: req.signal?.aborted === true,
+      providerId: provider.id, model, attempts: 1, elapsedMs: Date.now() - started,
+    })
+    const it = classifyFailure(raw)
+    const detail = interruptionDetailOf(raw)
+    // G10：审计不再只存 error 文本 —— 带上归因码才能按原因统计、才能度量「归因准不准」
     appendAudit(provider.id, 'llm.invoke', {
       provider: provider.name,
       model,
       durationMs: Date.now() - started,
       ok: false,
+      code: it.code,
+      matched: it.matched,
+      ...(raw.httpStatus !== undefined ? { httpStatus: raw.httpStatus } : {}),
+      ...(raw.upstreamCode ? { upstreamCode: raw.upstreamCode } : {}),
       error: String((err as Error)?.message ?? err).slice(0, 300),
     })
-    return { ok: false, error: String((err as Error)?.message ?? err) }
+    return { ok: false, error: friendlyReason(it, detail), code: it.code, interruption: it, detail }
   }
 }
 
@@ -1196,10 +1375,12 @@ async function llmInvoke(req: LlmInvokeRequest): Promise<LlmInvokeResponse> {
 
   const r = await llmInvokeOnce(t.provider, t.model, req, t.maxTokens)
   if (r.ok) return r
-  // 故障转移（网关补强）：仅「默认模型路径」（用户未钉死供应商/模型）且供应商级错误时，
+  // 故障转移（网关补强）：仅「默认模型路径」（用户未钉死供应商/模型）且**可重试**时，
   // 换一个可用供应商重试一次。流式路径不做（中途切换会造成内容拼接错乱）。
+  // G9（归因 P0）：判据改用归因码的 retryable（唯一真源）—— 原 isProviderLevelError 正则漏了
+  // net::ERR_NAME_NOT_RESOLVED / ERR_HTTP2_PROTOCOL_ERROR / 中文「流式响应超时」三类。
   if (req.providerId || req.modelId) return r
-  if (!isProviderLevelError(r.error)) return r
+  if (!r.interruption?.retryable) return r
   const fallback = getProviders().find(p => p.enabled && p.id !== t.provider.id && p.models.length > 0)
   if (!fallback) return r
   const r2 = await llmInvokeOnce(fallback, fallback.models[0], req, t.maxTokens)
@@ -1244,6 +1425,18 @@ export async function invokeLlmStreamInternal(
       signal: req.signal,
       sessionId: req.sessionId,
     }, onEvent)
+    // G5 = B-29：上游停止原因是截断型（撞单次输出上限 / 未见结束帧）时，成功返回也要带提示与归因
+    const trunc = interruptionOfStopReason(r.stopReason)
+    const truncDetail = trunc
+      ? interruptionDetailOf(rawFailure({
+          layer: 'stream-eof',
+          raw: `stopReason=${r.stopReason}`,
+          partialChars: r.content.length,
+          sawTerminator: r.stopReason !== STOP_REASON_NO_TERMINATOR,
+          ...(r.stopReason ? { stopReason: r.stopReason } : {}),
+          providerId: t.provider.id, model: t.model, attempts: 1, elapsedMs: Date.now() - started,
+        }))
+      : undefined
     appendAudit(t.provider.id, 'llm.invoke', {
       provider: t.provider.name,
       model: t.model,
@@ -1252,6 +1445,7 @@ export async function invokeLlmStreamInternal(
       promptTokens: r.usage.promptTokens,
       completionTokens: r.usage.completionTokens,
       ...(r.usage.cachedTokens ? { cachedTokens: r.usage.cachedTokens } : {}),
+      ...(trunc ? { code: trunc.code, stopReason: r.stopReason } : {}),
       durationMs: Date.now() - started,
       ok: true,
     })
@@ -1265,17 +1459,36 @@ export async function invokeLlmStreamInternal(
       promptTokens: r.usage.promptTokens,
       completionTokens: r.usage.completionTokens,
       ...(r.usage.cachedTokens ? { cachedTokens: r.usage.cachedTokens } : {}),
+      ...(r.stopReason ? { stopReason: r.stopReason } : {}),
+      ...(trunc ? { interruption: trunc } : {}),
+      ...(truncDetail ? { detail: truncDetail } : {}),
     }
   } catch (err) {
+    // 归因 P0：**唯一**的失败归一入口 —— 四家适配器只负责「原生形状 → RawFailure」的翻译，
+    // 码由 classifyFailure 产生、文案由 friendlyReason 产生（卡片 / 审计 / 重试判定读同一个码）。
+    const raw = rawFromError(err, {
+      externalAborted: req.signal?.aborted === true,
+      providerId: t.provider.id, model: t.model, attempts: 1, elapsedMs: Date.now() - started,
+    })
+    const it = classifyFailure(raw)
+    const detail = interruptionDetailOf(raw)
     appendAudit(t.provider.id, 'llm.invoke', {
       provider: t.provider.name,
       model: t.model,
       stream: true,
       durationMs: Date.now() - started,
       ok: false,
+      code: it.code,
+      matched: it.matched,
+      receivedChunks: raw.receivedChunks,
+      partialChars: raw.partialChars,
+      sawTerminator: raw.sawTerminator,
+      ...(raw.timedOut ? { timedOut: raw.timedOut } : {}),
+      ...(raw.httpStatus !== undefined ? { httpStatus: raw.httpStatus } : {}),
+      ...(raw.upstreamCode ? { upstreamCode: raw.upstreamCode } : {}),
       error: String((err as Error)?.message ?? err).slice(0, 300),
     })
-    return { ok: false, error: String((err as Error)?.message ?? err) }
+    return { ok: false, error: friendlyReason(it, detail), code: it.code, interruption: it, detail }
   }
 }
 

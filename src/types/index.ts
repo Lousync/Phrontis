@@ -1182,6 +1182,60 @@ export interface AgentTraceStep {
 }
 
 /**
+ * 中断归因（归因 P0，2026-10-14）：**唯一真源是 `electron/lib/llmFailurePure.ts`**。
+ * 渲染层拿不到主进程类型，故按仓库惯例镜像一份；★ 码清单必须与真源逐字一致 ——
+ * 契约 `.AGENT/scripts/llm-adapters/verify-llm-attribution.mjs` 按源码文本比对两份清单。
+ */
+export type InterruptCode =
+  | 'USER_ABORTED' | 'AGENT_ROUND_CAP' | 'AGENT_TOKEN_BUDGET' | 'AGENT_SUMMARY_FAILED' | 'AGENT_WRITE_CAP'
+  | 'LLM_AUTH' | 'LLM_QUOTA_EXHAUSTED' | 'LLM_RATE_LIMIT' | 'LLM_MODEL_NOT_FOUND' | 'LLM_PROTOCOL_MISMATCH'
+  | 'LLM_CONTEXT_OVERFLOW' | 'LLM_BAD_REQUEST' | 'LLM_OUTPUT_TRUNCATED'
+  | 'LLM_UPSTREAM_5XX' | 'LLM_OVERLOADED' | 'LLM_PROVIDER_ERROR_FRAME'
+  | 'LLM_CONNECT_FAILED' | 'LLM_CONNECT_TIMEOUT' | 'LLM_NET_RESET' | 'LLM_DNS_FAILED'
+  | 'LLM_FIRST_BYTE_TIMEOUT' | 'LLM_IDLE_TIMEOUT' | 'LLM_STREAM_TRUNCATED' | 'LLM_UNKNOWN'
+  | 'INTERNAL_EXCEPTION'
+
+/** 证据强度：决定「能不能写因果」（timing / inferred 的文案禁用因果词，契约负向断言） */
+export type InterruptionEvidence = 'provider-body' | 'http-status' | 'transport-error' | 'timing' | 'inferred'
+
+/** 建议动作（UI 据此出按钮 / 文案） */
+export type InterruptionAction =
+  | 'resume' | 'retry' | 'switch-model' | 'check-key' | 'top-up' | 'wait'
+  | 'shrink-context' | 'new-session' | 'report-bug' | 'none'
+
+export interface Interruption {
+  code: InterruptCode
+  evidence: InterruptionEvidence
+  /** 可续跑？（A 的「继续」按钮据它出不出） */
+  resumable: boolean
+  /** 可重试？（B 的重试判定唯一真源） */
+  retryable: boolean
+  action: InterruptionAction
+  /** 归一码的判据来源（诊断块用） */
+  matched: string
+}
+
+/** 诊断细节（「复制诊断信息」的数据源；**不含正文、不含 Key**） */
+export interface InterruptionDetail {
+  /** 原始错误串（截 300；诊断块用） */
+  raw: string
+  httpStatus?: number
+  upstreamCode?: string
+  upstreamMessage?: string
+  /** 收到几段数据（截断场景未知，故可缺省） */
+  receivedChunks?: number
+  partialChars: number
+  sawTerminator: boolean
+  stopReason?: string
+  round?: number
+  runTokens?: number
+  attempts?: number
+  providerId?: string
+  model?: string
+  elapsedMs: number
+}
+
+/**
  * 流式增量事件（agent:stream，与 agent:step 分工）：
  * step 承载「步骤完成」（落库），stream 承载「增量与进行中」（不落库）。两者合起来才是完整过程时间线。
  */
@@ -1235,6 +1289,28 @@ export interface AgentSessionInfo {
   lane?: 'main' | 'side'
   /** 支线旁问：固化上下文快照（分叉回答 + 主线前 K 轮） */
   sideContext?: string
+  /**
+   * A 方案（断点续跑）：最近一次中断留下的可续现场摘要（缺省 / null = 无可续点）。
+   * ★ 真源在主进程会话行 `AgentSessionRow.resume`，出口经 toResumeInfo 裁剪 —— **这里没有 carry 正文**
+   * （6k 字符的现场只在续跑时由主进程注入，绝不发给渲染层）。
+   */
+  resumeInfo?: ResumeInfo | null
+}
+
+/** 中断续跑现场摘要（主进程 agentInterruptPure.toResumeInfo 的镜像；结构上就不含 carry） */
+export interface ResumeInfo {
+  /** 中断时刻（本地时间串） */
+  at: string
+  /** 中断记录那条 assistant 消息 id —— 「继续」按钮挂在它上面 */
+  messageId: string
+  /** 原因串（白话，直接展示） */
+  reason: string
+  /** 用户主动停止 */
+  aborted: boolean
+  /** 本次 run 的工具调用次数 */
+  toolCalls: number
+  /** 已完成的写改动（与 AgentChange 同形，供卡片/hover 展示） */
+  changes: Array<{ action: string; target: string; file?: string }>
 }
 
 /** 建支线结果（agent:createSideLane）：只装上下文不调 LLM */
@@ -1432,6 +1508,11 @@ export interface AgentChatResult {
   changes?: AgentChange[]
   /** UI 优化条目9②：AI教学本轮 system 注入分段字符数（上下文构成摘要；其它来源无此字段） */
   injection?: AiTeachInjectionStats
+  /** 中断归因（归因 P0）：ok=false 时必有（读 code / action / resumable）；
+   *  ok=true 但输出被截断时也有（LLM_OUTPUT_TRUNCATED / LLM_STREAM_TRUNCATED → 提示可续写） */
+  interruption?: Interruption
+  /** 归因诊断细节（诊断块数据源；不含正文与 Key） */
+  interruptDetail?: InterruptionDetail
   /** 触达轮数/token 预算上限：本次回答来自强制总结轮（渲染层可提示） */
   hitCap?: boolean
   /** 本次请求前自动压缩了历史（会话压缩 §6.1；渲染层据此 toast 告知） */
@@ -2448,6 +2529,8 @@ export interface ElectronAPI {
   docsPptxPages: (relPath: string) => Promise<{ ok: boolean; pages?: Array<{ n: number; text: string }>; total?: number; error?: string }>
   agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string }) => Promise<AgentChatResult>
   agentRegenerate: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
+  /** A 方案：从断点续跑（中断卡上的「继续」）；不追加用户消息，现场由主进程一次性 claim */
+  agentResume: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
   agentStartScene: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string }) => Promise<AgentChatResult>
   agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: AgentContextInfo; chatId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
   agentDeleteMessage: (sessionId: string, messageId: string) => Promise<boolean>

@@ -8,6 +8,11 @@ import { readVaultRefText } from './aiAssistant/refText'
 import { runPerception } from './aiAssistant/perception'
 import { buildPerceptionInjection } from './aiAssistant/perceptionBudget'
 import { invokeLlmStreamInternal } from './llmService'
+import {
+  classifyFailure, friendlyReason, buildInterruptNotice, buildDiagnostics, suggestedActionText,
+  interruptionDetailOf, rawFailure, configInterruptionOf,
+  type RawFailure, type Interruption, type InterruptionDetail,
+} from './llmFailurePure'
 import { estimateTokens, trimHistoryByBudget } from './agentContextBudget'
 import { compressAtTokens, composeContextWithDigest, rowsAfterDigest } from './agentCompressCore'
 import { compressSession } from './agentCompress'
@@ -19,8 +24,13 @@ import {
   getMessageById, updateMessageContent, deleteMessage, deleteMessagesAfter,
   getAgentSession, updateAgentSessionInstructions, backfillSessionSources,
   createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode, setSessionPinned,
-  setSideLaneStatus, markSideLaneSeen,
+  setSideLaneStatus, markSideLaneSeen, updateSessionResume, nowLocal,
 } from './agentSessionRepo'
+// A 方案（断点续跑）：纯函数在 agentInterruptPure（零依赖，契约脚本直接 import）；文案真源在 llmFailurePure
+import {
+  buildInterruptContent, buildResumeCarry, buildResumeInjection, toResumeInfo,
+  type CarryRow, type SessionResume, type InterruptFacts,
+} from './agentInterruptPure'
 import { takeAdoptNotice } from './agentAdoptNotice'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { MANUAL_CHANNEL_TOOL, MANUAL_MAX_ROUNDS, buildManualSystemPrompt, classifyManualIntent, hasOperationIntent } from './manualChannel'
@@ -258,6 +268,10 @@ export interface AgentChatResult {
   error?: string
   code?: string
   trace: AgentTraceStep[]
+  /** 中断归因（归因 P0）：ok=false 时必有；ok=true 但输出被截断时也有（提示可续写） */
+  interruption?: Interruption
+  /** 归因诊断细节（诊断块数据源；不含正文与 Key） */
+  interruptDetail?: InterruptionDetail
   /** 本次执行真实发生的写改动（成功写入/创建类工具），供 UI 渲染改动清单 */
   changes?: AgentChange[]
   /** UI 优化条目9②：AI教学本轮 system 注入分段字符数（渲染层据此估算「上下文构成」摘要；其它来源不设） */
@@ -361,6 +375,17 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
 function argTarget(args: Record<string, unknown>): string {
   const v = args.path ?? args.relPath ?? args.title ?? args.name ?? args.date ?? args.query ?? args.slug
   return typeof v === 'string' ? v.trim().slice(0, 120) : ''
+}
+
+/**
+ * 续跑 carry 的入参摘要（A 方案 §3.5）：紧凑截断，取不到就留空。
+ * 它是纯展示/给模型看的现场线索，不参与任何判据 —— 序列化失败一律降级为空串，绝不抛。
+ */
+function carryArgsOf(args: Record<string, unknown>): string {
+  try {
+    const s = JSON.stringify(args ?? {})
+    return !s || s === '{}' ? '' : s.slice(0, 200)
+  } catch { return '' }
 }
 
 /** 写改动识别：工具 → 人类动作标签（成功执行后收集 target=path/title/date/name） */
@@ -674,6 +699,114 @@ function buildSideLaneSnapshot(parentSessionId: string, anchor: AgentMessageRow 
 }
 
 /** 从会话库当前内容直接推理（不追加新用户消息）——重新生成/编辑重推共用 */
+/** 中断出口的上下文（可选）：进度 / 改动清单 / carry / 是否写「继续」现场 */
+interface InterruptContext {
+  /** 本次真实写改动（此前只在成功分支返回，失败时「本次改动」面板拿不到已写的东西） */
+  changes?: AgentChange[]
+  /** 本次 run 消耗的轮数 */
+  rounds?: number
+  /** 本次 run 的工具调用次数 */
+  toolCalls?: number
+  /** 已获得的工具结果摘要（buildResumeCarry 产出；空串 = 没留下现场） */
+  carry?: string
+  /** 是否写会话 resume（支线旁问 / 手册通道传 false：重问成本低，不给「继续」） */
+  writeResume?: boolean
+}
+
+/** 归因事实 → 卡片正文用的事实（改动清单只搬卡片要展示的字段；旁白取 trace 里最后一条带 processText 的轮次） */
+function interruptFactsOf(
+  it: Interruption,
+  dt: InterruptionDetail,
+  trace: AgentTraceStep[],
+  ctx?: InterruptContext,
+): InterruptFacts {
+  const lastProcess = [...trace].reverse().find(s => !!s.processText)
+  return {
+    reason: friendlyReason(it, dt),
+    aborted: it.code === 'USER_ABORTED',
+    rounds: Math.max(0, Math.floor(Number(ctx?.rounds ?? dt.round ?? 0) || 0)),
+    toolCalls: Math.max(0, Math.floor(Number(ctx?.toolCalls ?? 0) || 0)),
+    changes: (ctx?.changes ?? []).map(c => ({ action: c.action, target: c.target, ...(c.file ? { file: c.file } : {}) })),
+    ...(lastProcess?.processText ? { lastProcessText: lastProcess.processText } : {}),
+  }
+}
+
+/** 写续跑现场（尽力而为：失败只留日志，**绝不**因为「记不上现场」而改变本次调用的返回结果） */
+function persistResume(sessionId: string, messageId: string, facts: InterruptFacts, carry: string): void {
+  try {
+    updateSessionResume(sessionId, {
+      at: nowLocal(),
+      message_id: messageId,
+      reason: facts.reason,
+      aborted: facts.aborted,
+      tool_calls: facts.toolCalls,
+      changes: facts.changes,
+      carry,
+    })
+  } catch (err) {
+    console.error('[agent] 续跑现场落库失败', err)
+  }
+}
+
+/**
+ * 中断出口（归因 P0 + A 方案，2026-10-14）：失败 / 停止 / 预算耗尽统一在这里收口 ——
+ * 写一条中断 assistant 消息（原因 + 建议 + 进度 + 改动清单 + 诊断块），把「继续」的现场写回会话行，
+ * 并返回带归因码的结果。
+ * 归因码的唯一真源是 electron/lib/llmFailurePure.ts（卡片文案 / 重试判定 / 审计统计 / 角标读同一个码）。
+ */
+function interruptResult(
+  sessionId: string,
+  trace: AgentTraceStep[],
+  raw: RawFailure,
+  interruption?: Interruption,
+  detail?: InterruptionDetail,
+  ctx?: InterruptContext,
+): AgentChatResult {
+  const it = interruption ?? classifyFailure(raw)
+  const dt = detail ?? interruptionDetailOf(raw)
+  const facts = interruptFactsOf(it, dt, trace, ctx)
+  // 有现场才有「继续」按钮：没有按钮就不能在正文里提它
+  const willResume = ctx?.writeResume !== false
+  // 正文首行必须是人能看懂的原因：reason 就是 friendlyReason 的产出（契约源码级断言锁「文案只在这里产生」）
+  const content = buildInterruptContent({
+    reason: facts.reason,
+    advice: suggestedActionText(it),
+    rounds: facts.rounds,
+    toolCalls: facts.toolCalls,
+    changes: facts.changes,
+    ...(facts.lastProcessText ? { lastProcessText: facts.lastProcessText } : {}),
+    aborted: facts.aborted,
+    canResume: willResume,
+    // 「用户停止」不贴诊断块：原因自明，贴了反而像出故障
+    ...(it.code === 'USER_ABORTED' ? {} : { diagnostics: buildDiagnostics(it, dt) }),
+  })
+  let messageId: string | undefined
+  try {
+    messageId = appendAgentMessage(sessionId, 'assistant', content, trace)
+  } catch (err) {
+    // 落库失败不能让「中断原因」也一起消失：至少留日志（异常不静默是归因 P0 的硬要求）
+    console.error('[agent] 中断记录落库失败', err)
+  }
+  // 有中断卡才有可挂「继续」的锚点（缺锚点的现场按钮无处可挂，等于没有）
+  if (ctx?.writeResume !== false && messageId) persistResume(sessionId, messageId, facts, ctx?.carry ?? '')
+  return {
+    ok: false,
+    sessionId,
+    reply: content,
+    error: facts.reason,
+    code: it.code,
+    interruption: it,
+    interruptDetail: dt,
+    changes: ctx?.changes,
+    trace,
+  }
+}
+
+/** 输出被截断（G5 = B-29）：提示段落追加到正文末尾（ok=true，用户可见「被截断 + 可续写」） */
+function withTruncationNotice(reply: string, it: Interruption, detail: InterruptionDetail): string {
+  return reply + '\n' + buildInterruptNotice(it, detail, { separator: true, diagnostics: true })
+}
+
 async function runAgentLoop(
   sessionId: string,
   context: AgentContextInfo | undefined,
@@ -685,16 +818,22 @@ async function runAgentLoop(
    * allowEmptyHistory：场景/模板启动专用。会话刚建、尚无用户消息时放行，
    * 用一条**不落库**的虚拟首轮触发——聊天区第一条即 AI 回复，
    * 避免把程序化的场景开场白伪造成用户消息（2026-09-09 体验优化）。
+   *
+   * resumeInjection（A 方案 §3.4）：续跑专用。中断卡是一条 assistant 消息、排在历史末尾，
+   * 所以守卫要放行「末条不是 user」；注入文本作为**一条不落库的合成 user 轮**追加在 convo 末尾
+   * （不进 requestInjection 槽：续跑指令必须是「最近一条指令」才有牵引力）。
    */
-  opts?: { allowEmptyHistory?: boolean }
+  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string }
 ): Promise<AgentChatResult> {
   // ---- 从会话库重建对话历史（仅 user/assistant 文本轮） ----
   // 会话压缩：检查点之前的旧轮已被纪要替代（assembleAgentHistory）；其后再做
   // 条数硬上限（-40）与 token 轮级裁剪——压缩失败/关闭时兜底，长会话不再全量进模型
+  const runStarted = Date.now() // 归因 P0：中断卡的「耗时」与诊断块用它
+  const resumeInjection = String(opts?.resumeInjection ?? '')
   let asm = assembleAgentHistory(sessionId)
   let history = asm.history
   const virtualKickoff = opts?.allowEmptyHistory === true && history.length === 0
-  if (!virtualKickoff && (history.length === 0 || history[history.length - 1].role !== 'user')) {
+  if (!virtualKickoff && (history.length === 0 || (history[history.length - 1].role !== 'user' && !resumeInjection))) {
     return { ok: false, sessionId, error: '没有可重新生成的用户消息', trace }
   }
 
@@ -980,8 +1119,25 @@ async function runAgentLoop(
   // 虚拟首轮：仅存在于本次请求的 convo，不写会话库、不渲染气泡。
   // 场景规则本身随 CONSTRAINTS.md 每轮注入（持久），这里只负责「让 AI 开口说第一句」。
   if (virtualKickoff) convo.push({ role: 'user', content: '（请按上述会话要求开始）' })
+  // 续跑注入：同样只存在于本次请求（不落库、不进历史）。放在 convo 末尾 = 前缀（system+tools）逐字不变，
+  // prompt cache 不受影响；且 carry 只付这一次（续跑成功即清现场）
+  if (resumeInjection) convo.push({ role: 'user', content: resumeInjection })
   let sessionWrites = 0
   const changes: AgentChange[] = []
+  /**
+   * 续跑现场（A 方案 §3.5）：每次工具执行后入账，失败/停止时压成 carry 写进会话行。
+   * 只留最近 40 条、单条结果先截到 4000 字符（carry 单条上限 800，留足余量又不用把 24k 全揣着）。
+   */
+  const carryRows: CarryRow[] = []
+  /** 中断出口的上下文（每个失败/停止点都带上它：进度、改动清单、已获得的现场） */
+  const interruptCtxOf = (round: number): InterruptContext => ({
+    changes,
+    rounds: round,
+    toolCalls: carryRows.length,
+    carry: buildResumeCarry(carryRows),
+    // 支线旁问 / 手册通道不给「继续」：职责是答一点，重问成本低（方案 §3.7）
+    writeResume: !isSideLane && !manual,
+  })
   // P3b：本对话模型覆盖（'pid:mid' 串拆分）——解析一次，全轮次复用
   let providerId: string | undefined
   let modelOverride: string | undefined
@@ -1003,14 +1159,23 @@ async function runAgentLoop(
   let softLanded = false
   /** token 预算触顶（或已到最后一轮）：本轮执行完后立即断出循环 → 强制总结轮 */
   let budgetCapped = false
+  /** 触顶原因（归因 P0：AGENT_ROUND_CAP 与 AGENT_TOKEN_BUDGET 的用户动作不同，必须分开） */
+  let capKind: 'round-cap' | 'token-budget' = 'round-cap'
 
   for (let i = 0; i < maxRounds; i++) {
     // ---- LLM 轮 ----
-    if (signal.aborted) return { ok: false, sessionId, code: 'ABORTED', error: '已停止生成', trace }
+    if (signal.aborted) {
+      // 归因 P0（B-0）：用户停止是一种**有名字**的中断 —— 此前报成「AI 调用失败」（审计里 12 条误报同源）
+      return interruptResult(sessionId, trace, rawFailure({
+        layer: 'agent-loop', raw: '用户停止（本轮开始前）', externalAborted: true,
+        round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
+      }), undefined, undefined, interruptCtxOf(i + 1))
+    }
     // 预算将尽（最后一轮 / token 预算触顶）：注入收场提示，让模型用已有信息总结（第 0 层）
     if (!softLanded && (i === maxRounds - 1 || (runTokenBudget > 0 && runTokens >= runTokenBudget))) {
       softLanded = true
       budgetCapped = true
+      capKind = (runTokenBudget > 0 && runTokens >= runTokenBudget) ? 'token-budget' : 'round-cap'
       convo.push({ role: 'user', content: FINAL_ROUND_NOTICE })
     }
     emitStream?.({ kind: 'round-start', round: i + 1 })
@@ -1059,13 +1224,41 @@ async function runAgentLoop(
         cachedTokens: r.cachedTokens,
       })
     }
-    if (!r.ok) return { ok: false, sessionId, error: r.error, code: r.code, trace }
+    if (!r.ok) {
+      // 归因 P0：LLM 侧已归一（code / interruption / detail）；配置类失败没有采集面 → 按「换模型」处置
+      const baseRaw = rawFailure({
+        layer: 'http', raw: r.error, round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
+      })
+      return interruptResult(
+        sessionId, trace, baseRaw,
+        r.interruption ?? configInterruptionOf(r.code),
+        r.detail ?? interruptionDetailOf(baseRaw),
+        interruptCtxOf(i + 1),
+      )
+    }
 
     if (!r.toolCalls || r.toolCalls.length === 0) {
       // 完成：把真实改动清单附在回复末尾（落库可见），并结构化返回给 UI
       const changesText = changes.length > 0
         ? '\n\n——\n本次改动：\n' + changes.map((c, idx) => `${idx + 1}. ${c.action}「${c.target}」`).join('\n')
         : ''
+      // G5 = B-29：输出被截断（撞单次输出上限 / 未见结束帧）此前静默当成功 —— 正文追加提示且可续写
+      if (r.interruption) {
+        const dt = r.detail ?? interruptionDetailOf(rawFailure({
+          layer: 'stream-eof', raw: r.interruption.matched, round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
+        }))
+        const reply = withTruncationNotice(r.content + changesText, r.interruption, dt)
+        const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace)
+        // 截断 = 有断点可续（「接着往下写」）：现场与失败出口同款（支线/手册通道不写）
+        const ictx = interruptCtxOf(i + 1)
+        if (ictx.writeResume !== false) persistResume(sessionId, msgId, interruptFactsOf(r.interruption, dt, trace, ictx), ictx.carry ?? '')
+        return {
+          ok: true, sessionId, reply, changes, trace, injection,
+          interruption: r.interruption, interruptDetail: dt,
+          ...(compressed ? { compressed } : {}),
+          contextBudget: asm.budget,
+        }
+      }
       const reply = r.content + changesText
       appendAgentMessage(sessionId, 'assistant', reply, trace)
       return {
@@ -1147,11 +1340,16 @@ async function runAgentLoop(
       }
       // 单条结果超上限时截断为合法摘要（见 capToolResult 说明）
       const toolResultText = JSON.stringify(exec.ok ? { ok: true, data: exec.data } : { ok: false, error: exec.message })
+      const toolContent = toolResultText.length > MAX_TOOL_RESULT_CHARS ? capToolResult(toolResultText, realName) : toolResultText
       convo.push({
         role: 'tool',
         tool_call_id: tc.id,
-        content: toolResultText.length > MAX_TOOL_RESULT_CHARS ? capToolResult(toolResultText, realName) : toolResultText,
+        content: toolContent,
       })
+      // 续跑现场入账（A 方案 §3.5）：成功与失败都记 ——「查过但没查成」同样是后面续跑要用的信息。
+      // 单条先截到 4000（carry 单条上限 800，留足余量又不把 24k 全揣着）；只留最近 40 条
+      carryRows.push({ tool: realName, args: carryArgsOf(args), result: toolContent.slice(0, 4000), ok: exec.ok })
+      if (carryRows.length > 40) carryRows.shift()
     }
 
     /** 串行件：写上限判定 + visual 时序事件 + 执行 + 记账（原逐条路径，行为不变） */
@@ -1216,7 +1414,12 @@ async function runAgentLoop(
     const batches = partitionToolBatches(prepared, c =>
       isParallelSafe(c.realName, toolsState.readOnlyTools.has(c.realName) && !toolsState.writeTools.has(c.realName)))
     for (const batch of batches) {
-      if (signal.aborted) return { ok: false, sessionId, code: 'ABORTED', error: '已停止生成', trace }
+      if (signal.aborted) {
+        return interruptResult(sessionId, trace, rawFailure({
+          layer: 'agent-loop', raw: '用户停止（工具批次前）', externalAborted: true,
+          round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
+        }), undefined, undefined, interruptCtxOf(i + 1))
+      }
       if (!batch.parallel) {
         const c = batch.items[0]
         await runSingleToolCall(c.tc, c.realName, c.args)
@@ -1271,11 +1474,43 @@ async function runAgentLoop(
     const changesText = changes.length > 0
       ? '\n\n——\n本次改动：\n' + changes.map((c, idx) => `${idx + 1}. ${c.action}「${c.target}」`).join('\n')
       : ''
+    // 预算触顶也是一种中断（归因 P0）：卡片说清是「轮数用尽」还是「token 触顶」，并可续跑
+    const capRaw = rawFailure({
+      layer: 'agent-loop',
+      raw: capKind === 'token-budget' ? 'token 预算触顶' : '轮数用尽',
+      loop: capKind,
+      round: maxRounds, runTokens, elapsedMs: Date.now() - runStarted,
+    })
+    const capIt = classifyFailure(capRaw)
+    const capDetail = interruptionDetailOf(capRaw)
+    const ictx = interruptCtxOf(maxRounds)
+    const facts = interruptFactsOf(capIt, capDetail, trace, ictx)
+    // 正文用统一的卡片构造器（进度 + 可继续句）；改动清单已由上面的 changesText 列过，这里传空避免重复
     const reply = fr.content + changesText
-    appendAgentMessage(sessionId, 'assistant', reply, trace)
-    return { ok: true, sessionId, reply, changes, trace, injection, hitCap: true, ...(compressed ? { compressed } : {}) }
+      + '\n' + buildInterruptContent({
+        reason: facts.reason,
+        advice: suggestedActionText(capIt),
+        rounds: facts.rounds,
+        toolCalls: facts.toolCalls,
+        changes: [],
+        canResume: ictx.writeResume !== false,
+        ...(facts.lastProcessText ? { lastProcessText: facts.lastProcessText } : {}),
+      })
+    const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace)
+    // 预算触顶 = 任务没做完（不是失败）：留现场让「继续」能带着已有信息接着跑
+    if (ictx.writeResume !== false) persistResume(sessionId, msgId, facts, ictx.carry ?? '')
+    return {
+      ok: true, sessionId, reply, changes, trace, injection, hitCap: true,
+      interruption: capIt, interruptDetail: capDetail,
+      ...(compressed ? { compressed } : {}),
+    }
   }
-  return { ok: false, sessionId, error: `已达最大推理轮数（${maxRounds}）且总结失败，请缩小问题范围后重试`, code: 'MAX_ITERATIONS', trace }
+  // 收场总结也没跑成：按「预算已耗尽 + 总结失败」归因（但保留总结轮自身的失败细节，别把原因丢了）
+  const sumRaw = rawFailure({
+    layer: 'agent-loop', raw: `已达最大推理轮数（${maxRounds}）且总结失败`, loop: 'summary-failed',
+    round: maxRounds, runTokens, elapsedMs: Date.now() - runStarted,
+  })
+  return interruptResult(sessionId, trace, sumRaw, classifyFailure(sumRaw), fr.detail ?? interruptionDetailOf(sumRaw), interruptCtxOf(maxRounds))
 }
 
 /** 重新生成最后一条回复：删掉末尾助手消息后按原用户消息重推 */
@@ -1288,6 +1523,38 @@ async function agentRegenerate(req: AgentChatRequest, signal: AbortSignal): Prom
   if (!lastUser) return { ok: false, sessionId, error: '没有可重新生成的用户消息', trace }
   deleteMessagesAfter(sessionId, lastUser.id)
   return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort })
+}
+
+/**
+ * A 方案：从断点续跑（不追加用户消息、不新建会话，2026-10-14）。
+ *
+ * 装配（§3.4）：会话历史末尾是「中断卡」（一条 assistant 消息），续跑指令作为**一条不落库的合成 user 轮**
+ * 追加在 convo 末尾 —— 前缀（system + tools）逐字不变，prompt cache 不受影响；carry 只付一次。
+ * claim 顺序：**先清现场再跑** —— 连点两次「继续」时第二次拿不到现场，直接如实返回（不给重复消费的机会）。
+ */
+async function agentResume(req: AgentChatRequest, signal: AbortSignal): Promise<AgentChatResult> {
+  const trace: AgentTraceStep[] = []
+  const sessionId = String(req?.sessionId ?? '')
+  if (!sessionId || !sessionExists(sessionId)) return { ok: false, error: '会话不存在', trace }
+  const rs = getAgentSession(sessionId)?.resume
+  if (!rs) return { ok: false, sessionId, error: '这个会话没有可继续的中断点', trace }
+  const facts: InterruptFacts = {
+    reason: String(rs.reason ?? ''),
+    aborted: rs.aborted === true,
+    rounds: 0,
+    toolCalls: Number(rs.tool_calls ?? 0) || 0,
+    changes: Array.isArray(rs.changes) ? rs.changes : [],
+  }
+  const injection = buildResumeInjection(facts, String(rs.carry ?? ''))
+  updateSessionResume(sessionId, null) // claim：现场只消费一次
+  const result = await runAgentLoop(
+    sessionId, req.context, signal, trace, req.source,
+    { modelId: req.modelId, effort: req.effort },
+    { resumeInjection: injection },
+  )
+  // 支线旁问：按本轮结果落运行态（成功 done / 其余 cut）；普通会话 no-op
+  setSideLaneStatus(sessionId, result.ok ? 'done' : 'cut')
+  return result
 }
 
 /**
@@ -1372,6 +1639,14 @@ export function registerAgentHandlers(): void {
     try {
       result = await fn(ctrl.signal)
       return result
+    } catch (err) {
+      // G8（归因 P0）：这里此前**只有 try/finally、没有 catch** —— 主进程里任何没被 runAgentLoop
+      // 收住的异常（工具执行器抛错 / 写盘抛错 / IPC 反序列化）都会让「卡片消失 + 零 Toast + 零记录」。
+      console.error('[agent] 任务异常逃逸（withAbort 兜底）', err)
+      result = interruptResult(sessionId, [], rawFailure({
+        layer: 'agent-loop', raw: String((err as Error)?.message ?? err), elapsedMs: 0,
+      }))
+      return result
     } finally {
       activeChats.delete(chatId)
       activeChatSessions.delete(chatId)
@@ -1391,6 +1666,9 @@ export function registerAgentHandlers(): void {
     withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentChat(req, signal, String(req?.chatId ?? ''))))
   ipcMain.handle('agent:regenerate', (e, req: AgentChatRequest) =>
     withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentRegenerate(req, signal)))
+  // A 方案：从断点续跑（中断卡上的「继续」）。同样挂在 withAbort 上 = 可停止、有运行态、异常不静默
+  ipcMain.handle('agent:resume', (e, req: AgentChatRequest) =>
+    withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentResume(req, signal)))
   ipcMain.handle('agent:startScene', (e, req: AgentChatRequest) =>
     withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentStartScene(req, signal)))
   ipcMain.handle('agent:editMessage', (e, req: AgentChatRequest & { messageId: string }) =>
@@ -1462,9 +1740,20 @@ export function registerAgentHandlers(): void {
       backfillSessionSources(infer, !rows.some(r => !r.source))
     } catch { /* 回填失败不影响列表本身 */ }
   }
+  /**
+   * 会话行出口（A 方案 §3.1）：续跑现场只发摘要 —— `resume.carry` 有 6k 字符，全量发给渲染层
+   * 等于每次列会话都白传一遍；「继续」按钮只需要 messageId / reason / resumable 这点信息。
+   */
+  const sessionOut = (row: AgentSessionRow): Record<string, unknown> => {
+    const out = camelRow(row) as unknown as Record<string, unknown>
+    const rs = out.resume as SessionResume | undefined
+    delete out.resume
+    out.resumeInfo = rs ? toResumeInfo(rs) : null
+    return out
+  }
   ipcMain.handle('agent:sessions', () => {
     ensureSessionSources()
-    return listAgentSessions().map(camelRow)
+    return listAgentSessions().map(sessionOut)
   })
   ipcMain.handle('agent:newSession', (_e, title?: string, source?: string) => {
     // 会话随仓库走（2026-10-13）：没有当前仓库就没有可写的位置。
