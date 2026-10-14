@@ -31,6 +31,7 @@ import { handleChatCommand } from '../../lib/chatCommands'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../../components/shared/SlashCommandMenu'
 import { ImageCard, imageGroupsOf } from '../../components/shared/AssistantPanel/ImageCard'
 import { looksLikeMindMap } from '../../lib/mindmap'
+import { isRenderableImagePath } from '../../lib/imageFormats'
 
 /** AI 教学面的斜杠指令（/mindmap、/生图）已收口到 src/lib/chatCommands.ts 的
  *  PASSTHROUGH_COMMANDS 单一真源 —— 弹层候选与「放行给模型」判定读同一张表，
@@ -545,6 +546,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       openArtTab({ id: rel, kind: 'html', rel, name: opts?.title || opts?.name || rel.split('/').pop() || rel, title: opts?.title, lines: opts?.lines })
       return
     }
+    // 生图产物（v3.6.0 阶段二）：png/jpg… → 图片页签（批 3 查看器）。
+    // ★ 必须排在下面那条"读文本 → md 页签"的兜底**之前**：图片按文本读只会得到一段乱码，
+    //   而且不报错 —— 表象是「点开产物页签里是一堆黑菱形」
+    if (isRenderableImagePath(rel)) {
+      openArtTab({ id: rel, kind: 'image', rel, name: opts?.name ?? opts?.title ?? rel.split('/').pop() ?? rel, title: opts?.title })
+      return
+    }
     const cur = await workspaceGetCurrent().catch(() => null)
     const rootId = (cur as { rootId?: string } | null)?.rootId
     if (!rootId) { showToast({ type: 'error', message: '尚未打开仓库' }); return }
@@ -787,7 +795,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const t = artTabs.find(x => x.id === artActive)
     writeNav(activeId, {
       midView,
-      docRel: t && !t.generating && (t.kind === 'md' || t.kind === 'html') ? t.rel : null,
+      // docRel = 「可原地重开的阅读类页签」：md / html 之外 v3.6.0 阶段二纳入 **image**
+      // （openArtFile 已认图片扩展名 → 切回会话时图片页签照常恢复；不纳入的话
+      //  离开时开着图、回来只剩空栏，而 nav 里明明记着"上次看的是这张"）
+      docRel: t && !t.generating && (t.kind === 'md' || t.kind === 'html' || t.kind === 'image') ? t.rel : null,
       readerRel: t && !t.generating && t.kind === 'pptx' ? t.rel : null,
       readerPage: t && t.kind === 'pptx' ? t.cur ?? 0 : 0,
     })
@@ -977,22 +988,41 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     return onAgentStep(({ chatId, step }) => {
       if (chatId !== chatIdRef.current) return
       setLiveSteps(prev => [...prev.slice(-29), step])
-      const isProduct = step.name === 'visual.html' || step.name === 'mindmap'
+      const isProduct = step.name === 'visual.html' || step.name === 'mindmap' || step.name === 'image'
       if (isProduct && step.args && !step.artifact) {
         const slug = String(step.args.slug ?? '')
-        const isMind = step.name === 'mindmap'
-        const title = String(step.args.title ?? '') || (isMind ? '思维导图' : '示意图')
-        setArtTabs(prev => [...prev.filter(t => !(t.generating && t.slug === slug)),
-          { id: `gen:${slug || title}`, kind: isMind ? 'mindmap' : 'html', rel: '', name: '生成中…', generating: true, slug, title }])
-        setArtActive(`gen:${slug || title}`)
+        if (step.name === 'image') {
+          // 生图（v3.6.0 阶段二）：slug 是**可选**参数（方案 §12 D3），占位键回落 'image' ——
+          // 必须与下面完成事件用**同一条**回落规则，否则空 slug 时占位页签永远匹配不上，
+          // 屏幕上就留一个卡死的「生成中…」（禁关页签）
+          const key = slug || 'image'
+          setArtTabs(prev => [...prev.filter(t => !(t.generating && t.slug === key)),
+            { id: `gen:${key}`, kind: 'image', rel: '', name: '生成中…', generating: true, slug: key, title: String(step.args?.prompt ?? '').slice(0, 80) || '生成的图片' }])
+          setArtActive(`gen:${key}`)
+        } else {
+          const isMind = step.name === 'mindmap'
+          const title = String(step.args.title ?? '') || (isMind ? '思维导图' : '示意图')
+          setArtTabs(prev => [...prev.filter(t => !(t.generating && t.slug === slug)),
+            { id: `gen:${slug || title}`, kind: isMind ? 'mindmap' : 'html', rel: '', name: '生成中…', generating: true, slug, title }])
+          setArtActive(`gen:${slug || title}`)
+        }
       }
       if (step.artifact && step.ok) {
         const a = step.artifact
         if (!a.rel) return
-        // v3.6.0 生图（docs/ai-image-gen-plan.md §6.2）：阶段一产物落仓库 `.attachments/`，
-        // 工件栏页签与文件树接线属**阶段二**。此处直接返回，不给 ArtTab 塞一个它渲染不了的 kind
-        // （对话流里的生图卡由下面的消息区渲染，不依赖工件栏）。
-        if (a.kind === 'image') return
+        // 生图产物（v3.6.0 阶段二，方案 §6.2）：占位原地转正式页签，键与上面同一条回落规则。
+        // 页签名取文件名（页签条只有 170px，prompt 会被截成一串省略号），prompt 留作 title 悬浮提示。
+        if (a.kind === 'image') {
+          const key = a.slug || 'image'
+          setArtTabs(prev => {
+            const rest = prev.filter(t => !(t.generating && t.slug === key))
+            return rest.some(t => t.id === a.rel) ? rest
+              : [...rest, { id: a.rel, kind: 'image', rel: a.rel, name: a.rel.split('/').pop() || '图片', title: a.title, w: a.w, h: a.h, bytes: a.bytes }]
+          })
+          setArtActive(cur => cur === `gen:${key}` ? a.rel : cur)
+          showToast({ type: 'info', message: `✓ 图片已生成：${a.rel.split('/').pop()}（会话 outputs/ 目录）` })
+          return
+        }
         const kind = a.kind ?? 'html'
         setArtTabs(prev => {
           const rest = prev.filter(t => !(t.generating && a.slug && t.slug === a.slug))
@@ -1660,7 +1690,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     }
     // 条目6B 配套 + 工件栏 §2：打开中的页签回读磁盘（编辑器保存/程序重写后即时反映，滚动位置按文件记忆恢复）
     const rel = opts.doc ?? null
-    const openTabs = artTabsRef.current.filter(t => !t.generating && t.rel && (rel ? t.rel === rel : t.kind === 'md'))
+    // ★ 图片页签排除在外（v3.6.0 阶段二）：下面这一跳是 `workspaceReadFile`（按文本读），
+    //   对 png 只会把二进制当 utf8 读一遍再丢掉 —— 白读一份，且重读结果没有任何去处
+    const openTabs = artTabsRef.current.filter(t => !t.generating && t.rel && t.kind !== 'image' && (rel ? t.rel === rel : t.kind === 'md'))
     for (const t of openTabs) {
       void workspaceGetCurrent().then(cur => {
         const rootId = (cur as { rootId?: string } | null)?.rootId
@@ -3179,6 +3211,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   activeRel={(() => { const r = artTabs.find(t => t.id === artActive && !t.generating)?.rel ?? null; return r && r.startsWith(`${treeBase}/`) ? r.slice(treeBase.length + 1) : null })()}
                   onOpenMd={treeOpenArt}
                   onOpenHtml={treeOpenArt}
+                  onOpenImage={treeOpenArt}
                   onOpenExternal={treeOpenExternal}
                   isPinned={isPinned}
                   onTogglePin={togglePin}
@@ -3390,8 +3423,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           )
                         })}
                         {/* 工件栏方案 §2：visual.html 工件卡（对话流唯一形态，HTML 正文永不进流）——数据源=trace 里的 artifact step。
-                            ★ v3.6.0 起**排除 image**：生图产物落仓库 `.attachments/`（阶段一），不进修图页签，
-                              由下面的生图卡渲染 —— 混进来会变成一个点了打不开的"0 行示意图"按钮 */}
+                            ★ 仍**排除 image**（v3.6.0 阶段二复核过）：图的"卡"就是图本身，下面 `ImageCard` 直接把它画出来了，
+                              再叠一个「在工件栏打开 →」按钮是同一件事说两遍；产物页签由生成时的事件流自动开（转正/关闭都归工件栏管） */}
                         {(m.trace ?? []).some(s => s.artifact && s.artifact.kind !== 'image') && (
                           <div className="mt-1.5 space-y-1">
                             {(m.trace ?? []).filter(s => s.artifact && s.artifact.kind !== 'image').map((s, k) => {
@@ -4164,8 +4197,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     {lastChanges.map((c, i) => (
                       <li key={i}>
                         {c.file ? (
-                          <button onClick={() => (c.tool === 'visual.html' ? void openArtFile(String(c.file), { title: c.target }) : window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file, from: 'aiTeaching' } })))}
-                            title={c.tool === 'visual.html' ? '在工件栏打开渲染预览' : '在编辑器中打开'}
+                          <button onClick={() => (c.tool === 'visual.html' || c.tool === 'image' ? void openArtFile(String(c.file), { title: c.target }) : window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: c.file, from: 'aiTeaching' } })))}
+                            title={c.tool === 'visual.html' ? '在工件栏打开渲染预览' : c.tool === 'image' ? '在工件栏查看图片' : '在编辑器中打开'}
                             className="w-full flex items-center gap-1.5 px-2.5 py-1 text-left text-[11.5px] group hover:bg-[var(--bg-hover)] transition-colors">
                             <FileText size={10} className="shrink-0 text-[var(--accent)]" />
                             <span className="shrink-0 text-[var(--accent)]">{c.action}</span>

@@ -4,7 +4,7 @@ import { join, relative, extname, sep, dirname } from 'path'
 import { listTools, registerTool, getSettingReader, checkModulePermission } from './aiTools'
 import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { webSearch, webReadPage } from './webSearch'
-import { writeVisual, writeMindmap } from './aiTeachingSources'
+import { writeVisual, writeMindmap, writeImage } from './aiTeachingSources'
 import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
 import { getWorkspaceOfSession } from './aiTeachingWorkspaces'
 import {
@@ -2018,6 +2018,7 @@ export function registerBuiltinTools(): void {
       '**只在用户明确要图时调用**（敲了 /生图，或说「画一张 / 配个图 / 示意图 / 把这张改成…」）；不要为讲解主动配图。' +
       'prompt 保持用户的语言与诉求原样（中文要求就写中文，别翻成英文）；画幅不填=按内容定，要指定就在 prompt 里说。' +
       '改图：把上一张图的仓库相对路径填进 ref，prompt 写要改成什么样。' +
+      '产物落会话文件夹 outputs/（AI 教学面）或仓库 .attachments/<年-月>/（普通对话），一律以返回的 relPath 为准。' +
       '生成后用一句话说明图已生成，**绝不把 prompt 或返回 JSON 写进回答正文**。',
     inputSchema: {
       type: 'object',
@@ -2034,8 +2035,8 @@ export function registerBuiltinTools(): void {
     readOnly: false,
     requires: 'write',
     tier: 'ondemand',
-    // 不设 module：产物落仓库 .attachments/，普通对话面与 AI 教学面都可用
-    // （阶段二才改成落会话夹 {会话夹}/outputs/，见方案 §6）
+    // 不设 module：产物落**按面分流**（AI 教学面 = 会话夹 outputs/，普通对话 = 仓库 .attachments/，见 handler），
+    // 教学面那一支的归属由 sessionId 兜底（writeImage → ensureWriteOwnerFolder）
   }, async (args, ctx) => {
     const prompt = str(args.prompt).trim()
     if (!prompt) throw new Error('prompt 为空：请给出要画的内容描述')
@@ -2078,14 +2079,30 @@ export function registerBuiltinTools(): void {
     const buf = Buffer.from(b64, 'base64')
     if (buf.length === 0) throw new Error('生图失败：图片数据为空')
     if (exceedsPixelGuard(buf)) throw new Error('生图失败：图片像素超过 1 亿，渲染侧无法显示')
-    const out = stageImageVersioned(root, str(args.slug), buf)
-    // 铁律 1：写盘后广播。阶段一落 .attachments/（隐藏目录，不进知识库索引）⇒ 不需要 knowledge scope，
-    // 只广播受影响目录让文件树/工学栏这类"按目录拉"的面刷新；「本次改动」清单走 agent 结果通道，
-    // 天然随本轮返回带到渲染层，无需另行广播。
-    try { broadcastTreeRefresh(out.relPath.replace(/\/[^/]*$/, '')) } catch { /* 联动失败不影响产物 */ }
+    // 落点分流（v3.6.0 阶段二，方案 §6.1）：AI 教学面落**会话夹 `outputs/`**（左栏资源管理器就挂在
+    // 会话夹上，用户能翻到），普通对话面落仓库隐藏目录 `.attachments/<年-月>/`（B2）。
+    // 判据取 `ctx.source` 而不是"sessionId 是否为空"：助手面的 sessionId 也是非空的
+    // （那是 agent 会话 id，不是教学会话），按空值判会把普通对话的图塞进一个并不存在的会话夹。
+    const sid = String(ctx?.sessionId ?? '')
+    let relPath: string
+    if (ctx?.source === 'aiTeaching') {
+      if (!sid) throw new Error('image 在 AI 教学面需要会话归属（当前调用没有 sessionId）')
+      const w = writeImage(sid, str(args.slug), buf, getSettingReader())
+      if (!w.ok) throw new Error(w.error ?? '图片写入会话产物目录失败')
+      relPath = String(w.relPath ?? '')
+      if (!relPath) throw new Error('图片写入失败：没有拿到产物路径')
+    } else {
+      const out = stageImageVersioned(root, str(args.slug), buf)
+      relPath = out.relPath
+      // 铁律 1：写盘后广播。阶段一落 .attachments/（隐藏目录，不进知识库索引）⇒ 不需要 knowledge scope，
+      // 只广播受影响目录让文件树这类"按目录拉"的面刷新；「本次改动」清单走 agent 结果通道，
+      // 天然随本轮返回带到渲染层，无需另行广播。
+      // （教学面那一支的广播在 writeImage 内——它广播的是会话夹，粒度更准）
+      try { broadcastTreeRefresh(relPath.replace(/\/[^/]*$/, '')) } catch { /* 联动失败不影响产物 */ }
+    }
     const size = imageSizeOf(buf)
     return {
-      relPath: out.relPath,
+      relPath,
       bytes: buf.length,
       w: size?.w,
       h: size?.h,

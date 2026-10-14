@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame, Network } from 'lucide-react'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../components/shared/MindMapView'
+import { ImmersiveImageView } from '../../components/shared/image/ImmersiveImageView'
 import { ArtHtmlView } from './ArtHtmlView'
 import type { ArtTab } from './artifacts'
 
@@ -73,7 +74,7 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
       ? <Presentation size={11} className="shrink-0 text-[var(--accent)]" />
       : t.kind === 'mindmap'
         ? <Network size={11} className="shrink-0 text-[var(--accent)]" />
-        : <ImageIcon size={11} className="shrink-0 text-[var(--accent)]" />
+        : <ImageIcon size={11} className="shrink-0 text-[var(--accent)]" /> // html 示意图 / image 生图产物
 
   return (
     <div className="h-full flex flex-col min-h-0 bg-[var(--bg-secondary)] border-l border-[var(--border-color)]">
@@ -106,15 +107,21 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
       {tab && (
         <div className="shrink-0 flex items-center gap-2 px-2.5 py-1 bg-[var(--bg-primary)] border-b border-[var(--border-color)] text-[10.5px] select-none min-w-0">
           <span className="flex-1 min-w-0 truncate text-[var(--text-muted)]" title={tab.rel || ''}>
-            {tab.generating ? (tab.kind === 'mindmap' ? `mindmaps/${tab.slug ?? ''}.json（生成中）` : `visuals/${tab.slug ?? ''}.html（生成中）`) : `${tab.rel}${tab.lines ? ` · ${tab.lines} 行` : ''}`}
+            {tab.generating
+              ? (tab.kind === 'mindmap' ? `mindmaps/${tab.slug ?? ''}.json（生成中）`
+                : tab.kind === 'image' ? `outputs/${tab.slug ?? ''}.png（生成中）`
+                  : `visuals/${tab.slug ?? ''}.html（生成中）`)
+              : `${tab.rel}${tab.lines ? ` · ${tab.lines} 行` : ''}${tab.kind === 'image' && tab.w && tab.h ? ` · ${tab.w} × ${tab.h}` : ''}`}
           </span>
-          {!tab.generating && tab.rel && (
+          {/* 图片页签不给「编辑」也不给 ⟳（v3.6.0 阶段二）：png 在编辑器里没有可编辑语义，
+              重读由查看器自己的异常态卡「重试」承接（批 3 口径：只看，不改图） */}
+          {!tab.generating && tab.rel && tab.kind !== 'image' && (
             <button onClick={() => onEdit(tab.rel)} title="在编辑器中打开（可编辑保存后 ⟳ 刷新）"
               className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
               <ExternalLink size={10} /> 编辑
             </button>
           )}
-          {!tab.generating && tab.rel && (
+          {!tab.generating && tab.rel && tab.kind !== 'image' && (
             <button onClick={() => onReload(tab)} title="重读磁盘文件刷新"
               className="shrink-0 px-1.5 py-0.5 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">⟳</button>
           )}
@@ -149,8 +156,8 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
         ) : tab.generating ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-[12px] text-[var(--text-muted)]">
             <div className="w-[26px] h-[26px] rounded-full border-[3px] border-[var(--border-color)] border-t-[var(--accent)] animate-spin" />
-            <div>{tab.kind === 'mindmap' ? 'mindmap 正在生成思维导图…' : 'visual.html 正在生成示意图…'}</div>
-            <div className="text-[10.5px]">{tab.kind === 'mindmap' ? '产出将写入会话 mindmaps/ 目录' : '产出将写入会话 visuals/ 目录 · 单文件自包含'}</div>
+            <div>{tab.kind === 'mindmap' ? 'mindmap 正在生成思维导图…' : tab.kind === 'image' ? 'image 正在生成图片…' : 'visual.html 正在生成示意图…'}</div>
+            <div className="text-[10.5px]">{tab.kind === 'mindmap' ? '产出将写入会话 mindmaps/ 目录' : tab.kind === 'image' ? '产出将写入会话 outputs/ 目录' : '产出将写入会话 visuals/ 目录 · 单文件自包含'}</div>
           </div>
         ) : tab.kind === 'md' ? (
           <>
@@ -185,6 +192,14 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
         ) : tab.kind === 'mindmap' ? (
           <div className="kb-art-in flex-1 min-h-0">
             <MindMapView relPath={tab.rel} showExport showSource onRef={onOpenRef} />
+          </div>
+        ) : tab.kind === 'image' ? (
+          /* 生图产物（v3.6.0 阶段二）：直接复用**批 3 的**图片查看器（缩放/旋转/平移/棋盘格底 +
+             异常态卡），不另造一个"教学面专用看图" —— 同一份逻辑两处各写一遍必然漂移，
+              这正是 `useVaultImage` 头注里那条口径。取回走范围通道（RANGE_EXT_WHITELIST 已含 png），
+              零安全面变更。 */
+          <div className="kb-art-in flex-1 min-h-0 min-w-0 flex flex-col">
+            <ImmersiveImageView relPath={tab.rel} name={tab.name} sizeBytes={tab.bytes} />
           </div>
         ) : (
           /* pptx 逐页阅读并入页签（§1.4：页码即内容） */

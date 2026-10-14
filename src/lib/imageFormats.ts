@@ -36,6 +36,13 @@ export function isRenderableImageExt(ext: string): boolean {
   return IMAGE_RENDER_EXT_SET.has(ext.replace(/^\./, '').toLowerCase())
 }
 
+/** 该**路径/文件名**能否在应用内渲染（v3.6.0 阶段二抽：文件树与工件栏两处都要按路径判图片，
+ *  各自 `lastIndexOf('.')` 切一遍就是第二份真相；扩展名名单仍只有上面那一处） */
+export function isRenderableImagePath(pathOrName: string): boolean {
+  const i = pathOrName.lastIndexOf('.')
+  return i > 0 && isRenderableImageExt(pathOrName.slice(i + 1))
+}
+
 /** 扩展名 → MIME。只服务 Blob 的 type（`<img>` 不看它也不会因此失败，但 DevTools 里好看） */
 export function imageMime(ext: string): string {
   switch (ext.replace(/^\./, '').toLowerCase()) {

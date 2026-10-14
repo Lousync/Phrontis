@@ -6,7 +6,7 @@ import { broadcastTreeRefresh, ensureSessionFolder, ensureWriteOwnerFolder, root
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { listWorkspaces, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { getSessionUnitFolderRel } from './aiTeachingCourse'
-import { uniqueFileName } from './workspaceManager'
+import { uniqueFileName, uniqueVersionedName } from './workspaceManager'
 import { extractPdfRange, extractPptxPages } from './docsReader'
 import { visionChat, findVisionModel } from './llmService'
 import { convertToPdf, probeSoffice, resetSofficeCache } from './sofficeConvert'
@@ -607,6 +607,49 @@ export function writeMindmap(
     writeFileSync(join(dirAbs, fname), body, 'utf-8')
     broadcastTreeRefresh(sessionRel)
     return { ok: true, relPath: `${sessionRel}/mindmaps/${fname}`, nodes: countNodes(doc.root) }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+/** 生图产物字节上限（与 workspaceManager.MAX_STAGE_IMAGE / builtinTools 参考图同口径 30MB） */
+const MAX_IMAGE_OUTPUT_BYTES = 30 * 1024 * 1024
+
+/** image 工具在 **AI 教学面**的产物：
+ *  写 `{会话夹}/outputs/<slug>.png`（与 `visuals/`、`mindmaps/` 并列的会话产物目录，
+ *  见 docs/ai-image-gen-plan.md §6.1 B1）；重名不覆盖（`-v2`/`-v3` 递增，与两个 write* 同口径）。
+ *
+ *  为什么与普通对话面分家：普通对话没有"会话文件夹"这个概念，产物落仓库隐藏目录 `.attachments/`；
+ *  教学面的会话夹是**用户自己会去翻的目录**（左栏资源管理器就挂在它上面），图落在里面才找得回来。
+ *  分流在 builtinTools 的 image 处理里按 `ctx.source` 判定，本函数只管教学面这一支。
+ *
+ *  slug 白名单校验（kebab 英文数字，拒 `..`/分隔符/盘符——与 writeVisual 同一条入参面收敛）；
+ *  slug 可缺省（image 工具的可选参数，方案 §12 D3），缺省回落 `image`。
+ *  落盘路径全程由本函数拼装，AI 参数无法越出会话 outputs/ 目录。
+ *  不登记 SOURCE.md、不参与素材注入（产物不是素材）。 */
+export function writeImage(
+  sessionId: string, slug: string, bytes: Buffer,
+  getSetting: (key: string) => unknown,
+): { ok: boolean; relPath?: string; bytes?: number; error?: string } {
+  try {
+    const s = String(slug ?? '').trim() || 'image'
+    if (!/^[a-z0-9](?:[a-z0-9._-]{0,60}[a-z0-9])?$/.test(s) || s.includes('..')) {
+      return { ok: false, error: `slug 不合法（要求 kebab-case 小写英文/数字，如 dp-fill-table）：${s.slice(0, 40)}` }
+    }
+    const data = bytes as Buffer
+    if (!data || data.length === 0) return { ok: false, error: '图片数据为空' }
+    if (data.length > MAX_IMAGE_OUTPUT_BYTES) return { ok: false, error: '图片超过 30MB，拒绝写入' }
+    const probe = ensureWriteOwnerFolder(sessionId, getSetting)
+    if (!probe.ok || !probe.relPath) return { ok: false, error: probe.error ?? '会话文件夹不可用' }
+    const vault = getCurrentVault()
+    if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const sessionRel = probe.relPath
+    const dirAbs = join(vault.rootPath, sessionRel, 'outputs')
+    mkdirSync(dirAbs, { recursive: true })
+    const fname = uniqueVersionedName(dirAbs, `${s}.png`)
+    writeFileSync(join(dirAbs, fname), data)
+    broadcastTreeRefresh(sessionRel)
+    return { ok: true, relPath: `${sessionRel}/outputs/${fname}`, bytes: data.length }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

@@ -212,5 +212,25 @@ console.log('\n[10 文件齐备]')
 ok(exists('src/components/shared/AssistantPanel/ImageCard.tsx'), '10.1 ImageCard.tsx 存在')
 ok(exists('electron/lib/imageHeaderPure.ts'), '10.2 imageHeaderPure.ts 存在（纯函数，契约可真跑）')
 
+console.log('\n[11 产物落点分流（阶段二：AI 教学面 -> 会话夹 outputs/）]')
+const aiteach = read('electron/lib/aiTeachingSources.ts')
+ok(/export function writeImage\(/.test(aiteach), '11.1 aiTeachingSources 导出 writeImage（方案 §6.1）')
+ok(aiteach.includes("join(vault.rootPath, sessionRel, 'outputs')"), '11.2 教学面落 {会话夹}/outputs/')
+ok(/export function writeImage[\s\S]{0,1400}ensureWriteOwnerFolder\(sessionId, getSetting\)/.test(aiteach),
+  '11.3 归属校验走 ensureWriteOwnerFolder（无会话/会话夹不可用即拒绝）')
+ok(/uniqueVersionedName\(dirAbs, `\$\{s\}\.png`\)/.test(aiteach),
+  '11.4 教学面同样是版本式 -v2（与 .attachments/ 一条口径）')
+ok(toolsSrc.includes("ctx?.source === 'aiTeaching'") && toolsSrc.includes('writeImage(sid, str(args.slug), buf'),
+  "11.5 image 处理按 ctx.source 分流 —— 不按 sessionId 空值判（助手面的 sessionId 也是非空的）")
+ok(toolsSrc.includes('stageImageVersioned(root, str(args.slug), buf)'),
+  '11.6 普通对话面仍落 .attachments/（阶段一口径不回退）')
+// 注入文案：两个面各给各的落点示例（教学面沿用 .attachments 那句会让模型去仓库隐藏目录里找图）
+ok(/本会话文件夹的 `outputs\/`/.test(svc) && /⑥ 产物落点/.test(svc),
+  '11.7 imageHint 给教学面单独一句落点说明（§6.1 收尾）')
+ok(svc.includes('.attachments/2026-10/x.png'),
+  '11.8 imageHint 仍保留普通对话面的 .attachments/ 示例（两面示例按 source 分叉）')
+ok(/outputs\/（AI 教学面）/.test(toolsSrc) && /\.attachments\/<年-月>\//.test(toolsSrc),
+  '11.9 工具 description 写清两个落点（模型自己就知道图会去哪，不必靠猜）')
+
 console.log(fails.length ? `\n${fails.length} FAIL` : '\nALL PASS')
 process.exit(fails.length ? 1 : 0)

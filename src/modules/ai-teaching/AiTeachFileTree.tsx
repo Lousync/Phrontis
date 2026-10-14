@@ -1,7 +1,8 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Plus, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Link2, Trash2, Star, FileText, BookOpen, Eye } from 'lucide-react'
+import { Plus, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Link2, Trash2, Star, FileText, BookOpen, Eye, Image as ImageIcon } from 'lucide-react'
 import { FileContextMenu, type FileMenuEntry } from '../../components/shared/FileContextMenu'
 import { duplicateWorkspaceFile } from '../../lib/fileDuplicate'
+import { isRenderableImagePath } from '../../lib/imageFormats'
 import {
   workspaceGetCurrent, workspaceListDir, workspaceCreateFile,
   workspaceMkdir, workspaceRename, workspaceTrash, getSettingRaw, onAiTeachTreeRefresh,
@@ -30,6 +31,9 @@ interface Props {
   onOpenMd: (rel: string) => void
   /** 工件栏方案 A（2026-09-09）：.html 点击/右键=工件栏沙箱渲染页签；不传则回落编辑器 */
   onOpenHtml?: (rel: string) => void
+  /** 图片（v3.6.0 阶段二）：png/jpg/… 点击/右键=工件栏图片页签（批 3 的 ImmersiveImageView）；
+   *  不传则回落 onOpenExternal（外部程序打开） */
+  onOpenImage?: (rel: string) => void
   onOpenExternal: (rel: string) => void
   /** v3.2.0 条目 ④：父组件持有的刷新计数（原始类型 prop，不破坏 memo）——自增即重扫已加载目录。
    *  两个来源共用它：外部文件系统变更广播、左栏头部的「刷新资源管理器」按钮 */
@@ -41,7 +45,11 @@ interface Props {
 
 interface CtxState { x: number; y: number; node: TreeNode | null }
 
-function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenExternal, refreshSeq, isPinned, onTogglePin }: Props) {
+/** 图片扩展名判定 —— 判据走批 3 的 `isRenderableImagePath`（应用内能渲染的那份名单是唯一真相源，
+ *  这里不再手抄一份扩展名清单：多一份就会与查看器漂移） */
+const isImageName = isRenderableImagePath
+
+function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenImage, onOpenExternal, refreshSeq, isPinned, onTogglePin }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [rootDir, setRootDir] = useState('AI教学')
   const [dirCache, setDirCache] = useState<DirCache>({})
@@ -116,11 +124,13 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
 
   const openFile = useCallback((n: TreeNode) => {
     const nm = n.name.toLowerCase()
-    // md / 导图 JSON / pptx → 右栏工件栏开页签（不跳模块，左聊右看）；html 走渲染预览；其余走外部
+    // md / 导图 JSON / pptx → 右栏工件栏开页签（不跳模块，左聊右看）；html 走渲染预览；
+    // 图片（v3.6.0 阶段二）→ 工件栏图片页签（批 3 查看器）；其余走外部
     if (nm.endsWith('.md') || nm.endsWith('.json') || nm.endsWith('.pptx')) onOpenMd(n.relPath)
     else if (/\.html?$/i.test(n.name) && onOpenHtml) onOpenHtml(n.relPath) // visual 示意图等 html → 工件栏渲染页签
+    else if (isImageName(n.name) && onOpenImage) onOpenImage(n.relPath) // outputs/*.png 等生图产物 → 工件栏图片页签
     else onOpenExternal(n.relPath)
-  }, [onOpenMd, onOpenHtml, onOpenExternal])
+  }, [onOpenMd, onOpenHtml, onOpenImage, onOpenExternal])
 
   // ---- 操作 ----
   /** 新建入口（B-14）：只落「内联输入意图」，真正写入在 commitCreate。
@@ -201,6 +211,10 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
     }
     if (node.type === 'file' && /\.html?$/i.test(node.name) && onOpenHtml) {
       items.push({ key: 'preview', label: '打开渲染预览', icon: <Eye size={15} />, onSelect: () => onOpenHtml(node.relPath) })
+    }
+    // 图片（v3.6.0 阶段二）：生图产物（outputs/*.png）在这里右键即可进工件栏看图
+    if (node.type === 'file' && isImageName(node.name) && onOpenImage) {
+      items.push({ key: 'viewImage', label: '查看图片', icon: <ImageIcon size={15} />, onSelect: () => onOpenImage(node.relPath) })
     }
     items.push({ key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => startRename(node) })
     items.push({ key: 'copy', label: '复制（到剪贴板）', icon: <ClipboardPaste size={15} />, onSelect: () => { setClip({ rel: node.relPath, name: node.name, isDir: node.type === 'dir' }); showToast({ type: 'info', message: `已复制「${node.name}」，到目标目录右键粘贴（仅文件）` }) } })
