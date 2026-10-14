@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Wrench, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, Presentation, ChevronLeft, ChevronRight, ChevronDown, PanelLeftClose, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
@@ -44,6 +44,7 @@ import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { registerSelectionAskHost } from '../../lib/assistantContext'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
+import { ToolSummary, type TraceRowView } from '../../components/shared/AssistantPanel/ToolSummary'
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
 import { UsageRing, fmtTok } from '../../components/shared/UsageRing'
@@ -265,6 +266,17 @@ const TOOL_CN: Record<string, string> = {
 function toolName(name?: string): string {
   const s = String(name ?? '')
   return TOOL_CN[s] ?? (s.startsWith('builtin.') ? s.slice(8) : s || '工具')
+}
+
+/** trace → 工具摘要行可用的行视图（「用了 N 个工具」只数工具行；LLM 行以「思考」保留在展开体里） */
+function traceRows(steps?: AgentTraceStep[]): TraceRowView[] {
+  return (steps ?? []).map((st, j) => ({
+    key: `${j}-${st.name ?? 'llm'}`,
+    label: st.kind === 'tool' ? toolName(st.name) : '思考',
+    isTool: st.kind === 'tool',
+    ok: st.ok !== false,
+    durationMs: st.durationMs,
+  }))
 }
 
 /**
@@ -2244,8 +2256,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     void refreshSessions()
   }, [refreshSessions])
 
-  // 占位事件（args 无 artifact）不计入工具次数（它只是「开始生成」信号，正式 tool step 另有一条）
-  const toolCount = liveSteps.filter(s => s.kind === 'tool' && !(s.name === 'visual.html' && s.args && !s.artifact)).length
   const lastStep = liveSteps[liveSteps.length - 1]
   // ---------- 工件栏布局（§1.2/§1.3）：分隔条拖拽 + 双右栏联动 ----------
   const rowRef = useRef<HTMLDivElement>(null)
@@ -3327,10 +3337,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     ) : (
                       /* P3a 去气泡：助手回复平铺 markdown 原生排版；P3b 轻量操作条（§3.8-3：整理成文档/复制/轨迹折叠） */
                       <div className="min-w-0">
+                        {/* 过程收起来（R8）：工具清单折成一行摘要放正文之前，默认收起 —— 原先是操作条里的
+                            「调用轨迹（N 步）」，生成中已经完全不显示工具了，完成后再铺回来是重复 */}
+                        <ToolSummary rows={traceRows(m.trace)} />
                         {/* P8：```profile 建议块不直显；条目11/12：```plan / ```ask 协议块同样收敛（plan→侧栏、ask→提问卡） */}
                         <MarkdownPreview
                           content={splitJumps(m.content).body.replace(/```(profile|plan|ask|outline)[^\n]*\n[\s\S]*?```/g, '')}
                           onQuizRetry={retryQuiz}
+                          codeBlockChrome="card"
                         />
                         {/* L4 引用网络：跳转 chip（AI 输出 `跳转：<知识点名>` → 打开其总结篇） */}
                         {splitJumps(m.content).jumps.map((name, k) => {
@@ -3400,21 +3414,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             <Copy size={12} />复制
                           </button>
                           {fmtTime(m.createdAt) && <span className="text-[11px] text-[var(--text-muted)] tabular-nums ml-0.5">{fmtTime(m.createdAt)}</span>}
-                          {m.trace && m.trace.length > 0 && (
-                            <details className="cursor-pointer select-none">
-                              <summary className="px-1.5 py-0.5 rounded-md list-none text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] transition-colors">调用轨迹（{m.trace.length} 步）</summary>
-                              <ul className="mt-1 space-y-0.5">
-                                {m.trace.map((st, j) => (
-                                  <li key={j} className="flex items-center gap-1 text-[10.5px]">
-                                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${st.ok ? 'bg-[var(--success)]' : 'bg-red-500'}`} />
-                                    <Wrench size={9} className="shrink-0 text-[var(--text-muted)]" />
-                                    <span className="truncate">{st.kind === 'tool' ? toolName(st.name) : '思考'}</span>
-                                    <span className="ml-auto tabular-nums text-[var(--text-muted)]">{st.durationMs}ms{st.tokens ? ` · ${st.tokens}t` : ''}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </details>
-                          )}
                         </div>
                       </div>
                     )}
@@ -3436,24 +3435,27 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 )}
 
                 {pending && (streamDraft ? (
-                  <div className="flex justify-start">
-                    <div className="w-full max-w-[92%]">
-                      <StreamBubble draft={streamDraft} textTransform={stripOpenFence} />
-                    </div>
+                  /* 流式过程（生成态）：状态行 + 下滑条 + 思考行 + 正文增量。
+                     外壳与已完成消息同款 `min-w-0` 平铺 —— 不再套 max-w-[92%]：
+                     正文落定后是满宽，窄一点会在最后一帧跳一下。 */
+                  <div className="min-w-0">
+                    <StreamBubble draft={streamDraft} textTransform={stripOpenFence} />
                   </div>
                 ) : (
-                  <div className="flex justify-start">
-                    <div className="max-w-[86%] rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] px-3.5 py-2.5 flex items-center gap-2 text-[12px] text-[var(--text-muted)]">
-                      <Loader2 size={13} className="animate-spin shrink-0" />
-                      <span className="min-w-0">
-                        {!lastStep ? '正在思考…'
+                  /* 兜底（无流式草稿）：换成**同一套状态行**，否则过程中会闪一下旧样式。
+                     旧版这版的转圈与描边盒子一并去掉（R1/R3）——停止入口在输入区。 */
+                  <div className="kb-gen-row">
+                    <span className="kb-stage">
+                      <span className="stage-label">
+                        {!lastStep ? '正在等待模型响应…'
                           : lastStep.kind === 'tool'
                             ? (lastStep.ok
-                              ? <>正在调用 <span className="text-[var(--accent)]">{toolName(lastStep.name)}</span>（第 {toolCount} 次工具调用）</>
-                              : <>执行 {toolName(lastStep.name)} 失败，正在调整…</>)
-                            : <>思考中…（已调用 {toolCount} 次工具）</>}
+                              ? `正在${toolName(lastStep.name)}…`
+                              : `执行 ${toolName(lastStep.name)} 失败，正在调整…`)
+                            : '正在思考…'}
                       </span>
-                    </div>
+                      <span className="kb-sweep" />
+                    </span>
                   </div>
                 ))}
                 </div>

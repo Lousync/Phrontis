@@ -429,7 +429,6 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 onRegenerate={() => { void regenerate() }}
                 onEditSubmit={(id, content) => { void editSubmit(id, content) }}
                 onDeleteMessage={id => { void deleteMessage(id) }}
-                onAbort={() => { void abort() }}
                 jumpBottom={variant === 'page'}
                 emptyHint={emptyHint ?? (
                   /* 三态统一：空态在滚动区高度内垂直+水平居中。2026-09-19 反馈：两行引导文字收敛为
@@ -667,10 +666,21 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   </button>
                   </>)}
                   <span className="flex-1" />
-                  <button onClick={() => { void send() }} disabled={pending || compressing || !input.trim()} title="发送"
-                    className="h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
-                    {pending ? <Loader2 size={12} className="animate-spin" /> : <ArrowUp size={14} />}
-                  </button>
+                  {pending ? (
+                    /* R7 单入口（docs/ai-reply-loading-plan.md §3.3）：生成中发送键 → 停止键，
+                       与 AI 教学中栏同一个口径（那儿一直是这么做的）。★ 这一面此前**只能**从消息流
+                       里的「停止」中断，生成态改版把状态区那颗按钮去掉了，所以这里必须补上，
+                       否则全局面板/右栏/整页三个宿主会失去唯一的中断入口。 */
+                    <button onClick={() => { void abort() }} title="停止生成（已完成的轮次保留）"
+                      className="h-7 w-7 shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity">
+                      <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
+                    </button>
+                  ) : (
+                    <button onClick={() => { void send() }} disabled={compressing || !input.trim()} title="发送"
+                      className="h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-opacity">
+                      <ArrowUp size={14} />
+                    </button>
+                  )}
                 </div>
 
                 {/* ── 工具行浮层（📎 / 模型 / 消耗，三者同构）──

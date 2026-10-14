@@ -1841,3 +1841,190 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
     display: none !important;
   }
 }
+
+/* ===== AI 回复代码块卡片（形态 B 悬浮胶囊）=====
+   方案：docs/code-block-card-plan.md。生效面 = AI 教学对话流 / AI 教学侧车 / 全局助手面板
+   （三处都靠 MarkdownPreview 的 `codeBlockChrome="card"` 打开）；工件栏 md 页签与知识库阅读态
+   **不传**这个开关，外观逐像素不变（默认档 `'plain'` 走原样 `<pre>`）。
+
+   ★ 这一段必须留在 `:is(.prose-content, .kb-md-atom) pre`（第 340 行）**之后**：
+     两者特异性相同（都是「1 类 + 1 元素」），而本项目自定义 CSS 都写在 @layer 之外，
+     靠「后来者胜」压住那条基础规则 —— 位置一挪到前面，卡片里的 pre 就会再套一层
+     边框 / 底色 / 圆角 / 投影（框中框）。 */
+.kb-code-card {
+  position: relative;
+  margin: var(--md-atom-gap) 0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+/* 语言标签浮左上、操作按钮成右上悬浮胶囊（形态 B）：两者都不画底色与分界线，
+   整块读作一个平面；胶囊自带底色 + 描边 + 投影，靠这层反差浮起来。 */
+.kb-code-card__lang {
+  position: absolute; top: 9px; left: 12px; max-width: 42%;
+  font-size: 10.5px; font-family: var(--font-mono); letter-spacing: .03em;
+  color: var(--text-secondary); user-select: none;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 显隐：默认 opacity:0，卡片 :hover / :focus-within 才显现。
+   ★ 用 opacity 不用 visibility / display —— opacity:0 的元素**仍可 Tab 聚焦**，
+     键盘用户 Tab 进来触发 :focus-within 就能显出来；换成 visibility 会把按钮移出 Tab 序，
+     等于键盘永远够不到复制。隐藏态保留占位，悬停时语言标签不位移、头部不抖。 */
+.kb-code-card__acts {
+  position: absolute; top: 5px; right: 6px; z-index: 1;
+  display: flex; align-items: center; gap: 0; padding: 2px;
+  border-radius: 9px; border: 1px solid var(--border-color);
+  background: var(--bg-tertiary); box-shadow: 0 2px 8px rgba(0, 0, 0, .22);
+  opacity: 0; transition: opacity var(--dur-std) var(--ease-kb);
+}
+.kb-code-card:hover .kb-code-card__acts,
+.kb-code-card:focus-within .kb-code-card__acts { opacity: 1; }
+.kb-code-card__act {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 5px;
+  border: 0; border-radius: 6px; cursor: pointer; background: transparent;
+  color: var(--text-muted); font: inherit; font-size: 11px;
+}
+.kb-code-card__act:hover { background: var(--bg-hover); color: var(--text-primary); }
+.kb-code-card__act:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.kb-code-card__act[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.kb-code-card__act svg { display: block; }
+/* 纯图标档（拍板）：胶囊里只出图标，语义靠 title + aria-label。
+   与「图标 + 文字」共用同一套 DOM，靠隐藏 span 切换 —— 不写两套按钮。 */
+.kb-code-card__act span { display: none; }
+
+/* 卡片内字号跟随正文：AI 教学（正文 16px）里是 14px、全局面板（正文 12px）里是 10.5px，
+   即真实渲染里 `--md-code-size`（0.875em）的取值。**不要写死 px** —— 写死会让卡片里的代码
+   比同一面的普通代码块小一号。 */
+.kb-code-card__body {
+  position: relative;
+  font-size: var(--md-code-size);
+  /* ★ 行高必须显式给：折叠高度要按「12 行」算，而 `normal` 是字体相关的、写不进 calc()。
+     代价是卡片内行距统一为 1.55，跨三个面一致（原先面板继承 leading-relaxed 1.625、
+     中栏继承 normal，本来就各不相同）。 */
+  --kb-code-line-h: 1.55;
+  --kb-card-head-extra: 20px;   /* 胶囊带比 --md-pre-pad 多出来的那 20px，见下面折叠高度 */
+  line-height: var(--kb-code-line-h);
+}
+/* 抵掉基础规则那 5 条（背景 / 边框 / 圆角 / 投影 / 外边距）—— 卡片的 chrome 全在外层。
+   横向滚动容器放在 pre 上（不放 __body）：滚动条落在代码块自身底边，语义更直。 */
+.kb-code-card__body pre {
+  margin: 0;
+  padding: var(--md-pre-pad);
+  padding-top: 36px;             /* = --md-pre-pad(16px) + --kb-card-head-extra(20px)，给胶囊让出那条带 */
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: inherit;
+  line-height: inherit;
+  white-space: pre;
+  tab-size: 4;
+}
+.kb-code-card__body pre code { background: none; padding: 0; font-size: inherit; font-family: inherit; }
+.kb-code-card.is-wrap .kb-code-card__body pre { white-space: pre-wrap; word-break: break-word; }
+
+/* 折叠：超 20 行 → 只显前 12 行（阈值见 MarkdownPreview.tsx 的 FOLD_OVER_LINES）。
+   ① 高度 = 12 行 + 上内边距 + 形态补偿，**不夹带「滚动条 px 补偿」**：滚动条宽度在 0 / 15px
+      两态之间，CSS 无从得知，实测两头都错（无滚动条时漏出第 13 行 12px、有滚动条时反而盖住
+      第 12 行）。故折叠态直接 overflow:hidden 截断、长行右侧截断；展开后才有横滚。
+   ② 少了 --kb-card-head-extra 那 20px，第 12 行会被裁掉 —— 原型实测 clientHeight 264 vs
+      需要 283.5，只露 11.03 行。形态 A（独立头部条）那档它是 0px。 */
+.kb-code-card.is-folded .kb-code-card__body {
+  /* `--kb-card-fold-lines` 由 JS 单点给出（MarkdownPreview.tsx 的 FOLD_SHOWN_LINES），
+     缺省回落 12 —— 常量与样式不许各写一份 */
+  max-height: calc(var(--kb-card-fold-lines, 12) * var(--kb-code-line-h) * 1em + var(--md-pre-pad) + var(--kb-card-head-extra));
+  overflow: hidden;
+}
+.kb-code-card.is-folded .kb-code-card__body pre { overflow-x: hidden; }
+.kb-code-card__fade {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 44px; pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--bg-primary));
+}
+.kb-code-card__more {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: 100%; height: 28px; border: 0; border-top: 1px solid var(--border-color);
+  cursor: pointer; background: var(--bg-tertiary); color: var(--text-secondary);
+  font: inherit; font-size: 11.5px;
+}
+.kb-code-card__more:hover { background: var(--bg-hover); color: var(--text-primary); }
+.kb-code-card__more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ===== 生成态下滑条（AI 回复等待指示）=====
+   方案：docs/ai-reply-loading-plan.md §3.1 / §6。成熟工具的共性是「滑动指示优先于转圈」——
+   转圈读作「系统忙」，滑动读作「AI 在说话」。做法：状态文字下面一条 2px 轨道，
+   里面一段 34% 宽的 accent 短条来回滑，父级 overflow:hidden 裁掉。
+   ★ 只动 transform ⇒ 完全落在铁律 13 的允许清单内，**这不是例外，是新增令牌**。
+     为什么不用文字流光：那要动 background-position，虽只跑 paint 但不在清单里，
+     为它开一条例外不划算（下滑条能做到同等表达且零例外）。 */
+.kb-sweep {
+  position: relative; display: block; height: 2px; border-radius: 1px;
+  background: var(--border-color); overflow: hidden;
+}
+.kb-sweep::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 34%;
+  border-radius: 1px; background: var(--accent);
+  /* 194% 是算出来的：短条占轨道 34%，左边缘走到 66% 时右边缘正好贴住 100% */
+  animation: kb-sweep 1.15s ease-in-out infinite alternate;
+}
+@keyframes kb-sweep {
+  from { transform: translateX(0); }
+  to   { transform: translateX(194%); }
+}
+
+/* 状态行 = 静态弱色文字 + 下滑条（无转圈、无秒表跳动）。
+   短条与状态文字同宽：inline-flex 列容器，轨道作为列项被拉伸到文字宽度。 */
+.kb-stage { display: inline-flex; flex-direction: column; gap: 3px; min-width: 64px; max-width: 100%; }
+.kb-stage .stage-label {
+  font-size: 12px; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 耗时：>3 秒才出现、弱色、每秒一次（不是现状那种 100ms 跳） */
+.kb-stage-dur { margin-left: auto; flex: none; font-size: 10.5px; color: var(--text-disabled); }
+
+/* 生成态整体：状态行（+ 耗时）一行；正文另起。 */
+.kb-gen-row { display: flex; align-items: center; gap: 6px; min-height: 20px; margin: 2px 0; }
+
+/* 思考行（完成后）：一行折叠 + 左细线展开体 —— 不做二级盒子（R6）。 */
+.kb-think { margin: 2px 0; }
+.kb-think__head {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 0;
+  border: 0; background: none; cursor: pointer; font: inherit;
+  font-size: 11.5px; color: var(--text-muted);
+}
+.kb-think__head:hover { color: var(--text-secondary); }
+.kb-think__body {
+  margin: 2px 0 2px 5px; padding-left: 8px; border-left: 1px solid var(--border-color);
+  max-height: 72px; overflow: hidden;
+  white-space: pre-wrap; font-size: 11px; line-height: 1.7; color: var(--text-disabled);
+}
+
+/* 工具摘要行（完成后）：默认收起、永不自动展开；展开体每步一行，失败步标红。 */
+.kb-toolsum { margin: 2px 0; }
+.kb-toolsum__head {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 0;
+  border: 0; background: none; cursor: pointer; font: inherit;
+  font-size: 11.5px; color: var(--text-muted);
+}
+.kb-toolsum__head:hover { color: var(--text-secondary); }
+.kb-toolsum__list { margin: 2px 0 2px 5px; padding-left: 8px; border-left: 1px solid var(--border-color); }
+.kb-toolsum__item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); }
+.kb-toolsum__item code {
+  max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted);
+}
+.kb-toolsum__item .dur { margin-left: auto; flex: none; font-size: 10.5px; color: var(--text-disabled); }
+.kb-toolsum__dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.kb-toolsum__dot.is-fail { background: var(--danger); }
+.kb-toolsum__more { font-size: 11px; color: var(--text-disabled); }
+
+@media (prefers-reduced-motion: reduce) {
+  /* 下滑条降级成一条静态的满格 accent 下划线：仍然读得出「进行中」，只是不动 */
+  .kb-sweep::after { animation: none; transform: none; width: 100%; }
+  .kb-code-card__acts,
+  .kb-code-card__more .kb-chevron { transition: none; }
+}

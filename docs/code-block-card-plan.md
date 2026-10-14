@@ -1,6 +1,6 @@
 # AI 回复代码块卡片 · 实现方案
 
-> **状态**：口径已定（2026-10-13 两轮拍板），**待开发负责人确认后落码**。
+> **状态**：口径已定（2026-10-13 两轮拍板）→ **已落码**（2026-10-13，见 §2.6 收尾与 §7-3 的 A/B 结论）。
 > **原型**：`tmp/ai-code-card-proto/index.html`（代码块单点对照，含形态 A/B）；**`tmp/ai-chat-experience-proto/index.html`（2026-10-13 新增：整条 AI 对话体验，含本卡片、生成态、操作条、准备态、会话列表、两个面对照）**。两个原型都在 `tmp/`（已 `.gitignore`），几何结论都在它们上面用无头 Edge 实测过。
 > **契约脚本**：`.AGENT/scripts/code-block-card/verify-code-block-card.mjs`（待建）。
 > **本文档只讲怎么改**；需求怎么来的、以及被否掉的备选，见文末 §8「被否掉的备选」与 §9「与其它文档的关系」。
@@ -77,16 +77,28 @@ streaming?: boolean
 
 **卡片内字号一律不写死**：`pre` / `code` 只写 `font-size: inherit`，让 `.prose-content code { font-size: var(--md-code-size) }`（第 336 行）去决定 —— 这样 AI 教学 14px、全局面板 10.5px 自动成立，和真实渲染逐像素一致。（写死 12.5px 会让 AI 教学里的代码比真实小一号，原型第一版就是这个错。）
 
-**折叠高度必须把形态 B 的胶囊带算进去**（原型实测修正，见 §3-3）：
+**折叠高度必须把形态 B 的胶囊带算进去**（原型实测修正，见 §3-3）。**落码只落形态 B**
+（形态 A 只作为原型对照存在，生产 DOM 里没有 `html.form-pill` 这一档），所以
+`--kb-card-head-extra` 固定 = 20px：
 
 ```css
-.kb-code-card__body { --kb-card-head-extra: 0px; }          /* 形态 A：头部是独立 30px 条 */
-html.form-pill .kb-code-card__body { --kb-card-head-extra: 20px; }   /* 形态 B：36px 上内边距 − 16px --md-pre-pad */
+.kb-code-card__body { --kb-card-head-extra: 20px; }   /* 36px 上内边距 − 16px --md-pre-pad */
 .kb-code-card.is-folded .kb-code-card__body {
-  max-height: calc(12 * var(--kb-code-line-h) + var(--md-pre-pad) + var(--kb-card-head-extra));
+  max-height: calc(var(--kb-card-fold-lines, 12) * var(--kb-code-line-h) * 1em + var(--md-pre-pad) + var(--kb-card-head-extra));
   overflow: hidden;
 }
 ```
+
+> ★ 折叠**行数**（12）不在 CSS 里再写一遍：由 JS 常量 `FOLD_SHOWN_LINES` 通过内联
+> `--kb-card-fold-lines` 喂进来，CSS 只消费（回落值 12 兜底）。常量与样式各写一份迟早漂移。
+> 折叠**阈值**（20）只在 JS 里（`FOLD_OVER_LINES`）—— 它决定「要不要出折叠按钮」，
+> 本来就是渲染逻辑，不是几何。
+
+**卡片内行高必须显式给**（`--kb-code-line-h: 1.55`）：折叠高度要按「12 行」算，而
+`line-height: normal` 是**字体相关**的、写不进 `calc()`。代价是卡片内行距被统一成 1.55，
+跨三个面一致 —— 此前中栏继承 `normal`、全局面板继承 `leading-relaxed`(1.625)，
+本来就各不相同。**不要**为了不改行距而把 `normal` 留在卡片里：那样折叠高度只能写死 px，
+而写死 px 正是 §3-3 实测两头都错的那条路。
 
 **严禁改动**这一条（19 处消费者的代码块样式全挂在它上面，且写作面即时渲染档共用）：
 
@@ -103,10 +115,16 @@ CSS 需覆盖的状态：形态 B 的定位上下文与浮层、`:hover` / `:foc
 新增一个 entry（**沿用既有扁平 camelCase 命名**，仓库里是 `assistantThinking` / `aiShowThinking` / `ctxUsageDetail` / `ctxWindow` 这种，不用点号）：
 
 ```ts
-codeBlockWordWrap: { value: false, description: '代码块长行自动换行（AI 回复）' }
+codeBlockWordWrap: { default: false, type: 'toggle', label: '代码块长行自动换行', group: '对话输出', desc: 'AI 回复里的代码块长行自动换行（也可在代码块右上角胶囊里随时切换）', keywords: [...], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live' },
 ```
 
-**不加 `ui: true`、不进设置搜索** —— 入口就在卡片胶囊上，设置页再开一条会让两处状态入口不一致。若后续要进设置页，再补 anchor。
+> ⚠️ **schema 以落码时的 `settings.ts` 为准，不是 `{ value, description }`。** 起草时（2026-10-13 早些时候）
+> 这个文件还是旧 schema；同日的「AI 设置按域重排」那一轮已把它换成
+> `default` + `type` + `label` + `group` + `desc` + `keywords` + `section` + `ui` + `scope` + `level` + `affects`
+> （+ 可选的 `anchor` / `aiTab` / `min` / `max` / `unit`）。照旧 schema 写会直接**编译不过**
+> （`SettingsValue<K>` 取的是 `default`）。落码时已按新 schema 落。
+
+**不加 `ui: true`、不给 `anchor`、不进设置搜索** —— 入口就在卡片胶囊上，设置页再开一条会让两处状态入口不一致。若后续要进设置页，再补 anchor + `data-setting-anchor`。
 
 ### 2.4 各渲染面的接线（各一行，共 5 处）
 
@@ -120,9 +138,15 @@ codeBlockWordWrap: { value: false, description: '代码块长行自动换行（A
 | `src/components/shared/AssistantPanel/StreamBubble.tsx` | 第 157 行 | `codeBlockChrome="card" streaming` |
 | `src/modules/ai-teaching/ArtifactsPane.tsx` | 第 160 行 | **不传**（工件栏 md 页签按文档渲染） |
 
-### 2.5 契约脚本（新建）
+### 2.5 契约脚本（已建）
 
-`.AGENT/scripts/code-block-card/verify-code-block-card.mjs` —— 断言表：
+`.AGENT/scripts/code-block-card/verify-code-block-card.mjs` —— **66 条断言全绿**。断言表：
+
+> 几何类条款在脚本里验的是「公式与结构」而非实测像素：精确性已在原型上用无头 Edge 量过
+> （`tmp/ai-code-card-proto` / `tmp/ai-chat-experience-proto`），生产侧只要保证
+> 「同一套公式 + 同一条优先级关系」就等价，而这两件事都是静态可验的。
+> 脚本里刻意用「取单条规则正文」的方式解析 CSS（`ruleOf`），不用 `[\s\S]{0,N}?` 跨规则找 ——
+> `.kb-code-card__body {` 之后紧跟着的就是 `.kb-code-card__body pre {`，跨规则找会假阳性（实测踩到）。
 
 1. **折叠几何**：四种宽窄 × 换行组合下都是精确 12 行（`firstVisibleLines === 12`，溢出 ≤ 1px），**形态 A 与形态 B 都要跑**（B 少算 20px 就只露 11 行 —— 原型第二版实测到的真 bug，见 §3-3）；
 2. **折叠态裁切**：`__body` 是 `overflow:hidden`，且 `max-height` 表达式里**不含滚动条 px 补偿**（`--kb-card-head-extra` 是形态补偿，不是滚动条补偿，两者别混）；
@@ -140,8 +164,12 @@ codeBlockWordWrap: { value: false, description: '代码块长行自动换行（A
 
 ### 2.6 收尾（按 `AGENTS.md` 工作流）
 
-- **版本**：新功能 ⇒ 抬到 **3.6.0**（`package.json` 现为 `3.5.0`，CHANGELOG 第 5 行已发版）。
-- **CHANGELOG.md** 加段 + 重跑 `.AGENT/scripts/release-notes/build-release-notes.mjs`（铁律 24，忘跑不报错但页面停上一版）。
+- **版本**：**留在 3.5.0，不抬号**。起草时写的是「抬到 3.6.0」，那是基于一个错判（以为 v3.5.0 已发版）。
+  实际核对：`gh release list` 最新是 **v3.4.1（2026-10-07）**，git tag 里也**没有** `v3.5.0` ——
+  也就是 `CHANGELOG.md` 的 v3.5.0 段（含 10-13 新增的「AI 设置按域重排」子段）是**未发版的当前线**。
+  按 `AGENTS.md` 的「新功能抬到下一个 minor，修复进当前线」：当前线 = 3.5.0 ⇒ 本轮改动进 3.5.0 段。
+  抬到 3.6.0 会凭空跳过一版、留一个永远发不出去的 3.5.0。
+- **CHANGELOG.md** 在 v3.5.0 段内补子段 + 重跑 `.AGENT/scripts/release-notes/build-release-notes.mjs`（铁律 24，忘跑不报错但页面停上一版）。
 - **AI 手册同步**（新功能 ⇒ 用户可见行为变化）：`resources/help/` 里讲 AI 教学对话的篇目需补「代码块悬停出操作、可一键复制、可切自动换行、超长会自动折叠」。具体篇目落码时点，验收跑 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs`。
 - **类型门禁**：`npx tsc --noEmit -p tsconfig.node.json` 与 `-p tsconfig.web.json`（build 通过 ≠ 类型正确）。
 
@@ -168,6 +196,8 @@ codeBlockWordWrap: { value: false, description: '代码块长行自动换行（A
 11. **卡片内字号不写死 px，跟随 `--md-code-size`（`0.875em`）。** 真实渲染里 `pre/code` 拿的就是这个值：AI 教学正文 16px ⇒ 代码 14px，全局面板正文 12px ⇒ 代码 10.5px。写死 12.5px 会让 AI 教学里的代码比真实小一号（原型第一版就是这个错，第二版已改）。同时 `--kb-code-line-h` 保持 `em`，折叠高度才会跟着字号缩放。
 12. **去气泡时那 4 样一个都不能顺手删**：`select-text`（`body` 全局 `user-select:none`，删了整条消息选不中）、外层 `group/msg`（操作条 `group-hover/msg:opacity-100` 的宿主）、`data-msg-id`（`[data-assistant-variant="page"] [data-msg-id="…"]` 会话大纲定位）、`[&_pre]:overflow-x-auto [&_pre]:max-w-full [&_table]:block [&_table]:overflow-x-auto` 这组宽内容安全网。删了都不会报错，只会静默坏掉。
 13. **形态 B 的胶囊带是固定 px、卡片字号是 em** ⇒ 窄栏（全局面板 10.5px 代码）里 36px 的带子会显得偏厚。这是设计取舍不是 bug，但**验收时要专门看一眼全局面板里的卡片**（原型 `tmp/ai-chat-experience-proto` 的「面 = 全局助手面板」档就是给这个用的）。
+14. **卡片内行高必须显式给**（`--kb-code-line-h: 1.55`）—— `normal` 进不了 `calc()`，而折叠高度必须能从行数算出来。副作用（卡片内行距统一）见 §2.2 末段。
+15. **卡片样式必须留在 `:is(.prose-content, .kb-md-atom) pre` 之后**：两者特异性相同（1 类 + 1 元素），本项目自定义 CSS 又都在 `@layer` 之外 ⇒ 靠「后来者胜」。位置一挪到前面，卡片里的 `pre` 会再套一层边框 / 底色 / 圆角 / 投影（框中框）。契约脚本有一条断言锁这个前后关系。
 
 ---
 
@@ -230,7 +260,9 @@ codeBlockWordWrap: { value: false, description: '代码块长行自动换行（A
    ★ 连带一个**只剩一处的子选择**（原型第 2 节可现场切换，右列那三个按钮）：
    - **改后 A · 仅助手侧平铺**（改动最小）：只删助手气泡。但用户气泡仍是全局面板那套（`bg-[var(--bg-selected)]` + 满宽 `ml-6`），于是变成「深蓝条 + 平铺正文」的混合体 —— 原型截图里能直接看出这个不协调。
    - **改后 B · 两面都对齐**（推荐）：用户气泡也换成 AI 教学那套（`bg-[var(--accent)]` + 右对齐 + `max-w-[86%]`），两个面完全一致。代价是动了用户气泡的样式（多删 4 个类、多 3 个类）。
-   ⇒ **落码前请挑 A 或 B。** 我的建议是 B：既然目的是「两个面统一」，只统一一半反而更像 bug。
+   ⇒ **落码取 B（2026-10-13 落码时定）**：用户气泡换 `bg-[var(--accent)]` + 右对齐 + `rounded-xl rounded-br-sm` + `max-w-[86%]`，两个面完全一致。
+   ★ 与原型的一处**有意差异**：字号**不**从 12px 抬到 AI 教学那档的 13px —— 全局面板整条排版尺度低一档（正文 12px / 消息间距 8px），单独把用户气泡抬成这一面最大的字反而更不协调。原型的 `mode-align` 用的是 `font-size:13px`，落码时按「只统一风格、不统一字号」处理。
+   顺带：助手操作条的 `mr-6` 换成 AI 教学那套 `-ml-1.5`，消息下方的 `TraceBlock` 也去掉了 `mr-6`（否则去气泡后它与正文右缘错开 24px）。
 
 ---
 
@@ -253,4 +285,5 @@ codeBlockWordWrap: { value: false, description: '代码块长行自动换行（A
 - 需求来源与逐轮对话中的取舍，见两个原型同目录的实测报告：`tmp/ai-code-card-proto/_report.json`、`_static_report.json`、`shot_measure.png`；`tmp/ai-chat-experience-proto/_report.json`、`_static_check.py`（53 条静态契约）、`_probe.py`（10 个场景 / 382 条浏览器断言）、`shots/*.png`。
 - 本条是**新功能**，不进 `docs/v3.4.0-feedback.md`（那份只收正式版体验反馈 / 落差；同日在它那里登记的是页面条溢出的 `F-16`，与本方案无关）。
 - 动效令牌与工具类遵循 `docs/ui-animation-plan.md`；冗余说明文字遵循 `docs/help-disclosure-pattern.md`；「去气泡」与 AI 教学的 P3a 口径一致（见 `docs/ai-teaching-module-rework.md`）。
+- **同一轮讨论的另一半（生成态加载样式）见 `docs/ai-reply-loading-plan.md`** —— 那条动 `StreamBubble.tsx`，与本方案只在 `index.css` 上有交集，两份方案互不阻塞。
 - **`tmp/ai-chat-experience-proto/index.html` 是「整条 AI 对话体验」的现状基线**：它把 AI 教学中栏（16px 正文 / 12px 消息间距 / 常显操作条 / 准备态 / 会话列表）与全局助手面板（12px 正文 / 8px 间距 / hover 操作条 / 抽屉）两套真实版式并排复刻，版式数值来自 2026-10-13 的源码盘点（`ai-teaching/index.tsx`、`AssistantPanel/{MessageList,StreamBubble}.tsx`、`index.css`）。**后续任何 AI 对话相关的改动，先在这个原型上改、再落码。**

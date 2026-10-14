@@ -5,9 +5,10 @@ import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { Copy } from 'lucide-react'
+import { Check, ChevronDown, Copy, WrapText } from 'lucide-react'
 import { showToast } from '../../lib/toast'
-import { copyImageUrlToClipboard } from '../../lib/ipc'
+import { copyImageUrlToClipboard, copyText } from '../../lib/ipc'
+import { useSettings } from '../../lib/SettingsContext'
 import { normalizeVaultRel, getCachedVaultImage, loadVaultImage } from '../../lib/attachmentImage'
 import { preprocessContent, parseQuizFence, parseQuizFenceLoose } from './QuizParser'
 import { QuizCard } from './QuizCard'
@@ -67,6 +68,18 @@ interface Props {
   onQuizRetry?: () => void
   /** 高亮的 wiki 链接标题（关联网络「引用/被引用」定位用）：命中该标题的 [[ ]] 加 `.kb-wiki-flash` */
   highlightWiki?: string
+  /**
+   * 代码块外框档位（docs/code-block-card-plan.md）。
+   * `'plain'`（默认）= 现状，19 处消费者零变化；`'card'` = 普通代码块出「形态 B 悬浮胶囊」卡片。
+   * 只作用于 `pre` 覆写的**兜底分支** —— quiz / mermaid / plugin / spoiler / anim /
+   * schedule-preview 在 `pre` 覆写里提前 return，永远到不了卡片。
+   */
+  codeBlockChrome?: 'plain' | 'card'
+  /**
+   * 流式档：卡片仍在，但**不出折叠、不出自动换行**（只留语言标签 + 复制）。
+   * 理由：正文每个 token 都在重排，行数与行宽都在变，折叠按钮会不停跳位。
+   */
+  streaming?: boolean
 }
 
 /** Unified markdown preview component. Links open via system handler (files → system app, URLs → browser). */
@@ -124,6 +137,91 @@ function FenceWithFallback({ info, code, pageId, pageTitle, children }: {
   )
 }
 
+/** 折叠阈值（docs/code-block-card-plan.md §1）：超过 FOLD_OVER_LINES 行 → 只显前 FOLD_SHOWN_LINES 行 */
+const FOLD_OVER_LINES = 20
+const FOLD_SHOWN_LINES = 12
+
+/**
+ * 代码块卡片（形态 B 悬浮胶囊，docs/code-block-card-plan.md）。
+ *
+ * 只在 `codeBlockChrome="card"` **且未命中任何特殊围栏**时挂载 —— 也就是 `pre` 覆写的兜底分支，
+ * 结构上恰好等于「用户真想原样复制走的纯文本」。
+ *
+ * 两条硬约束：
+ *   ① 依赖 `useSettings()` ⇒ 必须在 `SettingsProvider` 内（`SettingsContext.tsx` 会 throw）；
+ *   ② 胶囊隐藏态用 `opacity` 不用 `visibility`/`display` —— `opacity:0` 仍可 Tab 聚焦，
+ *      键盘用户 Tab 进来触发 `:focus-within` 即可显现（换成 visibility 就永远够不到复制）。
+ */
+function CodeBlockCard({ lang, source, streaming, children }: {
+  lang: string
+  /** 纯源码（`extractText` 已把 rehype-highlight 的 span 树还原成文本）—— 行数与复制都取它 */
+  source: string
+  streaming?: boolean
+  children: React.ReactNode
+}) {
+  const { s, update } = useSettings()
+  const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<number | null>(null)
+  useEffect(() => () => { if (copyTimer.current) window.clearTimeout(copyTimer.current) }, [])
+
+  // 自动换行是**全局偏好**（所有代码块同步切换）⇒ 不是本地 state，走 settings
+  const wrap = s.codeBlockWordWrap === true
+  const src = source.replace(/\n$/, '')
+  const lines = src.split('\n').length
+  const foldable = !streaming && lines > FOLD_OVER_LINES
+  const folded = foldable && !expanded
+
+  const onCopy = () => {
+    void copyText(src).then(ok => {
+      // 成功就地变 ✓（1.2s 复位），不弹 Toast —— 聊天流里每次复制弹一个右下角提示比不反馈更烦
+      if (!ok) { showToast({ type: 'error', message: '复制失败' }); return }
+      setCopied(true)
+      if (copyTimer.current) window.clearTimeout(copyTimer.current)
+      copyTimer.current = window.setTimeout(() => setCopied(false), 1200)
+    })
+  }
+
+  return (
+    <div
+      className={`kb-code-card${folded ? ' is-folded' : ''}${wrap ? ' is-wrap' : ''}`}
+      /* 折叠行数由 JS 常量单点给出、CSS 的 calc 消费它 —— 免得「常量写 12、CSS 也写 12」两处漂移 */
+      style={{ '--kb-card-fold-lines': FOLD_SHOWN_LINES } as React.CSSProperties}
+      data-lang={lang || 'txt'}
+      data-lines={lines}
+    >
+      {/* 形态 B：语言标签浮左上、操作按钮成右上悬浮胶囊，两者都不画底色与分界线 */}
+      <span className="kb-code-card__lang">{lang || 'txt'}</span>
+      <div className="kb-code-card__acts">
+        {!streaming && (
+          <button type="button" className="kb-code-card__act" aria-pressed={wrap}
+            title={wrap ? '关闭自动换行' : '自动换行（超长行折到下一行）'}
+            aria-label={wrap ? '关闭代码块自动换行' : '开启代码块自动换行'}
+            onClick={() => update('codeBlockWordWrap', !wrap)}>
+            <WrapText size={12} /><span>自动换行</span>
+          </button>
+        )}
+        <button type="button" className="kb-code-card__act" title="复制纯代码（不含围栏与高亮标记）"
+          aria-label="复制代码" onClick={onCopy}>
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          <span>{copied ? '已复制' : '复制'}</span>
+        </button>
+      </div>
+      <div className="kb-code-card__body">
+        <pre className="kb-thin-scroll">{children}</pre>
+        {folded && <div className="kb-code-card__fade" aria-hidden />}
+      </div>
+      {foldable && (
+        <button type="button" className="kb-code-card__more" aria-expanded={expanded}
+          onClick={() => setExpanded(v => !v)}>
+          <span>{expanded ? '收起' : `展开全部（共 ${lines} 行）`}</span>
+          <ChevronDown size={12} className={`kb-chevron ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** quiz 围栏解析失败占位卡（条目13）：不再裸显原始 JSON，可一键让 AI 重出 */
 function QuizFailCard({ onRetry }: { onRetry?: () => void }) {
   return (
@@ -139,7 +237,7 @@ function QuizFailCard({ onRetry }: { onRetry?: () => void }) {
   )
 }
 
-function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitles, pageId, pageTitle, onQuizRetry, highlightWiki }: Props) {
+function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitles, pageId, pageTitle, onQuizRetry, highlightWiki, codeBlockChrome = 'plain', streaming = false }: Props) {
   // 旧 408 选择题格式 → ```quiz 围栏（供 pre 组件渲染判题卡片）；非选择题块原样保留
   const processedContent = useMemo(() => preprocessContent(content), [content])
 
@@ -217,6 +315,14 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
           return <FenceWithFallback info={r} code={extractText(children)} pageId={pageId} pageTitle={pageTitle}>{children}</FenceWithFallback>
         }
       }
+      // ★ 兜底分支 = 普通代码块 ⇒ 卡片只挂这一行（以上所有特殊围栏都已提前 return）
+      if (codeBlockChrome === 'card') {
+        return (
+          <CodeBlockCard lang={fenceLang ?? ''} source={extractText(children)} streaming={streaming}>
+            {children}
+          </CodeBlockCard>
+        )
+      }
       return <pre>{children}</pre>
     },
     // Override ul/ol to restore list-style killed by Tailwind reset
@@ -288,6 +394,13 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
       if (!isBlock) {
         return <code className={className} {...props}>{children}</code>
       }
+      // 卡片档：chrome（语言标签 + 操作）整条交给 CodeBlockCard，这里只出裸 <code>，
+      // 否则 <pre> 里会套一个 <div>（非法结构）并多出一个语言标签。
+      // ⚠️ 上面 spoiler / anim 两个分支**必须保留** —— pre 覆写对这两个 lang 返回的是
+      //    <>{children}</>（不包 <pre>），真正的渲染体就在下面这两行里。
+      if (codeBlockChrome === 'card') {
+        return <code className={className} {...props}>{children}</code>
+      }
       return (
         <div className="relative group">
           {lang && (
@@ -331,7 +444,7 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
       const text = extractText(children)
       return <h6 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h6>
     },
-  }), [handleLinkClick, onWikiLink, knownWikiTitles, pageId, pageTitle, fenceRenderers, onQuizRetry, highlightWiki])
+  }), [handleLinkClick, onWikiLink, knownWikiTitles, pageId, pageTitle, fenceRenderers, onQuizRetry, highlightWiki, codeBlockChrome, streaming])
 
   return (
     <div className="prose-content">

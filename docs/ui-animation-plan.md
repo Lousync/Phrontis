@@ -58,6 +58,7 @@
 | `.kb-spin` | `rotate 360°` 0.8s 线性无限循环；形状 = 11px 圆环（描边色可覆盖） | 连续 busy 指示：会话列表「转圈示忙」（N-3）。reduced-motion 降速 2.4s 不停转（运动即语义） |
 | `.kb-dock-hint` | `opacity 0→1 + translateX(12px→0)` 170ms | 可拖动浮窗拖近停靠区时的落位预览块（G 类） |
 | `.kb-theme-vt` | `::view-transition-old/new(root)` 交叉淡化 220ms | 主题切换（View Transition），降级走容器级过渡 |
+| `.kb-sweep` | `::after` 短条 `transform: translateX(0→194%)` 1.15s ease-in-out alternate infinite；轨道 2px | AI 回复生成态的等待指示（下滑条）。见 §J 与 `docs/ai-reply-loading-plan.md` |
 
 > 所有类统一包一段 `@media (prefers-reduced-motion: reduce)` 关闭。
 
@@ -137,6 +138,23 @@ AI 教学上下文条 / 书市下载队列，共 7 处）。它是 §五-①「�
 这不是 transform/opacity 动画（scrollbar 伪元素不支持过渡），是**状态显隐**，
 与 `.kb-edge-strip`（彻底隐藏，`index.css:1395`）的区别：那条是「滚动手势仍在、视觉全无」，
 本条是「悬停可见的细条」。首个使用方：看板「今日打卡」卡列表。
+
+### J. 等待指示 → `.kb-sweep`（2026-10-13 新增，`docs/ai-reply-loading-plan.md`）
+适用场景：**AI 回复生成中**的等待指示。成熟工具（ChatGPT / Claude.ai / Copilot）的共性是
+「滑动优先于转圈」——转圈读作「系统忙」，滑动读作「AI 在说话」；转圈只留给「某个工具在执行」。
+做法：状态文字下面一条 2px 轨道（`--border-color`），里面一段 34% 宽的 `--accent` 短条来回滑，
+父级 `overflow: hidden` 裁掉。**短条与状态文字同宽**（容器是 `inline-flex` 列，
+轨道作为列项被拉伸到文字宽度）。
+
+- 位移量 194% 是算出来的：短条占轨道 34%，左边缘走到 66% 时右边缘正好贴住 100%。
+- ★ **只动 `transform`** ⇒ 完全落在铁律 13 的允许清单内，**这不是例外，是新增令牌**。
+  最初考虑的「文字流光」（`background-clip: text` + 动 `background-position`）虽只跑 paint，
+  但不在清单里 —— 为它开一条例外不划算，下滑条能做到同等表达且零例外。
+- reduced-motion 降级：动画停，短条铺满整条（`width: 100%; transform: none`）——
+  静态下仍读得出「进行中」。
+- 配套（同一轮加的，不是动画令牌）：`.kb-stage` / `.stage-label` / `.kb-stage-dur`（状态行）、
+  `.kb-think*`（思考行，折叠复用 `.kb-collapse`）、`.kb-toolsum*`（完成后的工具摘要行，
+  默认收起、展开体最多 5 步）。首个使用方：`AssistantPanel/StreamBubble.tsx`（三面共用）。
 
 ---
 

@@ -303,7 +303,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
               </>
             ) : (
               <div className="min-w-0 group relative">
-                <MarkdownPreview content={m.content} />
+                <MarkdownPreview content={m.content} codeBlockChrome="card" />
                 <button onClick={() => { void navigator.clipboard.writeText(m.content).then(() => showToast({ type: 'info', message: '已复制' })).catch(() => null) }}
                   title="复制" className="absolute right-0 -top-1 px-1 py-0.5 rounded text-[10.5px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-opacity">
                   <Copy size={10} />
@@ -317,8 +317,12 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
             <StreamBubble draft={streamDraft} />
           </div>
         ) : (
-          <div className="flex items-center gap-1.5 text-[11.5px] text-[var(--text-muted)]">
-            <Loader2 size={12} className="animate-spin" />思考中…
+          /* 兜底（无流式草稿）：与中栏/全局面板用**同一套状态行**，否则支线里会闪一下旧样式 */
+          <div className="kb-gen-row">
+            <span className="kb-stage">
+              <span className="stage-label">正在等待模型响应…</span>
+              <span className="kb-sweep" />
+            </span>
           </div>
         ))}
       </div>

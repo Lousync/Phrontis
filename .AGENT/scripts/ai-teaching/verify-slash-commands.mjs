@@ -74,7 +74,7 @@ check('slashQuery 派生：/ 开头且无空白才弹', /slashQuery = input\.sta
 check('Esc 局部拦截 stopPropagation', /onSlashKeys[\s\S]*?e\.key === 'Escape'[\s\S]*?e\.stopPropagation\(\)/.test(chatBody))
 check('Skill chip 一次性消费：send 内发出即清', /const sk = pickedSkill[\s\S]*?setPickedSkill\(null\)[\s\S]*?agentChat\(sid, body, finalCtx \?\? undefined, cid, sessionSource, modelId \|\| undefined, thinking \? 'medium' : 'off', sk\?\.registryName\)/.test(chatHook))
 check('handleChatCommand 接线 onProgress → setCompressing', chatHook.includes('onProgress: p => setCompressing(p.active)'))
-check('发送键禁用条件含 compressing', chatBody.includes('disabled={pending || compressing || !input.trim()}'))
+check('发送键禁用条件含 compressing（pending 改由「停止键」分支接管，见 ai-reply-loading-plan §3.3）', chatBody.includes('disabled={compressing || !input.trim()}'))
 check('send 依赖数组补 pickedSkill', /\}, \[[^\]]*pickedSkill[^\]]*\]\)/.test(chatHook))
 check('面板打开时刷新 Skill 列表', chatHook.includes('aiToolsListSkills().then(r => setSlashSkills(r.skills))'))
 check('compressing 占位条渲染', chatBody.includes('正在压缩对话历史'))
