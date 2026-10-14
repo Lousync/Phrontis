@@ -1945,13 +1945,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     () => (profileFence ? parseProfileFence(profileFence.raw) : null),
     [profileFence],
   )
-  /** 对话驱动建课：最新一条 assistant 回答里的 ```outline 围栏 = 课程大纲草稿（用户满意才正式落盘） */
-  const outlineFence = useMemo(() => {
+  /** 对话驱动建课：最新一条 assistant 回答里的 ```outline 围栏 = 课程大纲草稿（用户满意才正式落盘）。
+      带出所属消息下标 idx —— 草稿卡要**内联在产生它的那条回复里**（2026-10-14 拍板，见 docs/ai-outline-inline-plan.md），
+      旧轮次的围栏照旧只剥不渲染（正文剥离正则在渲染处）。 */
+  const outlineFence = useMemo<{ raw: string; idx: number } | null>(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i]
       if (m.role !== 'assistant') continue
       const mt = /```outline[^\n]*\n([\s\S]*?)```/.exec(m.content)
-      return mt ? mt[1].trim() : null
+      return mt ? { raw: mt[1].trim(), idx: i } : null
     }
     return null
   }, [messages])
@@ -1959,19 +1961,27 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const outlineDraft = useMemo<OutlineDraftUi | null>(() => {
     if (!outlineFence) return null
     try {
-      const o = JSON.parse(outlineFence) as OutlineDraftUi
+      const o = JSON.parse(outlineFence.raw) as OutlineDraftUi
       return o && Array.isArray(o.chapters) ? o : null
     } catch { return null }
   }, [outlineFence])
-  const [outlineCardHidden, setOutlineCardHidden] = useState(false)
-  useEffect(() => { setOutlineCardHidden(false) }, [outlineFence, activeId])
+  /** 落盘态：记住**哪一份草稿**已落盘 + 落盘路径（草稿内容一变就退回未落盘）。内存态 —— 切会话即清。 */
+  const [outlineDone, setOutlineDone] = useState<{ fence: string; rel: string } | null>(null)
+  useEffect(() => { setOutlineDone(null) }, [activeId])
+  const outlineCommitted = !!outlineDone && !!outlineFence && outlineDone.fence === outlineFence.raw
   const commitOutlineDraft = useCallback(async () => {
     const ws = activeWs && activeWs !== '__none__' ? activeWs : ''
-    if (!ws || !outlineDraft) { showToast({ type: 'warning', message: '缺少工作区或大纲草稿' }); return }
+    if (!ws || !outlineDraft || !outlineFence) { showToast({ type: 'warning', message: '缺少工作区或大纲草稿' }); return }
     const r = await aiTeachCourseWriteOutlineDraft(ws, outlineDraft).catch(() => null)
-    if (r?.ok) { showToast({ type: 'info', message: '已生成课程大纲' }); setOutlineCardHidden(true) }
+    if (r?.ok) { showToast({ type: 'info', message: '已生成课程大纲' }); setOutlineDone({ fence: outlineFence.raw, rel: r.relPath ?? '' }) }
     else showToast({ type: 'error', message: `生成失败${r?.error ? `：${r.error}` : ''}` })
-  }, [activeWs, outlineDraft])
+  }, [activeWs, outlineDraft, outlineFence])
+  /** 打开已落盘的 课程.md：与本模块画像 / CONSTRAINTS 同范式（ensure 产物 → 跳编辑区打开，带「← 返回 AI教学」） */
+  const openCourseOutline = useCallback(() => {
+    const rel = outlineDone?.rel
+    if (!rel) { showToast({ type: 'warning', message: '课程大纲尚未落盘' }); return }
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))
+  }, [outlineDone])
   /** 建议一变（或换会话）就重建勾选副本：默认全勾，层级回本主题，安静入口收起 */
   useEffect(() => {
     setProfRows(profileSuggestion?.mode === 'entries' ? profileSuggestion.entries.map((e) => ({ ...e, checked: true })) : [])
@@ -3378,6 +3388,46 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             })}
                           </div>
                         )}
+                        {/* 对话驱动建课：```outline 草稿卡 —— 内联在**产生它的这条回复**里，跟着对话滚动；
+                            居中并与输入区那条带子左右对齐（同 `max-w-[820px] mx-auto px-3`）。
+                            满意才「正式生成」落 课程.md；落盘后转「已落盘 · 课程.md + 打开课程」。
+                            2026-10-14 拍板：从输入区带子挪进对话流、删「继续修改」、章节列表不再内部滚动。 */}
+                        {outlineFence?.idx === idx && outlineDraft && (
+                          <div className="mt-2 w-full max-w-[820px] mx-auto px-3">
+                            <div className="kb-pop rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <BookOpen size={12} className="shrink-0 text-[var(--accent)]" />
+                                <span className="text-[12.5px] font-medium text-[var(--text-primary)]">课程大纲草稿</span>
+                                <span className={`text-[10.5px] ${outlineCommitted ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>
+                                  {outlineCommitted ? '已落盘 · 课程.md' : '对话内 · 未落盘'}
+                                </span>
+                              </div>
+                              <div className="mt-1.5 text-[12px] text-[var(--text-secondary)]">{outlineDraft.title || '课程大纲'}{outlineDraft.goal ? ` · ${outlineDraft.goal}` : ''}</div>
+                              <div className="mt-1.5 flex flex-col gap-1">
+                                {(outlineDraft.chapters || []).map((c, i) => (
+                                  <div key={i} className="rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5">
+                                    <div className="text-[12px] font-medium text-[var(--text-primary)]">
+                                      第{i + 1}章 {c.name || '（未命名）'}
+                                      {(!c.units || !c.units.length) && <span className="ml-1.5 text-[10.5px] font-normal text-[var(--text-muted)]">🔒 未展开（学完上一章再展开）</span>}
+                                    </div>
+                                    {(c.units || []).map((u, k) => (
+                                      <div key={k} className="mt-0.5 pl-3 text-[11.5px] text-[var(--text-secondary)]">· {u.name}</div>
+                                    ))}
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="mt-2 flex justify-end gap-2">
+                                {outlineCommitted ? (
+                                  <button type="button" onClick={openCourseOutline} title={`在编辑区打开 ${outlineDone?.rel || '课程.md'}`}
+                                    className="px-3 py-1 rounded-md border border-[var(--accent)]/50 text-[var(--accent)] text-[11.5px] hover:bg-[var(--accent)]/10 transition-colors">打开课程</button>
+                                ) : (
+                                  <button type="button" onClick={() => void commitOutlineDraft()}
+                                    className="px-3 py-1 rounded-md bg-[var(--accent)] text-white text-[11.5px] hover:bg-[var(--accent-hover)] transition-colors">正式生成</button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                         {/* UI 优化条目4：操作条升格为轻 chip 条（11.5px+图标，对齐顶栏 chip 规范）；时间戳坏数据不渲染 */}
                         <div className="text-[11.5px] mt-1.5 flex items-center gap-1.5 -ml-1.5">
                           {/* v3.1.2 条目11：支线旁问入口（与整理成文档/复制/轨迹同簇）。
@@ -3483,38 +3533,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 )}
               </div>
 
-              {/* 对话驱动建课：```outline 草稿卡 —— 满意才「正式生成」落 课程.md */}
-              {outlineDraft && !outlineCardHidden && (
-                <div className="shrink-0 w-full max-w-[820px] mx-auto px-3 pb-1.5 pt-1.5">
-                  <div className="kb-pop rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/8 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <BookOpen size={12} className="shrink-0 text-[var(--accent)]" />
-                      <span className="text-[12.5px] font-medium text-[var(--text-primary)]">课程大纲草稿</span>
-                      <span className="text-[10.5px] text-[var(--text-muted)]">对话内 · 未落盘</span>
-                    </div>
-                    <div className="mt-1.5 text-[12px] text-[var(--text-secondary)]">{outlineDraft.title || '课程大纲'}{outlineDraft.goal ? ` · ${outlineDraft.goal}` : ''}</div>
-                    <div className="mt-1.5 flex flex-col gap-1 max-h-[220px] overflow-auto">
-                      {(outlineDraft.chapters || []).map((c, i) => (
-                        <div key={i} className="rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5">
-                          <div className="text-[12px] font-medium text-[var(--text-primary)]">
-                            第{i + 1}章 {c.name || '（未命名）'}
-                            {(!c.units || !c.units.length) && <span className="ml-1.5 text-[10.5px] font-normal text-[var(--text-muted)]">🔒 未展开（学完上一章再展开）</span>}
-                          </div>
-                          {(c.units || []).map((u, k) => (
-                            <div key={k} className="mt-0.5 pl-3 text-[11.5px] text-[var(--text-secondary)]">· {u.name}</div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                    <div className="mt-2 flex justify-end gap-2">
-                      <button type="button" onClick={() => setOutlineCardHidden(true)}
-                        className="px-2.5 py-1 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">继续修改</button>
-                      <button type="button" onClick={() => void commitOutlineDraft()}
-                        className="px-3 py-1 rounded-md bg-[var(--accent)] text-white text-[11.5px] hover:bg-[var(--accent-hover)] transition-colors">正式生成</button>
-                    </div>
-                  </div>
-                </div>
-              )}
               {/* v3.2.0 第 20 项 · 安静入口：节流窗口内不再自动弹卡片，只留一行可点开的提示
                   （拍板口径：不打断心流但不错过 —— 点一下即展开完整卡片） */}
               {profQuiet && (

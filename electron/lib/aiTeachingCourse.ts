@@ -827,7 +827,10 @@ export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, get
     else additions.newChapters.push({ name: ch.name, units: ch.units.map((u) => ({ name: u.name, goal: u.goal, source: u.source })) })
   }
   const r = applyOutlineAdditions(id, additions, getSetting)
-  return r.ok ? { ok: true, mode: 'append', added: r.added } : { ok: false, error: r.error }
+  // 落盘路径**两条分支都要给**：草稿卡的「打开课程」靠它跳编辑区打开 课程.md。
+  // append 分支此前只回 added（2026-10-14 补）—— 否则「展开下一章」后落盘的卡拿不到路径。
+  const rel = outlineRel(id, getSetting)?.rel
+  return r.ok ? { ok: true, mode: 'append', added: r.added, relPath: rel } : { ok: false, error: r.error }
 }
 
 /** 删除知识点：未学习(todo/无进度) 直接删；已学/学一半 → 拒绝并要求先「整理对话并归档」。 */
