@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Check, Copy, Expand, MoreHorizontal, RefreshCw, Square, Trash2 } from 'lucide-react'
 import { copyText, workspaceGetCurrent, workspaceTrash } from '../../../lib/ipc'
 import { getCachedVaultImage, loadVaultImage } from '../../../lib/attachmentImage'
@@ -368,15 +369,18 @@ export function ImageCard({ artifact, versions, pending, error, errorPrompt, onS
         </>
       )}
 
-      {/* 放大（D6）：对话内暗底灯箱 —— 自绘，不复用批 3 的图片查看器（那是独立全屏宿主） */}
-      {zoom && url && (
-        <div className="kb-overlay fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6"
+      {/* 放大（D6）：对话内暗底灯箱 —— 自绘，不复用批 3 的图片查看器（那是独立全屏宿主）。
+          ★ 走 createPortal 挂到 body：助手侧栏根节点是 `fixed z-40`（自成层叠上下文），
+            留在里面的话 `fixed inset-0` 会被那个上下文关住 —— 盖不住侧栏以外的区域，
+            也会被更高层的浮层（如 z-300 的中央确认框）压住。z-[200] 落在
+            「面板级浮层（130 档）之上、中央模态（300 档）之下」这一档。 */}
+      {zoom && url && createPortal(
+        <div className="kb-overlay fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-6"
           onClick={() => setZoom(false)} role="dialog" aria-label="查看大图">
           <img src={url} alt={cur.title || name} draggable={false}
             onClick={(e) => e.stopPropagation()}
             className="max-h-full max-w-full select-none rounded-lg object-contain" />
-        </div>
-      )}
+        </div>, document.body)}
     </div>
   )
 }
