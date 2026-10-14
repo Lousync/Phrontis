@@ -3,8 +3,8 @@
  *
  * 聊天面发送入口共用：输入以 '/' 开头时先走 handleChatCommand——命中即拦截执行
  * （toast 反馈、不进对话），未命中提示可用指令；其余输入不受影响。
- * 弹层候选单一真源 = CHAT_COMMANDS（name + desc）；输入框 `/` 弹层与未来插件
- * 命令（plugin P3 commands slot）都从这张表取。
+ * 弹层候选单一真源 = CHAT_COMMANDS（本地执行）+ PASSTHROUGH_COMMANDS（放行给模型）；输入框 `/`
+ * 弹层与未来插件命令（plugin P3 commands slot）都从这两张表取。
  *
  * 执行态（v3.1.1 条目10）：/compress 是真实 LLM 调用（可能数十秒），静默执行曾让界面
  * 看起来「卡死」。ctx.onProgress 由调用面接线到本地占位 UI；running 守卫挡住重入
@@ -98,8 +98,42 @@ export function commandsForSurface(surface?: ChatSurface): ChatCommand[] {
   return CHAT_COMMANDS.filter((c) => !c.surfaces || c.surfaces.includes(surface))
 }
 
+/**
+ * 「放行给模型」的斜杠指令（v3.6.0 收口，docs/ai-image-gen-plan.md §5.1）。
+ *
+ * 与 CHAT_COMMANDS 的分界是**谁执行**：
+ *  · CHAT_COMMANDS = 本地执行（拦下来跑业务、toast 反馈、不进对话）；
+ *  · 本表 = 只声明"有这么个指令"，命中即放行 —— 斜杠原文照发，由模型据 system 注入的规则
+ *    去调对应工具（`/mindmap` → mindmap 工具，`/生图` → image 工具）。
+ *
+ * 为什么要成表：`/mindmap` 此前是 handleChatCommand 里的一行硬编码判断，弹层候选又在
+ * AI 教学模块里另写一份 MINDMAP_SLASH_ITEM —— 一个指令两处维护，加第二个就是三处。
+ * 现在「放行判定」与「弹层候选」读同一张表。
+ */
+export interface PassthroughCommand {
+  name: string
+  desc: string
+  /** 出现并生效的聊天面（必填：放行指令都有明确归属面，没有"全都有"这一档） */
+  surfaces: ChatSurface[]
+}
+
+export const PASSTHROUGH_COMMANDS: PassthroughCommand[] = [
+  { name: 'mindmap', desc: '把当前对话 / 指定笔记整理成思维导图', surfaces: ['aiTeaching'] },
+  { name: '生图', desc: '按描述生成一张图（后面跟要画什么；再补一句可改图）', surfaces: ['assistant', 'aiTeaching'] },
+]
+
+/** 当前面的放行指令（弹层候选与 handleChatCommand 放行判定共用这一处） */
+export function passthroughCommandsForSurface(surface?: ChatSurface): PassthroughCommand[] {
+  if (!surface) return PASSTHROUGH_COMMANDS
+  return PASSTHROUGH_COMMANDS.filter((c) => c.surfaces.includes(surface))
+}
+
 function chatCommandHint(surface?: ChatSurface): string {
-  return commandsForSurface(surface).map((c) => `/${c.name} —— ${c.desc}`).join('；')
+  // 提示里**同时**列放行指令：它们在弹层里出现，用户敲错别的名字时看到完整清单才找得到
+  return [
+    ...commandsForSurface(surface).map((c) => `/${c.name} —— ${c.desc}`),
+    ...passthroughCommandsForSurface(surface).map((c) => `/${c.name} —— ${c.desc}`),
+  ].join('；')
 }
 
 let running = false
@@ -114,9 +148,10 @@ export async function handleChatCommand(raw: string, ctx: ChatCommandCtx): Promi
   const text = raw.trim()
   if (!text.startsWith('/')) return false
   const name = text.slice(1).trim().split(/\s+/)[0]?.toLowerCase() ?? ''
-  // /mindmap 在 AI 教学面是「放行给 LLM」的指令：不进 CHAT_COMMANDS（不 toast、不拦截），
-  // 由模型据 system 注入的 mindmap 规则调用 mindmap 工具。其余聊天面维持「未知指令」。
-  if (name === 'mindmap' && ctx.surface === 'aiTeaching') return false
+  // 「放行给模型」的指令：不拦截、不 toast，斜杠原文照发（由模型据 system 规则调工具）。
+  // 查 PASSTHROUGH_COMMANDS 表 —— 收口前这里是针对 /mindmap 的一行按面硬编码判断。
+  const pt = passthroughCommandsForSurface(ctx.surface).find((c) => c.name.toLowerCase() === name)
+  if (pt) return false
   const cmd = CHAT_COMMANDS.find(
     (c) => c.name === name && (!c.surfaces || c.surfaces.includes(ctx.surface)),
   )

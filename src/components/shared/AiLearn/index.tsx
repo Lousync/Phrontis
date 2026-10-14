@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import {
   Sparkles, X, Plus, Trash2, ArrowUp, Check, ChevronLeft, ChevronRight, Minimize2,
   FileText, Wrench, BookOpen, MessageSquare, HelpCircle, Settings2, Loader2, Quote,
@@ -112,11 +112,32 @@ function IconBtn({ title, onClick, children }: { title: string; onClick: () => v
  *  ★ 此前这一面的唯一中断入口是消息流里的「停止」，生成态改版（docs/ai-reply-loading-plan.md）
  *    把状态区那颗按钮去掉了 —— 所以这里必须补上，否则会失去中断能力。
  *  `onStop` 不给时退化成旧的「禁用 + 转圈」。 */
+/** 把文本回填到 Composer 的输入框（生图卡的「改图 / 重试」用它；监听在 Composer 里） */
+function prefillComposer(text: string): void {
+  window.dispatchEvent(new CustomEvent('kb-assistant-prefill', { detail: { text } }))
+}
+
 function Composer({ placeholder, onSend, disabled, compact, onStop }: {
   placeholder: string; onSend: (text: string) => void; disabled?: boolean; compact?: boolean
   onStop?: () => void
 }) {
   const [draft, setDraft] = useState('')
+  const taRef = useRef<HTMLTextAreaElement>(null)
+  /**
+   * 生图卡的「改图 / 重试」（v3.6.0）要把文本填回**输入框**，但那条卡在 MessageList 里、
+   * 输入框在 Composer 里，两者之间没有链路（全屏学堂的输入态是本组件的局部 state）。
+   * 用 window 事件把文本送进来 —— 与本模块既有的 kb-open-note 同一范式（事件只送意图，payload 走 detail）。
+   */
+  useEffect(() => {
+    const onPrefill = (e: Event): void => {
+      const t = String((e as CustomEvent).detail?.text ?? '')
+      if (!t) return
+      setDraft(t)
+      taRef.current?.focus()
+    }
+    window.addEventListener('kb-assistant-prefill', onPrefill)
+    return () => window.removeEventListener('kb-assistant-prefill', onPrefill)
+  }, [])
   const push = () => {
     const v = draft.trim()
     if (!v || disabled) return
@@ -127,6 +148,7 @@ function Composer({ placeholder, onSend, disabled, compact, onStop }: {
     <div className={`shrink-0 w-full max-w-[820px] mx-auto ${compact ? 'px-3' : 'px-4'} pb-2.5 pt-2`}>
       <div className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3 pt-2.5 pb-2 focus-within:border-[var(--accent)]/60">
         <textarea
+          ref={taRef}
           rows={2}
           value={draft}
           onChange={e => setDraft(e.target.value)}
@@ -211,6 +233,9 @@ function FollowChat({ chat, lesson, docMode = false, docTitle }: {
         onRegenerate={chat.onRegenerate}
         onEditSubmit={chat.onEditSubmit}
         onDeleteMessage={chat.onDeleteMessage}
+        /* 生图卡（v3.6.0）：全屏学堂的输入态在 Composer 里，故经 window 事件回填（见 Composer 注释） */
+        onPrefillImage={prefillComposer}
+        onStopRun={chat.onAbort}
         emptyHint={(
           <div className="px-3 pt-8 text-center text-[12px] leading-relaxed text-[var(--text-muted)]">
             {docMode
@@ -471,6 +496,8 @@ export function AiLearnShell({ tab, onTabChange, onCollapse, onClose, active, pr
             onRegenerate={chat.onRegenerate}
             onEditSubmit={chat.onEditSubmit}
             onDeleteMessage={chat.onDeleteMessage}
+            onPrefillImage={prefillComposer}
+            onStopRun={chat.onAbort}
             emptyHint={(
               <div className="px-4 pt-16 text-center text-[12.5px] leading-relaxed text-[var(--text-muted)]">
                 这里是完整对话区，与侧栏共用同一份记录。<br />

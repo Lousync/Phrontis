@@ -282,3 +282,37 @@ registerTool({
 ## §12 落码记录
 
 > 开工后在此记录与方案的偏差（新增字段 / 去掉的步骤 / 实测数值），格式照 `docs/ai-outline-inline-plan.md` §8。
+
+### 2026-10-14 · 阶段一（普通对话面）落码
+
+**已按方案实现**：§4.1 适配器（`imageGenerate` / `imageEdit`）、§4.2 工具 `image`、§4.3 版本式落盘命名、
+§4.4 `trace.artifact` 扩 `kind:'image'`（两处镜像）、§4.5 系统提示词注入、§5.1 斜杠指令收口、
+§5.2 生图卡、§5.3 取回通道、§5.4 跨轮薄索引、§7 两个设置槽。
+
+**与方案的偏差（逐条，都在下面给了理由）**
+
+| # | 方案原文 | 落码做法 | 理由 |
+|---|---|---|---|
+| D1 | §5.4「system 注入里加『本会话最近生成的图』最多 5 条」 | 改注入**首条 user 消息层**（`requestInjection`） | system + tools 是 prompt cache 前缀，必须逐字稳定；这段随「又生成了一张」而变，进 system 等于每生成一张就把整段前缀作废一次（仓库既有铁律，`agentService.ts` 里 B1→B2 那次踩坑的注释就是写这条的） |
+| D2 | §4.5「只对支持的聊天面注入（阶段一 `assistant`）」 | 注入面 = **除日程助手以外的全部聊天面**（含 undefined 的助手三宿主、`aiLearn`、`aiTeaching`） | ① 助手三宿主与全屏学堂的 `sessionSource` 是 `undefined`，按 `=== 'assistant'` 会漏掉最主力那个面；② §5.1 已定 `/生图` 要在 assistant 与 aiTeaching **两个面**的弹层可见 —— 弹层里有、system 里没有 = 敲了没反应。日程助手不注入（它的工具面被刻意收窄） |
+| D3 | §4.2 schema 只有 `prompt` / `aspect` / `ref`（无 `slug`） | schema 增**可选** `slug` | §4.3 明写「slug 由模型给（kebab-case，同 visual.html/mindmap 约定）」，与 §4.2 的 schema 自相矛盾。取 §4.3：有 slug 才有可读的版本名（`dp-fill-v2.png`）。不填时回落 `image.png` / `image-v2.png`，版本切换照常工作 |
+| D4 | §4.2 未提停止信号 | `ToolInvokeCtx` 增 `signal?: AbortSignal`，agentService 两处调用透传 | A6 要求「前端断开 + 不落盘」。工具上下文此前拿不到中断信号 → 只让渲染层不再等待、主进程照跑照落盘，就是"点了停止，图还是出现在仓库里"。其余工具都是毫秒级本地动作，不受影响 |
+| D5 | §5.2「渲染落点：`MessageList.tsx` 与 `StreamBubble.tsx` 的 ProcessItem 序列」 | 只在 `MessageList.tsx` 渲染（生成中态由 `liveSteps` 驱动），**未改 `StreamBubble`** | `ProcessItem`（`agentStreamCore`）只带 name/label/state，拿不到 `aspect`/`prompt`，而占位框要靠 aspect 与成品同比例、靠 prompt 说明"在画什么"。硬塞进 ProcessItem 就得给它扩字段，代价大于收益 |
+| D6 | §5.2「版本切换读同一 trace 里的多条 artifact」 | 同 trace 内按**基名**归并（`imageGroupsOf`），跨消息不并 | 跨消息并会把两次独立生成误并成"同一张图的版本"（回落名 `image` 时尤其容易撞）。同一条消息里连续生成/改图仍能出 v1/v2/v3 切换 |
+| D7 | §4.4「失败呈现：一行字 + 重试」 | 失败步骤**额外带 `args`（prompt/aspect/ref）落库** | 不出这一条，"重试"就没有可重试的东西 —— 失败步骤原本只存 `summary`。其余工具的失败步骤仍不带 args（它们的失败只给一行字） |
+| D8 | §5.3「阶段二会话夹 outputs/ 走范围通道」 | 阶段一落 `.attachments/<年-月>/`，走既有 `ws:readRangeBytes`（`normalizeVaultRel` + `loadVaultImage`） | 与方案一致，记录仅为说明**零安全面变更**：`RANGE_EXT_WHITELIST` 已含 png/jpg/jpeg/webp/gif/bmp/svg，未动任何白名单 |
+| D9 | §6.2 工件栏页签（阶段二） | 教学面 `onAgentStep` 遇 `kind:'image'` **直接返回**，不开占位/正式页签 | 阶段一产物落 `.attachments/`，工件栏拿不到渲染分支；不返回就会塞一个打不开的"0 行示意图"页签。对话流里的生图卡照常渲染（两面共用 `ImageCard`） |
+
+**实测数值**
+
+- 单工具 `inputSchema` 字符数：见 `.AGENT/scripts/ai-tools-audit/out-schema-baseline.txt`（红线 ≤800）。
+- 落盘命名：`.attachments/<年-月>/<slug>.png` → `<slug>-v2.png`（**版本式**，非时间戳式；
+  `uniqueAttachmentName` 的时间戳式保留给"选图/粘贴"那条路，两者语义不同故并存）。
+- 画幅映射（`IMAGE_SIZE_MAP`，方案 §4.1 留的"落码时按目标模型文档定"）：`16:9→1536x864`、
+  `1:1→1024x1024`、`9:16→864x1536`；缺省**不传 size**（服务端默认，对应 A3「AI 自动定」）。
+- 生图超时 180s（独立于 `TOTAL_TIMEOUT_MS` 的 300s）；只回 `url` 的网关走二次下载，上限 30MB
+  （与 `MAX_STAGE_IMAGE` 同口径）。
+
+**阶段二待办（未动）**：`writeImage` 落 `{会话夹}/outputs/`、`ArtTab.kind:'image'` 页签与渲染分支、
+`AiTeachFileTree` 接批 3 图片查看器、`image` 工具的 sessionId 归属校验。
+

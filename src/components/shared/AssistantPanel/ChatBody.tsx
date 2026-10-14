@@ -432,6 +432,10 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 onEditSubmit={(id, content) => { void editSubmit(id, content) }}
                 onDeleteMessage={id => { void deleteMessage(id) }}
                 jumpBottom={variant === 'page'}
+                /* 生图卡的两个入口（v3.6.0）：改图/重试把文本填回输入框（入口是对话 —— 决策 D3，
+                   卡上没有"插入"按钮）；停止钮在图上（C3），停的是这一轮（含主进程侧 abort，不落盘） */
+                onPrefillImage={(text) => { setInput(text); inputRef.current?.focus() }}
+                onStopRun={() => { void abort() }}
                 emptyHint={emptyHint ?? (
                   /* 三态统一：空态在滚动区高度内垂直+水平居中。2026-09-19 反馈：两行引导文字收敛为
                      一个聊天气泡图案（入口语义自明，冗余文案按铁律 12 只收不增）。 */
@@ -600,7 +604,9 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       if (atPosRef.current !== null) syncAtQuery(e.currentTarget.value, e.currentTarget.selectionStart)
                     }}
                     rows={isNarrow ? 2 : 3}
-                    placeholder={scheduleMode ? '对日程助手说…（/ 唤起指令 · Enter 发送）' : '问问任何事…（@ 引用笔记 / Enter 发送）'}
+                    /* 生图入口就是对话本身（决策：去掉大按钮，走斜杠指令）⇒ 占位文字里点一句，
+                       否则用户没有别的地方知道这个能力存在（弹层只有敲了 `/` 才出现） */
+                    placeholder={scheduleMode ? '对日程助手说…（/ 唤起指令 · Enter 发送）' : '问问任何事…（要画图就敲 /生图 后面跟描述 · @ 引用笔记 / Enter 发送）'}
                     className={`w-full appearance-none px-0.5 py-1 text-[12px] resize-none outline-none bg-transparent! border-0! rounded-none! ${shell.ta ?? ''}`}
                   />
                   {/* ↑ bg-transparent! 等 Tailwind v4 important 修饰符：styles/index.css 的全局

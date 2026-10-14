@@ -29,17 +29,12 @@ import { extractQuizzes, looseJsonParse } from '../../components/shared/QuizPars
 import { showToast } from '../../lib/toast'
 import { handleChatCommand } from '../../lib/chatCommands'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../../components/shared/SlashCommandMenu'
+import { ImageCard, imageGroupsOf } from '../../components/shared/AssistantPanel/ImageCard'
 import { looksLikeMindMap } from '../../lib/mindmap'
 
-/** AI 教学面专属斜杠指令：/mindmap。不进 CHAT_COMMANDS（由 handleChatCommand 在 aiTeaching 面放行给 LLM，
- *  模型据 system 注入的 mindmap 规则调用 mindmap 工具）。 */
-const MINDMAP_SLASH_ITEM: SlashMenuItem = {
-  kind: 'command',
-  name: 'mindmap',
-  title: '/mindmap',
-  desc: '把当前对话 / 指定笔记整理成思维导图',
-  search: 'mindmap 思维导图 脑图 整理结构 知识框架',
-}
+/** AI 教学面的斜杠指令（/mindmap、/生图）已收口到 src/lib/chatCommands.ts 的
+ *  PASSTHROUGH_COMMANDS 单一真源 —— 弹层候选与「放行给模型」判定读同一张表，
+ *  本模块不再另写一份（v3.6.0，docs/ai-image-gen-plan.md §5.1）。 */
 import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { registerSelectionAskHost } from '../../lib/assistantContext'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
@@ -994,6 +989,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       if (step.artifact && step.ok) {
         const a = step.artifact
         if (!a.rel) return
+        // v3.6.0 生图（docs/ai-image-gen-plan.md §6.2）：阶段一产物落仓库 `.attachments/`，
+        // 工件栏页签与文件树接线属**阶段二**。此处直接返回，不给 ArtTab 塞一个它渲染不了的 kind
+        // （对话流里的生图卡由下面的消息区渲染，不依赖工件栏）。
+        if (a.kind === 'image') return
         const kind = a.kind ?? 'html'
         setArtTabs(prev => {
           const rest = prev.filter(t => !(t.generating && a.slug && t.slug === a.slug))
@@ -1110,7 +1109,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // ---- / 弹层派生态（v3.1.1 条目10）：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
   const slashQuery = input.startsWith('/') && !/[\s\n]/.test(input.slice(1)) && input.length > 1 ? input.slice(1) : (input === '/' ? '' : null)
   const slashItems = useMemo(
-    () => filterSlashItems(buildSlashItems(slashSkills, [MINDMAP_SLASH_ITEM], 'aiTeaching'), slashQuery ?? ''),
+    () => filterSlashItems(buildSlashItems(slashSkills, [], 'aiTeaching'), slashQuery ?? ''),
     [slashSkills, slashQuery],
   )
   const slashOpen = slashQuery !== null
@@ -1134,6 +1133,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); pickSlash(slashItems[slashActive]); return }
     if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setInput(''); setSlashActive(0) }
   }
+
+  /** v3.6.0 生图卡：把「改图 / 重试」的文本填回输入框（入口是对话，卡上没有插入按钮 —— 决策 D3）。
+   *  只填不发 —— 用户还要补一句"改成什么样"再回车（与 pickSlash 的指令补全同一手法） */
+  const prefillImagePrompt = useCallback((text: string) => {
+    setInput(text)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }, [])
 
   /** 条目13：quiz 解析失败占位卡的「让 AI 重出新题」——填入重试 prompt 直接发送（V-2 失败 toast 下沉同理路径） */
   const retryQuiz = useCallback(() => {
@@ -1212,8 +1218,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingAsk])
 
-  // ---------- v3.1.2 条目7：会话准备态交互 ----------
-  /** 准备态草稿变更 → 同步 state + 防抖落 nav.prep.draft（切走切回还原的关键） */
+  // ---------- v3.1.2 条目7：会话准备态交互 ----------  /** 准备态草稿变更 → 同步 state + 防抖落 nav.prep.draft（切走切回还原的关键） */
   const onPrepDraftChange = useCallback((text: string) => {
     setInput(text)
     const sid = activeIdRef.current
@@ -2267,6 +2272,22 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [refreshSessions])
 
   const lastStep = liveSteps[liveSteps.length - 1]
+  /** 生图「生成中」态（v3.6.0）：最后一条 image 步骤是**调用前的占位事件**（durationMs=0、无 artifact）
+   *  才算"还在画"；一旦出现完成事件（带 artifact，或失败），占位卡就该收起来 ——
+   *  成品/失败由上面的消息区（落库 trace）渲染，两处不会同时出现。 */
+  const liveImagePending = (() => {
+    for (let i = liveSteps.length - 1; i >= 0; i--) {
+      const s = liveSteps[i]
+      if (s.name !== 'image') continue
+      if (s.artifact || s.durationMs > 0) return null
+      return {
+        prompt: typeof s.args?.prompt === 'string' ? s.args.prompt : '',
+        aspect: typeof s.args?.aspect === 'string' ? s.args.aspect : '',
+        ref: typeof s.args?.ref === 'string' ? s.args.ref : '',
+      }
+    }
+    return null
+  })()
   // ---------- 工件栏布局（§1.2/§1.3）：分隔条拖拽 + 双右栏联动 ----------
   const rowRef = useRef<HTMLDivElement>(null)
   const [rowW, setRowW] = useState(0)
@@ -3368,10 +3389,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             </button>
                           )
                         })}
-                        {/* 工件栏方案 §2：visual.html 工件卡（对话流唯一形态，HTML 正文永不进流）——数据源=trace 里的 artifact step */}
-                        {(m.trace ?? []).some(s => s.artifact) && (
+                        {/* 工件栏方案 §2：visual.html 工件卡（对话流唯一形态，HTML 正文永不进流）——数据源=trace 里的 artifact step。
+                            ★ v3.6.0 起**排除 image**：生图产物落仓库 `.attachments/`（阶段一），不进修图页签，
+                              由下面的生图卡渲染 —— 混进来会变成一个点了打不开的"0 行示意图"按钮 */}
+                        {(m.trace ?? []).some(s => s.artifact && s.artifact.kind !== 'image') && (
                           <div className="mt-1.5 space-y-1">
-                            {(m.trace ?? []).filter(s => s.artifact).map((s, k) => {
+                            {(m.trace ?? []).filter(s => s.artifact && s.artifact.kind !== 'image').map((s, k) => {
                               const a = s.artifact as NonNullable<typeof s.artifact>
                               const isMind = a.kind === 'mindmap'
                               return (
@@ -3388,6 +3411,23 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             })}
                           </div>
                         )}
+                        {/* 生图卡（v3.6.0）：/生图 在 AI 教学面同样可用（阶段一产物落仓库 .attachments/），
+                            卡面与助手面共用同一个组件 —— 两处各画一份迟早会长歪。
+                            工件栏页签/文件树接线属阶段二（方案 §6），此处只渲染对话流里的卡。 */}
+                        {imageGroupsOf(m.trace).map((group, gi) => (
+                          <div key={`img-${gi}`} className="mt-1.5">
+                            <ImageCard artifact={group[group.length - 1]} versions={group}
+                              onPrefill={prefillImagePrompt}
+                              onStop={() => { void agentAbort(chatIdRef.current) }} />
+                          </div>
+                        ))}
+                        {(m.trace ?? []).filter(s => s.name === 'image' && s.ok === false).map((s, si) => (
+                          <div key={`imgerr-${si}`} className="mt-1.5">
+                            <ImageCard error={String(s.summary ?? '生图失败')}
+                              errorPrompt={typeof s.args?.prompt === 'string' ? s.args.prompt : ''}
+                              onPrefill={prefillImagePrompt} />
+                          </div>
+                        ))}
                         {/* 对话驱动建课：```outline 草稿卡 —— 内联在**产生它的这条回复**里，跟着对话滚动；
                             居中并与输入区那条带子左右对齐（同 `max-w-[820px] mx-auto px-3`）。
                             满意才「正式生成」落 课程.md；落盘后转「已落盘 · 课程.md + 打开课程」。
@@ -3508,6 +3548,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     </span>
                   </div>
                 ))}
+
+                {/* 生图（生成态 · v3.6.0）：占位框单独一档（它是"图位"，不是过程文本的一部分）。
+                    与助手面同源（agent:step 的 image 跑动事件带 prompt/aspect）；停止钮在图上常显（C3）。 */}
+                {pending && liveImagePending && (
+                  <div className="mt-1">
+                    <ImageCard pending={liveImagePending} onStop={() => { void agentAbort(chatIdRef.current) }} />
+                  </div>
+                )}
                 </div>
                 {/* 右缘快速定位条（§3.8-1，3-13）：每条回答一个刻度，hover 预览标题，点击滚动定位。
                     2026-09-08 用户拍板：锚点紧凑聚拢（顶部起 + 固定间距），不再 evenly 拉满整条高度 */}

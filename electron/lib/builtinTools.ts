@@ -12,7 +12,9 @@ import {
   type OutlineDraft,
 } from './aiTeachingCourse'
 import type { ToolInvokeCtx } from './aiTools'
-import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault } from './workspaceManager'
+import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault, stageImageVersioned } from './workspaceManager'
+import { imageGenerate, imageEdit, imageEditSlotConfigured } from './llmService'
+import { imageSizeOf, exceedsPixelGuard } from './imageHeaderPure'
 import { aiExec } from './terminalService'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { pomoSessionsAll } from './kbStore/pomoVaultRepo'
@@ -190,6 +192,24 @@ export function vaultRootPath(): string {
   const cur = getCurrentVault()
   if (!cur || !cur.rootPath) throw new Error('当前没有打开的仓库：请先在应用中打开知识仓库')
   return cur.rootPath
+}
+
+/**
+ * image 工具的 ref 归一化 → 仓库根相对路径。
+ *
+ * 收两种写法：裸相对路径（`.attachments/2026-10/x.png`）与 `attachment://vault/…` 前缀形式
+ * （方案 §4.2 的 ref 参数说明）。**不做点目录白名单**：ref 不是「AI 读写文件」面，
+ * 而是"把这张图喂给改图模型"的只读取字节动作；越界仍由调用处的 resolveSafe 一律拒。
+ *
+ * ★ 前缀判定用**字符串常量 + startsWith**，不写正则：这段代码落在
+ * `verify-ai-read-exts.mjs` 的类型剥离切片里，而含 `\/\/` 的正则字面量会让
+ * Node 的 stripTypeScriptTypes 报 "Unterminated regexp literal"（2026-10-14 实测踩到）。
+ */
+const ATTACHMENT_URL_PREFIX = 'attachment://vault/'
+function normalizeImageRef(ref: string): string {
+  let s = String(ref ?? '').trim().replace(/\\/g, '/')
+  if (s.toLowerCase().startsWith(ATTACHMENT_URL_PREFIX)) s = s.slice(ATTACHMENT_URL_PREFIX.length)
+  return s.replace(/^\/+/, '')
 }
 
 /** 取路径最后一段（兼容 / 与 \ 分隔，非文件系统语义，纯字符串） */
@@ -1427,7 +1447,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive / course.review.write）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive / course.review.write）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1983,6 +2003,97 @@ export function registerBuiltinTools(): void {
     const r = writeMindmap(sid, str(args.slug), JSON.stringify(doc), getSettingReader())
     if (!r.ok) throw new Error(r.error ?? '思维导图写入失败')
     return { relPath: r.relPath, nodes: r.nodes }
+  })
+
+  // 25b. image —— 对话内生图 / 改图（v3.6.0；docs/ai-image-gen-plan.md §4.2）
+  //
+  // 一个工具覆盖两条链路（**有 ref = 改图**）：省一份常驻 schema，也让模型少一次选择。
+  // 刻意不提供 count（A4 = 只出 1 张）与 insert（插图是第二次写入，见方案 §3.3）——
+  // 少两个花钱/走偏的旋钮。
+  const MAX_IMAGE_REF_BYTES = 30 * 1024 * 1024 // 与附件区 stageImageBytes 同口径
+  registerTool({
+    name: 'image',
+    title: '生成 / 改图',
+    description: '按文字描述生成一张图片；带 ref 时改为对已有图做修改。' +
+      '**只在用户明确要图时调用**（敲了 /生图，或说「画一张 / 配个图 / 示意图 / 把这张改成…」）；不要为讲解主动配图。' +
+      'prompt 保持用户的语言与诉求原样（中文要求就写中文，别翻成英文）；画幅不填=按内容定，要指定就在 prompt 里说。' +
+      '改图：把上一张图的仓库相对路径填进 ref，prompt 写要改成什么样。' +
+      '生成后用一句话说明图已生成，**绝不把 prompt 或返回 JSON 写进回答正文**。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: '画面描述（中文原样；含风格、构图、图上要标注的文字）' },
+        aspect: { type: 'string', enum: ['16:9', '1:1', '9:16'], description: '画幅；不填=按内容定' },
+        ref: { type: 'string', description: '要修改的图的仓库相对路径；给了就改图，不给就新画一张' },
+        slug: { type: 'string', description: '文件名（kebab-case 小写英文/数字，如 dp-fill-table；不带扩展名）' },
+      },
+      required: ['prompt'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    // 不设 module：产物落仓库 .attachments/，普通对话面与 AI 教学面都可用
+    // （阶段二才改成落会话夹 {会话夹}/outputs/，见方案 §6）
+  }, async (args, ctx) => {
+    const prompt = str(args.prompt).trim()
+    if (!prompt) throw new Error('prompt 为空：请给出要画的内容描述')
+    const aspect = str(args.aspect)
+    const ref = str(args.ref).trim()
+    const root = vaultRootPath()
+    const t0 = Date.now()
+    let res: Awaited<ReturnType<typeof imageGenerate>>
+    let downgraded = false
+    if (ref) {
+      // 改图（D7 = 原图喂给模型）：读参考图字节 → 走改图槽 + /images/edits
+      const rel = normalizeImageRef(ref)
+      const abs = rel ? resolveSafe(root, rel) : null
+      if (!abs) throw new Error(`ref 不合法或越出仓库：${ref.slice(0, 120)}`)
+      let bytes: Buffer
+      try {
+        const st = statSync(abs)
+        if (!st.isFile()) throw new Error('不是文件')
+        if (st.size === 0 || st.size > MAX_IMAGE_REF_BYTES) throw new Error(`参考图大小 ${st.size} 字节（上限 30MB）`)
+        bytes = readFileSync(abs)
+      } catch (e) {
+        throw new Error(`读不到参考图 ${rel}：${(e as Error).message}`)
+      }
+      if (imageEditSlotConfigured()) {
+        res = await imageEdit({
+          prompt, aspect, signal: ctx?.signal, sessionId: ctx?.sessionId,
+          image: bytes, imageExt: extname(abs).slice(1).toLowerCase(),
+        })
+      } else {
+        // 改图槽留空 ⇒ 退化成「按描述重画」。**在结果里标注**（卡上据此提示），不静默降级
+        downgraded = true
+        res = await imageGenerate({ prompt, aspect, signal: ctx?.signal, sessionId: ctx?.sessionId })
+      }
+    } else {
+      res = await imageGenerate({ prompt, aspect, signal: ctx?.signal, sessionId: ctx?.sessionId })
+    }
+    if (!res.ok) throw new Error(res.error ?? '生图失败')
+    const b64 = String(res.b64 ?? '')
+    if (!b64) throw new Error('生图失败：上游没有返回图片数据')
+    const buf = Buffer.from(b64, 'base64')
+    if (buf.length === 0) throw new Error('生图失败：图片数据为空')
+    if (exceedsPixelGuard(buf)) throw new Error('生图失败：图片像素超过 1 亿，渲染侧无法显示')
+    const out = stageImageVersioned(root, str(args.slug), buf)
+    // 铁律 1：写盘后广播。阶段一落 .attachments/（隐藏目录，不进知识库索引）⇒ 不需要 knowledge scope，
+    // 只广播受影响目录让文件树/工学栏这类"按目录拉"的面刷新；「本次改动」清单走 agent 结果通道，
+    // 天然随本轮返回带到渲染层，无需另行广播。
+    try { broadcastTreeRefresh(out.relPath.replace(/\/[^/]*$/, '')) } catch { /* 联动失败不影响产物 */ }
+    const size = imageSizeOf(buf)
+    return {
+      relPath: out.relPath,
+      bytes: buf.length,
+      w: size?.w,
+      h: size?.h,
+      model: res.model,
+      elapsedMs: Date.now() - t0,
+      ...(downgraded ? { downgraded: true, note: '改图模型未配置：本次按描述重画，未使用原图（可在 设置 → AI 工具 → 模型 配置「改图重绘」）' } : {}),
+      ...(res.revisedPrompt ? { revisedPrompt: res.revisedPrompt.slice(0, 300) } : {}),
+    }
   })
 
   // ===== 对话驱动建课（Phase 2，2026-10-11）：教学助手工具 =====

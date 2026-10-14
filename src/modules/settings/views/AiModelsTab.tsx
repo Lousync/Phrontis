@@ -256,8 +256,8 @@ export function AiModelsTab() {
  * baseUrl、同一把 Key 下，模型分属 `/chat/completions`、`/messages`、`/responses` 三条路径。
  * 所以协议必须能按模型覆盖；能一键按官方端点表预填，用户就不必手工标 32 个模型。
  */
-/** 五个"模型槽位"（= 原型 SCENE_LABEL 的五个场景） */
-type ModelSlotKey = 'defaultChatModel' | 'assistantModelId' | 'aiAssistantInlineSuggestModelId' | 'agentCompressModelId' | 'aiTeachVisionModel'
+/** 五个"模型槽位"（= 原型 SCENE_LABEL 的五个场景）+ 生图两槽（v3.6.0） */
+type ModelSlotKey = 'defaultChatModel' | 'assistantModelId' | 'aiAssistantInlineSuggestModelId' | 'agentCompressModelId' | 'aiTeachVisionModel' | 'aiImageModel' | 'aiImageEditModel'
 
 /**
  * 「把其他槽位也改用它」的请求。**rows 在打开改动卡时就算好**（连同每行的原值 from），
@@ -270,12 +270,22 @@ interface AdoptRequest {
   rows: Array<{ key: ModelSlotKey; label: string; from: string; to: string; fromText: string; toText: string; noop: boolean }>
 }
 
-const SCENES: Array<{ key: ModelSlotKey; label: string; desc: string; placeholder: string; visionOnly?: boolean }> = [
+/**
+ * 场景表。`anchor` 是**「要进设置搜索」的标记**（值 = SETTINGS 里那个 anchor）：
+ * 带 anchor 的行**不走上表的 map 渲染**，而是各自包一层字面量 `data-setting-anchor="…"` 单独渲染
+ * —— 设置搜索靠 DOM 找落点、`verify-ai-tab-anchors.mjs` 靠**字面量文本**数 anchor，
+ * 写成 `data-setting-anchor={sc.anchor}` 表达式两边都认不出来（2026-10-14 实测踩到）。
+ */
+const SCENES: Array<{ key: ModelSlotKey; label: string; desc: string; placeholder: string; visionOnly?: boolean; anchor?: string }> = [
   { key: 'defaultChatModel', label: '对话默认模型', desc: 'AI 助手与 AI 教学的默认模型', placeholder: '未设置（AI 功能不可用）' },
   { key: 'assistantModelId', label: 'AI 助手（侧栏）', desc: '侧栏助手会话用', placeholder: '跟随对话默认' },
   { key: 'aiAssistantInlineSuggestModelId', label: '编辑器内联续写', desc: '调用最频繁，建议指定成本较低、响应较快的模型', placeholder: '跟随对话默认（思考型会自动换非思考）' },
   { key: 'agentCompressModelId', label: '长对话压缩摘要', desc: '较早对话压缩为纪要时使用', placeholder: '跟随当前会话模型' },
   { key: 'aiTeachVisionModel', label: '图片视觉转写', desc: 'AI 教学转写图片与 pptx 时使用', placeholder: '自动挑选（任一支持图片的模型）', visionOnly: true },
+  // v3.6.0 对话内生图（docs/ai-image-gen-plan.md §7）：两个槽都**不做自动挑选** ——
+  // 图像模型没法像 VISION_MODEL_RE 那样靠正则猜，猜错就是直接花钱调错模型，故留空即报错。
+  { key: 'aiImageModel', label: '文生图', desc: '对话里敲 /生图 时用的图像生成模型', placeholder: '未设置（/生图 会提示未配置生图模型）', anchor: 'aiTools.imageModel' },
+  { key: 'aiImageEditModel', label: '改图重绘', desc: '改已有图时用（需编辑类模型，如 image-edit / SeedEdit）', placeholder: '未设置（改图退化为按描述重画）', anchor: 'aiTools.imageEditModel' },
 ]
 
 /** 「供应商 · 账号 / 模型名」——把 spec 说成人话 */
@@ -388,7 +398,7 @@ function SceneTable({ providers, freeSet, onToggleFree, adopt, onSetAdopt, onClo
       )}
 
       <div className="space-y-2 max-w-md">
-        {SCENES.filter(sc => !sc.visionOnly).map(sc => (
+        {SCENES.filter(sc => !sc.visionOnly && !sc.anchor).map(sc => (
           <SceneRow key={sc.key} sc={sc} providers={providers} freeSet={freeSet}
             onToggleFree={onToggleFree} visionSpecs={visionSpecs} />
         ))}
@@ -397,6 +407,17 @@ function SceneTable({ providers, freeSet, onToggleFree, adopt, onSetAdopt, onClo
             （写 data-setting-anchor={...} 表达式则契约脚本的文本扫描认不出来。） */}
         <div data-setting-anchor="aiTeach.visionModel">
           <SceneRow sc={SCENES.filter(sc => sc.visionOnly)[0]} providers={providers} freeSet={freeSet}
+            onToggleFree={onToggleFree} visionSpecs={visionSpecs} />
+        </div>
+        {/* 生图两行（v3.6.0 对话内生图）：与上一行同理，锚点必须是**字面量** ——
+            设置搜索「文生图模型 / 改图重绘模型」要能跳到这里，且 `verify-ai-tab-anchors.mjs`
+            是按字面量串数 anchor 的（表达式形式它认不出来）。 */}
+        <div data-setting-anchor="aiTools.imageModel">
+          <SceneRow sc={SCENES.filter(sc => sc.key === 'aiImageModel')[0]} providers={providers} freeSet={freeSet}
+            onToggleFree={onToggleFree} visionSpecs={visionSpecs} />
+        </div>
+        <div data-setting-anchor="aiTools.imageEditModel">
+          <SceneRow sc={SCENES.filter(sc => sc.key === 'aiImageEditModel')[0]} providers={providers} freeSet={freeSet}
             onToggleFree={onToggleFree} visionSpecs={visionSpecs} />
         </div>
       </div>

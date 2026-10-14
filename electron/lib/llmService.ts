@@ -1921,3 +1921,260 @@ export function findVisionModel(preferredSpec?: string): { provider: ProviderCon
     return { ok: false, error: String((e as Error)?.message ?? e), model: found.model }
   }
 }
+
+// ===== 生图 / 改图（v3.6.0 对话内生图 `/生图`；docs/ai-image-gen-plan.md §4.1）=====
+//
+// 三条边界，落码时不能越过：
+//  ① **不新增 ProviderType**：图像端点是"同一个供应商打不同端点"，baseUrl / 加密 Key /
+//     authHeaders / net.fetch 全部现成，加一个类型只会多一份要维护的账号与模型清单。
+//  ② **不进会话消息管线**：一次性请求 → 拿字节，落盘交给 builtinTools 的 image 工具。
+//     因此这里既不记 token 也不进 trace（观测面在工具那侧）。
+//  ③ **不做自动挑选**（与 visionChat 的 findVisionModel 刻意相反）：视觉模型猜错只影响
+//     转写质量，图像模型猜错是**直接花钱调错模型**，故两个槽留空即报错、由用户显式填。
+
+/** 画幅 → 端点 size 取值。**画幅口径的唯一处**：要改档位就改这张表。 */
+const IMAGE_SIZE_MAP: Record<string, string> = {
+  '16:9': '1536x864',
+  '1:1': '1024x1024',
+  '9:16': '864x1536',
+}
+
+/** 生图超时（独立于 TOTAL_TIMEOUT_MS 300s）：图像端点常在 10~60s，给足 180s 免得长图被切 */
+const IMAGE_TIMEOUT_MS = 180_000
+/** 上游只回 url 时二次下载的上限，与 workspaceManager.MAX_STAGE_IMAGE 同口径（30MB） */
+const MAX_IMAGE_BYTES = 30 * 1024 * 1024
+
+const IMAGE_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
+}
+
+export interface ImageGenRequest {
+  prompt: string
+  /** '16:9' | '1:1' | '9:16'；缺省 = 不传 size（由服务端默认定），对应决策 A3「AI 自动定」 */
+  aspect?: string
+  /** 用户点「停止」时中断（A6：前端断开 + 不落盘；文案注明服务端可能已计费） */
+  signal?: AbortSignal
+  /** 会话标识（x-opencode-session 一类的路由/缓存头），与聊天侧同源 */
+  sessionId?: string
+}
+
+export interface ImageEditRequest extends ImageGenRequest {
+  /** 参考图字节（由 image 工具从 `ref` 的仓库相对路径读出） */
+  image: Buffer
+  /** 参考图扩展名（决定 multipart 的 Content-Type；缺省 png） */
+  imageExt?: string
+}
+
+export interface ImageResult {
+  ok: boolean
+  /** base64（**不带** `data:` 前缀）—— 落盘由调用方负责，本层不碰文件系统 */
+  b64?: string
+  model?: string
+  providerName?: string
+  /** 上游改写的提示词（部分网关给，仅观测用，不落盘） */
+  revisedPrompt?: string
+  error?: string
+}
+
+interface ImageSlot { provider: ProviderConfig; model: string }
+
+/** `providerId:modelId` → 供应商与模型名；缺省 / 供应商不存在 / 未启用 / 非 openai-compatible 一律 null */
+function findImageProvider(spec: string): ImageSlot | null {
+  const s = String(spec ?? '').trim()
+  const i = s.indexOf(':')
+  if (i <= 0) return null
+  const pid = s.slice(0, i)
+  const mid = s.slice(i + 1)
+  if (!pid || !mid) return null
+  const p = getProviders().find(x => x.id === pid && x.enabled && x.type === 'openai-compatible')
+  return p ? { provider: p, model: mid } : null
+}
+
+/**
+ * 读一个生图槽。**空槽与坏槽给不同文案**：前者是"没配"（去设置里填），
+ * 后者是"配错了"（供应商没了/停了/协议不对）—— 混成一句会把排查方向带偏。
+ */
+function resolveImageSlot(key: 'aiImageModel' | 'aiImageEditModel', label: string):
+  { ok: true; slot: ImageSlot } | { ok: false; error: string } {
+  const spec = String(depsRef?.getSettingValue(key) ?? '').trim()
+  if (!spec) {
+    return { ok: false, error: `未配置${label}：请到 设置 → AI 工具 → 模型 →「哪个场景用哪个模型」填上（格式 providerId:modelId）` }
+  }
+  const slot = findImageProvider(spec)
+  if (!slot) return { ok: false, error: `${label}不可用（${spec}）：供应商不存在、未启用，或不是 OpenAI 兼容类型` }
+  return { ok: true, slot }
+}
+
+/** 生图错误 → A8 的「一行字」。图像端点不是聊天错误形状，故单列一份，不套 friendlyHttpError */
+function friendlyImageError(status: number, json: any, text: string): string {
+  const detail = String(json?.error?.message ?? json?.message ?? '').replace(/\s+/g, ' ').slice(0, 120)
+  const tail = detail ? `：${detail}` : ''
+  if (status === 401 || status === 403) return `生图失败：API Key 无该模型权限（${status}）${tail}`
+  if (status === 429) return `生图失败：额度不足或限频（429）${tail}`
+  if (status === 400 && /policy|safety|moderation|content|sensitive/i.test(`${detail} ${text}`)) {
+    return `生图失败：被内容策略拦下${tail}`
+  }
+  if (status === 404) return `生图失败：接口路径不存在（404），请确认该地址支持 /images/generations${tail}`
+  if (status >= 500) return `生图失败：上游暂时不可用（${status}）${tail}`
+  return `生图失败：HTTP ${status}${detail ? `${tail}` : `：${text.replace(/\s+/g, ' ').slice(0, 120)}`}`
+}
+
+/** 异常 → 一行字。超时与用户取消必须分开：前者可重试，后者是用户自己的动作 */
+function imageCatchMessage(e: unknown): string {
+  const err = e as { name?: string; message?: string }
+  if (err?.name === 'TimeoutError') return `生图超时（${Math.round(IMAGE_TIMEOUT_MS / 1000)} 秒未返回）：可点重试，或换一个更快的模型`
+  if (err?.name === 'AbortError') return '已停止生成（服务端可能已计费）'
+  return `生图失败：${String(err?.message ?? e)}`
+}
+
+/** 生图请求（JSON 与 multipart 共用）：body 收 string | Buffer —— multipart 手工组包后是 Buffer */
+async function imageFetch(
+  url: string,
+  init: { method: string; headers: Record<string, string>; body?: string | Buffer },
+  externalSignal?: AbortSignal,
+): Promise<{ status: number; json: any; text: string }> {
+  const signals: AbortSignal[] = [AbortSignal.timeout(IMAGE_TIMEOUT_MS)]
+  if (externalSignal) signals.push(externalSignal)
+  // body 收 string | Buffer；multipart 的 Buffer 要转成 BodyInit（Buffer 是 Uint8Array 子类，
+  // 但 lib 侧 BodyInit 的 ArrayBufferLike 变体对不上，故此处显式收口）
+  const res = await net.fetch(url, { ...init, body: init.body as BodyInit | undefined, signal: AbortSignal.any(signals) })
+  const text = await res.text()
+  let json: any = null
+  try { json = text ? JSON.parse(text) : null } catch { /* 非 JSON 响应（网关 HTML 错误页等） */ }
+  return { status: res.status, json, text }
+}
+
+/** 上游响应取图：OpenAI 形状 `{ data: [{ b64_json }] }`，兼容 `{ data: [{ url }] }` */
+function imagePayloadOf(json: any): { b64?: string; url?: string; revised?: string } {
+  const first = Array.isArray(json?.data) ? json.data[0] : null
+  return {
+    b64: typeof first?.b64_json === 'string' && first.b64_json ? first.b64_json : undefined,
+    url: typeof first?.url === 'string' && first.url ? first.url : undefined,
+    revised: typeof first?.revised_prompt === 'string' ? first.revised_prompt : undefined,
+  }
+}
+
+/**
+ * multipart/form-data 手工组包。
+ *
+ * 为什么不用运行时的 `FormData`：Electron `net.fetch` 对 FormData/Blob 请求体的支持面
+ * 视版本而定，一旦不吃就是"服务端报 boundary 缺失"这种远端报错、主进程侧看不出所以然；
+ * 手工组包把 boundary 与 Content-Length 都握在自己手里，也给契约脚本留下可断言的形状。
+ */
+function buildMultipart(
+  fields: Array<{ name: string; value: string }>,
+  file: { name: string; filename: string; mime: string; data: Buffer },
+): { body: Buffer; boundary: string } {
+  const boundary = `----kbimage${randomUUID().replace(/-/g, '')}`
+  const parts: Buffer[] = []
+  for (const f of fields) {
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${f.name}"\r\n\r\n${f.value}\r\n`, 'utf8'))
+  }
+  parts.push(Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="${file.name}"; filename="${file.filename}"\r\nContent-Type: ${file.mime}\r\n\r\n`, 'utf8'))
+  parts.push(file.data)
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'))
+  return { body: Buffer.concat(parts), boundary }
+}
+
+/** multipart 专用请求头：同 authHeaders 但**不带** Content-Type（boundary 由组包处给） */
+function imageAuthHeaders(p: ProviderConfig, sessionId?: string): Record<string, string> {
+  const h: Record<string, string> = { 'User-Agent': userAgent() }
+  const key = activeKeyOf(p)
+  if (key) h['Authorization'] = `Bearer ${key}` // 同 authHeaders：明文只在内存
+  const merged = { ...h, ...withSessionHeaders(p.headers, sessionId) }
+  // 用户自定义头里若带 Content-Type，会把 multipart 的 boundary 顶掉 —— 无条件剔除
+  for (const k of Object.keys(merged)) if (k.toLowerCase() === 'content-type') delete merged[k]
+  return merged
+}
+
+/** b64 / url 两形状收口到 base64；url 分支做限长二次下载 */
+async function resolveImageBytes(
+  payload: { b64?: string; url?: string },
+  signal?: AbortSignal,
+): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
+  if (payload.b64) return { ok: true, b64: payload.b64 }
+  if (!payload.url) {
+    return { ok: false, error: '生图失败：上游既没回 b64_json 也没回 url（响应形状不标准，请把该模型的返回形状反馈给开发者）' }
+  }
+  try {
+    const signals: AbortSignal[] = [AbortSignal.timeout(IMAGE_TIMEOUT_MS)]
+    if (signal) signals.push(signal)
+    const res = await net.fetch(payload.url, { signal: AbortSignal.any(signals) })
+    if (!res.ok) return { ok: false, error: `生图失败：取回图片失败（HTTP ${res.status}）` }
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length === 0) return { ok: false, error: '生图失败：取回的图片为空' }
+    if (buf.length > MAX_IMAGE_BYTES) {
+      return { ok: false, error: `生图失败：图片超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限` }
+    }
+    return { ok: true, b64: buf.toString('base64') }
+  } catch (e) {
+    return { ok: false, error: imageCatchMessage(e) }
+  }
+}
+
+/** 文生图：`POST {baseUrl}/images/generations`（走 aiImageModel 槽） */
+export async function imageGenerate(req: ImageGenRequest): Promise<ImageResult> {
+  const r = resolveImageSlot('aiImageModel', '生图模型')
+  if (!r.ok) return { ok: false, error: r.error }
+  const { provider, model } = r.slot
+  const body: Record<string, unknown> = { model, prompt: req.prompt, n: 1, response_format: 'b64_json' }
+  const size = IMAGE_SIZE_MAP[String(req.aspect ?? '')]
+  if (size) body.size = size
+  try {
+    const res = await imageFetch(`${provider.baseUrl}/images/generations`, {
+      method: 'POST',
+      headers: authHeaders(provider, req.sessionId),
+      body: JSON.stringify(body),
+    }, req.signal)
+    if (res.status < 200 || res.status >= 300) {
+      return { ok: false, model, error: friendlyImageError(res.status, res.json, res.text) }
+    }
+    const payload = imagePayloadOf(res.json)
+    const bytes = await resolveImageBytes(payload, req.signal)
+    if (!bytes.ok) return { ok: false, model, error: bytes.error }
+    return { ok: true, b64: bytes.b64, model, providerName: provider.name, revisedPrompt: payload.revised }
+  } catch (e) {
+    return { ok: false, model, error: imageCatchMessage(e) }
+  }
+}
+
+/** 改图：`POST {baseUrl}/images/edits`（走 aiImageEditModel 槽；原图字节 + prompt） */
+export async function imageEdit(req: ImageEditRequest): Promise<ImageResult> {
+  const r = resolveImageSlot('aiImageEditModel', '改图模型')
+  if (!r.ok) return { ok: false, error: r.error }
+  const { provider, model } = r.slot
+  const ext = String(req.imageExt ?? 'png').toLowerCase().replace(/^\./, '')
+  const fields = [{ name: 'model', value: model }, { name: 'prompt', value: req.prompt }, { name: 'n', value: '1' }, { name: 'response_format', value: 'b64_json' }]
+  const size = IMAGE_SIZE_MAP[String(req.aspect ?? '')]
+  if (size) fields.push({ name: 'size', value: size })
+  const { body, boundary } = buildMultipart(fields, {
+    name: 'image',
+    filename: `image.${ext || 'png'}`,
+    mime: IMAGE_MIME[ext] ?? 'image/png',
+    data: req.image,
+  })
+  try {
+    const res = await imageFetch(`${provider.baseUrl}/images/edits`, {
+      method: 'POST',
+      headers: { ...imageAuthHeaders(provider, req.sessionId), 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      body,
+    }, req.signal)
+    if (res.status < 200 || res.status >= 300) {
+      return { ok: false, model, error: friendlyImageError(res.status, res.json, res.text) }
+    }
+    const payload = imagePayloadOf(res.json)
+    const bytes = await resolveImageBytes(payload, req.signal)
+    if (!bytes.ok) return { ok: false, model, error: bytes.error }
+    return { ok: true, b64: bytes.b64, model, providerName: provider.name, revisedPrompt: payload.revised }
+  } catch (e) {
+    return { ok: false, model, error: imageCatchMessage(e) }
+  }
+}
+
+/** 改图槽是否已配置（image 工具据此决定"有 ref 走改图 / 无改图槽退化成重画并标注"） */
+export function imageEditSlotConfigured(): boolean {
+  return findImageProvider(String(depsRef?.getSettingValue('aiImageEditModel') ?? '').trim()) != null
+}

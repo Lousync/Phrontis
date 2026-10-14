@@ -271,6 +271,17 @@ export const SETTINGS = {
    * 留空 = 自动在已启用的供应商里挑一个疑似支持图片的模型。
    */
   aiTeachVisionModel: { default: '', type: 'text', label: '图片视觉转写模型', group: '模型', desc: '转写教材图片用的模型（格式 providerId:modelId）；留空=自动挑选。与对话模型分开设置——转写量大且只需识别文字时，使用成本较低的模型更经济。在「哪个场景用哪个模型」表里设置', keywords: ['视觉', '转写', '图片', 'ocr', '多模态', 'vision', '模型', '教材', 'aiteach', '场景'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTeach.visionModel', aiTab: 'models' },
+  /**
+   * 生图模型两个槽（2026-10-14，docs/ai-image-gen-plan.md §7 "对话内生图 /生图"）。
+   *
+   * 为什么**不做自动挑选**：视觉转写能靠 VISION_MODEL_RE 正则猜（猜错只影响转写质量），
+   * 生图一猜错就是**直接花钱**调错模型。故两者留空 = 报错「未配置生图模型」，由用户显式填。
+   * 为什么分成两个槽：文生图与改图是两条不同端点（/images/generations vs /images/edits），
+   * 改图需要编辑类模型（SeedEdit / image-edit 类），不是所有生图模型都能改。
+   * 改图槽留空 = 退化「按描述重画」（卡上标注，不静默降级）。
+   */
+  aiImageModel: { default: '', type: 'text', label: '文生图模型', group: '模型', desc: '对话里 /生图 用的图像生成模型（格式 providerId:modelId）；留空=报错「未配置生图模型」。在「哪个场景用哪个模型」表里设置', keywords: ['生图', '文生图', '画图', '配图', '图像', '图片', '模型', 'image', '场景'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.imageModel', aiTab: 'models' },
+  aiImageEditModel: { default: '', type: 'text', label: '改图重绘模型', group: '模型', desc: '对已有图做修改时用（格式 providerId:modelId，需编辑类模型）；留空=改图退化成按描述重画并在结果里标注', keywords: ['改图', '重绘', '编辑', '图像', '图片', '模型', 'image-edit', '场景'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.imageEditModel', aiTab: 'models' },
   // F-12：原 aiTeachUsageDetail / aiTeachCtxWindow 提为通用键（AI 教学与 AI 对话共用同一套档位与窗口口径）。
   // 旧键值由主进程启动时一次性迁移（settingsCache 拷贝，见 electron/main/index.ts）。
   // F-12 遗留收口（2026-10-07）：控件从「AI教学」设置页迁入「AI 工具 → AI 助手」小节并进设置搜索

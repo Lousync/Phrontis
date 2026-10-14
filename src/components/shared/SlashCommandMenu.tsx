@@ -1,8 +1,10 @@
 /**
  * 斜杠指令弹层（v3.1.1 条目10）—— 三聊天面共用的纯展示组件
  *
- * 数据源两层候选：
- *  - 「指令」= src/lib/chatCommands.ts 的 CHAT_COMMANDS 单一真源（当前 /compress）；
+ * 数据源三层候选：
+ *  - 「指令」= src/lib/chatCommands.ts 的 CHAT_COMMANDS（本地执行）与
+ *    **PASSTHROUGH_COMMANDS**（放行给模型，如 /mindmap、/生图）—— 两张表都在 chatCommands 里，
+ *    本组件只做映射，不自己写任何指令清单（v3.6.0 收口前 /mindmap 曾由教学模块另写一份）；
  *  - 「Skill · 已安装」= aiToolsListSkills() 现有 IPC（过滤 disabled）——显式调用入口。
  *
  * 键盘语义在宿主 textarea 的 onKeyDown 局部拦截（↑↓ 换高亮 / Enter 选中 /
@@ -11,7 +13,7 @@
  */
 import { useMemo } from 'react'
 import type { SkillInfo } from '../../types'
-import { commandsForSurface, type ChatSurface } from '../../lib/chatCommands'
+import { commandsForSurface, passthroughCommandsForSurface, type ChatSurface } from '../../lib/chatCommands'
 import { Zap, Wrench, Check } from 'lucide-react'
 
 export interface SlashMenuItem {
@@ -35,12 +37,22 @@ function shortDesc(d: string): string {
 }
 
 /**
- * 合并候选表（指令在前、Skill 在后）。`extra` 供调用面注入面内专属指令（如 AI 教学的 /mindmap）。
- * `surface` 非空时按聊天面过滤内置指令（日程助手只出 `/简报` 体系，通用助手只出 `/compress`）。
+ * 合并候选表（指令在前、Skill 在后）。
+ * 指令段 = CHAT_COMMANDS（本地执行）+ PASSTHROUGH_COMMANDS（放行给模型），**同一张面内清单**。
+ * `extra` 供调用面注入临时项（当前两面都已改用 PASSTHROUGH_COMMANDS，参数保留给插件/将来用）。
+ * `surface` 非空时按聊天面过滤内置指令（日程助手只出 `/简报` 体系，通用助手只出 `/compress` + `/生图`）。
  */
 export function buildSlashItems(skills: SkillInfo[], extra: SlashMenuItem[] = [], surface?: ChatSurface): SlashMenuItem[] {
   const cmds: SlashMenuItem[] = [
     ...commandsForSurface(surface).map((c) => ({
+      kind: 'command' as const,
+      name: c.name,
+      title: `/${c.name}`,
+      desc: shortDesc(c.desc),
+      search: `${c.name} ${c.desc}`,
+    })),
+    // 放行指令：语义与本地指令并列（都是 `/` 开头、回车发出去），只是不由前端执行
+    ...passthroughCommandsForSurface(surface).map((c) => ({
       kind: 'command' as const,
       name: c.name,
       title: `/${c.name}`,

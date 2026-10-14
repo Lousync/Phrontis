@@ -156,6 +156,31 @@ AI 教学上下文条 / 书市下载队列，共 7 处）。它是 §五-①「�
   `.kb-think*`（思考行，折叠复用 `.kb-collapse`）、`.kb-toolsum*`（完成后的工具摘要行，
   默认收起、展开体最多 5 步）。首个使用方：`AssistantPanel/StreamBubble.tsx`（三面共用）。
 
+### K. 生图卡 → `.kb-img-develop` / `.kb-img-ph` / `.kb-img-progress`（2026-10-14 新增，`docs/ai-image-gen-plan.md` §5.2）
+
+适用场景：**对话内生图（`/生图`）卡**的三态（生成中 / 成品 / 失败）。三个令牌：
+
+| 令牌 | 值 | 用途 |
+|---|---|---|
+| `.kb-img-develop` | `opacity 0→1 + scale(.985→1) + translateY(5px→0)`，320ms | 成品进场 |
+| `.kb-img-ph` | 伪元素两层：`::before` 光晕呼吸（opacity，2.2s alternate）+ `::after` 斜向扫光（translateX，1.6s infinite） | 生成中占位框 |
+| `.kb-img-progress` | 子元素 `scaleX(.04→.96)`，6s 缓入缓停 `forwards` | 生成中底部进度条 |
+
+- ★ **不新增 `.kb-sweep` 之外的等待指示体系**：`.kb-sweep`（J 段）是「一句话在跑」，本段是
+  「一张图在画」—— 后者需要一个**与成品等大的图位**（靠 `aspect-ratio` 撑，出图时不跳版），
+  所以是占位框而不是一条线。两者并存，不是替代关系。
+- 斜向扫光的"斜"用**渐变角度**（`100deg`）实现，不用 `rotate`：元素上只留一个 `transform`
+  （`translateX`），静态倾斜与动画位移就不会互相覆盖。
+- 进度条是**假进度**（接口没有流式事件，方案风险 4）：停在 0.96 不装作走完，文案侧同样
+  不出现任何百分比承诺。
+- 只动 `transform` / `opacity` ⇒ 落在 §五-1 允许清单内（这不是例外，是新增令牌）。
+- reduced-motion 降级：进场瞬时；光晕/扫光**定格**成静态的一层底光（仍读得出"图位在这儿、正在生成"）；
+  进度条停在不动的半满状态（不是空条 —— 空条等于"什么都没发生"）。
+
+首个使用方：`src/components/shared/AssistantPanel/ImageCard.tsx`（助手面 MessageList 与
+AI 教学消息区共用同一组件）。同批复用的既有令牌：`.kb-pop`（⋯ 菜单）、`.kb-overlay`（放大灯箱，
+暗底 + Esc 关）、`.kb-view-fade`（阶段文字轮播）。
+
 ---
 
 ## 五、性能评估（实测数据）
@@ -224,9 +249,14 @@ wildcard 方案在 420ms 采样窗口内只渲染出 2 帧 = 界面明显冻结�
   折叠容器用 `visibility`（延迟 `--dur-std` 切换）避免收起后的按钮/输入行仍可 Tab 聚焦。
 - `src/lib/usePresence.ts`：退场存在性 hook（定时器兜底，不依赖 transitionend）+ `prefersReducedMotion()`
 - `src/components/shared/Collapsible.tsx`：函数子节点的折叠容器（两个方向都有动画，且保持收起不挂载子树的懒语义）
+- `src/components/shared/AiMascot/*`（v3.4.0 落地）：吉祥物插件的显隐与切换反馈
 - `src/components/shared/ModalShell.tsx`：**新增弹层规范壳**（遮罩淡入淡出 + 面板缩放进出场 + 延迟卸载，
   且带 `animateOverlay` 开关给 backdrop-blur 遮罩用）。当前未接线（30+ 既有弹层走「遮罩挂类」批量通路），
   作为后续新增弹层的首选封装保留。
+- **K 段（2026-10-14）**：`.kb-img-develop` / `.kb-img-ph`（::before 光晕 / ::after 扫光）/
+  `.kb-img-progress`，落 `ImageCard.tsx`；⋯ 菜单复用 `.kb-pop`、放大灯箱复用 `.kb-overlay`、
+  阶段文字轮播复用 `.kb-view-fade` ⇒ **本轮只新增这三个类，其余全部走既有令牌**
+
 
 **共享组件（B 类，一处改全局受益）**
 - ConfirmDialog、GlobalConfirm：遮罩淡入淡出 + 面板缩放进出场（带完整退场）

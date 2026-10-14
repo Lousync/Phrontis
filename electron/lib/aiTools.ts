@@ -60,6 +60,15 @@ export interface AgentTool {
 export interface ToolInvokeCtx {
   sessionId?: string
   source?: string
+  /**
+   * 本轮的中断信号（v3.6.0，image 工具用）。
+   *
+   * 为什么工具需要它：生图是**秒级到分钟级**的一次外呼，用户点「停止」时必须真的把
+   * 主进程这一侧的网络请求也 abort 掉 —— 只让渲染层不再等待、而请求照跑并照落盘，
+   * 就是"点了停止，图还是出现在仓库里"（方案 A6 明确要求「前端断开 + 不落盘」）。
+   * 其余工具都是本地毫秒级动作，拿到信号也没用；只有长外呼类工具（image）消费它。
+   */
+  signal?: AbortSignal
 }
 
 export type ToolHandler = (args: Record<string, unknown>, ctx?: ToolInvokeCtx) => unknown | Promise<unknown>

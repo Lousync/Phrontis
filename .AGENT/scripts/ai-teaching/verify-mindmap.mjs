@@ -129,12 +129,20 @@ check('tool.request 清单含 mindmap', /terminal\.exec \/ mindmap/.test(srcTool
 const srcLoop = read('electron/lib/agentLoopPolicy.ts')
 check('agentLoopPolicy 串行名单含 mindmap', srcLoop.includes("!== 'mindmap'"))
 const srcCC = read('src/lib/chatCommands.ts')
-check('/mindmap 在 aiTeaching 面放行（return false）', /name === 'mindmap' && ctx\.surface === 'aiTeaching'/.test(srcCC))
+// 2026-10-14（v3.6.0 生图收口）：`/mindmap` 的按面放行不再是一行硬编码判断，
+// 而是查 PASSTHROUGH_COMMANDS 表 —— 断言改指向「表里有这一条 + 判定查表」。
+check('/mindmap 入 PASSTHROUGH_COMMANDS 且只在 aiTeaching 面',
+  /name: 'mindmap'[\s\S]{0,140}surfaces: \['aiTeaching'\]/.test(srcCC))
+check('/mindmap 在 aiTeaching 面放行（放行判定查表，resolve 为 false）',
+  srcCC.includes('passthroughCommandsForSurface(ctx.surface).find') && srcCC.includes('if (pt) return false'))
 const srcAP = read('src/modules/ai-teaching/ArtifactsPane.tsx')
 check('ArtifactsPane 渲染 MindMapView', srcAP.includes('MindMapView'))
 const srcAI = read('src/modules/ai-teaching/index.tsx')
 check('AI 教学 openArtFile 按内容识别导图', srcAI.includes('looksLikeMindMap'))
-check('AI 教学斜杠注入 /mindmap', srcAI.includes('MINDMAP_SLASH_ITEM'))
+// 同上：教学面的 /mindmap 弹层候选改由 SlashCommandMenu 读同一张表生成，模块内不再另写一份
+check('AI 教学斜杠候选含 /mindmap（由 PASSTHROUGH_COMMANDS 生成）',
+  srcAI.includes("buildSlashItems(slashSkills, [], 'aiTeaching')")
+  && read('src/components/shared/SlashCommandMenu.tsx').includes('passthroughCommandsForSurface(surface)'))
 const srcPE = read('src/modules/knowledge/components/PageEditor.tsx')
 check('PageEditor 渲染 MindMapView', srcPE.includes('MindMapView') && srcPE.includes('isMindMapFile'))
 const srcMP = read('src/components/shared/MarkdownPreview.tsx')

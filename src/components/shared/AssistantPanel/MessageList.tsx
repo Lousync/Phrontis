@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { ArrowDown, Check, Copy, Pencil, Play, RefreshCw, Trash2 } from 'lucide-react'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { showToast } from '../../../lib/toast'
 import { copyText } from '../../../lib/ipc'
 import { StreamBubble } from './StreamBubble'
 import { ToolSummary, type TraceRowView } from './ToolSummary'
+import { ImageCard, imageGroupsOf } from './ImageCard'
 import type { StreamDraft } from './useAgentStream'
 import type { AgentTraceStep, ResumeInfo } from '../../../types'
 
@@ -118,11 +119,16 @@ export interface MessageListProps {
   /** 「回到底部」浮标开关（正式版台账 F-7，2026-10-05 拍板：只开 aiChat 整页 = ChatBody
    *  variant='page'；悬浮侧栏 / 右栏 docked / AiLearn 不开 —— 开启时外层才包 relative 宿主） */
   jumpBottom?: boolean
+  /** 生图卡「改图 / 重试」：把文本填回输入框（入口是对话，卡上没有插入按钮 —— 决策 D3） */
+  onPrefillImage?: (text: string) => void
+  /** 生图卡「停止生成」（C3 生成期常显；A6 = 前端断开 + 主进程 abort，不落盘） */
+  onStopRun?: () => void
 }
 
 export function MessageList({
   messages, pending, liveSteps, draft, editing, setEditing, copiedIdx, setCopiedIdx,
   onRegenerate, resumeInfo, onResume, onEditSubmit, onDeleteMessage, emptyHint, className, jumpBottom = false,
+  onPrefillImage, onStopRun,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   /** 是否贴底（用户上滚阅读时不再强制拉回）。初始 true：新会话从底部开始 */
@@ -162,6 +168,36 @@ export function MessageList({
     el.scrollTop = el.scrollHeight
   }, [messages, pending, draftSig])
 
+  /**
+   * 生成中的生图卡（v3.6.0）：数据源是 `agent:step` 的**跑动事件**，不是 StreamBubble 的
+   * ProcessItem —— 后者只有 name/label/state，拿不到 aspect/prompt，而占位框要靠 aspect
+   * 与成品同比例（不跳版）、要靠 prompt 说明"在画什么"。
+   *
+   * 三种跑动事件在这里各归各位：占位（durationMs 0、无 artifact）→ 生成中卡；
+   * 成功（带 artifact）→ 成品卡；失败（ok:false）→ 失败档。运行结束后 liveSteps 清空，
+   * 同一批内容改由落库的 `m.trace` 渲染（两处不会同时出现，因为本轮消息在刷新前还不在 messages 里）。
+   */
+  const liveImages = useMemo(() => {
+    const steps = liveSteps.filter((s) => s.name === 'image')
+    const done = steps.filter((s) => s.durationMs > 0)
+    const groups = imageGroupsOf(done.filter((s) => s.ok))
+    const errors = done.filter((s) => !s.ok)
+    let pendingArgs: { prompt?: string; aspect?: string; ref?: string } | null = null
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const s = steps[i]
+      if (s.durationMs === 0 && !s.artifact) {
+        pendingArgs = {
+          prompt: typeof s.args?.prompt === 'string' ? s.args.prompt : '',
+          aspect: typeof s.args?.aspect === 'string' ? s.args.aspect : '',
+          ref: typeof s.args?.ref === 'string' ? s.args.ref : '',
+        }
+        break
+      }
+      break // 最后一条 image 步骤已经是完成态 ⇒ 没有"还在生成"的图
+    }
+    return { pendingArgs, groups, errors }
+  }, [liveSteps])
+
   const list = (
     <div
       ref={scrollRef}
@@ -184,6 +220,21 @@ export function MessageList({
               <div className="text-[12px] leading-relaxed break-words select-text cursor-text [&_.prose-content>:first-child]:mt-0 [&_.prose-content>:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:max-w-full [&_table]:block [&_table]:overflow-x-auto">
                 <MarkdownPreview content={m.content} codeBlockChrome="card" />
               </div>
+              {/* 生图卡（v3.6.0）：数据源 = 落库的 trace.artifact ⇒ 刷新 / 重启后卡片还在。
+                  放在正文之后 —— 正文是"一句话交代"，图是产物本身（方案 §3.1） */}
+              {imageGroupsOf(m.trace).map((group, gi) => (
+                <div key={`img-${gi}`} className="mt-1.5">
+                  <ImageCard artifact={group[group.length - 1]} versions={group} onPrefill={onPrefillImage} />
+                </div>
+              ))}
+              {/* 失败档（A8）：图位留空 + 一行字 + 重试 —— 失败步骤落库时带了 args.prompt（见 agentService） */}
+              {(m.trace ?? []).filter((s) => s.name === 'image' && s.ok === false).map((s, si) => (
+                <div key={`imgerr-${si}`} className="mt-1.5">
+                  <ImageCard error={String(s.summary ?? '生图失败')}
+                    errorPrompt={typeof s.args?.prompt === 'string' ? s.args.prompt : ''}
+                    onPrefill={onPrefillImage} />
+                </div>
+              ))}
             </>
           ) : (
             /* 改后 B：用户气泡也换成 AI 教学那套（accent 底 + 右对齐 + 圆角小尾角 + max-w-86%），
@@ -275,6 +326,26 @@ export function MessageList({
             <span className="stage-label"><AgentLiveSteps steps={liveSteps} /></span>
             <span className="kb-sweep" />
           </span>
+        </div>
+      ))}
+
+      {/* 生图（生成态）：占位框在**状态行下方**单独一档 —— 它是"图位"，不是过程文本的一部分。
+          停止钮在图上常显（C3），与输入区那颗停止键并存（那颗停的是整轮）。 */}
+      {pending && liveImages.pendingArgs && (
+        <div className="mt-1">
+          <ImageCard pending={liveImages.pendingArgs} onStop={onStopRun} />
+        </div>
+      )}
+      {pending && liveImages.groups.map((group, gi) => (
+        <div key={`live-img-${gi}`} className="mt-1">
+          <ImageCard artifact={group[group.length - 1]} versions={group} onPrefill={onPrefillImage} />
+        </div>
+      ))}
+      {pending && liveImages.errors.map((s, si) => (
+        <div key={`live-imgerr-${si}`} className="mt-1">
+          <ImageCard error={String(s.summary ?? '生图失败')}
+            errorPrompt={typeof s.args?.prompt === 'string' ? s.args.prompt : ''}
+            onPrefill={onPrefillImage} />
         </div>
       ))}
 

@@ -187,6 +187,14 @@ ok('限宽只落在输入壳，不影响输入卡本体类名',
   && code.assistant.includes('max-w-[820px] mx-auto w-full')
   && code.learn.includes('mx-auto ${compact ? \'px-3\' : \'px-4\'} pb-2.5 pt-2'))
 
+// ── ⑪ 生图入口 = 斜杠指令，输入区不放大按钮（v3.6.0 docs/ai-image-gen-plan.md §5.1）──────
+// 拍板口径：「去掉大按钮，输入区只剩 输入框 + 发送」，生图入口是 `/生图` + 占位文字指路。
+// 负向断言（先剥注释）：输入卡里不得再长出「生图」按钮 —— 原型档有一个，落码不许复活。
+ok('assistant 输入区无「生图」大按钮（入口 = 斜杠指令）',
+  !/>\s*生图\s*</.test(code.assistant) && !/title="生图/.test(code.assistant))
+ok('assistant 占位文字指路 /生图（弹层只有敲 `/` 才出现，不点一句用户无从知道）',
+  code.assistant.includes('要画图就敲 /生图'))
+
 console.log(`\nverify-input-bubble: ${pass} PASS / ${fail} FAIL`)
 if (fail) { console.log('\n失败项：'); for (const f of fails) console.log('  ✗ ' + f) }
 process.exit(fail ? 1 : 0)

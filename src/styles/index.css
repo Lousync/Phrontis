@@ -2028,3 +2028,73 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
   .kb-code-card__acts,
   .kb-code-card__more .kb-chevron { transition: none; }
 }
+
+/* ============================================================================
+   K 生图卡（v3.6.0 对话内生图 `/生图`；docs/ai-image-gen-plan.md §5.2）
+   —— 四个工具类 + 一条降级段。全部只动 transform / opacity（本文件 §五-1 硬约束）。
+   ★ 为什么"显影"与 .kb-view-in 分开：图片是**显影**出来（多一个 .985→1 的缩放），
+     不是"滑"进来；用 .kb-view-in 会与整条消息的进场观感糊在一起，读不出"图出来了"。
+   ============================================================================ */
+
+/* 成品进场：opacity + scale(.985→1) + translateY(5→0)，320ms */
+@keyframes kb-img-develop {
+  from { opacity: 0; transform: scale(0.985) translateY(5px); }
+  to   { opacity: 1; transform: none; }
+}
+.kb-img-develop { animation: kb-img-develop 320ms var(--ease-kb) both; }
+
+/* 生成中占位：一层光晕呼吸（::before）+ 一条斜向扫光（::after）。
+   两层都是**装饰层**，用伪元素 ⇒ 调用方只挂一个类，不额外加 DOM。
+   占位框的 aspect-ratio 由调用方按 aspect 参数给（与成品一致 → 出图时不跳版）。 */
+.kb-img-ph { position: relative; overflow: hidden; }
+
+@keyframes kb-img-breathe {
+  from { opacity: 0.26; }
+  to   { opacity: 0.62; }
+}
+.kb-img-ph::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(120% 90% at 50% 42%,
+    color-mix(in srgb, var(--accent) 34%, transparent) 0%, transparent 72%);
+  animation: kb-img-breathe 2.2s ease-in-out infinite alternate;
+}
+
+/* 斜向扫光：斜面用**渐变角度**做（100deg），不用 rotate —— 元素上只留一个 transform
+   （translateX），静态倾斜与动画位移就不会互相覆盖。 */
+@keyframes kb-img-sweep {
+  from { transform: translateX(-120%); }
+  to   { transform: translateX(330%); }
+}
+.kb-img-ph::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 34%;
+  background: linear-gradient(100deg,
+    transparent 0%,
+    color-mix(in srgb, var(--accent) 14%, transparent) 34%,
+    color-mix(in srgb, var(--accent) 26%, transparent) 50%,
+    color-mix(in srgb, var(--accent) 14%, transparent) 66%,
+    transparent 100%);
+  animation: kb-img-sweep 1.6s var(--ease-kb) infinite;
+}
+
+/* 底部进度条：**假进度**（接口没有流式事件，方案风险 4）。只动 scaleX、缓入缓停、
+   停在 0.96 不装作走完 —— 文案侧同样不出现任何百分比承诺。 */
+@keyframes kb-img-progress {
+  from { transform: scaleX(0.04); }
+  to   { transform: scaleX(0.96); }
+}
+.kb-img-progress { height: 3px; border-radius: 2px; background: var(--border-color); overflow: hidden; }
+.kb-img-progress > span {
+  display: block; height: 100%; width: 100%;
+  transform-origin: left center; background: var(--accent);
+  animation: kb-img-progress 6s cubic-bezier(0.18, 0.72, 0.28, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 降级：进场瞬时；光晕与扫光定格成静态的一层底光（仍读得出"图位在这儿、正在生成"）；
+     进度条停在一个不动的半满状态（不是空条 —— 空条等于"什么都没发生"）。 */
+  .kb-img-develop { animation: none; }
+  .kb-img-ph::before { animation: none; opacity: 0.42; }
+  .kb-img-ph::after { animation: none; transform: translateX(96%); opacity: 0.5; }
+  .kb-img-progress > span { animation: none; transform: scaleX(0.6); }
+}
+

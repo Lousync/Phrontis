@@ -203,8 +203,26 @@ export interface AgentTraceStep {
   summary?: string
   /** visual.html 实时占位事件（仅 agent:step 推送，不落库）：{slug,title}——渲染层据此开「生成中」页签 */
   args?: Record<string, unknown>
-  /** 产物工具（visual.html / mindmap）成功产物（落库，随消息 trace 持久）：渲染层画工件卡 + 占位页签原地转正式 */
-  artifact?: { rel: string; title: string; lines: number; slug: string; kind?: 'html' | 'mindmap'; nodes?: number }
+  /** 产物工具（visual.html / mindmap / image）成功产物（落库，随消息 trace 持久）：渲染层画工件卡 + 占位页签原地转正式 */
+  artifact?: {
+    rel: string
+    title: string
+    slug: string
+    /** visual.html 行数；image 没有"行"这个概念，恒缺省（故可选） */
+    lines?: number
+    kind?: 'html' | 'mindmap' | 'image'
+    nodes?: number
+    /** image：像素尺寸 / 字节数 / 生图描述 / 参考图 / 模型 / 耗时（卡上元信息 + 版本切换用，见方案 §4.4） */
+    w?: number
+    h?: number
+    bytes?: number
+    prompt?: string
+    ref?: string
+    model?: string
+    elapsedMs?: number
+    /** image：改图槽未配置时退化为「按描述重画」（卡上据此标注，不静默降级） */
+    downgraded?: boolean
+  }
   /** 过程旁白：带工具轮次里模型输出的说明文本（落库供历史回看；
    *  最终轮正文是回复本体，已在消息 content 里，不重复存） */
   processText?: string
@@ -369,12 +387,50 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   'builtin.tool.request': '申请工具',
   'visual.html': '生成示意图',
   'mindmap': '生成思维导图',
+  'image': '生成图片',
 }
 
 /** 工具入参 → 过程时间线的目标文案（正在读/写哪个对象）；取不到则留空 */
 function argTarget(args: Record<string, unknown>): string {
   const v = args.path ?? args.relPath ?? args.title ?? args.name ?? args.date ?? args.query ?? args.slug
-  return typeof v === 'string' ? v.trim().slice(0, 120) : ''
+  if (typeof v === 'string') return v.trim().slice(0, 120)
+  // image 没有 slug/title 这类短标签，用 prompt 首段当目标（截断，不整段塞进时间线）
+  return typeof args.prompt === 'string' ? args.prompt.trim().slice(0, 60) : ''
+}
+
+/**
+ * 本会话「最近生成的图」薄索引（v3.6.0 对话内生图，docs/ai-image-gen-plan.md §5.4）。
+ *
+ * 为什么需要它：结果侧只保最近 3 条工具结果不被摘要（铁律 17），更早的产物 `relPath` 会被
+ * 压缩掉 —— 用户隔几轮说「把刚才那张图改成浅灰背景」时，模型手里已经没有路径了。
+ *
+ * 数据源 = 本会话消息 trace 里的 `artifact`（与 §4.4 落库的同一份数据，**不新增存储**）。
+ * 最多取最近 5 张、按 rel 去重；更老的**刻意不做召回**（方案 §5.4：用户要点名"最早那张"时
+ * 由模型反问，而不是把整段历史塞进上下文）。
+ *
+ * ★ 调用处把它并进 `requestInjection`（首条 user 消息层）而不是 system：见该处注释。
+ */
+function buildRecentImagesHint(sessionId: string): string {
+  try {
+    const rows = getAgentMessages(sessionId)
+    const items: Array<{ rel: string; title: string }> = []
+    for (let i = rows.length - 1; i >= 0 && items.length < 5; i--) {
+      const raw = rows[i]?.trace_json
+      if (!raw) continue
+      let steps: unknown
+      try { steps = JSON.parse(raw) } catch { continue } // 单条 trace 坏掉不该影响本轮发送
+      if (!Array.isArray(steps)) continue
+      for (let j = steps.length - 1; j >= 0 && items.length < 5; j--) {
+        const a = (steps[j] as { artifact?: { kind?: string; rel?: string; title?: string } } | null)?.artifact
+        if (a?.kind !== 'image' || !a.rel) continue
+        if (items.some(x => x.rel === a.rel)) continue
+        items.push({ rel: a.rel, title: String(a.title ?? '') })
+      }
+    }
+    if (items.length === 0) return ''
+    return '\n\n【本会话最近生成的图】用户说「刚才那张图 / 改一下这张 / 插到某页」时，ref 与插图源从这里取（仓库相对路径）：\n'
+      + items.map(x => `— ${x.rel}${x.title ? `（${x.title}）` : ''}`).join('\n')
+  } catch { return '' } // 读会话失败不该打断本轮请求
 }
 
 /**
@@ -402,6 +458,7 @@ const CHANGE_LABELS: Record<string, string> = {
   'builtin.checkin.check-habit': '习惯打卡',
   'visual.html': '生成示意图',
   'mindmap': '生成思维导图',
+  'image': '生成图片',
 }
 
 /**
@@ -1034,6 +1091,27 @@ async function runAgentLoop(
       + '禁止写入 `SOURCES/`（那是给你读的素材目录，不是放产物的）、禁止写仓库顶层或工作区文件夹根目录。'
       + '用户在当前消息里明确指定了路径时，以用户指定的路径为准。'
   })() : ''
+  /**
+   * 生图（v3.6.0 对话内生图 `/生图`，docs/ai-image-gen-plan.md §4.5）。
+   *
+   * 注入面 = 除日程助手以外的全部聊天面。判据取"不是日程"而不是 `source === 'assistant'`：
+   *  ① 助手三宿主（悬浮侧栏 / 右栏 / aiChat 整页）与全屏 AI 学堂的 sessionSource 是 undefined，
+   *     按 `=== 'assistant'` 卡会把最主力的那个面整个漏掉；
+   *  ② §5.1 明确 `/生图` 要在 assistant 与 aiTeaching **两个面的 `/` 弹层**里可见，
+   *     而弹层里有指令、system 里没有规则 = 模型不知道要调 image（"敲了没反应"）——
+   *     故教学面同时注入；阶段二只改产物落点与工件栏，不再动注入面。
+   * 日程助手不注入：它的工具面被刻意收窄（只有日程那几个），给生图规则是负担。
+   */
+  const imageHint = source !== 'schedule'
+    ? '\n\n【生图工具 image】用户敲 `/生图 <描述>`，或明确说「画一张 / 配个图 / 示意图 / 把这张改成…」时，调用 image 生图或改图：' +
+      '① prompt 保持用户的语言与诉求原样（中文标注要求别翻成英文）；画幅不填=按内容定，要指定就在 prompt 里说。' +
+      '② 改图：把目标图的仓库相对路径填进 ref（上一次 image 的返回里就有）；改图模型没配时工具会按描述重画，并把这一点写在结果里。' +
+      '③ **不要为讲解主动配图** —— 只在用户要图时画。' +
+      '④ 生成后只用一句话说明（图已显示在对话里），**绝不把 prompt / 返回的 JSON / 图片 base64 写进回答正文**。' +
+      '⑤ 要把图插进某篇笔记：拿到产物 relPath 后再调写工具，按**目标页所在目录**算相对路径写成 `![](相对路径)`' +
+      '（如页在 `算法/` 下、图在 `.attachments/2026-10/x.png`，就写 `![](../.attachments/2026-10/x.png)`）。' +
+      '扩位与 `-v2` 重名不要自己猜，一律以工具返回的 relPath 为准。'
+    : ''
   // v3.1.2 条目11：支线旁问上下文（仅带 sideContext 的会话注入）。快照在建支线时固化，跨轮稳定 → 不扰动缓存前缀。
   // 升格为正式会话（lane='main'）后仍保留来源快照，只是不再套「支线纪律」措辞。
   // laneRow / isSideLane 已在前面规则装配处算好（纪律必须早于出题协议，故提前）。
@@ -1060,7 +1138,7 @@ async function runAgentLoop(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+    : baseSystem + schedulePersona + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -1088,7 +1166,10 @@ async function runAgentLoop(
     })
     if (pr && pr.items.length > 0) perceptionInjection = buildPerceptionInjection({ items: pr.items, dropped: pr.dropped })
   }
-  const requestInjection = [scheduleHint, refInjection, perceptionInjection].filter(Boolean).join('\n\n')
+  // 生图：本会话「最近生成的图」薄索引（方案 §5.4）。与上面同一理由 —— 放首条 user 消息层，
+  // 不放 system（它随会话内容递增而变，进 system 就是每生成一张图就把缓存前缀作废一次）
+  const recentImagesHint = (!manual && source !== 'schedule') ? buildRecentImagesHint(sessionId) : ''
+  const requestInjection = [scheduleHint, refInjection, perceptionInjection, recentImagesHint].filter(Boolean).join('\n\n')
 
   // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
@@ -1296,16 +1377,45 @@ async function runAgentLoop(
         durationMs,
         summary: exec.ok ? undefined : String(exec.message).slice(0, 200),
       }
-      // visual.html / mindmap 成功产物落 trace（小字段，不含全文）：渲染层工件卡数据源 + 占位页签原地转正式
-      if ((realName === 'visual.html' || realName === 'mindmap') && exec.ok && typeof exec.data === 'object' && exec.data !== null) {
+      // visual.html / mindmap / image 成功产物落 trace（小字段，不含全文）：渲染层工件卡数据源 + 占位页签原地转正式
+      if ((realName === 'visual.html' || realName === 'mindmap' || realName === 'image') && exec.ok && typeof exec.data === 'object' && exec.data !== null) {
         const d = exec.data as Record<string, unknown>
-        toolStep.artifact = {
-          rel: String(d.relPath ?? ''),
-          title: String(args?.title ?? '').slice(0, 80),
-          lines: Number(d.lines ?? 0),
+        if (realName === 'image') {
+          // 生图没有 title/slug 必填参数：卡上的人可读标签取 prompt 首段，取不到再退回文件名
+          const prompt = String(args?.prompt ?? '')
+          toolStep.artifact = {
+            rel: String(d.relPath ?? ''),
+            title: prompt.slice(0, 80) || String(d.relPath ?? '').split('/').pop() || '生成的图片',
+            slug: String(args?.slug ?? ''),
+            kind: 'image',
+            w: Number(d.w ?? 0) || undefined,
+            h: Number(d.h ?? 0) || undefined,
+            bytes: Number(d.bytes ?? 0) || undefined,
+            prompt: prompt.slice(0, 500),
+            ref: String(args?.ref ?? '').trim() || undefined,
+            model: String(d.model ?? '').trim() || undefined,
+            elapsedMs: Number(d.elapsedMs ?? 0) || undefined,
+            downgraded: d.downgraded === true ? true : undefined,
+          }
+        } else {
+          toolStep.artifact = {
+            rel: String(d.relPath ?? ''),
+            title: String(args?.title ?? '').slice(0, 80),
+            lines: Number(d.lines ?? 0),
+            slug: String(args?.slug ?? ''),
+            kind: realName === 'mindmap' ? 'mindmap' : 'html',
+            nodes: realName === 'mindmap' ? Number(d.nodes ?? 0) : undefined,
+          }
+        }
+      }
+      // 生图失败也要把 prompt/aspect/ref 带上（A8 的失败档要能「重试」——没有 prompt 就无处可重试；
+      // 其余工具的失败步骤不带 args，因为它们的失败只给一行字）
+      if (realName === 'image' && !exec.ok) {
+        toolStep.args = {
+          prompt: String(args?.prompt ?? '').slice(0, 500),
+          aspect: String(args?.aspect ?? ''),
+          ref: String(args?.ref ?? '').trim(),
           slug: String(args?.slug ?? ''),
-          kind: realName === 'mindmap' ? 'mindmap' : 'html',
-          nodes: realName === 'mindmap' ? Number(d.nodes ?? 0) : undefined,
         }
       }
       trace.push(toolStep)
@@ -1322,7 +1432,7 @@ async function runAgentLoop(
           // knowledge.create-page（F-11）：工具返回的 path 同为仓库内 .md，纳入 file 可点击直达编辑器
           const vaultPath = realName.startsWith('builtin.vault.')
             ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
-            : (realName === 'visual.html' || realName === 'mindmap') ? String(data?.relPath ?? '').trim()
+            : (realName === 'visual.html' || realName === 'mindmap' || realName === 'image') ? String(data?.relPath ?? '').trim()
               : realName === 'builtin.knowledge.create-page' ? String(data?.path ?? '').trim()
                 : ''
           const file = realName !== 'builtin.vault.trash' && vaultPath ? vaultPath : undefined
@@ -1382,12 +1492,25 @@ async function runAgentLoop(
         }
         sessionWrites++
       }
-      // visual.html / mindmap 生成时序 §3.4：调用前推「生成中」实时事件（仅 slug/title 小字段，绝不带全文；
-      // 不落库——渲染层据此在工件栏开占位页签，给即时反馈）
+      // visual.html / mindmap / image 生成时序 §3.4：调用前推「生成中」实时事件（仅 slug/title/prompt/aspect
+      // 这类小字段，绝不带全文；不落库——渲染层据此开「生成中」占位（工件栏页签 / 生图卡），给即时反馈）
       if (realName === 'visual.html' || realName === 'mindmap') {
         stepEmitters.get(signal)?.({
           kind: 'tool', name: realName, ok: true, durationMs: 0,
           args: { slug: String(args?.slug ?? ''), title: String(args?.title ?? '') },
+        })
+      }
+      // image 的占位事件要带 prompt/aspect/ref：生图卡靠 aspect 定占位框比例（不跳版），
+      // 靠 prompt 在生成期就能显示"在画什么"，靠 ref 标注这是改图还是新画
+      if (realName === 'image') {
+        stepEmitters.get(signal)?.({
+          kind: 'tool', name: realName, ok: true, durationMs: 0,
+          args: {
+            prompt: String(args?.prompt ?? '').slice(0, 500),
+            aspect: String(args?.aspect ?? ''),
+            ref: String(args?.ref ?? '').trim(),
+            slug: String(args?.slug ?? ''),
+          },
         })
       }
       // 过程时间线（§5.2.3）：在**调用前**先推「进行中」——现有 agent:step 是执行完才推，
@@ -1399,7 +1522,7 @@ async function runAgentLoop(
         target: argTarget(args),
       })
       const t1 = Date.now()
-      const exec = await invokeToolInternal(realName, args, '', { sessionId, source })
+      const exec = await invokeToolInternal(realName, args, '', { sessionId, source, signal })
       finishToolCall(tc, realName, args, exec, Date.now() - t1)
     }
 
@@ -1439,7 +1562,7 @@ async function runAgentLoop(
         const chunk = batch.items.slice(s, s + PARALLEL_CHUNK)
         execs.push(...await Promise.all(chunk.map(async c => {
           const t1 = Date.now()
-          const exec = await invokeToolInternal(c.realName, c.args, '', { sessionId, source })
+          const exec = await invokeToolInternal(c.realName, c.args, '', { sessionId, source, signal })
           return { exec, durationMs: Date.now() - t1 }
         })))
       }

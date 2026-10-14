@@ -619,6 +619,45 @@ function uniqueAttachmentName(dirAbs: string, fileName: string): string {
   return `${stem}-${Date.now()}${ext}`
 }
 
+/**
+ * 版本式重名去重：`<slug>.png` 已存在 → `<slug>-v2.png` → `-v3` …
+ * （v3.6.0 对话内生图，docs/ai-image-gen-plan.md §4.3）。
+ *
+ * 与上面 `uniqueAttachmentName` 的**时间戳式**刻意并存、不合并：两者的语义不同。
+ * 剪贴板/选图的附件名是用户原文件名，撞车是偶然，加时间戳最省事；
+ * 生图产物要的是**可读的版本名** —— 卡上「版本 v1 / v2」切换、改图再次落盘成 `-v2`
+ * 都直接读文件名，时间戳看不出先后关系（同秒内还不可排序）。
+ * 与 visual.html / mindmap 的「重名不覆盖」也是同一口径。
+ */
+export function uniqueVersionedName(dirAbs: string, fileName: string): string {
+  if (!existsSync(join(dirAbs, fileName))) return fileName
+  const ext = extname(fileName)
+  const stem = fileName.slice(0, fileName.length - ext.length)
+  for (let v = 2; v < 1000; v++) {
+    const cand = `${stem}-v${v}${ext}`
+    if (!existsSync(join(dirAbs, cand))) return cand
+  }
+  return `${stem}-${Date.now()}${ext}` // 1000 版同名：退化为时间戳（不覆盖，也不无限循环）
+}
+
+/**
+ * 生图产物落附件区：`.attachments/<年-月>/<slug>.png`，重名走**版本式**递增。
+ * 与 `stageImageBytes` 的分工：那个收用户给的文件名（时间戳去重），这个收模型给的 slug（版本去重）。
+ */
+export function stageImageVersioned(rootPath: string, slug: string, data: Buffer): { name: string; relPath: string } {
+  const raw = `${String(slug ?? '').trim() || 'image'}.png`
+  const safe = sanitizeFileName(raw)
+  const ext = extname(safe).slice(1).toLowerCase()
+  if (!IMAGE_EXT_WHITELIST.has(ext)) throw new Error(`不支持的图片类型：.${ext || '?'}`)
+  if (data.length === 0 || data.length > MAX_STAGE_IMAGE) throw new Error('图片为空或超过 30MB')
+  const ym = yearMonthDir()
+  const dirAbs = join(rootPath, ATTACHMENTS_DIR, ym)
+  mkdirSync(dirAbs, { recursive: true })
+  const name = uniqueVersionedName(dirAbs, safe)
+  writeFileSync(join(dirAbs, name), data)
+  return { name, relPath: `${ATTACHMENTS_DIR}/${ym}/${name}` }
+}
+
 /** 图片字节流入附件区：.attachments/<年-月>/<名>.<ext>；返回仓库根相对 POSIX 路径（md 相对链接用） */
 export function stageImageBytes(rootPath: string, fileName: string, data: Buffer): { name: string; relPath: string } {
   const safe = sanitizeFileName(fileName)

@@ -196,9 +196,21 @@ ok('卡片规则位于基础 pre 规则之后（特异性同为 1 类 + 1 元素
 // ── ⑩ 动效：铁律 13（只动 transform / opacity）+ reduced-motion 兜底 ──────────────
 ok('卡片动画只动 transform / opacity（无 transition-all）',
   !/\.kb-code-card[^{]*\{[^}]*transition-all/.test(code.css))
-// 取**最后一段** reduced-motion 块（本方案的块就追加在文件末尾），前向查找会命中别处早先的块
-const lastRM = code.css.lastIndexOf('@media (prefers-reduced-motion: reduce)')
-const rmBlock = lastRM === -1 ? '' : code.css.slice(lastRM)
+// 取**含 .kb-code-card 的那一段** reduced-motion 块。原先写的是「取最后一段」——那假设
+// 本方案的块永远是文件末尾最后一块；后续方案继续往末尾追加自己的块（2026-10-14 生图卡 K 段）
+// 就会让这条断言误判。改成按内容找：块边界用大括号配平，不依赖"谁在后面"。
+const rmStarts = [...code.css.matchAll(/@media \(prefers-reduced-motion: reduce\)/g)].map(m => m.index)
+const cssBlockAt = (start) => {
+  const open = code.css.indexOf('{', start)
+  if (open < 0) return ''
+  let depth = 0
+  for (let i = open; i < code.css.length; i++) {
+    if (code.css[i] === '{') depth++
+    else if (code.css[i] === '}') { depth--; if (depth === 0) return code.css.slice(start, i + 1) }
+  }
+  return code.css.slice(start)
+}
+const rmBlock = rmStarts.map(s => cssBlockAt(s)).find(b => b.includes('.kb-code-card')) ?? ''
 ok('卡片过渡带 prefers-reduced-motion 兜底',
   rmBlock.includes('.kb-code-card__acts'))
 

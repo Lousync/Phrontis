@@ -133,8 +133,23 @@ ok('keyframes 只动 transform: translateX', keyframes.includes('transform: tran
 ok('全文件没有任何 background-position 动画（文字流光的标志）',
   !has('css', 'background-position:') || !/animation[^;]*background-position/.test(code.css))
 ok('下滑条时长 1.15s + alternate', sweepAfter.includes('animation: kb-sweep 1.15s ease-in-out infinite alternate;'))
+// 取**含 .kb-sweep 的那一段** reduced-motion 块。原先写的是「取最后一段」——
+// 那假设本方案的块永远是文件末尾最后一块；后续方案继续往末尾追加块（2026-10-14 生图卡 K 段）
+// 就会让这条断言误判。改成按内容找，块边界用大括号配平，不依赖"谁在后面"。
+const rmStarts = [...code.css.matchAll(/@media \(prefers-reduced-motion: reduce\)/g)].map(m => m.index)
+const cssBlockAt = (start) => {
+  const open = code.css.indexOf('{', start)
+  if (open < 0) return ''
+  let depth = 0
+  for (let i = open; i < code.css.length; i++) {
+    if (code.css[i] === '{') depth++
+    else if (code.css[i] === '}') { depth--; if (depth === 0) return code.css.slice(start, i + 1) }
+  }
+  return code.css.slice(start)
+}
+const sweepRM = rmStarts.map(s => cssBlockAt(s)).find(b => b.includes('.kb-sweep::after')) ?? ''
 ok('reduced-motion 降级成静态满格下划线',
-  code.css.slice(code.css.lastIndexOf('@media (prefers-reduced-motion: reduce)')).includes('.kb-sweep::after { animation: none; transform: none; width: 100%; }'))
+  sweepRM.includes('.kb-sweep::after { animation: none; transform: none; width: 100%; }'))
 ok('状态行容器「文字在上、轨道在下」且同宽', ruleOf(code.css, '.kb-stage').includes('flex-direction: column;'))
 
 // ── ⑦ R6 思考行不是二级盒子 ──────────────────────────────────────────────────
