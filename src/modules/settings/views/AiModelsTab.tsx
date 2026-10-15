@@ -605,7 +605,7 @@ function RowMenu({ open, onClose, children }: { open: boolean; onClose: () => vo
   if (!open) return null
   return (
     <div onClick={e => e.stopPropagation()}
-      className="absolute right-0 top-full mt-1 z-20 min-w-[178px] py-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop">
+      className="absolute right-0 top-full mt-1 z-20 min-w-[178px] py-1 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop origin-top-right">
       {children}
     </div>
   )

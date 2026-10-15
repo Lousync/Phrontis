@@ -734,6 +734,14 @@ input:focus, textarea:focus, select:focus {
 /* 菜单层（满屏透明点击层 + 首个子元素是菜单面板）：只加一个类即可让面板进场。
    菜单只做进场不做退场——菜单项点完立即切界面，退场动画只会拖慢操作。 */
 .kb-pop-layer > :first-child { animation: kb-pop-in calc(var(--dur-micro) + 20ms) var(--ease-kb) both; }
+/* 锚点兜底：kb-pop-layer 这一族的位置由 JS 算（满屏透明层 + 首子元素是面板），
+   多数从点击点向右下展开 ⇒ top left 比默认的 50% 50%（从菜单自己中心长出来）贴近得多。
+   ★ 这里只兜底：能算出精确锚点的地方（lib/useContextMenuPosition / useAnchoredMenu）
+     用内联 style 覆盖它（内联优先级最高）；静态方向明确的用 Tailwind 的 origin-* 工具类。
+   ★ 别再给 .kb-pop 本体加 transform-origin —— index.css 是【未分层】样式，会压过
+     @layer utilities 里的 origin-* 工具类（Cascade Layers 规则：unlayered 优先于 layered），
+     那样上面那批静态锚点会全部失效。 */
+.kb-pop-layer > :first-child { transform-origin: top left; }
 
 /* --- B 侧边抽屉：从**右缘整幅滑入** / 反向滑出（书市条目详情抽屉，2026-09-22 补的基建）---
    与 .kb-modal-in 的区别：那是「居中面板缩放进场」，用在贴边、通高的抽屉上会显得面板在
@@ -850,6 +858,54 @@ input:focus, textarea:focus, select:focus {
 }
 @media (prefers-reduced-motion: reduce) {
   .kb-spin { animation-duration: 2.4s; }
+}
+
+/* --- M 按下反馈 → `.kb-press`（2026-10-14 新增） ---
+   补的是「事件发生的那一帧」。项目把**转场**做得很足（view / modal / pop / collapse / item 全有），
+   但按下瞬间是哑的 —— 全仓 `:active` 字面量为 0，1343 个 `<button>` 里只有 2 处写了 active:scale。
+   ★ 为什么它不受「高频不加动画」约束：本计划 §四-① 那条管的是**进出场动画**（命令面板开合不做
+     动画，见 §一「Raycast 没有开合动画」）。按下反馈是另一回事 —— 它是「听到了」的确认，
+     不是「演一遍」；所有成熟系统的高频控件都有按下态。
+   ★ 时长 100ms，而**不是** `--dur-micro`(140ms)：反馈要活在按下那一刻，140ms 起手就显钝。
+   ★ 幅度 0.97：34px 图标钮上约 1px，肉眼可感但不吵；小于 0.95 在大元素上会像「整块在跳」。
+   ★★ **用独立的 `scale` 属性，不用 `transform: scale()`** —— 全仓大量元素靠 `transform` 做平移
+      （如 PDF 悬浮条的 `-translate-y-1/2`、图查看器的 `translate(-50%,-50%)`），
+      `transform: scale()` 会整体覆盖它们导致位置跳变；`scale` 是与 `transform` 并存的独立属性，
+      两者自动组合。同一坑见 §六「blog 星标：transition-transform → transition-[transform,scale]」。
+      附带好处：与第 3 条「拖拽跟手」内联写的 `style.transform` 也不冲突（各管各的属性）。
+   ★ 只动 scale ⇒ 落在 §五-6 允许清单内，是**新增令牌不是例外**。
+   ★ 边界：**「按下即开始拖拽」的元素不要挂 `.kb-press`** —— §五-6 规定拖拽跟手过程一律无动画，
+     跟手位移必须由 pointer 直写内联样式；给这类元素加过渡会让它「拖起来发黏」。
+     拖拽手柄（`role="separator"`）同理。全局兜底那条（M2）对它们无害：只加 scale、不加位移，
+     且内联 transform 优先级更高，跟手位移照常生效。
+   ★ reduced-motion：**不关闭**，只去掉过渡让它瞬时到位 —— 按下反馈不是 vestibular 风险，
+     把它当装饰删掉等于丢掉功能性确认（§14 的口径是「更轻」而不是「没有」）。 */
+.kb-press {
+  transition-property: scale, color, background-color, border-color, opacity, box-shadow;
+  transition-duration: 100ms;
+  transition-timing-function: var(--ease-kb);
+}
+.kb-press:active:not(:disabled):not([aria-disabled='true']) {
+  scale: 0.97;
+}
+
+/* M2 全局兜底：让 1343 个既有 `<button>` **零改动**获得按下反馈。
+   用 `:where()` 把优先级压到 0 —— 绝不覆盖任何既有类的 transition / transform / scale
+   （`.desk-row-btn` / `.kb-menu-item` / `.kb-code-card__act` 等都有自己的过渡，普通
+   `button:active` 选择器优先级 (0,1,1) 会盖掉它们，`:where()` 则是 (0,0,0)）。
+   结果是「渐进增强」：没写过 transition 的按钮拿到平滑缩放；写过的按钮保持自己的过渡，
+   scale 变化退化为瞬变（仍有反馈，无回归）。 */
+:where(button, [role='button']) {
+  transition: scale 100ms var(--ease-kb);
+}
+:where(button:active:not(:disabled):not([aria-disabled='true']),
+      [role='button']:active:not([aria-disabled='true'])) {
+  scale: 0.97;
+}
+
+/* M3 逃生舱：个别不该缩的元素（全宽列表行、棋盘格、已自带按下效果的控件）挂它取消。 */
+.kb-no-press:active {
+  scale: none;
 }
 
 /* --- G 停靠落位提示：可拖动浮窗拖近停靠区时浮现「会落到这里」的预览块 ---

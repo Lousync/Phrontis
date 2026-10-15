@@ -1249,7 +1249,7 @@ export function EpubReaderView({ rootId, relPath, name, backLabel, onBack }: Pro
 
       {/* 点已有高亮 → 极简回看卡（正文 → 摘录的回路；完整编辑仍在右栏阅读侧栏） */}
       {notePop && (
-        <div className="kb-pop fixed z-[60] w-[260px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/97 p-2 shadow-lg backdrop-blur"
+        <div className="kb-pop origin-top fixed z-[60] w-[260px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/97 p-2 shadow-lg backdrop-blur"
           style={{ left: Math.min(Math.max(8, notePop.rect.left), Math.max(8, window.innerWidth - 268)), top: notePop.rect.top + notePop.rect.height + 8 }}>
           <div className="mb-1 flex items-center gap-1.5">
             <span className={`kb-exc-dot kb-exc-${notePop.excerpt.color}`} />

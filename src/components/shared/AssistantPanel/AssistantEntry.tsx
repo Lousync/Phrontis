@@ -56,7 +56,7 @@ export function AssistantEntryButton({ activeId }: { activeId: string | null }) 
         <div
           ref={menuRef}
           data-wb="assistantEntryMenu"
-          style={{ left: pos.left, top: pos.top }}
+          style={pos}
           className="kb-pop fixed z-50 w-60 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-1 shadow-xl"
         >
           <div className="px-2 pb-1 pt-1.5 text-[10.5px] leading-relaxed text-[var(--text-muted)]">

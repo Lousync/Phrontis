@@ -197,7 +197,7 @@ export function NoteTopBar({
           {moreOpen && (
             /* 锚点留在这一层（探针按 `[data-wb="noteTopMoreMenu"] button` 找条目）；
                「高度封顶 + 内部滚动」在 `NoteMoreMenu`（那段要 state，而本组件有**零 state** 的硬不变量）。 */
-            <div data-wb="noteTopMoreMenu" className="kb-pop absolute right-0 top-full z-50 mt-1 w-44">
+            <div data-wb="noteTopMoreMenu" className="kb-pop origin-top-right absolute right-0 top-full z-50 mt-1 w-44">
               <NoteMoreMenu>{moreMenu}</NoteMoreMenu>
             </div>
           )}

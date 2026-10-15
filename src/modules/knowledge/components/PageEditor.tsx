@@ -133,7 +133,7 @@ function MoreSub({ anchor, icon, label, note, items }: {
       </button>
       {open && (
         <div style={flip ? { bottom: -5 } : { top: -5 }}
-          className="kb-pop absolute right-[calc(100%+4px)] z-50 max-h-72 w-40 overflow-y-auto overscroll-contain rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-xl">
+          className="kb-pop origin-top-right absolute right-[calc(100%+4px)] z-50 max-h-72 w-40 overflow-y-auto overscroll-contain rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-xl">
           {items.map(it => (
             <button key={it.label} onClick={it.onSelect}
               className={`w-full px-3 py-1.5 text-left text-[12px] transition-colors ${it.active
@@ -1858,7 +1858,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               树可能收起 / 侧栏停在「大纲」页 / 整个左栏关着，那时内联输入行根本不渲染，
               表象就是「点了没反应，只能再去左栏找」。Enter 提交、Esc 取消（外点由上面的 effect 收）。 */}
           {showRename && (
-            <div data-wb="peRenameCard" className="kb-pop absolute right-2 top-full z-50 mt-1 w-72 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
+            <div data-wb="peRenameCard" className="kb-pop origin-top-right absolute right-2 top-full z-50 mt-1 w-72 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
               <div className="mb-2 text-[11px] text-[var(--text-secondary)]">重命名（含扩展名）</div>
               <input
                 data-wb="peRenameInput"
@@ -1886,7 +1886,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           {/* 「将文件移动到…」弹层：内容直接用共享 DirPicker（它只管内容与键盘，定位交给这里）。
               rootId 传本组件同步持有的那个 —— 它可能还没解析出来，DirPicker 会自己兜底查当前仓库。 */}
           {showMove && page?.path && (
-            <div data-wb="peMoveCard" className="kb-pop absolute right-2 top-full z-50 mt-1 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 shadow-xl">
+            <div data-wb="peMoveCard" className="kb-pop origin-top-right absolute right-2 top-full z-50 mt-1 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-2 shadow-xl">
               <DirPicker
                 rootId={vaultRootId ?? undefined}
                 sourceRel={page.path}
@@ -1899,7 +1899,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               值跨行的（YAML 列表 / 嵌套）与 `id` 一律只读 —— 见 parseFmPropRows 头注。
               「保存属性」= 外科手术写回前缀 + 立刻 doSave（与 Ctrl+S 同一条路），不动正文。 */}
           {showProps && (
-            <div data-wb="pePropsCard" className="kb-pop absolute right-2 top-full z-50 mt-1 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
+            <div data-wb="pePropsCard" className="kb-pop origin-top-right absolute right-2 top-full z-50 mt-1 w-80 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
               <div className="mb-2 flex items-center gap-1.5">
                 <Tag size={12} className="text-[var(--text-muted)]" />
                 <span className="text-[11px] text-[var(--text-secondary)]">笔记属性（frontmatter）</span>
@@ -1948,7 +1948,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               与 ⋮ 同锚点（⋮ 在顶栏右端，卡片贴右缘即落在它正下方）。
               批 1b：它与上面两个新弹层共用这个槽位 ⇒ 打开任一个前先把另两个关掉（见 openRename / peMove 分支）。 */}
           {showFileInfo && (
-            <div data-wb="peFileInfoCard" className="kb-pop absolute right-2 top-full z-50 mt-1 w-64 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
+            <div data-wb="peFileInfoCard" className="kb-pop origin-top-right absolute right-2 top-full z-50 mt-1 w-64 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
               <FileInfoRows path={page?.path} sizeBytes={page?.sizeBytes} updatedAt={page?.updatedAt} />
               <button onClick={() => setShowFileInfo(false)}
                 className="mt-2.5 w-full rounded-md border border-[var(--border-color)] py-1 text-[11.5px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]">

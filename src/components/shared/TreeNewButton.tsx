@@ -69,7 +69,7 @@ export function TreeNewButton({ items, onPick, title = '新建…' }: {
         >
           <div
             role="menu"
-            className="kb-pop absolute min-w-[168px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-lg"
+            className="kb-pop origin-top-left absolute min-w-[168px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-lg"
             style={{ left: pos.left, top: pos.top }}
             onMouseDown={(e) => e.stopPropagation()}
           >

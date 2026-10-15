@@ -112,7 +112,7 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop">
+        <div className="absolute left-0 right-0 top-full mt-1 z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop origin-top">
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-[var(--border-color)]">
             <Search size={12} className="text-[var(--text-muted)] shrink-0" />
             <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="搜索模型"

@@ -528,7 +528,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
               <ChevronDown size={13} className={`desk-chev${presetOpen ? ' is-open' : ''}`} />
             </button>
             {presetOpen && (
-              <div className="desk-menu kb-pop" onMouseLeave={() => setPresetOpen(false)}>
+              <div className="desk-menu kb-pop origin-top-right" onMouseLeave={() => setPresetOpen(false)}>
                 {presets.map((p) => (
                   <button key={p.id} className="desk-menu-item" onClick={() => switchPreset(p.id)}>
                     <span className="desk-menu-tick">{p.id === preset.id && <Check size={12} />}</span>
@@ -573,7 +573,7 @@ export function DesktopModule({ isActive, onOpenModule }: Props) {
               placeholder="搜索页面 / 目录 / 标签…"
             />
             {q.trim() !== '' && (
-              <div className="desk-search-pop kb-pop">
+              <div className="desk-search-pop kb-pop origin-top">
                 {hits.length === 0 ? (
                   <div className="desk-search-none">{searching ? '搜索中…' : '没有匹配的页面'}</div>
                 ) : hits.map((p) => (

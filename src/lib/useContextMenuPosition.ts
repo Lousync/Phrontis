@@ -5,6 +5,20 @@ const EDGE_MARGIN = 8
 interface MenuPosition {
   left: number
   top: number
+  /**
+   * 菜单缩放进场的锚点（`.kb-pop` 的 `kb-pop-in` 从 `scale(0.94)` 起）。
+   *
+   * 不给的话是 CSS 默认的 `50% 50%` = 从菜单**自己的中心**长出来，与触发位置无关 ——
+   * 菜单「从哪来」这条空间关系就断了（计划文档 §二 B 段要求「transform-origin 对准锚点」，
+   * 但当时只有少数调用方手工给过）。这里直接由 clamp 结果推出来，调用方零改动受益。
+   *
+   * 规则：菜单被右/下边界推回时会整体落到鼠标的另一侧，锚点就该换到对应的那一角，
+   * 缩放才像「从这个点长出来」。
+   *   · `left < menu.x` ⇒ 菜单被向左推（右侧空间不足），鼠标贴着菜单**右上角** ⇒ 取 right
+   *   · 反之鼠标在菜单左上角 ⇒ 取 left
+   *   · 纵向同理（下边界推回 ⇒ bottom）
+   */
+  transformOrigin: string
 }
 
 /**
@@ -39,11 +53,13 @@ export function useContextMenuPosition(menu: { x: number; y: number } | null) {
     const { width, height } = menuBoxSize(menuRef.current)
     const left = Math.max(EDGE_MARGIN, Math.min(menu.x, window.innerWidth - width - EDGE_MARGIN))
     const top = Math.max(EDGE_MARGIN, Math.min(menu.y, window.innerHeight - height - EDGE_MARGIN))
-    setPosition({ left, top })
+    const originY = top < menu.y ? 'bottom' : 'top'
+    const originX = left < menu.x ? 'right' : 'left'
+    setPosition({ left, top, transformOrigin: `${originY} ${originX}` })
   }, [menu])
 
   return {
     menuRef,
-    style: position ?? { left: menu?.x ?? 0, top: menu?.y ?? 0 },
+    style: position ?? { left: menu?.x ?? 0, top: menu?.y ?? 0, transformOrigin: 'top left' },
   }
 }

@@ -319,7 +319,7 @@ export function ImageCard({ artifact, versions, pending, error, errorPrompt, onS
             </button>
 
             {menu && (
-              <div className="kb-pop absolute right-2 top-9 z-20 w-[168px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] py-1 shadow-xl"
+              <div className="kb-pop origin-top-right absolute right-2 top-9 z-20 w-[168px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] py-1 shadow-xl"
                 role="menu">
                 <button type="button" role="menuitem" onClick={() => void copyPath(cur.rel)}
                   className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[11.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
