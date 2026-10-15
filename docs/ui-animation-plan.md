@@ -58,6 +58,7 @@
 | `.kb-spin` | `rotate 360°` 0.8s 线性无限循环；形状 = 11px 圆环（描边色可覆盖） | 连续 busy 指示：会话列表「转圈示忙」（N-3）。reduced-motion 降速 2.4s 不停转（运动即语义） |
 | `.kb-dock-hint` | `opacity 0→1 + translateX(12px→0)` 170ms | 可拖动浮窗拖近停靠区时的落位预览块（G 类） |
 | `.kb-theme-vt` | `::view-transition-old/new(root)` 交叉淡化 220ms | 主题切换（View Transition），降级走容器级过渡 |
+| `.kb-sweep` | `::after` 短条 `transform: translateX(0→194%)` 1.15s ease-in-out alternate infinite；轨道 2px | AI 回复生成态的等待指示（下滑条）。见 §J 与 `docs/ai-reply-loading-plan.md` |
 
 > 所有类统一包一段 `@media (prefers-reduced-motion: reduce)` 关闭。
 
@@ -138,6 +139,67 @@ AI 教学上下文条 / 书市下载队列，共 7 处）。它是 §五-①「�
 与 `.kb-edge-strip`（彻底隐藏，`index.css:1395`）的区别：那条是「滚动手势仍在、视觉全无」，
 本条是「悬停可见的细条」。首个使用方：看板「今日打卡」卡列表。
 
+### J. 等待指示 → `.kb-sweep`（2026-10-13 新增，`docs/ai-reply-loading-plan.md`）
+适用场景：**AI 回复生成中**的等待指示。成熟工具（ChatGPT / Claude.ai / Copilot）的共性是
+「滑动优先于转圈」——转圈读作「系统忙」，滑动读作「AI 在说话」；转圈只留给「某个工具在执行」。
+做法：状态文字下面一条 2px 轨道（`--border-color`），里面一段 34% 宽的 `--accent` 短条来回滑，
+父级 `overflow: hidden` 裁掉。**短条与状态文字同宽**（容器是 `inline-flex` 列，
+轨道作为列项被拉伸到文字宽度）。
+
+- 位移量 194% 是算出来的：短条占轨道 34%，左边缘走到 66% 时右边缘正好贴住 100%。
+- ★ **只动 `transform`** ⇒ 完全落在铁律 13 的允许清单内，**这不是例外，是新增令牌**。
+  最初考虑的「文字流光」（`background-clip: text` + 动 `background-position`）虽只跑 paint，
+  但不在清单里 —— 为它开一条例外不划算，下滑条能做到同等表达且零例外。
+- reduced-motion 降级：动画停，短条铺满整条（`width: 100%; transform: none`）——
+  静态下仍读得出「进行中」。
+- 配套（同一轮加的，不是动画令牌）：`.kb-stage` / `.stage-label` / `.kb-stage-dur`（状态行）、
+  `.kb-think*`（思考行，折叠复用 `.kb-collapse`）、`.kb-toolsum*`（完成后的工具摘要行，
+  默认收起、展开体最多 5 步）。首个使用方：`AssistantPanel/StreamBubble.tsx`（三面共用）。
+
+### K. 生图卡 → `.kb-img-develop` / `.kb-img-ph` / `.kb-img-progress`（2026-10-14 新增，`docs/ai-image-gen-plan.md` §5.2）
+
+适用场景：**对话内生图（`/生图`）卡**的三态（生成中 / 成品 / 失败）。三个令牌：
+
+| 令牌 | 值 | 用途 |
+|---|---|---|
+| `.kb-img-develop` | `opacity 0→1 + scale(.985→1) + translateY(5px→0)`，320ms | 成品进场 |
+| `.kb-img-ph` | 伪元素两层：`::before` 光晕呼吸（opacity，2.2s alternate）+ `::after` 斜向扫光（translateX，1.6s infinite） | 生成中占位框 |
+| `.kb-img-progress` | 子元素 `scaleX(.04→.96)`，6s 缓入缓停 `forwards` | 生成中底部进度条 |
+
+- ★ **不新增 `.kb-sweep` 之外的等待指示体系**：`.kb-sweep`（J 段）是「一句话在跑」，本段是
+  「一张图在画」—— 后者需要一个**与成品等大的图位**（靠 `aspect-ratio` 撑，出图时不跳版），
+  所以是占位框而不是一条线。两者并存，不是替代关系。
+- 斜向扫光的"斜"用**渐变角度**（`100deg`）实现，不用 `rotate`：元素上只留一个 `transform`
+  （`translateX`），静态倾斜与动画位移就不会互相覆盖。
+- 进度条是**假进度**（接口没有流式事件，方案风险 4）：停在 0.96 不装作走完，文案侧同样
+  不出现任何百分比承诺。
+- 只动 `transform` / `opacity` ⇒ 落在 §五-1 允许清单内（这不是例外，是新增令牌）。
+- reduced-motion 降级：进场瞬时；光晕/扫光**定格**成静态的一层底光（仍读得出"图位在这儿、正在生成"）；
+  进度条停在不动的半满状态（不是空条 —— 空条等于"什么都没发生"）。
+
+首个使用方：`src/components/shared/AssistantPanel/ImageCard.tsx`（助手面 MessageList 与
+AI 教学消息区共用同一组件）。同批复用的既有令牌：`.kb-pop`（⋯ 菜单）、`.kb-overlay`（放大灯箱，
+暗底 + Esc 关）、`.kb-view-fade`（阶段文字轮播）。
+
+### L. 悬停显形动作 → `.kb-hoveronly`（2026-10-14 新增，`docs/ai-settings-v2-plan.md` §2）
+
+适用场景：行内的**次要动作**（连通性测试、行级编辑…）。常驻会把「一行一物」的清单读成工具栏，
+删掉用户又找不到 ⇒ 默认不显，鼠标进到那一行（或键盘 Tab 进那一行）才浮出。
+
+用法：感应范围所在的宿主挂 `kb-hoveronly-host`，动作槽挂 `kb-hoveronly`；
+需要「临时常显」时（如刚保存成功、想让用户看见新按钮在哪）给动作槽再加 `is-peek`，调用方定时摘除。
+
+- ★ **用 `opacity` 保留占位**，不用 `display` / `visibility` / `max-width` —— 后三者让隐藏的按钮
+  不占宽度，悬停时同行的名称/状态被挤得位移，整行跳版。
+- ★ `opacity: 0` 的元素**仍在 Tab 顺序里**：键盘用户 Tab 进宿主即触发 `:focus-within` 显形。
+  代价是**宿主必须可聚焦**（真按钮，或 `role="button"` + `tabIndex={0}`），否则键盘永远够不到。
+- ★ 宿主只许贴住**那一行**：选择器是后代匹配，把宿主挂在包含多行的大容器上会「划过容器就整片亮起」。
+- 只动 `opacity` ⇒ 落在 §五-1 允许清单内（无例外）；reduced-motion 下过渡关掉，显隐仍是瞬时切换。
+- 与 `.kb-code-card__acts`（代码卡右上角复制等）的区别：那条是**绝对定位浮在卡片上**、不参与布局；
+  本类要参与行内布局，所以必须保留占位。
+
+首个使用方：设置 → AI 的连通性测试按钮（`Zap` 图标）与各行行级动作。
+
 ---
 
 ## 五、性能评估（实测数据）
@@ -206,9 +268,17 @@ wildcard 方案在 420ms 采样窗口内只渲染出 2 帧 = 界面明显冻结�
   折叠容器用 `visibility`（延迟 `--dur-std` 切换）避免收起后的按钮/输入行仍可 Tab 聚焦。
 - `src/lib/usePresence.ts`：退场存在性 hook（定时器兜底，不依赖 transitionend）+ `prefersReducedMotion()`
 - `src/components/shared/Collapsible.tsx`：函数子节点的折叠容器（两个方向都有动画，且保持收起不挂载子树的懒语义）
+- `src/components/shared/AiMascot/*`（v3.4.0 落地）：吉祥物插件的显隐与切换反馈
 - `src/components/shared/ModalShell.tsx`：**新增弹层规范壳**（遮罩淡入淡出 + 面板缩放进出场 + 延迟卸载，
   且带 `animateOverlay` 开关给 backdrop-blur 遮罩用）。当前未接线（30+ 既有弹层走「遮罩挂类」批量通路），
   作为后续新增弹层的首选封装保留。
+- **K 段（2026-10-14）**：`.kb-img-develop` / `.kb-img-ph`（::before 光晕 / ::after 扫光）/
+  `.kb-img-progress`，落 `ImageCard.tsx`；⋯ 菜单复用 `.kb-pop`、放大灯箱复用 `.kb-overlay`、
+  阶段文字轮播复用 `.kb-view-fade` ⇒ **本轮只新增这三个类，其余全部走既有令牌**
+- **L 段（2026-10-14）**：`.kb-hoveronly` / `.kb-hoveronly-host` / `.is-peek`（行内次要动作悬停显形），
+  首个使用方是设置 → AI 的连通性测试按钮（`Zap`）；配套 `src/components/shared/HelpHint.tsx`
+  的 ⓘ 浮层复用既有 `.kb-pop` ⇒ **本轮只新增这一个类**
+
 
 **共享组件（B 类，一处改全局受益）**
 - ConfirmDialog、GlobalConfirm：遮罩淡入淡出 + 面板缩放进出场（带完整退场）

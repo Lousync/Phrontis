@@ -5,12 +5,17 @@ import remarkMath from 'remark-math'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
-import { Copy } from 'lucide-react'
+import { Check, ChevronDown, Copy, WrapText } from 'lucide-react'
 import { showToast } from '../../lib/toast'
-import { copyImageUrlToClipboard, workspaceGetCurrent, workspaceReadImage } from '../../lib/ipc'
+import { copyImageUrlToClipboard, copyText } from '../../lib/ipc'
+import { useSettings } from '../../lib/SettingsContext'
+import { normalizeVaultRel, getCachedVaultImage, loadVaultImage } from '../../lib/attachmentImage'
 import { preprocessContent, parseQuizFence, parseQuizFenceLoose } from './QuizParser'
 import { QuizCard } from './QuizCard'
 import { PluginFenceRenderer } from './PluginFenceRenderer'
+import { MermaidBlock } from './MermaidBlock'
+import { SchedulePreviewCard } from '../../modules/schedule/SchedulePreviewCard'
+import { parseSchedulePreviewFence } from '../../modules/schedule/previewPure'
 import { pluginListRenderers } from '../../lib/ipc'
 import type { PluginRendererInfo } from '../../types'
 import { normalizeAnswerLayout } from '../../lib/answerLayout'
@@ -61,6 +66,20 @@ interface Props {
   pageTitle?: string
   /** quiz 围栏解析失败重试（v3.1.1 条目13）：传入后失败占位卡显示「让 AI 重出新题」按钮 */
   onQuizRetry?: () => void
+  /** 高亮的 wiki 链接标题（关联网络「引用/被引用」定位用）：命中该标题的 [[ ]] 加 `.kb-wiki-flash` */
+  highlightWiki?: string
+  /**
+   * 代码块外框档位（docs/code-block-card-plan.md）。
+   * `'plain'`（默认）= 现状，19 处消费者零变化；`'card'` = 普通代码块出「形态 B 悬浮胶囊」卡片。
+   * 只作用于 `pre` 覆写的**兜底分支** —— quiz / mermaid / plugin / spoiler / anim /
+   * schedule-preview 在 `pre` 覆写里提前 return，永远到不了卡片。
+   */
+  codeBlockChrome?: 'plain' | 'card'
+  /**
+   * 流式档：卡片仍在，但**不出折叠、不出自动换行**（只留语言标签 + 复制）。
+   * 理由：正文每个 token 都在重排，行数与行宽都在变，折叠按钮会不停跳位。
+   */
+  streaming?: boolean
 }
 
 /** Unified markdown preview component. Links open via system handler (files → system app, URLs → browser). */
@@ -118,6 +137,91 @@ function FenceWithFallback({ info, code, pageId, pageTitle, children }: {
   )
 }
 
+/** 折叠阈值（docs/code-block-card-plan.md §1）：超过 FOLD_OVER_LINES 行 → 只显前 FOLD_SHOWN_LINES 行 */
+const FOLD_OVER_LINES = 20
+const FOLD_SHOWN_LINES = 12
+
+/**
+ * 代码块卡片（形态 B 悬浮胶囊，docs/code-block-card-plan.md）。
+ *
+ * 只在 `codeBlockChrome="card"` **且未命中任何特殊围栏**时挂载 —— 也就是 `pre` 覆写的兜底分支，
+ * 结构上恰好等于「用户真想原样复制走的纯文本」。
+ *
+ * 两条硬约束：
+ *   ① 依赖 `useSettings()` ⇒ 必须在 `SettingsProvider` 内（`SettingsContext.tsx` 会 throw）；
+ *   ② 胶囊隐藏态用 `opacity` 不用 `visibility`/`display` —— `opacity:0` 仍可 Tab 聚焦，
+ *      键盘用户 Tab 进来触发 `:focus-within` 即可显现（换成 visibility 就永远够不到复制）。
+ */
+function CodeBlockCard({ lang, source, streaming, children }: {
+  lang: string
+  /** 纯源码（`extractText` 已把 rehype-highlight 的 span 树还原成文本）—— 行数与复制都取它 */
+  source: string
+  streaming?: boolean
+  children: React.ReactNode
+}) {
+  const { s, update } = useSettings()
+  const [expanded, setExpanded] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<number | null>(null)
+  useEffect(() => () => { if (copyTimer.current) window.clearTimeout(copyTimer.current) }, [])
+
+  // 自动换行是**全局偏好**（所有代码块同步切换）⇒ 不是本地 state，走 settings
+  const wrap = s.codeBlockWordWrap === true
+  const src = source.replace(/\n$/, '')
+  const lines = src.split('\n').length
+  const foldable = !streaming && lines > FOLD_OVER_LINES
+  const folded = foldable && !expanded
+
+  const onCopy = () => {
+    void copyText(src).then(ok => {
+      // 成功就地变 ✓（1.2s 复位），不弹 Toast —— 聊天流里每次复制弹一个右下角提示比不反馈更烦
+      if (!ok) { showToast({ type: 'error', message: '复制失败' }); return }
+      setCopied(true)
+      if (copyTimer.current) window.clearTimeout(copyTimer.current)
+      copyTimer.current = window.setTimeout(() => setCopied(false), 1200)
+    })
+  }
+
+  return (
+    <div
+      className={`kb-code-card${folded ? ' is-folded' : ''}${wrap ? ' is-wrap' : ''}`}
+      /* 折叠行数由 JS 常量单点给出、CSS 的 calc 消费它 —— 免得「常量写 12、CSS 也写 12」两处漂移 */
+      style={{ '--kb-card-fold-lines': FOLD_SHOWN_LINES } as React.CSSProperties}
+      data-lang={lang || 'txt'}
+      data-lines={lines}
+    >
+      {/* 形态 B：语言标签浮左上、操作按钮成右上悬浮胶囊，两者都不画底色与分界线 */}
+      <span className="kb-code-card__lang">{lang || 'txt'}</span>
+      <div className="kb-code-card__acts">
+        {!streaming && (
+          <button type="button" className="kb-code-card__act" aria-pressed={wrap}
+            title={wrap ? '关闭自动换行' : '自动换行（超长行折到下一行）'}
+            aria-label={wrap ? '关闭代码块自动换行' : '开启代码块自动换行'}
+            onClick={() => update('codeBlockWordWrap', !wrap)}>
+            <WrapText size={12} /><span>自动换行</span>
+          </button>
+        )}
+        <button type="button" className="kb-code-card__act" title="复制纯代码（不含围栏与高亮标记）"
+          aria-label="复制代码" onClick={onCopy}>
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          <span>{copied ? '已复制' : '复制'}</span>
+        </button>
+      </div>
+      <div className="kb-code-card__body">
+        <pre className="kb-thin-scroll">{children}</pre>
+        {folded && <div className="kb-code-card__fade" aria-hidden />}
+      </div>
+      {foldable && (
+        <button type="button" className="kb-code-card__more" aria-expanded={expanded}
+          onClick={() => setExpanded(v => !v)}>
+          <span>{expanded ? '收起' : `展开全部（共 ${lines} 行）`}</span>
+          <ChevronDown size={12} className={`kb-chevron ${expanded ? 'rotate-180' : ''}`} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** quiz 围栏解析失败占位卡（条目13）：不再裸显原始 JSON，可一键让 AI 重出 */
 function QuizFailCard({ onRetry }: { onRetry?: () => void }) {
   return (
@@ -133,7 +237,7 @@ function QuizFailCard({ onRetry }: { onRetry?: () => void }) {
   )
 }
 
-function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitles, pageId, pageTitle, onQuizRetry }: Props) {
+function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitles, pageId, pageTitle, onQuizRetry, highlightWiki, codeBlockChrome = 'plain', streaming = false }: Props) {
   // 旧 408 选择题格式 → ```quiz 围栏（供 pre 组件渲染判题卡片）；非选择题块原样保留
   const processedContent = useMemo(() => preprocessContent(content), [content])
 
@@ -195,14 +299,29 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
           return <QuizFailCard onRetry={onQuizRetry} />
         }
       }
+      // ```schedule-preview 围栏（日程助手排期预览卡）→ 迷你周表卡片；非法回退普通代码块
+      if (/language-schedule-preview/.test(cls)) {
+        const card = parseSchedulePreviewFence(extractText(children))
+        if (card) return <SchedulePreviewCard data={card} />
+      }
       // 插件渲染器（plugin-phase1-design C6）：命中 lang 且插件已启用 → 内容只读沙箱；失败回退普通代码块
       const langMatch = cls.match(/language-([a-z0-9-]+)/i)
       const fenceLang = langMatch?.[1]?.toLowerCase()
+      // ```mermaid 围栏 → Mermaid 渲染（动态 chunk；失败回退普通代码块）
+      if (fenceLang === 'mermaid') return <MermaidBlock code={extractText(children)} />
       if (fenceLang) {
         const r = fenceRenderers.get(fenceLang)
         if (r) {
           return <FenceWithFallback info={r} code={extractText(children)} pageId={pageId} pageTitle={pageTitle}>{children}</FenceWithFallback>
         }
+      }
+      // ★ 兜底分支 = 普通代码块 ⇒ 卡片只挂这一行（以上所有特殊围栏都已提前 return）
+      if (codeBlockChrome === 'card') {
+        return (
+          <CodeBlockCard lang={fenceLang ?? ''} source={extractText(children)} streaming={streaming}>
+            {children}
+          </CodeBlockCard>
+        )
       }
       return <pre>{children}</pre>
     },
@@ -275,6 +394,13 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
       if (!isBlock) {
         return <code className={className} {...props}>{children}</code>
       }
+      // 卡片档：chrome（语言标签 + 操作）整条交给 CodeBlockCard，这里只出裸 <code>，
+      // 否则 <pre> 里会套一个 <div>（非法结构）并多出一个语言标签。
+      // ⚠️ 上面 spoiler / anim 两个分支**必须保留** —— pre 覆写对这两个 lang 返回的是
+      //    <>{children}</>（不包 <pre>），真正的渲染体就在下面这两行里。
+      if (codeBlockChrome === 'card') {
+        return <code className={className} {...props}>{children}</code>
+      }
       return (
         <div className="relative group">
           {lang && (
@@ -288,37 +414,37 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
     },
     // Convert [[wiki links]] + 脚注（word^[标注]） in paragraph text to interactive spans
     p({ children }) {
-      return <p>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</p>
+      return <p>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</p>
     },
     // Also handle wiki links in list items, headings, etc.
     li({ children }) {
-      return <li>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</li>
+      return <li>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</li>
     },
     h1({ children }) {
       const text = extractText(children)
-      return <h1 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h1>
+      return <h1 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h1>
     },
     h2({ children }) {
       const text = extractText(children)
-      return <h2 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h2>
+      return <h2 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h2>
     },
     h3({ children }) {
       const text = extractText(children)
-      return <h3 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h3>
+      return <h3 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h3>
     },
     h4({ children }) {
       const text = extractText(children)
-      return <h4 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h4>
+      return <h4 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h4>
     },
     h5({ children }) {
       const text = extractText(children)
-      return <h5 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h5>
+      return <h5 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h5>
     },
     h6({ children }) {
       const text = extractText(children)
-      return <h6 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles)}</h6>
+      return <h6 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h6>
     },
-  }), [handleLinkClick, onWikiLink, knownWikiTitles, pageId, pageTitle, fenceRenderers, onQuizRetry])
+  }), [handleLinkClick, onWikiLink, knownWikiTitles, pageId, pageTitle, fenceRenderers, onQuizRetry, highlightWiki, codeBlockChrome, streaming])
 
   return (
     <div className="prose-content">
@@ -340,51 +466,44 @@ export const MarkdownPreview = React.memo(MarkdownPreviewInner)
 const WIKI_RE = /\[\[([^\]]+)\]\]/
 
 // ===== P3：仓库根相对路径图片解析（D1 附件区 .attachments/，兼容旧 .knowbase/_attachments/ 与根 _attachments/）=====
-// md 中形如 `![x](.attachments/2026-09/x.png)` 的链接对渲染进程不可直接取回（无文件系统 http 服务），
-// 统一经 ws:readImage（主进程附件白名单 + resolveSafe 越界防护）解析为 data:URI，进程内缓存。
-const vaultRelImgCache = new Map<string, string>()
-let vaultRelRootIdPromise: Promise<string | null> | null = null
-
-function normalizeVaultRel(src: string): string | null {
-  let s = src
-  try { s = decodeURIComponent(s) } catch { /* 含 % 的原始名按字面处理 */ }
-  for (let guard = 0; guard < 10; guard++) {
-    if (s.startsWith('../')) { s = s.slice(3); continue }
-    if (s.startsWith('./')) { s = s.slice(2); continue }
-    break
-  }
-  if (/^\.attachments\//i.test(s) || /^\.knowbase\/_attachments\//i.test(s) || /^_attachments\//i.test(s)) return s
-  return null
-}
-
+// 取回逻辑已抽到 `src/lib/attachmentImage.ts`（即时渲染档的编辑器内联图片共用同一份规则与缓存）。
 function VaultRelImg({ rel, alt, ...props }: { rel: string } & React.ImgHTMLAttributes<HTMLImageElement>) {
-  const cached = vaultRelImgCache.get(rel) ?? null
-  const [dataUrl, setDataUrl] = useState<string | null>(cached)
+  const [url, setUrl] = useState<string | null>(() => getCachedVaultImage(rel))
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
-    if (dataUrl) return
+    const cached = getCachedVaultImage(rel)
+    if (cached) { setUrl(cached); setFailed(false); return }
+    setUrl(null); setFailed(false)
     let alive = true
-    void (async () => {
-      try {
-        if (!vaultRelRootIdPromise) vaultRelRootIdPromise = workspaceGetCurrent().then((cur) => cur?.rootId ?? null)
-        const rootId = await vaultRelRootIdPromise
-        if (!rootId) return
-        const res = await workspaceReadImage(rootId, rel)
-        if (res.dataUrl && alive) {
-          vaultRelImgCache.set(rel, res.dataUrl)
-          setDataUrl(res.dataUrl)
-        }
-      } catch { /* 取回失败保持原生渲染（破图可见，不崩预览） */ }
-    })()
+    void loadVaultImage(rel).then((u) => {
+      if (!alive) return
+      if (u) setUrl(u)
+      else setFailed(true)
+    })
     return () => { alive = false }
-  }, [rel, dataUrl])
-  if (!dataUrl) {
+  }, [rel])
+  if (url) return <img src={url} alt={alt} {...props} />
+  /* 破图与加载中**必须分开**（批 3，2026-10-13）：本批把仓库内任意图片路径都放开了，
+     打错一个字的概率随之上升；而原先两者都落「图片加载中…」⇒ 一个永远转不完的加载态。
+     ★ 与 `LiveMarkdownPane` 的 `ImageWidget` 对齐 —— 那边早就有 `kb-live-img-broken` 分支，
+     预览这边缺了，属于两个消费者之间的行为漂移。 */
+  if (failed) {
     return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-1 my-1 rounded border border-dashed border-[var(--border-color)] bg-[var(--bg-secondary)] text-[12px] text-[var(--text-muted)]">
-        <span>🖼️</span><span>图片加载中…</span>
+      <span
+        data-wb="mdImgBroken"
+        title={rel}
+        className="inline-flex items-center gap-1.5 px-2 py-1 my-1 rounded border border-dashed border-[var(--danger)] bg-[var(--bg-secondary)] text-[12px] text-[var(--danger)]"
+      >
+        <span>图片无法显示</span>
+        <span className="font-mono text-[11px] opacity-80 truncate max-w-[220px]">{rel}</span>
       </span>
     )
   }
-  return <img src={dataUrl} alt={alt} {...props} />
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2 py-1 my-1 rounded border border-dashed border-[var(--border-color)] bg-[var(--bg-secondary)] text-[12px] text-[var(--text-muted)]">
+      <span>🖼️</span><span>图片加载中…</span>
+    </span>
+  )
 }
 
 /** Extract plain text from React children for heading ID generation */
@@ -466,11 +585,11 @@ function renderFootnotes(children: React.ReactNode): React.ReactNode {
 }
 
 /** 行内扩展统一入口：先脚注，后双链（脚注词不被双链二次处理） */
-function renderInlineExtras(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>): React.ReactNode {
-  return renderWikiLinks(renderFootnotes(children), onWikiLink, knownWikiTitles)
+function renderInlineExtras(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>, highlightWiki?: string): React.ReactNode {
+  return renderWikiLinks(renderFootnotes(children), onWikiLink, knownWikiTitles, highlightWiki)
 }
 
-function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>): React.ReactNode {
+function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string) => void, knownWikiTitles?: Set<string>, highlightWiki?: string): React.ReactNode {
   if (!onWikiLink) return children
   return React.Children.map(children, child => {
     if (typeof child === 'string') {
@@ -493,10 +612,12 @@ function renderWikiLinks(children: React.ReactNode, onWikiLink?: (title: string)
         parts.push(
           <span
             key={key++}
+            data-wiki={display}
             className={
-              exists
+              (exists
                 ? 'text-[var(--accent)] cursor-pointer hover:underline'
-                : 'text-[var(--text-muted)]/70 cursor-pointer hover:text-[var(--accent)] border-b border-dashed border-[var(--text-muted)]/50'
+                : 'text-[var(--text-muted)]/70 cursor-pointer hover:text-[var(--accent)] border-b border-dashed border-[var(--text-muted)]/50')
+              + (exists && display === highlightWiki ? ' kb-wiki-flash' : '')
             }
             title={exists ? display : `创建页面「${display}」`}
             onClick={() => onWikiLink(display)}

@@ -8,9 +8,11 @@ import { join } from 'path'
  * 而是读写粒度：每追加一条消息 = 全部历史 读+parse+序列化+重写 ×2 文件，成本 O(全部历史)。
  * 已造成实际妥协：reasoning 全文不落库（agentService.ts：「思考链长度常是正文数倍」）。
  *
- * v2 存储（同目录 userData/data/ 下）：
- *   agent-sessions.json        会话索引（小文件，全量重写可接受，保持不变）
- *   agent-messages/<id>.jsonl  每会话一个文件，一行一条消息，追加=O(1)
+ * v2 存储（baseDir 由调用方注入；2026-10-13 起 baseDir = 当前仓库的 `.knowbase/agent/`，
+ * 会话随仓库走前是 userData/data/，布局未变）：
+ *   sessions.json               会话索引（小文件，全量重写可接受；由 agentSessionRepo 管）
+ *   messages/<id>.jsonl         每会话一个文件，一行一条消息，追加=O(1)
+ *   agent-messages.json         v1 遗留：全体消息一个文件（仅认领时拷入仓库，随后拆分）
  *   agent-messages.migrated.json  v1 迁移完成后的原文件改名留存
  *
  * 纯逻辑模块（不 import electron）：baseDir 由调用方注入，node 冒烟可直接跑
@@ -27,7 +29,13 @@ export interface AgentMessageRow {
   created_at: string
 }
 
-const MESSAGES_DIR = 'agent-messages'
+/**
+ * 每会话消息文件所在子目录。
+ * ★ 必须与 agentSessionMigrate 的 MESSAGES_DIR_DST 一致：认领把全局 `agent-messages/`
+ *   里的文件拷到本名字下，读端从这里取 —— 两处不一致的后果是「认领成功但消息全看不见」
+ *   （2026-10-13 契约脚本 verify-agent-session-migrate.mjs 的 §4 就是为这条设的）。
+ */
+const MESSAGES_DIR = 'messages'
 const LEGACY_FILE = 'agent-messages.json'
 const MIGRATED_FILE = 'agent-messages.migrated.json'
 

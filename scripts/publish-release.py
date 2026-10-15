@@ -10,10 +10,14 @@
 
 用法：
   python scripts/publish-release.py --version 2.13.1
-  python scripts/publish-release.py --version 2.13.1 --dir dist-electron --notes-file release-notes.md --draft
+  python scripts/publish-release.py --version 2.13.1 --dir packs/3.4.1 --notes-file release-notes.md --draft
+
+产物目录（--dir 缺省）：自动取 packs/<version> 或 packs/<version>-N 中后缀最大者
+（打包规范见仓库根 AGENTS.md「工作流」：npm run pack 输出到 packs/<版本号>[-N]）。
 """
 import argparse
 import base64
+import glob
 import hashlib
 import json
 import os
@@ -32,6 +36,23 @@ except Exception:
     pass
 
 REPO = 'Lousync/Phrontis'
+
+
+def find_latest_pack_dir(ver):
+    """缺省产物目录：packs/<ver> 或 packs/<ver>-N（取后缀数字最大者）；找不到返回 None。"""
+    base = 'packs/%s' % ver
+    cands = []
+    if os.path.isdir(base):
+        cands.append(base)
+    cands += [d for d in glob.glob('packs/%s-*' % ver) if os.path.isdir(d)]
+    if not cands:
+        return None
+
+    def suffix(d):
+        m = re.match(r'^-(\d+)$', d[len(base):])
+        return int(m.group(1)) if m else 0
+
+    return max(cands, key=suffix)
 
 
 def run(cmd, **kw):
@@ -80,7 +101,7 @@ def parse_latest_yml(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--version', required=True, help='要发布的版本号(不带 v 前缀)')
-    ap.add_argument('--dir', default='dist-electron', help='electron-builder 产物目录')
+    ap.add_argument('--dir', default=None, help='electron-builder 产物目录（缺省自动取 packs/<version> 或 packs/<version>-N 中后缀最大者）')
     ap.add_argument('--notes-file', default=None, help='Release notes Markdown 文件')
     ap.add_argument('--draft', action='store_true', help='创建 draft Release')
     ap.add_argument('--prerelease', action='store_true', help='标记为预发布')
@@ -88,9 +109,11 @@ def main():
 
     ver = args.version.lstrip('vV')
     tag = 'v%s' % ver
-    d = args.dir
+    d = args.dir or find_latest_pack_dir(ver)
+    if not d:
+        sys.exit('!! 未找到产物目录 packs/%s*（先跑 npm run pack，或用 --dir 指定）' % ver)
     if not os.path.isdir(d):
-        sys.exit('!! 产物目录不存在: %s(先跑 electron-builder 打包)' % d)
+        sys.exit('!! 产物目录不存在: %s（先跑 npm run pack）' % d)
 
     # ---- 门 1:三件套必须同时存在 ----
     print('== 门 1:三件套存在性 ==')

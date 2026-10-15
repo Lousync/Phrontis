@@ -48,7 +48,7 @@ export default function AiRecordList({ records, onRespond }: Props) {
       <div className="absolute inset-0 flex items-center justify-center">
         <div className="text-center text-[12px] leading-6 text-[var(--text-secondary)]">
           <p>AI 发起的每条终端命令都会先出现在这里等你确认（行内卡，不弹窗）。</p>
-          <p>开关在 设置 → AI 终端执行（默认关闭）。</p>
+          <p>开关在 设置 → AI → 权限 → 终端执行（默认关闭）。</p>
         </div>
       </div>
     )

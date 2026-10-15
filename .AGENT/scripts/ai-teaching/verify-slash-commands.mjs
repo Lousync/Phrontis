@@ -72,12 +72,26 @@ check('pickedSkill chip 可移除（X 按钮）', /pickedSkill && \([\s\S]*?setP
 console.log('\n[AssistantPanel 接线（assistant + aiLearn 两 surface 共用；逻辑在 ChatBody + useAssistantChat）]')
 check('slashQuery 派生：/ 开头且无空白才弹', /slashQuery = input\.startsWith\('\/'\) && !\/\[\\s\\n\]\//.test(chatBody))
 check('Esc 局部拦截 stopPropagation', /onSlashKeys[\s\S]*?e\.key === 'Escape'[\s\S]*?e\.stopPropagation\(\)/.test(chatBody))
-check('Skill chip 一次性消费：send 内发出即清', /const sk = pickedSkill[\s\S]*?setPickedSkill\(null\)[\s\S]*?agentChat\(sid, body, finalCtx \?\? undefined, cid, undefined, modelId \|\| undefined, thinking \? 'medium' : 'off', sk\?\.registryName\)/.test(chatHook))
+check('Skill chip 一次性消费：send 内发出即清', /const sk = pickedSkill[\s\S]*?setPickedSkill\(null\)[\s\S]*?agentChat\(sid, body, finalCtx \?\? undefined, cid, sessionSource, modelId \|\| undefined, thinking \? 'medium' : 'off', sk\?\.registryName\)/.test(chatHook))
 check('handleChatCommand 接线 onProgress → setCompressing', chatHook.includes('onProgress: p => setCompressing(p.active)'))
-check('发送键禁用条件含 compressing', chatBody.includes('disabled={pending || compressing || !input.trim()}'))
+check('发送键禁用条件含 compressing（pending 改由「停止键」分支接管，见 ai-reply-loading-plan §3.3）', chatBody.includes('disabled={compressing || !input.trim()}'))
 check('send 依赖数组补 pickedSkill', /\}, \[[^\]]*pickedSkill[^\]]*\]\)/.test(chatHook))
 check('面板打开时刷新 Skill 列表', chatHook.includes('aiToolsListSkills().then(r => setSlashSkills(r.skills))'))
 check('compressing 占位条渲染', chatBody.includes('正在压缩对话历史'))
+
+console.log('\n[放行指令单一真源（v3.6.0 /生图，docs/ai-image-gen-plan.md §5.1）]')
+check('PASSTHROUGH_COMMANDS 表存在（放行给模型的指令）', t.includes('export const PASSTHROUGH_COMMANDS: PassthroughCommand[]'))
+check('/生图 入表且 surfaces = assistant + aiTeaching（两面弹层都可见）',
+  /name: '生图'[\s\S]{0,140}surfaces: \['assistant', 'aiTeaching'\]/.test(t))
+check('/mindmap 迁表后仍只在 aiTeaching 面', /name: 'mindmap'[\s\S]{0,140}surfaces: \['aiTeaching'\]/.test(t))
+check('handleChatCommand 里不再有 /mindmap 按面硬编码白名单', !/name === 'mindmap'/.test(t))
+check('放行判定查表（passthroughCommandsForSurface）', t.includes('passthroughCommandsForSurface(ctx.surface).find'))
+check('未知指令提示同时列放行指令（敲错名字时找得到）', /passthroughCommandsForSurface\(surface\)\.map/.test(t))
+check('弹层候选由 PASSTHROUGH_COMMANDS 生成（不再各面手抄）', menu.includes('passthroughCommandsForSurface(surface)'))
+check('教学模块不再另写一份指令清单（MINDMAP_SLASH_ITEM 已删）', !teach.includes('MINDMAP_SLASH_ITEM'))
+check('两个面的 buildSlashItems 均不传私有 extra（全部走表）',
+  /buildSlashItems\(slashSkills, \[MINDMAP_SLASH_ITEM\]/.test(teach) === false
+  && /buildSlashItems\(scheduleMode \? \[\] : slashSkills, \[\], surface\)/.test(chatBody))
 
 console.log('\n[红线]')
 check('ai-teaching 全局 Esc 浮层链未改动（TDZ 敏感区）', teach.includes("if (askVisible && askPending) { setAskDismissed(askPending.id); return }") || teach.includes('askCollapsed'))

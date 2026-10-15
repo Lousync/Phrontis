@@ -1,3 +1,19 @@
+/**
+ * 设置 → 快捷键「指令表」。
+ *
+ * ★ 2026-10-13 起本表**不再手写**：数据源是 src/lib/commandRegistry.ts（唯一真源）。
+ *   改键位 / 改文案 / 加命令一律改真源，**不要在这里加行** —— 手写行会让真源变成一份没人读的
+ *   清单，而设置页、AI 手册、命令面板又会各自漂回去（§44 记的那 8 处不符就是这么来的）。
+ *
+ * 守卫：
+ *   · 结构（组数 / 条数 / 键帽 token / 锚点可解析 / 撞车）→ .AGENT/scripts/commands/verify-commands-registry.mjs
+ *   · 内容判据（这批键位归哪个组、死键有没有复活、代码里那个分支还在不在、手册同步没）
+ *     → .AGENT/scripts/settings/verify-shortcuts-table.mjs
+ *
+ * 背景与 8 组逐行对账的判据：docs/ui-updates.md §44；真源方案：docs/command-registry-plan.md。
+ */
+import { COMMAND_GROUPS, commandsOfGroup } from '../../../lib/commandRegistry'
+
 export function ShortcutsView() {
   return (
     <div>
@@ -5,72 +21,13 @@ export function ShortcutsView() {
       <p className="text-[12px] text-[var(--text-muted)] mb-6">所有可用的键盘快捷键一览</p>
 
       <div className="space-y-8">
-        <Group anchor="shortcuts.global" label="全局">
-          <Row keys={['Ctrl', 'B']} desc="展开 / 折叠侧栏" />
-          <Row keys={['Escape']} desc="关闭弹窗 / 从编辑器返回列表" />
-          <Row keys={['Ctrl', 'Shift', 'P']} desc="命令面板" />
-          <Row keys={['Ctrl', 'O']} desc="快速打开 / 切换文件（知识页索引）" />
-          <Row keys={['Ctrl', '`']} desc="全局搜索底部面板（仅 Workbench 布局）" />
-          <Row keys={['Ctrl', '=']} desc="界面放大" />
-          <Row keys={['Ctrl', '-']} desc="界面缩小" />
-          <Row keys={['Ctrl', 'J']} desc="AI 助手面板开关" />
-          <Row keys={['Ctrl', 'Alt', 'S']} desc="日程与打卡侧栏开关（系统级）" />
-        </Group>
-
-        <Group anchor="shortcuts.kbEditor" label="知识库 — 编辑器">
-          <Row keys={['Ctrl', 'S']} desc="立即保存当前页面" />
-          <Row keys={['Ctrl', '/']} desc="切换 Markdown 预览（仅 md / txt 文件）" />
-          <Row keys={['Escape']} desc="关闭弹窗后返回页面列表" />
-        </Group>
-
-        <Group anchor="shortcuts.kbSidebar" label="知识库 — 侧栏">
-          <Row keys={['F2']} desc="重命名选中的目录 / 笔记本 / 章节" />
-          <Row keys={['Delete']} desc="删除选中的目录 / 笔记本 / 章节" />
-          <Row keys={['Ctrl', 'C']} desc="复制选中的页面 / 目录到内部剪贴板（非输入框时）" />
-          <Row keys={['Ctrl', 'X']} desc="剪切选中的页面 / 目录（非输入框时）" />
-          <Row keys={['Ctrl', 'V']} desc="粘贴内部剪贴板到选中目标（非输入框时）" />
-        </Group>
-
-        <Group anchor="shortcuts.kbTabs" label="知识库 — Tab 管理">
-          <Row keys={['Ctrl', 'N']} desc="新建零散页面" />
-          <Row keys={['Ctrl', 'W']} desc="关闭当前打开的 Tab 页" />
-          <Row keys={['Ctrl', 'Tab']} desc="切换到下一个 Tab" />
-          <Row keys={['Ctrl', 'Shift', 'Tab']} desc="切换到上一个 Tab" />
-        </Group>
-
-        <Group anchor="shortcuts.kbReading" label="知识库 — 阅读">
-          <Row keys={['Ctrl', 'Shift', 'R']} desc="沉浸阅读进出" />
-          <Row keys={['Ctrl', 'P']} desc="知识库快速搜索" />
-          <Row keys={['Escape']} desc="沉浸阅读退出" />
-        </Group>
-
-        <Group anchor="shortcuts.editorModule" label="编辑器模块">
-          <Row keys={['Ctrl', 'S']} desc="保存当前文件" />
-          <Row keys={['Ctrl', 'Shift', 'S']} desc="保存全部打开文件" />
-          <Row keys={['Alt', 'A']} desc="AI 内联建议：立即要一条（Markdown；Tab 采纳 / Esc 拒绝；平时停顿会自动出）" />
-          <Row keys={['Ctrl', 'F']} desc="PDF 阅读器内搜索" />
-          <Row keys={['PageDown', '空格']} desc="PDF 下一页" />
-          <Row keys={['PageUp']} desc="PDF 上一页" />
-        </Group>
-
-        <Group anchor="shortcuts.blogKeys" label="博客">
-          <Row keys={['Ctrl', 'N']} desc="新建 / 打开今日文章" />
-          <Row keys={['Ctrl', 'S']} desc="保存并关闭编辑器" />
-          <Row keys={['Ctrl', '/']} desc="切换 Markdown 预览" />
-          <Row keys={['Escape']} desc="从编辑器 / 详情返回列表" />
-          <Row keys={['Delete']} desc="删除当前查看的文章" />
-        </Group>
-
-        <Group anchor="shortcuts.scheduleKeys" label="日程">
-          <Row keys={['Ctrl', 'N']} desc="打开新建任务弹窗" />
-          <Row keys={['Escape']} desc="关闭弹窗（编辑 / 四象限 / 标签管理）" />
-          <Row keys={['Ctrl', 'Alt', 'Up']} desc="日程侧栏置顶停靠（系统级）" />
-          <Row keys={['Ctrl', 'Alt', 'Down']} desc="日程侧栏切为桌面小组件（系统级）" />
-        </Group>
-
-        <Group anchor="shortcuts.passwordKeys" label="密码本">
-          <Row keys={['Ctrl', 'Alt', 'P']} desc="密码填充弹窗开关（系统级；可在设置改键）" />
-        </Group>
+        {COMMAND_GROUPS.map((g) => (
+          <Group key={g.id} anchor={g.anchor} label={g.label}>
+            {commandsOfGroup(g.id).map((c) => (
+              <Row key={c.id} chords={c.keys} desc={c.desc} />
+            ))}
+          </Group>
+        ))}
       </div>
     </div>
   )
@@ -87,14 +44,28 @@ function Group({ anchor, label, children }: { anchor: string; label: string; chi
   )
 }
 
-function Row({ keys, desc }: { keys: string[]; desc: string }) {
+/**
+ * 一行快捷键。
+ * - `chords` = 多组同效组合键（真源里就是 `string[][]`）。一组时渲染成一排键帽；
+ *   多组时组间用 `/` 分隔（如 `Ctrl+P` / `Ctrl` + 反引号 / `Ctrl+Shift+F`）——
+ *   少了这个分隔，三个同效键会挤成七枚键帽、读不出「三选一」的意思。
+ */
+function Row({ chords, desc }: { chords: string[][]; desc: string }) {
   return (
     <div className="flex items-center justify-between py-1.5">
       <span className="text-[13px] text-[var(--text-primary)]">{desc}</span>
       <div className="flex items-center gap-1 shrink-0">
-        {keys.map((k, i) => (
-          <span key={i} className="inline-flex items-center px-1.5 py-0.5 text-[11px] font-mono bg-[var(--input-bg)] border border-[var(--border-color)] rounded text-[var(--text-secondary)] min-w-[20px] justify-center">
-            {k}
+        {chords.map((g, gi) => (
+          <span key={gi} className="flex items-center gap-1">
+            {gi > 0 && <span className="px-0.5 text-[10px] text-[var(--text-secondary)]">/</span>}
+            {g.map((k, i) => (
+              <span
+                key={i}
+                className="kb-kbd px-1.5 py-0.5 text-[11px] rounded min-w-[20px] justify-center"
+              >
+                {k}
+              </span>
+            ))}
           </span>
         ))}
       </div>

@@ -39,6 +39,7 @@ const api = {
   copyImage: (src: { path?: string; dataUrl?: string }) => ipcRenderer.invoke('clipboard:copyImage', src),
   clearClipboardIfEqual: (text: string) => ipcRenderer.invoke('clipboard:clearIfEqual', text),
   copyText: (text: string) => ipcRenderer.invoke('clipboard:writeText', text),
+  readClipboardText: () => ipcRenderer.invoke('clipboard:readText'),
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
   close: () => ipcRenderer.invoke('window:close'),
@@ -88,6 +89,12 @@ const api = {
   getScheduleTags: () => ipcRenderer.invoke('schedule:getTags'),
   createScheduleTag: (name: string, color?: string) => ipcRenderer.invoke('schedule:createTag', name, color),
   deleteScheduleTag: (id: string) => ipcRenderer.invoke('schedule:deleteTag', id),
+  scheduleRecurringList: () => ipcRenderer.invoke('schedule:recurringList'),
+  scheduleRecurringCreate: (input: unknown) => ipcRenderer.invoke('schedule:recurringCreate', input),
+  scheduleRecurringUpdate: (id: string, patch: unknown) => ipcRenderer.invoke('schedule:recurringUpdate', id, patch),
+  scheduleRecurringDelete: (id: string) => ipcRenderer.invoke('schedule:recurringDelete', id),
+  scheduleRecurringSettle: () => ipcRenderer.invoke('schedule:recurringSettle'),
+  scheduleRecurringUndoSettle: (todoIds: string[], restore: unknown) => ipcRenderer.invoke('schedule:recurringUndoSettle', todoIds, restore),
   /** 日程截止提醒的系统通知被点击 → 主窗口切到日程模块（主进程 scheduleReminder.ts 发出） */
   onScheduleReminderClick: (cb: () => void) => {
     const handler = () => cb()
@@ -197,6 +204,7 @@ const api = {
   pluginGetContribution: (id: string, key: string) => ipcRenderer.invoke('plugin:getContribution', id, key),
   pluginListViews: (slot: unknown) => ipcRenderer.invoke('plugin:listViews', slot),
   pluginListPets: () => ipcRenderer.invoke('plugin:listPets'),
+  pluginListMascots: () => ipcRenderer.invoke('plugin:listMascots'),
   pluginListDashboardWidgets: () => ipcRenderer.invoke('plugin:listDashboardWidgets'),
   pluginListCommands: () => ipcRenderer.invoke('plugin:listCommands'),
   pluginListRenderers: () => ipcRenderer.invoke('plugin:listRenderers'),
@@ -238,6 +246,7 @@ const api = {
   aiToolsCopySkillPrompt: (pluginId: string, skillId: string) => ipcRenderer.invoke('aiTools:copySkillPrompt', pluginId, skillId),
   aiToolsInstallSkill: (data: Uint8Array, fileName?: string) => ipcRenderer.invoke('aiTools:installSkill', data, fileName),
   aiToolsInstallSkillFromFile: () => ipcRenderer.invoke('aiTools:installSkillFromFile'),
+  aiToolsInstallSkillFromFolder: () => ipcRenderer.invoke('aiTools:installSkillFromFolder'),
   aiToolsUninstallSkill: (id: string) => ipcRenderer.invoke('aiTools:uninstallSkill', id),
   aiToolsToggleSkill: (registryName: string, enabled: boolean) => ipcRenderer.invoke('aiTools:toggleSkill', registryName, enabled),
   // Model gateway + agent
@@ -246,6 +255,12 @@ const api = {
   llmRemoveProvider: (id: string) => ipcRenderer.invoke('llm:removeProvider', id),
   llmToggleProvider: (id: string, enabled: boolean) => ipcRenderer.invoke('llm:toggleProvider', id, enabled),
   llmTestConnection: (draft: unknown) => ipcRenderer.invoke('llm:testConnection', draft),
+  // 账号（端点内部的第二层，2026-10-13）：同一端点换一把 Key，地址/协议/请求头/模型清单全复用
+  llmAddAccount: (payload: unknown) => ipcRenderer.invoke('llm:addAccount', payload),
+  llmSetActiveAccount: (providerId: string, accountId: string) => ipcRenderer.invoke('llm:setActiveAccount', providerId, accountId),
+  llmUpdateAccount: (payload: unknown) => ipcRenderer.invoke('llm:updateAccount', payload),
+  llmRemoveAccount: (providerId: string, accountId: string) => ipcRenderer.invoke('llm:removeAccount', providerId, accountId),
+  llmTestAccount: (providerId: string, accountId: string) => ipcRenderer.invoke('llm:testAccount', providerId, accountId),
   llmRefreshModels: (id: string) => ipcRenderer.invoke('llm:refreshModels', id),
   llmAddModel: (id: string, model: string) => ipcRenderer.invoke('llm:addModel', id, model),
   llmSetDefaultModel: (value: string) => ipcRenderer.invoke('llm:setDefaultModel', value),
@@ -265,6 +280,8 @@ const api = {
   docsPptxPages: (relPath: string) => ipcRenderer.invoke('docs:pptxPages', relPath),
   agentChat: (req: { sessionId: string; message: string; context?: unknown; chatId?: string; source?: string; modelId?: string; effort?: string; skillName?: string }) => ipcRenderer.invoke('agent:chat', req),
   agentRegenerate: (req: { sessionId: string; context?: unknown; chatId?: string; effort?: string }) => ipcRenderer.invoke('agent:regenerate', req),
+  // A 方案：从断点续跑（中断卡上的「继续」）；不追加用户消息，现场由主进程一次性 claim
+  agentResume: (req: { sessionId: string; context?: unknown; chatId?: string; source?: string; modelId?: string; effort?: string }) => ipcRenderer.invoke('agent:resume', req),
   agentStartScene: (req: { sessionId: string; context?: unknown; chatId?: string; source?: string; modelId?: string }) => ipcRenderer.invoke('agent:startScene', req),
   agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: unknown; chatId?: string; effort?: string }) => ipcRenderer.invoke('agent:editMessage', req),
   agentDeleteMessage: (sessionId: string, messageId: string) => ipcRenderer.invoke('agent:deleteMessage', { sessionId, messageId }),
@@ -297,17 +314,21 @@ const api = {
   agentSessions: () => ipcRenderer.invoke('agent:sessions'),
   agentNewSession: (title?: string, source?: string) => ipcRenderer.invoke('agent:newSession', title, source),
   agentMessages: (sessionId: string) => ipcRenderer.invoke('agent:messages', sessionId),
+  // 存量会话认领的一次性告知（会话随仓库走）；取走即删
+  agentTakeAdoptNotice: () => ipcRenderer.invoke('agent:takeAdoptNotice'),
   // AI 用量 / 会话文件改动（v3.4.0 批次5）：右栏 token 面板只读
   agentUsageGet: () => ipcRenderer.invoke('agent:usage:get'),
   agentSessionChanges: (sessionId?: string) => ipcRenderer.invoke('agent:sessionChanges:get', sessionId),
   agentRenameSession: (id: string, title: string) => ipcRenderer.invoke('agent:renameSession', id, title),
   agentSetSessionInstructions: (id: string, instructions: string) => ipcRenderer.invoke('agent:setSessionInstructions', id, instructions),
   agentDeleteSession: (id: string) => ipcRenderer.invoke('agent:deleteSession', id),
+  agentSetSessionPinned: (id: string, pinned: boolean) => ipcRenderer.invoke('agent:setSessionPinned', id, pinned),
   // v3.1.2 条目11：支线旁问（sidetrack）。createSideLane 只装上下文、不调 LLM
   agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) =>
     ipcRenderer.invoke('agent:createSideLane', payload),
   agentListSideLanes: (parentSessionId: string) => ipcRenderer.invoke('agent:listSideLanes', parentSessionId),
   agentPromoteSideLane: (laneSessionId: string) => ipcRenderer.invoke('agent:promoteSideLane', laneSessionId),
+  agentMarkSideLaneRead: (laneId: string) => ipcRenderer.invoke('agent:markSideLaneRead', laneId),
   // AI教学 P1：会话 ⇄ 文件夹绑定
   aiTeachEnsureSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:ensureSessionFolder', id),
   aiTeachSessionFolder: (id: string) => ipcRenderer.invoke('aiTeach:sessionFolder', id),
@@ -335,23 +356,21 @@ const api = {
   aiTeachSetLastWorkspace: (wsId: null | string) => ipcRenderer.invoke('aiTeach:setLastWorkspace', wsId),
   // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲）
   aiTeachCourseGetState: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getState', wsId),
-  aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => ipcRenderer.invoke('aiTeachCourse:setEnabled', wsId, enabled),
-  aiTeachCourseSaveOutline: (wsId: string, outline: unknown) => ipcRenderer.invoke('aiTeachCourse:saveOutline', wsId, outline),
+  aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) =>
+    ipcRenderer.invoke('aiTeachCourse:setEnabled', wsId, enabled),
+  aiTeachCourseWriteOutlineDraft: (wsId: string, draft: unknown) =>
+    ipcRenderer.invoke('aiTeachCourse:writeOutlineDraft', wsId, draft),
+  aiTeachCourseRemoveUnit: (wsId: string, unit: string) =>
+    ipcRenderer.invoke('aiTeachCourse:removeUnit', wsId, unit),
   aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: unknown) => ipcRenderer.invoke('aiTeachCourse:setUnitProgress', wsId, unitId, patch),
-  aiTeachCourseGenerateOutline: (input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutline', input),
   aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => ipcRenderer.invoke('aiTeachCourse:openUnit', wsId, unitId, kind),
   aiTeachCourseEndLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:endLesson', sessionId),
   aiTeachCourseFinalizeLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:finalizeLesson', sessionId),
   aiTeachCourseFinishUnit: (wsId: string, unitId: string, score?: { correct: number; total: number }) => ipcRenderer.invoke('aiTeachCourse:finishUnit', wsId, unitId, score),
   aiTeachCourseReadPrevHandoff: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:readPrevHandoff', sessionId),
   aiTeachCourseMakeUnitQuiz: (wsId: string, unitId: string) => ipcRenderer.invoke('aiTeachCourse:makeUnitQuiz', wsId, unitId),
-  aiTeachCourseGenerateOutlineStream: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachCourse:generateOutlineStream', id, input),
-  /** AI教学·课程模式：生成大纲过程事件（`{ id, phase, delta?, model?, chars?, error? }`） */
-  onAiTeachCourseGenProgress: (cb: (p: unknown) => void) => {
-    const handler = (_e: unknown, p: unknown) => cb(p)
-    ipcRenderer.on('aiTeach:course-gen-progress', handler)
-    return () => { ipcRenderer.removeListener('aiTeach:course-gen-progress', handler) }
-  },
+  aiTeachCourseOpenAssistant: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:openAssistant', wsId),
+  aiTeachCourseOpenChapterReview: (wsId: string, chapterId: string) => ipcRenderer.invoke('aiTeachCourse:openChapterReview', wsId, chapterId),
   /** AI教学·课程模式：大纲/进度变化（课程主页据此重拉），载荷 `{ wsId }` */
   onAiTeachCourseRefresh: (cb: (p: { wsId: string }) => void) => {
     const handler = (_e: unknown, p: { wsId: string }) => cb(p)
@@ -372,7 +391,10 @@ const api = {
   aiTeachSrcWebProbe: (id: string, no: number, anchorUrl?: string) => ipcRenderer.invoke('aiTeachSrc:webProbe', id, no, anchorUrl),
   aiTeachSrcWebCrawl: (id: string, no: number, urls: string[]) => ipcRenderer.invoke('aiTeachSrc:webCrawl', id, no, urls),
   aiTeachSrcWebCancel: (id: string) => ipcRenderer.invoke('aiTeachSrc:webCancel', id),
-  aiTeachSrcPromote: (id: string) => ipcRenderer.invoke('aiTeachSrc:promote', id),
+  aiTeachSrcPromote: (id: string, nos?: number[]) => ipcRenderer.invoke('aiTeachSrc:promote', id, nos),
+  aiTeachFavList: (wsId: string) => ipcRenderer.invoke('aiTeachFav:list', wsId),
+  aiTeachFavAdd: (wsId: string, rel: string, name: string) => ipcRenderer.invoke('aiTeachFav:add', wsId, rel, name),
+  aiTeachFavRemove: (wsId: string, rel: string) => ipcRenderer.invoke('aiTeachFav:remove', wsId, rel),
   aiTeachProfileReadGlobal: () => ipcRenderer.invoke('aiTeachProfile:readGlobal'),
   aiTeachProfileWriteGlobal: (text: string) => ipcRenderer.invoke('aiTeachProfile:writeGlobal', text),
   aiTeachProfileReadSession: (id: string) => ipcRenderer.invoke('aiTeachProfile:readSession', id),
@@ -461,6 +483,7 @@ const api = {
   // export
   showExportSaveDialog: (opts: unknown) => ipcRenderer.invoke('export:showSaveDialog', opts),
   writeExportTextFile: (filePath: string, content: string, encoding?: string) => ipcRenderer.invoke('export:writeTextFile', filePath, content, encoding),
+  writeExportPdf: (filePath: string) => ipcRenderer.invoke('export:writePdf', filePath),
 
   // toolbox - scripts CRUD
   getToolboxScripts: () => ipcRenderer.invoke('toolbox:getScripts'),
@@ -532,7 +555,13 @@ const api = {
   accountingUpdate: (id: string, patch: unknown) => ipcRenderer.invoke('accounting:update', id, patch),
   accountingDelete: (id: string) => ipcRenderer.invoke('accounting:delete', id),
   accountingSetAccountBalance: (id: string, initialBalance: number) => ipcRenderer.invoke('accounting:setAccountBalance', id, initialBalance),
-  accountingCreateAccount: (name: string, initialBalance: number) => ipcRenderer.invoke('accounting:createAccount', name, initialBalance),
+  accountingCreateAccount: (name: string, initialBalance: number) =>
+    ipcRenderer.invoke('accounting:createAccount', name, initialBalance),
+  accountingRecurringCreate: (input: unknown) => ipcRenderer.invoke('accounting:recurringCreate', input),
+  accountingRecurringUpdate: (id: string, patch: unknown) => ipcRenderer.invoke('accounting:recurringUpdate', id, patch),
+  accountingRecurringDelete: (id: string) => ipcRenderer.invoke('accounting:recurringDelete', id),
+  accountingRecurringPost: (id: string) => ipcRenderer.invoke('accounting:recurringPost', id),
+  accountingRecurringSettle: () => ipcRenderer.invoke('accounting:recurringSettle'),
   createBookmarkCategory: (data: unknown) => ipcRenderer.invoke('bookmark:createCategory', data),
   updateBookmarkCategory: (id: string, data: unknown) => ipcRenderer.invoke('bookmark:updateCategory', id, data),
   deleteBookmarkCategory: (id: string) => ipcRenderer.invoke('bookmark:deleteCategory', id),
@@ -769,6 +798,7 @@ const api = {
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => ipcRenderer.invoke('ws:writeFile', rootId, relPath, content, expectedMtimeMs),
   // 归档三条通道（ws:setMdStatus / ws:setArchiveStatus / ws:getArchiveEntries）已于 2026-09-20 随归档退役删除
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => ipcRenderer.invoke("ws:createFile", rootId, relPath, content),
+  workspaceCopyFile: (rootId: string, srcRel: string, dstRel: string) => ipcRenderer.invoke("ws:copy", rootId, srcRel, dstRel),
   workspaceMkdir: (rootId: string, relPath: string) => ipcRenderer.invoke('ws:mkdir', rootId, relPath),
   // 粘贴系统剪贴板里的外部文件/目录：srcPaths 由渲染层 paste 事件 + webUtils.getPathForFile 取得
   // （主进程 clipboard.readBuffer('FileNameW') 实测只能拿到第一条，多选会丢文件——见 ws:pasteExternal 注释）

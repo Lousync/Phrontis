@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { agentAbort, agentChat, agentCreateSideLane, agentDeleteSession, agentMessages, agentSessions } from '../../lib/ipc'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
+import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
 import { showToast } from '../../lib/toast'
 import type { AgentStoredMessage, AgentTraceStep } from '../../types'
-import { ArrowUp, Check, ChevronDown, Copy, Loader2, Maximize2, Minimize2, Sparkles, X } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, ChevronLeft, Copy, Loader2, Maximize2, Quote, Sparkles, X } from 'lucide-react'
 
 /**
  * 支线旁问面板（v3.1.2 条目11）。
@@ -43,20 +44,26 @@ export interface SideLanePanelProps {
   openLaneId?: string
   /** 关闭面板 */
   onClose: () => void
-  /** 切换形态：浮层 ⇄ 右栏宽轨（两种呈现同一条支线，不重建会话、不丢内容） */
-  onToggleWide?: () => void
+  /** 停靠到右栏支线中心（浮窗形态；拖到右缘松手同此路径） */
+  onDock?: () => void
   /** 支线就绪（拿到 laneSessionId 与标题）——父级据此**自动登记锚点回执**（关窗不失联）与升格 */
   onLaneReady?: (laneSessionId: string, laneTitle: string) => void
   /** P4 升格为正式会话 */
   onPromote?: (laneSessionId: string) => void
-  /** 宽轨形态（父级容器已决定宽度，这里只影响留白与折行） */
-  wide?: boolean
   /** 浮层形态的拖拽手柄：父级（`useFloatingWindow`）提供，挂到顶栏 → 拖动移动、双击复位。
-   *  宽轨形态不传（顶栏不可拖）。顶栏内按钮由 hook 的 INTERACTIVE 豁免规则自动跳过。 */
+   *  右栏内嵌形态不传（顶栏不可拖）。顶栏内按钮由 hook 的 INTERACTIVE 豁免规则自动跳过。 */
   titleDrag?: {
     onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void
     onDoubleClick: (e: React.MouseEvent<HTMLDivElement>) => void
   }
+  /** 右栏支线中心内嵌：顶栏显示「← 列表」+ 支线标题（替代「支线旁问 · 来自…」），隐藏关闭按钮与轮数切换 */
+  onBack?: () => void
+  /** 引用到主线：把最后一条 AI 回答交给父级放进主线输入框（不自动发送） */
+  onQuote?: (text: string) => void
+  /** 浮出为窗口：父级打开浮窗形态（与右栏同一条支线） */
+  onFloat?: () => void
+  /** 隐藏轮数切换（右栏中心内嵌 / 既有支线快照已固化时） */
+  hideTurns?: boolean
 }
 
 interface PanelMsg {
@@ -66,13 +73,14 @@ interface PanelMsg {
   createdAt?: string
 }
 
-export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, openLaneId, onClose, onToggleWide, onLaneReady, onPromote, wide, titleDrag }: SideLanePanelProps) {
+export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, openLaneId, onClose, onDock, onLaneReady, onPromote, titleDrag, onBack, onQuote, onFloat, hideTurns }: SideLanePanelProps) {
   const shell = useInputShell()
   const chatIdRef = useRef('')
   const { draft: streamDraft, begin: beginStream, end: endStream } = useAgentStream(chatIdRef)
 
   const [laneId, setLaneId] = useState<string | null>(openLaneId ?? null)
   const [snapshot, setSnapshot] = useState('')
+  const [title, setTitle] = useState('')
   const [turns, setTurns] = useState<number>(() => readTurns())
   const [messages, setMessages] = useState<PanelMsg[]>([])
   const [input, setInput] = useState('')
@@ -112,6 +120,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
         if (!row) { setErr('支线已不存在'); setLoading(false); return }
         setLaneId(openLaneId)
         laneTitleRef.current = row.title ?? ''
+        setTitle(row.title ?? '')
         notifiedRef.current = true // 既有支线的锚点早已登记过，不再重复回执
         setSnapshot(row.sideContext ?? '')
         lockedRef.current = (await agentMessages(openLaneId).catch(() => [])).length > 0
@@ -129,6 +138,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
       setLaneId(r.laneSessionId)
       createdRef.current = true
       laneTitleRef.current = r.title ?? ''
+      setTitle(r.title ?? '')
       setSnapshot(r.snapshotText ?? '')
       lockedRef.current = false
       await refresh(r.laneSessionId)
@@ -168,6 +178,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
       setLaneId(r.laneSessionId)
       createdRef.current = true
       laneTitleRef.current = r.title ?? ''
+      setTitle(r.title ?? '')
       notifiedRef.current = false // 换了新支线，首条消息后重新回执
       setSnapshot(r.snapshotText ?? '')
       if (old && old !== r.laneSessionId) void agentDeleteSession(old)
@@ -205,29 +216,45 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
         onPointerDown={titleDrag?.onPointerDown}
         onDoubleClick={titleDrag?.onDoubleClick}
       >
-        <Sparkles size={13} className="shrink-0 text-[var(--accent)]" />
-        <span className="shrink-0 text-[12px] font-medium text-[var(--text-primary)]">支线旁问</span>
-        <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" title={parentTitle}>来自「{parentTitle}」</span>
-        {/* 轮数切换：新建且未发送时可调；既有支线快照已固化，不可调 */}
-        <div className="shrink-0 flex items-center gap-0.5 rounded-md bg-[var(--bg-secondary)] p-0.5">
-          {TURN_OPTIONS.map(t => (
-            <button key={t} disabled={!!openLaneId || lockedRef.current || pending} onClick={() => { void changeTurns(t) }}
-              title={openLaneId ? '既有支线的上下文已固化' : lockedRef.current ? '已发送，上下文已锁定' : `带入主线最近 ${t} 轮`}
-              className={`px-1.5 py-0.5 rounded text-[10.5px] tabular-nums transition-colors ${turns === t ? 'bg-[var(--bg-hover)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'} disabled:opacity-40 disabled:cursor-not-allowed`}>
-              {t}轮
+        {onBack ? (
+          <>
+            <button onClick={onBack} title="返回支线列表"
+              className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+              <ChevronLeft size={13} />列表
             </button>
-          ))}
-        </div>
-        {onToggleWide && (
-          <button onClick={onToggleWide} title={wide ? '浮出为可拖动的小窗' : '停靠到右栏（宽轨，并列占宽不遮挡中栏；也可直接把窗口拖到右缘松手）'}
+            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--text-primary)]" title={title || parentTitle}>{title || '支线旁问'}</span>
+          </>
+        ) : (
+          <>
+            <Sparkles size={13} className="shrink-0 text-[var(--accent)]" />
+            <span className="shrink-0 text-[12px] font-medium text-[var(--text-primary)]">支线旁问</span>
+            <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" title={parentTitle}>来自「{parentTitle}」</span>
+          </>
+        )}
+        {/* 轮数切换：新建且未发送时可调；既有支线快照已固化，不可调 */}
+        {!hideTurns && !onBack && (
+          <div className="shrink-0 flex items-center gap-0.5 rounded-md bg-[var(--bg-secondary)] p-0.5">
+            {TURN_OPTIONS.map(t => (
+              <button key={t} disabled={!!openLaneId || lockedRef.current || pending} onClick={() => { void changeTurns(t) }}
+                title={openLaneId ? '既有支线的上下文已固化' : lockedRef.current ? '已发送，上下文已锁定' : `带入主线最近 ${t} 轮`}
+                className={`px-1.5 py-0.5 rounded text-[10.5px] tabular-nums transition-colors ${turns === t ? 'bg-[var(--bg-hover)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'} disabled:opacity-40 disabled:cursor-not-allowed`}>
+                {t}轮
+              </button>
+            ))}
+          </div>
+        )}
+        {onDock && (
+          <button onClick={onDock} title="停靠到右栏支线中心（也可直接把窗口拖到右缘松手）"
             className="shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-            {wide ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            <Maximize2 size={13} />
           </button>
         )}
-        <button onClick={onClose} title="关闭支线（内容保留在支线会话里）"
-          className="shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-          <X size={13} />
-        </button>
+        {!onBack && (
+          <button onClick={onClose} title="关闭支线（内容保留在支线会话里）"
+            className="shrink-0 p-1 rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+            <X size={13} />
+          </button>
+        )}
       </div>
 
       {/* 上下文摘录条：就地装载的可见证据（默认折叠，一眼可核） */}
@@ -276,7 +303,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
               </>
             ) : (
               <div className="min-w-0 group relative">
-                <MarkdownPreview content={m.content} />
+                <MarkdownPreview content={m.content} codeBlockChrome="card" />
                 <button onClick={() => { void navigator.clipboard.writeText(m.content).then(() => showToast({ type: 'info', message: '已复制' })).catch(() => null) }}
                   title="复制" className="absolute right-0 -top-1 px-1 py-0.5 rounded text-[10.5px] text-[var(--text-muted)] opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-hover)] transition-opacity">
                   <Copy size={10} />
@@ -290,8 +317,12 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
             <StreamBubble draft={streamDraft} />
           </div>
         ) : (
-          <div className="flex items-center gap-1.5 text-[11.5px] text-[var(--text-muted)]">
-            <Loader2 size={12} className="animate-spin" />思考中…
+          /* 兜底（无流式草稿）：与中栏/全局面板用**同一套状态行**，否则支线里会闪一下旧样式 */
+          <div className="kb-gen-row">
+            <span className="kb-stage">
+              <span className="stage-label">正在等待模型响应…</span>
+              <span className="kb-sweep" />
+            </span>
           </div>
         ))}
       </div>
@@ -300,19 +331,35 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
           「带回主线」已于 2026-09-14 移除——支线定位收窄为「只解答小知识点」，结论不再需要
           一条人工"带回"通道；支线与其锚点回答的关联改为**自动回执**（见 index.tsx 的 anchorLanes），
           直接关窗也不再失联。 */}
-      {laneId && !pending && onPromote && (
+      {laneId && !pending && (onPromote || onQuote || onFloat) && (
         <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 border-t border-[var(--border-color)]">
-          <button onClick={() => onPromote(laneId)}
-            title="把支线升格为正式会话（进左栏会话列表，可独立续聊；单向不可逆）"
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-            <ArrowUp size={11} />升格为会话
-          </button>
+          {onQuote && (
+            <button onClick={() => { const lastAi = [...messages].reverse().find(m => m.role === 'assistant'); onQuote(lastAi?.content ?? '') }}
+              title="把这条支线的结论作为引用放进主线输入框（不自动发送，你可继续编辑）"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+              <Quote size={11} />引用到主线
+            </button>
+          )}
+          {onFloat && (
+            <button onClick={onFloat} title="浮出为可拖动窗口（与右栏同一条支线）"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+              <Maximize2 size={11} />浮出窗口
+            </button>
+          )}
+          {onPromote && (
+            <button onClick={() => onPromote(laneId)}
+              title="把支线升格为正式会话（进左栏会话列表，可独立续聊；单向不可逆）"
+              className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+              <ArrowUp size={11} />升格为会话
+            </button>
+          )}
         </div>
       )}
 
       {/* 输入区 */}
       <div className="shrink-0 w-full max-w-[820px] mx-auto px-2.5 pb-2.5 pt-2">
-        <div className={`px-3 pt-2.5 pb-2 ${shell.wrap}`}>
+        <div className={`relative px-3 pt-2.5 pb-2 ${shell.wrap}`}>
+          <AiMascotAnchor />
           <textarea
             ref={inputRef}
             value={input}

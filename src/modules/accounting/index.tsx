@@ -1,11 +1,11 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { ReceiptText, BarChart3, NotebookPen, ListOrdered, CalendarDays, Eye, EyeOff, Plus } from 'lucide-react'
-import type { AccountingTransaction } from '../../types'
-import { accountingDelete } from '../../lib/ipc'
+import { ReceiptText, BarChart3, NotebookPen, ListOrdered, CalendarDays, Eye, EyeOff, Plus, Repeat, Pencil, Trash2 } from 'lucide-react'
+import type { AccountingTransaction, AccountingRecurring } from '../../types'
+import { accountingDelete, accountingRecurringPost, accountingRecurringDelete, accountingRecurringSettle, accountingRecurringUpdate } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { FlowView, StatsView, ReviewView } from './views'
-import { useAccountingData, monthLabel, money, sumAmount, catColor, todayStr, computeAccountBalances, requestEditTransaction, requestNewTransaction, type AccountingView } from './shared'
+import { useAccountingData, monthLabel, money, sumAmount, catColor, todayStr, computeAccountBalances, recurringStatus, recurringMonthlyTotal, requestEditTransaction, requestNewTransaction, requestNewRecurring, requestEditRecurring, type AccountingView } from './shared'
 
 /**
  * 记账模块（工作台内 Tab）。
@@ -47,7 +47,7 @@ function useNarrow(ref: { current: HTMLElement | null }, threshold: number): boo
 }
 
 export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHosted = false }: Props) {
-  const { transactions, categories, accounts, reload } = useAccountingData()
+  const { transactions, categories, accounts, recurring, reload } = useAccountingData()
   const [view, setView] = useState<AccountingView>('flow')
   const [month, setMonth] = useState<string>(() => todayStr().slice(0, 7))
   const [typeFilter, setTypeFilter] = useState<'all' | 'expense' | 'income'>('all')
@@ -84,7 +84,7 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
 
   const catCounts = useMemo(() => {
     const m = new Map<string, number>()
-    for (const t of monthTx) m.set(t.category, (m.get(t.category) ?? 0) + 1)
+    for (const t of monthTx) { if (t.type === 'transfer') continue; m.set(t.category, (m.get(t.category) ?? 0) + 1) }  // 转账无分类，不进分类侧栏
     return m
   }, [monthTx])
 
@@ -93,6 +93,46 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
       const ok = await accountingDelete(id)
       if (ok) { showToast({ type: 'info', message: '已删除这一笔' }); await reload() }
     } catch (e) { showToast({ type: 'error', message: '删除失败', detail: String(e) }) }
+  }
+
+  // 定期收支：打开模块时结算一次（幂等，自动补齐漏掉的应扣），可撤销
+  const settledRef = useRef(false)
+  useEffect(() => {
+    if (settledRef.current) return
+    settledRef.current = true
+    void (async () => {
+      try {
+        const res = await accountingRecurringSettle()
+        if (res.added > 0) {
+          const ids = res.items.map((i) => i.id)
+          showToast({
+            type: 'success', duration: 9000,
+            message: `已自动记入定期收支 ${res.added} 笔（${money(res.total)}）`,
+            action: { label: '撤销', onClick: () => { void (async () => { for (const id of ids) await accountingDelete(id).catch(() => { }); await reload() })() } },
+          })
+          await reload()
+        }
+      } catch { /* 仓库未打开等，忽略 */ }
+    })()
+  }, [reload])
+
+  const handlePostRecurring = async (id: string): Promise<void> => {
+    try {
+      const res = await accountingRecurringPost(id)
+      if (!res.ok) { showToast({ type: 'warning', message: res.error ?? '记入失败' }); return }
+      showToast({ type: 'success', message: '已记入这一笔' })
+      await reload()
+    } catch (e) { showToast({ type: 'error', message: '记入失败', detail: String(e) }) }
+  }
+  const handleDeleteRecurring = async (id: string): Promise<void> => {
+    try {
+      const ok = await accountingRecurringDelete(id)
+      if (ok) { showToast({ type: 'info', message: '已删除规则（已生成的流水保留）' }); await reload() }
+    } catch (e) { showToast({ type: 'error', message: '删除失败', detail: String(e) }) }
+  }
+  const handleToggleRecurring = async (r: AccountingRecurring): Promise<void> => {
+    try { await accountingRecurringUpdate(r.id, { enabled: !r.enabled }); await reload() }
+    catch (e) { showToast({ type: 'error', message: '操作失败', detail: String(e) }) }
   }
 
   const sidebarInner = (
@@ -133,6 +173,59 @@ export function AccountingModule({ isActive = true, sidebarEl = null, sidebarHos
           </button>
         ))}
         {catCounts.size === 0 && <div className="px-2.5 py-1 text-[11.5px] text-[var(--text-muted)]">本月还没有分类数据</div>}
+      </div>
+
+      {/* 定期收支（每月几号 / 每 N 天）*/}
+      <div className="mt-3 border-t border-[var(--border-color)] pt-2">
+        <div className="flex items-center gap-1.5 px-2 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+          <Repeat size={12} /> 定期收支
+          <span className="ml-auto tabular-nums">{recurring.length}</span>
+          <button onClick={() => requestNewRecurring()} title="新增定期收支"
+            className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--accent)]"><Plus size={13} /></button>
+        </div>
+        {recurring.length > 0 && (
+          <div className="mx-2 mt-1 flex items-baseline gap-1.5 rounded-md border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-2.5 py-1.5">
+            <span className="text-[11px] text-[var(--text-secondary)]">每月固定支出</span>
+            <span className="ml-auto text-[14px] font-bold tabular-nums text-[var(--accent)]">{money(recurringMonthlyTotal(recurring))}</span>
+          </div>
+        )}
+        <div className="mt-1 flex flex-col gap-1">
+          {recurring.map((r) => {
+            const st = recurringStatus(r, transactions, todayStr())
+            const badge = st.kind === 'paused' ? { t: '已暂停', c: 'text-[var(--text-muted)] bg-[var(--bg-hover)]' }
+              : st.kind === 'done' ? { t: '本月已记', c: 'text-[var(--money-in,#2b9e8f)] bg-[color-mix(in_srgb,var(--money-in,#2b9e8f)_16%,transparent)]' }
+                : st.kind === 'due' ? { t: `待记 ${st.due.slice(5)}`, c: 'text-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_18%,transparent)]' }
+                  : { t: `待扣 ${st.due.slice(5)}`, c: 'text-[var(--text-muted)] bg-[var(--bg-hover)]' }
+            const cyc = r.mode === 'monthly' ? `每月 ${r.day} 号` : `每 ${r.intervalDays} 天`
+            return (
+              <div key={r.id} className={'rounded-md border border-transparent bg-[var(--bg-tertiary)] px-2 py-1.5 ' + (r.enabled ? '' : 'opacity-55')}>
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => void handleToggleRecurring(r)} title={r.enabled ? '暂停' : '启用'}
+                    className={'relative h-4 w-7 shrink-0 rounded-full transition-colors ' + (r.enabled ? 'bg-[var(--accent)]' : 'bg-[var(--border-color)]')}>
+                    <span className="absolute top-0.5 h-3 w-3 rounded-full bg-white transition-[left] duration-150" style={{ left: r.enabled ? 14 : 2 }} />
+                  </button>
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--text-primary)]" title={r.name}>{r.name}</span>
+                  <span className={'shrink-0 text-[12px] font-semibold tabular-nums ' + (r.type === 'income' ? 'text-[var(--money-in,#2b9e8f)]' : 'text-[var(--money-out,#e06c4f)]')}>{r.type === 'expense' ? '-' : '+'}{money(r.amount).replace('¥', '')}</span>
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-[10.5px]">
+                  <span className="truncate text-[var(--text-muted)]">{cyc}{r.payment ? ` · ${r.payment}` : ''}</span>
+                  <span className={'ml-auto shrink-0 rounded-full px-1.5 py-px ' + badge.c}>{badge.t}</span>
+                </div>
+                <div className="mt-1 flex items-center gap-1">
+                  {r.enabled && st.kind === 'due' && (
+                    <button onClick={() => void handlePostRecurring(r.id)} className="rounded border border-[var(--accent)]/50 px-1.5 py-px text-[10.5px] text-[var(--accent)] transition-colors hover:bg-[var(--accent)]/10">记入</button>
+                  )}
+                  <span className="ml-auto" />
+                  <button onClick={() => requestEditRecurring(r.id)} title="编辑" className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Pencil size={11} /></button>
+                  <button onClick={() => void handleDeleteRecurring(r.id)} title="删除" className="rounded p-0.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"><Trash2 size={11} /></button>
+                </div>
+              </div>
+            )
+          })}
+          {recurring.length === 0 && (
+            <div className="px-2.5 py-1 text-[11.5px] text-[var(--text-muted)]">还没有定期收支，点右上 ＋ 新增（如会员、房租、每月生活费）。</div>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -73,8 +73,6 @@ export const BROADCAST_CHANNEL = {
   aiTeachWebCrawlProgress: 'aiTeach:web-crawl-progress',
   /** AI教学·课程模式：课程大纲/进度变化，载荷 `{ wsId: string }`（课程主页据此重拉） */
   aiTeachCourseRefresh: 'aiTeach:course-refresh',
-  /** AI教学·课程模式：生成大纲过程事件，载荷 `CourseGenProgress`（`{ id, phase, delta?, model?, chars?, error? }`） */
-  aiTeachCourseGenProgress: 'aiTeach:course-gen-progress',
   /** N-1 手册通道：助手侧提示（如升格 Toast），载荷 `{ sessionId, message }` */
   assistantNotice: 'assistant:notice',
   /** N-3 多对话并行：助手会话运行态（全窗口），载荷 AgentRunStateEvent `{ running: sessionId[], ended? }` */

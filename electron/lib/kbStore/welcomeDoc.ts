@@ -746,7 +746,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
         <h3>AI 助手<span class="ai-tag">Ctrl+J</span></h3>
         <p class="ai-moto">读任何东西时随手唤起侧栏，边看边问——它带着你正在读的内容回答。</p>
         <ol>
-          <li><b>配模型</b>：设置 → AI 工具，选本地 Ollama（离线免费）或在线 API；装过 CC Switch 可一键导入。</li>
+          <li><b>配模型</b>：设置 → AI，选本地 Ollama（离线免费）或在线 API；装过 CC Switch 可一键导入。</li>
           <li><b>唤起提问</b>：任何模块按 <kbd>Ctrl</kbd>+<kbd>J</kbd>，右栏滑出 AI 侧栏，自动带上当前页面；点 <kbd>⤢</kbd> 扩大成中间宽版对话。</li>
           <li><b>喂它上下文</b>：输入 <code>@</code> 引用仓库里的笔记；开着「感知模式」，它还会自动检索相关笔记作素材，回答带脚注可溯源。</li>
           <li><b>让它动手</b>：搜索笔记、读文件、整理内容——每次工具调用都有审计记录可回看。</li>
@@ -789,7 +789,7 @@ export function buildWelcomeDocContent(now = new Date()): string {
           </div>
         </div>
         <button class="lnk" id="aiReplay">▸ 再演示一次</button>
-        <div class="ai-foot">安全边界：设置 → AI 工具 → 权限，按模块给「禁止 / 只读 / 读写」；没授权的模块 AI 完全碰不到。写作时笔记区还会自动出接续建议（浅色续写），<kbd>Alt</kbd>+<kbd>A</kbd> 立即要一条。</div>
+        <div class="ai-foot">安全边界：设置 → AI → 权限，按模块给「禁止 / 只读 / 读写」；没授权的模块 AI 完全碰不到。写作时笔记区还会自动出接续建议（浅色续写），<kbd>Alt</kbd>+<kbd>A</kbd> 立即要一条。</div>
       </div>
 
       <div class="ai-panel">

@@ -11,6 +11,7 @@ import { emitPluginEvent } from './pluginEvents'
 import { IGNORE_FILE_NAME } from './kbStore/ignoreFile'
 import { parseMarkdown, serializeMarkdown } from './kbStore/mdStore'
 import { broadcastDataChanged } from '../main/windowBus'
+import { adoptLegacyAgentSessionsToVault } from './agentSessionRepo'
 import { syncVaultWatcher, markSelfWrite } from './fsWatcher'
 import { bookMetaPruneOrphans } from './kbStore/vaultBookMetaRepo'
 import { globalReadJson, globalWriteJson } from './globalJsonStore'
@@ -231,8 +232,15 @@ export function readWorkspaceFile(absPath: string): ReadFileResult {
  *    fbz 是 zip 封装，同 epub 需整份读；fb2 是纯 XML，本可走 loadFile，但阅读器只有一条整本读路径，
  *    且两类书都受 128MB 上限与「只读」约束，风险面与 epub 完全一致。
  *  - cbz = 阶段 2b（2026-09-22）：zip 封装的图片漫画，同 fbz 需整份读（中央目录在尾部）。
- *    同上受 128MB 上限与「只读」约束；**页图只能靠整份 zip 解包**，无更窄的读法。 */
-const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'txt', 'epub', 'fb2', 'fbz', 'cbz']
+ *    同上受 128MB 上限与「只读」约束；**页图只能靠整份 zip 解包**，无更窄的读法。
+ *  - avif = 批 3（2026-10-13）：笔记区图片查看器。**理由**：图片取回统一走本通道
+ *    （不走 `ws:readImage` —— 那条的白名单是「附件区」，管不了仓库里任意位置的图片，
+ *    而扩它等于再开一扇能力相同的门）。png/jpg/jpeg/webp/gif/bmp/svg 七种**早已在列**
+ *    （当初为 PDF 封面与 cbz 加的），故本批只补 avif 一项；`.ico` 同批评估后**刻意不收**
+ *    （仓库内罕见，不值得再动一次安全面）。风险面与既有图片格式完全一致：
+ *    只读、pathGuard 内、无写通道、渲染侧另受 32MB 与 1 亿像素两道守卫
+ *    （`src/lib/imageFormats.ts` 的 MAX_IMAGE_BYTES / MAX_IMAGE_PIXELS）。 */
+const RANGE_EXT_WHITELIST = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'avif', 'txt', 'epub', 'fb2', 'fbz', 'cbz']
 
 export interface ReadRangeResult {
   /** base64 编码的 [offset, offset+len) 段数据（不足段取到文件尾） */
@@ -569,13 +577,22 @@ function migrateBlogLayoutIntoKnowbase(rootPath: string): void {
   } catch { /* 目录不可读：跳过 */ }
 }
 
-/** 打开/创建/恢复仓库时的一次性布局迁移（P4 起 = 博客收拢；失败不阻断进入） */
+/**
+ * 打开/创建/恢复仓库时的一次性布局迁移（P4 起 = 博客收拢；失败不阻断进入）。
+ *
+ * 2026-10-13 加入第二条：**存量 AI 会话认领**（会话改为随仓库走，见
+ * docs/agent-sessions-vault-plan.md）。三处调用点（启动恢复 / adoptVaultDirectory /
+ * 导入合并）正是「仓库成为当前仓库」的全部入口，认领器自身幂等且进程内只试一次，
+ * 所以挂在这里即可，不必在各调用点重写一遍。
+ */
 function runLayoutMigrations(rootPath: string): void {
   try {
     migrateBlogLayoutIntoKnowbase(rootPath)
   } catch (e) {
     console.warn('[vault-layout] Blog layout migration failed (non-blocking):', (e as Error)?.message || e)
   }
+  // 存量 AI 会话 → 当前仓库（幂等；失败只留日志，原全局文件不动）
+  adoptLegacyAgentSessionsToVault()
 }
 
 // ===== 附件落盘（P3 编辑器插图：选图/粘贴共用；D1 目标 = 仓库根 .attachments/<年-月>/）=====
@@ -600,6 +617,45 @@ function uniqueAttachmentName(dirAbs: string, fileName: string): string {
   const ext = extname(fileName)
   const stem = fileName.slice(0, fileName.length - ext.length)
   return `${stem}-${Date.now()}${ext}`
+}
+
+/**
+ * 版本式重名去重：`<slug>.png` 已存在 → `<slug>-v2.png` → `-v3` …
+ * （v3.6.0 对话内生图，docs/ai-image-gen-plan.md §4.3）。
+ *
+ * 与上面 `uniqueAttachmentName` 的**时间戳式**刻意并存、不合并：两者的语义不同。
+ * 剪贴板/选图的附件名是用户原文件名，撞车是偶然，加时间戳最省事；
+ * 生图产物要的是**可读的版本名** —— 卡上「版本 v1 / v2」切换、改图再次落盘成 `-v2`
+ * 都直接读文件名，时间戳看不出先后关系（同秒内还不可排序）。
+ * 与 visual.html / mindmap 的「重名不覆盖」也是同一口径。
+ */
+export function uniqueVersionedName(dirAbs: string, fileName: string): string {
+  if (!existsSync(join(dirAbs, fileName))) return fileName
+  const ext = extname(fileName)
+  const stem = fileName.slice(0, fileName.length - ext.length)
+  for (let v = 2; v < 1000; v++) {
+    const cand = `${stem}-v${v}${ext}`
+    if (!existsSync(join(dirAbs, cand))) return cand
+  }
+  return `${stem}-${Date.now()}${ext}` // 1000 版同名：退化为时间戳（不覆盖，也不无限循环）
+}
+
+/**
+ * 生图产物落附件区：`.attachments/<年-月>/<slug>.png`，重名走**版本式**递增。
+ * 与 `stageImageBytes` 的分工：那个收用户给的文件名（时间戳去重），这个收模型给的 slug（版本去重）。
+ */
+export function stageImageVersioned(rootPath: string, slug: string, data: Buffer): { name: string; relPath: string } {
+  const raw = `${String(slug ?? '').trim() || 'image'}.png`
+  const safe = sanitizeFileName(raw)
+  const ext = extname(safe).slice(1).toLowerCase()
+  if (!IMAGE_EXT_WHITELIST.has(ext)) throw new Error(`不支持的图片类型：.${ext || '?'}`)
+  if (data.length === 0 || data.length > MAX_STAGE_IMAGE) throw new Error('图片为空或超过 30MB')
+  const ym = yearMonthDir()
+  const dirAbs = join(rootPath, ATTACHMENTS_DIR, ym)
+  mkdirSync(dirAbs, { recursive: true })
+  const name = uniqueVersionedName(dirAbs, safe)
+  writeFileSync(join(dirAbs, name), data)
+  return { name, relPath: `${ATTACHMENTS_DIR}/${ym}/${name}` }
 }
 
 /** 图片字节流入附件区：.attachments/<年-月>/<名>.<ext>；返回仓库根相对 POSIX 路径（md 相对链接用） */
@@ -959,6 +1015,29 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       const finalAbs = join(dir, finalName)
       mkdirSync(finalAbs, { recursive: false })
       const finalRel = finalName === requestedName ? relPath : relPath.replace(/[^\\/]+$/, finalName)
+      broadcastDataChanged('knowledge')
+      return { ok: true, relPath: finalRel, renamed: finalName !== requestedName }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
+
+  // 复制文件（创建副本）：按**字节**复制，文本/二进制（png/pdf/pptx…）通吃——
+  // 渲染层的 read+create 只能过文本，会把二进制读坏，故必须走本通道。
+  // 重名自动加后缀（复用 uniqueFileName，同 ws:createFile/ws:mkdir 口径）。
+  ipcMain.handle('ws:copy', (_e, rootId: string, srcRel: string, dstRel: string) => {
+    try {
+      const srcAbs = requireInside(rootId, srcRel)
+      if (!statSync(srcAbs).isFile()) return { ok: false, error: '只能复制文件（目录暂不支持）' }
+      const requestedAbs = requireInside(rootId, dstRel)
+      const dir = dirname(requestedAbs)
+      mkdirSync(dir, { recursive: true })
+      const requestedName = basename(requestedAbs)
+      const finalName = uniqueFileName(dir, requestedName)
+      const finalAbs = join(dir, finalName)
+      copyFileSync(srcAbs, finalAbs)
+      if (isKnowledgeIndexSensitive(finalAbs)) invalidateIndexIfCurrentVault(rootId)
+      const finalRel = finalName === requestedName ? dstRel : dstRel.replace(/[^\\/]+$/, finalName)
       broadcastDataChanged('knowledge')
       return { ok: true, relPath: finalRel, renamed: finalName !== requestedName }
     } catch (e) {

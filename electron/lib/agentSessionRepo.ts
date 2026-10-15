@@ -1,5 +1,12 @@
 import { randomUUID } from 'crypto'
-import { globalReadJson, globalWriteJson, globalDataDir } from './globalJsonStore'
+import { join } from 'path'
+import { readJson, writeJson, writeJsonOrThrow } from './kbStore/jsonStore'
+import { getCurrentVault, getVaultKbRoot } from './kbStore/vaultContext'
+import { globalDataDir } from './globalJsonStore'
+import { writeAdoptNotice } from './agentAdoptNotice'
+import { adoptLegacyGlobalAgentStore, type AdoptResult } from './agentSessionMigrate'
+// 类型专用导入（零运行时代价）：续跑现场的结构真源在 agentInterruptPure，仓库不另立一份
+import type { SessionResume } from './agentInterruptPure'
 import {
   appendMessage, deleteMessageById, deleteMessagesAfterId, deleteMessagesFile,
   getMessagesPage, migrateLegacyMessages, readMessages, updateMessageContent as storeUpdateMessageContent,
@@ -9,24 +16,55 @@ import {
 export type { AgentMessageRow }
 
 /**
- * R6 去库化（D9）：AI 会话 = userData/data/*.json（sql.js 已移除）。
- * 会话索引 = agent-sessions.json（小文件，全量重写可接受，保持不变）；
- * 消息 = agent-messages/<sessionId>.jsonl 按会话分文件追加写（v2，agentMessageStore），
- * 替代 v1 的 agent-messages.json 全量双文件（每条消息 O(全部历史) 重写，已迁移）。
+ * AI 会话存储 —— **随仓库走**（2026-10-13 拍板，见 docs/agent-sessions-vault-plan.md）。
+ *
+ * 位置：`<仓库>/.knowbase/agent/`
+ *   sessions.json               会话索引（小文件，全量重写可接受）
+ *   messages/<sessionId>.jsonl  每会话一个文件，一行一条消息，追加写 = O(1)
+ *
+ * 沿革：R6 去库化（D9）把会话从 sqlite 表搬到 userData/data/*.json 时沿用了「全局」口径
+ * （那正是原 knowledge.db 所在层），于是切仓库仍看得到别的仓库的对话；本条改为随仓库，
+ * 与「Vault = 唯一真相源，换机 = 拷走文件夹」对齐。存量全局会话由
+ * `agentSessionMigrate.adoptLegacyGlobalAgentStore()` 在首次进入仓库时认领。
+ *
+ * **不带 `rootId` 字段**：存储位置本身就是作用域，加一份冗余字段只会漂移。
+ *
+ * 消息层（agentMessageStore）按 baseDir 注入设计，换根本身只需换基目录；唯一另需同步的是它的
+ * `MESSAGES_DIR` 常量（原 `'agent-messages'` → `'messages'`，两端不一致会「认领成功但消息读不出来」）。
+ * v1 的 `agent-messages.json` 全量文件（每条消息 O(全部历史) 重写）在仓库目录内一次性拆分。
  * 删除会话级联清消息文件；首次消息操作触发 legacy 一次性迁移。
  *
- * 会话 + 消息两级（迁移 046）；
- * 行结构与原表列名（snake_case）一致；会话数组顺序即原 rowid 顺序（只 push / filter，
- * 不重排存储数组），用于平局排序；消息文件行序 = 会话内插入序（v1 rowid 等价物）。
+ * 无当前仓库时：读静默返回空、写抛错（绝不静默丢消息）。
+ *
+ * 会话 + 消息两级（迁移 046）；行结构与原表列名（snake_case）一致；会话数组顺序即原
+ * rowid 顺序（只 push / filter，不重排存储数组），用于平局排序；消息文件行序 = 会话内插入序。
  */
 
-const SESSIONS_FILE = 'agent-sessions.json'
+/** `.knowbase/agent` —— jsonStore 的 module 段 */
+const AGENT_DIR = 'agent'
+const SESSIONS_FILE = 'sessions.json'
+
+/**
+ * 当前仓库的 AI 会话目录（绝对路径）；无当前仓库返回 null。
+ * 供主进程其他模块（如迁移器）与契约脚本定位存储。
+ */
+export function vaultAgentDir(): string | null {
+  const kbRoot = getVaultKbRoot()
+  return kbRoot ? join(kbRoot, AGENT_DIR) : null
+}
+
+/** 无仓库抛错的版本（写路径用：调用方会据此向用户汇报成功，静默失败等于骗人） */
+function requireAgentDir(): string {
+  const dir = vaultAgentDir()
+  if (!dir) throw new Error('尚未打开仓库，无法读写 AI 会话')
+  return dir
+}
 
 /**
  * 会话来源：用于把「通用 AI 助手」（侧栏 / AI 学堂）与「AI 教学」的会话列表互相隔离。
  * 二者共用同一张会话表（同一份存储、同一套 AgentRunner），只在列表展示上按来源分流。
  */
-export type AgentSessionSource = 'assistant' | 'aiTeaching'
+export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule'
 
 /**
  * 会话通道（台账 N-1「手册通道」）：
@@ -59,8 +97,18 @@ export interface AgentSessionRow {
   mode?: AgentSessionMode
   created_at: string
   updated_at: string
+  /** 钉住时间（「★ 收藏」分区）：有值 = 已钉住（值用于收藏内排序）；缺省 = 未钉住。仅通用助手用 */
+  pinned_at?: string
   /** 会话压缩纪要（缺省=未压缩）。原消息永不删除，置 null 即回滚 */
   digest?: SessionDigest
+  /**
+   * 续跑现场（A 方案 §3.1，2026-10-14）：最近一次中断留下的断点。缺省 = 无可续点。
+   *
+   * 为什么放会话行、不放消息行：语义上「一个会话只有一个可续的断点（最近一次）」，天然幂等；
+   * 且它带 6k 字符的 carry 正文，放消息行会被 `agent:messages` 全量发给渲染层。
+   * 出口裁剪：`agent:sessions` 只发 toResumeInfo()（见 agentService），**绝不带 carry**。
+   */
+  resume?: SessionResume
   /**
    * 支线旁问（v3.1.2 条目11）：挂靠的主线会话 id。缺省 = 非支线。
    * 与主线物理隔离（独立 sessionId + 独立 .jsonl），删除主线时级联删除。
@@ -72,6 +120,10 @@ export interface AgentSessionRow {
   lane?: 'main' | 'side'
   /** 支线旁问：固化上下文快照（分叉回答全文 + 主线前 K 轮），每轮注入 system。不参与摘要压缩 */
   sideContext?: string
+  /** 支线旁问：运行态 'run' 进行中 / 'done' 已答 / 'cut' 已中断（缺省 run） */
+  lane_status?: 'run' | 'done' | 'cut'
+  /** 支线旁问：上次打开（已读）的本地时间串；缺省 = 从未打开 */
+  lane_seen_at?: string
 }
 
 /** 等价 datetime('now','localtime')：本地时间 "YYYY-MM-DD HH:MM:SS" */
@@ -81,22 +133,73 @@ export function nowLocal(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+/** 读会话索引：无仓库 / 文件不存在 → 空数组（读路径不抛错） */
 function readSessions(): AgentSessionRow[] {
-  return globalReadJson<AgentSessionRow[]>(SESSIONS_FILE, [])
+  return readJson<AgentSessionRow[]>(AGENT_DIR, SESSIONS_FILE, [])
+}
+
+/** 写会话索引：无仓库或写盘失败抛错（写路径必须让调用方知道没落盘） */
+function writeSessions(rows: AgentSessionRow[]): void {
+  writeJsonOrThrow(AGENT_DIR, SESSIONS_FILE, rows)
 }
 
 /** legacy 全量文件 → 分文件，进程内一次性（失败不置位，下次消息操作重试） */
 let legacyMigrated = false
 function ensureMigrated(): void {
   if (legacyMigrated) return
+  const dir = vaultAgentDir()
+  if (!dir) return // 无仓库：**不置位**——置了本进程就再也不会迁（切换仓库后即失效）
   try {
-    const r = migrateLegacyMessages(globalDataDir())
+    const r = migrateLegacyMessages(dir)
     if (r) {
-      console.log(`[AgentSessions] 旧版全量消息已迁移：${r.sessions} 会话 / ${r.messages} 条 → agent-messages/*.jsonl（原文件留存为 agent-messages.migrated.json）`)
+      console.log(`[AgentSessions] 旧版全量消息已迁移：${r.sessions} 会话 / ${r.messages} 条 → .knowbase/agent/messages/*.jsonl（原文件留存为 agent-messages.migrated.json）`)
     }
     legacyMigrated = true
   } catch (err) {
     console.error('[AgentSessions] 旧版消息迁移失败（原文件保留，下次操作重试；本次按 v2 读取）', err)
+  }
+}
+
+/**
+ * 进入仓库后的收尾：把升级前攒在全局目录里的存量会话**认领**进当前仓库。
+ *
+ * 由 workspaceManager 在「仓库成为当前仓库」时调用（启动恢复 / 打开仓库 / 导入仓库）。
+ * 三条性质：
+ * - **幂等**：认领成功的标志是全局 `agent-sessions.json` 被改名，再调直接返回
+ *   `{ adopted: false }`，因此不会给第二个仓库复制一份；
+ * - **进程内只试一次**：失败（如全局索引损坏）只打日志、不阻断进入仓库，也不反复重试 ——
+ *   全局文件原样保留，下次启动再说；
+ * - **无仓库不置位**：启动时还没有当前仓库（仓库选择页形态）不算「试过」，
+ *   等真正进入仓库时再认领。
+ */
+let adoptTried = false
+export function adoptLegacyAgentSessionsToVault(): AdoptResult | null {
+  if (adoptTried) return null
+  const dir = vaultAgentDir()
+  const cur = getCurrentVault()
+  if (!dir || !cur) return null
+  adoptTried = true
+  try {
+    const r = adoptLegacyGlobalAgentStore({ globalDir: globalDataDir(), vaultAgentDir: dir })
+    // v1 全量消息文件（若有）刚被原样拷进来：立刻拆分，让存储即刻正确、告知里的条数也准
+    let messages = r.messages
+    try {
+      const legacy = migrateLegacyMessages(dir)
+      if (legacy) {
+        messages += legacy.messages
+        legacyMigrated = true
+      }
+    } catch (err) {
+      console.error('[AgentSessions] 认领后的 v1 消息拆分失败（原文件保留，下次消息操作重试）', err)
+    }
+    if (r.adopted) {
+      console.log(`[AgentSessions] 存量会话已认领进仓库「${cur.name}」：${r.sessions} 会话 / ${messages} 条消息`)
+      writeAdoptNotice({ sessions: r.sessions, messages, vaultName: cur.name })
+    }
+    return { ...r, messages }
+  } catch (err) {
+    console.error('[AgentSessions] 存量会话认领失败（全局文件原样保留，下次启动重试）', err)
+    return null
   }
 }
 
@@ -111,7 +214,7 @@ export function createAgentSession(title = '新会话', source: AgentSessionSour
   }
   const sessions = readSessions()
   sessions.push(row)
-  globalWriteJson(SESSIONS_FILE, sessions)
+  writeSessions(sessions)
   return row
 }
 
@@ -121,7 +224,22 @@ export function setSessionMode(id: string, mode: AgentSessionMode): void {
   const row = sessions.find((s) => s.id === id)
   if (!row || row.mode === mode) return
   row.mode = mode
-  globalWriteJson(SESSIONS_FILE, sessions)
+  writeSessions(sessions)
+}
+
+/**
+ * 钉住 / 取消钉住会话（通用助手左栏「★ 收藏」分区）。
+ * pinned=true 记当前时间（收藏内按钉住时间倒序）；false 清除字段。
+ * 返回是否命中该会话。
+ */
+export function setSessionPinned(id: string, pinned: boolean): boolean {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row) return false
+  if (pinned) row.pinned_at = nowLocal()
+  else delete row.pinned_at
+  writeSessions(sessions)
+  return true
 }
 
 /**
@@ -152,10 +270,11 @@ export function createSideLaneSession(opts: {
     branchFromMessageId: opts.branchFromMessageId,
     lane: 'side',
     sideContext: opts.sideContext,
+    lane_status: 'run',
   }
   const sessions = readSessions()
   sessions.push(row)
-  globalWriteJson(SESSIONS_FILE, sessions)
+  writeSessions(sessions)
   return row
 }
 
@@ -177,7 +296,34 @@ export function promoteSideLane(laneSessionId: string): boolean {
   if (!row || !row.parentSessionId) return false
   row.lane = 'main'
   row.updated_at = nowLocal()
-  globalWriteJson(SESSIONS_FILE, sessions)
+  writeSessions(sessions)
+  return true
+}
+
+/**
+ * 支线运行态：'done' 已答 / 'cut' 已中断（见 .claude/plans/ai-teaching-side-lane-center.md）。
+ * 仅对挂靠主线的支线生效；普通会话 no-op。
+ */
+export function setSideLaneStatus(id: string, status: 'run' | 'done' | 'cut'): void {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row || !row.parentSessionId) return
+  if (row.lane_status === status) return
+  row.lane_status = status
+  row.updated_at = nowLocal()
+  writeSessions(sessions)
+}
+
+/**
+ * 标记支线已读（打开详情时调）：只写 lane_seen_at，**不** bump updated_at
+ * ——读一下不该把会话顶到列表最上。返回是否命中。
+ */
+export function markSideLaneSeen(id: string, at: string = nowLocal()): boolean {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row || row.lane === 'main') return false
+  row.lane_seen_at = at
+  writeSessions(sessions)
   return true
 }
 
@@ -206,7 +352,8 @@ export function backfillSessionSources(
       n++
     }
   }
-  if (n > 0) globalWriteJson(SESSIONS_FILE, sessions)
+  // 回填是**读路径顺带写**：用静默 writeJson —— 一次回填写失败不该让整个会话列表请求报错
+  if (n > 0) writeJson(AGENT_DIR, SESSIONS_FILE, sessions)
   return n
 }
 
@@ -228,7 +375,7 @@ export function renameAgentSession(id: string, title: string): void {
   if (!row) return
   row.title = title
   row.updated_at = nowLocal()
-  globalWriteJson(SESSIONS_FILE, sessions)
+  writeSessions(sessions)
 }
 
 /** 会话级全局要求（≤800 字；空串=清除）：只在本会话的后续轮次注入 system */
@@ -239,7 +386,7 @@ export function updateAgentSessionInstructions(id: string, instructions: string)
   if (!row) return
   row.instructions = text
   row.updated_at = nowLocal()
-  globalWriteJson(SESSIONS_FILE, sessions)
+  writeSessions(sessions)
 }
 
 export function getAgentSession(id: string): AgentSessionRow | undefined {
@@ -256,27 +403,60 @@ export function updateSessionDigest(id: string, digest: SessionDigest | null): v
   if (!row) return
   if (digest) row.digest = digest
   else delete row.digest
-  globalWriteJson(SESSIONS_FILE, sessions)
+  writeSessions(sessions)
 }
 
 export function deleteAgentSession(id: string): void {
   // 显式先删子消息（不依赖原 SQL 外键级联；v2 = 删整个会话消息文件）
   ensureMigrated()
-  deleteMessagesFile(globalDataDir(), id)
+  deleteMessagesFile(requireAgentDir(), id)
   const sessions = readSessions()
   const keptSessions = sessions.filter((s) => s.id !== id)
-  if (keptSessions.length !== sessions.length) globalWriteJson(SESSIONS_FILE, keptSessions)
+  if (keptSessions.length !== sessions.length) writeSessions(keptSessions)
+}
+
+/**
+ * 写回/清除续跑现场（null = 清除）。
+ * 与 updateSessionDigest 同款：**不动 updated_at**（中断不该把会话顶到列表最上）。
+ * 调用方（agentService.interruptResult）用 try/catch 包住：记不上现场不能改变本次调用的返回结果。
+ */
+export function updateSessionResume(id: string, resume: SessionResume | null): void {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row) return
+  if (resume) row.resume = resume
+  else delete row.resume
+  writeSessions(sessions)
+}
+
+/**
+ * 消息删改 → 续跑现场作废（与 invalidateDigestOnMutation 同构，但**更宽**）。
+ *
+ * 为什么宽：断点绑在**具体那条中断消息**上（resume.message_id），而删改任何一条消息都可能让
+ * 「现场」与实际历史对不上（改了用户消息 = 任务本身变了；删了中断卡 = 按钮挂的消息没了）。
+ * 作废的代价只是「继续」消失（用户可重新发消息），留着错的代价是续跑一个已经变了的任务。
+ */
+function invalidateResumeOnMutation(sessionId: string): void {
+  try {
+    if (!getAgentSession(sessionId)?.resume) return
+    updateSessionResume(sessionId, null)
+  } catch { /* 作废失败不阻断消息操作本身 */ }
 }
 
 export function sessionExists(id: string): boolean {
   return readSessions().some((s) => s.id === id)
 }
 
-/** 追加消息并刷新会话活跃时间（消息落盘 = 单行 append，O(本条消息)） */
-export function appendAgentMessage(sessionId: string, role: 'user' | 'assistant', content: string, trace?: unknown): void {
+/**
+ * 追加消息并刷新会话活跃时间（消息落盘 = 单行 append，O(本条消息)）。
+ * 返回新消息 id（A 方案：中断卡要把「继续」按钮挂在自己的 id 上）。
+ * `role==='user'` 时**清空续跑现场**：用户改主意发了新消息 = 旧现场作废（中断卡保留为历史）。
+ */
+export function appendAgentMessage(sessionId: string, role: 'user' | 'assistant', content: string, trace?: unknown): string {
   ensureMigrated()
-  appendMessage(globalDataDir(), {
-    id: randomUUID(),
+  const id = randomUUID()
+  appendMessage(requireAgentDir(), {
+    id,
     session_id: sessionId,
     role,
     content,
@@ -287,8 +467,11 @@ export function appendAgentMessage(sessionId: string, role: 'user' | 'assistant'
   const row = sessions.find((s) => s.id === sessionId)
   if (row) {
     row.updated_at = nowLocal()
-    globalWriteJson(SESSIONS_FILE, sessions)
+    // 新用户消息 = 现场作废（顺序无所谓：同一次写入里一起落盘）
+    if (role === 'user') delete row.resume
+    writeSessions(sessions)
   }
+  return id
 }
 
 /** 首条用户消息自动成为会话标题（仅当仍是默认标题时） */
@@ -304,12 +487,16 @@ export function ensureSessionTitle(sessionId: string, firstUserMessage: string):
 export function getAgentMessages(sessionId: string): AgentMessageRow[] {
   // 原 SQL：WHERE session_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 500（取最早 500 条）
   ensureMigrated()
-  return getMessagesPage(globalDataDir(), sessionId)
+  const dir = vaultAgentDir()
+  // 读路径：无仓库 = 空（调用方拿到的就是「这个仓库没这条会话」，与跨仓库陈旧 id 同一表现）
+  return dir ? getMessagesPage(dir, sessionId) : []
 }
 
 export function getMessageById(sessionId: string, id: string): AgentMessageRow | null {
   ensureMigrated()
-  return readMessages(globalDataDir(), sessionId).find((m) => m.id === id) ?? null
+  const dir = vaultAgentDir()
+  if (!dir) return null
+  return readMessages(dir, sessionId).find((m) => m.id === id) ?? null
 }
 
 /**
@@ -337,19 +524,22 @@ function invalidateDigestOnMutation(sessionId: string, targetId: string, mode: '
 /** 编辑消息内容（仅用于用户消息改写后重推） */
 export function updateMessageContent(sessionId: string, id: string, content: string): void {
   ensureMigrated()
-  storeUpdateMessageContent(globalDataDir(), sessionId, id, content)
+  storeUpdateMessageContent(requireAgentDir(), sessionId, id, content)
   invalidateDigestOnMutation(sessionId, id, 'at')
+  invalidateResumeOnMutation(sessionId)
 }
 
 export function deleteMessage(sessionId: string, id: string): void {
   ensureMigrated()
-  deleteMessageById(globalDataDir(), sessionId, id)
+  deleteMessageById(requireAgentDir(), sessionId, id)
   invalidateDigestOnMutation(sessionId, id, 'at')
+  invalidateResumeOnMutation(sessionId)
 }
 
 /** 删除某条消息之后的所有消息（重新生成/编辑重推时清掉旧回复） */
 export function deleteMessagesAfter(sessionId: string, messageId: string): void {
   ensureMigrated()
-  deleteMessagesAfterId(globalDataDir(), sessionId, messageId)
+  deleteMessagesAfterId(requireAgentDir(), sessionId, messageId)
   invalidateDigestOnMutation(sessionId, messageId, 'after')
+  invalidateResumeOnMutation(sessionId)
 }

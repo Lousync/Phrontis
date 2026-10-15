@@ -10,7 +10,7 @@ export function SessionRunMark({ mark }: { mark: 'running' | 'failed' | 'unread'
     return (
       <span
         className="kb-micro-pop flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-red-500 text-[9px] font-bold leading-none text-white"
-        title="上次回复失败"
+        title="上次回复被中断（可打开会话看原因）"
       >!</span>
     )
   }

@@ -1,7 +1,7 @@
-import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitPeriodStat, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, LlmUsageBreakdownEntry, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentRunStateEvent, AgentSessionInfo, AgentSessionSource, AgentSideLaneCreateResult, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, AiUsageDay, SessionFileChange, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginDashboardWidget, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, AiTeachProfileEntry, AiTeachCourseOutline, AiTeachCourseState, AiTeachCourseUnitProgress, AiTeachCourseGenerateInput, AiTeachCourseGenProgress, CreatePasswordEntryDTO, UpdatePasswordEntryDTO, PdfBookState, PdfBookPatch, BookListItem, ReaderBookState, ReaderStatePatch, ExcerptItem, ExcerptCreatePayload, ExcerptPatch, ExcerptExportEntry, WorkspaceRangeBytesResult, BookSourceInfo, BookSourcePatch, BookSourceCredentialInput, BookSourceConnectivity, BookMarketSearchResponse, BookDownloadRequest, BookDownloadStartResult, BookDownloadTask, BookDownloadAction, PetSpecies, PluginPetInfo, TerminalSessionInfo, TerminalCreateResult, TerminalShellInfo, TerminalAiRecord } from '../types'
+import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, ScheduleRecurring, CreateScheduleRecurringDTO, ScheduleRecurringSettleResult, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitPeriodStat, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmModelFamily, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, LlmUsageBreakdownEntry, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentRunStateEvent, AgentSessionInfo, AgentSessionSource, AgentSideLaneCreateResult, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, AiUsageDay, SessionFileChange, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginDashboardWidget, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, AiTeachProfileEntry, AiTeachCourseState, AiTeachCourseUnitProgress, CreatePasswordEntryDTO, UpdatePasswordEntryDTO, PdfBookState, PdfBookPatch, BookListItem, ReaderBookState, ReaderStatePatch, ExcerptItem, ExcerptCreatePayload, ExcerptPatch, ExcerptExportEntry, WorkspaceRangeBytesResult, BookSourceInfo, AiTeachFavorite, BookSourcePatch, BookSourceCredentialInput, BookSourceConnectivity, BookMarketSearchResponse, BookDownloadRequest, BookDownloadStartResult, BookDownloadTask, BookDownloadAction, PetSpecies, PluginPetInfo, PluginMascotInfo, TerminalSessionInfo, TerminalCreateResult, TerminalShellInfo, TerminalAiRecord } from '../types'
 import type { SettingsKey, SettingsValue, AppSettings } from './settings'
 import { SETTINGS_DEFAULTS } from './settings'
-import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingParseOutcome, AccountingImportOutcome, CreateAccountingInput } from '../types'
+import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingRecurring, AccountingParseOutcome, AccountingImportOutcome, CreateAccountingInput, CreateAccountingRecurringInput, AccountingRecurringSettleResult } from '../types'
 const a = () => { if (!window.api) throw new Error('Electron API not available.'); return window.api }
 
 export const getPathForFile = (file: File): string => a().getPathForFile(file)
@@ -9,6 +9,8 @@ export const getPathForFile = (file: File): string => a().getPathForFile(file)
 export const pasteFromClipboard = (): Promise<{ ok: boolean }> => a().pasteFromClipboard()
 export const copyImage = (src: { path?: string; dataUrl?: string }): Promise<boolean> => a().copyImage(src)
 export const copyText = (text: string): Promise<boolean> => a().copyText(text)
+/** 读剪贴板文本（编辑器右键「粘贴 / 以纯文本形式粘贴」；与 copyText 同走主进程代理） */
+export const readClipboardText = (): Promise<string> => a().readClipboardText()
 
 // ===== Typed settings =====
 
@@ -79,6 +81,13 @@ export const deleteScheduleTodo = (id: string) => a().deleteScheduleTodo(id)
 export const getScheduleTags = () => a().getScheduleTags()
 export const createScheduleTag = (n: string, c?: string) => a().createScheduleTag(n, c)
 export const deleteScheduleTag = (id: string) => a().deleteScheduleTag(id)
+// 固定日程（重复任务）
+export const scheduleRecurringList = () => a().scheduleRecurringList()
+export const scheduleRecurringCreate = (d: CreateScheduleRecurringDTO) => a().scheduleRecurringCreate(d)
+export const scheduleRecurringUpdate = (id: string, patch: Partial<ScheduleRecurring>) => a().scheduleRecurringUpdate(id, patch)
+export const scheduleRecurringDelete = (id: string) => a().scheduleRecurringDelete(id)
+export const scheduleRecurringSettle = () => a().scheduleRecurringSettle()
+export const scheduleRecurringUndoSettle = (todoIds: string[], restore: Array<{ ruleId: string; lastPostedDate: string }>) => a().scheduleRecurringUndoSettle(todoIds, restore)
 
 // knowledge (Scheme A)
 /**
@@ -126,6 +135,8 @@ export const duplicateKnowledgeCategory = (data: { categoryId: string; targetPar
 // export
 export const showExportSaveDialog = (opts: { defaultName: string; filters: { name: string; extensions: string[] }[] }) => a().showExportSaveDialog(opts)
 export const writeExportTextFile = (filePath: string, content: string, encoding?: string): Promise<ExportFileResult> => a().writeExportTextFile(filePath, content, encoding)
+/** 页面导出 PDF（批 3）：先 `showExportSaveDialog` 拿授权路径，再让主进程把当前窗口打成 PDF —— 字节不经过渲染层 */
+export const writeExportPdf = (filePath: string) => a().writeExportPdf(filePath)
 // 全仓导出/导入（R6 去库化：纯 .knowbase 仓库目录 zip，无 sqlite 快照）
 export const vaultBackupExportToZip = (zipPath: string) => a().vaultBackupExportToZip(zipPath)
 export const vaultBackupPickArchive = () => a().vaultBackupPickArchive()
@@ -174,6 +185,7 @@ export const pluginListViews = (slot?: string): Promise<PluginViewContribution[]
 /** 列出已启用插件声明的看板控件（2026-09-28；全局控件 id = `<pluginId>:<wid>`，渲染层拼） */
 export const pluginListDashboardWidgets = (): Promise<PluginDashboardWidget[]> => a().pluginListDashboardWidgets()
 export const pluginListPets = (): Promise<PluginPetInfo[]> => a().pluginListPets()
+export const pluginListMascots = (): Promise<PluginMascotInfo[]> => a().pluginListMascots()
 /** 列出已启用插件声明的命令（plugin-phase1-design C3；附首个 view 槽位供导航激活） */
 export const pluginListCommands = (): Promise<PluginCommandInfo[]> => a().pluginListCommands()
 /** 已启用插件声明的 fenced-code 渲染器（plugin-phase1-design C6） */
@@ -359,6 +371,8 @@ export const workspaceWriteFile = (rootId: string, relPath: string, content: str
     return r
   })
 export const workspaceCreateFile = (rootId: string, relPath: string, content?: string) => a().workspaceCreateFile(rootId, relPath, content)
+/** 创建副本：按字节复制仓库内文件（文本/二进制通吃）；重名主进程自动加后缀 */
+export const workspaceCopyFile = (rootId: string, srcRel: string, dstRel: string): Promise<{ ok: boolean; relPath?: string; renamed?: boolean; error?: string }> => a().workspaceCopyFile(rootId, srcRel, dstRel)
 export const workspaceMkdir = (rootId: string, relPath: string) => a().workspaceMkdir(rootId, relPath)
 /** 粘贴系统剪贴板里的外部文件/目录到 relDir（srcPaths 由 paste 事件侧取得，见 types） */
 export const workspacePasteExternal = (rootId: string, relDir: string, srcPaths: string[]) => a().workspacePasteExternal(rootId, relDir, srcPaths)
@@ -482,7 +496,7 @@ export interface PeriodStats {
 export const getBlogPeriodStats = (start: string, end: string): Promise<PeriodStats> => a().getBlogPeriodStats(start, end)
 
 // ===== 记账（accounting） =====
-export const accountingGetAll = (): Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[] }> => a().accountingGetAll()
+export const accountingGetAll = (): Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[]; recurring: AccountingRecurring[] }> => a().accountingGetAll()
 export const accountingParseJson = (text: string): Promise<AccountingParseOutcome> => a().accountingParseJson(text)
 export const accountingImportJson = (text: string): Promise<AccountingImportOutcome> => a().accountingImportJson(text)
 export const accountingCreate = (input: CreateAccountingInput): Promise<AccountingTransaction> => a().accountingCreate(input)
@@ -490,6 +504,11 @@ export const accountingUpdate = (id: string, patch: Partial<AccountingTransactio
 export const accountingDelete = (id: string): Promise<boolean> => a().accountingDelete(id)
 export const accountingSetAccountBalance = (id: string, initialBalance: number): Promise<AccountingAccount | null> => a().accountingSetAccountBalance(id, initialBalance)
 export const accountingCreateAccount = (name: string, initialBalance: number): Promise<AccountingAccount> => a().accountingCreateAccount(name, initialBalance)
+export const accountingRecurringCreate = (input: CreateAccountingRecurringInput): Promise<AccountingRecurring> => a().accountingRecurringCreate(input)
+export const accountingRecurringUpdate = (id: string, patch: Partial<AccountingRecurring>): Promise<AccountingRecurring | null> => a().accountingRecurringUpdate(id, patch)
+export const accountingRecurringDelete = (id: string): Promise<boolean> => a().accountingRecurringDelete(id)
+export const accountingRecurringPost = (id: string): Promise<{ ok: boolean; error?: string; due?: string }> => a().accountingRecurringPost(id)
+export const accountingRecurringSettle = (): Promise<AccountingRecurringSettleResult> => a().accountingRecurringSettle()
 
 // ===== 层级总结文件（周 / 月 / 年）—— 窗口口径见 lib/summary.ts =====
 export const listSummaries = () => a().listSummaries()
@@ -548,6 +567,7 @@ export const aiToolsListSkills = (): Promise<{ skills: SkillInfo[] }> => a().aiT
 export const aiToolsCopySkillPrompt = (pluginId: string, skillId: string): Promise<boolean> => a().aiToolsCopySkillPrompt(pluginId, skillId)
 export const aiToolsInstallSkill = (data: Uint8Array, fileName?: string): Promise<SkillInstallResult> => a().aiToolsInstallSkill(data, fileName)
 export const aiToolsInstallSkillFromFile = (): Promise<SkillInstallResult> => a().aiToolsInstallSkillFromFile()
+export const aiToolsInstallSkillFromFolder = (): Promise<SkillInstallResult> => a().aiToolsInstallSkillFromFolder()
 export const aiToolsUninstallSkill = (id: string): Promise<SkillInstallResult> => a().aiToolsUninstallSkill(id)
 export const aiToolsToggleSkill = (registryName: string, enabled: boolean): Promise<SkillInstallResult & { disabled?: boolean }> => a().aiToolsToggleSkill(registryName, enabled)
 
@@ -556,9 +576,16 @@ export const llmListProviders = (): Promise<{ providers: LlmProviderInfo[]; defa
 export const llmSaveProvider = (d: LlmProviderDraft): Promise<{ ok: boolean; id?: string; error?: string }> => a().llmSaveProvider(d)
 export const llmRemoveProvider = (id: string): Promise<{ ok: boolean }> => a().llmRemoveProvider(id)
 export const llmToggleProvider = (id: string, enabled: boolean): Promise<{ ok: boolean }> => a().llmToggleProvider(id, enabled)
-export const llmTestConnection = (d: { type: LlmProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string> }): Promise<LlmTestResultInfo> => a().llmTestConnection(d)
+export const llmTestConnection = (d: { type: LlmProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string>; accountId?: string }): Promise<LlmTestResultInfo> => a().llmTestConnection(d)
+// 账号（端点内部的第二层，2026-10-13）：同一端点换一把 Key，地址/协议/请求头/模型清单全复用
+export const llmAddAccount = (payload: { providerId: string; name?: string; apiKey?: string }) => a().llmAddAccount(payload)
+export const llmSetActiveAccount = (providerId: string, accountId: string) => a().llmSetActiveAccount(providerId, accountId)
+export const llmUpdateAccount = (payload: { providerId: string; accountId: string; name?: string; apiKey?: string; enabled?: boolean }) => a().llmUpdateAccount(payload)
+export const llmRemoveAccount = (providerId: string, accountId: string) => a().llmRemoveAccount(providerId, accountId)
+export const llmTestAccount = (providerId: string, accountId: string) => a().llmTestAccount(providerId, accountId)
 export const llmVisionModels = () => a().llmVisionModels()
 export const llmRefreshModels = (id: string): Promise<{ ok: boolean; models: string[]; error?: string }> => a().llmRefreshModels(id)
+export const llmSetModelFamily = (id: string, model: string, family: LlmModelFamily | ''): Promise<{ ok: boolean; modelFamilies?: Record<string, LlmModelFamily>; error?: string }> => a().llmSetModelFamily(id, model, family)
 export const llmAddModel = (id: string, model: string): Promise<{ ok: boolean; models: string[]; error?: string }> => a().llmAddModel(id, model)
 export const llmSetDefaultModel = (value: string): Promise<{ ok: boolean }> => a().llmSetDefaultModel(value)
 export const llmTestModel = (providerId: string, model: string): Promise<LlmModelTestResultInfo> => a().llmTestModel(providerId, model)
@@ -579,6 +606,8 @@ export const docsPptxPages = (relPath: string): Promise<{ ok: boolean; pages?: A
 
 export const agentChat = (sessionId: string, message: string, context?: AgentContextInfo, chatId?: string, source?: string, modelId?: string, effort?: 'off' | 'low' | 'medium' | 'high', skillName?: string): Promise<AgentChatResult> => a().agentChat({ sessionId, message, context, chatId, source, modelId, effort, skillName })
 export const agentRegenerate = (sessionId: string, context?: AgentContextInfo, chatId?: string, effort?: 'off' | 'low' | 'medium' | 'high'): Promise<AgentChatResult> => a().agentRegenerate({ sessionId, context, chatId, effort })
+/** A 方案（断点续跑）：从中断卡的断点继续，不追加用户消息、不新建会话 */
+export const agentResume = (sessionId: string, context?: AgentContextInfo, chatId?: string, source?: AgentSessionSource, modelId?: string, effort?: 'off' | 'low' | 'medium' | 'high'): Promise<AgentChatResult> => a().agentResume({ sessionId, context, chatId, source, modelId, effort })
 /** 场景/模板启动：不落任何用户消息，用虚拟首轮触发（聊天区第一条即 AI 回复） */
 export const agentStartScene = (sessionId: string, chatId?: string, source?: string, modelId?: string): Promise<AgentChatResult> => a().agentStartScene({ sessionId, chatId, source, modelId })
 export const agentEditMessage = (sessionId: string, messageId: string, message: string, context?: AgentContextInfo, chatId?: string, effort?: 'off' | 'low' | 'medium' | 'high'): Promise<AgentChatResult> => a().agentEditMessage({ sessionId, messageId, message, context, chatId, effort })
@@ -604,19 +633,28 @@ export const onAssistantRunState = (cb: (p: AgentRunStateEvent) => void) => a().
 export const agentSessions = (): Promise<AgentSessionInfo[]> => a().agentSessions()
 export const agentNewSession = (title?: string, source?: AgentSessionSource): Promise<AgentSessionInfo> => a().agentNewSession(title, source)
 export const agentMessages = (sessionId: string): Promise<AgentStoredMessage[]> => a().agentMessages(sessionId)
+/**
+ * 存量会话认领的一次性告知（会话随仓库走，2026-10-13）：取走即删，无则 null。
+ * 为什么要「取」而不是等主进程广播：切仓库的收尾是整窗重载，当场广播的 Toast 会被抹掉。
+ */
+export const agentTakeAdoptNotice = (): Promise<{ sessions: number; messages: number; vaultName: string; at: string } | null> =>
+  a().agentTakeAdoptNotice()
 /** AI token 用量（按日聚合；右栏 token 面板「今日消耗 / 会话 TOP」数据源） */
 export const agentUsageGet = (): Promise<{ days: Record<string, AiUsageDay> }> => a().agentUsageGet()
 /** 会话文件改动审计（不传 sessionId = 本次运行全部，按时间倒序） */
 export const agentSessionChanges = (sessionId?: string): Promise<SessionFileChange[]> => a().agentSessionChanges(sessionId)
 export const agentRenameSession = (id: string, title: string): Promise<boolean> => a().agentRenameSession(id, title)
 export const agentDeleteSession = (id: string): Promise<boolean> => a().agentDeleteSession(id)
+export const agentSetSessionPinned = (id: string, pinned: boolean): Promise<boolean> => a().agentSetSessionPinned(id, pinned)
 // ===== v3.1.2 条目11：支线旁问（sidetrack）=====
 /** 建支线：只装上下文快照、不调 LLM（点按钮/装载阶段零请求） */
 export const agentCreateSideLane = (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }): Promise<AgentSideLaneCreateResult> => a().agentCreateSideLane(payload)
-/** 列某主线下的支线（含已升格）；删除主线前的支线计数亦用它 */
-export const agentListSideLanes = (parentSessionId: string): Promise<AgentSessionInfo[]> => a().agentListSideLanes(parentSessionId)
+/** 列某主线下的支线（含已升格）；带派生字段（unread/laneStatus/excerpt），右栏支线中心与删除前计数共用 */
+export const agentListSideLanes = (parentSessionId: string): Promise<AgentSideLaneInfo[]> => a().agentListSideLanes(parentSessionId)
 /** 升格支线为正式会话（单向，不可降级） */
 export const agentPromoteSideLane = (laneSessionId: string): Promise<boolean> => a().agentPromoteSideLane(laneSessionId)
+/** 打开支线详情即已读（写 lane_seen_at）；返回是否命中 */
+export const agentMarkSideLaneRead = (laneId: string): Promise<boolean> => a().agentMarkSideLaneRead(laneId)
 // ===== AI教学 P1：会话 ⇄ 文件夹绑定 =====
 export interface AiTeachFolderResult { ok: boolean; relPath?: string | null; error?: string }
 /** 幂等确保会话文件夹存在（新建对话确认 / P3 产物落盘懒创建共用） */
@@ -659,17 +697,17 @@ export const aiTeachSetLastWorkspace = (wsId: string | null) => a().aiTeachSetLa
 // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲；docs/ai-teaching-course-mode-plan.md）
 export const aiTeachCourseGetState = (wsId: string): Promise<AiTeachCourseState> => a().aiTeachCourseGetState(wsId)
 export const aiTeachCourseSetEnabled = (wsId: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> => a().aiTeachCourseSetEnabled(wsId, enabled)
-export const aiTeachCourseSaveOutline = (wsId: string, outline: AiTeachCourseOutline): Promise<{ ok: boolean; relPath?: string; error?: string }> => a().aiTeachCourseSaveOutline(wsId, outline)
+export const aiTeachCourseWriteOutlineDraft = (wsId: string, draft: unknown): Promise<{ ok: boolean; mode?: string; added?: number; chapters?: number; relPath?: string; error?: string }> => a().aiTeachCourseWriteOutlineDraft(wsId, draft)
+export const aiTeachCourseRemoveUnit = (wsId: string, unit: string): Promise<{ ok: boolean; removed?: string; needOrganize?: boolean; unitId?: string; unitName?: string; status?: string; error?: string }> => a().aiTeachCourseRemoveUnit(wsId, unit)
 export const aiTeachCourseSetUnitProgress = (wsId: string, unitId: string, patch: Partial<AiTeachCourseUnitProgress>): Promise<{ ok: boolean; error?: string }> => a().aiTeachCourseSetUnitProgress(wsId, unitId, patch)
-export const aiTeachCourseGenerateOutline = (input: AiTeachCourseGenerateInput): Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }> => a().aiTeachCourseGenerateOutline(input)
-export const aiTeachCourseGenerateOutlineStream = (id: string, input: AiTeachCourseGenerateInput): Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }> => a().aiTeachCourseGenerateOutlineStream(id, input)
 export const aiTeachCourseOpenUnit = (wsId: string, unitId: string, kind?: string) => a().aiTeachCourseOpenUnit(wsId, unitId, kind)
 export const aiTeachCourseEndLesson = (sessionId: string) => a().aiTeachCourseEndLesson(sessionId)
 export const aiTeachCourseFinalizeLesson = (sessionId: string) => a().aiTeachCourseFinalizeLesson(sessionId)
 export const aiTeachCourseFinishUnit = (wsId: string, unitId: string, score?: { correct: number; total: number }) => a().aiTeachCourseFinishUnit(wsId, unitId, score)
 export const aiTeachCourseReadPrevHandoff = (sessionId: string) => a().aiTeachCourseReadPrevHandoff(sessionId)
 export const aiTeachCourseMakeUnitQuiz = (wsId: string, unitId: string) => a().aiTeachCourseMakeUnitQuiz(wsId, unitId)
-export const onAiTeachCourseGenProgress = (cb: (p: AiTeachCourseGenProgress) => void) => a().onAiTeachCourseGenProgress(cb)
+export const aiTeachCourseOpenAssistant = (wsId: string) => a().aiTeachCourseOpenAssistant(wsId)
+export const aiTeachCourseOpenChapterReview = (wsId: string, chapterId: string) => a().aiTeachCourseOpenChapterReview(wsId, chapterId)
 export const onAiTeachCourseRefresh = (cb: (p: { wsId: string }) => void) => a().onAiTeachCourseRefresh(cb)
 // P6 素材库（§3.13 结构 v3）
 export const aiTeachSrcRead = (id: string) => a().aiTeachSrcRead(id)
@@ -688,7 +726,10 @@ export const aiTeachSrcWebProbe = (id: string, no: number, anchorUrl?: string) =
 export const aiTeachSrcWebCrawl = (id: string, no: number, urls: string[]) => a().aiTeachSrcWebCrawl(id, no, urls)
 export const aiTeachSrcWebCancel = (id: string) => a().aiTeachSrcWebCancel(id)
 /** v3.1.1：对话级登记上收到工作区主库（原件/提取稿一并复制，对话夹保留） */
-export const aiTeachSrcPromote = (id: string) => a().aiTeachSrcPromote(id)
+export const aiTeachSrcPromote = (id: string, nos?: number[]) => a().aiTeachSrcPromote(id, nos)
+export const aiTeachFavList = (wsId: string): Promise<AiTeachFavorite[]> => a().aiTeachFavList(wsId)
+export const aiTeachFavAdd = (wsId: string, rel: string, name: string): Promise<AiTeachFavorite[]> => a().aiTeachFavAdd(wsId, rel, name)
+export const aiTeachFavRemove = (wsId: string, rel: string): Promise<AiTeachFavorite[]> => a().aiTeachFavRemove(wsId, rel)
 export const onAiTeachWebProgress = (cb: (p: { sessionId: string; no: number; done: number; total: number; current: string }) => void) => window.api.onAiTeachWebProgress(cb)
 // P8 用户画像（§3.14 两层 PROFILE.md）；UI 优化条目8.2.2 加工作区第三层（全局/工作区/会话）
 export const aiTeachProfileReadGlobal = () => a().aiTeachProfileReadGlobal()

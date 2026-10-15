@@ -301,6 +301,100 @@
 
 **已知局限**：`.claude/` 被 `.gitignore` 排除（`.gitignore:13`），该文档不在版本控制内。这既是它长期无人察觉的原因，也意味着本次重建没有 git 历史可回溯（2026-09-12 讨论决定暂不纳入跟踪）。
 
+## 2026-10-14 主仓归档（18 份文档 + 33 件原型 + 过程证据）
+
+> 口径：规则 1「已完成使命」；原型按规则 7 随方案同批。探针脚本（`.mjs` / `.py` / `.js` / `.ps1`）、DOM 快照（`dom-*.html` / `dom/`）、`shots/` 检查快照、`_report.json`、`_edgeprofile/`（浏览器用户目录）按规则 8 留在 `tmp/` 不归档。本批搬迁清单见 `tmp/archive-batch-20261014-manifest.txt`。
+> 本批同时处置了此前清单里的三处挂账：`workbench-split-scope-design.md`（原记「分屏留 v3.5.0」）、其配套的两个原型、以及 `outputs/checkin-card-prototype.html`。
+
+### 设计文档 → `Phrontis/已实现设计文档/`（15 份）
+
+| 文档 | 判定依据 |
+|---|---|
+| agent-error-attribution-plan.md | 已落码 `9dc5048`（`electron/lib/llmFailurePure.ts` + `src/types/index.ts` 的 `Interruption` / `LLM_CONNECT_TIMEOUT`；契约 `verify-llm-attribution.mjs`）。**归档时已把文档头「未落码」校正为已落码**（原声明与落码同批提交，属过期状态） |
+| agent-interrupt-resume-plan.md | 已落码 `9dc5048`（`electron/lib/agentInterruptPure.ts` + IPC `agent:resume`；契约 `verify-agent-resume.mjs`）。文档头同批校正 |
+| agent-sessions-vault-plan.md | 已落码 `2ba537d`（`agentSessionMigrate.ts`、`agentSessionRepo.ts` 的 `vaultAgentDir()`；契约 `verify-agent-session-migrate.mjs`） |
+| ai-settings-prototype-parity-plan.md | 已落码 `2ba537d`（`llmPresets.ts` / `llmAccountPure.ts` / `AiModelsTab.tsx` / `SectionHead.tsx`） |
+| ai-reply-loading-plan.md | 已落码 `f363954`；契约 `verify-reply-loading.mjs` |
+| code-block-card-plan.md | 已落码 `f363954`；契约 `verify-code-block-card.mjs` |
+| file-menu-rework-design.md | 已落码（`src/components/shared/FileContextMenu.tsx` 宽度自适应）；契约 `verify-file-menu.mjs`（74 项） |
+| image-viewer-design.md | 已落码 `916e8be`（`src/lib/imageView.ts`；契约 124/124）。**真机验收单 `batch3-real-machine-verification.md` 仍未跑，留主仓** |
+| knowledge-content-routing-design.md | 已落码 `e1abcd4`（`PageEditor.tsx` 专门视图合流；契约 79/79）。**真机验收单 `batch1-real-machine-verification.md` 仍未跑，留主仓** |
+| nonmd-topbar-design.md | 已落码（`src/modules/knowledge/components/NoteTopBar.tsx`；契约 54/54） |
+| note-surface-dual-engine-design.md | 已落码（`NoteSurface.tsx` / `LiveMarkdownPane.tsx`（CodeMirror 6）；`settings.ts` 的 `editorWritingMode`） |
+| terminal-module-design.md | 已落码 `fe120ed`（`electron/lib/terminalService.ts` + `src/modules/terminal/`） |
+| book-market-design.md | S1–S6 全落（`electron/lib/bookMarket/` / `bookSourceVaultRepo.ts` / `src/modules/bookmarket/`；7 契约 9 探针）。施工真源 `.claude/plans/book-market-implementation.md` 仍被引用，留主仓 |
+| assistant-parallel-design.md | 已落码 2026-10-07（台账 `v3.4.0-feedback.md` 的 N-3 已结）；配套原型同批归档 |
+| ai-teaching-lesson-lifecycle-plan.md | 已落码（`CourseMode.tsx` 回炉 / 总结篇、`index.tsx` 结束课时生成讲义 + `交接.md`）；配套原型同批归档 |
+
+### 设计文档 → `Phrontis/方案与调研/`（2 份）
+
+| 文档 | 判定依据 |
+|---|---|
+| workbench-split-scope-design.md | **能力已整轮下线** —— `893b8a1` revert 了 `SPLIT_ELIGIBLE` / `toggleSplit` / `openInSecondary`（全仓只剩该文档提到），分屏改由页面级方案实现（`page-split-followups.md` 留主仓）。用户 2026-10-14 拍板按「已作废方案」归档 |
+| ai-teaching-interactivity-plan.md | 文档头自述已被课程化计划取代；第一/二批已并入课程化计划并落码，第三批（工件回传 / 开放作答卡）未落且不在 3.5.0 范围 |
+
+### 设计文档 → `Phrontis/过程记录/`（1 份）
+
+| 文档 | 判定依据 |
+|---|---|
+| ai-teaching-course-verify-20260930.md | 课程模式 / 课时生命周期验证记录（过程证据，非开工依据） |
+
+### 原型 → `Phrontis/原型/`（33 件）
+
+| DP 原型名 | 来源 | 判定依据 |
+|---|---|---|
+| ai-teaching-lesson-lifecycle-prototype.html | `docs/prototypes/` | 配套方案已落码（同批归档） |
+| checkin-card-prototype.html | `outputs/` | 配套 `share-card-design.md` 早已归档；引用它的计划文件同批搬走 |
+| workbench-split-scope-prototype.html | `outputs/` | 随 `workbench-split-scope-design.md` 同批（能力已下线） |
+| keycap-themes-preview.html | `tmp/` | 键帽真源已落码（`commandRegistry.ts` + `.kb-kbd`）；本件为对比度预览稿 |
+| accounting-prototype.html | `tmp/accounting-proto/` | 记账模块已落码（`src/modules/accounting/`、`appModules.ts`） |
+| accounting-recurring-prototype.html | `tmp/accounting-recurring-proto/` | 定期收支已落码（`accountingPure.ts` / `accountingVaultRepo.ts`） |
+| agent-interrupt-prototype.html | `tmp/agent-interrupt-proto/` | 中断卡 + 断点续跑已落码（`MessageList.tsx` / `useAssistantChat.ts`，`9dc5048`） |
+| ai-reply-bubble-prototype.html | `tmp/ai-bubble-proto/` | 气泡可点性 / 观感多档；配套 `ai-input-bubble-design.md` 已归档 |
+| ai-chat-experience-prototype.html | `tmp/ai-chat-experience-proto/` | 整条 AI 对话体验基线；对应落码见 `ai-reply-loading-plan.md` / `StreamBubble.tsx` |
+| ai-code-card-prototype.html | `tmp/ai-code-card-proto/` | 代码块卡片形态 A/B 已落码（`code-block-card-plan.md`，66 断言全绿） |
+| ai-settings-prototype.html | `tmp/ai-settings-proto/` | AI 设置改造已落码（`2ba537d`） |
+| ai-teaching-favorites-prototype.html | `tmp/ai-teach-favorites-proto/` | 左栏收藏已落码（`ai-teaching/index.tsx` / `types/index.ts`） |
+| ai-teaching-mindmap-prototype.html | `tmp/ai-teaching-mindmap-proto/` | 思维导图已落码（`src/lib/mindmap.ts` / `MindMapView.tsx`） |
+| ai-assistant-parallel-prototype.html | `tmp/aichat-parallel-proto/` | 多对话并行 N-3 已落码（`assistantRunStore.ts`） |
+| ai-teaching-side-lane-center-prototype.html | `tmp/ait-sidelane-center-proto/` | 支线中心已落码（`SideLaneCenter.tsx` / `sideLaneMeta.ts`） |
+| ai-teaching-course-prototype.html | `tmp/aiteach-course-proto/` | 对话驱动建课已落码（`aiTeachingCourse.ts` + `course.outline.write`） |
+| command-registry-prototype.html | `tmp/command-registry-proto/` | 指令表真源化 P0+P1 已落地（`commandRegistry.ts`）；P2/P3 未做，方案仍留主仓 |
+| ai-teaching-course-assistant-prototype.html | `tmp/course-assistant-proto/` | 课程助手已落码（`ai-teaching/index.tsx`） |
+| ai-teaching-course-progress-prototype.html | `tmp/course-progress-proto/` | 知识点进度 + 课时状态机已落码（`CourseMode.tsx`） |
+| ai-teaching-course-review-prototype.html | `tmp/course-review-proto/` | 章末复习课已落码（`CourseMode.tsx`） |
+| file-menu-prototype.html | `tmp/file-menu-proto/` | 文件树右键菜单已落码（契约 74 项） |
+| image-viewer-prototype.html | `tmp/image-viewer-proto/` | 图片查看器已落码（`shared/image/ImageViewer.tsx`；真机验收单留主仓） |
+| ai-mascot-plugin-prototype.html | `tmp/mascot-plugin-proto/` | AI 输入区吉祥物已落码（`settings.ts` 的 `aiMascot` / `AiMascotAnchor.tsx`） |
+| nonmd-content-routing-prototype.html | `tmp/nonmd-content-routing-proto/` | 非 md 内容落点（批 1）已落码（`FileMetaCard.tsx`） |
+| nonmd-topbar-prototype.html | `tmp/nonmd-topbar-proto/` | 非 md 统一顶栏已落码（`PageEditor.tsx`） |
+| note-topbar-prototype.html | `tmp/note-topbar-proto/` | 笔记区顶栏已落码（`NoteTopBar.tsx`；契约 58/58） |
+| page-menu-capability-prototype.html | `tmp/page-menu-capability-proto/` | 页面 ⋮ 菜单能力补齐已落码（批 1a–4） |
+| page-menu-tight-prototype.html | `tmp/page-menu-tight-proto/` | ⋮ 菜单收短 / 删除标红已落码（`NoteMoreMenu.tsx`） |
+| schedule-assistant-prototype.html | `tmp/schedule-ai-proto/` | 日程 AI 化 P1 已落码（`ScheduleAssistantPanel.tsx`） |
+| schedule-recurring-prototype.html | `tmp/schedule-recurring-proto/` | 固定日程（重复任务）已落码（`RecurringRulesPanel.tsx` / `scheduleRecurringPure.ts`） |
+| session-pin-prototype.html | `tmp/session-pin-proto/` | 会话钉选已落码（`agentSetSessionPinned` / `AiChatSidebar.tsx`） |
+| terminal-prototype.html | `tmp/terminal-proto/` | 终端模块已落码（`appModules.ts` / `settings.ts`） |
+| workbench-empty-hints-prototype.html | `tmp/wb-empty-hints-proto/` | 工作台全关空态提示已落码（`WorkbenchEmptyState.tsx`） |
+
+### 过程证据与视觉素材
+
+| 材料 | 来源 | 去向 | 判定依据 |
+|---|---|---|---|
+| `workbench-review/`（24 png + 6 json） | `outputs/` | `过程记录/UI迭代截图/workbench-review/` | `workbench-split-scope-design.md:6` 按名引用的观测证据（分屏 S1–S5、实例探针 json）；随该方案同批 |
+| `双写作面对照/`（13 png + `cmp-styles.json`） | `tmp/probe-shots/` | `过程记录/UI迭代截图/双写作面对照/` | 双写作面（源码档 / 即时渲染档）落地前后的对照截图，对应 `note-surface-dual-engine-design.md`（已归档） |
+| `桌宠头像/`（2 png） | `tmp/pet-avatar/` | `视觉与品牌/桌宠头像/` | 桌宠头像素材（`pet-design.md` 已归档） |
+
+### 本批仍留主仓（未动）
+
+- **待跑验收单**：`batch1-real-machine-verification.md`、`batch3-real-machine-verification.md`
+- **仍活跃**：总纲 2 份、`ui-updates.md`、`ui-animation-plan.md`、`pending-fixes.md`、两份台账、三份常驻规范、插件三件套 + API 参考、`release-notes-design.md`、`theme-fx-design.md`（等看板）、`ai-learn-center-design.md`（自述不归档）、`command-registry-plan.md`（P2/P3 未做）、`page-menu-capability-plan.md`、`page-split-followups.md`、`ai-teaching-course-mode-plan.md`
+- **在飞**：`ai-outline-inline-plan.md`（并行会话正在落码，未跟踪）
+- **原型**：`outputs/` 的 5 件（`custom-panel-prototype.html` 被 v3.5.0 计划按名引用 + 待拍板四项 `ai-profile-suggest-` / `layout-customize-` / `ob-sidebar-` / `right-panel-widgets-prototype.html`）；`docs/prototypes/` 剩余 6 件（`ai-learn-center.html`、`ai-learn-bottom-bar.html`、`ui-animation-prototype.html`、`ai-teaching-course-mode.html`、`ai-teaching-header-tabs.html`、`ai-teaching-nav-declutter.html`）；`proto/` 3 件（`theme-fx-design.md` 待开工按名引用）
+- **`tmp/` 工作区产物**：4 个未落码原型目录（`image-gen-proto` / `aiteach-simple-mode-proto` / `course-outline-revise-proto`，另 `ai-bubble-proto` 的原型已搬、目录内探针留存）、各目录内的探针脚本与检查快照、`probe-app` / `devbridge` / `deepseek-spike` / `dsh-*` / `vault-fixture` / `node_modules` 等
+
+> **本批后主仓 `docs/` 从 42 份降到 25 份。**
+
 ## 已知引用失效（接受）
 
 以下活跃文档仍按旧路径引用已归档文件，按规则 6 不再维护链接：

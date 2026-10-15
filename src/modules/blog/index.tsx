@@ -5,6 +5,7 @@ import { Entry, Tag, type SummaryRecord } from '../../types'
 import { getEntries, createEntry, deleteEntry, getEntryById, toggleEntryStar, getSetting, setSetting, openExternal, getTags, workspaceGetCurrent, ensureSummary } from '../../lib/ipc'
 import { useSettings } from '../../lib/SettingsContext'
 import { ConfirmDialog } from '../../components/shared'
+import { SIDEBAR_HEADER_ICON } from '../../components/shared/sidebarHeaderIcon'
 import { PluginSlotEntry } from '../../components/shared/PluginSlotEntry'
 import { registerAssistantContext } from '../../lib/assistantContext'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
@@ -236,7 +237,16 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
       }
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // 「新建 / 打开今日文章」的**跨模块入口**（2026-10-13）：命令面板派发 `blog-new-entry`。
+    // 与知识库模块同一手法（那边补的是 kb-editor-new-page）—— 动作只在模块内有一份（handleTodayEntry），
+    // 外部只负责把意图递进来；要不要响应由调用方的门控决定（palette 侧 requires.tabs: ['blog']）。
+    // handleTodayEntry 是 async（建页要落盘）⇒ 必须显式丢弃 Promise，不能直接当 void 返回
+    const onNewEntry = (): void => { void handleTodayEntry() }
+    window.addEventListener('blog-new-entry', onNewEntry)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('blog-new-entry', onNewEntry)
+    }
   }, [handleTodayEntry, goToList, loadEntries])
 
   const starredEntries = entries.filter(e => e.isStarred)
@@ -306,12 +316,17 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
     })
   }, [onSnapCloseSidebar, onSnapOpenSidebar])
 
-  // Ctrl+O toggle outline
+  // Ctrl+Alt+O toggle outline
+  // ★ 2026-10-13 改键：原为 Ctrl+O，与 App.tsx:314 的**全局快速打开文件**撞车 —— 两条都是
+  //   window 级监听，而 App 那条没有焦点闸门（本条的 isEditingInput 只是自保），于是焦点不在
+  //   输入控件时两个动作会**一起发生**：既弹出快速打开面板、又切了大纲，而本条后注册、
+  //   preventDefault 已经来不及。改用 Ctrl+Alt+O 后与 Ctrl+Alt+B（切右栏）/ Ctrl+Alt+F（脚注）
+  //   同家族。两处按钮提示（本文件 :566 与 MarkdownEditor.tsx:308）必须同步改，契约有断言锁。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (getGlobalActiveTab() !== 'blog') return
       if (isEditingInput(e)) return
-      if (e.ctrlKey && e.key === 'o' && (view === 'editor' || view === 'detail')) {
+      if (e.ctrlKey && e.altKey && !e.shiftKey && e.key.toLowerCase() === 'o' && (view === 'editor' || view === 'detail')) {
         e.preventDefault()
         handleToggleOutline()
       }
@@ -334,7 +349,7 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
             title={entries.some(e => e.date === localToday()) ? '继续编写今日文章' : '新建今日文章'}
             className="p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors"
           >
-            <Edit3 size={13} />
+            <Edit3 {...SIDEBAR_HEADER_ICON} />
           </button>
         </>,
         modActionsEl,
@@ -562,7 +577,7 @@ function EntryDetail({ entryId, onEdit, onDelete, onBack, onToggleOutline }: {
             <button onClick={onBack} className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">← 返回列表</button>
             <div className="flex gap-2">
               {onToggleOutline && (
-                <button onClick={onToggleOutline} className="p-1.5 rounded hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]" title="大纲 (Ctrl+O)">
+                <button onClick={onToggleOutline} className="p-1.5 rounded hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-secondary)] hover:text-[var(--text-primary)]" title="大纲 (Ctrl+Alt+O)">
                   <ListTree size={16} />
                 </button>
               )}

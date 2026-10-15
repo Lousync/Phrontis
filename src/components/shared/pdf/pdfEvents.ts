@@ -11,6 +11,52 @@ export const KB_PDF_PAGE_CHANGED = 'kb-pdf-page-changed'
 export const KB_PDF_GOTO_PAGE = 'kb-pdf-goto-page'
 
 /**
+ * 命令面板 → PDF 阅读器：**整页适配**（与阅读器里按 `Ctrl+0` 是同一个 `resetFit()`）。
+ *
+ * 为什么要这条事件：`Ctrl+0` 只活在阅读器自己的 window keydown 里，而命令面板在 App 侧 ——
+ * 面板要让「适应窗口」成为一条可执行命令，就必须有一条跨模块通道（与 kb-editor-new-page 同构）。
+ *
+ * ★ 口径（2026-10-13 拍板）：**detail 不带 relPath，由「当前可见的那个阅读器」响应**。
+ *   理由：Tab 是 `display:none` 保活（App.tsx 的 rowModules 注释），所以可能同时挂着两个
+ *   PdfReaderView 实例 —— 书架 Tab 里一本、笔记编辑器里打开的 PDF 附件一本。
+ *   若照抄 KB_PDF_GOTO_PAGE 的 relPath 口径，派发方就得先知道「现在读的是哪本」，
+ *   而笔记侧那个实例的 relPath 只有 PageEditor 知道，App 拿不到。
+ *   所以改用**可见性**判定：`rootRef.current.offsetParent === null` ⇔ 所在 Tab 已被
+ *   `display:none` 收起（本仓同款判据：MindMapView.tsx:170）。
+ *
+ * ★ 为什么必须判可见、不能广播给所有实例：`resetFit()` 末尾会 `scheduleProgress({ zoom: 1 })`，
+ *   800ms 后**写盘**（pdfReaderPatch）。广播 = 用户在笔记里看附件，后台那本书的阅读进度被顺手
+ *   改写一条。
+ *
+ * ★ 键盘路径也已补上同一守卫（2026-10-13，K-1）：阅读器自己的 `Ctrl+0` / 翻页键同样是**无条件**的
+ *   window keydown，被收起那个实例原先照样响应；现在整个 handler 开头就判「读不到可见的根节点
+ *   就早退」（见 `PdfReaderView.tsx` 快捷键 effect）。下面那个探针就是同一条判据的对外形态。
+ */
+export const KB_PDF_ZOOM_FIT = 'kb-pdf-zoom-fit'
+
+/**
+ * 屏幕上**此刻**是否存在可见的 PDF 阅读器实例？（App 侧「全局界面缩放要不要让位」的判据）
+ *
+ * 为什么要探 DOM、而不是让 App 自己记一份状态：Tab 是 `display:none` 保活，书架与笔记编辑器
+ * 各自可能挂着一个阅读器，而**笔记侧那个的 relPath 只有 `PageEditor` 知道** —— App 无从回答
+ * 「现在读的是哪本、在哪个 Tab」。可见性反而是两边都能问的东西：被 `display:none` 收起的实例
+ * `offsetParent === null`（同款判据：上面 KB_PDF_ZOOM_FIT 头注、`MindMapView.tsx:170`）。
+ *
+ * ★ 标记写在阅读器根 div 上（`data-kb-pdf-root`），两处都写字面量：JSX 属性一处、下列选择器一处。
+ *   只改一侧 ⇒ 探针恒 `false` ⇒ 笔记侧 Ctrl+= 又变回双重缩放，且**零报错**；所以
+ *   `verify-palette-channels.mjs` §3 专门把这两处对账（含反例）。
+ *
+ * ★ 只在按键那一刻调用（一次 Ctrl 加/减号一次同步查询），不要放进渲染期或高频路径。
+ */
+export function hasVisiblePdfReader(): boolean {
+  const roots = document.querySelectorAll<HTMLElement>('[data-kb-pdf-root]')
+  for (const el of Array.from(roots)) {
+    if (el.offsetParent !== null) return true
+  }
+  return false
+}
+
+/**
  * 右栏阅读侧栏 → 阅读器：**删除一条书签**（detail: `{ relPath, id }`）。
  *
  * ★ 为什么必须回派给阅读器、而不是右栏直接 patch：三个阅读器把书签存在**内存权威数组**里

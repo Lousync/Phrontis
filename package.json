@@ -1,18 +1,27 @@
 {
   "name": "knowbase",
-  "version": "3.4.1",
+  "version": "3.7.0",
   "description": "Phrontis — 本地 Windows 桌面知识管理工具（原 Knowbase Programmer Edition）",
   "main": "./out/main/index.js",
   "scripts": {
+    "predev": "node .AGENT/scripts/acl-integrity-guard/verify-integrity-labels.mjs --root node_modules",
     "dev": "node scripts/launch.js dev",
     "build": "electron-vite build",
     "start": "node scripts/launch.js start",
     "preview": "electron-vite preview",
     "test": "node --experimental-strip-types --no-warnings scripts/test-parse-quick-date.mts",
-    "pack": "electron-vite build && electron-builder --win --publish=never",
-    "pack:dir": "electron-vite build && electron-builder --win --dir --publish=never"
+    "pack": "node scripts/pack.mjs",
+    "pack:dir": "node scripts/pack.mjs --dir-only"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/search": "^6.7.2",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.14",
+    "@lezer/markdown": "^1.8.0",
     "@lydell/node-pty": "^1.2.0-beta.15",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@monaco-editor/react": "^4.7.0",
@@ -25,9 +34,10 @@
     "highlight.js": "^11.11.1",
     "iconv-lite": "^0.7.2",
     "ignore": "^5.3.2",
-    "katex": "^0.18.4",
+    "katex": "^0.18.11",
     "linkedom": "^0.18.13",
     "lucide-react": "^1.0.0",
+    "mermaid": "^12.1.0",
     "monaco-editor": "0.56.0",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
@@ -82,7 +92,7 @@
       }
     ],
     "directories": {
-      "output": "dist-electron"
+      "output": "packs"
     },
     "files": [
       "out/**/*"

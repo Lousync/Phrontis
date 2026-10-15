@@ -416,8 +416,8 @@ ok(!/maximized/.test(srcRight), 'E6c 右栏组件的 maximized prop 随卡片下
 ok(/<PomoWidget frameless \/>/.test(srcRight) && /frameless\?: boolean/.test(srcPomo),
   'E6d 番茄钟在右栏走 frameless（不再画自带卡片，消除卡中卡）')
 ok(!/排序：直接拖拽上方图标/.test(srcRight), 'E6e ⋯ 控件选显菜单不带底部排序说明文字（文案精简）')
-ok(/bg-\[var\(--bg-primary\)\] \$\{absorbSurplus \? 'grow-\[99\] basis-0 max-h-\[480px\]' : 'flex-1'\} min-h-\[400px\]/.test(srcRight),
-  'E6f 下段 = bg-primary 内容层 + 细边框；min-h-400 保底（宠物永不被挤），absorbSurplus 时再封顶 max-h-480')
+ok(/flex min-h-0 flex-col overflow-hidden \$\{absorbSurplus \? 'grow-\[99\] basis-0 max-h-\[480px\]' : 'flex-1'\} min-h-\[400px\]/.test(srcRight),
+  'E6f 下段容器 = min-h-400 保底（宠物永不被挤），absorbSurplus 时再封顶 max-h-480')
 ok(/absorbSurplus=\{winMax\}/.test(read('src/App.tsx')),
   'E6g absorbSurplus 由 App 按 winMax 下发（策略在 App，右栏只表达「要不要吸收余量」）')
 
@@ -438,22 +438,42 @@ ok(/data-wb="pagebar"/.test(srcPageBar) && /data-pb-tabs=/.test(srcPageBar) && /
   'F3 页面条契约属性齐备（pagebar / pb-item / pb-tabs / 两个 pb-slot）')
 ok(/PAGE_OWNED/.test(srcPageBar) && /'knowledge'/.test(srcPageBar) && !/'editor'/.test(srcPageBar),
   'F4 页面条 PAGE_OWNED 只含知识库（编辑器已退役，不占模块条目）')
-// 浮层结构（2026-09-20 悬浮栏改造）：外壳 `data-wb="mainPane"` 全宽 + pointer-events-none；
-// 内层是**一个悬浮胶囊** `data-wb="floatBar"`（右上角 mt-3 mr-3）——两个槽（内容级操作 + 页面级工具）
-// 都在胶囊里；静息收把手 / 毛玻璃 / 空胶囊隐身由 index.css 的 [data-wb='floatBar'] 段承担。
-// 分屏时代外壳宽度曾是 `calc(100% - 副栏宽)`，下线后恒为全宽。
-ok(/data-wb="mainPane"[\s\S]{0,200}?pointer-events-none[\s\S]{0,200}?w-full/.test(srcApp)
-  && /data-wb="floatBar"/.test(srcApp) && /floatBar[\s\S]{0,120}?mr-3 mt-3/.test(srcApp)
-  && (srcApp.match(/id="editor-toolbar-slot"/g) || []).length === 1,
-  'F8 内容级操作浮层在 App（单个悬浮胶囊 floatBar 内含唯一 #editor-toolbar-slot；pointer-events 分层不挡内容）')
-// F8b 悬浮栏样式基建与把手口径（2026-09-20）：CSS 段 + 次级钮标记类必须在位，
-// 否则「静息收把手/毛玻璃/空胶囊隐身」三条行为整条失效（样式与实现分居两个文件，最易漏改）
+// ===== F16 页面条横向溢出（2026-10-13，docs/v3.4.0-feedback.md 的 F-16 条）=====
+// 病根是三条叠加：模块条目数量无上限且 `shrink-0`（一多就把后面的槽整块顶出行）+
+// 行容器 `overflow-x-clip`（禁止滚动 ⇒ 顶出去就**够不到**）+ 知识库槽把滚动条藏了（**看不出能滚**）。
+// 所以断言也要成对：溢出区**自己得能滚**、**得让得出宽度**，而行容器**不能**被改成滚动容器。
+// 行为侧（该滚到哪、什么时候出渐隐、滚轮要不要劫持）另有一份：verify-strip-overflow.mjs。
+const kbSlotCls = (srcPageBar.match(/data-pb-slot="knowledge"[^>]*?className=\{`([^`]*)`\}/s) ?? [])[1] ?? ''
+ok(/data-pb-scroll="module"/.test(srcPageBar)
+  && /data-pb-scroll="module"[^]{0,260}?kb-edge-strip/.test(srcPageBar)
+  && /data-pb-scroll="module"[^]{0,260}?overflow-x-auto/.test(srcPageBar)
+  && /data-pb-scroll="module"[^]{0,260}?px-2 -ml-2/.test(srcPageBar),
+  'F16a 模块条目区自成一个横向滚动容器（data-pb-scroll=module + kb-edge-strip + overflow-x-auto + 弧位 px-2/-ml-2）')
+ok(/relative flex min-w-0 shrink items-end gap-1/.test(srcPageBar),
+  'F16b 模块条目区让得出宽度（shrink + min-w-0：行不够时自己缩，不再把后面的槽顶出行外）')
+ok(!!kbSlotCls && !/overflow-x-auto/.test(kbSlotCls) && !/kb-edge-strip/.test(kbSlotCls) && /shrink-0/.test(kbSlotCls),
+  'F16c 知识库槽不再自己滚（滚动与渐隐交给 PageTabStrip 一份实现），且宽度口径不变：shrink-0 + max-w-[50%] = 按内容占宽至多半行 —— 行宽不够时由模块条目区让宽', kbSlotCls)
+ok(/overflow-x-clip/.test(srcPageBar),
+  'F16d 负向：行容器仍是 overflow-x-clip（行本身绝不能变滚动容器 —— 横向滚动条占盒高会把激活条目从行底顶起，内凹弧还会被纵向裁掉）')
+ok(/useStripScroll/.test(srcStrip) && /StripEdges/.test(srcStrip)
+  && /data-pb-scroll="group"/.test(srcStrip) && /overflow-x-auto px-2 -ml-2/.test(srcStrip),
+  'F16e 页签条自带滚动 + 两侧渐隐 + 弧位（主栏页面条与副栏分屏槽共用同一个渲染器）')
+// 浮层结构已退役（批 2，2026-10-12，docs/nonmd-topbar-design.md）：原 `data-wb="mainPane"` 外壳 +
+// `data-wb="floatBar"` 悬浮胶囊 + `#editor-toolbar-slot` + `.kb-float-hide` 把手口径**整条删除** ——
+// md 的动作 2026-10-11 已搬进 `NoteTopBar`，非 md 的动作批 2 也搬进去了 ⇒ 胶囊的两个槽都没有写入方
+// （其中 `wbContentActionsEl` 自 v3.4.0「页面条置顶」起就是死代码）。顶栏改为**行内渲染**，
+// 不再 portal 到主栏单例槽。故 F8 系转为**负向断言**：任何一处残留都说明退役没做干净。
+ok(!/data-wb="mainPane"/.test(srcApp) && !/data-wb="floatBar"/.test(srcApp)
+  && !/id="editor-toolbar-slot"/.test(srcApp) && !/wbContentActions/.test(srcApp),
+  'F8 内容级操作浮层已退役（App 侧无 mainPane / floatBar / #editor-toolbar-slot / wbContentActions）')
+// F8b 悬浮栏样式基建同批退役：CSS 段与次级钮标记类都必须消失 ——
+// 否则「DOM 没了、样式留着」= 一段永不生效的死样式（样式与实现分居两个文件，最易漏改）
 const srcCss = read('src/styles/index.css')
-ok(/\[data-wb='floatBar'\]/.test(srcCss) && /\.kb-float-hide/.test(srcCss)
-  && /backdrop-filter/.test(srcCss) && /:not\(:has\(button\)\)/.test(srcCss),
-  'F8b 悬浮栏样式基建在位（floatBar 胶囊 / kb-float-hide 把手 / 毛玻璃 / 空胶囊隐身）')
-ok(/kb-float-hide/.test(read('src/modules/knowledge/components/PageEditor.tsx')),
-  'F8c 笔记页工具栏标注次级钮 kb-float-hide（编辑器宿主已随模块退役）')
+ok(!/\[data-wb='floatBar'\]/.test(srcCss) && !/\.kb-float-hide/.test(srcCss)
+  && !/:not\(:has\(button\)\)/.test(srcCss),
+  'F8b 悬浮栏样式基建已退役（CSS 侧无 floatBar / kb-float-hide / 空胶囊隐身规则）')
+ok(!/kb-float-hide/.test(read('src/modules/knowledge/components/PageEditor.tsx')),
+  'F8c 笔记页不再标 kb-float-hide 次级钮（工具栏改由顶栏承载，胶囊的把手语义一并退役）')
 ok(/pageBarHosted/.test(srcKnowledge) && /createPortal\(strip/.test(srcKnowledge),
   'F9 知识库页签条 portal 进页面条槽')
 ok(/onImmersiveChange\?\.\(v\)/.test(srcKnowledge) && /readingMode \|\| graphMode/.test(srcKnowledge) && /pageBarHidden/.test(srcApp),
@@ -523,8 +543,8 @@ ok(!/secondaryTab|setSecondaryTab/.test(srcApp) && !/activePane/.test(srcApp),
 ok(!/openInSecondary|toggleSplit|closeSplit|splitSecondaryWidth|splitPaneModules/.test(srcApp),
   'G3 App 无分屏回调与派生量（openInSecondary / toggleSplit / closeSplit / splitSecondaryWidth / splitPaneModules）')
 ok(!/secondarySlotRef/.test(srcApp) && !/wbSecondaryTabsRef|wbSecActionsRef/.test(srcApp)
-  && !/data-pb-split|data-pb-slot="secondary"|data-wb="splitPane"/.test(srcApp),
-  'G4 副栏槽与副栏 DOM 标识（secondarySlotRef / wbSecActions / data-pb-split / splitPane）已清空')
+  && !/data-pb-split|data-wb="splitPane"/.test(srcApp),
+  'G4 旧分屏的副栏槽与 DOM 标识（secondarySlotRef / wbSecActions / data-pb-split / splitPane）已清空')
 ok(!existsSync(`${ROOT}/src/components/workbench/SplitHandle.tsx`) && !/SplitHandle/.test(srcApp),
   'G5 分屏手柄组件已删且 App 无引用（3.5.0 重做时从 git 历史取回）')
 ok(!/paneActive/.test(srcStrip) && !/paneActive/.test(srcKnowledge),
@@ -533,9 +553,16 @@ ok(!/SPLIT_FALLBACK_WIDTH|splitWidth/.test(srcApp) && !/RowsPerPane/.test(srcApp
   'G7 副栏宽度兜底与实测宽度上报（SPLIT_FALLBACK_WIDTH / splitWidth）已删')
 ok(!/Backslash/.test(srcApp) && !/Columns2/.test(srcApp),
   'G8 分屏入口全清：Ctrl+\\ 快捷键与页面条分屏按钮（Columns2 图标）')
-// 负向：全仓（源码 + 外壳 + 下游文案）不得再有「分屏」概念残留
-ok(!/分屏/.test(srcApp) && !/分屏/.test(srcStrip) && !/分屏/.test(srcPageBar) && !/分屏/.test(srcStatusBar),
-  'G9 「分屏」概念已从 App / 页签条 / 页面条 / 状态栏的源码与注释中清除')
+// G9（2026-10-13 重写）：原断言是「『分屏』概念已从 App / 页签条 / 页面条 / 状态栏的源码与注释中清除」——
+//   那是**旧工作台分屏**退役时立的负向断言，而 v3.5.0 又加回了**页面级分屏**（App 的 pageSplit /
+//   data-pb-slot="secondary" / 页签右键「向右拆分 · 向下拆分」）。旧断言与现状相反，改为对当前实现的
+//   **正向**断言：既锁住新形态，也不至于退回旧形态（旧标识仍由 G4 / G5 / G7 / G8 负向锁着）。
+ok(/data-pb-slot="secondary"/.test(srcApp) && /wbSecondaryPageRef/.test(srcApp),
+  'G9 页面级分屏的副栏槽仍在（App 的 data-pb-slot="secondary" + wbSecondaryPageRef）')
+ok(/pageSplit/.test(srcApp) && /pageSplit/.test(read('src/lib/workbenchLayout.ts')),
+  'G9b 页面级分屏的状态与持久化口径仍在（App.pageSplit + workbenchLayout 的 wbLayout.pageSplit）')
+ok(/向右拆分/.test(srcKnowledge) && /向下拆分/.test(srcKnowledge),
+  'G9c 页签右键的「向右拆分 / 向下拆分」入口仍在（knowledge/index.tsx）')
 
 // ===== H. 中间主体冗余头部行清除（v3.4.0，2026-09-18 · A 组）=====
 // 背景：多个模块在中间主体顶部自带一条「贯通行」（图标 + 模块名），与左栏标识 / 页面条重复。
@@ -630,22 +657,17 @@ const srcAiTeach = stripComments(read('src/modules/ai-teaching/index.tsx'))
 ok(!/编辑器顶栏/.test(srcAiTeach),
   'K6 负向：toast 文案不再指向已不存在的「编辑器顶栏」（提示与实际一致）')
 
-// ===== L. 删除清零 ≠ 用户关标签（台账 F-10，2026-09-26 拍板方向 A）=====
-// 缺陷面：「最后一个页面关闭 → 自动关模块标签」被删除动作意外命中 —— 删一条笔记被等价成
-// 「关掉整个知识库标签」，App.closeTab 清 railModule → 左栏弹回总览；树删除连带关签同病，
-// 且 handlePageDeleted 的「删完重开首页」有 await 空窗竞态（effect 抢在重开前看到清零）。
-ok(/if \(deletionClearRef\.current\) \{ deletionClearRef\.current = false; return \}/.test(srcKnowledge),
-  'L1 清零 effect 消费 deletionClear 标记（消费一次即复位，不依赖删除流程的复位时机）')
-// L2 用两个**单行**锚点比位置：仓库源码是 CRLF，多行正则/搜索串会被 \r 绊倒（strip 后亦然）
-const delConsumeAt = srcKnowledge.indexOf('if (deletionClearRef.current)')
-const fullViewGuardAt = srcKnowledge.indexOf('if (showQuizCollection || graphMode || readingMode) return')
-ok(delConsumeAt !== -1 && fullViewGuardAt !== -1 && delConsumeAt < fullViewGuardAt,
-  'L2 消费位于全幅视图守卫之前（守卫早退不留陈旧标记吞掉下一次手动关签）')
-ok(/length === 1 && openPageIdsRef\.current\.includes\(id\)\) deletionClearRef\.current = true/.test(srcKnowledge),
-  'L3 页面删除：仅在「被删页是唯一开着的页」（必然清零）时置位 —— 保证标记必被 effect 消费')
-ok(/willClearAll = openPageIdsRef\.current\.length > 0 && openPageIdsRef\.current\.every/.test(srcKnowledge)
-  && /if \(willClearAll\) deletionClearRef\.current = true/.test(srcKnowledge),
-  'L4 树删除：仅当全部已开页签都在被删路径下（必然清零）时置位（同 handlePageDeleted 口径）')
+// ===== L. 关最后一个页签不再自动关「笔记」模块标签（2026-10-09 口径变更）=====
+// 旧行为（2026-09-19）：页面清零即 onRequestCloseTab → App.closeTab('knowledge') 清 railModule，
+// 左栏回总览；并配套 deletionClear 标记区分「删除清零 ≠ 用户关签」。用户反馈：关最后一个页面
+// 后本意是继续在笔记区从文件树开别的文件，左栏却被弹回总览。
+// 新口径：清零不再关模块标签（左栏停在文件树、中间走空态）；删除/关签不再需要区分，机制整体移除。
+ok(!/deletionClearRef/.test(srcKnowledge) && !/prevPageCountRef/.test(srcKnowledge) && !/onRequestCloseTab/.test(srcKnowledge),
+  'L1 知识库不再持有「清零即关模块标签」机制（deletionClearRef / prevPageCountRef / onRequestCloseTab 全无）')
+ok(!/onRequestCloseTab/.test(srcApp),
+  'L2 App 不再向知识库传 onRequestCloseTab（负向：自动关标签通道已断）')
+ok(/activePageId \? \(/.test(srcKnowledge) && /<FileText size=\{48\}/.test(srcKnowledge),
+  'L3 无活动页时仍走空态占位（模块标签与左栏保留，中间显空态，可继续从树开文件）')
 
 // ===== M. 看板「返回」落顶层（看板方案 §5 反馈 1，2026-09-27）=====
 // 缺陷面：onBack 写死 setRailModule('knowledge') + handleTabChange('knowledge') —— 回工作台落在
@@ -700,13 +722,20 @@ ok(/onOpenFile=\{\(n\) => \{ setActivePath\(n\.relPath\); onOpenFile\(n\.relPath
   'N2 点文件 → 上报 relPath 并记高亮（不自己开页签，打开语义留在宿主）')
 ok(/onOpenFile=\{\(rel\) => onOpenLooseFile\(rel, \{ startEdit: true \}\)\}/.test(srcLeftRaw),
   'N3 宿主接 startEdit: true —— 文件树打开一律进编辑态（不再阅读优先）')
-// 八项文件操作接线齐全（方案 §2.1 表）
+// 文件操作接线齐全（方案 §2.1 表；2026-10-12 由八项扩到十项 —— 右键菜单对齐 Obsidian 后
+// 「复制路径」变二级菜单、「将文件移动到…」与「系统打开 / 资源管理器定位」是新入口）
 for (const [label, re] of [
   ['新建文件/文件夹', /workspaceCreateFile\(root, rel\)|workspaceMkdir\(root, rel\)/],
   ['新建知识页', /crypto\.randomUUID\(\)[\s\S]{0,200}workspaceCreateFile\(root, mdRel/],
   ['内联重命名', /workspaceRename\(root, relPath, to\)/],
   ['删除到回收站', /workspaceTrash\(root, node\.relPath\)/],
-  ['复制路径', /navigator\.clipboard\.writeText\(node\.relPath\)/],
+  // ★ 2026-10-12 改写：原来锁 `navigator.clipboard.writeText(node.relPath)`（渲染层直连剪贴板）。
+  // 现在「复制路径」是二级菜单（仓库相对路径 / 完整路径），并统一走主进程 `copyText` ——
+  // 批 1 定的口径就是「渲染层不直连 navigator.clipboard」。
+  ['复制路径（二级：相对 / 完整，走主进程剪贴板）',
+    /key: 'copyPath'[\s\S]{0,160}?submenu: \[[\s\S]{0,220}?copyTreePath\(node\.relPath, 'rel'\)[\s\S]{0,140}?copyTreePath\(node\.relPath, 'abs'\)/],
+  ['将文件移动到…（目录搜索弹层）', /key: 'moveTo'[\s\S]{0,200}?<DirPicker/],
+  ['系统打开 / 资源管理器定位', /workspaceOpenInSystem\(root, rel, reveal\)/],
   ['粘贴系统剪贴板', /workspacePasteExternal\(root, dirRel, paths\)/],
   ['拖拽移动', /const doMove = useCallback/],
   ['撤销栈登记', /recordFileOp\(\{ kind: 'move'/],
@@ -721,8 +750,16 @@ ok(/getKnowledgeCategories\(\)[\s\S]{0,300}c\.path === node\.relPath/.test(srcTr
 ok(/清除已开页签残留/.test(srcKnowledgeTree) || /openPageIdsRef\.current/.test(srcKnowledgeTree),
   'N7 知识库侧已开页签修剪通道在场（跨模块删除后的页签残留回退方案依据）')
 // 右键菜单 portal 到 body（左栏变换容器会改写 fixed 包含块，方案 §2.1）
-ok(/fixed inset-0 z-\[70\] kb-pop-layer/.test(srcTree),
-  'N8 右键菜单 portal 到 body（不走栏内定位 —— 变换容器会压窄菜单）')
+/* ★ 2026-10-13（批 3 期间校正）：这条原先断言层类名出现在 `WorkbenchFileTree.tsx` 里，
+   而文件树菜单重做（2026-10-12）之后，树**不再自己写菜单** —— 它把条目交给共享组件
+   `src/components/shared/FileContextMenu.tsx`（一颗组件服务 6 个调用点，是本仓
+   「清单各持一份必然漂移」那条教训的直接产物）。层类名于是正确地住在共享组件里。
+   断言的**意图**（菜单不能被栏内变换容器压窄）没变，只是落点变了：
+   拆成两条 —— ① 共享组件里确实 portal 到 body；② 文件树确实用的是它，而不是又内联了一套。 */
+ok(/fixed inset-0 z-\[70\] kb-pop-layer/.test(stripComments(read('src/components/shared/FileContextMenu.tsx'))),
+  'N8 右键菜单 portal 到 body（共享组件 FileContextMenu：`fixed inset-0 z-[70] kb-pop-layer`）')
+ok(/<FileContextMenu[\s\S]{0,200}onClose=/.test(srcTree),
+  'N8b 文件树用的是那颗共享菜单（不内联第二套 —— 否则层类名该在树里，两条断言一起红）')
 // ★ 本轮核心判据：主进程广播。五处结构写通道必须补，且**不得**加进高频的 writeWorkspaceFile
 const wsCreateAt = srcWs.indexOf("ipcMain.handle('ws:createFile'")
 const wsMkdirAt = srcWs.indexOf("ipcMain.handle('ws:mkdir'")
@@ -767,8 +804,8 @@ ok(/<VaultTree[\s\S]{0,400}hideSoft/.test(srcTree),
   'N13 树模式 hideSoft —— 不展示「软件文件」折叠节（命中项从主列表一并剔除）')
 const srcVaultTreeSoft = stripComments(read('src/components/shared/VaultTree.tsx'))
 ok(/hideSoft = false/.test(srcVaultTreeSoft) && /const softSet = depth === 0 && !hideSoft/.test(srcVaultTreeSoft)
-  && /const main = hideSoft && depth === 0/.test(srcVaultTreeSoft),
-  'N13b VaultTree 的 hideSoft 默认 false（其余调用方行为不变），且主列表同样剔除命中项')
+  && /const mainRaw = hideSoft && depth === 0/.test(srcVaultTreeSoft),
+  'N13b VaultTree 的 hideSoft 默认 false（其余调用方行为不变），且主列表（mainRaw）同样剔除命中项')
 // 聚焦按钮在**宿主**的树模式头部行（与 🏠 同排，开发负责人 2026-09-29 指定）；
 // 树组件侧只按受控 prop 消费，按钮本体不在它里面
 ok(/<FolderFocusButton on=\{treeFocus\}/.test(srcLeftRaw) && /const \[treeFocus, setTreeFocus\] = useState\(false\)/.test(srcLeftRaw),

@@ -128,6 +128,26 @@ keywords: [口语别名1, 口语别名2, …]   # 必填非空；与 .assistant/
 `.ignore 知识库隐藏规则` / `AI Skill 技能`（keywords 空）/ `AI 教学素材与代码`（keywords 空）/ `AI 联网搜索`（keywords 空）/ `zen-mode`（keywords 空）/ `习惯打卡`（keywords 空）/ `博客写作`（keywords 空）/ `博客标签`（keywords 空）/ `周月总结与模板`（keywords 空）/ `密码本`（keywords 空）/ `强密码生成器`（keywords 空）/ `心情状态`（keywords 空）/ `日期搜索`（keywords 空）/ `日程与打卡小窗`（keywords 空）/ `番茄钟`（keywords 空）/ `网址导航`（keywords 空）/ `远程监督`（keywords 空）
 （括号 = 脚本已告警的缺口；`工具箱` 总览篇可并入各工具篇，不单开。）
 
+### 补充 · 2026-10-13「AI 设置按域重排」的手册同步（非批次重编）
+
+AI 工具页从 5 页签重排为 6 页签（模型 / 权限 / 工具 / 对话 / 用量 / 教学），另有三处行为变更，手册按事实修订而非按批次：
+
+| 篇章 | 改了什么 |
+|---|---|
+| `AI 权限与工具边界.md` | 新增「AI 设置分布在六个页签」节（页签地图）；终端执行入口改为真实路径；审计位置改为「工具」页签的「最近调用」 |
+| `AI Skill 技能.md` | 页签名改「工具」；安装入口改「选择文件夹安装」（**原「拖入 .zip」是做不到的事**，已显式写成不支持）；补 `desc` + keywords（原为空） |
+| `AI 助手 · 吉祥物.md` | 设置路径改「AI 工具 → 对话 → 吉祥物」 |
+| `AI 联网搜索.md` | 内置工具落点改「工具」页签；补 `desc` + keywords（原为空） |
+| `常见问题.md` | 「审计记录」改「工具 页签的最近调用」 |
+| `终端.md` | 「设置 → AI 终端执行」改为「设置 → AI 工具 → 权限 → 终端执行」 |
+| `AI 教学素材与代码.md` | 补「图片视觉转写模型」的指定位置（决策 D 新提为正式设置键） |
+
+同源的错误路径还硬编码在代码/更新说明里，一并修掉（手册不是唯一会散播错路径的地方）：`electron/lib/builtinTools.ts` 的 `terminal.exec` 报错串、`electron/lib/aiTools.ts` 的权限拒绝串、`src/modules/terminal/AiRecordList.tsx` 空态提示、`src/modules/plugins/index.tsx` 的 skills 能力描述，以及 v3.5.0 更新说明（`CHANGELOG.md` + `releaseNotes/highlights.ts`，已重跑 `build-release-notes.mjs`）。
+
+用例：`verify-help-retrieval.mjs` 补登 8 条（**117/117 通过**）。其中 2 条按 `top: 2` 登记并注明原因——「AI 设置都有哪些页签」被《模块一览》压过（它天然含「设置」二字），「AI 终端执行开关在哪」被《AI 权限与工具边界》压过（该篇同样给出正确路径，两条都算答对）。
+
+**仍缺**：15 篇没有 `desc`（批次三待补，本次只补齐动到的两篇 AI 篇）。
+
 ---
 
 ## 六、《快速上手》初稿准备材料（下一步就绪包）

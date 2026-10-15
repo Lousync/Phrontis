@@ -1,8 +1,24 @@
-import { ipcMain, net } from 'electron'
+import { app, ipcMain, net } from 'electron'
 import { randomUUID } from 'crypto'
 import { appendAudit, countMonthLlmTokens, countMonthLlmTokensSplit, countMonthVisionTokens, countMonthVisionPages, summarizeMonthLlmUsage } from './pluginAudit'
 import { encryptSecret, decryptSecret } from './secretBox'
 import { scanCcSwitch, importCcSwitchIds, bindCcSwitchSaver } from './ccSwitchImport'
+import {
+  familyOf, userAgentString, withSessionHeaders, buildResponsesBody,
+  parseResponsesWhole, mergeResponsesResult, collectResponsesToolCalls,
+  REASONING_MODEL_RE,
+  type ProviderType, type ModelFamily, type PureChatResult,
+} from './llmProtocolPure'
+import {
+  migrateProvider, activeAccountOf, activeAccountKeyEnc, providerUsable,
+  sanitizeAccountInfo, appendAccount, removeAccount,
+  type ProviderAccount,
+} from './llmAccountPure'
+import {
+  attachFacts, rawFailure, rawFromError, classifyFailure, friendlyReason,
+  interruptionOfStopReason, interruptionDetailOf, STOP_REASON_NO_TERMINATOR,
+  type Interruption, type InterruptionDetail, type InterruptCode,
+} from './llmFailurePure'
 
 /**
  * Model Gateway —— LLM API 统一接入层（方案 .claude/plans/model-gateway.md）。
@@ -14,19 +30,45 @@ import { scanCcSwitch, importCcSwitchIds, bindCcSwitchSaver } from './ccSwitchIm
 
 // ===== 类型 =====
 
-export type ProviderType = 'openai-compatible' | 'ollama' | 'anthropic'
+// 供应商类型与协议族定义在零依赖的 llmProtocolPure（契约脚本要 import 它），此处只做转出，
+// 保持既有 `from './llmService'` 的调用方不受影响。
+export type { ProviderType, ModelFamily } from './llmProtocolPure'
+export { REASONING_MODEL_RE }
+
+/**
+ * 端点内的一个账号（2026-10-13，按原型 tmp/ai-settings-proto 的「账号列表」落地）。
+ *
+ * 为什么账号是**端点内部的第二层**，而不是"同一个端点再建一条供应商"：
+ * Key 是加密且**不可回读**的（渲染层只拿得到 hasKey），换账号时没法把旧 Key 读出来搬过去，
+ * 所以每个账号必须有自己独立的永久 Key 槽；而模型 spec 指向的是**端点 id**，
+ * 于是切换当前账号时那 5 处模型槽位（对话默认 / AI 助手 / 编辑器续写 / 长对话压缩 / 视觉转写）
+ * 一处都不用改，两个账号还共用同一份模型清单（不用各拉一遍 /models）。
+ * 规则本体见 llmAccountPure.ts。
+ */
+export type { ProviderAccount } from './llmAccountPure'
 
 export interface ProviderConfig {
   id: string
   name: string
   type: ProviderType
   baseUrl: string
-  /** 'enc1:' 密文（secretBox 机制），永不出主进程 */
+  /** 'enc1:' 密文（secretBox 机制），永不出主进程。
+   *  2026-10-13 起它是**当前账号** Key 的兼容镜像 —— 真正的 Key 住在 accounts[] 里，
+   *  取值一律走 activeKeyOf(p)，不要再直接读这个字段。 */
   apiKeyEncrypted: string
   enabled: boolean
   models: string[]
+  /** 端点内的账号（同一 baseUrl / 协议 / 请求头 / 模型清单，只有 Key 各自独立）。
+   *  旧记录没有这个字段：读盘时由 migrateProvider 用 apiKeyEncrypted 生成首个账号。 */
+  accounts?: ProviderAccount[]
+  /** 当前生效的账号 id —— 模型 spec 不含账号，切换它不动任何模型槽位 */
+  activeAccountId?: string
+  /** 逐模型的协议覆盖；未列出的模型跟随 type（见 familyOf）。 */
+  modelFamilies?: Record<string, ModelFamily>
   /** 自定义请求头（明文存设置，勿放 API Key 类敏感值——密钥走 apiKey 字段走 secretBox）。
-   *  2026-09-08：opencode 等网关要求 x-opencode-session 之类的会话/路由头，按服务商在设置里配 */
+   *  2026-09-08：opencode 等网关要求 x-opencode-session 之类的会话/路由头，按服务商在设置里配。
+   *  2026-10-13：这里填的是**常量**，而官方要求"每个对话一个稳定 ID"——有会话上下文时由
+   *  withSessionHeaders 用真实会话 ID 覆盖该值，见该函数注释。 */
   headers?: Record<string, string>
   /** 嵌入模型名（知识语义索引用，knowledge-index-design §6）；不配 = 该供应商不参与嵌入 */
   embeddingModel?: string
@@ -54,6 +96,9 @@ interface ChatRequest {
   signal?: AbortSignal
   /** P3b 思考强度（§3.8 第五轮）：仅推理型模型透传 reasoning_effort，off/未设 = 不发 */
   effort?: 'off' | 'low' | 'medium' | 'high'
+  /** 会话标识（x-opencode-session）。**必须每个对话稳定**：同一对话每轮同一个值（否则提示
+   *  缓存全废），不同对话不同值（否则缓存互相串）。无对话的场景传固定用途名（如 'translate'）。 */
+  sessionId?: string
 }
 
 /**
@@ -68,6 +113,8 @@ interface ChatResult {
   /** OpenAI 线格式的 assistant 消息（多轮回喂时原样使用） */
   assistantMessage: ChatMessage
   usage: LlmUsage
+  /** 上游停止原因（finish_reason / stop_reason / done_reason / 'no-terminator'）—— G5 = B-29 判据 */
+  stopReason?: string
   rawError?: never
 }
 
@@ -88,37 +135,103 @@ const STREAM_FIRST_BYTE_MS = 60_000
 const STREAM_IDLE_MS = 60_000
 
 /**
- * 流式超时：首字节 60s + 空闲 60s（每次收到数据块重置定时器）。
+ * 流式超时三阶段（归因方案 §4.1 —— 语义必须分明，否则三种超时又会糊成一团）：
+ * ① 连接：net.fetch() → 响应头到达（`CONNECT_TIMEOUT_MS` 30s；此前它是死常数，见 G7）
+ * ② 首字节：响应头到达 → 第一个数据帧（60s）
+ * ③ 空闲：帧 → 帧（60s，每帧重置）
  * 不可用 AbortSignal.timeout(TOTAL_TIMEOUT_MS)——那会在第 300 秒掐断正常长流。
+ * 超时归属由「fetch 是否已 resolve」+「收到几段数据」决定，**不靠耗时猜测**。
  */
-function createStreamAbort(external: AbortSignal | undefined): {
+export interface StreamStats {
+  /** 收到几个数据段（判「零输出 vs 收了一半」的关键判据） */
+  chunks: number
+  /** 已产出多少字符（content.length / text.length） */
+  chars: number
+  /** 是否见过正常结束帧（[DONE] / message_stop / done / response.completed） */
+  terminator: boolean
+  /** 上游停止原因（finish_reason / stop_reason / done_reason；未见结束帧补 'no-terminator'） */
+  stopReason?: string
+}
+
+interface StreamAbortHandle {
   signal: AbortSignal
+  /** 响应头已到（fetch resolve）→ 连接阶段结束，转首字节计时 */
+  connected: () => void
+  /** 每个数据段：转空闲计时 + 记段数 */
   chunk: () => void
-  timedOut: () => boolean
+  timedOutKind: () => 'connect' | 'first-byte' | 'idle' | null
+  /** 外部 signal 已 abort（用户点停止）—— 优先于任何超时（B-0） */
+  externalAborted: () => boolean
+  stats: StreamStats
   dispose: () => void
-} {
+}
+
+function createStreamAbort(external: AbortSignal | undefined): StreamAbortHandle {
   const ctrl = new AbortController()
+  const stats: StreamStats = { chunks: 0, chars: 0, terminator: false }
   let timer: ReturnType<typeof setTimeout> | null = null
-  let timedOut = false
-  const arm = (ms: number): void => {
+  let timedOutKind: 'connect' | 'first-byte' | 'idle' | null = null
+  const arm = (ms: number, kind: 'connect' | 'first-byte' | 'idle'): void => {
     if (timer) clearTimeout(timer)
-    timer = setTimeout(() => { timedOut = true; ctrl.abort() }, ms)
+    timer = setTimeout(() => { timedOutKind = kind; ctrl.abort() }, ms)
   }
   const onExternal = (): void => ctrl.abort()
   if (external) {
     if (external.aborted) ctrl.abort()
     else external.addEventListener('abort', onExternal, { once: true })
   }
-  arm(STREAM_FIRST_BYTE_MS)
+  arm(CONNECT_TIMEOUT_MS, 'connect')
   return {
     signal: ctrl.signal,
-    chunk: () => arm(STREAM_IDLE_MS),
-    timedOut: () => timedOut,
+    connected: () => arm(STREAM_FIRST_BYTE_MS, 'first-byte'),
+    chunk: () => { stats.chunks++; arm(STREAM_IDLE_MS, 'idle') },
+    timedOutKind: () => timedOutKind,
+    externalAborted: () => !!external?.aborted,
+    stats,
     dispose: () => {
       if (timer) clearTimeout(timer)
       if (external) external.removeEventListener('abort', onExternal)
     },
   }
+}
+
+// ---- 采集搬运：状态码 / 上游原话 / 段数 / 结束帧 → RawFailure（归一不读中文文案）----
+
+/**
+ * 上游错误体 → 机器可读码与原话。
+ * 只认 `error.code` / `error.type` / `error.message`（**不认顶层 type**：Anthropic 的
+ * `type:'error'` 是帧类型、不是错误码，认了会把所有错误帧归一成同一个码）。
+ */
+function upstreamFactsOf(json: any): { upstreamCode?: string; upstreamMessage?: string } {
+  const e = json?.error
+  const code = String(e?.code ?? e?.type ?? '').trim()
+  const raw = typeof e === 'string' ? e : String(e?.message ?? json?.message ?? '')
+  const message = raw.replace(/\s+/g, ' ').trim().slice(0, 300)
+  return { ...(code ? { upstreamCode: code } : {}), ...(message ? { upstreamMessage: message } : {}) }
+}
+
+/** 非 200 响应：状态 + 未截断的上游原话（300）一起带走（不再只有拼好的中文串） */
+function httpFailure(message: string, status: number, json: any, started: number): Error {
+  return attachFacts(new Error(message), {
+    layer: 'http',
+    httpStatus: status,
+    ...upstreamFactsOf(json),
+    elapsedMs: Date.now() - started,
+  })
+}
+
+/** 适配器 catch 出口：把「超时归属 + 段数 + 已产出 + 结束帧」并进采集面后原样抛出 */
+function failStream(err: unknown, sa: StreamAbortHandle, started: number): never {
+  const raw = rawFromError(err, {
+    externalAborted: sa.externalAborted(),
+    ...(sa.timedOutKind() ? { timedOut: sa.timedOutKind() as 'connect' | 'first-byte' | 'idle' } : {}),
+    receivedChunks: sa.stats.chunks,
+    partialChars: sa.stats.chars,
+    sawTerminator: sa.stats.terminator,
+    ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}),
+    elapsedMs: Date.now() - started,
+  })
+  throw attachFacts(err, raw)
 }
 
 /**
@@ -207,12 +320,27 @@ function getProviders(): ProviderConfig[] {
   try {
     const raw = String(depsRef?.getSettingValue('modelProviders') ?? '')
     const arr = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? (arr as ProviderConfig[]) : []
+    if (!Array.isArray(arr)) return []
+    const list = arr as ProviderConfig[]
+    // 一次性迁移到「账号」模型（旧记录只有单个 apiKeyEncrypted）；真有改动才回写，不是每次读都写盘
+    if (list.some(p => migrateProvider(p, randomUUID))) saveProviders(list)
+    return list
   } catch { return [] }
 }
 
 function saveProviders(list: ProviderConfig[]): void {
   depsRef?.setSettingValue('modelProviders', JSON.stringify(list))
+}
+
+// ===== 账号（端点内部的第二层）=====
+// 规则本体（迁移 / 取当前账号 / 可用性 / 脱敏 / 增删）住在 llmAccountPure.ts（零依赖，
+// 供契约脚本真跑）；这里只负责把它接到 node 的 uuid 与 secretBox 上。
+
+/** 取当前账号的明文 Key（**只在主进程内存中出现**，密文与明文都不落日志）。
+ *  有账号时只认当前账号那把，不回退到别的账号 —— 否则"切换"就成了摆设。 */
+function activeKeyOf(p: ProviderConfig): string {
+  const enc = activeAccountKeyEnc(p)
+  return enc ? decryptSecret(enc) : ''
 }
 
 // ===== URL 安全校验 =====
@@ -258,14 +386,22 @@ async function httpJson(url: string, init: { method: string; headers: Record<str
   return { status: res.status, json }
 }
 
-function authHeaders(p: ProviderConfig): Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (p.apiKeyEncrypted) {
-    // 解密仅在内存中进行，密文与明文都不落日志
-    const key = decryptSecret(p.apiKeyEncrypted)
-    if (key) h['Authorization'] = `Bearer ${key}`
-  }
-  return { ...h, ...(p.headers ?? {}) }
+/**
+ * 客户端标识（2026-10-13）。opencode Go 官方要求："Identify itself with its own user agent,
+ * such as my-coding-agent/1.0, rather than a generic SDK or HTTP-library name."
+ * 不带自定义 UA 时上游只看到通用的 Electron/Chromium 串，无法把流量归到一个正经客户端名下。
+ */
+function userAgent(): string {
+  let v = ''
+  try { v = app.getVersion() } catch { /* 无 app 上下文（纯函数被契约脚本 import）时留默认 */ }
+  return userAgentString(v)
+}
+
+function authHeaders(p: ProviderConfig, sessionId?: string): Record<string, string> {
+  const h: Record<string, string> = { 'Content-Type': 'application/json', 'User-Agent': userAgent() }
+  const key = activeKeyOf(p)
+  if (key) h['Authorization'] = `Bearer ${key}` // 解密仅在内存中进行，密文与明文都不落日志
+  return { ...h, ...withSessionHeaders(p.headers, sessionId) }
 }
 
 function anthropicBase(p: ProviderConfig): string {
@@ -285,13 +421,15 @@ function friendlyHttpError(status: number, json: any): string {
   return `HTTP ${status}: ${detail || '请求失败'}`
 }
 
-function anthropicHeaders(p: ProviderConfig): Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' }
-  if (p.apiKeyEncrypted) {
-    const key = decryptSecret(p.apiKeyEncrypted)
-    if (key) h['x-api-key'] = key
+function anthropicHeaders(p: ProviderConfig, sessionId?: string): Record<string, string> {
+  const h: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'anthropic-version': '2023-06-01',
+    'User-Agent': userAgent(),
   }
-  return { ...h, ...(p.headers ?? {}) }
+  const key = activeKeyOf(p)
+  if (key) h['x-api-key'] = key
+  return { ...h, ...withSessionHeaders(p.headers, sessionId) }
 }
 
 function normalizeOpenAiToolCalls(raw: any[]): ToolCallNormalized[] {
@@ -303,9 +441,6 @@ function normalizeOpenAiToolCalls(raw: any[]): ToolCallNormalized[] {
       : JSON.stringify(tc?.function?.arguments ?? {}),
   })).filter(tc => tc.name)
 }
-
-/** P3b 推理/思考能力启发式：仅这些模型接受 reasoning_effort（跟随模型能力）。渲染层可用同口径判断是否置灰。 */
-export const REASONING_MODEL_RE = /(reasoner|r1|qwq|qwen3|o[134]-|o[134]$|thinking|research|smart|deepthink)/i
 
 /** OpenAI 兼容请求体（流式 / 非流式共用，避免两套参数漂移） */
 function buildOpenAiBody(req: ChatRequest, stream: boolean): Record<string, unknown> {
@@ -358,25 +493,28 @@ const openAiCompatibleAdapter: Adapter = {
     const started = Date.now()
     const { status, json } = await httpJson(`${p.baseUrl}/chat/completions`, {
       method: 'POST',
-      headers: authHeaders(p),
+      headers: authHeaders(p, req.sessionId),
       body: JSON.stringify(buildOpenAiBody(req, false)),
     }, req.signal)
     if (status !== 200 || !json) {
-      throw Object.assign(new Error(friendlyHttpError(status, json)), { latencyMs: Date.now() - started })
+      throw Object.assign(httpFailure(friendlyHttpError(status, json), status, json, started), { latencyMs: Date.now() - started })
     }
     return parseOpenAiChoice(json)
   },
   async chatStream(p, req, onEvent) {
+    const started = Date.now()
     const sa = createStreamAbort(req.signal)
     try {
       const res = await net.fetch(`${p.baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: authHeaders(p),
+        headers: authHeaders(p, req.sessionId),
         body: JSON.stringify(buildOpenAiBody(req, true)),
         signal: sa.signal,
       })
+      sa.connected() // 响应头已到：连接阶段结束，转首字节计时（超时归属靠它分辨）
       if (res.status !== 200) {
-        throw new Error(friendlyHttpError(res.status, parseWholeJson(await res.text())))
+        const json = parseWholeJson(await res.text())
+        throw httpFailure(friendlyHttpError(res.status, json), res.status, json, started)
       }
       // 网关忽略 stream：整体 JSON 回退（功能可用，仅失去过程感）
       if (!isSseResponse(res)) {
@@ -393,18 +531,29 @@ const openAiCompatibleAdapter: Adapter = {
         sa.chunk()
         const data = sseData(frame)
         if (!data) continue
-        if (data === '[DONE]') break
+        if (data === '[DONE]') { sa.stats.terminator = true; break }
         const json = parseWholeJson(data)
         if (!json) continue // 心跳 / 非 JSON 帧：丢弃，绝不抛
-        const d = json?.choices?.[0]?.delta ?? {}
+        // G1（归因 P0）：SSE 内的 error 帧此前完全不看 —— 上游报错会被当成正常回答，内容半截
+        if (json.error) {
+          const up = upstreamFactsOf(json)
+          throw attachFacts(new Error(up.upstreamMessage ?? '上游在流中报错'), {
+            layer: 'stream-frame', ...up, elapsedMs: Date.now() - started,
+          })
+        }
+        const choice = json?.choices?.[0] ?? {}
+        // G5 = B-29：上游停止原因（'length' = 撞 max_tokens 被截断）此前没人读
+        if (typeof choice.finish_reason === 'string' && choice.finish_reason) sa.stats.stopReason = choice.finish_reason
+        const d = choice.delta ?? {}
         if (typeof d?.content === 'string' && d.content) {
           content += d.content
+          sa.stats.chars += d.content.length
           onEvent({ type: 'text', delta: d.content })
         }
         // 思考链字段名各家不一（reasoning_content / reasoning）：见到即归一化，不做模型名预判
         const rc = typeof d?.reasoning_content === 'string' ? d.reasoning_content
           : typeof d?.reasoning === 'string' ? d.reasoning : ''
-        if (rc) onEvent({ type: 'reasoning', delta: rc })
+        if (rc) { sa.stats.chars += rc.length; onEvent({ type: 'reasoning', delta: rc }) }
         if (Array.isArray(d?.tool_calls)) {
           for (const tc of d.tool_calls) {
             // 流式 tool_calls 是分片：id/name 仅首片给，arguments 逐片累加
@@ -413,7 +562,7 @@ const openAiCompatibleAdapter: Adapter = {
             if (tc?.id) cur.id = String(tc.id)
             if (tc?.function?.name) cur.name = String(tc.function.name)
             const argDelta = typeof tc?.function?.arguments === 'string' ? tc.function.arguments : ''
-            if (argDelta) cur.args += argDelta
+            if (argDelta) { cur.args += argDelta; sa.stats.chars += argDelta.length }
             acc.set(idx, cur)
             onEvent({
               type: 'tool_call', index: idx,
@@ -430,6 +579,8 @@ const openAiCompatibleAdapter: Adapter = {
           }
         }
       }
+      // G4：干净 EOF 与正常结束同形 —— 未见结束帧就标出来（上层据此提示「回答被上游截断」）
+      if (!sa.stats.terminator) sa.stats.stopReason = STOP_REASON_NO_TERMINATOR
       const toolCalls: ToolCallNormalized[] = [...acc.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([i, t]) => ({ id: t.id || `call_${i}`, name: t.name, arguments: t.args || '{}' }))
@@ -445,10 +596,12 @@ const openAiCompatibleAdapter: Adapter = {
       }
       onEvent({ type: 'usage', ...usage })
       onEvent({ type: 'done' })
-      return { content, toolCalls, assistantMessage, usage }
+      return {
+        content, toolCalls, assistantMessage, usage,
+        ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}),
+      }
     } catch (err) {
-      if (sa.timedOut()) throw new Error('流式响应超时（60 秒无数据）')
-      throw err
+      failStream(err, sa, started) // 超时归属 + 段数 + 结束帧并进采集面后原样抛出
     } finally {
       sa.dispose()
     }
@@ -522,15 +675,21 @@ const ollamaAdapter: Adapter = {
     return ((json?.models ?? []).map((m: any) => String(m?.name)).filter(Boolean)) as string[]
   },
   async chat(p, req) {
+    const started = Date.now()
     const { status, json } = await httpJson(`${ollamaBase(p)}/api/chat`, {
       method: 'POST',
       headers: {},
       body: JSON.stringify(buildOllamaBody(req, false)),
     }, req.signal)
-    if (status !== 200 || !json) throw new Error(`HTTP ${status}`)
+    // G3（归因 P0）：非 200 此前只抛 `HTTP 404`，错误体（如 model "x" not found）整个丢掉
+    if (status !== 200 || !json) {
+      const detail = typeof json?.error === 'string' ? `：${json.error.replace(/\s+/g, ' ').slice(0, 200)}` : ''
+      throw httpFailure(`HTTP ${status}${detail}`, status, json, started)
+    }
     return parseOllamaWhole(json)
   },
   async chatStream(p, req, onEvent) {
+    const started = Date.now()
     const sa = createStreamAbort(req.signal)
     try {
       const res = await net.fetch(`${ollamaBase(p)}/api/chat`, {
@@ -539,7 +698,11 @@ const ollamaAdapter: Adapter = {
         body: JSON.stringify(buildOllamaBody(req, true)),
         signal: sa.signal,
       })
-      if (res.status !== 200) throw new Error(`HTTP ${res.status}`)
+      sa.connected() // 响应头已到：连接阶段结束，转首字节计时
+      if (res.status !== 200) {
+        const json = parseWholeJson(await res.text())
+        throw httpFailure(`HTTP ${res.status}`, res.status, json, started)
+      }
       // 网关/服务忽略 stream 时返回 application/json（非 NDJSON）→ 整体回退
       const ctype = String(res.headers.get('content-type') ?? '')
       if (ctype.includes('application/json') && !ctype.includes('ndjson')) {
@@ -556,18 +719,28 @@ const ollamaAdapter: Adapter = {
         sa.chunk()
         const json = parseWholeJson(line)
         if (!json) continue
+        // NDJSON 里的 error 行（如 model "x" not found）此前被忽略 → 当正常回答
+        if (json.error) {
+          const up = upstreamFactsOf(json)
+          throw attachFacts(new Error(up.upstreamMessage ?? 'Ollama 在流中报错'), {
+            layer: 'stream-frame', ...up, elapsedMs: Date.now() - started,
+          })
+        }
         const m = json.message ?? {}
         if (typeof m.content === 'string' && m.content) {
           content += m.content
+          sa.stats.chars += m.content.length
           onEvent({ type: 'text', delta: m.content })
         }
         if (typeof m.thinking === 'string' && m.thinking) {
+          sa.stats.chars += m.thinking.length
           onEvent({ type: 'reasoning', delta: m.thinking })
         }
         if (Array.isArray(m.tool_calls)) {
           const got = parseOllamaToolCalls(m.tool_calls)
           for (const tc of got) {
             toolCalls.push({ ...tc, id: `call_${toolCalls.length}` })
+            sa.stats.chars += tc.arguments.length
             onEvent({ type: 'tool_call', index: toolCalls.length - 1, name: tc.name, argsDelta: tc.arguments })
           }
         }
@@ -577,8 +750,14 @@ const ollamaAdapter: Adapter = {
             completionTokens: Number(json.eval_count ?? 0),
           }
         }
-        if (json.done) break
+        // G5 = B-29：done_reason（'length' = 撞 num_predict 被截断）此前没人读
+        if (json.done) {
+          sa.stats.terminator = true
+          if (typeof json.done_reason === 'string' && json.done_reason) sa.stats.stopReason = json.done_reason
+          break
+        }
       }
+      if (!sa.stats.terminator) sa.stats.stopReason = STOP_REASON_NO_TERMINATOR
       const assistantMessage: ChatMessage = {
         role: 'assistant',
         content,
@@ -590,10 +769,12 @@ const ollamaAdapter: Adapter = {
       }
       onEvent({ type: 'usage', ...usage })
       onEvent({ type: 'done' })
-      return { content, toolCalls, assistantMessage, usage }
+      return {
+        content, toolCalls, assistantMessage, usage,
+        ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}),
+      }
     } catch (err) {
-      if (sa.timedOut()) throw new Error('流式响应超时（60 秒无数据）')
-      throw err
+      failStream(err, sa, started)
     } finally {
       sa.dispose()
     }
@@ -675,8 +856,8 @@ function buildAnthropicBody(req: ChatRequest, stream: boolean): Record<string, u
   }
 }
 
-/** Anthropic 结果 → assistant 消息（OpenAI 线格式，多轮回喂用） */
-function buildAnthropicAssistant(text: string, toolCalls: ToolCallNormalized[]): ChatMessage {
+/** 结果 → assistant 消息（OpenAI 线格式，多轮回喂用）。供应商中立：anthropic 与 responses 共用。 */
+function buildAssistantMessage(text: string, toolCalls: ToolCallNormalized[]): ChatMessage {
   return {
     role: 'assistant',
     content: text,
@@ -696,13 +877,14 @@ const anthropicAdapter: Adapter = {
     return ((json?.data ?? []).map((m: any) => String(m?.id)).filter(Boolean)) as string[]
   },
   async chat(p, req) {
+    const started = Date.now()
     const { status, json } = await httpJson(`${anthropicBase(p)}/v1/messages`, {
       method: 'POST',
-      headers: anthropicHeaders(p),
+      headers: anthropicHeaders(p, req.sessionId),
       body: JSON.stringify(buildAnthropicBody(req, false)),
     })
     if (status !== 200 || !json) {
-      throw new Error(`HTTP ${status}: ${String(json?.error?.message ?? '').slice(0, 200) || '响应解析失败'}`)
+      throw httpFailure(`HTTP ${status}: ${String(json?.error?.message ?? '').slice(0, 200) || '响应解析失败'}`, status, json, started)
     }
     let text = ''
     const toolCalls: ToolCallNormalized[] = []
@@ -719,7 +901,7 @@ const anthropicAdapter: Adapter = {
     return {
       content: text,
       toolCalls,
-      assistantMessage: buildAnthropicAssistant(text, toolCalls),
+      assistantMessage: buildAssistantMessage(text, toolCalls),
       usage: {
         promptTokens: Number(json.usage?.input_tokens ?? 0),
         completionTokens: Number(json.usage?.output_tokens ?? 0),
@@ -729,17 +911,19 @@ const anthropicAdapter: Adapter = {
     }
   },
   async chatStream(p, req, onEvent) {
+    const started = Date.now()
     const sa = createStreamAbort(req.signal)
     try {
       const res = await net.fetch(`${anthropicBase(p)}/v1/messages`, {
         method: 'POST',
-        headers: anthropicHeaders(p),
+        headers: anthropicHeaders(p, req.sessionId),
         body: JSON.stringify(buildAnthropicBody(req, true)),
         signal: sa.signal,
       })
+      sa.connected() // 响应头已到：连接阶段结束，转首字节计时
       if (res.status !== 200) {
         const json = parseWholeJson(await res.text())
-        throw new Error(`HTTP ${res.status}: ${String(json?.error?.message ?? '').slice(0, 200) || '响应解析失败'}`)
+        throw httpFailure(`HTTP ${res.status}: ${String(json?.error?.message ?? '').slice(0, 200) || '响应解析失败'}`, res.status, json, started)
       }
       let text = ''
       let usage: LlmUsage = { promptTokens: 0, completionTokens: 0 }
@@ -752,6 +936,14 @@ const anthropicAdapter: Adapter = {
         const json = parseWholeJson(data)
         if (!json) continue
         const type = String(json.type ?? '')
+        // G2（归因 P0）：此前只认 5 种 type、不认 error —— Anthropic 最常见的失败
+        // （overloaded_error 529）就此消失，用户看到「正常回答、内容半截」
+        if (type === 'error') {
+          const up = upstreamFactsOf(json)
+          throw attachFacts(new Error(up.upstreamMessage ?? 'Anthropic 在流中报错'), {
+            layer: 'stream-frame', ...up, elapsedMs: Date.now() - started,
+          })
+        }
         if (type === 'message_start') {
           // message_start 里就带完整的输入侧用量（含缓存命中量），一次取齐
           usage = {
@@ -768,23 +960,30 @@ const anthropicAdapter: Adapter = {
           const d = json.delta ?? {}
           if (d.type === 'text_delta' && d.text) {
             text += String(d.text)
+            sa.stats.chars += String(d.text).length
             onEvent({ type: 'text', delta: String(d.text) })
           } else if (d.type === 'thinking_delta' && d.thinking) {
+            sa.stats.chars += String(d.thinking).length
             onEvent({ type: 'reasoning', delta: String(d.thinking) })
           } else if (d.type === 'input_json_delta') {
             const idx = Number(json.index ?? 0)
             const cur = blocks.get(idx)
             if (cur) {
               cur.json += String(d.partial_json ?? '')
+              sa.stats.chars += String(d.partial_json ?? '').length
               onEvent({ type: 'tool_call', index: idx, name: cur.name || undefined, argsDelta: String(d.partial_json ?? '') })
             }
           }
         } else if (type === 'message_delta') {
           usage = { ...usage, completionTokens: Number(json.usage?.output_tokens ?? 0) }
+          // G5 = B-29：stop_reason（'max_tokens' = 被截断）此前只取 usage、不看它
+          if (typeof json.delta?.stop_reason === 'string' && json.delta.stop_reason) sa.stats.stopReason = json.delta.stop_reason
         } else if (type === 'message_stop') {
+          sa.stats.terminator = true
           break
         }
       }
+      if (!sa.stats.terminator) sa.stats.stopReason = STOP_REASON_NO_TERMINATOR
       const toolCalls: ToolCallNormalized[] = [...blocks.entries()]
         .sort((a, b) => a[0] - b[0])
         .map(([i, b]) => ({ id: b.id || `call_${i}`, name: b.name, arguments: b.json || '{}' }))
@@ -794,12 +993,149 @@ const anthropicAdapter: Adapter = {
       return {
         content: text,
         toolCalls,
-        assistantMessage: buildAnthropicAssistant(text, toolCalls),
+        assistantMessage: buildAssistantMessage(text, toolCalls),
         usage,
+        ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}),
       }
     } catch (err) {
-      if (sa.timedOut()) throw new Error('流式响应超时（60 秒无数据）')
-      throw err
+      failStream(err, sa, started)
+    } finally {
+      sa.dispose()
+    }
+  },
+}
+
+// ---- OpenAI Responses API 适配器（2026-10-13） ----
+//
+// 为什么需要它：opencode Go 官方端点表把 grok-4.7 / grok-4.6 / gpt-6-luna / gpt-5.6-luna /
+// muse-spark-1.3-contributor / muse-spark-1.2-contributor 归到 `/v1/responses`，而同一个
+// baseUrl、同一把 Key 下还有走 `/chat/completions`（20 个）与 `/messages`（6 个）的模型。
+// 网关原先只有 chat / messages / ollama 三条适配器 → 这批模型必然被打到 /chat/completions
+// 拿 4xx，等于接不进来。
+//
+// 请求装配 / 响应解析 / 分片合并这些纯逻辑都在 llmProtocolPure.ts（契约脚本可断言），
+// 本适配器只负责网络与事件转发。
+
+/** 纯函数结果 → 本文件的 ChatResult（补上 OpenAI 线格式的 assistantMessage） */
+function toChatResult(r: PureChatResult): ChatResult {
+  return { ...r, assistantMessage: buildAssistantMessage(r.content, r.toolCalls) }
+}
+
+const openAiResponsesAdapter: Adapter = {
+  async listModels(p): Promise<string[]> {
+    // 模型清单是端点级资源，与协议族无关（同一 baseUrl 的 /models 返回该端点的全部模型）
+    const { status, json } = await httpJson(`${p.baseUrl}/models`, { method: 'GET', headers: authHeaders(p) })
+    if (status !== 200) throw new Error(`HTTP ${status}`)
+    const ids = (json?.data ?? []).map((m: any) => String(m?.id)).filter(Boolean)
+    return [...new Set(ids)] as string[]
+  },
+  async chat(p, req) {
+    const started = Date.now()
+    const { status, json } = await httpJson(`${p.baseUrl}/responses`, {
+      method: 'POST',
+      headers: authHeaders(p, req.sessionId),
+      body: JSON.stringify(buildResponsesBody(req, false)),
+    }, req.signal)
+    if (status !== 200 || !json) {
+      throw Object.assign(httpFailure(friendlyHttpError(status, json), status, json, started), { latencyMs: Date.now() - started })
+    }
+    return toChatResult(parseResponsesWhole(json))
+  },
+  async chatStream(p, req, onEvent) {
+    const started = Date.now()
+    const sa = createStreamAbort(req.signal)
+    try {
+      const res = await net.fetch(`${p.baseUrl}/responses`, {
+        method: 'POST',
+        headers: authHeaders(p, req.sessionId),
+        body: JSON.stringify(buildResponsesBody(req, true)),
+        signal: sa.signal,
+      })
+      sa.connected() // 响应头已到：连接阶段结束，转首字节计时
+      if (res.status !== 200) {
+        const json = parseWholeJson(await res.text())
+        throw httpFailure(friendlyHttpError(res.status, json), res.status, json, started)
+      }
+      // 网关忽略 stream：整体 JSON 回退（功能可用，仅失去过程感）
+      if (!isSseResponse(res)) {
+        const r = toChatResult(parseResponsesWhole(parseWholeJson(await res.text())))
+        if (r.content) onEvent({ type: 'text', delta: r.content })
+        onEvent({ type: 'usage', ...r.usage })
+        onEvent({ type: 'done' })
+        return r
+      }
+      let text = ''
+      let usage: LlmUsage = { promptTokens: 0, completionTokens: 0 }
+      /** output_index → function_call 分片累加（function_call 是顶层 item，靠 output_index 归组） */
+      const acc = new Map<number, { id: string; name: string; args: string }>()
+      /** response.completed 里的完整 output 是权威结果；拿到就以它为准（见 mergeResponsesResult） */
+      let whole: PureChatResult | null = null
+      for await (const frame of readFrames(res)) {
+        sa.chunk()
+        const data = sseData(frame)
+        if (!data) continue
+        if (data === '[DONE]') { sa.stats.terminator = true; continue }
+        const json = parseWholeJson(data)
+        if (!json) continue // 心跳 / 非 JSON 帧：丢弃，绝不抛
+        const u = json.usage ?? json.response?.usage
+        if (u) {
+          usage = {
+            promptTokens: Number(u.input_tokens ?? 0),
+            completionTokens: Number(u.output_tokens ?? 0),
+            cachedTokens: Number(u.input_tokens_details?.cached_tokens ?? 0),
+          }
+        }
+        const type = String(json.type ?? '')
+        if (type === 'response.output_text.delta') {
+          const d = String(json.delta ?? '')
+          if (d) { text += d; sa.stats.chars += d.length; onEvent({ type: 'text', delta: d }) }
+        } else if (type === 'response.reasoning_summary_text.delta' || type === 'response.reasoning_text.delta') {
+          // 思考链走独立事件（与另两条适配器同口径：只发事件，不落库）
+          const d = String(json.delta ?? '')
+          if (d) { sa.stats.chars += d.length; onEvent({ type: 'reasoning', delta: d }) }
+        } else if (type === 'response.output_item.added') {
+          const it = json.item ?? {}
+          if (it.type === 'function_call') {
+            const idx = Number(json.output_index ?? 0)
+            const cur = acc.get(idx) ?? { id: '', name: '', args: '' }
+            if (it.call_id) cur.id = String(it.call_id)
+            if (it.name) cur.name = String(it.name)
+            if (typeof it.arguments === 'string' && it.arguments) { cur.args += it.arguments; sa.stats.chars += it.arguments.length }
+            acc.set(idx, cur)
+            onEvent({ type: 'tool_call', index: idx, id: cur.id || undefined, name: cur.name || undefined })
+          }
+        } else if (type === 'response.function_call_arguments.delta') {
+          const idx = Number(json.output_index ?? 0)
+          const d = String(json.delta ?? '')
+          const cur = acc.get(idx) ?? { id: '', name: '', args: '' }
+          if (d) { cur.args += d; sa.stats.chars += d.length; onEvent({ type: 'tool_call', index: idx, argsDelta: d }) }
+          acc.set(idx, cur)
+        } else if (type === 'response.completed' || type === 'response.incomplete') {
+          whole = parseResponsesWhole(json.response ?? {})
+          sa.stats.terminator = true
+          // G5 = B-29：此前 `incomplete` 当正常完成 —— 撞 max_output_tokens 被截断却毫无提示
+          if (type === 'response.incomplete' || String(json.response?.status ?? '') === 'incomplete') {
+            sa.stats.stopReason = String(json?.response?.incomplete_details?.reason ?? 'incomplete')
+          }
+          break
+        } else if (type === 'response.failed' || type === 'error') {
+          // 这条适配器原本就有（当样板）；本轮把上游码/原话一起采下来，不再只留一句中文
+          const errObj = json?.response?.error ?? json?.error ?? json
+          const up = upstreamFactsOf({ error: errObj })
+          throw attachFacts(new Error(up.upstreamMessage ?? 'Responses 接口返回失败事件'), {
+            layer: 'stream-frame', ...up, elapsedMs: Date.now() - started,
+          })
+        }
+      }
+      if (!sa.stats.terminator) sa.stats.stopReason = STOP_REASON_NO_TERMINATOR
+      // 合并：完成事件的完整 output 优先，任一侧为空时用另一侧兜底 —— 这样即使上游改了事件名
+      // （我们没认出来），只要 response.completed 到了，结果仍然正确，最多退化成非流式体验。
+      const merged = mergeResponsesResult(whole, collectResponsesToolCalls(acc), text, usage)
+      onEvent({ type: 'usage', ...merged.usage })
+      onEvent({ type: 'done' })
+      return { ...toChatResult(merged), ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}) }
+    } catch (err) {
+      failStream(err, sa, started)
     } finally {
       sa.dispose()
     }
@@ -810,6 +1146,19 @@ const adapters: Record<ProviderType, Adapter> = {
   'openai-compatible': openAiCompatibleAdapter,
   ollama: ollamaAdapter,
   anthropic: anthropicAdapter,
+  'openai-responses': openAiResponsesAdapter,
+}
+
+const FAMILY_ADAPTER: Record<ModelFamily, Adapter> = {
+  chat: openAiCompatibleAdapter,
+  messages: anthropicAdapter,
+  responses: openAiResponsesAdapter,
+}
+
+/** 按「模型」而不是「端点」选适配器 —— 一个端点下的模型可以分属不同 API 族 */
+function adapterFor(p: ProviderConfig, model: string): Adapter {
+  const fam = familyOf(p.type, p.modelFamilies, model)
+  return fam ? FAMILY_ADAPTER[fam] : getAdapter(p.type)
 }
 
 function getAdapter(type: ProviderType): Adapter {
@@ -865,7 +1214,17 @@ export interface LlmInvokeRequest {
   signal?: AbortSignal
   /** P3b：思考强度（本对话生效，由调用方透传） */
   effort?: 'off' | 'low' | 'medium' | 'high'
+  /** 会话标识（2026-10-13，供 x-opencode-session 路由/提示缓存）。
+   *  同一对话的每一轮必须是同一个值；无对话的场景传固定用途名（如 'translate' / 'vision'）。 */
+  sessionId?: string
 }
+
+/** 网关失败码 = 归因码 ∪ 配置类码（配置类在发请求前就知道，没有采集面） */
+export type LlmInvokeFailCode =
+  | InterruptCode
+  | 'PROVIDER_NOT_FOUND'
+  | 'PROVIDER_DISABLED'
+  | 'NO_DEFAULT_MODEL'
 
 export type LlmInvokeResponse = {
   ok: true
@@ -880,10 +1239,20 @@ export type LlmInvokeResponse = {
   cachedTokens?: number
   /** 故障转移：本次实际应答的供应商 ≠ 默认供应商时，记录被接管的默认供应商名（网关补强） */
   fallbackFrom?: string
+  /** 上游停止原因（G5 = B-29 判据） */
+  stopReason?: string
+  /** ok=true 但输出被截断（LLM_OUTPUT_TRUNCATED / LLM_STREAM_TRUNCATED）：正文追加提示且可续写 */
+  interruption?: Interruption
+  /** 归因诊断细节（截断时也有；不含正文与 Key） */
+  detail?: InterruptionDetail
 } | {
   ok: false
   error: string
-  code?: 'PROVIDER_NOT_FOUND' | 'PROVIDER_DISABLED' | 'NO_DEFAULT_MODEL'
+  code?: LlmInvokeFailCode
+  /** 归因结果（归因 P0 的唯一真源）—— 上层只读它，不再各自解析错误文案 */
+  interruption?: Interruption
+  /** 归因诊断细节（不含正文与 Key） */
+  detail?: InterruptionDetail
 }
 
 type LlmTarget =
@@ -939,13 +1308,8 @@ function streamEnabled(): boolean {
   return depsRef?.getSettingValue('aiStreamEnabled') !== false
 }
 
-/** 供应商级错误（网络/超时/限频/上游 5xx）→ 触发故障转移；参数/鉴权类错误换供应商也没用 */
-function isProviderLevelError(error: string): boolean {
-  return /timeout|timed?\s*out|fetch failed|ECONN|ENOTFOUND|EAI_AGAIN|socket|网络|HTTP 5\d\d|HTTP 429|限频/i.test(error)
-}
-
 async function llmInvokeOnce(provider: ProviderConfig, model: string, req: LlmInvokeRequest, maxTokens: number): Promise<LlmInvokeResponse> {
-  const adapter = getAdapter(provider.type)
+  const adapter = adapterFor(provider, model)
   const started = Date.now()
   try {
     const r = await adapter.chat(provider, {
@@ -955,13 +1319,17 @@ async function llmInvokeOnce(provider: ProviderConfig, model: string, req: LlmIn
       maxTokens,
       effort: req.effort,
       signal: req.signal,
+      sessionId: req.sessionId,
     })
+    const trunc = interruptionOfStopReason(r.stopReason)
     appendAudit(provider.id, 'llm.invoke', {
       provider: provider.name,
       model,
       tokens: r.usage.promptTokens + r.usage.completionTokens,
       promptTokens: r.usage.promptTokens,
       completionTokens: r.usage.completionTokens,
+      ...(r.usage.cachedTokens ? { cachedTokens: r.usage.cachedTokens } : {}),
+      ...(trunc ? { code: trunc.code, stopReason: r.stopReason } : {}),
       durationMs: Date.now() - started,
       ok: true,
     })
@@ -974,16 +1342,30 @@ async function llmInvokeOnce(provider: ProviderConfig, model: string, req: LlmIn
       tokens: r.usage.promptTokens + r.usage.completionTokens,
       promptTokens: r.usage.promptTokens,
       completionTokens: r.usage.completionTokens,
+      ...(r.usage.cachedTokens ? { cachedTokens: r.usage.cachedTokens } : {}),
+      ...(r.stopReason ? { stopReason: r.stopReason } : {}),
+      ...(trunc ? { interruption: trunc } : {}),
     }
   } catch (err) {
+    const raw = rawFromError(err, {
+      externalAborted: req.signal?.aborted === true,
+      providerId: provider.id, model, attempts: 1, elapsedMs: Date.now() - started,
+    })
+    const it = classifyFailure(raw)
+    const detail = interruptionDetailOf(raw)
+    // G10：审计不再只存 error 文本 —— 带上归因码才能按原因统计、才能度量「归因准不准」
     appendAudit(provider.id, 'llm.invoke', {
       provider: provider.name,
       model,
       durationMs: Date.now() - started,
       ok: false,
+      code: it.code,
+      matched: it.matched,
+      ...(raw.httpStatus !== undefined ? { httpStatus: raw.httpStatus } : {}),
+      ...(raw.upstreamCode ? { upstreamCode: raw.upstreamCode } : {}),
       error: String((err as Error)?.message ?? err).slice(0, 300),
     })
-    return { ok: false, error: String((err as Error)?.message ?? err) }
+    return { ok: false, error: friendlyReason(it, detail), code: it.code, interruption: it, detail }
   }
 }
 
@@ -993,10 +1375,12 @@ async function llmInvoke(req: LlmInvokeRequest): Promise<LlmInvokeResponse> {
 
   const r = await llmInvokeOnce(t.provider, t.model, req, t.maxTokens)
   if (r.ok) return r
-  // 故障转移（网关补强）：仅「默认模型路径」（用户未钉死供应商/模型）且供应商级错误时，
+  // 故障转移（网关补强）：仅「默认模型路径」（用户未钉死供应商/模型）且**可重试**时，
   // 换一个可用供应商重试一次。流式路径不做（中途切换会造成内容拼接错乱）。
+  // G9（归因 P0）：判据改用归因码的 retryable（唯一真源）—— 原 isProviderLevelError 正则漏了
+  // net::ERR_NAME_NOT_RESOLVED / ERR_HTTP2_PROTOCOL_ERROR / 中文「流式响应超时」三类。
   if (req.providerId || req.modelId) return r
-  if (!isProviderLevelError(r.error)) return r
+  if (!r.interruption?.retryable) return r
   const fallback = getProviders().find(p => p.enabled && p.id !== t.provider.id && p.models.length > 0)
   if (!fallback) return r
   const r2 = await llmInvokeOnce(fallback, fallback.models[0], req, t.maxTokens)
@@ -1018,7 +1402,7 @@ export async function invokeLlmStreamInternal(
 ): Promise<LlmInvokeResponse> {
   const t = resolveLlmTarget(req)
   if (!t.ok) return { ok: false, error: t.error, code: t.code }
-  const adapter = getAdapter(t.provider.type)
+  const adapter = adapterFor(t.provider, t.model)
 
   if (!streamEnabled() || !adapter.chatStream) {
     const r = await llmInvoke(req)
@@ -1039,7 +1423,20 @@ export async function invokeLlmStreamInternal(
       maxTokens: t.maxTokens,
       effort: req.effort,
       signal: req.signal,
+      sessionId: req.sessionId,
     }, onEvent)
+    // G5 = B-29：上游停止原因是截断型（撞单次输出上限 / 未见结束帧）时，成功返回也要带提示与归因
+    const trunc = interruptionOfStopReason(r.stopReason)
+    const truncDetail = trunc
+      ? interruptionDetailOf(rawFailure({
+          layer: 'stream-eof',
+          raw: `stopReason=${r.stopReason}`,
+          partialChars: r.content.length,
+          sawTerminator: r.stopReason !== STOP_REASON_NO_TERMINATOR,
+          ...(r.stopReason ? { stopReason: r.stopReason } : {}),
+          providerId: t.provider.id, model: t.model, attempts: 1, elapsedMs: Date.now() - started,
+        }))
+      : undefined
     appendAudit(t.provider.id, 'llm.invoke', {
       provider: t.provider.name,
       model: t.model,
@@ -1048,6 +1445,7 @@ export async function invokeLlmStreamInternal(
       promptTokens: r.usage.promptTokens,
       completionTokens: r.usage.completionTokens,
       ...(r.usage.cachedTokens ? { cachedTokens: r.usage.cachedTokens } : {}),
+      ...(trunc ? { code: trunc.code, stopReason: r.stopReason } : {}),
       durationMs: Date.now() - started,
       ok: true,
     })
@@ -1061,31 +1459,61 @@ export async function invokeLlmStreamInternal(
       promptTokens: r.usage.promptTokens,
       completionTokens: r.usage.completionTokens,
       ...(r.usage.cachedTokens ? { cachedTokens: r.usage.cachedTokens } : {}),
+      ...(r.stopReason ? { stopReason: r.stopReason } : {}),
+      ...(trunc ? { interruption: trunc } : {}),
+      ...(truncDetail ? { detail: truncDetail } : {}),
     }
   } catch (err) {
+    // 归因 P0：**唯一**的失败归一入口 —— 四家适配器只负责「原生形状 → RawFailure」的翻译，
+    // 码由 classifyFailure 产生、文案由 friendlyReason 产生（卡片 / 审计 / 重试判定读同一个码）。
+    const raw = rawFromError(err, {
+      externalAborted: req.signal?.aborted === true,
+      providerId: t.provider.id, model: t.model, attempts: 1, elapsedMs: Date.now() - started,
+    })
+    const it = classifyFailure(raw)
+    const detail = interruptionDetailOf(raw)
     appendAudit(t.provider.id, 'llm.invoke', {
       provider: t.provider.name,
       model: t.model,
       stream: true,
       durationMs: Date.now() - started,
       ok: false,
+      code: it.code,
+      matched: it.matched,
+      receivedChunks: raw.receivedChunks,
+      partialChars: raw.partialChars,
+      sawTerminator: raw.sawTerminator,
+      ...(raw.timedOut ? { timedOut: raw.timedOut } : {}),
+      ...(raw.httpStatus !== undefined ? { httpStatus: raw.httpStatus } : {}),
+      ...(raw.upstreamCode ? { upstreamCode: raw.upstreamCode } : {}),
       error: String((err as Error)?.message ?? err).slice(0, 300),
     })
-    return { ok: false, error: String((err as Error)?.message ?? err) }
+    return { ok: false, error: friendlyReason(it, detail), code: it.code, interruption: it, detail }
   }
 }
 
 // ===== IPC =====
 
+/** 账号信息的对外形状：**永不含密文**，渲染层只拿得到 hasKey（负向断言见 llm-accounts 契约） */
+const sanitizeAccount = sanitizeAccountInfo
+
 function sanitizeInfo(p: ProviderConfig, defaultChatModel: string) {
+  const acct = activeAccountOf(p)
   return {
     id: p.id,
     name: p.name,
     type: p.type,
     baseUrl: p.baseUrl,
     enabled: p.enabled,
-    hasKey: !!p.apiKeyEncrypted,
+    hasKey: !!acct?.keyEncrypted || (!p.accounts?.length && !!p.apiKeyEncrypted),
     models: p.models,
+    /** 账号列表（端点内部的第二层）；切换当前账号不改任何模型 spec */
+    accounts: (p.accounts ?? []).map(sanitizeAccount),
+    activeAccountId: acct?.id ?? '',
+    /** 端点整体可用（端点启用 且 至少一个账号可用）—— 模型选择器据此收候选 */
+    usable: providerUsable(p),
+    /** 逐模型协议覆盖（渲染层据此显示协议标记；未列出的跟随 type） */
+    modelFamilies: p.modelFamilies ?? {},
     headers: p.headers ?? {},
     embeddingModel: p.embeddingModel ?? '',
     isDefault: defaultChatModel.startsWith(`${p.id}:`),
@@ -1096,10 +1524,11 @@ function sanitizeInfo(p: ProviderConfig, defaultChatModel: string) {
 function saveProviderDraft(draft: {
   id?: string; name: string; type: ProviderType; baseUrl: string; apiKey?: string; enabled?: boolean
   headers?: Record<string, string>
+  modelFamilies?: Record<string, ModelFamily>
   embeddingModel?: string
 }): { ok: boolean; id?: string; error?: string } {
   if (!draft || typeof draft.name !== 'string' || !draft.name.trim()) return { ok: false, error: '名称不能为空' }
-  if (!['openai-compatible', 'ollama', 'anthropic'].includes(draft.type)) return { ok: false, error: '不支持的类型' }
+  if (!['openai-compatible', 'ollama', 'anthropic', 'openai-responses'].includes(draft.type)) return { ok: false, error: '不支持的类型' }
   const urlCheck = validateProviderUrl(String(draft.baseUrl ?? ''))
   if (!urlCheck.ok) return { ok: false, error: urlCheck.error }
   // 自定义请求头校验：扁平 string→string 对象（opencode 网关的 x-opencode-session 等路由头）
@@ -1109,6 +1538,21 @@ function saveProviderDraft(draft: {
     const bad = Object.entries(draft.headers).find(([k, v]) => !k.trim() || typeof v !== 'string')
     if (bad) return { ok: false, error: '自定义请求头格式非法（键值需为非空字符串）' }
     headers = Object.fromEntries(Object.entries(draft.headers).map(([k, v]) => [k.trim(), v]))
+  }
+  // 逐模型协议覆盖校验：只收 chat / messages / responses 三值（其余视为非法，不静默吞掉）
+  let modelFamilies: Record<string, ModelFamily> | undefined
+  if (draft.modelFamilies != null) {
+    if (typeof draft.modelFamilies !== 'object' || Array.isArray(draft.modelFamilies)) {
+      return { ok: false, error: '模型协议映射必须是 JSON 对象（{"模型ID":"chat|messages|responses"}）' }
+    }
+    const entries = Object.entries(draft.modelFamilies)
+    const badKey = entries.find(([k]) => !k.trim())
+    if (badKey) return { ok: false, error: '模型协议映射的键不能为空' }
+    const badVal = entries.find(([, v]) => !['chat', 'messages', 'responses'].includes(String(v)))
+    if (badVal) return { ok: false, error: `模型「${badVal[0]}」的协议只能是 chat / messages / responses` }
+    modelFamilies = entries.length > 0
+      ? Object.fromEntries(entries.map(([k, v]) => [k.trim(), v as ModelFamily]))
+      : undefined
   }
 
   const list = getProviders()
@@ -1121,9 +1565,20 @@ function saveProviderDraft(draft: {
   p.type = draft.type
   p.baseUrl = urlCheck.url
   p.headers = headers
+  // 未传 modelFamilies（= undefined）时保留原值：设置页编辑名称/地址/Key 不会顺手清掉协议标记。
+  // 要清空就显式传 {}（渲染层「清除全部协议标记」走这条）。
+  if (draft.modelFamilies !== undefined) p.modelFamilies = modelFamilies
   p.embeddingModel = typeof draft.embeddingModel === 'string' && draft.embeddingModel.trim() ? draft.embeddingModel.trim() : undefined
   if (typeof draft.apiKey === 'string' && draft.apiKey.length > 0) {
-    p.apiKeyEncrypted = encryptSecret(draft.apiKey) // 明文只在此瞬间存在，随即加密
+    const enc = encryptSecret(draft.apiKey) // 明文只在此瞬间存在，随即加密
+    p.apiKeyEncrypted = enc // 兼容镜像：旧读法仍能拿到当前账号的 Key
+    const acct = activeAccountOf(p)
+    if (acct) acct.keyEncrypted = enc
+    else {
+      const id = randomUUID()
+      p.accounts = [{ id, name: '默认', keyEncrypted: enc, enabled: true }]
+      p.activeAccountId = id
+    }
   }
   depsRef?.setSettingValue('modelProviders', JSON.stringify(list))
   return { ok: true, id: p.id }
@@ -1144,6 +1599,8 @@ export function registerLlmHandlers(deps: {
   ipcMain.handle('llm:saveProvider', (_e, draft: {
     id?: string; name: string; type: ProviderType; baseUrl: string; apiKey?: string; enabled?: boolean
     headers?: Record<string, string>
+    modelFamilies?: Record<string, ModelFamily>
+    embeddingModel?: string
   }) => saveProviderDraft(draft))
 
   ipcMain.handle('llm:ccswitch:list', () => scanCcSwitch())
@@ -1170,14 +1627,102 @@ export function registerLlmHandlers(deps: {
     return { ok: true }
   })
 
-  ipcMain.handle('llm:testConnection', async (_e, draft: { type: ProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string> }) => {
+  // ===== 账号（端点内部的第二层，2026-10-13 按原型落地）=====
+
+  /** 加一个账号：同一端点换一把 Key（地址 / 协议 / 请求头 / 模型清单全部复用） */
+  ipcMain.handle('llm:addAccount', (_e, payload: { providerId: string; name?: string; apiKey?: string }) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === payload?.providerId)
+    if (!p) return { ok: false, error: '供应商不存在' }
+    const key = String(payload?.apiKey ?? '').trim()
+    if (!key && p.type !== 'ollama') return { ok: false, error: '请粘贴这个账号的 API Key' }
+    const name = String(payload?.name ?? '').trim()
+    const acct = appendAccount(p, { name, keyEncrypted: key ? encryptSecret(key) : '' }, randomUUID)
+    saveProviders(list)
+    return { ok: true, id: acct.id, accounts: (p.accounts ?? []).map(sanitizeAccount), activeAccountId: acct.id }
+  })
+
+  /**
+   * 切换当前账号。**只改 activeAccountId** —— 模型 spec 指向端点 id，所以 5 处模型槽位
+   * 一处都不用改（这正是"账号做成端点内部第二层"的全部理由，契约里有负向断言锁）。
+   */
+  ipcMain.handle('llm:setActiveAccount', (_e, providerId: string, accountId: string) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === providerId)
+    if (!p) return { ok: false, error: '供应商不存在' }
+    const acct = (p.accounts ?? []).find(a => a.id === accountId)
+    if (!acct) return { ok: false, error: '账号不存在' }
+    p.activeAccountId = acct.id
+    p.apiKeyEncrypted = acct.keyEncrypted // 兼容镜像
+    saveProviders(list)
+    return { ok: true, activeAccountId: acct.id }
+  })
+
+  /** 改账号：重命名 / 换 Key（重输）/ 启用停用。只传要改的字段。 */
+  ipcMain.handle('llm:updateAccount', (_e, payload: { providerId: string; accountId: string; name?: string; apiKey?: string; enabled?: boolean }) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === payload?.providerId)
+    if (!p) return { ok: false, error: '供应商不存在' }
+    const acct = (p.accounts ?? []).find(a => a.id === payload?.accountId)
+    if (!acct) return { ok: false, error: '账号不存在' }
+    if (typeof payload.name === 'string' && payload.name.trim()) acct.name = payload.name.trim()
+    if (typeof payload.enabled === 'boolean') acct.enabled = payload.enabled
+    if (typeof payload.apiKey === 'string' && payload.apiKey.length > 0) {
+      acct.keyEncrypted = encryptSecret(payload.apiKey)
+    }
+    if (acct.id === p.activeAccountId) p.apiKeyEncrypted = acct.keyEncrypted
+    saveProviders(list)
+    return { ok: true, accounts: (p.accounts ?? []).map(sanitizeAccount) }
+  })
+
+  /** 删账号与它的 Key；删掉的若是当前账号，自动切到剩下的第一个 */
+  ipcMain.handle('llm:removeAccount', (_e, providerId: string, accountId: string) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === providerId)
+    if (!p) return { ok: false, error: '供应商不存在' }
+    if (!removeAccount(p, accountId)) return { ok: false, error: '账号不存在' }
+    saveProviders(list)
+    return { ok: true, accounts: (p.accounts ?? []).map(sanitizeAccount), activeAccountId: p.activeAccountId ?? '' }
+  })
+
+  /** 测试指定账号（用它的 Key 真拉一次 /models），结果记回账号行供界面显示 */
+  ipcMain.handle('llm:testAccount', async (_e, providerId: string, accountId: string) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === providerId)
+    if (!p) return { ok: false, error: '供应商不存在', latencyMs: 0 }
+    const acct = (p.accounts ?? []).find(a => a.id === accountId)
+    if (!acct) return { ok: false, error: '账号不存在', latencyMs: 0 }
+    // 只把这一把 Key 交给适配器：accounts 收成单元素 + 它的 id 设为当前
+    const scoped: ProviderConfig = { ...p, accounts: [acct], activeAccountId: acct.id }
+    const started = Date.now()
+    try {
+      const models = await getAdapter(scoped.type).listModels(scoped)
+      acct.lastLatencyMs = Date.now() - started
+      acct.lastTestedAt = new Date().toISOString()
+      saveProviders(list)
+      return { ok: true, latencyMs: acct.lastLatencyMs, models }
+    } catch (err) {
+      acct.lastLatencyMs = Date.now() - started
+      acct.lastTestedAt = new Date().toISOString()
+      saveProviders(list)
+      return { ok: false, latencyMs: acct.lastLatencyMs, error: String((err as Error)?.message ?? err) }
+    }
+  })
+
+  ipcMain.handle('llm:testConnection', async (_e, draft: { type: ProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string>; accountId?: string }) => {
     const urlCheck = validateProviderUrl(String(draft?.baseUrl ?? ''))
     if (!urlCheck.ok) return { ok: false, error: urlCheck.error, latencyMs: 0 }
     // 传 id（服务商卡片测试）= 用存档 Key 与自定义头测——裸测不带鉴权，对要求鉴权的
     // 网关必然 401（2026-09-08 用户实锤）。添加表单无 id，用表单明文 apiKey/headers。
+    // 传 accountId（2026-10-13）= 测**指定账号**那把 Key，而不是当前账号。
     const saved = draft?.id ? getProviders().find(x => x.id === draft.id) : undefined
-    const temp: ProviderConfig = saved
-      ? { ...saved, headers: { ...(saved.headers ?? {}), ...(draft.headers ?? {}) } }
+    let scoped = saved
+    if (saved && draft.accountId) {
+      const a = (saved.accounts ?? []).find(x => x.id === draft.accountId)
+      if (a) scoped = { ...saved, accounts: [a], activeAccountId: a.id }
+    }
+    const temp: ProviderConfig = scoped
+      ? { ...scoped, headers: { ...(scoped.headers ?? {}), ...(draft.headers ?? {}) } }
       : {
           id: '__test__', name: 'test', type: draft.type, baseUrl: urlCheck.url,
           apiKeyEncrypted: typeof draft.apiKey === 'string' && draft.apiKey ? encryptSecret(draft.apiKey) : '',
@@ -1202,7 +1747,7 @@ export function registerLlmHandlers(deps: {
     if (!p.enabled) return { ok: false, error: '供应商已禁用', latencyMs: 0 }
     const started = Date.now()
     try {
-      const res = await getAdapter(p.type).chat(p, {
+      const res = await adapterFor(p, model).chat(p, {
         model,
         messages: [{ role: 'user', content: 'ping' }],
         maxTokens: 1,
@@ -1222,7 +1767,7 @@ export function registerLlmHandlers(deps: {
   // 视觉转写模型选择列表只显示这些，非视觉模型不再出现
   ipcMain.handle('llm:visionModels', () => {
     const models: Array<{ spec: string; providerName: string; model: string }> = []
-    for (const p of getProviders().filter(p => p.enabled && p.type === 'openai-compatible')) {
+    for (const p of getProviders().filter(p => providerUsable(p) && p.type === 'openai-compatible')) {
       for (const m of p.models) {
         if (VISION_MODEL_RE.test(m)) models.push({ spec: `${p.id}:${m}`, providerName: p.name, model: m })
       }
@@ -1237,11 +1782,32 @@ export function registerLlmHandlers(deps: {
     try {
       const models = await getAdapter(p.type).listModels(p)
       p.models = models
+      // 顺手清掉已不在清单里的协议覆盖（模型下架后残留的映射会让 familyOf 永远查不到）
+      if (p.modelFamilies) {
+        const keep = Object.fromEntries(Object.entries(p.modelFamilies).filter(([m]) => models.includes(m)))
+        p.modelFamilies = Object.keys(keep).length > 0 ? keep : undefined
+      }
       deps.setSettingValue('modelProviders', JSON.stringify(list))
       return { ok: true, models }
     } catch (err) {
       return { ok: false, error: String((err as Error)?.message ?? err), models: [] }
     }
+  })
+
+  /** 逐模型协议覆盖（设置页的协议标记）。family 传空 = 清除覆盖，跟随供应商默认协议。 */
+  ipcMain.handle('llm:setModelFamily', (_e, id: string, model: string, family: string) => {
+    const list = getProviders()
+    const p = list.find(x => x.id === id)
+    if (!p) return { ok: false, error: '供应商不存在' }
+    const m = String(model ?? '').trim()
+    if (!m) return { ok: false, error: '模型 ID 不能为空' }
+    if (family && !['chat', 'messages', 'responses'].includes(family)) return { ok: false, error: '协议值非法' }
+    const next: Record<string, ModelFamily> = { ...(p.modelFamilies ?? {}) }
+    if (family) next[m] = family as ModelFamily
+    else delete next[m]
+    p.modelFamilies = Object.keys(next).length > 0 ? next : undefined
+    deps.setSettingValue('modelProviders', JSON.stringify(list))
+    return { ok: true, modelFamilies: p.modelFamilies ?? {} }
   })
 
   ipcMain.handle('llm:addModel', (_e, id: string, model: string) => {
@@ -1306,6 +1872,8 @@ export interface VisionChatRequest {
   images: string[]
   maxTokens?: number
   signal?: AbortSignal
+  /** 会话标识（x-opencode-session）：同一次素材转写传同一个值，保持路由/缓存稳定 */
+  sessionId?: string
 }
 
 export interface VisionChatResponse { ok: boolean; text?: string; model?: string; providerName?: string; tokens?: number; error?: string }
@@ -1337,16 +1905,276 @@ export function findVisionModel(preferredSpec?: string): { provider: ProviderCon
     { role: 'user', content },
   ]
   try {
-    const r = await getAdapter(found.provider.type).chat(found.provider, {
+    // 视觉转写固定走 OpenAI 多模态线格式（chat/completions 的 content 数组），
+    // 因此**不**按模型协议族分派 —— 即便该模型被标成 responses，这里也只认 chat 线格式
+    const r = await openAiCompatibleAdapter.chat(found.provider, {
       model: found.model,
       // OpenAI 多模态 content 数组（image_url 部件）：adapter 原样透传线上格式，类型面在此收口
       messages: messages as unknown as ChatMessage[],
       maxTokens: Math.max(1024, Math.min(16384, Math.floor(req.maxTokens ?? 8192))),
       signal: req.signal,
+      sessionId: req.sessionId,
     })
     const totalTokens = (r.usage?.promptTokens ?? 0) + (r.usage?.completionTokens ?? 0)
     return { ok: true, text: String(r.content ?? ''), model: found.model, providerName: found.provider.name, tokens: totalTokens }
   } catch (e) {
     return { ok: false, error: String((e as Error)?.message ?? e), model: found.model }
   }
+}
+
+// ===== 生图 / 改图（v3.6.0 对话内生图 `/生图`；docs/ai-image-gen-plan.md §4.1）=====
+//
+// 三条边界，落码时不能越过：
+//  ① **不新增 ProviderType**：图像端点是"同一个供应商打不同端点"，baseUrl / 加密 Key /
+//     authHeaders / net.fetch 全部现成，加一个类型只会多一份要维护的账号与模型清单。
+//  ② **不进会话消息管线**：一次性请求 → 拿字节，落盘交给 builtinTools 的 image 工具。
+//     因此这里既不记 token 也不进 trace（观测面在工具那侧）。
+//  ③ **不做自动挑选**（与 visionChat 的 findVisionModel 刻意相反）：视觉模型猜错只影响
+//     转写质量，图像模型猜错是**直接花钱调错模型**，故两个槽留空即报错、由用户显式填。
+
+/** 画幅 → 端点 size 取值。**画幅口径的唯一处**：要改档位就改这张表。 */
+const IMAGE_SIZE_MAP: Record<string, string> = {
+  '16:9': '1536x864',
+  '1:1': '1024x1024',
+  '9:16': '864x1536',
+}
+
+/** 生图超时（独立于 TOTAL_TIMEOUT_MS 300s）：图像端点常在 10~60s，给足 180s 免得长图被切 */
+const IMAGE_TIMEOUT_MS = 180_000
+/** 上游只回 url 时二次下载的上限，与 workspaceManager.MAX_STAGE_IMAGE 同口径（30MB） */
+const MAX_IMAGE_BYTES = 30 * 1024 * 1024
+
+const IMAGE_MIME: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
+}
+
+export interface ImageGenRequest {
+  prompt: string
+  /** '16:9' | '1:1' | '9:16'；缺省 = 不传 size（由服务端默认定），对应决策 A3「AI 自动定」 */
+  aspect?: string
+  /** 用户点「停止」时中断（A6：前端断开 + 不落盘；文案注明服务端可能已计费） */
+  signal?: AbortSignal
+  /** 会话标识（x-opencode-session 一类的路由/缓存头），与聊天侧同源 */
+  sessionId?: string
+}
+
+export interface ImageEditRequest extends ImageGenRequest {
+  /** 参考图字节（由 image 工具从 `ref` 的仓库相对路径读出） */
+  image: Buffer
+  /** 参考图扩展名（决定 multipart 的 Content-Type；缺省 png） */
+  imageExt?: string
+}
+
+export interface ImageResult {
+  ok: boolean
+  /** base64（**不带** `data:` 前缀）—— 落盘由调用方负责，本层不碰文件系统 */
+  b64?: string
+  model?: string
+  providerName?: string
+  /** 上游改写的提示词（部分网关给，仅观测用，不落盘） */
+  revisedPrompt?: string
+  error?: string
+}
+
+interface ImageSlot { provider: ProviderConfig; model: string }
+
+/** `providerId:modelId` → 供应商与模型名；缺省 / 供应商不存在 / 未启用 / 非 openai-compatible 一律 null */
+function findImageProvider(spec: string): ImageSlot | null {
+  const s = String(spec ?? '').trim()
+  const i = s.indexOf(':')
+  if (i <= 0) return null
+  const pid = s.slice(0, i)
+  const mid = s.slice(i + 1)
+  if (!pid || !mid) return null
+  const p = getProviders().find(x => x.id === pid && x.enabled && x.type === 'openai-compatible')
+  return p ? { provider: p, model: mid } : null
+}
+
+/**
+ * 读一个生图槽。**空槽与坏槽给不同文案**：前者是"没配"（去设置里填），
+ * 后者是"配错了"（供应商没了/停了/协议不对）—— 混成一句会把排查方向带偏。
+ */
+function resolveImageSlot(key: 'aiImageModel' | 'aiImageEditModel', label: string):
+  { ok: true; slot: ImageSlot } | { ok: false; error: string } {
+  const spec = String(depsRef?.getSettingValue(key) ?? '').trim()
+  if (!spec) {
+    return { ok: false, error: `未配置${label}：请到 设置 → AI 工具 → 模型 →「哪个场景用哪个模型」填上（格式 providerId:modelId）` }
+  }
+  const slot = findImageProvider(spec)
+  if (!slot) return { ok: false, error: `${label}不可用（${spec}）：供应商不存在、未启用，或不是 OpenAI 兼容类型` }
+  return { ok: true, slot }
+}
+
+/** 生图错误 → A8 的「一行字」。图像端点不是聊天错误形状，故单列一份，不套 friendlyHttpError */
+function friendlyImageError(status: number, json: any, text: string): string {
+  const detail = String(json?.error?.message ?? json?.message ?? '').replace(/\s+/g, ' ').slice(0, 120)
+  const tail = detail ? `：${detail}` : ''
+  if (status === 401 || status === 403) return `生图失败：API Key 无该模型权限（${status}）${tail}`
+  if (status === 429) return `生图失败：额度不足或限频（429）${tail}`
+  if (status === 400 && /policy|safety|moderation|content|sensitive/i.test(`${detail} ${text}`)) {
+    return `生图失败：被内容策略拦下${tail}`
+  }
+  if (status === 404) return `生图失败：接口路径不存在（404），请确认该地址支持 /images/generations${tail}`
+  if (status >= 500) return `生图失败：上游暂时不可用（${status}）${tail}`
+  return `生图失败：HTTP ${status}${detail ? `${tail}` : `：${text.replace(/\s+/g, ' ').slice(0, 120)}`}`
+}
+
+/** 异常 → 一行字。超时与用户取消必须分开：前者可重试，后者是用户自己的动作 */
+function imageCatchMessage(e: unknown): string {
+  const err = e as { name?: string; message?: string }
+  if (err?.name === 'TimeoutError') return `生图超时（${Math.round(IMAGE_TIMEOUT_MS / 1000)} 秒未返回）：可点重试，或换一个更快的模型`
+  if (err?.name === 'AbortError') return '已停止生成（服务端可能已计费）'
+  return `生图失败：${String(err?.message ?? e)}`
+}
+
+/** 生图请求（JSON 与 multipart 共用）：body 收 string | Buffer —— multipart 手工组包后是 Buffer */
+async function imageFetch(
+  url: string,
+  init: { method: string; headers: Record<string, string>; body?: string | Buffer },
+  externalSignal?: AbortSignal,
+): Promise<{ status: number; json: any; text: string }> {
+  const signals: AbortSignal[] = [AbortSignal.timeout(IMAGE_TIMEOUT_MS)]
+  if (externalSignal) signals.push(externalSignal)
+  // body 收 string | Buffer；multipart 的 Buffer 要转成 BodyInit（Buffer 是 Uint8Array 子类，
+  // 但 lib 侧 BodyInit 的 ArrayBufferLike 变体对不上，故此处显式收口）
+  const res = await net.fetch(url, { ...init, body: init.body as BodyInit | undefined, signal: AbortSignal.any(signals) })
+  const text = await res.text()
+  let json: any = null
+  try { json = text ? JSON.parse(text) : null } catch { /* 非 JSON 响应（网关 HTML 错误页等） */ }
+  return { status: res.status, json, text }
+}
+
+/** 上游响应取图：OpenAI 形状 `{ data: [{ b64_json }] }`，兼容 `{ data: [{ url }] }` */
+function imagePayloadOf(json: any): { b64?: string; url?: string; revised?: string } {
+  const first = Array.isArray(json?.data) ? json.data[0] : null
+  return {
+    b64: typeof first?.b64_json === 'string' && first.b64_json ? first.b64_json : undefined,
+    url: typeof first?.url === 'string' && first.url ? first.url : undefined,
+    revised: typeof first?.revised_prompt === 'string' ? first.revised_prompt : undefined,
+  }
+}
+
+/**
+ * multipart/form-data 手工组包。
+ *
+ * 为什么不用运行时的 `FormData`：Electron `net.fetch` 对 FormData/Blob 请求体的支持面
+ * 视版本而定，一旦不吃就是"服务端报 boundary 缺失"这种远端报错、主进程侧看不出所以然；
+ * 手工组包把 boundary 与 Content-Length 都握在自己手里，也给契约脚本留下可断言的形状。
+ */
+function buildMultipart(
+  fields: Array<{ name: string; value: string }>,
+  file: { name: string; filename: string; mime: string; data: Buffer },
+): { body: Buffer; boundary: string } {
+  const boundary = `----kbimage${randomUUID().replace(/-/g, '')}`
+  const parts: Buffer[] = []
+  for (const f of fields) {
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${f.name}"\r\n\r\n${f.value}\r\n`, 'utf8'))
+  }
+  parts.push(Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="${file.name}"; filename="${file.filename}"\r\nContent-Type: ${file.mime}\r\n\r\n`, 'utf8'))
+  parts.push(file.data)
+  parts.push(Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'))
+  return { body: Buffer.concat(parts), boundary }
+}
+
+/** multipart 专用请求头：同 authHeaders 但**不带** Content-Type（boundary 由组包处给） */
+function imageAuthHeaders(p: ProviderConfig, sessionId?: string): Record<string, string> {
+  const h: Record<string, string> = { 'User-Agent': userAgent() }
+  const key = activeKeyOf(p)
+  if (key) h['Authorization'] = `Bearer ${key}` // 同 authHeaders：明文只在内存
+  const merged = { ...h, ...withSessionHeaders(p.headers, sessionId) }
+  // 用户自定义头里若带 Content-Type，会把 multipart 的 boundary 顶掉 —— 无条件剔除
+  for (const k of Object.keys(merged)) if (k.toLowerCase() === 'content-type') delete merged[k]
+  return merged
+}
+
+/** b64 / url 两形状收口到 base64；url 分支做限长二次下载 */
+async function resolveImageBytes(
+  payload: { b64?: string; url?: string },
+  signal?: AbortSignal,
+): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
+  if (payload.b64) return { ok: true, b64: payload.b64 }
+  if (!payload.url) {
+    return { ok: false, error: '生图失败：上游既没回 b64_json 也没回 url（响应形状不标准，请把该模型的返回形状反馈给开发者）' }
+  }
+  try {
+    const signals: AbortSignal[] = [AbortSignal.timeout(IMAGE_TIMEOUT_MS)]
+    if (signal) signals.push(signal)
+    const res = await net.fetch(payload.url, { signal: AbortSignal.any(signals) })
+    if (!res.ok) return { ok: false, error: `生图失败：取回图片失败（HTTP ${res.status}）` }
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length === 0) return { ok: false, error: '生图失败：取回的图片为空' }
+    if (buf.length > MAX_IMAGE_BYTES) {
+      return { ok: false, error: `生图失败：图片超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限` }
+    }
+    return { ok: true, b64: buf.toString('base64') }
+  } catch (e) {
+    return { ok: false, error: imageCatchMessage(e) }
+  }
+}
+
+/** 文生图：`POST {baseUrl}/images/generations`（走 aiImageModel 槽） */
+export async function imageGenerate(req: ImageGenRequest): Promise<ImageResult> {
+  const r = resolveImageSlot('aiImageModel', '生图模型')
+  if (!r.ok) return { ok: false, error: r.error }
+  const { provider, model } = r.slot
+  const body: Record<string, unknown> = { model, prompt: req.prompt, n: 1, response_format: 'b64_json' }
+  const size = IMAGE_SIZE_MAP[String(req.aspect ?? '')]
+  if (size) body.size = size
+  try {
+    const res = await imageFetch(`${provider.baseUrl}/images/generations`, {
+      method: 'POST',
+      headers: authHeaders(provider, req.sessionId),
+      body: JSON.stringify(body),
+    }, req.signal)
+    if (res.status < 200 || res.status >= 300) {
+      return { ok: false, model, error: friendlyImageError(res.status, res.json, res.text) }
+    }
+    const payload = imagePayloadOf(res.json)
+    const bytes = await resolveImageBytes(payload, req.signal)
+    if (!bytes.ok) return { ok: false, model, error: bytes.error }
+    return { ok: true, b64: bytes.b64, model, providerName: provider.name, revisedPrompt: payload.revised }
+  } catch (e) {
+    return { ok: false, model, error: imageCatchMessage(e) }
+  }
+}
+
+/** 改图：`POST {baseUrl}/images/edits`（走 aiImageEditModel 槽；原图字节 + prompt） */
+export async function imageEdit(req: ImageEditRequest): Promise<ImageResult> {
+  const r = resolveImageSlot('aiImageEditModel', '改图模型')
+  if (!r.ok) return { ok: false, error: r.error }
+  const { provider, model } = r.slot
+  const ext = String(req.imageExt ?? 'png').toLowerCase().replace(/^\./, '')
+  const fields = [{ name: 'model', value: model }, { name: 'prompt', value: req.prompt }, { name: 'n', value: '1' }, { name: 'response_format', value: 'b64_json' }]
+  const size = IMAGE_SIZE_MAP[String(req.aspect ?? '')]
+  if (size) fields.push({ name: 'size', value: size })
+  const { body, boundary } = buildMultipart(fields, {
+    name: 'image',
+    filename: `image.${ext || 'png'}`,
+    mime: IMAGE_MIME[ext] ?? 'image/png',
+    data: req.image,
+  })
+  try {
+    const res = await imageFetch(`${provider.baseUrl}/images/edits`, {
+      method: 'POST',
+      headers: { ...imageAuthHeaders(provider, req.sessionId), 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      body,
+    }, req.signal)
+    if (res.status < 200 || res.status >= 300) {
+      return { ok: false, model, error: friendlyImageError(res.status, res.json, res.text) }
+    }
+    const payload = imagePayloadOf(res.json)
+    const bytes = await resolveImageBytes(payload, req.signal)
+    if (!bytes.ok) return { ok: false, model, error: bytes.error }
+    return { ok: true, b64: bytes.b64, model, providerName: provider.name, revisedPrompt: payload.revised }
+  } catch (e) {
+    return { ok: false, model, error: imageCatchMessage(e) }
+  }
+}
+
+/** 改图槽是否已配置（image 工具据此决定"有 ref 走改图 / 无改图槽退化成重画并标注"） */
+export function imageEditSlotConfigured(): boolean {
+  return findImageProvider(String(depsRef?.getSettingValue('aiImageEditModel') ?? '').trim()) != null
 }

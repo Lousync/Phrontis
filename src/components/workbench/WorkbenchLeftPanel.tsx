@@ -2,12 +2,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, House, Lock,
-  LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, Clipboard, ChevronRight,
+  LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, ChevronRight,
+  CopyPlus, Link2, ArrowUpNarrowWide, ArrowDownNarrowWide,
   LayoutGrid, Plus, SquareTerminal, Wallet,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { ConfirmDialog } from '../shared'
 import { FileIcon } from '../shared/FileIcon'
+import { FileContextMenu, type FileMenuEntry } from '../shared/FileContextMenu'
+import { TreeExpandButton } from '../shared/TreeExpandButton'
+import { FileExtBadge } from '../shared/FileExtBadge'
+import { splitName } from '../../lib/fileName'
+import { TREE_SORT_OPTIONS, getTreeSortMode, setTreeSortMode, type TreeSortMode } from '../../lib/treeSort'
+import { duplicateWorkspaceFile } from '../../lib/fileDuplicate'
 import { useSettings } from '../../lib/SettingsContext'
 import { workspaceCreateFile, workspaceGetCurrent, workspaceListDir, workspaceRename, workspaceTrash } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
@@ -16,6 +23,7 @@ import { useDataChanged } from '../../lib/dataChanged'
 import { WorkbenchSearchPanel } from './WorkbenchSearchPanel'
 import { WorkbenchFileTree } from './WorkbenchFileTree'
 import { FolderFocusButton } from '../shared/FolderFocusButton'
+import { SIDEBAR_HEADER_ICON } from '../shared/sidebarHeaderIcon'
 import { BOOKMARK_COLORS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_ENTRY_ENABLED, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, type RailModule } from '../../lib/workbenchLayout'
 import type { TabName } from '../../types'
 
@@ -246,6 +254,24 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
   // 与知识库侧栏的持久化偏好（knowledgeFolderFocus）是两种东西，不共用键。
   const [treeFocus, setTreeFocus] = useState(false)
 
+  // 树模式头部：排序（持久化）+ 全部展开/关闭（seq 命令驱动 WorkbenchFileTree）
+  const [treeSort, setTreeSort] = useState<TreeSortMode>(() => getTreeSortMode())
+  const changeTreeSort = (m: TreeSortMode) => { setTreeSort(m); setTreeSortMode(m) }
+  // 头部按钮＝「展开/收起选中目录的子树」开关（未选中＝仓库根/全部）；选中变化时复位按钮态
+  const [treeSelectedDir, setTreeSelectedDir] = useState<string | null>(null)
+  const [treeSubtreeExpanded, setTreeSubtreeExpanded] = useState(false)
+  useEffect(() => { setTreeSubtreeExpanded(false) }, [treeSelectedDir])
+  const treeCmdSeqRef = useRef(0)
+  const [treeCommand, setTreeCommand] = useState<{ kind: 'expand' | 'collapse'; rel: string; seq: number } | null>(null)
+  const toggleTreeSubtree = () => {
+    const rel = treeSelectedDir ?? ''
+    const kind = treeSubtreeExpanded ? 'collapse' : 'expand'
+    treeCmdSeqRef.current += 1
+    setTreeCommand({ kind, rel, seq: treeCmdSeqRef.current })
+    setTreeSubtreeExpanded((k) => !k)
+  }
+  const [sortMenuPos, setSortMenuPos] = useState<{ x: number; y: number } | null>(null)
+
   // 「软件文件」折叠区开合（N-3）：默认收起 + localStorage 记忆，口径同 VaultTree 底部折叠节
   //（键独立于树模式的 kb.treeSoftOpen——两处折叠面各自记忆）
   const [softOpen, setSoftOpen] = useState(() => {
@@ -283,18 +309,52 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
         <>
           <div className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
             <button onClick={onToggleTreeMode} title="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-              <House size={13} />
+              <House {...SIDEBAR_HEADER_ICON} />
             </button>
-            {/* 目录聚焦开关（开发负责人 2026-09-29 指定：与 🏠 同一排）。
+            <button
+              onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSortMenuPos({ x: r.left, y: r.bottom + 6 }) }}
+              title="排序方式"
+              data-wb="treeSortBtn"
+              className={`rounded p-1 transition-colors ${sortMenuPos ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+            >
+              {(treeSort === 'name-desc' || treeSort === 'mtime-desc')
+                ? <ArrowDownNarrowWide {...SIDEBAR_HEADER_ICON} />
+                : <ArrowUpNarrowWide {...SIDEBAR_HEADER_ICON} />}
+            </button>
+            <TreeExpandButton
+              expanded={treeSubtreeExpanded}
+              onClick={toggleTreeSubtree}
+              dataWb="treeSubtreeBtn"
+              title={treeSubtreeExpanded
+                ? (treeSelectedDir ? '收起此目录（含子目录）' : '全部关闭')
+                : (treeSelectedDir ? '展开此目录（含子目录）' : '展开全部（含子目录）')}
+            />
+            {/* 目录聚焦开关（2026-09-29 与 🏠 同排；2026-10-11 移到最右）。
                 语义复用知识库 / 编辑区那套 FolderFocusButton + VaultTree 的 focusOn/onFocusLocate；
                 状态在本组件（树模式内的临时视图开关，不进 settings —— 与知识库的持久化偏好区分）。 */}
             <FolderFocusButton on={treeFocus} onToggle={() => setTreeFocus((v) => !v)} />
           </div>
+          {sortMenuPos && (
+            <FileContextMenu
+              x={sortMenuPos.x}
+              y={sortMenuPos.y}
+              onClose={() => setSortMenuPos(null)}
+              items={TREE_SORT_OPTIONS.map((o) => ({
+                key: o.value,
+                label: o.label,
+                icon: treeSort === o.value ? <Check size={15} /> : <span className="inline-block w-[15px]" />,
+                onSelect: () => changeTreeSort(o.value),
+              }))}
+            />
+          )}
           <div data-wb="treeMode" className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <WorkbenchFileTree
               focusOn={treeFocus}
               onFocusExit={() => setTreeFocus(false)}
               onOpenFile={(rel) => onOpenLooseFile(rel, { startEdit: true })}
+              sort={treeSort}
+              treeCommand={treeCommand}
+              onSelectedDirChange={setTreeSelectedDir}
             />
           </div>
         </>
@@ -306,14 +366,14 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
           <div data-wb="mod" data-wb-mod={railModule ?? railTool ?? ''} className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
             {/* 返回顶层统一 🏠（2026-09-17 反馈轮：‹ 换 House，钮组与搜索态头部同一居中语言） */}
             <button onClick={onBack} title="返回总览（自动解锁）" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-              <House size={13} />
+              <House {...SIDEBAR_HEADER_ICON} />
             </button>
             <button
               onClick={onToggleLock}
               title={locked ? '已锁定：主界面切换不改变左栏（点击解锁）' : '锁定侧边栏：主界面切换不改变左栏'}
               className={`rounded p-1 transition-colors ${locked ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
             >
-              {locked ? <Lock size={13} /> : <LockOpen size={13} />}
+              {locked ? <Lock {...SIDEBAR_HEADER_ICON} /> : <LockOpen {...SIDEBAR_HEADER_ICON} />}
             </button>
             {/* 模块头部动作槽（2026-09-19）：模块自己的按钮（笔记聚焦 / 博客写作等）portal 到这里，
                 与二钮**同组居中**（2026-09-19 二次反馈：不要贴右，所有按钮居中放一起） */}
@@ -333,7 +393,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
               data-wb="bookmarkMenuBtn"
               className={`rounded p-1 transition-colors ${bookmarkMenuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
             >
-              <Bookmark size={13} />
+              <Bookmark {...SIDEBAR_HEADER_ICON} />
             </button>
             <button
               onClick={onEnterSearch}
@@ -341,7 +401,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
               data-wb="leftSearchBtn"
               className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
-              <Search size={13} />
+              <Search {...SIDEBAR_HEADER_ICON} />
             </button>
             <button
               onClick={onToggleTreeMode}
@@ -349,7 +409,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
               data-wb="treeModeBtn"
               className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
-              <Trees size={13} />
+              <Trees {...SIDEBAR_HEADER_ICON} />
             </button>
             {bookmarkMenuOpen && bmMenuPos && createPortal(
               <div
@@ -448,12 +508,16 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                   <Plus size={12} />
                 </button>
               </div>
-              {loose.map((f) => (
-                <button key={f} onClick={() => onOpenLooseFile(f)} onContextMenu={(e) => openLooseMenu(e, f)} className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}>
-                  <FileIcon ext={f.includes('.') ? f.split('.').pop()!.toLowerCase() : ''} size={13} />
-                  {f}
-                </button>
-              ))}
+              {loose.map((f) => {
+                const { base, ext } = splitName(f)
+                return (
+                  <button key={f} onClick={() => onOpenLooseFile(f)} onContextMenu={(e) => openLooseMenu(e, f)} className="flex w-full min-h-[28px] items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]">
+                    <FileIcon ext={ext} size={15} />
+                    <span className="min-w-0 flex-1 truncate">{base}</span>
+                    <FileExtBadge ext={ext} />
+                  </button>
+                )
+              })}
             </div>
             {/* 软件文件折叠区（N-3 拍板 A）：形态照抄 VaultTree 底部折叠节（mt-auto 沉底 + kb-chevron +
                 kb-collapse + 计数），数据 = softEntries（softNames 命中项，refreshRoot 另存不再丢弃）。
@@ -471,21 +535,26 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                 </div>
                 <div className={`kb-collapse ${softOpen ? 'open' : ''}`}>
                   <div className="flex flex-col gap-0.5 pb-1">
-                    {softEntries.map((e) => (
-                      <button
-                        key={e.name}
-                        data-wb-soft-entry={e.name}
-                        onClick={() => { if (e.type === 'file') onOpenLooseFile(e.name) }}
-                        onContextMenu={(ev) => openLooseMenu(ev, e.name, e.type)}
-                        className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}
-                        title={e.type === 'dir' ? '目录 — 到文件树模式查看内容' : undefined}
-                      >
-                        {e.type === 'dir'
-                          ? <Folder size={13} className="shrink-0 text-[var(--text-muted)]" />
-                          : <FileIcon ext={e.name.includes('.') ? e.name.split('.').pop()!.toLowerCase() : ''} size={13} />}
-                        {e.name}
-                      </button>
-                    ))}
+                    {softEntries.map((e) => {
+                      const isDir = e.type === 'dir'
+                      const { base, ext } = splitName(e.name)
+                      return (
+                        <button
+                          key={e.name}
+                          data-wb-soft-entry={e.name}
+                          onClick={() => { if (e.type === 'file') onOpenLooseFile(e.name) }}
+                          onContextMenu={(ev) => openLooseMenu(ev, e.name, e.type)}
+                          className="flex w-full min-h-[28px] items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
+                          title={e.type === 'dir' ? '目录 — 到文件树模式查看内容' : undefined}
+                        >
+                          {isDir
+                            ? <Folder size={15} className="shrink-0 text-[var(--text-muted)]" />
+                            : <FileIcon ext={ext} size={15} />}
+                          <span className="min-w-0 flex-1 truncate">{isDir ? e.name : base}</span>
+                          {!isDir && <FileExtBadge ext={ext} />}
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
               </div>
@@ -500,45 +569,38 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
       {/* ---- 零散文件右键菜单 + 重命名/删除弹层 ----
           fixed 浮层一律 portal 到 body（同书签菜单模式）：左栏面板的变换/收缩容器会把
           fixed 的包含块变成窄栏，菜单被压成竖条（2026-09-19 反馈截图） */}
-      {looseMenu && createPortal(
-        <div
-          className="fixed inset-0 z-[70]"
-          onMouseDown={() => setLooseMenu(null)}
-          onContextMenu={(e) => { e.preventDefault(); setLooseMenu(null) }}
-        >
-          <div
-            className="absolute min-w-[140px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-lg kb-pop"
-            style={{ left: Math.min(looseMenu.x, window.innerWidth - 160), top: Math.min(looseMenu.y, window.innerHeight - 200) }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={() => { if (looseMenu.type === 'dir') onToggleTreeMode(); else onOpenLooseFile(looseMenu.file); setLooseMenu(null) }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-            >
-              <FileText size={13} className="text-[var(--text-muted)]" />{looseMenu.type === 'dir' ? '打开（文件树模式）' : '打开'}
-            </button>
-            <button
-              onClick={() => { setRenameBox({ file: looseMenu.file, value: looseMenu.file }); setLooseMenu(null) }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-            >
-              <Pencil size={13} className="text-[var(--text-muted)]" />重命名
-            </button>
-            <button
-              onClick={() => { void navigator.clipboard.writeText(looseMenu.file); setLooseMenu(null) }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-            >
-              <Clipboard size={13} className="text-[var(--text-muted)]" />复制路径
-            </button>
-            <div className="my-1 border-t border-[var(--border-color)]" />
-            <button
-              onClick={() => { setTrashTarget(looseMenu.file); setLooseMenu(null) }}
-              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
-            >
-              <Trash2 size={13} className="text-[var(--text-muted)]" />删除（回收站）
-            </button>
-          </div>
-        </div>,
-        document.body,
+      {looseMenu && (
+        <FileContextMenu
+          x={looseMenu.x}
+          y={looseMenu.y}
+          onClose={() => setLooseMenu(null)}
+          items={(() => {
+            const m = looseMenu
+            const isDir = m.type === 'dir'
+            const items: FileMenuEntry[] = [
+              { key: 'open', label: isDir ? '打开（文件树模式）' : '打开', icon: <FileText size={15} />, onSelect: () => { if (isDir) onToggleTreeMode(); else onOpenLooseFile(m.file) } },
+              { separator: true },
+            ]
+            if (!isDir) items.push({
+              key: 'dup', label: '创建副本', icon: <CopyPlus size={15} />,
+              onSelect: () => {
+                void (async () => {
+                  const root = rootIdRef.current
+                  if (!root) { showToast({ type: 'error', message: '未打开仓库' }); return }
+                  const r = await duplicateWorkspaceFile(root, m.file).catch(() => null)
+                  if (!r || r.ok === false) { showToast({ type: 'error', message: r?.error || '创建副本失败' }); return }
+                  await refreshRoot()
+                  showToast({ type: 'info', message: `已生成副本 ${r.relPath?.split('/').pop() ?? ''}` })
+                })()
+              },
+            })
+            items.push({ key: 'copyPath', label: '复制路径', icon: <Link2 size={15} />, onSelect: () => { void navigator.clipboard.writeText(m.file) } })
+            items.push({ key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => setRenameBox({ file: m.file, value: m.file }) })
+            items.push({ separator: true })
+            items.push({ key: 'delete', label: '删除（回收站）', icon: <Trash2 size={15} />, danger: true, onSelect: () => setTrashTarget(m.file) })
+            return items
+          })()}
+        />
       )}
       {trashTarget !== null && createPortal(
         <ConfirmDialog

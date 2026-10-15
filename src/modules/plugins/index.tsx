@@ -46,7 +46,7 @@ const CONTRIBUTION_HINTS: Record<string, string> = {
   tools: '工具箱「插件工具」区可见',
   automationRule: '自动化规则(Tier1 预留)',
   knowledgePages: '导入到知识库(创建空间/笔记本/章节/页面)',
-  skills: '提示词技能,设置 → AI 工具 → Skill 中查看、停用与独立安装',
+  skills: '提示词技能,设置 → AI → 工具 中查看、停用与独立安装',
 }
 const CAPABILITY_LABELS: Record<string, string> = {
   clipboard: '剪贴板写入',
@@ -466,6 +466,12 @@ export function PluginsModule() {
             <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">{p.name}</span>
             <span className="text-[10px] text-[var(--text-disabled)] font-mono shrink-0">v{p.version}</span>
             {installedVer && <span className="text-[10px] text-[var(--success)] shrink-0">✓</span>}
+            {p.engineVersion && (
+              <span
+                className="shrink-0 rounded px-1 text-[9.5px] leading-[15px] text-[var(--warning)] bg-[var(--warning)]/10 border border-[var(--warning)]/30"
+                title={`需要应用版本 ${p.engineVersion}`}
+              >需{p.engineVersion.replace(/^>=/, '≥')}</span>
+            )}
           </div>
           <div className="text-[11px] text-[var(--text-muted)] truncate mt-0.5">
             {p.category && <span className="text-[10px] text-[var(--accent)] mr-1">{p.category}</span>}
@@ -625,6 +631,7 @@ export function PluginsModule() {
               <div className="flex"><span className="w-24 shrink-0">安全等级</span><span>{level} · {LEVEL_META[level].label}</span></div>
               {level === 'B' && <div className="flex"><span className="w-24 shrink-0">能力</span><span>{(p.capabilities || []).map(c => CAPABILITY_LABELS[c] || c).join('、') || '无'}</span></div>}
               <div className="flex"><span className="w-24 shrink-0">版本</span><span className="font-mono text-[var(--text-secondary)]">v{p.version}</span></div>
+              {p.engineVersion && <div className="flex"><span className="w-24 shrink-0">适配版本</span><span>应用 {p.engineVersion.replace(/^>=/, '≥')} 及以上</span></div>}
               {p.updatedAt && <div className="flex"><span className="w-24 shrink-0">最近更新</span><span>{p.updatedAt}</span></div>}
             </div>
           </div>

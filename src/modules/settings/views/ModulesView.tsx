@@ -1,9 +1,13 @@
 import { BlogView } from './BlogView'
 import { ReminderView } from './ReminderView'
-import { AiTeachingView } from './AiTeachingView'
 import { ScheduleView } from './ScheduleView'
 
-/** 设置 → 模块设置：业务模块专属偏好（博客 / 日程任务 / AI教学 / 打卡提醒），二期随自动表单细化分域 */
+/**
+ * 设置 → 模块设置：业务模块专属偏好（博客 / 日程任务 / 打卡提醒）。
+ *
+ * 2026-10-13：AI教学三项（产物根目录 / 删除联动 / 视觉转写模型）已迁到「AI 工具 → 教学」——
+ * 它们是 AI 设置，留在这里造成"AI 设置分散在两处"，找模型配置的人不会往模块设置翻。
+ */
 export function ModulesView() {
   return (
     <div>
@@ -12,9 +16,6 @@ export function ModulesView() {
       </div>
       <div className="mb-8">
         <ScheduleView />
-      </div>
-      <div className="mb-8">
-        <AiTeachingView />
       </div>
       <ReminderView />
     </div>

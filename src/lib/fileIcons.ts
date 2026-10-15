@@ -30,6 +30,9 @@ import rSvg from '../assets/r.svg?raw'
 import rbSvg from '../assets/rb.svg?raw'
 import phpSvg from '../assets/php.svg?raw'
 import luaSvg from '../assets/lua.svg?raw'
+// 图片（批 3，2026-10-13）：这批之前**一个图片图标都没有** ⇒ 文件树里每张图都显示通用文件图标，
+// 而那正是用户看到的第一眼。八种可渲染格式共用一个图标（按格式各画一个的收益远小于成本）。
+import imageSvg from '../assets/image.svg?raw'
 
 export const FILE_ICONS: Record<string, string> = {
   '': mdSvg,   // empty = Markdown (manually created pages)
@@ -61,6 +64,16 @@ export const FILE_ICONS: Record<string, string> = {
   rb: rbSvg,
   php: phpSvg,
   lua: luaSvg,
+  // 图片（批 3）：与 src/lib/imageFormats.ts 的 IMAGE_RENDER_EXTS 一一对应 ——
+  // 那份是「能渲染哪些」，这份是「文件树里画哪个图标」，两处必须同步扩。
+  png: imageSvg,
+  jpg: imageSvg,
+  jpeg: imageSvg,
+  gif: imageSvg,
+  webp: imageSvg,
+  bmp: imageSvg,
+  avif: imageSvg,
+  svg: imageSvg,
 }
 
 export function getFileIcon(ext: string): string {

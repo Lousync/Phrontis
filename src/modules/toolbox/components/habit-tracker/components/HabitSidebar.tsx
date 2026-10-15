@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Plus, Pencil, Archive, ArchiveRestore, Flame, CalendarRange } from 'lucide-react'
 import type { Habit, HabitRecord } from '../../../../../types'
 import { buildRecordIndex, currentStreak, weekDoneCount, ruleSummary } from '../dateUtils'
+import { SIDEBAR_HEADER_ICON } from '../../../../../components/shared/sidebarHeaderIcon'
 
 interface Props {
   habits: Habit[]
@@ -83,7 +84,7 @@ export function HabitSidebar({ habits, records, onNew, onEdit, onArchive }: Prop
         <button onClick={onNew}
           className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           title="新建习惯">
-          <Plus size={15} />
+          <Plus {...SIDEBAR_HEADER_ICON} />
         </button>
       </div>
 

@@ -13,13 +13,13 @@ import { useSettings } from '../../lib/SettingsContext'
 type ModuleIconComp = React.ComponentType<{ size?: number; className?: string }>
 
 const MODULES: { icon: ModuleIconComp; name: string; desc: string }[] = [
-  { icon: PenLine, name: '编辑器', desc: 'Markdown 正文写作 · 唯一写入方' },
-  { icon: BookOpen, name: '博客 · 日志', desc: '每日写作、标签与周月总结' },
-  { icon: CalendarDays, name: '任务', desc: '日程安排与四象限管理' },
-  { icon: Network, name: '知识库', desc: '双链笔记、PDF 与知识网络' },
-  { icon: MessageCircle, name: '说说', desc: '轻量动态与相册记录' },
-  { icon: GraduationCap, name: 'AI 教学', desc: '会话学习、视觉转写与自动出题' },
-  { icon: Wrench, name: '工具箱', desc: '番茄钟、习惯打卡、数据导出等 8 个工具' },
+  { icon: PenLine, name: '笔记', desc: 'Markdown 正文写作 · 知识库与文件树都在这里' },
+  { icon: BookOpen, name: '博客', desc: '每日写作、标签与周月总结' },
+  { icon: CalendarDays, name: '日程', desc: '任务安排、固定日程与打卡' },
+  { icon: Network, name: '知识图谱', desc: '双链关系可视化 · 从笔记模块进入' },
+  { icon: MessageCircle, name: '动态', desc: '轻量动态与相册记录' },
+  { icon: GraduationCap, name: 'AI 教学', desc: '对话驱动建课、上课与检验' },
+  { icon: Wrench, name: '工具箱', desc: '番茄钟、习惯打卡、数据导出等工具' },
   { icon: Bot, name: 'AI 助手', desc: '本地模型驱动，边看边问（Ctrl+J）' },
   { icon: PluginIcon, name: '插件', desc: '主题 / 预设 / 知识包官方市场' },
 ]
@@ -115,11 +115,11 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
               <StepTitle icon={<Bot size={15} />} title="AI 助手与插件" />
               <div className="space-y-2.5">
                 <InfoRow icon={<Bot size={14} />} title="AI 助手 · 边看边问"
-                  desc="Ctrl+J 随时唤起；设置 → AI 工具 中配置本地（Ollama）或在线模型，支持 CC Switch 一键导入。对话可调用本地工具并全程留痕" />
+                  desc="Ctrl+J 随时唤起；设置 → AI 中配置本地（Ollama）或在线模型，支持 CC Switch 一键导入。对话可调用本地工具并全程留痕" />
                 <InfoRow icon={<PluginIcon size={14} />} title="插件 · 官方市场"
                   desc="插件页一键安装主题、番茄预设与知识包（如 408 考研学习空间，一键导入 148 页学习内容）；S/A/B 三级安全审核" />
                 <InfoRow icon={<ShieldCheck size={14} />} title="按模块授权"
-                  desc="设置 → AI 工具 → 权限 中按模块控制 AI 能力边界（禁止 / 只读 / 读写），未授权模块 AI 完全无法触达" />
+                  desc="设置 → AI → 权限 中按模块控制 AI 能力边界（禁止 / 只读 / 读写），未授权模块 AI 完全无法触达" />
               </div>
             </div>
           )}
@@ -165,7 +165,7 @@ export function Onboarding({ onComplete }: { onComplete: () => void }) {
               <div className="space-y-2 mb-6">
                 {SHORTCUTS.map(sc => (
                   <div key={sc.keys} className="flex items-center gap-3">
-                    <kbd className="min-w-[92px] text-center px-2 py-1 rounded bg-[var(--bg-tertiary)] border border-[var(--border-color)] text-[11px] font-mono text-[var(--text-primary)]">{sc.keys}</kbd>
+                    <kbd className="kb-kbd min-w-[92px] justify-center px-2 py-1 rounded text-[11px]">{sc.keys}</kbd>
                     <span className="text-[12px] text-[var(--text-secondary)]">{sc.desc}</span>
                   </div>
                 ))}

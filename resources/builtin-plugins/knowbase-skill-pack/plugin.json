@@ -3,7 +3,7 @@
   "name": "官方 AI 技能包",
   "version": "1.0.0",
   "author": "Knowbase",
-  "description": "官方示例 Skill 包：内置周报撰写与知识摘要两个提示词技能，供未来的 AI 助手引用。可在 设置 → AI 工具 → Skill 中查看。",
+  "description": "官方示例 Skill 包：内置周报撰写与知识摘要两个提示词技能，供未来的 AI 助手引用。可在 设置 → AI → 工具 中查看。",
   "type": "declarative",
   "activation": ["startup"],
   "contributes": {

@@ -1,0 +1,328 @@
+{
+  "id": "crab-mascot",
+  "name": "Claude 小螃蟹",
+  "version": "0.3.2",
+  "engineVersion": ">=3.5.0",
+  "author": "local",
+  "description": "AI 输入区像素蟹吉祥物 + Claude 暖色主题。非官方个人项目，与 Anthropic 无隶属关系；螃蟹形象（Clawd）著作权归 Anthropic，仅供个人自用，权利人要求即下架。详见包内 NOTICE.md。",
+  "type": "ui",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "riskLevel": "S",
+  "capabilities": [],
+  "contributes": {
+    "mascot": [
+      {
+        "id": "crab",
+        "name": "小螃蟹",
+        "frameMs": 80,
+        "grid": {
+          "cell": 2,
+          "w": 52,
+          "h": 36
+        },
+        "states": {
+          "idle": "idle",
+          "thinking": "thinking",
+          "working": "typing",
+          "sweeping": "compacting",
+          "notification": "notification",
+          "error": "error",
+          "attention": "happy"
+        },
+        "sheets": {
+          "idle": {
+            "body": "assets/crab/idle.png",
+            "ink": "assets/crab/idle-ink.png",
+            "frames": 24,
+            "box": [
+              24,
+              20,
+              24,
+              16
+            ],
+            "still": 0
+          },
+          "idle-look": {
+            "body": "assets/crab/idle-look.png",
+            "ink": "assets/crab/idle-look-ink.png",
+            "frames": 31,
+            "box": [
+              24,
+              20,
+              24,
+              16
+            ],
+            "still": 0
+          },
+          "idle-wave": {
+            "body": "assets/crab/idle-wave.png",
+            "ink": "assets/crab/idle-wave-ink.png",
+            "frames": 12,
+            "box": [
+              24,
+              15,
+              24,
+              21
+            ],
+            "still": 0
+          },
+          "idle-laptop": {
+            "body": "assets/crab/idle-laptop.png",
+            "ink": "assets/crab/idle-laptop-ink.png",
+            "frames": 43,
+            "box": [
+              14,
+              13,
+              34,
+              23
+            ],
+            "still": 0
+          },
+          "thinking": {
+            "body": "assets/crab/thinking.png",
+            "ink": "assets/crab/thinking-ink.png",
+            "frames": 32,
+            "box": [
+              14,
+              4,
+              34,
+              32
+            ],
+            "still": 18
+          },
+          "typing": {
+            "body": "assets/crab/typing.png",
+            "ink": "assets/crab/typing-ink.png",
+            "frames": 6,
+            "box": [
+              15,
+              22,
+              28,
+              14
+            ],
+            "still": 0
+          },
+          "compacting": {
+            "body": "assets/crab/compacting.png",
+            "ink": "assets/crab/compacting-ink.png",
+            "frames": 20,
+            "box": [
+              21,
+              20,
+              30,
+              16
+            ],
+            "still": 3
+          },
+          "notification": {
+            "body": "assets/crab/notification.png",
+            "ink": "assets/crab/notification-ink.png",
+            "frames": 16,
+            "box": [
+              24,
+              8,
+              24,
+              28
+            ],
+            "still": 0
+          },
+          "error": {
+            "body": "assets/crab/error.png",
+            "ink": "assets/crab/error-ink.png",
+            "frames": 24,
+            "box": [
+              23,
+              11,
+              26,
+              25
+            ],
+            "still": 4
+          },
+          "happy": {
+            "body": "assets/crab/happy.png",
+            "ink": "assets/crab/happy-ink.png",
+            "frames": 32,
+            "box": [
+              18,
+              6,
+              34,
+              30
+            ],
+            "still": 3
+          },
+          "poke-left": {
+            "body": "assets/crab/poke-left.png",
+            "ink": "assets/crab/poke-left-ink.png",
+            "frames": 10,
+            "box": [
+              24,
+              20,
+              27,
+              16
+            ],
+            "still": 0
+          },
+          "poke-right": {
+            "body": "assets/crab/poke-right.png",
+            "ink": "assets/crab/poke-right-ink.png",
+            "frames": 10,
+            "box": [
+              21,
+              20,
+              27,
+              16
+            ],
+            "still": 0
+          },
+          "tickle": {
+            "body": "assets/crab/tickle.png",
+            "ink": "assets/crab/tickle-ink.png",
+            "frames": 16,
+            "box": [
+              23,
+              18,
+              26,
+              18
+            ],
+            "still": 0
+          },
+          "music": {
+            "body": "assets/crab/music.png",
+            "ink": "assets/crab/music-ink.png",
+            "frames": 16,
+            "box": [
+              22,
+              1,
+              30,
+              35
+            ],
+            "still": 0
+          },
+          "conducting": {
+            "body": "assets/crab/conducting.png",
+            "ink": "assets/crab/conducting-ink.png",
+            "frames": 24,
+            "box": [
+              24,
+              12,
+              27,
+              24
+            ],
+            "still": 0
+          },
+          "building": {
+            "body": "assets/crab/building.png",
+            "ink": "assets/crab/building-ink.png",
+            "frames": 6,
+            "box": [
+              15,
+              19,
+              28,
+              17
+            ],
+            "still": 0
+          },
+          "sleeping": {
+            "body": "assets/crab/sleeping.png",
+            "ink": "assets/crab/sleeping-ink.png",
+            "frames": 32,
+            "box": [
+              23,
+              3,
+              29,
+              33
+            ],
+            "still": 0
+          },
+          "waking": {
+            "body": "assets/crab/waking.png",
+            "ink": "assets/crab/waking-ink.png",
+            "frames": 12,
+            "box": [
+              24,
+              4,
+              24,
+              32
+            ],
+            "still": 11
+          }
+        },
+        "idleExtras": [
+          "idle-look",
+          "idle-wave",
+          "idle-laptop"
+        ],
+        "tapLeft": "poke-left",
+        "tapRight": "poke-right",
+        "tapFlail": "tickle",
+        "workingTiers": [
+          "typing",
+          "music",
+          "building"
+        ]
+      }
+    ],
+    "theme": [
+      {
+        "name": "Claude 暖夜",
+        "colors": {
+          "--bg-primary": "#1a1917",
+          "--bg-secondary": "#201f1c",
+          "--bg-tertiary": "#262420",
+          "--bg-hover": "#2a2723",
+          "--bg-selected": "#3a2f28",
+          "--activitybar-bg": "#161513",
+          "--sidebar-bg": "#201f1c",
+          "--input-bg": "#2a2723",
+          "--card-bg": "#262420",
+          "--text-primary": "#ece7df",
+          "--text-secondary": "#b3aca1",
+          "--text-muted": "#857e73",
+          "--text-disabled": "#5c574f",
+          "--accent": "#d97757",
+          "--accent-hover": "#e08a6d",
+          "--danger": "#e06c5a",
+          "--success": "#7fb069",
+          "--warning": "#d9a441",
+          "--border-color": "#38352f",
+          "--warning-bg": "#2e281c",
+          "--radius-card": "14px",
+          "--radius-btn": "10px",
+          "--quote-bar": "3px solid #d97757"
+        }
+      },
+      {
+        "name": "Claude 暖纸",
+        "colors": {
+          "--bg-primary": "#fbf9f4",
+          "--bg-secondary": "#f4f0e8",
+          "--bg-tertiary": "#ebe6db",
+          "--bg-hover": "#ece7dd",
+          "--bg-selected": "#f0e2d8",
+          "--activitybar-bg": "#f0ece4",
+          "--sidebar-bg": "#f4f0e8",
+          "--input-bg": "#ffffff",
+          "--card-bg": "#fdfbf7",
+          "--text-primary": "#35322c",
+          "--text-secondary": "#6b655b",
+          "--text-muted": "#9a9388",
+          "--text-disabled": "#b8b1a5",
+          "--accent": "#c96442",
+          "--accent-hover": "#b5563a",
+          "--danger": "#c0392b",
+          "--success": "#4f7a3f",
+          "--warning": "#a07a1e",
+          "--border-color": "#e3ddd1",
+          "--warning-bg": "#fbf3e2",
+          "--drop-bg": "#f0e2d8",
+          "--drop-border": "#c96442",
+          "--glass-edge": "rgba(255,255,255,0.65)",
+          "--radius-card": "14px",
+          "--radius-btn": "10px",
+          "--quote-bar": "3px solid #c96442"
+        }
+      }
+    ]
+  }
+}

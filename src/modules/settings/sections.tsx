@@ -67,9 +67,9 @@ export const SECTIONS: SectionDef[] = [
   { id: 'general',    label: '通用与行为', icon: <SlidersHorizontal size={16} />, keywords: ['通用', '行为', '启动', '缩放', 'zoom', '外壳', 'workbench', '界面'] },
   { id: 'data',       label: '数据与仓库', icon: <Database size={16} />,       keywords: ['数据', '仓库', '存储', '备份', '导出', '回收站', 'vault', '博客读源'] },
   { id: 'security',   label: '安全与隐私', icon: <ShieldCheck size={16} />,   keywords: ['安全', '隐私', '删除确认', '插件安全', '签名', '密钥'] },
-  { id: 'aiTools',    label: 'AI 工具',   icon: <Bot size={16} />,            keywords: ['AI', '工具', 'agent', '智能体', 'ai', '助手', '模型', 'mcp', 'skill'] },
+  { id: 'aiTools',    label: 'AI',        icon: <Bot size={16} />,            keywords: ['AI', '工具', 'agent', '智能体', 'ai', '助手', '模型', 'mcp', 'skill', 'AI 工具'] },
   { id: 'shortcuts',  label: '快捷键',    icon: <Keyboard size={16} />,       keywords: ['快捷键', 'shortcut', '键盘', 'keyboard', '按键'] },
-  { id: 'modules',    label: '模块设置',  icon: <Boxes size={16} />,          keywords: ['模块', '博客', 'blog', '日程', '提醒', '打卡', '导出', '错题', '高级', 'AI教学'] },
+  { id: 'modules',    label: '模块设置',  icon: <Boxes size={16} />,          keywords: ['模块', '博客', 'blog', '日程', '提醒', '打卡', '导出', '错题', '高级'] },
   { id: 'about',      label: '关于',      icon: <Info size={16} />,           keywords: ['关于', '更新', '版本', '升级', '镜像', '引导', 'about', 'update'] },
 ]
 
@@ -107,21 +107,29 @@ const ENTRY_ITEMS: SettingItem[] = [
   // ===== 博客 =====
   { id: 'blog.templates', section: 'modules', group: '博客模板', label: '博客模板',
     desc: '写日记时一键套用的 Markdown 模板', keywords: ['模板', '博客模板', '新建模板', 'template', '套用', 'markdown'] },
-  // ===== AI 工具 =====
-  { id: 'aiTools.usage', section: 'aiTools', group: '工具调用量', label: '工具调用量',
-    desc: '本自然月 AI 工具累计调用次数', keywords: ['用量', '调用量', '额度', '统计', 'usage', '次数', '本月'] },
-  { id: 'aiTools.builtin', section: 'aiTools', group: '内置工具', label: '内置工具清单', aiTab: 'builtin',
-    desc: '官方内置只读工具，不可关闭', keywords: ['内置工具', '工具', 'tool', '注册表', '只读'] },
-  { id: 'aiTools.audit', section: 'aiTools', group: '最近调用', label: '最近调用记录', aiTab: 'builtin',
-    desc: '最近 10 条调用审计记录', keywords: ['审计', '日志', '记录', 'audit', '调用记录', '历史'] },
-  { id: 'aiTools.mcp', section: 'aiTools', group: 'MCP 服务器', label: 'MCP 服务器', aiTab: 'mcp',
-    desc: '连接外部 Model Context Protocol 服务器', keywords: ['mcp', '服务器', '外部工具', 'server', 'sse', 'stdio', '连接'] },
-  { id: 'aiTools.skill', section: 'aiTools', group: 'Skill 技能', label: 'Skill 技能', aiTab: 'skill',
-    desc: '插件提供的声明式提示词资产', keywords: ['skill', '技能', '提示词', 'prompt', '资产'] },
+  // ===== AI 工具（2026-10-13 按域重排为 6 页签：模型 / 权限 / 工具 / 对话 / 用量 / 教学）=====
+  // 入口项的 aiTab 必须与 src/lib/settings.ts 的 AiTab 口径一致，且锚点在对应视图里真的存在
+  // （契约 .AGENT/scripts/settings/verify-ai-tab-anchors.mjs 断言这三件事）。
   { id: 'aiTools.models', section: 'aiTools', group: '模型', label: '模型配置', aiTab: 'models',
     desc: 'AI 模型与 API 密钥配置', keywords: ['模型', 'model', 'api', 'key', '密钥', '大模型', 'llm', '配置模型'] },
   { id: 'aiTools.perms', section: 'aiTools', group: '权限', label: '调用权限', aiTab: 'perms',
     desc: 'AI 工具调用的权限控制', keywords: ['权限', 'permission', '授权', '允许', '拒绝', '安全'] },
+  { id: 'aiTools.builtin', section: 'aiTools', group: '内置工具', label: '内置工具清单', aiTab: 'tools',
+    desc: '官方内置只读工具，不可关闭', keywords: ['内置工具', '工具', 'tool', '注册表', '只读'] },
+  { id: 'aiTools.mcp', section: 'aiTools', group: 'MCP 服务器', label: 'MCP 服务器', aiTab: 'tools',
+    desc: '连接外部 Model Context Protocol 服务器', keywords: ['mcp', '服务器', '外部工具', 'server', 'sse', 'stdio', '连接'] },
+  { id: 'aiTools.skill', section: 'aiTools', group: 'Skill 技能', label: 'Skill 技能', aiTab: 'tools',
+    desc: '插件提供的声明式提示词资产', keywords: ['skill', '技能', '提示词', 'prompt', '资产'] },
+  { id: 'aiTools.audit', section: 'aiTools', group: '最近调用', label: '最近调用记录', aiTab: 'tools',
+    desc: '最近 10 条调用审计记录', keywords: ['审计', '日志', '记录', 'audit', '调用记录', '历史'] },
+  { id: 'aiTools.chat', section: 'aiTools', group: '对话', label: '对话与助手', aiTab: 'chat',
+    desc: '感知模式、上下文占用指示、吉祥物、Agent 循环预算', keywords: ['对话', '助手', '感知', '上下文', '吉祥物', '循环', '预算', 'chat', 'agent'] },
+  { id: 'aiTools.usage', section: 'aiTools', group: '用量', label: '工具调用量', aiTab: 'usage',
+    desc: '本自然月 AI 工具累计调用次数', keywords: ['用量', '调用量', '额度', '统计', 'usage', '次数', '本月'] },
+  { id: 'aiTools.llmUsage', section: 'aiTools', group: '用量', label: '模型 token 用量', aiTab: 'usage',
+    desc: '本月 LLM 输入/输出 token 与按供应商模型细分', keywords: ['token', '用量', '模型', '消耗', '输入', '输出', '细分', 'llm', 'usage'] },
+  { id: 'aiTools.teach', section: 'aiTools', group: '教学', label: 'AI 教学产物', aiTab: 'teach',
+    desc: '教学会话文件夹根目录、删除联动与图片转写模型', keywords: ['ai教学', '教学', '产物', '文件夹', '转写', '视觉', '图片', 'teach'] },
   // ===== 高级 =====
   { id: 'advanced.update', section: 'about', group: '关于与更新', label: '检查更新',
     desc: '当前版本号与在线更新', keywords: ['更新', '升级', '版本', '检查更新', 'update', 'version', '新版本'] },
@@ -134,24 +142,37 @@ const ENTRY_ITEMS: SettingItem[] = [
   { id: 'advanced.storage', section: 'data', group: '备份与恢复', label: '整仓备份',
     desc: '整仓备份恢复（.knowbase 整包 zip）与数据导出', keywords: ['仓库', 'vault', '备份', '恢复', '导出', 'storage', '存储'] },
   // ===== 快捷键 =====
+  // ★ 2026-10-13 L1 真源化之后：这 11 条的 id / group 必须与 src/lib/commandRegistry.ts 的
+  //   COMMAND_GROUPS 一一对应（组数、组名、顺序三者对齐），否则设置搜索会跳到错的组或空锚
+  //   —— 契约 §5 断言这个双射。desc / keywords 仍**手写**：它们是检索排序的第一杠杆
+  //   （见 docs/ui-updates.md §44 记的「keywords 也会抢别人的分」），不随真源生成。
   { id: 'shortcuts.global', section: 'shortcuts', group: '全局', label: '全局快捷键',
-    desc: '侧栏折叠、命令面板、快速打开、缩放、AI 助手、全局搜索等', keywords: ['全局', '侧栏', '折叠', 'escape', 'esc', '关闭弹窗', 'ctrl b', '命令面板', 'ctrl shift p', '快速打开', 'ctrl o', '缩放', 'ctrl j', 'ai 助手', '全局搜索'] },
+    desc: '侧栏折叠、命令面板、快速打开、全局搜索（左栏搜索态）、缩放、AI 助手与小窗、撤销重做', keywords: ['全局', '侧栏', '折叠', 'escape', 'esc', '关闭弹窗', 'ctrl b', '命令面板', 'ctrl shift p', '快速打开', 'ctrl o', 'ctrl p', 'ctrl shift f', '反引号', '缩放', 'ctrl j', 'ai 助手', '全局搜索', '全屏学堂', 'ctrl shift j', '右栏', 'ctrl alt b', '撤销', '重做', 'ctrl z', 'ctrl y'] },
   { id: 'shortcuts.kbEditor', section: 'shortcuts', group: '知识库 — 编辑器', label: '知识库编辑器快捷键',
-    desc: '保存、Markdown 预览、返回列表', keywords: ['保存', '预览', 'ctrl s', 'markdown 预览', 'ctrl /'] },
+    desc: '保存、阅读编辑切换、页面历史、AI 内联续写、插图脚注', keywords: ['保存', '预览', 'ctrl s', 'markdown 预览', 'ctrl /', 'ctrl e', '页面历史', 'alt', '后退', '前进', '内联建议', '续写', 'alt a', '插图', '脚注', 'ctrl shift i', 'ctrl alt f'] },
+  // 真源新增组（B1 收录范围）：写作面这 8 键此前只在手册里，设置页从来没有
+  { id: 'shortcuts.kbWriting', section: 'shortcuts', group: '知识库 — 写作面', label: '知识库写作面快捷键',
+    desc: '加粗、斜体、链接、标题档与正文、查找', keywords: ['写作面', '编辑器内', '加粗', '斜体', '链接', '标题', '正文', '查找', 'markdown', 'ctrl b', 'ctrl i', 'ctrl k', 'ctrl alt 1', 'ctrl alt 0', 'ctrl f'] },
   { id: 'shortcuts.kbSidebar', section: 'shortcuts', group: '知识库 — 侧栏', label: '知识库侧栏快捷键',
     desc: '重命名、删除、复制剪切粘贴选中项', keywords: ['重命名', 'f2', '删除', '侧栏', 'rename', '复制', '剪切', '粘贴', 'ctrl c', 'ctrl x', 'ctrl v'] },
   { id: 'shortcuts.kbTabs', section: 'shortcuts', group: '知识库 — Tab 管理', label: '知识库 Tab 快捷键',
-    desc: '新建 / 关闭 / 切换标签页', keywords: ['tab', '标签页', '新建页面', '关闭', '切换', 'ctrl w', 'ctrl tab'] },
+    desc: '新建 / 关闭 / 切换标签页', keywords: ['tab', '标签页', '新建页面', '新建知识页', '关闭', '切换', 'ctrl w', 'ctrl tab'] },
   { id: 'shortcuts.kbReading', section: 'shortcuts', group: '知识库 — 阅读', label: '知识库阅读快捷键',
-    desc: '沉浸阅读、快速搜索', keywords: ['沉浸阅读', '快速搜索', 'ctrl shift r', 'ctrl p', 'escape', '阅读'] },
-  { id: 'shortcuts.editorModule', section: 'shortcuts', group: '编辑器模块', label: '编辑器模块快捷键',
-    desc: '保存文件、PDF 阅读器搜索与翻页', keywords: ['编辑器', '保存全部', 'ctrl shift s', 'pdf', 'pdf 搜索', 'ctrl f', '翻页', 'pageup', 'pagedown'] },
+    desc: '沉浸阅读进出', keywords: ['沉浸阅读', 'ctrl shift r', 'escape', '阅读'] },
+  // 原 id 为 shortcuts.editorModule —— 该模块 2026-09-20 已物理退役，组内只剩 PDF 那几行是真的，
+  // 故改组。2026-10-13 组名再由「PDF 阅读器」改为「电子书阅读器」（翻页键 PDF 与 EPUB 都吃）；
+  // anchor id 仍是 shortcuts.pdfKeys（内部标识，跟着改会牵动深链与契约，对用户不可见）。
+  { id: 'shortcuts.pdfKeys', section: 'shortcuts', group: '电子书阅读器', label: '电子书阅读器快捷键',
+    desc: 'PDF 内搜索、翻页、缩放，翻页键电子书同样适用', keywords: ['pdf', 'pdf 搜索', 'ctrl f', '翻页', 'pageup', 'pagedown', '下一页', '上一页', '空格', '缩放', 'ctrl 0', 'ctrl =', '电子书', 'epub', '阅读器'] },
+  // 真源新增组：图片查看器四键（都不带修饰键）此前只在手册里
+  { id: 'shortcuts.imageKeys', section: 'shortcuts', group: '图片查看器', label: '图片查看器快捷键',
+    desc: '适应窗口、实际大小、左右旋转', keywords: ['图片', '看图', '查看图片', '适应窗口', '实际大小', '旋转', '向左旋转', '向右旋转', '0', '1'] },
   { id: 'shortcuts.blogKeys', section: 'shortcuts', group: '博客', label: '博客快捷键',
-    desc: '新建今日文章、保存并关闭、预览', keywords: ['博客快捷键', '新建文章', 'ctrl n', '保存并关闭'] },
+    desc: '新建今日文章、保存并关闭、预览、大纲', keywords: ['博客快捷键', '新建文章', 'ctrl n', '保存并关闭', '大纲', 'ctrl alt o'] },
   { id: 'shortcuts.scheduleKeys', section: 'shortcuts', group: '日程', label: '日程快捷键',
     desc: '新建任务、关闭弹窗、置顶停靠、桌面小组件', keywords: ['日程快捷键', '新建任务', '任务', 'ctrl n', 'ctrl alt s', '置顶停靠', '桌面小组件', 'ctrl alt up', 'ctrl alt down'] },
   { id: 'shortcuts.passwordKeys', section: 'shortcuts', group: '密码本', label: '密码本快捷键',
-    desc: '密码填充弹窗（可配置键位）', keywords: ['密码', '密码填充', '填充弹窗', 'ctrl alt p', 'password', 'fill'] },
+    desc: '密码填充弹窗开关（系统级）', keywords: ['密码', '密码填充', '填充弹窗', 'ctrl alt p', 'password', 'fill'] },
 
   // ===== 提醒 =====
     { id: 'reminder.enable', section: 'modules', group: '打卡提醒', label: '启用打卡提醒',
@@ -308,7 +329,7 @@ export function countBySection(hits: SearchHit[]): Record<string, number> {
 
 // ===== 跳转锚点广播 =====
 // 搜索跳转的目标锚点除用于滚动高亮外，还广播给各视图：
-// 若目标落在默认收起的 CollapseList 分组内，视图据此自动展开。
+// 若目标落在默认收起的折叠分组内，视图据此自动展开（`SettingsGroup` 的 anchorIds）。
 
 type AnchorListener = (id: string | null) => void
 let pendingAnchor: string | null = null
@@ -323,6 +344,17 @@ export function setPendingAnchor(id: string | null) {
 /** 视图挂载/更新时消费：锚点归属本组则返回 true 并清除 */
 export function consumePendingAnchor(id: string): boolean {
   if (pendingAnchor === id) { pendingAnchor = null; return true }
+  return false
+}
+
+/**
+ * 认领：待跳转锚点若落在 `ids` 里则返回 true 并清除。
+ * 用于**一个折叠组包住多个锚点**的情形（如模型页场景表里有 视觉转写 / 文生图 / 改图重绘 三个锚点）——
+ * 逐个 `consumePendingAnchor` 只能命中第一个被调用的那个，且命中失败时不能清，
+ * 所以这里必须一次性判「在不在集合里」再决定清不清。
+ */
+export function claimPendingAnchor(ids: string[]): boolean {
+  if (pendingAnchor && ids.includes(pendingAnchor)) { pendingAnchor = null; return true }
   return false
 }
 

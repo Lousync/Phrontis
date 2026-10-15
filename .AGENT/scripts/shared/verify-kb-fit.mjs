@@ -91,8 +91,10 @@ ok(/className="kb-fit kb-fit-aichat[^"]*"/.test(chatBody),
   '④a ChatBody 根挂 .kb-fit .kb-fit-aichat（三处宿主共用同一容器）')
 ok(/className="kb-l1 text-\[var\(--text-muted\)\]"/.test(msgList),
   '④b 会话消耗（TokensOf）挂 .kb-l1 —— 窄容器先隐它')
-ok((msgList.match(/<span className="kb-l2">/g) ?? []).length === 4,
-  '④c 四个动作钮文字各挂 .kb-l2（复制 / 编辑 / 重新生成 / 删除）',
+// 2026-10-14（v3.5.1 断点续跑）：「继续」是本动作行的第 5 颗钮（只在挂着可续现场的那条消息上出现），
+// 它的文字同样必须挂 .kb-l2 —— 否则窄容器下它会先于其它钮被压成竖排。
+ok((msgList.match(/<span className="kb-l2">/g) ?? []).length === 5,
+  '④c 五个动作钮文字各挂 .kb-l2（复制 / 编辑 / 继续 / 重新生成 / 删除）',
   `实得 ${(msgList.match(/<span className="kb-l2">/g) ?? []).length} 处`)
 const aichatRules = rules.filter((r) => r.name === 'kb-aichat')
 ok(aichatRules.some((r) => r.level === 1 && r.px === 360) && aichatRules.some((r) => r.level === 2 && r.px === 245),
@@ -102,10 +104,13 @@ ok(aichatRules.some((r) => r.level === 1 && r.px === 360) && aichatRules.some((r
 ok(!/<Pencil size=\{10\} \/> 编辑/.test(msgList) && !/<RefreshCw size=\{10\} \/> 重新生成/.test(msgList)
   && !/<Trash2 size=\{10\} \/> 删除/.test(msgList),
   '④e 负向：动作钮文字仍是裸文本节点（无 .kb-l2 包裹）的写法已移除')
-// 同容器扫尾：流式气泡的「停止」也是同一容器的裸文字（流式态下的操作行），一并挂 l2
+// 同容器扫尾：流式气泡的「停止」原本也是同一容器里的裸文字（流式态下的操作行）。
+// ★ 2026-10-13 生成态改版（docs/ai-reply-loading-plan.md §3.3 / R7）把这颗按钮整体删了 ——
+//   停止入口收敛到输入区，而输入区那颗是「圆内方块」纯图标、根本没有文字节点，
+//   所以这条从正向（挂 .kb-l2）翻成**负向**（状态区不得再有裸文字停止钮，也不得回退成挂 l2 的版本）。
 const streamBubble = stripComments(read('src/components/shared/AssistantPanel/StreamBubble.tsx'))
-ok(/<Square size=\{9\} className="fill-current" \/> <span className="kb-l2">停止<\/span>/.test(streamBubble),
-  '④f 同容器扫尾：流式气泡「停止」钮文字也挂 .kb-l2（不是裸文本节点）')
+ok(!/停止<\/span>/.test(streamBubble) && !streamBubble.includes('kb-l2'),
+  '④f 生成态状态区已无「停止」文字钮（R7 单入口：停止在输入区）')
 
 console.log(`\n${pass} PASS / ${fail} FAIL`)
 process.exit(fail === 0 ? 0 : 1)

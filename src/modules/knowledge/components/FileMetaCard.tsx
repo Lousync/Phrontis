@@ -1,5 +1,6 @@
 import { Archive, Eye, FolderSearch, HardDrive, ExternalLink } from 'lucide-react'
 import { FileIcon } from '../../../components/shared/FileIcon'
+import { FileInfoRows } from '../../../components/shared/FileInfoRows'
 import { getFileTypeInfo } from '../../../lib/fileTypes'
 
 /**
@@ -15,13 +16,14 @@ import { getFileTypeInfo } from '../../../lib/fileTypes'
  * 现改为三件**真实存在**的动作：查看内容（文本类，就地只读）/ 在系统中打开 / 在文件夹中显示。
  */
 
-function formatSize(bytes?: number): string {
-  if (!bytes || bytes <= 0) return '—'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
-}
+/**
+ * 文件信息行已上移到 `src/components/shared/FileInfoRows.tsx`（批 3，2026-10-13）。
+ *
+ * 为什么上移：批 3 的图片异常态卡（`src/components/shared/image/ImageStateCard.tsx`）也要用它，
+ * 而 shared 反向依赖 module 是层次倒挂。`formatSize` 一并搬走（它原本只服务本行）。
+ * ★ 批 1 抽它的那条理由仍然成立且更强了：现在有三个消费者
+ * （本卡 / ⋮ 的文件信息弹层 / 图片异常态卡），更要只留一处。
+ */
 
 export function FileMetaCard({ title, fileType, path, updatedAt, sizeBytes, viewable = false, onView, onOpenInSystem, onRevealInFolder }: {
   title: string
@@ -63,19 +65,7 @@ export function FileMetaCard({ title, fileType, path, updatedAt, sizeBytes, view
           </div>
         </div>
 
-        <div className="space-y-1.5 mb-5">
-          {path && (
-            <div className="flex items-center gap-2 text-[11.5px] text-[var(--text-secondary)] min-w-0">
-              <Archive size={12} className="shrink-0 text-[var(--text-muted)]" />
-              <span className="truncate" title={path}>{path}</span>
-            </div>
-          )}
-          <div className="flex items-center gap-2 text-[11.5px] text-[var(--text-secondary)]">
-            <HardDrive size={12} className="shrink-0 text-[var(--text-muted)]" />
-            <span>{formatSize(sizeBytes)}</span>
-            {updatedAt && <span className="text-[var(--text-muted)]">· 修改于 {new Date(updatedAt).toLocaleString()}</span>}
-          </div>
-        </div>
+        <FileInfoRows path={path} sizeBytes={sizeBytes} updatedAt={updatedAt} className="mb-5" />
 
         {/* 主按钮：仅文本类出现（二进制无处可「查看」） */}
         {viewable && (

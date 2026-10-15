@@ -16,7 +16,7 @@ import { resolveDegrade, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/
 import { detectScanMode, resolveScanPages } from '../../../../electron/lib/kbStore/scanDetect'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
 import type { BookScanMode, ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState, ExcerptColor, ExcerptType } from '../../../types'
-import { KB_BOOKMARK_DELETE, KB_BOOKMARK_SECTION_SHOW } from './pdfEvents'
+import { KB_BOOKMARK_DELETE, KB_BOOKMARK_SECTION_SHOW, KB_PDF_ZOOM_FIT } from './pdfEvents'
 
 // 同源 worker（v3 classic，兼容 Electron 33 / Chromium 130——v4.5+ 依赖 toHex 未实现）
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
@@ -76,6 +76,19 @@ interface Props {
       不传则不渲染该按钮（编辑器打开 PDF 的路径即如此）。 */
   backLabel?: string
   onBack?: () => void
+  /** 顶栏归属（批 2，2026-10-12）：知识库内本阅读器**上方另有一条统一顶栏**
+   *  （`NoteTopBar`，见 docs/nonmd-topbar-design.md），它已承担「文件名」这件事，
+   *  故本组件这条栏退成**只留阅读控件**（模式/翻页/缩放/大纲/搜索/书签/护眼/沉浸/百分比），
+   *  去掉 `FileText + 文件名 + N 页` 那段 —— 否则书名会上下各显示一次，白占一行阅读高度
+   *  （与 `backLabel` 那条注释同一个理由）。
+   *  默认 `'full'` = 书架阅读态现状，**一行不动**。 */
+  chrome?: 'full' | 'reader-only'
+  /** 文档装载后上报页数 → 知识库顶栏中段的「N 页」（`chrome:'reader-only'` 时才有意义）。
+   *  经 ref 转发，见下方 ref 注释。 */
+  onDocInfo?: (info: { pages: number }) => void
+  /** 沉浸态上报 → 外层顶栏跟着隐藏。★ 必须补这个回调：`immersive` 是本组件的**内部 state**，
+   *  它沉浸时只把自己的栏 `hidden` 掉，而顶栏在本组件**外面**，无从得知。 */
+  onImmersiveChange?: (v: boolean) => void
 }
 
 /** 事件回调经 ref 转发：viewer 的创建 effect 依赖必须极小（否则每次 handler 换身份就重建 viewer） */
@@ -111,8 +124,16 @@ interface ViewerHandlers {
  * - 双页：ScrollMode.PAGE + SpreadMode.ODD（官方跨页对 = [1,2] [3,4] ... 与旧口径一致，
  *   见 `#ensurePageViewVisible`：奇偶配对规则 parity = spreadMode − 1）
  */
-export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Props) {
+export function PdfReaderView({ rootId, relPath, name, backLabel, onBack, chrome = 'full', onDocInfo, onImmersiveChange }: Props) {
   const pdfRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null)
+
+  /* 批 2：两个「上报给外层」的回调都经 ref 转发 —— 与 ViewerHandlers 同一理由
+     （见上方注释：viewer 的创建 effect 依赖必须极小，否则每次 handler 换身份就重建 viewer）。
+     onDocInfo：装载后上报页数；onImmersiveChange：沉浸态变化上报。 */
+  const onDocInfoRef = useRef(onDocInfo)
+  const onImmersiveChangeRef = useRef(onImmersiveChange)
+  useEffect(() => { onDocInfoRef.current = onDocInfo }, [onDocInfo])
+  useEffect(() => { onImmersiveChangeRef.current = onImmersiveChange }, [onImmersiveChange])
 
   // ===== 文档态 =====
   const [numPages, setNumPages] = useState(0)
@@ -190,6 +211,10 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   const [searchHits, setSearchHits] = useState<Array<{ page: number; preview: string }>>([])
   const [immersive, setImmersive] = useState(false)
   const [barHidden, setBarHidden] = useState(false)
+
+  /* 沉浸态上报（批 2）：必须放在 `immersive` 声明**之后** —— 依赖数组在 render 期求值，
+     放前面会撞 TDZ。挂载时也会跑一次（false），让外层顶栏回到可见。 */
+  useEffect(() => { onImmersiveChangeRef.current?.(immersive) }, [immersive])
 
   // ===== 书级状态（批次 4：书签 / 续读 / 护眼，方案 §3/§5.6/§5.7）=====
   const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
@@ -614,6 +639,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
         setPdfDoc(pdf)
         setNumPages(pdf.numPages)
         numPagesRef.current = pdf.numPages
+        onDocInfoRef.current?.({ pages: pdf.numPages })
         const p1 = await pdf.getPage(1)
         const base1 = p1.getViewport({ scale: 1 })
         // 只用于「宽度是否瓶颈」判定（availW/页宽 vs availH/页高）—— 该比较对整体缩放系数不敏感，
@@ -1156,6 +1182,12 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   // 快捷键：PageUp/Down、←→ 翻页、Ctrl+F 搜索、Esc 逐级退出（INPUT 焦点守卫）
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // ★ 可见性守卫（2026-10-13，K-1）：Tab 是 display:none 保活 ⇒ 被收起那个实例的 window
+      //   keydown 照样触发。少了这条，在笔记里按 Ctrl+0 会顺手把后台那本书的进度写成 zoom:1
+      //   （resetFit 末尾的 scheduleProgress 800ms 后落盘），翻页键也会推着它走一格。
+      //   判据同命令面板那条通道（pdfEvents.ts 的 KB_PDF_ZOOM_FIT 头注）与 MindMapView.tsx:170。
+      const root = rootRef.current
+      if (!root || root.offsetParent === null) return
       const t = e.target as HTMLElement
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
       if (e.key === 'PageDown' || e.key === 'ArrowRight' || (e.key === ' ' && !immersive)) { e.preventDefault(); stepPage(1) }
@@ -1200,6 +1232,20 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
     return () => window.removeEventListener('kb-pdf-goto-page', on)
   }, [goPage, relPath])
 
+  // 命令面板「PDF 适应窗口」承接（动作与上面 Ctrl+0 分支同一个 resetFit，不新写逻辑）。
+  // ★ 只认**当前可见**的那个实例：Tab 是 display:none 保活，书架一本 + 笔记里打开的 PDF 附件
+  //   一本可能同时挂着。显示态判定用 `offsetParent === null`，理由与副作用（resetFit 会写盘
+  //   一条 zoom 进度）见 pdfEvents.ts 里 KB_PDF_ZOOM_FIT 的头注。
+  useEffect(() => {
+    const onZoomFit = () => {
+      const root = rootRef.current
+      if (!root || root.offsetParent === null) return
+      resetFit()
+    }
+    window.addEventListener(KB_PDF_ZOOM_FIT, onZoomFit)
+    return () => window.removeEventListener(KB_PDF_ZOOM_FIT, onZoomFit)
+  }, [resetFit])
+
   // ===== 渲染 =====
   const toolbar = (
     <div className={`kb-fit kb-fit-pdfread flex shrink-0 items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[12px] text-[var(--text-secondary)] ${immersive ? 'hidden' : ''}`}>
@@ -1212,10 +1258,17 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
           <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
         </>
       )}
-      <FileText size={13} className="text-[var(--text-tertiary)]" />
-      <span className="max-w-[220px] truncate text-[var(--text-primary)]">{name}</span>
-      <span className="kb-l3 text-[var(--text-tertiary)]">{numPages} 页</span>
-      <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
+      {/* 批 2「合并公共部分」（docs/nonmd-topbar-design.md §4.3）：知识库内文件名 / 页数已上移到
+          统一顶栏（NoteTopBar 中段的 title + subtitle），本组件这条退成只留阅读控件。
+          书架阅读态走默认 'full'，保持现状一行不动。 */}
+      {chrome === 'full' && (
+        <>
+          <FileText size={13} className="text-[var(--text-tertiary)]" />
+          <span className="max-w-[220px] truncate text-[var(--text-primary)]">{name}</span>
+          <span className="kb-l3 text-[var(--text-tertiary)]">{numPages} 页</span>
+          <div className="mx-1 h-4 w-px bg-[var(--border-color)]" />
+        </>
+      )}
       {/* 三模式切换（方案 §5.2：竖滚默认）。
           文字按容器宽度退化（见 styles/index.css 的 .kb-fit 段）：容器 <770px 隐模式名、<668px 隐计数、
           <920px 先隐右侧功能按钮文字。title 保留 → 隐去后悬停仍可读。 */}
@@ -1359,7 +1412,7 @@ export function PdfReaderView({ rootId, relPath, name, backLabel, onBack }: Prop
   }
 
   return (
-    <div ref={rootRef} data-sel-float-ignore className={`kb-pdf-scope relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)] ${immersive ? 'kb-pdf-scope-immersive' : ''}`}>
+    <div ref={rootRef} data-kb-pdf-root="" data-sel-float-ignore className={`kb-pdf-scope relative flex h-full min-h-0 flex-col bg-[var(--bg-tertiary)] ${immersive ? 'kb-pdf-scope-immersive' : ''}`}>
       {toolbar}
       {effectiveScan !== 'full' && (
         <div className="shrink-0 border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-1 text-[11px] text-[var(--text-tertiary)]" data-wb="scanHint">

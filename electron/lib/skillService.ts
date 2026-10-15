@@ -1,11 +1,13 @@
 import { ipcMain, clipboard, app, dialog, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, rmSync, renameSync } from 'fs'
+import type { Dirent } from 'fs'
 import { randomUUID } from 'crypto'
 import { getPluginsRoot, getInstalledIndex, onPluginsChanged } from './pluginRegistry'
 import { registerTool, unregisterToolsByPrefix } from './aiTools'
 import { unzipBuffer } from './zip'
 import { safePathInside } from './pathGuard'
+import { resolveSkillEntry } from './skillPackPure'
 import type { ToolJsonSchema } from './aiTools'
 
 /**
@@ -58,6 +60,8 @@ const SKILL_ID_RE = /^[a-z][a-z0-9._-]{0,63}$/
 /** 安装包上限 8MB（纯提示词资产，足够宽裕） */
 const MAX_SKILL_BYTES = 8 * 1024 * 1024
 const MAX_SKILL_FILES = 200
+/** 文件夹安装的递归深度上限（防止用户误选到盘符根目录之类的地方一路走下去） */
+const MAX_SKILL_DIR_DEPTH = 8
 
 // ===== 独立 skill 存储目录 =====
 
@@ -275,28 +279,19 @@ export function refreshSkillRegistrations(): void {
   }
 }
 
-// ---- 安装（zip 包，拖拽/文件对话框共用） ----
+// ---- 安装（zip 包 / 文件夹，两条来源共用同一套解析与落盘） ----
 
-function installSkillFromBuffer(buf: Buffer): SkillInstallResult {
-  if (buf.length === 0 || buf.length > MAX_SKILL_BYTES) {
-    return { success: false, message: 'Skill 包为空或超出 8MB 上限' }
-  }
-  let files: Map<string, Buffer>
-  try { files = unzipBuffer(buf) } catch (e: any) {
-    return { success: false, message: `Skill 包解压失败: ${e?.message || e}` }
-  }
-
-  // 定位入口：根目录或单层顶层目录（兼容系统压缩工具打包）
-  let prefix = ''
-  let entryPath: string | null = files.has('SKILL.md') ? 'SKILL.md'
-    : files.has('skill.json') ? 'skill.json' : null
-  if (!entryPath) {
-    for (const p of files.keys()) {
-      if (/^[^/\\]+[/\\](SKILL\.md|skill\.json)$/.test(p)) { entryPath = p; prefix = p.slice(0, -(p.endsWith('SKILL.md') ? 'SKILL.md' : 'skill.json').length); break }
-    }
-  }
-  if (!entryPath) return { success: false, message: 'Skill 包根目录缺少 SKILL.md 或 skill.json' }
-  if (files.size <= 1) return { success: false, message: 'Skill 包内容为空（缺少提示词）' }
+/**
+ * 入口解析 → 读 manifest → 原子落盘。zip 与文件夹两条安装路径共用，
+ * 差别只在「文件从哪来」与文案里的单位词（包 / 文件夹）。
+ */
+function installSkillFromFileMap(files: Map<string, Buffer>, unit: '包' | '文件夹'): SkillInstallResult {
+  // 入口定位的判定全在零依赖的 skillPackPure（契约脚本要断言"多个 Skill 时不许随机挑"），
+  // 这里只负责取内容、解析 manifest、落盘。
+  const resolved = resolveSkillEntry(files.keys(), unit)
+  if (!resolved.ok) return { success: false, message: resolved.error }
+  const entryPath = resolved.entryPath
+  const prefix = resolved.prefix
 
   // 解析 manifest（id 从 manifest 取，SKILL.md 用 id/name 字段，skill.json 用 id 字段）
   let rawInfo: { id?: string; title: string; description: string; prompt: string; variables: string[]; tools: string[] }
@@ -377,6 +372,68 @@ function installSkillFromBuffer(buf: Buffer): SkillInstallResult {
   return { success: true, skill }
 }
 
+/** 目录 → 文件表（相对路径 → 内容）。点目录（.git / .tmp-* 等）与非普通文件一律跳过。 */
+function readDirAsFileMap(dirAbs: string): { files: Map<string, Buffer> } | { error: string } {
+  const files = new Map<string, Buffer>()
+  let total = 0
+  const walk = (abs: string, rel: string, depth: number): string | null => {
+    if (depth > MAX_SKILL_DIR_DEPTH) return `文件夹层级过深（超过 ${MAX_SKILL_DIR_DEPTH} 层）—— 是不是选错了文件夹？`
+    let entries: Dirent[]
+    try { entries = readdirSync(abs, { withFileTypes: true }) } catch (e: any) { return `读取文件夹失败: ${e?.message || e}` }
+    for (const ent of entries) {
+      if (ent.name.startsWith('.')) continue // .git / .DS_Store / .tmp-* 都不该进 Skill
+      const childRel = rel ? `${rel}/${ent.name}` : ent.name
+      if (ent.isDirectory()) {
+        const err = walk(join(abs, ent.name), childRel, depth + 1)
+        if (err) return err
+        continue
+      }
+      if (!ent.isFile()) continue // 符号链接等非普通文件跳过
+      if (files.size >= MAX_SKILL_FILES) return `Skill 文件数超出限制（最大 ${MAX_SKILL_FILES}）`
+      let data: Buffer
+      try { data = readFileSync(join(abs, ent.name)) } catch (e: any) { return `读取文件失败（${childRel}）: ${e?.message || e}` }
+      if (data.length > MAX_SKILL_BYTES) return `Skill 里有超大文件（${childRel}）`
+      total += data.length
+      if (total > MAX_SKILL_BYTES) return '文件夹内容超出 8MB 上限'
+      files.set(childRel, data)
+    }
+    return null
+  }
+  const err = walk(dirAbs, '', 0)
+  if (err) return { error: err }
+  if (files.size === 0) return { error: '这个文件夹是空的（没有任何文件）' }
+  return { files }
+}
+
+/**
+ * 从**文件夹**安装（2026-10-13 决策 F 的主路径）。
+ *
+ * 为什么现在才有它：原先唯一的独立安装入口是"拖入 .zip"的拖拽区，而它**从来没收到过事件** ——
+ * src/App.tsx 在 document 捕获阶段把任何 .zip 拖放都吃掉去开「整仓备份恢复」弹窗了
+ * （App.tsx 的 onDrop 捕获监听 + stopPropagation），而界面上却写着"拖入 Skill 包（.zip）到此处"，
+ * 等于教用户做一件做不到的事（AI 手册里也这么写）。
+ * 换成明确可点的「选择文件夹安装」后，也就正好对上决策 F「只装根目录那个」的真实场景：
+ * 用户手里通常是一整个文件夹、里面可能装着好几个 Skill，选中要装的那一个即可。
+ */
+function installSkillFromDirectory(dirAbs: string): SkillInstallResult {
+  const r = readDirAsFileMap(dirAbs)
+  if ('error' in r) return { success: false, message: r.error }
+  return installSkillFromFileMap(r.files, '文件夹')
+}
+
+/** zip 包安装（文件对话框 / 拖拽字节直传共用）。保留原口径：只有入口文件一个条目一律拒绝。 */
+function installSkillFromBuffer(buf: Buffer): SkillInstallResult {
+  if (buf.length === 0 || buf.length > MAX_SKILL_BYTES) {
+    return { success: false, message: 'Skill 包为空或超出 8MB 上限' }
+  }
+  let files: Map<string, Buffer>
+  try { files = unzipBuffer(buf) } catch (e: any) {
+    return { success: false, message: `Skill 包解压失败: ${e?.message || e}` }
+  }
+  if (files.size <= 1) return { success: false, message: 'Skill 包内容为空（缺少提示词）' }
+  return installSkillFromFileMap(files, '包')
+}
+
 // ---- IPC ----
 
 export function registerSkillHandlers(deps?: { getSettingValue?: (key: string) => unknown; setSettingValue?: (key: string, value: unknown) => boolean }): void {
@@ -444,6 +501,18 @@ export function registerSkillHandlers(deps?: { getSettingValue?: (key: string) =
     } catch (e: any) {
       return { success: false, message: `读取文件失败: ${e?.message || e}` }
     }
+  })
+
+  // 文件夹对话框安装（2026-10-13）：Skill 的本体就是一个文件夹，
+  // 比"先自己压成 zip、再从文件对话框里选 zip"直接得多（也是决策 F 的主路径）
+  ipcMain.handle('aiTools:installSkillFromFolder', async () => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const result = await dialog.showOpenDialog(win, {
+      title: '安装 Skill（选中 Skill 自身的文件夹）',
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || !result.filePaths[0]) return { success: false, message: '已取消' }
+    return installSkillFromDirectory(result.filePaths[0])
   })
 
   // 卸载独立 skill（插件贡献的 skill 随插件卸载，不在此列）

@@ -11,6 +11,9 @@ import { TreeGuideLine } from './treeGuides'
 import { useSettings } from '../../lib/SettingsContext'
 
 import { getFileIcon } from '../../lib/fileIcons'
+import { splitName } from '../../lib/fileName'
+import { sortTreeEntries, type TreeSortMode } from '../../lib/treeSort'
+import { FileExtBadge } from './FileExtBadge'
 import ignoreRuleSvg from '../../assets/ignore.svg?raw'
 import type { WorkspaceEntry } from '../../types/index'
 
@@ -72,6 +75,8 @@ interface Props {
   onFocusLocate?: (relPath: string, isDir: boolean) => void
   /** 根容器 ref：父级用它把焦点交给文件树（右键「粘贴」需先聚焦，见 editor/index.tsx） */
   rootRef?: React.RefObject<HTMLDivElement | null>
+  /** 排序口径（目录恒在前）；不传＝沿用主进程默认序（目录优先 + 名称 zh） */
+  sort?: TreeSortMode
 }
 
 const DRAG_MIME = 'text/x-kb-rel'
@@ -89,7 +94,7 @@ function FileIcon({ name }: { name: string }) {
   return (
     <span
       className="shrink-0 inline-flex items-center justify-center"
-      style={{ width: 14, height: 14 }}
+      style={{ width: 15, height: 15 }}
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   )
@@ -100,7 +105,7 @@ function FileIcon({ name }: { name: string }) {
  * 拖拽：条目均可拖（mime: text/x-kb-rel）；目录与根容器是落点，
  * drop 时把源相对路径移动到目标目录下（主进程 ws:rename 跨目录移动）。
  */
-export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, renaming, onCommitRename, onCancelRename, deletingMap, selectedPath, onSelectDir, softNames, hideSoft = false, focusOn, onFocusLocate, rootRef }: Props) {
+export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, renaming, onCommitRename, onCancelRename, deletingMap, selectedPath, onSelectDir, softNames, hideSoft = false, focusOn, onFocusLocate, rootRef, sort }: Props) {
   const [dragOver, setDragOver] = useState<string | null>(null)
   /** 删除动画状态（键 = relPath；animating 渲染吞噬 / done 收尾淡出） */
   const delState = (rel: string) => deletingMap?.get(rel)
@@ -134,13 +139,13 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
       key={`skel-${relPath}`}
       onClick={() => onFocusLocate?.(relPath, isDir)}
       title={`${name}（点击退出聚焦并定位）`}
-      className="group flex items-center gap-1 rounded-md px-1.5 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)]"
+      className="group flex items-center gap-1 rounded-md px-1.5 min-h-[28px] cursor-pointer select-none hover:bg-[var(--bg-hover)]"
       style={{ paddingLeft: 6 + depth * 12 }}
     >
-      <span className="w-[12px] shrink-0" />
+      <span className="w-[13px] shrink-0" />
       <span className="opacity-25 shrink-0 inline-flex">{icon}</span>
       <span className="h-[10px] rounded-[5px] bg-[var(--bg-tertiary)] shrink-0 group-hover:hidden" style={{ width: skelWidth(relPath) }} />
-      <span className="hidden group-hover:block truncate text-[12.5px] text-[var(--text-muted)]">{name}</span>
+      <span className="hidden group-hover:block truncate text-[13px] text-[var(--text-muted)]">{name}</span>
     </div>
   )
   // 「软件文件」折叠节开合（默认收起，localStorage 记忆——VS Code 时间线式）
@@ -184,6 +189,7 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
         />
       )
     }
+    const { base, ext } = splitName(e.name)
     return (
       <div
         key={e.relPath}
@@ -192,15 +198,16 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
         data-wb-tree-file="1"
         data-wb-tree-path={e.relPath}
         onDragStart={(ev) => startDrag(ev, e.relPath)}
-        className={`group flex items-center gap-1 rounded-md px-1.5 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)] ${activePath === e.relPath ? 'bg-[var(--bg-selected)]/40' : ''} ${focusActive && focusPath === e.relPath ? 'ring-1 ring-inset ring-[var(--accent)]/40' : ''}${delClass(e.relPath)}`}
+        className={`kb-cv-row group flex min-h-[28px] items-center gap-1 rounded-md px-1.5 cursor-pointer select-none hover:bg-[var(--bg-hover)] ${activePath === e.relPath ? 'bg-[var(--bg-selected)]/40' : ''} ${focusActive && focusPath === e.relPath ? 'ring-1 ring-inset ring-[var(--accent)]/40' : ''}${delClass(e.relPath)}`}
         style={{ paddingLeft: 6 + depth * 12 }}
         onClick={() => { onSelectDir?.(parentDirOf(e.relPath)); onOpenFile(e) }}
         onContextMenu={(ev) => onContextMenu(ev, e)}
         title={e.relPath}
       >
-        <span className="w-[12px] shrink-0" />
+        <span className="w-[13px] shrink-0" />
         <FileIcon name={e.name} />
-        <span className={`truncate text-[12.5px] ${activePath === e.relPath ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'}`}>{e.name}</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--text-primary)]">{base}</span>
+        <FileExtBadge ext={ext} />
         {delState(e.relPath) === 'animating' && <DeleteWipe />}
       </div>
     )
@@ -218,7 +225,7 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
     // 目录聚焦：目录只认链条（兄弟目录也失焦），根容器永不骨架化；链上目录强制展开
     if (focusActive && dirNode && !isChainDir(relPath)) {
       if (focusHide) return null
-      return renderSkeletonRow(relPath, dirNode.name, true, depth, <Folder size={14} className="text-[var(--text-muted)]" />)
+      return renderSkeletonRow(relPath, dirNode.name, true, depth, <Folder size={15} className="text-[var(--text-muted)]" />)
     }
     const isOpen = expanded.has(relPath) || (focusActive && isChainDir(relPath))
     return (
@@ -252,7 +259,7 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(relPath) }}
             onDragLeave={() => setDragOver((p) => (p === relPath ? null : p))}
             onDrop={(e) => dropToDir(e, relPath)}
-            className={`group relative flex items-center gap-1 rounded-md px-1.5 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)] ${
+            className={`kb-cv-row group relative flex items-center gap-1 rounded-md px-1.5 min-h-[28px] cursor-pointer select-none hover:bg-[var(--bg-hover)] ${
               dragOver === relPath ? 'bg-[var(--accent)]/15 ring-1 ring-inset ring-[var(--accent)]/40' : ''
             }${delClass(relPath)}`}
             style={{ paddingLeft: 6 + depth * 12 }}
@@ -270,11 +277,11 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
               />
             )}
             <ChevronRight
-              size={12}
+              size={13}
               className={`kb-chevron shrink-0 text-[var(--text-muted)] ${isOpen ? 'rotate-90' : ''}`}
             />
-            {isOpen ? <FolderOpen size={14} className="shrink-0 text-[var(--text-muted)]" /> : <Folder size={14} className="shrink-0 text-[var(--text-muted)]" />}
-            <span className="truncate text-[12.5px] text-[var(--text-primary)]">{dirNode.name}</span>
+            {isOpen ? <FolderOpen size={15} className="shrink-0 text-[var(--text-muted)]" /> : <Folder size={15} className="shrink-0 text-[var(--text-muted)]" />}
+            <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--text-primary)]">{dirNode.name}</span>
             {delState(relPath) === 'animating' && <DeleteWipe />}
           </div>
         ))}
@@ -282,10 +289,12 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
           // 软件生成项分组（仅根层）：命中名单的条目移到底部「软件文件」折叠节（VS Code 时间线式）。
           // hideSoft（工作台文件树模式）= 不看软件生成物：命中项从主列表也不出现（整节不渲染）。
           const softSet = depth === 0 && !hideSoft && softNames?.length ? new Set(softNames) : null
-          const main = hideSoft && depth === 0 && softNames?.length
+          const mainRaw = hideSoft && depth === 0 && softNames?.length
             ? entries.filter((e) => !softNames.includes(e.name))
             : softSet ? entries.filter((e) => !softSet.has(e.name)) : entries
-          const softItems = softSet ? entries.filter((e) => softSet.has(e.name)) : []
+          const main = sort ? sortTreeEntries(mainRaw, sort) : mainRaw
+          const softItemsRaw = softSet ? entries.filter((e) => softSet.has(e.name)) : []
+          const softItems = sort ? sortTreeEntries(softItemsRaw, sort) : softItemsRaw
           const children = (
             <>
               {main.map((e) => {
@@ -309,12 +318,12 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
                   <div
                     onClick={toggleSoftOpen}
                     data-wb="treeSoftHead"
-                    className="flex items-center gap-1 rounded-md px-1.5 py-[3px] cursor-pointer select-none hover:bg-[var(--bg-hover)]"
+                    className="flex items-center gap-1 rounded-md px-1.5 min-h-[28px] cursor-pointer select-none hover:bg-[var(--bg-hover)]"
                     style={{ paddingLeft: 6 }}
                     title="软件生成的目录与文件（AI教学 产物、.ignore 过滤规则等）"
                   >
                     <ChevronRight
-                      size={12}
+                      size={13}
                       className={`kb-chevron shrink-0 text-[var(--text-muted)] ${softOpen ? 'rotate-90' : ''}`}
                     />
                     <span className="truncate text-[12px] text-[var(--text-muted)]">软件文件</span>
@@ -413,14 +422,14 @@ function InlineCreateRow({ depth, type, initial, onCommit, onCancel }: {
   }
   return (
     <div
-      className="flex items-center gap-1 rounded-md px-1.5 py-[3px]"
+      className="flex items-center gap-1 rounded-md px-1.5 min-h-[28px]"
       style={{ paddingLeft: 6 + depth * 12 }}
     >
-      <span className="w-[12px] shrink-0" />
+      <span className="w-[13px] shrink-0" />
       {type === 'dir' || type === 'category'
         ? (type === 'category'
-          ? <FolderTree size={14} className="shrink-0 text-[var(--text-muted)]" />
-          : <Folder size={14} className="shrink-0 text-[var(--text-muted)]" />)
+          ? <FolderTree size={15} className="shrink-0 text-[var(--text-muted)]" />
+          : <Folder size={15} className="shrink-0 text-[var(--text-muted)]" />)
         : <FileIcon name={def || '新建文件.md'} />}
       <input
         ref={inputRef}
@@ -468,12 +477,12 @@ function InlineRenameRow({ depth, name, isDir, onCommit, onCancel }: {
   }
   return (
     <div
-      className="flex items-center gap-1 rounded-md px-1.5 py-[3px]"
+      className="flex items-center gap-1 rounded-md px-1.5 min-h-[28px]"
       style={{ paddingLeft: 6 + depth * 12 }}
     >
-      <span className="w-[12px] shrink-0" />
+      <span className="w-[13px] shrink-0" />
       {isDir
-        ? <Folder size={14} className="shrink-0 text-[var(--text-muted)]" />
+        ? <Folder size={15} className="shrink-0 text-[var(--text-muted)]" />
         : <FileIcon name={name} />}
       <input
         ref={inputRef}

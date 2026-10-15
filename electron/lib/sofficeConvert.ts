@@ -41,7 +41,7 @@ let cached: SofficeProbeResult | null = null
 let cachedAt = 0
 
 /** 未找到 soffice 的提示：必须可操作 —— 只说「装好即可」会把用户卡死（装完不重启就永远找不到，见 TTL 注释） */
-const NO_SOFFICE_ERROR = '未找到 LibreOffice（soffice）：已装却仍报错时，多为装在了自定义目录 —— 到「设置 → AI 工具 → 模型 → LibreOffice 路径」手填 soffice.exe 绝对路径（填完立即生效，不必重启）；刚装完也可直接重试，探测缓存 30 秒自动刷新。或改用文本提取（公式已支持 Symbol 还原）'
+const NO_SOFFICE_ERROR = '未找到 LibreOffice（soffice）：已装却仍报错时，多为装在了自定义目录 —— 到「设置 → AI → 工具 → LibreOffice 路径」手填 soffice.exe 绝对路径（填完立即生效，不必重启）；刚装完也可直接重试，探测缓存 30 秒自动刷新。或改用文本提取（公式已支持 Symbol 还原）'
 
 /** 清空探测缓存（设置页手动重探时调用） */
 export function resetSofficeCache(): void {

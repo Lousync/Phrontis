@@ -12,7 +12,7 @@
 这三条决定数据写在哪、由谁写。
 
 1. **Vault = 唯一真相源。** 仓库 = 一个含 `.knowbase/` 的文件夹。正文是 `.md`（带 frontmatter），结构化数据是 `.knowbase/modules/*.json`。换电脑 = 拷走文件夹。
-2. **编辑器 = 唯一正文写入方。** 知识库是阅读器 + 结构维护（建删目录 / 空间 / 笔记本、导入、重命名、排序、拖拽），**侧栏没有写正文的能力**。无 frontmatter id 的 md = 草稿，知识库不显示。
+2. **编辑器 = 唯一正文写入方。** 知识库是阅读器 + 结构维护（建删目录 / 空间 / 笔记本、导入、重命名、排序、拖拽），**侧栏没有写正文的能力**。仓库里的 md **都会进知识库**：没有 frontmatter `id` 的先以 `auto:<relPath>` 临时身份入列，首次保存静默补真 UUID —— 2026-09-20 身份统一后**没有「草稿」这个概念**（不要再写「无 id = 草稿、知识库不显示」）；不想收录走 `.ignore` 规则。
 3. **渲染层不接触绝对路径。** IPC 只传 `{ rootId, relPath }`，主进程侧由 `workspaceManager` + `pathGuard` 解析落盘。
 
 ---
@@ -83,7 +83,7 @@ src/
 15. 错题本 `source_space` 推导（`quizRepo.vaultResolveSource`）：上溯**必须走到 space 才 break**，notebook 只赋值不 break。演示数据工具 `.AGENT/scripts/demo-seed/`。
 
 ### AI 工具
-16. **工具 schema 就是每轮成本**（`.AGENT/scripts/ai-tools-audit/`）：core 14 个常驻 + ondemand 26 个默认折叠（2026-10-07 实数，枚举自 builtinTools.ts）。新增默认 `tier: 'ondemand'`，单工具 schema **≤800 字符**，**严禁在 description 里罗列返回字段**。
+16. **工具 schema 就是每轮成本**（`.AGENT/scripts/ai-tools-audit/`）：core 16 个常驻 + ondemand 36 个默认折叠（2026-10-14 实数，枚举自 builtinTools.ts）。新增默认 `tier: 'ondemand'`，单工具 schema **≤800 字符**，**严禁在 description 里罗列返回字段**。（`builtin.time.now` 是唯一例外：核心只读、三 AI 面处处可用——让模型能定位"今天几号/现在几点"。）
 17. 结果侧只做两件事：**拿得少**（默认值 / 上限）、**丢得早**（`MAX_TOOL_RESULT_CHARS=24000` 摘要替代 + `KEEP_RECENT_TOOL_RESULTS=3`）。压缩必须是纯函数且幂等，否则打散 prompt cache。
 18. 新模块接入 AI 工具的接线清单：`DataChangeScope` 加该模块 scope + 对应面板挂 `useDataChanged`（否则表象是「AI 说改好了、界面没反应」）；提供 `*ResolveOrCreate(name)` 命名桥；查询工具**不得**有建标签这类副作用；新写工具同步补 `builtin.tool.request` 的 description 清单。
 19. 出题 → 答题闭环：组卷落成知识库 `.md`，页内每题一个 ` ```quiz ` 围栏；答错自动回流错题本，**题号必须重排 1..N**（`snapshot.no` 是原页序号，沿用会把错题记到别的题上）。契约 `.AGENT/scripts/quiz-tools/verify-quiz-fence.mjs`。
@@ -119,14 +119,16 @@ src/
 ```bash
 npm run dev      # electron-vite dev（端口 7173）；启动前删掉 ELECTRON_RUN_AS_NODE
 npm run build    # electron-vite build —— 不做类型检查
-npm run pack     # build + electron-builder 打包
+npm run pack     # build + electron-builder 打包 → 产物落 packs/<版本号>[-N]（见下）
 ```
 
 - **类型门禁**（build 通过 ≠ 类型正确，必须单独跑）：`npx tsc --noEmit -p tsconfig.node.json` 与 `npx tsc --noEmit -p tsconfig.web.json`。
 - **提交必须用系统 git**（Git Bash 自带的版本会删嵌套分支 ref → 提交变孤儿）。路径与理由见 skill `windows-sandbox-ops` §1。
 - **改动越大越要配独立的契约验证脚本** —— 只跑 tsc 不够。
 - **版本号口径**：修复 / 补丁进当前线（如 `3.4.x`）；**新功能**抬到下一个 `minor`（如 `3.5.0`），不给新功能发 `3.4.z`。发版：抬 `package.json` → 改 `CHANGELOG.md` 段名 → 重跑 `.AGENT/scripts/release-notes/build-release-notes.mjs`（否则应用内更新说明停上一版且无报错，见铁律 24）→ `npm run pack` → `python scripts/publish-release.py --version <ver>`。
+- **打包产物规范**（2026-10-08 拍板）：`npm run pack`（= `node scripts/pack.mjs`）产物统一落仓库根 **`packs/`**，**目录名＝当前版本号**（如 `packs/3.4.1`）；**版本号没抬就重复打包**时自动追加 `-1`/`-2`…（如 `packs/3.4.1-1`，**不覆盖**上一份）。`scripts/publish-release.py` 的 `--dir` 缺省即去 `packs/<版本>[-N]` 取**后缀最大**者，无需再手传。旧的 `dist-electron/` 为历史目录（已弃），electron-builder 的 `build.directories.output` 基础值已改 `packs`，实际版本子目录由 `scripts/pack.mjs` 覆盖。
 - **脚本输出一律不用 emoji**（`scripts/` 与 `.AGENT/scripts/` 下的 `.py` / `.mjs` / `.bat` 都算，`print` 与 `console.log` 同规）。**Windows 控制台默认 GBK**，Python 脚本 `print` 到 emoji 会抛 `UnicodeEncodeError` —— 活干完了却报失败，还会吞掉退出码（2026-09-29 `scripts/publish-release.py` 发布成功后崩在收尾那句）。用纯文字标记：`[OK]` / `[FAIL]` / `PASS` / `FAIL`。存量脚本不强制回改，**新写与改到的脚本一律遵守**。
+- **新建 worktree 后必须给它一个桌面启动器**：桌面文件名走 `Phrontis-dev-<后缀>.bat`，内容只是薄壳，真逻辑仍在版本控制的 `scripts/start-desktop.bat`（自定位）。生成 / 清点 / 清扫一律走 `.AGENT/scripts/worktree-launcher/desktop-launcher.mjs`（`create --worktree <绝对路径>` / `list` / `clean`），别手搓。两条硬约束：① **脚本文件名与文件内容一律纯 ASCII、禁中文，行尾必须 CRLF** —— cmd.exe 按 OEM 代码页解析 .bat，中文会打坏解析、LF 会让它读串行（同一理由见 `scripts/start-desktop.bat` 顶部）；② **worktree 销毁时必须同步删掉这个桌面脚本**，否则桌面留死链：启动器发现目标树不存在会自删，`desktop-launcher.mjs clean` 批量清残留（先 `list` 看哪些标 STALE）。
 - **新功能落地 / 老功能用户可见行为变更后，收尾时必须提醒开发者同步 AI 手册**：`resources/help/*.md` 是 AI 回答「软件怎么用」的唯一语料（`builtin.help.search` 检索），功能与文档不同步 = AI 照旧文档说错话且无任何报错。提醒口径：本次改动涉及哪个模块、`resources/help/` 哪几篇可能受影响、是否需要改写（写作规范与重编流程见 `.AGENT/help-rewrite/README.md`，检索验收跑 `.AGENT/scripts/help-kb/verify-help-retrieval.mjs`）。纯内部重构（无用户可见行为变化）不需要提醒。
 
 ## 提示与设置

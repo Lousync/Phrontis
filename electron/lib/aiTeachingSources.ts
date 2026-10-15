@@ -6,7 +6,7 @@ import { broadcastTreeRefresh, ensureSessionFolder, ensureWriteOwnerFolder, root
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { listWorkspaces, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { getSessionUnitFolderRel } from './aiTeachingCourse'
-import { uniqueFileName } from './workspaceManager'
+import { uniqueFileName, uniqueVersionedName } from './workspaceManager'
 import { extractPdfRange, extractPptxPages } from './docsReader'
 import { visionChat, findVisionModel } from './llmService'
 import { convertToPdf, probeSoffice, resetSofficeCache } from './sofficeConvert'
@@ -16,6 +16,8 @@ import { getAgentSession } from './agentSessionRepo'
 // 素材类型识别的代码扩展名清单与 AI 读白名单同源（v3.2.0 条目 9 三处合一）：
 // 连带效果 = 素材库不再把 json/yml/yaml/toml/ini 五个配置类识别为 code（拍板④ 配置类不放开）
 import { AI_TEXT_CODE_EXTS } from '../../src/lib/aiTextExts'
+// 思维导图 JSON 的判别/计数与渲染层同一实现（单真相源，勿复刻）
+import { parseMindmap, countNodes } from '../../src/lib/mindmap'
 
 /**
  * AI教学模块 · 素材库（总纲 docs/ai-teaching-module-rework.md §3.13 结构 v3，P6）
@@ -315,6 +317,18 @@ function readEntries(l: SourcesLayout): SourceEntry[] {
   try { return parseSourceMd(readFileSync(p, 'utf-8')) } catch { return [] }
 }
 
+/**
+ * 按工作区夹**直读工作区主库** `{工作区夹}/SOURCES/SOURCE.md` 的条目（不依赖会话）。
+ * 课程模式「修订大纲」据此拿素材清单 + 做变更快照比对（不引入会话耦合）。
+ */
+export function readWorkspaceSourceEntries(wsFolderRel: string, rootPath: string): SourceEntry[] {
+  const folder = String(wsFolderRel ?? '').trim()
+  if (!folder || !rootPath) return []
+  const abs = join(rootPath, folder, SOURCES_DIR, SOURCE_FILE)
+  if (!existsSync(abs)) return []
+  try { return parseSourceMd(readFileSync(abs, 'utf-8')) } catch { return [] }
+}
+
 // ===== 两层合并（v3.1.1：工作区主库 + 对话私有补充）=====
 
 /** 合并读的条目：带来源作用域与所属素材夹（提取稿/原件都相对该目录），并保留重编号前的原编号 */
@@ -563,6 +577,84 @@ export function writeVisual(
   }
 }
 
+/** mindmap 工具产物：
+ *  写 `{会话夹}/mindmaps/<slug>.json`（结构同 writeVisual——会话产物、非课程素材，落会话文件夹）；
+ *  重名不覆盖（-v2/-v3 递增）。slug 白名单校验 + 结构校验（复用 `src/lib/mindmap.parseMindmap`，
+ *  与渲染层识别同一判据）+ 大小上限。不登记 SOURCE.md、不参与素材注入。 */
+export function writeMindmap(
+  sessionId: string, slug: string, jsonText: string,
+  getSetting: (key: string) => unknown,
+): { ok: boolean; relPath?: string; nodes?: number; error?: string } {
+  try {
+    const s = String(slug ?? '').trim()
+    if (!/^[a-z0-9](?:[a-z0-9._-]{0,60}[a-z0-9])?$/.test(s) || s.includes('..')) {
+      return { ok: false, error: `slug 不合法（要求 kebab-case 小写英文/数字，如 binary-tree-traversal）：${s.slice(0, 40)}` }
+    }
+    const body = String(jsonText ?? '')
+    if (!body.trim()) return { ok: false, error: '思维导图 JSON 为空' }
+    if (body.length > 256 * 1024) return { ok: false, error: '思维导图超过 256KB，拒绝写入' }
+    const doc = parseMindmap(body)
+    if (!doc) return { ok: false, error: '不是合法的思维导图 JSON（需含 kind:"mindmap" 与 root.text）' }
+    const probe = ensureWriteOwnerFolder(sessionId, getSetting)
+    if (!probe.ok || !probe.relPath) return { ok: false, error: probe.error ?? '会话文件夹不可用' }
+    const vault = getCurrentVault()
+    if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const sessionRel = probe.relPath
+    const dirAbs = join(vault.rootPath, sessionRel, 'mindmaps')
+    mkdirSync(dirAbs, { recursive: true })
+    let fname = `${s}.json`
+    for (let v = 2; existsSync(join(dirAbs, fname)) && v <= 99; v++) fname = `${s}-v${v}.json`
+    writeFileSync(join(dirAbs, fname), body, 'utf-8')
+    broadcastTreeRefresh(sessionRel)
+    return { ok: true, relPath: `${sessionRel}/mindmaps/${fname}`, nodes: countNodes(doc.root) }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+/** 生图产物字节上限（与 workspaceManager.MAX_STAGE_IMAGE / builtinTools 参考图同口径 30MB） */
+const MAX_IMAGE_OUTPUT_BYTES = 30 * 1024 * 1024
+
+/** image 工具在 **AI 教学面**的产物：
+ *  写 `{会话夹}/outputs/<slug>.png`（与 `visuals/`、`mindmaps/` 并列的会话产物目录，
+ *  见 docs/ai-image-gen-plan.md §6.1 B1）；重名不覆盖（`-v2`/`-v3` 递增，与两个 write* 同口径）。
+ *
+ *  为什么与普通对话面分家：普通对话没有"会话文件夹"这个概念，产物落仓库隐藏目录 `.attachments/`；
+ *  教学面的会话夹是**用户自己会去翻的目录**（左栏资源管理器就挂在它上面），图落在里面才找得回来。
+ *  分流在 builtinTools 的 image 处理里按 `ctx.source` 判定，本函数只管教学面这一支。
+ *
+ *  slug 白名单校验（kebab 英文数字，拒 `..`/分隔符/盘符——与 writeVisual 同一条入参面收敛）；
+ *  slug 可缺省（image 工具的可选参数，方案 §12 D3），缺省回落 `image`。
+ *  落盘路径全程由本函数拼装，AI 参数无法越出会话 outputs/ 目录。
+ *  不登记 SOURCE.md、不参与素材注入（产物不是素材）。 */
+export function writeImage(
+  sessionId: string, slug: string, bytes: Buffer,
+  getSetting: (key: string) => unknown,
+): { ok: boolean; relPath?: string; bytes?: number; error?: string } {
+  try {
+    const s = String(slug ?? '').trim() || 'image'
+    if (!/^[a-z0-9](?:[a-z0-9._-]{0,60}[a-z0-9])?$/.test(s) || s.includes('..')) {
+      return { ok: false, error: `slug 不合法（要求 kebab-case 小写英文/数字，如 dp-fill-table）：${s.slice(0, 40)}` }
+    }
+    const data = bytes as Buffer
+    if (!data || data.length === 0) return { ok: false, error: '图片数据为空' }
+    if (data.length > MAX_IMAGE_OUTPUT_BYTES) return { ok: false, error: '图片超过 30MB，拒绝写入' }
+    const probe = ensureWriteOwnerFolder(sessionId, getSetting)
+    if (!probe.ok || !probe.relPath) return { ok: false, error: probe.error ?? '会话文件夹不可用' }
+    const vault = getCurrentVault()
+    if (!vault) return { ok: false, error: '尚未打开仓库' }
+    const sessionRel = probe.relPath
+    const dirAbs = join(vault.rootPath, sessionRel, 'outputs')
+    mkdirSync(dirAbs, { recursive: true })
+    const fname = uniqueVersionedName(dirAbs, `${s}.png`)
+    writeFileSync(join(dirAbs, fname), data)
+    broadcastTreeRefresh(sessionRel)
+    return { ok: true, relPath: `${sessionRel}/outputs/${fname}`, bytes: data.length }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
 /** 解析条目路径 → 素材原件绝对路径（./名=素材夹；绝对路径原样；其余按仓库相对）。
  *  只依赖素材夹与仓库根 —— 注入侧对合并条目只有这两个信息也能复用 */
 function resolveMaterialAbs(l: { dirAbs: string; rootPath: string }, p: string): string {
@@ -733,7 +825,7 @@ export async function transcribeVision(sessionId: string, no: number, pages: { n
     let failedReason = ''
     let visionTokens = 0
     for (const p of list) {
-      const r = await visionChat({ system: VISION_SYSTEM, prompt: `这是教材第 ${p.n} 页，请转写整页。`, images: [p.dataUrl], modelSpec })
+      const r = await visionChat({ system: VISION_SYSTEM, prompt: `这是教材第 ${p.n} 页，请转写整页。`, images: [p.dataUrl], modelSpec, sessionId: `${sessionId}:vision:${no}` })
       const t = (r.text ?? '').trim()
       if (r.ok && t) { done.push({ n: p.n, md: t }); model = r.model ?? model; visionTokens += (r as { tokens?: number }).tokens ?? 0 }
       else { failed.push(p.n); if (!failedReason && r.error) failedReason = r.error }
@@ -1024,12 +1116,20 @@ function copyInto(srcAbs: string, dstDir: string): { name: string; error?: strin
  * 上收成功的条目从对话级 SOURCE.md 移除（合并视图里已由主库承载，留着会重复）；
  * 原件缺失等异常条目原地保留。未提取的 URL/引用条目只迁登记、零文件操作。
  */
-export function promoteSessionSources(sessionId: string, getSetting: (key: string) => unknown): SourcesResult & { promoted?: number } {
+export function promoteSessionSources(sessionId: string, getSetting: (key: string) => unknown, onlyNos?: number[]): SourcesResult & { promoted?: number } {
   try {
     const cl = layout(sessionId, getSetting, false, 'session')
     if ('error' in cl) return { ok: false, error: cl.error }
     const convEntries = readEntries(cl)
     if (convEntries.length === 0) return { ok: true, promoted: 0 }
+    // onlyNos（合并视图编号）→ 本层原始编号；不给=全部上收（原「一键上收」行为）。
+    // 粒度下放到单条：选中哪条收哪条，未选中的原样留在对话级。
+    let targetRawNos: Set<number> | null = null
+    if (Array.isArray(onlyNos) && onlyNos.length > 0) {
+      const m = readMerged(sessionId, getSetting)
+      targetRawNos = new Set(m.entries.filter(x => x.scope === 'session' && onlyNos.includes(x.no)).map(x => x.origNo))
+      if (targetRawNos.size === 0) return { ok: true, promoted: 0 }
+    }
     const ws = layout(sessionId, getSetting, true, 'workspace')
     if ('error' in ws) return { ok: false, error: ws.error }
     mkdirSync(ws.dirAbs, { recursive: true })
@@ -1037,7 +1137,9 @@ export function promoteSessionSources(sessionId: string, getSetting: (key: strin
     let no = wsEntries.reduce((m, e) => Math.max(m, e.no), 0)
     const promoted: SourceEntry[] = []
     const kept: SourceEntry[] = []
+    let failed = 0
     for (const e of convEntries) {
+      if (targetRawNos && !targetRawNos.has(e.no)) { kept.push(e); continue } // 未选中的条目原样留在对话级
       let path = e.path
       let extracted = e.extracted
       let ok = true
@@ -1072,7 +1174,7 @@ export function promoteSessionSources(sessionId: string, getSetting: (key: strin
         }
       }
       if (ok) promoted.push({ ...e, no: ++no, path, extracted })
-      else kept.push(e)
+      else { kept.push(e); failed++ }
     }
     if (promoted.length > 0) {
       const w = rewriteEntries(ws, [...wsEntries, ...promoted])
@@ -1090,7 +1192,7 @@ export function promoteSessionSources(sessionId: string, getSetting: (key: strin
     return {
       ok: true, promoted: promoted.length, relPath: ws.fileRel, entries: m.entries,
       workspaceRel: m.ws?.fileRel ?? null, sessionRel: m.conv?.fileRel ?? null,
-      ...(kept.length > 0 ? { error: `${kept.length} 条因文件异常留在对话级（可重试）` } : {}),
+      ...(failed > 0 ? { error: `${failed} 条因文件异常留在对话级（可重试）` } : {}),
     }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
@@ -1123,7 +1225,8 @@ export function registerAiTeachingSourceHandlers(getSetting: (key: string) => un
     webCrawlSource(String(sessionId ?? ''), Number(no), urls, getSetting))
   ipcMain.handle('aiTeachSrc:webCancel', (_e, sessionId: string) => webCrawlCancel(String(sessionId ?? '')))
   // 存量上收：对话级登记（含原件/提取稿复制）迁入工作区主库
-  ipcMain.handle('aiTeachSrc:promote', (_e, sessionId: string) => promoteSessionSources(String(sessionId ?? ''), getSetting))
+  ipcMain.handle('aiTeachSrc:promote', (_e, sessionId: string, nos?: number[]) =>
+    promoteSessionSources(String(sessionId ?? ''), getSetting, Array.isArray(nos) ? nos.map(Number).filter(Number.isFinite) : undefined))
   // 入库浏览：系统文件选择器（表单「已入库」用；返回绝对路径给 add 拷贝）
   ipcMain.handle('aiTeachSrc:pick', async () => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null

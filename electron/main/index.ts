@@ -68,6 +68,7 @@ import { registerAiTeachingWorkspaceHandlers } from '../lib/aiTeachingWorkspaces
 import { registerAiTeachingSourceHandlers } from '../lib/aiTeachingSources'
 import { registerAiTeachingProfileHandlers } from '../lib/aiTeachingProfile'
 import { registerAiTeachingCourseHandlers } from '../lib/aiTeachingCourse'
+import { registerAiTeachingFavoriteHandlers } from '../lib/aiTeachingFavorites'
 import { registerTranslateHandlers } from '../lib/translateService'
 import { registerPdfHandlers } from '../lib/pdfService'
 import { registerDocsReadHandlers } from '../lib/docsIpc'
@@ -863,6 +864,14 @@ app.whenReady().then(async () => {
       return true
     } catch { return false }
   })
+  // 通用文本读取（编辑器右键「粘贴 / 以纯文本形式粘贴」）：渲染层不直连 navigator.clipboard，
+  // 与 writeText 同口径走主进程代理；上限 1MB 同上
+  ipcMain.handle('clipboard:readText', () => {
+    try {
+      const t = clipboard.readText()
+      return typeof t === 'string' && t.length <= 1024 * 1024 ? t : ''
+    } catch { return '' }
+  })
   ipcMain.handle('clipboard:copyImage', (_e, src: { path?: string; dataUrl?: string }) => {
     try {
       let img: Electron.NativeImage | null = null
@@ -1023,6 +1032,8 @@ app.whenReady().then(async () => {
     registerAiTeachingProfileHandlers((key) => settingsCache[key])
     // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲；docs/ai-teaching-course-mode-plan.md）
     registerAiTeachingCourseHandlers((key) => settingsCache[key])
+    // AI教学·左栏「收藏」（favorites.json：钉住活文档随手翻）
+    registerAiTeachingFavoriteHandlers((key) => settingsCache[key])
     // 划词翻译:离线词典 + LLM 翻译/AI 精讲
     registerTranslateHandlers()
     // PDF 工具箱:合并/页面重组/导出
@@ -1039,7 +1050,13 @@ app.whenReady().then(async () => {
     const builtinDir = app.isPackaged ? join(process.resourcesPath, 'builtin-plugins') : builtinDirDev
     try {
       if (existsSync(builtinDir)) {
-        const first = readdirSync(builtinDir, { withFileTypes: true }).find(d => d.isDirectory())
+        const dirs = readdirSync(builtinDir, { withFileTypes: true }).filter(d => d.isDirectory())
+        /* ★ 只挑**真有 UI 入口**（`index.html`）的内置插件做自测（2026-10-13，F-4）。
+           原来是无条件取第一个目录去 fetch `index.html` —— 而两个内置插件都没有它：
+           `knowbase-skill-pack` 是 `type: 'declarative'` 的纯技能包（只贡献 skills），
+           `themes-collection` 只有 icon.svg + plugin.json ⇒ 每次启动都打一行 **恒 404 的假报错**
+           （开发者反馈「控制台有报错」）。没有 UI 入口就**跳过并说明**，不再报一个不存在的错。 */
+        const first = dirs.find(d => existsSync(join(builtinDir, d.name, 'index.html')))
         if (first) {
           // 注意:插件 id 以 manifest 为准,可能与目录名不同
           let manifestId = first.name
@@ -1056,6 +1073,10 @@ app.whenReady().then(async () => {
               console.log(`[plugin://] self-test: ${manifestId}/index.html -> HTTP ${r.status}`)
             })
             .catch(e => { pluginDebugLog(`self-test failed: ${e}`); console.error('[plugin://] self-test failed:', e) })
+        } else {
+          // 没有 UI 入口的内置插件：跳过并说明（一行，不再是一条恒 404 的"报错"）
+          pluginDebugLog(`self-test skipped: 内置插件都没有 index.html（${dirs.map(d => d.name).join('、') || '目录为空'}）`)
+          console.log('[plugin://] self-test skipped: 内置插件均无 UI 入口（declarative / 主题包）')
         }
       } else {
         pluginDebugLog(`self-test skipped: builtin dir missing ${builtinDir}`)

@@ -3,13 +3,20 @@ import {
   deleteKnowledgeCategory, getKnowledgeCategories, getPathForFile,
   workspaceCreateFile, workspaceGetCurrent, workspaceListDir, workspaceMkdir,
   workspacePasteExternal, workspaceRename, workspaceTrash,
+  copyText, workspaceOpenInSystem,
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { recordFileOp } from '../../lib/fileOpHistory'
 import { useDataChanged } from '../../lib/dataChanged'
 import { VaultTree } from '../shared/VaultTree'
+import { FileContextMenu, type FileMenuEntry } from '../shared/FileContextMenu'
+import { DirPicker } from '../shared/DirPicker'
+import { duplicateWorkspaceFile } from '../../lib/fileDuplicate'
+import { loadTreeSubtree } from '../../lib/treeExpand'
+import { FilePlus, FolderPlus, FileText, ClipboardPaste, Pencil, CopyPlus, Link2, Trash2, ChevronsUpDown, ChevronsDownUp, ExternalLink, FolderSearch, FolderInput } from 'lucide-react'
 import type { DirCache, TreeNode, CreateIntent, RenameIntent } from '../shared/VaultTree'
+import type { TreeSortMode } from '../../lib/treeSort'
 
 /**
  * 工作台左栏「文件树模式」的仓库根文件树（方案 .claude/plans/workbench-tree-mode-implementation.md）。
@@ -30,6 +37,12 @@ interface Props {
   focusOn?: boolean
   /** 点骨架条（退出聚焦并定位）时通知宿主关掉开关；本组件负责展开/定位 */
   onFocusExit?: () => void
+  /** 排序口径（透传 VaultTree；目录恒在前） */
+  sort?: TreeSortMode
+  /** 头部命令（作用于选中目录；rel='' = 根/全部）：seq 自增即触发 */
+  treeCommand?: { kind: 'expand' | 'collapse'; rel: string; seq: number } | null
+  /** 选中目录上报（点目录行/文件行时触发；供头部按钮确定作用目标） */
+  onSelectedDirChange?: (rel: string) => void
 }
 
 interface CtxState { x: number; y: number; node: TreeNode | null }
@@ -38,14 +51,20 @@ interface CtxState { x: number; y: number; node: TreeNode | null }
 const DELETE_ANIM_MS = 600
 const DELETE_FADE_MS = 420
 
-function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit }: Props) {
+function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit, sort, treeCommand, onSelectedDirChange }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [dirCache, setDirCache] = useState<DirCache>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['']))
+  // 展开/缓存的最新值 ref（toggleDir 里判「已展开 / 已加载」用，避免闭包拿到旧值）
+  const expandedRef = useRef(expanded)
+  expandedRef.current = expanded
+  const dirCacheRef = useRef<DirCache>({})
+  dirCacheRef.current = dirCache
   const [ctx, setCtx] = useState<CtxState | null>(null)
   const [creating, setCreating] = useState<CreateIntent | null>(null)
   const [renaming, setRenaming] = useState<RenameIntent | null>(null)
   const [activePath, setActivePath] = useState<string | null>(null)
+  const [selectedDir, setSelectedDir] = useState<string | null>(null)
   const [softNames, setSoftNames] = useState<string[]>([])
   // 删除动画状态：VaultTree 以 deletingMap 内容驱动动画，但 Map 引用不变不会触发重渲染——
   // 用 version 自增伴随每次 set（Map 原地改 + version 触发宿主重渲染）
@@ -109,13 +128,44 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit }: Pro
   }, [])
 
   const toggleDir = useCallback((rel: string) => {
+    if (expandedRef.current.has(rel)) {
+      setExpanded((prev) => { const n = new Set(prev); n.delete(rel); return n })
+      return
+    }
+    const open = () => setExpanded((prev) => (prev.has(rel) ? prev : new Set(prev).add(rel)))
+    // 首次展开：**先拉目录数据再展开** —— 否则 grid-rows 动画在空内容上播放（无可见高度），
+    // 数据到达后瞬间填充，「展开动画」看起来像被吞掉（2026-10-11 反馈）。已缓存的目录直接展开。
+    if (dirCacheRef.current[rel]) open()
+    else void loadDir(rel).then(open)
+  }, [loadDir])
+
+  /** 目录递归展开（右键「展开此目录（含子目录）」）：只加载点中的子树，带上限（防大仓库一次性拉爆） */
+  const expandDirRecursive = useCallback(async (rel: string) => {
+    const root = rootIdRef.current
+    if (!root) return
+    const { cache, dirs, truncated } = await loadTreeSubtree(root, rel)
+    loadedDirsRef.current = new Set([...loadedDirsRef.current, ...dirs])
+    setDirCache((prev) => ({ ...prev, ...cache }))
+    setExpanded((prev) => new Set([...prev, ...dirs]))
+    if (truncated) showToast({ type: 'warning', message: '目录过多，仅展开前 2000 个' })
+  }, [])
+
+  /** 目录递归收起：移除该目录及其所有子孙的展开态（rel='' = 全部关闭且根保留） */
+  const collapseDirRecursive = useCallback((rel: string) => {
+    if (rel === '') { setExpanded(new Set([''])); return }
     setExpanded((prev) => {
       const next = new Set(prev)
-      if (next.has(rel)) next.delete(rel)
-      else { next.add(rel); void loadDir(rel) }
+      for (const p of prev) if (p === rel || p.startsWith(rel + '/')) next.delete(p)
       return next
     })
-  }, [loadDir])
+  }, [])
+
+  // 头部命令（作用于选中目录；rel='' = 根）：seq 变化即执行
+  useEffect(() => {
+    if (!treeCommand) return
+    if (treeCommand.kind === 'expand') void expandDirRecursive(treeCommand.rel)
+    else collapseDirRecursive(treeCommand.rel)
+  }, [treeCommand, expandDirRecursive, collapseDirRecursive])
 
   const doCreate = (dirRel: string, type: 'file' | 'dir' | 'knowledge') => {
     // 内联输入行长在目录子级里，目录收着的话不可见（「点＋没反应」= 这个坑，知识库/AI 教学同款注释）
@@ -197,6 +247,31 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit }: Pro
     })()
   }, [loadDir])
 
+  /** 复制路径（2026-10-12 二级菜单用）：走主进程剪贴板通道 `copyText` ——
+   *  批 1 定的口径是「渲染层不直连 navigator.clipboard」，原来这处是直连的，本批一并统一。 */
+  const copyTreePath = useCallback(async (rel: string, mode: 'abs' | 'rel') => {
+    try {
+      let text = rel
+      if (mode === 'abs') {
+        const cur = await workspaceGetCurrent()
+        if (!cur?.path) { showToast({ type: 'error', message: '未打开仓库' }); return }
+        text = `${cur.path.replace(/\\/g, '/')}/${rel}`
+      }
+      const ok = await copyText(text)
+      if (!ok) { showToast({ type: 'error', message: '复制失败' }); return }
+      showToast({ type: 'info', message: mode === 'abs' ? '已复制完整路径' : '已复制仓库相对路径' })
+    } catch { showToast({ type: 'error', message: '复制失败' }) }
+  }, [])
+
+  /** 右键「使用默认应用打开 / 在系统资源管理器中显示」：与批 2 非 md 顶栏 ⋮ 走**同一个**
+   *  主进程通道 `workspaceOpenInSystem`（reveal 决定是打开还是定位），不新开能力面。 */
+  const openTreeInSystem = useCallback(async (rel: string, reveal: boolean) => {
+    const root = rootIdRef.current
+    if (!root) return
+    const res = await workspaceOpenInSystem(root, rel, reveal)
+    if (!res?.ok) showToast({ type: 'error', message: res?.error || '打开失败' })
+  }, [])
+
   /** 右键「粘贴」：记住目标目录、聚焦树容器并提示按 Ctrl+V
    *  （路径只能从渲染层 paste 事件取——主进程 clipboard.readBuffer 拿不全多选，见 knowledge 同款注释） */
   const pasteTargetRef = useRef<string>('')
@@ -257,25 +332,74 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit }: Pro
     })()
   }
 
-  const menuItems = (node: TreeNode | null): Array<{ label: string; run: () => void; danger?: boolean; disabled?: boolean }> => {
+  /** 创建副本：ws:copy 按字节复制（文本/二进制通吃），重名主进程自动加后缀 */
+  const doDuplicate = async (node: TreeNode) => {
+    const root = rootIdRef.current
+    if (!root) return
+    if (node.type === 'dir') { showToast({ type: 'warning', message: '暂不支持复制文件夹' }); return }
+    const r = await duplicateWorkspaceFile(root, node.relPath).catch(() => null)
+    if (!r || r.ok === false) { showToast({ type: 'error', message: r?.error || '创建副本失败' }); return }
+    const parent = node.relPath.includes('/') ? node.relPath.slice(0, node.relPath.lastIndexOf('/')) : ''
+    void loadDir(parent)
+    showToast({ type: 'info', message: `已生成副本 ${r.relPath?.split('/').pop() ?? ''}` })
+  }
+
+  const menuItems = (node: TreeNode | null): FileMenuEntry[] => {
     if (!node || node.relPath === '') {
       return [
-        { label: '＋ 新建文件', run: () => doCreate('', 'file') },
-        { label: '＋ 新建文件夹', run: () => doCreate('', 'dir') },
-        { label: '＋ 新建知识页', run: () => doCreate('', 'knowledge') },
-        { label: '粘贴系统剪贴板', run: () => armPaste('') },
+        { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => doCreate('', 'file') },
+        { key: 'newDir', label: '新建文件夹', icon: <FolderPlus size={15} />, onSelect: () => doCreate('', 'dir') },
+        { key: 'newKn', label: '新建知识页', icon: <FileText size={15} />, onSelect: () => doCreate('', 'knowledge') },
+        { key: 'paste', label: '粘贴系统剪贴板', icon: <ClipboardPaste size={15} />, onSelect: () => armPaste('') },
       ]
     }
-    const items: Array<{ label: string; run: () => void; danger?: boolean; disabled?: boolean }> = []
-    if (node.type === 'dir') items.push(
-      { label: '＋ 新建文件', run: () => doCreate(node.relPath, 'file') },
-      { label: '＋ 新建文件夹', run: () => doCreate(node.relPath, 'dir') },
-      { label: '＋ 新建知识页', run: () => doCreate(node.relPath, 'knowledge') },
-      { label: '粘贴系统剪贴板', run: () => armPaste(node.relPath) },
-    )
-    items.push({ label: '重命名', run: () => setRenaming({ relPath: node.relPath }) })
-    items.push({ label: '复制路径', run: () => { void navigator.clipboard.writeText(node.relPath).catch(() => null); showToast({ type: 'info', message: '已复制路径' }) } })
-    items.push({ label: '删除（回收站）', run: () => doDelete(node), danger: true })
+    /* ---- 文件条目（2026-10-12 对齐 Obsidian，docs/file-menu-rework-design.md）----
+       只放「对这个文件做什么」：「新建 / 粘贴」只留文件夹条目与空白处（Obsidian 同款口径）。
+       本宿主原本就没有「打开」项（单击即打开，见 N2/N3 契约），故不加。 */
+    if (node.type === 'file') {
+      return [
+        { key: 'dup', label: '创建副本', icon: <CopyPlus size={15} />, onSelect: () => void doDuplicate(node) },
+        {
+          key: 'moveTo', label: '将文件移动到…', icon: <FolderInput size={15} />,
+          popover: (
+            <DirPicker
+              rootId={rootIdRef.current ?? undefined}
+              sourceRel={node.relPath}
+              onPick={(dst) => { setCtx(null); doMove(node.relPath, dst) }}
+              onCancel={() => setCtx(null)}
+            />
+          ),
+        },
+        { separator: true },
+        {
+          key: 'copyPath', label: '复制路径', icon: <Link2 size={15} />,
+          submenu: [
+            { label: '仓库相对路径', onSelect: () => void copyTreePath(node.relPath, 'rel') },
+            { label: '完整路径', onSelect: () => void copyTreePath(node.relPath, 'abs') },
+          ],
+        },
+        { separator: true },
+        { key: 'openSys', label: '使用默认应用打开', icon: <ExternalLink size={15} />, onSelect: () => void openTreeInSystem(node.relPath, false) },
+        { key: 'reveal', label: '在系统资源管理器中显示', icon: <FolderSearch size={15} />, onSelect: () => void openTreeInSystem(node.relPath, true) },
+        { separator: true },
+        { key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => setRenaming({ relPath: node.relPath }) },
+        { separator: true },
+        { key: 'delete', label: '删除（回收站）', icon: <Trash2 size={15} />, danger: true, onSelect: () => doDelete(node) },
+      ]
+    }
+    const items: FileMenuEntry[] = [
+      { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => doCreate(node.relPath, 'file') },
+      { key: 'newDir', label: '新建文件夹', icon: <FolderPlus size={15} />, onSelect: () => doCreate(node.relPath, 'dir') },
+      { key: 'newKn', label: '新建知识页', icon: <FileText size={15} />, onSelect: () => doCreate(node.relPath, 'knowledge') },
+      { key: 'paste', label: '粘贴系统剪贴板', icon: <ClipboardPaste size={15} />, onSelect: () => armPaste(node.relPath) },
+      { separator: true },
+      { key: 'expandDir', label: '展开此目录（含子目录）', icon: <ChevronsUpDown size={15} />, onSelect: () => void expandDirRecursive(node.relPath) },
+      { key: 'collapseDir', label: '收起此目录', icon: <ChevronsDownUp size={15} />, onSelect: () => collapseDirRecursive(node.relPath) },
+      { separator: true },
+      { key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => setRenaming({ relPath: node.relPath }) },
+      { separator: true },
+      { key: 'delete', label: '删除（回收站）', icon: <Trash2 size={15} />, danger: true, onSelect: () => doDelete(node) },
+    ]
     return items
   }
 
@@ -326,8 +450,11 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit }: Pro
           dirCache={dirCache}
           expanded={expanded}
           activePath={activePath}
+          selectedPath={selectedDir}
+          onSelectDir={(rel) => { setSelectedDir(rel); onSelectedDirChange?.(rel) }}
           softNames={softNames}
           hideSoft
+          sort={sort}
           focusOn={focusOn}
           onFocusLocate={(rel, isDir) => {
             onFocusExit?.()
@@ -350,17 +477,7 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit }: Pro
 
       {/* 右键菜单 portal 到 body：左栏面板的变换/收缩容器会改写 fixed 的包含块（书签菜单同款坑，方案 §2.1） */}
       {ctx && (
-        <div className="fixed inset-0 z-[70] kb-pop-layer" onClick={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null) }}>
-          <div className="absolute min-w-[160px] w-max max-w-[280px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl py-1"
-            style={{ left: Math.min(ctx.x, window.innerWidth - 290), top: Math.min(ctx.y, window.innerHeight - 300) }}>
-            {menuItems(ctx.node).map((it, i) => (
-              <button key={i} disabled={it.disabled} onClick={() => { setCtx(null); it.run() }}
-                className={`w-full text-left px-3 py-1.5 text-[12px] leading-snug transition-colors disabled:opacity-40 ${it.danger ? 'text-red-400 hover:bg-[var(--bg-hover)]' : 'text-[var(--text-primary)] hover:bg-[var(--bg-hover)]'}`}>
-                {it.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <FileContextMenu x={ctx.x} y={ctx.y} items={menuItems(ctx.node)} onClose={() => setCtx(null)} />
       )}
     </div>
   )

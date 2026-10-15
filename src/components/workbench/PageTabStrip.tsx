@@ -1,6 +1,7 @@
 import { Fragment, useState, useCallback } from 'react'
 import { X, Pin, PenLine, BookOpen } from 'lucide-react'
 import { getFileTypeInfo } from '../../lib/fileTypes'
+import { useStripScroll, StripEdges } from './useStripScroll'
 
 /**
  * 页面条条目（工作台中间栏「页面条置顶」共用展示组件，2026-09-18）。
@@ -40,8 +41,10 @@ interface Props {
   itemAttr: 'data-tab-rel' | 'data-tab-id'
   onSelect: (id: string) => void
   onClose: (id: string) => void
-  /** 组内拖拽重排；不传 = 该组条目不可拖（编辑器文件标签改前就没有重排，保持一致） */
+  /** 组内拖拽重排；不传 = 该组条目不可重排（编辑器文件标签改前就没有重排，保持一致） */
   onReorder?: (ids: string[]) => void
+  /** 跨栏拖入（页面级分屏）：拖动的页面不属于本组时回调（拖到本条 = 移到本栏） */
+  onExternalDrop?: (dragId: string) => void
   onTogglePin?: (id: string) => void
   onContextMenu?: (e: React.MouseEvent, id: string) => void
 }
@@ -52,8 +55,13 @@ const OWNER_COLOR: Record<'editor' | 'knowledge', string> = {
   knowledge: '#4f6ef2',
 }
 
-export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClose, onReorder, onTogglePin, onContextMenu }: Props) {
+export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClose, onReorder, onExternalDrop, onTogglePin, onContextMenu }: Props) {
   const [draggedId, setDraggedId] = useState<string | null>(null)
+  // 可拖：能组内重排 或 能跨栏（跨栏时本组通常无 onReorder）
+  const canDrag = !!onReorder || !!onExternalDrop
+  // 页签条自己的横向溢出（F-16，2026-10-13）：激活变化 / 条目数变化后把激活条目滚回视野。
+  // 逻辑收在本组件内（而不是各个宿主槽）—— 主栏页面条与副栏分屏槽用的是同一个渲染器。
+  const stripScroll = useStripScroll(`${activeId ?? ''}|${items.length}`)
 
   const handleDragStart = useCallback((e: React.DragEvent, id: string) => {
     e.dataTransfer.effectAllowed = 'move'
@@ -94,107 +102,129 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
     e.preventDefault()
     e.stopPropagation()
     ;(e.currentTarget as HTMLElement).style.boxShadow = ''
-    if (!onReorder) return
     const srcId = e.dataTransfer.getData('text/plain')
     if (!srcId || srcId === targetId) return
     const ids = items.map((it) => it.id)
     const srcIdx = ids.indexOf(srcId)
+    // 拖动的页面不属于本组 → 跨栏（App 移动页面对侧）
+    if (srcIdx === -1) { onExternalDrop?.(srcId); return }
+    if (!onReorder) return
     const dstIdx = ids.indexOf(targetId)
-    if (srcIdx === -1 || dstIdx === -1) return
+    if (dstIdx === -1) return
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const side = e.clientX < rect.left + rect.width / 2 ? 'left' : 'right'
     ids.splice(srcIdx, 1)
     const insertIdx = side === 'right' ? ids.indexOf(targetId) + 1 : ids.indexOf(targetId)
     ids.splice(insertIdx, 0, srcId)
     onReorder(ids)
-  }, [items, onReorder])
+  }, [items, onReorder, onExternalDrop])
+
+  // 落在整条页签条空白处：拖动页面不属于本组 → 跨栏
+  const handleStripDrop = useCallback((e: React.DragEvent) => {
+    const srcId = e.dataTransfer.getData('text/plain')
+    if (!srcId || items.some((it) => it.id === srcId)) return
+    e.preventDefault()
+    onExternalDrop?.(srcId)
+  }, [items, onExternalDrop])
 
   // hooks 一律在早退之前（React #310：早退后再声明 hook 会整屏崩）
   if (items.length === 0) return null
 
   return (
-    <div
-      data-pb-group={owner}
-      className="flex min-w-0 items-end gap-1"
-    >
-      {items.map((it, i) => {
-        const isActive = it.id === activeId
-        const isDragged = it.id === draggedId
-        // Edge 细分隔线：与左邻都是非激活条目时才画（悬停任一侧由 CSS :has/相邻选择器淡出）
-        const prev = i > 0 ? items[i - 1] : null
-        const showSep = !!prev && prev.id !== activeId && !isActive
-        const tip = [
-          it.title,
-          it.preview ? '预览标签（双击固定）' : '',
-          it.missing ? '文件已在磁盘上被删除，保存将重新创建' : '',
-        ].filter(Boolean).join(' · ')
-        const fi = it.badge ? getFileTypeInfo(it.badge) : null
-        return (
-          <Fragment key={it.id}>
-          {showSep && <div className="kb-edge-sep" />}
-          <div
-            data-pb-item
-            data-pb-owner={owner}
-            data-wb-active={isActive ? '1' : '0'}
-            {...{ [itemAttr]: it.id }}
-            draggable={!!onReorder}
-            onClick={() => onSelect(it.id)}
-            onDoubleClick={onTogglePin ? () => onTogglePin(it.id) : undefined}
-            onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
-            onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(it.id) } }}
-            onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, it.id) } : undefined}
-            onDragStart={onReorder ? (e) => handleDragStart(e, it.id) : undefined}
-            onDragEnd={onReorder ? handleDragEnd : undefined}
-            onDragOver={onReorder ? (e) => handleDragOver(e, it.id) : undefined}
-            onDragLeave={onReorder ? handleDragLeave : undefined}
-            onDrop={onReorder ? (e) => handleDrop(e, it.id) : undefined}
-            title={tip}
-            className={`kb-edge-tab group flex max-w-[220px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
-              isDragged ? 'opacity-40' : ''
-            } ${
-              isActive
-                ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
-                : 'h-[30px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-            }`}
-          >
-            <span className="shrink-0" style={{ color: OWNER_COLOR[owner] }}>
-              {owner === 'editor' ? <PenLine size={13} /> : <BookOpen size={13} />}
-            </span>
-            <span className={`truncate ${it.preview ? 'italic' : ''} ${it.missing ? 'line-through' : ''}`}>{it.title}</span>
-            {it.dirty && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />}
-            {fi && (
-              <span className="shrink-0 rounded px-1 text-[8px] font-medium" style={{ backgroundColor: fi.color + '20', color: fi.color }}>
-                {fi.badge}
-              </span>
-            )}
-            {onTogglePin && (
-              <button
-                onClick={(e) => { e.stopPropagation(); onTogglePin(it.id) }}
-                onDoubleClick={(e) => e.stopPropagation()}
-                className={`shrink-0 rounded p-0.5 hover:bg-[var(--bg-hover)] ${
-                  it.pinned
-                    ? 'opacity-100 text-[var(--accent)]'
-                    : 'opacity-0 text-[var(--text-muted)] group-hover:opacity-100 hover:text-[var(--text-primary)]'
-                }`}
-                title={it.pinned ? '取消固定' : '固定标签（双击标签也可）'}
-              >
-                <Pin size={11} className={it.pinned ? 'fill-current' : undefined} />
-              </button>
-            )}
-            <button
-              onClick={(e) => { e.stopPropagation(); onClose(it.id) }}
-              onDoubleClick={(e) => e.stopPropagation()}
-              className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
-                isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+    // 外层 relative 只给溢出渐隐定位（F-16，2026-10-13）；宽度由里层滚动容器决定 ——
+    // 不带 flex-1：基础尺寸 = 内容宽度，宿主槽（页面条 / 副栏）不够宽时才缩，
+    // 缩下来靠里层横滚 + 两侧渐隐 + 激活条目自动滚入视野兜住（够得到、也看得出还能滚）。
+    // `px-2 -ml-2` 与模块条目区同因：滚动容器会裁掉溢出部分，而激活条目的 8px 内凹弧
+    // 画在条目**外侧**，必须给它留位置（否则首尾条目缺一个角），再用负 margin 挪回原位。
+    <div className="relative flex min-w-0 items-end gap-1">
+      <div
+        ref={stripScroll.setNode}
+        data-pb-group={owner}
+        data-pb-scroll="group"
+        className="kb-edge-strip flex min-w-0 items-end gap-1 overflow-x-auto px-2 -ml-2"
+        onDragOver={canDrag ? (e) => { if (onExternalDrop) e.preventDefault() } : undefined}
+        onDrop={canDrag ? handleStripDrop : undefined}
+      >
+        {items.map((it, i) => {
+          const isActive = it.id === activeId
+          const isDragged = it.id === draggedId
+          // Edge 细分隔线：与左邻都是非激活条目时才画（悬停任一侧由 CSS :has/相邻选择器淡出）
+          const prev = i > 0 ? items[i - 1] : null
+          const showSep = !!prev && prev.id !== activeId && !isActive
+          const tip = [
+            it.title,
+            it.preview ? '预览标签（双击固定）' : '',
+            it.missing ? '文件已在磁盘上被删除，保存将重新创建' : '',
+          ].filter(Boolean).join(' · ')
+          const fi = it.badge ? getFileTypeInfo(it.badge) : null
+          return (
+            <Fragment key={it.id}>
+            {showSep && <div className="kb-edge-sep" />}
+            <div
+              data-pb-item
+              data-pb-owner={owner}
+              data-wb-active={isActive ? '1' : '0'}
+              {...{ [itemAttr]: it.id }}
+              draggable={canDrag}
+              onClick={() => onSelect(it.id)}
+              onDoubleClick={onTogglePin ? () => onTogglePin(it.id) : undefined}
+              onMouseDown={(e) => { if (e.button === 1) e.preventDefault() }}
+              onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(it.id) } }}
+              onContextMenu={onContextMenu ? (e) => { e.preventDefault(); onContextMenu(e, it.id) } : undefined}
+              onDragStart={canDrag ? (e) => handleDragStart(e, it.id) : undefined}
+              onDragEnd={canDrag ? handleDragEnd : undefined}
+              onDragOver={canDrag ? (e) => handleDragOver(e, it.id) : undefined}
+              onDragLeave={canDrag ? handleDragLeave : undefined}
+              onDrop={canDrag ? (e) => handleDrop(e, it.id) : undefined}
+              title={tip}
+              className={`kb-edge-tab group flex max-w-[220px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
+                isDragged ? 'opacity-40' : ''
+              } ${
+                isActive
+                  ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
+                  : 'h-[30px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
               }`}
-              title="关闭（中键点击也可）"
             >
-              <X size={13} />
-            </button>
-          </div>
-          </Fragment>
-        )
-      })}
+              <span className="shrink-0" style={{ color: OWNER_COLOR[owner] }}>
+                {owner === 'editor' ? <PenLine size={13} /> : <BookOpen size={13} />}
+              </span>
+              <span className={`truncate ${it.preview ? 'italic' : ''} ${it.missing ? 'line-through' : ''}`}>{it.title}</span>
+              {it.dirty && <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />}
+              {fi && (
+                <span className="shrink-0 rounded px-1 text-[8px] font-medium" style={{ backgroundColor: fi.color + '20', color: fi.color }}>
+                  {fi.badge}
+                </span>
+              )}
+              {onTogglePin && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onTogglePin(it.id) }}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                  className={`shrink-0 rounded p-0.5 hover:bg-[var(--bg-hover)] ${
+                    it.pinned
+                      ? 'opacity-100 text-[var(--accent)]'
+                      : 'opacity-0 text-[var(--text-muted)] group-hover:opacity-100 hover:text-[var(--text-primary)]'
+                  }`}
+                  title={it.pinned ? '取消固定' : '固定标签（双击标签也可）'}
+                >
+                  <Pin size={11} className={it.pinned ? 'fill-current' : undefined} />
+                </button>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); onClose(it.id) }}
+                onDoubleClick={(e) => e.stopPropagation()}
+                className={`shrink-0 rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${
+                  isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                }`}
+                title="关闭（中键点击也可）"
+              >
+                <X size={13} />
+              </button>
+            </div>
+            </Fragment>
+          )
+        })}
+      </div>
+      <StripEdges edges={stripScroll.edges} />
     </div>
   )
 }

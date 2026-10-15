@@ -9,18 +9,25 @@ import { appendAudit, countMonthInvocations, listAudit, summarizeArgs } from './
 
 // ===== 类型 =====
 
-/** 入参校验用 JSON Schema 的 M1 子集：type/properties/required/description */
+/** 入参校验用 JSON Schema 的 M1 子集：type/properties/required/description（递归结构用 object/array） */
+export interface ToolSchemaProp {
+  type: 'string' | 'number' | 'boolean' | 'object' | 'array'
+  description?: string
+  minimum?: number
+  maximum?: number
+  enum?: string[]
+  /** required 字符串参数显式允许空串（如 edit.newText：'' = 删除片段）。缺省空串按缺失拒，防 AI 漏参 */
+  allowEmpty?: boolean
+  /** type:'object' 的子字段（透传给模型；校验只做浅层 typeof） */
+  properties?: Record<string, ToolSchemaProp>
+  /** type:'array' 的元素结构 */
+  items?: ToolSchemaProp
+  required?: string[]
+}
+
 export interface ToolJsonSchema {
   type: 'object'
-  properties?: Record<string, {
-    type: 'string' | 'number' | 'boolean'
-    description?: string
-    minimum?: number
-    maximum?: number
-    enum?: string[]
-    /** required 字符串参数显式允许空串（如 edit.newText：'' = 删除片段）。缺省空串按缺失拒，防 AI 漏参 */
-    allowEmpty?: boolean
-  }>
+  properties?: Record<string, ToolSchemaProp>
   required?: string[]
 }
 
@@ -53,6 +60,15 @@ export interface AgentTool {
 export interface ToolInvokeCtx {
   sessionId?: string
   source?: string
+  /**
+   * 本轮的中断信号（v3.6.0，image 工具用）。
+   *
+   * 为什么工具需要它：生图是**秒级到分钟级**的一次外呼，用户点「停止」时必须真的把
+   * 主进程这一侧的网络请求也 abort 掉 —— 只让渲染层不再等待、而请求照跑并照落盘，
+   * 就是"点了停止，图还是出现在仓库里"（方案 A6 明确要求「前端断开 + 不落盘」）。
+   * 其余工具都是本地毫秒级动作，拿到信号也没用；只有长外呼类工具（image）消费它。
+   */
+  signal?: AbortSignal
 }
 
 export type ToolHandler = (args: Record<string, unknown>, ctx?: ToolInvokeCtx) => unknown | Promise<unknown>
@@ -152,6 +168,12 @@ export function validateArgs(schema: ToolJsonSchema, args: Record<string, unknow
       }
       case 'boolean':
         if (typeof v !== 'boolean') return `参数 ${key} 应为布尔值`
+        break
+      case 'object':
+        if (typeof v !== 'object' || v === null || Array.isArray(v)) return `参数 ${key} 应为对象`
+        break
+      case 'array':
+        if (!Array.isArray(v)) return `参数 ${key} 应为数组`
         break
     }
   }
@@ -259,8 +281,8 @@ async function invokeTool(
       ok: false,
       code: permErr,
       message: permErr === 'MODULE_READONLY'
-        ? `模块「${moduleName}」对 AI 授权为只读，本操作被拒绝。可在 设置 → AI 工具 → AI 权限 中调整`
-        : `模块「${moduleName}」已对 AI 关闭，本操作被拒绝。可在 设置 → AI 工具 → AI 权限 中调整`,
+        ? `模块「${moduleName}」对 AI 授权为只读，本操作被拒绝。可在 设置 → AI → 权限 中调整`
+        : `模块「${moduleName}」已对 AI 关闭，本操作被拒绝。可在 设置 → AI → 权限 中调整`,
     }
   }
 
@@ -273,8 +295,8 @@ async function invokeTool(
         ok: false,
         code: fileErr,
         message: fileErr === 'VAULTFILE_READONLY'
-          ? '仓库文件对 AI 仅开放只读，写入类操作被拒绝。可在 设置 → AI 工具 → 权限 → 仓库文件 中调整为读写'
-          : '仓库文件已对 AI 关闭，本操作被拒绝。可在 设置 → AI 工具 → 权限 → 仓库文件 中调整',
+          ? '仓库文件对 AI 仅开放只读，写入类操作被拒绝。可在 设置 → AI → 权限 → 仓库文件 中调整为读写'
+          : '仓库文件已对 AI 关闭，本操作被拒绝。可在 设置 → AI → 权限 → 仓库文件 中调整',
       }
     }
   }
@@ -289,7 +311,7 @@ async function invokeTool(
     return {
       ok: false,
       code: 'LIMIT_EXCEEDED',
-      message: `本月调用次数已达上限（${usage.used}/${usage.limit}），请在 设置 → AI 工具 中调整`,
+      message: `本月调用次数已达上限（${usage.used}/${usage.limit}），请在 设置 → AI 中调整`,
     }
   }
 

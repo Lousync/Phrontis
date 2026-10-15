@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="小螃蟹">
+  <rect width="64" height="64" rx="14" fill="#d97757"/>
+  <!-- 钳 -->
+  <g fill="#f3d9c9">
+    <rect x="11" y="26" width="8" height="9" rx="3"/>
+    <rect x="45" y="26" width="8" height="9" rx="3"/>
+  </g>
+  <!-- 壳 -->
+  <rect x="18" y="21" width="28" height="19" rx="6" fill="#f7e6da"/>
+  <!-- 眼睛 -->
+  <g fill="#2b2a26">
+    <rect x="25" y="27" width="3" height="5" rx="1"/>
+    <rect x="36" y="27" width="3" height="5" rx="1"/>
+  </g>
+  <!-- 腿 -->
+  <g fill="#f3d9c9">
+    <rect x="23" y="40" width="4" height="10" rx="2"/>
+    <rect x="30" y="40" width="4" height="10" rx="2"/>
+    <rect x="37" y="40" width="4" height="10" rx="2"/>
+  </g>
+</svg>

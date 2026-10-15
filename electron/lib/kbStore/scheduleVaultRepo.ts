@@ -1,4 +1,6 @@
 import { exists, readJson, writeJsonOrThrow } from './jsonStore'
+import { randomUUID } from 'crypto'
+import { planScheduleRecurringSettle, endOfWeek, addDaysTo, type ScheduleRecurring } from '../../../src/lib/scheduleRecurringPure'
 
 /**
  * 日程 vault 数据仓库（去库化 P2）：storageData=vault 时日程的真相源。
@@ -34,6 +36,9 @@ export interface TodoRow {
   scheduled_end: number | null
   /** 提醒「稍后」目标时间（'YYYY-MM-DD HH:mm'）；缺省为空。本轮日程改造新增的唯一字段 */
   snooze_until?: string | null
+  /** 固定日程（重复任务）生成的待办：来源规则 id + 本次日期（去重键 = recurringId@recurringDue） */
+  recurringId?: string | null
+  recurringDue?: string | null
   created_at: string; updated_at: string
 }
 
@@ -317,4 +322,196 @@ export function vaultCreateTag(row: TagRow): TagRow {
 /** DELETE FROM schedule_tags WHERE id = ?（与 sqlite 一致：不动引用该标签的待办） */
 export function vaultDeleteTag(id: string): void {
   vaultTagsSave(vaultTagsAll().filter((r) => r.id !== id))
+}
+
+// ===== 固定日程（recurring） =====
+// 存储：.knowbase/modules/schedule/recurring.json；生成的待办 = 普通 TodoRow + recurringId/recurringDue。
+// 结算计划走零依赖纯函数 planScheduleRecurringSettle（src/lib/scheduleRecurringPure.ts，渲染层/契约共用）。
+
+const RECUR_FILE = 'recurring.json'
+
+function todayLocal(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+function isDate(s: unknown): boolean { return /^\d{4}-\d{2}-\d{2}$/.test(String(s)) }
+function clampInt(v: unknown, lo: number, hi: number, fallback: number): number {
+  const n = Math.round(Number(v))
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(lo, Math.min(hi, n))
+}
+function normWeekdays(v: unknown): number[] {
+  const arr = Array.isArray(v) ? v : []
+  return [...new Set(arr.map((n) => clampInt(n, 0, 6, 0)))].sort((a, b) => a - b)
+}
+
+export function vaultScheduleRecurringAll(): ScheduleRecurring[] {
+  const rows = readJson<unknown>(MOD, RECUR_FILE, [])
+  return Array.isArray(rows) ? (rows as ScheduleRecurring[]) : []
+}
+function saveRecurring(rows: ScheduleRecurring[]): void {
+  writeJsonOrThrow(MOD, RECUR_FILE, rows)
+}
+
+export interface CreateScheduleRecurringInput {
+  title: string
+  freq: 'weekly' | 'monthly' | 'interval'
+  weekdays?: number[]
+  day?: number | null
+  intervalDays?: number | null
+  startMin: number
+  endMin?: number | null
+  taskType?: 'plan' | 'deadline' | 'daily'
+  quadrant?: number
+  tagId?: string | null
+  enabled?: boolean
+  endDate?: string
+  lastPostedDate?: string
+}
+
+export function vaultScheduleCreateRecurring(input: CreateScheduleRecurringInput): ScheduleRecurring {
+  const title = String(input.title || '').trim()
+  if (!title) throw new Error('标题不能为空')
+  const freq: ScheduleRecurring['freq'] = input.freq === 'monthly' || input.freq === 'interval' ? input.freq : 'weekly'
+  const startMin = clampInt(input.startMin, 0, 1439, 540)
+  const now = new Date().toISOString()
+  const row: ScheduleRecurring = {
+    id: randomUUID(), title, freq,
+    weekdays: freq === 'weekly' ? normWeekdays(input.weekdays) : [],
+    day: freq === 'monthly' ? clampInt(input.day, 1, 31, 1) : null,
+    intervalDays: freq === 'interval' ? clampInt(input.intervalDays, 1, 3660, 7) : null,
+    startMin,
+    endMin: clampInt(input.endMin, 1, 1440, startMin + 60),
+    taskType: (['plan', 'deadline', 'daily'] as const).includes(input.taskType as 'plan') ? (input.taskType as ScheduleRecurring['taskType']) : 'plan',
+    quadrant: clampInt(input.quadrant, 0, 3, 1),
+    tagId: input.tagId ? String(input.tagId) : null,
+    enabled: input.enabled !== false,
+    endDate: isDate(input.endDate) ? String(input.endDate) : '',
+    lastPostedDate: isDate(input.lastPostedDate) ? String(input.lastPostedDate) : todayLocal(),
+    createdAt: now, updatedAt: now,
+  }
+  if (row.endMin <= row.startMin) row.endMin = Math.min(1440, row.startMin + 60)
+  saveRecurring([...vaultScheduleRecurringAll(), row])
+  settleAfterWrite(row)
+  return row
+}
+
+/** 写侧结算（2026-10-13，F-5）：建 / 改规则之后**立刻**把该生成的待办补齐。
+ *
+ *  为什么必须写在写侧：结算原来**全仓只有一处调用** —— 日程模块挂载时跑一次（带 `recSettledRef` 守卫，
+ *  `src/modules/schedule/index.tsx`）。而模块 Tab 是 `display:none` **保活**的（切 Tab 不卸载）
+ *  ⇒ 用户建规则时模块**早就挂过了**，随后的数据变更广播只刷列表、**不会重新结算**
+ *  ⇒ 表象 = 规则进了「固定日程」列表、日程表里什么都没有。
+ *  （2026-10-13 实机复现：`recurring.json` 4 条规则 / `todos.json` 是空的 `[]`。）
+ *
+ *  上界：默认仍是「本周日」；但若这条规则的**下一次**落在本周日之后（例如周日建「每周一」），
+ *  就取那一次 —— 否则"刚建的这条"要等到下周才看得见。首次应生成日直接复用结算计划纯函数取第一条，
+ *  不另写一套迭代（口径永远一致）。
+ *  ★ 幂等：结算内部按 `(recurringId, recurringDue)` 去重，重复调用不会重复生成。 */
+function settleAfterWrite(rule: ScheduleRecurring, today = todayLocal()): number {
+  const first = planScheduleRecurringSettle([rule], vaultTodosAll(), today, addDaysTo(today, 400))[0]?.due
+  const horizon = first && first > endOfWeek(today) ? first : endOfWeek(today)
+  return vaultScheduleSettleRecurring(today, horizon).added
+}
+
+export function vaultScheduleUpdateRecurring(id: string, patch: Partial<ScheduleRecurring>): ScheduleRecurring | null {
+  const rows = vaultScheduleRecurringAll()
+  const idx = rows.findIndex((r) => r.id === id)
+  if (idx < 0) return null
+  const next: ScheduleRecurring = { ...rows[idx] }
+  if (typeof patch.title === 'string' && patch.title.trim()) next.title = patch.title.trim()
+  if (patch.freq === 'weekly' || patch.freq === 'monthly' || patch.freq === 'interval') next.freq = patch.freq
+  if (patch.weekdays !== undefined) next.weekdays = normWeekdays(patch.weekdays)
+  if (patch.day !== undefined) next.day = clampInt(patch.day, 1, 31, 1)
+  if (patch.intervalDays !== undefined) next.intervalDays = clampInt(patch.intervalDays, 1, 3660, 7)
+  if (next.freq === 'monthly') next.intervalDays = null
+  else if (next.freq === 'interval') next.day = null
+  if (patch.startMin !== undefined) next.startMin = clampInt(patch.startMin, 0, 1439, 540)
+  if (patch.endMin !== undefined) next.endMin = clampInt(patch.endMin, 1, 1440, next.startMin + 60)
+  if (next.endMin <= next.startMin) next.endMin = Math.min(1440, next.startMin + 60)
+  if (patch.taskType && (['plan', 'deadline', 'daily'] as const).includes(patch.taskType)) next.taskType = patch.taskType
+  if (patch.quadrant !== undefined) next.quadrant = clampInt(patch.quadrant, 0, 3, 1)
+  if (patch.tagId !== undefined) next.tagId = patch.tagId ? String(patch.tagId) : null
+  if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled
+  if (typeof patch.endDate === 'string') next.endDate = isDate(patch.endDate) ? patch.endDate : ''
+  if (isDate(patch.lastPostedDate)) next.lastPostedDate = String(patch.lastPostedDate)
+  next.updatedAt = new Date().toISOString()
+  rows[idx] = next
+  saveRecurring(rows)
+  // 改完也补一次（改了星期几 / 时段 / 重新启用之后，本周该出现的待办要立刻跟上；幂等）
+  settleAfterWrite(next)
+  return next
+}
+
+export function vaultScheduleDeleteRecurring(id: string): boolean {
+  const rows = vaultScheduleRecurringAll()
+  const next = rows.filter((r) => r.id !== id)
+  if (next.length === rows.length) return false
+  saveRecurring(next)
+  return true
+}
+
+export interface ScheduleRecurringSettleResult {
+  added: number
+  items: Array<{ id: string; ruleId: string; title: string; due: string }>
+  /** 撤销用：各规则结算前的 lastPostedDate */
+  restore: Array<{ ruleId: string; lastPostedDate: string }>
+}
+
+/** 结算（幂等，写盘）：把「应生成但还没生成」的日期补成普通待办，并推进各规则 lastPostedDate。
+ *  上界默认 = 本周日（让当周固定日程在「周日程」里可见）；只补 ≤ 上界的日期。 */
+export function vaultScheduleSettleRecurring(today = todayLocal(), horizon?: string): ScheduleRecurringSettleResult {
+  const rules = vaultScheduleRecurringAll()
+  const todos = vaultTodosAll()
+  const h = isDate(horizon) ? String(horizon) : endOfWeek(today)
+  const plan = planScheduleRecurringSettle(rules, todos, today, h)
+  if (plan.length === 0) return { added: 0, items: [], restore: [] }
+  const now = new Date().toISOString()
+  const ruleMap = new Map(rules.map((r) => [r.id, r]))
+  const added: TodoRow[] = []
+  const items: ScheduleRecurringSettleResult['items'] = []
+  for (const p of plan) {
+    const r = ruleMap.get(p.ruleId)
+    if (!r) continue
+    const todo: TodoRow = {
+      id: randomUUID(), title: r.title, description: '', date: p.due, time: null,
+      quadrant: r.quadrant, task_type: r.taskType, tag_id: r.tagId, status: 'pending', sort_order: 0,
+      end_criteria: '', parent_id: null,
+      scheduled_start: r.startMin, scheduled_end: r.endMin, snooze_until: null,
+      recurringId: r.id, recurringDue: p.due,
+      created_at: now, updated_at: now,
+    }
+    added.push(todo)
+    items.push({ id: todo.id, ruleId: r.id, title: r.title, due: p.due })
+  }
+  if (added.length === 0) return { added: 0, items: [], restore: [] }
+  vaultTodosSave([...todos, ...added])
+  const restore: ScheduleRecurringSettleResult['restore'] = []
+  const nextRules = rules.map((r) => {
+    const dues = plan.filter((p) => p.ruleId === r.id).map((p) => p.due).sort()
+    if (dues.length === 0) return r
+    restore.push({ ruleId: r.id, lastPostedDate: r.lastPostedDate })
+    return { ...r, lastPostedDate: dues[dues.length - 1], updatedAt: now }
+  })
+  saveRecurring(nextRules)
+  return { added: added.length, items, restore }
+}
+
+/** 撤销一次结算：删掉刚生成的待办 + 把规则 lastPostedDate 还原 */
+export function vaultScheduleUndoSettleRecurring(
+  todoIds: string[],
+  restore: Array<{ ruleId: string; lastPostedDate: string }>,
+): number {
+  const ids = new Set(todoIds)
+  const todos = vaultTodosAll()
+  const kept = todos.filter((t) => !ids.has(t.id))
+  const removed = todos.length - kept.length
+  if (removed > 0) vaultTodosSave(kept)
+  if (restore.length > 0) {
+    const map = new Map(restore.map((x) => [x.ruleId, x.lastPostedDate]))
+    const now = new Date().toISOString()
+    saveRecurring(vaultScheduleRecurringAll().map((r) => (map.has(r.id) ? { ...r, lastPostedDate: map.get(r.id)!, updatedAt: now } : r)))
+  }
+  return removed
 }

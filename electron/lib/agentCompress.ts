@@ -81,6 +81,8 @@ export async function compressSession(req: AgentCompressRequest): Promise<AgentC
         providerId,
         modelId,
         effort: req.effort,
+        // 纪要生成属于该会话的延伸请求：沿用会话 ID，提示缓存前缀与主对话一致
+        sessionId,
       },
       (e) => {
         if (e.type === 'text') out += e.delta

@@ -151,12 +151,29 @@ export function recordSessionFileChange(sessionId: string, change: {
 }
 
 /**
+ * 按「改动文件」去重：同一文件被 AI 反复改只保留**最近一条**（列表传进来需已按时间倒序）。
+ * 无 file 的条目（标题类，如待办/打卡）按 sessionId+target 兜底；同文件若任一次是「新建」，
+ * op 保留 A（避免新建后被改就丢失「新」语义）。返回克隆，不改动内存里的原始审计条目。
+ */
+export function dedupeSessionChanges(list: SessionFileChange[]): SessionFileChange[] {
+  const byKey = new Map<string, SessionFileChange>()
+  for (const c of list) {
+    const key = c.file || `~${c.sessionId}\u0000${c.target}`
+    const cur = byKey.get(key)
+    if (!cur) { byKey.set(key, { ...c }); continue }
+    if (c.op === 'A' && cur.op !== 'A') cur.op = 'A'
+  }
+  return [...byKey.values()]
+}
+
+/**
  * 拉取会话文件改动：带 sessionId = 该会话的；不传 = 本次运行全部（按时间倒序）。
- * 主进程重启即清空（内存通道，方案 §3.8 拍板口径）。
+ * 主进程重启即清空（内存通道，方案 §3.8 拍板口径）。**同一文件只保留最近一条**（见 dedupeSessionChanges）。
  */
 export function getSessionChanges(sessionId?: string): SessionFileChange[] {
-  if (sessionId) return [...(sessionChanges.get(sessionId) ?? [])].reverse()
+  if (sessionId) return dedupeSessionChanges([...(sessionChanges.get(sessionId) ?? [])].reverse())
   const all: SessionFileChange[] = []
   for (const bucket of sessionChanges.values()) all.push(...bucket)
-  return all.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+  all.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
+  return dedupeSessionChanges(all)
 }

@@ -21,8 +21,8 @@ export interface WorkbenchLayout {
   leftLocked: boolean
   /** 右栏收起 */
   rightCollapsed: boolean
-  /** 右栏 Tab：小工具 / AI / 分享 + 条件性 'reading' / 'account'（见 RIGHT_PANEL_TAB_IDS_ALL） */
-  rightTab: 'widgets' | 'ai' | 'share' | 'reading' | 'account'
+  /** 右栏 Tab：小工具 / AI / 分享 + 条件性 'reading' / 'account' / 'schedule'（见 RIGHT_PANEL_TAB_IDS_ALL） */
+  rightTab: 'widgets' | 'ai' | 'share' | 'reading' | 'account' | 'schedule'
   /** 右栏控件排序（今日任务 task / 今日打卡 habit / 番茄钟 pomo / 网址导航 nav / 密码生成器 password） */
   widgetOrder: string[]
   /** 右栏隐藏的控件 id（⋯ 菜单选显） */
@@ -33,6 +33,16 @@ export interface WorkbenchLayout {
   bookmarksHidden: string[]
   /** 分屏比例（主栏:副栏，0~1；null = 未分屏） */
   splitRatio: number | null
+  /** 页面级分屏（只搬页面标签）：null = 单栏。见 App pageSplit 状态。 */
+  pageSplit: PageSplitLayout | null
+}
+
+/** 页面级分屏状态（App 的持久化形态）。secondaryPageIds 存页面 id，恢复时由模块二次净化。 */
+export interface PageSplitLayout {
+  orientation: 'row' | 'column'
+  ratio: number
+  secondaryPageIds: string[]
+  secondaryActiveId: string | null
 }
 
 /** 右栏控件的规范顺序（缺省序 = 原型 v15 定稿 + 2026-09-28 增桌宠）；DayPanel 四控件 id 沿用 DAY_TABS */
@@ -71,7 +81,7 @@ export const WORKBENCH_PANEL_TAB_IDS = ['widgets', 'ai', 'share'] as const
  * 关书回落逻辑在 WorkbenchRightPanel.effectiveTab（回落到 widgets/ai，不改持久化值的语义见彼处）。
  * 两集合刻意不同，勿合并（防 list-drift：契约脚本双向断言）。
  */
-export const RIGHT_PANEL_TAB_IDS_ALL = ['widgets', 'ai', 'share', 'reading', 'account'] as const
+export const RIGHT_PANEL_TAB_IDS_ALL = ['widgets', 'ai', 'share', 'reading', 'account', 'schedule'] as const
 
 export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   leftCollapsed: false,
@@ -84,6 +94,7 @@ export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   panelTabsHidden: [],
   bookmarksHidden: [],
   splitRatio: null,
+  pageSplit: null,
 }
 
 export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchLayout {
@@ -101,7 +112,7 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       if (o.leftMode === 'overview' || o.leftMode === 'tree') base.leftMode = o.leftMode
       if (typeof o.leftLocked === 'boolean') base.leftLocked = o.leftLocked
       if (typeof o.rightCollapsed === 'boolean') base.rightCollapsed = o.rightCollapsed
-      if (o.rightTab === 'widgets' || o.rightTab === 'ai' || o.rightTab === 'share' || o.rightTab === 'reading' || o.rightTab === 'account') base.rightTab = o.rightTab
+      if (o.rightTab === 'widgets' || o.rightTab === 'ai' || o.rightTab === 'share' || o.rightTab === 'reading' || o.rightTab === 'account' || o.rightTab === 'schedule') base.rightTab = o.rightTab
       if (Array.isArray(o.widgetOrder)) {
         const known = new Set<string>(WORKBENCH_WIDGET_IDS)
         const filtered = o.widgetOrder.filter((x): x is string => typeof x === 'string' && known.has(x))
@@ -121,6 +132,16 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       }
       if (o.splitRatio === null || (typeof o.splitRatio === 'number' && Number.isFinite(o.splitRatio))) {
         base.splitRatio = o.splitRatio as number | null
+      }
+      if (o.pageSplit && typeof o.pageSplit === 'object' && !Array.isArray(o.pageSplit)) {
+        const ps = o.pageSplit as Record<string, unknown>
+        const ori: 'row' | 'column' | null = ps.orientation === 'column' ? 'column' : ps.orientation === 'row' ? 'row' : null
+        const ratio = typeof ps.ratio === 'number' && Number.isFinite(ps.ratio) ? Math.min(0.8, Math.max(0.2, ps.ratio)) : 0.5
+        const ids = Array.isArray(ps.secondaryPageIds)
+          ? ps.secondaryPageIds.filter((x): x is string => typeof x === 'string' && x.length > 0)
+          : []
+        const active = typeof ps.secondaryActiveId === 'string' ? ps.secondaryActiveId : null
+        if (ori && ids.length > 0) base.pageSplit = { orientation: ori, ratio, secondaryPageIds: ids, secondaryActiveId: active }
       }
     }
   } catch { /* 坏 JSON 走默认 */ }

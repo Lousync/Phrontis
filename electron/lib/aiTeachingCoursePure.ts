@@ -37,15 +37,6 @@ export interface CourseUnitProgress {
   summaryRel?: string | null
 }
 
-export interface GenerateOutlineInput {
-  goal: string
-  mode: 'anchor' | 'materials' | 'mixed' | 'free'
-  anchorText?: string
-  anchorLabel?: string
-  /** 'providerId:modelId'；缺省 = 主进程 defaultChatModel */
-  modelSpec?: string
-}
-
 /** 字段清洗：去换行、把 `|` 换成全角，避免破坏行格式 */
 export function cleanField(v: unknown): string {
   return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\|/g, '／').trim()
@@ -166,4 +157,66 @@ export function parseOutlineJson(text: string): CourseOutline | null {
     }
   }
   return null
+}
+
+// ===== 课程增补（只增补）：SOURCE 快照 + 增补合并（纯函数，2026-10-08）=====
+
+export interface SourceSnapshotEntry { key: string; no: number; name: string; path: string; extracted: string }
+
+/** 快照匹配键：name + path（重编号不影响） */
+export function sourceKey(name: unknown, path: unknown): string {
+  return `${String(name ?? '').trim()}\u0000${String(path ?? '').trim()}`
+}
+
+/** 由当前 SOURCE 条目生成快照（写大纲时存一份）。
+ *  ★ 当前**只写不读**：唯一读者是 2026-10-11 删除的「修订大纲」抽屉；保留这份快照是为了
+ *  将来做「素材变更提醒」时不必重建。 */
+export function sourceSnapshot(entries: ReadonlyArray<{ no: number; name: string; path: string; extracted: string }>): SourceSnapshotEntry[] {
+  return (entries ?? []).map((e) => ({
+    key: sourceKey(e.name, e.path),
+    no: Number(e.no) || 0,
+    name: String(e.name ?? ''),
+    path: String(e.path ?? ''),
+    extracted: String(e.extracted ?? ''),
+  }))
+}
+
+export interface OutlineUnitAdd { chapterId?: string; chapterName?: string; name: string; goal?: string; source?: string; why?: string }
+export interface OutlineChapterAdd { name: string; units: Array<{ name: string; goal?: string; source?: string; why?: string }> }
+export interface OutlineAdditions { toExisting: OutlineUnitAdd[]; newChapters: OutlineChapterAdd[] }
+
+/**
+ * 只增补合并：**现有章节/知识点 id 一律保留**；新条目取递增 id；同名同章去重。
+ * 定位不到的现有章（chapterId/chapterName 都对不上）→ 丢弃该项（不新建、不改动现有）。
+ */
+export function mergeOutlineAdditions(outline: CourseOutline, additions: OutlineAdditions): { outline: CourseOutline; added: number } {
+  const chapters: CourseChapter[] = (outline?.chapters ?? []).map((c) => ({ ...c, units: c.units.map((u) => ({ ...u })) }))
+  let maxUnit = 0
+  let maxChap = 0
+  chapters.forEach((c, ci) => {
+    maxChap = Math.max(maxChap, parseInt(/\d+/.exec(c.id)?.[0] ?? String(ci + 1), 10) || ci + 1)
+    c.units.forEach((u) => { maxUnit = Math.max(maxUnit, parseInt(/\d+/.exec(u.id)?.[0] ?? '0', 10) || 0) })
+  })
+  let added = 0
+  const namesIn = (c: CourseChapter): Set<string> => new Set(c.units.map((u) => cleanField(u.name)))
+  for (const a of additions?.toExisting ?? []) {
+    if (!a?.name) continue
+    let ch = a.chapterId ? chapters.find((c) => c.id === a.chapterId) : undefined
+    if (!ch && a.chapterName) ch = chapters.find((c) => cleanField(c.name) === cleanField(a.chapterName))
+    if (!ch) continue
+    if (namesIn(ch).has(cleanField(a.name))) continue
+    ch.units.push({ id: `u${++maxUnit}`, name: cleanField(a.name), goal: cleanField(a.goal ?? ''), source: cleanField(a.source ?? '') || 'AI 增补' })
+    added += 1
+  }
+  for (const nc of additions?.newChapters ?? []) {
+    if (!nc?.units?.length) continue
+    const ch: CourseChapter = { id: `c${++maxChap}`, name: cleanField(nc.name), units: [] }
+    for (const u of nc.units) {
+      if (!cleanField(u.name) || namesIn(ch).has(cleanField(u.name))) continue
+      ch.units.push({ id: `u${++maxUnit}`, name: cleanField(u.name), goal: cleanField(u.goal ?? ''), source: cleanField(u.source ?? '') || 'AI 增补' })
+      added += 1
+    }
+    if (ch.units.length) chapters.push(ch)
+  }
+  return { outline: { ...outline, chapters }, added }
 }

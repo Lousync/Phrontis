@@ -78,11 +78,12 @@ function ensureSubscribed(): void {
     if (ended) {
       pendingEnded.push(ended)
       buckets.delete(ended.sessionId) // 流式卡退场；最终消息由 refreshMessages 落位
-      if (!ended.ok && ended.code === 'ABORTED') {
+      if (!ended.ok && ended.code === 'USER_ABORTED') {
         // 用户主动停止：静默
       } else if (!ended.ok) {
         if (!isViewed(ended.sessionId)) failedIds.add(ended.sessionId)
-        showToast({ type: 'error', message: `后台对话失败：${ended.error ?? '未知错误'}` })
+        // 口径与归因一致（A 方案）：这不是「失败」，是「中断」—— 会话里有原因卡，多数情况还能「继续」
+        showToast({ type: 'error', message: `后台对话被中断：${ended.error ?? '未知原因'}` })
       } else if (!isViewed(ended.sessionId)) {
         unreadIds.add(ended.sessionId)
       }

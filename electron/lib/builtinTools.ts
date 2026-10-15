@@ -4,10 +4,17 @@ import { join, relative, extname, sep, dirname } from 'path'
 import { listTools, registerTool, getSettingReader, checkModulePermission } from './aiTools'
 import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { webSearch, webReadPage } from './webSearch'
-import { writeVisual } from './aiTeachingSources'
+import { writeVisual, writeMindmap, writeImage } from './aiTeachingSources'
 import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
+import { getWorkspaceOfSession } from './aiTeachingWorkspaces'
+import {
+  inventoryWorkspaceSource, writeOutlineFromAssistant, removeCourseUnit, archiveOrganizedPage, writeChapterReviewDoc,
+  type OutlineDraft,
+} from './aiTeachingCourse'
 import type { ToolInvokeCtx } from './aiTools'
-import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault } from './workspaceManager'
+import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault, stageImageVersioned } from './workspaceManager'
+import { imageGenerate, imageEdit, imageEditSlotConfigured } from './llmService'
+import { imageSizeOf, exceedsPixelGuard } from './imageHeaderPure'
 import { aiExec } from './terminalService'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { pomoSessionsAll } from './kbStore/pomoVaultRepo'
@@ -19,7 +26,8 @@ import { searchHelp, helpCatalog } from './helpService'
 import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries } from './kbStore/blogVaultRepo'
 import { normalizeBlogDate, nearestEntryDates, blogHitExcerpt, splitBlogSearchTerms } from './blogToolsPure'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
-import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, type TodoRow } from './kbStore/scheduleVaultRepo'
+import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, vaultScheduleRecurringAll, vaultScheduleCreateRecurring, vaultScheduleUpdateRecurring, vaultScheduleDeleteRecurring, type TodoRow } from './kbStore/scheduleVaultRepo'
+import { hmToMin, minToHm, parseScheduleWeekdays, recurringFreqLabel } from '../../src/lib/scheduleRecurringPure'
 import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from './kbStore/accountingVaultRepo'
 // 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
 // 依赖方向已核：pluginEvents 的依赖树不反向 import 本模块，无循环。
@@ -184,6 +192,24 @@ export function vaultRootPath(): string {
   const cur = getCurrentVault()
   if (!cur || !cur.rootPath) throw new Error('当前没有打开的仓库：请先在应用中打开知识仓库')
   return cur.rootPath
+}
+
+/**
+ * image 工具的 ref 归一化 → 仓库根相对路径。
+ *
+ * 收两种写法：裸相对路径（`.attachments/2026-10/x.png`）与 `attachment://vault/…` 前缀形式
+ * （方案 §4.2 的 ref 参数说明）。**不做点目录白名单**：ref 不是「AI 读写文件」面，
+ * 而是"把这张图喂给改图模型"的只读取字节动作；越界仍由调用处的 resolveSafe 一律拒。
+ *
+ * ★ 前缀判定用**字符串常量 + startsWith**，不写正则：这段代码落在
+ * `verify-ai-read-exts.mjs` 的类型剥离切片里，而含 `\/\/` 的正则字面量会让
+ * Node 的 stripTypeScriptTypes 报 "Unterminated regexp literal"（2026-10-14 实测踩到）。
+ */
+const ATTACHMENT_URL_PREFIX = 'attachment://vault/'
+function normalizeImageRef(ref: string): string {
+  let s = String(ref ?? '').trim().replace(/\\/g, '/')
+  if (s.toLowerCase().startsWith(ATTACHMENT_URL_PREFIX)) s = s.slice(ATTACHMENT_URL_PREFIX.length)
+  return s.replace(/^\/+/, '')
 }
 
 /** 取路径最后一段（兼容 / 与 \ 分隔，非文件系统语义，纯字符串） */
@@ -809,6 +835,36 @@ export function registerBuiltinTools(): void {
     return { windowDays: days, totalMinutes, totalSessions, days: out }
   })
 
+  // 6b. builtin.time.now —— 当前时间（**核心只读工具**：通用助手 / 日程助手 / AI 教学 三面处处可用）
+  // 模型自身不知道「今天几号 / 现在几点」，靠此工具定位；schema 极小，常驻成本可忽略。
+  registerTool({
+    name: 'builtin.time.now',
+    title: '获取当前时间',
+    description: '返回当前日期、星期、时刻（本地时区）与本周一/周日。需要知道今天几号、星期几、现在几点时调用。',
+    inputSchema: { type: 'object', properties: {} },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+  }, () => {
+    const now = new Date()
+    const p = (n: number) => String(n).padStart(2, '0')
+    const fmt = (d: Date) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    const date = fmt(now)
+    const hhmm = `${p(now.getHours())}:${p(now.getMinutes())}`
+    const mon = new Date(now); mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7))
+    const sun = new Date(mon); sun.setDate(sun.getDate() + 6)
+    return {
+      date,
+      weekday: ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][now.getDay()],
+      time: hhmm,
+      datetime: `${date} ${hhmm}`,
+      iso: now.toISOString(),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      weekMonday: fmt(mon),
+      weekSunday: fmt(sun),
+    }
+  })
+
   // 7. builtin.schedule.list-todos —— 日程待办查询（读）
   registerTool({
     name: 'builtin.schedule.list-todos',
@@ -850,6 +906,8 @@ export function registerBuiltinTools(): void {
         // 看不到 tagId → create/update 的 tagId 参数根本没有取值来源。
         taskType: str(r.task_type, 'plan'),
         tagId: r.tag_id ?? null,
+        // 完成标准/目标（plan 类）：AI 需要能「看见」已有目标，否则无从判断进度与关联
+        endCriteria: r.end_criteria ?? '',
         scheduledStart: r.scheduled_start ?? null,
         scheduledEnd: r.scheduled_end ?? null,
         parentId: r.parent_id ?? null,
@@ -951,6 +1009,7 @@ export function registerBuiltinTools(): void {
         taskType: { type: 'string', enum: ['plan', 'deadline', 'daily'], description: "任务类型：plan 计划 / deadline 截止类 / daily 零碎当天完成，默认 plan" },
         time: { type: 'string', description: "截止时刻，完整格式 'YYYY-MM-DD HH:mm'（deadline 类才带）；仅当文本里识别出明确时间承诺才传，否则不传、不编造" },
         tagId: { type: 'string', description: '标签 ID（来自 schedule:getTags 或列表结果），可选' },
+        endCriteria: { type: 'string', description: '完成标准/目标（仅 plan 计划类有意义，如「能默写第三章公式」），可选' },
         scheduledStart: { type: 'number', description: '排期起点（当天分钟数 0-1439，如 09:00=540），配合 date 与 scheduledEnd 落格；可选' },
         scheduledEnd: { type: 'number', description: '排期终点（当天分钟数），可选' },
       },
@@ -985,7 +1044,9 @@ export function registerBuiltinTools(): void {
     vaultCreateTodo({
       id, title, description: '', date, time: finalTime, quadrant,
       task_type: taskType, tag_id: tagId, status: 'pending', sort_order: 0,
-      end_criteria: '', parent_id: null,
+      // 完成标准只在 plan 计划类带（与 UI 的 endCriteria 同口径：非 plan 丢弃，避免脏数据）
+      end_criteria: taskType === 'plan' ? str(args.endCriteria).trim() : '',
+      parent_id: null,
       // AI 建的任务默认不排期（除非显式传 scheduledStart/End），落进「待安排」栏等着被拖进日程表
       scheduled_start: scheduledStart, scheduled_end: scheduledEnd,
       snooze_until: null,
@@ -1079,6 +1140,145 @@ export function registerBuiltinTools(): void {
     return { ok: true, ...summary }
   })
 
+  // ===== 固定日程（重复任务）=====
+  // 11d. builtin.schedule.list-recurring —— 固定日程查询（读）
+  registerTool({
+    name: 'builtin.schedule.list-recurring',
+    title: '查询固定日程',
+    description: '列出全部固定日程（重复任务）规则：id / 标题 / 重复方式 / 时段 / 是否启用',
+    inputSchema: { type: 'object', properties: {} },
+    source: 'builtin', enabled: true, readOnly: true, module: 'schedule',
+  }, () => {
+    return vaultScheduleRecurringAll().map(r => ({
+      id: r.id, title: r.title, freq: r.freq,
+      weekdays: r.weekdays, day: r.day, intervalDays: r.intervalDays,
+      start: minToHm(r.startMin), end: minToHm(r.endMin),
+      enabled: r.enabled, endDate: r.endDate,
+    }))
+  })
+
+  // 11e. builtin.schedule.create-recurring —— 创建固定日程（写）
+  registerTool({
+    name: 'builtin.schedule.create-recurring',
+    title: '创建固定日程',
+    description: '创建固定日程（重复任务，如「每周六下午洗衣服」）。freq=weekly 必填 weekdays（传「周一」…「周日」这样的字符串，可多个）；monthly 传 day（每月几号）；interval 传 intervalDays。start/end 为 HH:mm，会占日程表时间格（end 缺省 = start+1 小时）。建好会立刻把本周该出现的待办排进日程表。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '事项（如 洗衣服洗袜子）' },
+        freq: { type: 'string', enum: ['weekly', 'monthly', 'interval'], description: '重复方式' },
+        /* ★ 2026-10-13（F-6）：这里原来写「0=周一…6=周日」，模型按 JS `getDay()` 想事（周日=0、周六=6）
+           ⇒ 说「周六」传 6，我们这边 6 = 周日，整整差一天（实机复现）。改成**字符串 enum**：
+           模型从清单里挑，不必记任何刻度；数字仍收（按 ISO 1=周一…6=周六、7=周日，0 也当周日）。 */
+        weekdays: { type: 'array', items: { type: 'string', enum: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] }, description: '每周几（可多个）；freq=weekly 时必填' },
+        day: { type: 'number', description: '每月几号 1-31，freq=monthly 时用' },
+        intervalDays: { type: 'number', description: '每几天一次，freq=interval 时用' },
+        start: { type: 'string', description: '时段起点 HH:mm（如 14:00）' },
+        end: { type: 'string', description: '时段终点 HH:mm（缺省 = start+1 小时）' },
+        quadrant: { type: 'number', description: '0紧急重要/1重要不紧急/2紧急不重要/3不重要，默认1' },
+        tagId: { type: 'string', description: '标签 id，可选' },
+        endDate: { type: 'string', description: '重复到哪天为止 YYYY-MM-DD，可选（长期不传）' },
+      },
+      required: ['title', 'freq'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const freqRaw = str(args.freq)
+    const freq = (['weekly', 'monthly', 'interval'] as const).includes(freqRaw as 'weekly') ? (freqRaw as 'weekly' | 'monthly' | 'interval') : 'weekly'
+    const startMin = hmToMin(str(args.start), 540)
+    const endMin = args.end !== undefined ? hmToMin(str(args.end), startMin + 60) : startMin + 60
+    // 星期几：字符串 / ISO 数字都收；非法值**报错**而不是静默夹成周一（F-6）
+    const wd = parseScheduleWeekdays(args.weekdays)
+    if (!wd.ok) throw new Error(wd.error)
+    if (freq === 'weekly' && wd.mon0.length === 0) {
+      throw new Error('freq=weekly 必须给 weekdays（如 ["周六"]）—— 空数组会得到一条永远不生效的规则')
+    }
+    const row = vaultScheduleCreateRecurring({
+      title: str(args.title), freq,
+      weekdays: wd.mon0,
+      day: typeof args.day === 'number' ? args.day : null,
+      intervalDays: typeof args.intervalDays === 'number' ? args.intervalDays : null,
+      startMin, endMin, quadrant: num(args.quadrant, 1),
+      tagId: str(args.tagId).trim() ? str(args.tagId).trim() : null,
+      endDate: str(args.endDate),
+    })
+    broadcastDataChanged('schedule')
+    /* ★ 回显人话（F-6）：原来只回 id/title/freq/start/end —— 模型写错星期几自己也不知道
+       （实机里它首轮还自信地回复「每周六」）。现在回 `repeat`，模型当轮即可自查。 */
+    return { ok: true, id: row.id, title: row.title, freq: row.freq, repeat: recurringFreqLabel(row), start: minToHm(row.startMin), end: minToHm(row.endMin) }
+  })
+
+  // 11f. builtin.schedule.update-recurring —— 修改固定日程（写）
+  registerTool({
+    name: 'builtin.schedule.update-recurring',
+    title: '修改固定日程',
+    description: '按 id 修改固定日程：改标题 / 重复方式（weekdays / day / intervalDays）/ 时段（start / end，HH:mm）/ 暂停启用（enabled）/ 结束日期。id 必须先由 list-recurring 取到。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '固定日程 id（来自 list-recurring）' },
+        title: { type: 'string', description: '标题' },
+        freq: { type: 'string', enum: ['weekly', 'monthly', 'interval'], description: '重复方式' },
+        weekdays: { type: 'array', items: { type: 'string', enum: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] }, description: '每周几（可多个；字符串，与 create 同口径）' },
+        day: { type: 'number', description: '每月几号 1-31' },
+        intervalDays: { type: 'number', description: '每几天一次' },
+        start: { type: 'string', description: '时段起点 HH:mm' },
+        end: { type: 'string', description: '时段终点 HH:mm' },
+        enabled: { type: 'boolean', description: 'true 启用 / false 暂停' },
+        endDate: { type: 'string', description: '重复到哪天为止 YYYY-MM-DD（空串 = 长期）' },
+        quadrant: { type: 'number', description: '象限 0..3' },
+        tagId: { type: 'string', description: '标签 id（空串=清空）' },
+      },
+      required: ['id'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    const patch: Record<string, unknown> = {}
+    if (args.title !== undefined) patch.title = str(args.title)
+    if (args.freq !== undefined) patch.freq = str(args.freq)
+    if (args.weekdays !== undefined) {
+      const wd = parseScheduleWeekdays(args.weekdays)
+      if (!wd.ok) throw new Error(wd.error)
+      patch.weekdays = wd.mon0
+    }
+    if (typeof args.day === 'number') patch.day = args.day
+    if (typeof args.intervalDays === 'number') patch.intervalDays = args.intervalDays
+    if (args.start !== undefined) patch.startMin = hmToMin(str(args.start), 540)
+    if (args.end !== undefined) patch.endMin = hmToMin(str(args.end), 600)
+    if (typeof args.enabled === 'boolean') patch.enabled = args.enabled
+    if (args.endDate !== undefined) patch.endDate = str(args.endDate)
+    if (typeof args.quadrant === 'number') patch.quadrant = args.quadrant
+    if (args.tagId !== undefined) patch.tagId = str(args.tagId).trim() || null
+    if (Object.keys(patch).length === 0) throw new Error('没有可修改的字段')
+    const row = vaultScheduleUpdateRecurring(id, patch as never)
+    if (!row) throw new Error(`未找到固定日程 id=${id}：请先用 list-recurring 确认`)
+    broadcastDataChanged('schedule')
+    // 同 create：回显人话（「每周六」），模型当轮可自查星期几有没有设错（F-6）
+    return { ok: true, id: row.id, title: row.title, enabled: row.enabled, repeat: recurringFreqLabel(row) }
+  })
+
+  // 11g. builtin.schedule.delete-recurring —— 删除固定日程（写）
+  registerTool({
+    name: 'builtin.schedule.delete-recurring',
+    title: '删除固定日程',
+    description: '按 id 删除固定日程（规则删除；已生成的待办保留）。必须先 list-recurring 确认 id 与标题相符再调用。',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: '固定日程 id（来自 list-recurring）' } },
+      required: ['id'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    const ok = vaultScheduleDeleteRecurring(id)
+    if (!ok) throw new Error(`未找到固定日程 id=${id}：请先用 list-recurring 确认`)
+    broadcastDataChanged('schedule')
+    return { ok: true, id }
+  })
+
   // 12. builtin.checkin.check-habit
   registerTool({
     name: 'builtin.checkin.check-habit',
@@ -1150,7 +1350,7 @@ export function registerBuiltinTools(): void {
       properties: {
         start: { type: 'string', description: '开始日期 YYYY-MM-DD，可省略' },
         end: { type: 'string', description: '结束日期 YYYY-MM-DD，可省略' },
-        type: { type: 'string', description: '筛类型：expense 支出 / income 收入，省略为全部', enum: ['expense', 'income'] },
+        type: { type: 'string', description: '筛类型：expense 支出 / income 收入 / transfer 转账，省略为全部', enum: ['expense', 'income', 'transfer'] },
         category: { type: 'string', description: '按分类名精确筛，可省略' },
       },
     },
@@ -1160,7 +1360,7 @@ export function registerBuiltinTools(): void {
     tier: 'ondemand',
     module: 'accounting',
   }, args => {
-    const type = args.type === 'income' ? 'income' as const : args.type === 'expense' ? 'expense' as const : undefined
+    const type = args.type === 'income' ? 'income' as const : args.type === 'expense' ? 'expense' as const : args.type === 'transfer' ? 'transfer' as const : undefined
     const start = /^\d{4}-\d{2}-\d{2}$/.test(str(args.start)) ? str(args.start) : undefined
     const end = /^\d{4}-\d{2}-\d{2}$/.test(str(args.end)) ? str(args.end) : undefined
     const category = str(args.category).trim() || undefined
@@ -1177,7 +1377,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.accounting.balances',
     title: '查询账户余额',
-    description: '查询记账各账户与总额的当前余额（余额=初始+累计收入-累计支出）',
+    description: '查询记账各账户与总额的当前余额（余额=初始+累计收入-累计支出；转账在账户间移动，不计收支、不影响总额）',
     inputSchema: { type: 'object', properties: {} },
     source: 'builtin',
     enabled: true,
@@ -1247,7 +1447,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive / course.review.write）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1287,7 +1487,7 @@ export function registerBuiltinTools(): void {
     }
     const deniedHint = denied.length
       ? `以下工具未启用：${denied.map(d => `${d.name}（模块「${d.module}」${d.reason}）`).join('；')}。`
-        + '请在回答中如实告知用户该操作未执行，并提示可在 设置 → AI 工具 → 权限 中把对应模块调为「读写」后重试；不要声称已完成。'
+        + '请在回答中如实告知用户该操作未执行，并提示可在 设置 → AI → 权限 中把对应模块调为「读写」后重试；不要声称已完成。'
       : undefined
     return {
       ok: true,
@@ -1300,7 +1500,7 @@ export function registerBuiltinTools(): void {
     }
   })
 
-  // ===== vault.* 仓库文件只读工具（B1）：受 vaultFile 权限域（设置 → AI 工具 → 权限 → 仓库文件）控制 =====
+  // ===== vault.* 仓库文件只读工具（B1）：受 vaultFile 权限域（设置 → AI → 权限 → 仓库文件）控制 =====
 
   // 14. builtin.vault.list —— 列仓库目录（AI 视角，禁区自动隐藏）
   registerTool({
@@ -1770,6 +1970,244 @@ export function registerBuiltinTools(): void {
     const r = writeVisual(sid, str(args.slug), String(args.html ?? ''), getSettingReader())
     if (!r.ok) throw new Error(r.error ?? '示意图写入失败')
     return { relPath: r.relPath, lines: r.lines }
+  })
+
+  // 25. mindmap —— 生成思维导图 JSON 写入会话 mindmaps/（工件栏 / 笔记区可交互渲染）
+  registerTool({
+    name: 'mindmap',
+    title: '生成思维导图',
+    description: '把一段内容整理成思维导图，写入本会话文件夹 mindmaps/<slug>.json 并在右栏工件栏打开。' +
+      'root 为递归结构，每个节点形如 { text, ref?, children? }：text 必须是一行短短语；' +
+      'ref 可选，为「知识库笔记」或「另一张思维导图」的仓库相对路径（.md 笔记 / .json 导图），用于节点点击跳转；children 为子节点数组。' +
+      '树深 ≤6、节点总数 ≤120。只把结构交给本工具，**绝不把 JSON 写进回答正文或代码块**，生成后用一句话说明右侧已打开。' +
+      '重名不覆盖（自动 -v2/-v3 递增）。仅限 AI教学对话会话内使用',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: '文件名（kebab-case 小写英文/数字，如 binary-tree-traversal；不带 .json 后缀）' },
+        title: { type: 'string', description: '导图中文标题（工件卡与页签展示，如「二叉树遍历」）' },
+        root: { type: 'object', description: '根节点，递归结构 { text, ref?, children? }；ref 可指向知识库笔记(.md)或另一张思维导图(.json)（详见工具说明）' },
+      },
+      required: ['slug', 'title', 'root'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    // 不设 module：产物固定落 AI教学会话目录，权限由 sessionId 归属兜底（无会话即拒绝）
+  }, (args, ctx) => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid) throw new Error('mindmap 仅可在 AI教学对话中使用（当前会话无归属文件夹）')
+    const doc = { kind: 'mindmap', version: 1, title: str(args.title), root: args.root }
+    const r = writeMindmap(sid, str(args.slug), JSON.stringify(doc), getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '思维导图写入失败')
+    return { relPath: r.relPath, nodes: r.nodes }
+  })
+
+  // 25b. image —— 对话内生图 / 改图（v3.6.0；docs/ai-image-gen-plan.md §4.2）
+  //
+  // 一个工具覆盖两条链路（**有 ref = 改图**）：省一份常驻 schema，也让模型少一次选择。
+  // 刻意不提供 count（A4 = 只出 1 张）与 insert（插图是第二次写入，见方案 §3.3）——
+  // 少两个花钱/走偏的旋钮。
+  const MAX_IMAGE_REF_BYTES = 30 * 1024 * 1024 // 与附件区 stageImageBytes 同口径
+  registerTool({
+    name: 'image',
+    title: '生成 / 改图',
+    description: '按文字描述生成一张图片；带 ref 时改为对已有图做修改。' +
+      '**只在用户明确要图时调用**（敲了 /生图，或说「画一张 / 配个图 / 示意图 / 把这张改成…」）；不要为讲解主动配图。' +
+      'prompt 保持用户的语言与诉求原样（中文要求就写中文，别翻成英文）；画幅不填=按内容定，要指定就在 prompt 里说。' +
+      '改图：把上一张图的仓库相对路径填进 ref，prompt 写要改成什么样。' +
+      '产物落会话文件夹 outputs/（AI 教学面）或仓库 .attachments/<年-月>/（普通对话），一律以返回的 relPath 为准。' +
+      '生成后用一句话说明图已生成，**绝不把 prompt 或返回 JSON 写进回答正文**。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: '画面描述（中文原样；含风格、构图、图上要标注的文字）' },
+        aspect: { type: 'string', enum: ['16:9', '1:1', '9:16'], description: '画幅；不填=按内容定' },
+        ref: { type: 'string', description: '要修改的图的仓库相对路径；给了就改图，不给就新画一张' },
+        slug: { type: 'string', description: '文件名（kebab-case 小写英文/数字，如 dp-fill-table；不带扩展名）' },
+      },
+      required: ['prompt'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    // 不设 module：产物落**按面分流**（AI 教学面 = 会话夹 outputs/，普通对话 = 仓库 .attachments/，见 handler），
+    // 教学面那一支的归属由 sessionId 兜底（writeImage → ensureWriteOwnerFolder）
+  }, async (args, ctx) => {
+    const prompt = str(args.prompt).trim()
+    if (!prompt) throw new Error('prompt 为空：请给出要画的内容描述')
+    const aspect = str(args.aspect)
+    const ref = str(args.ref).trim()
+    const root = vaultRootPath()
+    const t0 = Date.now()
+    let res: Awaited<ReturnType<typeof imageGenerate>>
+    let downgraded = false
+    if (ref) {
+      // 改图（D7 = 原图喂给模型）：读参考图字节 → 走改图槽 + /images/edits
+      const rel = normalizeImageRef(ref)
+      const abs = rel ? resolveSafe(root, rel) : null
+      if (!abs) throw new Error(`ref 不合法或越出仓库：${ref.slice(0, 120)}`)
+      let bytes: Buffer
+      try {
+        const st = statSync(abs)
+        if (!st.isFile()) throw new Error('不是文件')
+        if (st.size === 0 || st.size > MAX_IMAGE_REF_BYTES) throw new Error(`参考图大小 ${st.size} 字节（上限 30MB）`)
+        bytes = readFileSync(abs)
+      } catch (e) {
+        throw new Error(`读不到参考图 ${rel}：${(e as Error).message}`)
+      }
+      if (imageEditSlotConfigured()) {
+        res = await imageEdit({
+          prompt, aspect, signal: ctx?.signal, sessionId: ctx?.sessionId,
+          image: bytes, imageExt: extname(abs).slice(1).toLowerCase(),
+        })
+      } else {
+        // 改图槽留空 ⇒ 退化成「按描述重画」。**在结果里标注**（卡上据此提示），不静默降级
+        downgraded = true
+        res = await imageGenerate({ prompt, aspect, signal: ctx?.signal, sessionId: ctx?.sessionId })
+      }
+    } else {
+      res = await imageGenerate({ prompt, aspect, signal: ctx?.signal, sessionId: ctx?.sessionId })
+    }
+    if (!res.ok) throw new Error(res.error ?? '生图失败')
+    const b64 = String(res.b64 ?? '')
+    if (!b64) throw new Error('生图失败：上游没有返回图片数据')
+    const buf = Buffer.from(b64, 'base64')
+    if (buf.length === 0) throw new Error('生图失败：图片数据为空')
+    if (exceedsPixelGuard(buf)) throw new Error('生图失败：图片像素超过 1 亿，渲染侧无法显示')
+    // 落点分流（v3.6.0 阶段二，方案 §6.1）：AI 教学面落**会话夹 `outputs/`**（左栏资源管理器就挂在
+    // 会话夹上，用户能翻到），普通对话面落仓库隐藏目录 `.attachments/<年-月>/`（B2）。
+    // 判据取 `ctx.source` 而不是"sessionId 是否为空"：助手面的 sessionId 也是非空的
+    // （那是 agent 会话 id，不是教学会话），按空值判会把普通对话的图塞进一个并不存在的会话夹。
+    const sid = String(ctx?.sessionId ?? '')
+    let relPath: string
+    if (ctx?.source === 'aiTeaching') {
+      if (!sid) throw new Error('image 在 AI 教学面需要会话归属（当前调用没有 sessionId）')
+      const w = writeImage(sid, str(args.slug), buf, getSettingReader())
+      if (!w.ok) throw new Error(w.error ?? '图片写入会话产物目录失败')
+      relPath = String(w.relPath ?? '')
+      if (!relPath) throw new Error('图片写入失败：没有拿到产物路径')
+    } else {
+      const out = stageImageVersioned(root, str(args.slug), buf)
+      relPath = out.relPath
+      // 铁律 1：写盘后广播。阶段一落 .attachments/（隐藏目录，不进知识库索引）⇒ 不需要 knowledge scope，
+      // 只广播受影响目录让文件树这类"按目录拉"的面刷新；「本次改动」清单走 agent 结果通道，
+      // 天然随本轮返回带到渲染层，无需另行广播。
+      // （教学面那一支的广播在 writeImage 内——它广播的是会话夹，粒度更准）
+      try { broadcastTreeRefresh(relPath.replace(/\/[^/]*$/, '')) } catch { /* 联动失败不影响产物 */ }
+    }
+    const size = imageSizeOf(buf)
+    return {
+      relPath,
+      bytes: buf.length,
+      w: size?.w,
+      h: size?.h,
+      model: res.model,
+      elapsedMs: Date.now() - t0,
+      ...(downgraded ? { downgraded: true, note: '改图模型未配置：本次按描述重画，未使用原图（可在 设置 → AI 工具 → 模型 配置「改图重绘」）' } : {}),
+      ...(res.revisedPrompt ? { revisedPrompt: res.revisedPrompt.slice(0, 300) } : {}),
+    }
+  })
+
+  // ===== 对话驱动建课（Phase 2，2026-10-11）：教学助手工具 =====
+  // 助手只编排；落盘一律走 aiTeachingCourse 的业务函数（复用大纲/进度/素材实现），
+  // 不开 .knowbase 白名单，写工具仍受 requires:'write' 权限过滤（铁律 3）。
+  const requireAiTeachWs = (ctx?: ToolInvokeCtx): string => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid) throw new Error('仅可在 AI 教学对话中使用')
+    const wsId = getWorkspaceOfSession(sid)
+    if (!wsId) throw new Error('当前对话未归属工作区')
+    return wsId
+  }
+
+  // 26. inventory —— 清点 dir 素材（先清点再分章，避开整目录截断）
+  registerTool({
+    name: 'inventory',
+    title: '清点素材目录',
+    description: '清点本工作区登记的「目录(dir)素材」：递归统计文件数/字数、判定顶层是否已按子文件夹分类、列出待转写的 pdf/pptx、抽取每文件小标题，写入 SOURCES/{素材名}.index.md。用于"先清点、再分章"，避免整个目录被截断。仅对 dir 素材有效（单个 pdf/pptx 需先转写为 md）。',
+    inputSchema: { type: 'object', properties: { source: { type: 'string', description: '素材名称或编号（如 操作系统资料 或 #1）' } }, required: ['source'] },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => inventoryWorkspaceSource(requireAiTeachWs(ctx), str(args.source), getSettingReader()))
+
+  // 27. course.outline.write —— 写入/展开课程大纲（分批：先第一章，学完再 append）
+  registerTool({
+    name: 'course.outline.write',
+    title: '写入/展开课程大纲',
+    description: '把课程大纲写入本工作区（人读人改的 课程.md）。append 缺省/false = 首次生成（覆盖）；append=true = 按章名合并增补、保留既有知识点与进度，用于"展开下一章"。分批：先只给第一章，学完再加下一章。务必先在对话里把草稿给用户看过、确认后再调用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '课程名（首次可给）' },
+        goal: { type: 'string', description: '一句话学习目标（首次可给）' },
+        append: { type: 'boolean', description: 'true=追加进现大纲；缺省/false=首次覆盖生成' },
+        chapters: { type: 'array', items: { type: 'object' }, description: '[{ name, units:[{ name, goal, source }] }]' },
+      },
+      required: ['chapters'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const r = writeOutlineFromAssistant(requireAiTeachWs(ctx), { title: str(args.title), goal: str(args.goal), append: !!args.append, chapters: args.chapters as OutlineDraft['chapters'] }, getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '写入大纲失败')
+    return r
+  })
+
+  // 28. course.outline.remove-unit —— 删除知识点（已学 → 拒绝，要求先整理归档）
+  registerTool({
+    name: 'course.outline.remove-unit',
+    title: '删除知识点',
+    description: '从课程大纲删除一个知识点。未学习(todo)的直接删；已学习/学一半的会返回 needOrganize=true 并拒绝——请先用「整理对话并归档」把这段对话存档，再删除。参数 unit = 知识点名称或 id。',
+    inputSchema: { type: 'object', properties: { unit: { type: 'string', description: '知识点名称或 id' } }, required: ['unit'] },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const r = removeCourseUnit(requireAiTeachWs(ctx), str(args.unit), getSettingReader())
+    if (!r.ok && !r.needOrganize) throw new Error(r.error ?? '删除失败')
+    return r
+  })
+
+  // 29. course.organize.archive —— 整理页归档（默认 output/，可指定目录，返回绝对路径）
+  registerTool({
+    name: 'course.organize.archive',
+    title: '整理对话并归档',
+    description: '把一段内容整理成 markdown 一页并归档到指定目录。target 给仓库相对目录（可先用 vault.list/search 定位并自行判断最贴切的目录）；缺省落本会话产物目录 output/。返回相对路径与**绝对路径**（务必把绝对路径告诉用户，说明放到了哪里）。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '页面标题（作文件名）' },
+        content: { type: 'string', description: 'markdown 正文' },
+        target: { type: 'string', description: '仓库相对目录；缺省=会话 output/' },
+      },
+      required: ['title', 'content'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid) throw new Error('仅可在 AI 教学对话中使用')
+    const r = archiveOrganizedPage(sid, str(args.title), str(args.content), str(args.target), getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '归档失败')
+    return r
+  })
+
+  // 30. course.review.write —— 章末复习课：把复习结论整理成《复习讲义》落盘到本章目录
+  registerTool({
+    name: 'course.review.write',
+    title: '写入复习讲义',
+    description: '在**章末复习课**会话中，把本次复习的结论整理成《复习讲义》写入本章目录（{章号}·{章名}/复习讲义.md，覆盖同名）。content = markdown 正文。返回相对路径与**绝对路径**（务必把绝对路径告诉用户）。仅在复习课会话中可用。',
+    inputSchema: {
+      type: 'object',
+      properties: { content: { type: 'string', description: '复习讲义 markdown 正文' } },
+      required: ['content'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid) throw new Error('仅可在 AI 教学对话中使用')
+    const r = writeChapterReviewDoc(sid, str(args.content), getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '写入复习讲义失败')
+    return r
   })
 
   // =====================================================================
@@ -2351,7 +2789,7 @@ export function registerBuiltinTools(): void {
     tier: 'ondemand',
   }, async args => {
     const reader = getSettingReader()
-    if (reader('terminal.aiExec') !== true) throw new Error('AI 终端执行未开启（设置 → AI 终端执行）')
+    if (reader('terminal.aiExec') !== true) throw new Error('AI 终端执行未开启（设置 → AI → 权限 → 终端执行）')
     const cmd = str(args.command).trim()
     if (!cmd) throw new Error('缺少必填参数: command')
     const pref = reader('terminal.shell')

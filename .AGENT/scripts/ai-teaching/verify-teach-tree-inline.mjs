@@ -98,7 +98,9 @@ ok(/const doCreate = \(dirRel: string, type: 'file' \| 'dir'\) => \{\s*\n\s*if \
   'C1 ★ doCreate 先展开落点目录、再落创建意图（收着的目录里内联行不可见 = 「点了没反应」）', '')
 ok(/const startRename = \(n: TreeNode\) => setRenaming\(\{ relPath: n\.relPath \}\)/.test(TEACH),
   'C2 重命名入口只落意图（条目本就可见才右键得到，无需展开）', '')
-ok(/run: \(\) => startRename\(node\)/.test(TEACH),
+// ★ 2026-10-12 校正：原断言锁 `run: () => startRename(node)` —— `run` 是**旧菜单 API** 的字段名，
+// 共享 FileContextMenu 用的是 `onSelect`。该断言在 HEAD 上已经是红的（陈旧断言，非行为回归）。
+ok(/onSelect: \(\) => startRename\(node\)/.test(TEACH),
   'C3 右键菜单「重命名」指向 startRename（不是残留的旧函数）', '')
 ok(!/\bdoRename\b/.test(TEACH),
   'C4 负向：旧的一次性 doRename（弹窗提交版）已无残留', '')

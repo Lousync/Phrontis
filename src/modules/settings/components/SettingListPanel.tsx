@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
+import { AnchoredLayer } from '../../../components/shared/AnchoredLayer'
+import { HelpHint } from '../../../components/shared/HelpHint'
 import { consumePendingAnchor, subscribePendingAnchor } from '../sections'
 
 export interface SettingListTag {
@@ -71,6 +73,7 @@ export function SettingListPanel({
   const [open, setOpen] = useState(false)
   const listRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
 
   // 外部默认项变化时（如设置异步加载完成）重新对齐
   useEffect(() => {
@@ -82,7 +85,9 @@ export function SettingListPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultSelectedId, items])
 
-  // popover：搜索锚点跳转命中时自动展开；外点 / Esc 关闭
+  // popover：搜索锚点跳转命中时自动展开。**外点 / Esc 关闭交给 AnchoredLayer** ——
+  // 浮层要挂到 body（折叠容器的 overflow:hidden 会裁掉就地 absolute 的面板），
+  // 而挂出去之后「点外面算不算外面」的判定也跟着一起搬走了，这里不再各写一套。
   useEffect(() => {
     if (display !== 'popover') return
     if (anchorId && consumePendingAnchor(anchorId)) setOpen(true)
@@ -90,22 +95,6 @@ export function SettingListPanel({
       if (anchorId && id === anchorId) setOpen(true)
     })
   }, [display, anchorId])
-
-  useEffect(() => {
-    if (!open || display !== 'popover') return
-    const onDown = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.stopPropagation(); setOpen(false) }
-    }
-    document.addEventListener('mousedown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open, display])
 
   const move = (delta: number) => {
     if (items.length === 0) return
@@ -206,8 +195,10 @@ export function SettingListPanel({
 
   return (
     <div ref={rootRef}>
-      {/* 标题行：title + (count) + 右侧控件 */}
-      {(title || count !== undefined || titleRight) && (
+      {/* 标题行：title + (count) + ⓘ 说明 + 右侧控件。
+          ★ 说明文字改走 ⓘ 悬停（2026-10-14）：原先它常驻在标题下面，
+            在"点开才有"的新口径里是白占一行。文案一字不删，只是收起来。 */}
+      {(title || count !== undefined || titleRight || description) && (
         <div className="flex items-center gap-1.5 mb-1">
           {title && (
             <h3 className={titleClassName ?? 'text-[13px] font-medium text-[var(--text-primary)]'}>{title}</h3>
@@ -215,11 +206,9 @@ export function SettingListPanel({
           {typeof count === 'number' && (
             <span className="text-[10px] text-[var(--text-disabled)]">({count})</span>
           )}
+          {description && <HelpHint text={description} />}
           {titleRight && <span className="ml-auto shrink-0">{titleRight}</span>}
         </div>
-      )}
-      {description && (
-        <p className={`text-[11px] text-[var(--text-muted)] ${(title || count !== undefined || titleRight) ? 'mt-0.5' : ''}`}>{description}</p>
       )}
 
       {display === 'inline' ? (
@@ -232,6 +221,7 @@ export function SettingListPanel({
         <div className={`relative mt-2 ${maxWidthClassName}`}>
           {/* 触发器：SettingSelect 同款下拉框 */}
           <button
+            ref={triggerRef}
             onClick={() => (open ? setOpen(false) : openList())}
             onKeyDown={onTriggerKeyDown}
             aria-haspopup="listbox"
@@ -245,12 +235,16 @@ export function SettingListPanel({
             <ChevronDown size={14} className={`shrink-0 text-[var(--text-muted)] transition-transform ${open ? 'rotate-180' : ''}`} />
           </button>
 
-          {/* 悬浮选项列表：覆盖下方内容，不推挤 */}
-          {open && (
-            <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-lg overflow-hidden">
-              {listBody}
-            </div>
-          )}
+          {/* 选项面板挂 body、宽度跟随触发器：折叠组里就地 absolute 会被裁掉半个 */}
+          <AnchoredLayer
+            anchorRef={triggerRef}
+            open={open}
+            onClose={() => setOpen(false)}
+            matchWidth
+            className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-lg overflow-hidden"
+          >
+            {listBody}
+          </AnchoredLayer>
         </div>
       )}
     </div>

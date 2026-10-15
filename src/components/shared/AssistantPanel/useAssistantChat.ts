@@ -4,11 +4,13 @@ import { handleChatCommand } from '../../../lib/chatCommands'
 import { getAssistantContext } from '../../../lib/assistantContext'
 import { useSettings } from '../../../lib/SettingsContext'
 import {
-  agentSessions, agentNewSession, agentMessages, agentDeleteSession,
-  agentChat, agentRegenerate, agentEditMessage, agentDeleteMessage,
+  agentSessions, agentMessages, agentDeleteSession, agentSetSessionPinned,
+  agentChat, agentRegenerate, agentResume, agentEditMessage, agentDeleteMessage,
   llmListProviders, agentAbortSession, aiToolsListSkills, onAssistantNotice,
 } from '../../../lib/ipc'
-import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo } from '../../../types'
+// 新建会话走包装层：会话随仓库走，无仓库时要给提示而不是静默失败
+import { newAgentSession } from '../../../lib/agentSession'
+import type { AgentSessionInfo, AgentStoredMessage, AgentTraceStep, AgentContextInfo, AgentChange, SkillInfo, AgentSessionSource, ResumeInfo } from '../../../types'
 import type { StreamDraft } from '../../../lib/agentStreamCore'
 import {
   MAX_PARALLEL, subscribeAssistantRunState, getRunBucket, isSessionRunning, runningSessionCount,
@@ -42,10 +44,22 @@ export interface AssistantChatOptions {
    * 所以宿主可以安全闭包引用本组件里声明在 hook 之后的 ref；但**别在 render 期调用它**（TDZ 崩页）。
    */
   resolveContext?: () => AgentContextInfo | null
-  /** / 指令的执行面（悬浮版随全屏态切换；其余宿主固定 assistant） */
-  surfaceOf?: () => 'assistant' | 'aiLearn'
+  /** / 指令的执行面（悬浮版随全屏态切换；其余宿主固定 assistant；日程助手传 'schedule'） */
+  surfaceOf?: () => 'assistant' | 'aiLearn' | 'schedule'
   /** 发送前正文预处理（悬浮版并入划词引用块并清空；返回处理后正文） */
   prepareBody?: (body: string) => string
+  /**
+   * 会话来源（日程助手 P1）：缺省 = 通用助手（列表排除 aiTeaching）。
+   * 传 'schedule' 时——会话列表只列 schedule 来源、新建会话带此来源、发送经 agentChat 透传
+   * （主进程据此注入日程人设与工具面），与通用助手**物理隔离**、列表互不可见。
+   */
+  sessionSource?: AgentSessionSource
+  /**
+   * 「一天一个会话」（日程助手）：激活且当前无活动会话时，自动载入**今天创建**的会话
+   * （按 createdAt 日期判定）；今天还没有就新建一条（标题 = 今天日期）。配合右栏 Tab 切走即卸载，
+   * 实现「今天开的对话，下次打开还在」。
+   */
+  autoResumeToday?: boolean
 }
 
 /** 对话 UI（ChatBody / 全屏学堂 bridge）消费的控制器面 */
@@ -76,16 +90,25 @@ export interface AssistantChatController {
   toggleDrawer: () => void
   closeDrawer: () => void
   send: (override?: string) => Promise<void>
-  newSession: () => Promise<void>
+  newSession: (title?: string) => Promise<void>
   loadSession: (id: string) => Promise<void>
   removeSession: (id: string) => Promise<void>
+  /** 钉住 / 取消钉住会话（通用助手左栏「★ 收藏」分区）：乐观更新 + 落盘 */
+  togglePin: (id: string) => Promise<void>
   regenerate: () => Promise<void>
+  /**
+   * 从断点继续（A 方案，2026-10-14）：中断卡上的「继续」。
+   * 不追加用户消息；现场（含 carry）由主进程一次性 claim。仅 `resumeInfo` 指向的那条消息可触发。
+   */
+  resume: () => Promise<void>
+  /** 本会话最近一次中断留下的可续现场（无 = null）；`resumeInfo.messageId` 就是挂按钮的那条消息 */
+  resumeInfo: ResumeInfo | null
   editSubmit: (id: string, content: string) => Promise<void>
   deleteMessage: (id: string) => Promise<void>
   abort: () => Promise<void>
   dismissChanges: () => void
-  /** 主动刷新会话列表（宿主切换等场景） */
-  refreshSessions: () => Promise<void>
+  /** 主动刷新会话列表（宿主切换等场景）；返回刷新后的列表供调用方同步使用 */
+  refreshSessions: () => Promise<AgentSessionInfo[]>
   /** N-3 会话列表运行态标记（running=转圈 / unread=完成未读蓝点 / failed=失败红标） */
   runStateOf: (sid: string) => 'running' | 'failed' | 'unread' | null
   /** 对话模型（providerId:modelId 串；空 = 全局默认）——settings 持久化 */
@@ -113,6 +136,19 @@ function nowLocal(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+/** 今天 YYYY-MM-DD（本地时区；「一天一个会话」按它判定） */
+function todayYmd(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+/** 今天的会话默认标题（如「10月11日 周六」） */
+function todayLabel(): string {
+  const d = new Date()
+  const wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()]
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${wd}`
+}
+
 /** 落库消息 → UI 消息（保留 id 供编辑/删除/重新生成定位） */
 function toUi(m: AgentStoredMessage): UiMessage {
   return {
@@ -137,7 +173,8 @@ function contextKeyOf(c: AgentContextInfo | null): string | null {
 }
 
 export function useAssistantChat(options: AssistantChatOptions): AssistantChatController {
-  const { active } = options
+  const { active, sessionSource } = options
+  const autoResumeToday = options.autoResumeToday === true
   /**
    * 界面上下文解析（宿主可注入优先级链，缺省 = 当前界面）。
    *
@@ -203,6 +240,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const [drawerMounted, setDrawerMounted] = useState(false)
   const drawerTimerRef = useRef<number | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  /** send 的自引用（提示型指令 /简报 的 onSend 用）：避免在 send 内部直接递归引用自身 */
+  const sendRef = useRef<((override?: string) => Promise<void>) | null>(null)
   /** 当前会话 id 的实时镜像：回复返回时判断用户是否已切换会话 */
   const activeIdRef = useRef<string | null>(null)
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
@@ -212,16 +251,27 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const [, bumpRunVersion] = useReducer((x: number) => x + 1, 0)
   /** refreshMessages 的稳定引用：store 订阅回调（声明在前）触达后定义的刷新函数用 */
   const refreshMessagesRef = useRef<((sid: string) => Promise<void>) | null>(null)
+  /** 同上：会话列表（可续现场的出口）也要能在订阅回调里刷新 */
+  const refreshSessionsRef = useRef<(() => Promise<AgentSessionInfo[]>) | null>(null)
   useEffect(() => subscribeAssistantRunState(() => {
     // 后台完成时正被本宿主查看（本宿主不是发起方、没有 finally 兜底）→ 补一次消息对齐
     const sid = activeIdRef.current
-    if (sid && takeEndedFor(sid)) void refreshMessagesRef.current?.(sid)
+    if (sid && takeEndedFor(sid)) {
+      void refreshMessagesRef.current?.(sid)
+      // 中断现场写在会话行上：后台那一次是以别的宿主/窗口发起的，这里必须重拉才拿得到「继续」
+      void refreshSessionsRef.current?.()
+    }
     bumpRunVersion()
   }), [])
   const pending = isSessionRunning(activeId)
   const runBucket = getRunBucket(activeId)
   const draft = runBucket?.draft ?? null
   const liveSteps = runBucket?.liveSteps ?? []
+  /**
+   * 可续现场（A 方案）：真源在主进程会话行的 resume（出口已 toResumeInfo 裁剪，**不含 carry**）。
+   * 只认本会话那一份 —— 别的会话的中断不该在当前视图冒出「继续」。
+   */
+  const resumeInfo = activeId ? (sessions.find(s => s.id === activeId)?.resumeInfo ?? null) : null
 
   // 查看登记（计数制，多宿主对称进出）：进入清角标，离开撤销「查看中」
   useEffect(() => {
@@ -245,14 +295,26 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     aiToolsListSkills().then(r => setSlashSkills(r.skills)).catch(() => setSlashSkills([]))
   }, [active])
 
-  const refreshSessions = useCallback(async () => {
+  const refreshSessions = useCallback(async (): Promise<AgentSessionInfo[]> => {
     try {
-      // 只列「通用助手」来源：AI 教学有自己的会话列表（同表存储，按 source 分流）
-      setSessions((await agentSessions()).filter(x => x.source !== 'aiTeaching'))
-    } catch { /* ignore */ }
-  }, [])
+      // 按来源分流（同表存储）：日程助手只列 schedule；通用助手**只列 assistant**
+      // （AI 教学有自己的会话列表）。三者列表互不可见。
+      // ★ 2026-10-13（F-8）：默认分支原来是**排除法**（`!== 'aiTeaching'`）—— 第三来源 `schedule`
+      //   落地时没回头补这一条 ⇒ 日程助手的会话混进了通用助手列表（三个宿主都不传 sessionSource，
+      //   全走这个分支）。改成**白名单**语义：以后再加来源不会重犯，写 `!==` 就得记得回来加一条。
+      //   `?? 'assistant'`：存量老数据无 source 字段（由 backfillSessionSources 回填），
+      //   兜底按通用助手算，与 agentSessionRepo 的缺省口径一致。
+      const all = await agentSessions()
+      const list = sessionSource
+        ? all.filter(x => x.source === sessionSource)
+        : all.filter(x => (x.source ?? 'assistant') === 'assistant')
+      setSessions(list)
+      return list
+    } catch { return [] }
+  }, [sessionSource])
 
   useEffect(() => { if (active) void refreshSessions() }, [active, refreshSessions])
+  refreshSessionsRef.current = refreshSessions
 
   // N-1 手册通道：主进程侧提示（手册→通用助手升格）→ Toast + 刷新会话列表（徽标随之变化）
   useEffect(() => onAssistantNotice((p) => {
@@ -303,14 +365,30 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     } catch { setMessages([]) }
   }, [closeDrawer])
 
-  const newSession = useCallback(async () => {
-    const sRow = await agentNewSession().catch(() => null)
+  const newSession = useCallback(async (title?: string) => {
+    const sRow = await newAgentSession(title, sessionSource)
     if (!sRow) return
     setSessions(prev => [sRow, ...prev])
     setActiveId(sRow.id)
     setMessages([])
     closeDrawer()
-  }, [closeDrawer])
+  }, [closeDrawer, sessionSource])
+
+  // 「一天一个会话」（日程助手）：激活且当前无活动会话时，自动载入今天创建的会话；没有则新建一条。
+  // 右栏 Tab 切走即卸载（WorkbenchRightPanel 条件渲染）→ 再次打开时本效果重跑，回到今天的会话。
+  useEffect(() => {
+    if (!active || !autoResumeToday) return
+    let cancelled = false
+    void (async () => {
+      const list = await refreshSessions()
+      if (cancelled || activeIdRef.current) return
+      const today = todayYmd()
+      const mine = list.filter(s => (s.createdAt ?? '').slice(0, 10) === today)
+      if (mine.length > 0) await loadSession(mine[0].id)
+      else await newSession(todayLabel())
+    })()
+    return () => { cancelled = true }
+  }, [active, autoResumeToday, refreshSessions, loadSession, newSession])
 
   const removeSession = useCallback(async (id: string) => {
     if (deletingId !== id) {
@@ -323,6 +401,20 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     setSessions(prev => prev.filter(x => x.id !== id))
     if (activeIdRef.current === id) { setActiveId(null); setMessages([]) }
   }, [deletingId])
+
+  /** 钉住 / 取消钉住（通用助手「★ 收藏」分区）：乐观更新，落盘失败再拉库对齐 */
+  const togglePin = useCallback(async (id: string) => {
+    const cur = sessions.find(s => s.id === id)
+    const next = !cur?.pinnedAt
+    setSessions(prev => prev.map(s => (s.id === id ? { ...s, pinnedAt: next ? new Date().toISOString() : null } : s)))
+    try {
+      const ok = await agentSetSessionPinned(id, next)
+      if (!ok) void refreshSessions()
+    } catch {
+      showToast({ type: 'error', message: '钉住失败' })
+      void refreshSessions()
+    }
+  }, [sessions, refreshSessions])
 
   const send = useCallback(async (override?: string) => {
     const raw = (override ?? input).trim()
@@ -346,6 +438,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
         sessionId: activeIdRef.current ?? '',
         surface: options.surfaceOf ? options.surfaceOf() : 'assistant',
         onProgress: p => setCompressing(p.active),
+        // 提示型指令（/简报 等）：命中即把 prompt 当作用户消息发出（走正常 send 流程）
+        onSend: (t) => { void sendRef.current?.(t) },
       })) {
         if (!override) setInput('')
         return
@@ -353,7 +447,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     }
     let sid = activeIdRef.current
     if (!sid) {
-      const sRow = await agentNewSession().catch(() => null)
+      const sRow = await newAgentSession(undefined, sessionSource)
       if (!sRow) return
       sid = sRow.id
       setActiveId(sid)
@@ -382,7 +476,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       // Skill chip 随消息一次性消费，发出即清
       const sk = pickedSkill
       setPickedSkill(null)
-      const r = await agentChat(sid, body, finalCtx ?? undefined, cid, undefined, modelId || undefined, thinking ? 'medium' : 'off', sk?.registryName)
+      const r = await agentChat(sid, body, finalCtx ?? undefined, cid, sessionSource, modelId || undefined, thinking ? 'medium' : 'off', sk?.registryName)
       // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
       if (r.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要` })
       // 用户在等待期间切换了会话：回复已落库，但不注入当前视图
@@ -392,18 +486,26 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       }
       if (r.ok && r.reply !== undefined) {
         if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
-      } else if (r.code === 'ABORTED') {
-        showToast({ type: 'info', message: '已停止生成' })
+      } else if (r.code === 'USER_ABORTED') {
+        showToast({ type: 'info', message: '已停止生成 · 可点「继续」接着做' })
       } else {
-        showToast({ type: 'error', message: `AI 调用失败：${r.error ?? '未知错误'}` })
+        // 有可续现场（几乎每种中断都有）：明确告诉用户按钮在哪，别让他以为只能重来
+        const canResume = r.interruption?.resumable === true
+        showToast({ type: 'error', message: `AI 调用失败：${r.error ?? '未知错误'}${canResume ? ' · 可点「继续」接着做' : ''}` })
       }
       // 以会话库为准刷新（拿到落库 id/trace；中止时仅剩用户消息也保持一致）
       await refreshMessages(sid)
+    } catch (err) {
+      // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）——这里兜住并留日志
+      console.error('[assistant] send 未捕获异常', err)
+      showToast({ type: 'error', message: `AI 调用异常：${String((err as Error)?.message ?? err)}` })
+      await refreshMessages(sid).catch(() => { /* 刷新失败不掩盖原始异常 */ })
     } finally {
       endRun(sid)
       void refreshSessions()
     }
-  }, [input, pickedSkill, refreshMessages, refreshSessions, options, attachedFiles, modelId, thinking, contextRemoved, resolveCtx])
+  }, [input, pickedSkill, refreshMessages, refreshSessions, options, attachedFiles, modelId, thinking, contextRemoved, resolveCtx, sessionSource])
+  sendRef.current = send
 
   /** 重新生成最后一条回复（末条为助手消息时可用） */
   const regenerate = useCallback(async () => {
@@ -419,15 +521,58 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     const cid = crypto.randomUUID()
     try {
       const r = await agentRegenerate(sid, (contextRemoved ? null : resolveCtx()) ?? undefined, cid, thinking ? 'medium' : 'off')
-      if (r.code === 'ABORTED') showToast({ type: 'info', message: '已停止生成' })
-      else if (!r.ok) showToast({ type: 'error', message: `重新生成失败：${r.error ?? '未知错误'}` })
+      if (r.code === 'USER_ABORTED') showToast({ type: 'info', message: '已停止生成 · 可点「继续」接着做' })
+      else if (!r.ok) {
+        const again = r.interruption?.resumable === true ? ' · 可点「继续」接着做' : ''
+        showToast({ type: 'error', message: `重新生成失败：${r.error ?? '未知错误'}${again}` })
+      }
       else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
       await refreshMessages(sid)
+    } catch (err) {
+      // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
+      console.error('[assistant] regenerate 未捕获异常', err)
+      showToast({ type: 'error', message: `重新生成异常：${String((err as Error)?.message ?? err)}` })
+      await refreshMessages(sid).catch(() => { /* 刷新失败不掩盖原始异常 */ })
     } finally {
       endRun(sid)
       void refreshSessions()
     }
   }, [messages, refreshMessages, refreshSessions, thinking, contextRemoved, resolveCtx])
+
+  /**
+   * 从断点继续（A 方案）：不追加用户消息 —— 主进程用会话行里那份现场（含 carry）拼一次续跑注入，
+   * 拼在 convo 末尾（前缀不变 → prompt cache 不受影响）。守卫与 send 同款：
+   * 本会话在跑 / 全局并发上限都不发请求；现场由主进程 claim，重复点击第二次会如实报「没有可继续的中断点」。
+   */
+  const resume = useCallback(async () => {
+    const sid = activeIdRef.current
+    if (!sid || isSessionRunning(sid)) return
+    if (runningSessionCount() >= MAX_PARALLEL) {
+      showToast({ type: 'info', message: `已有 ${MAX_PARALLEL} 个对话在运行，请等一个完成再试` })
+      return
+    }
+    beginRun(sid)
+    setLastChanges(null)
+    const cid = crypto.randomUUID()
+    try {
+      const r = await agentResume(sid, (contextRemoved ? null : resolveCtx()) ?? undefined, cid, sessionSource, modelId || undefined, thinking ? 'medium' : 'off')
+      if (r.code === 'USER_ABORTED') showToast({ type: 'info', message: '已停止 · 可继续' })
+      else if (!r.ok) {
+        const again = r.interruption?.resumable === true ? ' · 可再点一次「继续」' : ''
+        showToast({ type: 'error', message: `继续失败：${r.error ?? '未知错误'}${again}` })
+      } else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
+      await refreshMessages(sid)
+    } catch (err) {
+      // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
+      console.error('[assistant] resume 未捕获异常', err)
+      showToast({ type: 'error', message: `继续异常：${String((err as Error)?.message ?? err)}` })
+      await refreshMessages(sid).catch(() => { /* 刷新失败不掩盖原始异常 */ })
+    } finally {
+      endRun(sid)
+      // 现场写回会话行（成功即已清空）→ 重拉列表才能让「继续」正确消失/出现
+      void refreshSessions()
+    }
+  }, [contextRemoved, modelId, refreshMessages, refreshSessions, resolveCtx, sessionSource, thinking])
 
   /** 改写用户消息并重推其后回复 */
   const editSubmit = useCallback(async (messageId: string, content: string) => {
@@ -443,10 +588,18 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     const cid = crypto.randomUUID()
     try {
       const r = await agentEditMessage(sid, messageId, content, (contextRemoved ? null : resolveCtx()) ?? undefined, cid, thinking ? 'medium' : 'off')
-      if (r.code === 'ABORTED') showToast({ type: 'info', message: '已停止生成' })
-      else if (!r.ok) showToast({ type: 'error', message: `修改失败：${r.error ?? '未知错误'}` })
+      if (r.code === 'USER_ABORTED') showToast({ type: 'info', message: '已停止生成 · 可点「继续」接着做' })
+      else if (!r.ok) {
+        const again = r.interruption?.resumable === true ? ' · 可点「继续」接着做' : ''
+        showToast({ type: 'error', message: `修改失败：${r.error ?? '未知错误'}${again}` })
+      }
       else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
       await refreshMessages(sid)
+    } catch (err) {
+      // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
+      console.error('[assistant] editSubmit 未捕获异常', err)
+      showToast({ type: 'error', message: `修改异常：${String((err as Error)?.message ?? err)}` })
+      await refreshMessages(sid).catch(() => { /* 刷新失败不掩盖原始异常 */ })
     } finally {
       endRun(sid)
       void refreshSessions()
@@ -499,7 +652,10 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     newSession,
     loadSession,
     removeSession,
+    togglePin,
     regenerate,
+    resume,
+    resumeInfo,
     editSubmit,
     deleteMessage,
     abort,

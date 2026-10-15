@@ -28,6 +28,18 @@ let lessonFolderResolver: ((sessionId: string, getSetting: (key: string) => unkn
 export function setLessonFolderResolver(fn: (sessionId: string, getSetting: (key: string) => unknown) => string | null): void {
   lessonFolderResolver = fn
 }
+
+/** 课程助手文件夹解析器（由 `aiTeachingCourse` 注册，避免循环 import）：返回 `{工作区}/课程助手`、或 null。
+ *  助手夹**不带日期**（固定名、一个工作区一个）；其 AI 产物统一落夹内 `output/`（元数据仍在夹顶层）。 */
+let assistantFolderResolver: ((sessionId: string, getSetting: (key: string) => unknown) => string | null) | null = null
+export function setAssistantFolderResolver(fn: (sessionId: string, getSetting: (key: string) => unknown) => string | null): void {
+  assistantFolderResolver = fn
+}
+
+/** 该会话是否为某工作区的「课程助手」（决定夹名无日期 + 产物落 output/） */
+function isCourseAssistant(sessionId: string, getSetting: (key: string) => unknown): boolean {
+  return !!assistantFolderResolver?.(sessionId, getSetting)
+}
 const DEFAULT_ROOT_DIR = 'AI教学'
 /** 会话约束文件（P2 §2.3）：AI 注入的唯一真相源，用户可在编辑器直接改 */
 const CONSTRAINTS_FILE = 'CONSTRAINTS.md'
@@ -140,6 +152,9 @@ export function ensureSessionFolder(sessionId: string, getSetting: (key: string)
     // L1：课时 → 落分层路径（章号·知识点/课时N·类型）
     const lessonRel = lessonFolderResolver?.(sessionId, getSetting)
     if (lessonRel) return ensureSessionFolderAt(sessionId, lessonRel, getSetting)
+    // 课程助手 → 固定夹名「课程助手」（无日期），一个工作区一个
+    const assistantRel = assistantFolderResolver?.(sessionId, getSetting)
+    if (assistantRel) return ensureSessionFolderAt(sessionId, assistantRel, getSetting)
     const wsId = getWorkspaceOfSession(sessionId)
     const baseRel = (wsId && workspaceFolderRel(wsId, getSetting)) || rootDir
     const baseAbs = join(vault.rootPath, baseRel)
@@ -173,7 +188,18 @@ export function ensureSessionFolderAt(sessionId: string, rel: string, getSetting
     const rootDir = rootDirName(getSetting)
     const existing = findSessionFolderRel(vault.rootPath, rootDir, sessionId)
     if (existing) return { ok: true, relPath: existing }
-    const folderAbs = join(vault.rootPath, rel)
+    // 目标路径可能被「另一个会话」的锚点占用（多环境 ping-pong / 固定名助手夹会命中）——
+    // 不覆盖别人的锚点，改用 unique 名（`课程助手 (2)`）。确定性课时路径的锚点恒属本会话，不触发。
+    let finalRel = rel
+    let folderAbs = join(vault.rootPath, finalRel)
+    if (existsSync(join(folderAbs, ANCHOR_FILE)) && !anchorMatches(folderAbs, sessionId)) {
+      const slash = finalRel.lastIndexOf('/')
+      const dirRel = slash >= 0 ? finalRel.slice(0, slash) : rootDir
+      const dirAbs = join(vault.rootPath, dirRel)
+      mkdirSync(dirAbs, { recursive: true })
+      finalRel = slash >= 0 ? `${dirRel}/${uniqueFileName(dirAbs, finalRel.slice(slash + 1))}` : uniqueFileName(dirAbs, finalRel)
+      folderAbs = join(vault.rootPath, finalRel)
+    }
     mkdirSync(folderAbs, { recursive: true })
     const wsId = getWorkspaceOfSession(sessionId)
     const anchor: SessionFolderAnchor = { sessionId, title: session.title, createdAt: session.created_at, v: 1, ...(wsId ? { workspaceId: wsId } : {}) }
@@ -184,9 +210,9 @@ export function ensureSessionFolderAt(sessionId: string, rel: string, getSetting
       wsFolder && join(vault.rootPath, wsFolder, ...CONSTRAINTS_TEMPLATE_REL_SEGMENTS),
       join(vault.rootPath, rootDir, ...CONSTRAINTS_TEMPLATE_REL_SEGMENTS),
     )
-    const parentRel = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : rootDir
+    const parentRel = finalRel.includes('/') ? finalRel.slice(0, finalRel.lastIndexOf('/')) : rootDir
     broadcastTreeRefresh(parentRel)
-    return { ok: true, relPath: rel }
+    return { ok: true, relPath: finalRel }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -475,8 +501,10 @@ export function resolveWriteOwnerRel(sessionId: string, getSetting: (key: string
   const ownerId = row?.parentSessionId || String(sessionId ?? '')
   const base = sessionFolder(ownerId, getSetting).relPath
   if (!base) return null
-  if (!row?.parentSessionId) return base
-  return `${base}/支线·${laneSubName(row.title)}`
+  if (row?.parentSessionId) return `${base}/支线·${laneSubName(row.title)}`
+  // 课程助手：AI 产物统一收进夹内 `output/`（元数据 .session.json / CONSTRAINTS.md / PROFILE.md 仍在夹顶层）
+  if (isCourseAssistant(sessionId, getSetting)) return `${base}/output`
+  return base
 }
 
 export function ensureWriteOwnerFolder(sessionId: string, getSetting: (key: string) => unknown): FolderResult {
@@ -484,8 +512,13 @@ export function ensureWriteOwnerFolder(sessionId: string, getSetting: (key: stri
   const ownerId = row?.parentSessionId || String(sessionId ?? '')
   const base = ensureSessionFolder(ownerId, getSetting)
   if (!base.ok || !base.relPath) return base
-  if (!row?.parentSessionId) return base
-  const rel = `${base.relPath}/支线·${laneSubName(row.title)}`
+  // 课程助手：产物落 `{助手夹}/output/`（与 resolveWriteOwnerRel 同口径）
+  const rel = row?.parentSessionId
+    ? `${base.relPath}/支线·${laneSubName(row.title)}`
+    : isCourseAssistant(sessionId, getSetting)
+      ? `${base.relPath}/output`
+      : null
+  if (!rel) return base
   try {
     const vault = getCurrentVault()
     if (vault) mkdirSync(join(vault.rootPath, rel), { recursive: true })
@@ -559,19 +592,22 @@ export function organizeDoc(sessionId: string, title: string, content: string, g
     if (!vault) return { ok: false, error: '尚未打开仓库' }
     const body = String(content ?? '').replace(/\r\n/g, '\n')
     const base = `${prefix || '讲义'}·${sanitizeTitle(title)}`
-    const dirAbs = join(vault.rootPath, ensured.relPath)
+    // 课程助手的讲义/测验也属"产物"，落夹内 `output/`；其它会话保持夹顶层（旧夹不迁移）
+    const targetRel = isCourseAssistant(sessionId, getSetting) ? `${ensured.relPath}/output` : ensured.relPath
+    const dirAbs = join(vault.rootPath, targetRel)
+    mkdirSync(dirAbs, { recursive: true })
     let name = `${base}.md`
     for (let n = 1; n < 50; n++) {
       const abs = join(dirAbs, name)
       if (!existsSync(abs)) break
       try {
-        if (readFileSync(abs, 'utf-8') === body) return { ok: true, relPath: `${ensured.relPath}/${name}` } // 内容未变 = 幂等
+        if (readFileSync(abs, 'utf-8') === body) return { ok: true, relPath: `${targetRel}/${name}` } // 内容未变 = 幂等
       } catch { /* 读取失败按占用处理，换后缀 */ }
       name = `${base} (${n}).md`
     }
     writeFileSync(join(dirAbs, name), body, 'utf-8')
     broadcastTreeRefresh(rootDirName(getSetting))
-    return { ok: true, relPath: `${ensured.relPath}/${name}` }
+    return { ok: true, relPath: `${targetRel}/${name}` }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }

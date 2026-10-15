@@ -39,6 +39,8 @@ import {
 } from '../../../src/lib/inlineSuggestTrigger.ts'
 import { composeContextWithDigest } from '../../../electron/lib/agentCompressCore.ts'
 import { AI_ASSISTANT_SHORTCUT_DISABLED } from '../../../src/lib/workbenchLayout.ts'
+// 2026-10-13：快捷键总表已由真源驱动（L1 真源化），J12 组随之改指真源而不是解析 ShortcutsView 的 JSX
+import { COMMANDS } from '../../../src/lib/commandRegistry.ts'
 import { stripComments, walkSourceFiles } from '../shared/strip-comments.mjs'
 
 // ★ 仓库根按**脚本自身位置**解析，不写死绝对路径：写死会把「在 worktree 里跑」变成
@@ -563,7 +565,13 @@ ok(/from '\.\.\/lib\/aiAssistant\/inlineSuggest'/.test(SRC_MAIN),
 
 // J10 渲染层接线
 const SRC_MONACO = stripComments(read('src/components/shared/MonacoPane.tsx'))
-const SRC_EDITOR = stripComments(read('src/modules/knowledge/components/PageEditor.tsx'))
+// 2026-10-11：AI 续写四态钮从 PageEditor 的悬浮胶囊搬到了顶栏组件（NoteTopBar）——
+// 断言点的锚点文本与四态短路顺序**一字未改**，只是采样文件跟着搬；两份拼在一起采样，
+// 这样「搬走的部分」与「留在 PageEditor 的部分」（如 J17d 的 inlineOn 判据）都能被同一批断言覆盖。
+const SRC_EDITOR = stripComments(
+  read('src/modules/knowledge/components/PageEditor.tsx') + '\n' +
+  read('src/modules/knowledge/components/NoteTopBar.tsx'),
+)
 ok(/registerInlineCompletionsProvider\(\s*'markdown'/.test(SRC_MONACO),
   'J10a 注册 markdown 语言的 inline completions provider（仅 md）', '')
 ok(/inlineCompletionInstalled/.test(SRC_MONACO),
@@ -588,15 +596,18 @@ ok(!/aiAssistant\.inlineSuggest/.test(SRC_SETTINGS) && !/inlineSuggest:/.test(SR
   'J11c ★ 不得出现上游的点号键写法（本项目 SETTINGS 全扁平键）', '')
 
 // J12 快捷键总表登记 + 不得与既有系统级快捷键冲突
-const SRC_SHORTCUTS = stripComments(read('src/modules/settings/views/ShortcutsView.tsx'))
-ok(/'Alt',\s*'A'/.test(SRC_SHORTCUTS),
-  'J12a 快捷键总表登记 Alt+A', '')
+// ★ 2026-10-13 L1 真源化：总表的数据源已是 src/lib/commandRegistry.ts，本组不再解析
+//   ShortcutsView 的 JSX（那条路在组件改成数据驱动后必然误报）。
+const ALL_CHORDS = COMMANDS.flatMap((c) => c.keys.map((k) => k.join('+')))
+ok(ALL_CHORDS.includes('Alt+A'), 'J12a 快捷键总表（真源）登记 Alt+A', '')
 // Ctrl+Alt+S 是系统级全局快捷键（dayPanelWindow globalShortcut）→ 不得用作内联建议触发
 const SRC_DAYPANEL = stripComments(read('electron/main/dayPanelWindow.ts'))
 ok(/globalShortcut\.register\('Control\+Alt\+S'/.test(SRC_DAYPANEL),
   'J12b ★ Ctrl+Alt+S 确为系统级全局快捷键（上游候选因此不可用）', '')
-ok(!/'Ctrl',\s*'Alt',\s*'S'[\s\S]{0,80}续写/.test(SRC_SHORTCUTS),
-  'J12c 内联建议未占用 Ctrl+Alt+S', '')
+const casOwners = COMMANDS.filter((c) => c.keys.some((k) => k.join('+') === 'Ctrl+Alt+S'))
+ok(casOwners.length > 0 && casOwners.every((c) => !/续写|内联建议/.test(c.label + c.desc)),
+  'J12c 内联建议未占用 Ctrl+Alt+S（该键归日程小窗）',
+  `占用者: ${casOwners.map((c) => c.id).join(',') || '无'}`)
 
 // J13 负向：不新增 AI 工具 / 不进常驻 schema（铁律 16）
 ok(!/registerTool|builtinTools|coreTool/.test(SRC_INLINE) && !/registerTool|builtinTools|coreTool/.test(SRC_MONACO),
@@ -857,8 +868,8 @@ ok(/triggerInlineSuggest\(\)\)\s*return/.test(SRC_EDITOR) &&
     'J17c 三色令牌齐备（生成中/开 = success，暂停 = warning，关 = danger）', '')
   ok(/opacity-70/.test(stateExpr),
     'J17c2 ★ 「关」为降级红（opacity-70，不借 --danger 的满色强度）', '')
-  ok(/const inlineOn = s\.aiAssistantInlineSuggest !== false/.test(SRC_EDITOR),
-    'J17d 四种状态的判据取自设置真值（不是本地影子 state）', '')
+  ok(/s\.aiAssistantInlineSuggest !== false/.test(SRC_EDITOR) && /inlineOn=\{/.test(SRC_EDITOR),
+    'J17d 四种状态的判据取自设置真值（不是本地影子 state）—— 批 2 起 ✨ 搬进 NoteTopBar，该值经 prop 下传', '')
 }
 ok(/data-wb="inlineOffSlash"/.test(SRC_EDITOR),
   'J17e ★ 关闭态有斜杠元素（色盲兜底：颜色不是唯一信号）', '')

@@ -98,8 +98,13 @@ check('剪贴板里没有文件时不 preventDefault（文本粘贴放行）',
 check('右键「粘贴」经 requestPasteFromMenu 走 webContents.paste 链路',
   /requestPasteFromMenu\b/.test(knowIdx) && /void pasteFromClipboard\(\)/.test(knowIdx))
 check('菜单粘贴延后一帧再聚焦（避开菜单卸载引发的 blur）', /requestAnimationFrame\(\(\) => \{[\s\S]{0,200}treeRef\.current\?\.focus\(\)/.test(knowIdx))
+// ★ 2026-10-12 校正：原断言锁 `>粘贴</button>` + `setTreeMenu(null); requestPasteFromMenu(dirRel)`，
+// 这两个字面量在数据驱动改造后就不存在了（菜单项是**数据**，由共享 FileContextMenu 渲染）——
+// 该断言在 HEAD 上已经是红的（陈旧断言，非行为回归）。改为锁「粘贴项作为数据传给菜单」这件事本身。
+// 注意：文件条目菜单已按 Obsidian 口径**去掉**粘贴，只留文件夹条目与空白处 —— 本断言不区分节点类型，
+// 锁的是「这条通道在、且指向 requestPasteFromMenu」。
 check('右键菜单含「粘贴」入口（点击走 requestPasteFromMenu）',
-  />粘贴<\/button>/.test(knowIdx) && /setTreeMenu\(null\); requestPasteFromMenu\(dirRel\)/.test(knowIdx))
+  /\{ key: 'paste', label: '粘贴',[\s\S]{0,160}?onSelect: \(\) => requestPasteFromMenu\(dirRel\) \}/.test(knowIdx))
 check('粘贴结果按 skipped 数量分流提示', /已跳过 \$\{res\.skipped\.length\} 项/.test(knowIdx))
 check('全失败时提示带出具体原因（不吞成一句「粘贴失败」）', /res\.skipped\[0\]\?\.reason/.test(knowIdx))
 check('单次上限常量 = 500', /const MAX_PASTE_ITEMS = 500\b/.test(src))

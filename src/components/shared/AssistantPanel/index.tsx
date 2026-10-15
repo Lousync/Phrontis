@@ -348,7 +348,7 @@ export function AssistantPanel({ shellLeft = 68, suspendShortcut = false, aiShor
   )
 
   /** 弱提示升格：暖色提示条（B-12 四次拍板 2026-09-22，方案 A）——从开关旁的小字升为
-   *  输入卡顶部的独立提示条：琥珀底 + 警告图标 + 「去配置」直达（跳设置 → AI 工具 → 模型，
+   *  输入卡顶部的独立提示条：琥珀底 + 警告图标 + 「去配置」直达（跳设置 → AI → 模型，
    *  嵌入模型就在那里配）。仍然只描述当前状态：不阻断发送、无「知道了」记忆（契约 H5）。
    *  色板用主题 token `--warning` / `--warning-bg`（明暗主题各有一份，勿写死色值）。 */
   const perceptionHintStrip = perceptionOn && semanticOk === false ? (

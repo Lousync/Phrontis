@@ -50,6 +50,8 @@ export async function classifyManualIntent(message: string, modelSpec?: string):
       providerId, modelId, effort: 'off',
       signal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
       messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
+      // 分类器是单次调用、无对话上下文：固定用途名（会话头要稳定，不能是随机值）
+      sessionId: 'manual-classify',
     })
     if (!r.ok) return 'agent'
     const out = String(r.content ?? '').toLowerCase()

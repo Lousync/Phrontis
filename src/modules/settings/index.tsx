@@ -91,7 +91,7 @@ export function SettingsModule() {
   // 跳转到具体设置项：切大项 → (必要时)切 AI 页签 → 滚动并高亮
   const jumpTo = (item: SettingItem) => {
     setSection(item.section)
-    setAiTabOverride(item.section === 'aiTools' ? (item.aiTab ?? 'builtin') : undefined)
+    setAiTabOverride(item.section === 'aiTools' ? (item.aiTab ?? 'models') : undefined)
     setJumpSeq(n => n + 1)
     setQuery('')
     setComboOpen(false)

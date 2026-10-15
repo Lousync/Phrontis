@@ -23,6 +23,7 @@ const types = read('src/types/index.ts')
 const preload = read('electron/preload/index.ts')
 const ipc = read('src/lib/ipc.ts')
 const agent = read('electron/lib/agentService.ts')
+const course = read('electron/lib/aiTeachingCourse.ts')
 
 let pass = 0
 let fail = 0
@@ -75,6 +76,19 @@ check('建夹不再播种对话级 SOURCES/SOURCE.md（登记收敛工作区主�
 check('对话改名仍同步存量素材夹（合并读按夹名定位，不改会丢）', folders.includes("join(parentAbs, 'SOURCES', oldName)"))
 check('删对话仍回收存量素材夹（跟随同一设置）', folders.includes('SOURCES/${rel.slice(lastSlash + 1)}'))
 
+// ---- 课程助手：固定夹名（无日期）+ 产物落 output/ ----
+console.log('\n[课程助手夹] aiTeachingFolders.ts / aiTeachingCourse.ts')
+check('folders 暴露 setAssistantFolderResolver（助手夹解析器注册点）', folders.includes('export function setAssistantFolderResolver'))
+check('folders 有 isCourseAssistant 判定并查询解析器', folders.includes('function isCourseAssistant') && folders.includes('assistantFolderResolver?.(sessionId, getSetting)'))
+check('ensureSessionFolder 课时判定后接助手判定（固定夹名路径）', /lessonRel[\s\S]{0,120}assistantFolderResolver\?\.\(sessionId, getSetting\)/.test(folders))
+check('resolveWriteOwnerRel 助手产物落 ${base}/output', folders.includes('${base}/output'))
+check('ensureWriteOwnerFolder 助手落 ${base.relPath}/output', folders.includes('${base.relPath}/output'))
+check('organizeDoc 助手讲义/测验落 output', folders.includes('${ensured.relPath}/output') && folders.includes('isCourseAssistant(sessionId, getSetting)'))
+check('建夹冲突保护：异会话锚点占用则 uniqueFileName 改名（不覆盖）', folders.includes('anchorMatches(folderAbs, sessionId)') && folders.includes('uniqueFileName(dirAbs,'))
+check('course 导出 assistantFolderRel 且按 assistantSessionId 反查工作区', course.includes('function assistantFolderRel') && course.includes('assistantSessionId === sessionId'))
+check('course 注册 setAssistantFolderResolver（镜像课时解析器）', course.includes('setAssistantFolderResolver(assistantFolderRel)'))
+check('助手夹名固定「课程助手」（无日期前缀）', course.includes('/课程助手') && !/assistantFolderRel[\s\S]{0,200}datePrefix/.test(course))
+
 // ---- 渲染层 ----
 console.log('\n[渲染层] index.tsx')
 check('无对话也回读素材库（sid ?? 空 = 工作区主库）', renderer.includes('aiTeachSrcRead(sid ?? \'\')'))
@@ -82,14 +96,14 @@ check('记录对话级路径（上收入口的显隐依据）', renderer.include
 check('卡片路径按条目所属层（e.dirRel 回退主库推导）', renderer.includes('e.dirRel || (srcFileRel'))
 check('会话存量条目带「对话」角标', renderer.includes("e.scope === 'session' && ("))
 check('「上收」按钮：有存量且有对话时出现', renderer.includes('{srcSessionRel && activeId && (') && renderer.includes('doPromoteSources()'))
-check('doPromoteSources 调 aiTeachSrcPromote（确认弹窗保护）', renderer.includes('aiTeachSrcPromote(activeId)') && renderer.includes("'上收素材到工作区主库'"))
+check('doPromoteSources 调 aiTeachSrcPromote（确认弹窗保护）', renderer.includes('aiTeachSrcPromote(activeId, nos)') && renderer.includes("'上收素材到工作区主库'"))
 check('＋素材不再门控 activeId（未建对话也能登记）', !renderer.includes('{activeId && (\n                  <button onClick={() => {\n                    setSrcForm('))
 
 // ---- IPC 四层 ----
 console.log('\n[IPC] promote 四层接线')
 check('主进程注册 aiTeachSrc:promote', src.includes("ipcMain.handle('aiTeachSrc:promote'"))
-check('preload 暴露 aiTeachSrcPromote', preload.includes("aiTeachSrcPromote: (id: string) => ipcRenderer.invoke('aiTeachSrc:promote', id)"))
-check('types 声明 aiTeachSrcPromote', types.includes('aiTeachSrcPromote: (id: string) => Promise<AiTeachSourcesResult>'))
+check('preload 暴露 aiTeachSrcPromote', preload.includes("aiTeachSrcPromote: (id: string, nos?: number[]) => ipcRenderer.invoke('aiTeachSrc:promote', id, nos)"))
+check('types 声明 aiTeachSrcPromote', types.includes('aiTeachSrcPromote: (id: string, nos?: number[]) => Promise<AiTeachSourcesResult>'))
 check('ipc.ts 封装 aiTeachSrcPromote', ipc.includes('export const aiTeachSrcPromote'))
 check('agentService 注入仍走 resolveSourcesForInjection', agent.includes('resolveSourcesForInjection(sessionId, getSettingReader())'))
 

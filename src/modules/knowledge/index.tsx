@@ -1,12 +1,14 @@
-import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff } from 'lucide-react'
+import { FileText, Folder, ListTree, FolderTree, X, BookMarked, Share2, Image as ImageIcon, ArrowUp, Pin, PinOff, FilePlus, FolderPlus, ClipboardPaste, Pencil, CopyPlus, Trash2, ArrowUpNarrowWide, ArrowDownNarrowWide, Check, ChevronsUpDown, ChevronsDownUp, Columns2, Rows2, Link2, ExternalLink, FolderSearch, FolderInput, House } from 'lucide-react'
 import { PluginIcon } from '../../components/shared/ModuleIcons'
 import { LOCATE_QUIZ_VIEW_EVENT , QUIZ_ENTRY_ENABLED, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT } from '../../lib/workbenchLayout'
 import type { KnowledgeCategory, KnowledgePage, KnowledgeTag, PluginViewContribution } from '../../types'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { WelcomeHtmlView } from './components/WelcomeHtmlView'
 import { FileMetaCard } from './components/FileMetaCard'
+import { ArchiveTextView } from './components/ArchiveTextView'
+import { isTextViewableExt } from '../../lib/aiTextExts'
 import { registerAssistantContext } from '../../lib/assistantContext'
 import {
   getKnowledgeCategories, createKnowledgeCategory, updateKnowledgeCategory, deleteKnowledgeCategory,
@@ -17,12 +19,13 @@ import {
   showImportOpenDialog, readImportFiles, importPdf, importPdfFile, importBinaryFile, importBinary,
   showFolderDialog, importFolder,
   duplicateKnowledgePage, duplicateKnowledgeCategory,
-  showExportSaveDialog, writeExportTextFile,
+  showExportSaveDialog, writeExportTextFile, writeExportPdf,
   getKnowledgeTags, pluginListViews, getKnowledgeGraph,
   getKnowledgeIndexWarnings,
   workspaceRename, workspaceGetCurrent, workspaceTrash,
   workspaceListDir, workspaceCreateFile, workspaceMkdir,
   workspacePasteExternal, pasteFromClipboard, getPathForFile,
+  copyText, workspaceOpenInSystem,
 } from '../../lib/ipc'
 import { hasTextPasteTarget } from '../../lib/pasteTarget'
 import { notifyDataChanged } from '../../lib/dataChanged'
@@ -34,7 +37,13 @@ import { VaultTree, type DirCache, type TreeNode, type CreateIntent, type Create
 import { recordFileOp } from '../../lib/fileOpHistory'
 import { useDataChanged } from '../../lib/dataChanged'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
-import { useContextMenuPosition } from '../../lib/useContextMenuPosition'
+import { FileContextMenu, type FileMenuEntry } from '../../components/shared/FileContextMenu'
+import { DirPicker } from '../../components/shared/DirPicker'
+import { TreeExpandButton } from '../../components/shared/TreeExpandButton'
+import { SIDEBAR_HEADER_ICON } from '../../components/shared/sidebarHeaderIcon'
+import { TREE_SORT_OPTIONS, getTreeSortMode, setTreeSortMode, type TreeSortMode } from '../../lib/treeSort'
+import { loadTreeSubtree } from '../../lib/treeExpand'
+import { duplicateWorkspaceFile } from '../../lib/fileDuplicate'
 import { NotebookList } from './components/NotebookList'
 import { ChapterPanel } from './components/ChapterPanel'
 // Monaco 宿主单独 lazy：PageEditor 内联了 @monaco-editor/react，而 monaco 主包 8.3MB
@@ -43,6 +52,7 @@ const PageEditor = lazy(() => import('./components/PageEditor').then((m) => ({ d
 import { PageTabStrip } from '../../components/workbench/PageTabStrip'
 import { getFileTypeInfo } from '../../lib/fileTypes'
 import { GraphView } from './components/graph/GraphView'
+import { emptyNav, pushNav, stepNav, canNavBack, canNavForward, type NavState } from './navHistory'
 import { QuizCollection } from './components/QuizCollection'
 import { QuizNavPanel } from './components/QuizNavPanel'
 import { ConfirmDialog } from '../../components/shared'
@@ -51,6 +61,9 @@ import { PluginFrame } from '../../components/shared/PluginFrame'
 import { ImportZone } from '../shared/components/ImportZone'
 import { ResizablePanel } from '../../components/shared/ResizablePanel'
 import { FolderFocusButton } from '../../components/shared/FolderFocusButton'
+// 图片沉浸态（批 3，2026-10-13）：自带视图态与浮条控件（沉浸态没有顶栏可放控件）
+import { ImmersiveImageView } from '../../components/shared/image/ImmersiveImageView'
+import { isRenderableImageExt } from '../../lib/imageFormats'
 import { TreeNewButton, type TreeNewMenuItem } from '../../components/shared/TreeNewButton'
 import { isEditingInput } from '../../lib/shortcuts'
 import { getGlobalActiveTab } from '../../lib/activeTab'
@@ -68,7 +81,7 @@ interface PageInfo {
   fileType: string
 }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onRequestCloseTab, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onRequestCloseTab?: () => void; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, secondaryPageIds = [], secondaryActiveId = null, secondaryBarEl = null, secondaryContentEl = null, splitDisabled = false, onSplitPage, onSecondaryActivate, onMergeSplit, onRemoveSecondary, onMovePageToPane, onBackToWorkbench }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; secondaryPageIds?: string[]; secondaryActiveId?: string | null; secondaryBarEl?: HTMLElement | null; secondaryContentEl?: HTMLElement | null; splitDisabled?: boolean; onSplitPage?: (pageId: string, orientation: 'row' | 'column') => void; onSecondaryActivate?: (pageId: string) => void; onMergeSplit?: () => void; onRemoveSecondary?: (pageId: string) => void; onMovePageToPane?: (pageId: string) => void; onBackToWorkbench?: () => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -112,6 +125,15 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const dirCacheRef = useRef<DirCache>({})
   dirCacheRef.current = dirCache
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set(['']))
+  /** 展开集镜像 ref：toggle 里判「已展开 / 已加载」用（避免闭包旧值） */
+  const expandedDirsRef = useRef(expandedDirs)
+  expandedDirsRef.current = expandedDirs
+  // 文件树头部（2026-10-11）：排序（与工作台文件树共用 kb.treeSort 偏好）+ 全部展开/关闭
+  const [treeSort, setTreeSort] = useState<TreeSortMode>(() => getTreeSortMode())
+  const changeTreeSort = (m: TreeSortMode) => { setTreeSort(m); setTreeSortMode(m) }
+  const [sortMenuPos, setSortMenuPos] = useState<{ x: number; y: number } | null>(null)
+  // 头部按钮＝「展开/收起选中目录的子树」开关（未选中＝根/全部）；选中变化在 onSelectDir 里复位
+  const [treeSubtreeExpanded, setTreeSubtreeExpanded] = useState(false)
   const [treeCreating, setTreeCreating] = useState<CreateIntent | null>(null)
   /** 文件树重命名态（B-2）：非空 = 该条目原地换成内联输入行 */
   const [treeRenaming, setTreeRenaming] = useState<RenameIntent | null>(null)
@@ -126,7 +148,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; node: TreeNode } | null>(null)
   // 树右键菜单定位：测量后 clamp 进视口（此前是「菜单高度按常量 160 估」的写法，
   // B-2 加了删除/重命名两项后估值必然失真 → 复用本模块既有 hook，与 NotebookList/ChapterPanel 同源）
-  const { menuRef: treeMenuRef, style: treeMenuStyle } = useContextMenuPosition(treeMenu)
+  // treeMenu 的定位/外观/关闭由共享 FileContextMenu 负责（原 useContextMenuPosition 已并入该组件）
   /** 新建分类目录的命名走文件树内联输入（B-13）：原 `catDraft` 居中浮层整条通道已删——
    *  两条创建路径并存本身就是分叉源，命名方式现已与新建知识页/目录/文件完全一致。 */
   const vaultRootRef = useRef<string | null>(null)
@@ -208,13 +230,23 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   // ---- 页签右键菜单（固定/关闭族） ----
   const [tabCtx, setTabCtx] = useState<{ x: number; y: number; pageId: string } | null>(null)
   const handleTabContextMenu = useCallback((e: React.MouseEvent, pageId: string) => {
-    // 粗夹取：菜单约 170×140，避免贴屏幕右/下缘溢出
-    setTabCtx({
-      x: Math.min(e.clientX, window.innerWidth - 180),
-      y: Math.min(e.clientY, window.innerHeight - 150),
-      pageId,
-    })
+    // 只记原始落点：菜单尺寸要渲染后才知道，夹取交给下面的 useLayoutEffect（菜单约 170×210，
+    // 用估算值夹取在菜单变高时会贴边/出屏）。
+    setTabCtx({ x: e.clientX, y: e.clientY, pageId })
   }, [])
+  /** 页签右键菜单：实测面板尺寸后夹进视口（照 src/components/shared/FileContextMenu 口径，8px 边距） */
+  const tabCtxPanelRef = useRef<HTMLDivElement | null>(null)
+  const [tabCtxPos, setTabCtxPos] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!tabCtx) { setTabCtxPos(null); return }
+    const el = tabCtxPanelRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setTabCtxPos({
+      left: Math.max(8, Math.min(tabCtx.x, window.innerWidth - r.width - 8)),
+      top: Math.max(8, Math.min(tabCtx.y, window.innerHeight - r.height - 8)),
+    })
+  }, [tabCtx])
 
   const openPageIdsRef = useRef(openPageIds)
   const activePageIdRef = useRef(activePageId)
@@ -230,6 +262,14 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
   }, [activePageId])
   useEffect(() => { selectedCategoryIdRef.current = selectedCategoryId }, [selectedCategoryId])
+  // 页面级分屏：被挪到副栏的页面若正是主栏激活页 → 主栏让位到第一个「留在主栏」的页面
+  useEffect(() => {
+    if (!secondaryPageIds.length) return
+    if (activePageId && secondaryPageIds.includes(activePageId)) {
+      const next = openPageIds.find((id) => !secondaryPageIds.includes(id))
+      if (next) setActivePageId(next)
+    }
+  }, [secondaryPageIds, activePageId, openPageIds])
   useEffect(() => { selectedChapterIdRef.current = selectedChapterId }, [selectedChapterId])
 
   // 插件视图挂载点：加载声明了 knowledge.sidebar 的 C 级模块插件
@@ -569,6 +609,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   // --- 沉浸阅读模式 ---
   const [readingMode, setReadingMode] = useState(false)
   const [readingPage, setReadingPage] = useState<KnowledgePage | null>(null)
+  /** 顶栏 ← → 的「页面访问历史」（2026-10-11 拍板 D3：模块内共享一条 / 上限 50 / 不落盘） */
+  const [nav, setNav] = useState<NavState>(emptyNav)
+  const navRef = useRef(nav)
+  navRef.current = nav
 
   const enterReading = useCallback(async () => {
     const id = activePageIdRef.current
@@ -578,8 +622,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       if (!p) return
       const ft = (p.fileType || 'md').toLowerCase()
       // html（欢迎页）也可沉浸阅读：整页 iframe，阅读布局分支见下方渲染
-      if (ft !== 'md' && ft !== 'txt' && ft !== 'html') {
-        showToast({ type: 'warning', message: '沉浸阅读仅支持 md / txt 页面' })
+      // 图片（批 3，2026-10-13）：全屏纯净看图，落点是 ImmersiveImageView（控件退成浮条 ——
+      // 沉浸态按定义没有顶栏，见该组件头注）
+      if (ft !== 'md' && ft !== 'txt' && ft !== 'html' && !isRenderableImageExt(ft)) {
+        showToast({ type: 'warning', message: '沉浸阅读仅支持 md / txt / html / 图片' })
         return
       }
       setReadingPage(p)
@@ -597,10 +643,60 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     setImmersiveTabOverride(null)
   }, [])
 
+  /**
+   * ⋮「导出为 PDF…」（2026-10-13 页面菜单能力补齐批 3）。
+   * 顺序刻意是「先定落点、再排版、最后打印」：用户在对话框里取消时**什么都不发生**
+   * （尤其不会先切进沉浸态再退出来，白白闪一下）。
+   *
+   * 为什么借沉浸面打印：`webContents.printToPDF` 打的是**当前窗口**，而沉浸态本来就是
+   * 为阅读优化的单栏排版（App 层读 `readingMode` 把标题栏 / 左右栏 / 页面条全收了），
+   * 比在普通阅读态里靠一整套打印样式去藏可靠得多；另有一段 `@media print` 兜底（藏左栏 /
+   * 沉浸退出热区 / 各类弹层）。
+   *
+   * ★ 不进撤销栈、不写仓库：导出物在仓库外（用户自己选的位置），仓库不会被污染成 PDF 页面。
+   */
+  const [exportingPdf, setExportingPdf] = useState(false)
+  const exportActivePdf = useCallback(async () => {
+    if (exportingPdf) return
+    const id = activePageIdRef.current
+    const p = id ? allPages.find((x) => x.id === id) : null
+    if (!p) { showToast({ type: 'warning', message: '请先打开一个页面' }); return }
+    /* ★ 文件名清洗**刻意不用正则**：正则字面量里那个 `"` 会让契约脚本的「剥注释」状态机以为进了
+       字符串字面量，从此把注释当活代码 → F1 那类「零残留」断言会假红（2026-10-13 真踩过一回）。
+       这里用一份非法字符表 + 逐字符替换，语义一样（Windows 文件名非法字符）。 */
+    const ILLEGAL_NAME_CHARS = '<>:"/\\|?*'
+    const sanitize = (s: string) => [...s].map((ch) => (ILLEGAL_NAME_CHARS.includes(ch) ? '_' : ch)).join('')
+    const suggested = sanitize(p.title || '未命名') || '未命名'
+    const { filePath } = await showExportSaveDialog({
+      defaultName: `${suggested}.pdf`,
+      filters: [{ name: 'PDF 文件', extensions: ['pdf'] }],
+    })
+    if (!filePath) return
+    setExportingPdf(true)
+    const wasReading = readingMode
+    showToast({ type: 'info', message: '正在导出 PDF…' })
+    try {
+      if (!wasReading) await enterReading()
+      // 等版面稳定：进沉浸是 setState + 重渲染，正文里还可能挂着图片/字体
+      await new Promise((r) => setTimeout(r, 450))
+      const res = await writeExportPdf(filePath)
+      if (res?.ok) showToast({ type: 'success', message: '已导出 PDF', detail: filePath })
+      else showToast({ type: 'error', message: res?.error || '导出失败' })
+    } catch {
+      showToast({ type: 'error', message: '导出失败' })
+    } finally {
+      // ★ 沉浸态是**我们借的**：用户没要求进，就还回去（本来就在沉浸态则保持不动）
+      if (!wasReading) exitReading()
+      setExportingPdf(false)
+    }
+  }, [exportingPdf, readingMode, enterReading, exitReading, allPages])
+
   const openInReading = useCallback(async (pageId: string) => {
     try {
       const p = await getKnowledgePageById(pageId)
       if (!p) return
+      // 沉浸阅读内的双链跳转同样计入页面历史（拍板 D4：← → 语义 = 回到刚才看过的页面）
+      setNav((s) => pushNav(s, pageId))
       setReadingPage(p)
       // 沉浸中经 [[双链]] 换页也要跟着换左栏（拍板①的延伸）：新页非 md 时收起大纲，
       // 免得留下「大纲不属于当前文档」的错配。只在已处于沉浸态时更新覆盖位。
@@ -639,6 +735,8 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       const ft = (p.fileType || 'md').toLowerCase()
       if (ft !== 'md' && ft !== 'txt' && ft !== 'html') { showToast({ type: 'warning', message: '沉浸阅读仅支持 md / txt 页面' }); return }
       setGraphMode(false)
+      // 图谱卡片「在阅读器中打开」也是一次页面访问 → 计入历史（否则从图谱跳进来后 ← 是灰的）
+      setNav((s) => pushNav(s, pageId))
       setReadingPage(p)
       setReadingMode(true)
     } catch (e) { console.error(e) }
@@ -651,11 +749,14 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   }, [])
 
   // --- tab management (VS Code preview mode) ---
-  const handleOpenPage = useCallback(async (pageId: string, infoOverride?: PageInfo) => {
+  const handleOpenPage = useCallback(async (pageId: string, infoOverride?: PageInfo, opts?: { fromHistory?: boolean }) => {
     // 错题本是知识库内容区的全幅子视图（2026-09-20 反馈）：开着时点页签只改了保活模块内部
     // activePageId，视图盖着什么都看不见 = 「点了没反应」。任何页面打开/切换先收错题本视图
     // （QUIZ_VIEW_TOGGLED {open:false} 回流 → App 收页面条错题本条目 + 左栏回笔记态）。
     if (showQuizCollectionRef.current) toggleQuizCollection(false)
+    // 入栈（拍板 D3）：打开新页、以及**切到已开页签**都算一次访问；从历史回退/前进时跳过
+    // （opts.fromHistory）—— 否则「后退」自己会再压一条，形成原地打转。
+    if (!opts?.fromHistory) setNav((s) => pushNav(s, pageId))
     // info：页签标题/类型（草稿直入编辑时由调用方自带，Phase 2 批次 1）
     let info: PageInfo | undefined = infoOverride
     if (!infoOverride) {
@@ -706,6 +807,23 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     setActivePageId(pageId)
   }, [allLoosePages, chapterPages, starredPages, toggleQuizCollection])
 
+  /**
+   * 顶栏 ← → 的取数（拍板 D3 / D4）：
+   *   · 单条栈、模块内共享，上限 50，不落盘；
+   *   · **失效条目跳过**（页面被删 / 页签被关）—— 不跳过的话表象正是「点了没反应」；
+   *   · 回退/前进复用 handleOpenPage（带 fromHistory 跳过一次入栈），
+   *     于是「脏页确认」「预览槽替换」等既有页签策略照旧生效，不另开一条旁路。
+   */
+  const navValid = useCallback((id: string) => (
+    openPageIdsRef.current.includes(id) || allPages.some((p) => p.id === id)
+  ), [allPages])
+  const navStep = useCallback((dir: -1 | 1) => {
+    const { state, id } = stepNav(navRef.current, dir, navValid)
+    if (!id) return
+    setNav(state)
+    void handleOpenPage(id, undefined, { fromHistory: true })
+  }, [navValid, handleOpenPage])
+
   const handleCloseTab = useCallback((pageId: string) => {
     // Check unsaved changes
     const dirty = dirtyPageIdsRef.current
@@ -738,27 +856,11 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
   }, [])
 
-  // 最后一个页面关闭 → 自动关闭模块标签（2026-09-19 修复，同 editor 口径）：
-  // PAGE_OWNED 模块条目不进页面条，页面清零后模块标签「隐形滞留」——页面条看似全空，
-  // 但 activeTab 仍在，左栏不回总览、全关空态不出现。守卫：① 首挂/本就无页面不触发；
-  // ② 错题本/图谱/沉浸阅读任一全幅视图开着不触发（那些视图不依赖页面存在）；
-  // ③ F-10（2026-09-26 拍板 A）：清零来自**删除**（页面删除 / 文件树删除连带关签）不触发 ——
-  //    删内容 ≠ 关标签，此前删一条笔记会被等价成「关掉整个知识库标签」，左栏被弹回总览。
-  //    标记由本 effect **消费一次即复位**（放在其他守卫之前，防全幅视图早退留下陈旧标记
-  //    吞掉下一次手动关签）；设置方只在「本次删除必然清零」时置位，保证标记必被消费。
-  const prevPageCountRef = useRef<number | null>(null)
-  const deletionClearRef = useRef(false)
-  const onRequestCloseTabRef = useRef(onRequestCloseTab)
-  onRequestCloseTabRef.current = onRequestCloseTab
-  useEffect(() => {
-    const prev = prevPageCountRef.current
-    prevPageCountRef.current = openPageIds.length
-    if (prev === null || prev === 0) return
-    if (openPageIds.length > 0) return
-    if (deletionClearRef.current) { deletionClearRef.current = false; return }
-    if (showQuizCollection || graphMode || readingMode) return
-    onRequestCloseTabRef.current?.()
-  }, [openPageIds.length, showQuizCollection, graphMode, readingMode])
+  // 最后一个页面关闭：**不再**自动关闭「笔记」模块标签（2026-10-09 口径变更）。
+  // 旧行为（2026-09-19）是清零即调 onRequestCloseTab → App.closeTab('knowledge') 清 railModule →
+  // 左栏回总览。用户反馈：关掉最后一个页面后本意是继续在笔记区从文件树开别的文件，左栏却被弹回总览。
+  // 现改为：清零只让中间区走 activePageId===null 的既有空态，模块标签与左栏（文件树展开/滚动）原地保留，
+  // 用户想离开笔记区改点其它活动栏图标即可。删除动作与手动关签因此不再需要区分（deletionClear 机制一并移除）。
 
   /** 固定/取消固定：双击标签、图钉按钮、右键菜单共用 */
   const handleTogglePin = useCallback((pageId: string) => {
@@ -807,10 +909,6 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       await deleteKnowledgePage(id)
       // 页面已删除，清除脏标记后直接关闭标签页（无需确认未保存）
       setDirtyPageIds(prev => { const n = new Set(prev); n.delete(id); return n })
-      // F-10：这是唯一开着的页 → 本次必清零，标记「来自删除」，effect 会消费并跳过自动关模块标签。
-      // 连台账待实机确认的竞态（下方 await getKnowledgePages 让出渲染帧，effect 抢在重开前看到清零）
-      // 一起封死：标记被 effect 消费后就地复位，不依赖删除流程自身的复位时机。
-      if (openPageIdsRef.current.length === 1 && openPageIdsRef.current.includes(id)) deletionClearRef.current = true
       forceCloseTab(id)
       // After delete, if no page is active but the chapter still has pages, auto-open first one
       const nextActiveId = activePageIdRef.current
@@ -848,14 +946,42 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   }, [ensureVaultRoot])
 
   const handleToggleTreeDir = useCallback((rel: string) => {
+    if (expandedDirsRef.current.has(rel)) {
+      setExpandedDirs(prev => { const next = new Set(prev); next.delete(rel); return next })
+      return
+    }
+    const open = () => setExpandedDirs(prev => (prev.has(rel) ? prev : new Set(prev).add(rel)))
+    // 首次展开先拉数据再展开：否则高度动画在空内容上播放（与工台文件树同口径，2026-10-11）
+    if (dirCacheRef.current[rel]) open()
+    else void refreshTreeDir(rel).then(open)
+  }, [refreshTreeDir])
+
+  /** 目录递归展开（右键「展开此目录（含子目录）」）：只加载点中的子树，带上限 */
+  const expandDirRecursive = useCallback(async (rel: string) => {
+    const root = await ensureVaultRoot()
+    if (!root) return
+    const { cache, dirs, truncated } = await loadTreeSubtree(root, rel)
+    setDirCache(prev => ({ ...prev, ...cache }))
+    setExpandedDirs(prev => new Set([...prev, ...dirs]))
+    if (truncated) showToast({ type: 'warning', message: '目录过多，仅展开前 2000 个' })
+  }, [ensureVaultRoot])
+
+  /** 目录递归收起：移除该目录及其所有子孙的展开态（rel='' = 全部关闭且根保留） */
+  const collapseDirRecursive = useCallback((rel: string) => {
+    if (rel === '') { setExpandedDirs(new Set([''])); return }
     setExpandedDirs(prev => {
       const next = new Set(prev)
-      if (next.has(rel)) { next.delete(rel); return next }
-      next.add(rel)
-      if (!dirCache[rel]) void refreshTreeDir(rel)
+      for (const p of prev) if (p === rel || p.startsWith(rel + '/')) next.delete(p)
       return next
     })
-  }, [dirCache, refreshTreeDir])
+  }, [])
+
+  // 头部按钮：展开/收起「选中目录」的子树（未选中＝根/全部）
+  const toggleTreeSubtree = () => {
+    const rel = selectedDirRel ?? ''
+    if (treeSubtreeExpanded) { collapseDirRecursive(rel); setTreeSubtreeExpanded(false) }
+    else { void expandDirRecursive(rel); setTreeSubtreeExpanded(true) }
+  }
 
   useEffect(() => {
     // 文件视图装载根层（树常驻左栏，展开态自然延续）
@@ -919,6 +1045,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     const dst = targetDirRel ? `${targetDirRel}/${name}` : name
     try {
       await workspaceRename(root, srcRel, dst)
+      /* 撤销栈（2026-10-13 修，与 WorkbenchFileTree.doMove 对齐）：此前知识库侧栏这两条移动入口
+         （拖拽 / 「将文件移动到…」）都不记 fileOpHistory，同一动作在工作台文件树里能 Ctrl+Z、
+         在这里撤不回来 —— 铁律 5「撤销栈两个编辑区共用」要避免的正是这种不对称。 */
+      recordFileOp({ kind: 'move', rootId: root, from: srcRel, to: dst, name })
       void refreshTreeDir(parentDirOf(srcRel)); void refreshTreeDir(targetDirRel)
       const page = allPages.find(p => p.path === srcRel)
       if (page) showToast({ type: 'info', message: `已移动「${name}」` })
@@ -1004,6 +1134,40 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     setTreeCreating({ dirRel, type: key as 'knowledge' | 'dir' })
   }, [treeLandDir])
 
+  /**
+   * 「新建知识页」的**跨模块入口**（2026-10-13）：桌面「新建」与命令面板都派发 `kb-editor-new-page`。
+   * ★ 这个事件此前**没有监听端** —— 它原本由 2026-09-20 阶段四物理退役的「编辑器」模块注册，
+   *   于是 desktop/index.tsx:203 那一下静默落空（桌面「新建」只完成「打开一页」、建页那步什么都不做），
+   *   与 §44 记的 `Ctrl+Shift+S` 死键同一家族：**派发端还在、监听端随模块一起没了、零报错**。
+   * 动作本体复用文件树「＋」的 handleTreeNewPick，不另写一份创建逻辑（读写分工铁律：
+   * 建页的写入只发生在编辑器/文件树这一条通道）。
+   */
+  useEffect(() => {
+    const onNewPage = (): void => handleTreeNewPick('knowledge')
+    window.addEventListener('kb-editor-new-page', onNewPage)
+    return () => window.removeEventListener('kb-editor-new-page', onNewPage)
+  }, [handleTreeNewPick])
+
+  /**
+   * 两条「模块内命令」的跨模块入口（2026-10-13，L2 第三批）：命令面板派发这两个事件。
+   * 动作直接复用既有回调（handleCloseTab / enterReading），不新写逻辑 —— 与前两批
+   * （kb-editor-new-page / blog-new-entry / schedule-new-task）同一手法。
+   * 门控在调用方：真源里这两条都要求 activeTab === 'knowledge'，故本监听端不再自查。
+   */
+  useEffect(() => {
+    const onCloseTab = (): void => {
+      const id = activePageIdRef.current
+      if (id) handleCloseTab(id)
+    }
+    const onImmersive = (): void => { void enterReading() }
+    window.addEventListener('kb-close-active-tab', onCloseTab)
+    window.addEventListener('kb-toggle-immersive', onImmersive)
+    return () => {
+      window.removeEventListener('kb-close-active-tab', onCloseTab)
+      window.removeEventListener('kb-toggle-immersive', onImmersive)
+    }
+  }, [handleCloseTab, enterReading])
+
   // 选中目录只在「知识库文件视图」语境下有意义：进空间 / 图谱态即清空（B-7）
   useEffect(() => {
     if (selectedSpaceId || graphMode) setSelectedDirRel(null)
@@ -1052,13 +1216,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         const res = await workspaceTrash(root, node.relPath)
         if (!res.ok) throw new Error(res.error || '删除失败')
       }
-      // F-10：若本次删除会关掉**全部**已开页签（必然清零），标记「来自删除」——
-      // 自动关模块标签的 effect 消费后跳过（删内容 ≠ 关标签，与 handlePageDeleted 同口径）
-      const willClearAll = openPageIdsRef.current.length > 0 && openPageIdsRef.current.every((pid) => {
-        const rel = pid.startsWith('draft:') ? pid.slice('draft:'.length) : allPages.find((p) => p.id === pid)?.path
-        return !!rel && (rel === node.relPath || rel.startsWith(node.relPath + '/'))
-      })
-      if (willClearAll) deletionClearRef.current = true
+      // 删除连带关闭该路径下的页签（关内容 ≠ 关标签：现在清零也不再自动关模块标签）
       closeTabsUnder(node.relPath)
     })
     // 树刷新放到动画整段走完之后（deleteWithAnimation 内部先播收尾淡出再返回，与 NotebookList
@@ -1067,6 +1225,51 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     setDirCache((prev) => { const n = { ...prev }; delete n[node.relPath]; return n })
     void refreshTreeDir(parentDirOf(node.relPath))
   }, [ensureVaultRoot, categories, confirmVaultCategoryDelete, deleteWithAnimation, closeTabsUnder, refreshTreeDir])
+
+  /* ===== ⋮ 的文件级动作（2026-10-13 批 1b「页面菜单能力补齐」）=====
+     PageEditor 只发请求、自己不动盘：这几个动作会改仓库相对路径或动页签，必须由模块层统一
+     —— 刷树 / 刷 allPages / 记撤销栈 / 连带关页签全在既有那几个 handleTreeXxx 里。
+     重命名与移动**直接复用** handleTreeRename / handleTreeMove（下一段就是），这里只补三个按
+     relPath 的落点。 */
+
+  /** ⋮「删除」落点：复用文件树那条（系统回收站 + 危险确认 + 连带关页签）。
+   *  ★ 构造一个只带 relPath / type 的 TreeNode —— handleTreeDelete 只读这两个字段
+   *    （取 name、判 isDir），不需要完整的工作区条目字段。 */
+  const handleDeleteByRel = useCallback((rel: string) => {
+    if (!rel) return
+    void handleTreeDelete({ relPath: rel, type: 'file' } as TreeNode)
+  }, [handleTreeDelete])
+
+  /** ⋮「创建副本」落点：与文件树右键同一通道（duplicateWorkspaceFile），刷父目录让副本立刻出现。
+   *  ★ 不自动打开副本 —— 与文件树右键行为一致。 */
+  const handleDuplicateByRel = useCallback(async (rel: string) => {
+    if (!rel) return
+    const root = await ensureVaultRoot()
+    if (!root) return
+    const r = await duplicateWorkspaceFile(root, rel).catch(() => null)
+    if (!r || r.ok === false) { showToast({ type: 'error', message: r?.error || '创建副本失败' }); return }
+    void refreshTreeDir(parentDirOf(rel))
+    showToast({ type: 'info', message: `已生成副本 ${r.relPath?.split('/').pop() ?? ''}` })
+  }, [ensureVaultRoot, refreshTreeDir])
+
+  /** ⋮「在文件列表中显示当前文件」：切到文件视图 + 展开全部祖先目录 + 滚进视野。
+   *  树是纯 props 驱动（VaultTree），行上有 `data-wb-tree-path` 锚点 —— 这里只驱动宿主的
+   *  expandedDirs 与滚动，**不动树组件本身**。
+   *  ★ 两帧后才滚：目录展开是异步的（子目录懒加载 + setState），当帧行还没渲染出来。
+   *  ★ 找不到就给一句提示 —— 不静默（可能是 .ignore 规则收起了这一条）。 */
+  const handleLocateInTree = useCallback((rel: string) => {
+    if (!rel) return
+    setSidebarTab('files')
+    const parts = rel.split('/')
+    const dirs = ['']
+    for (let i = 1; i < parts.length; i++) dirs.push(parts.slice(0, i).join('/'))
+    setExpandedDirs(prev => new Set([...prev, ...dirs]))
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLElement>(`[data-wb-tree-path="${CSS.escape(rel)}"]`)
+      if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      else showToast({ type: 'warning', message: '文件列表里没找到这一条（可能被 .ignore 规则收起）' })
+    }))
+  }, [])
 
   /** 文件树重命名（B-2 同批补）：workspaceRename + 记入撤销栈（重命名属「移动」语义，
    *  与 moveVaultPath 同一通道，Ctrl+Z 可撤回）。成功后刷新父目录并通知编辑器侧树同步。 */
@@ -1099,7 +1302,6 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       const res = await workspaceRename(root, relPath, nextRel)
       if (!res.ok) { showToast({ type: 'error', message: res.error || '重命名失败' }); return }
       recordFileOp({ kind: 'move', rootId: root, from: relPath, to: nextRel, name })
-      window.dispatchEvent(new CustomEvent('kb-file-moved', { detail: { srcRel: relPath, dstRel: nextRel } }))
       void refreshTreeDir(dir)
       void refreshAllPages()
       showToast({ type: 'info', message: `已重命名为「${name}」` })
@@ -1301,7 +1503,6 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       if (!res.ok) { showToast({ type: 'error', message: res.error || '移动失败' }); return false }
       // 记入跨模块撤销栈：编辑区与知识库共用一份，Ctrl+Z 可撤回（kb-fs-op-changed 回流刷新）
       recordFileOp({ kind: 'move', rootId: cur.rootId, from: srcRel, to: dstRel, name: base })
-      window.dispatchEvent(new CustomEvent('kb-file-moved', { detail: { srcRel, dstRel } })) // 通知编辑器刷新树
       showToast({ type: 'info', message: `已移动 ${label} → ${dstDirRel || '仓库根目录'}` })
       return true
     } catch (e) {
@@ -1367,11 +1568,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     if (ok) refreshCategories()
   }
 
-  /** 复制条目路径（vault：页面/目录均为仓库内文件；abs=含仓库根的绝对路径） */
-  const handleCopyPath = useCallback(async (type: 'category' | 'page', id: string, mode: 'abs' | 'rel') => {
-    const rel = type === 'page'
-      ? (allPages.find((x) => x.id === id)?.path ?? '')
-      : (categories.find((x) => x.id === id)?.path ?? '')
+  /** 复制路径的**核心**（2026-10-12 抽出）：rel → 剪贴板；abs 时前缀仓库根。
+   *  两个消费方：分类树 / 笔记本的 handleCopyPath（按 id 找 rel）、文件树右键的「复制路径 ▸」（直接有 rel）。
+   *  ★ 顺手统一到主进程剪贴板通道 `copyText` —— 批 1 定的口径是「渲染层不直连 navigator.clipboard」。 */
+  const copyPathText = useCallback(async (rel: string, mode: 'abs' | 'rel') => {
     if (!rel) { showToast({ type: 'warning', message: '该条目暂无仓库文件路径（历史数据）' }); return }
     try {
       let text = rel
@@ -1380,10 +1580,29 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         if (!cur?.path) { showToast({ type: 'error', message: '未打开仓库' }); return }
         text = `${cur.path.replace(/\\/g, '/')}/${rel}`
       }
-      await navigator.clipboard.writeText(text)
+      const ok = await copyText(text)
+      if (!ok) { showToast({ type: 'error', message: '复制失败' }); return }
       showToast({ type: 'info', message: mode === 'abs' ? '已复制完整路径' : '已复制仓库相对路径' })
     } catch { showToast({ type: 'error', message: '复制失败' }) }
-  }, [allPages, categories])
+  }, [])
+
+  /** 复制条目路径（vault：页面/目录均为仓库内文件；abs=含仓库根的绝对路径） */
+  const handleCopyPath = useCallback(async (type: 'category' | 'page', id: string, mode: 'abs' | 'rel') => {
+    const rel = type === 'page'
+      ? (allPages.find((x) => x.id === id)?.path ?? '')
+      : (categories.find((x) => x.id === id)?.path ?? '')
+    await copyPathText(rel, mode)
+  }, [allPages, categories, copyPathText])
+
+  /** 文件树右键「使用默认应用打开 / 在系统资源管理器中显示」（2026-10-12）：
+   *  与批 2 非 md 顶栏 ⋮ 的 handleArchiveOpenInSystem 走**同一个主进程通道**（workspaceOpenInSystem），
+   *  不新开能力面。 */
+  const openTreeInSystem = useCallback(async (rel: string, reveal: boolean) => {
+    const root = await ensureVaultRoot()
+    if (!root) return
+    const res = await workspaceOpenInSystem(root, rel, reveal)
+    if (!res?.ok) showToast({ type: 'error', message: res?.error || '打开失败' })
+  }, [ensureVaultRoot])
 
   // --- sort (up/down reorder) ---
   const handleSortCategory = async (id: string, direction: 'up' | 'down') => {
@@ -1462,15 +1681,23 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         if (e.key === 'Escape') { e.preventDefault(); exitReading() }
         return
       }
+      // Alt+← / Alt+→ —— 顶栏「页面历史」的键盘入口（2026-10-11 拍板 D2）。
+      // 刻意放在 isEditingInput 守卫**之前**：带 Alt 的方向键不是文本编辑操作，在编辑器里也该生效；
+      // preventDefault 同时挡掉 Chromium 自带的「Alt+← 后退」（否则会变成窗口级历史跳转）。
+      if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault()
+        navStep(e.key === 'ArrowLeft' ? -1 : 1)
+        return
+      }
+
       if (isEditingInput(e)) return
 
       // Ctrl+N — 新建知识页：文件树内联创建（Phase 2 批次 2：frontmatter id 直接写入，不再借道编辑器）
-      // 落点自 B-7 起跟随「选中目录」（原为恒落仓库根），与头部「＋」共用 treeLandDir()
+      // 落点自 B-7 起跟随「选中目录」（原为恒落仓库根）。动作与文件树「＋」、桌面「新建」、
+      // 命令面板**共用 handleTreeNewPick 一处**（原先这里内联三行，与「＋」是同一动作的两份实现）
       if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'n' || e.key === 'N')) {
         e.preventDefault()
-        const dirRel = treeLandDir()
-        if (dirRel) setExpandedDirs((prev) => (prev.has(dirRel) ? prev : new Set(prev).add(dirRel)))
-        setTreeCreating({ dirRel, type: 'knowledge' })
+        handleTreeNewPick('knowledge')
         return
       }
 
@@ -1563,7 +1790,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, readingMode, enterReading, exitReading, treeLandDir])
+  }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, readingMode, enterReading, exitReading, treeLandDir, navStep, handleTreeNewPick])
 
   // ---- 外部文件粘贴（2026-09-20 阶段四：能力自编辑器模块上移，随其退役）----
   // 资源管理器里 Ctrl+C 文件 → 本模块 Ctrl+V：剪贴板带 File 列表且没有文本接收方时接管，
@@ -1889,8 +2116,10 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
               </div>,
               sidebarEl,
             )}
-            {/* 顶部悬停退出区（平时隐形） */}
+            {/* 顶部悬停退出区（平时隐形）。★ data-wb 是给「导出 PDF」的打印样式用的：
+                导出会临时进沉浸态打印，这一条热区若不打掉就会在 PDF 顶部印出一个「退出阅读」条。 */}
             <div
+              data-wb="immersiveExitZone"
               className="absolute top-0 inset-x-0 h-9 z-40 group/rtop cursor-pointer"
               onClick={exitReading}
               title="退出沉浸阅读 (Esc)"
@@ -1904,9 +2133,36 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             </div>
 
             {readingPage && (readingPage.entryKind ?? 'doc') === 'file' ? (
-              /* 归档非 md 文件（全类型归档 D1/D2）：html 沙箱渲染，其余元信息卡 */
+              /* 归档非 md 文件（全类型归档 D1/D2）：
+                 · html → 沙箱渲染
+                 · 文本类 → **只读文本视图**（批 1 修，2026-10-12）
+                 · 其余（二进制 / 超大 / 未识别）→ 元信息卡
+                 ★ 为什么要修：`enterReading` 明确放行 md / txt / html（见其内注释与那条
+                 「沉浸阅读仅支持 md / txt 页面」的提示），而这里原先对**所有** entryKind==='file'
+                 一律元信息卡 ⇒ 打开仓库里一个 `.txt` 再进沉浸阅读，屏幕上跳出的是一张
+                 「该文件不是 markdown 知识页，知识库中仅展示元信息」的卡。无竞态、必现。
+                 与 PageEditor 的内容分支同一处根因（归档兜底遮蔽了专门视图），故同批一起收口。 */
               (readingPage.fileType || '').toLowerCase() === 'html' && readingPage.path ? (
                 <WelcomeHtmlView path={readingPage.path} />
+              ) : readingPage.path && isRenderableImageExt(readingPage.fileType || '') ? (
+                /* 图片（批 3，2026-10-13）：与笔记区同一个查看器，只是控件从顶栏槽退成浮条。
+                   ★ 顺序在文本类之前：图片扩展名不在 TEXT_VIEWABLE_EXT_SET 里，两者本不重叠，
+                   但把「专门视图优先」这条口径写死在这里，将来若有人把 svg 加进那个集合，
+                   也不会出现「SVG 在沉浸态变成一坨 XML 文本」。 */
+                <ImmersiveImageView
+                  relPath={readingPage.path}
+                  name={readingPage.title}
+                  sizeBytes={readingPage.sizeBytes}
+                  updatedAt={readingPage.updatedAt}
+                  onOpenInSystem={() => { void openTreeInSystem(readingPage.path as string, false) }}
+                  onRevealInFolder={() => { void openTreeInSystem(readingPage.path as string, true) }}
+                />
+              ) : readingPage.path && isTextViewableExt((readingPage.fileType || '').toLowerCase()) ? (
+                <ArchiveTextView
+                  path={readingPage.path}
+                  fileType={(readingPage.fileType || '').toLowerCase()}
+                  fontSize={Math.round(15 * zoom)}
+                />
               ) : (
                 <FileMetaCard title={readingPage.title} fileType={readingPage.fileType || ''} path={readingPage.path} updatedAt={readingPage.updatedAt} sizeBytes={readingPage.sizeBytes} />
               )
@@ -1973,7 +2229,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             <PageTabStrip
               owner="knowledge"
               itemAttr="data-tab-id"
-              items={openPageIds.map((id) => {
+              items={openPageIds.filter((pid) => !secondaryPageIds.includes(pid)).map((id) => {
                 const info = openPageInfos[id]
                 const pinned = pinnedPageIds.has(id) || dirtyPageIds.has(id)
                 return {
@@ -1996,22 +2252,42 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 void handleOpenPage(id)
                 // 页签组恒挂在页面条上（其他模块激活时也可见），点击 = 要看那个页面：
                 // 通知 App 把 knowledge 标签带到前台 + 左栏跟随（状态在模块、激活在 App，
-                // 同 onRequestCloseTab 的回调范式；2026-09-20 反馈「点笔记页签不跳笔记区」）
+                // 同 onPageTabActivate 这类「模块内事件 → App 收口」的回调范式；2026-09-20 反馈「点笔记页签不跳笔记区」）
                 onPageTabActivate?.()
               }}
               onClose={handleCloseTab}
               onReorder={handleReorderTabs}
               onTogglePin={handleTogglePin}
               onContextMenu={(e, id) => handleTabContextMenu(e, id)}
+              onExternalDrop={(id) => onRemoveSecondary?.(id)}
             />
           )
-          if (pageBarHosted) return pageBarEl ? createPortal(strip, pageBarEl) : null
-          /* 兜底形态（未托管）：顶部就是本模块自己的页签行，没页签也留一条同高的空行 */
-          return (
-            <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5">
-              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{strip}</div>
-            </div>
-          )
+          // 副栏页签条（被挪到副栏的页面）：portal 进 App 副栏段槽
+          const itemFor = (id: string) => {
+            const info = openPageInfos[id]
+            const pinned = pinnedPageIds.has(id) || dirtyPageIds.has(id)
+            return { id, title: info?.title || '加载中…', preview: !pinned, pinned, badge: info?.fileType ? getFileTypeInfo(info.fileType).badge : undefined }
+          }
+          const secItems = secondaryPageIds.filter((id) => openPageIds.includes(id)).map(itemFor)
+          const secondaryStrip = (secondaryBarEl && secItems.length > 0) ? createPortal(
+            <PageTabStrip
+              owner="knowledge"
+              itemAttr="data-tab-id"
+              items={secItems}
+              activeId={secondaryActiveId}
+              onSelect={(id) => { onSecondaryActivate?.(id); onPageTabActivate?.() }}
+              onClose={(id) => onRemoveSecondary?.(id)}
+              onExternalDrop={(id) => onMovePageToPane?.(id)}
+            />, secondaryBarEl,
+          ) : null
+          const mainEl = pageBarHosted
+            ? (pageBarEl ? createPortal(strip, pageBarEl) : null)
+            : (
+              <div className="flex h-9 shrink-0 items-center border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-1.5">
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">{strip}</div>
+              </div>
+            )
+          return <>{mainEl}{secondaryStrip}</>
         })()}
         <div className="kb-view-fade flex min-h-0 flex-1">
         {/* L1: File / Outline tabs — file tab drills into ChapterPanel when a notebook is selected */}
@@ -2026,7 +2302,33 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
           <TreeNewButton items={treeNewItems} onPick={handleTreeNewPick} title="新建知识页 / 目录 / 分类目录" />,
           modActionsEl,
         )}
-        {/* 聚焦按钮上移（2026-09-19 反馈）：portal 到左栏模块态头部动作槽（🏠 🔒 最右）。
+        {/* 排序 + 全部展开/关闭（2026-10-11）：同槽 portal，排在「＋」之后、聚焦按钮之前；
+            显隐口径与聚焦按钮完全一致（非知识库形态 / 选中空间 / 图谱态不渲染） */}
+        {modActionsEl && sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal(
+          <button
+            onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setSortMenuPos({ x: r.left, y: r.bottom + 6 }) }}
+            title="排序方式"
+            data-wb="kbTreeSortBtn"
+            className={`rounded p-1 transition-colors ${sortMenuPos ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+          >
+            {(treeSort === 'name-desc' || treeSort === 'mtime-desc')
+              ? <ArrowDownNarrowWide {...SIDEBAR_HEADER_ICON} />
+              : <ArrowUpNarrowWide {...SIDEBAR_HEADER_ICON} />}
+          </button>,
+          modActionsEl,
+        )}
+        {modActionsEl && sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode && createPortal(
+          <TreeExpandButton
+            expanded={treeSubtreeExpanded}
+            onClick={toggleTreeSubtree}
+            dataWb="kbTreeSubtreeBtn"
+            title={treeSubtreeExpanded
+              ? (selectedDirRel ? '收起此目录（含子目录）' : '全部关闭')
+              : (selectedDirRel ? '展开此目录（含子目录）' : '展开全部（含子目录）')}
+          />,
+          modActionsEl,
+        )}
+        {/* 聚焦按钮上移（2026-09-19 反馈）：portal 到左栏模块态头部动作槽；2026-10-11 起排在**最后＝最右**。
             与侧栏同显隐口径：非知识库形态（quiz）/选中空间（行原本就不显示）/图谱态不渲染 */}
         {modActionsEl && createPortal(
           sidebarVariant === 'knowledge' && !selectedSpaceId && !graphMode ? (
@@ -2036,6 +2338,19 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             />
           ) : null,
           modActionsEl,
+        )}
+        {sortMenuPos && (
+          <FileContextMenu
+            x={sortMenuPos.x}
+            y={sortMenuPos.y}
+            onClose={() => setSortMenuPos(null)}
+            items={TREE_SORT_OPTIONS.map((o) => ({
+              key: o.value,
+              label: o.label,
+              icon: treeSort === o.value ? <Check size={15} /> : <span className="inline-block w-[15px]" />,
+              onSelect: () => changeTreeSort(o.value),
+            }))}
+          />
         )}
         {(() => {
           const sidebarInner = (
@@ -2074,6 +2389,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   rootRef={treeRef}
                   dirCache={dirCache}
                   expanded={expandedDirs}
+                  sort={treeSort}
                   activePath={allPages.find(p => p.id === activePageId)?.path ?? (activePageId?.startsWith('draft:') ? activePageId.slice(6) : null)}
                   onToggleDir={(p) => { lastTreeDirRef.current = p; handleToggleTreeDir(p) }}
                   onOpenFile={(n) => { lastTreeDirRef.current = parentDirOf(n.relPath); handleTreeOpenFile(n) }}
@@ -2099,7 +2415,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                   /* 选中目录（B-7）：头部「＋」/ Ctrl+N 的落点来源。点目录行或点文件行（其父目录）都会上报，
                      受控——树本身不持选中态 */
                   selectedPath={selectedDirRel}
-                  onSelectDir={setSelectedDirRel}
+                  onSelectDir={(rel) => { setSelectedDirRel(rel); setTreeSubtreeExpanded(false) }}
                   renaming={treeRenaming}
                   onCommitRename={(rel, name) => { void handleTreeRename(rel, name) }}
                   onCancelRename={() => setTreeRenaming(null)}
@@ -2109,55 +2425,96 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                     命名合并进文件树内联输入——与新建知识页/目录/文件同一机制，即 VS Code 式。
                     分类目录语义不变：顶层 mkdir + categories.json 登记，**恒落仓库根层**
                     （所以它的内联输入行固定在根层末尾，不跟随选中目录，头部「＋」菜单项也已标「根层」）。 */}
-                {treeMenu && createPortal(
-                  /* fixed 菜单必须 portal 到 body：侧栏随批次3 portal 挂进左栏后，
-                     左栏面板的变换/收缩容器会让 fixed 的包含块变成窄栏——菜单被压成竖条
-                     （2026-09-19 反馈截图）。同 WorkbenchLeftPanel 书签菜单的 portal 模式。 */
-                  <div className="fixed inset-0 z-[70]" onMouseDown={() => setTreeMenu(null)} onContextMenu={e => { e.preventDefault(); setTreeMenu(null) }}>
-                    <div
-                      ref={treeMenuRef}
-                      className="absolute min-w-[150px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-lg kb-pop"
-                      style={treeMenuStyle}
-                      onMouseDown={e => e.stopPropagation()}
-                    >
-                      {(() => {
-                        const dirRel = treeMenu.node.type === 'dir' ? treeMenu.node.relPath : parentDirOf(treeMenu.node.relPath)
-                        // 条目自身动作（B-2）：根容器（relPath === ''）是虚拟节点，没有删除/重命名语义
-                        const self = treeMenu.node.relPath !== '' ? treeMenu.node : null
-                        return (
-                          <>
-                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'file' }) }}>新建文件</button>
-                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel, type: 'dir' }) }}>新建目录</button>
-                            {/* B-13：分类目录也走树内联命名（恒落根层，不吃 node 的 dirRel） */}
-                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); setTreeCreating({ dirRel: '', type: 'category' }) }}>新建分类目录</button>
-                            {/* 粘贴系统剪贴板里的文件/目录（Ctrl+V 同名功能的菜单入口；焦点随后交给文件树）。
-                                2026-09-23 恢复：编辑器退役时该入口随模块丢失（Ctrl+V 路径当时已上移），
-                                而 pasteFromClipboard IPC / VaultTree 的 rootRef+tabIndex 基建一直留着。 */}
-                            <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); requestPasteFromMenu(dirRel) }}>粘贴</button>
-                            {treeMenu.node.type === 'file' && (
-                              <button className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => { setTreeMenu(null); handleTreeOpenFile(treeMenu.node) }}>打开</button>
-                            )}
-                            {self && (
-                              <>
-                                <div className="my-1 border-t border-[var(--border-color)]" />
-                                <button
-                                  data-wb="treeRenameItem"
-                                  className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                                  onClick={() => { setTreeMenu(null); setTreeRenaming({ relPath: self.relPath }) }}
-                                >重命名</button>
-                                <button
-                                  data-wb="treeDeleteItem"
-                                  className="w-full px-3 py-1.5 text-left text-[12px] text-[var(--danger)] hover:bg-[var(--bg-hover)]"
-                                  onClick={() => { setTreeMenu(null); void handleTreeDelete(self) }}
-                                >删除</button>
-                              </>
-                            )}
-                          </>
-                        )
-                      })()}
-                    </div>
-                  </div>,
-                  document.body,
+                {treeMenu && (
+                  <FileContextMenu
+                    x={treeMenu.x}
+                    y={treeMenu.y}
+                    onClose={() => setTreeMenu(null)}
+                    items={(() => {
+                      const node = treeMenu.node
+                      const dirRel = node.type === 'dir' ? node.relPath : parentDirOf(node.relPath)
+                      // 条目自身动作（B-2）：根容器（relPath === ''）是虚拟节点，没有删除/重命名语义
+                      const self = node.relPath !== '' ? node : null
+                      const items: FileMenuEntry[] = []
+
+                      /* ---- 文件条目（2026-10-12 对齐 Obsidian，docs/file-menu-rework-design.md）----
+                         只放「对这个文件做什么」：「新建 / 粘贴」已移走，只留**文件夹条目与空白处**
+                         （Obsidian 同款口径）。Obsidian 那 13 项里本轮做 8 项，其余 4 项已拍板不做。 */
+                      if (self && self.type === 'file') {
+                        items.push({ key: 'open', label: '打开', icon: <FileText size={15} />, onSelect: () => handleTreeOpenFile(node) })
+                        items.push({ separator: true })
+                        items.push({
+                          key: 'dup', label: '创建副本', icon: <CopyPlus size={15} />,
+                          onSelect: () => {
+                            void (async () => {
+                              const root = await ensureVaultRoot()
+                              if (!root) return
+                              const r = await duplicateWorkspaceFile(root, self.relPath).catch(() => null)
+                              if (!r || r.ok === false) { showToast({ type: 'error', message: r?.error || '创建副本失败' }); return }
+                              void refreshTreeDir(parentDirOf(self.relPath))
+                              showToast({ type: 'info', message: `已生成副本 ${r.relPath?.split('/').pop() ?? ''}` })
+                            })()
+                          },
+                        })
+                        items.push({
+                          key: 'moveTo', label: '将文件移动到…', icon: <FolderInput size={15} />,
+                          popover: (
+                            <DirPicker
+                              sourceRel={self.relPath}
+                              onPick={(dst) => { setTreeMenu(null); void handleTreeMove(self.relPath, dst) }}
+                              onCancel={() => setTreeMenu(null)}
+                            />
+                          ),
+                        })
+                        items.push({ separator: true })
+                        items.push({
+                          key: 'copyPath', label: '复制路径', icon: <Link2 size={15} />,
+                          submenu: [
+                            { label: '仓库相对路径', onSelect: () => void copyPathText(self.relPath, 'rel') },
+                            { label: '完整路径', onSelect: () => void copyPathText(self.relPath, 'abs') },
+                          ],
+                        })
+                        items.push({ separator: true })
+                        items.push({ key: 'openSys', label: '使用默认应用打开', icon: <ExternalLink size={15} />, onSelect: () => void openTreeInSystem(self.relPath, false) })
+                        items.push({ key: 'reveal', label: '在系统资源管理器中显示', icon: <FolderSearch size={15} />, onSelect: () => void openTreeInSystem(self.relPath, true) })
+                        items.push({ separator: true })
+                        items.push({ key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => setTreeRenaming({ relPath: self.relPath }) })
+                        items.push({ separator: true })
+                        items.push({ key: 'delete', label: '删除', icon: <Trash2 size={15} />, danger: true, onSelect: () => void handleTreeDelete(self) })
+                        return items
+                      }
+
+                      /* ---- 文件夹条目 / 空白处（虚拟根）：**保持原样** ---- */
+                      items.push(
+                        { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => setTreeCreating({ dirRel, type: 'file' }) },
+                        { key: 'newDir', label: '新建目录', icon: <FolderPlus size={15} />, onSelect: () => setTreeCreating({ dirRel, type: 'dir' }) },
+                        // B-13：分类目录也走树内联命名（恒落根层，不吃 node 的 dirRel）
+                        { key: 'newCat', label: '新建分类目录', icon: <FolderTree size={15} />, onSelect: () => setTreeCreating({ dirRel: '', type: 'category' }) },
+                        { key: 'paste', label: '粘贴', icon: <ClipboardPaste size={15} />, onSelect: () => requestPasteFromMenu(dirRel) },
+                      )
+                      /* 导入（2026-10-13 批 1b「页面菜单能力补齐」）：两个处理函数**本来就在**
+                         （handleDialogImport / handleImportFolder，拖拽那条通道一直在用），此前只有
+                         那两套**没有任何渲染入口**的旧右键菜单里才有菜单项 ⇒ 用户根本摸不到。
+                         放在目录 / 空白组：导入要指定落在哪个目录，语义上属「在这建东西」。 */
+                      items.push({ separator: true })
+                      items.push(
+                        { key: 'importFiles', label: '导入文件…', icon: <FilePlus size={15} />, onSelect: () => void handleDialogImport() },
+                        { key: 'importFolder', label: '导入文件夹…', icon: <FolderPlus size={15} />, onSelect: () => void handleImportFolder() },
+                      )
+                      if (self && self.type === 'dir') {
+                        items.push({ separator: true })
+                        items.push({ key: 'expandDir', label: '展开此目录（含子目录）', icon: <ChevronsUpDown size={15} />, onSelect: () => void expandDirRecursive(self.relPath) })
+                        items.push({ key: 'collapseDir', label: '收起此目录', icon: <ChevronsDownUp size={15} />, onSelect: () => collapseDirRecursive(self.relPath) })
+                      }
+                      if (self) {
+                        items.push({ separator: true })
+                        items.push({ key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => setTreeRenaming({ relPath: self.relPath }) })
+                        items.push({ separator: true })
+                        items.push({ key: 'delete', label: '删除', icon: <Trash2 size={15} />, danger: true, onSelect: () => void handleTreeDelete(self) })
+                      }
+                      return items
+                    })()}
+                  />
                 )}
               </div>
             ) : (
@@ -2278,12 +2635,45 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 onOpenInEditor={() => handleOpenInEditor(activePageId)}
                 draftRelPath={activePageId.startsWith('draft:') ? activePageId.slice(6) : undefined}
                 startInEdit={startInEditRef.current === activePageId}
-                isActive={isActive}
+                initialFileType={openPageInfos[activePageId]?.fileType}
+                canNavBack={canNavBack(nav)}
+                canNavForward={canNavForward(nav)}
+                onNavBack={() => navStep(-1)}
+                onNavForward={() => navStep(1)}
+                /* ⋮ 的文件级动作（2026-10-13 批 1b）：实现都在这层（改名 / 移动要连带刷树与页签、
+                   删除要连带关页签），PageEditor 只发请求。分屏归页签组管 —— 与页签右键同一个入口。 */
+                onRenameRequest={(rel, name) => void handleTreeRename(rel, name)}
+                onMoveRequest={(rel, dst) => void handleTreeMove(rel, dst)}
+                onDuplicateRequest={(rel) => void handleDuplicateByRel(rel)}
+                onLocateRequest={handleLocateInTree}
+                onDeleteRequest={handleDeleteByRel}
+                onSplitRequest={onSplitPage ? (o) => onSplitPage(activePageId, o) : undefined}
+                splitDisabled={splitDisabled}
+                /* 导出 PDF（批 3）：只给主栏 —— 它借的是模块层的沉浸阅读态，而 enterReading 认的是
+                   **主栏活动页**；副栏挂了这项就会导出「另一篇」。 */
+                onExportPdfRequest={exportActivePdf}
               />
             </Suspense>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-[var(--text-muted)]">
+            /* 无活动页面的空态（2026-09-19 反馈：只留图标，不要文字说明）。
+               2026-10-13 补「回工作台」入口：本模块是 PAGE_OWNED（无页面时**页面条上不出现条目**），
+               于是「关掉最后一个页面」之后页面条为空、左上角「工作台」按钮在工作台内模块态又是幂等
+               no-op（ActivityBar 的 `if (!inWorkbench)`）⇒ **这个状态没有任何鼠标路径回总空态**
+               （实测于 devbridge：点「工作台」画面零变化）。那三条快捷指令在总空态里，用户却到不了。
+               按钮即该缺口的唯一出口；不加说明文字（口径不变，只加一个动作）。 */
+            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-[var(--text-muted)]">
               <FileText size={48} className="opacity-25" />
+              {onBackToWorkbench && (
+                <button
+                  type="button"
+                  onClick={onBackToWorkbench}
+                  title="回到工作台（中间空态，带命令面板 / 快速打开文件 / AI 助手三条快捷指令）"
+                  className="kb-item-in flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <House size={14} />
+                  <span>回工作台</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -2292,14 +2682,70 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         )}
       </div>
 
-      {/* 页签右键菜单：固定/取消固定 + 关闭族 */}
-      {tabCtx && (
+      {/* 副栏页面视图（页面级分屏）：portal 进 App 副栏内容槽。独立 PageEditor 实例 ——
+          两栏各挂各的顶栏（与 Obsidian 同款）。批 2 起非 md 也是顶栏，且顶栏是**行内渲染**、
+          不再 portal 到主栏单例槽，故两实例不会打架（原来那颗 `#editor-toolbar-slot` 已退役）。 */}
+      {secondaryContentEl && secondaryPageIds.length > 0 && secondaryActiveId && createPortal(
+        <Suspense fallback={<div className="flex-1 flex items-center justify-center text-[12px] text-[var(--text-muted)]">正在加载编辑器…</div>}>
+          <PageEditor
+            pageId={secondaryActiveId}
+            categories={categories}
+            allPages={allPages}
+            zoom={zoom}
+            onBack={() => onRemoveSecondary?.(secondaryActiveId)}
+            onDeleted={() => { handlePageDeleted(secondaryActiveId); onRemoveSecondary?.(secondaryActiveId) }}
+            onNavigate={handleOpenPage}
+            onUpdate={handleRefresh}
+            onTitleChange={handleTitleChange}
+            onFileTypeChange={handleFileTypeChange}
+            onContentChange={() => {}}
+            onTagsChange={handleSearchRefresh}
+            onMarkDirty={handleMarkDirty}
+            onClearDirty={handleClearDirty}
+            onRequestReading={enterReading}
+            vaultMode={true}
+            draftRelPath={secondaryActiveId.startsWith('draft:') ? secondaryActiveId.slice(6) : undefined}
+            startInEdit={false}
+            /* 副栏的 ⋮ 同样给文件级动作（两个栏位各挂各的顶栏，能力不该只有主栏有）。
+               ★ 唯独**不给分屏**：分屏的入口是主栏页签组的事，副栏再拆一次没有语义。 */
+            onRenameRequest={(rel, name) => void handleTreeRename(rel, name)}
+            onMoveRequest={(rel, dst) => void handleTreeMove(rel, dst)}
+            onDuplicateRequest={(rel) => void handleDuplicateByRel(rel)}
+            onLocateRequest={handleLocateInTree}
+            onDeleteRequest={handleDeleteByRel}
+          />
+        </Suspense>,
+        secondaryContentEl,
+      )}
+
+      {/* 页签右键菜单：固定/取消固定 + 关闭族。
+          ★ 必须 portal 到 document.body（照 src/components/shared/FileContextMenu 口径）：
+          本菜单写在 KnowledgeModule 的渲染树里，而模块容器是**保活**的
+          （App.tsx: `display: t === activeTab ? undefined : 'none'`）。祖先一旦 display:none，
+          整棵子树不生成盒子 —— 于是「人在别的模块时右键页签」会 setTabCtx 成功、菜单也生成了，
+          却因为没有盒子而不可见（表象：右键没反应；切回笔记模块后菜单突然冒出来）。
+          fixed 定位救不了这种情况：fixed 只脱离包含块，不脱离 display:none 的祖先。 */}
+      {tabCtx && createPortal((
         <div className="fixed inset-0 z-[70] kb-pop-layer" onClick={() => setTabCtx(null)} onContextMenu={(e) => { e.preventDefault(); setTabCtx(null) }}>
           <div
+            ref={tabCtxPanelRef}
             className="absolute min-w-[160px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] py-1 shadow-xl"
-            style={{ left: tabCtx.x, top: tabCtx.y }}
+            style={tabCtxPos ?? { left: tabCtx.x, top: tabCtx.y, visibility: 'hidden' }}
             onClick={(e) => e.stopPropagation()}
           >
+            {onSplitPage && (
+              <>
+                <button disabled={splitDisabled} onClick={() => { const pid = tabCtx.pageId; setTabCtx(null); onSplitPage(pid, 'row') }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-40">
+                  <Columns2 size={13} className="text-[var(--text-muted)]" />向右拆分
+                </button>
+                <button disabled={splitDisabled} onClick={() => { const pid = tabCtx.pageId; setTabCtx(null); onSplitPage(pid, 'column') }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-40">
+                  <Rows2 size={13} className="text-[var(--text-muted)]" />向下拆分
+                </button>
+                <div className="mx-2 my-0.5 border-t border-[var(--border-color)]" />
+              </>
+            )}
             <button onClick={() => { const pid = tabCtx.pageId; setTabCtx(null); handleTogglePin(pid) }}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-[12.5px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
               {pinnedPageIds.has(tabCtx.pageId) ? <PinOff size={13} className="text-[var(--text-muted)]" /> : <Pin size={13} className="text-[var(--text-muted)]" />}
@@ -2320,7 +2766,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
             </button>
           </div>
         </div>
-      )}
+      ), document.body)}
 
       {/* Unsaved changes confirm dialog */}
       <ConfirmDialog

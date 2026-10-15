@@ -602,9 +602,12 @@ export function TimetableView({
             // 与显示范围完全不相交的任务不画（部分重叠的保留，由列的 overflow-hidden 裁边）
             const ordinary = dayAll.filter(t =>
               (t.scheduledEnd ?? 0) > dayStartMin && (t.scheduledStart ?? 0) < dayEndMin)
-            const laid = layoutDay(ordinary)
             const dues = dueOfDay(weekDdl, ds)
+            // 延后幽灵（未完成滚到今天的排期任务）与当日任务**一起排版**：
+            // 幽灵原先是整列宽硬编码，和当日任务/别的幽灵同时段时文字会互相盖住（2026-10-11 反馈）
             const ghosts = isToday ? deferredForToday : []
+            const ghostIds = new Set(ghosts.map(t => t.id))
+            const laid = layoutDay([...ordinary, ...ghosts])
             const isDropTarget = drop?.day === dayIdx
 
             return (
@@ -662,24 +665,16 @@ export function TimetableView({
                     style={{ top: (blank.start - dayStartMin) * pxPerMin, height: Math.max(20, (blank.end - blank.start) * pxPerMin - 2) }} />
                 )}
 
-                {/* 延后幽灵（未完成的排期任务滚到今天） */}
-                {ghosts.map(t => (
-                  <Block key={`ghost-${t.id}`} todo={t} pxPerMin={pxPerMin} dayStartMin={dayStartMin}
-                    lane={0} lanes={1} ghost iconSize={iconSize} quadrantIcon={quadrantIcon} quadrantText={quadrantText}
-                    onOpen={openTodoGuarded} onToggleDone={onToggleDone}
-                    onStartDrag={onBlockPointerDown}
-                    onResizeDown={onResizeDown} resize={null} />
-                ))}
-
-                {/* 任务卡片 */}
+                {/* 任务卡片 + 延后幽灵（同排版：重叠时并排，文字不互盖） */}
                 {laid.map(({ item, lane, lanes }) => {
-                  const live = resize?.id === item.id ? resize : null
+                  const isGhost = ghostIds.has(item.id)
+                  const live = !isGhost && resize?.id === item.id ? resize : null
                   return (
                     <Block key={item.id} todo={item} pxPerMin={pxPerMin} dayStartMin={dayStartMin}
-                      lane={lane} lanes={lanes} iconSize={iconSize} quadrantIcon={quadrantIcon} quadrantText={quadrantText}
+                      lane={lane} lanes={lanes} ghost={isGhost} iconSize={iconSize} quadrantIcon={quadrantIcon} quadrantText={quadrantText}
                       onOpen={openTodoGuarded} onToggleDone={onToggleDone}
                       onStartDrag={onBlockPointerDown}
-                      onDelete={deleteTodoAnimated} deleting={deletingId === item.id}
+                      onDelete={isGhost ? undefined : deleteTodoAnimated} deleting={deletingId === item.id}
                       onResizeDown={onResizeDown} resize={live} />
                   )
                 })}
@@ -805,12 +800,13 @@ function Block({
 
       <div className="pointer-events-none">
         {!tiny && (
-          <div className="text-[9.5px] leading-tight tabular-nums" style={{ color: `color-mix(in srgb, ${color} 70%, var(--text-primary))` }}>
+          <div className={`text-[9.5px] leading-tight tabular-nums ${ghost ? 'pr-9 truncate' : ''}`} style={{ color: `color-mix(in srgb, ${color} 70%, var(--text-primary))` }}>
             {fmtMin(start)}–{fmtMin(end)}
           </div>
         )}
         <div className={`font-semibold leading-snug text-[var(--text-primary)] ${tiny ? 'truncate' : ''} ${isDone ? 'line-through' : ''}`}
           style={{ fontSize: fz }}>
+          {todo.recurringId && <span className="mr-0.5" title="固定日程">🔁</span>}
           {todo.title}
         </div>
         {!compact && (

@@ -128,7 +128,7 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
     <div
       data-wb="aiUsagePanel"
       className="kb-view-fade flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-2.5 pb-2.5 pt-2"
-      style={{ '--kb-in': '#8ba3f5' } as CSSProperties}
+      style={{ '--kb-in': 'color-mix(in srgb, var(--accent) 34%, var(--bg-tertiary))' } as CSSProperties}
     >
       {/* ── ① 消耗卡：今日大数字 + 7 天双段堆叠柱 + 会话 TOP（折叠） ── */}
       <div className="shrink-0 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-2">
@@ -148,26 +148,46 @@ export function AiUsagePanel({ onOpenChangeFile }: Props) {
           输入 {fmtTok(today.in)} · 输出 {fmtTok(today.out)} · {today.calls} 次调用{today.cache > 0 && todayTotal > 0 ? ` · 缓存命中 ${Math.min(100, Math.round((today.cache / Math.max(todayTotal, 1)) * 100))}%` : ''}
         </div>
 
-        {/* 近 7 天双段堆叠柱：浅=输入 / 深=输出（--kb-in 取原型同款浅蓝紫），悬停提亮 + 看当日数值 */}
-        <div className="mt-2 flex h-[96px] items-end gap-2" role="img" aria-label="近 7 天 token 消耗堆叠柱状图">
-          {chartDays.map(d => (
-            <div key={d.key} className="group/bar flex h-full flex-1 flex-col items-center justify-end gap-1" title={d.title}>
-              <div
-                className={`flex w-full max-w-[22px] flex-col justify-end overflow-hidden rounded-t-[5px] rounded-b-[2px] ${d.today ? 'outline outline-1 outline-[var(--accent)] outline-offset-1' : ''}`}
-                style={{ height: `${Math.round(((d.in + d.out) / chartMax) * 100)}%` }}
-              >
-                <i
-                  className="w-full bg-[var(--accent)] transition-[filter] group-hover/bar:brightness-110"
-                  style={{ height: `${d.in + d.out > 0 ? Math.round((d.out / (d.in + d.out)) * 100) : 0}%` }}
-                />
-                <i
-                  className="w-full bg-[var(--kb-in)] transition-[filter] group-hover/bar:brightness-110"
-                  style={{ height: `${d.in + d.out > 0 ? Math.round((d.in / (d.in + d.out)) * 100) : 0}%` }}
-                />
-              </div>
-              <span className="text-[9px] not-italic text-[var(--text-disabled)]">{d.label}</span>
-            </div>
-          ))}
+        {/* 近 7 天双段堆叠柱：输入=主题淡 accent / 输出=主题 accent（随主题走）；淡轨道 + 基线，空白天留墩 */}
+        <div className="mt-2" role="img" aria-label="近 7 天 token 消耗堆叠柱状图">
+          <div className="flex h-[84px] items-end gap-2 border-b border-[var(--border-color)]">
+            {chartDays.map(d => {
+              const total = d.in + d.out
+              return (
+                <div key={d.key} className="group/bar relative flex h-full flex-1 items-end justify-center" title={d.title}>
+                  {/* 淡轨道：今日用 accent 轻描，其余用中性；空白天只留这条轨道 */}
+                  <div
+                    className="absolute inset-0 mx-auto w-full max-w-[22px] rounded-[5px]"
+                    style={{ background: d.today
+                      ? 'color-mix(in srgb, var(--accent) 13%, transparent)'
+                      : 'color-mix(in srgb, var(--text-muted) 10%, transparent)' }}
+                  />
+                  <div
+                    className="relative flex w-full max-w-[22px] flex-col justify-end overflow-hidden rounded-[5px]"
+                    style={{ height: `${Math.round((total / chartMax) * 100)}%` }}
+                  >
+                    {d.out > 0 && (
+                      <i
+                        className="w-full transition-[filter] group-hover/bar:brightness-110"
+                        style={{ height: `${Math.round((d.out / total) * 100)}%`, background: 'linear-gradient(180deg, var(--accent-hover), var(--accent))' }}
+                      />
+                    )}
+                    {d.in > 0 && (
+                      <i
+                        className={`w-full bg-[var(--kb-in)] transition-[filter] group-hover/bar:brightness-110 ${d.out > 0 ? 'mt-[1.5px]' : ''}`}
+                        style={{ height: `${Math.round((d.in / total) * 100)}%` }}
+                      />
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-1 flex gap-2">
+            {chartDays.map(d => (
+              <span key={d.key} className={`flex-1 text-center text-[9px] ${d.today ? 'font-semibold text-[var(--accent)]' : 'text-[var(--text-disabled)]'}`}>{d.label}</span>
+            ))}
+          </div>
         </div>
         <div className="mt-1.5 flex items-center gap-3">
           <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)]"><i className="inline-block h-2 w-2 rounded-[2px] bg-[var(--kb-in)]" />输入</span>

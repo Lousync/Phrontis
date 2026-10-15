@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Search, Folder, BookOpen, Layers, Sparkles, ChevronRight, House, Lock, LockOpen } from 'lucide-react'
 import { Collapsible } from '../shared/Collapsible'
+import { SIDEBAR_HEADER_ICON } from '../shared/sidebarHeaderIcon'
 import { FileIcon } from '../shared/FileIcon'
 import { getFileTypeInfo } from '../../lib/fileTypes'
 import { searchKnowledgePages, getKnowledgePages, getKnowledgeCategories, getKnowledgeTags } from '../../lib/ipc'
@@ -266,14 +267,14 @@ export function WorkbenchSearchPanel({ onOpenPage, onLocateCategory, onRunComman
       {/* 头部：🏠 返回顶层 + 🔒 锁定（简图右图排版；与总览态头部同一居中语言） */}
       <div className="flex h-8 shrink-0 items-center justify-center gap-1 px-1.5">
         <button onClick={onExit} title="返回总览" className="rounded p-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">
-          <House size={13} />
+          <House {...SIDEBAR_HEADER_ICON} />
         </button>
         <button
           onClick={onToggleLock}
           title={locked ? '已锁定：主界面切换不改变左栏（点击解锁）' : '锁定侧边栏：主界面切换不改变左栏'}
           className={`rounded p-1 transition-colors ${locked ? 'bg-[var(--bg-hover)] text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
         >
-          {locked ? <Lock size={13} /> : <LockOpen size={13} />}
+          {locked ? <Lock {...SIDEBAR_HEADER_ICON} /> : <LockOpen {...SIDEBAR_HEADER_ICON} />}
         </button>
       </div>
 

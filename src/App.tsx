@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy } from 'react'
 import { createPortal } from 'react-dom'
-import { AppWindow } from 'lucide-react'
+import { Bot, Command, FileSearch } from 'lucide-react'
 import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag, BookKind } from './types'
 
 import { labelOf as tabLabel, isTabName } from './lib/appModules'
@@ -15,6 +15,7 @@ import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
 import { ZenHotZone } from './components/shared/ZenHotZone'
 import { WorkbenchStatusBar } from './components/shared/WorkbenchStatusBar'
 import { CommandPalette, type PaletteItem } from './components/shared/CommandPalette'
+import { WorkbenchEmptyState, type WorkbenchHint } from './components/workbench/WorkbenchEmptyState'
 import { CodePluginHosts } from './components/shared/CodePluginHosts'
 import { Toast } from './components/shared/Toast'
 import { FONT_CSS_MAP, applyThemeClass } from './lib/settings'
@@ -22,7 +23,7 @@ import { useSettings } from './lib/SettingsContext'
 import { isEditingInput, allowsWorkbenchShortcut } from './lib/shortcuts'
 import { registerSelectionAskHost, type SelectionAskHost } from './lib/assistantContext'
 import { setGlobalActiveTab } from './lib/activeTab'
-import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList } from './lib/ipc'
+import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList, agentTakeAdoptNotice } from './lib/ipc'
 import { getPluginTools } from './lib/pluginService'
 import { requestPluginViewActivation, dispatchCodePluginAction } from './lib/pluginCommandBus'
 import { requestSourceDraftPrefill } from './lib/bookSourceDraftBus'
@@ -43,7 +44,7 @@ import type { BlogJump } from './modules/blog'
 import type { SummaryKind } from './lib/summary'
 import { ScheduleModule } from './modules/schedule'
 import { AccountingModule } from './modules/accounting'
-import { ACCOUNTING_EDIT_EVENT, ACCOUNTING_NEW_EVENT } from './modules/accounting/shared'
+import { ACCOUNTING_EDIT_EVENT, ACCOUNTING_NEW_EVENT, ACCOUNTING_RECUR_NEW_EVENT, ACCOUNTING_RECUR_EDIT_EVENT } from './modules/accounting/shared'
 import { KnowledgeModule } from './modules/knowledge'
 import { MomentsModule } from './modules/moments'
 import { RecycleBinModule } from './modules/recycle'
@@ -68,14 +69,15 @@ const EpubRailPanel = lazy(() => import('./components/shared/epub/EpubRailPanel'
 
 import { FillPopup } from './modules/toolbox/components/FillPopup'
 import { VaultPicker } from './components/shared/VaultPicker'
-import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA, KB_EPUB_GOTO_CFI, KB_OPEN_EXCERPT_LOC } from './components/shared/pdf/pdfEvents'
+import { KB_PDF_GOTO_PAGE, KB_TXT_GOTO_PARA, KB_EPUB_GOTO_CFI, KB_OPEN_EXCERPT_LOC, KB_PDF_ZOOM_FIT, hasVisiblePdfReader } from './components/shared/pdf/pdfEvents'
 import { bookDisplayName, bookEngineOf, bookKindOf } from '../electron/lib/kbStore/bookFormats'
 import { PomodoroProvider } from './modules/toolbox/hooks/PomodoroContext'
 import { PomodoroPanel } from './modules/toolbox/components/PomodoroPanel'
 import { Onboarding } from './components/shared/Onboarding'
 import { ImportModal } from './modules/shared/components/ImportModal'
 import { useCheckinReminder } from './lib/useCheckinReminder'
-import { installFileOpUndoShortcuts } from './lib/fileOpHistory'
+import { installFileOpUndoShortcuts, undoFileOp, redoFileOp } from './lib/fileOpHistory'
+import { paletteCommands, groupLabelOf } from './lib/commandRegistry'
 import { initModalDimSync } from './lib/mainDimSync'
 import { AssistantPanel } from './components/shared/AssistantPanel'
 import { AiChatTab } from './components/shared/AssistantPanel/ChatBody'
@@ -163,13 +165,20 @@ export default function App() {
 
   // v3.4.0「页面条置顶」（2026-09-18）：中间栏页面条内的两个页签组槽 —— 编辑器与知识库
   // 各自把现有页签条 portal 进来（与上面 wbModSlotEl 同款手法与托管语义）。
-  // 另有一个内容级操作槽（插图/大纲/预览/保存全部 的胶囊），挂在内容区右上角浮层里。
+  // ★ 当年还有一个「内容级操作槽」（插图/大纲/预览/保存全部 的悬浮胶囊）挂在内容区右上角浮层里，
+  // 批 2（2026-10-12）随胶囊整条退役 —— 知识库的动作已全部收进 NoteTopBar。
   const [wbEditorPageEl, setWbEditorPageEl] = useState<HTMLElement | null>(null)
   const wbEditorPageRef = useCallback((node: HTMLDivElement | null) => { setWbEditorPageEl(node) }, [])
   const [wbKnowledgePageEl, setWbKnowledgePageEl] = useState<HTMLElement | null>(null)
   const wbKnowledgePageRef = useCallback((node: HTMLDivElement | null) => { setWbKnowledgePageEl(node) }, [])
-  const [wbContentActionsEl, setWbContentActionsEl] = useState<HTMLElement | null>(null)
-  const wbContentActionsRef = useCallback((node: HTMLDivElement | null) => { setWbContentActionsEl(node) }, [])
+  // 页面级分屏（Fork A）：主栏=模块容器（保活不动）；副栏=「第二页视图」槽，由拥有该页面的模块 portal 进来。
+  // 栏头同理：副栏段=副栏页面标签槽（模块 portal）+ App 的「合并回主栏」。
+  const [wbSecondaryPageEl, setWbSecondaryPageEl] = useState<HTMLElement | null>(null)
+  const wbSecondaryPageRef = useCallback((node: HTMLDivElement | null) => { setWbSecondaryPageEl(node) }, [])
+  const [wbSecondaryContentEl, setWbSecondaryContentEl] = useState<HTMLElement | null>(null)
+  const wbSecondaryContentRef = useCallback((node: HTMLDivElement | null) => { setWbSecondaryContentEl(node) }, [])
+  // 拖分隔条改比例：以内容区几何为准
+  const pageSplitContainerRef = useRef<HTMLDivElement | null>(null)
   // 知识库沉浸阅读 / 图谱模式：模块自己让整条页面条隐藏（那些形态下外壳行也该让位，模块内无法触及）
   const [knowledgeImmersive, setKnowledgeImmersive] = useState(false)
   const handleKnowledgeImmersive = useCallback((v: boolean) => setKnowledgeImmersive(v), [])
@@ -214,6 +223,29 @@ export default function App() {
 
   // R1-W2：命令面板 / 快速切换器（Ctrl+Shift+P / Ctrl+O），两布局均可用（docs/rework-workbench-design.md §3）
   const [palette, setPalette] = useState<null | 'command' | 'file'>(null)
+  // ---- 空态三条指令的动作真源（v3.5.0，2026-10-13）----------------------------------------
+  // 工作台全关空态要摆「打开命令面板 / 快速打开文件 / AI 助手」三条可点击提示，它们各自
+  // 都已有别的调用方（前两条 = 全局快捷键监听；第三条 = Ctrl+J 路由）。**动作只能有一份实现**：
+  // 三个 useCallback 就是那份唯一真相源，快捷键 / Ctrl+J / 空态提示三处一律调它们。
+  // 反面教材：把 AI 助手那段 update('workbenchLayout', …) 内联进 effect 里，空态就只能照抄
+  // 一遍 —— 之后权重、折叠判定一改就必然漂移。契约 verify-empty-state-hints.mjs 有断言锁。
+  const openCommandPalette = useCallback(() => {
+    setPalette((p) => (p === 'command' ? null : 'command'))
+  }, [])
+  const openQuickOpen = useCallback(() => {
+    setPalette((p) => (p === 'file' ? null : 'file'))
+  }, [])
+  /** 唤出 / 收起右栏 AI 助手。★ 不含「整窗模块下让位」的闸门 —— 那是**快捷键路由**的事
+   *  （整窗模块里 Ctrl+J 归悬浮 AssistantPanel 处理，见下方 Ctrl+J effect 的 early return），
+   *  而空态提示只可能在全关空态出现（那时 activeTab 恒为 null，闸门必然放行）。 */
+  const toggleWorkbenchAi = useCallback(() => {
+    // 先派 ai-assistant:close 收掉可能开着的浮层：右栏与浮层同为 ChatBody，
+    // 叠着会出现两块对话（且浮层盖在右栏正上方，视觉上像同一个东西）。
+    window.dispatchEvent(new Event('ai-assistant:close'))
+    // 开 = 右栏可见且停在 AI Tab → 再按 = 收起；否则唤出（展开右栏并切到 AI Tab）
+    const open = !wbLayout.rightCollapsed && wbLayout.rightTab === 'ai'
+    update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'ai', rightCollapsed: open }))
+  }, [wbLayout, update])
   const [fileItems, setFileItems] = useState<PaletteItem[]>([])
   const [fileLoading, setFileLoading] = useState(false)
   // 插件命令（plugin-phase1-design C3）：命令面板聚合 + 执行分发（切模块激活视图 / 推常驻 Worker）
@@ -266,7 +298,7 @@ export default function App() {
       }
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && (e.key === 'P' || e.key === 'p')) {
         e.preventDefault()
-        setPalette((p) => (p === 'command' ? null : 'command'))
+        openCommandPalette()
         return
       }
       // 左栏搜索态快捷键（反馈轮：顶栏搜索框删除后，Ctrl+P / Ctrl+` / Ctrl+Shift+F 全部指向左栏搜索）
@@ -282,14 +314,15 @@ export default function App() {
       }
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault()
-        setPalette((p) => (p === 'file' ? null : 'file'))
+        openQuickOpen()
         return
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // 依赖带全：退禅兜底需要读到当前禅档位 / 激活模块 / 面板态，重挂监听比 ref 镜像直白
-  }, [zenLevel, activeTab, palette, changeZen])
+    // （openCommandPalette / openQuickOpen 是稳定引用，进数组只为过 exhaustive-deps）
+  }, [zenLevel, activeTab, palette, changeZen, openCommandPalette, openQuickOpen])
 
   // 快速切换器数据源：知识页索引（默认 vault 读源带 path → 经 kb-open-note 在编辑器组打开）
   useEffect(() => {
@@ -354,7 +387,64 @@ export default function App() {
     setPalette(null)
   }, [openTab])
 
+  /** 空态三条指令提示（v3.5.0，2026-10-13）：**刻意不进上面的面板清单** ——
+   *  三条里的「打开命令面板」若进 buildCommandItems 就是自指（面板里出现「打开命令面板」）。
+   *  本函数只做「文案 + 键位 + 图标 → 已抽好的动作函数」的绑定，动作实现一律在上方 useCallback。
+   *  为什么是这三条：判据 =「界面上看不见、只能靠快捷键记忆的能力」（详见 WorkbenchEmptyState 头注）。 */
+  const buildEmptyHints = (): WorkbenchHint[] => [
+    { id: 'palette', label: '打开命令面板', keys: ['Ctrl', 'Shift', 'P'], icon: <Command size={15} />, run: openCommandPalette },
+    { id: 'quick-open', label: '快速打开文件', keys: ['Ctrl', 'O'], icon: <FileSearch size={15} />, run: openQuickOpen },
+    { id: 'ai-assistant', label: 'AI 助手', keys: ['Ctrl', 'J'], icon: <Bot size={15} />, run: toggleWorkbenchAi },
+  ]
+
+  // 真源里 palette:true 的命令 → 动作绑定表（v3.5.0 L2，2026-10-13）。
+  // ★ 契约 .AGENT/scripts/commands/verify-commands-registry.mjs §2 对它做**双射检查**：
+  //   这里的每个键必须在真源里标了 palette:true；真源里每条 palette:true 也必须在这里有绑定，
+  //   少一边都 FAIL（防「真源声明了但点了没反应」与「偷偷多接一条真源里没有的命令」）。
+  // ★ 键直接用真源 id（不另加前缀）：与本文件既有的 open-* / toggle-* / plugin-cmd-* 不冲突，
+  //   而且面板「最近使用」就是拿这个 id 落 localStorage 的 —— 改名会让用户的历史失效。
+  // ★ 写成函数而不是 const 对象：这个对象引用了 `fullWindowTab`，它声明在本文件 **1358 行**
+  //   （本函数之后）—— 写成 const 对象会在每次渲染时踩 TDZ（铁律 11 记过这类坑）。
+  const buildPaletteBindings = (): Record<string, () => void> => ({
+    'sidebar': () => setSidebarOpen(v => !v),
+    'global-search': () => setLeftSearchMode(true),
+    'quick-open': () => openQuickOpen(),
+    'ai-side': () => toggleWorkbenchAi(),
+    'right-panel': () => {
+      if (fullWindowTab) return   // 与 Ctrl+Alt+B 同口径（App.tsx:1395）
+      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightCollapsed: !wbLayout.rightCollapsed }))
+    },
+    'undo': () => { void undoFileOp() },
+    'redo': () => { void redoFileOp() },
+    'zoom-in': () => update('zoom', Math.min(s.zoomMax, +(s.zoom + s.zoomStep).toFixed(2))),
+    'zoom-out': () => update('zoom', Math.max(s.zoomMin, +(s.zoom - s.zoomStep).toFixed(2))),
+    // 新建知识页：走**已有**的跨模块事件（面板与桌面「新建」共用同一条），
+    // 监听端在知识库模块（handleTreeNewPick），不在这里直接创建 —— 读写分工铁律：
+    // 建页的写入只发生在知识库文件树/编辑器那条通道上。
+    'kb-new': () => window.dispatchEvent(new CustomEvent('kb-editor-new-page')),
+    // 新建 / 打开今日文章：同 kb-new，走模块自己的跨模块事件（监听端在博客模块）
+    'blog-new': () => window.dispatchEvent(new CustomEvent('blog-new-entry')),
+    // 新建任务：同上（监听端在日程模块）
+    'sch-new': () => window.dispatchEvent(new CustomEvent('schedule-new-task')),
+    // 笔记模块内的两条：关闭当前标签页 / 沉浸阅读进出（监听端都在知识库模块）
+    'kb-close-tab': () => window.dispatchEvent(new CustomEvent('kb-close-active-tab')),
+    'kb-immersive': () => window.dispatchEvent(new CustomEvent('kb-toggle-immersive')),
+    // PDF 适应窗口：与阅读器自己的 Ctrl+0 是同一个动作（走 pdfEvents 的 KB_PDF_ZOOM_FIT，
+    // 监听端只让**当前可见**的那个阅读器响应 —— 两个实例并存与可见性判定的理由见该常量头注）
+    'pdf-zoom-fit': () => window.dispatchEvent(new CustomEvent(KB_PDF_ZOOM_FIT)),
+  })
+
   const buildCommandItems = (): PaletteItem[] => {
+    // ★ 真源里标了 palette:true 的命令排在最前（都带键位；门控不过的不列）—— 面板此前
+    //   完全不知道快捷键，正是 L1 真源化才让它有了键位可显示（见 docs/ui-updates.md §45）。
+    const bind = buildPaletteBindings()
+    const items: PaletteItem[] = paletteCommands({ workbench, fullWindowTab, activeTab }).map((c) => ({
+      id: c.id,
+      label: c.label,
+      group: groupLabelOf(c.group),
+      keys: c.keys,
+      run: bind[c.id] ?? (() => {}),
+    }))
     const tabs: Array<{ id: TabName; label: string; hint?: string }> = [
       { id: 'knowledge', label: '打开 笔记', hint: '阅读 / 编辑 / 导航' },
       { id: 'aiTeaching', label: '打开 AI教学', hint: '讲义 / 研读 / 出题' },
@@ -368,13 +458,13 @@ export default function App() {
       { id: 'help', label: '打开 帮助' },
       { id: 'releaseNotes', label: '打开 更新说明', hint: '本版做了什么' },
     ]
-    const items: PaletteItem[] = tabs.map((t) => ({
+    items.push(...tabs.map((t) => ({
       id: `open-${t.id}`,
       label: t.label,
       hint: t.hint,
       group: '打开模块',
       run: () => openTab(t.id),
-    }))
+    })))
     items.push(
       { id: 'toggle-workbench', label: workbench ? '布局：切回 旧布局' : '布局：启用 Workbench 外壳（实验）', group: '界面设置', run: () => { update('uiWorkbench', !workbench); setPalette(null) } },
       { id: 'toggle-lineno', label: s.showLineNumbers ? '编辑器：隐藏行号' : '编辑器：显示行号', group: '界面设置', run: () => { update('showLineNumbers', !s.showLineNumbers); setPalette(null) } },
@@ -406,6 +496,74 @@ export default function App() {
   /** 激活的工具标签页（`tool:<toolId>` | null）。与 activeTab 互斥共现：工具标签激活时 activeTab=null
       （模块保活层照常 display:none 常驻），激活模块标签时清空。批次4 方案 §10.2「点击入口 → 中间开工具标签页」。 */
   const [activeToolTab, setActiveToolTab] = useState<string | null>(null)
+
+  // ---- 页面级分屏（Fork A）状态 ----
+  // 只承载「页面」（文档）；模块标签一律不进这里（模块整体不分栏）。null = 单栏。
+  // 页面目前只来自知识库（编辑器退役）；secondaryPageIds = 被挪到副栏的页面 id。
+  const [pageSplit, setPageSplit] = useState<{
+    orientation: 'row' | 'column'
+    ratio: number
+    secondaryPageIds: string[]
+    secondaryActiveId: string | null
+  } | null>(null)
+  const pageSplitActive = !!pageSplit
+  const pageSplitRef = useRef(pageSplit)
+  pageSplitRef.current = pageSplit
+  /** 拆分：把某页面从主栏挪入新建的副栏 */
+  const splitPageToPane = useCallback((pageId: string, orientation: 'row' | 'column') => {
+    setPageSplit({ orientation, ratio: 0.5, secondaryPageIds: [pageId], secondaryActiveId: pageId })
+  }, [])
+  /** 合并：副栏页面回主栏（回单栏） */
+  const mergePagePanes = useCallback(() => setPageSplit(null), [])
+  /** 切换副栏激活页面 */
+  const setSecondaryActive = useCallback((pageId: string) => {
+    setPageSplit((p) => p ? { ...p, secondaryActiveId: pageId } : p)
+  }, [])
+  /** 移动页面到副栏（一页只在一栏：已含则不重复） */
+  const movePageToPane = useCallback((pageId: string) => {
+    setPageSplit((p) => p ? { ...p, secondaryPageIds: p.secondaryPageIds.includes(pageId) ? p.secondaryPageIds : [...p.secondaryPageIds, pageId], secondaryActiveId: pageId } : p)
+  }, [])
+  /** 副栏移走/关闭某页面；副栏空 → 自动合并回单栏 */
+  const removePageFromPane = useCallback((pageId: string) => {
+    setPageSplit((p) => {
+      if (!p) return p
+      const ids = p.secondaryPageIds.filter((x) => x !== pageId)
+      if (!ids.length) return null
+      return { ...p, secondaryPageIds: ids, secondaryActiveId: p.secondaryActiveId === pageId ? ids[0] : p.secondaryActiveId }
+    })
+  }, [])
+  // 分隔条拖拽调比例（夹 0.2~0.8）；以内容区几何为准
+  const startPageSplitDrag = useCallback((e: { preventDefault: () => void }) => {
+    e.preventDefault()
+    const container = pageSplitContainerRef.current
+    if (!container) return
+    const rect = container.getBoundingClientRect()
+    const orientation = pageSplitRef.current?.orientation ?? 'row'
+    const move = (ev: PointerEvent) => {
+      const ratio = orientation === 'column' ? (ev.clientY - rect.top) / rect.height : (ev.clientX - rect.left) / rect.width
+      setPageSplit((p) => p ? { ...p, ratio: Math.min(0.8, Math.max(0.2, ratio)) } : p)
+    }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }, [])
+  // 页面级分屏持久化：settings 就绪后恢复一次；此后变化写回 wbLayout.pageSplit。
+  const pageSplitRestoredRef = useRef(false)
+  useEffect(() => {
+    if (!settingsReady || pageSplitRestoredRef.current) return
+    pageSplitRestoredRef.current = true
+    const ps = wbLayout.pageSplit
+    if (!ps) return
+    setPageSplit({ orientation: ps.orientation, ratio: ps.ratio, secondaryPageIds: ps.secondaryPageIds, secondaryActiveId: ps.secondaryActiveId ?? ps.secondaryPageIds[0] ?? null })
+  }, [settingsReady, wbLayout])
+  useEffect(() => {
+    if (!settingsReady || !pageSplitRestoredRef.current) return
+    const next = pageSplit
+      ? { orientation: pageSplit.orientation, ratio: pageSplit.ratio, secondaryPageIds: pageSplit.secondaryPageIds, secondaryActiveId: pageSplit.secondaryActiveId }
+      : null
+    if (JSON.stringify(wbLayout.pageSplit ?? null) === JSON.stringify(next)) return
+    update('workbenchLayout', JSON.stringify({ ...wbLayout, pageSplit: next }))
+  }, [settingsReady, pageSplit, wbLayout, update])
 
   // 启动检测当前仓库：无 → 仓库选择页（VaultPicker，新老用户统一）；有且开启「每次启动选择仓库」→ 启动形态选择页
   // sessionStorage 一次性标记：应用内切库会整窗 reload（数据激活重读约定），热重载不再打扰；冷启动才重新出页
@@ -460,6 +618,30 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsReady, loaded])
 
+  // ---- 存量 AI 会话认领的一次性告知（会话随仓库走，2026-10-13）----
+  // 认领发生在主进程「仓库成为当前仓库」时，而切库收尾是整窗重载——当场广播的 Toast 会被抹掉，
+  // 所以主进程留成待取文件，这里启动后取一次（主进程侧取走即删，只会展示一次）。
+  // 延迟 600ms：错开首屏渲染；更新说明的 2s 自动打开不冲突（Toast 在右下角，各走各的）。
+  const adoptNoticeCheckedRef = useRef(false)
+  useEffect(() => {
+    if (!settingsReady || !loaded || adoptNoticeCheckedRef.current) return
+    adoptNoticeCheckedRef.current = true
+    let alive = true
+    const timer = window.setTimeout(() => {
+      agentTakeAdoptNotice()
+        .then((n) => {
+          if (!alive || !n) return
+          showToast({
+            type: 'info',
+            message: `已把 ${n.sessions} 条历史会话归入仓库「${n.vaultName}」`,
+            detail: 'AI 对话自本版起随仓库走，不再跨仓库共享；原数据仍保留在应用数据目录下。',
+          })
+        })
+        .catch(() => { /* 静默：告知失败不值得为它弹错误 */ })
+    }, 600)
+    return () => { alive = false; window.clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsReady, loaded])
   /** 「知道了」：回到进更新说明之前那个模块；**没有来源时回工作台空态**
    *  （启动即工作台，已无「启动项」可退；非法 id 的兜底统一由 openTab 的守卫负责）。 */
   const dismissReleaseNotes = useCallback(() => {
@@ -604,22 +786,40 @@ export default function App() {
   /** 记账：中央「记一笔 / 编辑某笔」路由到右栏记账面板。同 pendingRightAsk —— 右栏折叠时整个卸载，
    *  故监听挂 App 层；'new' = 新建，其余 = 待编辑流水 id。展开右栏 + 切记账 Tab 由本层完成。 */
   const [pendingAccountingEdit, setPendingAccountingEdit] = useState<string | 'new' | null>(null)
+  /** 记账·定期收支：左栏「＋ 新增 / 编辑」路由到右栏记账面板的规则表单。同 pendingAccountingEdit——
+   *  右栏折叠时 AccountingPanel 整个卸载（收不到 window 事件），故由 App 存 state + 展开右栏后经 prop 投递。 */
+  const [pendingAccountingRule, setPendingAccountingRule] = useState<string | 'new' | null>(null)
   useEffect(() => {
+    const openAccountTab = () => update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'account', rightCollapsed: false }))
     const onEdit = (e: Event) => {
       const id = (e as CustomEvent<{ id?: string }>).detail?.id
       if (!id) return
       setPendingAccountingEdit(id)
-      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'account', rightCollapsed: false }))
+      openAccountTab()
     }
     const onNew = () => {
       setPendingAccountingEdit('new')
-      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'account', rightCollapsed: false }))
+      openAccountTab()
+    }
+    const onRecurNew = () => {
+      setPendingAccountingRule('new')
+      openAccountTab()
+    }
+    const onRecurEdit = (e: Event) => {
+      const id = (e as CustomEvent<{ id?: string }>).detail?.id
+      if (!id) return
+      setPendingAccountingRule(id)
+      openAccountTab()
     }
     window.addEventListener(ACCOUNTING_EDIT_EVENT, onEdit)
     window.addEventListener(ACCOUNTING_NEW_EVENT, onNew)
+    window.addEventListener(ACCOUNTING_RECUR_NEW_EVENT, onRecurNew)
+    window.addEventListener(ACCOUNTING_RECUR_EDIT_EVENT, onRecurEdit)
     return () => {
       window.removeEventListener(ACCOUNTING_EDIT_EVENT, onEdit)
       window.removeEventListener(ACCOUNTING_NEW_EVENT, onNew)
+      window.removeEventListener(ACCOUNTING_RECUR_NEW_EVENT, onRecurNew)
+      window.removeEventListener(ACCOUNTING_RECUR_EDIT_EVENT, onRecurEdit)
     }
   }, [wbLayout, update])
   useEffect(() => {
@@ -753,7 +953,7 @@ export default function App() {
     return () => window.removeEventListener('ai-learn:goto', handler)
   }, [])
 
-  // Listen for plugins:open — navigate to plugins tab (e.g. 设置→AI 工具→Skill 跳市场)
+  // Listen for plugins:open — navigate to plugins tab (e.g. 设置 → AI→Skill 跳市场)
   useEffect(() => {
     const handler = () => { setActiveTab('plugins'); setSidebarOpen(true) }
     window.addEventListener('plugins:open', handler)
@@ -1165,12 +1365,19 @@ export default function App() {
   // 标题栏那枚按钮已于 2026-09-23 隐藏（属未实现的「侧边栏 DIY」方向），故此处不再提供调用入口。
 
   // Ctrl+= / Ctrl+- zoom — synced with settings
-  // 作用域仲裁（2026-09-20 反馈「界面缩放和页面缩放冲突」）：正在书架里读 PDF 时，
-  // 这组快捷键归阅读器页面缩放（PdfReaderView 自行处理），全局界面缩放让位
+  // 作用域仲裁（2026-09-20 反馈「界面缩放和页面缩放冲突」）：正在读 PDF 时，这组快捷键归阅读器
+  // 页面缩放（PdfReaderView 自行处理），全局界面缩放让位。判据两条 —— ★ 第二条是 2026-10-13
+  // （K-2）补的，因为阅读器后来多了一个挂载点（笔记编辑器里的 PDF 附件）：
+  //   ① 书架 Tab + 开着书：App 侧有 state，任何书类型都算（现状，不动）；
+  //   ② 屏幕上有**可见的** PdfReaderView：笔记侧那个实例的 relPath 只有 PageEditor 知道，
+  //      App 拿不到，只能问可见性（探针见 pdfEvents.ts 的 hasVisiblePdfReader，隐藏实例不计入）。
+  // 少了 ② 的表象：笔记里按 Ctrl+= → 界面缩放一档 + 附件也放大一档（两个 window 监听器谁也拦不住谁，
+  // preventDefault 只拦浏览器默认行为，不拦另一个监听器）。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return
-      if (bookshelfReading && activeTab === 'bookshelf' && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '_')) return
+      const zoomKey = e.key === '=' || e.key === '+' || e.key === '-' || e.key === '_'
+      if (zoomKey && ((bookshelfReading && activeTab === 'bookshelf') || hasVisiblePdfReader())) return
       if (e.code === 'Equal' || e.code === 'NumpadAdd') {
         e.preventDefault()
         const n = Math.min(s.zoomMax, +(s.zoom + s.zoomStep).toFixed(2))
@@ -1267,24 +1474,31 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullWindowTab, wbLayout, update])
 
+  // 笔记区「关联网络」右轨打开 → 自动收起工作台右栏（两个右栏同开太挤；2026-10-09 反馈）。
+  // 单向：关联网络关掉不自动恢复右栏（用户拍板）。
+  useEffect(() => {
+    const handler = () => {
+      if (wbLayout.rightCollapsed) return
+      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightCollapsed: true }))
+    }
+    window.addEventListener('kb-collapse-right-panel', handler)
+    return () => window.removeEventListener('kb-collapse-right-panel', handler)
+  }, [wbLayout, update])
+
   // Ctrl+J — 上下文路由（2026-09-21 用户拍板）：工作台内唤出**右栏 AI 侧栏**（再按收起）；
   // 整窗模块不拦，由悬浮 AssistantPanel 自己的监听处理（唤出悬浮 AI 助手）。
-  // 工作台分支先派 ai-assistant:close 收掉可能开着的浮层 —— 右栏与浮层同为 ChatBody，
-  // 叠着会出现两块对话（且浮层盖在右栏正上方，视觉上像同一个东西）。
+  // 动作本体已抽到 toggleWorkbenchAi（唯一真相源，空态「AI 助手」提示调同一份）；
+  // 本 effect 只负责**路由**：整窗模块 early return + 拦默认行为。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j')) return
       if (fullWindowTab) return // 整窗模块：悬浮助手自己的监听处理
       e.preventDefault()
-      window.dispatchEvent(new Event('ai-assistant:close'))
-      // 开 = 右栏可见且停在 AI Tab → 再按 = 收起；否则唤出（展开右栏并切到 AI Tab）
-      const open = !wbLayout.rightCollapsed && wbLayout.rightTab === 'ai'
-      update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'ai', rightCollapsed: open }))
+      toggleWorkbenchAi()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullWindowTab, wbLayout, update])
+  }, [fullWindowTab, toggleWorkbenchAi])
 
   /** 「有书在读」的统一口径：右栏阅读 Tab 与 B-26 划词路由**共用这一份**
    *  （两处各写一遍必然漂移 —— cbz 那条排除尤其容易被漏掉）。cbz 不给：整页是图片、无文字层。 */
@@ -1337,7 +1551,7 @@ export default function App() {
     switch (name) {
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onRequestCloseTab={() => closeTab('knowledge')} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} secondaryPageIds={pageSplit?.secondaryPageIds ?? []} secondaryActiveId={pageSplit?.secondaryActiveId ?? null} secondaryBarEl={wbSecondaryPageEl} secondaryContentEl={wbSecondaryContentEl} splitDisabled={pageSplitActive} onSplitPage={splitPageToPane} onSecondaryActivate={setSecondaryActive} onMergeSplit={mergePagePanes} onRemoveSecondary={removePageFromPane} onMovePageToPane={movePageToPane} onBackToWorkbench={() => { setActiveToolTab(null); setActiveTab(null); setRailModule(null) }} />
       case 'moments': return <MomentsModule />
       case 'bookshelf': return (
         <BookshelfModule
@@ -1424,6 +1638,61 @@ export default function App() {
       </div>
     )
   }
+
+  // 主栏页面条（模块条目 + 知识库/编辑器页签组槽）。分屏时与副栏段并排，单栏时独占整行。
+  const mainPageBar = (
+    <WorkbenchPageBar
+      tabs={openTabs}
+      active={activeToolTab ?? activeTab}
+      onSelect={(id) => {
+        if (isToolTabId(id)) {
+          setActiveTab(null)
+          setActiveToolTab(id)
+          if (!wbLayout.leftLocked) {
+            const tid = toolIdOfTab(id)
+            setRailTool(TOOLS_WITH_SIDEBAR.has(tid) ? tid : null)
+          }
+        } else if (id === 'quiz') {
+          handleTabChange('knowledge')
+          window.setTimeout(() => window.dispatchEvent(new CustomEvent(LOCATE_QUIZ_VIEW_EVENT)), 100)
+          if (!wbLayout.leftLocked) setRailModule('quiz')
+        } else {
+          const t = id as TabName
+          handleTabChange(t)
+          if (!wbLayout.leftLocked) {
+            const m = t === 'knowledge' && quizViewOpen ? 'quiz' : RAIL_FOLLOW_MAP[t]
+            if (m) setRailModule(m)
+          }
+        }
+      }}
+      onClose={(id) => {
+        if (id === 'quiz') {
+          quizTabCloseRef.current = true
+          window.dispatchEvent(new CustomEvent(QUIZ_VIEW_CLOSE_REQUEST_EVENT))
+          quizTabCloseRef.current = false
+          return
+        }
+        closeTab(id)
+      }}
+      onReorder={handleReorder}
+      editorSlotRef={wbEditorPageRef}
+      knowledgeSlotRef={wbKnowledgePageRef}
+      showQuizEntry={QUIZ_ENTRY_ENABLED && quizViewOpen && openTabs.includes('knowledge')}
+      quizEntryActive={quizViewOpen && activeTab === 'knowledge'}
+      hidePages={zenLevel >= 1}
+      lead={activeTab === 'knowledge' && noteJumpFrom ? (
+        <button
+          onClick={() => handleTabChange(noteJumpFrom)}
+          title={`回到 ${tabLabel(noteJumpFrom)}`}
+          data-wb="noteReturnChip"
+          data-wb-return-to={noteJumpFrom}
+          className="kb-item-in flex items-center gap-0.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+        >
+          ← 返回 {tabLabel(noteJumpFrom)}
+        </button>
+      ) : null}
+    />
+  )
 
   return (
     <RootErrorBoundary>
@@ -1530,8 +1799,12 @@ export default function App() {
                   reading={rightReading}
                   // 记账模块激活 → 右栏出现条件性「记账」面板 Tab（记一笔 + JSON 导入）
                   accountingActive={activeTab === 'accounting'}
+                  // 日程模块激活 → 右栏出现条件性「日程助手」Tab（日程 AI 化 P1）
+                  scheduleActive={activeTab === 'schedule'}
                   pendingAccountingEdit={pendingAccountingEdit}
                   onConsumeAccountingEdit={() => setPendingAccountingEdit(null)}
+                  pendingAccountingRule={pendingAccountingRule}
+                  onConsumeAccountingRule={() => setPendingAccountingRule(null)}
                   // B-26：划词「问 AI」路由过来的选段（宿主在 App，见上面的 rightAskRef 注释）
                   pendingAsk={pendingRightAsk}
                   onConsumePendingAsk={() => setPendingRightAsk(null)}
@@ -1587,80 +1860,36 @@ export default function App() {
                   原「子模块标签条」取消——编辑器 / 知识库由各自页面条目代表，模块切换走左栏书签 / 图标条。
                   整窗模块（EXCLUDED 平级模块）激活时整条隐藏（同 aiTeaching，方案 §2）；
                   知识库沉浸阅读 / 图谱模式由模块反向通知让位（pageBarHidden）。 */}
-              {!fullWindowTab && !pageBarHidden && (
-                <WorkbenchPageBar
-                  tabs={openTabs}
-                  active={activeToolTab ?? activeTab}
-                  onSelect={(id) => {
-                    if (isToolTabId(id)) {
-                      setActiveTab(null)
-                      setActiveToolTab(id)
-                      // 重复点击已激活的工具标签也跟随左栏（跟随 effect 只认 state 变化，同值不触发）
-                      if (!wbLayout.leftLocked) {
-                        const tid = toolIdOfTab(id)
-                        setRailTool(TOOLS_WITH_SIDEBAR.has(tid) ? tid : null)
-                      }
-                    } else if (id === 'quiz') {
-                      // 错题本合成条目（2026-09-19）：回知识库标签 + 定位错题本视图（同错题本书签路径）
-                      handleTabChange('knowledge')
-                      window.setTimeout(() => window.dispatchEvent(new CustomEvent(LOCATE_QUIZ_VIEW_EVENT)), 100)
-                      if (!wbLayout.leftLocked) setRailModule('quiz')
-                    } else {
-                      const t = id as TabName
-                      handleTabChange(t)
-                      // 2026-09-17 反馈拍板：点击标签（含重复点击已激活标签）→ 左栏若不在该模块态则切过去；
-                      // 锁定时左栏归用户所有，不跟随（与 RAIL_FOLLOW 跟随语义一致）。
-                      // 特判：knowledge 标签当前显示错题本子视图时保持 quiz 态（否则点「知识库」会把错题本的左栏错切成目录树）
-                      if (!wbLayout.leftLocked) {
-                        const m = t === 'knowledge' && quizViewOpen ? 'quiz' : RAIL_FOLLOW_MAP[t]
-                        if (m) setRailModule(m)
-                      }
-                    }
-                  }}
-                  onClose={(id) => {
-                    // 错题本合成条目的 ✕ = 请求关闭错题本视图（视图关 → QUIZ_VIEW_TOGGLED 回流收条目）；
-                    // 标记来源 → 回流时对齐「关标签=回总览」（否则回流写死回知识库树态，2026-09-19 反馈）
-                    if (id === 'quiz') {
-                      quizTabCloseRef.current = true
-                      window.dispatchEvent(new CustomEvent(QUIZ_VIEW_CLOSE_REQUEST_EVENT))
-                      quizTabCloseRef.current = false
-                      return
-                    }
-                    closeTab(id)
-                  }}
-                  onReorder={handleReorder}
-                  editorSlotRef={wbEditorPageRef}
-                  knowledgeSlotRef={wbKnowledgePageRef}
-                  /* 错题本条目暂收（QUIZ_ENTRY_ENABLED 总闸，v3.5.0 随交互重做放出）——
-                     onSelect/onClose 的 'quiz' 分支保留（死代码但 harmless，重做时直接接线） */
-                  showQuizEntry={QUIZ_ENTRY_ENABLED && quizViewOpen && openTabs.includes('knowledge')}
-                   /* 单激活（2026-09-20）：激活 = knowledge 标签在前台**且**当前视图是错题本；
-                      页面视图时激活落在页签组条目上（模块侧 activeId 置 null 配合） */
-                   quizEntryActive={quizViewOpen && activeTab === 'knowledge'}
-                   hidePages={zenLevel >= 1}
-                   /* N-4：跳转来源返回 chip（「← 返回 X」）。知识库在前台且最近一次 kb-open-note
-                      带了合法 from（如 AI教学 / AI对话）时出现，点它回来源标签；手动切 Tab 即清。
-                      复用 WorkbenchPageBar 现成 lead 槽（prop 在、此前无人喂 —— 正是断链点）。 */
-                   lead={activeTab === 'knowledge' && noteJumpFrom ? (
-                     <button
-                       onClick={() => handleTabChange(noteJumpFrom)}
-                       title={`回到 ${tabLabel(noteJumpFrom)}`}
-                       data-wb="noteReturnChip"
-                       data-wb-return-to={noteJumpFrom}
-                       className="kb-item-in flex items-center gap-0.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                     >
-                       ← 返回 {tabLabel(noteJumpFrom)}
-                     </button>
-                   ) : null}
-                 />
-              )}
+              {!fullWindowTab && !pageBarHidden && (pageSplitActive ? (
+                <div className="flex min-h-0 min-w-0" style={{ flexDirection: pageSplit!.orientation }}>
+                  <div className="flex min-w-0" style={{ order: 0, flexGrow: pageSplit!.ratio, flexShrink: 1, flexBasis: 0 }}>
+                    {mainPageBar}
+                  </div>
+                  <div
+                    className={`kb-pane-divider${pageSplit!.orientation === 'column' ? ' is-col' : ''}`}
+                    style={{ order: 1 }}
+                    onPointerDown={startPageSplitDrag}
+                    aria-hidden
+                  />
+                  <div className="flex min-w-0 items-stretch" style={{ order: 2, flexGrow: 1 - pageSplit!.ratio, flexShrink: 1, flexBasis: 0 }}>
+                    <div ref={wbSecondaryPageRef} data-pb-slot="secondary" className="flex min-w-0 flex-1 items-end gap-1" />
+                    <button
+                      onClick={mergePagePanes}
+                      title="关闭分屏（页面合并回主栏）"
+                      className="shrink-0 self-center px-2 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                    >
+                      合并回主栏
+                    </button>
+                  </div>
+                </div>
+              ) : mainPageBar)}
               {/* 整窗模块的「回工作台」入口 = 图标条顶部「工作台」按钮（2026-09-17 bug 修复轮：
                   原右上角浮动「工作台」按钮删除——入口统一收敛到 ActivityBar，避免同一功能两处入口） */}
               {/* 编辑器组（W3 · Editor Groups v1）：主栏渲染。
                   v3.4.0 批次3：旧 R1-W1 全局侧栏槽（wbSidebarEl）已删除——editor 文件树与
                   knowledge/schedule/blog 侧栏统一由左栏模块态 slot（wbModSlotEl）portal 承接 */}
-              <div className="flex min-h-0 flex-1">
-                <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              <div ref={pageSplitContainerRef} className="flex min-h-0 min-w-0 flex-1" style={{ flexDirection: pageSplit?.orientation ?? 'row' }}>
+                <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" style={pageSplitActive ? { order: 0, flexGrow: pageSplit!.ratio, flexShrink: 1, flexBasis: 0 } : undefined}>
                   {/* 模块渲染区。
                       ★ 保活结构：模块容器**全部是这一行的直接子元素**（单一父节点），DOM 顺序按
                       `mountedTabs` 访问序恒定不变；可见性只由 style 的 `display` 决定，不换父节点。
@@ -1670,23 +1899,15 @@ export default function App() {
                       已验证的错路：① 挂跨父节点稳定 key（key 只在同父节点内有效）；
                       ② createPortal 换 target（一样重挂）。 */}
                   <div className="relative flex min-h-0 min-w-0 flex-1">
-                    {/* 内容级操作浮层（v3.4.0 页面条置顶）：插图/大纲/预览/保存全部 的胶囊，
-                        以及知识库页面级动作槽 `#editor-toolbar-slot`。
-                        ★ 2026-09-20：两者收进**一个悬浮胶囊**（data-wb="floatBar"，样式见
-                        styles/index.css 的 [data-wb='floatBar'] 段）——半透明毛玻璃底，
-                        静息态收成小把手（次级钮标 .kb-float-hide 者在非悬停时隐藏），
-                        模块只需给次级按钮加类，展开/淡出由 CSS 自持，无需上报状态。
-                        `pointer-events-none` 外壳保证空白区不挡内容点击；胶囊本体 auto。
-                        该 id 必须保留 —— knowledge/components/PageEditor.tsx 按 id 全局查它做 portal。 */}
-                    <div
-                      data-wb="mainPane"
-                      className="pointer-events-none absolute inset-y-0 left-0 z-30 flex w-full items-start justify-end"
-                    >
-                      <div data-wb="floatBar" className="pointer-events-auto mr-3 mt-3">
-                        <div ref={wbContentActionsRef} className="flex items-center" />
-                        <div id="editor-toolbar-slot" className="flex items-center gap-0.5" />
-                      </div>
-                    </div>
+                    {/* 内容级操作浮层已退役（批 2，2026-10-12，docs/nonmd-topbar-design.md）：
+                        这里原是 `data-wb="mainPane"` 外壳 + `data-wb="floatBar"` 悬浮胶囊，内含
+                        「内容级动作槽」与知识库页面级动作槽 `#editor-toolbar-slot`（半透明毛玻璃底、
+                        静息收成小把手、次级钮标 `.kb-float-hide`、空胶囊靠 `:not(:has(button))` 隐身）。
+                        ★ 为什么整条删掉：md 的动作 2026-10-11 已搬进 `NoteTopBar`，非 md 的动作
+                        批 2 也搬进去了 ⇒ 胶囊的两个槽都没有写入方。其中 `wbContentActionsEl`
+                        自 v3.4.0「页面条置顶」之后就一直是**死代码**（全仓无写入方）。
+                        ★ 顶栏是**行内渲染**，不再 portal 到主栏单例槽 ⇒ 分屏两栏各挂各的顶栏，
+                        不存在两实例抢槽的问题。 */}
                     {/* 模块容器序列：可见模块撑满（flex-1），其余 display:none 常驻保活。
                         ISS-2026-09-04-02 / -07：可见与隐藏模块必须在**同一个 keyed 数组**里，
                         否则可见↔隐藏换子节点槽位会被 React 按位置卸载重建。 */}
@@ -1718,14 +1939,11 @@ export default function App() {
                       </div>
                     )}
                     {/* 全关空态（2026-09-17 拍板③）：无激活模块且无工具标签时显示引导页；
-                        绝对定位铺满主栏区域（不参与 flex 流，避免挤动两栏几何）。 */}
+                        绝对定位铺满主栏区域（不参与 flex 流，避免挤动两栏几何）。
+                        2026-10-13：图标下补三条指令提示（组件 = components/workbench/WorkbenchEmptyState，
+                        动作真源 = 上方 openCommandPalette / openQuickOpen / toggleWorkbenchAi）。 */}
                     {activeTab === null && !activeToolTab && (
-                      /* 空态只留图标（2026-09-19 反馈：不要文字说明，页面简画） */
-                      <div
-                        className="absolute inset-y-0 left-0 z-20 flex w-full flex-col items-center justify-center pb-16"
-                      >
-                        <AppWindow size={44} strokeWidth={1.2} className="text-[var(--text-disabled)]" />
-                      </div>
+                      <WorkbenchEmptyState hints={buildEmptyHints()} />
                     )}
                   </div>
                   {/* AI 助手右下浮钮已移除（2026-09-16）：AI 对话入口迁移（批次5 中间栏 aiChat 标签），
@@ -1734,6 +1952,25 @@ export default function App() {
                       否则会盖住右侧的任务栏（DayPanel），表现为「进入番茄钟任务栏被关闭/唤不出」 */}
                   <PomodoroPanel />
                 </div>
+                {/* 分隔条与副栏必须与「主栏 div」平级（同为 pageSplitContainerRef 的直接子节点）。
+                    ⚠️ 不能写进主栏 div 内：主栏是 flex-col，flexGrow 会作用在纵轴上，
+                    副栏会塌成主栏底部的横条、容器右侧留白（2026-10-12 实机复现）。 */}
+                {pageSplitActive && (
+                  <div
+                    className={`kb-pane-divider${pageSplit!.orientation === 'column' ? ' is-col' : ''}`}
+                    style={{ order: 1 }}
+                    onPointerDown={startPageSplitDrag}
+                    aria-hidden
+                  />
+                )}
+                {pageSplitActive && (
+                  <div
+                    ref={wbSecondaryContentRef}
+                    data-pane="g2"
+                    className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+                    style={{ order: 2, flexGrow: 1 - pageSplit!.ratio, flexShrink: 1, flexBasis: 0 }}
+                  />
+                )}
               </div>
               </div>
             </div>

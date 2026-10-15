@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat, Share2, ReceiptText } from 'lucide-react'
+import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat, Share2, ReceiptText, CalendarDays } from 'lucide-react'
 import type { BookKind, KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
@@ -25,6 +25,7 @@ import { ChatBody } from '../shared/AssistantPanel/ChatBody'
 import { useAssistantChat } from '../shared/AssistantPanel/useAssistantChat'
 import { QuoteChips } from '../shared/AssistantPanel/QuoteChips'
 import { AccountingPanel } from '../../modules/accounting/AccountingPanel'
+import { ScheduleAssistantPanel } from '../../modules/schedule/ScheduleAssistantPanel'
 import type { PluginTool } from '../../lib/pluginService'
 
 /**
@@ -91,9 +92,14 @@ interface Props {
   reading?: { relPath: string; name: string; kind: BookKind } | null
   /** 记账模块激活时出现条件 Tab「🧾 记账」（记一笔 + JSON 导入）；缺省 false */
   accountingActive?: boolean
+  /** 日程模块激活时出现条件 Tab「🗓 日程助手」（日程 AI 化 P1）；缺省 false */
+  scheduleActive?: boolean
   /** 记账：中央「记一笔 / 编辑某笔」投递（App 层监听，见 App 的 pendingAccountingEdit）；'new' 或流水 id */
   pendingAccountingEdit?: string | 'new' | null
   onConsumeAccountingEdit?: () => void
+  /** 记账·定期收支：左栏「＋ 新增 / 编辑」投递到规则表单（'new' 或规则 id）；同 pendingAccountingEdit */
+  pendingAccountingRule?: string | 'new' | null
+  onConsumeAccountingRule?: () => void
   /** 阅读侧栏「书签 → 定位原文」（仅 pdf）：App 负责切回书架标签 + 派发跳页事件 */
   onLocatePdfPage?: (page: number) => void
   /** 阅读侧栏「摘录 → 定位原文」（pdf 跳页 / txt 跳段）：App 统一切回书架标签再派发 */
@@ -128,7 +134,7 @@ function PanelTabIcon({ id, size }: { id: string; size: number }) {
 const PANEL_TAB_TITLE: Record<string, string> = { widgets: '小工具', ai: 'AI', share: '分享' }
 const PANEL_TAB_LABEL: Record<string, string> = { widgets: '小工具', ai: 'AI 对话 / 面板', share: '分享卡片' }
 
-export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, accountingActive = false, pendingAccountingEdit = null, onConsumeAccountingEdit, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiChatOpen = false, onExpandAiChat, onOpenChangeFile, reading = null, accountingActive = false, scheduleActive = false, pendingAccountingEdit = null, onConsumeAccountingEdit, pendingAccountingRule = null, onConsumeAccountingRule, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -144,11 +150,14 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
   // 持久化值只在用户点 Tab 时写，条件消失不改写（同 reading 语义）。
   const readingOn = !!reading
   const accountingOn = !!accountingActive
+  const scheduleOn = !!scheduleActive
   const effectiveTab = layout.rightTab === 'reading'
     ? (readingOn ? 'reading' : visiblePanelTabs[0])
     : layout.rightTab === 'account'
       ? (accountingOn ? 'account' : visiblePanelTabs[0])
-      : (visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0])
+      : layout.rightTab === 'schedule'
+        ? (scheduleOn ? 'schedule' : visiblePanelTabs[0])
+        : (visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0])
   const setPanelTab = (id: (typeof WORKBENCH_PANEL_TAB_IDS)[number]) => patch({ rightTab: id })
 
   // ── B-26 划词引用胶囊（与悬浮侧栏同口径）────────────────────────────────────
@@ -333,6 +342,23 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               <ReceiptText size={14} />
             </button>
           )}
+          {/* 日程助手 Tab：日程模块激活才出现（条件性入口，不进 ⋯ 菜单）；点击展开右栏并切到日程助手 */}
+          {scheduleActive && (
+            <button
+              data-wb="rpTab"
+              data-wb-rp-tab="schedule"
+              data-wb-rp-active={effectiveTab === 'schedule' ? '1' : '0'}
+              onClick={() => patch({ rightTab: 'schedule', rightCollapsed: false })}
+              title="日程助手"
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                effectiveTab === 'schedule'
+                  ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <CalendarDays size={14} />
+            </button>
+          )}
           <div className="ml-auto">
             <button
               ref={ptMoreRef}
@@ -359,8 +385,8 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
                 层级：外壳卡(bg-secondary) → 本容器(bg-primary) → 控件内容 → 共两层带边框容器
                 （控件自身不画卡，如 PomoWidget frameless）。
                 内容区不再放文字标题——切换条选中图标即当前控件标识（2026-09-17 反馈：删冗余文字说明） */}
-            <div className={`mx-2.5 mb-2.5 flex min-h-0 flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] ${absorbSurplus ? 'grow-[99] basis-0 max-h-[480px]' : 'flex-1'} min-h-[400px]`}>
-              <div data-wb="widgetSwitch" className="flex shrink-0 items-center gap-0.5 px-2 pt-2">
+            <div className={`flex min-h-0 flex-col overflow-hidden ${absorbSurplus ? 'grow-[99] basis-0 max-h-[480px]' : 'flex-1'} min-h-[400px]`}>
+              <div data-wb="widgetSwitch" className="flex shrink-0 items-center gap-0.5 px-2.5 pt-2">
                 {visibleWidgets.map((id) => {
                   const meta = WIDGET_META[id]
                   if (!meta) return null
@@ -451,7 +477,11 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
           <ReadingSidePanel reading={reading} onLocatePdfPage={onLocatePdfPage} onLocateExcerpt={onLocateExcerpt} />
         ) : effectiveTab === 'account' ? (
           /* ---- 记账态（记账模块激活时）：记一笔表单 + 手机 AI JSON 导入 ---- */
-          <AccountingPanel pendingEdit={pendingAccountingEdit} onConsumeEdit={onConsumeAccountingEdit} />
+          <AccountingPanel pendingEdit={pendingAccountingEdit} onConsumeEdit={onConsumeAccountingEdit}
+            pendingRule={pendingAccountingRule} onConsumeRule={onConsumeAccountingRule} />
+        ) : effectiveTab === 'schedule' ? (
+          /* ---- 日程助手态（日程 AI 化 P1）：独立会话种类，常驻日程上下文 + /简报 · /排这周 ---- */
+          <ScheduleAssistantPanel />
         ) : (
           /* ---- AI 态（批次5，方案 §4）：aiChat 标签开着 → token 面板原位替换；否则小对话 + ⤢ ---- */
           aiChatOpen && onOpenChangeFile ? (
@@ -551,7 +581,7 @@ function RecentEdited({ onOpenFile, onOpenPage, absorbSurplus = false }: { onOpe
   }, [pages, absorbSurplus])
 
   return (
-    <div data-wb="recentEdited" className={`mx-2.5 mt-2 flex flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] ${absorbSurplus ? 'grow basis-0 min-h-[64px]' : 'shrink max-h-[212px] min-h-[36px]'}`}>
+    <div data-wb="recentEdited" className={`flex flex-col overflow-hidden border-b border-[var(--border-color)] px-2.5 pb-1.5 pt-2 ${absorbSurplus ? 'grow basis-0 min-h-[64px]' : 'shrink max-h-[212px] min-h-[36px]'}`}>
       <div className="flex shrink-0 items-center gap-1.5 px-2.5 pb-1 pt-2 text-[11.5px] font-semibold text-[var(--text-secondary)]">
         <History size={12} className="text-[var(--text-muted)]" />
         最近编辑

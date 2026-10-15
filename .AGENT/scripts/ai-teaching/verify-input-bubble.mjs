@@ -109,22 +109,28 @@ for (const k of ['teach', 'side', 'learn']) {
 ok('assistant 保留自适应 rows（窄版 2 行 / 宽版 3 行）', has('assistant', 'rows={isNarrow ? 2 : 3}'))
 ok('side 无意义的三元 rows 已化简', !has('side', 'rows={wide ? 2 : 2}'))
 
-// ── ⑤ 圆形发送键；方块停止只在 #1 / #5 ─────────────────────────────────────────────
+// ── ⑤ 圆形发送键；方块停止键：四个面各恰 1，且都落在**输入区** ─────────────────────
+// ★ 2026-10-13 生成态改版（docs/ai-reply-loading-plan.md §3.3 + §8-8）：状态区（消息流里的
+//   生成态）不再有停止按钮，停止入口收敛到输入区。而 assistant / learn 两面**原先只能**从
+//   状态区中断（发送键在 pending 时只是「禁用 + 转圈」）⇒ 这两面必须补上输入区停止键，
+//   否则会彻底失去中断能力。故下面两条断言由「不是停止键」翻成「是停止键」。
 for (const k of ['teach', 'side', 'learn']) {
   ok(`${k} 含圆形图标键（w-8 h-8 rounded-full）`, has(k, 'w-8 h-8') && has(k, 'rounded-full'))
 }
 ok('assistant 含圆形图标键（h-7 w-7 rounded-full，2026-09-17 起收小一号）',
   has('assistant', 'h-7 w-7') && has('assistant', 'rounded-full'))
 const SQUARE = 'w-2.5 h-2.5 rounded-[2px] bg-current'
-ok('teach 停止键 = 圆内方块（恰 1）', count(code.teach, SQUARE) === 1, `实际 ${count(code.teach, SQUARE)}`)
-ok('side 停止键 = 圆内方块（恰 1）', count(code.side, SQUARE) === 1, `实际 ${count(code.side, SQUARE)}`)
-ok('assistant pending 不是停止键（维持转圈 + 禁用）', !has('assistant', SQUARE))
-ok('learn pending 不是停止键（维持转圈 + 禁用）', !has('learn', SQUARE))
+for (const k of ['teach', 'side', 'assistant', 'learn']) {
+  ok(`${k} 停止键 = 圆内方块（恰 1，在输入区）`, count(code[k], SQUARE) === 1, `实际 ${count(code[k], SQUARE)}`)
+}
+ok('assistant 停止键按 pending 分档（不是常驻）',
+  /pending \? \([\s\S]{0,600}?停止生成（已完成的轮次保留）/.test(code.assistant))
+ok('learn 停止键按 disabled + onStop 分档（不是常驻）',
+  /disabled && onStop \? \([\s\S]{0,600}?停止生成（已完成的轮次保留）/.test(code.learn))
 // 原停止键用的是 <X size={13} />。改后 composer 里只剩方块；全文 <X size={13} /> 仍应**恰 1 处**
 //（L227 消息关闭键，绝不能删）—— 若变成 2 处即「停止键退回 ✕」。
 ok('side 停止键已不是 ✕（全文 <X size={13}> 恰 1 处 = 消息关闭键）',
   count(code.side, '<X size={13}') === 1, `实际 ${count(code.side, '<X size={13}')}`)
-ok('学/侧栏 pending 仍转圈', has('assistant', 'animate-spin') && has('learn', 'animate-spin'))
 
 // ── ⑥ 死引用清理 / 不能误删的引用 ────────────────────────────────────────────────
 for (const k of ['teach', 'side', 'learn']) {
@@ -138,8 +144,10 @@ for (const k of ['teach', 'side', 'assistant', 'learn']) {
 }
 
 // ── ⑦ 行为面未被动（只换外观）────────────────────────────────────────────────────
-ok('assistant pending 语义未变（转圈 + 三条件禁用）',
-  has('assistant', 'disabled={pending || compressing || !input.trim()}'))
+// 2026-10-13：`pending` 从发送键的禁用条件里退出（它改由「停止键」那一档接管），
+// `compressing`（历史压缩中）仍必须禁用发送 —— 见 docs/ai-reply-loading-plan.md §3.3。
+ok('assistant 发送键仍受 compressing / 空输入约束（pending 已由停止键分支接管）',
+  has('assistant', 'disabled={compressing || !input.trim()}'))
 ok('side 的 disabled={stopped} 仍在', has('side', 'disabled={stopped}'))
 ok('side Escape / Enter 键位未变',
   has('side', "e.key === 'Escape'") && has('side', "e.key === 'Enter' && !e.shiftKey"))
@@ -178,6 +186,14 @@ ok('限宽只落在输入壳，不影响输入卡本体类名',
   && code.side.includes('max-w-[820px] mx-auto px-2.5 pb-2.5 pt-2')
   && code.assistant.includes('max-w-[820px] mx-auto w-full')
   && code.learn.includes('mx-auto ${compact ? \'px-3\' : \'px-4\'} pb-2.5 pt-2'))
+
+// ── ⑪ 生图入口 = 斜杠指令，输入区不放大按钮（v3.6.0 docs/ai-image-gen-plan.md §5.1）──────
+// 拍板口径：「去掉大按钮，输入区只剩 输入框 + 发送」，生图入口是 `/生图` + 占位文字指路。
+// 负向断言（先剥注释）：输入卡里不得再长出「生图」按钮 —— 原型档有一个，落码不许复活。
+ok('assistant 输入区无「生图」大按钮（入口 = 斜杠指令）',
+  !/>\s*生图\s*</.test(code.assistant) && !/title="生图/.test(code.assistant))
+ok('assistant 占位文字指路 /生图（弹层只有敲 `/` 才出现，不点一句用户无从知道）',
+  code.assistant.includes('要画图就敲 /生图'))
 
 console.log(`\nverify-input-bubble: ${pass} PASS / ${fail} FAIL`)
 if (fail) { console.log('\n失败项：'); for (const f of fails) console.log('  ✗ ' + f) }

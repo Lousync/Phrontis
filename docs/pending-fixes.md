@@ -1639,6 +1639,14 @@ cbz 排除的**执行语义原样保留**（派生值对 cbz 仍为 `null`），
 
 ## B-29 AI 助手回答输出到一半戛然而止，无任何提示（2026-10-05，P1；用户反馈「不好复现」，怀疑超单次 token 上限 —— 代码实锤成立）
 
+> **2026-10-14（v3.5.1，归因 P0）已收口第 1 / 2 / 4 条**：三处结束帧（`finish_reason` / `stop_reason` / `done_reason`）
+> 与「未见结束帧」都已进采集面，截断时正文末尾写明确原因（`LLM_OUTPUT_TRUNCATED` / `LLM_STREAM_TRUNCATED`）+ 诊断块。
+> **第 2 条的「继续」动作已随批次 2 落地**（2026-10-14 同日，A 方案断点续跑）：截断的那条回复会留下续跑现场，
+> 动作行出现「继续」，点了带着已有信息接着往下写（口径见 `docs/agent-interrupt-resume-plan.md` §3）；
+> **第 3 条仍未做**（默认值 4096 → 16384、`llmMaxTokens` 进设置页）—— 归因方案 §10 明确本批不新增用户可见设置项，
+> 该项单列另案。验证方式见 `docs/agent-error-attribution-plan.md` §7.1 契约（`verify-llm-attribution.mjs`）
+> 与 `.AGENT/scripts/agent-resume/verify-agent-resume.mjs`（续跑）。
+
 **现象**：与 AI 助手聊天，回答经常输出到一半就断，无报错无提示、难以稳定复现。
 **定位**（完整链路，全部实锤）：
 1. 每次请求都带 `max_tokens: 4096` —— `src/lib/settings.ts` `llmMaxTokens` **默认 4096**（`electron/lib/llmService.ts:910-911` clamp 256..32768，`buildOpenAiBody` 原样下发）。★ 该设置 `ui: false`，设置界面**搜不到**，用户无从知晓更无从调整。

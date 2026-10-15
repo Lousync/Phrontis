@@ -72,7 +72,7 @@ export function isTriggerPoint(text: string, offset: number): TriggerVerdict {
 export interface AutoState {
   /** 连续「发了但没被采纳」的次数 */
   streak: number
-  /** 自动是否已暂停（暂停后只有手动 Alt+A / 胶囊按钮能唤醒） */
+  /** 自动是否已暂停（暂停后只有手动 Alt+A / 顶栏 ✨ 钮能唤醒） */
   paused: boolean
 }
 

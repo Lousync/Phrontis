@@ -8,18 +8,31 @@ import { readVaultRefText } from './aiAssistant/refText'
 import { runPerception } from './aiAssistant/perception'
 import { buildPerceptionInjection } from './aiAssistant/perceptionBudget'
 import { invokeLlmStreamInternal } from './llmService'
+import {
+  classifyFailure, friendlyReason, buildInterruptNotice, buildDiagnostics, suggestedActionText,
+  interruptionDetailOf, rawFailure, configInterruptionOf,
+  type RawFailure, type Interruption, type InterruptionDetail,
+} from './llmFailurePure'
 import { estimateTokens, trimHistoryByBudget } from './agentContextBudget'
 import { compressAtTokens, composeContextWithDigest, rowsAfterDigest } from './agentCompressCore'
 import { compressSession } from './agentCompress'
-import type { SessionDigest, AgentMessageRow } from './agentSessionRepo'
+import type { SessionDigest, AgentMessageRow, AgentSessionRow } from './agentSessionRepo'
 import { clampMaxRounds, clampRunTokenBudget, isParallelSafe, partitionToolBatches, PARALLEL_CHUNK, PARALLEL_HINT, FINAL_ROUND_NOTICE, FORCED_SUMMARY_NOTICE } from './agentLoopPolicy'
 import {
   createAgentSession, listAgentSessions, renameAgentSession, deleteAgentSession,
   sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages,
   getMessageById, updateMessageContent, deleteMessage, deleteMessagesAfter,
   getAgentSession, updateAgentSessionInstructions, backfillSessionSources,
-  createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode,
+  createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode, setSessionPinned,
+  setSideLaneStatus, markSideLaneSeen, updateSessionResume, nowLocal,
 } from './agentSessionRepo'
+// A 方案（断点续跑）：纯函数在 agentInterruptPure（零依赖，契约脚本直接 import）；文案真源在 llmFailurePure
+import {
+  buildInterruptContent, buildResumeCarry, buildResumeInjection, toResumeInfo,
+  type CarryRow, type SessionResume, type InterruptFacts,
+} from './agentInterruptPure'
+import { takeAdoptNotice } from './agentAdoptNotice'
+import { getCurrentVault } from './kbStore/vaultContext'
 import { MANUAL_CHANNEL_TOOL, MANUAL_MAX_ROUNDS, buildManualSystemPrompt, classifyManualIntent, hasOperationIntent } from './manualChannel'
 import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceConstraintsForSession, resolveWriteOwnerRel, listSessionFolderIds } from './aiTeachingFolders'
 import { readAssistantGlobalConstraints, readAssistantSessionConstraints, readAssistantGlossary } from './assistantConstraints'
@@ -27,8 +40,11 @@ import { resolveSourcesForInjection } from './aiTeachingSources'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
 import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { buildCourseInjection } from './aiTeachingCourse'
+import { listFavorites } from './aiTeachingFavorites'
 import { findSkillPrompt } from './skillService'
 import { recordAiUsage, recordSessionFileChange, getAiUsageData, getSessionChanges } from './agentUsage'
+import { vaultTodosAll } from './kbStore/scheduleVaultRepo'
+import { computeLaneUnread, deriveLaneStatus } from './sideLaneMeta'
 
 /**
  * 最小 AgentRunner —— 「用户消息 → LLM 决策 → ToolRegistry 执行 → 结果回喂」循环。
@@ -187,8 +203,26 @@ export interface AgentTraceStep {
   summary?: string
   /** visual.html 实时占位事件（仅 agent:step 推送，不落库）：{slug,title}——渲染层据此开「生成中」页签 */
   args?: Record<string, unknown>
-  /** visual.html 成功产物（落库，随消息 trace 持久）：渲染层画工件卡 + 占位页签原地转正式 */
-  artifact?: { rel: string; title: string; lines: number; slug: string }
+  /** 产物工具（visual.html / mindmap / image）成功产物（落库，随消息 trace 持久）：渲染层画工件卡 + 占位页签原地转正式 */
+  artifact?: {
+    rel: string
+    title: string
+    slug: string
+    /** visual.html 行数；image 没有"行"这个概念，恒缺省（故可选） */
+    lines?: number
+    kind?: 'html' | 'mindmap' | 'image'
+    nodes?: number
+    /** image：像素尺寸 / 字节数 / 生图描述 / 参考图 / 模型 / 耗时（卡上元信息 + 版本切换用，见方案 §4.4） */
+    w?: number
+    h?: number
+    bytes?: number
+    prompt?: string
+    ref?: string
+    model?: string
+    elapsedMs?: number
+    /** image：改图槽未配置时退化为「按描述重画」（卡上据此标注，不静默降级） */
+    downgraded?: boolean
+  }
   /** 过程旁白：带工具轮次里模型输出的说明文本（落库供历史回看；
    *  最终轮正文是回复本体，已在消息 content 里，不重复存） */
   processText?: string
@@ -252,6 +286,10 @@ export interface AgentChatResult {
   error?: string
   code?: string
   trace: AgentTraceStep[]
+  /** 中断归因（归因 P0）：ok=false 时必有；ok=true 但输出被截断时也有（提示可续写） */
+  interruption?: Interruption
+  /** 归因诊断细节（诊断块数据源；不含正文与 Key） */
+  interruptDetail?: InterruptionDetail
   /** 本次执行真实发生的写改动（成功写入/创建类工具），供 UI 渲染改动清单 */
   changes?: AgentChange[]
   /** UI 优化条目9②：AI教学本轮 system 注入分段字符数（渲染层据此估算「上下文构成」摘要；其它来源不设） */
@@ -348,12 +386,62 @@ const TOOL_ACTION_LABELS: Record<string, string> = {
   'builtin.help.search': '检索帮助',
   'builtin.tool.request': '申请工具',
   'visual.html': '生成示意图',
+  'mindmap': '生成思维导图',
+  'image': '生成图片',
 }
 
 /** 工具入参 → 过程时间线的目标文案（正在读/写哪个对象）；取不到则留空 */
 function argTarget(args: Record<string, unknown>): string {
   const v = args.path ?? args.relPath ?? args.title ?? args.name ?? args.date ?? args.query ?? args.slug
-  return typeof v === 'string' ? v.trim().slice(0, 120) : ''
+  if (typeof v === 'string') return v.trim().slice(0, 120)
+  // image 没有 slug/title 这类短标签，用 prompt 首段当目标（截断，不整段塞进时间线）
+  return typeof args.prompt === 'string' ? args.prompt.trim().slice(0, 60) : ''
+}
+
+/**
+ * 本会话「最近生成的图」薄索引（v3.6.0 对话内生图，docs/ai-image-gen-plan.md §5.4）。
+ *
+ * 为什么需要它：结果侧只保最近 3 条工具结果不被摘要（铁律 17），更早的产物 `relPath` 会被
+ * 压缩掉 —— 用户隔几轮说「把刚才那张图改成浅灰背景」时，模型手里已经没有路径了。
+ *
+ * 数据源 = 本会话消息 trace 里的 `artifact`（与 §4.4 落库的同一份数据，**不新增存储**）。
+ * 最多取最近 5 张、按 rel 去重；更老的**刻意不做召回**（方案 §5.4：用户要点名"最早那张"时
+ * 由模型反问，而不是把整段历史塞进上下文）。
+ *
+ * ★ 调用处把它并进 `requestInjection`（首条 user 消息层）而不是 system：见该处注释。
+ */
+function buildRecentImagesHint(sessionId: string): string {
+  try {
+    const rows = getAgentMessages(sessionId)
+    const items: Array<{ rel: string; title: string }> = []
+    for (let i = rows.length - 1; i >= 0 && items.length < 5; i--) {
+      const raw = rows[i]?.trace_json
+      if (!raw) continue
+      let steps: unknown
+      try { steps = JSON.parse(raw) } catch { continue } // 单条 trace 坏掉不该影响本轮发送
+      if (!Array.isArray(steps)) continue
+      for (let j = steps.length - 1; j >= 0 && items.length < 5; j--) {
+        const a = (steps[j] as { artifact?: { kind?: string; rel?: string; title?: string } } | null)?.artifact
+        if (a?.kind !== 'image' || !a.rel) continue
+        if (items.some(x => x.rel === a.rel)) continue
+        items.push({ rel: a.rel, title: String(a.title ?? '') })
+      }
+    }
+    if (items.length === 0) return ''
+    return '\n\n【本会话最近生成的图】用户说「刚才那张图 / 改一下这张 / 插到某页」时，ref 与插图源从这里取（仓库相对路径）：\n'
+      + items.map(x => `— ${x.rel}${x.title ? `（${x.title}）` : ''}`).join('\n')
+  } catch { return '' } // 读会话失败不该打断本轮请求
+}
+
+/**
+ * 续跑 carry 的入参摘要（A 方案 §3.5）：紧凑截断，取不到就留空。
+ * 它是纯展示/给模型看的现场线索，不参与任何判据 —— 序列化失败一律降级为空串，绝不抛。
+ */
+function carryArgsOf(args: Record<string, unknown>): string {
+  try {
+    const s = JSON.stringify(args ?? {})
+    return !s || s === '{}' ? '' : s.slice(0, 200)
+  } catch { return '' }
 }
 
 /** 写改动识别：工具 → 人类动作标签（成功执行后收集 target=path/title/date/name） */
@@ -369,6 +457,8 @@ const CHANGE_LABELS: Record<string, string> = {
   'builtin.schedule.delete-todo': '删除待办',
   'builtin.checkin.check-habit': '习惯打卡',
   'visual.html': '生成示意图',
+  'mindmap': '生成思维导图',
+  'image': '生成图片',
 }
 
 /**
@@ -425,8 +515,10 @@ function buildToolsPayload(sessionId?: string, only?: string[]): {
       deniedModules.add('terminal')
       return false
     }
-    // P3 装载层：ondemand 工具仅在会话内被 tool.request 启用后才进入视野
-    if (t.tier === 'ondemand' && !extraTools?.has(t.name)) {
+    // P3 装载层：ondemand 工具仅在会话内被 tool.request 启用后才进入视野。
+    // 例外：显式白名单（`only`，如手册通道 / 日程助手）内的工具视为「已启用」——
+    // 白名单本身就是调用方对可见性的明确决定。
+    if (t.tier === 'ondemand' && !onlySet?.has(t.name) && !extraTools?.has(t.name)) {
       hasOnDemandHidden = true
       return false
     }
@@ -504,6 +596,80 @@ function buildSystemPrompt(context?: AgentContextInfo): string {
     '\n用户的问题大概率与该上下文相关；若需要更多数据仍应调用工具。'
 }
 
+// ===== 日程助手（source === 'schedule'）—— docs / .claude/plans/schedule-assistant-p1.md =====
+/** 日程助手工具白名单：只把日程工具放进模型视野（与通用助手的宽工具面分化，铁律 16：少工具 = 少误触/少 token） */
+const SCHEDULE_TOOL_NAMES = [
+  'builtin.schedule.list-todos',
+  'builtin.schedule.create-todo',
+  'builtin.schedule.update-todo',
+  'builtin.schedule.delete-todo',
+  'builtin.schedule.list-recurring',
+  'builtin.schedule.create-recurring',
+  'builtin.schedule.update-recurring',
+  'builtin.schedule.delete-recurring',
+]
+
+/** 日程助手人设/规则（逐字稳定 → 进 system，命中 prompt cache 前缀） */
+const SCHEDULE_PERSONA = [
+  '\n\n【日程助手】你是 Phrontis 的「日程助手」——只负责日程/待办的排程、优先级与提醒，不处理知识库、记账、学习、博客等其它事务。规则：',
+  '1. 只使用日程相关工具（schedule.*）；其它模块的工具不可用，也不要尝试。',
+  // 任务类型（三类，务必建对；这是最容易出错的地方）
+  '2. 任务分三类，按语义选对 taskType：',
+  '   · deadline（截止类）——有「截止时刻」的任务（交报告、考试、报名/提交截止）。必须 taskType:"deadline" 且 time 用**完整时刻** "YYYY-MM-DD HH:mm"（说不出具体时刻就取当天 23:59）；**不要**传 scheduledStart/scheduledEnd（截止类不占时间格，只画一条红线）。',
+  '   · plan（计划类 / 目标类）——要推进但无固定截止的目标（复习完第三章、写完论文初稿）。taskType:"plan"；可在 endCriteria 写「完成标准 / 目标」（如「能默写全部公式」）。',
+  '   · daily（零碎）——当天随手完成的小事。taskType:"daily"；不传 time、不传 endCriteria。',
+  // 两种「时间」严格区分
+  '3. 两种时间语义严格分开：**排期时段** scheduledStart/scheduledEnd（当天分钟数，09:00=540；「X 点做 Y 小时」→ end = start + Y*60）是「排进日程表时间格」；**截止时刻** time 是「几点前必须完成」。一句话里两种都可能出现，按语义分别处理：「周五 23:59 前交报告」= 截止类（deadline+time）；「明天下午 3 点复习 2 小时」= 计划类 + 排期 15:00–17:00。',
+  // 时间敏感：相对时间必须换算成具体日期
+  '4. 对时间要敏感：系统在【日程数据】里给出了**当前日期、星期、时刻**（「现在：YYYY-MM-DD 周X HH:mm」）与本周一/下周一。以它为锚点把相对时间换算成**具体日期（必要时含时刻）**再动手——今天/明天/后天、本周X / 下周X / 下下周X、这周末、X 天后、月底；「过会儿 / 今晚 / 2 小时后」也按当前时刻算。上午≈09:00、中午≈12:00、下午≈14:00、晚上≈19:00（用户给了具体钟点就按用户的）。不要凭印象猜日期或现在几点；换算不确定就先问一句。',
+  // 批量排期预览
+  '5. 要把「待安排」批量排进周表时，先给一份**排期预览**：在正文里输出一个 ```schedule-preview 围栏代码块，块内是 JSON（不要注释）：{"title":"本周排期","items":[{"date":"YYYY-MM-DD","start":"HH:mm","end":"HH:mm","title":"任务名"}]}；再用一两句说明是否与已有安排冲突。等用户确认后再用 update-todo 逐条落盘；**只排非 deadline 的任务**（截止类不占格）。未经确认不要批量改期。',
+  // 改期 / 改截止
+  '6. 改期 / 取消排期用 update-todo 的 scheduledStart/scheduledEnd（传 null = 移除时段）；改截止时刻用 update-todo 的 time（并确保 taskType 仍为 "deadline"）。',
+  // 固定日程（重复任务）
+  '7. 固定日程（重复任务）：用户说「每周X / 每月X号 / 每N天 + 事项」（如「每周六下午洗衣服」「每月 1 号交房租」）时，用 **create-recurring** 建**重复规则**（freq + weekdays/day/intervalDays + start/end 时段），**不要**建成一次性待办；建之前可先用 list-recurring 看是否已存在同名规则。改规则用 update-recurring（先 list-recurring 取 id）；暂停传 enabled:false；取消用 delete-recurring。注意区分：改「规则」（以后每次都变）用 update-recurring，只改「某一次」的待办才用 update-todo。',
+  // 回答口径
+  '8. 回答简洁，用简体中文。涉及时间用「周三 10/14 19:00–20:30」这类明确写法，便于用户对照日程表。',
+].join('\n')
+
+function pad2(n: number): string { return String(n).padStart(2, '0') }
+function ymd(d: Date): string { return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}` }
+function fmtMinOfDay(m: number): string { return `${pad2(Math.floor(m / 60))}:${pad2(m % 60)}` }
+function weekdayZh(d: Date): string { return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()] }
+/** 该日期所在周的周一（周一为一周之始） */
+function mondayOf(d: Date): Date { const x = new Date(d); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
+
+/**
+ * 日程数据快照（每轮现算）——今日 / 逾期 / 近 3 天 DDL / 待安排。
+ * 逐字会变，故走**首条 user 消息层**（requestInjection）而非 system，避免打散 prompt cache。
+ * 总条数截断 ≤ ~40 条，防上下文膨胀。
+ */
+function buildScheduleInjection(): string {
+  const now = new Date()
+  const today = ymd(now)
+  const in3 = ymd(new Date(now.getTime() + 3 * 86400000))
+  const rows = vaultTodosAll().filter(r => r.status !== 'done' && !r.parent_id)
+  const when = (r: { scheduled_start?: number | null; scheduled_end?: number | null }): string =>
+    r.scheduled_start != null ? ` ${fmtMinOfDay(r.scheduled_start)}–${fmtMinOfDay(r.scheduled_end ?? r.scheduled_start)}` : ''
+  const fmt = (r: typeof rows[number]): string =>
+    `— ${r.title}（${r.date}${when(r)}${r.task_type === 'deadline' ? ` · DDL${r.time ? ' ' + r.time : ''}` : ''}）`
+  const todayRows = rows.filter(r => r.date === today)
+  const overdue = rows.filter(r => typeof r.date === 'string' && r.date !== '' && r.date < today)
+  const nearDdl = rows.filter(r => r.task_type === 'deadline' && r.date >= today && r.date <= in3)
+  const unscheduled = rows.filter(r => r.scheduled_start == null && r.scheduled_end == null && r.task_type !== 'deadline')
+  const cap = <T,>(arr: T[], n: number): T[] => arr.slice(0, n)
+  // 时间锚点：当前日期 + 星期 + **时刻** + 本周一/下周一（消除「本周X / 下周X」歧义，模型据此推算相对时间）
+  const thisMon = mondayOf(now)
+  const nextMon = new Date(thisMon); nextMon.setDate(nextMon.getDate() + 7)
+  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`
+  const parts: string[] = [`现在：${today} ${weekdayZh(now)} ${hhmm}（本周一 ${ymd(thisMon)} · 下周一 ${ymd(nextMon)}）`]
+  parts.push(todayRows.length ? `【今天 ${todayRows.length} 项】\n${cap(todayRows, 15).map(fmt).join('\n')}` : '【今天】暂无待办')
+  if (overdue.length) parts.push(`【逾期 ${overdue.length} 项】\n${cap(overdue, 10).map(fmt).join('\n')}`)
+  if (nearDdl.length) parts.push(`【近 3 天 DDL ${nearDdl.length} 项】\n${cap(nearDdl, 10).map(fmt).join('\n')}`)
+  if (unscheduled.length) parts.push(`【待安排 ${unscheduled.length} 项】\n${cap(unscheduled, 15).map(r => `— ${r.title}`).join('\n')}`)
+  return '\n\n【日程数据（本轮快照）】\n' + parts.join('\n')
+}
+
 async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: string): Promise<AgentChatResult> {
   const trace: AgentTraceStep[] = []
   const message = String(req?.message ?? '').trim()
@@ -512,14 +678,15 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
   // ---- 会话保障 ----
   let sessionId = String(req.sessionId ?? '')
   if (sessionId && !sessionExists(sessionId)) sessionId = ''
-  if (!sessionId) sessionId = createAgentSession('新会话', req.source === 'aiTeaching' ? 'aiTeaching' : 'assistant').id
+  if (!sessionId) sessionId = createAgentSession('新会话', req.source === 'aiTeaching' ? 'aiTeaching' : req.source === 'schedule' ? 'schedule' : 'assistant').id
 
   // ---- 落库用户消息 + 自动标题 ----
   appendAgentMessage(sessionId, 'user', message)
   ensureSessionTitle(sessionId, message)
 
   // ---- N-1 手册通道：首条消息一次性分类；手册通道内出现操作意图即升格（只升不降） ----
-  if (req.source !== 'aiTeaching') {
+  // 日程助手不走手册通道（req.source==='schedule' 恒走通用通道，见 runAgentLoop 的 manual 判定）
+  if (req.source !== 'aiTeaching' && req.source !== 'schedule') {
     const row = getAgentSession(sessionId)
     if (row && row.mode === undefined) {
       // 三分类：manual 走手册通道；agent 与 tech（第三方/通用技术问答）都走通用助手
@@ -531,7 +698,10 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
     }
   }
 
-  return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort, skillName: req.skillName })
+  const result = await runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort, skillName: req.skillName })
+  // 支线旁问：按本轮结果落运行态（成功 done / 其余 cut）；普通会话 no-op
+  setSideLaneStatus(sessionId, result.ok ? 'done' : 'cut')
+  return result
 }
 
 /** N-1：向渲染层推一条助手提示（如手册通道→通用助手的升格 Toast） */
@@ -586,6 +756,114 @@ function buildSideLaneSnapshot(parentSessionId: string, anchor: AgentMessageRow 
 }
 
 /** 从会话库当前内容直接推理（不追加新用户消息）——重新生成/编辑重推共用 */
+/** 中断出口的上下文（可选）：进度 / 改动清单 / carry / 是否写「继续」现场 */
+interface InterruptContext {
+  /** 本次真实写改动（此前只在成功分支返回，失败时「本次改动」面板拿不到已写的东西） */
+  changes?: AgentChange[]
+  /** 本次 run 消耗的轮数 */
+  rounds?: number
+  /** 本次 run 的工具调用次数 */
+  toolCalls?: number
+  /** 已获得的工具结果摘要（buildResumeCarry 产出；空串 = 没留下现场） */
+  carry?: string
+  /** 是否写会话 resume（支线旁问 / 手册通道传 false：重问成本低，不给「继续」） */
+  writeResume?: boolean
+}
+
+/** 归因事实 → 卡片正文用的事实（改动清单只搬卡片要展示的字段；旁白取 trace 里最后一条带 processText 的轮次） */
+function interruptFactsOf(
+  it: Interruption,
+  dt: InterruptionDetail,
+  trace: AgentTraceStep[],
+  ctx?: InterruptContext,
+): InterruptFacts {
+  const lastProcess = [...trace].reverse().find(s => !!s.processText)
+  return {
+    reason: friendlyReason(it, dt),
+    aborted: it.code === 'USER_ABORTED',
+    rounds: Math.max(0, Math.floor(Number(ctx?.rounds ?? dt.round ?? 0) || 0)),
+    toolCalls: Math.max(0, Math.floor(Number(ctx?.toolCalls ?? 0) || 0)),
+    changes: (ctx?.changes ?? []).map(c => ({ action: c.action, target: c.target, ...(c.file ? { file: c.file } : {}) })),
+    ...(lastProcess?.processText ? { lastProcessText: lastProcess.processText } : {}),
+  }
+}
+
+/** 写续跑现场（尽力而为：失败只留日志，**绝不**因为「记不上现场」而改变本次调用的返回结果） */
+function persistResume(sessionId: string, messageId: string, facts: InterruptFacts, carry: string): void {
+  try {
+    updateSessionResume(sessionId, {
+      at: nowLocal(),
+      message_id: messageId,
+      reason: facts.reason,
+      aborted: facts.aborted,
+      tool_calls: facts.toolCalls,
+      changes: facts.changes,
+      carry,
+    })
+  } catch (err) {
+    console.error('[agent] 续跑现场落库失败', err)
+  }
+}
+
+/**
+ * 中断出口（归因 P0 + A 方案，2026-10-14）：失败 / 停止 / 预算耗尽统一在这里收口 ——
+ * 写一条中断 assistant 消息（原因 + 建议 + 进度 + 改动清单 + 诊断块），把「继续」的现场写回会话行，
+ * 并返回带归因码的结果。
+ * 归因码的唯一真源是 electron/lib/llmFailurePure.ts（卡片文案 / 重试判定 / 审计统计 / 角标读同一个码）。
+ */
+function interruptResult(
+  sessionId: string,
+  trace: AgentTraceStep[],
+  raw: RawFailure,
+  interruption?: Interruption,
+  detail?: InterruptionDetail,
+  ctx?: InterruptContext,
+): AgentChatResult {
+  const it = interruption ?? classifyFailure(raw)
+  const dt = detail ?? interruptionDetailOf(raw)
+  const facts = interruptFactsOf(it, dt, trace, ctx)
+  // 有现场才有「继续」按钮：没有按钮就不能在正文里提它
+  const willResume = ctx?.writeResume !== false
+  // 正文首行必须是人能看懂的原因：reason 就是 friendlyReason 的产出（契约源码级断言锁「文案只在这里产生」）
+  const content = buildInterruptContent({
+    reason: facts.reason,
+    advice: suggestedActionText(it),
+    rounds: facts.rounds,
+    toolCalls: facts.toolCalls,
+    changes: facts.changes,
+    ...(facts.lastProcessText ? { lastProcessText: facts.lastProcessText } : {}),
+    aborted: facts.aborted,
+    canResume: willResume,
+    // 「用户停止」不贴诊断块：原因自明，贴了反而像出故障
+    ...(it.code === 'USER_ABORTED' ? {} : { diagnostics: buildDiagnostics(it, dt) }),
+  })
+  let messageId: string | undefined
+  try {
+    messageId = appendAgentMessage(sessionId, 'assistant', content, trace)
+  } catch (err) {
+    // 落库失败不能让「中断原因」也一起消失：至少留日志（异常不静默是归因 P0 的硬要求）
+    console.error('[agent] 中断记录落库失败', err)
+  }
+  // 有中断卡才有可挂「继续」的锚点（缺锚点的现场按钮无处可挂，等于没有）
+  if (ctx?.writeResume !== false && messageId) persistResume(sessionId, messageId, facts, ctx?.carry ?? '')
+  return {
+    ok: false,
+    sessionId,
+    reply: content,
+    error: facts.reason,
+    code: it.code,
+    interruption: it,
+    interruptDetail: dt,
+    changes: ctx?.changes,
+    trace,
+  }
+}
+
+/** 输出被截断（G5 = B-29）：提示段落追加到正文末尾（ok=true，用户可见「被截断 + 可续写」） */
+function withTruncationNotice(reply: string, it: Interruption, detail: InterruptionDetail): string {
+  return reply + '\n' + buildInterruptNotice(it, detail, { separator: true, diagnostics: true })
+}
+
 async function runAgentLoop(
   sessionId: string,
   context: AgentContextInfo | undefined,
@@ -597,24 +875,33 @@ async function runAgentLoop(
    * allowEmptyHistory：场景/模板启动专用。会话刚建、尚无用户消息时放行，
    * 用一条**不落库**的虚拟首轮触发——聊天区第一条即 AI 回复，
    * 避免把程序化的场景开场白伪造成用户消息（2026-09-09 体验优化）。
+   *
+   * resumeInjection（A 方案 §3.4）：续跑专用。中断卡是一条 assistant 消息、排在历史末尾，
+   * 所以守卫要放行「末条不是 user」；注入文本作为**一条不落库的合成 user 轮**追加在 convo 末尾
+   * （不进 requestInjection 槽：续跑指令必须是「最近一条指令」才有牵引力）。
    */
-  opts?: { allowEmptyHistory?: boolean }
+  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string }
 ): Promise<AgentChatResult> {
   // ---- 从会话库重建对话历史（仅 user/assistant 文本轮） ----
   // 会话压缩：检查点之前的旧轮已被纪要替代（assembleAgentHistory）；其后再做
   // 条数硬上限（-40）与 token 轮级裁剪——压缩失败/关闭时兜底，长会话不再全量进模型
+  const runStarted = Date.now() // 归因 P0：中断卡的「耗时」与诊断块用它
+  const resumeInjection = String(opts?.resumeInjection ?? '')
   let asm = assembleAgentHistory(sessionId)
   let history = asm.history
   const virtualKickoff = opts?.allowEmptyHistory === true && history.length === 0
-  if (!virtualKickoff && (history.length === 0 || history[history.length - 1].role !== 'user')) {
+  if (!virtualKickoff && (history.length === 0 || (history[history.length - 1].role !== 'user' && !resumeInjection))) {
     return { ok: false, sessionId, error: '没有可重新生成的用户消息', trace }
   }
 
   // N-1 手册通道：仅 assistant 来源、且会话已分类为 manual 时启用（AI 教学恒走通用通道）
+  // 来源：显式传入优先；缺省按会话记录回推（regenerate / edit 等不带 source 的路径）——
+  // 否则日程助手会话在这些路径会退化成通用助手（人设/工具面/摘要全丢）。
+  if (!source && sessionId) source = getAgentSession(sessionId)?.source
   const runModeRow = getAgentSession(sessionId)
-  const manual = source !== 'aiTeaching' && runModeRow?.mode === 'manual'
+  const manual = source !== 'aiTeaching' && source !== 'schedule' && runModeRow?.mode === 'manual'
   // P3 装载层：工具 payload 可能在循环中重建（tool.request 启用新工具后下一轮生效）
-  let toolsState = buildToolsPayload(sessionId, manual ? [MANUAL_CHANNEL_TOOL] : undefined)
+  let toolsState = buildToolsPayload(sessionId, manual ? [MANUAL_CHANNEL_TOOL] : source === 'schedule' ? SCHEDULE_TOOL_NAMES : undefined)
   let toolPayload = toolsState.payload
   const { nameMap, deniedModules, deniedVaultFile, skills } = toolsState
   // v3.1.2 条目11：支线写类工具**硬拦截**。模型视野里已经没有写工具（buildToolsPayload 已过滤），
@@ -627,10 +914,10 @@ async function runAgentLoop(
     ? new Set(listTools().filter(t => t.requires === 'write').map(t => t.name))
     : undefined
   const deniedHint = deniedModules.size > 0
-    ? `\n\n【权限提示】以下模块用户尚未授权 AI 操作：${[...deniedModules].join('、')}。若用户请求这些模块的操作，请如实说明当前未授权，并提示可在 设置 → AI 工具 → 权限 中开启后重试。`
+    ? `\n\n【权限提示】以下模块用户尚未授权 AI 操作：${[...deniedModules].join('、')}。若用户请求这些模块的操作，请如实说明当前未授权，并提示可在 设置 → AI → 权限 中开启后重试。`
     : ''
   const vaultFileHint = deniedVaultFile
-    ? '\n\n【权限提示】仓库文件读写（vault.* 工具）当前被权限限制。若用户请求操作仓库内笔记文件（列目录/读文件/搜内容），请如实说明需在 设置 → AI 工具 → 权限 → 仓库文件 中开启后重试。'
+    ? '\n\n【权限提示】仓库文件读写（vault.* 工具）当前被权限限制。若用户请求操作仓库内笔记文件（列目录/读文件/搜内容），请如实说明需在 设置 → AI → 权限 → 仓库文件 中开启后重试。'
     : ''
   // P3：存在被折叠的 ondemand 工具时，告知申请机制（写类工具默认不在视野）
   const toolsHint = toolsState.hasOnDemandHidden
@@ -731,6 +1018,10 @@ async function runAgentLoop(
   const askRuleHint = source === 'aiTeaching'
     ? '\n\n【提问模式协议（AI教学）】当你需要用户做选择、澄清或确认才能继续时（方案二选一、参数不明确、流程确认等），在回答正文末尾输出一个 ```ask 围栏代码块，块内是一个 JSON 对象（不要注释）：{"question":"一句话问题","options":["选项一","选项二"],"allowCustom":true}。规则：选项 2~6 个、每项不超过 20 字且可直接作为用户的回答发出；allowCustom=true 表示也允许用户自由输入；一次回答最多一个 ask 块；客户端会把提问渲染成交互选择卡，正文里不要再重复罗列同样的选项。整卷式批量提问（如诊断问卷）时块内改为 JSON 数组，每个元素形如 {"question":"问题","options":["选项A","选项B","选项C"]}，用户会整卷作答后统一发回。正式出题仍走 ```quiz 协议，两者不得混用；无需用户确认时不要输出 ask。JSON 字符串值内部禁止未转义英文双引号——需要引用时一律用中文引号，否则 JSON 被截断、提问卡渲染失败。'
     : ''
+  // 对话驱动建课：把课程大纲给用户过目时输出 ```outline 围栏 → 渲染成草稿卡（满意才「正式生成」落盘）
+  const outlineRuleHint = source === 'aiTeaching'
+    ? '\n\n【大纲草稿协议（AI教学）】当你把课程大纲给用户过目时，除正文说明外，输出一个 ```outline 围栏代码块，块内是一个 JSON 对象（不要注释）：{"title":"课程名","goal":"一句话目标","chapters":[{"name":"章名","units":[{"name":"知识点名","goal":"该点学习目标","source":"出处"}]}]}。规则：**分批**——先只展开第一章（其余章只给 name、units 用空数组表示未展开）；用户满意后由客户端「正式生成」按钮落盘（你也可调 course.outline.write）；用户要改就更新草稿、重新发这个围栏。围栏语言必须是 outline（\u0060\u0060\u0060outline）。JSON 字符串值内部禁止未转义英文双引号——需要引用时一律用中文引号『』或“”。另外，知识点粒度：拆到「一个可独立讲解、可出题检验的最小概念」为止（如一个定义、一条定理、一种方法）；依据里的一小节/一段通常对应多个知识点，**不要**把一整节压成一个。**不要**把章节导语、教学目标、考试目标 / 考情分析、重难点提示、学习要求、知识结构总览、复习建议这类元信息当作知识点——某份素材整篇只是导语 / 框架就跳过它，只从其余素材抽取实质内容。'
+    : ''
   // P6（§3.13/3-29）：素材目录实时注入（SOURCE.md 条目+提取稿路径+编号引用规则）；无登记则零注入
   const sourcesHint = source === 'aiTeaching' ? (() => {
     const cat = resolveSourcesForInjection(sessionId, getSettingReader())
@@ -745,12 +1036,28 @@ async function runAgentLoop(
       '文档内禁止写 <meta http-equiv> CSP 与 <base> 标签（宿主统一注入安全策略，自带 CSP 会因策略取交集禁掉脚本）。' +
       'slug 用 kebab-case 小写英文；title 给中文短标题。HTML 全文只作为工具参数传递，**绝不把 HTML 源码写进回答正文或 markdown 代码块**；生成后在回答里用一句话说明右侧工件栏已打开该图。'
     : ''
+  // 思维导图（方案 .AGENT/.claude/plans/ai-teaching-mindmap.md）：整理结构的产物工具，与 visual.html 并列（串行）
+  const mindmapHint = source === 'aiTeaching'
+    ? '\n\n【思维导图工具 mindmap（AI教学）】用户明确要「思维导图 / 脑图 / 整理结构 / 知识框架」时，调用 mindmap 工具把内容整理成树状结构：' +
+      'root 为递归节点 { text, ref?, children? }，text 用一行短短语；节点对应知识库里的某篇笔记（或另一张思维导图）时，ref 填其仓库相对路径（.md 笔记 / .json 导图），点击可跳转。' +
+      '树深 ≤6、节点总数 ≤120，超出的先归纳再输出。只把结构交给工具，**绝不把 JSON 写进回答正文**；生成后用一句话说明右侧工件栏已打开。' +
+      '若工具列表中没有 mindmap，先用 builtin.tool.request（tools="mindmap"）申请。'
+    : ''
   // P8（§3.14）+ UI 优化条目8.2.2：三层学习者画像注入（全局 → 工作区 → 会话，细颗粒覆盖粗颗粒）
   // + 更新建议协议（3-33 Plan B）
   const profileHint = source === 'aiTeaching' ? resolveProfilesForInjection(sessionId, getSettingReader()) : ''
   // 课程模式（docs/ai-teaching-course-mode-plan.md）：工作区开启课程模式时注入「课程目标 + 当前知识点 + 掌握度 + 待复习」，
   // 让模型从「答完这一问」转为「上好这门课」。未开启/无大纲 → 空串（零成本）。
   const courseHint = source === 'aiTeaching' ? buildCourseInjection(sessionId, getSettingReader()) : ''
+  // 收藏（v3.6.0）：让 AI 感知到当前工作区钉在左栏「收藏」的文档（只读注入，无工具；用户自己挑出来常看的）
+  const favoritesHint = source === 'aiTeaching' ? (() => {
+    const wsId = getWorkspaceOfSession(sessionId)
+    if (!wsId) return ''
+    const favs = listFavorites(wsId)
+    if (favs.length === 0) return ''
+    return '\n\n【收藏的文档（AI教学）】用户当前工作区钉在左栏顶部「收藏」的文档（用户自己挑出来常看的，区别于素材与产物；需要时可优先引用）：\n'
+      + favs.map((f) => `— ${f.name.replace(/\.md$/i, '')}（${f.rel}）`).join('\n')
+  })() : ''
   // v3.1.2 条目8+10：AI教学「取材范围」与「产物落点」两条纪律共用一次会话夹解析（避免重复 stat）
   // 条目11：支线的落点跟随**主线**会话夹（`{主线夹}/支线·{标题}/`），不新建自己的夹
   const aiTeachScope = source === 'aiTeaching' ? (() => {
@@ -784,6 +1091,32 @@ async function runAgentLoop(
       + '禁止写入 `SOURCES/`（那是给你读的素材目录，不是放产物的）、禁止写仓库顶层或工作区文件夹根目录。'
       + '用户在当前消息里明确指定了路径时，以用户指定的路径为准。'
   })() : ''
+  /**
+   * 生图（v3.6.0 对话内生图 `/生图`，docs/ai-image-gen-plan.md §4.5）。
+   *
+   * 注入面 = 除日程助手以外的全部聊天面。判据取"不是日程"而不是 `source === 'assistant'`：
+   *  ① 助手三宿主（悬浮侧栏 / 右栏 / aiChat 整页）与全屏 AI 学堂的 sessionSource 是 undefined，
+   *     按 `=== 'assistant'` 卡会把最主力的那个面整个漏掉；
+   *  ② §5.1 明确 `/生图` 要在 assistant 与 aiTeaching **两个面的 `/` 弹层**里可见，
+   *     而弹层里有指令、system 里没有规则 = 模型不知道要调 image（"敲了没反应"）——
+   *     故教学面同时注入；阶段二只改产物落点与工件栏，不再动注入面。
+   * 日程助手不注入：它的工具面被刻意收窄（只有日程那几个），给生图规则是负担。
+   */
+  const imageHint = source !== 'schedule'
+    ? '\n\n【生图工具 image】用户敲 `/生图 <描述>`，或明确说「画一张 / 配个图 / 示意图 / 把这张改成…」时，调用 image 生图或改图：' +
+      '① prompt 保持用户的语言与诉求原样（中文标注要求别翻成英文）；画幅不填=按内容定，要指定就在 prompt 里说。' +
+      '② 改图：把目标图的仓库相对路径填进 ref（上一次 image 的返回里就有）；改图模型没配时工具会按描述重画，并把这一点写在结果里。' +
+      '③ **不要为讲解主动配图** —— 只在用户要图时画。' +
+      '④ 生成后只用一句话说明（图已显示在对话里），**绝不把 prompt / 返回的 JSON / 图片 base64 写进回答正文**。' +
+      '⑤ 要把图插进某篇笔记：拿到产物 relPath 后再调写工具，按**目标页所在目录**算相对路径写成 `![](相对路径)`' +
+      (source === 'aiTeaching'
+        // 阶段二（方案 §6.1）：教学面产物落会话夹 outputs/，示例必须跟着换 —— 沿用阶段一那句
+        // 「图在 .attachments/…」会让模型把图往仓库隐藏目录里找（那个目录在教学面根本不会有图）
+        ? '（如页在 `算法/` 下、图在本会话文件夹的 `outputs/` 里，就从 `算法/` 出发算相对路径，该退几层就退几层）。'
+        : '（如页在 `算法/` 下、图在 `.attachments/2026-10/x.png`，就写 `![](../.attachments/2026-10/x.png)`）。') +
+      '扩位与 `-v2` 重名不要自己猜，一律以工具返回的 relPath 为准。' +
+      (source === 'aiTeaching' ? '⑥ 产物落点：本面（AI 教学）落本会话文件夹的 `outputs/` 目录。' : '')
+    : ''
   // v3.1.2 条目11：支线旁问上下文（仅带 sideContext 的会话注入）。快照在建支线时固化，跨轮稳定 → 不扰动缓存前缀。
   // 升格为正式会话（lane='main'）后仍保留来源快照，只是不再套「支线纪律」措辞。
   // laneRow / isSideLane 已在前面规则装配处算好（纪律必须早于出题协议，故提前）。
@@ -793,6 +1126,9 @@ async function runAgentLoop(
         : '\n\n【来源上下文（快照）】本条对话由主线会话的一条回答升格而来，以下是其来源快照（仅供参考背景；后续进展以本对话自身历史为准）。\n')
       + laneRow.sideContext
     : ''
+  // 日程助手（source==='schedule'）：人设进 system（逐字稳定）；数据快照进首条 user 消息层（每轮现算）
+  const schedulePersona = source === 'schedule' ? SCHEDULE_PERSONA : ''
+  const scheduleHint = source === 'schedule' ? buildScheduleInjection() : ''
   const baseSystem = buildSystemPrompt(context)
   // UI 优化条目9②：教学会话的注入分段用量（字符数，渲染层按 ≈2.6 字/token 折算做构成摘要）
   const injection: AiTeachInjectionStats | undefined = source === 'aiTeaching'
@@ -801,13 +1137,13 @@ async function runAgentLoop(
         constraintChars: sessionInst.length,
         profileChars: profileHint.length,
         sourcesChars: sourcesHint.length,
-        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + visualHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
+        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + outlineRuleHint.length + visualHint.length + mindmapHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
       }
     : undefined
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + visualHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+    : baseSystem + schedulePersona + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -835,7 +1171,10 @@ async function runAgentLoop(
     })
     if (pr && pr.items.length > 0) perceptionInjection = buildPerceptionInjection({ items: pr.items, dropped: pr.dropped })
   }
-  const requestInjection = [refInjection, perceptionInjection].filter(Boolean).join('\n\n')
+  // 生图：本会话「最近生成的图」薄索引（方案 §5.4）。与上面同一理由 —— 放首条 user 消息层，
+  // 不放 system（它随会话内容递增而变，进 system 就是每生成一张图就把缓存前缀作废一次）
+  const recentImagesHint = (!manual && source !== 'schedule') ? buildRecentImagesHint(sessionId) : ''
+  const requestInjection = [scheduleHint, refInjection, perceptionInjection, recentImagesHint].filter(Boolean).join('\n\n')
 
   // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
@@ -866,8 +1205,25 @@ async function runAgentLoop(
   // 虚拟首轮：仅存在于本次请求的 convo，不写会话库、不渲染气泡。
   // 场景规则本身随 CONSTRAINTS.md 每轮注入（持久），这里只负责「让 AI 开口说第一句」。
   if (virtualKickoff) convo.push({ role: 'user', content: '（请按上述会话要求开始）' })
+  // 续跑注入：同样只存在于本次请求（不落库、不进历史）。放在 convo 末尾 = 前缀（system+tools）逐字不变，
+  // prompt cache 不受影响；且 carry 只付这一次（续跑成功即清现场）
+  if (resumeInjection) convo.push({ role: 'user', content: resumeInjection })
   let sessionWrites = 0
   const changes: AgentChange[] = []
+  /**
+   * 续跑现场（A 方案 §3.5）：每次工具执行后入账，失败/停止时压成 carry 写进会话行。
+   * 只留最近 40 条、单条结果先截到 4000 字符（carry 单条上限 800，留足余量又不用把 24k 全揣着）。
+   */
+  const carryRows: CarryRow[] = []
+  /** 中断出口的上下文（每个失败/停止点都带上它：进度、改动清单、已获得的现场） */
+  const interruptCtxOf = (round: number): InterruptContext => ({
+    changes,
+    rounds: round,
+    toolCalls: carryRows.length,
+    carry: buildResumeCarry(carryRows),
+    // 支线旁问 / 手册通道不给「继续」：职责是答一点，重问成本低（方案 §3.7）
+    writeResume: !isSideLane && !manual,
+  })
   // P3b：本对话模型覆盖（'pid:mid' 串拆分）——解析一次，全轮次复用
   let providerId: string | undefined
   let modelOverride: string | undefined
@@ -889,14 +1245,23 @@ async function runAgentLoop(
   let softLanded = false
   /** token 预算触顶（或已到最后一轮）：本轮执行完后立即断出循环 → 强制总结轮 */
   let budgetCapped = false
+  /** 触顶原因（归因 P0：AGENT_ROUND_CAP 与 AGENT_TOKEN_BUDGET 的用户动作不同，必须分开） */
+  let capKind: 'round-cap' | 'token-budget' = 'round-cap'
 
   for (let i = 0; i < maxRounds; i++) {
     // ---- LLM 轮 ----
-    if (signal.aborted) return { ok: false, sessionId, code: 'ABORTED', error: '已停止生成', trace }
+    if (signal.aborted) {
+      // 归因 P0（B-0）：用户停止是一种**有名字**的中断 —— 此前报成「AI 调用失败」（审计里 12 条误报同源）
+      return interruptResult(sessionId, trace, rawFailure({
+        layer: 'agent-loop', raw: '用户停止（本轮开始前）', externalAborted: true,
+        round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
+      }), undefined, undefined, interruptCtxOf(i + 1))
+    }
     // 预算将尽（最后一轮 / token 预算触顶）：注入收场提示，让模型用已有信息总结（第 0 层）
     if (!softLanded && (i === maxRounds - 1 || (runTokenBudget > 0 && runTokens >= runTokenBudget))) {
       softLanded = true
       budgetCapped = true
+      capKind = (runTokenBudget > 0 && runTokens >= runTokenBudget) ? 'token-budget' : 'round-cap'
       convo.push({ role: 'user', content: FINAL_ROUND_NOTICE })
     }
     emitStream?.({ kind: 'round-start', round: i + 1 })
@@ -905,7 +1270,7 @@ async function runAgentLoop(
     let thinkFrom = 0
     let thinkTo = 0
     const r = await invokeLlmStreamInternal(
-      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort },
+      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort, sessionId },
       (e) => {
         if (e.type === 'text') batcher.push('text', e.delta)
         else if (e.type === 'reasoning') {
@@ -945,13 +1310,41 @@ async function runAgentLoop(
         cachedTokens: r.cachedTokens,
       })
     }
-    if (!r.ok) return { ok: false, sessionId, error: r.error, code: r.code, trace }
+    if (!r.ok) {
+      // 归因 P0：LLM 侧已归一（code / interruption / detail）；配置类失败没有采集面 → 按「换模型」处置
+      const baseRaw = rawFailure({
+        layer: 'http', raw: r.error, round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
+      })
+      return interruptResult(
+        sessionId, trace, baseRaw,
+        r.interruption ?? configInterruptionOf(r.code),
+        r.detail ?? interruptionDetailOf(baseRaw),
+        interruptCtxOf(i + 1),
+      )
+    }
 
     if (!r.toolCalls || r.toolCalls.length === 0) {
       // 完成：把真实改动清单附在回复末尾（落库可见），并结构化返回给 UI
       const changesText = changes.length > 0
         ? '\n\n——\n本次改动：\n' + changes.map((c, idx) => `${idx + 1}. ${c.action}「${c.target}」`).join('\n')
         : ''
+      // G5 = B-29：输出被截断（撞单次输出上限 / 未见结束帧）此前静默当成功 —— 正文追加提示且可续写
+      if (r.interruption) {
+        const dt = r.detail ?? interruptionDetailOf(rawFailure({
+          layer: 'stream-eof', raw: r.interruption.matched, round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
+        }))
+        const reply = withTruncationNotice(r.content + changesText, r.interruption, dt)
+        const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace)
+        // 截断 = 有断点可续（「接着往下写」）：现场与失败出口同款（支线/手册通道不写）
+        const ictx = interruptCtxOf(i + 1)
+        if (ictx.writeResume !== false) persistResume(sessionId, msgId, interruptFactsOf(r.interruption, dt, trace, ictx), ictx.carry ?? '')
+        return {
+          ok: true, sessionId, reply, changes, trace, injection,
+          interruption: r.interruption, interruptDetail: dt,
+          ...(compressed ? { compressed } : {}),
+          contextBudget: asm.budget,
+        }
+      }
       const reply = r.content + changesText
       appendAgentMessage(sessionId, 'assistant', reply, trace)
       return {
@@ -989,13 +1382,44 @@ async function runAgentLoop(
         durationMs,
         summary: exec.ok ? undefined : String(exec.message).slice(0, 200),
       }
-      // visual.html 成功产物落 trace（小字段，不含 HTML）：渲染层工件卡数据源 + 占位页签原地转正式
-      if (realName === 'visual.html' && exec.ok && typeof exec.data === 'object' && exec.data !== null) {
+      // visual.html / mindmap / image 成功产物落 trace（小字段，不含全文）：渲染层工件卡数据源 + 占位页签原地转正式
+      if ((realName === 'visual.html' || realName === 'mindmap' || realName === 'image') && exec.ok && typeof exec.data === 'object' && exec.data !== null) {
         const d = exec.data as Record<string, unknown>
-        toolStep.artifact = {
-          rel: String(d.relPath ?? ''),
-          title: String(args?.title ?? '').slice(0, 80),
-          lines: Number(d.lines ?? 0),
+        if (realName === 'image') {
+          // 生图没有 title/slug 必填参数：卡上的人可读标签取 prompt 首段，取不到再退回文件名
+          const prompt = String(args?.prompt ?? '')
+          toolStep.artifact = {
+            rel: String(d.relPath ?? ''),
+            title: prompt.slice(0, 80) || String(d.relPath ?? '').split('/').pop() || '生成的图片',
+            slug: String(args?.slug ?? ''),
+            kind: 'image',
+            w: Number(d.w ?? 0) || undefined,
+            h: Number(d.h ?? 0) || undefined,
+            bytes: Number(d.bytes ?? 0) || undefined,
+            prompt: prompt.slice(0, 500),
+            ref: String(args?.ref ?? '').trim() || undefined,
+            model: String(d.model ?? '').trim() || undefined,
+            elapsedMs: Number(d.elapsedMs ?? 0) || undefined,
+            downgraded: d.downgraded === true ? true : undefined,
+          }
+        } else {
+          toolStep.artifact = {
+            rel: String(d.relPath ?? ''),
+            title: String(args?.title ?? '').slice(0, 80),
+            lines: Number(d.lines ?? 0),
+            slug: String(args?.slug ?? ''),
+            kind: realName === 'mindmap' ? 'mindmap' : 'html',
+            nodes: realName === 'mindmap' ? Number(d.nodes ?? 0) : undefined,
+          }
+        }
+      }
+      // 生图失败也要把 prompt/aspect/ref 带上（A8 的失败档要能「重试」——没有 prompt 就无处可重试；
+      // 其余工具的失败步骤不带 args，因为它们的失败只给一行字）
+      if (realName === 'image' && !exec.ok) {
+        toolStep.args = {
+          prompt: String(args?.prompt ?? '').slice(0, 500),
+          aspect: String(args?.aspect ?? ''),
+          ref: String(args?.ref ?? '').trim(),
           slug: String(args?.slug ?? ''),
         }
       }
@@ -1013,7 +1437,7 @@ async function runAgentLoop(
           // knowledge.create-page（F-11）：工具返回的 path 同为仓库内 .md，纳入 file 可点击直达编辑器
           const vaultPath = realName.startsWith('builtin.vault.')
             ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
-            : realName === 'visual.html' ? String(data?.relPath ?? '').trim()
+            : (realName === 'visual.html' || realName === 'mindmap' || realName === 'image') ? String(data?.relPath ?? '').trim()
               : realName === 'builtin.knowledge.create-page' ? String(data?.path ?? '').trim()
                 : ''
           const file = realName !== 'builtin.vault.trash' && vaultPath ? vaultPath : undefined
@@ -1031,11 +1455,16 @@ async function runAgentLoop(
       }
       // 单条结果超上限时截断为合法摘要（见 capToolResult 说明）
       const toolResultText = JSON.stringify(exec.ok ? { ok: true, data: exec.data } : { ok: false, error: exec.message })
+      const toolContent = toolResultText.length > MAX_TOOL_RESULT_CHARS ? capToolResult(toolResultText, realName) : toolResultText
       convo.push({
         role: 'tool',
         tool_call_id: tc.id,
-        content: toolResultText.length > MAX_TOOL_RESULT_CHARS ? capToolResult(toolResultText, realName) : toolResultText,
+        content: toolContent,
       })
+      // 续跑现场入账（A 方案 §3.5）：成功与失败都记 ——「查过但没查成」同样是后面续跑要用的信息。
+      // 单条先截到 4000（carry 单条上限 800，留足余量又不把 24k 全揣着）；只留最近 40 条
+      carryRows.push({ tool: realName, args: carryArgsOf(args), result: toolContent.slice(0, 4000), ok: exec.ok })
+      if (carryRows.length > 40) carryRows.shift()
     }
 
     /** 串行件：写上限判定 + visual 时序事件 + 执行 + 记账（原逐条路径，行为不变） */
@@ -1068,12 +1497,25 @@ async function runAgentLoop(
         }
         sessionWrites++
       }
-      // visual.html 生成时序 §3.4：调用前推「生成中」实时事件（仅 slug/title 小字段，绝不带 html 全文；
-      // 不落库——渲染层据此在工件栏开占位页签，给即时反馈）
-      if (realName === 'visual.html') {
+      // visual.html / mindmap / image 生成时序 §3.4：调用前推「生成中」实时事件（仅 slug/title/prompt/aspect
+      // 这类小字段，绝不带全文；不落库——渲染层据此开「生成中」占位（工件栏页签 / 生图卡），给即时反馈）
+      if (realName === 'visual.html' || realName === 'mindmap') {
         stepEmitters.get(signal)?.({
-          kind: 'tool', name: 'visual.html', ok: true, durationMs: 0,
+          kind: 'tool', name: realName, ok: true, durationMs: 0,
           args: { slug: String(args?.slug ?? ''), title: String(args?.title ?? '') },
+        })
+      }
+      // image 的占位事件要带 prompt/aspect/ref：生图卡靠 aspect 定占位框比例（不跳版），
+      // 靠 prompt 在生成期就能显示"在画什么"，靠 ref 标注这是改图还是新画
+      if (realName === 'image') {
+        stepEmitters.get(signal)?.({
+          kind: 'tool', name: realName, ok: true, durationMs: 0,
+          args: {
+            prompt: String(args?.prompt ?? '').slice(0, 500),
+            aspect: String(args?.aspect ?? ''),
+            ref: String(args?.ref ?? '').trim(),
+            slug: String(args?.slug ?? ''),
+          },
         })
       }
       // 过程时间线（§5.2.3）：在**调用前**先推「进行中」——现有 agent:step 是执行完才推，
@@ -1085,7 +1527,7 @@ async function runAgentLoop(
         target: argTarget(args),
       })
       const t1 = Date.now()
-      const exec = await invokeToolInternal(realName, args, '', { sessionId, source })
+      const exec = await invokeToolInternal(realName, args, '', { sessionId, source, signal })
       finishToolCall(tc, realName, args, exec, Date.now() - t1)
     }
 
@@ -1100,7 +1542,12 @@ async function runAgentLoop(
     const batches = partitionToolBatches(prepared, c =>
       isParallelSafe(c.realName, toolsState.readOnlyTools.has(c.realName) && !toolsState.writeTools.has(c.realName)))
     for (const batch of batches) {
-      if (signal.aborted) return { ok: false, sessionId, code: 'ABORTED', error: '已停止生成', trace }
+      if (signal.aborted) {
+        return interruptResult(sessionId, trace, rawFailure({
+          layer: 'agent-loop', raw: '用户停止（工具批次前）', externalAborted: true,
+          round: i + 1, runTokens, elapsedMs: Date.now() - runStarted,
+        }), undefined, undefined, interruptCtxOf(i + 1))
+      }
       if (!batch.parallel) {
         const c = batch.items[0]
         await runSingleToolCall(c.tc, c.realName, c.args)
@@ -1120,7 +1567,7 @@ async function runAgentLoop(
         const chunk = batch.items.slice(s, s + PARALLEL_CHUNK)
         execs.push(...await Promise.all(chunk.map(async c => {
           const t1 = Date.now()
-          const exec = await invokeToolInternal(c.realName, c.args, '', { sessionId, source })
+          const exec = await invokeToolInternal(c.realName, c.args, '', { sessionId, source, signal })
           return { exec, durationMs: Date.now() - t1 }
         })))
       }
@@ -1135,7 +1582,7 @@ async function runAgentLoop(
   // ---- 轮数/token 预算耗尽：做一次无工具的强制总结轮，把已获取的信息变成交付（第 0 层优雅收场）----
   convo.push({ role: 'user', content: FORCED_SUMMARY_NOTICE })
   const fr = await invokeLlmStreamInternal(
-      { messages: convo, tools: [], signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort },
+      { messages: convo, tools: [], signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort, sessionId },
     (e) => { if (e.type === 'text') batcher.push('text', e.delta) },
   )
   batcher.flush()
@@ -1155,11 +1602,43 @@ async function runAgentLoop(
     const changesText = changes.length > 0
       ? '\n\n——\n本次改动：\n' + changes.map((c, idx) => `${idx + 1}. ${c.action}「${c.target}」`).join('\n')
       : ''
+    // 预算触顶也是一种中断（归因 P0）：卡片说清是「轮数用尽」还是「token 触顶」，并可续跑
+    const capRaw = rawFailure({
+      layer: 'agent-loop',
+      raw: capKind === 'token-budget' ? 'token 预算触顶' : '轮数用尽',
+      loop: capKind,
+      round: maxRounds, runTokens, elapsedMs: Date.now() - runStarted,
+    })
+    const capIt = classifyFailure(capRaw)
+    const capDetail = interruptionDetailOf(capRaw)
+    const ictx = interruptCtxOf(maxRounds)
+    const facts = interruptFactsOf(capIt, capDetail, trace, ictx)
+    // 正文用统一的卡片构造器（进度 + 可继续句）；改动清单已由上面的 changesText 列过，这里传空避免重复
     const reply = fr.content + changesText
-    appendAgentMessage(sessionId, 'assistant', reply, trace)
-    return { ok: true, sessionId, reply, changes, trace, injection, hitCap: true, ...(compressed ? { compressed } : {}) }
+      + '\n' + buildInterruptContent({
+        reason: facts.reason,
+        advice: suggestedActionText(capIt),
+        rounds: facts.rounds,
+        toolCalls: facts.toolCalls,
+        changes: [],
+        canResume: ictx.writeResume !== false,
+        ...(facts.lastProcessText ? { lastProcessText: facts.lastProcessText } : {}),
+      })
+    const msgId = appendAgentMessage(sessionId, 'assistant', reply, trace)
+    // 预算触顶 = 任务没做完（不是失败）：留现场让「继续」能带着已有信息接着跑
+    if (ictx.writeResume !== false) persistResume(sessionId, msgId, facts, ictx.carry ?? '')
+    return {
+      ok: true, sessionId, reply, changes, trace, injection, hitCap: true,
+      interruption: capIt, interruptDetail: capDetail,
+      ...(compressed ? { compressed } : {}),
+    }
   }
-  return { ok: false, sessionId, error: `已达最大推理轮数（${maxRounds}）且总结失败，请缩小问题范围后重试`, code: 'MAX_ITERATIONS', trace }
+  // 收场总结也没跑成：按「预算已耗尽 + 总结失败」归因（但保留总结轮自身的失败细节，别把原因丢了）
+  const sumRaw = rawFailure({
+    layer: 'agent-loop', raw: `已达最大推理轮数（${maxRounds}）且总结失败`, loop: 'summary-failed',
+    round: maxRounds, runTokens, elapsedMs: Date.now() - runStarted,
+  })
+  return interruptResult(sessionId, trace, sumRaw, classifyFailure(sumRaw), fr.detail ?? interruptionDetailOf(sumRaw), interruptCtxOf(maxRounds))
 }
 
 /** 重新生成最后一条回复：删掉末尾助手消息后按原用户消息重推 */
@@ -1172,6 +1651,38 @@ async function agentRegenerate(req: AgentChatRequest, signal: AbortSignal): Prom
   if (!lastUser) return { ok: false, sessionId, error: '没有可重新生成的用户消息', trace }
   deleteMessagesAfter(sessionId, lastUser.id)
   return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort })
+}
+
+/**
+ * A 方案：从断点续跑（不追加用户消息、不新建会话，2026-10-14）。
+ *
+ * 装配（§3.4）：会话历史末尾是「中断卡」（一条 assistant 消息），续跑指令作为**一条不落库的合成 user 轮**
+ * 追加在 convo 末尾 —— 前缀（system + tools）逐字不变，prompt cache 不受影响；carry 只付一次。
+ * claim 顺序：**先清现场再跑** —— 连点两次「继续」时第二次拿不到现场，直接如实返回（不给重复消费的机会）。
+ */
+async function agentResume(req: AgentChatRequest, signal: AbortSignal): Promise<AgentChatResult> {
+  const trace: AgentTraceStep[] = []
+  const sessionId = String(req?.sessionId ?? '')
+  if (!sessionId || !sessionExists(sessionId)) return { ok: false, error: '会话不存在', trace }
+  const rs = getAgentSession(sessionId)?.resume
+  if (!rs) return { ok: false, sessionId, error: '这个会话没有可继续的中断点', trace }
+  const facts: InterruptFacts = {
+    reason: String(rs.reason ?? ''),
+    aborted: rs.aborted === true,
+    rounds: 0,
+    toolCalls: Number(rs.tool_calls ?? 0) || 0,
+    changes: Array.isArray(rs.changes) ? rs.changes : [],
+  }
+  const injection = buildResumeInjection(facts, String(rs.carry ?? ''))
+  updateSessionResume(sessionId, null) // claim：现场只消费一次
+  const result = await runAgentLoop(
+    sessionId, req.context, signal, trace, req.source,
+    { modelId: req.modelId, effort: req.effort },
+    { resumeInjection: injection },
+  )
+  // 支线旁问：按本轮结果落运行态（成功 done / 其余 cut）；普通会话 no-op
+  setSideLaneStatus(sessionId, result.ok ? 'done' : 'cut')
+  return result
 }
 
 /**
@@ -1201,6 +1712,34 @@ async function agentEditAndRegen(req: AgentChatRequest & { messageId: string }, 
   return runAgentLoop(sessionId, req.context, signal, trace, req.source, { modelId: req.modelId, effort: req.effort })
 }
 
+/**
+ * 支线清单投影（.claude/plans/ai-teaching-side-lane-center.md §4.3）：
+ * 在原会话行上补「未读 / 运行态 / 末条 AI 时间 / 正文摘要」等派生字段，供右栏支线中心使用。
+ * 支线数量少（每主线个位数），逐条读 .jsonl 计算可接受。
+ */
+function buildSideLaneInfo(row: AgentSessionRow): Record<string, unknown> {
+  const msgs = getAgentMessages(row.id)
+  const last = msgs[msgs.length - 1]
+  const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant')
+  const excerpt = msgs.map((m) => m.content).join('\n').replace(/\s+/g, ' ').trim().slice(0, 200)
+  // 来源回答标题（分叉点那条主线回答的首行）：仅用于展示与搜索，缺锚点则空
+  const anchorMsg = row.branchFromMessageId && row.parentSessionId ? getMessageById(row.parentSessionId, row.branchFromMessageId) : null
+  const anchorTitle = (anchorMsg?.content ?? '').replace(/^#{1,6}\s*/gm, '').replace(/\s+/g, ' ').trim().slice(0, 40)
+  return {
+    ...row,
+    // camel 别名（与 camelRow 口径一致，渲染层按 camel 消费）
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    // 支线派生
+    laneStatus: deriveLaneStatus(row.lane_status, last ? (last.role as 'user' | 'assistant') : '', false),
+    laneSeenAt: row.lane_seen_at ?? null,
+    lastAssistantAt: lastAssistant?.created_at ?? '',
+    unread: computeLaneUnread({ hasMessages: msgs.length > 0, lastAssistantAt: lastAssistant?.created_at, laneSeenAt: row.lane_seen_at }),
+    excerpt,
+    anchorTitle,
+  }
+}
+
 export function registerAgentHandlers(): void {
   // 仅向发起窗口推送 agent:step 过程事件（chatId 过滤由渲染层做），复用 activeChats 生命周期。
   // N-3 多对话并行：载荷补 sessionId（渲染层按会话分桶，切回运行中会话即恢复实时流）；
@@ -1228,6 +1767,14 @@ export function registerAgentHandlers(): void {
     try {
       result = await fn(ctrl.signal)
       return result
+    } catch (err) {
+      // G8（归因 P0）：这里此前**只有 try/finally、没有 catch** —— 主进程里任何没被 runAgentLoop
+      // 收住的异常（工具执行器抛错 / 写盘抛错 / IPC 反序列化）都会让「卡片消失 + 零 Toast + 零记录」。
+      console.error('[agent] 任务异常逃逸（withAbort 兜底）', err)
+      result = interruptResult(sessionId, [], rawFailure({
+        layer: 'agent-loop', raw: String((err as Error)?.message ?? err), elapsedMs: 0,
+      }))
+      return result
     } finally {
       activeChats.delete(chatId)
       activeChatSessions.delete(chatId)
@@ -1247,6 +1794,9 @@ export function registerAgentHandlers(): void {
     withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentChat(req, signal, String(req?.chatId ?? ''))))
   ipcMain.handle('agent:regenerate', (e, req: AgentChatRequest) =>
     withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentRegenerate(req, signal)))
+  // A 方案：从断点续跑（中断卡上的「继续」）。同样挂在 withAbort 上 = 可停止、有运行态、异常不静默
+  ipcMain.handle('agent:resume', (e, req: AgentChatRequest) =>
+    withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentResume(req, signal)))
   ipcMain.handle('agent:startScene', (e, req: AgentChatRequest) =>
     withAbort(String(req?.chatId ?? '') || randomUUID(), String(req?.sessionId ?? ''), e.sender, signal => agentStartScene(req, signal)))
   ipcMain.handle('agent:editMessage', (e, req: AgentChatRequest & { messageId: string }) =>
@@ -1281,6 +1831,9 @@ export function registerAgentHandlers(): void {
       ...row,
       createdAt: typeof row.created_at === 'string' && row.created_at ? row.created_at : (row.createdAt ?? ''),
       updatedAt: typeof row.updated_at === 'string' && row.updated_at ? row.updated_at : (row.updatedAt ?? ''),
+      pinnedAt: typeof row.pinned_at === 'string' && row.pinned_at ? row.pinned_at : (row.pinnedAt ?? null),
+      laneStatus: row.lane_status ?? row.laneStatus,
+      laneSeenAt: row.lane_seen_at ?? row.laneSeenAt ?? null,
       sessionId: typeof row.session_id === 'string' ? row.session_id : (row.sessionId ?? ''),
       traceJson: typeof row.trace_json === 'string' ? row.trace_json : (row.traceJson ?? null),
     } as T
@@ -1315,16 +1868,33 @@ export function registerAgentHandlers(): void {
       backfillSessionSources(infer, !rows.some(r => !r.source))
     } catch { /* 回填失败不影响列表本身 */ }
   }
+  /**
+   * 会话行出口（A 方案 §3.1）：续跑现场只发摘要 —— `resume.carry` 有 6k 字符，全量发给渲染层
+   * 等于每次列会话都白传一遍；「继续」按钮只需要 messageId / reason / resumable 这点信息。
+   */
+  const sessionOut = (row: AgentSessionRow): Record<string, unknown> => {
+    const out = camelRow(row) as unknown as Record<string, unknown>
+    const rs = out.resume as SessionResume | undefined
+    delete out.resume
+    out.resumeInfo = rs ? toResumeInfo(rs) : null
+    return out
+  }
   ipcMain.handle('agent:sessions', () => {
     ensureSessionSources()
-    return listAgentSessions().map(camelRow)
+    return listAgentSessions().map(sessionOut)
   })
-  ipcMain.handle('agent:newSession', (_e, title?: string, source?: string) =>
-    camelRow(createAgentSession(
+  ipcMain.handle('agent:newSession', (_e, title?: string, source?: string) => {
+    // 会话随仓库走（2026-10-13）：没有当前仓库就没有可写的位置。
+    // 渲染层 4 个调用点都是 `.catch(() => null)`，这里抛出即退化为「建不了会话」+ 我们给的提示。
+    if (!getCurrentVault()) throw new Error('尚未打开仓库，无法新建对话')
+    return camelRow(createAgentSession(
       typeof title === 'string' && title.trim() ? title.trim() : '新会话',
-      source === 'aiTeaching' ? 'aiTeaching' : 'assistant',
-    )))
+      source === 'aiTeaching' ? 'aiTeaching' : source === 'schedule' ? 'schedule' : 'assistant',
+    ))
+  })
   ipcMain.handle('agent:messages', (_e, id: string) => getAgentMessages(String(id ?? '')).map(camelRow))
+  // 存量会话认领的一次性告知（会话随仓库走）：取走即删，只会被展示一次
+  ipcMain.handle('agent:takeAdoptNotice', () => takeAdoptNotice())
   // AI 用量 / 会话文件改动（v3.4.0 批次5，方案 §4/§3.8）：右栏 token 面板只读
   ipcMain.handle('agent:usage:get', () => getAiUsageData())
   ipcMain.handle('agent:sessionChanges:get', (_e, sessionId?: string) =>
@@ -1348,6 +1918,11 @@ export function registerAgentHandlers(): void {
     deleteAgentSession(sid)
     return true
   })
+  // 钉住 / 取消钉住会话（通用助手左栏「★ 收藏」分区）
+  ipcMain.handle('agent:setSessionPinned', (_e, id: string, pinned: boolean) => {
+    if (typeof id !== 'string' || !id) return false
+    return setSessionPinned(id, pinned === true)
+  })
 
   // ===== v3.1.2 条目11：支线旁问（sidetrack）=====
   // 建支线：只做「固化上下文快照 + 建独立会话」，**不调 LLM**（点按钮与装载阶段零请求）。
@@ -1369,10 +1944,13 @@ export function registerAgentHandlers(): void {
     })
     return { ok: true, laneSessionId: lane.id, title: lane.title, snapshotText, turns }
   })
-  // 列某主线下的支线（含已升格）：左栏缩进渲染 + 删除前计数
+  // 列某主线下的支线（含已升格）：右栏支线中心 + 左栏缩进渲染 + 删除前计数；带派生字段（unread/laneStatus/excerpt）
   ipcMain.handle('agent:listSideLanes', (_e, parentSessionId: string) =>
-    listSideLanes(String(parentSessionId ?? '')).map(camelRow))
+    listSideLanes(String(parentSessionId ?? '')).map(buildSideLaneInfo))
   // 升格支线为正式会话（单向）：lane 置 'main' → 进左栏列表
   ipcMain.handle('agent:promoteSideLane', (_e, laneSessionId: string) =>
     promoteSideLane(String(laneSessionId ?? '')))
+  // 打开支线详情即已读：写 lane_seen_at（不 bump updated_at）
+  ipcMain.handle('agent:markSideLaneRead', (_e, laneId: string) =>
+    markSideLaneSeen(String(laneId ?? '')))
 }

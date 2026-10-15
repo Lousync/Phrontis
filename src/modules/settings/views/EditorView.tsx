@@ -48,11 +48,25 @@ export function EditorView() {
         />
         <p className="text-[11px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
           可直接输入任意字号（10-40px），或点预设档位；输入越界会提示且不生效。
+          <br />
+          本项只作用于<span className="text-[var(--text-secondary)]">源码档</span>编辑器；即时渲染档跟随界面正文字号，与阅读态预览保持一致（整体缩放走 Ctrl +/−）。
         </p>
       </div>
 
       <div data-setting-anchor="editor.lineNumbers">
         <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-3">显示</h3>
+        <div data-setting-anchor="editor.writingMode" className="mb-4 max-w-md">
+          <SettingSelect
+            title="写作模式"
+            description="源码 = 编辑 Markdown 原文（配合标记淡化）；即时渲染 = 按排版显示，光标所在段落回到原文。两档各自记住光标位置，撤销历史不跨档"
+            value={(s.editorWritingMode as string) ?? 'source'}
+            onChange={(v) => update('editorWritingMode', v)}
+            options={[
+              { id: 'source', label: '源码', desc: 'Markdown 原文 + 标记淡化（既有手感）', isDefault: true },
+              { id: 'live', label: '即时渲染', desc: '标题 / 加粗 / 图片 / 公式 / 表格直接出效果' },
+            ]}
+          />
+        </div>
         <label className="flex items-center justify-between gap-4 cursor-pointer max-w-md">
           <span className="text-[13px] text-[var(--text-primary)]">显示行号</span>
           <SettingSwitch checked={s.showLineNumbers} onChange={(v) => update('showLineNumbers', v)} />

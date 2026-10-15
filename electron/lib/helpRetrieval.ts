@@ -46,6 +46,20 @@ export function parseList(v?: string): string[] {
   return v.replace(/^\[|\]$/g, '').split(/[,，]/).map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
 }
 
+/**
+ * 剥掉手册里的**生成区标记**（`<!-- GEN:keytable ids=… -->` 与 `<!-- /GEN -->`）。
+ *
+ * 为什么必须在读盘层剥：这些标记是**构建期脚手架**（生成器靠它定位表格区，
+ * 见 .AGENT/scripts/commands/build-shortcuts-doc.mjs），不是给人和 AI 看的内容 ——
+ *   ① 帮助中心用 `MarkdownPreview`（react-markdown，未装 rehype-raw）渲染，HTML 注释会
+ *      原样显示成文字；
+ *   ② AI 的 `builtin.help.search` 语料也不该混进 `GEN:keytable ids=kb-new,…` 这种噪声。
+ * 两处共用同一个 loadHelpDocs ⇒ 在唯一入口剥一次即可（同铁律 6 的「只插一处」思路）。
+ */
+export function stripGenMarkers(body: string): string {
+  return body.replace(/^[ \t]*<!--\s*\/?GEN\b[^>]*-->[ \t]*\r?\n?/gm, '')
+}
+
 /** 停用词（bigram 形式）：这些词在任何文档里都常见，留着只会稀释信号 */
 export const STOP_TERMS = new Set([
   '怎么', '为什么', '什么', '如何', '是否', '可以', '能不能', '有没有', '一个', '这个', '那个',

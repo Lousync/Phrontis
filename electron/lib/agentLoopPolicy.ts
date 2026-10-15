@@ -25,10 +25,10 @@ export function clampRunTokenBudget(v: unknown): number {
 
 /**
  * 并行安全判定：注册声明确认只读，且不是有会话级副作用的特殊工具
- * （tool.request 会重建工具 payload；visual.html 有专门的时序事件/工件处理——都保持串行）。
+ * （tool.request 会重建工具 payload；visual.html / mindmap 有专门的时序事件/工件处理——都保持串行）。
  */
 export function isParallelSafe(realName: string, readOnly: boolean): boolean {
-  return readOnly && realName !== 'builtin.tool.request' && realName !== 'visual.html'
+  return readOnly && realName !== 'builtin.tool.request' && realName !== 'visual.html' && realName !== 'mindmap'
 }
 
 export interface ToolBatch<T> {

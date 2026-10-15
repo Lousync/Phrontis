@@ -38,6 +38,8 @@ export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' 
 // ===== 记账模块 =====
 // 主进程侧同形状声明见 electron/lib/kbStore/accountingVaultRepo.ts（跨线各侧各声明一次的仓规）
 export type AccountingType = 'expense' | 'income'
+/** 交易类型：收支之外多一个「转账」（账户间移动资金，不计入收支统计、不影响总额） */
+export type AccountingTxType = 'expense' | 'income' | 'transfer'
 export interface AccountingCategory {
   id: string
   name: string
@@ -57,23 +59,79 @@ export interface AccountingTransaction {
   id: string
   date: string
   time: string
+  type: AccountingTxType
+  amount: number
+  category: string
+  payment: string
+  /** 转账专用：转入账户（type==='transfer' 时，payment = 转出账户） */
+  toPayment?: string
+  merchant: string
+  note: string
+  source?: string
+  /** 定期收支生成的流水：所属规则 id（去重键的一部分） */
+  recurringId?: string
+  /** 定期收支生成的流水：本次应扣日 YYYY-MM-DD（去重键 = recurringId + recurringDue） */
+  recurringDue?: string
+  createdAt: string
+  updatedAt: string
+}
+/** 定期收支周期：每月几号 / 每 N 天 */
+export type AccountingRecurringMode = 'monthly' | 'interval'
+/**
+ * 定期收支规则。真相源 `.knowbase/modules/accounting/recurring.json`。
+ * monthly：用 day；interval：用 intervalDays。lastPostedDate 为「上次扣费日」（幂等 + 追赶起点）。
+ */
+export interface AccountingRecurring {
+  id: string
+  name: string
   type: AccountingType
   amount: number
   category: string
   payment: string
   merchant: string
   note: string
-  source?: string
+  mode: AccountingRecurringMode
+  day: number | null
+  intervalDays: number | null
+  lastPostedDate: string
+  endDate: string
+  enabled: boolean
+  autoPost: boolean
   createdAt: string
   updatedAt: string
 }
-export interface CreateAccountingInput {
-  date?: string
-  time?: string
+export interface CreateAccountingRecurringInput {
+  name: string
   type: AccountingType
   amount: number
   category?: string
   payment?: string
+  merchant?: string
+  note?: string
+  mode: AccountingRecurringMode
+  day?: number | null
+  intervalDays?: number | null
+  /** 上次扣费日（建规则时填，决定下次与补记起点） */
+  lastPostedDate: string
+  endDate?: string
+  enabled?: boolean
+  autoPost?: boolean
+}
+/** 结算结果：本次自动记入的流水（撤销时按 id 删除） */
+export interface AccountingRecurringSettleResult {
+  added: number
+  total: number
+  items: Array<{ id: string; ruleId: string; name: string; amount: number; due: string }>
+}
+export interface CreateAccountingInput {
+  date?: string
+  time?: string
+  type: AccountingTxType
+  amount: number
+  category?: string
+  payment?: string
+  /** 转账专用：转入账户 */
+  toPayment?: string
   merchant?: string
   note?: string
   source?: string
@@ -84,10 +142,12 @@ export interface AccountingParseItem {
   dup: boolean
   date: string
   time: string
-  type: AccountingType
+  type: AccountingTxType
   amount: number
   category: string
   payment: string
+  /** 转账专用：转入账户 */
+  toPayment?: string
   merchant: string
   note: string
 }
@@ -450,6 +510,33 @@ export interface PluginPetInfo {
   sprites: Record<string, string>
 }
 
+/** 插件贡献的 AI 输入区吉祥物（contributes.mascot；帧图经 plugin:// 供给，见 .claude/plans/ai-composer-mascot.md） */
+export interface PluginMascotInfo {
+  pluginId: string
+  id: string
+  name: string
+  /** 每帧毫秒（缺省 80） */
+  frameMs: number
+  /** 逻辑格 × 每格像素（缺省 2px；默认 52×36 格） */
+  grid: { cell: number; w: number; h: number }
+  /** 站位（本版仅 'composer'） */
+  anchor: string
+  /** 状态 → 动画名（键落在 sheets 内）；缺省用动画名本身 */
+  states: Record<string, string>
+  /** 动画表：动画名 → { 本体 / 墨色遮罩（plugin:// URL）+ 帧数 / 裁切框 / 静止帧 } */
+  sheets: Record<string, { body: string; ink: string | null; frames: number; box: number[]; still: number }>
+  /** 空闲小节目（动画名数组） */
+  idleExtras: string[]
+  /** 点击反应（动画名；点左半 / 右半 / 连点 ≥4 次）——缺省则点击无反应 */
+  tapLeft?: string
+  tapRight?: string
+  tapFlail?: string
+  /** 工作分档：忙 1 / 2 / ≥3 个会话各演哪个动画（缺省只用 states.working） */
+  workingTiers?: string[]
+  /** 空闲多少毫秒后入睡（需 sheets 有 'sleeping'/'waking'；缺省 60000） */
+  sleepAfterMs?: number
+}
+
 // ---- 远程监督 ----
 export type SupervisePlatform = 'serverchan' | 'wecom' | 'dingtalk' | 'custom'
 export interface SuperviseConfig {
@@ -531,6 +618,9 @@ export interface ScheduleTodo {
    * 缺省 / null = 未打盹。本轮日程改造新增的唯一字段。
    */
   snoozeUntil?: string | null
+  /** 固定日程（重复任务）生成的待办：来源规则 id + 本次日期 */
+  recurringId?: string | null
+  recurringDue?: string | null
   createdAt: string; updatedAt: string
   tag?: ScheduleTag | null
   subtasks?: ScheduleTodo[]
@@ -549,6 +639,50 @@ export interface UpdateScheduleTodoDTO {
   scheduledStart?: number | null; scheduledEnd?: number | null
   /** 提醒「稍后」目标时间；传 null 表示清除打盹 */
   snoozeUntil?: string | null
+}
+
+// 固定日程（重复任务）—— 与主进程 src/lib/scheduleRecurringPure.ts 的 ScheduleRecurring 同形状
+export interface ScheduleRecurring {
+  id: string
+  title: string
+  /** weekly：每周 weekdays；monthly：每月 day 号；interval：每 intervalDays 天 */
+  freq: 'weekly' | 'monthly' | 'interval'
+  /** 0=周一 … 6=周日（仅 weekly 用） */
+  weekdays: number[]
+  day: number | null
+  intervalDays: number | null
+  /** 排期时段（当天分钟数，540=09:00） */
+  startMin: number
+  endMin: number
+  taskType: 'plan' | 'deadline' | 'daily'
+  quadrant: number
+  tagId: string | null
+  enabled: boolean
+  /** 到期日 YYYY-MM-DD（空 = 长期） */
+  endDate: string
+  lastPostedDate: string
+  createdAt: string
+  updatedAt: string
+}
+export interface CreateScheduleRecurringDTO {
+  title: string
+  freq: 'weekly' | 'monthly' | 'interval'
+  weekdays?: number[]
+  day?: number | null
+  intervalDays?: number | null
+  startMin: number
+  endMin?: number | null
+  taskType?: 'plan' | 'deadline' | 'daily'
+  quadrant?: number
+  tagId?: string | null
+  enabled?: boolean
+  endDate?: string
+  lastPostedDate?: string
+}
+export interface ScheduleRecurringSettleResult {
+  added: number
+  items: Array<{ id: string; ruleId: string; title: string; due: string }>
+  restore: Array<{ ruleId: string; lastPostedDate: string }>
 }
 
 // knowledge
@@ -585,6 +719,10 @@ export interface KnowledgeBacklinkItem {
   id: string; title: string; fileType: string
   updatedAt: string
   excerpt: string
+  /** 源页里命中本页的 `[[…]]` 原文（别名取 `|` 前段）——正文定位高亮用 */
+  linkText?: string
+  /** 源页仓库相对路径——跨页定位匹配用 */
+  path?: string
 }
 /** 相似笔记条目（编辑器右栏「相关笔记」，A3-3；via=命中方式 keyword/semantic/hybrid） */
 export interface SimilarPageHit {
@@ -653,6 +791,8 @@ export interface PluginRegistryEntry {
   size?: number
   checksum?: string
   updatedAt?: string
+  /** 适配的应用版本要求（形如 ">=3.5.0"）——市场列表/详情展示用；真正的安装门禁在插件清单的 engineVersion */
+  engineVersion?: string
 }
 
 export type PluginRiskLevel = 'S' | 'A' | 'B' | 'C'
@@ -888,7 +1028,30 @@ export interface SkillInstallResult {
 
 // ===== 模型网关 + AI 对话 =====
 
-export type LlmProviderType = 'openai-compatible' | 'ollama' | 'anthropic'
+export type LlmProviderType = 'openai-compatible' | 'ollama' | 'anthropic' | 'openai-responses'
+
+/**
+ * 模型级协议归属。同一端点下的模型可能分属不同 API 族（opencode Go 官方口径：
+ * "Each model is served by one API family"），所以协议要能按模型逐条覆盖。
+ * 未在 provider.modelFamilies 里列出的模型，跟随供应商 type。
+ */
+export type LlmModelFamily = 'chat' | 'messages' | 'responses'
+
+/**
+ * 端点内的一个账号（2026-10-13，按原型 tmp/ai-settings-proto 的「账号列表」落地）。
+ * 同一 baseUrl / 协议 / 请求头 / 模型清单，只有 Key 各自独立加密 —— 所以换账号
+ * 不用重输地址与协议，也不会把上一个账号的 Key 覆盖掉。
+ * **密文永不回传**：渲染层只拿得到 hasKey。
+ */
+export interface LlmAccountInfo {
+  id: string
+  name: string
+  enabled: boolean
+  hasKey: boolean
+  /** 最近一次「测试这个账号」的往返耗时与时间点 */
+  lastLatencyMs?: number
+  lastTestedAt?: string
+}
 
 /** 脱敏后的供应商信息（Key 相关字段永不回传） */
 export interface LlmProviderInfo {
@@ -897,8 +1060,17 @@ export interface LlmProviderInfo {
   type: LlmProviderType
   baseUrl: string
   enabled: boolean
+  /** 当前账号是否已配 Key（旧口径；账号级看 accounts[].hasKey） */
   hasKey: boolean
   models: string[]
+  /** 端点内的账号（switch activeAccountId 不改变任何模型 spec） */
+  accounts: LlmAccountInfo[]
+  /** 当前生效账号 id（空 = 无账号） */
+  activeAccountId: string
+  /** 端点整体可用 = 端点启用 且 至少一个账号可用；不可用端点的模型不进模型选择器 */
+  usable: boolean
+  /** 逐模型协议覆盖（空对象 = 全部跟随 type） */
+  modelFamilies?: Record<string, LlmModelFamily>
   headers?: Record<string, string>
   /** 嵌入模型名（空串=未配置；知识语义检索用） */
   embeddingModel: string
@@ -915,8 +1087,11 @@ export interface LlmProviderDraft {
   /** 仅新增/更换时传入；编辑留空保留旧密文 */
   apiKey?: string
   enabled?: boolean
-  /** 自定义请求头（opencode 等网关要求 x-opencode-session 之类路由头时在此配置） */
+  /** 自定义请求头（opencode 等网关要求 x-opencode-session 之类路由头时在此配置）。
+   *  这里填的值是常量；实际请求会按对话覆盖成真实会话 ID（见主进程 withSessionHeaders）。 */
   headers?: Record<string, string>
+  /** 逐模型协议覆盖（键=模型 ID，值=chat/messages/responses） */
+  modelFamilies?: Record<string, LlmModelFamily>
   /** 嵌入模型名（知识语义索引用）；不配 = 该供应商不参与嵌入 */
   embeddingModel?: string
 }
@@ -996,14 +1171,87 @@ export interface AgentTraceStep {
   /** 命中提示缓存的输入 token 数（观测用，已含在 promptTokens 内） */
   cachedTokens?: number
   summary?: string
-  /** visual.html「生成中」实时事件（agent:step 专用，不落库）：{slug,title} */
+  /** visual.html / image「生成中」实时事件（agent:step 专用，不落库）：{slug,title} / {prompt,aspect,ref,slug} */
   args?: Record<string, unknown>
-  /** visual.html 成功产物（落库随消息 trace）：对话流工件卡数据源 */
-  artifact?: { rel: string; title: string; lines: number; slug: string }
+  /** 产物工具（visual.html / mindmap / image）成功产物（落库随消息 trace）：对话流工件卡数据源。
+   *  ★ 本字段与 electron/lib/agentService.ts 的 AgentTraceStep.artifact **互为镜像**，改一处必须改两处。 */
+  artifact?: {
+    rel: string
+    title: string
+    slug: string
+    /** visual.html 行数；image 没有"行"这个概念，恒缺省（故可选） */
+    lines?: number
+    kind?: 'html' | 'mindmap' | 'image'
+    nodes?: number
+    /** image：像素尺寸 / 字节数 / 生图描述 / 参考图 / 模型 / 耗时（卡上元信息 + 版本切换用） */
+    w?: number
+    h?: number
+    bytes?: number
+    prompt?: string
+    ref?: string
+    model?: string
+    elapsedMs?: number
+    /** image：改图槽未配置时退化为「按描述重画」（卡上据此标注，不静默降级） */
+    downgraded?: boolean
+  }
   /** 过程旁白（落库）：带工具轮次里模型输出的说明文本，历史回看用 */
   processText?: string
   /** 思考耗时 ms（落库；reasoning 全文不落库） */
   thinkingMs?: number
+}
+
+/**
+ * 中断归因（归因 P0，2026-10-14）：**唯一真源是 `electron/lib/llmFailurePure.ts`**。
+ * 渲染层拿不到主进程类型，故按仓库惯例镜像一份；★ 码清单必须与真源逐字一致 ——
+ * 契约 `.AGENT/scripts/llm-adapters/verify-llm-attribution.mjs` 按源码文本比对两份清单。
+ */
+export type InterruptCode =
+  | 'USER_ABORTED' | 'AGENT_ROUND_CAP' | 'AGENT_TOKEN_BUDGET' | 'AGENT_SUMMARY_FAILED' | 'AGENT_WRITE_CAP'
+  | 'LLM_AUTH' | 'LLM_QUOTA_EXHAUSTED' | 'LLM_RATE_LIMIT' | 'LLM_MODEL_NOT_FOUND' | 'LLM_PROTOCOL_MISMATCH'
+  | 'LLM_CONTEXT_OVERFLOW' | 'LLM_BAD_REQUEST' | 'LLM_OUTPUT_TRUNCATED'
+  | 'LLM_UPSTREAM_5XX' | 'LLM_OVERLOADED' | 'LLM_PROVIDER_ERROR_FRAME'
+  | 'LLM_CONNECT_FAILED' | 'LLM_CONNECT_TIMEOUT' | 'LLM_NET_RESET' | 'LLM_DNS_FAILED'
+  | 'LLM_FIRST_BYTE_TIMEOUT' | 'LLM_IDLE_TIMEOUT' | 'LLM_STREAM_TRUNCATED' | 'LLM_UNKNOWN'
+  | 'INTERNAL_EXCEPTION'
+
+/** 证据强度：决定「能不能写因果」（timing / inferred 的文案禁用因果词，契约负向断言） */
+export type InterruptionEvidence = 'provider-body' | 'http-status' | 'transport-error' | 'timing' | 'inferred'
+
+/** 建议动作（UI 据此出按钮 / 文案） */
+export type InterruptionAction =
+  | 'resume' | 'retry' | 'switch-model' | 'check-key' | 'top-up' | 'wait'
+  | 'shrink-context' | 'new-session' | 'report-bug' | 'none'
+
+export interface Interruption {
+  code: InterruptCode
+  evidence: InterruptionEvidence
+  /** 可续跑？（A 的「继续」按钮据它出不出） */
+  resumable: boolean
+  /** 可重试？（B 的重试判定唯一真源） */
+  retryable: boolean
+  action: InterruptionAction
+  /** 归一码的判据来源（诊断块用） */
+  matched: string
+}
+
+/** 诊断细节（「复制诊断信息」的数据源；**不含正文、不含 Key**） */
+export interface InterruptionDetail {
+  /** 原始错误串（截 300；诊断块用） */
+  raw: string
+  httpStatus?: number
+  upstreamCode?: string
+  upstreamMessage?: string
+  /** 收到几段数据（截断场景未知，故可缺省） */
+  receivedChunks?: number
+  partialChars: number
+  sawTerminator: boolean
+  stopReason?: string
+  round?: number
+  runTokens?: number
+  attempts?: number
+  providerId?: string
+  model?: string
+  elapsedMs: number
 }
 
 /**
@@ -1037,7 +1285,7 @@ export interface AgentContextInfo {
 
 /** 会话来源：把「通用 AI 助手」（侧栏 / AI 学堂）与「AI 教学」的会话列表互相隔离。
  *  二者同表存储、同一套 AgentRunner，仅列表展示分流。与主进程 agentSessionRepo 同构。 */
-export type AgentSessionSource = 'assistant' | 'aiTeaching'
+export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule'
 
 export interface AgentSessionInfo {
   id: string
@@ -1050,6 +1298,8 @@ export interface AgentSessionInfo {
   instructions?: string
   createdAt: string
   updatedAt: string
+  /** 钉住时间（「★ 收藏」分区）：有值 = 已钉住（值用于收藏内排序）；缺省 / null = 未钉住 */
+  pinnedAt?: string | null
   /** 支线旁问（v3.1.2 条目11）：挂靠的主线会话 id（缺省=非支线）。与主线物理隔离 */
   parentSessionId?: string
   /** 支线旁问：分叉点的主线消息 id */
@@ -1058,6 +1308,28 @@ export interface AgentSessionInfo {
   lane?: 'main' | 'side'
   /** 支线旁问：固化上下文快照（分叉回答 + 主线前 K 轮） */
   sideContext?: string
+  /**
+   * A 方案（断点续跑）：最近一次中断留下的可续现场摘要（缺省 / null = 无可续点）。
+   * ★ 真源在主进程会话行 `AgentSessionRow.resume`，出口经 toResumeInfo 裁剪 —— **这里没有 carry 正文**
+   * （6k 字符的现场只在续跑时由主进程注入，绝不发给渲染层）。
+   */
+  resumeInfo?: ResumeInfo | null
+}
+
+/** 中断续跑现场摘要（主进程 agentInterruptPure.toResumeInfo 的镜像；结构上就不含 carry） */
+export interface ResumeInfo {
+  /** 中断时刻（本地时间串） */
+  at: string
+  /** 中断记录那条 assistant 消息 id —— 「继续」按钮挂在它上面 */
+  messageId: string
+  /** 原因串（白话，直接展示） */
+  reason: string
+  /** 用户主动停止 */
+  aborted: boolean
+  /** 本次 run 的工具调用次数 */
+  toolCalls: number
+  /** 已完成的写改动（与 AgentChange 同形，供卡片/hover 展示） */
+  changes: Array<{ action: string; target: string; file?: string }>
 }
 
 /** 建支线结果（agent:createSideLane）：只装上下文不调 LLM */
@@ -1070,6 +1342,22 @@ export interface AgentSideLaneCreateResult {
   /** 实际采用的轮数（1/3/5 夹取后） */
   turns?: number
   error?: string
+}
+
+/** 支线清单项（agent:listSideLanes）：会话行 + 派生字段，供右栏「支线中心」（见 plan §4.5） */
+export interface AgentSideLaneInfo extends AgentSessionInfo {
+  /** 运行态：进行中 / 已答 / 已中断 */
+  laneStatus?: 'run' | 'done' | 'cut'
+  /** 上次打开（已读）时间；null/缺省 = 从未打开 */
+  laneSeenAt?: string | null
+  /** 最近一条 AI 回答时间（未读判定基准） */
+  lastAssistantAt?: string
+  /** 是否有未读（后台来了新回答 / 从未打开） */
+  unread?: boolean
+  /** 正文摘要（前 200 字，供本会话内搜索） */
+  excerpt?: string
+  /** 来源回答标题（分叉点主线回答首行，供列表展示与搜索） */
+  anchorTitle?: string
 }
 
 /** P5 工作区（AI教学两层结构；主进程 aiTeachingWorkspaces.ts 同构） */
@@ -1090,10 +1378,9 @@ export interface AiTeachCourseChapter { id: string; name: string; units: AiTeach
 export interface AiTeachCourseOutline { title: string; goal: string; anchor: string; chapters: AiTeachCourseChapter[] }
 export interface AiTeachCourseUnitProgress { status: AiTeachCourseUnitStatus; mastery: number; lastCheckedAt: string | null; finished?: boolean; summaryRel?: string | null }
 export interface AiTeachLessonInfo { unitId: string; order: number; kind: string; status: 'open' | 'ended' }
+export interface AiTeachChapterReview { sessionId: string; rel: string | null }
 export interface AiTeachUnitQuizQuestion { q: string; options: string[]; answer: number; explanation: string }
-export interface AiTeachCourseState { enabled: boolean; outline: AiTeachCourseOutline | null; progress: Record<string, AiTeachCourseUnitProgress>; lessons: Record<string, AiTeachLessonInfo> }
-export interface AiTeachCourseGenerateInput { goal: string; mode: 'anchor' | 'materials' | 'mixed' | 'free'; anchorText?: string; anchorLabel?: string; modelSpec?: string }
-export interface AiTeachCourseGenProgress { id: string; phase: 'request' | 'reasoning' | 'answer' | 'parsing' | 'done' | 'failed'; delta?: string; model?: string; chars?: number; error?: string }
+export interface AiTeachCourseState { enabled: boolean; outline: AiTeachCourseOutline | null; progress: Record<string, AiTeachCourseUnitProgress>; lessons: Record<string, AiTeachLessonInfo>; reviews: Record<string, AiTeachChapterReview> }
 
 /** P6 素材库：SOURCE.md 解析条目（§3.13 模板 v2，字段行与模板一一对应） */
 export interface AiTeachSourceEntry {
@@ -1144,6 +1431,13 @@ export interface AiTeachSourcesResult {
   /** UI 优化条目5.3：手编/AI 直写 SOURCE.md 的形状异常统计（unnamed=缺编号的小节，dupNo=编号重复被丢弃数） */
   anomalies?: { unnamed: number; dupNo: number }
   error?: string
+}
+
+/** AI教学·左栏「收藏」：钉住的文档（rel = 仓库相对路径；按工作区分组，存 .knowbase/modules/aiTeaching/favorites.json） */
+export interface AiTeachFavorite {
+  rel: string
+  name: string
+  addedAt: string
 }
 
 /** 网页素材目录展开：章节条目（probe 返回，渲染层勾选） */
@@ -1233,6 +1527,11 @@ export interface AgentChatResult {
   changes?: AgentChange[]
   /** UI 优化条目9②：AI教学本轮 system 注入分段字符数（上下文构成摘要；其它来源无此字段） */
   injection?: AiTeachInjectionStats
+  /** 中断归因（归因 P0）：ok=false 时必有（读 code / action / resumable）；
+   *  ok=true 但输出被截断时也有（LLM_OUTPUT_TRUNCATED / LLM_STREAM_TRUNCATED → 提示可续写） */
+  interruption?: Interruption
+  /** 归因诊断细节（诊断块数据源；不含正文与 Key） */
+  interruptDetail?: InterruptionDetail
   /** 触达轮数/token 预算上限：本次回答来自强制总结轮（渲染层可提示） */
   hitCap?: boolean
   /** 本次请求前自动压缩了历史（会话压缩 §6.1；渲染层据此 toast 告知） */
@@ -1692,6 +1991,7 @@ export interface ElectronAPI {
   copyImage: (src: { path?: string; dataUrl?: string }) => Promise<boolean>
   clearClipboardIfEqual: (text: string) => Promise<boolean>
   copyText: (text: string) => Promise<boolean>
+  readClipboardText: () => Promise<string>
   minimize: () => Promise<void>
   maximize: () => Promise<void>
   close: () => Promise<void>
@@ -1735,6 +2035,13 @@ export interface ElectronAPI {
   getScheduleTags: () => Promise<ScheduleTag[]>
   createScheduleTag: (n: string, c?: string) => Promise<ScheduleTag>
   deleteScheduleTag: (id: string) => Promise<void>
+  /** 固定日程（重复任务） */
+  scheduleRecurringList: () => Promise<ScheduleRecurring[]>
+  scheduleRecurringCreate: (d: CreateScheduleRecurringDTO) => Promise<ScheduleRecurring>
+  scheduleRecurringUpdate: (id: string, patch: Partial<ScheduleRecurring>) => Promise<ScheduleRecurring | null>
+  scheduleRecurringDelete: (id: string) => Promise<boolean>
+  scheduleRecurringSettle: () => Promise<ScheduleRecurringSettleResult>
+  scheduleRecurringUndoSettle: (todoIds: string[], restore: Array<{ ruleId: string; lastPostedDate: string }>) => Promise<number>
   /** 日程截止提醒的系统通知被点击 → 主窗口切到日程模块 */
   onScheduleReminderClick: (cb: () => void) => () => void
   // knowledge (Scheme A)
@@ -1813,6 +2120,7 @@ export interface ElectronAPI {
   pluginListViews: (slot?: string) => Promise<PluginViewContribution[]>
   pluginListDashboardWidgets: () => Promise<PluginDashboardWidget[]>
   pluginListPets: () => Promise<PluginPetInfo[]>
+  pluginListMascots: () => Promise<PluginMascotInfo[]>
   pluginListCommands: () => Promise<PluginCommandInfo[]>
   pluginListRenderers: () => Promise<PluginRendererInfo[]>
   pluginGetSettingsSchema: (id: string) => Promise<{ schema: PluginSettingItem[] }>
@@ -1870,6 +2178,8 @@ export interface ElectronAPI {
   restoreUserFromImport: (data: UserImportData) => Promise<{ success: boolean }>
   showExportSaveDialog: (opts: { defaultName: string; filters: { name: string; extensions: string[] }[] }) => Promise<{ filePath: string | null }>
   writeExportTextFile: (filePath: string, content: string, encoding?: string) => Promise<ExportFileResult>
+  /** 页面导出 PDF（2026-10-13）：把**当前窗口**打成 PDF 写到已授权路径（渲染层不碰字节） */
+  writeExportPdf: (filePath: string) => Promise<{ ok: boolean; filePath?: string; size?: number; error?: string }>
   // toolbox
   getToolboxScripts: () => Promise<ToolboxScript[]>
   getToolboxScriptById: (id: string) => Promise<ToolboxScript | null>
@@ -1971,6 +2281,8 @@ export interface ElectronAPI {
   onBookMarketSourceDraft: (cb: (p: { draft: BookSourceDraft }) => void) => () => void
   workspaceWriteFile: (rootId: string, relPath: string, content: string, expectedMtimeMs?: number) => Promise<WorkspaceWriteResult>
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
+  /** 创建副本：按字节复制仓库内文件（文本/二进制通吃）；重名主进程自动加后缀 */
+  workspaceCopyFile: (rootId: string, srcRel: string, dstRel: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   /** 粘贴系统剪贴板里的外部文件/目录到 relDir；srcPaths 由渲染层 paste 事件取得（见 WorkspacePasteResult） */
   workspacePasteExternal: (rootId: string, relDir: string, srcPaths: string[]) => Promise<WorkspacePasteResult>
@@ -2063,11 +2375,16 @@ export interface ElectronAPI {
   petReset: (species: PetSpecies) => Promise<PetSnapshot>
   petSwitchSpecies: (species: PetSpecies) => Promise<PetSnapshot>
   // 记账（accounting）
-  accountingGetAll: () => Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[] }>
+  accountingGetAll: () => Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[]; recurring: AccountingRecurring[] }>
   accountingParseJson: (text: string) => Promise<AccountingParseOutcome>
   accountingImportJson: (text: string) => Promise<AccountingImportOutcome>
   accountingCreate: (input: CreateAccountingInput) => Promise<AccountingTransaction>
   accountingUpdate: (id: string, patch: Partial<AccountingTransaction>) => Promise<AccountingTransaction | null>
+  accountingRecurringCreate: (input: CreateAccountingRecurringInput) => Promise<AccountingRecurring>
+  accountingRecurringUpdate: (id: string, patch: Partial<AccountingRecurring>) => Promise<AccountingRecurring | null>
+  accountingRecurringDelete: (id: string) => Promise<boolean>
+  accountingRecurringPost: (id: string) => Promise<{ ok: boolean; error?: string; due?: string }>
+  accountingRecurringSettle: () => Promise<AccountingRecurringSettleResult>
   accountingDelete: (id: string) => Promise<boolean>
   accountingSetAccountBalance: (id: string, initialBalance: number) => Promise<AccountingAccount | null>
   accountingCreateAccount: (name: string, initialBalance: number) => Promise<AccountingAccount>
@@ -2191,6 +2508,8 @@ export interface ElectronAPI {
   aiToolsCopySkillPrompt: (pluginId: string, skillId: string) => Promise<boolean>
   aiToolsInstallSkill: (data: Uint8Array, fileName?: string) => Promise<SkillInstallResult>
   aiToolsInstallSkillFromFile: () => Promise<SkillInstallResult>
+  /** 选中一个 Skill 文件夹安装（2026-10-13：替代原先那个收不到事件的拖拽区） */
+  aiToolsInstallSkillFromFolder: () => Promise<SkillInstallResult>
   aiToolsUninstallSkill: (id: string) => Promise<SkillInstallResult>
   aiToolsToggleSkill: (registryName: string, enabled: boolean) => Promise<SkillInstallResult & { disabled?: boolean }>
   // Model gateway + agent
@@ -2198,9 +2517,16 @@ export interface ElectronAPI {
   llmSaveProvider: (draft: LlmProviderDraft) => Promise<{ ok: boolean; id?: string; error?: string }>
   llmRemoveProvider: (id: string) => Promise<{ ok: boolean }>
   llmToggleProvider: (id: string, enabled: boolean) => Promise<{ ok: boolean }>
-  llmTestConnection: (draft: { type: LlmProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string> }) => Promise<LlmTestResultInfo>
+  llmTestConnection: (draft: { type: LlmProviderType; baseUrl: string; apiKey?: string; id?: string; headers?: Record<string, string>; accountId?: string }) => Promise<LlmTestResultInfo>
+  // 账号（端点内部的第二层，2026-10-13）：同一端点换一把 Key，地址/协议/请求头/模型清单全复用
+  llmAddAccount: (payload: { providerId: string; name?: string; apiKey?: string }) => Promise<{ ok: boolean; id?: string; accounts?: LlmAccountInfo[]; activeAccountId?: string; error?: string }>
+  llmSetActiveAccount: (providerId: string, accountId: string) => Promise<{ ok: boolean; activeAccountId?: string; error?: string }>
+  llmUpdateAccount: (payload: { providerId: string; accountId: string; name?: string; apiKey?: string; enabled?: boolean }) => Promise<{ ok: boolean; accounts?: LlmAccountInfo[]; error?: string }>
+  llmRemoveAccount: (providerId: string, accountId: string) => Promise<{ ok: boolean; accounts?: LlmAccountInfo[]; activeAccountId?: string; error?: string }>
+  llmTestAccount: (providerId: string, accountId: string) => Promise<{ ok: boolean; latencyMs: number; models?: string[]; error?: string }>
   llmVisionModels: () => Promise<{ models: LlmVisionModelInfo[] }>
   llmRefreshModels: (id: string) => Promise<{ ok: boolean; models: string[]; error?: string }>
+  llmSetModelFamily: (id: string, model: string, family: LlmModelFamily | '') => Promise<{ ok: boolean; modelFamilies?: Record<string, LlmModelFamily>; error?: string }>
   llmAddModel: (id: string, model: string) => Promise<{ ok: boolean; models: string[]; error?: string }>
   llmSetDefaultModel: (value: string) => Promise<{ ok: boolean }>
   llmTestModel: (providerId: string, model: string) => Promise<LlmModelTestResultInfo>
@@ -2222,6 +2548,8 @@ export interface ElectronAPI {
   docsPptxPages: (relPath: string) => Promise<{ ok: boolean; pages?: Array<{ n: number; text: string }>; total?: number; error?: string }>
   agentChat: (req: { sessionId: string; message: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high'; skillName?: string }) => Promise<AgentChatResult>
   agentRegenerate: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
+  /** A 方案：从断点续跑（中断卡上的「继续」）；不追加用户消息，现场由主进程一次性 claim */
+  agentResume: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
   agentStartScene: (req: { sessionId: string; context?: AgentContextInfo; chatId?: string; source?: string; modelId?: string }) => Promise<AgentChatResult>
   agentEditMessage: (req: { sessionId: string; messageId: string; message: string; context?: AgentContextInfo; chatId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<AgentChatResult>
   agentDeleteMessage: (sessionId: string, messageId: string) => Promise<boolean>
@@ -2243,18 +2571,23 @@ export interface ElectronAPI {
   agentSessions: () => Promise<AgentSessionInfo[]>
   agentNewSession: (title?: string, source?: AgentSessionSource) => Promise<AgentSessionInfo>
   agentMessages: (sessionId: string) => Promise<AgentStoredMessage[]>
+  /** 存量会话认领的一次性告知（会话随仓库走）：取走即删，无则 null */
+  agentTakeAdoptNotice: () => Promise<{ sessions: number; messages: number; vaultName: string; at: string } | null>
   // ===== AI 用量 / 会话文件改动（v3.4.0 批次5，右栏 token 面板只读）=====
   agentUsageGet: () => Promise<{ days: Record<string, AiUsageDay> }>
   agentSessionChanges: (sessionId?: string) => Promise<SessionFileChange[]>
   agentRenameSession: (id: string, title: string) => Promise<boolean>
   agentSetSessionInstructions: (id: string, instructions: string) => Promise<{ ok: boolean; error?: string }>
   agentDeleteSession: (id: string) => Promise<boolean>
+  agentSetSessionPinned: (id: string, pinned: boolean) => Promise<boolean>
   // ===== v3.1.2 条目11：支线旁问（createSideLane 只装上下文、不调 LLM）=====
   agentCreateSideLane: (payload: { parentSessionId: string; anchorMessageId: string; contextTurns?: number }) => Promise<AgentSideLaneCreateResult>
-  /** 列某主线下的支线（含已升格）；删除前计数亦用它 */
-  agentListSideLanes: (parentSessionId: string) => Promise<AgentSessionInfo[]>
+  /** 列某主线下的支线（含已升格）；带派生字段（unread/laneStatus/excerpt） */
+  agentListSideLanes: (parentSessionId: string) => Promise<AgentSideLaneInfo[]>
   /** 升格支线为正式会话（单向） */
   agentPromoteSideLane: (laneSessionId: string) => Promise<boolean>
+  /** 打开支线详情即已读（写 lane_seen_at） */
+  agentMarkSideLaneRead: (laneId: string) => Promise<boolean>
   // ===== AI教学 P1：会话 ⇄ 文件夹绑定（docs/ai-teaching-module-rework.md §二）=====
   aiTeachEnsureSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
   aiTeachSessionFolder: (id: string) => Promise<{ ok: boolean; relPath?: string | null; error?: string }>
@@ -2281,10 +2614,9 @@ export interface ElectronAPI {
   // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲）
   aiTeachCourseGetState: (wsId: string) => Promise<AiTeachCourseState>
   aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
-  aiTeachCourseSaveOutline: (wsId: string, outline: AiTeachCourseOutline) => Promise<{ ok: boolean; relPath?: string; error?: string }>
+  aiTeachCourseWriteOutlineDraft: (wsId: string, draft: unknown) => Promise<{ ok: boolean; mode?: string; added?: number; chapters?: number; relPath?: string; error?: string }>
+  aiTeachCourseRemoveUnit: (wsId: string, unit: string) => Promise<{ ok: boolean; removed?: string; needOrganize?: boolean; unitId?: string; unitName?: string; status?: string; error?: string }>
   aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: Partial<AiTeachCourseUnitProgress>) => Promise<{ ok: boolean; error?: string }>
-  aiTeachCourseGenerateOutline: (input: AiTeachCourseGenerateInput) => Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }>
-  aiTeachCourseGenerateOutlineStream: (id: string, input: AiTeachCourseGenerateInput) => Promise<{ ok: boolean; outline?: AiTeachCourseOutline; error?: string }>
   // L2 课时生命周期：打开即续课 / 结束课时 / 生成交接；L3 知识点收尾
   aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => Promise<{ ok: boolean; sessionId?: string; order?: number; kind?: string; status?: 'open' | 'ended'; readonly?: boolean; error?: string }>
   aiTeachCourseEndLesson: (sessionId: string) => Promise<{ ok: boolean; wsId?: string; unitId?: string; error?: string }>
@@ -2292,7 +2624,8 @@ export interface ElectronAPI {
   aiTeachCourseFinishUnit: (wsId: string, unitId: string, score?: { correct: number; total: number }) => Promise<{ ok: boolean; summaryRel?: string; error?: string }>
   aiTeachCourseReadPrevHandoff: (sessionId: string) => Promise<{ ok: boolean; text: string }>
   aiTeachCourseMakeUnitQuiz: (wsId: string, unitId: string) => Promise<{ ok: boolean; questions?: AiTeachUnitQuizQuestion[]; error?: string }>
-  onAiTeachCourseGenProgress: (cb: (p: AiTeachCourseGenProgress) => void) => () => void
+  aiTeachCourseOpenAssistant: (wsId: string) => Promise<{ ok: boolean; sessionId?: string; error?: string }>
+  aiTeachCourseOpenChapterReview: (wsId: string, chapterId: string) => Promise<{ ok: boolean; sessionId?: string; error?: string }>
   onAiTeachCourseRefresh: (cb: (p: { wsId: string }) => void) => () => void
   aiTeachSrcRead: (id: string) => Promise<AiTeachSourcesResult>
   aiTeachSrcAdd: (id: string, input: AiTeachSourceInput) => Promise<AiTeachSourcesResult>
@@ -2308,8 +2641,12 @@ export interface ElectronAPI {
   aiTeachSrcWebProbe: (id: string, no: number, anchorUrl?: string) => Promise<WebProbeResult>
   aiTeachSrcWebCrawl: (id: string, no: number, urls: string[]) => Promise<WebCrawlResult>
   aiTeachSrcWebCancel: (id: string) => Promise<{ ok: boolean; error?: string }>
-  /** v3.1.1：把对话级登记（含原件/提取稿复制）上收到工作区主库 */
-  aiTeachSrcPromote: (id: string) => Promise<AiTeachSourcesResult>
+  /** v3.1.1：把对话级登记（含原件/提取稿复制）上收到工作区主库；nos 给了=只上收这些合并编号的条目（粒度下放到单条） */
+  aiTeachSrcPromote: (id: string, nos?: number[]) => Promise<AiTeachSourcesResult>
+  /** AI教学·左栏「收藏」：按工作区列出 / 钉住 / 取消（rel = 仓库相对路径） */
+  aiTeachFavList: (wsId: string) => Promise<AiTeachFavorite[]>
+  aiTeachFavAdd: (wsId: string, rel: string, name: string) => Promise<AiTeachFavorite[]>
+  aiTeachFavRemove: (wsId: string, rel: string) => Promise<AiTeachFavorite[]>
   aiTeachProfileReadGlobal: () => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>
   aiTeachProfileWriteGlobal: (text: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachProfileReadSession: (id: string) => Promise<{ ok: boolean; text?: string; relPath?: string | null; skeleton?: string; error?: string }>
