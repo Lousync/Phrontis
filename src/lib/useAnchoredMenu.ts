@@ -7,6 +7,13 @@ const EDGE_MARGIN = 8
 export interface MenuPosition {
   left: number
   top: number
+  /**
+   * 缩放进场的锚点（`.kb-pop` 的 `kb-pop-in` 从 `scale(0.94)` 起），默认 `50% 50%`
+   * = 从菜单自己的中心长出来，读不出「它从哪个按钮来」。
+   * 这里由定位结果反推：向下展开 ⇒ `top`；向上翻转 ⇒ `bottom`；默认右对齐触发按钮
+   * ⇒ `right`（被左边界推回时才换 `left`）。
+   */
+  transformOrigin: string
 }
 
 /**
@@ -38,13 +45,19 @@ export function useAnchoredMenu(
     const w = menu?.offsetWidth || fallbackWidth
     const h = menu?.offsetHeight ?? 0
 
-    const left = Math.max(EDGE_MARGIN, Math.min(r.right - w, window.innerWidth - w - EDGE_MARGIN))
+    // 未 clamp 的目标位：菜单右边缘对齐触发按钮右边缘（默认右对齐）
+    const rawLeft = r.right - w
+    const left = Math.max(EDGE_MARGIN, Math.min(rawLeft, window.innerWidth - w - EDGE_MARGIN))
     const fitsBelow = r.bottom + GAP + h + EDGE_MARGIN <= window.innerHeight
     const top = fitsBelow
       ? r.bottom + GAP
       : Math.max(EDGE_MARGIN, r.top - GAP - h)
 
-    setPos({ left, top })
+    // 锚点：被左边界推右（left > rawLeft）说明触发按钮贴着屏幕左边，菜单相对它在右侧 ⇒ 取 left；
+    // 否则菜单右对齐触发按钮，鼠标贴着菜单右上角 ⇒ 取 right。纵向取翻转方向。
+    const originX = left > rawLeft ? 'left' : 'right'
+    const originY = fitsBelow ? 'top' : 'bottom'
+    setPos({ left, top, transformOrigin: `${originY} ${originX}` })
   }, [triggerRef, menuRef, fallbackWidth])
 
   const close = useCallback(() => setOpen(false), [])

@@ -50,7 +50,7 @@ export function ExcerptCaptureBar({ rect, text, onCreate, onAsk, onTranslate, on
   }
 
   return (
-    <div className="kb-pop fixed z-[60] select-none" style={{ left, top }}>
+    <div className="kb-pop origin-top fixed z-[60] select-none" style={{ left, top }}>
       <div className="flex items-center gap-0.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/97 px-1 py-0.5 text-[12px] text-[var(--text-secondary)] shadow-lg backdrop-blur">
         {EXCERPT_COLOR_IDS.map((c) => (
           <button key={c} onClick={() => pickColor(c)} title={`以${EXCERPT_COLOR_NAMES[c]}色高亮`}
@@ -87,7 +87,7 @@ export function ExcerptCaptureBar({ rect, text, onCreate, onAsk, onTranslate, on
         </button>
       </div>
       {ideaOpen && (
-        <div className="kb-pop mt-1 w-[280px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/97 p-2 shadow-lg backdrop-blur">
+        <div className="kb-pop origin-top mt-1 w-[280px] rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/97 p-2 shadow-lg backdrop-blur">
           <div className="mb-1 line-clamp-2 text-[11px] leading-relaxed text-[var(--text-tertiary)]">「{text}」</div>
           <textarea autoFocus value={ideaText} onChange={(e) => setIdeaText(e.target.value)} placeholder="一句话想法…"
             className="w-full resize-none rounded border border-[var(--border-color)] bg-[var(--bg-primary)] px-1.5 py-1 text-[11.5px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" rows={2} />

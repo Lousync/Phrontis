@@ -95,7 +95,7 @@ export function SlashCommandMenu({ items, activeIndex, onHover, onPick }: Props)
 
   if (items.length === 0) {
     return (
-      <div className="absolute bottom-full left-0 right-0 mb-1.5 z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop p-3 text-[12px] text-[var(--text-muted)]">
+      <div className="absolute bottom-full left-0 right-0 mb-1.5 z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop origin-bottom p-3 text-[12px] text-[var(--text-muted)]">
         没有匹配的指令或 Skill
       </div>
     )
@@ -103,7 +103,7 @@ export function SlashCommandMenu({ items, activeIndex, onHover, onPick }: Props)
 
   return (
     <div
-      className="absolute bottom-full left-0 right-0 mb-1.5 z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop overflow-hidden"
+      className="absolute bottom-full left-0 right-0 mb-1.5 z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop origin-bottom overflow-hidden"
       role="listbox"
     >
       <div className="max-h-[38vh] overflow-y-auto py-1">

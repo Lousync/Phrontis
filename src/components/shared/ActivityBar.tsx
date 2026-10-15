@@ -61,6 +61,18 @@ const RAIL_BUTTONS: { id: TabName; label: string; icon: (size: number) => React.
 
 const RAIL_BY_ID = new Map(RAIL_BUTTONS.map((b) => [b.id, b]))
 
+/** rail 按钮的纵向步进（34px 按钮 + gap-0.5 = 2px）。让位位移 = 步进 × 让位格数。 */
+const RAIL_STEP = 36
+
+/** 投放让位：拖动项从 from 落到 to 时，下标 i 的那一项该往哪让一格。
+    to > from ⇒ (from, to] 整体上移（-1）；to < from ⇒ [to, from) 整体下移（+1）。 */
+function dropShift(i: number, from: number, to: number): number {
+  if (i === from) return 0
+  if (to > from && i > from && i <= to) return -1
+  if (to < from && i >= to && i < from) return 1
+  return 0
+}
+
 interface Props {
   /** 当前激活模块；null = 全部标签已关闭的空态（无高亮项） */
   active: TabName | null
@@ -76,6 +88,10 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
   const { s, update } = useSettings()
   const [dragId, setDragId] = useState<TabName | null>(null)
   const [dropIdx, setDropIdx] = useState<number | null>(null)
+  /** 被拖项相对拖起点的位移（px）—— 跟手 1:1，直接写内联 transform（§五-6：跟手过程不许有过渡） */
+  const [dragDy, setDragDy] = useState(0)
+  /** 拖动项的起始下标，让位计算用（拖起时定格，拖动中不变） */
+  const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null)
   const { menuRef: ctxMenuRef, style: ctxStyle } = useContextMenuPosition(ctxMenu)
   const railRef = useRef<HTMLDivElement | null>(null)
@@ -143,6 +159,7 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
   const onBtnPointerDown = (e: React.PointerEvent<HTMLButtonElement>, id: TabName) => {
     if (e.button !== 0) return   // 右键留给显隐菜单
     dragRef.current = { id, startY: e.clientY, moved: false }
+    setDragFrom(visible.indexOf(id))
     e.currentTarget.setPointerCapture(e.pointerId)
   }
 
@@ -154,6 +171,7 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
       d.moved = true
       setDragId(d.id)
     }
+    setDragDy(e.clientY - d.startY)
     const i = indexAtY(e.clientY)
     dropIdxRef.current = i
     setDropIdx(i)
@@ -164,6 +182,8 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
     dragRef.current = null
     try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* 指针已释放 */ }
     setDragId(null)
+    setDragDy(0)
+    setDragFrom(null)
     if (!d?.moved) { dropIdxRef.current = null; setDropIdx(null); return }
     railDragGuard.lastEnd = Date.now()
     const to = dropIdxRef.current
@@ -192,6 +212,21 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
       {visible.map((id, i) => {
         const b = RAIL_BY_ID.get(id)
         if (!b) return null
+        const isDragged = dragId === id
+        /* 跟手 / 让位（2026-10-14）：
+           · 被拖项：位移由指针直写内联 transform + transition:none —— §五-6 规定拖拽跟手
+             过程一律无动画，带过渡会「拖起来发黏」；
+           · 其余项：按落点让出一格，这是**状态翻转**不是跟手，故可以有过渡。
+           两者都只动 transform（铁律 13）。落位本身仍走原 commitReorder（瞬跳）——
+           列表重排需要即时确定性，FLIP 成本也高（计划文档 §四 D 表已列为可选）。 */
+        const shift = !isDragged && dragFrom != null && dropIdx != null
+          ? dropShift(i, dragFrom, dropIdx)
+          : 0
+        const dragStyle = isDragged
+          ? { transform: `translateY(${dragDy}px)`, transition: 'none', zIndex: 2 }
+          : shift
+            ? { transform: `translateY(${shift * RAIL_STEP}px)`, transition: 'transform var(--dur-micro) var(--ease-kb)' }
+            : undefined
         return (
           <button
             key={id}
@@ -205,7 +240,8 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
               onChange(id)
             }}
             title={b.label}
-            className={`${railCls(active === id)} ${dragId === id ? 'opacity-40' : ''}`}
+            className={`${railCls(active === id)} ${isDragged ? 'opacity-40' : ''}`}
+            style={dragStyle}
           >
             {active === id && railMark}
             {b.icon(22)}

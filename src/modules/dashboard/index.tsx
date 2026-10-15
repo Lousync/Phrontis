@@ -639,7 +639,7 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
         {/* Hero：视觉起点，居中。入场延迟 130ms —— 让「两侧侧栏先收」看得见 */}
         <header className={`kb-view-in text-center ${compact ? 'pb-2.5 pt-1' : 'pb-6 pt-3.5'}`} style={{ animationDelay: '130ms' }}>
           <div className="text-[10.5px] tracking-[0.2em] text-[var(--text-muted)]">{dateLine}</div>
-          <h1 className={`${compact ? 'my-1.5 text-[24px]' : 'my-3 text-[33px]'} font-medium leading-tight tracking-[0.015em]`} style={{ fontFamily: 'Georgia, "STZhongsong", SimSun, serif' }}>
+          <h1 className={`${compact ? 'my-1.5 text-[24px]' : 'my-3 text-[33px]'} font-medium leading-tight kb-track-display`} style={{ fontFamily: 'Georgia, "STZhongsong", SimSun, serif' }}>
             {nameEdit ? (
               /* 行内编辑（看板方案 §5 反馈 2，2026-09-27 拍板）：Enter / 失焦提交，Esc 放弃；空值 = 不带称呼 */
               <input

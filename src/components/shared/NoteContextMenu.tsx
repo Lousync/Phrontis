@@ -67,14 +67,18 @@ function SubMenu({ open, children }: { open: boolean; children: ReactNode }) {
     const gap = 4
     // 水平：默认贴承载项右侧；右侧放不下就翻到左侧
     let left = r.right - gap
-    if (left + w > window.innerWidth - EDGE) left = Math.max(EDGE, r.left - w + gap)
+    let originX = 'left'
+    if (left + w > window.innerWidth - EDGE) { left = Math.max(EDGE, r.left - w + gap); originX = 'right' }
     // 垂直：默认与承载项顶对齐；下边放不下就上移，并夹进视口
     let top = r.top - 5
-    if (top + h > window.innerHeight - EDGE) top = window.innerHeight - EDGE - h
+    let originY = 'top'
+    if (top + h > window.innerHeight - EDGE) { top = window.innerHeight - EDGE - h; originY = 'bottom' }
     top = Math.max(EDGE, top)
     setStyle({
       left: left - r.left,
       top: top - r.top,
+      // 锚点：翻转发生时菜单落到了承载项的另一侧，锚点跟着换边才像「从承载项长出来」
+      transformOrigin: `${originY} ${originX}`,
       // 极高窗口 / 极矮窗口兜底：超出可用高度就在菜单内滚动，别整块溢出
       maxHeight: Math.max(120, window.innerHeight - EDGE * 2),
       overflowY: 'auto',
@@ -92,7 +96,7 @@ function SubMenu({ open, children }: { open: boolean; children: ReactNode }) {
 
 export function NoteContextMenu({ x, y, engine, onFileType, onClose }: NoteContextMenuProps) {
   const boxRef = useRef<HTMLDivElement | null>(null)
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  const [pos, setPos] = useState<{ left: number; top: number; transformOrigin: string } | null>(null)
   const [openSub, setOpenSub] = useState<string | null>(null)
 
   // 出屏回夹：先渲染在屏幕外测量，再定位（避免先闪一下再跳）。
@@ -105,7 +109,9 @@ export function NoteContextMenu({ x, y, engine, onFileType, onClose }: NoteConte
     const h = el.offsetHeight
     const left = Math.max(EDGE, Math.min(x, window.innerWidth - w - EDGE))
     const top = Math.max(EDGE, Math.min(y, window.innerHeight - h - EDGE))
-    setPos({ left, top })
+    // 锚点：被下/右边界推回时菜单整体落到鼠标另一侧 → 锚点换到那一角
+    // （同 lib/useContextMenuPosition 口径；不给锚点就是从菜单自己中心长出来）
+    setPos({ left, top, transformOrigin: `${top < y ? 'bottom' : 'top'} ${left < x ? 'right' : 'left'}` })
   }, [x, y])
 
   useEffect(() => {
@@ -212,7 +218,7 @@ export function NoteContextMenu({ x, y, engine, onFileType, onClose }: NoteConte
     <div
       ref={boxRef}
       className="kb-menu kb-pop fixed z-[9999]"
-      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, visibility: pos ? 'visible' : 'hidden' }}
+      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, transformOrigin: pos?.transformOrigin ?? 'top left', visibility: pos ? 'visible' : 'hidden' }}
       data-wb="noteContextMenu"
     >
       {menuNodes.map((n, i) => renderNode(n, `n${i}`))}

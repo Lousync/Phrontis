@@ -53,7 +53,7 @@ export function FileContextMenu({ x, y, items, onClose }: {
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
   const subRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ left: x, top: y })
+  const [pos, setPos] = useState({ left: x, top: y, transformOrigin: 'top left' })
   const [side, setSide] = useState<'left' | 'right'>('right')
   const [openKey, setOpenKey] = useState<string | null>(null)
   /** 二级面板贴底时上移多少（负值向下、正值向上）；见下方 effect */
@@ -65,7 +65,11 @@ export function FileContextMenu({ x, y, items, onClose }: {
     if (!el) return
     const r = el.getBoundingClientRect()
     const left = Math.max(8, Math.min(x, window.innerWidth - r.width - 8))
-    setPos({ left, top: Math.max(8, Math.min(y, window.innerHeight - r.height - 8)) })
+    const top = Math.max(8, Math.min(y, window.innerHeight - r.height - 8))
+    // 锚点：菜单被下/右边界推回时会整体落到鼠标另一侧 → 锚点换到那一角。
+    // 口径与 lib/useContextMenuPosition 一致（.kb-pop 的 kb-pop-in 从 scale(0.94) 起，
+    // 不给锚点就是从菜单自己的中心长出来，「从哪个点弹出来的」这条空间关系读不出来）。
+    setPos({ left, top, transformOrigin: `${top < y ? 'bottom' : 'top'} ${left < x ? 'right' : 'left'}` })
     // 右侧剩余空间不够放二级面板 ⇒ 改往左开
     setSide(window.innerWidth - (left + r.width) < SUB_W ? 'left' : 'right')
   }, [x, y, items])
@@ -88,8 +92,8 @@ export function FileContextMenu({ x, y, items, onClose }: {
   }, [onClose])
 
   const subStyle: CSSProperties = side === 'left'
-    ? { right: 'calc(100% + 4px)', top: -5 - subShift }
-    : { left: 'calc(100% + 4px)', top: -5 - subShift }
+    ? { right: 'calc(100% + 4px)', top: -5 - subShift, transformOrigin: 'top right' }
+    : { left: 'calc(100% + 4px)', top: -5 - subShift, transformOrigin: 'top left' }
 
   return createPortal(
     <div

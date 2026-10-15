@@ -734,6 +734,14 @@ input:focus, textarea:focus, select:focus {
 /* 菜单层（满屏透明点击层 + 首个子元素是菜单面板）：只加一个类即可让面板进场。
    菜单只做进场不做退场——菜单项点完立即切界面，退场动画只会拖慢操作。 */
 .kb-pop-layer > :first-child { animation: kb-pop-in calc(var(--dur-micro) + 20ms) var(--ease-kb) both; }
+/* 锚点兜底：kb-pop-layer 这一族的位置由 JS 算（满屏透明层 + 首子元素是面板），
+   多数从点击点向右下展开 ⇒ top left 比默认的 50% 50%（从菜单自己中心长出来）贴近得多。
+   ★ 这里只兜底：能算出精确锚点的地方（lib/useContextMenuPosition / useAnchoredMenu）
+     用内联 style 覆盖它（内联优先级最高）；静态方向明确的用 Tailwind 的 origin-* 工具类。
+   ★ 别再给 .kb-pop 本体加 transform-origin —— index.css 是【未分层】样式，会压过
+     @layer utilities 里的 origin-* 工具类（Cascade Layers 规则：unlayered 优先于 layered），
+     那样上面那批静态锚点会全部失效。 */
+.kb-pop-layer > :first-child { transform-origin: top left; }
 
 /* --- B 侧边抽屉：从**右缘整幅滑入** / 反向滑出（书市条目详情抽屉，2026-09-22 补的基建）---
    与 .kb-modal-in 的区别：那是「居中面板缩放进场」，用在贴边、通高的抽屉上会显得面板在
@@ -870,6 +878,54 @@ input:focus, textarea:focus, select:focus {
 }
 @media (prefers-reduced-motion: reduce) {
   .kb-spin { animation-duration: 2.4s; }
+}
+
+/* --- M 按下反馈 → `.kb-press`（2026-10-14 新增） ---
+   补的是「事件发生的那一帧」。项目把**转场**做得很足（view / modal / pop / collapse / item 全有），
+   但按下瞬间是哑的 —— 全仓 `:active` 字面量为 0，1343 个 `<button>` 里只有 2 处写了 active:scale。
+   ★ 为什么它不受「高频不加动画」约束：本计划 §四-① 那条管的是**进出场动画**（命令面板开合不做
+     动画，见 §一「Raycast 没有开合动画」）。按下反馈是另一回事 —— 它是「听到了」的确认，
+     不是「演一遍」；所有成熟系统的高频控件都有按下态。
+   ★ 时长 100ms，而**不是** `--dur-micro`(140ms)：反馈要活在按下那一刻，140ms 起手就显钝。
+   ★ 幅度 0.97：34px 图标钮上约 1px，肉眼可感但不吵；小于 0.95 在大元素上会像「整块在跳」。
+   ★★ **用独立的 `scale` 属性，不用 `transform: scale()`** —— 全仓大量元素靠 `transform` 做平移
+      （如 PDF 悬浮条的 `-translate-y-1/2`、图查看器的 `translate(-50%,-50%)`），
+      `transform: scale()` 会整体覆盖它们导致位置跳变；`scale` 是与 `transform` 并存的独立属性，
+      两者自动组合。同一坑见 §六「blog 星标：transition-transform → transition-[transform,scale]」。
+      附带好处：与第 3 条「拖拽跟手」内联写的 `style.transform` 也不冲突（各管各的属性）。
+   ★ 只动 scale ⇒ 落在 §五-6 允许清单内，是**新增令牌不是例外**。
+   ★ 边界：**「按下即开始拖拽」的元素不要挂 `.kb-press`** —— §五-6 规定拖拽跟手过程一律无动画，
+     跟手位移必须由 pointer 直写内联样式；给这类元素加过渡会让它「拖起来发黏」。
+     拖拽手柄（`role="separator"`）同理。全局兜底那条（M2）对它们无害：只加 scale、不加位移，
+     且内联 transform 优先级更高，跟手位移照常生效。
+   ★ reduced-motion：**不关闭**，只去掉过渡让它瞬时到位 —— 按下反馈不是 vestibular 风险，
+     把它当装饰删掉等于丢掉功能性确认（§14 的口径是「更轻」而不是「没有」）。 */
+.kb-press {
+  transition-property: scale, color, background-color, border-color, opacity, box-shadow;
+  transition-duration: 100ms;
+  transition-timing-function: var(--ease-kb);
+}
+.kb-press:active:not(:disabled):not([aria-disabled='true']) {
+  scale: 0.97;
+}
+
+/* M2 全局兜底：让 1343 个既有 `<button>` **零改动**获得按下反馈。
+   用 `:where()` 把优先级压到 0 —— 绝不覆盖任何既有类的 transition / transform / scale
+   （`.desk-row-btn` / `.kb-menu-item` / `.kb-code-card__act` 等都有自己的过渡，普通
+   `button:active` 选择器优先级 (0,1,1) 会盖掉它们，`:where()` 则是 (0,0,0)）。
+   结果是「渐进增强」：没写过 transition 的按钮拿到平滑缩放；写过的按钮保持自己的过渡，
+   scale 变化退化为瞬变（仍有反馈，无回归）。 */
+:where(button, [role='button']) {
+  transition: scale 100ms var(--ease-kb);
+}
+:where(button:active:not(:disabled):not([aria-disabled='true']),
+      [role='button']:active:not([aria-disabled='true'])) {
+  scale: 0.97;
+}
+
+/* M3 逃生舱：个别不该缩的元素（全宽列表行、棋盘格、已自带按下效果的控件）挂它取消。 */
+.kb-no-press:active {
+  scale: none;
 }
 
 /* --- G 停靠落位提示：可拖动浮窗拖近停靠区时浮现「会落到这里」的预览块 ---
@@ -2117,5 +2173,70 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
   .kb-img-ph::before { animation: none; opacity: 0.42; }
   .kb-img-ph::after { animation: none; transform: translateX(96%); opacity: 0.5; }
   .kb-img-progress > span { animation: none; transform: scaleX(0.6); }
+}
+
+/* ===== 大字号标题的负字距（apple-design §15）=====
+   规则：tracking 随字号变 —— 大字要「负」（字放大了，默认字距会显得疏远），
+   小字才用微正。本项目 tracking-wide / tracking-wider 全用在小标签上，方向是对的；
+   反例是大标题：33px 配 tracking-[0.015em]、22px 配 tracking-[.6px]，字号越大越松。
+   值取 -0.015em：中文方块字收太紧会粘连，这个幅度在 22~33px 区间都安全。
+   注意：桌面时钟（.desk-hero-clock / .desk-clock-time）与 PomoWidget 的计时数字
+   是 tabular-nums 等宽数字，正字距是仪表风格的有意选择，不适用本规则，勿改。 */
+.kb-track-display { letter-spacing: -0.015em; }
+
+/* --- 滚动边缘效果 → `.kb-scroll-edge`（2026-10-15 新增） ---
+   补的是「吸顶条 × 滚动内容」的交界。项目原来用 1px 硬分隔线表达这条界限，
+   苹果的做法相反：滚到顶时没有边界，滚下去时用一条**渐隐**让内容淡出，
+   而不是被线生硬切断。
+   ★ 两种接法：
+     ① 滚动感知（已有 stuck 状态时）：常驻 `.kb-scroll-edge`，滚动态再加 `--on`。
+        拆两类是因为条件挂载会让伪元素瞬现瞬灭，吃不到 opacity 过渡。
+        全仓只有 DiscoverView 一处有 stuck（由父组件按滚动位置算）。
+     ② 常驻渐隐（无 stuck 时）：直接挂 `.kb-scroll-edge kb-scroll-edge--on`。
+        不需要 JS 状态也能得到正确观感 —— 吸顶条底色与下方内容底色相同，
+        未滚动时「同色 → 透明」看不出来，内容滚过时才自然淡出，等价于滚动感知。
+   ★ 已接：DiscoverView（①）；QuizCollection / AiModelPicker / CategorySidebar /
+     HabitSidebar / PasswordVault（②）。已是同族解法故未接：moments（85%+blur）、
+     ShareCardPanel（渐变）。跳过：TimetableView（`sticky left-0` 横向粘，准则不同）。
+   ★ 三条硬约束：
+     1) 吸顶条自身背景必须**不透明** —— 否则渐隐与条下内容颜色错位，会露出一条色带；
+     2) 渐隐色默认 `--bg-primary`；底色是别的层级时**必须**挂变体类
+        （`--secondary` / `--tertiary`），否则条下会出现浅色带；
+     3) **不要给本类加 `position: relative`** —— 吸顶条自带 `position: sticky`（本身已是
+        定位元素，伪元素照样相对它定位），而未分层的自定义 CSS 会压过分层 utilities，
+        加 relative 会把 sticky 打回原型、吸顶直接失效。 */
+.kb-scroll-edge::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 100%;
+  height: var(--kb-scroll-edge-h, 14px);
+  pointer-events: none;
+  background: linear-gradient(to bottom, var(--kb-scroll-edge-bg, var(--bg-primary)), transparent);
+  opacity: 0;
+  transition: opacity var(--dur-std) var(--ease-kb);
+}
+.kb-scroll-edge--on::after { opacity: 1; }
+/* 底色变体：渐隐色必须与吸顶条自身底色一致 —— 否则内容滚到条下时，
+   渐隐会把内容涂成「另一个颜色」，在条下露出一条色带。 */
+.kb-scroll-edge--secondary { --kb-scroll-edge-bg: var(--bg-secondary); }
+.kb-scroll-edge--tertiary  { --kb-scroll-edge-bg: var(--bg-tertiary); }
+
+/* ===== 无障碍：半透明材质与对比度降级（apple-design §12 / §14）=====
+   背景：全项目有 25 处 backdrop-blur 与多处 color-mix 半透明（顶栏 / 侧栏条 / 侧栏容器 /
+   浮钮 / 半透明表面），但此前只做了 prefers-reduced-motion —— 对「降低透明度」「增强对比」
+   两个系统偏好完全无响应：开了开关的用户，玻璃面照旧半透明。
+   为什么用属性选择器而不是逐个改类：材质散在 12 个组件里，逐个改必漏，且将来新增调用点
+   不会有人记得同步。`[class*='backdrop-blur']` 一处命中全部 Tailwind 模糊类。
+   为什么安全：两个块都只在用户表达系统偏好时生效，默认渲染逐字节不变。 */
+@media (prefers-reduced-transparency: reduce) {
+  /* 玻璃 → 实心：关掉模糊，并把薄纱面拉成不透明底（它原本故意留粒子透出来，
+     但在「降低透明度」偏好下，可读性优先于装饰）。 */
+  [class*='backdrop-blur'] { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  .kb-theme-surface-translucent { background-color: var(--bg-primary); }
+}
+
+@media (prefers-contrast: more) {
+  /* 边界要看得见：关模糊，并把 1px 分隔线从「淡」提到「可辨」。
+     --border-color 各主题取的都是最淡那支；--text-muted 是正文级灰，14 套主题都保证可读。 */
+  [class*='backdrop-blur'] { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  [class*='border-[var(--border-color)]'] { border-color: var(--text-muted) !important; }
 }
 
