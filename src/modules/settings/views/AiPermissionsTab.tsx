@@ -3,6 +3,7 @@ import { AlertTriangle, FileText, Terminal } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
+import { HelpHint } from '../../../components/shared/HelpHint'
 import { SectionHead } from './SectionHead'
 // 模块清单、档位语义、解析都在纯模块里（零依赖）—— 契约脚本要真跑那几条规则
 import { MODULES, PERM_LABEL, parsePerms, presetModulePerms } from '../../../lib/aiPermPresets'
@@ -39,6 +40,26 @@ function PermCtl({ cur, onChange, writeDead }: { cur: Perm; onChange: (p: Perm) 
         )
       })}
     </span>
+  )
+}
+
+/** 权限页的一行：模块名 + ⓘ 释义 + 三态控件。9 行共用一张卡，行间用分隔线（不再各自一张卡） */
+function PermRow({ icon, label, hint, ctl, active }: {
+  icon?: React.ReactNode
+  label: string
+  hint: string
+  ctl: React.ReactNode
+  active: boolean
+}) {
+  return (
+    <div className="flex items-center gap-3 py-2.5 border-t border-[var(--border-color)] first:border-t-0">
+      {icon ? <span className={`shrink-0 ${active ? 'text-[var(--accent)]' : 'text-[var(--text-disabled)]'}`}>{icon}</span> : null}
+      <span className="min-w-0 flex-1 flex items-center gap-1.5">
+        <span className={`truncate text-[13px] ${active ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'}`}>{label}</span>
+        <HelpHint text={hint} />
+      </span>
+      {ctl}
+    </div>
   )
 }
 
@@ -114,37 +135,32 @@ export function AiPermissionsTab() {
         )}
       </div>
 
-      {/* AI 能做什么 */}
+      {/* AI 能做什么（2026-10-14 改造）：9 行收进**一张卡**，每行只剩「模块名 + ⓘ + 三态控件」。
+          改造前每行名称下面都挂一行 11px 常显描述（合计 154 字），整页读起来像一份说明书；
+          文案一字不删，全部进 ⓘ —— 而且比原来更全：读写档的说明也写在一起了
+          （原先是"选了读写才把那行字换掉"，等于另一半永远看不到）。 */}
       <div>
         <SectionHead title="AI 能做什么"
           hint={<><b>禁止</b>：相关工具不进入 AI 的工具列表；<b>只读</b>：仅可查询与阅读；<b>读写</b>：可新建、修改、删除，均记入审计日志。灰色「读写」表示该模块暂无写操作。</>} />
 
-        <div className="space-y-2">
-          <div className="flex items-center gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
-            <FileText size={14} className={vaultPerm === 'off' ? 'text-[var(--text-disabled)] shrink-0' : 'text-[var(--accent)] shrink-0'} />
-            <span className="min-w-0 flex-1">
-              <span className={`block text-[13px] ${vaultPerm === 'off' ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}`}>仓库文件</span>
-              <span className="block text-[11px] text-[var(--text-muted)] leading-snug">
-                {vaultPerm === 'write'
-                  ? '列目录 / 读文本类文件，并可新建、覆写、局部编辑、重命名与移动（删除走回收站）'
-                  : '列目录与阅读仓库内文本类文件'}
-              </span>
-            </span>
-            <PermCtl cur={vaultPerm} onChange={setVaultPerm} />
-          </div>
-
+        <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3.5">
+          <PermRow
+            icon={<FileText size={14} />}
+            active={vaultPerm !== 'off'}
+            label="仓库文件"
+            hint="列目录与阅读仓库内文本类文件；设为读写后可新建、覆写、局部编辑、重命名与移动（删除走回收站）。"
+            ctl={<PermCtl cur={vaultPerm} onChange={setVaultPerm} />}
+          />
           {MODULES.map(m => {
             const cur: Perm = perms[m.id] ?? 'read'
             return (
-              <div key={m.id} className="flex items-center gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
-                <span className="min-w-0 flex-1">
-                  <span className={`block text-[13px] ${cur === 'off' ? 'text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}`}>{m.label}</span>
-                  <span className="block text-[11px] text-[var(--text-muted)] leading-snug">
-                    {cur === 'write' && m.writeDesc ? m.writeDesc : m.desc}
-                  </span>
-                </span>
-                <PermCtl cur={cur} onChange={p => setPerm(m.id, p)} writeDead={!m.writeDesc} />
-              </div>
+              <PermRow
+                key={m.id}
+                active={cur !== 'off'}
+                label={m.label}
+                hint={m.writeDesc ? `${m.desc}；设为读写后可${m.writeDesc}。` : `${m.desc}（该模块暂无写操作。）`}
+                ctl={<PermCtl cur={cur} onChange={p => setPerm(m.id, p)} writeDead={!m.writeDesc} />}
+              />
             )
           })}
         </div>

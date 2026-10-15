@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Search, Star } from 'lucide-react'
+import { AnchoredLayer } from '../../../components/shared/AnchoredLayer'
 import type { LlmProviderInfo, LlmProviderType, LlmModelFamily } from '../../../types'
 import { prettyModelName } from '../../../lib/modelNames'
 
@@ -60,16 +61,9 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
-  const boxRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const close = (e: MouseEvent): void => {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [open])
+  // 下拉面板走 AnchoredLayer（portal + fixed）：这个选择器在「模型」页的场景分配表里用，
+  // 而那张表已折叠成一组 —— 就地 absolute 的下拉会被折叠容器的 overflow:hidden 裁掉大半。
+  const btnRef = useRef<HTMLButtonElement | null>(null)
 
   // 当前值的展示：供应商名 · 账号名 / 模型名（找不到就照原样显示 spec，别装作没选）
   const cur = (() => {
@@ -96,8 +90,8 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
   const total = groups.reduce((n, g) => n + g.models.length, 0)
 
   return (
-    <div ref={boxRef} className="relative">
-      <button onClick={() => { setOpen(v => !v); setQ('') }}
+    <div className="relative">
+      <button ref={btnRef} onClick={() => { setOpen(v => !v); setQ('') }} aria-expanded={open}
         className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-left text-[12px] hover:border-[var(--accent)]/50 transition-colors">
         <span className="min-w-0 flex-1 truncate">
           {cur
@@ -111,59 +105,58 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
         <span className="shrink-0 text-[var(--text-muted)]">▾</span>
       </button>
 
-      {open && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-30 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg kb-pop">
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-[var(--border-color)]">
-            <Search size={12} className="text-[var(--text-muted)] shrink-0" />
-            <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="搜索模型"
-              className="flex-1 min-w-0 bg-transparent text-[12px] outline-none text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]" />
-          </div>
-          <div className="max-h-[280px] overflow-y-auto py-1">
-            {groups.map(({ p, models }) => {
-              const acct = p.accounts.find(a => a.id === p.activeAccountId)
-              return (
-                <div key={p.id}>
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] text-[var(--text-muted)] sticky top-0 bg-[var(--bg-primary)]">
-                    <span className="truncate">{p.name}</span>
-                    <span className="text-[var(--accent)] shrink-0">{acct ? acct.name : '无可用账号'}</span>
-                    <span className="text-[var(--text-disabled)] shrink-0">· {models.length}</span>
-                  </div>
-                  {models.map(m => {
-                    const spec = `${p.id}:${m}`
-                    const isCur = value === spec
-                    const free = freeSet.has(m) || /(^|[-._])free([-._]|$)/i.test(m)
-                    return (
-                      <div key={spec} title={spec}
-                        className={`flex items-center gap-1.5 px-2.5 py-1 text-[12px] cursor-pointer transition-colors ${isCur ? 'bg-[var(--accent)]/10' : 'hover:bg-[var(--bg-hover)]'}`}
-                        onClick={() => { onChange(spec); setOpen(false) }}>
-                        <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]">{prettyModelName(m)}</span>
-                        {free && <span className="shrink-0 text-[10px] px-1 py-0.5 rounded border border-amber-500/40 text-amber-400">免费</span>}
-                        <FamilyChip family={effectiveFamily(p, m)} />
-                        <span className="shrink-0 font-mono text-[10.5px] text-[var(--text-muted)] max-w-[38%] truncate">{m}</span>
-                        <button onClick={e => { e.stopPropagation(); onToggleFree(m) }}
-                          title={free ? '取消免费标记' : '标记为免费模型'}
-                          className={`shrink-0 p-0.5 rounded transition-colors ${free ? 'text-amber-400' : 'text-[var(--text-disabled)] hover:text-amber-400'}`}>
-                          <Star size={11} className={free ? 'fill-amber-400' : ''} />
-                        </button>
-                        {isCur && <span className="shrink-0 text-[var(--accent)] text-[11px]">✓</span>}
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            })}
-            {total === 0 && (
-              <div className="px-2.5 py-3 text-[11.5px] text-[var(--text-muted)]">
-                {ql ? `没有匹配「${q}」的模型` : '暂无可选模型：端点均已停用、账号未配置 Key，或尚未获取模型清单'}
-              </div>
-            )}
-          </div>
-          <div className="px-2.5 py-1.5 border-t border-[var(--border-color)] flex items-center justify-between gap-2 text-[10.5px] text-[var(--text-muted)]">
-            <span>☆ 标记为免费模型</span>
-            <span className="shrink-0">{total} 个可选</span>
-          </div>
+      <AnchoredLayer anchorRef={btnRef} open={open} onClose={() => setOpen(false)} matchWidth
+        className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg">
+        <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-[var(--border-color)]">
+          <Search size={12} className="text-[var(--text-muted)] shrink-0" />
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="搜索模型"
+            className="flex-1 min-w-0 bg-transparent text-[12px] outline-none text-[var(--text-primary)] placeholder:text-[var(--text-disabled)]" />
         </div>
-      )}
+        <div className="max-h-[280px] overflow-y-auto py-1">
+          {groups.map(({ p, models }) => {
+            const acct = p.accounts.find(a => a.id === p.activeAccountId)
+            return (
+              <div key={p.id}>
+                <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] text-[var(--text-muted)] sticky top-0 bg-[var(--bg-primary)]">
+                  <span className="truncate">{p.name}</span>
+                  <span className="text-[var(--accent)] shrink-0">{acct ? acct.name : '无可用账号'}</span>
+                  <span className="text-[var(--text-disabled)] shrink-0">· {models.length}</span>
+                </div>
+                {models.map(m => {
+                  const spec = `${p.id}:${m}`
+                  const isCur = value === spec
+                  const free = freeSet.has(m) || /(^|[-._])free([-._]|$)/i.test(m)
+                  return (
+                    <div key={spec} title={spec}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 text-[12px] cursor-pointer transition-colors ${isCur ? 'bg-[var(--accent)]/10' : 'hover:bg-[var(--bg-hover)]'}`}
+                      onClick={() => { onChange(spec); setOpen(false) }}>
+                      <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]">{prettyModelName(m)}</span>
+                      {free && <span className="shrink-0 text-[10px] px-1 py-0.5 rounded border border-amber-500/40 text-amber-400">免费</span>}
+                      <FamilyChip family={effectiveFamily(p, m)} />
+                      <span className="shrink-0 font-mono text-[10.5px] text-[var(--text-muted)] max-w-[38%] truncate">{m}</span>
+                      <button onClick={e => { e.stopPropagation(); onToggleFree(m) }}
+                        title={free ? '取消免费标记' : '标记为免费模型'}
+                        className={`shrink-0 p-0.5 rounded transition-colors ${free ? 'text-amber-400' : 'text-[var(--text-disabled)] hover:text-amber-400'}`}>
+                        <Star size={11} className={free ? 'fill-amber-400' : ''} />
+                      </button>
+                      {isCur && <span className="shrink-0 text-[var(--accent)] text-[11px]">✓</span>}
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
+          {total === 0 && (
+            <div className="px-2.5 py-3 text-[11.5px] text-[var(--text-muted)]">
+              {ql ? `没有匹配「${q}」的模型` : '暂无可选模型：端点均已停用、账号未配置 Key，或尚未获取模型清单'}
+            </div>
+          )}
+        </div>
+        <div className="px-2.5 py-1.5 border-t border-[var(--border-color)] flex items-center justify-between gap-2 text-[10.5px] text-[var(--text-muted)]">
+          <span>☆ 标记为免费模型</span>
+          <span className="shrink-0">{total} 个可选</span>
+        </div>
+      </AnchoredLayer>
     </div>
   )
 }

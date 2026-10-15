@@ -783,6 +783,26 @@ input:focus, textarea:focus, select:focus {
   transition: transform var(--dur-std) var(--ease-kb), rotate var(--dur-std) var(--ease-kb);
 }
 
+/* --- L 悬停显形动作 → `.kb-hoveronly`（2026-10-14 新增，docs/ai-settings-v2-plan.md §2）---
+   适用场景：行内的**次要动作**（连通性测试、行级编辑…）。常驻会挤掉主信息（一行一物读不出来），
+   删掉用户又找不到，所以按「悬停才显形」处理。
+   用法：感应范围所在的宿主挂 `.kb-hoveronly-host`，动作槽挂 `.kb-hoveronly`；
+        需要「临时常显」时（如刚保存成功）在动作槽上再加 `.is-peek`，由调用方定时摘除。
+   ★ 用 opacity，不用 display / visibility / max-width —— 隐藏态**空间照留**，悬停时同行元素
+     不位移、不跳版（`.kb-code-card__acts` 是同一口径，但那个是绝对定位浮在卡片上，
+     本类要参与行内布局，所以不能照搬）。
+   ★ opacity:0 的元素**仍在 Tab 顺序里**，键盘用户 Tab 进宿主即触发 :focus-within 显形；
+     代价是宿主必须可聚焦（真按钮，或 role=button + tabIndex=0），否则键盘永远够不到。
+   ★ 宿主只许贴住**那一行**，不要挂在包含多行的大容器上 —— 选择器是后代匹配，
+     挂在容器上会让「划过容器就整片亮起」。 */
+.kb-hoveronly {
+  opacity: 0;
+  transition: opacity var(--dur-micro) var(--ease-kb);
+}
+.kb-hoveronly-host:hover .kb-hoveronly,
+.kb-hoveronly-host:focus-within .kb-hoveronly,
+.kb-hoveronly.is-peek { opacity: 1; }
+
 /* --- 分屏分隔条（页面级两栏）：瞬时几何、不做尺寸过渡；只给自身 hover 反馈 --- */
 .kb-pane-divider {
   flex: none;
@@ -883,6 +903,7 @@ input:focus, textarea:focus, select:focus {
   .kb-collapse { transition: none; }
   .kb-collapse > * { transition: none; }
   .kb-chevron { transition: none; }
+  .kb-hoveronly { transition: none; }
   .kb-item-out { transition-duration: 1ms; transform: none; }
   ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 1ms; }
 }

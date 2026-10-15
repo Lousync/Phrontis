@@ -3,6 +3,7 @@ import { Gauge } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { llmGetUsage, llmUsageBreakdown } from '../../../lib/ipc'
 import { prettyModelName } from '../../../lib/modelNames'
+import { HelpHint } from '../../../components/shared/HelpHint'
 import { SectionHead } from './SectionHead'
 import type { AiToolUsage, LlmUsageBreakdownEntry, LlmUsageInfo } from '../../../types'
 
@@ -61,7 +62,11 @@ export function AiUsageTab({ usage, onUsageChange }: {
             </div>
           )}
           <label data-setting-anchor="aiTools.monthlyLimit" className="mt-3 pt-2.5 border-t border-[var(--border-color)] flex items-center justify-between gap-3 text-[12px]">
-            <span className="text-[var(--text-muted)]">月度调用上限（0 表示不限；超出后拒绝调用）</span>
+            {/* 括号里的边界说明（22 字）进 ⓘ：标签只说"是什么"，"0 是什么意思"是 hover 才需要的信息 */}
+            <span className="flex items-center gap-1.5 text-[var(--text-muted)]">
+              月度调用上限
+              <HelpHint text="0 表示不限；超出后本月的调用会被拒绝，下月 1 日自动恢复。" />
+            </span>
             <input
               type="number"
               min={0}

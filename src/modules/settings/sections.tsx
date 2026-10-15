@@ -329,7 +329,7 @@ export function countBySection(hits: SearchHit[]): Record<string, number> {
 
 // ===== 跳转锚点广播 =====
 // 搜索跳转的目标锚点除用于滚动高亮外，还广播给各视图：
-// 若目标落在默认收起的 CollapseList 分组内，视图据此自动展开。
+// 若目标落在默认收起的折叠分组内，视图据此自动展开（`SettingsGroup` 的 anchorIds）。
 
 type AnchorListener = (id: string | null) => void
 let pendingAnchor: string | null = null
@@ -344,6 +344,17 @@ export function setPendingAnchor(id: string | null) {
 /** 视图挂载/更新时消费：锚点归属本组则返回 true 并清除 */
 export function consumePendingAnchor(id: string): boolean {
   if (pendingAnchor === id) { pendingAnchor = null; return true }
+  return false
+}
+
+/**
+ * 认领：待跳转锚点若落在 `ids` 里则返回 true 并清除。
+ * 用于**一个折叠组包住多个锚点**的情形（如模型页场景表里有 视觉转写 / 文生图 / 改图重绘 三个锚点）——
+ * 逐个 `consumePendingAnchor` 只能命中第一个被调用的那个，且命中失败时不能清，
+ * 所以这里必须一次性判「在不在集合里」再决定清不清。
+ */
+export function claimPendingAnchor(ids: string[]): boolean {
+  if (pendingAnchor && ids.includes(pendingAnchor)) { pendingAnchor = null; return true }
   return false
 }
 

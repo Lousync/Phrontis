@@ -133,7 +133,7 @@ check('「工具调用量」已从常驻区搬进「用量」页签（不再切�
   !/tab === 'models'[\s\S]{0,400}UsageSummary/.test(toolsView) && read('src/modules/settings/views/AiUsageTab.tsx').includes('aiTools.usage'))
 check('「AI 助手」块已从常驻区搬进「对话」页签', toolsView.includes("data-setting-anchor=\"aiTools.chat\""))
 check('Agent 循环预算已从「内置工具」搬进「对话」页签',
-  /function ChatTab[\s\S]*<AgentLoopPanel \/>/.test(toolsView) && /function AgentLoopPanel/.test(toolsView))
+  /function ChatTab[\s\S]*<AgentLoopGroup \/>/.test(toolsView) && /function AgentLoopGroup/.test(toolsView))
 check('「模块设置」不再渲染 AI 教学', !read('src/modules/settings/views/ModulesView.tsx').includes('AiTeachingView'))
 
 // ===== 6. 原型「28 项去向表」 =====
@@ -245,8 +245,13 @@ console.log('\n[复位] 范围规则')
   check('负向：标题后没有紧跟常驻说明段（一律走 SectionHead 悬停）', inlineIntro.length === 0, [...new Set(inlineIntro)].join(', '))
 
   // ② 披露组件确实在用（否则"减少噪音"可能是靠把说明删光换来的）
-  const users = views.filter(v => v.text.includes('SectionHead')).length
-  check('SectionHead 至少被 5 个 AI 视图使用', users >= 5, users + ' 个')
+  //    2026-10-14：判据从「SectionHead 出现次数 ≥5」改成「每个视图都至少用了某个披露件」——
+  //    改造后工具页/对话页整页由 SettingsGroup + HelpHint 组成，一个 SectionHead 也没有，
+  //    按旧判据会把"换成了更合适的披露件"误判成"没有披露"（假 FAIL，且会诱导把 SectionHead 塞回去）。
+  const DISCLOSURE = ['SectionHead', 'SettingsGroup', 'HelpHint']
+  const noDisclosure = views.filter(v => !DISCLOSURE.some(d => v.text.includes(d))).map(v => v.rel)
+  check('每个 AI 视图都用了披露件（SectionHead / SettingsGroup / HelpHint 至少其一）',
+    noDisclosure.length === 0, noDisclosure.join(', '))
 
   // ③ 已删的文案不许回来
   const DEAD_COPY = [
