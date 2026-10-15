@@ -1,6 +1,6 @@
 import { app, ipcMain, net } from 'electron'
 import { randomUUID } from 'crypto'
-import { appendAudit, countMonthLlmTokens, countMonthLlmTokensSplit, countMonthVisionTokens, countMonthVisionPages, summarizeMonthLlmUsage } from './pluginAudit'
+import { appendAudit, countMonthLlmTokens, countMonthLlmTokensSplit, countMonthVisionTokens, countMonthVisionPages, countTodayLlmUsage, summarizeMonthLlmUsage } from './pluginAudit'
 import { encryptSecret, decryptSecret } from './secretBox'
 import { scanCcSwitch, importCcSwitchIds, bindCcSwitchSaver } from './ccSwitchImport'
 import {
@@ -91,7 +91,10 @@ interface ChatRequest {
   model: string
   messages: ChatMessage[]
   tools?: unknown[] // OpenAI function 格式
-  maxTokens: number
+  /** 单次输出上限。**可选**（2026-10-15）：不传 = 不下发该字段，交给模型自己的输出上限 ——
+   *  OpenAI 兼容的 max_tokens 与 Responses 的 max_output_tokens 都是可选字段。
+   *  只有「协议必填」（Anthropic）与「需要主动早停」（内联续写 / 连通性测试）才显式传值。 */
+  maxTokens?: number
   /** 外部中断信号（用户点击停止） */
   signal?: AbortSignal
   /** P3b 思考强度（§3.8 第五轮）：仅推理型模型透传 reasoning_effort，off/未设 = 不发 */
@@ -442,12 +445,19 @@ function normalizeOpenAiToolCalls(raw: any[]): ToolCallNormalized[] {
   })).filter(tc => tc.name)
 }
 
+/** Anthropic 的 max_tokens 是**协议必填**（不传直接 400），是唯一需要兜底值的适配器。
+ *  取 4096：即改之前的默认值，且小到所有 Claude 系列（含输出上限 4096 的 3 Haiku）都接受 ——
+ *  往上填反而可能超过模型的输出上限被上游拒。 */
+const ANTHROPIC_REQUIRED_MAX_TOKENS = 4096
+
 /** OpenAI 兼容请求体（流式 / 非流式共用，避免两套参数漂移） */
 function buildOpenAiBody(req: ChatRequest, stream: boolean): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: req.model,
     messages: req.messages,
-    max_tokens: req.maxTokens,
+    // 不传就不带 max_tokens（2026-10-15：用户不再设这个上限）。交给模型自己的输出上限，
+    // 既不会截断长回复，也不会因为填了个超过模型上限的值被上游 400。
+    ...(typeof req.maxTokens === 'number' ? { max_tokens: req.maxTokens } : {}),
   }
   if (stream) {
     body.stream = true
@@ -664,7 +674,8 @@ function buildOllamaBody(req: ChatRequest, stream: boolean): Record<string, unkn
     messages,
     stream,
     tools: req.tools && req.tools.length > 0 ? req.tools : undefined,
-    options: { num_predict: req.maxTokens },
+    // num_predict 的「不限」值是 -1，**显式给**：老版本 Ollama 的默认是 128，靠默认会悄悄截断
+    options: { num_predict: req.maxTokens ?? -1 },
   }
 }
 
@@ -845,7 +856,8 @@ function buildAnthropicBody(req: ChatRequest, stream: boolean): Record<string, u
   }))
   return {
     model: req.model,
-    max_tokens: req.maxTokens,
+    // 协议必填 → 未显式指定时用兜底值，不能省（见 ANTHROPIC_REQUIRED_MAX_TOKENS）
+    max_tokens: req.maxTokens ?? ANTHROPIC_REQUIRED_MAX_TOKENS,
     messages: turns,
     ...(stream ? { stream: true } : {}),
     // system 必须用数组形式才能带 cache_control（字符串形式无法附加标记）
@@ -1210,6 +1222,10 @@ export interface LlmInvokeRequest {
   modelId?: string
   messages: ChatMessage[]
   tools?: unknown[]
+  /** 单次输出上限（**内部调用方专用**，2026-10-15）。设置项「单次 maxTokens 上限」已删除 →
+   *  普通对话不传，由模型自己的上限决定；只有需要主动早停的内部场景传值
+   *  （如内联续写的 INLINE_SUGGEST_MAX_TOKENS）。 */
+  maxTokens?: number
   /** 外部中断信号（用户点击停止） */
   signal?: AbortSignal
   /** P3b：思考强度（本对话生效，由调用方透传） */
@@ -1256,10 +1272,13 @@ export type LlmInvokeResponse = {
 }
 
 type LlmTarget =
-  | { ok: true; provider: ProviderConfig; model: string; maxTokens: number }
+  /** maxTokens 可选：只由**内部调用方**显式指定（内联续写早停）；普通对话留空 = 不下发 */
+  | { ok: true; provider: ProviderConfig; model: string; maxTokens?: number }
   | { ok: false; error: string; code?: 'PROVIDER_NOT_FOUND' | 'PROVIDER_DISABLED' | 'NO_DEFAULT_MODEL' }
 
-/** 供应商 / 模型 / 上限解析（llmInvoke 与流式入口共用，避免两套参数漂移） */
+/** 供应商 / 模型解析（llmInvoke 与流式入口共用，避免两套参数漂移）。
+ *  2026-10-15：「单次 maxTokens 上限」设置项已删除 —— 这里不再读设置，只透传调用方显式给的
+ *  maxTokens（内部早停用）；普通对话留空 = 不下发该字段，由模型自己的上限决定。 */
 function resolveLlmTarget(req: LlmInvokeRequest): LlmTarget {
   const providers = getProviders()
   let provider: ProviderConfig | undefined
@@ -1276,11 +1295,9 @@ function resolveLlmTarget(req: LlmInvokeRequest): LlmTarget {
   if (!provider) return { ok: false, error: '未找到可用的模型供应商', code: req.providerId ? 'PROVIDER_NOT_FOUND' : 'NO_DEFAULT_MODEL' }
   if (!provider.enabled) return { ok: false, error: `供应商「${provider.name}」已禁用`, code: 'PROVIDER_DISABLED' }
 
-  const maxTokensRaw = Math.floor(Number(depsRef?.getSettingValue('llmMaxTokens') ?? 4096))
-  const maxTokens = Math.max(256, Math.min(32768, Number.isFinite(maxTokensRaw) ? maxTokensRaw : 4096))
   const finalModel = modelId || provider.models[0] || ''
   if (!finalModel) return { ok: false, error: '供应商未配置可用模型，请先刷新模型列表' }
-  return { ok: true, provider, model: finalModel, maxTokens }
+  return { ok: true, provider, model: finalModel, maxTokens: req.maxTokens }
 }
 
 /**
@@ -1308,7 +1325,7 @@ function streamEnabled(): boolean {
   return depsRef?.getSettingValue('aiStreamEnabled') !== false
 }
 
-async function llmInvokeOnce(provider: ProviderConfig, model: string, req: LlmInvokeRequest, maxTokens: number): Promise<LlmInvokeResponse> {
+async function llmInvokeOnce(provider: ProviderConfig, model: string, req: LlmInvokeRequest, maxTokens?: number): Promise<LlmInvokeResponse> {
   const adapter = adapterFor(provider, model)
   const started = Date.now()
   try {
@@ -1831,10 +1848,16 @@ export function registerLlmHandlers(deps: {
 
   ipcMain.handle('llm:getUsage', () => {
     const split = countMonthLlmTokensSplit()
+    const today = countTodayLlmUsage()
     return {
       monthTokens: countMonthLlmTokens(),
       monthPromptTokens: split.promptTokens,
       monthCompletionTokens: split.completionTokens,
+      // 今日口径（2026-10-15 用量仪表盘）：与细分同口径（llm.invoke 且 ok），供「今日」行展示
+      todayTokens: today.tokens,
+      todayPromptTokens: today.promptTokens,
+      todayCompletionTokens: today.completionTokens,
+      todayCalls: today.calls,
       visionMonthTokens: countMonthVisionTokens(),
       visionPages: countMonthVisionPages(),
     }

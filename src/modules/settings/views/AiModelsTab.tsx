@@ -210,11 +210,15 @@ export function AiModelsTab() {
           （本会话 ＞ AI 助手 ＞ 全局默认），而设置页只露了最底层那一层 —— 另外两处各自藏在
           助手面板与对话输入区里，改了默认模型却发现某处没变时无从解释。现在收成一张表。
           ★ anchorIds 必须列全组内**每一个**可搜索锚点：折叠后内层不挂载，只声明组头那一个，
-            搜「图片视觉转写模型」会滚到一个收起的分组、什么都看不见。 */}
+            搜「图片视觉转写模型」会滚到一个收起的分组、什么都看不见。
+          ★ className="max-w-md" 是 2026-10-15 的宽度对齐：`SettingsGroup` 的组头默认撑满内容列，
+            比下面 max-w-md 的内容卡长一截（截图上右侧会多伸出两条长条），收进同一档之后
+            整个 AI 模型页是一条等宽的列。**只在本页签收窄，其他页签的组头不动。** */}
       <div data-setting-anchor="aiTools.scenes">
         <SettingsGroup
           title="场景分配"
           summary={`已指定 ${assigned} / ${SCENES.length}`}
+          className="max-w-md"
           anchorIds={['aiTools.scenes', 'aiTeach.visionModel', 'aiTools.imageModel', 'aiTools.imageEditModel']}
           hint="各场景可分别指定模型（这张表就是「哪个场景用哪个模型」）；留空表示跟随「对话默认模型」（见各行占位文字），显式指定后不再跟随。此处修改不影响单个对话的临时覆盖。">
           {adopt && (
@@ -227,21 +231,10 @@ export function AiModelsTab() {
         </SettingsGroup>
       </div>
 
-      {/* 高级（`llmMaxTokens` 是 `ui:false`、不进设置搜索，所以折叠它不影响搜索落点）。
-          位置按原型移到页尾：它是最少改的一项，不该占首屏。 */}
-      <SettingsGroup title="高级" summary="单次 maxTokens 上限">
-        <div className="max-w-md px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
-          <div className="flex items-center justify-between gap-3">
-            <span className="min-w-0 flex items-center gap-1.5">
-              <span className="text-[13px] text-[var(--text-primary)]">单次 maxTokens 上限</span>
-              <HelpHint text="取值范围 256 ~ 32768；设置过小会截断较长回复。" />
-            </span>
-            <input type="number" min={256} max={32768} value={String(s.llmMaxTokens ?? 4096)}
-              onChange={e => { void update('llmMaxTokens', Math.min(32768, Math.max(256, Math.floor(Number(e.target.value) || 4096)))) }}
-              className="w-28 shrink-0 px-2 py-1 rounded border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] text-right outline-none focus:border-[var(--accent)]" />
-          </div>
-        </div>
-      </SettingsGroup>
+      {/* 原「高级」组（组内只有「单次 maxTokens 上限」一项）已于 2026-10-15 整体删除：
+          那个上限不再由用户设置、也不再进设置搜索，组里没有别的内容 → 组头一并删掉，不留空壳。
+          协议侧的新口径见 electron/lib/llmService.ts 的 buildOpenAiBody / buildOllamaBody /
+          buildAnthropicBody 与 llmProtocolPure.buildResponsesBody。 */}
 
       {/* 免费模型标记：入口在选择器里（每个模型右侧的 ☆），不再另设手填清单 */}
 

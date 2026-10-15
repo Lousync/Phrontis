@@ -1643,8 +1643,9 @@ cbz 排除的**执行语义原样保留**（派生值对 cbz 仍为 `null`），
 > 与「未见结束帧」都已进采集面，截断时正文末尾写明确原因（`LLM_OUTPUT_TRUNCATED` / `LLM_STREAM_TRUNCATED`）+ 诊断块。
 > **第 2 条的「继续」动作已随批次 2 落地**（2026-10-14 同日，A 方案断点续跑）：截断的那条回复会留下续跑现场，
 > 动作行出现「继续」，点了带着已有信息接着往下写（口径见 `docs/agent-interrupt-resume-plan.md` §3）；
-> **第 3 条仍未做**（默认值 4096 → 16384、`llmMaxTokens` 进设置页）—— 归因方案 §10 明确本批不新增用户可见设置项，
-> 该项单列另案。验证方式见 `docs/agent-error-attribution-plan.md` §7.1 契约（`verify-llm-attribution.mjs`）
+> **第 3 条已于 2026-10-15 收口，但走的是与原计划相反的口径**：不再「提高默认值 + 把它做成用户设置项」，
+> 而是**整体移除这个上限**（用户判断该设置项没有意义）。落法见文末「最终口径」。
+> 验证方式见 `docs/agent-error-attribution-plan.md` §7.1 契约（`verify-llm-attribution.mjs`）
 > 与 `.AGENT/scripts/agent-resume/verify-agent-resume.mjs`（续跑）。
 
 **现象**：与 AI 助手聊天，回答经常输出到一半就断，无报错无提示、难以稳定复现。
@@ -1654,14 +1655,33 @@ cbz 排除的**执行语义原样保留**（派生值对 cbz 仍为 `null`），
 3. **`finish_reason` 全链路无人读**：OpenAI 兼容 adapter 的流循环只解析 `choices[0].delta`（`llmService.ts` chatStream），`finish_reason: 'length'`（= 顶到 max_tokens 被截断的**正规信号**）被静默丢弃；`LlmInvokeResponse` 无 stopReason 字段 → agentService 循环只见 `r.ok` → `useAssistantChat.ts` 的 `r.ok` 分支当正常收尾，**零提示**。截断与正常结束在 UI 里完全同形。
 4. 对照（排除项）：网络中断 / 60 秒无数据（llmService 流式空闲超时）会走 `r.ok:false` → Toast「AI 调用失败」，**不是静默**；但「流被服务端**干净关闭**（EOF 且无 [DONE] 帧）」同样被当正常结束 —— 第二处静默点，概率低于第 3 条。
 **根因**：4096 单次输出上限 + 思考 token 挤占预算 + `finish_reason: 'length'` 信号全链路丢弃，三者叠加 = 「断了且无提示」。
-**自查佐证（立即可做）**：被截那几轮的 completion tokens 应 ≈4096 —— 「消耗统计」（AiUsageDay）看当日 completionTokens；或 settings.json 把 `llmMaxTokens` 调到 16384 观察是否还断。
+**自查佐证（立即可做）**：被截那几轮的 completion tokens 应 ≈4096 —— 「消耗统计」（AiUsageDay）看当日 completionTokens。
+⚠️ 原文另给了「把 `llmMaxTokens` 调到 16384 观察」的绕法，该设置项已于 2026-10-15 **删除**，别再照做（见文末「最终口径」）。
 **修复方向（待拍板）**：
 1. 三个 adapter（OpenAI 兼容 / Anthropic / Ollama）流循环捕获结束原因（`finish_reason` / `stop_reason` / `done_reason`），`LlmInvokeResponse` 加 `stopReason` 透传到渲染层；
 2. UI 按行内化呈现（铁律 25，不弹窗）：`stopReason==='length'` 时消息尾部行内提示「已达单次输出上限，回答被截断」+「继续」动作（带既有上下文续写）；
-3. 默认值 4096 → 16384（思考模型常态宽裕）；`llmMaxTokens` 改 `ui:true` 进设置页（aiTab models，字段已带 aiTab/anchor）；
+3. ~~默认值 4096 → 16384；`llmMaxTokens` 改 `ui:true` 进设置页~~ → **改为整体移除该上限**（2026-10-15 拍板，见文末「最终口径」）；
 4. 「EOF 但未见结束帧」同样标记异常收尾并提示；
 5. 收尾同步手册（模型/消耗相关篇）。
-**验证**：把 `llmMaxTokens` 调小（如 512）必现截断 → 消息尾部出现截断提示；正常短回答无提示；思考模式长回答不再常态性中断。
+**验证**：正常短回答无截断提示；思考模式长回答不再常态性中断；`.AGENT/scripts/llm-adapters/verify-llm-protocol.mjs`
+已锁住「未指定上限时不下发 `max_output_tokens`」。
+（原验证法「把 `llmMaxTokens` 调小到 512」已失效 —— 该设置项已删除。）
+
+**最终口径（2026-10-15 落法，本节以此为准）**：
+- `src/lib/settings.ts` 的 `llmMaxTokens` **整项删除**（设置界面与设置搜索里都不再存在）；
+  `AiModelsTab.tsx` 的「高级」组连同那一行输入框一并删除（组内只有这一项，空组不留壳）。
+- `llmService.resolveLlmTarget` **不再读任何设置**，只透传调用方显式给的 `maxTokens`；普通对话留空 =
+  **不下发上限字段** —— OpenAI 兼容不带 `max_tokens`、Responses 不带 `max_output_tokens`。
+  交给模型自己的输出上限：既不会截断长回复，也不会因为填了个超过模型上限的值被上游 400。
+- **两个例外**（都是协议约束，不是"用户上限"）：`Anthropic` 的 `max_tokens` 必填（不传直接 400）→
+  兜底 `ANTHROPIC_REQUIRED_MAX_TOKENS = 4096`（改之前的默认值，小到所有 Claude 系列都接受）；
+  `Ollama` 的 `num_predict` **显式传 `-1`**（不限）—— 老版本默认 128，靠默认会悄悄截断。
+- **内联续写**自带上限 `INLINE_SUGGEST_MAX_TOKENS = 4096`（`electron/lib/aiAssistant/inlineSuggestCore.ts`）：
+  续写只要一两句，必须有兜底；它是**模块内部常量**，不再是用户可调项。连通性测试仍用 `max_tokens: 1`。
+- 契约同步：`verify-ai-tab-anchors.mjs`（去 llmMaxTokens 三处 + 新增"设置项与视图都已删除"的负向断言）、
+  `verify-llm-protocol.mjs`（新增"不传上限则不下发字段"）。
+- 顺带（同一轮用户要求）：AI 模型页的折叠组头加 `max-w-md`，与内容卡等宽；真机几何由
+  `.AGENT/scripts/workbench-shell/probes/probe-ai-models-layout.mjs` 锁。
 
 ```
 ## B-n <一句话现象>（YYYY-MM-DD，P0/P1/P2/P3）

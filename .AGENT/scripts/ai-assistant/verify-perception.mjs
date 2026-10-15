@@ -777,7 +777,8 @@ ok(/aiAssistantInlineSuggestModelId/.test(SRC_INLINE),
 ok(!/文档末尾/.test(SRC_TRIGGER),
   'J15ae ★ 触发点判定里不得有「文档末尾就触发」兜底（人基本都在文末打字，加了等于不拦）', '')
 
-// J15af 流式早停（感知延迟主修法）：max_tokens 全局 4096 + 思考型模型默认思考，都会拖死「续写一句」
+// J15af 流式早停（感知延迟主修法）：上限（INLINE_SUGGEST_MAX_TOKENS，2026-10-15 起本模块自带）
+// + 思考型模型默认思考，都会拖死「续写一句」
 ok(/earlyStop/.test(SRC_INLINE) && /INLINE_SUGGEST_MAX_CHARS \+ 200/.test(SRC_INLINE),
   'J15af ★ 正文聚合到建议上限即早停（已有的内容直接作为建议返回，不等模型收尾）', '')
 ok(/thinkingLen > 1500/.test(SRC_INLINE),

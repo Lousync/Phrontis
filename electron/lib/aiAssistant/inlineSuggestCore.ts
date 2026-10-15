@@ -32,6 +32,15 @@ export const INLINE_SUGGEST_MAX_CHARS = 600
  * 渲染层另有一道 UI 兜底（MonacoPane 的 INLINE_UI_TIMEOUT_MS），必须 ≥ 本值（契约 J7b 断言）。
  */
 export const INLINE_SUGGEST_TIMEOUT_MS = 10000
+/**
+ * 单次生成的 token 上限（2026-10-15 起因「单次 maxTokens 上限」设置项删除而搬到这里）。
+ *
+ * 为什么这个模块必须自带上限：续写只要 1-3 句（INLINE_SUGGEST_MAX_CHARS），但模型并不知道
+ * 「够了」——没有上限它会一路写下去，白烧 token 且拖长收尾。全局设置删掉之后，上限不再由
+ * 用户配置，而由**这个模块自己**钉死；普通对话则完全不下发该字段（见 llmService 的下发口径）。
+ * 值沿用原来的全局默认 4096。
+ */
+export const INLINE_SUGGEST_MAX_TOKENS = 4096
 
 // ===== 类型 =====
 

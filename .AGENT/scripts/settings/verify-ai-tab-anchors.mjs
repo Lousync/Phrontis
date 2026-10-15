@@ -152,7 +152,7 @@ const MAP_TO_TAB = {
   // 模型
   modelProviders: 'models', defaultChatModel: 'models', assistantModelId: 'models',
   aiAssistantInlineSuggestModelId: 'models', agentCompressModelId: 'models',
-  aiFreeModelIds: 'models', llmMaxTokens: 'models',
+  aiFreeModelIds: 'models',
   // 权限
   aiModulePermissions: 'perms', aiVaultFilePerm: 'perms', terminalAiExec: 'perms',
   // 工具
@@ -279,7 +279,6 @@ console.log('\n[复位] 范围规则')
 {
   console.log('\n[标签口径] 术语做标签，口语做搜索别名')
   const TERMS = {
-    llmMaxTokens: '单次 maxTokens 上限',
     agentMaxRounds: '最大推理轮数',
     agentRunTokenBudget: '单次 token 预算',
     agentContextBudgetTokens: '历史上下文预算',
@@ -288,7 +287,6 @@ console.log('\n[复位] 范围规则')
   }
   // 别名给**完整**口语叫法：设置搜索按分词逐 token 打分，只留片段不足以保证命中。
   const ALIASES = {
-    llmMaxTokens: '单次回复上限',
     agentMaxRounds: '单次任务最多思考几轮',
     agentRunTokenBudget: '单次任务花费上限',
     agentContextBudgetTokens: '带多少历史对话',
@@ -304,7 +302,15 @@ console.log('\n[复位] 范围规则')
   const chatView = read('src/modules/settings/views/AiToolsView.tsx')
   check('Agent 循环面板渲染术语标签', chatView.includes('最大推理轮数') && chatView.includes('历史自动压缩'))
   check('负向：面板里没有残留的口语标签', !chatView.includes('单次任务最多思考几轮') && !chatView.includes('带多少历史对话'))
-  check('模型·高级渲染术语标签', read('src/modules/settings/views/AiModelsTab.tsx').includes('单次 maxTokens 上限'))
+  // 2026-10-15：「单次 maxTokens 上限」整体移除（用户判断这个上限没有意义）——
+  // 原来这里锁的是「视图里渲染的标签是术语」，现在改成**负向**锁三件事。
+  // ★ 判据必须用 `llmMaxTokens` 这个标识符与组标题，**不能扫裸 `maxTokens`**：
+  //   视图的注释里本来就会写「单次 maxTokens 上限」这串字（说明这次为什么删），扫裸串必假红。
+  check('llmMaxTokens 已从 SETTINGS 移除', !('llmMaxTokens' in SETTINGS))
+  const modelsView = read('src/modules/settings/views/AiModelsTab.tsx')
+  check('负向：模型页不再绑定 llmMaxTokens（控件随设置项一起删）', !modelsView.includes('llmMaxTokens'))
+  check('负向：模型页不再有「高级」组（组内只有这一项，已整组删除）',
+    !modelsView.includes('<SettingsGroup title="高级"'))
 }
 
 console.log(`\n断言: ${pass} PASS, ${fail} FAIL`)

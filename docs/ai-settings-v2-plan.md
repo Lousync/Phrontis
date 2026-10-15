@@ -68,7 +68,7 @@
 | 账号行 | 恢复被 v2 原型弄丢的账号级 `⋯`（更换 Key / 重命名 / 停用 / 删除）+ 新增 `⚡ 测试这个账号` | 切账号仍是左侧圆点（只改 `activeAccountId`，铁律见 `verify-llm-accounts.mjs` §2） |
 | 模型清单 | 每项右侧悬停出 `⚡`，结果**行内**显示 `✓ 可用（412ms）` / `✗ <error>` | 不走 Toast：连测两个模型时 Toast 会互相顶掉 |
 | 场景分配 | 折叠为一行（摘要「已指定 N / 7」），组内 7 行 = 标签 + ⓘ + 选择器 + 悬停 `测试这个模型` | `anchorIds` 必须含 `aiTeach.visionModel`、`aiTools.imageModel`、`aiTools.imageEditModel`（约束 1） |
-| 高级 | 移到页尾，保持折叠 | `llmMaxTokens` 是 `ui:false`，折叠不影响搜索落点（契约 §9 的术语标签不动） |
+| ~~高级~~ | **2026-10-15 整组删除**：组内唯一一项 `llmMaxTokens` 已移除（空组不留壳） | 该上限不再由用户设置 —— 普通对话不下发 `max_tokens` / `max_output_tokens`，Ollama 传 `-1`，Anthropic 因协议必填兜底 4096。口径与理由见 `docs/pending-fixes.md` B-29「最终口径」 |
 | `ModelFamilyPanel` | 降级为展开区内的折叠子块 | 能力全留，只是不再常显 |
 
 | `⚡` 规格（用户已拍板）：lucide `Zap`，14px，`text-[var(--text-muted)]`，hover → `text-[var(--text-primary)]` + `bg-[var(--bg-hover)]`，
@@ -143,7 +143,8 @@
 3. 真机点验清单（`npm run dev`，dev 主进程无热重载 —— 只改 `src/` 则 HMR 够用）：
    - [ ] 六个页签首屏都能在**一屏内**看全分节，不出现「要滚才看到第二段」
    - [ ] 搜索框搜「图片视觉转写模型」→ 自动展开场景分配组 → 高亮到那一行（约束 1 的正向验收）
-   - [ ] 搜「单次 maxTokens 上限」「LibreOffice 路径」「单次抓取页数上限」三个落点都能滚到并高亮
+   - [ ] 搜「LibreOffice 路径」「单次抓取页数上限」两个落点都能滚到并高亮（原第三个落点
+     「单次 maxTokens 上限」已随设置项在 2026-10-15 删除）
    - [ ] 供应商行 hover：⚡ / ⋯ / 开关都在，且**鼠标划过时行内元素不位移**
    - [ ] `Tab` 键走到供应商行：⚡ / ⋯ 同样浮出（`focus-within` 兜底）
    - [ ] 端点行 ⚡ → Toast 带延迟；账号行 ⚡ → Toast + 状态文字变「刚刚」；模型清单 ⚡ → 行内 ✓/✗

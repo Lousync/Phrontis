@@ -19,6 +19,7 @@ import { getSettingReader } from '../aiTools'
 import {
   buildInlinePrompt,
   INLINE_SUGGEST_MAX_CHARS,
+  INLINE_SUGGEST_MAX_TOKENS,
   INLINE_SUGGEST_TIMEOUT_MS,
   isValidSuggestion,
   normalizeInlineSuggestion,
@@ -104,7 +105,8 @@ export async function runInlineSuggest(req: InlineSuggestRequest): Promise<Inlin
     }
 
     let out = ''
-    // 早停（感知延迟的主修法）：max_tokens 走全局默认 4096，且思考型模型默认会先思考一大段 ——
+    // 早停（感知延迟的主修法）：单次上限由本模块自己钉死（INLINE_SUGGEST_MAX_TOKENS，
+    // 全局设置项已于 2026-10-15 删除），且思考型模型默认会先思考一大段 ——
     // 都会让「续写一句」等到天荒地老。流式聚合中一旦内容足够就主动掐断：
     //   - 正文超过建议上限（+余量）：已有的 out 直接作为建议返回，不等模型收尾；
     //   - 思考链超过 1500 字符还没出正文：这个时段它不适合作续写，立刻放弃，别让用户干等。
@@ -125,6 +127,8 @@ export async function runInlineSuggest(req: InlineSuggestRequest): Promise<Inlin
         // 编辑器续写没有"对话"概念，但会话头必须稳定（每敲一次换 ID 会打散提示缓存），
         // 所以给一个固定的用途名而不是随机值。
         sessionId: 'inline-suggest',
+        // 必须有上限兜底（原来借的是全局设置，全局设置删了 → 改由本模块自带）
+        maxTokens: INLINE_SUGGEST_MAX_TOKENS,
       },
       (e) => {
         if (e.type === 'text') {

@@ -37,6 +37,13 @@ function currentMonthKey(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
+/** 当前本地日期键："YYYY-MM-DD"（= created_at 的前缀，语义对齐 currentMonthKey） */
+function currentDayKey(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
 /** 追加一条审计记录并持久化 */
 export function appendAudit(pluginId: string, action: string, detail: Record<string, unknown> = {}): void {
   try {
@@ -198,6 +205,31 @@ export function countMonthLlmTokens(): number {
     } catch { /* 跳过损坏条目 */ }
   }
   return total
+}
+
+/** 单日 LLM 用量聚合（次数 + 三向 token） */
+export interface LlmDayUsage { calls: number; tokens: number; promptTokens: number; completionTokens: number }
+
+/**
+ * 今日（本地自然日）LLM 用量聚合（2026-10-15 用量仪表盘）。
+ * 口径与 summarizeMonthLlmUsage 对齐：action = llm.invoke 且 ok === true ——
+ * 失败调用本就没有 token，不计入次数，避免「今日 N 次」与明细行合计对不上。
+ */
+export function countTodayLlmUsage(): LlmDayUsage {
+  const day = currentDayKey()
+  const out: LlmDayUsage = { calls: 0, tokens: 0, promptTokens: 0, completionTokens: 0 }
+  for (const r of readAuditRows()) {
+    if (r.action !== 'llm.invoke' || !r.created_at.startsWith(day)) continue
+    try {
+      const d = JSON.parse(r.detail || '{}') as { ok?: boolean; tokens?: number; promptTokens?: number; completionTokens?: number }
+      if (d.ok !== true) continue
+      out.calls++
+      if (Number.isFinite(d.tokens)) out.tokens += Number(d.tokens)
+      if (Number.isFinite(d.promptTokens)) out.promptTokens += Number(d.promptTokens)
+      if (Number.isFinite(d.completionTokens)) out.completionTokens += Number(d.completionTokens)
+    } catch { /* 跳过损坏条目 */ }
+  }
+  return out
 }
 
 /** 本月 LLM 消耗拆分（↑输入 / ↓输出）——与 countMonthLlmTokens 同源同口径，供用量 UI 展示 ↑↓ */

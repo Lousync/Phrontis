@@ -80,6 +80,9 @@ const b1 = buildResponsesBody(baseReq, false)
 eq('model 直传', b1.model, 'gpt-5.6-luna')
 eq('max_tokens 字段名是 max_output_tokens', b1.max_output_tokens, 4096)
 check('不带 OpenAI 的 max_tokens 字段（Responses 不认）', !('max_tokens' in b1))
+// 2026-10-15：用户不再设「单次 maxTokens 上限」→ 不传 maxTokens 时该字段整条不下发
+check('未指定上限时不带 max_output_tokens（交由模型自己的输出上限）',
+  !('max_output_tokens' in buildResponsesBody({ model: 'gpt-5.6-luna', messages: [{ role: 'user', content: 'hi' }] }, false)))
 eq('store:false（多轮回喂自己管，不靠上游留状态）', b1.store, false)
 check('非流式不带 stream', !('stream' in b1))
 check('流式带 stream:true', buildResponsesBody(baseReq, true).stream === true)

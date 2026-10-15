@@ -45,7 +45,8 @@ export interface PureChatRequest {
   model: string
   messages: PureMessage[]
   tools?: unknown[]
-  maxTokens: number
+  /** 单次输出上限；不传 = 不下发 max_output_tokens（可选字段），由模型自己的上限决定 */
+  maxTokens?: number
   effort?: 'off' | 'low' | 'medium' | 'high'
 }
 
@@ -165,7 +166,8 @@ export function buildResponsesBody(req: PureChatRequest, stream: boolean): Recor
   const body: Record<string, unknown> = {
     model: req.model,
     input: buildResponsesInput(req.messages),
-    max_output_tokens: req.maxTokens,
+    // 不传就不带 max_output_tokens（2026-10-15）：交给模型自己的输出上限，别截断长回复
+    ...(typeof req.maxTokens === 'number' ? { max_output_tokens: req.maxTokens } : {}),
     // 多轮回喂由我们自己做，不需要上游留状态；store:false 同时避免服务端留存会话
     store: false,
   }

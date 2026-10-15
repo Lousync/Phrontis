@@ -1117,6 +1117,11 @@ export interface LlmUsageInfo {
   monthPromptTokens?: number
   /** 本月输出 tokens（↓） */
   monthCompletionTokens?: number
+/** 今日（本地自然日）聚合（2026-10-15 用量仪表盘，与细分同口径：llm.invoke 且 ok） */
+  todayTokens?: number
+  todayPromptTokens?: number
+  todayCompletionTokens?: number
+  todayCalls?: number
   /** 月度预算上限（已随 faf1b0f 移除限额概念；可选保留兼容沉浸面板） */
   budget?: number
   /** 视觉转写月度 tokens（与回答模型分开统计，2026-09-08） */
