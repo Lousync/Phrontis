@@ -77,7 +77,7 @@ export function DiscoverView({ q, setQ, srcFilter, setSrcFilter, sources, loadin
   failed: BookSearchFailure[]
   searchErr: string
   hasMore: boolean
-  /** 滚过 4px 后搜索条吸顶加分隔线（原型 `.barwrap.stuck`） */
+  /** 滚过 4px 后搜索条吸顶浮起 —— 出现下缘渐隐（`.kb-scroll-edge`；2026-10-15 由 1px 分隔线改为渐隐） */
   stuck: boolean
   selKey: string | null
   onSearch: () => void
@@ -94,10 +94,10 @@ export function DiscoverView({ q, setQ, srcFilter, setSrcFilter, sources, loadin
   return (
     <>
       <div className="px-4 pb-5 pt-8 text-center">
-        <h1 className="m-0 text-[22px] font-medium tracking-[.6px]">书市</h1>
+        <h1 className="m-0 text-[22px] font-medium kb-track-display">书市</h1>
       </div>
 
-      <div className={`sticky top-0 z-[5] border-b px-4 pb-3 pt-1.5 transition-colors ${stuck ? 'border-[var(--border-color)]' : 'border-transparent'} bg-[var(--bg-primary)]`}>
+      <div className={`sticky top-0 z-[5] px-4 pb-3 pt-1.5 bg-[var(--bg-primary)] kb-scroll-edge ${stuck ? 'kb-scroll-edge--on' : ''}`}>
         <div className="mx-auto flex h-[50px] max-w-[640px] items-center gap-2.5 rounded-[13px] border border-[var(--border-color)] bg-[var(--input-bg)] pl-3.5 pr-2 transition-colors focus-within:border-[var(--accent)]">
           <Search size={17} className="flex-none text-[var(--text-muted)]" />
           <input

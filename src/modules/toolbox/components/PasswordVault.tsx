@@ -561,7 +561,7 @@ export function PasswordVault({ onBack }: Props) {
             <div key={g.key}>
               <button
                 onClick={() => toggleGroup(g.key)}
-                className="sticky top-0 z-[1] w-full flex items-center gap-1.5 px-3 py-1 bg-[var(--bg-tertiary)] border-y border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                className="sticky top-0 z-[1] w-full flex items-center gap-1.5 px-3 py-1 bg-[var(--bg-tertiary)] border-t border-[var(--border-color)] text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors kb-scroll-edge kb-scroll-edge--on kb-scroll-edge--tertiary"
               >
                 {g.isCollapsed ? <Folder size={11} /> : <FolderOpen size={11} />}
                 <span className="font-medium">{g.name}</span>

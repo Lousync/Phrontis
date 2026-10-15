@@ -79,7 +79,7 @@ export function HabitSidebar({ habits, records, onNew, onEdit, onArchive }: Prop
 
   return (
     <div className="h-full flex flex-col bg-[var(--bg-secondary)] overflow-y-auto">
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-[var(--border-color)] shrink-0 sticky top-0 bg-[var(--bg-secondary)] z-10">
+      <div className="flex items-center gap-1.5 px-3 py-2 shrink-0 sticky top-0 bg-[var(--bg-secondary)] z-10 kb-scroll-edge kb-scroll-edge--on kb-scroll-edge--secondary">
         <span className="flex-1 text-[12px] font-medium text-[var(--text-secondary)]">习惯</span>
         <button onClick={onNew}
           className="p-1 rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"

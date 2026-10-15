@@ -591,7 +591,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
         <div className="flex-1 min-w-0 overflow-y-auto">
           {/* 批量打标面板：勾选模式下给选中的题目一次性打标签 */}
           {showBulkTag && selectMode && (
-            <div className="sticky top-0 z-10 px-5 py-2 flex flex-wrap items-center gap-1.5 border-b border-[var(--border-color)] bg-[var(--bg-secondary)]">
+            <div className="sticky top-0 z-10 px-5 py-2 flex flex-wrap items-center gap-1.5 bg-[var(--bg-secondary)] kb-scroll-edge kb-scroll-edge--on kb-scroll-edge--secondary">
               <span className="text-[11px] text-[var(--text-muted)] shrink-0">给 {selected.size} 题打标签：</span>
               {tags.length === 0 ? (
                 <span className="text-[11px] text-[var(--text-muted)]">暂无标签，可先展开题目新建</span>

@@ -2154,3 +2154,68 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
   .kb-img-progress > span { animation: none; transform: scaleX(0.6); }
 }
 
+/* ===== 大字号标题的负字距（apple-design §15）=====
+   规则：tracking 随字号变 —— 大字要「负」（字放大了，默认字距会显得疏远），
+   小字才用微正。本项目 tracking-wide / tracking-wider 全用在小标签上，方向是对的；
+   反例是大标题：33px 配 tracking-[0.015em]、22px 配 tracking-[.6px]，字号越大越松。
+   值取 -0.015em：中文方块字收太紧会粘连，这个幅度在 22~33px 区间都安全。
+   注意：桌面时钟（.desk-hero-clock / .desk-clock-time）与 PomoWidget 的计时数字
+   是 tabular-nums 等宽数字，正字距是仪表风格的有意选择，不适用本规则，勿改。 */
+.kb-track-display { letter-spacing: -0.015em; }
+
+/* --- 滚动边缘效果 → `.kb-scroll-edge`（2026-10-15 新增） ---
+   补的是「吸顶条 × 滚动内容」的交界。项目原来用 1px 硬分隔线表达这条界限，
+   苹果的做法相反：滚到顶时没有边界，滚下去时用一条**渐隐**让内容淡出，
+   而不是被线生硬切断。
+   ★ 两种接法：
+     ① 滚动感知（已有 stuck 状态时）：常驻 `.kb-scroll-edge`，滚动态再加 `--on`。
+        拆两类是因为条件挂载会让伪元素瞬现瞬灭，吃不到 opacity 过渡。
+        全仓只有 DiscoverView 一处有 stuck（由父组件按滚动位置算）。
+     ② 常驻渐隐（无 stuck 时）：直接挂 `.kb-scroll-edge kb-scroll-edge--on`。
+        不需要 JS 状态也能得到正确观感 —— 吸顶条底色与下方内容底色相同，
+        未滚动时「同色 → 透明」看不出来，内容滚过时才自然淡出，等价于滚动感知。
+   ★ 已接：DiscoverView（①）；QuizCollection / AiModelPicker / CategorySidebar /
+     HabitSidebar / PasswordVault（②）。已是同族解法故未接：moments（85%+blur）、
+     ShareCardPanel（渐变）。跳过：TimetableView（`sticky left-0` 横向粘，准则不同）。
+   ★ 三条硬约束：
+     1) 吸顶条自身背景必须**不透明** —— 否则渐隐与条下内容颜色错位，会露出一条色带；
+     2) 渐隐色默认 `--bg-primary`；底色是别的层级时**必须**挂变体类
+        （`--secondary` / `--tertiary`），否则条下会出现浅色带；
+     3) **不要给本类加 `position: relative`** —— 吸顶条自带 `position: sticky`（本身已是
+        定位元素，伪元素照样相对它定位），而未分层的自定义 CSS 会压过分层 utilities，
+        加 relative 会把 sticky 打回原型、吸顶直接失效。 */
+.kb-scroll-edge::after {
+  content: ''; position: absolute; left: 0; right: 0; top: 100%;
+  height: var(--kb-scroll-edge-h, 14px);
+  pointer-events: none;
+  background: linear-gradient(to bottom, var(--kb-scroll-edge-bg, var(--bg-primary)), transparent);
+  opacity: 0;
+  transition: opacity var(--dur-std) var(--ease-kb);
+}
+.kb-scroll-edge--on::after { opacity: 1; }
+/* 底色变体：渐隐色必须与吸顶条自身底色一致 —— 否则内容滚到条下时，
+   渐隐会把内容涂成「另一个颜色」，在条下露出一条色带。 */
+.kb-scroll-edge--secondary { --kb-scroll-edge-bg: var(--bg-secondary); }
+.kb-scroll-edge--tertiary  { --kb-scroll-edge-bg: var(--bg-tertiary); }
+
+/* ===== 无障碍：半透明材质与对比度降级（apple-design §12 / §14）=====
+   背景：全项目有 25 处 backdrop-blur 与多处 color-mix 半透明（顶栏 / 侧栏条 / 侧栏容器 /
+   浮钮 / 半透明表面），但此前只做了 prefers-reduced-motion —— 对「降低透明度」「增强对比」
+   两个系统偏好完全无响应：开了开关的用户，玻璃面照旧半透明。
+   为什么用属性选择器而不是逐个改类：材质散在 12 个组件里，逐个改必漏，且将来新增调用点
+   不会有人记得同步。`[class*='backdrop-blur']` 一处命中全部 Tailwind 模糊类。
+   为什么安全：两个块都只在用户表达系统偏好时生效，默认渲染逐字节不变。 */
+@media (prefers-reduced-transparency: reduce) {
+  /* 玻璃 → 实心：关掉模糊，并把薄纱面拉成不透明底（它原本故意留粒子透出来，
+     但在「降低透明度」偏好下，可读性优先于装饰）。 */
+  [class*='backdrop-blur'] { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  .kb-theme-surface-translucent { background-color: var(--bg-primary); }
+}
+
+@media (prefers-contrast: more) {
+  /* 边界要看得见：关模糊，并把 1px 分隔线从「淡」提到「可辨」。
+     --border-color 各主题取的都是最淡那支；--text-muted 是正文级灰，14 套主题都保证可读。 */
+  [class*='backdrop-blur'] { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+  [class*='border-[var(--border-color)]'] { border-color: var(--text-muted) !important; }
+}
+

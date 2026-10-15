@@ -123,7 +123,7 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
               const acct = p.accounts.find(a => a.id === p.activeAccountId)
               return (
                 <div key={p.id}>
-                  <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] text-[var(--text-muted)] sticky top-0 bg-[var(--bg-primary)]">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] text-[var(--text-muted)] sticky top-0 bg-[var(--bg-primary)] kb-scroll-edge kb-scroll-edge--on">
                     <span className="truncate">{p.name}</span>
                     <span className="text-[var(--accent)] shrink-0">{acct ? acct.name : '无可用账号'}</span>
                     <span className="text-[var(--text-disabled)] shrink-0">· {models.length}</span>
