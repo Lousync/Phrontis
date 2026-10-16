@@ -791,7 +791,7 @@ input:focus, textarea:focus, select:focus {
   transition: transform var(--dur-std) var(--ease-kb), rotate var(--dur-std) var(--ease-kb);
 }
 
-/* --- C2 左栏分区贴底：四分区单 grid 驱动（AI 教学左栏「资源管理器」对标 VS Code，2026-10-17） ---
+/* --- C2 左栏分区贴底：四分区单 grid 驱动（AI 教学左栏「资源管理器」对标 VS Code，2026-10-16） ---
    形态：会话头 / 会话体 / 资源管理器头 / 资源管理器体 = 一个 grid 的四条轨。
    贴底原理：资源管理器收起时第 4 轨归 0，剩余高度由 align-content:stretch 全部分给
    第 2 轨（auto）⇒ 会话体撑满，把「资源管理器」条目压到侧栏底。
