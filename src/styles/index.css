@@ -791,6 +791,30 @@ input:focus, textarea:focus, select:focus {
   transition: transform var(--dur-std) var(--ease-kb), rotate var(--dur-std) var(--ease-kb);
 }
 
+/* --- C2 左栏分区贴底：四分区单 grid 驱动（AI 教学左栏「资源管理器」对标 VS Code，2026-10-17） ---
+   形态：会话头 / 会话体 / 资源管理器头 / 资源管理器体 = 一个 grid 的四条轨。
+   贴底原理：资源管理器收起时第 4 轨归 0，剩余高度由 align-content:stretch 全部分给
+   第 2 轨（auto）⇒ 会话体撑满，把「资源管理器」条目压到侧栏底。
+   ★ 只让**第 4 轨**在 0fr↔1fr 之间变。同类型轨道才插值 —— 实测（Edge/Chromium）单轨
+     auto↔1fr 是离散跳变，会把整条轨道表的动画一起拖掉；第 2 轨因此恒为 auto，
+     会话自身的折叠交给 .kb-collapse（同样只动 0fr↔1fr），不占外层轨。
+   ★ 本容器**不能**加 overflow-hidden：会话头的「新建对话」是绝对定位浮层，会被裁掉。 */
+.kb-rail-secs {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 0;
+  grid-template-rows: max-content auto max-content 0fr;
+  align-content: start;
+  transition: grid-template-rows var(--dur-std) var(--ease-kb);
+}
+/* 会话展开 + 资源管理器收起：把剩余高度分给第 2 轨（auto）——贴底的那一步 */
+.kb-rail-secs.kb-stick { align-content: normal; }
+/* 资源管理器展开：第 4 轨 1fr 吃掉全部剩余高度（此时 align-content 无剩余可分，取值无影响） */
+.kb-rail-secs.kb-open-explorer { grid-template-rows: max-content auto max-content 1fr; }
+@media (prefers-reduced-motion: reduce) {
+  .kb-rail-secs { transition: none; }
+}
+
 /* --- L 悬停显形动作 → `.kb-hoveronly`（2026-10-14 新增，docs/ai-settings-v2-plan.md §2）---
    适用场景：行内的**次要动作**（连通性测试、行级编辑…）。常驻会挤掉主信息（一行一物读不出来），
    删掉用户又找不到，所以按「悬停才显形」处理。
@@ -2235,5 +2259,58 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
      --border-color 各主题取的都是最淡那支；--text-muted 是正文级灰，14 套主题都保证可读。 */
   [class*='backdrop-blur'] { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
   [class*='border-[var(--border-color)]'] { border-color: var(--text-muted) !important; }
+}
+
+/* ===== AI教学 · 学习流画布（方案 .AGENT/.claude/plans/ai-teaching-flow-view-v390.md）=====
+   章 = 背景分组框、知识点 = 卡片、连线 = 推进顺序；几何由 flowLayout.ts 纯函数算出。
+   只动 transform / opacity；拖拽跟手不加动画（原型已验证）。 */
+.kb-flow {
+  --border-soft: color-mix(in srgb, var(--border-color) 60%, transparent);
+  --kb-flow-grid-dot: color-mix(in srgb, var(--text-muted) 26%, transparent);
+}
+.kb-flow-world { will-change: transform; }
+.kb-flow-canvas {
+  background-color: var(--bg-primary);
+  background-image: radial-gradient(circle, var(--kb-flow-grid-dot) 1px, transparent 1.3px);
+  user-select: none;
+  -webkit-user-select: none;
+}
+body.dragging, body.dragging * { user-select: none !important; -webkit-user-select: none !important; }
+.kb-flow-zone {
+  border-color: var(--border-color);
+  background: color-mix(in srgb, var(--text-primary) 3%, transparent);
+  transition: border-color var(--dur-std) var(--ease-kb);
+}
+.kb-flow-zone:hover { border-color: color-mix(in srgb, var(--border-color) 55%, var(--text-muted)); }
+.kb-flow-zone.kb-drop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.kb-flow-zone.kb-on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.kb-flow-outer {
+  border-color: color-mix(in srgb, var(--border-color) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 2%, transparent);
+  transition: border-color var(--dur-std) var(--ease-kb), background-color var(--dur-std) var(--ease-kb);
+}
+.kb-flow-outer:hover { border-color: color-mix(in srgb, var(--border-color) 40%, var(--text-muted)); }
+.kb-flow-outer.kb-on {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.kb-flow-node {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  padding: 9px 11px 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .06);
+  transition: border-color var(--dur-std) var(--ease-kb), box-shadow var(--dur-std) var(--ease-kb);
+}
+.kb-flow-node:hover { border-color: color-mix(in srgb, var(--border-color) 55%, var(--text-muted)); box-shadow: 0 5px 16px rgba(0, 0, 0, .22); }
+.kb-flow-node.kb-on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 8px 22px rgba(0, 0, 0, .28); }
+.kb-flow-node.kb-dragging { z-index: 40; cursor: grabbing; box-shadow: 0 14px 30px rgba(0, 0, 0, .3); }
+.kb-flow-bar { transition: width var(--dur-std) var(--ease-kb); }
+.kb-flow-pulse { animation: kb-flow-pulse 1.8s var(--ease-kb) infinite; }
+@keyframes kb-flow-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .3; transform: scale(.7); } }
+.kb-flow-canvas.kb-panning { cursor: grabbing; }
+@media (prefers-reduced-motion: reduce) {
+  .kb-flow-pulse { animation: none; }
+  .kb-flow .kb-flow-bar { transition: none; }
+  .kb-flow-zone, .kb-flow-node, .kb-flow-outer { transition: none; }
 }
 

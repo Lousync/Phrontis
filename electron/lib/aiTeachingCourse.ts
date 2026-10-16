@@ -17,6 +17,7 @@ import {
   cleanField,
   sourceSnapshot,
   mergeOutlineAdditions,
+  moveUnitInOutline,
   type CourseOutline,
   type CourseUnitProgress,
   type CourseUnitStatus,
@@ -65,6 +66,8 @@ export interface CourseState {
   lessons: Record<string, LessonInfo>
   /** 章末复习课：chapterId → 会话 id + 复习讲义相对路径 */
   reviews: Record<string, ChapterReview>
+  /** 课程助手（教学助手）会话 id；未建课为 null —— 左栏三层树据此把它单独成行 */
+  assistantSessionId: string | null
 }
 
 interface WsCourseState {
@@ -205,6 +208,7 @@ export function getCourseState(wsId: string, getSetting: (key: string) => unknow
     progress: s.units,
     lessons: s.lessons,
     reviews: s.reviews ?? {},
+    assistantSessionId: s.assistantSessionId ?? null,
   }
 }
 
@@ -857,6 +861,21 @@ export function removeCourseUnit(wsId: string, ref: unknown, getSetting: (key: s
   return { ok: true, removed: hit.name }
 }
 
+/** 画布拖拽重排：把知识点移到目标章（可同章）的 beforeUnitId 之前；null=追加到章末。
+ *  ★ 必须走这里而不是 writeOutlineDraft —— 后者按章重建、unit id 会按顺序重生成，
+ *    progress.json 以 unit id 为键，重排即丢进度。本函数原位搬移、id 与进度都保留。 */
+export function moveCourseUnit(wsId: string, unitId: string, targetChapterId: string, beforeUnitId: string | null, getSetting: (key: string) => unknown): { ok: boolean; error?: string } {
+  const id = String(wsId ?? '')
+  const outline = readCourseOutline(id, getSetting)
+  if (!outline) return { ok: false, error: '该工作区还没有课程大纲' }
+  const r = moveUnitInOutline(outline, unitId, targetChapterId, beforeUnitId)
+  if (!r.ok) return { ok: false, error: r.error }
+  if (r.outline === outline) return { ok: true } // 无操作（拖到自己前面）
+  const w = writeCourseOutline(id, r.outline, getSetting)
+  if (!w.ok) return { ok: false, error: w.error }
+  return { ok: true }
+}
+
 /** 整理页归档：写入 target（仓库相对目录）或默认会话 output/；返回相对路径与**绝对路径**。 */
 export function archiveOrganizedPage(sessionId: string, title: unknown, content: unknown, target: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string } {
   const vault = getCurrentVault()
@@ -888,6 +907,9 @@ export function registerAiTeachingCourseHandlers(getSetting: (key: string) => un
   // 对话驱动建课：删知识点（已学的会被拒绝，需先整理归档）——与助手工具同口径
   ipcMain.handle('aiTeachCourse:removeUnit', (_e, wsId: string, unit: string) =>
     removeCourseUnit(String(wsId ?? ''), unit, getSetting))
+  // 画布拖拽重排：跨章/同章搬移知识点（保留 id 与进度）
+  ipcMain.handle('aiTeachCourse:moveUnit', (_e, wsId: string, unitId: string, targetChapterId: string, beforeUnitId: string | null) =>
+    moveCourseUnit(String(wsId ?? ''), unitId, targetChapterId, beforeUnitId ?? null, getSetting))
   ipcMain.handle('aiTeachCourse:setUnitProgress', (_e, wsId: string, unitId: string, patch: Partial<CourseUnitProgress>) =>
     setUnitProgress(String(wsId ?? ''), String(unitId ?? ''), patch ?? {}))
   // L2 课时

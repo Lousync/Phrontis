@@ -18,6 +18,8 @@ import {
 import { newAgentSession } from '../../lib/agentSession'
 import { AiTeachFileTree } from './AiTeachFileTree'
 import { CourseHome, COURSE_ST_LABEL } from './CourseMode'
+import type { FlowScope } from './flow/flowLayout'
+import { buildRailTree, type RailRow } from './leftRailTree'
 import { decidePrepLanding, withDraft, withFold, withStarted } from './prepPolicy'
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
 import { ArtifactsPane } from './ArtifactsPane'
@@ -453,6 +455,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     return n
   }), [])
   const [leftOpen, setLeftOpen] = useState(() => localStorage.getItem('aiTeach.leftOpen') !== '0')
+  /** 左栏「会话」三层树：章的展开态（本地记忆，与分区折叠分开存） */
+  const [collapsedChap, setCollapsedChap] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem('aiTeach.rail.chapCollapsed') || '{}') } catch { return {} } })
+  const toggleChap = useCallback((id: string) => setCollapsedChap(prev => {
+    const n = { ...prev, [id]: !prev[id] }
+    localStorage.setItem('aiTeach.rail.chapCollapsed', JSON.stringify(n))
+    return n
+  }), [])
+  /** 左栏「零散对话」组展开态（本地记忆） */
+  const [looseOpen, setLooseOpen] = useState(() => localStorage.getItem('aiTeach.rail.looseOpen') !== '0')
   const [rightOpen, setRightOpen] = useState(() => localStorage.getItem('aiTeach.rightOpen') !== '0')
   /** 右栏可见态（v3.8.0 §二改：右栏 = 素材 / 支线 两分区；工件已是中栏右侧独立分栏）。
    *  rightOpen=用户意图态（持久），srcVisible=渲染态；openRail() 两态同步置 true */
@@ -682,25 +693,31 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     [sessions, wsSessionMap, activeWs],
   )
   /**
-   * v3.1.2 条目11 P4：左栏会话列表 = 主线行 + 其下缩进的「已升格支线」。
-   * 支线本身不分配工作区，靠 parentSessionId 归属到父行下（父行在当前工作区视图时才带出）。
+   * v3.1.2 条目11 P4：**已升格支线**（lane==='main' 且带 parentSessionId）跟随父行缩进。
+   * 支线本身不分配工作区，故从**全量** sessions 里按父行归属；父行不在当前工作区视图时不出现（旧行为）。
    */
-  const wsSessionTree = useMemo(() => {
+  const promoted = useMemo(() => {
     const inView = new Set(wsSessions.map(s => s.id))
-    const childrenOf = new Map<string, AgentSessionInfo[]>()
+    const m: Record<string, AgentSessionInfo[]> = {}
     for (const s of sessions) {
       if (!s.parentSessionId || s.lane !== 'main' || !inView.has(s.parentSessionId)) continue
-      const arr = childrenOf.get(s.parentSessionId) ?? []
-      arr.push(s); childrenOf.set(s.parentSessionId, arr)
+      ;(m[s.parentSessionId] ??= []).push(s)
     }
-    const out: Array<{ s: AgentSessionInfo; child: boolean }> = []
-    for (const s of wsSessions) {
-      if (s.parentSessionId && s.lane === 'main') continue // 已升格支线由父行带出，不单独成行
-      out.push({ s, child: false })
-      for (const c of childrenOf.get(s.id) ?? []) out.push({ s: c, child: true })
-    }
-    return out
+    return m
   }, [wsSessions, sessions])
+  /**
+   * 左栏「会话」区 = 章 → 知识点 → 课时 三层树（2026-10-16 拍板，方案 ai-teaching-scope-layers-v390.md §十 R7）。
+   * 复习课挂章下、课程助手单独一行、其余归「零散对话」；口径与用例见 `leftRailTree.ts` 与
+   * `.AGENT/scripts/ai-teaching/verify-left-rail-tree.mjs`。
+   */
+  const railTree = useMemo(() => buildRailTree({
+    outline: courseState?.outline ?? null,
+    lessons: courseState?.lessons ?? null,
+    reviews: courseState?.reviews ?? null,
+    sessions: wsSessions,
+    promoted,
+    assistantSessionId: courseState?.assistantSessionId ?? null,
+  }), [courseState, wsSessions, promoted])
   // ---------- v3.8.0 §二中栏视图切换器（对话 / 课程）；题目视图已删除（出题改为落「题目文档」） ----------
   const [midView, setMidView] = useState<'chat' | 'course'>('chat')
   // ---------- v3.1.2 条目7：会话准备态（新建对话 → 首条消息之间的中间态） ----------
@@ -873,7 +890,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     // ★ 2026-10-13（F-8）：原来是排除法（`!== 'assistant'`）—— `schedule` 行也满足它，
     //   于是日程助手的会话会在「无工作区」桶里混进教学左栏。改成白名单，与 useAssistantChat 同一口径。
     // v3.1.2 条目11：未升格的支线（lane='side'）不进主列表——它们只活在浮层/宽轨里；
-    // 升格后 lane='main'，随主线行缩进显示（见 wsSessionTree）。
+    // 升格后 lane='main'，随主线行缩进显示（见 promoted / railTree，2026-10-16 起按课程三层树归位）。
     const list = (await agentSessions().catch(() => []))
       .filter(s => s.source === 'aiTeaching' && !(s.parentSessionId && s.lane === 'side'))
     setSessions(list)
@@ -1969,6 +1986,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
     showToast({ type: 'info', message: `工作区要求已在编辑区打开（${r.created ? '已按骨架创建' : '已有文件'}）· 保存后本工作区会话下一轮生效` })
   }, [activeWs])
+  /** 画布「编辑这一层」：按作用域层打开对应文档（L0 先接全局 / 工作区两层，章级与知识点级随 L1/L3 开放） */
+  const openScopeDoc = useCallback((scope: FlowScope) => {
+    if (scope.level === 'global') { void openGlobalConstraints(); return }
+    if (scope.level === 'workspace') { void openWorkspaceConstraints(); return }
+    showToast({ type: 'info', message: '章级 / 知识点级文档将在下一步开放（当前可编辑全局与工作区层）' })
+  }, [openGlobalConstraints, openWorkspaceConstraints])
   /** 关闭建议 → 记账节流窗口：`ignored` 窗口内留安静入口，`applied` 已写入则不再留 */
   const muteProfileSuggestion = useCallback((by: 'ignored' | 'applied') => {
     if (!activeId) return
@@ -2344,8 +2367,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     <div className="shrink-0 flex items-center gap-1 px-3 pt-2 select-none">
       <button onClick={() => setMidView('chat')} className={chipCls(midView === 'chat')}>对话</button>
       {courseEnabled && (
-        <button onClick={() => setMidView('course')} title="课程主页：大纲 / 进度 / 继续上课"
-          className={chipCls(midView === 'course')}>课程</button>
+        <button onClick={() => setMidView('course')} title="学习流：章 / 知识点推进画布"
+          className={chipCls(midView === 'course')}>学习流</button>
       )}
       <span className="flex-1" />
     </div>
@@ -2572,6 +2595,47 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 </div>
   )
 
+  /**
+   * 左栏三层树的行渲染（章树 / 零散对话共用）。
+   * depth：0=顶层（零散对话 / 课程助手）、1=课时与复习课、2=已升格支线。
+   */
+  const railRowNode = (row: RailRow, depth: 0 | 1 | 2) => {
+    const s = row.s
+    const d: 0 | 1 | 2 = row.child ? 2 : depth
+    const pad = d === 0 ? 'px-2' : d === 1 ? 'pl-3 pr-2' : 'ml-3.5 pl-1.5 pr-2 border-l border-[var(--border-color)]'
+    const on = s.id === activeId
+    return (
+      <div key={s.id} onClick={() => { void openSession(s.id, s.title) }}
+        title={on ? `当前对话：${activeTitle}` : (row.hint ? `${row.hint}\n${s.title}` : s.title)}
+        className={`group flex items-center gap-1.5 ${pad} py-1.5 rounded-md cursor-pointer text-[12.5px] transition-colors ${on ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
+        {row.child && <span className="shrink-0 px-1 rounded text-[9.5px] text-[var(--accent)] bg-[var(--accent)]/10" title="由支线旁问升格而来">支线</span>}
+        {!row.child && row.label && (
+          <span className="shrink-0 px-1 rounded bg-[var(--bg-hover)] text-[9.5px] text-[var(--text-muted)] whitespace-nowrap">{row.label}</span>
+        )}
+        {/* 未开讲的会话带「准备中」点标（读 nav.prep；prepNavSeq 触发重渲染） */}
+        {!row.child && (prepNavSeq >= 0 && readNav(s.id).prep?.started === false) && (
+          <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--warning)]" title="准备中：尚未发出首条消息" />
+        )}
+        {renamingId === s.id ? (
+          <input autoFocus onFocus={e => e.currentTarget.select()} value={renameDraft} maxLength={40}
+            onChange={e => setRenameDraft(e.target.value)}
+            onBlur={() => void commitRename(s.id)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void commitRename(s.id) } else if (e.key === 'Escape') { e.stopPropagation(); setRenamingId(null) } }}
+            onClick={e => e.stopPropagation()}
+            className="flex-1 min-w-0 px-1 py-0 rounded border border-[var(--accent)] bg-[var(--input-bg)] text-[11.5px] text-[var(--text-primary)] outline-none" />
+        ) : (
+          <>
+            <span className="flex-1 min-w-0 truncate" onDoubleClick={e => { e.stopPropagation(); setRenamingId(s.id); setRenameDraft(s.title) }}>{s.title}</span>
+            <button onClick={e => { e.stopPropagation(); void delSession(e, s.id, s.title) }} title="删除会话"
+              className="shrink-0 opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-400 transition-opacity"><X size={10} /></button>
+          </>
+        )}
+      </div>
+    )
+  }
+  /** 有章树 / 课程助手时才给「零散对话」单独一组（整仓无课程时直接平铺，不套壳） */
+  const showLooseGroup = railTree.chapters.length > 0 || !!railTree.assistant
+
   return (
     <div className="kb-theme-surface h-full flex flex-col min-h-0 relative">
       {/* v3.8.0 §二：顶栏瘦身 —— 去掉会话页签与课程分段器（会话导航归左栏列表、课程切换归中栏视图切换器）；
@@ -2770,6 +2834,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           {/* v3.1.2（开发负责人 2026-09-14）：会话列表区回归，与资源管理器「分区并列共存」——
               形态 A：会话（上，限高可折叠）+ 资源管理器（中，撑满剩余）。
               折叠任一分区，其余分区自动获得空间（原会话列表区曾因「页签即会话切换器」退役，本次恢复）。 */}
+          {/* 左栏两分区 = 一个四轨 grid（会话头 / 会话体 / 资源管理器头 / 资源管理器体）。
+              贴底原理见 .kb-rail-secs：资源管理器收起时第 4 轨归 0，剩余高度全给第 2 轨（auto）
+              ⇒ 会话体撑满，把「资源管理器」条目压到侧栏底（对标 VS Code）。
+              ★ 本容器不能 overflow-hidden —— 会话头的「新建对话」是绝对定位浮层，会被裁掉。 */}
+          <div className={`kb-rail-secs ${!collapsedSec.sessions && collapsedSec.explorer ? 'kb-stick' : ''} ${!collapsedSec.explorer ? 'kb-open-explorer' : ''}`}>
           <SectionHead open={!collapsedSec.sessions} title="会话" onToggle={() => toggleSec('sessions')}
             right={
               /* 菜单必须锚定在本按钮上（顶栏那个 ＋ 的菜单锚在顶栏里，左栏点它会「菜单出现在别处」），
@@ -2793,38 +2862,58 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 )}
               </span>
             } />
-          <div className="grid shrink-0 transition-[grid-template-rows] duration-200 ease-out" style={{ gridTemplateRows: collapsedSec.sessions ? '0fr' : '1fr' }}>
-            <div className={`overflow-hidden min-h-0 transition-opacity duration-150 ${collapsedSec.sessions ? 'invisible opacity-0' : 'opacity-100'}`}>
-              <div className="max-h-[38vh] overflow-y-auto px-1.5 pb-1.5">
+          {/* 会话体（第 2 轨，**恒为 auto**：不参与轨道类型切换，否则整条轨道表退化成离散跳变）。
+              折叠交给既有 .kb-collapse（只动 0fr↔1fr + 自带 reduced-motion 兜底）。
+              展开且资源管理器收起时轨道被 stretch 撑高 → h-full 生效、列表在轨道内滚动；
+              资源管理器展开时轨道回到内容高（≤38vh）。 */}
+          <div className={`kb-collapse min-h-0 ${collapsedSec.sessions ? '' : 'open'}`}>
+            <div className={`min-h-0 transition-opacity duration-150 ${collapsedSec.sessions ? 'opacity-0' : 'opacity-100'}`}>
+              <div className={`overflow-y-auto px-1.5 pb-1.5 h-full ${collapsedSec.explorer ? 'max-h-[38vh]' : ''}`}>
                 {wsSessions.length === 0 && (
                   <div className="px-2 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">本工作区还没有对话，点右上 ＋ 新建。</div>
                 )}
-                {wsSessionTree.map(({ s, child }) => (
-                  <div key={s.id} onClick={() => { void openSession(s.id, s.title) }}
-                    title={s.id === activeId ? `当前对话：${activeTitle}` : s.title}
-                    className={`group flex items-center gap-1.5 ${child ? 'ml-3.5 pl-1.5 border-l border-[var(--border-color)]' : ''} px-2 py-1.5 rounded-md cursor-pointer text-[12.5px] transition-colors ${s.id === activeId ? 'bg-[var(--bg-selected)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>
-                    {/* v3.1.2 条目11 P4：已升格支线的徽章 */}
-                    {child && <span className="shrink-0 px-1 rounded text-[9.5px] text-[var(--accent)] bg-[var(--accent)]/10" title="由支线旁问升格而来">支线</span>}
-                    {/* 未开讲的会话带「准备中」点标（读 nav.prep；prepNavSeq 触发重渲染） */}
-                    {!child && (prepNavSeq >= 0 && readNav(s.id).prep?.started === false) && (
-                      <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-[var(--warning)]" title="准备中：尚未发出首条消息" />
-                    )}
-                    {renamingId === s.id ? (
-                      <input autoFocus onFocus={e => e.currentTarget.select()} value={renameDraft} maxLength={40}
-                        onChange={e => setRenameDraft(e.target.value)}
-                        onBlur={() => void commitRename(s.id)}
-                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void commitRename(s.id) } else if (e.key === 'Escape') { e.stopPropagation(); setRenamingId(null) } }}
-                        onClick={e => e.stopPropagation()}
-                        className="flex-1 min-w-0 px-1 py-0 rounded border border-[var(--accent)] bg-[var(--input-bg)] text-[11.5px] text-[var(--text-primary)] outline-none" />
-                    ) : (
-                      <>
-                        <span className="flex-1 min-w-0 truncate" onDoubleClick={e => { e.stopPropagation(); setRenamingId(s.id); setRenameDraft(s.title) }}>{s.title}</span>
-                        <button onClick={e => { e.stopPropagation(); void delSession(e, s.id, s.title) }} title="删除会话"
-                          className="shrink-0 opacity-0 group-hover:opacity-100 text-[var(--text-muted)] hover:text-red-400 transition-opacity"><X size={10} /></button>
-                      </>
-                    )}
+                {/* 课程助手（教学助手）单独一行：建课 / 改大纲的入口 */}
+                {railTree.assistant && railRowNode(railTree.assistant, 0)}
+                {/* 章 → 知识点 → 课时（会话）三层树 */}
+                {railTree.chapters.map(ch => {
+                  const closed = !!collapsedChap[ch.chapterId]
+                  return (
+                    <div key={ch.chapterId} className="mb-0.5">
+                      <button onClick={() => toggleChap(ch.chapterId)} title={closed ? '展开本章' : '收起本章'}
+                        className="w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-left hover:bg-[var(--bg-hover)] transition-colors">
+                        <ChevronRight size={11} className={`shrink-0 text-[var(--text-muted)] kb-chevron ${closed ? '' : 'rotate-90'}`} />
+                        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--text-primary)]">{ch.name}</span>
+                        <span className="shrink-0 text-[9.5px] text-[var(--text-muted)] tabular-nums">{ch.count}</span>
+                      </button>
+                      {!closed && (
+                        <>
+                          {ch.units.map(u => (
+                            <div key={u.unitId}>
+                              <div className="flex items-center gap-1.5 pl-4 pr-2 py-1" title={u.name}>
+                                <span className="shrink-0 w-1 h-1 rounded-full bg-[var(--text-muted)]" />
+                                <span className="min-w-0 truncate text-[11.5px] text-[var(--text-secondary)]">{u.name}</span>
+                              </div>
+                              {u.rows.map(row => railRowNode(row, 1))}
+                            </div>
+                          ))}
+                          {(ch.review ?? []).map(row => railRowNode(row, 1))}
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+                {/* 零散对话：无课时归属的会话（随手提问、临时答疑）——整仓无课程时不套分组壳 */}
+                {railTree.loose.length > 0 && (showLooseGroup ? (
+                  <div className="mt-0.5">
+                    <button onClick={() => setLooseOpen(o => { const n = !o; localStorage.setItem('aiTeach.rail.looseOpen', n ? '1' : '0'); return n })} title={looseOpen ? '收起' : '展开'}
+                      className="w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-left hover:bg-[var(--bg-hover)] transition-colors">
+                      <ChevronRight size={11} className={`shrink-0 text-[var(--text-muted)] kb-chevron ${looseOpen ? 'rotate-90' : ''}`} />
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--text-secondary)]">零散对话</span>
+                      <span className="shrink-0 text-[9.5px] text-[var(--text-muted)] tabular-nums">{railTree.loose.length}</span>
+                    </button>
+                    {looseOpen && railTree.loose.map(row => railRowNode(row, 0))}
                   </div>
-                ))}
+                ) : railTree.loose.map(row => railRowNode(row, 0)))}
               </div>
             </div>
           </div>
@@ -2850,20 +2939,22 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 <RefreshCw size={12} className={treeRefreshing ? 'animate-spin' : undefined} />
               </button>
             )} />
-          <div className={`grid min-h-0 basis-0 transition-[flex-grow,grid-template-rows] duration-200 ease-out ${collapsedSec.explorer ? 'grow-0' : 'grow'}`} style={{ gridTemplateRows: collapsedSec.explorer ? '0fr' : '1fr' }}>
-            <div className={`overflow-hidden min-h-0 transition-opacity duration-150 ${collapsedSec.explorer ? 'invisible opacity-0' : 'opacity-100'}`}>
-              <div className="h-full min-h-0 pb-1">
-                <AiTeachFileTree
-                  subRel={wsTreeSeg}
-                  refreshSeq={treeRefreshSeq}
-                  activeRel={(() => { const r = artTabs.find(t => t.id === artActive && !t.generating)?.rel ?? null; return r && r.startsWith(`${treeBase}/`) ? r.slice(treeBase.length + 1) : null })()}
-                  onOpenMd={treeOpenArt}
-                  onOpenHtml={treeOpenArt}
-                  onOpenImage={treeOpenArt}
-                  onOpenExternal={treeOpenExternal}
-                  isPinned={isPinned}
-                  onTogglePin={togglePin}
-                />
+          {/* 资源管理器体 = 第 4 轨（0fr↔1fr，全模块唯一参与高度动画的轨道）。收起时轨道高 0 ⇒
+              条目被顶到底；这里不再自带 grid-template-rows —— 高度由外层 .kb-rail-secs 给出，
+              过渡也只留外层一处（原先这里过渡 flex-grow，属布局属性，越出铁律 13 允许集）。 */}
+          <div className={`overflow-hidden min-h-0 transition-opacity duration-150 ${collapsedSec.explorer ? 'invisible opacity-0' : 'opacity-100'}`}>
+            <div className="h-full min-h-0 pb-1">
+              <AiTeachFileTree
+                subRel={wsTreeSeg}
+                refreshSeq={treeRefreshSeq}
+                activeRel={(() => { const r = artTabs.find(t => t.id === artActive && !t.generating)?.rel ?? null; return r && r.startsWith(`${treeBase}/`) ? r.slice(treeBase.length + 1) : null })()}
+                onOpenMd={treeOpenArt}
+                onOpenHtml={treeOpenArt}
+                onOpenImage={treeOpenArt}
+                onOpenExternal={treeOpenExternal}
+                isPinned={isPinned}
+                onTogglePin={togglePin}
+              />
               </div>
             </div>
           </div>
@@ -2884,9 +2975,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   onFinishUnit={(id, score) => void courseFinishUnit(id, score)}
                   onReopenUnit={(id) => void courseReopenUnit(id)}
                   onOpenChapterReview={(chapterId) => void courseOpenChapterReview(chapterId)}
-                  onReload={() => void reloadCourse()}
-                  onGoChat={() => void courseOpenAssistant()}
-                />
+              onReload={() => void reloadCourse()}
+              onGoChat={() => void courseOpenAssistant()}
+              onOpenScopeDoc={openScopeDoc}
+            />
               </div>
             </div>
           ) : (

@@ -362,6 +362,8 @@ const api = {
     ipcRenderer.invoke('aiTeachCourse:writeOutlineDraft', wsId, draft),
   aiTeachCourseRemoveUnit: (wsId: string, unit: string) =>
     ipcRenderer.invoke('aiTeachCourse:removeUnit', wsId, unit),
+  aiTeachCourseMoveUnit: (wsId: string, unitId: string, targetChapterId: string, beforeUnitId: string | null) =>
+    ipcRenderer.invoke('aiTeachCourse:moveUnit', wsId, unitId, targetChapterId, beforeUnitId),
   aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: unknown) => ipcRenderer.invoke('aiTeachCourse:setUnitProgress', wsId, unitId, patch),
   aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => ipcRenderer.invoke('aiTeachCourse:openUnit', wsId, unitId, kind),
   aiTeachCourseEndLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:endLesson', sessionId),

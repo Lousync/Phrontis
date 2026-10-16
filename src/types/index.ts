@@ -1385,7 +1385,7 @@ export interface AiTeachCourseUnitProgress { status: AiTeachCourseUnitStatus; ma
 export interface AiTeachLessonInfo { unitId: string; order: number; kind: string; status: 'open' | 'ended' }
 export interface AiTeachChapterReview { sessionId: string; rel: string | null }
 export interface AiTeachUnitQuizQuestion { q: string; options: string[]; answer: number; explanation: string }
-export interface AiTeachCourseState { enabled: boolean; outline: AiTeachCourseOutline | null; progress: Record<string, AiTeachCourseUnitProgress>; lessons: Record<string, AiTeachLessonInfo>; reviews: Record<string, AiTeachChapterReview> }
+export interface AiTeachCourseState { enabled: boolean; outline: AiTeachCourseOutline | null; progress: Record<string, AiTeachCourseUnitProgress>; lessons: Record<string, AiTeachLessonInfo>; reviews: Record<string, AiTeachChapterReview>; /** 课程助手（教学助手）会话 id，未建课为 null —— 左栏三层树据此把它单独成行 */ assistantSessionId?: string | null }
 
 /** P6 素材库：SOURCE.md 解析条目（§3.13 模板 v2，字段行与模板一一对应） */
 export interface AiTeachSourceEntry {
@@ -2621,6 +2621,7 @@ export interface ElectronAPI {
   aiTeachCourseSetEnabled: (wsId: string, enabled: boolean) => Promise<{ ok: boolean; error?: string }>
   aiTeachCourseWriteOutlineDraft: (wsId: string, draft: unknown) => Promise<{ ok: boolean; mode?: string; added?: number; chapters?: number; relPath?: string; error?: string }>
   aiTeachCourseRemoveUnit: (wsId: string, unit: string) => Promise<{ ok: boolean; removed?: string; needOrganize?: boolean; unitId?: string; unitName?: string; status?: string; error?: string }>
+  aiTeachCourseMoveUnit: (wsId: string, unitId: string, targetChapterId: string, beforeUnitId: string | null) => Promise<{ ok: boolean; error?: string }>
   aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: Partial<AiTeachCourseUnitProgress>) => Promise<{ ok: boolean; error?: string }>
   // L2 课时生命周期：打开即续课 / 结束课时 / 生成交接；L3 知识点收尾
   aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => Promise<{ ok: boolean; sessionId?: string; order?: number; kind?: string; status?: 'open' | 'ended'; readonly?: boolean; error?: string }>
