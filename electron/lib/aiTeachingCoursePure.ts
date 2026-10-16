@@ -220,3 +220,33 @@ export function mergeOutlineAdditions(outline: CourseOutline, additions: Outline
   }
   return { outline: { ...outline, chapters }, added }
 }
+
+/**
+ * 画布拖拽重排（纯）：把 `unitId` 移到 `targetChapterId` 的 `beforeUnitId` 之前；`beforeUnitId` 为空=追加到章末。
+ * ★ 原位搬移，**id 与顺序以外的字段一律不动** —— progress.json 以 unit id 为键，重排不得重编号。
+ * 不改动入参；失败时返回原 outline 引用。
+ */
+export function moveUnitInOutline(
+  outline: CourseOutline,
+  unitId: string,
+  targetChapterId: string,
+  beforeUnitId: string | null,
+): { outline: CourseOutline; ok: boolean; error?: string } {
+  const uid = String(unitId ?? '').trim()
+  if (!uid) return { outline, ok: false, error: '缺少知识点' }
+  const bid = beforeUnitId ? String(beforeUnitId) : ''
+  if (bid && bid === uid) return { outline, ok: true } // 拖到自己前面 = 无操作
+  const chapters: CourseChapter[] = (outline?.chapters ?? []).map((c) => ({ ...c, units: c.units.map((u) => ({ ...u })) }))
+  let moved: CourseUnit | null = null
+  for (const c of chapters) {
+    const i = c.units.findIndex((u) => u.id === uid)
+    if (i >= 0) { moved = c.units.splice(i, 1)[0]; break }
+  }
+  if (!moved) return { outline, ok: false, error: `找不到知识点「${uid}」` }
+  const target = chapters.find((c) => c.id === String(targetChapterId ?? ''))
+  if (!target) return { outline, ok: false, error: '目标章不存在' }
+  const found = bid ? target.units.findIndex((u) => u.id === bid) : -1
+  if (bid && found < 0) return { outline, ok: false, error: '目标位置不存在' }
+  target.units.splice(found < 0 ? target.units.length : found, 0, moved)
+  return { outline: { ...outline, chapters }, ok: true }
+}

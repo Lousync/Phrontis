@@ -714,6 +714,7 @@ export const aiTeachCourseGetState = (wsId: string): Promise<AiTeachCourseState>
 export const aiTeachCourseSetEnabled = (wsId: string, enabled: boolean): Promise<{ ok: boolean; error?: string }> => a().aiTeachCourseSetEnabled(wsId, enabled)
 export const aiTeachCourseWriteOutlineDraft = (wsId: string, draft: unknown): Promise<{ ok: boolean; mode?: string; added?: number; chapters?: number; relPath?: string; error?: string }> => a().aiTeachCourseWriteOutlineDraft(wsId, draft)
 export const aiTeachCourseRemoveUnit = (wsId: string, unit: string): Promise<{ ok: boolean; removed?: string; needOrganize?: boolean; unitId?: string; unitName?: string; status?: string; error?: string }> => a().aiTeachCourseRemoveUnit(wsId, unit)
+export const aiTeachCourseMoveUnit = (wsId: string, unitId: string, targetChapterId: string, beforeUnitId: string | null): Promise<{ ok: boolean; error?: string }> => a().aiTeachCourseMoveUnit(wsId, unitId, targetChapterId, beforeUnitId)
 export const aiTeachCourseSetUnitProgress = (wsId: string, unitId: string, patch: Partial<AiTeachCourseUnitProgress>): Promise<{ ok: boolean; error?: string }> => a().aiTeachCourseSetUnitProgress(wsId, unitId, patch)
 export const aiTeachCourseOpenUnit = (wsId: string, unitId: string, kind?: string) => a().aiTeachCourseOpenUnit(wsId, unitId, kind)
 export const aiTeachCourseEndLesson = (sessionId: string) => a().aiTeachCourseEndLesson(sessionId)

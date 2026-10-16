@@ -33,7 +33,7 @@ const pureSrc = read(PURE_REL)
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'course-verify-'))
 const tmpFile = path.join(tmpDir, 'aiTeachingCoursePure.mjs')
 fs.writeFileSync(tmpFile, stripTypeScriptTypes(pureSrc, { mode: 'strip' }))
-const { parseCourseMd, rewriteCourseMd, parseOutlineJson, balancedJsonObjects, cleanField, sourceKey, sourceSnapshot, mergeOutlineAdditions } = await import(pathToFileURL(tmpFile).href)
+const { parseCourseMd, rewriteCourseMd, parseOutlineJson, balancedJsonObjects, cleanField, sourceKey, sourceSnapshot, mergeOutlineAdditions, moveUnitInOutline } = await import(pathToFileURL(tmpFile).href)
 
 console.log('\n=== 1. parseCourseMd：解析章/知识点/来源 ===')
 const sample = [
@@ -123,6 +123,29 @@ check('merge：新 id 递增 u3/u4', merged.outline.chapters[1].units.some((u) =
 check('merge：新章追加在末尾', merged.outline.chapters.length === 3 && merged.outline.chapters[2].name === '三', '')
 check('merge：新条目 source 缺省=AI 增补', merged.outline.chapters[2].units[0].source === 'AI 增补', merged.outline.chapters[2].units[0].source)
 
+console.log('\n=== 4c. moveUnitInOutline：画布拖拽重排（id 必须保留）===')
+// 2026-10-16：学习流画布拖拽跨章/同章搬移 —— 走 moveUnitInOutline 而不是 writeOutlineDraft，
+// 后者按章重建会重编号，而 progress.json 以 unit id 为键 → 重排即丢进度。
+const mv = { title: 'T', goal: '', anchor: '', chapters: [
+  { id: 'c1', name: '一', units: [{ id: 'u1', name: 'a', goal: 'g1', source: 's1' }, { id: 'u2', name: 'b', goal: '', source: '' }, { id: 'u3', name: 'c', goal: '', source: '' }] },
+  { id: 'c2', name: '二', units: [{ id: 'u4', name: 'd', goal: '', source: '' }] },
+] }
+const into = moveUnitInOutline(mv, 'u1', 'c2', 'u4')
+check('跨章：移到目标章首位', into.ok && into.outline.chapters[1].units.map((u) => u.id).join(',') === 'u1,u4', JSON.stringify(into.outline.chapters.map((c) => c.units.map((u) => u.id))))
+check('跨章：源章移除该项', into.outline.chapters[0].units.map((u) => u.id).join(',') === 'u2,u3', '')
+check('跨章：字段原样保留（name/goal/source）', JSON.stringify(into.outline.chapters[1].units[0]) === JSON.stringify({ id: 'u1', name: 'a', goal: 'g1', source: 's1' }), JSON.stringify(into.outline.chapters[1].units[0]))
+check('不改动入参', mv.chapters[0].units.length === 3 && mv.chapters[1].units.length === 1, '')
+const end = moveUnitInOutline(mv, 'u1', 'c1', null)
+check('同章：beforeUnitId=null → 追加到章末', end.ok && end.outline.chapters[0].units.map((u) => u.id).join(',') === 'u2,u3,u1', JSON.stringify(end.outline.chapters[0].units.map((u) => u.id)))
+const reorder = moveUnitInOutline(mv, 'u3', 'c1', 'u1')
+check('同章：拖到首位', reorder.ok && reorder.outline.chapters[0].units.map((u) => u.id).join(',') === 'u3,u1,u2', JSON.stringify(reorder.outline.chapters[0].units.map((u) => u.id)))
+check('拖到自己前面 = 无操作（返回原引用）', moveUnitInOutline(mv, 'u2', 'c1', 'u2').ok && moveUnitInOutline(mv, 'u2', 'c1', 'u2').outline === mv, '')
+check('找不到知识点 → 失败且不改动', moveUnitInOutline(mv, 'u9', 'c1', null).ok === false, '')
+check('目标章不存在 → 失败', moveUnitInOutline(mv, 'u1', 'c9', null).ok === false, '')
+check('目标位置不存在 → 失败', moveUnitInOutline(mv, 'u1', 'c1', 'u9').ok === false, '')
+const movedRound = parseCourseMd(rewriteCourseMd(into.outline))
+check('重排后可往返落盘（id 稳定）', JSON.stringify(movedRound) === JSON.stringify(into.outline), JSON.stringify(movedRound))
+
 // ---------------------------------------------------------------- B. 接线静态断言
 console.log('\n=== 5. IPC 四件套 + 注入接线（剥注释后）===')
 const main = stripComments(read('electron/lib/aiTeachingCourse.ts'))
@@ -133,8 +156,8 @@ const ipc = stripComments(read('src/lib/ipc.ts'))
 const agent = stripComments(read('electron/lib/agentService.ts'))
 const bus = stripComments(read('electron/main/windowBus.ts'))
 
-const channels = ['aiTeachCourse:getState', 'aiTeachCourse:setEnabled', 'aiTeachCourse:writeOutlineDraft', 'aiTeachCourse:removeUnit', 'aiTeachCourse:setUnitProgress', 'aiTeachCourse:openUnit', 'aiTeachCourse:endLesson', 'aiTeachCourse:finalizeLesson', 'aiTeachCourse:finishUnit', 'aiTeachCourse:readPrevHandoff', 'aiTeachCourse:makeUnitQuiz', 'aiTeachCourse:openAssistant', 'aiTeachCourse:openChapterReview']
-check('主进程注册全部 13 个 handler', channels.every((c) => main.includes(c)), channels.filter((c) => !main.includes(c)).join(','))
+const channels = ['aiTeachCourse:getState', 'aiTeachCourse:setEnabled', 'aiTeachCourse:writeOutlineDraft', 'aiTeachCourse:removeUnit', 'aiTeachCourse:moveUnit', 'aiTeachCourse:setUnitProgress', 'aiTeachCourse:openUnit', 'aiTeachCourse:endLesson', 'aiTeachCourse:finalizeLesson', 'aiTeachCourse:finishUnit', 'aiTeachCourse:readPrevHandoff', 'aiTeachCourse:makeUnitQuiz', 'aiTeachCourse:openAssistant', 'aiTeachCourse:openChapterReview']
+check('主进程注册全部 14 个 handler', channels.every((c) => main.includes(c)), channels.filter((c) => !main.includes(c)).join(','))
 // 负向（2026-10-11 后续）：一次性 / 流式大纲生成 + 保存三条死通道已删（零渲染调用点）；
 // 建课活路径 = 对话里 ```outline 草稿 → 「正式生成」→ writeOutlineDraft。
 check('主进程不再注册大纲生成/保存三通道', !main.includes('aiTeachCourse:saveOutline') && !main.includes('aiTeachCourse:generateOutline'), '')
@@ -149,7 +172,7 @@ check('课程模块不再有一次性 / 流式大纲生成（死链已删）', !
 check('agentService import 了 buildCourseInjection', agent.includes('buildCourseInjection'), '')
 check('agentService 把 courseHint 拼进 systemFull', agent.includes('+ courseHint +'), '')
 
-const apiMethods = ['aiTeachCourseGetState', 'aiTeachCourseSetEnabled', 'aiTeachCourseWriteOutlineDraft', 'aiTeachCourseRemoveUnit', 'aiTeachCourseSetUnitProgress', 'aiTeachCourseOpenUnit', 'aiTeachCourseEndLesson', 'aiTeachCourseFinalizeLesson', 'aiTeachCourseFinishUnit', 'aiTeachCourseReadPrevHandoff', 'aiTeachCourseMakeUnitQuiz', 'onAiTeachCourseRefresh', 'aiTeachCourseOpenAssistant', 'aiTeachCourseOpenChapterReview']
+const apiMethods = ['aiTeachCourseGetState', 'aiTeachCourseSetEnabled', 'aiTeachCourseWriteOutlineDraft', 'aiTeachCourseRemoveUnit', 'aiTeachCourseMoveUnit', 'aiTeachCourseSetUnitProgress', 'aiTeachCourseOpenUnit', 'aiTeachCourseEndLesson', 'aiTeachCourseFinalizeLesson', 'aiTeachCourseFinishUnit', 'aiTeachCourseReadPrevHandoff', 'aiTeachCourseMakeUnitQuiz', 'onAiTeachCourseRefresh', 'aiTeachCourseOpenAssistant', 'aiTeachCourseOpenChapterReview']
 for (const m of apiMethods) {
   const okPreload = preload.includes(m)
   const okTypes = types.includes(m)
@@ -194,7 +217,7 @@ console.log('\n=== 6b. 课程助手（整门课唯一会话 · 顾问注入）==
 check('主进程导出 openCourseAssistant 并使用 assistantSessionId', main.includes('export function openCourseAssistant') && main.includes('assistantSessionId'), '')
   check('助手注入分支存在（教学助手 / 不逐点开讲 / 建课工具指引）', main.includes('教学助手') && main.includes('逐知识点开讲') && main.includes('course.outline.write'), '')
 check('顾问注入无大纲也可用（不提前 return）', main.includes('!hasOutline && !isAssistant'), '')
-check('渲染层第三档「课程助手」+ assist 视图 + 打开函数', mod.includes('课程助手') && mod.includes("courseView === 'assist'") && mod.includes('courseOpenAssistant'), '')
+check('渲染层第三档「课程助手」+ assistantSid 视图 + 打开函数', mod.includes('课程助手') && mod.includes('assistantSid') && mod.includes('courseOpenAssistant'), '')
 
 console.log('\n=== 6c. 章末复习课（每章一个 · 讨论产出落盘）===')
 check('CourseState/接口增 reviews', main.includes('export interface ChapterReview') && main.includes('reviews: Record<string, ChapterReview>'))
@@ -211,8 +234,8 @@ check('types: AiTeachChapterReview + state.reviews + API', typesSrc.includes('ex
 check('ipc.ts 封装', stripComments(read('src/lib/ipc.ts')).includes('export const aiTeachCourseOpenChapterReview'))
 const bt = stripComments(read('electron/lib/builtinTools.ts'))
 check('工具 course.review.write + 进 request 清单', bt.includes("name: 'course.review.write'") && bt.includes('course.review.write）默认不在工具列表中'))
-check('CourseHome 复习课条目 + 讲义入口', course.includes('onOpenChapterReview') && course.includes('复习课') && course.includes('复习讲义 →'))
-check('index.tsx: 打开函数 + 复习课态左栏 + 生成入口', mod.includes('courseOpenChapterReview') && mod.includes('courseReviewChapter') && mod.includes('生成复习讲义（对助手说）'))
+check('画布章框复习课入口（onOpenChapterReview）', stripComments(read('src/modules/ai-teaching/flow/FlowCanvas.tsx')).includes('onOpenChapterReview') && stripComments(read('src/modules/ai-teaching/flow/FlowCanvas.tsx')).includes('复习课'))
+check('index.tsx: 打开函数 + 复习课态左栏', mod.includes('courseOpenChapterReview') && mod.includes('courseReviewChapter') && mod.includes('复习课'))
 
 // ---------------------------------------------------------------- 报告
 const failed = checks.filter((c) => !c.pass)
