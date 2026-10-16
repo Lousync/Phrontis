@@ -1,17 +1,17 @@
 /**
- * 探针：设置 → AI → 用量（2026-10-15 方案 D 重排后的真机验收）。
+ * 探针：设置 → AI → 用量（v3.9.0 收敛后的真机验收）。
+ *
+ * 收敛后本页**只留工具调用量**，token / 费用 / 额度整体移交整窗「用量」模块（方案 §6.1）。
  *
  * 断言（DOM 判据，截图只作观感佐证）：
- *   U1  两个锚点都在（aiTools.usage / aiTools.llmUsage）—— 设置搜索落点不受重排影响
- *   U2  「本月 tokens」大数字 + 「今日」一行存在（今日字段由 llm:getUsage 恒返回）
- *   U3  空态或明细表二选一：无记录时显示「本月还没有模型调用记录」；有记录时表头六列齐全
- *   U4  数字口径：页面不得出现 NaN；本月大数字的 title 是千分位精确值
- *   U5  供应商名兜底：明细里不得出现「空名 · 」（空 provider 已替换为「已删除的供应商」）
- *   U6  console.error / 未捕获异常 = 0
+ *   U1  锚点 aiTools.usage 在；旧的 aiTools.llmUsage 已消失（明细唯一由看板承担）
+ *   U2  「本月调用」+ 上限输入在场
+ *   U3  「打开用量看板」按钮在场；点击后 `[data-wb="usage"]` 挂载（tab:open 通道打通）
+ *   U4  页面无 NaN
+ *   U5  console.error / 未捕获异常 = 0
  *
  * 跑法：KNOWBASE_PROBE_PORT=93xx node .AGENT/scripts/workbench-shell/probes/run-probe.mjs \
- *         .AGENT/scripts/workbench-shell/probes/probe-ai-usage-view.mjs --no-sandbox --disable-gpu \
- *         "--user-data-dir=<APPDATA>/knowbase-probe-ai"
+ *         .AGENT/scripts/workbench-shell/probes/probe-ai-usage-view.mjs
  */
 import { writeFileSync, mkdirSync } from 'node:fs'
 
@@ -56,7 +56,7 @@ const evalJs = async (expr) => {
 const results = []
 function ok(pass, label, detail = '') {
   results.push({ pass, label, detail })
-  console.log(`${pass ? '✓' : '✗'} ${label}${detail ? '  → ' + detail : ''}`)
+  console.log(`${pass ? 'PASS' : 'FAIL'} ${label}${detail ? '  -> ' + detail : ''}`)
 }
 
 async function main() {
@@ -77,7 +77,7 @@ async function main() {
   await send('Page.enable')
   mkdirSync(SHOT_DIR, { recursive: true })
 
-  // 首启两层遮罩（仓库选择页 + 欢迎引导），出口可能是文字链 —— 逐轮收敛直到都消失
+  // 首启两层遮罩（仓库选择页 + 欢迎引导），逐轮收敛直到都消失
   let shell = null
   for (let i = 0; i < 30 && !(shell && shell.pagebar && !shell.overlay); i++) {
     shell = await evalJs(`(() => ({
@@ -113,36 +113,38 @@ async function main() {
     const q = (s) => document.querySelector(s)
     const usage = q('[data-setting-anchor="aiTools.usage"]')
     const llm = q('[data-setting-anchor="aiTools.llmUsage"]')
-    const big = llm && [...llm.querySelectorAll('span')].find(x => x.textContent.trim() === '本月 tokens')
-    const bigVal = big && big.parentElement.querySelector('span[title]')
-    const bodyText = document.body.textContent
-    const table = llm && llm.querySelector('table')
-    const heads = table ? [...table.querySelectorAll('th')].map(x => x.textContent.trim()) : []
-    const emptyState = llm && llm.textContent.includes('本月还没有模型调用记录')
-    const emptyBad = /NaN/.test(llm ? llm.textContent : '')
-    const rows = table ? [...table.querySelectorAll('tbody tr')].map(tr => {
-      const tds = [...tr.querySelectorAll('td')]
-      return { name: (tds[0]?.textContent || '').trim().slice(0, 24), cells: tds.length }
-    }) : []
+    const body = usage ? (usage.textContent || '') : ''
+    const limit = q('[data-setting-anchor="aiTools.monthlyLimit"]')
+    const boardBtn = usage ? [...usage.querySelectorAll('button')].find(b => /打开用量看板/.test(b.textContent || '')) : null
     return {
       usage: !!usage, llm: !!llm,
-      hasBig: !!bigVal, bigText: bigVal ? bigVal.textContent.trim() : '', bigTitle: bigVal ? bigVal.title : '',
-      hasToday: !!llm && llm.textContent.includes('今日'),
-      heads, emptyState, emptyBad, rows,
-      hasGrid: !!llm && llm.textContent.includes('调用次数') && llm.textContent.includes('输入') && llm.textContent.includes('输出'),
+      hasMonth: body.includes('本月调用'),
+      hasLimit: !!limit,
+      hasBoard: !!boardBtn,
+      nan: /NaN/.test(body),
     }
   })()`)
 
-  ok(m.usage && m.llm, 'U1 两个锚点都在（aiTools.usage / aiTools.llmUsage）', `usage=${m.usage} llmUsage=${m.llm}`)
-  ok(m.hasBig && m.hasToday && m.hasGrid, 'U2 本月大数字 + 今日行 + 次数/输入/输出三格都在',
-    `大数字=${m.bigText}（title=${m.bigTitle}） 今日行=${m.hasToday} 三格=${m.hasGrid}`)
-  const shapeOk = m.emptyState || (m.heads.length === 6 && m.heads.join(',') === '供应商 · 模型,次数,输入,输出,合计,占比')
-  ok(shapeOk, 'U3 空态或六列明细表二选一',
-    m.emptyState ? '空态（新环境无调用记录）' : `表头=${JSON.stringify(m.heads)} 行数=${m.rows.length}`)
-  ok(!m.emptyBad && (!m.bigText || /[\d.KM]/.test(m.bigText)) && !/NaN/.test(m.bigTitle || ''), 'U4 数字口径：无 NaN，大数字走 K/M 缩写',
-    `大数字=${m.bigText} title=${m.bigTitle}`)
-  const badName = m.rows.some(r => r.name.startsWith(' · '))
-  ok(!badName, 'U5 供应商名兜底：明细无空名行', m.rows.length ? JSON.stringify(m.rows.slice(0, 3)) : '（无明细行）')
+  ok(m.usage && !m.llm, 'U1 锚点 aiTools.usage 在、旧 aiTools.llmUsage 已消失', `usage=${m.usage} llmUsage=${m.llm}`)
+  ok(m.hasMonth && m.hasLimit, 'U2 「本月调用」+ 月度上限输入在场', `本月=${m.hasMonth} 上限=${m.hasLimit}`)
+  ok(m.hasBoard, 'U3a 「打开用量看板」按钮在场')
+  ok(!m.nan, 'U4 页面无 NaN')
+
+  // 点「打开用量看板」→ 走 tab:open → 用量模块挂载
+  if (m.hasBoard) {
+    await evalJs(`(() => {
+      const usage = document.querySelector('[data-setting-anchor="aiTools.usage"]')
+      const b = [...usage.querySelectorAll('button')].find(x => /打开用量看板/.test(x.textContent || ''))
+      if (b) b.click()
+    })()`)
+    let mounted = false
+    for (let i = 0; i < 40; i++) {
+      mounted = await evalJs(`!!document.querySelector('[data-wb="usage"]')`)
+      if (mounted) break
+      await sleep(150)
+    }
+    ok(mounted, 'U3b 点击后用量模块挂载（tab:open 通道打通）')
+  }
 
   for (let i = 0; i < 2; i++) {
     try {
@@ -153,7 +155,7 @@ async function main() {
     } catch (e) { console.log(`  [截图] 第 ${i + 1} 次失败：${e.message}`) }
   }
 
-  ok(consoleErrors === 0 && exceptions === 0, 'U6 console.error / 未捕获异常 = 0',
+  ok(consoleErrors === 0 && exceptions === 0, 'U5 console.error / 未捕获异常 = 0',
     `console.error=${consoleErrors} exceptions=${exceptions}`)
 }
 

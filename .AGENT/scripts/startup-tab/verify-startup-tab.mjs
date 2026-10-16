@@ -95,7 +95,8 @@ ok(new Set(ids).size === ids.length, 'A2 APP_MODULES 内 id 无重复')
 // 所以 G1 磁贴快照、G3 命令面板快照、C3 TILE_META 覆盖都不受影响，只有本条要改。
 // 2026-10-08 v3.5.0：19 项（+terminal +accounting）。两者都是「工作台内模块」——
 // bar:false（入口在左栏书签）/ tile:true / palette:true，同笔记/日程形态，快照同样不受影响。
-ok(ids.length === 19, 'A2b APP_MODULES 覆盖 19 个 TabName（v3.4.0：-desktop -user +bookshelf +aiChat +graph；aaff952 再 -editor；2026-09-22 +bookMarket；2026-09-27 +dashboard；2026-10-08 +terminal +accounting）', `实际 ${ids.length}`)
+// 2026-10-15 v3.9.0：20 项（+aiAssistant）。工作台内模块，bar:false / tile:true / palette:false。
+ok(ids.length === 21, 'A2b APP_MODULES 覆盖 21 个 TabName（v3.4.0：-desktop -user +bookshelf +aiChat +graph；aaff952 再 -editor；2026-09-22 +bookMarket；2026-09-27 +dashboard；2026-10-08 +terminal +accounting；2026-10-15 +aiAssistant；2026-10-16 +usage）', `实际 ${ids.length}`)
 ok(!ids.includes('desktop') && !ids.includes('user'), 'A2c 已删除的 desktop/user 不再出现在清单')
 ok(BAR_MODULE_IDS.every((id) => ids.includes(id)), 'A3 BAR_MODULE_IDS ⊆ APP_MODULES')
 ok(!APP_MODULES.some((m) => 'startable' in m),
@@ -168,8 +169,9 @@ if (railIds === null) {
   ok(false, 'C1 ActivityBar RAIL_BUTTONS 覆盖拍板项', '抠不到 RAIL_BUTTONS（结构变了，脚本要跟着改）')
 } else {
   // 2026-09-22 书市：4 → 5 项（bookMarket **追加在末尾**，现四项位置不动）
-  ok(railIds.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket',
-    'C1 ActivityBar RAIL_BUTTONS 覆盖 5 项（AI 教学入口 + 回收站/插件市场/动态 + 书市）', `实际 ${railIds.join(',')}`)
+  // 2026-10-16 用量 v3.9.0：5 → 6 项（usage **追加在末尾**）
+  ok(railIds.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket,usage',
+    'C1 ActivityBar RAIL_BUTTONS 覆盖 6 项（AI 教学入口 + 回收站/插件市场/动态 + 书市 + 用量）', `实际 ${railIds.join(',')}`)
 }
 ok(/title="设置"/.test(srcBar), 'C1b 图标条底部设置按钮存在（直开设置标签页）')
 checkCover('C3 tiles.tsx TILE_META 覆盖全部可作磁贴模块', keysOfRecord(srcTiles, 'TILE_META'), TILE_MODULE_IDS)
@@ -182,8 +184,10 @@ ok(normalizeModuleId('immersive') === 'aiTeaching', 'D1 normalizeModuleId 归一
 console.log('\n=== G. v3.4.0 口径快照（锁定新顺序，防后续误动） ===')
 // v3.4.0 桌面外壳删除后的磁贴清单（tile:true 的模块，顺序 = APP_MODULES 声明序；editor 已退役故不在列）
 // 2026-10-08 v3.5.0：+terminal +accounting（工作台内模块，tile:true）。
-const V340_TILE_ORDER = ['knowledge', 'blog', 'schedule', 'moments', 'aiTeaching', 'toolbox',
-  'terminal', 'accounting', 'plugins', 'bookMarket', 'recycle', 'help', 'releaseNotes', 'settings']
+// 2026-10-15 v3.9.0：+aiAssistant（紧随 aiTeaching，工作台内模块，tile:true）。
+// 2026-10-16 v3.9.0：+usage（追加在 bookMarket 后，整窗独占模块，tile:true）。
+const V340_TILE_ORDER = ['knowledge', 'blog', 'schedule', 'moments', 'aiTeaching', 'aiAssistant', 'toolbox',
+  'terminal', 'accounting', 'plugins', 'bookMarket', 'usage', 'recycle', 'help', 'releaseNotes', 'settings']
 ok(TILE_MODULE_IDS.join(',') === V340_TILE_ORDER.join(','),
   'G1 磁贴模块清单与 v3.4.0 口径一致', `\n     期望 ${V340_TILE_ORDER.join(',')}\n     实际 ${TILE_MODULE_IDS.join(',')}`)
 
@@ -192,8 +196,9 @@ ok(TILE_MODULE_IDS.join(',') === V340_TILE_ORDER.join(','),
 
 // 命令面板快照（palette:true；bookshelf/aiChat/graph 刻意不进面板——只能由工作台入口产生；editor 已退役）
 // 2026-10-08 v3.5.0：+terminal +accounting（同上面 G1）。
+// 2026-10-16 v3.9.0：+usage（整窗独占模块但 palette:true，可在命令面板直达）。
 const V340_PALETTE = ['knowledge', 'blog', 'schedule', 'moments', 'aiTeaching', 'toolbox',
-  'terminal', 'accounting', 'plugins', 'bookMarket', 'recycle', 'help', 'settings']
+  'terminal', 'accounting', 'plugins', 'bookMarket', 'usage', 'recycle', 'help', 'settings']
 const newPalette = PALETTE_MODULES.map((m) => m.id)
 ok(newPalette.join(',') === V340_PALETTE.join(','),
   'G3 命令面板清单与 v3.4.0 口径一致（desktop/user 已移除，三个新 Tab 不进面板）',

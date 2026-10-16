@@ -225,6 +225,28 @@ function BookMarketIconHandDrawn(props: IconProps) {
     </Svg>
   )
 }
+/** 用量：半圆表盘（刻度弧 + 底边 + 指针 + 轴心）。
+ *
+ *  几何与经典细线包的 lucide `Gauge` 同构（计量表盘），笔法走项目手绘：线宽 1.6、
+ *  只画上半圆刻度弧 + 两端小刻度，指针指向左上、轴心为实心点。
+ *  两包并存的规则同 PluginIcon：切图标风格时各显其形（手绘=这个，经典细线=lucide Gauge）。 */
+function UsageIconHandDrawn(props: IconProps) {
+  return (
+    <Svg {...props}>
+      {/* 刻度弧：左端点顺时针拱到右端点（上半圆） */}
+      <path d="M4.4 17.2a8 8 0 0 1 15.2 0" />
+      {/* 底边 */}
+      <path d="M3.6 17.2h16.8" />
+      {/* 指针 */}
+      <path d="M12 17.2 8.9 11.6" />
+      {/* 两端小刻度 */}
+      <path d="M6.15 12.35 5.05 11.75" />
+      <path d="M17.85 12.35l1.1-.6" />
+      {/* 轴心 */}
+      <circle cx="12" cy="17.2" r="1.05" fill="currentColor" stroke="none" />
+    </Svg>
+  )
+}
 // ===== 风格感知包装(设置→外观→侧边栏图标;default 走上方手绘实现) =====
 
 function StyleAware({ moduleId, Fallback, size = 24, className, strokeWidth }: IconProps & {
@@ -246,6 +268,7 @@ const HAND_DRAWN: Record<IconModuleId, (props: IconProps) => React.ReactElement>
   toolbox: ToolboxIconHandDrawn,
   plugins: PluginIconHandDrawn,
   bookMarket: BookMarketIconHandDrawn,
+  usage: UsageIconHandDrawn,
   recycle: RecycleIconHandDrawn,
   help: HelpIconHandDrawn,
   user: UserIconHandDrawn,
@@ -265,6 +288,7 @@ export function UserIcon(props: IconProps) { return <StyleAware moduleId="user" 
 export function SettingsIcon(props: IconProps) { return <StyleAware moduleId="settings" Fallback={SettingsIconHandDrawn} {...props} /> }
 export function PluginIcon(props: IconProps) { return <StyleAware moduleId="plugins" Fallback={PluginIconHandDrawn} {...props} /> }
 export function BookMarketIcon(props: IconProps) { return <StyleAware moduleId="bookMarket" Fallback={BookMarketIconHandDrawn} {...props} /> }
+export function UsageIcon(props: IconProps) { return <StyleAware moduleId="usage" Fallback={UsageIconHandDrawn} {...props} /> }
 export function EditorIcon(props: IconProps) { return <StyleAware moduleId="editor" Fallback={EditorIconHandDrawn} {...props} /> }
 
 /** 任意包预览:设置→外观 的图标选择器用它渲染每个包的效果 */

@@ -106,44 +106,9 @@ export function clearAudit(pluginId?: string): void {
   globalWriteJson(AUDIT_FILE, readAuditRows().filter(r => r.plugin_id !== pluginId))
 }
 
-// ===== LLM 用量细分（网关补强：按供应商/模型聚合本月 llm.invoke） =====
-
-export interface LlmUsageBreakdownEntry {
-  providerId: string
-  provider: string
-  model: string
-  calls: number
-  tokens: number
-  promptTokens: number
-  completionTokens: number
-}
-
-/** 本月（按本地自然月）成功 llm.invoke 的用量聚合，tokens 降序 */
-export function summarizeMonthLlmUsage(): { month: string; entries: LlmUsageBreakdownEntry[] } {
-  const now = new Date()
-  const p = (n: number) => String(n).padStart(2, '0')
-  const month = `${now.getFullYear()}-${p(now.getMonth() + 1)}`
-  const acc = new Map<string, LlmUsageBreakdownEntry>()
-  for (const r of readAuditRows()) {
-    if (r.action !== 'llm.invoke' || !r.created_at.startsWith(month)) continue
-    let d: Record<string, unknown> = {}
-    try { d = JSON.parse(r.detail || '{}') } catch { continue }
-    if (d.ok !== true) continue
-    const key = `${r.plugin_id}|${String(d.model ?? '')}`
-    const e = acc.get(key) ?? {
-      providerId: r.plugin_id,
-      provider: String(d.provider ?? r.plugin_id),
-      model: String(d.model ?? ''),
-      calls: 0, tokens: 0, promptTokens: 0, completionTokens: 0,
-    }
-    e.calls++
-    e.tokens += Number(d.tokens ?? 0)
-    e.promptTokens += Number(d.promptTokens ?? 0)
-    e.completionTokens += Number(d.completionTokens ?? 0)
-    acc.set(key, e)
-  }
-  return { month, entries: [...acc.values()].sort((a, b) => b.tokens - a.tokens) }
-}
+// ===== LLM 用量细分 =====
+// v3.9.0：`summarizeMonthLlmUsage` / `LlmUsageBreakdownEntry` 随 `llm:usageBreakdown` 通道一起退役
+// —— token / 费用 / 额度统一由整窗「用量」模块（agentUsage → usage:dashboard）承担。
 
 /** 入参摘要：JSON 序列化后截断，防止超大入参撑爆审计表 */
 export function summarizeArgs(args: unknown, maxChars = 200): string {

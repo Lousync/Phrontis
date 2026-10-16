@@ -69,6 +69,16 @@ export interface ToolInvokeCtx {
    * 其余工具都是本地毫秒级动作，拿到信号也没用；只有长外呼类工具（image）消费它。
    */
   signal?: AbortSignal
+  /**
+   * AI助手（v3.9.0，source='aiAssistant'）的读写作用域：归一化仓库相对前缀数组。
+   * vault.* 工具据此硬校验（读含一跳链接扩展，写严格在内）。其他来源不传 = 不限定。
+   */
+  scope?: string[]
+  /**
+   * 暂存（propose）模式（v3.9.0）：AI助手主线在落盘前先把改动记入变更方案、待用户确认。
+   * true 时 vault.* 写工具不直接落盘，改由 aiAssistantCommit 的岔口暂存。
+   */
+  propose?: boolean
 }
 
 export type ToolHandler = (args: Record<string, unknown>, ctx?: ToolInvokeCtx) => unknown | Promise<unknown>

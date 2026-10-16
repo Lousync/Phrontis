@@ -18,8 +18,9 @@ import {
 } from 'lucide-react'
 import {
   EditorIcon, BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon,
-  ToolboxIcon, PluginIcon, AiTeachingIcon, UserIcon, SettingsIcon, BookMarketIcon,
+  ToolboxIcon, PluginIcon, AiTeachingIcon, UserIcon, SettingsIcon, BookMarketIcon, UsageIcon,
 } from '../../components/shared/ModuleIcons'
+import { AiAssistantIcon } from '../../components/shared/AiAssistantIcon'
 import type { DesktopData, DerivedStats } from './useDesktopData'
 import { hasCheckOn, shiftDays } from './useDesktopData'
 import { isoWeekNo, weekRangeOf, monthRangeOf, yearRangeOf, summaryWindowsAt } from '../../lib/summary'
@@ -672,8 +673,12 @@ const TILE_META: Record<string, { desc: string; icon: (size: number) => ReactNod
   // v3.5.0 终端 / 记账（工作台内模块，同笔记/日程形态；图标与左栏书签同一对 lucide 图标）
   terminal: { desc: '内置终端 · 多会话', icon: (s) => <SquareTerminal size={s} /> },
   accounting: { desc: '流水 / 统计 / 复盘', icon: (s) => <Wallet size={s} /> },
+  // v3.9.0 AI助手：圈定范围让 AI 整理仓库（读 + 改，改动先预览）
+  aiAssistant: { desc: 'AI 整理仓库', icon: (s) => <AiAssistantIcon size={s} /> },
   plugins: { desc: '已装插件管理', icon: (s) => <PluginIcon size={s} /> },
   bookMarket: { desc: '从书源找书并下载上架', icon: (s) => <BookMarketIcon size={s} /> },
+  // v3.9.0 用量：本机全部 AI 调用（tokens / 估算费用 / 账户额度），只读
+  usage: { desc: 'AI 用量与账户额度', icon: (s) => <UsageIcon size={s} /> },
   recycle: { desc: '找回删掉的内容', icon: (s) => <Trash2 size={s} /> },
   help: { desc: '使用说明与快捷键', icon: (s) => <LifeBuoy size={s} /> },
   user: { desc: '个人信息', icon: (s) => <UserIcon size={s} /> },

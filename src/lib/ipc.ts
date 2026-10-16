@@ -1,7 +1,9 @@
-import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, ScheduleRecurring, CreateScheduleRecurringDTO, ScheduleRecurringSettleResult, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitPeriodStat, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmModelFamily, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, LlmUsageBreakdownEntry, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentRunStateEvent, AgentSessionInfo, AgentSessionSource, AgentSideLaneCreateResult, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, AiUsageDay, SessionFileChange, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginDashboardWidget, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, AiTeachProfileEntry, AiTeachCourseState, AiTeachCourseUnitProgress, CreatePasswordEntryDTO, UpdatePasswordEntryDTO, PdfBookState, PdfBookPatch, BookListItem, ReaderBookState, ReaderStatePatch, ExcerptItem, ExcerptCreatePayload, ExcerptPatch, ExcerptExportEntry, WorkspaceRangeBytesResult, BookSourceInfo, AiTeachFavorite, BookSourcePatch, BookSourceCredentialInput, BookSourceConnectivity, BookMarketSearchResponse, BookDownloadRequest, BookDownloadStartResult, BookDownloadTask, BookDownloadAction, PetSpecies, PluginPetInfo, PluginMascotInfo, TerminalSessionInfo, TerminalCreateResult, TerminalShellInfo, TerminalAiRecord } from '../types'
+import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, Tag, CreateScheduleTodoDTO, UpdateScheduleTodoDTO, ScheduleRecurring, CreateScheduleRecurringDTO, ScheduleRecurringSettleResult, CreateKnowledgeCategoryDTO, UpdateKnowledgeCategoryDTO, CreateKnowledgePageDTO, UpdateKnowledgePageDTO, KnowledgeTag, ExportFileResult, UserProfile, UserStats, UserExportData, UserImportData, MomentsPost, CreateMomentsPostDTO, UpdateMomentsPostDTO, MomentsAlbum, AttachmentMeta, CreateHabitDTO, UpdateHabitDTO, HabitPeriodStat, SuperviseConfig, AiToolsListResult, AiToolInvokeResult, AiToolUsage, AuditEntryInfo, McpServerInfo, McpServerDraft, McpToolPreview, McpTestResult, SkillInfo, SkillInstallResult, LlmProviderInfo, LlmProviderDraft, LlmProviderType, LlmModelFamily, LlmTestResultInfo, LlmModelTestResultInfo, LlmUsageInfo, AgentChatMessage, AgentChatResult, AgentCompressResult, AgentContextInfo, AgentRunStateEvent, AgentSessionInfo, AgentSessionSource, AgentSideLaneCreateResult, AgentSideLaneInfo, AgentStoredMessage, AgentTraceStep, AgentStreamEvent, AiUsageDay, AiUsageModelBucket, SessionFileChange, AiChangePlan, AiTaskSummary, AiScopeSuggestion, CcSwitchScanResult, CcSwitchImportResult, QuizSnapshotDto, QuizRecordDto, QuizCollectionDto, QuizStatsDto, QuizTagDto, PluginViewContribution, PluginDashboardWidget, PluginCommandInfo, PluginSettingItem, PluginRendererInfo, QuizDataStats, DictLookupResult, DictStatus, TranslateInvokeRequest, TranslateInvokeResult, PdfOpResult, PdfExportResult, AiTeachSourceInput, AiTeachProfileEntry, AiTeachCourseState, AiTeachCourseUnitProgress, CreatePasswordEntryDTO, UpdatePasswordEntryDTO, PdfBookState, PdfBookPatch, BookListItem, ReaderBookState, ReaderStatePatch, ExcerptItem, ExcerptCreatePayload, ExcerptPatch, ExcerptExportEntry, WorkspaceRangeBytesResult, BookSourceInfo, AiTeachFavorite, BookSourcePatch, BookSourceCredentialInput, BookSourceConnectivity, BookMarketSearchResponse, BookDownloadRequest, BookDownloadStartResult, BookDownloadTask, BookDownloadAction, PetSpecies, PluginPetInfo, PluginMascotInfo, TerminalSessionInfo, TerminalCreateResult, TerminalShellInfo, TerminalAiRecord } from '../types'
 import type { SettingsKey, SettingsValue, AppSettings } from './settings'
 import { SETTINGS_DEFAULTS } from './settings'
 import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingRecurring, AccountingParseOutcome, AccountingImportOutcome, CreateAccountingInput, CreateAccountingRecurringInput, AccountingRecurringSettleResult } from '../types'
+import type { ProviderQuotaView } from '../types'
+import type { UsageWindow, UsageDashboardView } from '../types'
 const a = () => { if (!window.api) throw new Error('Electron API not available.'); return window.api }
 
 export const getPathForFile = (file: File): string => a().getPathForFile(file)
@@ -590,7 +592,6 @@ export const llmAddModel = (id: string, model: string): Promise<{ ok: boolean; m
 export const llmSetDefaultModel = (value: string): Promise<{ ok: boolean }> => a().llmSetDefaultModel(value)
 export const llmTestModel = (providerId: string, model: string): Promise<LlmModelTestResultInfo> => a().llmTestModel(providerId, model)
 export const llmGetUsage = (): Promise<LlmUsageInfo> => a().llmGetUsage()
-export const llmUsageBreakdown = (): Promise<{ month: string; entries: LlmUsageBreakdownEntry[] }> => a().llmUsageBreakdown()
 
 // ===== 划词翻译 / 离线词典 =====
 export const dictLookup = (word: string): Promise<DictLookupResult> => a().dictLookup(word)
@@ -641,9 +642,23 @@ export const agentTakeAdoptNotice = (): Promise<{ sessions: number; messages: nu
   a().agentTakeAdoptNotice()
 /** AI token 用量（按日聚合；右栏 token 面板「今日消耗 / 会话 TOP」数据源） */
 export const agentUsageGet = (): Promise<{ days: Record<string, AiUsageDay> }> => a().agentUsageGet()
+export const agentUsageModels = (): Promise<Record<string, AiUsageModelBucket>> => a().agentUsageModels()
+/** 账户级远程额度（v3.9.0 用量模块）；不传 accountIds = 每个供应商只查激活账户 */
+export const llmGetQuota = (opts?: { providerId?: string; accountIds?: string[]; force?: boolean }): Promise<ProviderQuotaView[]> =>
+  a().llmGetQuota(opts)
+/** 用量看板聚合（v3.9.0 用量模块） */
+export const usageDashboard = (win: UsageWindow): Promise<UsageDashboardView> => a().usageDashboard(win)
 /** 会话文件改动审计（不传 sessionId = 本次运行全部，按时间倒序） */
 export const agentSessionChanges = (sessionId?: string): Promise<SessionFileChange[]> => a().agentSessionChanges(sessionId)
+// ===== AI助手变更方案（v3.9.0）=====
+export const aiAssistantPlanGet = (sessionId: string): Promise<AiChangePlan | null> => a().aiAssistantPlanGet(sessionId)
+export const aiAssistantPlanApply = (sessionId: string, acceptedIds: string[]): Promise<{ applied: number; opIds: string[] }> => a().aiAssistantPlanApply(sessionId, acceptedIds)
+export const aiAssistantPlanReject = (sessionId: string): Promise<boolean> => a().aiAssistantPlanReject(sessionId)
+export const aiAssistantTaskRollback = (sessionId: string): Promise<{ reverted: number }> => a().aiAssistantTaskRollback(sessionId)
+export const aiAssistantTasks = (): Promise<AiTaskSummary[]> => a().aiAssistantTasks()
+export const aiAssistantScopeSuggest = (query: string, limit?: number): Promise<AiScopeSuggestion[]> => a().aiAssistantScopeSuggest(query, limit)
 export const agentRenameSession = (id: string, title: string): Promise<boolean> => a().agentRenameSession(id, title)
+export const agentSetSessionScope = (id: string, scope: string[]): Promise<{ ok: boolean; error?: string }> => a().agentSetSessionScope(id, scope)
 export const agentDeleteSession = (id: string): Promise<boolean> => a().agentDeleteSession(id)
 export const agentSetSessionPinned = (id: string, pinned: boolean): Promise<boolean> => a().agentSetSessionPinned(id, pinned)
 // ===== v3.1.2 条目11：支线旁问（sidetrack）=====

@@ -267,7 +267,6 @@ const api = {
   llmVisionModels: () => ipcRenderer.invoke('llm:visionModels'),
   llmTestModel: (providerId: string, model: string) => ipcRenderer.invoke('llm:testModel', { providerId, model }),
   llmGetUsage: () => ipcRenderer.invoke('llm:getUsage'),
-  llmUsageBreakdown: () => ipcRenderer.invoke('llm:usageBreakdown'),
   llmReasoningCapable: (model: string) => ipcRenderer.invoke('llm:reasoningCapable', model),
   // 划词翻译 / 离线词典
   dictLookup: (word: string) => ipcRenderer.invoke('dict:lookup', word),
@@ -318,8 +317,21 @@ const api = {
   agentTakeAdoptNotice: () => ipcRenderer.invoke('agent:takeAdoptNotice'),
   // AI 用量 / 会话文件改动（v3.4.0 批次5）：右栏 token 面板只读
   agentUsageGet: () => ipcRenderer.invoke('agent:usage:get'),
+  agentUsageModels: () => ipcRenderer.invoke('agent:usage:models'),
+  // 账户级远程额度（v3.9.0 用量模块）：llm:quota:get
+  llmGetQuota: (opts?: { providerId?: string; accountIds?: string[]; force?: boolean }) => ipcRenderer.invoke('llm:quota:get', opts),
+  // 用量看板聚合（v3.9.0 用量模块）：usage:dashboard
+  usageDashboard: (win: 30 | 90 | 365 | 'all') => ipcRenderer.invoke('usage:dashboard', win),
   agentSessionChanges: (sessionId?: string) => ipcRenderer.invoke('agent:sessionChanges:get', sessionId),
+  // AI助手变更方案（v3.9.0）：预览 / 应用 / 丢弃 / 整任务回滚
+  aiAssistantPlanGet: (sessionId: string) => ipcRenderer.invoke('aiAssistant:plan:get', sessionId),
+  aiAssistantPlanApply: (sessionId: string, acceptedIds: string[]) => ipcRenderer.invoke('aiAssistant:plan:apply', sessionId, acceptedIds),
+  aiAssistantPlanReject: (sessionId: string) => ipcRenderer.invoke('aiAssistant:plan:reject', sessionId),
+  aiAssistantTaskRollback: (sessionId: string) => ipcRenderer.invoke('aiAssistant:task:rollback', sessionId),
+  aiAssistantTasks: () => ipcRenderer.invoke('aiAssistant:tasks'),
+  aiAssistantScopeSuggest: (query: string, limit?: number) => ipcRenderer.invoke('aiAssistant:scope:suggest', query, limit),
   agentRenameSession: (id: string, title: string) => ipcRenderer.invoke('agent:renameSession', id, title),
+  agentSetSessionScope: (id: string, scope: string[]) => ipcRenderer.invoke('agent:setSessionScope', id, scope),
   agentSetSessionInstructions: (id: string, instructions: string) => ipcRenderer.invoke('agent:setSessionInstructions', id, instructions),
   agentDeleteSession: (id: string) => ipcRenderer.invoke('agent:deleteSession', id),
   agentSetSessionPinned: (id: string, pinned: boolean) => ipcRenderer.invoke('agent:setSessionPinned', id, pinned),

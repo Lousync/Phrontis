@@ -12,6 +12,8 @@ import {
   type OutlineDraft,
 } from './aiTeachingCourse'
 import type { ToolInvokeCtx } from './aiTools'
+import { assertCanRead, assertCanWrite, readPredicate } from './aiAssistantScope'
+import { commitOrStage } from './aiAssistantCommit'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault, stageImageVersioned } from './workspaceManager'
 import { imageGenerate, imageEdit, imageEditSlotConfigured } from './llmService'
 import { imageSizeOf, exceedsPixelGuard } from './imageHeaderPure'
@@ -1518,8 +1520,9 @@ export function registerBuiltinTools(): void {
     readOnly: true,
     requires: 'read',
     vaultFile: 'read',
-  }, args => {
+  }, (args, ctx) => {
     const rel = str(args.path).trim()
+    assertCanRead(rel, ctx)
     const root = vaultRootPath()
     const abs = resolveSafe(root, rel)
     if (!abs) throw new Error(`路径非法或越出仓库: ${rel || '.'}`)
@@ -1563,7 +1566,7 @@ export function registerBuiltinTools(): void {
     readOnly: true,
     requires: 'read',
     vaultFile: 'read',
-  }, async args => {
+  }, async (args, ctx) => {
     // P2 收编原 knowledge.read：path 与 id 二选一；id 走知识索引定位页面文件
     let rel = str(args.path).trim()
     const pageId = str(args.id).trim()
@@ -1573,6 +1576,7 @@ export function registerBuiltinTools(): void {
       if (!page) throw new Error(`页面不存在: ${pageId}`)
       rel = page.path
     }
+    assertCanRead(rel, ctx)
     const root = vaultRootPath()
     const abs = resolveSafe(root, rel)
     if (!abs) throw new Error(`路径非法或越出仓库: ${rel}`)
@@ -1635,9 +1639,10 @@ export function registerBuiltinTools(): void {
     readOnly: true,
     requires: 'read',
     vaultFile: 'read',
-  }, args => {
+  }, (args, ctx) => {
     const q = str(args.query).trim()
     const limit = clamp(Math.floor(num(args.limit, 20)), 1, 50)
+    const inScope = readPredicate(ctx)
     const terms = q.split(/\s+/).filter(Boolean)
     if (terms.length === 0) throw new Error('缺少关键词 query')
     const root = vaultRootPath()
@@ -1650,8 +1655,10 @@ export function registerBuiltinTools(): void {
       try { text = readFileSync(f, 'utf-8') } catch { continue }
       const lower = text.toLowerCase()
       if (!terms.every(t => lower.includes(t.toLowerCase()))) continue
+      const relPath = vaultRelParts(root, f).join('/')
+      if (!inScope(relPath)) continue
       hits.push({
-        relPath: vaultRelParts(root, f).join('/'),
+        relPath,
         excerpt: buildExcerpt(text.replace(/\s+/g, ' '), terms) || text.replace(/\s+/g, ' ').slice(0, 100),
         size: text.length,
       })
@@ -1682,12 +1689,13 @@ export function registerBuiltinTools(): void {
     requires: 'write',
     tier: 'ondemand',
     vaultFile: 'write',
-  }, (args, ctx) => {
+  }, async (args, ctx) => {
     // v3.1.2 条目10：教学会话下产物落点归一化（裸文件名 / 仓库顶层 / SOURCES → 改写进本会话文件夹）
     const rel = normalizeAiTeachingWritePath(str(args.path).trim(), ctx)
     const content = str(args.content)
     if (!rel) throw new Error('缺少必填参数: path')
     if (content.length > 2_000_000) throw new Error('内容过大（>2MB），拒绝写入')
+    assertCanWrite(rel, ctx)
     const root = vaultRootPath()
     const abs = resolveSafe(root, rel)
     if (!abs) throw new Error(`路径非法或越出仓库: ${rel}`)
@@ -1695,18 +1703,21 @@ export function registerBuiltinTools(): void {
     let existing = false
     try { existing = statSync(abs).isFile() } catch { /* 新建 */ }
     assertAiWritable(root, abs, existing ? args.expectedMtimeMs : null)
-    if (!existing) {
-      try { mkdirSync(dirname(abs), { recursive: true }) } catch { /* 目录已存在 */ }
-    }
-    writeWorkspaceFile(abs, content)
-    if (rel.toLowerCase().endsWith('.md')) {
-      invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 与 ws:writeFile 同规则：.md 落盘即失效，知识列表/图谱立即可见
-      broadcastDataChanged('knowledge') // v3.1.2 条目9：对齐 knowledge.create-page 口径，带 frontmatter 的页即时进列表
-    }
-    const st = statSync(abs)
-    broadcastExternalWrite(rel, st.mtimeMs)
-    notifyVaultTreeChange(rel) // v3.1.2 条目9：编辑区树即时刷新（此前只发 external-change，新文件树上不出现）
-    return { ok: true, path: rel, created: !existing, size: st.size, mtimeMs: st.mtimeMs }
+    const prev = existing ? readFileSync(abs, 'utf-8') : null
+    return commitOrStage(ctx, () => ({ kind: 'write', relPath: rel, prev, next: content }), () => {
+      if (!existing) {
+        try { mkdirSync(dirname(abs), { recursive: true }) } catch { /* 目录已存在 */ }
+      }
+      writeWorkspaceFile(abs, content)
+      if (rel.toLowerCase().endsWith('.md')) {
+        invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 与 ws:writeFile 同规则：.md 落盘即失效，知识列表/图谱立即可见
+        broadcastDataChanged('knowledge') // v3.1.2 条目9：对齐 knowledge.create-page 口径，带 frontmatter 的页即时进列表
+      }
+      const st = statSync(abs)
+      broadcastExternalWrite(rel, st.mtimeMs)
+      notifyVaultTreeChange(rel) // v3.1.2 条目9：编辑区树即时刷新（此前只发 external-change，新文件树上不出现）
+      return { ok: true, path: rel, created: !existing, size: st.size, mtimeMs: st.mtimeMs }
+    })
   })
 
   // 18. builtin.vault.edit —— 精确替换（oldText→newText）+ 末尾追加（P2 收编原 knowledge.append-page）
@@ -1731,12 +1742,13 @@ export function registerBuiltinTools(): void {
     requires: 'write',
     tier: 'ondemand',
     vaultFile: 'write',
-  }, args => {
+  }, async (args, ctx) => {
     const rel = str(args.path).trim()
     const oldText = str(args.oldText)
     const newText = str(args.newText)
     const append = args.append === true
     if (!rel) throw new Error('缺少必填参数: path')
+    assertCanWrite(rel, ctx)
     if (!append && !oldText) throw new Error('缺少必填参数: oldText（append=true 时可省略）')
     if (append && !newText.trim()) throw new Error('追加内容不能为空')
     const root = vaultRootPath()
@@ -1757,21 +1769,23 @@ export function registerBuiltinTools(): void {
       if (text.indexOf(oldText, first + oldText.length) >= 0) throw new Error('待替换片段在文件中出现多处，请提供更长更精确的 oldText（本工具一次只替换一处）')
       next = text.slice(0, first) + newText + text.slice(first + oldText.length)
     }
-    writeWorkspaceFile(abs, next)
-    if (rel.toLowerCase().endsWith('.md')) {
-      invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 同上：edit 后索引/图谱同步刷新
-      broadcastDataChanged('knowledge') // v3.1.2 条目9：知识库列表/图谱同步重读
-    }
-    const after = statSync(abs)
-    broadcastExternalWrite(rel, after.mtimeMs)
-    notifyVaultTreeChange(rel) // v3.1.2 条目9：编辑区树即时刷新
-    return {
-      ok: true,
-      path: rel,
-      mtimeMs: after.mtimeMs,
-      oldChars: oldText.length,
-      newChars: newText.length,
-    }
+    return commitOrStage(ctx, () => ({ kind: 'edit', relPath: rel, prev: text, next }), () => {
+      writeWorkspaceFile(abs, next)
+      if (rel.toLowerCase().endsWith('.md')) {
+        invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '') // 同上：edit 后索引/图谱同步刷新
+        broadcastDataChanged('knowledge') // v3.1.2 条目9：知识库列表/图谱同步重读
+      }
+      const after = statSync(abs)
+      broadcastExternalWrite(rel, after.mtimeMs)
+      notifyVaultTreeChange(rel) // v3.1.2 条目9：编辑区树即时刷新
+      return {
+        ok: true,
+        path: rel,
+        mtimeMs: after.mtimeMs,
+        oldChars: oldText.length,
+        newChars: newText.length,
+      }
+    })
   })
 
   // 19. builtin.vault.resolve-ref —— 校验知识页引用名（场景 A：AI 写 [[链接]] 前确认目标标题）
@@ -1791,15 +1805,17 @@ export function registerBuiltinTools(): void {
     readOnly: true,
     requires: 'read',
     vaultFile: 'read',
-  }, args => {
+  }, (args, ctx) => {
     const raw = str(args.ref).trim()
     if (!raw) throw new Error('缺少必填参数: ref')
     const want = raw.replace(/^\[\[|\]\]$/g, '').split('|')[0].trim()
     if (!want) throw new Error('引用名为空')
+    const inScope = readPredicate(ctx)
     let pages: Array<{ id: string; title: string; path: string }> = []
     try {
       pages = getKnowledgeIndex().pages
         .filter(p => p.entryKind !== 'file') // 引用锚只指向 md 知识页（非 md 文件无标题锚语义）
+        .filter(p => inScope(p.path)) // AI助手：只在作用域内解析引用名
         .map(p => ({ id: p.id, title: p.title, path: p.path }))
     } catch { /* 索引未就绪时按空处理 */ }
     const exact = pages.filter(p => p.title === want)
@@ -1835,10 +1851,11 @@ export function registerBuiltinTools(): void {
     requires: 'write',
     tier: 'ondemand',
     vaultFile: 'write',
-  }, args => {
+  }, async (args, ctx) => {
     const rel = str(args.path).trim()
     const newRel = str(args.newPath).trim()
     if (!rel || !newRel) throw new Error('缺少必填参数: path / newPath')
+    assertCanWrite(rel, ctx)
     const root = vaultRootPath()
     const oldAbs = resolveSafe(root, rel)
     if (!oldAbs) throw new Error(`源路径非法或越出仓库: ${rel}`)
@@ -1860,14 +1877,17 @@ export function registerBuiltinTools(): void {
     }
     const finalAbs = resolveSafe(root, finalNewRel)
     if (!finalAbs) throw new Error('目标路径非法')
+    assertCanWrite(finalNewRel, ctx)
     const rootId = getCurrentVault()?.rootId
     if (!rootId) throw new Error('仓库上下文未就绪')
-    try { mkdirSync(dirname(finalAbs), { recursive: true }) } catch { /* 目录已存在 */ }
-    renameWorkspacePath(rootId, rel, finalNewRel)
-    // v3.1.2 条目9：rename/trash 此前连 external-change 都不发；这里补树刷新（源 + 目标父目录）
-    if (finalNewRel.toLowerCase().endsWith('.md') || rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
-    notifyVaultTreeChange(finalNewRel, rel)
-    return { ok: true, from: rel, to: finalNewRel }
+    return commitOrStage(ctx, () => ({ kind: 'rename', relPath: rel, to: finalNewRel }), () => {
+      try { mkdirSync(dirname(finalAbs), { recursive: true }) } catch { /* 目录已存在 */ }
+      renameWorkspacePath(rootId, rel, finalNewRel)
+      // v3.1.2 条目9：rename/trash 此前连 external-change 都不发；这里补树刷新（源 + 目标父目录）
+      if (finalNewRel.toLowerCase().endsWith('.md') || rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
+      notifyVaultTreeChange(finalNewRel, rel)
+      return { ok: true, from: rel, to: finalNewRel }
+    })
   })
 
   // 21. builtin.vault.trash —— 移入系统回收站（绝不删除）
@@ -1888,9 +1908,10 @@ export function registerBuiltinTools(): void {
     requires: 'write',
     tier: 'ondemand',
     vaultFile: 'write',
-  }, async args => {
+  }, async (args, ctx) => {
     const rel = str(args.path).trim()
     if (!rel) throw new Error('缺少必填参数: path')
+    assertCanWrite(rel, ctx)
     const root = vaultRootPath()
     const abs = resolveSafe(root, rel)
     if (!abs) throw new Error(`路径非法或越出仓库: ${rel}`)
@@ -1900,11 +1921,14 @@ export function registerBuiltinTools(): void {
     if (!isFile) throw new Error('vault.trash 仅支持文件（目录整理请用编辑器）')
     const rootId = getCurrentVault()?.rootId
     if (!rootId) throw new Error('仓库上下文未就绪')
-    await trashWorkspacePath(rootId, rel)
-    // v3.1.2 条目9：删除后编辑区树与知识库同步（此前无任何广播，文件树上条目还在）
-    if (rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
-    notifyVaultTreeChange(rel)
-    return { ok: true, trashed: rel }
+    const prev = readFileSync(abs, 'utf-8')
+    return commitOrStage(ctx, () => ({ kind: 'trash', relPath: rel, prev }), async () => {
+      await trashWorkspacePath(rootId, rel)
+      // v3.1.2 条目9：删除后编辑区树与知识库同步（此前无任何广播，文件树上条目还在）
+      if (rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
+      notifyVaultTreeChange(rel)
+      return { ok: true, trashed: rel }
+    })
   })
 
   // ===== web.read：通读 https 网页正文（场景 B「吃资料」，跨模块通用，不设 module） =====

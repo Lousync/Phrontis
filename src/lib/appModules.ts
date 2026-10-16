@@ -55,6 +55,9 @@ export const APP_MODULES = [
   { id: 'schedule', label: '日程', bar: false, tile: true, palette: true },
   { id: 'moments', label: '动态', bar: true, tile: true, palette: true },
   { id: 'aiTeaching', label: 'AI教学', bar: true, tile: true, palette: true },
+  // v3.9.0 AI助手（仓库整理）：工作台内模块（左栏书签进，同笔记/日程形态）。
+  // 入口形态 = bar:false / tile:true / palette:false（拍板：只靠书签 + 桌面磁贴进，不开命令面板）。
+  { id: 'aiAssistant', label: 'AI助手', bar: false, tile: true, palette: false },
   { id: 'toolbox', label: '工具箱', bar: false, tile: true, palette: true },
   // v3.5.0 终端（docs/terminal-module-design.md）：工作台内模块（左栏书签进，同笔记/日程形态）
   { id: 'terminal', label: '终端', bar: false, tile: true, palette: true },
@@ -65,6 +68,8 @@ export const APP_MODULES = [
   // 排在 bar 段末尾是有意的 —— 活动栏图标条（ActivityBar 的 RAIL_BUTTONS）按同一顺序追加，
   // 现有四项的位置一个不动。
   { id: 'bookMarket', label: '书市', bar: true, tile: true, palette: true },
+  // v3.9.0 用量：图标条最左窄列整窗模块（用户拍板）——全 app AI token 用量 + 账户额度。
+  { id: 'usage', label: '用量', bar: true, tile: true, palette: true },
   // 2026-09-27 看板：入口只在**左栏书签**（WORKBENCH_BOOKMARKS），不在图标条、不做磁贴、
   // 不进命令面板 —— 所以三个 flag 全 false。它同时进 WORKBENCH_TABBAR_EXCLUDED，
   // 效果 = 点开整窗铺满且**不产生标签页**。
@@ -139,7 +144,7 @@ function parseIdList(raw: string | undefined, fallback: TabName[]): string[] {
  * 唯一承载 —— 旧 `activityBarOrder` / `activityBarHidden` 已随旧八模块图标条退役删除）。
  * `ActivityBar` 的图标表按 id 取，成员与顺序一律来自这里。
  */
-export const RAIL_MODULE_IDS: TabName[] = ['aiTeaching', 'recycle', 'plugins', 'moments', 'bookMarket']
+export const RAIL_MODULE_IDS: TabName[] = ['aiTeaching', 'recycle', 'plugins', 'moments', 'bookMarket', 'usage']
 
 /** 图标条归一化顺序（含被隐藏的项）—— 拖拽后写回 `railOrder` 用的就是它 */
 export function railOrder(rawOrder?: string): TabName[] {

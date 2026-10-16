@@ -60,17 +60,17 @@ function stripComments(src) {
 /* ================= A. 书签 ↔ 模块映射（唯一真相源双向断言） ================= */
 console.log('\n=== A. 书签映射双向断言（方案 §3.3 / 原型 v15 六书签） ===')
 const keys = WORKBENCH_BOOKMARKS.map((b) => b.key)
-ok(keys.length === 8, 'A1 内置书签固定 8 项（看板 + 笔记/日程/书架/博客总结/记账 + 错题本 + 终端 2026-10-05）', `实际 ${keys.length}`)
+ok(keys.length === 9, 'A1 内置书签固定 9 项（看板 + 笔记/日程/书架/博客总结/记账 + 错题本 + 终端 2026-10-05 + AI助手 2026-10-15）', `实际 ${keys.length}`)
 ok(new Set(keys).size === keys.length, 'A2 书签 key 无重复')
-ok(keys.join(',') === 'dashboard,knowledge,schedule,bookshelf,blog,accounting,quiz,terminal', 'A3 书签集合与顺序（2026-09-27 看板排首位 —— 它是「打开第一眼该看什么」的落点；2026-10-05 终端 v3.5.0 入列末位；记账排在博客总结后、错题本前）', `实际 ${keys.join(',')}`)
+ok(keys.join(',') === 'dashboard,knowledge,schedule,bookshelf,blog,accounting,quiz,terminal,aiAssistant', 'A3 书签集合与顺序（2026-09-27 看板排首位 —— 它是「打开第一眼该看什么」的落点；2026-10-05 终端 v3.5.0 入列；2026-10-15 AI助手 v3.9.0 入列末位；记账排在博客总结后、错题本前）', `实际 ${keys.join(',')}`)
 ok(WORKBENCH_BOOKMARKS.every((b) => isTabName(b.tab)), 'A4 每个书签的 tab 都是合法 TabName',
   WORKBENCH_BOOKMARKS.filter((b) => !isTabName(b.tab)).map((b) => b.key).join(','))
 const quiz = WORKBENCH_BOOKMARKS.find((b) => b.key === 'quiz')
 ok(quiz?.tab === 'knowledge', 'A5 错题本书签 = knowledge 标签（不占独立 TabName，方案 §3.3）', `实际 ${quiz?.tab}`)
 const followValues = Object.values(RAIL_FOLLOW_MAP)
-ok(followValues.every((v) => ['knowledge', 'schedule', 'bookshelf', 'blog', 'aiChat', 'terminal', 'accounting'].includes(v)),
-  'A6 跟随映射的值域合法（quiz 不由标签触发，不进映射；aiChat 批次5 反馈轮入映射；terminal 2026-10-05 B-28 入映射；accounting 记账模块）')
-for (const k of ['knowledge', 'schedule', 'bookshelf', 'blog', 'terminal', 'accounting']) {
+ok(followValues.every((v) => ['knowledge', 'schedule', 'bookshelf', 'blog', 'aiChat', 'terminal', 'accounting', 'aiAssistant'].includes(v)),
+  'A6 跟随映射的值域合法（quiz 不由标签触发，不进映射；aiChat 批次5 反馈轮入映射；terminal 2026-10-05 B-28 入映射；accounting 记账模块；aiAssistant 2026-10-15）')
+for (const k of ['knowledge', 'schedule', 'bookshelf', 'blog', 'terminal', 'accounting', 'aiAssistant']) {
   ok(RAIL_FOLLOW_MAP[k] === k, `A7 跟随映射 ${k} → 自身`)
 }
 
@@ -115,10 +115,11 @@ const srcBlog = stripComments(read('src/modules/blog/index.tsx'))
 
 // C1 图标条按钮集（批次4 拍板 5 → 4；批次5 反馈轮 AI 教学入口回归：RAIL_BUTTONS 4 项 + 底部设置；
 // 2026-09-22 书市 S4：+bookMarket → 5 项，**追加在末尾**（现四项位置不动）；
+// 2026-10-16 用量 v3.9.0：+usage → 6 项，同样追加在末尾；
 // 工具箱入口移右栏上部，与 startup-tab 契约 C1 互为镜像）
 const railM = srcBar.match(/const\s+RAIL_BUTTONS[\s\S]*?=\s*\[([\s\S]*?)\n\]/)
 const railIds = railM ? [...railM[1].matchAll(/id:\s*'([A-Za-z][\w]*)'/g)].map((x) => x[1]) : null
-ok(railIds?.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket', 'C1 图标条 RAIL_BUTTONS = AI教学/回收站/插件市场/动态/书市', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
+ok(railIds?.join(',') === 'aiTeaching,recycle,plugins,moments,bookMarket,usage', 'C1 图标条 RAIL_BUTTONS = AI教学/回收站/插件市场/动态/书市/用量', railIds ? `实际 ${railIds.join(',')}` : '抠不到')
 ok(!/id:\s*'toolbox'/.test(railM ? railM[1] : ''), 'C1b 图标条不再含工具箱按钮（入口语义移 ToolLauncherZone）')
 ok(/title="设置"/.test(srcBar), 'C1c 图标条底部设置按钮存在')
 
@@ -156,11 +157,11 @@ ok(/railDragGuard/.test(srcBar), 'C1h3 手势结束补发 click 的 250ms 兜底
 ok(/onContextMenu=/.test(srcBar), 'C1i 右键菜单入口在场')
 ok(railOrder(undefined).join(',') === RAIL_MODULE_IDS.join(','),
   'C1j railOrder 缺省 = RAIL_MODULE_IDS 全量且同序')
-ok(railOrder('["bookMarket","plugins"]').join(',') === 'bookMarket,plugins,aiTeaching,recycle,moments',
+ok(railOrder('["bookMarket","plugins"]').join(',') === 'bookMarket,plugins,aiTeaching,recycle,moments,usage',
   'C1k railOrder 尊重存量顺序并补齐缺项', railOrder('["bookMarket","plugins"]').join(','))
 ok(!railOrder('["desktop","editor"]').includes('desktop'),
   'C1l railOrder 丢弃非图标条成员（desktop / editor 等陈年 id）')
-ok(railVisibleOrder(undefined, '["moments","plugins"]').join(',') === 'aiTeaching,recycle,bookMarket',
+ok(railVisibleOrder(undefined, '["moments","plugins"]').join(',') === 'aiTeaching,recycle,bookMarket,usage',
   'C1m railVisibleOrder 按 railHidden 剔除', railVisibleOrder(undefined, '["moments","plugins"]').join(','))
 ok(railHiddenIds('["moments"]').length === 1 && railHiddenIds('坏JSON').length === 0,
   'C1n railHiddenIds 坏 JSON 落空数组')

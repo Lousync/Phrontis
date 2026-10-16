@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { TabName } from '../../types'
 import { Trash2, FlaskConical, LayoutPanelLeft, GraduationCap, Check } from 'lucide-react'
-import { MomentsIcon, SettingsIcon, PluginIcon, BookMarketIcon } from './ModuleIcons'
+import { MomentsIcon, SettingsIcon, PluginIcon, BookMarketIcon, UsageIcon } from './ModuleIcons'
 import { WORKBENCH_TABBAR_EXCLUDED } from '../../lib/workbenchLayout'
 import { railHiddenIds, railOrder, railVisibleOrder } from '../../lib/appModules'
 import { useSettings } from '../../lib/SettingsContext'
@@ -57,6 +57,9 @@ const RAIL_BUTTONS: { id: TabName; label: string; icon: (size: number) => React.
   // 追加的 diff 最小、也最好核对。图标走 BookMarketIcon（StyleAware）——
   // 手绘包 = 店招，经典细线包 = lucide Store，两包形状同构、画法有别。
   { id: 'bookMarket', label: '书市', icon: (s) => <BookMarketIcon size={s} /> },
+  // v3.9.0 用量：图标条最左窄列整窗模块（用户拍板）——全 app AI token 用量 + 账户额度。
+  // 图标走 UsageIcon（StyleAware）：手绘包 = 半圆表盘，经典细线包 = lucide Gauge，两包形状同构。
+  { id: 'usage', label: '用量', icon: (s) => <UsageIcon size={s} /> },
 ]
 
 const RAIL_BY_ID = new Map(RAIL_BUTTONS.map((b) => [b.id, b]))

@@ -41,25 +41,35 @@ function fmtTok(n: number): string {
 
 /** 聚合 assistant 回复的 llm trace 用量，渲染"↑输入 ↓输出 · 合计 tokens"小字。
  *  `.kb-l1` = 容器（ChatBody 根）窄于阈值时先隐它 —— 它是辅助统计，
- *  排序在动作钮文字（`.kb-l2`）之前（N-6，阈值实测见 index.css ⑥）。 */
+ *  排序在动作钮文字（`.kb-l2`）之前（N-6，阈值实测见 index.css ⑥）。
+ *  v3.9.0：llm step 带 `costUsd`（主进程按价目表算好）时追加「· $x 估算」；无价目/旧 trace 只有 tokens。 */
+function fmtCostUsd(n: number): string {
+  if (n === 0) return '$0'
+  if (n < 0.01) return `$${n.toFixed(4)}`
+  if (n < 1) return `$${n.toFixed(3)}`
+  return `$${n.toFixed(2)}`
+}
+
 function TokensOf({ trace }: { trace?: AgentTraceStep[] }): ReactNode {
   if (!trace || trace.length === 0) return null
   const llm = trace.filter(s => s.kind === 'llm')
   if (llm.length === 0) return null
-  let p = 0, c = 0, hasSplit = false, t = 0, hasTotal = false
+  let p = 0, c = 0, hasSplit = false, t = 0, hasTotal = false, cost = 0, hasCost = false
   for (const s of llm) {
     if (typeof s.promptTokens === 'number') { p += s.promptTokens; hasSplit = true }
     if (typeof s.completionTokens === 'number') { c += s.completionTokens; hasSplit = true }
     if (typeof s.tokens === 'number') { t += s.tokens; hasTotal = true }
+    if (typeof s.costUsd === 'number') { cost += s.costUsd; hasCost = true }
   }
+  const costText = hasCost ? ` · ${fmtCostUsd(cost)} 估算` : ''
   if (hasSplit && (p > 0 || c > 0)) {
     return (
-      <span className="kb-l1 text-[var(--text-muted)]" title="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）">
-        ↑{fmtTok(p)} ↓{fmtTok(c)} · {fmtTok(p + c)} tokens
+      <span className="kb-l1 text-[var(--text-muted)]" title="本次回复消耗 tokens（↑=上下文输入 ↓=生成输出）与估算费用（按内置价目表，非账单）">
+        ↑{fmtTok(p)} ↓{fmtTok(c)} · {fmtTok(p + c)} tokens{costText}
       </span>
     )
   }
-  if (hasTotal && t > 0) return <span className="kb-l1 text-[var(--text-muted)]">≈{fmtTok(t)} tokens</span>
+  if (hasTotal && t > 0) return <span className="kb-l1 text-[var(--text-muted)]">≈{fmtTok(t)} tokens{costText}</span>
   return null
 }
 

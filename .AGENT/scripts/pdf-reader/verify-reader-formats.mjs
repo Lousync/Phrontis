@@ -247,7 +247,8 @@ console.log('\n--- ⑩ TabName 冻结（仍 19 项） ---')
   // 2026-09-27 看板：16 → 17（+dashboard）。有意变更，不是漂移 —— 见 verify-pdf-reader ④ 的说明。
   // 2026-10-08 v3.5.0：17 → 19（+terminal +accounting）。两者都是「工作台内模块」（bar:false /
   //   tile:true / palette:true），同笔记/日程形态 —— 有意变更，见 verify-pdf-reader ④ 的说明。
-  check('APP_MODULES 仍为 19 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 19, `实得 ${ids.length}: ${ids.join(',')}`)
+  // 2026-10-15 v3.9.0：19 → 20（+aiAssistant）。工作台内模块，bar:false / tile:true / palette:false。
+  check('APP_MODULES 仍为 20 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 20, `实得 ${ids.length}: ${ids.join(',')}`)
 }
 
 // ===== ⑪ 扫描版探测（轻量方案） =====

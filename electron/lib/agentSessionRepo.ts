@@ -64,7 +64,7 @@ function requireAgentDir(): string {
  * 会话来源：用于把「通用 AI 助手」（侧栏 / AI 学堂）与「AI 教学」的会话列表互相隔离。
  * 二者共用同一张会话表（同一份存储、同一套 AgentRunner），只在列表展示上按来源分流。
  */
-export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule'
+export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant'
 
 /**
  * 会话通道（台账 N-1「手册通道」）：
@@ -124,6 +124,12 @@ export interface AgentSessionRow {
   lane_status?: 'run' | 'done' | 'cut'
   /** 支线旁问：上次打开（已读）的本地时间串；缺省 = 从未打开 */
   lane_seen_at?: string
+  /**
+   * AI助手（source='aiAssistant'）任务级作用域：归一化后的仓库相对前缀数组
+   * （目录前缀 + 单文件路径）。缺省 / 空数组 = 尚未圈定。语义与 `aiAssistantScope` 一致。
+   * 仅 AI助手用；其它来源不写。
+   */
+  scope?: string[]
 }
 
 /** 等价 datetime('now','localtime')：本地时间 "YYYY-MM-DD HH:MM:SS" */
@@ -209,6 +215,7 @@ export function createAgentSession(title = '新会话', source: AgentSessionSour
     title,
     instructions: '',
     source,
+    ...(source === 'aiAssistant' ? { scope: [] as string[] } : {}),
     created_at: nowLocal(),
     updated_at: nowLocal(),
   }
@@ -386,6 +393,29 @@ export function updateAgentSessionInstructions(id: string, instructions: string)
   if (!row) return
   row.instructions = text
   row.updated_at = nowLocal()
+  writeSessions(sessions)
+}
+
+/**
+ * AI助手任务级作用域（归一：去空白、去空项、去重、限量）。
+ *
+ * **不动 `updated_at`** —— 勾选范围是编辑动作、不是对话活跃，改它会把任务无意义地顶到列表最上
+ * （同 digest 口径）。空数组写回 `[]`（明确「已圈定但为空」与「从未圈定」在读取侧都当空处理）。
+ */
+export function updateAgentSessionScope(id: string, scope: string[]): void {
+  const seen = new Set<string>()
+  const clean: string[] = []
+  for (const raw of Array.isArray(scope) ? scope : []) {
+    const s = String(raw ?? '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+    if (!s || seen.has(s)) continue
+    seen.add(s)
+    clean.push(s)
+    if (clean.length >= 500) break
+  }
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row) return
+  row.scope = clean
   writeSessions(sessions)
 }
 

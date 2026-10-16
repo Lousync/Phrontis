@@ -11,13 +11,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   FileText, Calendar, BookOpen, MessageCircle, Wrench, Package,
-  Trash2, LifeBuoy, User, Settings, Upload, FileCode2, GraduationCap, Store,
+  Trash2, LifeBuoy, User, Settings, Upload, FileCode2, GraduationCap, Store, Gauge,
 } from 'lucide-react'
 import { pluginGetContribution, pluginListInstalled } from './ipc'
 
 export type IconModuleId =
   | 'blog' | 'schedule' | 'knowledge' | 'moments' | 'aiTeaching' | 'toolbox' | 'plugins'
-  | 'recycle' | 'help' | 'user' | 'settings' | 'export' | 'editor' | 'bookMarket'
+  | 'recycle' | 'help' | 'user' | 'settings' | 'export' | 'editor' | 'bookMarket' | 'usage'
 
 export const BUILTIN_ICON_PACKS = [
   { id: 'default', label: '手绘(默认)' },
@@ -36,6 +36,8 @@ export function renderClassicIcon(moduleId: IconModuleId, size: number, classNam
     // bookMarket 用 Store（铺面）：与手绘包的 BookMarketIconHandDrawn 同构 ——
     // 书架占着 BookMarked（书签书），这里再画一本书只会与它和插件的箱子认混
     bookMarket: Store,
+    // usage 用 Gauge（仪表盘）：与手绘包 UsageIconHandDrawn 同构 —— 用量 = 计量表盘
+    usage: Gauge,
   } as const
   const C = map[moduleId]
   return C ? <C size={size} strokeWidth={1.5} className={className} /> : null

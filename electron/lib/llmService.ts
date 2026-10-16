@@ -1,6 +1,6 @@
 import { app, ipcMain, net } from 'electron'
 import { randomUUID } from 'crypto'
-import { appendAudit, countMonthLlmTokens, countMonthLlmTokensSplit, countMonthVisionTokens, countMonthVisionPages, countTodayLlmUsage, summarizeMonthLlmUsage } from './pluginAudit'
+import { appendAudit, countMonthLlmTokens, countMonthLlmTokensSplit, countMonthVisionTokens, countMonthVisionPages, countTodayLlmUsage } from './pluginAudit'
 import { encryptSecret, decryptSecret } from './secretBox'
 import { scanCcSwitch, importCcSwitchIds, bindCcSwitchSaver } from './ccSwitchImport'
 import {
@@ -19,6 +19,7 @@ import {
   interruptionOfStopReason, interruptionDetailOf, STOP_REASON_NO_TERMINATOR,
   type Interruption, type InterruptionDetail, type InterruptCode,
 } from './llmFailurePure'
+import { recordAiUsage, usageKeyOf } from './agentUsage'
 
 /**
  * Model Gateway —— LLM API 统一接入层（方案 .claude/plans/model-gateway.md）。
@@ -344,6 +345,27 @@ function saveProviders(list: ProviderConfig[]): void {
 function activeKeyOf(p: ProviderConfig): string {
   const enc = activeAccountKeyEnc(p)
   return enc ? decryptSecret(enc) : ''
+}
+
+export type ResolveSecretResult =
+  | { ok: true; provider: ProviderConfig; accountId: string; accountName: string; active: boolean; secret: string }
+  | { ok: false; error: string; code: 'PROVIDER_NOT_FOUND' | 'ACCOUNT_NOT_FOUND' | 'NO_KEY' }
+
+/** 按 providerId（可选指定 accountId）取明文 Key + 账号身份。**一处实现两处用**
+ *  （额度查询 providerQuota 与 llm:testConnection），避免第二份解析漂移。accountId 缺省 = 当前激活账号。 */
+export function resolveProviderSecret(providerId: string, accountId?: string): ResolveSecretResult {
+  const p = getProviders().find(x => x.id === providerId)
+  if (!p) return { ok: false, error: '供应商不存在', code: 'PROVIDER_NOT_FOUND' }
+  const acct = accountId ? (p.accounts ?? []).find(a => a.id === accountId) : activeAccountOf(p)
+  if (!acct) return { ok: false, error: accountId ? '账号不存在' : '该供应商没有账号', code: 'ACCOUNT_NOT_FOUND' }
+  const secret = acct.keyEncrypted ? decryptSecret(acct.keyEncrypted) : ''
+  if (!secret) return { ok: false, error: '账号未配置 Key', code: 'NO_KEY' }
+  return { ok: true, provider: p, accountId: acct.id, accountName: acct.name, active: acct.id === p.activeAccountId, secret }
+}
+
+/** 额度查询用：列出「已启用」的供应商（额度是账户级的，调用方自行决定查激活账号还是逐账户查） */
+export function listQuotaProviders(): ProviderConfig[] {
+  return getProviders().filter(p => p.enabled)
 }
 
 // ===== URL 安全校验 =====
@@ -1233,6 +1255,9 @@ export interface LlmInvokeRequest {
   /** 会话标识（2026-10-13，供 x-opencode-session 路由/提示缓存）。
    *  同一对话的每一轮必须是同一个值；无对话的场景传固定用途名（如 'translate' / 'vision'）。 */
   sessionId?: string
+  /** 记账归属（v3.9.0 统一记账）：默认 `'auto'` = llmService 自己记入 ai-usage.json；
+   *  `'caller'` = 调用方（agentService）自己记（带 sessionTitle），网关**不记**，避免双记。 */
+  accounting?: 'auto' | 'caller'
 }
 
 /** 网关失败码 = 归因码 ∪ 配置类码（配置类在发请求前就知道，没有采集面） */
@@ -1325,6 +1350,26 @@ function streamEnabled(): boolean {
   return depsRef?.getSettingValue('aiStreamEnabled') !== false
 }
 
+/** v3.9.0 统一记账：网关直调（翻译 / 嵌入 / 教学 / 内联续写 / 视觉等）也计入 ai-usage.json。
+ *  agentService 传 accounting:'caller' 时跳过（它带 sessionTitle 自行记账，避免双记）。
+ *  不传 sessionId → 不污染右栏「会话消耗 TOP」（那是 agentService 唯一 sessionTitle 来源）。 */
+function accountInvokeUsage(
+  req: LlmInvokeRequest,
+  providerId: string,
+  model: string,
+  usage: { promptTokens: number; completionTokens: number; cachedTokens?: number },
+): void {
+  if (req.accounting === 'caller') return
+  recordAiUsage({
+    sessionId: '',
+    model: usageKeyOf(providerId, model),
+    promptTokens: usage.promptTokens,
+    completionTokens: usage.completionTokens,
+    cachedTokens: usage.cachedTokens,
+    cacheReadTokens: usage.cachedTokens,
+  })
+}
+
 async function llmInvokeOnce(provider: ProviderConfig, model: string, req: LlmInvokeRequest, maxTokens?: number): Promise<LlmInvokeResponse> {
   const adapter = adapterFor(provider, model)
   const started = Date.now()
@@ -1350,6 +1395,7 @@ async function llmInvokeOnce(provider: ProviderConfig, model: string, req: LlmIn
       durationMs: Date.now() - started,
       ok: true,
     })
+    accountInvokeUsage(req, provider.id, model, r.usage)
     return {
       ok: true,
       content: r.content,
@@ -1466,6 +1512,7 @@ export async function invokeLlmStreamInternal(
       durationMs: Date.now() - started,
       ok: true,
     })
+    accountInvokeUsage(req, t.provider.id, t.model, r.usage)
     return {
       ok: true,
       content: r.content,
@@ -1862,8 +1909,6 @@ export function registerLlmHandlers(deps: {
       visionPages: countMonthVisionPages(),
     }
   })
-  // 用量细分（网关补强）：本月按供应商/模型聚合（审计数据源，只读）
-  ipcMain.handle('llm:usageBreakdown', () => summarizeMonthLlmUsage())
 }
 
 /** 供 agentService 复用（不经 IPC） */

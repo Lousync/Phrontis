@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { ConfirmDialog } from '../shared'
+import { AiAssistantIcon } from '../shared/AiAssistantIcon'
 import { FileIcon } from '../shared/FileIcon'
 import { FileContextMenu, type FileMenuEntry } from '../shared/FileContextMenu'
 import { TreeExpandButton } from '../shared/TreeExpandButton'
@@ -53,6 +54,8 @@ const BOOKMARK_ICONS: Record<RailModule, (size: number) => React.ReactNode> = {
   terminal: (s) => <SquareTerminal size={s} />,
   // 记账：钱袋
   accounting: (s) => <Wallet size={s} />,
+  // v3.9.0 AI助手：文件夹 + 右下角小机器人头（自定义图标，与 aiChat 的 Bot 区分）
+  aiAssistant: (s) => <AiAssistantIcon size={s} />,
 }
 
 /** 插件注册书签的钝解析：只收 tab 型 action，坏条目/坏 JSON 静默丢弃（插件数据不可信外壳） */

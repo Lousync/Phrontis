@@ -33,7 +33,7 @@ export interface EntryFilter { date?: string; tagId?: string; pinnedOnly?: boole
 export interface CreateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date: string; tags?: string[]; states?: string }
 export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date?: string; isPinned?: boolean; isStarred?: boolean; tags?: string[]; states?: string }
 export interface Tag { id: string; name: string; color: string }
-export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal' | 'accounting'
+export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'aiAssistant' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal' | 'accounting' | 'usage'
 
 // ===== 记账模块 =====
 // 主进程侧同形状声明见 electron/lib/kbStore/accountingVaultRepo.ts（跨线各侧各声明一次的仓规）
@@ -1130,17 +1130,6 @@ export interface LlmUsageInfo {
   visionPages?: number
 }
 
-/** 本月用量细分（网关补强：审计聚合，按供应商/模型） */
-export interface LlmUsageBreakdownEntry {
-  providerId: string
-  provider: string
-  model: string
-  calls: number
-  tokens: number
-  promptTokens: number
-  completionTokens: number
-}
-
 // ===== CC Switch 一键导入 =====
 
 export interface CcSwitchItem {
@@ -1175,6 +1164,8 @@ export interface AgentTraceStep {
   completionTokens?: number
   /** 命中提示缓存的输入 token 数（观测用，已含在 promptTokens 内） */
   cachedTokens?: number
+  /** 本轮估算费用（USD；llm step，主进程按 `modelPricing` 折算）。无价目 / 失败 → null */
+  costUsd?: number | null
   summary?: string
   /** visual.html / image「生成中」实时事件（agent:step 专用，不落库）：{slug,title} / {prompt,aspect,ref,slug} */
   args?: Record<string, unknown>
@@ -1290,7 +1281,7 @@ export interface AgentContextInfo {
 
 /** 会话来源：把「通用 AI 助手」（侧栏 / AI 学堂）与「AI 教学」的会话列表互相隔离。
  *  二者同表存储、同一套 AgentRunner，仅列表展示分流。与主进程 agentSessionRepo 同构。 */
-export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule'
+export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant'
 
 export interface AgentSessionInfo {
   id: string
@@ -1301,6 +1292,8 @@ export interface AgentSessionInfo {
   mode?: 'manual' | 'agent'
   /** 会话级全局要求（仅本会话生效；空串/缺省=无） */
   instructions?: string
+  /** AI助手任务级作用域（仓库相对前缀数组；缺省/空=未圈定）。仅 source='aiAssistant' 有值 */
+  scope?: string[]
   createdAt: string
   updatedAt: string
   /** 钉住时间（「★ 收藏」分区）：有值 = 已钉住（值用于收藏内排序）；缺省 / null = 未钉住 */
@@ -1496,6 +1489,51 @@ export interface AgentChange {
   file?: string
 }
 
+// ---- AI助手变更方案（v3.9.0）：先预览、后确认、可整任务回滚 ----
+
+export type AiPlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag'
+
+export interface AiPlanOp {
+  id: string
+  kind: AiPlanOpKind
+  /** write/edit/trash/tag：目标文件；rename：源 */
+  relPath?: string
+  /** rename 专用：目标路径 */
+  to?: string
+  /** 变更前内容（null = 文件原本不存在） */
+  prev?: string | null
+  /** 变更后内容（rename/trash 无） */
+  next?: string | null
+  status: 'pending' | 'applied' | 'rejected'
+}
+
+export interface AiChangePlan {
+  taskId: string
+  sessionId: string
+  createdAt: string
+  updatedAt: string
+  ops: AiPlanOp[]
+  appliedAt?: string
+  rolledBackAt?: string
+}
+
+export interface AiTaskSummary {
+  taskId: string
+  createdAt: string
+  updatedAt: string
+  appliedAt?: string
+  rolledBackAt?: string
+  opCount: number
+  pendingCount: number
+}
+
+/** 「描述圈选」建议出的候选作用域条目（v3.9.0 §3.5） */
+export interface AiScopeSuggestion {
+  relPath: string
+  title: string
+  score: number
+}
+
 // ---- AI 用量 / 会话文件改动（v3.4.0 批次5，右栏 token 面板数据源） ----
 
 /** 单日 token 用量聚合（主进程 agentUsage 的渲染层镜像） */
@@ -1506,7 +1544,89 @@ export interface AiUsageDay {
   calls: number
   /** 按会话分桶的当日消耗（title 为记账时快照） */
   sessions: Record<string, { title: string; in: number; out: number }>
+  /** 按模型分桶的当日消耗（v3.9.0 追加；旧数据缺失） */
+  models?: Record<string, AiUsageModelBucket>
 }
+
+/** 按模型分桶的用量（i0=未缓存输入 / ir=缓存读 / iw=缓存写 / out=输出） */
+export interface AiUsageModelBucket {
+  i0: number
+  ir: number
+  iw: number
+  out: number
+  calls: number
+}
+
+/** 套餐窗口（额度视图用；percent 0–100，≥100 与 rate-limited 同档显示） */
+export interface QuotaWindow {
+  key: string
+  label: string
+  percent: number
+  resetsAt?: string
+  status: 'ok' | 'rate-limited'
+}
+
+/** 账户余额（金额一律字符串精确保留；多币种逐条） */
+export interface QuotaMoney {
+  currency: string
+  total: string
+  granted: string
+  topped: string
+}
+
+export type QuotaFailReason = 'unsupported' | 'unauthorized' | 'not-subscribed' | 'network' | 'shape' | 'no-key'
+
+/** 账户级额度视图（v3.9.0 用量模块；主进程 providerQuota 的渲染层镜像） */
+export type ProviderQuotaView =
+  | { providerId: string; providerName: string; accountId: string; accountName: string; active: boolean; ok: true; kind: 'money'; available: boolean; balances: QuotaMoney[]; at: string }
+  | { providerId: string; providerName: string; accountId: string; accountName: string; active: boolean; ok: true; kind: 'windows'; windows: QuotaWindow[]; at: string }
+  | { providerId: string; providerName: string; accountId: string; accountName: string; active: boolean; ok: false; reason: QuotaFailReason; message: string; at: string }
+
+/** 用量看板时间窗（30/90/365 天或全时段） */
+export type UsageWindow = 30 | 90 | 365 | 'all'
+
+/** 用量看板按模型聚合行（镜像 usageDashboardPure.UsageModelRow） */
+export interface UsageModelRow {
+  key: string
+  provider: string
+  model: string
+  i0: number
+  ir: number
+  iw: number
+  out: number
+  calls: number
+  cost: number | null
+  share: number
+}
+
+/** 用量看板时间序列点（按日/周/月分桶） */
+export interface UsageSeriesPoint {
+  key: string
+  label: string
+  i0: number
+  ir: number
+  iw: number
+  out: number
+  calls: number
+  cost: number | null
+}
+
+/** 用量看板热力图单元（固定回看 365 天） */
+export interface UsageHeatCell {
+  date: string
+  tokens: number
+}
+
+/** 用量看板视图（v3.9.0 用量模块；主进程 usageDashboardPure 的渲染层镜像） */
+export interface UsageDashboardView {
+  window: UsageWindow
+  totals: { i0: number; ir: number; iw: number; out: number; calls: number; days: number }
+  models: UsageModelRow[]
+  series: UsageSeriesPoint[]
+  heat: UsageHeatCell[]
+  unknownModels: string[]
+}
+
 
 /** 会话内一次 AI 文件写改动的审计条目（右栏「改动文件」行） */
 export interface SessionFileChange {
@@ -2536,7 +2656,6 @@ export interface ElectronAPI {
   llmSetDefaultModel: (value: string) => Promise<{ ok: boolean }>
   llmTestModel: (providerId: string, model: string) => Promise<LlmModelTestResultInfo>
   llmGetUsage: () => Promise<LlmUsageInfo>
-  llmUsageBreakdown: () => Promise<{ month: string; entries: LlmUsageBreakdownEntry[] }>
   // 划词翻译 / 离线词典
   dictLookup: (word: string) => Promise<DictLookupResult>
   dictStatus: () => Promise<DictStatus>
@@ -2580,8 +2699,21 @@ export interface ElectronAPI {
   agentTakeAdoptNotice: () => Promise<{ sessions: number; messages: number; vaultName: string; at: string } | null>
   // ===== AI 用量 / 会话文件改动（v3.4.0 批次5，右栏 token 面板只读）=====
   agentUsageGet: () => Promise<{ days: Record<string, AiUsageDay> }>
+  agentUsageModels: () => Promise<Record<string, AiUsageModelBucket>>
+  /** 账户级远程额度（v3.9.0 用量模块）；不传 accountIds = 每个供应商只查激活账户 */
+  llmGetQuota: (opts?: { providerId?: string; accountIds?: string[]; force?: boolean }) => Promise<ProviderQuotaView[]>
+  /** 用量看板聚合（v3.9.0 用量模块）；时间窗 30/90/365 天或全时段 */
+  usageDashboard: (win: UsageWindow) => Promise<UsageDashboardView>
   agentSessionChanges: (sessionId?: string) => Promise<SessionFileChange[]>
+  // ===== AI助手变更方案（v3.9.0）=====
+  aiAssistantPlanGet: (sessionId: string) => Promise<AiChangePlan | null>
+  aiAssistantPlanApply: (sessionId: string, acceptedIds: string[]) => Promise<{ applied: number; opIds: string[] }>
+  aiAssistantPlanReject: (sessionId: string) => Promise<boolean>
+  aiAssistantTaskRollback: (sessionId: string) => Promise<{ reverted: number }>
+  aiAssistantTasks: () => Promise<AiTaskSummary[]>
+  aiAssistantScopeSuggest: (query: string, limit?: number) => Promise<AiScopeSuggestion[]>
   agentRenameSession: (id: string, title: string) => Promise<boolean>
+  agentSetSessionScope: (id: string, scope: string[]) => Promise<{ ok: boolean; error?: string }>
   agentSetSessionInstructions: (id: string, instructions: string) => Promise<{ ok: boolean; error?: string }>
   agentDeleteSession: (id: string) => Promise<boolean>
   agentSetSessionPinned: (id: string, pinned: boolean) => Promise<boolean>

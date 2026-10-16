@@ -14,9 +14,19 @@
 import { globalReadJson, globalWriteJson } from './globalJsonStore'
 
 const USAGE_FILE = 'ai-usage.json'
-const KEEP_DAYS = 30
+/** 保留期：仪表盘要 365 天 + 全时段（v3.9.0 由 30 抬到 400） */
+const KEEP_DAYS = 400
 const FLUSH_MS = 1500
 const MAX_SESSION_CHANGES = 80
+
+/** 按模型分桶的当日消耗（v3.9.0 追加；i0=未缓存输入 / ir=缓存读 / iw=缓存写 / out=输出） */
+export interface AiUsageModelBucket {
+  i0: number
+  ir: number
+  iw: number
+  out: number
+  calls: number
+}
 
 /** 单日聚合（in/out 为纯 token 数；cache 为提示缓存命中 token 数，只作展示参考） */
 export interface AiUsageDay {
@@ -26,6 +36,8 @@ export interface AiUsageDay {
   calls: number
   /** 按会话分桶的当日消耗（会话消耗 TOP 数据源；title 为记账时快照） */
   sessions: Record<string, { title: string; in: number; out: number }>
+  /** 按模型分桶的当日消耗（v3.9.0 追加；旧数据缺失 → 读取方按空对象处理） */
+  models?: Record<string, AiUsageModelBucket>
 }
 
 interface AiUsageFile {
@@ -56,6 +68,21 @@ export interface AiUsageRecordInput {
   promptTokens?: number
   completionTokens?: number
   cachedTokens?: number
+  /** 模型键 `providerId:modelId`（或全局默认）；缺省不记入 models 桶 */
+  model?: string
+  /** 缓存读 / 缓存写 token（provider 上报才有；缺失不硬造 0，见 modelPricing 说明） */
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+}
+
+/**
+ * 模型桶键：`providerId:modelId`（无 providerId 时退回裸 modelId）。
+ * 历史数据里只有裸 modelId（无 `:`）→ 读侧显示为「默认通道」，**不迁移**（v3.9.0）。
+ */
+export function usageKeyOf(providerId: string | undefined | null, modelId: string | undefined | null): string {
+  const m = (modelId ?? '').trim()
+  const p = (providerId ?? '').trim()
+  return p && m ? `${p}:${m}` : m
 }
 
 function todayKey(): string {
@@ -111,12 +138,41 @@ export function recordAiUsage(rec: AiUsageRecordInput): void {
     bucket.in += inTok
     bucket.out += outTok
   }
+  // 按模型分桶（v3.9.0）：i0 = 未缓存输入；ir = 缓存读；iw = 缓存写；out = 输出
+  if (rec.model) {
+    const models = day.models ?? (day.models = {})
+    const mb = models[rec.model] ?? (models[rec.model] = { i0: 0, ir: 0, iw: 0, out: 0, calls: 0 })
+    const cacheRead = Math.max(0, Math.round(Number(rec.cacheReadTokens ?? rec.cachedTokens ?? 0)))
+    const cacheWrite = Math.max(0, Math.round(Number(rec.cacheWriteTokens ?? 0)))
+    mb.i0 += Math.max(0, inTok - cacheRead - cacheWrite)
+    mb.ir += cacheRead
+    mb.iw += cacheWrite
+    mb.out += outTok
+    mb.calls += 1
+  }
   flush()
 }
 
 /** 全量日桶（渲染层自行聚合「今日 / 近 7 天」） */
 export function getAiUsageData(): { days: Record<string, AiUsageDay> } {
   return { days: load().days }
+}
+
+/** 按模型聚合（跨全部保留日求和；v3.9.0 仪表盘数据源） */
+export function getAiUsageModels(): Record<string, AiUsageModelBucket> {
+  const out: Record<string, AiUsageModelBucket> = {}
+  for (const day of Object.values(load().days)) {
+    if (!day.models) continue
+    for (const [k, b] of Object.entries(day.models)) {
+      const t = out[k] ?? (out[k] = { i0: 0, ir: 0, iw: 0, out: 0, calls: 0 })
+      t.i0 += b.i0
+      t.ir += b.ir
+      t.iw += b.iw
+      t.out += b.out
+      t.calls += b.calls
+    }
+  }
+  return out
 }
 
 // ---- 会话文件改动（内存，进程生命周期内有效） ----

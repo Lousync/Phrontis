@@ -22,7 +22,7 @@ import {
   createAgentSession, listAgentSessions, renameAgentSession, deleteAgentSession,
   sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages,
   getMessageById, updateMessageContent, deleteMessage, deleteMessagesAfter,
-  getAgentSession, updateAgentSessionInstructions, backfillSessionSources,
+  getAgentSession, updateAgentSessionInstructions, updateAgentSessionScope, backfillSessionSources,
   createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode, setSessionPinned,
   setSideLaneStatus, markSideLaneSeen, updateSessionResume, nowLocal,
 } from './agentSessionRepo'
@@ -42,9 +42,27 @@ import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiT
 import { buildCourseInjection } from './aiTeachingCourse'
 import { listFavorites } from './aiTeachingFavorites'
 import { findSkillPrompt } from './skillService'
-import { recordAiUsage, recordSessionFileChange, getAiUsageData, getSessionChanges } from './agentUsage'
+import { recordAiUsage, usageKeyOf, recordSessionFileChange, getAiUsageData, getAiUsageModels, getSessionChanges } from './agentUsage'
+import { estimateCost } from './modelPricing'
 import { vaultTodosAll } from './kbStore/scheduleVaultRepo'
 import { computeLaneUnread, deriveLaneStatus } from './sideLaneMeta'
+import { buildScopeManifest } from './aiAssistantScope'
+import { getPlan, applyPlan, rejectPlan, rollbackTask, listTasks } from './aiAssistantPlan'
+import { getKnowledgeIndex } from './kbStore/knowledgeIndex'
+import { suggestScope } from './aiAssistantScopeSuggestPure'
+
+/**
+ * 单轮估算费用（USD）：把 provider 的 prompt/completion/cached 拆成 `modelPricing` 的四桶
+ * （i0 = prompt − cached，ir = cached，iw 恒 0 —— 上游不上报缓存写，out = completion）。
+ * 无价目 / 无模型键 → null（界面只显 tokens）。与 `agentUsage.recordAiUsage` 的拆桶口径一致。
+ */
+function roundCostUsd(promptTokens?: number, completionTokens?: number, cachedTokens?: number, modelKey?: string): number | null {
+  if (!modelKey) return null
+  const prompt = Math.max(0, Math.round(Number(promptTokens ?? 0)))
+  const cacheRead = Math.max(0, Math.round(Number(cachedTokens ?? 0)))
+  const out = Math.max(0, Math.round(Number(completionTokens ?? 0)))
+  return estimateCost({ i0: Math.max(0, prompt - cacheRead), ir: cacheRead, iw: 0, out, calls: 1 }, modelKey)
+}
 
 /**
  * 最小 AgentRunner —— 「用户消息 → LLM 决策 → ToolRegistry 执行 → 结果回喂」循环。
@@ -200,6 +218,8 @@ export interface AgentTraceStep {
   completionTokens?: number
   /** 命中提示缓存的输入 token 数（观测用，已含在 promptTokens 内） */
   cachedTokens?: number
+  /** 本轮估算费用（USD；llm step，按 `modelPricing` 折算）。无价目 / 失败 → null，渲染层只显 tokens */
+  costUsd?: number | null
   summary?: string
   /** visual.html 实时占位事件（仅 agent:step 推送，不落库）：{slug,title}——渲染层据此开「生成中」页签 */
   args?: Record<string, unknown>
@@ -678,7 +698,7 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
   // ---- 会话保障 ----
   let sessionId = String(req.sessionId ?? '')
   if (sessionId && !sessionExists(sessionId)) sessionId = ''
-  if (!sessionId) sessionId = createAgentSession('新会话', req.source === 'aiTeaching' ? 'aiTeaching' : req.source === 'schedule' ? 'schedule' : 'assistant').id
+  if (!sessionId) sessionId = createAgentSession('新会话', req.source === 'aiTeaching' ? 'aiTeaching' : req.source === 'schedule' ? 'schedule' : req.source === 'aiAssistant' ? 'aiAssistant' : 'assistant').id
 
   // ---- 落库用户消息 + 自动标题 ----
   appendAgentMessage(sessionId, 'user', message)
@@ -686,7 +706,8 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
 
   // ---- N-1 手册通道：首条消息一次性分类；手册通道内出现操作意图即升格（只升不降） ----
   // 日程助手不走手册通道（req.source==='schedule' 恒走通用通道，见 runAgentLoop 的 manual 判定）
-  if (req.source !== 'aiTeaching' && req.source !== 'schedule') {
+  // AI助手（aiAssistant）同理不走手册通道 —— 它是仓库整理任务，不是「软件怎么用」的答疑。
+  if (req.source !== 'aiTeaching' && req.source !== 'schedule' && req.source !== 'aiAssistant') {
     const row = getAgentSession(sessionId)
     if (row && row.mode === undefined) {
       // 三分类：manual 走手册通道；agent 与 tech（第三方/通用技术问答）都走通用助手
@@ -1129,6 +1150,20 @@ async function runAgentLoop(
   // 日程助手（source==='schedule'）：人设进 system（逐字稳定）；数据快照进首条 user 消息层（每轮现算）
   const schedulePersona = source === 'schedule' ? SCHEDULE_PERSONA : ''
   const scheduleHint = source === 'schedule' ? buildScheduleInjection() : ''
+  // AI助手（source='aiAssistant'）：作用域从 context.data.scope 取（渲染层圈定），写作走暂存（propose）。
+  const aiScope = source === 'aiAssistant'
+    ? (Array.isArray((context?.data as Record<string, unknown> | undefined)?.scope)
+        ? ((context!.data as Record<string, unknown>).scope as unknown[]).filter((x): x is string => typeof x === 'string' && !!x.trim())
+        : undefined)
+    : undefined
+  const aiPropose = source === 'aiAssistant'
+  const aiAssistantHint = aiPropose
+    ? '\n\n【AI助手·作用域纪律】你只能读写本次作用域内的文件；作用域外文件仅当它们是范围内页面的 [[出链]] 目标时才可读取（其余读写调用会返回 ESCOPE 错误）。'
+      + '清单已给出范围内页面；正文按需用 vault.read 读取，不要试图通读整库。'
+      + '\n【AI助手·暂存纪律】你的所有写操作（vault.write / vault.edit / vault.rename / vault.trash）会被**暂存**、不会立即落盘，等用户逐条确认后才应用。'
+      + '因此：先规划要改哪些文件、怎么改，再调用工具；工具返回的 "staged" 表示已记入方案（不是已写入）。'
+      + '**不要**声称"已完成/已修改"——只有用户确认应用之后才算改动。'
+    : ''
   const baseSystem = buildSystemPrompt(context)
   // UI 优化条目9②：教学会话的注入分段用量（字符数，渲染层按 ≈2.6 字/token 折算做构成摘要）
   const injection: AiTeachInjectionStats | undefined = source === 'aiTeaching'
@@ -1143,7 +1178,7 @@ async function runAgentLoop(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT
+    : baseSystem + schedulePersona + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -1174,7 +1209,11 @@ async function runAgentLoop(
   // 生图：本会话「最近生成的图」薄索引（方案 §5.4）。与上面同一理由 —— 放首条 user 消息层，
   // 不放 system（它随会话内容递增而变，进 system 就是每生成一张图就把缓存前缀作废一次）
   const recentImagesHint = (!manual && source !== 'schedule') ? buildRecentImagesHint(sessionId) : ''
-  const requestInjection = [scheduleHint, refInjection, perceptionInjection, recentImagesHint].filter(Boolean).join('\n\n')
+  // AI助手：作用域元数据清单进首条 user 消息层（不进 system —— 清单随任务变，进 system 会作废 prompt cache 前缀）
+  const aiManifestHint = aiPropose
+    ? buildScopeManifest(aiScope, [...history].reverse().find((m) => m.role === 'user')?.content ?? '')
+    : ''
+  const requestInjection = [scheduleHint, refInjection, perceptionInjection, recentImagesHint, aiManifestHint].filter(Boolean).join('\n\n')
 
   // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
@@ -1232,6 +1271,12 @@ async function runAgentLoop(
     providerId = ci > 0 ? llmOpts.modelId.slice(0, ci) : undefined
     modelOverride = ci > 0 ? llmOpts.modelId.slice(ci + 1) : llmOpts.modelId
   }
+  // 用量记账的模型键（v3.9.0 §3.4）：本对话覆盖优先，否则全局默认；经 usageKeyOf 归一为 `providerId:modelId`
+  const usageModel = (() => {
+    const raw = String(llmOpts?.modelId || getSettingReader()('defaultChatModel') || '')
+    const ci = raw.indexOf(':')
+    return ci > 0 ? usageKeyOf(raw.slice(0, ci), raw.slice(ci + 1)) : usageKeyOf('', raw)
+  })()
 
   // 流式增量出口（不落库）：思考链 / 正文 delta 经合批后推给发起窗口。
   // signal 全程不变，取一次即可。
@@ -1270,7 +1315,7 @@ async function runAgentLoop(
     let thinkFrom = 0
     let thinkTo = 0
     const r = await invokeLlmStreamInternal(
-      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort, sessionId },
+      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort, sessionId, accounting: 'caller' },
       (e) => {
         if (e.type === 'text') batcher.push('text', e.delta)
         else if (e.type === 'reasoning') {
@@ -1290,6 +1335,8 @@ async function runAgentLoop(
       promptTokens: r.ok ? r.promptTokens : undefined,
       completionTokens: r.ok ? r.completionTokens : undefined,
       cachedTokens: r.ok ? r.cachedTokens : undefined,
+      // 本轮估算费用（USD）：主进程按内置价目表算好落库，渲染层只读（对话内「本轮消耗」小字用）
+      costUsd: r.ok ? roundCostUsd(r.promptTokens, r.completionTokens, r.cachedTokens, usageModel) : null,
       // 带工具轮次的正文 = 过程旁白（落库供历史回看）。实时展示已由上面的 text delta 完成，
       // 这里只为「回看历史时仍能看到 AI 当时说了什么」
       ...(r.ok && r.toolCalls.length > 0 && r.content.trim()
@@ -1308,6 +1355,8 @@ async function runAgentLoop(
         promptTokens: r.promptTokens,
         completionTokens: r.completionTokens,
         cachedTokens: r.cachedTokens,
+        model: usageModel,
+        cacheReadTokens: r.cachedTokens,
       })
     }
     if (!r.ok) {
@@ -1527,7 +1576,7 @@ async function runAgentLoop(
         target: argTarget(args),
       })
       const t1 = Date.now()
-      const exec = await invokeToolInternal(realName, args, '', { sessionId, source, signal })
+      const exec = await invokeToolInternal(realName, args, '', { sessionId, source, signal, scope: aiScope, propose: aiPropose })
       finishToolCall(tc, realName, args, exec, Date.now() - t1)
     }
 
@@ -1567,7 +1616,7 @@ async function runAgentLoop(
         const chunk = batch.items.slice(s, s + PARALLEL_CHUNK)
         execs.push(...await Promise.all(chunk.map(async c => {
           const t1 = Date.now()
-          const exec = await invokeToolInternal(c.realName, c.args, '', { sessionId, source, signal })
+          const exec = await invokeToolInternal(c.realName, c.args, '', { sessionId, source, signal, scope: aiScope, propose: aiPropose })
           return { exec, durationMs: Date.now() - t1 }
         })))
       }
@@ -1582,11 +1631,11 @@ async function runAgentLoop(
   // ---- 轮数/token 预算耗尽：做一次无工具的强制总结轮，把已获取的信息变成交付（第 0 层优雅收场）----
   convo.push({ role: 'user', content: FORCED_SUMMARY_NOTICE })
   const fr = await invokeLlmStreamInternal(
-      { messages: convo, tools: [], signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort, sessionId },
+      { messages: convo, tools: [], signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort, sessionId, accounting: 'caller' },
     (e) => { if (e.type === 'text') batcher.push('text', e.delta) },
   )
   batcher.flush()
-  const frStep: AgentTraceStep = { kind: 'llm', ok: fr.ok, durationMs: 0, tokens: fr.ok ? fr.tokens : undefined, summary: fr.ok ? '预算耗尽总结轮' : undefined }
+  const frStep: AgentTraceStep = { kind: 'llm', ok: fr.ok, durationMs: 0, tokens: fr.ok ? fr.tokens : undefined, costUsd: fr.ok ? roundCostUsd(fr.promptTokens, fr.completionTokens, fr.cachedTokens, usageModel) : null, summary: fr.ok ? '预算耗尽总结轮' : undefined }
   trace.push(frStep)
   stepEmitters.get(signal)?.(frStep)
   if (fr.ok) {
@@ -1596,6 +1645,8 @@ async function runAgentLoop(
       promptTokens: fr.promptTokens,
       completionTokens: fr.completionTokens,
       cachedTokens: fr.cachedTokens,
+      model: usageModel,
+      cacheReadTokens: fr.cachedTokens,
     })
   }
   if (fr.ok && fr.content.trim()) {
@@ -1889,7 +1940,7 @@ export function registerAgentHandlers(): void {
     if (!getCurrentVault()) throw new Error('尚未打开仓库，无法新建对话')
     return camelRow(createAgentSession(
       typeof title === 'string' && title.trim() ? title.trim() : '新会话',
-      source === 'aiTeaching' ? 'aiTeaching' : source === 'schedule' ? 'schedule' : 'assistant',
+      source === 'aiTeaching' ? 'aiTeaching' : source === 'schedule' ? 'schedule' : source === 'aiAssistant' ? 'aiAssistant' : 'assistant',
     ))
   })
   ipcMain.handle('agent:messages', (_e, id: string) => getAgentMessages(String(id ?? '')).map(camelRow))
@@ -1897,11 +1948,32 @@ export function registerAgentHandlers(): void {
   ipcMain.handle('agent:takeAdoptNotice', () => takeAdoptNotice())
   // AI 用量 / 会话文件改动（v3.4.0 批次5，方案 §4/§3.8）：右栏 token 面板只读
   ipcMain.handle('agent:usage:get', () => getAiUsageData())
+  ipcMain.handle('agent:usage:models', () => getAiUsageModels())
   ipcMain.handle('agent:sessionChanges:get', (_e, sessionId?: string) =>
     getSessionChanges(typeof sessionId === 'string' && sessionId ? sessionId : undefined))
+  // ===== AI助手变更方案（v3.9.0）：先预览、后确认、可整任务回滚 =====
+  ipcMain.handle('aiAssistant:plan:get', (_e, sessionId: string) => getPlan(String(sessionId ?? '')))
+  ipcMain.handle('aiAssistant:plan:apply', (_e, sessionId: string, acceptedIds: string[]) =>
+    applyPlan(String(sessionId ?? ''), Array.isArray(acceptedIds) ? acceptedIds.map(String) : []))
+  ipcMain.handle('aiAssistant:plan:reject', (_e, sessionId: string) => {
+    rejectPlan(String(sessionId ?? ''))
+    return true
+  })
+  ipcMain.handle('aiAssistant:task:rollback', (_e, sessionId: string) => rollbackTask(String(sessionId ?? '')))
+  ipcMain.handle('aiAssistant:tasks', () => listTasks())
+  ipcMain.handle('aiAssistant:scope:suggest', (_e, query: string, limit?: number) => {
+    const pages = getKnowledgeIndex().pages.map((p) => ({ relPath: p.path, title: p.title, tags: p.tags, entryKind: p.entryKind }))
+    return suggestScope(String(query ?? ''), pages, typeof limit === 'number' && limit > 0 ? limit : 8)
+  })
   ipcMain.handle('agent:renameSession', (_e, id: string, title: string) => {
     if (typeof id === 'string' && typeof title === 'string' && title.trim()) renameAgentSession(id, title.trim())
     return true
+  })
+  // AI助手（v3.9.0）：任务级作用域持久化（勾选随任务走，切会话自动切回）
+  ipcMain.handle('agent:setSessionScope', (_e, id: string, scope: string[]) => {
+    if (typeof id !== 'string' || !id) return { ok: false, error: '会话 id 非法' }
+    updateAgentSessionScope(id, Array.isArray(scope) ? scope : [])
+    return { ok: true }
   })
   ipcMain.handle('agent:setSessionInstructions', (_e, id: string, instructions: string) => {
     if (typeof id !== 'string' || !id) return { ok: false, error: '会话 id 非法' }

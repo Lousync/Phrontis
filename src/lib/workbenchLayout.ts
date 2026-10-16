@@ -166,7 +166,7 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
  * 2026-09-27 看板：同样是「左栏书签 + 整窗」形态。加进来的效果 = 点开后左右栏与页面条退场，
  * 且 openTabs 不登记（**不产生标签页**）—— 这正是设计要的「点开占满整窗、不进标签条」。
  */
-export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools', 'moments', 'toolbox', 'plugins', 'recycle', 'settings', 'bookMarket', 'dashboard']
+export const WORKBENCH_TABBAR_EXCLUDED: readonly TabName[] = ['aiTeaching', 'devtools', 'moments', 'toolbox', 'plugins', 'recycle', 'settings', 'bookMarket', 'dashboard', 'usage']
 
 /**
  * AI 助手快捷键禁用清单（2026-09-22 用户拍板）：这些模块里 **Ctrl+J / Ctrl+Shift+J 一律不响应**。
@@ -189,7 +189,7 @@ export const AI_ASSISTANT_SHORTCUT_DISABLED: readonly TabName[] = ['aiTeaching']
  * 2026-09-27 看板：唯一一个「书签 key 与 tab 同名」的成员 —— 点它开的不是某个模块的标签页，
  * 而是整窗看板（见 WORKBENCH_TABBAR_EXCLUDED）。
  */
-export type RailModule = 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat' | 'dashboard' | 'terminal' | 'accounting'
+export type RailModule = 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat' | 'dashboard' | 'terminal' | 'accounting' | 'aiAssistant'
 
 export interface WorkbenchBookmark {
   key: RailModule
@@ -218,6 +218,8 @@ export const WORKBENCH_BOOKMARKS: readonly WorkbenchBookmark[] = [
   { key: 'quiz', label: '错题本', tab: 'knowledge' },
   // v3.5.0 终端：工作台内模块（docs/terminal-module-design.md），模块侧栏 = 会话列表 + AI 执行记录入口
   { key: 'terminal', label: '终端', tab: 'terminal' },
+  // v3.9.0 AI助手：工作台内模块，侧栏 = 作用域树 + 任务列表（拍板：只靠书签 + 磁贴进）
+  { key: 'aiAssistant', label: 'AI助手', tab: 'aiAssistant' },
 ]
 
 /**
@@ -239,6 +241,8 @@ export const BOOKMARK_COLORS: Readonly<Record<RailModule, BookmarkColor>> = {
   aiChat: { fg: '#8b7ec8', bg: 'rgba(139,126,200,.14)' },
   // v3.5.0 终端：石板青，与看板的青蓝、书架的绿区分
   terminal: { fg: '#4e8f86', bg: 'rgba(78,143,134,.16)' },
+  // v3.9.0 AI助手：品红，与既有八色区分开
+  aiAssistant: { fg: '#b0497f', bg: 'rgba(176,73,127,.15)' },
 }
 
 /**
@@ -257,6 +261,8 @@ export const RAIL_FOLLOW_MAP: Readonly<Partial<Record<TabName, RailModule>>> = {
   // v3.5.0 终端：终端标签激活 → 左栏切会话列表侧栏。缺这条时经页面条切回终端不会
   // setRailModule('terminal')，左栏模块槽空白（B-28，2026-10-05）。
   terminal: 'terminal',
+  // v3.9.0 AI助手：AI助手标签激活 → 左栏切作用域/任务侧栏
+  aiAssistant: 'aiAssistant',
 }
 
 /**

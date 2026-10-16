@@ -54,11 +54,14 @@ import { ToolboxModule } from './modules/toolbox'
 import { PluginsModule } from './modules/plugins'
 import { BookshelfModule } from './modules/bookshelf'
 import { AiTeachingModule } from './modules/ai-teaching'
+import { AiAssistantModule } from './modules/ai-assistant'
 import { ReleaseNotesModule } from './modules/release-notes'
 // 书市（2026-09-22 · S4）：左栏独立整窗模块。**静态 import** —— 铁律 20 的 lazy 只点名引擎类
 // （monaco / pdfjs / heic-to 宿主），书市纯渲染 + IPC，进主包是对的。
 import { BookMarketModule } from './modules/bookmarket'
 import { DashboardModule } from './modules/dashboard'
+// 用量（v3.9.0）：图标条最左窄列整窗模块。静态 import（纯渲染 + IPC，无引擎依赖）。
+import { UsageModule } from './modules/usage'
 // 左栏书架大纲态（内含 pdfjs —— 必须 lazy，不进主包；见上方模块引入方式注释）
 const PdfRailPanel = lazy(() => import('./components/shared/pdf/PdfRailPanel').then((m) => ({ default: m.PdfRailPanel })))
 // 左栏书架书目条目视图（2026-09-19）：未在读任何书时左栏放书列表（封面 + 书名 + 进度条）
@@ -733,6 +736,16 @@ export default function App() {
     window.addEventListener('settings:open', handler)
     return () => window.removeEventListener('settings:open', handler)
   }, [])
+
+  // Listen for tab:open — 通用「打开某模块标签页」（设置页跳看板 / 对话内跳用量），detail.tab 走清单校验
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const tab = (e as CustomEvent<{ tab?: unknown }>).detail?.tab
+      if (isTabName(tab)) openTab(tab)
+    }
+    window.addEventListener('tab:open', handler)
+    return () => window.removeEventListener('tab:open', handler)
+  }, [openTab])
 
   // Listen for knowledge:open — navigate to knowledge tab(插件导入完成后「去知识库查看」)
   useEffect(() => {
@@ -1566,12 +1579,16 @@ export default function App() {
         />
       )
       case 'aiTeaching': return <AiTeachingModule isActive={on} zenLevel={zenLevel} onZenLevelChange={changeZen} pendingAsk={pendingAsk} onConsumePendingAsk={() => setPendingAsk(null)} />
+      // AI助手（v3.9.0）：工作台内 Tab，模块侧栏（任务列表 / 作用域）portal 进左栏模块槽
+      case 'aiAssistant': return <AiAssistantModule isActive={on} sidebarEl={on && railModule === 'aiAssistant' ? wbModSlotEl : null} sidebarHosted={on} />
       // aiChat = AI 对话中间标签（v3.4.0 批次5，方案 §4）：右栏 AI 态点 ⤢ 进入，关标签自动回右栏小对话。
       // 激活时左栏经 RAIL_FOLLOW_MAP 切 aiChat 模块态——侧栏（会话列表/会话大纲）portal 进 slot
       case 'aiChat': return <AiChatTab active={on} sidebarEl={on && railModule === 'aiChat' ? wbModSlotEl : null} modActionsEl={on && railModule === 'aiChat' ? wbModActionsEl : null} />
       // 书市：书源检索 + 下载上架。「去书架」是原型里没有的功能增量（整窗模块无法自跳 Tab，
       // 原型只能 toast 说明），实机由 App 的回调真跳转（方案 §11.3）
       case 'bookMarket': return <BookMarketModule onOpenShelf={() => handleTabChange('bookshelf')} />
+      // 用量（v3.9.0）：图标条整窗模块，无模块侧栏，整窗铺满
+      case 'usage': return <UsageModule />
       // 看板（2026-09-27）：左栏书签入口 + 整窗。它在 WORKBENCH_TABBAR_EXCLUDED 里，
       // 所以没有左右栏、没有页面条，整个中间栏归它；返回工作台靠看板自己的返回箭头。
       // ⚠️ 返回时必须一并把 railModule 从 'dashboard' 复位 —— 书签点击会 setRailModule('dashboard')，
