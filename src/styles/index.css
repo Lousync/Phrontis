@@ -1539,11 +1539,8 @@ input:focus, textarea:focus, select:focus {
 .kb-fit-aiws { container-name: kb-aiws; }
 @container kb-aiws (max-width: 200px) { .kb-l1 { display: none; } }
 
-/* ---- ⑤ AI 教学 · 「开始答题（N 题）」行（ai-teaching/index.tsx）----
-   按钮 + 长说明并排。说明已可缩可截断、按钮已 shrink-0 保形；
-   容器再窄到 <260px 时隐去按钮上的「开始答题」，保留图标与题数。 */
-.kb-fit-aiquiz { container-name: kb-aiquiz; }
-@container kb-aiquiz (max-width: 260px) { .kb-l1 { display: none; } }
+/* ---- ⑤ AI 教学 · 「开始答题（N 题）」行 —— v3.8.0 已随题目视图删除（出题改为落「题目文档」），
+   故 `.kb-fit-aiquiz` 容器规则一并移除；其余编号保持不动（多处代码注释按号引用）。 ---- */
 
 /* ---- ⑥ AI 助手 · 消息操作行 + 会话消耗（ChatBody.tsx 根；N-6）----
    容器 = ChatBody 根，**三处宿主共用**（悬浮侧栏 / 工作台右栏 AI 态 / 整页 aiChat 标签）
