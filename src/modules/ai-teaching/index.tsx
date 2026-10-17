@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
   agentChat, agentStartScene, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentPromoteSideLane, agentListSideLanes,
@@ -9,6 +9,7 @@ import {
   aiTeachCourseGetState, aiTeachCourseSetUnitProgress, aiTeachCourseSetEnabled, aiTeachCourseWriteOutlineDraft, onAiTeachCourseRefresh,
   aiTeachCourseOpenUnit, aiTeachCourseEndLesson, aiTeachCourseFinalizeLesson, aiTeachCourseFinishUnit, aiTeachCourseReadPrevHandoff,
   aiTeachCourseOpenAssistant, aiTeachCourseOpenChapterReview,
+  aiTeachCourseMakeUnitQuiz, aiTeachCourseRemoveUnit, aiTeachScopeEnsure, aiTeachScopeCounts,
   aiTeachSrcRead, aiTeachSrcAdd, aiTeachSrcRemove, aiTeachSrcExtract, aiTeachSrcPick, aiTeachSrcPickDir, aiTeachSrcVisionCheck,
   aiTeachSrcPdfBytes, aiTeachSrcTranscribe, aiTeachSrcPromote, aiTeachFavList, aiTeachFavAdd, aiTeachFavRemove,
   aiTeachProfileEnsureGlobal, aiTeachProfileEnsureSession, aiTeachProfileEnsureWorkspace,
@@ -18,7 +19,9 @@ import {
 import { newAgentSession } from '../../lib/agentSession'
 import { AiTeachFileTree } from './AiTeachFileTree'
 import { CourseHome, COURSE_ST_LABEL } from './CourseMode'
-import type { FlowScope } from './flow/flowLayout'
+import { ScopeDetail } from './ScopeDetail'
+import { UnitQuizModal, type FinishQuizState } from './UnitQuizModal'
+import { pickActiveChapter, type FlowScope } from './flow/flowLayout'
 import { buildRailTree, type RailRow } from './leftRailTree'
 import { decidePrepLanding, withDraft, withFold, withStarted } from './prepPolicy'
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
@@ -761,14 +764,56 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [instrOpen, setInstrOpen] = useState(false)
   const [instrDraft, setInstrDraft] = useState('')
   const [instrDismiss, setInstrDismiss] = useState(false)
-  // v3.8.0 §二：右栏只剩「素材 / 支线」两个分区（支线中心即支线的唯一形态，浮窗已退役）；
+  // v3.8.0 §二：右栏分区；v3.9.1 学习流 v2 新增第三个分区「层级」（画布选中层的要求 / 素材 / 推进）。
   // 工件已迁出为**中栏右侧的独立分栏**（与对话并排同屏），不再占用右栏页签
-  const [railTab, setRailTab] = useState<'lanes' | 'sources'>(() => {
+  const [railTab, setRailTab] = useState<'lanes' | 'sources' | 'scope'>(() => {
     const v = localStorage.getItem('aiTeach.railTab')
-    return v === 'sources' ? v : 'lanes'
+    return v === 'sources' ? v : v === 'scope' ? v : 'lanes'
   })
   // 记住上次分区选择（默认支线；一旦用户切走即保持）
   useEffect(() => { try { localStorage.setItem('aiTeach.railTab', railTab) } catch { /* ignore */ } }, [railTab])
+  /** 学习流选中的作用域层：画布与右栏「层级」面共用这一份（P2 起由本组件持有） */
+  const [flowScope, setFlowScope] = useState<FlowScope>({ level: 'workspace' })
+  /** 画布选层：点画布 = 切到「层级」面；用户手动切走不抢回（只在**选层动作**里切页签） */
+  const selectFlowScope = useCallback((scope: FlowScope) => {
+    // 同一层重复点（点卡片 → 点同一个卡片、拖拽松手补发的 click）不要造新对象：
+    // 新引用会把整块模块 + 右栏重渲一遍，而内容其实没变。
+    setFlowScope((prev) => (prev.level === scope.level && prev.chapterId === scope.chapterId && prev.unitId === scope.unitId ? prev : scope))
+    setRailTab((cur) => (cur === 'scope' ? cur : 'scope'))
+  }, [])
+  /** 当前章记忆（`aiTeach.flow.chapter.<wsId>`）：左栏点知识点行 / 点画布折叠条都写这里 */
+  const [flowChapter, setFlowChapter] = useState<string | null>(null)
+  const focusFlowChapter = useCallback((chapterId: string) => {
+    setFlowChapter(chapterId)
+    try { localStorage.setItem(`aiTeach.flow.chapter.${activeWsRef.current ?? ''}`, chapterId) } catch { /* ignore */ }
+  }, [])
+  // 切工作区：当前章记忆与选中层都跟着换（否则会拿上一个工作区的章 id 去展开 → 一张全折叠的图）
+  useEffect(() => {
+    setFlowScope({ level: 'workspace' })
+    if (!activeWs || activeWs === '__none__') { setFlowChapter(null); return }
+    try { setFlowChapter(localStorage.getItem(`aiTeach.flow.chapter.${activeWs}`)) } catch { setFlowChapter(null) }
+  }, [activeWs])
+  /** 当前章（§19：记忆优先 → 有 learning 的章 → 第一个还有未掌握的章 → 第一章） */
+  const activeFlowChapter = useMemo(
+    () => pickActiveChapter(courseState?.outline?.chapters ?? [], courseState?.progress ?? {}, flowChapter) ?? '',
+    [courseState, flowChapter],
+  )
+  /** 每个知识点的分层计数（要求 / 素材）：卡片「信息两级」与右栏用；大纲刷新时重扫一次 */
+  const [scopeCounts, setScopeCounts] = useState<Record<string, { req: number; src: number }>>({})
+  useEffect(() => {
+    // 计数没变就不要换引用：`scopeCounts` 一路传到画布，换引用等于把整块画布重渲一遍
+    const apply = (next: Record<string, { req: number; src: number }>) => setScopeCounts((prev) => {
+      const pk = Object.keys(prev), nk = Object.keys(next)
+      if (pk.length === nk.length && nk.every((k) => prev[k] && prev[k].req === next[k].req && prev[k].src === next[k].src)) return prev
+      return next
+    })
+    if (!courseEnabled || !courseState?.outline) { apply({}); return }
+    let alive = true
+    void aiTeachScopeCounts(activeWs as string)
+      .then((r) => { if (alive && r?.ok) apply(r.units ?? {}) })
+      .catch(() => { /* 读不到就按 0 显示，不影响画布 */ })
+    return () => { alive = false }
+  }, [courseEnabled, activeWs, courseState])
   /** 当前会话的支线清单（含派生字段）：右栏中心 / 计数 / 锚点 chip 映射共用。数据源=会话库（不再靠 localStorage） */
   const [laneInfos, setLaneInfos] = useState<AgentSideLaneInfo[]>([])
   /** 打开右栏支线中心的请求（锚点 chip 触发；中心按 requestSeq 重新响应） */
@@ -1405,8 +1450,25 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     void reloadCourse()
   }, [reloadCourse])
 
-  /** 收尾后「回炉复习」：状态回「待复习」，可再开课时；总结篇保留 */
-  const courseReopenUnit = useCallback(async (unitId: string) => {
+  /** 收尾自测（L3）：出题 → 作答 → 生成总结篇。弹窗只在这里挂一份，画布与右栏都走它 */
+  const [finishQuiz, setFinishQuiz] = useState<FinishQuizState | null>(null)
+  const finishQuizBusyRef = useRef(false)
+  const startFinishQuiz = useCallback(async (unitId: string) => {
+    if (finishQuizBusyRef.current) return
+    const ws = activeWsRef.current
+    if (!ws || ws === '__none__') return
+    finishQuizBusyRef.current = true
+    const r = await aiTeachCourseMakeUnitQuiz(ws, unitId).catch(() => null)
+    finishQuizBusyRef.current = false
+    if (!r?.ok || !r.questions?.length) {
+      showToast({ type: 'warning', message: `出题失败（${r?.error ?? ''}）· 直接生成总结篇` })
+      void courseFinishUnit(unitId)
+      return
+    }
+    setFinishQuiz({ unitId, qs: r.questions, i: 0, picked: null, score: 0, done: false })
+  }, [courseFinishUnit])
+
+  /** 收尾后「回炉复习」：状态回「待复习」，可再开课时；总结篇保留 */  const courseReopenUnit = useCallback(async (unitId: string) => {
     const ws = activeWsRef.current
     if (!ws || ws === '__none__') return
     await aiTeachCourseSetUnitProgress(ws, unitId, { status: 'review', finished: false }).catch(() => null)
@@ -1986,12 +2048,22 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
     showToast({ type: 'info', message: `工作区要求已在编辑区打开（${r.created ? '已按骨架创建' : '已有文件'}）· 保存后本工作区会话下一轮生效` })
   }, [activeWs])
-  /** 画布「编辑这一层」：按作用域层打开对应文档（L0 先接全局 / 工作区两层，章级与知识点级随 L1/L3 开放） */
-  const openScopeDoc = useCallback((scope: FlowScope) => {
-    if (scope.level === 'global') { void openGlobalConstraints(); return }
-    if (scope.level === 'workspace') { void openWorkspaceConstraints(); return }
-    showToast({ type: 'info', message: '章级 / 知识点级文档将在下一步开放（当前可编辑全局与工作区层）' })
-  }, [openGlobalConstraints, openWorkspaceConstraints])
+  /** 画布 / 右栏「编辑这一层」：按作用域层打开对应文档（L1/L3 后三层都真打开，章层本层不做） */
+  const openScopeDoc = useCallback(async (scope: FlowScope) => {
+    if (scope.level === 'global') { await openGlobalConstraints(); return }
+    if (!activeWs || activeWs === '__none__') { showToast({ type: 'warning', message: '先进入一个工作区' }); return }
+    if (scope.level === 'workspace') { await openWorkspaceConstraints(); return }
+    if (scope.level === 'chapter') {
+      // 章层本层要求不做（方案 §二-16 / §三-3）：**不给假入口**，直接说清去哪写
+      showToast({ type: 'info', message: '章层本层的要求不做', detail: '请写到工作区层（对本工作区所有章生效）或具体知识点上' })
+      return
+    }
+    if (!scope.unitId) return
+    const r = await aiTeachScopeEnsure({ wsId: activeWs, level: 'unit', unitId: scope.unitId }).catch(() => null)
+    if (!r?.ok || !r.relPath) { showToast({ type: 'error', message: `知识点要求打开失败（${r?.error ?? '未知错误'}）` }); return }
+    window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: r.relPath, from: 'aiTeaching' } }))
+    showToast({ type: 'info', message: `知识点要求已在编辑器打开${r.created ? '（按骨架创建）' : ''}`, detail: '保存后本知识点会话下一轮生效' })
+  }, [activeWs, openGlobalConstraints, openWorkspaceConstraints])
   /** 关闭建议 → 记账节流窗口：`ignored` 窗口内留安静入口，`applied` 已写入则不再留 */
   const muteProfileSuggestion = useCallback((by: 'ignored' | 'applied') => {
     if (!activeId) return
@@ -2362,7 +2434,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    *  （2026-10-16：分段器**只用文字，不带 emoji 图标**——彩色 emoji 在单色界面里很违和；同时「题目」段随题目视图一并删除） */
   const chipCls = (on: boolean) => `px-2 py-1 rounded-md text-[11.5px] transition-colors ${on ? 'bg-[var(--bg-hover)] text-[var(--text-primary)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`
   /** v3.8.0 §二改：右栏只剩 素材 / 支线 两页签（工件已迁为中栏右侧独立分栏） */
-  const railTabCls = (tab: 'lanes' | 'sources') => `flex-1 inline-flex items-center justify-center gap-1 px-1.5 py-1 rounded-md text-[11.5px] transition-colors ${railTab === tab ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`
+  const railTabCls = (tab: 'lanes' | 'sources' | 'scope') => `flex-1 inline-flex items-center justify-center gap-1 px-1.5 py-1 rounded-md text-[11.5px] transition-colors ${railTab === tab ? 'bg-[var(--bg-primary)] text-[var(--accent)] font-medium shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`
   const midChips = (
     <div className="shrink-0 flex items-center gap-1 px-3 pt-2 select-none">
       <button onClick={() => setMidView('chat')} className={chipCls(midView === 'chat')}>对话</button>
@@ -2887,15 +2959,27 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       </button>
                       {!closed && (
                         <>
-                          {ch.units.map(u => (
-                            <div key={u.unitId}>
-                              <div className="flex items-center gap-1.5 pl-4 pr-2 py-1" title={u.name}>
-                                <span className="shrink-0 w-1 h-1 rounded-full bg-[var(--text-muted)]" />
-                                <span className="min-w-0 truncate text-[11.5px] text-[var(--text-secondary)]">{u.name}</span>
+                          {ch.units.map(u => {
+                            // 左栏知识点行可点（口径 §二-1）：开课/继续 + 画布选中 + 该章设为当前章
+                            const st = courseState?.progress[u.unitId]?.status ?? 'todo'
+                            const dot = st === 'mastered' ? 'var(--success)' : st === 'learning' ? 'var(--accent)' : st === 'check' ? 'var(--warning)' : st === 'review' ? 'var(--danger)' : 'var(--text-muted)'
+                            return (
+                              <div key={u.unitId}>
+                                <button onClick={() => {
+                                  focusFlowChapter(ch.chapterId)
+                                  selectFlowScope({ level: 'unit', unitId: u.unitId, chapterId: ch.chapterId })
+                                  void courseOpenUnit(u.unitId)
+                                }}
+                                  title={`${u.name} · 点这里开课 / 继续这一节（画布同步选中并展开本章）`}
+                                  className={`w-full flex items-center gap-1.5 pl-4 pr-2 py-1 rounded-md text-left hover:bg-[var(--bg-hover)] transition-colors ${flowScope.level === 'unit' && flowScope.unitId === u.unitId ? 'bg-[var(--bg-selected)]' : ''}`}>
+                                  <span className="shrink-0 w-1 h-1 rounded-full" style={{ background: dot }} />
+                                  <span className="min-w-0 flex-1 truncate text-[11.5px] text-[var(--text-secondary)]">{u.name}</span>
+                                  <span className="shrink-0 text-[9.5px] text-[var(--text-muted)]">{COURSE_ST_LABEL[st] ?? ''}</span>
+                                </button>
+                                {u.rows.map(row => railRowNode(row, 1))}
                               </div>
-                              {u.rows.map(row => railRowNode(row, 1))}
-                            </div>
-                          ))}
+                            )
+                          })}
                           {(ch.review ?? []).map(row => railRowNode(row, 1))}
                         </>
                       )}
@@ -2973,12 +3057,18 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   state={courseState}
                   onStartUnit={(id) => void courseOpenUnit(id)}
                   onFinishUnit={(id, score) => void courseFinishUnit(id, score)}
+                  onFinishQuiz={(id) => void startFinishQuiz(id)}
                   onReopenUnit={(id) => void courseReopenUnit(id)}
                   onOpenChapterReview={(chapterId) => void courseOpenChapterReview(chapterId)}
-              onReload={() => void reloadCourse()}
-              onGoChat={() => void courseOpenAssistant()}
-              onOpenScopeDoc={openScopeDoc}
-            />
+                  onReload={() => void reloadCourse()}
+                  onGoChat={() => void courseOpenAssistant()}
+                  onOpenScopeDoc={openScopeDoc}
+                  selScope={flowScope}
+                  onSelectScope={selectFlowScope}
+                  scopeCounts={scopeCounts}
+                  activeChapterId={activeFlowChapter}
+                  onFocusChapter={focusFlowChapter}
+                />
               </div>
             </div>
           ) : (
@@ -3703,10 +3793,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
 
         {/* 右栏（v3.8.0 §二改）：只剩 素材 / 支线 两个分区（工件已迁到中栏右侧独立分栏）。
             展开入口在顶栏工具组与文件名 chip；收起后留 12px 贴边条（onSnapOpen），点/右拖即展开 */}
-        <ResizablePanel side="right" storageKey="aiTeach.rightWidth" defaultWidth={340} minWidth={260} maxWidth={720}
+        {/* 默认宽 2026-10-17 由 340 收到 300（用户反馈「启动后右栏偏宽」，学习流画布被压到只能排 1–2 列）；
+            下限仍 260：再窄「层级」面里的要求条目输入框与路径行就会挤成竖排（.kb-fit 只保标题行） */}
+        <ResizablePanel side="right" storageKey="aiTeach.rightWidth" defaultWidth={300} minWidth={260} maxWidth={720}
           visible={srcVisible} onSnapClose={() => toggleSide('right')} onSnapOpen={() => toggleSide('right')} collapsedWidth={12}>
           <div className="h-full min-h-0 flex flex-col">
-          {/* 右栏两分区（v3.8.0 §二改：工件已迁到中栏右侧的独立分栏，右栏只剩 素材 ⇄ 支线） */}
+          {/* 右栏三分区（v3.9.1：学习流 v2 起新增「层级」——画布选中层的要求 / 素材 / 推进） */}
           <div className="shrink-0 flex items-center gap-1 border-b border-[var(--border-color)] px-1.5 py-1 bg-[var(--bg-secondary)]">
             <button onClick={() => setRailTab('sources')} title="素材库（工作区主库 + 本对话登记）" className={railTabCls('sources')}>
               <Paperclip size={11} />素材{srcEntries.length > 0 ? `（${srcEntries.length}）` : ''}
@@ -3714,8 +3806,28 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
             <button onClick={() => setRailTab('lanes')} title="支线追问" className={railTabCls('lanes')}>
               <GitBranch size={11} />支线{laneInfos.length > 0 ? ` ${laneInfos.length}` : ''}
             </button>
+            <button onClick={() => setRailTab('scope')} title="层级：画布上选中的工作区 / 章 / 知识点的要求与素材" className={railTabCls('scope')}>
+              <Layers size={11} />层级
+            </button>
           </div>
           <div className="flex-1 min-h-0 relative">
+          {/* 层级面（学习流 v2）：选中态由 index.tsx 持有，画布点哪层这里就显示哪层 */}
+          <div className={`absolute inset-0 flex flex-col min-h-0 ${railTab === 'scope' ? '' : 'hidden'}`}>
+            <ScopeDetail
+              wsId={(activeWs as string)}
+              wsName={wsActive?.name ?? '课程'}
+              scope={flowScope}
+              outline={courseState?.outline ?? null}
+              progress={courseState?.progress ?? {}}
+              lessons={courseState?.lessons ?? {}}
+              onFinishQuiz={(id) => void startFinishQuiz(id)}
+              onOpenChapterReview={(chapterId) => void courseOpenChapterReview(chapterId)}
+              onStartUnit={(id) => void courseOpenUnit(id)}
+              onScopeGone={() => setFlowScope({ level: 'workspace' })}
+              onSelectScope={setFlowScope}
+              onReload={() => void reloadCourse()}
+            />
+          </div>
           <div className={`absolute inset-0 flex flex-col min-h-0 ${railTab === 'sources' ? '' : 'hidden'}`}>
           <div className="shrink-0">
             {/* 素材库标题行（文字按容器宽度退化，见 styles/index.css 的 .kb-fit 段）。
@@ -4130,6 +4242,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           （ensure 落骨架 → kb-open-note from:aiTeaching → 编辑器「← 返回 AI教学」回跳）；弹层 JSX 已删除 */}
       {webDlg && activeId && (
         <WebSourceDialog sessionId={activeId ?? ''} entry={webDlg} onClose={() => setWebDlg(null)} onDone={() => { void refreshSources(activeId) }} />
+      )}
+      {/* 收尾自测弹窗：画布浮动条与右栏「层级 · 推进」两个入口共用这一份（避免两处各写一份必然长歪） */}
+      {finishQuiz && (
+        <UnitQuizModal
+          state={finishQuiz}
+          onChange={setFinishQuiz}
+          onClose={() => setFinishQuiz(null)}
+          onFinishUnit={(id, score) => void courseFinishUnit(id, score)}
+        />
       )}
     </div>
   )

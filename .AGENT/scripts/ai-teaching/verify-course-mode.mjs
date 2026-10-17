@@ -237,6 +237,40 @@ check('工具 course.review.write + 进 request 清单', bt.includes("name: 'cou
 check('画布章框复习课入口（onOpenChapterReview）', stripComments(read('src/modules/ai-teaching/flow/FlowCanvas.tsx')).includes('onOpenChapterReview') && stripComments(read('src/modules/ai-teaching/flow/FlowCanvas.tsx')).includes('复习课'))
 check('index.tsx: 打开函数 + 复习课态左栏', mod.includes('courseOpenChapterReview') && mod.includes('courseReviewChapter') && mod.includes('复习课'))
 
+console.log('\n=== 6d. 分层要求 / 分层素材接线（学习流 v2 · 2026-10-17）===')
+// 方案 `ai-teaching-flow-v2-impl.md` §三-2/§三-3：scope 三层读写 + 分层素材 + 分层计数。
+// 通道与签名三处同名同签（铁律 18）；scope handler 的注册点在素材注册器里（依赖单向，见其注释）。
+const scopeSrc = stripComments(read('electron/lib/aiTeachingScope.ts'))
+const sourcesSrc2 = stripComments(read('electron/lib/aiTeachingSources.ts'))
+check('主进程导出 registerAiTeachingScopeHandlers', scopeSrc.includes('export function registerAiTeachingScopeHandlers'), '')
+check('主进程导出 readScopeText / writeScopeText / ensureScopeText', ['readScopeText', 'writeScopeText', 'ensureScopeText'].every((n) => scopeSrc.includes(`export function ${n}`)), '')
+check('主进程导出 scopeCounts / countConstraintItems', scopeSrc.includes('export function scopeCounts') && scopeSrc.includes('export function countConstraintItems'), '')
+check('分层计数复用既有 SOURCE.md 解析函数（不手搓正则）', scopeSrc.includes('parseSourceMd(') && !scopeSrc.includes('###\\s*(\\d+)'), '')
+check('知识点层读点供注入用（readUnitConstraintsForSession）', scopeSrc.includes('export function readUnitConstraintsForSession'), '')
+check('agentService 注入接线（buildScopePrompt + 知识点层来源）', agent.includes("from './scopePrompt'") && agent.includes('buildScopePrompt(') && agent.includes('readUnitConstraintsForSession('), '')
+check('章层未启用（主进程统一拒绝文案）', scopeSrc.includes("'章层本层未启用'"), '')
+const scopeChannels = ['aiTeachScope:read', 'aiTeachScope:writeText', 'aiTeachScope:ensure', 'aiTeachScope:counts']
+check('主进程注册 aiTeachScope 四通道', scopeChannels.every((c) => scopeSrc.includes(`'${c}'`)), scopeChannels.filter((c) => !scopeSrc.includes(`'${c}'`)).join(','))
+const scopeHandlerCount = (scopeSrc.match(/ipcMain\.handle\('aiTeachScope:/g) ?? []).length
+check('aiTeachScope handler 计数 = 4', scopeHandlerCount === 4, String(scopeHandlerCount))
+const scopedSrcHandlerCount = (sourcesSrc2.match(/ipcMain\.handle\('aiTeach(?:Source|Sources):(?:addScoped|readScoped)'/g) ?? []).length
+check('分层素材 handler 计数 = 2', scopedSrcHandlerCount === 2, String(scopedSrcHandlerCount))
+check('本次新增 handler 合计 6', scopeHandlerCount + scopedSrcHandlerCount === 6, String(scopeHandlerCount + scopedSrcHandlerCount))
+check('scope 注册器由素材注册器调用（注册可达）', sourcesSrc2.includes('registerAiTeachingScopeHandlers(getSetting)'), '')
+check('素材注册器由 main/index.ts 调用（注册可达）', /registerAiTeachingSourceHandlers\(/.test(mainIndex), '')
+check('章层不做：scope 层枚举含 chapter 但主进程一律拒绝', scopeSrc.includes("level === 'chapter'") && scopeSrc.includes('AiTeachScopeLevel ='), '')
+const scopeApi = ['aiTeachScopeRead', 'aiTeachScopeWriteText', 'aiTeachScopeEnsure', 'aiTeachScopeCounts', 'aiTeachSourcesReadScoped', 'aiTeachSourceAddScoped']
+for (const m of scopeApi) {
+  const okPreload = preload.includes(m)
+  const okTypes = types.includes(m)
+  const okIpc = ipc.includes(m)
+  check(`分层 IPC 三层一致：${m}`, okPreload && okTypes && okIpc, `preload=${okPreload} types=${okTypes} ipc=${okIpc}`)
+}
+check('types 导出分层类型族（Level/Ref/TextResult/ScopedSourcesResult/ScopeCount）',
+  ['AiTeachScopeLevel', 'AiTeachScopeRef', 'AiTeachScopeTextResult', 'AiTeachScopedSourcesResult', 'AiTeachScopeCount'].every((n) => types.includes(n)), '')
+check('源码条目 scope 联合体加 unit（分层素材标记）', /scope\?: 'workspace' \| 'session' \| 'unit'/.test(types), '')
+check('写盘复用既有两条广播、无新通道', scopeSrc.includes('broadcastTreeRefresh(') && scopeSrc.includes('BROADCAST_CHANNEL.aiTeachCourseRefresh'), '')
+
 // ---------------------------------------------------------------- 报告
 const failed = checks.filter((c) => !c.pass)
 for (const c of checks) console.log(`  ${c.pass ? '[OK]' : '[FAIL]'} ${c.name}${c.detail && !c.pass ? '  -> ' + c.detail : ''}`)
