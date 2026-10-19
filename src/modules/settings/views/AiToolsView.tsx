@@ -763,7 +763,7 @@ function AddServerWizard({ onClose, onSaved }: { onClose: () => void; onSaved: (
                     </p>
                   </div>
                   <Field label="命令">
-                    <input value={command} onChange={e => setCommand(e.target.value)} placeholder="例如 node 或 C:\tools\server.exe"
+                    <input value={command} onChange={e => setCommand(e.target.value)} placeholder="例如 node、npx 或服务端脚本的绝对路径"
                       className="w-full px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[12px] font-mono text-[var(--text-primary)] outline-none focus:border-[var(--accent)]" />
                   </Field>
                   <Field label="参数（空格分隔）">

@@ -147,6 +147,33 @@ const pkgName = pkg.name
 check('F7 佐证：包名仍为 knowbase（平台化不改 npm 包名）', pkgName === 'knowbase', String(pkgName))
 
 // ─────────────────────────────────────────────────────────────
+// G. AI 工具面的平台中性（2026-10-19 专项审计结论）
+//
+// 审计口径：AI 工具是「主进程里能碰 OS 的地方」，最该防的是**悄悄长出平台假设**。
+// 全量审计结果 —— 28 个 builtin 工具里 0 处 process.platform、0 处 shell 执行、0 处 Windows 专属命令；
+// skill.* 是纯提示词工具（readOnly，返回字符串）零 OS 耦合；vault.* 全走 workspaceManager + pathGuard。
+// 唯一碰 OS 的是 terminal.exec，它转发给 terminalService（已按平台取 shell）。
+// MCP 的 stdio 启动由 @modelcontextprotocol/sdk 内部的 cross-spawn 处理（它专治 Windows 的 .cmd 解析），
+// 所以**不要**自己在 mcpManager 里再包一层 cmd /c —— 那是双包装。
+// 这一节把上述结论钉住：将来新加工具若需要平台分叉，必须走共享服务层，不能就地分叉。
+console.log('\n=== G. AI 工具面的平台中性 ===')
+const srcBuiltin = stripComments(read('electron/lib/builtinTools.ts'))
+check('G1 负向：builtinTools.ts 代码里无 process.platform（工具不得就地平台分叉）',
+  !/process\.platform/.test(srcBuiltin))
+check('G2 负向：builtinTools.ts 代码里无 shell 执行（须转发给 terminalService 等共享服务）',
+  !/child_process|execSync|execFileSync|spawnSync|spawn\(/.test(srcBuiltin))
+check('G3 工具描述若提 Windows，必须同时给出 POSIX 口径',
+  !/Windows/.test(srcBuiltin) || /macOS\/Linux/.test(srcBuiltin))
+const srcMcp = stripComments(read('electron/lib/mcpManager.ts'))
+check('G4 负向：mcpManager 不自建 cmd/shell 包装（SDK 内 cross-spawn 已处理）',
+  !/shell:\s*true/.test(srcMcp) && !srcMcp.includes('cmd /c') && !srcMcp.includes('cmd.exe'))
+const srcToolsView = read('src/modules/settings/views/AiToolsView.tsx')
+check('G5 负向：MCP 命令占位不得给 Windows 盘符路径示例（平台中性）',
+  !srcToolsView.includes('C:\\') && !srcToolsView.includes('.exe'))
+check('G5 正向：MCP 命令占位给的是可跨平台执行的示例',
+  /例如 node/.test(srcToolsView))
+
+// ─────────────────────────────────────────────────────────────
 const failed = checks.filter(c => !c.pass)
 for (const c of checks) console.log(`${c.pass ? '[OK]  ' : '[FAIL]'} ${c.name}${c.detail ? '  -> ' + c.detail : ''}`)
 console.log('\n========================================')
