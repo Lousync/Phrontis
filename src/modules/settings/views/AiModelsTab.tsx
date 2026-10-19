@@ -99,6 +99,13 @@ export function AiModelsTab() {
   const unreadableKeyCount = providers.reduce((n, p) => n + p.accounts.filter(a => a.keyUnreadable).length, 0)
   /** 顶部提示条只在本会话内可关（不加 localStorage 记忆：它是数据状态的解释，重新填 Key 后应自动消失） */
   const [unreadableKeyNoticeOpen, setUnreadableKeyNoticeOpen] = useState(true)
+  /**
+   * 顶部提示条是否可见。**负边距必须跟着它走**（2026-10-19 修）：
+   * `Collapsible` 的外层是常驻的（开合动画需要），原先 `-my-4` 无条件挂着 ——
+   * 提示条收起后高度为 0、但上下各 −16px 的边距仍在，会把下面「供应商」整块向上拽，
+   * 顶进页签栏的下划线里（真机截图可见）。
+   */
+  const keyNoticeVisible = unreadableKeyCount > 0 && unreadableKeyNoticeOpen
 
   /**
    * 打开「把其他槽位也改用它」：**此刻**把七个槽位的 from → to 算好。
@@ -154,7 +161,7 @@ export function AiModelsTab() {
   return (
     <div className="space-y-8">
       {/* 跨系统密文的解释性提示（Linux 平台化阶段 1）。走 Collapsible + .kb-collapse（铁律 13） */}
-      <Collapsible open={unreadableKeyCount > 0 && unreadableKeyNoticeOpen} className="-my-4" innerClassName="">{() => (
+      <Collapsible open={keyNoticeVisible} className={keyNoticeVisible ? '-my-4' : ''} innerClassName="">{() => (
         <div className="flex items-start gap-2 rounded-md border border-[var(--border-color)] bg-[var(--warning-bg)] px-3 py-2">
           <AlertTriangle size={14} strokeWidth={1.7} className="mt-0.5 shrink-0 text-[var(--warning)]" />
           <div className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">
