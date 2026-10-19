@@ -78,7 +78,10 @@ check('搜索：标题 + 来源回答 + 摘要', center.includes('l.title +') &&
 check('详情复用 SideLanePanel 且带 onBack/onQuote/onFloat', center.includes('<SideLanePanel') && center.includes('onBack={back}') && center.includes('onQuote={onQuote}') && center.includes('onFloat='))
 const idx = read('src/modules/ai-teaching/index.tsx')
 check('index 引入 SideLaneCenter', idx.includes("import { SideLaneCenter } from './SideLaneCenter'"))
-check('右栏分区状态 railTab', idx.includes("useState<'lanes' | 'sources'>("))
+// v3.9.1 学习流 v2：右栏从两分区扩到「素材 / 支线 / 层级」三分区（方案 §三-1），
+// 断言按新口径收：**三分区齐全 + 落到 localStorage + 读取时白名单**，而不是钉死旧的两态字面量。
+check('右栏分区状态 railTab（三分区：素材 / 支线 / 层级）',
+  /useState<'lanes' \| 'sources' \| 'scope'>\(/.test(idx) && idx.includes('aiTeach.railTab'))
 check('锚点映射由会话库派生（不再 localStorage）', idx.includes('const anchorLanes = useMemo') && !idx.includes('ANCHOR_LANES_KEY'))
 check('锚点 chip 走 openCenter（open/create）', idx.includes("openCenter(al ? { kind: 'open', laneId: al.laneId } : { kind: 'create'"))
 check('引用回主线接 setQuotes', idx.includes('const quoteFromLane = useCallback') && idx.includes('setQuotes(prev'))

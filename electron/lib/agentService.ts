@@ -37,6 +37,8 @@ import { MANUAL_CHANNEL_TOOL, MANUAL_MAX_ROUNDS, buildManualSystemPrompt, classi
 import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceConstraintsForSession, resolveWriteOwnerRel, listSessionFolderIds } from './aiTeachingFolders'
 import { readAssistantGlobalConstraints, readAssistantSessionConstraints, readAssistantGlossary } from './assistantConstraints'
 import { resolveSourcesForInjection } from './aiTeachingSources'
+import { readUnitConstraintsForSession } from './aiTeachingScope'
+import { buildScopePrompt } from './scopePrompt'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
 import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { buildCourseInjection } from './aiTeachingCourse'
@@ -966,34 +968,21 @@ async function runAgentLoop(
       ? `\n\n【用户显式指定 Skill：${explicitSkill.title}】用户发送本条消息时明确指定使用该 Skill，以下为其提示词全文，**优先遵循执行**（优先级高于你对 Skill 的自主选择判断，仍以用户消息中的直接指令为最高）：\n${explicitSkill.prompt.length > 6000 ? explicitSkill.prompt.slice(0, 6000) + '\n…（Skill 提示词过长已截断）' : explicitSkill.prompt}`
       : `\n\n（用户指定的 Skill「${llmOpts.skillName}」不存在或已停用，忽略该指定并正常回答。）`
   // P2（§2.3）：会话约束唯一真相源 = 会话文件夹 CONSTRAINTS.md，每轮发送即时重读（编辑器改动即刻生效）；
-  // 2-6 读兼容：仅旧会话未落文件夹时回退 DB sessionInstructions。注入截断防 token 失控。
-  // N-5（2026-09-26）：三层约束是**教学**机制 —— 按 source 门控（此前 globalInstHint 未门控，
+  // 2-6 读兼容：仅旧会话未落文件夹时回退 DB sessionInstructions。
+  // N-5（2026-09-26）：分层约束是**教学**机制 —— 按 source 门控（此前全局层未门控，
   // 教学全局要求会漏进助手对话，与拍板「独立第二份，不共用」相悖；台账 N-5 前提澄清的本意即如此）。
-  const rawConstraints = source === 'aiTeaching' ? resolveConstraintsForInjection(sessionId, getSettingReader()) : ''
-  const sessionInst = rawConstraints.length > 4000
-    ? rawConstraints.slice(0, 4000) + '\n…（约束文件过长已截断，全文见会话文件夹 CONSTRAINTS.md）'
-    : rawConstraints
-  const instHint = sessionInst
-    ? `\n\n【本会话要求】（用户为此对话单独设定于 CONSTRAINTS.md，是约束链中最细、优先级最高的一层；与用户消息冲突时以用户当下消息为准）\n${sessionInst}`
-    : ''
-  // 工作区约束层（v3.1.2 条目6：三层约束补中间档）：{AI教学}/{工作区}/CONSTRAINTS.md 每轮重读，
-  // 本工作区所有会话共同遵守；未归属工作区的会话本层零段。截断 3500 取全局层与会话层之间的中间档。
-  const rawWs = source === 'aiTeaching' ? (readWorkspaceConstraintsForSession(sessionId, getSettingReader()).text ?? '') : ''
-  const wsInst = rawWs.length > 3500
-    ? rawWs.slice(0, 3500) + '\n…（工作区要求过长已截断，全文见工作区文件夹 CONSTRAINTS.md）'
-    : rawWs
-  const wsInstHint = wsInst.trim()
-    ? `\n\n【工作区要求】（用户为本工作区所有会话共同设定于 {工作区}/CONSTRAINTS.md，次于本会话要求、优先于全局要求；与更细颗粒层或用户当下消息冲突时以更细层为准）\n${wsInst}`
-    : ''
-  // 全局约束层（.claude/plans/global-constraints.md）：{产物根}/CONSTRAINTS.md 每轮重读，跨工作区/跨会话共同遵守；
-  // 冲突裁决链写进提示词：用户当下消息 > 会话层 > 工作区层 > 全局层 > 内置人设。截断 3000 与画像段同量级。
-  const rawGlobal = source === 'aiTeaching' ? (readGlobalConstraints(getSettingReader()).text ?? '') : ''
-  const globalInst = rawGlobal.length > 3000
-    ? rawGlobal.slice(0, 3000) + '\n…（全局要求过长已截断，全文见 AI教学产物根 CONSTRAINTS.md）'
-    : rawGlobal
-  const globalInstHint = globalInst.trim()
-    ? `\n\n【全局要求】（用户设定于 AI教学产物根的 CONSTRAINTS.md，跨工作区所有会话共同遵守，是约束链中最粗、优先级最低的一层；与更细颗粒层或用户当下消息冲突时以更细层为准）\n${globalInst}`
-    : ''
+  // L2（2026-10-17 学习流 v2 §八-1）：四层拼装收敛到零依赖纯函数 `scopePrompt.buildScopePrompt` ——
+  // 顺序恒为 **全局 → 工作区 → 知识点 → 课时**（越细越优先），每层独立上限、空层不出标题行；
+  // 契约脚本 `verify-scope-injection.mjs` 直接跑真实实现。存量「课时夹」那份是最细一层，**不迁移**。
+  const scopeLayers = source === 'aiTeaching'
+    ? {
+        global: readGlobalConstraints(getSettingReader()).text ?? '',
+        workspace: readWorkspaceConstraintsForSession(sessionId, getSettingReader()).text ?? '',
+        unit: readUnitConstraintsForSession(sessionId, getSettingReader()),
+        lesson: resolveConstraintsForInjection(sessionId, getSettingReader()),
+      }
+    : { global: '', workspace: '', unit: '', lesson: '' }
+  const scopeInstHint = source === 'aiTeaching' ? buildScopePrompt(scopeLayers) : ''
   // N-5：助手**独立**要求注入（.assistant/，2026-09-24 三轮拍板）——与教学三层完全分开，措辞不复用教学口径。
   // 默认单层（全局），用户从助手面板入口按需升格出会话层；每轮重读，保存后下一轮生效。
   // 优先级链（拍板 G）：用户当下消息 > 本会话要求 > 全局要求。
@@ -1173,7 +1162,8 @@ async function runAgentLoop(
   const injection: AiTeachInjectionStats | undefined = source === 'aiTeaching'
     ? {
         systemChars: baseSystem.length,
-        constraintChars: sessionInst.length,
+        // 分层要求合计（四层原始正文长度；实际注入串还含分层标注与截断标记，见 scopePrompt.ts）
+        constraintChars: scopeLayers.global.length + scopeLayers.workspace.length + scopeLayers.unit.length + scopeLayers.lesson.length,
         profileChars: profileHint.length,
         sourcesChars: sourcesHint.length,
         ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + outlineRuleHint.length + visualHint.length + mindmapHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
@@ -1182,7 +1172,7 @@ async function runAgentLoop(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + globalInstHint + wsInstHint + instHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
+    : baseSystem + schedulePersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，

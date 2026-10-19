@@ -3,7 +3,8 @@
  *
  * 直接 import 真实实现（vaultScope.ts 是零依赖纯模块），并用源码接线断言守住：
  * ① 作用域语义（前缀/后代/文件即前缀/空=放行）② vault.* 工具确实挂了读写 scope 强制
- * ③ agentService 确实把 scope/propose 透传进工具上下文 ④ 会话来源 aiAssistant 已入白名单。
+ * ③ agentService 确实把 scope/propose 透传进工具上下文 ④ 会话来源 aiAssistant 已入白名单
+ * ⑤ 左栏「集合语义 + 前缀压缩」的纯函数与面板接线（§H，方案 docs/ai-assistant-scope-rail-plan.md）。
  *
  * 用法：node --experimental-strip-types .AGENT/scripts/ai-assistant/verify-scope-guard.mjs
  */
@@ -12,6 +13,10 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { normalizeRelPath, isWithinVaultScope, enforceVaultScope } from '../../../electron/lib/kbStore/vaultScope.ts'
 import { suggestScope, tokenizeQuery } from '../../../electron/lib/aiAssistantScopeSuggestPure.ts'
+import {
+  SCOPE_ENTRY_SOFT_CAP, prunePrefixes, coveredBy, coverageOf, addToScope, batchAdd, removeFromScope,
+} from '../../../src/modules/ai-assistant/scopeSetPure.ts'
+import { stripComments } from '../shared/strip-comments.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..')
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8')
@@ -128,8 +133,136 @@ ok(/export const agentSetSessionScope/.test(ipc) && /export const agentRenameSes
   const mod2 = read('src/modules/ai-assistant/index.tsx')
   ok(/runGuarded\(\{ kind: 'regenerate' \}/.test(mod2) && /runGuarded\(\{ kind: 'resume' \}/.test(mod2) && /runGuarded\(\{ kind: 'edit'/.test(mod2), 'G13 重新生成 / 继续 / 编辑重发也过作用域守卫（空 scope = 不设限，只拦首次发送会漏）')
   ok(/disabled=\{api\.pending\}/.test(mod2), 'G14 运行中作用域面板置灰（与 hook 侧拒绝改动对称）')
-  ok(/onDoubleClick/.test(mod2) && /api\.renameSession\(/.test(mod2), 'G15 双击任务条目改名')
+  ok(/onDoubleClick/.test(mod2) && /api\.renameSession\(/.test(mod2), 'G15 双击任务条目改名（F-4 拍板：按设计保留，这条是锁不是待改项）')
   ok(!/const \[scope, setScope\]/.test(mod2), 'G16 负向：模块不再自持 scope state（真源只在 hook / 会话行）')
+}
+
+console.log('\n=== H. 集合语义纯函数与左栏接线（F-2 / F-3 / F-5） ===')
+const K = (m) => (rel) => m[rel]
+const sorted = (a) => a.slice().sort().join('|')
+{
+  ok(sorted(prunePrefixes(['a', 'a/b', 'a/b/c.md'])) === 'a', 'H1 prunePrefixes 吃掉被覆盖的后代')
+  ok(sorted(prunePrefixes(['a/b', 'a'])) === 'a', 'H2 prunePrefixes 与入参顺序无关')
+  {
+    const once = prunePrefixes(['x/y', 'x', 'q', 'q/r'])
+    ok(sorted(once) === 'q|x', 'H3 多条同时压缩', sorted(once))
+    ok(sorted(prunePrefixes(once)) === sorted(once), 'H4 prunePrefixes 幂等（不能让清单越存越长）')
+  }
+  ok(sorted(prunePrefixes(['a/b', 'a/b', 'a\\b', 'a/b/'])) === 'a/b', 'H5 去重 + 反斜杠 / 尾斜杠归一')
+  ok(sorted(prunePrefixes(['', '/', 'x'])) === 'x', 'H6 空条目丢弃')
+  ok(sorted(prunePrefixes(['a', 'ab'])) === 'a|ab', 'H7 压缩不得跨目录名（ab 不是 a 的后代）')
+}
+{
+  ok(coveredBy(['a'], 'a/b/c.md') === 'a', 'H8 覆盖判定：目录前缀盖后代')
+  ok(coveredBy(['a/b'], 'a/b') === 'a/b', 'H9 条目自身算被覆盖')
+  ok(coveredBy(['a/b', 'a'], 'a/b/c.md') === 'a', 'H10 多个前缀都盖住时取最外层（「来自 X」要显示用户实际勾下的那层）')
+  ok(coveredBy(['a'], 'ab/c.md') === undefined, 'H11 覆盖判定不跨目录名')
+}
+const T1 = { '': ['A', 'B'], A: ['A/a.md', 'A/b.md', 'A/sub'], 'A/sub': ['A/sub/s1.md', 'A/sub/s2.md'], B: ['B/img.png'], E: [] }
+const k1 = K(T1)
+{
+  ok(coverageOf(['A'], 'A', k1) === 'all', 'H12 条目本身 → 实勾')
+  ok(coverageOf(['A'], 'A/a.md', k1) === 'all', 'H13 被祖先前缀盖住的子项 → 也显示实勾（F-2 的第一个症状）')
+  ok(coverageOf([], 'A', k1) === 'none', 'H14 空作用域 → 未勾')
+  ok(coverageOf(['A/a.md', 'A/b.md', 'A/sub'], 'A', k1) === 'all', 'H15 子项全选中 → 父目录也是实勾')
+  ok(coverageOf(['A/a.md'], 'A/sub', k1) === 'none', 'H16 兄弟分支不受影响')
+  ok(coverageOf(['A/sub/s1.md'], 'A/sub', k1) === 'partial', 'H17 部分覆盖 → 半选')
+  ok(coverageOf(['A/sub/s1.md'], 'A', k1) === 'partial', 'H18 半选沿树往上冒（勾深层时顶层要能看出来）')
+  ok(coverageOf(['C/deep/x.md'], 'C', k1) === 'none', 'H19 负向口径：子项未知退化为未勾（方案 §3.2，不为此扫全库）')
+  ok(coverageOf(['E/x.md'], 'E', k1) === 'none', 'H20 已加载空目录判 none，不当成「全部覆盖」')
+}
+{
+  const r = removeFromScope(['A'], 'A/a.md', k1)
+  ok(sorted(r) === 'A/b.md|A/sub', 'H21 大目录里单独取消一项 → 炸开成兄弟', sorted(r))
+  ok(r && coveredBy(r, 'A/a.md') === undefined, 'H22 炸开后被取消的那项确实出圈')
+  ok(r && coveredBy(r, 'A/b.md') === 'A/b.md' && coveredBy(r, 'A/sub/s1.md') === 'A/sub', 'H23 炸开必须保住其余兄弟（含子树）')
+}
+{
+  const r = removeFromScope(['A'], 'A/sub/s1.md', k1)
+  ok(sorted(r) === 'A/a.md|A/b.md|A/sub/s2.md', 'H24 取消更深一层 → 沿路径逐层炸', sorted(r))
+  ok(r && coveredBy(r, 'A/sub/s2.md') === 'A/sub/s2.md', 'H25 同层兄弟仍选中')
+}
+ok(sorted(removeFromScope(['A'], 'A', k1)) === '', 'H26 整棵移出 = 该前缀消失')
+{
+  const t2 = { C: ['C/deep'] }   // C/deep 从未列过子项
+  ok(removeFromScope(['C'], 'C/deep/x.md', K(t2)) === null, 'H27 负向：子项未知时返回 null，不交半成品（半成品=静默缩范围）')
+  const t3 = { E: [] }
+  ok(sorted(removeFromScope(['E'], 'E/x.md', K(t3))) === '', 'H28 已列出且确为空目录 → 前缀就地消失（undefined 与空数组口径必须不同）')
+  const big = { BIG: Array.from({ length: 500 }, (_, i) => `BIG/${i}.md`) }
+  ok(removeFromScope(['BIG'], 'BIG/0.md', K(big)) === null, `H29 炸开超软上限（${SCOPE_ENTRY_SOFT_CAP}）→ null 交调用方提示，而非留给落库在 500 条静默截断`)
+}
+{
+  ok(sorted(addToScope(['A/b.md'], 'A')) === 'A', 'H30 勾上层 → 内部冗余条目被压掉')
+  ok(sorted(addToScope(['A'], 'A/a.md')) === 'A', 'H31 已覆盖的行再勾不产生重复条目（旧代码在这里是静默 return）')
+  ok(sorted(batchAdd(['A'], ['A/x.md', 'B'])) === 'A|B', 'H32 批量加入同样压回前缀')
+  ok(SCOPE_ENTRY_SOFT_CAP < 500, 'H33 软上限必须低于落库硬截断 500，否则余量为零、界面显示数 ≠ 重开后数')
+}
+{
+  const pane = read('src/modules/ai-assistant/ScopePane.tsx')
+  const bare = stripComments(pane)
+  ok(/indeterminate/.test(pane), 'H34 三态复选框在位（半选要靠它，checked 只有真/假）')
+  ok(/childrenRaw/.test(pane) && /rawRef/.test(pane), 'H35 未过滤子项清单与同步镜像都在位（炸开读它，不读树的过滤结果）')
+  ok(/全选顶层/.test(pane) && /全选可见/.test(pane) && /全部取消/.test(pane), 'H36 三个批量动作都在（同位单按钮按语境换语义）')
+  ok(/SCOPE_ENTRY_SOFT_CAP/.test(pane), 'H37 软上限前置守卫接到面板')
+  ok(!/scope\.map\(/.test(bare) && !/flex-wrap/.test(bare), 'H38 负向：chip 行已删，选择态只有树里一处表达（F-5 = C）')
+  const mdLines = bare.split('\n').filter((l) => /MD_EXTS/.test(l))
+  ok(mdLines.length === 2 && mdLines.every((l) => !/Raw|batchAdd|removeFromScope/.test(l)),
+    'H39 负向：MD_EXTS 只喂显示，绝不掺进炸开/全选路径（掺了会把非 md 文件静默挤出作用域）', `命中 ${mdLines.length} 行`)
+  ok(!/scope\.some\(/.test(bare) && !/coveredBy\([^)]*\)\)\s*return/.test(bare),
+    'H40 负向：被覆盖的行不再静默 return（F-2 根因，点不动的那条早退）')
+  ok(/api\.setScope\(prunePrefixes\(paths\)\)/.test(stripComments(read('src/modules/ai-assistant/index.tsx'))),
+    'H41 建议卡采用时也过一遍压缩（8 条文件路径里若含彼此所在目录，应塌成前缀）')
+}
+
+{
+  /**
+   * H42 / H43 炸开不变量**穷举**（几棵全形状小树 × 所有 ≤3 条前缀组合 × 每个已覆盖目标）：
+   * 随机只碰得到运气形状，这里要的是「一项都没多动」的保证 ——
+   *   取消后的可读集合 == 取消前的可读集合 减去（该子树 + 其祖先链）。
+   * 祖先行必须一起脱离实勾（退成半选），这是炸开的定义，不是偏差。
+   * 子项全量列好时 removeFromScope 一律不许返回 null：返回了就是接线侧 ensurePath 漏了某层。
+   */
+  const shape = (width, depth) => {
+    const universe = [], tree = {}
+    const grow = (base, d) => {
+      if (d === 0) return
+      for (let i = 0; i < width; i++) {
+        const rel = base ? `${base}/c${i}` : `r${i}`
+        universe.push(rel)
+        tree[rel] = []
+        grow(rel, d - 1)
+      }
+    }
+    grow('', depth)
+    for (const key of Object.keys(tree)) {
+      tree[key] = universe.filter((x) => x.startsWith(`${key}/`) && x.split('/').length === key.split('/').length + 1)
+    }
+    return { universe, kids: K(tree) }
+  }
+  let cases = 0, diffFail = 0, relStillIn = 0, blocked = 0
+  for (const [w, d] of [[2, 3], [3, 2], [2, 2]]) {
+    const { universe, kids } = shape(w, d)
+    const has = (scope, x) => !!coveredBy(scope, x)
+    for (let m = 1; m < (1 << universe.length); m++) {
+      if (m.toString(2).split('1').length - 1 > 3) continue
+      const before = prunePrefixes(universe.filter((_, i) => m & (1 << i)))
+      for (const target of universe.filter((x) => has(before, x))) {
+        cases++
+        const after = removeFromScope(before, target, kids)
+        if (after === null) { blocked++; continue }
+        for (const x of universe) {
+          const inSubtree = x === target || x.startsWith(`${target}/`)
+          const isAncestor = target.startsWith(`${x}/`)
+          if ((has(before, x) && !inSubtree && !isAncestor) !== has(after, x)) { diffFail++; break }
+        }
+        if (coverageOf(after, target, kids) !== 'none') relStillIn++
+      }
+    }
+  }
+  ok(cases > 500 && diffFail === 0 && blocked === 0,
+    `H42 炸开不变量穷举（${cases} 个组合）：可读集合 = 原集合减去该子树及其祖先链，其余一项不动`,
+    `偏差 ${diffFail}，子项齐全却做不了 ${blocked}`)
+  ok(relStillIn === 0, 'H43 穷举：刚取消的节点回到未勾（祖先不会残留成实勾）', `${relStillIn} 例未清`)
 }
 
 console.log('\n========================================')

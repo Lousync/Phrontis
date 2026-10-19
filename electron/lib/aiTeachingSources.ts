@@ -5,7 +5,8 @@ import { getCurrentVault } from './kbStore/vaultContext'
 import { broadcastTreeRefresh, ensureSessionFolder, ensureWriteOwnerFolder, rootDirName, sanitizeTitle, sessionFolder, sourceTemplateText } from './aiTeachingFolders'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { listWorkspaces, workspaceFolderRel } from './aiTeachingWorkspaces'
-import { getSessionUnitFolderRel } from './aiTeachingCourse'
+import { getSessionUnitFolderRel, unitFolderRel } from './aiTeachingCourse'
+import { normalizeSourceTarget, registerAiTeachingScopeHandlers, type AiTeachSourceTarget } from './aiTeachingScope'
 import { uniqueFileName, uniqueVersionedName } from './workspaceManager'
 import { extractPdfRange, extractPptxPages } from './docsReader'
 import { visionChat, findVisionModel } from './llmService'
@@ -46,8 +47,10 @@ const SOURCES_DIR = 'SOURCES'
  * 素材库作用域：
  * - `workspace` 工作区级主库 → `{工作区层}/SOURCES/SOURCE.md`（跨对话共用，默认）
  * - `session` 对话私有补充 → `{工作区层}/SOURCES/{对话夹名}/SOURCE.md`（存量保留，不再作为登记入口）
+ * - `unit` 知识点级补充 → `{工作区层}/SOURCES/{章号}·{知识点}/SOURCE.md`（2026-10-17 学习流 v2 §三-3：
+ *   与 `session` 同一物理口径（一节课=一个知识点），单独一个取值只为让「本层」语义在合并读里可辨）
  */
-export type SourcesScope = 'workspace' | 'session'
+export type SourcesScope = 'workspace' | 'session' | 'unit'
 
 const TYPE_ENUM = ['url', 'pptx', 'pdf', 'docx', 'image', 'md', 'code', 'dir', 'other'] as const
 export type SourceType = (typeof TYPE_ENUM)[number]
@@ -186,6 +189,70 @@ function layout(sessionId: string, getSetting: (key: string) => unknown, create:
   const convName = lastSlash > 0 ? rel.slice(lastSlash + 1) : rel
   const dirRel = `${parentRel}/${SOURCES_DIR}/${convName}`
   return { rootPath: vault.rootPath, rootId: vault.rootId, dirRel, dirAbs: join(vault.rootPath, dirRel), fileRel: `${dirRel}/${SOURCE_FILE}`, convName, wsName: wsNameOf(parentRel, rootDir), scope }
+}
+
+/**
+ * 知识点级素材夹 / 登记文件的仓库相对路径（**零依赖纯函数**，`层 → 路径` 的唯一拼法）。
+ * 入参 = `unitFolderRel(wsId, unitId, getSetting)`（`{工作区}/{章号}·{知识点}`）。
+ *
+ * 与 `layout(..., 'session')` 的 L5 分支同一口径：素材夹挂在**工作区层**的 `SOURCES/` 下，
+ * 夹名取知识点文件夹名（`{章号}·{知识点}`）——跨课时共用一份素材（一节课 = 一个知识点）。
+ */
+export function unitSourceDirRel(unitFolder: string | null | undefined): string | null {
+  const dir = String(unitFolder ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  if (!dir) return null
+  const slash = dir.lastIndexOf('/')
+  const parent = slash > 0 ? dir.slice(0, slash) : ''
+  const seg = slash > 0 ? dir.slice(slash + 1) : dir
+  if (!parent || !seg) return null
+  return `${parent}/${SOURCES_DIR}/${seg}`
+}
+
+/** 知识点级 `SOURCE.md` 的仓库相对路径（`unitSourceDirRel` + 文件名） */
+export function unitSourceFileRel(unitFolder: string | null | undefined): string | null {
+  const dirRel = unitSourceDirRel(unitFolder)
+  return dirRel ? `${dirRel}/${SOURCE_FILE}` : null
+}
+
+/** 由**显式**素材夹相对路径拼布局（工作区层 / 知识点层共用）。
+ *  `convName` 必须显式给：它是模板 frontmatter 的「归属」署名（工作区层为空串 → 模板写「（工作区级·跨对话共用）」，
+ *  知识点层为知识点夹名）——**不能**从 dirRel 末段推（工作区层的末段是 `SOURCES`，会把署名写成 "SOURCES"）。 */
+function layoutOf(rootPath: string, rootId: string, dirRel: string, scope: SourcesScope, wsName: string, convName: string): SourcesLayout {
+  return {
+    rootPath, rootId, dirRel, dirAbs: join(rootPath, dirRel),
+    fileRel: `${dirRel}/${SOURCE_FILE}`,
+    convName,
+    wsName,
+    scope,
+  }
+}
+
+/** 工作区层素材布局（按 **wsId** 解析，不依赖会话）：`{工作区文件夹}/SOURCES/SOURCE.md`。
+ *  分层入口（`aiTeachScope` / `aiTeachSource:addScoped`）只有 wsId、没有会话，故不能再走 `parentRelOf`。 */
+function layoutWorkspaceOf(wsId: string, getSetting: (key: string) => unknown, create: boolean): SourcesLayout | { error: string } {
+  const vault = getCurrentVault()
+  if (!vault) return { error: '尚未打开仓库' }
+  const wsRel = workspaceFolderRel(String(wsId ?? ''), getSetting)
+  if (!wsRel) return { error: '工作区不存在' }
+  const rootDir = rootDirName(getSetting)
+  const dirRel = `${wsRel}/${SOURCES_DIR}`
+  if (create) { try { mkdirSync(join(vault.rootPath, dirRel), { recursive: true }) } catch { /* 懒建失败由写入兜底 */ } }
+  // convName 空串 = 工作区级库（与 `layout(..., 'workspace')` 同口径）
+  return layoutOf(vault.rootPath, vault.rootId, dirRel, 'workspace', wsNameOf(wsRel, rootDir), '')
+}
+
+/** 知识点层素材布局（按 wsId + unitId 解析）：`{工作区}/SOURCES/{章号}·{知识点}/SOURCE.md` */
+function layoutUnitOf(wsId: string, unitId: string, getSetting: (key: string) => unknown, create: boolean): SourcesLayout | { error: string } {
+  const vault = getCurrentVault()
+  if (!vault) return { error: '尚未打开仓库' }
+  const unitFolder = unitFolderRel(String(wsId ?? ''), String(unitId ?? ''), getSetting)
+  const dirRel = unitSourceDirRel(unitFolder)
+  if (!dirRel) return { error: '知识点不存在或未打开仓库' }
+  const rootDir = rootDirName(getSetting)
+  const slash = String(unitFolder).lastIndexOf('/')
+  const wsName = wsNameOf(slash > 0 ? String(unitFolder).slice(0, slash) : '', rootDir)
+  if (create) { try { mkdirSync(join(vault.rootPath, dirRel), { recursive: true }) } catch { /* 懒建失败由写入兜底 */ } }
+  return layoutOf(vault.rootPath, vault.rootId, dirRel, 'unit', wsName, dirRel.slice(dirRel.lastIndexOf('/') + 1))
 }
 
 /** 懒建兜底模板：唯一真相源 = aiTeachingFolders.sourceTemplateText（2026-09-09 收尾合并，勿在此内联） */
@@ -459,8 +526,10 @@ export interface AddSourceInput {
   note?: string
 }
 
-/** 添加素材：已入库先拷贝原件进素材夹，再按模板追加条目（3-28「程序解析模板后写入」，非前端拼串） */
-export function addSource(sessionId: string, input: AddSourceInput, getSetting: (key: string) => unknown): SourcesResult & { no?: number; corrected?: { from: string; to: string } } {
+/** 添加素材：已入库先拷贝原件进素材夹，再按模板追加条目（3-28「程序解析模板后写入」，非前端拼串）。
+ *  `target` 缺省 = 工作区主库（**旧调用点与旧契约一律不破**，负向断言在 verify-scope-files.mjs）；
+ *  `target={ level:'unit', wsId, unitId }` → 知识点级补充库 `{工作区}/SOURCES/{章号}·{知识点}/SOURCE.md`。 */
+export function addSource(sessionId: string, input: AddSourceInput, getSetting: (key: string) => unknown, target?: AiTeachSourceTarget): SourcesResult & { no?: number; corrected?: { from: string; to: string } } {
   try {
     const name = String(input?.name ?? '').trim()
     if (!name) return { ok: false, error: '素材名称必填' }
@@ -471,7 +540,11 @@ export function addSource(sessionId: string, input: AddSourceInput, getSetting: 
     const storage = input?.storage === '已入库' ? '已入库' : '仅引用'
     // v3.1.1：登记一律落**工作区主库**（教材/讲义是课程资产，跨对话复用）；
     // sessionId 只用于定位工作区层，可为空 —— 无对话也能登记，解开「导素材要先建对话」的冷启动死结
-    const l = layout(sessionId, getSetting, true, 'workspace')
+    // 2026-10-17 学习流 v2 §三-3：显式 target 才改落点 —— unit=知识点级补充；wsId（无会话）=按工作区解析。
+    const t = normalizeSourceTarget(target)
+    const l = t.level === 'unit'
+      ? layoutUnitOf(t.wsId ?? '', t.unitId ?? '', getSetting, true)
+      : (t.wsId ? layoutWorkspaceOf(t.wsId, getSetting, true) : layout(sessionId, getSetting, true, 'workspace'))
     if ('error' in l) return { ok: false, error: l.error }
     mkdirSync(l.dirAbs, { recursive: true })
     let path = String(input.path ?? '').trim()
@@ -515,12 +588,82 @@ export function addSource(sessionId: string, input: AddSourceInput, getSetting: 
     const e: SourceEntry = { no, name, type, path, range, storage, extracted: '-', note: String(input.note ?? '').trim() }
     const w = rewriteEntries(l, [...entries, e])
     if (!w.ok) return { ok: false, error: w.error }
+    // 分层/按 wsId 登记（无会话）：`readMerged` 按会话解析、会话为空时读不到本层，故直接回该层条目。
+    if (t.level === 'unit' || t.wsId) {
+      const list: MergedSource[] = readEntries(l).map((x, i) => ({ ...x, scope: l.scope, dirRel: l.dirRel, origNo: x.no, no: i + 1 }))
+      return {
+        ok: true, relPath: l.fileRel, entries: list, no, corrected,
+        workspaceRel: t.level === 'unit' ? null : l.fileRel,
+        sessionRel: t.level === 'unit' ? l.fileRel : null,
+      }
+    }
     const m = readMerged(sessionId, getSetting)
     // no = 主库内的条目编号（供「再加区间」等场景定位原件）；entries 回合并视图供渲染层直接刷新
     return { ok: true, relPath: l.fileRel, entries: m.entries, no, corrected, workspaceRel: m.ws?.fileRel ?? null, sessionRel: m.conv?.fileRel ?? null }
   } catch (err) {
     return { ok: false, error: (err as Error).message }
   }
+}
+
+// ===== 分层素材读（右栏「素材」页签：工作区层 + 知识点层分组，2026-10-17 学习流 v2 §三-3）=====
+
+/** 分层素材读结果：按层分组（章层本层不做，故只有两组）；组内条目编号各从 1 起 */
+export interface ScopedSourcesResult {
+  ok: boolean
+  unit: MergedSource[]
+  workspace: MergedSource[]
+  unitRel?: string | null
+  workspaceRel?: string | null
+  error?: string
+}
+
+/**
+ * 分层读素材：工作区主库 + 本知识点补充库，**按层分组**返回（供右栏「素材」页签直接用）。
+ *
+ * - 工作区组：`{工作区}/SOURCES/SOURCE.md`，与 `aiTeachSrc:read` 同口径懒建空模板
+ *   （否则右栏一进去就是「登记文件不存在」，用户没有登记入口）。
+ * - 知识点组：`{工作区}/SOURCES/{章号}·{知识点}/SOURCE.md`，**只读不建**（本层还没登记就不该凭空造文件）；
+ *   文件不存在 → `unit: []` 且 `unitRel: null`。unitId 缺省 → 只读工作区组。
+ * - 两组各自重编号 1..N（分组展示，编号只在组内作引用键），`origNo` 保留层内原编号供写操作定位。
+ */
+export function readScopedSources(wsId: string, unitId: string | null | undefined, getSetting: (key: string) => unknown): ScopedSourcesResult {
+  try {
+    const wid = String(wsId ?? '').trim()
+    if (!wid) return { ok: false, unit: [], workspace: [], error: '缺少工作区' }
+    const ws = layoutWorkspaceOf(wid, getSetting, false)
+    if ('error' in ws) return { ok: false, unit: [], workspace: [], error: ws.error }
+    const wsAbs = join(ws.rootPath, ws.fileRel)
+    if (!existsSync(wsAbs)) {
+      mkdirSync(ws.dirAbs, { recursive: true })
+      writeFileSync(wsAbs, emptyTemplate(ws), 'utf-8')
+      broadcastTreeRefresh(ws.dirRel)
+    }
+    const workspace: MergedSource[] = readEntries(ws).map((x, i) => ({ ...x, scope: 'workspace' as SourcesScope, dirRel: ws.dirRel, origNo: x.no, no: i + 1 }))
+    let unit: MergedSource[] = []
+    let unitRel: string | null = null
+    const uid = String(unitId ?? '').trim()
+    if (uid) {
+      const ul = layoutUnitOf(wid, uid, getSetting, false)
+      if (!('error' in ul) && existsSync(join(ul.rootPath, ul.fileRel))) {
+        unitRel = ul.fileRel
+        unit = readEntries(ul).map((x, i) => ({ ...x, scope: 'unit' as SourcesScope, dirRel: ul.dirRel, origNo: x.no, no: i + 1 }))
+      }
+    }
+    return { ok: true, unit, workspace, unitRel, workspaceRel: ws.fileRel }
+  } catch (e) {
+    return { ok: false, unit: [], workspace: [], error: (e as Error).message }
+  }
+}
+
+/** 分层登记（右栏「素材」页签的 ＋ 按钮）：unitId 空/null = 工作区主库；否则落本知识点补充库。
+ *  与 `aiTeachSrc:add`（旧通道，按会话定位）并存不互斥：本条只服务「按 wsId 的层」这一入口。
+ *  ★ 函数名刻意不叫 `addSourceScoped`：既有的 `.AGENT/scripts/ai-teaching/verify-docx-range-entry.mjs`
+ *  用子串 `count(src, 'export function addSource') === 1` 锁「没有第二个登记/改条目 API」，改名避免误伤。 */
+export function addScopedSource(wsId: string, unitId: string | null | undefined, input: AddSourceInput, getSetting: (key: string) => unknown): SourcesResult & { no?: number; corrected?: { from: string; to: string } } {
+  const uid = String(unitId ?? '').trim()
+  return addSource('', input, getSetting, uid
+    ? { level: 'unit', wsId: String(wsId ?? ''), unitId: uid }
+    : { level: 'workspace', wsId: String(wsId ?? '') })
 }
 
 /** 删除条目（按合并编号定位到所属层；只删该小节、其余编号不动）。返回合并后的完整列表供渲染层直接刷新 */
@@ -1014,7 +1157,8 @@ export function resolveSourcesForInjection(sessionId: string, getSetting: (key: 
   try {
     // v3.1.2 条目11：支线按**主线**解析素材（工作区主库 + 主线对话私有补充）——支线自己既无
     // 工作区归属也无会话夹，直接解析会掉到 lastWorkspaceId 兜底，读到的是一个无关工作区。
-    const m = readMerged(ownerSessionId(sessionId), getSetting)
+    const owner = ownerSessionId(sessionId)
+    const m = readMerged(owner, getSetting)
     if (m.entries.length === 0) return ''
     const rootPath = m.ws?.rootPath ?? m.conv?.rootPath
     if (!rootPath) return ''
@@ -1072,7 +1216,12 @@ export function resolveSourcesForInjection(sessionId: string, getSetting: (key: 
       ...(wsOnes.length ? wsOnes.map(renderOne) : ['（尚无条目）']),
     ]
     if (convOnes.length) {
-      hint.push(`本对话私有补充（仅本对话可见；登记文件 ${m.conv?.fileRel ?? ''}）：`, ...convOnes.map(renderOne))
+      // 2026-10-17 学习流 v2 §八-1：素材侧读点既有，只补**分组标题**——本层若已按 L5 上移到
+      // 「知识点级」素材夹（一节课 = 一个知识点），标题按层名说清，别再叫「对话私有」。
+      const ownerUnit = getSessionUnitFolderRel(owner, getSetting)
+      hint.push(ownerUnit
+        ? `本知识点素材库（仅本知识点可见；登记文件 ${m.conv?.fileRel ?? ''}）：`
+        : `本对话私有补充（仅本对话可见；登记文件 ${m.conv?.fileRel ?? ''}）：`, ...convOnes.map(renderOne))
     }
     // 登记指引只指向工作区主库（新素材默认是课程资产）；编号是合并视图编号，直接按它改文件会对不上，
     // 所以要求 AI「新增条目接着文件内现有最大编号 +1」，不要试图按注入编号去改既有小节
@@ -1201,9 +1350,20 @@ export function promoteSessionSources(sessionId: string, getSetting: (key: strin
 
 /** IPC 注册（main/index.ts settingsCache 注入） */
 export function registerAiTeachingSourceHandlers(getSetting: (key: string) => unknown): void {
+  // 2026-10-17 学习流 v2 §三-2：分层要求（aiTeachScope:*）的 handler 一并在这里注册。
+  // 为什么不在 aiTeachingScope 自己开一个注册器、让 main/index.ts 调：scope 需要本文件的
+  // `parseSourceMd` / `unitSourceFileRel`（复用既有解析，不手搓正则），而 folders 又不能反向 import
+  // scope（folders→course 成环会在 `let lessonFolderResolver` 上踩 TDZ）。注册点放这里，
+  // 依赖恒为单向 main → sources → scope，且 main/index.ts 已经在调本方。
+  registerAiTeachingScopeHandlers(getSetting)
   // v3.1.1：sessionId 允许为空 —— 空会话 = 工作区级主库（素材库面板脱离对话常驻的前提）
   ipcMain.handle('aiTeachSrc:read', (_e, sessionId: string) => readSources(String(sessionId ?? ''), getSetting))
   ipcMain.handle('aiTeachSrc:add', (_e, sessionId: string, input: AddSourceInput) => addSource(String(sessionId ?? ''), input, getSetting))
+  // 2026-10-17 学习流 v2 §三-3：分层素材读（按层分组）+ 分层登记（只有 wsId / unitId，无会话）
+  ipcMain.handle('aiTeachSources:readScoped', (_e, wsId: string, unitId?: string | null) =>
+    readScopedSources(String(wsId ?? ''), unitId ?? null, getSetting))
+  ipcMain.handle('aiTeachSource:addScoped', (_e, wsId: string, unitId: string | null, input: AddSourceInput) =>
+    addScopedSource(String(wsId ?? ''), unitId ?? null, input, getSetting))
   ipcMain.handle('aiTeachSrc:remove', (_e, sessionId: string, no: number) => removeSource(String(sessionId ?? ''), Number(no), getSetting))
   ipcMain.handle('aiTeachSrc:extract', (_e, sessionId: string, no: number) => extractRange(String(sessionId ?? ''), Number(no), getSetting))
   // LibreOffice 探测（设置页「检测」按钮）：先清缓存再重探 —— 保证「刚装好 / 刚改路径」立刻拿到真值

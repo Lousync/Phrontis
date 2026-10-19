@@ -41,8 +41,9 @@ function isCourseAssistant(sessionId: string, getSetting: (key: string) => unkno
   return !!assistantFolderResolver?.(sessionId, getSetting)
 }
 const DEFAULT_ROOT_DIR = 'AI教学'
-/** 会话约束文件（P2 §2.3）：AI 注入的唯一真相源，用户可在编辑器直接改 */
-const CONSTRAINTS_FILE = 'CONSTRAINTS.md'
+/** 会话约束文件（P2 §2.3）：AI 注入的唯一真相源，用户可在编辑器直接改。
+ *  2026-10-17 导出：分层要求（`aiTeachingScope`）与本文件共用同一文件名常量，避免两处硬编码漂移。 */
+export const CONSTRAINTS_FILE = 'CONSTRAINTS.md'
 /** 约束模板（P2 先行落产物根层；P5 工作区两层落地后改读工作区目录，层级语义不变） */
 const CONSTRAINTS_TEMPLATE_REL_SEGMENTS = ['_templates', CONSTRAINTS_FILE]
 
@@ -371,6 +372,19 @@ export function ensureWorkspaceConstraints(wsId: string, getSetting: (key: strin
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
+}
+
+/**
+ * 知识点级 CONSTRAINTS.md 的仓库相对路径 —— 「层 → 文件」的唯一拼法（2026-10-17 学习流 v2 §三-2）。
+ *
+ * 入参是 `unitFolderRel(wsId, unitId, getSetting)` 的结果（`{工作区}/{章号}·{知识点}`，不含本文件名）。
+ * 放在本文件而不是填空处：本文件是 `CONSTRAINTS.md` 文件名与相对路径口径的既有归属地
+ * （全局层 / 工作区层 / 会话层三处都在这里拼）；`aiTeachingScope` 复用本函数，不另拼一份。
+ * null / 空串 → null（调用方据此报「知识点不存在」，不落盘）。
+ */
+export function unitConstraintsRel(unitFolder: string | null | undefined): string | null {
+  const dir = String(unitFolder ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  return dir ? `${dir}/${CONSTRAINTS_FILE}` : null
 }
 
 /**

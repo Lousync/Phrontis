@@ -409,3 +409,16 @@
 
 - `.AGENT/docs/读写分工设计.md` ← `electron/database/repositories/knowledgeRepo.ts:23`、`electron/lib/kbStore/knowledgeVaultRepo.ts:11`、`src/modules/editor/index.tsx:387`、`src/modules/knowledge/index.tsx:658`、`docs/knowledge-query-design.md:184`、`docs/onboarding-rework-design.md:5`
 - `.AGENT/docs/去库化迁移方案.md` ← `electron/lib/kbStore/blogVaultRepo.ts:8`、`electron/lib/kbStore/bookmarkVaultRepo.ts:5`、`docs/rework-master-plan.md:87`
+
+## 待归档：AI教学学习流 v2 原型（2026-10-17 登记）
+
+学习流 v2（折行泳道 / 只展开当前章 / 章间主干 / 拖拽锁 + 插入位 / 右栏三层）的验收原型仍在 `tmp/`（`tmp/` 不进 git，**文件随时可能被清**）：
+
+| 文件 | 说明 |
+|---|---|
+| `E:\Projects\KnowledgeRecorder\tmp\aiteach-flow-proto-v2\index.html` | 单文件可交互原型，含「现状 / 只补断链 / 全量推荐 / 依赖图」四档对照（已验收口径 = 全量推荐档） |
+| `E:\Projects\KnowledgeRecorder\tmp\aiteach-flow-proto-v2\dom-smoke.mjs` | 零依赖 DOM 桩冒烟（无浏览器也能跑四档读数与交互入口，拦白屏级错误） |
+| `E:\Projects\KnowledgeRecorder\tmp\aiteach-flow-v380\index.html` | v1（行铺版）原型，仅供对照；已落码并退役 |
+| `E:\Projects\KnowledgeRecorder\tmp\flow-v2-verify\` | 落码后的**运行时验证载体**（真实 Chromium + 真实 React，58 断言）：折行几何 / 折叠条 / 主干锚点 / 拖拽锁 / 插入位 / 落点写盘 / 视口守卫 —— 与原型不同，它属「验收工具」而非设计稿 |
+
+归档建议：`Phrontis/原型/` 收两份 `index.html` + 冒烟脚本；`Phrontis/过程记录/` 收 `flow-v2-verify/` 的断言清单与 `report.txt`（本轮未动 DP 仓，登记于此待归）。

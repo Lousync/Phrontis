@@ -791,7 +791,7 @@ input:focus, textarea:focus, select:focus {
   transition: transform var(--dur-std) var(--ease-kb), rotate var(--dur-std) var(--ease-kb);
 }
 
-/* --- C2 左栏分区贴底：四分区单 grid 驱动（AI 教学左栏「资源管理器」对标 VS Code，2026-10-17） ---
+/* --- C2 左栏分区贴底：四分区单 grid 驱动（AI 教学左栏「资源管理器」对标 VS Code，2026-10-16） ---
    形态：会话头 / 会话体 / 资源管理器头 / 资源管理器体 = 一个 grid 的四条轨。
    贴底原理：资源管理器收起时第 4 轨归 0，剩余高度由 align-content:stretch 全部分给
    第 2 轨（auto）⇒ 会话体撑满，把「资源管理器」条目压到侧栏底。
@@ -2284,16 +2284,6 @@ body.dragging, body.dragging * { user-select: none !important; -webkit-user-sele
 .kb-flow-zone:hover { border-color: color-mix(in srgb, var(--border-color) 55%, var(--text-muted)); }
 .kb-flow-zone.kb-drop { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .kb-flow-zone.kb-on { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
-.kb-flow-outer {
-  border-color: color-mix(in srgb, var(--border-color) 55%, transparent);
-  background: color-mix(in srgb, var(--accent) 2%, transparent);
-  transition: border-color var(--dur-std) var(--ease-kb), background-color var(--dur-std) var(--ease-kb);
-}
-.kb-flow-outer:hover { border-color: color-mix(in srgb, var(--border-color) 40%, var(--text-muted)); }
-.kb-flow-outer.kb-on {
-  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-}
 .kb-flow-node {
   background: var(--card-bg);
   border: 1px solid var(--border-color);
@@ -2308,9 +2298,54 @@ body.dragging, body.dragging * { user-select: none !important; -webkit-user-sele
 .kb-flow-pulse { animation: kb-flow-pulse 1.8s var(--ease-kb) infinite; }
 @keyframes kb-flow-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .3; transform: scale(.7); } }
 .kb-flow-canvas.kb-panning { cursor: grabbing; }
+
+/* ===== 学习流 v2（折行泳道）新增：分段条 / 折叠条 / 插入位 / 布局锁 =====
+   只动 transform / opacity —— 插入位条与锁提示的出现都走这两条属性；
+   章框展开 / 折叠是几何重排（宽高变化），按铁律 13 不补过渡。 */
+.kb-flow-segbar {
+  display: flex;
+  height: 7px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: var(--bg-tertiary);
+  flex-shrink: 0;
+}
+.kb-flow-segbar > i { display: block; height: 100%; transition: width var(--dur-std) var(--ease-kb); }
+.kb-flow-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  margin-right: 5px;
+  vertical-align: 1px;
+}
+/* 折叠成条的章：整条可点 = 展开并成为当前章（§19），所以是 pointer 而不是 default */
+.kb-flow-zone.kb-closed { cursor: pointer; }
+.kb-flow-zone.kb-closed:hover { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.kb-flow-dropbar {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  animation: kb-flow-dropbar-in 120ms var(--ease-kb);
+}
+@keyframes kb-flow-dropbar-in { from { opacity: 0; transform-origin: center; } to { opacity: 1; } }
+.kb-flow-lockhint {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+  border-color: var(--border-color);
+  transition: color var(--dur-std) var(--ease-kb), border-color var(--dur-std) var(--ease-kb);
+}
+.kb-flow-lockhint.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.kb-flow-lockbubble { border-color: var(--border-color); animation: kb-flow-pop-in 140ms var(--ease-kb); }
+@keyframes kb-flow-pop-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.kb-flow-node.kb-locked { cursor: pointer; }
+.kb-flow-node.kb-drag-on { cursor: grab; }
+
 @media (prefers-reduced-motion: reduce) {
   .kb-flow-pulse { animation: none; }
   .kb-flow .kb-flow-bar { transition: none; }
-  .kb-flow-zone, .kb-flow-node, .kb-flow-outer { transition: none; }
+  .kb-flow-zone, .kb-flow-node { transition: none; }
+  .kb-flow-segbar > i,
+  .kb-flow-lockhint { transition: none; }
+  .kb-flow-dropbar, .kb-flow-lockbubble { animation: none; }
 }
 

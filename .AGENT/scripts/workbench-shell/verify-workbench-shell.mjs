@@ -16,7 +16,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   WORKBENCH_BOOKMARKS, RAIL_FOLLOW_MAP, WORKBENCH_TABBAR_EXCLUDED,
-  parseWorkbenchLayout, DEFAULT_WORKBENCH_LAYOUT,
+  parseWorkbenchLayout, DEFAULT_WORKBENCH_LAYOUT, RIGHT_PANEL_WIDGET_IDS,
 } from '../../../src/lib/workbenchLayout.ts'
 import { isTabName, RAIL_MODULE_IDS, railOrder, railVisibleOrder, railHiddenIds, APP_MODULES } from '../../../src/lib/appModules.ts'
 
@@ -324,14 +324,23 @@ ok(/railTool=\{railTool\}/.test(srcApp) && /railTool\?/.test(srcShell) && /railM
   'E4d App → Shell → LeftPanel railTool 透传，模块态条件 = railModule || railTool')
 
 // E5 右栏下段：切换条（2026-09-28 由原型彩色 emoji 改版为素色 lucide 线性图标）+ 番茄钟形态改造（2026-09-17）
-ok(/RIGHT_PANEL_WIDGET_IDS: readonly string\[\] = \['pomo', 'nav', 'pet'\]/.test(srcWbl),
-  'E5 右栏切换条挂载集 = 番茄钟 + 网址导航 + 桌宠（RIGHT_PANEL_WIDGET_IDS 单点真相源；恢复控件 = 往这里加 id）')
+ok(/RIGHT_PANEL_WIDGET_IDS: readonly string\[\] = \['pomo', 'nav', 'pet', 'habit'\]/.test(srcWbl),
+  'E5 右栏切换条挂载集 = 番茄钟 + 网址导航 + 桌宠 + 今日打卡（RIGHT_PANEL_WIDGET_IDS 单点真相源；恢复控件 = 往这里加 id，并同步本断言）')
 ok(/RIGHT_PANEL_WIDGET_IDS\.filter/.test(srcRight) && /RIGHT_PANEL_WIDGET_IDS\.map/.test(srcRight),
   'E5b 切换条渲染与 ⋯ 选显菜单**同一挂载集**（两处口径一致，加 id 即两处生效）')
 ok(/pomo: \{ Icon: Timer, label: '番茄钟' \}/.test(srcRight) && /nav: \{ Icon: Globe, label: '网址导航' \}/.test(srcRight) && /pet: \{ Icon: Cat, label: '桌宠' \}/.test(srcRight),
   'E5b2 切换条图标表 = 素色 lucide 线性图标（弃彩色 emoji；桌宠用 Cat）')
 ok(/effectiveWidget === 'nav' && <NavWidget favoritesOnly \/>/.test(srcRight) && /effectiveWidget === 'pet' && <PetWidget \/>/.test(srcRight),
-  'E5b3 简略视图渲染分支覆盖挂载集全项（nav + pet 均挂实体组件）')
+  'E5b3 nav 走 favoritesOnly 简略形态、pet 挂实体组件（全项覆盖见 E5b4）')
+// E5b4 「加 id 即生效」的前提（2026-10-16 F-6 恢复 habit 时钉死）：挂载集**派生**遍历，
+// 每个 id 都要有「WIDGET_META 图标条目」+「effectiveWidget === id 渲染分支」两处接线。
+// 缺渲染分支 = 图标点了视图空白、缺图标 = 切换条少一颗，两条都不报错也不影响 IPC ⇒ 静默失败。
+for (const id of RIGHT_PANEL_WIDGET_IDS) {
+  const comp = id[0].toUpperCase() + id.slice(1) + 'Widget'
+  ok(new RegExp(`${id}: \\{ Icon: \\w+, label: '[^']+' \\}`).test(srcRight)
+    && new RegExp(`effectiveWidget === '${id}' && <${comp}`).test(srcRight),
+    `E5b4 挂载集 ${id}：图标表 + ${comp} 渲染分支两处同在（往 RIGHT_PANEL_WIDGET_IDS 加 id 时必须两处都在）`)
+}
 const srcPomo = stripComments(read('src/components/workbench/widgets/PomoWidget.tsx'))
 ok(/data-wb="pomoRing"/.test(srcPomo) && /strokeDashoffset/.test(srcPomo) && /const RING_CIRC = 2 \* Math\.PI \* RING_R/.test(srcPomo),
   'E5c 专注态环形进度（SVG 环 + stroke-dashoffset 周长派生）')

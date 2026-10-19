@@ -4,12 +4,14 @@ import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight } fr
 import type { AiScopeSuggestion, LlmProviderInfo } from '../../types'
 import { workspaceGetCurrent, aiAssistantScopeSuggest, llmListProviders, llmReasoningCapable } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
+import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { BOOKMARK_COLORS } from '../../lib/workbenchLayout'
 import { MessageList } from '../../components/shared/AssistantPanel/MessageList'
 import { AiAssistantIcon } from '../../components/shared/AiAssistantIcon'
 import { SessionRunMark } from '../../components/shared/AssistantPanel/SessionRunMark'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
 import { useAiAssistant, type Effort } from './useAiAssistant'
+import { prunePrefixes } from './scopeSetPure'
 import { ScopePane } from './ScopePane'
 import { ReviewPane } from './ReviewPane'
 
@@ -70,7 +72,11 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [providerList, setProviderList] = useState<LlmProviderInfo[]>([])
-  const [modelMenuOpen, setModelMenuOpen] = useState(false)
+  // 模型 / 思考强度菜单：必须 portal + 实测锚点（F-1，2026-10-16）。裸 absolute 的包含块是触发按钮，
+  // w-[280px] 会被 max-w-full 压成按钮宽的竖条；useAnchoredMenu 按视口翻折与 clamp，与宿主窄宽无关。
+  const modelTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const modelMenuRef = useRef<HTMLDivElement | null>(null)
+  const modelMenu = useAnchoredMenu(modelTriggerRef, modelMenuRef, 280)
   const [modelCapable, setModelCapable] = useState(false)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
   const dragGuardRef = useRef(0)
@@ -186,7 +192,7 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
     const paths = Array.from(scopeCard.accepted)
     if (paths.length === 0) return
     const { run } = scopeCard
-    api.setScope(paths)
+    api.setScope(prunePrefixes(paths))
     setScopeCard(null)
     if (runNow) execRun(run)
   }, [scopeCard, api, execRun])
@@ -202,18 +208,20 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
 
   const pickModel = useCallback((val: string) => {
     api.setModelId(val)
-    setModelMenuOpen(false)
-  }, [api])
+    modelMenu.close()
+  }, [api, modelMenu.close])
 
   const sidebar = (
     <div className="flex h-full flex-col">
-      {/* 作用域（上）：段头 + 搜索 + 目录树勾选 + 已选 chips。运行中锁定（本轮已按快照跑完，改了下轮才生效） */}
+      {/* 作用域（上）：段头 + 搜索 + 摘要行 + 目录树三态勾选。运行中锁定（本轮已按快照跑完，改了下轮才生效） */}
       <div className="flex min-h-0 flex-col" style={{ maxHeight: '56%' }}>
+        {/* 56% 限高保留：chip 行已删、段高恒定，不再存在「chip 每长一行从树上割一块」；限高是为了让树不吞掉下方任务段 */}
         <div className="flex shrink-0 items-center justify-between px-3 py-2">
           <span className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">作用域</span>
-          <span className="text-[11px] text-[var(--text-muted)]" title={api.pending ? '本轮已在运行：作用域已锁定，改动要等这一轮跑完' : undefined}>
-            {api.pending ? '运行中 · 已锁定' : api.scope.length ? `${api.scope.length} 项` : '未选择'}
-          </span>
+          {/* 计数与空态在 ScopePane 的摘要行（选择态只有一处表达），段头只报锁定状态 */}
+          {api.pending && (
+            <span className="text-[11px] text-[var(--text-muted)]" title="本轮已在运行：作用域已锁定，改动要等这一轮跑完">运行中 · 已锁定</span>
+          )}
         </div>
         <ScopePane rootId={rootId} scope={api.scope} onChange={api.setScope} disabled={api.pending} />
       </div>
@@ -428,12 +436,14 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
             {/* 工具条：合规提示（左空白）→ 模型/思考强度菜单 → 发送/停止（与 AI教学同一口径） */}
             <div className="relative flex items-center gap-2 mt-0.5">
               <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
-              <div className="relative">
+              <>
                 <button
+                  ref={modelTriggerRef}
                   type="button"
-                  onClick={() => setModelMenuOpen((v) => !v)}
+                  onClick={modelMenu.toggle}
+                  aria-expanded={modelMenu.open}
                   className={`flex items-center gap-1 h-7 px-2 rounded-md text-[11px] transition-colors ${
-                    modelMenuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                    modelMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
                   }`}
                   title="本任务模型与思考强度（仅本任务生效，默认跟随设置→AI 默认模型）"
                 >
@@ -442,8 +452,12 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
                   {api.effort !== 'off' && <span className="text-[var(--accent)]">· 🧠{EFFORT_LABEL[api.effort]}</span>}
                   <ChevronRight size={10} className="-rotate-90 shrink-0" />
                 </button>
-                {modelMenuOpen && (
-                  <div className="absolute bottom-full right-0 mb-1.5 w-[280px] max-w-full z-30 rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden select-none">
+                {modelMenu.open && modelMenu.pos && createPortal(
+                  <div
+                    ref={modelMenuRef}
+                    style={modelMenu.pos}
+                    className="kb-pop fixed z-50 w-[280px] rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden select-none"
+                  >
                     <div className="px-3 py-1.5 text-[10.5px] text-[var(--text-muted)] bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">回答模型 · 仅本任务生效</div>
                     <div className="max-h-[300px] overflow-y-auto py-1">
                       <button
@@ -482,9 +496,10 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
                         </button>
                       ))}
                     </div>
-                  </div>
+                  </div>,
+                  document.body,
                 )}
-              </div>
+              </>
               {api.pending ? (
                 <button
                   type="button"

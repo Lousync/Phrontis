@@ -1395,8 +1395,8 @@ export interface AiTeachSourceEntry {
   /** '-' 或 '✓ → 提取稿文件名'（3-26 程序维护） */
   extracted: string
   note: string
-  /** v3.1.1：条目所属层 —— workspace=工作区主库（跨对话共用），session=对话私有补充（存量） */
-  scope?: 'workspace' | 'session'
+  /** v3.1.1：条目所属层 —— workspace=工作区主库（跨对话共用），session=对话私有补充（存量），unit=知识点级补充（2026-10-17 分层） */
+  scope?: 'workspace' | 'session' | 'unit'
   /** v3.1.1：条目所属素材夹的仓库相对路径（提取稿/原件都相对它；两层合并后必须逐条目携带） */
   dirRel?: string
   /** v3.1.1：所属 SOURCE.md 内的原始编号（合并视图编号 ≠ 层内编号时，写操作按它定位） */
@@ -1430,6 +1430,22 @@ export interface AiTeachSourcesResult {
   anomalies?: { unnamed: number; dupNo: number }
   error?: string
 }
+
+/**
+ * AI教学·分层「要求」（方案 ai-teaching-flow-v2-impl.md §三-2，2026-10-17）。
+ * 三层可编辑：global（{AI教学产物根}/CONSTRAINTS.md）/ workspace（{工作区}/CONSTRAINTS.md）/
+ * unit（{工作区}/{章号}·{知识点}/CONSTRAINTS.md）；**chapter 本层未启用**（主进程一律返回
+ * `{ ok: false, error: '章层本层未启用' }`，右栏据此显示「本层未启用」，不做假按钮）。
+ * 只传 `{ wsId, level, unitId }`：绝对路径不出主进程（铁律 3），返回值一律仓库相对路径。
+ */
+export type AiTeachScopeLevel = 'global' | 'workspace' | 'chapter' | 'unit'
+export interface AiTeachScopeRef { wsId: string; level: AiTeachScopeLevel; unitId?: string | null }
+export interface AiTeachScopeTextResult { ok: boolean; relPath?: string | null; text?: string; created?: boolean; error?: string }
+/** 分层素材读（工作区层 + 知识点层分组；组内编号各从 1 起，origNo 为层内原编号） */
+export interface AiTeachScopedSourcesResult { ok: boolean; unit: AiTeachSourceEntry[]; workspace: AiTeachSourceEntry[]; unitRel?: string | null; workspaceRel?: string | null; error?: string }
+/** 画布卡片「信息两级」用：req=本知识点要求条数，src=本知识点素材条数（缺文件均记 0） */
+export interface AiTeachScopeCount { req: number; src: number }
+export interface AiTeachScopeCountsResult { ok: boolean; units: Record<string, AiTeachScopeCount>; error?: string }
 
 /** AI教学·左栏「收藏」：钉住的文档（rel = 仓库相对路径；按工作区分组，存 .knowbase/modules/aiTeaching/favorites.json） */
 export interface AiTeachFavorite {
@@ -2767,6 +2783,20 @@ export interface ElectronAPI {
   onAiTeachCourseRefresh: (cb: (p: { wsId: string }) => void) => () => void
   aiTeachSrcRead: (id: string) => Promise<AiTeachSourcesResult>
   aiTeachSrcAdd: (id: string, input: AiTeachSourceInput) => Promise<AiTeachSourcesResult>
+  // ===== AI教学·分层要求与分层素材（方案 §三-2/§三-3，2026-10-17）=====
+  // 只传 { wsId, level, unitId }，绝对路径不出主进程（铁律 3）；写盘后复用既有广播，无新通道。
+  /** 读某层要求（文件不存在 → text 空串；chapter → { ok:false, error:'章层本层未启用' }） */
+  aiTeachScopeRead: (ref: AiTeachScopeRef) => Promise<AiTeachScopeTextResult>
+  /** 写某层要求（CRLF 归一 LF；父目录懒建；写完广播 tree + course 刷新） */
+  aiTeachScopeWriteText: (ref: AiTeachScopeRef, text: string) => Promise<AiTeachScopeTextResult>
+  /** 确保某层要求文件存在，缺则落骨架并返回 created:true */
+  aiTeachScopeEnsure: (ref: AiTeachScopeRef) => Promise<AiTeachScopeTextResult>
+  /** 一次扫描给出全部知识点的要求/素材条数（只读不建文件；units 覆盖大纲里所有知识点） */
+  aiTeachScopeCounts: (wsId: string) => Promise<AiTeachScopeCountsResult>
+  /** 分层读素材（工作区层 + 本知识点层分组；unitId 缺省只读工作区层） */
+  aiTeachSourcesReadScoped: (wsId: string, unitId?: string | null) => Promise<AiTeachScopedSourcesResult>
+  /** 分层登记素材：unitId 空/null = 工作区主库；否则落本知识点补充库 */
+  aiTeachSourceAddScoped: (wsId: string, unitId: string | null, input: AiTeachSourceInput) => Promise<AiTeachSourcesResult>
   aiTeachSrcRemove: (id: string, no: number) => Promise<AiTeachSourcesResult>
   aiTeachSrcExtract: (id: string, no: number) => Promise<{ ok: boolean; relPath?: string; error?: string }>
   aiTeachSrcPick: () => Promise<{ ok: boolean; path: string | null; error?: string }>

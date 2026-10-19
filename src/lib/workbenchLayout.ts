@@ -52,13 +52,14 @@ export const WORKBENCH_WIDGET_IDS = ['task', 'habit', 'pomo', 'password', 'nav',
  * 右栏下段**切换条实际挂载的控件集**。
  *
  * 2026-09-17 拍板只留番茄钟；2026-09-28 用户点名恢复「网址导航」(nav)——
- * 仅显示星标收藏条目（NavWidget favoritesOnly，收藏位在网址导航工具的卡片 ⭐ 上打）。
+ * 仅显示星标收藏条目（NavWidget favoritesOnly，收藏位在网址导航工具的卡片 ⭐ 上打）；
+ * 2026-10-16 用户第二次点名恢复「今日打卡」(habit)（v3.9.0 台账 `F-6`：打卡要开工具箱页面，路径太长）。
  * 切换条与 ⋯ 选显菜单都只围绕本集合渲染。
  * 其余控件组件仍在 widgets/ 下（DayPanel 脱离窗口继续用），**恢复某个控件 = 往本常量加 id**
  * （渲染分支已按 5 个控件的条件渲染保留，加 id 即生效）。
  * 注：widgetsHidden 里的历史 id 若不在本集合内会被自然忽略，无需迁移。
  */
-export const RIGHT_PANEL_WIDGET_IDS: readonly string[] = ['pomo', 'nav', 'pet']
+export const RIGHT_PANEL_WIDGET_IDS: readonly string[] = ['pomo', 'nav', 'pet', 'habit']
 
 /**
  * 源自 DayPanel 的四个控件 id（方案 §3.7 互斥判定用）：整体脱离为独立窗口

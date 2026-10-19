@@ -393,6 +393,14 @@ const api = {
   },
   aiTeachSrcRead: (id: string) => ipcRenderer.invoke('aiTeachSrc:read', id),
   aiTeachSrcAdd: (id: string, input: unknown) => ipcRenderer.invoke('aiTeachSrc:add', id, input),
+  // ===== AI教学·分层要求与分层素材（方案 §三-2/§三-3，2026-10-17）=====
+  // 只传 { wsId, level, unitId }，绝对路径不出主进程（铁律 3）；写盘后复用既有广播（无新通道）
+  aiTeachScopeRead: (ref: { wsId: string; level: string; unitId?: string | null }) => ipcRenderer.invoke('aiTeachScope:read', ref),
+  aiTeachScopeWriteText: (ref: { wsId: string; level: string; unitId?: string | null }, text: string) => ipcRenderer.invoke('aiTeachScope:writeText', ref, text),
+  aiTeachScopeEnsure: (ref: { wsId: string; level: string; unitId?: string | null }) => ipcRenderer.invoke('aiTeachScope:ensure', ref),
+  aiTeachScopeCounts: (wsId: string) => ipcRenderer.invoke('aiTeachScope:counts', wsId),
+  aiTeachSourcesReadScoped: (wsId: string, unitId?: string | null) => ipcRenderer.invoke('aiTeachSources:readScoped', wsId, unitId ?? null),
+  aiTeachSourceAddScoped: (wsId: string, unitId: string | null, input: unknown) => ipcRenderer.invoke('aiTeachSource:addScoped', wsId, unitId ?? null, input),
   aiTeachSrcRemove: (id: string, no: number) => ipcRenderer.invoke('aiTeachSrc:remove', id, no),
   aiTeachSrcExtract: (id: string, no: number) => ipcRenderer.invoke('aiTeachSrc:extract', id, no),
   aiTeachSrcPick: () => ipcRenderer.invoke('aiTeachSrc:pick'),

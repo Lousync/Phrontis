@@ -16,6 +16,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { stripComments } from '../shared/strip-comments.mjs'
 import { selectOps, actionForOp } from '../../../electron/lib/aiAssistantPlanPure.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..')
@@ -113,6 +114,17 @@ ok(/agentUsageGet\(\)/.test(hook), 'F2 用量卡经 agentUsageGet 聚合会话�
 const mod = read('src/modules/ai-assistant/index.tsx')
 ok(/fmtTokens\(api\.usage\.in \+ api\.usage\.out\)/.test(mod), 'F3 任务完成显示 token 卡')
 ok(/ReviewPane/.test(mod) && /api\.pendingCount/.test(mod), 'F4 模块接 ReviewPane 与待确认角标')
+
+console.log('\n=== G. 输入区模型菜单弹层（v3.9.0 台账 F-1）===')
+// ★ 扫剥注释后的源码：本模块注释里就写着「w-[280px] 会被 max-w-full 压成竖条」这句根因说明，
+//   不剥注释的话 G2 这条负向断言会被自己的说明文字顶成假 FAIL（strip-comments 的既有教训）。
+const modCode = stripComments(mod)
+ok(/useAnchoredMenu\(modelTriggerRef, modelMenuRef, 280\)/.test(modCode)
+  && /createPortal\(\s*<div\s*ref=\{modelMenuRef\}\s*style=\{modelMenu\.pos\}[\s\S]*?,\s*document\.body,\s*\)\}/.test(modCode),
+  'G1 模型菜单 = 锚点弹层（useAnchoredMenu 实测翻折与 clamp + portal 到 body，宽度不受宿主影响）')
+ok(!/w-\[280px\][^"']*max-w-full/.test(modCode),
+  'G2 负向：弹层根禁止 w-[280px] + max-w-full 同挂一行 —— max-width:100% 的包含块是触发按钮（≈70px），\n' +
+  '     会把菜单压成竖条（F-1 根因）。窄宿主保险该由 useAnchoredMenu 的视口 clamp 承担，不是 max-w-full')
 
 console.log(`\n${fails.length ? 'FAIL' : 'PASS'}  ${pass} passed, ${fails.length} failed`)
 if (fails.length) { for (const f of fails) console.log('  - ' + f); process.exit(1) }

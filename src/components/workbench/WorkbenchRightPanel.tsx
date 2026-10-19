@@ -40,7 +40,7 @@ import type { PluginTool } from '../../lib/pluginService'
  * - 中：🕘 最近编辑（常驻卡片，近 7 天最多 6 条；无记录显示空态文案）；
  * - 下：**控件切换条**（原型 v16 形态：一排彩色图标 + ⋯ 选显菜单 + 拖拽排序）+ 简略视图。
  *   2026-09-17 拍板：切换条与 ⋯ 菜单**同走挂载集**（挂载集 = workbenchLayout.RIGHT_PANEL_WIDGET_IDS，
- *   现为番茄钟 + 网址导航 + 桌宠），其余控件组件仍在 widgets/ 下由 DayPanel 消费；恢复某控件 = 往该常量加 id。
+ *   现为番茄钟 + 网址导航 + 桌宠 + 今日打卡），其余控件组件仍在 widgets/ 下由 DayPanel 消费；恢复某控件 = 往该常量加 id。
  *
  * **脱离互斥（方案 §3.7）**：DayPanel 四控件整体脱离为独立窗口（dayPanelDetached）时，
  * 对应槽位显示「已在桌面」置灰条目，点击 = 收回悬浮回嵌右栏。
@@ -115,7 +115,7 @@ interface Props {
 
 /** 切换条图标与简略视图标题（id 沿用 WORKBENCH_WIDGET_IDS）。
  *  图标 = 素色 lucide 线性图标（2026-09-28 用户反馈：弃彩色 emoji，与上方工具入口区同语言）；
- *  当前只渲染 RIGHT_PANEL_WIDGET_IDS 内的项（番茄钟 + 网址导航 + 桌宠），其余 3 项保留供恢复时直接引用 */
+ *  当前只渲染 RIGHT_PANEL_WIDGET_IDS 内的项，未挂载的项保留供恢复时直接引用 */
 const WIDGET_META: Record<string, { Icon: typeof Timer; label: string }> = {
   task: { Icon: ListTodo, label: '今日任务' },
   habit: { Icon: CalendarCheck2, label: '今日打卡' },
