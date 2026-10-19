@@ -36,7 +36,7 @@
 | 顺带 | 台账 `F-7` / `F-8` / `F-9` | **已完成**（提交 `5ead0cec`） |
 | 顺带 | AI 工具面平台中性（审计 + 1 处文案 + 契约 G 节） | **已完成**（提交 `e8739bfc`） |
 | 阶段 1 | 托盘宿主探测 + 关窗语义 · `globalShortcut` 失败告警 · `safeStorage` 平台断言 · 跨平台密文显式提示 · inotify 上限与回收站自检 | **已完成**（提交 `deb5c080`；契约 §H 110/110 + 7 条变异测试） |
-| 阶段 2 | 打包与发布：`build.linux` · `pack.mjs` · `publish-release.py` · Linux 关更新 · 渲染层隐藏更新入口 · CHANGELOG + 重跑更新说明 · 真机 deb 验收 | 待做 |
+| 阶段 2 | 打包与发布：`build.linux` · `pack.mjs` · `publish-release.py` · Linux 关更新 · 渲染层隐藏更新入口 · CHANGELOG + 重跑更新说明 · 真机 deb 验收 | **已完成**（提交见下；产物 `packs/3.9.2/Phrontis-3.9.2-amd64.deb` + `latest-linux.yml`；待你 `sudo apt install` 真机安装验收） |
 | 阶段 3 | 文档口径（`readme` / `AGENTS.md` / `resources/help/*`） | **不做**（收尾提醒） |
 
 ---
@@ -111,6 +111,8 @@
 | 三个本地提交（`1a1ad3cf` / `5ead0cec` / `e8739bfc`）+ 后续提交 | **推送** `feature/v3.9.2-linux` | 远端此前没有该分支，先落袋；双平台 tag 仍等发版再打 |
 | `.desktop` 落 `~/.local/share/applications` 而非 `~/Desktop` | **保留** | `~/Desktop` 上的 .desktop 需 `gio set … metadata::trusted true` 才能双击，否则弹「不受信任的启动器」 |
 | `AGENTS.md` 的 worktree 启动器规则（现仅覆盖 Windows `.bat`） | **本次不改** | 属阶段 3 文档口径；Linux 走 `.desktop`，规则改动面比代码大 |
+| `desktopName` / `syncDesktopName` 是否本次加（清单外 2 行） | **加**（2026-10-19 确认） | 不加则 GNOME 无法把窗口关联到 `phrontis.desktop`（任务栏/概览图标对不上），且每次打包一条 warning；属 N-1 第一档，顺手收 |
+| deb 的 `author.email` / `maintainer` 取值 | **`Lousync <19292274929@163.com>`**（2026-10-19 确认） | 与 git 提交身份一致，仓库提交里已是同一邮箱 ⇒ 无新增暴露 |
 
 ### 已核实、勿再按旧前提推理（2026-10-19）
 
@@ -118,6 +120,45 @@
   **自己实现 XDG Trash**（`xdg-trashdir` + `move-file` + `@stroncium/procfs`），只有 Windows 分支用
   `chunked-exec` 调 powershell。阶段 1 原写的「外部命令缺失要降级提示」**没有可探测对象** ⇒
   自检改为 **XDG Trash 目录可写性**（`$XDG_DATA_HOME/Trash` 或 `~/.local/share/Trash`）。
+
+### 阶段 2 落地时核实的新事实（2026-10-19，都已进契约/闸门）
+
+- **`node_modules` 是符号链接时，electron-builder 会静默漏掉一大批依赖**（worktree 省盘做法的直接后果）。
+  实测对照（同一份代码、同一个版本号）：symlink → `cannot find path for dependency` 100+ 条、asar 里只有
+  **51** 个顶层包；真目录（或 `cp -al` 硬链接目录）→ 0 条、**2853** 个顶层包。
+  表象是最难查的那种：**包能打出来、体积也正常，装上一启动就崩**（`Cannot find module 'safer-buffer'`，
+  iconv-lite 的传递依赖）。⇒ `scripts/pack.mjs` 加闸门 `nodeModulesIsSymlink`（默认中止，逃生门
+  `KNOWBASE_ALLOW_SYMLINK_NODE_MODULES=1`）。**本 worktree 的 `node_modules` 已换成一个真目录**
+  （`cp -al` 硬链接自主仓，不额外占盘）—— 想换回符号链接请自行 `rm -rf node_modules && ln -s …`，
+  换回后 `npm run pack` 会被闸门拦下（这是有意的）。
+- **deb 需要 `homepage` 或 github `repository`**：两者都没有时 electron-builder 抛
+  `Please specify project homepage`。而**只有 `homepage` 仍然不够** —— 更新元数据
+  （`latest.yml` / `latest-linux.yml`）是在 `getPublishConfigsForUpdateInfo` 里按 **github repository**
+  推断生成的，没有它两个平台都拿不到元数据（这正是 `publish-release.py` 门 1 要的三件套）。
+  本次加了 `homepage` + `repository`（纯元数据，不动任何构建行为）。
+- **`linux.desktop.Exec` 被 electron-builder 明确禁止**（`Please specify executable name as
+  linux.executableName instead of linux.desktop.Exec`）⇒ 想把 **XWayland 钉进桌面条目**只能用
+  `linux.executableArgs: ["--ozone-platform=x11"]`（生成的 `Exec=/opt/Phrontis/phrontis --ozone-platform=x11 %U`）。
+  ⚠️ 覆盖面只有「菜单 / 桌面图标」这条路径；从终端敲 `phrontis` 的，要自行补参数（已写进 CHANGELOG）。
+- **Ubuntu 24+ 的沙箱两条防线本机都成立**：`apparmor_status --enabled` 退出 0，且随包 profile 的
+  `apparmor_parser --skip-kernel-load --debug` 干跑**通过**（abi/4.0 被接受）⇒ 装完 profile 生效；
+  postinst 仍保留「profile 没装成 + 内核限制 userns → `chrome-sandbox` 回退 4755」的兜底。
+- **deb 的默认 Depends 与已核对的结论一致**（`libgtk-3-0` / `libatspi2.0-0` 在 24.04+ 由 `*t64` 提供旧名，
+  `libxss1` 在 resolute 仓库存在）⇒ 未改 `depends`。
+
+### 发版操作（Linux 侧，本机执行）
+
+```bash
+npm run pack                                  # 产物落 packs/<版本>/（当前 3.9.2）
+sudo apt install ./packs/3.9.2/Phrontis-3.9.2-amd64.deb   # 真机安装验收（装完会在 /usr/bin 建 phrontis 软链）
+python3 scripts/publish-release.py --version 3.9.2 --platform linux   # 需要先装 gh 并 gh auth login
+```
+
+- tag = **`v3.9.2-linux`**（决策 #6）；Windows 侧在同**一个 commit** 上打 `v3.9.2`。
+- 发布脚本的 Linux 门：deb `control` 版本 ↔ `latest-linux.yml` 版本 ↔ 你传的 `--version` 三者一致，
+  sha512/size 与本地 deb 实测一致（另核对 `dpkg-deb -f` 的 `Version`，防「抬了版本号没重打包」）。
+- 验收建议（未做，需你执行）：装完直接启动一次，确认托盘图标、`Ctrl+Alt+P`、关闭窗口语义；
+  再验一次「中文输入法」（`docs/linux-port-plan.md` §2「发布前必测」那条，全仓零处理）。
 
 ---
 
@@ -128,3 +169,5 @@
 | 2026-10-19 | 建档。登记「Linux 桌面融入」方向与三档候选；划出「窗口控件位置与长相 = 有意设计，不再建议」。 |
 | 2026-10-19 | **阶段 1 完成**（提交 `deb5c080`）。五项：① 新增 `electron/lib/linuxDesktop.ts`（D-Bus 名探测状态栏宿主 + XDG Trash 可写性自检）并把关窗语义改为「Linux 且确有托盘才隐藏，否则真退出」；② `globalShortcut` 三处注册改看**返回值**并汇总提示；③ `safeStorage` 密文头改**按平台**断言（Linux = v11，探针按平台给期望头）+ 启动打印后端名；④ 解密改**三态**并透出 `passwordUndecryptable` / `keyUnreadable`，密码本与 AI 模型页给行内标记 + 可关闭提示条（`secretBox` 与 `passwordRepo` 两份拷贝同步改、互相标注），新增密文平台 IPC 与主进程告警通道；⑤ inotify 配额预检 + ENOSPC 归因 + 回收站自检。台账 `F-10` 按「只改 AI 面」一并收口。 |
 | 2026-10-19 | 同轮两条**事实更正 / 新事实**：① `trash@10.1.1` 在 Linux 自实现 XDG Trash、**不依赖 gio/trash-cli** ⇒ 回收站自检改判「XDG Trash 目录可写性」（原前提不成立，已与开发负责人确认）；② `~/Desktop` 上的 .desktop 需 `metadata::trusted` 才能双击 ⇒ 维持落 `~/.local/share/applications`。另：契约 `verify-linux-port.mjs` 增 §H 56 条（110/110）并做 **7 条变异测试**，其中「inotify 预检位置」一条第一版是**假断言**（`indexOf` 命中了函数定义），已改为只在 `syncVaultWatcher` 内部找调用；`verify-perception.mjs` 的 `J12b` 随 `bind()` 包装改钉点。真机 dev 启动实测：密文自检不再报假故障（后端 `gnome_libsecret`）、托盘创建成功、快捷键注册成功、无回收站/inotify 告警。**告警链路另做了端到端验证**：以 `XDG_DATA_HOME=/` 启动（回收站目录必然不可写）→ 主进程自检失败并登记告警 → 渲染层启动后取到并在界面上弹出了 Toast（用 devbridge `ui.eval` 读到 DOM 文案「回收站不可用：删除的文件可能无法移入回收站」），即 队列/广播 → IPC → React effect → Toast 全链路通。**顺手发现**（非本批引入）：`verify-ai-tab-anchors.mjs` 常红一项 `aiTools.llmUsage` 无落点锚点，已记入 §4 待拍板。 |
+| 2026-10-19 | **阶段 2 完成**：`package.json` 加顶层 `author`（deb 必需）/ 平台中性 `description` / `homepage` + `repository`（否则 deb 缺 Homepage 报错，且**两个平台都拿不到**更新元数据）/ `desktopName` + `syncDesktopName` / `build.linux`（deb x64 · icon · category · synopsis · maintainer · `executableName: phrontis` · `artifactName` · `executableArgs: --ozone-platform=x11`）+ `build.deb.afterInstall`；新增 `build/linux-after-install.sh`（**整份替换**默认模板：AppArmor profile 干跑通过才装，装不成且内核限制 userns 时把 `chrome-sandbox` 回退 4755；只用 `executable` / `sanitizedProductName` 两个宏）；`scripts/pack.mjs` 按平台选目标 + 拒绝交叉打包 + **拒绝 symlink 的 node_modules**；`scripts/publish-release.py` 加 `--platform`（Linux → tag `v<ver>-linux`，门 1 校验 deb + `latest-linux.yml`，另核对包内 `control` 版本；缺 `gh` 给安装指引而不是抛栈）；`electron/lib/updateService.ts` 在 Linux 下 check / download / install **硬拒且不发任何请求**，顺手修「`downloads + 反斜杠` 在 POSIX 上恒判路径不受信任」的现成 bug；`api.platform` 透出 + 新增 `src/lib/platform.ts` 作唯一判据，标题栏与设置页在 Linux 隐藏更新入口、改为「打开发布页」；`CHANGELOG.md` 抬 3.9.2 并**重跑** `.AGENT/scripts/release-notes/build-release-notes.mjs`。契约：`verify-linux-port.mjs` §I（145/145）、`verify-pack-dir.mjs` 23/23（含真跑 symlink 闸门），**9 条变异测试**全被抓住（其中一条第一版是假断言：`nodeModulesIsSymlink(repoRoot)` 被函数定义命中，已改成钉调用点形状）。 |
+| 2026-10-19 | 阶段 2 **真机打包 + 产物验收**：`npm run pack` 产出 `packs/3.9.2/Phrontis-3.9.2-amd64.deb`（156 MB）+ `latest-linux.yml`。deb 内核对无误：`control`（Maintainer / Homepage / Description / Depends）· `/usr/share/applications/phrontis.desktop`（`Exec=/opt/Phrontis/phrontis --ozone-platform=x11 %U`、`Icon=phrontis`、`StartupWMClass=phrontis`、`Categories=Office;TextEditor;`）· 随包 AppArmor profile（干跑 exit 0）· `app-update.yml`。**打包产物真机启动实测通过**（隔离 userData + `--no-sandbox`）：`[Boot] Phrontis main ready - net-v2 - 3.9.2`、密文后端 `gnome_libsecret`、`[Tray] Tray created`，无 `Cannot find module`、无 FATAL。`publish-release.py --platform linux` 三道门全过（`control` 版本 3.9.2 · sha512/size 一致），到上传步骤因本机**未装 gh** 而按设计给出安装指引（未真正发布）。 |
