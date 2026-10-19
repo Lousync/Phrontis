@@ -589,8 +589,8 @@ ok(/triggerInlineSuggest/.test(SRC_EDITOR),
 // J11 设置键
 ok(/aiAssistantInlineSuggest:\s*\{[^}]*default:\s*true/.test(SRC_SETTINGS),
   'J11a ★ 设置键 aiAssistantInlineSuggest 默认 on（手动触发无常驻 token 压力）', '')
-ok(/aiAssistantInlineSuggest:\s*\{[^}]*section:\s*'editor'/.test(SRC_SETTINGS),
-  'J11b 总开关落在 editor 段（与自动触发 / 模型两项同页渲染，避免同一开关两处出现）', '')
+ok(/aiAssistantInlineSuggest:\s*\{[^}]*section:\s*'aiTools'/.test(SRC_SETTINGS),
+  'J11b 总开关落在 aiTools 段（内联建议三项统一归 AI 工具；2026-10-13 按原型从 editor/模型页归位）', '')
 // 上游写的点号键名在本项目不成立（SETTINGS 全扁平键）
 ok(!/aiAssistant\.inlineSuggest/.test(SRC_SETTINGS) && !/inlineSuggest:/.test(SRC_SETTINGS),
   'J11c ★ 不得出现上游的点号键写法（本项目 SETTINGS 全扁平键）', '')
@@ -757,15 +757,29 @@ ok(/aiAssistantInlineSuggestModelId:\s*\{[^}]*default:\s*''/.test(SRC_SETTINGS),
 ok(/aiAssistantInlineSuggestModelId/.test(SRC_INLINE),
   'J15aa ★ 主进程真读该键（设置选了模型要生效，不能只写不读）', '')
 {
-  // 2026-09-20 反馈：内联建议三项从「编辑器」页迁往「AI 工具 → 模型」页（统一模型管理）
+  // ■ 2026-10-19 修契约漂移（台账 docs/v3.9.0-feedback.md F-8）。内联建议三件套搬过两次，
+  //   第二次没同步本组断言，于是三条长红（红色看惯了 = 对红色免疫，真回归会混在里面看不见）：
+  //     ① 2026-09-20 三项从「编辑器」页迁到「AI 工具 → 模型」页 —— 当时同步了本组；
+  //     ② 2026-10-13 又把**两个开关**按原型从「模型」页归位到「AI 工具」页，只把模型槽位留下
+  //        —— 依据是 AiToolsView.tsx 的「按原型从「模型」页归位」注释，以及 settings.ts 模型键
+  //        desc 里写的「在「场景分配」里设置」。
+  //   结论：**实现是有意设计，断言过期** ⇒ 只改断言，零 UI 改动。
+  //   为防同类漂移再来，这里锁的是「三项各只渲染一处」这个不变式（= J11b 原注释的真正意图），
+  //   而不是某个页签文件名 —— 页签还会再改，不变式不会。
   const SRC_MODELS_TAB = stripComments(read('src/modules/settings/views/AiModelsTab.tsx'))
+  const SRC_TOOLS_VIEW = stripComments(read('src/modules/settings/views/AiToolsView.tsx'))
   const SRC_EDITOR_VIEW = stripComments(read('src/modules/settings/views/EditorView.tsx'))
-  ok(/aiAssistantInlineSuggestModelId/.test(SRC_MODELS_TAB) && /aiAssistantInlineSuggest\b/.test(SRC_MODELS_TAB),
-    'J15ab 设置 → AI 工具·模型页有内联建议模型下拉（数据源 = 已启用供应商的模型）', '')
-  ok(/aiAssistantInlineSuggestAuto/.test(SRC_MODELS_TAB) && /aiAssistantInlineSuggest\b/.test(SRC_MODELS_TAB),
-    'J15ac 同页还有总开关与自动开关（三项集中，不散在别处）', '')
+  ok(/aiAssistantInlineSuggestModelId/.test(SRC_MODELS_TAB) && /ModelSlotKey/.test(SRC_MODELS_TAB),
+    'J15ab 内联建议模型是「模型 → 场景分配」表的一个槽位（ModelSlotKey 并集含它）', '')
+  ok(/aiAssistantInlineSuggest\b/.test(SRC_TOOLS_VIEW) && /aiAssistantInlineSuggestAuto/.test(SRC_TOOLS_VIEW),
+    'J15ac 两个开关在「AI 工具」页同组渲染（启用内联建议 + 自动触发）', '')
+  ok(SRC_TOOLS_VIEW.includes('data-setting-anchor="aiTools.inlineSuggest"')
+    && SRC_TOOLS_VIEW.includes('data-setting-anchor="aiTools.inlineSuggestAuto"'),
+    'J15ad 两个开关的 anchor 与 settings.ts 声明一致（进设置搜索的前提）', '')
+  ok(!/aiAssistantInlineSuggestAuto/.test(SRC_MODELS_TAB),
+    'J15ae 负向：两个开关不得在模型页重复出现（同一开关两处出现 = J11b 原始意图）', '')
   ok(!/aiAssistantInlineSuggestModelId/.test(SRC_EDITOR_VIEW),
-    'J15ag 负向：编辑器页不再渲染内联建议设置（已迁模型页，防回迁漂移）', '')
+    'J15ag 负向：编辑器页不再渲染内联建议设置（已迁走，防回迁漂移）', '')
 }
 {
   const SRC_CSS = read('src/styles/index.css')

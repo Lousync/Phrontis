@@ -32,9 +32,9 @@ const HELP_DIR = join(ROOT, 'resources', 'help')
 
 let failures = 0
 let warnings = 0
-const pass = (m) => console.log(`  \u2705 ${m}`)
-const fail = (m) => { failures++; console.error(`  \u274c ${m}`) }
-const warn = (m) => { warnings++; console.warn(`  \u26a0\ufe0f  ${m}`) }
+const pass = (m) => console.log(`  [OK]   ${m}`)
+const fail = (m) => { failures++; console.error(`  [FAIL] ${m}`) }
+const warn = (m) => { warnings++; console.warn(`  [WARN] ${m}`) }
 
 // ---- 与 helpService.loadHelpDocs 同规则读盘（CRLF 归一、单篇失败跳过）----
 function loadDocs() {
@@ -302,5 +302,30 @@ for (const c of CASES) {
 if (caseFail > 0) fail(`检索用例 ${caseFail}/${CASES.length} 条未过`)
 
 // ============================================================
-console.log(`\n${failures === 0 ? '\u2705 PASS' : '\u274c FAIL'} —— 结构警告 ${warnings} 条；用例 ${CASES.length - caseFail}/${CASES.length} 通过`)
+// §3 排序确定性（2026-10-19，Linux 平台化时发现）
+//
+// 本表此前的红绿**随机器语言环境变**：同一份语料、同一份代码，
+//   LC_ALL=C / en_US.UTF-8 → 156/156 绿；LC_ALL=zh_CN.UTF-8（开发机默认）→ 153/156 红，
+// 红的正是三条同分并列用例（博客写作/博客标签 均 11 分；工作台左栏与文件树模式/常见问题 均 8 分；
+// AI 权限与工具边界/用量 均 20 分）。根因是 helpRetrieval 的并列兜底用了**未钉 locale** 的
+// localeCompare，按运行时默认 locale 比较 ⇒ 名次随机器语言漂移。
+// 危害不止于契约：AI 回答「软件怎么用」的引用次序也不该与机器语言有关。
+// 这里锁死「并列不得走 localeCompare」，防它被写回来。
+console.log('\n§3 排序确定性（跨平台 / 跨语言环境）')
+{
+  // 负向断言必须先剥注释 —— 上面 helpRetrieval.ts 的说明注释里必然会写「不得用 localeCompare」，
+  // 直接 grep 源码会把这个字样当命中，得到「假红」。判的是代码，不是注释。
+  const stripComments = (s) => s
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+  const src = stripComments(readFileSync(join(ROOT, 'electron', 'lib', 'helpRetrieval.ts'), 'utf8'))
+  if (/localeCompare/.test(src)) {
+    fail('helpRetrieval 代码里不得使用 localeCompare（并列次序会随机器 locale 变；改用码点序）')
+  } else {
+    pass('helpRetrieval 代码里无 localeCompare（并列走码点序，跨平台确定）')
+  }
+}
+
+// ============================================================
+console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'} —— 结构警告 ${warnings} 条；用例 ${CASES.length - caseFail}/${CASES.length} 通过`)
 process.exit(failures === 0 ? 0 : 1)

@@ -8,6 +8,7 @@ import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { BOOKMARK_COLORS } from '../../lib/workbenchLayout'
 import { MessageList } from '../../components/shared/AssistantPanel/MessageList'
 import { AiAssistantIcon } from '../../components/shared/AiAssistantIcon'
+import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
 import { SessionRunMark } from '../../components/shared/AssistantPanel/SessionRunMark'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
 import { useAiAssistant, type Effort } from './useAiAssistant'
@@ -423,6 +424,10 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
         <div className="shrink-0">
           <div className="mx-auto w-full max-w-[820px] px-4 pb-2.5 pt-2">
             <div className={`relative px-2.5 pt-2 pb-2 ${shell.wrap}`}>
+            {/* 吉祥物锚点（台账 F-7）：另外三处用同一套输入卡外壳的宿主都有这一行，
+                本模块 v3.9.0 照抄输入卡时漏了 —— 属静默漏接（槽名/位置错了也不报错），
+                由 .AGENT/scripts/plugins/verify-mascot.mjs 的「四处输入区」段锁住。 */}
+            <AiMascotAnchor />
             <textarea
               ref={composerRef}
               value={draft}

@@ -3,8 +3,11 @@
  * 契约验证：AI 输入区吉祥物「地基」（.claude/plans/ai-composer-mascot.md）。
  *
  * 断言：扩展点清单校验 + 扫描/IPC 三处接线 + 渲染层（活动状态 / 挂载壳 / 播放器 / 占位角色）
- * + 三处输入区挂载 + 设置项。全线为静态接线断言（本模块的漏接是静默的：槽名/通道名错一个字符，
+ * + 四处输入区挂载 + 设置项。全线为静态接线断言（本模块的漏接是静默的：槽名/通道名错一个字符，
  * 界面就「什么都没出现」，没有任何报错）。
+ *   ★ 「四处」是 2026-10-19 从「三处」升上来的：v3.9.0 新增的 AI 助手模块照抄输入卡时漏挂了
+ *     锚点（台账 `docs/v3.9.0-feedback.md` F-7），而本脚本当时只登记了三处 ⇒ 漏接无人发现。
+ *     新增输入卡宿主时必须同步进册，否则同样的静默漏接会再来一次。
  *
  * 跑法：node .AGENT/scripts/plugins/verify-mascot.mjs
  */
@@ -63,11 +66,21 @@ check('播放器 ink 遮罩 + reduced-motion 停帧', player.includes('maskImage
 check('内置占位角色存在', read('src/components/shared/AiMascot/PlaceholderMascot.tsx').includes('export const PlaceholderMascot'))
 check('index.css 有 .kb-mascot-anchor + bob', read('src/styles/index.css').includes('.kb-mascot-anchor') && read('src/styles/index.css').includes('kb-mascot-bob'))
 
-console.log('\n[挂载] 三处输入区')
+console.log('\n[挂载] 四处输入区')
 const cb = read('src/components/shared/AssistantPanel/ChatBody.tsx')
 check('ChatBody 输入卡挂载（侧边/浮动/放大/日程）', cb.includes('<AiMascotAnchor />') && cb.includes("from '../AiMascot/AiMascotAnchor'"))
 check('AI 教学对话主区挂载', read('src/modules/ai-teaching/index.tsx').includes('<AiMascotAnchor />'))
 check('支线旁问挂载', read('src/modules/ai-teaching/SideLanePanel.tsx').includes('<AiMascotAnchor />'))
+// 台账 F-7（2026-10-19 修）：AI 助手是第四个输入卡宿主，v3.9.0 照抄输入卡时漏了这一行。
+// 这一条同时也是「新增宿主必须进册」的哨兵。
+const aa = read('src/modules/ai-assistant/index.tsx')
+check('AI 助手聊天输入卡挂载（台账 F-7）',
+  aa.includes('<AiMascotAnchor />') && aa.includes("from '../../components/shared/AiMascot/AiMascotAnchor'"))
+check('四处宿主共用同一套输入卡外壳（useInputShell）',
+  [cb, read('src/modules/ai-teaching/index.tsx'), read('src/modules/ai-teaching/SideLanePanel.tsx'), aa]
+    .every(s => s.includes('useInputShell')))
+check('负向：AI 助手的锚点在输入卡外壳内（不许挂到外壳之外）',
+  /shell\.wrap[^>]*>\s*(?:\{\/\*[\s\S]*?\*\/\}\s*)?<AiMascotAnchor \/>/.test(aa))
 
 console.log('\n[设置] aiMascot 字符串选择 + 设置面板控件')
 const st = read('src/lib/settings.ts')

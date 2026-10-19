@@ -97,6 +97,28 @@ export function snippetOf(body: string, needle: string, span = 700): string {
 }
 
 /**
+ * 并列时的稳定次序 —— **刻意不用 localeCompare**（2026-10-19，Linux 平台化实测）。
+ *
+ * 成因：`localeCompare` 不传 locale 时按**运行时默认 locale** 比较，于是同一份语料、同一份代码
+ * 在不同机器上给出不同的并列次序。实测量化（`.AGENT/scripts/help-kb/verify-help-retrieval.mjs`）：
+ *   · LC_ALL=C 或 en_US.UTF-8 → 156/156 全绿；
+ *   · LC_ALL=zh_CN.UTF-8（本项目开发机的默认）→ 153/156，红的正是三条**同分并列**用例：
+ *     博客写作 / 博客标签 均 11 分、工作台左栏与文件树模式 / 常见问题 均 8 分、
+ *     AI 权限与工具边界 / 用量 均 20 分。
+ *
+ * 双重理由：
+ *   ① AI 回答「软件怎么用」的名次**不该与机器的语言环境有关**；契约更不该随 locale 变色
+ *      （红绿随环境变的门禁 = 对红色免疫，会把真回归一起吞掉）。
+ *   ② 即便写死 `localeCompare(b, 'zh-Hans-CN')` 也仍有漂移面 —— 中文排序依赖 ICU 的 zh 排序数据，
+ *      而 node 与 Electron 的 ICU 构建档位可能不同（small-icu / full-icu）。
+ *
+ * 故并列一律走**码点序**：不依赖 ICU、跨平台跨进程确定。只影响同分歧义，不改变分数排序本身。
+ */
+function compareTitlesStable(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+/**
  * 手册检索（纯函数版）：标题 > keywords > 正文，按命中词数累加。
  * 只算「命中与否」而不算出现次数 —— 出现次数会让长文档霸榜，而这里要的是相关性排序。
  * 调用方传入已加载的文档集；文档集为空的提示语由调用方给出（那是磁盘/目录层的事）。
@@ -136,7 +158,7 @@ export function searchHelpIn(
     }
   }
 
-  hits.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+  hits.sort((a, b) => b.score - a.score || compareTitlesStable(a.title, b.title))
   const top = hits.slice(0, Math.max(1, Math.min(5, limit)))
   return {
     hits: top,
