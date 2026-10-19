@@ -21,6 +21,11 @@ type EntryMetaInput = { favorite?: boolean; group?: string | null }
 // ---- 密码加密(safeStorage；密文机制见 lib/secretBox.ts 头注释) ----
 // 密文格式: 'enc1:' + base64(加密字节);无前缀视为历史明文,读取时原样返回。
 // 与 secretBox 同格式但不互相引用(与密码本历史数据兼容)。
+// ★ 与 lib/secretBox.ts 是**两份必须同步的拷贝**（仓库有意不让两者互相引用）：
+//   改动本段（三态、平台断言、跨平台提示口径）时，另一份必须同改，否则「密码本会提示、
+//   LLM 账户页静默」这类不一致没有任何报错。契约见 .AGENT/scripts/linux-port/verify-linux-port.mjs §H。
+// 三态（2026-10-19 · Linux 平台化）：解不开的密文（多来自其他系统 —— 密钥在各自机器的
+// 系统钥匙串里，跨系统必然解不开）**不再静默返回空串**，而是标成 passwordUndecryptable 透给界面。
 const ENC_PREFIX = 'enc1:'
 
 export function encryptPassword(plain: string): string {
@@ -33,21 +38,42 @@ export function encryptPassword(plain: string): string {
   return plain // 加密不可用时退回明文(功能优先)
 }
 
-export function decryptPassword(stored: string | null | undefined): string {
-  if (!stored) return ''
-  if (!stored.startsWith(ENC_PREFIX)) return stored // 历史明文
+/** 解密三态（与 lib/secretBox.ts 的 SecretDecodeState 同义；见上方「两份拷贝」说明） */
+export type PasswordDecodeState = 'empty' | 'plaintext' | 'encrypted' | 'undecryptable'
+export interface PasswordDecode { state: PasswordDecodeState; value: string }
+
+export function decodePassword(stored: string | null | undefined): PasswordDecode {
+  if (!stored) return { state: 'empty', value: '' }
+  if (!stored.startsWith(ENC_PREFIX)) return { state: 'plaintext', value: stored } // 历史明文
   try {
-    return safeStorage.decryptString(Buffer.from(stored.slice(ENC_PREFIX.length), 'base64'))
+    return {
+      state: 'encrypted',
+      value: safeStorage.decryptString(Buffer.from(stored.slice(ENC_PREFIX.length), 'base64')),
+    }
   } catch {
-    return '' // 解密失败(如密文来自其他机器),不把密文当密码返回
+    // 解不开 ≠ 没有值：调用方按 'undecryptable' 显式提示（原先这里返回空串 ⇒「条目在、密码全空」）
+    return { state: 'undecryptable', value: '' }
   }
 }
 
+/** 明文取值（签名保持兼容）。⚠️ 解不开时同样返回空串 —— 要区分请走 decodePassword。 */
+export function decryptPassword(stored: string | null | undefined): string {
+  return decodePassword(stored).value
+}
+
+/** 「有密码字段但本机解不开」——界面据此显示「无法解密」而不是一个空密码 */
+export function isPasswordUndecryptable(stored: string | null | undefined): boolean {
+  return decodePassword(stored).state === 'undecryptable'
+}
+
 function rowToPassword(row: PasswordRow) {
+  const dec = decodePassword(row.password)
   return {
     id: row.id, title: row.title, url: row.url || '',
     username: row.username || '', account: row.account || '',
-    password: decryptPassword(row.password), notes: row.notes || '',
+    password: dec.value, notes: row.notes || '',
+    /** 密文来自其他系统、本机解不开（界面显式提示的依据；见上方三态说明） */
+    passwordUndecryptable: dec.state === 'undecryptable',
     sortOrder: row.sort_order, createdAt: row.created_at, updatedAt: row.updated_at,
     // 旧行无这两列 → 缺省 false / ''（向后兼容，无需迁移）
     favorite: row.favorite === true, group: row.group || '',
@@ -141,7 +167,12 @@ export function registerPasswordHandlers(): void {
     if (!hit) return
     const entry = rowToPassword(hit)
     const binId = randomUUID()
-    const snapshot = JSON.stringify({ ...entry, password: encryptPassword(entry.password) })
+    const snapshot = JSON.stringify({
+      ...entry,
+      // 明文可解 → 按本机密钥重加密。**解不开时 entry.password 是空串**：照旧重加密会把原始密文
+      // 替换成空串（回收站里再也回不来）⇒ 原样保留 hit.password，至少在原来那台机器上还能恢复。
+      password: entry.password ? encryptPassword(entry.password) : (hit.password || ''),
+    })
     recycleBinAdd({ id: binId, original_id: id, module: 'passwordVault', title: entry.title || '未命名', data: snapshot, deleted_at: new Date().toISOString() })
     vaultPasswordsSave(rows.filter((r) => r.id !== id) as unknown as SecretPwdRow[])
   })

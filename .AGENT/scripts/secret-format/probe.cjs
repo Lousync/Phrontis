@@ -22,11 +22,18 @@
  *   样本 'probe-测试-abc123'（19B）→ 密文 50B，头部 hex 7631306b…（= 'v10k'），回环解密 OK
  *   密钥 = <userData>/Local State 的 os_crypt.encrypted_key（DPAPI 保护后的 AES 密钥，非密文本身）
  *
+ * 实测基线（2026-10-19，同版本 / linux，Linux 平台化阶段 1）：
+ *   后端 = gnome_libsecret，**密文头 = 'v11'**（不是 v10）；
+ *   密钥在**系统钥匙串**里，**没有** Local State 的 os_crypt.encrypted_key（故 Linux 下那份检查报 exists=false 属正常）；
+ *   没有钥匙串时后端退化为 basic_text、密文头回到 'v10'（弱保护，脚本会把后端名一并打出来）。
+ *   ⇒ 本脚本的「期望头」已按平台分叉：win32 = v10，linux = v10 / v11。
+ *
  * 声明：只读探测——加密一个样本串并回环解密，不写任何应用数据、不打印任何真实密钥内容。
  */
 const { app, safeStorage } = require('electron')
 const { existsSync, readFileSync, writeFileSync, mkdirSync } = require('node:fs')
 const { join, dirname } = require('node:path')
+const os = require('node:os')
 
 app.setName('knowbase') // 让 userData 指向应用真实目录，便于核对 Local State 位置
 
@@ -61,19 +68,30 @@ app.whenReady().then(() => {
 
   try {
     out.isEncryptionAvailable = safeStorage.isEncryptionAvailable()
+    // Linux 专属：当前选中的后端（gnome_libsecret / kwallet / basic_text…）—— 跨平台排障的第一手线索
+    try {
+      if (typeof safeStorage.getSelectedStorageBackend === 'function') {
+        out.storageBackend = safeStorage.getSelectedStorageBackend()
+      }
+    } catch (e) { out.storageBackendError = String((e && e.message) || e) }
     if (out.isEncryptionAvailable) {
       // 探针样本带中文，确认与编码无关
       const sample = 'probe-测试-abc123'
       const enc = safeStorage.encryptString(sample)
+      const head = enc.subarray(0, 3).toString('latin1')
+      // 期望头按平台分叉（与 electron/lib/secretBox.ts 的 KNOWN_CIPHER_HEADS 同一份结论）
+      const expected = process.platform === 'win32' ? ['v10'] : process.platform === 'linux' ? ['v10', 'v11'] : []
       out.cipherLen = enc.length
-      out.cipherHeadAscii = enc.subarray(0, 4).toString('latin1') // 期望 'v10' + 1 字节 nonce
+      out.cipherHeadAscii = enc.subarray(0, 4).toString('latin1')
       out.cipherHeadHex = enc.subarray(0, 16).toString('hex')
+      out.expectedHeads = expected
       out.cipherStructHint = `nonce(12) + AES-256-GCM(ciphertext+tag(16)) 推定，实测总长 ${enc.length} 字节`
       out.roundTripOk = safeStorage.decryptString(enc) === sample
-      out.verdict =
-        enc.subarray(0, 3).toString('latin1') === 'v10'
-          ? 'Chromium os_crypt v10：AES-256-GCM（密钥由 DPAPI 保护）—— 与「DPAPI 直签密文」的旧注释不符'
-          : '前缀非 v10，需人工复核'
+      out.verdict = expected.length === 0
+        ? `未登记平台 ${process.platform}：只做回环校验，不做头部断言（实际 '${head}'）`
+        : expected.includes(head)
+          ? `符合 ${process.platform} 基线：头部 '${head}'（${process.platform === 'win32' ? 'AES-256-GCM，密钥由 DPAPI 保护' : '系统钥匙串保护'}）—— 与「DPAPI 直签密文」的旧注释不符`
+          : `头部 '${head}' 不在 ${process.platform} 的期望集合 ${expected.join(' / ')} 内，需人工复核`
     } else {
       out.verdict = 'safeStorage 不可用（非用户会话/无凭据），本机无法给出密文样本'
     }
@@ -81,12 +99,19 @@ app.whenReady().then(() => {
     out.error = String((e && e.message) || e)
   }
 
-  // 应用真实目录（dev 与正式两份都看一眼）
-  const appdata = process.env.APPDATA || ''
+  // 应用真实目录（dev 与正式两份都看一眼）。
+  // ★ Local State 的 os_crypt.encrypted_key 是 **Windows/macOS** 的密钥存放处；
+  //   Linux 的密钥在系统钥匙串里，故 Linux 上这里 exists=false / hasOsCryptKey=false 属**正常**。
+  const confHome = process.platform === 'win32'
+    ? (process.env.APPDATA || '')
+    : (process.env.XDG_CONFIG_HOME || join(os.homedir(), '.config'))
   out.localState = {
-    production: inspectLocalState(join(appdata, 'knowbase')),
-    dev: inspectLocalState(join(appdata, 'knowbase (dev)')),
+    production: inspectLocalState(join(confHome, 'knowbase')),
+    dev: inspectLocalState(join(confHome, 'knowbase (dev)')),
   }
+  out.localStateNote = process.platform === 'linux'
+    ? 'Linux 的密钥在系统钥匙串（见 storageBackend），没有 Local State 的 os_crypt 项 —— 上面两项 exists=false 属正常'
+    : 'Windows/macOS 的 AES 密钥经 DPAPI 保护后存 Local State 的 os_crypt.encrypted_key'
 
   console.log(JSON.stringify(out, null, 2))
   try {

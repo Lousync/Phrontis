@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, screen, globalShortcut, shell } from 'electron'
 import { join } from 'path'
 import { broadcast, BROADCAST_CHANNEL } from './windowBus'
+import { pushAppNotice } from '../lib/appNotice'
 
 /**
  * 日程与打卡侧边栏管理器
@@ -433,9 +434,22 @@ export function initDayPanel(opts: {
   explicitMode = null
   registerHandlers()
   try {
-    globalShortcut.register('Control+Alt+S', () => { togglePanel() })
-    globalShortcut.register('Control+Alt+Up', () => { setPanelMode('top-dock') })
-    globalShortcut.register('Control+Alt+Down', () => { setPanelMode('desktop-widget') })
+    // ⚠️ 结论看 `register` 的**返回值**（false = 被其他程序占用 / 平台不支持，原生 Wayland 下恒 false）：
+    // 原先三个键都不看返回值，失败时只在控制台留不下任何痕迹 ⇒ 用户侧表象是「按了没反应」。
+    // 三个键任一失败就提示一次（聚成一条，不刷三条 Toast）。
+    const failed: string[] = []
+    const bind = (accel: string, fn: () => void): void => { if (!globalShortcut.register(accel, fn)) failed.push(accel) }
+    bind('Control+Alt+S', () => { togglePanel() })
+    bind('Control+Alt+Up', () => { setPanelMode('top-dock') })
+    bind('Control+Alt+Down', () => { setPanelMode('desktop-widget') })
+    if (failed.length > 0) {
+      console.warn(`[DayPanel] 全局快捷键注册失败（可能被其他程序占用）：${failed.join(' / ')}`)
+      pushAppNotice({
+        type: 'warning',
+        message: `日程小窗快捷键 ${failed.join(' / ')} 没能生效`,
+        detail: '该组合键可能已被其他程序占用；原生 Wayland 会话下全局快捷键也不可用（本项目只支持 X11/XWayland）。释放冲突或切到 X11 会话后重启应用即可恢复。',
+      })
+    }
   } catch (e) {
     console.warn('[DayPanel] Global shortcut registration failed:', e)
   }

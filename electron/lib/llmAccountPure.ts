@@ -88,13 +88,16 @@ export function providerUsable(p: AccountHost & { enabled: boolean }): boolean {
   return usableAccountsOf(p).length > 0
 }
 
-/** 对外形状：**永不含密文**，渲染层只拿得到 hasKey */
-export function sanitizeAccountInfo(a: ProviderAccount) {
+/** 对外形状：**永不含密文**，渲染层只拿得到 hasKey。
+ *  `unreadable` 由调用方（llmService —— 手里才有解密能力）算好传进来：本模块零依赖，
+ *  不能 import secretBox（契约脚本要能裸 node 真跑它）。语义见 LlmAccountInfo.keyUnreadable。 */
+export function sanitizeAccountInfo(a: ProviderAccount, unreadable = false) {
   return {
     id: a.id,
     name: a.name,
     enabled: a.enabled,
     hasKey: !!a.keyEncrypted,
+    keyUnreadable: !!unreadable,
     lastLatencyMs: a.lastLatencyMs,
     lastTestedAt: a.lastTestedAt,
   }

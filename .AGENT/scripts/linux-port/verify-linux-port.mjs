@@ -12,6 +12,8 @@
  */
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import { resolve, join, basename } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 
 const ROOT = resolve(import.meta.dirname, '..', '..', '..')
@@ -172,6 +174,208 @@ check('G5 负向：MCP 命令占位不得给 Windows 盘符路径示例（平台
   !srcToolsView.includes('C:\\') && !srcToolsView.includes('.exe'))
 check('G5 正向：MCP 命令占位给的是可跨平台执行的示例',
   /例如 node/.test(srcToolsView))
+
+// ─────────────────────────────────────────────────────────────
+// H. 阶段 1：Linux 桌面语义（托盘宿主 / 快捷键 / 密文三态 / 环境自检 / AI 面排序）
+//
+// 这一节钉的全是「错了不报错」型的结论：
+//   · 关窗语义反了 → 窗口藏起来却唤不回（该真退出时反而常驻），或该常驻时直接退出；
+//   · 不看 `globalShortcut.register` 的返回值 → 用户「按了没反应」，日志里也查不到；
+//   · safeStorage 密文头按 Windows 假定 → Linux 上每次启动一条**假故障**；
+//   · 密文解不开仍返回空串 → 「条目都在、密码全空」。
+// 另注：secretBox 与 passwordRepo 是**有意**互不引用的两份拷贝（格式兼容但不耦合），
+// 所以这里额外锁「两份同步」，否则会出现「密码本有提示、LLM 账户页静默」这种没人发现的漂移。
+console.log('\n=== H. 阶段 1：Linux 桌面语义 ===')
+const srcLinuxDesktop = read('electron/lib/linuxDesktop.ts')
+const codeLinuxDesktop = stripComments(srcLinuxDesktop)
+const codePasswordFiller = stripComments(read('electron/main/passwordFiller.ts'))
+const codeDayPanel = stripComments(read('electron/main/dayPanelWindow.ts'))
+const srcSecretBox = read('electron/lib/secretBox.ts')
+const codeSecretBox = stripComments(srcSecretBox)
+const srcPasswordRepo = read('electron/database/repositories/passwordRepo.ts')
+const codePasswordRepo = stripComments(srcPasswordRepo)
+const srcAppNotice = read('electron/lib/appNotice.ts')
+const srcFsWatcher = read('electron/lib/fsWatcher.ts')
+const codeFsWatcher = stripComments(srcFsWatcher)
+const srcSuggestPure = read('electron/lib/aiAssistantScopeSuggestPure.ts')
+const codeSuggestPure = stripComments(srcSuggestPure)
+const codeAiTools = stripComments(read('electron/lib/aiTools.ts'))
+const srcPreload = read('electron/preload/index.ts')
+const srcTypes = read('src/types/index.ts')
+const srcApp = read('src/App.tsx')
+const srcVault = read('src/modules/toolbox/components/PasswordVault.tsx')
+const srcModelsTab = read('src/modules/settings/views/AiModelsTab.tsx')
+
+// H1 托盘宿主探测：判据必须是 D-Bus 名，不能是 GNOME 扩展名
+check('H1 linuxDesktop 导出宿主探测与同步缓存读法',
+  /export async function detectStatusNotifierHost/.test(srcLinuxDesktop) && /export function statusNotifierHostCached/.test(srcLinuxDesktop))
+check('H1 探测走 gdbus + org.kde.StatusNotifierWatcher', /gdbus/.test(srcLinuxDesktop) && /org\.kde\.StatusNotifierWatcher/.test(srcLinuxDesktop))
+check('H1 探测有超时（不许拖住启动）', /PROBE_TIMEOUT_MS\s*=\s*\d+/.test(srcLinuxDesktop) && /timeout:\s*timeoutMs/.test(srcLinuxDesktop))
+check('H1 负向：不按 GNOME 扩展名判定（宿主由系统预装扩展提供，扩展名列表里查不到）',
+  !/enabled-extensions|enabled_extensions|getEnabledExtensions/.test(codeLinuxDesktop))
+check('H1 非 Linux 平台明确按 false 处理（该探测不是「通用托盘可用性」）',
+  /process\.platform !== 'linux'[\s\S]{0,120}?cachedHost = false/.test(codeLinuxDesktop))
+check('H1 KNOWBASE_FORCE_TRAY 排障开关在场', /KNOWBASE_FORCE_TRAY/.test(srcLinuxDesktop))
+
+// H2 关窗语义：Linux 上没有可用托盘就真退出（决策 #3）
+check('H2 主进程 close 用「Linux 且确有托盘」作隐藏前提',
+  /process\.platform === 'linux' && !\(tray && statusNotifierHostCached\(\)\)/.test(stripComments(read('electron/main/index.ts'))))
+check('H2 无托盘时直接放行关闭（不 preventDefault）', (() => {
+  const seg = stripComments(read('electron/main/index.ts'))
+  const i = seg.indexOf("mainWindow.on('close'")
+  if (i < 0) return false
+  const body = seg.slice(i, i + 700)
+  // 前提判断出现在 preventDefault 之前，且那句是 return（放行）而不是 hide
+  return /process\.platform === 'linux'[\s\S]*?\)\)\s*return/.test(body) && /e\.preventDefault\(\)[\s\S]*?mainWindow\?\.hide\(\)/.test(body)
+})())
+check('H2 负向：close 里不再是无条件劫持（旧的 if (!isQuitting) { preventDefault(); hide() }）',
+  !/if \(!isQuitting\) \{\s*e\.preventDefault\(\)/.test(stripComments(read('electron/main/index.ts'))))
+check('H2 无宿主时不创建托盘（建了也看不见，却会让窗口藏了回不来）',
+  /process\.platform === 'linux' && !\(await detectStatusNotifierHost\(\)\)/.test(stripComments(read('electron/main/index.ts'))))
+
+// H3 全局快捷键：结论看 register 的返回值（原先只 try/catch，失败静默）
+check('H3 PasswordFiller 检查 register 返回值并提示',
+  /const ok = globalShortcut\.register\(/.test(codePasswordFiller) && /if \(ok\)/.test(codePasswordFiller) && /pushAppNotice\(/.test(codePasswordFiller))
+check('H3 DayPanel 三个快捷键逐一检查返回值并聚合成一条提示',
+  /const bind = \(accel: string, fn: \(\) => void\)/.test(codeDayPanel) && /if \(!globalShortcut\.register\(accel, fn\)\) failed\.push\(accel\)/.test(codeDayPanel) && /pushAppNotice\(/.test(codeDayPanel))
+check('H3 负向：两处都不得再有「调 register 但不接收返回值」的裸语句',
+  !/(^|\n)\s*globalShortcut\.register\(/.test(codePasswordFiller) && !/(^|\n)\s*globalShortcut\.register\(/.test(codeDayPanel))
+
+// H4 safeStorage：密文头按平台断言（原先硬断言 v10 ⇒ Linux 上每条启动一条假故障）
+check('H4 secretBox 有按平台的期望头表', /KNOWN_CIPHER_HEADS/.test(srcSecretBox))
+check('H4 win32 期望 v10 保留', /win32:\s*\[\s*'v10'\s*\]/.test(srcSecretBox))
+check('H4 linux 期望收 v10 + v11（gnome_libsecret 实测 v11；无钥匙串退回 basic_text 时是 v10）',
+  /linux:\s*\[\s*'v10',\s*'v11'\s*\]/.test(srcSecretBox))
+check('H4 负向：自检里不再硬断言 head !== \'v10\'', !/head !== 'v10'/.test(codeSecretBox))
+check('H4 后端名可读（basic_text = 无系统钥匙串，弱保护）',
+  /export function secretStorageBackend/.test(srcSecretBox) && /basic_text/.test(srcSecretBox))
+check('H4 启动期把后端名打出来（跨平台排障第一手线索）',
+  /secretStorageBackend\(\)/.test(stripComments(read('electron/main/index.ts'))))
+
+// H5 跨平台密文三态：两份拷贝都必须是三态，且都透出「解不开」这个信号
+check('H5 secretBox 三态（empty / plaintext / encrypted / undecryptable）',
+  /'undecryptable'/.test(codeSecretBox) && /export function decodeSecret/.test(srcSecretBox) && /export function isSecretUndecryptable/.test(srcSecretBox))
+check('H5 passwordRepo 三态拷贝同步', /'undecryptable'/.test(codePasswordRepo) && /export function decodePassword/.test(srcPasswordRepo))
+check('H5 两份拷贝都标了「必须同步改」的说明', /两份/.test(srcSecretBox) && /两份/.test(srcPasswordRepo))
+check('H5 passwordRepo 行结构透出 passwordUndecryptable', /passwordUndecryptable:\s*dec\.state === 'undecryptable'/.test(codePasswordRepo))
+check('H5 小密码本（fillPopup）也透出该标志（否则弹窗里给的是空密码）',
+  /passwordUndecryptable:\s*dec\.state === 'undecryptable'/.test(codePasswordFiller))
+check('H5 负向：passwordRepo 里不再有「解密失败 → 返回空串」的裸 catch',
+  !/catch \{\s*return '' \/\/ 解密失败/.test(codePasswordRepo))
+check('H5 LLM 账号信息透出 keyUnreadable（解不开的 Key 不许显示成「已配置」）',
+  /keyUnreadable:\s*!!unreadable/.test(stripComments(read('electron/lib/llmAccountPure.ts'))))
+check('H5 llmService 用 isSecretUndecryptable 计算该标志', /isSecretUndecryptable\(a\.keyEncrypted\)/.test(stripComments(read('electron/lib/llmService.ts'))))
+check('H5 llmService 区分「没配 Key」与「解不开」两种 NO_KEY',
+  /Key 在本机无法解密/.test(stripComments(read('electron/lib/llmService.ts'))))
+check('H5 密码本界面：行内标记 + 顶部提示条', /passwordUndecryptable/.test(srcVault) && /无法解密/.test(srcVault) && /条密码在本机无法解密/.test(srcVault))
+check('H5 LLM 账户界面：行内标记 + 顶部提示条', /a\.keyUnreadable/.test(srcModelsTab) && /Key 无法解密/.test(srcModelsTab) && /个账号的 API Key 在本机无法解密/.test(srcModelsTab))
+check('H5 提示条可关闭（「知道了」），且关掉不隐藏条目上的常驻标记',
+  /setUnreadableNoticeOpen\(false\)/.test(srcVault) && /setUnreadableKeyNoticeOpen\(false\)/.test(srcModelsTab)
+  && /无法解密/.test(srcVault) && /Key 无法解密/.test(srcModelsTab))
+check('H5 类型汇点：PasswordEntry 透出该字段', /passwordUndecryptable\?: boolean/.test(srcTypes))
+check('H5 类型汇点：LlmAccountInfo 透出该字段', /keyUnreadable: boolean/.test(srcTypes))
+check('H5 负向：渲染层不用 alert / confirm（反馈一律走 Toast / 行内提示）',
+  !/\balert\(|\bconfirm\(/.test(srcVault) && !/\balert\(|\bconfirm\(/.test(srcModelsTab))
+check('H5 IPC 三件套齐（密文平台信息 / 告警取走 / 告警订阅），三处名字一致',
+  /secret:platformInfo/.test(srcPreload) && /app:takeNotices/.test(srcPreload) && /onAppNotice/.test(srcPreload)
+  && /'secret:platformInfo'/.test(srcSecretBox) && /'app:takeNotices'/.test(srcAppNotice)
+  && /secretPlatformInfo: \(\) => Promise<SecretPlatformInfo>/.test(srcTypes) && /takeAppNotices: \(\) => Promise<AppNoticeInfo\[\]>/.test(srcTypes))
+
+// H6 告警通道：队列 + 广播（启动期告警早于渲染层监听）
+check('H6 appNotice 有渲染层就绪标记（就绪后只广播，避免旧告警下次启动再弹）', /rendererReady/.test(srcAppNotice))
+check('H6 appNotice 队列有上限（坏状态下不无界增长）', /MAX_QUEUE\s*=\s*\d+/.test(srcAppNotice))
+check('H6 takeAppNotices 取走即删', /unlinkSync/.test(srcAppNotice))
+check('H6 主进程启动期注册该通道', /registerAppNoticeHandlers\(\)/.test(stripComments(read('electron/main/index.ts'))))
+check('H6 渲染层**先订阅后取队列**并按 id 去重', (() => {
+  const i = srcApp.indexOf('const off = onAppNotice(show)')
+  const j = srcApp.indexOf('takeAppNotices().then')
+  return i > 0 && j > i && /shown\.has\(n\.id\)/.test(srcApp)
+})())
+
+// H7 inotify 上限：过低提醒一次；ENOSPC 归因到配额
+check('H7 fsWatcher 读 /proc/sys/fs/inotify/max_user_watches', /\/proc\/sys\/fs\/inotify\/max_user_watches/.test(srcFsWatcher))
+check('H7 有阈值且有「只提醒一次」的守卫', /INOTIFY_WATCH_WARN_THRESHOLD\s*=\s*\d+/.test(srcFsWatcher) && /inotifyWarned/.test(srcFsWatcher))
+check('H7 ENOSPC 归因到配额并给用户提示',
+  /\/ENOSPC\/i\.test\(reason\)/.test(codeFsWatcher) && /inotify 配额不足/.test(srcFsWatcher))
+check('H7 预检挂在挂监听之前（不是等到失败才说）', (() => {
+  // 只看 syncVaultWatcher 内部：函数定义那行本身就含 `checkInotifyLimitOnce(`，
+  // 全文件 indexOf 会命中定义、把「调用被删掉」漏过去（变异测试抓出来的）。
+  const seg = codeFsWatcher.slice(codeFsWatcher.indexOf('export function syncVaultWatcher'))
+  const i = seg.indexOf('checkInotifyLimitOnce()')
+  const j = seg.indexOf('watch(nextPath')
+  return i > 0 && j > i
+})())
+
+// H8 回收站自检：判据是 XDG 目录可写性（trash 包在 Linux 自己实现 XDG Trash，不依赖 gio/trash-cli）
+check('H8 linuxDesktop 有 XDG 回收站自检', /export function checkXdgTrash/.test(srcLinuxDesktop) && /XDG_DATA_HOME/.test(srcLinuxDesktop))
+check('H8 XDG_DATA_HOME 按规范要求绝对路径', /isAbsolute\(dataHome\)/.test(codeLinuxDesktop))
+check('H8 负向：自检不靠 gio / trash-cli 判定（那是已核实的错误前提）',
+  !/trash-cli|which gio|'gio'/.test(codeLinuxDesktop))
+check('H8 启动期自检并把不可用告知用户', /checkXdgTrash\(\)/.test(stripComments(read('electron/main/index.ts'))) && /回收站不可用/.test(read('electron/main/index.ts')))
+
+// H9 AI 面排序确定性（台账 F-10 拍板：只改 AI 面；人类列表保留 'zh-Hans' 钉死档）
+check('H9 负向：建议作用域排序代码里不得出现 localeCompare',
+  !/localeCompare/.test(codeSuggestPure))
+check('H9 负向：工具清单排序（aiTools）代码里不得出现 localeCompare',
+  !/localeCompare/.test(codeAiTools))
+check("H9 人类列表仍走 'zh-Hans' 钉死档（没有被顺手改掉）",
+  /localeCompare\(b\.name, 'zh-Hans-CN'\)/.test(read('src/lib/treeSort.ts')))
+
+// H9 真跑：同一份数据在三种 locale 下必须给出**完全相同的**行序（F-9 的同类判据）
+const suggestPureUrl = pathToFileURL(join(ROOT, 'electron/lib/aiAssistantScopeSuggestPure.ts')).href
+const pureProbe = `
+  import { suggestScope, compareSuggestStable } from ${JSON.stringify(suggestPureUrl)}
+  import { sanitizeAccountInfo } from ${JSON.stringify(pathToFileURL(join(ROOT, 'electron/lib/llmAccountPure.ts')).href)}
+  const entries = [
+    { relPath: 'p/4.md', title: '指针 阿', entryKind: 'page' },
+    { relPath: 'p/3.md', title: '指针 乙', entryKind: 'page' },
+    { relPath: 'p/1.md', title: '指针 Z', entryKind: 'page' },
+    { relPath: 'p/2.md', title: '指针 a', entryKind: 'page' },
+  ]
+  const order = suggestScope('指针', entries, 8).map((s) => s.title)
+  const acct = { id: 'a1', name: '工作号', keyEncrypted: 'enc1:SECRET-CIPHER', enabled: true }
+  const masked = sanitizeAccountInfo(acct, true)
+  const maskedDefault = sanitizeAccountInfo(acct)
+  console.log(JSON.stringify({
+    order,
+    cmp: [compareSuggestStable('a', 'b'), compareSuggestStable('b', 'a'), compareSuggestStable('a', 'a')],
+    unreadable: masked.keyUnreadable,
+    unreadableDefault: maskedDefault.keyUnreadable,
+    hasKey: masked.hasKey,
+    leak: JSON.stringify(masked).includes('SECRET-CIPHER') || JSON.stringify(masked).includes('enc1:') || ('keyEncrypted' in masked),
+  }))
+`
+function runPureProbe(locale) {
+  const r = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', '--input-type=module', '-e', pureProbe], {
+    env: { ...process.env, LC_ALL: locale }, encoding: 'utf8', timeout: 30000,
+  })
+  if (r.status !== 0) return { error: String(r.stderr || r.error || 'exit ' + r.status).slice(0, 300) }
+  try {
+    return { data: JSON.parse(String(r.stdout).trim().split('\n').pop() || '') }
+  } catch (e) {
+    return { error: 'stdout 解析失败: ' + String(r.stdout).slice(0, 200) }
+  }
+}
+const probeC = runPureProbe('C')
+const probeZh = runPureProbe('zh_CN.UTF-8')
+const probeEn = runPureProbe('en_US.UTF-8')
+check('H9 真跑：纯模块探测可执行（三种 locale）',
+  !probeC.error && !probeZh.error && !probeEn.error,
+  probeC.error || probeZh.error || probeEn.error || '')
+if (!probeC.error && !probeZh.error && !probeEn.error) {
+  const a = JSON.stringify(probeC.data.order)
+  const b = JSON.stringify(probeZh.data.order)
+  const c = JSON.stringify(probeEn.data.order)
+  check('H9 真跑：LC_ALL=C / zh_CN.UTF-8 / en_US.UTF-8 三处行序完全一致',
+    a === b && b === c, `C=${a} zh=${b} en=${c}`)
+  check('H9 真跑：同分并列按码点序（Z < a < 乙 < 阿）',
+    a === JSON.stringify(['指针 Z', '指针 a', '指针 乙', '指针 阿']), a)
+  check('H9 真跑：compareSuggestStable 是码点序（-1 / 1 / 0）',
+    JSON.stringify(probeC.data.cmp) === JSON.stringify([-1, 1, 0]), JSON.stringify(probeC.data.cmp))
+  check('H9 真跑：sanitizeAccountInfo 透出 keyUnreadable，且默认 false、密文不外泄',
+    probeC.data.unreadable === true && probeC.data.unreadableDefault === false && probeC.data.hasKey === true && probeC.data.leak === false,
+    JSON.stringify(probeC.data))
+}
 
 // ─────────────────────────────────────────────────────────────
 const failed = checks.filter(c => !c.pass)

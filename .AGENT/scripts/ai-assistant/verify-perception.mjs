@@ -602,7 +602,9 @@ const ALL_CHORDS = COMMANDS.flatMap((c) => c.keys.map((k) => k.join('+')))
 ok(ALL_CHORDS.includes('Alt+A'), 'J12a 快捷键总表（真源）登记 Alt+A', '')
 // Ctrl+Alt+S 是系统级全局快捷键（dayPanelWindow globalShortcut）→ 不得用作内联建议触发
 const SRC_DAYPANEL = stripComments(read('electron/main/dayPanelWindow.ts'))
-ok(/globalShortcut\.register\('Control\+Alt\+S'/.test(SRC_DAYPANEL),
+// 2026-10-19：注册改经 bind() 包装（为了检查 register 的返回值、失败时提示用户）——
+// 断言随之改为钉 bind 调用，钉的还是同一件事：Ctrl+Alt+S 归日程小窗。
+ok(/bind\('Control\+Alt\+S'/.test(SRC_DAYPANEL),
   'J12b ★ Ctrl+Alt+S 确为系统级全局快捷键（上游候选因此不可用）', '')
 const casOwners = COMMANDS.filter((c) => c.keys.some((k) => k.join('+') === 'Ctrl+Alt+S'))
 ok(casOwners.length > 0 && casOwners.every((c) => !/续写|内联建议/.test(c.label + c.desc)),

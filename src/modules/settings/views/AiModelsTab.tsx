@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Plus, Trash2, RefreshCw, Loader2, Star, Pencil, Import, Check, X,
-  ChevronRight, KeyRound, Zap, Copy,
+  ChevronRight, KeyRound, Zap, Copy, AlertTriangle,
 } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
@@ -91,6 +91,14 @@ export function AiModelsTab() {
   const [ccsOpen, setCcsOpen] = useState(false)
   /** 账号 ⋯「把其他槽位也改用它…」发起的批量改槽位请求（adopt 卡片由场景表渲染） */
   const [adopt, setAdopt] = useState<AdoptRequest | null>(null)
+  /**
+   * 本机解不开 Key 的账号数（跨系统导入；Linux 平台化阶段 1）。
+   * Key 密文由**其他系统**的钥匙串加密，密钥不随设置迁移 ⇒ 本机必然解不开；
+   * 原先这种账号显示「已配置 Key」，用户的感受只是「调用老是 401」。见 electron/lib/secretBox.ts 头注释。
+   */
+  const unreadableKeyCount = providers.reduce((n, p) => n + p.accounts.filter(a => a.keyUnreadable).length, 0)
+  /** 顶部提示条只在本会话内可关（不加 localStorage 记忆：它是数据状态的解释，重新填 Key 后应自动消失） */
+  const [unreadableKeyNoticeOpen, setUnreadableKeyNoticeOpen] = useState(true)
 
   /**
    * 打开「把其他槽位也改用它」：**此刻**把七个槽位的 from → to 算好。
@@ -145,6 +153,25 @@ export function AiModelsTab() {
 
   return (
     <div className="space-y-8">
+      {/* 跨系统密文的解释性提示（Linux 平台化阶段 1）。走 Collapsible + .kb-collapse（铁律 13） */}
+      <Collapsible open={unreadableKeyCount > 0 && unreadableKeyNoticeOpen} className="-my-4" innerClassName="">{() => (
+        <div className="flex items-start gap-2 rounded-md border border-[var(--border-color)] bg-[var(--warning-bg)] px-3 py-2">
+          <AlertTriangle size={14} strokeWidth={1.7} className="mt-0.5 shrink-0 text-[var(--warning)]" />
+          <div className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">
+            <b className="font-medium text-[var(--text-primary)]">{unreadableKeyCount} 个账号的 API Key 在本机无法解密。</b>
+            这些 Key 由其他系统（Windows / macOS）的本机钥匙串加密，密钥不随设置迁移
+            （本机钥匙串服务没运行时同样解不开）—— 在对应账号上重新填写 API Key 即可恢复；端点的地址、模型清单都不受影响。
+          </div>
+          <button
+            type="button"
+            onClick={() => setUnreadableKeyNoticeOpen(false)}
+            className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--accent)] transition-colors hover:bg-[var(--bg-hover)]"
+          >
+            知道了
+          </button>
+        </div>
+      )}</Collapsible>
+
       {/* 供应商：常驻的**唯一**一层列表；加供应商收成一个按钮，8 个预设磁贴不再占首屏 */}
       <div>
         <div className="flex items-start justify-between gap-2 max-w-md">
@@ -628,9 +655,11 @@ function ProviderEditor({ p, onChanged, onSaved, onClose, onAdopt, initialModelL
                   className={`w-3 h-3 rounded-full border shrink-0 transition-colors ${isOn ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-[var(--text-disabled)] hover:border-[var(--accent)]'}`} />
                 <span className="text-[12px] text-[var(--text-primary)] truncate">{a.name}</span>
                 {isOn && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--accent)]/40 text-[var(--accent)]">使用中</span>}
-                {a.hasKey || p.type === 'ollama'
-                  ? <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/40 text-emerald-400">{p.type === 'ollama' ? '无需 Key' : '已配置 Key'}</span>
-                  : <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-400">无 Key</span>}
+                {a.keyUnreadable
+                  ? <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--danger)]/40 text-[var(--danger)]" title="Key 密文由其他系统加密，本机解不开；重新填写该账号的 API Key 即可恢复">Key 无法解密</span>
+                  : a.hasKey || p.type === 'ollama'
+                    ? <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/40 text-emerald-400">{p.type === 'ollama' ? '无需 Key' : '已配置 Key'}</span>
+                    : <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-400">无 Key</span>}
                 {!a.enabled && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[var(--text-disabled)]">已停用</span>}
                 <span className="min-w-0 flex-1 truncate text-right text-[10.5px] text-[var(--text-muted)]">{status}</span>
                 <button onClick={() => { void testAccount(a) }} disabled={acctTesting !== null}

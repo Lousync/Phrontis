@@ -34,7 +34,7 @@ import { join, basename, resolve, sep } from 'path'
 import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdirSync, statSync, readdirSync, appendFileSync } from 'fs'
 import { Readable } from 'stream'
 import { getAttachmentsDir } from '../lib/globalPaths'
-import { assertSecretBoxRoundTrip } from '../lib/secretBox'
+import { assertSecretBoxRoundTrip, registerSecretBoxHandlers, secretStorageBackend } from '../lib/secretBox'
 import { registerPomodoroBroadcast } from './pomodoroState'
 import { registerEntryHandlers } from '../database/repositories/entryRepo'
 import { registerTagHandlers } from '../database/repositories/tagRepo'
@@ -103,6 +103,8 @@ import { applyBookMarketProxy, initBookMarketProxy } from '../lib/bookMarket/net
 import { registerClipperHandlers, startClipperServer, stopClipperServer } from '../lib/clipperServer'
 import { registerWorkspaceHandlers, trashAllRegisteredVaults, clearVaultRegistry } from '../lib/workspaceManager'
 import { closeVaultWatcher } from '../lib/fsWatcher'
+import { pushAppNotice, registerAppNoticeHandlers } from '../lib/appNotice'
+import { checkXdgTrash, detectStatusNotifierHost, statusNotifierHostCached } from '../lib/linuxDesktop'
 import { registerVaultArchiveHandlers } from '../lib/vaultArchive'
 import { getCurrentVault, setCurrentVault } from '../lib/kbStore/vaultContext'
 import { SETTINGS } from '../../src/lib/settings'
@@ -250,6 +252,13 @@ function showMainWindow(): void {
 import { loadAppIconSync, loadAppIconWithRetry } from '../lib/appIcon'
 
 async function createTray(): Promise<void> {
+  // Linux 平台化（阶段 1）：托盘图标能不能显示，取决于会话里有没有 StatusNotifierHost。
+  // 没有宿主时**不建托盘** —— 建了也只是个看不见的图标，却会让「点 X 隐藏窗口」变成
+  // 「应用消失且找不回来」（判据见 lib/linuxDesktop.ts 头注释；排障走 KNOWBASE_FORCE_TRAY=1）。
+  if (process.platform === 'linux' && !(await detectStatusNotifierHost())) {
+    console.warn('[Tray] 未检测到状态栏宿主（org.kde.StatusNotifierWatcher）→ 不创建托盘，关闭主窗口将直接退出应用')
+    return
+  }
   try {
     const { img, source } = await loadAppIconWithRetry(4, 400, (m) => console.warn('[Tray]', m))
     let image = img
@@ -384,10 +393,13 @@ function createWindow(): void {
 
   // 托盘常驻：点 X = 隐藏到托盘（任务栏独立存活），不退出应用；真正退出走托盘菜单
   mainWindow.on('close', (e) => {
-    if (!isQuitting) {
-      e.preventDefault()
-      mainWindow?.hide()
-    }
+    if (isQuitting) return
+    // Linux 平台化（阶段 1，已拍板决策 #3）：隐藏窗口的前提是**托盘真的能用** ——
+    // 没有托盘（无状态栏宿主，或图标装载失败）时藏窗口 = 应用消失且无法唤回，
+    // 故此时不劫持 close，直接走真退出。Windows / macOS 行为保持不变。
+    if (process.platform === 'linux' && !(tray && statusNotifierHostCached())) return
+    e.preventDefault()
+    mainWindow?.hide()
   })
 }
 
@@ -752,8 +764,15 @@ app.whenReady().then(async () => {
   // 加密自检：确认 safeStorage 密文格式与 secretBox 的假设一致（只告警不阻断，见 secretBox.ts）
   // 目的：把「密文格式变化 / 被误改」这类问题暴露在启动期，而非用户发现「密码全空」时
   try {
+    // 后端名一并打出来：Linux 上 basic_text = 没有系统钥匙串（弱保护），
+    // 是排障「密钥到底存在哪、为什么换个系统解不开」的第一手线索
+    console.log('[secretBox] 加密后端 =', secretStorageBackend())
     assertSecretBoxRoundTrip()
   } catch { /* 自检自身异常不应影响启动 */ }
+
+  // 密文平台自检信息（secret:platformInfo）：密码本 / LLM 账户页的「无法解密」提示条
+  // 据此说清「本机用什么在加密」，注册点在本文件而非常规 repo —— 两份密文实现不互相引用。
+  registerSecretBoxHandlers()
 
   // 书市代理灌进 bookmarket 分区（方案 §三）。**不 await**：代理连不上不是启动失败的理由，
   // 而 session.setProxy 在某些代理下要跟系统代理配置打交道，await 它会把窗口拖晚。
@@ -1131,6 +1150,11 @@ app.whenReady().then(async () => {
   // 跨窗口数据变更总线（data:notify → kb:data-changed），先于任何窗口能力注册
   registerWindowBus()
 
+  // 主进程 → 渲染层的用户可见告警队列（app:takeNotices）：启动期降级事实（快捷键没注册上 /
+  // 文件监听配额不足 / 回收站不可用）原先只有终端能看到，装包后用户看不到终端 ⇒ 走 Toast。
+  // 投递策略（队列 + 广播 + 渲染层按 id 去重）见 lib/appNotice.ts 头注释。
+  registerAppNoticeHandlers()
+
   // 应用使用时长采集（看板「今日使用」卡与半年使用热力图的数据源，2026-09-27 净新增）。
   // 记账条件 = 前台 且 未锁屏未休眠。用 app 级 focus/blur 而不是单窗口事件，
   // 这样多窗口之间来回切不会被误判成「离开应用」。
@@ -1153,6 +1177,20 @@ app.whenReady().then(async () => {
       saveTimer = setTimeout(flushSettingsToDisk, 500)
     },
   })
+
+  // 启动期降级自检（Linux，阶段 1）：回收站目录不可写时**当场说清楚**，
+  // 别等用户删东西失败才发现（判据与覆盖面见 lib/linuxDesktop.ts 头注释 ②）。
+  if (process.platform === 'linux') {
+    const t = checkXdgTrash()
+    if (!t.ok) {
+      console.warn(`[Linux] 回收站自检未通过：${t.reason ?? '未知原因'}（${t.dir}）`)
+      pushAppNotice({
+        type: 'warning',
+        message: '回收站不可用：删除的文件可能无法移入回收站',
+        detail: `${t.reason ?? t.dir}。请修好该目录的写权限后再试。`,
+      })
+    }
+  }
 
   void createTray()
 

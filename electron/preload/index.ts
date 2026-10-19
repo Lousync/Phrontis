@@ -452,6 +452,20 @@ const api = {
     ipcRenderer.on('assistant:notice', handler)
     return () => { ipcRenderer.removeListener('assistant:notice', handler) }
   },
+  /**
+   * 主进程侧**用户可见告警**（启动期降级事实：快捷键没注册上 / 文件监听配额不足 / 回收站不可用）。
+   * 投递策略是「队列 + 广播」：实时的那一份走这里，启动期积压的那一份走 takeAppNotices()，
+   * 两边按 `id` 去重（见 electron/lib/appNotice.ts 头注释）。
+   */
+  onAppNotice: (cb: (n: { id: string; type: 'info' | 'warning' | 'error'; message: string; detail?: string }) => void) => {
+    const handler = (_e: unknown, n: { id: string; type: 'info' | 'warning' | 'error'; message: string; detail?: string }) => cb(n)
+    ipcRenderer.on('app:notice', handler)
+    return () => { ipcRenderer.removeListener('app:notice', handler) }
+  },
+  /** 取走启动期积压的告警（**取走即删**；同时把渲染层标记为已就绪，此后主进程只走广播） */
+  takeAppNotices: () => ipcRenderer.invoke('app:takeNotices'),
+  /** 密文机制的平台自检信息（密码本 / LLM 账户页的「无法解密」提示条据此说清本机后端） */
+  secretPlatformInfo: () => ipcRenderer.invoke('secret:platformInfo'),
   llmCcSwitchList: () => ipcRenderer.invoke('llm:ccswitch:list'),
   llmCcSwitchImport: (ids: string[]) => ipcRenderer.invoke('llm:ccswitch:import', ids),
   // 插件安全分级 + 内容包导入

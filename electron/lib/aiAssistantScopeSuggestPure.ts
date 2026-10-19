@@ -47,6 +47,18 @@ export function expandTerms(terms: string[]): string[] {
   return [...out]
 }
 
+/**
+ * 并列次序 —— **码点序**，不依赖 ICU / 运行时 locale（2026-10-19，台账 F-10 拍板：只改 AI 面）。
+ *
+ * 与 F-9（helpRetrieval 的并列兜底）同因：`localeCompare` 不传 locale 时按**机器语言**比较，
+ * 于是同一份数据在不同 locale 的机器上行序不同。本条的落点是**建议作用域卡的行序**（用户可见）。
+ * 判据：**给 AI 看的排序必须确定**（码点序），给人看的列表可以自然（那些走 'zh-Hans' 钉死档，
+ * 如 src/lib/treeSort.ts）。导出以便契约脚本真跑（见 .AGENT/scripts/linux-port/verify-linux-port.mjs §H）。
+ */
+export function compareSuggestStable(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
 /** 匹配并排序：标题命中权重最高，其次标签，最后路径；只保留 score>0 */
 export function suggestScope(query: string, entries: ScopeSuggestEntry[], limit = 8): ScopeSuggestion[] {
   const q = query.trim().toLowerCase()
@@ -67,6 +79,9 @@ export function suggestScope(query: string, entries: ScopeSuggestEntry[], limit 
     }
     if (score > 0) out.push({ relPath: e.relPath, title: e.title, score })
   }
-  out.sort((a, b) => (b.score - a.score) || a.title.localeCompare(b.title) || a.relPath.localeCompare(b.relPath))
+  // 同分并列走码点序（见 compareSuggestStable）：行序不得随机器 locale 变
+  out.sort((a, b) => (b.score - a.score)
+    || compareSuggestStable(a.title, b.title)
+    || compareSuggestStable(a.relPath, b.relPath))
   return out.slice(0, Math.max(1, limit))
 }

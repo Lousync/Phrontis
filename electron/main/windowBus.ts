@@ -119,6 +119,9 @@ export const BROADCAST_CHANNEL = {
   dayPanelWidgetInteractiveChanged: 'daypanel:widget-interactive-changed',
   /** 主窗口全屏弹窗遮罩开合（dock 跟随压暗），载荷 `{ dim: boolean }`；渲染层发起走 'main:modal-dim' */
   mainModalDimChanged: 'main:modal-dim-broadcast',
+  /** 主进程 → 渲染层的**用户可见告警**（功能降级但进程照跑的事实），载荷 `AppNotice`
+   *  —— 投递策略（队列 + 广播、渲染层按 id 去重）见 lib/appNotice.ts 头注释 */
+  appNotice: 'app:notice',
   /** 终端 pty 输出，载荷 `{ id, data }`（高频；高频写回走 term:write 的 send，不经此通道） */
   termData: 'term:data',
   /** 终端会话退出，载荷 `{ id, exitCode }` */

@@ -1,7 +1,7 @@
 import { app, ipcMain, net } from 'electron'
 import { randomUUID } from 'crypto'
 import { appendAudit, countMonthLlmTokens, countMonthLlmTokensSplit, countMonthVisionTokens, countMonthVisionPages, countTodayLlmUsage } from './pluginAudit'
-import { encryptSecret, decryptSecret } from './secretBox'
+import { encryptSecret, decryptSecret, isSecretUndecryptable } from './secretBox'
 import { scanCcSwitch, importCcSwitchIds, bindCcSwitchSaver } from './ccSwitchImport'
 import {
   familyOf, userAgentString, withSessionHeaders, buildResponsesBody,
@@ -359,7 +359,14 @@ export function resolveProviderSecret(providerId: string, accountId?: string): R
   const acct = accountId ? (p.accounts ?? []).find(a => a.id === accountId) : activeAccountOf(p)
   if (!acct) return { ok: false, error: accountId ? '账号不存在' : '该供应商没有账号', code: 'ACCOUNT_NOT_FOUND' }
   const secret = acct.keyEncrypted ? decryptSecret(acct.keyEncrypted) : ''
-  if (!secret) return { ok: false, error: '账号未配置 Key', code: 'NO_KEY' }
+  if (!secret) {
+    // 「没配 Key」与「配了但本机解不开」必须分开说：后者是跨系统密文（密钥在原系统的钥匙串里），
+    // 重新录入即可恢复 —— 报成「未配置 Key」会让用户以为设置被清了（见 secretBox.ts 头注释）。
+    if (acct.keyEncrypted && isSecretUndecryptable(acct.keyEncrypted)) {
+      return { ok: false, error: 'Key 在本机无法解密（密文由其他系统加密，请重新填写该账号的 API Key）', code: 'NO_KEY' }
+    }
+    return { ok: false, error: '账号未配置 Key', code: 'NO_KEY' }
+  }
   return { ok: true, provider: p, accountId: acct.id, accountName: acct.name, active: acct.id === p.activeAccountId, secret }
 }
 
@@ -1558,8 +1565,10 @@ export async function invokeLlmStreamInternal(
 
 // ===== IPC =====
 
-/** 账号信息的对外形状：**永不含密文**，渲染层只拿得到 hasKey（负向断言见 llm-accounts 契约） */
-const sanitizeAccount = sanitizeAccountInfo
+/** 账号信息的对外形状：**永不含密文**，渲染层只拿得到 hasKey（负向断言见 llm-accounts 契约）。
+ *  解不开的 Key（密文来自其他系统）额外标 `keyUnreadable` —— 界面据此显示「Key 无法解密」，
+ *  否则用户只看到请求 401 而不知道原因（见 secretBox.ts 头注释「跨平台不可解密」段）。 */
+const sanitizeAccount = (a: ProviderAccount) => sanitizeAccountInfo(a, isSecretUndecryptable(a.keyEncrypted))
 
 function sanitizeInfo(p: ProviderConfig, defaultChatModel: string) {
   const acct = activeAccountOf(p)

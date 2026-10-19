@@ -1,10 +1,11 @@
-import { watch, type FSWatcher } from 'fs'
+import { watch, readFileSync, type FSWatcher } from 'fs'
 import { relative } from 'path'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { invalidateKnowledgeIndex } from './kbStore/knowledgeIndex'
 import { invalidateGraphIndex } from './kbStore/graphIndex'
 import { bookMetaPruneOrphans } from './kbStore/vaultBookMetaRepo'
 import { broadcast, broadcastDataChanged, BROADCAST_CHANNEL } from '../main/windowBus'
+import { pushAppNotice } from './appNotice'
 
 /**
  * 仓库级文件系统监听（v3.2.0 条目 ④）——对标 VS Code 的 file watcher。
@@ -53,6 +54,38 @@ const PRUNE_THROTTLE_MS = 30_000
 
 /** 不监听任何名字命中这些规则的路径（**不用 .ignore 规则过滤** —— 那是知识库扫描语义，铁律 6） */
 const IGNORED_SEGMENTS = new Set(['.knowbase', '.git', 'node_modules', '.DS_Store', 'Thumbs.db'])
+
+/**
+ * inotify 配额预检（Linux，2026-10-19 · 平台化阶段 1）。
+ *
+ * Node 的 recursive `fs.watch` 在 Linux 上**按目录逐个挂 inotify watch**（libuv 实现），
+ * 所以「仓库里的目录数」会直接吃 `fs.inotify.max_user_watches`。配额耗尽时 libuv 报 ENOSPC，
+ * 本模块按既有降级路径关掉监听 —— 表象就是「外部改动不再自动刷新」而用户无从得知。
+ * 故在真正挂监听前先看一眼配额，过低就（每个进程只）提醒一次。
+ * 阈值 8192 取的是历史发行版默认值：低于它、仓库目录稍多就会先撞上限
+ * （现代默认多为 65536，调高命令见提示明细）。
+ */
+const INOTIFY_WATCH_WARN_THRESHOLD = 8192
+let inotifyWarned = false
+
+function checkInotifyLimitOnce(): void {
+  if (inotifyWarned || process.platform !== 'linux') return
+  let raw: string
+  try {
+    raw = readFileSync('/proc/sys/fs/inotify/max_user_watches', 'utf-8').trim()
+  } catch {
+    return // 读不到（权限/非 Linux 内核接口）就不猜，静默跳过
+  }
+  const limit = Number(raw)
+  if (!Number.isFinite(limit) || limit <= 0 || limit >= INOTIFY_WATCH_WARN_THRESHOLD) return
+  inotifyWarned = true
+  console.warn(`[fsWatcher] inotify 配额偏低：fs.inotify.max_user_watches = ${limit}（阈值 ${INOTIFY_WATCH_WARN_THRESHOLD}）`)
+  pushAppNotice({
+    type: 'warning',
+    message: `文件监听配额偏低（max_user_watches = ${limit}）`,
+    detail: '仓库目录数接近这个上限时，外部改动将不再自动刷新资源管理器。可执行 sudo sysctl fs.inotify.max_user_watches=65536 提高上限（需重启后仍生效则写入 /etc/sysctl.d/）。',
+  })
+}
 
 let watcher: FSWatcher | null = null
 let watchedRootPath: string | null = null
@@ -176,10 +209,23 @@ function degrade(reason: string): void {
   pending.clear()
   if (degradedNoticeSent) return
   degradedNoticeSent = true
+  // ENOSPC = inotify 配额耗尽（见 checkInotifyLimitOnce 的说明）：把归因写进原因里，
+  // 并额外给用户一条可见提示 —— 否则「不再自动刷新」是个完全无声的降级。
+  const quotaExhausted = /ENOSPC/i.test(reason)
   try {
-    broadcast(BROADCAST_CHANNEL.wsFsChanged, { relPaths: [], watcherError: reason || 'unknown' })
+    broadcast(BROADCAST_CHANNEL.wsFsChanged, {
+      relPaths: [],
+      watcherError: quotaExhausted ? `${reason}（inotify 配额不足：调大 fs.inotify.max_user_watches）` : (reason || 'unknown'),
+    })
   } catch {
     /* ignore */
+  }
+  if (quotaExhausted) {
+    pushAppNotice({
+      type: 'warning',
+      message: '文件监听已停用：inotify 配额不足',
+      detail: '仓库目录数超过了 fs.inotify.max_user_watches。执行 sudo sysctl fs.inotify.max_user_watches=65536 后重启应用即可恢复自动刷新。',
+    })
   }
 }
 
@@ -216,6 +262,7 @@ export function syncVaultWatcher(): void {
   if (nextPath === watchedRootPath && nextId === watchedRootId && (!nextPath || watcher)) return
   closeVaultWatcher()
   if (!cur || !nextPath) return
+  checkInotifyLimitOnce()
   try {
     watcher = watch(nextPath, { recursive: true, persistent: false })
     // 事件入口：filename 在 Windows 上是「仓库根相对路径」（反斜杠分隔），拼不出时为 null

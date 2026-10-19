@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense, lazy } from 'react'
 import { createPortal } from 'react-dom'
 import { Bot, Command, FileSearch } from 'lucide-react'
-import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag, BookKind } from './types'
+import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag, BookKind, AppNoticeInfo } from './types'
 
 import { labelOf as tabLabel, isTabName } from './lib/appModules'
 import { WORKBENCH_TABBAR_EXCLUDED, AI_ASSISTANT_SHORTCUT_DISABLED } from './lib/workbenchLayout'
@@ -23,7 +23,7 @@ import { useSettings } from './lib/SettingsContext'
 import { isEditingInput, allowsWorkbenchShortcut } from './lib/shortcuts'
 import { registerSelectionAskHost, type SelectionAskHost } from './lib/assistantContext'
 import { setGlobalActiveTab } from './lib/activeTab'
-import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList, agentTakeAdoptNotice } from './lib/ipc'
+import { getKnowledgePages, getKnowledgeCategories, getKnowledgeTags, workspaceGetCurrent, getReleaseNotesState, pluginListCommands, onPluginInstalledChanged, excerptList, agentTakeAdoptNotice, onAppNotice, takeAppNotices } from './lib/ipc'
 import { getPluginTools } from './lib/pluginService'
 import { requestPluginViewActivation, dispatchCodePluginAction } from './lib/pluginCommandBus'
 import { requestSourceDraftPrefill } from './lib/bookSourceDraftBus'
@@ -643,6 +643,31 @@ export default function App() {
         .catch(() => { /* 静默：告知失败不值得为它弹错误 */ })
     }, 600)
     return () => { alive = false; window.clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsReady, loaded])
+
+  // ---- 主进程侧用户可见告警（Linux 平台化阶段 1）----
+  // 启动期降级事实（全局快捷键没注册上 / 文件监听配额不足 / 回收站不可用）原先只有主进程终端能看到；
+  // 从桌面图标启动时用户看不到终端 ⇒ 主进程留成待取队列 + 实时广播，这里**先订阅、后补取**，
+  // 并在本地按 `id` 去重（订阅与取队列有一个极小的重叠窗口，同一 id 可能到两次；
+  // 投递策略见 electron/lib/appNotice.ts 头注释）。
+  // 900ms 延迟：错开首屏渲染与存量会话认领那条（600ms），Toast 各自堆叠不冲突。
+  const appNoticeReadyRef = useRef(false)
+  useEffect(() => {
+    if (!settingsReady || !loaded || appNoticeReadyRef.current) return
+    appNoticeReadyRef.current = true
+    let alive = true
+    const shown = new Set<string>()
+    const show = (n: AppNoticeInfo) => {
+      if (!alive || shown.has(n.id)) return
+      shown.add(n.id)
+      showToast({ type: n.type, message: n.message, detail: n.detail })
+    }
+    const off = onAppNotice(show)
+    const timer = window.setTimeout(() => {
+      takeAppNotices().then((list) => { if (alive) list.forEach(show) }).catch(() => { /* 静默：告警取不到本身不值得弹错误 */ })
+    }, 900)
+    return () => { alive = false; off(); window.clearTimeout(timer) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsReady, loaded])
   /** 「知道了」：回到进更新说明之前那个模块；**没有来源时回工作台空态**

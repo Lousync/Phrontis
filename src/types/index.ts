@@ -360,6 +360,12 @@ export interface PasswordEntry {
   favorite: boolean
   /** 分组名（总览页折叠展示）；空 = 未分组 */
   group: string
+  /**
+   * 密文在本机**解不开**（多来自其他系统 —— 密钥在各自机器的系统钥匙串里，跨系统必然解不开）。
+   * true 时 `password` 必为空串：界面必须显示「无法解密」而不是一个空密码
+   * （机制见 electron/lib/secretBox.ts 头注释「跨平台不可解密」段）。缺省 / 旧后端不返回时按 false。
+   */
+  passwordUndecryptable?: boolean
 }
 export interface CreatePasswordEntryDTO { title?: string; url?: string; username?: string; account?: string; password?: string; notes?: string; favorite?: boolean; group?: string }
 export interface UpdatePasswordEntryDTO {
@@ -1048,6 +1054,12 @@ export interface LlmAccountInfo {
   name: string
   enabled: boolean
   hasKey: boolean
+  /**
+   * 该账号**有 Key 但本机解不开**（密文来自其他系统；密钥在各自机器的系统钥匙串里）——
+   * 界面必须显示「Key 无法解密」而不是「已配置 Key」，否则用户只会看到请求 401 而不知为什么。
+   * 见 electron/lib/secretBox.ts 头注释「跨平台不可解密」段。
+   */
+  keyUnreadable: boolean
   /** 最近一次「测试这个账号」的往返耗时与时间点 */
   lastLatencyMs?: number
   lastTestedAt?: string
@@ -2126,6 +2138,25 @@ export interface ShareCardState {
   prompt: string
 }
 
+/**
+ * 主进程 → 渲染层的用户可见告警（启动期降级事实，见 electron/lib/appNotice.ts）。
+ * `id` 用于渲染层去重（订阅与启动补取有一个极小的重叠窗口）。
+ */
+export interface AppNoticeInfo {
+  id: string
+  type: 'info' | 'warning' | 'error'
+  message: string
+  detail?: string
+}
+
+/** 密文机制的平台自检信息（electron/lib/secretBox.ts 的 secretPlatformInfo） */
+export interface SecretPlatformInfo {
+  platform: string
+  encryptionAvailable: boolean
+  /** Linux：gnome_libsecret / kwallet / basic_text…；其它平台多为 'unknown' */
+  backend: string
+}
+
 export interface ElectronAPI {
   getPathForFile: (file: File) => string
   pasteFromClipboard: () => Promise<{ ok: boolean }>
@@ -2832,6 +2863,12 @@ export interface ElectronAPI {
   onAiTeachNotice: (cb: (msg: string) => void) => () => void
   /** N-1 手册通道：助手侧提示（升格 Toast 等），载荷 `{ sessionId, message }` */
   onAssistantNotice: (cb: (p: { sessionId: string; message: string }) => void) => () => void
+  /** 主进程侧用户可见告警（启动期降级事实）；投递策略见 electron/lib/appNotice.ts */
+  onAppNotice: (cb: (n: AppNoticeInfo) => void) => () => void
+  /** 取走启动期积压的告警（取走即删；与 onAppNotice 并用，按 id 去重） */
+  takeAppNotices: () => Promise<AppNoticeInfo[]>
+  /** 密文机制的平台自检信息（密码本 / LLM 账户页的「无法解密」提示条） */
+  secretPlatformInfo: () => Promise<SecretPlatformInfo>
   llmCcSwitchList: () => Promise<CcSwitchScanResult>
   llmCcSwitchImport: (ids: string[]) => Promise<CcSwitchImportResult>
 }

@@ -129,11 +129,20 @@ export function registerTool(tool: AgentTool, handler: ToolHandler): void {
   registry.set(tool.name, { ...tool, handler })
 }
 
+/**
+ * 码点序比较 —— **不用 localeCompare**（2026-10-19，台账 F-10 拍板：只改 AI 面）。
+ * 工具清单是喂给模型的，次序必须跨平台确定；localeCompare 不传 locale 时按机器语言比较，
+ * 同一份注册表在不同机器上会给模型不同的工具次序（而同因的 F-9 已实测会随 locale 变红）。
+ */
+function byCodepoint(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
 /** 工具描述列表（不含处理器），按来源与名称排序保证输出稳定 */
 export function listTools(): ToolDescription[] {
   return [...registry.values()]
     .map(({ handler: _h, ...desc }) => desc)
-    .sort((a, b) => a.source.localeCompare(b.source) || a.name.localeCompare(b.name))
+    .sort((a, b) => byCodepoint(a.source, b.source) || byCodepoint(a.name, b.name))
 }
 
 /** 按命名空间前缀批量注销工具（如 MCP server 禁用/删除时其 mcp.<serverId>.* 整体下线） */

@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } fr
 import {
   ArrowLeft, Search, Eye, EyeOff, Copy, Plus, Trash2, ExternalLink, X, Check, Shield, Globe, User, Key,
   FileText, AtSign, Star, Folder, FolderOpen, Layers, ChevronRight, ArrowUp, ArrowDown, ChevronsUpDown, RefreshCw,
+  AlertTriangle,
 } from 'lucide-react'
 import type { PasswordEntry } from '../../../types'
 import { getPasswordEntries, getPasswordEntryById, createPasswordEntry, updatePasswordEntry, deletePasswordEntry, openExternal } from '../../../lib/ipc'
 import { showToast } from '../../../lib/toast'
 import { useDataChanged, notifyDataChanged } from '../../../lib/dataChanged'
 import { genPassword } from '../../../lib/passwordGen'
+import { Collapsible } from '../../../components/shared/Collapsible'
 
 interface Props {
   onBack: () => void
@@ -145,6 +147,19 @@ export function PasswordVault({ onBack }: Props) {
     [entries, view],
   )
   useEffect(() => { selectedRef.current = selected?.id ?? null }, [selected])
+
+  /**
+   * 本机解不开的密文条数（跨系统导入；Linux 平台化阶段 1）。
+   * 密文由**其他系统的钥匙串**加密，密钥不随仓库迁移 ⇒ 本机必然解不开（见 electron/lib/secretBox.ts
+   * 头注释「跨平台不可解密」段）。原先这种情况静默显示空密码，表象是「条目都在、密码全空」。
+   */
+  const unreadableCount = useMemo(() => entries.filter(e => e.passwordUndecryptable).length, [entries])
+  /**
+   * 顶部提示条只在本会话内可关：**刻意不做 localStorage 记忆**（与书市首启提示条不同）——
+   * 它是数据状态的解释（重新录入后应自动消失、又导入一批后应再次出现），
+   * 而条目上的「无法解密」标记是常驻的，关掉这条只是不重复解释。
+   */
+  const [unreadableNoticeOpen, setUnreadableNoticeOpen] = useState(true)
 
   // 已有分组（供详情页输入建议 / 统计）
   const groupNames = useMemo(() => {
@@ -450,22 +465,32 @@ export function PasswordVault({ onBack }: Props) {
           {e.account || e.username || <span className="text-[var(--text-disabled)]">—</span>}
         </div>
 
-        {/* 密码（默认掩码） */}
+        {/* 密码（默认掩码；解不开时给明确文案，不给空串） */}
         <div className="flex items-center gap-1 min-w-0">
-          <span className={`flex-1 truncate font-mono text-[11.5px] ${isRevealed ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)] tracking-wider'}`}>
-            {isRevealed ? (e.password || '—') : '••••••••'}
-          </span>
+          {e.passwordUndecryptable ? (
+            <span
+              className="flex-1 truncate text-[11px] text-[var(--warning)]"
+              title="密文由其他系统加密，本机密钥解不开；请在本机重新录入密码并保存"
+            >
+              无法解密
+            </span>
+          ) : (
+            <span className={`flex-1 truncate font-mono text-[11.5px] ${isRevealed ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)] tracking-wider'}`}>
+              {isRevealed ? (e.password || '—') : '••••••••'}
+            </span>
+          )}
           <button
             onClick={ev => { ev.stopPropagation(); toggleReveal(e.id) }}
-            title={isRevealed ? '隐藏' : '显示明文'}
-            className="shrink-0 p-0.5 rounded text-[var(--text-disabled)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-selected)]"
+            disabled={e.passwordUndecryptable}
+            title={e.passwordUndecryptable ? '本机无法解密这条密文' : (isRevealed ? '隐藏' : '显示明文')}
+            className="shrink-0 p-0.5 rounded text-[var(--text-disabled)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-selected)] disabled:opacity-30 disabled:hover:bg-transparent"
           >
             {isRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
           </button>
           <button
             onClick={ev => { ev.stopPropagation(); if (e.password) handleCopyText(e.password, 'pass', e.id) }}
             disabled={!e.password}
-            title="复制密码"
+            title={e.passwordUndecryptable ? '本机无法解密这条密文' : '复制密码'}
             className="shrink-0 p-0.5 rounded text-[var(--text-disabled)] hover:text-[var(--accent)] hover:bg-[var(--bg-selected)] disabled:opacity-30"
           >
             {copiedId === e.id ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
@@ -658,6 +683,30 @@ export function PasswordVault({ onBack }: Props) {
             )}
           </div>
 
+          {/* 跨系统密文提示条（Linux 平台化阶段 1）。走 Collapsible + .kb-collapse（铁律 13：
+              一切开合都要有动效），外层常驻、收起后不挂子树 */}
+          <Collapsible
+            open={unreadableCount > 0 && unreadableNoticeOpen}
+            className="shrink-0"
+            innerClassName=""
+          >{() => (
+            <div className="flex items-start gap-2 border-b border-[var(--border-color)] bg-[var(--warning-bg)] px-3 py-1.5">
+              <AlertTriangle size={13} strokeWidth={1.7} className="mt-0.5 shrink-0 text-[var(--warning)]" />
+              <div className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-[var(--text-secondary)]">
+                <b className="font-medium text-[var(--text-primary)]">{unreadableCount} 条密码在本机无法解密。</b>
+                这些密文由其他系统（Windows / macOS）的本机钥匙串加密，密钥不随仓库迁移
+                （本机钥匙串服务没运行时同样解不开）—— 请在本机重新录入密码后保存；条目其余字段都还在。
+              </div>
+              <button
+                type="button"
+                onClick={() => setUnreadableNoticeOpen(false)}
+                className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--accent)] transition-colors hover:bg-[var(--bg-hover)]"
+              >
+                知道了
+              </button>
+            </div>
+          )}</Collapsible>
+
           {/* 表头 */}
           {!loading && totalCount > 0 && !groupMode && (
             <div
@@ -789,6 +838,12 @@ export function PasswordVault({ onBack }: Props) {
                   <label className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-secondary)] uppercase tracking-wide">
                     <Key size={12} /> 密码
                   </label>
+                  {selected?.passwordUndecryptable && (
+                    <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-[var(--warning)]">
+                      <AlertTriangle size={12} strokeWidth={1.7} className="mt-0.5 shrink-0" />
+                      <span>本机解不开这条密文：输入框为空是「解不开」，不是「没存过」。重新输入密码并保存即可在本机恢复使用，其余字段不受影响。</span>
+                    </p>
+                  )}
                   <div className="flex gap-1.5">
                     <div className="flex-1 flex items-center bg-[var(--input-bg)] border border-[var(--border-color)] rounded-md overflow-hidden">
                       <input

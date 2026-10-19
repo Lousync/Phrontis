@@ -1,8 +1,9 @@
 import { BrowserWindow, globalShortcut, screen, clipboard, app, ipcMain } from 'electron'
 import { join } from 'path'
 import { readFileSync, existsSync } from 'fs'
-import { decryptPassword, createPasswordEntryRow } from '../database/repositories/passwordRepo'
+import { decodePassword, createPasswordEntryRow } from '../database/repositories/passwordRepo'
 import { vaultPasswordsAll } from '../lib/kbStore/secretVaultRepo'
+import { pushAppNotice } from '../lib/appNotice'
 
 let fillWindow: BrowserWindow | null = null
 
@@ -102,12 +103,18 @@ export function initPasswordFiller() {
       .sort((a, b) => (Number(b.favorite === true) - Number(a.favorite === true))
         || (a.sort_order - b.sort_order)
         || (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0))
-      .map((r) => ({
-      id: r.id, title: r.title, url: r.url || '', account: r.account || '',
-      username: r.username || '', password: decryptPassword(r.password), notes: r.notes || '',
-      sortOrder: r.sort_order, createdAt: r.created_at, updatedAt: r.updated_at,
-      favorite: r.favorite === true, group: r.group || ''
-    }))
+      .map((r) => {
+        const dec = decodePassword(r.password)
+        return {
+          id: r.id, title: r.title, url: r.url || '', account: r.account || '',
+          username: r.username || '', password: dec.value, notes: r.notes || '',
+          // 来自其他系统的密文在本机解不开（Linux 平台化三态）：小密码本同样要能显示「无法解密」，
+          // 不能给一个空密码让人以为是「没存过」
+          passwordUndecryptable: dec.state === 'undecryptable',
+          sortOrder: r.sort_order, createdAt: r.created_at, updatedAt: r.updated_at,
+          favorite: r.favorite === true, group: r.group || ''
+        }
+      })
   })
 
   // Copy to clipboard — 30 秒后若剪贴板仍是所复制的密码则自动清空(不覆盖用户后续复制的内容)
@@ -143,14 +150,26 @@ export function initPasswordFiller() {
   const shortcutKey = (settings.fillPopupShortcut as string) || 'Ctrl+Alt+P'
 
   try {
-    globalShortcut.register(shortcutKey, () => {
+    // ⚠️ 结论看**返回值**，不是有没有抛异常：false = 组合键被别的程序占了 / 平台不支持
+    // （Linux 原生 Wayland 会话下 globalShortcut 恒失败，见本仓平台口径）。原先只 catch
+    // 异常，于是「注册没成功」被当成功记进日志，用户那边是「按了没反应、也无从得知为什么」。
+    const ok = globalShortcut.register(shortcutKey, () => {
       if (fillWindow && fillWindow.isVisible() && !fillWindow.isDestroyed()) {
         fillWindow.hide()
       } else {
         showFillPopup()
       }
     })
-    console.log(`[PasswordFiller] Global shortcut registered: ${shortcutKey}`)
+    if (ok) {
+      console.log(`[PasswordFiller] Global shortcut registered: ${shortcutKey}`)
+    } else {
+      console.warn(`[PasswordFiller] 全局快捷键注册失败（可能被其他程序占用）：${shortcutKey}`)
+      pushAppNotice({
+        type: 'warning',
+        message: `密码填充快捷键 ${shortcutKey} 没能生效`,
+        detail: '该组合键可能已被其他程序占用；原生 Wayland 会话下全局快捷键也不可用（本项目只支持 X11/XWayland）。释放冲突或切到 X11 会话后重启应用即可恢复。',
+      })
+    }
   } catch (e) {
     console.error(`[PasswordFiller] Failed to register shortcut "${shortcutKey}":`, e)
   }
