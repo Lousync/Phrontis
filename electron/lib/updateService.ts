@@ -1,7 +1,7 @@
 import { app, ipcMain, shell, net } from 'electron'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'fs'
-import { join, resolve } from 'path'
+import { join, resolve, relative, isAbsolute } from 'path'
 import { createHash } from 'crypto'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
@@ -327,11 +327,39 @@ function runInstallerStartupCleanup(): void {
   } catch { /* 无标记或已清理 */ }
 }
 
+/**
+ * Linux 版**不提供应用内更新**（2026-10-19 已拍板决策 #6）。
+ *
+ * 理由：Linux 的安装包走**独立 tag**（`v<ver>-linux`），而 electron-builder 的
+ * `latest-linux.yml` 与 Windows 的 `latest.yml` 若共用同一 Release，任何一个平台的产物重传都会
+ * 牵动另一个平台的更新判定；且 Linux 侧没有「自动替换 deb 再重启」的成熟路径（deb 需要 root，
+ * 应当由包管理器接管）。所以 Linux 下 `update:check/download/install` **直接返回不提供**，
+ * 一个网络请求都不发（连 `api.github.com` 都不碰）—— 这是硬约束，不是「失败后回退」。
+ * 渲染层据 `api.platform` 隐藏更新入口（见 src/lib/updateStore.ts / TitleBar / AboutView）。
+ */
+const IN_APP_UPDATE_UNAVAILABLE = process.platform === 'linux'
+
+/** 不提供应用内更新时统一的返回形状（与 UpdateCheckResult 对齐，`hasUpdate` 恒 false） */
+function updateUnavailableResult(currentVersion: string): UpdateCheckResult {
+  return {
+    ok: false,
+    hasUpdate: false,
+    currentVersion,
+    latestVersion: '',
+    releaseUrl: RELEASES_PAGE,
+    notes: '',
+    asset: null,
+    message: '本平台不提供应用内更新，请到发布页手动下载新版本',
+  }
+}
+
 export function registerUpdateHandlers(deps?: { getSettingValue?: (key: string) => unknown }): void {
   if (deps?.getSettingValue) getSettingValue = deps.getSettingValue
   runInstallerStartupCleanup()
   ipcMain.handle('update:check', async (): Promise<UpdateCheckResult> => {
     const currentVersion = app.getVersion()
+    // 不发请求：见 IN_APP_UPDATE_UNAVAILABLE 的说明
+    if (IN_APP_UPDATE_UNAVAILABLE) return updateUnavailableResult(currentVersion)
     try {
       const res = await net.fetch(API_LATEST, {
         headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Knowbase-App' }
@@ -362,6 +390,7 @@ let activeDownloadAbort: AbortController | null = null
 let lastDownloadDest = ''
 
 ipcMain.handle('update:download', async (_e, url: string, name: string, expectedSize?: number) => {
+    if (IN_APP_UPDATE_UNAVAILABLE) return { success: false, message: '本平台不提供应用内更新，请到发布页手动下载' }
     if (downloading) return { success: false, message: '已有下载任务进行中' }
     try {
       const parsed = new URL(url)
@@ -472,11 +501,17 @@ ipcMain.handle('update:download', async (_e, url: string, name: string, expected
   })
 
   ipcMain.handle('update:install', async (_e, filePath: string) => {
+    // Linux：不提供应用内更新（见 IN_APP_UPDATE_UNAVAILABLE）—— 直接拒绝，也不碰 shell.openPath
+    if (IN_APP_UPDATE_UNAVAILABLE) return { success: false, message: '本平台不提供应用内更新，请到发布页手动下载' }
     // 仅允许运行系统"下载"目录内的安装包
     try {
       const downloads = resolve(app.getPath('downloads'))
       const resolved = resolve(filePath)
-      if (!resolved.startsWith(downloads.endsWith('\\') ? downloads : downloads + '\\')) {
+      // ★ 2026-10-19 修：原先用 `downloads + '\\'` 拼前缀，在 POSIX 上必然不匹配
+      //   （目录分隔符是 '/'），于是 Linux / macOS 下**任何**安装包都回「路径不受信任」。
+      //   改用 path.relative 判定「是否落在 downloads 之内」，平台无关。
+      const rel = relative(downloads, resolved)
+      if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
         return { success: false, message: '路径不受信任' }
       }
       if (!existsSync(resolved)) return { success: false, message: '安装包不存在' }

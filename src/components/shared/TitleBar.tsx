@@ -12,6 +12,7 @@ import {
 import { MarkdownPreview } from './MarkdownPreview'
 import { openExternal, edgeResizeStart, edgeResizeEnd } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
+import { IN_APP_UPDATE_SUPPORTED } from '../../lib/platform'
 
 function showToastSafe(message: string): void {
   showToast({ type: 'info', message })
@@ -58,7 +59,8 @@ export function TitleBar() {
     window.api?.isAlwaysOnTop()?.then(setIsPinned)
     window.api?.onMaximizeChange?.((v: boolean) => setIsMaximized(v))
     // 启动静默检查:store 内部幂等 + 6s 延迟 + 失败重试 3 次后静默
-    updateStartupCheck()
+    // Linux 不提供应用内更新(决策 #6):连检查都不发起,避免标题栏出现永远失败的状态
+    if (IN_APP_UPDATE_SUPPORTED) updateStartupCheck()
   }, [])
 
   // 下载完成提示(状态中枢收尾时在标题栏提醒一次)
@@ -82,9 +84,11 @@ export function TitleBar() {
   }, [panelOpen])
 
   // 入口可见:有新版/下载中/暂停/已下载,或下载失败(检查失败不展示,避免网络抖动打扰)
-  const showEntry =
+  // Linux 恒不可见:不提供应用内更新(决策 #6),入口改由设置页给「Releases 手动下载」
+  const showEntry = IN_APP_UPDATE_SUPPORTED && (
     upd.phase === 'available' || upd.phase === 'downloading' || upd.phase === 'paused' ||
     upd.phase === 'downloaded' || (upd.phase === 'error' && !!upd.check)
+  )
 
   const handleEntryClick = () => {
     // 已下载:点击直接运行安装(快速路径);其余状态展开面板

@@ -4,11 +4,111 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：50
+ * 版本数：51
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.9.2",
+    "date": "2026-10-19",
+    "summary": "本版一句话：Phrontis 第一次有 Linux 安装包 —— 一个 `.deb`，只保 X11 / XWayland（原生 Wayland 不做）。同时补掉一类「看着像丢数据」的体验：从其他系统带过来的密码 / API Key 在本机解不开时，会明确写「无法解密」，而不是给你一片空密码。",
+    "groups": [
+      {
+        "title": "Linux 版（deb，自 3.9.2 起）",
+        "kind": "feature",
+        "items": [
+          {
+            "lead": "安装",
+            "rest": "下载 `Phrontis-<版本>-amd64.deb` 后 `sudo apt install ./Phrontis-<版本>-amd64.deb`（或双击交给软件中心）。应用数据仍在仓库文件夹里，重装 / 换机都不动",
+            "sub": []
+          },
+          {
+            "lead": "只支持 X11 / XWayland",
+            "rest": "原生 Wayland 下窗口定位（贴顶停靠 / 边缘拖拽恢复）与全局快捷键不可用，所以菜单 / 桌面图标启动时固定走 XWayland（Wayland 会话里由系统自带 XWayland 提供，无需另装）。从终端直接敲 `phrontis` 的话请自行加 `--ozone-platform=x11` 保持一致",
+            "sub": []
+          },
+          {
+            "lead": "关闭窗口 = 退出",
+            "rest": "探测不到状态栏宿主（托盘图标显示不出来）时，关窗就是真退出，不会把窗口藏起来让你找不回来；有托盘时行为与 Windows 版一致",
+            "sub": []
+          },
+          {
+            "lead": "全局快捷键失败会说",
+            "rest": "密码填充（`Ctrl+Alt+P`）、日程小窗（`Ctrl+Alt+S` / `↑` / `↓`）被其他程序占用时，右下角给一条提示，而不是「按了没反应」",
+            "sub": []
+          },
+          {
+            "lead": "应用内更新关闭",
+            "rest": "Linux 版不检查、不下载、不发起任何更新网络请求。新版本请到 Releases 页手动下载覆盖安装（设置 → 关于 里也有「打开发布页」）",
+            "sub": []
+          },
+          {
+            "lead": "启动自检",
+            "rest": "文件监听配额过低（`fs.inotify.max_user_watches`）、回收站目录不可写时，启动后提示一次并说明怎么修",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "修复",
+        "kind": "fix",
+        "items": [
+          {
+            "lead": "跨系统密文不再静默变空",
+            "rest": "密码本条目与 AI 账户的 Key 若由别的系统（Windows / macOS）的本机钥匙串加密，本机解不开 —— 现在标「无法解密」并给一条说明，而不是显示成空密码或「未配置 Key」；原条目其余字段照常保留",
+            "sub": []
+          },
+          {
+            "lead": "Linux 上启动的密文假故障",
+            "rest": "此前自检把「密文头必须是 v10」写死，而 Linux 系统钥匙串产出的是 v11，于是每次启动都报一条不存在的错误。现在按平台断言，并把实际加密后端打进启动日志",
+            "sub": []
+          },
+          {
+            "lead": "更新安装包的路径校验",
+            "rest": "非 Windows 上此前恒判「路径不受信任」（用反斜杠拼前缀），改为平台无关的目录包含判断",
+            "sub": []
+          },
+          {
+            "lead": "排序跨平台一致",
+            "rest": "AI 面（建议作用域卡的行序、工具清单）改用码点序，不再随机器语言变；人看的列表仍按中文拼音序",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "打包按平台",
+            "rest": "`npm run pack` 依宿主平台选目标（Windows → nsis / Linux → deb），可用 `--win` / `--linux` 显式指定；交叉打包直接中止（electronDist 与 node-pty 的二进制都绑平台，产物装上也起不来）",
+            "sub": []
+          },
+          {
+            "lead": "打包前拦下两种「会静默产出坏包」的姿势",
+            "rest": "交叉打包；以及 `node_modules` 是符号链接时（worktree 的省盘做法）—— 后者会让 electron-builder 的依赖收集器漏掉一大批传递依赖，包能打出来、装上一启动就 `Cannot find module`",
+            "sub": []
+          },
+          {
+            "lead": "发布按平台",
+            "rest": "`scripts/publish-release.py --platform linux` 走独立 tag `v<版本>-linux`，校验 `.deb` + `latest-linux.yml`（deb 没有 `.blockmap`），并核对包内 `control` 的版本号；缺 `gh` 时给安装指引而不是抛栈",
+            "sub": []
+          },
+          {
+            "lead": "deb 的 postinst 换成自带脚本",
+            "rest": "AppArmor profile 装不上时（老版本不支持 `abi/4.0` 等）回退把 `chrome-sandbox` 设为 4755，保证装完能启动",
+            "sub": []
+          },
+          {
+            "lead": "契约",
+            "rest": "`verify-linux-port.mjs` 增 §I（打包 / 发布 / 应用内更新关闭）；`verify-pack-dir.mjs` 增目标平台解析用例",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.9.0",
     "date": "2026-10-16",

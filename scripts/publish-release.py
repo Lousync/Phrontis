@@ -3,14 +3,24 @@
 """
 应用安装包发布脚本（三件套完整性门）—— v2.13.0「先传 exe、后补 latest.yml/blockmap」事故的发布侧防线。
 
-门 1：安装包 .exe（`Phrontis-<ver>-setup.exe`）、同名 .exe.blockmap、latest.yml 三件套必须同时存在于产物目录
-门 2：latest.yml 的 sha512(base64)/size 与本地 exe 实测一致
-门 3：latest.yml 顶层 version 与 --version 一致
+门 1：安装包 + 同名 .blockmap（仅 Windows）+ 更新元数据（latest.yml / latest-linux.yml）必须同时存在
+门 2：更新元数据的 sha512(base64)/size 与本地安装包实测一致
+门 3：更新元数据顶层 version 与 --version 一致
 通过后 gh release 一次性原子上传三件套，并回读远端资产列表校验齐全。
+
+---- 平台分叉（2026-10-19 · Linux 平台化阶段 2，已拍板决策 #6）----
+Windows 与 Linux 用**独立 tag**（Windows `v<ver>` / Linux `v<ver>-linux`），原因：
+  · 两边的「最新版本」语义不同（Linux 自 3.9.2 起才有安装包，Windows 更早）；
+  · 应用内自动更新只跑 Windows（Linux 版已关掉，见 electron/lib/updateService.ts），
+    若共用 tag，Linux 的 latest-linux.yml 与 Windows 的 latest.yml 会挤在同一 Release 里，
+    任何一个平台的产物重传都会牵动另一个平台的更新判定。
+`--platform` 缺省按**产物目录里实际存在的文件**判定（有 .deb → linux，有 -setup.exe → windows），
+所以老用法 `python scripts/publish-release.py --version 3.4.1` 行为不变。
 
 用法：
   python scripts/publish-release.py --version 2.13.1
   python scripts/publish-release.py --version 2.13.1 --dir packs/3.4.1 --notes-file release-notes.md --draft
+  python scripts/publish-release.py --version 3.9.2 --platform linux
 
 产物目录（--dir 缺省）：自动取 packs/<version> 或 packs/<version>-N 中后缀最大者
 （打包规范见仓库根 AGENTS.md「工作流」：npm run pack 输出到 packs/<版本号>[-N]）。
@@ -63,6 +73,18 @@ def run(cmd, **kw):
     return r.stdout
 
 
+def require_gh():
+    """gh 缺失时给明确指引，而不是一串 FileNotFoundError 栈。
+
+    这台开发机（以及任何刚拉起来的 Linux 环境）默认没装 gh —— 2026-10-19 实到：
+    前面几道门全过，最后一步才崩在 subprocess 上，栈里看不出「只是没装工具」。
+    """
+    from shutil import which
+    if which('gh') is None:
+        sys.exit('!! 未找到 gh（GitHub CLI）—— 发布依赖它上传 Release。\n'
+                 '   安装：sudo apt install gh（或见 https://github.com/cli/cli#installation），然后 gh auth login')
+
+
 def sha512_b64(path):
     h = hashlib.sha512()
     with open(path, 'rb') as f:
@@ -72,7 +94,7 @@ def sha512_b64(path):
 
 
 def parse_latest_yml(path):
-    """最小化解析 electron-builder latest.yml(顶层标量 + files 列表),不引 PyYAML 依赖。"""
+    """最小化解析 electron-builder latest.yml / latest-linux.yml(顶层标量 + files 列表),不引 PyYAML 依赖。"""
     text = open(path, 'r', encoding='utf-8').read()
     top = {}
     files = []
@@ -98,25 +120,33 @@ def parse_latest_yml(path):
     return top, files
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--version', required=True, help='要发布的版本号(不带 v 前缀)')
-    ap.add_argument('--dir', default=None, help='electron-builder 产物目录（缺省自动取 packs/<version> 或 packs/<version>-N 中后缀最大者）')
-    ap.add_argument('--notes-file', default=None, help='Release notes Markdown 文件')
-    ap.add_argument('--draft', action='store_true', help='创建 draft Release')
-    ap.add_argument('--prerelease', action='store_true', help='标记为预发布')
-    args = ap.parse_args()
+# ---------------------------------------------------------------- 平台分叉
 
-    ver = args.version.lstrip('vV')
-    tag = 'v%s' % ver
-    d = args.dir or find_latest_pack_dir(ver)
-    if not d:
-        sys.exit('!! 未找到产物目录 packs/%s*（先跑 npm run pack，或用 --dir 指定）' % ver)
-    if not os.path.isdir(d):
-        sys.exit('!! 产物目录不存在: %s（先跑 npm run pack）' % d)
+def detect_platform(d):
+    """按产物目录里实际存在的文件判定平台（老用法不带 --platform 时用）。
 
-    # ---- 门 1:三件套必须同时存在 ----
-    print('== 门 1:三件套存在性 ==')
+    先看扩展名而不是先看更新元数据：`Phrontis-3.9.2-amd64.deb` 与 `Phrontis-3.9.2-setup.exe`
+    的扩展名互斥，最不容易误判；两者都在（同一版本号打了两边）则要求显式指定。
+    """
+    names = [n.lower() for n in os.listdir(d)] if os.path.isdir(d) else []
+    has_deb = any(n.endswith('.deb') for n in names)
+    has_exe = any(n.endswith('-setup.exe') for n in names)
+    if has_deb and has_exe:
+        sys.exit('!! 产物目录里同时有 .deb 与 -setup.exe —— 请用 --platform win|linux 明确要发布哪个平台')
+    if has_deb:
+        return 'linux'
+    if has_exe:
+        return 'win'
+    sys.exit('!! 产物目录里既没有 .deb 也没有 *-setup.exe —— 先跑 npm run pack，或用 --dir 指定目录')
+
+
+def platform_tag(ver, platform):
+    """独立 tag（决策 #6）：Windows = v<ver>，Linux = v<ver>-linux。"""
+    return ('v%s-linux' % ver) if platform == 'linux' else ('v%s' % ver)
+
+
+def collect_win_assets(d, ver):
+    """Windows 三件套（原有逻辑原样保留，含 v2.13.0 事故的命名教训）。"""
     names = os.listdir(d)
     # 产物名形如 "Phrontis-<ver>-setup.exe"（由 package.json 的 build.artifactName 决定）。
     # 必须按「-<ver>-setup.exe」精确后缀匹配：`ver in n` 这类子串匹配在
@@ -132,35 +162,121 @@ def main():
     missing = [n for n in (exe_name, blockmap_name, yml_name) if not os.path.isfile(os.path.join(d, n))]
     if missing:
         sys.exit('!! 三件套不完整,缺少: %s\n   禁止发布 —— v2.13.0 事故根因即 exe 先传、元数据后补,导致客户端 integrity check failed' % ', '.join(missing))
-    exe_p, blockmap_p, yml_p = (os.path.join(d, n) for n in (exe_name, blockmap_name, yml_name))
-    print('  三件套齐全: %s / %s / %s' % (exe_name, blockmap_name, yml_name))
+    return {
+        'pkg_name': exe_name,
+        'assets': [os.path.join(d, n) for n in (exe_name, blockmap_name, yml_name)],
+        'meta_path': os.path.join(d, yml_name),
+        'pkg_path': os.path.join(d, exe_name),
+        'meta_name': yml_name,
+    }
 
-    # ---- 门 2/3:latest.yml 与本地 exe 实测一致 ----
-    print('== 门 2/3:latest.yml 校验 ==')
-    top, files = parse_latest_yml(yml_p)
+
+def collect_linux_assets(d, ver):
+    """Linux 两件套：`Phrontis-<ver>-<arch>.deb` + `latest-linux.yml`。
+
+    与 Windows 的差别（都是 electron-builder 的既有行为，不是本项目的取舍）：
+      · deb 目标**不产 .blockmap**（那是 NSIS 的增量更新机制），所以没有「三件套」；
+      · 更新元数据叫 `latest-linux.yml`（按平台分名，互不覆盖）。
+    """
+    names = os.listdir(d)
+    # artifactName = "Phrontis-${version}-${arch}.${ext}"；deb 的 arch 走 Linux 口径（x64 → amd64）
+    deb_name = next((n for n in names if re.match(r'^Phrontis-%s-[a-z0-9]+\.deb$' % re.escape(ver), n, re.I)), None)
+    if not deb_name:
+        sys.exit('!! 未找到 %s 下的 Phrontis-%s-<arch>.deb(产物命名或版本不匹配)' % (d, ver))
+    yml_name = 'latest-linux.yml'
+    missing = [n for n in (deb_name, yml_name) if not os.path.isfile(os.path.join(d, n))]
+    if missing:
+        sys.exit('!! Linux 产物不完整,缺少: %s\n   禁止发布 —— 缺 latest-linux.yml 时客户端无法判断版本，'
+                 '缺 deb 时发布页是空壳' % ', '.join(missing))
+    return {
+        'pkg_name': deb_name,
+        'assets': [os.path.join(d, n) for n in (deb_name, yml_name)],
+        'meta_path': os.path.join(d, yml_name),
+        'pkg_path': os.path.join(d, deb_name),
+        'meta_name': yml_name,
+    }
+
+
+def check_deb_control(deb_path, ver):
+    """门 0（仅 Linux，尽力而为）：deb 的 control Version 必须与 --version 一致。
+
+    防的是「版本号抬了但忘了重打包」：那时 latest-linux.yml 与 deb 自洽（同一个旧包），
+    前三道门全绿，但发出去的包自称旧版本 —— 客户端会一直提示有新版本、装了却还是旧的。
+    dpkg-deb 不在（非 Debian 系机器）时跳过，不阻断。
+    """
+    try:
+        r = subprocess.run(['dpkg-deb', '-f', deb_path, 'Version'], capture_output=True, text=True)
+    except FileNotFoundError:
+        print('  ! 本机没有 dpkg-deb，跳过 control Version 校验')
+        return
+    if r.returncode != 0:
+        print('  ! dpkg-deb 读取失败，跳过 control Version 校验: %s' % (r.stderr or '').strip()[:200])
+        return
+    got = (r.stdout or '').strip()
+    if got != ver:
+        sys.exit('!! deb 的 control Version=%r 与 --version=%r 不一致\n   → 版本号抬了但包是旧的，重新 npm run pack' % (got, ver))
+    print('  deb control Version 一致: %s' % ver)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--version', required=True, help='要发布的版本号(不带 v 前缀)')
+    ap.add_argument('--dir', default=None, help='electron-builder 产物目录（缺省自动取 packs/<version> 或 packs/<version>-N 中后缀最大者）')
+    ap.add_argument('--notes-file', default=None, help='Release notes Markdown 文件')
+    ap.add_argument('--platform', default='auto', choices=['auto', 'win', 'linux'],
+                    help='发布哪个平台（缺省 auto = 按产物目录里的文件判定）。Linux 用独立 tag v<ver>-linux')
+    ap.add_argument('--draft', action='store_true', help='创建 draft Release')
+    ap.add_argument('--prerelease', action='store_true', help='标记为预发布')
+    args = ap.parse_args()
+
+    ver = args.version.lstrip('vV')
+    d = args.dir or find_latest_pack_dir(ver)
+    if not d:
+        sys.exit('!! 未找到产物目录 packs/%s*（先跑 npm run pack，或用 --dir 指定）' % ver)
+    if not os.path.isdir(d):
+        sys.exit('!! 产物目录不存在: %s（先跑 npm run pack）' % d)
+
+    platform = detect_platform(d) if args.platform == 'auto' else args.platform
+    tag = platform_tag(ver, platform)
+    print('== 平台 %s → tag %s（产物目录 %s）==' % (platform, tag, d))
+
+    # ---- 门 1:产物齐全 ----
+    print('== 门 1:产物存在性 ==')
+    if platform == 'linux':
+        bundle = collect_linux_assets(d, ver)
+        check_deb_control(bundle['pkg_path'], ver)
+    else:
+        bundle = collect_win_assets(d, ver)
+    print('  产物齐全: %s' % ' / '.join(os.path.basename(p) for p in bundle['assets']))
+
+    # ---- 门 2/3:更新元数据与本地安装包实测一致 ----
+    print('== 门 2/3:%s 校验 ==' % bundle['meta_name'])
+    top, files = parse_latest_yml(bundle['meta_path'])
     yml_ver = top.get('version', '')
     if yml_ver != ver:
-        sys.exit('!! latest.yml version=%r 与 --version=%r 不一致' % (yml_ver, ver))
+        sys.exit('!! %s version=%r 与 --version=%r 不一致' % (bundle['meta_name'], yml_ver, ver))
     print('  version 一致: %s' % ver)
     main_entry = files[0] if files else {}
     yml_sha = main_entry.get('sha512') or top.get('sha512') or ''
     yml_size = int(main_entry.get('size') or 0)
-    actual_sha = sha512_b64(exe_p)
-    actual_size = os.path.getsize(exe_p)
+    actual_sha = sha512_b64(bundle['pkg_path'])
+    actual_size = os.path.getsize(bundle['pkg_path'])
     if not yml_sha:
-        sys.exit('!! latest.yml 未解析出 sha512,拒绝发布(文件内容异常)')
+        sys.exit('!! %s 未解析出 sha512,拒绝发布(文件内容异常)' % bundle['meta_name'])
     if yml_sha != actual_sha:
-        sys.exit('!! sha512 不一致\n   latest.yml : %s\n   本地 exe  : %s\n   → 重新打包使元数据与产物匹配' % (yml_sha, actual_sha))
+        sys.exit('!! sha512 不一致\n   %s : %s\n   本地安装包  : %s\n   → 重新打包使元数据与产物匹配'
+                 % (bundle['meta_name'], yml_sha, actual_sha))
     if yml_size and yml_size != actual_size:
-        sys.exit('!! size 不一致: latest.yml=%d 实测=%d' % (yml_size, actual_size))
+        sys.exit('!! size 不一致: %s=%d 实测=%d' % (bundle['meta_name'], yml_size, actual_size))
     yml_blockmap_ref = any(str(f.get('url', '')).endswith('.blockmap') for f in files)
-    if not yml_blockmap_ref:
+    if platform == 'win' and not yml_blockmap_ref:
         print('  ! latest.yml files 未列出 .blockmap(旧版 electron-builder 常见),仍将随三件套上传')
-    print('  sha512/size 与本地 exe 实测一致(%d bytes)' % actual_size)
+    print('  sha512/size 与本地安装包实测一致(%d bytes)' % actual_size)
 
-    # ---- 上传:一次 gh 调用带上全部三件套(原子性由 gh 单命令上传保证) ----
+    # ---- 上传:一次 gh 调用带上全部资产(原子性由 gh 单命令上传保证) ----
     print('== 上传 %s ==' % tag)
-    assets = [exe_p, blockmap_p, yml_p]
+    require_gh()
+    assets = bundle['assets']
     exists = subprocess.run(['gh', 'release', 'view', tag, '--repo', REPO],
                             capture_output=True, text=True).returncode == 0
     if exists:
@@ -171,8 +287,10 @@ def main():
                '--title', tag, '--repo', REPO]
         if args.notes_file:
             cmd += ['--notes-file', args.notes_file]
+        elif platform == 'linux':
+            cmd += ['--notes', 'Phrontis %s（Linux · deb，自 3.9.2 起）。更新内容见 CHANGELOG。' % ver]
         else:
-            cmd += ['--notes', 'Knowbase %s。更新内容见 CHANGELOG。' % ver]
+            cmd += ['--notes', 'Phrontis %s。更新内容见 CHANGELOG。' % ver]
         if args.draft:
             cmd += ['--draft']
         if args.prerelease:
@@ -184,7 +302,8 @@ def main():
     info = json.loads(run(['gh', 'release', 'view', tag, '--json', 'assets,isDraft', '--repo', REPO]))
     remote = {a['name'].replace(' ', '.'): a['size'] for a in info.get('assets', [])}
     ok = True
-    for n, p in ((exe_name, exe_p), (blockmap_name, blockmap_p), (yml_name, yml_p)):
+    for p in assets:
+        n = os.path.basename(p)
         rn = n.replace(' ', '.')
         have = rn in remote
         size_ok = have and remote[rn] == os.path.getsize(p)
@@ -194,7 +313,7 @@ def main():
         print('  ! 这是 draft Release,记得发布正式版后客户端才能收到更新')
     if not ok:
         sys.exit(1)
-    print('[OK] %s 三件套已发布并验证齐全(%s)' % (tag, REPO))
+    print('[OK] %s 产物已发布并验证齐全(%s)' % (tag, REPO))
 
 
 if __name__ == '__main__':

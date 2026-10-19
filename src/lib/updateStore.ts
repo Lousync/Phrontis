@@ -3,6 +3,7 @@ import {
   checkForUpdate, downloadUpdate, installUpdate, onUpdateDownloadProgress, onUpdateDownloadStage,
   updatePauseDownload, updateCancelDownload,
 } from './ipc'
+import { IN_APP_UPDATE_SUPPORTED } from './platform'
 
 /**
  * 全局更新状态中枢 — 标题栏(TitleBar)与设置页(AdvancedView)的唯一数据源。
@@ -161,6 +162,8 @@ function bindProgressOnce(): void {
 export async function updateCheck(): Promise<void> {
   bindProgressOnce()
   if (!window.api) return
+  // 本平台不提供应用内更新(见 src/lib/platform.ts):不改状态、不发 IPC(主进程侧也会硬拒)
+  if (!IN_APP_UPDATE_SUPPORTED) return
   set({ phase: 'checking', error: '', reason: 'unknown' })
   try {
     const r = await checkForUpdate()
@@ -239,11 +242,15 @@ export async function updateInstall(): Promise<void> {
  * 启动静默检查(仅标题栏调用):延迟 6s 不与启动初始化抢网络/IO,
  * 失败按 10s 间隔重试 3 次后彻底静默(不进 error 态,避免网络抖动打扰用户)。
  * 全局只执行一次,重复调用是幂等 no-op。
+ *
+ * ★ Linux 直接不跑(2026-10-19 · 决策 #6):主进程的 update:check 在 Linux 上直接返回不提供、
+ *   不发任何网络请求;渲染层连「检查」这一步都不发起,避免标题栏出现一个永远失败的状态。
  */
 let startupStarted = false
 export function updateStartupCheck(): void {
   if (startupStarted) return
   startupStarted = true
+  if (!IN_APP_UPDATE_SUPPORTED) return
   let attempt = 0
   const run = async (): Promise<void> => {
     bindProgressOnce()

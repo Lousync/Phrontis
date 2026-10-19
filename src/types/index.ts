@@ -2158,6 +2158,12 @@ export interface SecretPlatformInfo {
 }
 
 export interface ElectronAPI {
+  /**
+   * 宿主平台（'win32' / 'linux' / 'darwin' …，来自主进程 process.platform）。
+   * 渲染层据此隐藏平台不支持的能力 —— 目前只有一处：Linux 不提供应用内更新（决策 #6）。
+   * 缺省（旧 preload）时按非 linux 处理，见 src/lib/platform.ts 的读法。
+   */
+  platform: string
   getPathForFile: (file: File) => string
   pasteFromClipboard: () => Promise<{ ok: boolean }>
   copyImage: (src: { path?: string; dataUrl?: string }) => Promise<boolean>

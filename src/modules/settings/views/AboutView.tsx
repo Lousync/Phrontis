@@ -6,6 +6,7 @@ import {
 import { useSettings } from '../../../lib/SettingsContext'
 import { getAppVersion, listReleaseNotes, openExternal, workspaceImportWelcomeDoc } from '../../../lib/ipc'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
+import { IN_APP_UPDATE_SUPPORTED } from '../../../lib/platform'
 import {
   useUpdateStore, updateCheck, updateDownload, updatePause, updateCancel, updateInstall,
   updateFailKind, updateFailMessage, updateStageText,
@@ -24,6 +25,9 @@ const MIRROR_PRESETS: ReadonlyArray<readonly [string, string]> = [
   ['gh.dpik.top', 'https://gh.dpik.top'],
   ['gh-proxy.com', 'https://gh-proxy.com'],
 ]
+
+/** 发布页（Linux 版唯一的更新路径：deb 由包管理器 / 手动下载，不提供应用内更新） */
+const RELEASES_URL = 'https://github.com/Lousync/Phrontis/releases'
 
 /** 设置 → 关于：版本 / 更新（下载镜像） / 新手引导 */
 export function AboutView() {
@@ -78,15 +82,33 @@ export function AboutView() {
         <h3 className="text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wide mb-3">关于与更新</h3>
         <div className="flex items-center gap-3 mb-3">
           <span className="text-[13px] text-[var(--text-primary)]">当前版本 v{appVersion || '…'}</span>
-          <button
-            onClick={() => void updateCheck()}
-            disabled={upd.phase === 'checking' || upd.phase === 'downloading'}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] text-[var(--text-primary)] border border-[var(--border-color)] rounded hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {upd.phase === 'checking' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-            {upd.phase === 'checking' ? '检查中…' : '检查更新'}
-          </button>
+          {IN_APP_UPDATE_SUPPORTED ? (
+            <button
+              onClick={() => void updateCheck()}
+              disabled={upd.phase === 'checking' || upd.phase === 'downloading'}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] text-[var(--text-primary)] border border-[var(--border-color)] rounded hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {upd.phase === 'checking' ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {upd.phase === 'checking' ? '检查中…' : '检查更新'}
+            </button>
+          ) : (
+            <button
+              onClick={() => { void openExternal(RELEASES_URL) }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] text-[var(--text-primary)] border border-[var(--border-color)] rounded hover:bg-[var(--bg-hover)] transition-colors"
+            >
+              <ExternalLink size={12} />打开发布页
+            </button>
+          )}
         </div>
+
+        {/* Linux 不提供应用内更新（决策 #6）：deb 交给包管理器 / 手动下载覆盖安装。
+            主进程侧 update:check/download/install 也是硬拒（不发网络请求），这里只是把「怎么更新」说清楚。 */}
+        {!IN_APP_UPDATE_SUPPORTED && (
+          <p className="mb-4 max-w-md text-[11.5px] leading-relaxed text-[var(--text-muted)]">
+            本平台不提供应用内自动更新：新版本以 <span className="font-mono">.deb</span> 发布在 Releases 页，
+            下载后覆盖安装即可（应用数据不会动）。版本号与更新内容见「更新说明」。
+          </p>
+        )}
 
         <div className="mb-4 max-w-md" data-setting-anchor="advanced.mirror">
           <label className="block text-[12px] text-[var(--text-secondary)] mb-1">下载镜像(GitHub 加速代理)</label>
@@ -99,7 +121,7 @@ export function AboutView() {
             className="w-full px-2.5 py-1.5 text-[12px] font-mono bg-[var(--input-bg)] border border-[var(--border-color)] rounded outline-none focus:border-[var(--accent)] text-[var(--text-primary)]"
           />
           <p className="text-[11px] text-[var(--text-muted)] mt-1 leading-relaxed">
-            镜像仅用于加速下载，失效自动回退直连。常用:{' '}
+            {IN_APP_UPDATE_SUPPORTED ? '镜像仅用于加速下载，失效自动回退直连。' : '（仅 Windows 版的应用内更新使用；本平台从发布页手动下载，镜像对它无作用。）'}常用:{' '}
             {MIRROR_PRESETS.map(([name, url], i) => (
               <span key={url}>
                 <button onClick={() => update('updateMirror', url)} className="text-[var(--accent)] hover:underline font-mono" title={`使用 ${url}`}>

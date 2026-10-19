@@ -33,6 +33,13 @@ function wireDataChanged() {
 }
 
 const api = {
+  /**
+   * 宿主平台（2026-10-19 · Linux 平台化阶段 2）。渲染层据此隐藏平台不支持的能力 ——
+   * 目前只有一处：Linux 不提供应用内更新（决策 #6，主进程侧也已硬拒，见 electron/lib/updateService.ts）。
+   * 用 process.platform 而不是 navigator.platform：后者在 Electron 里给的是渲染进程视角的
+   * 粗粒度值（Linux 上也可能报 "Linux x86_64"，且会随 UA 伪造漂移），主进程口径才是判据本身。
+   */
+  platform: process.platform,
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   // 编辑器文件树右键「粘贴」：请主进程对本窗口补发一次真实 paste 命令（渲染层先交焦点给文件树）
   pasteFromClipboard: () => ipcRenderer.invoke('clipboard:paste'),

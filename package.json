@@ -1,8 +1,18 @@
 {
   "name": "knowbase",
-  "version": "3.9.0",
-  "description": "Phrontis — 本地 Windows 桌面知识管理工具（原 Knowbase Programmer Edition）",
+  "version": "3.9.2",
+  "description": "Phrontis — 本地优先的学习生活操作系统（知识库 / 日程 / 打卡 / AI 教学，数据 100% 本地）",
+  "author": {
+    "name": "Lousync",
+    "email": "19292274929@163.com"
+  },
+  "homepage": "https://github.com/Lousync/Phrontis",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Lousync/Phrontis.git"
+  },
   "main": "./out/main/index.js",
+  "desktopName": "phrontis.desktop",
   "scripts": {
     "predev": "node .AGENT/scripts/acl-integrity-guard/verify-integrity-labels.mjs --root node_modules",
     "dev": "node scripts/launch.js dev",
@@ -117,6 +127,29 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "Office;TextEditor;",
+      "synopsis": "本地优先的学习生活操作系统（知识库 / 日程 / 打卡 / AI 教学）",
+      "maintainer": "Lousync <19292274929@163.com>",
+      "executableName": "phrontis",
+      "artifactName": "Phrontis-${version}-${arch}.${ext}",
+      "syncDesktopName": true,
+      "executableArgs": [
+        "--ozone-platform=x11"
+      ]
+    },
+    "deb": {
+      "afterInstall": "build/linux-after-install.sh"
     },
     "npmRebuild": false,
     "electronDist": "node_modules/electron/dist"

@@ -378,6 +378,126 @@ if (!probeC.error && !probeZh.error && !probeEn.error) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// I. 阶段 2：打包与发布（v3.9.2 · deb + 独立 tag + Linux 关更新）
+//
+// 这一节防的是「打包配置看着对、产物不能用」与「Linux 悄悄去请求 Windows 的更新通道」：
+//   · author 缺 email → deb 直接打不出来（builder 抛 Please specify author 'email'）；
+//   · description 带「Windows」→ 写进 .desktop 的 Comment，Linux 用户第一眼就看到「外来户」；
+//   · afterInstall 里的未定义宏 → builder 打包期抛错（写花括号 shell 变量就会踩）；
+//   · Linux 不关更新 → 去比 Windows 的 releases/latest，或在 deb 安装位置上做原地替换。
+console.log('\n=== I. 阶段 2：打包与发布 ===')
+const srcAfterInstall = read('build/linux-after-install.sh')
+const srcPublish = read('scripts/publish-release.py')
+const srcPackMjs = read('scripts/pack.mjs')
+const srcUpdateService = read('electron/lib/updateService.ts')
+const codeUpdateService = stripComments(srcUpdateService)
+const srcPlatformLib = read('src/lib/platform.ts')
+const srcUpdateStore = read('src/lib/updateStore.ts')
+const srcTitleBar = read('src/components/shared/TitleBar.tsx')
+const srcAboutView = read('src/modules/settings/views/AboutView.tsx')
+const srcChangelog = read('CHANGELOG.md')
+const srcReleaseData = read('electron/lib/releaseNotes/data.ts')
+
+// I1 package.json：deb 必需的元数据 + 平台中性文案
+check('I1 顶层 author 带 email（deb 的 Maintainer 由此而来，缺了 builder 直接抛错）',
+  typeof pkg.author === 'object' && !!pkg.author?.email, JSON.stringify(pkg.author))
+check('I1 description 平台中性（会进 .desktop 的 Comment）',
+  typeof pkg.description === 'string' && pkg.description.length > 0 && !/Windows/i.test(pkg.description))
+check('I1 版本号＝发版线 3.9.2', pkg.version === '3.9.2', String(pkg.version))
+check('I1 build.linux 里目标只有 deb', Array.isArray(pkg.build?.linux?.target)
+  && pkg.build.linux.target.length === 1 && pkg.build.linux.target[0]?.target === 'deb',
+  JSON.stringify(pkg.build?.linux?.target))
+check('I1 build.linux 可执行名 / 图标 / 分类 / maintainer / 产物命名齐备',
+  pkg.build?.linux?.executableName === 'phrontis' && pkg.build?.linux?.icon === 'build/icon.png'
+  && pkg.build?.linux?.category === 'Office;TextEditor;' && !!pkg.build?.linux?.maintainer
+  && pkg.build?.linux?.artifactName === 'Phrontis-${version}-${arch}.${ext}')
+check('I1 desktopName + syncDesktopName 成对（GNOME 才能把窗口关联到 phrontis.desktop）',
+  pkg.desktopName === 'phrontis.desktop' && pkg.build?.linux?.syncDesktopName === true)
+check('I1 负向：Windows 侧配置一行未动（win / nsis / extraResources / asarUnpack / npmRebuild / electronDist）',
+  pkg.build?.win?.target?.[0]?.target === 'nsis' && pkg.build?.nsis?.oneClick === false
+  && Array.isArray(pkg.build?.extraResources) && pkg.build.extraResources.length === 5
+  && pkg.build?.asarUnpack?.[0] === '**/node_modules/@lydell/node-pty*/**'
+  && pkg.build?.npmRebuild === false && pkg.build?.electronDist === 'node_modules/electron/dist')
+check('I1 deb.afterInstall 指向真实存在的脚本文件',
+  pkg.build?.deb?.afterInstall === 'build/linux-after-install.sh' && existsSync(join(ROOT, pkg.build.deb.afterInstall)))
+
+// I2 postinst：默认模板行为 + AppArmor 装不上时回退 4755
+check('I2 postinst 有 AppArmor 干跑（parse 不过就跳过安装）', /apparmor_parser --skip-kernel-load --debug/.test(srcAfterInstall))
+check('I2 postinst 记录 profile 是否真装成（AA_INSTALLED）', /AA_INSTALLED=1/.test(srcAfterInstall))
+check('I2 postinst 兜底：profile 没装成且内核限制 userns → chmod 4755',
+  /chmod 4755 '\/opt\/\$\{sanitizedProductName\}\/chrome-sandbox'/.test(srcAfterInstall)
+  && /apparmor_restrict_unprivileged_userns/.test(srcAfterInstall))
+check('I2 postinst 保留默认模板的软链 / MIME / 桌面库刷新',
+  /update-alternatives --install/.test(srcAfterInstall) && /update-mime-database/.test(srcAfterInstall)
+  && /update-desktop-database/.test(srcAfterInstall))
+check('I2 ★ postinst 只用 builder 会替换的两个宏（多写一个未定义宏 = 打包直接抛错）', (() => {
+  const names = [...new Set([...srcAfterInstall.matchAll(/\$\{([a-zA-Z]+)\}/g)].map((m) => m[1]))].sort()
+  return names.length > 0 && names.every((n) => n === 'executable' || n === 'sanitizedProductName')
+})(), [...new Set([...srcAfterInstall.matchAll(/\$\{([a-zA-Z]+)\}/g)].map((m) => m[1]))].sort().join(','))
+
+// I3 pack.mjs：按平台选目标（用例在 verify-pack-dir.mjs，这里只钉接线与交叉打包守卫）
+check('I3 pack 走 resolveTargetFlag（不再硬编码 --win）',
+  /resolveTargetFlag\(process\.platform, argv\)/.test(srcPackMjs) && !/electron-builder --win/.test(stripComments(srcPackMjs)))
+check('I3 交叉打包默认中止（逃生门 KNOWBASE_ALLOW_CROSS_PACK）',
+  /isCrossPack\(process\.platform, flag\)/.test(srcPackMjs) && /KNOWBASE_ALLOW_CROSS_PACK/.test(srcPackMjs))
+check('I3 打包前拦下 symlink 的 node_modules（实测：会静默漏掉传递依赖，装上一启动即崩）',
+  // 断言必须是**调用点**的形状：函数定义那行本身就含 `nodeModulesIsSymlink(repoRoot)`，
+  // 只做 includes 的话「闸门被删掉」会被定义顶成绿的（变异测试抓出来的，同 §H 的 inotify 一条）。
+  /if \(nodeModulesIsSymlink\(repoRoot\) && process\.env\.KNOWBASE_ALLOW_SYMLINK_NODE_MODULES !== '1'\) \{/.test(stripComments(srcPackMjs))
+  && /export function nodeModulesIsSymlink\(repoRoot\)/.test(srcPackMjs))
+
+// I4 publish-release.py：独立 tag + Linux 两件套门 + Windows 逻辑保留
+check('I4 支持 --platform（auto / win / linux）', /--platform/.test(srcPublish) && /choices=\['auto', 'win', 'linux'\]/.test(srcPublish))
+check('I4 Linux tag 走 v<ver>-linux', /def platform_tag/.test(srcPublish) && /v%s-linux/.test(srcPublish))
+check('I4 Linux 门 1 校验 deb + latest-linux.yml（deb 没有 .blockmap）',
+  /'latest-linux\.yml'/.test(srcPublish) && /Phrontis-%s-\[a-z0-9\]\+\\\.deb/.test(srcPublish))
+check('I4 Linux 额外核对 deb control 的 Version（防「抬了版本号但没重打包」）', /dpkg-deb/.test(srcPublish) && /control Version/.test(srcPublish))
+check('I4 负向：Windows 分支仍要求 exe + .blockmap + latest.yml 三件套（逻辑未被平台化改坏）',
+  /blockmap_name = exe_name \+ '\.blockmap'/.test(srcPublish) && /yml_name = 'latest\.yml'/.test(srcPublish)
+  && /缺 latest-linux\.yml/.test(srcPublish))
+
+// I5 应用内更新：Linux 下直接返回、不发网络请求
+check('I5 updateService 有平台开关（IN_APP_UPDATE_UNAVAILABLE）',
+  /const IN_APP_UPDATE_UNAVAILABLE = process\.platform === 'linux'/.test(srcUpdateService))
+check('I5 update:check 的守卫在网络请求之前（Linux 一个请求都不发）', (() => {
+  const seg = codeUpdateService.slice(codeUpdateService.indexOf("ipcMain.handle('update:check'"))
+  const guard = seg.indexOf('if (IN_APP_UPDATE_UNAVAILABLE) return updateUnavailableResult(currentVersion)')
+  const fetchAt = seg.indexOf('net.fetch(API_LATEST')
+  return guard >= 0 && fetchAt > guard
+})())
+check('I5 update:download / update:install 同样硬拒',
+  /IN_APP_UPDATE_UNAVAILABLE\) return \{ success: false, message: '本平台不提供应用内更新/.test(codeUpdateService)
+  && (codeUpdateService.match(/IN_APP_UPDATE_UNAVAILABLE\) return \{ success: false/g) || []).length >= 2)
+check('I5 负向：不再用 `downloads + 反斜杠` 拼前缀（POSIX 上恒判「路径不受信任」的现成 bug）',
+  !/downloads\.endsWith\('\\\\'\)/.test(codeUpdateService) && !/downloads \+ '\\\\'/.test(codeUpdateService))
+check('I5 安装包路径判定改走相对路径（平台无关）', /relative\(downloads, resolved\)/.test(codeUpdateService))
+
+// I6 渲染层：平台暴露 + 更新入口隐藏 + 设置页改手动下载
+check('I6 preload 暴露 api.platform（进程平台直传）', /platform: process\.platform,/.test(srcPreload))
+check('I6 ElectronAPI 声明 platform 字段', /platform: string/.test(srcTypes))
+check('I6 平台判据唯一出处 src/lib/platform.ts',
+  /export const IN_APP_UPDATE_SUPPORTED = !IS_LINUX/.test(srcPlatformLib) && /export const IS_LINUX = APP_PLATFORM === 'linux'/.test(srcPlatformLib))
+check('I6 updateStore 两条路径都按平台提前返回（不发起检查 IPC）',
+  (srcUpdateStore.match(/if \(!IN_APP_UPDATE_SUPPORTED\) return/g) || []).length >= 2,
+  String((srcUpdateStore.match(/if \(!IN_APP_UPDATE_SUPPORTED\) return/g) || []).length))
+check('I6 标题栏更新入口在 Linux 恒不可见，且不发起启动检查',
+  /const showEntry = IN_APP_UPDATE_SUPPORTED && \(/.test(srcTitleBar) && /if \(IN_APP_UPDATE_SUPPORTED\) updateStartupCheck\(\)/.test(srcTitleBar))
+check('I6 设置页 Linux 给「打开发布页」而不是「检查更新」',
+  /IN_APP_UPDATE_SUPPORTED \? \(/.test(srcAboutView) && /RELEASES_URL/.test(srcAboutView) && /不提供应用内自动更新/.test(srcAboutView))
+check('I6 负向：设置页不得在 Linux 分支里仍然渲染检查更新按钮', (() => {
+  const i = srcAboutView.indexOf('不提供应用内自动更新')
+  const j = srcAboutView.indexOf("onClick={() => void updateCheck()}")
+  // updateCheck 的按钮必须在 IN_APP_UPDATE_SUPPORTED 三元的第一支里（即出现在说明文案之前）
+  return i > 0 && j > 0 && j < i
+})())
+
+// I7 CHANGELOG 与生成数据同步（生成器本身由 release-notes 契约验，这里只钉「别忘了重跑」）
+check('I7 CHANGELOG 有 v3.9.2 段且写明 Linux 自 3.9.2 起',
+  /## v3\.9\.2（2026-10-19）/.test(srcChangelog) && /Linux 版（deb，自 3\.9\.2 起）/.test(srcChangelog))
+check('I7 负向：data.ts 已重跑（含 3.9.2 条目，不是停在上一版）',
+  /"version": "3\.9\.2"/.test(srcReleaseData))
+
+// ─────────────────────────────────────────────────────────────
 const failed = checks.filter(c => !c.pass)
 for (const c of checks) console.log(`${c.pass ? '[OK]  ' : '[FAIL]'} ${c.name}${c.detail ? '  -> ' + c.detail : ''}`)
 console.log('\n========================================')
