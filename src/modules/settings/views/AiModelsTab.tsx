@@ -1347,7 +1347,7 @@ function SceneRow({ sc, providers, freeSet, onToggleFree, visionSpecs }: {
           onlySpecs={sc.visionOnly && visionSpecs.size > 0 ? visionSpecs : undefined}
         />
       </div>
-      {out && <span className={`shrink-0 text-[10.5px] ${out.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>{out}</span>}
+      {out && <span title={out} className={`shrink-0 max-w-[45%] truncate text-[10.5px] ${out.startsWith('✓') ? 'text-emerald-400' : 'text-red-400'}`}>{out}</span>}
       <button onClick={() => { void testModel() }} disabled={!cur || testing}
         title="用当前选中的模型发一次最小请求" aria-label={`测试模型 ${sc.label}`}
         className="kb-hoveronly shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded border border-[var(--border-color)] text-[10.5px] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors">

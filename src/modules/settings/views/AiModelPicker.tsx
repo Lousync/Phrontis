@@ -92,6 +92,7 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
   return (
     <div className="relative">
       <button ref={btnRef} onClick={() => { setOpen(v => !v); setQ('') }} aria-expanded={open}
+        title={cur ? `${cur.pname}${cur.acct ? ' · ' + cur.acct : ''} / ${cur.model}` : placeholder}
         className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-left text-[12px] hover:border-[var(--accent)]/50 transition-colors">
         <span className="min-w-0 flex-1 truncate">
           {cur
@@ -105,8 +106,11 @@ export function AiModelPicker({ value, onChange, providers, freeSet, onToggleFre
         <span className="shrink-0 text-[var(--text-muted)]">▾</span>
       </button>
 
-      <AnchoredLayer anchorRef={btnRef} open={open} onClose={() => setOpen(false)} matchWidth
-        className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg">
+      {/* 下拉宽度不跟触发器走（2026-10-19）：场景表的触发列只有约 300px，
+          matchWidth 会把搜索框和模型名一起压窄 ⇒ 长模型名被截断。
+          改成固定 400px、视口不足时由锚点层的光标纠偏夹回，align=start 仍与触发器左对齐。 */}
+      <AnchoredLayer anchorRef={btnRef} open={open} onClose={() => setOpen(false)}
+        className="w-[400px] max-w-[calc(100vw-16px)] rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg">
         <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-[var(--border-color)]">
           <Search size={12} className="text-[var(--text-muted)] shrink-0" />
           <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="搜索模型"
