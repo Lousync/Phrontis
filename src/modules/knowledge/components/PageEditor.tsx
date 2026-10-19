@@ -13,6 +13,7 @@ import { showToast } from '../../../lib/toast'
 import { uploadImageFile, isImageFile, imageMarkdown, IMAGE_OWNER } from '../../../lib/editorImage'
 import { FILE_LANG_OPTIONS, getFileTypeInfo } from '../../../lib/fileTypes'
 import { isEditingInput } from '../../../lib/shortcuts'
+import { resolveVaultRel } from '../../../lib/vaultLink'
 import { getGlobalActiveTab } from '../../../lib/activeTab'
 import { visibleKnowledgeTags } from '../../../lib/knowledgeTags'
 import { ConfirmDialog } from '../../../components/shared'
@@ -2122,12 +2123,19 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 resolveInternalLink(title)
               }}
               onLinkClick={href => {
-                // If it's a web URL, open in browser directly
+                // 外链 → 系统浏览器
                 if (/^https?:\/\//i.test(href)) { openExternal(href); return }
-                // Try to resolve as a knowledge base page by extracting the title from the path
+                // 纯锚点 → 同页滚动，不导航
+                if (href.trim().startsWith('#')) return
+                // ① 相对路径 → 相对**当前页所在目录**归一，按 path 精确命中（2026-10-19 修）
+                const rel = resolveVaultRel(page?.path ?? '', href)
+                if (rel) {
+                  const byPath = allPages.find(p => (p.path ?? '').replace(/\\/g, '/') === rel)
+                  if (byPath) { onNavigate(byPath.id); return }
+                }
+                // ② 退回按标题匹配（跨笔记「标题链接」的既有语义，保持不变）
                 const basename = href.replace(/^.*[/\\]/, '')
                 const titleFromPath = basename.replace(/\.[^.]+$/, '')
-                // Collect all matches, prioritized by href exact match first
                 let matches = allPages.filter(p => p.title === href)
                 if (matches.length === 0) matches = allPages.filter(p => p.title === basename)
                 if (matches.length === 0) matches = allPages.filter(p => p.title === titleFromPath)
@@ -2136,7 +2144,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 } else if (matches.length > 1) {
                   setWikiPicker({ title: titleFromPath || basename, candidates: matches })
                 } else {
-                  openExternal(href)
+                  // ③ 都没命中：**不再交给 openExternal** —— 相对路径会被当外部文件并被安全拦截，
+                  //    用户只看到「点了没反应」。这里明确告诉他找不到。
+                  showToast({ type: 'info', message: '找不到这个链接指向的页面', detail: href })
                 }
               }}
             />
