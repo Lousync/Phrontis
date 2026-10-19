@@ -33,7 +33,6 @@ if (process.platform === 'linux') {
 import { join, basename, resolve, sep } from 'path'
 import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdirSync, statSync, readdirSync, appendFileSync } from 'fs'
 import { Readable } from 'stream'
-import { getAttachmentsDir } from '../lib/globalPaths'
 import { assertSecretBoxRoundTrip, registerSecretBoxHandlers, secretStorageBackend } from '../lib/secretBox'
 import { registerPomodoroBroadcast } from './pomodoroState'
 import { registerEntryHandlers } from '../database/repositories/entryRepo'
@@ -106,7 +105,7 @@ import { closeVaultWatcher } from '../lib/fsWatcher'
 import { pushAppNotice, registerAppNoticeHandlers } from '../lib/appNotice'
 import { checkXdgTrash, detectStatusNotifierHost, statusNotifierHostCached } from '../lib/linuxDesktop'
 import { registerVaultArchiveHandlers } from '../lib/vaultArchive'
-import { getCurrentVault, setCurrentVault } from '../lib/kbStore/vaultContext'
+import { getCurrentVault, setCurrentVault, getVaultAttachmentsRoot } from '../lib/kbStore/vaultContext'
 import { SETTINGS } from '../../src/lib/settings'
 
 // 附件自定义协议：attachment://{id}/ 与 attachment://{id}/?thumb=1
@@ -893,7 +892,7 @@ app.whenReady().then(async () => {
     }
   })
 
-  ipcMain.handle('app:getAttachmentsPath', () => getAttachmentsDir())
+  ipcMain.handle('app:getAttachmentsPath', () => getVaultAttachmentsRoot() ?? '')
   // 复制图片到系统剪贴板（path 或 dataUrl），供粘贴到其他程序
   // 剪贴板条件清空:仅当剪贴板内容仍为所复制的密码时才清空,不覆盖用户后续复制的内容
   ipcMain.handle('clipboard:clearIfEqual', (_e, text: string) => {

@@ -2523,6 +2523,7 @@ export interface ElectronAPI {
   getAttachmentsByOwner: (ownerType: string, ownerId: string) => Promise<AttachmentMeta[]>
   deleteAttachment: (id: string) => Promise<void>
   getAttachmentPath: (id: string) => Promise<string | null>
+  resolveAttachmentRel: (rel: string) => Promise<string | null>
   readAttachmentBase64: (id: string) => Promise<string | null>
   readAttachmentBase64ByFileName: (fileName: string) => Promise<string | null>
   cleanupOrphanAttachments: () => Promise<{ removed: number }>

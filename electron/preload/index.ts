@@ -562,6 +562,7 @@ const api = {
   getAttachmentsByOwner: (ownerType: string, ownerId: string) => ipcRenderer.invoke('attachment:getByOwner', ownerType, ownerId),
   deleteAttachment: (id: string) => ipcRenderer.invoke('attachment:delete', id),
   getAttachmentPath: (id: string) => ipcRenderer.invoke('attachment:getPath', id),
+  resolveAttachmentRel: (rel: string) => ipcRenderer.invoke('attachment:resolveRel', rel),
   readAttachmentBase64: (id: string) => ipcRenderer.invoke('attachment:readBase64', id),
   readAttachmentBase64ByFileName: (fileName: string) => ipcRenderer.invoke('attachment:readBase64ByFileName', fileName),
   cleanupOrphanAttachments: () => ipcRenderer.invoke('attachment:cleanupOrphans'),

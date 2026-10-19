@@ -6,7 +6,7 @@ import { looksLikeMindMap } from '../../../lib/mindmap'
 import { QuizMode } from '../../../components/shared/QuizMode'
 import { extractQuizzes } from '../../../components/shared/QuizParser'
 import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem } from '../../../types'
-import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, getAttachmentsPath, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent, workspaceOpenInSystem } from '../../../lib/ipc'
+import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, resolveAttachmentRel, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent, workspaceOpenInSystem } from '../../../lib/ipc'
 import { splitFrontmatter, joinFrontmatter, ensureFrontmatterId, bumpFrontmatterUpdated } from '../../../lib/frontmatter'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
@@ -680,12 +680,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   useEffect(() => { isPdfFileRef.current = isPdfFile }, [isPdfFile])
   useEffect(() => { vaultModeRef.current = vaultMode }, [vaultMode])
 
-  const [attachmentsPath, setAttachmentsPath] = useState('')
   // Phase 2 批次 2：PDF 阅读器内嵌本模块（openPdfInReader 跳转通道随编辑器退役而移除）
-
-  useEffect(() => {
-    getAttachmentsPath().then(setAttachmentsPath).catch(() => {})
-  }, [])
 
   // 用本地工具打开 PDF
   const openPdfExternal = useCallback(async () => {
@@ -693,9 +688,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     if (page?.attachmentId) {
       filePath = await getAttachmentPath(page.attachmentId)
     }
-    if (!filePath && page) filePath = `${attachmentsPath}\\${page.contentMd}`
+    if (!filePath && page?.contentMd) filePath = await resolveAttachmentRel(page.contentMd)
     if (filePath) openExternal(filePath)
-  }, [page, attachmentsPath])
+  }, [page])
 
   /** 就地编辑（vault 写路径）：装载时缓存 frontmatter 前缀与磁盘 mtime（冲突基线）。
    *  读失败 = 文件已被外部删除 → mtime 置 0，保存时按「重建」语义不带基线（同编辑器 missing 口径）。 */
@@ -1993,7 +1988,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                   if (page.attachmentId) {
                     filePath = await getAttachmentPath(page.attachmentId)
                   }
-                  if (!filePath) filePath = `${attachmentsPath}\\${page.contentMd}`
+                  if (!filePath && page.contentMd) filePath = await resolveAttachmentRel(page.contentMd)
                   if (filePath) openExternal(filePath)
                 }}
                 className="flex items-center gap-2 px-4 py-2 text-[13px] bg-[var(--accent)] text-white rounded hover:bg-[var(--accent-hover)] transition-colors"

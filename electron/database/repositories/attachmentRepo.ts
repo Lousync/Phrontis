@@ -1,10 +1,18 @@
-// R6 去库化：附件台账 = .knowbase/modules/attachments/registry.json（附件文件仍在 userData/attachments，sql.js 路径已移除，D9）
+// R6 去库化：附件台账 = .knowbase/modules/attachments/registry.json
+// 3.9.2：附件文件本体→仓库内 .attachments/（旧 userData/attachments 只读兼容，读命中时原子复制进仓库）
 import { ipcMain, app } from 'electron'
-import { join, basename } from 'path'
+import { join, basename, dirname } from 'path'
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, unlinkSync, renameSync, readFileSync } from 'fs'
 import { randomUUID } from 'crypto'
-import { getAttachmentsDir } from '../../lib/globalPaths'
 import { safePathInside } from '../../lib/pathGuard'
+import { getVaultAttachmentsRoot, getVaultKbRoot } from '../../lib/kbStore/vaultContext'
+import { normalizeRel, attachmentRel, resolveExistingPath } from '../../lib/kbStore/attachmentPath'
+import {
+  ensureAttachmentInVault,
+  ensureAttachmentStoreMigrated,
+  getLegacyAttachmentsRoot,
+  getVaultTrashRoot,
+} from '../../lib/attachmentStore'
 import { vaultAttachmentsAll, vaultAttachmentsSave, AttachmentRow } from '../../lib/kbStore/attachmentVaultRepo'
 import { vaultPostsAll } from '../../lib/kbStore/momentsVaultRepo'
 import { vaultListEntries } from '../../lib/kbStore/blogVaultRepo'
@@ -43,6 +51,13 @@ function toMeta(r: AttachmentRow) {
 
 export type AttachmentMeta = ReturnType<typeof toMeta>
 
+/** 写附件前必须有当前仓库；无仓库直接抛错（不静默退回 userData） */
+function requireVaultAttachmentsRoot(): string {
+  const root = getVaultAttachmentsRoot()
+  if (!root) throw new Error('当前没有打开的仓库')
+  return root
+}
+
 /** 从 Markdown 正文中提取内联图片引用的附件 ID（attachment://{id}/ 或 ?thumb=1） */
 export function parseInlineAttachmentIds(md: string): string[] {
   if (!md) return []
@@ -58,14 +73,15 @@ export function parseInlineAttachmentIds(md: string): string[] {
 
 /** 供 attachment:// 协议解析真实文件路径（路径防护:历史脏数据/恶意注入的 file_path 不会越出附件目录） */
 export function getAttachmentFilePath(id: string, thumb = false): string | null {
+  ensureAttachmentStoreMigrated()
   const row = vaultAttachmentsAll().find(r => r.id === id)
   if (!row) return null
-  const p = safePathInside(getAttachmentsDir(), thumb && row.thumb_path ? row.thumb_path : row.file_path)
-  return p && existsSync(p) ? p : null
+  return ensureAttachmentInVault(thumb && row.thumb_path ? row.thumb_path : row.file_path)
 }
 
 /** 一次查询多个附件的元数据（供说说列表批量组装） */
 export function getAttachmentsForIds(ids: string[]): ReturnType<typeof toMeta>[] {
+  ensureAttachmentStoreMigrated()
   const list = ids.filter(Boolean)
   if (list.length === 0) return []
   const rows = vaultAttachmentsAll().filter(r => list.includes(r.id))
@@ -89,35 +105,35 @@ export function claimAttachments(ids: string[], ownerType: string, ownerId: stri
   if (changed) vaultAttachmentsSave(rows)
 }
 
-/** 删除业务记录时，附件文件移入回收区（可恢复） */
+/** 删除业务记录时，附件文件移入仓库内回收区（可恢复；保留原相对路径，避免同名冲突） */
 export function trashAttachments(ids: string[], binId: string): void {
-  const trashRoot = join(app.getPath('userData'), 'attachments_trash', binId)
+  ensureAttachmentStoreMigrated()
+  const trashRoot = getVaultTrashRoot(binId)
+  const vaultRoot = getVaultAttachmentsRoot()
+  if (!trashRoot || !vaultRoot) return
   mkdirSync(trashRoot, { recursive: true })
+  const legacyRoot = getLegacyAttachmentsRoot()
   const rows = vaultAttachmentsAll()
   let changed = false
   for (const id of ids) {
     if (!id) continue
     const row = rows.find(r => r.id === id)
     if (!row || row.trashed) continue
-    const src = safePathInside(getAttachmentsDir(), row.file_path)
-    if (!src) continue
-    const dest = join(trashRoot, basename(row.file_path))
-    try {
-      if (existsSync(src)) renameSync(src, dest)
-    } catch {
-      try { if (existsSync(src)) { copyFileSync(src, dest); unlinkSync(src) } } catch { /* keep */ }
-    }
-    if (row.thumb_path) {
-      const tsrc = safePathInside(getAttachmentsDir(), row.thumb_path)
-      const tdest = join(trashRoot, basename(row.thumb_path))
-      if (tsrc) try {
-        if (existsSync(tsrc)) renameSync(tsrc, tdest)
+    const rels = [normalizeRel(row.file_path), normalizeRel(row.thumb_path)].filter((x): x is string => !!x)
+    for (const rel of rels) {
+      const src = resolveExistingPath(vaultRoot, legacyRoot, rel)
+      if (!src) continue
+      const dest = join(trashRoot, ...rel.split('/'))
+      try {
+        mkdirSync(dirname(dest), { recursive: true })
+        renameSync(src.abs, dest)
       } catch {
-        try { if (existsSync(tsrc)) { copyFileSync(tsrc, tdest); unlinkSync(tsrc) } } catch { /* keep */ }
+        try { mkdirSync(dirname(dest), { recursive: true }); copyFileSync(src.abs, dest); unlinkSync(src.abs) } catch { /* keep */ }
       }
     }
+    const fileRel = normalizeRel(row.file_path)
     row.trashed = 1
-    row.trash_path = join('attachments_trash', binId, basename(row.file_path))
+    row.trash_path = fileRel ? `attachments_trash/${binId}/${fileRel}` : ''
     changed = true
   }
   if (changed) vaultAttachmentsSave(rows)
@@ -125,6 +141,10 @@ export function trashAttachments(ids: string[], binId: string): void {
 
 /** 从回收区恢复附件文件 */
 export function restoreAttachments(ids: string[]): void {
+  ensureAttachmentStoreMigrated()
+  const vaultRoot = getVaultAttachmentsRoot()
+  const kbRoot = getVaultKbRoot()
+  if (!vaultRoot || !kbRoot) return
   const rows = vaultAttachmentsAll()
   let changed = false
   for (const id of ids) {
@@ -132,10 +152,15 @@ export function restoreAttachments(ids: string[]): void {
     const row = rows.find(r => r.id === id)
     if (!row || !row.trashed || !row.trash_path) continue
     // 路径防护:trash_path / file_path 均来自台账,越出预期目录的脏数据直接跳过
-    const src = safePathInside(app.getPath('userData'), row.trash_path)
-    const dest = safePathInside(getAttachmentsDir(), row.file_path)
+    const trashRel = normalizeRel(row.trash_path)
+    const src = trashRel
+      ? (safePathInside(kbRoot, trashRel) ?? safePathInside(app.getPath('userData'), trashRel))
+      : null
+    const destRel = normalizeRel(row.file_path)
+    const dest = destRel ? safePathInside(vaultRoot, destRel) : null
     if (!src || !dest) continue
     try {
+      mkdirSync(dirname(dest), { recursive: true })
       if (existsSync(dest)) unlinkSync(dest)
       if (existsSync(src)) renameSync(src, dest)
     } catch {
@@ -151,6 +176,8 @@ export function restoreAttachments(ids: string[]): void {
 /** 彻底删除附件（文件 + 记录） */
 export function deleteAttachments(ids: string[]): void {
   if (ids.filter(Boolean).length === 0) return
+  const vaultRoot = getVaultAttachmentsRoot()
+  const kbRoot = getVaultKbRoot()
   let rows = vaultAttachmentsAll()
   let changed = false
   for (const id of ids) {
@@ -158,13 +185,21 @@ export function deleteAttachments(ids: string[]): void {
     const row = rows.find(r => r.id === id)
     if (!row) continue
     for (const p of [row.file_path, row.thumb_path]) {
-      if (!p) continue
-      const full = safePathInside(getAttachmentsDir(), p)
-      try { if (full && existsSync(full)) unlinkSync(full) } catch { /* ignore */ }
+      const rel = normalizeRel(p)
+      if (!rel) continue
+      for (const root of [vaultRoot, getLegacyAttachmentsRoot()]) {
+        if (!root) continue
+        const full = safePathInside(root, rel)
+        try { if (full && existsSync(full)) unlinkSync(full) } catch { /* ignore */ }
+      }
     }
     if (row.trashed && row.trash_path) {
-      const trashFull = safePathInside(app.getPath('userData'), row.trash_path)
-      try { if (trashFull && existsSync(trashFull)) unlinkSync(trashFull) } catch { /* ignore */ }
+      const trashRel = normalizeRel(row.trash_path)
+      for (const root of [kbRoot, app.getPath('userData')]) {
+        if (!root || !trashRel) continue
+        const trashFull = safePathInside(root, trashRel)
+        try { if (trashFull && existsSync(trashFull)) unlinkSync(trashFull) } catch { /* ignore */ }
+      }
     }
     rows = rows.filter(r => r.id !== id)
     changed = true
@@ -190,7 +225,7 @@ export function registerAttachment(data: {
     owner_id: data.ownerId,
     position: data.position || 0,
     file_name: data.fileName,
-    file_path: data.relPath,
+    file_path: normalizeRel(data.relPath) ?? data.relPath,
     thumb_path: '',
     mime_type: data.mime || 'application/octet-stream',
     size_bytes: data.size || 0,
@@ -209,6 +244,8 @@ export function registerAttachmentHandlers(): void {
     ownerId?: string
     files: { name?: string; mime?: string; dataUrl?: string; base64?: string; thumbDataUrl?: string }[]
   }) => {
+    ensureAttachmentStoreMigrated()
+    const vaultRoot = requireVaultAttachmentsRoot()
     const ownerType = data.ownerType || 'misc'
     const ownerId = data.ownerId || '_pending'
     // 白名单校验:两者会拼进落盘路径,含路径分隔符/点号可越出附件目录
@@ -221,18 +258,16 @@ export function registerAttachmentHandlers(): void {
       const raw = f.dataUrl || ''
       const mime = f.mime || (/^data:([^;]+)/.exec(raw)?.[1] || 'application/octet-stream')
       const ext = extFor(mime, f.name || 'file')
-      const dir = join(getAttachmentsDir(), ownerType, ownerId)
-      mkdirSync(dir, { recursive: true })
-      const rel = join(ownerType, ownerId, `${id}${ext}`)
+      mkdirSync(join(vaultRoot, ownerType, ownerId), { recursive: true })
+      const rel = attachmentRel(ownerType, ownerId, id, ext)
       const buf = raw.includes(',') ? Buffer.from(raw.split(',')[1] || '', 'base64') : Buffer.from(f.base64 || '', 'base64')
-      writeFileSync(join(getAttachmentsDir(), rel), buf)
+      writeFileSync(join(vaultRoot, ...rel.split('/')), buf)
 
       let relThumb = ''
       if (f.thumbDataUrl && f.thumbDataUrl.includes(',')) {
-        const tdir = join(dir, 'thumbs')
-        mkdirSync(tdir, { recursive: true })
-        relThumb = join(ownerType, ownerId, 'thumbs', `${id}.jpg`)
-        writeFileSync(join(getAttachmentsDir(), relThumb), Buffer.from(f.thumbDataUrl.split(',')[1] || '', 'base64'))
+        mkdirSync(join(vaultRoot, ownerType, ownerId, 'thumbs'), { recursive: true })
+        relThumb = [ownerType, ownerId, 'thumbs', `${id}.jpg`].join('/')
+        writeFileSync(join(vaultRoot, ...relThumb.split('/')), Buffer.from(f.thumbDataUrl.split(',')[1] || '', 'base64'))
       }
 
       const row: AttachmentRow = {
@@ -259,6 +294,8 @@ export function registerAttachmentHandlers(): void {
   // 通道 A：主进程直接复制本地文件（批量导入/知识库附件）
   ipcMain.handle('attachment:uploadFromPath', (_e, data: { ownerType?: string; ownerId?: string; filePath: string }) => {
     if (!data.filePath || !existsSync(data.filePath)) return null
+    ensureAttachmentStoreMigrated()
+    const vaultRoot = requireVaultAttachmentsRoot()
     const ownerType = data.ownerType || 'misc'
     const ownerId = data.ownerId || '_pending'
     // 白名单校验:两者会拼进落盘路径(同 uploadMany)
@@ -266,11 +303,10 @@ export function registerAttachmentHandlers(): void {
     const id = randomUUID()
     const name = basename(data.filePath)
     const ext = extFor(mimeFromPath(data.filePath), name)
-    const dir = join(getAttachmentsDir(), ownerType, ownerId)
-    mkdirSync(dir, { recursive: true })
-    const rel = join(ownerType, ownerId, `${id}${ext}`)
-    copyFileSync(data.filePath, join(getAttachmentsDir(), rel))
-    const size = existsSync(data.filePath) ? (readFileSync(data.filePath).length) : 0
+    mkdirSync(join(vaultRoot, ownerType, ownerId), { recursive: true })
+    const rel = attachmentRel(ownerType, ownerId, id, ext)
+    copyFileSync(data.filePath, join(vaultRoot, ...rel.split('/')))
+    const size = readFileSync(data.filePath).length
     const row: AttachmentRow = {
       id,
       owner_type: ownerType,
@@ -292,6 +328,7 @@ export function registerAttachmentHandlers(): void {
   })
 
   ipcMain.handle('attachment:getByOwner', (_e, ownerType: string, ownerId: string) => {
+    ensureAttachmentStoreMigrated()
     const rows = vaultAttachmentsAll()
       .filter(r => r.owner_type === ownerType && r.owner_id === ownerId)
       .sort((a, b) => a.position - b.position)
@@ -304,6 +341,12 @@ export function registerAttachmentHandlers(): void {
 
   ipcMain.handle('attachment:getPath', (_e, id: string) => {
     return getAttachmentFilePath(id)
+  })
+
+  // 解析仓库内相对路径（编辑器 PDF/XMind 兜底用）：仓库优先，旧目录命中则复制进仓库
+  ipcMain.handle('attachment:resolveRel', (_e, rel: string) => {
+    ensureAttachmentStoreMigrated()
+    return ensureAttachmentInVault(rel)
   })
 
   // 读取附件文件内容为 base64（PDF 阅读器用）
@@ -321,8 +364,8 @@ export function registerAttachmentHandlers(): void {
   // 按附件目录内的文件名读取 base64（兼容旧版无 attachment_id 的附件）
   ipcMain.handle('attachment:readBase64ByFileName', (_e, fileName: string) => {
     if (!fileName || /[\\/]/.test(fileName)) return null  // 只允许附件目录内相对文件名
-    const p = join(getAttachmentsDir(), fileName)
-    if (!existsSync(p)) return null
+    const p = ensureAttachmentInVault(fileName)
+    if (!p) return null
     try {
       return readFileSync(p).toString('base64')
     } catch (e) {
@@ -332,6 +375,7 @@ export function registerAttachmentHandlers(): void {
   })
 
   ipcMain.handle('attachment:cleanupOrphans', () => {
+    ensureAttachmentStoreMigrated()
     let removed = 0
     // 1) 超过 24 小时的未认领上传（owner_id = _pending）
     const pending = vaultAttachmentsAll().filter(r => r.owner_id === '_pending')

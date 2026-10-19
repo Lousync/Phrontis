@@ -415,6 +415,7 @@ export const clipperCheckToken = (candidate: string) => a().clipperCheckToken(ca
 export const getAttachmentsByOwner = (ownerType: string, ownerId: string): Promise<AttachmentMeta[]> => a().getAttachmentsByOwner(ownerType, ownerId)
 export const deleteAttachment = (id: string) => a().deleteAttachment(id)
 export const getAttachmentPath = (id: string): Promise<string | null> => a().getAttachmentPath(id)
+export const resolveAttachmentRel = (rel: string): Promise<string | null> => a().resolveAttachmentRel(rel)
 export const readAttachmentBase64 = (id: string): Promise<string | null> => a().readAttachmentBase64(id)
 export const readAttachmentBase64ByFileName = (fileName: string): Promise<string | null> => a().readAttachmentBase64ByFileName(fileName)
 export const cleanupOrphanAttachments = () => a().cleanupOrphanAttachments()

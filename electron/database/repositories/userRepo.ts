@@ -1,6 +1,7 @@
-import { ipcMain, app, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow } from 'electron'
 import { randomBytes, pbkdf2Sync } from 'crypto'
-import { getAttachmentsDir } from '../../lib/globalPaths'
+import { getVaultAttachmentsRoot } from '../../lib/kbStore/vaultContext'
+import { findAvatarFile, resolveAvatarFile } from '../../lib/attachmentStore'
 import { join } from 'path'
 import { mkdirSync, writeFileSync, readFileSync, existsSync, copyFileSync, unlinkSync } from 'fs'
 import { registerAttachment, deleteAttachments } from './attachmentRepo'
@@ -43,13 +44,6 @@ function patchProfile(patch: Partial<Omit<UserVaultRow, 'id' | 'created_at'>>): 
   const row = { ...loadProfileOrDefault(), ...patch, updated_at: new Date().toISOString() }
   vaultUserProfileSave(row)
   return row
-}
-
-// ---- Avatar directory ----
-function avatarsDir(): string {
-  const dir = join(app.getPath('userData'), 'avatars')
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-  return dir
 }
 
 // ---- PBKDF2 password ----
@@ -149,11 +143,13 @@ export function registerUserHandlers(): void {
     return result.filePaths[0]
   })
 
-  // ===== Avatar: save to avatars/ dir =====
+  // ===== Avatar: save to vault .attachments/ =====
   ipcMain.handle('user:saveAvatar', (_e, sourcePath: string) => {
+    const vaultRoot = getVaultAttachmentsRoot()
+    if (!vaultRoot) throw new Error('当前没有打开的仓库')
     const ext = sourcePath.match(/\.(png|jpe?g|gif|webp|bmp)$/i)?.[0] || '.png'
     const fileName = `avatar_${Date.now()}${ext}`
-    const destDir = join(getAttachmentsDir(), 'user_profile', 'default')
+    const destDir = join(vaultRoot, 'user_profile', 'default')
     mkdirSync(destDir, { recursive: true })
     const destPath = join(destDir, fileName)
     copyFileSync(sourcePath, destPath)
@@ -161,18 +157,18 @@ export function registerUserHandlers(): void {
     // 删除旧头像文件与旧附件记录
     const prev = vaultUserProfile()
     if (prev?.avatar_path) {
-      const oldPath = join(app.getPath('userData'), prev.avatar_path)
-      try { if (existsSync(oldPath)) unlinkSync(oldPath) } catch { /* ignore */ }
+      const oldPath = findAvatarFile(prev.avatar_path)
+      try { if (oldPath && existsSync(oldPath)) unlinkSync(oldPath) } catch { /* ignore */ }
     }
     const oldAtts = vaultAttachmentsAll().filter(a => a.owner_type === 'user_profile' && a.owner_id === 'default')
     if (oldAtts.length > 0) deleteAttachments(oldAtts.map(a => a.id))
 
-    const relativePath = `attachments/user_profile/default/${fileName}`
+    const relativePath = `user_profile/default/${fileName}`
     registerAttachment({
       ownerType: 'user_profile',
       ownerId: 'default',
       fileName,
-      relPath: `user_profile/default/${fileName}`,
+      relPath: relativePath,
       mime: `image/${ext.replace(/^\./, '').replace('jpg', 'jpeg')}`,
       size: readFileSync(destPath).length,
     })
@@ -184,10 +180,13 @@ export function registerUserHandlers(): void {
   ipcMain.handle('user:getAvatarBase64', () => {
     const row = vaultUserProfile()
     if (!row?.avatar_path) return null
-    const fullPath = join(app.getPath('userData'), row.avatar_path)
-    if (!existsSync(fullPath)) return null
-    const buf = readFileSync(fullPath)
-    const ext = row.avatar_path.match(/\.(\w+)$/)?.[1] || 'png'
+    const hit = resolveAvatarFile(row.avatar_path)
+    if (!hit) return null
+    if (hit.rel !== row.avatar_path) {
+      try { patchProfile({ avatar_path: hit.rel }) } catch { /* ignore */ }
+    }
+    const buf = readFileSync(hit.abs)
+    const ext = hit.rel.match(/\.(\w+)$/)?.[1] || 'png'
     const mime = ext === 'jpg' ? 'jpeg' : ext
     return `data:image/${mime};base64,${buf.toString('base64')}`
   })
@@ -240,10 +239,10 @@ export function registerUserHandlers(): void {
     // Read avatar base64 if exists
     let avatarBase64: string | null = null
     if (row.avatar_path) {
-      const fullPath = join(app.getPath('userData'), row.avatar_path)
-      if (existsSync(fullPath)) {
-        const buf = readFileSync(fullPath)
-        const ext = row.avatar_path.match(/\.(\w+)$/)?.[1] || 'png'
+      const hit = resolveAvatarFile(row.avatar_path)
+      if (hit) {
+        const buf = readFileSync(hit.abs)
+        const ext = hit.rel.match(/\.(\w+)$/)?.[1] || 'png'
         const mime = ext === 'jpg' ? 'jpeg' : ext
         avatarBase64 = `data:image/${mime};base64,${buf.toString('base64')}`
       }
@@ -269,24 +268,27 @@ export function registerUserHandlers(): void {
       // Extract base64 data and mime type
       const match = data.avatarBase64.match(/^data:image\/(\w+);base64,(.+)$/)
       if (match) {
-        const ext = match[1] === 'jpeg' ? 'jpg' : match[1]
-        const fileName = `avatar_imported_${Date.now()}.${ext}`
-        const destDir = join(getAttachmentsDir(), 'user_profile', 'default')
-        mkdirSync(destDir, { recursive: true })
-        const destPath = join(destDir, fileName)
-        writeFileSync(destPath, Buffer.from(match[2], 'base64'))
-        const oldAtts = vaultAttachmentsAll().filter(a => a.owner_type === 'user_profile' && a.owner_id === 'default')
-        if (oldAtts.length > 0) deleteAttachments(oldAtts.map(a => a.id))
-        const relativePath = `attachments/user_profile/default/${fileName}`
-        registerAttachment({
-          ownerType: 'user_profile',
-          ownerId: 'default',
-          fileName,
-          relPath: `user_profile/default/${fileName}`,
-          mime: `image/${ext}`,
-          size: Buffer.byteLength(match[2], 'base64'),
-        })
-        patchProfile({ avatar_path: relativePath })
+        const vaultRoot = getVaultAttachmentsRoot()
+        if (vaultRoot) {
+          const ext = match[1] === 'jpeg' ? 'jpg' : match[1]
+          const fileName = `avatar_imported_${Date.now()}.${ext}`
+          const destDir = join(vaultRoot, 'user_profile', 'default')
+          mkdirSync(destDir, { recursive: true })
+          const destPath = join(destDir, fileName)
+          writeFileSync(destPath, Buffer.from(match[2], 'base64'))
+          const oldAtts = vaultAttachmentsAll().filter(a => a.owner_type === 'user_profile' && a.owner_id === 'default')
+          if (oldAtts.length > 0) deleteAttachments(oldAtts.map(a => a.id))
+          const relativePath = `user_profile/default/${fileName}`
+          registerAttachment({
+            ownerType: 'user_profile',
+            ownerId: 'default',
+            fileName,
+            relPath: relativePath,
+            mime: `image/${ext}`,
+            size: Buffer.byteLength(match[2], 'base64'),
+          })
+          patchProfile({ avatar_path: relativePath })
+        }
       }
     }
 
