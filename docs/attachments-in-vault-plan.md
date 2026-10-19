@@ -207,7 +207,7 @@ export function planMigration(rows: Array<{ id: string; file_path: string; thumb
 
 ## 14. 不在本次范围
 
-- 仓库身份（rootId）写进 `.knowbase/meta.json`（PDF 阅读进度/摘录跨系统分裂）——建议另开一条；
+- 仓库身份（rootId）写进 `.knowbase/meta.json` —— 已在 3.9.2 单独实现，见 `docs/vault-identity.md`；
 - 134 条无引用附件台账 + 5 条历史 PDF 记录的清理；
 - 高数那批 md 里 30 处 `attachment://image.png` 无效引用；
 - 附件去重、压缩、缩略图重建。

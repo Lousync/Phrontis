@@ -18,6 +18,7 @@
 ### 🔧 修复
 
 - **附件跟着仓库走**：说说配图、头像、博客配图、编辑器插图原先存在系统的应用数据目录（Windows `%APPDATA%\knowbase\attachments`），不在仓库里 —— 换电脑或换系统打开同一个仓库时，文字正常、图片全变破图。现在附件一律存进仓库根的 `.attachments/`；旧文件首次读取时自动复制进来（只复制不删，旧版客户端仍可用），台账里的 Windows 反斜杠路径也一并归一化成 `/`
+- **阅读进度 / 摘录跟着仓库走**：仓库身份（rootId）原先只记在设备设置里，同一个仓库在 Windows 与 Linux 会各拿一个 id，导致 PDF 阅读进度、TXT 进度、摘录、摘录导出映射分成互不可见的两套。现在身份写进仓库 `.knowbase/meta.json`，另一系统打开时自动采纳；旧键按 `updatedAt` 取新迁移，摘录按条合并，封面缓存键与文件一起改名
 - **跨系统密文不再静默变空**：密码本条目与 AI 账户的 Key 若由别的系统（Windows / macOS）的本机钥匙串加密，本机解不开 —— 现在标「无法解密」并给一条说明，而不是显示成空密码或「未配置 Key」；原条目其余字段照常保留
 - **Linux 上启动的密文假故障**：此前自检把「密文头必须是 v10」写死，而 Linux 系统钥匙串产出的是 v11，于是每次启动都报一条不存在的错误。现在按平台断言，并把实际加密后端打进启动日志
 - **更新安装包的路径校验**：非 Windows 上此前恒判「路径不受信任」（用反斜杠拼前缀），改为平台无关的目录包含判断
@@ -29,7 +30,8 @@
 - **打包前拦下两种「会静默产出坏包」的姿势**：交叉打包；以及 `node_modules` 是**符号链接**时（worktree 的省盘做法）—— 后者会让 electron-builder 的依赖收集器漏掉一大批传递依赖，包能打出来、装上一启动就 `Cannot find module`
 - **发布按平台**：`scripts/publish-release.py --platform linux` 走独立 tag `v<版本>-linux`，校验 `.deb` + `latest-linux.yml`（deb 没有 `.blockmap`），并核对包内 `control` 的版本号；缺 `gh` 时给安装指引而不是抛栈
 - **deb 的 postinst 换成自带脚本**：AppArmor profile 装不上时（老版本不支持 `abi/4.0` 等）回退把 `chrome-sandbox` 设为 4755，保证装完能启动
-- **契约**：`verify-linux-port.mjs` 增 §I（打包 / 发布 / 应用内更新关闭）；`verify-pack-dir.mjs` 增目标平台解析用例
+- **契约**：`verify-linux-port.mjs` 增 §I（打包 / 发布 / 应用内更新关闭）；`verify-pack-dir.mjs` 增目标平台解析用例；新增 `verify-attachment-store.mjs`（附件入仓库）与 `verify-vault-identity.mjs`（仓库身份统一 / 键迁移 / 封面改名），均含变异测试
+- **仓库维护脚本**：`.AGENT/scripts/vault-maintenance/clean-broken-attachment-refs.mjs` 清理 PDF 导入残留的无效 `attachment://<文件名>` 图片引用（默认 dry-run，`--apply --backup` 才写盘；已用于当前仓库，31 处 / 12 个文件；契约 `verify-refs-cleanup` 16/16 + 4 条变异测试）
 
 ## v3.9.0（2026-10-16）
 

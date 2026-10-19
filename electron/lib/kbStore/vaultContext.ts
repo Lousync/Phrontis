@@ -124,7 +124,7 @@ export function setCurrentVault(v: VaultInfo | null): void {
   writeSettingsFile((s) => {
     if (v) {
       s['currentVaultId'] = v.rootId
-      const rest = (Array.isArray(s['recentVaults']) ? (s['recentVaults'] as RecentVault[]) : []).filter((x) => x.rootId !== v.rootId)
+      const rest = (Array.isArray(s['recentVaults']) ? (s['recentVaults'] as RecentVault[]) : []).filter((x) => x.rootId !== v.rootId && x.path !== v.rootPath)
       s['recentVaults'] = [
         { rootId: v.rootId, name: v.name, path: v.rootPath, updatedAt: new Date().toISOString() },
         ...rest,
@@ -168,23 +168,30 @@ export function ensureAttachmentsDir(): boolean {
 export function ensureKbRoot(name?: string): boolean {
   const root = getVaultKbRoot()
   if (!root) return false
+  const vaultId = current?.rootId
   try {
     mkdirSync(root, { recursive: true })
     const metaPath = join(root, 'meta.json')
     if (!existsSync(metaPath)) {
       writeFileSync(
         metaPath,
-        JSON.stringify({ schemaVersion: KB_SCHEMA_VERSION, name: name || undefined, createdAt: new Date().toISOString() }, null, 2),
+        JSON.stringify({ schemaVersion: KB_SCHEMA_VERSION, id: vaultId, name: name || undefined, createdAt: new Date().toISOString() }, null, 2),
         'utf-8'
       )
-    } else if (name) {
-      // 存量 meta 无 name → 回填一次（幂等：已有不覆盖）
+    } else if (name || vaultId) {
+      // 存量 meta：回填 name / id 一次（幂等：已有不覆盖）
       try {
         const meta = JSON.parse(readFileSync(metaPath, 'utf-8')) as Record<string, unknown>
-        if (typeof meta.name !== 'string' || !meta.name) {
+        let dirty = false
+        if (name && (typeof meta.name !== 'string' || !meta.name)) {
           meta.name = name
-          writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8')
+          dirty = true
         }
+        if (vaultId && (typeof meta.id !== 'string' || !meta.id)) {
+          meta.id = vaultId
+          dirty = true
+        }
+        if (dirty) writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8')
       } catch { /* meta 损坏不重写（读路径各自有兜底） */ }
     }
     return true

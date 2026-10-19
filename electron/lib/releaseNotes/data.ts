@@ -60,6 +60,11 @@ export const RELEASE_NOTES = [
             "sub": []
           },
           {
+            "lead": "阅读进度 / 摘录跟着仓库走",
+            "rest": "仓库身份（rootId）原先只记在设备设置里，同一个仓库在 Windows 与 Linux 会各拿一个 id，导致 PDF 阅读进度、TXT 进度、摘录、摘录导出映射分成互不可见的两套。现在身份写进仓库 `.knowbase/meta.json`，另一系统打开时自动采纳；旧键按 `updatedAt` 取新迁移，摘录按条合并，封面缓存键与文件一起改名",
+            "sub": []
+          },
+          {
             "lead": "跨系统密文不再静默变空",
             "rest": "密码本条目与 AI 账户的 Key 若由别的系统（Windows / macOS）的本机钥匙串加密，本机解不开 —— 现在标「无法解密」并给一条说明，而不是显示成空密码或「未配置 Key」；原条目其余字段照常保留",
             "sub": []
@@ -107,7 +112,12 @@ export const RELEASE_NOTES = [
           },
           {
             "lead": "契约",
-            "rest": "`verify-linux-port.mjs` 增 §I（打包 / 发布 / 应用内更新关闭）；`verify-pack-dir.mjs` 增目标平台解析用例",
+            "rest": "`verify-linux-port.mjs` 增 §I（打包 / 发布 / 应用内更新关闭）；`verify-pack-dir.mjs` 增目标平台解析用例；新增 `verify-attachment-store.mjs`（附件入仓库）与 `verify-vault-identity.mjs`（仓库身份统一 / 键迁移 / 封面改名），均含变异测试",
+            "sub": []
+          },
+          {
+            "lead": "仓库维护脚本",
+            "rest": "`.AGENT/scripts/vault-maintenance/clean-broken-attachment-refs.mjs` 清理 PDF 导入残留的无效 `attachment://<文件名>` 图片引用（默认 dry-run，`--apply --backup` 才写盘；已用于当前仓库，31 处 / 12 个文件；契约 `verify-refs-cleanup` 16/16 + 4 条变异测试）",
             "sub": []
           }
         ]

@@ -12,6 +12,7 @@ import { IGNORE_FILE_NAME } from './kbStore/ignoreFile'
 import { parseMarkdown, serializeMarkdown } from './kbStore/mdStore'
 import { broadcastDataChanged } from '../main/windowBus'
 import { adoptLegacyAgentSessionsToVault } from './agentSessionRepo'
+import { resolveVaultId, migrateVaultIdentity } from './kbStore/vaultIdentity'
 import { syncVaultWatcher, markSelfWrite } from './fsWatcher'
 import { bookMetaPruneOrphans } from './kbStore/vaultBookMetaRepo'
 import { globalReadJson, globalWriteJson } from './globalJsonStore'
@@ -419,27 +420,43 @@ function loadVaults(): void {
   try {
     // 含墓碑（deleted）条目：用户从系统回收站恢复目录后，这里自动复活登记并清标记
     // （2026-09-08 用户需求：删除仓库 → 回收站恢复 → 重启回到仓库切换列表）
+    // 3.9.2：仓库身份以 .knowbase/meta.json 的 id 为准；设备侧旧 id 就地采纳/回填。
     for (const rv of readRecentVaults(true)) {
-      if (roots.has(rv.rootId)) continue
-      if (existsSync(rv.path) && existsSync(join(rv.path, '.knowbase'))) {
-        roots.set(rv.rootId, { id: rv.rootId, name: rv.name, rootPath: rv.path })
-        upsertVault(rv.rootId, rv.name, rv.path)
-        if (rv.deleted) clearRecentDeleted(rv.rootId)
-      }
+      if (!existsSync(rv.path) || !existsSync(join(rv.path, '.knowbase'))) continue
+      const id = resolveVaultId(rv.path, rv.rootId)
+      if (roots.has(id)) continue
+      roots.set(id, { id, name: rv.name, rootPath: rv.path })
+      upsertVault(id, rv.name, rv.path)
+      if (rv.deleted) { clearRecentDeleted(rv.rootId); clearRecentDeleted(id) }
     }
   } catch { /* ignore */ }
   try {
     // 从 JSON 登记表恢复全部已授权仓库（磁盘上已不存在的跳过）
     for (const row of readVaultRegistry()) {
-      if (roots.has(row.id)) continue
-      if (existsSync(row.path)) roots.set(row.id, { id: row.id, name: row.name, rootPath: row.path })
+      if (!existsSync(row.path)) continue
+      const id = resolveVaultId(row.path, row.id)
+      if (roots.has(id)) continue
+      roots.set(id, { id, name: row.name, rootPath: row.path })
+      if (id !== row.id) upsertVault(id, row.name, row.path)
     }
     // 恢复当前仓库上下文（settings.json 记忆的 currentVaultId）
     const curId = readCurrentVaultId()
-    const cur = curId ? roots.get(curId) : undefined
+    let cur = curId ? roots.get(curId) : undefined
+    if (!cur && curId) {
+      // 身份被另一系统改过：按最近列表里的旧 id 找到路径，再按 meta.id 取解析后的条目
+      const row = readRecentVaults(true).find((r) => r.rootId === curId)
+      if (row) {
+        const id = resolveVaultId(row.path, row.rootId)
+        cur = roots.get(id)
+      }
+    }
     if (cur) {
       setCurrentVault({ rootId: cur.id, name: cur.name, rootPath: cur.rootPath })
       ensureKbRoot(cur.name)
+      const identity = migrateVaultIdentity(cur.rootPath, cur.id)
+      if (identity.keys || identity.covers) {
+        console.log(`[vault-identity] 统一仓库身份：迁移 ${identity.keys} 个键 / ${identity.covers} 个封面`)
+      }
       // 启动恢复也过一遍一次性布局迁移（P4 博客收拢；幂等）
       runLayoutMigrations(cur.rootPath)
       // v3.2.0 条目 ④：启动即给当前仓库挂上文件监听
@@ -459,15 +476,17 @@ function upsertVault(id: string, name: string, path: string): void {
   try {
     const rows = readVaultRegistry()
     const now = registryNow()
-    const row = rows.find((r) => r.path === path)
-    if (row) {
-      row.id = id
-      row.name = name
-      row.updated_at = now
-    } else {
-      rows.push({ id, name, path, created_at: now, updated_at: now })
-    }
-    writeVaultRegistry(rows)
+    const match = rows.find((r) => r.path === path)
+    // 同一路径只保留一行（身份统一后旧 id 行不再留着，防切换器出现重复仓库）
+    const next = rows.filter((r) => r.path !== path)
+    next.push({
+      id,
+      name,
+      path,
+      created_at: match?.created_at ?? now,
+      updated_at: now,
+    })
+    writeVaultRegistry(next)
   } catch {
     /* ignore */
   }
@@ -508,8 +527,10 @@ let pendingVaultPath: string | null = null
 
 /** 把目录登记为仓库 + 设为当前 + 初始化 .knowbase（openDir 确认初始化与 createVault 复用） */
 function adoptVaultDirectory(rootPath: string, name?: string): { rootId: string; name: string; path: string } {
-  const id = findVaultIdByPath(rootPath) ?? randomUUID()
+  const localId = findVaultIdByPath(rootPath) ?? randomUUID()
+  const id = resolveVaultId(rootPath, localId)
   const vaultName = name ?? basename(rootPath)
+  for (const [key, r] of roots) if (r.rootPath === rootPath && key !== id) roots.delete(key)
   roots.set(id, { id, name: vaultName, rootPath })
   upsertVault(id, vaultName, rootPath)
   setCurrentVault({ rootId: id, name: vaultName, rootPath })
@@ -517,6 +538,10 @@ function adoptVaultDirectory(rootPath: string, name?: string): { rootId: string;
   const isFirstInit = !existsSync(join(rootPath, '.knowbase', 'meta.json'))
   ensureKbRoot(vaultName)
   if (isFirstInit) writeWelcomeDocOnce(rootPath)
+  const identity = migrateVaultIdentity(rootPath, id)
+  if (identity.keys || identity.covers) {
+    console.log(`[vault-identity] 统一仓库身份：迁移 ${identity.keys} 个键 / ${identity.covers} 个封面`)
+  }
   runLayoutMigrations(rootPath)
   // v3.2.0 条目 ④：仓库（换）了 → 文件监听对准它
   syncVaultWatcher()
