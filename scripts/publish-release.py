@@ -85,6 +85,57 @@ def require_gh():
                  '   安装：sudo apt install gh（或见 https://github.com/cli/cli#installation），然后 gh auth login')
 
 
+def local_head_sha():
+    """本地 HEAD 的 commit（用来把 tag **钉在打包的这一版代码上**，见 check_counterpart_tag）"""
+    r = subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ''
+
+
+def remote_tag_sha(tag):
+    """远端同名 tag 指向的 commit（取不到返回 None）。
+
+    用 git ls-remote 而不是 gh api：同一把 SSH/凭据、少一层 JSON、附注 tag 的 `^{}` 行也能一起处理。
+    """
+    r = subprocess.run(['git', 'ls-remote', '--tags', 'origin', tag], capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    peeled = None
+    plain = None
+    for line in r.stdout.splitlines():
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        sha, ref = parts
+        if ref.endswith('^{}'):
+            peeled = sha
+        elif ref == 'refs/tags/%s' % tag:
+            plain = sha
+    return peeled or plain
+
+
+def check_counterpart_tag(ver, platform, head):
+    """已拍板决策 #10：两个平台 tag（v<ver> 与 v<ver>-linux）必须指向**同一个 commit**。
+
+    这里做的是发布前交叉校验：对方 tag 若已存在且指向别的 commit，直接中止 —— 否则会出现
+    「Windows 装的是 A 版代码、Linux 装的是 B 版」，而两边版本号一模一样，没人看得出来。
+    取不到远端信息（没网 / 未配 origin）时只提示，不阻断（真正上传那步本来也需要网）。
+    """
+    other = ('v%s' % ver) if platform == 'linux' else ('v%s-linux' % ver)
+    got = remote_tag_sha(other)
+    if got is None:
+        print('  ! 未能读到远端 %s 的 commit（离线 / 未配 origin？）—— 跳过双 tag 一致性校验' % other)
+        return
+    if not head:
+        print('  ! 本机拿不到 HEAD commit，跳过双 tag 一致性校验')
+        return
+    if got != head:
+        sys.exit('!! %s 指向 %s，而本地 HEAD 是 %s\n'
+                 '   两平台 tag 必须指向同一个 commit（决策 #10）—— 否则同样版本号、内容不同。\n'
+                 '   请确认：① 两边的包都从同一个 commit 打出；② 先合并再发版，或分两次发时把 tag 手动指到同一处。'
+                 % (other, got[:12], head[:12]))
+    print('  双 tag 一致性 OK：%s 与本地 HEAD 同为 %s' % (other, head[:12]))
+
+
 def sha512_b64(path):
     h = hashlib.sha512()
     with open(path, 'rb') as f:
@@ -276,6 +327,8 @@ def main():
     # ---- 上传:一次 gh 调用带上全部资产(原子性由 gh 单命令上传保证) ----
     print('== 上传 %s ==' % tag)
     require_gh()
+    head = local_head_sha()
+    check_counterpart_tag(ver, platform, head)
     assets = bundle['assets']
     exists = subprocess.run(['gh', 'release', 'view', tag, '--repo', REPO],
                             capture_output=True, text=True).returncode == 0
@@ -285,6 +338,11 @@ def main():
     else:
         cmd = ['gh', 'release', 'create', tag, *assets,
                '--title', tag, '--repo', REPO]
+        # ★ tag 必须钉在**本地 HEAD**（= 打包用的那个 commit）上：gh 缺省把新 tag 建在远端默认
+        #   分支 HEAD —— 若发版发生在合并之前，tag 就会指到还没包含本版代码的 commit 上，
+        #   而两个平台都这么建则「同 commit」这条不变式看着成立、实际两边都错。
+        if head:
+            cmd += ['--target', head]
         if args.notes_file:
             cmd += ['--notes-file', args.notes_file]
         elif platform == 'linux':

@@ -452,6 +452,13 @@ check('I4 Linux tag 走 v<ver>-linux', /def platform_tag/.test(srcPublish) && /v
 check('I4 Linux 门 1 校验 deb + latest-linux.yml（deb 没有 .blockmap）',
   /'latest-linux\.yml'/.test(srcPublish) && /Phrontis-%s-\[a-z0-9\]\+\\\.deb/.test(srcPublish))
 check('I4 Linux 额外核对 deb control 的 Version（防「抬了版本号但没重打包」）', /dpkg-deb/.test(srcPublish) && /control Version/.test(srcPublish))
+check('I4 tag 钉在本地 HEAD（gh 缺省建在默认分支 HEAD，会让 tag 指到没含本版的 commit）',
+  /--target', head\]/.test(srcPublish) && /def local_head_sha/.test(srcPublish))
+check('I4 双 tag 一致性校验（决策 #10：v<ver> 与 v<ver>-linux 必须同一 commit）',
+  // 钉**调用点**：函数定义 `def check_counterpart_tag(ver, platform, head):` 与调用点逐字同形，
+  // 只做子串匹配时「把调用删掉」会被定义顶成绿的（变异测试抓出来的，本批第三次踩同一个坑）。
+  /^[ \t]+check_counterpart_tag\(ver, platform, head\)$/m.test(srcPublish)
+  && /def check_counterpart_tag/.test(srcPublish))
 check('I4 负向：Windows 分支仍要求 exe + .blockmap + latest.yml 三件套（逻辑未被平台化改坏）',
   /blockmap_name = exe_name \+ '\.blockmap'/.test(srcPublish) && /yml_name = 'latest\.yml'/.test(srcPublish)
   && /缺 latest-linux\.yml/.test(srcPublish))

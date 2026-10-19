@@ -155,6 +155,8 @@ python3 scripts/publish-release.py --version 3.9.2 --platform linux   # 需要�
 ```
 
 - tag = **`v3.9.2-linux`**（决策 #6）；Windows 侧在同**一个 commit** 上打 `v3.9.2`。
+  发布脚本会把新 tag **钉在本地 HEAD**（= 打包用的那个 commit，`gh release create --target`），
+  并在上传前校验另一平台的同名 tag 是否指向同一 commit（不一致直接中止）—— 避免「同版本号、内容不同」。
 - 发布脚本的 Linux 门：deb `control` 版本 ↔ `latest-linux.yml` 版本 ↔ 你传的 `--version` 三者一致，
   sha512/size 与本地 deb 实测一致（另核对 `dpkg-deb -f` 的 `Version`，防「抬了版本号没重打包」）。
 - 验收建议（未做，需你执行）：装完直接启动一次，确认托盘图标、`Ctrl+Alt+P`、关闭窗口语义；
