@@ -35,9 +35,12 @@
   /* 树形缩进层级参考线（编辑器/知识库/AI教学 左栏多层树，treeGuides.ts 消费） */
   --tree-guide: color-mix(in srgb, var(--border-color) 60%, transparent);
 
-  /* 字体 */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  /* 字体
+     —— 跨平台回退链：macOS 原生 → Windows（Segoe UI / 中文 Microsoft YaHei）→ Linux
+     （GNOME 默认 Cantarell / Ubuntu；中文 Noto Sans CJK / 思源黑体；等宽 DejaVu / Ubuntu Mono）。
+     不做平台分叉：CSS 会跳过本机不存在的字体名，后段纯兜底，加了对已有平台零影响。 */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Cantarell, Ubuntu, 'Noto Sans', 'Noto Sans CJK SC', 'Noto Sans SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei', sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', 'Noto Sans Mono CJK SC', 'DejaVu Sans Mono', 'Ubuntu Mono', monospace;
 
   /* ===== sketch 基建(theme-handdrawn.md 第四节)=====
      默认值与既有视觉完全一致;主题包可覆写实现手绘线条效果。

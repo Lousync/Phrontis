@@ -12,9 +12,13 @@
 const { spawn, spawnSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
+const { electronBinary } = require('./electron-bin')
 
 const ROOT = path.join(__dirname, '..')
-const ELECTRON = path.join(ROOT, 'node_modules/electron/dist/electron.exe')
+// Electron 可执行名按平台解析。原先写死 `electron.exe`（Windows 专属名），
+// Linux / macOS 下 `needInstall()` 会恒为真 → 每次启动都白跑一遍 npm install。
+// 平台守卫与沙箱判定理由见 scripts/electron-bin.js。
+const ELECTRON = electronBinary(ROOT)
 const LOG_DIR = path.join(ROOT, 'logs')
 const LOG_FILE = path.join(LOG_DIR, 'launch-last.log')
 
@@ -29,6 +33,9 @@ const LOG_FILE = path.join(LOG_DIR, 'launch-last.log')
  * 于是 dev 起不来、窗口一闪就没。把 TEMP/TMP 收进仓库 tmp/（已 gitignore）后
  * 实测同样负载 0 残留（见 tmp/dev-temp/），系统 Temp 根则每跑必留 1 个。
  * 只影响 dev 启动；打包后的应用仍用系统 Temp。
+ *
+ * Linux 平台化（2026-10-19）：同一套 esbuild 文件协议在 POSIX 上走的是 TMPDIR，
+ * 故启动子进程时 TEMP / TMP / TMPDIR 三个都指向本目录（各平台只会读自己那条）。
  */
 const DEV_TMP = path.join(ROOT, 'tmp', 'dev-temp')
 const INTEGRITY_GUARD = path.join(ROOT, '.AGENT', 'scripts', 'acl-integrity-guard', 'verify-integrity-labels.mjs')
@@ -144,9 +151,11 @@ function integrityPreflight() {
     }
     fs.mkdirSync(DEV_TMP, { recursive: true })
     console.log(`[启动器] 正在以开发模式启动 Knowbase ...（dev 临时目录：${DEV_TMP}）`)
+    // Windows 认 TEMP/TMP，POSIX 认 TMPDIR —— 三处都设，各平台只取自己那条
     await run(process.execPath, [path.join(ROOT, 'scripts/launch.js'), 'dev'], '启动应用', {
       TEMP: DEV_TMP,
-      TMP: DEV_TMP
+      TMP: DEV_TMP,
+      TMPDIR: DEV_TMP
     })
     console.log('[启动器] 应用已退出')
   } catch (err) {

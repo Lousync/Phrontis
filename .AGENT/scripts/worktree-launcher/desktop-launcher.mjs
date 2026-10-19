@@ -16,9 +16,17 @@
  *      and `clean` sweeps leftovers (run it as part of worktree teardown).
  *
  * Usage:
- *   node .AGENT/scripts/worktree-launcher/desktop-launcher.mjs create --worktree <abs path> [--name <file.bat>] [--desktop <dir>]
+ *   node .AGENT/scripts/worktree-launcher/desktop-launcher.mjs create --worktree <abs path> [--name <file.ext>] [--desktop <dir>]
  *   node .AGENT/scripts/worktree-launcher/desktop-launcher.mjs list
  *   node .AGENT/scripts/worktree-launcher/desktop-launcher.mjs clean [--dry-run]
+ *
+ * Linux 平台化（2026-10-19）—— 与 Windows 的三处有意分叉：
+ *   · 薄壳改成 .desktop（指向 scripts/start-desktop.sh），文件名 Phrontis-dev-<后缀>.desktop；
+ *   · 默认落 ~/.local/share/applications（XDG 应用网格），**不是** ~/Desktop ——
+ *     桌面上的 .desktop 必须先 `gio set … metadata::trusted true` 才能双击运行，
+ *     否则 GNOME 弹「不受信任的启动器」，正是本项目最忌讳的「双击没反应」形态。
+ *     要放桌面就显式 --desktop ~/Desktop。
+ *   · 硬约束相反：.desktop 必须 **LF**、允许 UTF-8（.bat 是 CRLF + 纯 ASCII）。
  *
  * Exit codes: 0 = ok, 1 = failure.
  * Output is ASCII-only on purpose (Windows console codepage).
@@ -26,9 +34,17 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { spawnSync } from 'node:child_process'
 
 const MARKER = 'KB-WORKTREE-LAUNCHER'
-const ENTRY_REL = path.join('scripts', 'start-desktop.bat')
+/** .desktop 里装 worktree 绝对路径的自定义键（.bat 走 `rem <MARKER> worktree=…` 注释行） */
+const MARKER_KEY = 'X-Phrontis-Worktree'
+/** 薄壳要指向的入口脚本：Windows 是 .bat，其余平台是 .sh（scripts/start-desktop.sh） */
+const ENTRY_REL = process.platform === 'win32'
+  ? path.join('scripts', 'start-desktop.bat')
+  : path.join('scripts', 'start-desktop.sh')
+/** 生成的薄壳扩展名 */
+const WRAPPER_EXT = process.platform === 'win32' ? '.bat' : '.desktop'
 const MAIN_ROOT = path.resolve(import.meta.dirname, '..', '..', '..')
 
 function fail(msg) {
@@ -47,12 +63,21 @@ function parseArgs(argv) {
   return out
 }
 
-/** Desktop folder: --desktop, then KB_DESKTOP, then the usual Windows spots. */
+/** Launcher folder: --desktop, then KB_DESKTOP, then the platform's usual spot. */
 function resolveDesktop(args) {
   const explicit = args.desktop || process.env.KB_DESKTOP
   if (explicit) {
     const dir = path.resolve(explicit)
     if (!fs.existsSync(dir)) fail('desktop folder does not exist: ' + dir)
+    return dir
+  }
+  if (process.platform !== 'win32') {
+    // XDG 应用网格目录。刻意不用 ~/Desktop：桌面上的 .desktop 需要 gio 标记 trusted
+    // 才可双击运行，否则 GNOME 弹「不受信任的启动器」—— 反倒成了「双击没反应」。
+    // 那个目录是系统级路径，缺了就建（与应用商店安装的条目同一位置）。
+    const base = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share')
+    const dir = path.join(base, 'applications')
+    try { fs.mkdirSync(dir, { recursive: true }) } catch { /* 交给下面 writeFileSync 报错 */ }
     return dir
   }
   const home = process.env.USERPROFILE || os.homedir()
@@ -64,11 +89,19 @@ function resolveDesktop(args) {
   fail('cannot locate the desktop folder; pass --desktop <dir> or set KB_DESKTOP')
 }
 
-/** Default name: Phrontis-dev-<worktree suffix>.bat, always ASCII. */
-function defaultName(worktree) {
+/**
+ * worktree 的短后缀：剥掉主仓目录名前缀。主仓历史上叫 KnowledgeRecorder、现在是 Phrontis
+ * —— **两个前缀都要剥**，否则得到 Phrontis-dev-Phrontis-linux.bat 这种重复前缀
+ * （原实现只剥了前者）。
+ */
+function suffixOf(worktree) {
   const base = path.basename(worktree)
-  const suffix = base.replace(/^KnowledgeRecorder-?/, '') || 'main'
-  return `Phrontis-dev-${suffix}.bat`
+  return base.replace(/^(Phrontis|KnowledgeRecorder)-?/, '') || 'main'
+}
+
+/** 默认名：Phrontis-dev-<后缀><扩展名>，永远是 ASCII。 */
+function defaultName(worktree) {
+  return `Phrontis-dev-${suffixOf(worktree)}${WRAPPER_EXT}`
 }
 
 function wrapperText(worktree, branch) {
@@ -119,6 +152,56 @@ function check(text) {
   return problems
 }
 
+/**
+ * .desktop 薄壳（Linux）。只做一件事：把 worktree 的 scripts/start-desktop.sh 挂到
+ * 应用网格里。真逻辑仍在版本控制的入口脚本里，与本文件的 Windows 分支同一口径。
+ *
+ * Terminal=true 是必须的：入口脚本与 start-desktop.js 都会往控制台打失败原因，
+ * 而这正是「窗口一闪就没」时唯一还能留下的现场。
+ */
+function desktopFileText(worktree, branch) {
+  const entry = path.join(worktree, ENTRY_REL)
+  return [
+    '# Phrontis dev launcher -- GENERATED FILE, do not edit.',
+    '# worktree : ' + worktree,
+    '# branch   : ' + (branch || '(unknown)'),
+    '# ' + MARKER + ' worktree=' + worktree,
+    '# Real launch logic (version controlled): ' + entry,
+    '# Regenerate / remove with this very script (list | clean).',
+    '[Desktop Entry]',
+    'Type=Application',
+    'Version=1.0',
+    'Name=Phrontis (dev ' + suffixOf(worktree) + ')',
+    'Comment=Phrontis dev worktree: ' + worktree + ' (branch ' + (branch || 'unknown') + ')',
+    // Desktop Entry 规范要求带空格的参数用双引号包起来；JSON.stringify 顺手把反斜杠也转义了
+    'Exec=' + JSON.stringify(entry),
+    'Path=' + worktree,
+    'Terminal=true',
+    'Categories=Development;',
+    'Icon=' + path.join(worktree, 'build', 'icon.png'),
+    MARKER_KEY + '=' + worktree,
+    ''
+  ].join('\n')
+}
+
+/**
+ * .desktop 的硬约束与 .bat **相反**：必须 LF（CRLF 会变成值尾的 \r，解析出来的路径全带脏字符），
+ * 且允许 UTF-8（.desktop 规范就是 UTF-8）。别把 .bat 的检查照搬过来。
+ */
+function checkDesktop(text) {
+  const problems = []
+  if (/\r/.test(text)) problems.push('CR present (LF required for .desktop)')
+  if (!/^\[Desktop Entry\]$/m.test(text)) problems.push('missing [Desktop Entry] group')
+  // 逐行校验：只允许 空行 / # 注释 / [组名] / Key=Value（含 Name[zh_CN] 这类 locale 后缀）
+  for (const line of text.split('\n')) {
+    if (!line || line.startsWith('#')) continue
+    if (/^\[[^\]]+\]$/.test(line)) continue
+    if (/^[A-Za-z0-9-]+(\[[^\]]*\])?=/.test(line)) continue
+    problems.push('malformed line: ' + line.slice(0, 40))
+  }
+  return problems
+}
+
 function branchOf(worktree) {
   try {
     const head = fs.readFileSync(path.join(worktree, '.git'), 'utf8')
@@ -132,6 +215,10 @@ function branchOf(worktree) {
   }
 }
 
+/**
+ * 扫出本工具生成过的薄壳（两种格式都认：Windows .bat/.cmd 与 Linux .desktop）。
+ * 判定依据是各自的 marker，不是文件名 —— 文件名可以被用户改。
+ */
 function scan(desktop) {
   const found = []
   let entries = []
@@ -141,7 +228,9 @@ function scan(desktop) {
     return found
   }
   for (const name of entries) {
-    if (!/\.(bat|cmd)$/i.test(name)) continue
+    const isWin = /\.(bat|cmd)$/i.test(name)
+    const isLin = /\.desktop$/i.test(name)
+    if (!isWin && !isLin) continue
     const file = path.join(desktop, name)
     let text = ''
     try {
@@ -149,7 +238,9 @@ function scan(desktop) {
     } catch {
       continue
     }
-    const m = text.match(new RegExp('^rem\\s+' + MARKER + '\\s+worktree=(.+)$', 'm'))
+    const m = isWin
+      ? text.match(new RegExp('^rem\\s+' + MARKER + '\\s+worktree=(.+)$', 'm'))
+      : text.match(new RegExp('^' + MARKER_KEY + '=(.+)$', 'm'))
     if (!m) continue
     const worktree = m[1].trim()
     found.push({ file, worktree, alive: fs.existsSync(worktree) })
@@ -171,18 +262,32 @@ function cmdCreate(args) {
   if (/[^\x20-\x7e]/.test(name)) fail('launcher name must be ASCII: ' + name)
   const file = path.join(desktop, name)
 
-  const text = wrapperText(worktree, branchOf(worktree))
-  const problems = check(text)
+  const isWin = process.platform === 'win32'
+  const text = isWin ? wrapperText(worktree, branchOf(worktree)) : desktopFileText(worktree, branchOf(worktree))
+  const problems = isWin ? check(text) : checkDesktop(text)
   if (problems.length) fail('generated wrapper violates the rules: ' + problems.join('; '))
 
-  fs.writeFileSync(file, text, { encoding: 'ascii' })
+  fs.writeFileSync(file, text, isWin ? { encoding: 'ascii' } : { encoding: 'utf8', mode: 0o755 })
 
   const written = fs.readFileSync(file, 'utf8')
-  const after = check(written)
+  const after = isWin ? check(written) : checkDesktop(written)
   if (after.length) fail('written file violates the rules: ' + after.join('; '))
+
+  if (!isWin) {
+    // 让应用网格立刻刷出这条（没装 update-desktop-database 也不影响，只是晚一点出现）
+    try { spawnSync('update-desktop-database', [desktop], { stdio: 'ignore' }) } catch { /* best effort */ }
+  }
+
   console.log('[OK]   wrapper : ' + file)
   console.log('[OK]   worktree: ' + worktree)
-  console.log('[INFO] rules   : ASCII-only content, CRLF endings, no non-ASCII name')
+  if (isWin) {
+    console.log('[INFO] rules   : ASCII-only content, CRLF endings, no non-ASCII name')
+  } else {
+    console.log('[INFO] rules   : UTF-8 content, LF endings, no non-ASCII name')
+    console.log('[INFO] note    : written to the XDG applications dir, so it shows up in the')
+    console.log('[INFO]           app grid. For a desktop ICON instead, pass --desktop ~/Desktop')
+    console.log('[INFO]           and mark it trusted: gio set <file> metadata::trusted true')
+  }
   console.log('[INFO] cleanup : delete this file when the worktree is destroyed, or run')
   console.log('[INFO]           node ' + path.join('.AGENT', 'scripts', 'worktree-launcher', 'desktop-launcher.mjs') + ' clean')
 }

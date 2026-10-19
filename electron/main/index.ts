@@ -2,9 +2,33 @@
 import './ipcSafe'
 import { app, BrowserWindow, dialog, ipcMain, screen, shell, protocol, clipboard, nativeImage, Menu, net, Tray, powerMonitor } from 'electron'
 // 无 GPU/无头环境（AI 驱动真机测试）显式 KNOWBASE_DISABLE_GPU=1 时禁用 GPU 加速，防渲染进程连带崩溃
+// ⚠️ Linux 平台化（2026-10-19 实测）：这里的 appendSwitch('no-sandbox') 在 Linux 上**无效** ——
+//    sandbox 在 JS 主脚本执行前就已定下来，设了照样 `FATAL:setuid_sandbox_host.cc` + core dump。
+//    Linux 关沙箱只能走命令行 --no-sandbox 或 env ELECTRON_DISABLE_SANDBOX=1，
+//    由 scripts/launch.js 按需注入（判据与恢复修法见 scripts/electron-bin.js）。
 if (process.env.KNOWBASE_DISABLE_GPU === '1') {
   app.commandLine.appendSwitch('disable-gpu')
   app.commandLine.appendSwitch('no-sandbox')
+}
+
+// ===== Linux 显示后端守卫（2026-10-19）=====
+// 本项目只支持 X11 / XWayland。原生 Wayland 下这两块直接失效（本机实测）：
+//   · 窗口定位 —— dayPanelWindow 的贴顶停靠 / 桌面小组件、自绘边缘拖拽恢复走的都是 setBounds；
+//   · globalShortcut —— register() 返回 false（密码快速填充、日程小窗三组热键全废），
+//     且 screen.workArea 不带 GNOME 顶栏 strut（顶部停靠会藏到顶栏底下）。
+// ★ 本开关**不能**在这里 appendSwitch 钉死：实测 appendSwitch('ozone-platform', …) 对该开关无效
+//   （臭氧平台在 JS 主脚本执行前就已选定），只有 env ELECTRON_OZONE_PLATFORM_HINT 与命令行
+//   --ozone-platform 有效 —— 由 scripts/launch.js 负责钉 x11。
+//   这里只做**可观测性**：后端不是 x11 就明确告警一次，免得将来 Electron 升级改默认值后，
+//   变成「窗口位置不对、热键没反应」的悬案（对照：HINT=auto 在 Wayland 会话下会主动选中 Wayland）。
+if (process.platform === 'linux') {
+  const ozone = app.commandLine.getSwitchValue('ozone-platform')
+  if (ozone && ozone !== 'x11') {
+    console.warn(
+      `[platform] Linux 显示后端 = '${ozone}'（非 x11）。原生 Wayland 下窗口定位与全局热键不会工作；` +
+      '请用 ELECTRON_OZONE_PLATFORM_HINT=x11 或 --ozone-platform=x11 启动。',
+    )
+  }
 }
 import { join, basename, resolve, sep } from 'path'
 import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdirSync, statSync, readdirSync, appendFileSync } from 'fs'

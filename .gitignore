@@ -1,4 +1,8 @@
-node_modules/
+# 不带尾斜杠：同时匹配目录与**符号链接**。
+# Windows worktree 的 node_modules 是指向主仓的 junction（算目录，`node_modules/` 能匹配），
+# 但 Linux worktree 用的是 symlink —— 尾斜杠规则匹配不到它，于是它变成「未跟踪文件」，
+# 一个 `git add -A` 就把 symlink 提交进版本库（在别人机器上解析成断链）。2026-10-19 实测踩到。
+node_modules
 out/
 dist/
 dist-electron/
