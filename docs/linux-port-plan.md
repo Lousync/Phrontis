@@ -35,7 +35,7 @@
 | P0 | 启动器 / 沙箱 / 显示后端 / 字体 / worktree 启动器 | **已完成**（提交 `1a1ad3cf`） |
 | 顺带 | 台账 `F-7` / `F-8` / `F-9` | **已完成**（提交 `5ead0cec`） |
 | 顺带 | AI 工具面平台中性（审计 + 1 处文案 + 契约 G 节） | **已完成**（提交 `e8739bfc`） |
-| 阶段 1 | 托盘宿主探测 + 关窗语义 · `globalShortcut` 失败告警 · `safeStorage` 平台断言 · 跨平台密文显式提示 · inotify 上限与回收站自检 | 待做 |
+| 阶段 1 | 托盘宿主探测 + 关窗语义 · `globalShortcut` 失败告警 · `safeStorage` 平台断言 · 跨平台密文显式提示 · inotify 上限与回收站自检 | **已完成**（提交 `deb5c080`；契约 §H 110/110 + 7 条变异测试） |
 | 阶段 2 | 打包与发布：`build.linux` · `pack.mjs` · `publish-release.py` · Linux 关更新 · 渲染层隐藏更新入口 · CHANGELOG + 重跑更新说明 · 真机 deb 验收 | 待做 |
 | 阶段 3 | 文档口径（`readme` / `AGENTS.md` / `resources/help/*`） | **不做**（收尾提醒） |
 
@@ -97,9 +97,27 @@
 
 - **桌面融入的版本安排**：建议 3.9.2 只放「发布前必测 + 第一档里最省的几条」，其余开 **3.10.0**（新功能按仓库口径抬 minor）。
 - 第 11 条（系统搜索）是否认真做（工作量最大）。
-- 两处已先行拍板、可被推翻：`.desktop` 落 `~/.local/share/applications` 而非 `~/Desktop`；`AGENTS.md` 的 worktree 启动器规则暂未改成支持 `.desktop`（属阶段 3）。
-- 台账 `F-10`（未钉 locale 的 `localeCompare`）是否按「只改 AI 面」修。
-- 三个本地提交（`1a1ad3cf` / `5ead0cec` / `e8739bfc`）是否推送。
+- **顺手发现（与本线无关，待拍板归属）**：契约 `.AGENT/scripts/settings/verify-ai-tab-anchors.mjs` 常红 1 项 ——
+  入口项 `aiTools.llmUsage`（`src/modules/settings/sections.tsx:129`，AI 工具的「用量」页签）在视图里**没有落点锚点**，
+  即设置搜索能搜到、点进去没地方跳。已实测 HEAD（`2605501a`）即为此状态 ⇒ **非本批引入**。修法 = 在
+  `src/modules/settings/views/AiUsageTab.tsx` 的 token 用量卡上补一个 `data-setting-anchor="aiTools.llmUsage"`（一行）。
+  未改（避免与阶段 1 混在一批）。
+
+### 已拍板（2026-10-19，只留结论与依据）
+
+| 事项 | 结论 | 依据 / 落点 |
+|---|---|---|
+| 台账 `F-10`（未钉 locale 的 `localeCompare`） | **只改 AI 面**：`aiAssistantScopeSuggestPure` / `aiTools` 改码点序；人类列表保留 `'zh-Hans'` 钉死档 | 判据「给 AI 看的排序必须确定，给人看的可以自然」。已落码（提交 `deb5c080`）；契约 §H9 真跑 `LC_ALL=C / zh_CN.UTF-8 / en_US.UTF-8` 比行序 |
+| 三个本地提交（`1a1ad3cf` / `5ead0cec` / `e8739bfc`）+ 后续提交 | **推送** `feature/v3.9.2-linux` | 远端此前没有该分支，先落袋；双平台 tag 仍等发版再打 |
+| `.desktop` 落 `~/.local/share/applications` 而非 `~/Desktop` | **保留** | `~/Desktop` 上的 .desktop 需 `gio set … metadata::trusted true` 才能双击，否则弹「不受信任的启动器」 |
+| `AGENTS.md` 的 worktree 启动器规则（现仅覆盖 Windows `.bat`） | **本次不改** | 属阶段 3 文档口径；Linux 走 `.desktop`，规则改动面比代码大 |
+
+### 已核实、勿再按旧前提推理（2026-10-19）
+
+- **`trash` 包在 Linux 不依赖 `gio` / `trash-cli`**：`trash@10.1.1` 的 `node_modules/trash/lib/linux.js`
+  **自己实现 XDG Trash**（`xdg-trashdir` + `move-file` + `@stroncium/procfs`），只有 Windows 分支用
+  `chunked-exec` 调 powershell。阶段 1 原写的「外部命令缺失要降级提示」**没有可探测对象** ⇒
+  自检改为 **XDG Trash 目录可写性**（`$XDG_DATA_HOME/Trash` 或 `~/.local/share/Trash`）。
 
 ---
 
@@ -108,3 +126,5 @@
 | 日期 | 事项 |
 |---|---|
 | 2026-10-19 | 建档。登记「Linux 桌面融入」方向与三档候选；划出「窗口控件位置与长相 = 有意设计，不再建议」。 |
+| 2026-10-19 | **阶段 1 完成**（提交 `deb5c080`）。五项：① 新增 `electron/lib/linuxDesktop.ts`（D-Bus 名探测状态栏宿主 + XDG Trash 可写性自检）并把关窗语义改为「Linux 且确有托盘才隐藏，否则真退出」；② `globalShortcut` 三处注册改看**返回值**并汇总提示；③ `safeStorage` 密文头改**按平台**断言（Linux = v11，探针按平台给期望头）+ 启动打印后端名；④ 解密改**三态**并透出 `passwordUndecryptable` / `keyUnreadable`，密码本与 AI 模型页给行内标记 + 可关闭提示条（`secretBox` 与 `passwordRepo` 两份拷贝同步改、互相标注），新增密文平台 IPC 与主进程告警通道；⑤ inotify 配额预检 + ENOSPC 归因 + 回收站自检。台账 `F-10` 按「只改 AI 面」一并收口。 |
+| 2026-10-19 | 同轮两条**事实更正 / 新事实**：① `trash@10.1.1` 在 Linux 自实现 XDG Trash、**不依赖 gio/trash-cli** ⇒ 回收站自检改判「XDG Trash 目录可写性」（原前提不成立，已与开发负责人确认）；② `~/Desktop` 上的 .desktop 需 `metadata::trusted` 才能双击 ⇒ 维持落 `~/.local/share/applications`。另：契约 `verify-linux-port.mjs` 增 §H 56 条（110/110）并做 **7 条变异测试**，其中「inotify 预检位置」一条第一版是**假断言**（`indexOf` 命中了函数定义），已改为只在 `syncVaultWatcher` 内部找调用；`verify-perception.mjs` 的 `J12b` 随 `bind()` 包装改钉点。真机 dev 启动实测：密文自检不再报假故障、托盘创建成功、无回收站/inotify 告警。**顺手发现**（非本批引入）：`verify-ai-tab-anchors.mjs` 常红一项 `aiTools.llmUsage` 无落点锚点，已记入 §4 待拍板。 |
