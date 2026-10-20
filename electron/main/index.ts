@@ -275,7 +275,7 @@ async function createTray(): Promise<void> {
     tray = new Tray(image)
     tray.setToolTip('Phrontis · 日程打卡')
     // 只留应用级动作：托盘是「应用还在运行」的指示 + 显示/退出。
-    // 任务栏模式（自由漂浮/顶部停靠/桌面小组件）功能未完成，2026-10-20 用户要求先从菜单移除。
+    // 任务栏模式（自由漂浮/顶部停靠/桌面小组件）已整条删除（2026-10-20），顶栏联动由 GNOME 扩展承担。
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: '显示主窗口', click: showMainWindow },
       { type: 'separator' },

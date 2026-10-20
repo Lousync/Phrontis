@@ -1,8 +1,8 @@
 # 桌面集成实施计划（阶段 1 · 核心通路）
 
-> 状态：**阶段 1 第一批已落码**（2026-10-20）。
+> 状态：**阶段 1 第一批已落码**（2026-10-20）；阶段 2 的 GNOME 扩展（A+B）已在独立仓库交付。
 > 形态拍板见 `phrontis-desktop-integration/docs/decisions.md`（A+B+C，D/E 不做）；对外契约见该仓库 `docs/interface.md`。
-> 本文只记「应用侧怎么实现、改了哪些文件、哪些刻意没做」。
+> 本文只记「应用侧怎么实现、改了哪些文件、哪些刻意没做」。决策交接见 `docs/desktop-integration-handoff.md`。
 
 ## 1. 三层架构
 
@@ -83,7 +83,10 @@ Core1 D-Bus 接口 + 托盘               GNOME 扩展（A 顶栏 + B 磁贴）
 
 ## 7. 刻意没做（下一批）
 
-- `PomodoroControl`：权威状态机在渲染层，需要主进程 → 渲染层的命令通道（先做通道，再开方法）。
-- `OpenApp(relPath)`：需要渲染层「按路径开页签」通道。
-- GNOME 扩展（A+B）：等接口跑通再动，避免边做边改契约。
+- `PomodoroControl`：**2026-10-20 用户拍板暂不做**（性价比不高，优先级低）。权威状态机在渲染层，
+  真要做得先补主进程 → 渲染层命令通道。
+- `OpenApp(relPath)`：**暂不做**（用户只要顶栏联动；应用内搜索已可用）。
+- 任务栏模式（top-dock / desktop-widget）：**2026-10-20 已整条删除**，小窗只保留自由漂浮；
+  顶栏联动由 GNOME 扩展承担（决策与清单见 `docs/desktop-integration-handoff.md` §3.1）。
+- GNOME 扩展（A+B）：已交付，见独立仓库 `phrontis-desktop-integration`。
 - 图标 / 深色跟随：属「桌面融入」backlog，与本接口无关。

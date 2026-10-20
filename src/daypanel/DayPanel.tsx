@@ -3,23 +3,18 @@ import {
   GripHorizontal, X, PanelRightClose, PanelRightOpen, Timer,
   CalendarDays, ListChecks, Globe,
 } from 'lucide-react'
-import type { ScheduleTodo, Habit, HabitRecord } from '../types'
+import type { ScheduleTodo } from '../types'
 import { usePomodoro } from '../modules/toolbox/hooks/PomodoroContext'
 import { localToday } from '../lib/date'
 import {
-  getScheduleTodos, getScheduleOverdue, updateScheduleTodo, habitGetAll,
+  getScheduleTodos, getScheduleOverdue, updateScheduleTodo,
 } from '../lib/ipc'
 import { useDataChanged } from '../lib/dataChanged'
-import { buildRecordIndex, isPlannedOn } from '../modules/toolbox/components/habit-tracker/dateUtils'
-// v3.4.0 批次4（方案 §3.7）：DAY_TABS 四 Tab 抽为可嵌入控件（components/workbench/widgets/），
-// 右栏简略视图与本面板（脱离宿主）**共用同一组件**，不复制渲染。
 import { TaskWidget, addMinutesLocal, parseLocalTime } from '../components/workbench/widgets/TaskWidget'
 import { HabitWidget } from '../components/workbench/widgets/HabitWidget'
 import { PomoWidget, PomodoroPopoutPanel } from '../components/workbench/widgets/PomoWidget'
 import { NavWidget } from '../components/workbench/widgets/NavWidget'
 import { ReminderBar, type ReminderItem } from './panel/ReminderBar'
-
-const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
 /** 「今日工作台」四 Tab：日程 / 打卡 / 番茄 / 导航（嵌入式在表头下方，脱离态在底部） */
 const DAY_TABS = [
@@ -39,17 +34,9 @@ function msUntilTomorrow(): number {
 const dragRegion = { WebkitAppRegion: 'drag' } as React.CSSProperties
 const noDrag = { WebkitAppRegion: 'no-drag' } as React.CSSProperties
 
-export type PanelMode = 'floating' | 'top-dock' | 'desktop-widget'
-
 export interface DayPanelProps {
   /** embedded：主窗口内嵌面板（高度由父容器决定，h-full）；popout：独立 BrowserWindow（h-screen） */
   mode: 'embedded' | 'popout'
-  /** popout 专属：桌面互动模式（floating 自由漂浮 / top-dock 顶部停靠 / desktop-widget 桌面小组件） */
-  panelMode?: PanelMode
-  /** popout + top-dock 专属：收缩为触碰条 */
-  collapsed?: boolean
-  /** popout + desktop-widget 专属：鼠标穿透 ⇄ 可交互 */
-  widgetInteractive?: boolean
   /** 嵌入→脱离（内嵌模式顶部按钮触发）；主进程负责创建独立窗口 */
   onPopout?: () => void
   /** 脱离→嵌入（独立窗口顶部按钮触发 / Esc）；主进程负责销毁独立窗口 */
@@ -66,20 +53,14 @@ export interface DayPanelProps {
  * 日程与打卡侧边栏组件（WeChat 模式：同一组件既渲染主窗口内嵌面板，也渲染独立脱离窗口）。
  * v3.4.0 批次4 起：内嵌态由右栏小工具接管的职责（任务/打卡/番茄/导航的渲染与数据加载）
  * 全部下沉到 widgets 控件；本组件保留**宿主职责**——表头、四 Tab 切换、逾期截止提醒条、
- * 全局番茄条、桌面小组件（isWidget 只读角标）与脱离窗口三种互动模式。
+ * 全局番茄条与脱离窗口（自由漂浮）。
  */
-export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widgetInteractive = false, onPopout, onDockBack, onClose, pomodoroStatus = null }: DayPanelProps) {
+export function DayPanel({ mode, onPopout, onDockBack, onClose, pomodoroStatus = null }: DayPanelProps) {
   const [todayStr, setTodayStr] = useState(() => localToday())
-  const todayDate = useMemo(() => {
-    const [y, m, d] = todayStr.split('-').map(Number)
-    return new Date(y, m - 1, d)
-  }, [todayStr])
 
-  // 数据：仅保留宿主级消费——逾期截止（提醒条/红点角标）与今日统计（小组件角标）
+  // 数据：仅保留宿主级消费——逾期截止（提醒条/红点角标）
   const [todos, setTodos] = useState<ScheduleTodo[]>([])
   const [overdue, setOverdue] = useState<ScheduleTodo[]>([])
-  const [habits, setHabits] = useState<Habit[]>([])
-  const [records, setRecords] = useState<HabitRecord[]>([])
   // 嵌入式「今日工作台」当前 Tab（脱离态忽略）
   const [tab, setTab] = useState<'task' | 'habit' | 'pomo' | 'nav'>('task')
 
@@ -99,15 +80,12 @@ export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widg
 
   const load = useCallback(async () => {
     try {
-      const [todayList, od, habitData] = await Promise.all([
+      const [todayList, od] = await Promise.all([
         getScheduleTodos(todayStr),
         getScheduleOverdue(todayStr),
-        habitGetAll(),
       ])
       setTodos(todayList)
       setOverdue(od)
-      setHabits(habitData.habits ?? [])
-      setRecords(habitData.records ?? [])
     } catch (e) {
       console.error('[DayPanel] 加载失败', e)
     }
@@ -115,7 +93,6 @@ export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widg
 
   useEffect(() => { void load() }, [load])
   useDataChanged('schedule', load)
-  useDataChanged('habit', load)
 
   // Esc：嵌入式关闭内嵌面板；脱离式吸附回内嵌
   useEffect(() => {
@@ -130,10 +107,6 @@ export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widg
     return () => window.removeEventListener('keydown', onKey)
   }, [mode, onClose, onDockBack])
 
-  const topTodos = useMemo(() => todos.filter(t => !t.parentId), [todos])
-  const pendingCount = topTodos.filter(t => t.status === 'pending').length
-  const doneCount = topTodos.filter(t => t.status === 'done').length
-
   /** 已逾期的 DDL（角标口径）：deadline 类、带 time、未完成、且未处于打盹期内 */
   const overdueDdls = useMemo<ReminderItem[]>(() => {
     const now = Date.now()
@@ -144,16 +117,6 @@ export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widg
       .sort((a, b) => parseLocalTime(a.time!) - parseLocalTime(b.time!))
       .map(t => ({ id: t.id, title: t.title, time: t.time! }))
   }, [overdue, todos])
-
-  const habitIndex = useMemo(() => buildRecordIndex(records), [records])
-  const plannedHabits = useMemo(
-    () => habits.filter(h => !h.archived && isPlannedOn(h, todayDate)),
-    [habits, todayDate],
-  )
-  const checkedToday = useMemo(
-    () => plannedHabits.filter(h => habitIndex.get(h.id)?.has(todayStr)).length,
-    [plannedHabits, habitIndex, todayStr],
-  )
 
   /** 提醒「稍后」：打盹 1 小时（写 snoozeUntil，打盹期内不再提醒该任务） */
   const snooze = useCallback(async (id: string) => {
@@ -186,35 +149,10 @@ export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widg
     </button>
   ))
 
-  // ---- 桌面互动模式判定 ----
-  const isTopDock = mode === 'popout' && panelMode === 'top-dock'
-  const isWidget = mode === 'popout' && panelMode === 'desktop-widget'
-  const showTouchStrip = isTopDock && collapsed
-
   // 容器高度：嵌入式由外层卡片壳 flex 提供（flex-1）；独立窗口自己 h-screen。
-  // top-dock 走透明窗口（无底色，圆角毛玻璃由 containerStyle 提供）；floating 保持不透明实体窗
   const containerCls = mode === 'embedded'
     ? 'relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)] select-none'
-    : `relative flex h-screen flex-col overflow-hidden text-[var(--text-primary)] select-none${isTopDock ? '' : ' bg-[var(--bg-primary)]'}`
-  // top-dock 展开态：透明窗口 + 底部圆角 + 毛玻璃（圆润悬浮感，顶部贴屏无圆角）
-  const containerStyle = isTopDock ? {
-    backgroundColor: 'color-mix(in srgb, var(--bg-primary) 88%, transparent)',
-    backdropFilter: 'blur(14px)',
-    boxShadow: '0 10px 36px rgb(0 0 0 / 0.28)',
-    borderRadius: '0 0 20px 20px',
-  } : undefined
-
-  // top-dock：移入展开 / 移出 500ms 收回（主进程 grace）；小组件：划过激活可交互 / 移出恢复穿透
-  const onRootMouseEnter = useCallback(() => {
-    if (isTopDock) void window.api?.dayPanelTopdockExpand?.()
-  }, [isTopDock])
-  const onRootMouseLeave = useCallback(() => {
-    if (isTopDock && !collapsed) void window.api?.dayPanelTopdockCollapseIntent?.()
-    if (isWidget && widgetInteractive) void window.api?.dayPanelWidgetInteractive?.(false)
-  }, [isTopDock, isWidget, collapsed, widgetInteractive])
-  const onRootMouseMove = useCallback(() => {
-    if (isWidget && !widgetInteractive) void window.api?.dayPanelWidgetInteractive?.(true)
-  }, [isWidget, widgetInteractive])
+    : 'relative flex h-screen flex-col overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)] select-none'
 
   // 主窗口全屏弹窗遮罩 → 本 dock 窗跟随压暗（独立窗口时；内嵌态在主窗内已被遮罩盖住，无需自绘）
   const [mainDim, setMainDim] = useState(false)
@@ -224,106 +162,22 @@ export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widg
     return () => { off?.() }
   }, [mode])
 
-  // 触碰条：收缩态占满 10px 透明窗口，半透明圆角条 + 待办红点 + 顶部高亮
-  if (showTouchStrip) {
-    return (
-      <div
-        className="relative h-full w-full cursor-pointer overflow-visible px-2"
-        onMouseEnter={onRootMouseEnter}
-        title="日程与打卡 · 悬停展开"
-      >
-        <div
-          className="absolute inset-0 top-0 rounded-b-xl border-x border-b border-[var(--border-color)]"
-          style={{
-            backgroundColor: 'color-mix(in srgb, var(--bg-primary) 78%, transparent)',
-            boxShadow: '0 3px 12px rgb(0 0 0 / 0.18)',
-          }}
-        />
-        <div className={`absolute inset-x-5 top-0 h-[3px] rounded-b ${overdueDdls.length > 0 ? 'bg-[var(--danger)] animate-pulse' : 'bg-[var(--accent)]/70'}`} />
-        {pendingCount > 0 && (
-          <div
-            className="absolute right-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full"
-            style={{ backgroundColor: 'var(--danger)' }}
-            title={`${pendingCount} 个待办`}
-          />
-        )}
-      </div>
-    )
-  }
-
-  // 桌面小组件：只读展示，鼠标划过激活为可交互
-  if (isWidget) {
-    return (
-      <div
-        className={`flex h-full w-full flex-col gap-1.5 overflow-hidden rounded-2xl border p-3 text-[var(--text-primary)] ${overdueDdls.length > 0 ? 'border-[var(--danger)]' : 'border-[var(--border-color)]'}`}
-        style={{
-          backgroundColor: 'color-mix(in srgb, var(--bg-primary) 88%, transparent)',
-          backdropFilter: 'blur(12px)',
-          boxShadow: '0 6px 28px rgb(0 0 0 / 0.28)',
-        }}
-        onMouseMove={onRootMouseMove}
-        onMouseLeave={onRootMouseLeave}
-      >
-        <div className="flex items-center justify-between">
-          <span className="text-[11px] font-medium">
-            {todayDate.getMonth() + 1}月{todayDate.getDate()}日 {WEEKDAY_LABELS[todayDate.getDay()]}
-          </span>
-          <span className="flex items-center gap-1.5">
-            {overdueDdls.length > 0 && (
-              <span className="rounded-full bg-[var(--danger)] px-1.5 leading-[15px] text-[10px] font-semibold text-white" title={`${overdueDdls.length} 个逾期截止`}>
-                {overdueDdls.length}
-              </span>
-            )}
-            <span className="text-[10px] text-[var(--text-muted)]">{widgetInteractive ? '可操作' : '划过激活'}</span>
-          </span>
-        </div>
-        <div className="flex items-baseline gap-1 text-[11px]">
-          <span className="text-[var(--text-muted)]">今日待办</span>
-          <span className="text-[13px] font-medium text-[var(--accent)]">{pendingCount}</span>
-          <span className="text-[10px] text-[var(--text-muted)]">/ 完成 {doneCount}</span>
-        </div>
-        <div className="flex items-center gap-1 text-[11px]">
-          <span className="text-[var(--text-muted)]">今日打卡</span>
-          <span className="font-medium">{checkedToday}/{plannedHabits.length}</span>
-        </div>
-        <div className="mt-auto flex flex-col gap-1">
-          <button
-            onClick={() => { window.api?.dayPanelOpenInMain?.('schedule') }}
-            className="rounded-md border border-[var(--border-color)] py-1 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            title="在主窗口任务模块中管理"
-          >
-            打开任务模块
-          </button>
-          <button
-            onClick={() => { window.api?.dayPanelSetMode?.('floating'); window.api?.dayPanelPopout?.() }}
-            className="rounded-md py-0.5 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)]"
-            title="切换为自由漂浮模式"
-          >
-            切换自由漂浮
-          </button>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className={containerCls} style={containerStyle} onMouseEnter={onRootMouseEnter} onMouseLeave={onRootMouseLeave}>
-      {/* 主窗弹窗跟随压暗层：在圆角容器内（containerStyle 的 borderRadius + 根 overflow-hidden 裁掉方角），
+    <div className={containerCls}>
+      {/* 主窗弹窗跟随压暗层：在圆角容器内（根 overflow-hidden 裁掉方角），
           pointer-events-none 保持遮挡期不可交互；opacity 过渡只动透明度（动效铁律） */}
       <div
         aria-hidden
         className={`pointer-events-none absolute inset-0 z-[70] transition-opacity duration-200 ${mainDim ? 'bg-black/35 opacity-100' : 'bg-black/0 opacity-0'}`}
       />
-      {/* 表头：嵌入式下用 WebkitAppRegion: drag 让用户能拖出脱离，独立窗口由 BrowserWindow 自身拖动；
-          top-dock 展开态固定贴顶，禁拖（避免用户拖走破坏停靠位置） */}
+      {/* 表头：嵌入式下用 WebkitAppRegion: drag 让用户能拖出脱离，独立窗口由 BrowserWindow 自身拖动 */}
       <div
         className="flex h-10 shrink-0 select-none items-center justify-between border-b border-[var(--border-color)] px-3"
-        style={{ backgroundColor: 'color-mix(in srgb, var(--bg-tertiary) 78%, transparent)', ...(mode === 'popout' && !isTopDock ? dragRegion : undefined) }}
+        style={{ backgroundColor: 'color-mix(in srgb, var(--bg-tertiary) 78%, transparent)', ...(mode === 'popout' ? dragRegion : undefined) }}
       >
         <div className="flex items-center gap-1.5 text-[12px]">
-          {mode === 'popout' && !isTopDock && <GripHorizontal size={13} className="text-[var(--text-muted)]" />}
+          {mode === 'popout' && <GripHorizontal size={13} className="text-[var(--text-muted)]" />}
           {mode === 'embedded' ? '今日工作台' : '日程与打卡'}
-          {isTopDock && <span className="text-[10px] font-normal text-[var(--text-muted)]">顶部停靠 · 移出自动收回</span>}
         </div>
         <div className="flex items-center gap-0.5" style={mode === 'popout' ? noDrag : undefined}>
           {mode === 'embedded' && (
@@ -335,7 +189,7 @@ export function DayPanel({ mode, panelMode = 'floating', collapsed = false, widg
               <PanelRightClose size={14} strokeWidth={1.5} />
             </button>
           )}
-          {mode === 'popout' && !isTopDock && (
+          {mode === 'popout' && (
             <button
               onClick={onDockBack}
               className="rounded p-1.5 text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"

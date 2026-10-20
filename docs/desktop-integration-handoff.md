@@ -10,9 +10,9 @@
 |---|---|---|---|
 | 1 | 番茄钟控制 `PomodoroControl` | **暂不做** —— 性价比不高、优先级低 | 不做 |
 | 2 | `OpenApp(relPath)` | **暂不做** —— 只想要顶栏联动，外部搜索/按路径打开不需要 | 不做 |
-| 3 | 任务栏模式（top-dock / desktop-widget） | **直接删除干净**，只保留自由漂浮；顶栏联动是唯一方向 | **待做**（清单见 §3.1） |
-| 4 | 设置搜索 `aiTools.llmUsage` 无落点 | **顺手修** | **待做**（§3.2） |
-| 5 | 坏产物 `packs/3.9.2-4` | **删除**；只删这一个，别删错 | **待做**（§3.3） |
+| 3 | 任务栏模式（top-dock / desktop-widget） | **直接删除干净**，只保留自由漂浮；顶栏联动是唯一方向 | **已完成**（§3.1） |
+| 4 | 设置搜索 `aiTools.llmUsage` 无落点 | **顺手修** | **已完成**（`c21f5a5e`） |
+| 5 | 坏产物 `packs/3.9.2-4` | **删除**；只删这一个，别删错 | **已完成**（`3.9.2-5` 保留） |
 | 6 | 面板待办口径 | **保持 A**：今天到期 + 非计划类逾期；不含待安排 / 已完成 | **已完成** |
 | 7 | 托盘 | 图标保留（运行指示）；菜单只留「显示主窗口 / 退出」 | **已完成** |
 | 8 | 面板交互 | 勾选/打卡**不关闭面板** + 勾选动效 | **已落码，待重登验证** |
@@ -27,61 +27,51 @@
 
 ## 2. 当前状态
 
-- 主仓分支 `feature/v3.9.2-linux`，最新 `8d27f15e`（含 D-Bus Core1、托盘、原生快捷键、
-  登记表去重、A 口径）。工作区干净。
+- 主仓分支 `feature/v3.9.2-linux`，工作区干净；本轮提交见 `git log -3`
+  （`c21f5a5e` 锚点 + 交接单，以及「删除任务栏模式」的收尾提交）。
 - 集成仓 `phrontis-desktop-integration`，最新 `dc5ecee`（扩展 A+B、原生快捷键、面板交互）。
 - 已验证：`GetToday` / `ToggleDayPanel` 经 D-Bus 可用；扩展 `ACTIVE`；`[Tray] Tray created`；
-  `[vault-registry] 清理同 id 重复行：2 → 1`。
+  `[vault-registry] 清理同 id 重复行：2 → 1`；小窗脱离 / 吸附（dev bridge 实测：开窗落右下角
+  `1596,536`、吸附后重开位置保持、无 (0,0) 残留）。
 - **未验证**：扩展的「面板不关闭 + 动效」是 ESM 模块，`disable/enable` 不重载代码，
   必须**注销重登**后才生效。
 
 ## 3. 待做清单
 
-### 3.1 删除任务栏模式（用户拍板）
+### 3.1 删除任务栏模式 —— 已完成（2026-10-20）
 
-目标：只保留 **floating（自由漂浮）**；删除 top-dock（顶部停靠）与 desktop-widget（桌面小组件）
-的全部代码与入口。保留「脱离 / 吸附回右栏」的小窗基本能力。
+只保留 **floating（自由漂浮）**。已删除：
 
-改动面（按文件）：
+- 主进程 `electron/main/dayPanelWindow.ts`：`PanelMode` / `MODES` / `setPanelMode` / `getPanelMode` /
+  `onPanelModeChanged`、top-dock 的收缩/展开与高度动画、desktop-widget 的穿透与固定尺寸、
+  拖拽贴顶吸附、`Control+Alt+Up/Down`、`daypanel:mode-set|get`、`daypanel:topdock-*`、
+  `daypanel:widget-interactive`、`daypanel:get-state`
+- `electron/preload/index.ts` / `src/types/index.ts`：对应 API 与 state 字段；
+  `onDayPanelStateChanged` 载荷收成 `{ detached }`
+- `src/daypanel/DayPanel.tsx`：`panelMode / collapsed / widgetInteractive` props、触碰条、
+  桌面小组件视图、hover 激活逻辑
+- `src/daypanel/DayPanelWindowApp.tsx`：不再订阅形态（固定漂浮）
+- 保留：脱离 / 吸附回右栏（`dayPanelPopout` / `dayPanelDockBack`）、内容高度自适应、位置落盘
 
-- `electron/main/dayPanelWindow.ts`
-  - `PanelMode` / `MODES` / `mode` / `explicitMode` 收成单一 floating（可直接删类型）
-  - 删 `getPanelMode` / `setPanelMode` / `onPanelModeChanged` / `dayPanelModeChanged` 广播
-  - 删 `computeTargetPos` 的 top-dock / desktop-widget 分支；`applyMode` 的分支
-  - 删 top-dock 展开/收缩动画、`EXPAND_MS`、`collapsed`、触碰条、`dayPanelTopdock*`
-  - 删 desktop-widget 的 `widgetInteractive`、穿透切换、固定尺寸逻辑
-  - 删 `onPopoutMoved` 里的「贴顶自动停靠」判定（`DOCK_JUDGE_MS` / `POPOUT_GRACE_MS` 视引用清理）
-  - 键盘：删 `Control+Alt+Up` / `Control+Alt+Down`（保留 `Control+Alt+S`）
-  - IPC：删 `daypanel:mode-set`、`daypanel:mode-get`、`daypanel:topdock-*`、`daypanel:widget-interactive`
-- `electron/preload/index.ts`
-  - 删 `dayPanelSetMode` / `dayPanelTopdockExpand` / `dayPanelTopdockCollapseIntent` /
-    `dayPanelTopdockCancelCollapse` / `dayPanelWidgetInteractive`
-  - `dayPanelGetState` / `onDayPanelStateChanged` 的返回结构收成 `{ detached }`
-- `src/types/index.ts`
-  - 同步删上述 API 与 `mode/collapsed/widgetInteractive` 字段
-- `src/daypanel/DayPanel.tsx`、`src/daypanel/DayPanelWindowApp.tsx`
-  - 删 `panelMode` / `collapsed` / `widgetInteractive` props 与 top-dock / widget 分支、
-    按钮（「划过激活 / 可操作」等）与相关事件
-- 契约 / 文档
-  - `grep -rn "top-dock\|desktop-widget\|widgetInteractive\|dayPanelSetMode" src electron .AGENT`
-    清零（历史文档里的说明除外）
-  - 跑相关契约 + 双份 `tsc`
-  - `docs/desktop-integration-plan.md` / `docs/linux-port-plan.md` 补一条变更记录
+契约同步：
+- `verify-workbench-shell` 258 项全绿
+- `verify-habit-link-removal`：打卡刷新通道断言改挂 `HabitWidget`；打卡写入断言改指
+  `electron/lib/habitActions.ts`（IPC 与 D-Bus 共用的唯一实现）
+- `verify-linux-port`：托盘宿主断言接受「1.2s × 3 重试」写法；`extraResources` 期望值 5 → 6
+  （新增 `scripts/desktop-bridge`）
 
-> 风险：`dayPanelWindow.ts` 里模式逻辑与尺寸/显示耦合，删完必须真机验证
-> 「脱离 → 小窗可拖动/可关闭 → 吸附回右栏」仍正常。
+> 仍需真机验证：脱离 → 小窗可拖动/可关闭 → 吸附回右栏。
 
-### 3.2 修设置搜索落点（一行）
+### 3.2 修设置搜索落点 —— 已完成（`c21f5a5e`）
 
-- `src/modules/settings/views/AiUsageTab.tsx` 的「打开用量看板」按钮加
+- `src/modules/settings/views/AiUsageTab.tsx` 的「打开用量看板」按钮已加
   `data-setting-anchor="aiTools.llmUsage"`
-- 验收：`node .AGENT/scripts/settings/verify-ai-tab-anchors.mjs`（应全绿；这是存量 1 FAIL）
+- `verify-ai-tab-anchors`：96 PASS / 0 FAIL
 
-### 3.3 删除坏产物
+### 3.3 删除坏产物 —— 已完成
 
-- 只删 `packs/3.9.2-4`（该次 `app.asar` 文件表错位，装上会退化成 Electron 默认页）
-- 删除前用 `scripts/pack.mjs` 的 `verifyPackedAsar` 确认它失败（坏包）再删
-- **不要动** `packs/3.9.2-5`（已验证的好包）与其它历史目录
+- 删除前用 `verifyPackedAsar` 确认 `packs/3.9.2-4` 失败（坏包），已删除
+- `packs/3.9.2-5`（验证通过的好包）保留
 
 ### 3.4 重登验收（只有用户能做）
 

@@ -4,23 +4,16 @@ import { getAllSettings } from '../lib/ipc'
 import { useDataChanged } from '../lib/dataChanged'
 import { Toast } from '../components/shared/Toast'
 import { PomodoroProvider } from '../modules/toolbox/hooks/PomodoroContext'
-import { DayPanel, type PanelMode } from './DayPanel'
+import { DayPanel } from './DayPanel'
 
 /**
  * 独立脱离窗口根应用：与主窗口共用 #/day-panel 路由，仅在 detached=true 时由主进程创建
  * 独立的 BrowserWindow 加载并渲染本应用。主窗口内嵌态下不进入此分支（App.tsx 直接渲染
  * <DayPanel mode="embedded" />）。
  *
- * 独立态有三种桌面互动模式（主进程驱动）：
- * - floating      自由漂浮
- * - top-dock      顶部停靠（收缩触碰条 / 展开）
- * - desktop-widget 桌面小组件（鼠标穿透 / 可交互）
+ * 独立态固定为自由漂浮窗口（2026-10-20 删除顶部停靠 / 桌面小组件两形态）。
  */
 export function DayPanelWindowApp() {
-  const [panelMode, setPanelMode] = useState<PanelMode>('floating')
-  const [collapsed, setCollapsed] = useState(false)
-  const [widgetInteractive, setWidgetInteractive] = useState(false)
-
   const applyAppearance = useCallback(async () => {
     try {
       const s = await getAllSettings()
@@ -48,20 +41,7 @@ export function DayPanelWindowApp() {
   useEffect(() => { void applyAppearance() }, [applyAppearance])
   useDataChanged('settings', () => { void applyAppearance() })
 
-  // 订阅主进程状态：mode / 收缩态 / 小组件可交互态
-  useEffect(() => {
-    void window.api?.dayPanelGetState?.().then(s => {
-      setPanelMode((s?.mode as PanelMode) || 'floating')
-      setCollapsed(!!s?.collapsed)
-      setWidgetInteractive(!!s?.widgetInteractive)
-    }).catch(() => {})
-    const offMode = window.api?.onDayPanelModeChanged?.((s) => setPanelMode((s.mode as PanelMode) || 'floating'))
-    const offCollapsed = window.api?.onDayPanelCollapsedChanged?.((s) => setCollapsed(s.collapsed))
-    const offWidget = window.api?.onDayPanelWidgetInteractiveChanged?.((s) => setWidgetInteractive(s.interactive))
-    return () => { offMode?.(); offCollapsed?.(); offWidget?.() }
-  }, [])
-
-  // 报告 document 实际所需尺寸给主进程，独立窗口据此贴合高度（floating/top-dock 展开态）。
+  // 报告 document 实际所需尺寸给主进程，独立窗口据此贴合高度。
   // 内容变多时主动变大；变少时主进程不缩（保留用户拉大的空间）；首次开窗强制贴合避免闪烁。
   useEffect(() => {
     let timer: number | null = null
@@ -101,9 +81,6 @@ export function DayPanelWindowApp() {
     <PomodoroProvider passive>
       <DayPanel
         mode="popout"
-        panelMode={panelMode}
-        collapsed={collapsed}
-        widgetInteractive={widgetInteractive}
         pomodoroStatus={pomodoroStatus}
         onDockBack={() => { void window.api?.dayPanelDockBack?.() }}
       />

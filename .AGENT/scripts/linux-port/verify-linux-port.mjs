@@ -231,7 +231,7 @@ check('H2 无托盘时直接放行关闭（不 preventDefault）', (() => {
 check('H2 负向：close 里不再是无条件劫持（旧的 if (!isQuitting) { preventDefault(); hide() }）',
   !/if \(!isQuitting\) \{\s*e\.preventDefault\(\)/.test(stripComments(read('electron/main/index.ts'))))
 check('H2 无宿主时不创建托盘（建了也看不见，却会让窗口藏了回不来）',
-  /process\.platform === 'linux' && !\(await detectStatusNotifierHost\(\)\)/.test(stripComments(read('electron/main/index.ts'))))
+  /process\.platform === 'linux'[\s\S]{0,400}?detectStatusNotifierHost\(\)[\s\S]{0,400}?if \(!host\)/.test(stripComments(read('electron/main/index.ts'))))
 
 // H3 全局快捷键：结论看 register 的返回值（原先只 try/catch，失败静默）
 check('H3 PasswordFiller 检查 register 返回值并提示',
@@ -415,7 +415,8 @@ check('I1 desktopName + syncDesktopName 成对（GNOME 才能把窗口关联到 
   pkg.desktopName === 'phrontis.desktop' && pkg.build?.linux?.syncDesktopName === true)
 check('I1 负向：Windows 侧配置一行未动（win / nsis / extraResources / asarUnpack / npmRebuild / electronDist）',
   pkg.build?.win?.target?.[0]?.target === 'nsis' && pkg.build?.nsis?.oneClick === false
-  && Array.isArray(pkg.build?.extraResources) && pkg.build.extraResources.length === 5
+  && Array.isArray(pkg.build?.extraResources) && pkg.build.extraResources.length === 6
+  && pkg.build.extraResources.some((e) => e?.from === 'scripts/desktop-bridge' && e?.to === 'desktop-bridge')
   && pkg.build?.asarUnpack?.[0] === '**/node_modules/@lydell/node-pty*/**'
   && pkg.build?.npmRebuild === false && pkg.build?.electronDist === 'node_modules/electron/dist')
 check('I1 deb.afterInstall 指向真实存在的脚本文件',

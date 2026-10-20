@@ -128,16 +128,10 @@ export const BROADCAST_CHANNEL = {
   bookMarketSourceDraft: 'bookMarket:source-draft',
   /** 番茄钟状态广播，载荷 PomodoroSnapshot */
   pomodoroStateBroadcast: 'pomodoro:state-broadcast',
-  /** 小窗（日面板）状态变化，载荷 `{ detached, mode, collapsed, widgetInteractive }` */
+  /** 小窗（日面板）状态变化，载荷 `{ detached }` */
   dayPanelStateChanged: 'daypanel:state-changed',
-  /** 小窗（日面板）形态切换，载荷 `{ mode: PanelMode }` */
-  dayPanelModeChanged: 'daypanel:mode-changed',
   /** 小窗（日面板）显示/隐藏切换意图，无载荷 */
   dayPanelToggleVisibility: 'daypanel:toggle-visibility',
-  /** 小窗（日面板）top-dock 收缩态变化，载荷 `{ collapsed: boolean }` */
-  dayPanelCollapsedChanged: 'daypanel:collapsed-changed',
-  /** 小窗（日面板）桌面小组件可交互态变化，载荷 `{ interactive: boolean }` */
-  dayPanelWidgetInteractiveChanged: 'daypanel:widget-interactive-changed',
   /** 主窗口全屏弹窗遮罩开合（dock 跟随压暗），载荷 `{ dim: boolean }`；渲染层发起走 'main:modal-dim' */
   mainModalDimChanged: 'main:modal-dim-broadcast',
   /** 主进程 → 渲染层的**用户可见告警**（功能降级但进程照跑的事实），载荷 `AppNotice`

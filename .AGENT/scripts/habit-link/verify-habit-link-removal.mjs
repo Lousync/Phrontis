@@ -11,7 +11,7 @@
  *      但若调用点被包在 try/catch 或 `void` 表达式里又补了 local 桩，就彻底静默了。
  *   ④ **反向误删（本项最贵的一条）**：整条拔线时顺手带走 **手动打卡** 或
  *      **远程监督推送（`notifyCheckin`）**。后者没有界面入口，删了要等下一次真实打卡推送
- *      失败才知道；`DayPanel` 那条 `useDataChanged('habit')` 监听同理 —— 它看着像「自动打卡的
+ *      失败才知道；`HabitWidget` 那条 `useDataChanged('habit')` 监听同理 —— 它看着像「自动打卡的
  *      刷新」，其实是**手动打卡的跨窗口刷新通道**，删了表现为「桌面日程面板的打卡状态不更新」。
  *
  * 做法：本项改的全是 electron 依赖的 IPC handler，没法「切片真实实现执行」，
@@ -122,7 +122,7 @@ const FORBIDDEN = [
   ['今日视图联动标签表 LINK_LABELS', /\bLINK_LABELS\b/],
   ['日历入口联动标签表 LINK_LABELS', /\bLINK_LABELS\b/],
   ['派生索引 buildRecordSourceIndex', /\bbuildRecordSourceIndex\b/],
-  ['Habit 的 link 字段消费点（h.link / .link?.enabled）', /\.link\?{0,1}\./],
+  ['Habit 的 link 字段消费点（h.link / .link?.enabled）', /\b(?:h|habit|habitRow|row)\.link\?{0,1}\./],
 ]
 for (const [name, re] of FORBIDDEN) {
   const h = scanAll(re)
@@ -156,12 +156,15 @@ check('dateUtils 不再导出联动派生索引',
 /* ------------------------------------------------- 三、正向：保留面在位 */
 
 const CHECKIN = 'electron/database/repositories/checkinRepo.ts'
+const HABIT_ACTIONS = 'electron/lib/habitActions.ts'
 check('手动打卡 IPC habit:toggleCheck 仍在', has(CHECKIN, /ipcMain\.handle\('habit:toggleCheck'/))
+check('IPC 打卡委托唯一写入实现 toggleHabitChecked（D-Bus 与托盘共用）',
+  has(CHECKIN, /toggleHabitChecked\(habitId, date\)/))
 check('【保留】远程监督推送 notifyCheckin 仍在（无界面入口，易被顺手删）',
-  has(CHECKIN, /notifyCheckin\(habitId, date\)/))
+  has(HABIT_ACTIONS, /notifyCheckin\(habitId, date\)/))
 check('手动打卡写入口径 source=manual 未变',
-  has(CHECKIN, /vaultHabitRecordAddIfAbsent\(habitId, date, 'manual'\)/))
-check('撤销打卡仍走 vaultHabitRecordRemove', has(CHECKIN, /vaultHabitRecordRemove\(habitId, date\)/))
+  has(HABIT_ACTIONS, /vaultHabitRecordAddIfAbsent\(habitId, date, 'manual'\)/))
+check('撤销打卡仍走 vaultHabitRecordRemove', has(HABIT_ACTIONS, /vaultHabitRecordRemove\(habitId, date\)/))
 check('habit:getAll 返回 { habits, records }（无 linkMap 注入）',
   has(CHECKIN, /handle\('habit:getAll', \(\) => \{[\s\S]{0,400}?return \{ habits, records \}/))
 check('删习惯仍连带删其打卡记录', has(CHECKIN, /vaultRecordsSave\(vaultRecordsAll\(\)\.filter\(r => r\.habit_id !== id\)\)/))
@@ -192,8 +195,8 @@ check('ElectronAPI 的 habitGetAll 不再带 linkMap',
 check('Habit 接口不再有 link 成员（避免死字段回归）',
   /export interface Habit \{[\s\S]*?\n\}/.test(readCode(TYPES)) &&
   !/export interface Habit \{[\s\S]*?\blink\b[\s\S]*?\n\}/.test(readCode(TYPES)))
-check('【保留】DayPanel 的 useDataChanged(\'habit\') 刷新通道仍在（手动打卡跨窗口刷新靠它）',
-  has('src/daypanel/DayPanel.tsx', /useDataChanged\('habit', load\)/))
+check('【保留】HabitWidget 的 useDataChanged(\'habit\') 刷新通道仍在（手动打卡跨窗口刷新靠它）',
+  has('src/components/workbench/widgets/HabitWidget.tsx', /useDataChanged\('habit', load\)/))
 check('习惯模块侧仍 notifyDataChanged(\'habit\') 广播',
   has('src/modules/toolbox/components/habit-tracker/index.tsx', /notifyDataChanged\('habit'\)/))
 check('App.tsx 不再挂全局自动打卡轻提示',

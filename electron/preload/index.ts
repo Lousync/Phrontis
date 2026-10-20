@@ -664,48 +664,20 @@ const api = {
   // fill popup
   isFillPopup,
   isDayPanel,
-  // 日程与打卡侧边栏（WeChat 模式：内嵌面板 + 可脱离独立窗口；独立态支持三种桌面互动模式）
-  // - 当前状态：脱离态 + 模式(floating/top-dock/desktop-widget) + top-dock 收缩态 + 小组件可交互态
-  dayPanelGetState: () => ipcRenderer.invoke('daypanel:get-state') as Promise<{ detached: boolean; mode: string; collapsed: boolean; widgetInteractive: boolean }>,
+  // 日程与打卡侧边栏（内嵌面板 + 可脱离独立漂浮窗口）
   // - 内嵌→脱离：创建独立窗口（与主窗口共用 #/day-panel 路由）
   dayPanelPopout: () => ipcRenderer.invoke('daypanel:popout') as Promise<boolean>,
   // - 脱离→内嵌：销毁独立窗口
   dayPanelDockBack: () => ipcRenderer.invoke('daypanel:dock-back') as Promise<boolean>,
   // - 切换（内嵌则隐藏；脱离则吸附回来）
   dayPanelToggle: () => ipcRenderer.invoke('daypanel:toggle') as Promise<boolean>,
-  // - 设置独立窗口模式
-  dayPanelSetMode: (m: string) => ipcRenderer.invoke('daypanel:mode-set', m) as Promise<string>,
-  // - top-dock：展开 / 收回意图（500ms grace）/ 取消收回
-  dayPanelTopdockExpand: () => ipcRenderer.invoke('daypanel:topdock-expand'),
-  dayPanelTopdockCollapseIntent: () => ipcRenderer.invoke('daypanel:topdock-collapse-intent'),
-  dayPanelTopdockCancelCollapse: () => ipcRenderer.invoke('daypanel:topdock-cancel-collapse'),
-  // - desktop-widget：可交互态切换（穿透 ⇄ 可点）
-  dayPanelWidgetInteractive: (active: boolean) => ipcRenderer.invoke('daypanel:widget-interactive', active) as Promise<boolean>,
   // 渲染层报告 document 所需尺寸（用于独立窗口高度自适应）
   dayPanelReportContentSize: (width: number, height: number) => { ipcRenderer.send('daypanel:content-size', { width, height }) },
-  // - 跨窗口 detached/模式状态推送
-  onDayPanelStateChanged: (cb: (s: { detached: boolean; mode: string; collapsed: boolean; widgetInteractive: boolean }) => void) => {
-    const handler = (_e: unknown, s: { detached: boolean; mode: string; collapsed: boolean; widgetInteractive: boolean }) => cb(s)
+  // - 跨窗口 detached 状态推送
+  onDayPanelStateChanged: (cb: (s: { detached: boolean }) => void) => {
+    const handler = (_e: unknown, s: { detached: boolean }) => cb(s)
     ipcRenderer.on('daypanel:state-changed', handler)
     return () => { ipcRenderer.removeListener('daypanel:state-changed', handler) }
-  },
-  // - 模式变化推送
-  onDayPanelModeChanged: (cb: (s: { mode: string }) => void) => {
-    const handler = (_e: unknown, s: { mode: string }) => cb(s)
-    ipcRenderer.on('daypanel:mode-changed', handler)
-    return () => { ipcRenderer.removeListener('daypanel:mode-changed', handler) }
-  },
-  // - top-dock 收缩态推送
-  onDayPanelCollapsedChanged: (cb: (s: { collapsed: boolean }) => void) => {
-    const handler = (_e: unknown, s: { collapsed: boolean }) => cb(s)
-    ipcRenderer.on('daypanel:collapsed-changed', handler)
-    return () => { ipcRenderer.removeListener('daypanel:collapsed-changed', handler) }
-  },
-  // - 小组件可交互态推送
-  onDayPanelWidgetInteractiveChanged: (cb: (s: { interactive: boolean }) => void) => {
-    const handler = (_e: unknown, s: { interactive: boolean }) => cb(s)
-    ipcRenderer.on('daypanel:widget-interactive-changed', handler)
-    return () => { ipcRenderer.removeListener('daypanel:widget-interactive-changed', handler) }
   },
   // - 快捷键 toggle 通知（让主窗口切内嵌可见性）
   onDayPanelToggleVisibility: (cb: () => void) => {

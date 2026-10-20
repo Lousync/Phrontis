@@ -2635,22 +2635,13 @@ export interface ElectronAPI {
   // fill popup
   isFillPopup: boolean
   isDayPanel: boolean
-  // 日程与打卡侧边栏（内嵌 + 可脱离；独立态支持三种桌面互动模式）
-  dayPanelGetState: () => Promise<{ detached: boolean; mode: string; collapsed: boolean; widgetInteractive: boolean }>
+  // 日程与打卡侧边栏（内嵌 + 可脱离独立漂浮窗口）
   dayPanelPopout: () => Promise<boolean>
   dayPanelDockBack: () => Promise<boolean>
   dayPanelToggle: () => Promise<boolean>
-  dayPanelSetMode: (m: string) => Promise<string>
-  dayPanelTopdockExpand: () => Promise<void>
-  dayPanelTopdockCollapseIntent: () => Promise<void>
-  dayPanelTopdockCancelCollapse: () => Promise<void>
-  dayPanelWidgetInteractive: (active: boolean) => Promise<boolean>
   /** 渲染层报告 document 所需尺寸（用于独立窗口高度自适应） */
   dayPanelReportContentSize: (width: number, height: number) => void
-  onDayPanelStateChanged: (cb: (s: { detached: boolean; mode: string; collapsed: boolean; widgetInteractive: boolean }) => void) => () => void
-  onDayPanelModeChanged: (cb: (s: { mode: string }) => void) => () => void
-  onDayPanelCollapsedChanged: (cb: (s: { collapsed: boolean }) => void) => () => void
-  onDayPanelWidgetInteractiveChanged: (cb: (s: { interactive: boolean }) => void) => () => void
+  onDayPanelStateChanged: (cb: (s: { detached: boolean }) => void) => () => void
   onDayPanelToggleVisibility: (cb: () => void) => () => void
   dayPanelOpenInMain: (tab: string, tool?: string) => void
   onMainCommand: (cb: (payload: { type: string; tab?: string; tool?: string }) => void) => () => void
