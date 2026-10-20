@@ -31,6 +31,7 @@ const readJson = (p) => JSON.parse(read(p))
 console.log('\n--- ① daySnapshotPure ---')
 const {
   buildDaySnapshot,
+  isAgendaTodo,
   parseClockSeconds,
   pomoFromSource,
 } = await import('../../../src/lib/daySnapshotPure.ts')
@@ -64,6 +65,15 @@ check('番茄：leftSeconds = 750', day.pomo.leftSeconds === 750, String(day.pom
 check('番茄：totalSeconds 由 progress 反推 = 1500', day.pomo.totalSeconds === 1500, String(day.pomo.totalSeconds))
 check('番茄不可见 → 全零', JSON.stringify(pomoFromSource({ visible: false, running: true, display: '25:00', progress: 0.2 })) === '{"state":0,"leftSeconds":0,"totalSeconds":0}')
 check('番茄进行中 = 1', pomoFromSource({ visible: true, running: true, display: '10:00', progress: 0 }).state === 1)
+
+// A 口径（2026-10-20 用户拍板）：今天到期 + 逾期未完成；不含待安排/已完成/子任务
+const agenda = (date, status, task_type, parent_id = null) => ({ date, status, task_type, parent_id })
+check('A：今天到期（含计划类）→ 收', isAgendaTodo(agenda('2026-10-20', 'pending', 'plan'), '2026-10-20'))
+check('A：逾期非计划类 → 收', isAgendaTodo(agenda('2026-10-19', 'pending', 'deadline'), '2026-10-20'))
+check('A：逾期计划类（待安排）→ 不收', !isAgendaTodo(agenda('2026-10-19', 'pending', 'plan'), '2026-10-20'))
+check('A：未来日期的待安排 → 不收', !isAgendaTodo(agenda('2026-10-25', 'pending', 'plan'), '2026-10-20'))
+check('A：已完成 → 不收', !isAgendaTodo(agenda('2026-10-20', 'done', 'plan'), '2026-10-20'))
+check('A：子任务 → 不收', !isAgendaTodo(agenda('2026-10-20', 'pending', 'plan', 'p1'), '2026-10-20'))
 
 // ===== ② D-Bus 契约面 =====
 console.log('\n--- ② D-Bus 契约面 ---')

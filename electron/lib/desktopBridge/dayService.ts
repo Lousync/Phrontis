@@ -1,5 +1,5 @@
 import { localToday } from '../../../src/lib/date'
-import { buildDaySnapshot, type DaySnapshot } from '../../../src/lib/daySnapshotPure'
+import { buildDaySnapshot, isAgendaTodo, type DaySnapshot } from '../../../src/lib/daySnapshotPure'
 import { vaultTodosForDate, vaultOverdueTodos } from '../kbStore/scheduleVaultRepo'
 import { vaultHabitsAll, vaultRecordsAll } from '../kbStore/habitVaultRepo'
 import { checkinCurrentStreak } from '../kbStore/habitStats'
@@ -31,7 +31,8 @@ export function readTodaySnapshot(today: string = localToday()): DaySnapshot {
 
   return buildDaySnapshot({
     date: today,
-    todos: [...vaultOverdueTodos(today), ...vaultTodosForDate(today)],
+    // A 口径：今天到期 + 逾期未完成；待安排计划类与已完成不进面板（见 isAgendaTodo）
+    todos: [...vaultOverdueTodos(today), ...vaultTodosForDate(today)].filter(r => isAgendaTodo(r, today)),
     habits,
     pomo: getPomodoroSnapshot(),
   })

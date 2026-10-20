@@ -52,7 +52,9 @@ Core1 D-Bus 接口 + 托盘               GNOME 扩展（A 顶栏 + B 磁贴）
 
 ## 4. 数据口径
 
-- 待办 = `vaultTodosForDate(today)`（含浮动的计划类）+ `vaultOverdueTodos(today)`，按 id 去重。
+- 待办（**A 口径**，2026-10-20 用户拍板）= **今天到期 + 逾期未完成**；
+  **不含**「待安排」计划类、已完成、子任务。实现：`isAgendaTodo`（`src/lib/daySnapshotPure.ts`）
+  过滤 `vaultTodosForDate` + `vaultOverdueTodos`，再按 id 去重。
 - 排序 = 未完成在前 → `sort_order` → `created_at` → id（与 UI 稳定序一致）。
 - 打卡 = 未归档习惯全部；`doneToday` 按当天记录去重；`streak` 复用 `checkinCurrentStreak`（按习惯过滤后）。
 - 番茄 = 主进程已有的渲染层快照镜像；`totalSeconds` 由 `left / (1 - progress)` 反推，`progress` 为 0/1 时给 0。

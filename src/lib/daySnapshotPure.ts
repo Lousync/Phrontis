@@ -68,6 +68,30 @@ export interface DaySnapshot {
   pomo: DayPomo
 }
 
+export interface AgendaTodoLike {
+  date: string
+  status: string
+  task_type?: string | null
+  parent_id?: string | null
+}
+
+/**
+ * 面板「今日」的待办口径（2026-10-20 用户选 A）：
+ *   - 今天到期的未完成任务（含计划类）；
+ *   - 逾期未完成、且**不是**计划类（待安排）的任务；
+ *   - 不含「待安排」计划类、不含已完成、不含子任务。
+ *
+ * 为什么不用 `vaultTodosForDate` 直接当面板数据：它还包含**任何日期**的待安排计划类，
+ * 日程一多就会把整个待安排栏灌进面板（用户实测：像把整个日程表列出来了）。
+ */
+export function isAgendaTodo(todo: AgendaTodoLike, today: string): boolean {
+  if (todo.parent_id != null) return false
+  if (todo.status === 'done') return false
+  if (todo.date === today) return true
+  if (todo.date >= today) return false
+  return todo.task_type != null && todo.task_type !== 'plan'
+}
+
 /** `12:34` / `1:02:03` → 秒；坏输入按 0（面板宁可不显示倒计时，也不要显示 NaN） */
 export function parseClockSeconds(display: string): number {
   const parts = String(display ?? '').trim().split(':')
