@@ -109,16 +109,12 @@ check('windowBus 提供内部订阅', /export function subscribeDataChanged/.tes
 check('主进程广播也会通知订阅者', /emitDataChanged\(scope\)/.test(bus))
 check('渲染层 notify 也会通知订阅者', /emitDataChanged\(\(payload as \{ scope: string \}\)\.scope\)/.test(bus))
 
-const tray = stripComments(read('electron/lib/desktopBridge/trayMenu.ts'))
-check('托盘「今日」区由同一快照驱动', /readTodaySnapshot/.test(tray))
-check('托盘待办走 action 回调', /onToggleTodo/.test(tray))
-check('托盘打卡走 action 回调', /onToggleHabit/.test(tray))
-
+// 托盘（2026-10-20 用户拍板）：只保留应用级动作（显示 / 任务栏模式 / 退出），
+// 不承载今日区 —— 今日面板归 GNOME 扩展（顶栏入口），托盘菜单不再重复一份。
 const main = stripComments(read('electron/main/index.ts'))
 check('主进程挂载桌面桥', /initDesktopBridge\(\{ packaged: app\.isPackaged/.test(main))
-check('托盘接入今日区', /buildTodayMenuItems\(\{/.test(main))
-check('数据变更触发托盘重算', /subscribeDataChanged\(\(scope\)/.test(main))
-check('托盘写入后广播', /broadcastDataChanged\('schedule'\)/.test(main) && /broadcastDataChanged\('habit'\)/.test(main))
+check('托盘不挂今日区（用户拍板）', !/buildTodayMenuItems|日程小窗/.test(main))
+check('托盘保留应用级动作', /label: '任务栏模式'/.test(main) && /label: '退出 Phrontis'/.test(main))
 
 // ===== ④ 打包注入 =====
 console.log('\n--- ④ deb 注入 ---')
