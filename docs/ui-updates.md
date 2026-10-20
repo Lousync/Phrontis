@@ -101,6 +101,16 @@
 
 §1.7 达到可交付实施状态。
 
+### 1.8 第三轮修复（2026-10-20）：最大化 / 还原状态反转
+
+**实测**：点最大化后 `window.api.isMaximized()` 已经是 `true`，但渲染层 `winMax` 仍为 `false`，左/中/右三块与活动栏继续保留 6px 留白和圆角；再点还原，反而收到两条 `true`，留白消失。也就是说 §1 的条件没写反，是 `window:maximizeChange` 的状态源反了。
+
+**根因**：透明无边框窗口的 `maximize()` / `unmaximize()` 是异步落定的。旧实现动作后立刻 `syncMaxState()`：最大化时读到旧态 `false`，还原时读到旧态 `true`；Windows 上 `maximize` 事件还可能不触发，后续 `resize` / `move` 也未必补发，`lastMaxSent` 去重把那一次错误值锁死。
+
+**修复**：`electron/main/index.ts` 改为「乐观发目标态 + 延时轮询校正」：动作路径先按意图发一次，之后 50ms 轮询、连续两次观测一致才发；有明确目标态时等目标态出现，1.2s 超时以真实状态兜底；`maximize` / `unmaximize` / `resize` / `move` 事件只登记轮询，不再同步读；顺带补齐边缘拖拽还原与全屏退出的状态同步。
+
+**验收**：`.AGENT/scripts/window-state/probe-window-max.mjs` 用真实 `window.api.maximize()` 往返，断言 `rounded` / `mx-1.5` / `m-1.5` 三组类名与事件末值；当前 dev 实例三组 PASS。
+
 ---
 
 ## 11. 「任务规划」区块改造：从静态装饰变成活的进度

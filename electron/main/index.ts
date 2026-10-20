@@ -422,14 +422,98 @@ function isWinMaximized(win?: BrowserWindow | null): boolean {
 function registerWindowHandlers(): void {
   let lastMaxSent: boolean | null = null
   let preMaxBounds: Electron.Rectangle | null = null
-  const syncMaxState = (): void => {
+
+  /**
+   * 窗口态同步（UI 优化条目1 · 2026-10-20 真机回归修复）。
+   *
+   * 透明无边框窗口的 maximize/unmaximize 是**异步落定**的：调用返回时
+   * win.isMaximized() / getBounds() 仍可能是切换前的值（Windows 上 'maximize'
+   * 事件还可能根本不触发，见上方 407-410 行）。旧实现只在动作后立刻 sync 一次，
+   * 于是最大化读到 false、还原读到 true，再由 lastMaxSent 去重锁死 —— 渲染层
+   * 的 winMax 正好反了：最大化仍有 6px 留白，还原反而贴边。
+   *
+   * 现在改为「乐观发目标态 + 延时轮询校正」：
+   * - 动作路径先按意图发一次（按钮即时响应）；
+   * - 之后 50ms 轮询，连续两次观测一致才发，避开动画中间态；
+   * - 有明确目标态时，等目标态出现再发，超时（1.2s）以真实状态兜底；
+   * - 事件路径只登记轮询，不再同步读（同步读必然读到旧状态）。
+   */
+  let maxSyncTimer: ReturnType<typeof setInterval> | null = null
+  let maxSyncUntil = 0
+  let maxExpected: boolean | null = null
+  let maxExpectedUntil = 0
+  let maxLastObserved: boolean | null = null
+  let maxStableTicks = 0
+
+  const sendMaxState = (maxed: boolean): void => {
     const win = mainWindow
-    if (!win || win.isDestroyed()) return
-    const maxed = isWinMaximized(win)
+    if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
     if (maxed === lastMaxSent) return
     lastMaxSent = maxed
     win.webContents.send('window:maximizeChange', maxed)
   }
+
+  const syncMaxState = (): void => {
+    const win = mainWindow
+    if (!win || win.isDestroyed()) return
+    sendMaxState(isWinMaximized(win))
+  }
+
+  const stopMaxSync = (): void => {
+    if (maxSyncTimer) {
+      clearInterval(maxSyncTimer)
+      maxSyncTimer = null
+    }
+    maxSyncUntil = 0
+    maxExpected = null
+    maxExpectedUntil = 0
+    maxLastObserved = null
+    maxStableTicks = 0
+  }
+
+  /** expected 仅在「由本应用发起的最大化/还原/全屏退出」时传入；外部 OS 动作传 undefined。 */
+  const scheduleMaxSync = (expected?: boolean, windowMs = 1200): void => {
+    const win = mainWindow
+    if (!win || win.isDestroyed()) return
+    const now = Date.now()
+    maxSyncUntil = Math.max(maxSyncUntil, now + windowMs)
+    if (expected !== undefined) {
+      maxExpected = expected
+      maxExpectedUntil = now + windowMs
+    }
+    if (maxSyncTimer) return
+    maxLastObserved = null
+    maxStableTicks = 0
+    maxSyncTimer = setInterval(() => {
+      const w = mainWindow
+      if (!w || w.isDestroyed()) {
+        stopMaxSync()
+        return
+      }
+      const observed = isWinMaximized(w)
+      if (observed === maxLastObserved) maxStableTicks += 1
+      else {
+        maxLastObserved = observed
+        maxStableTicks = 1
+      }
+
+      const waitingForExpected = maxExpected !== null && Date.now() < maxExpectedUntil
+      if (maxStableTicks >= 2 && (!waitingForExpected || observed === maxExpected)) {
+        sendMaxState(observed)
+        if (observed === maxExpected) {
+          maxExpected = null
+          maxExpectedUntil = 0
+        }
+      }
+
+      if (Date.now() >= maxSyncUntil) {
+        // 超时兜底：目标态始终没出现（动作被系统拒绝/窗口被外部接管）→ 以真实状态收口
+        if (maxExpected !== null) sendMaxState(observed)
+        stopMaxSync()
+      }
+    }, 50)
+  }
+
   ipcMain.handle('window:minimize', () => {
     mainWindow?.minimize()
     // WeChat 模式下小窗要么内嵌在主窗口、要么是独立顶层窗口；最小化主窗口时：
@@ -439,7 +523,8 @@ function registerWindowHandlers(): void {
   ipcMain.handle('window:maximize', () => {
     const win = mainWindow
     if (!win || win.isDestroyed()) return
-    if (isWinMaximized(win)) {
+    const nextMax = !isWinMaximized(win)
+    if (!nextMax) {
       // 未进最大化态的透明无边框窗口，unmaximize()/restore() 都可能无效 → 回落到记录的原始 bounds
       if (win.isMaximized()) win.unmaximize()
       else if (preMaxBounds) win.setBounds(preMaxBounds)
@@ -448,7 +533,9 @@ function registerWindowHandlers(): void {
       preMaxBounds = win.getBounds()
       win.maximize()
     }
-    syncMaxState()
+    // 乐观态让渲染层立刻开始 300ms 过渡；真实状态由 scheduleMaxSync 在落定后校正
+    sendMaxState(nextMax)
+    scheduleMaxSync(nextMax)
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
   ipcMain.handle('window:isMaximized', () => isWinMaximized(mainWindow))
@@ -461,7 +548,8 @@ function registerWindowHandlers(): void {
     const win = mainWindow
     if (!win || win.isDestroyed()) return
     if (flag && !win.isFullScreen()) {
-      preFsMaximized = win.isMaximized()
+      // 用 isWinMaximized 而不是裸 isMaximized：透明无边框窗口的贴满态可能不进 OS 最大化
+      preFsMaximized = isWinMaximized(win)
       preFsBounds = preFsMaximized ? null : win.getBounds()
       win.setFullScreen(true)
     } else if (!flag && win.isFullScreen()) {
@@ -472,6 +560,9 @@ function registerWindowHandlers(): void {
         win.setBounds(preFsBounds)
       }
       preFsBounds = null
+      // 退出全屏会切回「最大化」或「还原」—— 同样等落定后再报，避免读成全屏中间态
+      sendMaxState(preFsMaximized)
+      scheduleMaxSync(preFsMaximized)
     }
   })
   mainWindow?.on('enter-full-screen', () => mainWindow?.webContents.send('window:fullscreenChange', true))
@@ -615,6 +706,9 @@ function registerWindowHandlers(): void {
       anchor = edgeRectFromCursor(edge, edgeRestoreRef(cur), p0)
     }
     win.setBounds(anchor)
+    // 从最大化拖边缘 = 目标还原态：先发直角/留白，再等 setBounds 落定后校正
+    sendMaxState(false)
+    scheduleMaxSync(false)
     edgeDrag = { edge, anchor, p0, timer: null }
     // 跟随循环：光标轮询（DIP 一致）实时 setBounds；mouseup（渲染层）/ 窗口失焦兜底收尾
     edgeDrag.timer = setInterval(() => {
@@ -640,14 +734,16 @@ function registerWindowHandlers(): void {
   ipcMain.handle('window:isAlwaysOnTop', () => mainWindow?.isAlwaysOnTop() ?? false)
   ipcMain.handle('window:reload', () => { mainWindow?.webContents.reload() })
 
-  mainWindow?.on('maximize', () => syncMaxState())
-  mainWindow?.on('unmaximize', () => syncMaxState())
-  mainWindow?.on('closed', stopEdgeDrag)
+  // 事件只登记轮询：事件触发时窗口态往往还没落定，同步读会读到旧值（旧实现就是这么反的）
+  mainWindow?.on('maximize', () => scheduleMaxSync())
+  mainWindow?.on('unmaximize', () => scheduleMaxSync())
+  mainWindow?.on('closed', () => { stopEdgeDrag(); stopMaxSync() })
   mainWindow?.on('blur', stopEdgeDrag) // 拖拽中失焦（Alt-Tab 等）兜底收尾，防跟随循环悬挂
-  // 几何兜底路径（透明无边框窗口不进最大化态）依赖 bounds 变化后重估，故 resize/move 也同步
-  mainWindow?.on('resize', () => syncMaxState())
-  mainWindow?.on('move', () => syncMaxState())
+  // 几何兜底路径（透明无边框窗口不进最大化态）依赖 bounds 变化后重估，故 resize/move 也登记
+  mainWindow?.on('resize', () => scheduleMaxSync())
+  mainWindow?.on('move', () => scheduleMaxSync())
   syncMaxState()
+  scheduleMaxSync()
 
   // 缩放 — 仅缩放内容区（不缩放 chrome）
 
