@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=io.github.lousync.Phrontis
+Exec=/opt/Phrontis/phrontis --ozone-platform=x11

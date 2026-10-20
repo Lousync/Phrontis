@@ -1,0 +1,21 @@
+#!/bin/sh
+# Phrontis CLI（安装到 /usr/bin/phrontis-cli）
+#
+# 为什么用应用自带的 Electron 以 node 模式跑：用户机器上不保证有 node，
+# 而 Electron 本来就装着 —— 直接复用它的 Node 运行时，零额外依赖。
+# GUI 入口在 /opt/Phrontis/phrontis（.desktop 里写的是绝对路径），不受本脚本影响。
+
+set -e
+APP_HOME=${PHRONTIS_HOME:-/opt/Phrontis}
+CLI=${PHRONTIS_CLI:-/usr/lib/phrontis/phrontis.cjs}
+
+if [ ! -x "$APP_HOME/phrontis" ]; then
+    echo "找不到 Phrontis 应用：$APP_HOME/phrontis" >&2
+    exit 1
+fi
+if [ ! -f "$CLI" ]; then
+    echo "找不到 CLI 脚本：$CLI" >&2
+    exit 1
+fi
+
+ELECTRON_RUN_AS_NODE=1 exec "$APP_HOME/phrontis" "$CLI" "$@"

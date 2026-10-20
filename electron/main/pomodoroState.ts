@@ -38,6 +38,11 @@ function broadcastToAll(payload: PomodoroSnapshot): void {
   broadcast(BROADCAST_CHANNEL.pomodoroStateBroadcast, payload)
 }
 
+/** 只读快照（桌面集成 `GetToday` 读取；不要把返回值改回内部对象） */
+export function getPomodoroSnapshot(): PomodoroSnapshot {
+  return snapshot
+}
+
 export function registerPomodoroBroadcast(): void {
   // 渲染层（主窗口 PomodoroProvider）上报状态变化 → 主进程更新快照并广播给所有窗口
   ipcMain.on('pomodoro:state-update', (_e, payload: Partial<PomodoroSnapshot>) => {

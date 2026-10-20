@@ -1,13 +1,11 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
-import { notifyCheckin } from '../../lib/pushService'
+import { toggleHabitChecked } from '../../lib/habitActions'
 import {
   vaultHabitsAll,
   vaultHabitsSave,
   vaultRecordsAll,
   vaultRecordsSave,
-  vaultHabitRecordAddIfAbsent,
-  vaultHabitRecordRemove,
   type HabitRow,
 } from '../../lib/kbStore/habitVaultRepo'
 
@@ -135,15 +133,8 @@ export function registerCheckinHandlers(): void {
   })
 
   ipcMain.handle('habit:toggleCheck', (_e, habitId: string, date: string) => {
-    const has = vaultRecordsAll().some(r => r.habit_id === habitId && r.date === date)
-    if (has) {
-      vaultHabitRecordRemove(habitId, date)
-      return { checked: false }
-    }
-    vaultHabitRecordAddIfAbsent(habitId, date, 'manual')
-    // 远程监督：打卡成功后异步推送（静默失败，不影响打卡本身）
-    void notifyCheckin(habitId, date)
-    return { checked: true }
+    // 写入与「远程监督推送」统一走 lib/habitActions（桌面集成 CheckIn 共用同一实现）
+    return { checked: toggleHabitChecked(habitId, date) }
   })
 
   ipcMain.handle('habit:reorder', (_e, orderedIds: string[]) => {

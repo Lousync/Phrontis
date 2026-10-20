@@ -35,6 +35,11 @@ import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdi
 import { Readable } from 'stream'
 import { assertSecretBoxRoundTrip, registerSecretBoxHandlers, secretStorageBackend } from '../lib/secretBox'
 import { registerPomodoroBroadcast } from './pomodoroState'
+import { initDesktopBridge } from '../lib/desktopBridge'
+import { buildTodayMenuItems } from '../lib/desktopBridge/trayMenu'
+import { toggleTodoDone } from '../lib/todoActions'
+import { toggleHabitChecked } from '../lib/habitActions'
+import { localToday } from '../../src/lib/date'
 import { registerEntryHandlers } from '../database/repositories/entryRepo'
 import { registerTagHandlers } from '../database/repositories/tagRepo'
 import { registerScheduleHandlers } from '../database/repositories/scheduleRepo'
@@ -69,7 +74,7 @@ import { startSuperviseScheduler, stopSuperviseScheduler, enqueueExternalPush } 
 import { initScheduleReminders } from '../lib/scheduleReminder'
 import { initPasswordFiller, destroyPasswordFiller } from './passwordFiller'
 import { initDayPanel, disposeDayPanel, getPanelMode, setPanelMode, onPanelModeChanged, isPopoutOpen } from './dayPanelWindow'
-import { registerWindowBus } from './windowBus'
+import { registerWindowBus, subscribeDataChanged, broadcastDataChanged } from './windowBus'
 import { noteFocus, noteSuspended, flushAppUsageNow, startAppUsageCollector } from '../lib/appUsageStore'
 import { registerDevtoolsHandlers } from './devtools'
 import { registerUpdateHandlers } from '../lib/updateService'
@@ -265,8 +270,15 @@ async function createTray(): Promise<void> {
     tray = new Tray(image)
     tray.setToolTip('Phrontis · 日程打卡')
     const rebuildMenu = () => {
-      tray?.setContextMenu(Menu.buildFromTemplate([
+      const template: Electron.MenuItemConstructorOptions[] = [
         { label: '显示主窗口', click: showMainWindow },
+        { type: 'separator' },
+        // 阶段 1 · C 档：托盘里的「今日」区（待办可勾、打卡可点）。
+        // 读的是与 D-Bus GetToday 同一份快照，写的是同一套 action，三条路不会各算各的。
+        ...buildTodayMenuItems({
+          onToggleTodo: (id) => { if (toggleTodoDone(id)) broadcastDataChanged('schedule') },
+          onToggleHabit: (id) => { toggleHabitChecked(id, localToday()); broadcastDataChanged('habit') },
+        }),
         { type: 'separator' },
         { label: '任务栏模式', submenu: [
           { label: '自由漂浮', type: 'radio', checked: getPanelMode() === 'floating', click: () => setPanelMode('floating') },
@@ -275,11 +287,16 @@ async function createTray(): Promise<void> {
         ]},
         { type: 'separator' },
         { label: '退出 Phrontis', click: () => { isQuitting = true; app.quit() } },
-      ]))
+      ]
+      tray?.setContextMenu(Menu.buildFromTemplate(template))
     }
     rebuildMenu()
     // 模式变化时刷新托盘单选状态
     onPanelModeChanged(rebuildMenu)
+    // 数据变了就重算「今日」区（应用内勾选 / D-Bus / 托盘自身都会触发广播）
+    subscribeDataChanged((scope) => {
+      if (scope === 'schedule' || scope === 'habit') rebuildMenu()
+    })
     tray.on('click', showMainWindow)
     console.log('[Tray] Tray created (icon source:', source + ')')
   } catch (e) {
@@ -1192,6 +1209,10 @@ app.whenReady().then(async () => {
   }
 
   void createTray()
+
+  // 桌面集成（阶段 1）：D-Bus 服务 + 数据变更 → Changed。
+  // 放在托盘之后 —— 名字注册得越晚，D-Bus 激活的调用方拿到窗口时窗口越「熟」。
+  void initDesktopBridge({ packaged: app.isPackaged, showWindow: showMainWindow })
 
   // Web 剪藏服务（工具箱「网页剪藏」入口的数据面；127.0.0.1 常驻，随应用启停）
   registerClipperHandlers({

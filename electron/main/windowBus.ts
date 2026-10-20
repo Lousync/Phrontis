@@ -12,6 +12,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 export function registerWindowBus(): void {
   ipcMain.on('data:notify', (event, payload) => {
     if (!payload || typeof payload !== 'object' || typeof (payload as { scope?: unknown }).scope !== 'string') return
+    emitDataChanged((payload as { scope: string }).scope)
     // 此通道由渲染层发起、须**排除发送方**（发送方已本地广播），故不走 broadcast() —— 保留显式循环
     for (const w of BrowserWindow.getAllWindows()) {
       if (w.webContents !== event.sender && !w.isDestroyed()) {
@@ -36,7 +37,27 @@ export function registerWindowBus(): void {
  * scope 取值与 src/lib/dataChanged.ts 的 DataChangeScope 对齐。
  */
 export function broadcastDataChanged(scope: string): void {
+  emitDataChanged(scope)
   broadcast(BROADCAST_CHANNEL.kbDataChanged, { scope })
+}
+
+/** 主进程内部的「数据变了」订阅者（桌面集成刷新托盘 / 发 D-Bus Changed 用） */
+type DataChangedListener = (scope: string) => void
+const dataChangedListeners = new Set<DataChangedListener>()
+
+/**
+ * 订阅数据变更。**只读**：订阅者不得在这里写盘（会与触发者形成回环）。
+ * @returns 取消订阅
+ */
+export function subscribeDataChanged(cb: DataChangedListener): () => void {
+  dataChangedListeners.add(cb)
+  return () => { dataChangedListeners.delete(cb) }
+}
+
+function emitDataChanged(scope: string): void {
+  for (const cb of dataChangedListeners) {
+    try { cb(scope) } catch { /* 单个订阅者出错不影响其他订阅者 */ }
+  }
 }
 
 /**

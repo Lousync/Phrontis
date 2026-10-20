@@ -63,7 +63,19 @@ else
     chmod 0755 '/opt/${sanitizedProductName}/chrome-sandbox' || true
 fi
 
-# 5) 桌面 / MIME 数据库刷新（与默认模板一致）
+# 5) 桌面集成（阶段 1）：D-Bus 激活服务 + CLI
+#    - .service 让「应用没开时，面板/扩展里的打卡」能把应用拉起来（总线激活）；
+#    - /usr/bin/phrontis-cli 是终端入口；/usr/bin/<executable> 仍是 GUI 链接，不动。
+#    Exec 行在这里按宏重写，避免产品名变化后服务文件指向不存在的路径。
+BRIDGE_DIR="/opt/${sanitizedProductName}/resources/desktop-bridge"
+if [ -d "$BRIDGE_DIR" ]; then
+    install -Dm644 "$BRIDGE_DIR/io.github.lousync.Phrontis.service" /usr/share/dbus-1/services/io.github.lousync.Phrontis.service
+    sed -i "s|^Exec=.*|Exec=/opt/${sanitizedProductName}/${executable} --ozone-platform=x11|" /usr/share/dbus-1/services/io.github.lousync.Phrontis.service
+    install -Dm644 "$BRIDGE_DIR/phrontis.cjs" /usr/lib/phrontis/phrontis.cjs
+    install -Dm755 "$BRIDGE_DIR/phrontis-cli" /usr/bin/phrontis-cli
+fi
+
+# 6) 桌面 / MIME 数据库刷新（与默认模板一致）
 if hash update-mime-database 2>/dev/null; then
     update-mime-database /usr/share/mime || true
 fi

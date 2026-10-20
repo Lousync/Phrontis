@@ -39,6 +39,7 @@
     "@xterm/xterm": "^6.0.0",
     "construct-style-sheets-polyfill": "^3.1.0",
     "d3-force": "^3.0.0",
+    "dbus-next": "^0.10.2",
     "defuddle": "^0.19.3",
     "heic-to": "^1.5.2",
     "highlight.js": "^11.11.1",
@@ -99,6 +100,10 @@
       {
         "from": "build/icon.png",
         "to": "icon.png"
+      },
+      {
+        "from": "scripts/desktop-bridge",
+        "to": "desktop-bridge"
       }
     ],
     "directories": {
@@ -144,12 +149,18 @@
       "executableName": "phrontis",
       "artifactName": "Phrontis-${version}-${arch}.${ext}",
       "syncDesktopName": true,
+      "desktop": {
+        "entry": {
+          "DBusActivatable": "true"
+        }
+      },
       "executableArgs": [
         "--ozone-platform=x11"
       ]
     },
     "deb": {
-      "afterInstall": "build/linux-after-install.sh"
+      "afterInstall": "build/linux-after-install.sh",
+      "afterRemove": "build/linux-after-remove.sh"
     },
     "npmRebuild": false,
     "electronDist": "node_modules/electron/dist"
