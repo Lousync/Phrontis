@@ -69,6 +69,7 @@ export function AiUsageTab({ usage, onUsageChange }: {
 
         {/* Token / 费用 / 额度看板入口：明细唯一由「用量」模块承担 */}
         <button
+          data-setting-anchor="aiTools.llmUsage"
           onClick={() => window.dispatchEvent(new CustomEvent('tab:open', { detail: { tab: 'usage' } }))}
           className="group mt-3 flex w-full max-w-md items-center justify-between rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3.5 py-2.5 text-left hover:bg-[var(--bg-hover)]"
         >
