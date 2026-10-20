@@ -44,7 +44,8 @@ Core1 D-Bus 接口 + 托盘               GNOME 扩展（A 顶栏 + B 磁贴）
 | `CheckIn` | `(s habitId, b value) -> (b)` | **幂等**：已是目标状态也返回 true；含远程监督推送 |
 | `OpenApp` | `(s target) -> (b)` | `''` / `today` / `pomodoro`；`relPath` 暂不支持（明确返回 false） |
 | `Search` | `(s q, i limit) -> (as)` | 返回仓库相对路径，最多 50 |
-| `GetCapabilities` | `() -> (as)` | `today/todo/checkin/search/open` |
+| `ToggleDayPanel` | `() -> (b)` | 显示 / 隐藏日程小窗（GNOME 扩展的原生快捷键入口；XWayland 全局键不可靠） |
+| `GetCapabilities` | `() -> (as)` | `today/todo/checkin/search/open/dayPanel` |
 | 信号 `Changed` | `(s scope)` | `today` / `vault`；写后由主进程广播 |
 
 **名称必须用 DO_NOT_QUEUE**：dev 与正式版同名配置会抢总线名，排队会让调用方一直挂着。

@@ -22,6 +22,8 @@ const MAX_BODY = 1024 * 1024
 export interface BridgeDeps {
   getMainWindow?: () => BrowserWindow | null
   getSettingValue?: (key: string) => unknown
+  /** 日程小窗三个全局快捷键的真实注册结果（false = 被占用 / 原生 Wayland） */
+  getDayPanelShortcuts?: () => Record<string, boolean>
 }
 
 let deps: BridgeDeps = {}
@@ -118,6 +120,9 @@ function state() {
       bounds,
     },
     ui: getUiState(),
+    dayPanel: {
+      shortcuts: deps.getDayPanelShortcuts?.() ?? null,
+    },
     settingsSummary: {
       theme: deps.getSettingValue?.('theme') ?? null,
     },

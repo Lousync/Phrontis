@@ -100,6 +100,7 @@ function usage() {
   phrontis-cli checkin <习惯名|id> | uncheck <习惯名|id>
   phrontis-cli search <关键词> [--limit N] [--json]
   phrontis-cli open [today|pomodoro]
+  phrontis-cli daypanel
   phrontis-cli capabilities [--json]
 
 环境：
@@ -175,6 +176,13 @@ function main(argv) {
     const data = call('Search', 'si', [q, String(limit)])
     const rows = data[0] || []
     console.log(json ? JSON.stringify(rows) : rows.join('\n'))
+    return
+  }
+
+  if (cmd === 'daypanel') {
+    const data = call('ToggleDayPanel')
+    if (!data[0]) die('切换日程小窗失败', 2)
+    console.log('已切换日程小窗')
     return
   }
 

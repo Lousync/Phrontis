@@ -208,6 +208,26 @@ ok('打开/恢复都跑身份迁移', (ws.match(/migrateVaultIdentity\(/g) || []
 ok('ensureKbRoot 写入 id', vc.includes('id: vaultId'))
 ok('最近列表按路径去重', vc.includes('x.path !== v.rootPath'))
 
+
+/* ================= 登记表按 id 去重（2026-10-20） ================= */
+const { dedupeVaultRows, upsertVaultRow } = await import('../../../src/lib/vaultRegistryPure.ts')
+const rv = (id, path, updated_at = '2026-01-01T00:00:00.000Z') => ({
+  id, name: 'n', path, created_at: '2025-01-01T00:00:00.000Z', updated_at,
+})
+const onlyHome = (p) => p === '/home/a'
+
+eq('同 id 两行：保留磁盘存在的路径',
+  dedupeVaultRows([rv('x', '/usb/x', '2026-02-01T00:00:00.000Z'), rv('x', '/home/a')], onlyHome).map(r => r.path).join(','),
+  '/home/a')
+eq('同 id 都存在：保留 updated_at 新的',
+  dedupeVaultRows([rv('x', '/a', '2026-01-01'), rv('x', '/b', '2026-02-01')], () => true).map(r => r.path).join(','),
+  '/b')
+eq('不同 id 不动', dedupeVaultRows([rv('x', '/a'), rv('y', '/b')], () => true).length, 2)
+eq('upsert 同 id 不同 path：旧行移除',
+  upsertVaultRow([rv('x', '/old')], rv('x', '/new')).map(r => r.path).join(','), '/new')
+eq('upsert 同 path 不同 id：旧行移除',
+  upsertVaultRow([rv('old', '/p')], rv('new', '/p')).map(r => r.id).join(','), 'new')
+
 /* ================= 汇总 ================= */
 console.log('')
 if (fails.length === 0) {

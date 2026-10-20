@@ -6,6 +6,7 @@ import { vaultSearchPages } from '../kbStore/knowledgeVaultRepo'
 import { toggleTodoDone } from '../todoActions'
 import { setHabitChecked } from '../habitActions'
 import { readTodaySnapshot } from './dayService'
+import { toggleDayPanel } from '../../main/dayPanelWindow'
 
 /**
  * 桌面集成的对外接口（D-Bus，会话总线）。
@@ -28,7 +29,7 @@ export const OBJECT_PATH = '/io/github/lousync/Phrontis'
 export const INTERFACE = 'io.github.lousync.Phrontis.Core1'
 
 /** 能力表：消费方用它探测，**不要拿版本号猜**（接口只做加法） */
-export const CAPABILITIES = ['today', 'todo', 'checkin', 'search', 'open'] as const
+export const CAPABILITIES = ['today', 'todo', 'checkin', 'search', 'open', 'dayPanel'] as const
 
 export function resolveBusName(packaged: boolean): string {
   const override = process.env.PHRONTIS_BUS_NAME?.trim()
@@ -106,6 +107,12 @@ class Core1 extends dbus.interface.Interface {
     }
   }
 
+  /** 显示 / 隐藏日程小窗（GNOME 扩展的原生快捷键走这里；Wayland 下比 X11 全局键可靠） */
+  ToggleDayPanel(): boolean {
+    toggleDayPanel()
+    return true
+  }
+
   GetCapabilities(): string[] {
     return [...CAPABILITIES]
   }
@@ -119,6 +126,7 @@ Core1.configureMembers({
     CheckIn: { inSignature: 'sb', outSignature: 'b' },
     OpenApp: { inSignature: 's', outSignature: 'b' },
     Search: { inSignature: 'si', outSignature: 'as' },
+    ToggleDayPanel: { inSignature: '', outSignature: 'b' },
     GetCapabilities: { inSignature: '', outSignature: 'as' },
   },
   signals: {

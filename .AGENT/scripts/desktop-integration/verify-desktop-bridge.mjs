@@ -80,6 +80,7 @@ const signatures = {
   CheckIn: "inSignature: 'sb', outSignature: 'b'",
   OpenApp: "inSignature: 's', outSignature: 'b'",
   Search: "inSignature: 'si', outSignature: 'as'",
+  ToggleDayPanel: "inSignature: '', outSignature: 'b'",
   GetCapabilities: "outSignature: 'as'",
 }
 for (const [name, sig] of Object.entries(signatures)) {
@@ -87,7 +88,7 @@ for (const [name, sig] of Object.entries(signatures)) {
 }
 check('Changed 信号（scope: s）', /Changed: \{ signature: 's' \}/.test(svc))
 check('本批不含 PomodoroControl（阶段边界）', !/PomodoroControl/.test(svc))
-check('能力表不含番茄控制', /CAPABILITIES = \['today', 'todo', 'checkin', 'search', 'open'\]/.test(svc))
+check('能力表与实现一致（本批不含番茄控制）', /CAPABILITIES = \['today', 'todo', 'checkin', 'search', 'open', 'dayPanel'\]/.test(svc))
 
 // ===== ③ 写入口唯一性 =====
 console.log('\n--- ③ 写入口与广播 ---')

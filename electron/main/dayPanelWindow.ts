@@ -439,7 +439,7 @@ export function initDayPanel(opts: {
     // 三个键任一失败就提示一次（聚成一条，不刷三条 Toast）。
     const failed: string[] = []
     const bind = (accel: string, fn: () => void): void => { if (!globalShortcut.register(accel, fn)) failed.push(accel) }
-    bind('Control+Alt+S', () => { togglePanel() })
+    bind('Control+Alt+S', () => { toggleDayPanel() })
     bind('Control+Alt+Up', () => { setPanelMode('top-dock') })
     bind('Control+Alt+Down', () => { setPanelMode('desktop-widget') })
     if (failed.length > 0) {
@@ -455,9 +455,18 @@ export function initDayPanel(opts: {
   }
 }
 
-function togglePanel(): void {
+export function toggleDayPanel(): void {
   if (isPopoutOpen()) destroyPopout()
   else broadcast(BROADCAST_CHANNEL.dayPanelToggleVisibility)
+}
+
+/** 三个全局快捷键当前是否真的注册上了（dev bridge /state 用；Wayland 原生会话下恒 false） */
+export function dayPanelShortcutState(): Record<string, boolean> {
+  return {
+    'Control+Alt+S': globalShortcut.isRegistered('Control+Alt+S'),
+    'Control+Alt+Up': globalShortcut.isRegistered('Control+Alt+Up'),
+    'Control+Alt+Down': globalShortcut.isRegistered('Control+Alt+Down'),
+  }
 }
 
 function registerHandlers(): void {
@@ -472,7 +481,7 @@ function registerHandlers(): void {
   ipcMain.handle('daypanel:dock-back', () => { destroyPopout(); return isPopoutOpen() })
   ipcMain.handle('daypanel:get-state', () => ({ detached: isPopoutOpen(), mode, collapsed, widgetInteractive }))
   ipcMain.handle('daypanel:toggle', () => {
-    togglePanel()
+    toggleDayPanel()
     return isPopoutOpen()
   })
   ipcMain.handle('daypanel:mode-set', (_e, m: PanelMode) => { setPanelMode(m); return mode })

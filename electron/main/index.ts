@@ -73,7 +73,7 @@ import { registerBookMarketHandlers } from '../database/repositories/bookMarketR
 import { startSuperviseScheduler, stopSuperviseScheduler, enqueueExternalPush } from '../lib/pushService'
 import { initScheduleReminders } from '../lib/scheduleReminder'
 import { initPasswordFiller, destroyPasswordFiller } from './passwordFiller'
-import { initDayPanel, disposeDayPanel, getPanelMode, setPanelMode, onPanelModeChanged, isPopoutOpen } from './dayPanelWindow'
+import { initDayPanel, disposeDayPanel, getPanelMode, setPanelMode, onPanelModeChanged, isPopoutOpen, toggleDayPanel, dayPanelShortcutState } from './dayPanelWindow'
 import { registerWindowBus, subscribeDataChanged, broadcastDataChanged } from './windowBus'
 import { noteFocus, noteSuspended, flushAppUsageNow, startAppUsageCollector } from '../lib/appUsageStore'
 import { registerDevtoolsHandlers } from './devtools'
@@ -279,6 +279,9 @@ async function createTray(): Promise<void> {
           onToggleTodo: (id) => { if (toggleTodoDone(id)) broadcastDataChanged('schedule') },
           onToggleHabit: (id) => { toggleHabitChecked(id, localToday()); broadcastDataChanged('habit') },
         }),
+        { type: 'separator' },
+        // 快捷键之外的兜底入口：Ctrl+Alt+S 被占用 / 原生 Wayland 下也能唤出日程小窗
+        { label: '日程小窗', click: () => toggleDayPanel() },
         { type: 'separator' },
         { label: '任务栏模式', submenu: [
           { label: '自由漂浮', type: 'radio', checked: getPanelMode() === 'floating', click: () => setPanelMode('floating') },
@@ -991,6 +994,7 @@ app.whenReady().then(async () => {
     void bridge.startBridge({
       getMainWindow: () => mainWindow,
       getSettingValue: (key) => settingsCache[key],
+      getDayPanelShortcuts: () => dayPanelShortcutState(),
     })
   }
   registerWindowHandlers()

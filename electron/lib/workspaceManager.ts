@@ -10,6 +10,7 @@ import { invalidateGraphIndex } from './kbStore/graphIndex'
 import { emitPluginEvent } from './pluginEvents'
 import { IGNORE_FILE_NAME } from './kbStore/ignoreFile'
 import { parseMarkdown, serializeMarkdown } from './kbStore/mdStore'
+import { dedupeVaultRows, upsertVaultRow } from '../../src/lib/vaultRegistryPure'
 import { broadcastDataChanged } from '../main/windowBus'
 import { adoptLegacyAgentSessionsToVault } from './agentSessionRepo'
 import { resolveVaultId, migrateVaultIdentity } from './kbStore/vaultIdentity'
@@ -415,6 +416,17 @@ function pruneOrphanBookMetaQuiet(): void {
 }
 
 function loadVaults(): void {
+  // 自愈（2026-10-20）：登记表里同一 id 可能因仓库被复制/移动留下旧路径行。
+  // 先按 id 归一，再走下面的恢复；顺带把用户已有数据里的重复行清掉。
+  try {
+    const rows = readVaultRegistry()
+    const deduped = dedupeVaultRows(rows, (p) => existsSync(p))
+    if (deduped.length !== rows.length) {
+      writeVaultRegistry(deduped)
+      console.log(`[vault-registry] 清理同 id 重复行：${rows.length} → ${deduped.length}`)
+    }
+  } catch { /* ignore */ }
+
   // P8 设备级自愈：settings.json.recentVaults 有而登记表没有的条目（库缺/损坏），
   // 磁盘上确实存在且含 .knowbase → 回登记（最近列表即第二注册表）。
   try {
@@ -476,10 +488,10 @@ function upsertVault(id: string, name: string, path: string): void {
   try {
     const rows = readVaultRegistry()
     const now = registryNow()
-    const match = rows.find((r) => r.path === path)
-    // 同一路径只保留一行（身份统一后旧 id 行不再留着，防切换器出现重复仓库）
-    const next = rows.filter((r) => r.path !== path)
-    next.push({
+    const match = rows.find((r) => r.path === path) ?? rows.find((r) => r.id === id)
+    // 同 id 或同 path 都只留一行：仓库被复制/移动后（id 不变、path 变了）
+    // 旧的路径行不能留着，否则切换器里同一仓库出现两次（2026-10-20 实测）。
+    const next = upsertVaultRow(rows, {
       id,
       name,
       path,
