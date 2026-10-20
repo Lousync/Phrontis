@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, ChevronDown, ExternalLink, FolderOpen, FolderPlus, Pencil, Layers } from 'lucide-react'
-import { workspaceCreateVault, workspaceGetCurrent, workspaceGetRecent, workspaceOpenById, workspaceRenameVault, workspaceRevealVault } from '../../lib/ipc'
+import { ArrowLeft, Check, ChevronDown, ExternalLink, FolderOpen, FolderPlus, MinusCircle, MoreHorizontal, Pencil, Layers, Trash2 } from 'lucide-react'
+import {
+  workspaceCreateVault, workspaceDeleteVault, workspaceForget, workspaceGetCurrent,
+  workspaceGetRecent, workspaceOpenById, workspaceRenameVault, workspaceRevealVault,
+} from '../../lib/ipc'
 import { openVaultWithGuide } from '../../lib/vaultOpen'
 import { showToast } from '../../lib/toast'
 import type { WorkspaceRecent } from '../../types'
@@ -12,12 +15,16 @@ import type { WorkspaceRecent } from '../../types'
  * 形态从简：切换与新建后整窗重载（数据激活重读约定）；重命名只改展示名（不动文件夹）。
  * 弹层走 portal + fixed 定位：侧栏面板根是 overflow-hidden，窄侧栏（minWidth 180 < 菜单 260）
  * 时 absolute 菜单会被裁剪（2026-09-08 用户验收实锤），portal 后不受任何祖先裁剪。
+ *
+ * 仓库列表管理（2026-10-20）：每行右侧「⋯」→ 从列表移除（保留文件夹）/ 删除仓库文件夹
+ * （整仓移入系统回收站）。两步都在菜单内行内确认，不弹中央模态。
  */
 export function VaultSwitcher() {
   const [cur, setCur] = useState<{ rootId: string; name: string; path: string } | null>(null)
   const [recent, setRecent] = useState<WorkspaceRecent[]>([])
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<'list' | 'create' | 'rename'>('list')
+  const [manage, setManage] = useState<{ v: WorkspaceRecent; confirm: 'none' | 'forget' | 'trash' } | null>(null)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [menuPos, setMenuPos] = useState<{ left: number; bottom: number } | null>(null)
@@ -39,10 +46,15 @@ export function VaultSwitcher() {
     setOpen((o) => !o)
   }
 
+  const refreshRecent = async (): Promise<void> => {
+    try { setRecent(await workspaceGetRecent()) } catch { /* 读取失败保持旧列表 */ }
+  }
+
   useEffect(() => {
     if (!open) return
-    void workspaceGetRecent().then(setRecent).catch(() => {})
+    void refreshRecent()
     setMode('list')
+    setManage(null)
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node
       if ((ref.current && ref.current.contains(t)) || (menuRef.current && menuRef.current.contains(t))) return
@@ -112,6 +124,40 @@ export function VaultSwitcher() {
     } finally { setBusy(false) }
   }
 
+  /** 只移除列表记录：磁盘文件夹保留，之后可再「打开本地仓库」加回来 */
+  const forgetVault = async (): Promise<void> => {
+    const target = manage?.v
+    if (!target || busy) return
+    setBusy(true)
+    try {
+      const res = await workspaceForget(target.rootId)
+      if (res && res.error) { showToast({ type: 'error', message: res.error }); return }
+      showToast({ type: 'info', message: `已从列表移除「${target.name}」（文件夹保留）` })
+      setManage(null)
+      await refreshRecent()
+    } finally { setBusy(false) }
+  }
+
+  /** 删除仓库：整个文件夹进系统回收站（可还原） */
+  const deleteVault = async (): Promise<void> => {
+    const target = manage?.v
+    if (!target || busy) return
+    setBusy(true)
+    try {
+      const res = await workspaceDeleteVault(target.rootId)
+      if (!res || !res.ok) { showToast({ type: 'error', message: (res && res.error) || '删除失败' }); return }
+      if (res.deletedCurrent) {
+        setOpen(false)
+        showToast({ type: 'info', message: '仓库已移入系统回收站（可还原）。即将返回仓库选择页...' })
+        setTimeout(() => location.reload(), 1000)
+        return
+      }
+      showToast({ type: 'info', message: `仓库「${target.name}」已移入系统回收站（可还原）` })
+      setManage(null)
+      await refreshRecent()
+    } finally { setBusy(false) }
+  }
+
   return (
     <div className="relative w-full" ref={ref}>
       <button
@@ -131,23 +177,82 @@ export function VaultSwitcher() {
           className="fixed w-[260px] max-h-[min(460px,70vh)] overflow-y-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-2xl py-1 z-[130] text-[var(--text-primary)]"
           style={{ left: menuPos.left, bottom: menuPos.bottom }}
         >
-          {mode === 'list' && (
+          {mode === 'list' && manage && (
+            <div className="px-3 py-2 kb-item-in">
+              <button onClick={() => setManage(null)} className="flex items-center gap-1 text-[11px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                <ArrowLeft size={12} /> 返回列表
+              </button>
+              <div className="mt-1.5 text-[12px] font-medium truncate">{manage.v.name}</div>
+              <div className="text-[10px] text-[var(--text-muted)] truncate mb-2">{manage.v.path}</div>
+
+              {manage.confirm === 'none' && (
+                <>
+                  {manage.v.rootId !== cur?.rootId && (
+                    <MenuItem
+                      icon={<MinusCircle size={13} />}
+                      label="从列表移除（保留文件夹）"
+                      onClick={() => setManage({ ...manage, confirm: 'forget' })}
+                    />
+                  )}
+                  <MenuItem
+                    icon={<Trash2 size={13} />}
+                    label="删除仓库文件夹…"
+                    danger
+                    onClick={() => setManage({ ...manage, confirm: 'trash' })}
+                  />
+                  {manage.v.rootId === cur?.rootId && (
+                    <p className="px-1 pt-1 text-[10px] leading-snug text-[var(--text-muted)]">当前仓库不能只从列表移除，可切换后再移除，或直接删除。</p>
+                  )}
+                </>
+              )}
+
+              {manage.confirm === 'forget' && (
+                <div className="kb-item-in">
+                  <p className="text-[11px] leading-snug text-[var(--text-secondary)]">只移除列表记录，磁盘上的文件夹不受影响；以后可从「打开其他文件夹」重新加入。</p>
+                  <div className="mt-2 flex justify-end gap-1.5">
+                    <button onClick={() => setManage({ ...manage, confirm: 'none' })} className="px-2 py-1 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">取消</button>
+                    <button onClick={() => void forgetVault()} disabled={busy} className="px-2 py-1 rounded-md text-[11px] text-white bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40">移除</button>
+                  </div>
+                </div>
+              )}
+
+              {manage.confirm === 'trash' && (
+                <div className="kb-item-in">
+                  <p className="text-[11px] leading-snug text-[var(--danger)]">整个仓库文件夹将移入系统回收站（可还原）。</p>
+                  <div className="mt-2 flex justify-end gap-1.5">
+                    <button onClick={() => setManage({ ...manage, confirm: 'none' })} className="px-2 py-1 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">取消</button>
+                    <button onClick={() => void deleteVault()} disabled={busy} className="px-2 py-1 rounded-md text-[11px] text-white bg-[var(--danger)] hover:opacity-90 transition-opacity disabled:opacity-40">移入回收站</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {mode === 'list' && !manage && (
             <>
               <div className="px-3 pt-1.5 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">最近仓库</div>
               {recent.length === 0 && <div className="px-3 py-1.5 text-[11.5px] text-[var(--text-secondary)]">暂无记录</div>}
               {recent.map((v) => (
-                <button
-                  key={v.rootId}
-                  onClick={() => void switchTo(v)}
-                  disabled={busy}
-                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 ${v.rootId === cur?.rootId ? 'text-[var(--accent)]' : ''}`}
-                >
-                  <span className="w-4 shrink-0">{v.rootId === cur?.rootId && <Check size={13} />}</span>
-                  <span className="min-w-0">
-                    <span className="block truncate">{v.name}</span>
-                    <span className="block truncate text-[10px] text-[var(--text-muted)]">{v.path}</span>
-                  </span>
-                </button>
+                <div key={v.rootId} className="group flex items-center">
+                  <button
+                    onClick={() => void switchTo(v)}
+                    disabled={busy}
+                    className={`flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-[12px] text-left hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 ${v.rootId === cur?.rootId ? 'text-[var(--accent)]' : ''}`}
+                  >
+                    <span className="w-4 shrink-0">{v.rootId === cur?.rootId && <Check size={13} />}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate">{v.name}</span>
+                      <span className="block truncate text-[10px] text-[var(--text-muted)]">{v.path}</span>
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setManage({ v, confirm: 'none' })}
+                    title="管理此仓库"
+                    className="mr-1 shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition-opacity hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus-visible:opacity-100 group-hover:opacity-100"
+                  >
+                    <MoreHorizontal size={13} />
+                  </button>
+                </div>
               ))}
               <div className="my-1 border-t border-[var(--border-color)]" />
               <MenuItem icon={<FolderOpen size={13} />} label="打开其他文件夹…" onClick={() => void openOther()} />
@@ -185,10 +290,13 @@ export function VaultSwitcher() {
   )
 }
 
-function MenuItem({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
+function MenuItem({ icon, label, onClick, danger = false }: { icon: React.ReactNode; label: string; onClick: () => void; danger?: boolean }) {
   return (
-    <button onClick={onClick} className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors">
-      <span className="w-4 shrink-0 text-[var(--text-secondary)]">{icon}</span>
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-left transition-colors hover:bg-[var(--bg-hover)] ${danger ? 'text-[var(--danger)]' : 'text-[var(--text-primary)]'}`}
+    >
+      <span className={`w-4 shrink-0 ${danger ? 'text-[var(--danger)]' : 'text-[var(--text-secondary)]'}`}>{icon}</span>
       {label}
     </button>
   )

@@ -2360,3 +2360,19 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 
 
 
+
+## 2026-10-20 · 仓库列表管理：从列表移除 / 删除仓库文件夹
+
+**现状**：`ws:forget`（移除授权）与 `ws:deleteVault`（整仓进回收站，P7/D6）两个主进程能力都在，但**没有任何界面入口**——`VaultSwitcher` 与 `VaultPicker` 只能进/切，清不掉条目。旧入口在已退役的「用户」模块危险区，随死代码清理一并消失。
+
+**根因（顺带修的静默 bug）**：`ws:forget` 只删 `vaults.json` 与内存 roots，**没删 `settings.json.recentVaults`**。`loadVaults` 的「最近列表即第二注册表」自愈会在下次启动时把目录仍存在、含 `.knowbase` 的条目**重新登记**，表象是「删了又出现」。
+
+**方案**：
+- 两个列表（切换器 / 选择页）每行 hover 出「⋯」→ 行内管理面板，两步确认，不弹中央模态（遵循 `docs/ui-interaction-patterns.md`）。
+- **从列表移除**：只删登记（`vaults.json` + `recentVaults`），磁盘文件夹保留；之后可「打开本地仓库」加回。
+- **删除仓库文件夹**：整仓移入系统回收站（可还原），走既有 `isAllowedClearRoot` 护栏。
+- **当前仓库**不提供「从列表移除」（否则 `currentVaultId` 指向未登记仓库，重启自愈又复活）；可先切换，或直接删除。
+
+**改动点**：`electron/lib/workspaceManager.ts`（`ws:forget` 补 `forgetRecentVault` + 当前仓库护栏）、`src/components/shared/VaultSwitcher.tsx`、`src/components/shared/VaultPicker.tsx`、`src/types/index.ts`（error 回传）、契约 `.AGENT/scripts/vault-list/verify-vault-list.mjs`。
+
+**验收**：契约 24 项全绿；双份 `tsc` 0 错；devbridge 实测当前仓库 `forget` 被拒、切走后 `forget` 成功且 `recentVaults` 同步清空（无复活），选择页管理面板与「移入回收站」二次确认渲染正常。

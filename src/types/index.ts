@@ -2481,7 +2481,7 @@ export interface ElectronAPI {
   workspaceImportWelcomeDoc: (force?: boolean) => Promise<{ ok: boolean; created?: boolean; exists?: boolean; hasLegacyMd?: boolean; relPath?: string; error?: string }>
   // P8（D8）：重命名当前仓库展示名（roots/登记表/meta.json/最近列表同步，不动磁盘目录名）
   workspaceRenameVault: (name: string) => Promise<{ ok?: boolean; name?: string; error?: string }>
-  workspaceForget: (rootId: string) => Promise<{ ok: boolean }>
+  workspaceForget: (rootId: string) => Promise<{ ok: boolean; error?: string }>
   workspaceDeleteVault: (rootId: string) => Promise<{ ok?: boolean; deletedCurrent?: boolean; error?: string }>
   workspaceClearCurrentVault: () => Promise<{ ok: boolean; cleared?: string | null }>
   /** v3.2.0 条目 ④ 保底：手动刷新（口径 b 全量：知识索引/图谱失效 + 归档清单 prune） */

@@ -1254,10 +1254,17 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
     }
   })
 
-  // 移除授权（从 roots 内存与 JSON 登记表）
+  // 移除授权（从 roots 内存、JSON 登记表与最近列表一并移除）
+  // 只删「列表记录」，磁盘文件夹保留；当前仓库不允许这样移除（否则 currentVaultId 指向未登记仓库，
+  // 重启时 self-heal 又会把它加回来，表象是「删了又出现」）。
   ipcMain.handle('ws:forget', (_e, rootId: string) => {
+    const cur = getCurrentVault()
+    if (cur && cur.rootId === rootId) {
+      return { ok: false, error: '当前仓库不能只从列表移除；请先切换到其他仓库，或直接删除仓库' }
+    }
     roots.delete(rootId)
     removeVault(rootId)
+    forgetRecentVault(rootId)
     return { ok: true }
   })
 
