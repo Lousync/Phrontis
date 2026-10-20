@@ -141,6 +141,11 @@ const serviceFile = read('scripts/desktop-bridge/io.github.lousync.Phrontis.serv
 check('.service 的 Name 与接口一致', /^Name=io\.github\.lousync\.Phrontis$/m.test(serviceFile))
 check('.service 的 Exec 指向 /opt', /^Exec=\/opt\/Phrontis\/phrontis/m.test(serviceFile))
 
+// 打包期防线（2026-10-20 实测过一次 app.asar 静默错位：dev 进程还在写 out/）
+const packScript = stripComments(read('scripts/pack.mjs'))
+check('打包后校验 app.asar 自洽', /verifyPackedAsar\(asarPath\)/.test(packScript))
+check('校验失败以 exit 4 中止（不静默）', /process\.exit\(4\)/.test(packScript))
+
 // ===== ⑤ 负向 =====
 console.log('\n--- ⑤ 负向断言 ---')
 check('D-Bus 层不直接写文件', !/writeFile|writeJson|vaultUpdateTodo|vaultHabitsSave/.test(svc))

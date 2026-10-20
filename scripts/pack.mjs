@@ -23,8 +23,11 @@
  */
 import { existsSync, lstatSync, realpathSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const requireFromHere = createRequire(import.meta.url)
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -135,6 +138,45 @@ function main() {
   console.log(`[pack] 版本 ${version} -> 产物目录 ${outRel}（目标 ${flag}${explicit ? '，显式指定' : '，按宿主平台'}）`)
   run('electron-vite build')
   run(`electron-builder ${flag} --publish=never${dirOnly ? ' --dir' : ''} --config.directories.output=${outRel}`)
+
+  const asarPath = ['linux-unpacked', 'win-unpacked']
+    .map(d => join(repoRoot, outRel, d, 'resources', 'app.asar'))
+    .find(existsSync)
+  if (!asarPath) {
+    console.error(`[pack] 中止：产物里没有 app.asar（${outRel}）`)
+    process.exit(4)
+  }
+  verifyPackedAsar(asarPath)
+}
+
+/**
+ * 构建后校验 app.asar 的「文件表 ↔ 数据区」是否自洽。
+ *
+ * 为什么需要（2026-10-20 实测）：`npm run dev` 还在跑时执行 `npm run pack`，
+ * electron-vite 的 dev 进程会在 build 清理 out/ 之后继续写文件 → electron-builder
+ * 先按 A 时刻的文件表算偏移、再按 B 时刻的内容拷数据 ⇒ 包能打出来、deb 也能装，
+ * 但 `app.asar` 里的 package.json 指向了 index.html 的字节，启动退化成 Electron 默认页
+ * （打印 Usage），**全程没有任何报错**。这条断言把「静默坏包」变成响亮的失败。
+ *
+ * @param {string} asarPath 绝对路径
+ */
+export function verifyPackedAsar(asarPath) {
+  try {
+    const asar = requireFromHere('@electron/asar')
+    const pkg = JSON.parse(asar.extractFile(asarPath, 'package.json').toString('utf8'))
+    const entries = new Set(asar.listPackage(asarPath))
+    const main = String(pkg.main || '').replace(/^\.\//, '')
+    if (!main) throw new Error('package.json 缺 main')
+    if (!entries.has('/' + main)) throw new Error(`入口不在包内：/${main}`)
+    console.log(`[pack] app.asar 校验通过（${entries.size} 项，入口 /${main}）`)
+  } catch (e) {
+    console.error(
+      '[pack] 中止：app.asar 校验失败 —— ' + (e?.message || e) + '\n' +
+      '      典型原因：打包时有 dev 进程（electron-vite dev）在写 out/，文件表与数据区错位。\n' +
+      '      修法：停掉所有 dev 实例后重打；本产物不可发布（装上会退化成 Electron 默认页）。',
+    )
+    process.exit(4)
+  }
 }
 
 if (isDirectRun()) main()

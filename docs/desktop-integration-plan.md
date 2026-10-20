@@ -75,7 +75,8 @@ Core1 D-Bus 接口 + 托盘               GNOME 扩展（A 顶栏 + B 磁贴）
    ./scripts/phrontis-cli.sh today
    ```
 3. 托盘右键：应出现「今日 N/M 项 · 打卡 X/Y」+ 前 5 条待办/习惯。
-4. 打包后 `dpkg -i`：`/usr/bin/phrontis-cli today`、`systemctl --user` 无关；`gdbus` 调用同上（不带 `.Dev`）。
+4. 打包后 `dpkg -i`：`/usr/bin/phrontis-cli today`、`gdbus` 调用同上（不带 `.Dev`）。
+5. `npm run pack` 自带 `app.asar` 自洽校验（dev 进程还在写 `out/` 会产出静默坏包，详见 `scripts/pack.mjs` 的 `verifyPackedAsar`）。
 
 ## 7. 刻意没做（下一批）
 
