@@ -114,7 +114,8 @@ check('渲染层 notify 也会通知订阅者', /emitDataChanged\(\(payload as \
 const main = stripComments(read('electron/main/index.ts'))
 check('主进程挂载桌面桥', /initDesktopBridge\(\{ packaged: app\.isPackaged/.test(main))
 check('托盘不挂今日区（用户拍板）', !/buildTodayMenuItems|日程小窗/.test(main))
-check('托盘保留应用级动作', /label: '任务栏模式'/.test(main) && /label: '退出 Phrontis'/.test(main))
+check('托盘保留应用级动作', /label: '显示主窗口'/.test(main) && /label: '退出 Phrontis'/.test(main))
+check('任务栏模式已从托盘移除（功能未完成）', !/任务栏模式/.test(main))
 
 // ===== ④ 打包注入 =====
 console.log('\n--- ④ deb 注入 ---')

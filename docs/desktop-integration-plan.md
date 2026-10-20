@@ -25,7 +25,7 @@ Core1 D-Bus 接口 + 托盘               GNOME 扩展（A 顶栏 + B 磁贴）
 |---|---|
 | 今日快照（待办 + 打卡 + 番茄只读） | `src/lib/daySnapshotPure.ts`（纯函数）+ `electron/lib/desktopBridge/dayService.ts`（读 repo） |
 | D-Bus 服务 | `electron/lib/desktopBridge/dbusService.ts` |
-| 托盘（**仅应用级动作**：显示 / 任务栏模式 / 退出） | `electron/main/index.ts` |
+| 托盘（**仅应用级动作**：显示 / 退出） | `electron/main/index.ts` |
 | 数据变更 → `Changed` 信号 / 托盘刷新 | `electron/main/windowBus.ts` 的 `subscribeDataChanged` |
 | 写入口统一 | `electron/lib/todoActions.ts`、`electron/lib/habitActions.ts`（IPC 与 D-Bus 共用） |
 | CLI | `scripts/desktop-bridge/phrontis.cjs` + `scripts/desktop-bridge/phrontis-cli`（dev：`scripts/phrontis-cli.sh`） |

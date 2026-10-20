@@ -69,7 +69,7 @@ import { registerBookMarketHandlers } from '../database/repositories/bookMarketR
 import { startSuperviseScheduler, stopSuperviseScheduler, enqueueExternalPush } from '../lib/pushService'
 import { initScheduleReminders } from '../lib/scheduleReminder'
 import { initPasswordFiller, destroyPasswordFiller } from './passwordFiller'
-import { initDayPanel, disposeDayPanel, getPanelMode, setPanelMode, onPanelModeChanged, isPopoutOpen, dayPanelShortcutState } from './dayPanelWindow'
+import { initDayPanel, disposeDayPanel, isPopoutOpen, dayPanelShortcutState } from './dayPanelWindow'
 import { registerWindowBus } from './windowBus'
 import { noteFocus, noteSuspended, flushAppUsageNow, startAppUsageCollector } from '../lib/appUsageStore'
 import { registerDevtoolsHandlers } from './devtools'
@@ -265,23 +265,13 @@ async function createTray(): Promise<void> {
     if (process.platform === 'win32') image = image.resize({ width: 16, height: 16 })
     tray = new Tray(image)
     tray.setToolTip('Phrontis · 日程打卡')
-    const rebuildMenu = () => {
-      const template: Electron.MenuItemConstructorOptions[] = [
-        { label: '显示主窗口', click: showMainWindow },
-        { type: 'separator' },
-        { label: '任务栏模式', submenu: [
-          { label: '自由漂浮', type: 'radio', checked: getPanelMode() === 'floating', click: () => setPanelMode('floating') },
-          { label: '顶部停靠', type: 'radio', checked: getPanelMode() === 'top-dock', click: () => setPanelMode('top-dock') },
-          { label: '桌面小组件', type: 'radio', checked: getPanelMode() === 'desktop-widget', click: () => setPanelMode('desktop-widget') },
-        ]},
-        { type: 'separator' },
-        { label: '退出 Phrontis', click: () => { isQuitting = true; app.quit() } },
-      ]
-      tray?.setContextMenu(Menu.buildFromTemplate(template))
-    }
-    rebuildMenu()
-    // 模式变化时刷新托盘单选状态
-    onPanelModeChanged(rebuildMenu)
+    // 只留应用级动作：托盘是「应用还在运行」的指示 + 显示/退出。
+    // 任务栏模式（自由漂浮/顶部停靠/桌面小组件）功能未完成，2026-10-20 用户要求先从菜单移除。
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: '显示主窗口', click: showMainWindow },
+      { type: 'separator' },
+      { label: '退出 Phrontis', click: () => { isQuitting = true; app.quit() } },
+    ]))
     tray.on('click', showMainWindow)
     console.log('[Tray] Tray created (icon source:', source + ')')
   } catch (e) {
