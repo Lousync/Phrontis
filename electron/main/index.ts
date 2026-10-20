@@ -255,9 +255,18 @@ async function createTray(): Promise<void> {
   // Linux 平台化（阶段 1）：托盘图标能不能显示，取决于会话里有没有 StatusNotifierHost。
   // 没有宿主时**不建托盘** —— 建了也只是个看不见的图标，却会让「点 X 隐藏窗口」变成
   // 「应用消失且找不回来」（判据见 lib/linuxDesktop.ts 头注释；排障走 KNOWBASE_FORCE_TRAY=1）。
-  if (process.platform === 'linux' && !(await detectStatusNotifierHost())) {
-    console.warn('[Tray] 未检测到状态栏宿主（org.kde.StatusNotifierWatcher）→ 不创建托盘，关闭主窗口将直接退出应用')
-    return
+  if (process.platform === 'linux') {
+    // 宿主由 GNOME Shell 扩展（ubuntu-appindicators）提供；登录后它可能比应用晚几秒出现
+    // （实测：扩展重载期间启动应用 → 首次探测失败，托盘直接没了）。短重试，避免「这次登录刚好没托盘」。
+    let host = await detectStatusNotifierHost()
+    for (let attempt = 0; !host && attempt < 3; attempt++) {
+      await new Promise((r) => setTimeout(r, 1200))
+      host = await detectStatusNotifierHost()
+    }
+    if (!host) {
+      console.warn('[Tray] 未检测到状态栏宿主（org.kde.StatusNotifierWatcher）→ 不创建托盘，关闭主窗口将直接退出应用')
+      return
+    }
   }
   try {
     const { img, source } = await loadAppIconWithRetry(4, 400, (m) => console.warn('[Tray]', m))
