@@ -49,3 +49,6 @@ outputs/
 tmp/
 # Git Bash 崩溃转储
 *.stackdump
+
+# 本机自用安装目标（scripts/install-local.mjs；路径因机器而异，不进版本控制）
+scripts/local-install.json

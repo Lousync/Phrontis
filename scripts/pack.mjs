@@ -33,6 +33,10 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
  * 纯函数：给定「已存在判定器」，算出本次可用的产物目录（相对仓库根的 POSIX 路径）。
+ *
+ * 2026-10-20 修：原先取「第一个空位」，删掉中间某份产物（如坏包 `-4`）后会被**重新占用**，
+ * 于是 `packs/<v>-5` 反而比新产物旧 —— 发布脚本「取后缀最大者」会误发旧包。
+ * 现在恒取 `max(已存在后缀) + 1`，后缀单调递增、永不回填。
  * @param {string} version 版本号（如 '3.4.1'）
  * @param {(relPath: string) => boolean} exists 相对仓库根是否存在
  */
@@ -40,11 +44,12 @@ export function nextPackDirName(version, exists) {
   const v = String(version ?? '').trim() || '0.0.0'
   const base = `packs/${v}`
   if (!exists(base)) return base
+  let max = 0
   for (let i = 1; i < 1000; i++) {
-    const cand = `packs/${v}-${i}`
-    if (!exists(cand)) return cand
+    if (exists(`${base}-${i}`)) max = i
   }
-  throw new Error('打包目录后缀超过上限（1000）——请清理 packs/ 后重试')
+  if (max >= 999) throw new Error('打包目录后缀超过上限（999）——请清理 packs/ 后重试')
+  return `${base}-${max + 1}`
 }
 
 /** 平台 → electron-builder 目标开关（唯一真相源；契约脚本直接 import 本函数真跑） */
@@ -147,6 +152,35 @@ function main() {
     process.exit(4)
   }
   verifyPackedAsar(asarPath)
+  installLocalIfConfigured(outRel)
+}
+
+/**
+ * 本机自用安装（2026-10-20）：`scripts/local-install.json` 存在时（gitignored），
+ * 打包成功后自动把产物同步到配置的目录，保证「每次更新后安装版跟着更新」。
+ * 配置不存在 = 不启用（其他机器 / CI 不受影响）。
+ */
+function installLocalIfConfigured(outRel) {
+  const cfgPath = join(repoRoot, 'scripts', 'local-install.json')
+  if (!existsSync(cfgPath)) return
+  let cfg
+  try {
+    cfg = JSON.parse(readFileSync(cfgPath, 'utf8'))
+  } catch (e) {
+    console.warn('[pack] scripts/local-install.json 无法解析，跳过本地安装：' + (e?.message || e))
+    return
+  }
+  const target = typeof cfg?.target === 'string' ? cfg.target.trim() : ''
+  if (!target) return
+  console.log(`[pack] 本地安装已配置 → ${target}`)
+  const r = spawnSync(process.execPath, [
+    join(repoRoot, 'scripts', 'install-local.mjs'),
+    '--from', outRel,
+    '--target', target,
+  ], { cwd: repoRoot, stdio: 'inherit' })
+  if (r.status !== 0) {
+    console.warn('[pack] 本地安装更新失败（安装包本身已生成，可稍后手动重跑 scripts/install-local.mjs）')
+  }
 }
 
 /**

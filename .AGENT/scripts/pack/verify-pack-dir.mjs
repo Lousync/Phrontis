@@ -24,6 +24,10 @@ check('无冲突 → packs/<版本>', nextPackDirName('3.4.1', makeExists(new Se
 check('基目录已存在 → 追加 -1', nextPackDirName('3.4.1', makeExists(new Set(['packs/3.4.1']))) === 'packs/3.4.1-1', '')
 check('基与 -1 都在 → -2', nextPackDirName('3.4.1', makeExists(new Set(['packs/3.4.1', 'packs/3.4.1-1']))) === 'packs/3.4.1-2', '')
 check('-1 空洞也跳过：基 + -1 + -2 在 → -3', nextPackDirName('3.4.1', makeExists(new Set(['packs/3.4.1', 'packs/3.4.1-1', 'packs/3.4.1-2']))) === 'packs/3.4.1-3', '')
+check('中间删过也不回填：基 + -1 + -2 + -5 在 → -6（2026-10-20 实测事故）',
+  nextPackDirName('3.4.1', makeExists(new Set(['packs/3.4.1', 'packs/3.4.1-1', 'packs/3.4.1-2', 'packs/3.4.1-5']))) === 'packs/3.4.1-6', '')
+check('只有 -2（-1 空洞）→ -3，而不是回填 -1',
+  nextPackDirName('3.4.1', makeExists(new Set(['packs/3.4.1', 'packs/3.4.1-2']))) === 'packs/3.4.1-3', '')
 check('只存在历史 -5（无基）→ 仍用基', nextPackDirName('3.4.1', makeExists(new Set(['packs/3.4.1-5']))) === 'packs/3.4.1', '')
 check('别的版本不影响', nextPackDirName('3.4.2', makeExists(new Set(['packs/3.4.1', 'packs/3.4.1-1']))) === 'packs/3.4.2', '')
 check('空版本兜底 0.0.0', nextPackDirName('', makeExists(new Set())) === 'packs/0.0.0', '')
@@ -68,6 +72,16 @@ check('入口调用 nodeModulesIsSymlink 闸门', /if \(nodeModulesIsSymlink\(re
 check('负向：不再出现裸 electron-builder --win 硬编码', !/electron-builder --win/.test(srcPack))
 check('交叉打包有逃生门（KNOWBASE_ALLOW_CROSS_PACK）', /KNOWBASE_ALLOW_CROSS_PACK/.test(srcPack))
 check('符号链接闸门有逃生门（KNOWBASE_ALLOW_SYMLINK_NODE_MODULES）', /KNOWBASE_ALLOW_SYMLINK_NODE_MODULES/.test(srcPack))
+
+// ---- §5 本机自用安装（2026-10-20） ----
+check('打包成功后调用本地安装钩子', /installLocalIfConfigured\(outRel\)/.test(srcPack))
+check('钩子由 gitignored 的 scripts/local-install.json 开关', /local-install\.json/.test(srcPack))
+const srcInstall = readFileSync(path.join(ROOT, 'scripts', 'install-local.mjs'), 'utf8')
+check('本地安装复用 app.asar 闸门（坏包不覆盖现有安装）', /verifyPackedAsar/.test(srcInstall))
+check('本地安装带 --no-sandbox（免 root 的明确取舍）', /--no-sandbox/.test(srcInstall))
+check('本地安装写用户级 D-Bus 激活文件', /io\.github\.lousync\.Phrontis\.service/.test(srcInstall))
+check('本地安装是原子替换（staging rename）', /renameSync\(staging, target\)/.test(srcInstall))
+check('本地安装目标配置不进版本控制', /scripts\/local-install\.json/.test(readFileSync(path.join(ROOT, '.gitignore'), 'utf8')))
 
 const failed = checks.filter((c) => !c.pass)
 for (const c of checks) console.log(`  ${c.pass ? '[OK]' : '[FAIL]'} ${c.name}${c.detail && !c.pass ? '  -> ' + c.detail : ''}`)

@@ -21,7 +21,8 @@
     "preview": "electron-vite preview",
     "test": "node --experimental-strip-types --no-warnings scripts/test-parse-quick-date.mts",
     "pack": "node scripts/pack.mjs",
-    "pack:dir": "node scripts/pack.mjs --dir-only"
+    "pack:dir": "node scripts/pack.mjs --dir-only",
+    "install:local": "node scripts/install-local.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
