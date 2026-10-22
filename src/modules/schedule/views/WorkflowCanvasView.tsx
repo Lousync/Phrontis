@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Check, Crosshair, GitBranch, Minus, Plus } from 'lucide-react'
 import type { ScheduleWorkflow } from '../../../types'
-import { addScheduleWorkflowStage, reorderScheduleWorkflowStages } from '../../../lib/ipc'
+import { addScheduleWorkflowStage, reorderScheduleWorkflowStages, restoreScheduleWorkflow } from '../../../lib/ipc'
 import { showToast } from '../../../lib/toast'
 import { workflowProgress } from '../workflowPure'
 
@@ -118,8 +118,8 @@ export function WorkflowCanvasView({ workflow, onBack, onOpenPanel, onChanged }:
     }
     const originalIndex = workflow.stages.findIndex(s => s.id === current.id)
     if (current.target === originalIndex || current.target === originalIndex + 1) return
-    const originalIds = workflow.stages.map(s => s.id)
-    const ids = originalIds.filter(id => id !== current.id)
+    const snapshot = workflow
+    const ids = snapshot.stages.map(s => s.id).filter(id => id !== current.id)
     const insertAt = current.target > originalIndex ? current.target - 1 : current.target
     ids.splice(insertAt, 0, current.id)
     try {
@@ -129,7 +129,11 @@ export function WorkflowCanvasView({ workflow, onBack, onOpenPanel, onChanged }:
         message: '已调整顺序，日期已顺延',
         action: {
           label: '撤销',
-          onClick: () => { void reorderScheduleWorkflowStages(workflow.id, originalIds).catch(() => {}) },
+          onClick: () => {
+            void restoreScheduleWorkflow(snapshot).then(() => onChanged()).catch((e) => {
+              showToast({ type: 'error', message: '撤销失败', detail: e instanceof Error ? e.message : String(e) })
+            })
+          },
         },
       })
       onChanged()

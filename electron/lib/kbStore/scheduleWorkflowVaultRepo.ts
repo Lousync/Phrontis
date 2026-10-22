@@ -157,6 +157,19 @@ export function vaultUpdateWorkflow(
   return saveOne(rows, next)
 }
 
+export function vaultRestoreWorkflow(snapshot: ScheduleWorkflow): ScheduleWorkflow {
+  const rows = vaultWorkflowsAll()
+  const index = rows.findIndex((w) => w.id === snapshot.id)
+  if (index < 0) throw new Error('工作流不存在')
+  assertTaskFree(rows, snapshot.taskId, snapshot.id)
+  const next = normalizeWorkflow({ ...snapshot, updatedAt: new Date().toISOString() })
+  const validation = validateWorkflow(next)
+  if (!validation.ok) throw new Error(validation.errors[0] || '工作流数据非法')
+  rows[index] = next
+  vaultWorkflowsSave(rows)
+  return next
+}
+
 export function vaultDeleteWorkflow(id: string): boolean {
   const rows = vaultWorkflowsAll()
   const next = rows.filter((w) => w.id !== id)

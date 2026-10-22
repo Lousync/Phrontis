@@ -2249,6 +2249,7 @@ export interface ElectronAPI {
   getScheduleWorkflowByTask: (taskId: string) => Promise<ScheduleWorkflow | null>
   createScheduleWorkflow: (d: CreateScheduleWorkflowDTO) => Promise<ScheduleWorkflow>
   updateScheduleWorkflow: (id: string, d: UpdateScheduleWorkflowDTO, expectedUpdatedAt?: string) => Promise<ScheduleWorkflow>
+  restoreScheduleWorkflow: (snapshot: ScheduleWorkflow) => Promise<ScheduleWorkflow>
   deleteScheduleWorkflow: (id: string) => Promise<boolean>
   addScheduleWorkflowStage: (workflowId: string, stage: ScheduleWorkflowStageInput) => Promise<ScheduleWorkflow>
   updateScheduleWorkflowStage: (workflowId: string, stageId: string, patch: ScheduleWorkflowStageInput, expectedUpdatedAt?: string) => Promise<ScheduleWorkflow>

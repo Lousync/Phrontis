@@ -16,7 +16,7 @@ const repo = read('electron/lib/kbStore/scheduleWorkflowVaultRepo.ts')
 console.log('\n[repo] 工作流真相源')
 for (const name of [
   'vaultWorkflowsAll', 'vaultWorkflowsSave', 'vaultWorkflowById', 'vaultWorkflowByTask',
-  'vaultWorkflowsByTaskIds', 'vaultCreateWorkflow', 'vaultUpdateWorkflow', 'vaultDeleteWorkflow',
+  'vaultWorkflowsByTaskIds', 'vaultCreateWorkflow', 'vaultUpdateWorkflow', 'vaultRestoreWorkflow', 'vaultDeleteWorkflow',
   'vaultDeleteWorkflowsByTask', 'vaultAddWorkflowStage', 'vaultUpdateWorkflowStage',
   'vaultDeleteWorkflowStage', 'vaultReorderWorkflowStages', 'vaultAddWorkflowCheckpoint',
   'vaultUpdateWorkflowCheckpoint', 'vaultDeleteWorkflowCheckpoint',
@@ -41,7 +41,7 @@ console.log('\n[IPC] handlers 与桥接')
 const ipc = read('electron/database/repositories/scheduleRepo.ts')
 for (const channel of [
   'schedule:getAllTodos', 'schedule:listWorkflows', 'schedule:getWorkflow', 'schedule:getWorkflowByTask',
-  'schedule:createWorkflow', 'schedule:updateWorkflow', 'schedule:deleteWorkflow',
+  'schedule:createWorkflow', 'schedule:updateWorkflow', 'schedule:restoreWorkflow', 'schedule:deleteWorkflow',
   'schedule:addWorkflowStage', 'schedule:updateWorkflowStage', 'schedule:deleteWorkflowStage',
   'schedule:reorderWorkflowStages', 'schedule:addWorkflowCheckpoint',
   'schedule:updateWorkflowCheckpoint', 'schedule:deleteWorkflowCheckpoint',
@@ -53,7 +53,7 @@ check('任务更新冲突检测', ipc.includes('TASK_CONFLICT'))
 const preload = read('electron/preload/index.ts')
 for (const name of [
   'getAllScheduleTodos', 'listScheduleWorkflows', 'createScheduleWorkflow', 'updateScheduleWorkflow',
-  'deleteScheduleWorkflow', 'addScheduleWorkflowStage', 'updateScheduleWorkflowStage',
+  'restoreScheduleWorkflow', 'deleteScheduleWorkflow', 'addScheduleWorkflowStage', 'updateScheduleWorkflowStage',
   'deleteScheduleWorkflowStage', 'reorderScheduleWorkflowStages', 'addScheduleWorkflowCheckpoint',
   'updateScheduleWorkflowCheckpoint', 'deleteScheduleWorkflowCheckpoint',
 ]) check(`preload ${name}`, preload.includes(`${name}:`))
@@ -61,7 +61,7 @@ for (const name of [
 const ipcClient = read('src/lib/ipc.ts')
 for (const name of [
   'getAllScheduleTodos', 'listScheduleWorkflows', 'createScheduleWorkflow', 'updateScheduleWorkflow',
-  'deleteScheduleWorkflow', 'addScheduleWorkflowStage', 'updateScheduleWorkflowStage',
+  'restoreScheduleWorkflow', 'deleteScheduleWorkflow', 'addScheduleWorkflowStage', 'updateScheduleWorkflowStage',
   'deleteScheduleWorkflowStage', 'reorderScheduleWorkflowStages', 'addScheduleWorkflowCheckpoint',
   'updateScheduleWorkflowCheckpoint', 'deleteScheduleWorkflowCheckpoint',
 ]) check(`ipc.ts ${name}`, ipcClient.includes(`export const ${name}`))

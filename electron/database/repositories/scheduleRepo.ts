@@ -187,6 +187,12 @@ export function registerScheduleHandlers(): void {
     broadcastDataChanged('schedule')
     return row
   })
+  ipcMain.handle('schedule:restoreWorkflow', (_e, snapshot: Parameters<typeof W.vaultRestoreWorkflow>[0]) => {
+    if (!snapshot || typeof snapshot.id !== 'string' || !snapshot.id.trim()) throw new Error('工作流 id 不能为空')
+    const row = W.vaultRestoreWorkflow(snapshot)
+    broadcastDataChanged('schedule')
+    return row
+  })
   ipcMain.handle('schedule:deleteWorkflow', (_e, id: string) => {
     requireId(id, '工作流 id')
     const ok = W.vaultDeleteWorkflow(id)

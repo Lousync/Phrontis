@@ -95,6 +95,7 @@ const api = {
   getScheduleWorkflowByTask: (taskId: string) => ipcRenderer.invoke('schedule:getWorkflowByTask', taskId),
   createScheduleWorkflow: (data: unknown) => ipcRenderer.invoke('schedule:createWorkflow', data),
   updateScheduleWorkflow: (id: string, data: unknown, expectedUpdatedAt?: string) => ipcRenderer.invoke('schedule:updateWorkflow', id, data, expectedUpdatedAt),
+  restoreScheduleWorkflow: (snapshot: unknown) => ipcRenderer.invoke('schedule:restoreWorkflow', snapshot),
   deleteScheduleWorkflow: (id: string) => ipcRenderer.invoke('schedule:deleteWorkflow', id),
   addScheduleWorkflowStage: (workflowId: string, data: unknown) => ipcRenderer.invoke('schedule:addWorkflowStage', workflowId, data),
   updateScheduleWorkflowStage: (workflowId: string, stageId: string, data: unknown, expectedUpdatedAt?: string) => ipcRenderer.invoke('schedule:updateWorkflowStage', workflowId, stageId, data, expectedUpdatedAt),
