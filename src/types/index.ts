@@ -621,6 +621,7 @@ export interface ScheduleTodo {
   /** 固定日程（重复任务）生成的待办：来源规则 id + 本次日期 */
   recurringId?: string | null
   recurringDue?: string | null
+  estimateMin?: number | null
   createdAt: string; updatedAt: string
   tag?: ScheduleTag | null
   subtasks?: ScheduleTodo[]
@@ -631,14 +632,80 @@ export interface CreateScheduleTodoDTO {
   quadrant?: number; taskType?: 'deadline' | 'plan' | 'daily'; tagId?: string
   endCriteria?: string; parentId?: string
   scheduledStart?: number | null; scheduledEnd?: number | null
+  estimateMin?: number | null
 }
 export interface UpdateScheduleTodoDTO {
   title?: string; description?: string; date?: string; time?: string | null
   quadrant?: number; taskType?: 'deadline' | 'plan' | 'daily'; tagId?: string | null
   status?: string; endCriteria?: string; parentId?: string | null
   scheduledStart?: number | null; scheduledEnd?: number | null
+  estimateMin?: number | null
+  expectedUpdatedAt?: string
   /** 提醒「稍后」目标时间；传 null 表示清除打盹 */
   snoozeUntil?: string | null
+}
+
+export type ScheduleStageStatus = 'planned' | 'doing' | 'done'
+export interface ScheduleWorkflowCheckpoint {
+  id: string
+  title: string
+  start: string
+  end: string
+  status: ScheduleStageStatus
+}
+export interface ScheduleWorkflowStage {
+  id: string
+  title: string
+  start: string
+  end: string
+  status: ScheduleStageStatus
+  milestone: boolean
+  checkpoints: ScheduleWorkflowCheckpoint[]
+}
+export interface ScheduleWorkflow {
+  id: string
+  title: string
+  taskId: string | null
+  tagId: string | null
+  color: string
+  start: string
+  end: string
+  stages: ScheduleWorkflowStage[]
+  createdAt: string
+  updatedAt: string
+}
+export interface ScheduleWorkflowStageInput {
+  id?: string
+  title?: string
+  start?: string
+  end?: string
+  status?: ScheduleStageStatus
+  milestone?: boolean
+  checkpoints?: ScheduleWorkflowCheckpointInput[]
+}
+export interface ScheduleWorkflowCheckpointInput {
+  id?: string
+  title?: string
+  start?: string
+  end?: string
+  status?: ScheduleStageStatus
+}
+export interface CreateScheduleWorkflowDTO {
+  title: string
+  taskId?: string | null
+  tagId?: string | null
+  color?: string
+  start?: string
+  end?: string
+  stages?: ScheduleWorkflowStageInput[]
+}
+export interface UpdateScheduleWorkflowDTO {
+  title?: string
+  taskId?: string | null
+  tagId?: string | null
+  color?: string
+  start?: string
+  end?: string
 }
 
 // 固定日程（重复任务）—— 与主进程 src/lib/scheduleRecurringPure.ts 的 ScheduleRecurring 同形状
@@ -758,7 +825,7 @@ export interface RecycleBinItem {
 
 // export
 export interface BlogExportData { entries: (Entry & { tags: Tag[] })[]; tags: Tag[] }
-export interface ScheduleExportData { todos: (ScheduleTodo & { tag: ScheduleTag | null })[]; tags: ScheduleTag[] }
+export interface ScheduleExportData { todos: (ScheduleTodo & { tag: ScheduleTag | null })[]; tags: ScheduleTag[]; workflows: ScheduleWorkflow[] }
 export interface KnowledgeExportData { categories: KnowledgeCategory[]; pages: (KnowledgePage & { tags: KnowledgeTag[]; backlinks: string[] })[]; tags: KnowledgeTag[] }
 export interface PasswordVaultExportData { entries: PasswordEntry[] }
 export interface MomentsExportData { posts: MomentsPost[]; albums: MomentsAlbum[] }
@@ -2170,12 +2237,26 @@ export interface ElectronAPI {
   getScheduleSubtasks: (parentId: string) => Promise<ScheduleTodo[]>
   getScheduleUnscheduledTodos: () => Promise<ScheduleTodo[]>
   getScheduleWeekTodos: (weekStart: string, weekEnd: string) => Promise<ScheduleTodo[]>
+  getAllScheduleTodos: () => Promise<ScheduleTodo[]>
   createScheduleTodo: (d: CreateScheduleTodoDTO) => Promise<ScheduleTodo>
   updateScheduleTodo: (id: string, d: UpdateScheduleTodoDTO) => Promise<ScheduleTodo>
   deleteScheduleTodo: (id: string) => Promise<void>
   getScheduleTags: () => Promise<ScheduleTag[]>
   createScheduleTag: (n: string, c?: string) => Promise<ScheduleTag>
   deleteScheduleTag: (id: string) => Promise<void>
+  listScheduleWorkflows: () => Promise<ScheduleWorkflow[]>
+  getScheduleWorkflow: (id: string) => Promise<ScheduleWorkflow | null>
+  getScheduleWorkflowByTask: (taskId: string) => Promise<ScheduleWorkflow | null>
+  createScheduleWorkflow: (d: CreateScheduleWorkflowDTO) => Promise<ScheduleWorkflow>
+  updateScheduleWorkflow: (id: string, d: UpdateScheduleWorkflowDTO, expectedUpdatedAt?: string) => Promise<ScheduleWorkflow>
+  deleteScheduleWorkflow: (id: string) => Promise<boolean>
+  addScheduleWorkflowStage: (workflowId: string, stage: ScheduleWorkflowStageInput) => Promise<ScheduleWorkflow>
+  updateScheduleWorkflowStage: (workflowId: string, stageId: string, patch: ScheduleWorkflowStageInput, expectedUpdatedAt?: string) => Promise<ScheduleWorkflow>
+  deleteScheduleWorkflowStage: (workflowId: string, stageId: string) => Promise<ScheduleWorkflow>
+  reorderScheduleWorkflowStages: (workflowId: string, orderedIds: string[]) => Promise<ScheduleWorkflow>
+  addScheduleWorkflowCheckpoint: (workflowId: string, stageId: string, checkpoint: ScheduleWorkflowCheckpointInput) => Promise<ScheduleWorkflow>
+  updateScheduleWorkflowCheckpoint: (workflowId: string, stageId: string, checkpointId: string, patch: ScheduleWorkflowCheckpointInput) => Promise<ScheduleWorkflow>
+  deleteScheduleWorkflowCheckpoint: (workflowId: string, stageId: string, checkpointId: string) => Promise<ScheduleWorkflow>
   /** 固定日程（重复任务） */
   scheduleRecurringList: () => Promise<ScheduleRecurring[]>
   scheduleRecurringCreate: (d: CreateScheduleRecurringDTO) => Promise<ScheduleRecurring>

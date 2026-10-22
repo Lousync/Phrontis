@@ -4,11 +4,115 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：50
+ * 版本数：51
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.10.0",
+    "date": "2026-10-22",
+    "summary": "本版一句话：日程模块重做为「今天工作台 + 日历 + 工作流」三部分。工作流用有序大画布呈现，阶段拖动只改顺序、日期自动顺延；任务与工作流一对一绑定，删任务级联删工作流；AI 获得完整工作流读写能力。",
+    "groups": [
+      {
+        "title": "日程工作流",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "",
+            "rest": "新增工作流数据 `.knowbase/modules/schedule/workflows.json`，阶段内嵌检查点，阶段数组顺序就是执行顺序",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "左栏新增「工作流」列表；任务右栏可一键建立「准备 / 执行 / 收尾」三阶段工作流",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "工作流画布：阶段卡片同尺寸横向排列，检查点挂父阶段下方；支持平移、缩放、适应画布与拖动排序",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "阶段日期统一归一化：重排或改日期后后续阶段自动顺延，检查点始终夹在父阶段内",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "工作流范围自动覆盖所有阶段，不保存任意 x / y 坐标",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "日历新增日 / 周 / 月 / 季：周与季显示工作流泳道，月视图保持任务 chip + 轻量色线",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "右栏拆成任务 / 工作流 / AI 三 Tab；任务面板自动保存并带冲突检测",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "任务新增预计时长；收集箱 = 无日期任务，不再混入每一天的今日列表",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "AI 新增 8 个工作流工具：查询、读取、创建、修改、删除、阶段增删改、阶段重排、检查点增删改",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "AI 建任务支持预计时长与收集箱；删除任务走 repo 层级联删除工作流",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "删除「AI 拆阶段」按钮与 `/拆解` 指令，AI 能力统一收进工作流工具与 AI 助手",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "新增 `workflowPure.ts` 纯函数层，UI / 主进程 / AI 工具 / 契约脚本共用同一套日期归一化",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增契约脚本：`verify-workflow-pure.mjs` / `verify-workflow-repo.mjs` / `verify-workflow-ai-tools.mjs`",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增帮助手册《日程工作流》，更新《日程助手与固定日程》《日程与打卡小窗》",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增设置 `scheduleView` / `scheduleCalendarMode`；旧四象限与时间网格设置仅兼容保留",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "Toast 在日程右栏展开时自动让位，不再遮挡 AI 输入框",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "删除旧日程组件：`TimetableView` / `TaskTray` / `ViewSwitcher` / `TodoEditModal` / `QuadrantChart` / `TodoItem`",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.9.0",
     "date": "2026-10-16",

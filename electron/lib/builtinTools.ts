@@ -28,8 +28,15 @@ import { searchHelp, helpCatalog } from './helpService'
 import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries } from './kbStore/blogVaultRepo'
 import { normalizeBlogDate, nearestEntryDates, blogHitExcerpt, splitBlogSearchTerms } from './blogToolsPure'
 import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
-import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, vaultScheduleRecurringAll, vaultScheduleCreateRecurring, vaultScheduleUpdateRecurring, vaultScheduleDeleteRecurring, type TodoRow } from './kbStore/scheduleVaultRepo'
+import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, vaultScheduleRecurringAll, vaultScheduleCreateRecurring, vaultScheduleUpdateRecurring, vaultScheduleDeleteRecurring, vaultTagsAll, type TodoRow } from './kbStore/scheduleVaultRepo'
+import {
+  vaultWorkflowsAll, vaultWorkflowById, vaultCreateWorkflow, vaultUpdateWorkflow, vaultDeleteWorkflow,
+  vaultAddWorkflowStage, vaultUpdateWorkflowStage, vaultDeleteWorkflowStage, vaultReorderWorkflowStages,
+  vaultAddWorkflowCheckpoint, vaultUpdateWorkflowCheckpoint, vaultDeleteWorkflowCheckpoint,
+} from './kbStore/scheduleWorkflowVaultRepo'
 import { hmToMin, minToHm, parseScheduleWeekdays, recurringFreqLabel } from '../../src/lib/scheduleRecurringPure'
+import { buildWorkflowFromTask, isWorkflowDate, stageDuration, workflowProgress } from '../../src/modules/schedule/workflowPure'
+import type { ScheduleWorkflow, ScheduleWorkflowStageInput } from '../../src/types'
 import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from './kbStore/accountingVaultRepo'
 // 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
 // 依赖方向已核：pluginEvents 的依赖树不反向 import 本模块，无循环。
@@ -424,7 +431,7 @@ export function normalizeTodoPatch(args: Record<string, unknown>, currentTaskTyp
   }
   if (args.date !== undefined) {
     const d = str(args.date).trim()
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error('date 必须是 YYYY-MM-DD')
+    if (d && !/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error('date 必须是 YYYY-MM-DD 或空串')
     patch.date = d
   }
   if (args.quadrant !== undefined) {
@@ -455,6 +462,12 @@ export function normalizeTodoPatch(args: Record<string, unknown>, currentTaskTyp
     }
     patch[key] = v
   }
+  if (args.estimateMin !== undefined) {
+    const v = args.estimateMin
+    if (v === null) patch.estimateMin = null
+    else if (typeof v !== 'number' || !Number.isInteger(v) || v <= 0 || v > 10080) throw new Error('estimateMin 必须是 1..10080 的整数分钟数')
+    else patch.estimateMin = v
+  }
 
   // 截止时刻：只对 deadline 类有意义（与 create-todo 的 finalTime 同口径）
   const effectiveTaskType = (patch.taskType as string | undefined) ?? currentTaskType
@@ -472,7 +485,7 @@ export function normalizeTodoPatch(args: Record<string, unknown>, currentTaskTyp
   }
 
   if (Object.keys(patch).length === 0) {
-    throw new Error('没有可修改的字段：至少传一个（title/description/date/time/quadrant/taskType/tagId/status/endCriteria/scheduledStart/scheduledEnd）')
+    throw new Error('没有可修改的字段：至少传一个（title/description/date/time/quadrant/taskType/tagId/status/endCriteria/scheduledStart/scheduledEnd/estimateMin）')
   }
   return patch
 }
@@ -495,6 +508,50 @@ export function summarizeDeletedTodos(target: TodoRow, rows: TodoRow[]): {
     scheduledStart: target.scheduled_start ?? null,
     scheduledEnd: target.scheduled_end ?? null,
     subtasks,
+  }
+}
+
+function workflowState(flow: ScheduleWorkflow, today = todayLocal()): 'planning' | 'active' | 'upcoming' | 'done' {
+  const progress = workflowProgress(flow)
+  if (progress.total === 0) return 'planning'
+  if (progress.done === progress.total) return 'done'
+  if (flow.stages.some(s => s.status === 'doing') || flow.start <= today) return 'active'
+  return 'upcoming'
+}
+
+function workflowDateArg(value: unknown, label: string): string | undefined {
+  if (value === undefined) return undefined
+  const s = str(value).trim()
+  if (!isWorkflowDate(s)) throw new Error(`${label} 必须是 YYYY-MM-DD`)
+  return s
+}
+
+function workflowStatusArg(value: unknown): 'planned' | 'doing' | 'done' | undefined {
+  if (value === undefined) return undefined
+  const s = str(value).trim()
+  if (s !== 'planned' && s !== 'doing' && s !== 'done') throw new Error('status 只支持 planned / doing / done')
+  return s
+}
+
+function workflowSummary(flow: ScheduleWorkflow) {
+  const progress = workflowProgress(flow)
+  const current = flow.stages.find(s => s.status === 'doing')
+    ?? flow.stages.find(s => s.status !== 'done')
+    ?? null
+  return {
+    id: flow.id,
+    title: flow.title,
+    taskId: flow.taskId,
+    tagId: flow.tagId,
+    color: flow.color,
+    start: flow.start,
+    end: flow.end,
+    state: workflowState(flow),
+    progress,
+    stageCount: flow.stages.length,
+    currentStage: current
+      ? { id: current.id, title: current.title, start: current.start, end: current.end, status: current.status, days: stageDuration(current) }
+      : null,
   }
 }
 
@@ -912,6 +969,7 @@ export function registerBuiltinTools(): void {
         endCriteria: r.end_criteria ?? '',
         scheduledStart: r.scheduled_start ?? null,
         scheduledEnd: r.scheduled_end ?? null,
+        estimateMin: r.estimate_min ?? null,
         parentId: r.parent_id ?? null,
       }
     })
@@ -1005,15 +1063,16 @@ export function registerBuiltinTools(): void {
     inputSchema: {
       type: 'object',
       properties: {
-        date: { type: 'string', description: 'YYYY-MM-DD, 默认今天' },
+        date: { type: 'string', description: 'YYYY-MM-DD；省略=今天，空串=收集箱' },
         title: { type: 'string', description: '待办内容' },
-        quadrant: { type: 'number', description: '0紧急重要/1重要不紧急/2紧急不重要/3不重要, 默认1' },
-        taskType: { type: 'string', enum: ['plan', 'deadline', 'daily'], description: "任务类型：plan 计划 / deadline 截止类 / daily 零碎当天完成，默认 plan" },
-        time: { type: 'string', description: "截止时刻，完整格式 'YYYY-MM-DD HH:mm'（deadline 类才带）；仅当文本里识别出明确时间承诺才传，否则不传、不编造" },
-        tagId: { type: 'string', description: '标签 ID（来自 schedule:getTags 或列表结果），可选' },
-        endCriteria: { type: 'string', description: '完成标准/目标（仅 plan 计划类有意义，如「能默写第三章公式」），可选' },
-        scheduledStart: { type: 'number', description: '排期起点（当天分钟数 0-1439，如 09:00=540），配合 date 与 scheduledEnd 落格；可选' },
-        scheduledEnd: { type: 'number', description: '排期终点（当天分钟数），可选' },
+        quadrant: { type: 'number', description: '0/1/2/3，默认 1' },
+        taskType: { type: 'string', enum: ['plan', 'deadline', 'daily'], description: 'plan/deadline/daily，默认 plan' },
+        time: { type: 'string', description: "截止 'YYYY-MM-DD HH:mm'（deadline 用）" },
+        tagId: { type: 'string', description: '标签 id' },
+        endCriteria: { type: 'string', description: '完成标准（plan 可选）' },
+        scheduledStart: { type: 'number', description: '排期起点分钟，09:00=540' },
+        scheduledEnd: { type: 'number', description: '排期终点分钟' },
+        estimateMin: { type: 'number', description: '预计分钟' },
       },
       required: ['title'],
     },
@@ -1026,7 +1085,9 @@ export function registerBuiltinTools(): void {
   }, args => {
     const title = str(args.title).trim()
     if (!title) throw new Error('待办内容不能为空')
-    const date = /^\d{4}-\d{2}-\d{2}$/.test(str(args.date)) ? str(args.date) : todayLocal()
+    const rawDate = str(args.date).trim()
+    if (rawDate && !/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) throw new Error('date 必须是 YYYY-MM-DD 或空串')
+    const date = args.date !== undefined && rawDate === '' ? '' : (rawDate || todayLocal())
     const quadrant = clamp(Math.floor(num(args.quadrant, 1)), 0, 3)
     const taskType = (['plan', 'deadline', 'daily'] as const).includes(str(args.taskType) as 'plan' | 'deadline' | 'daily')
       ? (str(args.taskType) as 'plan' | 'deadline' | 'daily')
@@ -1040,6 +1101,7 @@ export function registerBuiltinTools(): void {
     const tagId = str(args.tagId).trim() ? str(args.tagId).trim() : null
     const scheduledStart = typeof args.scheduledStart === 'number' && Number.isFinite(args.scheduledStart) ? args.scheduledStart : null
     const scheduledEnd = typeof args.scheduledEnd === 'number' && Number.isFinite(args.scheduledEnd) ? args.scheduledEnd : null
+    const estimateMin = typeof args.estimateMin === 'number' && Number.isInteger(args.estimateMin) && args.estimateMin > 0 ? args.estimateMin : null
     const id = randomUUID()
     // 写 .knowbase/modules/schedule/todos.json（默认值同表列：plan/pending/sort 0）
     const now = new Date().toISOString()
@@ -1051,7 +1113,7 @@ export function registerBuiltinTools(): void {
       parent_id: null,
       // AI 建的任务默认不排期（除非显式传 scheduledStart/End），落进「待安排」栏等着被拖进日程表
       scheduled_start: scheduledStart, scheduled_end: scheduledEnd,
-      snooze_until: null,
+      snooze_until: null, estimate_min: estimateMin,
       created_at: now, updated_at: now,
     })
     // 主进程写盘后必须主动广播：日程模块是保活的（切 Tab 不重载），
@@ -1065,13 +1127,13 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.schedule.update-todo',
     title: '修改日程待办',
-    description: '按 id 修改待办：改标题/日期/截止时刻/象限/任务类型/标签/完成状态/排期时段。id 必须先由 list-todos 取到。',
+    description: '按 id 修改待办：改标题/日期/截止时刻/象限/任务类型/标签/完成状态/排期时段/预计时长。id 必须先由 list-todos 取到。',
     inputSchema: {
       type: 'object',
       properties: {
         id: { type: 'string', description: '待办 id' },
         title: { type: 'string', description: '标题' },
-        date: { type: 'string', description: '日期 YYYY-MM-DD' },
+        date: { type: 'string', description: '日期 YYYY-MM-DD；空串=收集箱' },
         time: { type: 'string', description: "截止时刻 'YYYY-MM-DD HH:mm'，仅 deadline 类" },
         quadrant: { type: 'number', description: '象限 0紧急重要/1重要不紧急/2紧急不重要/3不紧急不重要' },
         taskType: { type: 'string', enum: ['plan', 'deadline', 'daily'], description: '任务类型' },
@@ -1079,6 +1141,7 @@ export function registerBuiltinTools(): void {
         status: { type: 'string', enum: ['pending', 'done'], description: 'pending 未完成 / done 已完成' },
         scheduledStart: { type: 'number', description: '排期起点（当天分钟数，09:00=540）' },
         scheduledEnd: { type: 'number', description: '排期终点（当天分钟数）' },
+        estimateMin: { type: 'number', description: '预计时长（分钟），null=清除' },
         // 刻意不暴露 description / end_criteria：list-todos 不回传这两列，
         // AI 看不到现值 → 允许改就是「盲改覆盖用户写过的备注」，属静默数据丢失。
         // （单工具 schema 有 800 字符红线，AGENTS.md#16；这两项省下的正好也是大头）
@@ -1140,6 +1203,280 @@ export function registerBuiltinTools(): void {
     vaultDeleteTodoCascade(id)
     broadcastDataChanged('schedule')
     return { ok: true, ...summary }
+  })
+
+  // ===== 工作流 =====
+  registerTool({
+    name: 'builtin.schedule.list-workflows',
+    title: '查询工作流',
+    description: '按任务/标签/状态/日期筛选工作流摘要',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: { type: 'string', description: '按任务筛选' },
+        tagId: { type: 'string', description: '按标签筛选' },
+        status: { type: 'string', enum: ['planning', 'active', 'upcoming', 'done'], description: '状态筛选' },
+        from: { type: 'string', description: '范围开始 YYYY-MM-DD' },
+        to: { type: 'string', description: '范围结束 YYYY-MM-DD' },
+        limit: { type: 'number', description: '上限，默认 50' },
+      },
+    },
+    source: 'builtin', enabled: true, readOnly: true, tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const taskId = str(args.taskId).trim()
+    const tagId = str(args.tagId).trim()
+    const status = str(args.status).trim()
+    const from = workflowDateArg(args.from, 'from')
+    const to = workflowDateArg(args.to, 'to')
+    const limit = clamp(Math.floor(num(args.limit, 50)), 1, 100)
+    return vaultWorkflowsAll()
+      .filter(w => !taskId || w.taskId === taskId)
+      .filter(w => !tagId || w.tagId === tagId)
+      .filter(w => !status || workflowState(w) === status)
+      .filter(w => !from || w.end >= from)
+      .filter(w => !to || w.start <= to)
+      .slice(0, limit)
+      .map(workflowSummary)
+  })
+
+  registerTool({
+    name: 'builtin.schedule.get-workflow',
+    title: '读取工作流',
+    description: '读取工作流完整阶段与检查点',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: '工作流 id' } },
+      required: ['id'],
+    },
+    source: 'builtin', enabled: true, readOnly: true, tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    const flow = vaultWorkflowById(id)
+    if (!flow) throw new Error(`未找到工作流 id=${id}`)
+    return { ...workflowSummary(flow), stages: flow.stages }
+  })
+
+  registerTool({
+    name: 'builtin.schedule.create-workflow',
+    title: '创建工作流',
+    description: '创建独立或任务工作流，可带初始阶段；绑定任务时自动 1:1 校验',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: '标题' },
+        taskId: { type: 'string', description: '绑定任务 id，可选' },
+        tagId: { type: 'string', description: '标签 id，可选' },
+        color: { type: 'string', description: '颜色，可选' },
+        start: { type: 'string', description: '开始 YYYY-MM-DD' },
+        end: { type: 'string', description: '结束 YYYY-MM-DD' },
+        stages: {
+          type: 'array',
+          description: '初始阶段，可选',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              start: { type: 'string' },
+              end: { type: 'string' },
+              status: { type: 'string', enum: ['planned', 'doing', 'done'] },
+            },
+            required: ['title', 'start', 'end'],
+          },
+        },
+      },
+      required: ['title'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const taskId = str(args.taskId).trim() || null
+    const task = taskId ? vaultFindTodo(taskId) : null
+    if (taskId && !task) throw new Error(`未找到任务 id=${taskId}`)
+    const tagId = str(args.tagId).trim() || task?.tag_id || null
+    const tag = tagId ? vaultTagsAll().find(t => t.id === tagId) ?? null : null
+    const base = task
+      ? buildWorkflowFromTask({ id: task.id, title: task.title, date: task.date, time: task.time }, tag ? { id: tag.id, color: tag.color } : null)
+      : null
+    const rawStages = Array.isArray(args.stages) ? args.stages as Array<Record<string, unknown>> : []
+    const stages: ScheduleWorkflowStageInput[] = rawStages.map(s => ({
+      title: str(s.title).trim(),
+      start: workflowDateArg(s.start, 'stages.start')!,
+      end: workflowDateArg(s.end, 'stages.end')!,
+      status: workflowStatusArg(s.status),
+    }))
+    const flow = vaultCreateWorkflow({
+      title: str(args.title).trim() || base?.title || '未命名工作流',
+      taskId,
+      tagId,
+      color: str(args.color).trim() || base?.color,
+      start: workflowDateArg(args.start, 'start') || base?.start,
+      end: workflowDateArg(args.end, 'end') || base?.end,
+      stages: stages.length > 0 ? stages : base?.stages.map(s => ({
+        title: s.title, start: s.start, end: s.end, status: s.status, milestone: s.milestone,
+      })),
+    })
+    broadcastDataChanged('schedule')
+    return workflowSummary(flow)
+  })
+
+  registerTool({
+    name: 'builtin.schedule.update-workflow',
+    title: '修改工作流',
+    description: '修改工作流标题、标签、颜色或计划范围',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: '工作流 id' },
+        title: { type: 'string', description: '标题' },
+        tagId: { type: 'string', description: '标签 id，空串=清空' },
+        color: { type: 'string', description: '颜色' },
+        start: { type: 'string', description: '开始 YYYY-MM-DD' },
+        end: { type: 'string', description: '结束 YYYY-MM-DD' },
+        expectedUpdatedAt: { type: 'string', description: '冲突检测时间戳' },
+      },
+      required: ['id'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    const flow = vaultUpdateWorkflow(id, {
+      title: args.title === undefined ? undefined : str(args.title).trim(),
+      tagId: args.tagId === undefined ? undefined : (str(args.tagId).trim() || null),
+      color: args.color === undefined ? undefined : str(args.color).trim(),
+      start: workflowDateArg(args.start, 'start'),
+      end: workflowDateArg(args.end, 'end'),
+    }, str(args.expectedUpdatedAt).trim() || undefined)
+    broadcastDataChanged('schedule')
+    return workflowSummary(flow)
+  })
+
+  registerTool({
+    name: 'builtin.schedule.delete-workflow',
+    title: '删除工作流',
+    description: '删除工作流，不删除绑定任务',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: '工作流 id' } },
+      required: ['id'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const id = str(args.id).trim()
+    if (!id) throw new Error('缺少必填参数: id')
+    if (!vaultDeleteWorkflow(id)) throw new Error(`未找到工作流 id=${id}`)
+    broadcastDataChanged('schedule')
+    return { ok: true, id }
+  })
+
+  registerTool({
+    name: 'builtin.schedule.mutate-stage',
+    title: '编辑工作流阶段',
+    description: '新增、修改或删除阶段；日期自动归一化并顺延后续阶段',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        op: { type: 'string', enum: ['add', 'update', 'delete'], description: '操作' },
+        workflowId: { type: 'string', description: '工作流 id' },
+        stageId: { type: 'string', description: '阶段 id，update/delete 必填' },
+        title: { type: 'string', description: '标题' },
+        start: { type: 'string', description: '开始 YYYY-MM-DD' },
+        end: { type: 'string', description: '结束 YYYY-MM-DD' },
+        status: { type: 'string', enum: ['planned', 'doing', 'done'], description: '状态' },
+        milestone: { type: 'boolean', description: '是否里程碑' },
+      },
+      required: ['op', 'workflowId'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const op = str(args.op).trim()
+    const workflowId = str(args.workflowId).trim()
+    const stageId = str(args.stageId).trim()
+    if (!workflowId) throw new Error('缺少必填参数: workflowId')
+    const patch: ScheduleWorkflowStageInput = {
+      title: args.title === undefined ? undefined : str(args.title).trim(),
+      start: workflowDateArg(args.start, 'start'),
+      end: workflowDateArg(args.end, 'end'),
+      status: workflowStatusArg(args.status),
+      milestone: typeof args.milestone === 'boolean' ? args.milestone : undefined,
+    }
+    let flow: ScheduleWorkflow
+    if (op === 'add') flow = vaultAddWorkflowStage(workflowId, patch)
+    else if (op === 'update') {
+      if (!stageId) throw new Error('update 需要 stageId')
+      flow = vaultUpdateWorkflowStage(workflowId, stageId, patch)
+    } else if (op === 'delete') {
+      if (!stageId) throw new Error('delete 需要 stageId')
+      flow = vaultDeleteWorkflowStage(workflowId, stageId)
+    } else throw new Error('op 只支持 add / update / delete')
+    broadcastDataChanged('schedule')
+    return workflowSummary(flow)
+  })
+
+  registerTool({
+    name: 'builtin.schedule.reorder-stages',
+    title: '重排工作流阶段',
+    description: '按新顺序重排阶段，保留每段时长并自动顺延日期',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        workflowId: { type: 'string', description: '工作流 id' },
+        orderedIds: { type: 'array', items: { type: 'string' }, description: '按执行顺序排列的阶段 id' },
+      },
+      required: ['workflowId', 'orderedIds'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const workflowId = str(args.workflowId).trim()
+    if (!workflowId) throw new Error('缺少必填参数: workflowId')
+    if (!Array.isArray(args.orderedIds) || args.orderedIds.some(v => !str(v).trim())) throw new Error('orderedIds 必须是非空字符串数组')
+    const flow = vaultReorderWorkflowStages(workflowId, args.orderedIds.map(v => str(v).trim()))
+    broadcastDataChanged('schedule')
+    return workflowSummary(flow)
+  })
+
+  registerTool({
+    name: 'builtin.schedule.mutate-checkpoint',
+    title: '编辑工作流检查点',
+    description: '新增、修改或删除阶段内的检查点；日期自动夹进父阶段',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        op: { type: 'string', enum: ['add', 'update', 'delete'], description: '操作' },
+        workflowId: { type: 'string', description: '工作流 id' },
+        stageId: { type: 'string', description: '阶段 id' },
+        checkpointId: { type: 'string', description: '检查点 id，update/delete 必填' },
+        title: { type: 'string', description: '标题' },
+        start: { type: 'string', description: '开始 YYYY-MM-DD' },
+        end: { type: 'string', description: '结束 YYYY-MM-DD' },
+        status: { type: 'string', enum: ['planned', 'doing', 'done'], description: '状态' },
+      },
+      required: ['op', 'workflowId', 'stageId'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand', module: 'schedule',
+  }, args => {
+    const op = str(args.op).trim()
+    const workflowId = str(args.workflowId).trim()
+    const stageId = str(args.stageId).trim()
+    const checkpointId = str(args.checkpointId).trim()
+    if (!workflowId || !stageId) throw new Error('缺少 workflowId 或 stageId')
+    const patch = {
+      title: args.title === undefined ? undefined : str(args.title).trim(),
+      start: workflowDateArg(args.start, 'start'),
+      end: workflowDateArg(args.end, 'end'),
+      status: workflowStatusArg(args.status),
+    }
+    let flow: ScheduleWorkflow
+    if (op === 'add') flow = vaultAddWorkflowCheckpoint(workflowId, stageId, patch)
+    else if (op === 'update') {
+      if (!checkpointId) throw new Error('update 需要 checkpointId')
+      flow = vaultUpdateWorkflowCheckpoint(workflowId, stageId, checkpointId, patch)
+    } else if (op === 'delete') {
+      if (!checkpointId) throw new Error('delete 需要 checkpointId')
+      flow = vaultDeleteWorkflowCheckpoint(workflowId, stageId, checkpointId)
+    } else throw new Error('op 只支持 add / update / delete')
+    broadcastDataChanged('schedule')
+    return workflowSummary(flow)
   })
 
   // ===== 固定日程（重复任务）=====
@@ -1449,7 +1786,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive / course.review.write）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive / course.review.write）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {

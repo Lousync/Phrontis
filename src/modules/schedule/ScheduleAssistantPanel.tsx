@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { CalendarDays, ListChecks, Sparkles } from 'lucide-react'
 import { ChatBody } from '../../components/shared/AssistantPanel/ChatBody'
 import { useAssistantChat } from '../../components/shared/AssistantPanel/useAssistantChat'
-import { SCHEDULE_PREVIEW_ADJUST_EVENT, SCHEDULE_PREVIEW_CONFIRM_EVENT } from './shared'
+import { SCHEDULE_AI_PREFILL_EVENT, SCHEDULE_PREVIEW_ADJUST_EVENT, SCHEDULE_PREVIEW_CONFIRM_EVENT } from './shared'
 
 /**
  * 日程助手面板（日程 AI 化 P1）——工作台右栏「🗓 日程助手」条件页签的内容。
@@ -43,6 +43,17 @@ export function ScheduleAssistantPanel() {
       window.removeEventListener(SCHEDULE_PREVIEW_CONFIRM_EVENT, onConfirm)
       window.removeEventListener(SCHEDULE_PREVIEW_ADJUST_EVENT, onAdjust)
     }
+  }, [chat])
+
+  useEffect(() => {
+    const onPrefill = (e: Event) => {
+      const text = (e as CustomEvent<{ text?: string }>).detail?.text
+      if (!text) return
+      chat.setInput(text)
+      setTimeout(() => chat.inputRef.current?.focus(), 30)
+    }
+    window.addEventListener(SCHEDULE_AI_PREFILL_EVENT, onPrefill)
+    return () => window.removeEventListener(SCHEDULE_AI_PREFILL_EVENT, onPrefill)
   }, [chat])
 
   const quickSend = useCallback((text: string) => { void chat.send(text) }, [chat])

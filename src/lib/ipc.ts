@@ -4,6 +4,7 @@ import { SETTINGS_DEFAULTS } from './settings'
 import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingRecurring, AccountingParseOutcome, AccountingImportOutcome, CreateAccountingInput, CreateAccountingRecurringInput, AccountingRecurringSettleResult } from '../types'
 import type { ProviderQuotaView } from '../types'
 import type { UsageWindow, UsageDashboardView } from '../types'
+import type { CreateScheduleWorkflowDTO, ScheduleWorkflowCheckpointInput, ScheduleWorkflowStageInput, UpdateScheduleWorkflowDTO } from '../types'
 const a = () => { if (!window.api) throw new Error('Electron API not available.'); return window.api }
 
 export const getPathForFile = (file: File): string => a().getPathForFile(file)
@@ -77,12 +78,27 @@ export const getScheduleSubtasks = (parentId: string) => a().getScheduleSubtasks
 export const getScheduleUnscheduledTodos = () => a().getScheduleUnscheduledTodos()
 /** 日程表：某一周（含首尾）的任务，附带区间之前「已排期未完成」的延后候选 */
 export const getScheduleWeekTodos = (weekStart: string, weekEnd: string) => a().getScheduleWeekTodos(weekStart, weekEnd)
+/** 日程大列表：一次读取全部顶层任务（收集箱 / 即将 / 已完成共用） */
+export const getAllScheduleTodos = () => a().getAllScheduleTodos()
 export const createScheduleTodo = (d: CreateScheduleTodoDTO) => a().createScheduleTodo(d)
 export const updateScheduleTodo = (id: string, d: UpdateScheduleTodoDTO) => a().updateScheduleTodo(id, d)
 export const deleteScheduleTodo = (id: string) => a().deleteScheduleTodo(id)
 export const getScheduleTags = () => a().getScheduleTags()
 export const createScheduleTag = (n: string, c?: string) => a().createScheduleTag(n, c)
 export const deleteScheduleTag = (id: string) => a().deleteScheduleTag(id)
+export const listScheduleWorkflows = () => a().listScheduleWorkflows()
+export const getScheduleWorkflow = (id: string) => a().getScheduleWorkflow(id)
+export const getScheduleWorkflowByTask = (taskId: string) => a().getScheduleWorkflowByTask(taskId)
+export const createScheduleWorkflow = (d: CreateScheduleWorkflowDTO) => a().createScheduleWorkflow(d)
+export const updateScheduleWorkflow = (id: string, d: UpdateScheduleWorkflowDTO, expectedUpdatedAt?: string) => a().updateScheduleWorkflow(id, d, expectedUpdatedAt)
+export const deleteScheduleWorkflow = (id: string) => a().deleteScheduleWorkflow(id)
+export const addScheduleWorkflowStage = (workflowId: string, stage: ScheduleWorkflowStageInput) => a().addScheduleWorkflowStage(workflowId, stage)
+export const updateScheduleWorkflowStage = (workflowId: string, stageId: string, patch: ScheduleWorkflowStageInput, expectedUpdatedAt?: string) => a().updateScheduleWorkflowStage(workflowId, stageId, patch, expectedUpdatedAt)
+export const deleteScheduleWorkflowStage = (workflowId: string, stageId: string) => a().deleteScheduleWorkflowStage(workflowId, stageId)
+export const reorderScheduleWorkflowStages = (workflowId: string, orderedIds: string[]) => a().reorderScheduleWorkflowStages(workflowId, orderedIds)
+export const addScheduleWorkflowCheckpoint = (workflowId: string, stageId: string, checkpoint: ScheduleWorkflowCheckpointInput) => a().addScheduleWorkflowCheckpoint(workflowId, stageId, checkpoint)
+export const updateScheduleWorkflowCheckpoint = (workflowId: string, stageId: string, checkpointId: string, patch: ScheduleWorkflowCheckpointInput) => a().updateScheduleWorkflowCheckpoint(workflowId, stageId, checkpointId, patch)
+export const deleteScheduleWorkflowCheckpoint = (workflowId: string, stageId: string, checkpointId: string) => a().deleteScheduleWorkflowCheckpoint(workflowId, stageId, checkpointId)
 // 固定日程（重复任务）
 export const scheduleRecurringList = () => a().scheduleRecurringList()
 export const scheduleRecurringCreate = (d: CreateScheduleRecurringDTO) => a().scheduleRecurringCreate(d)
