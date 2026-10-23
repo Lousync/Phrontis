@@ -63,7 +63,8 @@ ok(writeAsserts >= 5, 'B5 写工具均挂 assertCanWrite（write/edit/rename×2/
 
 console.log('\n=== C. agentService 透传 scope / propose ===')
 const svc = read('electron/lib/agentService.ts')
-ok(/scope:\s*aiScope,\s*propose:\s*aiPropose/.test(svc), 'C1 工具上下文注入 scope+propose')
+ok(/scope:\s*aiScope/.test(svc) && /propose:\s*aiPropose/.test(svc) && /scopeAll/.test(svc),
+  'C1 工具上下文注入 scope+scopeAll+propose')
 ok(/source === 'aiAssistant'/.test(svc) && /buildScopeManifest/.test(svc), 'C2 清单按 aiAssistant 注入')
 ok(/source === 'aiAssistant' \? 'aiAssistant'/.test(svc), 'C3 newSession 来源白名单含 aiAssistant')
 
@@ -114,7 +115,8 @@ ok(/scope\?:\s*string\[\]/.test(repo), 'G1 会话行带 scope 字段（作用域
   const i = repo.indexOf('export function updateAgentSessionScope')
   const body = i < 0 ? '' : repo.slice(i, repo.indexOf('\n}', i))
   ok(i >= 0 && !/updated_at/.test(body), 'G2 落库不碰 updated_at（勾选是编辑动作，不该把任务顶到列表最上）', 'updated_at 只允许出现在函数外的文档注释里')
-  ok(/seen\.has\(s\)/.test(body) && /clean\.length >= 500/.test(body), 'G3 落库归一：去重 + 上限 500')
+  const norm = repo.slice(repo.indexOf('export function normalizeSessionScope'), repo.indexOf('export function updateAgentSessionScope'))
+  ok(/seen\.has\(s\)/.test(norm) && /clean\.length >= 500/.test(norm), 'G3 落库归一：去重 + 上限 500')
   ok(/row\.scope = clean/.test(body) && /writeSessions\(sessions\)/.test(body), 'G4 写回走 writeSessions（与其余会话字段同一通道）')
 }
 ok(/ipcMain\.handle\('agent:setSessionScope'/.test(svc), 'G5 主进程注册 agent:setSessionScope')
@@ -123,11 +125,13 @@ ok(preload.includes('agentSetSessionScope') && preload.includes('agentRenameSess
 ok(types.includes('agentSetSessionScope') && types.includes('agentRenameSession'), 'G8 types 声明两条通道')
 ok(/export const agentSetSessionScope/.test(ipc) && /export const agentRenameSession/.test(ipc), 'G9 ipc.ts 封装两条通道')
 {
-  const hook2 = read('src/modules/ai-assistant/useAiAssistant.ts')
-  ok(/scopeCache/.test(hook2) && /flushScope/.test(hook2), 'G10 切会话先 flush + 留最新值缓存（防抖窗口内切走再切回不显旧值）')
-  ok(/isSessionRunning\(id\)\)\s*return/.test(hook2), 'G11 运行中拒绝改作用域（本轮已按开头快照跑）')
+  const hook2 = read('src/components/shared/AssistantPanel/useAssistantChat.ts')
+  ok(/scopePendingRef/.test(hook2) && /flushScope/.test(hook2), 'G10 切会话先 flush + 留最新值缓存（防抖窗口内切走再切回不显旧值）')
+  ok(/isSessionRunning\(activeIdRef\.current\)\)\s*return/.test(hook2) && /isSessionRunning\(id\)\)\s*return/.test(hook2),
+    'G11 运行中拒绝改作用域（本轮已按开头快照跑）')
   const retBlock = hook2.slice(hook2.lastIndexOf('return {'))
-  ok(/\bscope, setScope,/.test(retBlock) && /renameSession/.test(retBlock), 'G12 hook 返回 scope / setScope / renameSession（漏了就是半截重构，tsc 直接红）')
+  ok(/\bscope,/.test(retBlock) && /setScope,/.test(retBlock) && /scopeAll,/.test(retBlock) && /renameSession/.test(retBlock),
+    'G12 hook 返回 scope / scopeAll / setScope / renameSession（漏了就是半截重构，tsc 直接红）')
 }
 {
   const mod2 = read('src/modules/ai-assistant/index.tsx')

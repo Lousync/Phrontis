@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight, Zap } from 'lucide-react'
 import type { AiScopeSuggestion, LlmProviderInfo } from '../../types'
 import { workspaceGetCurrent, aiAssistantScopeSuggest, llmListProviders, llmReasoningCapable } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
@@ -13,7 +13,9 @@ import { useInputShell } from '../../components/shared/AssistantPanel/inputShell
 import { useAiAssistant, type Effort } from './useAiAssistant'
 import { prunePrefixes } from './scopeSetPure'
 import { ScopePane } from './ScopePane'
-import { ReviewPane } from './ReviewPane'
+
+/** Monaco 差异预览只在有待确认变更时按需加载 */
+const ReviewPane = lazy(() => import('./ReviewPane').then(m => ({ default: m.ReviewPane })))
 
 /**
  * AI助手模块（v3.9.0，工作台内 Tab，形态同笔记 / 日程）。
@@ -21,9 +23,9 @@ import { ReviewPane } from './ReviewPane'
  * 左栏 = 作用域圈选（上）+ 任务列表（下，底部「新建任务」）；
  * 中央 = 任务流（共享 MessageList：AI 去气泡 + 工具摘要 + 用户带尾角气泡）+ **常驻底部输入框**
  *   （外框走 `useInputShell()`，与 AI教学 / 侧栏 AI助手 同一套样式；工具条 = 合规提示 + 模型/强度 + 发送/停止）。
- * 会话来源 source='aiAssistant'，与 aiChat（'assistant'）在存储与列表两侧都不混；
- * 运行态与消息渲染复用共享资产（assistantRunStore / MessageList）。
- * 主链路（作用域强制 / 暂存预览 / 整任务回滚）见 `.claude/plans/ai-vault-assistant-v390-impl.md`。
+ * v3.11.0 起与右侧栏、AI 对话页共用同一批会话（source='assistant'）：本文件只是完整视图宿主，
+ * 状态机在 `useAssistantChat`；运行态与消息渲染复用共享资产（assistantRunStore / MessageList）。
+ * 主链路（文件作用域 / 先预览 / 整任务回滚）见 `.claude/plans/unified-ai-assistant-v311.md`。
  */
 const EFFORT_LABEL: Record<Effort, string> = { off: '关闭', low: '低', medium: '中', high: '高' }
 
@@ -68,6 +70,17 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
   const [reviewOpen, setReviewOpen] = useState(false)
   const [reviewWidth, setReviewWidth] = useState(520)
   const [scopeCard, setScopeCard] = useState<ScopeCardState | null>(null)
+  /** 作用域卡折叠（只存本地 UI 状态，不写 Vault） */
+  const [scopeCollapsed, setScopeCollapsed] = useState(() => {
+    try { return localStorage.getItem('phrontis.ai.scopeCollapsed') === '1' } catch { return false }
+  })
+  const toggleScopeCollapsed = useCallback(() => {
+    setScopeCollapsed(v => {
+      const next = !v
+      try { localStorage.setItem('phrontis.ai.scopeCollapsed', next ? '1' : '0') } catch { /* 本地状态失败不阻断 */ }
+      return next
+    })
+  }, [])
   /** 任务条目改名（双击进内联输入框；与 AI 教学左栏会话行同一手法） */
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
@@ -156,7 +169,9 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
    */
   const runGuarded = useCallback((run: PendingRun, query: string) => {
     if (api.pending) return
-    if (api.scope.length > 0) { execRun(run); return }
+    // 整仓 / 已选文件 / 普通提问（不读文件）都直接跑；
+    // 只有「继续 / 重新生成 / 编辑重发」在空选时先给建议范围（它们需要落到具体文件）。
+    if (api.scopeAll || api.scope.length > 0 || run.kind === 'send') { execRun(run); return }
     void (async () => {
       try {
         const cands = await aiAssistantScopeSuggest(query, 8)
@@ -214,29 +229,51 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
   const sidebar = (
     <div className="flex h-full flex-col">
       {/* 作用域（上）：段头 + 搜索 + 摘要行 + 目录树三态勾选。运行中锁定（本轮已按快照跑完，改了下轮才生效） */}
-      <div className="flex min-h-0 flex-col" style={{ maxHeight: '56%' }}>
+      <div className={`flex min-h-0 flex-col ${scopeCollapsed ? 'shrink-0' : ''}`} style={{ maxHeight: scopeCollapsed ? undefined : '56%' }}>
         {/* 56% 限高保留：chip 行已删、段高恒定，不再存在「chip 每长一行从树上割一块」；限高是为了让树不吞掉下方任务段 */}
         <div className="flex shrink-0 items-center justify-between px-3 py-2">
-          <span className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">作用域</span>
+          <button
+            type="button"
+            onClick={toggleScopeCollapsed}
+            className="flex min-w-0 items-center gap-1 text-[11px] uppercase tracking-wide text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+            title={scopeCollapsed ? '展开作用域' : '折叠作用域'}
+          >
+            <ChevronRight size={11} className={`kb-chevron shrink-0 ${scopeCollapsed ? '' : 'is-open'}`} />
+            作用域
+            <span className="normal-case tracking-normal text-[var(--text-disabled)]">
+              {api.scopeAll ? '· 整个仓库' : api.scope.length ? `· ${api.scope.length} 项` : '· 未选择文件'}
+            </span>
+          </button>
           {/* 计数与空态在 ScopePane 的摘要行（选择态只有一处表达），段头只报锁定状态 */}
           {api.pending && (
             <span className="text-[11px] text-[var(--text-muted)]" title="本轮已在运行：作用域已锁定，改动要等这一轮跑完">运行中 · 已锁定</span>
           )}
         </div>
-        <ScopePane rootId={rootId} scope={api.scope} onChange={api.setScope} disabled={api.pending} />
+        {!scopeCollapsed && (
+          <div className="kb-item-in flex min-h-0 flex-1 flex-col">
+            <ScopePane
+              rootId={rootId}
+              scope={api.scope}
+              scopeAll={api.scopeAll}
+              onChange={api.setScope}
+              onScopeAllChange={api.setScopeAll}
+              disabled={api.pending}
+            />
+          </div>
+        )}
       </div>
 
       {/* 任务（下）：段头（含新建）+ 列表；新建入口在段头，不占列表尾部 */}
       <div className="flex min-h-0 flex-1 flex-col border-t border-[var(--border-color)]">
         <div className="flex shrink-0 items-center justify-between gap-1 px-3 py-2">
-          <span className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">任务</span>
+          <span className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">会话</span>
           <span className="flex items-center gap-0.5">
             <span className="text-[11px] text-[var(--text-muted)]">{api.sessions.length}</span>
             <button
               type="button"
               onClick={() => void api.newSession()}
               className="kb-micro-pop flex h-5 w-5 items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              title="新建任务"
+              title="新建会话"
             >
               <Plus size={13} />
             </button>
@@ -244,7 +281,7 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
           {api.sessions.length === 0 ? (
-            <p className="px-2 py-4 text-center text-[12px] text-[var(--text-muted)]">暂无任务</p>
+            <p className="px-2 py-4 text-center text-[12px] text-[var(--text-muted)]">暂无会话</p>
           ) : (
             <ul className="flex flex-col gap-0.5">
               {api.sessions.map((s) => (
@@ -268,7 +305,7 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
                     <button
                       type="button"
                       onClick={() => api.setActiveId(s.id)}
-                      title={s.title || '未命名任务'}
+                      title={s.title || '未命名会话'}
                       className={`kb-item-in flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12.5px] ${
                         api.activeId === s.id ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
                       }`}
@@ -276,7 +313,7 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
                       <span
                         className="truncate"
                         onDoubleClick={(e) => { e.stopPropagation(); setRenamingId(s.id); setRenameDraft(s.title || '') }}
-                      >{s.title || '未命名任务'}</span>
+                      >{s.title || '未命名会话'}</span>
                       <span className="flex-1" />
                       <SessionRunMark mark={api.activeId === s.id ? api.runMark : null} />
                     </button>
@@ -285,7 +322,7 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
                     type="button"
                     onClick={() => void api.deleteSession(s.id)}
                     className="hidden h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--danger)] group-hover:flex"
-                    title="删除任务"
+                    title="删除会话"
                   >
                     <Trash2 size={13} />
                   </button>
@@ -430,13 +467,29 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
               rows={2}
-              placeholder={api.scope.length ? '描述要整理的内容…（Enter 发送）' : '先圈定作用域，再描述要做什么…'}
+              placeholder={api.scopeAll || api.scope.length ? '描述要整理的内容…（Enter 发送）' : '未选择文件：本轮 AI 不会读写仓库文件…'}
               className={`w-full appearance-none px-0.5 py-1 text-[13px] resize-none outline-none bg-transparent! border-0! rounded-none! ${shell.ta ?? ''}`}
             />
             {/* 工具条：合规提示（左空白）→ 模型/思考强度菜单 → 发送/停止（与 AI教学同一口径） */}
             <div className="relative flex items-center gap-2 mt-0.5">
               <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
               <>
+                <button
+                  type="button"
+                  onClick={() => api.setWriteMode(api.writeMode === 'confirm' ? 'direct' : 'confirm')}
+                  disabled={api.pending}
+                  className={`flex h-7 items-center gap-1 rounded-md px-2 text-[11px] transition-colors disabled:opacity-40 ${
+                    api.writeMode === 'confirm'
+                      ? 'text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]'
+                      : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                  }`}
+                  title={api.writeMode === 'confirm'
+                    ? '先预览：写操作等确认后应用（点击切直接执行）'
+                    : '直接执行：写操作立即落盘（点击切先预览）'}
+                >
+                  <Zap size={11} />
+                  {api.writeMode === 'confirm' ? '先预览' : '直接执行'}
+                </button>
                 <button
                   ref={modelTriggerRef}
                   type="button"
@@ -533,14 +586,17 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
               className="kb-draggable w-1 shrink-0 cursor-col-resize bg-[var(--border-color)] hover:bg-[var(--accent)]"
               title="拖动调整宽度"
             />
-            <div style={{ width: reviewWidth }} className="h-full min-w-0 shrink-0 border-l border-[var(--border-color)]">
-              <ReviewPane
-                plan={api.plan}
-                busy={api.pending}
-                onApply={(ids) => { if (performance.now() < dragGuardRef.current) return; void api.applyAccepted(ids) }}
-                onReject={() => void api.rejectPlan()}
-                onRollback={() => void api.rollbackTask()}
-              />
+            <div style={{ width: reviewWidth, maxWidth: '100%' }} className="h-full min-w-0 max-w-full shrink-0 border-l border-[var(--border-color)]">
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-[12px] text-[var(--text-muted)]">正在载入差异预览…</div>}>
+                <ReviewPane
+                  plan={api.plan}
+                  busy={api.pending}
+                  compact={reviewWidth < 720}
+                  onApply={(ids) => { if (performance.now() < dragGuardRef.current) return; void api.applyAccepted(ids) }}
+                  onReject={() => void api.rejectPlan()}
+                  onRollback={() => void api.rollbackTask()}
+                />
+              </Suspense>
             </div>
           </>
         ) : null}

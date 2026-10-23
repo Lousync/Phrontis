@@ -1359,8 +1359,16 @@ export interface AgentSessionInfo {
   mode?: 'manual' | 'agent'
   /** 会话级全局要求（仅本会话生效；空串/缺省=无） */
   instructions?: string
-  /** AI助手任务级作用域（仓库相对前缀数组；缺省/空=未圈定）。仅 source='aiAssistant' 有值 */
+  /** 统一 AI 助手文件作用域（仓库相对前缀数组；scopeAll=false 时严格按它限制） */
   scope?: string[]
+  /** true=整个仓库；false=严格按 scope（空数组 = 不读取仓库文件） */
+  scopeAll?: boolean
+  /** 写入策略：direct=立即执行；confirm=先进入变更方案 */
+  writeMode?: 'direct' | 'confirm'
+  /** 会话级模型（空 = 跟随全局设置） */
+  modelId?: string
+  /** 会话级思考强度（空 = 跟随全局设置） */
+  effort?: 'off' | 'low' | 'medium' | 'high'
   createdAt: string
   updatedAt: string
   /** 钉住时间（「★ 收藏」分区）：有值 = 已钉住（值用于收藏内排序）；缺省 / null = 未钉住 */
@@ -1574,7 +1582,7 @@ export interface AgentChange {
 
 // ---- AI助手变更方案（v3.9.0）：先预览、后确认、可整任务回滚 ----
 
-export type AiPlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag'
+export type AiPlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool'
 
 export interface AiPlanOp {
   id: string
@@ -1587,6 +1595,16 @@ export interface AiPlanOp {
   prev?: string | null
   /** 变更后内容（rename/trash 无） */
   next?: string | null
+  /** kind='tool'：工具注册名 */
+  tool?: string
+  /** kind='tool'：所属模块 */
+  module?: string
+  /** kind='tool'：调用参数 */
+  args?: Record<string, unknown>
+  /** kind='tool'：给用户看的结构化摘要 */
+  summary?: string
+  /** kind='tool'：应用后工具返回结果 */
+  result?: unknown
   status: 'pending' | 'applied' | 'rejected'
 }
 
@@ -2807,11 +2825,12 @@ export interface ElectronAPI {
   aiAssistantPlanGet: (sessionId: string) => Promise<AiChangePlan | null>
   aiAssistantPlanApply: (sessionId: string, acceptedIds: string[]) => Promise<{ applied: number; opIds: string[] }>
   aiAssistantPlanReject: (sessionId: string) => Promise<boolean>
-  aiAssistantTaskRollback: (sessionId: string) => Promise<{ reverted: number }>
+  aiAssistantTaskRollback: (sessionId: string) => Promise<{ reverted: number; skipped?: number }>
   aiAssistantTasks: () => Promise<AiTaskSummary[]>
   aiAssistantScopeSuggest: (query: string, limit?: number) => Promise<AiScopeSuggestion[]>
   agentRenameSession: (id: string, title: string) => Promise<boolean>
-  agentSetSessionScope: (id: string, scope: string[]) => Promise<{ ok: boolean; error?: string }>
+  agentSetSessionScope: (id: string, scope: string[], scopeAll?: boolean) => Promise<{ ok: boolean; error?: string }>
+  agentSetSessionPrefs: (id: string, patch: { writeMode?: 'direct' | 'confirm'; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<{ ok: boolean; error?: string }>
   agentSetSessionInstructions: (id: string, instructions: string) => Promise<{ ok: boolean; error?: string }>
   agentDeleteSession: (id: string) => Promise<boolean>
   agentSetSessionPinned: (id: string, pinned: boolean) => Promise<boolean>

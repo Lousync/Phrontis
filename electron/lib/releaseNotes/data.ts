@@ -4,11 +4,100 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：51
+ * 版本数：52
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.11.0",
+    "date": "2026-10-23",
+    "summary": "本版一句话：右侧栏、工作区书签「AI助手」与 AI 对话页合并为同一个助手——会话、作用域、写入方式、模型全部共享。每个会话默认整个仓库，也可缩窄到文件/目录；写入可选直接执行或先预览，确认后应用，文件改动可整任务回滚。",
+    "groups": [
+      {
+        "title": "统一 AI 助手",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "",
+            "rest": "三个入口共用同一批会话、消息与运行状态；在任一入口新建/继续的对话，另外两处直接可见",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "作用域改为文件/目录级：默认整个仓库，可缩窄到文件或目录；显式「未选择文件」不再等于全库放行",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "从整个仓库缩窄到文件作用域时，写入方式自动切「先预览」；扩回整仓不自动切回",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "写入方式按会话保存：直接执行 / 先预览；右栏与工作区都可切换",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "先预览覆盖可暂存的数据写入：文件显示 diff，错题本 / 记账 / 打卡等显示结构化摘要；逐条勾选应用、可丢弃、文件改动可整任务回滚",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "终端、生图落盘、插件外部副作用等不可安全预览的工具在「先预览」下自动从工具列表移除；日程在统一助手中始终只读",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "模型与思考强度按会话保存，新会话默认继承全局设置",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "工作区作用域卡支持折叠；右侧栏用作用域 chip 弹出同一个文件树",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "窄窗口 / 右侧栏的变更预览改为单栏 diff + 横向变更清单，修复固定清单把 diff 挤成黑条",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "会话行新增 `scopeAll` / `writeMode` / `modelId` / `effort`；旧 `source='aiAssistant'` 会话幂等迁移为统一会话，保留路径作用域并切确认模式",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增 `agentSessionNormalizePure.ts` / `aiAssistantStageable.ts` 与契约 `verify-unified-assistant.mjs`",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "`scopeOf` 严格区分「整个仓库」与「空选文件」；空选时读写谓词全部拒绝",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "变更方案支持 `kind='tool'`：模块写工具可暂存、重放与应用；无统一逆操作的模块写入在回滚时跳过并如实计数",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "统一助手每轮请求携带作用域与写入方式；缩窄作用域时关闭感知检索并过滤越界附件",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.10.0",
     "date": "2026-10-22",

@@ -94,7 +94,7 @@ ok(/isPropose\(ctx\)/.test(commit) && /ctx\.propose/.test(commit), 'D4 岔口以
 ok(/stageOp\(/.test(commit), 'D5 propose 时记入 stageOp')
 
 const svc = read('electron/lib/agentService.ts')
-ok(/scope:\s*aiScope,\s*propose:\s*aiPropose/.test(svc), 'D6 agentService 透传 scope+propose')
+ok(/scope:\s*aiScope/.test(svc) && /propose:\s*aiPropose/.test(svc) && /scopeAll/.test(svc), 'D6 agentService 透传 scope+scopeAll+propose')
 ok(/ipcMain\.handle\('aiAssistant:plan:apply'/.test(svc) && /aiAssistant:task:rollback/.test(svc), 'D7 主进程注册 plan:apply / task:rollback')
 
 console.log('\n=== E. IPC 三处同步 ===')
@@ -107,9 +107,10 @@ for (const ch of ['aiAssistantPlanGet', 'aiAssistantPlanApply', 'aiAssistantPlan
 ok(/AiChangePlan \| null/.test(types), 'E types 声明 AiChangePlan 返回')
 ok(/export const aiAssistantPlanGet/.test(ipc) && /export const aiAssistantTaskRollback/.test(ipc), 'E ipc.ts 封装函数到位')
 
-console.log('\n=== F. Stop = 回滚整任务 / 用量卡接线 ===')
-const hook = read('src/modules/ai-assistant/useAiAssistant.ts')
-ok(/agentAbortSession\(activeId\)[\s\S]{0,200}aiAssistantTaskRollback\(activeId\)/.test(hook), 'F1 Stop 后自动回滚整任务')
+console.log('\n=== F. Stop 语义 / 用量卡接线 ===')
+const hook = read('src/components/shared/AssistantPanel/useAssistantChat.ts')
+ok(/agentAbortSession\(sid\)[\s\S]{0,220}aiAssistantPlanReject\(sid\)/.test(hook),
+  'F1 确认模式 Stop 丢弃未应用方案；直接模式只中断（不再自动回滚）')
 ok(/agentUsageGet\(\)/.test(hook), 'F2 用量卡经 agentUsageGet 聚合会话分桶')
 const mod = read('src/modules/ai-assistant/index.tsx')
 ok(/fmtTokens\(api\.usage\.in \+ api\.usage\.out\)/.test(mod), 'F3 任务完成显示 token 卡')

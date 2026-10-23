@@ -14,6 +14,7 @@ import {
 import type { ToolInvokeCtx } from './aiTools'
 import { assertCanRead, assertCanWrite, readPredicate } from './aiAssistantScope'
 import { commitOrStage } from './aiAssistantCommit'
+import { isConfirmModeHiddenTool } from './aiAssistantStageable'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault, stageImageVersioned } from './workspaceManager'
 import { imageGenerate, imageEdit, imageEditSlotConfigured } from './llmService'
 import { imageSizeOf, exceedsPixelGuard } from './imageHeaderPure'
@@ -1798,7 +1799,7 @@ export function registerBuiltinTools(): void {
     enabled: true,
     readOnly: true,
     tier: 'core',
-  }, args => {
+  }, (args, ctx) => {
     const raw = str(args.tools)
     const names = raw.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean)
     if (names.length === 0) throw new Error('缺少必填参数: tools')
@@ -1810,6 +1811,16 @@ export function registerBuiltinTools(): void {
     for (const n of names) {
       const t = all.find(x => x.name === n)
       if (!t) { unknown.push(n); continue }
+      // 统一助手：日程写工具始终不可用；确认模式下不可安全预览的写工具也不可用。
+      // 否则 tool.request 会「申请成功」，下一轮却仍被工具面过滤 —— 模型会误以为已启用。
+      if (ctx?.unifiedAssistant && t.module === 'schedule' && t.requires === 'write') {
+        denied.push({ name: n, module: t.module ?? '', reason: '统一助手内日程只读，请用日程助手' })
+        continue
+      }
+      if (ctx?.propose && isConfirmModeHiddenTool(t.name, t.requires)) {
+        denied.push({ name: n, module: t.module ?? '', reason: '先预览模式不支持该工具，请切直接执行' })
+        continue
+      }
       // 权限不足的工具不能"申请成功"（2026-09-10 修）：
       // 否则模型会误以为已启用，进而向用户宣称操作完成 —— 而下一轮它依然不在工具列表里，
       // 结果是"AI 说创建成功、实际上什么都没发生"。
@@ -1826,7 +1837,7 @@ export function registerBuiltinTools(): void {
     }
     const deniedHint = denied.length
       ? `以下工具未启用：${denied.map(d => `${d.name}（模块「${d.module}」${d.reason}）`).join('；')}。`
-        + '请在回答中如实告知用户该操作未执行，并提示可在 设置 → AI → 权限 中把对应模块调为「读写」后重试；不要声称已完成。'
+        + '请在回答中如实告知用户该操作未执行；权限不足时提示可在 设置 → AI → 权限 中调整，不要声称已完成。'
       : undefined
     return {
       ok: true,

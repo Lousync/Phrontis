@@ -25,7 +25,10 @@ import {
 interface Props {
   rootId: string | null
   scope: string[]
+  /** true = 整个仓库（与空 scope 的「不选文件」严格区分） */
+  scopeAll?: boolean
   onChange: (scope: string[]) => void
+  onScopeAllChange?: (all: boolean) => void
   /**
    * 运行中锁定（2026-10-16 拍板）：本轮的工具调用已按运行开头的 scope 快照跑完，
    * 中途改勾选只会在下一轮生效 —— 与其让用户以为「换了范围却没反应」，不如直接置灰。
@@ -60,7 +63,7 @@ function ancestorChain(rel: string): string[] {
   return out
 }
 
-export function ScopePane({ rootId, scope, onChange, disabled = false }: Props) {
+export function ScopePane({ rootId, scope, scopeAll = false, onChange, onScopeAllChange, disabled = false }: Props) {
   const [children, setChildren] = useState<Record<string, WorkspaceEntry[]>>({})
   const [childrenRaw, setChildrenRaw] = useState<Record<string, WorkspaceEntry[]>>({})
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['']))
@@ -205,13 +208,16 @@ export function ScopePane({ rootId, scope, onChange, disabled = false }: Props) 
   /** 先建树再算摘要：renderLevel 会顺手收集「本轮真正渲染出来且自身命中的节点」，摘要行与全选可见都读它 */
   const tree = renderLevel('', 0)
 
-  const batchMode: 'visible' | 'top' | 'clear' = filtering && visible.length > 0
+  const batchMode: 'visible' | 'top' | 'clear' | 'files' = filtering && visible.length > 0
     ? 'visible'
-    : scope.length === 0 ? 'top' : 'clear'
-  const batchLabel = batchMode === 'visible' ? `全选可见(${visible.length})` : batchMode === 'top' ? '全选顶层' : '全部取消'
+    : scopeAll ? 'files' : scope.length === 0 ? 'top' : 'clear'
+  const batchLabel = batchMode === 'visible'
+    ? `全选可见(${visible.length})`
+    : batchMode === 'files' ? '改为选择文件' : batchMode === 'top' ? '全选顶层' : '全部取消'
 
   const runBatch = () => {
     if (disabled) return
+    if (batchMode === 'files') { onScopeAllChange?.(false); return }
     if (batchMode === 'clear') { onChange([]); return }
     const rels = batchMode === 'visible' ? visible : (childrenRaw[''] ?? []).map((e) => joinRel('', e.name))
     const next = batchAdd(scope, rels)
@@ -241,12 +247,28 @@ export function ScopePane({ rootId, scope, onChange, disabled = false }: Props) 
           )}
         </div>
       </div>
+      {/* 整仓 / 文件级二选一：整仓时树仍可点，点任意文件即缩窄（并自动切先预览） */}
+      <label className={`mx-2 mb-1.5 flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[11.5px] ${disabled ? 'cursor-default opacity-60' : ''}`}>
+        <input
+          type="checkbox"
+          checked={scopeAll}
+          disabled={disabled}
+          onChange={() => onScopeAllChange?.(!scopeAll)}
+          className="h-3.5 w-3.5 shrink-0 accent-[var(--accent)]"
+        />
+        <span className="text-[var(--text-secondary)]">整个仓库</span>
+        <span className="ml-auto text-[10.5px] text-[var(--text-muted)]">
+          {scopeAll ? '读写不按文件限制' : '点选文件可缩窄'}
+        </span>
+      </label>
       {/* 摘要行（F-5 = 只报数 / F-3 = 同位单按钮）：高度恒定，选择态不在这里逐条铺开 */}
       <div className="flex shrink-0 items-center justify-between gap-2 px-2 pb-1.5">
         <span className="min-w-0 truncate text-[11px] text-[var(--text-muted)]" title={disabled ? '运行中已锁定，跑完可改' : undefined}>
-          {scope.length === 0
-            ? <span className="text-[var(--warning)]">未圈定范围</span>
-            : `已选 ${scope.length} 项`}
+          {scopeAll
+            ? '整个仓库'
+            : scope.length === 0
+              ? <span className="text-[var(--warning)]">未选择文件</span>
+              : `已选 ${scope.length} 项`}
           {filtering && visible.length > 0 ? ` · 命中 ${visible.length}` : ''}
         </span>
         <button
@@ -255,7 +277,8 @@ export function ScopePane({ rootId, scope, onChange, disabled = false }: Props) 
           disabled={disabled}
           title={batchMode === 'visible'
             ? '把当前过滤命中的已加载节点全部加入作用域（清空搜索框可回到「全部取消」）'
-            : batchMode === 'top' ? '选中仓库最上层的每一项' : '清空本任务的作用域'}
+            : batchMode === 'files' ? '改为按文件/目录选择（空选 = 不读取仓库文件）'
+              : batchMode === 'top' ? '选中仓库最上层的每一项' : '清空本任务的作用域（不读取仓库文件）'}
           className="kb-micro-pop shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--text-muted)]"
         >
           {batchLabel}

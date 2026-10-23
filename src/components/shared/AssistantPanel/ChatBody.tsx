@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
   Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu, Radar, MessagesSquare, TriangleAlert,
-  RotateCcw, CalendarDays, Star,
+  RotateCcw, CalendarDays, Star, FolderTree, Zap,
 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
 import { useSettings } from '../../../lib/SettingsContext'
 import { AiMascotAnchor } from '../AiMascot/AiMascotAnchor'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { useInputShell } from './inputShells'
-import { getKnowledgePages, agentUsageGet, llmListProviders, getSemanticStatus } from '../../../lib/ipc'
+import { getKnowledgePages, agentUsageGet, llmListProviders, getSemanticStatus, workspaceGetCurrent } from '../../../lib/ipc'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
 import { MessageList, fmtTime } from './MessageList'
 import { useAssistantChat } from './useAssistantChat'
@@ -21,6 +21,7 @@ import { QuoteChips } from './QuoteChips'
 import { UsageRing, fmtTok } from '../UsageRing'
 import { buildQuotedBody } from './selQuotes'
 import { registerSelectionAskHost } from '../../../lib/assistantContext'
+import { ScopePane } from '../../../modules/ai-assistant/ScopePane'
 import type { AssistantChatController } from './useAssistantChat'
 import type { ChatSurface } from '../../../lib/chatCommands'
 import type { AiUsageDay, KnowledgePage, AgentSessionInfo } from '../../../types'
@@ -40,6 +41,9 @@ export type AssistantBodyVariant = 'sidebar' | 'docked' | 'page'
  * 契约脚本 `verify-perception.mjs` C2/C3 断言此处**只此一份字面量**（list-drift 防线）。
  */
 export const MAX_ATTACHED_REFS = 4
+
+/** Monaco 只随预览按需加载：右侧栏常驻，不能把它拖进首屏静态闭包 */
+const ReviewPane = lazy(() => import('../../../modules/ai-assistant/ReviewPane').then(m => ({ default: m.ReviewPane })))
 
 /** 日程助手会话的日期标签（如「10月11日 周日」）——「一天一个会话」列表按日期展示 */
 function schedDayLabel(iso: string): string {
@@ -117,8 +121,10 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
     drawerMounted, drawerOpen, toggleDrawer, closeDrawer,
     send, newSession, loadSession, removeSession, togglePin, regenerate, resume, resumeInfo, editSubmit, deleteMessage,
     abort, dismissChanges, runStateOf,
-    modelId, setModelId, thinking, setThinking, attachedFiles, setAttachedFiles,
+    modelId, setModelId, thinking, setThinking, effort, attachedFiles, setAttachedFiles,
     contextInfo, contextRemoved, dismissContext, restoreContext,
+    scope, scopeAll, setScope, setScopeAll, writeMode, setWriteMode,
+    plan, pendingCount, appliedCount, refreshPlan, applyPlan, rejectPlan, rollbackTask,
   } = chat
 
   const isNarrow = variant === 'docked'
@@ -150,8 +156,23 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   }, [perceptionOn])
 
   // ---- 输入区工具浮层（📎 附加文件 / 模型选择 / 消耗查看）：互斥单开，外部点击关闭 ----
-  const [pop, setPop] = useState<'files' | 'model' | 'usage' | null>(null)
+  const [pop, setPop] = useState<'files' | 'scope' | 'writeMode' | 'model' | 'usage' | null>(null)
   const inputCardRef = useRef<HTMLDivElement | null>(null)
+  const [scopeRootId, setScopeRootId] = useState<string | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  useEffect(() => {
+    if (pop !== 'scope' || scopeRootId) return
+    workspaceGetCurrent().then(v => setScopeRootId(v?.rootId ?? null)).catch(() => setScopeRootId(null))
+  }, [pop, scopeRootId])
+  // 新方案出现时自动打开预览（只在该边沿触发，不打断用户手动返回对话）
+  const prevPendingRef = useRef(0)
+  useEffect(() => {
+    if (prevPendingRef.current === 0 && pendingCount > 0) setPreviewOpen(true)
+    prevPendingRef.current = pendingCount
+  }, [pendingCount])
+  useEffect(() => {
+    if (pendingCount === 0) setPreviewOpen(false)
+  }, [pendingCount])
   // 📎 浮层检索词 / @ 唤起光标位（两者共用同一浮层，故状态同层声明）
   const [fileQuery, setFileQuery] = useState('')
   const atPosRef = useRef<number | null>(null)
@@ -417,34 +438,64 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   </div>
                 </div>
               )}
-              <MessageList
-                messages={messages}
-                pending={pending}
-                liveSteps={liveSteps}
-                draft={draft}
-                editing={editing}
-                setEditing={setEditing}
-                copiedIdx={copiedIdx}
-                setCopiedIdx={setCopiedIdx}
-                onRegenerate={() => { void regenerate() }}
-                resumeInfo={resumeInfo}
-                onResume={() => { void resume() }}
-                onEditSubmit={(id, content) => { void editSubmit(id, content) }}
-                onDeleteMessage={id => { void deleteMessage(id) }}
-                jumpBottom={variant === 'page'}
-                /* 生图卡的两个入口（v3.6.0）：改图/重试把文本填回输入框（入口是对话 —— 决策 D3，
-                   卡上没有"插入"按钮）；停止钮在图上（C3），停的是这一轮（含主进程侧 abort，不落盘） */
-                onPrefillImage={(text) => { setInput(text); inputRef.current?.focus() }}
-                onStopRun={() => { void abort() }}
-                emptyHint={emptyHint ?? (
-                  /* 三态统一：空态在滚动区高度内垂直+水平居中。2026-09-19 反馈：两行引导文字收敛为
-                     一个聊天气泡图案（入口语义自明，冗余文案按铁律 12 只收不增）。 */
-                  <div className="flex h-full items-center justify-center">
-                    <MessagesSquare size={22} strokeWidth={1.5} className="text-[var(--text-disabled)]" />
-                  </div>
-                )}
-              />
+              {previewOpen && plan ? (
+                <div className="h-full min-h-0">
+                  <Suspense fallback={<div className="flex h-full items-center justify-center text-[12px] text-[var(--text-muted)]">正在载入差异预览…</div>}>
+                    <ReviewPane
+                      plan={plan}
+                      busy={pending}
+                      onApply={(ids) => { void applyPlan(ids) }}
+                      onReject={() => { void rejectPlan() }}
+                      onRollback={() => { void rollbackTask() }}
+                      onClose={() => setPreviewOpen(false)}
+                      compact={variant !== 'page'}
+                    />
+                  </Suspense>
+                </div>
+              ) : (
+                <MessageList
+                  messages={messages}
+                  pending={pending}
+                  liveSteps={liveSteps}
+                  draft={draft}
+                  editing={editing}
+                  setEditing={setEditing}
+                  copiedIdx={copiedIdx}
+                  setCopiedIdx={setCopiedIdx}
+                  onRegenerate={() => { void regenerate() }}
+                  resumeInfo={resumeInfo}
+                  onResume={() => { void resume() }}
+                  onEditSubmit={(id, content) => { void editSubmit(id, content) }}
+                  onDeleteMessage={id => { void deleteMessage(id) }}
+                  jumpBottom={variant === 'page'}
+                  /* 生图卡的两个入口（v3.6.0）：改图/重试把文本填回输入框（入口是对话 —— 决策 D3，
+                     卡上没有"插入"按钮）；停止钮在图上（C3），停的是这一轮（含主进程侧 abort，不落盘） */
+                  onPrefillImage={(text) => { setInput(text); inputRef.current?.focus() }}
+                  onStopRun={() => { void abort() }}
+                  emptyHint={emptyHint ?? (
+                    /* 三态统一：空态在滚动区高度内垂直+水平居中。2026-09-19 反馈：两行引导文字收敛为
+                       一个聊天气泡图案（入口语义自明，冗余文案按铁律 12 只收不增）。 */
+                    <div className="flex h-full items-center justify-center">
+                      <MessagesSquare size={22} strokeWidth={1.5} className="text-[var(--text-disabled)]" />
+                    </div>
+                  )}
+                />
+              )}
             </div>
+
+            {!previewOpen && pendingCount > 0 && (
+              <div className={`pb-1 shrink-0 ${CARD_WRAP[variant]}`}>
+                <button
+                  type="button"
+                  onClick={() => { setPreviewOpen(true); void refreshPlan() }}
+                  className="kb-item-in flex w-full items-center gap-1.5 rounded-lg border border-[var(--accent)] bg-[var(--bg-secondary)] px-2.5 py-1.5 text-left text-[11px] text-[var(--text-secondary)]"
+                >
+                  <Wrench size={10} className="shrink-0 text-[var(--accent)]" />
+                  <span className="flex-1">待确认变更 {pendingCount} 项{appliedCount ? ` · 已应用 ${appliedCount} 项` : ''}</span>
+                  <span className="text-[var(--accent)]">预览</span>
+                </button>
+              </div>
+            )}
 
             {/* 本次改动卡片（AI 执行完成的写操作清单，可一键关闭） */}
             {lastChanges && lastChanges.length > 0 && (
@@ -623,6 +674,33 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   )}
                   {!scheduleMode && (<>
                   <button
+                    onClick={() => setPop(p => (p === 'scope' ? null : 'scope'))}
+                    title={scopeAll ? '作用域：整个仓库（点击选择文件）' : `作用域：${scope.length} 项`}
+                    className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors ${
+                      pop === 'scope' || (!scopeAll && scope.length === 0)
+                        ? 'text-[var(--accent)]'
+                        : 'text-[var(--text-muted)] hover:bg-[var(--bg-selected)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    <FolderTree size={12} />
+                    {!isNarrow && <span className="max-w-[92px] truncate leading-none">{scopeAll ? '整个仓库' : `${scope.length} 文件`}</span>}
+                  </button>
+                  <button
+                    onClick={() => setPop(p => (p === 'writeMode' ? null : 'writeMode'))}
+                    disabled={pending}
+                    title={writeMode === 'confirm' ? '先预览：写操作等确认后应用' : '直接执行：写操作立即落盘'}
+                    className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors disabled:opacity-40 ${
+                      writeMode === 'confirm'
+                        ? 'text-[var(--accent)]'
+                        : 'text-[var(--text-muted)] hover:bg-[var(--bg-selected)] hover:text-[var(--text-primary)]'
+                    }`}
+                  >
+                    <Zap size={12} />
+                    {!isNarrow && <span className="leading-none">{writeMode === 'confirm' ? '先预览' : '直接执行'}</span>}
+                  </button>
+                  </>)}
+                  {!scheduleMode && (<>
+                  <button
                     onClick={() => setPop(p => (p === 'files' ? null : 'files'))}
                     title="添加文件作为上下文（模型按需读取全文）"
                     data-wb="aiAttachBtn"
@@ -645,7 +723,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     }`}
                   >
                     <Cpu size={12} />
-                    <span className={`leading-none ${isNarrow ? 'max-w-[80px] truncate' : 'max-w-[120px] truncate'}`}>{modelLabel}</span>
+                    <span className={`leading-none ${isNarrow ? 'max-w-[80px] truncate' : 'max-w-[120px] truncate'}`}>{modelLabel}{effort !== 'off' ? ` · ${effort}` : ''}</span>
                     <ChevronDown size={10} />
                   </button>
                   {/* F-12：上下文占用指示（与 AI 教学同口径，档位设置 ctxUsageDetail / 窗口 ctxWindow 共用） */}
@@ -697,6 +775,61 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     `overflow-hidden` 从右侧裁掉（2026-09-20 反馈：右栏拖到最窄时模型菜单右侧被切、
                     开关被啃掉一半）。规则：固定宽只作上限，`max-w-full` 按输入卡宽度收缩，
                     行内文案本就有 truncate 兜底，不会溢出。 */}
+                {pop === 'scope' && (
+                  <div data-wb="aiScopePop" className="absolute bottom-full left-0 mb-2 flex h-[320px] w-[300px] max-w-full flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl z-20">
+                    <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-color)] px-2.5 py-1.5">
+                      <span className="text-[11px] font-medium text-[var(--text-primary)]">本会话作用域</span>
+                      <button
+                        type="button"
+                        onClick={() => setPop(null)}
+                        className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                        title="收起"
+                      ><X size={12} /></button>
+                    </div>
+                    <div className="min-h-0 flex-1">
+                      <ScopePane
+                        rootId={scopeRootId}
+                        scope={scope}
+                        scopeAll={scopeAll}
+                        onChange={setScope}
+                        onScopeAllChange={setScopeAll}
+                        disabled={pending}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {pop === 'writeMode' && (
+                  <div data-wb="aiWriteModePop" className="absolute bottom-full left-0 mb-2 w-[250px] max-w-full overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl z-20">
+                    <div className="border-b border-[var(--border-color)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-primary)]">写入方式 · 仅本会话</div>
+                    <button
+                      type="button"
+                      onClick={() => { setWriteMode('direct'); setPop(null) }}
+                      className="flex w-full items-start gap-2 px-2.5 py-2 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      <Check size={12} className={`mt-0.5 shrink-0 ${writeMode === 'direct' ? 'text-[var(--accent)]' : 'opacity-0'}`} />
+                      <span className="min-w-0">
+                        <span className="block text-[12px] text-[var(--text-primary)]">直接执行</span>
+                        <span className="block text-[10.5px] text-[var(--text-muted)]">写工具立即落盘；停止只中断，不自动回滚</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setWriteMode('confirm'); setPop(null) }}
+                      className="flex w-full items-start gap-2 px-2.5 py-2 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                    >
+                      <Check size={12} className={`mt-0.5 shrink-0 ${writeMode === 'confirm' ? 'text-[var(--accent)]' : 'opacity-0'}`} />
+                      <span className="min-w-0">
+                        <span className="block text-[12px] text-[var(--text-primary)]">先预览</span>
+                        <span className="block text-[10.5px] text-[var(--text-muted)]">任务结束后统一确认；不可预览工具会从工具面移除</span>
+                      </span>
+                    </button>
+                    <div className="border-t border-[var(--border-color)] px-2.5 py-1.5 text-[10px] text-[var(--text-muted)]">
+                      从「整个仓库」缩窄文件作用域会自动切到先预览
+                    </div>
+                  </div>
+                )}
+
                 {pop === 'files' && (
                   <div data-wb="aiAttachPop" className="absolute bottom-full left-0 mb-2 w-[280px] max-w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
                     <div className="border-b border-[var(--border-color)] p-1.5">

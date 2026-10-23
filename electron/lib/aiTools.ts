@@ -1,5 +1,7 @@
 import { ipcMain } from 'electron'
 import { appendAudit, countMonthInvocations, listAudit, summarizeArgs } from './pluginAudit'
+import { stageOp } from './aiAssistantPlan'
+import { isHandlerStagedTool, isStageableWriteTool } from './aiAssistantStageable'
 
 /**
  * ToolRegistry —— AI Agent 统一工具注册表（方案见 .claude/plans/agent-tools-foundation.md 第四节）。
@@ -70,15 +72,24 @@ export interface ToolInvokeCtx {
    */
   signal?: AbortSignal
   /**
-   * AI助手（v3.9.0，source='aiAssistant'）的读写作用域：归一化仓库相对前缀数组。
-   * vault.* 工具据此硬校验（读含一跳链接扩展，写严格在内）。其他来源不传 = 不限定。
+   * 统一 AI 助手（v3.11.0）的读写作用域：归一化仓库相对前缀数组。
+   * `scopeAll=true` 时忽略 scope；`scopeAll=false` 时严格按 scope（空数组 = 全部拒绝）；
+   * 缺省 = 旧行为（空数组 = 不限定，兼容非统一会话）。
    */
   scope?: string[]
+  /** 是否整个仓库（与 scope 配合，区分「整仓」和「明确不选文件」） */
+  scopeAll?: boolean
+  /** 统一助手的写入策略；confirm 下所有可暂存写工具只记入变更方案 */
+  writeMode?: 'direct' | 'confirm'
   /**
-   * 暂存（propose）模式（v3.9.0）：AI助手主线在落盘前先把改动记入变更方案、待用户确认。
-   * true 时 vault.* 写工具不直接落盘，改由 aiAssistantCommit 的岔口暂存。
+   * 暂存（propose）模式：统一助手 confirm 模式下由 AgentRunner 注入。
+   * true 时写工具不直接落盘，改由 aiAssistantCommit / 通用暂存层记入变更方案。
    */
   propose?: boolean
+  /** 应用变更方案时注入：跳过暂存、真正执行工具 */
+  apply?: boolean
+  /** 统一 AI 助手会话标记（用于日程写工具硬过滤等） */
+  unifiedAssistant?: boolean
 }
 
 export type ToolHandler = (args: Record<string, unknown>, ctx?: ToolInvokeCtx) => unknown | Promise<unknown>
@@ -308,6 +319,38 @@ async function invokeTool(
           ? '仓库文件对 AI 仅开放只读，写入类操作被拒绝。可在 设置 → AI → 权限 → 仓库文件 中调整为读写'
           : '仓库文件已对 AI 关闭，本操作被拒绝。可在 设置 → AI → 权限 → 仓库文件 中调整',
       }
+    }
+  }
+
+  // 统一 AI 助手 confirm 模式：非 handler 自暂存的写工具在这里统一暂存。
+  // handler 自暂存的 vault 文件工具（commitOrStage）不受影响，避免双重记录。
+  if (ctx?.propose === true && ctx.apply !== true && ctx.sessionId && tool.requires === 'write' && !isHandlerStagedTool(name)) {
+    if (!isStageableWriteTool(name)) {
+      return {
+        ok: false,
+        code: 'EXEC_ERROR',
+        message: `工具「${tool.title}」无法安全预览，已阻止执行。请切换到「直接执行」后再试`,
+      }
+    }
+    const summary = `${tool.title}${tool.module ? ` · ${tool.module}` : ''}：${summarizeArgs(cleanArgs)}`
+    const opId = stageOp(ctx.sessionId, {
+      kind: 'tool',
+      tool: name,
+      module: tool.module,
+      args: cleanArgs,
+      summary,
+    })
+    return {
+      ok: true,
+      data: {
+        ok: true,
+        staged: true,
+        opId,
+        // 后续工具参数可引用这个临时 id；应用时替换成真实返回 id
+        tempId: opId,
+        kind: 'tool',
+        message: '已记入变更方案（尚未落盘，等用户确认后应用）',
+      },
     }
   }
 

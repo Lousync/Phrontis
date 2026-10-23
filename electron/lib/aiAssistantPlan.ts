@@ -1,9 +1,9 @@
 /**
  * AI助手变更方案（ChangePlan）与整任务事务（v3.9.0）。
  *
- * 主链路：AI助手会话里所有 vault.* 写操作经 `aiAssistantCommit.commitOrStage` **暂存**为
- * PlanOp，不直接落盘；渲染层拿到方案后逐条确认，`applyPlan` 才真正执行，`rollbackTask`
- * 逆序还原整任务。这样「先预览、后确认、可整任务回滚」在**主进程侧**闭环。
+ * 主链路：统一助手「先预览」下，文件写操作经 `aiAssistantCommit.commitOrStage`、模块写工具经
+ * `aiTools` 的通用暂存层记入 PlanOp，不直接落盘；渲染层拿到方案后逐条确认，`applyPlan` 才真正执行。
+ * `rollbackTask` 逆序还原文件操作；模块工具写入目前没有统一逆操作，会跳过并计入 skipped。
  *
  * 存储：进程内 Map + 落盘 `<vault>/.knowbase/assistant/tasks/<sessionId>.json`（跨重启可回滚）。
  * taskId = sessionId（一个会话同时只有一个在途任务）。
@@ -117,7 +117,33 @@ async function runAction(a: FsAction, rootPath: string, rootId: string): Promise
   }
 }
 
-/** 应用被接受的写操作（按计划顺序）；返回落盘清单 */
+function replaceTempIds(value: unknown, resolved: Map<string, string>): unknown {
+  if (typeof value === 'string') return resolved.get(value) ?? value
+  if (Array.isArray(value)) return value.map((v) => replaceTempIds(v, resolved))
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = replaceTempIds(v, resolved)
+    return out
+  }
+  return value
+}
+
+function resultIdOf(data: unknown): string {
+  if (!data || typeof data !== 'object') return ''
+  const d = data as Record<string, unknown>
+  for (const key of ['id', 'pageId', 'entryId', 'recordId', 'habitId']) {
+    const v = d[key]
+    if (typeof v === 'string' && v.trim()) return v
+  }
+  return ''
+}
+
+/**
+ * 应用被接受的写操作（按计划顺序）；返回落盘清单。
+ *
+ * `kind='tool'` 的 op 通过动态 import 重放工具调用（避免 aiTools ↔ aiAssistantPlan 静态环）。
+ * 工具返回的 id 会登记为临时 id：同一计划里后续参数引用暂存时拿到的 opId，可在此替换成真实 id。
+ */
 export async function applyPlan(sessionId: string, acceptedIds: string[]): Promise<{ applied: number; opIds: string[] }> {
   const plan = load(sessionId)
   if (!plan) throw new Error('没有可应用的变更方案')
@@ -125,30 +151,67 @@ export async function applyPlan(sessionId: string, acceptedIds: string[]): Promi
   const accepted = new Set(acceptedIds)
   const rels: string[] = []
   const done: string[] = []
-  for (const op of plan.ops) {
-    if (op.status !== 'pending') continue
-    if (!accepted.has(op.id)) { op.status = 'rejected'; continue }
-    const action = actionForOp(op, 'apply')
-    if (action) await runAction(action, rootPath, rootId)
-    op.status = 'applied'
-    done.push(op.id)
-    rels.push(op.relPath ?? op.to ?? '')
+  const resolved = new Map<string, string>()
+  try {
+    for (const op of plan.ops) {
+      if (op.status !== 'pending') continue
+      if (!accepted.has(op.id)) { op.status = 'rejected'; continue }
+      if (op.kind === 'tool') {
+        if (!op.tool) throw new Error('变更方案缺少工具名')
+        const { invokeToolInternal } = await import('./aiTools')
+        const args = replaceTempIds(op.args ?? {}, resolved) as Record<string, unknown>
+        const exec = await invokeToolInternal(op.tool, args, '', {
+          sessionId,
+          source: 'assistant',
+          apply: true,
+          unifiedAssistant: true,
+        })
+        if (!exec.ok) throw new Error(`${op.tool} 应用失败：${exec.message}`)
+        op.result = exec.data
+        const resultId = resultIdOf(exec.data)
+        if (resultId) resolved.set(op.id, resultId)
+        // 工具若返回文件路径，纳入刷新清单（模块工具自己会广播）
+        if (exec.data && typeof exec.data === 'object') {
+          const d = exec.data as Record<string, unknown>
+          const p = String(d.path ?? d.relPath ?? '').trim()
+          if (p) rels.push(p)
+        }
+      } else {
+        const action = actionForOp(op, 'apply')
+        if (action) await runAction(action, rootPath, rootId)
+        rels.push(op.relPath ?? op.to ?? '')
+      }
+      op.status = 'applied'
+      done.push(op.id)
+    }
+  } finally {
+    plan.appliedAt = new Date().toISOString()
+    plan.updatedAt = plan.appliedAt
+    persist(plan)
+    refresh(rels.filter(Boolean))
   }
-  plan.appliedAt = new Date().toISOString()
-  plan.updatedAt = plan.appliedAt
-  persist(plan)
-  refresh(rels.filter(Boolean))
   return { applied: done.length, opIds: done }
 }
 
-/** 整任务回滚：逆序还原所有已应用的操作 */
-export async function rollbackTask(sessionId: string): Promise<{ reverted: number }> {
+/**
+ * 整任务回滚：逆序还原所有已应用的文件操作。
+ *
+ * 模块工具（kind='tool'）目前没有统一的逆操作：跳过并计入 `skipped`，
+ * UI 必须如实告知「文件已还原，模块写入需手动撤销」，不能假装全回滚。
+ */
+export async function rollbackTask(sessionId: string): Promise<{ reverted: number; skipped: number }> {
   const plan = load(sessionId)
   if (!plan) throw new Error('没有可回滚的任务')
   const { rootPath, rootId } = rootPathOrThrow()
   const rels: string[] = []
   let n = 0
+  let skipped = 0
   for (const op of selectOps(plan.ops, [], 'rollback')) {
+    if (op.kind === 'tool') {
+      op.status = 'rejected'
+      skipped++
+      continue
+    }
     const action = actionForOp(op, 'rollback')
     if (action) await runAction(action, rootPath, rootId)
     op.status = 'rejected'
@@ -159,7 +222,7 @@ export async function rollbackTask(sessionId: string): Promise<{ reverted: numbe
   plan.updatedAt = plan.rolledBackAt
   persist(plan)
   refresh(rels.filter(Boolean))
-  return { reverted: n }
+  return { reverted: n, skipped }
 }
 
 /** 丢弃未应用的方案 */

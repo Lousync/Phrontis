@@ -2,6 +2,8 @@ import { ipcMain } from 'electron'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { randomUUID } from 'crypto'
 import { listTools, invokeToolInternal, getSettingReader, checkModulePermission, checkVaultFilePermission } from './aiTools'
+import { isConfirmModeHiddenTool } from './aiAssistantStageable'
+import { isWithinVaultScope } from './kbStore/vaultScope'
 import type { ToolDescription, AiToolInvokeResult } from './aiTools'
 import { buildAttachedRefsInjection } from './aiAssistant/refSkeleton'
 import { readVaultRefText } from './aiAssistant/refText'
@@ -25,6 +27,7 @@ import {
   getAgentSession, updateAgentSessionInstructions, updateAgentSessionScope, backfillSessionSources,
   createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode, setSessionPinned,
   setSideLaneStatus, markSideLaneSeen, updateSessionResume, nowLocal,
+  normalizeSessionScope, updateAgentSessionPreferences,
 } from './agentSessionRepo'
 // A 方案（断点续跑）：纯函数在 agentInterruptPure（零依赖，契约脚本直接 import）；文案真源在 llmFailurePure
 import {
@@ -503,7 +506,12 @@ const CHANGE_LABELS: Record<string, string> = {
  */
 const enabledOnDemand = new Map<string, Set<string>>()
 
-function buildToolsPayload(sessionId?: string, only?: string[]): {
+function buildToolsPayload(sessionId?: string, only?: string[], modeOpts?: {
+  /** 统一助手 confirm 模式：只保留可安全暂存的写工具 */
+  confirmMode?: boolean
+  /** 统一助手只读日程：隐藏所有日程写工具 */
+  scheduleReadOnly?: boolean
+}): {
   payload: unknown[]
   nameMap: Map<string, string>
   /** 本轮可用的写入类工具注册名集合（requires==='write'），供会话写上限计数 */
@@ -538,6 +546,9 @@ function buildToolsPayload(sessionId?: string, only?: string[]): {
     // 与铁律 3 同一机制：requires==='write' 的工具被预过滤出模型视野。这条判定放在最前面，
     // 是为了让 tool.request 也绕不过（即便申请过写工具，支线这边照样 return false）。
     if (isSideLaneSession && t.requires === 'write') return false
+    // 统一助手：日程只读（写工具交给日程助手），确认模式隐藏不可安全预览的写工具
+    if (modeOpts?.scheduleReadOnly && t.module === 'schedule' && t.requires === 'write') return false
+    if (modeOpts?.confirmMode && isConfirmModeHiddenTool(t.name, t.requires)) return false
     const denied = checkModulePermission(t, reader)
     if (denied && t.module) deniedModules.add(t.module)
     if (!denied && t.vaultFile && checkVaultFilePermission(t, reader)) {
@@ -947,8 +958,36 @@ async function runAgentLoop(
   if (!source && sessionId) source = getAgentSession(sessionId)?.source
   const runModeRow = getAgentSession(sessionId)
   const manual = source !== 'aiTeaching' && source !== 'schedule' && runModeRow?.mode === 'manual'
+  // ---- 统一 AI 助手（v3.11.0）：文件作用域 + 写入策略 ----
+  // 旧 aiAssistant 来源只作为兼容入口；新会话一律 source='assistant'。
+  // 缺省 source 也按通用助手处理（老会话 / 某些内部入口不带来源）；AI 教学与日程上面已回推
+  const unifiedAssistant = !source || source === 'assistant' || source === 'aiAssistant'
+  const ctxData = (context?.data ?? {}) as Record<string, unknown>
+  const scopeAll = unifiedAssistant
+    ? (typeof ctxData.scopeAll === 'boolean'
+        ? ctxData.scopeAll
+        : runModeRow?.scopeAll !== false)
+    : true
+  const writeMode: 'direct' | 'confirm' = unifiedAssistant
+    ? (ctxData.writeMode === 'confirm' || ctxData.writeMode === 'direct'
+        ? ctxData.writeMode
+        : (runModeRow?.writeMode === 'confirm' ? 'confirm' : 'direct'))
+    : 'direct'
+  const rawScope = Array.isArray(ctxData.scope)
+    ? ctxData.scope.filter((x): x is string => typeof x === 'string')
+    : (runModeRow?.scope ?? [])
+  const aiScope = unifiedAssistant && !scopeAll ? normalizeSessionScope(rawScope) : undefined
+  const aiPropose = unifiedAssistant && writeMode === 'confirm'
+  // 会话级模型 / 思考强度：请求没显式带时回落到会话行（regenerate / edit 等路径不传 modelId）
+  if (llmOpts) {
+    llmOpts = {
+      ...llmOpts,
+      modelId: llmOpts.modelId || runModeRow?.modelId || undefined,
+      effort: llmOpts.effort ?? runModeRow?.effort,
+    }
+  }
   // P3 装载层：工具 payload 可能在循环中重建（tool.request 启用新工具后下一轮生效）
-  let toolsState = buildToolsPayload(sessionId, manual ? [MANUAL_CHANNEL_TOOL] : source === 'schedule' ? SCHEDULE_TOOL_NAMES : undefined)
+  let toolsState = buildToolsPayload(sessionId, manual ? [MANUAL_CHANNEL_TOOL] : source === 'schedule' ? SCHEDULE_TOOL_NAMES : undefined, { confirmMode: aiPropose, scheduleReadOnly: unifiedAssistant })
   let toolPayload = toolsState.payload
   const { nameMap, deniedModules, deniedVaultFile, skills } = toolsState
   // v3.1.2 条目11：支线写类工具**硬拦截**。模型视野里已经没有写工具（buildToolsPayload 已过滤），
@@ -1167,20 +1206,23 @@ async function runAgentLoop(
   // 日程助手（source==='schedule'）：人设进 system（逐字稳定）；数据快照进首条 user 消息层（每轮现算）
   const schedulePersona = source === 'schedule' ? SCHEDULE_PERSONA : ''
   const scheduleHint = source === 'schedule' ? buildScheduleInjection() : ''
-  // AI助手（source='aiAssistant'）：作用域从 context.data.scope 取（渲染层圈定），写作走暂存（propose）。
-  const aiScope = source === 'aiAssistant'
-    ? (Array.isArray((context?.data as Record<string, unknown> | undefined)?.scope)
-        ? ((context!.data as Record<string, unknown>).scope as unknown[]).filter((x): x is string => typeof x === 'string' && !!x.trim())
-        : undefined)
-    : undefined
-  const aiPropose = source === 'aiAssistant'
-  const aiAssistantHint = aiPropose
-    ? '\n\n【AI助手·作用域纪律】你只能读写本次作用域内的文件；作用域外文件仅当它们是范围内页面的 [[出链]] 目标时才可读取（其余读写调用会返回 ESCOPE 错误）。'
-      + '清单已给出范围内页面；正文按需用 vault.read 读取，不要试图通读整库。'
-      + '\n【AI助手·暂存纪律】你的所有写操作（vault.write / vault.edit / vault.rename / vault.trash）会被**暂存**、不会立即落盘，等用户逐条确认后才应用。'
-      + '因此：先规划要改哪些文件、怎么改，再调用工具；工具返回的 "staged" 表示已记入方案（不是已写入）。'
-      + '**不要**声称"已完成/已修改"——只有用户确认应用之后才算改动。'
+  // 统一 AI 助手：作用域 + 写入策略（v3.11.0）
+  const scopeHint = !unifiedAssistant
+    ? ''
+    : scopeAll
+      ? '\n\n【统一助手·作用域】本次作用域是整个仓库。仍受仓库文件权限、模块权限与 .ignore 规则约束。'
+      : aiScope && aiScope.length > 0
+        ? '\n\n【统一助手·作用域】你只能读写本次作用域内的文件；作用域外文件仅当它们是范围内页面的 [[出链]] 目标时才可读取（其余读写调用会返回 ESCOPE 错误）。清单已给出范围内页面；正文按需用 vault.read 读取，不要试图通读整库。'
+        : '\n\n【统一助手·作用域】本次没有选择任何仓库文件：不要读取/写入仓库文件（vault.* 调用会被拒绝）；仍可按用户请求使用受权限允许的模块工具。'
+  const writeModeHint = !unifiedAssistant
+    ? ''
+    : writeMode === 'confirm'
+      ? '\n【统一助手·暂存纪律】你的所有可暂存写操作会被**暂存**、不会立即落盘，等用户逐条确认后才应用。工具返回的 "staged" 表示已记入方案（不是已写入）。**不要**声称"已完成/已修改"——只有用户确认应用之后才算改动。不可安全预览的写工具已从工具面移除；需要时请让用户切换到「直接执行」。'
+      : '\n【统一助手·直接执行】用户选择了「直接执行」：写工具会立即落盘。只有真正调用工具并拿到成功结果后，才能告诉用户已完成。'
+  const scheduleReadOnlyHint = unifiedAssistant
+    ? '\n【统一助手·日程只读】日程数据只读；不要创建/修改/删除日程。日程写入请让用户使用日程助手。'
     : ''
+  const aiAssistantHint = scopeHint + writeModeHint + scheduleReadOnlyHint
   const baseSystem = buildSystemPrompt(context)
   // UI 优化条目9②：教学会话的注入分段用量（字符数，渲染层按 ≈2.6 字/token 折算做构成摘要）
   const injection: AiTeachInjectionStats | undefined = source === 'aiTeaching'
@@ -1203,9 +1245,13 @@ async function runAgentLoop(
   // 逐字稳定才命中（core 14 工具 ≈7.7k tok/轮）。B1 初版误放进 buildSystemPrompt，
   // 引用一变前缀就失效；B2 纠正（开发负责人 2026-09-18 拍板「一并纠正」）。
   // 本段只对**本轮**有效，也因此不该沉淀成系统的长期人设。
-  const contextRefs = Array.isArray((context?.data as Record<string, unknown> | undefined)?.attachedFiles)
+  const rawContextRefs = Array.isArray((context?.data as Record<string, unknown> | undefined)?.attachedFiles)
     ? (context!.data as Record<string, unknown>).attachedFiles as Array<{ pageId?: string; title?: string; path?: string }>
     : []
+  // 缩窄作用域：只接受 scope 内附件；范围外附件直接丢弃（不静默注入越界内容）
+  const contextRefs = unifiedAssistant && !scopeAll
+    ? rawContextRefs.filter((r) => !!r?.path && !!aiScope && aiScope.length > 0 && isWithinVaultScope(String(r.path), aiScope))
+    : rawContextRefs
   const refInjection = contextRefs.length > 0
     ? buildAttachedRefsInjection(contextRefs.map((r) => ({
         title: String(r?.title ?? ''),
@@ -1215,7 +1261,8 @@ async function runAgentLoop(
     : ''
   // 感知模式（B2）：开关开启时先检索知识库，把最相关素材注入。
   // 排除已 @ 引用的 pageId —— 同一篇不重复占两段预算。全路零命中 / 检索异常 → 空串，照常发请求。
-  const perceptionOn = getSettingReader()('aiAssistantPerception') === true
+  // 缩窄文件作用域时关闭感知：感知会检索全库，等于绕过用户圈定范围
+  const perceptionOn = getSettingReader()('aiAssistantPerception') === true && !(unifiedAssistant && !scopeAll)
   let perceptionInjection = ''
   if (perceptionOn && !virtualKickoff) {
     const lastUser = [...history].reverse().find((m) => m.role === 'user')
@@ -1227,9 +1274,10 @@ async function runAgentLoop(
   // 生图：本会话「最近生成的图」薄索引（方案 §5.4）。与上面同一理由 —— 放首条 user 消息层，
   // 不放 system（它随会话内容递增而变，进 system 就是每生成一张图就把缓存前缀作废一次）
   const recentImagesHint = (!manual && source !== 'schedule') ? buildRecentImagesHint(sessionId) : ''
-  // AI助手：作用域元数据清单进首条 user 消息层（不进 system —— 清单随任务变，进 system 会作废 prompt cache 前缀）
-  const aiManifestHint = aiPropose
-    ? buildScopeManifest(aiScope, [...history].reverse().find((m) => m.role === 'user')?.content ?? '')
+  // 统一助手：缩窄作用域时把元数据清单进首条 user 消息层（不进 system —— 清单随任务变，进 system 会作废 prompt cache 前缀）。
+  // 整仓不列清单（成本高且无边界意义），只由 system 的作用域提示说明。
+  const aiManifestHint = unifiedAssistant && !scopeAll
+    ? buildScopeManifest(aiScope, [...history].reverse().find((m) => m.role === 'user')?.content ?? '', false)
     : ''
   const requestInjection = [scheduleHint, refInjection, perceptionInjection, recentImagesHint, aiManifestHint].filter(Boolean).join('\n\n')
 
@@ -1437,7 +1485,7 @@ async function runAgentLoop(
           for (const n of enabled) cur.add(n)
           enabledOnDemand.set(sessionId, cur)
           if (cur.size !== before) {
-            toolsState = buildToolsPayload(sessionId)
+            toolsState = buildToolsPayload(sessionId, undefined, { confirmMode: aiPropose, scheduleReadOnly: unifiedAssistant })
             toolPayload = toolsState.payload
           }
         }
@@ -1492,7 +1540,10 @@ async function runAgentLoop(
       }
       trace.push(toolStep)
       stepEmitters.get(signal)?.(toolStep) // 实时过程：渲染层活动气泡
-      if (exec.ok) {
+      // 暂存结果不是「已改动」：confirm 模式下写工具只进方案，不能进改动清单
+      const stagedResult = exec.ok && typeof exec.data === 'object' && exec.data !== null
+        && (exec.data as Record<string, unknown>).staged === true
+      if (exec.ok && !stagedResult) {
         // 收集真实写改动 → 完成时列为「本次改动」清单
         const label = CHANGE_LABELS[realName]
         if (label) {
@@ -1594,7 +1645,10 @@ async function runAgentLoop(
         target: argTarget(args),
       })
       const t1 = Date.now()
-      const exec = await invokeToolInternal(realName, args, '', { sessionId, source, signal, scope: aiScope, propose: aiPropose })
+      const exec = await invokeToolInternal(realName, args, '', {
+        sessionId, source, signal,
+        scope: aiScope, scopeAll, writeMode, propose: aiPropose, unifiedAssistant,
+      })
       finishToolCall(tc, realName, args, exec, Date.now() - t1)
     }
 
@@ -1634,7 +1688,10 @@ async function runAgentLoop(
         const chunk = batch.items.slice(s, s + PARALLEL_CHUNK)
         execs.push(...await Promise.all(chunk.map(async c => {
           const t1 = Date.now()
-          const exec = await invokeToolInternal(c.realName, c.args, '', { sessionId, source, signal, scope: aiScope, propose: aiPropose })
+          const exec = await invokeToolInternal(c.realName, c.args, '', {
+            sessionId, source, signal,
+            scope: aiScope, scopeAll, writeMode, propose: aiPropose, unifiedAssistant,
+          })
           return { exec, durationMs: Date.now() - t1 }
         })))
       }
@@ -1987,10 +2044,20 @@ export function registerAgentHandlers(): void {
     if (typeof id === 'string' && typeof title === 'string' && title.trim()) renameAgentSession(id, title.trim())
     return true
   })
-  // AI助手（v3.9.0）：任务级作用域持久化（勾选随任务走，切会话自动切回）
-  ipcMain.handle('agent:setSessionScope', (_e, id: string, scope: string[]) => {
+  // 统一 AI 助手：会话级文件作用域（scopeAll=true 时整个仓库；false 时严格按 scope）
+  ipcMain.handle('agent:setSessionScope', (_e, id: string, scope: string[], scopeAll?: boolean) => {
     if (typeof id !== 'string' || !id) return { ok: false, error: '会话 id 非法' }
-    updateAgentSessionScope(id, Array.isArray(scope) ? scope : [])
+    updateAgentSessionScope(id, Array.isArray(scope) ? scope : [], typeof scopeAll === 'boolean' ? scopeAll : undefined)
+    return { ok: true }
+  })
+  // 统一 AI 助手：会话级写入策略 / 模型 / 思考强度
+  ipcMain.handle('agent:setSessionPrefs', (_e, id: string, patch: {
+    writeMode?: 'direct' | 'confirm'
+    modelId?: string
+    effort?: 'off' | 'low' | 'medium' | 'high'
+  }) => {
+    if (typeof id !== 'string' || !id) return { ok: false, error: '会话 id 非法' }
+    updateAgentSessionPreferences(id, patch && typeof patch === 'object' ? patch : {})
     return { ok: true }
   })
   ipcMain.handle('agent:setSessionInstructions', (_e, id: string, instructions: string) => {
