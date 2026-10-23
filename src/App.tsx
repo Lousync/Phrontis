@@ -43,6 +43,7 @@ import { BlogModule } from './modules/blog'
 import type { BlogJump } from './modules/blog'
 import type { SummaryKind } from './lib/summary'
 import { ScheduleModule } from './modules/schedule'
+import { ScheduleUiProvider } from './modules/schedule/ScheduleUiContext'
 import { AccountingModule } from './modules/accounting'
 import { ACCOUNTING_EDIT_EVENT, ACCOUNTING_NEW_EVENT, ACCOUNTING_RECUR_NEW_EVENT, ACCOUNTING_RECUR_EDIT_EVENT } from './modules/accounting/shared'
 import { KnowledgeModule } from './modules/knowledge'
@@ -1794,6 +1795,7 @@ export default function App() {
               wbModSlotEl,
               'wb-bookshelf-rail',
             ) : null}
+            <ScheduleUiProvider>
             <WorkbenchShell
               activeTab={activeTab}
               railModule={railModule}
@@ -2019,6 +2021,7 @@ export default function App() {
             </>
               }
             />
+            </ScheduleUiProvider>
           </main>
       {/* 全局 AI 助手侧栏。shellLeft = 全屏扩张时要避让的活动栏占位宽度
           （活动栏不渲染时 → 0：禅模式 Z2 隐壳，或用户显式隐藏了活动栏；最大化 flush → 56；否则 56 + mx-1.5 两侧留白）。

@@ -25,7 +25,7 @@ import { ChatBody } from '../shared/AssistantPanel/ChatBody'
 import { useAssistantChat } from '../shared/AssistantPanel/useAssistantChat'
 import { QuoteChips } from '../shared/AssistantPanel/QuoteChips'
 import { AccountingPanel } from '../../modules/accounting/AccountingPanel'
-import { ScheduleAssistantPanel } from '../../modules/schedule/ScheduleAssistantPanel'
+import { ScheduleRightPanel } from '../../modules/schedule/ScheduleRightPanel'
 import type { PluginTool } from '../../lib/pluginService'
 
 /**
@@ -349,7 +349,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               data-wb-rp-tab="schedule"
               data-wb-rp-active={effectiveTab === 'schedule' ? '1' : '0'}
               onClick={() => patch({ rightTab: 'schedule', rightCollapsed: false })}
-              title="日程助手"
+              title="日程"
               className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
                 effectiveTab === 'schedule'
                   ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
@@ -480,8 +480,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
           <AccountingPanel pendingEdit={pendingAccountingEdit} onConsumeEdit={onConsumeAccountingEdit}
             pendingRule={pendingAccountingRule} onConsumeRule={onConsumeAccountingRule} />
         ) : effectiveTab === 'schedule' ? (
-          /* ---- 日程助手态（日程 AI 化 P1）：独立会话种类，常驻日程上下文 + /简报 · /排这周 ---- */
-          <ScheduleAssistantPanel />
+          <ScheduleRightPanel />
         ) : (
           /* ---- AI 态（批次5，方案 §4）：aiChat 标签开着 → token 面板原位替换；否则小对话 + ⤢ ---- */
           aiChatOpen && onOpenChangeFile ? (

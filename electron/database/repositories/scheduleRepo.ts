@@ -3,7 +3,9 @@ import { randomUUID } from 'crypto'
 import { emitPluginEvent } from '../../lib/pluginEvents'
 import { broadcastDataChanged } from '../../main/windowBus'
 import * as V from '../../lib/kbStore/scheduleVaultRepo'
+import * as W from '../../lib/kbStore/scheduleWorkflowVaultRepo'
 import type { ScheduleRecurring } from '../../../src/lib/scheduleRecurringPure'
+import type { CreateScheduleWorkflowDTO, ScheduleWorkflowCheckpointInput, ScheduleWorkflowStageInput, UpdateScheduleWorkflowDTO } from '../../../src/types'
 
 // R6 去库化：真相源 = .knowbase/modules/schedule/*.json（sql.js 路径已移除，D9）
 
@@ -16,7 +18,13 @@ interface TodoRow {
   scheduled_start: number | null; scheduled_end: number | null
   snooze_until?: string | null
   recurringId?: string | null; recurringDue?: string | null
+  estimate_min?: number | null
   created_at: string; updated_at: string
+}
+
+function requireId(value: unknown, label: string): value is string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error(`${label}不能为空`)
+  return true
 }
 
 function rowToTodo(row: TodoRow) {
@@ -34,6 +42,7 @@ function rowToTodo(row: TodoRow) {
     // 固定日程生成物标记（渲染层画 🔁）
     recurringId: row.recurringId ?? null,
     recurringDue: row.recurringDue ?? null,
+    estimateMin: typeof row.estimate_min === 'number' ? row.estimate_min : null,
     createdAt: row.created_at, updatedAt: row.updated_at
   }
 }
@@ -43,6 +52,10 @@ export function registerScheduleHandlers(): void {
   // 按日期获取待办（排除子任务）
   ipcMain.handle('schedule:getTodos', (_e, date: string) => {
     return V.vaultTodosForDate(date).map(rowToTodo)
+  })
+
+  ipcMain.handle('schedule:getAllTodos', () => {
+    return V.vaultTodosAllTopLevel().map(rowToTodo)
   })
 
   // 获取全部逾期未完成的顶层任务（日期早于 today，不限月份；按日期升序）
@@ -105,6 +118,7 @@ export function registerScheduleHandlers(): void {
     quadrant?: number; taskType?: 'deadline' | 'plan'; tagId?: string
     endCriteria?: string; parentId?: string
     scheduledStart?: number | null; scheduledEnd?: number | null
+    estimateMin?: number | null
   }) => {
     const vId = randomUUID()
     const vNow = new Date().toISOString()
@@ -116,9 +130,12 @@ export function registerScheduleHandlers(): void {
       scheduled_start: typeof data.scheduledStart === 'number' ? data.scheduledStart : null,
       scheduled_end: typeof data.scheduledEnd === 'number' ? data.scheduledEnd : null,
       snooze_until: null,
+      estimate_min: typeof data.estimateMin === 'number' ? data.estimateMin : null,
       created_at: vNow, updated_at: vNow
     }
-    return rowToTodo(V.vaultCreateTodo(row))
+    const created = V.vaultCreateTodo(row)
+    broadcastDataChanged('schedule')
+    return rowToTodo(created)
   })
 
   // 更新待办
@@ -127,8 +144,15 @@ export function registerScheduleHandlers(): void {
     quadrant?: number; taskType?: 'deadline' | 'plan'; tagId?: string | null
     status?: string; endCriteria?: string; parentId?: string | null
     scheduledStart?: number | null; scheduledEnd?: number | null
+    estimateMin?: number | null
+    expectedUpdatedAt?: string
     snoozeUntil?: string | null
   }) => {
+    if (data.expectedUpdatedAt) {
+      const current = V.vaultFindTodo(id)
+      if (!current) throw new Error('任务不存在')
+      if (current.updated_at !== data.expectedUpdatedAt) throw new Error('TASK_CONFLICT')
+    }
     // 状态跃迁判定：先取旧状态，只有 pending → done 才算「完成」事件
     // （改标题/象限等普通编辑也走本 handler，不能每次都触发）
     const prevStatus = data.status !== undefined ? V.vaultFindTodo(id)?.status : undefined
@@ -136,13 +160,94 @@ export function registerScheduleHandlers(): void {
     if (prevStatus !== undefined && prevStatus !== 'done' && data.status === 'done' && updated) {
       emitPluginEvent('schedule:todoCompleted', { todoId: id, title: updated.title ?? '' })
     }
-    // id 不存在时 vaultUpdateTodo 返回 null 且不改文件
-    return rowToTodo(updated!)
+    if (!updated) throw new Error('任务不存在')
+    broadcastDataChanged('schedule')
+    return rowToTodo(updated)
   })
 
-  // 删除待办（级联删除子任务）
+  // 删除待办（级联删除子任务与工作流）
   ipcMain.handle('schedule:deleteTodo', (_e, id: string) => {
     V.vaultDeleteTodoCascade(id)
+    broadcastDataChanged('schedule')
+  })
+
+  // ===== 工作流 =====
+  ipcMain.handle('schedule:listWorkflows', () => W.vaultWorkflowsAll())
+  ipcMain.handle('schedule:getWorkflow', (_e, id: string) => requireId(id, '工作流 id') ? W.vaultWorkflowById(id) : null)
+  ipcMain.handle('schedule:getWorkflowByTask', (_e, taskId: string) => requireId(taskId, '任务 id') ? W.vaultWorkflowByTask(taskId) : null)
+
+  ipcMain.handle('schedule:createWorkflow', (_e, input: CreateScheduleWorkflowDTO) => {
+    const row = W.vaultCreateWorkflow(input)
+    broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:updateWorkflow', (_e, id: string, patch: UpdateScheduleWorkflowDTO, expectedUpdatedAt?: string) => {
+    requireId(id, '工作流 id')
+    const row = W.vaultUpdateWorkflow(id, patch, expectedUpdatedAt)
+    broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:restoreWorkflow', (_e, snapshot: Parameters<typeof W.vaultRestoreWorkflow>[0]) => {
+    if (!snapshot || typeof snapshot.id !== 'string' || !snapshot.id.trim()) throw new Error('工作流 id 不能为空')
+    const row = W.vaultRestoreWorkflow(snapshot)
+    broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:deleteWorkflow', (_e, id: string) => {
+    requireId(id, '工作流 id')
+    const ok = W.vaultDeleteWorkflow(id)
+    if (ok) broadcastDataChanged('schedule')
+    return ok
+  })
+  ipcMain.handle('schedule:addWorkflowStage', (_e, workflowId: string, input: ScheduleWorkflowStageInput) => {
+    requireId(workflowId, '工作流 id')
+    const row = W.vaultAddWorkflowStage(workflowId, input)
+    broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:updateWorkflowStage', (_e, workflowId: string, stageId: string, patch: ScheduleWorkflowStageInput, expectedUpdatedAt?: string) => {
+    requireId(workflowId, '工作流 id')
+    requireId(stageId, '阶段 id')
+    const row = W.vaultUpdateWorkflowStage(workflowId, stageId, patch, expectedUpdatedAt)
+    broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:deleteWorkflowStage', (_e, workflowId: string, stageId: string) => {
+    requireId(workflowId, '工作流 id')
+    requireId(stageId, '阶段 id')
+    const row = W.vaultDeleteWorkflowStage(workflowId, stageId)
+    broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:reorderWorkflowStages', (_e, workflowId: string, orderedIds: string[]) => {
+    requireId(workflowId, '工作流 id')
+    if (!Array.isArray(orderedIds) || orderedIds.some((id) => !requireId(id, '阶段 id'))) throw new Error('阶段顺序非法')
+    const row = W.vaultReorderWorkflowStages(workflowId, orderedIds)
+    broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:addWorkflowCheckpoint', (_e, workflowId: string, stageId: string, input: ScheduleWorkflowCheckpointInput) => {
+    requireId(workflowId, '工作流 id')
+    requireId(stageId, '阶段 id')
+    const row = W.vaultAddWorkflowCheckpoint(workflowId, stageId, input)
+    broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:updateWorkflowCheckpoint', (_e, workflowId: string, stageId: string, checkpointId: string, patch: ScheduleWorkflowCheckpointInput) => {
+    requireId(workflowId, '工作流 id')
+    requireId(stageId, '阶段 id')
+    requireId(checkpointId, '检查点 id')
+    const row = W.vaultUpdateWorkflowCheckpoint(workflowId, stageId, checkpointId, patch)
+    broadcastDataChanged('schedule')
+    return row
+  })
+  ipcMain.handle('schedule:deleteWorkflowCheckpoint', (_e, workflowId: string, stageId: string, checkpointId: string) => {
+    requireId(workflowId, '工作流 id')
+    requireId(stageId, '阶段 id')
+    requireId(checkpointId, '检查点 id')
+    const row = W.vaultDeleteWorkflowCheckpoint(workflowId, stageId, checkpointId)
+    broadcastDataChanged('schedule')
+    return row
   })
 
   // ===== 标签 =====
@@ -151,11 +256,14 @@ export function registerScheduleHandlers(): void {
   })
 
   ipcMain.handle('schedule:createTag', (_e, name: string, color?: string) => {
-    return V.vaultCreateTag({ id: randomUUID(), name, color: color || '#6b7280' })
+    const row = V.vaultCreateTag({ id: randomUUID(), name, color: color || '#6b7280' })
+    broadcastDataChanged('schedule')
+    return row
   })
 
   ipcMain.handle('schedule:deleteTag', (_e, id: string) => {
     V.vaultDeleteTag(id)
+    broadcastDataChanged('schedule')
   })
 
   // ===== 固定日程（recurring）=====

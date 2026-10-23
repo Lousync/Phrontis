@@ -4,6 +4,8 @@ import { Plus, Trash2, MessageSquare, ListTree, Pencil, Star } from 'lucide-reac
 import { agentRenameSession } from '../../../lib/ipc'
 import { fmtTime } from './MessageList'
 import { SessionRunMark } from './SessionRunMark'
+import { SessionPinButton } from './SessionPinButton'
+import { splitPinnedSessions } from './sessionSections'
 import { AssistantEntryButton } from './AssistantEntry'
 import type { AssistantChatController } from './useAssistantChat'
 import type { AgentSessionInfo } from '../../../types'
@@ -38,12 +40,7 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
   const [tab, setTab] = useState<'sessions' | 'outline'>('sessions')
   const { sessions, activeId, messages, pending, runStateOf } = chat
 
-  // 「★ 收藏」分区：钉住的会话按钉住时间倒序置顶；其余照常（列表已按更新时间倒序）
-  const pinned = useMemo(
-    () => sessions.filter(s => s.pinnedAt).sort((a, b) => (b.pinnedAt || '').localeCompare(a.pinnedAt || '')),
-    [sessions],
-  )
-  const rest = useMemo(() => sessions.filter(s => !s.pinnedAt), [sessions])
+  const { pinned, rest } = useMemo(() => splitPinnedSessions(sessions), [sessions])
 
   // ---- 右键菜单（重命名/删除）：portal + 原生事件委托（React 对 body-portal 首个菜单的
   //      合成 click 分发会话内首次失效——🔖 菜单同坑同修，见 WorkbenchLeftPanel 注释）----
@@ -118,7 +115,7 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
 
   if (!container) return null
 
-  /** 会话行（收藏分区与全部列表共用）。行尾 ★ = 钉住 / 取消钉住 */
+  /** 会话行（收藏分区与全部列表共用）。行尾 ★ = 收藏 / 取消收藏 */
   const renderRow = (sess: AgentSessionInfo) => (
     <div
       key={sess.id}
@@ -161,17 +158,7 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
             <span className="block text-[10px] text-[var(--text-disabled)]">{fmtTime(sess.updatedAt)}</span>
           </span>
           <SessionRunMark mark={runStateOf(sess.id)} />
-          <button
-            onClick={e => { e.stopPropagation(); void chat.togglePin(sess.id) }}
-            className={`shrink-0 rounded p-0.5 transition-opacity ${
-              sess.pinnedAt
-                ? 'text-[var(--warning)]'
-                : 'text-[var(--text-disabled)] opacity-0 hover:text-[var(--warning)] group-hover:opacity-100'
-            }`}
-            title={sess.pinnedAt ? '取消钉住' : '钉住到收藏'}
-          >
-            <Star size={11} fill={sess.pinnedAt ? 'currentColor' : 'none'} />
-          </button>
+          <SessionPinButton pinned={!!sess.pinnedAt} onToggle={() => void chat.togglePin(sess.id)} />
           <button
             onClick={e => { e.stopPropagation(); void chat.removeSession(sess.id) }}
             className={`shrink-0 rounded p-0.5 ${chat.deletingId === sess.id ? 'text-red-400' : 'text-[var(--text-disabled)] opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100'}`}
@@ -299,7 +286,7 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[12px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             <Star size={12} className="shrink-0" fill={sessions.find(s => s.id === menu.sessionId)?.pinnedAt ? 'currentColor' : 'none'} />
-            {sessions.find(s => s.id === menu.sessionId)?.pinnedAt ? '取消钉住' : '钉住到收藏'}
+            {sessions.find(s => s.id === menu.sessionId)?.pinnedAt ? '取消收藏' : '收藏'}
           </button>
           <button
             data-ai-menu-item="delete"

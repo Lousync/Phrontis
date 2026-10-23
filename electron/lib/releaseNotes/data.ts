@@ -4,11 +4,256 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：51
+ * 版本数：53
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.11.0",
+    "date": "2026-10-23",
+    "summary": "本版一句话：右侧栏、工作区书签「AI助手」与 AI 对话页合并为同一个助手——会话、作用域、写入方式、模型全部共享。每个会话默认整个仓库，也可缩窄到文件/目录；写入可选直接执行或先预览，确认后应用，文件改动可整任务回滚。",
+    "groups": [
+      {
+        "title": "统一 AI 助手",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "",
+            "rest": "三个入口共用同一批会话、消息与运行状态；在任一入口新建/继续的对话，另外两处直接可见",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "作用域改为文件/目录级：默认整个仓库，可缩窄到文件或目录；显式「未选择文件」不再等于全库放行",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "从整个仓库缩窄到文件作用域时，写入方式自动切「先预览」；扩回整仓不自动切回",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "写入方式按会话保存：直接执行 / 先预览；右栏与工作区都可切换",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "先预览覆盖可暂存的数据写入：文件显示 diff，错题本 / 记账 / 打卡等显示结构化摘要；逐条勾选应用、可丢弃、文件改动可整任务回滚",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "终端、生图落盘、插件外部副作用等不可安全预览的工具在「先预览」下自动从工具列表移除；日程在统一助手中始终只读",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "模型与思考强度按会话保存，新会话默认继承全局设置",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "工作区作用域卡支持折叠；右侧栏用作用域 chip 弹出同一个文件树",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "工作区会话列表补齐「★ 收藏」分区与行尾星标，收藏状态在三个入口保持一致",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "窄窗口 / 右侧栏的变更预览改为单栏 diff + 横向变更清单，修复固定清单把 diff 挤成黑条",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "对话过程",
+        "kind": "feature",
+        "items": [
+          {
+            "lead": "AI 回复过程事件流",
+            "rest": "生成中不再只显示一条进度线。每轮思考独立成段，当前轮展开、正文或工具开始时收起，旧轮可点开回看；工具调用以事件行实时显示（读取 / 搜索 / 写入… + 目标 + 耗时），运行中的工具图标轻微呼吸，不转圈、不画表格",
+            "sub": []
+          },
+          {
+            "lead": "完成态过程摘要",
+            "rest": "回复结束后收成一行「过程 · 思考 Ns · N 个工具」，默认收起；点开复用同一套事件流，显示全部步骤（不再只列 5 步）。思考正文仍不落库，完成态只保留时长",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "修复",
+        "kind": "fix",
+        "items": [
+          {
+            "lead": "Linux 桌面图标与应用名",
+            "rest": "启动器的 `StartupWMClass` 对齐打包后的 WM_CLASS（`knowbase`），GNOME 停靠栏 / 应用菜单显示 Phrontis 名称与图标，不再显示成 Electron 默认图标",
+            "sub": []
+          },
+          {
+            "lead": "从文件管理器粘贴文件",
+            "rest": "知识库树与工作台文件树现在能直接读取系统剪贴板里的文件路径，支持右键粘贴与 Ctrl+V；复制多个文件、粘贴进子目录均可",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "会话行新增 `scopeAll` / `writeMode` / `modelId` / `effort`；旧 `source='aiAssistant'` 会话幂等迁移为统一会话，保留路径作用域并切确认模式",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增 `agentSessionNormalizePure.ts` / `aiAssistantStageable.ts` 与契约 `verify-unified-assistant.mjs`",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "`scopeOf` 严格区分「整个仓库」与「空选文件」；空选时读写谓词全部拒绝",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "变更方案支持 `kind='tool'`：模块写工具可暂存、重放与应用；无统一逆操作的模块写入在回滚时跳过并如实计数",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "统一助手每轮请求携带作用域与写入方式；缩窄作用域时关闭感知检索并过滤越界附件",
+            "sub": []
+          },
+          {
+            "lead": "AI 流式草稿按轮分段",
+            "rest": "`agentStreamCore` 增加 `think` 事件、`rev` 版本号与 `completeThink`，用 `thinkingMs` 补每轮思考时长；`useAgentStream` 与 `assistantRunStore` 共用",
+            "sub": []
+          },
+          {
+            "lead": "工具标签唯一真源",
+            "rest": "`src/lib/toolLabels.ts` 同时供主进程事件与渲染层完成态使用",
+            "sub": []
+          },
+          {
+            "lead": "契约",
+            "rest": "重写 `verify-reply-loading.mjs`（65 项，含真实纯函数用例）；`verify-assistant-parallel.mjs` 36 项；`verify-help-retrieval.mjs` 156/156",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "version": "3.10.0",
+    "date": "2026-10-22",
+    "summary": "本版一句话：日程模块重做为「今天工作台 + 日历 + 工作流」三部分。工作流用有序大画布呈现，阶段拖动只改顺序、日期自动顺延；任务与工作流一对一绑定，删任务级联删工作流；AI 获得完整工作流读写能力。",
+    "groups": [
+      {
+        "title": "日程工作流",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "",
+            "rest": "新增工作流数据 `.knowbase/modules/schedule/workflows.json`，阶段内嵌检查点，阶段数组顺序就是执行顺序",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "左栏新增「工作流」列表；任务右栏可一键建立「准备 / 执行 / 收尾」三阶段工作流",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "工作流画布：阶段卡片同尺寸横向排列，检查点挂父阶段下方；支持平移、缩放、适应画布与拖动排序",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "阶段日期统一归一化：重排或改日期后后续阶段自动顺延，检查点始终夹在父阶段内",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "工作流范围自动覆盖所有阶段，不保存任意 x / y 坐标",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "日历新增日 / 周 / 月 / 季：周与季显示工作流泳道，月视图保持任务 chip + 轻量色线",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "右栏拆成任务 / 工作流 / AI 三 Tab；任务面板自动保存并带冲突检测",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "任务新增预计时长；收集箱 = 无日期任务，不再混入每一天的今日列表",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "AI 新增 8 个工作流工具：查询、读取、创建、修改、删除、阶段增删改、阶段重排、检查点增删改",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "AI 建任务支持预计时长与收集箱；删除任务走 repo 层级联删除工作流",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "删除「AI 拆阶段」按钮与 `/拆解` 指令，AI 能力统一收进工作流工具与 AI 助手",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "新增 `workflowPure.ts` 纯函数层，UI / 主进程 / AI 工具 / 契约脚本共用同一套日期归一化",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增契约脚本：`verify-workflow-pure.mjs` / `verify-workflow-repo.mjs` / `verify-workflow-ai-tools.mjs`",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增帮助手册《日程工作流》，更新《日程助手与固定日程》《日程与打卡小窗》",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "新增设置 `scheduleView` / `scheduleCalendarMode`；旧四象限与时间网格设置仅兼容保留",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "Toast 在日程右栏展开时自动让位，不再遮挡 AI 输入框",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "删除旧日程组件：`TimetableView` / `TaskTray` / `ViewSwitcher` / `TodoEditModal` / `QuadrantChart` / `TodoItem`",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.9.2",
     "date": "2026-10-19",

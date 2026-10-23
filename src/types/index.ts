@@ -627,6 +627,7 @@ export interface ScheduleTodo {
   /** 固定日程（重复任务）生成的待办：来源规则 id + 本次日期 */
   recurringId?: string | null
   recurringDue?: string | null
+  estimateMin?: number | null
   createdAt: string; updatedAt: string
   tag?: ScheduleTag | null
   subtasks?: ScheduleTodo[]
@@ -637,14 +638,80 @@ export interface CreateScheduleTodoDTO {
   quadrant?: number; taskType?: 'deadline' | 'plan' | 'daily'; tagId?: string
   endCriteria?: string; parentId?: string
   scheduledStart?: number | null; scheduledEnd?: number | null
+  estimateMin?: number | null
 }
 export interface UpdateScheduleTodoDTO {
   title?: string; description?: string; date?: string; time?: string | null
   quadrant?: number; taskType?: 'deadline' | 'plan' | 'daily'; tagId?: string | null
   status?: string; endCriteria?: string; parentId?: string | null
   scheduledStart?: number | null; scheduledEnd?: number | null
+  estimateMin?: number | null
+  expectedUpdatedAt?: string
   /** 提醒「稍后」目标时间；传 null 表示清除打盹 */
   snoozeUntil?: string | null
+}
+
+export type ScheduleStageStatus = 'planned' | 'doing' | 'done'
+export interface ScheduleWorkflowCheckpoint {
+  id: string
+  title: string
+  start: string
+  end: string
+  status: ScheduleStageStatus
+}
+export interface ScheduleWorkflowStage {
+  id: string
+  title: string
+  start: string
+  end: string
+  status: ScheduleStageStatus
+  milestone: boolean
+  checkpoints: ScheduleWorkflowCheckpoint[]
+}
+export interface ScheduleWorkflow {
+  id: string
+  title: string
+  taskId: string | null
+  tagId: string | null
+  color: string
+  start: string
+  end: string
+  stages: ScheduleWorkflowStage[]
+  createdAt: string
+  updatedAt: string
+}
+export interface ScheduleWorkflowStageInput {
+  id?: string
+  title?: string
+  start?: string
+  end?: string
+  status?: ScheduleStageStatus
+  milestone?: boolean
+  checkpoints?: ScheduleWorkflowCheckpointInput[]
+}
+export interface ScheduleWorkflowCheckpointInput {
+  id?: string
+  title?: string
+  start?: string
+  end?: string
+  status?: ScheduleStageStatus
+}
+export interface CreateScheduleWorkflowDTO {
+  title: string
+  taskId?: string | null
+  tagId?: string | null
+  color?: string
+  start?: string
+  end?: string
+  stages?: ScheduleWorkflowStageInput[]
+}
+export interface UpdateScheduleWorkflowDTO {
+  title?: string
+  taskId?: string | null
+  tagId?: string | null
+  color?: string
+  start?: string
+  end?: string
 }
 
 // 固定日程（重复任务）—— 与主进程 src/lib/scheduleRecurringPure.ts 的 ScheduleRecurring 同形状
@@ -764,7 +831,7 @@ export interface RecycleBinItem {
 
 // export
 export interface BlogExportData { entries: (Entry & { tags: Tag[] })[]; tags: Tag[] }
-export interface ScheduleExportData { todos: (ScheduleTodo & { tag: ScheduleTag | null })[]; tags: ScheduleTag[] }
+export interface ScheduleExportData { todos: (ScheduleTodo & { tag: ScheduleTag | null })[]; tags: ScheduleTag[]; workflows: ScheduleWorkflow[] }
 export interface KnowledgeExportData { categories: KnowledgeCategory[]; pages: (KnowledgePage & { tags: KnowledgeTag[]; backlinks: string[] })[]; tags: KnowledgeTag[] }
 export interface PasswordVaultExportData { entries: PasswordEntry[] }
 export interface MomentsExportData { posts: MomentsPost[]; albums: MomentsAlbum[] }
@@ -1304,8 +1371,16 @@ export interface AgentSessionInfo {
   mode?: 'manual' | 'agent'
   /** 会话级全局要求（仅本会话生效；空串/缺省=无） */
   instructions?: string
-  /** AI助手任务级作用域（仓库相对前缀数组；缺省/空=未圈定）。仅 source='aiAssistant' 有值 */
+  /** 统一 AI 助手文件作用域（仓库相对前缀数组；scopeAll=false 时严格按它限制） */
   scope?: string[]
+  /** true=整个仓库；false=严格按 scope（空数组 = 不读取仓库文件） */
+  scopeAll?: boolean
+  /** 写入策略：direct=立即执行；confirm=先进入变更方案 */
+  writeMode?: 'direct' | 'confirm'
+  /** 会话级模型（空 = 跟随全局设置） */
+  modelId?: string
+  /** 会话级思考强度（空 = 跟随全局设置） */
+  effort?: 'off' | 'low' | 'medium' | 'high'
   createdAt: string
   updatedAt: string
   /** 钉住时间（「★ 收藏」分区）：有值 = 已钉住（值用于收藏内排序）；缺省 / null = 未钉住 */
@@ -1519,7 +1594,7 @@ export interface AgentChange {
 
 // ---- AI助手变更方案（v3.9.0）：先预览、后确认、可整任务回滚 ----
 
-export type AiPlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag'
+export type AiPlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool'
 
 export interface AiPlanOp {
   id: string
@@ -1532,6 +1607,16 @@ export interface AiPlanOp {
   prev?: string | null
   /** 变更后内容（rename/trash 无） */
   next?: string | null
+  /** kind='tool'：工具注册名 */
+  tool?: string
+  /** kind='tool'：所属模块 */
+  module?: string
+  /** kind='tool'：调用参数 */
+  args?: Record<string, unknown>
+  /** kind='tool'：给用户看的结构化摘要 */
+  summary?: string
+  /** kind='tool'：应用后工具返回结果 */
+  result?: unknown
   status: 'pending' | 'applied' | 'rejected'
 }
 
@@ -2207,12 +2292,27 @@ export interface ElectronAPI {
   getScheduleSubtasks: (parentId: string) => Promise<ScheduleTodo[]>
   getScheduleUnscheduledTodos: () => Promise<ScheduleTodo[]>
   getScheduleWeekTodos: (weekStart: string, weekEnd: string) => Promise<ScheduleTodo[]>
+  getAllScheduleTodos: () => Promise<ScheduleTodo[]>
   createScheduleTodo: (d: CreateScheduleTodoDTO) => Promise<ScheduleTodo>
   updateScheduleTodo: (id: string, d: UpdateScheduleTodoDTO) => Promise<ScheduleTodo>
   deleteScheduleTodo: (id: string) => Promise<void>
   getScheduleTags: () => Promise<ScheduleTag[]>
   createScheduleTag: (n: string, c?: string) => Promise<ScheduleTag>
   deleteScheduleTag: (id: string) => Promise<void>
+  listScheduleWorkflows: () => Promise<ScheduleWorkflow[]>
+  getScheduleWorkflow: (id: string) => Promise<ScheduleWorkflow | null>
+  getScheduleWorkflowByTask: (taskId: string) => Promise<ScheduleWorkflow | null>
+  createScheduleWorkflow: (d: CreateScheduleWorkflowDTO) => Promise<ScheduleWorkflow>
+  updateScheduleWorkflow: (id: string, d: UpdateScheduleWorkflowDTO, expectedUpdatedAt?: string) => Promise<ScheduleWorkflow>
+  restoreScheduleWorkflow: (snapshot: ScheduleWorkflow) => Promise<ScheduleWorkflow>
+  deleteScheduleWorkflow: (id: string) => Promise<boolean>
+  addScheduleWorkflowStage: (workflowId: string, stage: ScheduleWorkflowStageInput) => Promise<ScheduleWorkflow>
+  updateScheduleWorkflowStage: (workflowId: string, stageId: string, patch: ScheduleWorkflowStageInput, expectedUpdatedAt?: string) => Promise<ScheduleWorkflow>
+  deleteScheduleWorkflowStage: (workflowId: string, stageId: string) => Promise<ScheduleWorkflow>
+  reorderScheduleWorkflowStages: (workflowId: string, orderedIds: string[]) => Promise<ScheduleWorkflow>
+  addScheduleWorkflowCheckpoint: (workflowId: string, stageId: string, checkpoint: ScheduleWorkflowCheckpointInput) => Promise<ScheduleWorkflow>
+  updateScheduleWorkflowCheckpoint: (workflowId: string, stageId: string, checkpointId: string, patch: ScheduleWorkflowCheckpointInput) => Promise<ScheduleWorkflow>
+  deleteScheduleWorkflowCheckpoint: (workflowId: string, stageId: string, checkpointId: string) => Promise<ScheduleWorkflow>
   /** 固定日程（重复任务） */
   scheduleRecurringList: () => Promise<ScheduleRecurring[]>
   scheduleRecurringCreate: (d: CreateScheduleRecurringDTO) => Promise<ScheduleRecurring>
@@ -2754,11 +2854,12 @@ export interface ElectronAPI {
   aiAssistantPlanGet: (sessionId: string) => Promise<AiChangePlan | null>
   aiAssistantPlanApply: (sessionId: string, acceptedIds: string[]) => Promise<{ applied: number; opIds: string[] }>
   aiAssistantPlanReject: (sessionId: string) => Promise<boolean>
-  aiAssistantTaskRollback: (sessionId: string) => Promise<{ reverted: number }>
+  aiAssistantTaskRollback: (sessionId: string) => Promise<{ reverted: number; skipped?: number }>
   aiAssistantTasks: () => Promise<AiTaskSummary[]>
   aiAssistantScopeSuggest: (query: string, limit?: number) => Promise<AiScopeSuggestion[]>
   agentRenameSession: (id: string, title: string) => Promise<boolean>
-  agentSetSessionScope: (id: string, scope: string[]) => Promise<{ ok: boolean; error?: string }>
+  agentSetSessionScope: (id: string, scope: string[], scopeAll?: boolean) => Promise<{ ok: boolean; error?: string }>
+  agentSetSessionPrefs: (id: string, patch: { writeMode?: 'direct' | 'confirm'; modelId?: string; effort?: 'off' | 'low' | 'medium' | 'high' }) => Promise<{ ok: boolean; error?: string }>
   agentSetSessionInstructions: (id: string, instructions: string) => Promise<{ ok: boolean; error?: string }>
   agentDeleteSession: (id: string) => Promise<boolean>
   agentSetSessionPinned: (id: string, pinned: boolean) => Promise<boolean>

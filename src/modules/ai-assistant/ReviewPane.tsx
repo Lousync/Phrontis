@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { DiffEditor } from '@monaco-editor/react'
-import { Check, X, Undo2, FileText, FilePlus2, MoveRight, Trash2 } from 'lucide-react'
+import { Check, X, Undo2, FileText, FilePlus2, MoveRight, Trash2, ArrowLeft } from 'lucide-react'
 import type { AiChangePlan, AiPlanOp } from '../../types'
 import { bindEditorTheme } from '../../lib/editorTheme'
 // Monaco 运行时装配与共享宿主同源（worker 注册 + loader 本地化），monaco 仍单独分包
@@ -19,6 +19,10 @@ interface Props {
   onApply: (ids: string[]) => void
   onReject: () => void
   onRollback: () => void
+  /** 紧凑宿主用：返回对话（完整视图不传） */
+  onClose?: () => void
+  /** 窄宿主（右侧栏 / 悬浮侧栏）：清单横排 + 单栏 diff，避免固定 236px 清单把 diff 挤成黑条 */
+  compact?: boolean
 }
 
 function langOf(rel?: string): string {
@@ -37,6 +41,10 @@ function isDiffable(op: AiPlanOp): boolean {
   return op.kind === 'write' || op.kind === 'edit' || op.kind === 'trash'
 }
 
+function labelOf(op: AiPlanOp): string {
+  return op.relPath ?? op.to ?? op.tool ?? '(未知)'
+}
+
 function KindIcon({ kind }: { kind: AiPlanOp['kind'] }) {
   const p = { size: 13, className: 'shrink-0 text-[var(--text-muted)]' }
   if (kind === 'write') return <FilePlus2 {...p} />
@@ -46,7 +54,7 @@ function KindIcon({ kind }: { kind: AiPlanOp['kind'] }) {
   return <FileText {...p} />
 }
 
-export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback }: Props) {
+export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, onClose, compact = false }: Props) {
   const pending = useMemo(() => plan.ops.filter((o) => o.status === 'pending'), [plan])
   const applied = useMemo(() => plan.ops.filter((o) => o.status === 'applied'), [plan])
   const [accepted, setAccepted] = useState<Set<string>>(new Set())
@@ -72,9 +80,19 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback }
 
   return (
     <div className="kb-view-in flex h-full min-w-0 flex-col bg-[var(--bg-primary)]">
-      <div className="flex h-9 shrink-0 items-center justify-between border-b border-[var(--border-color)] px-3">
-        <span className="text-[12.5px] font-medium text-[var(--text-primary)]">
-          变更方案 · 待确认 {pending.length} 项{applied.length ? ` · 已应用 ${applied.length} 项` : ''}
+      <div className={`flex shrink-0 items-center justify-between gap-1 border-b border-[var(--border-color)] ${compact ? 'min-h-9 flex-wrap px-2 py-1' : 'h-9 px-3'}`}>
+        <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] font-medium text-[var(--text-primary)]">
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="kb-micro-pop flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              title="返回对话"
+            >
+              <ArrowLeft size={12} /> 返回
+            </button>
+          )}
+          <span className="truncate">变更方案 · 待确认 {pending.length} 项{applied.length ? ` · 已应用 ${applied.length} 项` : ''}</span>
         </span>
         <div className="flex items-center gap-1.5">
           {applied.length > 0 && (
@@ -109,19 +127,23 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback }
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1">
-        <ul className="w-[236px] shrink-0 overflow-y-auto border-r border-[var(--border-color)] p-1.5">
+      <div className={compact ? 'flex min-h-0 flex-1 flex-col' : 'flex min-h-0 flex-1'}>
+        <ul className={compact
+          ? 'flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border-color)] p-1.5'
+          : 'w-[236px] shrink-0 overflow-y-auto border-r border-[var(--border-color)] p-1.5'}>
           {plan.ops.length === 0 ? (
             <p className="px-2 py-4 text-center text-[12px] text-[var(--text-muted)]">暂无变更</p>
           ) : plan.ops.map((op) => {
             const isPending = op.status === 'pending'
             const on = isPending && accepted.has(op.id)
             return (
-              <li key={op.id}>
+              <li key={op.id} className={compact ? 'shrink-0' : undefined}>
                 <button
                   type="button"
                   onClick={() => setSelectedId(op.id)}
-                  className={`kb-item-in flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${
+                  className={`kb-item-in flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] ${
+                    compact ? 'w-auto max-w-[180px]' : 'w-full'
+                  } ${
                     selectedId === op.id ? 'bg-[var(--bg-selected)]' : 'hover:bg-[var(--bg-hover)]'
                   } ${op.status === 'rejected' ? 'opacity-50' : ''}`}
                 >
@@ -139,7 +161,7 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback }
                     </span>
                   )}
                   <KindIcon kind={op.kind} />
-                  <span className="truncate text-[var(--text-secondary)]">{op.relPath ?? op.to ?? '(未知)'}</span>
+                  <span className="truncate text-[var(--text-secondary)]">{labelOf(op)}</span>
                 </button>
               </li>
             )
@@ -162,25 +184,34 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback }
                   readOnly: true,
                   originalEditable: false,
                   minimap: { enabled: false },
-                  fontSize: 13,
+                  fontSize: compact ? 11 : 13,
                   wordWrap: 'on',
                   scrollBeyondLastLine: false,
-                  renderSideBySide: true,
+                  // 窄面板必须单栏：并排 diff 在 200px 宽里会把右侧压成纯黑条
+                  renderSideBySide: !compact,
+                  lineNumbers: compact ? 'off' : 'on',
+                  renderOverviewRuler: !compact,
                   automaticLayout: true,
                 }}
               />
             </MonacoErrorBoundary>
           ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-2 text-[13px] text-[var(--text-secondary)]">
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-[13px] text-[var(--text-secondary)]">
               <KindIcon kind={selected.kind} />
-              <p>
+              <p className="max-w-full break-words">
                 {selected.kind === 'rename'
                   ? `${selected.relPath} → ${selected.to}`
                   : selected.kind === 'mkdir'
                     ? `新建目录 ${selected.relPath}`
-                    : `标签变更 ${selected.relPath ?? ''}`}
+                    : selected.kind === 'tool'
+                      ? (selected.summary || `模块写入 ${selected.tool ?? ''}`)
+                      : `标签变更 ${selected.relPath ?? ''}`}
               </p>
-              <p className="text-[12px] text-[var(--text-muted)]">此变更无文本差异预览</p>
+              <p className="text-[12px] text-[var(--text-muted)]">
+                {selected.kind === 'tool'
+                  ? '模块写入没有文本 diff；应用后可手动撤销，整任务回滚不会自动还原这一类'
+                  : '此变更无文本差异预览'}
+              </p>
             </div>
           )}
         </div>

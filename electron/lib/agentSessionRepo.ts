@@ -5,6 +5,7 @@ import { getCurrentVault, getVaultKbRoot } from './kbStore/vaultContext'
 import { globalDataDir } from './globalJsonStore'
 import { writeAdoptNotice } from './agentAdoptNotice'
 import { adoptLegacyGlobalAgentStore, type AdoptResult } from './agentSessionMigrate'
+import { normalizeSessionFields } from './agentSessionNormalizePure'
 // 类型专用导入（零运行时代价）：续跑现场的结构真源在 agentInterruptPure，仓库不另立一份
 import type { SessionResume } from './agentInterruptPure'
 import {
@@ -67,6 +68,16 @@ function requireAgentDir(): string {
 export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant'
 
 /**
+ * 写入策略（统一 AI 助手，v3.11.0）：
+ * - `direct`：写工具立即执行；
+ * - `confirm`：所有可暂存写工具先进入 ChangePlan，用户确认后应用。
+ */
+export type SessionWriteMode = 'direct' | 'confirm'
+
+/** 思考强度档位（与 AI 教学 / agentService 同口径） */
+export type SessionEffort = 'off' | 'low' | 'medium' | 'high'
+
+/**
  * 会话通道（台账 N-1「手册通道」）：
  * - `'manual'` = 使用帮助通道（只检索官方手册、effort off、≤3 轮、不注入教学/感知规则）；
  * - `'agent'`（或未标记） = 通用助手通道。
@@ -125,11 +136,24 @@ export interface AgentSessionRow {
   /** 支线旁问：上次打开（已读）的本地时间串；缺省 = 从未打开 */
   lane_seen_at?: string
   /**
-   * AI助手（source='aiAssistant'）任务级作用域：归一化后的仓库相对前缀数组
-   * （目录前缀 + 单文件路径）。缺省 / 空数组 = 尚未圈定。语义与 `aiAssistantScope` 一致。
-   * 仅 AI助手用；其它来源不写。
+   * 统一 AI 助手（v3.11.0）文件作用域：归一化后的仓库相对前缀数组
+   * （目录前缀 + 单文件路径）。`scopeAll=false` 时严格按它限制；空数组 = 不读取仓库文件。
+   * 旧 `source='aiAssistant'` 会话迁移后保留原值。
    */
   scope?: string[]
+  /**
+   * 是否作用于整个仓库（v3.11.0）：
+   * - `true`：整个仓库，`scope` 必须为空；
+   * - `false`：严格按 `scope` 限制（空数组 = 不读取任何仓库文件）；
+   * - 缺省：旧数据，读取时按来源补默认值（assistant → true，aiAssistant → false）。
+   */
+  scopeAll?: boolean
+  /** 写入策略（v3.11.0）；缺省 = direct */
+  writeMode?: SessionWriteMode
+  /** 会话级模型（空 = 跟随全局设置） */
+  modelId?: string
+  /** 会话级思考强度（空 = 跟随全局设置） */
+  effort?: SessionEffort
 }
 
 /** 等价 datetime('now','localtime')：本地时间 "YYYY-MM-DD HH:MM:SS" */
@@ -139,9 +163,17 @@ export function nowLocal(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
-/** 读会话索引：无仓库 / 文件不存在 → 空数组（读路径不抛错） */
+/**
+ * 读会话索引：无仓库 / 文件不存在 → 空数组（读路径不抛错）。
+ * 统一助手字段迁移（v3.11.0）是幂等的；读路径顺带迁移用静默 writeJson：
+ * 一次迁移失败不该让整个会话列表请求报错。
+ */
 function readSessions(): AgentSessionRow[] {
-  return readJson<AgentSessionRow[]>(AGENT_DIR, SESSIONS_FILE, [])
+  const rows = readJson<AgentSessionRow[]>(AGENT_DIR, SESSIONS_FILE, [])
+  let dirty = false
+  for (const row of rows) if (normalizeSessionFields(row)) dirty = true
+  if (dirty) writeJson(AGENT_DIR, SESSIONS_FILE, rows)
+  return rows
 }
 
 /** 写会话索引：无仓库或写盘失败抛错（写路径必须让调用方知道没落盘） */
@@ -210,12 +242,21 @@ export function adoptLegacyAgentSessionsToVault(): AdoptResult | null {
 }
 
 export function createAgentSession(title = '新会话', source: AgentSessionSource = 'assistant'): AgentSessionRow {
+  const legacyAiAssistant = source === 'aiAssistant'
+  const unified = source === 'assistant' || legacyAiAssistant
   const row: AgentSessionRow = {
     id: randomUUID(),
     title,
     instructions: '',
-    source,
-    ...(source === 'aiAssistant' ? { scope: [] as string[] } : {}),
+    // 新统一助手不再产生 aiAssistant 来源；兼容入口仍归一成 assistant
+    source: legacyAiAssistant ? 'assistant' : source,
+    ...(unified
+      ? {
+          scopeAll: !legacyAiAssistant,
+          scope: [] as string[],
+          writeMode: legacyAiAssistant ? 'confirm' : 'direct',
+        }
+      : {}),
     created_at: nowLocal(),
     updated_at: nowLocal(),
   }
@@ -396,13 +437,8 @@ export function updateAgentSessionInstructions(id: string, instructions: string)
   writeSessions(sessions)
 }
 
-/**
- * AI助手任务级作用域（归一：去空白、去空项、去重、限量）。
- *
- * **不动 `updated_at`** —— 勾选范围是编辑动作、不是对话活跃，改它会把任务无意义地顶到列表最上
- * （同 digest 口径）。空数组写回 `[]`（明确「已圈定但为空」与「从未圈定」在读取侧都当空处理）。
- */
-export function updateAgentSessionScope(id: string, scope: string[]): void {
+/** 作用域归一：去空白、去空项、去重、上限 500（落库侧最后一道保护） */
+export function normalizeSessionScope(scope: string[]): string[] {
   const seen = new Set<string>()
   const clean: string[] = []
   for (const raw of Array.isArray(scope) ? scope : []) {
@@ -412,10 +448,65 @@ export function updateAgentSessionScope(id: string, scope: string[]): void {
     clean.push(s)
     if (clean.length >= 500) break
   }
+  return clean
+}
+
+/**
+ * 统一 AI 助手作用域（归一：去空白、去空项、去重、限量）。
+ *
+ * **不动 `updated_at`** —— 勾选范围是编辑动作、不是对话活跃，改它会把任务无意义地顶到列表最上
+ * （同 digest 口径）。
+ *
+ * `scopeAll`：
+ * - true → 整个仓库，强制清空 scope；
+ * - false → 严格按 scope（空数组 = 不读取仓库文件）；
+ * - 缺省 → 兼容旧调用：scope 非空时视为缩窄，空数组保持当前值。
+ */
+export function updateAgentSessionScope(id: string, scope: string[], scopeAll?: boolean): void {
+  const clean = normalizeSessionScope(scope)
   const sessions = readSessions()
   const row = sessions.find((s) => s.id === id)
   if (!row) return
-  row.scope = clean
+  if (scopeAll === true) {
+    row.scopeAll = true
+    row.scope = []
+  } else if (scopeAll === false) {
+    row.scopeAll = false
+    row.scope = clean
+  } else if (row.scopeAll === true) {
+    // 旧调用只传了 scope：非空 = 用户明确缩窄；空数组保持「整个仓库」
+    if (clean.length > 0) {
+      row.scopeAll = false
+      row.scope = clean
+    }
+  } else {
+    row.scope = clean
+  }
+  writeSessions(sessions)
+}
+
+/**
+ * 会话级偏好（写入策略 / 模型 / 思考强度）。
+ * 与作用域同口径：不碰 `updated_at`，改设置不是对话活跃。
+ */
+export function updateAgentSessionPreferences(id: string, patch: {
+  writeMode?: SessionWriteMode
+  modelId?: string
+  effort?: SessionEffort
+}): void {
+  const sessions = readSessions()
+  const row = sessions.find((s) => s.id === id)
+  if (!row) return
+  if (patch.writeMode === 'direct' || patch.writeMode === 'confirm') row.writeMode = patch.writeMode
+  if (patch.modelId !== undefined) {
+    const modelId = String(patch.modelId ?? '').trim()
+    if (modelId) row.modelId = modelId
+    else delete row.modelId
+  }
+  if (patch.effort !== undefined) {
+    const effort = patch.effort
+    if (effort === 'off' || effort === 'low' || effort === 'medium' || effort === 'high') row.effort = effort
+  }
   writeSessions(sessions)
 }
 

@@ -38,7 +38,8 @@ check('ChatCommand 支持 prompt / surfaces', cc.includes('prompt?: string') && 
 check('ChatCommandCtx 支持 onSend', cc.includes('onSend?: (text: string) => void'))
 check('提示型命令经 onSend 发出', cc.includes('ctx.onSend(cmd.prompt)'))
 check('commandsForSurface 导出', cc.includes('export function commandsForSurface'))
-check('日程指令集 /简报 /排这周 /拆解 /今天', ['简报', '排这周', '拆解', '今天'].every((n) => cc.includes(`name: '${n}'`)))
+check('日程指令集 /简报 /排这周 /今天', ['简报', '排这周', '今天'].every((n) => cc.includes(`name: '${n}'`)))
+check('日程指令不再含 拆解', !cc.includes("name: '拆解'"))
 check('/compress 限定非日程面', cc.includes("surfaces: ['assistant', 'aiTeaching', 'aiLearn']"))
 check('SlashCommandMenu 按面过滤', read('src/components/shared/SlashCommandMenu.tsx').includes('commandsForSurface(surface)'))
 
@@ -52,10 +53,10 @@ check('SCHEDULE_TOOL_NAMES 工具白名单', as.includes('const SCHEDULE_TOOL_NA
 check('source===\'schedule\' 注入人设 + 摘要', as.includes("source === 'schedule' ? SCHEDULE_PERSONA : ''") && as.includes("source === 'schedule' ? buildScheduleInjection() : ''"))
 check('工具面按 schedule 收窄', as.includes("source === 'schedule' ? SCHEDULE_TOOL_NAMES"))
 check('仅白名单内 ondemand 工具可见', as.includes('!onlySet?.has(t.name) && !extraTools?.has(t.name)'))
-check('newSession 支持 schedule', as.includes("source === 'schedule' ? 'schedule' : 'assistant'"))
+check('newSession 支持 schedule', as.includes("source === 'schedule' ? 'schedule'"))
 check('缺省 source 按会话记录回推', as.includes("if (!source && sessionId) source = getAgentSession(sessionId)?.source"))
-check('摘要进首条 user 消息层（缓存前缀稳定）', as.includes('const requestInjection = [scheduleHint, refInjection, perceptionInjection]'))
-check('agentSessionRepo: AgentSessionSource 含 schedule', read('electron/lib/agentSessionRepo.ts').includes("AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule'"))
+check('摘要进首条 user 消息层（缓存前缀稳定）', as.includes('const requestInjection = [') && as.includes('scheduleHint'))
+check('agentSessionRepo: AgentSessionSource 含 schedule', read('electron/lib/agentSessionRepo.ts').includes("'schedule'"))
 check('人设要求排期预览围栏 schedule-preview', as.includes('schedule-preview'))
 
 // ---------- 接线：渲染层 ----------
@@ -63,7 +64,8 @@ console.log('\n[接线] 渲染层')
 const urp = read('src/components/workbench/WorkbenchRightPanel.tsx')
 check('WorkbenchRightPanel: scheduleActive prop', urp.includes('scheduleActive?: boolean') && urp.includes('scheduleActive = false'))
 check('条件页签 data-wb-rp-tab="schedule"', urp.includes('data-wb-rp-tab="schedule"'))
-check('渲染 ScheduleAssistantPanel', urp.includes("effectiveTab === 'schedule' ?") && urp.includes('<ScheduleAssistantPanel />'))
+check('日程右栏渲染 ScheduleRightPanel', urp.includes("effectiveTab === 'schedule' ?") && urp.includes('<ScheduleRightPanel />'))
+check('ScheduleRightPanel 内复用 ScheduleAssistantPanel', read('src/modules/schedule/ScheduleRightPanel.tsx').includes('<ScheduleAssistantPanel />'))
 check('workbenchLayout: rightTab 含 schedule', read('src/lib/workbenchLayout.ts').includes("'schedule'") && read('src/lib/workbenchLayout.ts').includes('RIGHT_PANEL_TAB_IDS_ALL = '))
 
 const uac = read('src/components/shared/AssistantPanel/useAssistantChat.ts')
@@ -78,7 +80,7 @@ check('负向：默认分支不再是「只排 aiTeaching」的排除法（那�
   !uac.includes("all.filter(x => x.source !== 'aiTeaching')"))
 check('★ AI 教学侧同样是白名单（原来用排除法，会把 schedule 也算进去）',
   read('src/modules/ai-teaching/index.tsx').includes("s.source === 'aiTeaching' && !(s.parentSessionId && s.lane === 'side')"))
-check('新建会话带 source', uac.includes('agentNewSession(undefined, sessionSource)'))
+check('新建会话带 source', uac.includes('newAgentSession(undefined, sessionSource)'))
 check('发送透传 source', uac.includes('agentChat(sid, body, finalCtx ?? undefined, cid, sessionSource'))
 
 const cb = read('src/components/shared/AssistantPanel/ChatBody.tsx')

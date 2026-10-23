@@ -1,6 +1,7 @@
 import { exists, readJson, writeJsonOrThrow } from './jsonStore'
 import { randomUUID } from 'crypto'
 import { planScheduleRecurringSettle, endOfWeek, addDaysTo, type ScheduleRecurring } from '../../../src/lib/scheduleRecurringPure'
+import { vaultDeleteWorkflowsByTask } from './scheduleWorkflowVaultRepo'
 
 /**
  * 日程 vault 数据仓库（去库化 P2）：storageData=vault 时日程的真相源。
@@ -39,6 +40,7 @@ export interface TodoRow {
   /** 固定日程（重复任务）生成的待办：来源规则 id + 本次日期（去重键 = recurringId@recurringDue） */
   recurringId?: string | null
   recurringDue?: string | null
+  estimate_min?: number | null
   created_at: string; updated_at: string
 }
 
@@ -55,6 +57,12 @@ const TAGS_FILE = 'tags.json'
 export function vaultTodosAll(): TodoRow[] {
   const rows = readJson<unknown>(MOD, TODOS_FILE, [])
   return Array.isArray(rows) ? (rows as TodoRow[]) : []
+}
+
+export function vaultTodosAllTopLevel(): TodoRow[] {
+  return vaultTodosAll()
+    .filter((r) => isNull(r.parent_id))
+    .sort((a, b) => binaryCompare(str(a.date), str(b.date)) || bySortThenCreated(a, b))
 }
 
 export function vaultTodosSave(rows: TodoRow[]): void {
@@ -119,7 +127,7 @@ function bySortThenCreated(a: TodoRow, b: TodoRow): number {
  */
 export function vaultTodosForDate(date: string): TodoRow[] {
   return vaultTodosAll()
-    .filter((r) => isNull(r.parent_id) && (r.date === date || (r.task_type === 'plan' && r.status === 'pending')))
+    .filter((r) => isNull(r.parent_id) && (r.date === date || (str(r.date) !== '' && r.task_type === 'plan' && r.status === 'pending')))
     .sort(bySortThenCreated)
 }
 
@@ -131,7 +139,7 @@ export function vaultTodosForDate(date: string): TodoRow[] {
  */
 export function vaultOverdueTodos(today: string): TodoRow[] {
   return vaultTodosAll()
-    .filter((r) => !isNull(r.date) && str(r.date) < today && r.status === 'pending'
+    .filter((r) => str(r.date) !== '' && str(r.date) < today && r.status === 'pending'
       && isNull(r.parent_id) && !isNull(r.task_type) && r.task_type !== 'plan')
     .sort((a, b) => binaryCompare(str(a.date), str(b.date)) || bySortThenCreated(a, b))
 }
@@ -161,7 +169,7 @@ export function vaultDatesWithTodos(yearMonth: string): string[] {
  */
 export function vaultMonthTodos(yearMonth: string): TodoRow[] {
   return vaultTodosAll()
-    .filter((r) => isNull(r.parent_id) && (likePrefix(r.date, yearMonth) || (r.task_type === 'plan' && r.status === 'pending')))
+    .filter((r) => isNull(r.parent_id) && (likePrefix(r.date, yearMonth) || (str(r.date) !== '' && r.task_type === 'plan' && r.status === 'pending')))
     .sort((a, b) => binaryCompare(str(a.date), str(b.date)) || bySortThenCreated(a, b))
 }
 
@@ -244,9 +252,9 @@ export function vaultCreateTodo(row: TodoRow): TodoRow {
 type TodoColumn =
   | 'title' | 'description' | 'date' | 'time' | 'quadrant' | 'task_type'
   | 'tag_id' | 'status' | 'end_criteria' | 'parent_id'
-  | 'scheduled_start' | 'scheduled_end' | 'snooze_until'
+  | 'scheduled_start' | 'scheduled_end' | 'snooze_until' | 'estimate_min'
 
-const TODO_COLUMNS: TodoColumn[] = ['title', 'description', 'date', 'time', 'quadrant', 'task_type', 'tag_id', 'status', 'end_criteria', 'parent_id', 'scheduled_start', 'scheduled_end', 'snooze_until']
+const TODO_COLUMNS: TodoColumn[] = ['title', 'description', 'date', 'time', 'quadrant', 'task_type', 'tag_id', 'status', 'end_criteria', 'parent_id', 'scheduled_start', 'scheduled_end', 'snooze_until', 'estimate_min']
 
 function camelToSnake(s: string): string {
   return s.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())
@@ -284,6 +292,7 @@ export function vaultUpdateTodo(id: string, patch: Record<string, unknown>, upda
       case 'scheduled_start': next.scheduled_start = v as number | null; break
       case 'scheduled_end': next.scheduled_end = v as number | null; break
       case 'snooze_until': next.snooze_until = v as string | null; break
+      case 'estimate_min': next.estimate_min = v as number | null; break
     }
   }
   // preset：updated_at 总被刷新（sqlite handler 里恒定附加）
@@ -299,6 +308,7 @@ export function vaultUpdateTodo(id: string, patch: Record<string, unknown>, upda
  */
 export function vaultDeleteTodoCascade(id: string): void {
   vaultTodosSave(vaultTodosAll().filter((r) => r.id !== id && r.parent_id !== id))
+  vaultDeleteWorkflowsByTask(id)
 }
 
 // ===== 标签 =====
@@ -479,7 +489,7 @@ export function vaultScheduleSettleRecurring(today = todayLocal(), horizon?: str
       quadrant: r.quadrant, task_type: r.taskType, tag_id: r.tagId, status: 'pending', sort_order: 0,
       end_criteria: '', parent_id: null,
       scheduled_start: r.startMin, scheduled_end: r.endMin, snooze_until: null,
-      recurringId: r.id, recurringDue: p.due,
+      recurringId: r.id, recurringDue: p.due, estimate_min: null,
       created_at: now, updated_at: now,
     }
     added.push(todo)

@@ -6,7 +6,7 @@
  * 真实落盘（fs / workspaceManager / 广播）在 `aiAssistantPlan.ts`，只调这里选出的动作。
  */
 
-export type PlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag'
+export type PlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool'
 
 export interface PlanOp {
   id: string
@@ -19,6 +19,18 @@ export interface PlanOp {
   prev?: string | null
   /** 变更后内容（rename/trash 无） */
   next?: string | null
+  /** kind='tool'：工具注册名（如 builtin.knowledge.create-page） */
+  tool?: string
+  /** kind='tool'：所属模块 */
+  module?: string
+  /** kind='tool'：调用参数（应用时按原样重放） */
+  args?: Record<string, unknown>
+  /** kind='tool'：给用户看的结构化摘要 */
+  summary?: string
+  /** kind='tool'：暂存阶段返回的临时 id（后续参数可引用，应用时替换） */
+  tempId?: string
+  /** 应用后工具返回的原始结果（用于临时 id 映射与回滚提示） */
+  result?: unknown
   status: 'pending' | 'applied' | 'rejected'
 }
 
@@ -82,6 +94,9 @@ export function actionForOp(op: PlanOp, mode: 'apply' | 'rollback'): FsAction | 
     case 'mkdir':
       return mode === 'apply' ? { action: 'mkdir', relPath: rel } : null
     case 'tag':
+      return null
+    case 'tool':
+      // 工具类变更由 aiAssistantPlan 按计划顺序重放工具调用，不产生文件动作
       return null
     default:
       return null

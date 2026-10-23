@@ -77,13 +77,6 @@ export const CHAT_COMMANDS: ChatCommand[] = [
     run: async () => null,
   },
   {
-    name: '拆解',
-    desc: '把一个大任务拆成子步骤，并建议截止时间',
-    surfaces: ['schedule'],
-    prompt: '我要把一个任务拆解成子步骤。请先问我是哪件事，再拆开并建议截止时间。',
-    run: async () => null,
-  },
-  {
     name: '今天',
     desc: '今天该做什么：按 DDL 紧迫度与四象限给建议顺序',
     surfaces: ['schedule'],

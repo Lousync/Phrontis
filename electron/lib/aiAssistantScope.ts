@@ -1,21 +1,31 @@
 /**
- * AI助手（source='aiAssistant'）的作用域收敛与元数据清单（v3.9.0）。
+ * 统一 AI 助手的作用域收敛与元数据清单（v3.11.0）。
  *
  * 与插件系统同源：复用 `kbStore/vaultScope` 的纯函数（`normalizeRelPath` / `isWithinVaultScope`），
- * 但本模块把约束扩到**读写两侧**——AI助手只能读取/修改用户圈定范围（scope）内的文件，
+ * 但本模块把约束扩到**读写两侧**——统一助手只能读取/修改用户圈定范围（scope）内的文件，
  * 例外是「一跳链接扩展」：scope 内页面的 `[[出链]]` 直接目标允许读取，仍不可写。
  *
  * scope 表示：归一化后的仓库相对前缀数组（目录前缀 + 单文件路径）；文件自身即其前缀。
- * 空数组视为「未限定」（本模块不允许空 —— 渲染层必须圈定范围或先让 AI 给建议范围）。
+ * `scopeAll=true` = 整个仓库；`scopeAll=false` + 空数组 = 明确不读取任何仓库文件
+ * （**不能**沿用 vaultScope 的「空数组 = 不限制」旧语义）；缺省 = 旧来源兼容。
  */
 
 import { isWithinVaultScope, normalizeRelPath } from './kbStore/vaultScope'
 import { getKnowledgeIndex } from './kbStore/knowledgeIndex'
 import type { ToolInvokeCtx } from './aiTools'
 
-/** 从工具上下文取有效 scope（空数组 = undefined = 未限定） */
+/**
+ * 从工具上下文取有效 scope。
+ *
+ * - `scopeAll === true` → `undefined`（不限制，整个仓库）
+ * - `scopeAll === false` → 严格返回数组；空数组 = 不读取任何仓库文件
+ * - 缺省 → 旧行为：空数组 = `undefined`（兼容非统一会话）
+ */
 export function scopeOf(ctx?: ToolInvokeCtx): string[] | undefined {
-  return ctx?.scope && ctx.scope.length > 0 ? ctx.scope : undefined
+  if (ctx?.scopeAll === true) return undefined
+  const scope = Array.isArray(ctx?.scope) ? ctx.scope : []
+  if (ctx?.scopeAll === false) return scope
+  return scope.length > 0 ? scope : undefined
 }
 
 /**
@@ -54,6 +64,8 @@ export function canRead(rel: string, ctx?: ToolInvokeCtx): boolean {
 export function readPredicate(ctx?: ToolInvokeCtx): (rel: string) => boolean {
   const scope = scopeOf(ctx)
   if (!scope) return () => true
+  // 严格模式 + 空数组 = 明确不选文件：不能沿用 vaultScope 的「空 = 全库」
+  if (scope.length === 0) return () => false
   const oneHop = oneHopReadPaths(scope)
   return (rel: string): boolean => {
     if (isWithinVaultScope(rel, scope)) return true
@@ -66,6 +78,7 @@ export function readPredicate(ctx?: ToolInvokeCtx): (rel: string) => boolean {
 export function canWrite(rel: string, ctx?: ToolInvokeCtx): boolean {
   const scope = scopeOf(ctx)
   if (!scope) return true
+  if (scope.length === 0) return false
   return isWithinVaultScope(rel, scope)
 }
 
@@ -94,10 +107,16 @@ const MANIFEST_MAX_PAGES = 300
  * 构建作用域元数据清单（零正文成本）：标题 / 路径 / 标签 / 出链数 / 大小 / 更新时间。
  * 数据源 = 现有知识索引 + 图谱索引，不额外扫盘。
  */
-export function buildScopeManifest(scope: string[] | undefined, taskBrief = ''): string {
+export function buildScopeManifest(scope: string[] | undefined, taskBrief = '', scopeAll = false): string {
   const lines: string[] = []
+  if (scopeAll) {
+    lines.push('【本次作用域】整个仓库：你可以按需读取/修改仓库内任何文件（仍受仓库文件权限与模块权限约束）。')
+    if (taskBrief.trim()) lines.push('任务：「' + taskBrief.trim().slice(0, 200) + '」')
+    return lines.join('\n')
+  }
   lines.push('【本次作用域清单】你**只能读写以下范围内的内容**（越界调用会被拒绝）；范围外文件仅当它们是范围内页面的 [[出链]] 目标时才可读取。')
   if (scope && scope.length > 0) lines.push('范围：' + scope.join('、'))
+  else lines.push('范围：未选择任何仓库文件（本轮不能读取/写入仓库文件）')
   if (taskBrief.trim()) lines.push('任务：「' + taskBrief.trim().slice(0, 200) + '」')
   lines.push('')
 
@@ -105,8 +124,9 @@ export function buildScopeManifest(scope: string[] | undefined, taskBrief = ''):
   let dirs: string[] = []
   try {
     const idx = getKnowledgeIndex()
+    const hasScope = !!scope && scope.length > 0
     pages = idx.pages
-      .filter((p) => isWithinVaultScope(p.path, scope))
+      .filter((p) => hasScope && isWithinVaultScope(p.path, scope))
       .map((p) => ({
         title: p.title || '(无标题)',
         path: p.path,
