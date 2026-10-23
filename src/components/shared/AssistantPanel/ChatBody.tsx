@@ -17,6 +17,8 @@ import { useAssistantChat } from './useAssistantChat'
 import { AssistantEntryButton } from './AssistantEntry'
 import { AiChatSidebar } from './AiChatSidebar'
 import { SessionRunMark } from './SessionRunMark'
+import { SessionPinButton } from './SessionPinButton'
+import { splitPinnedSessions } from './sessionSections'
 import { QuoteChips } from './QuoteChips'
 import { UsageRing, fmtTok } from '../UsageRing'
 import { buildQuotedBody } from './selQuotes'
@@ -380,10 +382,9 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     {(() => {
                       // 「★ 收藏」分区（仅通用助手；日程助手「一天一会话」不适用）
                       const pinEnabled = !scheduleMode
-                      const pinnedList = pinEnabled
-                        ? sessions.filter(s => s.pinnedAt).sort((a, b) => (b.pinnedAt || '').localeCompare(a.pinnedAt || ''))
-                        : []
-                      const restList = pinEnabled ? sessions.filter(s => !s.pinnedAt) : sessions
+                      const { pinned, rest } = splitPinnedSessions(sessions)
+                      const pinnedList = pinEnabled ? pinned : []
+                      const restList = pinEnabled ? rest : sessions
                       const row = (sess: AgentSessionInfo) => (
                         <div key={sess.id}
                           onClick={() => { void loadSession(sess.id) }}
@@ -397,14 +398,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                           </span>
                           <SessionRunMark mark={runStateOf(sess.id)} />
                           {pinEnabled && (
-                            <button
-                              onClick={e => { e.stopPropagation(); void togglePin(sess.id) }}
-                              className={`shrink-0 p-0.5 rounded transition-opacity ${
-                                sess.pinnedAt ? 'text-[var(--warning)]' : 'text-[var(--text-disabled)] opacity-0 group-hover:opacity-100 hover:text-[var(--warning)]'
-                              }`}
-                              title={sess.pinnedAt ? '取消钉住' : '钉住到收藏'}>
-                              <Star size={11} fill={sess.pinnedAt ? 'currentColor' : 'none'} />
-                            </button>
+                            <SessionPinButton pinned={!!sess.pinnedAt} onToggle={() => void togglePin(sess.id)} />
                           )}
                           <button
                             onClick={e => { e.stopPropagation(); void removeSession(sess.id) }}

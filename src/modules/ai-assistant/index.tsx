@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight, Zap } from 'lucide-react'
-import type { AiScopeSuggestion, LlmProviderInfo } from '../../types'
+import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight, Zap, Star } from 'lucide-react'
+import type { AgentSessionInfo, AiScopeSuggestion, LlmProviderInfo } from '../../types'
 import { workspaceGetCurrent, aiAssistantScopeSuggest, llmListProviders, llmReasoningCapable } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
@@ -9,6 +9,8 @@ import { BOOKMARK_COLORS } from '../../lib/workbenchLayout'
 import { MessageList } from '../../components/shared/AssistantPanel/MessageList'
 import { AiAssistantIcon } from '../../components/shared/AiAssistantIcon'
 import { SessionRunMark } from '../../components/shared/AssistantPanel/SessionRunMark'
+import { SessionPinButton } from '../../components/shared/AssistantPanel/SessionPinButton'
+import { splitPinnedSessions } from '../../components/shared/AssistantPanel/sessionSections'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
 import { useAiAssistant, type Effort } from './useAiAssistant'
 import { prunePrefixes } from './scopeSetPure'
@@ -155,6 +157,11 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
     return api.active?.title ?? ''
   }, [api.messages, api.active])
 
+  const { pinned: pinnedSessions, rest: restSessions } = useMemo(
+    () => splitPinnedSessions(api.sessions),
+    [api.sessions],
+  )
+
   /** 真正开跑（作用域已就绪时才会被调用） */
   const execRun = useCallback((run: PendingRun) => {
     if (run.kind === 'send') { setDraft(''); void api.send(run.text); return }
@@ -221,6 +228,53 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
     await api.renameSession(id, t)
   }, [renameDraft, api])
 
+  const renderSessionRow = (s: AgentSessionInfo) => (
+    <li key={s.id} className="group flex items-center gap-1">
+      {renamingId === s.id ? (
+        <input
+          autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          value={renameDraft}
+          maxLength={40}
+          onChange={(e) => setRenameDraft(e.target.value)}
+          onBlur={() => void commitRename(s.id)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); void commitRename(s.id) }
+            else if (e.key === 'Escape') { e.stopPropagation(); setRenamingId(null) }
+          }}
+          className="min-w-0 flex-1 rounded-md border border-[var(--accent)] bg-[var(--input-bg)] px-2 py-1 text-[12.5px] text-[var(--text-primary)] outline-none"
+        />
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => api.setActiveId(s.id)}
+            title={s.title || '未命名会话'}
+            className={`kb-item-in flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12.5px] ${
+              api.activeId === s.id ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+            }`}
+          >
+            <span
+              className="truncate"
+              onDoubleClick={(e) => { e.stopPropagation(); setRenamingId(s.id); setRenameDraft(s.title || '') }}
+            >{s.title || '未命名会话'}</span>
+            <span className="flex-1" />
+            <SessionRunMark mark={api.activeId === s.id ? api.runMark : null} />
+          </button>
+          <SessionPinButton pinned={!!s.pinnedAt} onToggle={() => void api.togglePin(s.id)} />
+        </>
+      )}
+      <button
+        type="button"
+        onClick={() => void api.deleteSession(s.id)}
+        className="hidden h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--danger)] group-hover:flex"
+        title="删除会话"
+      >
+        <Trash2 size={13} />
+      </button>
+    </li>
+  )
+
   const pickModel = useCallback((val: string) => {
     api.setModelId(val)
     modelMenu.close()
@@ -284,50 +338,19 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
             <p className="px-2 py-4 text-center text-[12px] text-[var(--text-muted)]">暂无会话</p>
           ) : (
             <ul className="flex flex-col gap-0.5">
-              {api.sessions.map((s) => (
-                <li key={s.id} className="group flex items-center gap-1">
-                  {renamingId === s.id ? (
-                    /* 改名：双击条目名进内联输入框（Enter 提交 / Esc 取消 / 移开焦点提交），与 AI 教学左栏同款 */
-                    <input
-                      autoFocus
-                      onFocus={(e) => e.currentTarget.select()}
-                      value={renameDraft}
-                      maxLength={40}
-                      onChange={(e) => setRenameDraft(e.target.value)}
-                      onBlur={() => void commitRename(s.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') { e.preventDefault(); void commitRename(s.id) }
-                        else if (e.key === 'Escape') { e.stopPropagation(); setRenamingId(null) }
-                      }}
-                      className="min-w-0 flex-1 rounded-md border border-[var(--accent)] bg-[var(--input-bg)] px-2 py-1 text-[12.5px] text-[var(--text-primary)] outline-none"
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => api.setActiveId(s.id)}
-                      title={s.title || '未命名会话'}
-                      className={`kb-item-in flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12.5px] ${
-                        api.activeId === s.id ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
-                      }`}
-                    >
-                      <span
-                        className="truncate"
-                        onDoubleClick={(e) => { e.stopPropagation(); setRenamingId(s.id); setRenameDraft(s.title || '') }}
-                      >{s.title || '未命名会话'}</span>
-                      <span className="flex-1" />
-                      <SessionRunMark mark={api.activeId === s.id ? api.runMark : null} />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => void api.deleteSession(s.id)}
-                    className="hidden h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] hover:text-[var(--danger)] group-hover:flex"
-                    title="删除会话"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </li>
-              ))}
+              {pinnedSessions.length > 0 && (
+                <>
+                  <li className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5 text-[10.5px] text-[var(--text-muted)]">
+                    <Star size={11} className="shrink-0 text-[var(--warning)]" fill="currentColor" />
+                    收藏
+                    <span className="h-px flex-1 bg-[var(--border-color)]" />
+                  </li>
+                  {pinnedSessions.map(renderSessionRow)}
+                  <li className="mx-1.5 my-1 h-px bg-[var(--border-color)]" aria-hidden="true" />
+                  <li className="px-2 pb-0.5 text-[10.5px] text-[var(--text-muted)]">全部会话</li>
+                </>
+              )}
+              {restSessions.map(renderSessionRow)}
             </ul>
           )}
         </div>

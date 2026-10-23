@@ -43,6 +43,7 @@ export interface AiAssistantApi {
   newSession: () => Promise<AgentSessionInfo | null>
   deleteSession: (id: string) => Promise<void>
   renameSession: (id: string, title: string) => Promise<void>
+  togglePin: (id: string) => Promise<void>
   send: (message: string) => Promise<void>
   stop: () => Promise<void>
   reloadSessions: () => Promise<void>
@@ -91,6 +92,7 @@ export function useAiAssistant(isActive: boolean): AiAssistantApi {
     newSession: () => chat.newSession('新会话'),
     deleteSession: chat.deleteSessionNow,
     renameSession: chat.renameSession,
+    togglePin: chat.togglePin,
     send: async (message: string) => { await chat.send(message) },
     stop: chat.abort,
     reloadSessions: async () => { await chat.refreshSessions() },

@@ -154,6 +154,17 @@ console.log('\n=== G. 三宿主共享控制器 ===')
     'G6d 工作区预览按面板宽度切 compact，并限制不溢出')
   ok(/useAssistantChat/.test(workspace) && /unified:\s*true/.test(workspace), 'G7 工作区改走统一控制器')
   ok(/scopeAll/.test(mod) && /scopeCollapsed/.test(mod), 'G8 工作区作用域卡支持整仓与折叠')
+  const sections = read('src/components/shared/AssistantPanel/sessionSections.ts')
+  const pinButton = read('src/components/shared/AssistantPanel/SessionPinButton.tsx')
+  const pageSidebar = read('src/components/shared/AssistantPanel/AiChatSidebar.tsx')
+  ok(/splitPinnedSessions/.test(sections) && /pinned\.sort/.test(sections), 'G10 pinned sections helper sorts by pin time')
+  ok(/SessionPinButton/.test(pinButton) && /aria-pressed/.test(pinButton), 'G11 pin button is accessible')
+  ok(/SessionPinButton/.test(chat) && /SessionPinButton/.test(pageSidebar) && /SessionPinButton/.test(mod),
+    'G12 all three hosts render the pin button')
+  ok(/togglePin/.test(workspace) && /togglePin:\s*chat\.togglePin/.test(workspace),
+    'G13 workspace wrapper exposes togglePin')
+  ok(/splitPinnedSessions/.test(mod) && /pinnedSessions\.map/.test(mod),
+    'G14 workspace session list has a pinned section')
   ok(/AgentSessionInfo/.test(hook) && /source \?\? 'assistant'/.test(hook), 'G9 会话列表合并旧 assistant 来源')
 }
 
