@@ -4,11 +4,81 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：53
+ * 版本数：54
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.12.11",
+    "date": "2026-10-25",
+    "summary": "本版一句话：修掉一批知识库「点了没反应」——收藏、重命名、分屏、删除与 Ctrl+B 的六个实测缺陷（B-32…B-39）。",
+    "groups": [
+      {
+        "title": "知识库",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "收藏页面修好",
+            "rest": "此前在页面状态未同步时点「收藏」会静默失败（控制台 TypeError、无任何提示）；现在给出行动指引提示，成功路径不变",
+            "sub": []
+          },
+          {
+            "lead": "重命名全面跟上",
+            "rest": "改名后打开着的页签与顶栏标题立即更新；无 frontmatter id 的页面（auto 身份）页签 id 原位迁移，不再变成「点了没反应」的孤儿页签，续写一定落到新路径",
+            "sub": []
+          },
+          {
+            "lead": "创建副本不再复制身份",
+            "rest": "md 副本自动换新 frontmatter id，副本与原文件在搜索 / 图谱 / 收藏 / 双链里各自独立（此前同 id 双文件只有一份能被索引看见）",
+            "sub": []
+          },
+          {
+            "lead": "删除 stale 页签不再报错",
+            "rest": "文件已被移走或删除时，确认删除视为清理完成并连带关页签，不再弹「删除失败，请重试」",
+            "sub": []
+          },
+          {
+            "lead": "分屏按预期让位",
+            "rest": "只开一个页签时分屏，主栏落到空态让你打开其他页面；合并回主栏后自动恢复页面显示",
+            "sub": []
+          },
+          {
+            "lead": "杜绝「旧路径复活空壳文件」",
+            "rest": "页面已被移动/改名后，编辑器不再在旧路径静默新建同名空文件",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "工作台",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "Ctrl+B 修好",
+            "rest": "现在真正收起/展开左侧栏（此前只把栏内内容清空、列宽不动）；命令面板「切换侧边栏」同款修好",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "知识库索引冷启动对账：缓存收养前逐条目核对文件存在性，外部删除过的文件不再以幽灵条目存活（此前会把打开动作引进草稿兜底、连锁触发收藏崩溃）",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "契约脚本 `.AGENT/scripts/file-duplicate/verify-file-duplicate.mjs`（13 项）；命令真源同步摘除已随 fa42b85 删除的日程停靠/小组件两条快捷键",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.11.0",
     "date": "2026-10-23",

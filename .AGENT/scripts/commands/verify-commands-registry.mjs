@@ -49,7 +49,7 @@ check('组锚点都以 shortcuts. 开头', ganchors.every((a) => a.startsWith('s
   ganchors.filter((a) => !a.startsWith('shortcuts.')).join(' '))
 check('组标题非空', COMMAND_GROUPS.every((g) => g.label.trim().length > 0))
 
-check(`命令数 61`, COMMANDS.length === 61, `实际 ${COMMANDS.length}`)
+check(`命令数 59`, COMMANDS.length === 59, `实际 ${COMMANDS.length}`)
 
 const ids = COMMANDS.map((c) => c.id)
 check('命令 id 唯一', new Set(ids).size === ids.length,

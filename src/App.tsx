@@ -113,6 +113,9 @@ export default function App() {
   // 成假标签——settings 在 mount 前往往已 ready，ready 判定拦不住；null 由 !activeTab 守卫天然拦住）。
   const [activeTab, setActiveTab] = useState<TabName | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  // B-38：toggleLeftSidebar 的稳定读数（回调不挂 sidebarOpen 依赖，keydown 监听器不必重挂）
+  const sidebarOpenRef = useRef(sidebarOpen)
+  sidebarOpenRef.current = sidebarOpen
   const [sidebarWidths, setSidebarWidths] = useState<Record<string, number>>({})
   const [importModalOpen, setImportModalOpen] = useState(false)
   const [importBackupPath, setImportBackupPath] = useState<string | null>(null)
@@ -204,6 +207,17 @@ export default function App() {
   const workbench = !!s.uiWorkbench
   // 工作台布局（workbenchLayout 键钝解析）：左栏锁定/树模式供跟随与左栏交互用
   const wbLayout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
+  // B-38（2026-10-25）：「收起/展开左栏」的**唯一动作**。托管形态下列宽真源在
+  // `wbLayout.leftCollapsed`（WorkbenchShell 只看它），`sidebarOpen` 只管模块 portal 内容显隐；
+  // 只切后者的表象 = 内容原地变空、列不收（Ctrl+B 用户实测）。两个状态一起翻，
+  // 托管 / 非托管两种形态都成立；Ctrl+B 与命令面板「sidebar」都走这里。
+  const toggleLeftSidebar = useCallback(() => {
+    const next = !sidebarOpenRef.current
+    setSidebarOpen(next)
+    try {
+      update('workbenchLayout', JSON.stringify({ ...wbLayout, leftCollapsed: !next }))
+    } catch { /* 布局串坏时保底只切 sidebarOpen */ }
+  }, [wbLayout, update])
   // 布局 · 活动栏整条显隐。原名「自定义布局」的标题栏下拉已于 2026-09-17 整条删除，
   // 唯一入口收敛到命令面板「布局：隐藏/显示活动栏」（快捷键 Ctrl+Shift+P）。
   // 与逐模块显隐互不干扰：这里关的是「活动栏这个容器本身」。
@@ -410,7 +424,7 @@ export default function App() {
   // ★ 写成函数而不是 const 对象：这个对象引用了 `fullWindowTab`，它声明在本文件 **1358 行**
   //   （本函数之后）—— 写成 const 对象会在每次渲染时踩 TDZ（铁律 11 记过这类坑）。
   const buildPaletteBindings = (): Record<string, () => void> => ({
-    'sidebar': () => setSidebarOpen(v => !v),
+    'sidebar': () => toggleLeftSidebar(),
     'global-search': () => setLeftSearchMode(true),
     'quick-open': () => openQuickOpen(),
     'ai-side': () => toggleWorkbenchAi(),
@@ -1435,17 +1449,19 @@ export default function App() {
   // Ctrl+B — toggle sidebar（Alt 修饰的组合键不拦：Ctrl+Alt+B 归工作台右栏，见下方处理器）
   // F-9：终端（.xterm）与聊天输入框（[data-wb-keys]）对 Ctrl+B 开豁免——它们里 Ctrl+B 无本地语义，
   // 工作台键优先，不被 isEditingInput 粗闸门吞掉（xterm 侧另配 attachCustomKeyEventHandler 不发 ^B）。
+  // B-38：动作本体在 toggleLeftSidebar（wbLayout 声明处），此处只挂键。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey && !e.altKey && e.key === 'b') {
         if (isEditingInput(e) && !allowsWorkbenchShortcut(e)) return
         e.preventDefault()
-        setSidebarOpen(v => !v)
+        toggleLeftSidebar()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+    // B-38：依赖 toggleLeftSidebar —— 它闭包着 wbLayout，缺了会把首帧布局当基线写回
+  }, [toggleLeftSidebar])
 
   // 工具标签页保活集合（批次4）：**必须声明在下方 `if (!loaded) return null` 早退之前**——
   // hook 若落在早退之后，首挂（loaded=false）与恢复后的两次渲染 hook 数不同 = React #310 整屏崩
@@ -1590,7 +1606,7 @@ export default function App() {
     switch (name) {
       case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} secondaryPageIds={pageSplit?.secondaryPageIds ?? []} secondaryActiveId={pageSplit?.secondaryActiveId ?? null} secondaryBarEl={wbSecondaryPageEl} secondaryContentEl={wbSecondaryContentEl} splitDisabled={pageSplitActive} onSplitPage={splitPageToPane} onSecondaryActivate={setSecondaryActive} onMergeSplit={mergePagePanes} onRemoveSecondary={removePageFromPane} onMovePageToPane={movePageToPane} onBackToWorkbench={() => { setActiveToolTab(null); setActiveTab(null); setRailModule(null) }} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} secondaryPageIds={pageSplit?.secondaryPageIds ?? []} secondaryActiveId={pageSplit?.secondaryActiveId ?? null} secondaryBarEl={wbSecondaryPageEl} secondaryContentEl={wbSecondaryContentEl} splitDisabled={pageSplitActive} onSplitPage={splitPageToPane} onSecondaryActivate={setSecondaryActive} onMergeSplit={mergePagePanes} onRemoveSecondary={removePageFromPane} onMovePageToPane={movePageToPane} onBackToWorkbench={() => { setActiveToolTab(null); setActiveTab(null); setRailModule(null) }} onMigratePageTab={(oldId, newId) => setPageSplit((p) => p ? { ...p, secondaryPageIds: p.secondaryPageIds.map((x) => (x === oldId ? newId : x)), secondaryActiveId: p.secondaryActiveId === oldId ? newId : p.secondaryActiveId } : p)} />
       case 'moments': return <MomentsModule />
       case 'bookshelf': return (
         <BookshelfModule

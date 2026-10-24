@@ -896,6 +896,16 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         return
       }
       try {
+        // B-35（2026-10-25）：draft 伪页 + 从没读到过盘上文件（mtime=0）= 这个 relPath 在打开时就不存在
+        //（kb-open-note 落到 draft 兜底、或文件已被移走）。此时写盘 = 在旧路径凭空新建一个
+        // 同名空壳（真实内容在别处）—— 拒绝写盘并说明，绝不静默新建。
+        // 真草稿（+ 号先建文件再打开）装载时 mtime>0，不进这条；外部删除后的「重建」口径不受影响
+        //（那只发生在装载成功过的页面上）。
+        if (pageRef.current.id.startsWith('draft:') && vaultMtimeRef.current === 0) {
+          showToast({ type: 'warning', message: '原文件已不在仓库中，无法保存', detail: '它可能已被移动、改名或删除；请关掉这个页签，从文件列表重新打开' })
+          setSaving(false)
+          return
+        }
         // 首次保存自动补 id（2026-09-20 拍板）：无 frontmatter id 的 .md 在首次编辑保存时静默转正，
         // 用户零操作；注入后必须回写 vaultPrefixRef（否则下一次保存又把它写掉）。
         // 仅 .md 参与（非 md 是文件卡片，注入 frontmatter 会破坏内容）。
@@ -1386,9 +1396,19 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     if (!page) return
     try {
       const updated = await toggleKnowledgeStar(page.id)
+      // B-32（2026-10-25）：vaultToggleStar 契约里 null = 「该 id 不在索引里」（draft 伪页 id、
+      // 索引重建延迟、同 id 冲突都可能走到）—— 直接解引用是静默崩溃（TypeError 进控制台，
+      // 界面零反馈）。给一句能行动的话，别让用户以为按钮坏了。
+      if (!updated) {
+        showToast({ type: 'warning', message: '页面状态未同步，收藏失败', detail: '请关掉这个页签后重新打开再试；若反复出现，重启应用让知识库索引重建' })
+        return
+      }
       setPage({ ...page, isStarred: updated.isStarred })
       onUpdate()
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      showToast({ type: 'error', message: '收藏失败，请重试' })
+    }
   }
 
   const handleAddTag = async () => {

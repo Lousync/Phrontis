@@ -810,6 +810,18 @@ function clearIndexMemo(): void {
   indexMemoVault = null
 }
 
+/** B-37：缓存条目逐个 stat —— 任一 path 在盘上消失即视为缓存过期（幽灵条目）。
+ *  只做「已删」方向：新文件方向由既有机制覆盖（任一应用内写入即失效重建；文件树本就不依赖索引），
+ *  且精确集合比对会被「重复 id 跳过」这类合法差异打成每次冷启动都重建。 */
+function cachePathsExist(cached: KnowledgeIndex, rootPath: string | null): boolean {
+  if (!rootPath) return true
+  for (const p of cached.pages) {
+    if (!p.path) continue
+    if (!existsSync(join(rootPath, p.path))) return false
+  }
+  return true
+}
+
 /** 读取缓存；schema 不匹配或 .ignore 指纹变化（外部增删改规则，无 watcher 也感知）时自动重建并落盘。 */
 export function getKnowledgeIndex(forceRebuild = false): KnowledgeIndex {
   const vaultKey = getCurrentVault()?.rootPath ?? null
@@ -826,7 +838,12 @@ export function getKnowledgeIndex(forceRebuild = false): KnowledgeIndex {
       cached.source === 'vault' &&
       Array.isArray(cached.pages) &&
       cached.byId &&
-      sameIgnoreState(cached.ignoreState, getVaultIgnoreState())
+      sameIgnoreState(cached.ignoreState, getVaultIgnoreState()) &&
+      // B-37（2026-10-25）：收养前做一次便宜的存在性对账。缓存指纹（schemaVersion + ignoreState）
+      // 不含「文件集合」，应用关闭期间被外部删掉/改名的文件会以幽灵条目活在缓存里 ——
+      // 打开落 draft 兜底（身份降级）→ 收藏崩（B-32）。代价 = 每条目一次 statSync，
+      // 只在冷启动收养这一条路付；任一 path 消失即 forceRebuild（落到下方重建分支）。
+      cachePathsExist(cached, vaultKey)
     ) {
       indexMemo = cached
       indexMemoVault = vaultKey

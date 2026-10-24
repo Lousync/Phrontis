@@ -80,7 +80,7 @@ interface PageInfo {
   fileType: string
 }
 
-export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, secondaryPageIds = [], secondaryActiveId = null, secondaryBarEl = null, secondaryContentEl = null, splitDisabled = false, onSplitPage, onSecondaryActivate, onMergeSplit, onRemoveSecondary, onMovePageToPane, onBackToWorkbench }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; secondaryPageIds?: string[]; secondaryActiveId?: string | null; secondaryBarEl?: HTMLElement | null; secondaryContentEl?: HTMLElement | null; splitDisabled?: boolean; onSplitPage?: (pageId: string, orientation: 'row' | 'column') => void; onSecondaryActivate?: (pageId: string) => void; onMergeSplit?: () => void; onRemoveSecondary?: (pageId: string) => void; onMovePageToPane?: (pageId: string) => void; onBackToWorkbench?: () => void }) {
+export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, secondaryPageIds = [], secondaryActiveId = null, secondaryBarEl = null, secondaryContentEl = null, splitDisabled = false, onSplitPage, onSecondaryActivate, onMergeSplit, onRemoveSecondary, onMovePageToPane, onBackToWorkbench, onMigratePageTab }: { sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; secondaryPageIds?: string[]; secondaryActiveId?: string | null; secondaryBarEl?: HTMLElement | null; secondaryContentEl?: HTMLElement | null; splitDisabled?: boolean; onSplitPage?: (pageId: string, orientation: 'row' | 'column') => void; onSecondaryActivate?: (pageId: string) => void; onMergeSplit?: () => void; onRemoveSecondary?: (pageId: string) => void; onMovePageToPane?: (pageId: string) => void; onBackToWorkbench?: () => void; onMigratePageTab?: (oldId: string, newId: string) => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
   const [chapterPages, setChapterPages] = useState<KnowledgePage[]>([])
@@ -249,9 +249,11 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
 
   const openPageIdsRef = useRef(openPageIds)
   const activePageIdRef = useRef(activePageId)
+  const allPagesRef = useRef(allPages)
   const selectedCategoryIdRef = useRef(selectedCategoryId)
   const selectedChapterIdRef = useRef(selectedChapterId)
   useEffect(() => { openPageIdsRef.current = openPageIds }, [openPageIds])
+  useEffect(() => { allPagesRef.current = allPages }, [allPages])
   useEffect(() => { activePageIdRef.current = activePageId }, [activePageId])
   useEffect(() => {
     setLiveContent('')  // reset live outline when switching pages
@@ -261,12 +263,23 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
   }, [activePageId])
   useEffect(() => { selectedCategoryIdRef.current = selectedCategoryId }, [selectedCategoryId])
-  // 页面级分屏：被挪到副栏的页面若正是主栏激活页 → 主栏让位到第一个「留在主栏」的页面
+  // 页面级分屏：被挪到副栏的页面若正是主栏激活页 → 主栏让位到第一个「留在主栏」的页面；
+  // 没有留下的页签 → 主栏空态（B-39）。合并回主栏（副栏清空）时主栏若还停在拆分让位的空态 → 恢复第一个页签
+  //（用 ref 记「确实经历过分屏」——「全部关闭保留脏页签」那种本来就该空态的主栏，不能被误拉起）。
+  const hadSecondaryRef = useRef(false)
   useEffect(() => {
-    if (!secondaryPageIds.length) return
-    if (activePageId && secondaryPageIds.includes(activePageId)) {
-      const next = openPageIds.find((id) => !secondaryPageIds.includes(id))
-      if (next) setActivePageId(next)
+    if (secondaryPageIds.length) {
+      hadSecondaryRef.current = true
+      if (activePageId && secondaryPageIds.includes(activePageId)) {
+        const next = openPageIds.find((id) => !secondaryPageIds.includes(id))
+        if (next) setActivePageId(next)
+        else setActivePageId(null) // B-39：没有留下的页签 → 主栏空态（被拆页独占副栏，主栏别再渲染同一篇）
+      }
+      return
+    }
+    if (hadSecondaryRef.current) {
+      hadSecondaryRef.current = false
+      if (!activePageId && openPageIds.length) setActivePageId(openPageIds[0])
     }
   }, [secondaryPageIds, activePageId, openPageIds])
   useEffect(() => { selectedChapterIdRef.current = selectedChapterId }, [selectedChapterId])
@@ -1213,7 +1226,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       if (catId) await deleteKnowledgeCategory(catId)
       else {
         const res = await workspaceTrash(root, node.relPath)
-        if (!res.ok) throw new Error(res.error || '删除失败')
+        // B-36（2026-10-25）：文件已不存在 = 目标态已达成（外部删过 / stale 页签）——
+        // 按成功走连带关页签，别再 toast「删除失败，请重试」把用户困在删不掉也关不掉的页签上
+        if (!res.ok && !/不存在/.test(res.error || '')) throw new Error(res.error || '删除失败')
       }
       // 删除连带关闭该路径下的页签（关内容 ≠ 关标签：现在清零也不再自动关模块标签）
       closeTabsUnder(node.relPath)
@@ -1302,12 +1317,44 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       if (!res.ok) { showToast({ type: 'error', message: res.error || '重命名失败' }); return }
       recordFileOp({ kind: 'move', rootId: root, from: relPath, to: nextRel, name })
       void refreshTreeDir(dir)
-      void refreshAllPages()
+      // B-33（2026-10-25）：打开着的页签必须跟上改名 —— 此前只刷树与 allPages，
+      // 页签标题（openPageInfos）与页签 id（auto:/draft: 身份绑着旧 relPath）都没人管：
+      // 表象 = 页签/顶栏停在旧名；auto 页签变孤儿（旧 id 在索引里已 404），续写还会落回旧路径（B-35）。
+      const pagesFresh = await getKnowledgePages().catch(() => null as KnowledgePage[] | null)
+      const hit = pagesFresh?.find(p => p.path === nextRel) ?? null
+      const legacyOld = [`auto:${relPath}`, `draft:${relPath}`].find(x => openPageIdsRef.current.includes(x))
+      if (legacyOld && hit) {
+        // auto/草稿身份页：页签 id **原位迁移**（不走关-开，保住页签次序与激活落点）。
+        // ★ PageEditor 会因 pageId 变化重载、脏态被覆盖 —— 最多丢一个自动保存窗口的内容，
+        //   换取「续写一定落在新路径」（旧行为是把文件在旧路径复活出来，B-35）。
+        const newId = hit.id
+        setOpenPageIds(prev => prev.map(id => (id === legacyOld ? newId : id)))
+        if (activePageIdRef.current === legacyOld) setActivePageId(newId)
+        setOpenPageInfos(prev => {
+          const n = { ...prev }
+          const info = n[legacyOld]
+          delete n[legacyOld]
+          if (info) n[newId] = { ...info, title: hit.title }
+          return n
+        })
+        onMigratePageTab?.(legacyOld, newId) // 分屏副栏的页签 id 在 App 收口（pageSplit）
+      }
+      if (hit) {
+        // 标题对齐（含稳定 id 页）：文件名派生题名的页面改名后索引标题已变，页签别停在旧值
+        const ids = legacyOld ? [hit.id] : allPagesRef.current.filter(p => p.path === relPath).map(p => p.id)
+        setOpenPageInfos(prev => {
+          const n = { ...prev }
+          for (const id of ids) if (n[id]) n[id] = { ...n[id], title: hit.title }
+          return n
+        })
+      }
+      if (pagesFresh) setAllPages(pagesFresh)
+      else void refreshAllPages()
       showToast({ type: 'info', message: `已重命名为「${name}」` })
     } catch (e) {
       showToast({ type: 'error', message: e instanceof Error ? e.message : '重命名失败' })
     }
-  }, [categories, ensureVaultRoot, refreshTreeDir, refreshAllPages, refreshCategories, updateKnowledgeCategory])
+  }, [categories, ensureVaultRoot, refreshTreeDir, refreshAllPages, refreshCategories, updateKnowledgeCategory, onMigratePageTab])
 
 
   const handleBackToList = useCallback(() => {

@@ -1719,6 +1719,127 @@ cbz 排除的**执行语义原样保留**（派生值对 cbz 仍为 `null`），
 `.AGENT/scripts/editor/verify-paste-external.mjs` 扩到 **79 PASS / 0 FAIL**（新增 URI 列表 / FileNameW 纯函数用例与接线断言）；
 `npx tsc --noEmit -p tsconfig.node.json` / `tsconfig.web.json` 均 0 错；`npm run build` 通过。
 
+---
+
+> **以下 B-32…B-37（2026-10-25）来自「笔记页右上 ⋮ 菜单逐项实机探查」**：用户反馈菜单里「左右分屏」「重命名」等多个按钮有问题、其余来不及测。
+> 探查方式：隔离实例探针（`tmp/probe-app` junction + `tmp/vault-fixture` 种子仓库，CDP 真鼠标/真键盘，不碰用户仓库、不改代码），
+> 脚本 `tmp/probe-more-menu.mjs`（v1）/ `tmp/probe-more-menu-v2.mjs`（v2）、截图 `tmp/probe-shots/mm2-*.png`、原始结果 `tmp/probe-more-menu-v2-result.json`。
+> 复跑方法：`node .AGENT/scripts/workbench-shell/probes/seed-probe-vault.mjs --ud "knowbase (dev probe-app)"` →
+> `node .AGENT/scripts/workbench-shell/probes/run-probe-app.mjs tmp/probe-more-menu-v2.mjs`（需先 `npm install` 补齐 dbus-next，见 B-30 那批 Linux 依赖）。
+> ★ 探针教训（写在这里防止下一轮再踩）：① 隔离 userData 首启必弹「更新说明」全屏标签（启动 +2s），不关掉后面全是假失败；
+> ② 不能拿 Esc 收菜单（全局 Esc 会顺带关页/页签）；③ v2 里 **上下分屏（column）实机通过**，左右分屏（row）同一入口同一代码路径
+> 仅因探针时序未取到证据，静态链路（`MoreSplitGroup` → `onSplitPage('row')` → `splitPageToPane`）完整，建议手测一次即可。
+
+**修复记录（2026-10-25，fix/v3.12.11 分支，全八条同批落码；实机验收 = 隔离探针 `tmp/probe-more-menu-v2.mjs` 重跑 50/56（余 6 条为探针断言语义差，见 B-33 口径修正）+ 定向探针 `tmp/probe-ctrl-b.mjs`）**：
+- **B-32** `PageEditor.handleToggleStar` 判空 + warning toast + 失败 toast。探针：收藏成功、索引 `isStarred=true`、无 TypeError。
+- **B-33** `handleTreeRename` 成功后：拉一次最新索引 → auto/draft 身份页签 id **原位迁移**（openPageIds / activePageId / openPageInfos，新 prop `onMigratePageTab` 让 App 同步迁 pageSplit 副栏）；标题与索引对齐。探针：auto 页改名后页签/顶栏即时跟上。
+  ★ 口径修正：页签显示的是**页面题名**（frontmatter title 优先）——frontmatter 带 title 的页改名文件后题名本就不变，探针原断言「页签必须变文件名」按语义改判；文件名派生题名的页（auto）确认跟随。
+- **B-34** `fileDuplicate.duplicateWorkspaceFile` 复制成功后对 .md 副本重写单行 `id:`（新 UUID；纯函数 `rewriteFrontmatterId`，契约 `.AGENT/scripts/file-duplicate/verify-file-duplicate.mjs` 13 项全绿）。探针：索引里副本不再共用原 id。
+- **B-35** `doSave` vault 分支守卫：draft 伪页且 mtime=0（打开时文件就不存在）→ 拒写 + 指引 toast；改名场景由 B-33 的页签迁移根治（编辑器随新 id 重载到新路径）。
+- **B-36** `handleTreeDelete` 对「文件不存在」按已删除处理（连带关页签），不再 toast 失败。
+- **B-37** `getKnowledgeIndex` 收养磁盘缓存前逐条目 statSync（`cachePathsExist`）——幽灵条目方向落码；**新文件方向维持现状**（任一应用内写入即失效重建、文件树不依赖索引），精确集合比对会被「重复 id 跳过」的合法差异打成每次冷启动都重建，故不做。
+- **B-38** App 层收口 `toggleLeftSidebar`（sidebarOpen 与 `wbLayout.leftCollapsed` 同翻；命令真源「sidebar」同走）；顺带同步真源锚点行号、摘除随 fa42b85 已删的 sys-dock / sys-widget 两条（help 键位表 marker 同步）。定向探针：Ctrl+B 收起（leftPanel 卸载）→ 再按恢复。
+- **B-39** 让位 effect 补 else（无留下页签 → 主栏空态 `activePageId=null`）+ **合并回主栏自动恢复**（`hadSecondaryRef` 记「经历过分屏」才拉起，不误伤「全部关闭留脏页签」的既有空态）。探针：单页签分屏主栏空态、合并回主栏后页面回来、上下分屏（此前被合并空态卡死的整段）转绿。
+
+## [x] B-32 ⋮「收藏页面」点击静默失败，控制台抛 `TypeError: Cannot read properties of null (reading 'isStarred')`（2026-10-25，P1）
+
+**现象**：笔记页 ⋮ →「收藏页面」点了没反应（无 toast、星标不写、菜单不翻转「取消收藏」），DevTools 里多一条 TypeError。
+隔离探针在**干净单页**上两次复现（v2 S1、S5），v1 的 G1 也复现过——与副本是否存在无关。
+**定位**：`src/modules/knowledge/components/PageEditor.tsx:1385-1392`（`handleToggleStar`：`const updated = await toggleKnowledgeStar(page.id); setPage({ ...page, isStarred: updated.isStarred })`）；
+契约源 `electron/lib/kbStore/knowledgeVaultRepo.ts:373-388`（`vaultToggleStar`：入口 `if (!entry) return null`，收尾 `return fresh ? entryToPage(...) : null` —— **null 是写进契约的正常返回值**）。
+**根因**：渲染层把「页面 id 不在索引里」的契约返回值（null）当成必然非空直接解引用。探针实测的触发链：
+索引磁盘缓存不校验文件存在性（见 B-37）→ 页面以 **draft 伪页**打开（`page.id = 'draft:<relPath>'`，索引里永远查不到）→ 收藏必崩。
+同型触发还有：索引重建延迟窗口（新建/转正后立即点）、同 id 冲突（B-34 的连带）。
+**修复方向**：① `updated` 判空：null 时给 warning toast（「当前页面状态未同步，请关闭后重新打开」）并 return，绝不解引用；
+② 顺手审一遍 PageEditor 里消费 IPC 返回值的其他 `updated.xxx` 同型点；③ 可选：`vaultToggleStar` 对 missing entry 改为 throw（带明确 message），把「静默 null」变成「有话说的失败」。
+**验证**：探针 v2 S1 的 `无 isStarred 崩溃` 断言转绿；手测：打开一篇 md 点收藏 → 星标写入 frontmatter（`starred: true`）+ 菜单翻转。
+
+## [x] B-33 ⋮「重命名」成功后，已打开页签与顶栏标题**不跟随更新**；auto 身份页的页签直接变孤儿（2026-10-25，P1；用户报的「重命名有问题」与此吻合）
+
+**现象**：对**当前打开着**的页面做重命名（⋮ 或文件树内联，同一通道）：磁盘改名成功、toast「已重命名为…」、文件树与索引都更新了，
+但 ① 页签文案保持旧名 ② 顶栏标题保持旧名。**auto 身份页（无 frontmatter id）更重一级**：页签 id 是 `auto:<relPath>`，改名后旧 id 在索引里消失，
+页签成为孤儿——点击仍显示内存里的旧内容（`title="笔记一"`、`monaco=0`），看起来「没反应」；此时任何保存会写回旧路径（连锁 B-35）。
+隔离探针实锤：v2 S3（带 id 页：`磁盘改名成功 OK / 页签标题更新 FAIL / 顶栏标题更新 FAIL`）、S4（auto 页：`磁盘改名成功 OK / 页签标题跟着改 FAIL`，索引终态 `auto:学习笔记/笔记一改名测试.md`，旧 id 蒸发）。
+**定位**：`src/modules/knowledge/index.tsx:1275-1310`（`handleTreeRename`：只做 `refreshTreeDir` + `refreshAllPages`，**从不更新 `openPageInfos`**——页签标题的真源在 `openPageInfos`，
+顶栏标题的真源在 PageEditor 的 `title` state，两条都没人写）；页签 id 与 relPath 的绑定关系见该文件 `openByRelPath` / draft 兜底（`:1010` 一带）。
+**根因**：v3.5.0 批 1b 把 ⋮ 重命名接进 `handleTreeRename` 时只考虑了「盘上与树」，没考虑「打开着的页签与编辑器」。
+**修复方向**：① 带稳定 id 的页：改名成功后同步 `setOpenPageInfos(prev => ({ ...prev, [pageId]: { ...info, title: 新主名 } }))`（模块里已有同型 `handleTitleChange` 可参照）；
+② auto/草稿身份页：页签 id 必须跟着迁——把 `openPageIds` / `activePageId` / `secondaryPageIds`（分屏副栏！）/ `openPageInfos` 里的旧 id 原位替换为新 id，等价于「原位改键」，别走关-开（会丢 dirty 态与页签次序）；
+③ PageEditor 侧经既有 `kb-reload-detail` 重读后 `title`/`page.path` 应该自愈，需在修复时一并确认（探针显示顶栏 title 也没跟上，说明重读分支对 path 变化可能有早退）。
+**验证**：探针 v2 S3/S4 的「页签标题更新」「顶栏标题更新」断言转绿；手测：打开页 → ⋮ 重命名 → 页签、顶栏、文件树三处同名；auto 页改完名还能正常编辑保存到新路径。
+
+## [x] B-34 ⋮「创建副本」字节级复制 frontmatter → 同 id 双文件，索引只收其一（2026-10-25，P1）
+
+**现象**：对带 frontmatter `id` 的 md 创建副本，副本与原文件**共用同一个 id**；索引重建时「后者已跳过」（warning），两文件在搜索 / 图谱 / 收藏 / 双链 / `getKnowledgePageById` 里**永远只指得中其中一个**。
+v1 实机踩中的连带事故：副本在场时，编辑器里「打开主文件」按 id 解析可能落到副本；紧接着的「删除页面」按 id 解析出的 path **删掉的是另一个文件**（用户视角：删 A 删掉了 B）。
+探针证据：v1 fixture 终态（主文件被删、副本仍在盘）；v2 S5 `索引里同 id 条目数 = 1` + 索引 dump 中 `probe-note-surface :: 写作面探针改名测试.md`（唯一条目，路径还随改名漂移）。
+**定位**：`src/lib/fileDuplicate.ts:12-21`（只算目标名，正文原样走 `workspaceCopyFile` 字节复制）+ `electron/lib/kbStore/knowledgeIndex.ts:660-663`（`if (byId[id]) { warnings.push('页面 id 重复，后者已跳过…'); continue }`）。
+**根因**：副本语义「完整克隆」与身份不变量「id 全仓唯一」冲突；复制路径从未重写 id。
+**修复方向**：`duplicateWorkspaceFile` 在复制 `.md` 成功后对新文件做一次**外科手术**重写 frontmatter `id`（新 UUID；无 id / auto 兜底的文件不用动——它们的身份本来就是路径）。
+写回方式照 `fmProps.ts` 的纪律「绝不重建整块前缀」，只换 id 一行的值；主进程侧做更稳（ws:copy 之后顺手），避免渲染层再发一次写。
+**验证**：副本创建后两文件 id 不同（探针 S5 的 `同 id 条目数` 断言应改为 `=== 2` 且 id 互异）；对副本收藏 / 删除 / 图谱互不串扰。
+
+## [x] B-35 编辑器 `page.path` 滞后于改名/移动：任何一次保存会在**旧路径复活出一个空正文幻影文件**（2026-10-25，P2）
+
+**现象**：页面打开着 → 在文件树/另一处把该文件改名或移走 → 编辑器（页签与 `page.path`）还停在旧 relPath → 此时**自动保存 / Ctrl+S / ⋮「笔记属性…」保存**任一触发，
+`doSave` 按旧路径把内容写回——文件已不在 → 在旧路径**新建**一个同标题、frontmatter 齐全（新 UUID）、**正文为空**的文件。原内容还在新路径，但用户仓库里凭空多出一个同名空壳，且继续编辑旧页签会把内容**劈成两份**。
+隔离探针实锤（v2 S8）：对旧路径（文件已不在）做「保存属性」→ 盘上出现 `写作面探针.md`，内容仅 `id/title/updated` 三行、零正文；索引终态收录 `a7894715… :: 写作面探针.md`。
+附带一个同根小脸：draft 伪页上打开「笔记属性…」显示**零条属性**（`vaultPrefixRef` 在 draft 流程恒为空串，不读盘上真实前缀）。
+**定位**：`src/modules/knowledge/components/PageEditor.tsx`（`doSave` 的 vault 分支按 `pageRef.current.path` 落盘；`vaultMtimeRef` 冲突检测只防「mtime 变了」，防不了「文件没了」）+ `saveProps`（`:1354-1360`）。
+**根因**：写回前不校验「上次装载的 path 是否仍然存在 / 是否已被改名」；`ws:writeFile` 对不存在的路径按「新建」处理（对 draft 首存是特性，对 stale path 是事故）。
+**修复方向**：与 B-33 的 ③ 同根合修——dataChanged 重读时发现 `page.path` 与装载值不一致 → 编辑器原位迁移（更新 `pageRef.path`、`modelPath`、`vaultPrefixRef`、`vaultMtimeRef`）；
+再加一道底线：`doSave` 落盘前 `existsSync`（经 IPC 查）为 false 且**不是** draft 首存 → 停止写盘 + toast 引导（「文件已被移动或删除」），绝不静默新建。
+**验证**：探针复现路径（改名后不重开页面直接保存属性）→ 旧路径不再出现新文件、内容落在新路径；`草稿直入编辑` 的首存补 id 行为不回归（探针 fixture 的草稿.md 流程）。
+
+## [x] B-36 ⋮「删除页面」对 stale 路径：危险确认走完却 toast「删除失败，请重试」，页签残留（2026-10-25，P2）
+
+**现象**：页签指向的文件已不存在（B-33/35 的连锁态，或外部已删）→ ⋮ 删除页面 → 危险确认点「删除」→ toast「删除失败，请重试」，页签留在原地。用户被困在「删不掉又关不掉」（只能手动再关一次页签）。
+隔离探针实锤（v2 S7）：`[Knowledge] delete failed: Error: 文件不存在` + `toast=["删除失败，请重试"]` + 页签未关。
+**定位**：`src/modules/knowledge/index.tsx`（`handleTreeDelete` → `workspaceTrash` 失败 throw → catch 统一 toast）；主进程语义 `electron/lib/workspaceManager.ts:772-781`（`trashWorkspacePath` 第一句 `if (!existsSync(abs)) throw`）。
+**根因**：「文件已不在」对删除动作而言**目标态已达成**，却按一般失败处理。
+**修复方向**：主进程或渲染层把 ENOENT 从失败里单列——视为已删除：正常走 `closeTabsUnder` + 树刷新，toast 说「文件已不在仓库中，已清掉相关页签」。
+**验证**：探针 S7 断言改断「页签被关 + 无失败 toast」；正常删除路径（文件在）不回归。
+
+## [x] B-37 索引磁盘缓存不校验文件存在性：冷启动加载 stale 缓存（2026-10-25，P3；探针环境实锤，真实用户路径待核）
+
+**现象**：应用关闭期间在外部增删改仓库文件（资源管理器改名/删除/恢复回收站）→ 冷启动 → 索引仍是上次退出时的缓存：新文件不可见、已删文件成幽灵条目、
+打开一个 id 不在索引里的 md 会被**draft 伪页兜底**接住（表象正常，实为降级身份，并连锁引爆 B-32）。
+**定位**：`electron/lib/kbStore/knowledgeIndex.ts:814-841`（`getKnowledgeIndex` 缓存指纹 = `schemaVersion` + `source` + `ignoreState`，**不含文件集合**；`:796` 一带注释自述「不读内容也不校验文件是否还在」——2026-09-22 种子脚本头注已把「幽灵页」记为已知行为）。
+**根因**：缓存新鲜度判据里没有「盘上文件集合」这个维度；应用存活期靠写路径主动 invalidate 掩盖，冷启动没人兜底。
+**修复方向**：冷启动（或首次 `getKnowledgeIndex`）做一次便宜的**存在性对账**：对缓存里每个 `path` `existsSync` 一遍 + 扫一遍顶层目录数（或干脆比较 `scanMarkdownFiles` 的 rel 集合与缓存 rel 集合的 size），
+对不上即 forceRebuild——只在指纹其余部分命中时才需要，正常启动多付一次 stat 扫描（千文件级 <50ms）。
+**验证**：外部删一个 md → 冷启动 → 该条目不在 `getKnowledgePages`；外部加一个 md → 冷启动 → 可见。探针 v2 的「打开目标页不再落 draft 伪页」是连带验收点。
+
+---
+
+**本轮（2026-10-25 探查）未取得实机证据、不建议盲修的项**（静态链路已读、多数为探针时序或级联失败，留待 B-32…B-37 修完顺手复测）：
+左右分屏（row；column 实测通过、同一入口）· 在文件列表中显示（对真实存在文件的树行滚动）· 复制路径 ▸ 两档 · 文件格式 ▸ 子菜单 ·
+查看源码 / 看渲染 · 在标签页中显示反向链接 · 沉浸阅读 · 导出为 PDF · 在系统中打开 / 在文件夹中显示 · 笔记属性「添加一行」按钮（探针没匹配到该按钮文案，标签待人工确认）。
+
+## [x] B-38 Ctrl+B 不再收起左栏：侧栏内容原地变空（顶层按钮还在），列宽不动（2026-10-25，P1；用户实机反馈）
+
+**现象**：工作台形态下按 Ctrl+B，左栏**内容**消失（portal 槽变空），但左栏列本身不收——书签图标条与 🏠 / 🔒 等 WorkbenchLeftPanel 顶层按钮还在，栏宽不变；再按一次内容又回来。原设计语义是「整列收起 / 弹出」。
+**定位**：
+- 快捷键本身没改：`src/App.tsx:1494-1504`（Ctrl+B → `setSidebarOpen(v => !v)`，注释与豁免逻辑都是旧的）。
+- 托管形态下左栏列的收起真源早就搬了家：`src/components/workbench/WorkbenchShell.tsx:88`（`visible={!sidesGone && !layout.leftCollapsed}`）——列收不收**只看** `workbenchLayout.leftCollapsed`，完全不消费 App 的 `sidebarOpen`。
+- 内容消失的那一环：`src/modules/knowledge/index.tsx:2006`（`const panelsVisible = sidebarOpen`）+ `:2555`（托管 portal 的渲染条件含 `panelsVisible`，false → 渲染 `null`）。blog / schedule / devtools 三模块同样消费 `sidebarOpen` prop，同病。
+**根因**：v3.4.0 批次 3 把左栏从「各模块自持 ResizablePanel」改成「WorkbenchShell 托管 + 模块 portal」（`wbModSlotEl` 槽），列收起的真源随之从 `sidebarOpen` 换成持久化的 `wbLayout.leftCollapsed`；Ctrl+B 的 `setSidebarOpen` 没有跟着改靶子。于是快捷键从「切列宽」退化成「切 portal 内容显隐」——非托管回落形态（`sidebarHosted=false`，如窗口直开模块）里旧语义仍然成立，所以部分场景下它「看起来还是好的」。
+**同病相连（修时一并收口）**：模块的 `onSnapCloseSidebar` / `onSnapOpenSidebar` 回调（App 侧也只 `setSidebarOpen(false/true)`）在托管形态下同样切不动列；反过来 WorkbenchShell 的 6px 手柄 / 悬停开合走 `patch({leftCollapsed})` 是对的，但它不回写 `sidebarOpen`（无害，重开列时内容本来就在 portal 里）。
+**修复方向**：把「收起/展开左栏」收口成**一个动作函数**，内部按形态分派：托管（工作台）态 → `update('workbenchLayout', …leftCollapsed 翻转…)`；非托管回落态 → `setSidebarOpen` 翻转。Ctrl+B 与两个 snap 回调都改走它。要顺带定义的口径：① `leftLocked`（锁定）态下 Ctrl+B 收不收（建议：收，与手柄行为一致；手柄不看 locked）；② 树模式（`leftMode==='tree'`）下是否同样生效；③ 四个托管模块不必逐个改——列收起后 portal 内容自然不可见，`panelsVisible` 保持 true 反而让重开时内容即回。
+**验证**：knowledge / blog / schedule / devtools 四个模块态下 Ctrl+B → 左栏列真收起（只剩 6px 边条手柄），再按弹回且内容完整；树模式与锁定态按拍板口径行为一致；整窗模块（设置/看板等，suppressSides）下 Ctrl+B 无残留手柄（`sidesGone` 分支不被这次改动破坏）。
+
+## [x] B-39 分屏后左右两栏渲染**同一个页面**：仅有一个页签时，主栏没有让位落点（2026-10-25，P1；用户实机反馈 + 截图）
+
+**现象**：只开了一个页签（如「接口技术——第一章」），对它分屏（页签右键「向右拆分」或 ⋮「左右分屏」）→ 副栏出现该页，**主栏也还是这一页**——左右两栏同屏渲染同一篇。用户预期（也是产品语义）：被拆的页面挪去副栏后，主栏应落到**空态**，让用户从文件树/其他入口打开别的页签。
+**定位**：
+- 让位逻辑：`src/modules/knowledge/index.tsx:264-271` —— `const next = openPageIds.find((id) => !secondaryPageIds.includes(id)); if (next) setActivePageId(next)`。**只有找到「留在主栏的其他页签」才让位；一个都找不到时什么都不做**，`activePageId` 继续指着已被挪进副栏的那一页 → 主栏照常渲染它。
+- 连带的视觉不一致：主栏页签条对副栏页是过滤掉的（`:2197` `items={openPageIds.filter((pid) => !secondaryPageIds.includes(pid))}`）→ **主栏页签条空着、主栏内容区却渲染着一篇没有页签的笔记**（用户截图正是这个状态：主栏顶上没有页签，正文却全文显示）。
+- 入口与守卫本身没问题：`src/App.tsx:517-519`（`splitPageToPane` 只把页面挪进副栏）；`splitDisabled=pageSplitActive` 保证分屏态下不能重复拆——所以双栏同页只发生在**首次拆分且仅有一个页签**时。
+**根因**：`:269` 的 `if (next)` 没写 else。该 effect 的语义是「被挪走的页面不能继续当主栏激活页」，但落点只考虑了「有其他页签」一种情形；「没有任何其他页签」时正确落点是主栏空态（`activePageId=null`，模块已有的空态分支 `:2622-2642`，带「回工作台」出口），而不是维持指向副栏页面。
+**附带风险**：双栏同页 = 两个 PageEditor 实例挂同一个 pageId —— 自动保存广播互刷（各实例有 `selfSavedAtRef` 自写守卫，但两实例同写一处盘上文件仍是多余且易竞态的形态），主栏空态化之后这个状态自然消失。
+**修复方向**：`:267-270` 补 else——`if (next) setActivePageId(next) else setActivePageId(null)`（仅当 `activePageId` 属于 `secondaryPageIds` 时）。注意三条联动：① 冷启动恢复持久化 `pageSplit` 走的也是这个 effect，修一处即全覆盖；② 副栏被关空自动合并（`removePageFromPane`）后 `secondaryPageIds` 清空，effect 早退，不会误伤正常单栏；③ 主栏空态目前只有「回工作台」一个出口，可顺手评估要不要在该空态加一句「从左侧文件树打开文件」式引导（可选，不影响本修复）。
+**验证**：单页签分屏 → 左栏空态、右栏为被拆页；主栏页签条为空但**不再**显示无页签正文；多页签分屏 → 主栏让位到留下的页签（现状行为不回归）；关掉副栏最后一页 → 自动合并回单栏。
+
 ```
 ## B-n <一句话现象>（YYYY-MM-DD，P0/P1/P2/P3）
 
