@@ -14,7 +14,7 @@
 | TD2 | **范围 = 卡片级**：只译 feed 卡片上展示的文本——标题 + summary（`FeedCard`，`src/modules/intel/index.tsx:340-343`）。**文章页/正文一律不译**（用户明确：进浏览器用浏览器翻译）。 |
 | TD3 | **呈现 = 双语同屏**：原文在上、简体中文灰字副行在下（标题译副行 + 摘要译副行），不提供"只显中文"切换。 |
 | TD4 | **缓存复用 `translationRepo`**（`.knowbase/modules/translation/cache.json`）：新 `mode: 'plain'`，key = `plain:<sha1(text)>` 内容寻址——同文本跨条目、跨刷新、跨会话零 token 复用。不新建 intel 专属缓存文件。 |
-| TD5 | **触发 = 预热 + 可见即译**：刷新完成后 idle 预热 top-24 英文条目的标题（一批）；卡片滚入视口时译该卡（标题 + summary）。全文预热不做。 |
+| TD5 | **触发 = 预热 + 悬停即译**（2026-10-25 用户改拍：原「可见即译」→「鼠标移上卡片才译」，更省也更贴合阅读动线）：刷新完成后 idle 预热 top-24 英文条目的标题（一批）；指针移上未译卡片时译该卡（标题 + summary），400ms 防抖合并快速划过。全文预热不做。 |
 | TD6 | **设置只加两项**：`intel.translateOn`（总开关）、`intel.translateBudget`（会话条数上限）。**不加模型选择项**——模型解析复用 B4 内联建议的「默认链命中思考型 → 降级到同供应商第一个非思考模型」判据（`resolveInlineSuggestFallback`，`llmService.ts:1342`；翻译与"续写一句"同一痛点：不需要思考链）。 |
 
 ## 1. 总原则：不卡的三条硬约束
@@ -83,9 +83,9 @@ export function isEnglishText(s: string): boolean {
 
 `intelStore.intelRefresh()` 成功收尾后 fire-and-forget：按 score 取 top-24 英文条目的**标题**（一批）→ 翻译 → upsert → 广播。`intel.translateOn` 为 false 或预算耗尽则跳过。效果：刷新完回到列表，首屏译题基本已就位。
 
-### 4.2 可见即译（渲染层驱动）
+### 4.2 悬停即译（渲染层驱动，2026-10-25 改拍）
 
-- 列表容器上 `IntersectionObserver`（`rootMargin: '200px'`，`threshold: 0`）：进入视口且无 `titleZh` 的卡片 → 收集 id，600ms 防抖合并去重 → `window.api.intelTranslate(ids)`。
+- 列表容器 `pointerover` 事件委托（冒泡，`closest('[data-intel-id]:not([data-zh])')` 命中卡片）：指针移上未译卡片 → 收集 id，400ms 防抖合并快速划过 → `window.api.intelTranslate(ids)`。卡片内子元素间移动对同一 id 反复触发，由 requested/seen 双去重兜住。
 - IPC `intel:translate(ids)` **await 全流程**（去缓存 → 检测 → 批量 LLM → upsert → 广播），返回统计：
 
 ```ts
@@ -100,7 +100,7 @@ export interface IntelTranslateResult {
 ```
 
 - 渲染层收到响应：清除对应卡片的「译…」占位；`disabled` 则本会话熔断（不再观察请求），首次 toast 一次（「卡片翻译已停用：<原因>」+ detail 指到 设置 › 模块 › 情报）。
-- 中文条目在主进程侧判跳（渲染层不判断），会话内 `skippedIds` 记忆，重复滚入不重复请求。
+- 中文条目在主进程侧判跳（渲染层不判断），会话内 `skippedIds` 记忆，重复悬停不重复请求。
 
 ## 5. 渲染层（`src/modules/intel/index.tsx`）
 
@@ -130,7 +130,7 @@ export interface IntelTranslateResult {
 | `src/lib/ipc.ts` | `intelTranslate` 封装 |
 | `src/types/index.ts` | `IntelItem.titleZh?/summaryZh?` + `IntelTranslateResult` + api 声明 |
 | `src/lib/settings.ts` | `intel.translateOn`（toggle，默认 true）、`intel.translateBudget`（number，默认 300，min 50 max 2000 step 50，unit 条） |
-| `src/modules/intel/index.tsx` | `FeedCard` 双语副行 + 占位 + `IntersectionObserver` + 熔断态 |
+| `src/modules/intel/index.tsx` | `FeedCard` 双语副行 + 占位 + `pointerover` 悬停委托 + 熔断态 |
 
 设置两项进现有「设置 › 模块 › 情报」分区（`SETTINGS` ui: true + anchor，自动渲染）。
 

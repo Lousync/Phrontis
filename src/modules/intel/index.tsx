@@ -136,8 +136,9 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
     return { perSource, all: items.length, fav, airec: aiRec?.ids.length ?? 0 }
   }, [items, aiRec])
 
-  // ===== 卡片英文自动翻译（docs/intel-translate-plan.md §4.2/§5）：可见即译 =====
-  // 占位「译…」预留高度防跳动 → 译文经主进程广播 → reload 合并 titleZh 后副行 .kb-view-in 淡入。
+  // ===== 卡片英文自动翻译（docs/intel-translate-plan.md §4.2/§5）：悬停即译 =====
+  // 2026-10-25 用户拍板：可见即译 → 悬停即译（鼠标移上卡片才译，更省也更贴合阅读动线）；
+  // 预热兜底首屏译题。占位「译…」预留高度防跳动 → 译文经主进程广播 → reload 合并 titleZh 后 .kb-view-in 淡入。
   // zhRequestedRef（本会话已请求）/ zhOffRef（熔断：LLM 未配置 / 预算耗尽）都不随渲染重置。
   const listRef = useRef<HTMLDivElement>(null)
   const zhRequestedRef = useRef<Set<string>>(new Set())
@@ -150,17 +151,16 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
     if (!translateOn || zhOffRef.current || !loaded) return
     const root = listRef.current
     if (!root) return
-    const targets = Array.from(root.querySelectorAll<HTMLElement>('[data-intel-id]:not([data-zh])'))
-      .filter((el) => !zhRequestedRef.current.has(el.dataset.intelId ?? ''))
-    if (!targets.length) return
     let timer: number | undefined
     const seen = new Set<string>()
-    const io = new IntersectionObserver((entries) => {
-      for (const en of entries) {
-        const id = (en.target as HTMLElement).dataset.intelId
-        if (en.isIntersecting && id) seen.add(id)
-      }
-      if (!seen.size || timer !== undefined) return
+    // pointerover 冒泡委托：卡片内子元素间移动会对同一 id 反复触发，seen/requested 双去重兜住
+    const onOver = (e: PointerEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest?.('[data-intel-id]:not([data-zh])') as HTMLElement | null
+      const id = el?.dataset.intelId
+      if (!id || zhRequestedRef.current.has(id) || seen.has(id)) return
+      seen.add(id)
+      if (timer !== undefined) return
+      // 400ms 防抖合并快速划过：顺列表扫一遍不应每卡一发
       timer = window.setTimeout(() => {
         const ids = [...seen]
         seen.clear()
@@ -196,14 +196,14 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
             return n
           })
         })
-      }, 600)
-    }, { root, rootMargin: '200px' })
-    targets.forEach((t) => io.observe(t))
+      }, 400)
+    }
+    root.addEventListener('pointerover', onOver)
     return () => {
       if (timer !== undefined) window.clearTimeout(timer)
-      io.disconnect()
+      root.removeEventListener('pointerover', onOver)
     }
-  }, [translateOn, loaded, visible])
+  }, [translateOn, loaded])
 
   const sidebarInner = (
     <IntelSidebar
