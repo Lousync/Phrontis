@@ -6,6 +6,7 @@
 > - 分支：`feature/v3.12.0`（基于 main @ a97181d，工作树干净；`stash@{0}` 是用户在 v3.9.1 上的日程 WIP，**勿动**）
 > - 交互基准原型：`E:\Projects\KnowledgeRecorder\tmp\prototypes\feed-module-proto.html`（本地静态服务 `http://127.0.0.1:8391/feed-module-proto.html`；tmp/ 不进 git，实现前别删）
 > - 参考项目：`E:\Projects\KnowledgeRecorder\tmp\OpenCollector`（MIT，仅借鉴管线思路，不引依赖）
+> - 关联方案：卡片英文自动翻译（双语副行 + 翻译缓存复用）见 `docs/intel-translate-plan.md`（2026-10-25 定稿，并入 3.13.0）
 
 ## 0. 已拍板决策（全部确认过，实现时不再询问）
 
