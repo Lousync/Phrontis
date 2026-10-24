@@ -98,6 +98,33 @@ export function IntelView() {
               />
             </label>
           </div>
+
+          <label className="flex items-center justify-between gap-3 px-3.5 py-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] cursor-pointer max-w-xl" data-setting-anchor="intel.translateOn">
+            <span className="flex flex-col gap-0.5">
+              <span className="text-[13px] text-[var(--text-primary)]">卡片英文自动翻译</span>
+              <span className="text-[11px] text-[var(--text-muted)]">英文卡片的标题与摘要自动补一行中文灰字（走已配置的 LLM，同一文本只译一次）；中文条目自动跳过</span>
+            </span>
+            <SettingSwitch checked={s['intel.translateOn'] !== false} onChange={(v) => update('intel.translateOn', v)} />
+          </label>
+
+          <div data-setting-anchor="intel.translateBudget">
+            <div className="flex items-center justify-between gap-3">
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[13px] text-[var(--text-primary)]">卡片翻译会话上限</span>
+                <span className="text-[11px] text-[var(--text-muted)]">本次运行最多翻译的文本条数（防失控）；达到上限后本次运行不再翻译</span>
+              </span>
+              <NumberField
+                value={Number(s['intel.translateBudget'] ?? 300)}
+                onCommit={(v) => update('intel.translateBudget', v)}
+                min={50}
+                max={2000}
+                step={50}
+                unit="条"
+                presets={[100, 300, 500, 1000]}
+                defaultValue={300}
+              />
+            </div>
+          </div>
         </div>
       </div>
 

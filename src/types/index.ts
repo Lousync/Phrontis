@@ -2327,6 +2327,7 @@ export interface ElectronAPI {
   // intel（v3.12.0 情报模块）
   intelGetItems: () => Promise<{ items: IntelItem[]; meta: IntelMeta }>
   intelRefresh: (source?: IntelSourceKey) => Promise<IntelRefreshResult>
+  intelTranslate: (ids: string[]) => Promise<IntelTranslateResult>
   intelToggleFav: (id: string) => Promise<IntelItem | null>
   intelGetArticle: (id: string) => Promise<{ md: string; url: string; title: string; cached: boolean } | { error: string }>
   intelSetAiRec: (rec: IntelAiRec) => Promise<boolean>
@@ -3205,6 +3206,23 @@ export interface IntelItem {
   favAt?: string
   /** forks / paperId / points 等源特有字段 */
   extra?: Record<string, unknown>
+  /** 运行时合并自翻译缓存（translationRepo mode 'plain'），不落 intel.json（intel-translate-plan §2） */
+  titleZh?: string
+  summaryZh?: string
+}
+
+/** intel:translate 结果（卡片英文自动翻译，docs/intel-translate-plan.md §4.2） */
+export interface IntelTranslateResult {
+  /** 本次新译文本数 */
+  translated: number
+  /** 缓存复用数（零 token） */
+  cachedHit: number
+  /** 中文条目跳过数 */
+  skippedChinese: number
+  failed: number
+  /** 熔断：本会话不再翻译（渲染层据此停观察器） */
+  disabled?: true
+  reason?: 'off' | 'noModel' | 'budget'
 }
 
 export interface IntelAiRec {

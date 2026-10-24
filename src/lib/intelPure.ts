@@ -127,6 +127,39 @@ export function intelIdOf(url: string): string {
   return intelHash(url).slice(0, 12)
 }
 
+/** 文本内容 hash（翻译缓存键用）：与 intelHash 同实现，但不做 URL 归一化 */
+export function intelTextHash(text: string): string {
+  return sha256Hex(String(text ?? '')).slice(0, 40)
+}
+
+// ===== 卡片英文自动翻译（docs/intel-translate-plan.md §3）=====
+
+/** 英文判定：拉丁字母 ≥6 且 CJK 占比 <25% —— 中文源（qbitai / 新闻源）自动跳过，零 token */
+export function isEnglishText(s: string): boolean {
+  const t = String(s ?? '').trim()
+  if (t.length < 2) return false
+  const cjk = (t.match(/[\u4e00-\u9fff\u3040-\u30ff]/g) ?? []).length
+  const latin = (t.match(/[A-Za-z]/g) ?? []).length
+  return latin >= 6 && cjk / Math.max(cjk + latin, 1) < 0.25
+}
+
+/** 批量翻译响应解析：剥 code fence、截首个 [ 到末个 ]；等长字符串数组才算过，否则 null（整批失败） */
+export function parseTranslateArray(raw: string, expectCount: number): string[] | null {
+  let s = String(raw ?? '').trim()
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fence) s = fence[1].trim()
+  const lo = s.indexOf('[')
+  const hi = s.lastIndexOf(']')
+  if (lo < 0 || hi <= lo) return null
+  try {
+    const arr: unknown = JSON.parse(s.slice(lo, hi + 1))
+    if (!Array.isArray(arr) || arr.length !== expectCount || !arr.every((x) => typeof x === 'string')) return null
+    return (arr as string[]).map((x) => x.trim())
+  } catch {
+    return null
+  }
+}
+
 // ===== 营销水文过滤（设置 intel.filter 可关）=====
 
 const SPAM_RE = [

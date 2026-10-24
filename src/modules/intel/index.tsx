@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Bot, Heart, RefreshCw, Settings2, FileText } from 'lucide-react'
 import type { IntelItem, IntelMeta, IntelSourceKey } from '../../types'
-import { intelGetItems, intelRefresh, intelToggleFav, intelSetFilter, intelClearAiRec } from '../../lib/ipc'
+import { intelGetItems, intelRefresh, intelToggleFav, intelSetFilter, intelClearAiRec, intelTranslate } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
+import { useSettings } from '../../lib/SettingsContext'
 import { showToast } from '../../lib/toast'
 import { filterIntelItems, SOURCE_META, INTEL_SOURCE_KEYS } from '../../lib/intelPure'
 import { IntelSidebar, type IntelFeedFilter } from './IntelSidebar'
@@ -48,6 +49,7 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
   const [filter, setFilter] = useState<IntelFeedFilter>('all')
   const [favPopId, setFavPopId] = useState<string | null>(null)
   const mountedRef = useRef(false)
+  const { s } = useSettings()
 
   const reload = useCallback(async () => {
     try {
@@ -133,6 +135,75 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
     }
     return { perSource, all: items.length, fav, airec: aiRec?.ids.length ?? 0 }
   }, [items, aiRec])
+
+  // ===== 卡片英文自动翻译（docs/intel-translate-plan.md §4.2/§5）：可见即译 =====
+  // 占位「译…」预留高度防跳动 → 译文经主进程广播 → reload 合并 titleZh 后副行 .kb-view-in 淡入。
+  // zhRequestedRef（本会话已请求）/ zhOffRef（熔断：LLM 未配置 / 预算耗尽）都不随渲染重置。
+  const listRef = useRef<HTMLDivElement>(null)
+  const zhRequestedRef = useRef<Set<string>>(new Set())
+  const zhOffRef = useRef(false)
+  const zhToastedRef = useRef(false)
+  const [pendingZh, setPendingZh] = useState<ReadonlySet<string>>(() => new Set())
+  const translateOn = s['intel.translateOn'] !== false
+
+  useEffect(() => {
+    if (!translateOn || zhOffRef.current || !loaded) return
+    const root = listRef.current
+    if (!root) return
+    const targets = Array.from(root.querySelectorAll<HTMLElement>('[data-intel-id]:not([data-zh])'))
+      .filter((el) => !zhRequestedRef.current.has(el.dataset.intelId ?? ''))
+    if (!targets.length) return
+    let timer: number | undefined
+    const seen = new Set<string>()
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        const id = (en.target as HTMLElement).dataset.intelId
+        if (en.isIntersecting && id) seen.add(id)
+      }
+      if (!seen.size || timer !== undefined) return
+      timer = window.setTimeout(() => {
+        const ids = [...seen]
+        seen.clear()
+        timer = undefined
+        ids.forEach((x) => zhRequestedRef.current.add(x))
+        setPendingZh((prev) => {
+          const n = new Set(prev)
+          ids.forEach((x) => n.add(x))
+          return n
+        })
+        intelTranslate(ids).then((res) => {
+          setPendingZh((prev) => {
+            const n = new Set(prev)
+            ids.forEach((x) => n.delete(x))
+            return n
+          })
+          if (res.disabled && !zhOffRef.current) {
+            zhOffRef.current = true
+            if (!zhToastedRef.current) {
+              zhToastedRef.current = true
+              const why = res.reason === 'budget'
+                ? '会话翻译量已达上限（设置 › 模块 › 情报 › 卡片翻译会话上限）'
+                : res.reason === 'off'
+                  ? '卡片翻译已在设置中关闭'
+                  : '未配置可用的模型（设置 › AI › 模型）'
+              showToast({ type: 'info', message: '卡片英文翻译已停用', detail: why })
+            }
+          }
+        }).catch(() => {
+          setPendingZh((prev) => {
+            const n = new Set(prev)
+            ids.forEach((x) => n.delete(x))
+            return n
+          })
+        })
+      }, 600)
+    }, { root, rootMargin: '200px' })
+    targets.forEach((t) => io.observe(t))
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer)
+      io.disconnect()
+    }
+  }, [translateOn, loaded, visible])
 
   const sidebarInner = (
     <IntelSidebar
@@ -235,7 +306,7 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
         </div>
 
         {/* 列表 */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-10 pt-3">
+        <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-4 pb-10 pt-3">
           {!loaded ? (
             <ListSkeleton />
           ) : visible.length === 0 ? (
@@ -261,6 +332,7 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
                   item={it}
                   index={i}
                   pop={favPopId === it.id}
+                  pendingZh={pendingZh.has(it.id)}
                   onOpen={() => onOpenArticle(it.id, it.title)}
                   onFav={() => { void toggleFav(it) }}
                 />
@@ -299,10 +371,12 @@ function scoreColorCls(score: number): string {
   return 'bg-[var(--accent)]'
 }
 
-function FeedCard({ item, index, pop, onOpen, onFav }: {
+function FeedCard({ item, index, pop, pendingZh, onOpen, onFav }: {
   item: IntelItem
   index: number
   pop: boolean
+  /** 翻译已请求未返回（占位「译…」行，预留高度防卡片跳动） */
+  pendingZh: boolean
   onOpen: () => void
   onFav: () => void
 }) {
@@ -318,6 +392,8 @@ function FeedCard({ item, index, pop, onOpen, onFav }: {
   return (
     <div
       onClick={onOpen}
+      data-intel-id={item.id}
+      data-zh={item.titleZh ? '1' : undefined}
       className="kb-cv kb-item-in mb-2.5 cursor-pointer rounded-[10px] border border-[var(--border-color)] bg-[var(--card-bg)] px-3.5 py-3 transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-hover)]"
       style={{ animationDelay: `${Math.min(index * 30, 360)}ms` }}
       title={item.url}
@@ -338,8 +414,16 @@ function FeedCard({ item, index, pop, onOpen, onFav }: {
         </div>
       </div>
       <div className="mb-1 text-[13.5px] font-semibold leading-[1.45] text-[var(--text-primary)]">{item.title}</div>
+      {item.titleZh ? (
+        <div className="kb-view-in mb-1 line-clamp-2 text-[12px] leading-[1.55] text-[var(--text-muted)]">{item.titleZh}</div>
+      ) : pendingZh ? (
+        <div className="mb-1 text-[12px] leading-[1.55] text-[var(--text-muted)] opacity-60">译…</div>
+      ) : null}
       {item.summary && (
         <div className="line-clamp-2 text-[12px] leading-[1.55] text-[var(--text-secondary)]">{item.summary}</div>
+      )}
+      {item.summaryZh && (
+        <div className="kb-view-in line-clamp-2 text-[12px] leading-[1.55] text-[var(--text-muted)]">{item.summaryZh}</div>
       )}
       <div className="mt-2 flex items-center gap-3.5">
         {typeof stars === 'number' && stars > 0 && (

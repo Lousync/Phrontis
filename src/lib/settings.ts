@@ -342,6 +342,9 @@ export const SETTINGS = {
   'intel.filter': { default: true, type: 'toggle', label: '拦截营销与低质内容', group: '情报', desc: '命中营销特征词的条目在入库前拦截（宁缺毋滥）', keywords: ['情报', '过滤', '营销', '拦截', '广告', 'filter'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.filter' },
   'intel.keep': { default: 14, type: 'number', label: '条目保留天数', group: '情报', desc: '超期未收藏的条目自动清理；收藏条目不受影响', keywords: ['情报', '保留', '天数', '清理', '过期', 'keep'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.keep', min: 1, max: 90, step: 1, unit: '天' },
   'intel.hfBase': { default: 'https://huggingface.co', type: 'text', label: 'HF API 基址', group: '情报', desc: 'HF Daily Papers 的 API 基址；大陆直连不稳时可配镜像（如 hf-mirror.com）', keywords: ['情报', 'hf', '镜像', 'huggingface', '基址', 'hfbase'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.hfBase' },
+  // 卡片英文自动翻译（v3.13.0，docs/intel-translate-plan.md §5）
+  'intel.translateOn': { default: true, type: 'toggle', label: '卡片英文自动翻译', group: '情报', desc: '英文卡片的标题与摘要自动补一行中文灰字（走已配置的 LLM，同一文本只译一次）；关闭后恢复纯原文', keywords: ['情报', '翻译', '英文', '双语', 'translate'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.translateOn' },
+  'intel.translateBudget': { default: 300, type: 'number', label: '卡片翻译会话上限', group: '情报', desc: '本次运行最多翻译的文本条数（防失控）；达到上限后本次运行不再翻译', keywords: ['情报', '翻译', '预算', '上限', 'budget'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.translateBudget', min: 50, max: 2000, step: 50, unit: '条' },
 }
 
 // ===== 边栏面板约束（组件 default/min/max，非用户可改，集中引用） =====

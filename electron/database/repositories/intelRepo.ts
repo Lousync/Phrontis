@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import {
   intelItemsAll, intelReadMeta, intelRefresh, intelToggleFav,
   intelGetArticle, intelSetAiRec, intelClearAiRec, intelSetAiFilter, intelSaveAsNote,
+  intelTranslateItems,
 } from '../../lib/intel/intelStore'
 import { INTEL_SOURCE_KEYS } from '../../../src/lib/intelPure'
 import type { IntelAiRec, IntelItem, IntelMeta, IntelSourceKey } from '../../../src/types'
@@ -23,6 +24,14 @@ export function registerIntelHandlers(deps: { getSettingValue: (key: string) => 
     // 单源刷新（2026-10-25）：source 为源 key 时只抓该源；空/非法值 = 全源
     const only = INTEL_SOURCE_KEYS.includes(source as IntelSourceKey) ? (source as IntelSourceKey) : undefined
     return await intelRefresh(deps.getSettingValue, only)
+  })
+
+  // 卡片英文自动翻译（intel-translate-plan §4.2）：await 全流程，译文经广播合并回列表
+  ipcMain.handle('intel:translate', async (_e, ids: unknown) => {
+    const list = Array.isArray(ids)
+      ? ids.filter((x): x is string => typeof x === 'string' && !!x).slice(0, 200)
+      : []
+    return await intelTranslateItems(deps.getSettingValue, list)
   })
 
   ipcMain.handle('intel:toggleFav', (_e, id: string) => {

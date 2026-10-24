@@ -72,6 +72,7 @@ export const deleteTag = (id: string) => a().deleteTag(id)
 // intel（v3.12.0 情报模块）
 export const intelGetItems = () => a().intelGetItems()
 export const intelRefresh = (source?: import('../types').IntelSourceKey) => a().intelRefresh(source)
+export const intelTranslate = (ids: string[]) => a().intelTranslate(ids)
 export const intelToggleFav = (id: string) => a().intelToggleFav(id)
 export const intelGetArticle = (id: string) => a().intelGetArticle(id)
 export const intelSetAiRec = (rec: import('../types').IntelAiRec) => a().intelSetAiRec(rec)

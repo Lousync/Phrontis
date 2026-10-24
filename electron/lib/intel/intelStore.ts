@@ -5,11 +5,16 @@ import { getVaultKbRoot } from '../kbStore/vaultContext'
 import { readJson, writeJsonOrThrow, kbModulePath } from '../kbStore/jsonStore'
 import { sanitizeFileName } from '../workspaceManager'
 import { extractArticle } from '../clipperServer/extract'
-import type { IntelAiFilter, IntelAiRec, IntelItem, IntelMeta, IntelRefreshResult, IntelSourceKey } from '../../../src/types'
-import { mergeIntelPool, pruneIntelPool, capIntelPool, sortIntelItems } from '../../../src/lib/intelPure'
+import type { IntelAiFilter, IntelAiRec, IntelItem, IntelMeta, IntelRefreshResult, IntelSourceKey, IntelTranslateResult } from '../../../src/types'
+import { mergeIntelPool, pruneIntelPool, capIntelPool, sortIntelItems, isEnglishText } from '../../../src/lib/intelPure'
 import { fetchAllIntelSources } from './fetchAll'
 import type { IntelGetSetting } from './intelSettings'
 import { intelKeepDays } from './intelSettings'
+import {
+  mergeItemZh, serializeTranslate, translateSession, translateBudgetOf, translateBatch, persistTranslations,
+  TITLE_BATCH, SUMMARY_BATCH, PREHEAT_TITLES, plainKeyOf, existingPlainKeys,
+  isKeyPoisoned, markKeyFailed, markSkippedId, isSkippedId,
+} from './translate'
 
 /**
  * 情报模块唯一真相源（docs/intel-module-plan.md §4.3）。
@@ -29,7 +34,8 @@ const POOL_CAP = 2000
 // ===== 读取 =====
 
 export function intelItemsAll(): IntelItem[] {
-  return sortIntelItems(readJson<IntelItem[]>(MOD, 'items.json', []))
+  // 读取边界统一合并卡片译文（titleZh/summaryZh 为运行时字段，不落 intel.json；intel-translate-plan §2）
+  return mergeItemZh(sortIntelItems(readJson<IntelItem[]>(MOD, 'items.json', [])))
 }
 
 export function intelReadMeta(): IntelMeta {
@@ -137,7 +143,139 @@ export async function intelRefresh(get: IntelGetSetting, only?: IntelSourceKey):
   }
   writeJsonOrThrow(MOD, 'meta.json', next)
   broadcastDataChanged('intel')
+  // 预热卡片译题（idle、fire-and-forget；单源轮也跑——增量条目同样受益，内容寻址缓存零重复翻译）
+  preheatTranslateTitles(get)
   return { meta: next, scope: only ?? 'all', added, failedSources: stats.failed }
+}
+
+// ===== 卡片英文自动翻译（docs/intel-translate-plan.md §4）=====
+
+let zhBroadcastTimer: ReturnType<typeof setTimeout> | undefined
+/** 译文落库后的合并广播（400ms 防抖：一次 IPC 可能拆多次 LLM 批，避免列表反复 refetch 抖动） */
+function broadcastZhSoon(): void {
+  if (zhBroadcastTimer !== undefined) return
+  zhBroadcastTimer = setTimeout(() => {
+    zhBroadcastTimer = undefined
+    broadcastDataChanged('intel')
+  }, 400)
+}
+
+function zeroTranslateResult(reason: 'off' | 'noModel' | 'budget'): IntelTranslateResult {
+  return { translated: 0, cachedHit: 0, skippedChinese: 0, failed: 0, disabled: true, reason }
+}
+
+/** 任务切成 title/summary 批串行执行；configFail = 配置类失败（调用方据此熔断会话） */
+async function runTaskChunks(
+  tasks: Array<{ kind: 'title' | 'summary'; text: string }>,
+  budgetRoom: number,
+): Promise<{ translated: number; failed: number; configFail: boolean }> {
+  const sizeOf = (k: 'title' | 'summary') => (k === 'title' ? TITLE_BATCH : SUMMARY_BATCH)
+  const byKind: Record<'title' | 'summary', string[]> = { title: [], summary: [] }
+  let used = 0
+  for (const t of tasks) {
+    if (used >= budgetRoom) break
+    byKind[t.kind].push(t.text)
+    used++
+  }
+  let translated = 0
+  let failed = 0
+  for (const kind of ['title', 'summary'] as const) {
+    const texts = byKind[kind]
+    for (let i = 0; i < texts.length; i += sizeOf(kind)) {
+      const chunk = texts.slice(i, i + sizeOf(kind))
+      const r = await translateBatch(chunk, kind)
+      if (r.ok) {
+        translated += persistTranslations(kind, chunk, r.out, r.model)
+        broadcastZhSoon()
+      } else if (r.configFail) {
+        return { translated, failed, configFail: true }
+      } else {
+        for (const text of chunk) markKeyFailed(plainKeyOf(text))
+        failed += chunk.length
+      }
+    }
+  }
+  return { translated, failed, configFail: false }
+}
+
+/** 卡片可见即译（intel:translate）：await 全流程后返回统计；译文经 broadcastZhSoon → 渲染层 reload 合并 */
+export async function intelTranslateItems(get: IntelGetSetting, ids: string[]): Promise<IntelTranslateResult> {
+  if (get('intel.translateOn') === false) return zeroTranslateResult('off')
+  return serializeTranslate(() => translateItemsLocked(get, ids))
+}
+
+async function translateItemsLocked(get: IntelGetSetting, ids: string[]): Promise<IntelTranslateResult> {
+  const budget = translateBudgetOf(get)
+  if (translateSession.disabledReason === 'noModel') return zeroTranslateResult('noModel')
+  if (translateSession.translatedCount >= budget) return zeroTranslateResult('budget')
+
+  const want = new Set(ids)
+  const zhKeys = existingPlainKeys()
+  const queued = new Set<string>()
+  const tasks: Array<{ kind: 'title' | 'summary'; text: string }> = []
+  let cachedHit = 0
+  let skippedChinese = 0
+  for (const it of readJson<IntelItem[]>(MOD, 'items.json', [])) {
+    if (!want.has(it.id) || isSkippedId(it.id)) continue
+    let en = 0      // 英文文本数（=0 即中文条目）
+    let handled = 0 // 有产出的英文文本数（缓存命中或已入队；=0 说明全部毒化）
+    for (const [kind, text] of [['title', it.title], ['summary', it.summary]] as Array<['title' | 'summary', string]>) {
+      if (!text || !isEnglishText(text)) continue
+      en++
+      const key = plainKeyOf(text)
+      if (zhKeys.has(key)) {
+        cachedHit++
+        handled++
+      } else if (!isKeyPoisoned(key) && !queued.has(text)) {
+        queued.add(text)
+        tasks.push({ kind, text })
+        handled++
+      }
+    }
+    if (en === 0) skippedChinese++
+    if (handled === 0) markSkippedId(it.id) // 中文条目 / 全毒化：本会话不再对其发请求
+  }
+
+  const room = Math.max(budget - translateSession.translatedCount, 0)
+  const run = room > 0 ? tasks.slice(0, room) : []
+  const r = run.length ? await runTaskChunks(run, room) : { translated: 0, failed: 0, configFail: false }
+  if (r.configFail) translateSession.disabledReason = 'noModel'
+  const result: IntelTranslateResult = { translated: r.translated, cachedHit, skippedChinese, failed: r.failed }
+  if (r.configFail) return { ...result, disabled: true, reason: 'noModel' }
+  if (translateSession.translatedCount >= budget) return { ...result, disabled: true, reason: 'budget' }
+  return result
+}
+
+/** 刷新后 idle 预热 top-N 英文条目标题（一批；失败静默——预热绝不打扰刷新语义） */
+function preheatTranslateTitles(get: IntelGetSetting): void {
+  void serializeTranslate(async () => {
+    if (get('intel.translateOn') === false) return
+    if (translateSession.disabledReason === 'noModel') return
+    const budget = translateBudgetOf(get)
+    if (translateSession.translatedCount >= budget) return
+    const zhKeys = existingPlainKeys()
+    const seen = new Set<string>()
+    const texts: string[] = []
+    for (const it of sortIntelItems(readJson<IntelItem[]>(MOD, 'items.json', []))) {
+      if (texts.length >= PREHEAT_TITLES) break
+      const t = it.title
+      if (!t || !isEnglishText(t) || seen.has(t)) continue
+      const key = plainKeyOf(t)
+      if (zhKeys.has(key) || isKeyPoisoned(key)) continue
+      seen.add(t)
+      texts.push(t)
+    }
+    if (!texts.length) return
+    const r = await translateBatch(texts, 'title')
+    if (r.ok) {
+      persistTranslations('title', texts, r.out, r.model)
+      broadcastZhSoon()
+    } else if (r.configFail) {
+      translateSession.disabledReason = 'noModel'
+    } else {
+      for (const t of texts) markKeyFailed(plainKeyOf(t))
+    }
+  }).catch(() => undefined)
 }
 
 // ===== 正文（惰性缓存；不广播）=====

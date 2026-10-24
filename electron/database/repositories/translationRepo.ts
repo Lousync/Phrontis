@@ -34,6 +34,11 @@ export function getTranslationCache(key: string): TranslationCacheRow | null {
   return readRows().find((r) => r.cache_key === key) ?? null
 }
 
+/** 全表读取（情报卡片翻译的读取侧合并用：一次进内存建 map，避免逐 key 读盘） */
+export function allTranslationCache(): TranslationCacheRow[] {
+  return readRows()
+}
+
 export function upsertTranslationCache(key: string, mode: string, sourceText: string, resultMd: string, model: string): void {
   const rows = readRows()
   const now = localNow()
