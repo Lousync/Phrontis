@@ -46,6 +46,10 @@ import { ScheduleModule } from './modules/schedule'
 import { ScheduleUiProvider } from './modules/schedule/ScheduleUiContext'
 import { AccountingModule } from './modules/accounting'
 import { ACCOUNTING_EDIT_EVENT, ACCOUNTING_NEW_EVENT, ACCOUNTING_RECUR_NEW_EVENT, ACCOUNTING_RECUR_EDIT_EVENT } from './modules/accounting/shared'
+// 情报（v3.12.0）：工作台内 Tab + 动态文章页签（intel-a:<itemId>）
+import { IntelModule } from './modules/intel'
+import { IntelArticleView } from './modules/intel/IntelArticleView'
+import { isIntelArticleTab, intelArticleIdOf, intelArticleTabId } from './modules/intel/tabs'
 import { KnowledgeModule } from './modules/knowledge'
 import { MomentsModule } from './modules/moments'
 import { RecycleBinModule } from './modules/recycle'
@@ -468,6 +472,7 @@ export default function App() {
       { id: 'aiTeaching', label: '打开 AI教学', hint: '讲义 / 研读 / 出题' },
       { id: 'blog', label: '打开 博客' },
       { id: 'schedule', label: '打开 日程' },
+      { id: 'intel', label: '打开 情报' },
       { id: 'moments', label: '打开 说说' },
       { id: 'recycle', label: '打开 回收站' },
       { id: 'settings', label: '打开 设置' },
@@ -514,6 +519,13 @@ export default function App() {
   /** 激活的工具标签页（`tool:<toolId>` | null）。与 activeTab 互斥共现：工具标签激活时 activeTab=null
       （模块保活层照常 display:none 常驻），激活模块标签时清空。批次4 方案 §10.2「点击入口 → 中间开工具标签页」。 */
   const [activeToolTab, setActiveToolTab] = useState<string | null>(null)
+  /** 激活的情报文章页签（`intel-a:<itemId>` | null，v3.12.0 docs/intel-module-plan.md §6.2）。
+      同 activeToolTab 口径：与 activeTab 互斥共现、共用 openTabs 序列，但语义是「条目」不是「工具」，
+      故独立状态（关闭 / 过期兜底都按条目处理，标题映射 intelTitles 供页面条渲染）。 */
+  const [activeIntelTab, setActiveIntelTab] = useState<string | null>(null)
+  /** 文章页签标题映射（itemId → 标题）：页面条 tabLabel 用；条目标题在打开时随事件带来，无需反查 */
+  const intelTitlesRef = useRef<Map<string, string>>(new Map())
+  const mountedIntelTabs = useRef<Set<string>>(new Set())
 
   // ---- 页面级分屏（Fork A）状态 ----
   // 只承载「页面」（文档）；模块标签一律不进这里（模块整体不分栏）。null = 单栏。
@@ -1179,6 +1191,11 @@ export default function App() {
     if (!activeToolTab) return
     setOpenTabs((ts) => (ts.includes(activeToolTab) ? ts : [...ts, activeToolTab]))
   }, [activeToolTab])
+  // 情报文章页签同批登记（v3.12.0）：与工具标签同一条 openTabs 序列
+  useEffect(() => {
+    if (!activeIntelTab) return
+    setOpenTabs((ts) => (ts.includes(activeIntelTab) ? ts : [...ts, activeIntelTab]))
+  }, [activeIntelTab])
 
   // quizViewOpen / 页签组可见性（2026-09-19）：声明在 closeTab 之前——其全关判定 deps 渲染期就要读
   const [quizViewOpen, setQuizViewOpen] = useState(false)
@@ -1199,9 +1216,11 @@ export default function App() {
     if (i === -1) return
     let next = openTabs.filter((t) => t !== tab)
     const isTool = isToolTabId(tab)
-    const isActive = isTool ? activeToolTab === tab : activeTab === tab
+    const isIntel = isIntelArticleTab(tab)
+    const isActive = isTool ? activeToolTab === tab : isIntel ? activeIntelTab === tab : activeTab === tab
     if (isActive) {
       setActiveToolTab(null)
+      setActiveIntelTab(null)
       setActiveTab(null)
       setRailModule(null)
     }
@@ -1209,16 +1228,18 @@ export default function App() {
     // PAGE_OWNED 空壳（模块条目不进页面条、无停靠页面时页签组也不出现）→ 用户视角已无
     // 标签页，按全关收尾：清掉隐形空壳、activeTab/左栏回总览。可见性由模块上报。
     const tabVisible = (t: string) =>
-      isToolTabId(t) || !PAGE_OWNED.includes(t) ||
+      isToolTabId(t) || isIntelArticleTab(t) || !PAGE_OWNED.includes(t) ||
       (t === 'knowledge' && (kbStripVisible || quizViewOpen))
     if (!next.some(tabVisible)) {
       next = next.filter((t) => !PAGE_OWNED.includes(t))
       setActiveToolTab(null)
+      setActiveIntelTab(null)
       setActiveTab(null)
       setRailModule(null)
     }
     setOpenTabs(next)
-  }, [openTabs, activeTab, activeToolTab, kbStripVisible, quizViewOpen])
+    if (isIntel) intelTitlesRef.current.delete(intelArticleIdOf(tab))
+  }, [openTabs, activeTab, activeToolTab, activeIntelTab, kbStripVisible, quizViewOpen])
   // 标签拖拽重排（现成机制恢复）：只调 openTabs 顺序，激活标签跟内容走、不变
   const handleReorder = useCallback((tabs: string[]) => setOpenTabs(tabs), [])
 
@@ -1238,6 +1259,7 @@ export default function App() {
   const lastWorkbenchTabRef = useRef<TabName | null>(null)
   const handleTabChange = (tab: TabName) => {
     setActiveToolTab(null)  // 切回模块标签时退出工具标签（工具标签关闭走 ✕ / 落点分流）
+    setActiveIntelTab(null) // 同口径：模块标签互斥退出情报文章页签（v3.12.0）
     setNoteJumpFrom(null)   // 手动切 Tab 清返回 chip（条目6 口径；chip 自身的返回点击也走这里，消费即清）
     exitTreeModeForModule() // 进模块态 → leftMode 落回总览（树模式互斥修复，见函数头注）
     // F-5（2026-09-30）：进「整窗模块」前记下当时的工作台标签，点活动栏「工作台」回来若它仍开着则恢复
@@ -1265,8 +1287,26 @@ export default function App() {
       return
     }
     setActiveTab(null)
+    setActiveIntelTab(null)
     setActiveToolTab(toolTabId(toolId))
   }, [])
+
+  // ---- 情报文章页签（v3.12.0，docs/intel-module-plan.md §6.2）----
+  // feed 卡片点击 → 已开则激活（去重），否则新开；标题随事件带来（页面条 tabLabel 反查 intelTitlesRef）。
+  // 重启恢复不落地（openTabs 会话态）——条目被 prune 后由 IntelArticleView 渲染「已过期」空态卡兜底。
+  const handleOpenIntelArticle = useCallback((itemId: string, title: string) => {
+    intelTitlesRef.current.set(itemId, title)
+    const tabId = intelArticleTabId(itemId)
+    setOpenTabs((ts) => (ts.includes(tabId) ? ts : [...ts, tabId]))
+    setActiveTab(null)
+    setActiveToolTab(null)
+    setActiveIntelTab(tabId)
+  }, [])
+
+  /** 🤖（情报顶栏）→ 展开右栏并落 📡 情报助手 Tab（D5：右栏条件 Tab） */
+  const handleExpandIntelAssistant = useCallback(() => {
+    update('workbenchLayout', JSON.stringify({ ...wbLayout, rightTab: 'intel', rightCollapsed: false }))
+  }, [wbLayout, update])
 
   const handleOpenPluginTool = useCallback((tool: PluginTool) => {
     setActiveTab(null)
@@ -1285,6 +1325,22 @@ export default function App() {
     const toolHosted = tabId === activeToolTab && !wbLayout.leftLocked && TOOLS_WITH_SIDEBAR.has(tid)
     const toolSidebarEl = toolHosted ? wbModSlotEl : null
     return <ToolHost toolId={tid} onBack={() => closeTab(tabId)} sidebarEl={toolSidebarEl} sidebarHosted={toolHosted} />
+  }
+
+  /** 情报文章页签宿主（v3.12.0 §6.2，保活同工具标签）：已开条目常驻 display:none；
+      「回情报页」= 切回情报模块标签；「关闭本页签」= closeTab（含过期条目兜底路径）。 */
+  function renderIntelArticleMounted(tabId: string, on: boolean) {
+    if (on) mountedIntelTabs.current.add(tabId)
+    if (!on && !mountedIntelTabs.current.has(tabId)) return null
+    return (
+      <div key={tabId} className="kb-view-fade flex-1 min-h-0" style={on ? undefined : { display: 'none' }}>
+        <IntelArticleView
+          itemId={intelArticleIdOf(tabId)}
+          onBack={() => handleTabChange('intel')}
+          onClose={() => closeTab(tabId)}
+        />
+      </div>
+    )
   }
 
   // ---- 左栏书签（v3.4.0 批次3）----
@@ -1504,7 +1560,7 @@ export default function App() {
   // 总览空态（看板方案 §5 反馈 9，2026-09-27）：无模块标签也无工具标签 —— 中间卡片壳切半透明档
   // （并去掉卡片自己的渐变图，0.92 不透明度会把粒子盖没），让外壳垫底的主题特效画布透出来；
   // 有标签时维持 88% 实感不动（「中间的标签页还是不要做的太透明」）。
-  const centerEmpty = activeTab === null && !activeToolTab
+  const centerEmpty = activeTab === null && !activeToolTab && !activeIntelTab
 
   // AI 助手快捷键闸门（2026-09-22 拍板）：AI 教学区自己就是 AI 对话区，在那里 Ctrl+J / Ctrl+Shift+J
   // 一律不响应（详见 AI_ASSISTANT_SHORTCUT_DISABLED 的注释）。
@@ -1660,6 +1716,8 @@ export default function App() {
         : <ModuleLoadingFallback />
       // 记账：工作台内 Tab，中央三视图 + 左栏模块侧栏 portal；录入/导入在右栏「记账」面板
       case 'accounting': return <AccountingModule isActive={on} sidebarEl={on && railModule === 'accounting' ? wbModSlotEl : null} sidebarHosted={on} />
+      // 情报（v3.12.0）：工作台内 Tab，feed 主页 + 左栏源过滤侧栏 portal；文章页签走动态 id（§6.2）
+      case 'intel': return <IntelModule isActive={on} sidebarEl={on && railModule === 'intel' ? wbModSlotEl : null} sidebarHosted={on} onOpenArticle={handleOpenIntelArticle} onOpenSettings={() => handleTabChange('settings')} onExpandAssistant={handleExpandIntelAssistant} />
       case 'settings': return <SettingsModule />
       case 'toolbox': return <ToolboxModule homeSignal={toolboxHomeSignal} />
       case 'plugins': return <PluginsModule />
@@ -1702,15 +1760,21 @@ export default function App() {
   const mainPageBar = (
     <WorkbenchPageBar
       tabs={openTabs}
-      active={activeToolTab ?? activeTab}
+      active={activeToolTab ?? activeIntelTab ?? activeTab}
       onSelect={(id) => {
         if (isToolTabId(id)) {
           setActiveTab(null)
+          setActiveIntelTab(null)
           setActiveToolTab(id)
           if (!wbLayout.leftLocked) {
             const tid = toolIdOfTab(id)
             setRailTool(TOOLS_WITH_SIDEBAR.has(tid) ? tid : null)
           }
+        } else if (isIntelArticleTab(id)) {
+          // 情报文章页签：激活条目页（去重登记已在 openTabs），左栏不动（文章页不切侧栏）
+          setActiveTab(null)
+          setActiveToolTab(null)
+          setActiveIntelTab(id)
         } else if (id === 'quiz') {
           handleTabChange('knowledge')
           window.setTimeout(() => window.dispatchEvent(new CustomEvent(LOCATE_QUIZ_VIEW_EVENT)), 100)
@@ -1738,6 +1802,7 @@ export default function App() {
       knowledgeSlotRef={wbKnowledgePageRef}
       showQuizEntry={QUIZ_ENTRY_ENABLED && quizViewOpen && openTabs.includes('knowledge')}
       quizEntryActive={quizViewOpen && activeTab === 'knowledge'}
+      intelTitleOf={(tabId) => intelTitlesRef.current.get(intelArticleIdOf(tabId))}
       hidePages={zenLevel >= 1}
       lead={activeTab === 'knowledge' && noteJumpFrom ? (
         <button
@@ -1775,6 +1840,7 @@ export default function App() {
               // 总览态下页面条原样保留各标签，点击即恢复；收尾口径与 closeTab / 反馈1 返回一致。
               onWorkbench={() => {
                 setActiveToolTab(null)
+                setActiveIntelTab(null)
                 // 反馈 F-5（2026-09-30）：恢复「进整窗模块前」的工作台标签（仍在 openTabs 时）；
                 // 否则保留反馈 10 的安全兜底——落总览态，避免旧兜底落到「没开页面的 knowledge」而左栏被拉错。
                 const back = lastWorkbenchTabRef.current
@@ -1864,6 +1930,8 @@ export default function App() {
                   accountingActive={activeTab === 'accounting'}
                   // 日程模块激活 → 右栏出现条件性「日程助手」Tab（日程 AI 化 P1）
                   scheduleActive={activeTab === 'schedule'}
+                  // 情报模块激活 → 右栏出现条件性「📡 情报助手」Tab（v3.12.0 D5：source='intel' 独立会话）
+                  intelActive={activeTab === 'intel'}
                   pendingAccountingEdit={pendingAccountingEdit}
                   onConsumeAccountingEdit={() => setPendingAccountingEdit(null)}
                   pendingAccountingRule={pendingAccountingRule}
@@ -2001,11 +2069,24 @@ export default function App() {
                           .map((t) => renderToolMounted(t, false))}
                       </div>
                     )}
+                    {/* 情报文章页签宿主（v3.12.0 §6.2）：与工具标签同款绝对定位保活层。
+                        门条件含 activeIntelTab 本身（同 renderToolMounted 的「鸡生蛋」死门教训）。 */}
+                    {(activeIntelTab || mountedIntelTabs.current.size > 0) && (
+                      <div
+                        className="absolute inset-y-0 left-0 z-20 flex min-h-0 w-full flex-col"
+                        style={{ display: activeIntelTab ? undefined : 'none' }}
+                      >
+                        {activeIntelTab && renderIntelArticleMounted(activeIntelTab, true)}
+                        {Array.from(mountedIntelTabs.current)
+                          .filter((t) => t !== activeIntelTab)
+                          .map((t) => renderIntelArticleMounted(t, false))}
+                      </div>
+                    )}
                     {/* 全关空态（2026-09-17 拍板③）：无激活模块且无工具标签时显示引导页；
                         绝对定位铺满主栏区域（不参与 flex 流，避免挤动两栏几何）。
                         2026-10-13：图标下补三条指令提示（组件 = components/workbench/WorkbenchEmptyState，
                         动作真源 = 上方 openCommandPalette / openQuickOpen / toggleWorkbenchAi）。 */}
-                    {activeTab === null && !activeToolTab && (
+                    {activeTab === null && !activeToolTab && !activeIntelTab && (
                       <WorkbenchEmptyState hints={buildEmptyHints()} />
                     )}
                   </div>

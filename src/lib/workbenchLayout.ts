@@ -21,8 +21,8 @@ export interface WorkbenchLayout {
   leftLocked: boolean
   /** 右栏收起 */
   rightCollapsed: boolean
-  /** 右栏 Tab：小工具 / AI / 分享 + 条件性 'reading' / 'account' / 'schedule'（见 RIGHT_PANEL_TAB_IDS_ALL） */
-  rightTab: 'widgets' | 'ai' | 'share' | 'reading' | 'account' | 'schedule'
+  /** 右栏 Tab：小工具 / AI / 分享 + 条件性 'reading' / 'account' / 'schedule' / 'intel'（见 RIGHT_PANEL_TAB_IDS_ALL） */
+  rightTab: 'widgets' | 'ai' | 'share' | 'reading' | 'account' | 'schedule' | 'intel'
   /** 右栏控件排序（今日任务 task / 今日打卡 habit / 番茄钟 pomo / 网址导航 nav / 密码生成器 password） */
   widgetOrder: string[]
   /** 右栏隐藏的控件 id（⋯ 菜单选显） */
@@ -81,8 +81,9 @@ export const WORKBENCH_PANEL_TAB_IDS = ['widgets', 'ai', 'share'] as const
  * 有书在读时才渲染、点击才持久化 rightTab='reading'；不进 ⋯ 选显菜单、不持久化显隐。
  * 关书回落逻辑在 WorkbenchRightPanel.effectiveTab（回落到 widgets/ai，不改持久化值的语义见彼处）。
  * 两集合刻意不同，勿合并（防 list-drift：契约脚本双向断言）。
+ * v3.12.0：'intel'（📡 情报助手）同 'reading' 家族 —— 情报模块激活时出现的条件 Tab，不进基础三元组。
  */
-export const RIGHT_PANEL_TAB_IDS_ALL = ['widgets', 'ai', 'share', 'reading', 'account', 'schedule'] as const
+export const RIGHT_PANEL_TAB_IDS_ALL = ['widgets', 'ai', 'share', 'reading', 'account', 'schedule', 'intel'] as const
 
 export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   leftCollapsed: false,
@@ -113,7 +114,7 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
       if (o.leftMode === 'overview' || o.leftMode === 'tree') base.leftMode = o.leftMode
       if (typeof o.leftLocked === 'boolean') base.leftLocked = o.leftLocked
       if (typeof o.rightCollapsed === 'boolean') base.rightCollapsed = o.rightCollapsed
-      if (o.rightTab === 'widgets' || o.rightTab === 'ai' || o.rightTab === 'share' || o.rightTab === 'reading' || o.rightTab === 'account' || o.rightTab === 'schedule') base.rightTab = o.rightTab
+      if (o.rightTab === 'widgets' || o.rightTab === 'ai' || o.rightTab === 'share' || o.rightTab === 'reading' || o.rightTab === 'account' || o.rightTab === 'schedule' || o.rightTab === 'intel') base.rightTab = o.rightTab
       if (Array.isArray(o.widgetOrder)) {
         const known = new Set<string>(WORKBENCH_WIDGET_IDS)
         const filtered = o.widgetOrder.filter((x): x is string => typeof x === 'string' && known.has(x))
@@ -190,7 +191,7 @@ export const AI_ASSISTANT_SHORTCUT_DISABLED: readonly TabName[] = ['aiTeaching']
  * 2026-09-27 看板：唯一一个「书签 key 与 tab 同名」的成员 —— 点它开的不是某个模块的标签页，
  * 而是整窗看板（见 WORKBENCH_TABBAR_EXCLUDED）。
  */
-export type RailModule = 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat' | 'dashboard' | 'terminal' | 'accounting' | 'aiAssistant'
+export type RailModule = 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat' | 'dashboard' | 'terminal' | 'accounting' | 'aiAssistant' | 'intel'
 
 export interface WorkbenchBookmark {
   key: RailModule
@@ -221,6 +222,8 @@ export const WORKBENCH_BOOKMARKS: readonly WorkbenchBookmark[] = [
   { key: 'terminal', label: '终端', tab: 'terminal' },
   // v3.9.0 AI助手：工作台内模块，侧栏 = 作用域树 + 任务列表（拍板：只靠书签 + 磁贴进）
   { key: 'aiAssistant', label: 'AI助手', tab: 'aiAssistant' },
+  // v3.12.0 情报：工作台内模块（docs/intel-module-plan.md），侧栏 = 源过滤 + 收藏/AI 推荐
+  { key: 'intel', label: '情报', tab: 'intel' },
 ]
 
 /**
@@ -244,6 +247,8 @@ export const BOOKMARK_COLORS: Readonly<Record<RailModule, BookmarkColor>> = {
   terminal: { fg: '#4e8f86', bg: 'rgba(78,143,134,.16)' },
   // v3.9.0 AI助手：品红，与既有八色区分开
   aiAssistant: { fg: '#b0497f', bg: 'rgba(176,73,127,.15)' },
+  // v3.12.0 情报：雷达青（原型 bmIntel 用色 #1a9e9e），与看板的青蓝区分
+  intel: { fg: '#1a9e9e', bg: 'rgba(26,158,158,.15)' },
 }
 
 /**
@@ -264,6 +269,8 @@ export const RAIL_FOLLOW_MAP: Readonly<Partial<Record<TabName, RailModule>>> = {
   terminal: 'terminal',
   // v3.9.0 AI助手：AI助手标签激活 → 左栏切作用域/任务侧栏
   aiAssistant: 'aiAssistant',
+  // v3.12.0 情报：情报标签激活 → 左栏切源过滤侧栏
+  intel: 'intel',
 }
 
 /**

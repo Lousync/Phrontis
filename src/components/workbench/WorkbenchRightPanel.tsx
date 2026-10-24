@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat, Share2, ReceiptText, CalendarDays } from 'lucide-react'
+import { Bot, BookOpen, MoreHorizontal, History, FileText, MonitorX, ListTodo, CalendarCheck2, Timer, KeyRound, Globe, Cat, Share2, ReceiptText, CalendarDays, Radar } from 'lucide-react'
 import type { BookKind, KnowledgePage } from '../../types'
 import { getKnowledgePages } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
@@ -26,6 +26,7 @@ import { useAssistantChat } from '../shared/AssistantPanel/useAssistantChat'
 import { QuoteChips } from '../shared/AssistantPanel/QuoteChips'
 import { AccountingPanel } from '../../modules/accounting/AccountingPanel'
 import { ScheduleRightPanel } from '../../modules/schedule/ScheduleRightPanel'
+import { IntelAssistantPanel } from '../../modules/intel/IntelAssistantPanel'
 import type { PluginTool } from '../../lib/pluginService'
 
 /**
@@ -96,6 +97,8 @@ interface Props {
   accountingActive?: boolean
   /** 日程模块激活时出现条件 Tab「🗓 日程助手」（日程 AI 化 P1）；缺省 false */
   scheduleActive?: boolean
+  /** 情报模块激活时出现条件 Tab「📡 情报助手」（v3.12.0 D5，source='intel' 独立会话）；缺省 false */
+  intelActive?: boolean
   /** 记账：中央「记一笔 / 编辑某笔」投递（App 层监听，见 App 的 pendingAccountingEdit）；'new' 或流水 id */
   pendingAccountingEdit?: string | 'new' | null
   onConsumeAccountingEdit?: () => void
@@ -136,7 +139,7 @@ function PanelTabIcon({ id, size }: { id: string; size: number }) {
 const PANEL_TAB_TITLE: Record<string, string> = { widgets: '小工具', ai: 'AI', share: '分享' }
 const PANEL_TAB_LABEL: Record<string, string> = { widgets: '小工具', ai: 'AI 对话 / 面板', share: '分享卡片' }
 
-export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiUsagePanel = false, onExpandAiChat, onOpenChangeFile, reading = null, accountingActive = false, scheduleActive = false, pendingAccountingEdit = null, onConsumeAccountingEdit, pendingAccountingRule = null, onConsumeAccountingRule, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
+export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, onOpenTool, onOpenPluginTool, onOpenFile, onOpenPage, onOpenSchedule, aiUsagePanel = false, onExpandAiChat, onOpenChangeFile, reading = null, accountingActive = false, scheduleActive = false, intelActive = false, pendingAccountingEdit = null, onConsumeAccountingEdit, pendingAccountingRule = null, onConsumeAccountingRule, onLocatePdfPage, onLocateExcerpt, pendingAsk = null, onConsumePendingAsk, absorbSurplus = false }: Props) {
   const { s, update } = useSettings()
   const layout = useMemo(() => parseWorkbenchLayout(s.workbenchLayout), [s.workbenchLayout])
   const patch = useCallback((p: Partial<WorkbenchLayout>) => {
@@ -153,13 +156,16 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
   const readingOn = !!reading
   const accountingOn = !!accountingActive
   const scheduleOn = !!scheduleActive
+  const intelOn = !!intelActive
   const effectiveTab = layout.rightTab === 'reading'
     ? (readingOn ? 'reading' : visiblePanelTabs[0])
     : layout.rightTab === 'account'
       ? (accountingOn ? 'account' : visiblePanelTabs[0])
       : layout.rightTab === 'schedule'
         ? (scheduleOn ? 'schedule' : visiblePanelTabs[0])
-        : (visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0])
+        : layout.rightTab === 'intel'
+          ? (intelOn ? 'intel' : visiblePanelTabs[0])
+          : (visiblePanelTabs.includes(layout.rightTab) ? layout.rightTab : visiblePanelTabs[0])
   const setPanelTab = (id: (typeof WORKBENCH_PANEL_TAB_IDS)[number]) => patch({ rightTab: id })
 
   // ── B-26 划词引用胶囊（与悬浮侧栏同口径）────────────────────────────────────
@@ -362,6 +368,23 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
               <CalendarDays size={14} />
             </button>
           )}
+          {/* 情报助手 Tab：情报模块激活才出现（条件性入口，不进 ⋯ 菜单）；点击展开右栏并切到情报助手（v3.12.0 D5） */}
+          {intelActive && (
+            <button
+              data-wb="rpTab"
+              data-wb-rp-tab="intel"
+              data-wb-rp-active={effectiveTab === 'intel' ? '1' : '0'}
+              onClick={() => patch({ rightTab: 'intel', rightCollapsed: false })}
+              title="情报助手（情报模块激活时出现）"
+              className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                effectiveTab === 'intel'
+                  ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
+                  : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+              }`}
+            >
+              <Radar size={14} />
+            </button>
+          )}
           <div className="ml-auto">
             <button
               ref={ptMoreRef}
@@ -484,6 +507,9 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
             pendingRule={pendingAccountingRule} onConsumeRule={onConsumeAccountingRule} />
         ) : effectiveTab === 'schedule' ? (
           <ScheduleRightPanel />
+        ) : effectiveTab === 'intel' ? (
+          /* ---- 情报助手态（v3.12.0 D5/D6）：source='intel' 独立会话 + 只读情报池的窄工具面 ---- */
+          <IntelAssistantPanel />
         ) : (
           /* ---- AI 态（批次5，方案 §4）：aiChat / AI助手模块激活中 → 用量面板原位替换；否则小对话 + ⤢ ---- */
           aiUsagePanel && onOpenChangeFile ? (

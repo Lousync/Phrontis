@@ -107,7 +107,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'sidebar', label: '折叠 / 展开侧栏', desc: '展开 / 折叠侧栏',
     keys: [['Ctrl', 'B']], group: 'global', scope: 'global', palette: true,
     conflictNote: '编辑器（Monaco / LiveMarkdown）内归「加粗」，App 侧靠 isEditingInput 对 .monaco-editor 让位（src/lib/shortcuts.ts）',
-    sources: ['src/App.tsx:1455 @ if (e.ctrlKey && !e.altKey && e.key ==='],
+    sources: ['src/App.tsx:1511 @ if (e.ctrlKey && !e.altKey && e.key ==='],
   },
   {
     id: 'escape', label: '关闭弹窗 / 返回列表', desc: '关闭弹窗 / 返回列表',
@@ -119,24 +119,24 @@ export const COMMANDS: CommandDef[] = [
     id: 'palette', label: '命令面板', desc: '命令面板',
     keys: [['Ctrl', 'Shift', 'P']], group: 'global', scope: 'global', palette: false,
     note: '刻意不进命令面板自身（自指）——buildEmptyHints / buildCommandItems 都遵守这条',
-    sources: ['src/App.tsx:317 @ if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e'],
+    sources: ['src/App.tsx:321 @ if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e'],
   },
   {
     id: 'quick-open', label: '快速打开文件', desc: '快速打开文件（按标题 / 路径搜仓库页面）',
     keys: [['Ctrl', 'O']], group: 'global', scope: 'global', palette: true,
     note: '2026-10-13 博客大纲改键 Ctrl+Alt+O 让位给本键（原先两条 window 监听都会跑）',
-    sources: ['src/App.tsx:333 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !'],
+    sources: ['src/App.tsx:337 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !'],
   },
   {
     id: 'global-search', label: '全局搜索', desc: '全局搜索（左栏搜索态：标题、正文、目录、标签）',
     keys: [['Ctrl', 'P'], ['Ctrl', '`'], ['Ctrl', 'Shift', 'F']], group: 'global', scope: 'global', palette: true,
     note: '三个键同效、都指向左栏搜索态（App.tsx:304 与 :309 同一去向）。原表把这仨拆散且 Ctrl+P 错挂在「知识库 — 阅读」下',
-    sources: ['src/App.tsx:323 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !', 'src/App.tsx:328 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
+    sources: ['src/App.tsx:327 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !', 'src/App.tsx:332 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
   },
   {
     id: 'ai-side', label: 'AI 助手', desc: 'AI 助手开关（工作台右栏；整窗模块下为悬浮助手）',
     keys: [['Ctrl', 'J']], group: 'global', scope: 'global', palette: true,
-    sources: ['src/App.tsx:1549 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
+    sources: ['src/App.tsx:1605 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
   },
   {
     id: 'ai-full', label: 'AI 助手 · 全屏学堂', desc: 'AI 助手：进入全屏学堂',
@@ -151,7 +151,7 @@ export const COMMANDS: CommandDef[] = [
     // 否则会列出一条「点了没反应」的命令
     requires: { workbench: true, fullWindowTab: false },
     note: '整窗模块下左右栏本就退场，handler 里 fullWindowTab 早退（App.tsx:1395）',
-    sources: ['src/App.tsx:1521 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
+    sources: ['src/App.tsx:1577 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
   },
   {
     id: 'undo', label: '撤销文件操作', desc: '撤销上一文件操作（重命名 / 删除 / 移动）',
@@ -168,13 +168,13 @@ export const COMMANDS: CommandDef[] = [
     id: 'zoom-in', label: '界面放大', desc: '界面放大',
     keys: [['Ctrl', '=']], group: 'global', scope: 'global', palette: true,
     conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1380）',
-    sources: ['src/App.tsx:1434 @ NumpadAdd'],
+    sources: ['src/App.tsx:1490 @ NumpadAdd'],
   },
   {
     id: 'zoom-out', label: '界面缩小', desc: '界面缩小',
     keys: [['Ctrl', '-']], group: 'global', scope: 'global', palette: true,
     conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1380）',
-    sources: ['src/App.tsx:1439 @ NumpadSubtract'],
+    sources: ['src/App.tsx:1495 @ NumpadSubtract'],
   },
   {
     id: 'sys-day', label: '日程与打卡小窗开关', desc: '日程与打卡小窗开关（系统级）',
@@ -205,12 +205,12 @@ export const COMMANDS: CommandDef[] = [
     id: 'kb-back', label: '页面历史：后退', desc: '页面历史：后退（笔记区顶栏最左那颗箭头）',
     keys: [['Alt', '←']], group: 'kbEditor', scope: 'note', palette: false,
     note: '对账原型曾把本键锚到 PageEditor 里 Alt+A 那一行（不再写行号 —— 它随代码漂），真实判据在 knowledge/index.tsx',
-    sources: ['src/modules/knowledge/index.tsx:1759 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
+    sources: ['src/modules/knowledge/index.tsx:1769 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
     id: 'kb-fwd', label: '页面历史：前进', desc: '页面历史：前进',
     keys: [['Alt', '→']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1759 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
+    sources: ['src/modules/knowledge/index.tsx:1769 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
     id: 'kb-ai-inline', label: 'AI 内联续写建议', desc: 'AI 内联续写建议：立即请求一条（Tab 采纳 / Esc 拒绝；停顿后自动给出）',
@@ -291,17 +291,17 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'sb-copy', label: '复制选中项', desc: '复制选中的页面 / 目录到内部剪贴板（非输入框时）',
     keys: [['Ctrl', 'C']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1807 @ // Ctrl+C — copy selected item to internal clipb'],
+    sources: ['src/modules/knowledge/index.tsx:1817 @ // Ctrl+C — copy selected item to internal clipb'],
   },
   {
     id: 'sb-cut', label: '剪切选中项', desc: '剪切选中的页面 / 目录（非输入框时）',
     keys: [['Ctrl', 'X']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1820 @ // Ctrl+X — cut selected item'],
+    sources: ['src/modules/knowledge/index.tsx:1830 @ // Ctrl+X — cut selected item'],
   },
   {
     id: 'sb-paste', label: '粘贴到选中目标', desc: '粘贴内部剪贴板到选中目标（非输入框时）',
     keys: [['Ctrl', 'V']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1843 @ pasteExternalFromClipboard(resolvePasteDir(), false)'],
+    sources: ['src/modules/knowledge/index.tsx:1853 @ pasteExternalFromClipboard(resolvePasteDir(), false)'],
   },
 
   // ---------------------------------------------------------------- 知识库 — Tab 管理
@@ -311,24 +311,24 @@ export const COMMANDS: CommandDef[] = [
     // 只在笔记模块激活时出现：Ctrl+N 在笔记 / 博客 / 日程都有，靠 tabs 区分（A1 的门控）
     requires: { tabs: ['knowledge'] },
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门）：笔记 / 博客 / 日程都占 Ctrl+N，各管各的',
-    sources: ['src/modules/knowledge/index.tsx:1770 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.'],
+    sources: ['src/modules/knowledge/index.tsx:1780 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.'],
   },
   {
     id: 'kb-close-tab', label: '关闭当前 Tab', desc: '关闭当前打开的 Tab 页',
     keys: [['Ctrl', 'W']], group: 'kbTabs', scope: 'note', palette: true,
     // 模块内命令进面板（L2 第三批）：只在笔记模块激活时出现
     requires: { tabs: ['knowledge'] },
-    sources: ['src/modules/knowledge/index.tsx:1782 @ // Ctrl+W — close current tab'],
+    sources: ['src/modules/knowledge/index.tsx:1792 @ // Ctrl+W — close current tab'],
   },
   {
     id: 'kb-next-tab', label: '下一个 Tab', desc: '切换到下一个 Tab',
     keys: [['Ctrl', 'Tab']], group: 'kbTabs', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1790 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
+    sources: ['src/modules/knowledge/index.tsx:1800 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
   },
   {
     id: 'kb-prev-tab', label: '上一个 Tab', desc: '切换到上一个 Tab',
     keys: [['Ctrl', 'Shift', 'Tab']], group: 'kbTabs', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1790 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
+    sources: ['src/modules/knowledge/index.tsx:1800 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
   },
 
   // ---------------------------------------------------------------- 知识库 — 阅读
@@ -337,13 +337,13 @@ export const COMMANDS: CommandDef[] = [
     keys: [['Ctrl', 'Shift', 'R']], group: 'kbReading', scope: 'note', palette: true,
     // 模块内命令进面板（L2 第三批）：只在笔记模块激活时出现
     requires: { tabs: ['knowledge'] },
-    sources: ['src/modules/knowledge/index.tsx:1776 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
+    sources: ['src/modules/knowledge/index.tsx:1786 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
   },
   {
     id: 'kb-immersive-esc', label: '沉浸阅读退出', desc: '沉浸阅读退出',
     keys: [['Escape']], group: 'kbReading', scope: 'note', palette: false,
     conflictNote: '仅沉浸阅读态接管 Escape；非沉浸态归「返回页面列表」',
-    sources: ['src/modules/knowledge/index.tsx:1776 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
+    sources: ['src/modules/knowledge/index.tsx:1786 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
   },
 
   // ---------------------------------------------------------------- 电子书阅读器（PDF + EPUB）
@@ -351,7 +351,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'pdf-find', label: 'PDF 内搜索', desc: 'PDF 阅读器内搜索',
     keys: [['Ctrl', 'F']], group: 'pdfKeys', scope: 'pdf', palette: false,
     conflictNote: '与写作面的 Ctrl+F 同键：焦点在 PDF 阅读器时归阅读器自处理',
-    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1199 @ && (e.ctrlKey || e.metaKey)) {'],
+    sources: ['src/components/shared/pdf/PdfReaderView.tsx:1196 @ && (e.ctrlKey || e.metaKey)) {'],
   },
   {
     id: 'pdf-next', label: 'PDF 下一页', desc: 'PDF 下一页',
@@ -386,7 +386,7 @@ export const COMMANDS: CommandDef[] = [
     requires: { tabs: ['knowledge', 'bookshelf'] },
     note: '三条 PDF 缩放键此前从未进过设置页，手册《键盘快捷键》也没有 PDF 一节（P2 生成时一并补）。本条 2026-10-13 进面板；与它同键的 pdf-zoom-in / pdf-zoom-out **不进** —— 面板里已经有全局「界面放大 / 缩小」（zoom-in / zoom-out），再加一对同名近义命令会互相干扰（也用不着：阅读器里 Ctrl+= / Ctrl+- 本来就生效）',
     sources: [
-      'src/components/shared/pdf/PdfReaderView.tsx:1198 @ && (e.ctrlKey || e.metaKey)) { e.preventDefault(',
+      'src/components/shared/pdf/PdfReaderView.tsx:1196 @ && (e.ctrlKey || e.metaKey)) { e.preventDefault(',
       'src/components/shared/pdf/PdfReaderView.tsx:1245 @ window.addEventListener(KB_PDF_ZOOM_FIT, onZoomFit)',
     ],
   },

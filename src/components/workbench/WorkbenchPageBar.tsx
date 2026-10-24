@@ -1,9 +1,10 @@
 import { Fragment, useRef, useState } from 'react'
-import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical, FileQuestion } from 'lucide-react'
+import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical, FileQuestion, Radar } from 'lucide-react'
 import { PluginIcon, BookMarketIcon, UsageIcon } from '../shared/ModuleIcons'
 import type { TabName } from '../../types'
 import { labelOf } from '../../lib/appModules'
 import { isToolTabId, toolIdOfTab, findTool } from './toolRegistry'
+import { isIntelArticleTab, intelArticleIdOf } from '../../modules/intel/tabs'
 import { useStripScroll, StripEdges } from './useStripScroll'
 
 /**
@@ -42,6 +43,8 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   usage: <UsageIcon size={14} />,
   devtools: <FlaskConical size={14} />,
   quiz: <FileQuestion size={14} />,
+  // 情报（v3.12.0）：feed 主页签与文章页签共用雷达图标（文章页签走动态 id，见下方 tabLabel/tabIcon 分支）
+  intel: <Radar size={14} />,
 }
 
 /** 未收录模块的兜底图标（新增 Tab 忘配图标时不出空白） */
@@ -51,10 +54,15 @@ const FALLBACK_ICON = <BookText size={14} />
  *  （editor 曾在此列，2026-09-20 随编辑器模块退役移除） */
 export const PAGE_OWNED: readonly string[] = ['knowledge']
 
-function tabLabel(id: string): string {
+function tabLabel(id: string, intelTitleOf?: (tabId: string) => string | undefined): string {
   if (isToolTabId(id)) return findTool(toolIdOfTab(id))?.name ?? '工具'
   // quiz 不是 TabName（错题本 = 知识库的错题本子视图，2026-09-19 起在页面条有专属条目）
   if (id === 'quiz') return '错题本'
+  // 情报文章页签（v3.12.0）：条目标题截 12 字符；标题映射缺失（重启恢复理论态）回落「情报」
+  if (isIntelArticleTab(id)) {
+    const t = intelTitleOf?.(id)?.replace(/\s+/g, ' ').trim()
+    return t ? (t.length > 12 ? `${t.slice(0, 12)}…` : t) : '情报'
+  }
   return labelOf(id as TabName)
 }
 
@@ -64,6 +72,7 @@ function tabIcon(id: string): React.ReactNode {
     if (t) return <t.Icon size={14} />
     return <Wrench size={14} />
   }
+  if (isIntelArticleTab(id)) return <Radar size={14} />
   return TAB_ICONS[id] ?? FALLBACK_ICON
 }
 
@@ -106,9 +115,11 @@ interface Props {
   lead?: React.ReactNode
   /** 隐藏页签组（禅模式 Z1+） */
   hidePages?: boolean
+  /** 情报文章页签（intel-a:<itemId>）的标题反查（App 持 itemId → 标题映射；缺省回落「情报」） */
+  intelTitleOf?: (tabId: string) => string | undefined
 }
 
-export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, editorSlotRef, knowledgeSlotRef, showQuizEntry = false, quizEntryActive = false, trail = null, lead = null, hidePages = false }: Props) {
+export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, editorSlotRef, knowledgeSlotRef, showQuizEntry = false, quizEntryActive = false, trail = null, lead = null, hidePages = false, intelTitleOf }: Props) {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const dragIdRef = useRef<string | null>(null)
@@ -205,7 +216,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
                     onDrop={(e) => handleDrop(e, id)}
                     onClick={() => onSelect(id)}
                     onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(id) } }}
-                    title={tabLabel(id)}
+                    title={tabLabel(id, intelTitleOf)}
                     className={`kb-edge-tab group flex max-w-[200px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
                       isActive
                         ? 'kb-edge-tab-active h-[34px] text-[var(--text-primary)]'
@@ -213,7 +224,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
                     }`}
                   >
                     <span className={`shrink-0 ${isActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{tabIcon(id)}</span>
-                    <span className="max-w-[140px] truncate">{tabLabel(id)}</span>
+                    <span className="max-w-[140px] truncate">{tabLabel(id, intelTitleOf)}</span>
                     <button
                       onClick={(e) => { e.stopPropagation(); onClose(id) }}
                       onAuxClick={(e) => e.stopPropagation()}

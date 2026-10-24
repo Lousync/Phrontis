@@ -33,7 +33,7 @@ export interface EntryFilter { date?: string; tagId?: string; pinnedOnly?: boole
 export interface CreateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date: string; tags?: string[]; states?: string }
 export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date?: string; isPinned?: boolean; isStarred?: boolean; tags?: string[]; states?: string }
 export interface Tag { id: string; name: string; color: string }
-export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'aiAssistant' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal' | 'accounting' | 'usage'
+export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'aiAssistant' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal' | 'accounting' | 'usage' | 'intel'
 
 // ===== 记账模块 =====
 // 主进程侧同形状声明见 electron/lib/kbStore/accountingVaultRepo.ts（跨线各侧各声明一次的仓规）
@@ -1360,7 +1360,7 @@ export interface AgentContextInfo {
 
 /** 会话来源：把「通用 AI 助手」（侧栏 / AI 学堂）与「AI 教学」的会话列表互相隔离。
  *  二者同表存储、同一套 AgentRunner，仅列表展示分流。与主进程 agentSessionRepo 同构。 */
-export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant'
+export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant' | 'intel'
 
 export interface AgentSessionInfo {
   id: string
@@ -2324,6 +2324,15 @@ export interface ElectronAPI {
   scheduleRecurringUndoSettle: (todoIds: string[], restore: Array<{ ruleId: string; lastPostedDate: string }>) => Promise<number>
   /** 日程截止提醒的系统通知被点击 → 主窗口切到日程模块 */
   onScheduleReminderClick: (cb: () => void) => () => void
+  // intel（v3.12.0 情报模块）
+  intelGetItems: () => Promise<{ items: IntelItem[]; meta: IntelMeta }>
+  intelRefresh: () => Promise<IntelMeta>
+  intelToggleFav: (id: string) => Promise<IntelItem | null>
+  intelGetArticle: (id: string) => Promise<{ md: string; url: string; title: string; cached: boolean } | { error: string }>
+  intelSetAiRec: (rec: IntelAiRec) => Promise<boolean>
+  intelClearAiRec: () => Promise<boolean>
+  intelSetFilter: (filter: { kind: 'paper' | 'chinese' | ''; kw: string }) => Promise<boolean>
+  intelSaveAsNote: (id: string) => Promise<{ ok: true; relPath: string; title: string } | { ok: false; error: string }>
   // knowledge (Scheme A)
   getKnowledgeCategories: () => Promise<KnowledgeCategory[]>
   createKnowledgeCategory: (d: CreateKnowledgeCategoryDTO) => Promise<KnowledgeCategory>
@@ -3164,5 +3173,64 @@ export type BookDownloadStartResult =
 export type BookDownloadAction =
   | 'pause' | 'resume' | 'cancel' | 'retry' | 'pause-all' | 'resume-all' | 'clear-done'
 
+// ===== 情报模块（v3.12.0，docs/intel-module-plan.md §3）=====
+// 主进程消费方：electron/lib/intel/*（pipeline / intelStore）；纯函数在 src/lib/intelPure.ts。
+
+export type IntelSourceKey = 'github' | 'hn' | 'arxiv' | 'openalex' | 'weekly' | 'hf' | 'labs' | 'qbitai'
+export type IntelKind = 'repo' | 'news' | 'paper' | 'weekly' | 'blog'
+
+export interface IntelItem {
+  /** 稳定条目 id = hash 前 12 位 */
+  id: string
+  /** URL 归一化后 sha256 前 40（去重键） */
+  hash: string
+  source: IntelSourceKey
+  kind: IntelKind
+  title: string
+  /** 原文链接（「打开原文」用） */
+  url: string
+  author: string
+  summary: string
+  tags: string[]
+  /** 0~100 质量分（intelPure.intelScore） */
+  score: number
+  /** repo 类热度（stars）；其余源放 points / upvotes / 被引 */
+  stars?: number
+  /** ISO；缺失 '' */
+  publishedAt: string
+  /** ISO 本轮抓取时间 */
+  fetchedAt: string
+  /** 用户收藏（永不被 prune/merge 清除） */
+  fav: boolean
+  favAt?: string
+  /** forks / paperId / points 等源特有字段 */
+  extra?: Record<string, unknown>
+}
+
+export interface IntelAiRec {
+  /** 推荐条目 id 集（有序，按推荐优先级） */
+  ids: string[]
+  /** 用户当时的问句（左栏入口副标题 + feed 顶部 pill 显示） */
+  query: string
+  /** AI 一句话说明 */
+  note?: string
+  updatedAt: string
+}
+
+export interface IntelMeta {
+  aiRec: IntelAiRec | null
+  lastFetchAt: string
+  lastFetchStats?: { ok: IntelSourceKey[]; failed: IntelSourceKey[]; added: number }
+  /** AI 写入的筛选态（builtin.intel.set-filter；feed 顶部 pill 显示，可点掉） */
+  aiFilter?: IntelAiFilter
+}
+
+/** intel:setFilter 写入的筛选态（AI 可设；渲染层 feed 顶部 pill 显示） */
+export interface IntelAiFilter {
+  /** 'paper' = 只看论文（arxiv/openalex/hf）；'chinese' = 只看中文（weekly/qbitai）；'' = 无 */
+  kind: 'paper' | 'chinese' | ''
+  kw: string
+  updatedAt: string
+}
 
 declare global { interface Window { api: ElectronAPI; devtoolsApi?: DevtoolsAPI } }

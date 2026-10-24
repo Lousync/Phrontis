@@ -4,7 +4,7 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：54
+ * 版本数：55
  */
 import type { ReleaseNote } from './types'
 
@@ -73,6 +73,65 @@ export const RELEASE_NOTES = [
           {
             "lead": "",
             "rest": "契约脚本 `.AGENT/scripts/file-duplicate/verify-file-duplicate.mjs`（13 项）；命令真源同步摘除已随 fa42b85 删除的日程停靠/小组件两条快捷键",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "version": "3.12.0",
+    "date": "2026-10-25",
+    "summary": "本版一句话：工作台新增「情报」模块——8 个免 Key 数据源（GitHub 新晋高星 / Hacker News / arXiv / OpenAlex / 阮一峰周刊 / HF Papers / AI 官方博客 / 量子位）一轮抓齐，正文应用内阅读、收藏与存笔记；📡 情报助手独立会话，帮你从池子里推荐、查找、筛选。",
+    "groups": [
+      {
+        "title": "情报",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "一轮抓取 8 个数据源",
+            "rest": "全部免 Key 免登录、大陆可达；单源失败不影响其余源（顶栏显示「N 源失败」，下轮自动重试）；营销水文在入库前拦截（可关）",
+            "sub": []
+          },
+          {
+            "lead": "质量分排序",
+            "rest": "源权重 + 热度对数缩放 + 技术信号词 + 摘要完整度 + 新鲜度；自动抓取间隔可设（关 / 1h / 3h / 1d），超期未收藏条目滚动清理（默认 14 天，收藏豁免）",
+            "sub": []
+          },
+          {
+            "lead": "应用内阅读",
+            "rest": "点卡片新开文章页签（Edge 式，可关），正文经 Defuddle 提取 + 消毒后以 Markdown 渲染；提取失败给「重试 + 在浏览器打开」兜底，绝不在应用内 iframe 任意网页",
+            "sub": []
+          },
+          {
+            "lead": "收藏 ♥ 与存为笔记",
+            "rest": "收藏即时反馈、跨窗口同步；存为笔记走剪藏草稿通道（`.knowbase/_draft/intel/`），编辑器打开即可整理转正",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "📡 情报助手（右栏条件页签）：独立会话（与通用助手物理隔离），只读情报池；「推荐」结果收进左栏「✨ AI 推荐」随时回看，再问即刷新；「只看论文 / 只看中文 / 关键词」直接改列表筛选。通用 AI 助手对情报池只读（可查询，写不进来）",
+            "sub": []
+          },
+          {
+            "lead": "HF 直连不稳可配镜像",
+            "rest": "设置 › 模块 › 情报 › HF API 基址",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "内部",
+        "kind": "internal",
+        "items": [
+          {
+            "lead": "",
+            "rest": "数据落 `.knowbase/modules/intel/`（items / meta / articles 惰性缓存）；管线纯函数与工具 schema 有契约脚本 `verify-intel-pipeline.mjs` / `verify-intel-tools.mjs`",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "情报抓取不携带任何用户数据、无遥测；「打开原文」一律走系统浏览器",
             "sub": []
           }
         ]
