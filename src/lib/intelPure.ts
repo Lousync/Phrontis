@@ -32,11 +32,8 @@ export const SOURCE_META: Record<IntelSourceKey, IntelSourceMeta> = {
   hf:             { label: 'HF Papers',   kind: 'paper',  section: 'tech',     weight: 27, fg: '#c98a00' },
   labs:           { label: 'AI 官方博客', kind: 'blog',   section: 'tech',     weight: 27, fg: '#6f9dff' },
   qbitai:         { label: '量子位',      kind: 'news',   section: 'tech',     weight: 20, fg: '#d4549a' },
-  people_politics: { label: '人民网·时政', kind: 'news',  section: 'domestic', weight: 24, fg: '#c23a2b' },
-  people_world:    { label: '人民网·国际', kind: 'news',  section: 'world',    weight: 24, fg: '#d05a3a' },
-  sina_china:      { label: '新浪·国内',   kind: 'news',  section: 'domestic', weight: 20, fg: '#e07b00' },
-  sina_world:      { label: '新浪·国际',   kind: 'news',  section: 'world',    weight: 20, fg: '#cf9d2f' },
   chinanews:       { label: '中新网·滚动', kind: 'news',  section: 'domestic', weight: 22, fg: '#2f7fbf' },
+  chinanews_world: { label: '中新网·国际', kind: 'news',  section: 'world',    weight: 22, fg: '#3a8fd0' },
   wallstcn:        { label: '华尔街见闻',  kind: 'news',  section: 'finance',  weight: 24, fg: '#b08d2f' },
 }
 
@@ -63,8 +60,8 @@ export function sourceWeightOf(source: string): number {
 
 /** 论文类来源（AI「只看论文」筛选与 feed pill 同口径） */
 export const PAPER_SRCS: readonly IntelSourceKey[] = ['arxiv', 'openalex', 'hf']
-/** 中文来源（AI「只看中文」筛选；v2 起含 6 个新闻源） */
-export const CN_SRCS: readonly IntelSourceKey[] = ['weekly', 'qbitai', 'people_politics', 'people_world', 'sina_china', 'sina_world', 'chinanews', 'wallstcn']
+/** 中文来源（AI「只看中文」筛选；v2.1 起含 3 个新闻源——人民网/新浪 feed 已冻结，见方案 §1 勿再调研清单） */
+export const CN_SRCS: readonly IntelSourceKey[] = ['weekly', 'qbitai', 'chinanews', 'chinanews_world', 'wallstcn']
 
 // ===== URL 归一化 + hash（去重键）=====
 

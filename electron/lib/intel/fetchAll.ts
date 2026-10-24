@@ -8,9 +8,7 @@ import { fetchWeekly } from './sources/weekly'
 import { fetchHf } from './sources/hf'
 import { fetchLabs } from './sources/labs'
 import { fetchQbitai } from './sources/qbitai'
-import { fetchPeoplePolitics, fetchPeopleWorld } from './sources/people'
-import { fetchSinaChina, fetchSinaWorld } from './sources/sina'
-import { fetchChinanews } from './sources/chinanews'
+import { fetchChinanews, fetchChinanewsWorld } from './sources/chinanews'
 import { fetchWallstcn } from './sources/wallstcn'
 import { fetchCustomSource } from './sources/custom'
 import { intelListCustomSources } from './customSources'
@@ -62,11 +60,8 @@ export async function fetchAllIntelSources(get: IntelGetSetting, only?: string):
     ['hf', () => fetchHf(opts.limit, opts.hfBase)],
     ['labs', () => fetchLabs(opts.limit)],
     ['qbitai', () => fetchQbitai(opts.limit)],
-    ['people_politics', () => fetchPeoplePolitics(opts.limit)],
-    ['people_world', () => fetchPeopleWorld(opts.limit)],
-    ['sina_china', () => fetchSinaChina(opts.limit)],
-    ['sina_world', () => fetchSinaWorld(opts.limit)],
     ['chinanews', () => fetchChinanews(opts.limit)],
+    ['chinanews_world', () => fetchChinanewsWorld(opts.limit)],
     ['wallstcn', () => fetchWallstcn(opts.limit)],
   ]
   // 自定义源：单源轮只跑指定那个；全量轮全部参与

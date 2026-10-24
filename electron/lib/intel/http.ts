@@ -61,29 +61,5 @@ export async function fetchText(url: string, timeoutMs = DEFAULT_TIMEOUT_MS, ret
   return new TextDecoder('utf-8', { fatal: false }).decode(buf)
 }
 
-/** 文本转义反转（RSS / Atom 摘要里常见实体） */
-export function decodeEntities(s: string): string {
-  return s
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&#x2F;|&#47;/g, '/')
-    .replace(/&nbsp;|&#160;/g, ' ')
-    .replace(/&hellip;/g, '…')
-    .replace(/&mdash;/g, '—')
-    .replace(/&ndash;/g, '–')
-    .replace(/&#(\d+);/g, (_, n: string) => { try { return String.fromCodePoint(Number(n)) } catch { return '' } })
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, n: string) => { try { return String.fromCodePoint(parseInt(n, 16)) } catch { return '' } })
-}
-
-/** 去标签 + 压空白（RSS description 摘要用） */
-export function stripHtml(s: string): string {
-  return decodeEntities(String(s ?? ''))
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+// decodeEntities / stripHtml 已迁至 ./rss.ts（2026-10-25：rss.ts 做成零依赖纯解析层，
+// 契约脚本 verify-intel-rss.mjs 裸 node 直跑；CDATA 修复也落那边）

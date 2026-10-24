@@ -6,7 +6,7 @@ import { intelGetItems, intelRefresh, intelToggleFav, intelSetFilter, intelClear
 import { useDataChanged } from '../../lib/dataChanged'
 import { useSettings } from '../../lib/SettingsContext'
 import { showToast } from '../../lib/toast'
-import { filterIntelItems, SOURCE_META, INTEL_SOURCE_KEYS, SECTIONS, SECTION_META, sectionOf } from '../../lib/intelPure'
+import { filterIntelItems, SOURCE_META, INTEL_SOURCE_KEYS, SECTIONS, SECTION_META, sectionOf, isEnglishText } from '../../lib/intelPure'
 import { IntelSidebar, type IntelFeedFilter } from './IntelSidebar'
 
 /**
@@ -174,9 +174,10 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
     if (!root) return
     let timer: number | undefined
     const seen = new Set<string>()
-    // pointerover 冒泡委托：卡片内子元素间移动会对同一 id 反复触发，seen/requested 双去重兜住
+    // pointerover 冒泡委托：卡片内子元素间移动会对同一 id 反复触发，seen/requested 双去重兜住；
+    // [data-en] 门控 = 渲染层同款 isEnglishText 预判（与主进程同一实现），中文卡悬停零请求零占位
     const onOver = (e: PointerEvent) => {
-      const el = (e.target as HTMLElement | null)?.closest?.('[data-intel-id]:not([data-zh])') as HTMLElement | null
+      const el = (e.target as HTMLElement | null)?.closest?.('[data-intel-id][data-en]:not([data-zh])') as HTMLElement | null
       const id = el?.dataset.intelId
       if (!id || zhRequestedRef.current.has(id) || seen.has(id)) return
       seen.add(id)
@@ -431,6 +432,7 @@ function HeadlineView({ visible, customNames, onOpen, onFilterSection }: {
                 onClick={() => onOpen(it)}
                 data-intel-id={it.id}
                 data-zh={it.titleZh ? '1' : undefined}
+                data-en={isEnglishText(it.title) || (it.summary ? isEnglishText(it.summary) : false) ? '1' : undefined}
                 className="kb-item-in mb-2 cursor-pointer rounded-[10px] border border-[var(--border-color)] bg-[var(--card-bg)] px-4 py-3.5 transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-hover)]"
                 title={it.url}
               >
@@ -451,6 +453,7 @@ function HeadlineView({ visible, customNames, onOpen, onFilterSection }: {
                 onClick={() => onOpen(it)}
                 data-intel-id={it.id}
                 data-zh={it.titleZh ? '1' : undefined}
+                data-en={isEnglishText(it.title) ? '1' : undefined}
                 className="kb-item-in flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 transition-colors hover:bg-[var(--bg-hover)]"
                 title={it.url}
               >
@@ -524,6 +527,7 @@ function FeedCard({ item, index, pop, pendingZh, customNames, onOpen, onFav }: {
       onClick={onOpen}
       data-intel-id={item.id}
       data-zh={item.titleZh ? '1' : undefined}
+      data-en={isEnglishText(item.title) || (item.summary ? isEnglishText(item.summary) : false) ? '1' : undefined}
       className="kb-cv kb-item-in mb-2.5 cursor-pointer rounded-[10px] border border-[var(--border-color)] bg-[var(--card-bg)] px-3.5 py-3 transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-hover)]"
       style={{ animationDelay: `${Math.min(index * 30, 360)}ms` }}
       title={item.url}

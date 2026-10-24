@@ -3183,7 +3183,7 @@ export type BookDownloadAction =
 // 主进程消费方：electron/lib/intel/*（pipeline / intelStore）；纯函数在 src/lib/intelPure.ts。
 
 export type IntelSourceKey = 'github' | 'hn' | 'arxiv' | 'openalex' | 'weekly' | 'hf' | 'labs' | 'qbitai'
-  | 'people_politics' | 'people_world' | 'sina_china' | 'sina_world' | 'chinanews' | 'wallstcn'
+  | 'chinanews' | 'chinanews_world' | 'wallstcn'
 export type IntelKind = 'repo' | 'news' | 'paper' | 'weekly' | 'blog'
 /** 版面（v2 报纸化）：条目 section = 内置源固定所属版面（自定义源 = 用户所选） */
 export type IntelSection = 'tech' | 'domestic' | 'world' | 'finance'

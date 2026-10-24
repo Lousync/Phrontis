@@ -266,10 +266,7 @@ const SOURCE_DESC: Record<string, string> = {
   hf: '社区点赞筛选的每日 AI 论文；API 基址可配镜像',
   labs: 'DeepMind / OpenAI 官方 RSS + Anthropic 页面解析，标题前缀区分',
   qbitai: '中文 AI 资讯（官方 RSS，大陆可达）',
-  people_politics: '时政·国内版面（官方 RSS）',
-  people_world: '国际版面（官方 RSS）',
-  sina_china: '时政·国内版面（聚焦频道 RSS）',
-  sina_world: '国际版面（聚焦频道 RSS）',
   chinanews: '时政·国内版面（滚动要闻 RSS）',
+  chinanews_world: '国际版面（国际频道 RSS）',
   wallstcn: '财经版面（全球快讯 API，纯文快讯）',
 }
