@@ -1,6 +1,6 @@
 import { onAgentStep, onAgentStream, onAssistantRunState } from './ipc'
 import { showToast } from './toast'
-import { applyStreamEvent, completeTool, createDraft, type StreamDraft } from './agentStreamCore'
+import { applyStreamEvent, completeThink, completeTool, createDraft, type StreamDraft } from './agentStreamCore'
 import type { AgentTraceStep, AgentRunStateEvent } from '../types'
 
 /**
@@ -67,6 +67,8 @@ function ensureSubscribed(): void {
       b.liveSteps = [...b.liveSteps.slice(-19), step]
       // durationMs=0 的是 visual.html 的「生成中」占位事件，不参与完成配对
       if (step.kind === 'tool' && step.durationMs > 0) completeTool(b.draft, step)
+      // llm step 带着本轮 thinkingMs：给对应思考段补权威时长
+      if (step.kind === 'llm') completeThink(b.draft, step)
     }
     notify()
   })

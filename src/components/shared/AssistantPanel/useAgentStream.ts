@@ -1,6 +1,6 @@
 import type { StreamDraft } from '../../../lib/agentStreamCore'
 export type { StreamDraft, ProcessItem } from '../../../lib/agentStreamCore'
-import { applyStreamEvent, completeTool, createDraft } from '../../../lib/agentStreamCore'
+import { applyStreamEvent, completeThink, completeTool, createDraft } from '../../../lib/agentStreamCore'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { onAgentStep, onAgentStream } from '../../../lib/ipc'
 import type { AgentTraceStep } from '../../../types'
@@ -53,6 +53,8 @@ export function useAgentStream(chatIdRef: { current: string }): {
       const d = draftRef.current
       // durationMs=0 的是 visual.html 的「生成中」占位事件，不参与完成配对
       if (d && step.kind === 'tool' && step.durationMs > 0) completeTool(d, step)
+      // llm step 带着本轮 thinkingMs：给对应思考段补权威时长
+      if (d && step.kind === 'llm') completeThink(d, step)
       flushSoon()
     })
     return () => { offStream(); offStep() }

@@ -1085,11 +1085,13 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
   /**
    * 粘贴系统剪贴板里的外部文件/目录到仓库内某个目录（v3.2.0 条目 ③）。
    *
-   * **路径来源为什么在渲染层**：主进程侧唯一的读法是 `clipboard.readBuffer('FileNameW')`，
-   * 实测（2026-09-15 探针，Electron 33.2.0 / win32）它**只能拿到第一条路径**、且载荷里没有
-   * DROPFILES 头——同一次剪贴板，PS 回读 3/3、渲染层 paste 事件 3/3、主进程只得 1/3，
-   * 即多选会**静默丢文件**。故改由渲染层 `paste` 事件 + `webUtils.getPathForFile` 取全量路径
-   * （Electron 32+ 官方路线，File.path 已移除），本通道只负责落盘。
+   * **路径来源（2026-10-20 改）**：主进程 `clipboard:readFilePaths` 直接读文件剪贴板 ——
+   * Linux 的 `text/uri-list` / `x-special/gnome-copied-files`、Windows 的 `FileNameW`
+   * （解析见 `electron/lib/clipboardFilesPure.ts`）。旧路线是渲染层 `paste` 事件 +
+   * `webUtils.getPathForFile`，但 Linux 上焦点在文件树（非可编辑元素）时 Chromium
+   * **不派发 paste 事件**，右键菜单更是没有事件可挂 —— 键盘与菜单都静默失效。
+   * 主进程侧旧的 `clipboard.readBuffer('FileNameW')`（v3.2.0 实测只能拿第一条）也一并
+   * 换成按 CF_HDROP / 裸 UTF-16 双空列表逐条解析。
    *
    * 因而 `srcPaths` 是**不可信输入**，逐条校验（绝对路径 / 真实存在 / 非符号链接）；
    * 目标目录仍由 requireInside 单向守——渲染层永远只说 `{ rootId, relDir }`，不接触落盘绝对路径。

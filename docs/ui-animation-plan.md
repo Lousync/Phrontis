@@ -56,6 +56,7 @@
 | `.kb-item-out` | `opacity→0 + scale(0.98) + 高度塌缩`，180ms | 列表项退场（普通删除，区别于吞噬特效） |
 | `.kb-micro-pop` | `scale 1→0.85→1` 180ms spring | 星标、勾选、开关点击反馈 |
 | `.kb-spin` | `rotate 360°` 0.8s 线性无限循环；形状 = 11px 圆环（描边色可覆盖） | 连续 busy 指示：会话列表「转圈示忙」（N-3）。reduced-motion 降速 2.4s 不停转（运动即语义） |
+| `@keyframes kb-soft-pulse` | `opacity 0.45→1→0.45` 1.4s ease-in-out infinite | AI 过程事件流里「运行中的工具」图标呼吸（v3.10.0）。只动 opacity；reduced-motion 关闭 |
 | `.kb-dock-hint` | `opacity 0→1 + translateX(12px→0)` 170ms | 可拖动浮窗拖近停靠区时的落位预览块（G 类） |
 | `.kb-theme-vt` | `::view-transition-old/new(root)` 交叉淡化 220ms | 主题切换（View Transition），降级走容器级过渡 |
 | `.kb-sweep` | `::after` 短条 `transform: translateX(0→194%)` 1.15s ease-in-out alternate infinite；轨道 2px | AI 回复生成态的等待指示（下滑条）。见 §J 与 `docs/ai-reply-loading-plan.md` |
@@ -153,8 +154,9 @@ AI 教学上下文条 / 书市下载队列，共 7 处）。它是 §五-①「�
 - reduced-motion 降级：动画停，短条铺满整条（`width: 100%; transform: none`）——
   静态下仍读得出「进行中」。
 - 配套（同一轮加的，不是动画令牌）：`.kb-stage` / `.stage-label` / `.kb-stage-dur`（状态行）、
-  `.kb-think*`（思考行，折叠复用 `.kb-collapse`）、`.kb-toolsum*`（完成后的工具摘要行，
-  默认收起、展开体最多 5 步）。首个使用方：`AssistantPanel/StreamBubble.tsx`（三面共用）。
+  `.kb-think*`（思考行，折叠复用 `.kb-collapse`）、`.kb-ev-rail` / `.kb-ev*`（v3.10.0 过程事件流，
+  思考按轮分段、工具耗时内联；完成态 `.kb-procsum*` 默认收起、展开显示全部步骤）。
+  首个使用方：`AssistantPanel/StreamBubble.tsx`（三面共用）。
 
 ### K. 生图卡 → `.kb-img-develop` / `.kb-img-ph` / `.kb-img-progress`（2026-10-14 新增，`docs/ai-image-gen-plan.md` §5.2）
 

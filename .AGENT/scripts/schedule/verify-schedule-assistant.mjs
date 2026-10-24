@@ -74,14 +74,14 @@ check('会话列表按 source 分流', uac.includes("all.filter(x => x.source ==
 /* ★ 2026-10-13（F-8 会话串味）：默认分支原来只写了排除法 `!== 'aiTeaching'`，
    第三来源 schedule 落地时没回头补 ⇒ 日程会话混进通用助手列表（三个宿主都不传 sessionSource）。
    这里把它锁成**白名单**，并配一条负向：排除法不许回来。 */
-check('★ 默认分支是白名单（通用助手只列 assistant）',
-  uac.includes("all.filter(x => (x.source ?? 'assistant') === 'assistant')"))
+check('★ 默认分支是白名单（通用助手只列 assistant / 统一助手）',
+  uac.includes("all.filter(x => (x.source ?? 'assistant') === 'assistant' || x.source === 'aiAssistant')"))
 check('负向：默认分支不再是「只排 aiTeaching」的排除法（那样加第四个来源还会重犯）',
   !uac.includes("all.filter(x => x.source !== 'aiTeaching')"))
 check('★ AI 教学侧同样是白名单（原来用排除法，会把 schedule 也算进去）',
   read('src/modules/ai-teaching/index.tsx').includes("s.source === 'aiTeaching' && !(s.parentSessionId && s.lane === 'side')"))
-check('新建会话带 source', uac.includes('newAgentSession(undefined, sessionSource)'))
-check('发送透传 source', uac.includes('agentChat(sid, body, finalCtx ?? undefined, cid, sessionSource'))
+check('新建会话带 source', uac.includes('newAgentSession(title, sessionSource)'))
+check('发送透传 source', uac.includes('agentChat(sid, body, outgoingCtx, cid, sessionSource'))
 
 const cb = read('src/components/shared/AssistantPanel/ChatBody.tsx')
 check('ChatBody: surface 裁剪通用控件', cb.includes("const scheduleMode = surface === 'schedule'"))
@@ -132,7 +132,7 @@ console.log('\n[会话] 一天一个会话（autoResumeToday）')
 check('hook 支持 autoResumeToday', uac.includes('autoResumeToday?: boolean') && uac.includes("const autoResumeToday = options.autoResumeToday === true"))
 check('按 createdAt 判定今天', uac.includes("(s.createdAt ?? '').slice(0, 10) === today"))
 check('没有今天的会话就新建（日期标题）', uac.includes('await newSession(todayLabel())') && uac.includes('function todayLabel'))
-check('newSession 支持标题', uac.includes('newSession: (title?: string) => Promise<void>'))
+check('newSession 支持标题', uac.includes('newSession: (title?: string) => Promise<AgentSessionInfo | null>'))
 check('面板开启 autoResumeToday', read('src/modules/schedule/ScheduleAssistantPanel.tsx').includes('autoResumeToday: true'))
 
 // ---------- 手册 ----------

@@ -1,10 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  deleteKnowledgeCategory, getKnowledgeCategories, getPathForFile,
+  deleteKnowledgeCategory, getKnowledgeCategories,
   workspaceCreateFile, workspaceGetCurrent, workspaceListDir, workspaceMkdir,
-  workspacePasteExternal, workspaceRename, workspaceTrash,
+  workspaceRename, workspaceTrash,
   copyText, workspaceOpenInSystem,
 } from '../../lib/ipc'
+import {
+  describePasteResult, isElementVisible, isExternalPasteGesture, pasteClipboardFiles,
+} from '../../lib/externalFilePaste'
 import { showToast } from '../../lib/toast'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { recordFileOp } from '../../lib/fileOpHistory'
@@ -272,14 +275,42 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit, sort,
     if (!res?.ok) showToast({ type: 'error', message: res?.error || '打开失败' })
   }, [])
 
-  /** 右键「粘贴」：记住目标目录、聚焦树容器并提示按 Ctrl+V
-   *  （路径只能从渲染层 paste 事件取——主进程 clipboard.readBuffer 拿不全多选，见 knowledge 同款注释） */
+  /** 右键「粘贴」：直接读系统剪贴板里的文件并落盘（不再要求用户再按一次 Ctrl+V）。
+   *  键盘路径见下方 window keydown —— 两者共用 pasteClipboardFiles 一条链路。 */
   const pasteTargetRef = useRef<string>('')
-  const armPaste = (dirRel: string) => {
-    pasteTargetRef.current = dirRel
-    rootRef.current?.focus()
-    showToast({ type: 'info', message: `按 Ctrl+V 粘贴剪贴板中的文件${dirRel ? `到「${dirRel}」` : ''}` })
-  }
+  const pasteInto = useCallback(async (dirRel: string) => {
+    const root = rootIdRef.current
+    if (!root) { showToast({ type: 'error', message: '尚未打开仓库' }); return }
+    const r = await pasteClipboardFiles(root, dirRel)
+    if (!r) { showToast({ type: 'warning', message: '剪贴板里没有可粘贴的文件' }); return }
+    showToast(describePasteResult(r))
+    if (r.pasted.length > 0) {
+      const parent = dirRel.includes('/') ? dirRel.slice(0, dirRel.lastIndexOf('/')) : ''
+      void loadDir(dirRel)
+      if (parent !== dirRel) void loadDir(parent)
+    }
+  }, [loadDir])
+
+  // Ctrl+V：焦点在树里（或页面上任何非编辑元素）时粘外部文件到最近一次右键点选的目录。
+  // 不用元素级 onPaste —— 非可编辑焦点下 Chromium 不派发 paste 事件（Linux 实测），
+  // 且右键菜单没有事件可挂；window keydown 是两个入口都能覆盖的唯一稳定时机。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isExternalPasteGesture(e)) return
+      const el = rootRef.current
+      if (!isElementVisible(el)) return
+      // 只在「焦点在树里」或「焦点没有落在任何具体控件上（body）」时接管，
+      // 避免树模式常驻左栏时抢走顶栏按钮 / 其它面板的 Ctrl+V。
+      const active = document.activeElement
+      const focusedInTree = !!active && (active === el || el.contains(active))
+      const neutralFocus = !active || active === document.body || active === document.documentElement
+      if (!focusedInTree && !neutralFocus) return
+      e.preventDefault()
+      void pasteInto(pasteTargetRef.current)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pasteInto])
 
   const doDelete = (node: TreeNode) => {
     void (async () => {
@@ -350,7 +381,7 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit, sort,
         { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => doCreate('', 'file') },
         { key: 'newDir', label: '新建文件夹', icon: <FolderPlus size={15} />, onSelect: () => doCreate('', 'dir') },
         { key: 'newKn', label: '新建知识页', icon: <FileText size={15} />, onSelect: () => doCreate('', 'knowledge') },
-        { key: 'paste', label: '粘贴系统剪贴板', icon: <ClipboardPaste size={15} />, onSelect: () => armPaste('') },
+        { key: 'paste', label: '粘贴系统剪贴板', icon: <ClipboardPaste size={15} />, onSelect: () => { pasteTargetRef.current = ''; void pasteInto('') } },
       ]
     }
     /* ---- 文件条目（2026-10-12 对齐 Obsidian，docs/file-menu-rework-design.md）----
@@ -391,7 +422,7 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit, sort,
       { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => doCreate(node.relPath, 'file') },
       { key: 'newDir', label: '新建文件夹', icon: <FolderPlus size={15} />, onSelect: () => doCreate(node.relPath, 'dir') },
       { key: 'newKn', label: '新建知识页', icon: <FileText size={15} />, onSelect: () => doCreate(node.relPath, 'knowledge') },
-      { key: 'paste', label: '粘贴系统剪贴板', icon: <ClipboardPaste size={15} />, onSelect: () => armPaste(node.relPath) },
+      { key: 'paste', label: '粘贴系统剪贴板', icon: <ClipboardPaste size={15} />, onSelect: () => { pasteTargetRef.current = node.relPath; void pasteInto(node.relPath) } },
       { separator: true },
       { key: 'expandDir', label: '展开此目录（含子目录）', icon: <ChevronsUpDown size={15} />, onSelect: () => void expandDirRecursive(node.relPath) },
       { key: 'collapseDir', label: '收起此目录', icon: <ChevronsDownUp size={15} />, onSelect: () => collapseDirRecursive(node.relPath) },
@@ -403,37 +434,6 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit, sort,
     return items
   }
 
-  // 粘贴：只拦文件（纯文本放行，编辑区默认行为不受影响）；目标目录 = 最近一次右键点选的目录（缺省根）
-  const handlePaste = (e: React.ClipboardEvent) => {
-    const files = Array.from(e.clipboardData?.files ?? [])
-    if (files.length === 0) return
-    e.preventDefault()
-    void (async () => {
-      const root = rootIdRef.current
-      if (!root) { showToast({ type: 'error', message: '尚未打开仓库' }); return }
-      const paths: string[] = []
-      for (const f of files) {
-        try { const p = getPathForFile(f); if (p) paths.push(p) } catch { /* 取不到路径的条目丢弃 */ }
-      }
-      if (!paths.length) { showToast({ type: 'warning', message: '剪贴板里没有可粘贴的文件' }); return }
-      const dirRel = pasteTargetRef.current
-      const r = await workspacePasteExternal(root, dirRel, paths).catch(() => null)
-      if (!r) { showToast({ type: 'error', message: '粘贴失败' }); return }
-      if (r.pasted.length === 0) {
-        showToast({
-          type: 'warning',
-          message: r.reason === 'empty' ? '剪贴板里没有可粘贴的文件' : `粘贴失败：${r.error || r.skipped[0]?.reason || '未知原因'}`,
-        })
-        return
-      }
-      const skippedNote = r.skipped.length > 0 ? `，已跳过 ${r.skipped.length} 项` : ''
-      showToast({ type: r.skipped.length > 0 ? 'warning' : 'success', message: `已粘贴 ${r.pasted.length} 项${skippedNote}` })
-      const dir = dirRel.includes('/') ? dirRel.slice(0, dirRel.lastIndexOf('/')) : ''
-      void loadDir(dirRel)
-      void loadDir(dir)
-    })()
-  }
-
   if (!rootId) return <div className="px-2 py-3 text-[11.5px] text-[var(--text-muted)]">尚未打开仓库</div>
 
   return (
@@ -441,7 +441,6 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit, sort,
       ref={rootRef}
       tabIndex={-1}
       className="flex flex-col h-full min-h-0 outline-none"
-      onPaste={handlePaste}
     >
       {/* flex 链路：本 div 与 VaultTree 根都要能铺满可视区，否则条目下方的空白
           落在容器上、树根收不到 contextmenu（「空白处右键新建文件点不动」，2026-09-29 修） */}

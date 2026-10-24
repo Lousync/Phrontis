@@ -152,7 +152,7 @@
       "syncDesktopName": true,
       "desktop": {
         "entry": {
-          "DBusActivatable": "true"
+          "StartupWMClass": "knowbase"
         }
       },
       "executableArgs": [

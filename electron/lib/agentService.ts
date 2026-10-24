@@ -55,6 +55,7 @@ import { buildScopeManifest } from './aiAssistantScope'
 import { getPlan, applyPlan, rejectPlan, rollbackTask, listTasks } from './aiAssistantPlan'
 import { getKnowledgeIndex } from './kbStore/knowledgeIndex'
 import { suggestScope } from './aiAssistantScopeSuggestPure'
+import { toolActionLabel } from '../../src/lib/toolLabels'
 
 /**
  * 单轮估算费用（USD）：把 provider 的 prompt/completion/cached 拆成 `modelPricing` 的四桶
@@ -384,43 +385,6 @@ class DeltaBatcher {
     if (this.reasoning) { const d = this.reasoning; this.reasoning = ''; this.emit({ kind: 'thinking', delta: d }) }
     if (this.text) { const d = this.text; this.text = ''; this.emit({ kind: 'text', delta: d }) }
   }
-}
-
-/** 工具注册名 → 过程时间线的动作文案（"正在读取 …"）。未登记的取注册名末段兜底 */
-const TOOL_ACTION_LABELS: Record<string, string> = {
-  'builtin.vault.list': '浏览目录',
-  'builtin.vault.read': '读取文件',
-  'builtin.vault.search': '搜索内容',
-  'builtin.vault.resolve-ref': '解析引用',
-  'builtin.vault.write': '写入文件',
-  'builtin.vault.edit': '修改文件',
-  'builtin.vault.rename': '重命名',
-  'builtin.vault.trash': '移入回收站',
-  'builtin.knowledge.search': '检索知识库',
-  'builtin.knowledge.create-page': '新建知识页',
-  'builtin.blog.create-entry': '新建日记',
-  'builtin.schedule.list-todos': '查看待办',
-  'builtin.schedule.create-todo': '创建待办',
-  'builtin.schedule.update-todo': '修改待办',
-  'builtin.schedule.delete-todo': '删除待办',
-  'builtin.schedule.list-workflows': '查看工作流',
-  'builtin.schedule.get-workflow': '读取工作流',
-  'builtin.schedule.create-workflow': '创建工作流',
-  'builtin.schedule.update-workflow': '修改工作流',
-  'builtin.schedule.delete-workflow': '删除工作流',
-  'builtin.schedule.mutate-stage': '编辑工作流阶段',
-  'builtin.schedule.reorder-stages': '重排工作流阶段',
-  'builtin.schedule.mutate-checkpoint': '编辑工作流检查点',
-  'builtin.checkin.check-habit': '习惯打卡',
-  'builtin.habits.stats': '统计习惯',
-  'builtin.pomodoro.summary': '统计番茄',
-  'builtin.web.search': '联网搜索',
-  'builtin.web.read': '读取网页',
-  'builtin.help.search': '检索帮助',
-  'builtin.tool.request': '申请工具',
-  'visual.html': '生成示意图',
-  'mindmap': '生成思维导图',
-  'image': '生成图片',
 }
 
 /** 工具入参 → 过程时间线的目标文案（正在读/写哪个对象）；取不到则留空 */
@@ -1641,7 +1605,7 @@ async function runAgentLoop(
       emitStream?.({
         kind: 'tool-start',
         name: realName,
-        label: TOOL_ACTION_LABELS[realName] ?? (realName.startsWith('builtin.') ? realName.slice(8) : realName),
+        label: toolActionLabel(realName),
         target: argTarget(args),
       })
       const t1 = Date.now()
@@ -1679,7 +1643,7 @@ async function runAgentLoop(
         emitStream?.({
           kind: 'tool-start',
           name: c.realName,
-          label: TOOL_ACTION_LABELS[c.realName] ?? (c.realName.startsWith('builtin.') ? c.realName.slice(8) : c.realName),
+          label: toolActionLabel(c.realName),
           target: argTarget(c.args),
         })
       }

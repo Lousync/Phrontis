@@ -2376,3 +2376,18 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **改动点**：`electron/lib/workspaceManager.ts`（`ws:forget` 补 `forgetRecentVault` + 当前仓库护栏）、`src/components/shared/VaultSwitcher.tsx`、`src/components/shared/VaultPicker.tsx`、`src/types/index.ts`（error 回传）、契约 `.AGENT/scripts/vault-list/verify-vault-list.mjs`。
 
 **验收**：契约 24 项全绿；双份 `tsc` 0 错；devbridge 实测当前仓库 `forget` 被拒、切走后 `forget` 成功且 `recentVaults` 同步清空（无复活），选择页管理面板与「移入回收站」二次确认渲染正常。
+
+## 2026-10-21 · AI 回复生成态：思考按轮展开 + 工具事件流（v3.10.0）
+
+**现状 / 根因**：3.5.0 有意在生成中隐藏工具行（只留状态线），完成后再收成「用了 N 个工具」；同时所有轮次的 reasoning 被拼进同一个 `thinking` 字符串。用户反馈「看不到过程」，也分不清当前是哪一轮在思考。
+
+**方案（事件流，原型 `proto/ai-process-redesign/index.html`）**：
+- **A 思考按轮展开**：每个 LLM 轮次一段 think；当前轮默认展开，正文或工具开始即收起为 `思考 · Ns`；旧轮保持收起，可手动点开。
+- **B 工具过程可见**：生成中实时显示工具事件行（`读取文件 编译原理第一次作业.md · 36ms`），耗时内联、不做右对齐列、不用 tabular-nums；运行中只让图标做 opacity 呼吸，不用转圈。
+- **完成态**：`StreamBubble` 退场后由 `ProcessSummary` 接管，收成 `过程 · 思考 Ns · N 个工具`，默认收起；展开复用同一套 `.kb-ev-rail`，显示全部步骤（不再 5 步截断）。思考正文不落库，完成态思考行只有时长。
+- **长过程保护**：生成中默认只显示最近 10 个事件，上方「查看前面 N 步」可展开全部。
+- **标签统一**：工具中文标签抽到 `src/lib/toolLabels.ts`，主进程事件与完成态摘要共用，不再出现「读取文件 / vault.read」两套口径。
+
+**改动点**：`src/lib/agentStreamCore.ts`（think 段 + `completeThink` + `rev`）、`StreamBubble.tsx`、新增 `ProcessRail.tsx` / `ProcessSummary.tsx`（`ToolSummary.tsx` 退役）、`MessageList.tsx`、`modules/ai-teaching/index.tsx`、`useAgentStream.ts` / `assistantRunStore.ts`、`src/lib/toolLabels.ts`、`electron/lib/agentService.ts`、`src/styles/index.css`。
+
+**验收**：`verify-reply-loading.mjs` 65/65（含真实 `agentStreamCore` 纯函数用例）；`verify-assistant-parallel.mjs` 36/36；双份 `tsc` 0 错；`npm run build` 通过；`verify-help-retrieval.mjs` 156/156。devbridge 真机跑多轮工具对话：思考段逐轮出现/收起、工具行生成中可见、正文开始最后一轮思考收起、完成后摘要 `过程 · 思考 2s · 1 个工具` / `思考 3s · 5 个工具` 正常，展开可见思考与工具行。

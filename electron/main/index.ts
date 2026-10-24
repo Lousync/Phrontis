@@ -30,6 +30,13 @@ if (process.platform === 'linux') {
     )
   }
 }
+
+// ===== Linux 桌面标识（2026-10-20 修）=====
+// 不要为了坞里显示 Phrontis 去改 app.name：Electron 在 Linux 上把 safeStorage 的钥匙串条目
+// 也存在 app.getName() 名下（实测 knowbase 与 Phrontis 互相解不开对方的密文）——
+// 改名会让存量 API Key / 密码本全部「无法解密」。正确做法是让 .desktop 的
+// StartupWMClass 去匹配窗口实际 WM_CLASS（package.json name = knowbase，故写 knowbase），
+// 匹配成功后 GNOME 显示的是 .desktop 的 Name=Phrontis 与 Icon=phrontis。
 import { join, basename, resolve, sep } from 'path'
 import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdirSync, statSync, readdirSync, appendFileSync } from 'fs'
 import { Readable } from 'stream'
@@ -105,6 +112,7 @@ import { registerWorkspaceHandlers, trashAllRegisteredVaults, clearVaultRegistry
 import { closeVaultWatcher } from '../lib/fsWatcher'
 import { pushAppNotice, registerAppNoticeHandlers } from '../lib/appNotice'
 import { checkXdgTrash, detectStatusNotifierHost, statusNotifierHostCached } from '../lib/linuxDesktop'
+import { readClipboardFilePaths } from '../lib/clipboardFiles'
 import { registerVaultArchiveHandlers } from '../lib/vaultArchive'
 import { getCurrentVault, setCurrentVault, getVaultAttachmentsRoot } from '../lib/kbStore/vaultContext'
 import { SETTINGS } from '../../src/lib/settings'
@@ -1012,6 +1020,16 @@ app.whenReady().then(async () => {
       return typeof t === 'string' && t.length <= 1024 * 1024 ? t : ''
     } catch { return '' }
   })
+  /**
+   * 读系统剪贴板里的文件/目录绝对路径（文件树右键「粘贴」与 Ctrl+V 共用）。
+   *
+   * 为什么不再走渲染层 `paste` 事件：焦点在文件树（非可编辑元素）时 Chromium 不派发
+   * paste 事件（Linux 实测），菜单点击更是合成动作、没有事件可挂 —— 两条路都断。
+   * 这里只返回路径，落盘仍由 `ws:pasteExternal` 逐条校验（绝对路径 / 非符号链接 / 越界）。
+   */
+  ipcMain.handle('clipboard:readFilePaths', () => {
+    try { return readClipboardFilePaths() } catch { return [] }
+  })
   ipcMain.handle('clipboard:copyImage', (_e, src: { path?: string; dataUrl?: string }) => {
     try {
       let img: Electron.NativeImage | null = null
@@ -1032,12 +1050,12 @@ app.whenReady().then(async () => {
     }
   })
   /**
-   * 向发起窗口补发一次真实粘贴命令（编辑器文件树右键「粘贴」用，v3.2.0 条目 ③）。
+   * 向发起窗口补发一次真实粘贴命令（**旧通道**，v3.2.0 条目 ③；2026-10-20 起文件树不再使用）。
    *
-   * Ctrl+V 会自然产生带 `clipboardData.files` 的 paste 事件，但**右键菜单点击是合成动作**，
-   * 拿不到 clipboardData；所以由渲染层先把焦点交给文件树，再请主进程代为执行
-   * `webContents.paste()`，从而复用同一条 paste 链路（落盘见 ws:pasteExternal）。
-   * 用 `e.sender` 而非 mainWindow：多窗口下必须打在发起方（小窗也有编辑器宿主）。
+   * 历史：右键菜单点击是合成动作、拿不到 clipboardData，于是先聚焦文件树再补发
+   * `webContents.paste()` 复用 paste 链路。但 Linux 上焦点在非可编辑元素时 Chromium
+   * **不派发 paste 事件**，这条链路本身就会落空 —— 现由 `clipboard:readFilePaths` 取代。
+   * 保留本通道给既有调用方；新代码不要再依赖 paste 事件取文件路径。
    */
   ipcMain.handle('clipboard:paste', (e) => {
     try { e.sender.paste() } catch { /* 窗口已销毁等：静默 */ }

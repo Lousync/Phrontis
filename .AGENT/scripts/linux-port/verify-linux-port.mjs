@@ -403,7 +403,9 @@ check('I1 顶层 author 带 email（deb 的 Maintainer 由此而来，缺了 bui
   typeof pkg.author === 'object' && !!pkg.author?.email, JSON.stringify(pkg.author))
 check('I1 description 平台中性（会进 .desktop 的 Comment）',
   typeof pkg.description === 'string' && pkg.description.length > 0 && !/Windows/i.test(pkg.description))
-check('I1 版本号＝发版线 3.9.2', pkg.version === '3.9.2', String(pkg.version))
+const [vMajor, vMinor, vPatch] = String(pkg.version).split('.').map(Number)
+check('I1 版本号 ≥ 3.9.2（Linux 发版线起点，后续版本可继续抬）',
+  vMajor > 3 || (vMajor === 3 && (vMinor > 9 || (vMinor === 9 && vPatch >= 2))), String(pkg.version))
 check('I1 build.linux 里目标只有 deb', Array.isArray(pkg.build?.linux?.target)
   && pkg.build.linux.target.length === 1 && pkg.build.linux.target[0]?.target === 'deb',
   JSON.stringify(pkg.build?.linux?.target))

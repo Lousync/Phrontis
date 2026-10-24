@@ -73,7 +73,7 @@ interface Props {
   focusOn?: boolean
   /** 点击骨架条 = 退出聚焦并定位（目录展开 / 文件打开） */
   onFocusLocate?: (relPath: string, isDir: boolean) => void
-  /** 根容器 ref：父级用它把焦点交给文件树（右键「粘贴」需先聚焦，见 editor/index.tsx） */
+  /** 根容器 ref：父级用它把键盘焦点交给文件树（快捷键作用域 / 探针定位用；2026-10-20 起粘贴不再依赖聚焦） */
   rootRef?: React.RefObject<HTMLDivElement | null>
   /** 排序口径（目录恒在前）；不传＝沿用主进程默认序（目录优先 + 名称 zh） */
   sort?: TreeSortMode
@@ -364,12 +364,9 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
   return (
     <div
       ref={rootRef}
-      /* tabIndex：右键「粘贴」要先 programmatic focus 到这里（paste 命令落在「当前聚焦元素」上，
-         焦点留在 Monaco 里的话会变成往正文插文本）。focus 圈用极淡 inset ring：
-         既知道焦点进来了，又不抢视觉（开发负责人厌恶醒目标签）。
-         注意 Ctrl+V 的守卫**不看焦点在不在树上**，只看焦点在不在文本编辑区
-         （Chromium 会把非可编辑焦点的 paste 事件 target 重定向成 BODY，见 editor/index.tsx
-         的 isTextEditingTarget）——所以这里不需要额外的 data-* 标记。 */
+      /* tabIndex：树可以获得键盘焦点（快捷键作用域 / 探针定位用）。
+         2026-10-20 起外部文件粘贴改走 window keydown + 主进程剪贴板，不再要求先把焦点交给树
+         （非可编辑焦点下 Chromium 不派发 paste 事件，见 src/lib/externalFilePaste.ts 头注释）。 */
       tabIndex={0}
       /* ★ min-h-full（2026-09-29 修「空白区右键点不到」）：外层是 overflow-y-auto 的滚动容器时，
          `flex-1` 子项按**内容高度**撑开、不拉伸 —— 条目只有几行时树根只占几十到几百 px，

@@ -36,6 +36,7 @@ import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem
 import { ImageCard, imageGroupsOf } from '../../components/shared/AssistantPanel/ImageCard'
 import { looksLikeMindMap } from '../../lib/mindmap'
 import { isRenderableImagePath } from '../../lib/imageFormats'
+import { toolActionLabel } from '../../lib/toolLabels'
 
 /** AI 教学面的斜杠指令（/mindmap、/生图）已收口到 src/lib/chatCommands.ts 的
  *  PASSTHROUGH_COMMANDS 单一真源 —— 弹层候选与「放行给模型」判定读同一张表，
@@ -44,7 +45,7 @@ import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { registerSelectionAskHost } from '../../lib/assistantContext'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
-import { ToolSummary, type TraceRowView } from '../../components/shared/AssistantPanel/ToolSummary'
+import { ProcessSummary, type TraceRowView } from '../../components/shared/AssistantPanel/ProcessSummary'
 import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
 import { UsageRing, fmtTok } from '../../components/shared/UsageRing'
@@ -251,32 +252,27 @@ const TEMPLATES: Template[] = [
   },
 ]
 
-/** 内置工具 → 中文简称（缺省回退短名）。2026-09-09 P1/P2 退役项已删：habits.list / docs.read-text / bookmarks.search / knowledge.read / knowledge.append-page */
-const TOOL_CN: Record<string, string> = {
-  'builtin.vault.list': '列目录', 'builtin.vault.read': '读仓库文件', 'builtin.vault.search': '搜笔记内容',
-  'builtin.vault.write': '写笔记文件', 'builtin.vault.edit': '修改/追加笔记', 'builtin.vault.rename': '重命名',
-  'builtin.vault.trash': '移回收站', 'builtin.vault.resolve-ref': '校验引用',
-  'builtin.knowledge.search': '搜知识库', 'builtin.knowledge.create-page': '建知识页',
-  'builtin.blog.create-entry': '写日记', 'builtin.schedule.create-todo': '建待办',
-  'builtin.schedule.update-todo': '改待办', 'builtin.schedule.delete-todo': '删待办',
-  'builtin.checkin.check-habit': '打卡', 'builtin.habits.stats': '习惯查询统计',
-  'builtin.pomodoro.summary': '专注统计', 'builtin.schedule.list-todos': '查待办',
-  'builtin.web.search': '联网搜索', 'builtin.web.read': '读网页',
-}
-function toolName(name?: string): string {
-  const s = String(name ?? '')
-  return TOOL_CN[s] ?? (s.startsWith('builtin.') ? s.slice(8) : s || '工具')
-}
-
-/** trace → 工具摘要行可用的行视图（「用了 N 个工具」只数工具行；LLM 行以「思考」保留在展开体里） */
+/** trace → 完成态过程摘要的行视图（思考行只在有 thinkingMs 时出现） */
 function traceRows(steps?: AgentTraceStep[]): TraceRowView[] {
-  return (steps ?? []).map((st, j) => ({
-    key: `${j}-${st.name ?? 'llm'}`,
-    label: st.kind === 'tool' ? toolName(st.name) : '思考',
-    isTool: st.kind === 'tool',
-    ok: st.ok !== false,
-    durationMs: st.durationMs,
-  }))
+  return (steps ?? []).flatMap((st, j): TraceRowView[] => {
+    if (st.kind === 'tool') {
+      return [{
+        key: `${j}-${st.name ?? 'tool'}`,
+        kind: 'tool' as const,
+        label: toolActionLabel(st.name),
+        ok: st.ok !== false,
+        durationMs: st.durationMs,
+      }]
+    }
+    if (!st.thinkingMs || st.thinkingMs <= 0) return []
+    return [{
+      key: `${j}-llm`,
+      kind: 'think' as const,
+      label: '思考',
+      ok: st.ok !== false,
+      durationMs: st.thinkingMs,
+    }]
+  })
 }
 
 /**
@@ -2305,7 +2301,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    * **必须 instant，不能用 smooth**：流式下本 effect 每 60ms 触发一次，smooth 动画会与下一次
    * 调用互相打断，表现为滚动抽搐（同 MessageList.tsx 已记录的坑）。
    */
-  const draftSig = streamDraft ? `${streamDraft.text.length}|${streamDraft.items.length}|${streamDraft.thinking?.length ?? 0}` : ''
+  const draftSig = streamDraft ? `${streamDraft.text.length}|${streamDraft.items.length}|${streamDraft.rev}` : ''
   useEffect(() => {
     const c = scrollRef.current
     if (!c || !stickRef.current) return
@@ -3140,9 +3136,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     ) : (
                       /* P3a 去气泡：助手回复平铺 markdown 原生排版；P3b 轻量操作条（§3.8-3：整理成文档/复制/轨迹折叠） */
                       <div className="min-w-0">
-                        {/* 过程收起来（R8）：工具清单折成一行摘要放正文之前，默认收起 —— 原先是操作条里的
-                            「调用轨迹（N 步）」，生成中已经完全不显示工具了，完成后再铺回来是重复 */}
-                        <ToolSummary rows={traceRows(m.trace)} />
+                        {/* 过程收起来（默认收起）：思考时长 + 工具清单折成一行，点开是事件流 */}
+                        <ProcessSummary rows={traceRows(m.trace)} />
                         {/* P8：```profile 建议块不直显；条目11/12：```plan / ```ask 协议块同样收敛（plan→侧栏、ask→提问卡） */}
                         <MarkdownPreview
                           content={splitJumps(m.content).body.replace(/```(profile|plan|ask|outline)[^\n]*\n[\s\S]*?```/g, '')}
@@ -3312,8 +3307,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         {!lastStep ? '正在等待模型响应…'
                           : lastStep.kind === 'tool'
                             ? (lastStep.ok
-                              ? `正在${toolName(lastStep.name)}…`
-                              : `执行 ${toolName(lastStep.name)} 失败，正在调整…`)
+                              ? `正在${toolActionLabel(lastStep.name)}…`
+                              : `执行 ${toolActionLabel(lastStep.name)} 失败，正在调整…`)
                             : '正在思考…'}
                       </span>
                       <span className="kb-sweep" />

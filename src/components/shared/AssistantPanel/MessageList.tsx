@@ -4,10 +4,11 @@ import { MarkdownPreview } from '../MarkdownPreview'
 import { showToast } from '../../../lib/toast'
 import { copyText } from '../../../lib/ipc'
 import { StreamBubble } from './StreamBubble'
-import { ToolSummary, type TraceRowView } from './ToolSummary'
+import { ProcessSummary, type TraceRowView } from './ProcessSummary'
 import { ImageCard, imageGroupsOf } from './ImageCard'
 import type { StreamDraft } from './useAgentStream'
 import type { AgentTraceStep, ResumeInfo } from '../../../types'
+import { toolActionLabel } from '../../../lib/toolLabels'
 
 /**
  * 共用消息流（侧栏 AI 与 AI 学堂全屏对话同一份渲染，避免两套逻辑分叉）。
@@ -73,33 +74,39 @@ function TokensOf({ trace }: { trace?: AgentTraceStep[] }): ReactNode {
   return null
 }
 
-/** 工具名可读化：builtin.vault.read → vault.read */
-function toolShortName(name?: string): string {
-  const s = String(name ?? '')
-  return s.startsWith('builtin.') ? s.slice(8) : s || '工具'
-}
-
 /** 实时状态行（agent:step 驱动）：无步骤=思考中；最新为工具=正在调用；失败则显示重试中 */
 function AgentLiveSteps({ steps }: { steps: AgentTraceStep[] }) {
   const last = steps[steps.length - 1]
   if (!last) return <>正在思考…</>
   const toolCount = steps.filter(s => s.kind === 'tool').length
   if (last.kind === 'tool') {
-    if (!last.ok) return <>执行 {toolShortName(last.name)} 失败，正在调整策略…</>
-    return <>正在调用 <span className="text-[var(--accent)]">{toolShortName(last.name)}</span>（第 {toolCount} 次工具调用）</>
+    if (!last.ok) return <>执行 {toolActionLabel(last.name)} 失败，正在调整策略…</>
+    return <>正在调用 <span className="text-[var(--accent)]">{toolActionLabel(last.name)}</span>（第 {toolCount} 次工具调用）</>
   }
   return <>思考中…（已调用 {toolCount} 次工具）</>
 }
 
-/** trace → 工具摘要行可用的行视图（「用了 N 个工具」只数工具行，LLM 行以「思考」保留在展开体里） */
+/** trace → 完成态过程摘要的行视图（思考行只在有 thinkingMs 时出现） */
 function traceRows(steps?: AgentTraceStep[]): TraceRowView[] {
-  return (steps ?? []).map((st, j) => ({
-    key: `${j}-${st.name ?? 'llm'}`,
-    label: st.kind === 'tool' ? toolShortName(st.name) : '思考',
-    isTool: st.kind === 'tool',
-    ok: st.ok !== false,
-    durationMs: st.durationMs,
-  }))
+  return (steps ?? []).flatMap((st, j): TraceRowView[] => {
+    if (st.kind === 'tool') {
+      return [{
+        key: `${j}-${st.name ?? 'tool'}`,
+        kind: 'tool' as const,
+        label: toolActionLabel(st.name),
+        ok: st.ok !== false,
+        durationMs: st.durationMs,
+      }]
+    }
+    if (!st.thinkingMs || st.thinkingMs <= 0) return []
+    return [{
+      key: `${j}-llm`,
+      kind: 'think' as const,
+      label: '思考',
+      ok: st.ok !== false,
+      durationMs: st.thinkingMs,
+    }]
+  })
 }
 
 export interface MessageListProps {
@@ -171,7 +178,7 @@ export function MessageList({
 
   // 内容变化 → 贴底才跟随，且**用 instant 而非 smooth**：
   // 流式下这个 effect 每 60ms 触发一次，smooth 动画会与下一次调用互相打断（表现为滚动抽搐）
-  const draftSig = draft ? `${draft.text.length}|${draft.items.length}|${draft.thinking.length}` : ''
+  const draftSig = draft ? `${draft.text.length}|${draft.items.length}|${draft.rev}` : ''
   useEffect(() => {
     const el = scrollRef.current
     if (!el || !stickRef.current) return
@@ -218,9 +225,8 @@ export function MessageList({
         <div key={m.id ?? `live-${i}`} data-msg-id={m.id ?? undefined} className="group/msg">
           {m.role === 'assistant' ? (
             <>
-              {/* 过程收起来（R8）：工具清单折成一行摘要，默认收起 —— 原先这里是消息下方的
-                  「调用轨迹（N 步）」虚线框，生成中已经完全不显示工具了，完成后再铺回来是重复 */}
-              <ToolSummary rows={traceRows(m.trace)} />
+              {/* 过程收起来（默认收起）：思考时长 + 工具清单折成一行，点开是事件流 */}
+              <ProcessSummary rows={traceRows(m.trace)} />
               {/* 去气泡（docs/code-block-card-plan.md §2.2 末段 / §7-3 改后 B）：助手侧与 AI 教学一样
                  平铺 markdown 原生排版 —— 否则代码卡片自带 bg + 边框，在这一面变成「框中框」。
                  ★ 下面这几样**一个都不能顺手删**：select-text（body 全局 user-select:none，删了

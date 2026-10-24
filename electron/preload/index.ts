@@ -41,7 +41,10 @@ const api = {
    */
   platform: process.platform,
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
-  // 编辑器文件树右键「粘贴」：请主进程对本窗口补发一次真实 paste 命令（渲染层先交焦点给文件树）
+  // 文件树「粘贴」：主进程直接读系统剪贴板里的文件 URI 列表（Linux 非可编辑焦点下
+  // Chromium 不派发 paste 事件，右键菜单也没有事件，故不能再依赖 clipboardData.files）
+  readClipboardFilePaths: () => ipcRenderer.invoke('clipboard:readFilePaths'),
+  // 旧通道（webContents.paste 补发）；2026-10-20 起文件树不再使用，保留给既有调用方
   pasteFromClipboard: () => ipcRenderer.invoke('clipboard:paste'),
   copyImage: (src: { path?: string; dataUrl?: string }) => ipcRenderer.invoke('clipboard:copyImage', src),
   clearClipboardIfEqual: (text: string) => ipcRenderer.invoke('clipboard:clearIfEqual', text),

@@ -1683,6 +1683,42 @@ cbz 排除的**执行语义原样保留**（派生值对 cbz 仍为 `null`），
 - 顺带（同一轮用户要求）：AI 模型页的折叠组头加 `max-w-md`，与内容卡等宽；真机几何由
   `.AGENT/scripts/workbench-shell/probes/probe-ai-models-layout.mjs` 锁。
 
+## [x] B-30 Linux 安装版坞 / 任务栏图标不对，应用名显示成 knowbase（2026-10-20，P1；用户实机反馈；**当日已修，改动未提交**）
+
+**现象**：`deb` / 本机免 root 安装版从桌面或坞启动后，GNOME 坞里的图标是默认 Electron 图标，名字也不是 Phrontis（显示 knowbase 或 Electron）。
+**定位**：`electron/main/index.ts`（应用启动段）+ `package.json` 的 `build.linux.desktop.entry` + `scripts/install-local.mjs`。
+**根因**：Electron 的 `app.name` 默认取 `package.json` 的 `name` —— 本仓是 npm 包名 `knowbase`，于是 X11 窗口
+`WM_CLASS = ("knowbase","knowbase")`。`.desktop` 里写的是 `StartupWMClass=phrontis`，GNOME 按 WM_CLASS 找桌面入口时
+对不上，就把窗口当成「没有桌面入口的 Electron 应用」：图标回落成默认、名称取 WM_CLASS。另外 `DBusActivatable=true`
+与实际的 D-Bus 名 `io.github.lousync.Phrontis` / 桌面文件名 `phrontis.desktop` 也不匹配（无效声明）。
+**修复**：
+1. `.desktop` 的 `StartupWMClass` 改成窗口**实际**的 WM_CLASS `knowbase`（`package.json` 的 `linux.desktop.entry` 与 `scripts/install-local.mjs` 同步）。匹配成功后 GNOME 显示的是 `.desktop` 的 `Name=Phrontis` / `Icon=phrontis`，用户看到的名字与图标就对了。
+2. **刻意不改 `app.name`**：实测 Electron 在 Linux 上把 `safeStorage` 的钥匙串条目也存在 `app.name` 名下 —— `app.setName('Phrontis')` 会让存量的 API Key / 密码本全部解不开（knowbase 与 Phrontis 互相解不开对方的密文）。桌面显示名交给 `.desktop`，不要把应用身份和钥匙串身份拆成两套。
+3. 删掉不成立的 `DBusActivatable=true`（D-Bus 激活由 postinst 安装的独立 service 文件承担，桌面入口直接走 Exec）。
+**验证**：本机打包产物 + `xwininfo` 实测窗口 WM_CLASS 仍为 `("knowbase" "knowbase")`，与 `.desktop` 的 `StartupWMClass=knowbase` 一致；`dpkg-deb -x` 检查生成的
+`/usr/share/applications/phrontis.desktop` 为 `Name=Phrontis` / `Icon=phrontis` / `StartupWMClass=knowbase` 且无 `DBusActivatable`；两个 tsc 门禁通过；另用 safeStorage 实测 `knowbase` 仍能解开用户现有 `apiKeyEncrypted` 密文。
+
+## [x] B-31 从文件管理器复制文件后，右键「粘贴」与 Ctrl+V 都贴不进仓库目录（2026-10-20，P1；用户实机反馈；**当日已修，改动未提交**）
+
+**现象**：在文件管理器里 Ctrl+C 一个文件，回到 Phrontis 对目标目录右键 →「粘贴」，没反应；直接按 Ctrl+V 也没反应（Linux 安装版）。
+**定位**：`src/modules/knowledge/index.tsx`、`src/components/workbench/WorkbenchFileTree.tsx`、`electron/main/index.ts`（clipboard 通道）。
+**根因**（Linux X11 实测，两个独立断点）：
+1. 焦点在文件树（div，非可编辑元素）时 **Chromium 根本不派发 `paste` 事件** —— 原先基于 `paste` + `clipboardData.files` 的链路
+   在 Ctrl+V 时永远等不到事件；右键菜单点击更是合成动作，没有事件可挂（`webContents.paste()` 也因同一原因落空）。
+2. 知识库的 window keydown 对 Ctrl+V **无条件 `preventDefault()` 后只走内部剪贴板**；内部剪贴板为空时 `handlePaste` 直接 return
+   —— 浏览器的默认粘贴动作已被吃掉，外部文件永远轮不到。工作台文件树的右键「粘贴」则只弹一句「请按 Ctrl+V」，没有真正落盘。
+**修复**：
+1. 新增主进程 `clipboard:readFilePaths`：直接读文件剪贴板 —— Linux 的 `text/uri-list` / `x-special/gnome-copied-files`
+   （Nautilus / Dolphin / Thunar），Windows 的 `FileNameW`（CF_HDROP，含裸列表与 DROPFILES 头两种实测形态）。解析为纯函数
+   `electron/lib/clipboardFilesPure.ts`，落盘仍走既有 `ws:pasteExternal` 的越界 / 符号链接 / 数量上限校验。
+2. 渲染层新增共享入口 `src/lib/externalFilePaste.ts`：键盘与菜单共用「读路径 → ws:pasteExternal」一条链路。
+3. 知识库：内部剪贴板**优先**，为空才把 Ctrl+V 交给外部文件；右键「粘贴」直接落盘（不再要求二次按键）；隐藏模块 / 树不在场时不抢快捷键。
+4. 工作台文件树：右键菜单直接粘到该目录；Ctrl+V 改 window keydown（焦点在树里或 body 时才接管）；删除元素级 `onPaste`。
+**验证**：本机 dev 实例 + CDP 实机验证 —— 知识库 Ctrl+V 落盘 `a.txt`、右键菜单再次粘贴生成 `a copy.txt`；
+工作台树模式 Ctrl+V 落盘 `b.txt`、对 `sub/` 目录右键「粘贴系统剪贴板」落盘 `sub/c.txt`，均有成功 Toast。
+`.AGENT/scripts/editor/verify-paste-external.mjs` 扩到 **79 PASS / 0 FAIL**（新增 URI 列表 / FileNameW 纯函数用例与接线断言）；
+`npx tsc --noEmit -p tsconfig.node.json` / `tsconfig.web.json` 均 0 错；`npm run build` 通过。
+
 ```
 ## B-n <一句话现象>（YYYY-MM-DD，P0/P1/P2/P3）
 

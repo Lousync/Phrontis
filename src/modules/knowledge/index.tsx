@@ -24,11 +24,10 @@ import {
   getKnowledgeIndexWarnings,
   workspaceRename, workspaceGetCurrent, workspaceTrash,
   workspaceListDir, workspaceCreateFile, workspaceMkdir,
-  workspacePasteExternal, pasteFromClipboard, getPathForFile,
   copyText, workspaceOpenInSystem,
 } from '../../lib/ipc'
-import { hasTextPasteTarget } from '../../lib/pasteTarget'
 import { notifyDataChanged } from '../../lib/dataChanged'
+import { describePasteResult, isElementVisible, pasteClipboardFiles } from '../../lib/externalFilePaste'
 import { showToast } from '../../lib/toast'
 // 页签判定消费共享 tabPolicy（笔记合并 Phase 1 §1.3）：与编辑器模块同一套「该不该消失 / 关闭落点」
 import { previewReplacement, landingAfterClose } from '../../lib/tabPolicy'
@@ -152,9 +151,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
   /** 新建分类目录的命名走文件树内联输入（B-13）：原 `catDraft` 居中浮层整条通道已删——
    *  两条创建路径并存本身就是分叉源，命名方式现已与新建知识页/目录/文件完全一致。 */
   const vaultRootRef = useRef<string | null>(null)
-  /** 文件树根容器 ref：右键「粘贴」是合成动作（拿不到真实 paste 事件的 File 列表），
-   *  故先 programmatic focus 到这里，再请主进程补发 `webContents.paste()` 复用同一条链路。
-   *  与 VaultTree 的 tabIndex={0} 配套（见其 ref/tabIndex 注释）。 */
+  /** 文件树根容器 ref：键盘快捷键作用域 / 探针定位用。
+   *  2026-10-20 起粘贴改走 window keydown + 主进程剪贴板（`src/lib/externalFilePaste.ts`），
+   *  不再需要先 programmatic focus 再补发 `webContents.paste()`。 */
   const treeRef = useRef<HTMLDivElement | null>(null)
   /** 最近点中的目录（落点兜底）：toggleDir / openFile / 右键都更新它，Ctrl+V 与菜单「粘贴」共用 */
   const lastTreeDirRef = useRef<string>('')
@@ -1672,6 +1671,42 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
   }
 
+  // ---- 外部文件粘贴（2026-10-20 重做：改读主进程剪贴板，不再依赖 paste 事件）----
+  // 资源管理器里 Ctrl+C 文件 → 本模块 Ctrl+V：落到当前文件所在目录（无激活文件 = 仓库根）。
+  // 旧实现靠 window 'paste' 事件 + clipboardData.files：Linux 上焦点在非可编辑的文件树时
+  // Chromium 根本不派发该事件（本机 X11 实测），右键菜单更是没有事件可挂 —— 两条路都断。
+  // 现在统一由主进程读剪贴板里的文件 URI 列表（text/uri-list / FileNameW），键盘与菜单共用。
+  const pasteExternalFromClipboard = useCallback(async (dirRel: string, notifyEmpty: boolean) => {
+    const root = vaultRootRef.current
+    if (!root) return false
+    const res = await pasteClipboardFiles(root, dirRel)
+    if (!res) {
+      if (notifyEmpty) showToast({ type: 'warning', message: '剪贴板里没有可粘贴的文件' })
+      return false
+    }
+    if (res.pasted.some((n) => n.toLowerCase().endsWith('.md'))) {
+      notifyDataChanged('knowledge') // 让本模块与保活模块重读（md 会影响列表/图谱）
+    }
+    showToast(describePasteResult(res))
+    return res.pasted.length > 0
+  }, [])
+
+  /** 粘贴落点：右键的那个目录 > 最近点中的目录 > 当前打开文件所在目录 > 仓库根 */
+  const resolvePasteDir = useCallback((node?: TreeNode | null): string => {
+    if (node) return node.type === 'dir' ? node.relPath : parentDirOf(node.relPath)
+    if (lastTreeDirRef.current) return lastTreeDirRef.current
+    // activePageId 可能是 draft:<rel> 伪页，两种都取真实 relPath
+    const active = allPages.find((p) => p.id === activePageIdRef.current)
+    const activeRel = active?.path ?? (activePageIdRef.current?.startsWith('draft:') ? activePageIdRef.current.slice(6) : null)
+    return activeRel && activeRel.includes('/') ? activeRel.slice(0, activeRel.lastIndexOf('/')) : ''
+  }, [allPages])
+
+  /** 右键「粘贴」：直接读剪贴板落盘（不再要求用户再按 Ctrl+V；菜单项本身就是完整动作） */
+  const requestPasteFromMenu = useCallback((dirRel: string) => {
+    lastTreeDirRef.current = dirRel
+    void pasteExternalFromClipboard(dirRel, true)
+  }, [pasteExternalFromClipboard])
+
   // Keyboard shortcuts — module level
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1758,11 +1793,17 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         return
       }
 
-      // Ctrl+V — paste internal clipboard
-      if (e.ctrlKey && e.key === 'v') {
+      // Ctrl+V — 内部剪贴板优先；内部为空时交给「系统剪贴板里的文件」这条路。
+      // ★ 不能无条件 preventDefault + handlePaste：内部剪贴板为空时 handlePaste 直接 return，
+      //   default 又被吃掉 → 从资源管理器复制文件后 Ctrl+V 什么都没发生（2026-10-20 修）。
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'v' || e.key === 'V')) {
         e.preventDefault()
-        const target = selectedChapterIdRef.current ?? selectedCategoryIdRef.current
-        handlePaste(target)
+        if (isElementVisible(treeRef.current) && clipboard && clipboard.items.length > 0) {
+          const target = selectedChapterIdRef.current ?? selectedCategoryIdRef.current
+          handlePaste(target)
+          return
+        }
+        if (isElementVisible(treeRef.current)) void pasteExternalFromClipboard(resolvePasteDir(), false)
         return
       }
 
@@ -1790,83 +1831,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, readingMode, enterReading, exitReading, treeLandDir, navStep, handleTreeNewPick])
-
-  // ---- 外部文件粘贴（2026-09-20 阶段四：能力自编辑器模块上移，随其退役）----
-  // 资源管理器里 Ctrl+C 文件 → 本模块 Ctrl+V：剪贴板带 File 列表且没有文本接收方时接管，
-  // 落到当前文件所在目录（无激活文件 = 仓库根）。文本粘贴原样放行（hasTextPasteTarget 判定）。
-  const pasteExternalFiles = useCallback(async (files: File[], dirRel: string) => {
-    const root = vaultRootRef.current
-    if (!root || files.length === 0) return
-    const srcPaths: string[] = []
-    for (const f of files) {
-      try { const p = getPathForFile(f); if (p) srcPaths.push(p) } catch { /* 取不到路径的条目丢弃 */ }
-    }
-    if (srcPaths.length === 0) return
-    try {
-      const res = await workspacePasteExternal(root, dirRel, srcPaths)
-      if (res.pasted.length === 0) {
-        // 全失败时把**具体原因**带出来：主进程只在循环走完却一项没成功时不给 reason，
-        // 此时第一条 skipped 的原因（越界/符号链接/权限…）才是用户能据此行动的信息
-        showToast({
-          type: 'warning',
-          message: res.reason === 'empty'
-            ? '剪贴板里没有可粘贴的文件'
-            : `粘贴失败：${res.error || res.skipped[0]?.reason || '未知原因'}`,
-        })
-        return
-      }
-      if (res.pasted.some((n) => n.toLowerCase().endsWith('.md'))) {
-        notifyDataChanged('knowledge') // 让本模块与保活模块重读（md 会影响列表/图谱）
-      }
-      const skippedNote = res.skipped.length > 0 ? `，已跳过 ${res.skipped.length} 项` : ''
-      showToast({
-        type: res.skipped.length > 0 ? 'warning' : 'success',
-        message: res.pasted.length === 1
-          ? `已粘贴「${res.pasted[0]}」${skippedNote}`
-          : `已粘贴 ${res.pasted.length} 项${skippedNote}`,
-      })
-    } catch (e) {
-      showToast({ type: 'error', message: `粘贴失败：${(e as Error).message}` })
-    }
-  }, [])
-
-  /** 粘贴落点：右键的那个目录 > 最近点中的目录 > 当前打开文件所在目录 > 仓库根 */
-  const resolvePasteDir = useCallback((node?: TreeNode | null): string => {
-    if (node) return node.type === 'dir' ? node.relPath : parentDirOf(node.relPath)
-    if (lastTreeDirRef.current) return lastTreeDirRef.current
-    // activePageId 可能是 draft:<rel> 伪页，两种都取真实 relPath
-    const active = allPages.find((p) => p.id === activePageIdRef.current)
-    const activeRel = active?.path ?? (activePageIdRef.current?.startsWith('draft:') ? activePageIdRef.current.slice(6) : null)
-    return activeRel && activeRel.includes('/') ? activeRel.slice(0, activeRel.lastIndexOf('/')) : ''
-  }, [allPages])
-
-  /**
-   * 右键「粘贴」：Ctrl+V 有真实 paste 事件（clipboardData 带 File 列表），菜单点击是合成动作
-   * 拿不到，所以先聚焦文件树再请主进程补发一次 `webContents.paste()`，复用同一条链路。
-   * 必须等 React 把菜单卸载完再聚焦——被卸载的菜单是当时 focused 元素，先聚焦会被它的
-   * blur 打回 body，粘贴就落到别处去了（故走 rAF 等这一帧提交结束）。
-   */
-  const requestPasteFromMenu = useCallback((dirRel: string) => {
-    lastTreeDirRef.current = dirRel
-    requestAnimationFrame(() => {
-      treeRef.current?.focus()
-      void pasteFromClipboard()
-    })
-  }, [])
-
-  useEffect(() => {
-    if (!isActive) return
-    const onPaste = (e: ClipboardEvent) => {
-      const files = e.clipboardData?.files
-      if (!files || files.length === 0) return
-      if (hasTextPasteTarget(e)) return
-      e.preventDefault()
-      void pasteExternalFiles(Array.from(files), resolvePasteDir())
-    }
-    window.addEventListener('paste', onPaste)
-    return () => window.removeEventListener('paste', onPaste)
-  }, [isActive, pasteExternalFiles, resolvePasteDir])
+  }, [handleCloseTab, handleDeleteChapter, handleDeleteNotebook, handlePageDeleted, handleCopy, handleCut, handlePaste, clipboard, pasteExternalFromClipboard, resolvePasteDir, readingMode, enterReading, exitReading, treeLandDir, navStep, handleTreeNewPick])
 
   // --- outline ---
   const activePageForOutline = useMemo(() => {

@@ -29,7 +29,7 @@ Core1 D-Bus 接口 + 托盘               GNOME 扩展（A 顶栏 + B 磁贴）
 | 数据变更 → `Changed` 信号 / 托盘刷新 | `electron/main/windowBus.ts` 的 `subscribeDataChanged` |
 | 写入口统一 | `electron/lib/todoActions.ts`、`electron/lib/habitActions.ts`（IPC 与 D-Bus 共用） |
 | CLI | `scripts/desktop-bridge/phrontis.cjs` + `scripts/desktop-bridge/phrontis-cli`（dev：`scripts/phrontis-cli.sh`） |
-| deb 注入 | `build/linux-after-install.sh`（.service + CLI）、`build/linux-after-remove.sh`、`package.json` 的 `extraResources` / `DBusActivatable` |
+| deb 注入 | `build/linux-after-install.sh`（.service + CLI）、`build/linux-after-remove.sh`、`package.json` 的 `extraResources` / `StartupWMClass`（**不写 `DBusActivatable`**，理由见 §5） |
 | 契约 | `.AGENT/scripts/desktop-integration/verify-desktop-bridge.mjs` |
 
 ## 3. 接口（实际签名）
@@ -62,7 +62,12 @@ Core1 D-Bus 接口 + 托盘               GNOME 扩展（A 顶栏 + B 磁贴）
 
 ## 5. 打包
 
-- `.desktop` 加 `DBusActivatable=true`；`.service` 的 `Exec` 在 afterInstall 里按宏重写成 `/opt/<product>/<executable>`。
+- `.desktop` 写 `StartupWMClass=knowbase`（与窗口实际的 WM_CLASS 一致；**不能为了显示名去
+  `app.setName('Phrontis')`** —— Electron 的 safeStorage 在 Linux 上按 app.name 找钥匙串条目，
+  改名会让存量 API Key / 密码本全部解不开）。用户看到的名字/图标来自 `Name=Phrontis` / `Icon=phrontis`。
+  **不写 `DBusActivatable=true`** —— 它要求桌面文件 id 等于 D-Bus 名（reverse-DNS），而本项目的桌面文件是
+  `phrontis.desktop`、总线名是 `io.github.lousync.Phrontis`；写了会让 GNOME 去激活不存在的 `phrontis` 服务。
+  D-Bus 激活由 `.service` 承担，其 `Exec` 在 afterInstall 里按宏重写成 `/opt/<product>/<executable>`。
 - `/usr/bin/phrontis` **仍是 GUI 链接**（默认模板不动）；CLI 装到 `/usr/bin/phrontis-cli`。
   刻意不占用 `phrontis` 这个名字：升级时若把既有 GUI 链接换成 CLI，属于静默破坏。
 - `afterRemove` 只在 `remove/purge` 时清理；`upgrade` 直接退出（dpkg 顺序：旧 postrm upgrade → 配置新版）。

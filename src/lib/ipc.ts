@@ -8,7 +8,9 @@ import type { CreateScheduleWorkflowDTO, ScheduleWorkflowCheckpointInput, Schedu
 const a = () => { if (!window.api) throw new Error('Electron API not available.'); return window.api }
 
 export const getPathForFile = (file: File): string => a().getPathForFile(file)
-/** 请主进程对本窗口补发一次真实 paste（文件树右键「粘贴」用；渲染层需先交焦点给文件树） */
+/** 读系统剪贴板里的文件/目录绝对路径（文件树右键「粘贴」与 Ctrl+V 共用；空数组 = 不是文件） */
+export const readClipboardFilePaths = (): Promise<string[]> => a().readClipboardFilePaths()
+/** 请主进程对本窗口补发一次真实 paste（旧通道；文件树自 2026-10-20 起改用 readClipboardFilePaths） */
 export const pasteFromClipboard = (): Promise<{ ok: boolean }> => a().pasteFromClipboard()
 export const copyImage = (src: { path?: string; dataUrl?: string }): Promise<boolean> => a().copyImage(src)
 export const copyText = (text: string): Promise<boolean> => a().copyText(text)

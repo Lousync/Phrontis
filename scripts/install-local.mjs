@@ -165,7 +165,11 @@ async function main() {
     'Terminal=false',
     'Type=Application',
     'Icon=phrontis',
-    'StartupWMClass=phrontis',
+    // 必须与窗口实际 WM_CLASS 的 res_class 完全一致。package.json 的 name 是 knowbase，
+    // 不能为改这个去 app.setName('Phrontis')：Electron 在 Linux 上把 safeStorage 的
+    // 钥匙串条目也存在 app.name 名下，改名会让存量 API Key / 密码本全部解不开。
+    // 匹配成功后桌面显示的是 Name=Phrontis / Icon=phrontis（用户看到的部分）。
+    'StartupWMClass=knowbase',
     'Comment=Phrontis — 本地优先的学习生活操作系统（知识库 / 日程 / 打卡 / AI 教学，数据 100% 本地）',
     'Categories=Office;TextEditor;',
     '',

@@ -127,7 +127,7 @@ ok(/export const agentSetSessionScope/.test(ipc) && /export const agentRenameSes
 {
   const hook2 = read('src/components/shared/AssistantPanel/useAssistantChat.ts')
   ok(/scopePendingRef/.test(hook2) && /flushScope/.test(hook2), 'G10 切会话先 flush + 留最新值缓存（防抖窗口内切走再切回不显旧值）')
-  ok(/isSessionRunning\(activeIdRef\.current\)\)\s*return/.test(hook2) && /isSessionRunning\(id\)\)\s*return/.test(hook2),
+  ok(/if \(id && isSessionRunning\(id\)\) return/.test(hook2),
     'G11 运行中拒绝改作用域（本轮已按开头快照跑）')
   const retBlock = hook2.slice(hook2.lastIndexOf('return {'))
   ok(/\bscope,/.test(retBlock) && /setScope,/.test(retBlock) && /scopeAll,/.test(retBlock) && /renameSession/.test(retBlock),

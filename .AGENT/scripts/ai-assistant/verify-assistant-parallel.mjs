@@ -54,7 +54,8 @@ check('ipc 包装 agentAbortSession / onAssistantRunState',
 console.log('\n=== 3. 渲染层：纯函数下沉 + 共享 store ===')
 const core = read('src/lib/agentStreamCore.ts')
 check('agentStreamCore 纯函数导出（零 React / ipc 依赖）',
-  /export function applyStreamEvent/.test(core) && /export function completeTool/.test(core) && /export function createDraft/.test(core)
+  /export function applyStreamEvent/.test(core) && /export function completeTool/.test(core)
+  && /export function completeThink/.test(core) && /export function createDraft/.test(core)
   && !/from 'react'/.test(core) && !/from '\.\/ipc'/.test(core), '')
 
 const stream = read('src/components/shared/AssistantPanel/useAgentStream.ts')
@@ -96,7 +97,9 @@ const css = read('src/styles/index.css')
 check('.kb-spin 令牌（transform-only + reduced-motion 降速兜底）',
   /@keyframes kb-rotate/.test(css) && /\.kb-spin \{/.test(css) && /prefers-reduced-motion: reduce/.test(css), '')
 check('动效方案文档已登记 .kb-spin（铁律 13）', /`\.kb-spin`/.test(read('docs/ui-animation-plan.md')), '')
-check('设计文档在位', fs.existsSync(path.join(ROOT, 'docs/assistant-parallel-design.md')), '')
+check('设计文档已归档（docs/DESIGN-ARCHIVE.md）',
+  fs.existsSync(path.join(ROOT, 'docs/assistant-parallel-design.md'))
+  || /assistant-parallel-design\.md/.test(read('docs/DESIGN-ARCHIVE.md')), '')
 
 const fails = checks.filter((c) => !c.pass)
 for (const c of checks) console.log(`${c.pass ? 'PASS' : 'FAIL'}  ${c.name}${c.pass ? '' : ' —— ' + c.detail}`)

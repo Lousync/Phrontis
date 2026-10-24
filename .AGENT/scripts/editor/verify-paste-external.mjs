@@ -54,6 +54,10 @@ const mainIndex = readIfExists('electron/main/index.ts')
 const fileTree = readIfExists('src/components/shared/VaultTree.tsx')
 const knowIdx = readIfExists('src/modules/knowledge/index.tsx')
 const pasteTarget = readIfExists('src/lib/pasteTarget.ts')
+const pasteHelper = readIfExists('src/lib/externalFilePaste.ts')
+const workbenchTree = readIfExists('src/components/workbench/WorkbenchFileTree.tsx')
+const clipboardFiles = readIfExists('electron/lib/clipboardFiles.ts')
+const clipboardPure = readIfExists('electron/lib/clipboardFilesPure.ts')
 
 const checks = []
 const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
@@ -66,7 +70,21 @@ check('ipc.ts 导出 workspacePasteExternal', /export const workspacePasteExtern
 check('types 声明 workspacePasteExternal', /workspacePasteExternal:\s*\(/.test(typeDecl))
 check('types 导出 WorkspacePasteResult', /export interface WorkspacePasteResult\b/.test(typeDecl))
 
-check('主进程注册 clipboard:paste', /ipcMain\.handle\('clipboard:paste'/.test(mainIndex))
+check('主进程注册 clipboard:readFilePaths（v3.9.3 新通道）',
+  /ipcMain\.handle\('clipboard:readFilePaths'/.test(mainIndex))
+check('clipboard:readFilePaths 转发到 clipboardFiles 解析层',
+  /readClipboardFilePaths\(\)/.test(mainIndex) && /export function readClipboardFilePaths\b/.test(clipboardFiles))
+check('Linux 读 text/uri-list 与 GNOME x-special/gnome-copied-files',
+  /text\/uri-list/.test(clipboardFiles) && /x-special\/gnome-copied-files/.test(clipboardFiles))
+check('Windows 读 FileNameW（支持多条 + DROPFILES 头）',
+  /FileNameW/.test(clipboardFiles) && /parseFileNameWBuffer/.test(clipboardPure) && /readUInt32LE/.test(clipboardPure))
+check('preload 暴露 readClipboardFilePaths', /readClipboardFilePaths:\s*\(\)/.test(preload))
+check('ipc.ts 导出 readClipboardFilePaths', /export const readClipboardFilePaths\b/.test(ipcLib))
+check('types 声明 readClipboardFilePaths', /readClipboardFilePaths:\s*\(\)/.test(typeDecl))
+check('共享粘贴 helper 用主进程剪贴板 + ws:pasteExternal',
+  /readClipboardFilePaths\(\)/.test(pasteHelper) && /workspacePasteExternal\(rootId, relDir, paths\)/.test(pasteHelper))
+
+check('主进程注册 clipboard:paste（旧通道保留）', /ipcMain\.handle\('clipboard:paste'/.test(mainIndex))
 check('clipboard:paste 打在发起窗口（e.sender.paste）', /e\.sender\.paste\(\)/.test(mainIndex))
 check('preload 暴露 pasteFromClipboard', /pasteFromClipboard:\s*\(\)/.test(preload))
 check('ipc.ts 导出 pasteFromClipboard', /export const pasteFromClipboard\b/.test(ipcLib))
@@ -90,14 +108,24 @@ check('判据②：编辑宿主名单（input/textarea/contenteditable/Monaco）
   /isContentEditable/.test(pasteTarget) && /\.monaco-editor/.test(pasteTarget))
 check('旧的按 e.target 判定文件树的写法已不存在（否则 Ctrl+V 永久失效）',
   !/closest\?\.\('\[data-kb-filetree\]'\)/.test(pasteTarget))
-// 宿主接线（菜单入口 / 焦点落点 / 提示分流）在知识库模块 —— 编辑器退役后粘贴能力上移到此
-check('paste 监听按 isActive 门禁（隐藏模块不抢事件）', /if \(!isActive\) return[\s\S]{0,400}addEventListener\('paste'/.test(knowIdx))
-check('剪贴板里没有文件时不 preventDefault（文本粘贴放行）',
-  /files\.length === 0\) return[\s\S]{0,200}hasTextPasteTarget/.test(knowIdx) &&
-  /hasTextPasteTarget\(e\)\) return[\s\S]{0,120}e\.preventDefault\(\)/.test(knowIdx))
-check('右键「粘贴」经 requestPasteFromMenu 走 webContents.paste 链路',
-  /requestPasteFromMenu\b/.test(knowIdx) && /void pasteFromClipboard\(\)/.test(knowIdx))
-check('菜单粘贴延后一帧再聚焦（避开菜单卸载引发的 blur）', /requestAnimationFrame\(\(\) => \{[\s\S]{0,200}treeRef\.current\?\.focus\(\)/.test(knowIdx))
+// 宿主接线（菜单入口 / 键盘入口 / 提示分流）在知识库模块 —— 编辑器退役后粘贴能力上移到此。
+// ★ 2026-10-20 改口径：不再用 window 'paste' 事件（Linux 非可编辑焦点下 Chromium 不派发），
+//   改为 window keydown + 主进程读剪贴板；内部剪贴板为空时才走外部文件，避免吃掉 Ctrl+V。
+check('知识库 Ctrl+V：内部剪贴板优先，为空才转外部文件',
+  /clipboard && clipboard\.items\.length > 0[\s\S]{0,400}pasteExternalFromClipboard/.test(knowIdx))
+check('知识库不再依赖 paste 事件做外部文件粘贴', !/addEventListener\('paste'/.test(knowIdx))
+check('知识库右键「粘贴」直接落盘（不再补发 webContents.paste）',
+  /requestPasteFromMenu[\s\S]{0,220}pasteExternalFromClipboard/.test(knowIdx) &&
+  !/void pasteFromClipboard\(\)/.test(knowIdx))
+check('知识库隐藏时/树不在场时不抢 Ctrl+V', /isElementVisible\(treeRef\.current\)/.test(knowIdx))
+check('共享 helper 的 Ctrl+V 守卫排除编辑输入框', /isEditingInput\(e\)/.test(pasteHelper))
+check('工作台树右键「粘贴」直接落盘（不再提示「请按 Ctrl+V」）',
+  /pasteTargetRef\.current = node\.relPath; void pasteInto\(node\.relPath\)/.test(workbenchTree) &&
+  /pasteTargetRef\.current = ''; void pasteInto\(''\)/.test(workbenchTree))
+check('工作台树 Ctrl+V 走 keydown + 主进程剪贴板',
+  /isExternalPasteGesture/.test(workbenchTree) && /pasteInto\(pasteTargetRef\.current\)/.test(workbenchTree))
+check('工作台树不再用元素级 onPaste / getPathForFile',
+  !/onPaste=/.test(workbenchTree) && !/getPathForFile/.test(workbenchTree))
 // ★ 2026-10-12 校正：原断言锁 `>粘贴</button>` + `setTreeMenu(null); requestPasteFromMenu(dirRel)`，
 // 这两个字面量在数据驱动改造后就不存在了（菜单项是**数据**，由共享 FileContextMenu 渲染）——
 // 该断言在 HEAD 上已经是红的（陈旧断言，非行为回归）。改为锁「粘贴项作为数据传给菜单」这件事本身。
@@ -105,8 +133,8 @@ check('菜单粘贴延后一帧再聚焦（避开菜单卸载引发的 blur）',
 // 锁的是「这条通道在、且指向 requestPasteFromMenu」。
 check('右键菜单含「粘贴」入口（点击走 requestPasteFromMenu）',
   /\{ key: 'paste', label: '粘贴',[\s\S]{0,160}?onSelect: \(\) => requestPasteFromMenu\(dirRel\) \}/.test(knowIdx))
-check('粘贴结果按 skipped 数量分流提示', /已跳过 \$\{res\.skipped\.length\} 项/.test(knowIdx))
-check('全失败时提示带出具体原因（不吞成一句「粘贴失败」）', /res\.skipped\[0\]\?\.reason/.test(knowIdx))
+check('粘贴结果按 skipped 数量分流提示（共享 helper）', /已跳过 \$\{res\.skipped\.length\} 项/.test(pasteHelper))
+check('全失败时提示带出具体原因（共享 helper）', /res\.skipped\[0\]\?\.reason/.test(pasteHelper))
 check('单次上限常量 = 500', /const MAX_PASTE_ITEMS = 500\b/.test(src))
 check('渲染层记下最近点中的目录（落点兜底）', /lastTreeDirRef/.test(knowIdx))
 check('粘 .md 后失效知识索引', /pasted\.some\(\(n\) => \/\\\.md\$\/i\.test\(n\)\)\) invalidateIndexIfCurrentVault/.test(src))
@@ -242,6 +270,50 @@ fs.writeFileSync(path.join(srcBox, 'subdir', 'inner.txt'), 'INNER', 'utf8')
 fs.writeFileSync(path.join(srcBox, 'note.md'), '---\nid: x\n---\n', 'utf8')
 
 const read = (p) => (fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null)
+
+/**
+ * 剪贴板路径解析：直接跑真实纯函数（stripTypeScriptTypes → 临时 .mjs → import）。
+ * 语言 / 平台无关，用例里的绝对路径从 tmpRoot 现取（Windows 与 POSIX 都成立）。
+ */
+const runClipboardParserCases = async () => {
+  step = 'U 剪贴板路径解析'
+  for (const name of ['clipboardFilesPure']) {
+    if (!readIfExists(`electron/lib/${name}.ts`)) {
+      check(`U0 缺少 ${name}.ts`, false)
+      return
+    }
+  }
+  const file = path.join(tmpRoot, `clipboard-pure-${Date.now()}.mjs`)
+  fs.writeFileSync(file, stripTypeScriptTypes(clipboardPure, { mode: 'transform' }), 'utf8')
+  tmpModules.push(file)
+  const m = await import(pathToFileURL(file).href)
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+  const p1 = path.join(tmpRoot, 'a.txt')
+  const p2 = path.join(tmpRoot, 'b dir')
+  const toUri = (p) => pathToFileURL(p).href
+
+  const uri = m.parseUriList(`copy\n${toUri(p1)}\r\n${toUri(p2)}\r\n# comment\r\nhttps://example.com/x\r\n`)
+  check('U1 uri-list 解出全部文件路径（GNOME 首行 copy 自动丢弃）', eq(uri, [p1, p2]), JSON.stringify(uri))
+
+  const dup = m.parseUriList(`${toUri(p1)}\n${toUri(p1)}\n`)
+  check('U2 uri-list 去重且保序', eq(dup, [p1]), JSON.stringify(dup))
+
+  const bare = Buffer.from(`${p1}\0${p2}\0\0`, 'utf16le')
+  check('U3 FileNameW 裸列表（双空结尾）解出多条', eq(m.parseFileNameWBuffer(bare), [p1, p2]),
+    JSON.stringify(m.parseFileNameWBuffer(bare)))
+
+  const hdr = Buffer.alloc(20)
+  hdr.writeUInt32LE(20, 0)
+  check('U4 FileNameW 带 DROPFILES 头（pFiles 偏移）解出多条',
+    eq(m.parseFileNameWBuffer(Buffer.concat([hdr, bare])), [p1, p2]))
+
+  check('U5 空 / 非文件剪贴板 → 空数组', eq(m.parseUriList(''), []) && eq(m.parseUriList('hello world'), []))
+
+  const p3 = path.join(tmpRoot, '中文 文件.md')
+  check('U6 中文 / 空格路径按 UTF-8 百分号解码',
+    eq(m.parseUriList(`${toUri(p3)}\r\n`), [p3]), JSON.stringify(m.parseUriList(`${toUri(p3)}\r\n`)))
+}
 
 const run = async () => {
   mod = await makeHarness()
@@ -381,7 +453,7 @@ const guard = new Promise((_, rej) => {
 })
 
 try {
-  await Promise.race([run(), guard])
+  await Promise.race([(async () => { await runClipboardParserCases(); await run() })(), guard])
 } catch (e) {
   check(`运行期异常（${step}）`, false, String(e?.stack || e))
 } finally {

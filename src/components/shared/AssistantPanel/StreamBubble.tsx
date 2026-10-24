@@ -1,22 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Sparkles } from 'lucide-react'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { useSettings } from '../../../lib/SettingsContext'
+import { LIVE_EVENT_CAP, ThinkEvent, ToolEvent } from './ProcessRail'
 import type { ProcessItem, StreamDraft } from './useAgentStream'
 
 /**
- * 流式过程（生成态）—— docs/ai-reply-loading-plan.md §3「C 极简光标」。
+ * 流式过程（生成态）—— v3.10.0「事件流」。
  *
  * AI 教学中栏 / 支线面板 / 全局面板**三面共用**这一个组件，所以改一处三面生效。
- * 从对 Claude Code / ChatGPT / Claude.ai / Cursor / Cline / Copilot 的观感里提炼出的
- * 共性（§2 的 R1–R8）落在这里就是三句话：
- *   ① **状态是一条线，不是一个盒子**（R1）：不画外框、思考内容也不再套内框；
- *   ② **滑动指示优先于转圈**（R3）：状态行下面一条 2px 轨道 + accent 短条来回滑（纯 transform），
- *      状态行里也不放转圈 —— 滑动本身就是指示器；
- *   ③ **同一时刻只有一个状态标签**（R2），且 **生成中完全不显示工具行**（R8）：工具展示对
- *      体验价值不大（有意为之），完成后才由 `ToolSummary` 收成一行。
  *
- * 耗时是安静的（R5）：**>3 秒才出现**、弱色、每秒一次 —— 不是旧版那种 100ms 跳的秒表。
+ * 与 3.5.0 的「生成中完全不显示工具行」相反，这里恢复过程可见，但**不回到旧表格**：
+ *   ① 状态仍是一条线、一个标签（R1/R2）：状态行只负责「现在在做什么」；
+ *   ② 事件流是左细线 + 小节点（`.kb-ev-rail`），无外框、无右对齐耗时列；
+ *   ③ 思考按 LLM 轮次分段：当前轮展开，正文/工具开始时收起；上一轮保持收起可点开；
+ *   ④ 工具运行中用图标 opacity 呼吸，不用转圈；耗时跟在目标后面内联。
+ *
+ * 耗时仍是安静的（R5）：**>3 秒才出现**、弱色、每秒一次 —— 不是旧版那种 100ms 跳的秒表。
  */
 
 /** 耗时 >3 秒才在状态行右侧出现（短回复不闪、长回复有交代） */
@@ -30,52 +29,8 @@ function lastRunning(items: ProcessItem[]): Extract<ProcessItem, { kind: 'tool' 
   return null
 }
 
-/**
- * 思考行（R6）：一行「已思考 N 秒」+ 左细线展开体，**不做二级盒子**。
- * 只在收到 reasoning 内容时渲染；正文一开始输出就自动收起一次。
- *
- * ★ 这一行的文案**始终是「已思考 N 秒」**（进行中就是活的计数器）—— 不写「思考中…」。
- *   因为状态行此刻正好也在说「正在思考…」，两处都写就是把「同一时刻只有一个状态标签」
- *   （R2 / 现状毛病 2）原样搬回来。
- */
-function ThinkingBlock({ text, active }: { text: string; active: boolean }) {
-  const [open, setOpen] = useState(true)
-  const [secs, setSecs] = useState(0)
-  const prevActive = useRef(active)
-  const bodyRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (prevActive.current && !active) setOpen(false)
-    prevActive.current = active
-  }, [active])
-
-  useEffect(() => {
-    if (!active) return
-    const t0 = Date.now()
-    const id = window.setInterval(() => setSecs((Date.now() - t0) / 1000), 1000)
-    return () => window.clearInterval(id)
-  }, [active])
-
-  // 尾部对齐：`.kb-think__body` 是 overflow:hidden + max-height 截断，程序化 scrollTop 仍有效
-  useEffect(() => {
-    const el = bodyRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [text])
-
-  return (
-    <div className="kb-think">
-      <button type="button" className="kb-think__head" aria-expanded={open} onClick={() => setOpen(o => !o)}>
-        <Sparkles size={10} />
-        <span>已思考 {Math.max(1, Math.round(secs))} 秒</span>
-        <ChevronDown size={10} className={`kb-chevron ${open ? '' : '-rotate-90'}`} />
-      </button>
-      <div className={`kb-collapse${open ? ' open' : ''}`}>
-        <div>
-          <div ref={bodyRef} className="kb-think__body">{text}</div>
-        </div>
-      </div>
-    </div>
-  )
+function hasActiveThink(items: ProcessItem[]): boolean {
+  return items.some(it => it.kind === 'think' && it.state === 'active')
 }
 
 export function StreamBubble({
@@ -87,6 +42,10 @@ export function StreamBubble({
 }) {
   const { s } = useSettings()
   const showThinking = s.aiShowThinking !== false
+  const [showAll, setShowAll] = useState(false)
+
+  // 新一轮（startedAt 变化）重新按 10 步收起；同一轮内用户展开后保持展开
+  useEffect(() => setShowAll(false), [draft.startedAt])
 
   const durRef = useRef<HTMLSpanElement>(null)
   const [showDur, setShowDur] = useState(false)
@@ -117,10 +76,14 @@ export function StreamBubble({
   const running = lastRunning(draft.items)
   const phase = running ? `正在${running.label}…`
     : draft.text ? '正在回答…'
-    : draft.thinking ? '思考中…'
+    : hasActiveThink(draft.items) ? '思考中…'
     : '正在等待模型响应…'
-  const thinkingActive = draft.thinking.length > 0 && !draft.text && draft.items.length === 0
   const bodyText = textTransform ? textTransform(draft.text) : draft.text
+
+  // 思考显示开关只影响渲染，不影响草稿内容（关掉再打开仍可看到已收到的段）
+  const events = showThinking ? draft.items : draft.items.filter(it => it.kind !== 'think')
+  const hidden = !showAll && events.length > LIVE_EVENT_CAP ? events.length - LIVE_EVENT_CAP : 0
+  const visible = hidden > 0 ? events.slice(hidden) : events
 
   return (
     <>
@@ -133,7 +96,30 @@ export function StreamBubble({
         {showDur && <span ref={durRef} className="kb-stage-dur" />}
       </div>
 
-      {showThinking && draft.thinking && <ThinkingBlock text={draft.thinking} active={thinkingActive} />}
+      {visible.length > 0 && (
+        <div className="kb-ev-rail">
+          {hidden > 0 && (
+            <button type="button" className="kb-ev-more" onClick={() => setShowAll(true)}>
+              查看前面 {hidden} 步
+            </button>
+          )}
+          {visible.map(it => {
+            if (it.kind === 'think') {
+              return (
+                <ThinkEvent key={it.key} text={it.text} active={it.state === 'active'}
+                  startedAt={it.startedAt} durationMs={it.durationMs} />
+              )
+            }
+            if (it.kind === 'narr') {
+              return <div key={it.key} className="kb-ev kb-ev-narr kb-item-in">{it.text}</div>
+            }
+            return (
+              <ToolEvent key={it.key} name={it.name} label={it.label} target={it.target}
+                state={it.state} durationMs={it.durationMs} />
+            )
+          })}
+        </div>
+      )}
 
       {bodyText && (
         <div className="text-[12px] leading-relaxed break-words select-text cursor-text [&_.prose-content>:first-child]:mt-0 [&_.prose-content>:last-child]:mb-0 [&_pre]:overflow-x-auto [&_pre]:max-w-full">

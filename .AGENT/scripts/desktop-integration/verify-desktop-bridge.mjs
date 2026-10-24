@@ -8,7 +8,7 @@
 //   ① daySnapshotPure 纯函数用例（去重 / 排序 / 时钟解析 / 番茄反推）
 //   ② D-Bus 契约面：总线名 / 对象路径 / 接口版本 / 方法签名（与 interface.md 对齐）
 //   ③ 写入口唯一性：托盘、D-Bus、IPC 共用 action；写后必须广播
-//   ④ 打包注入：.service / CLI / DBusActivatable / afterRemove 的升级保护
+//   ④ 打包注入：.service / CLI / StartupWMClass / afterRemove 的升级保护
 //   ⑤ 负向：D-Bus 层不得直接写文件（只读 + action）
 //
 // 运行（项目根目录）：
@@ -132,7 +132,16 @@ console.log('\n--- ④ deb 注入 ---')
 const pkg = readJson('package.json')
 const extra = JSON.stringify(pkg.build.extraResources ?? [])
 check('extraResources 带 desktop-bridge', extra.includes('scripts/desktop-bridge'))
-check('DBusActivatable=true', pkg.build.linux?.desktop?.entry?.DBusActivatable === 'true')
+// 2026-10-20 校正：DBusActivatable 要求桌面文件名 = D-Bus 名（reverse-DNS），
+// 本项目的桌面文件是 phrontis.desktop、总线名是 io.github.lousync.Phrontis —— 写了也无效，
+// 且会让 GNOME 尝试激活不存在的 `phrontis` 服务。D-Bus 激活由 postinst 的独立 .service 承担。
+check('不写无效的 DBusActivatable', !('DBusActivatable' in (pkg.build.linux?.desktop?.entry ?? {})))
+check('StartupWMClass 与运行时 WM_CLASS（res_class）一致',
+  pkg.build.linux?.desktop?.entry?.StartupWMClass === 'knowbase')
+// ★ 不能为了桌面显示名去 app.setName('Phrontis')：Electron 的 safeStorage 在 Linux 上
+//   按 app.name 找钥匙串条目，改名 = 存量 API Key / 密码本全部解不开（2026-10-20 实测）。
+check('主进程不得改 app.name（safeStorage 钥匙串按它分段）',
+  !/app\.setName\(\s*['"]Phrontis['"]\s*\)/.test(stripComments(read('electron/main/index.ts'))))
 check('deb.afterRemove 已登记', pkg.build.deb?.afterRemove === 'build/linux-after-remove.sh')
 
 const afterInstall = read('build/linux-after-install.sh')
