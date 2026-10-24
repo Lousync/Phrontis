@@ -1,5 +1,5 @@
 import type { IntelItem, IntelSourceKey } from '../../../src/types'
-import { INTEL_SOURCE_KEYS, sortIntelItems } from '../../../src/lib/intelPure'
+import { INTEL_SOURCE_KEYS, sortIntelItems, SOURCE_META } from '../../../src/lib/intelPure'
 import { fetchGithub } from './sources/github'
 import { fetchHn } from './sources/hn'
 import { fetchArxiv } from './sources/arxiv'
@@ -23,13 +23,20 @@ export interface IntelFetchStats {
   failed: IntelSourceKey[]
 }
 
-export async function fetchAllIntelSources(get: IntelGetSetting): Promise<{
+/**
+ * @param only 只抓这一个源（2026-10-25 单源刷新语义：左栏停在某个源时，刷新按钮只刷它）。
+ *   该源在设置中关闭时抛错（用户意图与设置冲突，给明确提示而不是静默空转）。
+ */
+export async function fetchAllIntelSources(get: IntelGetSetting, only?: IntelSourceKey): Promise<{
   items: IntelItem[]
   stats: IntelFetchStats
   added: number
 }> {
   const opts = intelFetchOpts(get)
-  const runners: Array<[IntelSourceKey, () => Promise<IntelItem[]>]> = [
+  if (only && !opts.enabled.has(only)) {
+    throw new Error(`「${SOURCE_META[only]?.label ?? only}」已在设置中关闭（设置 › 模块 › 情报）`)
+  }
+  const all: Array<[IntelSourceKey, () => Promise<IntelItem[]>]> = [
     ['github', () => fetchGithub(opts.limit)],
     ['hn', () => fetchHn(opts.limit)],
     ['arxiv', () => fetchArxiv(opts.limit)],
@@ -39,6 +46,7 @@ export async function fetchAllIntelSources(get: IntelGetSetting): Promise<{
     ['labs', () => fetchLabs(opts.limit)],
     ['qbitai', () => fetchQbitai(opts.limit)],
   ]
+  const runners = only ? all.filter(([key]) => key === only) : all
   const settled = await Promise.allSettled(
     runners.map(([key, run]) => (opts.enabled.has(key) ? run() : Promise.resolve<IntelItem[]>([]))),
   )

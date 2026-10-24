@@ -2326,7 +2326,7 @@ export interface ElectronAPI {
   onScheduleReminderClick: (cb: () => void) => () => void
   // intel（v3.12.0 情报模块）
   intelGetItems: () => Promise<{ items: IntelItem[]; meta: IntelMeta }>
-  intelRefresh: () => Promise<IntelMeta>
+  intelRefresh: (source?: IntelSourceKey) => Promise<IntelRefreshResult>
   intelToggleFav: (id: string) => Promise<IntelItem | null>
   intelGetArticle: (id: string) => Promise<{ md: string; url: string; title: string; cached: boolean } | { error: string }>
   intelSetAiRec: (rec: IntelAiRec) => Promise<boolean>
@@ -3231,6 +3231,14 @@ export interface IntelAiFilter {
   kind: 'paper' | 'chinese' | ''
   kw: string
   updatedAt: string
+}
+
+/** intel:refresh 返回（2026-10-25 单源刷新语义）：scope = 'all' 或本轮唯一抓取的源 key */
+export interface IntelRefreshResult {
+  meta: IntelMeta
+  scope: 'all' | IntelSourceKey
+  added: number
+  failedSources: IntelSourceKey[]
 }
 
 declare global { interface Window { api: ElectronAPI; devtoolsApi?: DevtoolsAPI } }

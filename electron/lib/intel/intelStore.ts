@@ -5,7 +5,7 @@ import { getVaultKbRoot } from '../kbStore/vaultContext'
 import { readJson, writeJsonOrThrow, kbModulePath } from '../kbStore/jsonStore'
 import { sanitizeFileName } from '../workspaceManager'
 import { extractArticle } from '../clipperServer/extract'
-import type { IntelAiFilter, IntelAiRec, IntelItem, IntelMeta, IntelSourceKey } from '../../../src/types'
+import type { IntelAiFilter, IntelAiRec, IntelItem, IntelMeta, IntelRefreshResult, IntelSourceKey } from '../../../src/types'
 import { mergeIntelPool, pruneIntelPool, capIntelPool, sortIntelItems } from '../../../src/lib/intelPure'
 import { fetchAllIntelSources } from './fetchAll'
 import type { IntelGetSetting } from './intelSettings'
@@ -118,16 +118,26 @@ export function intelSetAiFilter(filter: { kind: 'paper' | 'chinese' | ''; kw: s
 
 // ===== 一轮抓取 =====
 
-export async function intelRefresh(get: IntelGetSetting): Promise<IntelMeta> {
+export async function intelRefresh(get: IntelGetSetting, only?: IntelSourceKey): Promise<IntelRefreshResult> {
   if (!getVaultKbRoot()) throw new Error('请先打开仓库')
-  const { items, stats, added } = await fetchAllIntelSources(get)
+  const { items, stats, added } = await fetchAllIntelSources(get, only)
   intelMergeItems(items)
   intelPrune(intelKeepDays(get))
   const meta = intelReadMeta()
-  const next: IntelMeta = { ...meta, lastFetchAt: new Date().toISOString(), lastFetchStats: { ok: stats.ok as IntelSourceKey[], failed: stats.failed as IntelSourceKey[], added } }
+  let next: IntelMeta = { ...meta, lastFetchAt: new Date().toISOString() }
+  if (only) {
+    // 单源轮：lastFetchStats 只更新该源的成败归属，其余源保持上轮全量抓取的记录
+    const prevOk = new Set(meta.lastFetchStats?.ok ?? [])
+    const prevFailed = new Set(meta.lastFetchStats?.failed ?? [])
+    for (const k of stats.ok) { prevOk.add(k); prevFailed.delete(k) }
+    for (const k of stats.failed) { prevFailed.add(k); prevOk.delete(k) }
+    next = { ...next, lastFetchStats: { ok: [...prevOk], failed: [...prevFailed], added: meta.lastFetchStats?.added ?? 0 } }
+  } else {
+    next = { ...next, lastFetchStats: { ok: stats.ok as IntelSourceKey[], failed: stats.failed as IntelSourceKey[], added } }
+  }
   writeJsonOrThrow(MOD, 'meta.json', next)
   broadcastDataChanged('intel')
-  return next
+  return { meta: next, scope: only ?? 'all', added, failedSources: stats.failed }
 }
 
 // ===== 正文（惰性缓存；不广播）=====

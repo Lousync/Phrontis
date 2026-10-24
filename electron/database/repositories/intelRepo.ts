@@ -3,7 +3,8 @@ import {
   intelItemsAll, intelReadMeta, intelRefresh, intelToggleFav,
   intelGetArticle, intelSetAiRec, intelClearAiRec, intelSetAiFilter, intelSaveAsNote,
 } from '../../lib/intel/intelStore'
-import type { IntelAiRec, IntelItem, IntelMeta } from '../../../src/types'
+import { INTEL_SOURCE_KEYS } from '../../../src/lib/intelPure'
+import type { IntelAiRec, IntelItem, IntelMeta, IntelSourceKey } from '../../../src/types'
 
 /**
  * 情报模块 IPC（v3.12.0，docs/intel-module-plan.md §5）。
@@ -18,8 +19,10 @@ export function registerIntelHandlers(deps: { getSettingValue: (key: string) => 
     return { items, meta } satisfies { items: IntelItem[]; meta: IntelMeta }
   })
 
-  ipcMain.handle('intel:refresh', async () => {
-    return await intelRefresh(deps.getSettingValue)
+  ipcMain.handle('intel:refresh', async (_e, source?: string) => {
+    // 单源刷新（2026-10-25）：source 为源 key 时只抓该源；空/非法值 = 全源
+    const only = INTEL_SOURCE_KEYS.includes(source as IntelSourceKey) ? (source as IntelSourceKey) : undefined
+    return await intelRefresh(deps.getSettingValue, only)
   })
 
   ipcMain.handle('intel:toggleFav', (_e, id: string) => {

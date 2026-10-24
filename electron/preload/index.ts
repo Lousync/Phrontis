@@ -129,7 +129,7 @@ const api = {
 
   // intel（v3.12.0 情报模块；业务转发 lib/intel/intelStore）
   intelGetItems: () => ipcRenderer.invoke('intel:getItems'),
-  intelRefresh: () => ipcRenderer.invoke('intel:refresh'),
+  intelRefresh: (source?: string) => ipcRenderer.invoke('intel:refresh', source),
   intelToggleFav: (id: string) => ipcRenderer.invoke('intel:toggleFav', id),
   intelGetArticle: (id: string) => ipcRenderer.invoke('intel:getArticle', id),
   intelSetAiRec: (rec: unknown) => ipcRenderer.invoke('intel:setAiRec', rec),

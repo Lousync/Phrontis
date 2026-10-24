@@ -1,8 +1,11 @@
 /**
  * 情报抓取公共 HTTP helper（docs/intel-module-plan.md §4.1）。
- * 写法照 electron/lib/webSearch.ts：Node 全局 fetch + 浏览器 UA + AbortController 超时。
+ * 用 Electron 的 net.fetch（Chromium 网络栈）：**吃系统代理 + Windows 证书库**——
+ * Node 全局 fetch 两者都不认，用户开加速器（本地 TLS 拦截 / 系统代理）时外源会
+ * 静默证书失败（2026-10-25 实测：GitHub 源恒空即此因）。先例：llmService / pluginRegistry。
  * 仅请求方案 §1 清单里的固定域名（无 SSRF 面）；单源失败由调用方兜住，绝不炸整轮。
  */
+import { net } from 'electron'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
@@ -19,7 +22,7 @@ async function request(url: string, timeoutMs: number, accept: string, retries: 
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
     try {
-      const res = await fetch(url, {
+      const res = await net.fetch(url, {
         headers: {
           'User-Agent': UA,
           'Accept': accept,
