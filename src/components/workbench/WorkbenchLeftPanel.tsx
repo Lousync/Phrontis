@@ -4,7 +4,7 @@ import {
   Bookmark, CalendarDays, BookOpen, Check, FileText, FileQuestion, Folder, House, Lock,
   LockOpen, NotebookPen, Library, Trees, Bot, Search, Pencil, Trash2, ChevronRight,
   CopyPlus, Link2, ArrowUpNarrowWide, ArrowDownNarrowWide,
-  LayoutGrid, Plus, SquareTerminal, Wallet,
+  LayoutGrid, Plus, SquareTerminal, Wallet, Radar,
 } from 'lucide-react'
 import { VaultSwitcher } from '../shared/VaultSwitcher'
 import { ConfirmDialog } from '../shared'
@@ -56,6 +56,8 @@ const BOOKMARK_ICONS: Record<RailModule, (size: number) => React.ReactNode> = {
   accounting: (s) => <Wallet size={s} />,
   // v3.9.0 AI助手：文件夹 + 右下角小机器人头（自定义图标，与 aiChat 的 Bot 区分）
   aiAssistant: (s) => <AiAssistantIcon size={s} />,
+  // v3.12.0 情报：雷达（docs/intel-module-plan.md，与原型 bmIntel 的 📡 同语义）
+  intel: (s) => <Radar size={s} />,
 }
 
 /** 插件注册书签的钝解析：只收 tab 型 action，坏条目/坏 JSON 静默丢弃（插件数据不可信外壳） */

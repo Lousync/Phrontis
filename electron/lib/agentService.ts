@@ -50,6 +50,8 @@ import { findSkillPrompt } from './skillService'
 import { recordAiUsage, usageKeyOf, recordSessionFileChange, getAiUsageData, getAiUsageModels, getSessionChanges } from './agentUsage'
 import { estimateCost } from './modelPricing'
 import { vaultTodosAll } from './kbStore/scheduleVaultRepo'
+import { intelItemsAll, intelReadMeta, intelPoolStats } from './intel/intelStore'
+import { SOURCE_META } from '../../src/lib/intelPure'
 import { computeLaneUnread, deriveLaneStatus } from './sideLaneMeta'
 import { buildScopeManifest } from './aiAssistantScope'
 import { getPlan, applyPlan, rejectPlan, rollbackTask, listTasks } from './aiAssistantPlan'
@@ -475,6 +477,8 @@ function buildToolsPayload(sessionId?: string, only?: string[], modeOpts?: {
   confirmMode?: boolean
   /** 统一助手只读日程：隐藏所有日程写工具 */
   scheduleReadOnly?: boolean
+  /** 统一助手只读情报池：隐藏 intel 写工具（筛选/推荐请用情报助手的 📡 面板，D8） */
+  intelReadOnly?: boolean
 }): {
   payload: unknown[]
   nameMap: Map<string, string>
@@ -510,8 +514,9 @@ function buildToolsPayload(sessionId?: string, only?: string[], modeOpts?: {
     // 与铁律 3 同一机制：requires==='write' 的工具被预过滤出模型视野。这条判定放在最前面，
     // 是为了让 tool.request 也绕不过（即便申请过写工具，支线这边照样 return false）。
     if (isSideLaneSession && t.requires === 'write') return false
-    // 统一助手：日程只读（写工具交给日程助手），确认模式隐藏不可安全预览的写工具
+    // 统一助手：日程只读（写工具交给日程助手），情报池只读（筛选/推荐交给情报助手 📡），确认模式隐藏不可安全预览的写工具
     if (modeOpts?.scheduleReadOnly && t.module === 'schedule' && t.requires === 'write') return false
+    if (modeOpts?.intelReadOnly && t.module === 'intel' && t.requires === 'write') return false
     if (modeOpts?.confirmMode && isConfirmModeHiddenTool(t.name, t.requires)) return false
     const denied = checkModulePermission(t, reader)
     if (denied && t.module) deniedModules.add(t.module)
@@ -691,6 +696,64 @@ function buildScheduleInjection(): string {
   return '\n\n【日程数据（本轮快照）】\n' + parts.join('\n')
 }
 
+// ===== 情报助手（source === 'intel'）—— docs/intel-module-plan.md §7 =====
+/** 情报助手工具白名单：只读池 + 两个写回动作（窄工具面 = 少误触少 token，铁律 16）。 */
+const INTEL_TOOL_NAMES = [
+  'builtin.intel.query',
+  'builtin.intel.set-recommendations',
+  'builtin.intel.set-filter',
+  'builtin.time.now',
+]
+
+/** 情报助手人设/规则（逐字稳定 → 进 system，命中 prompt cache 前缀；语义要点见方案 §7.2） */
+const INTEL_PERSONA = [
+  '\n\n【情报助手】你是 Phrontis 的「情报助手」——只管情报池的查询、筛选与推荐，不处理日程、知识库、记账等其它事务。规则：',
+  '1. 只使用情报相关工具；其它模块的工具不可用，也不要尝试。',
+  '2. 【情报数据】快照给出了当前日期与池子概况，一切以它为准——不凭印象编造条目；池内没有就直说没有。',
+  // 推荐（写动作 → 左栏结果集）
+  '3. 用户要「推荐」时：先 builtin.intel.query 取候选（可按用户兴趣拼关键词），挑 3~8 条，把 id 按推荐优先级传给 builtin.intel.set-recommendations（query 填用户原话），再用正文逐条简述推荐理由（一句话一条）。',
+  // 找资料
+  '4. 用户「找 X」时：builtin.intel.query 带 q 检索；命中多条先 set-recommendations 收进结果集再汇报；池内没有匹配就明说没有，不要编造。',
+  // 筛选（写动作 → feed 顶部 pill）
+  '5. 用户「只看论文 / 只看中文 / 只看某源」时：用 builtin.intel.set-filter（kind:"paper"=论文类；kind:"chinese"=中文来源；kw 可叠加关键词）；「恢复全部 / 清掉筛选」传 kind:"" 与空 kw。',
+  // 回答口径
+  '6. 回答简洁，用简体中文。提到条目时给「源 · 标题 · 一句话价值」格式，不贴长 URL（用户点卡片即可打开）。',
+].join('\n')
+
+/**
+ * 情报数据快照（每轮现算）——池概况 + 按质量分前 30 条 + 当前推荐。
+ * 逐字会变，故走**首条 user 消息层**（requestInjection）而非 system，避免打散 prompt cache（同 buildScheduleInjection）。
+ */
+function buildIntelInjection(): string {
+  const now = new Date()
+  const hhmm = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`
+  const pool = intelItemsAll()
+  const meta = intelReadMeta()
+  const stats = intelPoolStats()
+  if (pool.length === 0) {
+    return `\n\n【情报数据（本轮快照）】\n现在：${ymd(now)} ${weekdayZh(now)} ${hhmm}\n池：空（还没有抓取过任何情报；用户在情报模块点「刷新」后即有数据，本轮请如实告知池子为空）`
+  }
+  const srcLine = stats.perSource.map(([k, n]) => `${SOURCE_META[k]?.label ?? k} ${n}`).join(' · ')
+  const top = pool.slice(0, 30).map((it) => {
+    const sum = (it.summary || '').slice(0, 60)
+    return `— [${it.source}|${it.score}] ${it.title}${sum ? ` — ${sum}` : ''}（id:${it.id}${it.fav ? ' · 已收藏' : ''}）`
+  }).join('\n')
+  const rec = meta.aiRec && meta.aiRec.ids.length > 0
+    ? `\n当前 AI 推荐：${meta.aiRec.ids.length} 条（来自「${meta.aiRec.query}」，${meta.aiRec.updatedAt.slice(0, 16).replace('T', ' ')}）`
+    : '\n当前 AI 推荐：无（用户问过推荐后由 set-recommendations 生成）'
+  const filter = meta.aiFilter && (meta.aiFilter.kind || meta.aiFilter.kw)
+    ? `\n当前筛选态：${[meta.aiFilter.kind === 'paper' ? '仅论文' : meta.aiFilter.kind === 'chinese' ? '仅中文' : '', meta.aiFilter.kw ? `关键词「${meta.aiFilter.kw}」` : ''].filter(Boolean).join(' + ') || '无'}`
+    : ''
+  return [
+    `\n\n【情报数据（本轮快照）】`,
+    `现在：${ymd(now)} ${weekdayZh(now)} ${hhmm}`,
+    `池：共 ${stats.total} 条（${srcLine}；收藏 ${stats.fav}）`,
+    `按质量分前 30：`,
+    top,
+    rec + filter,
+  ].join('\n')
+}
+
 async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: string): Promise<AgentChatResult> {
   const trace: AgentTraceStep[] = []
   const message = String(req?.message ?? '').trim()
@@ -699,7 +762,7 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
   // ---- 会话保障 ----
   let sessionId = String(req.sessionId ?? '')
   if (sessionId && !sessionExists(sessionId)) sessionId = ''
-  if (!sessionId) sessionId = createAgentSession('新会话', req.source === 'aiTeaching' ? 'aiTeaching' : req.source === 'schedule' ? 'schedule' : req.source === 'aiAssistant' ? 'aiAssistant' : 'assistant').id
+  if (!sessionId) sessionId = createAgentSession('新会话', req.source === 'aiTeaching' ? 'aiTeaching' : req.source === 'schedule' ? 'schedule' : req.source === 'aiAssistant' ? 'aiAssistant' : req.source === 'intel' ? 'intel' : 'assistant').id
 
   // ---- 落库用户消息 + 自动标题 ----
   appendAgentMessage(sessionId, 'user', message)
@@ -708,7 +771,8 @@ async function agentChat(req: AgentChatRequest, signal: AbortSignal, _chatId: st
   // ---- N-1 手册通道：首条消息一次性分类；手册通道内出现操作意图即升格（只升不降） ----
   // 日程助手不走手册通道（req.source==='schedule' 恒走通用通道，见 runAgentLoop 的 manual 判定）
   // AI助手（aiAssistant）同理不走手册通道 —— 它是仓库整理任务，不是「软件怎么用」的答疑。
-  if (req.source !== 'aiTeaching' && req.source !== 'schedule' && req.source !== 'aiAssistant') {
+  // 情报助手（intel）同型：专属领域助手，恒走通用通道（v3.12.0）。
+  if (req.source !== 'aiTeaching' && req.source !== 'schedule' && req.source !== 'aiAssistant' && req.source !== 'intel') {
     const row = getAgentSession(sessionId)
     if (row && row.mode === undefined) {
       // 三分类：manual 走手册通道；agent 与 tech（第三方/通用技术问答）都走通用助手
@@ -921,7 +985,7 @@ async function runAgentLoop(
   // 否则日程助手会话在这些路径会退化成通用助手（人设/工具面/摘要全丢）。
   if (!source && sessionId) source = getAgentSession(sessionId)?.source
   const runModeRow = getAgentSession(sessionId)
-  const manual = source !== 'aiTeaching' && source !== 'schedule' && runModeRow?.mode === 'manual'
+  const manual = source !== 'aiTeaching' && source !== 'schedule' && source !== 'intel' && runModeRow?.mode === 'manual'
   // ---- 统一 AI 助手（v3.11.0）：文件作用域 + 写入策略 ----
   // 旧 aiAssistant 来源只作为兼容入口；新会话一律 source='assistant'。
   // 缺省 source 也按通用助手处理（老会话 / 某些内部入口不带来源）；AI 教学与日程上面已回推
@@ -951,7 +1015,11 @@ async function runAgentLoop(
     }
   }
   // P3 装载层：工具 payload 可能在循环中重建（tool.request 启用新工具后下一轮生效）
-  let toolsState = buildToolsPayload(sessionId, manual ? [MANUAL_CHANNEL_TOOL] : source === 'schedule' ? SCHEDULE_TOOL_NAMES : undefined, { confirmMode: aiPropose, scheduleReadOnly: unifiedAssistant })
+  let toolsState = buildToolsPayload(
+    sessionId,
+    manual ? [MANUAL_CHANNEL_TOOL] : source === 'schedule' ? SCHEDULE_TOOL_NAMES : source === 'intel' ? INTEL_TOOL_NAMES : undefined,
+    { confirmMode: aiPropose, scheduleReadOnly: unifiedAssistant, intelReadOnly: unifiedAssistant },
+  )
   let toolPayload = toolsState.payload
   const { nameMap, deniedModules, deniedVaultFile, skills } = toolsState
   // v3.1.2 条目11：支线写类工具**硬拦截**。模型视野里已经没有写工具（buildToolsPayload 已过滤），
@@ -1143,7 +1211,7 @@ async function runAgentLoop(
    *     故教学面同时注入；阶段二只改产物落点与工件栏，不再动注入面。
    * 日程助手不注入：它的工具面被刻意收窄（只有日程那几个），给生图规则是负担。
    */
-  const imageHint = source !== 'schedule'
+  const imageHint = source !== 'schedule' && source !== 'intel'
     ? '\n\n【生图工具 image】用户敲 `/生图 <描述>`，或明确说「画一张 / 配个图 / 示意图 / 把这张改成…」时，调用 image 生图或改图：' +
       '① prompt 保持用户的语言与诉求原样（中文标注要求别翻成英文）；画幅不填=按内容定，要指定就在 prompt 里说。' +
       '② 改图：把目标图的仓库相对路径填进 ref（上一次 image 的返回里就有）；改图模型没配时工具会按描述重画，并把这一点写在结果里。' +
@@ -1170,6 +1238,9 @@ async function runAgentLoop(
   // 日程助手（source==='schedule'）：人设进 system（逐字稳定）；数据快照进首条 user 消息层（每轮现算）
   const schedulePersona = source === 'schedule' ? SCHEDULE_PERSONA : ''
   const scheduleHint = source === 'schedule' ? buildScheduleInjection() : ''
+  // 情报助手（source==='intel'）：人设进 system（逐字稳定）；池快照进首条 user 消息层（每轮现算，v3.12.0 §7.2）
+  const intelPersona = source === 'intel' ? INTEL_PERSONA : ''
+  const intelHint = source === 'intel' ? buildIntelInjection() : ''
   // 统一 AI 助手：作用域 + 写入策略（v3.11.0）
   const scopeHint = !unifiedAssistant
     ? ''
@@ -1186,7 +1257,11 @@ async function runAgentLoop(
   const scheduleReadOnlyHint = unifiedAssistant
     ? '\n【统一助手·日程只读】日程数据只读；不要创建/修改/删除日程。日程写入请让用户使用日程助手。'
     : ''
-  const aiAssistantHint = scopeHint + writeModeHint + scheduleReadOnlyHint
+  // v3.12.0 D8：情报池对通用助手只读——写工具已被 buildToolsPayload 滤出视野，这里补一句指引防「我改不了」式回答
+  const intelReadOnlyHint = unifiedAssistant
+    ? '\n【统一助手·情报只读】情报池只读（可查询）；筛选与刷新「✨ AI 推荐」请用户打开情报模块的 📡 情报助手。'
+    : ''
+  const aiAssistantHint = scopeHint + writeModeHint + scheduleReadOnlyHint + intelReadOnlyHint
   const baseSystem = buildSystemPrompt(context)
   // UI 优化条目9②：教学会话的注入分段用量（字符数，渲染层按 ≈2.6 字/token 折算做构成摘要）
   const injection: AiTeachInjectionStats | undefined = source === 'aiTeaching'
@@ -1202,7 +1277,7 @@ async function runAgentLoop(
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
+    : baseSystem + schedulePersona + intelPersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
@@ -1237,13 +1312,15 @@ async function runAgentLoop(
   }
   // 生图：本会话「最近生成的图」薄索引（方案 §5.4）。与上面同一理由 —— 放首条 user 消息层，
   // 不放 system（它随会话内容递增而变，进 system 就是每生成一张图就把缓存前缀作废一次）
-  const recentImagesHint = (!manual && source !== 'schedule') ? buildRecentImagesHint(sessionId) : ''
+  const recentImagesHint = (!manual && source !== 'schedule' && source !== 'intel') ? buildRecentImagesHint(sessionId) : ''
   // 统一助手：缩窄作用域时把元数据清单进首条 user 消息层（不进 system —— 清单随任务变，进 system 会作废 prompt cache 前缀）。
   // 整仓不列清单（成本高且无边界意义），只由 system 的作用域提示说明。
   const aiManifestHint = unifiedAssistant && !scopeAll
     ? buildScopeManifest(aiScope, [...history].reverse().find((m) => m.role === 'user')?.content ?? '', false)
     : ''
-  const requestInjection = [scheduleHint, refInjection, perceptionInjection, recentImagesHint, aiManifestHint].filter(Boolean).join('\n\n')
+  // 首条 user 消息层注入（每轮变化的数据快照）：日程 / 情报各自的数据快照 + 引用骨架 / 感知素材 ——
+  // 逐字会变的内容都只进这一层，不进 system（防打散 prompt cache 前缀）
+  const requestInjection = [scheduleHint, intelHint, refInjection, perceptionInjection, recentImagesHint, aiManifestHint].filter(Boolean).join('\n\n')
 
   // 纪要以首条 user 消息注入（composeContextWithDigest）——system+tools 是 prompt cache
   // 前缀必须逐字稳定，纪要变化只重建一次性前缀
@@ -1979,7 +2056,7 @@ export function registerAgentHandlers(): void {
     if (!getCurrentVault()) throw new Error('尚未打开仓库，无法新建对话')
     return camelRow(createAgentSession(
       typeof title === 'string' && title.trim() ? title.trim() : '新会话',
-      source === 'aiTeaching' ? 'aiTeaching' : source === 'schedule' ? 'schedule' : source === 'aiAssistant' ? 'aiAssistant' : 'assistant',
+      source === 'aiTeaching' ? 'aiTeaching' : source === 'schedule' ? 'schedule' : source === 'aiAssistant' ? 'aiAssistant' : source === 'intel' ? 'intel' : 'assistant',
     ))
   })
   ipcMain.handle('agent:messages', (_e, id: string) => getAgentMessages(String(id ?? '')).map(camelRow))

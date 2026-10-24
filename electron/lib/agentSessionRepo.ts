@@ -64,8 +64,9 @@ function requireAgentDir(): string {
 /**
  * 会话来源：用于把「通用 AI 助手」（侧栏 / AI 学堂）与「AI 教学」的会话列表互相隔离。
  * 二者共用同一张会话表（同一份存储、同一套 AgentRunner），只在列表展示上按来源分流。
+ * 与 src/types 的 AgentSessionSource 同构（跨线各声明一次的仓规）；v3.12.0 加 'intel'（📡 情报助手）。
  */
-export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant'
+export type AgentSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant' | 'intel'
 
 /**
  * 写入策略（统一 AI 助手，v3.11.0）：

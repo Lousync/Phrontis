@@ -107,7 +107,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'sidebar', label: '折叠 / 展开侧栏', desc: '展开 / 折叠侧栏',
     keys: [['Ctrl', 'B']], group: 'global', scope: 'global', palette: true,
     conflictNote: '编辑器（Monaco / LiveMarkdown）内归「加粗」，App 侧靠 isEditingInput 对 .monaco-editor 让位（src/lib/shortcuts.ts）',
-    sources: ['src/App.tsx:1401 @ if (e.ctrlKey && !e.altKey && e.key ==='],
+    sources: ['src/App.tsx:1496 @ if (e.ctrlKey && !e.altKey && e.key ==='],
   },
   {
     id: 'escape', label: '关闭弹窗 / 返回列表', desc: '关闭弹窗 / 返回列表',
@@ -119,24 +119,24 @@ export const COMMANDS: CommandDef[] = [
     id: 'palette', label: '命令面板', desc: '命令面板',
     keys: [['Ctrl', 'Shift', 'P']], group: 'global', scope: 'global', palette: false,
     note: '刻意不进命令面板自身（自指）——buildEmptyHints / buildCommandItems 都遵守这条',
-    sources: ['src/App.tsx:299 @ if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e'],
+    sources: ['src/App.tsx:307 @ if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e'],
   },
   {
     id: 'quick-open', label: '快速打开文件', desc: '快速打开文件（按标题 / 路径搜仓库页面）',
     keys: [['Ctrl', 'O']], group: 'global', scope: 'global', palette: true,
     note: '2026-10-13 博客大纲改键 Ctrl+Alt+O 让位给本键（原先两条 window 监听都会跑）',
-    sources: ['src/App.tsx:315 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !'],
+    sources: ['src/App.tsx:323 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !'],
   },
   {
     id: 'global-search', label: '全局搜索', desc: '全局搜索（左栏搜索态：标题、正文、目录、标签）',
     keys: [['Ctrl', 'P'], ['Ctrl', '`'], ['Ctrl', 'Shift', 'F']], group: 'global', scope: 'global', palette: true,
     note: '三个键同效、都指向左栏搜索态（App.tsx:304 与 :309 同一去向）。原表把这仨拆散且 Ctrl+P 错挂在「知识库 — 阅读」下',
-    sources: ['src/App.tsx:305 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !', 'src/App.tsx:310 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
+    sources: ['src/App.tsx:313 @ if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !', 'src/App.tsx:318 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
   },
   {
     id: 'ai-side', label: 'AI 助手', desc: 'AI 助手开关（工作台右栏；整窗模块下为悬浮助手）',
     keys: [['Ctrl', 'J']], group: 'global', scope: 'global', palette: true,
-    sources: ['src/App.tsx:1494 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
+    sources: ['src/App.tsx:1589 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
   },
   {
     id: 'ai-full', label: 'AI 助手 · 全屏学堂', desc: 'AI 助手：进入全屏学堂',
@@ -151,7 +151,7 @@ export const COMMANDS: CommandDef[] = [
     // 否则会列出一条「点了没反应」的命令
     requires: { workbench: true, fullWindowTab: false },
     note: '整窗模块下左右栏本就退场，handler 里 fullWindowTab 早退（App.tsx:1395）',
-    sources: ['src/App.tsx:1466 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
+    sources: ['src/App.tsx:1561 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
   },
   {
     id: 'undo', label: '撤销文件操作', desc: '撤销上一文件操作（重命名 / 删除 / 移动）',
@@ -167,14 +167,14 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'zoom-in', label: '界面放大', desc: '界面放大',
     keys: [['Ctrl', '=']], group: 'global', scope: 'global', palette: true,
-    conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1380）',
-    sources: ['src/App.tsx:1381 @ NumpadAdd'],
+    conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1473）',
+    sources: ['src/App.tsx:1476 @ NumpadAdd'],
   },
   {
     id: 'zoom-out', label: '界面缩小', desc: '界面缩小',
     keys: [['Ctrl', '-']], group: 'global', scope: 'global', palette: true,
-    conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1380）',
-    sources: ['src/App.tsx:1386 @ NumpadSubtract'],
+    conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1473）',
+    sources: ['src/App.tsx:1481 @ NumpadSubtract'],
   },
   {
     id: 'sys-day', label: '日程与打卡小窗开关', desc: '日程与打卡小窗开关（系统级）',

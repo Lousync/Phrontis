@@ -37,6 +37,9 @@ import {
 } from './kbStore/scheduleWorkflowVaultRepo'
 import { hmToMin, minToHm, parseScheduleWeekdays, recurringFreqLabel } from '../../src/lib/scheduleRecurringPure'
 import { buildWorkflowFromTask, isWorkflowDate, stageDuration, workflowProgress } from '../../src/modules/schedule/workflowPure'
+import { filterIntelItems } from '../../src/lib/intelPure'
+import { intelItemsAll, intelSetAiRec, intelSetAiFilter } from './intel/intelStore'
+import { INTEL_QUERY_SCHEMA, INTEL_SET_REC_SCHEMA, INTEL_SET_FILTER_SCHEMA } from './intel/toolSchemas'
 import type { ScheduleWorkflow, ScheduleWorkflowStageInput } from '../../src/types'
 import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from './kbStore/accountingVaultRepo'
 // 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
@@ -1783,11 +1786,93 @@ export function registerBuiltinTools(): void {
 
   // ===== P3 装载层元工具：写类（tier='ondemand'）默认不在视野，需申请启用 =====
 
+  // ===== intel.* 情报池（v3.12.0，docs/intel-module-plan.md §7.4）=====
+  // 情报助手（source='intel'）白名单全含；通用助手只见 query（写工具被 intelReadOnly 滤出视野，D8）。
+  // schema ≤800 字符、description 不罗列返回字段（铁律 16）；写工具直接落盘（D7：可一键清空的 UI 态，可逆）。
+  // schema 常量在 ./intel/toolSchemas（零依赖，契约脚本 verify-intel-tools 直跑断言长度）。
+
+  // 读：按关键词/源/类型检索已抓取条目（通用助手 + 情报助手都可见）
+  registerTool({
+    name: 'builtin.intel.query',
+    title: '查询情报池',
+    description: '按关键词/源/类型检索已抓取的情报条目（GitHub/HN/论文/周刊/官方博客等）。推荐或找资料前先查这里，以返回为准，不要凭印象编条目',
+    inputSchema: INTEL_QUERY_SCHEMA,
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'intel',
+  }, args => {
+    const limit = clamp(Math.floor(num(args.limit, 20)), 1, 50)
+    const source = str(args.source)
+    const kindRaw = str(args.kind)
+    const sourceKey = (['github', 'hn', 'arxiv', 'openalex', 'weekly', 'hf', 'labs', 'qbitai'] as const).find((k) => k === source)
+    const kindVal = kindRaw === 'repo' || kindRaw === 'news' || kindRaw === 'paper' || kindRaw === 'weekly' || kindRaw === 'blog' || kindRaw === 'chinese'
+      ? kindRaw as 'repo' | 'news' | 'paper' | 'weekly' | 'blog' | 'chinese'
+      : ''
+    const hits = filterIntelItems(intelItemsAll(), { kw: str(args.q), source: sourceKey, kind: kindVal })
+    // 精简投影（铁律 17：拿得少）：url 保留（模型偶尔要给原文链接），summary 截 120
+    return hits.slice(0, limit).map((it) => ({
+      id: it.id,
+      title: it.title,
+      source: it.source,
+      score: it.score,
+      publishedAt: it.publishedAt,
+      summary: (it.summary || '').slice(0, 120),
+      url: it.url,
+      fav: it.fav,
+    }))
+  })
+
+  // 写：刷新 AI 推荐（覆盖式；情报助手白名单内，通用助手视野外）
+  registerTool({
+    name: 'builtin.intel.set-recommendations',
+    title: '刷新 AI 推荐',
+    description: '把筛选出的条目 id 设为情报页左栏「AI 推荐」结果集（覆盖式刷新；id 从 builtin.intel.query 的返回里取，顺序即推荐优先级）',
+    inputSchema: INTEL_SET_REC_SCHEMA,
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'intel',
+  }, args => {
+    const ids = Array.isArray(args.ids) ? args.ids.map((x) => String(x)).filter(Boolean).slice(0, 20) : []
+    if (ids.length === 0) throw new Error('ids 不能为空（先 builtin.intel.query 取候选）')
+    const query = str(args.query).trim()
+    if (!query) throw new Error('query 不能为空（填用户原话）')
+    intelSetAiRec({ ids, query: query.slice(0, 120), note: str(args.note).slice(0, 200) || undefined, updatedAt: new Date().toISOString() })
+    return { ok: true, count: ids.length, message: '已写入左栏「✨ AI 推荐」（覆盖上一组）' }
+  })
+
+  // 写：设置情报页筛选态（kind / 中文 / 关键词）
+  registerTool({
+    name: 'builtin.intel.set-filter',
+    title: '设置情报筛选',
+    description: "设置情报页的筛选态：kind='paper' 只看论文、'chinese' 只看中文、'' 清除；kw 可叠加关键词过滤",
+    inputSchema: INTEL_SET_FILTER_SCHEMA,
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    module: 'intel',
+  }, args => {
+    const kind = args.kind === 'paper' || args.kind === 'chinese' ? args.kind : ''
+    const kw = str(args.kw)
+    if (!kind && !kw) {
+      intelSetAiFilter({ kind: '', kw: '' })
+      return { ok: true, message: '已清除全部筛选' }
+    }
+    intelSetAiFilter({ kind, kw })
+    return { ok: true, message: `筛选已生效：${[kind === 'paper' ? '仅论文' : kind === 'chinese' ? '仅中文' : '', kw ? `关键词「${kw}」` : ''].filter(Boolean).join(' + ') || '无'}` }
+  })
+
   // builtin.tool.request —— 申请启用按需工具（本会话内持久；启用集合由 agentService 按会话维护）
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive / course.review.write）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {

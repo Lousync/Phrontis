@@ -46,6 +46,8 @@ import { initDesktopBridge } from '../lib/desktopBridge'
 import { registerEntryHandlers } from '../database/repositories/entryRepo'
 import { registerTagHandlers } from '../database/repositories/tagRepo'
 import { registerScheduleHandlers } from '../database/repositories/scheduleRepo'
+import { registerIntelHandlers } from '../database/repositories/intelRepo'
+import { startIntelScheduler, stopIntelScheduler } from '../lib/intel/scheduler'
 import { registerKnowledgeHandlers } from '../database/repositories/knowledgeRepo'
 import { registerExportHandlers } from '../database/repositories/exportRepo'
 import { registerRecycleBinHandlers } from '../database/repositories/recycleBinRepo'
@@ -1112,6 +1114,8 @@ app.whenReady().then(async () => {
   registerBookmarkHandlers()
   registerPetHandlers()
   registerAccountingHandlers()
+  // 情报模块（v3.12.0，docs/intel-module-plan.md）：6 通道，业务在 lib/intel/intelStore
+  registerIntelHandlers({ getSettingValue: (key) => settingsCache[key] })
   registerSuperviseHandlers()
   registerSummaryHandlers()
   registerBlogSummaryHandlers()
@@ -1250,6 +1254,9 @@ app.whenReady().then(async () => {
   // 远程监督：每日汇总定时器 + 免打扰补发
   startSuperviseScheduler()
 
+  // 情报自动抓取（v3.12.0）：5min tick 检查间隔设置，到点抓一轮
+  startIntelScheduler((key) => settingsCache[key])
+
   // 日程 DDL 提醒：接线设置读取器与外部通道；实际检查挂在上面那个 30s tick 里（复用调度器，不新建）
   initScheduleReminders({
     getSetting: (key) => settingsCache[key],
@@ -1357,6 +1364,7 @@ app.on('before-quit', () => {
   tray = null
   destroyPasswordFiller()
   stopSuperviseScheduler()
+  stopIntelScheduler()
   disposeDayPanel()
   stopClipperServer()
   // v3.2.0 条目 ④：关掉仓库文件监听（防句柄泄漏、防 dev 重启后重复挂载）

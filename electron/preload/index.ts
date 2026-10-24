@@ -127,6 +127,16 @@ const api = {
     return () => { ipcRenderer.removeListener('schedule:reminderClick', handler) }
   },
 
+  // intel（v3.12.0 情报模块；业务转发 lib/intel/intelStore）
+  intelGetItems: () => ipcRenderer.invoke('intel:getItems'),
+  intelRefresh: () => ipcRenderer.invoke('intel:refresh'),
+  intelToggleFav: (id: string) => ipcRenderer.invoke('intel:toggleFav', id),
+  intelGetArticle: (id: string) => ipcRenderer.invoke('intel:getArticle', id),
+  intelSetAiRec: (rec: unknown) => ipcRenderer.invoke('intel:setAiRec', rec),
+  intelClearAiRec: () => ipcRenderer.invoke('intel:clearAiRec'),
+  intelSetFilter: (filter: unknown) => ipcRenderer.invoke('intel:setFilter', filter),
+  intelSaveAsNote: (id: string) => ipcRenderer.invoke('intel:saveAsNote', id),
+
   // knowledge (Scheme A)
   getKnowledgeCategories: () => ipcRenderer.invoke('knowledge:getCategories'),
   createKnowledgeCategory: (data: unknown) => ipcRenderer.invoke('knowledge:createCategory', data),

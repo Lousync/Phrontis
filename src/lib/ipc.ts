@@ -69,6 +69,16 @@ export const getTags = () => a().getTags()
 export const createTag = (n: string, c?: string) => a().createTag(n, c)
 export const deleteTag = (id: string) => a().deleteTag(id)
 
+// intel（v3.12.0 情报模块）
+export const intelGetItems = () => a().intelGetItems()
+export const intelRefresh = () => a().intelRefresh()
+export const intelToggleFav = (id: string) => a().intelToggleFav(id)
+export const intelGetArticle = (id: string) => a().intelGetArticle(id)
+export const intelSetAiRec = (rec: import('../types').IntelAiRec) => a().intelSetAiRec(rec)
+export const intelClearAiRec = () => a().intelClearAiRec()
+export const intelSetFilter = (filter: { kind: 'paper' | 'chinese' | ''; kw: string }) => a().intelSetFilter(filter)
+export const intelSaveAsNote = (id: string) => a().intelSaveAsNote(id)
+
 // schedule
 export const getScheduleTodos = (date: string) => a().getScheduleTodos(date)
 export const getScheduleDates = (yearMonth: string) => a().getScheduleDates(yearMonth)

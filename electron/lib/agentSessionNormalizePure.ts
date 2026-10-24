@@ -5,7 +5,8 @@
  * 只改字段，不读写磁盘；调用方决定是否落盘。
  */
 
-export type NormalizableSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant'
+// 'intel'（📡 情报助手，v3.12.0）同为专属助手来源，与 aiTeaching / schedule 同样「不动」
+export type NormalizableSessionSource = 'assistant' | 'aiTeaching' | 'schedule' | 'aiAssistant' | 'intel'
 export type NormalizableWriteMode = 'direct' | 'confirm'
 
 export interface NormalizableSessionFields {
