@@ -833,6 +833,20 @@ ok(/className=\{`flex min-h-full flex-1 flex-col overflow-y-auto/.test(srcVaultT
 ok(/flex min-h-0 flex-1 flex-col overflow-hidden/.test(srcTree),
   'N15b 树模式 wrapper 走 flex 列布局（与树根 min-h-full 配套，滚动归树根）')
 
+/* ===== O. 右栏 AI 态：AI助手模块与 aiChat 共用「用量 + 改动文件」面板（2026-10-24） =====
+ * 背景：AI助手模块中间主体已经是对话，右栏 AI Tab 若仍放小对话 = 同屏两个聊天窗口
+ * （用户反馈原话：「中间主体是聊天，然后侧边栏也是聊天窗口」）。
+ * 判据：右栏用量面板的开关必须同时覆盖 aiChat 与 aiAssistant 两个激活态。
+ * 拍板：不自动展开右栏、不自动切 Tab（只在右栏原本就在 AI Tab 时替换）；切走模块回小对话。 */
+ok(/aiUsagePanel=\{activeTab === 'aiChat' \|\| activeTab === 'aiAssistant'\}/.test(srcApp),
+  'O1 App 把「AI 对话整页」与「AI助手模块」都算进右栏用量面板开关')
+ok(/aiUsagePanel && onOpenChangeFile \? \(\s*<AiUsagePanel/.test(srcRight),
+  'O2 右栏 AI Tab 在 aiUsagePanel 时渲染 AiUsagePanel（用量 + 改动文件），不再叠一份对话')
+ok(/active=\{effectiveTab === 'ai' && !aiUsagePanel\}/.test(srcRight),
+  'O3 右栏小对话的 active 与用量面板互斥（不会两套对话同时刷新）')
+ok(!/aiChatOpen/.test(srcApp) && !/aiChatOpen/.test(srcRight),
+  'O4 负向：旧 prop 名 aiChatOpen 已退役（避免新宿主再漏接）')
+
 console.log('\n========================================')
 if (fails.length === 0) {
   console.log(`✅ 全部通过：${pass} 项断言 PASS`)

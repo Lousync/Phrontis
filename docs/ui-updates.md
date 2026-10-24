@@ -2391,3 +2391,17 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **改动点**：`src/lib/agentStreamCore.ts`（think 段 + `completeThink` + `rev`）、`StreamBubble.tsx`、新增 `ProcessRail.tsx` / `ProcessSummary.tsx`（`ToolSummary.tsx` 退役）、`MessageList.tsx`、`modules/ai-teaching/index.tsx`、`useAgentStream.ts` / `assistantRunStore.ts`、`src/lib/toolLabels.ts`、`electron/lib/agentService.ts`、`src/styles/index.css`。
 
 **验收**：`verify-reply-loading.mjs` 65/65（含真实 `agentStreamCore` 纯函数用例）；`verify-assistant-parallel.mjs` 36/36；双份 `tsc` 0 错；`npm run build` 通过；`verify-help-retrieval.mjs` 156/156。devbridge 真机跑多轮工具对话：思考段逐轮出现/收起、工具行生成中可见、正文开始最后一轮思考收起、完成后摘要 `过程 · 思考 2s · 1 个工具` / `思考 3s · 5 个工具` 正常，展开可见思考与工具行。
+
+## 2026-10-24 · AI助手模块：右栏 AI 态改为「用量 + 最近修改」，不再叠第二个聊天窗口
+
+**现状 / 根因**：从左栏书签进入「AI助手」模块后，中间主体是对话，而右栏 AI Tab 仍按默认形态渲染小对话（`ChatBody` docked）——同屏两个聊天窗口。右栏其实早就有「用量 + 改动文件」面板（`AiUsagePanel`），但开关只认 `aiChatOpen`（`activeTab === 'aiChat'`），AI助手模块（`aiAssistant`）从未接进去。
+
+**方案（用户拍板）**：
+- 右栏用量面板的判据从 `aiChatOpen` 扩为 `aiUsagePanel = activeTab === 'aiChat' || activeTab === 'aiAssistant'`；AI助手模块激活期间右栏 AI Tab 原位显示「今日消耗 / 近 7 天柱状图 / 会话 TOP + 改动文件」。
+- **不自动展开右栏、不自动切 Tab**：只在右栏原本就展开且停在 AI Tab 时替换内容（默认折叠/小工具态完全不动）。
+- **切走模块自动恢复小对话**（与 aiChat 关闭标签的既有语义一致）；左栏（作用域树 + 会话列表）与中间对话零改动。
+- prop 名 `aiChatOpen` → `aiUsagePanel`，避免名字把语义锁死在单一宿主上。
+
+**改动点**：`src/App.tsx`（开关计算）、`src/components/workbench/WorkbenchRightPanel.tsx`（prop 重命名 + 两处消费 + 注释）、契约 `.AGENT/scripts/workbench-shell/verify-workbench-shell.mjs` 新增 §O（4 条，含负向「旧 prop 名不得复活」）。
+
+**验收**：`verify-workbench-shell.mjs` 新增 O1–O4 全绿（既有 N4 粘贴系统剪贴板 FAIL 与本轮无关，改动前即在）；`npx tsc --noEmit -p tsconfig.web.json` 0 错。真机观感待验：进入 AI助手 → 右栏已在 AI Tab 时变用量面板；切到笔记 → 回小对话。

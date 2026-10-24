@@ -1828,9 +1828,12 @@ export default function App() {
                   onOpenFile={(relPath) => handleOpenLooseFile(relPath)}
                   onOpenPage={(pageId) => openKnowledgePageFromSearch(pageId)}
                   onOpenSchedule={() => handleTabChange('schedule')}
-                  // token 面板只在 aiChat 标签「激活中」陪伴显示（批次5 反馈拍板）：
-                  // 切走模块 → 右栏主动回对话态但 aiChat 标签保留；点回标签 → 右栏再变 token 面板
-                  aiChatOpen={activeTab === 'aiChat'}
+                  // 右栏 AI 态原位显示「用量 + 改动文件」面板（token 面板）的时机：
+                  // aiChat（AI 对话整页）或 aiAssistant（左栏书签「AI助手」模块）激活中。
+                  // 两者中间主体都是对话 —— 右栏若再放一份小对话 = 同屏两个聊天窗口（2026-10-24 用户反馈）。
+                  // 切走模块 → 右栏主动回对话态但标签保留；点回标签 → 右栏再变用量面板。
+                  // 不自动展开右栏、不自动切 Tab（用户拍板：只在右栏原本就在 AI Tab 时替换）。
+                  aiUsagePanel={activeTab === 'aiChat' || activeTab === 'aiAssistant'}
                   onExpandAiChat={() => handleTabChange('aiChat')}
                   onOpenChangeFile={(relPath) => handleOpenLooseFile(relPath)}
                   // 右栏「阅读」侧栏（全格式阅读器一期）：有书在读且书架标签在位时出现第三个条件 Tab。
