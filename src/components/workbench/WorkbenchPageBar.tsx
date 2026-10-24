@@ -256,7 +256,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
                 }`}
               >
                 <span className={`shrink-0 ${quizEntryActive ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}>{TAB_ICONS.quiz}</span>
-                <span>错题本</span>
+                <span className="max-w-[140px] truncate">错题本</span>
                 <button
                   onClick={(e) => { e.stopPropagation(); onClose('quiz') }}
                   onAuxClick={(e) => e.stopPropagation()}

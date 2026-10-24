@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Bot, Heart, RefreshCw, Settings2, FileText } from 'lucide-react'
-import type { IntelItem, IntelMeta } from '../../types'
+import type { IntelItem, IntelMeta, IntelSourceKey } from '../../types'
 import { intelGetItems, intelRefresh, intelToggleFav, intelSetFilter, intelClearAiRec } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
 import { showToast } from '../../lib/toast'
-import { filterIntelItems, SOURCE_META } from '../../lib/intelPure'
+import { filterIntelItems, SOURCE_META, INTEL_SOURCE_KEYS } from '../../lib/intelPure'
 import { IntelSidebar, type IntelFeedFilter } from './IntelSidebar'
 
 /**
@@ -63,21 +63,32 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
 
   const refresh = useCallback(async () => {
     if (refreshing) return
+    // 刷新语义（2026-10-25 拍板）：左栏停在具体源 = 只刷该源；「全部/收藏/AI 推荐」= 全部 8 源
+    const scope = INTEL_SOURCE_KEYS.includes(filter as IntelSourceKey) ? (filter as IntelSourceKey) : undefined
     setRefreshing(true)
     try {
-      const m = await intelRefresh()
-      const failed = m.lastFetchStats?.failed.length ?? 0
-      showToast({
-        type: failed > 0 ? 'info' : 'success',
-        message: `刷新完成 · 新增 ${m.lastFetchStats?.added ?? 0} 条`,
-        detail: failed > 0 ? `${failed} 个源本轮失败（限流 / 网络抖动，下轮自动重试）` : undefined,
-      })
+      const r = await intelRefresh(scope)
+      if (scope) {
+        const label = SOURCE_META[scope]?.label ?? scope
+        if (r.failedSources.includes(scope)) {
+          showToast({ type: 'info', message: `已刷新 ${label} · 该源本轮失败`, detail: '限流或网络抖动，稍后再试（GitHub 匿名接口限 10 次/分钟）' })
+        } else {
+          showToast({ type: 'success', message: `已刷新 ${label} · 新增 ${r.added} 条`, detail: '左栏停在「全部」时刷新 = 全部 8 源并行' })
+        }
+      } else {
+        const failed = r.failedSources.length
+        showToast({
+          type: failed > 0 ? 'info' : 'success',
+          message: `刷新完成 · 新增 ${r.added} 条`,
+          detail: failed > 0 ? `${failed} 个源本轮失败（限流 / 网络抖动，下轮自动重试）` : undefined,
+        })
+      }
     } catch (err) {
       showToast({ type: 'error', message: String((err as Error)?.message ?? err).slice(0, 120) })
     } finally {
       setRefreshing(false)
     }
-  }, [refreshing])
+  }, [refreshing, filter])
 
   const toggleFav = useCallback(async (it: IntelItem) => {
     // 乐观更新（卡片 ♥ 即时反馈；主进程广播后 reload 对齐）
@@ -153,17 +164,17 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
     <div className="kb-theme-surface flex h-full min-h-0">
       {sidebar}
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        {/* topbar */}
-        <div className="flex h-[42px] shrink-0 items-center gap-2.5 border-b border-[var(--border-color)] px-3.5">
-          <span className="text-[13.5px] font-semibold text-[var(--text-primary)]">情报</span>
-          <span className="rounded-full border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-[3px] text-[11px] text-[var(--text-secondary)]">
+        {/* topbar：@container 供窄宽度下隐藏按钮文字（2026-10-25 反馈：窄列不折行，文字隐去只留图标） */}
+        <div className="@container flex h-[42px] shrink-0 items-center gap-2.5 border-b border-[var(--border-color)] px-3.5">
+          <span className="shrink-0 whitespace-nowrap text-[13.5px] font-semibold text-[var(--text-primary)]">情报</span>
+          <span className="min-w-0 max-w-[190px] shrink truncate rounded-full border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 py-[3px] text-[11px] text-[var(--text-secondary)]" title={statText}>
             {statText}
           </span>
           {meta?.lastFetchAt && (
-            <span className="text-[11px] text-[var(--text-muted)]" title={meta.lastFetchAt}>上次更新 {relTime(meta.lastFetchAt)}</span>
+            <span className="min-w-0 shrink truncate text-[11px] text-[var(--text-muted)]" title={meta.lastFetchAt}>上次更新 {relTime(meta.lastFetchAt)}</span>
           )}
           {meta?.lastFetchStats && meta.lastFetchStats.failed.length > 0 && (
-            <span className="text-[11px] text-[var(--warning)]" title={meta.lastFetchStats.failed.join('、')}>
+            <span className="min-w-0 shrink truncate text-[11px] text-[var(--warning)]" title={meta.lastFetchStats.failed.join('、')}>
               {meta.lastFetchStats.failed.length} 源失败
             </span>
           )}
@@ -173,15 +184,19 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
             title="每日简报将在 3.12.x 提供"
             className="flex h-7 cursor-default items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 text-[12px] text-[var(--text-muted)] opacity-50"
           >
-            <FileText size={12} />简报
+            <FileText size={12} className="shrink-0" />
+            <span className="whitespace-nowrap @max-[560px]:hidden">简报</span>
           </button>
           <button
             onClick={() => { void refresh() }}
             disabled={refreshing}
-            title="抓取一轮（8 源并行，单源失败不影响其余）"
+            title={INTEL_SOURCE_KEYS.includes(filter as IntelSourceKey)
+              ? `只刷新该源（${SOURCE_META[filter as IntelSourceKey]?.label}）；左栏停在「全部」时刷新 = 全部 8 源并行`
+              : '抓取一轮（8 源并行，单源失败不影响其余）；左栏停在某个源时只刷该源'}
             className="flex h-7 items-center gap-1.5 rounded-md border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-2.5 text-[12px] text-[var(--text-primary)] transition-colors hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-50"
           >
-            <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />刷新
+            <RefreshCw size={12} className={`shrink-0 ${refreshing ? 'animate-spin' : ''}`} />
+            <span className="whitespace-nowrap @max-[560px]:hidden">刷新</span>
           </button>
           <button
             onClick={onOpenSettings}
@@ -227,7 +242,9 @@ export function IntelModule({ isActive, sidebarEl = null, sidebarHosted = false,
             <div className="mx-auto mt-20 max-w-sm text-center text-[12.5px] leading-[2.1] text-[var(--text-muted)]">
               <span className="mb-2 block text-[30px]">🕊</span>
               {counts.all === 0 ? (
-                <>这里还没有内容<br />点右上角「刷新」抓取一轮</>
+                INTEL_SOURCE_KEYS.includes(filter as IntelSourceKey)
+                  ? <>这里还没有该源的内容<br />点右上角「刷新」只抓这一源</>
+                  : <>这里还没有内容<br />点右上角「刷新」抓取一轮（8 源并行）</>
               ) : filter === 'fav' ? (
                 <>收藏夹是空的<br />点击卡片右下角的 ♡ 收藏感兴趣的内容</>
               ) : filter === 'airec' ? (
