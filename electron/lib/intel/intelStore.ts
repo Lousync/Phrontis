@@ -6,7 +6,8 @@ import { readJson, writeJsonOrThrow, kbModulePath } from '../kbStore/jsonStore'
 import { sanitizeFileName } from '../workspaceManager'
 import { extractArticle } from '../clipperServer/extract'
 import type { IntelAiFilter, IntelAiRec, IntelItem, IntelMeta, IntelRefreshResult, IntelSourceKey, IntelTranslateResult } from '../../../src/types'
-import { mergeIntelPool, pruneIntelPool, capIntelPool, sortIntelItems, isEnglishText } from '../../../src/lib/intelPure'
+import { mergeIntelPool, pruneIntelPool, capIntelPool, sortIntelItems, isEnglishText, sectionOf } from '../../../src/lib/intelPure'
+export { intelListCustomSources, intelAddCustomSource, intelRemoveCustomSource, intelToggleCustomSource } from './customSources'
 import { fetchAllIntelSources } from './fetchAll'
 import type { IntelGetSetting } from './intelSettings'
 import { intelKeepDays } from './intelSettings'
@@ -34,8 +35,10 @@ const POOL_CAP = 2000
 // ===== 读取 =====
 
 export function intelItemsAll(): IntelItem[] {
-  // 读取边界统一合并卡片译文（titleZh/summaryZh 为运行时字段，不落 intel.json；intel-translate-plan §2）
-  return mergeItemZh(sortIntelItems(readJson<IntelItem[]>(MOD, 'items.json', [])))
+  // 读取边界统一合并卡片译文（titleZh/summaryZh 为运行时字段，不落 intel.json；intel-translate-plan §2）；
+  // 老池条目无 section（v1 全科技源）在此兜底（mergeIntelPool 也会在写入侧补齐，磁盘随刷新收敛）
+  const pool = readJson<IntelItem[]>(MOD, 'items.json', [])
+  return mergeItemZh(sortIntelItems(pool.map((it) => it.section ? it : { ...it, section: sectionOf(it.source) })))
 }
 
 export function intelReadMeta(): IntelMeta {
@@ -124,7 +127,7 @@ export function intelSetAiFilter(filter: { kind: 'paper' | 'chinese' | ''; kw: s
 
 // ===== 一轮抓取 =====
 
-export async function intelRefresh(get: IntelGetSetting, only?: IntelSourceKey): Promise<IntelRefreshResult> {
+export async function intelRefresh(get: IntelGetSetting, only?: string): Promise<IntelRefreshResult> {
   if (!getVaultKbRoot()) throw new Error('请先打开仓库')
   const { items, stats, added } = await fetchAllIntelSources(get, only)
   intelMergeItems(items)
@@ -139,7 +142,7 @@ export async function intelRefresh(get: IntelGetSetting, only?: IntelSourceKey):
     for (const k of stats.failed) { prevFailed.add(k); prevOk.delete(k) }
     next = { ...next, lastFetchStats: { ok: [...prevOk], failed: [...prevFailed], added: meta.lastFetchStats?.added ?? 0 } }
   } else {
-    next = { ...next, lastFetchStats: { ok: stats.ok as IntelSourceKey[], failed: stats.failed as IntelSourceKey[], added } }
+    next = { ...next, lastFetchStats: { ok: stats.ok, failed: stats.failed, added } }
   }
   writeJsonOrThrow(MOD, 'meta.json', next)
   broadcastDataChanged('intel')
@@ -343,13 +346,16 @@ export async function intelSaveAsNote(id: string): Promise<{ ok: true; relPath: 
 
 // ===== AI 注入快照辅助（agentService buildIntelInjection 消费）=====
 
-export function intelPoolStats(): { total: number; perSource: Array<[IntelSourceKey, number]>; fav: number } {
+export function intelPoolStats(): { total: number; perSource: Array<[string, number]>; perSection: Array<[string, number]>; fav: number } {
   const pool = intelItemsAll()
-  const per = new Map<IntelSourceKey, number>()
+  const per = new Map<string, number>()
+  const perSec = new Map<string, number>()
   let fav = 0
   for (const it of pool) {
     per.set(it.source, (per.get(it.source) ?? 0) + 1)
+    const sec = it.section ?? sectionOf(it.source)
+    perSec.set(sec, (perSec.get(sec) ?? 0) + 1)
     if (it.fav) fav++
   }
-  return { total: pool.length, perSource: [...per.entries()], fav }
+  return { total: pool.length, perSource: [...per.entries()], perSection: [...perSec.entries()], fav }
 }

@@ -27,6 +27,7 @@ export async function fetchArxiv(limit: number): Promise<IntelItem[]> {
       const t = new Date(published)
       out.push(intelDraft({
         source: 'arxiv',
+    section: 'tech',
         kind: 'paper',
         title: rawTitle,
         url: `https://arxiv.org/abs/${arxivId}`,

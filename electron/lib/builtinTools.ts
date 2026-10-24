@@ -37,7 +37,8 @@ import {
 } from './kbStore/scheduleWorkflowVaultRepo'
 import { hmToMin, minToHm, parseScheduleWeekdays, recurringFreqLabel } from '../../src/lib/scheduleRecurringPure'
 import { buildWorkflowFromTask, isWorkflowDate, stageDuration, workflowProgress } from '../../src/modules/schedule/workflowPure'
-import { filterIntelItems } from '../../src/lib/intelPure'
+import { filterIntelItems, INTEL_SOURCE_KEYS } from '../../src/lib/intelPure'
+import type { IntelSourceKey } from '../../src/types'
 import { intelItemsAll, intelSetAiRec, intelSetAiFilter } from './intel/intelStore'
 import { INTEL_QUERY_SCHEMA, INTEL_SET_REC_SCHEMA, INTEL_SET_FILTER_SCHEMA } from './intel/toolSchemas'
 import type { ScheduleWorkflow, ScheduleWorkflowStageInput } from '../../src/types'
@@ -1795,7 +1796,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.intel.query',
     title: '查询情报池',
-    description: '按关键词/源/类型检索已抓取的情报条目（GitHub/HN/论文/周刊/官方博客等）。推荐或找资料前先查这里，以返回为准，不要凭印象编条目',
+    description: '按关键词/源/版面/类型检索已抓取的情报条目（科技/时政国内/国际/财经四版面）。推荐或找资料前先查这里，以返回为准，不要凭印象编条目',
     inputSchema: INTEL_QUERY_SCHEMA,
     source: 'builtin',
     enabled: true,
@@ -1806,11 +1807,14 @@ export function registerBuiltinTools(): void {
     const limit = clamp(Math.floor(num(args.limit, 20)), 1, 50)
     const source = str(args.source)
     const kindRaw = str(args.kind)
-    const sourceKey = (['github', 'hn', 'arxiv', 'openalex', 'weekly', 'hf', 'labs', 'qbitai'] as const).find((k) => k === source)
+    const sectionRaw = str(args.section)
+    // v2：源键收宽到全部内置源 + custom:*；版面参数同口径校验
+    const sourceKey = INTEL_SOURCE_KEYS.includes(source as IntelSourceKey) || source.startsWith('custom:') ? source : undefined
+    const sectionKey = sectionRaw === 'tech' || sectionRaw === 'domestic' || sectionRaw === 'world' || sectionRaw === 'finance' ? sectionRaw : undefined
     const kindVal = kindRaw === 'repo' || kindRaw === 'news' || kindRaw === 'paper' || kindRaw === 'weekly' || kindRaw === 'blog' || kindRaw === 'chinese'
       ? kindRaw as 'repo' | 'news' | 'paper' | 'weekly' | 'blog' | 'chinese'
       : ''
-    const hits = filterIntelItems(intelItemsAll(), { kw: str(args.q), source: sourceKey, kind: kindVal })
+    const hits = filterIntelItems(intelItemsAll(), { kw: str(args.q), source: sourceKey, section: sectionKey, kind: kindVal })
     // 精简投影（铁律 17：拿得少）：url 保留（模型偶尔要给原文链接），summary 截 120
     return hits.slice(0, limit).map((it) => ({
       id: it.id,

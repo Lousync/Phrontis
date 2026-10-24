@@ -71,7 +71,7 @@ export const deleteTag = (id: string) => a().deleteTag(id)
 
 // intel（v3.12.0 情报模块）
 export const intelGetItems = () => a().intelGetItems()
-export const intelRefresh = (source?: import('../types').IntelSourceKey) => a().intelRefresh(source)
+export const intelRefresh = (source?: string) => a().intelRefresh(source)
 export const intelTranslate = (ids: string[]) => a().intelTranslate(ids)
 export const intelToggleFav = (id: string) => a().intelToggleFav(id)
 export const intelGetArticle = (id: string) => a().intelGetArticle(id)
@@ -79,6 +79,10 @@ export const intelSetAiRec = (rec: import('../types').IntelAiRec) => a().intelSe
 export const intelClearAiRec = () => a().intelClearAiRec()
 export const intelSetFilter = (filter: { kind: 'paper' | 'chinese' | ''; kw: string }) => a().intelSetFilter(filter)
 export const intelSaveAsNote = (id: string) => a().intelSaveAsNote(id)
+export const intelListCustomSources = () => a().intelListCustomSources()
+export const intelAddCustomSource = (d: { name: string; url: string; section: import('../types').IntelSection }) => a().intelAddCustomSource(d)
+export const intelRemoveCustomSource = (id: string) => a().intelRemoveCustomSource(id)
+export const intelToggleCustomSource = (id: string) => a().intelToggleCustomSource(id)
 
 // schedule
 export const getScheduleTodos = (date: string) => a().getScheduleTodos(date)

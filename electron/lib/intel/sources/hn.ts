@@ -22,6 +22,7 @@ export async function fetchHn(limit: number): Promise<IntelItem[]> {
     const comments = h.num_comments ?? 0
     return intelDraft({
       source: 'hn',
+    section: 'tech',
       kind: 'news',
       title,
       url: link,

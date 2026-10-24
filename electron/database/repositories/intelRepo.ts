@@ -3,6 +3,7 @@ import {
   intelItemsAll, intelReadMeta, intelRefresh, intelToggleFav,
   intelGetArticle, intelSetAiRec, intelClearAiRec, intelSetAiFilter, intelSaveAsNote,
   intelTranslateItems,
+  intelListCustomSources, intelAddCustomSource, intelRemoveCustomSource, intelToggleCustomSource,
 } from '../../lib/intel/intelStore'
 import { INTEL_SOURCE_KEYS } from '../../../src/lib/intelPure'
 import type { IntelAiRec, IntelItem, IntelMeta, IntelSourceKey } from '../../../src/types'
@@ -21,9 +22,29 @@ export function registerIntelHandlers(deps: { getSettingValue: (key: string) => 
   })
 
   ipcMain.handle('intel:refresh', async (_e, source?: string) => {
-    // 单源刷新（2026-10-25）：source 为源 key 时只抓该源；空/非法值 = 全源
-    const only = INTEL_SOURCE_KEYS.includes(source as IntelSourceKey) ? (source as IntelSourceKey) : undefined
+    // 单源刷新（2026-10-25）：source 为源 key 或 custom:<id> 时只抓该源；空/非法值 = 全源
+    const raw = typeof source === 'string' && source.trim() ? source.trim() : ''
+    const only = raw.startsWith('custom:') || INTEL_SOURCE_KEYS.includes(raw as IntelSourceKey) ? raw : undefined
     return await intelRefresh(deps.getSettingValue, only)
+  })
+
+  // ===== 自定义 RSS 源（v2，D12）=====
+
+  ipcMain.handle('intel:listCustomSources', () => intelListCustomSources())
+
+  ipcMain.handle('intel:addCustomSource', (_e, d: { name?: string; url?: string; section?: string }) => {
+    const section = d?.section === 'domestic' || d?.section === 'world' || d?.section === 'finance' ? d.section : 'tech'
+    return intelAddCustomSource({ name: String(d?.name ?? ''), url: String(d?.url ?? ''), section })
+  })
+
+  ipcMain.handle('intel:removeCustomSource', (_e, id: string) => {
+    if (typeof id !== 'string' || !id.trim()) return false
+    return intelRemoveCustomSource(id)
+  })
+
+  ipcMain.handle('intel:toggleCustomSource', (_e, id: string) => {
+    if (typeof id !== 'string' || !id.trim()) return null
+    return intelToggleCustomSource(id)
   })
 
   // 卡片英文自动翻译（intel-translate-plan §4.2）：await 全流程，译文经广播合并回列表

@@ -30,6 +30,7 @@ async function fetchFeedStation(feedUrl: string, prefix: string, per: number): P
   const xml = await fetchText(feedUrl)
   return parseFeed(xml, feedUrl, per).map((e) => intelDraft({
     source: 'labs',
+    section: 'tech',
     kind: 'blog',
     title: `${prefix}: ${e.title}`,
     url: e.link,
@@ -56,6 +57,7 @@ async function fetchAnthropicStation(pageUrl: string, per: number): Promise<Inte
     seen.add(link)
     out.push(intelDraft({
       source: 'labs',
+      section: 'tech',
       kind: 'blog',
       title: `Anthropic: ${title}`.slice(0, 300),
       url: link,

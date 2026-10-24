@@ -137,6 +137,10 @@ const api = {
   intelClearAiRec: () => ipcRenderer.invoke('intel:clearAiRec'),
   intelSetFilter: (filter: unknown) => ipcRenderer.invoke('intel:setFilter', filter),
   intelSaveAsNote: (id: string) => ipcRenderer.invoke('intel:saveAsNote', id),
+  intelListCustomSources: () => ipcRenderer.invoke('intel:listCustomSources'),
+  intelAddCustomSource: (d: unknown) => ipcRenderer.invoke('intel:addCustomSource', d),
+  intelRemoveCustomSource: (id: string) => ipcRenderer.invoke('intel:removeCustomSource', id),
+  intelToggleCustomSource: (id: string) => ipcRenderer.invoke('intel:toggleCustomSource', id),
 
   // knowledge (Scheme A)
   getKnowledgeCategories: () => ipcRenderer.invoke('knowledge:getCategories'),

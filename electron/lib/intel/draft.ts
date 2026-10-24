@@ -1,11 +1,12 @@
-import type { IntelItem, IntelKind, IntelSourceKey } from '../../../src/types'
+import type { IntelAnySourceKey, IntelItem, IntelKind, IntelSection } from '../../../src/types'
 
 /**
  * 情报条目雏形构造（docs/intel-module-plan.md §4.1）。
  * 适配器只做「拉数 + 映射」：hash / id / score / fetchedAt 由 pipeline 补齐。
  */
 export function intelDraft(p: {
-  source: IntelSourceKey
+  source: IntelAnySourceKey
+  section: IntelSection
   kind: IntelKind
   title: string
   url: string
@@ -20,6 +21,7 @@ export function intelDraft(p: {
     id: '',           // pipeline 填（hash 前 12）
     hash: '',         // pipeline 填
     source: p.source,
+    section: p.section,
     kind: p.kind,
     title: String(p.title ?? '').replace(/\s+/g, ' ').trim().slice(0, 300),
     url: String(p.url ?? '').trim(),

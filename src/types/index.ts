@@ -2326,7 +2326,7 @@ export interface ElectronAPI {
   onScheduleReminderClick: (cb: () => void) => () => void
   // intel（v3.12.0 情报模块）
   intelGetItems: () => Promise<{ items: IntelItem[]; meta: IntelMeta }>
-  intelRefresh: (source?: IntelSourceKey) => Promise<IntelRefreshResult>
+  intelRefresh: (source?: string) => Promise<IntelRefreshResult>
   intelTranslate: (ids: string[]) => Promise<IntelTranslateResult>
   intelToggleFav: (id: string) => Promise<IntelItem | null>
   intelGetArticle: (id: string) => Promise<{ md: string; url: string; title: string; cached: boolean } | { error: string }>
@@ -2334,6 +2334,11 @@ export interface ElectronAPI {
   intelClearAiRec: () => Promise<boolean>
   intelSetFilter: (filter: { kind: 'paper' | 'chinese' | ''; kw: string }) => Promise<boolean>
   intelSaveAsNote: (id: string) => Promise<{ ok: true; relPath: string; title: string } | { ok: false; error: string }>
+  // 自定义 RSS 源（v2，docs/intel-module-plan.md D12；随仓库 sources.json 走，不进 SETTINGS）
+  intelListCustomSources: () => Promise<IntelCustomSource[]>
+  intelAddCustomSource: (d: { name: string; url: string; section: IntelSection }) => Promise<{ ok: true; source: IntelCustomSource } | { ok: false; error: string }>
+  intelRemoveCustomSource: (id: string) => Promise<boolean>
+  intelToggleCustomSource: (id: string) => Promise<IntelCustomSource | null>
   // knowledge (Scheme A)
   getKnowledgeCategories: () => Promise<KnowledgeCategory[]>
   createKnowledgeCategory: (d: CreateKnowledgeCategoryDTO) => Promise<KnowledgeCategory>
@@ -3178,14 +3183,31 @@ export type BookDownloadAction =
 // 主进程消费方：electron/lib/intel/*（pipeline / intelStore）；纯函数在 src/lib/intelPure.ts。
 
 export type IntelSourceKey = 'github' | 'hn' | 'arxiv' | 'openalex' | 'weekly' | 'hf' | 'labs' | 'qbitai'
+  | 'people_politics' | 'people_world' | 'sina_china' | 'sina_world' | 'chinanews' | 'wallstcn'
 export type IntelKind = 'repo' | 'news' | 'paper' | 'weekly' | 'blog'
+/** 版面（v2 报纸化）：条目 section = 内置源固定所属版面（自定义源 = 用户所选） */
+export type IntelSection = 'tech' | 'domestic' | 'world' | 'finance'
+/** 含自定义源的完整 source 键（IntelItem.source 用这个；SOURCE_META 只收录内置 14 源） */
+export type IntelAnySourceKey = IntelSourceKey | `custom:${string}`
+
+/** 用户自定义 RSS 源（v2，随仓库走：.knowbase/modules/intel/sources.json） */
+export interface IntelCustomSource {
+  /** `custom:` 后缀的键体（如 'c7f2a1'） */
+  id: string
+  name: string
+  url: string
+  section: IntelSection
+  enabled: boolean
+}
 
 export interface IntelItem {
   /** 稳定条目 id = hash 前 12 位 */
   id: string
   /** URL 归一化后 sha256 前 40（去重键） */
   hash: string
-  source: IntelSourceKey
+  source: IntelAnySourceKey
+  /** 版面（v2）：内置源固定所属；自定义源 = 用户所选 */
+  section: IntelSection
   kind: IntelKind
   title: string
   /** 原文链接（「打开原文」用） */
@@ -3238,7 +3260,8 @@ export interface IntelAiRec {
 export interface IntelMeta {
   aiRec: IntelAiRec | null
   lastFetchAt: string
-  lastFetchStats?: { ok: IntelSourceKey[]; failed: IntelSourceKey[]; added: number }
+  /** 成败键 = 内置源 key 或 custom:<id>（v2 起 string[]） */
+  lastFetchStats?: { ok: string[]; failed: string[]; added: number }
   /** AI 写入的筛选态（builtin.intel.set-filter；feed 顶部 pill 显示，可点掉） */
   aiFilter?: IntelAiFilter
 }
@@ -3251,12 +3274,12 @@ export interface IntelAiFilter {
   updatedAt: string
 }
 
-/** intel:refresh 返回（2026-10-25 单源刷新语义）：scope = 'all' 或本轮唯一抓取的源 key */
+/** intel:refresh 返回（2026-10-25 单源刷新语义）：scope = 'all' 或本轮唯一抓取的源键（v2 起含 custom:<id>） */
 export interface IntelRefreshResult {
   meta: IntelMeta
-  scope: 'all' | IntelSourceKey
+  scope: 'all' | string
   added: number
-  failedSources: IntelSourceKey[]
+  failedSources: string[]
 }
 
 declare global { interface Window { api: ElectronAPI; devtoolsApi?: DevtoolsAPI } }

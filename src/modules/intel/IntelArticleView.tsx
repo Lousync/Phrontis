@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, ExternalLink, Heart, NotebookPen, RefreshCw } from 'lucide-react'
-import type { IntelItem } from '../../types'
+import type { IntelItem, IntelSourceKey } from '../../types'
 import { intelGetArticle, intelGetItems, intelSaveAsNote, intelToggleFav, openExternal } from '../../lib/ipc'
 import { useDataChanged } from '../../lib/dataChanged'
 import { showToast } from '../../lib/toast'
@@ -118,7 +118,7 @@ export function IntelArticleView({ itemId, onBack, onClose }: Props) {
     )
   }
 
-  const meta = SOURCE_META[item.source]
+  const meta = SOURCE_META[item.source as IntelSourceKey]
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -126,9 +126,9 @@ export function IntelArticleView({ itemId, onBack, onClose }: Props) {
       <div className="flex min-h-[44px] shrink-0 flex-wrap items-center gap-2.5 border-b border-[var(--border-color)] px-4 py-1.5">
         <span
           className="inline-flex shrink-0 items-center rounded px-2 py-[1.5px] text-[10.5px] font-semibold text-white"
-          style={{ background: meta?.fg ?? 'var(--text-muted)' }}
+          style={{ background: meta?.fg ?? '#4f8f6a' }}
         >
-          {meta?.label ?? item.source}
+          {!meta && '📰'}{meta?.label ?? item.source}
         </span>
         <span className="min-w-0 max-w-[40%] truncate text-[12.5px] font-semibold text-[var(--text-primary)]" title={item.title}>
           {item.title}

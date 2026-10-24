@@ -44,6 +44,7 @@ export async function fetchWeekly(limit: number): Promise<IntelItem[]> {
     }
     out.push(intelDraft({
       source: 'weekly',
+    section: 'tech',
       kind: 'weekly',
       title,
       url: link,

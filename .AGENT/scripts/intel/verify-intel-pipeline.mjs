@@ -16,7 +16,7 @@
 import {
   normalizeIntelUrl, intelHash, intelIdOf, intelSpam, intelScore,
   filterIntelItems, mergeIntelPool, pruneIntelPool, capIntelPool, sortIntelItems,
-  SOURCE_META, INTEL_SOURCE_KEYS, PAPER_SRCS, CN_SRCS,
+  SOURCE_META, INTEL_SOURCE_KEYS, PAPER_SRCS, CN_SRCS, sectionOf, sourceWeightOf,
 } from '../../../src/lib/intelPure.ts'
 
 let pass = 0
@@ -31,7 +31,7 @@ const iso = (msAgo) => new Date(NOW - msAgo).toISOString()
 const H = 3600000
 const D = 24 * H
 
-/** 造条目（只填断言所需字段，其余走默认；favAt 透传） */
+/** 造条目（只填断言所需字段，其余走默认；favAt / section 透传） */
 const mk = (over = {}) => ({
   id: over.id ?? 'x'.repeat(12),
   hash: over.hash ?? 'h'.repeat(40),
@@ -49,6 +49,7 @@ const mk = (over = {}) => ({
   fav: over.fav ?? false,
   ...(over.favAt ? { favAt: over.favAt } : {}),
   ...(over.extra ? { extra: over.extra } : {}),
+  ...(over.section ? { section: over.section } : {}),
 })
 
 console.log('\n=== A. URL 归一化 + hash（去重键）===')
@@ -82,8 +83,38 @@ const older = intelScore(mk({ publishedAt: iso(30 * D), fetchedAt: iso(1 * H) })
 const fresher = intelScore(mk({ publishedAt: iso(1 * H), fetchedAt: iso(1 * H) }))
 ok(fresher > older, 'C5 新鲜度单调')
 ok(intelScore(mk({ summary: '' })) < intelScore(mk({ summary: 'x'.repeat(200) })), 'C6 摘要完整度单调')
-ok(Object.keys(SOURCE_META).length === 8 && INTEL_SOURCE_KEYS.length === 8, 'C7 SOURCE_META 全 8 源')
-ok(PAPER_SRCS.join() === 'arxiv,openalex,hf' && CN_SRCS.join() === 'weekly,qbitai', 'C8 论文 / 中文来源组合口径')
+ok(Object.keys(SOURCE_META).length === 14 && INTEL_SOURCE_KEYS.length === 14, 'C7 SOURCE_META 全 14 源（v2：8 科技 + 6 新闻）')
+ok(PAPER_SRCS.join() === 'arxiv,openalex,hf' && CN_SRCS.join() === 'weekly,qbitai,people_politics,people_world,sina_china,sina_world,chinanews,wallstcn', 'C8 论文 / 中文来源组合口径（v2：中文含 6 新闻源）')
+
+console.log('\n=== C9. 版面（v2 D11/D14）===')
+ok(sectionOf('people_politics') === 'domestic' && sectionOf('wallstcn') === 'finance' && sectionOf('github') === 'tech', 'C9-1 内置源 → 版面归属正确')
+ok(sectionOf('custom:abc') === 'tech' && sectionOf('unknown') === 'tech', 'C9-2 自定义/未知键兜 tech（自定义条目落库自带 section，不走这里）')
+ok(sourceWeightOf('custom:abc') === 18 && sourceWeightOf('github') === 26, 'C9-3 自定义源权重固定 18（低于全部内置源）')
+{
+  // D14：非科技版面不套技术信号词表——同文本在 domestic 版面拿不到信号词加分
+  const techScore = intelScore(mk({ source: 'github', title: 'new open source llm framework', summary: 'training and inference benchmark for agent models' }))
+  const newsScore = intelScore(mk({ source: 'people_politics', section: 'domestic', title: 'new open source llm framework', summary: 'training and inference benchmark for agent models' }))
+  ok(techScore > newsScore, 'C9-4 技术信号词只给科技版面加分（D14）', `${techScore} vs ${newsScore}`)
+  // 老池条目无 section：sectionOf 兜底后与显式 tech 一致
+  const legacy = intelScore(mk({ source: 'github' }))
+  const explicit = intelScore(mk({ source: 'github', section: 'tech' }))
+  ok(legacy === explicit, 'C9-5 老池条目（无 section）打分与显式 tech 一致')
+}
+ok(filterIntelItems([
+  { ...mk({ id: 's1' }), source: 'people_politics', section: 'domestic' },
+  { ...mk({ id: 's2' }), source: 'github', section: 'tech' },
+], { section: 'domestic' }).length === 1, 'C9-6 filterIntelItems 支持版面过滤')
+
+console.log('\n=== C10. merge 给老池条目补 section（v2 迁移）===')
+{
+  const legacyPool = [{ ...mk({ id: 'old1', hash: 'oldhash' }) }]
+  delete legacyPool[0].section
+  const { pool: merged } = mergeIntelPool(legacyPool, [mk({ id: 'new1', hash: 'newhash', source: 'wallstcn', section: 'finance' })])
+  const old1 = merged.find((it) => it.id === 'old1')
+  const new1 = merged.find((it) => it.id === 'new1')
+  ok(old1.section === 'tech', 'C10-1 老条目补 section=tech（v1 全科技源）')
+  ok(new1.section === 'finance', 'C10-2 新条目保留自带 section')
+}
 
 console.log('\n=== D. 过滤（feed 与 AI 工具共用）===')
 const pool = [
