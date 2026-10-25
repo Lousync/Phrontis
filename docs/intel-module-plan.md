@@ -6,6 +6,7 @@
 > - 分支：`feature/v3.12.0`（基于 main @ a97181d，工作树干净；`stash@{0}` 是用户在 v3.9.1 上的日程 WIP，**勿动**）
 > - 交互基准原型：`E:\Projects\KnowledgeRecorder\tmp\prototypes\feed-module-proto.html`（本地静态服务 `http://127.0.0.1:8391/feed-module-proto.html`；tmp/ 不进 git，实现前别删）
 > - 参考项目：`E:\Projects\KnowledgeRecorder\tmp\OpenCollector`（MIT，仅借鉴管线思路，不引依赖）
+> - 关联方案：卡片英文自动翻译（双语副行 + 翻译缓存复用）见 `docs/intel-translate-plan.md`（2026-10-25 定稿，并入 3.13.0）
 
 ## 0. 已拍板决策（全部确认过，实现时不再询问）
 
@@ -41,20 +42,19 @@
 | `labs` | AI 官方博客 | DeepMind `https://deepmind.google/blog/rss.xml` + OpenAI `https://openai.com/news/rss.xml`（标准 RSS）+ Anthropic `https://www.anthropic.com/news` 页面解析（脆弱，单站失败不影响另两站）；title 加 `DeepMind:` / `OpenAI:` / `Anthropic:` 前缀区分 | blog | 27 |
 | `qbitai` | 量子位 | `https://www.qbitai.com/feed`（WordPress RSS，偶发 502，重试 1 次） | news | 20 |
 
-**新闻版面（v2 新增 6，2026-10-25 用户真机实测 200）：**
+**新闻版面（v2.1 现役 3 源，2026-10-25 真机验证鲜活；内置源合计 11 = 8 科技 + 3 新闻）：**
 
 | key | 名称 | 版面 | 取数方式 | kind | 源权重 |
 |---|---|---|---|---|---|
-| `people_politics` | 人民网·时政 | domestic | `http://www.people.com.cn/rss/politics.xml`（标准 RSS，实测 382KB 全文） | news | 24 |
-| `people_world` | 人民网·国际 | world | `http://www.people.com.cn/rss/world.xml` | news | 24 |
-| `sina_china` | 新浪·国内焦点 | domestic | `https://rss.sina.com.cn/news/china/focus15.xml` | news | 20 |
-| `sina_world` | 新浪·国际焦点 | world | `https://rss.sina.com.cn/news/world/focus15.xml` | news | 20 |
-| `chinanews` | 中新网·滚动 | domestic | `https://www.chinanews.com/rss/scroll-news.xml` | news | 22 |
-| `wallstcn` | 华尔街见闻·快讯 | finance | `https://api-one.wallstcn.com/apiv1/content/lives?channel=global-channel&limit={limit}`（JSON，`data.items[]`，content 为 HTML 需转 markdown/去标签；子频道 a-stock 等后续可扩） | news | 24 |
+| `chinanews` | 中新网·滚动 | domestic | `https://www.chinanews.com/rss/scroll-news.xml`（滚动要闻，分钟级更新） | news | 22 |
+| `chinanews_world` | 中新网·国际 | world | `https://www.chinanews.com/rss/world.xml`（国际频道，分钟级更新；v2.1 替换冻结的人民网/新浪） | news | 22 |
+| `wallstcn` | 华尔街见闻·快讯 | finance | `https://api-one.wallstcn.com/apiv1/content/lives?channel=global-channel&limit={limit}`（JSON，字段 title/content_text/display_time/uri 2026-10-25 实测） | news | 24 |
 
-**自定义 RSS（v2 新增）**：用户在 设置 › 情报 添加任意 RSS/Atom 地址（命名 + 归入四版面之一），存 `.knowbase/modules/intel/sources.json` 随仓库走；抓取走与内置 RSS 源同一 `fetchRss()` 通道，`source` 键 = `custom:<id>`，源权重固定 18。
+> **CDATA 教训（2026-10-25）**：人民网/新浪/中新网国际的 `<title>`/`<description>` 是 `<![CDATA[…]]>` 包裹——解析层必须先解 CDATA 再去标签（`rss.ts pick()`），否则标题被 `<[^>]*>` 整段吃掉，表象是「刷新成功但 0 条」。契约：`verify-intel-rss.mjs`。另：`parseFeed` 对非 RSS/Atom 响应（错误页/代理拦截页）抛错进 failed，不静默返回空。
 
-已验证不可用、勿再调研：linux.do（login_required）、V2EX hot.json（2025 起反爬）、Reddit（OAuth）、Papers with Code（2025 停服）、**新华网 RSS（404）、界面 yaowen.xml（404）、联合早报 RSS（返回 HTML，已死）、36氪 /feed（返回 HTML，已死）、gov.cn/rss/zhengce.xml（404）、澎湃首页侧栏 API（通但全是推广位内容，质量不合格）**。
+**自定义 RSS（v2 新增）**：用户在 设置 › 情报 添加任意 RSS/Atom 地址（命名 + 归入四版面之一），存 `.knowbase/modules/intel/sources.json` 随仓库走；抓取走与内置 RSS 源同一 `parseFeed()` 通道，`source` 键 = `custom:<id>`，源权重固定 18。
+
+已验证不可用、勿再调研：linux.do（login_required）、V2EX hot.json（2025 起反爬）、Reddit（OAuth）、Papers with Code（2025 停服）、**新华网 RSS（404）、界面 yaowen.xml（404）、联合早报 RSS（返回 HTML，已死）、36氪 /feed（返回 HTML，已死）、gov.cn/rss/zhengce.xml（404）、澎湃首页侧栏 API（通但全是推广位内容，质量不合格）**；**人民网 RSS politics.xml/world.xml（HTTP 200 但内容冻结在 2025-06）、新浪 focus15.xml 国内/国际（冻结在 2018-09）——v2 曾接入，v2.1 移除；chinadaily rss（404）、DW 中文 rss（直连不通）、光明网 rss（404）、环球网（无 RSS，重定向 sitemap）**。
 
 ## 2. 架构总览
 
