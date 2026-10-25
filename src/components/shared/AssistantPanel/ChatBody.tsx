@@ -639,7 +639,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       // 方向键移动光标后重算 @ 检索词（↑↓ 被浮层拦下时不会走到这里）
                       if (atPosRef.current !== null) syncAtQuery(e.currentTarget.value, e.currentTarget.selectionStart)
                     }}
-                    rows={isNarrow ? 2 : 3}
+                    rows={isNarrow ? 2 : variant === 'page' ? 4 : 3}
                     /* 生图入口就是对话本身（决策：去掉大按钮，走斜杠指令）⇒ 占位文字里点一句，
                        否则用户没有别的地方知道这个能力存在（弹层只有敲了 `/` 才出现） */
                     placeholder={scheduleMode ? '对日程助手说…（/ 唤起指令 · Enter 发送）' : '问问任何事…（要画图就敲 /生图 后面跟描述 · @ 引用笔记 / Enter 发送）'}
