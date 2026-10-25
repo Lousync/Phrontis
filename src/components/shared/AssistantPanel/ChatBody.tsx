@@ -661,7 +661,10 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
 
                 {/* 工具行：行首插槽（侧栏感知开关，B-12）→ 感知开关（docked/page 态，B-12 2026-09-22 二次拍板同位）
                     → 📎 附加文件 / 对话模型 / 消耗查看 —— 发送钮右置 */}
-                <div className="relative flex items-center gap-0.5 mt-1">
+                {/* @container 量的是本行自身宽度（与宿主 variant 无关）：≤320px 时模型名隐为图标——
+                    工作台侧栏可拖窄，variant 驱动的 isNarrow 感知不到，2026-10-25 反馈按钮被截。
+                    套路与 WorkbenchLeftPanel 顶栏 @max-[170px] 一致 */}
+                <div className="relative flex items-center gap-0.5 mt-1 @container">
                   {inputBarLeft}
                   {variant !== 'sidebar' && !scheduleMode && (
                     <PerceptionToggle on={perceptionOn} onToggle={togglePerception} />
@@ -717,7 +720,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     }`}
                   >
                     <Cpu size={12} />
-                    <span className={`leading-none ${isNarrow ? 'max-w-[80px] truncate' : 'max-w-[120px] truncate'}`}>{modelLabel}{effort !== 'off' ? ` · ${effort}` : ''}</span>
+                    <span className={`leading-none ${isNarrow ? 'max-w-[80px] truncate' : 'max-w-[120px] truncate'} @max-[320px]:hidden`}>{modelLabel}{effort !== 'off' ? ` · ${effort}` : ''}</span>
                     <ChevronDown size={10} />
                   </button>
                   {/* F-12：上下文占用指示（与 AI 教学同口径，档位设置 ctxUsageDetail / 窗口 ctxWindow 共用） */}
