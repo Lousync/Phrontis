@@ -134,21 +134,14 @@ async function main() {
   })()`)
   ok(dockedHeader.menu && dockedHeader.expand, 'A2b docked 态轻头部控件齐全（会话列表 + ⤢；收窄条件未误伤窄版）', JSON.stringify(dockedHeader))
 
-  // ---- D 组：输入区工具行（反馈轮：选模型/查消耗/附加文件 + 输入卡轻量美化）----
+  // ---- D 组：输入区工具行（2026-10-25 反馈：删「附件」「消耗」两入口 —— 附件与作用域语义重叠留作用域，
+  //      文件仍可经输入框 @ 引用附上；用量看右栏扩大页。模型按钮保留）----
   const toolRow = await evalJs(`(() => ({
     attach: !!document.querySelector('[data-wb="aiAttachBtn"]'),
     model: !!document.querySelector('[data-wb="aiModelBtn"]'),
     usage: !!document.querySelector('[data-wb="aiUsageBtn"]'),
   }))()`)
-  ok(toolRow.attach && toolRow.model && toolRow.usage, 'D1 输入卡工具行三钮在（📎/模型/消耗）', JSON.stringify(toolRow))
-  await evalJs(`(() => { document.querySelector('[data-wb="aiAttachBtn"]')?.click(); return true })()`)
-  await sleep(500)
-  const attachPop = await evalJs(`(() => {
-    const el = document.querySelector('[data-wb="aiAttachPop"]')
-    return { there: !!el, hasSearch: !!el?.querySelector('input') }
-  })()`)
-  ok(attachPop.there && attachPop.hasSearch, 'D2 📎 浮层（搜索框+候选列表）')
-  await evalJs(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true })()`)
+  ok(!toolRow.attach && toolRow.model && !toolRow.usage, 'D1 工具行按 2026-10-25 反馈收敛（附件/消耗已删、模型保留）', JSON.stringify(toolRow))
   await evalJs(`(() => { document.querySelector('[data-wb="aiModelBtn"]')?.click(); return true })()`)
   await sleep(500)
   const modelPop = await evalJs(`(() => {
@@ -156,14 +149,6 @@ async function main() {
     return { there: !!el, hasDefault: !!el && el.textContent.includes('默认模型') }
   })()`)
   ok(modelPop.there && modelPop.hasDefault, 'D3 模型浮层（默认模型 + 供应商清单）', JSON.stringify(modelPop))
-  await evalJs(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true })()`)
-  await evalJs(`(() => { document.querySelector('[data-wb="aiUsageBtn"]')?.click(); return true })()`)
-  await sleep(500)
-  const usagePop = await evalJs(`(() => {
-    const el = document.querySelector('[data-wb="aiUsagePop"]')
-    return { there: !!el, hasToday: !!el && el.textContent.includes('今日消耗'), hasSession: !!el && el.textContent.includes('当前会话') }
-  })()`)
-  ok(usagePop.there && usagePop.hasToday && usagePop.hasSession, 'D4 消耗浮层（今日 + 当前会话）', JSON.stringify(usagePop))
   await evalJs(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true })()`)
   await sleep(200)
 
