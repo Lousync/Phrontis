@@ -8,12 +8,24 @@
 
 export const DEFAULT_MAX_ROUNDS = 16
 export const DEFAULT_RUN_TOKEN_BUDGET = 500000
+export const DEFAULT_MAX_SESSION_WRITES = 20
 
 /** agentMaxRounds 收敛：2-64，非法/缺省回落 16 */
 export function clampMaxRounds(v: unknown): number {
   const n = Math.floor(Number(v))
   if (!Number.isFinite(n)) return DEFAULT_MAX_ROUNDS
   return Math.max(2, Math.min(64, n))
+}
+
+/**
+ * agentMaxSessionWrites 收敛：1-99，非法/缺省回落 20。
+ * v3.13.0 反馈 N-1：写次数上限原为硬编码 7，「建任务 + 排期 + 工作流」一串的正常
+ * 复杂任务轻松超限（保护上限变成任务能力上限）；默认抬到 20 并开放可配。
+ */
+export function clampMaxSessionWrites(v: unknown): number {
+  const n = Math.floor(Number(v))
+  if (!Number.isFinite(n)) return DEFAULT_MAX_SESSION_WRITES
+  return Math.max(1, Math.min(99, n))
 }
 
 /** agentRunTokenBudget 收敛：≥0；0 = 不启用 token 预算（只按轮数封顶）；非法回落默认 */

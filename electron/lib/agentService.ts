@@ -19,7 +19,7 @@ import { estimateTokens, trimHistoryByBudget } from './agentContextBudget'
 import { compressAtTokens, composeContextWithDigest, rowsAfterDigest } from './agentCompressCore'
 import { compressSession } from './agentCompress'
 import type { SessionDigest, AgentMessageRow, AgentSessionRow } from './agentSessionRepo'
-import { clampMaxRounds, clampRunTokenBudget, isParallelSafe, partitionToolBatches, PARALLEL_CHUNK, PARALLEL_HINT, FINAL_ROUND_NOTICE, FORCED_SUMMARY_NOTICE } from './agentLoopPolicy'
+import { clampMaxRounds, clampMaxSessionWrites, clampRunTokenBudget, isParallelSafe, partitionToolBatches, PARALLEL_CHUNK, PARALLEL_HINT, FINAL_ROUND_NOTICE, FORCED_SUMMARY_NOTICE } from './agentLoopPolicy'
 import {
   createAgentSession, listAgentSessions, renameAgentSession, deleteAgentSession,
   sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages,
@@ -90,8 +90,8 @@ function roundCostUsd(promptTokens?: number, completionTokens?: number, cachedTo
  * 改为由 buildToolsPayload 按 tool.requires === 'write' 动态构造集合，
  * 覆盖全部 9 个内置写工具。外部 mcp.* / skill.* 不设 requires 字段，故不计入
  * （mcp 工具的 readOnly:false 是「不保证只读」的保守标记，不等于写操作，计入会大量误伤）。
+ * 上限值自 v3.13.0 反馈 N-1 起为设置项 agentMaxSessionWrites（默认 20，见 agentLoopPolicy）。
  */
-const MAX_SESSION_WRITES = 7
 
 /**
  * 支线旁问纪律（v3.1.2 条目11 · 2026-09-14 定稿）。
@@ -1395,6 +1395,9 @@ async function runAgentLoop(
   // ---- 循环预算（Agent 第 0+2 层）：轮数可配 + 累计 token 预算，耗尽优雅收场而非报错 ----
   const maxRounds = manual ? MANUAL_MAX_ROUNDS : clampMaxRounds(getSettingReader()('agentMaxRounds'))
   const runTokenBudget = clampRunTokenBudget(getSettingReader()('agentRunTokenBudget'))
+  // 写次数上限（v3.13.0 反馈 N-1）：作用域 = 本条消息触发的这次运行（非会话级配额，
+  // 下一条消息重计）；7 次硬上限对「建任务+排期+工作流」式复杂任务不够用 → 设置化，默认 20
+  const maxSessionWrites = clampMaxSessionWrites(getSettingReader()('agentMaxSessionWrites'))
   let runTokens = 0
   let softLanded = false
   /** token 预算触顶（或已到最后一轮）：本轮执行完后立即断出循环 → 强制总结轮 */
@@ -1642,17 +1645,17 @@ async function runAgentLoop(
         })
         return
       }
-      // 会话写上限：单次请求内写入类工具最多 MAX_SESSION_WRITES 次（防失控循环刷盘）。
+      // 写上限：本次运行内写入类工具最多 maxSessionWrites 次（防失控循环刷盘）。
       // 动态读 toolsState.writeTools——tool.request 启用新写工具后重建的集合要立即生效
       if (toolsState.writeTools.has(realName)) {
-        if (sessionWrites >= MAX_SESSION_WRITES) {
-          const denyStep: AgentTraceStep = { kind: 'tool', name: realName, ok: false, durationMs: 0, summary: `会话写入上限 ${MAX_SESSION_WRITES}` }
+        if (sessionWrites >= maxSessionWrites) {
+          const denyStep: AgentTraceStep = { kind: 'tool', name: realName, ok: false, durationMs: 0, summary: `本条消息写入上限 ${maxSessionWrites}` }
           trace.push(denyStep)
           stepEmitters.get(signal)?.(denyStep)
           convo.push({
             role: 'tool',
             tool_call_id: tc.id,
-            content: JSON.stringify({ ok: false, error: `已达本次会话写入操作上限（${MAX_SESSION_WRITES} 次）。请停止写入类操作并总结已完成内容` }),
+            content: JSON.stringify({ ok: false, error: `已达本条消息的写入操作上限（${maxSessionWrites} 次）。请停止写入类操作并总结已完成内容` }),
           })
           return
         }
