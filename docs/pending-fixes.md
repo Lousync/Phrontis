@@ -1849,3 +1849,41 @@ v1 实机踩中的连带事故：副本在场时，编辑器里「打开主文�
 **修复方向**：怎么改、要注意什么。
 **验证**：修完怎么确认。
 ```
+
+## [x] B-40 ⋮ 菜单「重命名」后，页面顶栏的文件名不跟着改（2026-10-25，P1；用户实机反馈 + 截图）
+
+**现象**：笔记页 ⋮ → 重命名（含扩展名）改完后，顶栏中段的文件名仍显示旧名；树条目/页签反而正常。左侧文件树里改名「没有这个问题」（其实是同族时序差异，见根因 ③）。
+**定位**：`src/modules/knowledge/components/PageEditor.tsx`（顶栏 title 只在 loadPage 赋值）；`src/modules/knowledge/index.tsx` handleTreeRename 的稳定 id 标题对齐分支。
+**根因**（三层叠加，探针逐层实锤）：
+① 顶栏跟随的既有通道是 `ws:rename` 成功 → `broadcastDataChanged('knowledge')` → `kb-reload-detail` → PageEditor 重读，但重读入口被「脏缓冲不打断 / 刚保存 2s 内不打断」两道闸拦着 —— 用户恰恰常在刚编辑完时改名，重读被拦后**再无补跑**，顶栏与 `page.path` 停在旧值（之后 ⋮ 的创建副本/移动/定位还全打旧路径）。
+② B-33 的页签标题对齐从 `allPagesRef` 反查 path→id，那份列表在改名瞬间可能还没有该条目（散页/刷新时序），filter 落空 = 对齐静默跳过（实测 `ids: []`）。
+③ 分屏时主/副两个 PageEditor 共用模块层 `handleTitleChange` / `handleFileTypeChange`，旧签名只传值、handler 落到 `activePageIdRef` 名下 = 副栏页装载时把**自己的标题**记到**主栏激活页**头上（页签标题串页，与 ①② 无关的独立缺陷，归 B-42 一并修）。
+**修复**：`PageEditor.tsx` 新增 allPages 对齐 effect（B-40）：路径恒随索引走（**含脏缓冲** —— 改名不改内容与 mtime，旧保存基线对新路径依然有效，自动保存必须落新路径，否则旧路径复活出拷贝 = B-35 同族）；题名只在 `titleRef === savedTitleRef`（题名缓冲无未保存编辑）时对齐，且连 `savedTitleRef` 一起改，避免误触发「与保存版分歧」的假脏。handleTreeRename 的稳定 id 对齐改为直接 `openPageInfos[hit.id]`（页签 id 即页面 id，不再反查）。
+**修复记录（2026-10-25，fix/v3.12.12）**：隔离探针 22/22 —— ⋮ 改名 / 树内联改名 / 连续两次改名三场景下索引、树、页签、顶栏四处全部即时跟随；无 TypeError。
+**验证**：打开任意文件名派生题名的页 → ⋮ 重命名 → 顶栏即时变新名；分屏态改副栏页名 → 两栏页签互不串写。
+
+## [x] B-41 分屏后页签显示不完全：长题名页签被截断/拦腰裁掉（2026-10-25，P1；用户实机反馈 + 截图）
+
+**现象**：分屏后左侧页签只显示 ~8 字（如「编译原理第一次·」），药丸有大片空白仍不显全；更糟时页签被槽位拦腰裁掉、关闭按钮够不到。
+**定位**：`src/components/workbench/PageTabStrip.tsx`（条目 `max-w-[220px] shrink-0`）；`src/components/workbench/WorkbenchPageBar.tsx`（knowledge 槽 `shrink-0 max-w-[50%]` + 页面条根 `shrink-0`）。
+**根因**（探针实测宽度链）：① 条目定宽上限 220px：17 字题名在**整条有空位**时也只给 110px 文本框（~8 字 + 省略号）；② 分屏态 knowledge 槽 `max-w-[50%]` 按半行宽再砍半（实测 122px），页签 220px 塞不进 → 条内横滚，激活页签被裁在可视区外；③ 页面条根 `shrink-0` 在分屏单元格内不收缩（`overflow-x-clip` 不豁免 Chromium 的自动最小尺寸），整条外溢压过分隔线（实测 +49px）。
+**修复**：条目改「内容占宽至多 360px、可缩、下限 104px」（宽裕时显全、吃紧先缩、缩到底才横滚兜底 —— F-16 滚动机制保留为兜底）；knowledge 槽退役 `shrink-0 max-w-[50%]` 改 `min-w-0` 可缩（分屏不再二次砍半）；页面条根去 `shrink-0` 加 `min-w-0`。契约同步：`verify-workbench-shell.mjs` F16c 改口径 + 新增 B41 断言。
+**修复记录（2026-10-25，fix/v3.12.12）**：探针实测 —— 非分屏长名页签 323px 全题名不截断；分屏态条目完整落在可视区内（缩宽 + 省略号，不裁切不分屏压线 barOverflowCell=0）。
+**验证**：打开长文件名的页 → 左右分屏 → 主栏页签题名尽量显全、无裁切；窄窗口/多页签时页签先缩后滚。
+
+## [x] B-42 分屏双编辑器共用标题/类型回调，副栏页的标题记到主栏激活页头上（2026-10-25，P1；B-40 探针暴露）
+
+**现象**：分屏后主栏页签与顶栏显示**副栏页的标题**（如副栏开着「写作面探针」，主栏长名页的页签/顶栏/阅读视图标题全变「写作面探针」，正文却还是长名页的）。
+**定位**：`src/modules/knowledge/index.tsx` handleTitleChange / handleFileTypeChange（写 `activePageIdRef.current` 名下）；`src/components/workbench/PageEditor.tsx` loadPage 尾部 `onTitleChange?.(p.title)`。
+**根因**：两个 PageEditor 实例共用同一 handler，旧签名不带编辑器身份；副栏页装载（loadPage 必发 onTitleChange）时 `activePageIdRef` 指向主栏激活页 ⇒ 串写。单栏模式两者恰好恒等，从不暴露。此前 run 没踩中纯属 B-39 让位落点恰为 null（被卫语句拦住）。
+**修复**：onTitleChange / onFileTypeChange / onContentChange / onMarkDirty / onClearDirty 全部带出编辑器自己的 pageId（Props 签名加可选尾参，13 处调用点补传）；模块侧 handler 优先用 editorPageId、`onContentChange`（liveContent/大纲）只吃主栏激活编辑器。
+**修复记录（2026-10-25，fix/v3.12.12）**：探针 A2 分屏全流程 —— 主栏页签/顶栏恒显主栏页自己的题名，副栏装载不再串写。
+**验证**：分屏两页题名一长一短 → 反复切换/装载 → 两栏页签与顶栏各自恒定。
+
+## [ ] B-43 打开页面即出现一次假脏（content 分歧），自动保存白写一轮（2026-10-25，P3；B-40 探针顺带实测，**存量问题**）
+
+**现象**：探针实测每次打开页面后 `isDirtyRef` 变 true（`[dirty-mark] cDiffer:true, tDiffer:false`，title 与 savedTitle 一致、content 与 savedContent 不一致），随后一次自动保存把**同样内容**写回磁盘（frontmatter `updated` 被顶掉、mtime 变化）。用户无感，但「刚保存 2s 内不打断」重读闸被白白消耗，且每次开页多一次写盘。
+**定位**：`src/modules/knowledge/components/PageEditor.tsx` 「Mark dirty when content/title diverges」effect（deps 含 `page`）与 loadPage `.then` 的 setState/写 ref 交错。
+**根因**：未定（cDiffer=true 时 content 与 savedContentRef 的赋值来源按代码读是同一 `p.contentMd`，怀疑 effect 在 loadPage 两段式 setState 之间以中间态运行）。**与 B-40/41/42 改动无关的存量竞态** —— 修复前建议先给该 effect 加「pageId 刚切换的宽限」类守卫再观察。
+**修复方向**：待定位后收敛；可能的方向是 divergence effect 的比较改用 pageId 代次门卫（切页后首轮跳过）。
+**验证**：开页后探针观测 `isDirtyRef` 恒 false；无多余写盘。

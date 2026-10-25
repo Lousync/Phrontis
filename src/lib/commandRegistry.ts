@@ -187,13 +187,13 @@ export const COMMANDS: CommandDef[] = [
     id: 'kb-save', label: '立即保存', desc: '立即保存当前页面',
     keys: [['Ctrl', 'S']], group: 'kbEditor', scope: 'note', palette: false,
     conflictNote: '按当前激活模块分发：handler 首行 getGlobalActiveTab() !== 本模块就 return（src/lib/activeTab.ts）',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1084 @ if (e.ctrlKey && e.key ==='],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1113 @ if (e.ctrlKey && e.key ==='],
   },
   {
     id: 'kb-preview', label: '阅读 ⇄ 编辑切换', desc: '阅读 ⇄ 编辑切换（仅 md / txt 文件）',
     keys: [['Ctrl', '/'], ['Ctrl', 'E']], group: 'kbEditor', scope: 'note', palette: false,
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门），与博客的 Ctrl+/ 各管各的',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1094 @ ) || (e.ctrlKey && (e.key ==='],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1123 @ ) || (e.ctrlKey && (e.key ==='],
   },
   {
     id: 'kb-editor-esc', label: '返回页面列表', desc: '关闭弹窗后返回页面列表',
@@ -205,28 +205,28 @@ export const COMMANDS: CommandDef[] = [
     id: 'kb-back', label: '页面历史：后退', desc: '页面历史：后退（笔记区顶栏最左那颗箭头）',
     keys: [['Alt', '←']], group: 'kbEditor', scope: 'note', palette: false,
     note: '对账原型曾把本键锚到 PageEditor 里 Alt+A 那一行（不再写行号 —— 它随代码漂），真实判据在 knowledge/index.tsx',
-    sources: ['src/modules/knowledge/index.tsx:1769 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
+    sources: ['src/modules/knowledge/index.tsx:1779 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
     id: 'kb-fwd', label: '页面历史：前进', desc: '页面历史：前进',
     keys: [['Alt', '→']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1769 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
+    sources: ['src/modules/knowledge/index.tsx:1779 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
     id: 'kb-ai-inline', label: 'AI 内联续写建议', desc: 'AI 内联续写建议：立即请求一条（Tab 采纳 / Esc 拒绝；停顿后自动给出）',
     keys: [['Alt', 'A']], group: 'kbEditor', scope: 'note', palette: false,
     note: '原表把它挂在已退役的「编辑器模块」组下；实际判定在 PageEditor.tsx:779（笔记编辑态）',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:855 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:884 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
     id: 'kb-image', label: '插入图片', desc: '插入图片（顶栏 ⋮ 里也有）',
     keys: [['Ctrl', 'Shift', 'I']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1234 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1263 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
   },
   {
     id: 'kb-footnote', label: '插入脚注', desc: '插入脚注（先选中词语；顶栏 ⋮ 里也有）',
     keys: [['Ctrl', 'Alt', 'F']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1239 @ if (e.ctrlKey && e.altKey && !e.shiftKey && (e.k'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1268 @ if (e.ctrlKey && e.altKey && !e.shiftKey && (e.k'],
   },
 
   // ---------------------------------------------------------------- 知识库 — 写作面
@@ -291,17 +291,17 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'sb-copy', label: '复制选中项', desc: '复制选中的页面 / 目录到内部剪贴板（非输入框时）',
     keys: [['Ctrl', 'C']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1817 @ // Ctrl+C — copy selected item to internal clipb'],
+    sources: ['src/modules/knowledge/index.tsx:1827 @ // Ctrl+C — copy selected item to internal clipb'],
   },
   {
     id: 'sb-cut', label: '剪切选中项', desc: '剪切选中的页面 / 目录（非输入框时）',
     keys: [['Ctrl', 'X']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1830 @ // Ctrl+X — cut selected item'],
+    sources: ['src/modules/knowledge/index.tsx:1840 @ // Ctrl+X — cut selected item'],
   },
   {
     id: 'sb-paste', label: '粘贴到选中目标', desc: '粘贴内部剪贴板到选中目标（非输入框时）',
     keys: [['Ctrl', 'V']], group: 'kbSidebar', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1853 @ pasteExternalFromClipboard(resolvePasteDir(), false)'],
+    sources: ['src/modules/knowledge/index.tsx:1863 @ pasteExternalFromClipboard(resolvePasteDir(), false)'],
   },
 
   // ---------------------------------------------------------------- 知识库 — Tab 管理
@@ -311,24 +311,24 @@ export const COMMANDS: CommandDef[] = [
     // 只在笔记模块激活时出现：Ctrl+N 在笔记 / 博客 / 日程都有，靠 tabs 区分（A1 的门控）
     requires: { tabs: ['knowledge'] },
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门）：笔记 / 博客 / 日程都占 Ctrl+N，各管各的',
-    sources: ['src/modules/knowledge/index.tsx:1780 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.'],
+    sources: ['src/modules/knowledge/index.tsx:1790 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.'],
   },
   {
     id: 'kb-close-tab', label: '关闭当前 Tab', desc: '关闭当前打开的 Tab 页',
     keys: [['Ctrl', 'W']], group: 'kbTabs', scope: 'note', palette: true,
     // 模块内命令进面板（L2 第三批）：只在笔记模块激活时出现
     requires: { tabs: ['knowledge'] },
-    sources: ['src/modules/knowledge/index.tsx:1792 @ // Ctrl+W — close current tab'],
+    sources: ['src/modules/knowledge/index.tsx:1802 @ // Ctrl+W — close current tab'],
   },
   {
     id: 'kb-next-tab', label: '下一个 Tab', desc: '切换到下一个 Tab',
     keys: [['Ctrl', 'Tab']], group: 'kbTabs', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1800 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
+    sources: ['src/modules/knowledge/index.tsx:1810 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
   },
   {
     id: 'kb-prev-tab', label: '上一个 Tab', desc: '切换到上一个 Tab',
     keys: [['Ctrl', 'Shift', 'Tab']], group: 'kbTabs', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/index.tsx:1800 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
+    sources: ['src/modules/knowledge/index.tsx:1810 @ // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs'],
   },
 
   // ---------------------------------------------------------------- 知识库 — 阅读
@@ -337,13 +337,13 @@ export const COMMANDS: CommandDef[] = [
     keys: [['Ctrl', 'Shift', 'R']], group: 'kbReading', scope: 'note', palette: true,
     // 模块内命令进面板（L2 第三批）：只在笔记模块激活时出现
     requires: { tabs: ['knowledge'] },
-    sources: ['src/modules/knowledge/index.tsx:1786 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
+    sources: ['src/modules/knowledge/index.tsx:1796 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
   },
   {
     id: 'kb-immersive-esc', label: '沉浸阅读退出', desc: '沉浸阅读退出',
     keys: [['Escape']], group: 'kbReading', scope: 'note', palette: false,
     conflictNote: '仅沉浸阅读态接管 Escape；非沉浸态归「返回页面列表」',
-    sources: ['src/modules/knowledge/index.tsx:1786 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
+    sources: ['src/modules/knowledge/index.tsx:1796 @ if (e.ctrlKey && e.shiftKey && (e.key ==='],
   },
 
   // ---------------------------------------------------------------- 电子书阅读器（PDF + EPUB）

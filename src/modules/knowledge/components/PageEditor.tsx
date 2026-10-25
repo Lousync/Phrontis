@@ -177,12 +177,15 @@ interface Props {
   onDeleted: () => void
   onNavigate: (id: string) => void
   onUpdate: () => void
-  onTitleChange?: (title: string) => void
-  onFileTypeChange?: (fileType: string) => void
-  onContentChange?: (content: string) => void
+  /** B-42（2026-10-25）：三个 Change 回调与脏标记都带出**本编辑器自己的 pageId** ——
+   *  分屏时主/副两个 PageEditor 实例共用模块层同一个 handler，旧签名只传值、handler 落到
+   *  activePageIdRef 名下 = 副栏页的标题/类型/脏态全记到主栏激活页头上（页签标题串页）。 */
+  onTitleChange?: (title: string, pageId?: string) => void
+  onFileTypeChange?: (fileType: string, pageId?: string) => void
+  onContentChange?: (content: string, pageId?: string) => void
   onTagsChange?: () => void
-  onMarkDirty?: () => void
-  onClearDirty?: () => void
+  onMarkDirty?: (pageId?: string) => void
+  onClearDirty?: (pageId?: string) => void
   /** 请求进入沉浸阅读模式（由父级切换布局） */
   onRequestReading?: () => void
   /** 仓库读源模式：正文走就地编辑（vault 写路径，Phase 1）；「在编辑器模块中打开」保留为次入口 */
@@ -617,7 +620,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
         setContent(body)
         savedContentRef.current = body                    // 纪律③
         isDirtyRef.current = false
-        onContentChange?.(body)
+        onContentChange?.(body, pageIdRef.current)
         /* 纪律④「文本类落地 = 直接编辑」（批 1 拍板）：`loadPage` 的 setPreview 规则是
            `ft === 'txt'` ⇒ 阅读态，那是给 **txt 知识页**定的；归档 .txt 也要直接进编辑态，
            否则用户点开一个仓库里的 .txt 先看到的是 Markdown 渲染（而 .txt 并无 Markdown 语义）。 */
@@ -680,6 +683,32 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   useEffect(() => { isCodeFileRef.current = isCodeFile }, [isCodeFile])
   useEffect(() => { isPdfFileRef.current = isPdfFile }, [isPdfFile])
   useEffect(() => { vaultModeRef.current = vaultMode }, [vaultMode])
+
+  // B-40（2026-10-25）：改名/移动后，打开着的页面必须跟上新路径与新题名。页面身份（frontmatter id）
+  // 不变 ⇒ pageId 不变、loadPage 不会重跑；既有兜底是 dataChanged → kb-reload-detail 重读，但那条
+  // 通道被「脏缓冲不打断 / 刚保存 2s 内不打断」两道闸拦着（用户恰恰常在刚编辑完时改名），表象 =
+  // 顶栏题名与 page.path 停在旧值，之后 ⋮ 的创建副本 / 移动 / 定位还全打旧路径。allPages 是改名后
+  // 必然刷新的最低水位（handleTreeRename 成功即 setAllPages），在这里静默对齐：路径跟着索引走
+  // （含脏缓冲，否则自动保存把缓冲写回旧路径 = 复活拷贝）；题名只在「题名缓冲无未保存编辑」时
+  // 对齐（正文造成的脏不拦题名跟随）。auto/draft 旧 id 在索引里查不到 ⇒ 自然 no-op
+  // （它们的跟随走 handleTreeRename 的 id 原位迁移 → pageId 变化重载，B-33）。
+  useEffect(() => {
+    if (!pageId || pageId.startsWith('draft:') || pageId.startsWith('auto:')) return
+    const p = allPages.find((x) => x.id === pageId)
+    if (!p) return
+    const cur = pageRef.current
+    // 路径始终跟着索引走（**含脏缓冲**）：改名不改内容与 mtime，旧保存基线对新路径依然有效，
+    // 而自动保存必须落到新路径 —— 不跟就会把缓冲写回旧路径、凭空复活一份拷贝（B-35 同族）。
+    if (cur && p.path && cur.path !== p.path) setPage((prev) => (prev ? { ...prev, path: p.path } : prev))
+    // 题名只在「缓冲没有未保存的题名编辑」时对齐：titleRef === savedTitleRef 说明题名缓冲与
+    // 已存版一致 —— 缓冲的脏可能来自正文（那是正文的事，不该拦住题名跟随），只有题名本身
+    // 在编辑才让位。对齐要连 savedTitleRef 一起改 —— 否则下方「与保存版分歧」的脏判定会被
+    // 这次对齐误触发（假脏 → 计划一次带旧闭包内容的自动保存）。
+    if (titleRef.current !== savedTitleRef.current) return
+    if (titleRef.current === p.title) return
+    savedTitleRef.current = p.title
+    setTitle(p.title)
+  }, [allPages, pageId])
 
   // Phase 2 批次 2：PDF 阅读器内嵌本模块（openPdfInReader 跳转通道随编辑器退役而移除）
 
@@ -752,7 +781,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       setPage(pseudo); setTitle(title); setContent(body); setFileTypeState(ext); setEntryTags([])
       savedContentRef.current = body; savedTitleRef.current = title; isDirtyRef.current = false
       savedAnnotationRef.current = ''
-      onTitleChange?.(title); onContentChange?.(body)
+      onTitleChange?.(title); onContentChange?.(body, pageIdRef.current)
       // startInEdit（快速草稿）：本次打开直接落编辑态
       if (!isReload) setPreview(startInEditRef.current ? false : (ext === 'md' || ext === 'txt'))
     } catch (e) {
@@ -781,9 +810,9 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           savedContentRef.current = p.contentMd || ''; savedTitleRef.current = p.title; isDirtyRef.current = false
           savedAnnotationRef.current = p.annotationMd || ''
           window.dispatchEvent(new CustomEvent('status-filetype', { detail: getFileTypeInfo(p.fileType || '').label }))
-          onTitleChange?.(p.title)
+          onTitleChange?.(p.title, pageIdRef.current)
           // 种子 liveContent(大纲/导出依赖);列表已瘦身,活动页内容以编辑器装载为准
-          onContentChange?.(p.contentMd || '')
+          onContentChange?.(p.contentMd || '', pageIdRef.current)
           // 非 md/txt 类型(pdf/代码)强制编辑视图;md/txt 保持阅读优先（重读时保持当前态）。
           // startInEdit（快速草稿）：本次打开直接落编辑态（该标记只对「建完即开」那一次为 true）
           const ft = (p.fileType || 'md').toLowerCase()
@@ -927,7 +956,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           savedTitleRef.current = t
           selfSavedAtRef.current = Date.now() // 标记自写时刻（守卫：随后的广播不回灌）
           setSaving(false)
-          onClearDirty?.()
+          onClearDirty?.(pageIdRef.current)
           // 双链/图谱不入图通道：vault 模式下 knowledge:updateLinks 被 DB-only 白名单拒绝（knowledgeRepo.ts:201），
           // 图谱由主进程随文件落盘的索引重建负责（knowledgeIndex 扫描）
         } else if (res?.conflict) {
@@ -936,7 +965,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           isDirtyRef.current = false
           vaultMtimeRef.current = 0
           setSaving(false)
-          onClearDirty?.()
+          onClearDirty?.(pageIdRef.current)
           loadPageRef.current()
         } else {
           showToast({ type: 'error', message: res?.error || '保存失败，请重试' })
@@ -957,7 +986,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       savedTitleRef.current = t
       selfSavedAtRef.current = Date.now() // 同上：自写时刻守卫
       setSaving(false)
-      onClearDirty?.()
+      onClearDirty?.(pageIdRef.current)
     } catch (e) { console.error(e) }
   }, [])
 
@@ -1069,7 +1098,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     if (content !== savedContentRef.current || title !== savedTitleRef.current) {
       isDirtyRef.current = true
       setSaving(true)
-      onMarkDirty?.()
+      onMarkDirty?.(pageIdRef.current)
       clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => doSave(title, content), s.autoSaveDebounceMs)
     }
@@ -1084,7 +1113,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
       if (e.ctrlKey && e.key === 's') {
         e.preventDefault()
         clearTimeout(saveTimer.current)
-        doSave(titleRef.current, contentRef.current).then(() => { setSaving(false); onClearDirty?.() })
+        doSave(titleRef.current, contentRef.current).then(() => { setSaving(false); onClearDirty?.(pageIdRef.current) })
         return
       }
 
@@ -1196,7 +1225,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
   const applyFileType = useCallback((ext: string, label?: string) => {
     setFileTypeState(ext)
     if (ext !== '' && ext !== 'md' && ext !== 'txt') setPreview(false)
-    onFileTypeChange?.(ext)
+    onFileTypeChange?.(ext, pageIdRef.current)
     window.dispatchEvent(new CustomEvent('status-filetype', { detail: label ?? getFileTypeInfo(ext).label }))
   }, [onFileTypeChange])
 
@@ -1366,7 +1395,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
     const next = applyFmPropRows(vaultPrefixRef.current, propRows)
     vaultPrefixRef.current = next
     setShowProps(false)
-    void doSave(titleRef.current, contentRef.current).then(() => { setSaving(false); onClearDirty?.() })
+    void doSave(titleRef.current, contentRef.current).then(() => { setSaving(false); onClearDirty?.(pageIdRef.current) })
   }
   const setPropAt = (i: number, patch: Partial<FmPropRow>) =>
     setPropRows(rows => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
@@ -2207,7 +2236,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               <Editor
                 language={getFileTypeInfo(fileType).monacoLang}
                 value={content}
-                onChange={v => { const c = v || ''; setContent(c); onContentChange?.(c) }}
+                onChange={v => { const c = v || ''; setContent(c); onContentChange?.(c, pageIdRef.current) }}
                 beforeMount={monaco => bindEditorTheme(monaco)}
                 theme="knowbase-auto"
                 onMount={handleEditorMount}
@@ -2258,7 +2287,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               ref={paneRef}
               doc={paneDoc}
               mode={writingMode}
-              onChange={(_rel, v) => { setContent(v); onContentChange?.(v) }}
+              onChange={(_rel, v) => { setContent(v); onContentChange?.(v, pageIdRef.current) }}
               fontSize={Math.round(s.editorFontSize * zoom)}
               editorOptions={{
                 fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",

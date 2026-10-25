@@ -80,7 +80,7 @@ check('④ 更新路径同样写 fileType（建页与更新口径对齐）', /if
 
 // ⑤ 缓存失效杠杆
 console.log('\n--- ⑤ 索引缓存：bump 后校验点同源 ---')
-check('⑤ schemaVersion 已抬到 6（语义变更须 bump）', /KNOWLEDGE_INDEX_SCHEMA_VERSION = 6/.test(idxSrc))
+check('⑤ schemaVersion 已抬到 7（B-37 收养条件加逐条目存在性对账 = 语义变更须 bump）', /KNOWLEDGE_INDEX_SCHEMA_VERSION = 7/.test(idxSrc))
 check('⑤ 接口声明读同一常量（不是散落字面量）', /schemaVersion:\s*typeof KNOWLEDGE_INDEX_SCHEMA_VERSION/.test(idxSrc))
 check('⑤ 两处返回值读同一常量', (idxSrc.match(/schemaVersion:\s*KNOWLEDGE_INDEX_SCHEMA_VERSION/g) || []).length === 2)
 check('⑤ 缓存校验点读同一常量', /cached\.schemaVersion === KNOWLEDGE_INDEX_SCHEMA_VERSION/.test(idxSrc))

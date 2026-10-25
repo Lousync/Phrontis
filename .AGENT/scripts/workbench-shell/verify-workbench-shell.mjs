@@ -461,8 +461,11 @@ ok(/data-pb-scroll="module"/.test(srcPageBar)
   'F16a 模块条目区自成一个横向滚动容器（data-pb-scroll=module + kb-edge-strip + overflow-x-auto + 弧位 px-2/-ml-2）')
 ok(/relative flex min-w-0 shrink items-end gap-1/.test(srcPageBar),
   'F16b 模块条目区让得出宽度（shrink + min-w-0：行不够时自己缩，不再把后面的槽顶出行外）')
-ok(!!kbSlotCls && !/overflow-x-auto/.test(kbSlotCls) && !/kb-edge-strip/.test(kbSlotCls) && /shrink-0/.test(kbSlotCls),
-  'F16c 知识库槽不再自己滚（滚动与渐隐交给 PageTabStrip 一份实现），且宽度口径不变：shrink-0 + max-w-[50%] = 按内容占宽至多半行 —— 行宽不够时由模块条目区让宽', kbSlotCls)
+ok(!!kbSlotCls && !/overflow-x-auto/.test(kbSlotCls) && !/kb-edge-strip/.test(kbSlotCls)
+  && /min-w-0/.test(kbSlotCls) && !/shrink-0/.test(kbSlotCls) && !/max-w-\[50%\]/.test(kbSlotCls),
+  'F16c 知识库槽不再自己滚（滚动与渐隐交给 PageTabStrip 一份实现）；B-41 宽度口径 = 内容占宽 + min-w-0 可缩（shrink-0 / max-w-[50%] 退役 —— 分屏态「半行的一半」会把激活页签拦腰裁掉），吃紧时与模块条目区按比例分摊', kbSlotCls)
+ok(/min-w-\[104px\] max-w-\[360px\]/.test(srcStrip) && !/max-w-\[220px\] shrink-0/.test(srcStrip),
+  'B41 页签条目可缩模型：内容占宽至多 360px、下限 104px（旧 shrink-0 + 220px 上限把长题名截到 ~8 字，整条有空位也不显全）')
 ok(/overflow-x-clip/.test(srcPageBar),
   'F16d 负向：行容器仍是 overflow-x-clip（行本身绝不能变滚动容器 —— 横向滚动条占盒高会把激活条目从行底顶起，内凹弧还会被纵向裁掉）')
 ok(/useStripScroll/.test(srcStrip) && /StripEdges/.test(srcStrip)

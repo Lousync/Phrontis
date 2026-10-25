@@ -134,6 +134,10 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
     // 外层 relative 只给溢出渐隐定位（F-16，2026-10-13）；宽度由里层滚动容器决定 ——
     // 不带 flex-1：基础尺寸 = 内容宽度，宿主槽（页面条 / 副栏）不够宽时才缩，
     // 缩下来靠里层横滚 + 两侧渐隐 + 激活条目自动滚入视野兜住（够得到、也看得出还能滚）。
+    // B-41（2026-10-25）：条目从「shrink-0 + 上限 220px」改为「内容占宽至多 360px、可缩、下限
+    // 104px」—— 旧模型里单条长题名页签即使整条页签条有大量空位也只显示 ~8 字（上限截断），
+    // 分屏时宿主槽再被砍半就成了「页签被拦腰裁掉」（用户截图的表象）。新模型：宽裕时题名
+    // 尽量显全，吃紧时条目先缩（truncate 省略号），缩到下限才轮到横向滚动兜底。
     // `px-2 -ml-2` 与模块条目区同因：滚动容器会裁掉溢出部分，而激活条目的 8px 内凹弧
     // 画在条目**外侧**，必须给它留位置（否则首尾条目缺一个角），再用负 margin 挪回原位。
     <div className="relative flex min-w-0 items-end gap-1">
@@ -177,7 +181,7 @@ export function PageTabStrip({ owner, items, activeId, itemAttr, onSelect, onClo
               onDragLeave={canDrag ? handleDragLeave : undefined}
               onDrop={canDrag ? (e) => handleDrop(e, it.id) : undefined}
               title={tip}
-              className={`kb-edge-tab group flex max-w-[220px] shrink-0 cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
+              className={`kb-edge-tab group flex min-w-[104px] max-w-[360px] cursor-pointer items-center gap-1.5 px-2.5 text-[12.5px] transition-colors ${
                 isDragged ? 'opacity-40' : ''
               } ${
                 isActive

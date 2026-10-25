@@ -1340,11 +1340,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
         onMigratePageTab?.(legacyOld, newId) // 分屏副栏的页签 id 在 App 收口（pageSplit）
       }
       if (hit) {
-        // 标题对齐（含稳定 id 页）：文件名派生题名的页面改名后索引标题已变，页签别停在旧值
-        const ids = legacyOld ? [hit.id] : allPagesRef.current.filter(p => p.path === relPath).map(p => p.id)
+        // 标题对齐（含稳定 id 页）：稳定 id 页的页签 id 即 hit.id，直接改 openPageInfos。
+        // ★ 不要从 allPagesRef 反查 path→id —— 那份列表在改名瞬间可能还没有这个条目
+        //（散页/刷新时序），filter 落空 = 对齐静默跳过，页签与顶栏停在旧名（实测踩过）。
         setOpenPageInfos(prev => {
           const n = { ...prev }
-          for (const id of ids) if (n[id]) n[id] = { ...n[id], title: hit.title }
+          if (n[hit.id]) n[hit.id] = { ...n[hit.id], title: hit.title }
           return n
         })
       }
@@ -1387,9 +1388,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     })
   }, [])
 
-  const handleTitleChange = useCallback((title: string) => {
-    if (!activePageIdRef.current) return
-    const pageId = activePageIdRef.current
+  // B-42（2026-10-25）：editorPageId = 发起回调的编辑器自己的 pageId。分屏时主/副两个
+  // PageEditor 共用这些 handler，缺省 fallback activePageIdRef 只对「主栏编辑器」成立 ——
+  // 副栏页装载/编辑时标题与类型会被记到主栏激活页头上（页签标题串页，探针实测复现）。
+  const handleTitleChange = useCallback((title: string, editorPageId?: string) => {
+    const pageId = editorPageId || activePageIdRef.current
+    if (!pageId) return
     setAllPages(prev => prev.map(p => p.id === pageId ? { ...p, title } : p))
     setChapterPages(prev => prev.map(p => p.id === pageId ? { ...p, title } : p))
     setOpenPageInfos(prev => {
@@ -1398,9 +1402,9 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
     })
   }, [])
 
-  const handleFileTypeChange = useCallback((fileType: string) => {
-    if (!activePageIdRef.current) return
-    const pageId = activePageIdRef.current
+  const handleFileTypeChange = useCallback((fileType: string, editorPageId?: string) => {
+    const pageId = editorPageId || activePageIdRef.current
+    if (!pageId) return
     setAllPages(prev => prev.map(p => p.id === pageId ? { ...p, fileType } : p))
     setChapterPages(prev => prev.map(p => p.id === pageId ? { ...p, fileType } : p))
     setStarredPages(prev => prev.map(p => p.id === pageId ? { ...p, fileType } : p))
@@ -1408,6 +1412,12 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
       const existing = prev[pageId]
       return { ...prev, [pageId]: { ...existing, fileType } }
     })
+  }, [])
+
+  /** liveContent（大纲/搜索的实时正文）只吃**主栏激活编辑器**的正文：副栏编辑器的正文
+   *  不喂这里（否则分屏时大纲跟着副栏页走，而大纲面板挂的是主栏）。 */
+  const handleLiveContent = useCallback((body: string, editorPageId?: string) => {
+    if (!editorPageId || editorPageId === activePageIdRef.current) setLiveContent(body)
   }, [])
 
   const handleToggleStar = async (pageId: string) => {
@@ -2638,7 +2648,7 @@ export function KnowledgeModule({ sidebarOpen = true, zoom = 1, sidebarWidths = 
                 onUpdate={handleRefresh}
                 onTitleChange={handleTitleChange}
                 onFileTypeChange={handleFileTypeChange}
-                onContentChange={setLiveContent}
+                onContentChange={handleLiveContent}
                 onTagsChange={handleSearchRefresh}
                 onMarkDirty={handleMarkDirty}
                 onClearDirty={handleClearDirty}

@@ -169,7 +169,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
       /* Edge Fluent（2026-09-19）：行底不用 border-b（滚动槽的 overflow 会裁掉负 margin 贴边），
          改为行内 hairline 子元素——激活条目（positioned、DOM 靠后）自然盖住它形成「与内容区同体」；
          items-end 让条目沉底，overflow-x-clip 只拦首尾条目内凹弧的水平外溢、不裁垂直融合。 */
-      className="relative flex h-9 shrink-0 select-none items-end overflow-x-clip bg-[var(--bg-secondary)] px-1.5"
+      className="relative flex h-9 min-w-0 select-none items-end overflow-x-clip bg-[var(--bg-secondary)] px-1.5"
     >
       {/* 2026-10-11（拍板 A2）：页面条底部那道 hairline **已删**。
           原来它承担「页面条 vs 内容区」的分界，但顶栏改为无分隔线（与正文连成一整片）之后，
@@ -275,12 +275,13 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
         {/* 知识库页签组槽：紧跟模块条目从左排起（2026-09-19 反馈：原排在 flex-1 编辑器槽之后，
             页签组被顶到行最右端、贴着右栏，看起来像排错位置）。
             F-16 起本槽**不再自己滚**：滚动 / 渐隐 / 激活滚入视野都在 PageTabStrip 里（那条页签条
-            在副栏分屏里也会 portal 出去，逻辑收在组件内才是一份）；本槽只负责占位与上限。
-            宽度口径保持不变（`shrink-0 max-w-[50%]` = 按内容占宽、至多半行）——**这是有意的优先级**：
-            笔记页签是用户正在处理的东西，行宽不够时让它**优先保住**，由数量无上限的模块条目区去让宽
-            （它已经可滚 + 激活自动归位，少吃一点宽度仍然够得到）。`max-w-[50%]` 是**上限**不是定宽，
-            页签少时按内容占宽，不会白占半行。 */}
-        <div ref={knowledgeSlotRef} data-pb-slot="knowledge" className={`flex min-w-0 shrink-0 max-w-[50%] items-end gap-1 ${hidePages ? 'hidden' : ''}`} />
+            在副栏分屏里也会 portal 出去，逻辑收在组件内才是一份）；本槽只负责占位。
+            B-41（2026-10-25）宽度口径：`shrink-0 max-w-[50%]` 退役，改为「内容占宽 + min-w-0 可缩」
+            —— 旧口径在分屏态把槽再砍半（半行的一半 ≈ 120px），页签条被迫横滚、激活页签被拦腰裁掉
+            （用户截图表象）；页签条目本身已可缩（PageTabStrip B-41），槽跟着可缩即可：
+            宽裕时按内容占宽（题名尽量显全），吃紧时与模块条目区按比例分摊，缩到底再由条内横滚兜底。
+            模块条目区仍然可滚 + 激活自动归位，不会本槽一宽就够不到。 */}
+        <div ref={knowledgeSlotRef} data-pb-slot="knowledge" className={`flex min-w-0 items-end gap-1 ${hidePages ? 'hidden' : ''}`} />
         {/* 主栏编辑器页签组槽：flex-1 让组内横向滚动（组内容器带 overflow-x-auto） */}
         <div ref={editorSlotRef} data-pb-slot="editor" className={`flex min-w-0 flex-1 items-end gap-1 ${hidePages ? 'hidden' : ''}`} />
         {trail && <div className="self-center ml-1 flex shrink-0 items-center gap-0.5">{trail}</div>}
