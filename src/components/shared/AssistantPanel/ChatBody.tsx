@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import { createPortal } from 'react-dom'
 import {
   Menu, Plus, Trash2, Wrench, FileText, ArrowUpRight, ArrowUp, Maximize2,
-  Loader2, Bot, X, Sparkles, Paperclip, Coins, ChevronDown, Check, Cpu, Radar, MessagesSquare, TriangleAlert,
+  Loader2, Bot, X, Sparkles, ChevronDown, Check, Cpu, Radar, MessagesSquare, TriangleAlert,
   RotateCcw, CalendarDays, Star, FolderTree, Zap,
 } from 'lucide-react'
 import { showToast } from '../../../lib/toast'
@@ -10,7 +10,7 @@ import { useSettings } from '../../../lib/SettingsContext'
 import { AiMascotAnchor } from '../AiMascot/AiMascotAnchor'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 import { useInputShell } from './inputShells'
-import { getKnowledgePages, agentUsageGet, llmListProviders, getSemanticStatus, workspaceGetCurrent } from '../../../lib/ipc'
+import { getKnowledgePages, llmListProviders, getSemanticStatus, workspaceGetCurrent } from '../../../lib/ipc'
 import { SlashCommandMenu, buildSlashItems, filterSlashItems, type SlashMenuItem } from '../SlashCommandMenu'
 import { MessageList, fmtTime } from './MessageList'
 import { useAssistantChat } from './useAssistantChat'
@@ -26,7 +26,7 @@ import { registerSelectionAskHost } from '../../../lib/assistantContext'
 import { ScopePane } from '../../../modules/ai-assistant/ScopePane'
 import type { AssistantChatController } from './useAssistantChat'
 import type { ChatSurface } from '../../../lib/chatCommands'
-import type { AiUsageDay, KnowledgePage, AgentSessionInfo } from '../../../types'
+import type { KnowledgePage, AgentSessionInfo } from '../../../types'
 
 /**
  * AI 助手对话体（v3.4.0 批次5）：消息区 + 会话抽屉 + 改动卡 + 输入区的共用 UI。
@@ -158,7 +158,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   }, [perceptionOn])
 
   // ---- 输入区工具浮层（📎 附加文件 / 模型选择 / 消耗查看）：互斥单开，外部点击关闭 ----
-  const [pop, setPop] = useState<'files' | 'scope' | 'writeMode' | 'model' | 'usage' | null>(null)
+  const [pop, setPop] = useState<'files' | 'scope' | 'writeMode' | 'model' | null>(null)
   const inputCardRef = useRef<HTMLDivElement | null>(null)
   const [scopeRootId, setScopeRootId] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -272,15 +272,6 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
       .catch(() => setProviders([]))
   }, [pop])
   const modelLabel = modelId ? modelId.split(':').slice(1).join(':') || modelId : '默认模型'
-
-  // 消耗浮层：今日用量 + 当前会话当日消耗（agentUsageGet 只读）
-  const [usage, setUsage] = useState<AiUsageDay | null>(null)
-  useEffect(() => {
-    if (pop !== 'usage') return
-    const key = (() => { const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` })()
-    agentUsageGet().then(u => setUsage(u.days?.[key] ?? null)).catch(() => setUsage(null))
-  }, [pop])
-  const sessionUsage = activeId ? usage?.sessions?.[activeId] : null
 
   // ---- / 弹层派生态：输入为「/ + 无空格词」时弹，带空格/换行即视为正文 ----
   const [slashActive, setSlashActive] = useState(0)
@@ -648,7 +639,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       // 方向键移动光标后重算 @ 检索词（↑↓ 被浮层拦下时不会走到这里）
                       if (atPosRef.current !== null) syncAtQuery(e.currentTarget.value, e.currentTarget.selectionStart)
                     }}
-                    rows={isNarrow ? 2 : 3}
+                    rows={isNarrow ? 2 : variant === 'page' ? 4 : 3}
                     /* 生图入口就是对话本身（决策：去掉大按钮，走斜杠指令）⇒ 占位文字里点一句，
                        否则用户没有别的地方知道这个能力存在（弹层只有敲了 `/` 才出现） */
                     placeholder={scheduleMode ? '对日程助手说…（/ 唤起指令 · Enter 发送）' : '问问任何事…（要画图就敲 /生图 后面跟描述 · @ 引用笔记 / Enter 发送）'}
@@ -660,8 +651,13 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                 </div>
 
                 {/* 工具行：行首插槽（侧栏感知开关，B-12）→ 感知开关（docked/page 态，B-12 2026-09-22 二次拍板同位）
-                    → 📎 附加文件 / 对话模型 / 消耗查看 —— 发送钮右置 */}
-                <div className="relative flex items-center gap-0.5 mt-1">
+                    → 作用域 / 写入模式 / 对话模型 —— 发送钮右置。
+                    2026-10-25 反馈：删 📎 附件与「消耗」两个入口 —— 附件与作用域语义重叠（留作用域，
+                    文件仍可经输入框 @ 引用附上），消耗入口删除（用量看右栏扩大页），输入栏腾出空间。 */}
+                {/* @container 量的是本行自身宽度（与宿主 variant 无关）：≤320px 时模型名隐为图标——
+                    工作台侧栏可拖窄，variant 驱动的 isNarrow 感知不到，2026-10-25 反馈按钮被截。
+                    套路与 WorkbenchLeftPanel 顶栏 @max-[170px] 一致 */}
+                <div className="relative flex items-center gap-0.5 mt-1 @container">
                   {inputBarLeft}
                   {variant !== 'sidebar' && !scheduleMode && (
                     <PerceptionToggle on={perceptionOn} onToggle={togglePerception} />
@@ -695,20 +691,6 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   </>)}
                   {!scheduleMode && (<>
                   <button
-                    onClick={() => setPop(p => (p === 'files' ? null : 'files'))}
-                    title="添加文件作为上下文（模型按需读取全文）"
-                    data-wb="aiAttachBtn"
-                    className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors ${
-                      pop === 'files' || attachedFiles.length > 0
-                        ? 'bg-[var(--bg-selected)] text-[var(--accent)]'
-                        : 'text-[var(--text-muted)] hover:bg-[var(--bg-selected)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    <Paperclip size={12} />
-                    {!isNarrow && <span className="leading-none">附件</span>}
-                    {attachedFiles.length > 0 && <span className="leading-none">{attachedFiles.length}</span>}
-                  </button>
-                  <button
                     onClick={() => setPop(p => (p === 'model' ? null : 'model'))}
                     title="对话模型"
                     data-wb="aiModelBtn"
@@ -717,7 +699,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                     }`}
                   >
                     <Cpu size={12} />
-                    <span className={`leading-none ${isNarrow ? 'max-w-[80px] truncate' : 'max-w-[120px] truncate'}`}>{modelLabel}{effort !== 'off' ? ` · ${effort}` : ''}</span>
+                    <span className={`leading-none ${isNarrow ? 'max-w-[80px] truncate' : 'max-w-[120px] truncate'} @max-[320px]:hidden`}>{modelLabel}{effort !== 'off' ? ` · ${effort}` : ''}</span>
                     <ChevronDown size={10} />
                   </button>
                   {/* F-12：上下文占用指示（与 AI 教学同口径，档位设置 ctxUsageDetail / 窗口 ctxWindow 共用） */}
@@ -733,17 +715,6 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       )}
                     </span>
                   )}
-                  <button
-                    onClick={() => setPop(p => (p === 'usage' ? null : 'usage'))}
-                    title="Token 消耗"
-                    data-wb="aiUsageBtn"
-                    className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors ${
-                      pop === 'usage' ? 'bg-[var(--bg-selected)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-selected)] hover:text-[var(--text-primary)]'
-                    }`}
-                  >
-                    <Coins size={12} />
-                    {!isNarrow && <span className="leading-none">消耗</span>}
-                  </button>
                   </>)}
                   <span className="flex-1" />
                   {pending ? (
@@ -910,38 +881,6 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   </div>
                 )}
 
-                {/* ── 消耗浮层 ── */}
-                {pop === 'usage' && (
-                  <div data-wb="aiUsagePop" className="absolute bottom-full left-0 mb-2 w-[230px] max-w-full rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl overflow-hidden z-20">
-                    <div className="border-b border-[var(--border-color)] px-2.5 py-2">
-                      <div className="text-[10.5px] text-[var(--text-muted)]">今日消耗</div>
-                      <div className="mt-0.5 text-[15px] font-semibold text-[var(--text-primary)]">
-                        {usage ? (usage.in + usage.out).toLocaleString() : '0'}
-                        <span className="ml-1 text-[10px] font-normal text-[var(--text-muted)]">tokens</span>
-                      </div>
-                      {usage && (
-                        <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">
-                          输入 {usage.in.toLocaleString()} · 输出 {usage.out.toLocaleString()} · {usage.calls} 次调用
-                          {usage.cache > 0 && ` · 缓存命中 ${usage.cache.toLocaleString()}`}
-                        </div>
-                      )}
-                    </div>
-                    <div className="px-2.5 py-2">
-                      <div className="text-[10.5px] text-[var(--text-muted)]">当前会话（今日）</div>
-                      {sessionUsage ? (
-                        <div className="mt-0.5 text-[12px] text-[var(--text-primary)]">
-                          {(sessionUsage.in + sessionUsage.out).toLocaleString()}
-                          <span className="ml-1 text-[10px] text-[var(--text-muted)]">tokens（输入 {sessionUsage.in.toLocaleString()} / 输出 {sessionUsage.out.toLocaleString()}）</span>
-                        </div>
-                      ) : (
-                        <div className="mt-0.5 text-[11px] text-[var(--text-muted)]">本会话今日还没有消耗</div>
-                      )}
-                    </div>
-                    <div className="border-t border-[var(--border-color)] px-2.5 py-1.5 text-[9.5px] text-[var(--text-muted)]">
-                      按日落盘近 30 天 · 右栏扩大页可看会话排行
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </>

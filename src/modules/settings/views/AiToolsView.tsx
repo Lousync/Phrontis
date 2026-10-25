@@ -397,6 +397,7 @@ function ChatTab({ mascots, mascotDiag }: {
 function AgentLoopGroup() {
   const { s, update } = useSettings()
   const agentMaxRounds = s.agentMaxRounds ?? 16
+  const agentMaxSessionWrites = s.agentMaxSessionWrites ?? 20
   const agentRunTokenBudget = s.agentRunTokenBudget ?? 500000
   const agentContextBudgetTokens = s.agentContextBudgetTokens ?? 24000
   const agentCompressionEnabled = s.agentCompressionEnabled !== false
@@ -412,6 +413,12 @@ function AgentLoopGroup() {
           hint="达到上限后自动总结收场，不丢弃已经拿到的信息。">
           <input type="number" min={2} max={64} value={String(agentMaxRounds)}
             onChange={e => { void update('agentMaxRounds', Math.min(64, Math.max(2, Math.floor(Number(e.target.value) || 16)))) }}
+            className={numCls} />
+        </Row>
+        <Row label="单条消息写入上限"
+          hint="一条消息触发的运行里，写入类工具（建/改笔记、任务等）最多执行的次数；超出后 AI 转为只读并总结。下一条消息重新计数，无需等待恢复。">
+          <input type="number" min={1} max={99} value={String(agentMaxSessionWrites)}
+            onChange={e => { void update('agentMaxSessionWrites', Math.min(99, Math.max(1, Math.floor(Number(e.target.value) || 20)))) }}
             className={numCls} />
         </Row>
         <Row label="单次 token 预算"

@@ -408,7 +408,7 @@ export function friendlyReason(it: Interruption, detail?: InterruptionDetail): s
     case 'AGENT_ROUND_CAP': return `达到本次任务轮数上限（${r?.round ?? '?'} 轮），已就地总结`
     case 'AGENT_TOKEN_BUDGET': return `达到本次任务 token 上限（${r?.runTokens ?? '?'}），已就地总结`
     case 'AGENT_SUMMARY_FAILED': return '预算已耗尽，收场总结也没跑成'
-    case 'AGENT_WRITE_CAP': return '已达本次会话写入上限，新的写入被拦下'
+    case 'AGENT_WRITE_CAP': return '已达本条消息的写入上限，新的写入被拦下（下一条消息重新计数）'
     case 'LLM_AUTH': return 'API Key 无效或已过期'
     case 'LLM_QUOTA_EXHAUSTED': return '账号额度已用尽'
     case 'LLM_RATE_LIMIT': return '模型服务限频，稍后或换模型'

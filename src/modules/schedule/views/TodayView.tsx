@@ -52,6 +52,42 @@ export function TodayView({ today, tasks, tags, workflows, focusSignal, onOpenTa
   const scheduled = todayTasks.filter(t => t.scheduledStart != null || t.time)
   const estimate = todayTasks.reduce((sum, t) => sum + (t.estimateMin ?? 0), 0)
 
+  // 退场（v3.13.0 反馈 F-1）：勾选完成的条目在本视图原位保留一拍，播 .kb-item-out
+  // （划线 + 右移淡出，约 180ms）后移除 —— 「完成」要看得见，而不是无声消失。
+  // 检测 = 上次渲染仍在 pending、本次消失且已 done 的条目；这里故意不用 effect cleanup
+  // 撤定时器：广播刷新会让本 effect 频繁重跑，cleanup 会把进行中的退场计时清掉，
+  // 幽灵行就永远留住了。定时器自会到期自摘。
+  const [exiting, setExiting] = useState<Map<string, ScheduleTodo>>(new Map())
+  const prevPendingRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const currentIds = new Set(pending.map(t => t.id))
+    const justDone: ScheduleTodo[] = []
+    prevPendingRef.current.forEach(id => {
+      if (!currentIds.has(id)) {
+        const t = tasks.find(x => x.id === id)
+        if (t && t.status === 'done') justDone.push(t)
+      }
+    })
+    prevPendingRef.current = currentIds
+    if (justDone.length === 0) return
+    setExiting(prev => {
+      const next = new Map(prev)
+      justDone.forEach(t => next.set(t.id, t))
+      return next
+    })
+    window.setTimeout(() => {
+      setExiting(prev => {
+        const next = new Map(prev)
+        justDone.forEach(t => next.delete(t.id))
+        return next
+      })
+    }, 300)
+  }, [tasks, pending])
+  const exitRows = [...exiting.values()]
+  const exitOverdue = exitRows.filter(t => !!t.date && t.date < today)
+  const exitToday = exitRows.filter(t => t.date === today)
+  const exitInbox = exitRows.filter(t => !t.date)
+
   async function addTask() {
     const raw = input.trim()
     if (!raw || busy) return
@@ -102,8 +138,8 @@ export function TodayView({ today, tasks, tags, workflows, focusSignal, onOpenTa
     )
   }
 
-  function group(title: string, rows: ScheduleTodo[], tone = 'text-[var(--text-muted)]') {
-    if (rows.length === 0) return null
+  function group(title: string, rows: ScheduleTodo[], tone = 'text-[var(--text-muted)]', exitRows: ScheduleTodo[] = []) {
+    if (rows.length === 0 && exitRows.length === 0) return null
     return (
       <section>
         <h3 className={`mb-1.5 text-[11px] font-medium ${tone}`}>{title} · {rows.length}</h3>
@@ -117,6 +153,17 @@ export function TodayView({ today, tasks, tags, workflows, focusSignal, onOpenTa
               onOpen={onOpenTask}
               onToggle={onToggle}
               onDelete={onDelete}
+            />
+          ))}
+          {exitRows.map(t => (
+            <ScheduleTaskRow
+              key={t.id}
+              task={t}
+              tag={t.tagId ? tagById.get(t.tagId) : null}
+              hasWorkflow={workflowTaskIds.has(t.id)}
+              onOpen={onOpenTask}
+              onToggle={onToggle}
+              exiting
             />
           ))}
         </div>
@@ -161,10 +208,10 @@ export function TodayView({ today, tasks, tags, workflows, focusSignal, onOpenTa
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden px-5 pb-4 xl:grid-cols-[minmax(0,1fr)_260px]">
         <div className="min-h-0 overflow-y-auto pr-1">
           <div className="space-y-4">
-            {group('逾期', overdue, 'text-[var(--danger)]')}
-            {group('今天', todayTasks, 'text-[var(--accent)]')}
-            {group('收集箱', inbox)}
-            {overdue.length + todayTasks.length + inbox.length === 0 && (
+            {group('逾期', overdue, 'text-[var(--danger)]', exitOverdue)}
+            {group('今天', todayTasks, 'text-[var(--accent)]', exitToday)}
+            {group('收集箱', inbox, 'text-[var(--text-muted)]', exitInbox)}
+            {overdue.length + todayTasks.length + inbox.length + exitRows.length === 0 && (
               <div className="flex h-48 flex-col items-center justify-center gap-1.5 text-center text-[var(--text-disabled)]">
                 <CalendarDays size={22} strokeWidth={1.5} />
                 <p className="text-[12px]">今天没有待办</p>
