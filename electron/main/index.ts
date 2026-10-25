@@ -427,6 +427,10 @@ function coversWorkArea(win: BrowserWindow): boolean {
 }
 function isWinMaximized(win?: BrowserWindow | null): boolean {
   if (!win || win.isDestroyed()) return false
+  // Linux（2026-10-25）：maximize 由 WM 真接管，isMaximized() 可靠；「覆盖工作区」几何兜底
+  // 只治 Windows 透明无边框窗口的 isMaximized 失真，Linux 保留反而把「拖大的普通窗口」
+  // 误判成最大化 —— 点最大化按钮变成还原、侧栏开合被跳过、边缘热区挂到普通窗口上。
+  if (process.platform === 'linux') return win.isMaximized()
   return win.isMaximized() || coversWorkArea(win)
 }
 function registerWindowHandlers(): void {
@@ -455,11 +459,17 @@ function registerWindowHandlers(): void {
   let maxLastObserved: boolean | null = null
   let maxStableTicks = 0
 
+  // 边缘拖拽收尾巩固帧的代际守卫（Linux）：任何新的窗口几何写入（新拖拽 / 最大化 / 全屏 / 侧栏动画）
+  // 都递增代数，让未落地的巩固 setTimeout 失效 —— 否则 120ms 后它会把已经变化的窗口拉回旧目标
+  let edgeFinalizeGen = 0
+  const bumpEdgeFinalize = (): void => { edgeFinalizeGen++ }
+
   const sendMaxState = (maxed: boolean): void => {
     const win = mainWindow
     if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return
     if (maxed === lastMaxSent) return
     lastMaxSent = maxed
+    console.log(`[Window] maxState -> ${maxed}`)
     win.webContents.send('window:maximizeChange', maxed)
   }
 
@@ -533,7 +543,12 @@ function registerWindowHandlers(): void {
   ipcMain.handle('window:maximize', () => {
     const win = mainWindow
     if (!win || win.isDestroyed()) return
+    bumpEdgeFinalize()
+    // 防御：若边缘跟随循环仍在跑（mouseup 丢失、窗口外松手等），强停后再切最大化，
+    // 否则 maximize() 与循环每帧互写 → 恶性闪烁
+    stopEdgeDrag()
     const nextMax = !isWinMaximized(win)
+    console.log(`[Window] maxToggle nextMax=${nextMax} isMaximized=${win.isMaximized()} bounds=${JSON.stringify(win.getBounds())}`)
     if (!nextMax) {
       // 未进最大化态的透明无边框窗口，unmaximize()/restore() 都可能无效 → 回落到记录的原始 bounds
       if (win.isMaximized()) win.unmaximize()
@@ -557,6 +572,8 @@ function registerWindowHandlers(): void {
   ipcMain.handle('window:set-fullscreen', (_e, flag: boolean) => {
     const win = mainWindow
     if (!win || win.isDestroyed()) return
+    bumpEdgeFinalize()
+    stopEdgeDrag()
     if (flag && !win.isFullScreen()) {
       // 用 isWinMaximized 而不是裸 isMaximized：透明无边框窗口的贴满态可能不进 OS 最大化
       preFsMaximized = isWinMaximized(win)
@@ -617,6 +634,8 @@ function registerWindowHandlers(): void {
     if (!win || win.isDestroyed() || typeof width !== 'number' || !Number.isFinite(width)) {
       return { applied: false }
     }
+    bumpEdgeFinalize()
+    stopEdgeDrag()
     // 贴满/最大化（isWinMaximized = OS maximize ∪ 覆盖工作区——无边框窗口 isMaximized() 不可靠）
     // 时窗口由用户管理，侧栏开合不改窗口尺寸。2026-09-08 实锤：裸 isMaximized() 漏判贴满态，
     // 最大化收侧栏把窗口一起缩了。
@@ -664,7 +683,7 @@ function registerWindowHandlers(): void {
   // 无埋窗口在最大化态由 OS 接管，原生 resize 热区不响应——渲染层在四边/四角渲染透明热区，
   // mousedown 经此 IPC 交主进程接管：unmaximize → 按恢复几何（preMaxBounds）锚定对边 →
   // 轮询光标实时 setBounds（v2 贴鼠标）。edge='move' 为顶栏拖拽恢复模式（比例映射 + 跟随移动）。
-  let edgeDrag: { edge: string; anchor: Electron.Rectangle; p0: Electron.Point; timer: ReturnType<typeof setInterval> | null } | null = null
+  let edgeDrag: { edge: string; anchor: Electron.Rectangle; p0: Electron.Point; timer: ReturnType<typeof setInterval> | null; lastRect: Electron.Rectangle | null } | null = null
   const MINW = 900, MINH = 600
   const stopEdgeDrag = (): void => {
     if (edgeDrag?.timer) clearInterval(edgeDrag.timer)
@@ -698,11 +717,11 @@ function registerWindowHandlers(): void {
     if (!win || win.isDestroyed() || typeof edge !== 'string' || !/^(top|bottom|left|right|top-left|top-right|bottom-left|bottom-right|move)$/.test(edge)) {
       return { ok: false }
     }
+    bumpEdgeFinalize()
     stopEdgeDrag()
     const cur = win.getBounds()
     const p0 = screen.getCursorScreenPoint()
-    // 真最大化态先退出（透明无埋窗口的几何兜底型 isMaximized=false，直接由下方 setBounds 覆盖）
-    if (win.isMaximized()) win.unmaximize()
+    console.log(`[Window] edgeStart edge=${edge} isMaximized=${win.isMaximized()} bounds=${JSON.stringify(cur)} cursor=${JSON.stringify(p0)}`)
     let anchor: Electron.Rectangle
     if (edge === 'move') {
       // 顶栏拖拽恢复：水平方向按光标在最大化宽度中的比例映射（Chrome 同款），垂直方向标题栏贴光标下 18px
@@ -715,26 +734,57 @@ function registerWindowHandlers(): void {
     } else {
       anchor = edgeRectFromCursor(edge, edgeRestoreRef(cur), p0)
     }
+    if (win.isMaximized()) {
+      // Linux（X11/XWayland，2026-10-25 实测）：unmaximize() 异步落定（约 30-40ms），且 Mutter 以
+      // 「客户端在 maximized 态最后一次 setBounds 的几何」为 unmaximize 恢复目标。旧顺序（先 unmaximize
+      // 再 setBounds）会让 Mutter 的迟到恢复插进应用的 setBounds 流 —— 窗口先跳目标、再被恢复覆盖、
+      // 再被跟随循环写回，几何三连跳。正确顺序：先把恢复目标钉成 anchor 再 unmaximize，全程只跳一次。
+      // Windows 透明无边框窗口常不进真最大化态（unmaximize 可能无效），维持旧顺序靠 setBounds 覆盖。
+      if (process.platform === 'linux') win.setBounds(anchor)
+      win.unmaximize()
+    }
     win.setBounds(anchor)
     // 从最大化拖边缘 = 目标还原态：先发直角/留白，再等 setBounds 落定后校正
     sendMaxState(false)
     scheduleMaxSync(false)
-    edgeDrag = { edge, anchor, p0, timer: null }
+    edgeDrag = { edge, anchor, p0, timer: null, lastRect: anchor }
     // 跟随循环：光标轮询（DIP 一致）实时 setBounds；mouseup（渲染层）/ 窗口失焦兜底收尾
     edgeDrag.timer = setInterval(() => {
       const w = mainWindow
-      if (!w || w.isDestroyed()) { stopEdgeDrag(); return }
+      const drag = edgeDrag
+      if (!drag || !w || w.isDestroyed()) { stopEdgeDrag(); return }
       const c = screen.getCursorScreenPoint()
-      if (edgeDrag?.edge === 'move') {
-        const a = edgeDrag.anchor
-        w.setBounds({ x: a.x + (c.x - p0.x), y: a.y + (c.y - p0.y), width: a.width, height: a.height })
+      if (drag.edge === 'move') {
+        const a = drag.anchor
+        const r = { x: a.x + (c.x - p0.x), y: a.y + (c.y - p0.y), width: a.width, height: a.height }
+        w.setBounds(r)
+        drag.lastRect = r
       } else {
-        w.setBounds(edgeRectFromCursor(edge, edgeDrag!.anchor, c))
+        const r = edgeRectFromCursor(drag.edge, drag.anchor, c)
+        w.setBounds(r)
+        drag.lastRect = r
       }
     }, 16)
     return { ok: true }
   })
-  ipcMain.handle('window:edgeResizeEnd', () => { stopEdgeDrag(); return { ok: true } })
+  ipcMain.handle('window:edgeResizeEnd', () => {
+    const rect = edgeDrag?.lastRect ?? null
+    console.log(`[Window] edgeEnd target=${JSON.stringify(rect)} bounds=${JSON.stringify(mainWindow?.getBounds() ?? null)}`)
+    stopEdgeDrag()
+    if (rect && process.platform === 'linux') {
+      // Linux（XWayland）：Configure 请求异步排队，跟随循环停止后 Mutter 仍可能应用积压的
+      // 迟到一帧（实测：最终几何回退一帧位移）。延迟 120ms 巩固最后目标一次；代际守卫保证
+      // 期间发生新拖拽 / 最大化 / 全屏 / 侧栏动画时不抢写。
+      const gen = edgeFinalizeGen
+      setTimeout(() => {
+        const w = mainWindow
+        if (gen !== edgeFinalizeGen || edgeDrag || !w || w.isDestroyed()) return
+        if (w.isMaximized() || w.isFullScreen()) return
+        w.setBounds(rect)
+      }, 120)
+    }
+    return { ok: true }
+  })
 
   // 窗口置顶（锁定）
   ipcMain.handle('window:setAlwaysOnTop', (_e, onTop: boolean) => {
@@ -745,10 +795,16 @@ function registerWindowHandlers(): void {
   ipcMain.handle('window:reload', () => { mainWindow?.webContents.reload() })
 
   // 事件只登记轮询：事件触发时窗口态往往还没落定，同步读会读到旧值（旧实现就是这么反的）
-  mainWindow?.on('maximize', () => scheduleMaxSync())
-  mainWindow?.on('unmaximize', () => scheduleMaxSync())
+  const diagWinEvt = (name: string): void => {
+    const w = mainWindow
+    if (!w || w.isDestroyed()) return
+    // 只记低频事件；resize/move 拖拽期间每 16ms 一条会刷屏，不入日志
+    console.log(`[Window] evt ${name} bounds=${JSON.stringify(w.getBounds())} isMax=${w.isMaximized()}`)
+  }
+  mainWindow?.on('maximize', () => { diagWinEvt('maximize'); scheduleMaxSync() })
+  mainWindow?.on('unmaximize', () => { diagWinEvt('unmaximize'); scheduleMaxSync() })
   mainWindow?.on('closed', () => { stopEdgeDrag(); stopMaxSync() })
-  mainWindow?.on('blur', stopEdgeDrag) // 拖拽中失焦（Alt-Tab 等）兜底收尾，防跟随循环悬挂
+  mainWindow?.on('blur', () => { console.log('[Window] evt blur'); stopEdgeDrag() }) // 拖拽中失焦（Alt-Tab 等）兜底收尾，防跟随循环悬挂
   // 几何兜底路径（透明无边框窗口不进最大化态）依赖 bounds 变化后重估，故 resize/move 也登记
   mainWindow?.on('resize', () => scheduleMaxSync())
   mainWindow?.on('move', () => scheduleMaxSync())
@@ -1094,7 +1150,11 @@ app.whenReady().then(async () => {
       getDayPanelShortcuts: () => dayPanelShortcutState(),
     })
   }
-  registerWindowHandlers()
+  // ★ registerWindowHandlers 必须在 createWindow **之后**（2026-10-25 实锤）：
+  //   它内部向 mainWindow 挂 maximize/unmaximize/resize/move/blur/closed 事件
+  //   （scheduleMaxSync 轮询登记 + 失焦停拖拽兜底），早于此调用时 mainWindow 还是
+  //   null，`?.` 全部静默跳过 —— 事件路径从未生效，blur 兜底形同虚设。
+  //   其余 ipcMain.handle 与窗口创建无时序依赖，一并后移无影响。
   registerRepoConfigHandlers()
   registerEntryHandlers()
   registerTagHandlers()
@@ -1250,6 +1310,9 @@ app.whenReady().then(async () => {
   }
 
   createWindow()
+
+  // 窗口 IPC + 窗口事件挂接（必须晚于 createWindow，见上方注释）
+  registerWindowHandlers()
 
   // 远程监督：每日汇总定时器 + 免打扰补发
   startSuperviseScheduler()
