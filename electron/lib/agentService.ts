@@ -51,7 +51,8 @@ import { recordAiUsage, usageKeyOf, recordSessionFileChange, getAiUsageData, get
 import { estimateCost } from './modelPricing'
 import { vaultTodosAll } from './kbStore/scheduleVaultRepo'
 import { intelItemsAll, intelReadMeta, intelPoolStats } from './intel/intelStore'
-import { SOURCE_META } from '../../src/lib/intelPure'
+import { SECTION_META } from '../../src/lib/intelPure'
+import type { IntelSection } from '../../src/types'
 import { computeLaneUnread, deriveLaneStatus } from './sideLaneMeta'
 import { buildScopeManifest } from './aiAssistantScope'
 import { getPlan, applyPlan, rejectPlan, rollbackTask, listTasks } from './aiAssistantPlan'
@@ -707,7 +708,7 @@ const INTEL_TOOL_NAMES = [
 
 /** 情报助手人设/规则（逐字稳定 → 进 system，命中 prompt cache 前缀；语义要点见方案 §7.2） */
 const INTEL_PERSONA = [
-  '\n\n【情报助手】你是 Phrontis 的「情报助手」——只管情报池的查询、筛选与推荐，不处理日程、知识库、记账等其它事务。规则：',
+  '\n\n【情报助手】你是 Phrontis 的「情报助手」——只管情报池的查询、筛选与推荐（池覆盖科技 / 时政国内 / 国际 / 财经四个版面），不处理日程、知识库、记账等其它事务。规则：',
   '1. 只使用情报相关工具；其它模块的工具不可用，也不要尝试。',
   '2. 【情报数据】快照给出了当前日期与池子概况，一切以它为准——不凭印象编造条目；池内没有就直说没有。',
   // 推荐（写动作 → 左栏结果集）
@@ -733,7 +734,8 @@ function buildIntelInjection(): string {
   if (pool.length === 0) {
     return `\n\n【情报数据（本轮快照）】\n现在：${ymd(now)} ${weekdayZh(now)} ${hhmm}\n池：空（还没有抓取过任何情报；用户在情报模块点「刷新」后即有数据，本轮请如实告知池子为空）`
   }
-  const srcLine = stats.perSource.map(([k, n]) => `${SOURCE_META[k]?.label ?? k} ${n}`).join(' · ')
+  // v2：概况按版面统计（四版面一行说完；源级细节模型可 intel.query 查）
+  const secLine = stats.perSection.map(([k, n]) => `${SECTION_META[k as IntelSection]?.label ?? k} ${n}`).join(' · ')
   const top = pool.slice(0, 30).map((it) => {
     const sum = (it.summary || '').slice(0, 60)
     return `— [${it.source}|${it.score}] ${it.title}${sum ? ` — ${sum}` : ''}（id:${it.id}${it.fav ? ' · 已收藏' : ''}）`
@@ -747,7 +749,7 @@ function buildIntelInjection(): string {
   return [
     `\n\n【情报数据（本轮快照）】`,
     `现在：${ymd(now)} ${weekdayZh(now)} ${hhmm}`,
-    `池：共 ${stats.total} 条（${srcLine}；收藏 ${stats.fav}）`,
+    `池：共 ${stats.total} 条（${secLine}；收藏 ${stats.fav}）`,
     `按质量分前 30：`,
     top,
     rec + filter,

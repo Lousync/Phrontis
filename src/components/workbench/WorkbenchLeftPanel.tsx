@@ -290,7 +290,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
   }
 
   return (
-    <div data-wb="leftPanel" className="kb-theme-surface-translucent flex h-full flex-col">
+    <div data-wb="leftPanel" className="@container kb-theme-surface-translucent flex h-full flex-col">
       {/* 表面用半透明档（看板方案 §5 反馈 9）：外壳垫底的主题特效画布透出来；
           渐变图刻意不要 —— --bg-gradient 约 0.92 不透明度会把粒子盖没。 */}
       {/* ---- 树模式：仓库顶层目录（不含 .knowbase）+ 根散文件 ----
@@ -480,11 +480,11 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                     onClick={() => onBookmarkClick(b.key)}
                     className={`${itemCls} ${isActive ? 'bg-[var(--bg-hover)] font-medium' : 'hover:bg-[var(--bg-hover)]'}`}
                   >
-                    {/* 图标底块 + 同色文字（原型 v15 c-* 配色） */}
+                    {/* 图标底块 + 同色文字（原型 v15 c-* 配色）；面板拖窄到 ≤170px 时文字整体隐去只留图标（容器查询，2026-10-25 反馈） */}
                     <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md" style={{ background: c.bg, color: c.fg }}>
                       {BOOKMARK_ICONS[b.key](13)}
                     </span>
-                    <span style={{ color: c.fg }}>{b.label}</span>
+                    <span className="min-w-0 flex-1 truncate @max-[170px]:hidden" style={{ color: c.fg }}>{b.label}</span>
                   </button>
                 )
               })}
@@ -496,7 +496,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                   className={`${itemCls} text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]`}
                 >
                   <FileText size={14} />
-                  {p.label}
+                  <span className="min-w-0 flex-1 truncate @max-[170px]:hidden">{p.label}</span>
                 </button>
               ))}
             </div>

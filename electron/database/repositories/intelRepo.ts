@@ -2,8 +2,11 @@ import { ipcMain } from 'electron'
 import {
   intelItemsAll, intelReadMeta, intelRefresh, intelToggleFav,
   intelGetArticle, intelSetAiRec, intelClearAiRec, intelSetAiFilter, intelSaveAsNote,
+  intelTranslateItems,
+  intelListCustomSources, intelAddCustomSource, intelRemoveCustomSource, intelToggleCustomSource,
 } from '../../lib/intel/intelStore'
-import type { IntelAiRec, IntelItem, IntelMeta } from '../../../src/types'
+import { INTEL_SOURCE_KEYS } from '../../../src/lib/intelPure'
+import type { IntelAiRec, IntelItem, IntelMeta, IntelSourceKey } from '../../../src/types'
 
 /**
  * 情报模块 IPC（v3.12.0，docs/intel-module-plan.md §5）。
@@ -18,8 +21,38 @@ export function registerIntelHandlers(deps: { getSettingValue: (key: string) => 
     return { items, meta } satisfies { items: IntelItem[]; meta: IntelMeta }
   })
 
-  ipcMain.handle('intel:refresh', async () => {
-    return await intelRefresh(deps.getSettingValue)
+  ipcMain.handle('intel:refresh', async (_e, source?: string) => {
+    // 单源刷新（2026-10-25）：source 为源 key 或 custom:<id> 时只抓该源；空/非法值 = 全源
+    const raw = typeof source === 'string' && source.trim() ? source.trim() : ''
+    const only = raw.startsWith('custom:') || INTEL_SOURCE_KEYS.includes(raw as IntelSourceKey) ? raw : undefined
+    return await intelRefresh(deps.getSettingValue, only)
+  })
+
+  // ===== 自定义 RSS 源（v2，D12）=====
+
+  ipcMain.handle('intel:listCustomSources', () => intelListCustomSources())
+
+  ipcMain.handle('intel:addCustomSource', (_e, d: { name?: string; url?: string; section?: string }) => {
+    const section = d?.section === 'domestic' || d?.section === 'world' || d?.section === 'finance' ? d.section : 'tech'
+    return intelAddCustomSource({ name: String(d?.name ?? ''), url: String(d?.url ?? ''), section })
+  })
+
+  ipcMain.handle('intel:removeCustomSource', (_e, id: string) => {
+    if (typeof id !== 'string' || !id.trim()) return false
+    return intelRemoveCustomSource(id)
+  })
+
+  ipcMain.handle('intel:toggleCustomSource', (_e, id: string) => {
+    if (typeof id !== 'string' || !id.trim()) return null
+    return intelToggleCustomSource(id)
+  })
+
+  // 卡片英文自动翻译（intel-translate-plan §4.2）：await 全流程，译文经广播合并回列表
+  ipcMain.handle('intel:translate', async (_e, ids: unknown) => {
+    const list = Array.isArray(ids)
+      ? ids.filter((x): x is string => typeof x === 'string' && !!x).slice(0, 200)
+      : []
+    return await intelTranslateItems(deps.getSettingValue, list)
   })
 
   ipcMain.handle('intel:toggleFav', (_e, id: string) => {

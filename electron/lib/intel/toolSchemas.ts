@@ -13,7 +13,8 @@ export const INTEL_QUERY_SCHEMA: ToolJsonSchema = {
   type: 'object',
   properties: {
     q: { type: 'string', description: '关键词，标题+摘要匹配' },
-    source: { type: 'string', description: '源 key：github/hn/arxiv/openalex/weekly/hf/labs/qbitai' },
+    source: { type: 'string', description: '源 key，如 github/hn/arxiv/qbitai/people_politics/wallstcn/custom:xx' },
+    section: { type: 'string', description: '版面：tech/domestic/world/finance' },
     kind: { type: 'string', description: '类型：repo/news/paper/weekly/blog' },
     limit: { type: 'number', description: '上限，默认 20' },
   },

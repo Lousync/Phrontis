@@ -25,6 +25,7 @@ export async function fetchHf(limit: number, hfBase = 'https://huggingface.co'):
     const td = t ? new Date(t) : null
     return intelDraft({
       source: 'hf',
+    section: 'tech',
       kind: 'paper',
       title,
       url: `${base}/papers/${pid}`,

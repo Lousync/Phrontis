@@ -1,4 +1,4 @@
-import type { IntelItem, IntelKind, IntelSourceKey } from '../types'
+import type { IntelItem, IntelKind, IntelSection, IntelSourceKey } from '../types'
 
 /**
  * 情报模块纯函数（v3.12.0，docs/intel-module-plan.md §4.2）。
@@ -15,6 +15,8 @@ import type { IntelItem, IntelKind, IntelSourceKey } from '../types'
 export interface IntelSourceMeta {
   label: string
   kind: IntelKind
+  /** 版面（v2）：侧栏分组 + 头条视图分区 + 打分分化都用它 */
+  section: IntelSection
   /** 源权重（打分 30 分段内的归一分母 = 权重最大值） */
   weight: number
   /** 侧栏 / 徽标色（对齐原型 feed-module-proto 的 --src-*） */
@@ -22,22 +24,44 @@ export interface IntelSourceMeta {
 }
 
 export const SOURCE_META: Record<IntelSourceKey, IntelSourceMeta> = {
-  github:   { label: 'GitHub',      kind: 'repo',   weight: 26, fg: '#8b949e' },
-  hn:       { label: 'Hacker News', kind: 'news',   weight: 24, fg: '#ff6600' },
-  arxiv:    { label: 'arXiv',       kind: 'paper',  weight: 26, fg: '#e04040' },
-  openalex: { label: 'OpenAlex',    kind: 'paper',  weight: 24, fg: '#4ec9b0' },
-  weekly:   { label: '阮一峰周刊',  kind: 'weekly', weight: 28, fg: '#a371f7' },
-  hf:       { label: 'HF Papers',   kind: 'paper',  weight: 27, fg: '#c98a00' },
-  labs:     { label: 'AI 官方博客', kind: 'blog',   weight: 27, fg: '#6f9dff' },
-  qbitai:   { label: '量子位',      kind: 'news',   weight: 20, fg: '#d4549a' },
+  github:         { label: 'GitHub',      kind: 'repo',   section: 'tech',     weight: 26, fg: '#8b949e' },
+  hn:             { label: 'Hacker News', kind: 'news',   section: 'tech',     weight: 24, fg: '#ff6600' },
+  arxiv:          { label: 'arXiv',       kind: 'paper',  section: 'tech',     weight: 26, fg: '#e04040' },
+  openalex:       { label: 'OpenAlex',    kind: 'paper',  section: 'tech',     weight: 24, fg: '#4ec9b0' },
+  weekly:         { label: '阮一峰周刊',  kind: 'weekly', section: 'tech',     weight: 28, fg: '#a371f7' },
+  hf:             { label: 'HF Papers',   kind: 'paper',  section: 'tech',     weight: 27, fg: '#c98a00' },
+  labs:           { label: 'AI 官方博客', kind: 'blog',   section: 'tech',     weight: 27, fg: '#6f9dff' },
+  qbitai:         { label: '量子位',      kind: 'news',   section: 'tech',     weight: 20, fg: '#d4549a' },
+  chinanews:       { label: '中新网·滚动', kind: 'news',  section: 'domestic', weight: 22, fg: '#2f7fbf' },
+  chinanews_world: { label: '中新网·国际', kind: 'news',  section: 'world',    weight: 22, fg: '#3a8fd0' },
+  wallstcn:        { label: '华尔街见闻',  kind: 'news',  section: 'finance',  weight: 24, fg: '#b08d2f' },
 }
 
 export const INTEL_SOURCE_KEYS = Object.keys(SOURCE_META) as IntelSourceKey[]
 
+/** 版面展示顺序与名称（v2 侧栏分组 / 头条视图 / AI 注入共用，别在组件里抄第二份） */
+export const SECTIONS: readonly IntelSection[] = ['tech', 'domestic', 'world', 'finance']
+export const SECTION_META: Record<IntelSection, { label: string }> = {
+  tech: { label: '科技' },
+  domestic: { label: '时政 · 国内' },
+  world: { label: '国际' },
+  finance: { label: '财经' },
+}
+
+/** source 键 → 版面（内置源查表；自定义源/未知键兜 tech —— 自定义条目落库时自带 section，不走这里） */
+export function sectionOf(source: string): IntelSection {
+  return SOURCE_META[source as IntelSourceKey]?.section ?? 'tech'
+}
+
+/** source 键 → 源权重（内置源查表；自定义源固定 18，低于全部内置源） */
+export function sourceWeightOf(source: string): number {
+  return SOURCE_META[source as IntelSourceKey]?.weight ?? 18
+}
+
 /** 论文类来源（AI「只看论文」筛选与 feed pill 同口径） */
 export const PAPER_SRCS: readonly IntelSourceKey[] = ['arxiv', 'openalex', 'hf']
-/** 中文来源（AI「只看中文」筛选） */
-export const CN_SRCS: readonly IntelSourceKey[] = ['weekly', 'qbitai']
+/** 中文来源（AI「只看中文」筛选；v2.1 起含 3 个新闻源——人民网/新浪 feed 已冻结，见方案 §1 勿再调研清单） */
+export const CN_SRCS: readonly IntelSourceKey[] = ['weekly', 'qbitai', 'chinanews', 'chinanews_world', 'wallstcn']
 
 // ===== URL 归一化 + hash（去重键）=====
 
@@ -127,6 +151,39 @@ export function intelIdOf(url: string): string {
   return intelHash(url).slice(0, 12)
 }
 
+/** 文本内容 hash（翻译缓存键用）：与 intelHash 同实现，但不做 URL 归一化 */
+export function intelTextHash(text: string): string {
+  return sha256Hex(String(text ?? '')).slice(0, 40)
+}
+
+// ===== 卡片英文自动翻译（docs/intel-translate-plan.md §3）=====
+
+/** 英文判定：拉丁字母 ≥6 且 CJK 占比 <25% —— 中文源（qbitai / 新闻源）自动跳过，零 token */
+export function isEnglishText(s: string): boolean {
+  const t = String(s ?? '').trim()
+  if (t.length < 2) return false
+  const cjk = (t.match(/[\u4e00-\u9fff\u3040-\u30ff]/g) ?? []).length
+  const latin = (t.match(/[A-Za-z]/g) ?? []).length
+  return latin >= 6 && cjk / Math.max(cjk + latin, 1) < 0.25
+}
+
+/** 批量翻译响应解析：剥 code fence、截首个 [ 到末个 ]；等长字符串数组才算过，否则 null（整批失败） */
+export function parseTranslateArray(raw: string, expectCount: number): string[] | null {
+  let s = String(raw ?? '').trim()
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fence) s = fence[1].trim()
+  const lo = s.indexOf('[')
+  const hi = s.lastIndexOf(']')
+  if (lo < 0 || hi <= lo) return null
+  try {
+    const arr: unknown = JSON.parse(s.slice(lo, hi + 1))
+    if (!Array.isArray(arr) || arr.length !== expectCount || !arr.every((x) => typeof x === 'string')) return null
+    return (arr as string[]).map((x) => x.trim())
+  } catch {
+    return null
+  }
+}
+
 // ===== 营销水文过滤（设置 intel.filter 可关）=====
 
 const SPAM_RE = [
@@ -153,15 +210,18 @@ const SIGNAL_WORDS = [
   'api', 'sdk', 'cli', 'kernel', 'protocol', '部署', '微调', '量化', '上下文', '检索',
 ] as const
 
-/** 质量分：源权重(≤30) + 热度 log 缩放(≤35) + 技术信号词(≤15) + 摘要完整度(≤10) + 新鲜度(≤10) */
-export function intelScore(item: Pick<IntelItem, 'source' | 'kind' | 'title' | 'summary' | 'stars' | 'publishedAt' | 'fetchedAt'>): number {
-  const meta = SOURCE_META[item.source]
-  let s = (meta?.weight ?? 20) / 28 * 30
+/** 质量分：源权重(≤30) + 热度 log 缩放(≤35) + 技术信号词(≤15) + 摘要完整度(≤10) + 新鲜度(≤10)。
+ *  v2 D14：非科技版面不套技术信号词表（时政/财经/国际无 star/点赞，热度项天然 0；靠源权重+新鲜度+完整度区分）。 */
+export function intelScore(item: Pick<IntelItem, 'source' | 'kind' | 'title' | 'summary' | 'stars' | 'publishedAt' | 'fetchedAt'> & { section?: IntelSection }): number {
+  const section = item.section ?? sectionOf(item.source)
+  let s = sourceWeightOf(item.source) / 28 * 30
   const heat = Math.max(0, Number(item.stars) || 0)
   if (heat > 0) s += Math.min(1, Math.log1p(heat) / Math.log1p(HEAT_CAP[item.kind] || 1)) * 35
   const text = `${item.title}\n${item.summary}`.toLowerCase()
-  const hits = SIGNAL_WORDS.filter((w) => text.includes(w)).length
-  if (hits > 0) s += Math.min(15, hits * 4)
+  if (section === 'tech') {
+    const hits = SIGNAL_WORDS.filter((w) => text.includes(w)).length
+    if (hits > 0) s += Math.min(15, hits * 4)
+  }
   const len = (item.summary ?? '').trim().length
   s += len >= 200 ? 10 : len >= 120 ? 8 : len >= 60 ? 6 : len >= 20 ? 4 : len > 0 ? 2 : 0
   const t = Date.parse(item.publishedAt || item.fetchedAt || '')
@@ -175,8 +235,10 @@ export function intelScore(item: Pick<IntelItem, 'source' | 'kind' | 'title' | '
 // ===== 过滤（feed 与 AI 工具共用一套）=====
 
 export interface IntelFilter {
-  /** 源 key（单源） */
-  source?: IntelSourceKey
+  /** 源 key（单源；v2 起可为 custom:<id>） */
+  source?: string
+  /** 版面（v2：侧栏组头筛选与 AI query 的 section 参数） */
+  section?: IntelSection
   /** 类型：具体 kind，或 'paper'（= PAPER_SRCS）/ 'chinese'（= CN_SRCS）组合筛选 */
   kind?: IntelKind | 'paper' | 'chinese' | ''
   /** 关键词：标题 + 摘要包含（不分大小写） */
@@ -191,8 +253,9 @@ export function filterIntelItems(items: IntelItem[], f: IntelFilter): IntelItem[
   const kind = f.kind ?? ''
   return items.filter((it) => {
     if (f.source && it.source !== f.source) return false
-    if (kind === 'paper') { if (!PAPER_SRCS.includes(it.source)) return false }
-    else if (kind === 'chinese') { if (!CN_SRCS.includes(it.source)) return false }
+    if (f.section && (it.section ?? sectionOf(it.source)) !== f.section) return false
+    if (kind === 'paper') { if (!(PAPER_SRCS as readonly string[]).includes(it.source)) return false }
+    else if (kind === 'chinese') { if (!(CN_SRCS as readonly string[]).includes(it.source)) return false }
     else if (kind && it.kind !== kind) return false
     if (idSet && !idSet.has(it.id)) return false
     if (kw && !`${it.title}\n${it.summary}`.toLowerCase().includes(kw)) return false
@@ -213,7 +276,8 @@ export function sortIntelItems(items: IntelItem[]): IntelItem[] {
  * 返回新池（score 降序）与新增条数。
  */
 export function mergeIntelPool(pool: IntelItem[], raw: IntelItem[]): { pool: IntelItem[]; added: number } {
-  const byHash = new Map(pool.map((it) => [it.hash, it]))
+  // v2 迁移：老池条目没有 section（v1 全是科技源）——合并时按源补齐，磁盘随下一轮刷新自然收敛
+  const byHash = new Map(pool.map((it) => [it.hash, it.section ? it : { ...it, section: sectionOf(it.source) }]))
   let added = 0
   for (const item of raw) {
     if (!item.hash || !item.id) continue
@@ -227,7 +291,7 @@ export function mergeIntelPool(pool: IntelItem[], raw: IntelItem[]): { pool: Int
       next.score = intelScore(next)
       byHash.set(item.hash, next)
     } else {
-      byHash.set(item.hash, item)
+      byHash.set(item.hash, item.section ? item : { ...item, section: sectionOf(item.source) })
       added++
     }
   }

@@ -22,6 +22,7 @@ export async function fetchGithub(limit: number): Promise<IntelItem[]> {
     if (!fullName || !/^https?:\/\//.test(url2)) return null
     return intelDraft({
       source: 'github',
+    section: 'tech',
       kind: 'repo',
       title: fullName,
       url: url2,

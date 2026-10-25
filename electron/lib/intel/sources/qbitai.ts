@@ -10,6 +10,7 @@ export async function fetchQbitai(limit: number): Promise<IntelItem[]> {
   const xml = await fetchText('https://www.qbitai.com/feed', 12000, 1)
   return parseFeed(xml, 'https://www.qbitai.com', Math.min(Math.max(limit, 1), 50)).map((e) => intelDraft({
     source: 'qbitai',
+    section: 'tech',
     kind: 'news',
     title: e.title,
     url: e.link,

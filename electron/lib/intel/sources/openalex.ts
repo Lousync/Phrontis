@@ -38,6 +38,7 @@ export async function fetchOpenAlex(limit: number): Promise<IntelItem[]> {
     const t = w.publication_date ? new Date(w.publication_date) : null
     return intelDraft({
       source: 'openalex',
+    section: 'tech',
       kind: 'paper',
       title,
       url: link,
