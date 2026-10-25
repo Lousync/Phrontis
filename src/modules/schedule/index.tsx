@@ -245,9 +245,15 @@ export function ScheduleModule({ isActive = true, sidebarOpen = true, sidebarWid
   }, [view, canvasReturnView, openWorkflow])
 
   const handleToggle = useCallback(async (task: ScheduleTodo) => {
+    const nextStatus = task.status === 'done' ? 'pending' : 'done'
+    // 乐观更新（v3.13.0 反馈 F-1）：本地立即翻转 status，完成计数 / 列表移出即时反馈，
+    // 不再全押主进程广播的半拍延迟；IPC 失败回滚 + Toast。成功路径无需手动刷新——
+    // 主进程 broadcastDataChanged('schedule') 的全量对账自然落地。
+    setTasks(prev => prev.map(t => (t.id === task.id ? { ...t, status: nextStatus } : t)))
     try {
-      await updateScheduleTodo(task.id, { status: task.status === 'done' ? 'pending' : 'done' })
+      await updateScheduleTodo(task.id, { status: nextStatus })
     } catch (e) {
+      setTasks(prev => prev.map(t => (t.id === task.id ? { ...t, status: task.status } : t)))
       showToast({ type: 'error', message: '更新任务失败', detail: e instanceof Error ? e.message : String(e) })
     }
   }, [])

@@ -124,6 +124,19 @@ export function TaskPanel({ task, tags, workflow, onChanged, onDeleted }: Props)
     }
   }
 
+  // 主任务完成开关（v3.13.0 反馈 F-1）：修改态原本没有任何完成入口，完成只能回列表
+  // 瞄准 16px 小框。与列表勾选同语义（toggle status），patch 不带 status 以外的字段，
+  // 与表单的 400ms 防抖自动保存（不含 status）互不干扰。
+  async function toggleDone() {
+    const next = task.status === 'done' ? 'pending' : 'done'
+    try {
+      await updateScheduleTodo(task.id, { status: next })
+      onChanged()
+    } catch (e) {
+      showToast({ type: 'error', message: '更新完成状态失败', detail: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
   async function addSubtask() {
     const title = subtaskInput.trim()
     if (!title) return
@@ -183,6 +196,19 @@ export function TaskPanel({ task, tags, workflow, onChanged, onDeleted }: Props)
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {/* 完成状态行（F-1）：视觉与列表勾选框同款圆圈，完成 / 重新打开一步到位 */}
+        <button
+          onClick={() => void toggleDone()}
+          className={`mb-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] transition-colors ${task.status === 'done'
+            ? 'bg-[var(--bg-selected)] text-[var(--text-secondary)]'
+            : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}
+        >
+          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors ${task.status === 'done' ? 'border-[var(--accent)] bg-[var(--accent)] text-white' : 'border-[var(--text-disabled)] text-transparent'}`}>
+            <Check size={11} strokeWidth={3} />
+          </span>
+          {task.status === 'done' ? '已完成 · 点击重新打开' : '标记完成'}
+        </button>
+
         <input
           value={form.title}
           onChange={e => patchForm({ title: e.target.value })}

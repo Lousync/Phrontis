@@ -9,6 +9,8 @@ interface Props {
   onOpen: (task: ScheduleTodo) => void
   onToggle: (task: ScheduleTodo) => void
   onDelete?: (task: ScheduleTodo) => void
+  /** 退场态：勾选完成后宿主保留一拍播 .kb-item-out（划线 + 右移淡出），播完移除（F-1） */
+  exiting?: boolean
 }
 
 function timeLabel(task: ScheduleTodo): string {
@@ -20,7 +22,7 @@ function timeLabel(task: ScheduleTodo): string {
   return ''
 }
 
-export function ScheduleTaskRow({ task, tag, hasWorkflow = false, showDate = false, onOpen, onToggle, onDelete }: Props) {
+export function ScheduleTaskRow({ task, tag, hasWorkflow = false, showDate = false, onOpen, onToggle, onDelete, exiting = false }: Props) {
   const done = task.status === 'done'
   const when = timeLabel(task)
   return (
@@ -29,14 +31,19 @@ export function ScheduleTaskRow({ task, tag, hasWorkflow = false, showDate = fal
       tabIndex={0}
       onClick={() => onOpen(task)}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(task) }}
-      className={`kb-item-in group flex w-full items-start gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-left transition-colors hover:border-[var(--accent)]/50 hover:bg-[var(--bg-hover)] ${done ? 'opacity-60' : ''}`}
+      className={`kb-item-in group flex w-full items-start gap-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-left transition-colors hover:border-[var(--accent)]/50 hover:bg-[var(--bg-hover)] ${done ? 'opacity-60' : ''} ${exiting ? 'kb-item-out' : ''}`}
     >
+      {/* 热区（v3.13.0 反馈 F-1）：视觉圆 16px 不变，命中区扩到 28px（h-7 w-7），
+          负 margin 补偿外扩占位、行内视觉位置不变 —— 点偏一丝不再落进行体的「打开编辑」。
+          原 16px 命中 + 行体整行可点 = 高频误触修改态。 */}
       <button
         onClick={(e) => { e.stopPropagation(); onToggle(task) }}
         title={done ? '标记未完成' : '标记完成'}
-        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors ${done ? 'border-[var(--accent)] bg-[var(--accent)] text-white' : 'border-[var(--text-disabled)] text-transparent hover:border-[var(--accent)]'}`}
+        className="-my-1 -ml-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full"
       >
-        <Check size={11} strokeWidth={3} />
+        <span className={`flex h-4 w-4 items-center justify-center rounded-full border transition-colors ${done ? 'border-[var(--accent)] bg-[var(--accent)] text-white' : 'border-[var(--text-disabled)] text-transparent hover:border-[var(--accent)]'}`}>
+          <Check size={11} strokeWidth={3} />
+        </span>
       </button>
 
       <div className="min-w-0 flex-1">
