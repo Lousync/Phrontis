@@ -433,7 +433,7 @@ export default function App() {
     'quick-open': () => openQuickOpen(),
     'ai-side': () => toggleWorkbenchAi(),
     'right-panel': () => {
-      if (fullWindowTab) return   // 与 Ctrl+Alt+B 同口径（App.tsx:1395）
+      if (fullWindowTab) return   // 与 Ctrl+Alt+B 同口径（App.tsx:1586）
       update('workbenchLayout', JSON.stringify({ ...wbLayout, rightCollapsed: !wbLayout.rightCollapsed }))
     },
     'undo': () => { void undoFileOp() },
@@ -731,7 +731,6 @@ export default function App() {
       sidebarWidth_knowledgePages: s.sidebarWidth_knowledgePages,
       sidebarWidth_devtools: s.sidebarWidth_devtools,
     })
-    document.documentElement.style.fontSize = `${Math.min(s.zoomMax, Math.max(s.zoomMin, s.zoom)) * 16}px`
     setLoaded(true)
   }, [settingsReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1150,10 +1149,19 @@ export default function App() {
     return () => window.removeEventListener('onboarding:show', handler)
   }, [])
 
-  // Keep <html> font-size in sync when zoom changes externally
+  // 界面缩放（v3.13.2）：改为 Chromium 页面缩放，由主进程统一应用（electron/main/uiZoom.ts）。
+  // 这里原本是 `documentElement.style.fontSize = zoom × 16px` —— 只影响 rem，全仓 2700+ 处
+  // text-[Npx] 绝对像素一个都不会变大，用户调到 120% 只看到留白变大。页面缩放对 px 同样生效。
+  // 一次性迁移提示：主进程把老配置的 120% 抬到 130% 时写 uiZoomNotice，这里弹一次后清空。
   useEffect(() => {
-    document.documentElement.style.fontSize = `${s.zoom * 16}px`
-  }, [s.zoom])
+    if (!settingsReady || !s.uiZoomNotice) return
+    showToast({
+      type: 'info',
+      message: '界面缩放已调整为 100%',
+      detail: '窗口最大化 / 全屏时会自动放大到 130%，避免大屏下字显得小；可在 设置 → 通用与行为 → 界面缩放 调整或关闭',
+    })
+    update('uiZoomNotice', '')
+  }, [settingsReady, s.uiZoomNotice, update])
 
   // Sync active tab for module-level shortcut guards (hidden modules stay mounted)
   useEffect(() => { setGlobalActiveTab(activeTab ?? '') }, [activeTab])
@@ -1660,9 +1668,9 @@ export default function App() {
       —— 页面条置顶后页签条 portal 进外壳页面条。 */
   function renderModuleContent(name: TabName, on: boolean): React.ReactNode {
     switch (name) {
-      case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
+      case 'blog': return <BlogModule showLineNumbers={s.showLineNumbers} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} blogJump={pendingBlogJump} onBlogJumpConsumed={() => setPendingBlogJump(null)} sidebarEl={on && railModule === 'blog' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'blog' ? wbModActionsEl : null} />
       case 'schedule': return <ScheduleModule isActive={on} sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} sidebarEl={on && railModule === 'schedule' ? wbModSlotEl : null} sidebarHosted={on} />
-      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} zoom={s.zoom} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} secondaryPageIds={pageSplit?.secondaryPageIds ?? []} secondaryActiveId={pageSplit?.secondaryActiveId ?? null} secondaryBarEl={wbSecondaryPageEl} secondaryContentEl={wbSecondaryContentEl} splitDisabled={pageSplitActive} onSplitPage={splitPageToPane} onSecondaryActivate={setSecondaryActive} onMergeSplit={mergePagePanes} onRemoveSecondary={removePageFromPane} onMovePageToPane={movePageToPane} onBackToWorkbench={() => { setActiveToolTab(null); setActiveTab(null); setRailModule(null) }} onMigratePageTab={(oldId, newId) => setPageSplit((p) => p ? { ...p, secondaryPageIds: p.secondaryPageIds.map((x) => (x === oldId ? newId : x)), secondaryActiveId: p.secondaryActiveId === oldId ? newId : p.secondaryActiveId } : p)} />
+      case 'knowledge': return <KnowledgeModule sidebarOpen={sidebarOpen} sidebarWidths={sidebarWidths} onSnapCloseSidebar={() => setSidebarOpen(false)} onSnapOpenSidebar={() => setSidebarOpen(true)} isActive={on} sidebarEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModSlotEl : null} sidebarVariant={railModule === 'quiz' ? 'quiz' : 'knowledge'} sidebarHosted={on} pageBarEl={wbKnowledgePageEl} pageBarHosted onImmersiveChange={handleKnowledgeImmersive} modActionsEl={on && (railModule === 'knowledge' || railModule === 'quiz') ? wbModActionsEl : null} onStripVisibleChange={setKbStripVisible} onPageTabActivate={() => { handleTabChange('knowledge'); if (!wbLayout.leftLocked) setRailModule('knowledge') }} pendingRelPath={pendingOpenRel} onPendingRelConsumed={consumePendingOpenRel} secondaryPageIds={pageSplit?.secondaryPageIds ?? []} secondaryActiveId={pageSplit?.secondaryActiveId ?? null} secondaryBarEl={wbSecondaryPageEl} secondaryContentEl={wbSecondaryContentEl} splitDisabled={pageSplitActive} onSplitPage={splitPageToPane} onSecondaryActivate={setSecondaryActive} onMergeSplit={mergePagePanes} onRemoveSecondary={removePageFromPane} onMovePageToPane={movePageToPane} onBackToWorkbench={() => { setActiveToolTab(null); setActiveTab(null); setRailModule(null) }} onMigratePageTab={(oldId, newId) => setPageSplit((p) => p ? { ...p, secondaryPageIds: p.secondaryPageIds.map((x) => (x === oldId ? newId : x)), secondaryActiveId: p.secondaryActiveId === oldId ? newId : p.secondaryActiveId } : p)} />
       case 'moments': return <MomentsModule />
       case 'bookshelf': return (
         <BookshelfModule

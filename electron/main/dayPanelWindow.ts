@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, screen, globalShortcut, shell } from 'electron'
 import { join } from 'path'
 import { broadcast, BROADCAST_CHANNEL } from './windowBus'
 import { pushAppNotice } from '../lib/appNotice'
+import { applyUiZoomTo, getUiZoom } from './uiZoom'
 
 /**
  * 日程与打卡侧边栏管理器
@@ -53,7 +54,9 @@ function savedBounds(): { x?: number; y?: number; width?: number; height?: numbe
 function floatingPosition(): { x: number; y: number; width: number } {
   const wa = screen.getPrimaryDisplay().workArea
   const saved = savedBounds()
-  const w = DEFAULT_W
+  // 页面缩放后，设计宽度（CSS px）要乘 zoom 才是窗口 DIP 宽度
+  const zoom = getUiZoom()
+  const w = Math.round(DEFAULT_W * zoom)
   // 旧版本停靠/贴顶时期存下的位置（y≈工作区顶缘）会让漂浮窗一开就贴在最上面，
   // 判为残留，改回工作区右下角
   const dockResidue = typeof saved.y === 'number' && saved.y - wa.y <= TOP_EDGE_DIRTY
@@ -62,17 +65,18 @@ function floatingPosition(): { x: number; y: number; width: number } {
     : (wa.x + wa.width - w - 24)
   const y = !dockResidue && typeof saved.y === 'number'
     ? saved.y
-    : (wa.y + wa.height - DEFAULT_H - 24)
+    : (wa.y + wa.height - Math.round(DEFAULT_H * zoom) - 24)
   return { x, y, width: w }
 }
 
 /** 把 popout 窗口调成自由漂浮形态（运行时，无重建）。尺寸由 applyContentSize 驱动 */
 function applyFloatingMode(win: BrowserWindow): void {
   const wa = screen.getPrimaryDisplay().workArea
+  const zoom = getUiZoom()
   win.setAlwaysOnTop(false)
   win.setIgnoreMouseEvents(false)
   win.setResizable(true)
-  win.setMinimumSize(240, 60)
+  win.setMinimumSize(Math.round(240 * zoom), Math.round(60 * zoom))
   win.setMaximumSize(wa.width - 80, wa.height - 80)
   const target = floatingPosition()
   // 首次开窗尚未显示，直接落位即可（不做位移动画，避免与随后的内容贴合抢 y）
@@ -88,10 +92,13 @@ function applyFloatingMode(win: BrowserWindow): void {
 function applyContentSize(scrollW: number, scrollH: number): void {
   if (!popout || popout.isDestroyed()) return
   const wa = screen.getPrimaryDisplay().workArea
-  const w = Math.max(240, Math.min(scrollW, wa.width - 80))
-  const minH = 60
+  // 渲染层报的是 **CSS px**（document 的 scroll 尺寸），窗口 bounds 是 DIP —— 按页面缩放折算，
+  // 否则 130% 时窗口会比内容窄 23%，小窗里出现横向滚动条、卡片被裁。
+  const zoom = getUiZoom()
+  const w = Math.max(Math.round(240 * zoom), Math.min(Math.round(scrollW * zoom), wa.width - 80))
+  const minH = Math.round(60 * zoom)
   const maxH = wa.height - 80
-  const targetH = Math.max(minH, Math.min(scrollH, maxH))
+  const targetH = Math.max(minH, Math.min(Math.round(scrollH * zoom), maxH))
   // 工作区右下角锚定：内容长高时窗口向上生长，底部始终贴住工作区下缘
   const anchorY = wa.y + wa.height - targetH - 24
   const cur = popout.getBounds()
@@ -147,6 +154,11 @@ function createPopout(): void {
   // 形态与位置在开窗前直接落定：内容尺寸报告可能早于 ready-to-show 到达并先 show()，
   // 那时 ready-to-show 不再触发，靠它摆位会留在 (0,0)。
   applyFloatingMode(popout)
+
+  // 页面缩放（v3.13.2）：dom-ready 之后应用 —— 加载前设值会被本次导航覆盖（实测 1.5 掉成 1.25）。
+  // 渲染层不再自己改根字号（DayPanelWindowApp 里那行已删），全应用唯一口径在主进程。
+  const zoomWin = popout
+  popout.webContents.on('dom-ready', () => applyUiZoomTo(zoomWin))
 
   // 同 URL reload 放行（仓库切换等正常刷新），其余导航一律阻断
   popout.webContents.on('will-navigate', (e, url) => {

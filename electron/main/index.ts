@@ -118,6 +118,7 @@ import { readClipboardFilePaths } from '../lib/clipboardFiles'
 import { registerVaultArchiveHandlers } from '../lib/vaultArchive'
 import { getCurrentVault, setCurrentVault, getVaultAttachmentsRoot } from '../lib/kbStore/vaultContext'
 import { SETTINGS } from '../../src/lib/settings'
+import { applyUiZoomTo, applyUiZoomToAll, getEffectiveUiZoom, registerUiMinSize, setUiZoom, setUiZoomBoostResolver } from './uiZoom'
 
 // 附件自定义协议：attachment://{id}/ 与 attachment://{id}/?thumb=1
 // 插件自定义协议：plugin://{id}/{file} — UI 插件的沙箱页面(配合 iframe sandbox 使用)
@@ -320,9 +321,14 @@ function createWindow(): void {
     }
   })
 
-  // 缩放分层钳制（2026-09-20）：界面缩放走 s.zoom（rem），PDF 页面缩走阅读器内部 zoom——
-  // 引擎级 zoomFactor（Ctrl+滚轮整页缩放 / 双指捏合）必须关掉，否则三层缩放互相叠加
+  // 缩放分层（2026-09-20 / v3.13.2 改口径）：界面缩放现在走 Chromium 页面缩放
+  // （webContents.setZoomFactor，见 ./uiZoom），PDF 页面缩走阅读器内部 zoom —— 仍是两层，
+  // 互不叠加。这里关掉的只是**捏合 / Ctrl+滚轮**那条视觉缩放通道（setVisualZoomLevelLimits），
+  // 否则它会与设置里的缩放再叠一层。
   mainWindow.webContents.setVisualZoomLevelLimits(1, 1)
+  // 页面缩放必须在 dom-ready 之后应用：加载前设值会被本次导航覆盖，且值会被取整（实测 1.5 → 1.25）
+  registerUiMinSize(mainWindow, 900, 600)
+  mainWindow.webContents.on('dom-ready', () => applyUiZoomTo(mainWindow))
 
   // 安全：主窗口自身永不导航(应用为单页,任何导航请求均为异常/注入行为)。
   // 例外：同 URL 的 reload——Electron 把 location.reload() 也当导航触发本事件，
@@ -471,6 +477,28 @@ function registerWindowHandlers(): void {
     lastMaxSent = maxed
     console.log(`[Window] maxState -> ${maxed}`)
     win.webContents.send('window:maximizeChange', maxed)
+    // ⚠️ 这里**不要**算缩放：maximize 路径是先乐观调用本函数（此刻 WM 的 isMaximized / bounds
+    // 还是旧值，实测读到 false → 缩放停在基础档；反向还原时反之把最大化档留在了窗口态）。
+    // 缩放一律由 scheduleZoomSync 在几何落定后重算 —— 见下方 resize/move 监听。
+  }
+
+  /**
+   * 页面缩放重算（v3.13.2）：窗口几何落定后 120ms 再算一次有效缩放。
+   *
+   * 为什么不直接读 isMaximized()：本机 X11 下「铺满工作区」的窗口可能并不处于 WM 最大化态
+   * （实测 bounds = 1920×1048、isMaximized() = false），只看 WM 标志会漏掉用户真正看到的
+   * 「最大化」。所以判定 = isMaximized ∪ isFullScreen ∪ coversWorkArea，且等几何稳定后再算 ——
+   * maximize/unmaximize 的瞬间 bounds 还是旧值。
+   */
+  let zoomSyncTimer: ReturnType<typeof setTimeout> | null = null
+  const scheduleZoomSync = (): void => {
+    if (zoomSyncTimer) clearTimeout(zoomSyncTimer)
+    zoomSyncTimer = setTimeout(() => {
+      zoomSyncTimer = null
+      const w = mainWindow
+      if (!w || w.isDestroyed() || w.webContents.isLoading()) return
+      applyUiZoomTo(w)
+    }, 120)
   }
 
   const syncMaxState = (): void => {
@@ -561,6 +589,8 @@ function registerWindowHandlers(): void {
     // 乐观态让渲染层立刻开始 300ms 过渡；真实状态由 scheduleMaxSync 在落定后校正
     sendMaxState(nextMax)
     scheduleMaxSync(nextMax)
+    // 缩放等几何落定后再算（乐观 sendMaxState 此刻读到的 bounds / isMaximized 还是旧值）
+    scheduleZoomSync()
   })
   ipcMain.handle('window:close', () => mainWindow?.close())
   ipcMain.handle('window:isMaximized', () => isWinMaximized(mainWindow))
@@ -592,8 +622,15 @@ function registerWindowHandlers(): void {
       scheduleMaxSync(preFsMaximized)
     }
   })
-  mainWindow?.on('enter-full-screen', () => mainWindow?.webContents.send('window:fullscreenChange', true))
-  mainWindow?.on('leave-full-screen', () => mainWindow?.webContents.send('window:fullscreenChange', false))
+  // 全屏同样算「最大化档」：进入/退出时重算一次有效缩放（不是最大化时 sendMaxState 不会变）
+  mainWindow?.on('enter-full-screen', () => {
+    mainWindow?.webContents.send('window:fullscreenChange', true)
+    scheduleZoomSync()
+  })
+  mainWindow?.on('leave-full-screen', () => {
+    mainWindow?.webContents.send('window:fullscreenChange', false)
+    scheduleZoomSync()
+  })
 
   // 抽屉式日程面板：renderer 发送「面板期望宽度」（0 = 收回）。增量协议（2026-09-08 重写）——
   // 打开/拖拽 = 当前窗口宽 + (期望宽 − 上次期望宽)，收回 = 当前窗口宽 − 上次期望宽。
@@ -644,11 +681,15 @@ function registerWindowHandlers(): void {
     const b = win.getBounds()
     const { workArea } = screen.getDisplayMatching(b)
     const req = Math.max(0, Math.round(width))
+    // 面板宽度由渲染层按 **CSS px** 报上来，窗口 bounds 是 **DIP** —— 页面缩放后两者差一个 zoom，
+    // 不折算的话 130% 时「开侧栏把窗口撑宽」会撑少 23%、最小宽度判定也会提前挡住。
+    const zoom = getEffectiveUiZoom(win)
+    const minWinW = Math.round(900 * zoom)
 
     // 收回：当前窗口宽 − 上次面板宽（增量语义，见上；动画进行中忽略重复请求防目标漂移）
     if (req <= 0) {
       if (lastDrawerWidth === 0) return { applied: false }
-      const w = Math.max(900, Math.min(workArea.width, b.width - lastDrawerWidth))
+      const w = Math.max(minWinW, Math.min(workArea.width, b.width - Math.round(lastDrawerWidth * zoom)))
       if (w === b.width) {
         lastDrawerWidth = 0
         return { applied: false }
@@ -665,8 +706,8 @@ function registerWindowHandlers(): void {
     // 打开/拖拽：当前窗口宽 + 宽度增量。首次打开 lastDrawerWidth=0 → delta=期望宽（整体外扩）；
     // 拖拽每帧 delta=与上帧差（跟手）；用户手动改窗后 delta 基于实时 bounds 永远正确。
     // 右缘越界则整体左移夹回工作区防膨胀。
-    const delta = req - lastDrawerWidth
-    const w = Math.max(900, Math.min(workArea.width, b.width + delta))
+    const delta = Math.round((req - lastDrawerWidth) * zoom)
+    const w = Math.max(minWinW, Math.min(workArea.width, b.width + delta))
     lastDrawerWidth = req
     let x = b.x
     if (w > b.width && x + w > workArea.x + workArea.width) {
@@ -684,6 +725,7 @@ function registerWindowHandlers(): void {
   // mousedown 经此 IPC 交主进程接管：unmaximize → 按恢复几何（preMaxBounds）锚定对边 →
   // 轮询光标实时 setBounds（v2 贴鼠标）。edge='move' 为顶栏拖拽恢复模式（比例映射 + 跟随移动）。
   let edgeDrag: { edge: string; anchor: Electron.Rectangle; p0: Electron.Point; timer: ReturnType<typeof setInterval> | null; lastRect: Electron.Rectangle | null } | null = null
+  // 设计最小尺寸（CSS px）；实际 clamp 用的 DIP 值要乘当前页面缩放（见 edgeRectFromCursor）
   const MINW = 900, MINH = 600
   const stopEdgeDrag = (): void => {
     if (edgeDrag?.timer) clearInterval(edgeDrag.timer)
@@ -708,8 +750,12 @@ function registerWindowHandlers(): void {
     if (edge.includes('right')) right = c.x
     if (dragTop) y = c.y
     if (dragBottom) bottom = c.y
-    if (right - x < MINW) { if (edge.includes('left')) x = right - MINW; else right = x + MINW }
-    if (bottom - y < MINH) { if (dragTop) y = bottom - MINH; else bottom = y + MINH }
+    // 最小尺寸按有效缩放折算：最大化时 900 CSS px 需要 1170 DIP（130%），否则布局会被压窄
+    const zoom = getEffectiveUiZoom(mainWindow)
+    const minW = Math.round(MINW * zoom)
+    const minH = Math.round(MINH * zoom)
+    if (right - x < minW) { if (edge.includes('left')) x = right - minW; else right = x + minW }
+    if (bottom - y < minH) { if (dragTop) y = bottom - minH; else bottom = y + minH }
     return { x, y, width: right - x, height: bottom - y }
   }
   ipcMain.handle('window:edgeResizeStart', (_e, edge: string) => {
@@ -801,13 +847,13 @@ function registerWindowHandlers(): void {
     // 只记低频事件；resize/move 拖拽期间每 16ms 一条会刷屏，不入日志
     console.log(`[Window] evt ${name} bounds=${JSON.stringify(w.getBounds())} isMax=${w.isMaximized()}`)
   }
-  mainWindow?.on('maximize', () => { diagWinEvt('maximize'); scheduleMaxSync() })
-  mainWindow?.on('unmaximize', () => { diagWinEvt('unmaximize'); scheduleMaxSync() })
+  mainWindow?.on('maximize', () => { diagWinEvt('maximize'); scheduleMaxSync(); scheduleZoomSync() })
+  mainWindow?.on('unmaximize', () => { diagWinEvt('unmaximize'); scheduleMaxSync(); scheduleZoomSync() })
   mainWindow?.on('closed', () => { stopEdgeDrag(); stopMaxSync() })
   mainWindow?.on('blur', () => { console.log('[Window] evt blur'); stopEdgeDrag() }) // 拖拽中失焦（Alt-Tab 等）兜底收尾，防跟随循环悬挂
   // 几何兜底路径（透明无边框窗口不进最大化态）依赖 bounds 变化后重估，故 resize/move 也登记
-  mainWindow?.on('resize', () => scheduleMaxSync())
-  mainWindow?.on('move', () => scheduleMaxSync())
+  mainWindow?.on('resize', () => { scheduleMaxSync(); scheduleZoomSync() })
+  mainWindow?.on('move', () => { scheduleMaxSync(); scheduleZoomSync() })
   syncMaxState()
   scheduleMaxSync()
 
@@ -841,6 +887,10 @@ function registerWindowHandlers(): void {
       }
     }
     settingsCache[key] = value
+    // 界面缩放（v3.13.2）：立刻应用到所有窗口（含日程小窗），不等 500ms 落盘防抖
+    if (key === 'zoom') setUiZoom(value)
+    // 最大化自动放大开关：只影响「是否乘 1.2」，改了要立刻重算当前窗口
+    if (key === 'uiZoomMaximizedBoost') applyUiZoomToAll()
     // 书市代理（方案 §三）：改完**立刻**灌进 bookmarket 分区 —— 只作用于书市那座 session，
     // 不动 defaultSession。失败不打断设置写入（代理串写错不该连带设置都存不下），
     // 下次 `initBookMarketProxy` 启动时还会再试一次。
@@ -869,6 +919,7 @@ function registerWindowHandlers(): void {
 
       // 3) settings 恢复默认
       settingsCache = {}
+      setUiZoom(SETTINGS.zoom.default)
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
       flushSettingsToDisk()
 
@@ -896,6 +947,33 @@ app.whenReady().then(async () => {
 
   // Initialize settings cache once at startup
   settingsCache = loadSettingsFromDisk()
+
+  // 界面缩放（v3.13.2）：窗口态基础档默认 100%，窗口最大化 / 全屏时自动再乘 1.3（用户实测：
+  // 1280 窗口下 ~100% 舒服、1920 最大化下 ~130% 舒服；两者逻辑宽度差 1.5 倍，单一系数无法兼顾）。
+  // 旧实现下的 120% 只放大了留白（字号是绝对 px，不动），老配置一次性归位到 100%。
+  // notice 由 App 首挂弹一次后清空；★ 无论是否命中迁移值都立刻置位标记 ——
+  // 否则用户以后手动改回旧值，下次启动又会被改一次。
+  try {
+    if (!settingsCache['uiZoomMigrated']) {
+      if (Number(settingsCache['zoom']) === 1.2) {
+        settingsCache['zoom'] = 1.0
+        settingsCache['uiZoomNotice'] = '1.0'
+      }
+      settingsCache['uiZoomMigrated'] = true
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = setTimeout(flushSettingsToDisk, 500)
+    }
+  } catch { /* 迁移失败不阻断启动 */ }
+  setUiZoom(settingsCache['zoom'])
+  // 「是否乘最大化倍数」的判定交给主进程：只有主窗、设置开关开着、且真的最大化/全屏时才放大。
+  // 日程小窗与密码悬浮窗不参与（它们本来就小，放大只会更挤）。
+  setUiZoomBoostResolver((win) =>
+    win === mainWindow
+    && settingsCache['uiZoomMaximizedBoost'] !== false
+    // 几何兜底：本机 X11 实测存在「铺满工作区但 isMaximized() = false」的窗口（用户看到的就是最大化），
+    // 只认 WM 标志会让最大化档永远不生效。三选一即可 —— 铺满工作区 = 用户视角的大屏态。
+    && (win.isFullScreen() || isWinMaximized(win) || coversWorkArea(win)),
+  )
 
   // 记账模块（v3.5.x）默认对 AI 读写：老 settings.json 的 aiModulePermissions 早于本模块、
   // 缺 accounting 键时权限层会落到默认 read（AI 录账被拒）；这里一次性补齐为 write。无该键时也建一份

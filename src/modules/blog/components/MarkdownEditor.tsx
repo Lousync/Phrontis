@@ -15,7 +15,7 @@ import { MonacoPane, type MonacoPaneHandle } from '../../../components/shared/Mo
 import type { Tag } from '../../../types'
 
 interface Props {
-  entryId: string; showLineNumbers: boolean; zoom?: number; onSave: () => void; onCancel: () => void
+  entryId: string; showLineNumbers: boolean; onSave: () => void; onCancel: () => void
   onContentChange?: (content: string) => void
   onToggleOutline?: () => void
 }
@@ -31,7 +31,7 @@ const MAX_TAGS = 5
 /** 模块级稳定引用：内联箭头每次渲染都是新函数，会让 MarkdownPreview 的 memo 失效、预览反复重解析 */
 const handlePreviewLinkClick = (href: string) => openExternal(href)
 
-export function MarkdownEditor({ entryId, showLineNumbers, zoom = 1, onSave, onCancel, onContentChange, onToggleOutline }: Props) {
+export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onContentChange, onToggleOutline }: Props) {
   const { s } = useSettings()
   const [contentMd, setContentMd] = useState('')
   const [date, setDate] = useState('')
@@ -384,11 +384,10 @@ export function MarkdownEditor({ entryId, showLineNumbers, zoom = 1, onSave, onC
               size: contentMd.length,
             }}
             onChange={(_rel, v) => handleChange(v)}
-            fontSize={Math.round(s.editorFontSize * zoom)}
+            fontSize={s.editorFontSize}
             dimEnabled={false}
             inlineSuggestEnabled={false}
             inlineSuggestAuto={false}
-            layoutKey={zoom}
             onPasteImage={handleImageToMarkdown}
             onDropImage={handleImageToMarkdown}
             editorOptions={{

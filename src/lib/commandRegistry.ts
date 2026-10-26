@@ -107,7 +107,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'sidebar', label: '折叠 / 展开侧栏', desc: '展开 / 折叠侧栏',
     keys: [['Ctrl', 'B']], group: 'global', scope: 'global', palette: true,
     conflictNote: '编辑器（Monaco / LiveMarkdown）内归「加粗」，App 侧靠 isEditingInput 对 .monaco-editor 让位（src/lib/shortcuts.ts）',
-    sources: ['src/App.tsx:1511 @ if (e.ctrlKey && !e.altKey && e.key ==='],
+    sources: ['src/App.tsx:1519 @ if (e.ctrlKey && !e.altKey && e.key ==='],
   },
   {
     id: 'escape', label: '关闭弹窗 / 返回列表', desc: '关闭弹窗 / 返回列表',
@@ -136,7 +136,7 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'ai-side', label: 'AI 助手', desc: 'AI 助手开关（工作台右栏；整窗模块下为悬浮助手）',
     keys: [['Ctrl', 'J']], group: 'global', scope: 'global', palette: true,
-    sources: ['src/App.tsx:1605 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
+    sources: ['src/App.tsx:1613 @ if (!(e.ctrlKey && !e.shiftKey && !e.altKey && e', 'src/components/shared/AssistantPanel/index.tsx:164 @ if (e.ctrlKey && !e.shiftKey && !e.altKey && k ='],
   },
   {
     id: 'ai-full', label: 'AI 助手 · 全屏学堂', desc: 'AI 助手：进入全屏学堂',
@@ -147,11 +147,11 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'right-panel', label: '切换工作台右栏', desc: '切换工作台右栏（折叠 / 展开）',
     keys: [['Ctrl', 'Alt', 'B']], group: 'global', scope: 'global', palette: true,
-    // 整窗模块下左右栏本就退场（handler 里 fullWindowTab 早退，App.tsx:1395）⇒ 面板里也隐藏，
+    // 整窗模块下左右栏本就退场（handler 里 fullWindowTab 早退，App.tsx:1586）⇒ 面板里也隐藏，
     // 否则会列出一条「点了没反应」的命令
     requires: { workbench: true, fullWindowTab: false },
-    note: '整窗模块下左右栏本就退场，handler 里 fullWindowTab 早退（App.tsx:1395）',
-    sources: ['src/App.tsx:1577 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
+    note: '整窗模块下左右栏本就退场，handler 里 fullWindowTab 早退（App.tsx:1586）',
+    sources: ['src/App.tsx:1585 @ if (e.ctrlKey && e.altKey && e.key.toLowerCase()'],
   },
   {
     id: 'undo', label: '撤销文件操作', desc: '撤销上一文件操作（重命名 / 删除 / 移动）',
@@ -167,19 +167,19 @@ export const COMMANDS: CommandDef[] = [
   {
     id: 'zoom-in', label: '界面放大', desc: '界面放大',
     keys: [['Ctrl', '=']], group: 'global', scope: 'global', palette: true,
-    conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1380）',
-    sources: ['src/App.tsx:1490 @ NumpadAdd'],
+    conflictNote: '书架里读 PDF 时让位给阅读器页面缩放（作用域仲裁，src/App.tsx:1497）',
+    sources: ['src/App.tsx:1498 @ NumpadAdd'],
   },
   {
     id: 'zoom-out', label: '界面缩小', desc: '界面缩小',
     keys: [['Ctrl', '-']], group: 'global', scope: 'global', palette: true,
-    conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1380）',
-    sources: ['src/App.tsx:1495 @ NumpadSubtract'],
+    conflictNote: '同上：PDF 阅读态让位给阅读器（src/App.tsx:1497）',
+    sources: ['src/App.tsx:1503 @ NumpadSubtract'],
   },
   {
     id: 'sys-day', label: '日程与打卡小窗开关', desc: '日程与打卡小窗开关（系统级）',
     keys: [['Ctrl', 'Alt', 'S']], group: 'global', scope: 'global', palette: false,
-    sources: ["electron/main/dayPanelWindow.ts:218 @ bind('Control+Alt+S'"],
+    sources: ["electron/main/dayPanelWindow.ts:230 @ bind('Control+Alt+S'"],
   },
 
   // ---------------------------------------------------------------- 知识库 — 编辑器（页面级）
@@ -187,13 +187,13 @@ export const COMMANDS: CommandDef[] = [
     id: 'kb-save', label: '立即保存', desc: '立即保存当前页面',
     keys: [['Ctrl', 'S']], group: 'kbEditor', scope: 'note', palette: false,
     conflictNote: '按当前激活模块分发：handler 首行 getGlobalActiveTab() !== 本模块就 return（src/lib/activeTab.ts）',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1113 @ if (e.ctrlKey && e.key ==='],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1112 @ if (e.ctrlKey && e.key ==='],
   },
   {
     id: 'kb-preview', label: '阅读 ⇄ 编辑切换', desc: '阅读 ⇄ 编辑切换（仅 md / txt 文件）',
     keys: [['Ctrl', '/'], ['Ctrl', 'E']], group: 'kbEditor', scope: 'note', palette: false,
     conflictNote: '按当前激活模块分发（getGlobalActiveTab 闸门），与博客的 Ctrl+/ 各管各的',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1123 @ ) || (e.ctrlKey && (e.key ==='],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1122 @ ) || (e.ctrlKey && (e.key ==='],
   },
   {
     id: 'kb-editor-esc', label: '返回页面列表', desc: '关闭弹窗后返回页面列表',
@@ -216,17 +216,17 @@ export const COMMANDS: CommandDef[] = [
     id: 'kb-ai-inline', label: 'AI 内联续写建议', desc: 'AI 内联续写建议：立即请求一条（Tab 采纳 / Esc 拒绝；停顿后自动给出）',
     keys: [['Alt', 'A']], group: 'kbEditor', scope: 'note', palette: false,
     note: '原表把它挂在已退役的「编辑器模块」组下；实际判定在 PageEditor.tsx:779（笔记编辑态）',
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:884 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:883 @ if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.'],
   },
   {
     id: 'kb-image', label: '插入图片', desc: '插入图片（顶栏 ⋮ 里也有）',
     keys: [['Ctrl', 'Shift', 'I']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1263 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1262 @ if (e.ctrlKey && e.shiftKey && !e.altKey && (e.k'],
   },
   {
     id: 'kb-footnote', label: '插入脚注', desc: '插入脚注（先选中词语；顶栏 ⋮ 里也有）',
     keys: [['Ctrl', 'Alt', 'F']], group: 'kbEditor', scope: 'note', palette: false,
-    sources: ['src/modules/knowledge/components/PageEditor.tsx:1268 @ if (e.ctrlKey && e.altKey && !e.shiftKey && (e.k'],
+    sources: ['src/modules/knowledge/components/PageEditor.tsx:1267 @ if (e.ctrlKey && e.altKey && !e.shiftKey && (e.k'],
   },
 
   // ---------------------------------------------------------------- 知识库 — 写作面
@@ -480,7 +480,7 @@ export const COMMANDS: CommandDef[] = [
     id: 'sys-pwdfill', label: '密码填充弹窗开关', desc: '密码填充弹窗开关（系统级）',
     keys: [['Ctrl', 'Alt', 'P']], group: 'passwordKeys', scope: 'global', palette: false,
     note: '原表写「可在设置改键」—— src/lib/settings.ts 里没有这个设置项，passwordFiller.ts:143 是直接读 settings.json 的裸键 fillPopupShortcut。改成真可改键属新功能，未做',
-    sources: ['electron/main/passwordFiller.ts:150 @ const shortcutKey = (settings.fillPopupShortcut '],
+    sources: ['electron/main/passwordFiller.ts:163 @ const shortcutKey = (settings.fillPopupShortcut '],
   },
 ]
 

@@ -37,8 +37,8 @@ export type BlogJump =
   | { kind: 'date'; date: string }
   | { kind: 'summary'; summaryKind: SummaryKind; start: string; end: string }
 
-export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom = 1, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, blogJump = null, onBlogJumpConsumed, sidebarEl = null, sidebarHosted = false, modActionsEl = null }: {
-  showLineNumbers?: boolean; sidebarOpen?: boolean; zoom?: number; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; blogJump?: BlogJump | null; onBlogJumpConsumed?: () => void; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; modActionsEl?: HTMLElement | null
+export function BlogModule({ showLineNumbers = false, sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, blogJump = null, onBlogJumpConsumed, sidebarEl = null, sidebarHosted = false, modActionsEl = null }: {
+  showLineNumbers?: boolean; sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; blogJump?: BlogJump | null; onBlogJumpConsumed?: () => void; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; modActionsEl?: HTMLElement | null
 }) {
   const { s } = useSettings()
   const [view, setView] = useState<BlogView>('list')
@@ -511,7 +511,6 @@ export function BlogModule({ showLineNumbers = false, sidebarOpen = true, zoom =
               key={selectedId}
               entryId={selectedId}
               showLineNumbers={showLineNumbers}
-              zoom={zoom}
               onSave={goToList}
               onCancel={goToList}
               onContentChange={setLiveContent}

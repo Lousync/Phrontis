@@ -4,6 +4,11 @@ import { readFileSync, existsSync } from 'fs'
 import { decodePassword, createPasswordEntryRow } from '../database/repositories/passwordRepo'
 import { vaultPasswordsAll } from '../lib/kbStore/secretVaultRepo'
 import { pushAppNotice } from '../lib/appNotice'
+import { applyUiZoomTo, getUiZoom } from './uiZoom'
+
+/** 小密码本的设计尺寸（CSS px）；窗口实际 DIP 尺寸 = 设计尺寸 × 界面缩放 */
+const FILL_W = 340
+const FILL_H = 420
 
 let fillWindow: BrowserWindow | null = null
 
@@ -38,9 +43,11 @@ function getSettingsJSON(): Record<string, unknown> {
 function createFillWindow(): BrowserWindow {
   const theme = String(getSettingsJSON().theme || 'dark')
   const bgColor = theme === 'light' ? '#f3f3f3' : '#1e1e1e'
+  // 页面缩放（v3.13.2）：窗口尺寸同步乘 zoom，保证弹窗内部仍是设计上的 340×420 CSS px
+  const zoom = getUiZoom()
 
   const win = new BrowserWindow({
-    width: 340, height: 420,
+    width: Math.round(FILL_W * zoom), height: Math.round(FILL_H * zoom),
     frame: false, alwaysOnTop: true, skipTaskbar: true, show: false,
     resizable: false, maximizable: false, minimizable: false,
     backgroundColor: bgColor,
@@ -63,6 +70,8 @@ function createFillWindow(): BrowserWindow {
     event.preventDefault()
   })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // 页面缩放：dom-ready 后应用（加载前设值会被导航覆盖）
+  win.webContents.on('dom-ready', () => applyUiZoomTo(win))
 
   if (process.env.ELECTRON_RENDERER_URL) {
     win.loadURL(`${process.env.ELECTRON_RENDERER_URL}#/fill-popup`)
@@ -80,10 +89,14 @@ function showFillPopup() {
 
   const cursor = screen.getCursorScreenPoint()
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  // 窗口实际尺寸随界面缩放（见 createFillWindow），越界夹取也要用同一组值
+  const zoom = getUiZoom()
+  const winW = Math.round(FILL_W * zoom)
+  const winH = Math.round(FILL_H * zoom)
 
   let x = cursor.x + 10, y = cursor.y + 10
-  if (x + 340 > width) x = width - 350
-  if (y + 420 > height) y = cursor.y - 430
+  if (x + winW > width) x = width - winW - 10
+  if (y + winH > height) y = cursor.y - winH - 10
 
   fillWindow.setPosition(x, y)
   applyPin(fillWindow, isPinned()) // 每次唤出都按当前设置重断言层级（用户可能中途改过）
