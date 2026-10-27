@@ -2332,16 +2332,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           {/* v3.1.2（开发负责人 2026-09-14）：会话列表区回归，与资源管理器「分区并列共存」——
               形态 A：会话（上，限高可折叠）+ 资源管理器（中，撑满剩余）。
               折叠任一分区，其余分区自动获得空间（原会话列表区曾因「页签即会话切换器」退役，本次恢复）。 */}
-          {/* 左栏两分区 = 一个四轨 grid（会话头 / 会话体 / 资源管理器头 / 资源管理器体）。
-              贴底原理见 .kb-rail-secs：资源管理器收起时第 4 轨归 0，剩余高度全给第 2 轨（auto）
-              ⇒ 会话体撑满，把「资源管理器」条目压到侧栏底（对标 VS Code）。
-              ★ 本容器不能 overflow-hidden —— 会话头的「新建对话」是绝对定位浮层，会被裁掉。 */}
-          <div className={`kb-rail-secs ${!collapsedSec.sessions && collapsedSec.explorer ? 'kb-stick' : ''} ${!collapsedSec.explorer ? 'kb-open-explorer' : ''}`}>
+          {/* 左栏两分区 = 一个四轨 grid（课程头 / 课程体 / 资源管理器头 / 资源管理器体）。
+              课程体优先吃剩余高度（资源管理器展开时最多占 32vh），内部滚动翻知识点；
+              资源管理器收起时第 4 轨归 0，剩余高度全给课程体（对标 VS Code）。
+              ★ 本容器不能 overflow-hidden —— 分区头的菜单是绝对定位浮层，会被裁掉。 */}
+          <div className={`kb-rail-secs ${!collapsedSec.sessions ? 'kb-course-open' : ''} ${!collapsedSec.sessions && collapsedSec.explorer ? 'kb-stick' : ''} ${!collapsedSec.explorer ? 'kb-open-explorer' : ''}`}>
           <SectionHead open={!collapsedSec.sessions} title="课程" onToggle={() => toggleSec('sessions')} />
-          {/* 课程树（第 2 轨：展开且资源管理器收起时撑满，资源管理器展开时回到内容高 ≤38vh） */}
+          {/* 课程树（第 2 轨：展开时吃剩余高度；资源管理器展开时仍保留内部滚动） */}
           <div className={`kb-collapse min-h-0 ${collapsedSec.sessions ? '' : 'open'}`}>
             <div className={`min-h-0 transition-opacity duration-150 ${collapsedSec.sessions ? 'opacity-0' : 'opacity-100'}`}>
-              <div className={`h-full ${collapsedSec.explorer ? 'max-h-[38vh]' : ''}`}>
+              <div className="h-full min-h-0">
                 <CourseRail
                   chapters={railVisible}
                   activeChapterId={railActiveChapter}
