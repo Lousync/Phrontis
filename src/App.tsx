@@ -1686,7 +1686,7 @@ export default function App() {
       )
       case 'aiTeaching': return <AiTeachingModule isActive={on} zenLevel={zenLevel} onZenLevelChange={changeZen} pendingAsk={pendingAsk} onConsumePendingAsk={() => setPendingAsk(null)} />
       // AI助手（v3.9.0）：工作台内 Tab，模块侧栏（任务列表 / 作用域）portal 进左栏模块槽
-      case 'aiAssistant': return <AiAssistantModule isActive={on} sidebarEl={on && railModule === 'aiAssistant' ? wbModSlotEl : null} sidebarHosted={on} />
+      case 'aiAssistant': return <AiAssistantModule isActive={on} sidebarEl={on && railModule === 'aiAssistant' ? wbModSlotEl : null} sidebarHosted={on} modActionsEl={on && railModule === 'aiAssistant' ? wbModActionsEl : null} />
       // aiChat = AI 对话中间标签（v3.4.0 批次5，方案 §4）：右栏 AI 态点 ⤢ 进入，关标签自动回右栏小对话。
       // 激活时左栏经 RAIL_FOLLOW_MAP 切 aiChat 模块态——侧栏（会话列表/会话大纲）portal 进 slot
       case 'aiChat': return <AiChatTab active={on} sidebarEl={on && railModule === 'aiChat' ? wbModSlotEl : null} modActionsEl={on && railModule === 'aiChat' ? wbModActionsEl : null} />

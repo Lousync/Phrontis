@@ -2433,3 +2433,20 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **改动点**：`electron/main/uiZoom.ts`（新增）、`electron/main/index.ts`、`electron/main/dayPanelWindow.ts`、`electron/main/passwordFiller.ts`、`src/lib/settings.ts`、`src/App.tsx`、`src/modules/knowledge/index.tsx`、`src/modules/knowledge/components/PageEditor.tsx`、`src/modules/blog/index.tsx`、`src/modules/blog/components/MarkdownEditor.tsx`、`src/daypanel/DayPanelWindowApp.tsx`、`src/modules/settings/views/GeneralView.tsx`（缩放范围/预设备选改读 SETTINGS 真源 + 新增「最大化时自动放大」开关）、`src/lib/commandRegistry.ts`（锚点漂移同步）、`resources/help/常见问题.md`、契约 `.AGENT/scripts/ui-zoom/verify-ui-zoom.mjs`（新增 47 条）。
 
 **验收**：`verify-ui-zoom.mjs` 47/47；双份 `tsc` 0 错；`npm run build` 通过；`verify-commands-registry.mjs`、`verify-shortcuts-table.mjs` 58/58、`verify-workbench-shell.mjs` 264 项、`verify-help-retrieval.mjs` 171/171 全绿。真机观感待验（dev）：窗口态 100% 是否回到旧的舒服比例；点最大化后自动放大到 130% 是否舒服；再还原是否回到 100%；重启 / 切仓库 reload 后保持；日程小窗跟随；PDF 阅读态 Ctrl+= 仍让位给阅读器。
+
+## 2026-10-27 · AI 助手左栏「会话大纲」（v3.13.2 补丁内容）
+
+**需求 / 拍板**：AI 助手会话一长，想跳回某条消息只能靠滚动，当前会话**没有大纲入口**。用户拍板四件事：① 入口放在工作台左栏顶部 🏠/🔒 那一行（与它们同组居中）；② 形态是**切换左栏主体**，不做浮层、不占消息区；③ 只列正文消息（用户提问 + AI 回答），摘要取首行；④ 点条目跳转后自动切回会话列表。范围仅 AI 助手模块，AI 对话页 / 右栏抽屉不动。**版本号不抬**：按用户判断算 3.13.2 补丁内容。
+
+**可交互原型**：`/home/lousync/Projects/Phrontis/tmp/ai-assistant-outline-proto/index.html`（`tmp/` 已 gitignore；`#outline` 直接看大纲态，右下角可切空会话）。
+
+**方案要点**：
+- 入口 = 模块头部动作槽：`App.tsx` 在 `railModule === 'aiAssistant'` 时传 `modActionsEl={wbModActionsEl}`；模块 portal 一个 `ListTree` 按钮进去，图标尺寸走 `SIDEBAR_HEADER_ICON`（15 / 2.4），激活态 `--accent`。
+- 左栏主体切换用**显示 / 隐藏**而非条件渲染：会话主体（作用域树 + 会话列表）保持挂载，展开状态与滚动位置不丢；大纲列表随 `api.messages` 实时更新。
+- 跳转只在**模块自己的消息容器**里找锚点：消息列加 `data-assistant-variant="aiAssistant"`，`jumpToOutline` 先取该容器再 `querySelector('[data-msg-id]')` —— 右栏 / AI 对话页可能保活着同一批消息（同 id），全局查会滚到隐藏实例。id 进选择器前过 `CSS.escape`。
+- 摘要口径抽到 `src/components/shared/AssistantPanel/outlineSummary.ts`（`msgSummary` + `OUTLINE_SUMMARY_MAX = 64`），AI 对话页原本地实现删除，两处共用，避免同一条消息两处标题不同。
+- 只列已落库消息（`m.id` 存在）：乐观 / 流式草稿没有锚点；空态区分「无会话 / 无消息 / 正在思考」。点击后 180ms 切回会话主体（让滚动先起步）。
+
+**改动点**：`src/modules/ai-assistant/index.tsx`、`src/components/shared/AssistantPanel/AiChatSidebar.tsx`、`src/components/shared/AssistantPanel/outlineSummary.ts`（新增）、`src/App.tsx`、`resources/help/AI助手.md`、`CHANGELOG.md`、契约 `.AGENT/scripts/ai-assistant/verify-ai-outline.mjs`（新增 26 条）。
+
+**验收**：`verify-ai-outline.mjs` 26/26；`npx tsc --noEmit`（web / node）双清；`npm run build` 通过；`verify-help-retrieval.mjs` 全绿。真机观感待验（dev）：按钮位置 / 大纲行密度 / 跳转后自动切回是否顺手。
