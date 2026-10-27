@@ -136,13 +136,18 @@ export type LlmStreamEvent =
   | { type: 'done' }
 
 const STREAM_FIRST_BYTE_MS = 60_000
-const STREAM_IDLE_MS = 60_000
+/**
+ * 帧间空闲阈值。2026-10-27：60s → 120s。
+ * 推理模型/慢网关在「思考完、正文还没开始」或长工具入参生成时，60s 无新帧并不等于死流；
+ * 本机审计里成功的流最长到过 172s。再长会拖慢真正死链的发现，故取 2 分钟。
+ */
+const STREAM_IDLE_MS = 120_000
 
 /**
  * 流式超时三阶段（归因方案 §4.1 —— 语义必须分明，否则三种超时又会糊成一团）：
  * ① 连接：net.fetch() → 响应头到达（`CONNECT_TIMEOUT_MS` 30s；此前它是死常数，见 G7）
  * ② 首字节：响应头到达 → 第一个数据帧（60s）
- * ③ 空闲：帧 → 帧（60s，每帧重置）
+ * ③ 空闲：首帧之后，**原始响应字节 → 原始响应字节**（120s，任何字节到达即重置；完整帧也重置）
  * 不可用 AbortSignal.timeout(TOTAL_TIMEOUT_MS)——那会在第 300 秒掐断正常长流。
  * 超时归属由「fetch 是否已 resolve」+「收到几段数据」决定，**不靠耗时猜测**。
  */
@@ -151,6 +156,8 @@ export interface StreamStats {
   chunks: number
   /** 已产出多少字符（content.length / text.length） */
   chars: number
+  /** 已产出的可见正文（只用于中断时落库；思考链不算） */
+  partialText: string
   /** 是否见过正常结束帧（[DONE] / message_stop / done / response.completed） */
   terminator: boolean
   /** 上游停止原因（finish_reason / stop_reason / done_reason；未见结束帧补 'no-terminator'） */
@@ -161,8 +168,11 @@ interface StreamAbortHandle {
   signal: AbortSignal
   /** 响应头已到（fetch resolve）→ 连接阶段结束，转首字节计时 */
   connected: () => void
-  /** 每个数据段：转空闲计时 + 记段数 */
+  /** 每个完整数据帧：转空闲计时 + 记段数 */
   chunk: () => void
+  /** 任意原始响应字节到达：重置当前阶段计时（首帧前按首字节阈值，之后按空闲阈值），不记段数。
+   *  避免「大帧没闭合」被误判为空闲；也不让半帧把首字节超时改写。 */
+  touch: () => void
   timedOutKind: () => 'connect' | 'first-byte' | 'idle' | null
   /** 外部 signal 已 abort（用户点停止）—— 优先于任何超时（B-0） */
   externalAborted: () => boolean
@@ -172,7 +182,7 @@ interface StreamAbortHandle {
 
 function createStreamAbort(external: AbortSignal | undefined): StreamAbortHandle {
   const ctrl = new AbortController()
-  const stats: StreamStats = { chunks: 0, chars: 0, terminator: false }
+  const stats: StreamStats = { chunks: 0, chars: 0, partialText: '', terminator: false }
   let timer: ReturnType<typeof setTimeout> | null = null
   let timedOutKind: 'connect' | 'first-byte' | 'idle' | null = null
   const arm = (ms: number, kind: 'connect' | 'first-byte' | 'idle'): void => {
@@ -189,6 +199,9 @@ function createStreamAbort(external: AbortSignal | undefined): StreamAbortHandle
     signal: ctrl.signal,
     connected: () => arm(STREAM_FIRST_BYTE_MS, 'first-byte'),
     chunk: () => { stats.chunks++; arm(STREAM_IDLE_MS, 'idle') },
+    // 首帧之前仍按首字节阈值计时（避免「半帧」把错误归因成 idle + 0 段）；
+    // 已有完整帧之后才按空闲阈值续命。
+    touch: () => { arm(stats.chunks === 0 ? STREAM_FIRST_BYTE_MS : STREAM_IDLE_MS, stats.chunks === 0 ? 'first-byte' : 'idle') },
     timedOutKind: () => timedOutKind,
     externalAborted: () => !!external?.aborted,
     stats,
@@ -226,11 +239,14 @@ function httpFailure(message: string, status: number, json: any, started: number
 
 /** 适配器 catch 出口：把「超时归属 + 段数 + 已产出 + 结束帧」并进采集面后原样抛出 */
 function failStream(err: unknown, sa: StreamAbortHandle, started: number): never {
+  const partialText = sa.stats.partialText
   const raw = rawFromError(err, {
     externalAborted: sa.externalAborted(),
     ...(sa.timedOutKind() ? { timedOut: sa.timedOutKind() as 'connect' | 'first-byte' | 'idle' } : {}),
     receivedChunks: sa.stats.chunks,
     partialChars: sa.stats.chars,
+    ...(sa.timedOutKind() === 'idle' ? { idleTimeoutMs: STREAM_IDLE_MS } : {}),
+    ...(partialText ? { partialText } : {}),
     sawTerminator: sa.stats.terminator,
     ...(sa.stats.stopReason ? { stopReason: sa.stats.stopReason } : {}),
     elapsedMs: Date.now() - started,
@@ -245,7 +261,7 @@ function failStream(err: unknown, sa: StreamAbortHandle, started: number): never
  * 也可能只有半个）——所以必须带缓冲按空行切帧，残尾留到下个 chunk。
  * 详见 docs/ai-streaming-design.md §5.1.2。
  */
-async function* readFrames(res: Response): AsyncGenerator<string> {
+async function* readFrames(res: Response, onActivity?: () => void): AsyncGenerator<string> {
   const body = res.body
   if (!body) return
   const reader = body.getReader()
@@ -255,6 +271,7 @@ async function* readFrames(res: Response): AsyncGenerator<string> {
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
+      onActivity?.() // 原始字节到达即算「活着」——不等完整帧，避免大帧/半帧被误判为空闲
       buf += dec.decode(value, { stream: true })
       if (buf.indexOf('\r') >= 0) buf = buf.replace(/\r\n/g, '\n')
       let i = buf.indexOf('\n\n')
@@ -271,7 +288,7 @@ async function* readFrames(res: Response): AsyncGenerator<string> {
 }
 
 /** 按行切分读取（Ollama 是 NDJSON 而非 SSE，不能复用 readFrames 的空行分帧） */
-async function* readLines(res: Response): AsyncGenerator<string> {
+async function* readLines(res: Response, onActivity?: () => void): AsyncGenerator<string> {
   const body = res.body
   if (!body) return
   const reader = body.getReader()
@@ -281,6 +298,7 @@ async function* readLines(res: Response): AsyncGenerator<string> {
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
+      onActivity?.() // 同上：按原始字节判定空闲，不按完整行
       buf += dec.decode(value, { stream: true })
       let i = buf.indexOf('\n')
       while (i >= 0) {
@@ -566,7 +584,7 @@ const openAiCompatibleAdapter: Adapter = {
       let content = ''
       const acc = new Map<number, { id: string; name: string; args: string }>()
       let usage: LlmUsage = { promptTokens: 0, completionTokens: 0 }
-      for await (const frame of readFrames(res)) {
+      for await (const frame of readFrames(res, sa.touch)) {
         sa.chunk()
         const data = sseData(frame)
         if (!data) continue
@@ -587,6 +605,7 @@ const openAiCompatibleAdapter: Adapter = {
         if (typeof d?.content === 'string' && d.content) {
           content += d.content
           sa.stats.chars += d.content.length
+          sa.stats.partialText = content
           onEvent({ type: 'text', delta: d.content })
         }
         // 思考链字段名各家不一（reasoning_content / reasoning）：见到即归一化，不做模型名预判
@@ -755,7 +774,7 @@ const ollamaAdapter: Adapter = {
       let content = ''
       let usage = { promptTokens: 0, completionTokens: 0 }
       const toolCalls: ToolCallNormalized[] = []
-      for await (const line of readLines(res)) {
+      for await (const line of readLines(res, sa.touch)) {
         sa.chunk()
         const json = parseWholeJson(line)
         if (!json) continue
@@ -770,6 +789,7 @@ const ollamaAdapter: Adapter = {
         if (typeof m.content === 'string' && m.content) {
           content += m.content
           sa.stats.chars += m.content.length
+          sa.stats.partialText = content
           onEvent({ type: 'text', delta: m.content })
         }
         if (typeof m.thinking === 'string' && m.thinking) {
@@ -970,7 +990,7 @@ const anthropicAdapter: Adapter = {
       let usage: LlmUsage = { promptTokens: 0, completionTokens: 0 }
       /** 按 content block index 收集 tool_use（入参是 input_json_delta 分片拼接） */
       const blocks = new Map<number, { id: string; name: string; json: string }>()
-      for await (const frame of readFrames(res)) {
+      for await (const frame of readFrames(res, sa.touch)) {
         sa.chunk()
         const data = sseData(frame)
         if (!data) continue
@@ -1002,6 +1022,7 @@ const anthropicAdapter: Adapter = {
           if (d.type === 'text_delta' && d.text) {
             text += String(d.text)
             sa.stats.chars += String(d.text).length
+            sa.stats.partialText = text
             onEvent({ type: 'text', delta: String(d.text) })
           } else if (d.type === 'thinking_delta' && d.thinking) {
             sa.stats.chars += String(d.thinking).length
@@ -1111,7 +1132,7 @@ const openAiResponsesAdapter: Adapter = {
       const acc = new Map<number, { id: string; name: string; args: string }>()
       /** response.completed 里的完整 output 是权威结果；拿到就以它为准（见 mergeResponsesResult） */
       let whole: PureChatResult | null = null
-      for await (const frame of readFrames(res)) {
+      for await (const frame of readFrames(res, sa.touch)) {
         sa.chunk()
         const data = sseData(frame)
         if (!data) continue
@@ -1129,7 +1150,7 @@ const openAiResponsesAdapter: Adapter = {
         const type = String(json.type ?? '')
         if (type === 'response.output_text.delta') {
           const d = String(json.delta ?? '')
-          if (d) { text += d; sa.stats.chars += d.length; onEvent({ type: 'text', delta: d }) }
+          if (d) { text += d; sa.stats.chars += d.length; sa.stats.partialText = text; onEvent({ type: 'text', delta: d }) }
         } else if (type === 'response.reasoning_summary_text.delta' || type === 'response.reasoning_text.delta') {
           // 思考链走独立事件（与另两条适配器同口径：只发事件，不落库）
           const d = String(json.delta ?? '')
@@ -1301,6 +1322,8 @@ export type LlmInvokeResponse = {
   interruption?: Interruption
   /** 归因诊断细节（不含正文与 Key） */
   detail?: InterruptionDetail
+  /** 中断前已产出的可见正文（只给主进程续跑落库用；**不发给渲染层**） */
+  partialText?: string
 }
 
 type LlmTarget =
@@ -1555,11 +1578,15 @@ export async function invokeLlmStreamInternal(
       partialChars: raw.partialChars,
       sawTerminator: raw.sawTerminator,
       ...(raw.timedOut ? { timedOut: raw.timedOut } : {}),
+      ...(raw.idleTimeoutMs !== undefined ? { idleTimeoutMs: raw.idleTimeoutMs } : {}),
       ...(raw.httpStatus !== undefined ? { httpStatus: raw.httpStatus } : {}),
       ...(raw.upstreamCode ? { upstreamCode: raw.upstreamCode } : {}),
       error: String((err as Error)?.message ?? err).slice(0, 300),
     })
-    return { ok: false, error: friendlyReason(it, detail), code: it.code, interruption: it, detail }
+    return {
+      ok: false, error: friendlyReason(it, detail), code: it.code, interruption: it, detail,
+      ...(raw.partialText ? { partialText: raw.partialText } : {}),
+    }
   }
 }
 

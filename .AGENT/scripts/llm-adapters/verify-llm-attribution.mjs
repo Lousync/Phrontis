@@ -142,6 +142,14 @@ for (const code of INTERRUPT_CODES) {
 }
 eq('无空文案、无因果词', silent, [])
 
+// 2026-10-27：空闲阈值不再写死 60s —— 文案 / 诊断都要跟随实际配置
+const idleRaw = raw({ raw: '', timedOut: 'idle', receivedChunks: 5, partialChars: 120, idleTimeoutMs: 120_000 })
+const idleDetail = interruptionDetailOf(idleRaw)
+check('空闲超时文案跟随实际阈值（120 秒）', friendlyReason(classifyFailure(idleRaw), idleDetail).includes('120 秒'), friendlyReason(classifyFailure(idleRaw), idleDetail))
+check('诊断块带空闲阈值', buildDiagnostics(classifyFailure(idleRaw), idleDetail).includes('空闲阈值：120s'))
+const partialRaw = raw({ raw: '', timedOut: 'idle', receivedChunks: 5, partialChars: 120, partialText: 'SECRET_PARTIAL_TEXT' })
+check('半截正文不进诊断块（隐私边界）', !buildDiagnostics(classifyFailure(partialRaw), interruptionDetailOf(partialRaw)).includes('SECRET_PARTIAL_TEXT'))
+
 // ===== 5. 诊断块（可一键复制，且不含密钥）=====
 
 console.log('\n[诊断块] 能带走事实、带不走隐私')
@@ -189,6 +197,9 @@ check('文案只在 friendlyReason 产生', (svc.match(/friendlyReason\(/g) ?? [
 eq('四家适配器都接了连接阶段（G7）', (svc.match(/sa\.connected\(\)/g) ?? []).length, 4)
 check('连接超时用的是 CONNECT_TIMEOUT_MS（死常数接上了）', svc.includes('arm(CONNECT_TIMEOUT_MS,'))
 check('超时归属可判（不靠耗时猜）', svc.includes('timedOutKind'))
+check('idle 计时按原始响应字节重置（不等完整帧）', svc.includes('readFrames(res, sa.touch)') && svc.includes('readLines(res, sa.touch)'))
+check('空闲阈值随事实带出（文案/诊断读同一处）', svc.includes('idleTimeoutMs: STREAM_IDLE_MS'))
+check('中断时采集可见半截正文（不落思考链）', svc.includes('sa.stats.partialText') && svc.includes('partialText'))
 check('旧的中文超时串已消失（首字节/空闲分开说）', !svc.includes('流式响应超时（60 秒无数据）'))
 check('OpenAI 兼容认 SSE 内 error 帧（G1）', svc.includes('if (json.error) {'))
 check('Anthropic 认 type=error（G2）', svc.includes("if (type === 'error')"))
@@ -216,6 +227,13 @@ check('没有裸 ABORTED 码（统一 USER_ABORTED）', !/'ABORTED'/.test(agent)
 check('轮内失败带 code + interruption', agent.includes('r.interruption ?? configInterruptionOf(r.code)'))
 check('截断追加提示（B-29）', agent.includes('withTruncationNotice'))
 check('预算触顶区分轮数/token', agent.includes("capKind === 'token-budget'") && agent.includes("loop: capKind"))
+check('中断前半截正文在卡片之前落库（续跑能读到）', agent.includes('appendPartialAnswer') && agent.includes('partialText'))
+
+console.log('\n[接线] AI 教学面续跑入口')
+const teach = read('src/modules/ai-teaching/index.tsx')
+check('AI 教学接上 agentResume', teach.includes('agentResume'))
+check('只有 resumeInfo 指向的那条消息挂「继续」', teach.includes('resumeInfo.messageId === m.id'))
+check('AI 教学没有裸 ABORTED 码', !/'ABORTED'/.test(teach))
 
 console.log('\n[接线] 渲染层四入口 catch（G8；批次 2 起多了续跑入口 resume）')
 const chat = read('src/components/shared/AssistantPanel/useAssistantChat.ts')

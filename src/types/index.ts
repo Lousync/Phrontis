@@ -1319,6 +1319,8 @@ export interface InterruptionDetail {
   /** 收到几段数据（截断场景未知，故可缺省） */
   receivedChunks?: number
   partialChars: number
+  /** 空闲超时阈值（ms，仅 LLM_IDLE_TIMEOUT 有值；卡片文案跟随实际配置） */
+  idleTimeoutMs?: number
   sawTerminator: boolean
   stopReason?: string
   round?: number

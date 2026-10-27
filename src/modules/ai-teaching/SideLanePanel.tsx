@@ -196,7 +196,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
     beginStream()
     setMessages(prev => [...prev, { role: 'user', content: text, createdAt: new Date().toISOString() }])
     const r = await agentChat(laneId, text, undefined, cid, 'aiTeaching')
-    if (r && !r.ok && r.code !== 'ABORTED') showToast({ type: 'error', message: `支线调用失败：${r.error ?? ''}` })
+    if (r && !r.ok && r.code !== 'USER_ABORTED') showToast({ type: 'error', message: `支线调用失败：${r.error ?? ''}` })
     await refresh(laneId)
     endStream()
     setPending(false)
