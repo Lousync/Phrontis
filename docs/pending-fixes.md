@@ -1942,3 +1942,23 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 - **契约**：新增 `.AGENT/scripts/ai-teaching/verify-ask-custom.mjs`（43 条）；更新 `.AGENT/scripts/ai-teaching/verify-ask-collapse.mjs` 的重置断言（11 条）。
 
 **已跑验证**：`tsc --noEmit -p tsconfig.web.json` 0 错；`npm run build` 通过；`verify-ask-custom` 43/43；`verify-ask-collapse` 11/11。真机待验：整卷第 2 题补充 Enter 后行内可见、再补一次有 Toast、翻第 3 题再翻回仍在、已点选项再补充后只剩补充行高亮、中文输入法回车不误提交、整卷 ↑ 带未提交文字能直接发出。
+
+## [x] B-45 AI 助手切换会话时输入框文字串台：多个对话共用一份草稿缓冲区（2026-10-27，P2；用户反馈）
+
+**现象**：在 AI 助手会话 A 输入一段文字但没发送 → 切到会话 B → 输入框仍显示 A 的文字。期望每个对话的输入框独立：A 的草稿只属于 A，切到 B 应为空或 B 自己的草稿；切回 A 时原文还在。
+
+**定位**：
+- 完整 AI 助手模块 `src/modules/ai-assistant/index.tsx` 自己维护 `const [draft, setDraft] = useState('')`，切换任务只改 `api.activeId`，从不换草稿。
+- 共享控制器 `src/components/shared/AssistantPanel/useAssistantChat.ts` 的 `const [input, setInput] = useState('')` 也是单份；`loadSession` / `selectSession` 只换会话数据，不换输入槽位。侧栏 / 浮窗 / AI 对话页 / 日程 / 情报助手都受影响（AI 教学主输入有自己的实现，不在本条范围）。
+
+**修复（2026-10-27，fix/optimize-v3.13.2）**：
+- 新增 `src/lib/assistantDraftStore.ts`：内存级草稿仓库，key = `session:<source>:<id>`；没有活动会话的空白页草稿 key = `new:<source>`，按来源隔离，日程 / 情报不会串进通用助手。空串即删除条目；不落盘、不走 IPC，退出应用即丢弃（按用户口径「仅本次运行内保留」）。
+- `useAssistantChat` 的 `input` 改为 `useSyncExternalStore(subscribeDrafts, ...)` 读取当前会话槽位；`setInput` 写入 `activeIdRef` 对应的槽位。切会话只换 key，不共用字符串；同一会话在完整模块 / 侧栏 / 浮窗 / AI 对话页之间读同一格，可实时同步。
+- 新建会话：从已有会话新建 → 旧会话草稿保留、新会话为空；从「还没有活动会话」的空白页新建 → 把空白页草稿搬进新会话（`moveDraft(newDraftKey, sessionKey(newId))`）。
+- 删除会话：`deleteSessionNow` / `removeSession` 同步清掉该会话草稿，避免幽灵草稿。
+- 完整 AI 助手模块删除本地 `draft` state，改用 `api.input` / `api.setInput`（`useAiAssistant` 暴露同一份共享输入）；发送前的清空也走同一槽位。
+- 未做：跨重启持久化（用户明确选「仅本次运行内」）；输入框的光标位置 / 选中范围不按会话保存（只保存文本）。
+
+**契约**：新增 `.AGENT/scripts/ai-assistant/verify-assistant-drafts.mjs`（30 条，存储 key / 来源隔离 / 切会话 / 新建搬运 / 删除清理 / 完整模块接线）。
+
+**已跑验证**：`tsc --noEmit -p tsconfig.web.json` 0 错；`npm run build` 通过；`verify-assistant-drafts` 30/30；`verify-message-window` 45/45；`verify-assistant-parallel` 36/36；`verify-unified-assistant` 61/61；`verify-scope-guard` 94/94；`verify-perception` 237/237；`verify-plan-rollback` 32/32；`verify-ai-outline` 26/26；`verify-usage-pricing` 21/21。真机待验：A 输入不发送 → 切 B 输入框为空 → 切回 A 原文还在；B 输入 → 切 A 不串；新建后旧会话草稿保留 / 新会话空；空白页输入后新建能带入；删除会话后草稿不复活。

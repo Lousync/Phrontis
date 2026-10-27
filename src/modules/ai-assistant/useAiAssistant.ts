@@ -18,6 +18,9 @@ export interface AiAssistantApi {
   messages: UiMessage[]
   pending: boolean
   draft: ReturnType<typeof useAssistantChat>['draft']
+  /** 当前会话的输入草稿（按会话独立；完整模块与侧栏 / 浮窗共用同一格） */
+  input: string
+  setInput: (v: string) => void
   liveSteps: ReturnType<typeof useAssistantChat>['liveSteps']
   runMark: 'running' | 'failed' | 'unread' | null
   plan: AiChangePlan | null
@@ -72,6 +75,8 @@ export function useAiAssistant(isActive: boolean): AiAssistantApi {
     messages: chat.messages,
     pending: chat.pending,
     draft: chat.draft,
+    input: chat.input,
+    setInput: chat.setInput,
     liveSteps: chat.liveSteps,
     runMark: chat.runMark,
     plan: chat.plan,

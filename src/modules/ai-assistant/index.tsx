@@ -79,7 +79,6 @@ export function AiAssistantModule({
   const api = useAiAssistant(isActive)
   /** 左栏主体：会话（作用域 + 会话列表）/ 会话大纲。只存 UI 状态，不写 Vault。 */
   const [sidebarView, setSidebarView] = useState<'sessions' | 'outline'>('sessions')
-  const [draft, setDraft] = useState('')
   const [rootId, setRootId] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [reviewWidth, setReviewWidth] = useState(520)
@@ -217,7 +216,7 @@ export function AiAssistantModule({
 
   /** 真正开跑（作用域已就绪时才会被调用） */
   const execRun = useCallback((run: PendingRun) => {
-    if (run.kind === 'send') { setDraft(''); void api.send(run.text); return }
+    if (run.kind === 'send') { api.setInput(''); void api.send(run.text); return }
     if (run.kind === 'regenerate') { void api.onRegenerate(); return }
     if (run.kind === 'resume') { void api.onResume(); return }
     void api.onEditSubmit(run.id, run.content)
@@ -247,10 +246,10 @@ export function AiAssistantModule({
   }, [api.pending, api.scope.length, execRun])
 
   const handleSend = useCallback(() => {
-    const text = draft.trim()
+    const text = api.input.trim()
     if (!text) return
     runGuarded({ kind: 'send', text }, text)
-  }, [draft, runGuarded])
+  }, [api.input, runGuarded])
 
   const toggleScopeCard = useCallback((relPath: string) => {
     setScopeCard((prev) => {
@@ -623,9 +622,9 @@ export function AiAssistantModule({
             <AiMascotAnchor />
             <textarea
               ref={composerRef}
-              value={draft}
+              value={api.input}
               spellCheck={false}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => api.setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
               rows={2}
               placeholder={api.scopeAll || api.scope.length ? '描述要整理的内容…（Enter 发送）' : '未选择文件：本轮 AI 不会读写仓库文件…'}
@@ -727,7 +726,7 @@ export function AiAssistantModule({
                 <button
                   type="button"
                   onClick={handleSend}
-                  disabled={!draft.trim()}
+                  disabled={!api.input.trim()}
                   className="kb-micro-pop h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-opacity"
                   title="发送"
                 >

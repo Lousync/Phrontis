@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useReducer, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore, type Dispatch, type SetStateAction } from 'react'
 import { showToast } from '../../../lib/toast'
+import {
+  draftKeyForSession, draftKeyForNew, getDraft, setDraft, moveDraft, deleteDraft, subscribeDrafts,
+} from '../../../lib/assistantDraftStore'
 import { handleChatCommand } from '../../../lib/chatCommands'
 import { getAssistantContext } from '../../../lib/assistantContext'
 import { useSettings } from '../../../lib/SettingsContext'
@@ -221,6 +224,9 @@ function contextKeyOf(c: AgentContextInfo | null): string | null {
 
 export function useAssistantChat(options: AssistantChatOptions): AssistantChatController {
   const { active, sessionSource } = options
+  /** 草稿来源：通用助手（完整模块 / 右栏 / 浮窗 / AI 对话页）默认 assistant；日程、情报各自隔离 */
+  const draftSource = sessionSource ?? 'assistant'
+  const newDraftKey = draftKeyForNew(draftSource)
   const unified = options.unified !== false && !sessionSource
   const autoResumeToday = options.autoResumeToday === true
   /**
@@ -268,7 +274,23 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   /** 大纲跳转请求（nonce 递增保证同一 id 连点也能再次滚动） */
   const [reveal, setReveal] = useState<{ id: string; nonce: number } | null>(null)
   const revealNonceRef = useRef(0)
-  const [input, setInput] = useState('')
+  /** 当前会话 id 的实时镜像：setInput 取当前草稿槽位 / 回复返回时判断用户是否已切换会话 */
+  const activeIdRef = useRef<string | null>(null)
+  /**
+   * 输入框 = 当前会话的草稿（assistantDraftStore 内存单例）。
+   * 切会话只换 key，不共用一份字符串；同一会话在完整模块 / 侧栏 / 浮窗之间也读同一格。
+   */
+  const inputKey = activeId ? draftKeyForSession(activeId, draftSource) : newDraftKey
+  const getInputSnapshot = useCallback(() => getDraft(inputKey), [inputKey])
+  const input = useSyncExternalStore(subscribeDrafts, getInputSnapshot, () => '')
+  const setInput = useCallback((v: string) => {
+    const sid = activeIdRef.current
+    setDraft(sid ? draftKeyForSession(sid, draftSource) : newDraftKey, v)
+  }, [draftSource, newDraftKey])
+  /** 只清指定会话的草稿：发送 / 斜杠指令在 await 期间切了会话也不会误清新会话 */
+  const clearInputFor = useCallback((sid: string | null) => {
+    setDraft(sid ? draftKeyForSession(sid, draftSource) : newDraftKey, '')
+  }, [draftSource, newDraftKey])
   // / 弹层（指令 + 已装 Skill）与 Skill 显式调用 chip、压缩进行时占位
   const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
   const [pickedSkill, setPickedSkill] = useState<SkillInfo | null>(null)
@@ -320,8 +342,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   /** send 的自引用（提示型指令 /简报 的 onSend 用）：避免在 send 内部直接递归引用自身 */
   const sendRef = useRef<((override?: string) => Promise<void>) | null>(null)
-  /** 当前会话 id 的实时镜像：回复返回时判断用户是否已切换会话 */
-  const activeIdRef = useRef<string | null>(null)
+  // 会话切换时同步镜像（loadSession/newSession 里也会先同步写，防快速连点）
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
   /** 作用域落库防抖（400ms）；切会话前 flush，避免「刚勾完就切走」丢改动 */
   const scopeTimerRef = useRef<number | null>(null)
@@ -624,7 +645,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     flushScope()
     // 从已有会话点「新建」= 回到默认整仓 + 直接执行；
     // 首次发送前（没有活动会话）创建 = 沿用户刚在输入区选好的草稿设置。
-    const hadActive = !!activeIdRef.current
+    const prevSid = activeIdRef.current
+    const hadActive = !!prevSid
     const targetScopeAll = hadActive ? true : scopeAll
     const targetScope = targetScopeAll ? [] : scope
     const targetWriteMode = hadActive ? 'direct' : writeMode
@@ -648,6 +670,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     } else {
       setSessions(prev => [sRow, ...prev])
     }
+    // 从「还没有活动会话」的空白页新建：把那段草稿带进新会话；从已有会话新建则新会话为空
+    if (prevSid === null && activeIdRef.current === null) moveDraft(newDraftKey, draftKeyForSession(sRow.id, draftSource))
     setActiveIdState(sRow.id)
     activeIdRef.current = sRow.id
     setMessages([])
@@ -659,7 +683,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     setWriteModeState(targetWriteMode)
     closeDrawer()
     return sRow
-  }, [closeDrawer, flushScope, sessionSource, unified, scopeAll, scope, writeMode, modelId, effort])
+  }, [closeDrawer, flushScope, sessionSource, unified, scopeAll, scope, writeMode, modelId, effort, draftSource, newDraftKey])
 
   const selectSession = useCallback((id: string | null) => {
     if (!id) {
@@ -675,6 +699,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
 
   const deleteSessionNow = useCallback(async (id: string) => {
     await agentDeleteSession(id)
+    deleteDraft(draftKeyForSession(id, draftSource))
     setSessions(prev => prev.filter(x => x.id !== id))
     if (activeIdRef.current === id) {
       setActiveIdState(null)
@@ -683,7 +708,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setWindowStart(0)
       setReveal(null)
     }
-  }, [])
+  }, [draftSource])
 
   const renameSession = useCallback(async (id: string, title: string) => {
     const t = title.trim().slice(0, 40)
@@ -717,6 +742,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     }
     setDeletingId(null)
     await agentDeleteSession(id)
+    deleteDraft(draftKeyForSession(id, draftSource))
     setSessions(prev => prev.filter(x => x.id !== id))
     if (activeIdRef.current === id) {
       setActiveIdState(null)
@@ -725,7 +751,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       setWindowStart(0)
       setReveal(null)
     }
-  }, [deletingId])
+  }, [deletingId, draftSource])
 
   /** 钉住 / 取消钉住（通用助手「★ 收藏」分区）：乐观更新，落盘失败再拉库对齐 */
   const togglePin = useCallback(async (id: string) => {
@@ -768,6 +794,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
 
   const send = useCallback(async (override?: string) => {
     const raw = (override ?? input).trim()
+    /** 本次发送属于哪个会话：斜杠指令 / await 期间切会话时按它清草稿，不误清当前视图 */
+    const draftSid = activeIdRef.current
     // 宿主预处理（悬浮版：划词引用块并入正文并清空——body 为空但仍有引用时返回纯引用正文；
     // 其他宿主原样返回 raw）。返回空串 = 无可发送内容，取消本次发送
     const body = options.prepareBody ? options.prepareBody(raw) : raw
@@ -786,17 +814,17 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     // 斜杠指令（/compress 等）：命中即拦截执行，不进对话（置于 pending 检查后，避免生成中并发压缩）
     if (body.startsWith('/')) {
       if (await handleChatCommand(body, {
-        sessionId: activeIdRef.current ?? '',
+        sessionId: draftSid ?? '',
         surface: options.surfaceOf ? options.surfaceOf() : 'assistant',
         onProgress: p => setCompressing(p.active),
         // 提示型指令（/简报 等）：命中即把 prompt 当作用户消息发出（走正常 send 流程）
         onSend: (t) => { void sendRef.current?.(t) },
       })) {
-        if (!override) setInput('')
+        if (!override) clearInputFor(draftSid)
         return
       }
     }
-    let sid = activeIdRef.current
+    let sid = draftSid
     if (!sid) {
       const sRow = await newSession()
       if (!sRow) return
@@ -826,7 +854,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     }
     const outgoingCtx = unifiedContextOf(finalCtx)
     setMessages(prev => [...prev, { role: 'user', content: body, createdAt: nowLocal() }])
-    setInput('')
+    clearInputFor(sid)
     beginRun(sid)
     setLastChanges(null)
     const cid = crypto.randomUUID()
@@ -864,7 +892,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       void refreshPlan()
       void refreshUsage()
     }
-  }, [input, pickedSkill, flushScope, refreshMessages, refreshSessions, refreshPlan, refreshUsage, options, attachedFiles, modelId, effort, contextRemoved, resolveCtx, sessionSource, unified, scopeAll, scope, writeMode, unifiedContextOf, newSession, pathInScope])
+  }, [input, clearInputFor, pickedSkill, flushScope, refreshMessages, refreshSessions, refreshPlan, refreshUsage, options, attachedFiles, modelId, effort, contextRemoved, resolveCtx, sessionSource, unified, scopeAll, scope, writeMode, unifiedContextOf, newSession, pathInScope])
   sendRef.current = send
 
   /** 重新生成最后一条回复（末条为助手消息时可用） */
