@@ -102,11 +102,8 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
     [messages],
   )
 
-  /** 大纲点击 → 消息区滚动定位（消息行带 data-msg-id 锚点，跨容器无需 ref 穿透） */
-  const jumpTo = (id: string) => {
-    const el = document.querySelector(`[data-assistant-variant="page"] [data-msg-id="${id}"]`)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+  /** 大纲点击 → 控制器统一收口（必要时展开渲染窗口，再由 MessageList 滚动定位） */
+  const jumpTo = (id: string) => { chat.revealMessage(id) }
 
   if (!container) return null
 

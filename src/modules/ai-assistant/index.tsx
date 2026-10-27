@@ -192,16 +192,15 @@ export function AiAssistantModule({
   }, [sidebarHosted, sidebarEl])
 
   /**
-   * 大纲跳转：只在**本模块**的消息容器里找锚点 —— 右栏 / AI 对话页可能同时保活着同一批消息
-   * （同 id），全局 querySelector 会跳到隐藏的那个实例上。
+   * 大纲跳转：交给控制器统一收口（render 窗口可能没挂目标消息，控制器会先把窗口
+   * 展开到目标所在轮，再由 MessageList 滚动 —— 不再用全局 [data-msg-id] 查 DOM，
+   * 避免右栏 / AI 对话页的保活实例同 id 串台）。
    */
   const jumpToOutline = useCallback((id: string) => {
-    const root = document.querySelector('[data-assistant-variant="aiAssistant"]')
-    const el = root?.querySelector(`[data-msg-id="${CSS.escape(id)}"]`)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    api.revealMessage(id)
     // 跳转后关闭（2026-10-27 拍板）：留 180ms 让滚动先起步，再切回会话主体
     window.setTimeout(() => setSidebarView('sessions'), 180)
-  }, [])
+  }, [api])
 
   /** 大纲态 Esc 返回；焦点在输入框时不抢键（避免和输入法 / 斜杠命令的 Esc 打架） */
   useEffect(() => {
@@ -534,6 +533,10 @@ export function AiAssistantModule({
             pending={api.pending}
             liveSteps={api.liveSteps}
             draft={api.draft}
+            sessionKey={api.activeId}
+            windowStart={api.windowStart}
+            onLoadEarlier={api.loadEarlier}
+            reveal={api.reveal}
             editing={api.editing}
             setEditing={api.setEditing}
             copiedIdx={api.copiedIdx}

@@ -40,6 +40,11 @@ export interface AiAssistantApi {
   writeMode: 'direct' | 'confirm'
   setWriteMode: (mode: 'direct' | 'confirm') => void
   setActiveId: (id: string | null) => void
+  /** 渲染窗口起点：长会话只挂最近 10 轮，数据仍是全量 */
+  windowStart: number
+  loadEarlier: () => void
+  reveal: { id: string; nonce: number } | null
+  revealMessage: (id: string) => void
   newSession: () => Promise<AgentSessionInfo | null>
   deleteSession: (id: string) => Promise<void>
   renameSession: (id: string, title: string) => Promise<void>
@@ -89,6 +94,10 @@ export function useAiAssistant(isActive: boolean): AiAssistantApi {
     writeMode: chat.writeMode,
     setWriteMode: chat.setWriteMode,
     setActiveId: chat.setActiveId,
+    windowStart: chat.windowStart,
+    loadEarlier: chat.loadEarlier,
+    reveal: chat.reveal,
+    revealMessage: chat.revealMessage,
     newSession: () => chat.newSession('新会话'),
     deleteSession: chat.deleteSessionNow,
     renameSession: chat.renameSession,

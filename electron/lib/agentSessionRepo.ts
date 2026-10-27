@@ -10,7 +10,7 @@ import { normalizeSessionFields } from './agentSessionNormalizePure'
 import type { SessionResume } from './agentInterruptPure'
 import {
   appendMessage, deleteMessageById, deleteMessagesAfterId, deleteMessagesFile,
-  getMessagesPage, migrateLegacyMessages, readMessages, updateMessageContent as storeUpdateMessageContent,
+  getAllMessages, getMessagesPage, migrateLegacyMessages, readMessages, updateMessageContent as storeUpdateMessageContent,
   type AgentMessageRow,
 } from './agentMessageStore'
 
@@ -608,10 +608,24 @@ export function ensureSessionTitle(sessionId: string, firstUserMessage: string):
 
 export function getAgentMessages(sessionId: string): AgentMessageRow[] {
   // 原 SQL：WHERE session_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 500（取最早 500 条）
+  // ★ 这是 **agent 上下文路径** 的口径（压缩 / 注入预算都按它算），别改成全量。
   ensureMigrated()
   const dir = vaultAgentDir()
   // 读路径：无仓库 = 空（调用方拿到的就是「这个仓库没这条会话」，与跨仓库陈旧 id 同一表现）
   return dir ? getMessagesPage(dir, sessionId) : []
+}
+
+/**
+ * UI 读路径：全量消息（不截断）。
+ *
+ * 渲染层需要完整历史来画会话大纲、跳回旧消息、整任务回滚；「只挂最近 N 轮」由
+ * `MessageList` 的渲染窗口负责，不是在这里截数据。超过 500 条的会话此前会从最新处
+ * 被截掉（旧 SQL LIMIT 语义只给 agent 上下文保留）。
+ */
+export function getAgentMessagesAll(sessionId: string): AgentMessageRow[] {
+  ensureMigrated()
+  const dir = vaultAgentDir()
+  return dir ? getAllMessages(dir, sessionId) : []
 }
 
 export function getMessageById(sessionId: string, id: string): AgentMessageRow | null {

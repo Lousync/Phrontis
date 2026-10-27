@@ -61,15 +61,14 @@ ok(/sidebarView !== 'outline'\) return[\s\S]{0,500}?Escape[\s\S]{0,500}?setSideb
   'C8 大纲态 Esc 返回（输入框内不抢键）')
 
 console.log('\n=== D. 跳转定位 ===')
-ok(/data-assistant-variant="aiAssistant"/.test(mod), 'D1 模块消息容器有独立作用域标记')
-ok(/querySelector\('\[data-assistant-variant="aiAssistant"\]'\)/.test(mod),
-  'D2 跳转只在模块自己的容器里找锚点')
-ok(/CSS\.escape\(id\)/.test(mod), 'D3 id 进选择器前转义')
-ok(/scrollIntoView\(\{ behavior: 'smooth', block: 'start' \}\)/.test(mod), 'D4 平滑滚到消息顶部')
+ok(/data-assistant-variant="aiAssistant"/.test(mod), 'D1 模块消息容器保留作用域标记（探针 / 调试）')
+ok(/api\.revealMessage\(id\)/.test(mod), 'D2 大纲跳转交给控制器（不再自己查 DOM）')
+ok(/reveal=\{api\.reveal\}/.test(mod), 'D3 跳转请求通过 reveal prop 交给 MessageList')
+ok(/windowStart=\{api\.windowStart\}/.test(mod) && /onLoadEarlier=\{api\.loadEarlier\}/.test(mod),
+  'D4 模块接入渲染窗口（跳转前可先展开窗口）')
 ok(/setTimeout\(\(\) => setSidebarView\('sessions'\), 180\)/.test(mod), 'D5 跳转后 180ms 切回会话主体')
-const jumpBlock = (mod.match(/const jumpToOutline = useCallback[\s\S]{0,700}?\n  \}, \[\]\)/) || [''])[0]
-ok(!!jumpBlock && !/document\.querySelector\(`\[data-msg-id/.test(jumpBlock),
-  'D6 禁止全局按 data-msg-id 找锚点（保活实例会串台）')
+ok(!/document\.querySelector\('\[data-assistant-variant="aiAssistant"\]'\)/.test(mod),
+  'D6 不得再全局查 data-msg-id（右栏 / AI 对话页保活实例会串台）')
 ok(/\.filter\(\(m\) => m\.id\)/.test(mod), 'D7 大纲只列已落库消息（乐观 / 流式草稿没有锚点）')
 
 console.log('\n=== E. 空态 ===')

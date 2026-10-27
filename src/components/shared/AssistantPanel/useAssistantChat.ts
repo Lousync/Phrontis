@@ -18,6 +18,7 @@ import {
   MAX_PARALLEL, subscribeAssistantRunState, getRunBucket, isSessionRunning, runningSessionCount,
   runMarkOf, beginRun, endRun, markSessionViewed, unmarkSessionViewed, takeEndedFor,
 } from '../../../lib/assistantRunStore'
+import { initialWindowStart, earlierWindowStart, revealWindowStart } from './messageWindow'
 import type { UiMessage } from './MessageList'
 
 /**
@@ -124,6 +125,14 @@ export interface AssistantChatController {
   loadSession: (id: string) => Promise<void>
   /** 切会话（兼容旧 AI助手模块的同步 API）：内部走 loadSession */
   setActiveId: (id: string | null) => void
+  /** 渲染窗口起点（messages 数组下标）：MessageList 只挂载 messages.slice(windowStart) */
+  windowStart: number
+  /** 上滚加载更早的 10 轮；已到顶时 no-op */
+  loadEarlier: () => void
+  /** 大纲跳转请求：nonce 变化时由 MessageList 定位并滚动（必要时自动展开窗口） */
+  reveal: { id: string; nonce: number } | null
+  /** 请求定位到某条消息；消息不在当前窗口时先把窗口展开到它所在轮 */
+  revealMessage: (id: string) => void
   removeSession: (id: string) => Promise<void>
   /** 立即删除（旧 AI助手模块用；抽屉仍走 removeSession 的二次确认） */
   deleteSessionNow: (id: string) => Promise<void>
@@ -254,6 +263,11 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const [providersOk, setProvidersOk] = useState<boolean | null>(null)
   const [activeId, setActiveIdState] = useState<string | null>(null)
   const [messages, setMessages] = useState<UiMessage[]>([])
+  /** 渲染窗口：只挂 messages.slice(windowStart)，数据本身仍是全量（大纲 / 跳转不受影响） */
+  const [windowStart, setWindowStart] = useState(0)
+  /** 大纲跳转请求（nonce 递增保证同一 id 连点也能再次滚动） */
+  const [reveal, setReveal] = useState<{ id: string; nonce: number } | null>(null)
+  const revealNonceRef = useRef(0)
   const [input, setInput] = useState('')
   // / 弹层（指令 + 已装 Skill）与 Skill 显式调用 chip、压缩进行时占位
   const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
@@ -427,7 +441,12 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     if (activeIdRef.current !== sid) return
     try {
       const rows: AgentStoredMessage[] = await agentMessages(sid)
-      if (activeIdRef.current === sid) setMessages(rows.map(toUi))
+      if (activeIdRef.current === sid) {
+        const ui = rows.map(toUi)
+        setMessages(ui)
+        // 同会话刷新（发送 / 删除 / 压缩）不动用户已加载的窗口；长度缩到起点之后时回到末尾 10 轮
+        setWindowStart((s) => (s >= ui.length ? initialWindowStart(ui) : s))
+      }
     } catch { /* keep current */ }
   }, [])
   refreshMessagesRef.current = refreshMessages
@@ -566,14 +585,40 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
 
   const loadSession = useCallback(async (id: string) => {
     flushScope()
+    // 同步镜像先切：连续快速切会话时，后到的 fetch 不能把前一个会话的消息写回来
+    activeIdRef.current = id
     setActiveIdState(id)
     setPlan(null)
+    setReveal(null)
     closeDrawer()
     try {
       const rows: AgentStoredMessage[] = await agentMessages(id)
-      setMessages(rows.map(toUi))
-    } catch { setMessages([]) }
+      if (activeIdRef.current !== id) return
+      const ui = rows.map(toUi)
+      setMessages(ui)
+      // 首屏只挂最近 10 轮；数据全量，向上滚动 / 大纲跳转再展开
+      setWindowStart(initialWindowStart(ui))
+    } catch {
+      if (activeIdRef.current === id) {
+        setMessages([])
+        setWindowStart(0)
+      }
+    }
   }, [closeDrawer, flushScope])
+
+  /** 上滚加载更早一屏（纯内存，无 IPC —— 数据本来就是全量） */
+  const loadEarlier = useCallback(() => {
+    setWindowStart((s) => earlierWindowStart(messages, s))
+  }, [messages])
+
+  /** 大纲 / 跳转入口：必要时把窗口展开到目标所在轮，再让 MessageList 滚动 */
+  const revealMessage = useCallback((id: string) => {
+    const start = revealWindowStart(messages, id)
+    if (start === null) return
+    setWindowStart((s) => (start < s ? start : s))
+    revealNonceRef.current += 1
+    setReveal({ id, nonce: revealNonceRef.current })
+  }, [messages])
 
   const newSession = useCallback(async (title?: string): Promise<AgentSessionInfo | null> => {
     flushScope()
@@ -606,6 +651,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     setActiveIdState(sRow.id)
     activeIdRef.current = sRow.id
     setMessages([])
+    setWindowStart(0)
+    setReveal(null)
     setPlan(null)
     setScopeState(targetScope)
     setScopeAllState(targetScopeAll)
@@ -615,14 +662,27 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   }, [closeDrawer, flushScope, sessionSource, unified, scopeAll, scope, writeMode, modelId, effort])
 
   const selectSession = useCallback((id: string | null) => {
-    if (!id) { setActiveIdState(null); activeIdRef.current = null; setMessages([]); return }
+    if (!id) {
+      setActiveIdState(null)
+      activeIdRef.current = null
+      setMessages([])
+      setWindowStart(0)
+      setReveal(null)
+      return
+    }
     void loadSession(id)
   }, [loadSession])
 
   const deleteSessionNow = useCallback(async (id: string) => {
     await agentDeleteSession(id)
     setSessions(prev => prev.filter(x => x.id !== id))
-    if (activeIdRef.current === id) { setActiveIdState(null); activeIdRef.current = null; setMessages([]) }
+    if (activeIdRef.current === id) {
+      setActiveIdState(null)
+      activeIdRef.current = null
+      setMessages([])
+      setWindowStart(0)
+      setReveal(null)
+    }
   }, [])
 
   const renameSession = useCallback(async (id: string, title: string) => {
@@ -658,7 +718,13 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     setDeletingId(null)
     await agentDeleteSession(id)
     setSessions(prev => prev.filter(x => x.id !== id))
-    if (activeIdRef.current === id) { setActiveIdState(null); activeIdRef.current = null; setMessages([]) }
+    if (activeIdRef.current === id) {
+      setActiveIdState(null)
+      activeIdRef.current = null
+      setMessages([])
+      setWindowStart(0)
+      setReveal(null)
+    }
   }, [deletingId])
 
   /** 钉住 / 取消钉住（通用助手「★ 收藏」分区）：乐观更新，落盘失败再拉库对齐 */
@@ -1023,6 +1089,10 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     newSession,
     loadSession,
     setActiveId: selectSession,
+    windowStart,
+    loadEarlier,
+    reveal,
+    revealMessage,
     removeSession,
     deleteSessionNow,
     renameSession,

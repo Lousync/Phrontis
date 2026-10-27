@@ -106,18 +106,30 @@ export function deleteMessagesFile(baseDir: string, sessionId: string): void {
 }
 
 /**
- * v1 排序语义（原 SQL：ORDER BY created_at ASC, rowid ASC）：
- * created_at 同秒内按写入序（行序）平局决胜，然后取最早 500 条。
+ * 全量消息（排序同 v1：created_at ASC, 行序平局）。
+ *
+ * UI 读路径（AI 助手 / 右栏 / AI 对话页 / AI 教学）需要完整历史来画会话大纲、
+ * 跳回旧消息、整任务回滚 —— 不能被分页截断。渲染窗口在渲染层负责「只挂最近几轮」，
+ * 与这里的「全量读取」是两件事。
  */
-export function getMessagesPage(baseDir: string, sessionId: string, limit = 500): AgentMessageRow[] {
+export function getAllMessages(baseDir: string, sessionId: string): AgentMessageRow[] {
   return readMessages(baseDir, sessionId)
     .map((m, i) => ({ m, i }))
     .sort((a, b) => {
       if (a.m.created_at !== b.m.created_at) return a.m.created_at < b.m.created_at ? -1 : 1
       return a.i - b.i
     })
-    .slice(0, limit)
     .map((x) => x.m)
+}
+
+/**
+ * v1 分页语义（原 SQL：ORDER BY created_at ASC, rowid ASC）：
+ * created_at 同秒内按写入序（行序）平局决胜，然后取最早 limit 条。
+ * **只给 agent 上下文路径用**（`getAgentMessages`）；UI 不要走这里，否则超过 500 条
+ * 会从最新处截断（历史 bug）。
+ */
+export function getMessagesPage(baseDir: string, sessionId: string, limit = 500): AgentMessageRow[] {
+  return getAllMessages(baseDir, sessionId).slice(0, limit)
 }
 
 /** 编辑消息内容并清 trace（编辑重推语义：旧回复链随之作废） */

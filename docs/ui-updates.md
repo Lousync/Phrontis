@@ -2443,10 +2443,34 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **方案要点**：
 - 入口 = 模块头部动作槽：`App.tsx` 在 `railModule === 'aiAssistant'` 时传 `modActionsEl={wbModActionsEl}`；模块 portal 一个 `ListTree` 按钮进去，图标尺寸走 `SIDEBAR_HEADER_ICON`（15 / 2.4），激活态 `--accent`。
 - 左栏主体切换用**显示 / 隐藏**而非条件渲染：会话主体（作用域树 + 会话列表）保持挂载，展开状态与滚动位置不丢；大纲列表随 `api.messages` 实时更新。
-- 跳转只在**模块自己的消息容器**里找锚点：消息列加 `data-assistant-variant="aiAssistant"`，`jumpToOutline` 先取该容器再 `querySelector('[data-msg-id]')` —— 右栏 / AI 对话页可能保活着同一批消息（同 id），全局查会滚到隐藏实例。id 进选择器前过 `CSS.escape`。
+- 跳转走控制器 `revealMessage`：渲染窗口下目标可能未挂载，控制器先把窗口展开到目标所在轮，再由 `MessageList` 滚动；不再用全局 `data-msg-id` 查 DOM（右栏 / AI 对话页的保活实例同 id 会串台）。
 - 摘要口径抽到 `src/components/shared/AssistantPanel/outlineSummary.ts`（`msgSummary` + `OUTLINE_SUMMARY_MAX = 64`），AI 对话页原本地实现删除，两处共用，避免同一条消息两处标题不同。
 - 只列已落库消息（`m.id` 存在）：乐观 / 流式草稿没有锚点；空态区分「无会话 / 无消息 / 正在思考」。点击后 180ms 切回会话主体（让滚动先起步）。
 
 **改动点**：`src/modules/ai-assistant/index.tsx`、`src/components/shared/AssistantPanel/AiChatSidebar.tsx`、`src/components/shared/AssistantPanel/outlineSummary.ts`（新增）、`src/App.tsx`、`resources/help/AI助手.md`、`CHANGELOG.md`、契约 `.AGENT/scripts/ai-assistant/verify-ai-outline.mjs`（新增 26 条）。
 
 **验收**：`verify-ai-outline.mjs` 26/26；`npx tsc --noEmit`（web / node）双清；`npm run build` 通过；`verify-help-retrieval.mjs` 全绿。真机观感待验（dev）：按钮位置 / 大纲行密度 / 跳转后自动切回是否顺手。
+
+## 2026-10-27 · 长会话切换卡顿：渲染窗口（v3.13.2 补丁内容）
+
+**现象**：某个会话内容一多，切换过去明显卡顿。
+
+**实测（本机最大会话 217 条 / 699 KB）**：
+- 主进程读取 + JSON 解析 + 排序 + 序列化：约 9–15ms（IPC 载荷 399KB）。
+- Markdown 渲染基准（服务端、仅 106 条 AI 回复）：10 条 ≈171ms / 20 条 ≈274ms / 40 条 ≈372ms / 106 条 ≈592ms。
+- 结论：**卡在渲染（react-markdown 解析 + 挂 DOM），不在加载**。另外发现 `getMessagesPage` 的 `LIMIT 500` 取最早 500 条 —— 会话超过 500 条时会从最新处截断（潜在 bug）。
+
+**拍板（2026-10-27）**：先做 A 渲染窗口 —— 数据仍全量，只挂最近 10 轮；上滚到顶自动加载更早 10 轮；数据分页 / 消息索引留到几千条时再做。
+
+**方案**：
+- `messageWindow.ts` 纯函数：`initialWindowStart` / `earlierWindowStart` / `revealWindowStart`，以「轮」为单位、永远从用户消息开始，不切半轮。
+- 控制器 `useAssistantChat` 持有 `windowStart` / `reveal`：`loadSession` 后设末尾 10 轮，切会话重置；`loadEarlier` 纯内存展开；`revealMessage` 先把窗口展开到目标轮再发 reveal。
+- `MessageList` 只渲染 `windowStart` 之后的消息（保留原下标给复制 / 重发）：顶部哨兵 + IntersectionObserver 近顶自动加载；加载前记 `scrollHeight`，加载后补偿 `scrollTop`；`sessionKey` 变化回底（修「上一个会话滚到中间时新会话不回底」的存量问题）；`reveal` nonce 触发平滑滚动，并停掉贴底跟随（流式中不会被拉回底部）。
+- 大纲跳转（AI 助手模块 + AI 对话页）统一改走 `revealMessage`，不再全局查 `data-msg-id`。
+- UI 读全量：新增 `getAllMessages` / `getAgentMessagesAll`，`agent:messages` 改走全量；`getAgentMessages`（agent 上下文 / 压缩）保留原 500 条分页口径，两边语义分开。
+
+**改动点**：`src/components/shared/AssistantPanel/messageWindow.ts`（新增）、`MessageList.tsx`、`useAssistantChat.ts`、`ChatBody.tsx`、`AiChatSidebar.tsx`、`src/modules/ai-assistant/useAiAssistant.ts`、`index.tsx`、`electron/lib/agentMessageStore.ts`、`agentSessionRepo.ts`、`agentService.ts`、帮助手册、CHANGELOG、契约 `.AGENT/scripts/ai-assistant/verify-message-window.mjs`（45 条）+ `verify-ai-outline.mjs`（26 条更新）。
+
+**验收**：`verify-message-window` 45/45；`verify-ai-outline` 26/26；双 tsc 0 错；`npm run build` 通过；既有 unified-assistant / scope-guard / workbench-shell / ui-zoom / help-retrieval 全绿。真机观感待验：217 条会话的切换耗时、上滚加载是否跳、流式中大纲跳转是否被拉回底部。
+
+**未做 / 下一步**：真数据分页 + 消息索引 + 双向窗口（几千条时再做）；AI 教学用自己的渲染器，本轮只修了它的数据截断，没套渲染窗口；「跳到很旧的消息」仍需一次性展开到目标（到目标之后的全部消息），极长会话的显式跳转可能仍有几百 ms。
