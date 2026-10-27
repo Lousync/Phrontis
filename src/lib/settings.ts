@@ -338,7 +338,7 @@ export const SETTINGS = {
   //   `affects: 'live'` 名副其实：`settings:set` 里挂了 `applyBookMarketProxy`，改了立刻生效。
   bookMarketProxy: { default: '', type: 'text', label: '书市代理', group: '书市', desc: '书市网络请求使用的代理（如 http://127.0.0.1:7890 或 socks5://…），留空直连；只影响书市，不影响 AI 对话与更新', keywords: ['书市', '代理', 'proxy', '网络', 'socks5', '书源', '下载'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'bookMarket.proxy' },
 
-  // ---- 情报（v3.12.0，docs/intel-module-plan.md §8）：抓取节奏 / 8 源开关 / 体量控制 ----
+  // ---- 情报（v3.12.0，docs/intel-module-plan.md §8）：抓取节奏 / 13 源开关 / 体量控制 ----
   // 抓取器与 scheduler 一律 getSetting('intel.*') 取值，主进程侧 fallback 见 electron/lib/intel/intelSettings.ts
   'intel.interval': { default: '3h', type: 'select', label: '自动抓取间隔', group: '情报', desc: '后台按间隔自动拉新；「关闭」后仅手动刷新', keywords: ['情报', '抓取', '间隔', '自动', 'intel', '刷新'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.interval' },
   'intel.source.github': { default: true, type: 'toggle', label: 'GitHub 新晋高星', group: '情报', desc: '最近 7 天创建、Star 增长最快的仓库（官方 Search API，免 Key）', keywords: ['情报', 'github', '源', '开源', '仓库'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.source.github' },
@@ -349,6 +349,8 @@ export const SETTINGS = {
   'intel.source.hf': { default: true, type: 'toggle', label: 'HF Daily Papers', group: '情报', desc: '社区点赞筛选的每日 AI 论文；API 基址可配镜像（intel.hfBase）', keywords: ['情报', 'hf', 'huggingface', '论文', '源'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.source.hf' },
   'intel.source.labs': { default: true, type: 'toggle', label: 'AI 官方博客', group: '情报', desc: 'DeepMind / OpenAI 官方 RSS + Anthropic 页面解析，标题前缀区分', keywords: ['情报', '官方博客', 'deepmind', 'openai', 'anthropic', '源'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.source.labs' },
   'intel.source.qbitai': { default: true, type: 'toggle', label: '量子位', group: '情报', desc: '中文 AI 资讯（官方 RSS，大陆可达）', keywords: ['情报', '量子位', '中文', '源', 'qbitai'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.source.qbitai' },
+  'intel.source.cnblogs': { default: true, type: 'toggle', label: '博客园', group: '情报', desc: '首页最新技术博客（官方 Atom）', keywords: ['情报', '博客园', 'cnblogs', '中文', '源'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.source.cnblogs' },
+  'intel.source.csdn': { default: true, type: 'toggle', label: 'CSDN·人工智能', group: '情报', desc: '人工智能频道最新文章（公开页面解析，站点改版时只改一个适配器）', keywords: ['情报', 'csdn', '人工智能', '中文', '源'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.source.csdn' },
   // 新闻版面 3 源（v2.1：人民网/新浪 4 个 feed 已冻结验证死源，替换为中新网国际；自定义 RSS 源不进 SETTINGS）
   'intel.source.chinanews': { default: true, type: 'toggle', label: '中新网·滚动', group: '情报', desc: '时政·国内版面（滚动要闻 RSS）', keywords: ['情报', '中新网', '滚动', '源'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.source.chinanews' },
   'intel.source.chinanews_world': { default: true, type: 'toggle', label: '中新网·国际', group: '情报', desc: '国际版面（国际频道 RSS）', keywords: ['情报', '中新网', '国际', '源'], section: 'modules', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'intel.source.chinanews_world' },

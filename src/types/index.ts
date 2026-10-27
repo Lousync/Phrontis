@@ -3250,11 +3250,11 @@ export type BookDownloadAction =
 // 主进程消费方：electron/lib/intel/*（pipeline / intelStore）；纯函数在 src/lib/intelPure.ts。
 
 export type IntelSourceKey = 'github' | 'hn' | 'arxiv' | 'openalex' | 'weekly' | 'hf' | 'labs' | 'qbitai'
-  | 'chinanews' | 'chinanews_world' | 'wallstcn'
+  | 'cnblogs' | 'csdn' | 'chinanews' | 'chinanews_world' | 'wallstcn'
 export type IntelKind = 'repo' | 'news' | 'paper' | 'weekly' | 'blog'
 /** 版面（v2 报纸化）：条目 section = 内置源固定所属版面（自定义源 = 用户所选） */
 export type IntelSection = 'tech' | 'domestic' | 'world' | 'finance'
-/** 含自定义源的完整 source 键（IntelItem.source 用这个；SOURCE_META 只收录内置 14 源） */
+/** 含自定义源的完整 source 键（IntelItem.source 用这个；SOURCE_META 只收录内置 13 源） */
 export type IntelAnySourceKey = IntelSourceKey | `custom:${string}`
 
 /** 用户自定义 RSS 源（v2，随仓库走：.knowbase/modules/intel/sources.json） */
@@ -3335,7 +3335,7 @@ export interface IntelMeta {
 
 /** intel:setFilter 写入的筛选态（AI 可设；渲染层 feed 顶部 pill 显示） */
 export interface IntelAiFilter {
-  /** 'paper' = 只看论文（arxiv/openalex/hf）；'chinese' = 只看中文（weekly/qbitai）；'' = 无 */
+  /** 'paper' = 只看论文（arxiv/openalex/hf）；'chinese' = 只看中文（CN_SRCS，含博客园 / CSDN）；'' = 无 */
   kind: 'paper' | 'chinese' | ''
   kw: string
   updatedAt: string

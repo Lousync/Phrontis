@@ -96,3 +96,49 @@ export function rssDateIso(raw: string): string {
   const t = Date.parse(String(raw ?? ''))
   return Number.isFinite(t) ? new Date(t).toISOString() : ''
 }
+
+/**
+ * CSDN 人工智能频道（blog.csdn.net/nav/ai）列表页解析。
+ *
+ * CSDN 没有站级 RSS（只有 `/{用户名}/rss/list`），所以这里按公开列表页的
+ * article-item-box 卡片抽标题 / 摘要 / 作者。站点改版时只改这一个纯函数；
+ * 抓取失败由 fetchAll 按单源失败处理，不影响其余源。
+ */
+export interface CsdnEntry {
+  title: string
+  link: string
+  summary: string
+  author: string
+}
+
+export function parseCsdnHtml(html: string, limit: number): CsdnEntry[] {
+  const max = Math.min(Math.max(Math.floor(limit) || 20, 1), 50)
+  const blocks = String(html ?? '').split(/<div\s+class=["'][^"']*article-item-box[^"']*["']/i).slice(1)
+  const seen = new Set<string>()
+  const out: CsdnEntry[] = []
+  for (const block of blocks) {
+    let title = ''
+    let link = ''
+    let summary = ''
+    let author = ''
+    for (const m of block.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+      const attrs = m[1]
+      const body = m[2]
+      const href = /href\s*=\s*["']([^"']+)["']/i.exec(attrs)?.[1] ?? ''
+      const cls = /class\s*=\s*["']([^"']*)["']/i.exec(attrs)?.[1] ?? ''
+      if (!title && cls.includes('article-title')) {
+        title = stripHtml(body)
+        link = absUrl(href, 'https://blog.csdn.net')
+      } else if (!summary && cls.includes('article-desc')) {
+        summary = stripHtml(body)
+      } else if (!author && cls.includes('user-info')) {
+        author = stripHtml(body)
+      }
+    }
+    if (!title || !link || !/\/article\/details\/\d+/i.test(link) || seen.has(link)) continue
+    seen.add(link)
+    out.push({ title: title.slice(0, 300), link, summary: summary.slice(0, 600), author: author.slice(0, 120) })
+    if (out.length >= max) break
+  }
+  return out
+}

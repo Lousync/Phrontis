@@ -10,7 +10,7 @@ import { intelAddCustomSource, intelListCustomSources, intelRemoveCustomSource, 
 
 /**
  * 设置 → 模块 › 情报（v3.12.0 / v3.13.0 报纸化，docs/intel-module-plan.md §8 + D12）。
- * 抓取节奏 / 14 源开关 / 体量控制 / 自定义 RSS 源编辑器；抓取器与 scheduler 一律 getSetting('intel.*') 取值（不硬编码）。
+ * 抓取节奏 / 13 源开关 / 体量控制 / 自定义 RSS 源编辑器；抓取器与 scheduler 一律 getSetting('intel.*') 取值（不硬编码）。
  * 每行挂 data-setting-anchor（模块顶栏 ⚙ 与设置搜索共用锚点）。
  */
 export function IntelView() {
@@ -266,6 +266,8 @@ const SOURCE_DESC: Record<string, string> = {
   hf: '社区点赞筛选的每日 AI 论文；API 基址可配镜像',
   labs: 'DeepMind / OpenAI 官方 RSS + Anthropic 页面解析，标题前缀区分',
   qbitai: '中文 AI 资讯（官方 RSS，大陆可达）',
+  cnblogs: '首页最新技术博客（官方 Atom）',
+  csdn: '人工智能频道最新文章（公开页面解析）',
   chinanews: '时政·国内版面（滚动要闻 RSS）',
   chinanews_world: '国际版面（国际频道 RSS）',
   wallstcn: '财经版面（全球快讯 API，纯文快讯）',

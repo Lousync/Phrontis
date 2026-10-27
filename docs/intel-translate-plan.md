@@ -56,7 +56,7 @@ export function isEnglishText(s: string): boolean {
 }
 ```
 
-中文源（qbitai / weekly / 六个新闻源 / 中文自定义 RSS）自动跳过，零 token。
+中文源（qbitai / weekly / 博客园 / CSDN / 新闻源 / 中文自定义 RSS）自动跳过，零 token。
 
 ### 3.2 批量 prompt（标题与摘要分开走）
 

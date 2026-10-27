@@ -8,6 +8,8 @@ import { fetchWeekly } from './sources/weekly'
 import { fetchHf } from './sources/hf'
 import { fetchLabs } from './sources/labs'
 import { fetchQbitai } from './sources/qbitai'
+import { fetchCnblogs } from './sources/cnblogs'
+import { fetchCsdn } from './sources/csdn'
 import { fetchChinanews, fetchChinanewsWorld } from './sources/chinanews'
 import { fetchWallstcn } from './sources/wallstcn'
 import { fetchCustomSource } from './sources/custom'
@@ -17,7 +19,7 @@ import { intelFetchOpts, type IntelGetSetting } from './intelSettings'
 
 /**
  * 一轮抓取编排（docs/intel-module-plan.md §4.1 v2）：
- * Promise.allSettled 并行 14 内置源 + 启用的自定义 RSS 源，**单源失败返回 []，绝不炸整轮**；
+ * Promise.allSettled 并行 13 内置源 + 启用的自定义 RSS 源，**单源失败返回 []，绝不炸整轮**；
  * 失败源进 stats.failed（顶栏「Y 源失败」+ meta.lastFetchStats）。
  * GitHub 匿名限流 10 req/min —— 每轮只发 1 请求（github 源自身），不做重试轰炸。
  */
@@ -60,6 +62,8 @@ export async function fetchAllIntelSources(get: IntelGetSetting, only?: string):
     ['hf', () => fetchHf(opts.limit, opts.hfBase)],
     ['labs', () => fetchLabs(opts.limit)],
     ['qbitai', () => fetchQbitai(opts.limit)],
+    ['cnblogs', () => fetchCnblogs(opts.limit)],
+    ['csdn', () => fetchCsdn(opts.limit)],
     ['chinanews', () => fetchChinanews(opts.limit)],
     ['chinanews_world', () => fetchChinanewsWorld(opts.limit)],
     ['wallstcn', () => fetchWallstcn(opts.limit)],
