@@ -9,8 +9,11 @@ import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolder
 import { getWorkspaceOfSession } from './aiTeachingWorkspaces'
 import {
   inventoryWorkspaceSource, writeOutlineFromAssistant, removeCourseUnit, archiveOrganizedPage, writeChapterReviewDoc,
+  readCourseOutline,
   type OutlineDraft,
 } from './aiTeachingCourse'
+import { registerSources, assignSources, extractSource, getSources, type RegisterSourceItem, type AssignSourceItem } from './aiTeachingSourceRegistry'
+import type { SourceAnchor } from '../../src/lib/aiTeachingSourcesPure'
 import type { ToolInvokeCtx } from './aiTools'
 import { assertCanRead, assertCanWrite, readPredicate } from './aiAssistantScope'
 import { commitOrStage } from './aiAssistantCommit'
@@ -1876,7 +1879,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.organize.archive / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -2589,16 +2592,16 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'inventory',
     title: '清点素材目录',
-    description: '清点本工作区登记的「目录(dir)素材」：递归统计文件数/字数、判定顶层是否已按子文件夹分类、列出待转写的 pdf/pptx、抽取每文件小标题，写入 SOURCES/{素材名}.index.md。用于"先清点、再分章"，避免整个目录被截断。仅对 dir 素材有效（单个 pdf/pptx 需先转写为 md）。',
-    inputSchema: { type: 'object', properties: { source: { type: 'string', description: '素材名称或编号（如 操作系统资料 或 #1）' } }, required: ['source'] },
+    description: '清点本工作区登记的「目录(dir)素材」：递归统计文件数/字数、判定顶层是否已按子文件夹分类、列出待转写的 pdf/pptx、抽取每文件小标题，写入 SOURCES/{素材名}.index.md。用于"先清点、再分章"，避免整个目录被截断。仅对 dir 素材有效（单个 pdf/pptx 需先提取为 md）。',
+    inputSchema: { type: 'object', properties: { source: { type: 'string', description: '素材名称或 id' } }, required: ['source'] },
     source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
   }, (args, ctx) => inventoryWorkspaceSource(requireAiTeachWs(ctx), str(args.source), getSettingReader()))
 
-  // 27. course.outline.write —— 写入/展开课程大纲（分批：先第一章，学完再 append）
+  // 27. course.outline.write —— 写入课程大纲（3.14：全量章→知识点；每段开讲前确认）
   registerTool({
     name: 'course.outline.write',
-    title: '写入/展开课程大纲',
-    description: '把课程大纲写入本工作区（人读人改的 课程.md）。append 缺省/false = 首次生成（覆盖）；append=true = 按章名合并增补、保留既有知识点与进度，用于"展开下一章"。分批：先只给第一章，学完再加下一章。务必先在对话里把草稿给用户看过、确认后再调用。',
+    title: '写入课程大纲',
+    description: '把课程大纲写入本工作区（人读人改的 课程.md）。3.14 口径：一次给全量章→知识点，不要"先只给第一章"；每段开讲前由用户在客户端确认。append 缺省/false = 首次生成（覆盖）；append=true = 按章名合并增补、保留既有知识点与进度（改大纲时用）。务必先在对话里把草稿给用户看过、确认后再调用。**落盘/更新成功即终止建课流程**：下一步只引导用户去左栏点知识点开段（先做素材预检），不要问「开讲第 N 章」，也不要继续在助手会话里开讲。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2613,6 +2616,89 @@ export function registerBuiltinTools(): void {
   }, (args, ctx) => {
     const r = writeOutlineFromAssistant(requireAiTeachWs(ctx), { title: str(args.title), goal: str(args.goal), append: !!args.append, chapters: args.chapters as OutlineDraft['chapters'] }, getSettingReader())
     if (!r.ok) throw new Error(r.error ?? '写入大纲失败')
+    return r
+  })
+
+  // 27a. course.sources.register —— 登记素材（只登记，不分配）
+  registerTool({
+    name: 'course.sources.register',
+    title: '登记课程素材',
+    description: '把文件 / 目录 / URL 登记进本课程素材库（sources.json）。只登记，不分章。仓库内路径只引用；仓库外文件会复制进本课 SOURCES/。返回 id 与标题，后续 course.sources.assign 用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: '仓库相对路径 / 绝对路径 / URL' },
+              title: { type: 'string', description: '可选：显示名' },
+              type: { type: 'string', description: '可选：md/dir/pdf/pptx/docx/image/url/code' },
+            },
+            required: ['path'],
+          },
+        },
+      },
+      required: ['items'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const r = registerSources(requireAiTeachWs(ctx), (args.items as RegisterSourceItem[]) ?? [], getSettingReader())
+    if (!r.ok && !r.sources.length) throw new Error(r.error ?? r.errors.map((x) => x.error).join('；') ?? '登记素材失败')
+    return r
+  })
+
+  // 27b. course.sources.assign —— 章级分配（可带区间）
+  registerTool({
+    name: 'course.sources.assign',
+    title: '按章分配素材',
+    description: '把已登记素材分配到某一章（chapter = 章名或章 id）。items[].source = 素材 id 或标题；anchor 可给 {kind:"pages",from,to} / {kind:"headings",from,to} / {kind:"files",paths} / {kind:"whole"}；缺省用素材默认区间。只写章级计划，不影响已开的段。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chapter: { type: 'string', description: '章名或章 id' },
+        items: { type: 'array', items: { type: 'object' }, description: '[{ source, label?, anchor? }]' },
+      },
+      required: ['chapter', 'items'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const wsId = requireAiTeachWs(ctx)
+    const ref = str(args.chapter)
+    const outline = readCourseOutline(wsId, getSettingReader())
+    const ch = outline?.chapters.find((c) => c.id === ref) ?? outline?.chapters.find((c) => c.name === ref) ?? outline?.chapters.find((c) => c.name.includes(ref))
+    if (!ch) throw new Error(`找不到章「${ref}」`)
+    const r = assignSources(wsId, ch.id, (args.items as AssignSourceItem[]) ?? [], getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? r.errors.join('；') ?? '分配失败')
+    return r
+  })
+
+  // 27c. course.sources.extract —— PDF/PPTX/Word/代码区间提取
+  registerTool({
+    name: 'course.sources.extract',
+    title: '提取素材区间',
+    description: '把已登记素材的页码区间（PDF/PPTX/Word）或行号区间（代码）提取成可读 md 提取稿。source = 素材 id 或标题；from/to 从 1 起。提取稿会写回 sources.json，后续 AI 直接读。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        source: { type: 'string', description: '素材 id 或标题' },
+        from: { type: 'number', description: '起始页/行' },
+        to: { type: 'number', description: '结束页/行' },
+      },
+      required: ['source', 'from', 'to'],
+    },
+    source: 'builtin', enabled: true, readOnly: false, requires: 'write', tier: 'ondemand',
+  }, async (args, ctx) => {
+    const wsId = requireAiTeachWs(ctx)
+    const ref = str(args.source)
+    const src = getSources(wsId, getSettingReader()).sources.find((x) => x.id === ref) ?? getSources(wsId, getSettingReader()).sources.find((x) => x.title === ref)
+    if (!src) throw new Error(`找不到素材「${ref}」`)
+    const from = Math.max(1, Math.floor(Number(args.from) || 1))
+    const to = Math.max(from, Math.floor(Number(args.to) || from))
+    const anchor: SourceAnchor = src.type === 'code' ? { kind: 'lines', from, to } : { kind: 'pages', from, to }
+    const r = await extractSource(wsId, src.id, anchor, getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '提取失败')
     return r
   })
 

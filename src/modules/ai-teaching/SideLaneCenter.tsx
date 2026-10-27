@@ -8,7 +8,7 @@ import type { AgentSideLaneInfo } from '../../types'
  * 右栏「支线中心」（.claude/plans/ai-teaching-side-lane-center.md）。
  *
  * 给支线旁问一个「家」：把当前会话的支线**按自身标题/时间列出来**（不再靠锚点回答那枚 chip），
- * 打开即已读、可搜索、可引用回主线 / 浮出窗口 / 升格。
+ * 打开即已读、可搜索、可引用回主线 / 浮出窗口。
  * 详情直接复用 `SideLanePanel`（同一套流式/输入/动作），`onBack` 触发「← 列表」内嵌形态。
  */
 
@@ -27,9 +27,7 @@ export interface SideLaneCenterProps {
   onFloat?: (laneId: string) => void
   /** 引用到主线（把末条 AI 回答交给父级放进主线输入框） */
   onQuote?: (text: string) => void
-  /** 升格为正式会话 */
-  onPromote?: (laneId: string) => void
-  /** 列表数据变化（已读 / 升格 / 新建）→ 父级刷新锚点与计数 */
+  /** 列表数据变化（已读 / 新建）→ 父级刷新锚点与计数 */
   onChanged?: () => void
   /** 该支线当前在浮窗 / 宽轨里显示 —— 右栏详情让位回列表，避免同一条内容两处并存 */
   suppressLaneId?: string | null
@@ -49,7 +47,7 @@ function fmtTime(s?: string): string {
 
 export function SideLaneCenter({
   parentSessionId, parentTitle, request, requestSeq,
-  onFloat, onQuote, onPromote, onChanged, suppressLaneId,
+  onFloat, onQuote, onChanged, suppressLaneId,
 }: SideLaneCenterProps) {
   const [items, setItems] = useState<AgentSideLaneInfo[]>([])
   const [loading, setLoading] = useState(false)
@@ -111,7 +109,6 @@ export function SideLaneCenter({
           onClose={back}
           onFloat={onFloat ? () => onFloat(activeId) : undefined}
           onQuote={onQuote}
-          onPromote={onPromote ? () => onPromote(activeId) : undefined}
         />
       </div>
     )

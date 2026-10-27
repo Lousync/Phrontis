@@ -100,6 +100,7 @@ import { registerAiTeachingFolderHandlers, migrateRootDir as migrateAiTeachRootD
 import { registerAssistantConstraintsHandlers } from '../lib/assistantConstraints'
 import { registerAiTeachingWorkspaceHandlers } from '../lib/aiTeachingWorkspaces'
 import { registerAiTeachingSourceHandlers } from '../lib/aiTeachingSources'
+import { registerAiTeachingSourceRegistryHandlers } from '../lib/aiTeachingSourceRegistry'
 import { registerAiTeachingProfileHandlers } from '../lib/aiTeachingProfile'
 import { registerAiTeachingCourseHandlers } from '../lib/aiTeachingCourse'
 import { registerAiTeachingFavoriteHandlers } from '../lib/aiTeachingFavorites'
@@ -1331,6 +1332,7 @@ app.whenReady().then(async () => {
     registerAiTeachingWorkspaceHandlers((key) => settingsCache[key])
     // AI教学 P6：素材库（SOURCES/{对话夹}/SOURCE.md 登记+区间提取，§3.13 结构 v3）
     registerAiTeachingSourceHandlers((key) => settingsCache[key])
+    registerAiTeachingSourceRegistryHandlers((key) => settingsCache[key])
     // AI教学 P8：用户画像（全局 userData + 会话 PROFILE.md 两层，§3.14）
     registerAiTeachingProfileHandlers((key) => settingsCache[key])
     // AI教学·课程模式（课程.md 大纲 + progress.json 进度 + AI 生成大纲；docs/ai-teaching-course-mode-plan.md）

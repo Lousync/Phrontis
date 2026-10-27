@@ -106,7 +106,7 @@ ok('learn textarea 已去自身边框/底色', has('learn', 'rounded-none border
 for (const k of ['teach', 'side', 'learn']) {
   ok(`${k} 保留 rows={2}（自适应高度不在本次范围）`, has(k, 'rows={2}'))
 }
-ok('assistant 保留自适应 rows（窄版 2 行 / 宽版 3 行）', has('assistant', 'rows={isNarrow ? 2 : 3}'))
+ok('assistant 保留自适应 rows（窄版 2 行 / 整页 4 行 / 宽版 3 行）', has('assistant', "rows={isNarrow ? 2 : variant === 'page' ? 4 : 3}"))
 ok('side 无意义的三元 rows 已化简', !has('side', 'rows={wide ? 2 : 2}'))
 
 // ── ⑤ 圆形发送键；方块停止键：四个面各恰 1，且都落在**输入区** ─────────────────────
@@ -152,7 +152,7 @@ ok('side 的 disabled={stopped} 仍在', has('side', 'disabled={stopped}'))
 ok('side Escape / Enter 键位未变',
   has('side', "e.key === 'Escape'") && has('side', "e.key === 'Enter' && !e.shiftKey"))
 ok('side max-h-32 内部滚动未变', has('side', 'max-h-32'))
-ok('side 上方「升格为会话」动作条未变', has('side', '升格为会话'))
+ok('side 已删除「升格为会话」动作条（3.14）', !has('side', '升格为会话'))
 ok('learn compact 左右边距差异保留（px-3 / px-4）',
   has('learn', "compact ? 'px-3' : 'px-4'"))
 ok('learn 自带草稿 state 保留', has('learn', 'const [draft, setDraft] = useState'))

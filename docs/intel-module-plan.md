@@ -2,7 +2,7 @@
 
 > **交接文档**：需求与原型均已确认，本文档是唯一实现依据，不再重开范围讨论。
 >
-> **⚠ v2 修订（2026-10-25，扩源报纸化）已并入各节**：新增决策 D11–D14；源扩到 14 内置 + 自定义 RSS；`IntelItem` 加 `section` 字段（**若 M1 已开工，先补这个小 diff 再继续**）；侧栏版面分组 + 头条视图；设置增 6 源开关与自定义源编辑器。改动点全部标注「v2」字样，改前重读 §0/§1/§3。
+> **⚠ v2 修订（2026-10-25，扩源报纸化）已并入各节**：新增决策 D11–D14；源扩到 13 内置 + 自定义 RSS；`IntelItem` 加 `section` 字段（**若 M1 已开工，先补这个小 diff 再继续**）；侧栏版面分组 + 头条视图；设置增各源开关与自定义源编辑器。改动点全部标注「v2」字样，改前重读 §0/§1/§3。
 > - 分支：`feature/v3.12.0`（基于 main @ a97181d，工作树干净；`stash@{0}` 是用户在 v3.9.1 上的日程 WIP，**勿动**）
 > - 交互基准原型：`E:\Projects\KnowledgeRecorder\tmp\prototypes\feed-module-proto.html`（本地静态服务 `http://127.0.0.1:8391/feed-module-proto.html`；tmp/ 不进 git，实现前别删）
 > - 参考项目：`E:\Projects\KnowledgeRecorder\tmp\OpenCollector`（MIT，仅借鉴管线思路，不引依赖）
@@ -13,7 +13,7 @@
 | # | 决策 |
 |---|---|
 | D1 | 定位：工作台内模块「情报」——抓取 / 筛查 / 推荐 + 收藏与网页跳转 + **应用内阅读**（Defuddle 提取可行，「组装不是发明」）；v2 起升级为「**线上报纸**」：时政 / 国内 / 国际 / 财经 + 科技全版面 |
-| D2 | **14 个内置数据源**（8 科技 + 6 新闻，见 §1；6 个新闻源 2026-10-25 在用户真机实测可达）＋**用户自定义 RSS** |
+| D2 | **13 个内置数据源**（10 科技 + 3 新闻，见 §1；新闻源 2026-10-25 在用户真机实测可达；科技源含博客园 / CSDN）＋**用户自定义 RSS** |
 | D3 | 模块占一个工作台页签；点开一篇文章**新开一个文章页签**（Edge Fluent Tab，可关） |
 | D4 | 收藏 ♥ + 存为笔记；存笔记必须走 clipper 草稿通道（编辑器是唯一正文写入方，AGENTS 铁律 2） |
 | D5 | AI：**独立条件 Tab「📡 情报助手」**，`AgentSessionSource = 'intel'` 物理隔离会话，照抄日程助手模板（`agentService.ts` source==='schedule' 全套接线） |
@@ -27,9 +27,9 @@
 | D13 | **（v2）呈现**：左栏侧栏按版面分组（科技 / 时政·国内 / 国际 / 财经）；feed 顶部增「头条 / 时间流」视图切换，默认时间流（会话内记忆，不持久化） |
 | D14 | **（v2）打分按版面分化**：非科技版面**不套技术信号词表**（时政/财经/国际无 star/点赞，热度天然为 0），新闻源权重 20–24 |
 
-## 1. 数据源清单（v2：14 内置 + 自定义）
+## 1. 数据源清单（v2.2：13 内置 + 自定义）
 
-**科技版面（8，原清单）：**
+**科技版面（10）：**
 
 | key | 名称 | 取数方式 | kind | 源权重 |
 |---|---|---|---|---|
@@ -41,8 +41,10 @@
 | `hf` | HF Daily Papers | `{hfBase}/api/daily_papers?limit={limit}`，默认 `https://huggingface.co`，基址可配镜像（设置 `intel.hfBase`） | paper | 27 |
 | `labs` | AI 官方博客 | DeepMind `https://deepmind.google/blog/rss.xml` + OpenAI `https://openai.com/news/rss.xml`（标准 RSS）+ Anthropic `https://www.anthropic.com/news` 页面解析（脆弱，单站失败不影响另两站）；title 加 `DeepMind:` / `OpenAI:` / `Anthropic:` 前缀区分 | blog | 27 |
 | `qbitai` | 量子位 | `https://www.qbitai.com/feed`（WordPress RSS，偶发 502，重试 1 次） | news | 20 |
+| `cnblogs` | 博客园 | `https://www.cnblogs.com/rss`（官方首页 Atom，全站最新） | blog | 21 |
+| `csdn` | CSDN | `https://blog.csdn.net/nav/ai`（人工智能频道公开页解析；无站级 RSS，站点改版时只改 `rss.ts` 的 `parseCsdnHtml`） | blog | 20 |
 
-**新闻版面（v2.1 现役 3 源，2026-10-25 真机验证鲜活；内置源合计 11 = 8 科技 + 3 新闻）：**
+**新闻版面（v2.1 现役 3 源，2026-10-25 真机验证鲜活；内置源合计 13 = 10 科技 + 3 新闻）：**
 
 | key | 名称 | 版面 | 取数方式 | kind | 源权重 |
 |---|---|---|---|---|---|
@@ -62,7 +64,7 @@
 渲染层                                    IPC（invoke）                主进程
 ─────────────────────────────            ─────────────                ─────────────────────────────
 src/modules/intel/                        intel:getItems   ──────▶     electron/lib/intel/
-  index.tsx        情报主页（feed）        intel:refresh               ├─ sources/ 14 个源适配器（每源一文件）+ rss.ts 公共 RSS/Atom 解析
+  index.tsx        情报主页（feed）        intel:refresh               ├─ sources/ 13 个源适配器（每源一文件）+ rss.ts 公共 RSS/Atom 解析
   IntelSidebar.tsx 模块侧栏（portal）      intel:toggleFav             ├─ pipeline.ts 清洗/打分（调 intelPure）
   IntelArticleView.tsx 文章页             intel:getArticle             ├─ intelStore.ts 读写/合并/清理（真相源）
   IntelAssistantPanel.tsx 右栏 AI         intel:setAiRec               ├─ fetchAll.ts 一轮抓取编排
@@ -87,7 +89,7 @@ AI 面
 
 ```ts
 export type IntelSourceKey = 'github' | 'hn' | 'arxiv' | 'openalex' | 'weekly' | 'hf' | 'labs' | 'qbitai'
-  | 'people_politics' | 'people_world' | 'sina_china' | 'sina_world' | 'chinanews' | 'wallstcn'
+  | 'cnblogs' | 'csdn' | 'chinanews' | 'chinanews_world' | 'wallstcn'
 export type IntelKind = 'repo' | 'news' | 'paper' | 'weekly' | 'blog'
 /** 版面（v2）：报纸的分类维度；条目 section = 来源源固定 section（自定义源 = 用户所选） */
 export type IntelSection = 'tech' | 'domestic' | 'world' | 'finance'
@@ -152,7 +154,7 @@ export interface IntelCustomSource {
 
 ## 4. 主进程 `E:\Projects\KnowledgeRecorder\electron\lib\intel\`
 
-### 4.1 `sources/`（8 文件，每源一个适配器）
+### 4.1 `sources/`（13 文件，每源一个适配器）
 
 统一形态：
 
@@ -164,7 +166,7 @@ export async function fetchGithub(limit: number): Promise<IntelItem[]> // 其余
 - **`rss.ts`（v2 新增公共层）**：轻量 RSS/Atom 解析（正则抽 `<item>/<entry>` 的 title/link/description/pubDate，不引 XML 依赖，与 arXiv Atom 解析同思路）；供 6 个新闻源 + 自定义源共用。人民网/新浪/中新网为标准 RSS 直解；华尔街见闻走 `fetchJson`（content 字段为 HTML → 去标签保文）；自定义源按响应类型自动判 RSS/Atom。
 - **单源失败返回 `[]`，绝不炸整轮**；`fetchAll` 用 `Promise.allSettled` 汇总，失败源进 `lastFetchStats.failed`。
 - 适配器只做「拉数 + 映射成 IntelItem 雏形」（score/fav 等由管线补）。
-- **fetchAll 编排（v2）**：14 内置源（各受 `intel.source.<key>` 开关控制）+ `sources.json` 里 enabled 的自定义源一并 `allSettled`；自定义源条目带 `source: 'custom:<id>'` 与用户所选 section。
+- **fetchAll 编排（v2）**：13 内置源（各受 `intel.source.<key>` 开关控制）+ `sources.json` 里 enabled 的自定义源一并 `allSettled`；自定义源条目带 `source: 'custom:<id>'` 与用户所选 section。
 
 ### 4.2 `pipeline.ts`（清洗与打分，逻辑放纯函数）
 
@@ -299,7 +301,7 @@ const INTEL_TOOL_NAMES = [
 2. 只使用情报相关工具；【情报数据】快照给出当前日期与池子概况（按版面统计），以它为准，不凭印象编条目；
 3. 「推荐」：先 `intel.query` 取候选，挑 3~8 条，把 id 传给 `intel.set-recommendations`（query 填用户原话），再用正文简述推荐理由；
 4. 「找 X」：`intel.query` 带 q 检索，命中多条先 set-recommendations 收进结果集再汇报；池内没有就说没有，**不要编造**；
-5. 「只看论文 / 只看中文 / 只看某源」：`intel.set-filter`（kind: 'paper'；中文源 = weekly/qbitai；kw 支持关键词）；
+5. 「只看论文 / 只看中文 / 只看某源」：`intel.set-filter`（kind: 'paper'；中文源 = weekly/qbitai/cnblogs/csdn；kw 支持关键词）；
 6. 回答简洁、简体中文；提条目时给「源 · 标题 · 一句话价值」，不贴长 URL。
 
 **`buildIntelInjection()`**（每轮现算 → 首条 user 消息层，防打散 prompt cache；总量截断）：
@@ -329,7 +331,7 @@ registerTool({
   description: '按关键词/源/类型检索已抓取的情报条目',
   inputSchema: { type:'object', properties:{
     q:{type:'string',description:'关键词，标题+摘要匹配'},
-    source:{type:'string',description:'源 key：github/hn/arxiv/openalex/weekly/hf/labs/qbitai/people_politics/people_world/sina_china/sina_world/chinanews/wallstcn'},
+    source:{type:'string',description:'源 key：github/hn/arxiv/openalex/weekly/hf/labs/qbitai/cnblogs/csdn/chinanews/chinanews_world/wallstcn'},
     section:{type:'string',description:'版面：tech/domestic/world/finance'},
     kind:{type:'string',description:'repo/news/paper/weekly/blog'},
     limit:{type:'number',description:'上限，默认 20'} } },
@@ -357,8 +359,9 @@ registerTool({ name:'builtin.intel.set-filter', title:'设置情报筛选',
 | key | 默认 | 类型 | 说明 |
 |---|---|---|---|
 | `intel.interval` | `'3h'` | select（off/1h/3h/1d） | 自动抓取间隔 |
-| `intel.source.github` … `.qbitai`（8 条） | `true` | toggle | 各源开关（科技版面） |
-| `intel.source.people_politics` / `.people_world` / `.sina_china` / `.sina_world` / `.chinanews` / `.wallstcn`（6 条，v2） | `true` | toggle | 新闻版面各源开关；**自定义源开关不进 SETTINGS**（随 sources.json 存仓库） |
+| `intel.source.github` … `.qbitai`（8 条科技） | `true` | toggle | 各源开关（科技版面） |
+| `intel.source.cnblogs` / `.csdn`（2 条中文博客） | `true` | toggle | 博客园首页 Atom / CSDN 人工智能频道页面解析 |
+| `intel.source.chinanews` / `.chinanews_world` / `.wallstcn`（3 条新闻） | `true` | toggle | 新闻版面各源开关；**自定义源开关不进 SETTINGS**（随 sources.json 存仓库） |
 | `intel.limit` | `20` | number | 每源每轮上限 |
 | `intel.filter` | `true` | toggle | 营销水文过滤 |
 | `intel.keep` | `14` | number | 条目保留天数 |
@@ -378,7 +381,7 @@ registerTool({ name:'builtin.intel.set-filter', title:'设置情报筛选',
 
 | 里程碑 | 内容 | 验收 |
 |---|---|---|
-| **M1 数据层** | `src/types` 类型（**含 v2 的 `IntelSection` / `section` 字段 / `IntelCustomSource`，类型冻结一次到位**）+ `src/lib/intelPure.ts` + `electron/lib/intel/`（http/rss/sources×14/pipeline/intelStore/fetchAll 含自定义源） | `npx tsc --noEmit -p tsconfig.node.json` 过；临时脚本直跑 14 源 fetchAll 真网通（失败源列明）；纯函数契约脚本通过 |
+| **M1 数据层** | `src/types` 类型（**含 v2 的 `IntelSection` / `section` 字段 / `IntelCustomSource`，类型冻结一次到位**）+ `src/lib/intelPure.ts` + `electron/lib/intel/`（http/rss/sources×13/pipeline/intelStore/fetchAll 含自定义源） | `npx tsc --noEmit -p tsconfig.node.json` 过；临时脚本直跑 13 源 fetchAll 真网通（失败源列明）；纯函数契约脚本通过 |
 | **M2 IPC + 骨架** | intelRepo handlers（含 4 个自定义源 channel）+ preload + ipc.ts + Tab/模块注册 + feed 页（**含头条/时间流切换**）+ 版面分组侧栏 + 刷新链路 | dev 起得来；刷新后 Toast 统计、列表出现、broadcast → useDataChanged 生效（开两窗改收藏另一窗跟着变）；头条视图分区正确；设置里增删自定义源 → 下轮刷新出现其条目 |
 | **M3 文章链路** | 文章页签 + intelGetArticle 缓存 + 收藏 + 存为笔记 | 点卡片开页签、去重激活、关闭；正文渲染 + 失败兜底；存为笔记出草稿并可编辑 |
 | **M4 AI 全链** | source='intel' 四处接线 + 白名单 + persona + 注入 + 3 工具 + intelReadOnly + 📡 Tab + 左栏 AI 推荐入口 | 问「推荐」→ set-recommendations → 左栏入口出现 → 点开是推荐集 → 再问刷新 → ✕ 清空；通用助手里问情报只见 query 不见写工具 |

@@ -814,6 +814,9 @@ input:focus, textarea:focus, select:focus {
 .kb-rail-secs.kb-stick { align-content: normal; }
 /* 资源管理器展开：第 4 轨 1fr 吃掉全部剩余高度（此时 align-content 无剩余可分，取值无影响） */
 .kb-rail-secs.kb-open-explorer { grid-template-rows: max-content auto max-content 1fr; }
+/* 3.14 课程树优先：课程展开时第 2 轨吃剩余高度；资源管理器展开时最多占 32vh（仍可折叠拿满） */
+.kb-rail-secs.kb-course-open { grid-template-rows: max-content minmax(0, 1fr) max-content 0fr; }
+.kb-rail-secs.kb-course-open.kb-open-explorer { grid-template-rows: max-content minmax(0, 1fr) max-content minmax(120px, 32vh); }
 @media (prefers-reduced-motion: reduce) {
   .kb-rail-secs { transition: none; }
 }

@@ -418,6 +418,18 @@ const api = {
   aiTeachCourseMoveUnit: (wsId: string, unitId: string, targetChapterId: string, beforeUnitId: string | null) =>
     ipcRenderer.invoke('aiTeachCourse:moveUnit', wsId, unitId, targetChapterId, beforeUnitId),
   aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: unknown) => ipcRenderer.invoke('aiTeachCourse:setUnitProgress', wsId, unitId, patch),
+  // 3.14 段模型
+  aiTeachCourseOpenSegment: (wsId: string, unitIds: string[], sources: unknown[]) => ipcRenderer.invoke('aiTeachCourse:openSegment', wsId, unitIds, sources),
+  aiTeachCourseSetActiveUnit: (sessionId: string, unitId: string) => ipcRenderer.invoke('aiTeachCourse:setActiveUnit', sessionId, unitId),
+  aiTeachCourseEndSegment: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:endSegment', sessionId),
+  aiTeachCourseFinalizeSegment: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:finalizeSegment', sessionId),
+  // 3.14 素材注册表
+  aiTeachCourseGetSources: (wsId: string) => ipcRenderer.invoke('aiTeachCourse:getSources', wsId),
+  aiTeachCourseRegisterSources: (wsId: string, items: unknown[]) => ipcRenderer.invoke('aiTeachCourse:registerSources', wsId, items),
+  aiTeachCourseAssignSources: (wsId: string, chapterId: string, items: unknown[]) => ipcRenderer.invoke('aiTeachCourse:assignSources', wsId, chapterId, items),
+  aiTeachCourseRemoveSource: (wsId: string, sourceId: string) => ipcRenderer.invoke('aiTeachCourse:removeSource', wsId, sourceId),
+  aiTeachCourseRemoveAssignment: (wsId: string, chapterId: string, sourceId: string) => ipcRenderer.invoke('aiTeachCourse:removeAssignment', wsId, chapterId, sourceId),
+  aiTeachCourseExtractSource: (wsId: string, sourceId: string, anchor: unknown) => ipcRenderer.invoke('aiTeachCourse:extractSource', wsId, sourceId, anchor),
   aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => ipcRenderer.invoke('aiTeachCourse:openUnit', wsId, unitId, kind),
   aiTeachCourseEndLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:endLesson', sessionId),
   aiTeachCourseFinalizeLesson: (sessionId: string) => ipcRenderer.invoke('aiTeachCourse:finalizeLesson', sessionId),

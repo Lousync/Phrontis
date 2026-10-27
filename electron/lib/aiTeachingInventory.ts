@@ -92,7 +92,7 @@ export function scanInventoryDir(dirAbs: string): InventoryScan {
     const s = subMap.get(top) ?? { name: top, fileCount: 0, chars: 0 }
     s.fileCount++; s.chars += f.chars; subMap.set(top, s)
   }
-  const subdirs = [...subMap.values()].sort((a, b) => a.name.localeCompare(b.name))
+  const subdirs = [...subMap.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
   let classification: InventoryScan['classification'] = 'empty'
   if (files.length) classification = subdirs.length >= 1 && topFiles === 0 ? 'organized' : 'flat'
 
@@ -102,7 +102,7 @@ export function scanInventoryDir(dirAbs: string): InventoryScan {
     totalFiles: files.length,
     totalChars: files.reduce((n, f) => n + f.chars, 0),
     classification,
-    pendingTranscribe: pending.sort((a, b) => a.rel.localeCompare(b.rel)),
+    pendingTranscribe: pending.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0)),
   }
 }
 

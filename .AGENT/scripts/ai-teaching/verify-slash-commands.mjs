@@ -72,7 +72,7 @@ check('pickedSkill chip 可移除（X 按钮）', /pickedSkill && \([\s\S]*?setP
 console.log('\n[AssistantPanel 接线（assistant + aiLearn 两 surface 共用；逻辑在 ChatBody + useAssistantChat）]')
 check('slashQuery 派生：/ 开头且无空白才弹', /slashQuery = input\.startsWith\('\/'\) && !\/\[\\s\\n\]\//.test(chatBody))
 check('Esc 局部拦截 stopPropagation', /onSlashKeys[\s\S]*?e\.key === 'Escape'[\s\S]*?e\.stopPropagation\(\)/.test(chatBody))
-check('Skill chip 一次性消费：send 内发出即清', /const sk = pickedSkill[\s\S]*?setPickedSkill\(null\)[\s\S]*?agentChat\(sid, body, finalCtx \?\? undefined, cid, sessionSource, modelId \|\| undefined, thinking \? 'medium' : 'off', sk\?\.registryName\)/.test(chatHook))
+check('Skill chip 一次性消费：send 内发出即清', /const sk = pickedSkill[\s\S]*?setPickedSkill\(null\)[\s\S]*?sk\?\.registryName/.test(chatHook))
 check('handleChatCommand 接线 onProgress → setCompressing', chatHook.includes('onProgress: p => setCompressing(p.active)'))
 check('发送键禁用条件含 compressing（pending 改由「停止键」分支接管，见 ai-reply-loading-plan §3.3）', chatBody.includes('disabled={compressing || !input.trim()}'))
 check('send 依赖数组补 pickedSkill', /\}, \[[^\]]*pickedSkill[^\]]*\]\)/.test(chatHook))

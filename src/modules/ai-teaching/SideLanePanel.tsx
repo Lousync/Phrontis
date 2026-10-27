@@ -48,8 +48,6 @@ export interface SideLanePanelProps {
   onDock?: () => void
   /** 支线就绪（拿到 laneSessionId 与标题）——父级据此**自动登记锚点回执**（关窗不失联）与升格 */
   onLaneReady?: (laneSessionId: string, laneTitle: string) => void
-  /** P4 升格为正式会话 */
-  onPromote?: (laneSessionId: string) => void
   /** 浮层形态的拖拽手柄：父级（`useFloatingWindow`）提供，挂到顶栏 → 拖动移动、双击复位。
    *  右栏内嵌形态不传（顶栏不可拖）。顶栏内按钮由 hook 的 INTERACTIVE 豁免规则自动跳过。 */
   titleDrag?: {
@@ -73,7 +71,7 @@ interface PanelMsg {
   createdAt?: string
 }
 
-export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, openLaneId, onClose, onDock, onLaneReady, onPromote, titleDrag, onBack, onQuote, onFloat, hideTurns }: SideLanePanelProps) {
+export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, openLaneId, onClose, onDock, onLaneReady, titleDrag, onBack, onQuote, onFloat, hideTurns }: SideLanePanelProps) {
   const shell = useInputShell()
   const chatIdRef = useRef('')
   const { draft: streamDraft, begin: beginStream, end: endStream } = useAgentStream(chatIdRef)
@@ -327,11 +325,8 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
         ))}
       </div>
 
-      {/* 底部动作条（v3.1.2 条目11）：升格为正式会话（P4）。
-          「带回主线」已于 2026-09-14 移除——支线定位收窄为「只解答小知识点」，结论不再需要
-          一条人工"带回"通道；支线与其锚点回答的关联改为**自动回执**（见 index.tsx 的 anchorLanes），
-          直接关窗也不再失联。 */}
-      {laneId && !pending && (onPromote || onQuote || onFloat) && (
+      {/* 底部动作条：引用到主线 / 浮出窗口（升格已于 3.14 删除）。 */}
+      {laneId && !pending && (onQuote || onFloat) && (
         <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 border-t border-[var(--border-color)]">
           {onQuote && (
             <button onClick={() => { const lastAi = [...messages].reverse().find(m => m.role === 'assistant'); onQuote(lastAi?.content ?? '') }}
@@ -344,13 +339,6 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
             <button onClick={onFloat} title="浮出为可拖动窗口（与右栏同一条支线）"
               className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
               <Maximize2 size={11} />浮出窗口
-            </button>
-          )}
-          {onPromote && (
-            <button onClick={() => onPromote(laneId)}
-              title="把支线升格为正式会话（进左栏会话列表，可独立续聊；单向不可逆）"
-              className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-              <ArrowUp size={11} />升格为会话
             </button>
           )}
         </div>

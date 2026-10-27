@@ -58,8 +58,8 @@ check('容器未设 overflow:hidden（否则裁掉「新建对话」浮层）', 
 const baseTracks = String(decl(base, 'grid-template-rows')).split(/\s+/)
 check('基础模板 4 轨 = max-content auto max-content 0fr',
   baseTracks.join(' ') === 'max-content auto max-content 0fr', baseTracks.join(' '))
-// ★ 核心不变量：第 2 轨恒为 auto（auto<->1fr 是异型轨道，会把整条轨道表拖成离散跳变）
-check('★ 第 2 轨恒为 auto（异型轨道会丢动画）', baseTracks[1] === 'auto', baseTracks[1])
+// 基础态（课程收起）第 2 轨为 auto；课程展开时由 .kb-course-open 改为 1fr 优先分配高度
+check('基础态第 2 轨 = auto', baseTracks[1] === 'auto', baseTracks[1])
 
 const trans = String(decl(base, 'transition'))
 check('过渡属性只有 grid-template-rows', /^grid-template-rows\b/.test(trans) && !/flex-grow/.test(trans), trans)
@@ -71,11 +71,18 @@ check('.kb-stick 不改轨道模板（贴底只换分配方式）', decl(stick, 
 
 const openExpl = ruleBody(css, '.kb-rail-secs.kb-open-explorer')
 const openTracks = String(decl(openExpl, 'grid-template-rows')).split(/\s+/)
-check('.kb-open-explorer 第 4 轨 = 1fr', openTracks[3] === '1fr', openTracks.join(' '))
-// ★ 两条状态类相加后，与基础模板的差异必须**只在第 4 轨**，这才是「不会退化」的充分条件
-check('★ 状态类与基础模板只差第 4 轨（前 3 轨不动）',
-  openTracks.length === 4 && openTracks.slice(0, 3).join(' ') === baseTracks.slice(0, 3).join(' '),
-  `base=[${baseTracks.join(' ')}] open=[${openTracks.join(' ')}]`)
+check('课程收起 + 资源管理器展开：第 4 轨 = 1fr', openTracks[3] === '1fr', openTracks.join(' '))
+
+const courseOpen = ruleBody(css, '.kb-rail-secs.kb-course-open {')
+const courseOpenRows = String(decl(courseOpen, 'grid-template-rows'))
+check('课程展开：第 2 轨 = minmax(0, 1fr)（课程优先吃剩余高度）',
+  courseOpenRows.includes('minmax(0, 1fr)'), courseOpenRows)
+
+const courseOpenExpl = ruleBody(css, '.kb-rail-secs.kb-course-open.kb-open-explorer')
+const courseOpenExplRows = String(decl(courseOpenExpl, 'grid-template-rows'))
+check('课程展开 + 资源管理器展开：课程 1fr、资源管理器最多 32vh',
+  courseOpenExplRows.includes('minmax(0, 1fr)') && courseOpenExplRows.includes('minmax(120px, 32vh)'),
+  courseOpenExplRows)
 
 const rmBlock = css.slice(css.indexOf('prefers-reduced-motion'))
 check('有 prefers-reduced-motion 兜底', /\.kb-rail-secs\s*\{[^}]*transition:\s*none/.test(rmBlock), '')
@@ -94,7 +101,7 @@ check('会话体折叠走既有 .kb-collapse（不占外层轨）',
 // 两个分区头都必须在容器内（否则被撑高的是空气，条目不会下移）
 const iClose = tsx.indexOf('</ResizablePanel>', iOpen)
 const seg = tsx.slice(iOpen, iClose)
-const headSessions = seg.indexOf('title="会话"')
+const headSessions = seg.indexOf('title="课程"')
 const headExplorer = seg.indexOf('title="资源管理器"')
 check('两个分区头都在容器内', headSessions > 0 && headExplorer > headSessions, `sessions@${headSessions} explorer@${headExplorer}`)
 check('资源管理器体在资源管理器头之后（第 4 轨）', seg.indexOf('AiTeachFileTree') > headExplorer, '')
@@ -104,8 +111,8 @@ check('已移除 flex-grow 过渡（布局属性，越出允许集）', !/transi
 check('已移除 grow basis-0 写法', !/grow basis-0/.test(seg), '')
 const inlineRows = seg.match(/gridTemplateRows/g) || []
 check('左栏内不再有内联 gridTemplateRows（高度全由 CSS 轨给出）', inlineRows.length === 0, String(inlineRows.length))
-check('会话体上限仍按资源管理器状态切换（max-h-[38vh]）',
-  /collapsedSec\.explorer \? 'max-h-\[38vh\]' : ''/.test(seg), '')
+check('课程体高度由 CSS 轨给出（不再内联 38vh 上限）',
+  !/max-h-\[38vh\]|h-\[38vh\]/.test(seg) && seg.includes('className="h-full min-h-0"'), '')
 
 // ---------------------------------------------------------------- 报告
 const failed = checks.filter((c) => !c.pass)
