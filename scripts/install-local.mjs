@@ -155,7 +155,14 @@ async function main() {
 
   // 本机系统图标覆盖：只影响这台机器的安装目录与桌面图标，
   // 不写回 build/icon.png，也不会进入安装包（软件本身仍用官方图标）。
-  const overrideIcon = args.icon.trim() ? resolve(args.icon.trim()) : ''
+  // 优先级：--icon 参数 > gitignored 的 scripts/local-install.json > 安装包图标。
+  let configuredIcon = ''
+  try {
+    const cfg = JSON.parse(readFileSync(join(repoRoot, 'scripts', 'local-install.json'), 'utf8'))
+    if (typeof cfg?.icon === 'string') configuredIcon = cfg.icon.trim()
+  } catch { /* 没配置就回退安装包图标 */ }
+  const requestedIcon = (args.icon.trim() || configuredIcon)
+  const overrideIcon = requestedIcon ? resolve(requestedIcon) : ''
   if (overrideIcon && !existsSync(overrideIcon)) console.warn(`[install] 自定义图标不存在，回退安装包图标：${overrideIcon}`)
   if (overrideIcon && existsSync(overrideIcon)) {
     copyFileSync(overrideIcon, join(target, 'resources', 'icon.png'))
