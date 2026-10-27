@@ -55,8 +55,14 @@ export function parseCourseMd(text: string): CourseOutline {
     if (goal) { out.goal = goal[1].trim(); continue }
     const anchor = /^[-*]?\s*依据\s*[：:]\s*(.+)$/.exec(line)
     if (anchor) { out.anchor = anchor[1].trim(); continue }
-    const ch = /^#{2,6}\s+(.+)$/.exec(line)
-    if (ch) { cur = { id: `c${out.chapters.length + 1}`, name: ch[1].trim(), units: [] }; out.chapters.push(cur); continue }
+    // 章行：`## 章名`（旧）或 `## [c3] 章名`（3.14 起稳定章 ID）
+    const ch = /^#{2,6}\s+(?:\[([A-Za-z0-9_-]+)\]\s*)?(.+)$/.exec(line)
+    if (ch) {
+      const id = (ch[1] ?? '').trim() || `c${out.chapters.length + 1}`
+      cur = { id, name: (ch[2] ?? '').trim(), units: [] }
+      out.chapters.push(cur)
+      continue
+    }
     const unit = /^[-*]\s*(.+)$/.exec(line)
     if (unit && cur) {
       const parts = unit[1].split('|').map((s) => s.trim())
@@ -75,7 +81,8 @@ export function rewriteCourseMd(o: CourseOutline): string {
   if (o.anchor) lines.push(`- 依据: ${cleanField(o.anchor)}`)
   lines.push('')
   o.chapters.forEach((c, ci) => {
-    lines.push(`## ${cleanField(c.name) || `第${ci + 1}章`}`)
+    const cid = cleanField(c.id) || `c${ci + 1}`
+    lines.push(`## [${cid}] ${cleanField(c.name) || `第${ci + 1}章`}`)
     c.units.forEach((u) => {
       lines.push(`- ${cleanField(u.id)} | ${cleanField(u.name)} | ${cleanField(u.goal)} | ${cleanField(u.source)}`)
     })
@@ -249,4 +256,188 @@ export function moveUnitInOutline(
   if (bid && found < 0) return { outline, ok: false, error: '目标位置不存在' }
   target.units.splice(found < 0 ? target.units.length : found, 0, moved)
   return { outline: { ...outline, chapters }, ok: true }
+}
+
+// ===== 3.14.0：段模型 + progress v1→v2 归一化（纯函数，契约脚本直接跑） =====
+
+export interface CourseSegmentSourceV2 {
+  sourceId: string
+  label: string
+  /** 预检收窄后的区间；具体形状由 aiTeachingSourcesPure.SourceAnchor 定义 */
+  anchor: unknown
+  mode: 'exact' | 'narrow' | 'fallback'
+}
+
+/** 段（历史键名 lessons 保留；语义 = 一段覆盖同章多个知识点） */
+export interface CourseLessonInfoV2 {
+  unitIds: string[]
+  activeUnitId?: string
+  /** 本章内的顺序（1..N） */
+  order: number
+  status: 'open' | 'ended'
+  sources: CourseSegmentSourceV2[]
+  handoffRel: string | null
+  startedAt?: string
+  endedAt?: string | null
+}
+
+export interface CourseUnitProgressV2 {
+  status: CourseUnitStatus
+  mastery: number
+  lastCheckedAt: string | null
+  finished?: boolean
+  summaryRel?: string | null
+}
+
+export interface CourseReviewV2 {
+  sessionId: string
+  rel: string | null
+}
+
+export interface CourseWsV2 {
+  lessons: Record<string, CourseLessonInfoV2>
+  units: Record<string, CourseUnitProgressV2>
+  reviews: Record<string, CourseReviewV2>
+  assistantSessionId?: string
+}
+
+export interface ProgressFileV2 {
+  v: 2
+  workspaces: Record<string, CourseWsV2>
+}
+
+const V2_STATUSES: CourseUnitStatus[] = ['todo', 'learning', 'check', 'mastered', 'review']
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v)
+}
+
+function asStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  const out: string[] = []
+  for (const x of v) {
+    const s = String(x ?? '').trim()
+    if (s && !out.includes(s)) out.push(s)
+  }
+  return out
+}
+
+function normalizeLesson(raw: unknown, fallbackOrder: number): CourseLessonInfoV2 | null {
+  if (!isRecord(raw)) return null
+  const unitIds = asStringArray(raw.unitIds)
+  if (!unitIds.length) {
+    const single = String(raw.unitId ?? '').trim()
+    if (single) unitIds.push(single)
+  }
+  if (!unitIds.length) return null
+  const active = String(raw.activeUnitId ?? '').trim()
+  const order = Number(raw.order)
+  const status = raw.status === 'ended' ? 'ended' : 'open'
+  const sources = Array.isArray(raw.sources) ? (raw.sources as CourseSegmentSourceV2[]) : []
+  const handoffRel = typeof raw.handoffRel === 'string' && raw.handoffRel.trim() ? raw.handoffRel : null
+  const startedAt = typeof raw.startedAt === 'string' ? raw.startedAt : undefined
+  const endedAt = typeof raw.endedAt === 'string' ? raw.endedAt : null
+  return {
+    unitIds,
+    activeUnitId: unitIds.includes(active) ? active : unitIds[0],
+    order: Number.isFinite(order) && order > 0 ? Math.floor(order) : fallbackOrder,
+    status,
+    sources,
+    handoffRel,
+    ...(startedAt ? { startedAt } : {}),
+    endedAt,
+  }
+}
+
+function normalizeUnit(raw: unknown): CourseUnitProgressV2 {
+  const o = isRecord(raw) ? raw : {}
+  const status = V2_STATUSES.includes(o.status as CourseUnitStatus) ? (o.status as CourseUnitStatus) : 'todo'
+  const masteryRaw = Number(o.mastery)
+  const mastery = Number.isFinite(masteryRaw) ? Math.max(0, Math.min(1, masteryRaw)) : 0
+  const lastCheckedAt = typeof o.lastCheckedAt === 'string' ? o.lastCheckedAt : null
+  const out: CourseUnitProgressV2 = { status, mastery, lastCheckedAt }
+  if (typeof o.finished === 'boolean') out.finished = o.finished
+  if (typeof o.summaryRel === 'string' || o.summaryRel === null) out.summaryRel = o.summaryRel
+  return out
+}
+
+/**
+ * progress.json v1 → v2 归一化。
+ *
+ * - 只加字段 / 搬字段，不删知识点与段；
+ * - `unitId` → `unitIds:[unitId]`，`kind` 丢弃；
+ * - 旧 `sessions`（sessionId→unitId）并入 lessons；
+ * - 段里没有 `sources` 的补空数组（旧课时没有段级快照）；
+ * - `finished` 缺省时按「有已结束段覆盖」或「mastered/review 且不在 open 段」补；
+ * - `enabled` / `sourceBaseline` 丢弃；
+ * - 幂等：v2 输入再跑一次结果不变。
+ */
+export function normalizeProgressFile(raw: unknown): { file: ProgressFileV2; migrated: boolean } {
+  const src = isRecord(raw) ? raw : {}
+  let migrated = src.v !== 2
+  const workspacesRaw = isRecord(src.workspaces) ? src.workspaces : {}
+  const workspaces: Record<string, CourseWsV2> = {}
+  for (const [wsId, wsRaw] of Object.entries(workspacesRaw)) {
+    const w = isRecord(wsRaw) ? wsRaw : {}
+    if (w.enabled !== undefined || w.sourceBaseline !== undefined || w.sessions !== undefined) migrated = true
+
+    const lessons: Record<string, CourseLessonInfoV2> = {}
+    const lessonsRaw = isRecord(w.lessons) ? w.lessons : {}
+    for (const [sid, lRaw] of Object.entries(lessonsRaw)) {
+      const l = normalizeLesson(lRaw, Object.keys(lessons).length + 1)
+      if (!l) continue
+      if (isRecord(lRaw) && (lRaw.unitId !== undefined || lRaw.kind !== undefined)) migrated = true
+      lessons[sid] = l
+    }
+    // 旧 sessions 只在 lessons 缺该会话时补；order 按知识点内出现次序
+    if (isRecord(w.sessions)) {
+      const perUnit: Record<string, number> = {}
+      for (const [sid, uidRaw] of Object.entries(w.sessions)) {
+        const uid = String(uidRaw ?? '').trim()
+        if (!uid || lessons[sid]) continue
+        const n = (perUnit[uid] = (perUnit[uid] ?? 0) + 1)
+        lessons[sid] = {
+          unitIds: [uid],
+          activeUnitId: uid,
+          order: n,
+          status: 'open',
+          sources: [],
+          handoffRel: null,
+          endedAt: null,
+        }
+        migrated = true
+      }
+    }
+
+    const units: Record<string, CourseUnitProgressV2> = {}
+    const unitsRaw = isRecord(w.units) ? w.units : {}
+    for (const [uid, uRaw] of Object.entries(unitsRaw)) {
+      units[uid] = normalizeUnit(uRaw)
+    }
+    for (const [uid, u] of Object.entries(units)) {
+      if (typeof u.finished === 'boolean') continue
+      const inOpen = Object.values(lessons).some((l) => l.status === 'open' && l.unitIds.includes(uid))
+      const inEnded = Object.values(lessons).some((l) => l.status === 'ended' && l.unitIds.includes(uid))
+      if (!inOpen && (u.status === 'mastered' || u.status === 'review' || inEnded)) u.finished = true
+    }
+
+    const reviews: Record<string, CourseReviewV2> = {}
+    if (isRecord(w.reviews)) {
+      for (const [cid, rRaw] of Object.entries(w.reviews)) {
+        if (!isRecord(rRaw)) continue
+        const sessionId = String(rRaw.sessionId ?? '').trim()
+        if (!sessionId) continue
+        reviews[cid] = { sessionId, rel: typeof rRaw.rel === 'string' ? rRaw.rel : null }
+      }
+    }
+
+    const assistantSessionId = String(w.assistantSessionId ?? '').trim()
+    workspaces[wsId] = {
+      lessons,
+      units,
+      reviews,
+      ...(assistantSessionId ? { assistantSessionId } : {}),
+    }
+  }
+  return { file: { v: 2, workspaces }, migrated }
 }

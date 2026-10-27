@@ -1456,16 +1456,71 @@ export interface AiTeachWorkspaceInfo {
   lastActive: string | null
 }
 
-/** AI教学·课程模式（主进程 aiTeachingCourse.ts 同构；docs/ai-teaching-course-mode-plan.md） */
+/** AI教学·课程模式（主进程 aiTeachingCourse.ts 同构；3.14 段模型） */
 export type AiTeachCourseUnitStatus = 'todo' | 'learning' | 'check' | 'mastered' | 'review'
 export interface AiTeachCourseUnit { id: string; name: string; goal: string; source: string }
 export interface AiTeachCourseChapter { id: string; name: string; units: AiTeachCourseUnit[] }
 export interface AiTeachCourseOutline { title: string; goal: string; anchor: string; chapters: AiTeachCourseChapter[] }
 export interface AiTeachCourseUnitProgress { status: AiTeachCourseUnitStatus; mastery: number; lastCheckedAt: string | null; finished?: boolean; summaryRel?: string | null }
-export interface AiTeachLessonInfo { unitId: string; order: number; kind: string; status: 'open' | 'ended' }
+/** 一段（历史键名 lesson）：覆盖同章 1..N 个知识点 */
+export interface AiTeachLessonInfo {
+  unitIds: string[]
+  activeUnitId?: string
+  order: number
+  status: 'open' | 'ended'
+  sources: AiTeachSegmentSource[]
+  handoffRel: string | null
+  startedAt?: string
+  endedAt?: string | null
+  /** 3.13 兼容：只读，不再写 */
+  unitId?: string
+  kind?: string
+}
 export interface AiTeachChapterReview { sessionId: string; rel: string | null }
 export interface AiTeachUnitQuizQuestion { q: string; options: string[]; answer: number; explanation: string }
-export interface AiTeachCourseState { enabled: boolean; outline: AiTeachCourseOutline | null; progress: Record<string, AiTeachCourseUnitProgress>; lessons: Record<string, AiTeachLessonInfo>; reviews: Record<string, AiTeachChapterReview>; /** 课程助手（教学助手）会话 id，未建课为 null —— 左栏三层树据此把它单独成行 */ assistantSessionId?: string | null }
+export interface AiTeachSourceCounts { total: number; assigned: number; unassigned: number; byChapter: Record<string, number> }
+export interface AiTeachCourseState {
+  /** 3.13 兼容：3.14 恒 true */
+  enabled: boolean
+  outline: AiTeachCourseOutline | null
+  progress: Record<string, AiTeachCourseUnitProgress>
+  lessons: Record<string, AiTeachLessonInfo>
+  reviews: Record<string, AiTeachChapterReview>
+  assistantSessionId?: string | null
+  sourceCounts: AiTeachSourceCounts
+}
+
+/** 3.14 素材注册表：区间 / 条目 / 章级分配 / 段快照（与 src/lib/aiTeachingSourcesPure.ts 同构） */
+export type AiTeachSourceAnchor =
+  | { kind: 'whole' }
+  | { kind: 'pages'; from: number; to: number }
+  | { kind: 'headings'; from: string; to?: string }
+  | { kind: 'files'; paths: string[] }
+  | { kind: 'lines'; from: number; to: number }
+export interface AiTeachSourceIndexEntry { label: string; anchor: AiTeachSourceAnchor; level?: number }
+export type AiTeachSourceType = 'md' | 'dir' | 'pdf' | 'pptx' | 'docx' | 'image' | 'url' | 'code' | 'other'
+export interface AiTeachSource {
+  id: string
+  title: string
+  type: AiTeachSourceType
+  rel?: string
+  url?: string
+  extractRel?: string | null
+  anchor: AiTeachSourceAnchor
+  status: 'ready' | 'needs-extract' | 'error'
+  index?: AiTeachSourceIndexEntry[]
+  indexUpdatedAt?: string
+  note?: string
+  createdAt: string
+}
+export interface AiTeachChapterAssignment { sourceId: string; label: string; anchor: AiTeachSourceAnchor; addedAt: string }
+export interface AiTeachSegmentSource { sourceId: string; label: string; anchor: AiTeachSourceAnchor; mode: 'exact' | 'narrow' | 'fallback' }
+export interface AiTeachSourcesPayload {
+  ok: boolean
+  sources: AiTeachSource[]
+  assignments: Record<string, AiTeachChapterAssignment[]>
+  error?: string
+}
 
 /** P6 素材库：SOURCE.md 解析条目（§3.13 模板 v2，字段行与模板一一对应） */
 export interface AiTeachSourceEntry {
@@ -2918,7 +2973,19 @@ export interface ElectronAPI {
   aiTeachCourseRemoveUnit: (wsId: string, unit: string) => Promise<{ ok: boolean; removed?: string; needOrganize?: boolean; unitId?: string; unitName?: string; status?: string; error?: string }>
   aiTeachCourseMoveUnit: (wsId: string, unitId: string, targetChapterId: string, beforeUnitId: string | null) => Promise<{ ok: boolean; error?: string }>
   aiTeachCourseSetUnitProgress: (wsId: string, unitId: string, patch: Partial<AiTeachCourseUnitProgress>) => Promise<{ ok: boolean; error?: string }>
-  // L2 课时生命周期：打开即续课 / 结束课时 / 生成交接；L3 知识点收尾
+  // 3.14 段模型：开段 / 聚焦 / 收尾 / 交接
+  aiTeachCourseOpenSegment: (wsId: string, unitIds: string[], sources: AiTeachSegmentSource[]) => Promise<{ ok: boolean; sessionId?: string; order?: number; status?: 'open' | 'ended'; readonly?: boolean; error?: string }>
+  aiTeachCourseSetActiveUnit: (sessionId: string, unitId: string) => Promise<{ ok: boolean; error?: string }>
+  aiTeachCourseEndSegment: (sessionId: string) => Promise<{ ok: boolean; wsId?: string; unitIds?: string[]; error?: string }>
+  aiTeachCourseFinalizeSegment: (sessionId: string) => Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean }>
+  // 3.14 素材注册表
+  aiTeachCourseGetSources: (wsId: string) => Promise<AiTeachSourcesPayload>
+  aiTeachCourseRegisterSources: (wsId: string, items: Array<{ path: string; title?: string; type?: string }>) => Promise<{ ok: boolean; sources: AiTeachSource[]; errors: Array<{ path: string; error: string }>; error?: string }>
+  aiTeachCourseAssignSources: (wsId: string, chapterId: string, items: Array<{ sourceId?: string; source?: string; label?: string; anchor?: AiTeachSourceAnchor }>) => Promise<{ ok: boolean; assigned: number; errors: string[]; error?: string }>
+  aiTeachCourseRemoveSource: (wsId: string, sourceId: string) => Promise<{ ok: boolean; error?: string }>
+  aiTeachCourseRemoveAssignment: (wsId: string, chapterId: string, sourceId: string) => Promise<{ ok: boolean; error?: string }>
+  aiTeachCourseExtractSource: (wsId: string, sourceId: string, anchor: AiTeachSourceAnchor) => Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean }>
+  // L2 课时生命周期（3.13 兼容）
   aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => Promise<{ ok: boolean; sessionId?: string; order?: number; kind?: string; status?: 'open' | 'ended'; readonly?: boolean; error?: string }>
   aiTeachCourseEndLesson: (sessionId: string) => Promise<{ ok: boolean; wsId?: string; unitId?: string; error?: string }>
   aiTeachCourseFinalizeLesson: (sessionId: string) => Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean }>

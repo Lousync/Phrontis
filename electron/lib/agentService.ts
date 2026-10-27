@@ -39,12 +39,11 @@ import { getCurrentVault } from './kbStore/vaultContext'
 import { MANUAL_CHANNEL_TOOL, MANUAL_MAX_ROUNDS, buildManualSystemPrompt, classifyManualIntent, hasOperationIntent } from './manualChannel'
 import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceConstraintsForSession, resolveWriteOwnerRel, listSessionFolderIds } from './aiTeachingFolders'
 import { readAssistantGlobalConstraints, readAssistantSessionConstraints, readAssistantGlossary } from './assistantConstraints'
-import { resolveSourcesForInjection } from './aiTeachingSources'
 import { readUnitConstraintsForSession } from './aiTeachingScope'
 import { buildScopePrompt } from './scopePrompt'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
 import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
-import { buildCourseInjection } from './aiTeachingCourse'
+import { buildCourseInjection, buildAiTeachSourcesHint } from './aiTeachingCourse'
 import { listFavorites } from './aiTeachingFavorites'
 import { findSkillPrompt } from './skillService'
 import { recordAiUsage, usageKeyOf, recordSessionFileChange, getAiUsageData, getAiUsageModels, getSessionChanges } from './agentUsage'
@@ -1131,11 +1130,11 @@ async function runAgentLoop(
     : ''
   // 对话驱动建课：把课程大纲给用户过目时输出 ```outline 围栏 → 渲染成草稿卡（满意才「正式生成」落盘）
   const outlineRuleHint = source === 'aiTeaching'
-    ? '\n\n【大纲草稿协议（AI教学）】当你把课程大纲给用户过目时，除正文说明外，输出一个 ```outline 围栏代码块，块内是一个 JSON 对象（不要注释）：{"title":"课程名","goal":"一句话目标","chapters":[{"name":"章名","units":[{"name":"知识点名","goal":"该点学习目标","source":"出处"}]}]}。规则：**分批**——先只展开第一章（其余章只给 name、units 用空数组表示未展开）；用户满意后由客户端「正式生成」按钮落盘（你也可调 course.outline.write）；用户要改就更新草稿、重新发这个围栏。围栏语言必须是 outline（\u0060\u0060\u0060outline）。JSON 字符串值内部禁止未转义英文双引号——需要引用时一律用中文引号『』或“”。另外，知识点粒度：拆到「一个可独立讲解、可出题检验的最小概念」为止（如一个定义、一条定理、一种方法）；依据里的一小节/一段通常对应多个知识点，**不要**把一整节压成一个。**不要**把章节导语、教学目标、考试目标 / 考情分析、重难点提示、学习要求、知识结构总览、复习建议这类元信息当作知识点——某份素材整篇只是导语 / 框架就跳过它，只从其余素材抽取实质内容。'
+    ? '\n\n【大纲草稿协议（AI教学）】当你把课程大纲给用户过目时，除正文说明外，输出一个 ```outline 围栏代码块，块内是一个 JSON 对象（不要注释）：{"title":"课程名","goal":"一句话目标","chapters":[{"name":"章名","units":[{"name":"知识点名","goal":"该点学习目标","source":"出处"}]}]}。规则：**一次给全量章 → 知识点**（不要"先只给第一章"；每段开讲前由用户在客户端确认）；用户满意后由客户端「正式生成」按钮落盘（你也可调 course.outline.write）；用户要改就更新草稿、重新发这个围栏。围栏语言必须是 outline（\u0060\u0060\u0060outline）。JSON 字符串值内部禁止未转义英文双引号——需要引用时一律用中文引号『』或“”。另外，知识点粒度：拆到「一个可独立讲解、可出题检验的最小概念」为止（如一个定义、一条定理、一种方法）；依据里的一小节/一段通常对应多个知识点，**不要**把一整节压成一个。**不要**把章节导语、教学目标、考试目标 / 考情分析、重难点提示、学习要求、知识结构总览、复习建议这类元信息当作知识点——某份素材整篇只是导语 / 框架就跳过它，只从其余素材抽取实质内容。'
     : ''
-  // P6（§3.13/3-29）：素材目录实时注入（SOURCE.md 条目+提取稿路径+编号引用规则）；无登记则零注入
+  // 3.14：素材注入按角色（助手摘要 / 段快照 / 复习章级）；旧零散会话不注入
   const sourcesHint = source === 'aiTeaching' ? (() => {
-    const cat = resolveSourcesForInjection(sessionId, getSettingReader())
+    const cat = buildAiTeachSourcesHint(sessionId, getSettingReader())
     return cat ? `\n\n${cat}` : ''
   })() : ''
   // 工件栏方案 §3.2：示意图生成门槛与产物约束（双路触发：命中门槛主动画 + 用户指令强制画）
@@ -1181,7 +1180,7 @@ async function runAgentLoop(
   // 默认只读材料登记项 + 本工作区夹；用户当前消息明确点名时才放开。长度控制百字级，防缓存前缀膨胀。
   const scopeRuleHint = aiTeachScope ? (() => {
     const { wsRel, sessionRel } = aiTeachScope
-    const scope1 = '① 素材目录（SOURCE.md）中登记的文件 / 提取稿 / 链接'
+    const scope1 = '① 本段确认的素材 / 本章已分配的素材（见注入的素材清单；段快照之外的 SOURCES 文件不要自行扫描）'
     const scope2 = wsRel
       ? `② 本工作区文件夹 \`${wsRel}/\` 内的内容（含本会话产物${sessionRel ? `，本会话文件夹为 \`${sessionRel}/\`` : ''}）`
       : '② 本会话产物所在文件夹'

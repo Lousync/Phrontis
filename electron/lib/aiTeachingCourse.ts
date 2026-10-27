@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, renameSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, renameSync, copyFileSync } from 'fs'
 import { dirname, isAbsolute, join } from 'path'
 import { ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
@@ -15,41 +15,67 @@ import {
   rewriteCourseMd,
   normalizeOutline,
   cleanField,
-  sourceSnapshot,
   mergeOutlineAdditions,
   moveUnitInOutline,
+  normalizeProgressFile,
   type CourseOutline,
   type CourseUnitProgress,
   type CourseUnitStatus,
+  type CourseLessonInfoV2,
+  type CourseWsV2,
   type OutlineAdditions,
-  type SourceSnapshotEntry,
 } from './aiTeachingCoursePure'
-import { readWorkspaceSourceEntries, type SourceEntry } from './aiTeachingSources'
+import {
+  getSources,
+  getSourceSummary,
+  resolveSegmentSources,
+  chapterSourceTitles,
+  assistantSourcesSummary,
+  remapChapterAssignments,
+  renderSourcesHint,
+  type SourceSummary,
+} from './aiTeachingSourceRegistry'
+import {
+  chapterSegments,
+  lessonUnitIds,
+  nextSegmentOrder,
+  prevSegmentOf,
+  reviewState,
+  unitLearned,
+} from '../../src/lib/aiTeachingProgressPure'
+import type { SegmentSource } from '../../src/lib/aiTeachingSourcesPure'
 
 /**
- * AI教学 · 课程模式（docs/ai-teaching-course-mode-plan.md）
+ * AI教学 · 课程模式（3.14.0 简化：课程 = 工作区；章 → 知识点；一段覆盖同章多个知识点）
  *
- * - 课程模式 = 工作区可选开启；开启后该工作区多一条「学习主线」；
  * - 大纲 = 工作区文件夹内 `课程.md`（**人读人改的唯一真相源**，程序按固定行格式解析/重写）；
- *   行格式与纯函数 parseCourseMd / rewriteCourseMd 见 `aiTeachingCoursePure.ts`（供契约脚本 import）；
- * - 进度 = `.knowbase/modules/aiTeaching/progress.json`（机器维护，与 workspaces.json 同目录）：
- *     { v:1, workspaces:{ [wsId]: { enabled, sessions:{ sessionId->unitId }, units:{ unitId->{status,mastery,lastCheckedAt} } } } }
- * - 知识点与会话解耦：掌握度挂知识点；会话只记「当前在学哪个知识点」。
- * - 大纲可演进：AI 只提议，用户确认才写入（唯一写入口径 writeCourseOutline）。
+ * - 进度 = `.knowbase/modules/aiTeaching/progress.json`（机器维护）：v2 段模型；
+ * - 素材 = `.knowbase/modules/aiTeaching/sources.json`（登记 / 章级分配 / 段级快照三分离）；
+ * - 课程助手 / 复习课 / 段 = 三类 aiTeaching 会话；零散会话不再进入左栏。
  */
 
 export { parseCourseMd, rewriteCourseMd, parseOutlineJson } from './aiTeachingCoursePure'
 export type { CourseChapter, CourseOutline, CourseUnit, CourseUnitProgress, CourseUnitStatus } from './aiTeachingCoursePure'
 
-/** 一节课（课时）：一条会话 + 一个产物夹，挂在某知识点下，线性推进 */
+/** 一段（历史键名 lesson）：一条会话 + 一个产物夹，覆盖同章 1..N 个知识点 */
 export interface LessonInfo {
-  unitId: string
-  /** 在该知识点内的顺序（1..N） */
+  unitIds: string[]
+  /** 当前聚焦知识点（点击胶囊 / 右栏定位时更新） */
+  activeUnitId?: string
+  /** 在本章内的顺序（1..N） */
   order: number
-  /** 类型：精讲 / 习题 / 复习 / 测验 / 答疑 … */
-  kind: string
-  /** open=进行中（可续） / ended=已结束（只读） */
+  /** open=进行中（可续） / ended=已收尾（只读） */
   status: 'open' | 'ended'
+  /** 开段预检确认的素材快照；后续改章级分配不影响它 */
+  sources: SegmentSource[]
+  /** 段末交接仓库相对路径（未生成为 null） */
+  handoffRel: string | null
+  startedAt?: string
+  endedAt?: string | null
+  /** 旧字段：仅迁移期读兼容，不再写 */
+  unitId?: string
+  /** 旧字段：仅迁移期读兼容，不再写 */
+  kind?: string
 }
 
 /** 章末复习课（每章一个；会话懒建，内容由与课程助手讨论得出） */
@@ -60,33 +86,23 @@ export interface ChapterReview {
 }
 
 export interface CourseState {
+  /** 3.13 兼容字段：3.14 恒 true；P4 删除 */
   enabled: boolean
   outline: CourseOutline | null
   progress: Record<string, CourseUnitProgress>
   lessons: Record<string, LessonInfo>
   /** 章末复习课：chapterId → 会话 id + 复习讲义相对路径 */
   reviews: Record<string, ChapterReview>
-  /** 课程助手（教学助手）会话 id；未建课为 null —— 左栏三层树据此把它单独成行 */
+  /** 课程助手（教学助手）会话 id；未建课为 null */
   assistantSessionId: string | null
+  /** 素材计数（完整列表走 aiTeachCourse:getSources 按需加载） */
+  sourceCounts: SourceSummary
 }
 
-interface WsCourseState {
-  enabled: boolean
-  /** sessionId → 课时信息（新形状） */
-  lessons: Record<string, LessonInfo>
-  units: Record<string, CourseUnitProgress>
-  /** 旧形状（sessionId → unitId）：仅读兼容，读到后迁移进 lessons */
-  sessions?: Record<string, string>
-  /** 上次写大纲时的 SOURCE.md 条目快照（课程修订算「素材变更」用；机器维护） */
-  sourceBaseline?: SourceSnapshotEntry[]
-  /** 课程助手会话 id（整门课唯一，懒建；不写入 lessons，故不计课时/进度） */
-  assistantSessionId?: string
-  /** 章末复习课：chapterId → 会话 id + 复习讲义相对路径（懒建；不写入 lessons，故不计课时/进度） */
-  reviews?: Record<string, ChapterReview>
-}
+type WsCourseState = CourseWsV2
 
 interface ProgressFile {
-  v: 1
+  v: 2
   workspaces: Record<string, WsCourseState>
 }
 
@@ -95,24 +111,31 @@ const MODULE = 'modules/aiTeaching'
 const OUTLINE_FILE = '课程.md'
 const STATUSES: CourseUnitStatus[] = ['todo', 'learning', 'check', 'mastered', 'review']
 
-const DEFAULT_KIND = '精讲'
-
-function statusLabel(s: CourseUnitStatus | undefined): string {
-  switch (s) {
-    case 'learning': return '学习中'
-    case 'check': return '待检验'
-    case 'mastered': return '已掌握'
-    case 'review': return '待复习'
-    default: return '未开始'
-  }
-}
-
 // ===== 进度文件读写 =====
 
+let progressMigrated = false
+
+function backupProgressOnce(): void {
+  try {
+    const vault = getCurrentVault()
+    if (!vault) return
+    const dirAbs = join(vault.rootPath, '.knowbase', MODULE)
+    const abs = join(dirAbs, KEY)
+    const bak = join(dirAbs, 'progress.v1.bak.json')
+    if (!existsSync(abs) || existsSync(bak)) return
+    copyFileSync(abs, bak)
+  } catch { /* 备份失败不阻断读取 */ }
+}
+
 function readProgressFile(): ProgressFile {
-  const f = readJson<ProgressFile>(MODULE, KEY, { v: 1, workspaces: {} })
-  if (!f.workspaces || typeof f.workspaces !== 'object') f.workspaces = {}
-  return f
+  const raw = readJson<unknown>(MODULE, KEY, { v: 1, workspaces: {} })
+  const { file, migrated } = normalizeProgressFile(raw)
+  if (migrated && !progressMigrated) {
+    progressMigrated = true
+    backupProgressOnce()
+    try { writeJson(MODULE, KEY, file) } catch { /* 下次写盘再试 */ }
+  }
+  return file
 }
 
 function persist(f: ProgressFile): void {
@@ -120,21 +143,11 @@ function persist(f: ProgressFile): void {
 }
 
 function wsState(f: ProgressFile, wsId: string): WsCourseState {
-  if (!f.workspaces[wsId]) f.workspaces[wsId] = { enabled: false, lessons: {}, units: {} }
+  if (!f.workspaces[wsId]) f.workspaces[wsId] = { lessons: {}, units: {}, reviews: {} }
   const s = f.workspaces[wsId]
   if (!s.units || typeof s.units !== 'object') s.units = {}
-  if (!s.lessons || typeof s.lessons !== 'object') {
-    s.lessons = {}
-    // 旧形状迁移：sessions(sessionId→unitId) → lessons（order 按出现次序；status 保守置 open）
-    if (s.sessions && typeof s.sessions === 'object') {
-      const perUnit: Record<string, number> = {}
-      for (const [sid, uid] of Object.entries(s.sessions)) {
-        const n = (perUnit[uid] = (perUnit[uid] ?? 0) + 1)
-        s.lessons[sid] = { unitId: uid, order: n, kind: DEFAULT_KIND, status: 'open' }
-      }
-    }
-  }
-  delete s.sessions
+  if (!s.lessons || typeof s.lessons !== 'object') s.lessons = {}
+  if (!s.reviews || typeof s.reviews !== 'object') s.reviews = {}
   return s
 }
 
@@ -159,24 +172,25 @@ export function readCourseOutline(wsId: string, getSetting: (key: string) => unk
   try { return parseCourseMd(readFileSync(abs, 'utf-8')) } catch { return null }
 }
 
-/** 该工作区主库（SOURCE.md）的素材条目（课程修订 / 快照用；不依赖会话） */
-function wsSources(wsId: string, getSetting: (key: string) => unknown): SourceEntry[] {
-  const vault = getCurrentVault()
-  if (!vault) return []
-  const folder = workspaceFolderRel(wsId, getSetting)
-  if (!folder) return []
-  return readWorkspaceSourceEntries(folder, vault.rootPath)
-}
-
-/** 写大纲成功后刷新 SOURCE 快照（机器维护，失败不阻断）。
- *  ★ 当前**只写不读** —— 比对「素材变更」的唯一读者是 2026-10-11 删除的「修订大纲」抽屉；
- *  保留快照是为将来做「素材变更提醒」时不必重建。 */
-function refreshSourceBaseline(wsId: string, getSetting: (key: string) => unknown): void {
+/** 章 ID 重映射：按章名把 reviews 搬到新 id（找不到同名章的旧数据保留不显示）。 */
+function remapReviewKeys(wsId: string, oldOutline: CourseOutline | null, newOutline: CourseOutline): void {
+  if (!oldOutline) return
   try {
     const f = readProgressFile()
-    wsState(f, wsId).sourceBaseline = sourceSnapshot(wsSources(wsId, getSetting))
-    persist(f)
-  } catch { /* 快照失败不阻断大纲保存 */ }
+    const s = wsState(f, wsId)
+    const byName = new Map(newOutline.chapters.map((c) => [cleanField(c.name), c.id] as const))
+    let changed = false
+    for (const oldCh of oldOutline.chapters) {
+      const newId = byName.get(cleanField(oldCh.name))
+      if (!newId || newId === oldCh.id) continue
+      const cur = s.reviews[oldCh.id]
+      if (!cur) continue
+      if (!s.reviews[newId]) s.reviews[newId] = cur
+      delete s.reviews[oldCh.id]
+      changed = true
+    }
+    if (changed) persist(f)
+  } catch { /* 重映射失败不阻断大纲保存 */ }
 }
 
 export function writeCourseOutline(wsId: string, outline: CourseOutline, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; error?: string } {
@@ -184,11 +198,13 @@ export function writeCourseOutline(wsId: string, outline: CourseOutline, getSett
   const loc = outlineRel(wsId, getSetting)
   if (!vault || !loc) return { ok: false, error: '尚未打开仓库或工作区不存在' }
   try {
+    const old = readCourseOutline(wsId, getSetting)
     const abs = join(vault.rootPath, loc.rel)
     mkdirSync(dirname(abs), { recursive: true })
     writeFileSync(abs, rewriteCourseMd(outline), 'utf-8')
+    remapReviewKeys(wsId, old, outline)
+    remapChapterAssignments(wsId, old, outline, getSetting)
     migrateUnitFolderPrefixes(wsId, getSetting) // F4：章号/章名变更 → 同步重命名知识点夹
-    refreshSourceBaseline(wsId, getSetting) // 刷新素材快照（当前只写不读，见该函数头注）
     broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: loc.dirRel.replace(/\\/g, '/') })
     broadcastCourse(wsId)
     return { ok: true, relPath: loc.rel }
@@ -203,20 +219,18 @@ export function getCourseState(wsId: string, getSetting: (key: string) => unknow
   const f = readProgressFile()
   const s = wsState(f, wsId)
   return {
-    enabled: !!s.enabled,
+    enabled: true,
     outline: readCourseOutline(wsId, getSetting),
     progress: s.units,
-    lessons: s.lessons,
+    lessons: s.lessons as unknown as Record<string, LessonInfo>,
     reviews: s.reviews ?? {},
     assistantSessionId: s.assistantSessionId ?? null,
+    sourceCounts: getSourceSummary(wsId, getSetting),
   }
 }
 
-export function setCourseEnabled(wsId: string, enabled: boolean): { ok: boolean; error?: string } {
-  const f = readProgressFile()
-  wsState(f, wsId).enabled = !!enabled
-  persist(f)
-  broadcastCourse(wsId)
+/** 3.13 兼容：3.14 课程 = 有 `课程.md` 即课程；开关不再生效。 */
+export function setCourseEnabled(_wsId: string, _enabled: boolean): { ok: boolean; error?: string } {
   return { ok: true }
 }
 
@@ -236,52 +250,138 @@ export function setUnitProgress(wsId: string, unitId: string, patch: Partial<Cou
   return { ok: true }
 }
 
-// ===== 课时（L2）：打开即续课 / 结束 / 交接 =====
+// ===== 段（L2）：开段 / 聚焦 / 收尾 / 交接 =====
 
 function lessonsOf(s: WsCourseState, unitId: string): Array<{ sid: string; info: LessonInfo }> {
   return Object.entries(s.lessons)
-    .filter(([, l]) => l.unitId === unitId)
-    .map(([sid, info]) => ({ sid, info }))
+    .filter(([, l]) => lessonUnitIds(l).includes(unitId))
+    .map(([sid, info]) => ({ sid, info: info as LessonInfo }))
     .sort((a, b) => a.info.order - b.info.order)
 }
 
-function nextLessonOrder(s: WsCourseState, unitId: string): number {
-  const arr = lessonsOf(s, unitId)
-  return arr.length ? arr[arr.length - 1].info.order + 1 : 1
+function chapterOfUnit(outline: CourseOutline | null, unitId: string): { chapter: CourseOutline['chapters'][number]; index: number } | null {
+  if (!outline) return null
+  for (let i = 0; i < outline.chapters.length; i++) {
+    const c = outline.chapters[i]
+    if (c.units.some((u) => u.id === unitId)) return { chapter: c, index: i }
+  }
+  return null
 }
 
-export interface LessonOpenResult {
+function chapterUnitIds(outline: CourseOutline | null, chapterId: string): string[] {
+  return (outline?.chapters.find((c) => c.id === chapterId)?.units ?? []).map((u) => u.id)
+}
+
+export interface SegmentOpenResult {
   ok: boolean
   sessionId?: string
   order?: number
-  kind?: string
   status?: 'open' | 'ended'
   readonly?: boolean
   error?: string
 }
 
-/** 打开知识点：无课时→建课时1；最后一节进行中→续上；已结束→建下一节。 */
-export function openUnit(wsId: string, unitId: string, kind: string | undefined, getSetting: (key: string) => unknown): LessonOpenResult {
+/**
+ * 开一段：同章 1..N 个知识点；同章同时只允许一个 open 段。
+ * - 请求集合是现有 open 段的子集/相等 → 续上；
+ * - 本章有别的 open 段 → 拒绝（先收尾）；
+ * - 新段对每个 unit 做回炉（finished=false / learning）。
+ */
+export function openSegment(wsId: string, unitIdsRaw: string[], sources: SegmentSource[], getSetting: (key: string) => unknown): SegmentOpenResult {
   if (!getCurrentVault()) return { ok: false, error: '尚未打开仓库' }
+  const id = String(wsId ?? '').trim()
+  const unitIds = Array.from(new Set((unitIdsRaw ?? []).map((x) => String(x ?? '').trim()).filter(Boolean)))
+  if (!id || !unitIds.length) return { ok: false, error: '缺少工作区或知识点' }
+  const outline = readCourseOutline(id, getSetting)
+  if (!outline) return { ok: false, error: '该工作区还没有课程大纲' }
+  const first = chapterOfUnit(outline, unitIds[0])
+  if (!first) return { ok: false, error: '知识点不存在' }
+  if (unitIds.some((uid) => chapterOfUnit(outline, uid)?.chapter.id !== first.chapter.id)) {
+    return { ok: false, error: '一段只能覆盖同一章的知识点' }
+  }
+  const f = readProgressFile()
+  const s = wsState(f, id)
+  const chapterIds = new Set(first.chapter.units.map((u) => u.id))
+  const open = Object.entries(s.lessons).find(([, l]) => l.status === 'open' && lessonUnitIds(l).some((uid) => chapterIds.has(uid)))
+  if (open) {
+    const existing = lessonUnitIds(open[1])
+    if (unitIds.every((uid) => existing.includes(uid))) {
+      return { ok: true, sessionId: open[0], order: open[1].order, status: 'open', readonly: false }
+    }
+    return { ok: false, error: '本章还有一段没收尾，先收尾再开新段' }
+  }
+  const order = nextSegmentOrder(s.lessons, [...chapterIds])
+  const start = first.chapter.units.find((u) => u.id === unitIds[0])
+  const end = first.chapter.units.find((u) => u.id === unitIds[unitIds.length - 1])
+  const title = `第${first.index + 1}章 段${order}${start && end && start.id !== end.id ? ` · ${start.name}–${end.name}` : start ? ` · ${start.name}` : ''}`
+  const row = createAgentSession(title, 'aiTeaching')
+  assignSession(row.id, id)
+  s.lessons[row.id] = {
+    unitIds,
+    activeUnitId: unitIds[0],
+    order,
+    status: 'open',
+    sources: Array.isArray(sources) ? sources : [],
+    handoffRel: null,
+    startedAt: new Date().toISOString(),
+    endedAt: null,
+  }
+  for (const uid of unitIds) {
+    const up = s.units[uid] ?? { status: 'todo' as CourseUnitStatus, mastery: 0, lastCheckedAt: null }
+    s.units[uid] = { ...up, finished: false, status: 'learning' }
+  }
+  persist(f)
+  broadcastCourse(id)
+  return { ok: true, sessionId: row.id, order, status: 'open', readonly: false }
+}
+
+/** 3.13 兼容：打开单知识点 = 开一个只含该知识点的段。 */
+export function openUnit(wsId: string, unitId: string, _kind: string | undefined, getSetting: (key: string) => unknown): SegmentOpenResult & { kind?: string } {
+  const r = openSegment(wsId, [unitId], [], getSetting)
+  return { ...r, kind: '精讲' }
+}
+
+/** 段内切换当前聚焦知识点（不新建会话）。 */
+export function setActiveUnit(sessionId: string, unitId: string): { ok: boolean; error?: string } {
+  const wsId = getWorkspaceOfSession(sessionId)
+  if (!wsId) return { ok: false, error: '会话未归属工作区' }
   const f = readProgressFile()
   const s = wsState(f, wsId)
-  const arr = lessonsOf(s, unitId)
-  const last = arr[arr.length - 1]
-  if (last && last.info.status === 'open') {
-    return { ok: true, sessionId: last.sid, order: last.info.order, kind: last.info.kind, status: 'open', readonly: false }
-  }
-  const order = nextLessonOrder(s, unitId)
-  const k = (kind && String(kind).trim()) || DEFAULT_KIND
-  const row = createAgentSession(`课时${order}·${k}`, 'aiTeaching')
-  assignSession(row.id, wsId)
-  // 懒创建：不在开课时就建夹（空课时不建夹；真产生文件时由 writeFolderFile/ensureSessionFolder 建）
-  s.lessons[row.id] = { unitId, order, kind: k, status: 'open' }
-  // F7：该知识点此前若已收尾，再开课时自动回炉（重置 finished / 状态）
-  const up = s.units[unitId]
-  if (up?.finished) { s.units[unitId] = { ...up, finished: false, status: 'learning' } }
+  const l = s.lessons[sessionId]
+  if (!l) return { ok: false, error: '该会话不是一段' }
+  if (l.status !== 'open') return { ok: false, error: '本段已收尾' }
+  if (!lessonUnitIds(l).includes(unitId)) return { ok: false, error: '该知识点不在本段' }
+  l.activeUnitId = unitId
   persist(f)
   broadcastCourse(wsId)
-  return { ok: true, sessionId: row.id, order, kind: k, status: 'open', readonly: false }
+  return { ok: true }
+}
+
+/** 收尾一段：整段冻结；段内所有知识点置学完（不看掌握度）。 */
+export function endSegment(sessionId: string): { ok: boolean; wsId?: string; unitIds?: string[]; error?: string } {
+  const wsId = getWorkspaceOfSession(sessionId)
+  if (!wsId) return { ok: false, error: '会话未归属工作区' }
+  const f = readProgressFile()
+  const s = wsState(f, wsId)
+  const l = s.lessons[sessionId]
+  if (!l) return { ok: false, error: '该会话不是一段' }
+  const ids = lessonUnitIds(l)
+  l.status = 'ended'
+  l.endedAt = new Date().toISOString()
+  const now = new Date().toISOString()
+  for (const uid of ids) {
+    const up = s.units[uid] ?? { status: 'todo' as CourseUnitStatus, mastery: 0, lastCheckedAt: null }
+    s.units[uid] = { ...up, finished: true, status: 'mastered', lastCheckedAt: now }
+  }
+  persist(f)
+  broadcastCourse(wsId)
+  return { ok: true, wsId, unitIds: ids }
+}
+
+/** 3.13 兼容：结束单知识点课时。 */
+export function endLesson(sessionId: string): { ok: boolean; wsId?: string; unitId?: string; error?: string } {
+  const r = endSegment(sessionId)
+  return { ...r, unitId: r.unitIds?.[0] }
 }
 
 /**
@@ -337,6 +437,10 @@ export function openChapterReview(wsId: string, chapterId: string, getSetting: (
   const s = wsState(f, id)
   if (!s.reviews) s.reviews = {}
   const existing = s.reviews[cid]
+  const st = reviewState(cid, chapter.units.map((u) => u.id), s.units, s.lessons, s.reviews)
+  if (st.state === 'locked') {
+    return { ok: false, error: `本章还有 ${st.remaining} 个知识点没学完，学完自动解锁` }
+  }
   if (existing?.sessionId && sessionExists(existing.sessionId)) return { ok: true, sessionId: existing.sessionId }
   const row = createAgentSession(`复习课·${chapter.name}`, 'aiTeaching')
   assignSession(row.id, id)
@@ -385,36 +489,27 @@ export function writeChapterReviewDoc(sessionId: string, content: unknown, getSe
   }
 }
 
-/** 结束课时：本节冻结（只读） */
-export function endLesson(sessionId: string): { ok: boolean; wsId?: string; unitId?: string; error?: string } {
-  const wsId = getWorkspaceOfSession(sessionId)
-  if (!wsId) return { ok: false, error: '会话未归属工作区' }
-  const f = readProgressFile()
-  const s = wsState(f, wsId)
-  const l = s.lessons[sessionId]
-  if (!l) return { ok: false, error: '该会话不是一节课' }
-  l.status = 'ended'
-  persist(f)
-  broadcastCourse(wsId)
-  return { ok: true, wsId, unitId: l.unitId }
-}
-
-/** 取本会话的上一节交接内容（无则空串） */
+/** 取本段同章上一段的交接内容（无则空串）。 */
 export function readPrevHandoff(sessionId: string, getSetting: (key: string) => unknown): string {
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return ''
   const f = readProgressFile()
-  const s = wsState(f, wsId) // 迁移兼容 + 保证 lessons 结构存在
+  const s = wsState(f, wsId)
   const cur = s.lessons?.[sessionId]
   if (!cur) return ''
-  const arr = lessonsOf(s, cur.unitId)
-  const prev = arr.filter((l) => l.info.order < cur.order).pop()
+  const outline = readCourseOutline(wsId, getSetting)
+  const ch = chapterOfUnit(outline, lessonUnitIds(cur)[0])
+  if (!ch) return ''
+  const prev = prevSegmentOf(s.lessons, sessionId, ch.chapter.units.map((u) => u.id))
   if (!prev) return ''
   const vault = getCurrentVault()
   if (!vault) return ''
-  const folder = sessionFolder(prev.sid, getSetting)
-  if (!folder.ok || !folder.relPath) return ''
-  const abs = join(vault.rootPath, folder.relPath, '交接.md')
+  const rel = prev.lesson.handoffRel || (() => {
+    const folder = lessonFolderRel(prev.sessionId, getSetting)
+    return folder ? `${folder}/交接.md` : null
+  })()
+  if (!rel) return ''
+  const abs = join(vault.rootPath, rel)
   if (!existsSync(abs)) return ''
   try { return readFileSync(abs, 'utf-8').slice(0, 4000) } catch { return '' }
 }
@@ -423,7 +518,8 @@ function defaultModel(): { providerId?: string; modelId?: string } {
   return resolveOutlineModel({})
 }
 
-/** L1：本课时的物理文件夹相对路径 `{工作区}/{章号}·{知识点}/课时N·类型`；非课时返回 null */
+/** L1：段的物理文件夹相对路径 `{工作区}/{章号}·{首知识点}/段N`；非段返回 null。
+ *  旧 `课时N·类型` 夹若已存在则继续用它（不搬用户文件）。 */
 function lessonFolderRel(sessionId: string, getSetting: (key: string) => unknown): string | null {
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return null
@@ -431,18 +527,30 @@ function lessonFolderRel(sessionId: string, getSetting: (key: string) => unknown
   if (!wsFolder) return null
   const f = readProgressFile()
   const st = wsState(f, wsId)
-  // 章末复习课会话：落章级文件夹 {工作区}/{章号}·{章名}（无 课时N 子夹）
+  // 章末复习课会话：落章级文件夹 {工作区}/{章号}·{章名}（无段子夹）
   const revChapter = Object.entries(st.reviews ?? {}).find(([, r]) => r?.sessionId === sessionId)?.[0]
   if (revChapter) return chapterFolderRel(wsId, revChapter, getSetting)
   const l = st.lessons[sessionId]
   if (!l) return null
   const outline = readCourseOutline(wsId, getSetting)
-  let chapterNo = 1
-  let unitName = '知识点'
-  const chapters = outline?.chapters ?? []
-  chapters.forEach((c, ci) => { for (const u of c.units) if (u.id === l.unitId) { chapterNo = ci + 1; unitName = u.name } })
+  const firstUnitId = lessonUnitIds(l)[0]
+  const ch = chapterOfUnit(outline, firstUnitId)
   const safe = (t: string) => String(t).replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim() || '未命名'
-  return `${wsFolder}/${chapterNo}·${safe(unitName)}/课时${l.order}·${safe(l.kind)}`
+  if (!ch) return null
+  const unit = ch.chapter.units.find((u) => u.id === firstUnitId)
+  const unitName = unit?.name ?? '知识点'
+  const unitDirRel = `${wsFolder}/${ch.index + 1}·${safe(unitName)}`
+  // 旧课时夹兼容：{unit}/课时{order}·{kind}
+  try {
+    const vault = getCurrentVault()
+    if (vault) {
+      const dirAbs = join(vault.rootPath, unitDirRel)
+      const prefix = `课时${l.order}·`
+      const old = readdirSync(dirAbs, { withFileTypes: true }).find((d) => d.isDirectory() && d.name.startsWith(prefix))
+      if (old) return `${unitDirRel}/${old.name}`
+    }
+  } catch { /* 目录不存在 → 新段夹 */ }
+  return `${unitDirRel}/段${l.order}`
 }
 
 // L1：注册课时文件夹解析器给 aiTeachingFolders（避免 folders↔course 循环 import）
@@ -540,20 +648,36 @@ function transcriptOf(sessionId: string, limit = 6000): string {
   return text.length > limit ? text.slice(-limit) : text
 }
 
-/** 结束课时后：生成 交接.md（固定四段）落本课时夹 */
-export async function finalizeLesson(sessionId: string, getSetting: (key: string) => unknown): Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean }> {
+/** 段收尾后：生成 交接.md（固定四段）落本段夹，并写 handoffRel。 */
+export async function finalizeSegment(sessionId: string, getSetting: (key: string) => unknown): Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean }> {
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return { ok: false, error: '会话未归属工作区' }
-  // F6：空课时（零消息）不生成占位交接
+  // 空段（零消息）不生成占位交接
   const msgs = getAgentMessages(sessionId).filter((m) => m.role === 'user' || m.role === 'assistant')
   if (msgs.length === 0) return { ok: true, skipped: true }
   const { providerId, modelId } = defaultModel()
-  const sys = '你是助教。根据这一节课的对话，写一份交给下一节课的「交接」。只输出四段 markdown，简体中文，简洁具体。'
-  const user = `本课对话记录：\n${transcriptOf(sessionId) || '（本节没有对话）'}\n\n请严格按下面四段输出：\n- 本节要点：…\n- 掌握情况：…（哪里会了、哪里卡）\n- 遗留问题：…（没讲完/没搞懂的）\n- 下节建议：…（从哪继续、练什么）`
+  const sys = '你是助教。根据这一段课程的对话，写一份交给同章下一段的「交接」。只输出四段 markdown，简体中文，简洁具体。'
+  const user = `本段对话记录：\n${transcriptOf(sessionId) || '（本段没有对话）'}\n\n请严格按下面四段输出：\n- 本段要点：…\n- 掌握情况：…（哪里会了、哪里卡）\n- 遗留问题：…（没讲完/没搞懂的）\n- 下段建议：…（从哪继续、练什么）`
   const r = await invokeLlmInternal({ providerId, modelId, effort: 'off', messages: [{ role: 'system', content: sys }, { role: 'user', content: user }], sessionId })
   const body = r.ok ? r.content.trim() : `（交接自动生成失败：${r.error}——可手动补写）`
-  const title = getAgentSession(sessionId)?.title ?? '本课'
-  return writeFolderFile(sessionId, '交接.md', `# 交接 · ${title}\n\n${body}\n`, getSetting)
+  const title = getAgentSession(sessionId)?.title ?? '本段'
+  const w = writeFolderFile(sessionId, '交接.md', `# 交接 · ${title}\n\n${body}\n`, getSetting)
+  if (w.ok && w.relPath) {
+    try {
+      const f = readProgressFile()
+      const s = wsState(f, wsId)
+      if (s.lessons[sessionId]) {
+        s.lessons[sessionId].handoffRel = w.relPath
+        persist(f)
+      }
+    } catch { /* 交接已落盘；handoffRel 下次可再补 */ }
+  }
+  return w
+}
+
+/** 3.13 兼容：结束单知识点课时后的交接。 */
+export async function finalizeLesson(sessionId: string, getSetting: (key: string) => unknown): Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean }> {
+  return finalizeSegment(sessionId, getSetting)
 }
 
 /** 知识点收尾：汇总各课时 → 生成 总结·{知识点}.md，置 finished */
@@ -569,7 +693,7 @@ export async function finishUnit(wsId: string, unitId: string, getSetting: (key:
   if (arr.length === 0 || arr.some((l) => l.info.status !== 'ended')) {
     return { ok: false, error: '还有课时未结束，先把课时上完' }
   }
-  const merged = arr.map((l) => `— ${l.info.kind}（课时${l.info.order}）—\n${transcriptOf(l.sid, 2500)}`).join('\n\n').slice(-12000)
+  const merged = arr.map((l) => `— 段${l.info.order} —\n${transcriptOf(l.sid, 2500)}`).join('\n\n').slice(-12000)
   const { providerId, modelId } = defaultModel()
   const sys = `你是课程助教。为知识点「${unit.name}」写一篇收尾总结（总结篇），用于日后回顾。`
   const user = `知识点：${unit.name}\n目标：${unit.goal || '（未设）'}\n\n各课时要点汇总：\n${merged || '（暂无）'}\n\n请输出 markdown：核心方法 / 易错点 / 关联知识 / 自检清单 四部分，简洁。`
@@ -602,38 +726,37 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
   if (!wsId) return ''
   const f = readProgressFile()
   const s = wsState(f, wsId)
-  if (!s.enabled) return ''
-  // 课程助手会话（整门课一个）走「顾问」分支：**无大纲也可用**（冷启动即可聊规划/整理素材）
+  // 课程助手会话（整门课一个）走「顾问」分支：无大纲也可用
   const isAssistant = !!s.assistantSessionId && sessionId === s.assistantSessionId
-  // 章末复习课会话：走「复习」分支（本章知识点 + 掌握度 + 复习人设）
+  // 章末复习课会话：走「复习」分支
   const reviewHit = findReviewBySession(sessionId)
   const outline = readCourseOutline(wsId, getSetting)
   const hasOutline = !!outline && outline.chapters.length > 0
   if (!hasOutline && !isAssistant) return ''
   const units = hasOutline ? outline!.chapters.flatMap((c) => c.units.map((u) => ({ ...u, chapter: c.name }))) : []
   const total = units.length
-  const done = units.filter((u) => s.units[u.id]?.status === 'mastered').length
+  const done = units.filter((u) => unitLearned(u.id, s.units, s.lessons)).length
   const lines: string[] = []
   if (isAssistant) {
-    lines.push('【教学助手上下文（AI 教学 · 对话驱动建课）】')
+    lines.push('【教学助手上下文（AI 教学 · 课程助手）】')
     lines.push(`课程：${outline?.title || '未命名'} · 目标：${outline?.goal || '未设定'}`)
-    lines.push('你是这门课的**教学助手**：负责跟用户定学习目标、清点与分章素材、生成/展开课程大纲、整理与答疑。**不要**逐知识点开讲（那是上课时的事），也不要出课时或快检卡。')
+    lines.push('你是这门课的**课程助手**：负责跟用户定学习目标、登记素材、生成/调整课程大纲、按章分配素材、整理与答疑。**不要**逐知识点开讲（开讲由用户在中栏点「开始本段」触发），也不要出课时或快检卡。')
     if (hasOutline) {
-      lines.push('课程大纲（章 → 知识点 · 掌握度/状态）：')
+      lines.push('课程大纲（章 → 知识点 · 学完状态）：')
       for (const c of outline!.chapters) {
-        lines.push(`- ${c.name}`)
+        const learned = c.units.filter((u) => unitLearned(u.id, s.units, s.lessons)).length
+        lines.push(`- [${c.id}] ${c.name}（已学 ${learned}/${c.units.length}）`)
         for (const u of c.units) {
-          const p = s.units[u.id]
-          lines.push(`  · ${u.name}（${statusLabel(p?.status)}，掌握度 ${Math.round((p?.mastery ?? 0) * 100)}%${u.source ? `，来源：${u.source}` : ''}）`)
+          lines.push(`  · [${u.id}] ${u.name}（${unitLearned(u.id, s.units, s.lessons) ? '已学完' : '未学'}${u.source ? `，来源：${u.source}` : ''}）`)
         }
       }
-      lines.push(`课程进度：已掌握 ${done}/${total}`)
-      const review = units.filter((u) => s.units[u.id]?.status === 'review')
-      if (review.length) lines.push(`待复习（薄弱）：${review.map((u) => u.name).join('、')}`)
+      lines.push(`课程进度：已学完 ${done}/${total}`)
     } else {
-      lines.push('（本工作区还没有课程大纲。按流程引导：先聊清学习目标、清点素材，条件够就询问用户"是否生成大纲"，确认后再生成为草稿。）')
+      lines.push('（本工作区还没有课程大纲。按流程引导：先聊清学习目标、登记素材，条件够就询问用户"是否生成大纲"，确认后再生成为草稿。）')
     }
-    lines.push('【建课流程与工具】① 素材里若有 pdf/pptx，先提醒用户把它们转写成 md（可在素材库对该素材做「提取稿」），确认后再继续；② 用 inventory 清点目录素材（**先清点再分章**，别把整个目录硬读进上下文）；③ 与用户定好目标、素材就绪后，问「是否生成大纲」；④ 生成的大纲**先作为对话里的草稿给用户看**，用户满意后才调 course.outline.write 落盘（**分批**：先只给第一章，用户学完再说「展开下一章」用 append=true 追加）；⑤ 删知识点用 course.outline.remove-unit（已学过的会被拒绝，需先用 course.organize.archive 整理归档、给用户看后再删）；⑥ course.organize.archive 的归档位置默认会话 output/，也可由用户/你指定目录，归档后必须把**绝对路径**告诉用户。落盘只走这些工具，不要另造文件；改大纲前先与用户确认。')
+    lines.push('【素材登记摘要】')
+    lines.push(assistantSourcesSummary(wsId, getSetting))
+    lines.push('【建课流程与工具】① 素材先登记：用户给出文件/目录/URL 时用 course.sources.register 批量登记（外部文件会复制进本课 SOURCES；仓库内文件只引用）；② pdf/pptx 需要时用 course.sources.extract 提取页码区间；③ 用 inventory 清点目录素材（先清点再分章，别把整目录硬读进上下文）；④ 与用户定好目标、素材就绪后，生成**全量**大纲草稿（章 → 知识点；不要"先只给第一章"）；用户确认后调 course.outline.write 落盘；⑤ 用 course.sources.assign 把素材按章分配（能判断区间就带 anchor；判断不了就整章 whole）；⑥ 不主动开讲；提醒用户点知识点开段，开段前会做素材预检；⑦ 删知识点用 course.outline.remove-unit（已学过的会被拒绝，需先用 course.organize.archive 整理归档）；⑧ 落盘只走这些工具，不要另造文件；改大纲前先与用户确认。')
     return '\n\n' + lines.join('\n')
   }
   // 复习课分支：章末复习（本章知识点串讲 + 查漏补缺，不引入新知识点）
@@ -643,43 +766,78 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     lines.push(`课程：${outline!.title || '未命名'} · 目标：${outline!.goal || '未设定'}`)
     lines.push(`这是针对「${chapter?.name ?? '本章'}」的**章末复习课**：帮学生把本章已学知识点串成体系、查漏补缺，**不引入新知识点**。`)
     if (chapter) {
-      lines.push('本章知识点（含掌握度/状态）：')
+      lines.push('本章知识点（全部已学完才解锁复习）：')
       for (const u of chapter.units) {
-        const p = s.units[u.id]
-        lines.push(`  · ${u.name}（${statusLabel(p?.status)}，掌握度 ${Math.round((p?.mastery ?? 0) * 100)}%${u.goal ? `，目标：${u.goal}` : ''}）`)
+        lines.push(`  · [${u.id}] ${u.name}（${unitLearned(u.id, s.units, s.lessons) ? '已学完' : '未学'}${u.goal ? `，目标：${u.goal}` : ''}）`)
       }
-      const weak = chapter.units.filter((u) => s.units[u.id]?.status === 'review')
-      if (weak.length) lines.push(`本章薄弱（待复习）：${weak.map((u) => u.name).join('、')}`)
+      const segs = chapterSegments(s.lessons, chapter.units.map((u) => u.id))
+      const handoffs = segs.map((x) => x.lesson.handoffRel).filter((x): x is string => !!x)
+      if (handoffs.length) {
+        const vault = getCurrentVault()
+        const parts: string[] = []
+        for (const rel of handoffs.slice(-6)) {
+          if (!vault) break
+          try {
+            const abs = join(vault.rootPath, rel)
+            if (existsSync(abs)) parts.push(readFileSync(abs, 'utf-8').slice(0, 1600))
+          } catch { /* 单个交接读取失败不阻断 */ }
+        }
+        if (parts.length) lines.push(`\n【本章各段交接（节选）】\n${parts.join('\n\n---\n\n').slice(0, 6000)}`)
+      }
+      const srcTitles = chapterSourceTitles(wsId, reviewHit.chapterId, getSetting)
+      if (srcTitles.length) lines.push(`\n【本章素材（章级分配）】\n${srcTitles.map((t) => `- ${t}`).join('\n')}`)
     }
     lines.push('复习方式**由你和学生讨论决定**：可按学生要求逐块回顾、出题检验、或把零散点串成体系。**先问学生想怎么过**，别自顾自开讲。')
     lines.push('当复习讨论到一定阶段、结论成型时，**主动提议**「把本次复习整理成《复习讲义》落盘」，学生同意后调用 course.review.write 写入本章目录；写好后把落盘路径告诉学生。')
     return '\n\n' + lines.join('\n')
   }
-  // 教师分支（上课 / 课时）：仅当有大纲（上面已挡）
+  // 教师分支：必须有段；旧零散会话不再注入教学推进规则
   const curLesson = s.lessons[sessionId]
-  const cur = curLesson ? units.find((u) => u.id === curLesson.unitId) ?? null : null
-  lines.push('【课程上下文（AI教学·课程模式）】')
+  if (!curLesson) return ''
+  const ids = lessonUnitIds(curLesson)
+  const unitRows = ids
+    .map((uid) => units.find((u) => u.id === uid))
+    .filter((u): u is (typeof units)[number] => !!u)
+  const active = units.find((u) => u.id === (curLesson.activeUnitId || ids[0])) ?? unitRows[0] ?? null
+  lines.push('【课程上下文（AI教学·段）】')
   lines.push(`课程：${outline!.title || '未命名'} · 目标：${outline!.goal || '未设定'}`)
-  if (outline!.anchor) lines.push(`大纲依据：${outline!.anchor}（你是这门课的老师，请围绕大纲推进，不要脱离知识点自由发散）`)
-  if (cur) {
-    const p = s.units[cur.id]
-    lines.push(`当前知识点：${cur.name}（出自「${cur.chapter}」，来源：${cur.source || '未标注'}，掌握度 ${Math.round((p?.mastery ?? 0) * 100)}%，状态：${statusLabel(p?.status)}）`)
-    if (cur.goal) lines.push(`本知识点目标：${cur.goal}`)
-    if (curLesson) lines.push(`当前课时：课时${curLesson.order}·${curLesson.kind}（${curLesson.status === 'ended' ? '已结束·只读' : '进行中'}）`)
-    const handoff = readPrevHandoff(sessionId, getSetting)
-    if (handoff) lines.push(`\n【上一节交接（本知识点内）】\n${handoff}`)
+  if (outline!.anchor) lines.push(`大纲依据：${outline!.anchor}（你是这门课的老师，请围绕大纲推进，不要脱离本段知识点自由发散）`)
+  lines.push(`本段：第${curLesson.order}段（${curLesson.status === 'ended' ? '已收尾·只读' : '进行中'}）· 覆盖 ${ids.length} 个知识点`)
+  for (const u of unitRows) {
+    const mark = u.id === active?.id ? '【当前聚焦】' : ''
+    lines.push(`- ${mark}[${u.id}] ${u.name}（出自「${u.chapter}」，来源：${u.source || '未标注'}）${u.goal ? ` · 目标：${u.goal}` : ''}`)
   }
-  lines.push(`课程进度：已掌握 ${done}/${total}`)
-  const review = units.filter((u) => s.units[u.id]?.status === 'review')
-  if (review.length) lines.push(`待复习（薄弱）：${review.map((u) => u.name).join('、')}`)
-  // 引用网络（L4）：已完成知识点目录 + 跳转协议
-  const finishedUnits = units.filter((u) => s.units[u.id]?.finished)
+  const handoff = readPrevHandoff(sessionId, getSetting)
+  if (handoff) lines.push(`\n【上一段交接（同章）】\n${handoff}`)
+  lines.push(`课程进度：已学完 ${done}/${total}`)
+  const finishedUnits = units.filter((u) => unitLearned(u.id, s.units, s.lessons))
   if (finishedUnits.length) {
     lines.push(`\n【已完成知识点（可被引用/跳转）】\n` + finishedUnits.map((u) => `- ${u.name}`).join('\n'))
     lines.push('当学生想「回顾/回看」某个已完成知识点，或你判断学生对某已完成知识点完全没有掌握/印象时，**另起一行**输出：`跳转：<知识点名>`；系统会把它渲染成可点击的跳转按钮（一句最多一个）。')
   }
-  lines.push('教学纪律：每轮围绕当前知识点组织讲解；讲完一个新概念可就地出一道快检（走 quiz 协议，一条回答最多一张）；不要一次性把整门课讲完，按知识点推进。')
+  lines.push('教学纪律：本段只讲上面列出的知识点，按用户节奏推进；当前聚焦哪个就先讲哪个，讲完可问用户是否继续下一个或换焦点；不要跳到本章其他段，也不要一次把整门课讲完。讲完一个新概念可就地出一道快检（走 quiz 协议，一条回答最多一张）。本段素材范围见下一段【本段确认素材】，不要扫描 SOURCES 下未确认的文件。')
   return '\n\n' + lines.join('\n')
+}
+
+// ===== 素材注入（agentService 每轮调用）=====
+
+/** 按角色返回素材注入串：助手=摘要；复习=章级；段=段快照；其他=空。 */
+export function buildAiTeachSourcesHint(sessionId: string, getSetting: (key: string) => unknown): string {
+  const wsId = getWorkspaceOfSession(sessionId)
+  if (!wsId) return ''
+  const f = readProgressFile()
+  const s = wsState(f, wsId)
+  if (s.assistantSessionId === sessionId) {
+    return renderSourcesHint({ role: 'assistant', summary: assistantSourcesSummary(wsId, getSetting) })
+  }
+  const reviewHit = findReviewBySession(sessionId)
+  if (reviewHit) {
+    return renderSourcesHint({ role: 'review', chapterSources: chapterSourceTitles(wsId, reviewHit.chapterId, getSetting) })
+  }
+  const lesson = s.lessons[sessionId]
+  if (!lesson) return ''
+  const items = resolveSegmentSources(wsId, (lesson.sources ?? []) as unknown as SegmentSource[], getSetting)
+  return renderSourcesHint({ role: 'segment', items })
 }
 
 // ===== 模型解析（defaultModel 用）=====
@@ -777,19 +935,18 @@ export function inventoryWorkspaceSource(wsId: string, ref: unknown, getSetting:
   if (!vault) return { ok: false, error: '尚未打开仓库' }
   const folder = workspaceFolderRel(String(wsId ?? ''), getSetting)
   if (!folder) return { ok: false, error: '工作区不存在' }
-  const all = wsSources(String(wsId ?? ''), getSetting)
+  const all = getSources(String(wsId ?? ''), getSetting).sources
   if (!all.length) return { ok: false, error: '本工作区还没有登记素材；先在素材库添加' }
   const raw = String(ref ?? '').trim()
-  const no = /^#?(\d+)$/.exec(raw)?.[1]
-  const e = no ? all.find((x) => x.no === Number(no)) : all.find((x) => x.name === raw) ?? all.find((x) => x.name.includes(raw))
-  if (!e) return { ok: false, error: `找不到素材「${raw}」。现有：${all.map((x) => `#${x.no} ${x.name}`).join('、')}` }
-  if (e.type !== 'dir') return { ok: false, error: `「${e.name}」不是目录素材（${e.type}）。单个 pdf/pptx 请先转写为 md 再使用` }
-  const dirAbs = !e.path || e.path === '-' ? '' : (isAbsolute(e.path) ? e.path : join(vault.rootPath, e.path))
-  if (!dirAbs) return { ok: false, error: `素材「${e.name}」未登记路径` }
-  const w = writeInventoryIndex(join(vault.rootPath, folder), e.name, e.path, dirAbs, todayLocal())
+  const e = all.find((x) => x.id === raw) ?? all.find((x) => x.title === raw) ?? all.find((x) => x.title.includes(raw))
+  if (!e) return { ok: false, error: `找不到素材「${raw}」。现有：${all.map((x) => x.title).join('、')}` }
+  if (e.type !== 'dir') return { ok: false, error: `「${e.title}」不是目录素材（${e.type}）。单个 pdf/pptx 请先提取为 md 再使用` }
+  const dirAbs = e.rel ? join(vault.rootPath, e.rel) : ''
+  if (!dirAbs) return { ok: false, error: `素材「${e.title}」未登记路径` }
+  const w = writeInventoryIndex(join(vault.rootPath, folder), e.title, e.rel || '', dirAbs, todayLocal())
   if (!w.ok) return { ok: false, error: w.error }
   return {
-    ok: true, relPath: w.relPath, sourceName: e.name,
+    ok: true, relPath: w.relPath, sourceName: e.title,
     classification: w.scan?.classification, totalFiles: w.scan?.totalFiles, totalChars: w.scan?.totalChars,
     subdirs: w.scan?.subdirs, pendingTranscribe: w.scan?.pendingTranscribe, fingerprint: w.fingerprint,
   }
@@ -912,7 +1069,14 @@ export function registerAiTeachingCourseHandlers(getSetting: (key: string) => un
     moveCourseUnit(String(wsId ?? ''), unitId, targetChapterId, beforeUnitId ?? null, getSetting))
   ipcMain.handle('aiTeachCourse:setUnitProgress', (_e, wsId: string, unitId: string, patch: Partial<CourseUnitProgress>) =>
     setUnitProgress(String(wsId ?? ''), String(unitId ?? ''), patch ?? {}))
-  // L2 课时
+  // L2 段（3.14 新口径）
+  ipcMain.handle('aiTeachCourse:openSegment', (_e, wsId: string, unitIds: string[], sources: SegmentSource[]) =>
+    openSegment(String(wsId ?? ''), unitIds ?? [], sources ?? [], getSetting))
+  ipcMain.handle('aiTeachCourse:setActiveUnit', (_e, sessionId: string, unitId: string) =>
+    setActiveUnit(String(sessionId ?? ''), String(unitId ?? '')))
+  ipcMain.handle('aiTeachCourse:endSegment', (_e, sessionId: string) => endSegment(String(sessionId ?? '')))
+  ipcMain.handle('aiTeachCourse:finalizeSegment', (_e, sessionId: string) => finalizeSegment(String(sessionId ?? ''), getSetting))
+  // L2 兼容（旧 UI / 旧会话）
   ipcMain.handle('aiTeachCourse:openUnit', (_e, wsId: string, unitId: string, kind?: string) =>
     openUnit(String(wsId ?? ''), String(unitId ?? ''), kind, getSetting))
   ipcMain.handle('aiTeachCourse:endLesson', (_e, sessionId: string) => endLesson(String(sessionId ?? '')))
