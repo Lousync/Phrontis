@@ -1884,12 +1884,15 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [askPicks, setAskPicks] = useState<Record<number, string>>({})
   // 提问卡 v2（WorkBuddy 式）：整卷 ‹k/n› 翻页 + 每题「其他补充」自定义回答
   const [askPage, setAskPage] = useState(0)
-  const [askCustomOpen, setAskCustomOpen] = useState(false)
-  const [askCustom, setAskCustom] = useState('')
+  /** 每题一条补充草稿 / 一个编辑态：翻页不串题（B-44 根因 5），翻回来还能继续编辑 */
+  const [askCustomDrafts, setAskCustomDrafts] = useState<Record<number, string>>({})
+  const [askCustomOpen, setAskCustomOpen] = useState<Record<number, boolean>>({})
+  /** 本题答案是否来自「其他补充」：与选项文本恰好相等时也仍按补充行呈现（B-44 根因 1） */
+  const [askCustomPicks, setAskCustomPicks] = useState<Record<number, boolean>>({})
   const askVisible = !!askPending && askDismissed !== askPending.id
   /** 条目9：提问卡收起二态（不丢 askPending 与点选状态；换 ask 重置） */
   const [askCollapsed, setAskCollapsed] = useState(false)
-  useEffect(() => { setAskPicks({}); setAskPage(0); setAskCustomOpen(false); setAskCustom(''); setAskCollapsed(false) }, [askPending?.id]) // 换 ask 重置整卷点选/翻页/补充/收起
+  useEffect(() => { setAskPicks({}); setAskPage(0); setAskCustomDrafts({}); setAskCustomOpen({}); setAskCustomPicks({}); setAskCollapsed(false) }, [askPending?.id]) // 换 ask 重置整卷点选/翻页/补充/收起
 
   /**
    * v3.2.0 第 20 项：画像建议的三块状态。
@@ -2126,9 +2129,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setAskDismissed(null)
     void sendText(text, cid)
   }, [pending, sendText])
-  const submitAskExam = useCallback(() => {
+  const submitAskExam = useCallback((override?: { page: number; value: string }) => {
     if (!askPending || askPending.kind !== 'exam' || pending) return
-    const lines = askPending.questions.map((q, i) => `${i + 1}. ${q.question} → ${askPicks[i] ?? '（未答）'}`)
+    // ↑ 前输入框里还没按 Enter 的文字：由调用方作为 override 传入，避免 setState 异步导致漏答
+    const picks = override ? { ...askPicks, [override.page]: override.value } : askPicks
+    const lines = askPending.questions.map((q, i) => `${i + 1}. ${q.question} → ${picks[i] ?? '（未答）'}`)
     sendAskAnswer(`【整卷回答】\n${lines.join('\n')}`)
   }, [askPending, askPicks, pending, sendAskAnswer])
 
@@ -3553,8 +3558,55 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   const curOpts = exam ? askPending.questions[page].options : askPending.options
                   const pickedCur = exam ? askPicks[page] : undefined
                   const pickedCount = exam ? Object.keys(askPicks).length : 0
-                  const allPicked = !exam || pickedCount >= n
-                  const customMode = askCustomOpen || (exam && pickedCur !== undefined && !curOpts.includes(pickedCur))
+                  /** 本题当前答的是「其他补充」：用独立标记，避免自定义文本恰好等于某选项时丢失补充行 */
+                  const hasCustomAnswer = exam && pickedCur !== undefined && askCustomPicks[page] === true
+                  const customDraft = askCustomDrafts[page] ?? ''
+                  const customOpen = askCustomOpen[page] === true
+                  /** 当前输入等于一道还没记录的答案 —— ↑ 要把它算进可提交数（B-44 根因 4） */
+                  const draftFillsAnswer = exam && customOpen && !!customDraft.trim() && askPicks[page] === undefined
+                  const submitCount = pickedCount + (draftFillsAnswer ? 1 : 0)
+                  /** 别的题还开着补充编辑且草稿未确认：避免整卷 ↑ 跨页静默丢掉那段字（B-44 根因 4 的跨页版） */
+                  const otherDraftPending = exam && Object.entries(askCustomOpen).some(([k, open]) => {
+                    const p = Number(k)
+                    if (!open || p === page) return false
+                    const d = (askCustomDrafts[p] ?? '').trim()
+                    return !!d && askPicks[p] !== d
+                  })
+                  const canSubmitExam = !exam || (submitCount >= n && !otherDraftPending)
+                  const openCustom = () => {
+                    setAskCustomOpen(p => ({ ...p, [page]: true }))
+                    // 已记录的自定义答案回填；否则保留本题草稿（翻页回来可继续）
+                    setAskCustomDrafts(p => ({ ...p, [page]: hasCustomAnswer ? (pickedCur ?? '') : (p[page] ?? '') }))
+                  }
+                  const cancelCustom = () => {
+                    setAskCustomOpen(p => ({ ...p, [page]: false }))
+                    setAskCustomDrafts(p => {
+                      const next = { ...p }
+                      if (hasCustomAnswer) next[page] = pickedCur ?? ''
+                      else delete next[page]
+                      return next
+                    })
+                  }
+                  const submitCustom = () => {
+                    if (pending) return
+                    const v = customDraft.trim()
+                    if (!v) return
+                    if (!exam) {
+                      setAskCustomDrafts(p => { const next = { ...p }; delete next[page]; return next })
+                      setAskCustomOpen(p => ({ ...p, [page]: false }))
+                      sendAskAnswer(v)
+                      return
+                    }
+                    const prev = askPicks[page]
+                    setAskPicks(p => ({ ...p, [page]: v }))
+                    setAskCustomPicks(p => ({ ...p, [page]: true }))
+                    setAskCustomDrafts(p => { const next = { ...p }; delete next[page]; return next })
+                    setAskCustomOpen(p => ({ ...p, [page]: false }))
+                    // 覆盖旧答案（选项或旧补充）给一次轻反馈；首次补充由 .kb-item-in 行出现即可
+                    if (prev !== undefined && prev !== v) {
+                      showToast({ type: 'info', message: n > 1 ? `第 ${page + 1} 题的回答已更新` : '回答已更新' })
+                    }
+                  }
                   return (
                     <div className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg px-3.5 pt-3 pb-2.5">
                       {/* 头行（条目9 双态把手）：展开 = 题干 + ‹k/n› + 收起钮 + ✕；收起 = 细 chip（点击展开，✕ 仍可直接忽略） */}
@@ -3589,10 +3641,22 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                       {() => (<>
                       <div className="pt-2 max-h-[40vh] overflow-y-auto space-y-0.5">
                         {curOpts.map((o, oi) => {
-                          const picked = exam ? pickedCur === o : false
+                          // 补充答案有独立标记：它占了本题的「唯一高亮」，选项行不再高亮（B-44）
+                          const picked = exam ? pickedCur === o && askCustomPicks[page] !== true : false
                           return (
                             <button key={o} disabled={pending}
-                              onClick={() => (exam ? setAskPicks(p => ({ ...p, [page]: o })) : sendAskAnswer(o))}
+                              onClick={() => {
+                                if (!exam) { sendAskAnswer(o); return }
+                                const prev = askPicks[page]
+                                setAskPicks(p => ({ ...p, [page]: o }))
+                                setAskCustomPicks(p => { const next = { ...p }; delete next[page]; return next })
+                                // 选项是明确选择：收起补充编辑器（草稿保留，可再点「继续编辑补充」）
+                                setAskCustomOpen(p => ({ ...p, [page]: false }))
+                                // 选项覆盖掉一条补充答案时给轻反馈（补充行会消失）；首次点选 / 选项互切靠高亮移动即可
+                                if (prev !== undefined && prev !== o && askCustomPicks[page] === true) {
+                                  showToast({ type: 'info', message: n > 1 ? `第 ${page + 1} 题的回答已更新` : '回答已更新' })
+                                }
+                              }}
                               className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg border text-left text-[12.5px] transition-colors disabled:opacity-40 ${
                                 picked ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text-primary)]' : 'border-transparent hover:bg-[var(--bg-hover)] text-[var(--text-primary)]'}`}>
                               <span className={`w-5 h-5 rounded-full border flex items-center justify-center text-[10px] shrink-0 ${picked ? 'border-[var(--accent)] bg-[var(--accent)] text-white' : 'border-[var(--border-color)] text-[var(--text-muted)]'}`}>{oi + 1}</span>
@@ -3601,30 +3665,78 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                             </button>
                           )
                         })}
-                        {/* 其他补充：自定义回答（单题 Enter/↑ 即发；整卷 Enter 记为当前题答案） */}
-                        {customMode ? (
-                          <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--border-color)]">
-                            <PenLine size={12} className="text-[var(--text-muted)] shrink-0" />
-                            <input autoFocus value={askCustom} onChange={e => setAskCustom(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter' && askCustom.trim()) { const v = askCustom.trim(); setAskCustom(''); setAskCustomOpen(false); exam ? setAskPicks(p => ({ ...p, [page]: v })) : sendAskAnswer(v) } }}
+                        {/* 其他补充：自定义回答（整卷 = 当前题答案；单题 = Enter/↑ 直接发出） */}
+                        {hasCustomAnswer && (
+                          <div key={`custom-${page}-${pickedCur}`} data-wb="aiTeachAskCustomAnswer"
+                            className="kb-item-in w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg border border-[var(--accent)] bg-[var(--accent)]/10 text-left text-[12.5px] text-[var(--text-primary)]">
+                            <span className="w-5 h-5 rounded-full border border-[var(--accent)] bg-[var(--accent)] text-white flex items-center justify-center shrink-0"><PenLine size={11} /></span>
+                            <span className="flex-1 min-w-0 break-words">{pickedCur}</span>
+                            {customOpen ? (
+                              <span className="shrink-0 text-[10px] text-[var(--accent)]">编辑中</span>
+                            ) : (
+                              <button onClick={openCustom} disabled={pending} title="修改这条补充回答"
+                                className="shrink-0 px-1.5 py-0.5 rounded text-[10.5px] text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-40 transition-colors">编辑</button>
+                            )}
+                            <ArrowRight size={13} className="text-[var(--accent)] shrink-0" />
+                          </div>
+                        )}
+                        {customOpen && (
+                          <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[var(--accent)] bg-[var(--bg-primary)]">
+                            <PenLine size={12} className="text-[var(--accent)] shrink-0" />
+                            <input autoFocus value={customDraft} disabled={pending}
+                              onChange={e => setAskCustomDrafts(p => ({ ...p, [page]: e.target.value }))}
+                              onKeyDown={e => {
+                                if (e.key === 'Escape') {
+                                  // 中文输入法正在组合时，Esc 交给 IME 取消候选词；不让它顺手收起提问卡
+                                  if (e.nativeEvent.isComposing) { e.stopPropagation(); return }
+                                  e.preventDefault(); e.stopPropagation(); cancelCustom(); return
+                                }
+                                if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submitCustom() }
+                              }}
                               placeholder="补充你的回答…（Enter 确认）"
-                              className="flex-1 bg-transparent text-[12.5px] text-[var(--text-primary)] outline-none" />
+                              data-wb="aiTeachAskCustomInput"
+                              className="flex-1 bg-transparent text-[12.5px] text-[var(--text-primary)] outline-none disabled:opacity-50" />
+                            <button onClick={cancelCustom} disabled={pending} title="取消补充（保留原答案）"
+                              className="shrink-0 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-40">取消</button>
                             <span className="text-[10px] text-[var(--text-muted)] shrink-0">Enter 确认</span>
                           </div>
-                        ) : (
-                          <button onClick={() => { setAskCustomOpen(true); setAskCustom(exam && pickedCur && !curOpts.includes(pickedCur) ? pickedCur : '') }}
-                            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-[12.5px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] transition-colors">
-                            <PenLine size={13} className="shrink-0" /> 其他补充…
+                        )}
+                        {!customOpen && !hasCustomAnswer && (
+                          <button onClick={openCustom} disabled={pending} data-wb="aiTeachAskCustomOpen"
+                            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-[12.5px] text-[var(--text-muted)] hover:bg-[var(--bg-hover)] disabled:opacity-40 transition-colors">
+                            <PenLine size={13} className="shrink-0" /> {customDraft.trim() ? '继续编辑补充…' : '其他补充…'}
                           </button>
                         )}
                       </div>
                       {/* 底部：进度 + 圆形 ↑ 发送 */}
                       <div className="mt-1.5 flex items-center">
-                        {exam && <span className="text-[10.5px] text-[var(--text-muted)] mr-auto tabular-nums">已答 {pickedCount}/{n}{allPicked ? ' · 可提交' : ' · ‹›翻页作答'}</span>}
+                        {exam && (
+                          <span className="text-[10.5px] text-[var(--text-muted)] mr-auto tabular-nums">
+                            已答 {pickedCount}/{n}
+                            {canSubmitExam
+                              ? (draftFillsAnswer ? ' · 含当前补充，可提交' : ' · 可提交')
+                              : otherDraftPending ? ' · 有未确认补充' : ' · ‹›翻页作答'}
+                          </span>
+                        )}
                         <button
-                          onClick={() => { if (exam) submitAskExam(); else if (askCustom.trim()) { const v = askCustom.trim(); setAskCustom(''); setAskCustomOpen(false); sendAskAnswer(v) } }}
-                          disabled={pending || (exam ? !allPicked : !(askCustomOpen && askCustom.trim()))}
-                          title={exam ? `统一发送全部回答（${pickedCount}/${n}）` : '发送补充回答'}
+                          onClick={() => {
+                            if (!exam) { submitCustom(); return }
+                            // 整卷 ↑ 先把当前输入记到本题，再统一发送（B-44 根因 4）
+                            const draft = customOpen ? customDraft.trim() : ''
+                            if (draft) {
+                              setAskPicks(p => ({ ...p, [page]: draft }))
+                              setAskCustomPicks(p => ({ ...p, [page]: true }))
+                              setAskCustomDrafts(p => { const next = { ...p }; delete next[page]; return next })
+                              setAskCustomOpen(p => ({ ...p, [page]: false }))
+                              submitAskExam({ page, value: draft })
+                              return
+                            }
+                            submitAskExam()
+                          }}
+                          disabled={pending || (exam ? !canSubmitExam : !(customOpen && customDraft.trim()))}
+                          title={exam
+                            ? (otherDraftPending ? '还有未确认的补充：翻回该题按 Enter 或取消' : `统一发送全部回答（${submitCount}/${n}）`)
+                            : '发送补充回答'}
                           className="ml-auto w-8 h-8 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-all">
                           <ArrowUp size={15} />
                         </button>
