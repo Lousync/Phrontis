@@ -260,6 +260,7 @@ export const previewUserFromDb = (filePath: string) => a().previewUserFromDb(fil
 
 // recycle bin
 export const getRecycleBinItems = () => a().getRecycleBinItems()
+export const getRecycleBinCount = () => a().getRecycleBinCount()
 export const restoreRecycleBinItem = (id: string) => a().restoreRecycleBinItem(id)
 export const restoreRecycleBinPartial = (id: string, path: string) => a().restoreRecycleBinPartial(id, path)
 export const trashRecycleBinItem = (id: string) => a().trashRecycleBinItem(id)

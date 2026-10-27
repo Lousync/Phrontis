@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
+import { getVaultTrashRoot } from './attachmentStore'
 
 function getTrashExportDir(): string {
   const settingsPath = join(app.getPath('userData'), 'settings.json')
@@ -67,6 +68,37 @@ function writeMarkdownFile(dir: string, entry: any): string[] {
   return files
 }
 
+// ---- moments snapshot (post + attachment folder) ----
+function momentTitleOf(entry: any): string {
+  const text = String(entry?.contentMd ?? '').replace(/\s+/g, ' ').trim()
+  return text.slice(0, 24) || '说说'
+}
+
+/**
+ * 说说没有独立正文文件（正文在 posts.json），移入系统回收站时写一份可读摘要；
+ * 图片/附件本体在 `<vault>/.knowbase/attachments_trash/<binId>/`，由调用方一起移入系统回收站。
+ */
+function writeMomentSummary(dir: string, entry: any): string[] {
+  const files: string[] = []
+  const base = safeName(momentTitleOf(entry))
+  let filePath = join(dir, base + '.md')
+  let n = 1
+  while (existsSync(filePath)) { filePath = join(dir, `${base} (${n}).md`); n++ }
+  const tags = Array.isArray(entry?.tags) ? entry.tags.filter((t: unknown) => typeof t === 'string' && t.trim()) : []
+  const images = Array.isArray(entry?.imageDataUrls)
+    ? entry.imageDataUrls
+    : (entry?.imageDataUrl ? [entry.imageDataUrl] : [])
+  const attachmentIds = Array.isArray(entry?.attachmentIds) ? entry.attachmentIds : []
+  let md = `# 说说\n\n${entry?.contentMd || ''}\n\n`
+  md += `- 创建时间：${entry?.createdAt || '-'}\n`
+  if (tags.length > 0) md += `- 标签：${tags.join('、')}\n`
+  if (images.length > 0) md += `- 图片：${images.length} 张（原图随本条目一起移入系统回收站）\n`
+  if (attachmentIds.length > 0) md += `- 附件：${attachmentIds.length} 个（原文件随本条目一起移入系统回收站）\n`
+  writeFileSync(filePath, md, 'utf-8')
+  files.push(filePath)
+  return files
+}
+
 // ---- recursively write a category tree snapshot ----
 function writeCategoryTree(dir: string, data: any): string[] {
   const files: string[] = []
@@ -93,6 +125,7 @@ export async function trashItem(binId: string, item: { module: string; title: st
 
   try {
     const files: string[] = []
+    const extraTrash: string[] = []
 
     if (item.module === 'blog' || item.module === 'knowledge') {
       // Single page / blog entry → write directly
@@ -110,6 +143,11 @@ export async function trashItem(binId: string, item: { module: string; title: st
       md += `| ${esc(e.title)} | ${esc(e.account)} | ${esc(e.username)} | ${esc(e.password ? '••••••（已隐藏）' : '-')} | ${esc(e.url)} | ${esc(e.notes)} |\n`
       writeFileSync(filePath, md, 'utf-8')
       files.push(filePath)
+    } else if (item.module === 'moments') {
+      // 说说：正文写摘要，图片/附件目录一起移入系统回收站（否则永远留在 attachments_trash 成孤儿）
+      files.push(...writeMomentSummary(rootDir, item.data))
+      const trashRoot = getVaultTrashRoot(binId)
+      if (trashRoot && existsSync(trashRoot)) extraTrash.push(trashRoot)
     } else if (item.module === 'knowledge_category') {
       // Category tree → label with category name, write structure
       const catName = item.data?.category?.name || item.title || '知识目录'
@@ -118,8 +156,8 @@ export async function trashItem(binId: string, item: { module: string; title: st
       writeCategoryTree(catDir, item.data)
     }
 
-    // Move to OS recycle bin
-    await (await getTrash())([rootDir])
+    // Move to OS recycle bin（说说附件是独立目录，一起移走）
+    await (await getTrash())([rootDir, ...extraTrash])
 
     return []
   } catch (e) {
@@ -131,6 +169,8 @@ export async function trashItem(binId: string, item: { module: string; title: st
 export async function trashAll(items: Array<{ binId: string; module: string; title: string; data: any }>): Promise<void> {
   const rootDir = uniqueDir(getTrashExportDir(), `knowbase-trash-${Date.now()}`)
   mkdirSync(rootDir, { recursive: true })
+  const extraTrash: string[] = []
+  let failed = 0
 
   for (const item of items) {
     try {
@@ -146,6 +186,12 @@ export async function trashAll(items: Array<{ binId: string; module: string; tit
         const esc = (s: string) => (s || '-').replace(/\|/g, '\\|').replace(/\n/g, ' ')
         md += `| ${esc(e.title)} | ${esc(e.account)} | ${esc(e.username)} | ${esc(e.password ? '••••••（已隐藏）' : '-')} | ${esc(e.url)} | ${esc(e.notes)} |\n`
         writeFileSync(filePath, md, 'utf-8')
+      } else if (item.module === 'moments') {
+        const itemDir = uniqueDir(rootDir, momentTitleOf(item.data))
+        mkdirSync(itemDir, { recursive: true })
+        writeMomentSummary(itemDir, item.data)
+        const trashRoot = getVaultTrashRoot(item.binId)
+        if (trashRoot && existsSync(trashRoot)) extraTrash.push(trashRoot)
       } else if (item.module === 'knowledge_category') {
         const catName = item.data?.category?.name || item.title || '知识目录'
         const catDir = uniqueDir(rootDir, catName)
@@ -153,10 +199,14 @@ export async function trashAll(items: Array<{ binId: string; module: string; tit
         writeCategoryTree(catDir, item.data)
       }
     } catch (e) {
+      failed++
       console.error(`Failed to export item ${item.binId}:`, e)
     }
   }
 
-  // Move entire temp dir to OS recycle bin
-  await (await getTrash())([rootDir])
+  // 有任何一条没写成就不要移：让调用方保留回收站索引，避免「清空了但没进系统回收站」
+  if (failed > 0) throw new Error(`${failed} 个条目写入失败，未移入系统回收站`)
+
+  // Move entire temp dir + moments attachment folders to OS recycle bin
+  await (await getTrash())([rootDir, ...extraTrash])
 }

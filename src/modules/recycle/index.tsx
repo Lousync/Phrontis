@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { Trash2, RotateCcw, X, AlertCircle, FileText, BookOpen, Folder, ChevronRight, ChevronDown, ArrowUpDown, Filter, Shield } from 'lucide-react'
 import type { RecycleBinItem } from '../../types'
 import { getRecycleBinItems, restoreRecycleBinItem, restoreRecycleBinPartial, trashRecycleBinItem, trashRecycleBinPartial, emptyRecycleBin } from '../../lib/ipc'
+import { useSettings } from '../../lib/SettingsContext'
+import { showToast } from '../../lib/toast'
 
 const MODULE_INFO: Record<string, { label: string; icon: React.ReactNode; badgeClass: string }> = {
   blog:          { label: '博客',     icon: <FileText size={12} />,  badgeClass: 'bg-[var(--accent)]/20 text-[var(--accent)]' },
@@ -22,11 +24,17 @@ function getItemFileType(item: RecycleBinItem): string {
 }
 
 export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
+  const { s } = useSettings()
+  const retentionDays = Math.max(1, Math.round(Number(s.recycleBinRetentionDays) || 30))
   const [items, setItems] = useState<RecycleBinItem[]>([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc')
   const [typeFilter, setTypeFilter] = useState('') // '' = all
+  /** 「全部移入系统回收站」的两段式确认（第一次点只上膛，3 秒内再点才执行） */
+  const [emptyArmed, setEmptyArmed] = useState(false)
+  const [emptying, setEmptying] = useState(false)
+  const emptyTimerRef = useRef<number | null>(null)
 
   // Filtered + sorted items
   const displayItems = useMemo(() => {
@@ -82,45 +90,92 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
     return () => window.removeEventListener('data-imported', handler)
   }, [])
 
+  useEffect(() => () => {
+    if (emptyTimerRef.current !== null) window.clearTimeout(emptyTimerRef.current)
+  }, [])
+
   const toggleExpand = (id: string) => {
     setExpanded(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
   }
 
   const handleRestore = async (id: string, module: string) => {
     try {
-      await restoreRecycleBinItem(id)
+      const r = await restoreRecycleBinItem(id)
+      if (r && !r.success) {
+        showToast({ type: 'error', message: r.message || '恢复失败' })
+        return
+      }
       await loadItems()
+      showToast({ type: 'info', message: '已恢复到原模块' })
       window.dispatchEvent(new CustomEvent('recycle-restored', { detail: { module } }))
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      showToast({ type: 'error', message: '恢复失败' })
+    }
   }
 
   const handleRestorePartial = async (binId: string, path: string, module: string) => {
     try {
       await restoreRecycleBinPartial(binId, path)
       await loadItems()
+      showToast({ type: 'info', message: '已恢复所选内容' })
       window.dispatchEvent(new CustomEvent('recycle-restored', { detail: { module } }))
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e)
+      showToast({ type: 'error', message: '恢复失败' })
+    }
   }
 
-  const handlePermanentDelete = async (id: string) => {
+  const handleTrashToOS = async (id: string) => {
     try {
       await trashRecycleBinItem(id)
       await loadItems()
-    } catch (e) { console.error(e) }
+      showToast({ type: 'info', message: '已移入系统回收站' })
+    } catch (e) {
+      console.error(e)
+      showToast({ type: 'error', message: '移入系统回收站失败' })
+    }
   }
 
-  const handlePermDeletePartial = async (binId: string, path: string) => {
+  const handleTrashPartialToOS = async (binId: string, path: string) => {
     try {
       await trashRecycleBinPartial(binId, path)
       await loadItems()
-    } catch (e) { console.error(e) }
+      showToast({ type: 'info', message: '已移入系统回收站' })
+    } catch (e) {
+      console.error(e)
+      showToast({ type: 'error', message: '移入系统回收站失败' })
+    }
   }
 
   const handleEmptyAll = async () => {
+    if (emptying) return
+    // 两段式确认：第一次只上膛（3 秒后自动收回），第二次才真的移走
+    if (!emptyArmed) {
+      setEmptyArmed(true)
+      if (emptyTimerRef.current !== null) window.clearTimeout(emptyTimerRef.current)
+      emptyTimerRef.current = window.setTimeout(() => {
+        setEmptyArmed(false)
+        emptyTimerRef.current = null
+      }, 3000)
+      return
+    }
+    if (emptyTimerRef.current !== null) {
+      window.clearTimeout(emptyTimerRef.current)
+      emptyTimerRef.current = null
+    }
+    setEmptyArmed(false)
+    setEmptying(true)
     try {
       await emptyRecycleBin()
       await loadItems()
-    } catch (e) { console.error(e) }
+      showToast({ type: 'info', message: '已全部移入系统回收站' })
+    } catch (e) {
+      console.error(e)
+      showToast({ type: 'error', message: '清空失败，回收站内容未变' })
+    } finally {
+      setEmptying(false)
+    }
   }
 
   const renderTreeNode = (item: RecycleBinItem) => {
@@ -149,9 +204,9 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
             <RotateCcw size={12} />
           </button>
           <button
-            onClick={() => handlePermDeletePartial(item.id, 'category')}
+            onClick={() => handleTrashPartialToOS(item.id, 'category')}
             className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0"
-            title="永久删除此目录">
+            title="移入系统回收站">
             <X size={12} />
           </button>
         </div>
@@ -175,9 +230,9 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
                       <RotateCcw size={11} />
                     </button>
                     <button
-                      onClick={() => handlePermDeletePartial(item.id, `children.${ci}`)}
+                      onClick={() => handleTrashPartialToOS(item.id, `children.${ci}`)}
                       className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0"
-                      title="永久删除此子目录">
+                      title="移入系统回收站">
                       <X size={11} />
                     </button>
                   </div>
@@ -193,9 +248,9 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
                         <RotateCcw size={11} />
                       </button>
                       <button
-                        onClick={() => handlePermDeletePartial(item.id, `children.${ci}.pages.${pi}`)}
+                        onClick={() => handleTrashPartialToOS(item.id, `children.${ci}.pages.${pi}`)}
                         className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0"
-                        title="永久删除此页面">
+                        title="移入系统回收站">
                         <X size={11} />
                       </button>
                     </div>
@@ -216,9 +271,9 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
                   <RotateCcw size={11} />
                 </button>
                 <button
-                  onClick={() => handlePermDeletePartial(item.id, `pages.${pi}`)}
+                  onClick={() => handleTrashPartialToOS(item.id, `pages.${pi}`)}
                   className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--danger)] shrink-0"
-                  title="永久删除此页面">
+                  title="移入系统回收站">
                   <X size={11} />
                 </button>
               </div>
@@ -243,11 +298,18 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
         {items.length > 0 && (
           <button
             onClick={handleEmptyAll}
-            className="ml-auto px-1.5 py-0.5 rounded-md text-[11.5px] text-[var(--danger)] hover:bg-[var(--bg-hover)] transition-colors"
+            disabled={emptying}
+            title="全部移入系统回收站（可在系统回收站找回）"
+            className={`ml-auto px-1.5 py-0.5 rounded-md text-[11.5px] transition-colors disabled:opacity-50 ${emptyArmed ? 'text-white bg-[var(--danger)] hover:opacity-90' : 'text-[var(--danger)] hover:bg-[var(--bg-hover)]'}`}
           >
-            全部清空
+            {emptying ? '正在移入…' : emptyArmed ? '确认全部移入？' : '全部移入系统回收站'}
           </button>
         )}
+      </div>
+
+      {/* 范围说明：这个模块不是全量文件回收站，避免「删了文件却在这里找不到」的误解 */}
+      <div className="px-3 py-1.5 border-b border-[var(--border-color)] shrink-0 text-[10.5px] leading-relaxed text-[var(--text-muted)]">
+        这里只收博客 / 密码本 / 动态等模块删除的数据；笔记和文件删除在系统回收站。
       </div>
 
       {/* Sort + Filter bar */}
@@ -287,7 +349,7 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
       {items.length > 0 && (
         <div className="px-5 py-2 flex items-start gap-1.5 text-[11px] text-[var(--warning)] bg-[var(--warning-bg)] border-b border-[var(--border-color)] shrink-0">
           <AlertCircle size={12} className="shrink-0 mt-0.5" />
-          <span>删除的内容将在 30 天后自动清空</span>
+          <span>删除的内容将在 {retentionDays} 天后自动清空</span>
         </div>
       )}
 
@@ -298,8 +360,9 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
             <div className="border-2 border-[var(--border-color)] border-t-[var(--accent)] rounded-full w-6 h-6 animate-spin" />
           </div>
         ) : displayItems.length === 0 ? (
-          <div className="flex items-center justify-center py-20 text-[12px] text-[var(--text-muted)]">
-            {typeFilter ? `无 ${typeFilter.toUpperCase()} 类型文件` : '回收站为空'}
+          <div className="flex flex-col items-center justify-center gap-1 py-20 text-[12px] text-[var(--text-muted)]">
+            <span>{typeFilter ? `无 ${typeFilter.toUpperCase()} 类型数据` : '这里还没有模块删除的数据'}</span>
+            <span className="text-[10.5px] text-[var(--text-disabled)]">笔记 / 文件删除在系统回收站</span>
           </div>
         ) : (
           <div>
@@ -337,9 +400,9 @@ export function RecycleBinModule({ isActive = true }: { isActive?: boolean }) {
                         <RotateCcw size={15} />
                       </button>
                       <button
-                        onClick={() => handlePermanentDelete(item.id)}
+                        onClick={() => handleTrashToOS(item.id)}
                         className="p-1.5 rounded text-[var(--text-secondary)] hover:text-[var(--danger)] hover:bg-[color-mix(in_srgb,var(--danger)_12%,transparent)] transition-colors"
-                        title="永久删除"
+                        title="移入系统回收站"
                       >
                         <X size={15} />
                       </button>
