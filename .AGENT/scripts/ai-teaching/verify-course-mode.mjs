@@ -52,6 +52,10 @@ check('左栏渲染 CourseRail', idx.includes('<CourseRail') && rail.includes('�
 check('中栏渲染 Preflight', idx.includes('<Preflight') && preflight.includes('buildPreflight'))
 check('右栏进度渲染 CourseProgress', idx.includes('<CourseProgress') && progress.includes('reviewState'))
 check('右栏素材渲染 CourseSources', idx.includes('<CourseSources') && sources.includes('aiTeachCourseGetSources'))
+check('右栏素材不依赖大纲即可打开', idx.includes('outline={courseState?.outline ?? null}') && !/courseState\?\.outline\s*&&[\s\S]{0,160}<CourseSources/.test(idx))
+check('CourseSources 支持无大纲', sources.includes('outline: AiTeachCourseOutline | null') && sources.includes('const hasOutline = chapters.length > 0'))
+check('无大纲素材页提示可先登记', sources.includes('还没有课程大纲。可以先登记素材'))
+check('未分配只认当前大纲的有效章', sources.includes('validChapterIds') && sources.includes('.filter(([cid]) => validChapterIds.has(cid))'))
 check('右栏三页签 = 进度 / 素材 / 支线', /useState<'progress' \| 'sources' \| 'lanes'>/.test(idx) && idx.includes("setRailTab('progress')") && idx.includes("setRailTab('sources')") && idx.includes("setRailTab('lanes')"))
 check('要求抽屉四层（全局 / 本课程 / 本知识点 / 本段）', req.includes("'global'") && req.includes("'workspace'") && req.includes("'unit'") && req.includes("'segment'"))
 

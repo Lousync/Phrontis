@@ -51,7 +51,7 @@ export function CourseRail(props: Props) {
       <div className="flex-1 min-h-0 overflow-y-auto px-1.5 pb-2">
         {!hasOutline && (
           <div className="px-2 py-3 text-[11px] leading-relaxed text-[var(--text-muted)]">
-            还没有课程大纲。点上面的「课程助手」，把资料和目标交给它，先建课。
+            还没有课程大纲。点上面的「课程助手」建课；也可以先在右栏「素材」登记资料，大纲生成后再按章分配。
           </div>
         )}
         {hasOutline && chapters.length === 0 && (

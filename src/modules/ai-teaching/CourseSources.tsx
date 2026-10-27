@@ -12,11 +12,12 @@ import { showToast } from '../../lib/toast'
 /**
  * AI教学 3.14 右栏「素材」：本段快照 / 本章分配 / 未分配。
  * 登记（文件 / 目录 / URL）、章级分配、区间提取都在这里；不再有 SOURCE.md 分层与「上收」。
+ * 没有大纲时也允许登记：只显示「未分配」，章级分配等大纲生成后再出现。
  */
 
 interface Props {
   wsId: string
-  outline: AiTeachCourseOutline
+  outline: AiTeachCourseOutline | null
   activeChapterId: string | null
   activeSegment: AiTeachLessonInfo | null
   onOpenFile: (rel: string) => void
@@ -42,8 +43,12 @@ export function CourseSources(props: Props) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
 
-  const chapterId = activeChapterId ?? outline.chapters[0]?.id ?? ''
-  const chapter = outline.chapters.find((c) => c.id === chapterId) ?? null
+  const chapters = useMemo(() => outline?.chapters ?? [], [outline])
+  const hasOutline = chapters.length > 0
+  const chapterId = activeChapterId && chapters.some((c) => c.id === activeChapterId)
+    ? activeChapterId
+    : chapters[0]?.id ?? ''
+  const chapter = chapters.find((c) => c.id === chapterId) ?? null
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -61,8 +66,13 @@ export function CourseSources(props: Props) {
 
   const sources = payload?.sources ?? []
   const assignments = payload?.assignments ?? {}
-  const chapterAssignments = assignments[chapterId] ?? []
-  const assignedIds = useMemo(() => new Set(Object.values(assignments).flat().map((a) => a.sourceId)), [assignments])
+  const chapterAssignments = chapterId ? assignments[chapterId] ?? [] : []
+  const validChapterIds = useMemo(() => new Set(chapters.map((c) => c.id)), [chapters])
+  const assignedIds = useMemo(() => new Set(
+    Object.entries(assignments)
+      .filter(([cid]) => validChapterIds.has(cid))
+      .flatMap(([, list]) => list.map((a) => a.sourceId)),
+  ), [assignments, validChapterIds])
   const unassigned = sources.filter((s) => !assignedIds.has(s.id))
   const byId = useMemo(() => new Map(sources.map((s) => [s.id, s] as const)), [sources])
 
@@ -194,8 +204,10 @@ export function CourseSources(props: Props) {
             <span className="text-[var(--text-muted)]">本段确认</span>
           ) : opts.assigned ? (
             <button onClick={() => void unassign(src.id)} disabled={busy} className="text-[var(--text-muted)] hover:text-[var(--danger)] transition-colors">取消分配</button>
+          ) : chapterId ? (
+            <button onClick={() => void assignToChapter(src)} disabled={busy} className="text-[var(--accent)] hover:underline transition-colors">分配到本章</button>
           ) : (
-            <button onClick={() => void assignToChapter(src)} disabled={busy || !chapterId} className="text-[var(--accent)] hover:underline transition-colors">分配到本章</button>
+            <span className="text-[var(--text-muted)]">大纲生成后分配</span>
           )}
           {(src.type === 'pdf' || src.type === 'pptx' || src.type === 'docx' || src.type === 'code') && (
             <button onClick={() => beginExtract(src)} disabled={busy} className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">提取</button>
@@ -259,6 +271,13 @@ export function CourseSources(props: Props) {
         </div>
       )}
 
+      {!hasOutline && (
+        <div className="rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1.5 text-[10px] leading-relaxed text-[var(--text-muted)]">
+          还没有课程大纲。可以先登记素材；大纲生成后再按章分配。
+        </div>
+      )}
+
+      {hasOutline && (
       <section>
         <div className="flex items-center gap-1 px-0.5 py-1 text-[10px] font-medium text-[var(--text-secondary)]">
           <span>本段</span>
@@ -278,11 +297,13 @@ export function CourseSources(props: Props) {
           </div>
         )}
       </section>
+      )}
 
+      {chapter && (
       <section>
         <div className="flex items-center gap-1 px-0.5 py-1 text-[10px] font-medium text-[var(--text-secondary)]">
           <span>本章</span>
-          <span className="truncate text-[var(--text-muted)]">{chapter?.name ?? '未选章'}</span>
+          <span className="truncate text-[var(--text-muted)]">{chapter.name}</span>
           <span className="text-[var(--text-muted)]">{chapterAssignments.length}</span>
         </div>
         {chapterAssignments.length === 0 ? (
@@ -321,6 +342,7 @@ export function CourseSources(props: Props) {
           </div>
         )}
       </section>
+      )}
 
       <section>
         <div className="flex items-center gap-1 px-0.5 py-1 text-[10px] font-medium text-[var(--text-secondary)]">
@@ -328,7 +350,9 @@ export function CourseSources(props: Props) {
           <span className="text-[var(--text-muted)]">{unassigned.length}</span>
         </div>
         {unassigned.length === 0 ? (
-          <div className="px-1 text-[10px] text-[var(--text-muted)]">没有未分配素材。</div>
+          <div className="px-1 text-[10px] text-[var(--text-muted)]">
+            {sources.length === 0 ? '还没有素材。点右上角 + 先登记。' : '没有未分配素材。'}
+          </div>
         ) : (
           <div className="flex flex-col gap-1">
             {unassigned.map((src) => sourceRow(src))}

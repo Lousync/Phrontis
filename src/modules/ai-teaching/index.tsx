@@ -3213,17 +3213,17 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 />
               </div>
               <div className={`absolute inset-0 overflow-y-auto ${railTab === 'sources' ? '' : 'hidden'}`}>
-                {courseState?.outline && activeWs && activeWs !== '__none__' ? (
+                {activeWs && activeWs !== '__none__' ? (
                   <CourseSources
                     wsId={activeWs}
-                    outline={courseState.outline}
+                    outline={courseState?.outline ?? null}
                     activeChapterId={railActiveChapter}
                     activeSegment={activeSegment}
                     onOpenFile={(rel) => void openArtFile(rel)}
                     onReloadCourse={() => void reloadCourse()}
                   />
                 ) : (
-                  <div className="px-3 py-3 text-[11px] text-[var(--text-muted)]">先让课程助手建课，再登记 / 分配素材。</div>
+                  <div className="px-3 py-3 text-[11px] text-[var(--text-muted)]">先进入工作区。</div>
                 )}
               </div>
               <div className={`absolute inset-0 ${railTab === 'lanes' ? '' : 'hidden'}`}>
