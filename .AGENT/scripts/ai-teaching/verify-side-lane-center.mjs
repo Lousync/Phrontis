@@ -80,13 +80,13 @@ const idx = read('src/modules/ai-teaching/index.tsx')
 check('index 引入 SideLaneCenter', idx.includes("import { SideLaneCenter } from './SideLaneCenter'"))
 // v3.9.1 学习流 v2：右栏从两分区扩到「素材 / 支线 / 层级」三分区（方案 §三-1），
 // 断言按新口径收：**三分区齐全 + 落到 localStorage + 读取时白名单**，而不是钉死旧的两态字面量。
-check('右栏分区状态 railTab（三分区：素材 / 支线 / 层级）',
-  /useState<'lanes' \| 'sources' \| 'scope'>\(/.test(idx) && idx.includes('aiTeach.railTab'))
+check('右栏分区状态 railTab（三分区：进度 / 素材 / 支线）',
+  /useState<'progress' \| 'sources' \| 'lanes'>\(/.test(idx) && idx.includes('aiTeach.railTab'))
 check('锚点映射由会话库派生（不再 localStorage）', idx.includes('const anchorLanes = useMemo') && !idx.includes('ANCHOR_LANES_KEY'))
 check('锚点 chip 走 openCenter（open/create）', idx.includes("openCenter(al ? { kind: 'open', laneId: al.laneId } : { kind: 'create'"))
 check('引用回主线接 setQuotes', idx.includes('const quoteFromLane = useCallback') && idx.includes('setQuotes(prev'))
-check('浮窗承接 floatFromCenter（openLaneId）', idx.includes('const floatFromCenter = useCallback') && idx.includes('openLaneId: laneId'))
-check('openSources 切回素材库分区', /openSources\s*=\s*\(\)\s*=>\s*\{[^}]*setRailTab\('sources'\)/.test(idx))
+check('支线详情保留浮出能力（onFloat 可选）', read('src/modules/ai-teaching/SideLaneCenter.tsx').includes('onFloat?') && read('src/modules/ai-teaching/SideLanePanel.tsx').includes('onFloat?'))
+check('右栏可切到素材库分区', idx.includes("setRailTab('sources')"))
 
 console.log('\n=== 7. SideLanePanel 内嵌形态 ===')
 const panel = read('src/modules/ai-teaching/SideLanePanel.tsx')

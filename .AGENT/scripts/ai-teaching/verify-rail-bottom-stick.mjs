@@ -94,7 +94,7 @@ check('会话体折叠走既有 .kb-collapse（不占外层轨）',
 // 两个分区头都必须在容器内（否则被撑高的是空气，条目不会下移）
 const iClose = tsx.indexOf('</ResizablePanel>', iOpen)
 const seg = tsx.slice(iOpen, iClose)
-const headSessions = seg.indexOf('title="会话"')
+const headSessions = seg.indexOf('title="课程"')
 const headExplorer = seg.indexOf('title="资源管理器"')
 check('两个分区头都在容器内', headSessions > 0 && headExplorer > headSessions, `sessions@${headSessions} explorer@${headExplorer}`)
 check('资源管理器体在资源管理器头之后（第 4 轨）', seg.indexOf('AiTeachFileTree') > headExplorer, '')

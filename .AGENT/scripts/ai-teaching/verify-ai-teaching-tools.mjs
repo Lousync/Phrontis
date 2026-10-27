@@ -24,7 +24,7 @@ check('导出 inventoryWorkspaceSource', course.includes('export function invent
 check('导出 writeOutlineFromAssistant', course.includes('export function writeOutlineFromAssistant'))
 check('导出 removeCourseUnit', course.includes('export function removeCourseUnit'))
 check('导出 archiveOrganizedPage', course.includes('export function archiveOrganizedPage'))
-check('清点仅支持 dir 素材（单个 pdf/pptx 提示先转写）', course.includes("e.type !== 'dir'") && course.includes('先转写为 md'))
+check('清点仅支持 dir 素材（单个 pdf/pptx 提示先转写）', course.includes("e.type !== 'dir'") && course.includes('先提取为 md'))
 check('大纲写入支持 append 增补', course.includes("mode: 'append'") && course.includes('applyOutlineAdditions'))
 check('删除已学知识点 → needOrganize 拒绝', course.includes("status !== 'todo'") && course.includes('needOrganize: true'))
 check('归档返回绝对路径 absPath', course.includes('absPath: join(dirAbs, fname)'))
@@ -38,7 +38,7 @@ check('注册 course.outline.remove-unit', tools.includes("name: 'course.outline
 check('注册 course.organize.archive', tools.includes("name: 'course.organize.archive'"))
 check('四工具 requires:write + tier:ondemand', (tools.match(/requires: 'write', tier: 'ondemand'/g) || []).length >= 4)
 check('工作区解析走 getWorkspaceOfSession', tools.includes('requireAiTeachWs') && tools.includes('getWorkspaceOfSession(sid)'))
-check('builtin.tool.request 清单含新工具', tools.includes('course.outline.write / course.outline.remove-unit / course.organize.archive'))
+check('builtin.tool.request 清单含新工具', tools.includes('course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive'))
 
 console.log('\n[权限放行] 课程助手注入')
 check('不再有「只读约束」', !course.includes('【只读约束】'))
