@@ -16,6 +16,49 @@ import type { ReleaseNoteHighlight } from './types'
 
 export const RELEASE_NOTE_HIGHLIGHTS: readonly ReleaseNoteHighlight[] = [
   {
+    version: '3.14.0',
+    section: 'AI 教学',
+    title: '课程简化：一段覆盖多个知识点',
+    tag: '重构',
+    desc: 'AI 教学只保留「课程 = 工作区 → 章 → 知识点」两层结构。一条学习段可以覆盖同章多个知识点，开段前先选知识点并确认本段素材；素材统一收进一份 `sources.json`，未建课也能先登记，大纲生成后再按章分配。章末复习在本章全部学完后解锁。',
+    briefLead: 'AI 教学 3.14',
+    briefRest: '课程更轻，一段可讲多个知识点',
+    changes: [
+      '课程 = 工作区，结构只保留「章 → 知识点」两级',
+      '一段可覆盖同章 1–N 个知识点，开段前做素材预检',
+      '素材统一 `sources.json`：登记 / 章级分配 / 段级确认分离',
+      '没有大纲也能先登记素材，只进「未分配」',
+      '章末复习在本章知识点全部学完后自动解锁',
+      '删除模板 / 准备态 / 学习流 / 课时生命周期 / 层级页签 / 快捷胶囊 / 支线升格 / 零散对话入口',
+      '大纲完成后的课程助手只引导去左栏开段，不再直接邀请「开讲」（B-46）',
+    ],
+    demo: {
+      kind: 'mini-list',
+      caption: '3.14 的课程模型',
+      items: [
+        { text: '课程 = 工作区', done: true },
+        { text: '章 → 知识点两层', done: true },
+        { text: '一段覆盖同章多个知识点', done: true },
+        { text: '素材先登记，开段前确认', done: true },
+      ],
+    },
+  },
+  {
+    version: '3.14.0',
+    section: '情报',
+    title: '博客园与 CSDN 进入情报',
+    tag: '新增',
+    desc: '情报新增两个中文技术社区源：博客园走官方首页 Atom，CSDN 走人工智能频道公开列表页解析。两源都可在设置 › 模块 › 情报 单独开关，并纳入「只看中文」筛选；内置源增至 13 个。',
+    briefLead: '情报',
+    briefRest: '博客园 + CSDN·人工智能',
+    changes: [
+      '博客园：官方首页 Atom，全站最新技术博客',
+      'CSDN：人工智能频道页面解析，抽取标题 / 摘要 / 作者',
+      '两源均可在设置中单独开关，并纳入「只看中文」',
+      '内置源合计 13 个：科技 / 社区 10 + 新闻 3',
+    ],
+  },
+  {
     version: '3.5.0',
     section: '思维导图',
     title: '一句话生成一张思维导图',
