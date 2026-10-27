@@ -2405,3 +2405,72 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **改动点**：`src/App.tsx`（开关计算）、`src/components/workbench/WorkbenchRightPanel.tsx`（prop 重命名 + 两处消费 + 注释）、契约 `.AGENT/scripts/workbench-shell/verify-workbench-shell.mjs` 新增 §O（4 条，含负向「旧 prop 名不得复活」）。
 
 **验收**：`verify-workbench-shell.mjs` 新增 O1–O4 全绿（既有 N4 粘贴系统剪贴板 FAIL 与本轮无关，改动前即在）；`npx tsc --noEmit -p tsconfig.web.json` 0 错。真机观感待验：进入 AI助手 → 右栏已在 AI Tab 时变用量面板；切到笔记 → 回小对话。
+
+## 2026-10-26 · 界面缩放改为 Chromium 页面缩放（v3.13.2）
+
+**现状 / 根因**：反馈「最大化后控件和字太小、画面很空」。实测本机 2 台 4K（系统 200%，逻辑 1920×1080），用户设置里 `zoom = 1.2` —— **已经调过 120%，但完全没有效果**。原因是旧实现只有一句 `documentElement.style.fontSize = zoom × 16px`，只影响 rem；而全仓字号有 2700+ 处 `text-[Npx]` 绝对像素（`text-[12px]` 741、`text-[11px]` 707…），一个都不会变。于是行为是「留白变大、字不变」，观感反而更空。这不是调参能解决的，是缩放实现只覆盖了不到 1% 的样式。
+
+**为什么选页面缩放而不是「把 2700 处 px 改成 rem」**：页面缩放对绝对 px、iframe 内容、画布一起生效，且以后新写的 `text-[12px]` 自动跟随 —— 不需要每个组件记得用 rem。rem 迁移方案工作量大且守不住习惯（现有 2700 处就是证明）。
+
+**实测约束（Electron 33）**：
+- `setZoomFactor` 必须在 `dom-ready` 之后应用；加载前设值会被本次导航覆盖且值被取整（1.5 → 1.25）。
+- 同源 / 跨源 iframe 都跟随缩放；页面 reload 后缩放保持（切仓库会 reload）。
+- 页面缩放会让 `window.innerWidth` 按比例缩小，`devicePixelRatio` 同比例抬高 —— 布局按更窄视口重排（这正是要的），画布以更高 dpr 渲染。
+
+**方案**：
+- 新增 `electron/main/uiZoom.ts` 作为唯一口径：`setUiZoom / applyUiZoomTo / registerUiMinSize`，clamp 0.85–2.0，最小窗口尺寸按 `设计 CSS px × zoom` 折算。
+- 三个窗口统一接入（主窗 / 日程打卡小窗 / 密码悬浮窗），一律在 `dom-ready` 后应用；`settings:set` 收到 `zoom` 立刻应用（不等 500ms 落盘）。
+- 删除渲染层全部补偿，避免二层缩放：`App.tsx` 两处根字号、`PageEditor` 三处 `editorFontSize × zoom`、`knowledge/index` 的 `15 × zoom`、`MarkdownEditor` 的 `× zoom` 与 `layoutKey`、`DayPanelWindowApp` 的根字号。
+- DIP ↔ CSS 换算点按 zoom 折算：主窗 `resizeForSidebar`（侧栏撑宽）、边缘拖拽最小尺寸、日程小窗内容尺寸报告、密码窗固定尺寸。
+- 设置真源：**窗口态基础档默认 1.0**、范围 85–200、`zoomMax` 2.0；老配置 120% 一次性归位到 100%（`uiZoomMigrated` 标记 + `uiZoomNotice` 首屏提示，提示弹出后自清）。
+
+**追加修正（同日，两轮用户实测反馈）**：1.3 在最大化态舒服、窗口态（1280×820）偏大；把基础档降到 110% 后仍偏大（窗口态视口 1164 CSS px 仍比旧的 1280 小），而最大化 +20% 到 132% 后用户仍觉得偏小 —— 说明两态需要的不是同一个比例。最终按实测校准：**基础档 100%**（窗口态完全复刻旧的 1280 CSS 视口 / 12px 字），**最大化 / 全屏 ×1.3 = 130%**（用户唯一明确说过「舒服」的点，视口 1477 / 字 15.6px）。判定由主进程注入（`setUiZoomBoostResolver`，只对主窗、且开关 `uiZoomMaximizedBoost` 开着时生效）；日程小窗与密码悬浮窗只用基础档。设置页新增开关「最大化时自动放大」。
+
+**真机实测踩到的两个坑（devbridge + 对比图，2026-10-26 晚）**：
+1. **本机 X11 存在「铺满工作区但 `isMaximized()` = false」的窗口**（实测 bounds 1920×1048 = 工作区、isMaximized false）——用户看到的就是最大化，但只认 WM 标志时放大档永远不生效，表现就是「最大化后仍偏小」。判定因此改为 `isFullScreen ∪ isMaximized ∪ coversWorkArea`（几何兜底只用于缩放，不动其他以 isMaximized 为准的行为）。
+2. **不能在乐观调用 `sendMaxState` 时算缩放**：`window:maximize` 是先发乐观态再等 WM 落定，此刻 `isMaximized()`/bounds 还是旧值。实测还原时读到仍是最大化 → 窗口态被套上 1.37 倍；最大化时读到 false → 停在基础档。现在缩放统一由 `scheduleZoomSync`（120ms 防抖，挂在 resize / move / maximize / fullscreen 上）在几何稳定后重算。
+
+**改动点**：`electron/main/uiZoom.ts`（新增）、`electron/main/index.ts`、`electron/main/dayPanelWindow.ts`、`electron/main/passwordFiller.ts`、`src/lib/settings.ts`、`src/App.tsx`、`src/modules/knowledge/index.tsx`、`src/modules/knowledge/components/PageEditor.tsx`、`src/modules/blog/index.tsx`、`src/modules/blog/components/MarkdownEditor.tsx`、`src/daypanel/DayPanelWindowApp.tsx`、`src/modules/settings/views/GeneralView.tsx`（缩放范围/预设备选改读 SETTINGS 真源 + 新增「最大化时自动放大」开关）、`src/lib/commandRegistry.ts`（锚点漂移同步）、`resources/help/常见问题.md`、契约 `.AGENT/scripts/ui-zoom/verify-ui-zoom.mjs`（新增 47 条）。
+
+**验收**：`verify-ui-zoom.mjs` 47/47；双份 `tsc` 0 错；`npm run build` 通过；`verify-commands-registry.mjs`、`verify-shortcuts-table.mjs` 58/58、`verify-workbench-shell.mjs` 264 项、`verify-help-retrieval.mjs` 171/171 全绿。真机观感待验（dev）：窗口态 100% 是否回到旧的舒服比例；点最大化后自动放大到 130% 是否舒服；再还原是否回到 100%；重启 / 切仓库 reload 后保持；日程小窗跟随；PDF 阅读态 Ctrl+= 仍让位给阅读器。
+
+## 2026-10-27 · AI 助手左栏「会话大纲」（v3.13.2 补丁内容）
+
+**需求 / 拍板**：AI 助手会话一长，想跳回某条消息只能靠滚动，当前会话**没有大纲入口**。用户拍板四件事：① 入口放在工作台左栏顶部 🏠/🔒 那一行（与它们同组居中）；② 形态是**切换左栏主体**，不做浮层、不占消息区；③ 只列正文消息（用户提问 + AI 回答），摘要取首行；④ 点条目跳转后自动切回会话列表。范围仅 AI 助手模块，AI 对话页 / 右栏抽屉不动。**版本号不抬**：按用户判断算 3.13.2 补丁内容。
+
+**可交互原型**：`/home/lousync/Projects/Phrontis/tmp/ai-assistant-outline-proto/index.html`（`tmp/` 已 gitignore；`#outline` 直接看大纲态，右下角可切空会话）。
+
+**方案要点**：
+- 入口 = 模块头部动作槽：`App.tsx` 在 `railModule === 'aiAssistant'` 时传 `modActionsEl={wbModActionsEl}`；模块 portal 一个 `ListTree` 按钮进去，图标尺寸走 `SIDEBAR_HEADER_ICON`（15 / 2.4），激活态 `--accent`。
+- 左栏主体切换用**显示 / 隐藏**而非条件渲染：会话主体（作用域树 + 会话列表）保持挂载，展开状态与滚动位置不丢；大纲列表随 `api.messages` 实时更新。
+- 跳转走控制器 `revealMessage`：渲染窗口下目标可能未挂载，控制器先把窗口展开到目标所在轮，再由 `MessageList` 滚动；不再用全局 `data-msg-id` 查 DOM（右栏 / AI 对话页的保活实例同 id 会串台）。
+- 摘要口径抽到 `src/components/shared/AssistantPanel/outlineSummary.ts`（`msgSummary` + `OUTLINE_SUMMARY_MAX = 64`），AI 对话页原本地实现删除，两处共用，避免同一条消息两处标题不同。
+- 只列已落库消息（`m.id` 存在）：乐观 / 流式草稿没有锚点；空态区分「无会话 / 无消息 / 正在思考」。点击后 180ms 切回会话主体（让滚动先起步）。
+
+**改动点**：`src/modules/ai-assistant/index.tsx`、`src/components/shared/AssistantPanel/AiChatSidebar.tsx`、`src/components/shared/AssistantPanel/outlineSummary.ts`（新增）、`src/App.tsx`、`resources/help/AI助手.md`、`CHANGELOG.md`、契约 `.AGENT/scripts/ai-assistant/verify-ai-outline.mjs`（新增 26 条）。
+
+**验收**：`verify-ai-outline.mjs` 26/26；`npx tsc --noEmit`（web / node）双清；`npm run build` 通过；`verify-help-retrieval.mjs` 全绿。真机观感待验（dev）：按钮位置 / 大纲行密度 / 跳转后自动切回是否顺手。
+
+## 2026-10-27 · 长会话切换卡顿：渲染窗口（v3.13.2 补丁内容）
+
+**现象**：某个会话内容一多，切换过去明显卡顿。
+
+**实测（本机最大会话 217 条 / 699 KB）**：
+- 主进程读取 + JSON 解析 + 排序 + 序列化：约 9–15ms（IPC 载荷 399KB）。
+- Markdown 渲染基准（服务端、仅 106 条 AI 回复）：10 条 ≈171ms / 20 条 ≈274ms / 40 条 ≈372ms / 106 条 ≈592ms。
+- 结论：**卡在渲染（react-markdown 解析 + 挂 DOM），不在加载**。另外发现 `getMessagesPage` 的 `LIMIT 500` 取最早 500 条 —— 会话超过 500 条时会从最新处截断（潜在 bug）。
+
+**拍板（2026-10-27）**：先做 A 渲染窗口 —— 数据仍全量，只挂最近 10 轮；上滚到顶自动加载更早 10 轮；数据分页 / 消息索引留到几千条时再做。
+
+**方案**：
+- `messageWindow.ts` 纯函数：`initialWindowStart` / `earlierWindowStart` / `revealWindowStart`，以「轮」为单位、永远从用户消息开始，不切半轮。
+- 控制器 `useAssistantChat` 持有 `windowStart` / `reveal`：`loadSession` 后设末尾 10 轮，切会话重置；`loadEarlier` 纯内存展开；`revealMessage` 先把窗口展开到目标轮再发 reveal。
+- `MessageList` 只渲染 `windowStart` 之后的消息（保留原下标给复制 / 重发）：顶部哨兵 + IntersectionObserver 近顶自动加载；加载前记 `scrollHeight`，加载后补偿 `scrollTop`；`sessionKey` 变化回底（修「上一个会话滚到中间时新会话不回底」的存量问题）；`reveal` nonce 触发平滑滚动，并停掉贴底跟随（流式中不会被拉回底部）。
+- 大纲跳转（AI 助手模块 + AI 对话页）统一改走 `revealMessage`，不再全局查 `data-msg-id`。
+- UI 读全量：新增 `getAllMessages` / `getAgentMessagesAll`，`agent:messages` 改走全量；`getAgentMessages`（agent 上下文 / 压缩）保留原 500 条分页口径，两边语义分开。
+
+**改动点**：`src/components/shared/AssistantPanel/messageWindow.ts`（新增）、`MessageList.tsx`、`useAssistantChat.ts`、`ChatBody.tsx`、`AiChatSidebar.tsx`、`src/modules/ai-assistant/useAiAssistant.ts`、`index.tsx`、`electron/lib/agentMessageStore.ts`、`agentSessionRepo.ts`、`agentService.ts`、帮助手册、CHANGELOG、契约 `.AGENT/scripts/ai-assistant/verify-message-window.mjs`（45 条）+ `verify-ai-outline.mjs`（26 条更新）。
+
+**验收**：`verify-message-window` 45/45；`verify-ai-outline` 26/26；双 tsc 0 错；`npm run build` 通过；既有 unified-assistant / scope-guard / workbench-shell / ui-zoom / help-retrieval 全绿。真机观感待验：217 条会话的切换耗时、上滚加载是否跳、流式中大纲跳转是否被拉回底部。
+
+**未做 / 下一步**：真数据分页 + 消息索引 + 双向窗口（几千条时再做）；AI 教学用自己的渲染器，本轮只修了它的数据截断，没套渲染窗口；「跳到很旧的消息」仍需一次性展开到目标（到目标之后的全部消息），极长会话的显式跳转可能仍有几百 ms。

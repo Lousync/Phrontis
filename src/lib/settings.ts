@@ -119,7 +119,10 @@ export const SETTINGS = {
   deleteFxSkin: { default: 'builtin', type: 'select', label: '删除动画皮肤', group: '主题与皮肤', desc: '知识库删除条目时的吞噬特效外观；插件可贡献自定义皮肤', keywords: ['删除动画', '删除特效', '吞噬', '火焰', '进度条', '皮肤', 'fx', 'delete'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.deleteFx' },
   showLineNumbers: { default: true, type: 'toggle', label: '显示行号', group: '显示', desc: '编辑器左侧是否显示行号', keywords: ['行号', '显示行号', 'linenumber', 'line numbers', 'gutter'], section: 'editor', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'editor.lineNumbers' },
   editorFontSize: { default: 13, type: 'number', label: '字号', group: '字号', desc: '源码档编辑器正文字号（可直接输入数字）。即时渲染档跟随界面正文字号，与阅读态一致，不受此项影响', keywords: ['字号', '字体大小', '大小', 'fontsize', 'font size'], section: 'editor', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'editor.fontSize', min: 10, max: 40, step: 1, unit: 'px' },
-  zoom: { default: 1.0, type: 'number', label: '界面缩放', group: '缩放', desc: '整体界面缩放比例（可直接输入百分比）', keywords: ['缩放', 'zoom', '放大', '缩小', '重置', '比例', '界面大小'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'advanced.zoom', min: 85, max: 150, step: 5, unit: '%' },
+  // v3.13.2：缩放改为 Chromium 页面缩放（webContents.setZoomFactor），文字 / 控件 / 间距整体等比放大。
+  // 此前是「根字号 × zoom」，只对 rem 生效 —— 全仓 2700+ 处 text-[Npx] 绝对像素丝毫不受影响，
+  // 用户把 120% 调到底也只看见留白变大、字没变（2026-10 反馈「最大化后字太小、画面空」的根因）。
+  zoom: { default: 1.0, type: 'number', label: '界面缩放', group: '缩放', desc: '窗口态的整体界面缩放比例（可直接输入百分比）。文字、控件、间距一起放大；最大化 / 全屏时会再自动放大 30%', keywords: ['缩放', 'zoom', '放大', '缩小', '重置', '比例', '界面大小', '字太小'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'advanced.zoom', min: 85, max: 200, step: 5, unit: '%' },
   markdownDim: { default: true, type: 'toggle', label: 'Markdown 标记淡化', group: '显示', desc: '弱化版所见即所得：编辑时淡化 Markdown 标记，光标行保留原始标记', keywords: ['markdown', '淡化', '标记', 'md', 'dim', '弱化'], section: 'editor', ui: true, scope: 'global', level: 'normal', affects: 'live' , anchor: 'editor.markdownDim' },
   editorWritingMode: { default: 'source', type: 'select', label: '写作模式', group: '显示', desc: '源码 = 编辑 Markdown 原文（配合标记淡化）；即时渲染 = 编辑时按排版显示（标题 / 加粗 / 图片 / 公式 / 表格直接出效果），光标所在段落回到原文。两档各自记住光标位置，撤销历史不跨档', keywords: ['写作模式', '即时渲染', '所见即所得', 'live preview', '源码', 'source', '渲染', '写作'], section: 'editor', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'editor.writingMode' },
   sidebarTreeGuides: { default: 'line', type: 'select', label: '侧栏层级参考线', group: '显示', desc: '编辑器 / 知识库 / AI教学 左栏多层树的层级竖线样式：实线 / 虚线 / 关闭', keywords: ['树', '层级', '参考线', '竖线', '缩进', '指南线', 'tree', 'guide', 'indent'], section: 'editor', ui: false, scope: 'global', level: 'normal', affects: 'live', anchor: 'editor.treeGuides' },
@@ -150,8 +153,15 @@ export const SETTINGS = {
   /** v3.2.0 第 20 项：画像更新建议里「删除类条目」的二次确认（默认要确认） */
   skipProfileDeleteConfirm: { default: false, type: 'toggle', label: '画像更新删除确认', group: '删除确认', desc: '跳过「画像更新建议」里删除类条目的二次确认', keywords: ['删除确认', '画像', 'AI教学', '学习者画像', '跳过', 'confirm', 'profile'], section: 'security', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   zoomMin: { default: 0.85, type: 'number', label: '缩放下限', group: '缩放', desc: '界面缩放下限（约束，勿手改）', keywords: ['缩放', '下限', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
-  zoomMax: { default: 1.5, type: 'number', label: '缩放上限', group: '缩放', desc: '界面缩放上限（约束，勿手改）', keywords: ['缩放', '上限', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  zoomMax: { default: 2.0, type: 'number', label: '缩放上限', group: '缩放', desc: '界面缩放上限（约束，勿手改）', keywords: ['缩放', '上限', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   zoomStep: { default: 0.05, type: 'number', label: '缩放步进', group: '缩放', desc: '界面缩放步进（约束，勿手改）', keywords: ['缩放', '步进', 'zoom'], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // v3.13.2 一次性迁移标记 + 提示：老配置里 zoom=1.2 的用户（120% 只在放大留白）自动归位到 100%。
+  // 两个键都 ui:false —— 内部状态，不进设置页/搜索。notice 由 App 首挂时弹一次 Toast 后清空。
+  uiZoomMigrated: { default: false, type: 'toggle', label: '界面缩放迁移标记', group: '缩放', desc: '内部标记（勿手改）：v3.13.2 已把 120% 迁移到 100%', keywords: [], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  uiZoomNotice: { default: '', type: 'text', label: '界面缩放迁移提示', group: '缩放', desc: '内部标记（勿手改）：非空时首屏弹一次缩放调整提示', keywords: [], section: 'general', ui: false, scope: 'global', level: 'normal', affects: 'live' },
+  // 最大化自动放大（2026-10-26 实测）：窗口态 1280 与最大化 1920 的逻辑宽度差 1.5 倍，
+  // 同一缩放系数在窗口态偏大、最大化才刚好 —— 因此最大化 / 全屏时在基础档上再 ×1.3。
+  uiZoomMaximizedBoost: { default: true, type: 'toggle', label: '最大化时自动放大', group: '缩放', desc: '窗口最大化 / 全屏时在基础缩放上再放大 30%（实测大屏下更舒服）；关闭后两态用同一档', keywords: ['最大化', '全屏', '放大', '缩放', '大屏', 'zoom', 'maximize'], section: 'general', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'advanced.zoomMaxBoost' },
   // ⚠️ 默认值里**不能出现**不在活动栏图标位上的 id。这里曾混着 `export`（模块早已不存在）与
   // `recycle`（回收站已移进底部设置菜单）—— `recycle` 那次是真出过事故：启动兜底会沿着这张顺序表
   // 找"第一个没被隐藏的模块"，而 recycle 永远隐藏不掉，于是把侧边栏模块全隐藏后重启就开回收站。

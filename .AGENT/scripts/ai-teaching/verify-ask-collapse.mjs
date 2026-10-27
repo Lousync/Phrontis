@@ -26,8 +26,8 @@ const check = (name, ok, detail = '') => {
 console.log('\n[状态与重置]')
 check('askCollapsed 状态声明于 Esc 统一入口之前（TDZ 安全：与 askVisible 同区）',
   t.indexOf('const [askCollapsed, setAskCollapsed]') < t.indexOf('// Esc 统一入口'))
-check('换 ask 重置收起态（新问题不继承旧收起）',
-  /setAskPicks\(\{\}\); setAskPage\(0\); setAskCustomOpen\(false\); setAskCustom\(''\); setAskCollapsed\(false\)/.test(t))
+check('换 ask 重置收起态（新问题不继承旧收起 / 补充草稿 / 编辑态 / 自定义标记）',
+  /setAskPicks\(\{\}\); setAskPage\(0\); setAskCustomDrafts\(\{\}\); setAskCustomOpen\(\{\}\); setAskCustomPicks\(\{\}\); setAskCollapsed\(false\)/.test(t))
 
 console.log('\n[Esc 两段式]')
 check('Esc 第一段 = 收起（轻操作）', /if \(!askCollapsed\) \{ setAskCollapsed\(true\); return \}/.test(t))

@@ -6,6 +6,7 @@ import { fmtTime } from './MessageList'
 import { SessionRunMark } from './SessionRunMark'
 import { SessionPinButton } from './SessionPinButton'
 import { splitPinnedSessions } from './sessionSections'
+import { msgSummary } from './outlineSummary'
 import { AssistantEntryButton } from './AssistantEntry'
 import type { AssistantChatController } from './useAssistantChat'
 import type { AgentSessionInfo } from '../../../types'
@@ -20,12 +21,6 @@ import type { AgentSessionInfo } from '../../../types'
  * 取代 page 态对话区内的 overlay 抽屉（实机反馈：抽屉浮层遮空态文字、层次混乱）。
  * 会话数据复用 AiChatTab 的 useAssistantChat 控制器（真源在主进程）。
  */
-
-/** 大纲节点摘要：首行非空文本，去 markdown 标记，截 64 字 */
-function msgSummary(content: string): string {
-  const line = content.split('\n').map(l => l.trim()).find(l => l && !l.startsWith('——')) ?? ''
-  return line.replace(/^[#>*\-\s`]+/, '').slice(0, 64) || '（空）'
-}
 
 interface Props {
   chat: AssistantChatController
@@ -107,11 +102,8 @@ export function AiChatSidebar({ chat, container, modActionsEl }: Props) {
     [messages],
   )
 
-  /** 大纲点击 → 消息区滚动定位（消息行带 data-msg-id 锚点，跨容器无需 ref 穿透） */
-  const jumpTo = (id: string) => {
-    const el = document.querySelector(`[data-assistant-variant="page"] [data-msg-id="${id}"]`)
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+  /** 大纲点击 → 控制器统一收口（必要时展开渲染窗口，再由 MessageList 滚动定位） */
+  const jumpTo = (id: string) => { chat.revealMessage(id) }
 
   if (!container) return null
 

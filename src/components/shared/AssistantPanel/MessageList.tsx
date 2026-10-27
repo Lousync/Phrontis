@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
 import { ArrowDown, Check, Copy, Pencil, Play, RefreshCw, Trash2 } from 'lucide-react'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { showToast } from '../../../lib/toast'
@@ -140,18 +140,39 @@ export interface MessageListProps {
   onPrefillImage?: (text: string) => void
   /** 生图卡「停止生成」（C3 生成期常显；A6 = 前端断开 + 主进程 abort，不落盘） */
   onStopRun?: () => void
+  /**
+   * 渲染窗口起点（messages 数组下标）：只挂 messages.slice(windowStart)。
+   * 缺省 0 = 全量（AiLearn 等旧调用方）；长会话宿主传控制器里的窗口值。
+   */
+  windowStart?: number
+  /** 顶部自动加载更早消息（滚动到窗口上缘触发）；不传 = 不启用窗口加载 */
+  onLoadEarlier?: () => void
+  /** 会话键：变化时回底 + 重置「用户已上滚」姿态，切会话不再继承上一个会话的滚动状态 */
+  sessionKey?: string | null
+  /** 大纲跳转请求：nonce 变化时滚动到 id 对应消息（窗口已由调用方展开） */
+  reveal?: { id: string; nonce: number } | null
 }
 
 export function MessageList({
   messages, pending, liveSteps, draft, editing, setEditing, copiedIdx, setCopiedIdx,
   onRegenerate, resumeInfo, onResume, onEditSubmit, onDeleteMessage, emptyHint, className, jumpBottom = false,
-  onPrefillImage, onStopRun,
+  onPrefillImage, onStopRun, windowStart = 0, onLoadEarlier, sessionKey = null, reveal = null,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   /** 是否贴底（用户上滚阅读时不再强制拉回）。初始 true：新会话从底部开始 */
   const stickRef = useRef(true)
   /** 不贴底时显示「回到底部」浮标（仅 jumpBottom 开启时消费） */
   const [offBottom, setOffBottom] = useState(false)
+  /** 窗口起点夹到 [0, messages.length]（刷新 / 删除后长度可能变短） */
+  const winStart = Math.max(0, Math.min(windowStart, messages.length))
+  /** 上滚加载哨兵 + 滚动锚点：加载前记高度，加载后补偿 scrollTop，画面不跳 */
+  const topSentinelRef = useRef<HTMLDivElement>(null)
+  const anchorRef = useRef<{ height: number; top: number } | null>(null)
+  const prevStartRef = useRef(winStart)
+  const loadingEarlierRef = useRef(false)
+  const prevSessionRef = useRef(sessionKey)
+  /** 已消费的 reveal nonce：组件重挂（右栏切 token 面板再切回）时不重复滚到上次跳转点 */
+  const handledRevealRef = useRef(reveal?.nonce ?? 0)
 
   // 跟踪「是否贴底」。流式高频注入下，只有贴底才跟随滚动
   useEffect(() => {
@@ -184,6 +205,64 @@ export function MessageList({
     if (!el || !stickRef.current) return
     el.scrollTop = el.scrollHeight
   }, [messages, pending, draftSig])
+
+  // ---- 渲染窗口（2026-10-27）：长会话只挂最近 N 轮，上滚自动加载更早 ----
+  // 数据本身仍是全量；窗口只控制 DOM，不碰大纲 / 跳转 / 编辑。
+  useEffect(() => { loadingEarlierRef.current = false }, [winStart])
+  useEffect(() => {
+    const el = topSentinelRef.current
+    const root = scrollRef.current
+    if (!el || !root || winStart <= 0 || !onLoadEarlier) return
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting) || loadingEarlierRef.current) return
+      loadingEarlierRef.current = true
+      // 先记锚点：展开后内容变高，按差值把 scrollTop 推回去，用户看到的消息不动
+      anchorRef.current = { height: root.scrollHeight, top: root.scrollTop }
+      onLoadEarlier()
+    }, { root, rootMargin: '200px 0px 0px 0px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [winStart, onLoadEarlier])
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const anchor = anchorRef.current
+    if (anchor && winStart < prevStartRef.current) {
+      el.scrollTop = anchor.top + (el.scrollHeight - anchor.height)
+      anchorRef.current = null
+    }
+    prevStartRef.current = winStart
+  }, [winStart])
+
+  // 切会话：无论上一个会话滚在哪里，新会话都从底部开始（旧行为会继承 stickRef=false）
+  useLayoutEffect(() => {
+    if (prevSessionRef.current === sessionKey) return
+    prevSessionRef.current = sessionKey
+    stickRef.current = true
+    setOffBottom(false)
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+    requestAnimationFrame(() => { const c = scrollRef.current; if (c) c.scrollTop = c.scrollHeight })
+  }, [sessionKey])
+
+  // 大纲跳转：窗口已由控制器展开到目标轮，这里只负责把目标滚到顶部
+  useLayoutEffect(() => {
+    if (!reveal?.id) return
+    if (handledRevealRef.current === reveal.nonce) return
+    const el = scrollRef.current
+    const target = el?.querySelector(`[data-msg-id="${CSS.escape(reveal.id)}"]`)
+    if (!target) return
+    handledRevealRef.current = reveal.nonce
+    // 跳到旧消息时停止「贴底跟随」：否则流式草稿每 60ms 更新一次会把视图拉回底部。
+    // 目标就是最后一条时不动 —— 用户是在回到最新处，后续流式仍应跟随。
+    const targetIdx = messages.findIndex((m) => m.id === reveal.id)
+    if (targetIdx >= 0 && targetIdx < messages.length - 1) {
+      stickRef.current = false
+      if (jumpBottom) setOffBottom(true)
+    }
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [reveal?.nonce, reveal?.id, jumpBottom])
 
   /**
    * 生成中的生图卡（v3.6.0）：数据源是 `agent:step` 的**跑动事件**，不是 StreamBubble 的
@@ -221,7 +300,12 @@ export function MessageList({
       className={className ?? 'h-full overflow-y-auto px-3 py-3 space-y-2'}
     >
       {messages.length === 0 && !pending && emptyHint}
-      {messages.map((m, i) => (
+      {winStart > 0 && onLoadEarlier && (
+        <div ref={topSentinelRef} className="py-2 text-center text-[10.5px] text-[var(--text-muted)]">
+          加载更早的消息…
+        </div>
+      )}
+      {messages.map((m, i) => i < winStart ? null : (
         <div key={m.id ?? `live-${i}`} data-msg-id={m.id ?? undefined} className="group/msg">
           {m.role === 'assistant' ? (
             <>

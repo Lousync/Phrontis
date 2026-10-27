@@ -1,17 +1,19 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight, Zap, Star } from 'lucide-react'
+import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight, Zap, Star, ListTree } from 'lucide-react'
 import type { AgentSessionInfo, AiScopeSuggestion, LlmProviderInfo } from '../../types'
 import { workspaceGetCurrent, aiAssistantScopeSuggest, llmListProviders, llmReasoningCapable } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { BOOKMARK_COLORS } from '../../lib/workbenchLayout'
-import { MessageList } from '../../components/shared/AssistantPanel/MessageList'
+import { MessageList, fmtTime } from '../../components/shared/AssistantPanel/MessageList'
 import { AiAssistantIcon } from '../../components/shared/AiAssistantIcon'
 import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
 import { SessionRunMark } from '../../components/shared/AssistantPanel/SessionRunMark'
 import { SessionPinButton } from '../../components/shared/AssistantPanel/SessionPinButton'
 import { splitPinnedSessions } from '../../components/shared/AssistantPanel/sessionSections'
+import { msgSummary } from '../../components/shared/AssistantPanel/outlineSummary'
+import { SIDEBAR_HEADER_ICON } from '../../components/shared/sidebarHeaderIcon'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
 import { useAiAssistant, type Effort } from './useAiAssistant'
 import { prunePrefixes } from './scopeSetPure'
@@ -63,12 +65,20 @@ interface Props {
   isActive?: boolean
   sidebarEl?: HTMLElement | null
   sidebarHosted?: boolean
+  /** 左栏模块态头部动作槽（wbModActionsEl）：「会话大纲」入口与 🏠/🔒 同排 */
+  modActionsEl?: HTMLElement | null
 }
 
-export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHosted = false }: Props) {
+export function AiAssistantModule({
+  isActive = true,
+  sidebarEl = null,
+  sidebarHosted = false,
+  modActionsEl = null,
+}: Props) {
   const shell = useInputShell()
   const api = useAiAssistant(isActive)
-  const [draft, setDraft] = useState('')
+  /** 左栏主体：会话（作用域 + 会话列表）/ 会话大纲。只存 UI 状态，不写 Vault。 */
+  const [sidebarView, setSidebarView] = useState<'sessions' | 'outline'>('sessions')
   const [rootId, setRootId] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [reviewWidth, setReviewWidth] = useState(520)
@@ -163,9 +173,50 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
     [api.sessions],
   )
 
+  /** 大纲只列已落库消息（乐观 / 流式草稿没有 id，不能作为跳转锚点） */
+  const outline = useMemo(
+    () =>
+      api.messages
+        .filter((m) => m.id)
+        .map((m) => ({ id: m.id as string, role: m.role, text: msgSummary(m.content), createdAt: m.createdAt })),
+    [api.messages],
+  )
+
+  /**
+   * 左栏失去宿主（切走模块态 / 收起左栏）时回到会话主体：
+   * 再接回来时看到的是会话列表，而不是一个「没有跳转对象」的大纲。
+   */
+  useEffect(() => {
+    if (!sidebarHosted || !sidebarEl) setSidebarView('sessions')
+  }, [sidebarHosted, sidebarEl])
+
+  /**
+   * 大纲跳转：交给控制器统一收口（render 窗口可能没挂目标消息，控制器会先把窗口
+   * 展开到目标所在轮，再由 MessageList 滚动 —— 不再用全局 [data-msg-id] 查 DOM，
+   * 避免右栏 / AI 对话页的保活实例同 id 串台）。
+   */
+  const jumpToOutline = useCallback((id: string) => {
+    api.revealMessage(id)
+    // 跳转后关闭（2026-10-27 拍板）：留 180ms 让滚动先起步，再切回会话主体
+    window.setTimeout(() => setSidebarView('sessions'), 180)
+  }, [api])
+
+  /** 大纲态 Esc 返回；焦点在输入框时不抢键（避免和输入法 / 斜杠命令的 Esc 打架） */
+  useEffect(() => {
+    if (sidebarView !== 'outline') return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      setSidebarView('sessions')
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [sidebarView])
+
   /** 真正开跑（作用域已就绪时才会被调用） */
   const execRun = useCallback((run: PendingRun) => {
-    if (run.kind === 'send') { setDraft(''); void api.send(run.text); return }
+    if (run.kind === 'send') { api.setInput(''); void api.send(run.text); return }
     if (run.kind === 'regenerate') { void api.onRegenerate(); return }
     if (run.kind === 'resume') { void api.onResume(); return }
     void api.onEditSubmit(run.id, run.content)
@@ -195,10 +246,10 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
   }, [api.pending, api.scope.length, execRun])
 
   const handleSend = useCallback(() => {
-    const text = draft.trim()
+    const text = api.input.trim()
     if (!text) return
     runGuarded({ kind: 'send', text }, text)
-  }, [draft, runGuarded])
+  }, [api.input, runGuarded])
 
   const toggleScopeCard = useCallback((relPath: string) => {
     setScopeCard((prev) => {
@@ -283,77 +334,135 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
 
   const sidebar = (
     <div className="flex h-full flex-col">
-      {/* 作用域（上）：段头 + 搜索 + 摘要行 + 目录树三态勾选。运行中锁定（本轮已按快照跑完，改了下轮才生效） */}
-      <div className={`flex min-h-0 flex-col ${scopeCollapsed ? 'shrink-0' : ''}`} style={{ maxHeight: scopeCollapsed ? undefined : '56%' }}>
-        {/* 56% 限高保留：chip 行已删、段高恒定，不再存在「chip 每长一行从树上割一块」；限高是为了让树不吞掉下方任务段 */}
-        <div className="flex shrink-0 items-center justify-between px-3 py-2">
-          <button
-            type="button"
-            onClick={toggleScopeCollapsed}
-            className="flex min-w-0 items-center gap-1 text-[11px] uppercase tracking-wide text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-            title={scopeCollapsed ? '展开作用域' : '折叠作用域'}
-          >
-            <ChevronRight size={11} className={`kb-chevron shrink-0 ${scopeCollapsed ? '' : 'is-open'}`} />
-            作用域
-            <span className="normal-case tracking-normal text-[var(--text-disabled)]">
-              {api.scopeAll ? '· 整个仓库' : api.scope.length ? `· ${api.scope.length} 项` : '· 未选择文件'}
-            </span>
-          </button>
-          {/* 计数与空态在 ScopePane 的摘要行（选择态只有一处表达），段头只报锁定状态 */}
-          {api.pending && (
-            <span className="text-[11px] text-[var(--text-muted)]" title="本轮已在运行：作用域已锁定，改动要等这一轮跑完">运行中 · 已锁定</span>
-          )}
-        </div>
-        {!scopeCollapsed && (
-          <div className="kb-item-in flex min-h-0 flex-1 flex-col">
-            <ScopePane
-              rootId={rootId}
-              scope={api.scope}
-              scopeAll={api.scopeAll}
-              onChange={api.setScope}
-              onScopeAllChange={api.setScopeAll}
-              disabled={api.pending}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* 任务（下）：段头（含新建）+ 列表；新建入口在段头，不占列表尾部 */}
-      <div className="flex min-h-0 flex-1 flex-col border-t border-[var(--border-color)]">
+      {/* 会话大纲（2026-10-27 拍板）：替换左栏主体，不做浮层 —— 不遮消息区，长会话也能滚。
+          只列已落库消息；点条目跳转后自动切回会话主体（见 jumpToOutline）。 */}
+      <div className={`${sidebarView === 'outline' ? 'flex' : 'hidden'} kb-view-in min-h-0 flex-1 flex-col`}>
         <div className="flex shrink-0 items-center justify-between gap-1 px-3 py-2">
-          <span className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">会话</span>
-          <span className="flex items-center gap-0.5">
-            <span className="text-[11px] text-[var(--text-muted)]">{api.sessions.length}</span>
-            <button
-              type="button"
-              onClick={() => void api.newSession()}
-              className="kb-micro-pop flex h-5 w-5 items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              title="新建会话"
-            >
-              <Plus size={13} />
-            </button>
+          <span className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
+            <ListTree size={11} className="shrink-0" />
+            会话大纲
           </span>
+          <span className="text-[11px] text-[var(--text-muted)]">{outline.length} 条</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          {api.sessions.length === 0 ? (
-            <p className="px-2 py-4 text-center text-[12px] text-[var(--text-muted)]">暂无会话</p>
+          {outline.length === 0 ? (
+            <p className="px-2 py-6 text-center text-[11.5px] leading-relaxed text-[var(--text-muted)]">
+              {api.activeId ? (api.pending ? '正在思考，回复后将出现在大纲' : '当前会话还没有消息') : '先选择或新建一个会话'}
+            </p>
           ) : (
-            <ul className="flex flex-col gap-0.5">
-              {pinnedSessions.length > 0 && (
-                <>
-                  <li className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5 text-[10.5px] text-[var(--text-muted)]">
-                    <Star size={11} className="shrink-0 text-[var(--warning)]" fill="currentColor" />
-                    收藏
-                    <span className="h-px flex-1 bg-[var(--border-color)]" />
-                  </li>
-                  {pinnedSessions.map(renderSessionRow)}
-                  <li className="mx-1.5 my-1 h-px bg-[var(--border-color)]" aria-hidden="true" />
-                  <li className="px-2 pb-0.5 text-[10.5px] text-[var(--text-muted)]">全部会话</li>
-                </>
-              )}
-              {restSessions.map(renderSessionRow)}
-            </ul>
+            <div className="space-y-0.5">
+              {outline.map((n) => (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => jumpToOutline(n.id)}
+                  title={n.text}
+                  className={`flex w-full items-start gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[var(--bg-hover)] ${
+                    n.role === 'assistant' ? 'pl-5' : ''
+                  }`}
+                >
+                  <span
+                    className={`mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full ${
+                      n.role === 'user' ? 'bg-[var(--accent)]' : 'bg-[var(--text-disabled)]'
+                    }`}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={`block truncate text-[11.5px] leading-[1.5] ${
+                        n.role === 'user' ? 'font-medium text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'
+                      }`}
+                    >
+                      {n.text}
+                    </span>
+                    {n.createdAt && (
+                      <span className="block text-[9.5px] text-[var(--text-disabled)]">{fmtTime(n.createdAt)}</span>
+                    )}
+                  </span>
+                </button>
+              ))}
+            </div>
           )}
+        </div>
+        <div className="shrink-0 border-t border-[var(--border-color)] px-3 py-1.5 text-[10px] text-[var(--text-disabled)]">
+          点击条目跳转，跳转后回到会话
+        </div>
+      </div>
+
+      {/* 会话主体（默认）：作用域（上）+ 会话列表（下）。切到大纲时只隐藏、不卸载 ——
+          作用域树的展开状态 / 列表滚动位置要保留。 */}
+      <div className={`${sidebarView === 'outline' ? 'hidden' : 'flex'} kb-view-in min-h-0 flex-1 flex-col`}>
+        {/* 作用域（上）：段头 + 搜索 + 摘要行 + 目录树三态勾选。运行中锁定（本轮已按快照跑完，改了下轮才生效） */}
+        <div className={`flex min-h-0 flex-col ${scopeCollapsed ? 'shrink-0' : ''}`} style={{ maxHeight: scopeCollapsed ? undefined : '56%' }}>
+          {/* 56% 限高保留：chip 行已删、段高恒定，不再存在「chip 每长一行从树上割一块」；限高是为了让树不吞掉下方任务段 */}
+          <div className="flex shrink-0 items-center justify-between px-3 py-2">
+            <button
+              type="button"
+              onClick={toggleScopeCollapsed}
+              className="flex min-w-0 items-center gap-1 text-[11px] uppercase tracking-wide text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+              title={scopeCollapsed ? '展开作用域' : '折叠作用域'}
+            >
+              <ChevronRight size={11} className={`kb-chevron shrink-0 ${scopeCollapsed ? '' : 'is-open'}`} />
+              作用域
+              <span className="normal-case tracking-normal text-[var(--text-disabled)]">
+                {api.scopeAll ? '· 整个仓库' : api.scope.length ? `· ${api.scope.length} 项` : '· 未选择文件'}
+              </span>
+            </button>
+            {/* 计数与空态在 ScopePane 的摘要行（选择态只有一处表达），段头只报锁定状态 */}
+            {api.pending && (
+              <span className="text-[11px] text-[var(--text-muted)]" title="本轮已在运行：作用域已锁定，改动要等这一轮跑完">运行中 · 已锁定</span>
+            )}
+          </div>
+          {!scopeCollapsed && (
+            <div className="kb-item-in flex min-h-0 flex-1 flex-col">
+              <ScopePane
+                rootId={rootId}
+                scope={api.scope}
+                scopeAll={api.scopeAll}
+                onChange={api.setScope}
+                onScopeAllChange={api.setScopeAll}
+                disabled={api.pending}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* 任务（下）：段头（含新建）+ 列表；新建入口在段头，不占列表尾部 */}
+        <div className="flex min-h-0 flex-1 flex-col border-t border-[var(--border-color)]">
+          <div className="flex shrink-0 items-center justify-between gap-1 px-3 py-2">
+            <span className="text-[11px] uppercase tracking-wide text-[var(--text-muted)]">会话</span>
+            <span className="flex items-center gap-0.5">
+              <span className="text-[11px] text-[var(--text-muted)]">{api.sessions.length}</span>
+              <button
+                type="button"
+                onClick={() => void api.newSession()}
+                className="kb-micro-pop flex h-5 w-5 items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                title="新建会话"
+              >
+                <Plus size={13} />
+              </button>
+            </span>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+            {api.sessions.length === 0 ? (
+              <p className="px-2 py-4 text-center text-[12px] text-[var(--text-muted)]">暂无会话</p>
+            ) : (
+              <ul className="flex flex-col gap-0.5">
+                {pinnedSessions.length > 0 && (
+                  <>
+                    <li className="flex items-center gap-1.5 px-2 pb-0.5 pt-1.5 text-[10.5px] text-[var(--text-muted)]">
+                      <Star size={11} className="shrink-0 text-[var(--warning)]" fill="currentColor" />
+                      收藏
+                      <span className="h-px flex-1 bg-[var(--border-color)]" />
+                    </li>
+                    {pinnedSessions.map(renderSessionRow)}
+                    <li className="mx-1.5 my-1 h-px bg-[var(--border-color)]" aria-hidden="true" />
+                    <li className="px-2 pb-0.5 text-[10.5px] text-[var(--text-muted)]">全部会话</li>
+                  </>
+                )}
+                {restSessions.map(renderSessionRow)}
+              </ul>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -362,6 +471,25 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
   return (
     <>
       {sidebarHosted && sidebarEl ? createPortal(sidebar, sidebarEl) : null}
+
+      {/* 会话大纲入口（2026-10-27）：与 🏠/🔒 同组居中；激活时高亮，再点回到会话主体。
+          只在模块左栏挂载时出现（modActionsEl 由 App 按 railModule 传入）。 */}
+      {modActionsEl && createPortal(
+        <button
+          type="button"
+          onClick={() => setSidebarView((v) => (v === 'outline' ? 'sessions' : 'outline'))}
+          title={sidebarView === 'outline' ? '返回会话（当前：会话大纲）' : '会话大纲'}
+          aria-pressed={sidebarView === 'outline'}
+          className={`rounded p-1 transition-colors ${
+            sidebarView === 'outline'
+              ? 'bg-[var(--bg-hover)] text-[var(--accent)]'
+              : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <ListTree {...SIDEBAR_HEADER_ICON} />
+        </button>,
+        modActionsEl,
+      )}
 
       <div ref={layoutRef} className="flex h-full min-w-0 bg-[var(--bg-primary)]">
         <div className="flex h-full min-w-0 flex-1 flex-col">
@@ -398,12 +526,16 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
         </div>
 
         {/* 对话列（消息 + 输入卡 + 作用域建议卡）统一 820 限宽居中 —— 与 AI 教学 / aiChat page 态同一口径 */}
-        <div className="mx-auto min-h-0 w-full max-w-[820px] flex-1">
+        <div data-assistant-variant="aiAssistant" className="mx-auto min-h-0 w-full max-w-[820px] flex-1">
           <MessageList
             messages={api.messages}
             pending={api.pending}
             liveSteps={api.liveSteps}
             draft={api.draft}
+            sessionKey={api.activeId}
+            windowStart={api.windowStart}
+            onLoadEarlier={api.loadEarlier}
+            reveal={api.reveal}
             editing={api.editing}
             setEditing={api.setEditing}
             copiedIdx={api.copiedIdx}
@@ -490,9 +622,9 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
             <AiMascotAnchor />
             <textarea
               ref={composerRef}
-              value={draft}
+              value={api.input}
               spellCheck={false}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => api.setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
               rows={2}
               placeholder={api.scopeAll || api.scope.length ? '描述要整理的内容…（Enter 发送）' : '未选择文件：本轮 AI 不会读写仓库文件…'}
@@ -594,7 +726,7 @@ export function AiAssistantModule({ isActive = true, sidebarEl = null, sidebarHo
                 <button
                   type="button"
                   onClick={handleSend}
-                  disabled={!draft.trim()}
+                  disabled={!api.input.trim()}
                   className="kb-micro-pop h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-opacity"
                   title="发送"
                 >

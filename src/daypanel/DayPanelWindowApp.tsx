@@ -27,8 +27,8 @@ export function DayPanelWindowApp() {
       } else {
         applyThemeClass(theme)
       }
-      const zoom = Math.min(1.5, Math.max(0.85, Number(s.zoom) || 1))
-      document.documentElement.style.fontSize = `${zoom * 16}px`
+      // 界面缩放（v3.13.2）：改由主进程 webContents.setZoomFactor 统一应用（electron/main/uiZoom.ts）。
+      // 这里不再改根字号 —— 根字号只影响 rem，本窗口的字号同样是绝对 px，改了也不生效。
       if (FONT_CSS_MAP[s.editorFont]) {
         document.documentElement.style.setProperty('--font-sans', FONT_CSS_MAP[s.editorFont])
       }

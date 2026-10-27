@@ -22,7 +22,7 @@ import type { SessionDigest, AgentMessageRow, AgentSessionRow } from './agentSes
 import { clampMaxRounds, clampMaxSessionWrites, clampRunTokenBudget, isParallelSafe, partitionToolBatches, PARALLEL_CHUNK, PARALLEL_HINT, FINAL_ROUND_NOTICE, FORCED_SUMMARY_NOTICE } from './agentLoopPolicy'
 import {
   createAgentSession, listAgentSessions, renameAgentSession, deleteAgentSession,
-  sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages,
+  sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages, getAgentMessagesAll,
   getMessageById, updateMessageContent, deleteMessage, deleteMessagesAfter,
   getAgentSession, updateAgentSessionInstructions, updateAgentSessionScope, backfillSessionSources,
   createSideLaneSession, listSideLanes, promoteSideLane, setSessionMode, setSessionPinned,
@@ -2064,7 +2064,8 @@ export function registerAgentHandlers(): void {
       source === 'aiTeaching' ? 'aiTeaching' : source === 'schedule' ? 'schedule' : source === 'aiAssistant' ? 'aiAssistant' : source === 'intel' ? 'intel' : 'assistant',
     ))
   })
-  ipcMain.handle('agent:messages', (_e, id: string) => getAgentMessages(String(id ?? '')).map(camelRow))
+  // UI 读全量：会话大纲 / 跳回旧消息 / 回滚需要完整历史；只挂最近几轮由渲染层窗口负责。
+  ipcMain.handle('agent:messages', (_e, id: string) => getAgentMessagesAll(String(id ?? '')).map(camelRow))
   // 存量会话认领的一次性告知（会话随仓库走）：取走即删，只会被展示一次
   ipcMain.handle('agent:takeAdoptNotice', () => takeAdoptNotice())
   // AI 用量 / 会话文件改动（v3.4.0 批次5，方案 §4/§3.8）：右栏 token 面板只读

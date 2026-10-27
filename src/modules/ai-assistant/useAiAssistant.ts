@@ -18,6 +18,9 @@ export interface AiAssistantApi {
   messages: UiMessage[]
   pending: boolean
   draft: ReturnType<typeof useAssistantChat>['draft']
+  /** 当前会话的输入草稿（按会话独立；完整模块与侧栏 / 浮窗共用同一格） */
+  input: string
+  setInput: (v: string) => void
   liveSteps: ReturnType<typeof useAssistantChat>['liveSteps']
   runMark: 'running' | 'failed' | 'unread' | null
   plan: AiChangePlan | null
@@ -40,6 +43,11 @@ export interface AiAssistantApi {
   writeMode: 'direct' | 'confirm'
   setWriteMode: (mode: 'direct' | 'confirm') => void
   setActiveId: (id: string | null) => void
+  /** 渲染窗口起点：长会话只挂最近 10 轮，数据仍是全量 */
+  windowStart: number
+  loadEarlier: () => void
+  reveal: { id: string; nonce: number } | null
+  revealMessage: (id: string) => void
   newSession: () => Promise<AgentSessionInfo | null>
   deleteSession: (id: string) => Promise<void>
   renameSession: (id: string, title: string) => Promise<void>
@@ -67,6 +75,8 @@ export function useAiAssistant(isActive: boolean): AiAssistantApi {
     messages: chat.messages,
     pending: chat.pending,
     draft: chat.draft,
+    input: chat.input,
+    setInput: chat.setInput,
     liveSteps: chat.liveSteps,
     runMark: chat.runMark,
     plan: chat.plan,
@@ -89,6 +99,10 @@ export function useAiAssistant(isActive: boolean): AiAssistantApi {
     writeMode: chat.writeMode,
     setWriteMode: chat.setWriteMode,
     setActiveId: chat.setActiveId,
+    windowStart: chat.windowStart,
+    loadEarlier: chat.loadEarlier,
+    reveal: chat.reveal,
+    revealMessage: chat.revealMessage,
     newSession: () => chat.newSession('新会话'),
     deleteSession: chat.deleteSessionNow,
     renameSession: chat.renameSession,

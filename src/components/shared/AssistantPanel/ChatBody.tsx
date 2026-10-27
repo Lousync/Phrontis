@@ -117,7 +117,7 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
   const scheduleMode = surface === 'schedule'
   const {
 
-    sessions, providersOk, activeId, messages, input, setInput, inputRef, pending,
+    sessions, providersOk, activeId, messages, windowStart, loadEarlier, reveal, input, setInput, inputRef, pending,
     liveSteps, draft, lastChanges, compressing, pickedSkill, setPickedSkill,
     slashSkills, editing, setEditing, copiedIdx, setCopiedIdx, deletingId,
     drawerMounted, drawerOpen, toggleDrawer, closeDrawer,
@@ -443,6 +443,10 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                   pending={pending}
                   liveSteps={liveSteps}
                   draft={draft}
+                  sessionKey={activeId}
+                  windowStart={windowStart}
+                  onLoadEarlier={loadEarlier}
+                  reveal={reveal}
                   editing={editing}
                   setEditing={setEditing}
                   copiedIdx={copiedIdx}

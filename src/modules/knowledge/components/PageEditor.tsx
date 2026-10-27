@@ -172,7 +172,6 @@ interface Props {
   pageId: string
   categories: KnowledgeCategory[]
   allPages: KnowledgePage[]
-  zoom?: number
   onBack: () => void
   onDeleted: () => void
   onNavigate: (id: string) => void
@@ -232,7 +231,7 @@ interface Props {
   onExportPdfRequest?: () => void
 }
 
-export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward, onRenameRequest, onMoveRequest, onDuplicateRequest, onLocateRequest, onDeleteRequest, onSplitRequest, splitDisabled = false, onExportPdfRequest }: Props) {
+export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward, onRenameRequest, onMoveRequest, onDuplicateRequest, onLocateRequest, onDeleteRequest, onSplitRequest, splitDisabled = false, onExportPdfRequest }: Props) {
   const { s, update } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
   const [title, setTitle] = useState('')
@@ -2114,7 +2113,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
           <ArchiveTextView
             path={page.path}
             fileType={fileType}
-            fontSize={Math.round(s.editorFontSize * zoom)}
+            fontSize={s.editorFontSize}
             banner={`文件 ${Math.round((page.sizeBytes ?? 0) / 1024 / 1024)} MB，超过 10 MB 编辑上限，以只读方式打开`}
           />
         ) : isArchiveFile && !archiveTextOpenable ? (
@@ -2244,7 +2243,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
                 options={{
                   // 就地编辑（Phase 1）：vault 模式解除只读——欢迎页/归档非 md 文件不进 Monaco，无需再闸
                   readOnly: false,
-                  fontSize: Math.round(s.editorFontSize * zoom),
+                  fontSize: s.editorFontSize,
                   fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
                   lineNumbers: 'on',
                   minimap: { enabled: false },
@@ -2288,7 +2287,7 @@ export function PageEditor({ pageId, categories, allPages, zoom = 1, onBack, onD
               doc={paneDoc}
               mode={writingMode}
               onChange={(_rel, v) => { setContent(v); onContentChange?.(v, pageIdRef.current) }}
-              fontSize={Math.round(s.editorFontSize * zoom)}
+              fontSize={s.editorFontSize}
               editorOptions={{
                 fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace",
                 cursorBlinking: 'smooth',

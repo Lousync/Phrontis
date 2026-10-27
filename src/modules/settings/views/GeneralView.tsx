@@ -1,4 +1,5 @@
 import { useSettings } from '../../../lib/SettingsContext'
+import { SETTINGS } from '../../../lib/settings'
 import { NumberField } from '../components/fields/NumberField'
 import { SettingSwitch } from '../../../components/shared/SettingSwitch'
 
@@ -35,16 +36,25 @@ export function GeneralView() {
         <NumberField
           value={zoomPct}
           onCommit={(pct) => update('zoom', pct / 100)}
-          min={85}
-          max={150}
-          step={5}
+          min={SETTINGS.zoom.min}
+          max={SETTINGS.zoom.max}
+          step={SETTINGS.zoom.step}
           unit="%"
           presets={[100, 110, 125, 150]}
-          defaultValue={100}
+          defaultValue={Math.round(SETTINGS.zoom.default * 100)}
         />
         <p className="text-[11px] text-[var(--text-muted)] mt-1.5 leading-relaxed">
-          可直接输入任意百分比，或点预设档位；步进 ±5%。当前 {zoomPct}%。
+          窗口态的缩放比例；步进 ±5%。缩放作用于整个界面（文字、控件、间距一起放大），当前 {zoomPct}%。
         </p>
+        <label className="mt-4 flex max-w-md items-center justify-between gap-4 cursor-pointer" data-setting-anchor="advanced.zoomMaxBoost">
+          <span className="text-[13px] text-[var(--text-primary)] leading-relaxed">
+            最大化时自动放大
+            <span className="block text-[11px] text-[var(--text-muted)] mt-0.5 leading-relaxed">
+              窗口最大化 / 全屏时在基础缩放上再放大 30%（默认 100% → 130%），避免大屏下字显得小；关闭后两态用同一档。
+            </span>
+          </span>
+          <SettingSwitch checked={s.uiZoomMaximizedBoost !== false} onChange={(v) => update('uiZoomMaximizedBoost', v)} />
+        </label>
       </div>
 
       {/* 外壳布局（Workbench 灰度 R1-W1） */}

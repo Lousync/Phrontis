@@ -1887,3 +1887,78 @@ v1 实机踩中的连带事故：副本在场时，编辑器里「打开主文�
 **根因**：未定（cDiffer=true 时 content 与 savedContentRef 的赋值来源按代码读是同一 `p.contentMd`，怀疑 effect 在 loadPage 两段式 setState 之间以中间态运行）。**与 B-40/41/42 改动无关的存量竞态** —— 修复前建议先给该 effect 加「pageId 刚切换的宽限」类守卫再观察。
 **修复方向**：待定位后收敛；可能的方向是 divergence effect 的比较改用 pageId 代次门卫（切页后首轮跳过）。
 **验证**：开页后探针观测 `isDirtyRef` 恒 false；无多余写盘。
+
+## [x] B-44 AI 教学「整卷」提问卡的「其他补充」输入框按下 Enter 后文字凭空消失，自定义回答没有任何可见落点（2026-10-27，P1；用户实机反馈 + 截图）
+
+> 落码轮（2026-10-27，fix/optimize-v3.13.2）：已按下方「修复方向 1+2+3」落地；`src/modules/ai-teaching/index.tsx` 单文件改动，遵守铁律 21（同文件禁并行编辑）。
+
+**现象**（用户原话：「选项下面的输入框，我输入内容后点击回车，里面的内容就直接消失了，这个选项形同虚设」）：
+AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补充内容不考』，第二章里那条『补充的 IN/OUT 指令、mov 指令总结』算不算考？」· 3 个序号选项 · 右上 `‹ 2 / 3 ›` 翻页 + 收起 + ✕ · 底部「已答 1/3 · ‹›翻页作答」+ 圆形 ↑）→ 点「✎ 其他补充…」展开输入框（placeholder「补充你的回答…（Enter 确认）」）→ 打字 → **按 Enter** → 输入框里的字**立刻清空**，界面其余部分看不出任何变化（该题没出现「已选中」的行、翻回该题也是空框）→ 用户结论：这个补充入口是摆设。
+
+**定位**（单文件，`src/modules/ai-teaching/index.tsx`）：
+- 输入框渲染 + Enter：`:3604-3613`，关键是 `:3608-3609`
+  ```tsx
+  <input autoFocus value={askCustom} onChange={e => setAskCustom(e.target.value)}
+    onKeyDown={e => { if (e.key === 'Enter' && askCustom.trim()) { const v = askCustom.trim(); setAskCustom(''); setAskCustomOpen(false); exam ? setAskPicks(p => ({ ...p, [page]: v })) : sendAskAnswer(v) } }}
+    placeholder="补充你的回答…（Enter 确认）" />
+  ```
+- 显隐判定：`:3557` `const customMode = askCustomOpen || (exam && pickedCur !== undefined && !curOpts.includes(pickedCur))`
+- 选项行渲染（只遍历 AI 给的选项）：`:3591-3603`，`picked = pickedCur === o`
+- 圆形 ↑：`:3624-3626`（`onClick` 里 `if (exam) submitAskExam()`）、`submitAskExam` 在 `:2129-2133`
+- 状态与重置：`:1884-1892`（`askPicks` / `askPage` / `askCustomOpen` / `askCustom` 四个 state，`:1892` 的 effect 只在**换 ask id** 时整体重置）
+- 对照：同文件其他 Enter 入口都带 IME 保护 —— `:3524` `!e.nativeEvent.isComposing`、`:1173` 同款；本处**没有**。
+
+**根因**（① 已由用户答复实锤「计数不变」；②③⑤⑥ 读码可确定；④ 需实机复现；⑦ 待定案）：
+1. **写进去了，但屏幕上没有任何地方读它** —— 整卷模式 Enter 走 `setAskPicks(p => ({ ...p, [page]: v }))`，自定义答案只存在于 `askPicks[page]` 这个字符串里；而选项行只按 `curOpts.map` 渲染（`pickedCur === o` 对自定义串恒 false）→ **不存在「自定义答案」那一行**。同时 `setAskCustom('')` 立刻把输入框清空、`setAskCustomOpen(false)` 收掉补充态。于是用户视角唯一的可见变化 = 「字没了」，看起来就是被丢弃。
+2. **不可回看、不可再编辑** —— 清空后 `askCustom` 不再回填；`customMode` 此刻仍为 true（`pickedCur` 是自定义串）→ 「其他补充…」按钮**不渲染**，那条唯一的回填分支（`:3615` 会把 `pickedCur` 塞回输入框）也就永远进不去。翻回该题看到的仍是空框。
+3. **唯一可能的变化量还是「已答题目数」，而它恰好不变** —— `pickedCount = Object.keys(askPicks).length` 数的是「几道题有答案」，不是「答案是啥」。用户确认数字停在 1/3，反证了这次是**覆盖**（见下方实机确认块）：原答案被一个无呈现的字符串替换，旧选项高亮同时消失（`picked = pickedCur === o` 不再命中任何一项）⇒ 屏幕上「选项也没了、进度也不动、字也没了」三件事同时发生，这正是「形同虚设」的完整解释。
+   ★ 推论：**只要还沿用「一道题一个字符串 + 计数看已答题数」这套模型，覆盖就永远无法被用户看见** —— 修复必须补「这题现在答的是哪一条」的呈现，光把输入框留住不够。
+4. **整卷的 ↑ 与输入框互不知情** —— `:3625` 整卷分支只调 `submitAskExam()`，完全忽略 `askCustom`：只打字、没按 Enter 就点 ↑（或以为 Enter 只是换行）→ 文字被**静默丢弃**；反过来 `:3626` 的 `disabled` 只看 `allPicked`，不看输入框有无内容，用户也无法从按钮态判断「这段字到底算不算」。
+5. **自定义输入是「全局单份」，不按题索引存** —— `askCustomOpen` / `askCustom` 不随 `page` 分槽：第 2 题打了一段字后直接点 › 翻到第 3 题，输入框带着上一题的文字跟过去，此时按 Enter 就**记到第 3 题头上**（错题错答）。
+6. **中文输入法风险** —— Enter 分支未判 `e.nativeEvent.isComposing`：用中文输入法回车确认候选词时同样会命中该分支（Chromium 输入过程中 `onChange` 已把候选串写进受控值），表现为「候选词还没选完，框里的字就没了」。这条要实机复现确认，但同文件两处 Enter 都做了这层保护，此处漏掉属明确不一致。
+
+> ★★ **实机确认（2026-10-27，用户答复）：按 Enter 之后底部「已答 1/3」的数字没有变。**
+> 这条把根因收窄到了唯一一种可能 —— `pickedCount = Object.keys(askPicks).length`（`:3555`）计的是**「已答题目数」而不是「答案」**，而全仓只有三处碰 `askPicks`：`:1892` 换 ask 的 effect（清空）、`:3595` 点选项、`:3609` 本处 Enter。若这次写的是一个**新题号**，计数必 +1；若 `:1892` 的 effect 清过一遍，计数必归 **0/3**（不是停在 1/3）。两者都没发生 ⇒ **Enter 确实把文字写进了 `askPicks[page]`，只是写在一个「原本就有答案」的题号上（覆盖）**。
+> 也就是说用户这一格答案**要么早已被自己答过（点过选项 / 之前就补过一次），要么写错了题号**，两种情况在界面上完全等价：换成一个没有任何可见呈现的字符串。
+> ★ 落码前请顺手核一下（约 5 秒，改完删掉）：在 `:3609` 的 `if (...)` 体首行加 `console.log('[ask-enter]', { page, n, exam, before: askPicks, v })`，复现一次即知是「key 已存在（覆盖）」还是「写到别的题号」。**这个日志只用于定案，别带进提交。**
+
+**修复方向**（三条，建议 1+2 必做，3 视拍板）：
+1. **给自定义答案一个可见落点（本轮核心）**：在选项列表末尾把「当前题已记录的自定义答案」渲染成一行（与序号行同款版式，`✎` 图标 + 文字 + 选中态，`data-wb` 锚点便于探针断言），并**保留 `askCustom` 不清空**（或清空但同时把该行显示出来）—— 用户要能一眼看到「这题我答的是什么」。★ 因为根因 3 已实锤是**覆盖**，这一行还必须能表达「答案被替换过」：至少保证任意时刻**有且仅有一条**高亮（选项行 ↔ 自定义行互斥，不能出现「两边都不亮」），覆盖发生时给一次轻反馈（Toast 或该行 `.kb-micro-pop` 一闪），否则「改答」这个动作永远是无声的。
+2. **Enter 语义补齐**：`e.preventDefault()` + `!e.nativeEvent.isComposing` 判定；已记录状态下再次进入补充态要能把现有答案**回填可编辑**（现在 `customMode` 恒 true 挡掉了 `:3615` 的回填路径，需把「编辑已有自定义答案」做成可点的入口，别只靠那个不可见的 `customMode` 分支）；整卷的 ↑ 也应先把输入框里未提交的文字记到当前题（否则静默丢弃）。
+3. **按题分槽 + 翻页保护**（可选但推荐）：`askCustom` 改成 `Record<number,string>`，或在 `setAskPage` 时清空当前题草稿并给一次轻提示；至少不能把上一题的文字带进下一题（根因 5 若真的踩中，就是「答案记到别的题」这种更难发现的错）。
+- 顺带核对：单题模式（`!exam`）走 `sendAskAnswer(v)` → 作为用户消息发出、卡片消失，这条链路是通的，**不要**为了整卷的显示需求把单题也改成「记录式」。
+- 动效按铁律 13：新增的答案行用 `.kb-item-in`（不要新造过渡）。
+
+**验证**：整卷卡 → 第 2 题点「其他补充」输入文字按 Enter → **框内文字不再无故消失**，且该题在选项列表里能看到这条自定义答案、有且仅有一个高亮；**再补一次/改答** → 能立刻看出答案被替换（不留「什么都不亮」的空档）；翻到第 3 题再翻回第 2 题 → 自定义答案仍在、可继续编辑；对已点选项的题再补充 → 覆盖后明确显示「现在答的是自定义这条」；中文输入法回车确认候选词 → 不会误提交/误清空；整卷 ↑ 前未按 Enter 的文字不被静默吞掉。
+
+**修复记录（2026-10-27，fix/optimize-v3.13.2）**：
+- **可见落点（对应根因 1/2/3）**：选项列表末尾新增「补充答案」行（`✎` + 文本 + 选中态 + `data-wb="aiTeachAskCustomAnswer"`），与选项行互斥。新增 `askCustomPicks: Record<number, boolean>` 判别自定义答案（不再用「文本是否在选项里」推断），所以自定义文本恰好等于某个选项时也仍显示补充行，不会退回成「选项高亮 + 补充消失」。
+- **回编**：补充行右侧「编辑」按钮回填现有答案进入可编辑态；编辑中行保持高亮并显示「编辑中」；「取消」恢复原答案（无自定义答案则清草稿）。
+- **Enter / IME（根因 6）**：`preventDefault()` + `!e.nativeEvent.isComposing`；组合态 Esc 只 `stopPropagation` 交给 IME，不收起提问卡；正常态 Esc 取消补充编辑。
+- **覆盖反馈（根因 3）**：自定义补充覆盖旧答案时 Toast「第 k 题的回答已更新」；选项覆盖掉补充答案时也 Toast（补充行会消失）；首次选择不弹，选项互切靠高亮移动；补充行用 `.kb-item-in` 入场。
+- **分槽（根因 5）**：`askCustomDrafts` / `askCustomOpen` 改为按题号 `Record`；翻页不串题，翻回来草稿/编辑态仍在。点选项会收起补充编辑器但保留草稿，按钮显示「继续编辑补充…」。
+- **整卷 ↑（根因 4）**：点击时先把当前输入框文字记到本题（`submitAskExam({ page, value })` 以 override 合并，避开 setState 异步漏答），并把它计入可提交数（`draftFillsAnswer` / `submitCount`）；底部状态显示「含当前补充，可提交」。别的题还开着未确认草稿时 ↑ 会停用并提示「有未确认补充」，翻回该题按 Enter 或取消后才能发，避免跨页静默丢字。
+- **单题模式**：仍走 `sendAskAnswer(v)` 作为用户消息发出，没有改成记录式。
+- **契约**：新增 `.AGENT/scripts/ai-teaching/verify-ask-custom.mjs`（43 条）；更新 `.AGENT/scripts/ai-teaching/verify-ask-collapse.mjs` 的重置断言（11 条）。
+
+**已跑验证**：`tsc --noEmit -p tsconfig.web.json` 0 错；`npm run build` 通过；`verify-ask-custom` 43/43；`verify-ask-collapse` 11/11。真机待验：整卷第 2 题补充 Enter 后行内可见、再补一次有 Toast、翻第 3 题再翻回仍在、已点选项再补充后只剩补充行高亮、中文输入法回车不误提交、整卷 ↑ 带未提交文字能直接发出。
+
+## [x] B-45 AI 助手切换会话时输入框文字串台：多个对话共用一份草稿缓冲区（2026-10-27，P2；用户反馈）
+
+**现象**：在 AI 助手会话 A 输入一段文字但没发送 → 切到会话 B → 输入框仍显示 A 的文字。期望每个对话的输入框独立：A 的草稿只属于 A，切到 B 应为空或 B 自己的草稿；切回 A 时原文还在。
+
+**定位**：
+- 完整 AI 助手模块 `src/modules/ai-assistant/index.tsx` 自己维护 `const [draft, setDraft] = useState('')`，切换任务只改 `api.activeId`，从不换草稿。
+- 共享控制器 `src/components/shared/AssistantPanel/useAssistantChat.ts` 的 `const [input, setInput] = useState('')` 也是单份；`loadSession` / `selectSession` 只换会话数据，不换输入槽位。侧栏 / 浮窗 / AI 对话页 / 日程 / 情报助手都受影响（AI 教学主输入有自己的实现，不在本条范围）。
+
+**修复（2026-10-27，fix/optimize-v3.13.2）**：
+- 新增 `src/lib/assistantDraftStore.ts`：内存级草稿仓库，key = `session:<source>:<id>`；没有活动会话的空白页草稿 key = `new:<source>`，按来源隔离，日程 / 情报不会串进通用助手。空串即删除条目；不落盘、不走 IPC，退出应用即丢弃（按用户口径「仅本次运行内保留」）。
+- `useAssistantChat` 的 `input` 改为 `useSyncExternalStore(subscribeDrafts, ...)` 读取当前会话槽位；`setInput` 写入 `activeIdRef` 对应的槽位。切会话只换 key，不共用字符串；同一会话在完整模块 / 侧栏 / 浮窗 / AI 对话页之间读同一格，可实时同步。
+- 新建会话：从已有会话新建 → 旧会话草稿保留、新会话为空；从「还没有活动会话」的空白页新建 → 把空白页草稿搬进新会话（`moveDraft(newDraftKey, sessionKey(newId))`）。
+- 删除会话：`deleteSessionNow` / `removeSession` 同步清掉该会话草稿，避免幽灵草稿。
+- 完整 AI 助手模块删除本地 `draft` state，改用 `api.input` / `api.setInput`（`useAiAssistant` 暴露同一份共享输入）；发送前的清空也走同一槽位。
+- 未做：跨重启持久化（用户明确选「仅本次运行内」）；输入框的光标位置 / 选中范围不按会话保存（只保存文本）。
+
+**契约**：新增 `.AGENT/scripts/ai-assistant/verify-assistant-drafts.mjs`（30 条，存储 key / 来源隔离 / 切会话 / 新建搬运 / 删除清理 / 完整模块接线）。
+
+**已跑验证**：`tsc --noEmit -p tsconfig.web.json` 0 错；`npm run build` 通过；`verify-assistant-drafts` 30/30；`verify-message-window` 45/45；`verify-assistant-parallel` 36/36；`verify-unified-assistant` 61/61；`verify-scope-guard` 94/94；`verify-perception` 237/237；`verify-plan-rollback` 32/32；`verify-ai-outline` 26/26；`verify-usage-pricing` 21/21。真机待验：A 输入不发送 → 切 B 输入框为空 → 切回 A 原文还在；B 输入 → 切 A 不串；新建后旧会话草稿保留 / 新会话空；空白页输入后新建能带入；删除会话后草稿不复活。
