@@ -17,6 +17,10 @@
  *   node scripts/install-local.mjs                        # 取最新 pack，装到 ~/apps/Phrontis
  *   node scripts/install-local.mjs --from packs/3.9.2-6
  *   node scripts/install-local.mjs --target /home/you/apps/Phrontis
+ *   node scripts/install-local.mjs --icon /path/to/system-icon.png
+ *
+ * --icon 只覆盖本机安装目录与桌面图标，不改 build/icon.png，也不会进入安装包；
+ * 适合用户自己替换了系统图标、但软件本身仍应使用官方图标的场景。
  *
  * 目录替换是「staging → 原子 rename」，不会在运行中被逐文件覆盖。
  */
@@ -31,13 +35,14 @@ const requireFromHere = createRequire(import.meta.url)
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 function parseArgs(argv) {
-  const out = { from: '', target: '' }
+  const out = { from: '', target: '', icon: '' }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--from') out.from = String(argv[++i] ?? '')
     else if (a === '--target') out.target = String(argv[++i] ?? '')
+    else if (a === '--icon') out.icon = String(argv[++i] ?? '')
     else if (a === '--help' || a === '-h') {
-      console.log('用法: node scripts/install-local.mjs [--from packs/<ver>[-N]] [--target <dir>]')
+      console.log('用法: node scripts/install-local.mjs [--from packs/<ver>[-N]] [--target <dir>] [--icon <png>]')
       process.exit(0)
     }
   }
@@ -148,7 +153,15 @@ async function main() {
   const iconDir = join(dataHome, 'icons', 'hicolor', '512x512', 'apps')
   const binDir = join(homedir(), '.local', 'bin')
 
-  const iconSrc = join(target, 'resources', 'icon.png')
+  // 本机系统图标覆盖：只影响这台机器的安装目录与桌面图标，
+  // 不写回 build/icon.png，也不会进入安装包（软件本身仍用官方图标）。
+  const overrideIcon = args.icon.trim() ? resolve(args.icon.trim()) : ''
+  if (overrideIcon && !existsSync(overrideIcon)) console.warn(`[install] 自定义图标不存在，回退安装包图标：${overrideIcon}`)
+  if (overrideIcon && existsSync(overrideIcon)) {
+    copyFileSync(overrideIcon, join(target, 'resources', 'icon.png'))
+    console.log(`[install] 使用本机图标覆盖：${overrideIcon}`)
+  }
+  const iconSrc = overrideIcon && existsSync(overrideIcon) ? overrideIcon : join(target, 'resources', 'icon.png')
   if (existsSync(iconSrc)) {
     mkdirSync(iconDir, { recursive: true })
     copyFileSync(iconSrc, join(iconDir, 'phrontis.png'))

@@ -172,12 +172,15 @@ function installLocalIfConfigured(outRel) {
   }
   const target = typeof cfg?.target === 'string' ? cfg.target.trim() : ''
   if (!target) return
-  console.log(`[pack] 本地安装已配置 → ${target}`)
-  const r = spawnSync(process.execPath, [
+  const icon = typeof cfg?.icon === 'string' ? cfg.icon.trim() : ''
+  console.log(`[pack] 本地安装已配置 → ${target}${icon ? `（图标覆盖：${icon}）` : ''}`)
+  const args = [
     join(repoRoot, 'scripts', 'install-local.mjs'),
     '--from', outRel,
     '--target', target,
-  ], { cwd: repoRoot, stdio: 'inherit' })
+  ]
+  if (icon) args.push('--icon', icon)
+  const r = spawnSync(process.execPath, args, { cwd: repoRoot, stdio: 'inherit' })
   if (r.status !== 0) {
     console.warn('[pack] 本地安装更新失败（安装包本身已生成，可稍后手动重跑 scripts/install-local.mjs）')
   }
