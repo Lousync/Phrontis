@@ -269,6 +269,18 @@ function parseAskBlock(raw: string, id: string): AskBlock | null {
   } catch { return null }
 }
 
+/** B-46 客户端兜底：课程助手的 ask 不允许把用户留在助手会话里「开讲」。模型仍可能偶发，删掉坏选项并补左栏入口。 */
+function sanitizeCourseAssistantAsk(block: AskBlock): AskBlock {
+  if (block.kind !== 'single') return block
+  const banned = /开讲|直接讲|继续讲|开始讲/
+  const options = block.options.filter((o) => !banned.test(o))
+  if (options.length === block.options.length) return block
+  const rail = '去左栏开第 1 段（先做素材预检）'
+  if (!options.includes(rail)) options.unshift(rail)
+  if (options.length < 2) options.push('继续改大纲')
+  return { ...block, options: options.slice(0, 6) }
+}
+
 export interface PendingAsk {
   question: string
   source?: { type: string; relPath: string; page: number; excerpt: string }
@@ -1373,10 +1385,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       const m = messages[i]
       if (m.role === 'user') return null
       const mt = /```ask[^\n]*\n([\s\S]*?)```/.exec(m.content)
-      return mt ? parseAskBlock(mt[1], m.id ?? `idx${i}`) : null
+      const block = mt ? parseAskBlock(mt[1], m.id ?? `idx${i}`) : null
+      return block && assistantSid && activeId === assistantSid ? sanitizeCourseAssistantAsk(block) : block
     }
     return null
-  }, [messages, activeId])
+  }, [messages, activeId, assistantSid])
   const [askDismissed, setAskDismissed] = useState<string | null>(null)
   const [askPicks, setAskPicks] = useState<Record<number, string>>({})
   // 提问卡 v2（WorkBuddy 式）：整卷 ‹k/n› 翻页 + 每题「其他补充」自定义回答
@@ -1477,15 +1490,28 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const ws = activeWs && activeWs !== '__none__' ? activeWs : ''
     if (!ws || !outlineDraft || !outlineFence) { showToast({ type: 'warning', message: '缺少工作区或大纲草稿' }); return }
     const r = await aiTeachCourseWriteOutlineDraft(ws, outlineDraft).catch(() => null)
-    if (r?.ok) { showToast({ type: 'info', message: '已生成课程大纲' }); setOutlineDone({ fence: outlineFence.raw, rel: r.relPath ?? '' }) }
-    else showToast({ type: 'error', message: `生成失败${r?.error ? `：${r.error}` : ''}` })
-  }, [activeWs, outlineDraft, outlineFence])
+    if (r?.ok) {
+      await reloadCourse()
+      showToast({ type: 'info', message: '已生成课程大纲' })
+      setOutlineDone({ fence: outlineFence.raw, rel: r.relPath ?? '' })
+    } else showToast({ type: 'error', message: `生成失败${r?.error ? `：${r.error}` : ''}` })
+  }, [activeWs, outlineDraft, outlineFence, reloadCourse])
   /** 打开已落盘的 课程.md：与本模块画像 / CONSTRAINTS 同范式（ensure 产物 → 跳编辑区打开，带「← 返回 AI教学」） */
   const openCourseOutline = useCallback(() => {
     const rel = outlineDone?.rel
     if (!rel) { showToast({ type: 'warning', message: '课程大纲尚未落盘' }); return }
     window.dispatchEvent(new CustomEvent('kb-open-note', { detail: { relPath: rel, from: 'aiTeaching' } }))
   }, [outlineDone])
+  /** 大纲落盘后只定位到左栏，不自动开段：用户点知识点时才进入预检。 */
+  const goCourseRailFirstChapter = useCallback(() => {
+    const ch = courseState?.outline?.chapters[0]
+    if (!ch) { showToast({ type: 'warning', message: '课程大纲还没读取到，请稍后再试' }); return }
+    setRailSearch('')
+    setCollapsedSec(prev => ({ ...prev, sessions: false }))
+    setCollapsedChap(prev => ({ ...prev, [ch.id]: false }))
+    setActiveChapterState(ch.id)
+    showToast({ type: 'info', message: '已定位到左栏 · 点知识点开段（会先做素材预检）' })
+  }, [courseState])
   /** 建议一变（或换会话）就重建勾选副本：默认全勾，层级回本主题，安静入口收起 */
   useEffect(() => {
     setProfRows(profileSuggestion?.mode === 'entries' ? profileSuggestion.entries.map((e) => ({ ...e, checked: true })) : [])
@@ -2594,8 +2620,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                               </div>
                               <div className="mt-2 flex justify-end gap-2">
                                 {outlineCommitted ? (
-                                  <button type="button" onClick={openCourseOutline} title={`在编辑区打开 ${outlineDone?.rel || '课程.md'}`}
-                                    className="px-3 py-1 rounded-md border border-[var(--accent)]/50 text-[var(--accent)] text-[11.5px] hover:bg-[var(--accent)]/10 transition-colors">打开课程</button>
+                                  <>
+                                    <button type="button" onClick={goCourseRailFirstChapter} title="定位到左栏课程树；不会自动开讲"
+                                      className="px-3 py-1 rounded-md bg-[var(--accent)] text-white text-[11.5px] hover:bg-[var(--accent-hover)] transition-colors">去左栏开段</button>
+                                    <button type="button" onClick={openCourseOutline} title={`在编辑区打开 ${outlineDone?.rel || '课程.md'}`}
+                                      className="px-3 py-1 rounded-md border border-[var(--accent)]/50 text-[var(--accent)] text-[11.5px] hover:bg-[var(--accent)]/10 transition-colors">打开课程</button>
+                                  </>
                                 ) : (
                                   <button type="button" onClick={() => void commitOutlineDraft()}
                                     className="px-3 py-1 rounded-md bg-[var(--accent)] text-white text-[11.5px] hover:bg-[var(--accent-hover)] transition-colors">正式生成</button>

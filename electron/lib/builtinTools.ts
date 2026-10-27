@@ -2601,7 +2601,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'course.outline.write',
     title: '写入课程大纲',
-    description: '把课程大纲写入本工作区（人读人改的 课程.md）。3.14 口径：一次给全量章→知识点，不要"先只给第一章"；每段开讲前由用户在客户端确认。append 缺省/false = 首次生成（覆盖）；append=true = 按章名合并增补、保留既有知识点与进度（改大纲时用）。务必先在对话里把草稿给用户看过、确认后再调用。',
+    description: '把课程大纲写入本工作区（人读人改的 课程.md）。3.14 口径：一次给全量章→知识点，不要"先只给第一章"；每段开讲前由用户在客户端确认。append 缺省/false = 首次生成（覆盖）；append=true = 按章名合并增补、保留既有知识点与进度（改大纲时用）。务必先在对话里把草稿给用户看过、确认后再调用。**落盘/更新成功即终止建课流程**：下一步只引导用户去左栏点知识点开段（先做素材预检），不要问「开讲第 N 章」，也不要继续在助手会话里开讲。',
     inputSchema: {
       type: 'object',
       properties: {

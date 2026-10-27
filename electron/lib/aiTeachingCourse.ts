@@ -740,7 +740,7 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
   if (isAssistant) {
     lines.push('【教学助手上下文（AI 教学 · 课程助手）】')
     lines.push(`课程：${outline?.title || '未命名'} · 目标：${outline?.goal || '未设定'}`)
-    lines.push('你是这门课的**课程助手**：负责跟用户定学习目标、登记素材、生成/调整课程大纲、按章分配素材、整理与答疑。**不要**逐知识点开讲（开讲由用户在中栏点「开始本段」触发），也不要出课时或快检卡。')
+    lines.push('你是这门课的**课程助手**：负责跟用户定学习目标、登记素材、生成/调整课程大纲、按章分配素材、整理与答疑。**不要**逐知识点开讲（开讲由用户在左栏点知识点、进入开段预检后触发），也不要出课时或快检卡。')
     if (hasOutline) {
       lines.push('课程大纲（章 → 知识点 · 学完状态）：')
       for (const c of outline!.chapters) {
@@ -756,7 +756,8 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     }
     lines.push('【素材登记摘要】')
     lines.push(assistantSourcesSummary(wsId, getSetting))
-    lines.push('【建课流程与工具】① 素材先登记：用户给出文件/目录/URL 时用 course.sources.register 批量登记（外部文件会复制进本课 SOURCES；仓库内文件只引用）；② pdf/pptx 需要时用 course.sources.extract 提取页码区间；③ 用 inventory 清点目录素材（先清点再分章，别把整目录硬读进上下文）；④ 与用户定好目标、素材就绪后，生成**全量**大纲草稿（章 → 知识点；不要"先只给第一章"）；用户确认后调 course.outline.write 落盘；⑤ 用 course.sources.assign 把素材按章分配（能判断区间就带 anchor；判断不了就整章 whole）；⑥ 不主动开讲；提醒用户点知识点开段，开段前会做素材预检；⑦ 删知识点用 course.outline.remove-unit（已学过的会被拒绝，需先用 course.organize.archive 整理归档）；⑧ 落盘只走这些工具，不要另造文件；改大纲前先与用户确认。')
+    lines.push('【建课流程与工具】① 素材先登记：用户给出文件/目录/URL 时用 course.sources.register 批量登记（外部文件会复制进本课 SOURCES；仓库内文件只引用）；② pdf/pptx 需要时用 course.sources.extract 提取页码区间；③ 用 inventory 清点目录素材（先清点再分章，别把整目录硬读进上下文）；④ 与用户定好目标、素材就绪后，生成**全量**大纲草稿（章 → 知识点；不要"先只给第一章"）；用户确认后调 course.outline.write 落盘；⑤ 用 course.sources.assign 把素材按章分配（能判断区间就带 anchor；判断不了就整章 whole）；⑥ 不主动开讲；只提醒用户去左栏点知识点开段，开段前会做素材预检；⑦ 删知识点用 course.outline.remove-unit（已学过的会被拒绝，需先用 course.organize.archive 整理归档）；⑧ 落盘只走这些工具，不要另造文件；改大纲前先与用户确认。')
+    lines.push('【大纲落盘后的终止规则】课程大纲写入 / 更新成功后，建课流程即结束：不要讲授知识点，不要问用户是否「开讲第 N 章」，也不要邀请用户继续在课程助手会话里听讲。只输出下一步引导：去左栏点知识点开段（会先做素材预检）、继续改大纲、查看 / 分配素材；用户主动问课程内容时可以答疑，但仍不进入逐知识点开讲。')
     return '\n\n' + lines.join('\n')
   }
   // 复习课分支：章末复习（本章知识点串讲 + 查漏补缺，不引入新知识点）
@@ -961,8 +962,11 @@ export interface OutlineDraft {
   append?: boolean
 }
 
+/** 落盘成功后的唯一推荐下一步；作为工具结果回给模型，防止它接着问「开讲第 N 章」。 */
+const OUTLINE_NEXT_STEP = '大纲已落盘。下一步只引导用户去左栏点知识点开段（会先做素材预检）；不要问是否开讲，也不要在课程助手会话里直接开讲。'
+
 /** 助手写入/展开课程大纲：append=false 首次生成（覆盖）；append=true 按章名合并增补（保留既有 id/进度）。 */
-export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, getSetting: (key: string) => unknown): { ok: boolean; mode?: 'create' | 'append'; added?: number; chapters?: number; relPath?: string; error?: string } {
+export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, getSetting: (key: string) => unknown): { ok: boolean; mode?: 'create' | 'append'; added?: number; chapters?: number; relPath?: string; nextStep?: string; error?: string } {
   const id = String(wsId ?? '')
   if (!id) return { ok: false, error: '缺少工作区' }
   if (!getCurrentVault()) return { ok: false, error: '尚未打开仓库' }
@@ -978,7 +982,7 @@ export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, get
       chapters: norm.chapters,
     }
     const w = writeCourseOutline(id, outline, getSetting)
-    return w.ok ? { ok: true, mode: 'create', chapters: outline.chapters.length, relPath: w.relPath } : { ok: false, error: w.error }
+    return w.ok ? { ok: true, mode: 'create', chapters: outline.chapters.length, relPath: w.relPath, nextStep: OUTLINE_NEXT_STEP } : { ok: false, error: w.error }
   }
   // 增补：章名对齐现有章 → 追加其知识点；否则整章新增
   const additions: OutlineAdditions = { toExisting: [], newChapters: [] }
@@ -991,7 +995,7 @@ export function writeOutlineFromAssistant(wsId: string, draft: OutlineDraft, get
   // 落盘路径**两条分支都要给**：草稿卡的「打开课程」靠它跳编辑区打开 课程.md。
   // append 分支此前只回 added（2026-10-14 补）—— 否则「展开下一章」后落盘的卡拿不到路径。
   const rel = outlineRel(id, getSetting)?.rel
-  return r.ok ? { ok: true, mode: 'append', added: r.added, relPath: rel } : { ok: false, error: r.error }
+  return r.ok ? { ok: true, mode: 'append', added: r.added, relPath: rel, nextStep: OUTLINE_NEXT_STEP } : { ok: false, error: r.error }
 }
 
 /** 删除知识点：未学习(todo/无进度) 直接删；已学/学一半 → 拒绝并要求先「整理对话并归档」。 */
