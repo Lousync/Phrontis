@@ -88,8 +88,8 @@ export function Preflight(props: Props) {
   const sourceCount = preflight.candidates.filter((c) => picked.has(c.sourceId)).length
 
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="max-w-[820px] mx-auto px-5 py-5">
+    <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+      <div className="w-full max-w-[820px] mx-auto px-5 py-5 my-auto">
         <div className="flex items-start gap-2">
           <Sparkles size={16} className="mt-0.5 shrink-0 text-[var(--accent)]" />
           <div className="min-w-0 flex-1">
