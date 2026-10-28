@@ -3,6 +3,14 @@ import { randomUUID } from 'crypto'
 import { getKnowledgeIndex } from '../../lib/kbStore/knowledgeIndex'
 import * as V from '../../lib/kbStore/quizVaultRepo'
 import { quizDataStats, exportQuizData, clearMasteredQuizData, clearAllQuizData } from '../../lib/quizDataAdmin'
+import { broadcastDataChanged } from '../../main/windowBus'
+import {
+  applyDraftPatch,
+  mergeRowsOnPageIdMigration,
+  parseDraftJson,
+  serializeDraft,
+  type QuizDraftPatch,
+} from '../../lib/quizRecordPure'
 
 /**
  * R6 去库化：真相源 = .knowbase/modules/quiz/*.json（sql.js 路径已移除，D9）
@@ -33,6 +41,16 @@ export interface QuizSnapshotDto {
   options: QuizOptionDto[]
   answer: string
   explanation: string
+  type?: 'choice' | 'short'
+  referenceAnswer?: string
+}
+
+export interface QuizDraftDto {
+  picked: string | null
+  text: string
+  revealed: boolean
+  assessedText: string | null
+  updatedAt: string | null
 }
 
 export interface QuizRecordDto {
@@ -55,6 +73,7 @@ export interface QuizRecordDto {
   sourceChapter: string
   collectionIds: string[]
   tagIds: string[]
+  draft: QuizDraftDto | null
   createdAt: string
   updatedAt: string
 }
@@ -98,7 +117,11 @@ function parseSnapshot(json: string): QuizSnapshotDto | null {
   if (!json) return null
   try {
     const v = JSON.parse(json) as QuizSnapshotDto
-    if (!v || typeof v !== 'object' || !Array.isArray(v.options)) return null
+    if (!v || typeof v !== 'object') return null
+    if (v.type === 'short') {
+      return { ...v, options: Array.isArray(v.options) ? v.options : [] }
+    }
+    if (!Array.isArray(v.options)) return null
     return v
   } catch {
     return null
@@ -141,6 +164,7 @@ function vaultRowToDto(row: V.VaultQuizRecordRow): QuizRecordDto {
     sourceChapter: row.source_chapter ?? '',
     collectionIds: vaultCollectionIdsOf(row.id),
     tagIds: vaultTagIdsOf(row.id),
+    draft: parseDraftJson(row.draft_json),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -230,10 +254,45 @@ export function quizRecordGetByPage(pageId: string): QuizRecordDto[] {
     .map(vaultRowToDto)
 }
 
+/**
+ * 保存作答痕迹：只合并 draft_json（+ 必要时的快照/标题），
+ * **不碰** last_result / wrong_count / correct_count / streak_correct / updated_at。
+ * 高频写，不广播；界面由 store 乐观更新。
+ */
+export function quizRecordSaveDraft(
+  pageId: string,
+  quizNo: number,
+  patch: QuizDraftPatch,
+  meta: { pageTitle?: string; snapshot?: QuizSnapshotDto },
+): QuizRecordDto {
+  if (typeof pageId !== 'string' || !pageId) throw new Error('pageId 缺失')
+  const no = Number(quizNo)
+  if (!Number.isInteger(no)) throw new Error('quizNo 非法')
+  const row = vaultEnsureRecord(pageId, no, {
+    pageTitle: typeof meta?.pageTitle === 'string' ? meta.pageTitle : '',
+    snapshot: meta?.snapshot ?? null,
+  })
+  const rows = V.readQuizRecords()
+  const i = rows.findIndex((r) => r.id === row.id)
+  if (i < 0) return vaultRowToDto(row)
+  const now = V.vaultLocalNow()
+  const draft = applyDraftPatch(parseDraftJson(rows[i].draft_json), patch ?? {}, now)
+  rows[i] = {
+    ...rows[i],
+    draft_json: serializeDraft(draft),
+    snapshot_json: meta?.snapshot ? JSON.stringify(meta.snapshot) : rows[i].snapshot_json,
+    page_title: meta?.pageTitle || rows[i].page_title,
+  }
+  V.writeQuizRecords(rows)
+  return vaultRowToDto(rows[i])
+}
+
 /** 上报一次作答结果（答对累计 streak、答错清零并回流错题本）；幂等 find-or-create */
 export function quizRecordReport(pageId: string, quizNo: number, correct: boolean, meta: {
   pageTitle?: string
   snapshot?: QuizSnapshotDto
+  /** 选择题本次选的 key；与判题结果同一次写盘，供恢复高亮 */
+  picked?: string
 }): QuizRecordDto {
   if (typeof pageId !== 'string' || !pageId) throw new Error('pageId 缺失')
   const no = Number(quizNo)
@@ -246,27 +305,93 @@ export function quizRecordReport(pageId: string, quizNo: number, correct: boolea
   const i = rows.findIndex((r) => r.id === row.id)
   if (i < 0) return vaultRowToDto(row)
   const now = V.vaultLocalNow() // 对齐 datetime('now', 'localtime')
+  const base = {
+    ...rows[i],
+    snapshot_json: meta?.snapshot ? JSON.stringify(meta.snapshot) : rows[i].snapshot_json,
+    page_title: meta?.pageTitle || rows[i].page_title,
+    updated_at: now,
+  }
   if (correct) {
     // correct_count+1、streak_correct+1（wrong_count 保留供档位分层）
     rows[i] = {
-      ...rows[i],
+      ...base,
       correct_count: (rows[i].correct_count ?? 0) + 1,
       streak_correct: (rows[i].streak_correct ?? 0) + 1,
       last_result: 1,
-      updated_at: now,
     }
   } else {
     // 答错：wrong_count+1、连续答对清零（回流错题本）
     rows[i] = {
-      ...rows[i],
+      ...base,
       wrong_count: (rows[i].wrong_count ?? 0) + 1,
       streak_correct: 0,
       last_result: 0,
-      updated_at: now,
     }
+  }
+  // 选择题：picked 与判题结果同一次写盘，刷新后可恢复选项高亮
+  if (typeof meta?.picked === 'string' && meta.picked) {
+    rows[i].draft_json = serializeDraft(applyDraftPatch(
+      parseDraftJson(rows[i].draft_json),
+      { picked: meta.picked },
+      now,
+    ))
   }
   V.writeQuizRecords(rows)
   return vaultRowToDto(rows[i])
+}
+
+/**
+ * auto:<rel> / draft:<rel> 转正时迁移答题记录。
+ * 合并规则见 quizRecordPure；关联表（标签/分组）按 idMap 一起迁移，避免孤儿。
+ */
+export function quizRecordMigratePageId(oldPageId: string, newPageId: string): { moved: number; merged: number } {
+  if (typeof oldPageId !== 'string' || typeof newPageId !== 'string' || !oldPageId || !newPageId || oldPageId === newPageId) {
+    return { moved: 0, merged: 0 }
+  }
+  const rows = V.readQuizRecords()
+  const result = mergeRowsOnPageIdMigration(rows, oldPageId, newPageId)
+  if (result.moved || result.merged) {
+    V.writeQuizRecords(result.rows)
+    const oldIds = Object.keys(result.idMap).filter((oldId) => result.idMap[oldId] !== oldId)
+    if (oldIds.length > 0) {
+      const tagLinks = V.readQuizRecordTags()
+      let tagChanged = false
+      const tagSeen = new Set<string>()
+      const nextTagLinks = tagLinks.map((l) => {
+        const nextId = result.idMap[l.record_id]
+        if (!nextId || nextId === l.record_id) return l
+        tagChanged = true
+        return { ...l, record_id: nextId }
+      }).filter((l) => {
+        if (!oldIds.includes(l.record_id)) {
+          const key = `${l.record_id}\u0000${l.tag_id}`
+          if (tagSeen.has(key)) return false
+          tagSeen.add(key)
+        }
+        return true
+      })
+      if (tagChanged) V.writeQuizRecordTags(nextTagLinks)
+
+      const colLinks = V.readQuizRecordCollections()
+      let colChanged = false
+      const colSeen = new Set<string>()
+      const nextColLinks = colLinks.map((l) => {
+        const nextId = result.idMap[l.record_id]
+        if (!nextId || nextId === l.record_id) return l
+        colChanged = true
+        return { ...l, record_id: nextId }
+      }).filter((l) => {
+        if (!oldIds.includes(l.record_id)) {
+          const key = `${l.record_id}\u0000${l.collection_id}`
+          if (colSeen.has(key)) return false
+          colSeen.add(key)
+        }
+        return true
+      })
+      if (colChanged) V.writeQuizRecordCollections(nextColLinks)
+    }
+  }
+  return { moved: result.moved, merged: result.merged }
 }
 
 export function quizRecordToggleFavorite(pageId: string, quizNo: number, meta: {
@@ -585,7 +710,18 @@ export function registerQuizHandlers(deps?: { getSettingValue?: (key: string) =>
   ipcMain.handle('quizRecord:report', (_e, pageId: string, quizNo: number, correct: boolean, meta: {
     pageTitle?: string
     snapshot?: QuizSnapshotDto
-  }) => quizRecordReport(pageId, quizNo, correct, meta))
+    picked?: string
+  }) => {
+    const row = quizRecordReport(pageId, quizNo, correct, meta)
+    // 低频（判题/自评）——错题本、收藏、统计的 useDataChanged('quiz') 消费者需要刷新
+    broadcastDataChanged('quiz')
+    return row
+  })
+  ipcMain.handle('quizRecord:saveDraft', (_e, pageId: string, quizNo: number, patch: QuizDraftPatch, meta: {
+    pageTitle?: string
+    snapshot?: QuizSnapshotDto
+  }) => quizRecordSaveDraft(pageId, quizNo, patch, meta))
+  ipcMain.handle('quizRecord:migratePageId', (_e, oldPageId: string, newPageId: string) => quizRecordMigratePageId(oldPageId, newPageId))
   ipcMain.handle('quizRecord:toggleFavorite', (_e, pageId: string, quizNo: number, meta: {
     pageTitle?: string
     snapshot?: QuizSnapshotDto

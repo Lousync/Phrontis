@@ -4,11 +4,60 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：61
+ * 版本数：62
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.15.0",
+    "date": "2026-10-28",
+    "summary": "本版一句话：题单支持简答题——题干、作答框、折叠参考答案与自评；选择题和简答题的作答痕迹都会保存，题单内可直接错题重做。",
+    "groups": [
+      {
+        "title": "知识库 · 题单",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "简答题正确渲染",
+            "rest": "AI 出的大题改用 `quiz` 围栏的 `type:\"short\"` 协议，显示为题卡而不是 `<details>` 原文；旧 `<details>` 文档自动转成只读折叠块。",
+            "sub": []
+          },
+          {
+            "lead": "答题痕迹保存",
+            "rest": "选择题选项/对错、简答草稿、是否展开参考答案、自评结果写入 `records.json` 的 `draft_json`；刷新/重启后恢复。",
+            "sub": []
+          },
+          {
+            "lead": "题单内错题重做",
+            "rest": "阅读态标题下新增状态条，只抽当前题单 `lastResult = 0` 的题；带着上次答案重做，参考答案默认收起。",
+            "sub": []
+          },
+          {
+            "lead": "刷题模式仍只跑选择题",
+            "rest": "简答题在题单内作答；错题本里的简答记录改为「去原页重做」。",
+            "sub": []
+          },
+          {
+            "lead": "题单身份稳定",
+            "rest": "AI 新题单落盘即写 frontmatter `id`；旧 `auto:` 题单首次保存时迁移答题记录，避免转正后痕迹丢失。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "AI 教学",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "出题协议同步",
+            "rest": "系统提示与 `quiz-generator` Skill 支持简答题协议，并禁止 `<details>` 与参考答案里的三反引号代码围栏。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.14.1",
     "date": "2026-10-27",

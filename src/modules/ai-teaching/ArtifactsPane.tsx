@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame, Network } from 'lucide-react'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
+import { QuizRecordContext, useQuizRecordStore } from '../../components/shared/QuizRecordStore'
 import { MindMapView } from '../../components/shared/MindMapView'
 import { ImmersiveImageView } from '../../components/shared/image/ImmersiveImageView'
 import { ArtHtmlView } from './ArtHtmlView'
@@ -31,6 +32,12 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
   onOpenRef: (rel: string) => void
 }) {
   const tab = tabs.find(t => t.id === activeId) ?? null
+  // 工件栏里的题单也要能保存答题痕迹：只有 relPath，store 会反查 pageId（可能是 auto:）
+  const quizStore = useQuizRecordStore({
+    pageId: '',
+    relPath: tab?.kind === 'md' ? (tab.rel ?? '') : '',
+    pageTitle: tab?.name ?? '',
+  })
   const mdScrollRef = useRef<HTMLDivElement>(null)
   const mdScrollPos = useRef<Record<string, number>>({})
   const [outline, setOutline] = useState<Array<{ id: string; text: string; lv: number }>>([])
@@ -164,7 +171,9 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
             <div ref={mdScrollRef} onScroll={e => { mdScrollPos.current[tab.rel] = (e.target as HTMLDivElement).scrollTop }}
               className="kb-art-in flex-1 overflow-y-auto min-h-0">
               <div className="max-w-[820px] mx-auto py-5 px-5">
-                <MarkdownPreview content={tab.content ?? ''} />
+                <QuizRecordContext.Provider value={quizStore}>
+                  <MarkdownPreview content={tab.content ?? ''} />
+                </QuizRecordContext.Provider>
               </div>
             </div>
             {outline.length > 2 && widthPx >= 640 && (

@@ -33,6 +33,8 @@ export interface VaultQuizRecordRow {
   source_notebook: string
   created_at: string
   updated_at: string
+  /** 作答痕迹（JSON）：picked / text / revealed / assessedText / updatedAt；旧数据缺省 */
+  draft_json?: string
 }
 
 /** quiz_collections 行 */

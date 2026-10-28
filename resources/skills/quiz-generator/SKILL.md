@@ -1,7 +1,7 @@
 ---
 id: quiz-generator
 title: 出题官
-description: 把刚讲过的知识或给定资料变成结构化测验——选择题用 quiz 围栏（界面可点选判题），大题/简答用 spoiler 答案折叠；逐题讲解、可沉淀为题库卷。当用户说"出题/考考我/来几道题/把这章整理成卷子/从这份资料里抽题"或教学流程进入检验环节时使用
+description: 把刚讲过的知识或给定资料变成结构化测验——选择题与简答题都用 quiz 围栏（界面可作答/自评），逐题讲解、可沉淀为题库卷。当用户说"出题/考考我/来几道题/把这章整理成卷子/从这份资料里抽题"或教学流程进入检验环节时使用
 variables: [topic, sourceContext, questionCount]
 tools: [builtin.vault.read, builtin.vault.search, builtin.web.read, builtin.vault.write]
 ---
@@ -33,35 +33,26 @@ tools: [builtin.vault.read, builtin.vault.search, builtin.web.read, builtin.vaul
 - 题干只问一件刚讲过的确定事实/推论；不玩文字游戏
 - 出完一组题后，界面已能点选判题；用户作答后再逐题点评，别再整卷复述答案
 
-### 简答 / 大题 → 普通 Markdown + 答案折叠
+### 简答 / 大题 → quiz 围栏（type: short）
 
 ```
-### 第 1 题（10 分）
-
-题干描述……（含小问时用 (1) (2) (3) 全角括号编号，每个小问独立一行）
-
-```spoiler-answer
-**解析**：
-
-**(1) 小问描述**
-
-答案要点……（客观可判）
-
-**(2) 小问描述**
-
-答案要点……
+```quiz
+{"type":"short","no":4,"question":"题干描述……（含小问时用 (1) (2) (3) 全角括号编号，每个小问独立一行；题干不写题号）","referenceAnswer":"**(1) 小问描述**\n\n答案要点……（客观可判）\n\n**(2) 小问描述**\n\n答案要点……","explanation":"补充说明（可选）"}
 ```
 ```
 
 要点：
-- spoiler 内第一行必须是 `**解析**：` 独占一行；每小问先加粗小问标题再写答案
+- `no` 全卷连续 1..N（不按选择/简答重新编号），题干里不再手写题号
+- 简答不给 `options` / `answer`；`referenceAnswer` 必填，支持 Markdown
 - 简答题必须给"可自判的要点式答案"（列点），不写模糊结论
+- 参考答案里不要出现三反引号代码围栏；需要代码时用 4 空格缩进
+- 禁止 `<details>` / `<summary>` 等原生 HTML 折叠标签；客户端会折叠 `referenceAnswer`
 - 需要画图/代码的场景优先考虑选择/填空形式，避免难自判
 
 ### 沉淀（用户要求"存起来/整成卷子"时）
 
 生成一份 `.md` 卷：frontmatter 写 `type: quiz`、`tags: [课程/章节]`、`source: 资料或日期`；
-正文 = 全部题（选择题 quiz 围栏 + 大题 spoiler）。先用文字展示卷内容，等用户确认再写入。
+正文 = 全部题（选择题 + 简答题都用 quiz 围栏）。AI 教学场景直接落文档；通用场景可先文字展示卷内容，等用户确认再写入。
 
 ## 质量铁律
 

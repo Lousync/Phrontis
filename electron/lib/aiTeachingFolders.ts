@@ -6,6 +6,7 @@ import { getAgentSession } from './agentSessionRepo'
 import { renameWorkspacePath, trashWorkspacePath, uniqueFileName } from './workspaceManager'
 import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
+import { ensureQuizDocFrontmatter, sameQuizDocBody } from './quizDocPure'
 
 /**
  * AI教学模块 · 会话 ⇄ 文件夹绑定（总纲 docs/ai-teaching-module-rework.md §二，P1）
@@ -604,7 +605,10 @@ export function organizeDoc(sessionId: string, title: string, content: string, g
     if (!ensured.ok || !ensured.relPath) return { ok: false, error: ensured.error ?? '会话文件夹不可用' }
     const vault = getCurrentVault()
     if (!vault) return { ok: false, error: '尚未打开仓库' }
-    const body = String(content ?? '').replace(/\r\n/g, '\n')
+    const rawBody = String(content ?? '').replace(/\r\n/g, '\n')
+    // 题单落盘即写 frontmatter id（否则知识索引先给 auto:<rel>，转正后答题记录变孤儿）。
+    // 非 quiz 文档原样返回，不影响讲义/普通笔记。
+    const body = ensureQuizDocFrontmatter(title, rawBody)
     const base = `${prefix || '讲义'}·${sanitizeTitle(title)}`
     // 课程助手的讲义/测验也属"产物"，落夹内 `output/`；其它会话保持夹顶层（旧夹不迁移）
     const targetRel = isCourseAssistant(sessionId, getSetting) ? `${ensured.relPath}/output` : ensured.relPath
@@ -615,7 +619,8 @@ export function organizeDoc(sessionId: string, title: string, content: string, g
       const abs = join(dirAbs, name)
       if (!existsSync(abs)) break
       try {
-        if (readFileSync(abs, 'utf-8') === body) return { ok: true, relPath: `${targetRel}/${name}` } // 内容未变 = 幂等
+        // 内容未变 = 幂等。先剥 frontmatter：否则每次生成的新 UUID 会被当成不同内容，落出 (1).md
+        if (sameQuizDocBody(readFileSync(abs, 'utf-8'), body)) return { ok: true, relPath: `${targetRel}/${name}` }
       } catch { /* 读取失败按占用处理，换后缀 */ }
       name = `${base} (${n}).md`
     }

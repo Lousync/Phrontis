@@ -26,7 +26,7 @@ function normalizeCategoryType(raw: string): CategoryType {
 // 白名单内通道走下方 vault 实现；白名单外的旧 DB-only 通道保留注册并统一拒绝，
 // 维持 IPC 通道存在与既有拒绝语义（渲染层仍经 preload 暴露这些通道）。
 const VAULT_ALLOWED = new Set([
-  'knowledge:getCategories', 'knowledge:getPages', 'knowledge:getPageById',
+  'knowledge:getCategories', 'knowledge:getPages', 'knowledge:getPageById', 'knowledge:findByRel',
   'knowledge:searchPages', 'knowledge:toggleStar', 'knowledge:getStarredPages', 'knowledge:getTags',
   'knowledge:getBacklinks', 'knowledge:getBacklinkContext', 'knowledge:getGraph',
   // 2026-09-07 知识库开放目录删除：vault 分支走 trash 磁盘文件夹 + 字典清理（与编辑器删除同语义）
@@ -126,6 +126,15 @@ export function registerKnowledgeHandlers(): void {
   // 获取单个页面
   kHandle('knowledge:getPageById', (_e, id: string) => {
     return vaultGetPageById(id)
+  })
+
+  // 按仓库相对路径反查页面：题单 store 在只有 relPath（工件栏/auto 页）时解析 pageId。
+  // 返回的 id 可能是 auto:<rel>（文件尚无 frontmatter id），由调用方在页面转正后再次解析。
+  kHandle('knowledge:findByRel', (_e, relPath: string) => {
+    const rel = String(relPath ?? '').replace(/\\/g, '/').replace(/^\/+/, '')
+    if (!rel) return null
+    const page = getKnowledgeIndex().pages.find((p) => p.path.replace(/\\/g, '/') === rel)
+    return page ? { id: page.id, title: page.title, path: page.path } : null
   })
 
   // 创建页面 — 写 frontmatter md 到目标目录/收件箱（2026-09-07 导入放行）

@@ -1138,8 +1138,8 @@ async function runAgentLoop(
   // v3.1.2 条目11：**支线不出题**（硬边界）——支线只解答零碎小知识点，出题是主线的职责。
   const quizRuleHint = source === 'aiTeaching' && !isSideLane
     ? '\n\n【出题规则（AI教学）】当用户要求出题/测验/练习时，把整卷写成**一篇 Markdown 题目文档**：调 course.organize.archive（不在工具列表时先 builtin.tool.request 申请）落盘，标题形如「练习·<主题>」；写完在回答里给出文件路径，并说明可在文档阅读视图/知识库里直接作答（题卡自动判分，错题进错题本）。不要在回答正文里贴整卷题目。\n' +
-      '文档格式：开头一个标题 + 一行说明（覆盖范围 / 题量），之后每道题单独一个 ```quiz 围栏代码块，块内是一个 JSON 对象（不要注释、不要多个对象）：{"no":1,"question":"题干（支持 markdown）","options":[{"key":"A","text":"选项一"},{"key":"B","text":"选项二"},{"key":"C","text":"选项三"},{"key":"D","text":"选项四"}],"answer":"A","explanation":"答案解析（支持 markdown）"}。no 从 1 连续编号。不要输出 points 分值字段（客户端不渲染分值）。answer 的值必须是 options 中某个 key；默认四选一。\n' +
-      '两个硬约束：① 围栏语言必须是 quiz（\u0060\u0060\u0060quiz），写成 json 或不带语言都不会被渲染成题卡；② JSON 字符串值内部禁止出现未转义的英文双引号——题干/选项/解析里需要引用术语时一律用中文引号『』或“”，否则 JSON 被截断、题目渲染失败。\n' +
+      '文档格式：开头一个标题 + 一行说明（覆盖范围 / 题量），之后每道题单独一个 ```quiz 围栏代码块，块内是一个 JSON 对象（不要注释、不要多个对象）。选择题：{"no":1,"question":"题干（支持 markdown，不写题号）","options":[{"key":"A","text":"选项一"},{"key":"B","text":"选项二"},{"key":"C","text":"选项三"},{"key":"D","text":"选项四"}],"answer":"A","explanation":"答案解析（支持 markdown）"}。简答题/大题：{"type":"short","no":4,"question":"题干（支持 markdown，不写题号）","referenceAnswer":"可自判的要点式答案（支持 markdown）","explanation":"补充说明"}。一份卷子可以混合题型；no 全卷连续 1..N，简答题不要再给 options/answer。不要输出 points 分值字段（客户端不渲染分值）。answer 的值必须是 options 中某个 key；默认四选一。\n' +
+      '四个硬约束：① 围栏语言必须是 quiz（\u0060\u0060\u0060quiz），写成 json 或不带语言都不会被渲染成题卡；② JSON 字符串值内部禁止出现未转义的英文双引号——题干/选项/解析里需要引用术语时一律用中文引号『』或“”，否则 JSON 被截断、题目渲染失败；③ 禁止 <details>/<summary> 等原生 HTML 折叠标签，参考答案一律放 referenceAnswer，由客户端折叠；④ referenceAnswer 内不要出现三反引号代码围栏，需要代码时用 4 空格缩进。\n' +
       '例外：讲解过程中顺手的**单题快检**可以就地贴一个 ```quiz 围栏（一条回答最多一道），不必为一道题单独建文档；整卷练习一律走文档。'
     : ''
   // UI 优化条目11A（任务规划激活）：阶段推进时输出 ```plan 围栏 → 左栏「任务规划」渲染为带状态进度列表

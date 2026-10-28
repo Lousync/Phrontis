@@ -4,9 +4,12 @@ import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
 import { QuizMode } from '../../../components/shared/QuizMode'
-import { extractQuizzes } from '../../../components/shared/QuizParser'
+import { extractQuizzes, duplicateQuizNos } from '../../../components/shared/QuizParser'
+import { QuizRecordContext, useQuizRecordStore, useQuizSummary } from '../../../components/shared/QuizRecordStore'
+import { QuizSheetBar } from '../../../components/shared/QuizSheetBar'
+import { QuizReviewPane } from '../../../components/shared/QuizReviewPane'
 import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem } from '../../../types'
-import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, resolveAttachmentRel, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent, workspaceOpenInSystem } from '../../../lib/ipc'
+import { getKnowledgePageById, updateKnowledgePage, getKnowledgeBacklinkContext, getKnowledgeManualLinks, addKnowledgeManualLink, removeKnowledgeManualLink, createKnowledgePage, updateKnowledgeLinks, toggleKnowledgeStar, getSetting, setSetting, resolveAttachmentRel, openExternal, getKnowledgeTags, createKnowledgeTag, getAttachmentPath, workspaceReadFile, workspaceWriteFile, workspaceGetCurrent, workspaceOpenInSystem, quizRecordMigratePageId } from '../../../lib/ipc'
 import { splitFrontmatter, joinFrontmatter, ensureFrontmatterId, bumpFrontmatterUpdated } from '../../../lib/frontmatter'
 import { useSettings } from '../../../lib/SettingsContext'
 import { showToast } from '../../../lib/toast'
@@ -338,11 +341,52 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   // 沉浸刷题模式（页面含选择题时可用）
   const [quizMode, setQuizMode] = useState(false)
-  /** 从当前内容解析出的可判题选择题列表 */
+  /** 从当前内容解析出的全部题目（选择 + 简答） */
   const quizzes = useMemo(() => {
     if (fileType !== 'md' && fileType !== 'txt') return []
     return extractQuizzes(content)
   }, [content, fileType])
+  /** 刷题模式只跑选择题 */
+  const choiceQuizzes = useMemo(
+    () => quizzes.filter(q => q.type === 'choice' && q.options.length >= 2),
+    [quizzes],
+  )
+  const duplicateNos = useMemo(() => duplicateQuizNos(quizzes), [quizzes])
+  // 题单答题痕迹 store：页面级拉一次，卡片按题号订阅
+  const quizStore = useQuizRecordStore({
+    pageId: quizzes.length > 0 ? pageId : '',
+    relPath: quizzes.length > 0 ? (page?.path ?? '') : '',
+    pageTitle: title,
+  })
+  const quizSummary = useQuizSummary(quizStore)
+  /** 当前文档里仍存在的错题（防止旧记录把入口数字撑大） */
+  const currentWrongCount = useMemo(() => {
+    const nos = new Set(quizzes.map(q => q.no))
+    return quizStore.getRecords().filter(r => nos.has(r.quizNo) && r.lastResult === 0).length
+  }, [quizzes, quizSummary.wrong, quizStore])
+  const [quizReview, setQuizReview] = useState(false)
+  const [reviewNos, setReviewNos] = useState<Set<number>>(new Set())
+  const reviewQuizzes = useMemo(
+    () => quizzes.filter(q => reviewNos.has(q.no)),
+    [quizzes, reviewNos],
+  )
+  useEffect(() => {
+    setQuizReview(false)
+    setReviewNos(new Set())
+  }, [pageId])
+  const openQuizReview = useCallback(() => {
+    const nos = new Set(
+      quizzes.filter(q => quizStore.getWrongNos().has(q.no)).map(q => q.no),
+    )
+    if (nos.size === 0) {
+      showToast({ type: 'info', message: '当前题单没有判错的题' })
+      return
+    }
+    setReviewNos(nos)
+    setQuizReview(true)
+    setPreview(true)
+    setShowMoreMenu(false)
+  }, [quizzes, quizStore])
   const [skipDeleteConfirm, setSkipDeleteConfirm] = useState(false)
   const [showUnsavedConfirm, setShowUnsavedConfirm] = useState(false)
   const [unsavedAction, setUnsavedAction] = useState<(() => void) | null>(null)
@@ -937,9 +981,18 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
         // 首次保存自动补 id（2026-09-20 拍板）：无 frontmatter id 的 .md 在首次编辑保存时静默转正，
         // 用户零操作；注入后必须回写 vaultPrefixRef（否则下一次保存又把它写掉）。
         // 仅 .md 参与（非 md 是文件卡片，注入 frontmatter 会破坏内容）。
+        let quizMigrate: { oldId: string; newId: string } | null = null
         if (/\.md$/i.test(rel)) {
-          const ensured = ensureFrontmatterId(vaultPrefixRef.current, rel, crypto.randomUUID())
-          if (ensured.injected) vaultPrefixRef.current = ensured.prefix
+          const newId = crypto.randomUUID()
+          const ensured = ensureFrontmatterId(vaultPrefixRef.current, rel, newId)
+          if (ensured.injected) {
+            vaultPrefixRef.current = ensured.prefix
+            // 先在内存里记下，写盘成功后再迁移（写失败不能把记录迁到不存在的 id）
+            const oldId = pageRef.current.id
+            if (oldId.startsWith('auto:') || oldId.startsWith('draft:')) {
+              quizMigrate = { oldId, newId }
+            }
+          }
           // 保存即刷新 frontmatter.updated（2026-09-20 反馈：最近编辑列表停在旧值——
           // 索引 updatedAt 取自 frontmatter.updated 而非 mtime，必须随保存刷新并回写内存前缀）
           const bumped = bumpFrontmatterUpdated(vaultPrefixRef.current || '')
@@ -949,6 +1002,12 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
         const baseline = vaultMtimeRef.current > 0 ? vaultMtimeRef.current : undefined
         const res = await workspaceWriteFile(root, rel, joinFrontmatter({ frontmatterPrefix: vaultPrefixRef.current || undefined, content: c }), baseline)
         if (res?.ok) {
+          // 题单从 auto:/draft: 转正：记录/标签/分组一起迁到新 UUID
+          if (quizMigrate) {
+            void quizRecordMigratePageId(quizMigrate.oldId, quizMigrate.newId).catch((e) => {
+              console.warn('[PageEditor] quiz record page-id migration failed:', e)
+            })
+          }
           vaultMtimeRef.current = typeof res.mtimeMs === 'number' && res.mtimeMs > 0 ? res.mtimeMs : vaultMtimeRef.current
           isDirtyRef.current = false
           savedContentRef.current = c
@@ -1650,11 +1709,18 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
                     <span className="kb-kbd ml-auto shrink-0 rounded px-1 py-0.5 text-[10px]">Ctrl+Shift+R</span>
                   </button>
                 )}
-                {quizzes.length > 0 && (
+                {choiceQuizzes.length > 0 && (
                   <button onClick={() => { setQuizMode(true); setShowMoreMenu(false) }}
                     className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
                     <ListChecks size={13} />刷题模式
-                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{quizzes.length} 题</span>
+                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{choiceQuizzes.length} 题</span>
+                  </button>
+                )}
+                {currentWrongCount > 0 && (
+                  <button onClick={openQuizReview}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+                    <RotateCcw size={13} />错题重做
+                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{currentWrongCount} 题</span>
                   </button>
                 )}
                 {/* 查看源码 / 看渲染（2026-10-13）：**本页临时**切档，不改全局设置 `editorWritingMode`。
@@ -2160,8 +2226,21 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
           /* 阅读态（仅 md / txt 知识页会走到这里；归档文本类已在自读 effect 里强制 preview=false，
              即「文本类落地 = 直接编辑」）。欢迎页的 iframe 已上移到专门视图区，不再在此兜底。 */
           <div ref={previewRef} className="flex-1 overflow-y-auto px-6 pb-6 pt-14">
+            <QuizRecordContext.Provider value={quizStore}>
             <h1 className="text-xl font-bold text-[var(--text-primary)] mb-3">{title}</h1>
-            <MarkdownPreview
+            {quizReview ? (
+              <QuizReviewPane quizzes={reviewQuizzes} onExit={() => setQuizReview(false)} />
+            ) : (
+              <>
+                {duplicateNos.length > 0 && (
+                  <div className="mb-3 rounded-md border border-[var(--warning)]/40 bg-[var(--warning)]/5 px-3 py-2 text-[11.5px] text-[var(--warning)]">
+                    题号重复：第 {duplicateNos.join('、')} 题。答题状态可能串号，请让 AI 重新生成这份题单。
+                  </div>
+                )}
+                {quizzes.length > 0 && (
+                  <QuizSheetBar quizzes={quizzes} store={quizStore} onReview={openQuizReview} />
+                )}
+                <MarkdownPreview
               content={content}
               pageId={pageId}
               pageTitle={title}
@@ -2198,6 +2277,8 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
                 }
               }}
             />
+              </>
+            )}
             {/* 内联反链（2026-10-13 批 2）：⋮ 那枚开关打开时，在正文末尾列出来源页 + 引用上下文摘录。
                 条目点击与右栏「关联网络 · 被引用」**同一个动作**（跳源页 + 定位到源页引用本页处并高亮），
                 走同一套 setPendingLocate + onNavigate，不另写跳转。 */}
@@ -2227,6 +2308,7 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
                 )}
               </section>
             )}
+            </QuizRecordContext.Provider>
           </div>
         ) : !paneDoc ? (
           <div className="flex flex-col flex-1 overflow-hidden">
@@ -2613,8 +2695,8 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
       )}
 
       {/* 沉浸刷题模式覆盖层（模块内全屏，独立于阅读模式；不遮挡窗口标题栏） */}
-      {quizMode && quizzes.length > 0 && (
-        <QuizMode quizzes={quizzes} pageTitle={title} pageId={pageId} onClose={() => setQuizMode(false)} />
+      {quizMode && choiceQuizzes.length > 0 && (
+        <QuizMode quizzes={choiceQuizzes} pageTitle={title} pageId={pageId} onClose={() => setQuizMode(false)} />
       )}
     </div>
   )

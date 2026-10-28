@@ -9,7 +9,8 @@
 //   node --experimental-strip-types --no-warnings .AGENT/scripts/quiz-tools/verify-quiz-fence.mjs
 // 期望：输出 PASS 且 exit=0
 
-import { extractQuizzes } from '../../../src/components/shared/QuizParser.ts'
+import { extractQuizzes, parseQuizFence, preprocessContent, duplicateQuizNos } from '../../../src/components/shared/QuizParser.ts'
+import { ensureQuizDocFrontmatter, sameQuizDocBody } from '../../../electron/lib/quizDocPure.ts'
 
 // 记录里的快照：no 是它在"原页面"的序号，组卷时必须重排
 const snapshot = {
@@ -115,4 +116,65 @@ for (const [name, ok] of pointsChecks) {
   if (!ok) pass = false
 }
 console.log(pass ? 'PASS: 条目15 归一化契约一致' : 'FAIL: 归一化不符')
+
+// ===== 简答题：新协议 / 围栏提取 / 旧 <details> 兼容 =====
+console.log('\n--- 简答题与旧格式兼容 ---')
+const shortJson = JSON.stringify({
+  type: 'short',
+  no: 2,
+  question: '简述接口的功能',
+  referenceAnswer: '① 地址译码；② 数据缓冲（集合 {a,b}）',
+  explanation: '补充说明',
+})
+const shortItem = parseQuizFence(shortJson)
+const mixedMd = [
+  '```quiz',
+  JSON.stringify({ no: 1, question: '选择题', options: [{ key: 'A', text: '甲' }, { key: 'B', text: '乙' }], answer: 'A', explanation: '' }),
+  '```',
+  '',
+  '```quiz',
+  shortJson,
+  '```',
+].join('\n')
+const mixed = extractQuizzes(mixedMd)
+const detailsMd = [
+  '<details>',
+  '<summary>参考答案</summary>',
+  '',
+  '**解析**：先译码，再缓冲。',
+  '</details>',
+].join('\n')
+const detailsOut = preprocessContent(detailsMd)
+const codeFencedDetails = ['```md', '<details><summary>答案</summary>', 'x', '</details>', '```'].join('\n')
+const codeFencedOut = preprocessContent(codeFencedDetails)
+const legacyShort = ['### 第 1 题（10 分）', '题干', '', '```spoiler-answer', '**解析**：要点', '```'].join('\n')
+const legacyShortOut = preprocessContent(legacyShort)
+const dup = duplicateQuizNos([
+  { type: 'short', no: 1 },
+  { type: 'choice', no: 1 },
+  { type: 'short', no: 2 },
+])
+const quizDoc = ensureQuizDocFrontmatter('练习·接口', mixedMd, 'id-fixed')
+const plainDoc = ensureQuizDocFrontmatter('讲义', '# 普通讲义', 'id-x')
+const shortChecks = [
+  ['简答题解析出 type=short', shortItem?.type === 'short'],
+  ['简答题 referenceAnswer 可取', shortItem?.referenceAnswer.includes('地址译码')],
+  ['简答题 options 归一为空数组', Array.isArray(shortItem?.options) && shortItem.options.length === 0],
+  ['混合卷提取 2 题', mixed.length === 2 && mixed[1].type === 'short'],
+  ['参考答案里的 } 不截断', mixed[1]?.referenceAnswer.includes('{a,b}')],
+  ['缺 referenceAnswer 的简答题拒绝', parseQuizFence(JSON.stringify({ type: 'short', no: 1, question: 'q' })) === null],
+  ['未知 type 拒绝', parseQuizFence(JSON.stringify({ type: 'essay', no: 1, question: 'q' })) === null],
+  ['<details> 转 spoiler-answer', detailsOut.includes('```spoiler-answer') && !detailsOut.includes('<details>')],
+  ['代码围栏内的 <details> 不改', codeFencedOut === codeFencedDetails],
+  ['408 简答块不误转选择题', legacyShortOut.includes('spoiler-answer') && !legacyShortOut.includes('```quiz')],
+  ['重复题号可检出', dup.length === 1 && dup[0] === 1],
+  ['题单落盘写 frontmatter id', /^---\nid: id-fixed\n/.test(quizDoc)],
+  ['题单 frontmatter 幂等比较', sameQuizDocBody(quizDoc, mixedMd)],
+  ['非 quiz 文档不注入 frontmatter', plainDoc === '# 普通讲义'],
+]
+for (const [name, ok] of shortChecks) {
+  console.log(`${ok ? '  ok  ' : ' fail '} ${name}`)
+  if (!ok) pass = false
+}
+console.log(pass ? 'PASS: 简答题与旧格式契约一致' : 'FAIL: 简答题契约不符')
 process.exit(pass ? 0 : 1)

@@ -12,6 +12,7 @@ import { useSettings } from '../../lib/SettingsContext'
 import { normalizeVaultRel, getCachedVaultImage, loadVaultImage } from '../../lib/attachmentImage'
 import { preprocessContent, parseQuizFence, parseQuizFenceLoose } from './QuizParser'
 import { QuizCard } from './QuizCard'
+import { ShortAnswerCard } from './ShortAnswerCard'
 import { PluginFenceRenderer } from './PluginFenceRenderer'
 import { MermaidBlock } from './MermaidBlock'
 import { SchedulePreviewCard } from '../../modules/schedule/SchedulePreviewCard'
@@ -292,10 +293,18 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
       if (/language-(quiz|json)/.test(cls)) {
         const src = extractText(children)
         const quiz = parseQuizFence(src)
-        if (quiz) return <QuizCard quiz={quiz} pageId={pageId} pageTitle={pageTitle} />
+        if (quiz) {
+          return quiz.type === 'short'
+            ? <ShortAnswerCard quiz={quiz} />
+            : <QuizCard quiz={quiz} />
+        }
         if (/language-quiz/.test(cls)) {
           const fixed = parseQuizFenceLoose(src)
-          if (fixed) return <QuizCard quiz={fixed} pageId={pageId} pageTitle={pageTitle} />
+          if (fixed) {
+            return fixed.type === 'short'
+              ? <ShortAnswerCard quiz={fixed} />
+              : <QuizCard quiz={fixed} />
+          }
           return <QuizFailCard onRetry={onQuizRetry} />
         }
       }
