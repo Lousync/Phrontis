@@ -46,7 +46,7 @@ export interface SideLanePanelProps {
   onClose: () => void
   /** 停靠到右栏支线中心（浮窗形态；拖到右缘松手同此路径） */
   onDock?: () => void
-  /** 支线就绪（拿到 laneSessionId 与标题）——父级据此**自动登记锚点回执**（关窗不失联）与升格 */
+  /** 首轮完成（成功 / 失败 / 中断）后回执 laneSessionId 与标题——父级据此登记锚点并切到详情 */
   onLaneReady?: (laneSessionId: string, laneTitle: string) => void
   /** 浮层形态的拖拽手柄：父级（`useFloatingWindow`）提供，挂到顶栏 → 拖动移动、双击复位。
    *  右栏内嵌形态不传（顶栏不可拖）。顶栏内按钮由 hook 的 INTERACTIVE 豁免规则自动跳过。 */
@@ -99,10 +99,17 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
   const notifiedRef = useRef(false)
   /** 当前支线 id 的实时镜像（卸载清理的闭包读不到最新 state，故用 ref 同步） */
   const laneIdRef = useRef<string | null>(openLaneId ?? null)
+  /** 面板是否仍挂载：首轮完成时若用户已关闭，不再回调父级切详情 */
+  const aliveRef = useRef(true)
 
   const refresh = useCallback(async (sid: string) => {
     const rows = await agentMessages(sid).catch(() => [] as AgentStoredMessage[])
     setMessages(rows.map(m => ({ id: m.id, role: m.role, content: m.content, createdAt: m.createdAt })))
+  }, [])
+
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
   }, [])
 
   // ---- 装载：① 新建支线（纯本地拼快照，不调 LLM）② 或载入既有支线 ----
@@ -187,21 +194,32 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
     const text = input.trim()
     if (!text || pending || !laneId) return
     lockedRef.current = true
-    // 首条消息即回执锚点：此后关窗 / 切形态都能回到这条支线（空支线则不留入口、卸载时回收）
-    if (!notifiedRef.current) { notifiedRef.current = true; onLaneReady?.(laneId, laneTitleRef.current) }
     const cid = crypto.randomUUID()
     chatIdRef.current = cid
     setInput('')
     setPending(true)
     beginStream()
     setMessages(prev => [...prev, { role: 'user', content: text, createdAt: new Date().toISOString() }])
-    const r = await agentChat(laneId, text, undefined, cid, 'aiTeaching')
-    if (r && !r.ok && r.code !== 'USER_ABORTED') showToast({ type: 'error', message: `支线调用失败：${r.error ?? ''}` })
-    await refresh(laneId)
-    endStream()
-    setPending(false)
-    inputRef.current?.focus()
-  }, [input, pending, laneId, beginStream, endStream, refresh])
+    try {
+      const r = await agentChat(laneId, text, undefined, cid, 'aiTeaching')
+      if (r && !r.ok && r.code !== 'USER_ABORTED') showToast({ type: 'error', message: `支线调用失败：${r.error ?? ''}` })
+      // 关键：先把首轮回复落库并刷新，再通知父级切到详情；否则创建面板卸载会带走流式草稿
+      if (aliveRef.current) await refresh(laneId)
+    } catch (e) {
+      if (aliveRef.current) showToast({ type: 'error', message: `支线调用失败：${(e as Error).message || ''}` })
+    } finally {
+      if (aliveRef.current) {
+        endStream()
+        setPending(false)
+        inputRef.current?.focus()
+        // 首轮完成（成功 / 失败 / 中断）后才回执锚点：父级此时切详情，消息已可读，不再需要复制重发
+        if (!notifiedRef.current) {
+          notifiedRef.current = true
+          onLaneReady?.(laneId, laneTitleRef.current)
+        }
+      }
+    }
+  }, [input, pending, laneId, beginStream, endStream, refresh, onLaneReady])
 
   const stopped = err !== '' || (!loading && !laneId)
 
