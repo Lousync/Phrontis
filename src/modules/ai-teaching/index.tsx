@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers } from 'lucide-react'
+import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
-  agentChat, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentListSideLanes,
+  agentChat, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentListSideLanes, agentResume,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceRefreshVault,
   agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachUnassignSession, aiTeachSetLastWorkspace,
@@ -927,6 +927,41 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     else if (nav.readerRel && /\.pptx$/i.test(nav.readerRel)) void openArtFile(nav.readerRel, { cur: nav.readerPage ?? 0 })
   }, [refreshMessages, sessions, loadConstraints, openArtFile])
 
+  /**
+   * 一次 Agent 运行的共同收尾（发送 / 续跑共用）：
+   * 失败 Toast、用量、注入摘要、消息刷新、复习讲义联动、流式草稿与 pending 清理。
+   * 收尾必须放 finally —— 否则刷新消息抛错会把输入区永久锁在「生成中」。
+   */
+  const finishRun = useCallback(async (r: AgentChatResult | null, sid: string): Promise<AgentChatResult | null> => {
+    // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
+    if (r?.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要（/compress 可手动触发）` })
+    // V-2：失败提示下沉到 sendText——模板开场/ask 发送/PPT 逐页讲解等 5 处 void sendText 路径统一覆盖（原先只有 doSend 有 toast）
+    if (r && !r.ok && r.code !== 'USER_ABORTED') showToast({ type: 'error', message: `AI 调用失败：${r.error ?? ''}` })
+    // 条目9②：本轮 system 注入分段按会话留存（hover 构成摘要）；条目9③：月度用量随每轮刷新
+    if (r?.injection) setInjectionMap(prev => ({ ...prev, [sid]: r.injection as AiTeachInjectionStats }))
+    void llmGetUsage().then(setUsage).catch(() => null)
+    setLastChanges(r?.changes && r.changes.length ? r.changes : null)
+    try {
+      await refreshMessages(sid)
+      // 复习课：若 AI 刚用 course.review.write 生成 / 更新了讲义，自动刷新课程态并打开工件
+      const reviewCid = Object.entries(courseStateRef.current?.reviews ?? {}).find(([, rv]) => rv.sessionId === sid)?.[0] ?? null
+      if (reviewCid) {
+        const before = courseStateRef.current?.reviews[reviewCid]?.rel ?? null
+        await reloadCourse()
+        const after = courseStateRef.current?.reviews[reviewCid]?.rel ?? null
+        if (after && after !== before) void openArtFile(after)
+      }
+    } finally {
+      endStream()
+      setPending(false)
+      setArtTabs(prev => prev.some(t => t.generating) ? prev.filter(t => !t.generating) : prev) // 中止/失败收尾：禁关占位不留场
+      setArtActive(cur => cur?.startsWith('gen:') ? null : cur)
+      // 现场写回会话行（成功即已清空）→ 重拉列表才能让「继续」正确消失/出现
+      void refreshSessions()
+    }
+    return r
+  }, [refreshMessages, endStream, reloadCourse, openArtFile, refreshSessions])
+
   const sendText = useCallback(async (raw: string, cid: string, withQuote = false, skillName?: string): Promise<AgentChatResult | null> => {
     setPending(true); setLiveSteps([]); beginStream()
     const sid = activeIdRef.current
@@ -945,29 +980,31 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     jumpToBottom()
     const ov = convoLlm.current.get(sid)
     const r = await agentChat(sid, text, undefined, cid, 'aiTeaching', ov?.modelId, ov?.effort, skillName)
-    // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
-    if (r?.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要（/compress 可手动触发）` })
-    // V-2：失败提示下沉到 sendText——模板开场/ask 发送/PPT 逐页讲解等 5 处 void sendText 路径统一覆盖（原先只有 doSend 有 toast）
-    if (r && !r.ok && r.code !== 'ABORTED') showToast({ type: 'error', message: `AI 调用失败：${r.error ?? ''}` })
-    // 条目9②：本轮 system 注入分段按会话留存（hover 构成摘要）；条目9③：月度用量随每轮刷新
-    if (r?.injection) setInjectionMap(prev => ({ ...prev, [sid]: r.injection as AiTeachInjectionStats }))
-    void llmGetUsage().then(setUsage).catch(() => null)
-    setLastChanges(r?.changes && r.changes.length ? r.changes : null)
-    await refreshMessages(sid)
-    // 复习课：若 AI 刚用 course.review.write 生成 / 更新了讲义，自动刷新课程态并打开工件
-    const reviewCid = Object.entries(courseStateRef.current?.reviews ?? {}).find(([, rv]) => rv.sessionId === sid)?.[0] ?? null
-    if (reviewCid) {
-      const before = courseStateRef.current?.reviews[reviewCid]?.rel ?? null
-      await reloadCourse()
-      const after = courseStateRef.current?.reviews[reviewCid]?.rel ?? null
-      if (after && after !== before) void openArtFile(after)
+    return finishRun(r, sid)
+  }, [finishRun, beginStream, jumpToBottom])
+
+  /** 本会话最近一次中断留下的可续现场（来自会话列表的 resumeInfo；只有中断卡那条能挂「继续」） */
+  const resumeInfo = activeId ? (sessions.find(s => s.id === activeId)?.resumeInfo ?? null) : null
+
+  /** A 方案：从中断卡「继续」——不追加用户消息，现场由主进程一次性 claim（与通用助手同一条链路） */
+  const resumeRun = useCallback(async (): Promise<AgentChatResult | null> => {
+    const sid = activeIdRef.current
+    if (!sid || pending || !resumeInfo) return null
+    setPending(true); setLiveSteps([]); beginStream()
+    jumpToBottom()
+    const cid = crypto.randomUUID()
+    chatIdRef.current = cid
+    const ov = convoLlm.current.get(sid)
+    let r: AgentChatResult | null = null
+    try {
+      r = await agentResume(sid, undefined, cid, 'aiTeaching', ov?.modelId, ov?.effort)
+    } catch (err) {
+      // 主进程异常逃逸：留日志 + Toast；finally 里的收尾仍然执行
+      console.error('[aiTeaching] resume 未捕获异常', err)
+      showToast({ type: 'error', message: `继续异常：${String((err as Error)?.message ?? err)}` })
     }
-    endStream()
-    setPending(false)
-    setArtTabs(prev => prev.some(t => t.generating) ? prev.filter(t => !t.generating) : prev) // 中止/失败收尾：禁关占位不留场
-    setArtActive(cur => cur?.startsWith('gen:') ? null : cur)
-    return r
-  }, [refreshMessages, beginStream, endStream, jumpToBottom, reloadCourse, openArtFile])
+    return finishRun(r, sid)
+  }, [pending, resumeInfo, beginStream, finishRun, jumpToBottom])
 
   const doSend = useCallback(async (override?: string) => {
     const text = (override ?? inputValueRef.current).trim()
@@ -2636,6 +2673,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         )}
                         {/* UI 优化条目4：操作条升格为轻 chip 条（11.5px+图标，对齐顶栏 chip 规范）；时间戳坏数据不渲染 */}
                         <div className="text-[11.5px] mt-1.5 flex items-center gap-1.5 -ml-1.5">
+                          {/* A 方案：只有挂着 resumeInfo 的那条中断卡才有「继续」——与通用助手的按钮同源 */}
+                          {resumeInfo && m.id && resumeInfo.messageId === m.id && !pending && (
+                            <button onClick={() => void resumeRun()}
+                              title={resumeInfo.reason ? `从断点继续（上次中断：${resumeInfo.reason}）` : '从断点继续'}
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[var(--accent)] bg-[var(--accent)]/10 hover:bg-[var(--accent)]/20 transition-colors">
+                              <Play size={11} />继续
+                            </button>
+                          )}
                           {/* v3.1.2 条目11：支线旁问入口（与整理成文档/复制/轨迹同簇）。
                               已开过支线的回答 → 按钮变「支线追问 · 已开」并高亮，点击在**右栏支线中心**重开原支线；
                               未开过 → 「就这点追问」在右栏中心新建一条（打开即输入，创建即已读）。

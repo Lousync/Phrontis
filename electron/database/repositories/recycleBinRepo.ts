@@ -11,6 +11,7 @@ import { vaultListEntries, vaultCreateEntry, vaultUpdateEntry } from '../../lib/
 import { vaultPostsAll, vaultPostsSave, vaultAlbumsAll, type MomentsRow } from '../../lib/kbStore/momentsVaultRepo'
 import { vaultGetCategory, vaultRestorePage, vaultRestoreCategory } from '../../lib/kbStore/knowledgeVaultRepo'
 import { readJson, writeJson } from '../../lib/kbStore/jsonStore'
+import { broadcastDataChanged } from '../../main/windowBus'
 
 function getSettingsRetentionDays(): number {
   try {
@@ -36,6 +37,15 @@ interface RecycleBinRow {
 function normalizeCategoryType(raw: unknown): 'notebook' | 'folder' | 'space' {
   if (raw === 'notebook' || raw === 'space') return raw
   return 'folder'
+}
+
+/** 回收站条目所属模块 → DataChangeScope（恢复后让对应界面立即刷新；未知模块只发 recycle） */
+function dataScopeOf(module: string): 'blog' | 'knowledge' | 'passwords' | 'moments' | null {
+  if (module === 'blog') return 'blog'
+  if (module === 'knowledge' || module === 'knowledge_category') return 'knowledge'
+  if (module === 'passwordVault') return 'passwords'
+  if (module === 'moments') return 'moments'
+  return null
 }
 
 /** 分类归属父级解析（vault 字典口径）：空间恒为顶层；父级不在字典内则落到顶层（不再新建默认空间） */
@@ -87,7 +97,10 @@ function purgeExpiredRows(): RecycleBinRow[] {
   const cutoff = formatLocalDateTime(new Date(Date.now() - retentionDays * 86400000))
   const rows = readBin()
   const kept = rows.filter(r => !isExpired(r.deleted_at, cutoff))
-  if (kept.length !== rows.length) writeBin(kept)
+  if (kept.length !== rows.length) {
+    writeBin(kept)
+    broadcastDataChanged('recycle')
+  }
   return kept
 }
 
@@ -103,6 +116,8 @@ export function recycleBinAdd(entry: { id: string; original_id: string; module: 
     deleted_at: entry.deleted_at ?? formatLocalDateTime(new Date()),
   })
   writeBin(rows)
+  // 回收站计数/角标与列表的唯一刷新通道
+  broadcastDataChanged('recycle')
 }
 
 
@@ -129,6 +144,9 @@ export function registerRecycleBinHandlers(): void {
     }
     return items
   })
+
+  // ---- 回收站条目数（图标条角标用；顺手清理过期项） ----
+  ipcMain.handle('recycleBin:count', () => purgeExpiredRows().length)
 
   // ---- 恢复回收站项目 ----
   ipcMain.handle('recycleBin:restoreItem', (_e, id: string): { success: boolean; message?: string } | undefined => {
@@ -266,6 +284,10 @@ export function registerRecycleBinHandlers(): void {
 
     // 从回收站移除
     writeBin(removeBin(readBin(), id))
+    // 恢复后通知所属模块 + 回收站角标（此前只有知识库自己监听 window 事件，博客/密码本/动态会停在旧列表）
+    const scope = dataScopeOf(item.module)
+    if (scope) broadcastDataChanged(scope)
+    broadcastDataChanged('recycle')
   })
 
   // ---- 部分恢复（从知识目录快照中恢复单个页面/子目录） ----
@@ -382,6 +404,8 @@ export function registerRecycleBinHandlers(): void {
       item.data = JSON.stringify(record)
       writeBin(rows)
     }
+    broadcastDataChanged('knowledge')
+    broadcastDataChanged('recycle')
   })
 
   // ---- 从快照中永久删除单条（不恢复，直接丢弃） ----
@@ -420,6 +444,7 @@ export function registerRecycleBinHandlers(): void {
       item.data = JSON.stringify(record)
       writeBin(rows)
     }
+    broadcastDataChanged('recycle')
   })
 
   // ---- 移入系统回收站（单条） ----
@@ -429,6 +454,7 @@ export function registerRecycleBinHandlers(): void {
     const record = { module: item.module, title: item.title, data: JSON.parse(item.data) }
     await trashItem(id, record)
     writeBin(removeBin(readBin(), id))
+    broadcastDataChanged('recycle')
   })
 
   // ---- 移入系统回收站（全部） ----
@@ -439,6 +465,7 @@ export function registerRecycleBinHandlers(): void {
     const items = rows.map(r => ({ binId: r.id, module: r.module, title: r.title, data: JSON.parse(r.data) }))
     await trashAll(items)
     writeBin([])
+    broadcastDataChanged('recycle')
   })
 
   // ---- 从快照中局部移入系统回收站 ----
@@ -480,27 +507,25 @@ export function registerRecycleBinHandlers(): void {
       item.data = JSON.stringify(record)
       writeBin(rows)
     }
+    broadcastDataChanged('recycle')
   })
 
   // ---- 永久删除单条（直接删库，不移入系统回收站） ----
   ipcMain.handle('recycleBin:permanentlyDelete', (_e, id: string) => {
     writeBin(removeBin(readBin(), id))
+    broadcastDataChanged('recycle')
   })
 
   // ---- 清空回收站（移入系统回收站） ----
   ipcMain.handle('recycleBin:emptyAll', async () => {
-    // 1) Snapshot items before deleting — so we can write them to disk
     const rows = readBin()
     sortByDeletedAtDesc(rows)
+    if (rows.length === 0) return
     const items = rows.map(r => ({ binId: r.id, module: r.module, title: r.title, data: JSON.parse(r.data) }))
-
-    // 2) Clear bin immediately — the frontend sees instant feedback
+    // 先确认真的移入系统回收站，再清空索引 —— 旧实现先清空再后台移，trash 失败就永久丢
+    await trashAll(items)
     writeBin([])
-
-    // 3) Write files + move to OS recycle bin in background (don't block the response)
-    if (items.length > 0) {
-      trashAll(items).catch(e => console.error('trashAll failed:', e))
-    }
+    broadcastDataChanged('recycle')
   })
 
   // ---- 清除过期项（独立调用） ----

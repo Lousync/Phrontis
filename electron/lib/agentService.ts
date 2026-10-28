@@ -893,6 +893,25 @@ function persistResume(sessionId: string, messageId: string, facts: InterruptFac
 }
 
 /**
+ * 中断前已产出的正文：单独落一条 assistant 消息（在中断卡之前）。
+ * 目的：① 用户刷新后仍能看到写到哪里；② 续跑注入从历史里自然带上它，模型不用从头再写。
+ * 只落可见正文（思考链不落）；未闭合的 ``` 围栏补一行，避免把后面的中断卡吞进代码块。
+ */
+function appendPartialAnswer(sessionId: string, text: string): void {
+  const raw = String(text ?? '').trim()
+  if (!raw) return
+  const cap = 20_000
+  const clipped = raw.length > cap ? `${raw.slice(0, cap)}\n…（中断前内容过长，已截断）` : raw
+  const fenceCount = (clipped.match(/```/g) ?? []).length
+  const safe = fenceCount % 2 === 1 ? `${clipped}\n\`\`\`` : clipped
+  try {
+    appendAgentMessage(sessionId, 'assistant', `${safe}\n\n（以上内容在中断前已生成，可能不完整）`)
+  } catch (err) {
+    console.error('[agent] 中断前半截正文落库失败', err)
+  }
+}
+
+/**
  * 中断出口（归因 P0 + A 方案，2026-10-14）：失败 / 停止 / 预算耗尽统一在这里收口 ——
  * 写一条中断 assistant 消息（原因 + 建议 + 进度 + 改动清单 + 诊断块），把「继续」的现场写回会话行，
  * 并返回带归因码的结果。
@@ -905,12 +924,15 @@ function interruptResult(
   interruption?: Interruption,
   detail?: InterruptionDetail,
   ctx?: InterruptContext,
+  partialText?: string,
 ): AgentChatResult {
   const it = interruption ?? classifyFailure(raw)
   const dt = detail ?? interruptionDetailOf(raw)
   const facts = interruptFactsOf(it, dt, trace, ctx)
   // 有现场才有「继续」按钮：没有按钮就不能在正文里提它
   const willResume = ctx?.writeResume !== false
+  // 中断前已产出的正文先落库：卡片必须保持在最后（它是续跑锚点），正文在它之前
+  if (partialText) appendPartialAnswer(sessionId, partialText)
   // 正文首行必须是人能看懂的原因：reason 就是 friendlyReason 的产出（契约源码级断言锁「文案只在这里产生」）
   const content = buildInterruptContent({
     reason: facts.reason,
@@ -1480,6 +1502,7 @@ async function runAgentLoop(
         r.interruption ?? configInterruptionOf(r.code),
         r.detail ?? interruptionDetailOf(baseRaw),
         interruptCtxOf(i + 1),
+        r.partialText,
       )
     }
 

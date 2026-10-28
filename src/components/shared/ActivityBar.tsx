@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { TabName } from '../../types'
 import { Trash2, FlaskConical, LayoutPanelLeft, GraduationCap, Check } from 'lucide-react'
@@ -7,6 +7,8 @@ import { WORKBENCH_TABBAR_EXCLUDED } from '../../lib/workbenchLayout'
 import { railHiddenIds, railOrder, railVisibleOrder } from '../../lib/appModules'
 import { useSettings } from '../../lib/SettingsContext'
 import { useContextMenuPosition } from '../../lib/useContextMenuPosition'
+import { getRecycleBinCount } from '../../lib/ipc'
+import { useDataChanged } from '../../lib/dataChanged'
 
 /**
  * 图标条（v3.4.0 工作台三栏外壳，方案 §3.4 / §10；2026-09-17 拍板变化：工具箱按钮撤掉，5 → 4；
@@ -91,6 +93,8 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
   const { s, update } = useSettings()
   const [dragId, setDragId] = useState<TabName | null>(null)
   const [dropIdx, setDropIdx] = useState<number | null>(null)
+  /** 回收站待恢复条目数（图标条角标；只在 >0 时显示小圆点） */
+  const [recycleCount, setRecycleCount] = useState(0)
   /** 被拖项相对拖起点的位移（px）—— 跟手 1:1，直接写内联 transform（§五-6：跟手过程不许有过渡） */
   const [dragDy, setDragDy] = useState(0)
   /** 拖动项的起始下标，让位计算用（拖起时定格，拖动中不变） */
@@ -127,6 +131,17 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [ctxMenu])
+
+  // 回收站角标：启动 / 切仓库 / 任何窗口增删恢复清空后拉一次
+  const refreshRecycleCount = useCallback(() => {
+    void getRecycleBinCount().then(setRecycleCount).catch(() => null)
+  }, [])
+  useEffect(() => { refreshRecycleCount() }, [refreshRecycleCount])
+  useDataChanged('recycle', refreshRecycleCount)
+  useEffect(() => {
+    window.addEventListener('vault:changed', refreshRecycleCount)
+    return () => window.removeEventListener('vault:changed', refreshRecycleCount)
+  }, [refreshRecycleCount])
 
   const toggleHidden = (id: TabName) => {
     const next = hidden.includes(id) ? hidden.filter((h) => h !== id) : [...hidden, id]
@@ -242,12 +257,16 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
               if (Date.now() - railDragGuard.lastEnd < 250) return   // 拖完补发的 click
               onChange(id)
             }}
-            title={b.label}
+            title={`${b.label}${id === 'recycle' && recycleCount > 0 ? `（${recycleCount} 项）` : ''}`}
             className={`${railCls(active === id)} ${isDragged ? 'opacity-40' : ''}`}
             style={dragStyle}
           >
             {active === id && railMark}
             {b.icon(22)}
+            {/* 回收站有待恢复项：右上角小圆点（标题里带数量），避免模块永远像“空的” */}
+            {id === 'recycle' && recycleCount > 0 && (
+              <span aria-hidden className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
+            )}
             {/* 插入位指示：拖到某个按钮的上半 ⇒ 插在它前面 */}
             {dragId && dragId !== id && dropIdx === i && (
               <div className="absolute -top-[3px] left-1/2 h-[3px] w-6 -translate-x-1/2 rounded-full bg-[var(--accent)]" />

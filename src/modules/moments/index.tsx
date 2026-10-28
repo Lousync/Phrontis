@@ -24,6 +24,7 @@ import {
   copyImageUrlToClipboard,
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
+import { useDataChanged } from '../../lib/dataChanged'
 import { ThemeFxLayer } from '../../components/shared/ThemeFxLayer'
 import type { MomentsAlbum, MomentsPost, UserProfile } from '../../types'
 
@@ -284,6 +285,12 @@ export function MomentsModule() {
       .then(v => { if (typeof v === 'string') setAvatarDataUrl(v) })
       .catch(() => setAvatarDataUrl(''))
   }, [loadPosts, loadAlbums, reloadProfile])
+
+  // 回收站恢复 / 其它窗口写操作 → 刷新列表与相册（此前只在挂载时拉一次，恢复后看不到）
+  useDataChanged('moments', () => {
+    void loadPosts()
+    void loadAlbums()
+  })
 
   // Esc 关闭编辑器 / 详情弹层（灯箱打开时让灯箱优先处理）
   useEffect(() => {

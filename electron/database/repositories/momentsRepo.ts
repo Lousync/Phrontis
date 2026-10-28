@@ -232,7 +232,11 @@ export function registerMomentsHandlers(): void {
     const binId = randomUUID()
     if (attachmentIds.length > 0) trashAttachments(attachmentIds, binId)
     // 回收站统一写 API（R6 去库化，与 passwordVault 同口径）
-    recycleBinAdd({ id: binId, original_id: id, module: 'moments', title: '单机说说', data: JSON.stringify(row), deleted_at: new Date().toISOString() })
+    recycleBinAdd({
+      id: binId, original_id: id, module: 'moments',
+      title: String(hit.content_md ?? '').replace(/\s+/g, ' ').trim().slice(0, 24) || '说说',
+      data: JSON.stringify(row), deleted_at: new Date().toISOString(),
+    })
     vaultPostsSave(rows.filter(r => r.id !== id))
   })
 

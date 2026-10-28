@@ -48,6 +48,13 @@ export interface RawFailure {
   receivedChunks: number
   /** ★ 已产出多少字符（content.length / text.length） */
   partialChars: number
+  /** 空闲超时阈值（ms）—— 让文案跟随实际配置，不再写死 60 秒；仅 timing 类失败有值 */
+  idleTimeoutMs?: number
+  /**
+   * 中断前已产出的可见正文。**只给主进程续跑落库用**：
+   * 不进入 `InterruptionDetail`、不进诊断块、不发渲染层（正文可能含用户隐私）。
+   */
+  partialText?: string
   /** 是否见过正常结束帧（[DONE] / message_stop / done / response.completed） */
   sawTerminator: boolean
   /** 上游给的停止原因（finish_reason / stop_reason / done_reason / 内部标记 'no-terminator'） */
@@ -142,6 +149,8 @@ export interface InterruptionDetail {
   /** 收到几段数据（截断场景在入口层拿不到，故可缺省 —— **宁缺勿编**） */
   receivedChunks?: number
   partialChars: number
+  /** 空闲超时阈值（ms，仅 LLM_IDLE_TIMEOUT 有值；让卡片文案跟随实际配置） */
+  idleTimeoutMs?: number
   sawTerminator: boolean
   stopReason?: string
   round?: number
@@ -351,6 +360,7 @@ export function interruptionDetailOf(raw: RawFailure): InterruptionDetail {
   if (raw.httpStatus !== undefined) detail.httpStatus = raw.httpStatus
   if (raw.upstreamCode) detail.upstreamCode = raw.upstreamCode
   if (raw.upstreamMessage) detail.upstreamMessage = String(raw.upstreamMessage).replace(/\s+/g, ' ').slice(0, 300)
+  if (raw.idleTimeoutMs !== undefined) detail.idleTimeoutMs = raw.idleTimeoutMs
   if (raw.stopReason) detail.stopReason = raw.stopReason
   if (raw.round !== undefined) detail.round = raw.round
   if (raw.runTokens !== undefined) detail.runTokens = raw.runTokens
@@ -425,7 +435,10 @@ export function friendlyReason(it: Interruption, detail?: InterruptionDetail): s
     case 'LLM_NET_RESET': return '与模型服务的连接被中断'
     case 'LLM_DNS_FAILED': return '域名解析失败（检查网络或代理）'
     case 'LLM_FIRST_BYTE_TIMEOUT': return '等待模型响应超时（60 秒内一点数据都没回来）'
-    case 'LLM_IDLE_TIMEOUT': return `模型输出到一半卡住了（已收到 ${r?.receivedChunks ?? 0} 段后 60 秒无新数据）`
+    case 'LLM_IDLE_TIMEOUT': {
+      const idleSec = Math.round(Number(r?.idleTimeoutMs ?? 60_000) / 1000)
+      return `模型输出到一半卡住了（已收到 ${r?.receivedChunks ?? 0} 段后 ${idleSec} 秒无新数据）`
+    }
     case 'LLM_STREAM_TRUNCATED': return '回答被上游中途截断（没收到结束帧）'
     case 'INTERNAL_EXCEPTION': return `内部异常：${errorNameOf(r?.raw ?? '')}（已留完整日志）`
     case 'LLM_UNKNOWN': return '本次任务被中断，未收到任何错误说明'
@@ -466,6 +479,7 @@ export function buildDiagnostics(it: Interruption, detail: InterruptionDetail, m
   if (detail.upstreamCode) lines.push(`上游码：${clean(detail.upstreamCode, 80)}`)
   if (detail.upstreamMessage) lines.push(`上游原话：${clean(detail.upstreamMessage)}`)
   if (detail.receivedChunks !== undefined) lines.push(`收到数据段：${detail.receivedChunks}`)
+  if (detail.idleTimeoutMs !== undefined) lines.push(`空闲阈值：${Math.round(detail.idleTimeoutMs / 1000)}s`)
   lines.push(`已产出字符：${detail.partialChars}`)
   lines.push(`结束帧：${detail.sawTerminator ? '收到' : '未收到'}`)
   if (detail.stopReason) lines.push(`停止原因：${clean(detail.stopReason, 60)}`)

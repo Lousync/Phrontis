@@ -1319,6 +1319,8 @@ export interface InterruptionDetail {
   /** 收到几段数据（截断场景未知，故可缺省） */
   receivedChunks?: number
   partialChars: number
+  /** 空闲超时阈值（ms，仅 LLM_IDLE_TIMEOUT 有值；卡片文案跟随实际配置） */
+  idleTimeoutMs?: number
   sawTerminator: boolean
   stopReason?: string
   round?: number
@@ -2503,7 +2505,8 @@ export interface ElectronAPI {
   previewUserFromDb: (filePath: string) => Promise<{ profile?: { username: string; avatar_path: string; password_hash: string }; stats?: { blogCount: number; scheduleCount: number; knowledgeCount: number }; error?: string }>
   // recycle bin
   getRecycleBinItems: () => Promise<RecycleBinItem[]>
-  restoreRecycleBinItem: (id: string) => Promise<void>
+  getRecycleBinCount: () => Promise<number>
+  restoreRecycleBinItem: (id: string) => Promise<{ success: boolean; message?: string } | undefined>
   permanentlyDeleteRecycleBinItem: (id: string) => Promise<void>
   restoreRecycleBinPartial: (id: string, path: string) => Promise<void>
   trashRecycleBinItem: (id: string) => Promise<void>

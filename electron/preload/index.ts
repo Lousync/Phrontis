@@ -544,6 +544,7 @@ const api = {
 
   // recycle bin
   getRecycleBinItems: () => ipcRenderer.invoke('recycleBin:getItems'),
+  getRecycleBinCount: () => ipcRenderer.invoke('recycleBin:count'),
   restoreRecycleBinItem: (id: string) => ipcRenderer.invoke('recycleBin:restoreItem', id),
   restoreRecycleBinPartial: (id: string, path: string) => ipcRenderer.invoke('recycleBin:restorePartial', id, path),
   trashRecycleBinItem: (id: string) => ipcRenderer.invoke('recycleBin:trashToOS', id),
