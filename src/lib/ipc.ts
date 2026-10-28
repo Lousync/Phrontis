@@ -138,6 +138,8 @@ export const createKnowledgeCategory = async (d: CreateKnowledgeCategoryDTO) => 
 export const updateKnowledgeCategory = async (id: string, d: UpdateKnowledgeCategoryDTO) => { const r = await a().updateKnowledgeCategory(id, d); notifyKnowledgeTreeChanged(); return r }
 export const deleteKnowledgeCategory = async (id: string) => { const r = await a().deleteKnowledgeCategory(id); notifyKnowledgeTreeChanged(); return r }
 export const getKnowledgePages = (categoryId?: string | null) => a().getKnowledgePages(categoryId)
+/** 按仓库相对路径反查知识页（题单 store 在只有 relPath 时解析 pageId） */
+export const knowledgeFindByRel = (relPath: string) => a().knowledgeFindByRel(relPath)
 /** 知识索引 warnings（.ignore 坏行/规则未命中磁盘条目）：知识库模块激活时检查透出 */
 export const getKnowledgeIndexWarnings = () => a().getKnowledgeIndexWarnings()
 export const getKnowledgePageById = (id: string) => a().getKnowledgePageById(id)
@@ -562,7 +564,9 @@ export const deleteBlogTemplate = (id: string) => a().deleteBlogTemplate(id)
 
 // ===== Quiz records (收藏 + 错题本) =====
 export const quizRecordGetByPage = (pageId: string): Promise<QuizRecordDto[]> => a().quizRecordGetByPage(pageId)
-export const quizRecordReport = (pageId: string, quizNo: number, correct: boolean, meta: { pageTitle?: string; snapshot?: QuizSnapshotDto }): Promise<QuizRecordDto | null> => a().quizRecordReport(pageId, quizNo, correct, meta)
+export const quizRecordReport = (pageId: string, quizNo: number, correct: boolean, meta: { pageTitle?: string; snapshot?: QuizSnapshotDto; picked?: string }): Promise<QuizRecordDto | null> => a().quizRecordReport(pageId, quizNo, correct, meta)
+export const quizRecordSaveDraft = (pageId: string, quizNo: number, patch: { picked?: string | null; text?: string; revealed?: boolean; assessedText?: string | null }, meta: { pageTitle?: string; snapshot?: QuizSnapshotDto }): Promise<QuizRecordDto> => a().quizRecordSaveDraft(pageId, quizNo, patch, meta)
+export const quizRecordMigratePageId = (oldPageId: string, newPageId: string): Promise<{ moved: number; merged: number }> => a().quizRecordMigratePageId(oldPageId, newPageId)
 export const quizRecordToggleFavorite = (pageId: string, quizNo: number, meta: { pageTitle?: string; snapshot?: QuizSnapshotDto }): Promise<QuizRecordDto> => a().quizRecordToggleFavorite(pageId, quizNo, meta)
 export const quizRecordList = (opts?: { kind?: 'favorite' | 'wrong' | 'all'; sourceSpace?: string; collectionId?: string }): Promise<QuizRecordDto[]> => a().quizRecordList(opts)
 export const quizRecordRemove = (pageId: string, quizNo: number): Promise<void> => a().quizRecordRemove(pageId, quizNo)

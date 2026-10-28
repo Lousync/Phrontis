@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Check, X, Star } from 'lucide-react'
+import { Check, X, Star, RotateCcw } from 'lucide-react'
 import { MarkdownPreview } from './MarkdownPreview'
 import type { QuizItem } from './QuizParser'
-import { quizRecordGetByPage, quizRecordReport, quizRecordToggleFavorite } from '../../lib/ipc'
+import { useQuizRecord, useQuizStore, useQuizStoreActive } from './QuizRecordStore'
 
 interface Props {
   quiz: QuizItem
@@ -10,55 +10,69 @@ interface Props {
   index?: number
   /** 作答回调（供统计/刷题模式汇总） */
   onAnswered?: (correct: boolean) => void
-  /** 来源页面 ID（传入后启用收藏 + 错题上报） */
+  /** 来源页面 ID（保留兼容；状态/收藏由页面级 store 负责） */
   pageId?: string
   /** 来源页面标题（用于错题本快照） */
   pageTitle?: string
+  /** 错题重做：带着上次选项重做，不自动展开解析 */
+  redo?: boolean
 }
 
 /**
  * 选择题判题卡片：点选选项立即判题。
  * 答对 → 选项变绿并自动滚动到下一题；答错 → 选项变红 + 正确项高亮 + 展开解析。
  * 支持键盘 1-4 / A-D 作答（卡片聚焦时）。
+ *
+ * 状态真源是页面级 QuizRecordStore（picked / lastResult）；无 store（AI 聊天单题快检）
+ * 时退化为本地状态，可判题但不落盘、不显示收藏。
  */
-export function QuizCard({ quiz, index, onAnswered, pageId, pageTitle }: Props) {
-  const [picked, setPicked] = useState<string | null>(null)
-  const [showExplanation, setShowExplanation] = useState(false)
-  const [fav, setFav] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-
-  // 初始化收藏状态（页面渲染时回显该题是否已收藏）
-  useEffect(() => {
-    if (!pageId) return
-    let alive = true
-    quizRecordGetByPage(pageId)
-      .then(records => {
-        if (!alive) return
-        const r = records.find(x => x.quizNo === quiz.no)
-        if (r) setFav(r.isFavorite)
-      })
-      .catch(() => { /* ignore */ })
-    return () => { alive = false }
-  }, [pageId, quiz.no])
-
+export function QuizCard({ quiz, index, onAnswered, redo = false }: Props) {
+  const store = useQuizStore()
+  const record = useQuizRecord(store, quiz.no)
+  const persist = useQuizStoreActive(store)
   const snapshot = () => ({
     no: quiz.no,
+    type: 'choice' as const,
     question: quiz.question,
     options: quiz.options,
     answer: quiz.answer,
     explanation: quiz.explanation,
   })
 
-  const toggleFav = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (!pageId) return
-    quizRecordToggleFavorite(pageId, quiz.no, { pageTitle, snapshot: snapshot() })
-      .then(r => setFav(r.isFavorite))
-      .catch(() => { /* ignore */ })
-  }
+  const [picked, setPicked] = useState<string | null>(null)
+  const [fallbackCorrect, setFallbackCorrect] = useState<boolean | null>(null)
+  const [showExplanation, setShowExplanation] = useState(false)
+  const [redoLocal, setRedoLocal] = useState(false)
+  const [redoDone, setRedoDone] = useState(false)
+  const hydratedRef = useRef(false)
+  const rootRef = useRef<HTMLDivElement>(null)
 
-  const answered = picked !== null
-  const isCorrect = picked === quiz.answer
+  const isRedo = (redo || redoLocal) && !redoDone
+  const storedCorrect = persist ? (record?.lastResult ?? null) : null
+  const correct = isRedo
+    ? null
+    : (fallbackCorrect == null ? storedCorrect : (fallbackCorrect ? 1 : 0))
+  const effectivePicked = isRedo ? null : (picked ?? record?.draft?.picked ?? null)
+  const answered = !isRedo && (correct != null || effectivePicked != null)
+  const isCorrect = correct === 1 || (correct == null && effectivePicked != null && effectivePicked === quiz.answer)
+
+  // 首次载入记录：恢复上次选项/错题解析；只填一次，不覆盖用户刚点的选项
+  useEffect(() => {
+    if (hydratedRef.current || !record) return
+    hydratedRef.current = true
+    if (record.draft?.picked) setPicked(record.draft.picked)
+    if (!redo && record.lastResult === 0) setShowExplanation(true)
+  }, [record, redo])
+
+  // 父级 redo：同一张卡可能被复用，重置本地判题/解析
+  useEffect(() => {
+    if (!redo) return
+    setPicked(null)
+    setFallbackCorrect(null)
+    setShowExplanation(false)
+    setRedoDone(false)
+    setRedoLocal(false)
+  }, [redo])
 
   const scrollToNext = () => {
     const root = rootRef.current
@@ -73,10 +87,13 @@ export function QuizCard({ quiz, index, onAnswered, pageId, pageTitle }: Props) 
   const pick = (key: string) => {
     if (answered) return
     setPicked(key)
+    setFallbackCorrect(key === quiz.answer)
+    setRedoDone(true)
+    setRedoLocal(false)
     const ok = key === quiz.answer
     onAnswered?.(ok)
-    if (pageId) {
-      quizRecordReport(pageId, quiz.no, ok, { pageTitle, snapshot: snapshot() }).catch(() => { /* ignore */ })
+    if (persist) {
+      void store!.report(quiz.no, ok, snapshot(), key)
     }
     if (ok) {
       // 答对自动过掉：短暂反馈后滚动到下一题
@@ -102,9 +119,26 @@ export function QuizCard({ quiz, index, onAnswered, pageId, pageTitle }: Props) 
       }
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      if (!isCorrect) scrollToNext()
+      scrollToNext()
     }
   }
+
+  const enterRedo = () => {
+    setRedoLocal(true)
+    setRedoDone(false)
+    setPicked(null)
+    setFallbackCorrect(null)
+    setShowExplanation(false)
+  }
+
+  const toggleFav = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!persist) return
+    void store!.toggleFavorite(quiz.no, snapshot())
+  }
+
+  const fav = record?.isFavorite ?? false
+  const prevPicked = record?.draft?.picked ?? null
 
   return (
     <div
@@ -118,15 +152,17 @@ export function QuizCard({ quiz, index, onAnswered, pageId, pageTitle }: Props) 
           ? 'border-[var(--success)]/60'
           : answered
             ? 'border-[var(--danger)]/50'
-            : 'border-[var(--border-color)] hover:border-[var(--border-color-secondary,var(--border-color))]'
+            : isRedo
+              ? 'border-[var(--warning)]/40'
+              : 'border-[var(--border-color)] hover:border-[var(--border-color-secondary,var(--border-color))]'
       }`}
     >
-      {/* 卡片头：题号 + 状态（条目15 追加：分值徽章按开发负责人拍板移除——解析仍容忍 points 字段，只是不渲染） */}
+      {/* 卡片头：题号 + 状态 */}
       <div className="flex items-center gap-2 px-3 pt-2.5 pb-1">
         <span className="text-[12px] font-medium text-[var(--text-primary)]">
           第 {quiz.no} 题
         </span>
-        {pageId && (
+        {persist && (
           <button
             onClick={toggleFav}
             title={fav ? '取消收藏' : '收藏此题'}
@@ -137,7 +173,11 @@ export function QuizCard({ quiz, index, onAnswered, pageId, pageTitle }: Props) 
             <Star key={fav ? 'on' : 'off'} size={15} className="kb-micro-pop" fill={fav ? 'currentColor' : 'none'} />
           </button>
         )}
-        {answered && (
+        {isRedo ? (
+          <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-[var(--warning)]">
+            <RotateCcw size={12} />重做中
+          </span>
+        ) : answered ? (
           <span
             className={`ml-auto inline-flex items-center gap-1 text-[11px] font-medium ${
               isCorrect ? 'text-[var(--success)]' : 'text-[var(--danger)]'
@@ -146,7 +186,7 @@ export function QuizCard({ quiz, index, onAnswered, pageId, pageTitle }: Props) 
             {isCorrect ? <Check size={13} /> : <X size={13} />}
             {isCorrect ? '回答正确' : `正确答案 ${quiz.answer}`}
           </span>
-        )}
+        ) : null}
       </div>
 
       {/* 题干（完整 Markdown 管线：公式/图片/wiki 链接） */}
@@ -157,10 +197,11 @@ export function QuizCard({ quiz, index, onAnswered, pageId, pageTitle }: Props) 
       {/* 选项 */}
       <div className="px-3 pb-2.5 pt-1 grid grid-cols-1 gap-1.5">
         {quiz.options.map(opt => {
-          const isPicked = picked === opt.key
+          const isPicked = effectivePicked === opt.key
           const isAnswer = opt.key === quiz.answer
+          const reveal = answered && !isRedo
           let cls = 'border-[var(--border-color)] text-[var(--text-primary)] hover:border-[var(--accent)] hover:bg-[var(--bg-hover)] cursor-pointer'
-          if (answered) {
+          if (reveal) {
             if (isAnswer) cls = 'border-[var(--success)] bg-[var(--success)]/10 text-[var(--text-primary)] cursor-default'
             else if (isPicked) cls = 'border-[var(--danger)] bg-[var(--danger)]/10 text-[var(--text-primary)] cursor-default'
             else cls = 'border-[var(--border-color)] text-[var(--text-muted)] cursor-default'
@@ -178,15 +219,15 @@ export function QuizCard({ quiz, index, onAnswered, pageId, pageTitle }: Props) 
               <span className="flex-1 min-w-0 text-[13.5px] leading-relaxed [&_.prose-content]:!m-0 [&_.prose-content>*:first-child]:mt-0 [&_.prose-content>*:last-child]:mb-0">
                 <MarkdownPreview content={opt.text} />
               </span>
-              {answered && isAnswer && <Check size={15} className="shrink-0 mt-0.5 text-[var(--success)]" />}
-              {answered && isPicked && !isAnswer && <X size={15} className="shrink-0 mt-0.5 text-[var(--danger)]" />}
+              {reveal && isAnswer && <Check size={15} className="shrink-0 mt-0.5 text-[var(--success)]" />}
+              {reveal && isPicked && !isAnswer && <X size={15} className="shrink-0 mt-0.5 text-[var(--danger)]" />}
             </button>
           )
         })}
       </div>
 
       {/* 解析：答错自动展开；答对可通过"查看解析"展开 */}
-      {(showExplanation || (answered && !isCorrect)) && quiz.explanation && (
+      {(showExplanation || (answered && correct === 0)) && quiz.explanation && (
         <div className="mx-3 mb-3 px-3 py-2.5 rounded-md border border-dashed border-[var(--border-color)] bg-[var(--bg-secondary)]">
           <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-[var(--text-secondary)]">
             <span className="inline-block w-1 h-3 rounded-full bg-[var(--accent)]" />
@@ -208,9 +249,23 @@ export function QuizCard({ quiz, index, onAnswered, pageId, pageTitle }: Props) 
         </div>
       )}
 
-      {/* 键盘提示 */}
-      <div className="px-3 pb-2 text-[10px] text-[var(--text-muted)]/70">
-        {answered ? 'Enter 跳到下一题' : '点击选项或按 1-4 / A-D 作答'}
+      {/* 底部：键盘提示 / 重做 */}
+      <div className="px-3 pb-2 flex items-center gap-2 text-[10px] text-[var(--text-muted)]/70">
+        <span>
+          {isRedo
+            ? `上次选 ${prevPicked || '—'} · 重新选择一个答案`
+            : answered
+              ? 'Enter 跳到下一题'
+              : '点击选项或按 1-4 / A-D 作答'}
+        </span>
+        {answered && !isRedo && (
+          <button
+            onClick={enterRedo}
+            className="ml-auto inline-flex items-center gap-1 text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+          >
+            <RotateCcw size={11} />重做本题
+          </button>
+        )}
       </div>
     </div>
   )

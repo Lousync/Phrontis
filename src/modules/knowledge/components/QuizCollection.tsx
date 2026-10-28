@@ -77,6 +77,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
   const [collectionFilter, setCollectionFilter] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [reviewing, setReviewing] = useState<QuizItem[] | null>(null)
+  const [reviewPageId, setReviewPageId] = useState<string | undefined>(undefined)
   /** 书架「翻书」状态：true 时右侧显示书头（书名 + 返回书架），并按 bookFilter 聚焦某本书 */
   const [inBook, setInBook] = useState(false)
   /** 勾选模式 + 选中的记录 id 集合（批量重刷） */
@@ -259,12 +260,36 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
   // 分组创建/删除与标签删除的管理入口已迁左栏 QuizNavPanel
   //（quizCollectionCreate/Delete、quizTagDelete 直调 + useDataChanged 刷新；筛选状态权威源仍在本组件）
 
-  /** 重刷任意题集：单题 / 档位 / 知识点组 / 勾选批量 / 全部 共用入口 */
+  /** 重刷任意题集：单题 / 档位 / 知识点组 / 勾选批量 / 全部 共用入口（刷题模式只跑选择题） */
   const startReview = (items: QuizRecordDto[]) => {
-    const list = items
-      .filter(r => r.snapshot)
-      .map(r => ({ no: r.snapshot!.no, points: '', question: r.snapshot!.question, options: r.snapshot!.options, answer: r.snapshot!.answer, explanation: r.snapshot!.explanation }))
-    if (list.length === 0) { showToast({ type: 'warning', message: '所选题目没有可重刷的内容' }); return }
+    const all = items.filter(r => r.snapshot)
+    const choice = all.filter(r => (
+      (r.snapshot!.type ?? 'choice') === 'choice'
+      && (r.snapshot!.options?.length ?? 0) >= 2
+    ))
+    const skipped = all.length - choice.length
+    if (choice.length === 0) {
+      showToast({
+        type: 'warning',
+        message: skipped > 0 ? '简答题请在原题单内重做' : '所选题目没有可重刷的内容',
+        detail: skipped > 0 ? '刷题模式只跑选择题；简答题请打开来源页面作答' : undefined,
+      })
+      return
+    }
+    if (skipped > 0) {
+      showToast({ type: 'info', message: `已跳过 ${skipped} 道简答题`, detail: '请在原题单内重做' })
+    }
+    const list = choice.map(r => ({
+      type: 'choice' as const,
+      no: r.snapshot!.no,
+      points: '',
+      question: r.snapshot!.question,
+      options: r.snapshot!.options,
+      answer: r.snapshot!.answer,
+      referenceAnswer: '',
+      explanation: r.snapshot!.explanation,
+    }))
+    setReviewPageId(choice[0].pageId)
     setReviewing(list)
   }
 
@@ -285,6 +310,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
   const renderCard = (r: QuizRecordDto) => {
     const isExp = expanded === r.id
     const snap = r.snapshot
+    const isShort = (snap?.type ?? 'choice') === 'short'
     const summary = stripMarkdown(snap?.question || '') || r.pageTitle || '（无题干）'
     const isSel = selected.has(r.id)
     // kb-cv：视口外卡片不参与布局/绘制（长错题列表的 CSS 虚拟化，见 styles/index.css）
@@ -306,6 +332,7 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
             <div className="flex items-center gap-1.5 mt-2">
               {isExp ? <ChevronDown size={13} className="shrink-0 text-[var(--text-muted)]" /> : <ChevronRight size={13} className="shrink-0 text-[var(--text-muted)]" />}
               <span className="text-[11px] font-medium text-[var(--text-secondary)] shrink-0">第 {r.quizNo} 题</span>
+              {isShort && <span className="shrink-0 px-1 py-px rounded bg-[var(--accent)]/10 text-[10px] text-[var(--accent)]">简答</span>}
               <span className="text-[11px] text-[var(--text-muted)] truncate">{r.pageTitle}</span>
               <div className="flex-1" />
               {r.streakCorrect === 1 && (
@@ -328,8 +355,15 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
               </button>
             )}
             <button
-              onClick={() => startReview([r])}
-              title="重刷本题"
+              onClick={() => {
+                if (isShort) {
+                  if (onOpenPage) onOpenPage(r.pageId)
+                  else showToast({ type: 'info', message: '请从知识库打开原题单作答' })
+                } else {
+                  startReview([r])
+                }
+              }}
+              title={isShort ? '去原题单重做（简答题）' : '重刷本题'}
               className="shrink-0 p-1 rounded text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)]"
             >
               <RotateCcw size={13} />
@@ -357,24 +391,33 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
             <div className="text-[13.5px] leading-relaxed text-[var(--text-primary)] [&_.prose-content>*:first-child]:mt-0">
               <MarkdownPreview content={snap.question} />
             </div>
-            <div className="space-y-1">
-              {snap.options.map(o => (
-                <div
-                  key={o.key}
-                  className={`flex items-start gap-2 px-2.5 py-1.5 rounded border text-[13px] leading-relaxed ${
-                    o.key === snap.answer
-                      ? 'border-[var(--success)] bg-[var(--success)]/10 text-[var(--text-primary)]'
-                      : 'border-[var(--border-color)] text-[var(--text-secondary)]'
-                  }`}
-                >
-                  <span className="shrink-0 mt-px inline-flex items-center justify-center w-5 h-5 rounded-full border border-current text-[11px] font-medium">{o.key}</span>
-                  <span className="flex-1 min-w-0 [&_.prose-content]:!m-0 [&_.prose-content>*:first-child]:mt-0 [&_.prose-content>*:last-child]:mb-0">
-                    <MarkdownPreview content={o.text} />
-                  </span>
-                  {o.key === snap.answer && <Check size={14} className="shrink-0 mt-0.5 text-[var(--success)]" />}
-                </div>
-              ))}
-            </div>
+            {isShort ? (
+              <div className="px-2.5 py-2 rounded border border-dashed border-[var(--border-color)] text-[13px] leading-relaxed text-[var(--text-primary)] [&_.prose-content>*:first-child]:mt-0 [&_.prose-content>*:last-child]:mb-0">
+                <div className="mb-1 text-[11px] font-medium text-[var(--text-secondary)]">参考答案</div>
+                {snap.referenceAnswer
+                  ? <MarkdownPreview content={snap.referenceAnswer} />
+                  : <span className="text-[var(--text-muted)]">（旧记录没有参考答案）</span>}
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {snap.options.map(o => (
+                  <div
+                    key={o.key}
+                    className={`flex items-start gap-2 px-2.5 py-1.5 rounded border text-[13px] leading-relaxed ${
+                      o.key === snap.answer
+                        ? 'border-[var(--success)] bg-[var(--success)]/10 text-[var(--text-primary)]'
+                        : 'border-[var(--border-color)] text-[var(--text-secondary)]'
+                    }`}
+                  >
+                    <span className="shrink-0 mt-px inline-flex items-center justify-center w-5 h-5 rounded-full border border-current text-[11px] font-medium">{o.key}</span>
+                    <span className="flex-1 min-w-0 [&_.prose-content]:!m-0 [&_.prose-content>*:first-child]:mt-0 [&_.prose-content>*:last-child]:mb-0">
+                      <MarkdownPreview content={o.text} />
+                    </span>
+                    {o.key === snap.answer && <Check size={14} className="shrink-0 mt-0.5 text-[var(--success)]" />}
+                  </div>
+                ))}
+              </div>
+            )}
             {snap.explanation && (
               <div className="px-2.5 py-2 rounded border border-dashed border-[var(--border-color)] text-[13px] leading-relaxed text-[var(--text-primary)] [&_.prose-content>*:first-child]:mt-0 [&_.prose-content>*:last-child]:mb-0">
                 <div className="mb-1 text-[11px] font-medium text-[var(--text-secondary)]">解析</div>
@@ -498,9 +541,8 @@ export function QuizCollection({ onClose, spaceName, onOpenPage }: {
   const reviewPageTitle = kind === 'wrong' ? '错题重刷' : '收藏重刷'
 
   if (reviewing) {
-    // 重刷时用第一题的来源页面 ID 做上报（答对自动移出错题本）
-    const first = filtered.find(r => r.snapshot)
-    return <QuizMode quizzes={reviewing} pageTitle={reviewPageTitle} pageId={first?.pageId} onClose={() => { setReviewing(null); void load() }} />
+    // 重刷时用实际进入重刷的第一道选择题来源页做上报（答对自动移出错题本）
+    return <QuizMode quizzes={reviewing} pageTitle={reviewPageTitle} pageId={reviewPageId} onClose={() => { setReviewing(null); setReviewPageId(undefined); void load() }} />
   }
 
   return (

@@ -2489,3 +2489,16 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 契约：`.AGENT/scripts/recycle/verify-recycle-bin.mjs`（28 条）。
 
 **验收**：`verify-recycle-bin` 28/28；双 tsc 0 错；`npm run build` 通过；`verify-workbench-shell` 264 项、`verify-help-retrieval` 171/171、`verify-release-notes` 全绿。真机观感待验：头部说明行在窄窗是否折行、角标小圆点是否够显眼。
+
+## 2026-10-28 · 题单简答题与答题痕迹（v3.15.0）
+
+**现状 / 用户反馈**：AI 出的大题把 `<details>` 原文当正文显示；选择题和简答的作答状态刷新后丢失；错题重做没有题单内入口。
+
+**改动点**：
+- 简答题新协议 `type:"short"` + `referenceAnswer`；`ShortAnswerCard` 提供作答框、参考答案折叠、自评「答对了 / 答错了」。
+- 阅读态标题下新增 `QuizSheetBar`（已答 / 错题 / 草稿 + 错题重做）；`QuizReviewPane` 在页面内做错题重做，不是中央模态。
+- 页面级 `QuizRecordStore` 用 `useSyncExternalStore` 按题号订阅；草稿防抖 500ms、失焦/卸载 flush，保存不广播、判题才广播。
+- 旧 `<details>` 转只读 `spoiler-answer`；408 老格式简答保持 spoiler，不改造成可作答卡。
+- 刷题模式仍只跑选择题；错题本里的简答记录改为「去原页重做」。
+
+**验收**：`verify-quiz-fence` / `verify-quiz-record` PASS；双 tsc 0 错；`npm run build` 通过。真机观感待验：长题单输入是否只重渲染当前卡、标题下状态条在窄窗是否折行。

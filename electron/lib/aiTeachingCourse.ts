@@ -10,6 +10,7 @@ import { renameWorkspacePath, uniqueFileName } from './workspaceManager'
 import { createAgentSession, getAgentMessages, getAgentSession, sessionExists } from './agentSessionRepo'
 import { invokeLlmInternal, firstEnabledModelSpec } from './llmService'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
+import { ensureQuizDocFrontmatter } from './quizDocPure'
 import {
   parseCourseMd,
   rewriteCourseMd,
@@ -1049,7 +1050,9 @@ export function archiveOrganizedPage(sessionId: string, title: unknown, content:
     mkdirSync(dirAbs, { recursive: true })
     const base = sanitizeTitle(String(title ?? '整理'))
     const fname = uniqueFileName(dirAbs, base.endsWith('.md') ? base : `${base}.md`)
-    writeFileSync(join(dirAbs, fname), String(content ?? '').replace(/\r\n/g, '\n'), 'utf-8')
+    // 题单落盘即写 frontmatter id（同 organizeDoc；非 quiz 文档原样返回）
+    const body = ensureQuizDocFrontmatter(String(title ?? '整理'), String(content ?? '').replace(/\r\n/g, '\n'))
+    writeFileSync(join(dirAbs, fname), body, 'utf-8')
     broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: rel })
     return { ok: true, relPath: `${rel}/${fname}`, absPath: join(dirAbs, fname) }
   } catch (e) {

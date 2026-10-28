@@ -276,6 +276,18 @@ export interface QuizSnapshotDto {
   options: QuizOptionDto[]
   answer: string
   explanation: string
+  /** 新：题型；旧快照缺省 = choice */
+  type?: 'choice' | 'short'
+  /** 新：简答题参考答案 */
+  referenceAnswer?: string
+}
+/** 作答痕迹（只在 draft_json 里；不影响错题计数） */
+export interface QuizDraftDto {
+  picked: string | null
+  text: string
+  revealed: boolean
+  assessedText: string | null
+  updatedAt: string | null
 }
 export interface QuizRecordDto {
   id: string
@@ -297,6 +309,8 @@ export interface QuizRecordDto {
   sourceChapter: string
   collectionIds: string[]
   tagIds: string[]
+  /** 作答痕迹；旧记录为 null */
+  draft: QuizDraftDto | null
   createdAt: string
   updatedAt: string
 }
@@ -2402,6 +2416,8 @@ export interface ElectronAPI {
   updateKnowledgeCategory: (id: string, d: UpdateKnowledgeCategoryDTO) => Promise<KnowledgeCategory>
   deleteKnowledgeCategory: (id: string) => Promise<void>
   getKnowledgePages: (categoryId?: string | null) => Promise<KnowledgePage[]>
+  /** 按仓库相对路径反查知识页（题单 store 在只有 relPath 时解析 pageId） */
+  knowledgeFindByRel: (relPath: string) => Promise<{ id: string; title: string; path: string } | null>
   /** 知识索引 warnings（.ignore 坏行/规则未命中磁盘条目等）；空数组 = 无警告 */
   getKnowledgeIndexWarnings: () => Promise<string[]>
   getKnowledgePageById: (id: string) => Promise<KnowledgePage | null>
@@ -2786,7 +2802,9 @@ export interface ElectronAPI {
   deleteBlogTemplate: (id: string) => Promise<void>
   // quiz records (收藏 + 错题本)
   quizRecordGetByPage: (pageId: string) => Promise<QuizRecordDto[]>
-  quizRecordReport: (pageId: string, quizNo: number, correct: boolean, meta: { pageTitle?: string; snapshot?: QuizSnapshotDto }) => Promise<QuizRecordDto | null>
+  quizRecordReport: (pageId: string, quizNo: number, correct: boolean, meta: { pageTitle?: string; snapshot?: QuizSnapshotDto; picked?: string }) => Promise<QuizRecordDto | null>
+  quizRecordSaveDraft: (pageId: string, quizNo: number, patch: { picked?: string | null; text?: string; revealed?: boolean; assessedText?: string | null }, meta: { pageTitle?: string; snapshot?: QuizSnapshotDto }) => Promise<QuizRecordDto>
+  quizRecordMigratePageId: (oldPageId: string, newPageId: string) => Promise<{ moved: number; merged: number }>
   quizRecordToggleFavorite: (pageId: string, quizNo: number, meta: { pageTitle?: string; snapshot?: QuizSnapshotDto }) => Promise<QuizRecordDto>
   quizRecordList: (opts?: { kind?: 'favorite' | 'wrong' | 'all'; sourceSpace?: string; collectionId?: string }) => Promise<QuizRecordDto[]>
   quizRecordRemove: (pageId: string, quizNo: number) => Promise<void>

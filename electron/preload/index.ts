@@ -148,6 +148,7 @@ const api = {
   updateKnowledgeCategory: (id: string, data: unknown) => ipcRenderer.invoke('knowledge:updateCategory', id, data),
   deleteKnowledgeCategory: (id: string) => ipcRenderer.invoke('knowledge:deleteCategory', id),
   getKnowledgePages: (categoryId?: string | null) => ipcRenderer.invoke('knowledge:getPages', categoryId),
+  knowledgeFindByRel: (relPath: string) => ipcRenderer.invoke('knowledge:findByRel', relPath),
   // 索引 warnings（.ignore 坏行/规则未命中）：知识库 UI 消费（2026-09-08 §10.1）
   getKnowledgeIndexWarnings: () => ipcRenderer.invoke('knowledge:getIndexWarnings'),
   getKnowledgePageById: (id: string) => ipcRenderer.invoke('knowledge:getPageById', id),
@@ -688,6 +689,8 @@ const api = {
   // quiz records (收藏 + 错题本，全知识包通用)
   quizRecordGetByPage: (pageId: string) => ipcRenderer.invoke('quizRecord:getByPage', pageId),
   quizRecordReport: (pageId: string, quizNo: number, correct: boolean, meta: unknown) => ipcRenderer.invoke('quizRecord:report', pageId, quizNo, correct, meta),
+  quizRecordSaveDraft: (pageId: string, quizNo: number, patch: unknown, meta: unknown) => ipcRenderer.invoke('quizRecord:saveDraft', pageId, quizNo, patch, meta),
+  quizRecordMigratePageId: (oldPageId: string, newPageId: string) => ipcRenderer.invoke('quizRecord:migratePageId', oldPageId, newPageId),
   quizRecordToggleFavorite: (pageId: string, quizNo: number, meta: unknown) => ipcRenderer.invoke('quizRecord:toggleFavorite', pageId, quizNo, meta),
   quizRecordList: (opts: unknown) => ipcRenderer.invoke('quizRecord:list', opts),
   quizRecordRemove: (pageId: string, quizNo: number) => ipcRenderer.invoke('quizRecord:remove', pageId, quizNo),

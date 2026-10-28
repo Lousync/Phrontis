@@ -33,14 +33,20 @@ export function QuizMode({ quizzes, pageTitle, onClose, pageId, onFinish }: Prop
   const [showHint, setShowHint] = useState(true)
   const [favMap, setFavMap] = useState<{ [no: number]: boolean }>({})
 
-  const quiz = quizzes[idx]
-  const total = quizzes.length
+  // 刷题模式只跑选择题；调用方可能把整页（含简答）直接传进来，这里兜底过滤。
+  const choiceQuizzes = useMemo(
+    () => quizzes.filter(q => q.type === 'choice' && q.options.length >= 2),
+    [quizzes],
+  )
+  const quiz = choiceQuizzes[idx]
+  const total = choiceQuizzes.length
   const answered = picked !== null
   const isCorrect = picked === quiz?.answer
   const correctCount = records.filter(r => r.correct).length
 
   const snapshot = (q: QuizItem) => ({
     no: q.no,
+    type: 'choice' as const,
     question: q.question,
     options: q.options,
     answer: q.answer,
@@ -70,7 +76,7 @@ export function QuizMode({ quizzes, pageTitle, onClose, pageId, onFinish }: Prop
       const ok = key === quiz.answer
       setRecords(rs => [...rs, { no: quiz.no, correct: ok, picked: key }])
       if (pageId) {
-        quizRecordReport(pageId, quiz.no, ok, { pageTitle, snapshot: snapshot(quiz) }).catch(() => { /* ignore */ })
+        quizRecordReport(pageId, quiz.no, ok, { pageTitle, snapshot: snapshot(quiz), picked: key }).catch(() => { /* ignore */ })
       }
       if (ok) window.setTimeout(goNext, 500)
     },
@@ -193,7 +199,7 @@ export function QuizMode({ quizzes, pageTitle, onClose, pageId, onFinish }: Prop
                 <div className="mb-2 text-[12px] font-medium text-[var(--text-secondary)]">错题回顾</div>
                 <div className="space-y-3">
                   {wrongList.map(r => {
-                    const q = quizzes.find(x => x.no === r.no)
+                    const q = choiceQuizzes.find(x => x.no === r.no)
                     if (!q) return null
                     return (
                       <div key={r.no} className="rounded-lg border border-[var(--danger)]/40 bg-[var(--bg-secondary)] px-4 py-3">

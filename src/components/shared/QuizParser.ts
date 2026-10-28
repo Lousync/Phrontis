@@ -1,13 +1,15 @@
 /**
- * 选择题解析器（刷题模式数据层）
+ * 题目解析器（题单 / 刷题模式数据层）
  *
  * 双轨输入：
  * 1. 旧 408 知识包格式（兼容）：`### 第 N 题（X 分）` 块 + `- **A.**` 选项行 +
  *    ```spoiler-answer 块内 `**答案：X**` / `**解析**：...`
- * 2. 新规范格式（推荐给未来数学/英语/政治知识包）：```quiz 围栏内 JSON
+ * 2. 新规范格式（推荐）：```quiz 围栏内 JSON
+ *    - 选择题：{"no":1,"question":"...","options":[...],"answer":"A","explanation":"..."}
+ *    - 简答题：{"type":"short","no":4,"question":"...","referenceAnswer":"...","explanation":"..."}
  *
- * 渲染层流程：preprocessContent(旧→quiz 围栏) → ReactMarkdown 的 pre 组件
- * 识别 language-quiz → parseQuizFence → QuizCard / QuizMode 消费。
+ * 渲染层流程：preprocessContent(旧→quiz 围栏 / `<details>`→spoiler) → ReactMarkdown 的 pre 组件
+ * 识别 language-quiz → parseQuizFence → QuizCard / ShortAnswerCard / QuizMode 消费。
  * 无法识别的块静默降级为原文，绝不破坏现有渲染。
  */
 
@@ -16,12 +18,18 @@ export interface QuizOption {
   text: string
 }
 
+export type QuizItemType = 'choice' | 'short'
+
 export interface QuizItem {
+  type: QuizItemType
   no: number
   points: string
   question: string
   options: QuizOption[]
+  /** 选择题正确 key（多选为 "ABD"）；简答题为空串 */
   answer: string
+  /** 简答题参考答案（Markdown）；选择题为空串 */
+  referenceAnswer: string
   explanation: string
 }
 
@@ -101,7 +109,16 @@ function parseQuestionBlock(block: string): QuizItem | null {
     question = question.replace(/^###\s+第\s*\d+\s*题(?:\s*[（(]\s*\d+\s*分\s*[）)])?\s*\n?/, '').trim()
   }
 
-  return { no, points, question, options, answer, explanation }
+  return {
+    type: 'choice',
+    no,
+    points,
+    question,
+    options,
+    answer,
+    referenceAnswer: '',
+    explanation,
+  }
 }
 
 /** 旧格式块 → 新 quiz 围栏 JSON 文本 */
@@ -111,26 +128,150 @@ function toQuizFence(q: QuizItem): string {
 }
 
 /**
- * 内容预处理：把旧 408 格式的选择题块替换为 ```quiz 围栏；
- * 非选择题块（大题/无法识别）原样保留。
+ * 把旧 `<details><summary>…</summary>…</details>` 折叠转成只读 `spoiler-answer` 围栏。
+ * 只处理代码围栏外的块；主体含三反引号围栏时不转换（SpoilerBlock 不支持嵌套围栏）。
+ */
+function detailsToSpoiler(block: string): string | null {
+  const summaryMatch = block.match(/<summary\b[^>]*>([\s\S]*?)<\/summary>/i)
+  const summary = stripHtml(summaryMatch?.[1] ?? '').trim()
+  const body = block
+    .replace(/<details\b[^>]*>/gi, '')
+    .replace(/<\/details>/gi, '')
+    .replace(/<summary\b[^>]*>[\s\S]*?<\/summary>/gi, '')
+    .trim()
+  if (!body) return null
+  // 三反引号/波浪线围栏包在 spoiler-answer 外层会提前截断（既有 SpoilerBlock 限制）
+  if (/^\s*(?:```|~~~)/m.test(body)) return null
+  const prefix = summary && !/参考|答案|解析/.test(summary) ? `**${summary}**\n\n` : ''
+  return '```spoiler-answer\n' + prefix + body + '\n```'
+}
+
+/** 极简 HTML 去标签（summary 只用于保留一行语义，不渲染 HTML） */
+function stripHtml(s: string): string {
+  return s.replace(/<[^>]*>/g, ' ')
+}
+
+/**
+ * 行级转换 `<details>`（不用全局正则）：跳过 ``` / ~~~ 代码围栏，
+ * 支持一行内出现、多个块、简单嵌套。无法安全转换的块原样保留。
+ */
+function convertDetailsBlocks(content: string): string {
+  if (!content.includes('<details')) return content
+  const lines = content.split('\n')
+  const out: string[] = []
+  let i = 0
+  let fenceChar: '`' | '~' | null = null
+  let fenceLen = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    const fm = line.match(/^\s*(`{3,}|~{3,})/)
+    if (fm) {
+      const seq = fm[1]
+      const ch = seq[0] as '`' | '~'
+      if (!fenceChar) { fenceChar = ch; fenceLen = seq.length }
+      else if (ch === fenceChar && seq.length >= fenceLen) { fenceChar = null; fenceLen = 0 }
+      out.push(line); i++; continue
+    }
+    if (!fenceChar && /<details\b/i.test(line)) {
+      const start = line.search(/<details\b/i)
+      const prefix = line.slice(0, start)
+      let block = line.slice(start)
+      let depth = countDetailsOpen(block) - countDetailsClose(block)
+      let j = i
+      while (depth > 0 && j + 1 < lines.length) {
+        j++
+        block += '\n' + lines[j]
+        depth += countDetailsOpen(lines[j]) - countDetailsClose(lines[j])
+      }
+      if (depth === 0) {
+        const converted = detailsToSpoiler(block)
+        if (converted !== null) {
+          if (prefix.trim()) out.push(prefix)
+          out.push(...converted.split('\n'))
+          i = j + 1
+          continue
+        }
+      }
+    }
+    out.push(line)
+    i++
+  }
+  return out.join('\n')
+}
+
+function countDetailsOpen(s: string): number {
+  return (s.match(/<details\b/gi) ?? []).length
+}
+function countDetailsClose(s: string): number {
+  return (s.match(/<\/details>/gi) ?? []).length
+}
+
+/**
+ * 内容预处理：
+ * - 旧 408 选择题块 → ```quiz 围栏；
+ * - 旧 `<details>` 折叠 → ```spoiler-answer 只读围栏；
+ * - 非选择题块（大题/无法识别）原样保留。
  */
 export function preprocessContent(content: string): string {
-  if (!content || !content.includes('第') || !content.includes('```')) return content
-  return content.replace(blockRegex(), (full: string, lead: string, body: string) => {
+  if (!content) return content
+  let out = convertDetailsBlocks(content)
+  if (!out.includes('第') || !out.includes('```')) return out
+  out = out.replace(blockRegex(), (full: string, lead: string, body: string) => {
     const quiz = parseQuestionBlock(body)
     return quiz ? lead + toQuizFence(quiz) : full
   })
+  return out
 }
 
-/** 结构校验（解析与宽容修复共用）：有 options≥2 且 answer 非空才算题 */
+/** 结构校验（解析与宽容修复共用）：选择题有 options≥2 且 answer 非空；简答题有参考答案 */
 function asQuizItem(raw: unknown): QuizItem | null {
   if (typeof raw !== 'object' || raw === null) return null
-  const q = raw as QuizItem
-  if (
-    !Array.isArray(q.options) || q.options.length < 2 ||
-    typeof q.answer !== 'string' || !q.answer
-  ) return null
-  return q
+  const q = raw as Record<string, unknown>
+  const rawType = q.type
+  const type: QuizItemType | null = rawType === undefined || rawType === 'choice'
+    ? 'choice'
+    : rawType === 'short'
+      ? 'short'
+      : null
+  if (!type) return null
+  const no = Number(q.no)
+  if (!Number.isInteger(no) || no <= 0) return null
+  const question = typeof q.question === 'string' ? q.question : ''
+  if (!question.trim()) return null
+  const explanation = typeof q.explanation === 'string' ? q.explanation : ''
+  const points = typeof q.points === 'string' ? q.points : ''
+  if (type === 'short') {
+    const referenceAnswer = typeof q.referenceAnswer === 'string' ? q.referenceAnswer : ''
+    if (!referenceAnswer.trim()) return null
+    return {
+      type,
+      no,
+      points,
+      question,
+      options: [],
+      answer: '',
+      referenceAnswer,
+      explanation,
+    }
+  }
+  const rawOptions = Array.isArray(q.options) ? q.options : []
+  const options = rawOptions
+    .filter((o): o is Record<string, unknown> => typeof o === 'object' && o !== null)
+    .map(o => ({ key: String(o.key ?? '').trim().toUpperCase(), text: String(o.text ?? '') }))
+    .filter(o => o.key)
+  if (options.length < 2) return null
+  const answer = typeof q.answer === 'string' ? q.answer.trim().toUpperCase() : ''
+  if (!answer) return null
+  return {
+    type,
+    no,
+    points,
+    question,
+    options,
+    answer,
+    referenceAnswer: '',
+    explanation,
+  }
 }
 
 /** 解析 ```quiz 围栏内的 JSON → QuizItem；非法返回 null */
@@ -190,12 +331,15 @@ export function parseQuizFenceLoose(text: string): QuizItem | null {
   return asQuizItem(looseJsonParse(text))
 }
 
-/** 从页面 Markdown 中提取全部可判题选择题（供刷题模式与卡片渲染共用） */
+/**
+ * 从页面 Markdown 中提取全部可判题题目（供刷题模式与卡片渲染共用）。
+ * 按围栏提取，不用 `\\{...\\}` 非贪婪 —— 参考答案里的 `}` 不会提前截断。
+ */
 export function extractQuizzes(content: string): QuizItem[] {
   if (!content) return []
   const processed = preprocessContent(content)
   const out: QuizItem[] = []
-  const re = /```quiz\s*\n(\{[\s\S]*?\})\n```/g
+  const re = /```quiz[^\n]*\n([\s\S]*?)\n```/g
   let m: RegExpExecArray | null
   while ((m = re.exec(processed)) !== null) {
     const q = parseQuizFence(m[1])
@@ -204,3 +348,13 @@ export function extractQuizzes(content: string): QuizItem[] {
   return out
 }
 
+/** 重复题号（同一页两个 `no` 相同会共享答题记录）：供题单条做防御提示 */
+export function duplicateQuizNos(items: QuizItem[]): number[] {
+  const seen = new Set<number>()
+  const dup = new Set<number>()
+  for (const q of items) {
+    if (seen.has(q.no)) dup.add(q.no)
+    else seen.add(q.no)
+  }
+  return Array.from(dup).sort((a, b) => a - b)
+}
