@@ -531,6 +531,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [reqLayer, setReqLayer] = useState<ReqLayer>('workspace')
   /** 上段交接内容（界面条） */
   const [prevHandoff, setPrevHandoff] = useState('')
+  /** prevHandoff 归属的段会话：切段时旧文本不闪到新段 */
+  const [prevHandoffSid, setPrevHandoffSid] = useState<string | null>(null)
   const [handoffOpen, setHandoffOpen] = useState(true)
   const courseEnabled = !!activeWs && activeWs !== '__none__'
   const courseReadonly = !!activeSegmentSid && activeId === activeSegmentSid && segmentStatus === 'ended'
@@ -575,15 +577,24 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const off = onAiTeachCourseRefresh((p) => { if (p.wsId === activeWsRef.current) { void reloadCourse(); if (sourcePayload) void reloadSources() } })
     return off
   }, [reloadCourse, reloadSources, sourcePayload])
-  // 上段交接：当前会话 = 段时读取，展示为可折叠交接条
+  // 上段交接：当前会话 = 段时读取；首轮对话前展示，发出首条用户消息后收起卸载
   useEffect(() => {
     const sid = activeId
     const lesson = sid ? courseState?.lessons[sid] : null
-    if (!lesson || !sid) { setPrevHandoff(''); return }
+    if (!lesson || !sid) { setPrevHandoff(''); setPrevHandoffSid(null); return }
     let alive = true
     aiTeachCourseReadPrevHandoff(sid)
-      .then((r) => { if (alive) { setPrevHandoff(r?.ok ? (r.text ?? '') : ''); setHandoffOpen(true) } })
-      .catch(() => { if (alive) setPrevHandoff('') })
+      .then((r) => {
+        if (!alive) return
+        setPrevHandoff(r?.ok ? (r.text ?? '') : '')
+        setPrevHandoffSid(sid)
+        setHandoffOpen(true)
+      })
+      .catch(() => {
+        if (!alive) return
+        setPrevHandoff('')
+        setPrevHandoffSid(sid)
+      })
     return () => { alive = false }
   }, [activeId, courseState?.lessons])
   const wsActive = activeWs && activeWs !== '__none__' ? wsList.find(w => w.id === activeWs) ?? null : null
@@ -731,6 +742,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   /** 当前 messages 归属的会话 id（refreshMessages 里更新）——把「随会话」的 UI（```ask 提问卡等）
    *  严格绑到 activeId：切会话是「先换 activeId、再异步拉 messages」，空窗里旧会话的卡片会串到新会话。 */
   const messagesSidRef = useRef<string | null>(null)
+  /** 首轮交接条：仅当前段、且消息 / 交接都归属当前段、还没有用户消息时显示。 */
+  const segmentHandoffVisible = !!activeSegment && activeId === activeSegmentSid
+    && prevHandoffSid === activeSegmentSid
+    && messagesSidRef.current === activeSegmentSid
+    && !messages.some(m => m.role === 'user')
   // v3.2.0 条目6：原先这里还有个 `bottomRef` 死锚点（定义了、也渲染了，全仓无人读取）——
   // 它就是「滚底实现丢了」的物证。本条改用直接赋值 `scrollTop = scrollHeight`（同 MessageList 范式、
   // 与 rules 1/2 的写法一致），不再需要锚点元素，故连同其渲染点一并移除。
@@ -3172,17 +3188,23 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         </span>
                       </div>
                     )}
-                    {activeSegment && activeId === activeSegmentSid && prevHandoff && (
-                      <div className="mb-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-hidden kb-view-in">
-                        <button type="button" onClick={() => setHandoffOpen(v => !v)}
-                          className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-                          <ChevronDown size={12} className={`transition-transform ${handoffOpen ? '' : '-rotate-90'}`} />
-                          上一段交接（同章）
-                        </button>
-                        {handoffOpen && (
-                          <div className="px-2.5 pb-2 text-[11.5px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap max-h-[160px] overflow-y-auto">{prevHandoff.replace(/^#[^\n]*\n?/, '')}</div>
+                    {activeSegment && activeId === activeSegmentSid && prevHandoff && prevHandoffSid === activeSegmentSid && (
+                      <Collapsible open={segmentHandoffVisible} innerClassName="" className="shrink-0">
+                        {() => (
+                          <div className="mb-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-hidden kb-view-in">
+                            <button type="button" onClick={() => setHandoffOpen(v => !v)}
+                              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
+                              <ChevronDown size={12} className={`kb-chevron ${handoffOpen ? '' : '-rotate-90'}`} />
+                              上一段交接（同章）
+                            </button>
+                            <Collapsible open={handoffOpen} innerClassName="">
+                              {() => (
+                                <div className="px-2.5 pb-2 text-[11.5px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap max-h-[160px] overflow-y-auto">{prevHandoff.replace(/^#[^\n]*\n?/, '')}</div>
+                              )}
+                            </Collapsible>
+                          </div>
                         )}
-                      </div>
+                      </Collapsible>
                     )}
                     {activeSegment && activeId === activeSegmentSid && (
                       <div className="mb-1.5 flex flex-wrap items-center gap-1.5 kb-view-in">
