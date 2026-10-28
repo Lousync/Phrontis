@@ -41,6 +41,20 @@ check('重写写回 [c7]', rewritten.includes('## [c7] 第七章 进程'), rewri
 const round = coursePure.parseCourseMd(rewritten)
 check('重写往返章 ID / 名称 / 知识点不丢', JSON.stringify(round) === JSON.stringify(outline), JSON.stringify(round))
 
+// ---------------------------------------------------------------- 1.5 交接标题闸门
+console.log('\n=== 1.5 交接标题闸门 ===')
+for (const t of ['交接', '生成交接文档', '整理一下交接', 'Hand-off', 'hand off', '练习·交接']) {
+  check(`拒绝交接标题：${t}`, coursePure.isHandoffTitle(t) === true, String(coursePure.isHandoffTitle(t)))
+}
+for (const t of ['练习题', '段末总结', '课堂笔记']) {
+  check(`放行普通标题：${t}`, coursePure.isHandoffTitle(t) === false, String(coursePure.isHandoffTitle(t)))
+}
+const handoffFiles = new Set(['handoff.md', 'standard.md'])
+check('收尾幂等：handoffRel 存在时优先复用', coursePure.pickReusableHandoff('handoff.md', 'standard.md', (r) => handoffFiles.has(r)) === 'handoff.md')
+check('收尾幂等：handoffRel 缺失时回退标准路径', coursePure.pickReusableHandoff('missing.md', 'standard.md', (r) => handoffFiles.has(r)) === 'standard.md')
+check('收尾幂等：两份都不存在时重新生成', coursePure.pickReusableHandoff('missing.md', 'also-missing.md', (r) => handoffFiles.has(r)) === null)
+check('收尾幂等：空路径被忽略', coursePure.pickReusableHandoff('', null, () => true) === null)
+
 // ---------------------------------------------------------------- 2. progress v1 -> v2
 console.log('\n=== 2. progress v1 -> v2 ===')
 const v1 = {

@@ -2719,7 +2719,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'course.organize.archive',
     title: '整理对话并归档',
-    description: '把一段内容整理成 markdown 一页并归档到指定目录。target 给仓库相对目录（可先用 vault.list/search 定位并自行判断最贴切的目录）；缺省落本会话产物目录 output/。返回相对路径与**绝对路径**（务必把绝对路径告诉用户，说明放到了哪里）。',
+    description: '把一段内容整理成 markdown 一页并归档到指定目录。target 给仓库相对目录（可先用 vault.list/search 定位并自行判断最贴切的目录）；缺省落本会话产物目录 output/。返回相对路径与**绝对路径**（务必把绝对路径告诉用户，说明放到了哪里）。不要用它创建交接文档；交接只由「收尾本段」系统生成。',
     inputSchema: {
       type: 'object',
       properties: {

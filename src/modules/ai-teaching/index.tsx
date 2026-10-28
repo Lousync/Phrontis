@@ -281,6 +281,18 @@ function sanitizeCourseAssistantAsk(block: AskBlock): AskBlock {
   return { ...block, options: options.slice(0, 6) }
 }
 
+/** 段会话兜底：交接只由「收尾本段」生成，过滤模型偶发的写交接 ask 选项。 */
+function sanitizeSegmentAsk(block: AskBlock): AskBlock {
+  if (block.kind !== 'single') return block
+  const banned = /生成.*交接|写.*交接|整理.*交接|输出.*交接|做.*交接|handoff/i
+  const options = block.options.filter((o) => !banned.test(o.replace(/\s+/g, '')))
+  if (options.length === block.options.length) return block
+  for (const safe of ['继续下一个知识点', '再看一个例子']) {
+    if (!options.includes(safe)) options.push(safe)
+  }
+  return { ...block, options: options.slice(0, 6) }
+}
+
 export interface PendingAsk {
   question: string
   source?: { type: string; relPath: string; page: number; excerpt: string }
@@ -1304,7 +1316,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     showToast({ type: 'info', message: '本段已收尾 · 正在生成交接…' })
     await reloadCourse()
     const f = await aiTeachCourseFinalizeSegment(sid).catch(() => null)
-    if (f?.skipped) showToast({ type: 'info', message: '本段没有内容，未生成交接' })
+    if (f?.reused) { showToast({ type: 'info', message: '本段交接已存在，未重复生成', detail: f.relPath }); await reloadCourse() }
+    else if (f?.skipped) showToast({ type: 'info', message: '本段没有内容，未生成交接' })
     else if (f?.ok) { showToast({ type: 'success', message: '交接已生成（交接.md）' }); await reloadCourse() }
     else showToast({ type: 'warning', message: `交接生成失败：${f?.error ?? ''}（可手动补写）` })
   }, [reloadCourse])
@@ -1423,10 +1436,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       if (m.role === 'user') return null
       const mt = /```ask[^\n]*\n([\s\S]*?)```/.exec(m.content)
       const block = mt ? parseAskBlock(mt[1], m.id ?? `idx${i}`) : null
-      return block && assistantSid && activeId === assistantSid ? sanitizeCourseAssistantAsk(block) : block
+      if (!block) return null
+      if (activeSegmentSid && activeId === activeSegmentSid) return sanitizeSegmentAsk(block)
+      return assistantSid && activeId === assistantSid ? sanitizeCourseAssistantAsk(block) : block
     }
     return null
-  }, [messages, activeId, assistantSid])
+  }, [messages, activeId, assistantSid, activeSegmentSid])
   const [askDismissed, setAskDismissed] = useState<string | null>(null)
   const [askPicks, setAskPicks] = useState<Record<number, string>>({})
   // 提问卡 v2（WorkBuddy 式）：整卷 ‹k/n› 翻页 + 每题「其他补充」自定义回答

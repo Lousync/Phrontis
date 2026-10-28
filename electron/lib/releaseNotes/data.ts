@@ -4,11 +4,44 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：62
+ * 版本数：63
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.15.1",
+    "date": "2026-10-28",
+    "summary": "本版一句话：AI 教学段收尾只保留一份交接——对话里不再出现「生成交接文档」，整理归档也不能写交接；重复收尾复用已有文件。",
+    "groups": [
+      {
+        "title": "AI 教学",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "交接唯一写者",
+            "rest": "段会话提示与 ask 协议禁止「生成交接 / 写交接 / 整理交接 / 输出交接」类选项；客户端兜底过滤坏选项并补「继续下一个知识点 / 再看一个例子」。",
+            "sub": []
+          },
+          {
+            "lead": "归档工具硬闸",
+            "rest": "`course.organize.archive` 的标题命中「交接 / handoff」时直接拒绝，提示交接由「收尾本段」统一生成。",
+            "sub": []
+          },
+          {
+            "lead": "收尾幂等",
+            "rest": "已有 `handoffRel` 或标准 `{段目录}/交接.md` 时直接复用，不重复调用模型、不覆盖文件；重复收尾会提示「本段交接已存在」。",
+            "sub": []
+          },
+          {
+            "lead": "帮助文档同步",
+            "rest": "明确交接只由「收尾本段」生成一份，对话里不会另写交接文件。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.15.0",
     "date": "2026-10-28",

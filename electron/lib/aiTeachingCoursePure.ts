@@ -37,6 +37,27 @@ export interface CourseUnitProgress {
   summaryRel?: string | null
 }
 
+/**
+ * 交接文档标题闸门：AI 只能通过「收尾本段」生成交接，整理归档不得创建交接页。
+ * 归一化去掉空白与分隔符，兼容「交接.md」「生成交接」「hand-off」等写法。
+ */
+export function isHandoffTitle(title: unknown): boolean {
+  const s = String(title ?? '').replace(/[\s._-]+/g, '').toLowerCase()
+  return s.includes('交接') || s.includes('handoff')
+}
+
+/** 收尾幂等：优先复用 handoffRel，缺失时回退标准 `{段目录}/交接.md`。 */
+export function pickReusableHandoff(
+  handoffRel: string | null | undefined,
+  standardRel: string | null | undefined,
+  exists: (rel: string) => boolean,
+): string | null {
+  for (const rel of [handoffRel, standardRel]) {
+    if (rel && exists(rel)) return rel
+  }
+  return null
+}
+
 /** 字段清洗：去换行、把 `|` 换成全角，避免破坏行格式 */
 export function cleanField(v: unknown): string {
   return String(v ?? '').replace(/[\r\n]+/g, ' ').replace(/\|/g, '／').trim()

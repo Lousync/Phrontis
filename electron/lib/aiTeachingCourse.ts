@@ -19,6 +19,8 @@ import {
   mergeOutlineAdditions,
   moveUnitInOutline,
   normalizeProgressFile,
+  isHandoffTitle,
+  pickReusableHandoff,
   type CourseOutline,
   type CourseUnitProgress,
   type CourseUnitStatus,
@@ -649,10 +651,26 @@ function transcriptOf(sessionId: string, limit = 6000): string {
   return text.length > limit ? text.slice(-limit) : text
 }
 
-/** 段收尾后：生成 交接.md（固定四段）落本段夹，并写 handoffRel。 */
-export async function finalizeSegment(sessionId: string, getSetting: (key: string) => unknown): Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean }> {
+/** 段收尾后：生成 交接.md（固定四段）落本段夹，并写 handoffRel。
+ *  幂等：已有交接（handoffRel 优先，标准路径兜底）直接复用，不重复调用模型或覆盖文件。 */
+export async function finalizeSegment(sessionId: string, getSetting: (key: string) => unknown): Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean; reused?: boolean }> {
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return { ok: false, error: '会话未归属工作区' }
+  const vault = getCurrentVault()
+  if (!vault) return { ok: false, error: '尚未打开仓库' }
+  const f = readProgressFile()
+  const s = wsState(f, wsId)
+  const lesson = s.lessons[sessionId]
+  const folderRel = lesson ? lessonFolderRel(sessionId, getSetting) : null
+  const standardRel = folderRel ? `${folderRel}/交接.md` : null
+  const existingRel = pickReusableHandoff(lesson?.handoffRel, standardRel, (rel) => existsSync(join(vault.rootPath, rel)))
+  if (existingRel) {
+    if (lesson && lesson.handoffRel !== existingRel) {
+      lesson.handoffRel = existingRel
+      persist(f)
+    }
+    return { ok: true, relPath: existingRel, reused: true }
+  }
   // 空段（零消息）不生成占位交接
   const msgs = getAgentMessages(sessionId).filter((m) => m.role === 'user' || m.role === 'assistant')
   if (msgs.length === 0) return { ok: true, skipped: true }
@@ -665,8 +683,6 @@ export async function finalizeSegment(sessionId: string, getSetting: (key: strin
   const w = writeFolderFile(sessionId, '交接.md', `# 交接 · ${title}\n\n${body}\n`, getSetting)
   if (w.ok && w.relPath) {
     try {
-      const f = readProgressFile()
-      const s = wsState(f, wsId)
       if (s.lessons[sessionId]) {
         s.lessons[sessionId].handoffRel = w.relPath
         persist(f)
@@ -817,6 +833,7 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     lines.push(`\n【已完成知识点（可被引用/跳转）】\n` + finishedUnits.map((u) => `- ${u.name}`).join('\n'))
     lines.push('当学生想「回顾/回看」某个已完成知识点，或你判断学生对某已完成知识点完全没有掌握/印象时，**另起一行**输出：`跳转：<知识点名>`；系统会把它渲染成可点击的跳转按钮（一句最多一个）。')
   }
+  lines.push('交接纪律：交接文档只由用户点右上角「收尾本段」时由系统生成。你不要在对话中提供「生成交接文档 / 写交接 / 整理交接 / 输出交接」这类选项，也不要自行创建 `交接.md` 或任何交接文件；本段讲完只需在正文里建议用户点「收尾本段」。')
   lines.push('教学纪律：本段只讲上面列出的知识点，按用户节奏推进；当前聚焦哪个就先讲哪个，讲完可问用户是否继续下一个或换焦点；不要跳到本章其他段，也不要一次把整门课讲完。讲完一个新概念可就地出一道快检（走 quiz 协议，一条回答最多一张）。本段素材范围见下一段【本段确认素材】，不要扫描 SOURCES 下未确认的文件。')
   return '\n\n' + lines.join('\n')
 }
@@ -1042,6 +1059,7 @@ export function moveCourseUnit(wsId: string, unitId: string, targetChapterId: st
 export function archiveOrganizedPage(sessionId: string, title: unknown, content: unknown, target: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string } {
   const vault = getCurrentVault()
   if (!vault) return { ok: false, error: '尚未打开仓库' }
+  if (isHandoffTitle(title)) return { ok: false, error: '交接由「收尾本段」统一生成，不能用整理归档创建。' }
   let rel = String(target ?? '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
   if (!rel) { const owner = resolveWriteOwnerRel(String(sessionId ?? ''), getSetting); if (!owner) return { ok: false, error: '无法确定归档目录' }; rel = owner }
   if (rel.split('/').some((s) => s.startsWith('.'))) return { ok: false, error: '归档目录非法（不能写入隐藏/点目录）' }
