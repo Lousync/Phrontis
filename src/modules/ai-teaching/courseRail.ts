@@ -11,9 +11,23 @@ export interface RailUnit {
   learned: boolean
   /** 当前段内的聚焦知识点 */
   active: boolean
-  /** 属于当前 open 段 */
+  /** 属于任一 open 段（不再只算当前激活段） */
   inSegment: boolean
+  /** 所属段（被多个段覆盖时 open 优先，其次 order 最大） */
+  segmentId?: string | null
+  segmentOrder?: number | null
+  segmentStatus?: 'open' | 'ended' | null
 }
+
+export type RailRow =
+  | {
+      kind: 'segment'
+      sessionId: string
+      order: number
+      status: 'open' | 'ended'
+      units: RailUnit[]
+    }
+  | { kind: 'unit'; unit: RailUnit }
 
 export interface RailReview {
   state: 'locked' | 'unlocked' | 'done'
@@ -68,13 +82,42 @@ export function buildCourseRail(chapters: ReadonlyArray<RailChapterInput>, searc
   return out
 }
 
+/**
+ * 把章内知识点整理成「段节点 / 独立知识点」行。
+ *
+ * - 同段 unit 收进段头，段头落在这段第一次出现的位置；
+ * - 组内保持大纲顺序；
+ * - 没有段归属的 unit 保持独立行；
+ * - 非连续 unitIds 也归入同段（中间未入段行排在该段之后，已接受的取舍）。
+ */
+export function buildRailRows(units: ReadonlyArray<RailUnit>): RailRow[] {
+  const rows: RailRow[] = []
+  const bySegment = new Map<string, Extract<RailRow, { kind: 'segment' }>>()
+  for (const unit of units ?? []) {
+    const sid = unit.segmentId ? String(unit.segmentId) : ''
+    if (!sid) { rows.push({ kind: 'unit', unit }); continue }
+    const hit = bySegment.get(sid)
+    if (hit) { hit.units.push(unit); continue }
+    const row: Extract<RailRow, { kind: 'segment' }> = {
+      kind: 'segment',
+      sessionId: sid,
+      order: Number(unit.segmentOrder) || 0,
+      status: unit.segmentStatus === 'ended' ? 'ended' : 'open',
+      units: [unit],
+    }
+    bySegment.set(sid, row)
+    rows.push(row)
+  }
+  return rows
+}
+
 /** 当前应自动展开的章：有 open 段/聚焦点的章 → 第一个未学完的章 → 第一章。 */
 export function activeChapterId(
   chapters: ReadonlyArray<RailChapterInput>,
   preferred?: string | null,
 ): string | null {
   if (preferred && chapters.some((c) => c.id === preferred)) return preferred
-  const withActive = chapters.find((c) => c.units.some((u) => u.active || u.inSegment))
+  const withActive = chapters.find((c) => c.units.some((u) => u.active || u.inSegment || u.segmentStatus === 'open'))
   if (withActive) return withActive.id
   const withTodo = chapters.find((c) => c.review.learned < c.review.total)
   return withTodo?.id ?? chapters[0]?.id ?? null

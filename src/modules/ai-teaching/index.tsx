@@ -21,7 +21,7 @@ import { CourseProgress } from './CourseProgress'
 import { CourseSources } from './CourseSources'
 import { RequirementsDrawer, type ReqLayer } from './RequirementsDrawer'
 import { buildCourseRail, activeChapterId as pickRailChapter, type RailChapterInput } from './courseRail'
-import { latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned } from '../../lib/aiTeachingProgressPure'
+import { chapterSegments, latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned, type ProgressLessonLike } from '../../lib/aiTeachingProgressPure'
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
 import { ArtifactsPane } from './ArtifactsPane'
 import { SideLaneCenter } from './SideLaneCenter'
@@ -626,24 +626,46 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    * v3.1.2 条目11 P4：**已升格支线**（lane==='main' 且带 parentSessionId）跟随父行缩进。
    * 支线本身不分配工作区，故从**全量** sessions 里按父行归属；父行不在当前工作区视图时不出现（旧行为）。
    */
-  /** 左栏课程树数据（章 → 知识点 → 复习状态；不再有会话行） */
-  const railChapters: RailChapterInput[] = useMemo(() => (courseState?.outline?.chapters ?? []).map((c) => {
-    const ids = c.units.map((u) => u.id)
-    const review = reviewState(c.id, ids, courseState?.progress ?? {}, courseState?.lessons ?? {}, courseState?.reviews ?? {})
-    const activeIds = activeSegmentSid && courseState?.lessons[activeSegmentSid]?.status === 'open' ? lessonUnitIds(courseState?.lessons[activeSegmentSid]) : []
-    return {
-      id: c.id,
-      name: c.name,
-      review,
-      units: c.units.map((u) => ({
-        id: u.id,
-        name: u.name,
-        learned: unitLearned(u.id, courseState?.progress, courseState?.lessons),
-        active: activeUnitId === u.id && !!activeSegmentSid && activeIds.includes(u.id),
-        inSegment: activeIds.includes(u.id),
-      })),
-    }
-  }), [courseState, activeSegmentSid, activeUnitId])
+  /** 左栏课程树数据（章 → 段 → 知识点 → 复习状态；不再有会话行） */
+  const railChapters: RailChapterInput[] = useMemo(() => {
+    const lessons = courseState?.lessons ?? {}
+    return (courseState?.outline?.chapters ?? []).map((c) => {
+      const ids = c.units.map((u) => u.id)
+      const review = reviewState(c.id, ids, courseState?.progress ?? {}, lessons, courseState?.reviews ?? {})
+      const activeIds = activeSegmentSid && lessons[activeSegmentSid]?.status === 'open' ? lessonUnitIds(lessons[activeSegmentSid]) : []
+      // unit → 段：open 优先，其次 order 最大；左栏只显示一个归属，避免同一知识点重复出现。
+      const byUnit = new Map<string, { sessionId: string; lesson: ProgressLessonLike }>()
+      for (const s of chapterSegments(lessons, ids)) {
+        for (const uid of lessonUnitIds(s.lesson)) {
+          if (!ids.includes(uid)) continue
+          const prev = byUnit.get(uid)
+          if (!prev) { byUnit.set(uid, s); continue }
+          const prevOpen = prev.lesson.status === 'open'
+          const nextOpen = s.lesson.status === 'open'
+          if (nextOpen && !prevOpen) byUnit.set(uid, s)
+          else if (nextOpen === prevOpen && (Number(s.lesson.order) || 0) >= (Number(prev.lesson.order) || 0)) byUnit.set(uid, s)
+        }
+      }
+      return {
+        id: c.id,
+        name: c.name,
+        review,
+        units: c.units.map((u) => {
+          const seg = byUnit.get(u.id)
+          return {
+            id: u.id,
+            name: u.name,
+            learned: unitLearned(u.id, courseState?.progress, lessons),
+            active: activeUnitId === u.id && !!activeSegmentSid && activeIds.includes(u.id),
+            inSegment: seg?.lesson.status === 'open',
+            segmentId: seg?.sessionId ?? null,
+            segmentOrder: seg ? (Number(seg.lesson.order) || 0) : null,
+            segmentStatus: seg?.lesson.status ?? null,
+          }
+        }),
+      }
+    })
+  }, [courseState, activeSegmentSid, activeUnitId])
   const railVisible = useMemo(() => buildCourseRail(railChapters, railSearch), [railChapters, railSearch])
   const railActiveChapter = useMemo(() => pickRailChapter(railChapters, activeChapterState), [railChapters, activeChapterState])
   const activeSegment = activeSegmentSid ? courseState?.lessons[activeSegmentSid] ?? null : null
@@ -1358,6 +1380,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const ids = activeSegment ? lessonUnitIds(activeSegment) : []
     return ids.map((id) => courseUnits.find((u) => u.id === id)?.name ?? id)
   }, [activeSegment, courseUnits])
+  const activeSegmentUnitName = useMemo(() => {
+    const ids = activeSegment ? lessonUnitIds(activeSegment) : []
+    const uid = activeUnitId && ids.includes(activeUnitId) ? activeUnitId : ids[0]
+    return uid ? (courseUnits.find((u) => u.id === uid)?.name ?? uid) : '未选择'
+  }, [activeSegment, activeUnitId, courseUnits])
 
   const openRequirements = useCallback((layer: ReqLayer) => {
     setReqLayer(layer)
@@ -2444,6 +2471,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   onActivateChapter={setActiveChapterState}
                   onUnit={(chapterId, unitId) => void courseOpenUnit(chapterId, unitId)}
                   onReview={(chapterId) => void courseOpenChapterReview(chapterId)}
+                  onSegment={(sid) => void openSegmentBySid(sid)}
+                  activeSegmentId={activeSegmentSid}
                   assistantActive={!!assistantSid && activeId === assistantSid}
                   onAssistant={() => void courseOpenAssistant()}
                   search={railSearch}
@@ -2518,8 +2547,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 <div className="shrink-0 flex items-center gap-2 px-4 pt-2 pb-1.5 border-b border-[var(--border-color)] select-none">
                   <span className="shrink-0 text-[11px] font-medium text-[var(--text-primary)]">{activeChapterObj?.name ?? '本段'}</span>
                   <span className="shrink-0 text-[10px] text-[var(--text-muted)]">第{activeSegment.order}段</span>
-                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" title={activeSegmentUnitNames.join('、')}>{activeSegmentUnitNames.join('、')}</span>
-                  <span className="shrink-0 text-[10px] tabular-nums text-[var(--text-muted)]">{activeSegmentUnitNames.length} 个知识点</span>
+                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" title={activeSegmentUnitNames.join('、')}>本段 {activeSegmentUnitNames.length} 个知识点 · 当前：{activeSegmentUnitName}</span>
+                  {segmentStatus === 'ended' && <span className="shrink-0 rounded-full border border-[var(--border-color)] px-1.5 py-0.5 text-[9.5px] text-[var(--text-muted)]">已收尾</span>}
                   <div className="shrink-0 flex items-center gap-1">
                     {segmentStatus === 'open' && (
                       <button onClick={() => void courseEndSegment()} disabled={pending}
@@ -3205,26 +3234,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           </div>
                         )}
                       </Collapsible>
-                    )}
-                    {activeSegment && activeId === activeSegmentSid && (
-                      <div className="mb-1.5 flex flex-wrap items-center gap-1.5 kb-view-in">
-                        {lessonUnitIds(activeSegment).map((uid) => {
-                          const name = courseUnits.find((u) => u.id === uid)?.name ?? uid
-                          const on = activeUnitId === uid
-                          return (
-                            <button key={uid} type="button" disabled={segmentStatus === 'ended'}
-                              onClick={() => {
-                                if (!activeSegmentSid) return
-                                void aiTeachCourseSetActiveUnit(activeSegmentSid, uid).then((r) => { if (r?.ok) setActiveUnitId(uid) })
-                              }}
-                              title={on ? '当前聚焦' : '切换本段聚焦知识点'}
-                              className={`px-2.5 py-1 rounded-full border text-[11px] transition-colors ${on ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]' : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)]'} disabled:opacity-50`}>
-                              {name}
-                            </button>
-                          )
-                        })}
-                        {segmentStatus === 'ended' && <span className="text-[11px] text-[var(--text-muted)]">本段已收尾（只读）</span>}
-                      </div>
                     )}
                     <div className="relative">
                       {slashOpen && (
