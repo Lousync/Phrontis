@@ -11,6 +11,12 @@ if (process.env.KNOWBASE_DISABLE_GPU === '1') {
   app.commandLine.appendSwitch('no-sandbox')
 }
 
+// ===== 磁盘缓存上限（2026-10-28）=====
+// Chromium 的 HTTP 缓存默认无上限：实测正式版 `%APPDATA%/knowbase/Cache` 涨到 289MB
+// （网络剪藏图片 / 书市封面 / 更新包分片）。这里钉 128MB，超限由 Chromium 自行淘汰，
+// 不影响功能，只是少占盘。必须在 app ready 之前设置。
+app.commandLine.appendSwitch('disk-cache-size', String(128 * 1024 * 1024))
+
 // ===== Linux 显示后端守卫（2026-10-19）=====
 // 本项目只支持 X11 / XWayland。原生 Wayland 下这两块直接失效（本机实测）：
 //   · 窗口定位 —— dayPanelWindow 的贴顶停靠 / 桌面小组件、自绘边缘拖拽恢复走的都是 setBounds；
@@ -38,7 +44,7 @@ if (process.platform === 'linux') {
 // StartupWMClass 去匹配窗口实际 WM_CLASS（package.json name = knowbase，故写 knowbase），
 // 匹配成功后 GNOME 显示的是 .desktop 的 Name=Phrontis 与 Icon=phrontis。
 import { join, basename, resolve, sep } from 'path'
-import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdirSync, statSync, readdirSync, appendFileSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdirSync, statSync, readdirSync, appendFileSync, renameSync, unlinkSync } from 'fs'
 import { Readable } from 'stream'
 import { assertSecretBoxRoundTrip, registerSecretBoxHandlers, secretStorageBackend } from '../lib/secretBox'
 import { registerPomodoroBroadcast } from './pomodoroState'
@@ -158,14 +164,29 @@ if (!app.isPackaged && process.env.KNOWBASE_SHARED_DATA !== '1') {
 }
 
 // ===== 崩溃/异常留痕（黑匣子）：写入 userData/crash-log.txt，供事后定位 =====
+// 轮转：超过 2MB 就把旧文件改名为 crash-log.txt.1（只留一代）。此前无轮转，
+// 实测正式版累积到 137.6MB / 246 万行，白白占盘。
+const CRASH_LOG_MAX_BYTES = 2 * 1024 * 1024
 {
   const crashLog = () => {
     try { return join(app.getPath('userData'), 'crash-log.txt') } catch { return 'crash-log.txt' }
   }
+  const rotateCrashLog = (file: string): void => {
+    try {
+      if (statSync(file).size < CRASH_LOG_MAX_BYTES) return
+    } catch { return /* 文件不存在 = 不需要轮转 */ }
+    try {
+      const prev = `${file}.1`
+      try { unlinkSync(prev) } catch { /* 上一代不存在 */ }
+      renameSync(file, prev)
+    } catch { /* 轮转失败就继续向原文件追加，留痕优先 */ }
+  }
   const logCrash = (tag: string, detail: string): void => {
     try {
       const line = `\n[${new Date().toISOString()}] ${tag} v${app.getVersion()}\n${detail}\n`
-      appendFileSync(crashLog(), line)
+      const file = crashLog()
+      rotateCrashLog(file)
+      appendFileSync(file, line)
     } catch { /* 留痕失败不影响主流程 */ }
   }
   process.on('uncaughtException', err => {
