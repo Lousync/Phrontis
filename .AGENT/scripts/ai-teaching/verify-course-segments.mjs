@@ -28,7 +28,7 @@ async function load(rel, name) {
 const coursePure = await load('electron/lib/aiTeachingCoursePure.ts', 'coursePure')
 const progressPure = await load('src/lib/aiTeachingProgressPure.ts', 'progressPure')
 const sourcesPure = await load('src/lib/aiTeachingSourcesPure.ts', 'sourcesPure')
-const rail = await load('src/modules/ai-teaching/courseRail.ts', 'courseRail')
+const rail = await load('src/modules/ai-teaching/courseRailPure.ts', 'courseRailPure')
 
 // ---------------------------------------------------------------- 1. 课程.md 章 ID
 console.log('\n=== 1. 课程.md 稳定章 ID ===')

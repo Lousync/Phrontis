@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Bot, ChevronRight, Lock, Search, Check, Sparkles } from 'lucide-react'
-import type { RailChapterInput, RailRow, RailUnit } from './courseRail'
-import { buildRailRows, reviewLabel } from './courseRail'
+import type { RailChapterInput, RailRow, RailUnit } from './courseRailPure'
+import { buildRailRows, reviewLabel } from './courseRailPure'
 
 /**
  * AI教学 3.14 左栏课程树：课程助手 + 搜索 + 章手风琴（段 → 知识点 / 复习行）。

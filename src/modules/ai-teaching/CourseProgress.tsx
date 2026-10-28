@@ -1,7 +1,7 @@
 import { Check, ChevronRight, Lock, Sparkles } from 'lucide-react'
 import type { AiTeachCourseOutline, AiTeachCourseUnitProgress, AiTeachLessonInfo, AiTeachChapterReview } from '../../types'
 import { chapterSegments, lessonUnitIds, reviewState, unitLearned } from '../../lib/aiTeachingProgressPure'
-import { reviewLabel } from './courseRail'
+import { reviewLabel } from './courseRailPure'
 
 /** 右栏「进度」页签：章 → 段列表 → 复习行。 */
 
