@@ -61,8 +61,13 @@ ok(/icon: loadAppIconSync\(\)\.img/.test(srcMain),
 const pkg = JSON.parse(read('package.json'))
 const iconRes = (pkg.build?.extraResources ?? []).some(r => r.from === 'build/icon.png' && r.to === 'icon.png')
 ok(iconRes, 'C4 package.json extraResources 把 build/icon.png 带出到资源根（打包态候选 ① 成立的前提）')
-ok(JSON.stringify(pkg.build?.files ?? []) === '["out/**/*"]',
-  'C5 佐证：files 仍只打包 out/**（build/ 不进 asar —— 本条是根因链的一环，若将来改 files 需重审候选顺序）')
+const filesPatterns = (pkg.build?.files ?? []).filter(p => typeof p === 'string')
+const filesIncludes = filesPatterns.filter(p => !p.startsWith('!'))
+const filesExcludes = filesPatterns.filter(p => p.startsWith('!'))
+ok(filesIncludes.length === 1 && filesIncludes[0] === 'out/**/*',
+  'C5 佐证：files 的正向白名单仍只有 out/**（build/ 等目录不进 asar —— 本条是根因链的一环）')
+ok(filesExcludes.every(p => p.startsWith('!node_modules/')),
+  'C5b 佐证：files 的负向规则只允许裁剪 node_modules 子路径（不得排除 out/**）')
 
 console.log('\n========================================')
 if (fails.length === 0) {

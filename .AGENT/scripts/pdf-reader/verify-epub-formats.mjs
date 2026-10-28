@@ -139,8 +139,8 @@ console.log('\n--- ④b ★ fb2.js：内建样式表内联进 <style>（CSP styl
 console.log('\n--- ⑤ 依赖与文档登记 ---')
 {
   const pkg = JSON.parse(read('package.json'))
-  check('construct-style-sheets-polyfill 已入 dependencies（fixed-layout.js 静态 import）',
-    !!pkg.dependencies?.['construct-style-sheets-polyfill'])
+  check('construct-style-sheets-polyfill 仍在依赖树（fixed-layout.js 静态 import，渲染层由 Vite 打包，deps / devDeps 均可）',
+    !!(pkg.dependencies?.['construct-style-sheets-polyfill'] || pkg.devDependencies?.['construct-style-sheets-polyfill']))
   check('vendor README 在位（含升级手法与安全模型）', exists(`${VENDOR}/README.md`))
   const rdm = exists(`${VENDOR}/README.md`) ? read(`${VENDOR}/README.md`) : ''
   check('README 记录了 KB PATCH 与升级流程',

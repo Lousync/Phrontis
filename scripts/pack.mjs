@@ -21,10 +21,10 @@
  *   显式指定的目标与宿主平台不一致时直接中止，而不是产出一个坏包。
  *   确有需要（例如只想看 electron-builder 的配置解析）可置 `KNOWBASE_ALLOW_CROSS_PACK=1` 放行。
  */
-import { existsSync, lstatSync, realpathSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, realpathSync, readFileSync, readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const requireFromHere = createRequire(import.meta.url)
@@ -187,6 +187,78 @@ function installLocalIfConfigured(outRel) {
 }
 
 /**
+ * 外部依赖自检：`out/main` 里所有 bare require 都必须能在 `app.asar` 的 node_modules 里找到。
+ *
+ * 为什么需要（2026-10-28 依赖分层）：渲染层依赖（react / monaco / mermaid …）已移入
+ * devDependencies —— 它们由 Vite 打进 `out/renderer`，不进 asar。只有主进程 `require()`
+ * 的包必须留在 dependencies。一旦误把主进程用到的包移走，electron-builder **不会报错**，
+ * 只是把它漏出 asar → 装机启动即 `Cannot find module`。
+ *
+ * 判据：用 Node 的 `require.resolve` 解析每个说明符（自动走 package.json exports，
+ * 子路径别名也能命中），再把解析结果换算成 asar 内相对路径，必须存在。
+ * `canvas` 永不触发的可选分支（linkedom 的 Node 原生路径），允许缺席。
+ *
+ * @param {string} asarPath app.asar 绝对路径
+ * @param {string} outMainDir 主进程产物目录（out/main）
+ */
+export function verifyAsarExternalDeps(asarPath, outMainDir) {
+  const asar = requireFromHere('@electron/asar')
+  const entries = new Set(asar.listPackage(asarPath).map((p) => p.replace(/\\/g, '/')))
+  const resolveFromRepo = createRequire(join(repoRoot, 'package.json'))
+  const ALLOW_MISSING = new Set(['canvas'])
+  const BUILTINS = new Set([
+    'fs', 'path', 'os', 'url', 'stream', 'crypto', 'http', 'https', 'zlib', 'child_process',
+    'util', 'events', 'net', 'tls', 'dns', 'vm', 'module', 'assert', 'buffer', 'process',
+    'readline', 'tty', 'worker_threads', 'perf_hooks', 'string_decoder', 'querystring',
+    'constants', 'timers', 'async_hooks', 'punycode', 'repl', 'cluster', 'dgram', 'sys',
+    'wasi', 'inspector', 'diagnostics_channel', 'trace_events',
+  ])
+  const RE = [
+    /\brequire\(\s*["']([^"']+)["']\s*\)/g,
+    /\brequire\.resolve\(\s*["']([^"']+)["']\s*\)/g,
+    /\bimport\(\s*["']([^"']+)["']\s*\)/g,
+  ]
+  const specifiers = new Set()
+  const walk = (dir) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, ent.name)
+      if (ent.isDirectory()) walk(p)
+      else if (p.endsWith('.js')) {
+        const text = readFileSync(p, 'utf8')
+        for (const re of RE) for (const m of text.matchAll(re)) specifiers.add(m[1])
+      }
+    }
+  }
+  walk(outMainDir)
+
+  const missing = []
+  for (const spec of specifiers) {
+    if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('node:') || spec === 'electron') continue
+    const pkgName = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]
+    if (BUILTINS.has(pkgName) || ALLOW_MISSING.has(pkgName)) continue
+    // 用 Node 的 require 解析真实落盘文件（会自动走 package.json exports，子路径别名也能命中）
+    let resolved
+    try {
+      resolved = resolveFromRepo.resolve(spec)
+    } catch {
+      missing.push(`${spec}（无法解析）`)
+      continue
+    }
+    const rel = relative(repoRoot, resolved).replace(/\\/g, '/')
+    if (!entries.has('/' + rel)) {
+      missing.push(`${spec} → /${rel}`)
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `app.asar 缺主进程运行时依赖：\n  - ${missing.join('\n  - ')}\n` +
+      '  这些包被 out/main require，但不在 dependencies 里（大概率被误移到 devDependencies）。',
+    )
+  }
+  console.log(`[pack] asar 外部依赖自检通过：${specifiers.size} 个 bare require 全部命中`)
+}
+
+/**
  * 构建后校验 app.asar 的「文件表 ↔ 数据区」是否自洽。
  *
  * 为什么需要（2026-10-20 实测）：`npm run dev` 还在跑时执行 `npm run pack`，
@@ -201,7 +273,7 @@ export function verifyPackedAsar(asarPath) {
   try {
     const asar = requireFromHere('@electron/asar')
     const pkg = JSON.parse(asar.extractFile(asarPath, 'package.json').toString('utf8'))
-    const entries = new Set(asar.listPackage(asarPath))
+    const entries = new Set(asar.listPackage(asarPath).map((p) => p.replace(/\\/g, '/')))
     const main = String(pkg.main || '').replace(/^\.\//, '')
     if (!main) throw new Error('package.json 缺 main')
     if (!entries.has('/' + main)) throw new Error(`入口不在包内：/${main}`)
@@ -212,6 +284,12 @@ export function verifyPackedAsar(asarPath) {
       '      典型原因：打包时有 dev 进程（electron-vite dev）在写 out/，文件表与数据区错位。\n' +
       '      修法：停掉所有 dev 实例后重打；本产物不可发布（装上会退化成 Electron 默认页）。',
     )
+    process.exit(4)
+  }
+  try {
+    verifyAsarExternalDeps(asarPath, join(repoRoot, 'out', 'main'))
+  } catch (e) {
+    console.error('[pack] 中止：' + (e?.message || e))
     process.exit(4)
   }
 }

@@ -83,8 +83,10 @@ check('settings: terminalShell + terminalFontSize', settings.includes('terminalS
 // ===== A5 打包与构建 =====
 const pkg = JSON.parse(read('package.json'))
 check('package.json: asarUnpack 覆盖 node-pty', JSON.stringify(pkg.build?.asarUnpack ?? []).includes('@lydell/node-pty'))
-check('package.json: 三依赖在列', !!(pkg.dependencies?.['@lydell/node-pty']
-  && pkg.dependencies?.['@xterm/xterm'] && pkg.dependencies?.['@xterm/addon-fit']))
+check('package.json: node-pty 是运行时依赖（主进程 require，必须 externalize）', !!pkg.dependencies?.['@lydell/node-pty'])
+check('package.json: @xterm 仍在依赖树（渲染层由 Vite 打进 out/renderer，deps / devDeps 均可）',
+  !!((pkg.dependencies?.['@xterm/xterm'] || pkg.devDependencies?.['@xterm/xterm'])
+    && (pkg.dependencies?.['@xterm/addon-fit'] || pkg.devDependencies?.['@xterm/addon-fit'])))
 const vite = read('electron.vite.config.ts')
 check('vite: @xterm 独立分桶', vite.includes("return 'xterm'"))
 
