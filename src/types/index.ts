@@ -2998,7 +2998,7 @@ export interface ElectronAPI {
   aiTeachCourseOpenSegment: (wsId: string, unitIds: string[], sources: AiTeachSegmentSource[]) => Promise<{ ok: boolean; sessionId?: string; order?: number; status?: 'open' | 'ended'; readonly?: boolean; error?: string }>
   aiTeachCourseSetActiveUnit: (sessionId: string, unitId: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachCourseEndSegment: (sessionId: string) => Promise<{ ok: boolean; wsId?: string; unitIds?: string[]; error?: string }>
-  aiTeachCourseFinalizeSegment: (sessionId: string) => Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean }>
+  aiTeachCourseFinalizeSegment: (sessionId: string) => Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean; reused?: boolean }>
   // 3.14 素材注册表
   aiTeachCourseGetSources: (wsId: string) => Promise<AiTeachSourcesPayload>
   aiTeachCourseRegisterSources: (wsId: string, items: Array<{ path: string; title?: string; type?: string }>) => Promise<{ ok: boolean; sources: AiTeachSource[]; errors: Array<{ path: string; error: string }>; error?: string }>

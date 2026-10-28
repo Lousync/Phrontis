@@ -41,6 +41,20 @@ check('重写写回 [c7]', rewritten.includes('## [c7] 第七章 进程'), rewri
 const round = coursePure.parseCourseMd(rewritten)
 check('重写往返章 ID / 名称 / 知识点不丢', JSON.stringify(round) === JSON.stringify(outline), JSON.stringify(round))
 
+// ---------------------------------------------------------------- 1.5 交接标题闸门
+console.log('\n=== 1.5 交接标题闸门 ===')
+for (const t of ['交接', '生成交接文档', '整理一下交接', 'Hand-off', 'hand off', '练习·交接']) {
+  check(`拒绝交接标题：${t}`, coursePure.isHandoffTitle(t) === true, String(coursePure.isHandoffTitle(t)))
+}
+for (const t of ['练习题', '段末总结', '课堂笔记']) {
+  check(`放行普通标题：${t}`, coursePure.isHandoffTitle(t) === false, String(coursePure.isHandoffTitle(t)))
+}
+const handoffFiles = new Set(['handoff.md', 'standard.md'])
+check('收尾幂等：handoffRel 存在时优先复用', coursePure.pickReusableHandoff('handoff.md', 'standard.md', (r) => handoffFiles.has(r)) === 'handoff.md')
+check('收尾幂等：handoffRel 缺失时回退标准路径', coursePure.pickReusableHandoff('missing.md', 'standard.md', (r) => handoffFiles.has(r)) === 'standard.md')
+check('收尾幂等：两份都不存在时重新生成', coursePure.pickReusableHandoff('missing.md', 'also-missing.md', (r) => handoffFiles.has(r)) === null)
+check('收尾幂等：空路径被忽略', coursePure.pickReusableHandoff('', null, () => true) === null)
+
 // ---------------------------------------------------------------- 2. progress v1 -> v2
 console.log('\n=== 2. progress v1 -> v2 ===')
 const v1 = {
@@ -128,6 +142,24 @@ check('知识点命中只留命中行', rail.buildCourseRail(railCh, '映射')[0
 check('无命中返回空', rail.buildCourseRail(railCh, '不存在').length === 0)
 check('activeChapterId 优先当前章', rail.activeChapterId(railCh, 'c2') === 'c2')
 check('reviewLabel 文案', rail.reviewLabel({ state: 'locked', remaining: 2, total: 4, learned: 2 }) === '还差 2 个' && rail.reviewLabel({ state: 'done', remaining: 0, total: 4, learned: 4 }) === '已生成讲义')
+
+const segU = (id, seg, order = 1, status = 'open') => ({ id, name: id, learned: false, active: false, inSegment: status === 'open', segmentId: seg, segmentOrder: order, segmentStatus: status })
+const segRows = rail.buildRailRows([
+  segU('u1', 's1'),
+  segU('u2', 's1'),
+  segU('u3', null),
+])
+check('段分组：同段两个 unit 合成一个段头', segRows[0]?.kind === 'segment' && segRows[0].sessionId === 's1' && segRows[0].units.length === 2, JSON.stringify(segRows))
+check('段分组：无段归属 unit 保持独立行', segRows[1]?.kind === 'unit' && segRows[1].unit.id === 'u3')
+const nonContig = rail.buildRailRows([segU('u1', 's1'), segU('u2', null), segU('u3', 's1')])
+check('段分组：非连续 unitIds 仍归入同段，独立行排后', nonContig[0]?.kind === 'segment' && nonContig[0].units.map((u) => u.id).join(',') === 'u1,u3' && nonContig[1]?.kind === 'unit' && nonContig[1].unit.id === 'u2', JSON.stringify(nonContig))
+const endedRows = rail.buildRailRows([segU('u1', 's0', 2, 'ended')])
+check('段分组：ended 状态与 order 保留', endedRows[0]?.kind === 'segment' && endedRows[0].status === 'ended' && endedRows[0].order === 2)
+const segChapter = [{ id: 'c9', name: '有进行中段', units: [{ ...segU('u9', 's9'), inSegment: false }], review: { state: 'locked', remaining: 1, total: 1, learned: 0 } }]
+check('activeChapterId 识别非当前 open 段', rail.activeChapterId(segChapter) === 'c9')
+const filteredSeg = rail.buildCourseRail([{ id: 'c8', name: '第八章', units: [segU('u1', 's1'), segU('u2', 's1')], review: { state: 'locked', remaining: 2, total: 2, learned: 0 } }], 'u2')
+const filteredRows = rail.buildRailRows(filteredSeg[0]?.units ?? [])
+check('搜索过滤后段头保留且只含命中 unit', filteredRows[0]?.kind === 'segment' && filteredRows[0].units.length === 1 && filteredRows[0].units[0].id === 'u2', JSON.stringify(filteredRows))
 
 // ---------------------------------------------------------------- 汇总
 const failed = checks.filter((c) => !c.pass)

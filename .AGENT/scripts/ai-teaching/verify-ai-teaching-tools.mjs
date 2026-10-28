@@ -30,6 +30,8 @@ check('删除已学知识点 → needOrganize 拒绝', course.includes("status !
 check('归档返回绝对路径 absPath', course.includes('absPath: join(dirAbs, fname)'))
 check('归档默认落会话 write-owner（助手 output/）', course.includes('resolveWriteOwnerRel(String(sessionId'))
 check('归档拒绝写入隐藏/点目录', course.includes("s.startsWith('.')"))
+check('归档标题命中交接 → 硬闸拒绝', course.includes('isHandoffTitle(title)') && course.includes('交接由「收尾本段」统一生成'))
+check('归档工具描述禁止创建交接', tools.includes('不要用它创建交接文档'))
 
 console.log('\n[工具注册] builtinTools.ts')
 check('注册 inventory', tools.includes("name: 'inventory'"))

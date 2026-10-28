@@ -21,7 +21,7 @@ import { CourseProgress } from './CourseProgress'
 import { CourseSources } from './CourseSources'
 import { RequirementsDrawer, type ReqLayer } from './RequirementsDrawer'
 import { buildCourseRail, activeChapterId as pickRailChapter, type RailChapterInput } from './courseRail'
-import { latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned } from '../../lib/aiTeachingProgressPure'
+import { chapterSegments, latestEndedSegmentOfUnit, lessonUnitIds, openSegmentOfUnit, reviewState, unitLearned, type ProgressLessonLike } from '../../lib/aiTeachingProgressPure'
 import { parseProfileFence, profileThrottleAllows, profileThrottleNote, layerAllows, userRoundCount, PROFILE_THROTTLE_ROUNDS, type ProfileLayer, type ProfileSuggestion, type ProfileThrottleState } from './profilePatchParse'
 import { ArtifactsPane } from './ArtifactsPane'
 import { SideLaneCenter } from './SideLaneCenter'
@@ -281,6 +281,18 @@ function sanitizeCourseAssistantAsk(block: AskBlock): AskBlock {
   return { ...block, options: options.slice(0, 6) }
 }
 
+/** 段会话兜底：交接只由「收尾本段」生成，过滤模型偶发的写交接 ask 选项。 */
+function sanitizeSegmentAsk(block: AskBlock): AskBlock {
+  if (block.kind !== 'single') return block
+  const banned = /生成.*交接|写.*交接|整理.*交接|输出.*交接|做.*交接|handoff/i
+  const options = block.options.filter((o) => !banned.test(o.replace(/\s+/g, '')))
+  if (options.length === block.options.length) return block
+  for (const safe of ['继续下一个知识点', '再看一个例子']) {
+    if (!options.includes(safe)) options.push(safe)
+  }
+  return { ...block, options: options.slice(0, 6) }
+}
+
 export interface PendingAsk {
   question: string
   source?: { type: string; relPath: string; page: number; excerpt: string }
@@ -519,6 +531,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const [reqLayer, setReqLayer] = useState<ReqLayer>('workspace')
   /** 上段交接内容（界面条） */
   const [prevHandoff, setPrevHandoff] = useState('')
+  /** prevHandoff 归属的段会话：切段时旧文本不闪到新段 */
+  const [prevHandoffSid, setPrevHandoffSid] = useState<string | null>(null)
   const [handoffOpen, setHandoffOpen] = useState(true)
   const courseEnabled = !!activeWs && activeWs !== '__none__'
   const courseReadonly = !!activeSegmentSid && activeId === activeSegmentSid && segmentStatus === 'ended'
@@ -563,15 +577,24 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const off = onAiTeachCourseRefresh((p) => { if (p.wsId === activeWsRef.current) { void reloadCourse(); if (sourcePayload) void reloadSources() } })
     return off
   }, [reloadCourse, reloadSources, sourcePayload])
-  // 上段交接：当前会话 = 段时读取，展示为可折叠交接条
+  // 上段交接：当前会话 = 段时读取；首轮对话前展示，发出首条用户消息后收起卸载
   useEffect(() => {
     const sid = activeId
     const lesson = sid ? courseState?.lessons[sid] : null
-    if (!lesson || !sid) { setPrevHandoff(''); return }
+    if (!lesson || !sid) { setPrevHandoff(''); setPrevHandoffSid(null); return }
     let alive = true
     aiTeachCourseReadPrevHandoff(sid)
-      .then((r) => { if (alive) { setPrevHandoff(r?.ok ? (r.text ?? '') : ''); setHandoffOpen(true) } })
-      .catch(() => { if (alive) setPrevHandoff('') })
+      .then((r) => {
+        if (!alive) return
+        setPrevHandoff(r?.ok ? (r.text ?? '') : '')
+        setPrevHandoffSid(sid)
+        setHandoffOpen(true)
+      })
+      .catch(() => {
+        if (!alive) return
+        setPrevHandoff('')
+        setPrevHandoffSid(sid)
+      })
     return () => { alive = false }
   }, [activeId, courseState?.lessons])
   const wsActive = activeWs && activeWs !== '__none__' ? wsList.find(w => w.id === activeWs) ?? null : null
@@ -603,24 +626,46 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    * v3.1.2 条目11 P4：**已升格支线**（lane==='main' 且带 parentSessionId）跟随父行缩进。
    * 支线本身不分配工作区，故从**全量** sessions 里按父行归属；父行不在当前工作区视图时不出现（旧行为）。
    */
-  /** 左栏课程树数据（章 → 知识点 → 复习状态；不再有会话行） */
-  const railChapters: RailChapterInput[] = useMemo(() => (courseState?.outline?.chapters ?? []).map((c) => {
-    const ids = c.units.map((u) => u.id)
-    const review = reviewState(c.id, ids, courseState?.progress ?? {}, courseState?.lessons ?? {}, courseState?.reviews ?? {})
-    const activeIds = activeSegmentSid && courseState?.lessons[activeSegmentSid]?.status === 'open' ? lessonUnitIds(courseState?.lessons[activeSegmentSid]) : []
-    return {
-      id: c.id,
-      name: c.name,
-      review,
-      units: c.units.map((u) => ({
-        id: u.id,
-        name: u.name,
-        learned: unitLearned(u.id, courseState?.progress, courseState?.lessons),
-        active: activeUnitId === u.id && !!activeSegmentSid && activeIds.includes(u.id),
-        inSegment: activeIds.includes(u.id),
-      })),
-    }
-  }), [courseState, activeSegmentSid, activeUnitId])
+  /** 左栏课程树数据（章 → 段 → 知识点 → 复习状态；不再有会话行） */
+  const railChapters: RailChapterInput[] = useMemo(() => {
+    const lessons = courseState?.lessons ?? {}
+    return (courseState?.outline?.chapters ?? []).map((c) => {
+      const ids = c.units.map((u) => u.id)
+      const review = reviewState(c.id, ids, courseState?.progress ?? {}, lessons, courseState?.reviews ?? {})
+      const activeIds = activeSegmentSid && lessons[activeSegmentSid]?.status === 'open' ? lessonUnitIds(lessons[activeSegmentSid]) : []
+      // unit → 段：open 优先，其次 order 最大；左栏只显示一个归属，避免同一知识点重复出现。
+      const byUnit = new Map<string, { sessionId: string; lesson: ProgressLessonLike }>()
+      for (const s of chapterSegments(lessons, ids)) {
+        for (const uid of lessonUnitIds(s.lesson)) {
+          if (!ids.includes(uid)) continue
+          const prev = byUnit.get(uid)
+          if (!prev) { byUnit.set(uid, s); continue }
+          const prevOpen = prev.lesson.status === 'open'
+          const nextOpen = s.lesson.status === 'open'
+          if (nextOpen && !prevOpen) byUnit.set(uid, s)
+          else if (nextOpen === prevOpen && (Number(s.lesson.order) || 0) >= (Number(prev.lesson.order) || 0)) byUnit.set(uid, s)
+        }
+      }
+      return {
+        id: c.id,
+        name: c.name,
+        review,
+        units: c.units.map((u) => {
+          const seg = byUnit.get(u.id)
+          return {
+            id: u.id,
+            name: u.name,
+            learned: unitLearned(u.id, courseState?.progress, lessons),
+            active: activeUnitId === u.id && !!activeSegmentSid && activeIds.includes(u.id),
+            inSegment: seg?.lesson.status === 'open',
+            segmentId: seg?.sessionId ?? null,
+            segmentOrder: seg ? (Number(seg.lesson.order) || 0) : null,
+            segmentStatus: seg?.lesson.status ?? null,
+          }
+        }),
+      }
+    })
+  }, [courseState, activeSegmentSid, activeUnitId])
   const railVisible = useMemo(() => buildCourseRail(railChapters, railSearch), [railChapters, railSearch])
   const railActiveChapter = useMemo(() => pickRailChapter(railChapters, activeChapterState), [railChapters, activeChapterState])
   const activeSegment = activeSegmentSid ? courseState?.lessons[activeSegmentSid] ?? null : null
@@ -719,6 +764,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   /** 当前 messages 归属的会话 id（refreshMessages 里更新）——把「随会话」的 UI（```ask 提问卡等）
    *  严格绑到 activeId：切会话是「先换 activeId、再异步拉 messages」，空窗里旧会话的卡片会串到新会话。 */
   const messagesSidRef = useRef<string | null>(null)
+  /** 首轮交接条：仅当前段、且消息 / 交接都归属当前段、还没有用户消息时显示。 */
+  const segmentHandoffVisible = !!activeSegment && activeId === activeSegmentSid
+    && prevHandoffSid === activeSegmentSid
+    && messagesSidRef.current === activeSegmentSid
+    && !messages.some(m => m.role === 'user')
   // v3.2.0 条目6：原先这里还有个 `bottomRef` 死锚点（定义了、也渲染了，全仓无人读取）——
   // 它就是「滚底实现丢了」的物证。本条改用直接赋值 `scrollTop = scrollHeight`（同 MessageList 范式、
   // 与 rules 1/2 的写法一致），不再需要锚点元素，故连同其渲染点一并移除。
@@ -1304,7 +1354,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     showToast({ type: 'info', message: '本段已收尾 · 正在生成交接…' })
     await reloadCourse()
     const f = await aiTeachCourseFinalizeSegment(sid).catch(() => null)
-    if (f?.skipped) showToast({ type: 'info', message: '本段没有内容，未生成交接' })
+    if (f?.reused) { showToast({ type: 'info', message: '本段交接已存在，未重复生成', detail: f.relPath }); await reloadCourse() }
+    else if (f?.skipped) showToast({ type: 'info', message: '本段没有内容，未生成交接' })
     else if (f?.ok) { showToast({ type: 'success', message: '交接已生成（交接.md）' }); await reloadCourse() }
     else showToast({ type: 'warning', message: `交接生成失败：${f?.error ?? ''}（可手动补写）` })
   }, [reloadCourse])
@@ -1329,6 +1380,11 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const ids = activeSegment ? lessonUnitIds(activeSegment) : []
     return ids.map((id) => courseUnits.find((u) => u.id === id)?.name ?? id)
   }, [activeSegment, courseUnits])
+  const activeSegmentUnitName = useMemo(() => {
+    const ids = activeSegment ? lessonUnitIds(activeSegment) : []
+    const uid = activeUnitId && ids.includes(activeUnitId) ? activeUnitId : ids[0]
+    return uid ? (courseUnits.find((u) => u.id === uid)?.name ?? uid) : '未选择'
+  }, [activeSegment, activeUnitId, courseUnits])
 
   const openRequirements = useCallback((layer: ReqLayer) => {
     setReqLayer(layer)
@@ -1423,10 +1479,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       if (m.role === 'user') return null
       const mt = /```ask[^\n]*\n([\s\S]*?)```/.exec(m.content)
       const block = mt ? parseAskBlock(mt[1], m.id ?? `idx${i}`) : null
-      return block && assistantSid && activeId === assistantSid ? sanitizeCourseAssistantAsk(block) : block
+      if (!block) return null
+      if (activeSegmentSid && activeId === activeSegmentSid) return sanitizeSegmentAsk(block)
+      return assistantSid && activeId === assistantSid ? sanitizeCourseAssistantAsk(block) : block
     }
     return null
-  }, [messages, activeId, assistantSid])
+  }, [messages, activeId, assistantSid, activeSegmentSid])
   const [askDismissed, setAskDismissed] = useState<string | null>(null)
   const [askPicks, setAskPicks] = useState<Record<number, string>>({})
   // 提问卡 v2（WorkBuddy 式）：整卷 ‹k/n› 翻页 + 每题「其他补充」自定义回答
@@ -2413,6 +2471,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   onActivateChapter={setActiveChapterState}
                   onUnit={(chapterId, unitId) => void courseOpenUnit(chapterId, unitId)}
                   onReview={(chapterId) => void courseOpenChapterReview(chapterId)}
+                  onSegment={(sid) => void openSegmentBySid(sid)}
+                  activeSegmentId={activeSegmentSid}
                   assistantActive={!!assistantSid && activeId === assistantSid}
                   onAssistant={() => void courseOpenAssistant()}
                   search={railSearch}
@@ -2487,8 +2547,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                 <div className="shrink-0 flex items-center gap-2 px-4 pt-2 pb-1.5 border-b border-[var(--border-color)] select-none">
                   <span className="shrink-0 text-[11px] font-medium text-[var(--text-primary)]">{activeChapterObj?.name ?? '本段'}</span>
                   <span className="shrink-0 text-[10px] text-[var(--text-muted)]">第{activeSegment.order}段</span>
-                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" title={activeSegmentUnitNames.join('、')}>{activeSegmentUnitNames.join('、')}</span>
-                  <span className="shrink-0 text-[10px] tabular-nums text-[var(--text-muted)]">{activeSegmentUnitNames.length} 个知识点</span>
+                  <span className="min-w-0 flex-1 truncate text-[10.5px] text-[var(--text-muted)]" title={activeSegmentUnitNames.join('、')}>本段 {activeSegmentUnitNames.length} 个知识点 · 当前：{activeSegmentUnitName}</span>
+                  {segmentStatus === 'ended' && <span className="shrink-0 rounded-full border border-[var(--border-color)] px-1.5 py-0.5 text-[9.5px] text-[var(--text-muted)]">已收尾</span>}
                   <div className="shrink-0 flex items-center gap-1">
                     {segmentStatus === 'open' && (
                       <button onClick={() => void courseEndSegment()} disabled={pending}
@@ -3157,37 +3217,23 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         </span>
                       </div>
                     )}
-                    {activeSegment && activeId === activeSegmentSid && prevHandoff && (
-                      <div className="mb-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-hidden kb-view-in">
-                        <button type="button" onClick={() => setHandoffOpen(v => !v)}
-                          className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
-                          <ChevronDown size={12} className={`transition-transform ${handoffOpen ? '' : '-rotate-90'}`} />
-                          上一段交接（同章）
-                        </button>
-                        {handoffOpen && (
-                          <div className="px-2.5 pb-2 text-[11.5px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap max-h-[160px] overflow-y-auto">{prevHandoff.replace(/^#[^\n]*\n?/, '')}</div>
-                        )}
-                      </div>
-                    )}
-                    {activeSegment && activeId === activeSegmentSid && (
-                      <div className="mb-1.5 flex flex-wrap items-center gap-1.5 kb-view-in">
-                        {lessonUnitIds(activeSegment).map((uid) => {
-                          const name = courseUnits.find((u) => u.id === uid)?.name ?? uid
-                          const on = activeUnitId === uid
-                          return (
-                            <button key={uid} type="button" disabled={segmentStatus === 'ended'}
-                              onClick={() => {
-                                if (!activeSegmentSid) return
-                                void aiTeachCourseSetActiveUnit(activeSegmentSid, uid).then((r) => { if (r?.ok) setActiveUnitId(uid) })
-                              }}
-                              title={on ? '当前聚焦' : '切换本段聚焦知识点'}
-                              className={`px-2.5 py-1 rounded-full border text-[11px] transition-colors ${on ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]' : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--accent)]/50 hover:text-[var(--accent)]'} disabled:opacity-50`}>
-                              {name}
+                    {activeSegment && activeId === activeSegmentSid && prevHandoff && prevHandoffSid === activeSegmentSid && (
+                      <Collapsible open={segmentHandoffVisible} innerClassName="" className="shrink-0">
+                        {() => (
+                          <div className="mb-1.5 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] overflow-hidden kb-view-in">
+                            <button type="button" onClick={() => setHandoffOpen(v => !v)}
+                              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors">
+                              <ChevronDown size={12} className={`kb-chevron ${handoffOpen ? '' : '-rotate-90'}`} />
+                              上一段交接（同章）
                             </button>
-                          )
-                        })}
-                        {segmentStatus === 'ended' && <span className="text-[11px] text-[var(--text-muted)]">本段已收尾（只读）</span>}
-                      </div>
+                            <Collapsible open={handoffOpen} innerClassName="">
+                              {() => (
+                                <div className="px-2.5 pb-2 text-[11.5px] leading-relaxed text-[var(--text-primary)] whitespace-pre-wrap max-h-[160px] overflow-y-auto">{prevHandoff.replace(/^#[^\n]*\n?/, '')}</div>
+                              )}
+                            </Collapsible>
+                          </div>
+                        )}
+                      </Collapsible>
                     )}
                     <div className="relative">
                       {slashOpen && (

@@ -93,6 +93,10 @@ const panel = read('src/modules/ai-teaching/SideLanePanel.tsx')
 check('新增可选 props（onBack/onQuote/onFloat/hideTurns）', ['onBack?', 'onQuote?', 'onFloat?', 'hideTurns?'].every(s => panel.includes(s)))
 check('内嵌顶栏「← 列表」', panel.includes('返回支线列表') && panel.includes('onBack ?'))
 check('动作条含引用到主线 / 浮出窗口', panel.includes('引用到主线') && panel.includes('浮出窗口'))
+check('首轮回执在 agentChat + refresh 之后（创建面板不提前卸载）', panel.indexOf('await agentChat(') > -1 && panel.indexOf('await refresh(laneId)') > panel.indexOf('await agentChat(') && panel.indexOf('onLaneReady?.(laneId') > panel.indexOf('await refresh(laneId)'))
+check('首轮回执放在 finally（失败 / 中断也切详情）', panel.includes('} finally {') && /finally \{[\s\S]{0,260}onLaneReady\?\.\(laneId/.test(panel))
+check('卸载后不再回执父级（aliveRef 守卫）', panel.includes('const aliveRef = useRef(true)') && panel.includes('aliveRef.current = false') && /aliveRef\.current\) \{[\s\S]{0,500}onLaneReady\?\.\(laneId/.test(panel))
+check('doSend 依赖数组含 onLaneReady', /\[input, pending, laneId, beginStream, endStream, refresh, onLaneReady\]/.test(panel))
 
 // ---------------------------------------------------------------- 汇总
 let pass = 0, fail = 0
