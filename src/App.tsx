@@ -1633,18 +1633,19 @@ export default function App() {
   //   （`ResizablePanel` 只渲染 visible 的子节点），而右栏**默认就是折叠的** —— 注册在它里面等于
   //   最常见的那个场景下根本没注册。注册在常驻的 App，选段经 state 转交右栏（它挂载后消费）。
   //
-  // ★ 四条「放手」条件全收口在 accept()（false ⇒ 原样回退悬浮侧栏，**不许静默无反应**）：
+  // ★ 五条「放手」条件全收口在 accept()（false ⇒ 交给模块自己的宿主 / 原样回退悬浮侧栏，**不许静默无反应**）：
   //   ① 没有书在读；② 右栏 AI Tab 被 ⋯ 菜单藏了；③ 对话已扩成 aiChat 中间标签（右栏原位是
-  //   token 面板，看不到输入框 —— 用户 2026-09-22 拍板：放手回退）；④ 整窗模块（左右栏退场，
-  //   展开也看不见 —— 与上面 Ctrl+Alt+B / Ctrl+J 同款闸门）。③④ 构造上都不可达（划词只可能发生
-  //   在阅读器可见时），但**判据写全**比依赖「不可达」稳。
+  //   token 面板，看不到输入框 —— 用户 2026-09-22 拍板：放手回退）；④ AI 助手模块激活（自带输入框，
+  //   右栏原位是用量面板 —— 由模块自己的 SelectionAskHost 接管，v3.15.2）；⑤ 整窗模块（左右栏退场，
+  //   展开也看不见 —— 与上面 Ctrl+Alt+B / Ctrl+J 同款闸门）。③④⑤ 构造上都不可达（划词只可能发生
+  //   在阅读器 / 模块可见时），但**判据写全**比依赖「不可达」稳。
   //
   // ★ 用 ref 兜最新实况：注册只在挂载时做一次（deps 为空）。注册表是**栈**，重注册会把本宿主
   //   顶到 AI 教学之上（后者激活即接管，是本条要保护的地盘），所以不能让依赖驱动它反复进出。
   const rightAskRef = useRef<SelectionAskHost>({ accept: () => false, ask: () => {} })
   useEffect(() => {
     rightAskRef.current = {
-      accept: () => !fullWindowTab && activeTab !== 'aiChat'
+      accept: () => !fullWindowTab && activeTab !== 'aiChat' && activeTab !== 'aiAssistant'
         && !wbLayout.panelTabsHidden.includes('ai'),
       ask: (text) => {
         // 与 Ctrl+J 同款两步：先收掉可能开着的浮层（两个 ChatBody 叠着 = 两块对话），再展开右栏 AI

@@ -57,6 +57,7 @@ function KindIcon({ kind }: { kind: AiPlanOp['kind'] }) {
 export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, onClose, compact = false }: Props) {
   const pending = useMemo(() => plan.ops.filter((o) => o.status === 'pending'), [plan])
   const applied = useMemo(() => plan.ops.filter((o) => o.status === 'applied'), [plan])
+  const failed = useMemo(() => plan.ops.filter((o) => o.status === 'failed'), [plan])
   const [accepted, setAccepted] = useState<Set<string>>(new Set())
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
@@ -92,7 +93,7 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
               <ArrowLeft size={12} /> 返回
             </button>
           )}
-          <span className="truncate">变更方案 · 待确认 {pending.length} 项{applied.length ? ` · 已应用 ${applied.length} 项` : ''}</span>
+          <span className="truncate">变更方案 · 待确认 {pending.length} 项{applied.length ? ` · 已应用 ${applied.length} 项` : ''}{failed.length ? ` · 失败 ${failed.length} 项` : ''}</span>
         </span>
         <div className="flex items-center gap-1.5">
           {applied.length > 0 && (
@@ -156,8 +157,17 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
                       className="kb-draggable h-3.5 w-3.5 shrink-0 accent-[var(--accent)]"
                     />
                   ) : (
-                    <span className={`shrink-0 text-[10px] ${op.status === 'applied' ? 'text-emerald-500' : 'text-[var(--text-muted)]'}`}>
-                      {op.status === 'applied' ? '●' : '○'}
+                    <span
+                      className={`shrink-0 text-[10px] ${
+                        op.status === 'applied'
+                          ? 'text-emerald-500'
+                          : op.status === 'failed'
+                            ? 'text-[var(--danger)]'
+                            : 'text-[var(--text-muted)]'
+                      }`}
+                      title={op.status === 'failed' ? op.error : undefined}
+                    >
+                      {op.status === 'applied' ? '●' : op.status === 'failed' ? '×' : '○'}
                     </span>
                   )}
                   <KindIcon kind={op.kind} />
@@ -212,6 +222,11 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
                   ? '模块写入没有文本 diff；应用后可手动撤销，整任务回滚不会自动还原这一类'
                   : '此变更无文本差异预览'}
               </p>
+              {selected.status === 'failed' && selected.error && (
+                <p className="max-w-full break-words text-[12px] text-[var(--danger)]" title={selected.error}>
+                  失败：{selected.error}
+                </p>
+              )}
             </div>
           )}
         </div>

@@ -16,7 +16,9 @@ import { registerSources, assignSources, extractSource, getSources, type Registe
 import type { SourceAnchor } from '../../src/lib/aiTeachingSourcesPure'
 import type { ToolInvokeCtx } from './aiTools'
 import { assertCanRead, assertCanWrite, readPredicate } from './aiAssistantScope'
-import { commitOrStage } from './aiAssistantCommit'
+import { commitOrStage, stageToolOp } from './aiAssistantCommit'
+import { resolveKnowledgeTargetPure, type KnowledgeTarget } from './knowledgeTargetPure'
+import { summarizeToolOp } from './aiAssistantPlanPure'
 import { isConfirmModeHiddenTool } from './aiAssistantStageable'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault, stageImageVersioned } from './workspaceManager'
 import { imageGenerate, imageEdit, imageEditSlotConfigured } from './llmService'
@@ -26,7 +28,7 @@ import { getCurrentVault } from './kbStore/vaultContext'
 import { pomoSessionsAll } from './kbStore/pomoVaultRepo'
 import { getKnowledgeIndex, getKnowledgeTextIndex } from './kbStore/knowledgeIndex'
 import { getGraphIndex } from './kbStore/graphIndex'
-import { vaultGetPageById, vaultGetCategories, vaultCreatePage } from './kbStore/knowledgeVaultRepo'
+import { vaultGetPageById, vaultGetCategories, vaultCreatePage, vaultDirExists } from './kbStore/knowledgeVaultRepo'
 import { searchKnowledge } from './knowledgeSearch'
 import { searchHelp, helpCatalog } from './helpService'
 import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries } from './kbStore/blogVaultRepo'
@@ -563,6 +565,19 @@ function workflowSummary(flow: ScheduleWorkflow) {
   }
 }
 
+/** AI 知识库写工具的目标目录解析（含空目录 / 学习空间根的磁盘兜底，v3.15.2） */
+function resolveKnowledgeTarget(args: Record<string, unknown>): KnowledgeTarget {
+  return resolveKnowledgeTargetPure(args, vaultGetCategories(), vaultDirExists)
+}
+
+/** 暂存参数：连带解析结果一起存，应用时不再按名字猜（目录被删则明确失败） */
+function withResolvedTarget(args: Record<string, unknown>, target: KnowledgeTarget): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...args }
+  if (target.categoryId) out.categoryId = target.categoryId
+  if (target.dirRel) out.dirRel = target.dirRel
+  return out
+}
+
 export function registerBuiltinTools(): void {
 
   // 1. builtin.knowledge.search —— 知识库混合检索（关键词 + 语义，knowledge-index-design §9）
@@ -989,13 +1004,14 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.knowledge.create-page',
     title: '创建知识库页面',
-    description: '新建知识库页面(可指定分类名)',
+    description: '新建知识库页面。categoryPath=仓库相对目录（可写入空目录 / 学习空间根），categoryName=分类名；省略则存未分类',
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: '标题' },
         contentMd: { type: 'string', description: 'Markdown 正文' },
-        categoryName: { type: 'string', description: '分类名(精确, 可选)' },
+        categoryPath: { type: 'string', description: '仓库相对目录，如 感悟与心得 或 学习空间/高数（推荐）' },
+        categoryName: { type: 'string', description: '分类名（精确；同名多处时改用 categoryPath）' },
       },
       required: ['title', 'contentMd'],
     },
@@ -1005,19 +1021,26 @@ export function registerBuiltinTools(): void {
     requires: 'write',
     tier: 'ondemand',
     module: 'knowledge',
-  }, args => {
+  }, (args, ctx) => {
     const title = str(args.title).trim()
     const contentMd = str(args.contentMd)
     if (!title) throw new Error('标题不能为空')
-    let categoryId: string | null = null
-    const catName = str(args.categoryName).trim()
-    if (catName) {
-      const cat = vaultGetCategories().find(c => c.name === catName && c.categoryType !== 'space')
-      if (!cat) throw new Error(`未找到分类「${catName}」，可省略 categoryName 存入未分类`)
-      categoryId = cat.id
-    }
+    // 暂存前就解析目标：分类 / 空目录 / 空间根。解析失败当场回给模型改参数，
+    // 不再拖到用户点「应用」才炸（v3.15.2）。
+    const target = resolveKnowledgeTarget(args)
+    const stagedArgs = withResolvedTarget(args, target)
+    const staged = stageToolOp(ctx, {
+      tool: 'builtin.knowledge.create-page',
+      module: 'knowledge',
+      args: stagedArgs,
+      summary: `创建知识库页面 · knowledge：${summarizeToolOp('builtin.knowledge.create-page', {
+        ...stagedArgs,
+        ...(target.display !== '未分类' ? { categoryPath: target.display } : {}),
+      })}`,
+    })
+    if (staged) return staged
     // 受控写层：与 UI 同一份磁盘 .md（frontmatter id 由 repo 生成并登记索引）
-    const page = vaultCreatePage({ title, contentMd, categoryId })
+    const page = vaultCreatePage({ title, contentMd, categoryId: target.categoryId, dirRel: target.dirRel })
     // 与 vault.write 同规则：.md 落盘即失效索引（页面立刻进入列表/图谱/AI 检索），
     // 并广播通知渲染层重取 —— 知识库是保活模块，不通知就看不到（2026-09-10 修）
     invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '')
@@ -3094,6 +3117,7 @@ export function registerBuiltinTools(): void {
         band: { type: 'string', enum: ['all', 'stubborn', 'mid', 'light'], description: '错次档位：all=不限(默认) / stubborn=顽固错(≥4次) / mid=中错(2-3次) / light=轻错(1次)' },
         limit: { type: 'number', description: '最多出题数，默认 20，上限 100' },
         order: { type: 'string', enum: ['wrong', 'recent', 'random'], description: 'wrong=按错次降序(默认) / recent=按最近更新 / random=随机' },
+        categoryPath: { type: 'string', description: '存入的仓库相对目录；与 categoryName 二选一（推荐）' },
         categoryName: { type: 'string', description: '存入的知识库分类名（精确匹配）；省略则存入默认收件箱' },
       },
     },
@@ -3103,7 +3127,20 @@ export function registerBuiltinTools(): void {
     requires: 'write',
     tier: 'ondemand',
     module: 'quiz',
-  }, args => {
+  }, (args, ctx) => {
+    // 暂存前解析目标（同 knowledge.create-page）：失败当场回给模型，不拖到应用期
+    const target = resolveKnowledgeTarget(args)
+    const stagedArgs = withResolvedTarget(args, target)
+    const staged = stageToolOp(ctx, {
+      tool: 'builtin.quiz.gen-paper',
+      module: 'quiz',
+      args: stagedArgs,
+      summary: `按错误类型组卷成练习页 · quiz：${summarizeToolOp('builtin.quiz.gen-paper', {
+        ...stagedArgs,
+        ...(target.display !== '未分类' ? { categoryPath: target.display } : {}),
+      })}`,
+    })
+    if (staged) return staged
     const space = str(args.sourceSpace).trim()
     const tags = quizTagList()
     const tagIds: string[] = []
@@ -3166,14 +3203,7 @@ export function registerBuiltinTools(): void {
     })
 
     // 建页走知识库受控写层：与手工新建页面同一条路径（自动生成 frontmatter id 并登记索引）
-    let categoryId: string | null = null
-    const catName = str(args.categoryName).trim()
-    if (catName) {
-      const cat = vaultGetCategories().find(c => c.name === catName && c.categoryType !== 'space')
-      if (!cat) throw new Error(`未找到分类「${catName}」；可省略 categoryName 以存入默认收件箱`)
-      categoryId = cat.id
-    }
-    const page = vaultCreatePage({ title, contentMd: lines.join('\n'), categoryId })
+    const page = vaultCreatePage({ title, contentMd: lines.join('\n'), categoryId: target.categoryId, dirRel: target.dirRel })
     // 同 knowledge.create-page：.md 落盘即失效索引并广播，否则列表/搜索里看不到新练习页
     invalidateIndexIfCurrentVault(getCurrentVault()?.rootId ?? '')
     broadcastDataChanged('knowledge')

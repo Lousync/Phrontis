@@ -6,6 +6,7 @@ import { getKnowledgeIndex, invalidateKnowledgeIndex, getKnowledgeTextIndex, mdT
 import { createLinkResolver, getGraphIndex } from './graphIndex'
 import { parseMarkdown, serializeMarkdown } from './mdStore'
 import { WELCOME_DOC_FILENAME } from './welcomeDoc'
+import { normalizeDirRel } from '../knowledgeTargetPure'
 
 /**
  * 知识库 vault 读源（读写分工定稿，见 .AGENT/docs/读写分工设计.md）：
@@ -149,6 +150,17 @@ export function vaultGetCategories(): Array<{ id: string; name: string; parentId
   }))
 }
 
+/**
+ * 仓库内目录是否存在（AI 写工具的空目录兜底用，v3.15.2）。
+ * 只接受安全的仓库相对路径；绝对路径 / `..` / 隐藏目录段一律 false。
+ */
+export function vaultDirExists(rel: unknown): boolean {
+  const norm = normalizeDirRel(rel)
+  if (!norm) return false
+  try { return statSync(join(requireRoot(), norm)).isDirectory() } catch { return false }
+}
+
+
 /** 目录的仓库内相对路径（无 path 条目=老格式/虚拟目录，返回 null）；供删除通道 trash 磁盘文件夹用 */
 export function vaultGetCategoryRelPath(id: string): string | null {
   return getKnowledgeIndex().categories.find((c) => c.id === id)?.path ?? null
@@ -252,11 +264,18 @@ function uniquePageName(dirRel: string, stem: string, root: string): string {
 }
 
 /** vault 导入式建页：写带 frontmatter 的 .md 到目标目录（categoryId 目录，缺省落收件箱 .knowbase/_inbox）；status=published（导入即可见） */
-export function vaultCreatePage(data: { title: string; contentMd: string; categoryId?: string | null; fileType?: string; tags?: string[] }): VaultPage {
+export function vaultCreatePage(data: { title: string; contentMd: string; categoryId?: string | null; dirRel?: string | null; fileType?: string; tags?: string[] }): VaultPage {
   const root = requireRoot()
   const now = new Date().toISOString()
   const id = randomUUID()
-  const dirRel = (data.categoryId ? vaultGetCategoryRelPath(data.categoryId) : null) ?? KB_INBOX_DIR
+  let dirRel: string
+  if (data.dirRel) {
+    const norm = normalizeDirRel(data.dirRel)
+    if (!norm) throw new Error(`页面目标目录非法：${data.dirRel}`)
+    dirRel = norm
+  } else {
+    dirRel = (data.categoryId ? vaultGetCategoryRelPath(data.categoryId) : null) ?? KB_INBOX_DIR
+  }
   const stem = sanitizeFileStem(data.title || '导入页面')
   const name = uniquePageName(dirRel, stem, root)
   const rel = `${dirRel}/${name}`

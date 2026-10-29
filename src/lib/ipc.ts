@@ -692,7 +692,11 @@ export const usageDashboard = (win: UsageWindow): Promise<UsageDashboardView> =>
 export const agentSessionChanges = (sessionId?: string): Promise<SessionFileChange[]> => a().agentSessionChanges(sessionId)
 // ===== AI助手变更方案（v3.9.0）=====
 export const aiAssistantPlanGet = (sessionId: string): Promise<AiChangePlan | null> => a().aiAssistantPlanGet(sessionId)
-export const aiAssistantPlanApply = (sessionId: string, acceptedIds: string[]): Promise<{ applied: number; opIds: string[] }> => a().aiAssistantPlanApply(sessionId, acceptedIds)
+export const aiAssistantPlanApply = (sessionId: string, acceptedIds: string[]): Promise<{
+  applied: number
+  opIds: string[]
+  failures: Array<{ id: string; tool?: string; summary?: string; error: string }>
+}> => a().aiAssistantPlanApply(sessionId, acceptedIds)
 export const aiAssistantPlanReject = (sessionId: string): Promise<boolean> => a().aiAssistantPlanReject(sessionId)
 export const aiAssistantTaskRollback = (sessionId: string): Promise<{ reverted: number; skipped?: number }> => a().aiAssistantTaskRollback(sessionId)
 export const aiAssistantTasks = (): Promise<AiTaskSummary[]> => a().aiAssistantTasks()

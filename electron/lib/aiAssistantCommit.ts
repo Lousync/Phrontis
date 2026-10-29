@@ -21,8 +21,46 @@ export interface StagedResult {
   message: string
 }
 
+export interface StagedToolResult {
+  ok: true
+  staged: true
+  opId: string
+  kind: 'tool'
+  message: string
+}
+
 export function isPropose(ctx?: ToolInvokeCtx): boolean {
   return !!ctx?.propose && !!ctx.sessionId
+}
+
+/**
+ * 数据写工具（非 vault 文件）的 handler 内暂存口（v3.15.2）。
+ *
+ * 为什么这些工具不能走 `aiTools` 的通用暂存层：它们需要在暂存前解析业务目标
+ * （例如 knowledge.create-page 的分类名 → 目录）。通用层只做 schema 校验，
+ * 解析失败会拖到用户点「应用」才炸，且模型收不到错误、无法在本轮改参数。
+ *
+ * 返回 null = 非 propose 模式，调用方继续原落盘逻辑。
+ */
+export function stageToolOp(
+  ctx: ToolInvokeCtx | undefined,
+  input: { tool: string; module?: string; args: Record<string, unknown>; summary: string },
+): StagedToolResult | null {
+  if (!isPropose(ctx)) return null
+  const opId = stageOp(ctx!.sessionId as string, {
+    kind: 'tool',
+    tool: input.tool,
+    module: input.module,
+    args: input.args,
+    summary: input.summary,
+  })
+  return {
+    ok: true,
+    staged: true,
+    opId,
+    kind: 'tool',
+    message: '已记入变更方案（尚未落盘，等用户确认后应用）',
+  }
 }
 
 /**

@@ -18,6 +18,7 @@ import {
 } from './workspaceManager'
 import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { broadcastTreeRefresh } from './aiTeachingFolders'
+import { appendAgentMessage, sessionExists } from './agentSessionRepo'
 import { selectOps, actionForOp, type ChangePlan, type PlanOp, type PlanOpInput, type FsAction } from './aiAssistantPlanPure'
 
 export type { PlanOpKind, PlanOp, ChangePlan, PlanOpInput, FsAction } from './aiAssistantPlanPure'
@@ -144,53 +145,98 @@ function resultIdOf(data: unknown): string {
  * `kind='tool'` 的 op 通过动态 import 重放工具调用（避免 aiTools ↔ aiAssistantPlan 静态环）。
  * 工具返回的 id 会登记为临时 id：同一计划里后续参数引用暂存时拿到的 opId，可在此替换成真实 id。
  */
-export async function applyPlan(sessionId: string, acceptedIds: string[]): Promise<{ applied: number; opIds: string[] }> {
+export interface PlanFailure {
+  id: string
+  tool?: string
+  summary?: string
+  error: string
+}
+
+/**
+ * 应用被接受的写操作（按计划顺序）；返回落盘清单与失败项。
+ *
+ * `kind='tool'` 的 op 通过动态 import 重放工具调用（避免 aiTools ↔ aiAssistantPlan 静态环）。
+ * 工具返回的 id 会登记为临时 id：同一计划里后续参数引用暂存时拿到的 opId，可在此替换成真实 id。
+ *
+ * v3.15.2：失败不再只抛给渲染层 ——
+ *   · 失败 op 标 `failed` + `error`（不再留在 pending 里反复重放）；
+ *   · `appliedAt` 只在真的应用成功过时写（此前 0 成功也会写）；
+ *   · 失败摘要以 assistant 消息写回会话，下一轮模型能看到并自我修正。
+ */
+export async function applyPlan(
+  sessionId: string,
+  acceptedIds: string[],
+): Promise<{ applied: number; opIds: string[]; failures: PlanFailure[] }> {
   const plan = load(sessionId)
   if (!plan) throw new Error('没有可应用的变更方案')
   const { rootPath, rootId } = rootPathOrThrow()
   const accepted = new Set(acceptedIds)
   const rels: string[] = []
   const done: string[] = []
+  const failures: PlanFailure[] = []
   const resolved = new Map<string, string>()
   try {
     for (const op of plan.ops) {
       if (op.status !== 'pending') continue
       if (!accepted.has(op.id)) { op.status = 'rejected'; continue }
-      if (op.kind === 'tool') {
-        if (!op.tool) throw new Error('变更方案缺少工具名')
-        const { invokeToolInternal } = await import('./aiTools')
-        const args = replaceTempIds(op.args ?? {}, resolved) as Record<string, unknown>
-        const exec = await invokeToolInternal(op.tool, args, '', {
-          sessionId,
-          source: 'assistant',
-          apply: true,
-          unifiedAssistant: true,
-        })
-        if (!exec.ok) throw new Error(`${op.tool} 应用失败：${exec.message}`)
-        op.result = exec.data
-        const resultId = resultIdOf(exec.data)
-        if (resultId) resolved.set(op.id, resultId)
-        // 工具若返回文件路径，纳入刷新清单（模块工具自己会广播）
-        if (exec.data && typeof exec.data === 'object') {
-          const d = exec.data as Record<string, unknown>
-          const p = String(d.path ?? d.relPath ?? '').trim()
-          if (p) rels.push(p)
+      try {
+        if (op.kind === 'tool') {
+          if (!op.tool) throw new Error('变更方案缺少工具名')
+          const { invokeToolInternal } = await import('./aiTools')
+          const args = replaceTempIds(op.args ?? {}, resolved) as Record<string, unknown>
+          const exec = await invokeToolInternal(op.tool, args, '', {
+            sessionId,
+            source: 'assistant',
+            apply: true,
+            unifiedAssistant: true,
+          })
+          if (!exec.ok) throw new Error(exec.message)
+          op.result = exec.data
+          const resultId = resultIdOf(exec.data)
+          if (resultId) resolved.set(op.id, resultId)
+          // 工具若返回文件路径，纳入刷新清单（模块工具自己会广播）
+          if (exec.data && typeof exec.data === 'object') {
+            const d = exec.data as Record<string, unknown>
+            const p = String(d.path ?? d.relPath ?? '').trim()
+            if (p) rels.push(p)
+          }
+        } else {
+          const action = actionForOp(op, 'apply')
+          if (action) await runAction(action, rootPath, rootId)
+          rels.push(op.relPath ?? op.to ?? '')
         }
-      } else {
-        const action = actionForOp(op, 'apply')
-        if (action) await runAction(action, rootPath, rootId)
-        rels.push(op.relPath ?? op.to ?? '')
+        op.status = 'applied'
+        delete op.error
+        done.push(op.id)
+      } catch (err) {
+        const msg = String((err as Error)?.message ?? err)
+        op.status = 'failed'
+        op.error = msg
+        failures.push({ id: op.id, tool: op.tool, summary: op.summary, error: msg })
+        // 后续 op 可能依赖本条的前提（临时 id / 目标目录），停在第一条失败，其余留给用户重试
+        break
       }
-      op.status = 'applied'
-      done.push(op.id)
     }
   } finally {
-    plan.appliedAt = new Date().toISOString()
-    plan.updatedAt = plan.appliedAt
+    const now = new Date().toISOString()
+    if (done.length > 0) plan.appliedAt = now
+    plan.updatedAt = now
     persist(plan)
     refresh(rels.filter(Boolean))
   }
-  return { applied: done.length, opIds: done }
+  if (failures.length > 0 && sessionExists(sessionId)) {
+    const remaining = plan.ops.filter((o) => o.status === 'pending').length
+    const lines = failures.map((f, i) => `${i + 1}. ${f.summary || f.tool || '写操作'}：${f.error}`)
+    const note = [
+      '（变更未应用）执行变更方案时失败：',
+      ...lines,
+      remaining > 0 ? `另有 ${remaining} 项尚未执行，可在变更方案里重试。` : '',
+      '请修正参数后重新提交；如果目标目录不存在，请先在知识库创建该目录。',
+    ].filter(Boolean).join('\n')
+    // 写回会话 = 下一轮模型能看到失败原因并自我修正；会话不可写不掩盖应用失败本身
+    try { appendAgentMessage(sessionId, 'assistant', note) } catch { /* 忽略 */ }
+  }
+  return { applied: done.length, opIds: done, failures }
 }
 
 /**
@@ -225,11 +271,11 @@ export async function rollbackTask(sessionId: string): Promise<{ reverted: numbe
   return { reverted: n, skipped }
 }
 
-/** 丢弃未应用的方案 */
+/** 丢弃未应用的方案（pending 与 failed 一并清掉；failed 保留在会话消息里可回看） */
 export function rejectPlan(sessionId: string): void {
   const plan = load(sessionId)
   if (!plan) return
-  for (const op of plan.ops) if (op.status === 'pending') op.status = 'rejected'
+  for (const op of plan.ops) if (op.status === 'pending' || op.status === 'failed') op.status = 'rejected'
   plan.updatedAt = new Date().toISOString()
   persist(plan)
 }

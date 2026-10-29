@@ -31,7 +31,9 @@ export interface PlanOp {
   tempId?: string
   /** 应用后工具返回的原始结果（用于临时 id 映射与回滚提示） */
   result?: unknown
-  status: 'pending' | 'applied' | 'rejected'
+  /** 应用失败原因（status='failed'；失败项不再作为 pending 重放） */
+  error?: string
+  status: 'pending' | 'applied' | 'rejected' | 'failed'
 }
 
 export interface ChangePlan {
@@ -46,6 +48,40 @@ export interface ChangePlan {
 
 /** 暂存输入（无需 id/status，由 stageOp 补齐） */
 export type PlanOpInput = Omit<PlanOp, 'id' | 'status'>
+
+/**
+ * 方案卡上的人类可读摘要（v3.15.2）。
+ *
+ * 此前通用暂存层直接贴 `JSON.stringify(args)` 的前 200 字：英文参数名 + `\n` 转义，
+ * 用户看不出「到底要建什么」。这里按工具做最小结构化，未知工具再回退到 JSON。
+ */
+export function summarizeToolOp(name: string, args: Record<string, unknown>): string {
+  const s = (k: string): string => (typeof args[k] === 'string' ? String(args[k]).trim() : '')
+  const firstLine = (text: string, max = 60): string => {
+    const flat = text.replace(/\s+/g, ' ').trim()
+    return flat.length > max ? `${flat.slice(0, max)}…` : flat
+  }
+  const target = s('categoryPath') || s('categoryName') || '未分类'
+  switch (name) {
+    case 'builtin.knowledge.create-page': {
+      const title = s('title') || '未命名页面'
+      const body = s('contentMd')
+      const preview = firstLine(body)
+      return `新建知识页《${title}》· 目标 ${target} · 正文 ${body.length} 字${preview ? ` · ${preview}` : ''}`
+    }
+    case 'builtin.blog.create-entry': {
+      const body = s('contentMd')
+      return `${s('date') || '今天'} 的日记 · 正文 ${body.length} 字${body ? ` · ${firstLine(body)}` : ''}`
+    }
+    case 'builtin.quiz.gen-paper':
+      return `组卷《${s('title') || '练习页'}》· 目标 ${target}`
+    default: {
+      let json: string
+      try { json = JSON.stringify(args ?? {}) } catch { json = String(args) }
+      return json.length > 200 ? `${json.slice(0, 200)}…` : json
+    }
+  }
+}
 
 /** 一个 op 正/反向对应的原子文件动作（真正执行交给 aiAssistantPlan 的 fs 层） */
 export interface FsAction {

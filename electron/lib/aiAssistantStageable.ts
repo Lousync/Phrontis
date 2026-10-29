@@ -8,7 +8,7 @@
  * 纯模块：给 aiTools / agentService / 契约脚本共用，不 import electron。
  */
 
-/** 由各工具 handler 内部调用 commitOrStage 暂存的 vault 文件工具（通用层必须跳过，避免双重暂存） */
+/** 由各工具 handler 内部调用 commitOrStage / stageToolOp 暂存的工具（通用层必须跳过，避免双重暂存） */
 export const HANDLER_STAGED_TOOLS = new Set([
   'builtin.vault.write',
   'builtin.vault.edit',
@@ -17,29 +17,37 @@ export const HANDLER_STAGED_TOOLS = new Set([
 ])
 
 /**
+ * 由 handler 自行暂存的数据写工具（v3.15.2）。
+ * 与 vault 文件的区别：这些工具必须在暂存前解析业务目标（如知识库目录），
+ * 解析失败要当场回给模型改参数，而不是等用户点「应用」才失败。
+ */
+export const HANDLER_STAGED_DATA_TOOLS = new Set([
+  'builtin.knowledge.create-page',
+  'builtin.quiz.gen-paper',
+])
+
+/**
  * 通用暂存层可安全重放的数据写工具。
  * 只收「参数即完整意图、重复执行幂等或可重放」的工具；终端 / 外部副作用 / 生图落盘不收。
  */
 export const STAGEABLE_WRITE_TOOLS = new Set([
-  'builtin.knowledge.create-page',
   'builtin.blog.create-entry',
   'builtin.quiz.set-note',
   'builtin.quiz.tag',
   'builtin.quiz.collect',
   'builtin.quiz.favorite',
   'builtin.quiz.remove',
-  'builtin.quiz.gen-paper',
   'builtin.checkin.check-habit',
   'builtin.accounting.import-json',
   'builtin.booksource.draft',
 ])
 
 export function isHandlerStagedTool(name: string): boolean {
-  return HANDLER_STAGED_TOOLS.has(name)
+  return HANDLER_STAGED_TOOLS.has(name) || HANDLER_STAGED_DATA_TOOLS.has(name)
 }
 
 export function isStageableWriteTool(name: string): boolean {
-  return HANDLER_STAGED_TOOLS.has(name) || STAGEABLE_WRITE_TOOLS.has(name)
+  return isHandlerStagedTool(name) || STAGEABLE_WRITE_TOOLS.has(name)
 }
 
 /** 确认模式下应当从工具面隐藏的写工具（当前包含终端、插件外部副作用等） */

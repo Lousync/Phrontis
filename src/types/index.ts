@@ -1688,7 +1688,9 @@ export interface AiPlanOp {
   summary?: string
   /** kind='tool'：应用后工具返回结果 */
   result?: unknown
-  status: 'pending' | 'applied' | 'rejected'
+  /** 应用失败原因（status='failed'） */
+  error?: string
+  status: 'pending' | 'applied' | 'rejected' | 'failed'
 }
 
 export interface AiChangePlan {
@@ -2945,7 +2947,11 @@ export interface ElectronAPI {
   agentSessionChanges: (sessionId?: string) => Promise<SessionFileChange[]>
   // ===== AI助手变更方案（v3.9.0）=====
   aiAssistantPlanGet: (sessionId: string) => Promise<AiChangePlan | null>
-  aiAssistantPlanApply: (sessionId: string, acceptedIds: string[]) => Promise<{ applied: number; opIds: string[] }>
+  aiAssistantPlanApply: (sessionId: string, acceptedIds: string[]) => Promise<{
+    applied: number
+    opIds: string[]
+    failures: Array<{ id: string; tool?: string; summary?: string; error: string }>
+  }>
   aiAssistantPlanReject: (sessionId: string) => Promise<boolean>
   aiAssistantTaskRollback: (sessionId: string) => Promise<{ reverted: number; skipped?: number }>
   aiAssistantTasks: () => Promise<AiTaskSummary[]>

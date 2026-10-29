@@ -38,10 +38,13 @@ console.log('=== A. selectOps：应用取 pending+accepted 正序 ===')
     op({ id: '1', kind: 'write', relPath: 'a.md', prev: null, next: 'x', status: 'pending' }),
     op({ id: '2', kind: 'edit', relPath: 'b.md', prev: 'o', next: 'n', status: 'pending' }),
     op({ id: '3', kind: 'trash', relPath: 'c.md', prev: 'zz', status: 'pending' }),
+    op({ id: '4', kind: 'tool', tool: 'builtin.knowledge.create-page', status: 'failed' }),
   ]
   const sel = selectOps(ops, ['1', '3'], 'apply')
   ok(sel.map((o) => o.id).join(',') === '1,3', 'A1 只取被采纳的 pending，保持计划顺序', sel.map((o) => o.id).join(','))
   ok(selectOps(ops, ['1', '2', '3'], 'apply').length === 3, 'A2 全采纳取全部')
+  ok(!selectOps(ops, ['1', '2', '3', '4'], 'apply').some((o) => o.id === '4'),
+    'A3 failed 项不再进入应用候选（v3.15.2）')
 }
 
 console.log('\n=== B. selectOps：回滚取 applied 逆序 ===')
@@ -84,7 +87,7 @@ console.log('\n=== C. actionForOp：正 / 反向映射 ===')
 
 console.log('\n=== D. 源码接线：写工具走岔口 ===')
 const bt = read('electron/lib/builtinTools.ts')
-ok(/import\s*\{\s*commitOrStage\s*\}\s*from\s*'\.\/aiAssistantCommit'/.test(bt), 'D1 builtinTools 引入 commitOrStage')
+ok(/import\s*\{[^}]*commitOrStage[^}]*\}\s*from\s*'\.\/aiAssistantCommit'/.test(bt), 'D1 builtinTools 引入 commitOrStage')
 const commitCount = (bt.match(/commitOrStage\(ctx,/g) || []).length
 ok(commitCount >= 4, 'D2 write/edit/rename/trash 四处走岔口', `实得 ${commitCount}`)
 ok(/kind: 'write'/.test(bt) && /kind: 'edit'/.test(bt) && /kind: 'rename'/.test(bt) && /kind: 'trash'/.test(bt), 'D3 四种 op kind 均被暂存构造')
@@ -96,6 +99,12 @@ ok(/stageOp\(/.test(commit), 'D5 propose 时记入 stageOp')
 const svc = read('electron/lib/agentService.ts')
 ok(/scope:\s*aiScope/.test(svc) && /propose:\s*aiPropose/.test(svc) && /scopeAll/.test(svc), 'D6 agentService 透传 scope+scopeAll+propose')
 ok(/ipcMain\.handle\('aiAssistant:plan:apply'/.test(svc) && /aiAssistant:task:rollback/.test(svc), 'D7 主进程注册 plan:apply / task:rollback')
+const planSrc = read('electron/lib/aiAssistantPlan.ts')
+ok(/status = 'failed'/.test(planSrc) && /op\.error = msg/.test(planSrc), 'D8 应用失败标 failed 并记录原因（v3.15.2）')
+ok(/if \(done\.length > 0\) plan\.appliedAt/.test(planSrc), 'D9 零成功不再写 appliedAt')
+ok(/appendAgentMessage\(sessionId, 'assistant', note\)/.test(planSrc), 'D10 失败摘要写回会话给模型')
+ok(/HANDLER_STAGED_DATA_TOOLS/.test(read('electron/lib/aiAssistantStageable.ts')) && /stageToolOp\(ctx/.test(bt),
+  'D11 建页 / 组卷由 handler 暂存前解析目标')
 
 console.log('\n=== E. IPC 三处同步 ===')
 const preload = read('electron/preload/index.ts')

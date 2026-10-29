@@ -1033,12 +1033,24 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     if (!sid) return
     try {
       const r = await aiAssistantPlanApply(sid, ids)
-      showToast({ type: 'success', message: `已应用 ${r.applied} 项变更` })
+      if (r.failures && r.failures.length > 0) {
+        showToast({
+          type: 'error',
+          message: `应用失败：${r.failures.length} 项${r.applied > 0 ? ` · 已应用 ${r.applied} 项` : ''}`,
+          detail: r.failures.map((f) => f.error).join('\n'),
+        })
+      } else if (r.applied > 0) {
+        showToast({ type: 'success', message: `已应用 ${r.applied} 项变更` })
+      } else {
+        showToast({ type: 'info', message: '没有可应用的变更' })
+      }
       await refreshPlan()
+      // 失败摘要由主进程写回会话（下一轮模型可见），这里同步刷新消息列表
+      await refreshMessages(sid)
     } catch (e) {
-      showToast({ type: 'error', message: '应用变更失败', detail: String(e) })
+      showToast({ type: 'error', message: '应用变更失败', detail: String((e as Error)?.message ?? e) })
     }
-  }, [plan, refreshPlan])
+  }, [plan, refreshPlan, refreshMessages])
 
   const rejectPlanAction = useCallback(async () => {
     const sid = activeIdRef.current ?? plan?.sessionId ?? null

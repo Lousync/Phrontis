@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { appendAudit, countMonthInvocations, listAudit, summarizeArgs } from './pluginAudit'
 import { stageOp } from './aiAssistantPlan'
+import { summarizeToolOp } from './aiAssistantPlanPure'
 import { isHandlerStagedTool, isStageableWriteTool } from './aiAssistantStageable'
 
 /**
@@ -341,13 +342,19 @@ async function invokeTool(
         message: `工具「${tool.title}」无法安全预览，已阻止执行。请切换到「直接执行」后再试`,
       }
     }
-    const summary = `${tool.title}${tool.module ? ` · ${tool.module}` : ''}：${summarizeArgs(cleanArgs)}`
+    const summary = `${tool.title}${tool.module ? ` · ${tool.module}` : ''}：${summarizeToolOp(name, cleanArgs)}`
     const opId = stageOp(ctx.sessionId, {
       kind: 'tool',
       tool: name,
       module: tool.module,
       args: cleanArgs,
       summary,
+    })
+    // 暂存动作也留痕（tool.stage 不计入月度调用上限；不写成 tool.invoke 免得应用时重复计数）
+    appendAudit(callerPluginId, 'tool.stage', {
+      tool: name,
+      args: summarizeArgs(cleanArgs),
+      opId,
     })
     return {
       ok: true,
@@ -381,11 +388,14 @@ async function invokeTool(
   const action = auditActionFor(name)
   try {
     const data = await tool.handler(cleanArgs, ctx)
-    appendAudit(callerPluginId, action, {
+    const staged = !!(data && typeof data === 'object' && (data as Record<string, unknown>).staged === true)
+    // 暂存记 tool.stage（不计入月度调用上限；应用时的 tool.invoke 才是真实执行）
+    appendAudit(callerPluginId, staged ? 'tool.stage' : action, {
       tool: name,
       args: summarizeArgs(cleanArgs),
       durationMs: Date.now() - started,
       ok: true,
+      ...(staged ? { staged: true } : {}),
     })
     return { ok: true, data }
   } catch (err) {
@@ -431,5 +441,5 @@ export function registerAiToolHandlers(deps: {
   ipcMain.handle('aiTools:list', () => ({ tools: listTools(), usage: getUsage(settingReader!) }))
   ipcMain.handle('aiTools:invoke', (_e, name: string, args: unknown) => invokeTool(name, args, settingReader!))
   ipcMain.handle('aiTools:getUsage', () => getUsage(settingReader!))
-  ipcMain.handle('aiTools:getRecentAudit', (_e, limit?: number) => listAudit(limit ?? 20, ['tool.invoke', 'mcp.invoke', 'llm.invoke']))
+  ipcMain.handle('aiTools:getRecentAudit', (_e, limit?: number) => listAudit(limit ?? 20, ['tool.invoke', 'tool.stage', 'mcp.invoke', 'llm.invoke']))
 }

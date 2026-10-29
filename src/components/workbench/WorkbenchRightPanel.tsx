@@ -198,6 +198,10 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
   // ★ 收进引用胶囊（多条可累积，上限 5 条），不自动发送、不覆盖用户已打的草稿。
   useEffect(() => {
     if (pendingAsk == null) return
+    // 用量面板态没有输入框（aiChat / aiAssistant 激活时）：不要再把选段塞进隐藏的
+    // docked 控制器，否则切走模块后引用胶囊会突然冒出来（v3.15.2）。正常路由下
+    // 这两种 Tab 已由模块自己的宿主接管，这里只是防御性兜底。
+    if (aiUsagePanel) { onConsumePendingAsk?.(); return }
     setSelQuotes(prev => {
       const next = prev.includes(pendingAsk) ? prev : [...prev, pendingAsk].slice(-5)
       selQuotesRef.current = next
@@ -206,7 +210,7 @@ export function WorkbenchRightPanel({ dayPanelDetached = false, onDockDayPanel, 
     onConsumePendingAsk?.()
     setTimeout(() => aiChat.inputRef.current?.focus(), 60)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingAsk])
+  }, [pendingAsk, aiUsagePanel])
 
   const togglePanelTabVisibility = (id: (typeof WORKBENCH_PANEL_TAB_IDS)[number], show: boolean) => {
     const next = show

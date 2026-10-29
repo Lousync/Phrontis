@@ -7,6 +7,9 @@ import { showToast } from '../../lib/toast'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { BOOKMARK_COLORS } from '../../lib/workbenchLayout'
 import { MessageList, fmtTime } from '../../components/shared/AssistantPanel/MessageList'
+import { QuoteChips } from '../../components/shared/AssistantPanel/QuoteChips'
+import { buildQuotedBody } from '../../components/shared/AssistantPanel/selQuotes'
+import { registerSelectionAskHost } from '../../lib/assistantContext'
 import { AiAssistantIcon } from '../../components/shared/AiAssistantIcon'
 import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
 import { SessionRunMark } from '../../components/shared/AssistantPanel/SessionRunMark'
@@ -105,6 +108,10 @@ export function AiAssistantModule({
   const modelMenu = useAnchoredMenu(modelTriggerRef, modelMenuRef, 280)
   const [modelCapable, setModelCapable] = useState(false)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  /** 划词「问 AI」引用片段（与 AiChatTab / AI 教学同口径：进胶囊，不自动发送） */
+  const [selQuotes, setSelQuotes] = useState<string[]>([])
+  const selQuotesRef = useRef<string[]>([])
+  const askRef = useRef<(text: string) => void>(() => {})
   const dragGuardRef = useRef(0)
   const layoutRef = useRef<HTMLDivElement | null>(null)
 
@@ -117,6 +124,25 @@ export function AiAssistantModule({
   useEffect(() => {
     if (!isActive) return
     void llmListProviders().then((r) => setProviderList(r.providers ?? [])).catch(() => null)
+  }, [isActive])
+
+  // 划词「问 AI」就地接管（v3.15.2）：本模块自带底部输入框，选段必须进这里。
+  // 此前只有 AI 教学 / AI 对话页注册了宿主，本模块落到 App 常驻的右栏宿主 →
+  // aiAssistant 激活时右栏是「用量 + 改动文件」面板，引用胶囊被存进没有输入框的控制器。
+  askRef.current = (text) => {
+    setSelQuotes((prev) => {
+      const next = prev.includes(text) ? prev : [...prev, text].slice(-5)
+      selQuotesRef.current = next
+      return next
+    })
+    setTimeout(() => composerRef.current?.focus(), 60)
+  }
+  useEffect(() => {
+    if (!isActive) return
+    return registerSelectionAskHost({
+      accept: () => true,
+      ask: (text) => askRef.current(text),
+    })
   }, [isActive])
 
   // 思考强度门槛（与 AI 教学同口径）：所选模型不支持推理 → 强制回落关闭
@@ -216,7 +242,14 @@ export function AiAssistantModule({
 
   /** 真正开跑（作用域已就绪时才会被调用） */
   const execRun = useCallback((run: PendingRun) => {
-    if (run.kind === 'send') { api.setInput(''); void api.send(run.text); return }
+    if (run.kind === 'send') {
+      api.setInput('')
+      // 引用随消息一次性消费（与 AiChatTab / AI 教学同口径），发送后清空胶囊
+      selQuotesRef.current = []
+      setSelQuotes([])
+      void api.send(run.text)
+      return
+    }
     if (run.kind === 'regenerate') { void api.onRegenerate(); return }
     if (run.kind === 'resume') { void api.onResume(); return }
     void api.onEditSubmit(run.id, run.content)
@@ -246,10 +279,25 @@ export function AiAssistantModule({
   }, [api.pending, api.scope.length, execRun])
 
   const handleSend = useCallback(() => {
-    const text = api.input.trim()
+    const raw = api.input.trim()
+    const quotes = selQuotesRef.current
+    // 只有引用、没有文字也允许发送（与引用胶囊语义一致）
+    const text = buildQuotedBody(quotes, raw).trim()
     if (!text) return
-    runGuarded({ kind: 'send', text }, text)
+    runGuarded({ kind: 'send', text }, raw)
   }, [api.input, runGuarded])
+
+  const removeQuote = useCallback((index: number) => {
+    setSelQuotes((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      selQuotesRef.current = next
+      return next
+    })
+  }, [])
+  const clearQuotes = useCallback(() => {
+    selQuotesRef.current = []
+    setSelQuotes([])
+  }, [])
 
   const toggleScopeCard = useCallback((relPath: string) => {
     setScopeCard((prev) => {
@@ -620,6 +668,11 @@ export function AiAssistantModule({
                 本模块 v3.9.0 照抄输入卡时漏了 —— 属静默漏接（槽名/位置错了也不报错），
                 由 .AGENT/scripts/plugins/verify-mascot.mjs 的「四处输入区」段锁住。 */}
             <AiMascotAnchor />
+            <QuoteChips
+              quotes={selQuotes}
+              onRemove={removeQuote}
+              onRemoveAll={clearQuotes}
+            />
             <textarea
               ref={composerRef}
               value={api.input}

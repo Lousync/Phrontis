@@ -4,11 +4,49 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：63
+ * 版本数：64
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.15.2",
+    "date": "2026-10-28",
+    "summary": "本版一句话：AI 助手建知识页不再因空目录 / 学习空间根卡在「应用变更失败」；AI 助手模块里划词「问 AI」回到模块自己的输入框；失败的变更方案会标红并把原因写回会话。",
+    "groups": [
+      {
+        "title": "AI 助手",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "建知识页支持空目录与空间根",
+            "rest": "`builtin.knowledge.create-page` 新增 `categoryPath`（仓库相对目录）；`categoryName` 命中不了分类索引时按磁盘目录兜底。通过「新建目录」建的空目录、学习空间根都能直接写入，不再报「未找到分类」。",
+            "sub": []
+          },
+          {
+            "lead": "暂存前就校验目标",
+            "rest": "建页 / 组卷在进入「变更方案」时解析目录，目录不存在当场回给模型改参数，不再等用户点「应用」才失败。",
+            "sub": []
+          },
+          {
+            "lead": "失败可见可修正",
+            "rest": "变更方案新增「失败」状态与原因；失败项不再反复重放，应用失败摘要会以一条消息写回会话，下一轮模型能看到并修正。",
+            "sub": []
+          },
+          {
+            "lead": "方案卡摘要可读",
+            "rest": "建页 / 写日记 / 组卷等操作显示标题、目标目录与正文字数，不再直接贴英文参数 JSON。",
+            "sub": []
+          },
+          {
+            "lead": "AI 助手模块划词「问 AI」",
+            "rest": "选段进入模块自己的引用胶囊，发送时合并进消息；不再被右侧「今日消耗 / 改动文件」面板截走，也不会在切模块后突然冒出旧引用。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.15.1",
     "date": "2026-10-28",

@@ -16,7 +16,8 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { normalizeSessionFields } from '../../../electron/lib/agentSessionNormalizePure.ts'
 import {
-  HANDLER_STAGED_TOOLS, STAGEABLE_WRITE_TOOLS, isConfirmModeHiddenTool, isHandlerStagedTool, isStageableWriteTool,
+  HANDLER_STAGED_TOOLS, HANDLER_STAGED_DATA_TOOLS,
+  isConfirmModeHiddenTool, isHandlerStagedTool, isStageableWriteTool,
 } from '../../../electron/lib/aiAssistantStageable.ts'
 import { selectOps, actionForOp } from '../../../electron/lib/aiAssistantPlanPure.ts'
 
@@ -63,8 +64,9 @@ console.log('=== A. 会话迁移纯函数 ===')
 
 console.log('\n=== B. 确认模式工具白名单 ===')
 ok(HANDLER_STAGED_TOOLS.has('builtin.vault.write') && isHandlerStagedTool('builtin.vault.edit'), 'B1 vault 四工具由 handler 自暂存')
-ok(STAGEABLE_WRITE_TOOLS.has('builtin.knowledge.create-page') && isStageableWriteTool('builtin.knowledge.create-page'),
-  'B2 知识库建页可暂存')
+ok(HANDLER_STAGED_DATA_TOOLS.has('builtin.knowledge.create-page') && HANDLER_STAGED_DATA_TOOLS.has('builtin.quiz.gen-paper')
+  && isStageableWriteTool('builtin.knowledge.create-page') && isHandlerStagedTool('builtin.quiz.gen-paper'),
+  'B2 知识库建页 / 组卷由 handler 自暂存（暂存前解析目标）')
 ok(isStageableWriteTool('builtin.quiz.tag') && isStageableWriteTool('builtin.accounting.import-json'),
   'B3 错题本 / 记账写工具可暂存')
 ok(!isStageableWriteTool('builtin.terminal.exec'), 'B4 终端不可预览')
@@ -166,6 +168,29 @@ console.log('\n=== G. 三宿主共享控制器 ===')
   ok(/splitPinnedSessions/.test(mod) && /pinnedSessions\.map/.test(mod),
     'G14 workspace session list has a pinned section')
   ok(/AgentSessionInfo/.test(hook) && /source \?\? 'assistant'/.test(hook), 'G9 会话列表合并旧 assistant 来源')
+}
+
+console.log('\n=== H. 划词「问 AI」落点（v3.15.2）===')
+{
+  const app = read('src/App.tsx')
+  const mod = read('src/modules/ai-assistant/index.tsx')
+  const right = read('src/components/workbench/WorkbenchRightPanel.tsx')
+  ok(/activeTab !== 'aiAssistant'/.test(app), 'H1 App 右栏宿主不再接管 AI 助手模块的划词')
+  ok(/registerSelectionAskHost/.test(mod) && /askRef\.current/.test(mod), 'H2 AI 助手模块注册自己的划词宿主')
+  ok(/QuoteChips/.test(mod) && /buildQuotedBody/.test(mod), 'H3 选段进模块引用胶囊并随消息合并')
+  ok(/if \(aiUsagePanel\) \{ onConsumePendingAsk/.test(right), 'H4 用量面板态不再吞 pendingAsk')
+}
+
+console.log('\n=== I. 方案应用失败（v3.15.2）===')
+{
+  const plan = read('electron/lib/aiAssistantPlan.ts')
+  ok(/status = 'failed'/.test(plan) && /op\.error = msg/.test(plan), 'I1 失败 op 标 failed 并记录原因')
+  ok(/if \(done\.length > 0\) plan\.appliedAt/.test(plan), 'I2 零成功不再写 appliedAt')
+  ok(/appendAgentMessage\(sessionId, 'assistant', note\)/.test(plan), 'I3 失败摘要写回会话给模型')
+  const types = read('src/types/index.ts')
+  ok(/'rejected' \| 'failed'/.test(types), 'I4 渲染层类型同步 failed 状态')
+  const review = read('src/modules/ai-assistant/ReviewPane.tsx')
+  ok(/selected\.status === 'failed'/.test(review), 'I5 审阅面板显示失败原因')
 }
 
 console.log('\n========================================')
