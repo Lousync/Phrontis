@@ -58,9 +58,8 @@ check('agentStreamCore 纯函数导出（零 React / ipc 依赖）',
   && /export function completeThink/.test(core) && /export function createDraft/.test(core)
   && !/from 'react'/.test(core) && !/from '\.\/ipc'/.test(core), '')
 
-const stream = read('src/components/shared/AssistantPanel/useAgentStream.ts')
-check('useAgentStream 签名不变（AiLearn / AI 教学侧栏继续用）', /export function useAgentStream\(chatIdRef: \{ current: string \}\)/.test(stream), '')
-check('useAgentStream 保留 chatId 过滤（单草稿语义不变）', /chatId !== chatIdRef\.current/.test(stream), '')
+check('单槽 useAgentStream 已退役（生产面全部走 store）',
+  !fs.existsSync(path.join(ROOT, 'src/components/shared/AssistantPanel/useAgentStream.ts')), '')
 
 const store = read('src/lib/assistantRunStore.ts')
 check('MAX_PARALLEL = 3', /export const MAX_PARALLEL = 3/.test(store), '')

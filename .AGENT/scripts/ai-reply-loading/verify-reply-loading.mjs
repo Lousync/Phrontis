@@ -45,7 +45,6 @@ const FILES = {
   proc: 'src/components/shared/AssistantPanel/ProcessSummary.tsx',
   core: 'src/lib/agentStreamCore.ts',
   labels: 'src/lib/toolLabels.ts',
-  use: 'src/components/shared/AssistantPanel/useAgentStream.ts',
   store: 'src/lib/assistantRunStore.ts',
   list: 'src/components/shared/AssistantPanel/MessageList.tsx',
   chatbody: 'src/components/shared/AssistantPanel/ChatBody.tsx',
@@ -84,8 +83,8 @@ ok('正文开始 / 工具开始 / 新一轮都会收口 active 思考',
 ok('completeThink 用 thinkingMs 补权威时长',
   has('core', 'export function completeThink') && has('core', 'step.thinkingMs')
   && has('core', "state: 'done', durationMs: step.thinkingMs"))
-ok('两条流式订阅链都调用 completeThink',
-  has('use', 'completeThink(d, step)') && has('store', 'completeThink(b.draft, step)'))
+ok('流式订阅链调用 completeThink',
+  has('store', 'completeThink(b.draft, step)'))
 ok('两处 draftSig 改用 rev（思考/工具增量也能触发贴底）',
   has('list', 'draft.rev') && has('teach', 'streamDraft.rev'))
 

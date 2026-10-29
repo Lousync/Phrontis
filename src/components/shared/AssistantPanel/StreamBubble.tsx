@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { MarkdownPreview } from '../MarkdownPreview'
 import { useSettings } from '../../../lib/SettingsContext'
 import { LIVE_EVENT_CAP, ThinkEvent, ToolEvent } from './ProcessRail'
-import type { ProcessItem, StreamDraft } from './useAgentStream'
+import type { ProcessItem, StreamDraft } from '../../../lib/agentStreamCore'
 
 /**
  * 流式过程（生成态）—— v3.10.0「事件流」。

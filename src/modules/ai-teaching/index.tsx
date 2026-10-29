@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { Sparkles, X, Loader2, Bot, FileText, Plus, Trash2, BookOpen, Compass, CalendarClock, PenLine, ChevronLeft, ChevronRight, ChevronDown, PanelRightClose, PanelRightOpen, ArrowLeft, ArrowUp, ArrowDown, ArrowRight, Folder, Search, User, Eye, FileOutput, Copy, RotateCcw, ScrollText, Image as ImageIcon, Quote, Info, Paperclip, ClipboardList, GitBranch, RefreshCw, Check, MessagesSquare, Star, Repeat, Layers, Play } from 'lucide-react'
 import {
   agentSessions, agentMessages, agentDeleteSession,
-  agentChat, agentAbort, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentListSideLanes, agentResume,
+  agentChat, agentAbortSession, onAgentStep, llmGetUsage, getSettingRaw, setSettingRaw, agentSetSessionInstructions, llmListProviders, llmReasoningCapable, llmVisionModels, aiToolsListSkills, agentListSideLanes, agentResume,
   workspaceGetCurrent, workspaceReadFile, docsPptxPages, workspaceRefreshVault,
   agentRenameSession, aiTeachSessionFolder, aiTeachRenameSessionFolder, aiTeachDeleteSessionFolder, aiTeachReadConstraints, aiTeachWriteConstraints, aiTeachGlobalEnsureConstraints, aiTeachWorkspaceEnsureConstraints, aiTeachOrganizeDoc, onAiTeachNotice, onAiTeachTreeRefresh, onWsFsChanged,
   aiTeachListWorkspaces, aiTeachCreateWorkspace, aiTeachRenameWorkspace, aiTeachDeleteWorkspace, aiTeachUnassignSession, aiTeachSetLastWorkspace,
@@ -46,8 +46,11 @@ import { registerSelectionAskHost } from '../../lib/assistantContext'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
 import { ProcessSummary, type TraceRowView } from '../../components/shared/AssistantPanel/ProcessSummary'
-import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
+import {
+  beginRun, endRun, getRunBucket, isSessionRunning, markSessionViewed, subscribeAssistantRunState,
+  takeEndedFor, unmarkSessionViewed,
+} from '../../lib/assistantRunStore'
 import { UsageRing, fmtTok } from '../../components/shared/UsageRing'
 import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
 
@@ -324,8 +327,13 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   /** 划词引用片段列表（「问 AI」收进输入区上方引用胶囊，不自动发送；随消息一起发出后一次性消费） */
   const [quotes, setQuotes] = useState<string[]>([])
   const [quotesOpen, setQuotesOpen] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [liveSteps, setLiveSteps] = useState<AgentTraceStep[]>([])
+  // 运行态 / 流式草稿 / 实时步骤统一来自 N-3 的会话桶（v3.15.3）：
+  // 多个 AI 对话面共用同一份 store，切会话不再复用上一会话的单槽草稿。
+  const [, bumpRun] = useReducer((x: number) => x + 1, 0)
+  const pending = isSessionRunning(activeId)
+  const runBucket = getRunBucket(activeId)
+  const streamDraft = runBucket?.draft ?? null
+  const liveSteps = runBucket?.liveSteps ?? []
   const [lastChanges, setLastChanges] = useState<AgentChange[] | null>(null)
   // P3b（§3.8 第五轮 R12/R14）：本对话模型/思考强度覆盖（内存级，仅本对话生效）+ 整理成文档状态
   const convoLlm = useRef<Map<string, { modelId?: string; effort?: Effort }>>(new Map())
@@ -760,7 +768,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       readerPage: t && t.kind === 'pptx' ? t.cur ?? 0 : 0,
     })
   }, [activeId, artTabs, artActive])
-  const [activeIdRef, chatIdRef] = [useRef<string | null>(null), useRef('')]
+  const activeIdRef = useRef<string | null>(null)
   /** 当前 messages 归属的会话 id（refreshMessages 里更新）——把「随会话」的 UI（```ask 提问卡等）
    *  严格绑到 activeId：切会话是「先换 activeId、再异步拉 messages」，空窗里旧会话的卡片会串到新会话。 */
   const messagesSidRef = useRef<string | null>(null)
@@ -791,7 +799,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   /** 不贴底时显示「回到底部」浮标 */
   const [jumpBottom, setJumpBottom] = useState(false)
   const [activeAnchor, setActiveAnchor] = useState(0)
-  const liveRef = useRef(liveSteps)
   /**
    * 贴底 + 滚到底（instant）——**条目 6 的「强制滚底」只有这一份实现**：
    * 规则 1（发送，无条件）与规则 3（浮标点击）都走它；规则 2（内容增长）走下面那个只贴底才生效的 effect。
@@ -808,7 +815,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [])
 
   useEffect(() => { activeIdRef.current = activeId }, [activeId])
-  useEffect(() => { liveRef.current = liveSteps }, [liveSteps])
 
   // 划词「问 AI」就地接管：提问落进本模块「当前对话」往后答，而不是弹出侧边栏另开一个对话。
   // 无当前对话时不接管（accept=false）→ 回退侧边栏行为，用户始终有路可走。
@@ -856,6 +862,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const cur = activeIdRef.current ? list.find(s => s.id === activeIdRef.current) : undefined
     if (cur) setActiveTitle(cur.title)
     else if (!activeWsRef.current) {
+      activeIdRef.current = null
       setActiveId(null)
       setActiveInstr(''); setInstrRel('')
     }
@@ -880,7 +887,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
 
   /** v3.2.0 第 19 项：返回消息条数——`openSession` 用它校正「准备态」判据（快照说未开讲、但会话已有消息）。 */
   const refreshMessages = useCallback(async (sid: string): Promise<number> => {
+    // 旧 run 的收尾可能晚于切会话：只允许「当前 desiredSid」的刷新写消息（v3.15.3）
+    if (activeIdRef.current !== sid) return 0
     const rows = await agentMessages(sid).catch(() => [] as AgentStoredMessage[])
+    if (activeIdRef.current !== sid) return 0
     messagesSidRef.current = sid
     setMessages(rows.map(m => ({
       id: m.id, role: m.role, content: m.content, createdAt: m.createdAt,
@@ -889,6 +899,24 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     return rows.length
   }, [])
 
+  // 运行态 store 订阅（v3.15.3）：pending / draft / liveSteps 都是会话桶的投影。
+  // 后台完成时若正在看该会话，补一次消息对齐（发起方自己的 finishRun 也会刷新，幂等）。
+  useEffect(() => subscribeAssistantRunState(() => {
+    const sid = activeIdRef.current
+    if (sid && takeEndedFor(sid)) {
+      void refreshMessages(sid)
+      void refreshSessions()
+    }
+    bumpRun()
+  }), [refreshMessages, refreshSessions])
+
+  // 查看登记：只有 AI 教学 Tab 可见时才算「正在看」；切到别的模块后后台完成会走 store 的角标/失败提示
+  useEffect(() => {
+    if (!activeId || !isActive) return
+    markSessionViewed(activeId)
+    return () => unmarkSessionViewed(activeId)
+  }, [activeId, isActive])
+
   // 打开 AI教学 Tab 时同步会话
   useEffect(() => { void refreshSessions() }, [refreshSessions, isActive])
   // 支线清单随当前会话 / 激活态刷新（右栏中心 / 锚点 chip / 计数）
@@ -896,17 +924,17 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   // P1 重命名会话（双击列表行）：agentRenameSession + 文件夹同步改名
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
-  // 流式过程（思考链 / 工具时间线 / 正文增量）：与侧栏共用同一 hook（docs/ai-streaming-design.md §5.3.5）。
-  // liveSteps 仍由下方 onAgentStep 订阅维护（本模块还要做工件栏占位页签联动，不合并）。
-  const { draft: streamDraft, begin: beginStream, end: endStream } = useAgentStream(chatIdRef)
+  // 流式过程（思考链 / 工具时间线 / 正文增量）由 assistantRunStore 按会话分桶，
+  // 本模块只消费 activeId 对应的桶（v3.15.3，替换原先单槽草稿）。
 
-  // 实时步骤（agent:step，按 chatId 过滤）。工件栏方案 §3.4 生成时序：
+  // 实时步骤（agent:step，按 sessionId 过滤）：store 已维护 draft/liveSteps，这里只做工件栏副作用。
+  // 工件栏方案 §3.4 生成时序：
   // ① visual.html 带 args 的「生成中」事件 → 工件栏同步开占位页签（禁止关闭，即时反馈）；
   // ② 带 artifact 的成功事件 → 占位原地换正式页签 + toast（对话流工件卡随消息落库自动出现）。
   useEffect(() => {
-    return onAgentStep(({ chatId, step }) => {
-      if (chatId !== chatIdRef.current) return
-      setLiveSteps(prev => [...prev.slice(-29), step])
+    return onAgentStep(({ sessionId, step }) => {
+      // 只处理当前会话的工件事件；旧会话在后台跑时不得把页签 / 占位图开进新会话（v3.15.3）
+      if (sessionId !== activeIdRef.current) return
       const isProduct = step.name === 'visual.html' || step.name === 'mindmap' || step.name === 'image'
       if (isProduct && step.args && !step.artifact) {
         const slug = String(step.args.slug ?? '')
@@ -952,7 +980,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           ? `✓ 思维导图已生成：${a.rel.split('/').pop()}（${a.nodes ?? 0} 节点）`
           : `✓ 示意图已生成：${a.rel.split('/').pop()}（${a.lines} 行）` })
       }
-      // 工具失败：清掉「生成中」占位页签（禁关页签不能因失败卡死）；停止生成同理（setPending(false) 处兜底）
+      // 工具失败：清掉「生成中」占位页签（禁关页签不能因失败卡死）；停止生成同理（endRun 处兜底）
       if (isProduct && !step.ok && !step.artifact) {
         setArtTabs(prev => prev.filter(t => !t.generating))
         setArtActive(cur => cur?.startsWith('gen:') ? null : cur)
@@ -963,7 +991,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
 
   // 切换会话（段 / 复习 / 助手 / 旧会话）
   const openSession = useCallback(async (sid: string, title: string) => {
-    setActiveId(sid); setActiveTitle(title); setLastChanges(null); setLiveSteps([])
+    // 切到不同会话：先清空旧消息，避免 IPC 拉取期间旧会话内容在新标题下闪现；
+    // 同步镜像先切，refreshMessages 的守卫和旧 run 的 finishRun 都读它，不能等 effect。
+    if (activeIdRef.current !== sid) {
+      messagesSidRef.current = null
+      setMessages([])
+    }
+    activeIdRef.current = sid
+    setActiveId(sid); setActiveTitle(title); setLastChanges(null)
     quotesRef.current = []; setQuotes([]); setQuotesOpen(false) // 引用片段属于发起时那个对话，切会话即失效
     setArtTabs([]); setArtActive(null) // 工件栏页签=会话内存态：切会话清空（阅读位置记忆保留在页签组件内）
     setPreflight(null)
@@ -983,39 +1018,49 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
    * 收尾必须放 finally —— 否则刷新消息抛错会把输入区永久锁在「生成中」。
    */
   const finishRun = useCallback(async (r: AgentChatResult | null, sid: string): Promise<AgentChatResult | null> => {
+    // 本次 run 是否仍对应正在看的会话：切走后的收尾不得改当前会话的 messages / changes / 工件页签
+    const isActive = () => activeIdRef.current === sid
     // 自动压缩告知（会话压缩 §6.1）：主进程发送前折叠旧轮为纪要，用户应知道上下文变了
-    if (r?.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要（/compress 可手动触发）` })
+    if (isActive() && r?.ok && r.compressed) showToast({ type: 'info', message: `上下文已自动压缩 ${r.compressed.covered} 条历史 → 纪要（/compress 可手动触发）` })
     // V-2：失败提示下沉到 sendText——模板开场/ask 发送/PPT 逐页讲解等 5 处 void sendText 路径统一覆盖（原先只有 doSend 有 toast）
-    if (r && !r.ok && r.code !== 'USER_ABORTED') showToast({ type: 'error', message: `AI 调用失败：${r.error ?? ''}` })
+    if (isActive() && r && !r.ok && r.code !== 'USER_ABORTED') showToast({ type: 'error', message: `AI 调用失败：${r.error ?? ''}` })
     // 条目9②：本轮 system 注入分段按会话留存（hover 构成摘要）；条目9③：月度用量随每轮刷新
     if (r?.injection) setInjectionMap(prev => ({ ...prev, [sid]: r.injection as AiTeachInjectionStats }))
     void llmGetUsage().then(setUsage).catch(() => null)
-    setLastChanges(r?.changes && r.changes.length ? r.changes : null)
+    if (isActive()) setLastChanges(r?.changes && r.changes.length ? r.changes : null)
     try {
       await refreshMessages(sid)
       // 复习课：若 AI 刚用 course.review.write 生成 / 更新了讲义，自动刷新课程态并打开工件
-      const reviewCid = Object.entries(courseStateRef.current?.reviews ?? {}).find(([, rv]) => rv.sessionId === sid)?.[0] ?? null
-      if (reviewCid) {
-        const before = courseStateRef.current?.reviews[reviewCid]?.rel ?? null
-        await reloadCourse()
-        const after = courseStateRef.current?.reviews[reviewCid]?.rel ?? null
-        if (after && after !== before) void openArtFile(after)
+      if (isActive()) {
+        const reviewCid = Object.entries(courseStateRef.current?.reviews ?? {}).find(([, rv]) => rv.sessionId === sid)?.[0] ?? null
+        if (reviewCid) {
+          const before = courseStateRef.current?.reviews[reviewCid]?.rel ?? null
+          await reloadCourse()
+          const after = courseStateRef.current?.reviews[reviewCid]?.rel ?? null
+          if (after && after !== before) void openArtFile(after)
+        }
       }
     } finally {
-      endStream()
-      setPending(false)
-      setArtTabs(prev => prev.some(t => t.generating) ? prev.filter(t => !t.generating) : prev) // 中止/失败收尾：禁关占位不留场
-      setArtActive(cur => cur?.startsWith('gen:') ? null : cur)
+      endRun(sid)
+      if (isActive()) {
+        setArtTabs(prev => prev.some(t => t.generating) ? prev.filter(t => !t.generating) : prev) // 中止/失败收尾：禁关占位不留场
+        setArtActive(cur => cur?.startsWith('gen:') ? null : cur)
+      }
       // 现场写回会话行（成功即已清空）→ 重拉列表才能让「继续」正确消失/出现
       void refreshSessions()
     }
     return r
-  }, [refreshMessages, endStream, reloadCourse, openArtFile, refreshSessions])
+  }, [refreshMessages, reloadCourse, openArtFile, refreshSessions])
 
   const sendText = useCallback(async (raw: string, cid: string, withQuote = false, skillName?: string): Promise<AgentChatResult | null> => {
-    setPending(true); setLiveSteps([]); beginStream()
     const sid = activeIdRef.current
-    if (!sid) { setPending(false); return null }
+    if (!sid) return null
+    // 同一会话只允许一个 run（与 useAssistantChat 同口径）；不同会话可并行（N-3）
+    if (isSessionRunning(sid)) {
+      showToast({ type: 'info', message: '本对话正在回复中，请等待完成或点击「停止」' })
+      return null
+    }
+    beginRun(sid)
     // 划词引用片段：仅「输入框发送」路径消费（withQuote），避免逐页讲解/模板等命令误带上无关引用。
     // 会话引用形式：引用以可见的 markdown 引用块并入消息正文（对话回看时来源可查），
     // 不再走不可见的 selectionContext 注入；单条截断 600 字防刷屏
@@ -1029,9 +1074,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     // 刚发出消息本就该看到它，哪怕之前正在上方阅读）。共用 jumpToBottom 一份实现，见其定义处注释。
     jumpToBottom()
     const ov = convoLlm.current.get(sid)
-    const r = await agentChat(sid, text, undefined, cid, 'aiTeaching', ov?.modelId, ov?.effort, skillName)
-    return finishRun(r, sid)
-  }, [finishRun, beginStream, jumpToBottom])
+    try {
+      const r = await agentChat(sid, text, undefined, cid, 'aiTeaching', ov?.modelId, ov?.effort, skillName)
+      return await finishRun(r, sid)
+    } catch (err) {
+      // 主进程异常逃逸：finishRun 仍要清 bucket / 拉消息，否则会话会永久停在「生成中」
+      console.error('[aiTeaching] send 未捕获异常', err)
+      if (activeIdRef.current === sid) showToast({ type: 'error', message: `AI 调用异常：${String((err as Error)?.message ?? err)}` })
+      return await finishRun(null, sid)
+    }
+  }, [finishRun, jumpToBottom])
 
   /** 本会话最近一次中断留下的可续现场（来自会话列表的 resumeInfo；只有中断卡那条能挂「继续」） */
   const resumeInfo = activeId ? (sessions.find(s => s.id === activeId)?.resumeInfo ?? null) : null
@@ -1039,11 +1091,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   /** A 方案：从中断卡「继续」——不追加用户消息，现场由主进程一次性 claim（与通用助手同一条链路） */
   const resumeRun = useCallback(async (): Promise<AgentChatResult | null> => {
     const sid = activeIdRef.current
-    if (!sid || pending || !resumeInfo) return null
-    setPending(true); setLiveSteps([]); beginStream()
+    if (!sid || isSessionRunning(sid) || !resumeInfo) return null
+    beginRun(sid)
     jumpToBottom()
     const cid = crypto.randomUUID()
-    chatIdRef.current = cid
     const ov = convoLlm.current.get(sid)
     let r: AgentChatResult | null = null
     try {
@@ -1051,10 +1102,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     } catch (err) {
       // 主进程异常逃逸：留日志 + Toast；finally 里的收尾仍然执行
       console.error('[aiTeaching] resume 未捕获异常', err)
-      showToast({ type: 'error', message: `继续异常：${String((err as Error)?.message ?? err)}` })
+      if (activeIdRef.current === sid) showToast({ type: 'error', message: `继续异常：${String((err as Error)?.message ?? err)}` })
     }
     return finishRun(r, sid)
-  }, [pending, resumeInfo, beginStream, finishRun, jumpToBottom])
+  }, [resumeInfo, finishRun, jumpToBottom])
+
+  /** 停止当前会话（按 sessionId，不再依赖单 chatId；与通用助手同口径） */
+  const abortActive = useCallback(() => {
+    const sid = activeIdRef.current
+    if (sid) void agentAbortSession(sid)
+  }, [])
 
   const doSend = useCallback(async (override?: string) => {
     const text = (override ?? inputValueRef.current).trim()
@@ -1079,7 +1136,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const sk = pickedSkill
     setPickedSkill(null)
     const cid = crypto.randomUUID()
-    chatIdRef.current = cid
     await sendText(text, cid, true, sk?.registryName) // 失败 toast 已下沉 sendText（V-2），此处不再重复提示
   }, [pending, compressing, sendText, pickedSkill])
 
@@ -1165,7 +1221,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
         void openSession(s.assistantSessionId, '课程助手')
       } else {
         activeIdRef.current = null
-        setActiveId(null); setActiveTitle(''); setMessages([]); setLastChanges(null); setLiveSteps([]); setArtTabs([]); setArtActive(null)
+        setActiveId(null); setActiveTitle(''); setMessages([]); setLastChanges(null); setArtTabs([]); setArtActive(null)
         setActiveInstr(''); setInstrRel('')
       }
       void refreshSessions()
@@ -1726,7 +1782,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     if (pending) return
     if (!activeIdRef.current) { showToast({ type: 'warning', message: '先选择或新建一个对话' }); return }
     const cid = crypto.randomUUID()
-    chatIdRef.current = cid
     setAskDismissed(null)
     void sendText(text, cid)
   }, [pending, sendText])
@@ -1769,7 +1824,6 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const page = tab.pages[Math.min(tab.cur ?? 0, tab.pages.length - 1)]
     if (!page) return
     const cid = crypto.randomUUID()
-    chatIdRef.current = cid
     const text = `我在逐页阅读 PPT《${tab.name}》第 ${(tab.cur ?? 0) + 1} 页（原文编号 ${page.n}）。请基于这一页讲清楚要点，讲完停一下等我的问题：\n\n${page.text.slice(0, 2200)}`
     void sendText(text, cid)
   }, [pending, sendText])
@@ -2241,7 +2295,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                   )}
                   {/* P3b（R12）：流式输出中发送键 → 停止键（深色底白方块），点击中断、保留已落库内容 */}
                   {pending ? (
-                    <button onClick={() => { void agentAbort(chatIdRef.current) }}
+                    <button onClick={abortActive}
                       className="w-8 h-8 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity"
                       title="停止生成（已完成的轮次保留）">
                       <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
@@ -2677,7 +2731,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                           <div key={`img-${gi}`} className="mt-1.5">
                             <ImageCard artifact={group[group.length - 1]} versions={group}
                               onPrefill={prefillImagePrompt}
-                              onStop={() => { void agentAbort(chatIdRef.current) }} />
+                              onStop={abortActive} />
                           </div>
                         ))}
                         {(m.trace ?? []).filter(s => s.name === 'image' && s.ok === false).map((s, si) => (
@@ -2824,7 +2878,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                     与助手面同源（agent:step 的 image 跑动事件带 prompt/aspect）；停止钮在图上常显（C3）。 */}
                 {pending && liveImagePending && (
                   <div className="mt-1">
-                    <ImageCard pending={liveImagePending} onStop={() => { void agentAbort(chatIdRef.current) }} />
+                    <ImageCard pending={liveImagePending} onStop={abortActive} />
                   </div>
                 )}
                 </div>
@@ -3532,6 +3586,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       {floatLane && activeId && (
         <div className="fixed right-6 bottom-6 z-50 w-[420px] max-w-[92vw] h-[560px] max-h-[80vh] rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-2xl overflow-hidden kb-pop">
           <SideLanePanel
+            key={floatLane.laneId}
             parentSessionId={activeId}
             parentTitle={activeTitle}
             anchorMessageId={floatLane.anchorMessageId}

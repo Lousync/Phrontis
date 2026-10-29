@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { agentAbort, agentChat, agentCreateSideLane, agentDeleteSession, agentMessages, agentSessions } from '../../lib/ipc'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { agentAbortSession, agentChat, agentCreateSideLane, agentDeleteSession, agentMessages, agentSessions } from '../../lib/ipc'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { AiMascotAnchor } from '../../components/shared/AiMascot/AiMascotAnchor'
 import { StreamBubble } from '../../components/shared/AssistantPanel/StreamBubble'
-import { useAgentStream } from '../../components/shared/AssistantPanel/useAgentStream'
 import { useInputShell } from '../../components/shared/AssistantPanel/inputShells'
+import {
+  beginRun, endRun, getRunBucket, isSessionRunning, markSessionViewed, subscribeAssistantRunState,
+  takeEndedFor, unmarkSessionViewed,
+} from '../../lib/assistantRunStore'
 import { showToast } from '../../lib/toast'
 import type { AgentStoredMessage, AgentTraceStep } from '../../types'
 import { ArrowUp, Check, ChevronDown, ChevronLeft, Copy, Loader2, Maximize2, Quote, Sparkles, X } from 'lucide-react'
@@ -73,16 +76,18 @@ interface PanelMsg {
 
 export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, openLaneId, onClose, onDock, onLaneReady, titleDrag, onBack, onQuote, onFloat, hideTurns }: SideLanePanelProps) {
   const shell = useInputShell()
-  const chatIdRef = useRef('')
-  const { draft: streamDraft, begin: beginStream, end: endStream } = useAgentStream(chatIdRef)
-
   const [laneId, setLaneId] = useState<string | null>(openLaneId ?? null)
+  // 支线也是会话：流式草稿 / pending 统一走 N-3 会话桶（v3.15.3）。
+  // 面板关闭再打开、或从右栏中心切换支线时，不把上一支线的输出串过来。
+  const [, bumpRun] = useReducer((x: number) => x + 1, 0)
+  const runBucket = getRunBucket(laneId)
+  const streamDraft = runBucket?.draft ?? null
+  const pending = isSessionRunning(laneId)
   const [snapshot, setSnapshot] = useState('')
   const [title, setTitle] = useState('')
   const [turns, setTurns] = useState<number>(() => readTurns())
   const [messages, setMessages] = useState<PanelMsg[]>([])
   const [input, setInput] = useState('')
-  const [pending, setPending] = useState(false)
   const [loading, setLoading] = useState(true)
   const [ctxOpen, setCtxOpen] = useState(false)
   const [err, setErr] = useState('')
@@ -111,6 +116,23 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
     aliveRef.current = true
     return () => { aliveRef.current = false }
   }, [])
+
+  // 支线会话查看登记 + 后台完成补拉（与 AI 教学主对话 / useAssistantChat 同口径）
+  useEffect(() => {
+    if (!laneId) return
+    markSessionViewed(laneId)
+    return () => unmarkSessionViewed(laneId)
+  }, [laneId])
+
+  useEffect(() => subscribeAssistantRunState(() => {
+    if (laneId && takeEndedFor(laneId)) void refresh(laneId)
+    bumpRun()
+  }), [laneId, refresh])
+
+  // 面板在新实例挂载前旧 run 已结束：ended 事件可能还留在队列里，挂载后补一次消息对齐
+  useEffect(() => {
+    if (laneId && takeEndedFor(laneId)) void refresh(laneId)
+  }, [laneId, refresh])
 
   // ---- 装载：① 新建支线（纯本地拼快照，不调 LLM）② 或载入既有支线 ----
   useEffect(() => {
@@ -195,22 +217,22 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
     if (!text || pending || !laneId) return
     lockedRef.current = true
     const cid = crypto.randomUUID()
-    chatIdRef.current = cid
     setInput('')
-    setPending(true)
-    beginStream()
+    beginRun(laneId)
     setMessages(prev => [...prev, { role: 'user', content: text, createdAt: new Date().toISOString() }])
     try {
       const r = await agentChat(laneId, text, undefined, cid, 'aiTeaching')
-      if (r && !r.ok && r.code !== 'USER_ABORTED') showToast({ type: 'error', message: `支线调用失败：${r.error ?? ''}` })
+      if (aliveRef.current && r && !r.ok && r.code !== 'USER_ABORTED') showToast({ type: 'error', message: `支线调用失败：${r.error ?? ''}` })
       // 关键：先把首轮回复落库并刷新，再通知父级切到详情；否则创建面板卸载会带走流式草稿
       if (aliveRef.current) await refresh(laneId)
     } catch (e) {
-      if (aliveRef.current) showToast({ type: 'error', message: `支线调用失败：${(e as Error).message || ''}` })
-    } finally {
       if (aliveRef.current) {
-        endStream()
-        setPending(false)
+        showToast({ type: 'error', message: `支线调用失败：${(e as Error).message || ''}` })
+        await refresh(laneId).catch(() => { /* 刷新失败不掩盖原始异常 */ })
+      }
+    } finally {
+      endRun(laneId)
+      if (aliveRef.current) {
         inputRef.current?.focus()
         // 首轮完成（成功 / 失败 / 中断）后才回执锚点：父级此时切详情，消息已可读，不再需要复制重发
         if (!notifiedRef.current) {
@@ -219,7 +241,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
         }
       }
     }
-  }, [input, pending, laneId, beginStream, endStream, refresh, onLaneReady])
+  }, [input, pending, laneId, refresh, onLaneReady])
 
   const stopped = err !== '' || (!loading && !laneId)
 
@@ -385,7 +407,7 @@ export function SideLanePanel({ parentSessionId, parentTitle, anchorMessageId, o
             <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none"
               title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
             {pending ? (
-              <button onClick={() => { void agentAbort(chatIdRef.current) }} title="停止生成"
+              <button onClick={() => { if (laneId) void agentAbortSession(laneId) }} title="停止生成"
                 className="w-8 h-8 shrink-0 rounded-full bg-[var(--text-primary)] text-[var(--bg-primary)] flex items-center justify-center hover:opacity-80 transition-opacity">
                 <span className="w-2.5 h-2.5 rounded-[2px] bg-current" />
               </button>

@@ -6,7 +6,7 @@ import { copyText } from '../../../lib/ipc'
 import { StreamBubble } from './StreamBubble'
 import { ProcessSummary, type TraceRowView } from './ProcessSummary'
 import { ImageCard, imageGroupsOf } from './ImageCard'
-import type { StreamDraft } from './useAgentStream'
+import type { StreamDraft } from '../../../lib/agentStreamCore'
 import type { AgentTraceStep, ResumeInfo } from '../../../types'
 import { toolActionLabel } from '../../../lib/toolLabels'
 

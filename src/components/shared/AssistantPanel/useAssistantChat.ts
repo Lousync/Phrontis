@@ -916,7 +916,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
         const again = r.interruption?.resumable === true ? ' · 可点「继续」接着做' : ''
         showToast({ type: 'error', message: `重新生成失败：${r.error ?? '未知错误'}${again}` })
       }
-      else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
+      else if (activeIdRef.current === sid && r.changes && r.changes.length > 0) setLastChanges(r.changes)
       await refreshMessages(sid)
     } catch (err) {
       // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
@@ -954,7 +954,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       else if (!r.ok) {
         const again = r.interruption?.resumable === true ? ' · 可再点一次「继续」' : ''
         showToast({ type: 'error', message: `继续失败：${r.error ?? '未知错误'}${again}` })
-      } else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
+      } else if (activeIdRef.current === sid && r.changes && r.changes.length > 0) setLastChanges(r.changes)
       await refreshMessages(sid)
     } catch (err) {
       // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）
@@ -991,7 +991,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
         const again = r.interruption?.resumable === true ? ' · 可点「继续」接着做' : ''
         showToast({ type: 'error', message: `修改失败：${r.error ?? '未知错误'}${again}` })
       }
-      else if (r.changes && r.changes.length > 0) setLastChanges(r.changes)
+      else if (activeIdRef.current === sid && r.changes && r.changes.length > 0) setLastChanges(r.changes)
       await refreshMessages(sid)
     } catch (err) {
       // G8：主进程侧异常逃逸时此前完全静默（卡片消失 + 零 Toast + 零记录）

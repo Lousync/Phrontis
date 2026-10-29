@@ -6,7 +6,7 @@ import {
 import { MarkdownPreview } from '../MarkdownPreview'
 import { ResizablePanel } from '../ResizablePanel'
 import { MessageList, type UiMessage } from '../AssistantPanel/MessageList'
-import type { StreamDraft } from '../AssistantPanel/useAgentStream'
+import type { StreamDraft } from '../../../lib/agentStreamCore'
 import { loadHelpDocs, type HelpDoc } from '../../../modules/help/docsLoader'
 import { LESSONS, LESSON_TOTAL, getLesson, type Lesson } from './lessons'
 import type { LearnProgressApi } from './useLearnProgress'

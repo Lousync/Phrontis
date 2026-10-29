@@ -1,10 +1,9 @@
 import type { AgentStreamEvent, AgentTraceStep } from '../types'
 
 /**
- * Agent 流式草稿的**纯应用逻辑**（自 useAgentStream.ts 迁出，N-3 多对话并行拆层）：
- * 主进程事件 → 草稿的推导零副作用，供两条订阅链共用 ——
- * ① useAgentStream（chatId 单草稿，AiLearn / AI 教学侧栏在用，签名不变）；
- * ② assistantRunStore（sessionId 分桶，助手三宿主共享，切回运行中会话即恢复实时流）。
+ * Agent 流式草稿的**纯应用逻辑**（N-3 多对话并行拆层）：
+ * 主进程事件 → 草稿的推导零副作用，供 assistantRunStore 的 sessionId 分桶订阅链使用
+ * （AI 助手三宿主 / AI 教学主对话 / 支线面板共享，切回运行中会话即恢复实时流）。
  *
  * v3.10.0 事件流：思考按 **LLM 轮次**分段（不再把所有 reasoning 拼成一个块），
  * 工具与旁白也进同一个有序数组 —— 渲染层按 `items` 原序画事件流即可。

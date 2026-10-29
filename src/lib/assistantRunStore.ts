@@ -40,7 +40,7 @@ let subscribed = false
 
 function notify(): void {
   if (notifyTimer !== null) return
-  // 与 useAgentStream 同款 60ms 节流：delta 只 mutate 内部结构，这里只节流通知
+  // 与旧单槽 hook 同款 60ms 节流：delta 只 mutate 内部结构，这里只节流通知
   notifyTimer = window.setTimeout(() => {
     notifyTimer = null
     for (const l of [...listeners]) l()
