@@ -85,7 +85,14 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
     if (!rootId) return
     loadedDirsRef.current.add(rel)
     const r = await workspaceListDir(rootId, rel ? `${base}/${rel}` : base).catch(() => null)
-    const entries = (r?.entries ?? []).map(e => ({ ...e, relPath: rel ? `${rel}/${e.name}` : e.name }))
+    const entries = (r?.entries ?? [])
+      .map(e => ({ ...e, relPath: rel ? `${rel}/${e.name}` : e.name }))
+      // 章文件夹是本模块的结构主体：按数字自然序（第1章 → 第2章 → 第10章），
+      // 不沿用主进程的纯字典序（第10章会跑到第1章前面）。目录恒在文件前。
+      .sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'dir' ? -1 : 1
+        return a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true })
+      })
     setDirCache(prev => ({ ...prev, [rel]: entries }))
   }, [rootId, base])
 

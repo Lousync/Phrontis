@@ -2765,7 +2765,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'course.review.write',
     title: '写入复习讲义',
-    description: '在**章末复习课**会话中，把本次复习的结论整理成《复习讲义》写入本章目录（{章号}·{章名}/复习讲义.md，覆盖同名）。content = markdown 正文。返回相对路径与**绝对路径**（务必把绝对路径告诉用户）。仅在复习课会话中可用。',
+    description: '在**章末复习课**会话中，把本次复习的结论整理成《复习讲义》写入本章的「章末复习」目录（第N章 章名/章末复习/复习讲义.md，覆盖同名）。content = markdown 正文。返回相对路径与**绝对路径**（务必把绝对路径告诉用户）。仅在复习课会话中可用。',
     inputSchema: {
       type: 'object',
       properties: { content: { type: 'string', description: '复习讲义 markdown 正文' } },

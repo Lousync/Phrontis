@@ -4,11 +4,49 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：65
+ * 版本数：66
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.16.0",
+    "date": "2026-10-29",
+    "summary": "本版一句话：AI 教学课程文件夹按「章 → 知识点 → 段」自动整理，旧课程打开即迁移，资源管理器不再是一排重复的 `1·...`。",
+    "groups": [
+      {
+        "title": "AI 教学",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "课程文件夹自动分层",
+            "rest": "知识点从工作区根目录收进 `第N章 章名/{NN} 知识点`，段仍在知识点下；章末复习独立为 `第N章 章名/章末复习/`。",
+            "sub": []
+          },
+          {
+            "lead": "旧课程自动迁移",
+            "rest": "打开旧工作区时静默整理旧扁平目录，不需要手动搬文件夹；交接、总结篇、复习讲义、收藏等路径跟随更新。",
+            "sub": []
+          },
+          {
+            "lead": "迁移可回退",
+            "rest": "整理前备份进度与收藏元数据；目标目录冲突时保留原目录，不覆盖用户文件。",
+            "sub": []
+          },
+          {
+            "lead": "素材库本期保持平铺",
+            "rest": "`SOURCES/` 仍是工作区下的一层技术目录，不参与本次分层；知识点素材夹继续按 `章号·知识点` 命名。",
+            "sub": []
+          },
+          {
+            "lead": "课程助手 / 课程.md / CONSTRAINTS.md",
+            "rest": "位置不变，根目录只多了章容器。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.15.3",
     "date": "2026-10-29",

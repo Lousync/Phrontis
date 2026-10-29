@@ -4,8 +4,9 @@ import { BrowserWindow, dialog, ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { broadcastTreeRefresh, ensureSessionFolder, ensureWriteOwnerFolder, rootDirName, sanitizeTitle, sessionFolder, sourceTemplateText } from './aiTeachingFolders'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
-import { listWorkspaces, workspaceFolderRel } from './aiTeachingWorkspaces'
+import { listWorkspaces, workspaceFolderRel, getWorkspaceOfSession } from './aiTeachingWorkspaces'
 import { getSessionUnitFolderRel, unitFolderRel } from './aiTeachingCourse'
+import { sourceKeyFromUnitRel } from './aiTeachingLayoutPure'
 import { normalizeSourceTarget, registerAiTeachingScopeHandlers, type AiTeachSourceTarget } from './aiTeachingScope'
 import { uniqueFileName, uniqueVersionedName } from './workspaceManager'
 import { extractPdfRange, extractPptxPages } from './docsReader'
@@ -174,12 +175,13 @@ function layout(sessionId: string, getSetting: (key: string) => unknown, create:
   // L5：本对话若是一节课 → 素材「对话级」上移为「知识点级」：{工作区}/SOURCES/{章号}·{知识点}/SOURCE.md
   const unitRel = getSessionUnitFolderRel(sid, getSetting)
   if (unitRel) {
-    const us = unitRel.lastIndexOf('/')
-    const parentRel = us > 0 ? unitRel.slice(0, us) : rootDir
-    const unitSeg = us > 0 ? unitRel.slice(us + 1) : unitRel
-    const dirRel = `${parentRel}/${SOURCES_DIR}/${unitSeg}`
+    const dirRel = unitSourceDirRel(unitRel)
+    if (!dirRel) return { error: '知识点素材夹不可用' }
+    const convName = dirRel.slice(dirRel.lastIndexOf('/') + 1)
+    const wsId = getWorkspaceOfSession(sid)
+    const wsRel = wsId ? workspaceFolderRel(wsId, getSetting) : null
     if (create) { try { mkdirSync(join(vault.rootPath, dirRel), { recursive: true }) } catch { /* 懒建失败由写入兜底 */ } }
-    return { rootPath: vault.rootPath, rootId: vault.rootId, dirRel, dirAbs: join(vault.rootPath, dirRel), fileRel: `${dirRel}/${SOURCE_FILE}`, convName: unitSeg, wsName: wsNameOf(parentRel, rootDir), scope }
+    return { rootPath: vault.rootPath, rootId: vault.rootId, dirRel, dirAbs: join(vault.rootPath, dirRel), fileRel: `${dirRel}/${SOURCE_FILE}`, convName, wsName: wsRel ? wsNameOf(wsRel, rootDir) : '', scope }
   }
   const probe = create ? ensureSessionFolder(sid, getSetting) : sessionFolder(sid, getSetting)
   const rel = probe.relPath
@@ -193,14 +195,19 @@ function layout(sessionId: string, getSetting: (key: string) => unknown, create:
 
 /**
  * 知识点级素材夹 / 登记文件的仓库相对路径（**零依赖纯函数**，`层 → 路径` 的唯一拼法）。
- * 入参 = `unitFolderRel(wsId, unitId, getSetting)`（`{工作区}/{章号}·{知识点}`）。
  *
- * 与 `layout(..., 'session')` 的 L5 分支同一口径：素材夹挂在**工作区层**的 `SOURCES/` 下，
- * 夹名取知识点文件夹名（`{章号}·{知识点}`）——跨课时共用一份素材（一节课 = 一个知识点）。
+ * v3.16.0：课程内容改为 `{工作区}/第N章 章名/{NN} 知识点`，但 `SOURCES` **本期仍平铺**
+ * （用户可见度低，且 sources.json 存的是仓库相对路径，迁移面太大）。因此这里把新目录
+ * 反解回旧的 `{章号}·{知识点}` 素材夹名，保证存量素材与新建知识点素材都不丢。
+ *
+ * 入参 = `unitFolderRel(wsId, unitId, getSetting)` 的结果（新旧布局都可）。
  */
 export function unitSourceDirRel(unitFolder: string | null | undefined): string | null {
   const dir = String(unitFolder ?? '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
   if (!dir) return null
+  const parsed = sourceKeyFromUnitRel(dir)
+  if (parsed) return `${parsed.wsRel}/SOURCES/${parsed.key}`
+  // 未知命名（用户手工改名）：保持旧行为，素材夹挂同级 SOURCES
   const slash = dir.lastIndexOf('/')
   const parent = slash > 0 ? dir.slice(0, slash) : ''
   const seg = slash > 0 ? dir.slice(slash + 1) : dir
@@ -249,8 +256,8 @@ function layoutUnitOf(wsId: string, unitId: string, getSetting: (key: string) =>
   const dirRel = unitSourceDirRel(unitFolder)
   if (!dirRel) return { error: '知识点不存在或未打开仓库' }
   const rootDir = rootDirName(getSetting)
-  const slash = String(unitFolder).lastIndexOf('/')
-  const wsName = wsNameOf(slash > 0 ? String(unitFolder).slice(0, slash) : '', rootDir)
+  const wsRel = workspaceFolderRel(String(wsId ?? ''), getSetting)
+  const wsName = wsRel ? wsNameOf(wsRel, rootDir) : ''
   if (create) { try { mkdirSync(join(vault.rootPath, dirRel), { recursive: true }) } catch { /* 懒建失败由写入兜底 */ } }
   return layoutOf(vault.rootPath, vault.rootId, dirRel, 'unit', wsName, dirRel.slice(dirRel.lastIndexOf('/') + 1))
 }

@@ -14,7 +14,7 @@ import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
  * 三层可编辑（**章层本层不做** —— 方案 §三-3「明确不做」）：
  * - `global`     → `{仓库}/{aiTeachRootDir}/CONSTRAINTS.md`（**复用** `aiTeachingFolders` 既有读点/ensure，不新造文件）
  * - `workspace`  → `{工作区文件夹}/CONSTRAINTS.md`（同上）
- * - `unit`       → `{工作区}/{章号}·{知识点}/CONSTRAINTS.md`（本次新增层；骨架由本文件落）
+ * - `unit`       → `{工作区}/第N章 章名/{NN} 知识点/CONSTRAINTS.md`（本次新增层；骨架由本文件落）
  *
  * 铁律 1：写盘后**只复用既有广播** —— `aiTeach:tree-refresh`（文件树/资源管理器）+
  *   `aiTeach:course-refresh`（课程页/画布重拉），**不新增广播通道**。
@@ -101,7 +101,7 @@ function resolveScopeFile(ref: AiTeachScopeRef, getSetting: (key: string) => unk
     if (!wsId) return { error: '缺少工作区 id' }
     const unitId = String(ref.unitId ?? '').trim()
     if (!unitId) return { error: '缺少知识点 id' }
-    // 大纲存在时必须能在其中找到该知识点 —— 挡住脏 id 落进 `unitFolderRel` 的兜底路径（`1·知识点`）
+    // 大纲存在时必须能在其中找到该知识点 —— 挡住脏 id 落进 `unitFolderRel` 的兜底路径
     const outline = readCourseOutline(wsId, getSetting)
     if (outline && outline.chapters.length > 0 && !outline.chapters.some((c) => c.units.some((u) => u.id === unitId))) {
       return { error: '知识点不存在' }

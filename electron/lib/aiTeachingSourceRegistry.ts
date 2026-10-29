@@ -22,6 +22,7 @@ import { readJson, writeJson } from './kbStore/jsonStore'
 import { workspaceFolderRel } from './aiTeachingWorkspaces'
 import { parseSourceMd, type SourceEntry as LegacySourceEntry } from './aiTeachingSources'
 import { parseCourseMd, type CourseOutline } from './aiTeachingCoursePure'
+import { rewriteRelPrefix } from './aiTeachingLayoutPure'
 import { extractPdfRange, extractPptxPages } from './docsReader'
 import { convertToPdf } from './sofficeConvert'
 import { uniqueFileName } from './workspaceManager'
@@ -95,6 +96,40 @@ function readFile(): SourcesFile {
 
 function writeFile(f: SourcesFile): void {
   writeJson(MODULE, KEY, f)
+}
+
+/**
+ * v3.16.0：课程目录改名时同步 sources.json 里的仓库相对路径。
+ * 本期 SOURCES 仍平铺，只会在「章号 / 知识点名变化 → 旧素材夹改名」时调用。
+ */
+export function rewriteSourcePathPrefixes(wsId: string, pairs: Array<{ from: string; to: string }>): void {
+  const id = String(wsId ?? '').trim()
+  if (!id || pairs.length === 0) return
+  const f = readFile()
+  const w = f.workspaces[id]
+  if (!w) return
+  const rewrite = (value: string | null | undefined): string | null | undefined => {
+    for (const p of pairs) {
+      const next = rewriteRelPrefix(value, p.from, p.to)
+      if (next) return next
+    }
+    return value
+  }
+  let changed = false
+  for (const source of w.sources) {
+    if (source.rel) {
+      const next = rewrite(source.rel)
+      if (next && next !== source.rel) { source.rel = next; changed = true }
+    }
+    if (source.extractRel) {
+      const next = rewrite(source.extractRel)
+      if (next && next !== source.extractRel) { source.extractRel = next; changed = true }
+    }
+  }
+  if (changed) {
+    writeFile(f)
+    broadcastSources(id)
+  }
 }
 
 function broadcastSources(wsId: string): void {

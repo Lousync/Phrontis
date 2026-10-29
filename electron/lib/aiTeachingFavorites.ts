@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { getCurrentVault } from './kbStore/vaultContext'
 import { readJson, writeJson } from './kbStore/jsonStore'
+import { rewriteRelPrefix } from './aiTeachingLayoutPure'
 
 /**
  * AI教学 · 左栏「收藏」（v3.6.0 新功能）。
@@ -73,6 +74,26 @@ export function removeFavorite(wsId: string, rel: string): AiTeachFavorite[] {
   s.byWs[wsId] = rows
   persist(s)
   return rows
+}
+
+/** v3.16.0：课程目录迁移时跟随改写收藏路径（只改前缀，不改变收藏顺序与标题） */
+export function rewriteFavoritePrefixes(wsId: string, pairs: Array<{ from: string; to: string }>): void {
+  const s = store()
+  if (!s || !wsId || pairs.length === 0) return
+  const rows = s.byWs[wsId]
+  if (!Array.isArray(rows) || rows.length === 0) return
+  let changed = false
+  for (const row of rows) {
+    for (const p of pairs) {
+      const next = rewriteRelPrefix(row.rel, p.from, p.to)
+      if (next && next !== row.rel) {
+        row.rel = next
+        changed = true
+        break
+      }
+    }
+  }
+  if (changed) persist(s)
 }
 
 export function registerAiTeachingFavoriteHandlers(_getSetting: (key: string) => unknown): void {
