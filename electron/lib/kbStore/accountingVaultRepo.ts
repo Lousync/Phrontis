@@ -385,6 +385,63 @@ export function vaultAccountingDelete(id: string): boolean {
   return true
 }
 
+// ===== 手机同步 upsert（手机伴侣 M1，协议见 Phrontis-mobile/docs/design.md §2.1）=====
+
+export interface SyncUpsertInput {
+  /** 来源端（手机）生成并终身不变的 UUID —— 与 vaultAccountingCreate 的强制新 UUID 语义不同，勿合并 */
+  id: string
+  updatedAt: string
+  date: string
+  time: string
+  type: AccountingTxType
+  amount: number
+  category: string
+  payment: string
+  merchant: string
+  note: string
+}
+
+export interface SyncUpsertResult { applied: boolean; conflict: boolean }
+
+/**
+ * 保 id 的 last-writer-wins upsert：
+ *  - id 不存在 → 以给定 id 插入（source='phone'）
+ *  - id 已存在 → updatedAt 新者赢；相同或本地更新 → 原样保留（conflict=true，手机以服务端为准）
+ */
+export function vaultAccountingSyncUpsert(input: SyncUpsertInput): SyncUpsertResult {
+  const amount = normalizeAmount(input.amount)
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('金额必须大于 0')
+  if (input.type !== 'expense' && input.type !== 'income' && input.type !== 'transfer') throw new Error('type 必须是 expense / income / transfer')
+  if (!input.id) throw new Error('同步条目缺 id')
+  const incomingUpdatedAt = String(input.updatedAt || '')
+  if (!/^\d{4}-\d{2}-\d{2}T/.test(incomingUpdatedAt)) throw new Error('同步条目 updatedAt 必须是 ISO 字符串')
+
+  const rows = vaultAccountingTransactionsAll()
+  const idx = rows.findIndex((r) => r.id === input.id)
+  if (idx >= 0 && !(incomingUpdatedAt > rows[idx].updatedAt)) {
+    return { applied: false, conflict: true }
+  }
+  const kind: AccountingType = input.type === 'income' ? 'income' : 'expense'
+  const row: TransactionRow = {
+    id: input.id,
+    date: /^\d{4}-\d{2}-\d{2}$/.test(String(input.date)) ? String(input.date) : todayLocal(),
+    time: /^\d{1,2}:\d{2}/.test(String(input.time)) ? String(input.time).slice(0, 5) : '',
+    type: input.type,
+    amount,
+    category: input.type === 'transfer' ? '' : vaultAccountingResolveOrCreateCategory(input.category || '其他', kind),
+    payment: vaultAccountingResolveOrCreateAccount(input.payment || ''),
+    merchant: String(input.merchant ?? ''),
+    note: String(input.note ?? ''),
+    source: 'phone',
+    createdAt: idx >= 0 ? rows[idx].createdAt : incomingUpdatedAt,
+    updatedAt: incomingUpdatedAt,
+  }
+  if (idx >= 0) rows[idx] = row
+  else rows.push(row)
+  vaultAccountingTransactionsSave(rows)
+  return { applied: true, conflict: false }
+}
+
 // ===== 查询 / 统计 =====
 
 export interface QueryInput { start?: string; end?: string; type?: AccountingTxType; category?: string }

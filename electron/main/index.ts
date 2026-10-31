@@ -114,6 +114,7 @@ import { registerTranslateHandlers } from '../lib/translateService'
 import { registerPdfHandlers } from '../lib/pdfService'
 import { registerDocsReadHandlers } from '../lib/docsIpc'
 import { registerLanShareHandlers } from '../lib/lanShare'
+import { registerCompanionHandlers, companionAutoStartIfConfigured } from '../lib/phoneCompanion'
 import { registerTerminalHandlers } from '../database/repositories/terminalRepo'
 import { applyBookMarketProxy, initBookMarketProxy } from '../lib/bookMarket/netSession'
 import { registerClipperHandlers, startClipperServer, stopClipperServer } from '../lib/clipperServer'
@@ -1299,6 +1300,9 @@ app.whenReady().then(async () => {
   registerReleaseNotesHandlers({ getSettingValue: (key) => settingsCache[key] })
   // 设备传输：局域网短时双向互传（工具箱）
   registerLanShareHandlers()
+  // 手机伴侣（Phrontis Mobile M1）：局域网常驻同步服务，协议 Phrontis-mobile/docs/design.md §2.1
+  registerCompanionHandlers()
+  void companionAutoStartIfConfigured((key) => settingsCache[key])
   // 终端模块（terminal-module-design）：pty 会话 + AI 执行命令通道
   registerTerminalHandlers({ getSettingValue: (key) => settingsCache[key] })
   // 编辑器工作区（Vault 仓库）：文件服务 + 授权根管理（getSetting 供 AI教学 产物根沉底名单）
