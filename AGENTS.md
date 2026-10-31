@@ -130,6 +130,7 @@ npm run pack     # build + electron-builder 打包 → 产物落 packs/<版本�
 
 - **类型门禁**（build 通过 ≠ 类型正确，必须单独跑）：`npx tsc --noEmit -p tsconfig.node.json` 与 `npx tsc --noEmit -p tsconfig.web.json`。
 - **提交必须用系统 git**（Git Bash 自带的版本会删嵌套分支 ref → 提交变孤儿）。路径与理由见 skill `windows-sandbox-ops` §1。
+- **push 永远等用户明确指令**（2026-10-31 拍板，主仓与 Phrontis-mobile 同规）：commit 可随改动本地进行，`git push` 一律等用户说推再推，不许顺手推。
 - **改动越大越要配独立的契约验证脚本** —— 只跑 tsc 不够。
 - **版本号口径**：修复 / 补丁进当前线（如 `3.4.x`）；**新功能**抬到下一个 `minor`（如 `3.5.0`），不给新功能发 `3.4.z`。发版：抬 `package.json` → 改 `CHANGELOG.md` 段名 → 重跑 `.AGENT/scripts/release-notes/build-release-notes.mjs`（否则应用内更新说明停上一版且无报错，见铁律 24）→ `npm run pack` → `python scripts/publish-release.py --version <ver>`。
 - **打包产物规范**（2026-10-08 拍板）：`npm run pack`（= `node scripts/pack.mjs`）产物统一落仓库根 **`packs/`**，**目录名＝当前版本号**（如 `packs/3.4.1`）；**版本号没抬就重复打包**时自动追加 `-1`/`-2`…（如 `packs/3.4.1-1`，**不覆盖**上一份；**取最大后缀 +1，删过中间产物也不回填**）。`scripts/publish-release.py` 的 `--dir` 缺省即去 `packs/<版本>[-N]` 取**后缀最大**者，无需再手传。旧的 `dist-electron/` 为历史目录（已弃），electron-builder 的 `build.directories.output` 基础值已改 `packs`，实际版本子目录由 `scripts/pack.mjs` 覆盖。
