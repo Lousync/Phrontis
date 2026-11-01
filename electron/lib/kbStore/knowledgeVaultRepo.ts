@@ -272,6 +272,33 @@ export function vaultCreatePage(data: { title: string; contentMd: string; catego
   return { id, title: data.title || stem, contentMd: data.contentMd ?? '', contentHtml: '', annotationMd: '', categoryId: data.categoryId ?? null, isStarred: false, sortOrder: 0, fileType: 'md', attachmentId: '', createdAt: now, updatedAt: now, tags: (data.tags ?? []).map((t) => ({ id: t, name: t, color: '' })), path: rel, attachments: [] }
 }
 
+/**
+ * 手机笔记上行（手机伴侣 v1.2，协议口径 Phrontis-mobile/docs/design.md §2.1 v1.2 节）：
+ * 保 id 的 upsert —— 手机是闪念的真相源，**无条件应用**（v1 不做 LWW/墓碑）。
+ *  - 已存在（按 id 查索引）→ 原路径覆写：更新 title/body/updated，created/tags/starred/fileType 保留；
+ *    电脑端整理后的版本会被手机旧版覆写，属 v1 已知边界（整理后手机别再推旧版）。
+ *  - 不存在 → 落收件箱 `.knowbase/_inbox/`，tags 恒加 '手机'（桌面端一眼可辨来源）。
+ */
+export function vaultUpsertPhoneNote(id: string, title: string, contentMd: string): { action: 'created' | 'updated'; path: string } {
+  const root = requireRoot()
+  const now = new Date().toISOString()
+  const entry = getKnowledgeIndex().byId[id]
+  if (entry) {
+    const doc = parseMarkdown(readFileSync(join(root, entry.path), 'utf-8'))
+    const fm = { ...doc.frontmatter, title: title || (typeof doc.frontmatter.title === 'string' ? doc.frontmatter.title : entry.title), updated: now }
+    if (!writeVaultFile(entry.path, serializeMarkdown(fm, contentMd))) throw new Error('页面文件写入失败')
+    invalidateKnowledgeIndex()
+    return { action: 'updated', path: entry.path }
+  }
+  const stem = sanitizeFileStem(title || '手机笔记')
+  const name = uniquePageName(KB_INBOX_DIR, stem, root)
+  const rel = `${KB_INBOX_DIR}/${name}`
+  const fm = { id, title: title || stem, fileType: 'md', tags: ['手机'], starred: false, status: 'published' as const, created: now, updated: now }
+  if (!writeVaultFile(rel, serializeMarkdown(fm, contentMd))) throw new Error('页面文件写入失败')
+  invalidateKnowledgeIndex()
+  return { action: 'created', path: rel }
+}
+
 /** vault 导入文件夹：递归镜像为目录树（categories.json 条目）+ 文本文件转 frontmatter md；PDF/XMind 落附件目录并以协议引用挂入页面 */
 export function vaultImportFolder(folderPath: string, parentCategoryId: string | null): { id: string; name: string; fileCount: number; folderCount: number } {  const root = requireRoot()
   const skipDirs = ['node_modules', '.git', '__pycache__', '.vscode', '.idea', 'dist', 'build', 'out', '.claude']

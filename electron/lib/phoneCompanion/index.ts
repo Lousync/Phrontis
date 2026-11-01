@@ -7,6 +7,8 @@ import { generateToken } from '../lanShare/auth'
 import { getLanAddresses } from '../lanShare/server'
 import { toQrDataUrl } from '../lanShare/qr'
 import { loadPairedDevices, savePairedDevices } from './devices'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import {
   vaultAccountingSyncUpsert, vaultAccountingTransactionsAll, vaultAccountingDelete,
   type TransactionRow,
@@ -17,6 +19,10 @@ import {
 } from '../kbStore/scheduleVaultRepo'
 import { vaultRecordTombstones, vaultTombstonesSince } from '../kbStore/tombstoneVaultRepo'
 import { setVaultDeleteSink } from '../kbStore/deleteSink'
+import { vaultUpsertPhoneNote } from '../kbStore/knowledgeVaultRepo'
+import { getKnowledgeIndex, findKnowledgePage } from '../kbStore/knowledgeIndex'
+import { getCurrentVault } from '../kbStore/vaultContext'
+import { parseMarkdown } from '../kbStore/mdStore'
 import { broadcastDataChanged } from '../../main/windowBus'
 
 /**
@@ -125,6 +131,35 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
         return { applied: true }
       }
       return { applied: false, reason: 'unsupported-domain' }
+    },
+    applyNote: item => {
+      // v1.2：手机是闪念真相源，无条件应用（口径见 design.md §2.1 v1.2 节）
+      const r = vaultUpsertPhoneNote(item.id, item.data.title, item.data.body)
+      broadcastDataChanged('knowledge')
+      return { applied: true, reason: r.action }
+    },
+    listNoteTree: () => getKnowledgeIndex().pages
+      // 只给 doc（md）；欢迎页是合成条目且 HTML 手机渲染不了；file 条目（导图/归档）同样排除
+      .filter(p => p.entryKind !== 'file' && p.id !== 'kb-welcome-doc')
+      .map(p => ({ id: p.id, title: p.title, path: p.path, categoryId: p.categoryId, mtimeMs: p.mtimeMs, sizeBytes: p.sizeBytes ?? 0 })),
+    readNoteContent: id => {
+      const entry = findKnowledgePage(id)
+      if (!entry || entry.entryKind === 'file') return null
+      const root = getCurrentVault()?.rootPath
+      if (!root) return null
+      try {
+        const doc = parseMarkdown(readFileSync(join(root, entry.path), 'utf-8'))
+        // 正文上限 30 万字符（约 900KB UTF-8），超出截断并带 truncated 标记
+        const truncated = doc.body.length > 300_000
+        return {
+          title: entry.title,
+          updatedAt: new Date(entry.mtimeMs).toISOString(),
+          body: truncated ? doc.body.slice(0, 300_000) : doc.body,
+          truncated: truncated || undefined,
+        }
+      } catch {
+        return null
+      }
     },
     listLedgerSince: sinceMs => vaultAccountingTransactionsAll()
       .map(rowToLedgerItem)

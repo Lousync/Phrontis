@@ -2,8 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from 'crypto'
 import {
   MAX_BODY_BYTES, PAIR_ATTEMPTS_PER_MIN, PAIR_CODE_TTL_MS, PROTOCOL_VERSION, SYNC_DOMAINS,
-  normalizeLedgerData, normalizeScheduleData, isTombstoneData,
-  type LedgerItemData, type ScheduleItemData, type SyncDomain,
+  normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData,
+  type LedgerItemData, type ScheduleItemData, type NoteItemData, type SyncDomain,
 } from './protocol.ts'
 import { isPrivateAddress, generateToken, tokenMatches } from '../lanShare/auth.ts'
 
@@ -48,8 +48,9 @@ export interface CompanionServerDeps {
   applyLedger(item: { id: string; updatedAt: string; data: LedgerItemData }): { applied: boolean; conflict?: boolean; reason?: string }
   /** schedule 域写入（生产 = vaultScheduleSyncUpsert；同一条 LWW 时线） */
   applySchedule(item: { id: string; updatedAt: string; data: ScheduleItemData }): { applied: boolean; conflict?: boolean; reason?: string }
-  /**
-   * 删除同步（v1.1 墓碑）：手机上行 `data:{deleted:true}` 的变更。
+  /** notes 域写入（v1.2，生产 = vaultUpsertPhoneNote；手机是闪念真相源，无条件应用） */
+  applyNote(item: { id: string; updatedAt: string; data: NoteItemData }): { applied: boolean; reason?: string }
+  /** 删除同步（v1.1 墓碑）：手机上行 `data:{deleted:true}` 的变更。
    * 生产 = 查现行行做 LWW（删除比行 updatedAt 旧 → conflict 拒删）→ 删行（repo 内部 emit 墓碑）
    * → 无行时直接记墓碑（幂等）。
    */
@@ -60,6 +61,10 @@ export interface CompanionServerDeps {
   listScheduleSince(sinceMs: number): Array<{ id: string; updatedAt: string; data: ScheduleItemData }>
   /** 全域墓碑：deletedAt > sinceMs（手机按 domain 分派 + 幂等应用） */
   listTombstonesSince(sinceMs: number): Array<{ domain: string; id: string; deletedAt: string }>
+  /** v1.2 内容 API：doc 类页面平表（排除欢迎页与 file 条目；手机按 path 自行建目录树） */
+  listNoteTree(): Array<{ id: string; title: string; path: string; categoryId: string | null; mtimeMs: number; sizeBytes: number }>
+  /** v1.2 内容 API：按 id 读正文（服务端解析路径；找不到/不可读返回 null → 404） */
+  readNoteContent(id: string): { title: string; updatedAt: string; body: string; truncated?: boolean } | null
   /** 配对响应里的电脑名 */
   pcName(): string
 }
@@ -224,6 +229,23 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
         return
       }
 
+      // ----- v1.2 内容 API（电脑笔记 → 手机只读缓存）-----
+      if (method === 'GET' && pathname === '/api/notes/tree') {
+        sendJson(res, 200, { ok: true, generatedAt: Date.now(), pages: deps.listNoteTree() })
+        return
+      }
+      if (method === 'GET' && pathname === '/api/notes/content') {
+        // 按 id 服务端解析路径：客户端永不传路径，无目录穿越面
+        const qId = new URL(url, 'http://local').searchParams.get('id') || ''
+        const hit = qId ? deps.readNoteContent(qId) : null
+        if (!hit) {
+          deny(res, 404, '笔记不存在或不可读')
+          return
+        }
+        sendJson(res, 200, { ok: true, id: qId, ...hit })
+        return
+      }
+
       if (method === 'POST' && pathname === '/api/sync/push') {
         void (async () => {
           const body = await readJsonBody(req) as { changes?: unknown }
@@ -256,6 +278,11 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
                 const data = normalizeScheduleData(c.data)
                 if (!data) return { id, applied: false, reason: 'invalid-data' }
                 return toResult(deps.applySchedule({ id, updatedAt, data }))
+              }
+              if (domain === 'notes') {
+                const data = normalizeNoteData(c.data)
+                if (!data) return { id, applied: false, reason: 'invalid-data' }
+                return toResult(deps.applyNote({ id, updatedAt, data }))
               }
               return { id, applied: false, reason: 'unsupported-domain' }
             } catch (e) {

@@ -15,8 +15,8 @@ export const PAIR_ATTEMPTS_PER_MIN = 10
 /** 请求体上限（push 批量 + 余量） */
 export const MAX_BODY_BYTES = 2 * 1024 * 1024
 
-/** 同步域清单（v1.1 起 ledger + schedule；notes 随 M3 追加，端点结构不变） */
-export const SYNC_DOMAINS = ['ledger', 'schedule'] as const
+/** 同步域清单（v1.2 起 ledger + schedule + notes；notes 只上行不 pull，语义见 design.md §2.1 v1.2 节） */
+export const SYNC_DOMAINS = ['ledger', 'schedule', 'notes'] as const
 export type SyncDomain = (typeof SYNC_DOMAINS)[number]
 
 /** 手机上行的一条变更（push changes[] 的元素） */
@@ -110,6 +110,24 @@ export interface TombstoneData {
 
 export function isTombstoneData(data: unknown): data is TombstoneData {
   return !!data && typeof data === 'object' && !Array.isArray(data) && (data as Record<string, unknown>).deleted === true
+}
+
+/* ================= v1.2：notes 域（手机闪念上行） + 内容 API ================= */
+
+/** notes 域负载：落 vault 成带 frontmatter 的 .md（title 可空 → 桌面侧回落文件名） */
+export interface NoteItemData {
+  title: string
+  body: string
+}
+
+/** notes 负载校验与规范化：标题与正文都为空视为非法；正文上限 10 万字符 */
+export function normalizeNoteData(raw: unknown): NoteItemData | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const title = typeof o.title === 'string' ? o.title.trim().slice(0, 120) : ''
+  const body = typeof o.body === 'string' ? o.body.slice(0, 100_000) : ''
+  if (!title && !body.trim()) return null
+  return { title, body }
 }
 
 /** ledger 负载校验与规范化：非法返回 null（响应 reason: invalid-data） */
