@@ -1,9 +1,9 @@
 import { ipcMain, dialog, shell, app, BrowserWindow } from 'electron'
 import { writeFileSync } from 'fs'
 import { join } from 'path'
-import { vaultRecordsAll } from '../../lib/kbStore/habitVaultRepo'
-import { checkinWeekCells, checkinHeatGrid } from '../../lib/kbStore/habitStats'
-import { heatRate, SHARE_CARD_HEAT_WEEKS } from '../../lib/kbStore/shareCardStats'
+import { vaultRecordsAll } from 'phrontis-core/kbStore/habitVaultRepo'
+import { checkinWeekCells, checkinHeatGrid } from 'phrontis-core/kbStore/habitStats'
+import { heatRate, SHARE_CARD_HEAT_WEEKS } from 'phrontis-core/kbStore/shareCardStats'
 import { PRODUCT_SITE } from '../../lib/productInfo'
 import { toQrDataUrl } from '../../lib/lanShare/qr'
 

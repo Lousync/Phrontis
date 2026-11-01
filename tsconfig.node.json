@@ -12,7 +12,14 @@
     // 一旦有人直接跑 `tsc -p tsconfig.node.json`，就会把 electron/ 的原样副本排进 out/
     // （out/electron、out/src），而 build.files 是 ["out/**/*"] → 会被打进安装包。
     "noEmit": true,
-    "types": ["electron-vite/node"]
+    "types": ["electron-vite/node"],
+    // phrontis-core 以 TS 源码形态被消费（file: 链接 + 构建期打进 bundle）。
+    // exports 通配子路径的裸扩展名 bundler 解析不可靠（2026-11-01 实测 525 个级联错误），
+    // paths 直指源码最稳；运行时解析交给 vite resolver（其 extensions 含 .ts，实测可用）。
+    "paths": {
+      "phrontis-core": ["../phrontis-core/src/index.ts"],
+      "phrontis-core/*": ["../phrontis-core/src/*"]
+    }
   },
   "include": ["electron/**/*", "electron.vite.config.ts", "src/lib/settings.ts", "src/lib/translateTypes.ts", "src/lib/wordbookTypes.ts"]
 }

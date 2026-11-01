@@ -39,8 +39,8 @@ const APP = 'src/App.tsx'
 const TYPES = 'src/types/index.ts'
 const IPC = 'src/lib/ipc.ts'
 const PRELOAD = 'electron/preload/index.ts'
-const SCHEMA = 'electron/lib/kbStore/bookMarketSchema.ts'
-const META_REPO = 'electron/lib/kbStore/vaultBookMetaRepo.ts'
+const SCHEMA = '../phrontis-core/src/kbStore/bookMarketSchema.ts'
+const META_REPO = '../phrontis-core/src/kbStore/vaultBookMetaRepo.ts'
 const BM_REPO = 'electron/database/repositories/bookMarketRepo.ts'
 const MOD_DIR = 'src/modules/bookmarket'
 const SHELF_DIR = 'src/modules/bookshelf'
@@ -159,12 +159,12 @@ check('读取路径必经 bookCoverAbsPath（内含 isSafeCoverRel：只认 .cov
   /bookCoverAbsPath\(/.test(code(META_REPO)) &&
   /const p = bookCoverAbsPath\(coverRel\)/.test(code(META_REPO)))
 check('负向：main 里没有第二处手拼 .covers 路径', (() => {
-  const hits = walkSourceFiles(join(ROOT, 'electron'))
+  const hits = walkSourceFiles(join(ROOT, 'electron')).concat(walkSourceFiles(join(ROOT, '../phrontis-core/src')))
     .filter((f) => /\.ts$/.test(f))
     .map((f) => [f.replace(/\\/g, '/'), stripComments(readFileSync(f, 'utf8'))])
     .filter(([, src]) => /['"`]\.books\/\.covers/.test(src))
     .map(([f]) => relative(ROOT.replace(/\\/g, '/'), f).replace(/\\/g, '/'))
-  return hits.length === 1 && hits[0].endsWith('bookMarketSchema.ts')
+  return hits.length === 1 && hits[0].endsWith('phrontis-core/src/kbStore/bookMarketSchema.ts')
 })())
 
 /* ================= ⑧ 代理单一写路径 ================= */

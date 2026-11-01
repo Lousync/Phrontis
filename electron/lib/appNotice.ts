@@ -1,7 +1,7 @@
 import { existsSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { ipcMain } from 'electron'
-import { globalDataDir, globalReadJson, globalWriteJson } from './globalJsonStore'
+import { globalDataDir, globalReadJson, globalWriteJson } from 'phrontis-core/globalJsonStore'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 
 /**

@@ -42,8 +42,8 @@ const IPC_REL = 'src/lib/ipc.ts'
 const REPO_REL = 'electron/database/repositories/bookMarketRepo.ts'
 const READER_REL = 'src/components/shared/epub/EpubReaderView.tsx'
 /** 装载闸（B-16 起体积上限的唯一真相源，零依赖叶子） */
-const GATE_REL = 'electron/lib/kbStore/bookSizeGate.ts'
-const SCHEMA_REL = 'electron/lib/kbStore/bookMarketSchema.ts'
+const GATE_REL = '../phrontis-core/src/kbStore/bookSizeGate.ts'
+const SCHEMA_REL = '../phrontis-core/src/kbStore/bookMarketSchema.ts'
 
 // ===== ① 128MB 两处同值 =====
 console.log('\n--- ① 体积上限：下载器 ↔ 阅读器装载闸（两处同值）---')
@@ -156,7 +156,7 @@ check('队列是内存态（不落盘：无 writeFileSync 到 jsonStore）', !/w
 
 // ===== ⑨ 命名与封面（走 schema 真函数）=====
 console.log('\n--- ⑨ 命名闸与封面路径（schema 真函数）---')
-const S = await import('../../../electron/lib/kbStore/bookMarketSchema.ts')
+const S = await import('../../../../phrontis-core/src/kbStore/bookMarketSchema.ts')
 check('作者 + 书名 + 扩展名', S.safeBookFileName('鲁迅', '呐喊', '.epub') === '鲁迅 - 呐喊.epub')
 check('作者为空 → 只留书名', S.safeBookFileName('', '只书名', '.epub') === '只书名.epub')
 check('空书名回落「未命名书籍」', S.safeBookFileName('鲁迅', '   ', '.epub') === '鲁迅 - 未命名书籍.epub')
@@ -167,7 +167,7 @@ check('扩展名不是合法裸扩展名时不拼后缀', S.safeBookFileName('�
 check('封面相对路径 = .books/.covers/<hash>.jpg', S.bookCoverRelFor('abc123') === '.books/.covers/abc123.jpg')
 check('封面 hash 里的非法字符被剥掉（防路径注入）', S.bookCoverRelFor('../../etc/passwd') === '.books/.covers/etcpasswd.jpg', S.bookCoverRelFor('../../etc/passwd'))
 check('封面扩展名非法回落 .jpg', S.bookCoverRelFor('abc', '../x') === '.books/.covers/abc.jpg')
-const F = await import('../../../electron/lib/kbStore/bookFormats.ts')
+const F = await import('../../../../phrontis-core/src/kbStore/bookFormats.ts')
 check('格式闸收 epub/pdf（BOOK_EXTS 口径）', F.bookExtOf('.epub') === '.epub' && F.bookExtOf('.pdf') === '.pdf')
 check('格式闸拒 mobi（下得到的书必须书架点得开）', F.bookExtOf('.mobi') === null)
 

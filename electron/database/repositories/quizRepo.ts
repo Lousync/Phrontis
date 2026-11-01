@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
-import { getKnowledgeIndex } from '../../lib/kbStore/knowledgeIndex'
-import * as V from '../../lib/kbStore/quizVaultRepo'
+import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import * as V from 'phrontis-core/kbStore/quizVaultRepo'
 import { quizDataStats, exportQuizData, clearMasteredQuizData, clearAllQuizData } from '../../lib/quizDataAdmin'
 import { broadcastDataChanged } from '../../main/windowBus'
 import {

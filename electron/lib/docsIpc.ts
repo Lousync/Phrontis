@@ -8,7 +8,7 @@ import { ipcMain } from 'electron'
 import { statSync } from 'fs'
 import { extname } from 'path'
 import { resolveSafe } from './workspaceManager'
-import { getCurrentVault } from './kbStore/vaultContext'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { extractPptxPages } from './docsReader'
 
 export function registerDocsReadHandlers(): void {

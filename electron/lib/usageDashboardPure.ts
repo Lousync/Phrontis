@@ -9,7 +9,7 @@
  * 热力图固定回看 365 天（与时间窗无关，就是「这一年」的日历）。
  */
 
-import type { AiUsageDay } from './agentUsage'
+import type { AiUsageDay } from 'phrontis-core/agentUsage'
 import { estimateCost } from './modelPricing'
 
 export type UsageWindow = 30 | 90 | 365 | 'all'

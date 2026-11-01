@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
-import { getCurrentVault } from './kbStore/vaultContext'
-import { readJson, writeJson } from './kbStore/jsonStore'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
+import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 import { rewriteRelPrefix } from './aiTeachingLayoutPure'
 
 /**

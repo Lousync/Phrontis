@@ -30,7 +30,7 @@ import { stripTypeScriptTypes } from 'node:module'
 // 默认仓库推导自脚本位置（勿写死盘符：在 worktree 里跑会静默校验主仓 → 假 PASS）
 const REPO = process.argv[2] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), '../../..')
 const TOOLS_SRC = path.resolve(REPO, 'electron/lib/builtinTools.ts')
-const REPO_SRC = path.resolve(REPO, 'electron/lib/kbStore/scheduleVaultRepo.ts')
+const REPO_SRC = path.resolve(REPO, '../phrontis-core/src/kbStore/scheduleVaultRepo.ts')
 const toolsSrc = stripTypeScriptTypes(fs.readFileSync(TOOLS_SRC, 'utf8'), { mode: 'strip', sourceMap: false })
 const repoSrc = stripTypeScriptTypes(fs.readFileSync(REPO_SRC, 'utf8'), { mode: 'strip', sourceMap: false })
 

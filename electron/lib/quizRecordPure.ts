@@ -1,4 +1,4 @@
-import type { VaultQuizRecordRow } from './kbStore/quizVaultRepo'
+import type { VaultQuizRecordRow } from 'phrontis-core/kbStore/quizVaultRepo'
 
 /**
  * 答题痕迹纯函数（零 Electron 依赖，可被 Node 契约脚本直接 import）。

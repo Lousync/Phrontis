@@ -38,7 +38,7 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 
 // ===== ① bookFormats 纯函数用例 =====
 console.log('\n--- ① bookFormats：扩展名唯一真相源 ---')
-const F = await import('../../../electron/lib/kbStore/bookFormats.ts')
+const F = await import('../../../../phrontis-core/src/kbStore/bookFormats.ts')
 check('bookKindOf：txt 大写扩展名', F.bookKindOf('a/b/C.TXT') === 'txt')
 check('bookKindOf：pdf', F.bookKindOf('books/x.pdf') === 'pdf')
 check('bookKindOf：多重点仍按末段', F.bookKindOf('a.pdf.txt') === 'txt')
@@ -115,7 +115,7 @@ check('★ bookExtOf 对 Gutenberg 真直链返回 null，bookExtFromMime 救回
 
 // ===== ② readerStateSchema 纯函数用例 =====
 console.log('\n--- ② readerStateSchema：键归一 / patch 白名单 / 修补 ---')
-const S = await import('../../../electron/lib/kbStore/readerStateSchema.ts')
+const S = await import('../../../../phrontis-core/src/kbStore/readerStateSchema.ts')
 check('键归一：基础', S.readerKey('r1', 'books/a.txt') === 'r1/books/a.txt')
 check('键归一：反斜杠 → posix', S.readerKey('r1', 'books\\a.txt') === 'r1/books/a.txt')
 check('键归一：去 ./ 前缀', S.readerKey('r1', './a.txt') === 'r1/a.txt')
@@ -149,7 +149,7 @@ console.log('\n--- ③ 负向：readerState.json 唯一写方 ---')
       if (e.isDirectory()) walk(p)
       else if (/\.(ts|tsx|mjs)$/.test(e.name)) {
         const src = readFileSync(p, 'utf8')
-        if (stripComments(src).includes('readerState.json') && !p.replaceAll('\\', '/').endsWith('electron/lib/kbStore/readerStateVaultRepo.ts')) offenders.push(p)
+        if (stripComments(src).includes('readerState.json') && !p.replaceAll('\\', '/').endsWith('../phrontis-core/src/kbStore/readerStateVaultRepo.ts')) offenders.push(p)
       }
     }
   }
@@ -161,7 +161,7 @@ console.log('\n--- ③ 负向：readerState.json 唯一写方 ---')
 // ===== ④ 负向：knowledgeIndex 不再有 .pdf 字面量 =====
 console.log('\n--- ④ 负向：扫描过滤唯一走 bookKindOf ---')
 {
-  const stripped = stripComments(read('electron/lib/kbStore/knowledgeIndex.ts'))
+  const stripped = stripComments(read('../phrontis-core/src/kbStore/knowledgeIndex.ts'))
   check('knowledgeIndex.ts 剥注释后不含 .pdf 字面量', !stripped.includes(".pdf"), '过滤一律走 bookKindOf')
   check('knowledgeIndex.ts 已 import bookKindOf', stripped.includes('bookKindOf'))
   check('scanVaultBooks 存在（scanVaultPdfs 已更名）', stripped.includes('function scanVaultBooks'))
@@ -248,13 +248,13 @@ console.log('\n--- ⑩ TabName 冻结（仍 19 项） ---')
   // 2026-10-08 v3.5.0：17 → 19（+terminal +accounting）。两者都是「工作台内模块」（bar:false /
   //   tile:true / palette:true），同笔记/日程形态 —— 有意变更，见 verify-pdf-reader ④ 的说明。
   // 2026-10-15 v3.9.0：19 → 20（+aiAssistant）。工作台内模块，bar:false / tile:true / palette:false。
-  check('APP_MODULES 仍为 20 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 20, `实得 ${ids.length}: ${ids.join(',')}`)
+  check('APP_MODULES 仍为 22 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 22, `实得 ${ids.length}: ${ids.join(',')}`)
 }
 
 // ===== ⑪ 扫描版探测（轻量方案） =====
 console.log('\n--- ⑪ detectScanMode：抽样字数 → full/partial/no ---')
 {
-  const D = await import('../../../electron/lib/kbStore/scanDetect.ts')
+  const D = await import('../../../../phrontis-core/src/kbStore/scanDetect.ts')
   check('空样本 → full（无样本不定罪）', D.detectScanMode([]) === 'full')
   check('全部 texty → full', D.detectScanMode([300, 420, 260, 380, 510]) === 'full')
   check('全零 → no（纯扫描）', D.detectScanMode([0, 0, 0, 0]) === 'no')
@@ -263,7 +263,7 @@ console.log('\n--- ⑪ detectScanMode：抽样字数 → full/partial/no ---')
   check('阈值：恰 20 字符算 texty', D.detectScanMode([20]) === 'full')
   check('阈值：19 字符不算 texty', D.detectScanMode([19]) === 'no')
   check('SCAN_MODES 与 schema 白名单一致', D.SCAN_MODES.join(',') === 'full,partial,no')
-  const S2 = await import('../../../electron/lib/kbStore/pdfReaderSchema.ts')
+  const S2 = await import('../../../../phrontis-core/src/kbStore/pdfReaderSchema.ts')
   check('patch：scan= 合法收', (() => { const r = S2.sanitizeBookPatch({ scan: 'no' }); return !!r && r.scan === 'no' })())
   check('patch：scan 非法值拒', S2.sanitizeBookPatch({ scan: 'unknown' }) === null)
   const c = S2.coerceBookState({ lastPage: 2, scan: 'partial' }, 'NOW')
@@ -285,7 +285,7 @@ console.log('\n--- ⑫ detectEncoding / decodeWith / resolveScanPages ---')
   check('decodeWith 复用 decodeText（无 BOM UTF-8）', decodeWith(utf8, detectEncoding(utf8)) === '第一行\n第二段正文。')
   const gb = new Uint8Array(Buffer.from('D6D0CEC4D4C4B6C1', 'hex'))
   check('decodeWith 复用 decodeText（GB18030）', decodeWith(gb, detectEncoding(gb)) === '中文阅读')
-  const D = await import('../../../electron/lib/kbStore/scanDetect.ts')
+  const D = await import('../../../../phrontis-core/src/kbStore/scanDetect.ts')
   check('resolveScanPages：[t,f,t] → [f,t,f]', JSON.stringify(D.resolveScanPages([true, false, true])) === '[false,true,false]')
   check('resolveScanPages：空 → 空', JSON.stringify(D.resolveScanPages([])) === '[]')
   check('resolveScanPages：[f,f] → [t,t]', JSON.stringify(D.resolveScanPages([false, false])) === '[true,true]')
@@ -345,8 +345,8 @@ console.log('\n--- ⑬ 书签：kind 分行定位键 / 上限 / 存量兼容 ---
   check('修补：coerce 不传 kind 时 bookmarks 仍产出（默认空数组）', Array.isArray(S.coerceReaderState({ pct: 1 }, 'NOW').bookmarks))
 
   // 镜像一致性（源码级 —— 本文件不得值导入，故只能读文本比）
-  const schemaSrc = read('electron/lib/kbStore/readerStateSchema.ts')
-  const excerptSrc = read('electron/lib/kbStore/excerptSchema.ts')
+  const schemaSrc = read('../phrontis-core/src/kbStore/readerStateSchema.ts')
+  const excerptSrc = read('../phrontis-core/src/kbStore/excerptSchema.ts')
   const cfiLen = (src) => /MAX_CFI_LEN\s*=\s*(\d+)/.exec(src)?.[1]
   check('镜像：MAX_CFI_LEN 与 excerptSchema 同值', !!cfiLen(schemaSrc) && cfiLen(schemaSrc) === cfiLen(excerptSrc), `${cfiLen(schemaSrc)} vs ${cfiLen(excerptSrc)}`)
   // ★ 这里断言的不是"相等"：**引擎 = foliate ⊋ 书签能用的 kind**。
@@ -377,7 +377,7 @@ console.log('\n--- ⑬ 书签：kind 分行定位键 / 上限 / 存量兼容 ---
 //      运行时证据在 `probe-cbz-bigbook.mjs`（整本 FNV-1a 等值 + 分档端到端），此处锁源码形状。
 console.log('\n--- ⑭ 大书体积分档 + 读取链路 ---')
 {
-  const G = await import('../../../electron/lib/kbStore/bookSizeGate.ts')
+  const G = await import('../../../../phrontis-core/src/kbStore/bookSizeGate.ts')
   const MB = 1048576
   // 边界含端点：128MB 静默、128MB+1 确认、384MB 确认、384MB+1 拒绝
   const cases = [[0, 'ok'], [1, 'ok'], [127 * MB, 'ok'], [128 * MB, 'ok'], [128 * MB + 1, 'confirm'],

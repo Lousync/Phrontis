@@ -1,5 +1,5 @@
 import { emitPluginEvent } from './pluginEvents'
-import { vaultFindTodo, vaultUpdateTodo } from './kbStore/scheduleVaultRepo'
+import { vaultFindTodo, vaultUpdateTodo } from 'phrontis-core/kbStore/scheduleVaultRepo'
 
 /**
  * 待办勾选 / 取消的**唯一写入口**（桌面集成 `ToggleTodo` 与托盘菜单共用）。

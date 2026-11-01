@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { vaultPetGet, vaultPetFeed, vaultPetPetTouch, vaultPetRename, vaultPetReset, vaultPetSwitchSpecies } from '../../lib/kbStore/petVaultRepo'
+import { vaultPetGet, vaultPetFeed, vaultPetPetTouch, vaultPetRename, vaultPetReset, vaultPetSwitchSpecies } from 'phrontis-core/kbStore/petVaultRepo'
 import { broadcastDataChanged } from '../../main/windowBus'
 
 /**

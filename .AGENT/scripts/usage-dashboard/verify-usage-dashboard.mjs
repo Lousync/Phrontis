@@ -62,7 +62,7 @@ const count = (src, needle) => src.split(needle).length - 1
 console.log('\n=== C. 统一记账 · 防双记（方案 §3） ===')
 const llm = stripComments(read('electron/lib/llmService.ts'))
 const agent = stripComments(read('electron/lib/agentService.ts'))
-const usage = stripComments(read('electron/lib/agentUsage.ts'))
+const usage = stripComments(read('../phrontis-core/src/agentUsage.ts'))
 
 // C1 usageKeyOf 定义存在且为 `providerId:modelId`（无 providerId 退回裸 modelId）
 ok(/export function usageKeyOf\s*\(/.test(usage), 'C1 usageKeyOf 已导出（agentUsage）')

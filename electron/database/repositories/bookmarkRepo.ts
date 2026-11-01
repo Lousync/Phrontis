@@ -3,7 +3,7 @@ import { BrowserWindow } from 'electron'
 import {
   vaultBookmarksAll, vaultCreateCategory, vaultUpdateCategory, vaultDeleteCategory,
   vaultReorderCategories, vaultCreateBookmark, vaultUpdateBookmark, vaultDeleteBookmark,
-} from '../../lib/kbStore/bookmarkVaultRepo'
+} from 'phrontis-core/kbStore/bookmarkVaultRepo'
 
 // R6 去库化：真相源 = .knowbase/modules/bookmarks/（bookmarks.json / categories.json，sql.js 路径已移除，D9）
 

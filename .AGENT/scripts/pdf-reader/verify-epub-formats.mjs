@@ -152,9 +152,9 @@ console.log('\n--- ⑤ 依赖与文档登记 ---')
 // ===== ⑥ ★ 格式真相源三处一致 =====
 console.log('\n--- ⑥ ★ 格式真相源：bookFormats ↔ src/types ↔ 两个 schema ---')
 {
-  const F = await import('../../../electron/lib/kbStore/bookFormats.ts')
-  const S = await import('../../../electron/lib/kbStore/readerStateSchema.ts')
-  const E = await import('../../../electron/lib/kbStore/excerptSchema.ts')
+  const F = await import('../../../../phrontis-core/src/kbStore/bookFormats.ts')
+  const S = await import('../../../../phrontis-core/src/kbStore/readerStateSchema.ts')
+  const E = await import('../../../../phrontis-core/src/kbStore/excerptSchema.ts')
 
   // 真源：bookFormats 的两张表（BOOK_EXTS 与 BookKind 靠 KIND_BY_EXT 绑定）
   const extKinds = [...F.BOOK_EXTS].map((ext) => F.bookKindOf(`x${ext}`)).sort()
@@ -189,7 +189,7 @@ console.log('\n--- ⑥ ★ 格式真相源：bookFormats ↔ src/types ↔ 两�
 // ===== ⑦ locator 白名单 + kind 仍不在白名单 =====
 console.log('\n--- ⑦ locator 白名单 / kind 不在白名单 ---')
 {
-  const S = await import('../../../electron/lib/kbStore/readerStateSchema.ts')
+  const S = await import('../../../../phrontis-core/src/kbStore/readerStateSchema.ts')
   const cfi = 'epubcfi(/6/4!/4/2/1:0)'
   const okLoc = S.sanitizeReaderPatch({ locator: cfi })
   check('patch：locator 收（合法 CFI）', !!okLoc && okLoc.locator === cfi)
@@ -215,7 +215,7 @@ console.log('\n--- ⑦ locator 白名单 / kind 不在白名单 ---')
   check('★ 修补：deriveKind（按 relPath 推导）优先于存档 kind —— 自愈历史脏值', c3.kind === 'epub')
 
   // repo 侧必须真的用上推导（否则 kind 依然只在首写时固定）
-  const repo = stripComments(read('electron/lib/kbStore/readerStateVaultRepo.ts'))
+  const repo = stripComments(read('../phrontis-core/src/kbStore/readerStateVaultRepo.ts'))
   check('readerStateVaultRepo 用 bookKindOf 推导 kind（kindOfPath）', repo.includes('bookKindOf') && repo.includes('kindOfPath'))
   check('readerStateVaultRepo 三处调用点都传了推导值',
     (repo.match(/kindOfPath\(/g) ?? []).length >= 3, `实得 ${(repo.match(/kindOfPath\(/g) ?? []).length} 处`)
@@ -288,17 +288,17 @@ console.log('\n--- ⑨ ★ fb2/fbz 接入：阅读器零格式字面量 + 主进
     cfiDispatch > 0 && engineGuard === cfiDispatch, `实得守卫 ${engineGuard} 处`)
 
   // (3) 导出分组：foliate 三格式共用「按章节」分支，不得落到 txt 的 paraIndex 分支
-  const exp = stripComments(read('electron/lib/kbStore/excerptExportSchema.ts'))
+  const exp = stripComments(read('../phrontis-core/src/kbStore/excerptExportSchema.ts'))
   check('★ 导出分组显式列出三个 foliate 格式（写 else 会让 fb2 摘录被当 txt 并成「第 1 段」）',
     /\['epub', 'fb2', 'fbz'\]/.test(exp) || /=== 'epub' \|\| kind === 'fb2' \|\| kind === 'fbz'/.test(exp))
 
   // (4) 摘录 schema：三个 foliate 格式同走 CFI 必填分支，且末尾不留吞新格式的 else
-  const exS = stripComments(read('electron/lib/kbStore/excerptSchema.ts'))
+  const exS = stripComments(read('../phrontis-core/src/kbStore/excerptSchema.ts'))
   check('★ 摘录 schema 显式列出三个 foliate 格式（else 会把未来格式静默塞进 CFI 校验）',
     /kind === 'epub' \|\| kind === 'fb2' \|\| kind === 'fbz'/.test(exS))
 
   // (5) 主进程整份读白名单必须覆盖全部书籍格式（漏一个 = readWholeBook 第一步就报错）
-  const F2 = await import('../../../electron/lib/kbStore/bookFormats.ts')
+  const F2 = await import('../../../../phrontis-core/src/kbStore/bookFormats.ts')
   const wm = stripComments(read('electron/lib/workspaceManager.ts'))
   const m = wm.match(/RANGE_EXT_WHITELIST\s*=\s*\[([^\]]*)\]/)
   const listed = m ? [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]) : []

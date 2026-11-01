@@ -6,7 +6,7 @@ import { KB_BOOKMARK_DELETE, KB_READER_STATE_CHANGED, KB_TXT_GOTO_PARA } from '.
 import { decodeWith, detectEncoding, type TextEncoding } from '../../../lib/textDecode'
 import { showToast } from '../../../lib/toast'
 // 书签条数上限：**唯一真源在 schema**（写盘侧会按它整单拒绝），渲染层只读来提前拦并给出提示
-import { MAX_BOOKMARKS } from '../../../../electron/lib/kbStore/readerStateSchema'
+import { MAX_BOOKMARKS } from 'phrontis-core/kbStore/readerStateSchema'
 import { ExcerptCaptureBar } from './ExcerptCaptureBar'
 import type { SelectionRect } from '../pdf/TextSelectionBar'
 import type { BookBookmark, ExcerptColor, ExcerptItem, ExcerptType, ReaderPaper } from '../../../types'

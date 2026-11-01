@@ -26,7 +26,7 @@ import {
   resolveExistingPath,
   copyMissingFile,
   migrationRels,
-} from '../../../electron/lib/kbStore/attachmentPath.ts'
+} from '../../../../phrontis-core/src/kbStore/attachmentPath.ts'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 let pass = 0

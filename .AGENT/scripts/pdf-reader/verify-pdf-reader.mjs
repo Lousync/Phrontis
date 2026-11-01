@@ -26,7 +26,7 @@ const check = (name, ok, extra = '') => {
 
 // ===== ① pdfReaderSchema 纯函数用例 =====
 console.log('\n--- ① pdfReaderSchema：键归一 / patch 白名单 / 存量修补 ---')
-const S = await import('../../../electron/lib/kbStore/pdfReaderSchema.ts')
+const S = await import('../../../../phrontis-core/src/kbStore/pdfReaderSchema.ts')
 
 // 键归一：posix 化、去 ./、空值拒绝
 check('键归一：基础', S.pdfBookKey('r1', 'books/a.pdf') === 'r1/books/a.pdf')
@@ -79,7 +79,7 @@ const targets = [...walk(join(ROOT, 'electron')), ...walk(join(ROOT, 'src'))]
 const offenders = []
 for (const f of targets) {
   const src = stripComments(readFileSync(f, 'utf8'))
-  if (src.includes('pdfReader.json') && !f.replace(/\\/g, '/').endsWith('electron/lib/kbStore/pdfReaderVaultRepo.ts')) {
+  if (src.includes('pdfReader.json') && !f.replace(/\\/g, '/').endsWith('../phrontis-core/src/kbStore/pdfReaderVaultRepo.ts')) {
     offenders.push(f.replace(ROOT, ''))
   }
 }
@@ -109,7 +109,7 @@ const ids = [...moduleBlock.matchAll(/id:\s*'([A-Za-z]+)'/g)].map((m) => m[1])
 // 2026-10-08 v3.5.0：17 → 19（+terminal +accounting）。两者都是「工作台内模块」——
 // bar:false（入口在左栏书签，不占图标条）/ tile:true / palette:true，同笔记/日程形态。
 // 2026-10-15 v3.9.0：19 → 20（+aiAssistant）。工作台内模块，bar:false / tile:true / palette:false。
-check('APP_MODULES 仍为 20 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 20, `实得 ${ids.length}: ${ids.join(',')}`)
+check('APP_MODULES 仍为 22 项（新增模块必须显式改这里，防清单悄悄飘）', ids.length === 22, `实得 ${ids.length}: ${ids.join(',')}`)
 check("bookshelf 仍为入口产生型（bar:false / tile:false / palette:false）", /id:\s*'bookshelf',\s*label:\s*'书架',\s*bar:\s*false,\s*tile:\s*false,\s*palette:\s*false/.test(moduleBlock))
 // 看板三 flag 全 false 是**设计**（入口只在左栏书签），不是漏配 —— 它若被误改成
 // 图标条/磁贴/命令面板可见，就是清单漂移。这条断言把「刻意」钉住。
@@ -155,7 +155,7 @@ console.log('\n--- ⑥ A5 页级扫描白名单 / resolveScanPages ---')
   check('修补：合法 scanPages 保留', Array.isArray(coerced.scanPages) && coerced.scanPages[1] === true)
   const coerced2 = S.coerceBookState({ lastPage: 2, scanPages: ['x'] }, 'NOW')
   check('修补：坏 scanPages 回落缺省（undefined）', coerced2.scanPages === undefined)
-  const SD = await import('../../../electron/lib/kbStore/scanDetect.ts')
+  const SD = await import('../../../../phrontis-core/src/kbStore/scanDetect.ts')
   check('resolveScanPages：[t,f,t] → [f,t,f]', JSON.stringify(SD.resolveScanPages([true, false, true])) === '[false,true,false]')
   check('resolveScanPages：全文本页 → 全 false', JSON.stringify(SD.resolveScanPages([true, true])) === '[false,false]')
 }

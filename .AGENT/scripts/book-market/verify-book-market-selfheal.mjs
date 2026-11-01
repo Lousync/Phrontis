@@ -26,8 +26,8 @@ const check = (name, ok, extra = '') => {
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8')
 const code = (rel) => stripComments(read(rel))
 
-const META_REPO = 'electron/lib/kbStore/vaultBookMetaRepo.ts'
-const SCHEMA = 'electron/lib/kbStore/bookMarketSchema.ts'
+const META_REPO = '../phrontis-core/src/kbStore/vaultBookMetaRepo.ts'
+const SCHEMA = '../phrontis-core/src/kbStore/bookMarketSchema.ts'
 const WS = 'electron/lib/workspaceManager.ts'
 const WATCHER = 'electron/lib/fsWatcher.ts'
 
@@ -47,7 +47,7 @@ check('pruneOrphanMeta 在 schema 里导出（纯函数层）', /export function
 /* ================= ② workspaceManager：import + helper + 三个打开点 ================= */
 console.log('\n--- ② workspaceManager 三处仓库打开点 ---')
 const ws = code(WS)
-check('import bookMetaPruneOrphans', /import\s*\{[^}]*bookMetaPruneOrphans[^}]*\}\s*from\s*'\.\/kbStore\/vaultBookMetaRepo'/.test(ws))
+check('import bookMetaPruneOrphans', /import\s*\{[^}]*bookMetaPruneOrphans[^}]*\}\s*from\s*'phrontis-core\/kbStore\/vaultBookMetaRepo'/.test(ws))
 
 const HELPER = 'pruneOrphanBookMetaQuiet'
 const helperDef = new RegExp(`function ${HELPER}\\s*\\(`).test(ws)
@@ -78,7 +78,7 @@ check('ws:openById（按 id 打开）内有调用', inSpan(openById, -1))
 /* ================= ③ fsWatcher：import + 节流 + .books/ 触发 ================= */
 console.log('\n--- ③ fsWatcher 实时节流 ---')
 const watcher = code(WATCHER)
-check('import bookMetaPruneOrphans', /import\s*\{[^}]*bookMetaPruneOrphans[^}]*\}\s*from\s*'\.\/kbStore\/vaultBookMetaRepo'/.test(watcher))
+check('import bookMetaPruneOrphans', /import\s*\{[^}]*bookMetaPruneOrphans[^}]*\}\s*from\s*'phrontis-core\/kbStore\/vaultBookMetaRepo'/.test(watcher))
 const throttleMatch = watcher.match(/PRUNE_THROTTLE_MS\s*=\s*([\d_]+)/)
 const throttleMs = throttleMatch ? Number(throttleMatch[1].replace(/_/g, '')) : 0
 check('节流常量 PRUNE_THROTTLE_MS ≥ 30_000', throttleMs >= 30000, `=${throttleMs}ms`)

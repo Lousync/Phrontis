@@ -1,7 +1,7 @@
 // R6 去库化：真相源 = .knowbase/secret/passwords.json（'enc1:' 密文，机制见 lib/secretBox.ts 头注释；sql.js 路径已移除，D9）
 import { ipcMain, safeStorage } from 'electron'
 import { randomUUID } from 'crypto'
-import { vaultPasswordsAll, vaultPasswordsSave, type SecretPwdRow } from '../../lib/kbStore/secretVaultRepo'
+import { vaultPasswordsAll, vaultPasswordsSave, type SecretPwdRow } from 'phrontis-core/kbStore/secretVaultRepo'
 import { recycleBinAdd } from './recycleBinRepo'
 
 // ---- types ----

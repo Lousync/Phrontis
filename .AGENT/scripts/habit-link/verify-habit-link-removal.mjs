@@ -137,7 +137,7 @@ check('已删除文件不存在：electron/lib/habitLinkService.ts',
 check('已删除文件不存在：src/lib/useHabitAutoCheckin.ts',
   !fs.existsSync(path.join(ROOT, 'src/lib/useHabitAutoCheckin.ts')))
 check('vault 层不再写 links.json（剥注释后）',
-  !has('electron/lib/kbStore/habitVaultRepo.ts', /links\.json/))
+  !has('../phrontis-core/src/kbStore/habitVaultRepo.ts', /links\.json/))
 check('备份导入脚本不再产出 checkin/links.json（剥注释后）',
   !has('scripts/import-backup-to-vault.mjs', /links\.json/))
 
@@ -215,7 +215,7 @@ check('相邻未误伤：builtinTools 的 AI 标记完成仍发插件事件',
   has('electron/lib/builtinTools.ts', /emitPluginEvent\('schedule:todoCompleted'/))
 check('相邻未误伤：habitVaultRepo 的 records 读写函数仍在（手动打卡与统计依赖）',
   ['vaultRecordsAll', 'vaultRecordsSave', 'vaultHabitRecordAddIfAbsent', 'vaultHabitRecordRemove']
-    .every((m) => has('electron/lib/kbStore/habitVaultRepo.ts', new RegExp(`function ${m}\\b|export .*${m}\\b`))))
+    .every((m) => has('../phrontis-core/src/kbStore/habitVaultRepo.ts', new RegExp(`function ${m}\\b|export .*${m}\\b`))))
 
 /* 文档留痕：避免后人拿 DESIGN-ARCHIVE 里的「已实现」当现状 */
 check('DESIGN-ARCHIVE 已标注该设计已整体移除',

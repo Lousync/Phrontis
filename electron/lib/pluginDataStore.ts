@@ -1,5 +1,5 @@
 // R6 去库化（D9）：全局数据 = userData/data/*.json（sql.js 已移除）
-import { globalReadJson, globalWriteJson } from './globalJsonStore'
+import { globalReadJson, globalWriteJson } from 'phrontis-core/globalJsonStore'
 
 /**
  * 插件数据表存储（C 级插件能力 `data`）。

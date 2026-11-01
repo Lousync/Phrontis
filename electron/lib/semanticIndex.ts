@@ -1,17 +1,21 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ipcMain } from 'electron'
-import { getVaultKbRoot } from './vaultContext'
-import { getKnowledgeIndex } from './knowledgeIndex'
-import { chunkPageText } from './semanticChunker'
+import { getVaultKbRoot } from 'phrontis-core/kbStore/vaultContext'
+import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import { chunkPageText } from 'phrontis-core/kbStore/semanticChunker'
 import {
   clearSemanticsMemo, isModelMismatch, loadSemantics, removeSemanticsFiles, writeSemantics,
   type SemanticPageEntry,
-} from './semanticStore'
-import { llmEmbed, resolveEmbedProvider } from '../llmService'
+} from 'phrontis-core/kbStore/semanticStore'
+import { llmEmbed, resolveEmbedProvider } from './llmService'
 
 /**
  * 语义索引构建/增量管线（knowledge-index-design §5-§7）。
+ *
+ * 2026-11-01 自 electron/lib/kbStore/semanticIndex.ts 迁出至本处（kbcore 抽取）：
+ * 它依赖 llmService（留在主仓）与 ipcMain，不属于数据层纯面，故不随 kbStore 进 phrontis-core；
+ * 依赖的数据层原语（vaultContext / knowledgeIndex / semanticChunker / semanticStore）改从包导入。
  *
  * 触发模型：懒构建 —— searchKnowledge 语义路与设置页「重建」都走 ensureSemanticIndex()，
  * 内部按页 mtime + chunkKey(contentHash) 双层 diff，只对真正变化的块发嵌入请求；

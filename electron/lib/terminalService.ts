@@ -19,7 +19,7 @@ import { basename, join } from 'path'
 import { randomUUID } from 'crypto'
 import * as nodePty from '@lydell/node-pty'
 import * as iconv from 'iconv-lite'
-import { getCurrentVault } from './kbStore/vaultContext'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 
 // ===== shell 解析（三平台） =====

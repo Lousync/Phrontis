@@ -12,7 +12,7 @@ const check = (name, ok, detail = '') => {
   else { fail += 1; console.log(`  FAIL  ${name}${detail ? `  -- ${detail}` : ''}`) }
 }
 
-const repo = read('electron/lib/kbStore/scheduleWorkflowVaultRepo.ts')
+const repo = read('../phrontis-core/src/kbStore/scheduleWorkflowVaultRepo.ts')
 console.log('\n[repo] 工作流真相源')
 for (const name of [
   'vaultWorkflowsAll', 'vaultWorkflowsSave', 'vaultWorkflowById', 'vaultWorkflowByTask',
@@ -29,7 +29,7 @@ check('冲突码 WORKFLOW_CONFLICT', repo.includes('WORKFLOW_CONFLICT'))
 check('创建时校验数据', repo.includes('validateWorkflow(flow)'))
 
 console.log('\n[任务 repo] 查询与级联')
-const taskRepo = read('electron/lib/kbStore/scheduleVaultRepo.ts')
+const taskRepo = read('../phrontis-core/src/kbStore/scheduleVaultRepo.ts')
 check('vaultTodosAllTopLevel 导出', taskRepo.includes('export function vaultTodosAllTopLevel'))
 check('删除任务级联工作流', taskRepo.includes('vaultDeleteWorkflowsByTask(id)'))
 check('日视图排除空日期 plan', taskRepo.includes("str(r.date) !== '' && r.task_type === 'plan'"))
@@ -66,9 +66,11 @@ for (const name of [
   'updateScheduleWorkflowCheckpoint', 'deleteScheduleWorkflowCheckpoint',
 ]) check(`ipc.ts ${name}`, ipcClient.includes(`export const ${name}`))
 
+// 2026-11-01 kbcore 抽取：类型定义单源迁至核心包，主仓 src/types 只保留 re-export
 const types = read('src/types/index.ts')
-check('ScheduleWorkflow 类型', types.includes('export interface ScheduleWorkflow'))
-check('阶段 / 检查点类型', types.includes('export interface ScheduleWorkflowStage') && types.includes('export interface ScheduleWorkflowCheckpoint'))
+const coreTypes = read('../phrontis-core/src/types/schedule.ts')
+check('ScheduleWorkflow 类型', coreTypes.includes('export interface ScheduleWorkflow') && types.includes("from 'phrontis-core/types/schedule'"))
+check('阶段 / 检查点类型', coreTypes.includes('export interface ScheduleWorkflowStage') && coreTypes.includes('export interface ScheduleWorkflowCheckpoint'))
 check('ScheduleExportData 含 workflows', types.includes('workflows: ScheduleWorkflow[]'))
 check('Todo 含 estimateMin', types.includes('estimateMin?: number | null'))
 

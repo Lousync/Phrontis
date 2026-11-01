@@ -29,7 +29,7 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 
 // ===== ① normalizeMdEntryFields 纯函数用例 =====
 console.log('\n--- ① normalizeMdEntryFields：缺省补全 ---')
-const { normalizeMdEntryFields } = await import('../../../electron/lib/kbStore/mdEntryFields.ts')
+const { normalizeMdEntryFields } = await import('../../../../phrontis-core/src/kbStore/mdEntryFields.ts')
 
 /** 造一条 frontmatter 并跑补全；返回补全后的对象 */
 const run = (fm, rel) => { const o = { ...fm }; normalizeMdEntryFields(o, rel); return o }
@@ -64,7 +64,7 @@ check('② 幂等：跑两遍结果一致', JSON.stringify(run(run({ id: 'u8' },
 
 // ===== ③ 索引侧：无条件调用，且不再有分支内的 fileType 直写 =====
 console.log('\n--- ③ knowledgeIndex：单一解析点 ---')
-const idxSrc = stripComments(read('electron/lib/kbStore/knowledgeIndex.ts'))
+const idxSrc = stripComments(read('../phrontis-core/src/kbStore/knowledgeIndex.ts'))
 check('索引的 .md 分支调用了 normalizeMdEntryFields', idxSrc.includes('normalizeMdEntryFields(doc.frontmatter, rel)'))
 check('★ 索引内不再直写 frontmatter.fileType（兜底已收口到纯函数）', !/frontmatter\.fileType\s*=/.test(idxSrc))
 check('★ 索引内不再直写 frontmatter.id（同上）', !/frontmatter\.id\s*=/.test(idxSrc))
@@ -74,7 +74,7 @@ check('索引 import 了补全函数', /from '\.\/mdEntryFields'/.test(idxSrc))
 
 // ④ 写入侧：vaultCreatePage 不再是「陷阱参数」
 console.log('\n--- ④ vaultCreatePage：fileType 真写进 frontmatter ---')
-const repo = stripComments(read('electron/lib/kbStore/knowledgeVaultRepo.ts'))
+const repo = stripComments(read('../phrontis-core/src/kbStore/knowledgeVaultRepo.ts'))
 check('④ 建页 fm 含 fileType 且缺省 md', /fileType:\s*data\.fileType\s*\|\|\s*'md'/.test(repo))
 check('④ 更新路径同样写 fileType（建页与更新口径对齐）', /if \(payload\.fileType\) fm\.fileType = payload\.fileType/.test(repo))
 

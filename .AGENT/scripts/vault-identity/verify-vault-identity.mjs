@@ -24,7 +24,7 @@ import {
   migrateCoverIndex,
   migrateVaultIdentity,
   resolveVaultId,
-} from '../../../electron/lib/kbStore/vaultIdentity.ts'
+} from '../../../../phrontis-core/src/kbStore/vaultIdentity.ts'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const CUR = '11111111-1111-4111-8111-111111111111'
@@ -202,7 +202,7 @@ try {
 /* ================= G. 调用点形状 ================= */
 console.log('\n=== G. 调用点形状（注释已剥离） ===')
 const ws = stripComments(readFileSync(join(ROOT, 'electron/lib/workspaceManager.ts'), 'utf8'))
-const vc = stripComments(readFileSync(join(ROOT, 'electron/lib/kbStore/vaultContext.ts'), 'utf8'))
+const vc = stripComments(readFileSync(join(ROOT, '../phrontis-core/src/kbStore/vaultContext.ts'), 'utf8'))
 ok('adopt 入口解析仓库身份', ws.includes('resolveVaultId('))
 ok('打开/恢复都跑身份迁移', (ws.match(/migrateVaultIdentity\(/g) || []).length >= 2, String((ws.match(/migrateVaultIdentity\(/g) || []).length))
 ok('ensureKbRoot 写入 id', vc.includes('id: vaultId'))

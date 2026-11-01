@@ -358,7 +358,7 @@ ok(/data-wb="widgetBrief"[^]*?flex min-h-0 flex-1 flex-col/.test(srcRight.replac
 // 任一接线点漏掉都是**静默失败**（图标点了没反应 / 写盘不广播则界面不刷新），无任何报错。
 const srcPetWidget = stripComments(read('src/components/workbench/widgets/PetWidget.tsx'))
 const srcPetRepo = stripComments(read('electron/database/repositories/petRepo.ts'))
-const srcPetVault = stripComments(read('electron/lib/kbStore/petVaultRepo.ts'))
+const srcPetVault = stripComments(read('../phrontis-core/src/kbStore/petVaultRepo.ts'))
 const srcPreload = stripComments(read('electron/preload/index.ts'))
 const srcIpc = stripComments(read('src/lib/ipc.ts'))
 const srcTypes = stripComments(read('src/types/index.ts'))

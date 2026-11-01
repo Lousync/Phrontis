@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { broadcastDataChanged } from '../../main/windowBus'
-import { getCurrentVault } from '../../lib/kbStore/vaultContext'
-import { readerStateGetBook, readerStateListProgress, readerStatePatchBook } from '../../lib/kbStore/readerStateVaultRepo'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
+import { readerStateGetBook, readerStateListProgress, readerStatePatchBook } from 'phrontis-core/kbStore/readerStateVaultRepo'
 
 /**
  * 阅读状态 IPC 注册转发层（书架升级全格式阅读器一期，方案 §S2.3）。

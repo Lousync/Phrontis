@@ -68,7 +68,7 @@ if (block) {
   ok(/mode:\s*'keyword'/.test(block), '7 断链 hint 走 keyword-only 检索（无嵌入模型也可用）')
 }
 
-ok(/getGraphIndex/.test(src) && /import\s*\{\s*getGraphIndex\s*\}\s*from\s*'\.\/kbStore\/graphIndex'/.test(src),
+ok(/getGraphIndex/.test(src) && /import\s*\{\s*getGraphIndex\s*\}\s*from\s*'phrontis-core\/kbStore\/graphIndex'/.test(src),
   '8 import getGraphIndex（数据源 = 图谱索引现成字段）')
 
 // 铁律 18：builtin.tool.request description 清单

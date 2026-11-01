@@ -1,4 +1,4 @@
-import { BOOKS_DIR, safeBookFileName } from '../../../electron/lib/kbStore/bookMarketSchema'
+import { BOOKS_DIR, safeBookFileName } from 'phrontis-core/kbStore/bookMarketSchema'
 import type { BookMarketItem, BookSourceConnectivity, BookSourceInfo } from '../../types'
 
 /**

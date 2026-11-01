@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { getCurrentVault } from './kbStore/vaultContext'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import {
   readQuizRecords, writeQuizRecords,
   readQuizRecordCollections, writeQuizRecordCollections,
@@ -9,8 +9,8 @@ import {
   readQuizTags, writeQuizTags,
   readQuizRecordTags, writeQuizRecordTags,
   vaultLocalToday,
-} from './kbStore/quizVaultRepo'
-import type { VaultQuizRecordRow } from './kbStore/quizVaultRepo'
+} from 'phrontis-core/kbStore/quizVaultRepo'
+import type { VaultQuizRecordRow } from 'phrontis-core/kbStore/quizVaultRepo'
 
 /**
  * 错题本数据管理（「数据」面板后端）。

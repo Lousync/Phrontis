@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { vaultBlogTags, vaultRemoveTagFromAll } from '../../lib/kbStore/blogVaultRepo'
+import { vaultBlogTags, vaultRemoveTagFromAll } from 'phrontis-core/kbStore/blogVaultRepo'
 
 // R6 去库化：真相源 = .knowbase/blog/（tags 记录在各博文 md frontmatter；sql.js 路径已移除，D9）
 

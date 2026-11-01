@@ -10,7 +10,7 @@
 
 import { readFileSync } from 'fs'
 import { resolveSafe } from '../workspaceManager'
-import { getCurrentVault } from '../kbStore/vaultContext'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 
 export function readVaultRefText(relPath: string): string | undefined {
   if (!relPath) return undefined

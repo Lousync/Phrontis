@@ -4,7 +4,7 @@ import { excerptDelete, excerptList, excerptPatch, excerptExportEntry, excerptEx
 import { useDataChanged } from '../../lib/dataChanged'
 import { showToast } from '../../lib/toast'
 import { KB_BOOKMARK_DELETE, KB_PDF_PAGE_CHANGED, KB_READER_STATE_CHANGED } from '../shared/pdf/pdfEvents'
-import { bookEngineOf } from '../../../electron/lib/kbStore/bookFormats'
+import { bookEngineOf } from 'phrontis-core/kbStore/bookFormats'
 import type { BookBookmark, BookKind, ExcerptItem, ExcerptColor, ExcerptType, ExcerptExportEntry, PdfBookState } from '../../types'
 
 /**

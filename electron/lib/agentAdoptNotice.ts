@@ -1,6 +1,6 @@
 import { existsSync, unlinkSync } from 'fs'
 import { join } from 'path'
-import { globalDataDir, globalReadJson, globalWriteJson } from './globalJsonStore'
+import { globalDataDir, globalReadJson, globalWriteJson } from 'phrontis-core/globalJsonStore'
 
 /**
  * 存量会话认领的**一次性告知**（2026-10-13：AI 会话改为随仓库走）。

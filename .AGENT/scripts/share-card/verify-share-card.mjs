@@ -35,7 +35,7 @@ const SUN = '2026-10-04'
 
 // ===== ① habitStats：周格 / 热力格 =====
 console.log('\n--- ① habitStats：checkinWeekCells / checkinHeatGrid ---')
-const H = await import('../../../electron/lib/kbStore/habitStats.ts')
+const H = await import('../../../../phrontis-core/src/kbStore/habitStats.ts')
 
 {
   const w = H.checkinWeekCells([], TODAY)
@@ -80,7 +80,7 @@ const H = await import('../../../electron/lib/kbStore/habitStats.ts')
 
 // ===== ② shareCardStats：热力率（专注分钟的口径函数保留，供指标定下来后直接用） =====
 console.log('\n--- ② shareCardStats：focusMinutesOn / heatRate ---')
-const S = await import('../../../electron/lib/kbStore/shareCardStats.ts')
+const S = await import('../../../../phrontis-core/src/kbStore/shareCardStats.ts')
 
 check('专注：多场次求和',
   S.focusMinutesOn([{ minutes: 25, date: TODAY }, { minutes: 50, date: TODAY }], TODAY) === 75)
@@ -341,7 +341,7 @@ console.log('\n--- ⑦ IPC 三处同步 ---')
   check("repo handle 'shareCard:savePng'", repo.includes("ipcMain.handle('shareCard:savePng'"))
   check('repo 已注册（main/index.ts）', read('electron/main/index.ts').includes('registerShareCardHandlers()'))
   check('repo 复用 habitStats 口径（不另写周格 / 热力）',
-    repo.includes('checkinWeekCells') && repo.includes('checkinHeatGrid') && repo.includes("from '../../lib/kbStore/habitStats'"))
+    repo.includes('checkinWeekCells') && repo.includes('checkinHeatGrid') && repo.includes("from 'phrontis-core/kbStore/habitStats'"))
   // 2026-09-29：卡上两个大字位改放**占位内容**（日期 / 星期），不再取统计标量。
   // 指标选择整条挪进 DP 搁置区（Phrontis/搁置功能与想法/分享卡片数据指标/）。
   // 这条负向断言防止「顺手又把没定的指标接回来」—— 要接必须先定指标并改这条。

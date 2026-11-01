@@ -4,8 +4,8 @@ import { appendFileSync, existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { getPluginsRoot, auditWrite } from './pluginRegistry'
 import { importPackToVault, packStateVault } from './knowledgePackVault'
-import { invalidateKnowledgeIndex } from './kbStore/knowledgeIndex'
-import { invalidateGraphIndex } from './kbStore/graphIndex'
+import { invalidateKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import { invalidateGraphIndex } from 'phrontis-core/kbStore/graphIndex'
 
 /**
  * 内容型插件(knowledgePages)导入引擎。

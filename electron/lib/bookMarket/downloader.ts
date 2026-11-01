@@ -6,13 +6,13 @@ import {
 import { basename, dirname, join } from 'node:path'
 import type { ClientRequest } from 'electron'
 import { broadcast, broadcastDataChanged, BROADCAST_CHANNEL } from '../../main/windowBus'
-import { getCurrentVault } from '../kbStore/vaultContext'
-import { bookExtOf, type BookExt } from '../kbStore/bookFormats'
-import { BOOKS_DIR, MAX_COVER_BYTES, bookCoverRelFor, safeBookFileName } from '../kbStore/bookMarketSchema'
-import { bookSourceCredentialFor, bookSourceGet } from '../kbStore/bookSourceVaultRepo'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
+import { bookExtOf, type BookExt } from 'phrontis-core/kbStore/bookFormats'
+import { BOOKS_DIR, MAX_COVER_BYTES, bookCoverRelFor, safeBookFileName } from 'phrontis-core/kbStore/bookMarketSchema'
+import { bookSourceCredentialFor, bookSourceGet } from 'phrontis-core/kbStore/bookSourceVaultRepo'
 import {
   bookCoverDelete, bookMetaGet, bookMetaReadAll, bookMetaUpsert, ensureBookCoversDir,
-} from '../kbStore/vaultBookMetaRepo'
+} from 'phrontis-core/kbStore/vaultBookMetaRepo'
 import { openBookRequest } from './netSession'
 import { authHeaderFor } from './sourceClient'
 

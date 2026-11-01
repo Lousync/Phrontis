@@ -3,7 +3,7 @@
  *
  * 为什么需要它（v3.2.0 条目 14 踩到的坑，2026-09-16）：
  *   负向断言（「这个标识符全仓零残留」）必须先把注释剥掉，否则**说明文字会被当成真实代码** ——
- *   例如 `electron/lib/kbStore/habitVaultRepo.ts` 里那句「原先这里三个成员
+ *   例如 `../phrontis-core/src/kbStore/habitVaultRepo.ts` 里那句「原先这里三个成员
  *   （HabitLinkRow / vaultHabitLinksAll …）已一并移除」，会被当成「还在用」。
  *   而 `src/types/index.ts` 的注释里恰好写着 `HabitLinkSource / HabitLink` 两个类型名，是现成靶子。
  *

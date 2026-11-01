@@ -1,5 +1,5 @@
 import { notifyCheckin } from './pushService'
-import { vaultHabitRecordAddIfAbsent, vaultHabitRecordRemove, vaultRecordsAll } from './kbStore/habitVaultRepo'
+import { vaultHabitRecordAddIfAbsent, vaultHabitRecordRemove, vaultRecordsAll } from 'phrontis-core/kbStore/habitVaultRepo'
 
 /**
  * 打卡的**唯一写入实现**（IPC `habit:toggleCheck` 与桌面集成 `CheckIn` 共用）。

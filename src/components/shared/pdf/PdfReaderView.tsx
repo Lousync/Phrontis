@@ -13,7 +13,7 @@ import { openExternal, copyText, excerptCreate, excerptList, pdfReaderGet, pdfRe
 import { useDataChanged } from '../../../lib/dataChanged'
 import { showToast } from '../../../lib/toast'
 import { resolveDegrade, DUO_MIN_WIDTH, type PdfLayoutMode } from '../../../lib/pdfLayout'
-import { detectScanMode, resolveScanPages } from '../../../../electron/lib/kbStore/scanDetect'
+import { detectScanMode, resolveScanPages } from 'phrontis-core/kbStore/scanDetect'
 import { TextSelectionBar, type SelectionRect, type TranslateState } from './TextSelectionBar'
 import type { BookScanMode, ExcerptItem, ExcerptRect, PdfBookPatch, PdfBookState, ExcerptColor, ExcerptType } from '../../../types'
 import { KB_BOOKMARK_DELETE, KB_BOOKMARK_SECTION_SHOW, KB_PDF_ZOOM_FIT } from './pdfEvents'

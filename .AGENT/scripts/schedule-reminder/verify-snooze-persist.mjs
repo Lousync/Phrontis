@@ -25,7 +25,7 @@ import { stripTypeScriptTypes } from 'node:module'
 
 // 默认仓库推导自脚本位置（勿写死盘符：在 worktree 里跑会静默校验主仓 → 假 PASS）
 const REPO = process.argv[2] ?? path.join(path.dirname(fileURLToPath(import.meta.url)), '../../..')
-const SRC = path.resolve(REPO, 'electron/lib/kbStore/scheduleVaultRepo.ts')
+const SRC = path.resolve(REPO, '../phrontis-core/src/kbStore/scheduleVaultRepo.ts')
 const src = fs.readFileSync(SRC, 'utf8')
 
 /**
@@ -69,6 +69,9 @@ const stubs = `
 let __rows = []
 function vaultTodosAll() { return __rows }
 function vaultTodosSave(rows) { __rows = rows }
+// 存量修复（2026-11-01）：1aea96c5 给 vaultDeleteTodoCascade 加了工作流级联调用，
+// 但没同步这里的 stub 清单 → 沙箱里 ReferenceError。级联本身由 verify-workflow-repo 覆盖。
+function vaultDeleteWorkflowsByTask() {}
 export function __seed(rows) { __rows = rows }
 export function __dump() { return __rows }
 `
@@ -142,7 +145,7 @@ for (const [patchKey, rowKey, value] of COLUMN_CASES) {
   check(`列回归 ${patchKey} → ${rowKey}`, mod.__dump()[0][rowKey] === value,
     JSON.stringify(mod.__dump()[0][rowKey]))
 }
-check('白名单共 13 列（12 + snooze_until）', mod.TODO_COLUMNS.length === 13,
+check('白名单共 14 列（12 + snooze_until + estimate_min）', mod.TODO_COLUMNS.length === 14,
   `实际 ${mod.TODO_COLUMNS.length}: ${mod.TODO_COLUMNS.join(',')}`)
 
 // ---------- 3. 白名单外键必须被丢弃 ----------

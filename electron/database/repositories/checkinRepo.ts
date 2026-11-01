@@ -7,7 +7,7 @@ import {
   vaultRecordsAll,
   vaultRecordsSave,
   type HabitRow,
-} from '../../lib/kbStore/habitVaultRepo'
+} from 'phrontis-core/kbStore/habitVaultRepo'
 
 /**
  * R6 去库化：真相源 = .knowbase/modules/（sql.js 路径已移除，D9）

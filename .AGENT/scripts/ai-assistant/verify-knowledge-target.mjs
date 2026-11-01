@@ -13,7 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { normalizeDirRel, resolveKnowledgeTargetPure } from '../../../electron/lib/knowledgeTargetPure.ts'
+import { normalizeDirRel, resolveKnowledgeTargetPure } from '../../../../phrontis-core/src/lib/knowledgeTargetPure.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..')
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8')
@@ -97,7 +97,7 @@ console.log('\n=== E. normalizeDirRel ===')
 console.log('\n=== F. 源码接线 ===')
 {
   const bt = read('electron/lib/builtinTools.ts')
-  const repo = read('electron/lib/kbStore/knowledgeVaultRepo.ts')
+  const repo = read('../phrontis-core/src/kbStore/knowledgeVaultRepo.ts')
   const stageable = read('electron/lib/aiAssistantStageable.ts')
   ok(/resolveKnowledgeTargetPure/.test(bt) && /vaultDirExists/.test(bt), 'F1 builtinTools 走纯解析器 + 磁盘存在检查')
   ok(!/categoryType !== 'space'/.test(bt), 'F2 不再写死拒绝学习空间根')

@@ -1,4 +1,4 @@
-import { readJson, writeJson } from '../../lib/kbStore/jsonStore'
+import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 
 // R6 去库化：真相源 = .knowbase/modules/translation/cache.json（无迁移存量，新建存储；
 // 行快照 schema 与迁移器 planTable 产物约定一致，sql.js 路径已移除，D9）

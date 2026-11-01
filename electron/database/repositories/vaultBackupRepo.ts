@@ -1,7 +1,7 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs'
 import { dirname, join, relative, resolve, sep } from 'path'
-import { getCurrentVault } from '../../lib/kbStore/vaultContext'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { isWritePathAuthorized } from './exportRepo'
 import { zipBuffer, unzipBuffer } from '../../lib/zip'
 

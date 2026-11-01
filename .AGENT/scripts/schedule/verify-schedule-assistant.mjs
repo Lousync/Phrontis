@@ -46,7 +46,7 @@ check('SlashCommandMenu 按面过滤', read('src/components/shared/SlashCommandM
 // ---------- 接线：后端 ----------
 console.log('\n[接线] 主进程 agentService / agentSessionRepo')
 const as = read('electron/lib/agentService.ts')
-check('导入 vaultTodosAll', as.includes("from './kbStore/scheduleVaultRepo'"))
+check('导入 vaultTodosAll', as.includes("from 'phrontis-core/kbStore/scheduleVaultRepo'"))
 check('SCHEDULE_PERSONA 人设', as.includes('const SCHEDULE_PERSONA'))
 check('buildScheduleInjection 摘要', as.includes('function buildScheduleInjection') && as.includes('【日程数据（本轮快照）】'))
 check('SCHEDULE_TOOL_NAMES 工具白名单', as.includes('const SCHEDULE_TOOL_NAMES') && as.includes("'builtin.schedule.create-todo'"))

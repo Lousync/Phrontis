@@ -1,8 +1,8 @@
-import { bookCoverDelete, bookMetaGet, bookMetaRemove } from './kbStore/vaultBookMetaRepo'
-import { readerStateRemoveBook } from './kbStore/readerStateVaultRepo'
-import { pdfReaderCoverRemove, pdfReaderRemoveBook } from './kbStore/pdfReaderVaultRepo'
-import { excerptDeleteBook } from './kbStore/excerptVaultRepo'
-import { excerptExportRemove } from './kbStore/excerptExportVaultRepo'
+import { bookCoverDelete, bookMetaGet, bookMetaRemove } from 'phrontis-core/kbStore/vaultBookMetaRepo'
+import { readerStateRemoveBook } from 'phrontis-core/kbStore/readerStateVaultRepo'
+import { pdfReaderCoverRemove, pdfReaderRemoveBook } from 'phrontis-core/kbStore/pdfReaderVaultRepo'
+import { excerptDeleteBook } from 'phrontis-core/kbStore/excerptVaultRepo'
+import { excerptExportRemove } from 'phrontis-core/kbStore/excerptExportVaultRepo'
 import { trashWorkspacePath } from './workspaceManager'
 
 /**

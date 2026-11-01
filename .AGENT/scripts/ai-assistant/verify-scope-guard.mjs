@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { normalizeRelPath, isWithinVaultScope, enforceVaultScope } from '../../../electron/lib/kbStore/vaultScope.ts'
+import { normalizeRelPath, isWithinVaultScope, enforceVaultScope } from '../../../../phrontis-core/src/kbStore/vaultScope.ts'
 import { suggestScope, tokenizeQuery } from '../../../electron/lib/aiAssistantScopeSuggestPure.ts'
 import {
   SCOPE_ENTRY_SOFT_CAP, prunePrefixes, coveredBy, coverageOf, addToScope, batchAdd, removeFromScope,

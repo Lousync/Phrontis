@@ -5,7 +5,7 @@ import {
   KB_EPUB_GOTO_CFI, KB_EPUB_STATE, KB_EPUB_STATE_REQ, type EpubTocItem,
 } from '../pdf/pdfEvents'
 // 格式判据走真相源（与 EpubReaderView 同一条 import 路径）；本文件仍**不引入 foliate 引擎**。
-import { bookKindOf } from '../../../../electron/lib/kbStore/bookFormats'
+import { bookKindOf } from 'phrontis-core/kbStore/bookFormats'
 
 /** 缩略图格宽度（高由图片自身比例决定，见 TILE_H 的说明） */
 const TILE_W = 96

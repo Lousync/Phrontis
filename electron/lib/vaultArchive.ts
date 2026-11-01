@@ -2,9 +2,9 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, lstatSync } from 'fs'
 import { join, dirname, relative, sep, basename, extname } from 'path'
 import { zipBuffer, unzipBuffer } from './zip'
-import { getCurrentVault } from './kbStore/vaultContext'
-import { invalidateKnowledgeIndex } from './kbStore/knowledgeIndex'
-import { invalidateGraphIndex } from './kbStore/graphIndex'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
+import { invalidateKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import { invalidateGraphIndex } from 'phrontis-core/kbStore/graphIndex'
 import { adoptImportedVault } from './workspaceManager'
 
 /**

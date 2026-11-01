@@ -5,18 +5,18 @@ import { join, basename, dirname } from 'path'
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, unlinkSync, renameSync, readFileSync } from 'fs'
 import { randomUUID } from 'crypto'
 import { safePathInside } from '../../lib/pathGuard'
-import { getVaultAttachmentsRoot, getVaultKbRoot } from '../../lib/kbStore/vaultContext'
-import { normalizeRel, attachmentRel, resolveExistingPath } from '../../lib/kbStore/attachmentPath'
+import { getVaultAttachmentsRoot, getVaultKbRoot } from 'phrontis-core/kbStore/vaultContext'
+import { normalizeRel, attachmentRel, resolveExistingPath } from 'phrontis-core/kbStore/attachmentPath'
 import {
   ensureAttachmentInVault,
   ensureAttachmentStoreMigrated,
   getLegacyAttachmentsRoot,
   getVaultTrashRoot,
 } from '../../lib/attachmentStore'
-import { vaultAttachmentsAll, vaultAttachmentsSave, AttachmentRow } from '../../lib/kbStore/attachmentVaultRepo'
-import { vaultPostsAll } from '../../lib/kbStore/momentsVaultRepo'
-import { vaultListEntries } from '../../lib/kbStore/blogVaultRepo'
-import { getKnowledgeIndex } from '../../lib/kbStore/knowledgeIndex'
+import { vaultAttachmentsAll, vaultAttachmentsSave, AttachmentRow } from 'phrontis-core/kbStore/attachmentVaultRepo'
+import { vaultPostsAll } from 'phrontis-core/kbStore/momentsVaultRepo'
+import { vaultListEntries } from 'phrontis-core/kbStore/blogVaultRepo'
+import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 
 const EXT_MAP: Record<string, string> = {
   'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/bmp': 'bmp',

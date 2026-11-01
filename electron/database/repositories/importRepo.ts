@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { readFileSync } from 'fs'
 import { basename, extname } from 'path'
-import { vaultImportFolder } from '../../lib/kbStore/knowledgeVaultRepo'
+import { vaultImportFolder } from 'phrontis-core/kbStore/knowledgeVaultRepo'
 
 /**
  * 导入 IPC 层（R6 去库化收尾处置）：

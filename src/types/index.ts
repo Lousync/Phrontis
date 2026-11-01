@@ -3,6 +3,11 @@
 import type { DictLookupResult, DictStatus, DictWordEntry, DictExchange, TranslateMode, TranslateInvokeRequest, TranslateInvokeResult } from '../lib/translateTypes'
 import type { GraphIndexData, GraphViewConfig } from '../lib/graphTypes'
 import type { SummaryKind } from '../lib/summary'
+import type { ScheduleRecurring, ScheduleStageStatus, ScheduleWorkflow, ScheduleWorkflowStage, ScheduleWorkflowCheckpoint, ScheduleWorkflowCheckpointInput, ScheduleWorkflowStageInput, CreateScheduleWorkflowDTO, UpdateScheduleWorkflowDTO } from 'phrontis-core/types/schedule'
+import type { AccountingAccount, AccountingRecurring, AccountingType, AccountingRecurringMode, AccountingTransaction, AccountingTxType } from 'phrontis-core/types/accounting'
+export type { ScheduleRecurring, ScheduleStageStatus, ScheduleWorkflow, ScheduleWorkflowStage, ScheduleWorkflowCheckpoint, ScheduleWorkflowCheckpointInput, ScheduleWorkflowStageInput, CreateScheduleWorkflowDTO, UpdateScheduleWorkflowDTO } from 'phrontis-core/types/schedule'
+export type { AccountingAccount, AccountingRecurring, AccountingType, AccountingRecurringMode, AccountingTransaction, AccountingTxType } from 'phrontis-core/types/accounting'
+
 
 export type { DictLookupResult, DictStatus, DictWordEntry, DictExchange, TranslateMode, TranslateInvokeRequest, TranslateInvokeResult }
 
@@ -35,70 +40,12 @@ export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtm
 export interface Tag { id: string; name: string; color: string }
 export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'aiAssistant' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal' | 'accounting' | 'usage' | 'intel'
 
-// ===== 记账模块 =====
-// 主进程侧同形状声明见 electron/lib/kbStore/accountingVaultRepo.ts（跨线各侧各声明一次的仓规）
-export type AccountingType = 'expense' | 'income'
-/** 交易类型：收支之外多一个「转账」（账户间移动资金，不计入收支统计、不影响总额） */
-export type AccountingTxType = 'expense' | 'income' | 'transfer'
 export interface AccountingCategory {
   id: string
   name: string
   color: string
   kind: AccountingType | 'both'
   builtin: boolean
-}
-/** 账户（= 支付方式）；当前余额 = initialBalance + 累计收入 − 累计支出（推导） */
-export interface AccountingAccount {
-  id: string
-  name: string
-  color: string
-  initialBalance: number
-  builtin: boolean
-}
-export interface AccountingTransaction {
-  id: string
-  date: string
-  time: string
-  type: AccountingTxType
-  amount: number
-  category: string
-  payment: string
-  /** 转账专用：转入账户（type==='transfer' 时，payment = 转出账户） */
-  toPayment?: string
-  merchant: string
-  note: string
-  source?: string
-  /** 定期收支生成的流水：所属规则 id（去重键的一部分） */
-  recurringId?: string
-  /** 定期收支生成的流水：本次应扣日 YYYY-MM-DD（去重键 = recurringId + recurringDue） */
-  recurringDue?: string
-  createdAt: string
-  updatedAt: string
-}
-/** 定期收支周期：每月几号 / 每 N 天 */
-export type AccountingRecurringMode = 'monthly' | 'interval'
-/**
- * 定期收支规则。真相源 `.knowbase/modules/accounting/recurring.json`。
- * monthly：用 day；interval：用 intervalDays。lastPostedDate 为「上次扣费日」（幂等 + 追赶起点）。
- */
-export interface AccountingRecurring {
-  id: string
-  name: string
-  type: AccountingType
-  amount: number
-  category: string
-  payment: string
-  merchant: string
-  note: string
-  mode: AccountingRecurringMode
-  day: number | null
-  intervalDays: number | null
-  lastPostedDate: string
-  endDate: string
-  enabled: boolean
-  autoPost: boolean
-  createdAt: string
-  updatedAt: string
 }
 export interface CreateAccountingRecurringInput {
   name: string
@@ -665,92 +612,6 @@ export interface UpdateScheduleTodoDTO {
   snoozeUntil?: string | null
 }
 
-export type ScheduleStageStatus = 'planned' | 'doing' | 'done'
-export interface ScheduleWorkflowCheckpoint {
-  id: string
-  title: string
-  start: string
-  end: string
-  status: ScheduleStageStatus
-}
-export interface ScheduleWorkflowStage {
-  id: string
-  title: string
-  start: string
-  end: string
-  status: ScheduleStageStatus
-  milestone: boolean
-  checkpoints: ScheduleWorkflowCheckpoint[]
-}
-export interface ScheduleWorkflow {
-  id: string
-  title: string
-  taskId: string | null
-  tagId: string | null
-  color: string
-  start: string
-  end: string
-  stages: ScheduleWorkflowStage[]
-  createdAt: string
-  updatedAt: string
-}
-export interface ScheduleWorkflowStageInput {
-  id?: string
-  title?: string
-  start?: string
-  end?: string
-  status?: ScheduleStageStatus
-  milestone?: boolean
-  checkpoints?: ScheduleWorkflowCheckpointInput[]
-}
-export interface ScheduleWorkflowCheckpointInput {
-  id?: string
-  title?: string
-  start?: string
-  end?: string
-  status?: ScheduleStageStatus
-}
-export interface CreateScheduleWorkflowDTO {
-  title: string
-  taskId?: string | null
-  tagId?: string | null
-  color?: string
-  start?: string
-  end?: string
-  stages?: ScheduleWorkflowStageInput[]
-}
-export interface UpdateScheduleWorkflowDTO {
-  title?: string
-  taskId?: string | null
-  tagId?: string | null
-  color?: string
-  start?: string
-  end?: string
-}
-
-// 固定日程（重复任务）—— 与主进程 src/lib/scheduleRecurringPure.ts 的 ScheduleRecurring 同形状
-export interface ScheduleRecurring {
-  id: string
-  title: string
-  /** weekly：每周 weekdays；monthly：每月 day 号；interval：每 intervalDays 天 */
-  freq: 'weekly' | 'monthly' | 'interval'
-  /** 0=周一 … 6=周日（仅 weekly 用） */
-  weekdays: number[]
-  day: number | null
-  intervalDays: number | null
-  /** 排期时段（当天分钟数，540=09:00） */
-  startMin: number
-  endMin: number
-  taskType: 'plan' | 'deadline' | 'daily'
-  quadrant: number
-  tagId: string | null
-  enabled: boolean
-  /** 到期日 YYYY-MM-DD（空 = 长期） */
-  endDate: string
-  lastPostedDate: string
-  createdAt: string
-  updatedAt: string
-}
 export interface CreateScheduleRecurringDTO {
   title: string
   freq: 'weekly' | 'monthly' | 'interval'

@@ -10,7 +10,7 @@ export {
   bookSourceSaveCredential,
   bookSourceClearCredential,
   bookSourceCredentialFor,
-} from '../../../electron/lib/kbStore/bookSourceVaultRepo'
+} from '../../../../phrontis-core/src/kbStore/bookSourceVaultRepo'
 export { probeSourceConnectivity, searchBookSources } from '../../../electron/lib/bookMarket/sourceClient'
 export { getBookMarketSession } from '../../../electron/lib/bookMarket/netSession'
-export { setCurrentVault } from '../../../electron/lib/kbStore/vaultContext'
+export { setCurrentVault } from '../../../../phrontis-core/src/kbStore/vaultContext'

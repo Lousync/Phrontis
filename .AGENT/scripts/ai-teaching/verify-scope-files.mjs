@@ -70,7 +70,7 @@ export function __register(spec, ns) { real[spec] = ns }
 
 const overrides = {
   electron: { ipcMain: { handle: () => {} }, BrowserWindow: {}, dialog: {} },
-  './kbStore/vaultContext': { getCurrentVault: () => (state.vaultOpen ? { rootPath: state.rootPath, rootId: 'vault-1' } : null) },
+  'phrontis-core/kbStore/vaultContext': { getCurrentVault: () => (state.vaultOpen ? { rootPath: state.rootPath, rootId: 'vault-1' } : null) },
   '../main/windowBus': {
     broadcast: (channel, payload) => { state.broadcasts.push({ channel, payload }) },
     BROADCAST_CHANNEL: {
@@ -98,7 +98,7 @@ const overrides = {
   },
   './agentSessionRepo': { getAgentSession: () => null, createAgentSession: () => ({ id: 's1' }), getAgentMessages: () => [] },
   '../../src/lib/aiTextExts': { AI_TEXT_CODE_EXTS: ['ts', 'js', 'tsx', 'py', 'c'] },
-  '../../src/lib/mindmap': { parseMindmap: () => null, countNodes: () => 0 },
+  '../lib/mindmap': { parseMindmap: () => null, countNodes: () => 0 },
 }
 
 /** spec -> 命名空间；未覆盖者给「延迟转发」，以便循环 import 的另一半在调用时才取真身 */

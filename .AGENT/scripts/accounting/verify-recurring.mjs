@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   clampDay, monthDue, recurringNextDue, recurringStatus, planRecurringSettle, recurringMonthlyTotal,
-} from '../../../src/lib/accountingPure.ts'
+} from '../../../../phrontis-core/src/lib/accountingPure.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const read = (p) => readFileSync(join(ROOT, p), 'utf8')
@@ -67,18 +67,20 @@ check('只算启用中的支出', recurringMonthlyTotal([
 
 // ---------- 接线 ----------
 console.log('\n[接线] 数据层 accountingVaultRepo.ts')
-const repo = read('electron/lib/kbStore/accountingVaultRepo.ts')
+const repo = read('../phrontis-core/src/kbStore/accountingVaultRepo.ts')
 check('recurring.json 存储', repo.includes("RECUR_FILE = 'recurring.json'"))
 check('结算 / 记入 / 增删改', ['vaultAccountingSettleRecurring', 'vaultAccountingPostRecurring', 'vaultAccountingCreateRecurring', 'vaultAccountingUpdateRecurring', 'vaultAccountingDeleteRecurring'].every((s) => repo.includes(s)))
 check('流水带 recurringId / recurringDue', repo.includes('recurringId?: string') && repo.includes('recurringDue?: string'))
-check('结算复用纯函数 planRecurringSettle', repo.includes("from '../../../src/lib/accountingPure'") && repo.includes('planRecurringSettle('))
+check('结算复用纯函数 planRecurringSettle', repo.includes("from '../lib/accountingPure'") && repo.includes('planRecurringSettle('))
 
 console.log('\n[接线] IPC 三层')
 check('accountingRepo 注册 5 个 handler', ['accounting:recurringCreate', 'accounting:recurringUpdate', 'accounting:recurringDelete', 'accounting:recurringPost', 'accounting:recurringSettle'].every((s) => read('electron/database/repositories/accountingRepo.ts').includes(s)))
 check('getAll 返回 recurring', read('electron/database/repositories/accountingRepo.ts').includes('recurring: vaultAccountingRecurringAll()'))
 check('preload 暴露通道', read('electron/preload/index.ts').includes("ipcRenderer.invoke('accounting:recurringSettle')"))
 check('ipc.ts 封装', read('src/lib/ipc.ts').includes('accountingRecurringSettle = (): Promise<AccountingRecurringSettleResult>'))
-check('types 声明 AccountingRecurring', read('src/types/index.ts').includes('export interface AccountingRecurring {'))
+check('types 声明 AccountingRecurring（核心包单源 + 主仓 re-export）',
+  read('../phrontis-core/src/types/accounting.ts').includes('export interface AccountingRecurring {') &&
+  read('src/types/index.ts').includes("from 'phrontis-core/types/accounting'"))
 
 console.log('\n[接线] 渲染层')
 const idx = read('src/modules/accounting/index.tsx')

@@ -7,7 +7,7 @@ import { ipcMain } from 'electron'
 import type { SummaryKind } from '../../../src/lib/summary'
 import {
   vaultListSummaries, vaultGetSummaryById, vaultEnsureSummary, vaultUpdateSummary,
-} from '../../lib/kbStore/blogVaultRepo'
+} from 'phrontis-core/kbStore/blogVaultRepo'
 import { broadcastDataChanged } from '../../main/windowBus'
 
 export function registerBlogSummaryHandlers(): void {

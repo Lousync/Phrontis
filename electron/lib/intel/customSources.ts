@@ -1,5 +1,5 @@
 import { randomBytes } from 'crypto'
-import { readJson, writeJsonOrThrow } from '../kbStore/jsonStore'
+import { readJson, writeJsonOrThrow } from 'phrontis-core/kbStore/jsonStore'
 import { broadcastDataChanged } from '../../main/windowBus'
 import type { IntelCustomSource, IntelSection } from '../../../src/types'
 

@@ -5,7 +5,7 @@ import { recycleBinAdd } from './recycleBinRepo'
 import {
   vaultPostsAll, vaultPostsSave, vaultAlbumsAll, vaultAlbumsSave,
   type MomentsRow, type AlbumRow,
-} from '../../lib/kbStore/momentsVaultRepo'
+} from 'phrontis-core/kbStore/momentsVaultRepo'
 
 /**
  * R6 去库化：真相源 = .knowbase/modules/moments/（sql.js 路径已移除，D9）

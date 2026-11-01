@@ -47,11 +47,11 @@ const core = code(CORE)
 /* ================= ① 五个 repo 出口 ================= */
 console.log('\n--- ① repo 出口：五类数据各有一个整本删除入口 ---')
 const EXPORTS = [
-  ['electron/lib/kbStore/readerStateVaultRepo.ts', 'readerStateRemoveBook', '阅读进度 + txt/foliate 书签'],
-  ['electron/lib/kbStore/pdfReaderVaultRepo.ts', 'pdfReaderRemoveBook', 'PDF 进度 + PDF 书签'],
-  ['electron/lib/kbStore/pdfReaderVaultRepo.ts', 'pdfReaderCoverRemove', 'PDF 封面缓存（含 .covers 图片文件）'],
-  ['electron/lib/kbStore/excerptVaultRepo.ts', 'excerptDeleteBook', '摘录'],
-  ['electron/lib/kbStore/excerptExportVaultRepo.ts', 'excerptExportRemove', '导出映射'],
+  ['../phrontis-core/src/kbStore/readerStateVaultRepo.ts', 'readerStateRemoveBook', '阅读进度 + txt/foliate 书签'],
+  ['../phrontis-core/src/kbStore/pdfReaderVaultRepo.ts', 'pdfReaderRemoveBook', 'PDF 进度 + PDF 书签'],
+  ['../phrontis-core/src/kbStore/pdfReaderVaultRepo.ts', 'pdfReaderCoverRemove', 'PDF 封面缓存（含 .covers 图片文件）'],
+  ['../phrontis-core/src/kbStore/excerptVaultRepo.ts', 'excerptDeleteBook', '摘录'],
+  ['../phrontis-core/src/kbStore/excerptExportVaultRepo.ts', 'excerptExportRemove', '导出映射'],
 ]
 for (const [path, fn, what] of EXPORTS) {
   const src = code(path)

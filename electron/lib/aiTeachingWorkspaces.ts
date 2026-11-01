@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, renameSync } from 'fs'
 import { join } from 'path'
 import { ipcMain } from 'electron'
-import { getCurrentVault } from './kbStore/vaultContext'
-import { readJson, writeJson } from './kbStore/jsonStore'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
+import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 import { listAgentSessions } from './agentSessionRepo'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 

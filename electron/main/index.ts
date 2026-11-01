@@ -1,6 +1,12 @@
 // 必须最先引入：IPC 注册幂等包装（dev 下 repo 模块被打包两份时避免重复注册崩溃）
 import './ipcSafe'
 import { app, BrowserWindow, dialog, ipcMain, screen, shell, protocol, clipboard, nativeImage, Menu, net, Tray, powerMonitor } from 'electron'
+import { configureCore } from 'phrontis-core/kbStore/vaultContext'
+
+// phrontis-core 宿主注入（kbcore 抽取后）：数据层共享包需要 userData 目录
+// （settings.json 的 currentVaultId / recentVaults 与 globalJsonStore 全局域都从这走）。
+// 必须在模块顶层完成——所有 vault/全局域读取都发生在 app ready 之后，此刻注入一定先于它们。
+configureCore({ userDataDir: app.getPath('userData'), appVersion: app.getVersion() })
 // 无 GPU/无头环境（AI 驱动真机测试）显式 KNOWBASE_DISABLE_GPU=1 时禁用 GPU 加速，防渲染进程连带崩溃
 // ⚠️ Linux 平台化（2026-10-19 实测）：这里的 appendSwitch('no-sandbox') 在 Linux 上**无效** ——
 //    sandbox 在 JS 主脚本执行前就已定下来，设了照样 `FATAL:setuid_sandbox_host.cc` + core dump。
@@ -86,7 +92,7 @@ import { initScheduleReminders } from '../lib/scheduleReminder'
 import { initPasswordFiller, destroyPasswordFiller } from './passwordFiller'
 import { initDayPanel, disposeDayPanel, isPopoutOpen, dayPanelShortcutState } from './dayPanelWindow'
 import { registerWindowBus } from './windowBus'
-import { noteFocus, noteSuspended, flushAppUsageNow, startAppUsageCollector } from '../lib/appUsageStore'
+import { noteFocus, noteSuspended, flushAppUsageNow, startAppUsageCollector } from 'phrontis-core/appUsageStore'
 import { registerDevtoolsHandlers } from './devtools'
 import { registerUpdateHandlers } from '../lib/updateService'
 import { registerReleaseNotesHandlers } from '../lib/releaseNotes'
@@ -100,7 +106,7 @@ import { registerLlmHandlers } from '../lib/llmService'
 import { registerAgentHandlers } from '../lib/agentService'
 import { registerAgentCompressHandlers } from '../lib/agentCompress'
 import { registerInlineSuggestHandlers } from '../lib/aiAssistant/inlineSuggest'
-import { registerSemanticIndexHandlers } from '../lib/kbStore/semanticIndex'
+import { registerSemanticIndexHandlers } from '../lib/semanticIndex'
 import { registerKnowledgeSearchHandlers } from '../lib/knowledgeSearch'
 import { registerAiTeachingFolderHandlers, migrateRootDir as migrateAiTeachRootDir } from '../lib/aiTeachingFolders'
 import { registerAssistantConstraintsHandlers } from '../lib/assistantConstraints'
@@ -123,7 +129,7 @@ import { pushAppNotice, registerAppNoticeHandlers } from '../lib/appNotice'
 import { checkXdgTrash, detectStatusNotifierHost, statusNotifierHostCached } from '../lib/linuxDesktop'
 import { readClipboardFilePaths } from '../lib/clipboardFiles'
 import { registerVaultArchiveHandlers } from '../lib/vaultArchive'
-import { getCurrentVault, setCurrentVault, getVaultAttachmentsRoot } from '../lib/kbStore/vaultContext'
+import { getCurrentVault, setCurrentVault, getVaultAttachmentsRoot } from 'phrontis-core/kbStore/vaultContext'
 import { SETTINGS } from '../../src/lib/settings'
 import { applyUiZoomTo, applyUiZoomToAll, getEffectiveUiZoom, registerUiMinSize, setUiZoom, setUiZoomBoostResolver } from './uiZoom'
 
@@ -1119,7 +1125,7 @@ app.whenReady().then(async () => {
       // （主进程每次按「当前仓库」动态定位，新落盘 .attachments/knowledge_page/<pageId>/<file>，
       //   旧包兼容读取 .knowbase/_attachments/knowledge_page/<pageId>/<file>）
       if (url.hostname === 'vault') {
-        const { getCurrentVault } = await import('../lib/kbStore/vaultContext')
+        const { getCurrentVault } = await import('phrontis-core/kbStore/vaultContext')
         const cur = getCurrentVault()
         if (!cur) return new Response('Not Found', { status: 404 })
         const segs = url.pathname.split('/').filter(Boolean)

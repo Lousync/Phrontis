@@ -1,9 +1,9 @@
 import { watch, readFileSync, type FSWatcher } from 'fs'
 import { relative } from 'path'
-import { getCurrentVault } from './kbStore/vaultContext'
-import { invalidateKnowledgeIndex } from './kbStore/knowledgeIndex'
-import { invalidateGraphIndex } from './kbStore/graphIndex'
-import { bookMetaPruneOrphans } from './kbStore/vaultBookMetaRepo'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
+import { invalidateKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import { invalidateGraphIndex } from 'phrontis-core/kbStore/graphIndex'
+import { bookMetaPruneOrphans } from 'phrontis-core/kbStore/vaultBookMetaRepo'
 import { broadcast, broadcastDataChanged, BROADCAST_CHANNEL } from '../main/windowBus'
 import { pushAppNotice } from './appNotice'
 

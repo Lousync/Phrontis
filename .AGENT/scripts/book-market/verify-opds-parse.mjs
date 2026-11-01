@@ -29,7 +29,7 @@ const check = (name, ok, extra = '') => {
 }
 
 const P = await import('../../../electron/lib/bookMarket/opdsParse.ts')
-const F = await import('../../../electron/lib/kbStore/bookFormats.ts')
+const F = await import('../../../../phrontis-core/src/kbStore/bookFormats.ts')
 
 const FIX = 'fixtures'
 const fix = (f) => readFileSync(join(ROOT, '.AGENT/scripts/book-market', FIX, f), 'utf-8')

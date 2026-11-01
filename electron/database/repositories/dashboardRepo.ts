@@ -1,11 +1,11 @@
 import { ipcMain } from 'electron'
-import { vaultTodosForDate, vaultOverdueTodos, type TodoRow } from '../../lib/kbStore/scheduleVaultRepo'
-import { vaultHabitsAll, vaultRecordsAll } from '../../lib/kbStore/habitVaultRepo'
-import { checkinCurrentStreak } from '../../lib/kbStore/habitStats'
-import { getKnowledgeIndex } from '../../lib/kbStore/knowledgeIndex'
-import { pomoSessionsAll } from '../../lib/kbStore/pomoVaultRepo'
-import { dateKeyOf } from '../../lib/appUsage'
-import { getUsageRange, getUsageTodayMinutes } from '../../lib/appUsageStore'
+import { vaultTodosForDate, vaultOverdueTodos, type TodoRow } from 'phrontis-core/kbStore/scheduleVaultRepo'
+import { vaultHabitsAll, vaultRecordsAll } from 'phrontis-core/kbStore/habitVaultRepo'
+import { checkinCurrentStreak } from 'phrontis-core/kbStore/habitStats'
+import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import { pomoSessionsAll } from 'phrontis-core/kbStore/pomoVaultRepo'
+import { dateKeyOf } from 'phrontis-core/appUsage'
+import { getUsageRange, getUsageTodayMinutes } from 'phrontis-core/appUsageStore'
 import { listBooksImpl } from './pdfReaderRepo'
 
 /**

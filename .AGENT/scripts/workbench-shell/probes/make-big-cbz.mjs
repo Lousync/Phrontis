@@ -10,7 +10,7 @@
  * 探针失败时可比对两轮产物判断「是 fixture 变了还是代码变了」。**故不用 `crypto.randomBytes`**：
  * 那会让每次产出的 sha256 都不同，等值断言与体积断言全失去意义。
  *
- * 体积分档的三条线（`electron/lib/kbStore/bookSizeGate.ts`）在 fixture 侧的落点：
+ * 体积分档的三条线（`../phrontis-core/src/kbStore/bookSizeGate.ts`）在 fixture 侧的落点：
  *   · ≤128MB 静默 —— 96MB 正好卡在静默档**之内**，「现行策略允许的最坏情况」用它测
  *   · 128–384MB 确认 —— 130MB 刚过线，用它测确认框 / 取消 / 「仍要打开」
  *

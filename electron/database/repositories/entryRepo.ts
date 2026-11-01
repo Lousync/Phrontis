@@ -5,7 +5,7 @@ import { emitPluginEvent } from '../../lib/pluginEvents'
 import {
   vaultListEntries, vaultGetEntryById, vaultCreateEntry, vaultUpdateEntry,
   vaultDeleteEntry, vaultSearchEntries,
-} from '../../lib/kbStore/blogVaultRepo'
+} from 'phrontis-core/kbStore/blogVaultRepo'
 import { recycleBinAdd } from './recycleBinRepo'
 
 export function registerEntryHandlers(): void {

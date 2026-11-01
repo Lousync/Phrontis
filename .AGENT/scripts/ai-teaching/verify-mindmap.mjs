@@ -32,7 +32,7 @@ const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 
 // ---------------------------------------------------------------- A. 纯函数真实实现
-const PURE_REL = 'src/lib/mindmap.ts'
+const PURE_REL = '../phrontis-core/src/lib/mindmap.ts'
 const pureSrc = read(PURE_REL)
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mindmap-verify-'))
 const tmpFile = path.join(tmpDir, 'mindmap.mjs')
@@ -192,17 +192,17 @@ const fresh = () => { const d = clone(SAMPLE); assignIds(d.root); return d }
 
 // ---------------------------------------------------------------- 7. 双链接入（导图可被关联跳转）
 console.log('\n=== 7. 双链接入（导图可被关联跳转） ===')
-const srcIdx = read('electron/lib/kbStore/knowledgeIndex.ts')
+const srcIdx = read('../phrontis-core/src/kbStore/knowledgeIndex.ts')
 check('索引读导图 JSON title + 标 isMindmap', srcIdx.includes('parseMindmap') && srcIdx.includes('isMindmap'))
 check('索引 schema 已 bump 到 7', /KNOWLEDGE_INDEX_SCHEMA_VERSION = 7/.test(srcIdx))
-const srcGraph = read('electron/lib/kbStore/graphIndex.ts')
+const srcGraph = read('../phrontis-core/src/kbStore/graphIndex.ts')
 check('图谱 graphPages 含 isMindmap（导图进图）', /entryKind !== 'file' \|\| e\.isMindmap/.test(srcGraph))
 check('mindmap 工具 ref 说明允许导图 .json', srcTools.includes('另一张思维导图'))
 check('mindmapHint ref 说明允许导图 .json', read('electron/lib/agentService.ts').includes('另一张思维导图'))
 
 // ---------------------------------------------------------------- 8. 关联网络面板重构
 console.log('\n=== 8. 关联网络面板（引用/被引用 + 定位高亮） ===')
-const srcRepo = read('electron/lib/kbStore/knowledgeVaultRepo.ts')
+const srcRepo = read('../phrontis-core/src/kbStore/knowledgeVaultRepo.ts')
 check('反链 DTO 含 linkText + path', /VaultBacklinkContextItem\b[\s\S]{0,400}linkText: string[\s\S]{0,200}path: string/.test(srcRepo))
 const srcPE2 = read('src/modules/knowledge/components/PageEditor.tsx')
 check('面板含「引用」节', srcPE2.includes('引用 · '))

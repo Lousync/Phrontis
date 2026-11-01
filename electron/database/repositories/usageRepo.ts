@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { getQuotaViews } from '../../lib/providerQuota'
-import { getAiUsageData } from '../../lib/agentUsage'
+import { getAiUsageData } from 'phrontis-core/agentUsage'
 import { buildUsageDashboard, type UsageWindow } from '../../lib/usageDashboardPure'
 
 /**

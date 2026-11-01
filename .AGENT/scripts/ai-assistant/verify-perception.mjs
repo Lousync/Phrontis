@@ -418,7 +418,7 @@ ok(!/^\s*import\s/m.test(SRC_BUDGET),
 
 // I3 不得在 semanticStore 里补一份「上游以为要新写的」semanticSearch
 // （上游 §4.2 误判项：真出口是 knowledgeSearch.searchKnowledge）
-const SRC_SEMSTORE = stripComments(read('electron/lib/kbStore/semanticStore.ts'))
+const SRC_SEMSTORE = stripComments(read('../phrontis-core/src/kbStore/semanticStore.ts'))
 ok(!/export\s+function\s+semanticSearch/.test(SRC_SEMSTORE),
   'I3 ★ semanticStore 里没有也不应有 `semanticSearch`（上游误判；真出口是 searchKnowledge）', '')
 

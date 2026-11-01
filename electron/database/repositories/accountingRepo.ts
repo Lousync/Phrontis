@@ -7,7 +7,7 @@ import {
   vaultAccountingRecurringAll, vaultAccountingCreateRecurring, vaultAccountingUpdateRecurring,
   vaultAccountingDeleteRecurring, vaultAccountingSettleRecurring, vaultAccountingPostRecurring,
   type CreateTransactionInput, type TransactionRow, type CreateRecurringInput, type RecurringRow,
-} from '../../lib/kbStore/accountingVaultRepo'
+} from 'phrontis-core/kbStore/accountingVaultRepo'
 import { broadcastDataChanged } from '../../main/windowBus'
 
 /**

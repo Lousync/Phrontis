@@ -25,7 +25,7 @@ const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 
 // ---------- A. 纯函数真实实现 ----------
-const PURE_REL = 'src/lib/accountingPure.ts'
+const PURE_REL = '../phrontis-core/src/lib/accountingPure.ts'
 const pureSrc = read(PURE_REL)
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'acct-verify-'))
 const tmpFile = path.join(tmpDir, 'accountingPure.mjs')
@@ -63,13 +63,16 @@ check('未归户：总额不变（100）', r2.total === 100, `total=${r2.total}`
 
 // ---------- B. 接线静态断言 ----------
 const srcTypes = read('src/types/index.ts')
-const srcRepo = read('electron/lib/kbStore/accountingVaultRepo.ts')
+// kbcore 抽取：类型定义单源在核心包，主仓只剩 re-export
+const srcCoreTypes = read('../phrontis-core/src/types/accounting.ts')
+const srcRepo = read('../phrontis-core/src/kbStore/accountingVaultRepo.ts')
 const srcPanel = read('src/modules/accounting/AccountingPanel.tsx')
 const srcViews = read('src/modules/accounting/views.tsx')
 const srcTools = read('electron/lib/builtinTools.ts')
 
-check('类型：新增 AccountingTxType（含 transfer）', /AccountingTxType = 'expense' \| 'income' \| 'transfer'/.test(srcTypes), '')
-check('类型：交易/创建/解析带 toPayment', (srcTypes.match(/toPayment\?: string/g) || []).length >= 3, '')
+check('类型：新增 AccountingTxType（含 transfer，核心包单源 + 主仓 re-export）', /AccountingTxType = 'expense' \| 'income' \| 'transfer'/.test(srcCoreTypes) && srcTypes.includes("from 'phrontis-core/types/accounting'"), '')
+check('类型：交易/创建/解析带 toPayment（核心包行类型 + 主仓 DTO）',
+  ((srcCoreTypes.match(/toPayment\?: string/g) || []).length + (srcTypes.match(/toPayment\?: string/g) || []).length) >= 3, '')
 check('主进程：TransactionRow / CreateTransactionInput 支持 transfer + toPayment', /AccountingTxType/.test(srcRepo) && /toPayment\?: string/.test(srcRepo), '')
 check('主进程：create 校验转出≠转入', /转出与转入账户不能相同/.test(srcRepo), '')
 check('主进程：parse 接受 transfer 且校验转入账户', /transfer' \? toPaymentRaw/.test(srcRepo) || /type === 'transfer' && !toPaymentRaw/.test(srcRepo), '')

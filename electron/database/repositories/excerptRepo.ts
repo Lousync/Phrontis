@@ -1,8 +1,8 @@
 import { ipcMain } from 'electron'
 import { broadcastDataChanged } from '../../main/windowBus'
-import { getCurrentVault } from '../../lib/kbStore/vaultContext'
-import { excerptCreate, excerptDelete, excerptList, excerptPatch } from '../../lib/kbStore/excerptVaultRepo'
-import { excerptExportToNote, getExportEntry } from '../../lib/kbStore/excerptExportVaultRepo'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
+import { excerptCreate, excerptDelete, excerptList, excerptPatch } from 'phrontis-core/kbStore/excerptVaultRepo'
+import { excerptExportToNote, getExportEntry } from 'phrontis-core/kbStore/excerptExportVaultRepo'
 
 /**
  * 摘录 IPC 注册转发层（书架阅读器 · 摘录先行批次）。

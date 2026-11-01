@@ -19,7 +19,7 @@ import {
   interruptionOfStopReason, interruptionDetailOf, STOP_REASON_NO_TERMINATOR,
   type Interruption, type InterruptionDetail, type InterruptCode,
 } from './llmFailurePure'
-import { recordAiUsage, usageKeyOf } from './agentUsage'
+import { recordAiUsage, usageKeyOf } from 'phrontis-core/agentUsage'
 
 /**
  * Model Gateway —— LLM API 统一接入层（方案 .claude/plans/model-gateway.md）。

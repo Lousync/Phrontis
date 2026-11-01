@@ -1,7 +1,7 @@
 import { app, ipcMain, shell } from 'electron'
 import { existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
-import { getCurrentVault, KB_DRAFT_DIR } from '../kbStore/vaultContext'
+import { getCurrentVault, KB_DRAFT_DIR } from 'phrontis-core/kbStore/vaultContext'
 import { generateToken, tokenMatches } from '../lanShare/auth'
 import { createClipperServer, listenClipper, CLIPPER_DEFAULT_PORT } from './server'
 import type { Server } from 'http'

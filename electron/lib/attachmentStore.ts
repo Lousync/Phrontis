@@ -10,15 +10,15 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { getLegacyAttachmentsDir } from './globalPaths'
-import { getCurrentVault, getVaultAttachmentsRoot, getVaultKbRoot } from './kbStore/vaultContext'
-import { vaultAttachmentsAll, vaultAttachmentsSave } from './kbStore/attachmentVaultRepo'
+import { getCurrentVault, getVaultAttachmentsRoot, getVaultKbRoot } from 'phrontis-core/kbStore/vaultContext'
+import { vaultAttachmentsAll, vaultAttachmentsSave } from 'phrontis-core/kbStore/attachmentVaultRepo'
 import {
   copyMissingFile,
   migrationRels,
   normalizeRel,
   relToAbs,
   resolveExistingPath,
-} from './kbStore/attachmentPath'
+} from 'phrontis-core/kbStore/attachmentPath'
 import { existsSync } from 'fs'
 
 /** 旧附件根：<userData>/attachments（只读兜底，不再写入） */

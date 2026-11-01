@@ -6,7 +6,7 @@
 //   ② flexible（每周 N 次）没有「计划日」，完成率若照搬「已打卡 ÷ 计划日」会恒等于 100%。
 //   ③ 最长连续：非计划日必须「跳过且不断」，否则每周一三五的习惯永远显示 1 天。
 //
-// 所以本脚本**切片真实实现**（`electron/lib/kbStore/habitStats.ts`，零依赖纯函数），
+// 所以本脚本**切片真实实现**（`../phrontis-core/src/kbStore/habitStats.ts`，零依赖纯函数），
 // 不照抄算法；跨线类型同步与旧写法残留另用源码探针断言（负向一律先剥注释）。
 //
 // 运行（项目根目录）：
@@ -20,7 +20,7 @@ import { stripComments } from '../shared/strip-comments.mjs'
 
 import {
   habitPeriodStats, checkinTotalInWindow, parseRuleDays,
-} from '../../../electron/lib/kbStore/habitStats.ts'
+} from '../../../../phrontis-core/src/kbStore/habitStats.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..', '..', '..')

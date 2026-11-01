@@ -8,7 +8,7 @@
 //   ③ 热力图要的是闭区间且**缺失日补 0**；渲染层若自己拿 Object.keys 拼格子，
 //      没记录的那天会整格消失，看起来像 bug。
 //
-// 所以本脚本**切片真实实现**（electron/lib/appUsage.ts，零依赖纯函数），不照抄算法；
+// 所以本脚本**切片真实实现**（../phrontis-core/src/appUsage.ts，零依赖纯函数），不照抄算法；
 // 主进程接线另用源码探针断言（负向一律先剥注释）。
 //
 // 运行（项目根目录）：
@@ -23,7 +23,7 @@ import { stripComments } from '../shared/strip-comments.mjs'
 import {
   dateKeyOf, dayNo, clampSegment, mergeSegment, pruneDays, minutesOn, rangeMinutes,
   MAX_SEGMENT_MS,
-} from '../../../electron/lib/appUsage.ts'
+} from '../../../../phrontis-core/src/appUsage.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..', '..', '..')
@@ -155,7 +155,7 @@ eq('A5 dayNo 相邻两天差 1', dayNo('2026-06-16') - dayNo('2026-06-15'), 1)
 /* ================= F. 纯函数层必须零依赖（能被契约脚本直接装载） ================= */
 
 {
-  const src = read('electron/lib/appUsage.ts')
+  const src = read('../phrontis-core/src/appUsage.ts')
   ok('F1 appUsage.ts 无任何 import（跨层引用会拖垮 --experimental-strip-types 装载链路）',
     !/^\s*import\s/m.test(src))
 }
@@ -164,7 +164,7 @@ eq('A5 dayNo 相邻两天差 1', dayNo('2026-06-16') - dayNo('2026-06-15'), 1)
 
 {
   const main = stripComments(read('electron/main/index.ts'))
-  const store = stripComments(read('electron/lib/appUsageStore.ts'))
+  const store = stripComments(read('../phrontis-core/src/appUsageStore.ts'))
 
   ok('G1 index.ts 从 electron 引入了 powerMonitor', /import\s*\{[^}]*powerMonitor[^}]*\}\s*from\s*'electron'/.test(main))
   ok('G2 index.ts 启动了采集器', /startAppUsageCollector\(\)/.test(main))

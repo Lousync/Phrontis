@@ -17,7 +17,7 @@
  */
 
 import { app, ipcMain } from 'electron'
-import { readJson, writeJson } from '../kbStore/jsonStore'
+import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 import { RELEASE_NOTES } from './data'
 import { RELEASE_NOTE_HIGHLIGHTS } from './highlights'
 import {

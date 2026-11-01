@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { ipcMain } from 'electron'
-import { getCurrentVault } from './kbStore/vaultContext'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { CONSTRAINTS_FILE, broadcastTreeRefresh, ensureGlobalConstraints, ensureWorkspaceConstraints, readGlobalConstraints, rootDirName, unitConstraintsRel } from './aiTeachingFolders'
 import { workspaceFolderRel } from './aiTeachingWorkspaces'
 import { getSessionUnitFolderRel, readCourseOutline, unitFolderRel } from './aiTeachingCourse'

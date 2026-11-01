@@ -11,8 +11,8 @@
  * 避免本模块反向 import pushService 形成循环依赖。
  */
 import { Notification, BrowserWindow } from 'electron'
-import { vaultTodosAll, type TodoRow } from './kbStore/scheduleVaultRepo'
-import { readJson, writeJson } from './kbStore/jsonStore'
+import { vaultTodosAll, type TodoRow } from 'phrontis-core/kbStore/scheduleVaultRepo'
+import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 
 const SCHEDULE_MOD = 'modules/schedule'
 const REMINDED_FILE = 'reminders.json'

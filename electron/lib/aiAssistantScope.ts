@@ -10,8 +10,8 @@
  * （**不能**沿用 vaultScope 的「空数组 = 不限制」旧语义）；缺省 = 旧来源兼容。
  */
 
-import { isWithinVaultScope, normalizeRelPath } from './kbStore/vaultScope'
-import { getKnowledgeIndex } from './kbStore/knowledgeIndex'
+import { isWithinVaultScope, normalizeRelPath } from 'phrontis-core/kbStore/vaultScope'
+import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 import type { ToolInvokeCtx } from './aiTools'
 
 /**

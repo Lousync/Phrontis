@@ -1,8 +1,8 @@
 import { localToday } from '../../../src/lib/date'
 import { buildDaySnapshot, isAgendaTodo, type DaySnapshot } from '../../../src/lib/daySnapshotPure'
-import { vaultTodosForDate, vaultOverdueTodos } from '../kbStore/scheduleVaultRepo'
-import { vaultHabitsAll, vaultRecordsAll } from '../kbStore/habitVaultRepo'
-import { checkinCurrentStreak } from '../kbStore/habitStats'
+import { vaultTodosForDate, vaultOverdueTodos } from 'phrontis-core/kbStore/scheduleVaultRepo'
+import { vaultHabitsAll, vaultRecordsAll } from 'phrontis-core/kbStore/habitVaultRepo'
+import { checkinCurrentStreak } from 'phrontis-core/kbStore/habitStats'
 import { getPomodoroSnapshot } from '../../main/pomodoroState'
 
 /**

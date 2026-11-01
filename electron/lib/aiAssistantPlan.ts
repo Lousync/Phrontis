@@ -12,7 +12,7 @@
 import { randomUUID } from 'crypto'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs'
 import { join, relative, dirname } from 'path'
-import { getCurrentVault, getVaultKbRoot } from './kbStore/vaultContext'
+import { getCurrentVault, getVaultKbRoot } from 'phrontis-core/kbStore/vaultContext'
 import {
   resolveSafe, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault,
 } from './workspaceManager'

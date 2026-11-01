@@ -34,6 +34,7 @@
     "linkedom": "^0.18.13",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^3.11.174",
+    "phrontis-core": "file:../phrontis-core",
     "qrcode": "^1.5.4",
     "sql.js": "^1.12.0",
     "trash": "^10.1.1"

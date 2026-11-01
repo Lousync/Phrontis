@@ -7,15 +7,15 @@ import { unzipBuffer } from './zip'
 import { safePathInside } from './pathGuard'
 import { isNewerVersion } from './updateService'
 import { createGateway } from './pluginHostGateway'
-import { pluginStoreGet, pluginStoreSet, pluginStoreDelete, pluginStoreHas, pluginStoreUsage } from './kbStore/pluginStore'
+import { pluginStoreGet, pluginStoreSet, pluginStoreDelete, pluginStoreHas, pluginStoreUsage } from 'phrontis-core/kbStore/pluginStore'
 import { subscribePluginEvents, unsubscribePluginEvents, unsubscribeAllPluginEvents } from './pluginEvents'
 import { searchKnowledge } from './knowledgeSearch'
-import { getKnowledgeIndex } from './kbStore/knowledgeIndex'
-import { vaultGetBacklinks } from './kbStore/knowledgeVaultRepo'
-import { evaluateFrontmatterQuery } from './kbStore/frontmatterQuery'
-import { enforceVaultScope } from './kbStore/vaultScope'
+import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import { vaultGetBacklinks } from 'phrontis-core/kbStore/knowledgeVaultRepo'
+import { evaluateFrontmatterQuery } from 'phrontis-core/kbStore/frontmatterQuery'
+import { enforceVaultScope } from 'phrontis-core/kbStore/vaultScope'
 import { resolveSafe, writeWorkspaceFile, trashWorkspacePath, invalidateIndexIfCurrentVault } from './workspaceManager'
-import { getCurrentVault } from './kbStore/vaultContext'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 // kb.vault.* 复用 builtin.vault.* 同一套经审计的安全 helper（不另写规则，防两套规则漂移）
 import { vaultRootPath, childAiAllowed, isAiReadableFile, isAiWritableFile, assertAiWritable, MAX_VAULT_FILE, MAX_VAULT_LIST_ENTRIES } from './builtinTools'
 import { verifyPluginSignature, buildKeyring } from './pluginSigning'
@@ -26,7 +26,7 @@ import {
   pluginQuery, pluginInsert, pluginUpdate, pluginDelete, pluginDumpTable,
 } from './pluginDataStore'
 import type { PluginTableDef, WhereCond } from './pluginDataStore'
-import { setPluginPetProvider, PET_SPRITE_KEYS, type PluginPetInfo } from './petSpeciesRegistry'
+import { setPluginPetProvider, PET_SPRITE_KEYS, type PluginPetInfo } from 'phrontis-core/petSpeciesRegistry'
 
 /**
  * 插件注册表与安装管理。

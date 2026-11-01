@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, statSync } from 'fs'
 import { protocol } from 'electron'
-import { getCurrentVault } from './kbStore/vaultContext'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { rootDirName } from './aiTeachingFolders'
-import { WELCOME_DOC_FILENAME } from './kbStore/welcomeDoc'
+import { WELCOME_DOC_FILENAME } from 'phrontis-core/kbStore/welcomeDoc'
 import { safePathInside } from './pathGuard'
 
 /**

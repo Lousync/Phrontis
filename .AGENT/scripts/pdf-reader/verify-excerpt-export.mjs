@@ -26,8 +26,8 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 
 // ===== ① excerptExportSchema 纯函数用例 =====
 console.log('\n--- ① excerptExportSchema：键口径 / md 结构 / 幂等 upsert ---')
-const X = await import('../../../electron/lib/kbStore/excerptExportSchema.ts')
-const S = await import('../../../electron/lib/kbStore/excerptSchema.ts')
+const X = await import('../../../../phrontis-core/src/kbStore/excerptExportSchema.ts')
+const S = await import('../../../../phrontis-core/src/kbStore/excerptSchema.ts')
 
 // 键口径必须与 excerptKey 逐字一致（同一本书的「摘录键」= 「导出键」）
 for (const [rootId, relPath] of [['r1', '.books/a.pdf'], ['r1', '.books\\a.txt'], ['', 'a.txt'], ['r1', '/a.txt'], ['r1', './x/y.pdf']]) {
@@ -132,7 +132,7 @@ console.log('\n--- ② 负向：excerptExports.json 唯一写方 ---')
       if (e.isDirectory()) walk(p)
       else if (/\.(ts|tsx|mjs)$/.test(e.name)) {
         const src = readFileSync(p, 'utf8')
-        if (stripComments(src).includes('excerptExports.json') && !p.replaceAll('\\', '/').endsWith('electron/lib/kbStore/excerptExportVaultRepo.ts')) offenders.push(p)
+        if (stripComments(src).includes('excerptExports.json') && !p.replaceAll('\\', '/').endsWith('../phrontis-core/src/kbStore/excerptExportVaultRepo.ts')) offenders.push(p)
       }
     }
   }
@@ -159,7 +159,7 @@ console.log('\n--- ③ IPC 三处同步：preload / types / ipc.ts ---')
 // ===== ④ C2 硬约束：覆盖重写只换 body（保住页面 id） =====
 console.log('\n--- ④ C2 硬约束：只换 body，不重建 frontmatter ---')
 {
-  const kv = stripComments(read('electron/lib/kbStore/knowledgeVaultRepo.ts'))
+  const kv = stripComments(read('../phrontis-core/src/kbStore/knowledgeVaultRepo.ts'))
   const i = kv.indexOf('export function vaultExportExcerptsNote')
   check('vaultExportExcerptsNote 存在', i > -1)
   if (i > -1) {
@@ -177,7 +177,7 @@ console.log('\n--- ④ C2 硬约束：只换 body，不重建 frontmatter ---')
     check('★ 该守卫先失效索引再返回（不留陈旧索引给后续读）', /if\s*\(\s*!existsSync\(abs\)\s*\)\s*\{\s*invalidateKnowledgeIndex\(\)\s*return null/.test(body))
     check('写后失效索引（invalidateKnowledgeIndex）', /invalidateKnowledgeIndex\(\)/.test(body))
   }
-  const repo = stripComments(read('electron/lib/kbStore/excerptExportVaultRepo.ts'))
+  const repo = stripComments(read('../phrontis-core/src/kbStore/excerptExportVaultRepo.ts'))
   check('★ 未把 knowledge:updatePage 当覆盖写入口（它只支持重命名）', !repo.includes('knowledge:updatePage'))
   check('自愈分支：页面不在时走 vaultCreatePage 新建', repo.includes('vaultCreatePage('))
   check('导出后回写映射（applyExportEntry）', repo.includes('applyExportEntry('))

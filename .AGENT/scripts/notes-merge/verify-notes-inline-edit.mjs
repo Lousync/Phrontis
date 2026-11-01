@@ -123,7 +123,7 @@ console.log('[7] 文件页直入编辑 + 首次保存自动补 id')
   ok(vaultBranch && vaultBranch[0].includes('workspaceWriteFile'), '草稿保存走同一 vault 写路径（零旁路）')
   ok(vaultBranch && vaultBranch[0].includes('ensureFrontmatterId'), '补 id 发生在写盘之前（同一保存事务序内）')
   // 索引层：无 id 的 md 兜底收录（不再要求被归档目录覆盖）
-  const kiMain = read('electron/lib/kbStore/knowledgeIndex.ts')
+  const kiMain = read('../phrontis-core/src/kbStore/knowledgeIndex.ts')
   ok(kiMain.includes('auto:${rel}') && !/!asString\(doc\.frontmatter\.id\) && findCoveringDirEntry/.test(kiMain),
     '索引层：无 id 的 md 一律以 auto:<relPath> 收录（旧「需被归档目录覆盖」前提已移除）')
   // 补 id 纯函数行为（直接跑真实现）
@@ -159,16 +159,16 @@ console.log('[9] status 双态退役（文件即条目）')
 {
   const types = read('src/types/index.ts')
   ok(!/status\?: 'draft' \| 'published'/.test(types), '负向：KnowledgePage 不再有 status 字段')
-  const kiMain = read('electron/lib/kbStore/knowledgeIndex.ts')
+  const kiMain = read('../phrontis-core/src/kbStore/knowledgeIndex.ts')
   ok(!/status: coveredByDir/.test(kiMain) && !/'draft' : 'published'/.test(kiMain),
     '负向：索引条目不再计算 status（草稿/归档双态）')
-  const graph = read('electron/lib/kbStore/graphIndex.ts')
+  const graph = read('../phrontis-core/src/kbStore/graphIndex.ts')
   ok(!/status: entry\.status/.test(graph), '负向：图谱节点不再带 status')
-  const repo = read('electron/lib/kbStore/knowledgeVaultRepo.ts')
+  const repo = read('../phrontis-core/src/kbStore/knowledgeVaultRepo.ts')
   ok(!/entry\.status === 'draft'/.test(repo) && !/e\.status !== 'draft'/.test(repo),
     '负向：仓库读源不再按 status 过滤（列表/阅读/反链/相似页全量）')
   const search = read('electron/lib/knowledgeSearch.ts')
-  const sem = read('electron/lib/kbStore/semanticIndex.ts')
+  const sem = read('electron/lib/semanticIndex.ts')
   const tools = read('electron/lib/builtinTools.ts')
   const plugin = read('electron/lib/pluginRegistry.ts')
   ok(!/status !== 'draft'/.test(search + sem + tools + plugin),

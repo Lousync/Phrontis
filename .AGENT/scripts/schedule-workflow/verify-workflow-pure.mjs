@@ -10,7 +10,7 @@ import {
   updateWorkflowStage,
   validateWorkflow,
   workflowProgress,
-} from '../../../src/modules/schedule/workflowPure.ts'
+} from '../../../../phrontis-core/src/schedule/workflowPure.ts'
 
 let pass = 0
 let fail = 0

@@ -1,9 +1,9 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'fs'
 import { dirname, join, relative } from 'path'
 import { randomUUID } from 'crypto'
-import { getCurrentVault, ATTACHMENTS_DIR, KB_ATTACHMENTS_DIR } from './kbStore/vaultContext'
-import { readJson, writeJson } from './kbStore/jsonStore'
-import { parseMarkdown, serializeMarkdown } from './kbStore/mdStore'
+import { getCurrentVault, ATTACHMENTS_DIR, KB_ATTACHMENTS_DIR } from 'phrontis-core/kbStore/vaultContext'
+import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
+import { parseMarkdown, serializeMarkdown } from 'phrontis-core/kbStore/mdStore'
 
 /**
  * 内容型插件（knowledgePages）知识包 → Vault 批量写页引擎（去库化适配）。

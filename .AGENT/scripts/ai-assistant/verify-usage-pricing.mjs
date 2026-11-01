@@ -54,7 +54,7 @@ ok(estimateCost({ i0: 1e6, ir: 0, iw: 0, out: 0, calls: 1 }, 'zzz') === null, 'B
 ok(estimateCost({ i0: 0, ir: 0, iw: 0, out: 0, calls: 0 }, 'unknown-x') === null, 'B5 空桶且无价目 → null')
 
 console.log('\n=== C. agentUsage 数据层接线 ===')
-const au = read('electron/lib/agentUsage.ts')
+const au = read('../phrontis-core/src/agentUsage.ts')
 ok(/KEEP_DAYS\s*=\s*400/.test(au), 'C1 保留期抬到 400 天')
 ok(/models\?:\s*Record<string,\s*AiUsageModelBucket>/.test(au), 'C2 AiUsageDay 追加 models 字段（可选）')
 ok(/sessions:\s*Record<string,\s*\{\s*title:\s*string;\s*in:\s*number;\s*out:\s*number\s*\}>/.test(au), 'C3 sessions 形状未动（向后兼容）')

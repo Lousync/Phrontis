@@ -1,7 +1,7 @@
 import { existsSync, copyFileSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync } from 'fs'
 import { join, basename, isAbsolute, relative } from 'path'
 import { BrowserWindow, dialog, ipcMain } from 'electron'
-import { getCurrentVault } from './kbStore/vaultContext'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { broadcastTreeRefresh, ensureSessionFolder, ensureWriteOwnerFolder, rootDirName, sanitizeTitle, sessionFolder, sourceTemplateText } from './aiTeachingFolders'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { listWorkspaces, workspaceFolderRel, getWorkspaceOfSession } from './aiTeachingWorkspaces'

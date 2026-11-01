@@ -8,7 +8,7 @@
 //   ③ 目录隔离漏一处：总结文件同样带 frontmatter.id，一旦被日志扫描收走，
 //      它们会静默混进博客列表 / 标签聚合 / 全文搜索 —— 不报错，只是列表里多出几篇「没有日期的日记」。
 //
-// 所以本脚本**切片真实实现**（`src/lib/summary.ts` 与 `electron/lib/kbStore/blogVaultRepo.ts`，
+// 所以本脚本**切片真实实现**（`src/lib/summary.ts` 与 `../phrontis-core/src/kbStore/blogVaultRepo.ts`，
 // 只把 `vaultContext` 换成指向临时仓库的 stub），在真实文件系统上跑。
 //
 // 运行（项目根目录）：
@@ -24,7 +24,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   weekRangeOf, monthRangeOf, yearRangeOf, isoWeekNo, mondayOf,
   summaryFileKey, summaryFileName, summaryLabel, summaryWindowsAt,
-} from '../../../src/lib/summary.ts'
+} from '../../../../phrontis-core/src/lib/summary.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..', '..', '..')
@@ -104,15 +104,15 @@ export function getCurrentVault() { return current }
 export function getVaultKbRoot() { return current ? current.rootPath + '/.knowbase' : null }
 `, 'utf-8')
 
-slice('src/lib/summary.ts', 'summary.mjs')
-slice('electron/lib/blogToolsPure.ts', 'blogToolsPure.mjs')
-slice('electron/lib/kbStore/mdStore.ts', 'mdStore.mjs', [
+slice('../phrontis-core/src/lib/summary.ts', 'summary.mjs')
+slice('../phrontis-core/src/lib/blogToolsPure.ts', 'blogToolsPure.mjs')
+slice('../phrontis-core/src/kbStore/mdStore.ts', 'mdStore.mjs', [
   [/from '\.\/vaultContext'/, "from './vaultContext.mjs'"],
 ])
-slice('electron/lib/kbStore/blogVaultRepo.ts', 'blogVaultRepo.mjs', [
+slice('../phrontis-core/src/kbStore/blogVaultRepo.ts', 'blogVaultRepo.mjs', [
   [/from '\.\/vaultContext'/, "from './vaultContext.mjs'"],
   [/from '\.\/mdStore'/, "from './mdStore.mjs'"],
-  [/from '\.\.\/blogToolsPure'/, "from './blogToolsPure.mjs'"],
+  [/from '\.\.\/lib\/blogToolsPure'/, "from './blogToolsPure.mjs'"],
   [/import \{ summaryFileName, summaryLabel, type SummaryKind \} from '[^']*'/, "import { summaryFileName, summaryLabel } from './summary.mjs'"],
 ])
 

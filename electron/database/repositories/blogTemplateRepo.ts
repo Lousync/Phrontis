@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
-import { readJson, writeJson } from '../../lib/kbStore/jsonStore'
+import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 
 /**
  * 博客模板 —— 用户自编辑的日记模板，写博客时可一键套用。

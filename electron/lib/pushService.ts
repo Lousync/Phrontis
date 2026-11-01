@@ -1,6 +1,6 @@
 import { adaptPush, type SupervisePlatform, type SupervisePushConfig, type PushPayload } from './pushAdapters'
-import { vaultRecordsAll, vaultHabitsAll } from './kbStore/habitVaultRepo'
-import { readJson, writeJson } from './kbStore/jsonStore'
+import { vaultRecordsAll, vaultHabitsAll } from 'phrontis-core/kbStore/habitVaultRepo'
+import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 import { checkScheduleReminders } from './scheduleReminder'
 
 /**

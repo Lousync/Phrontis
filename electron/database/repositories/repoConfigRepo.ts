@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { readRepoConfig, updateGraphViewConfig } from '../../lib/kbStore/repoConfig'
+import { readRepoConfig, updateGraphViewConfig } from 'phrontis-core/kbStore/repoConfig'
 
 /** 仓库级配置 IPC（R4-G3）：图谱参数持久化到 .knowbase/config.json，配置跟仓库走 */
 export function registerRepoConfigHandlers(): void {

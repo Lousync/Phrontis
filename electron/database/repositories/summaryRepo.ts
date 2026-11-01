@@ -1,11 +1,11 @@
 import { ipcMain } from 'electron'
-import { vaultTodosAll } from '../../lib/kbStore/scheduleVaultRepo'
-import { vaultRecordsAll, vaultHabitsAll } from '../../lib/kbStore/habitVaultRepo'
-import { vaultListEntries } from '../../lib/kbStore/blogVaultRepo'
-import { pomoSessionCreate, pomoSessionsAll } from '../../lib/kbStore/pomoVaultRepo'
-import { vaultAccountingPeriodStats } from '../../lib/kbStore/accountingVaultRepo'
-import { getKnowledgeIndex } from '../../lib/kbStore/knowledgeIndex'
-import { checkinTotalInWindow, habitPeriodStats } from '../../lib/kbStore/habitStats'
+import { vaultTodosAll } from 'phrontis-core/kbStore/scheduleVaultRepo'
+import { vaultRecordsAll, vaultHabitsAll } from 'phrontis-core/kbStore/habitVaultRepo'
+import { vaultListEntries } from 'phrontis-core/kbStore/blogVaultRepo'
+import { pomoSessionCreate, pomoSessionsAll } from 'phrontis-core/kbStore/pomoVaultRepo'
+import { vaultAccountingPeriodStats } from 'phrontis-core/kbStore/accountingVaultRepo'
+import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import { checkinTotalInWindow, habitPeriodStats } from 'phrontis-core/kbStore/habitStats'
 
 /**
  * 周期总结支持服务 ——

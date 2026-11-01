@@ -1,6 +1,6 @@
-import { bookExtFromMime, bookExtOf } from '../kbStore/bookFormats'
-import { credentialSatisfies, resolveSearchUrl, type BookSource, type BookSourceCredential } from '../kbStore/bookMarketSchema'
-import { bookSourceCredentialFor, bookSourceGet, bookSourceList } from '../kbStore/bookSourceVaultRepo'
+import { bookExtFromMime, bookExtOf } from 'phrontis-core/kbStore/bookFormats'
+import { credentialSatisfies, resolveSearchUrl, type BookSource, type BookSourceCredential } from 'phrontis-core/kbStore/bookMarketSchema'
+import { bookSourceCredentialFor, bookSourceGet, bookSourceList } from 'phrontis-core/kbStore/bookSourceVaultRepo'
 import { bookRequestText, BookRequestError } from './netSession'
 import {
   feedEntryToRawItem, jsonToRawItems, parseAtomFeed, pickAcquisitionFromChildFeed, toBookMarketItems,

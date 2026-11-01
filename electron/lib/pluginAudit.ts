@@ -1,6 +1,6 @@
 // R6 去库化（D9）：全局数据 = userData/data/*.json（sql.js 已移除）
 import { randomUUID } from 'crypto'
-import { globalReadJson, globalWriteJson } from './globalJsonStore'
+import { globalReadJson, globalWriteJson } from 'phrontis-core/globalJsonStore'
 
 /**
  * 行为审计日志 —— 追加式记录插件与 AI 工具的关键动作。

@@ -12,7 +12,13 @@
     // 本文件的用途只有「类型检查」。漏掉 noEmit 时 `tsc -p tsconfig.web.json`
     // 会在源码旁吐出同名 .js，而 Vite 解析目录导入的扩展名顺序是 .js → .ts → .tsx，
     // 于是构建/dev 全部改用那份旧快照 —— 新改的 .tsx 静默不生效（2026-09-15 实测过一次）。
-    "noEmit": true
+    "noEmit": true,
+    // phrontis-core：渲染层经 src/lib/* 的 re-export shim 间接消费（类型单源在核心包）。
+    // 与 tsconfig.node.json 同款 paths 直指源码（bundler 对 exports 裸扩展名子路径解析不可靠）。
+    "paths": {
+      "phrontis-core": ["../phrontis-core/src/index.ts"],
+      "phrontis-core/*": ["../phrontis-core/src/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["src/modules/help/docs"]

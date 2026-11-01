@@ -13,11 +13,11 @@ import { KB_BOOKMARK_DELETE, KB_CBZ_THUMBS, KB_CBZ_THUMB_REQ, KB_EPUB_GOTO_CFI, 
 // 真源（扩展名 / kind / MIME 三张表都在那里）。★ 本文件**不得**再出现 MIME 或书籍扩展名字面量：
 // foliate 的 makeBook() 按 File 的 name/type 分派解码器（view.js:13-21，不看魔数），
 // 自拼 MIME 会重演「所有书都叫 xxx.epub」→ 裸 fb2 当场 UnsupportedTypeError、fbz 被当 EPUB 解包炸掉。
-import { bookExtOf, bookKindOf, bookMimeOf } from '../../../../electron/lib/kbStore/bookFormats'
+import { bookExtOf, bookKindOf, bookMimeOf } from 'phrontis-core/kbStore/bookFormats'
 // 书签条数上限：**唯一真源在 schema**（写盘侧会按它整单拒绝），渲染层只读来提前拦并给出提示
-import { MAX_BOOKMARKS } from '../../../../electron/lib/kbStore/readerStateSchema'
+import { MAX_BOOKMARKS } from 'phrontis-core/kbStore/readerStateSchema'
 // 大书体积分档（B-16）：阈值与**用户看到的文案**都在那个零依赖文件里，两边共用同一份（勿在此另写数字）
-import { bookSizeTier, bigBookConfirmText, bigBookDeclinedText, tooBigText } from '../../../../electron/lib/kbStore/bookSizeGate'
+import { bookSizeTier, bigBookConfirmText, bigBookDeclinedText, tooBigText } from 'phrontis-core/kbStore/bookSizeGate'
 import { ExcerptCaptureBar } from '../txt/ExcerptCaptureBar'
 import type { SelectionRect } from '../pdf/TextSelectionBar'
 import type { BookBookmark, ExcerptColor, ExcerptItem, ExcerptType, ReaderPaper } from '../../../types'

@@ -25,13 +25,13 @@ const check = (name, ok, extra = '') => {
   console.log(`${ok ? '  ok  ' : ' fail '} ${name}${extra ? `  [${extra}]` : ''}`)
   if (!ok) pass = false
 }
-const SCHEMA_REL = 'electron/lib/kbStore/bookMarketSchema.ts'
-const REPO_REL = 'electron/lib/kbStore/bookSourceVaultRepo.ts'
-const META_REL = 'electron/lib/kbStore/vaultBookMetaRepo.ts'
+const SCHEMA_REL = '../phrontis-core/src/kbStore/bookMarketSchema.ts'
+const REPO_REL = '../phrontis-core/src/kbStore/bookSourceVaultRepo.ts'
+const META_REL = '../phrontis-core/src/kbStore/vaultBookMetaRepo.ts'
 
 // ===== ① 书源归一 =====
 console.log('\n--- ① 书源归一 / 脏数据回落 ---')
-const S = await import('../../../electron/lib/kbStore/bookMarketSchema.ts')
+const S = await import('../../../../phrontis-core/src/kbStore/bookMarketSchema.ts')
 
 const good = { id: 's1', name: '公版书库', kind: 'opds', url: 'https://example.org/opds', enabled: true, builtin: true, createdAt: '2026-09-22T00:00:00.000Z' }
 const g = S.coerceBookSource(good)
@@ -260,10 +260,11 @@ const runtimeImports = [...schemaSrc.matchAll(/\bimport\s+([^;]*?)\s+from\s+'[^'
 check('schema 无运行时 import（只有 import type 或没有）', runtimeImports.length === 0, runtimeImports.join(' | '))
 check('schema 无 require()', !/\brequire\s*\(/.test(schemaSrc))
 
-const files = walkSourceFiles(join(ROOT, 'electron')).concat(walkSourceFiles(join(ROOT, 'src')))
+const files = walkSourceFiles(join(ROOT, 'electron')).concat(walkSourceFiles(join(ROOT, 'src'))).concat(walkSourceFiles(join(ROOT, '../phrontis-core/src')))
 const scan = new Map()
 for (const f of files) scan.set(f.replace(/\\/g, '/'), stripComments(readFileSync(f, 'utf8')))
-const whoHas = (needle) => [...scan.entries()].filter(([, src]) => src.includes(needle)).map(([f]) => f.replace(`${ROOT.replace(/\\/g, '/')}/`, ''))
+const CORE_DIR = join(ROOT, '../phrontis-core').replace(/\\/g, '/')
+const whoHas = (needle) => [...scan.entries()].filter(([, src]) => src.includes(needle)).map(([f]) => f.replace(/\\/g, '/').replace(`${ROOT.replace(/\\/g, '/')}/`, '').replace(`${CORE_DIR}/`, '../phrontis-core/'))
 
 check("'.books' 字面量只出现在 schema（布局单源）", whoHas("'.books'").join(',') === SCHEMA_REL, whoHas("'.books'").join(','))
 check("'.meta.json' 字面量只出现在 schema（消费方一律用常量）", whoHas("'.meta.json'").join(',') === SCHEMA_REL, whoHas("'.meta.json'").join(','))

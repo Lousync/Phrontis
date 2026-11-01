@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
-import { readJson, writeJson } from '../../lib/kbStore/jsonStore'
+import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 
 // R6 去库化：真相源 = .knowbase/modules/toolbox/scripts.json（sql.js 路径已移除，D9）
 // 行快照 schema（snake_case 字段）与迁移器 planTable 产物约定一致（同 study/sets.json 风格）

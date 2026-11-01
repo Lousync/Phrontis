@@ -10,7 +10,7 @@ import { showToast } from '../../lib/toast'
 import { DeleteWipe } from '../../components/shared/DeleteWipe'
 import type { BookKind, BookListItem } from '../../types'
 import { BookCover } from './BookCover'
-import { bookEngineOf } from '../../../electron/lib/kbStore/bookFormats'
+import { bookEngineOf } from 'phrontis-core/kbStore/bookFormats'
 
 // 2026-09-17 拍板「书架内自渲染」：点书在书架标签页内部打开阅读器（书架 ⇄ 阅读器），
 // 不再借编辑器文档标签（编辑器 PDF 能力保留给知识库附件等既有入口）。

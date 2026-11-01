@@ -24,22 +24,22 @@ import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, t
 import { imageGenerate, imageEdit, imageEditSlotConfigured } from './llmService'
 import { imageSizeOf, exceedsPixelGuard } from './imageHeaderPure'
 import { aiExec } from './terminalService'
-import { getCurrentVault } from './kbStore/vaultContext'
-import { pomoSessionsAll } from './kbStore/pomoVaultRepo'
-import { getKnowledgeIndex, getKnowledgeTextIndex } from './kbStore/knowledgeIndex'
-import { getGraphIndex } from './kbStore/graphIndex'
-import { vaultGetPageById, vaultGetCategories, vaultCreatePage, vaultDirExists } from './kbStore/knowledgeVaultRepo'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
+import { pomoSessionsAll } from 'phrontis-core/kbStore/pomoVaultRepo'
+import { getKnowledgeIndex, getKnowledgeTextIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import { getGraphIndex } from 'phrontis-core/kbStore/graphIndex'
+import { vaultGetPageById, vaultGetCategories, vaultCreatePage, vaultDirExists } from 'phrontis-core/kbStore/knowledgeVaultRepo'
 import { searchKnowledge } from './knowledgeSearch'
 import { searchHelp, helpCatalog } from './helpService'
-import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries } from './kbStore/blogVaultRepo'
+import { vaultCreateEntry, vaultSearchEntries, vaultGetEntryById, vaultListEntries } from 'phrontis-core/kbStore/blogVaultRepo'
 import { normalizeBlogDate, nearestEntryDates, blogHitExcerpt, splitBlogSearchTerms } from './blogToolsPure'
-import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from './kbStore/habitVaultRepo'
-import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, vaultScheduleRecurringAll, vaultScheduleCreateRecurring, vaultScheduleUpdateRecurring, vaultScheduleDeleteRecurring, vaultTagsAll, type TodoRow } from './kbStore/scheduleVaultRepo'
+import { vaultHabitsAll, vaultRecordsAll, vaultHabitRecordAddIfAbsent } from 'phrontis-core/kbStore/habitVaultRepo'
+import { vaultTodosAll, vaultCreateTodo, vaultFindTodo, vaultUpdateTodo, vaultDeleteTodoCascade, vaultScheduleRecurringAll, vaultScheduleCreateRecurring, vaultScheduleUpdateRecurring, vaultScheduleDeleteRecurring, vaultTagsAll, type TodoRow } from 'phrontis-core/kbStore/scheduleVaultRepo'
 import {
   vaultWorkflowsAll, vaultWorkflowById, vaultCreateWorkflow, vaultUpdateWorkflow, vaultDeleteWorkflow,
   vaultAddWorkflowStage, vaultUpdateWorkflowStage, vaultDeleteWorkflowStage, vaultReorderWorkflowStages,
   vaultAddWorkflowCheckpoint, vaultUpdateWorkflowCheckpoint, vaultDeleteWorkflowCheckpoint,
-} from './kbStore/scheduleWorkflowVaultRepo'
+} from 'phrontis-core/kbStore/scheduleWorkflowVaultRepo'
 import { hmToMin, minToHm, parseScheduleWeekdays, recurringFreqLabel } from '../../src/lib/scheduleRecurringPure'
 import { buildWorkflowFromTask, isWorkflowDate, stageDuration, workflowProgress } from '../../src/modules/schedule/workflowPure'
 import { filterIntelItems, INTEL_SOURCE_KEYS } from '../../src/lib/intelPure'
@@ -47,7 +47,7 @@ import type { IntelSourceKey } from '../../src/types'
 import { intelItemsAll, intelSetAiRec, intelSetAiFilter } from './intel/intelStore'
 import { INTEL_QUERY_SCHEMA, INTEL_SET_REC_SCHEMA, INTEL_SET_FILTER_SCHEMA } from './intel/toolSchemas'
 import type { ScheduleWorkflow, ScheduleWorkflowStageInput } from '../../src/types'
-import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from './kbStore/accountingVaultRepo'
+import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from 'phrontis-core/kbStore/accountingVaultRepo'
 // 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
 // 依赖方向已核：pluginEvents 的依赖树不反向 import 本模块，无循环。
 import { emitPluginEvent } from './pluginEvents'
@@ -59,8 +59,8 @@ import {
   quizTagList, quizTagResolveOrCreate,
   quizCollectionList, quizCollectionResolveOrCreate,
 } from '../database/repositories/quizRepo'
-import { bookSourceInfos } from './kbStore/bookSourceVaultRepo'
-import { sanitizeBookSourcePatch, isAllowedSourceUrl, type BookSourceMapping } from './kbStore/bookMarketSchema'
+import { bookSourceInfos } from 'phrontis-core/kbStore/bookSourceVaultRepo'
+import { sanitizeBookSourcePatch, isAllowedSourceUrl, type BookSourceMapping } from 'phrontis-core/kbStore/bookMarketSchema'
 import { quizDataStats } from './quizDataAdmin'
 import { AI_TEXT_CODE_EXT_SET } from '../../src/lib/aiTextExts'
 import type { ToolJsonSchema } from './aiTools'

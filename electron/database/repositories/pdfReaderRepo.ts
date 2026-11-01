@@ -1,16 +1,16 @@
 import { ipcMain } from 'electron'
 import { broadcastDataChanged } from '../../main/windowBus'
-import { getCurrentVault } from '../../lib/kbStore/vaultContext'
-import { scanVaultBooks } from '../../lib/kbStore/knowledgeIndex'
-import { readerStateListProgress } from '../../lib/kbStore/readerStateVaultRepo'
-import { bookMetaReadAll } from '../../lib/kbStore/vaultBookMetaRepo'
-import { bookMetaKey } from '../../lib/kbStore/bookMarketSchema'
-import { bookDisplayName, type BookKind } from '../../lib/kbStore/bookFormats'
-import type { ScanMode } from '../../lib/kbStore/scanDetect'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
+import { scanVaultBooks } from 'phrontis-core/kbStore/knowledgeIndex'
+import { readerStateListProgress } from 'phrontis-core/kbStore/readerStateVaultRepo'
+import { bookMetaReadAll } from 'phrontis-core/kbStore/vaultBookMetaRepo'
+import { bookMetaKey } from 'phrontis-core/kbStore/bookMarketSchema'
+import { bookDisplayName, type BookKind } from 'phrontis-core/kbStore/bookFormats'
+import type { ScanMode } from 'phrontis-core/kbStore/scanDetect'
 import {
   pdfReaderCoverGet, pdfReaderCoverList, pdfReaderCoverSave, pdfReaderGetBook,
   pdfReaderListProgress, pdfReaderPatchBook,
-} from '../../lib/kbStore/pdfReaderVaultRepo'
+} from 'phrontis-core/kbStore/pdfReaderVaultRepo'
 
 /**
  * PDF 阅读数据 IPC 注册转发层（v3.4.0 PDF 阅读体验整包，方案 §4）。

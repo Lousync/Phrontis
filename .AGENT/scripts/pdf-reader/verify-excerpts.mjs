@@ -23,7 +23,7 @@ const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 
 // ===== ① excerptSchema 纯函数用例 =====
 console.log('\n--- ① excerptSchema：键归一 / 创建载荷 / patch / 修补 ---')
-const S = await import('../../../electron/lib/kbStore/excerptSchema.ts')
+const S = await import('../../../../phrontis-core/src/kbStore/excerptSchema.ts')
 
 check('键归一：基础', S.excerptKey('r1', '.books/a.txt') === 'r1/.books/a.txt')
 check('键归一：反斜杠 → posix', S.excerptKey('r1', '.books\\a.txt') === 'r1/.books/a.txt')
@@ -119,7 +119,7 @@ console.log('\n--- ② 负向：excerpts.json 唯一写方 ---')
       if (e.isDirectory()) walk(p)
       else if (/\.(ts|tsx|mjs)$/.test(e.name)) {
         const src = readFileSync(p, 'utf8')
-        if (stripComments(src).includes('excerpts.json') && !p.replaceAll('\\', '/').endsWith('electron/lib/kbStore/excerptVaultRepo.ts')) offenders.push(p)
+        if (stripComments(src).includes('excerpts.json') && !p.replaceAll('\\', '/').endsWith('../phrontis-core/src/kbStore/excerptVaultRepo.ts')) offenders.push(p)
       }
     }
   }

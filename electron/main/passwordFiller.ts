@@ -2,7 +2,7 @@ import { BrowserWindow, globalShortcut, screen, clipboard, app, ipcMain } from '
 import { join } from 'path'
 import { readFileSync, existsSync } from 'fs'
 import { decodePassword, createPasswordEntryRow } from '../database/repositories/passwordRepo'
-import { vaultPasswordsAll } from '../lib/kbStore/secretVaultRepo'
+import { vaultPasswordsAll } from 'phrontis-core/kbStore/secretVaultRepo'
 import { pushAppNotice } from '../lib/appNotice'
 import { applyUiZoomTo, getUiZoom } from './uiZoom'
 

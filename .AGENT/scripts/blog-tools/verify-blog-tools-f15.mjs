@@ -26,7 +26,7 @@ const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
 
 // ---------------------------------------------------------------- A. 纯函数
-const PURE_REL = 'electron/lib/blogToolsPure.ts'
+const PURE_REL = '../phrontis-core/src/lib/blogToolsPure.ts'
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'blog-tools-verify-'))
 const tmpFile = path.join(tmpDir, 'blogToolsPure.mjs')
 fs.writeFileSync(tmpFile, stripTypeScriptTypes(read(PURE_REL), { mode: 'strip' }))
@@ -135,7 +135,7 @@ check('blog.search 多词 AND（splitBlogSearchTerms + 词表入参）', !!searc
 check('blog.search description 声明 AND 语义', !!searchBlock && /全部命中才算命中，AND/.test(searchBlock), '')
 check('blog.search description 指路 blog.read', !!searchBlock && /builtin\.blog\.read/.test(searchBlock), '')
 check('import 补 vaultGetEntryById / vaultListEntries',
-  /import\s*\{[^}]*vaultGetEntryById[^}]*vaultListEntries[^}]*\}\s*from\s*'\.\/kbStore\/blogVaultRepo'/.test(tools), '')
+  /import\s*\{[^}]*vaultGetEntryById[^}]*vaultListEntries[^}]*\}\s*from\s*'phrontis-core\/kbStore\/blogVaultRepo'/.test(tools), '')
 check('import blogToolsPure（含 splitBlogSearchTerms）', /import\s*\{\s*normalizeBlogDate,\s*nearestEntryDates,\s*blogHitExcerpt,\s*splitBlogSearchTerms\s*\}\s*from\s*'\.\/blogToolsPure'/.test(tools), '')
 
 console.log('\n=== 8. builtin.tool.request 清单 + 术语表指路（铁律 18） ===')

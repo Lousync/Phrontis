@@ -1,10 +1,10 @@
 import { ipcMain } from 'electron'
 import { broadcastDataChanged } from '../../main/windowBus'
-import { bookCoverReadDataUrl } from '../../lib/kbStore/vaultBookMetaRepo'
+import { bookCoverReadDataUrl } from 'phrontis-core/kbStore/vaultBookMetaRepo'
 import {
   bookSourceClearCredential, bookSourceInfos, bookSourceRemove, bookSourceSaveCredential,
   bookSourceSetEnabled, bookSourceUpsert,
-} from '../../lib/kbStore/bookSourceVaultRepo'
+} from 'phrontis-core/kbStore/bookSourceVaultRepo'
 import { probeSourceConnectivity, searchBookSources } from '../../lib/bookMarket/sourceClient'
 import { controlDownload, listDownloadQueue, startDownload } from '../../lib/bookMarket/downloader'
 import { deleteBookEverywhere } from '../../lib/bookDelete'

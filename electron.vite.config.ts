@@ -45,7 +45,7 @@ export default defineConfig({
     // linkedom 一并打进来：其 cjs 构建运行时 require('css-select')，而 css-select 新版是 ESM-only，
     // Electron 主进程必炸 ERR_REQUIRE_ESM（实测）；bundle 静态解析后统一为 CJS 产物，运行期无 require 链。
     // turndown 有合法 require 条件，维持外置。
-    plugins: [cleanOutDir('out/main'), externalizeDepsPlugin({ exclude: ['defuddle', 'linkedom'] })],
+    plugins: [cleanOutDir('out/main'), externalizeDepsPlugin({ exclude: ['defuddle', 'linkedom', 'phrontis-core'] })],
     // AI 测试桥开关：构建期静态替换。为 false 时 main 中的动态 import 会被
     // tree-shake 掉，devbridge 整个 chunk 不进产物（生产零残留）。
     define: {

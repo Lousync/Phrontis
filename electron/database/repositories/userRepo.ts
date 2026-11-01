@@ -1,16 +1,16 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import { randomBytes, pbkdf2Sync } from 'crypto'
-import { getVaultAttachmentsRoot } from '../../lib/kbStore/vaultContext'
+import { getVaultAttachmentsRoot } from 'phrontis-core/kbStore/vaultContext'
 import { findAvatarFile, resolveAvatarFile } from '../../lib/attachmentStore'
 import { join } from 'path'
 import { mkdirSync, writeFileSync, readFileSync, existsSync, copyFileSync, unlinkSync } from 'fs'
 import { registerAttachment, deleteAttachments } from './attachmentRepo'
-import { vaultTodosAll, vaultTagsAll } from '../../lib/kbStore/scheduleVaultRepo'
-import { vaultListEntries } from '../../lib/kbStore/blogVaultRepo'
-import { vaultGetTags } from '../../lib/kbStore/knowledgeVaultRepo'
-import { getKnowledgeIndex } from '../../lib/kbStore/knowledgeIndex'
-import { vaultUserProfile, vaultUserProfileSave, type UserVaultRow } from '../../lib/kbStore/userVaultRepo'
-import { vaultAttachmentsAll } from '../../lib/kbStore/attachmentVaultRepo'
+import { vaultTodosAll, vaultTagsAll } from 'phrontis-core/kbStore/scheduleVaultRepo'
+import { vaultListEntries } from 'phrontis-core/kbStore/blogVaultRepo'
+import { vaultGetTags } from 'phrontis-core/kbStore/knowledgeVaultRepo'
+import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
+import { vaultUserProfile, vaultUserProfileSave, type UserVaultRow } from 'phrontis-core/kbStore/userVaultRepo'
+import { vaultAttachmentsAll } from 'phrontis-core/kbStore/attachmentVaultRepo'
 
 // R6 去库化（D9）：全局数据 = userData/data/*.json（sql.js 已移除）
 // R6 去库化：用户档案 = .knowbase/modules/user.json（登录密码 hash 同存；sql.js 路径已移除，D9）

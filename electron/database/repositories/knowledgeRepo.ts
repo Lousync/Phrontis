@@ -8,11 +8,11 @@ import {
   vaultGetBacklinks, vaultGetBacklinkContext,
   vaultGetCategoryRelPath, vaultDeleteCategory, vaultCreateCategory, vaultGetCategory, vaultCreatePage,
   vaultRenameCategory, vaultRenamePage, vaultMoveCategoryOrder, vaultMovePageOrder,
-} from '../../lib/kbStore/knowledgeVaultRepo'
-import { getCurrentVault } from '../../lib/kbStore/vaultContext'
+} from 'phrontis-core/kbStore/knowledgeVaultRepo'
+import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { emitPluginEvent } from '../../lib/pluginEvents'
-import { getGraphIndex } from '../../lib/kbStore/graphIndex'
-import { getKnowledgeIndex, invalidateKnowledgeIndex } from '../../lib/kbStore/knowledgeIndex'
+import { getGraphIndex } from 'phrontis-core/kbStore/graphIndex'
+import { getKnowledgeIndex, invalidateKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 
 type CategoryType = 'notebook' | 'folder' | 'space'
 
