@@ -1934,6 +1934,19 @@ function buildSideLaneInfo(row: AgentSessionRow): Record<string, unknown> {
   }
 }
 
+/**
+ * 手机伴侣电脑档中继入口（M4b，协议 Phrontis-mobile/docs/design.md §2.1 v1.3）。
+ *
+ * 与 agent:chat 走**同一个 agentChat 核心**（同 Key / 同供应商体系 / 全库工具，轻问答通道），
+ * 但不注册 UI 停止器与运行态广播：stepEmitters 全部可选链，无注册即静默；
+ * 手机超时 120s 自弃，桌面这一轮照常完成（消息已落会话，电脑端可见）。
+ * 会话映射：手机传它保存的桌面 sessionId（不存在则 agentChat 自动新建并回传新 id）。
+ */
+export async function agentChatViaCompanion(req: AgentChatRequest): Promise<AgentChatResult> {
+  const ctrl = new AbortController()
+  return agentChat(req, ctrl.signal, 'companion-' + randomUUID())
+}
+
 export function registerAgentHandlers(): void {
   // 仅向发起窗口推送 agent:step 过程事件（chatId 过滤由渲染层做），复用 activeChats 生命周期。
   // N-3 多对话并行：载荷补 sessionId（渲染层按会话分桶，切回运行中会话即恢复实时流）；

@@ -23,6 +23,7 @@ import { vaultUpsertPhoneNote } from '../kbStore/knowledgeVaultRepo'
 import { getKnowledgeIndex, findKnowledgePage } from '../kbStore/knowledgeIndex'
 import { getCurrentVault } from '../kbStore/vaultContext'
 import { parseMarkdown } from '../kbStore/mdStore'
+import { agentChatViaCompanion } from '../agentService'
 import { broadcastDataChanged } from '../../main/windowBus'
 
 /**
@@ -168,6 +169,18 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
       .map(rowToScheduleItem)
       .filter((x): x is { id: string; updatedAt: string; data: ScheduleItemData } => !!x && Date.parse(x.updatedAt) > sinceMs),
     listTombstonesSince: sinceMs => vaultTombstonesSince(sinceMs),
+    aiChat: async req => {
+      // v1.3 电脑档：完整 agentService（轻问答通道），结果瘦身投影（trace/artifact 不出网）
+      const r = await agentChatViaCompanion({ sessionId: req.sessionId, message: req.message })
+      return {
+        ok: !!r.ok,
+        reply: r.reply,
+        sessionId: r.sessionId ?? req.sessionId,
+        error: r.error,
+        code: r.code,
+        changes: (r.changes ?? []).map(c => ({ tool: c.tool, action: c.action, target: c.target })),
+      }
+    },
     pcName: () => hostname(),
   })
 

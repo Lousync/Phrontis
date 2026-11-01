@@ -65,6 +65,14 @@ export interface CompanionServerDeps {
   listNoteTree(): Array<{ id: string; title: string; path: string; categoryId: string | null; mtimeMs: number; sizeBytes: number }>
   /** v1.2 内容 API：按 id 读正文（服务端解析路径；找不到/不可读返回 null → 404） */
   readNoteContent(id: string): { title: string; updatedAt: string; body: string; truncated?: boolean } | null
+  /**
+   * v1.3 电脑档：对话中继到桌面完整 agentService（生产 = agentChatViaCompanion 的瘦身投影）。
+   * sessionId 空 → 桌面新建会话并在响应回传；业务失败 ok:false 携带 error/code（HTTP 仍 200）。
+   */
+  aiChat(req: { sessionId: string; message: string }): Promise<{
+    ok: boolean; reply?: string; sessionId: string; error?: string; code?: string
+    changes?: Array<{ tool: string; action: string; target: string }>
+  }>
   /** 配对响应里的电脑名 */
   pcName(): string
 }
@@ -322,6 +330,25 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
             cursor: { ledger: now, schedule: now },
           })
         })().catch(() => deny(res, 400, '请求体解析失败'))
+        return
+      }
+
+      // ----- v1.3 电脑档：对话中继到桌面 agentService -----
+      if (method === 'POST' && pathname === '/api/ai/chat') {
+        void (async () => {
+          const body = await readJsonBody(req) as { sessionId?: unknown; message?: unknown }
+          const message = String(body.message ?? '').trim()
+          if (!message) {
+            deny(res, 400, '消息不能为空')
+            return
+          }
+          // 业务失败（无供应商/中断等）以 ok:false + error 返回，HTTP 仍 200 —— 传输失败才 5xx
+          const r = await deps.aiChat({ sessionId: String(body.sessionId ?? ''), message })
+          sendJson(res, 200, r)
+        })().catch(e => {
+          console.error('[companion] ai chat failed', e)
+          deny(res, e instanceof Error && e.message === 'bad json' ? 400 : 500, 'AI 中继失败')
+        })
         return
       }
 

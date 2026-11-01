@@ -92,6 +92,12 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000 } = {}) {
     readNoteContent: (id) => id === 'p-1'
       ? { title: 'AI教学模块笔记', updatedAt: '2026-11-01T00:00:00.000Z', body: '# AI教学模块笔记\n\n正文', truncated: undefined }
       : null,
+    aiChat: async (req) => ({
+      ok: true,
+      reply: '桌面回复：' + req.message,
+      sessionId: req.sessionId || 'new-desktop-session',
+      changes: req.message.includes('记') ? [{ tool: 'builtin.ledger.create', action: '新建流水', target: '午饭' }] : [],
+    }),
     pcName: () => 'TEST-PC',
   })
   await new Promise((res, rej) => { server.once('error', rej); server.listen(0, '127.0.0.1', res) })
@@ -341,6 +347,27 @@ console.log('\n§4d notes 域与内容 API（v1.2：上行 + tree/content）')
   await s.close()
 }
 
+/* ------------------------------------------------------------------ §4e */
+console.log('\n§4e 电脑档 AI 中继（v1.3 /api/ai/chat）')
+{
+  const s = await boot()
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: '测试机' })).json()).deviceToken
+  const auth = { authorization: 'Bearer ' + token }
+  const chat = (body) => s.post('/api/ai/chat', body, auth)
+
+  const bare = await s.post('/api/ai/chat', { message: 'hi' })
+  check('无令牌 401', bare.status === 401)
+  check('空消息 400', (await chat({ message: '  ' })).status === 400)
+  check('缺消息字段 400', (await chat({})).status === 400)
+
+  const r1 = await (await chat({ message: '看看今天日程' })).json()
+  check('首轮返回桌面新会话 id', r1.ok === true && r1.sessionId === 'new-desktop-session' && String(r1.reply).includes('桌面回复'))
+  const r2 = await (await chat({ sessionId: 'sess-1', message: '记一笔午饭' })).json()
+  check('续聊沿用传入 sessionId', r2.sessionId === 'sess-1')
+  check('changes 瘦身投影（tool/action/target）', Array.isArray(r2.changes) && r2.changes[0].action === '新建流水' && r2.changes[0].target === '午饭')
+  await s.close()
+}
+
 /* ------------------------------------------------------------------ §5 */
 console.log('\n§5 CORS（手机 WebView 与本服务不同源）')
 {
@@ -375,6 +402,9 @@ console.log('\n§6 协议文档契约（design.md §2.1 与实现一致）')
   check('§2.1 v1.2 记录 notes 上行域与无条件应用', design.includes('v1.2 笔记') && design.includes('无条件应用'))
   check('§2.1 记录内容 API 端点', design.includes('/api/notes/tree') && design.includes('/api/notes/content'))
   check('§2.1 记录按 id 服务端解析路径', design.includes('按 id 服务端解析路径'))
+  // v1.3 契约
+  check('§2.1 记录 AI 中继端点', design.includes('/api/ai/chat'))
+  check('§2.1 记录电脑档语义（真相源直执行）', design.includes('直接在桌面真相源执行'))
 }
 
 console.log('\n' + (failures === 0 ? 'PASS (' + checks + ' checks)' : 'FAIL (' + failures + '/' + checks + ')'))
