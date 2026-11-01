@@ -2,14 +2,22 @@ import { app, ipcMain } from 'electron'
 import { randomInt } from 'crypto'
 import { hostname } from 'os'
 import { createCompanionServer, type CompanionPairCode } from './server'
-import { DEFAULT_PORT, PAIR_CODE_TTL_MS, buildPairUrl } from './protocol'
+import { DEFAULT_PORT, PAIR_CODE_TTL_MS, buildPairUrl, shouldApplyIncoming, type ScheduleItemData } from './protocol'
 import { generateToken } from '../lanShare/auth'
 import { getLanAddresses } from '../lanShare/server'
 import { toQrDataUrl } from '../lanShare/qr'
 import { loadPairedDevices, savePairedDevices } from './devices'
-import { vaultAccountingSyncUpsert, vaultAccountingTransactionsAll } from '../kbStore/accountingVaultRepo'
+import {
+  vaultAccountingSyncUpsert, vaultAccountingTransactionsAll, vaultAccountingDelete,
+  type TransactionRow,
+} from '../kbStore/accountingVaultRepo'
+import {
+  vaultScheduleSyncUpsert, vaultTodosAll, vaultFindTodo, vaultDeleteTodoCascade,
+  type TodoRow,
+} from '../kbStore/scheduleVaultRepo'
+import { vaultRecordTombstones, vaultTombstonesSince } from '../kbStore/tombstoneVaultRepo'
+import { setVaultDeleteSink } from '../kbStore/deleteSink'
 import { broadcastDataChanged } from '../../main/windowBus'
-import type { TransactionRow } from '../kbStore/accountingVaultRepo'
 
 /**
  * 手机伴侣（工具箱）：局域网常驻同步服务，lanShare 的演化线。
@@ -68,14 +76,63 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
     saveDevices: savePairedDevices,
     getPairCode: () => state.pairCode,
     consumePairCode: () => { state.pairCode = null },
-    applyLedger: item => vaultAccountingSyncUpsert({
-      id: item.id, updatedAt: item.updatedAt,
-      date: item.data.date, time: item.data.time, type: item.data.type, amount: item.data.amount,
-      category: item.data.category, payment: item.data.payment, merchant: item.data.merchant, note: item.data.note,
-    }),
+    applyLedger: item => {
+      const r = vaultAccountingSyncUpsert({
+        id: item.id, updatedAt: item.updatedAt,
+        date: item.data.date, time: item.data.time, type: item.data.type, amount: item.data.amount,
+        category: item.data.category, payment: item.data.payment, merchant: item.data.merchant, note: item.data.note,
+      })
+      // 铁律 1：主进程写盘后必须广播（手机上行改了 vault，桌面账本窗口要刷新）
+      if (r.applied) broadcastDataChanged('accounting')
+      return r
+    },
+    applySchedule: item => {
+      const r = vaultScheduleSyncUpsert({
+        id: item.id, updatedAt: item.updatedAt,
+        date: item.data.date, title: item.data.title, type: item.data.type, time: item.data.time,
+        done: item.data.done, parentId: item.data.parentId,
+        schedStart: item.data.schedStart, schedEnd: item.data.schedEnd,
+      })
+      if (r.applied) broadcastDataChanged('schedule')
+      return r
+    },
+    applyDelete: (domain, id, deletedAt) => {
+      if (domain === 'schedule') {
+        const row = vaultFindTodo(id)
+        if (!row) {
+          // 行不在：可能早已删除。记墓碑幂等收敛（重复上行删除是正常路径）
+          vaultRecordTombstones('schedule', [id], deletedAt)
+          return { applied: true }
+        }
+        if (!shouldApplyIncoming(row.updated_at, deletedAt)) {
+          return { applied: false, conflict: true, reason: 'server-newer' }
+        }
+        vaultDeleteTodoCascade(id) // repo 内部 emit → 记墓碑（含级联子任务）
+        broadcastDataChanged('schedule')
+        return { applied: true }
+      }
+      if (domain === 'ledger') {
+        const row = vaultAccountingTransactionsAll().find(r => r.id === id)
+        if (!row) {
+          vaultRecordTombstones('ledger', [id], deletedAt)
+          return { applied: true }
+        }
+        if (!shouldApplyIncoming(row.updatedAt, deletedAt)) {
+          return { applied: false, conflict: true, reason: 'server-newer' }
+        }
+        vaultAccountingDelete(id)
+        broadcastDataChanged('accounting')
+        return { applied: true }
+      }
+      return { applied: false, reason: 'unsupported-domain' }
+    },
     listLedgerSince: sinceMs => vaultAccountingTransactionsAll()
       .map(rowToLedgerItem)
       .filter((x): x is NonNullable<ReturnType<typeof rowToLedgerItem>> => !!x && Date.parse(x.updatedAt) > sinceMs),
+    listScheduleSince: sinceMs => vaultTodosAll()
+      .map(rowToScheduleItem)
+      .filter((x): x is { id: string; updatedAt: string; data: ScheduleItemData } => !!x && Date.parse(x.updatedAt) > sinceMs),
+    listTombstonesSince: sinceMs => vaultTombstonesSince(sinceMs),
     pcName: () => hostname(),
   })
 
@@ -121,6 +178,31 @@ function rowToLedgerItem(row: TransactionRow): { id: string; updatedAt: string; 
   }
 }
 
+/** TodoRow → 协议 schedule 条目（含子任务行；异常行丢弃不阻断整表 pull） */
+function rowToScheduleItem(row: TodoRow): { id: string; updatedAt: string; data: ScheduleItemData } | null {
+  const date = typeof row.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.date) ? row.date : ''
+  const title = String(row.title ?? '').trim()
+  if (!date || !title) return null
+  const type = row.task_type === 'deadline' || row.task_type === 'daily' ? row.task_type : 'plan'
+  // 桌面行 time 存 'YYYY-MM-DD HH:MM'（deadline）；截回协议口径 'HH:MM'，异常格式视为无
+  const time = typeof row.time === 'string' && /\d{1,2}:\d{2}/.test(row.time) ? row.time.slice(-5) : ''
+  const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  return {
+    id: row.id,
+    updatedAt: String(row.updated_at ?? ''),
+    data: {
+      date,
+      title,
+      type,
+      time,
+      done: row.status === 'done',
+      parentId: row.parent_id ?? null,
+      schedStart: num(row.scheduled_start),
+      schedEnd: num(row.scheduled_end),
+    },
+  }
+}
+
 export async function stop(): Promise<CompanionStatus> {
   state.pairCode = null
   if (state.server) {
@@ -137,6 +219,10 @@ export async function stop(): Promise<CompanionStatus> {
 // ---- IPC ----
 
 export function registerCompanionHandlers(): void {
+  // 墓碑数据源（v1.1）：桌面侧一切 vault 条目删除（界面 / AI / 7 天清理 / 结算撤销）
+  // 统一经 deleteSink 记墓碑 —— 服务开着与否都记（服务关着时删除，下次 pull 手机照样能收到）
+  setVaultDeleteSink((domain, ids) => vaultRecordTombstones(domain, ids, new Date().toISOString()))
+
   ipcMain.handle('companion:start', (_e, opts?: { port?: number }) => start(opts))
   ipcMain.handle('companion:stop', () => stop())
   ipcMain.handle('companion:status', () => status())

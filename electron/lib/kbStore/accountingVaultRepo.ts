@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import { exists, readJson, writeJsonOrThrow } from './jsonStore'
 import { planRecurringSettle, recurringNextDue, monthDue } from '../../../src/lib/accountingPure'
+import { emitVaultDeletes } from './deleteSink'
 
 /**
  * 记账 vault 数据仓库（v3.5.x 新模块）。
@@ -382,6 +383,8 @@ export function vaultAccountingDelete(id: string): boolean {
   const next = rows.filter((r) => r.id !== id)
   if (next.length === rows.length) return false
   vaultAccountingTransactionsSave(next)
+  // v1.1：手机伴侣墓碑数据源（删除已生效，墓碑缺失的最坏后果是手机滞留该条）
+  emitVaultDeletes('ledger', [id])
   return true
 }
 

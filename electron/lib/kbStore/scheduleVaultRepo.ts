@@ -2,6 +2,8 @@ import { exists, readJson, writeJsonOrThrow } from './jsonStore'
 import { randomUUID } from 'crypto'
 import { planScheduleRecurringSettle, endOfWeek, addDaysTo, type ScheduleRecurring } from '../../../src/lib/scheduleRecurringPure'
 import { vaultDeleteWorkflowsByTask } from './scheduleWorkflowVaultRepo'
+import { emitVaultDeletes } from './deleteSink'
+import { vaultTombstoneFor } from './tombstoneVaultRepo'
 
 /**
  * 日程 vault 数据仓库（去库化 P2）：storageData=vault 时日程的真相源。
@@ -234,9 +236,17 @@ export function vaultFindTodo(id: string): TodoRow | null {
 export function vaultPurgeStaleDoneTodos(): number {
   const cutoff = sqliteUtcMinusDays(7)
   const rows = vaultTodosAll()
-  const kept = rows.filter((r) => !(r.status === 'done' && !isNull(r.updated_at) && str(r.updated_at) < cutoff))
+  const removedIds: string[] = []
+  const kept = rows.filter((r) => {
+    if (r.status === 'done' && !isNull(r.updated_at) && str(r.updated_at) < cutoff) {
+      removedIds.push(r.id)
+      return false
+    }
+    return true
+  })
   if (kept.length === rows.length) return 0
   vaultTodosSave(kept)
+  if (removedIds.length > 0) emitVaultDeletes('schedule', removedIds)
   return rows.length - kept.length
 }
 
@@ -304,10 +314,14 @@ export function vaultUpdateTodo(id: string, patch: Record<string, unknown>, upda
 
 /**
  * DELETE FROM schedule_todos WHERE parent_id = ? ; DELETE FROM schedule_todos WHERE id = ?
- * 删除待办并级联删除子任务（NULL parent_id 不会被误删）
+ * 删除待办并级联删除子任务（NULL parent_id 不会被误删）。
+ * v1.1：被删的每一条（含子任务）都发 deleteSink —— 手机伴侣据此记墓碑下行。
  */
 export function vaultDeleteTodoCascade(id: string): void {
-  vaultTodosSave(vaultTodosAll().filter((r) => r.id !== id && r.parent_id !== id))
+  const rows = vaultTodosAll()
+  const removedIds = rows.filter((r) => r.id === id || r.parent_id === id).map((r) => r.id)
+  vaultTodosSave(rows.filter((r) => r.id !== id && r.parent_id !== id))
+  if (removedIds.length > 0) emitVaultDeletes('schedule', removedIds)
   vaultDeleteWorkflowsByTask(id)
 }
 
@@ -508,7 +522,7 @@ export function vaultScheduleSettleRecurring(today = todayLocal(), horizon?: str
   return { added: added.length, items, restore }
 }
 
-/** 撤销一次结算：删掉刚生成的待办 + 把规则 lastPostedDate 还原 */
+/** 撤销一次结算：删掉刚生成的待办 + 把规则 lastPostedDate 还原（v1.1：删除条目发 deleteSink 记墓碑） */
 export function vaultScheduleUndoSettleRecurring(
   todoIds: string[],
   restore: Array<{ ruleId: string; lastPostedDate: string }>,
@@ -517,11 +531,75 @@ export function vaultScheduleUndoSettleRecurring(
   const todos = vaultTodosAll()
   const kept = todos.filter((t) => !ids.has(t.id))
   const removed = todos.length - kept.length
-  if (removed > 0) vaultTodosSave(kept)
+  if (removed > 0) {
+    vaultTodosSave(kept)
+    emitVaultDeletes('schedule', todoIds.filter((id) => ids.has(id)))
+  }
   if (restore.length > 0) {
     const map = new Map(restore.map((x) => [x.ruleId, x.lastPostedDate]))
     const now = new Date().toISOString()
     saveRecurring(vaultScheduleRecurringAll().map((r) => (map.has(r.id) ? { ...r, lastPostedDate: map.get(r.id)!, updatedAt: now } : r)))
   }
   return removed
+}
+
+// ===== 手机伴侣同步 upsert（v1.1） =====
+
+/** 手机上行日程条目 → TodoRow 的保 id LWW upsert。负载字段见 protocol.ScheduleItemData；
+ *  description/quadrant/tag/sort_order/recurring/snooze/estimate/created_at 不在负载里，更新时原样保留。 */
+export interface ScheduleSyncUpsertInput {
+  id: string
+  updatedAt: string
+  date: string
+  title: string
+  type: 'plan' | 'deadline' | 'daily'
+  /** 'HH:MM' 或 ''（桌面行存 'YYYY-MM-DD HH:MM'，此处组合） */
+  time: string
+  done: boolean
+  parentId: string | null
+  schedStart: number | null
+  schedEnd: number | null
+}
+
+export interface ScheduleSyncUpsertResult {
+  applied: boolean
+  conflict?: boolean
+  /** server-newer | tombstoned */
+  reason?: string
+}
+
+export function vaultScheduleSyncUpsert(input: ScheduleSyncUpsertInput): ScheduleSyncUpsertResult {
+  // 墓碑阻挡：该 id 已被删除且墓碑不早于上行更新 → 拒绝复活
+  const ts = vaultTombstoneFor('schedule', input.id)
+  if (ts && String(ts.deletedAt) >= String(input.updatedAt)) return { applied: false, reason: 'tombstoned' }
+
+  const rows = vaultTodosAll()
+  const i = rows.findIndex((r) => r.id === input.id)
+  const time = input.time ? `${input.date} ${input.time}` : null
+  const status = input.done ? 'done' : 'pending'
+  if (i < 0) {
+    // 新增（父任务可能在本批另一条变更里，先后无关；无外键约束）
+    const row: TodoRow = {
+      id: input.id, title: input.title, description: '', date: input.date,
+      time, quadrant: 1, task_type: input.type, tag_id: null, status,
+      sort_order: 0, end_criteria: '', parent_id: input.parentId,
+      scheduled_start: input.schedStart, scheduled_end: input.schedEnd, snooze_until: null,
+      created_at: input.updatedAt, updated_at: input.updatedAt,
+    }
+    vaultTodosSave([...rows, row])
+    return { applied: true }
+  }
+  // LWW：updatedAt 新的赢；相同 → 桌面赢（conflict，手机以服务端版本回写收敛）
+  if (String(rows[i].updated_at) >= String(input.updatedAt)) {
+    return { applied: false, conflict: true, reason: 'server-newer' }
+  }
+  rows[i] = {
+    ...rows[i],
+    title: input.title, date: input.date, time, task_type: input.type, status,
+    parent_id: input.parentId,
+    scheduled_start: input.schedStart, scheduled_end: input.schedEnd,
+    updated_at: input.updatedAt,
+  }
+  vaultTodosSave(rows)
+  return { applied: true }
 }

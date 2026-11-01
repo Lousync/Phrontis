@@ -2,8 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from 'crypto'
 import {
   MAX_BODY_BYTES, PAIR_ATTEMPTS_PER_MIN, PAIR_CODE_TTL_MS, PROTOCOL_VERSION, SYNC_DOMAINS,
-  normalizeLedgerData,
-  type LedgerItemData,
+  normalizeLedgerData, normalizeScheduleData, isTombstoneData,
+  type LedgerItemData, type ScheduleItemData, type SyncDomain,
 } from './protocol.ts'
 import { isPrivateAddress, generateToken, tokenMatches } from '../lanShare/auth.ts'
 
@@ -45,9 +45,21 @@ export interface CompanionServerDeps {
   getPairCode(): CompanionPairCode | null
   consumePairCode(): void
   /** ledger 域写入（生产 = vaultAccountingSyncUpsert；已含 LWW，返回 conflict 即服务端更新） */
-  applyLedger(item: { id: string; updatedAt: string; data: LedgerItemData }): { applied: boolean; conflict?: boolean }
+  applyLedger(item: { id: string; updatedAt: string; data: LedgerItemData }): { applied: boolean; conflict?: boolean; reason?: string }
+  /** schedule 域写入（生产 = vaultScheduleSyncUpsert；同一条 LWW 时线） */
+  applySchedule(item: { id: string; updatedAt: string; data: ScheduleItemData }): { applied: boolean; conflict?: boolean; reason?: string }
+  /**
+   * 删除同步（v1.1 墓碑）：手机上行 `data:{deleted:true}` 的变更。
+   * 生产 = 查现行行做 LWW（删除比行 updatedAt 旧 → conflict 拒删）→ 删行（repo 内部 emit 墓碑）
+   * → 无行时直接记墓碑（幂等）。
+   */
+  applyDelete(domain: SyncDomain, id: string, deletedAt: string): { applied: boolean; conflict?: boolean; reason?: string }
   /** ledger 域读取：updatedAt > sinceMs 的条目 */
   listLedgerSince(sinceMs: number): Array<{ id: string; updatedAt: string; data: LedgerItemData }>
+  /** schedule 域读取：updatedAt > sinceMs 的条目（含子任务行） */
+  listScheduleSince(sinceMs: number): Array<{ id: string; updatedAt: string; data: ScheduleItemData }>
+  /** 全域墓碑：deletedAt > sinceMs（手机按 domain 分派 + 幂等应用） */
+  listTombstonesSince(sinceMs: number): Array<{ domain: string; id: string; deletedAt: string }>
   /** 配对响应里的电脑名 */
   pcName(): string
 }
@@ -219,21 +231,35 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
           const results = changes.map(raw => {
             const c = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
             const id = String(c.id ?? '')
-            const domain = String(c.domain ?? '')
+            const domain = String(c.domain ?? '') as SyncDomain
             const updatedAt = String(c.updatedAt ?? '')
             if (!id || !updatedAt) return { id, applied: false, reason: 'invalid-change' }
             if (!(SYNC_DOMAINS as readonly string[]).includes(domain)) {
               return { id, applied: false, reason: 'unsupported-domain' }
             }
-            const data = normalizeLedgerData(c.data)
-            if (!data) return { id, applied: false, reason: 'invalid-data' }
-            try {
-              const r = deps.applyLedger({ id, updatedAt, data })
-              return r.applied
+            /** applied→ok；conflict→手机以服务端版本回写收敛；其余 reason 原样带回 */
+            const toResult = (r: { applied: boolean; conflict?: boolean; reason?: string }) =>
+              r.applied
                 ? { id, applied: true }
-                : { id, applied: false, conflict: true, reason: r.conflict ? 'server-newer' : 'skipped' }
+                : { id, applied: false, ...(r.conflict ? { conflict: true } : {}), ...(r.reason ? { reason: r.reason } : {}) }
+            try {
+              // 墓碑（删除）优先判定：data = { deleted: true }
+              if (isTombstoneData(c.data)) {
+                return toResult(deps.applyDelete(domain, id, updatedAt))
+              }
+              if (domain === 'ledger') {
+                const data = normalizeLedgerData(c.data)
+                if (!data) return { id, applied: false, reason: 'invalid-data' }
+                return toResult(deps.applyLedger({ id, updatedAt, data }))
+              }
+              if (domain === 'schedule') {
+                const data = normalizeScheduleData(c.data)
+                if (!data) return { id, applied: false, reason: 'invalid-data' }
+                return toResult(deps.applySchedule({ id, updatedAt, data }))
+              }
+              return { id, applied: false, reason: 'unsupported-domain' }
             } catch (e) {
-              console.error('[companion] applyLedger failed', e)
+              console.error('[companion] apply change failed', e)
               return { id, applied: false, reason: 'apply-error' }
             }
           })
@@ -250,10 +276,24 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
           const body = await readJsonBody(req) as { since?: Record<string, unknown> }
           const since = body.since && typeof body.since === 'object' ? body.since : {}
           const sinceLedger = Number(since.ledger ?? 0)
+          const sinceSchedule = Number(since.schedule ?? 0)
+          const valid = (n: number): boolean => Number.isFinite(n)
+          // 墓碑游标 = 各域游标取最小（手机对收到的墓碑按 id 幂等应用，多收无害、少收有害）
+          const sinceTs = Math.min(
+            valid(sinceLedger) ? sinceLedger : 0,
+            valid(sinceSchedule) ? sinceSchedule : 0,
+          )
+          const now = Date.now()
           const changes: Record<string, unknown> = {
-            ledger: Number.isFinite(sinceLedger) ? deps.listLedgerSince(sinceLedger) : [],
+            ledger: valid(sinceLedger) ? deps.listLedgerSince(sinceLedger) : [],
+            schedule: valid(sinceSchedule) ? deps.listScheduleSince(sinceSchedule) : [],
           }
-          sendJson(res, 200, { ok: true, changes, cursor: { ledger: Date.now() } })
+          sendJson(res, 200, {
+            ok: true,
+            changes,
+            tombstones: deps.listTombstonesSince(sinceTs),
+            cursor: { ledger: now, schedule: now },
+          })
         })().catch(() => deny(res, 400, '请求体解析失败'))
         return
       }

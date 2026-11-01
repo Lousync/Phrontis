@@ -15,8 +15,8 @@ export const PAIR_ATTEMPTS_PER_MIN = 10
 /** 请求体上限（push 批量 + 余量） */
 export const MAX_BODY_BYTES = 2 * 1024 * 1024
 
-/** v1 同步域清单；schedule / notes 随 M2 / M3 追加，端点结构不变 */
-export const SYNC_DOMAINS = ['ledger'] as const
+/** 同步域清单（v1.1 起 ledger + schedule；notes 随 M3 追加，端点结构不变） */
+export const SYNC_DOMAINS = ['ledger', 'schedule'] as const
 export type SyncDomain = (typeof SYNC_DOMAINS)[number]
 
 /** 手机上行的一条变更（push changes[] 的元素） */
@@ -53,6 +53,63 @@ export interface LedgerItemData {
 /** 合并裁决（纯函数）：incoming 是否应当应用。updatedAt 新的赢；相同 → 桌面赢 */
 export function shouldApplyIncoming(localUpdatedAt: string, incomingUpdatedAt: string): boolean {
   return String(incomingUpdatedAt) > String(localUpdatedAt)
+}
+
+/* ================= v1.1：schedule 域 + 墓碑 ================= */
+
+/**
+ * schedule 条目负载（桌面 TodoRow 的同步子集；子任务行同样按条目同步，parentId 指向父条目 UUID）。
+ * 桌面行独有字段（description、quadrant、tag、sort_order、recurring 系列、snooze_until、
+ * estimate_min、created_at）不在负载里，upsert 时原样保留 —— 口径见 design.md §2.1。
+ */
+export interface ScheduleItemData {
+  /** YYYY-MM-DD */
+  date: string
+  title: string
+  type: 'plan' | 'deadline' | 'daily'
+  /** 'HH:MM'（deadline 截止时刻；桌面行存 'YYYY-MM-DD HH:MM'，pull 截回 'HH:MM'）；'' = 无 */
+  time: string
+  /** ↔ 桌面 status pending/done */
+  done: boolean
+  /** 父条目 UUID；null = 顶层 */
+  parentId: string | null
+  /** 当天分钟数 ↔ scheduled_start/end；null = 未排期 */
+  schedStart: number | null
+  schedEnd: number | null
+}
+
+/** schedule 负载校验与规范化：非法返回 null（响应 reason: invalid-data） */
+export function normalizeScheduleData(raw: unknown): ScheduleItemData | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const type = o.type === 'plan' || o.type === 'deadline' || o.type === 'daily' ? o.type : ''
+  if (!type) return null
+  const date = typeof o.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.date) ? o.date : ''
+  const title = typeof o.title === 'string' ? o.title.trim().slice(0, 120) : ''
+  if (!date || !title) return null
+  const time = typeof o.time === 'string' && /^\d{1,2}:\d{2}/.test(o.time) ? o.time.slice(0, 5) : ''
+  const min = (v: unknown): number | null => {
+    if (v === null || v === undefined || v === '') return null
+    const n = Math.round(Number(v))
+    return Number.isFinite(n) && n >= 0 && n <= 1440 ? n : null
+  }
+  const parent = typeof o.parentId === 'string' && o.parentId.trim() ? o.parentId.trim() : null
+  return {
+    date, title, type, time,
+    done: o.done === true,
+    parentId: parent,
+    schedStart: min(o.schedStart),
+    schedEnd: min(o.schedEnd),
+  }
+}
+
+/** 删除同步（墓碑）上行负载：`{ deleted: true }`（domain/id/updatedAt 照常，updatedAt = 删除时刻） */
+export interface TombstoneData {
+  deleted: true
+}
+
+export function isTombstoneData(data: unknown): data is TombstoneData {
+  return !!data && typeof data === 'object' && !Array.isArray(data) && (data as Record<string, unknown>).deleted === true
 }
 
 /** ledger 负载校验与规范化：非法返回 null（响应 reason: invalid-data） */
