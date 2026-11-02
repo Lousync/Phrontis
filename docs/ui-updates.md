@@ -2510,10 +2510,12 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **改动点**：
 - AI 助手输入卡接共享 `useSlashMenu` + `SlashCommandMenu`（指令 + Skill），补 Skill chip、压缩占位行、发送按钮禁用、IME 守卫；`useAssistantChat.send` 增加压缩闸门（三宿主共用）。
 - 工件栏页签条复用 `useStripScroll` / `StripEdges`（滚轮横滚 / 渐隐 / 激活归位），⤢ 移出滚动容器；页签加 `data-wb-active`。
+- 工件栏 P1：「全部页签」下拉（当前项对勾 / 单条关闭 / 底部全部关闭）、页签右键菜单（关闭 / 关闭其他 / 关闭右侧 / 全部关闭）、溢出 `+N` 计数、窄分栏页签宽度三档自适应；`closeArtTab` 同步回填 ref 以支持批量关闭。
 - `VaultTree` 的 `draggable` 从整行收窄到行首图标把手（文件 / 文件夹），拖动中源行 `opacity-40`；AI 教学 / 工作台 / 笔记区三处同时生效。
 - AI 教学资源管理器接入 `recordFileOp`（移动 / 重命名 / 新建），监听 `kb-fs-op-changed` 即时重扫；成功 toast 补「Ctrl+Z 可撤回」。
-- 帮助手册：文件树拖拽改为「拖行首图标」；`Ctrl+Z` 条目去掉「删除」并注明 AI 教学新建可撤回。
+- 工作台文件树与知识库侧栏的新建（文件 / 文件夹 / 知识页）也记入撤销栈，路径取主进程返回的 `relPath`；分类目录因同时改 `categories.json` 不入栈。
+- 帮助手册：文件树拖拽改为「拖行首图标」；`Ctrl+Z` 覆盖「重命名 / 移动 / 新建」，删除走系统回收站不在此列；AI 教学课程模式补工件页签说明。
 
-**验收**：双 tsc 0 错；`npm run build` 通过；`verify-assistant-composer` 32、`verify-tree-drag-handle` 15、`verify-artifact-tabs` 12、`verify-renderer-crash-guard` 12、`verify-teach-tree-inline` 31、`verify-strip-overflow` 31、`verify-workbench-shell` 264 项全绿；`verify-help-retrieval` 171/171。
+**验收**：双 tsc 0 错；`npm run build` 通过；`verify-assistant-composer` 32、`verify-tree-drag-handle` 15、`verify-artifact-tabs` 27、`verify-renderer-crash-guard` 12、`verify-teach-tree-inline` 31、`verify-strip-overflow` 31、`verify-workbench-shell` 266 项全绿；`verify-help-retrieval` 171/171。
 
-**未做**：工件栏「全部页签」下拉 / 右键菜单 / 溢出计数；工作台与笔记区的新建操作仍不入撤销栈；渲染进程原生内存泄漏定位（F-1 只落了崩溃兜底）。
+**未做**：渲染进程原生内存泄漏定位（F-1 只落了崩溃兜底与取证基建）。

@@ -1104,14 +1104,22 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
         const mdRel = dirRel ? `${dirRel}/${mdName}` : mdName
         const base = mdName.replace(/\.[^.]+$/, '')
         const id = crypto.randomUUID()
-        await workspaceCreateFile(root, mdRel, `---\nid: ${id}\ntitle: ${base}\n---\n\n`)
+        const r = await workspaceCreateFile(root, mdRel, `---\nid: ${id}\ntitle: ${base}\n---\n\n`)
+        if (r?.ok === false) { showToast({ type: 'error', message: r.error || '创建失败' }); return }
+        // 新建入撤销栈（v3.16.1 F-5 P2）：路径以主进程返回值为准（重名自动加 (1) 后缀）
+        const createdRel = r?.relPath ?? mdRel
+        recordFileOp({ kind: 'create', rootId: root, relPath: createdRel, isDir: false, name: createdRel.split('/').pop() ?? mdName })
         void refreshTreeDir(dirRel)
         void refreshAllPages()
+        showToast({ type: 'info', message: `已创建 ${mdName} · Ctrl+Z 可撤回` })
         setTimeout(() => { void handleOpenPage(id, { title: base, fileType: 'md' }) }, 400)
         return
       }
-      if (type === 'dir') await workspaceMkdir(root, rel)
-      else await workspaceCreateFile(root, rel)
+      const r = type === 'dir' ? await workspaceMkdir(root, rel) : await workspaceCreateFile(root, rel)
+      if (r?.ok === false) { showToast({ type: 'error', message: r.error || '创建失败' }); return }
+      const createdRel = r?.relPath ?? rel
+      recordFileOp({ kind: 'create', rootId: root, relPath: createdRel, isDir: type === 'dir', name: createdRel.split('/').pop() ?? name })
+      showToast({ type: 'info', message: `已创建 ${createdRel.split('/').pop() ?? name} · Ctrl+Z 可撤回` })
       void refreshTreeDir(dirRel)
       // 新建的 md 若未被索引收录（无 id 草稿），点开走编辑器兜底；有 id 由刷新后的索引接管
       void refreshAllPages()

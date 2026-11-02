@@ -448,7 +448,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     const i = prev.findIndex(t => t.id === id)
     if (i < 0 || prev[i].generating) return
     const next = prev[i + 1] ?? prev[i - 1] ?? null
-    setArtTabs(prev.filter(t => t.id !== id))
+    // 同步回填 ref（v3.16.1 F-3 P1）：批量关闭（关闭其他 / 关闭右侧 / 全部关闭）会在
+    // 同一 tick 连续调用本函数；只靠 effect 回填时后一次仍读到旧数组，setState 互相覆盖，
+    // 表象是「点了全部关闭只关掉一个」。effect 随后会写回同一数组，无副作用。
+    const nextTabs = prev.filter(t => t.id !== id)
+    artTabsRef.current = nextTabs
+    setArtTabs(nextTabs)
     setArtActive(cur => (cur === id ? next?.id ?? null : cur))
   }, [])
   /** 统一打开入口：pptx→逐页页签；html→沙箱预览页签；其余按 md 阅读页签 */

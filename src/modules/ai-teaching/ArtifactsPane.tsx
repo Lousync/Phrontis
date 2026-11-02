@@ -1,11 +1,14 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame, Network } from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame, Network, Layers, Check } from 'lucide-react'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { QuizRecordContext, useQuizRecordStore } from '../../components/shared/QuizRecordStore'
 import { MindMapView } from '../../components/shared/MindMapView'
 import { ImmersiveImageView } from '../../components/shared/image/ImmersiveImageView'
 import { ArtHtmlView } from './ArtHtmlView'
 import { useStripScroll, StripEdges } from '../../components/workbench/useStripScroll'
+import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
+import { FileContextMenu, type FileMenuEntry } from '../../components/shared/FileContextMenu'
 import type { ArtTab } from './artifacts'
 
 /**
@@ -35,6 +38,69 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
   const tab = tabs.find(t => t.id === activeId) ?? null
   /** 页签条横向溢出（v3.16.1 F-3）：复用页面条基建 —— 滚轮横滚 + 激活归位 + 边沿渐隐 */
   const strip = useStripScroll(`${activeId ?? ''}|${tabs.length}`)
+  // ---- F-3 P1：全部页签下拉 / 页签右键菜单 / 溢出计数 / 窄分栏宽度自适应 ----
+  const stripRef = useRef<HTMLDivElement | null>(null)
+  /** 同时喂给 useStripScroll 与自己（计数要量每个页签的矩形）；setNode 是稳定 setState */
+  const setStripNode = useCallback((node: HTMLDivElement | null) => {
+    stripRef.current = node
+    strip.setNode(node)
+  }, [strip.setNode])
+  /** 完全滚出可视区的页签数（溢出提示用，滚动 / 尺寸 / 增删都重算） */
+  const [hiddenTabs, setHiddenTabs] = useState(0)
+  const allTabsBtnRef = useRef<HTMLButtonElement | null>(null)
+  const allTabsMenuRef = useRef<HTMLDivElement | null>(null)
+  const allTabsMenu = useAnchoredMenu(allTabsBtnRef, allTabsMenuRef, 248)
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+
+  useEffect(() => {
+    const el = stripRef.current
+    if (!el) return
+    const sync = () => {
+      const cr = el.getBoundingClientRect()
+      let n = 0
+      for (const child of Array.from(el.children) as HTMLElement[]) {
+        const r = child.getBoundingClientRect()
+        if (r.width > 0 && (r.left < cr.left - 1 || r.right > cr.right + 1)) n++
+      }
+      setHiddenTabs(prev => (prev === n ? prev : n))
+    }
+    sync()
+    el.addEventListener('scroll', sync, { passive: true })
+    window.addEventListener('resize', sync)
+    const ro = new ResizeObserver(sync)
+    ro.observe(el)
+    const mo = new MutationObserver(sync)
+    mo.observe(el, { childList: true })
+    return () => {
+      el.removeEventListener('scroll', sync)
+      window.removeEventListener('resize', sync)
+      ro.disconnect()
+      mo.disconnect()
+    }
+  }, [tabs.length, widthPx])
+
+  /** 窄分栏下页签收窄，避免两三个页签就吃掉整条（原来恒定 170px 上限） */
+  const tabMaxWidth = widthPx < 300 ? 96 : widthPx < 420 ? 132 : 170
+
+  /** 右键菜单项：关闭 / 关闭其他 / 关闭右侧 / 全部关闭（生成中的页签一律跳过） */
+  const tabMenuItems = useMemo<FileMenuEntry[]>(() => {
+    if (!tabMenu) return []
+    const idx = tabs.findIndex(t => t.id === tabMenu.id)
+    const cur = tabs[idx]
+    if (!cur) return []
+    const canClose = (t: ArtTab) => !t.generating
+    const others = tabs.filter(t => t.id !== cur.id && canClose(t))
+    const right = tabs.slice(idx + 1).filter(canClose)
+    const all = tabs.filter(canClose)
+    const closeMany = (list: ArtTab[]) => { list.forEach(t => onClose(t.id)); setTabMenu(null) }
+    return [
+      { key: 'close', label: '关闭', icon: <X size={14} />, disabled: !canClose(cur), onSelect: () => closeMany([cur]) },
+      { separator: true },
+      { key: 'others', label: others.length ? `关闭其他（${others.length}）` : '关闭其他', disabled: others.length === 0, onSelect: () => closeMany(others) },
+      { key: 'right', label: right.length ? `关闭右侧（${right.length}）` : '关闭右侧', disabled: right.length === 0, onSelect: () => closeMany(right) },
+      { key: 'all', label: all.length ? `全部关闭（${all.length}）` : '全部关闭', danger: true, disabled: all.length === 0, onSelect: () => closeMany(all) },
+    ]
+  }, [tabMenu, tabs, onClose])
   // 工件栏里的题单也要能保存答题痕迹：只有 relPath，store 会反查 pageId（可能是 auto:）
   const quizStore = useQuizRecordStore({
     pageId: '',
@@ -92,13 +158,15 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
           F-3：滚动区与固定动作（⤢）拆开 —— 否则页签一多，全屏按钮会跟着内容滚出视野。 */}
       <div className="shrink-0 flex items-center gap-0.5 px-2 pt-1.5 pb-0 select-none">
         <div className="relative flex min-w-0 flex-1 items-center">
-          <div ref={strip.setNode} className="kb-edge-strip flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+          <div ref={setStripNode} className="kb-edge-strip flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
             {tabs.map(t => (
               <div key={t.id} onClick={() => onActivate(t.id)}
                 data-wb-active={t.id === activeId ? '1' : '0'}
                 onMouseDown={e => { if (e.button === 1 && !t.generating) { e.preventDefault(); onClose(t.id) } }}
+                onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setTabMenu({ x: e.clientX, y: e.clientY, id: t.id }) }}
                 title={`${t.generating ? '生成中…' : t.name}${t.rel ? `\n${t.rel}` : ''}`}
-                className={`group shrink-0 flex items-center gap-1 px-2 py-1 rounded-t-lg border border-b-0 text-[11.5px] cursor-pointer whitespace-nowrap max-w-[170px] transition-colors ${
+                style={{ maxWidth: tabMaxWidth }}
+                className={`group shrink-0 flex items-center gap-1 px-2 py-1 rounded-t-lg border border-b-0 text-[11.5px] cursor-pointer whitespace-nowrap transition-colors ${
                   t.id === activeId ? 'bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] font-medium' : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>
                 {iconOf(t)}
                 <span className="truncate">{t.generating ? '生成中…' : t.name}</span>
@@ -111,6 +179,23 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
           </div>
           <StripEdges edges={strip.edges} />
         </div>
+        {/* 全部页签下拉（F-3 P1）：被裁掉的页签不必靠横滚找；有溢出时按钮上直接显示未显示数量 */}
+        <button
+          ref={allTabsBtnRef}
+          type="button"
+          onClick={allTabsMenu.toggle}
+          aria-expanded={allTabsMenu.open}
+          title={`全部页签（共 ${tabs.length} 个${hiddenTabs > 0 ? `，${hiddenTabs} 个未显示` : ''}）`}
+          className={`shrink-0 flex h-[22px] items-center gap-1 rounded-md px-1.5 text-[10.5px] tabular-nums transition-colors ${
+            allTabsMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+          }`}
+        >
+          <Layers size={11} />
+          <span>{tabs.length}</span>
+          {hiddenTabs > 0 && (
+            <span className="rounded-full bg-[var(--accent)] px-1 text-[9px] leading-[13px] text-white">+{hiddenTabs}</span>
+          )}
+        </button>
         {/* 原位放大阅读切换（页签行右端，仿编辑器全屏）：占满内容区而非弹窗；Esc 同退出。
             F-3：按钮固定在滚动容器**外**，页签再多也始终可见。 */}
         {tab && !tab.generating && tab.rel && (
@@ -120,6 +205,51 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
           </button>
         )}
       </div>
+      {/* 全部页签下拉（F-3 P1）：被裁掉的页签不必靠横滚找；有溢出时按钮上直接显示未显示数量 */}
+      {allTabsMenu.open && allTabsMenu.pos && createPortal(
+        <div
+          ref={allTabsMenuRef}
+          style={allTabsMenu.pos}
+          className="kb-pop fixed z-50 w-[248px] rounded-xl border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-xl overflow-hidden select-none"
+        >
+          <div className="px-3 py-1.5 text-[10.5px] text-[var(--text-muted)] bg-[var(--bg-secondary)] border-b border-[var(--border-color)]">
+            全部页签 · {tabs.length}
+          </div>
+          <div className="max-h-[320px] overflow-y-auto py-1">
+            {tabs.map(t => (
+              <div
+                key={t.id}
+                onClick={() => { onActivate(t.id); allTabsMenu.close() }}
+                className={`group flex items-center gap-2 px-3 py-1.5 text-[12px] cursor-pointer transition-colors ${
+                  t.id === activeId ? 'bg-[var(--bg-selected)]/60 text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                {iconOf(t)}
+                <span className="flex-1 min-w-0 truncate" title={t.rel || t.name}>{t.generating ? '生成中…' : t.name}</span>
+                {t.id === activeId && <Check size={10} className="shrink-0 text-[var(--accent)]" />}
+                {!t.generating && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onClose(t.id) }}
+                    title="关闭页签"
+                    className="shrink-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                  ><X size={10} /></button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-end gap-1 border-t border-[var(--border-color)] px-2 py-1.5">
+            <button
+              type="button"
+              onClick={() => { tabs.forEach(t => { if (!t.generating) onClose(t.id) }); allTabsMenu.close() }}
+              disabled={!tabs.some(t => !t.generating)}
+              className="px-2 py-0.5 rounded-md text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-30 transition-colors"
+            >全部关闭</button>
+          </div>
+        </div>, document.body)}
+      {/* 页签右键菜单（F-3 P1）：关闭 / 关闭其他 / 关闭右侧 / 全部关闭（生成中的跳过） */}
+      {tabMenu && (
+        <FileContextMenu x={tabMenu.x} y={tabMenu.y} items={tabMenuItems} onClose={() => setTabMenu(null)} />
+      )}
       {/* 工具条：落盘路径 + ↗编辑 + ⟳ + ✕关闭（§2） */}
       {tab && (
         <div className="shrink-0 flex items-center gap-2 px-2.5 py-1 bg-[var(--bg-primary)] border-b border-[var(--border-color)] text-[10.5px] select-none min-w-0">

@@ -751,11 +751,15 @@ for (const [label, re] of [
   ['系统打开 / 资源管理器定位', /workspaceOpenInSystem\(root, rel, reveal\)/],
   ['粘贴系统剪贴板（B-31 重做后：走 externalFilePaste 一条链路）', /pasteClipboardFiles\(root, dirRel\)/],
   ['拖拽移动', /const doMove = useCallback/],
-  ['撤销栈登记', /recordFileOp\(\{ kind: 'move'/],
+  ['撤销栈登记（移动 / 重命名）', /recordFileOp\(\{ kind: 'move'/],
+  ['撤销栈登记（新建，F-5 P2）', /recordFileOp\(\{ kind: 'create'/],
 ]) ok(re.test(srcTree), `N4 操作接线：${label}`)
-// 知识页落盘即开（方案 §2.1 表：「落盘即刻打开」）
-ok(/void loadDir\(dirRel\)[\s\S]{0,80}onOpenFile\(mdRel\)/.test(srcTree),
+// 知识页落盘即开（方案 §2.1 表：「落盘即刻打开」）；F-5 P2 起打开的是主进程返回的实际路径
+ok(/void loadDir\(dirRel\)[\s\S]{0,80}onOpenFile\((?:mdRel|createdRel)\)/.test(srcTree),
   'N5 新建知识页 = 补 .md + frontmatter id 模板 → 落盘后立刻打开（即开即编辑）')
+// 知识库侧新建同样入撤销栈（F-5 P2）：此前只有移动 / 重命名有，新建按 Ctrl+Z 无反应
+ok(/recordFileOp\(\{ kind: 'create', rootId: root, relPath: createdRel/.test(srcKnowledgeTree),
+  'N8 知识库新建文件 / 目录 / 知识页入跨模块撤销栈（路径取主进程返回值）')
 // 分类目录删除分流（否则 categories.json 留脏条目）
 ok(/getKnowledgeCategories\(\)[\s\S]{0,300}c\.path === node\.relPath/.test(srcTree)
   && /if \(catId\) await deleteKnowledgeCategory\(catId\)/.test(srcTree),

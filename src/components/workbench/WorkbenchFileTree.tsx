@@ -190,15 +190,21 @@ function WorkbenchFileTreeImpl({ onOpenFile, focusOn = false, onFocusExit, sort,
         const id = crypto.randomUUID()
         const r = await workspaceCreateFile(root, mdRel, `---\nid: ${id}\ntitle: ${base}\n---\n\n`)
         if (!r.ok) { showToast({ type: 'error', message: r.error || '创建失败' }); return }
-        showToast({ type: 'info', message: `已创建 ${mdName}` })
+        // 新建入撤销栈（v3.16.1 F-5 P2）：与移动 / 重命名同一份栈，Ctrl+Z 撤回 = 移入系统回收站。
+        // 路径以主进程返回值为准（重名会自动加 (1) 后缀，用请求路径会撤错文件）。
+        const createdRel = r.relPath ?? mdRel
+        recordFileOp({ kind: 'create', rootId: root, relPath: createdRel, isDir: false, name: createdRel.split('/').pop() ?? mdName })
+        showToast({ type: 'info', message: `已创建 ${mdName} · Ctrl+Z 可撤回` })
         void loadDir(dirRel)
-        onOpenFile(mdRel)
+        onOpenFile(createdRel)
         return
       }
       const rel = dirRel ? `${dirRel}/${name}` : name
       const r = type === 'dir' ? await workspaceMkdir(root, rel) : await workspaceCreateFile(root, rel)
       if (!r.ok) { showToast({ type: 'error', message: r.error || '创建失败' }); return }
-      showToast({ type: 'info', message: `已创建 ${r.relPath?.split('/').pop() ?? name}` })
+      const createdRel = r.relPath ?? rel
+      recordFileOp({ kind: 'create', rootId: root, relPath: createdRel, isDir: type === 'dir', name: createdRel.split('/').pop() ?? name })
+      showToast({ type: 'info', message: `已创建 ${createdRel.split('/').pop() ?? name} · Ctrl+Z 可撤回` })
       void loadDir(dirRel)
       // 新建的 md 也直接打开（.type === 'file'）
       if (type === 'file' && r.relPath) onOpenFile(r.relPath)
