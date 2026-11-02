@@ -407,7 +407,10 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true,                         // preload 仅用 contextBridge/ipcRenderer/webUtils,完全兼容沙箱
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // 全应用关闭拼写检查（v3.16.1 方案 B）：中文/英文混写的笔记与 AI 对话里，
+      // Chromium 的红色波浪线只会制造噪声；窗口级开关覆盖全部输入框，新增窗口也必须同步。
+      spellcheck: false
     }
   })
 

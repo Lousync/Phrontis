@@ -147,6 +147,7 @@ function createPopout(): void {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
+      spellcheck: false, // 全应用关闭拼写检查（v3.16.1 方案 B）；新增窗口必须同步
       additionalArguments: ['--day-panel-window'],
     },
   })

@@ -6,7 +6,14 @@
  * 真实落盘（fs / workspaceManager / 广播）在 `aiAssistantPlan.ts`，只调这里选出的动作。
  */
 
-export type PlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool'
+import type { MovePair } from './vaultMovePure'
+
+export type PlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool' | 'move-batch'
+
+/** 回滚方向：逆序 + 反向（与 vaultMovePure.reverseMoves 同口径；此处内联避免纯模块运行时互引） */
+function reversePairs(moves: MovePair[]): MovePair[] {
+  return moves.slice().reverse().map((m) => ({ from: m.to, to: m.from }))
+}
 
 export interface PlanOp {
   id: string
@@ -29,6 +36,8 @@ export interface PlanOp {
   summary?: string
   /** kind='tool'：暂存阶段返回的临时 id（后续参数可引用，应用时替换） */
   tempId?: string
+  /** kind='move-batch'：整批移动条目（已解析成 from/to 文件路径） */
+  moves?: MovePair[]
   /** 应用后工具返回的原始结果（用于临时 id 映射与回滚提示） */
   result?: unknown
   /** 应用失败原因（status='failed'；失败项不再作为 pending 重放） */
@@ -85,12 +94,14 @@ export function summarizeToolOp(name: string, args: Record<string, unknown>): st
 
 /** 一个 op 正/反向对应的原子文件动作（真正执行交给 aiAssistantPlan 的 fs 层） */
 export interface FsAction {
-  action: 'write' | 'rename' | 'trash' | 'mkdir'
+  action: 'write' | 'rename' | 'trash' | 'mkdir' | 'move-batch'
   relPath: string
   /** write 专用：写入内容 */
   content?: string
   /** rename 专用：目标路径 */
   to?: string
+  /** move-batch 专用：整批条目（回滚方向已逆序反向） */
+  moves?: MovePair[]
 }
 
 /**
@@ -129,6 +140,14 @@ export function actionForOp(op: PlanOp, mode: 'apply' | 'rollback'): FsAction | 
         : { action: 'write', relPath: rel, content: op.prev ?? '' }
     case 'mkdir':
       return mode === 'apply' ? { action: 'mkdir', relPath: rel } : null
+    case 'move-batch': {
+      const moves = op.moves ?? []
+      return {
+        action: 'move-batch',
+        relPath: moves[0]?.from ?? rel,
+        moves: mode === 'apply' ? moves : reversePairs(moves),
+      }
+    }
     case 'tag':
       return null
     case 'tool':

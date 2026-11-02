@@ -30,7 +30,10 @@ function ok(cond, label, detail = '') {
   return false
 }
 
-const op = (o) => ({ id: o.id, kind: o.kind, relPath: o.relPath, to: o.to, prev: o.prev, next: o.next, status: o.status })
+const op = (o) => ({
+  id: o.id, kind: o.kind, relPath: o.relPath, to: o.to, prev: o.prev, next: o.next,
+  moves: o.moves, summary: o.summary, tool: o.tool, args: o.args, status: o.status,
+})
 
 console.log('=== A. selectOps：应用取 pending+accepted 正序 ===')
 {
@@ -83,6 +86,18 @@ console.log('\n=== C. actionForOp：正 / 反向映射 ===')
   const m = op({ id: 'm', kind: 'mkdir', relPath: 'dir', status: 'pending' })
   ok(actionForOp(m, 'apply').action === 'mkdir', 'C8 mkdir→mkdir')
   ok(actionForOp(m, 'rollback') === null, 'C9 mkdir 回滚无文件动作（不误删目录）')
+
+  // v3.16.1 方案 A：整批移动是一条 op，回滚必须逆序反向
+  const mb = op({
+    id: 'mb', kind: 'move-batch', relPath: '', status: 'pending',
+    moves: [{ from: 'a.md', to: 'x/a.md' }, { from: 'b.md', to: 'x/b.md' }],
+  })
+  const mba = actionForOp(mb, 'apply')
+  const mbr = actionForOp(mb, 'rollback')
+  ok(mba.action === 'move-batch' && mba.moves?.length === 2 && mba.moves[0].from === 'a.md' && mba.moves[1].to === 'x/b.md',
+    'C10 move-batch 应用方向：原顺序')
+  ok(mbr.action === 'move-batch' && mbr.moves?.[0].from === 'x/b.md' && mbr.moves?.[1].to === 'a.md',
+    'C11 move-batch 回滚方向：逆序 + 反向')
 }
 
 console.log('\n=== D. 源码接线：写工具走岔口 ===')
@@ -105,6 +120,12 @@ ok(/if \(done\.length > 0\) plan\.appliedAt/.test(planSrc), 'D9 零成功不再�
 ok(/appendAgentMessage\(sessionId, 'assistant', note\)/.test(planSrc), 'D10 失败摘要写回会话给模型')
 ok(/HANDLER_STAGED_DATA_TOOLS/.test(read('electron/lib/aiAssistantStageable.ts')) && /stageToolOp\(ctx/.test(bt),
   'D11 建页 / 组卷由 handler 暂存前解析目标')
+ok(/name: 'builtin\.vault\.move'/.test(bt) && /kind: 'move-batch'/.test(bt),
+  'D12 批量移动工具注册并暂存为 move-batch op（v3.16.1 方案 A）')
+ok(/'builtin\.vault\.move'/.test(read('electron/lib/aiAssistantStageable.ts')),
+  'D13 批量移动登记为 handler-staged（确认模式可见）')
+ok(/applyMoveBatch/.test(planSrc) && /for \(const back of \[\.\.\.done\]\.reverse\(\)\)/.test(planSrc),
+  'D14 应用期单条失败逆序回滚')
 
 console.log('\n=== E. IPC 三处同步 ===')
 const preload = read('electron/preload/index.ts')

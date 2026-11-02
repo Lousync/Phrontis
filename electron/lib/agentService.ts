@@ -55,6 +55,7 @@ import type { IntelSection } from '../../src/types'
 import { computeLaneUnread, deriveLaneStatus } from './sideLaneMeta'
 import { buildScopeManifest } from './aiAssistantScope'
 import { getPlan, applyPlan, rejectPlan, rollbackTask, listTasks } from './aiAssistantPlan'
+import { MAX_BATCH_MOVE_ITEMS_PER_MESSAGE } from './vaultMovePure'
 import { getKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 import { suggestScope } from './aiAssistantScopeSuggestPure'
 import { toolActionLabel } from '../../src/lib/toolLabels'
@@ -448,6 +449,7 @@ const CHANGE_LABELS: Record<string, string> = {
   'builtin.vault.write': '写入文件',
   'builtin.vault.edit': '修改文件',
   'builtin.vault.rename': '重命名文件',
+  'builtin.vault.move': '批量移动文件',
   'builtin.vault.trash': '移入回收站',
   'builtin.knowledge.create-page': '新建知识页',
   'builtin.blog.create-entry': '新建日记',
@@ -1378,6 +1380,8 @@ async function runAgentLoop(
   // prompt cache 不受影响；且 carry 只付这一次（续跑成功即清现场）
   if (resumeInjection) convo.push({ role: 'user', content: resumeInjection })
   let sessionWrites = 0
+  /** 本条消息累计批量移动条目数（v3.16.1 方案 A：整批算 1 次写，但条目总量另有 300 硬上限） */
+  let batchMoveItems = 0
   const changes: AgentChange[] = []
   /**
    * 续跑现场（A 方案 §3.5）：每次工具执行后入账，失败/停止时压成 carry 写进会话行。
@@ -1611,6 +1615,11 @@ async function runAgentLoop(
       // 暂存结果不是「已改动」：confirm 模式下写工具只进方案，不能进改动清单
       const stagedResult = exec.ok && typeof exec.data === 'object' && exec.data !== null
         && (exec.data as Record<string, unknown>).staged === true
+      // 暂存态也计数：否则模型可以在一条消息里连开 4 批 100 条方案，绕过累计上限
+      if (realName === 'builtin.vault.move' && exec.ok) {
+        const d = (typeof exec.data === 'object' && exec.data !== null) ? exec.data as Record<string, unknown> : {}
+        batchMoveItems += Number(d.count ?? d.moved ?? 0) || 0
+      }
       if (exec.ok && !stagedResult) {
         // 收集真实写改动 → 完成时列为「本次改动」清单
         const label = CHANGE_LABELS[realName]
@@ -1621,8 +1630,10 @@ async function runAgentLoop(
           // vault 文件写类工具：目标=真实落盘路径（rename 取目标路径 to）；trash 后文件已移走不可跳转
           // visual.html：relPath 一并作 file（右栏「本次改动」条目可点击回工件栏渲染）
           // knowledge.create-page（F-11）：工具返回的 path 同为仓库内 .md，纳入 file 可点击直达编辑器
-          const vaultPath = realName.startsWith('builtin.vault.')
-            ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
+          const vaultPath = realName === 'builtin.vault.move'
+            ? String(((data?.items as Array<{ to?: string }> | undefined)?.[0]?.to) ?? '').trim()
+            : realName.startsWith('builtin.vault.')
+              ? String(data?.to ?? data?.path ?? data?.trashed ?? '').trim()
             : (realName === 'visual.html' || realName === 'mindmap' || realName === 'image') ? String(data?.relPath ?? '').trim()
               : realName === 'builtin.knowledge.create-page' ? String(data?.path ?? '').trim()
                 : ''
@@ -1682,6 +1693,22 @@ async function runAgentLoop(
           return
         }
         sessionWrites++
+      }
+      // 批量移动条目上限（方案 A4.8）：整批算 1 次写，但单条消息累计不能超过 300 条，
+      // 否则模型可以用 99 次「合法批量」绕过单次 100 条的限制。
+      if (realName === 'builtin.vault.move') {
+        const n = Array.isArray((args as Record<string, unknown>)?.moves) ? ((args as Record<string, unknown>).moves as unknown[]).length : 0
+        if (batchMoveItems + n > MAX_BATCH_MOVE_ITEMS_PER_MESSAGE) {
+          const denyStep: AgentTraceStep = { kind: 'tool', name: realName, ok: false, durationMs: 0, summary: `本条消息累计批量移动上限 ${MAX_BATCH_MOVE_ITEMS_PER_MESSAGE} 个文件` }
+          trace.push(denyStep)
+          stepEmitters.get(signal)?.(denyStep)
+          convo.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify({ ok: false, error: `本条消息累计批量移动已达上限（${MAX_BATCH_MOVE_ITEMS_PER_MESSAGE} 个文件）。请先总结已完成内容，剩余移动请用户发下一条消息后再做` }),
+          })
+          return
+        }
       }
       // visual.html / mindmap / image 生成时序 §3.4：调用前推「生成中」实时事件（仅 slug/title/prompt/aspect
       // 这类小字段，绝不带全文；不落库——渲染层据此开「生成中」占位（工件栏页签 / 生图卡），给即时反馈）

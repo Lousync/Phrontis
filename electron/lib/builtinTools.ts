@@ -19,6 +19,8 @@ import { assertCanRead, assertCanWrite, readPredicate } from './aiAssistantScope
 import { commitOrStage, stageToolOp } from './aiAssistantCommit'
 import { resolveKnowledgeTargetPure, type KnowledgeTarget } from './knowledgeTargetPure'
 import { summarizeToolOp } from './aiAssistantPlanPure'
+import { applyMoveBatch } from './aiAssistantPlan'
+import { preflightMoves, formatMoveConflicts, summarizeMoves, MAX_BATCH_MOVES, type MoveProbe } from './vaultMovePure'
 import { isConfirmModeHiddenTool } from './aiAssistantStageable'
 import { resolveSafe, detectConflict, writeWorkspaceFile, renameWorkspacePath, trashWorkspacePath, invalidateIndexIfCurrentVault, stageImageVersioned } from './workspaceManager'
 import { imageGenerate, imageEdit, imageEditSlotConfigured } from './llmService'
@@ -1902,7 +1904,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.move / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -2350,6 +2352,88 @@ export function registerBuiltinTools(): void {
       if (finalNewRel.toLowerCase().endsWith('.md') || rel.toLowerCase().endsWith('.md')) broadcastDataChanged('knowledge')
       notifyVaultTreeChange(finalNewRel, rel)
       return { ok: true, from: rel, to: finalNewRel }
+    })
+  })
+
+  // 20b. builtin.vault.move —— 一次移动/重命名多个 .md/.txt（一条变更方案 op）
+  // 解决「N 个文件 = N 次工具调用 + N 条 op + N 次写计数」；预检全量拒绝，应用期单条失败逆序回滚。
+  registerTool({
+    name: 'builtin.vault.move',
+    title: '批量移动/重命名仓库文件',
+    description: '一次移动或重命名多个仓库内 .md/.txt 文件（最多 100 条）。先全量校验再暂存为一条变更；目标已存在、路径非法、越界、隐藏目录、AI 教学目录会整批拒绝。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        moves: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_BATCH_MOVES,
+          items: {
+            type: 'object',
+            properties: {
+              from: { type: 'string', description: '源文件相对路径' },
+              to: { type: 'string', description: '目标：已存在目录（移入并保留文件名）或新的 .md/.txt 路径' },
+            },
+            required: ['from', 'to'],
+          },
+        },
+      },
+      required: ['moves'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write',
+    tier: 'ondemand',
+    vaultFile: 'write',
+  }, async (args, ctx) => {
+    const root = vaultRootPath()
+    const rootId = getCurrentVault()?.rootId
+    if (!rootId) throw new Error('仓库上下文未就绪')
+    const teachRoot = String(getSettingReader()('aiTeachRootDir') || 'AI教学').trim() || 'AI教学'
+    const absOfRel = (rel: string): string | null => resolveSafe(root, rel)
+    const moveProbe: MoveProbe = {
+      isFile: (rel) => {
+        const abs = absOfRel(rel)
+        if (!abs) return false
+        try { return statSync(abs).isFile() } catch { return false }
+      },
+      isDir: (rel) => {
+        const abs = absOfRel(rel)
+        if (!abs) return false
+        try { return statSync(abs).isDirectory() } catch { return false }
+      },
+      exists: (rel) => {
+        const abs = absOfRel(rel)
+        if (!abs) return false
+        try { statSync(abs); return true } catch { return false }
+      },
+    }
+    const pre = preflightMoves((args as Record<string, unknown>).moves, moveProbe, { protectedRoots: [teachRoot] })
+    if (!pre.ok) throw new Error(`批量移动未执行：${formatMoveConflicts(pre.conflicts)}`)
+    // 作用域 / 可写性：整批逐条校验，任一越界都整批拒绝（与单文件 rename 同口径）
+    for (const m of pre.moves) {
+      assertCanWrite(m.from, ctx)
+      assertCanWrite(m.to, ctx)
+      const fromAbs = absOfRel(m.from)
+      const toAbs = absOfRel(m.to)
+      if (!fromAbs || !isAiWritableFile(root, fromAbs)) throw new Error(`不可移动（源不在普通区）: ${m.from}`)
+      if (!toAbs || !isAiWritableFile(root, toAbs)) throw new Error(`不可写入（目标不在普通区）: ${m.to}`)
+    }
+    const moves = pre.moves
+    const summary = summarizeMoves(moves)
+    return commitOrStage(ctx, () => ({ kind: 'move-batch', moves, summary }), () => {
+      try {
+        const res = applyMoveBatch(root, rootId, moves)
+        broadcastDataChanged('knowledge')
+        for (const m of moves) notifyVaultTreeChange(m.to, m.from)
+        return res
+      } catch (e) {
+        // 部分残留时也要让树 / 知识库立刻反映真实状态
+        broadcastDataChanged('knowledge')
+        for (const m of moves) notifyVaultTreeChange(m.to, m.from)
+        throw e
+      }
     })
   })
 

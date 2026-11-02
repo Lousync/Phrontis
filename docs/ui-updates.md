@@ -2521,3 +2521,19 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **验收**：双 tsc 0 错；`npm run build` 通过；`verify-assistant-composer` 32、`verify-tree-drag-handle` 15、`verify-artifact-tabs` 28、`verify-renderer-crash-guard` 12、`verify-renderer-memory-probe` 27、`verify-teach-tree-inline` 31、`verify-strip-overflow` 31、`verify-workbench-shell` 266 项全绿；`verify-help-retrieval` 171/171。
 
 **未做**：渲染进程原生内存泄漏的根因定位 —— 采样与崩溃上下文已就位，仍需一次真机长跑复现（100+ 步 agent 回合）把增长曲线与崩溃时刻对齐。
+
+## 2026-11-02 · AI 批量移动 + 全局关闭拼写检查（v3.16.1）
+
+**现状 / 用户反馈**：AI 整理笔记时一次只能搬一个文件，N 个文件产生 N 次工具调用与 N 条方案；笔记与 AI 对话里的英文（如 `DMA`）被 Chromium 拼写检查标红。
+
+**改动点**：
+- 新增 `builtin.vault.move`：一次最多 100 个 `.md` / `.txt`；全量预检（重复 / 目标存在 / 越界 / 隐藏目录 / AI 教学目录整批拒绝）；暂存为**一条** `move-batch` op。
+- 方案卡按目标目录分组，整批应用 / 丢弃；应用前二次预检，中途失败逆序回滚并列出残留；整任务回滚里单个 op 失败不再中断其余文件。
+- 写上限：整批算 1 次写操作；单条消息累计 300 个文件硬上限。
+- 拼写检查：主窗口 / 日程小窗 / 密码填充浮窗统一 `spellcheck: false`；`index.html` 根属性兜底；简答框显式声明。
+- 帮助手册：`AI 权限与工具边界` / `AI助手` 补批量移动能力与回滚口径。
+- 契约：`verify-batch-move` 47、`verify-plan-rollback` 42、`verify-spellcheck-off` 16。
+
+**验收**：双 tsc 0 错；`npm run build` 通过；上述契约全绿；`verify-unified-assistant` 70、`verify-prompt-cache` PASS；`verify-help-retrieval` 171/171。
+
+**未做**：目录批量移动（P1）、逐文件取消（v1 整批接受/拒绝）、大小写-only 重命名（v1 拒绝）。

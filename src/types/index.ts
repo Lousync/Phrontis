@@ -1526,7 +1526,7 @@ export interface AgentChange {
 
 // ---- AI助手变更方案（v3.9.0）：先预览、后确认、可整任务回滚 ----
 
-export type AiPlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool'
+export type AiPlanOpKind = 'write' | 'edit' | 'rename' | 'trash' | 'mkdir' | 'tag' | 'tool' | 'move-batch'
 
 export interface AiPlanOp {
   id: string
@@ -1547,6 +1547,8 @@ export interface AiPlanOp {
   args?: Record<string, unknown>
   /** kind='tool'：给用户看的结构化摘要 */
   summary?: string
+  /** kind='move-batch'：整批移动条目（已解析成 from/to 文件路径） */
+  moves?: Array<{ from: string; to: string }>
   /** kind='tool'：应用后工具返回结果 */
   result?: unknown
   /** 应用失败原因（status='failed'） */
@@ -2814,7 +2816,7 @@ export interface ElectronAPI {
     failures: Array<{ id: string; tool?: string; summary?: string; error: string }>
   }>
   aiAssistantPlanReject: (sessionId: string) => Promise<boolean>
-  aiAssistantTaskRollback: (sessionId: string) => Promise<{ reverted: number; skipped?: number }>
+  aiAssistantTaskRollback: (sessionId: string) => Promise<{ reverted: number; skipped?: number; failed?: number; errors?: string[] }>
   aiAssistantTasks: () => Promise<AiTaskSummary[]>
   aiAssistantScopeSuggest: (query: string, limit?: number) => Promise<AiScopeSuggestion[]>
   agentRenameSession: (id: string, title: string) => Promise<boolean>

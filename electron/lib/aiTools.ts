@@ -25,6 +25,9 @@ export interface ToolSchemaProp {
   properties?: Record<string, ToolSchemaProp>
   /** type:'array' 的元素结构 */
   items?: ToolSchemaProp
+  /** type:'array' 的条数下限 / 上限（透传给模型；validateArgs 同步校验） */
+  minItems?: number
+  maxItems?: number
   required?: string[]
 }
 
@@ -205,6 +208,8 @@ export function validateArgs(schema: ToolJsonSchema, args: Record<string, unknow
         break
       case 'array':
         if (!Array.isArray(v)) return `参数 ${key} 应为数组`
+        if (spec.minItems !== undefined && v.length < spec.minItems) return `参数 ${key} 至少 ${spec.minItems} 项`
+        if (spec.maxItems !== undefined && v.length > spec.maxItems) return `参数 ${key} 最多 ${spec.maxItems} 项`
         break
     }
   }

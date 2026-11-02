@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from 'crypto'
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs'
 import { join, relative, dirname } from 'path'
 import { getCurrentVault, getVaultKbRoot } from 'phrontis-core/kbStore/vaultContext'
 import {
@@ -20,6 +20,9 @@ import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/wind
 import { broadcastTreeRefresh } from './aiTeachingFolders'
 import { appendAgentMessage, sessionExists } from './agentSessionRepo'
 import { selectOps, actionForOp, type ChangePlan, type PlanOp, type PlanOpInput, type FsAction } from './aiAssistantPlanPure'
+import {
+  preflightMoves, formatMoveConflicts, type MovePair, type MoveProbe,
+} from './vaultMovePure'
 
 export type { PlanOpKind, PlanOp, ChangePlan, PlanOpInput, FsAction } from './aiAssistantPlanPure'
 
@@ -88,6 +91,71 @@ function absOf(rootPath: string, rel: string): string {
   return abs
 }
 
+/** 把仓库根解析成 preflight 需要的 fs 事实（符号链接越界由 resolveSafe 兜住） */
+function moveProbeOf(rootPath: string): MoveProbe {
+  const absOfRel = (rel: string): string | null => resolveSafe(rootPath, rel)
+  return {
+    isFile: (rel) => {
+      const abs = absOfRel(rel)
+      if (!abs) return false
+      try { return statSync(abs).isFile() } catch { return false }
+    },
+    isDir: (rel) => {
+      const abs = absOfRel(rel)
+      if (!abs) return false
+      try { return statSync(abs).isDirectory() } catch { return false }
+    },
+    exists: (rel) => {
+      const abs = absOfRel(rel)
+      return !!abs && existsSync(abs)
+    },
+  }
+}
+
+export interface MoveBatchResult {
+  ok: true
+  moved: number
+  count: number
+  items: Array<MovePair & { ok: boolean; error?: string }>
+}
+
+/**
+ * 整批移动（v3.16.1 方案 A）：预检 → 顺序执行 → 单条失败时逆序回滚已移动条目。
+ *
+ * 事务语义：要么整批到位，要么尽量回到原状；回滚不干净时把「仍在新位置」的路径一并报出来，
+ * 不做「部分成功也算成功」的静默处理。
+ */
+export function applyMoveBatch(rootPath: string, rootId: string, moves: MovePair[]): MoveBatchResult {
+  // 应用前再预检一次：暂存到用户点「应用」之间，磁盘可能已变（目标被占 / 源被移走）
+  const pre = preflightMoves(moves, moveProbeOf(rootPath), { resolveDirTargets: false })
+  if (!pre.ok) throw new Error(`批量移动预检失败：${formatMoveConflicts(pre.conflicts)}`)
+  const resolved = pre.moves
+  const done: MovePair[] = []
+  const items: MoveBatchResult['items'] = []
+  for (const m of resolved) {
+    try {
+      renameWorkspacePath(rootId, m.from, m.to)
+      done.push(m)
+      items.push({ ...m, ok: true })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      items.push({ ...m, ok: false, error: msg })
+      const residual: string[] = []
+      for (const back of [...done].reverse()) {
+        try { renameWorkspacePath(rootId, back.to, back.from) } catch { residual.push(`${back.to} → ${back.from}`) }
+      }
+      const head = `批量移动失败（第 ${items.length} 条：${m.from} → ${m.to}）：${msg}`
+      const tail = done.length === 0
+        ? '；本批未产生任何移动'
+        : residual.length === 0
+          ? `；已回滚本次已移动的 ${done.length} 个文件，整批未应用`
+          : `；已移动的 ${done.length} 个文件中，${residual.length} 个回滚失败，仍在新位置：${residual.join('、')}`
+      throw new Error(head + tail)
+    }
+  }
+  return { ok: true, moved: done.length, count: done.length, items }
+}
+
 function refresh(rels: string[]): void {
   try {
     for (const rel of rels) {
@@ -114,6 +182,9 @@ async function runAction(a: FsAction, rootPath: string, rootId: string): Promise
       return
     case 'mkdir':
       mkdirSync(absOf(rootPath, a.relPath), { recursive: true })
+      return
+    case 'move-batch':
+      applyMoveBatch(rootPath, rootId, a.moves ?? [])
       return
   }
 }
@@ -203,7 +274,12 @@ export async function applyPlan(
         } else {
           const action = actionForOp(op, 'apply')
           if (action) await runAction(action, rootPath, rootId)
-          rels.push(op.relPath ?? op.to ?? '')
+          // move-batch 要刷新**所有** from / to 的父目录，不能只取第一条
+          if (action?.action === 'move-batch') {
+            for (const m of action.moves ?? []) rels.push(m.from, m.to)
+          } else {
+            rels.push(op.relPath ?? op.to ?? '')
+          }
         }
         op.status = 'applied'
         delete op.error
@@ -213,6 +289,9 @@ export async function applyPlan(
         op.status = 'failed'
         op.error = msg
         failures.push({ id: op.id, tool: op.tool, summary: op.summary, error: msg })
+        // 失败也可能有残留（批量移动回滚不干净）：把相关路径纳入刷新，别让树上停在旧位置
+        if (op.kind === 'move-batch') for (const m of op.moves ?? []) rels.push(m.from, m.to)
+        else rels.push(op.relPath ?? op.to ?? '')
         // 后续 op 可能依赖本条的前提（临时 id / 目标目录），停在第一条失败，其余留给用户重试
         break
       }
@@ -245,30 +324,50 @@ export async function applyPlan(
  * 模块工具（kind='tool'）目前没有统一的逆操作：跳过并计入 `skipped`，
  * UI 必须如实告知「文件已还原，模块写入需手动撤销」，不能假装全回滚。
  */
-export async function rollbackTask(sessionId: string): Promise<{ reverted: number; skipped: number }> {
+export async function rollbackTask(
+  sessionId: string,
+): Promise<{ reverted: number; skipped: number; failed: number; errors: string[] }> {
   const plan = load(sessionId)
   if (!plan) throw new Error('没有可回滚的任务')
   const { rootPath, rootId } = rootPathOrThrow()
   const rels: string[] = []
+  const errors: string[] = []
   let n = 0
   let skipped = 0
+  let failed = 0
   for (const op of selectOps(plan.ops, [], 'rollback')) {
     if (op.kind === 'tool') {
       op.status = 'rejected'
       skipped++
       continue
     }
-    const action = actionForOp(op, 'rollback')
-    if (action) await runAction(action, rootPath, rootId)
-    op.status = 'rejected'
-    rels.push(op.relPath ?? op.to ?? '')
-    n++
+    // 单个 op 回滚失败不能中断整个任务（否则后面的文件永远回不去）：
+    // 标 failed + error 后继续，结果里如实报告失败条数。
+    try {
+      const action = actionForOp(op, 'rollback')
+      if (action) await runAction(action, rootPath, rootId)
+      op.status = 'rejected'
+      if (action?.action === 'move-batch') {
+        for (const m of action.moves ?? []) rels.push(m.from, m.to)
+      } else {
+        rels.push(op.relPath ?? op.to ?? '')
+      }
+      n++
+    } catch (e) {
+      failed++
+      op.status = 'failed'
+      op.error = e instanceof Error ? e.message : String(e)
+      errors.push(`${op.summary || op.kind}：${op.error}`)
+      // 回滚失败可能留下部分移动：相关路径同样要刷新
+      if (op.kind === 'move-batch') for (const m of op.moves ?? []) rels.push(m.from, m.to)
+      else rels.push(op.relPath ?? op.to ?? '')
+    }
   }
   plan.rolledBackAt = new Date().toISOString()
   plan.updatedAt = plan.rolledBackAt
   persist(plan)
   refresh(rels.filter(Boolean))
-  return { reverted: n, skipped }
+  return { reverted: n, skipped, failed, errors }
 }
 
 /** 丢弃未应用的方案（pending 与 failed 一并清掉；failed 保留在会话消息里可回看） */

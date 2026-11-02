@@ -19,6 +19,10 @@ export interface StagedResult {
   kind: string
   path: string
   message: string
+  /** move-batch 专用：整批条目数（其他工具缺省） */
+  count?: number
+  /** move-batch 专用：方案卡摘要 */
+  summary?: string
 }
 
 export interface StagedToolResult {
@@ -82,6 +86,8 @@ export async function commitOrStage<R>(
       kind: op.kind,
       path: op.relPath ?? op.to ?? '',
       message: '已记入变更方案（尚未落盘，等用户确认后应用）',
+      count: op.moves?.length,
+      summary: op.summary,
     }
   }
   return run()

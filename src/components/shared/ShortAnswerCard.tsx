@@ -195,6 +195,7 @@ export function ShortAnswerCard({ quiz, redo = false }: Props) {
             value={text}
             onChange={e => onChange(e.target.value)}
             onBlur={flush}
+            spellCheck={false}
             rows={4}
             placeholder="写下你的答案…（自动保存）"
             aria-label={`第 ${quiz.no} 题作答`}

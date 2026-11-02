@@ -1074,11 +1074,15 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     try {
       const r = await aiAssistantTaskRollback(sid)
       const skipped = r.skipped ?? 0
+      const failed = r.failed ?? 0
       showToast({
-        type: skipped > 0 ? 'info' : 'success',
-        message: skipped > 0
-          ? `文件已回滚 ${r.reverted} 项；${skipped} 项模块写入需手动撤销`
-          : `已回滚 ${r.reverted} 项变更`,
+        type: failed > 0 ? 'error' : skipped > 0 ? 'info' : 'success',
+        message: failed > 0
+          ? `已回滚 ${r.reverted} 项；${failed} 项回滚失败`
+          : skipped > 0
+            ? `文件已回滚 ${r.reverted} 项；${skipped} 项模块写入需手动撤销`
+            : `已回滚 ${r.reverted} 项变更`,
+        detail: failed > 0 ? (r.errors ?? []).slice(0, 3).join('；') : undefined,
       })
       await refreshPlan()
     } catch (e) {

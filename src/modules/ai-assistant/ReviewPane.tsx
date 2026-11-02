@@ -42,6 +42,7 @@ function isDiffable(op: AiPlanOp): boolean {
 }
 
 function labelOf(op: AiPlanOp): string {
+  if (op.kind === 'move-batch') return op.summary || `批量移动 ${op.moves?.length ?? 0} 个文件`
   return op.relPath ?? op.to ?? op.tool ?? '(未知)'
 }
 
@@ -49,9 +50,54 @@ function KindIcon({ kind }: { kind: AiPlanOp['kind'] }) {
   const p = { size: 13, className: 'shrink-0 text-[var(--text-muted)]' }
   if (kind === 'write') return <FilePlus2 {...p} />
   if (kind === 'edit') return <FileText {...p} />
-  if (kind === 'rename') return <MoveRight {...p} />
+  if (kind === 'rename' || kind === 'move-batch') return <MoveRight {...p} />
   if (kind === 'trash') return <Trash2 {...p} />
   return <FileText {...p} />
+}
+
+/** 批量移动的方案卡：按目标目录分组，不把 100 条路径平铺成一面墙 */
+function MoveBatchView({ op, compact }: { op: AiPlanOp; compact: boolean }) {
+  const moves = op.moves ?? []
+  const groups = useMemo(() => {
+    const map = new Map<string, Array<{ from: string; to: string }>>()
+    for (const m of moves) {
+      const i = m.to.lastIndexOf('/')
+      const dir = i < 0 ? '' : m.to.slice(0, i)
+      const rows = map.get(dir)
+      if (rows) rows.push(m)
+      else map.set(dir, [m])
+    }
+    return [...map.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]))
+  }, [moves])
+
+  return (
+    <div className={`h-full overflow-y-auto ${compact ? 'px-3 py-2' : 'px-5 py-4'}`}>
+      <div className="mb-2 flex items-center gap-2 text-[13px] font-medium text-[var(--text-primary)]">
+        <MoveRight size={14} className="shrink-0 text-[var(--accent)]" />
+        <span className="min-w-0 truncate" title={op.summary}>{op.summary || `批量移动 ${moves.length} 个文件`}</span>
+      </div>
+      <p className="mb-2 text-[11.5px] text-[var(--text-muted)]">
+        预检通过 · 整批应用 / 整批丢弃（v1 不支持逐文件取消；要排除某几条请让 AI 重新提交）
+      </p>
+      {groups.map(([dir, rows]) => (
+        <div key={dir || '(root)'} className="mb-2 overflow-hidden rounded-lg border border-[var(--border-color)]">
+          <div className="flex items-center gap-1.5 bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-muted)]">
+            <MoveRight size={10} className="shrink-0" />
+            <span className="min-w-0 truncate" title={dir || '仓库根目录'}>→ {dir || '仓库根目录'}</span>
+            <span className="ml-auto shrink-0">{rows.length} 个文件</span>
+          </div>
+          {rows.map((m) => (
+            <div key={`${m.from}->${m.to}`} className="flex items-center gap-1.5 px-2.5 py-1 text-[11.5px]">
+              <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]" title={m.from}>{m.from}</span>
+              <MoveRight size={10} className="shrink-0 text-[var(--text-muted)]" />
+              <span className="min-w-0 flex-1 truncate text-[var(--text-primary)]" title={m.to}>{m.to.split('/').pop()}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+      {moves.length === 0 && <p className="text-[12px] text-[var(--text-muted)]">没有可移动的条目</p>}
+    </div>
+  )
 }
 
 export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, onClose, compact = false }: Props) {
@@ -205,6 +251,8 @@ export function ReviewPane({ plan, busy = false, onApply, onReject, onRollback, 
                 }}
               />
             </MonacoErrorBoundary>
+          ) : selected.kind === 'move-batch' ? (
+            <MoveBatchView op={selected} compact={compact} />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-[13px] text-[var(--text-secondary)]">
               <KindIcon kind={selected.kind} />

@@ -13,6 +13,7 @@ export const TOOL_ACTION_LABELS: Record<string, string> = {
   'builtin.vault.write': '写入文件',
   'builtin.vault.edit': '修改文件',
   'builtin.vault.rename': '重命名',
+  'builtin.vault.move': '批量移动',
   'builtin.vault.trash': '移入回收站',
   'builtin.knowledge.search': '检索知识库',
   'builtin.knowledge.create-page': '新建知识页',

@@ -698,7 +698,7 @@ export const aiAssistantPlanApply = (sessionId: string, acceptedIds: string[]): 
   failures: Array<{ id: string; tool?: string; summary?: string; error: string }>
 }> => a().aiAssistantPlanApply(sessionId, acceptedIds)
 export const aiAssistantPlanReject = (sessionId: string): Promise<boolean> => a().aiAssistantPlanReject(sessionId)
-export const aiAssistantTaskRollback = (sessionId: string): Promise<{ reverted: number; skipped?: number }> => a().aiAssistantTaskRollback(sessionId)
+export const aiAssistantTaskRollback = (sessionId: string): Promise<{ reverted: number; skipped?: number; failed?: number; errors?: string[] }> => a().aiAssistantTaskRollback(sessionId)
 export const aiAssistantTasks = (): Promise<AiTaskSummary[]> => a().aiAssistantTasks()
 export const aiAssistantScopeSuggest = (query: string, limit?: number): Promise<AiScopeSuggestion[]> => a().aiAssistantScopeSuggest(query, limit)
 export const agentRenameSession = (id: string, title: string): Promise<boolean> => a().agentRenameSession(id, title)

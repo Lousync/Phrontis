@@ -54,6 +54,7 @@ function createFillWindow(): BrowserWindow {
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: true, contextIsolation: true, nodeIntegration: false,
+      spellcheck: false, // 全应用关闭拼写检查（v3.16.1 方案 B）；新增窗口必须同步
       additionalArguments: ['--fill-popup-window', `--theme=${theme}`],
     },
   })

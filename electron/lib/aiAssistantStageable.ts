@@ -14,6 +14,7 @@ export const HANDLER_STAGED_TOOLS = new Set([
   'builtin.vault.edit',
   'builtin.vault.rename',
   'builtin.vault.trash',
+  'builtin.vault.move',
 ])
 
 /**
