@@ -1,12 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight, Zap, Star, ListTree } from 'lucide-react'
+import { Plus, Trash2, Square, ArrowUp, GitCompareArrows, Bot, ChevronRight, Zap, Star, ListTree, Loader2, Sparkles } from 'lucide-react'
 import type { AgentSessionInfo, AiScopeSuggestion, LlmProviderInfo } from '../../types'
 import { workspaceGetCurrent, aiAssistantScopeSuggest, llmListProviders, llmReasoningCapable } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { useAnchoredMenu } from '../../lib/useAnchoredMenu'
 import { BOOKMARK_COLORS } from '../../lib/workbenchLayout'
 import { MessageList, fmtTime } from '../../components/shared/AssistantPanel/MessageList'
+import { SlashCommandMenu } from '../../components/shared/SlashCommandMenu'
+import { useSlashMenu } from '../../components/shared/AssistantPanel/useSlashMenu'
 import { QuoteChips } from '../../components/shared/AssistantPanel/QuoteChips'
 import { buildQuotedBody } from '../../components/shared/AssistantPanel/selQuotes'
 import { registerSelectionAskHost } from '../../lib/assistantContext'
@@ -108,6 +110,15 @@ export function AiAssistantModule({
   const modelMenu = useAnchoredMenu(modelTriggerRef, modelMenuRef, 280)
   const [modelCapable, setModelCapable] = useState(false)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  /** `/` 指令 + Skill 弹层（v3.16.1 F-2）：与 ChatBody 同一套候选与键盘语义，避免第三处手写漂移 */
+  const slash = useSlashMenu({
+    input: api.input,
+    setInput: api.setInput,
+    skills: api.slashSkills,
+    surface: 'assistant',
+    onPickSkill: api.setPickedSkill,
+    focus: () => composerRef.current?.focus(),
+  })
   /** 划词「问 AI」引用片段（与 AiChatTab / AI 教学同口径：进胶囊，不自动发送） */
   const [selQuotes, setSelQuotes] = useState<string[]>([])
   const selQuotesRef = useRef<string[]>([])
@@ -284,8 +295,10 @@ export function AiAssistantModule({
     // 只有引用、没有文字也允许发送（与引用胶囊语义一致）
     const text = buildQuotedBody(quotes, raw).trim()
     if (!text) return
+    // 压缩期间不先清草稿：交给 send 内部闸门拒绝并 toast，否则用户刚打的字会被 execRun 吞掉
+    if (api.compressing) { void api.send(text); return }
     runGuarded({ kind: 'send', text }, raw)
-  }, [api.input, runGuarded])
+  }, [api.input, api.compressing, api.send, runGuarded])
 
   const removeQuote = useCallback((index: number) => {
     setSelQuotes((prev) => {
@@ -673,16 +686,44 @@ export function AiAssistantModule({
               onRemove={removeQuote}
               onRemoveAll={clearQuotes}
             />
-            <textarea
-              ref={composerRef}
-              value={api.input}
-              spellCheck={false}
-              onChange={(e) => api.setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-              rows={2}
-              placeholder={api.scopeAll || api.scope.length ? '描述要整理的内容…（Enter 发送）' : '未选择文件：本轮 AI 不会读写仓库文件…'}
-              className={`w-full appearance-none px-0.5 py-1 text-[13px] resize-none outline-none bg-transparent! border-0! rounded-none! ${shell.ta ?? ''}`}
-            />
+            {/* 压缩进行中占位（v3.16.1 F-2）：文案与 ChatBody / AI 教学同源，避免「数十秒零反馈」 */}
+            {api.compressing && (
+              <div className="mb-1 flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[var(--bg-secondary)] text-[11px] text-[var(--text-secondary)] kb-pop">
+                <Loader2 size={12} className="animate-spin shrink-0 text-[var(--accent)]" />
+                正在压缩对话历史…（可能数十秒，期间暂不能发送）
+              </div>
+            )}
+            {api.pickedSkill && (
+              <span className="mb-1 inline-flex items-center gap-1 max-w-full px-2 py-0.5 rounded-md bg-[var(--bg-selected)] border border-[var(--border-color)] text-[11px] text-[var(--text-secondary)]">
+                <Sparkles size={10} className="shrink-0 text-[var(--accent)]" />
+                <span className="truncate">Skill：{api.pickedSkill.title} · 本轮显式生效</span>
+                <button onClick={() => api.setPickedSkill(null)} title="移除该 Skill"
+                  className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">×</button>
+              </span>
+            )}
+            <div className="relative">
+              {slash.open && (
+                <SlashCommandMenu items={slash.items} activeIndex={slash.activeIndex} onHover={slash.setActiveIndex} onPick={slash.pick} />
+              )}
+              <textarea
+                ref={composerRef}
+                value={api.input}
+                spellCheck={false}
+                onChange={(e) => { api.setInput(e.target.value); slash.setActiveIndex(0) }}
+                onKeyDown={(e) => {
+                  // 键序：slash 弹层优先（Enter 只选中不发送）→ 发送；IME 组合态回车不得误发
+                  slash.onKeyDown(e)
+                  if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault(); handleSend()
+                  }
+                }}
+                rows={2}
+                placeholder={api.scopeAll || api.scope.length
+                  ? '描述要整理的内容…（/ 唤起指令 · Enter 发送）'
+                  : '未选择文件：本轮 AI 不会读写仓库文件…（/ 唤起指令）'}
+                className={`w-full appearance-none px-0.5 py-1 text-[13px] resize-none outline-none bg-transparent! border-0! rounded-none! ${shell.ta ?? ''}`}
+              />
+            </div>
             {/* 工具条：合规提示（左空白）→ 模型/思考强度菜单 → 发送/停止（与 AI教学同一口径） */}
             <div className="relative flex items-center gap-2 mt-0.5">
               <span className="flex-1 min-w-0 truncate text-[10.5px] text-[var(--text-disabled)] select-none" title="AI 生成内容可能存在错误，请自行核实">AI 生成内容，请注意甄别</span>
@@ -779,9 +820,9 @@ export function AiAssistantModule({
                 <button
                   type="button"
                   onClick={handleSend}
-                  disabled={!api.input.trim()}
+                  disabled={api.compressing || !api.input.trim()}
                   className="kb-micro-pop h-7 w-7 shrink-0 rounded-full bg-[var(--accent)] text-white flex items-center justify-center hover:opacity-90 disabled:opacity-30 transition-opacity"
-                  title="发送"
+                  title={api.compressing ? '正在压缩对话历史，请稍候' : '发送'}
                 >
                   <ArrowUp size={14} />
                 </button>

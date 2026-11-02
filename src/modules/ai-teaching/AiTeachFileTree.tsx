@@ -9,6 +9,7 @@ import {
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
+import { recordFileOp } from '../../lib/fileOpHistory'
 import { VaultTree } from '../../components/shared/VaultTree'
 import type { DirCache, TreeNode, CreateIntent, RenameIntent } from '../../components/shared/VaultTree'
 
@@ -158,8 +159,12 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
       ? await workspaceCreateFile(rootId, full).catch((e) => ({ ok: false as const, error: String((e as Error)?.message ?? e) }))
       : await workspaceMkdir(rootId, full).catch((e) => ({ ok: false as const, error: String((e as Error)?.message ?? e) }))
     if (!r || r.ok === false) { showToast({ type: 'error', message: `创建失败：${(r as { error?: string })?.error ?? 'IPC 无响应'}` }); return }
+    // 记入跨模块撤销栈（v3.16.1 F-5）：主进程重名会自动加后缀，路径以返回值为准
+    const createdFull = (r as { relPath?: string }).relPath ?? full
+    const createdName = createdFull.slice(createdFull.lastIndexOf('/') + 1)
+    recordFileOp({ kind: 'create', rootId, relPath: createdFull, isDir: type === 'dir', name: createdName })
     void loadDir(dirRel)
-    showToast({ type: 'info', message: `已创建 ${name}` })
+    showToast({ type: 'info', message: `已创建 ${name} · Ctrl+Z 可撤回` })
   }
   /** 重命名入口（B-14）：同样只落内联意图；目标目录本就在展开态（条目可见才能右键到它） */
   const startRename = (n: TreeNode) => setRenaming({ relPath: n.relPath })
@@ -171,8 +176,10 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
     const parent = relPath.includes('/') ? relPath.slice(0, relPath.lastIndexOf('/')) : ''
     const to = `${base}/${parent ? `${parent}/` : ''}${name}`
     const r = await workspaceRename(rootId, `${base}/${relPath}`, to).catch(() => null)
-    if (r && r.ok === false) { showToast({ type: 'error', message: `改名失败：${r.error ?? ''}` }); return }
+    if (!r || r.ok === false) { showToast({ type: 'error', message: `改名失败：${r?.error ?? 'IPC 无响应'}` }); return }
+    recordFileOp({ kind: 'move', rootId, from: `${base}/${relPath}`, to, name })
     void loadDir(parent)
+    showToast({ type: 'info', message: `已重命名为 ${name} · Ctrl+Z 可撤回` })
   }
   const doDuplicate = async (rel: string, isDir: boolean) => {
     if (!rootId) return
@@ -256,7 +263,13 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
               const name = src.split('/').pop() ?? src
               const to = dstDir ? `${base}/${dstDir}/${name}` : `${base}/${name}`
               const r = await workspaceRename(rootId, `${base}/${src}`, to).catch(() => null)
-              if (r && r.ok === false) showToast({ type: 'error', message: `移动失败：${r.error ?? ''}` })
+              if (!r || r.ok === false) {
+                showToast({ type: 'error', message: `移动失败：${r?.error ?? 'IPC 无响应'}` })
+                return
+              }
+              // 记入跨模块撤销栈（v3.16.1 F-5）：fileOpHistory 用仓库相对路径，树内是产物根相对路径
+              recordFileOp({ kind: 'move', rootId, from: `${base}/${src}`, to, name })
+              showToast({ type: 'info', message: `已移动 ${name} · Ctrl+Z 可撤回` })
               const srcParent = src.includes('/') ? src.slice(0, src.lastIndexOf('/')) : ''
               void loadDir(srcParent); void loadDir(dstDir)
             })()

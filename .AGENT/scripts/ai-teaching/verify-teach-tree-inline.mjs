@@ -135,11 +135,34 @@ ok((TREE.match(/onKeyDown=\{\(e\) => \{[\s\S]{0,120}if \(e\.key === 'Enter'\) co
 console.log('\n=== F. 知识库与教学区消费同一套 props ===\n')
 
 ok(/creating=\{treeCreating\}/.test(KNOW) && /renaming=\{treeRenaming\}/.test(KNOW),
-  'F1 知识库仍传 creating / renaming（教学区不是在跟一个已废弃的接口对齐）', '')
+  'G1 知识库仍传 creating / renaming（教学区不是在跟一个已废弃的接口对齐）', '')
 ok(/onCommitCreate=\{handleTreeCommitCreate\}/.test(KNOW) && /onCommitRename=\{/.test(KNOW),
-  'F2 知识库两个提交回调仍在', '')
+  'G2 知识库两个提交回调仍在', '')
 ok(!/z-\[90\]/.test(KNOW),
-  'F3 负向：知识库侧同样无居中弹窗（B-13 已删，别被"顺手加回"）', '')
+  'G3 负向：知识库侧同样无居中弹窗（B-13 已删，别被"顺手加回"）', '')
+
+/* ================= G. 文件操作撤销栈接线（v3.16.1 F-5） ================= */
+console.log('\n=== G. 教学区资源管理器接入跨模块撤销栈 ===\n')
+
+const TEACH_INDEX = read('src/modules/ai-teaching/index.tsx')
+
+ok(/import \{ recordFileOp \} from '\.\.\/\.\.\/lib\/fileOpHistory'/.test(TEACH),
+  'G1 教学区树 import recordFileOp')
+ok((TEACH.match(/recordFileOp\(/g) ?? []).length === 3,
+  'G2 恰好三处记录：移动 / 重命名 / 新建（删除走回收站，按既有口径不入栈）')
+ok(/recordFileOp\(\{ kind: 'move', rootId, from: `\$\{base\}\/\$\{src\}`, to, name \}\)/.test(TEACH),
+  'G3 移动记录用仓库相对路径（base + 树内 relPath）')
+ok(/recordFileOp\(\{ kind: 'move', rootId, from: `\$\{base\}\/\$\{relPath\}`, to, name \}\)/.test(TEACH),
+  'G4 重命名同样记 move')
+ok(/recordFileOp\(\{ kind: 'create', rootId, relPath: createdFull, isDir: type === 'dir', name: createdName \}\)/.test(TEACH),
+  'G5 新建记 create，路径以主进程返回的 relPath 为准（重名自动加后缀）')
+ok(/if \(!r \|\| r\.ok === false\)[\s\S]{0,160}?return[\s\S]{0,260}?recordFileOp/.test(TEACH),
+  'G6 失败路径先 return，不会把失败的操作记进撤销栈')
+ok(/window\.addEventListener\('kb-fs-op-changed', onFileOp\)/.test(TEACH_INDEX)
+  && /setTreeRefreshSeq\(n => n \+ 1\)/.test(TEACH_INDEX),
+  'G7 撤销 / 重做后立即重扫资源管理器（不等 fsWatcher 的 1 秒节流）')
+ok(!/recordFileOp[\s\S]{0,80}?workspaceTrash/.test(TEACH),
+  'G8 负向：删除（回收站）不记撤销栈')
 
 /* ================= 结果 ================= */
 if (fails.length === 0) {

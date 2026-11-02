@@ -272,6 +272,46 @@ if (!gotLock) {
 
 let mainWindow: BrowserWindow | null = null
 
+// ===== 渲染进程崩溃兜底（v3.16.1 F-1）=====
+// 透明无边框窗口在渲染进程死掉后没有内容可画，只剩一个透明圆角框；此前只打日志，
+// 用户从托盘 / 任务栏再唤起时看到的就是这个「死窗口」。这里做两级恢复：
+//  · 首次崩溃：自动 reload 一次，尽量把界面救回来（当前未落库的回合会丢）；
+//  · 60 秒内再次崩溃：不再自动 reload（防崩溃循环），弹原生对话框让用户选择重启 / 退出。
+const RENDERER_CRASH_WINDOW_MS = 60_000
+let lastRendererCrashAt = 0
+
+function recoverCrashedRenderer(win: BrowserWindow, trigger: 'crash' | 'show'): void {
+  if (win.isDestroyed()) return
+  const now = Date.now()
+  const repeated = now - lastRendererCrashAt < RENDERER_CRASH_WINDOW_MS
+  lastRendererCrashAt = now
+  if (trigger === 'crash' && !repeated) {
+    // 后台崩溃时不要先 show() 死窗口：直接原地 reload，等用户下次唤起时已是好界面
+    console.warn('[Window] renderer crashed → reload once')
+    setTimeout(() => {
+      if (!win.isDestroyed()) win.webContents.reload()
+    }, 400)
+    return
+  }
+  // 需要用户选择：先把窗口显示出来，否则原生对话框可能没有可见的父窗口
+  if (!win.isVisible()) win.show()
+  void dialog.showMessageBox(win, {
+    type: 'error',
+    title: 'Phrontis 界面已崩溃',
+    message: repeated ? '界面连续崩溃，已停止自动重载。' : '界面已崩溃。',
+    detail: '当前未保存的对话回合可能丢失；仓库里的笔记与结构化数据不受影响。可以重启界面，或退出后重新打开应用。',
+    buttons: ['重启界面', '退出应用'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  }).then(({ response }) => {
+    if (win.isDestroyed()) return
+    if (response === 1) { isQuitting = true; app.quit(); return }
+    lastRendererCrashAt = 0
+    win.webContents.reload()
+  }).catch(() => { /* 对话框失败不阻断；窗口仍可由用户手动关闭 */ })
+}
+
 // ===== 托盘常驻：主窗口 X = 隐藏，任务栏独立存活（用户决策 2026-08-31）=====
 let isQuitting = false
 let tray: Tray | null = null
@@ -279,6 +319,11 @@ let tray: Tray | null = null
 function showMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow()
+    return
+  }
+  // 渲染进程已崩溃：直接把死窗口 show() 出来只会得到「透明窗框」（F-1）
+  if (mainWindow.webContents.isCrashed()) {
+    recoverCrashedRenderer(mainWindow, 'show')
     return
   }
   if (mainWindow.isMinimized()) mainWindow.restore()
@@ -394,6 +439,9 @@ function createWindow(): void {
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error('[Window] render-process-gone:', details)
     ;(globalThis as any).__kbLogRendererGone?.(details)
+    if (details.reason === 'clean-exit' || isQuitting) return
+    const win = mainWindow
+    if (win && !win.isDestroyed()) recoverCrashedRenderer(win, 'crash')
   })
   // ★ B-19：渲染层 error 级消息**按「来源+消息体」去重限流**再转发。
   //   一次「退出书籍回书架」实测在 1.45s 内向这里投递 266 条**同一条** RO 环告警；
@@ -1510,12 +1558,8 @@ app.whenReady().then(async () => {
 
 // 用户尝试打开第二个实例 → 激活已有窗口
 app.on('second-instance', () => {
-  if (mainWindow) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    // 托盘常驻下窗口可能处于 hide() 状态：focus() 对隐藏窗口无效，必须 show()
-    if (!mainWindow.isVisible()) mainWindow.show()
-    mainWindow.focus()
-  }
+  // 与托盘 / 任务栏唤起共用同一入口：崩溃态要先恢复，不能直接 show() 死窗口（F-1）
+  showMainWindow()
 })
 
 app.on('window-all-closed', () => {

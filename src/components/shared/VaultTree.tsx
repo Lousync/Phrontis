@@ -107,6 +107,8 @@ function FileIcon({ name }: { name: string }) {
  */
 export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenFile, onContextMenu, onMove, creating, onCommitCreate, onCancelCreate, renaming, onCommitRename, onCancelRename, deletingMap, selectedPath, onSelectDir, softNames, hideSoft = false, focusOn, onFocusLocate, rootRef, sort }: Props) {
   const [dragOver, setDragOver] = useState<string | null>(null)
+  /** 正在拖的源路径：只用于给源行降透明度（F-4）；拖拽源已收窄到行首图标 */
+  const [dragPath, setDragPath] = useState<string | null>(null)
   /** 删除动画状态（键 = relPath；animating 渲染吞噬 / done 收尾淡出） */
   const delState = (rel: string) => deletingMap?.get(rel)
   /** 删除动画行附加类（.kb-deleting 自带 position:relative + pointer-events:none） */
@@ -162,7 +164,10 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
   const startDrag = (e: React.DragEvent, relPath: string) => {
     e.dataTransfer.setData(DRAG_MIME, relPath)
     e.dataTransfer.effectAllowed = 'move'
+    setDragPath(relPath)
   }
+
+  const endDrag = () => setDragPath(null)
 
   const dropToDir = (e: React.DragEvent, dirRel: string) => {
     e.preventDefault()
@@ -193,19 +198,31 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
     return (
       <div
         key={e.relPath}
-        draggable
         data-wb-tree-node
         data-wb-tree-file="1"
         data-wb-tree-path={e.relPath}
-        onDragStart={(ev) => startDrag(ev, e.relPath)}
-        className={`kb-cv-row group flex min-h-[28px] items-center gap-1 rounded-md px-1.5 cursor-pointer select-none hover:bg-[var(--bg-hover)] ${activePath === e.relPath ? 'bg-[var(--bg-selected)]/40' : ''} ${focusActive && focusPath === e.relPath ? 'ring-1 ring-inset ring-[var(--accent)]/40' : ''}${delClass(e.relPath)}`}
+        className={`kb-cv-row group flex min-h-[28px] items-center gap-1 rounded-md px-1.5 cursor-pointer select-none hover:bg-[var(--bg-hover)] ${activePath === e.relPath ? 'bg-[var(--bg-selected)]/40' : ''} ${focusActive && focusPath === e.relPath ? 'ring-1 ring-inset ring-[var(--accent)]/40' : ''}${dragPath === e.relPath ? ' opacity-40' : ''}${delClass(e.relPath)}`}
         style={{ paddingLeft: 6 + depth * 12 }}
         onClick={() => { onSelectDir?.(parentDirOf(e.relPath)); onOpenFile(e) }}
         onContextMenu={(ev) => onContextMenu(ev, e)}
         title={e.relPath}
       >
         <span className="w-[13px] shrink-0" />
-        <FileIcon name={e.name} />
+        {/* 拖拽源收窄到行首图标（F-4）：整行可拖会让「点一下打开」变成「手一抖就移动文件」。
+            图标仍冒泡到行的 onClick（点图标 = 打开），只有从图标按下并拖动才进入拖拽。 */}
+        <span
+          draggable
+          className="kb-draggable inline-flex shrink-0 cursor-grab"
+          title="拖动移动"
+          onDragStart={(ev) => {
+            startDrag(ev, e.relPath)
+            const row = (ev.currentTarget as HTMLElement).parentElement
+            if (row) ev.dataTransfer.setDragImage(row, 12, 14)
+          }}
+          onDragEnd={endDrag}
+        >
+          <FileIcon name={e.name} />
+        </span>
         <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--text-primary)]">{base}</span>
         <FileExtBadge ext={ext} />
         {delState(e.relPath) === 'animating' && <DeleteWipe />}
@@ -251,17 +268,15 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
           />
         ) : (
           <div
-            draggable
             data-wb-tree-node
             data-wb-tree-dir="1"
             data-wb-tree-path={relPath}
-            onDragStart={(e) => startDrag(e, relPath)}
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(relPath) }}
             onDragLeave={() => setDragOver((p) => (p === relPath ? null : p))}
             onDrop={(e) => dropToDir(e, relPath)}
             className={`kb-cv-row group relative flex items-center gap-1 rounded-md px-1.5 min-h-[28px] cursor-pointer select-none hover:bg-[var(--bg-hover)] ${
               dragOver === relPath ? 'bg-[var(--accent)]/15 ring-1 ring-inset ring-[var(--accent)]/40' : ''
-            }${delClass(relPath)}`}
+            }${dragPath === relPath ? ' opacity-40' : ''}${delClass(relPath)}`}
             style={{ paddingLeft: 6 + depth * 12 }}
             onClick={() => { onSelectDir?.(relPath); onToggleDir(relPath) }}
             onContextMenu={(e) => onContextMenu(e, dirNode)}
@@ -280,7 +295,21 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
               size={13}
               className={`kb-chevron shrink-0 text-[var(--text-muted)] ${isOpen ? 'rotate-90' : ''}`}
             />
-            {isOpen ? <FolderOpen size={15} className="shrink-0 text-[var(--text-muted)]" /> : <Folder size={15} className="shrink-0 text-[var(--text-muted)]" />}
+            {/* 拖拽源收窄到文件夹图标（F-4）：点行仍是展开 / 收起，只有从图标拖动才移动 */}
+            <span
+              draggable
+              className="kb-draggable inline-flex shrink-0 cursor-grab"
+              title="拖动移动"
+              onDragStart={(e) => {
+                e.stopPropagation()
+                startDrag(e, relPath)
+                const row = (e.currentTarget as HTMLElement).parentElement
+                if (row) e.dataTransfer.setDragImage(row, 12, 14)
+              }}
+              onDragEnd={endDrag}
+            >
+              {isOpen ? <FolderOpen size={15} className="text-[var(--text-muted)]" /> : <Folder size={15} className="text-[var(--text-muted)]" />}
+            </span>
             <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--text-primary)]">{dirNode.name}</span>
             {delState(relPath) === 'animating' && <DeleteWipe />}
           </div>

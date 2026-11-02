@@ -295,6 +295,8 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
   const [slashSkills, setSlashSkills] = useState<SkillInfo[]>([])
   const [pickedSkill, setPickedSkill] = useState<SkillInfo | null>(null)
   const [compressing, setCompressing] = useState(false)
+  /** 同值的 ref：Enter 连按两下时第二次可能拿到旧闭包（state 尚未重渲染），闸门必须同步生效 */
+  const compressingRef = useRef(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null)
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
@@ -800,6 +802,12 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     // 其他宿主原样返回 raw）。返回空串 = 无可发送内容，取消本次发送
     const body = options.prepareBody ? options.prepareBody(raw) : raw
     if (!body) return
+    // 压缩期间禁止发送（v3.16.1 F-2）：闸门下沉到这里，按钮禁用只是第一道；
+    // 三宿主（右栏 / 工作台 / AI 教学）的 Enter 都必须被同一处挡住，否则普通文字会真的并发发出。
+    if (compressingRef.current) {
+      showToast({ type: 'info', message: '正在压缩对话历史，请稍候再发送' })
+      return
+    }
     flushScope()
     // N-3 会话级占锁：只有「本会话」在跑才拦（别的会话在跑互不影响，可并行）
     if (isSessionRunning(activeIdRef.current)) {
@@ -816,7 +824,7 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
       if (await handleChatCommand(body, {
         sessionId: draftSid ?? '',
         surface: options.surfaceOf ? options.surfaceOf() : 'assistant',
-        onProgress: p => setCompressing(p.active),
+        onProgress: p => { compressingRef.current = p.active; setCompressing(p.active) },
         // 提示型指令（/简报 等）：命中即把 prompt 当作用户消息发出（走正常 send 流程）
         onSend: (t) => { void sendRef.current?.(t) },
       })) {

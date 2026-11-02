@@ -5,6 +5,7 @@ import { QuizRecordContext, useQuizRecordStore } from '../../components/shared/Q
 import { MindMapView } from '../../components/shared/MindMapView'
 import { ImmersiveImageView } from '../../components/shared/image/ImmersiveImageView'
 import { ArtHtmlView } from './ArtHtmlView'
+import { useStripScroll, StripEdges } from '../../components/workbench/useStripScroll'
 import type { ArtTab } from './artifacts'
 
 /**
@@ -32,6 +33,8 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
   onOpenRef: (rel: string) => void
 }) {
   const tab = tabs.find(t => t.id === activeId) ?? null
+  /** 页签条横向溢出（v3.16.1 F-3）：复用页面条基建 —— 滚轮横滚 + 激活归位 + 边沿渐隐 */
+  const strip = useStripScroll(`${activeId ?? ''}|${tabs.length}`)
   // 工件栏里的题单也要能保存答题痕迹：只有 relPath，store 会反查 pageId（可能是 auto:）
   const quizStore = useQuizRecordStore({
     pageId: '',
@@ -85,24 +88,31 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
 
   return (
     <div className="h-full flex flex-col min-h-0 bg-[var(--bg-secondary)] border-l border-[var(--border-color)]">
-      {/* 页签条：icon+名称+✕；溢出横向滚动；生成中页签禁关（§2） */}
-      <div className="shrink-0 flex items-center gap-0.5 px-2 pt-1.5 pb-0 overflow-x-auto [scrollbar-width:none] select-none">
-        {tabs.map(t => (
-          <div key={t.id} onClick={() => onActivate(t.id)}
-            onMouseDown={e => { if (e.button === 1 && !t.generating) { e.preventDefault(); onClose(t.id) } }}
-            title={`${t.generating ? '生成中…' : t.name}${t.rel ? `\n${t.rel}` : ''}`}
-            className={`group shrink-0 flex items-center gap-1 px-2 py-1 rounded-t-lg border border-b-0 text-[11.5px] cursor-pointer whitespace-nowrap max-w-[170px] transition-colors ${
-              t.id === activeId ? 'bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] font-medium' : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>
-            {iconOf(t)}
-            <span className="truncate">{t.generating ? '生成中…' : t.name}</span>
-            {!t.generating && (
-              <button onClick={e => { e.stopPropagation(); onClose(t.id) }} title="关闭页签"
-                className="shrink-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"><X size={10} /></button>
-            )}
+      {/* 页签条：icon+名称+✕；溢出横向滚动；生成中页签禁关（§2）。
+          F-3：滚动区与固定动作（⤢）拆开 —— 否则页签一多，全屏按钮会跟着内容滚出视野。 */}
+      <div className="shrink-0 flex items-center gap-0.5 px-2 pt-1.5 pb-0 select-none">
+        <div className="relative flex min-w-0 flex-1 items-center">
+          <div ref={strip.setNode} className="kb-edge-strip flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
+            {tabs.map(t => (
+              <div key={t.id} onClick={() => onActivate(t.id)}
+                data-wb-active={t.id === activeId ? '1' : '0'}
+                onMouseDown={e => { if (e.button === 1 && !t.generating) { e.preventDefault(); onClose(t.id) } }}
+                title={`${t.generating ? '生成中…' : t.name}${t.rel ? `\n${t.rel}` : ''}`}
+                className={`group shrink-0 flex items-center gap-1 px-2 py-1 rounded-t-lg border border-b-0 text-[11.5px] cursor-pointer whitespace-nowrap max-w-[170px] transition-colors ${
+                  t.id === activeId ? 'bg-[var(--bg-primary)] border-[var(--border-color)] text-[var(--text-primary)] font-medium' : 'border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'}`}>
+                {iconOf(t)}
+                <span className="truncate">{t.generating ? '生成中…' : t.name}</span>
+                {!t.generating && (
+                  <button onClick={e => { e.stopPropagation(); onClose(t.id) }} title="关闭页签"
+                    className="shrink-0 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"><X size={10} /></button>
+                )}
+              </div>
+            ))}
           </div>
-        ))}
-        <div className="flex-1 min-w-[8px]" />
-        {/* 原位放大阅读切换（页签行右端，仿编辑器全屏）：占满内容区而非弹窗；Esc 同退出 */}
+          <StripEdges edges={strip.edges} />
+        </div>
+        {/* 原位放大阅读切换（页签行右端，仿编辑器全屏）：占满内容区而非弹窗；Esc 同退出。
+            F-3：按钮固定在滚动容器**外**，页签再多也始终可见。 */}
         {tab && !tab.generating && tab.rel && (
           <button onClick={() => onToggleExpanded(!expanded)} title={expanded ? '退出全屏阅读 (Esc)' : '全屏阅读：工件占满窗口（Esc 退出）'}
             className={`shrink-0 self-start mb-1 p-1 rounded-md transition-colors ${expanded ? 'bg-[var(--accent)]/15 text-[var(--accent)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'}`}>

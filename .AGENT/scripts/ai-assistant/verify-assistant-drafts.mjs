@@ -80,13 +80,13 @@ check('useAiAssistant 暴露 input / setInput',
 check('模块不再自己维护 draft state',
   !/const \[draft, setDraft\] = useState\(''\)/.test(mod) && !/setDraft\(/.test(mod))
 check('textarea 绑定 api.input / api.setInput',
-  /value=\{api\.input\}/.test(mod) && /onChange=\{\(e\) => api\.setInput\(e\.target\.value\)\}/.test(mod))
+  /value=\{api\.input\}/.test(mod) && /onChange=\{\(e\) => \{ api\.setInput\(e\.target\.value\)/.test(mod))
 check('发送按钮按 api.input 判空',
-  /disabled=\{!api\.input\.trim\(\)\}/.test(mod))
+  /disabled=\{.*!api\.input\.trim\(\)\}/.test(mod))
 check('handleSend 读 api.input',
-  /const text = api\.input\.trim\(\)/.test(mod))
+  /const (raw|text) = api\.input\.trim\(\)/.test(mod))
 check('发送前后清的是当前会话草稿（api.setInput）',
-  /if \(run\.kind === 'send'\) \{ api\.setInput\(''\); void api\.send\(run\.text\); return \}/.test(mod))
+  /if \(run\.kind === 'send'\) \{[\s\S]{0,80}?api\.setInput\(''\)[\s\S]{0,260}?void api\.send\(run\.text\)/.test(mod))
 
 console.log('\n[E. 行为语义]')
 check('草稿跟着 activeId 走：切 B 读 B 的槽位（inputKey 依赖 activeId）',

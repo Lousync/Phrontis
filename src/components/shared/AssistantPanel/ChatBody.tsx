@@ -637,7 +637,8 @@ export function ChatBody({ chat, variant, active, onExpand, onGoSettings, emptyH
                       // 回车等键序：@ 浮层优先 → slash 弹层 → 发送（各层自己 stopPropagation）
                       if (onAtKeys(e)) return
                       onSlashKeys(e)
-                      if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send() }
+                      // 中文输入法选词回车同样会派发 Enter：组合态必须放行给 IME（v3.16.1 F-2）
+                      if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send() }
                     }}
                     onKeyUp={e => {
                       // 方向键移动光标后重算 @ 检索词（↑↓ 被浮层拦下时不会走到这里）

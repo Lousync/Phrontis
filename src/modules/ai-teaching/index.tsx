@@ -1522,6 +1522,12 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   }, [syncSessionFiles, reloadCourse])
   // 切回本模块 Tab：回读一次（保活组件不卸载，isActive 是唯一「重新可见」信号）
   useEffect(() => { if (isActive) syncSessionFiles({ constraints: true }) }, [isActive, syncSessionFiles])
+  // 文件操作撤销 / 重做（v3.16.1 F-5）：等 fsWatcher 有约 1 秒延迟，这里立即重扫已加载目录
+  useEffect(() => {
+    const onFileOp = () => setTreeRefreshSeq(n => n + 1)
+    window.addEventListener('kb-fs-op-changed', onFileOp)
+    return () => window.removeEventListener('kb-fs-op-changed', onFileOp)
+  }, [])
 
   // ---------- P8 用户画像（§3.14；三层 = 三份仓库内 PROFILE.md，编辑一律跳编辑区——第三轮「C 移入仓库」拍板） ----------
   /** 12/13：最新一个未答 ```ask 块（只挂最新一条 assistant 回答里的；其后出现用户消息即视为已答）
@@ -3294,7 +3300,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
                         <SlashCommandMenu items={slashItems} activeIndex={slashActive} onHover={setSlashActive} onPick={pickSlash} />
                       )}
                       <textarea ref={inputRef} spellCheck={false} value={input} onChange={e => { setInput(e.target.value); setSlashActive(0) }}
-                        onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void doSend() } }}
+                        onKeyDown={e => { onSlashKeys(e); if (!e.defaultPrevented && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void doSend() } }}
                         disabled={courseReadonly}
                         rows={2} placeholder={courseReadonly ? '本段已收尾（只读）· 要补充请开新段' : quotes.length > 0 ? '针对引用内容提问…（Enter 发送）' : '粘贴资料或输入指令…（Enter 发送，/ 唤起指令）'}
                         className="w-full appearance-none px-0.5 py-1 text-[13px] resize-none outline-none bg-transparent! border-0! rounded-none! disabled:opacity-60" />

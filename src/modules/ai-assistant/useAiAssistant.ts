@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react'
-import type { AgentSessionInfo, AiChangePlan, ResumeInfo } from '../../types'
+import type { AgentSessionInfo, AiChangePlan, ResumeInfo, SkillInfo } from '../../types'
 import { useAssistantChat } from '../../components/shared/AssistantPanel/useAssistantChat'
 import type { UiMessage } from '../../components/shared/AssistantPanel/MessageList'
 
@@ -21,6 +21,13 @@ export interface AiAssistantApi {
   /** 当前会话的输入草稿（按会话独立；完整模块与侧栏 / 浮窗共用同一格） */
   input: string
   setInput: (v: string) => void
+  /** `/compress` 执行中（可能数十秒）：输入卡据此显示占位、禁用发送 */
+  compressing: boolean
+  /** 已安装 Skill（`/` 弹层的第二段候选） */
+  slashSkills: SkillInfo[]
+  /** 本轮显式生效的 Skill（输入卡 chip） */
+  pickedSkill: SkillInfo | null
+  setPickedSkill: Dispatch<SetStateAction<SkillInfo | null>>
   liveSteps: ReturnType<typeof useAssistantChat>['liveSteps']
   runMark: 'running' | 'failed' | 'unread' | null
   plan: AiChangePlan | null
@@ -77,6 +84,10 @@ export function useAiAssistant(isActive: boolean): AiAssistantApi {
     draft: chat.draft,
     input: chat.input,
     setInput: chat.setInput,
+    compressing: chat.compressing,
+    slashSkills: chat.slashSkills,
+    pickedSkill: chat.pickedSkill,
+    setPickedSkill: chat.setPickedSkill,
     liveSteps: chat.liveSteps,
     runMark: chat.runMark,
     plan: chat.plan,

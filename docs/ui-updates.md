@@ -2502,3 +2502,18 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 刷题模式仍只跑选择题；错题本里的简答记录改为「去原页重做」。
 
 **验收**：`verify-quiz-fence` / `verify-quiz-record` PASS；双 tsc 0 错；`npm run build` 通过。真机观感待验：长题单输入是否只重渲染当前卡、标题下状态条在窄窗是否折行。
+
+## 2026-11-02 · v3.16.1 反馈批：AI 助手斜杠菜单 / 压缩反馈 / 工件页签溢出 / 文件树拖拽把手
+
+**现状 / 用户反馈**：工作台 AI 助手输入卡敲 `/` 无弹层、`/compress` 期间零反馈；AI 教学工件栏页签一多就被裁、⤢ 按钮跟着滚出视野；共享文件树整行可拖，点文件夹容易变成移动文件；AI 教学资源管理器 Ctrl+Z 撤不回。
+
+**改动点**：
+- AI 助手输入卡接共享 `useSlashMenu` + `SlashCommandMenu`（指令 + Skill），补 Skill chip、压缩占位行、发送按钮禁用、IME 守卫；`useAssistantChat.send` 增加压缩闸门（三宿主共用）。
+- 工件栏页签条复用 `useStripScroll` / `StripEdges`（滚轮横滚 / 渐隐 / 激活归位），⤢ 移出滚动容器；页签加 `data-wb-active`。
+- `VaultTree` 的 `draggable` 从整行收窄到行首图标把手（文件 / 文件夹），拖动中源行 `opacity-40`；AI 教学 / 工作台 / 笔记区三处同时生效。
+- AI 教学资源管理器接入 `recordFileOp`（移动 / 重命名 / 新建），监听 `kb-fs-op-changed` 即时重扫；成功 toast 补「Ctrl+Z 可撤回」。
+- 帮助手册：文件树拖拽改为「拖行首图标」；`Ctrl+Z` 条目去掉「删除」并注明 AI 教学新建可撤回。
+
+**验收**：双 tsc 0 错；`npm run build` 通过；`verify-assistant-composer` 32、`verify-tree-drag-handle` 15、`verify-artifact-tabs` 12、`verify-renderer-crash-guard` 12、`verify-teach-tree-inline` 31、`verify-strip-overflow` 31、`verify-workbench-shell` 264 项全绿；`verify-help-retrieval` 171/171。
+
+**未做**：工件栏「全部页签」下拉 / 右键菜单 / 溢出计数；工作台与笔记区的新建操作仍不入撤销栈；渲染进程原生内存泄漏定位（F-1 只落了崩溃兜底）。
