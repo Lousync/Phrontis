@@ -46,8 +46,8 @@ ok(/app\.on\('second-instance', \(\) => \{[\s\S]{0,120}?showMainWindow\(\)/.test
   'B3 第二实例 / 任务栏唤起走同一入口')
 
 console.log('\n=== C. 崩溃事件接线 ===')
-ok(/webContents\.on\('render-process-gone'[\s\S]{0,320}?recoverCrashedRenderer\(win, 'crash'\)/.test(main),
-  'C1 render-process-gone 触发恢复')
+ok(/webContents\.on\('render-process-gone'[\s\S]{0,1200}?recoverCrashedRenderer\(win, 'crash'\)/.test(main),
+  'C1 render-process-gone 触发恢复（中间可插入内存取证，不阻断恢复）')
 ok(/if \(details\.reason === 'clean-exit'\) return/.test(main), 'C2 clean-exit 不触发恢复')
 ok(/__kbLogRendererGone\?\.\(details\)/.test(main), 'C3 原有崩溃日志留痕保留')
 

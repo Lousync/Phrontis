@@ -23,6 +23,15 @@ if (process.env.KNOWBASE_DISABLE_GPU === '1') {
 // 不影响功能，只是少占盘。必须在 app ready 之前设置。
 app.commandLine.appendSwitch('disk-cache-size', String(128 * 1024 * 1024))
 
+// ===== 原生内存取证开关（v3.16.1 F-1）=====
+// 默认关闭：`--enable-heap-profiling=native` 会给每次原生分配加采样钩子，开销与运行形态都会变，
+// 不适合常驻。需要复现「AI 教学长回合把渲染进程原生堆撑爆」时显式带上
+// `KNOWBASE_NATIVE_HEAP_PROFILE=1` 启动，再用 DevTools Memory → Native memory 取样。
+if (process.env.KNOWBASE_NATIVE_HEAP_PROFILE === '1') {
+  app.commandLine.appendSwitch('enable-heap-profiling', 'native')
+  console.log('[Memory] native heap profiling enabled (KNOWBASE_NATIVE_HEAP_PROFILE=1)')
+}
+
 // ===== Linux 显示后端守卫（2026-10-19）=====
 // 本项目只支持 X11 / XWayland。原生 Wayland 下这两块直接失效（本机实测）：
 //   · 窗口定位 —— dayPanelWindow 的贴顶停靠 / 桌面小组件、自绘边缘拖拽恢复走的都是 setBounds；
@@ -53,6 +62,10 @@ import { join, basename, resolve, sep } from 'path'
 import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdirSync, statSync, readdirSync, appendFileSync, renameSync, unlinkSync } from 'fs'
 import { Readable } from 'stream'
 import { assertSecretBoxRoundTrip, registerSecretBoxHandlers, secretStorageBackend } from '../lib/secretBox'
+import {
+  startRendererMemoryProbe, formatMemorySample, formatMetricsSnapshot,
+  type RendererMemoryProbe,
+} from '../lib/rendererMemoryProbe'
 import { registerPomodoroBroadcast } from './pomodoroState'
 import { initDesktopBridge } from '../lib/desktopBridge'
 import { registerEntryHandlers } from '../database/repositories/entryRepo'
@@ -212,6 +225,8 @@ const CRASH_LOG_MAX_BYTES = 2 * 1024 * 1024
     if (details.reason === 'clean-exit') return
     logCrash('render-process-gone', `reason=${details.reason} exitCode=${details.exitCode}`)
   }
+  // 供后续代码（内存采样 / 崩溃上下文）复用同一个轮转与落盘口径
+  ;(globalThis as any).__kbLogCrashLine = logCrash
 }
 
 // ===== Settings memory cache =====
@@ -271,6 +286,8 @@ if (!gotLock) {
 }
 
 let mainWindow: BrowserWindow | null = null
+/** 渲染进程原生内存采样（v3.16.1 F-1）：窗口级生命周期，见 lib/rendererMemoryProbe.ts */
+let rendererMemProbe: RendererMemoryProbe | null = null
 
 // ===== 渲染进程崩溃兜底（v3.16.1 F-1）=====
 // 透明无边框窗口在渲染进程死掉后没有内容可画，只剩一个透明圆角框；此前只打日志，
@@ -439,7 +456,15 @@ function createWindow(): void {
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     console.error('[Window] render-process-gone:', details)
     ;(globalThis as any).__kbLogRendererGone?.(details)
+    // 正常退出 / 正在退出不算崩溃：不记录内存上下文，避免每次关窗都往 crash-log 里加噪声
     if (details.reason === 'clean-exit' || isQuitting) return
+    // 原生内存取证（F-1）：进程已经没了，只能记录**崩溃前最后一次**采样与此刻的全进程 metrics。
+    // peak 值尤其关键 —— 崩溃后 RSS 会立刻归零，但 peak 还留着「涨到过多大」。
+    try {
+      const last = rendererMemProbe?.latest()
+      if (last) (globalThis as any).__kbLogCrashLine?.('renderer-mem-last', formatMemorySample(last))
+      ;(globalThis as any).__kbLogCrashLine?.('app-metrics-at-crash', formatMetricsSnapshot(app.getAppMetrics()))
+    } catch { /* 取证失败不影响恢复流程 */ }
     const win = mainWindow
     if (win && !win.isDestroyed()) recoverCrashedRenderer(win, 'crash')
   })
@@ -477,7 +502,15 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
+  // 渲染进程原生内存采样（F-1）：每 30 秒写 userData/renderer-mem.log，
+  // 崩溃时由上面的 render-process-gone 读「最后一次样本」一并写进 crash-log。
+  // 隐藏到托盘后仍继续（用户报告的场景正是应用在后台）。
+  rendererMemProbe?.stop()
+  rendererMemProbe = startRendererMemoryProbe(mainWindow)
+
   mainWindow.on('closed', () => {
+    rendererMemProbe?.stop()
+    rendererMemProbe = null
     mainWindow = null
     // 主窗口真正关闭（托盘「退出」路径）→ 销毁任务栏窗口，让退出流程收尾
     disposeDayPanel()

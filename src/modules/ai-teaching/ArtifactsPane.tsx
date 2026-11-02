@@ -70,7 +70,8 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
     const ro = new ResizeObserver(sync)
     ro.observe(el)
     const mo = new MutationObserver(sync)
-    mo.observe(el, { childList: true })
+    // characterData 也算：生成中 → 完成时页签文字变了，宽度可能跟着变
+    mo.observe(el, { childList: true, subtree: true, characterData: true })
     return () => {
       el.removeEventListener('scroll', sync)
       window.removeEventListener('resize', sync)
