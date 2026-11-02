@@ -2518,6 +2518,6 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 - 内存取证基建：每 30 秒把渲染进程 RSS / peak / JS heap 写入 `userData/renderer-mem.log`（1MB 轮转）；崩溃时把最后样本与全进程 metrics 写进 `crash-log.txt`；`KNOWBASE_NATIVE_HEAP_PROFILE=1` 可显式开启原生 heap profile。
 - 帮助手册：文件树拖拽改为「拖行首图标」；`Ctrl+Z` 覆盖「重命名 / 移动 / 新建」，删除走系统回收站不在此列；AI 教学课程模式补工件页签说明。
 
-**验收**：双 tsc 0 错；`npm run build` 通过；`verify-assistant-composer` 32、`verify-tree-drag-handle` 15、`verify-artifact-tabs` 27、`verify-renderer-crash-guard` 12、`verify-renderer-memory-probe` 27、`verify-teach-tree-inline` 31、`verify-strip-overflow` 31、`verify-workbench-shell` 266 项全绿；`verify-help-retrieval` 171/171。
+**验收**：双 tsc 0 错；`npm run build` 通过；`verify-assistant-composer` 32、`verify-tree-drag-handle` 15、`verify-artifact-tabs` 28、`verify-renderer-crash-guard` 12、`verify-renderer-memory-probe` 27、`verify-teach-tree-inline` 31、`verify-strip-overflow` 31、`verify-workbench-shell` 266 项全绿；`verify-help-retrieval` 171/171。
 
 **未做**：渲染进程原生内存泄漏的根因定位 —— 采样与崩溃上下文已就位，仍需一次真机长跑复现（100+ 步 agent 回合）把增长曲线与崩溃时刻对齐。

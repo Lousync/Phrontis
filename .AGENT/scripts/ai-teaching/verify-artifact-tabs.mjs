@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { stripComments } from '../shared/strip-comments.mjs'
+import { stripComments, walkSourceFiles } from '../shared/strip-comments.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = join(here, '../../..')
@@ -97,6 +97,23 @@ ok(/const canClose = \(t: ArtTab\) => !t\.generating/.test(pane),
   const teachIndex = read('src/modules/ai-teaching/index.tsx')
   ok(/artTabsRef\.current = nextTabs[\s\S]{0,80}?setArtTabs\(nextTabs\)/.test(teachIndex),
     'E5 closeArtTab 同步回填 artTabsRef（批量关闭不会互相覆盖）')
+}
+
+console.log('\n=== F. 同类哨兵：隐藏滚动条的条目条必须接 useStripScroll ===')
+{
+  // `.kb-edge-strip` 把滚动条藏掉是为了不占盒高；代价是「看不出能滚」。
+  // 任何新条目条使用它，就必须同时给滚轮接管 + 渐隐 + 激活归位，否则又回到 F-3 的老路。
+  const offenders = []
+  for (const file of walkSourceFiles(join(repo, 'src'), { exts: ['.tsx'] })) {
+    if (file.endsWith('useStripScroll.tsx')) continue // 基建自己
+    const src = stripComments(readFileSync(file, 'utf8').replace(/\r\n/g, '\n'))
+    if (!src.includes('kb-edge-strip')) continue
+    const wired = /useStripScroll\(/.test(src) && /ref=\{[^}]*set(?:Strip)?Node[^}]*\}/.test(src) && /<StripEdges/.test(src)
+    if (!wired) offenders.push(file.slice(repo.length + 1))
+  }
+  ok(offenders.length === 0,
+    'F1 所有 `.kb-edge-strip` 条目条都接了 useStripScroll（setNode + StripEdges）',
+    offenders.join('、'))
 }
 
 console.log('\n========================================')
