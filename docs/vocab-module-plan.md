@@ -266,3 +266,69 @@ builtin.vocab.words
 - **B-48 读单词功能疑似有问题**：用户 2026-11-02 反馈，具体表现待补充；按用户要求**本次只记录、不修复**，下次先复现再定位。详见 `docs/pending-fixes.md` B-48。
 - 当前嵌入版默认关闭发音播放 / 预取 / 按键音，是无音频设备环境下的临时稳定性处理，不代表 B-48 已解决。
 - 后续适配 / 优化候选：发音链路（本地 TTS 或可选在线发音）、词库裁剪与安装包体积、跨设备进度回灌、AI 造句一键入口 / 练习页沉淀。
+
+## 10. 原生模块化路线（暂缓，下一阶段）
+
+> 决策：v3.17.0 先用 iframe 快速落地；原生模块作为下一阶段，**不急于实施**。
+> 目标不是「把 qwerty-learner 源码搬进来」，而是把「打字背单词」重写成 Phrontis 的一等模块。
+
+### 10.1 目标
+
+- 统一 React 19 + Tailwind 4 + Phrontis 设计令牌，去掉 iframe 接缝。
+- 数据只走 Vault：词库 / 章节 / 每日记录 / 错词 / 统计都在 `.knowbase/modules/vocab/`，不再依赖 iframe IndexedDB。
+- 与左栏、右栏、桌面磁贴、命令面板、AI 助手、日程 / 打卡原生联动。
+- 去掉约 82MB 的 qwerty-learner 静态产物与 vendor / build 脚本，安装包回到正常体积。
+- 保留 qwerty-learner 的词库数据与 GPL-3.0 归属。
+
+### 10.2 不做什么
+
+- 不追求一次性 100% 复刻上游所有页面（Gallery / Analysis / ErrorBook 可分批）。
+- 不把逐字母时序全量写 Vault；只保留聚合统计，明细可选本地缓存。
+- 不在本期改 AI 工具协议（`builtin.vocab.words` 继续用）。
+
+### 10.3 模块结构（建议）
+
+```
+src/modules/vocab/
+  index.tsx                 # 原生模块壳：左栏 / 中央 / 右栏
+  views/TypingView.tsx      # 跟打 / 默写 / 复习
+  views/DictView.tsx        # 词库 / 章节选择
+  views/StatsView.tsx       # 今日 / 历史 / 错词
+  components/...
+  core/
+    typingEngine.ts         # 纯函数：输入判定 / 进度 / 错误统计
+    wordQueue.ts            # 章节切分 / 循环 / 复习队列
+    stats.ts                # 日 / 周聚合
+phrontis-core/src/kbStore/vocabVaultRepo.ts  # 扩展词库 / 章节 / 统计
+```
+
+### 10.4 分阶段
+
+| 阶段 | 内容 | 预估 |
+|---|---|---|
+| P0 | 打字判定 / 队列 / 统计抽成纯函数 + 契约脚本；词库 JSON 转 Phrontis 数据格式 | 1–2 天 |
+| P1 | 原生模块壳 + 词库 / 章节选择 + 跟打 + Vault 日记录 | 2–3 天 |
+| P2 | 默写 / 循环 / 错词本 / 今日统计 | 2–3 天 |
+| P3 | AI 造句复习入口 + 日程 / 打卡联动 + 右栏设置 | 1–2 天 |
+| P4 | 移除 iframe / vendor / resources/vocab，安装包瘦身 | 0.5–1 天 |
+| 合计 | 完整对齐上游核心体验 | 约 7–11 天 |
+
+### 10.5 迁移与回退
+
+- 用设置项 / 构建开关保留 iframe 版一个版本周期（如 `vocabEngine: 'iframe' | 'native'`），默认 iframe，native 稳定后切换。
+- Vault 日记录格式不变，原生模块直接复用；iframe 的 Dexie 明细不迁移，只保留 Vault 语义记录。
+- 原生模块上线后，`resources/vocab` 与 `scripts/build-vocab.mjs` 先保留一个版本，确认无回退需求再删除。
+
+### 10.6 风险
+
+- 功能 parity：上游的默写、循环、错题本、统计页较多，分批做。
+- 输入法 / 键盘布局 / 长词 / 大小写 / 标点等边界，需要纯函数 + 真机验证。
+- 词库数据体积与许可证：继续用 kajweb/dict 来源，保留 GPL-3.0 与来源说明。
+- 逐字母时序数据：原生版只存聚合，避免 Vault 膨胀；如需要图表，另建可选缓存。
+- 发音：原生版优先系统 TTS 或本地音频包，避免在线依赖与音频栈崩溃。
+
+### 10.7 验收
+
+- 双 tsc / build / 契约脚本通过。
+- 跟打、默写、错词、统计、AI 造句五条主链路可用。
+- 卸载 iframe 后安装包体积明显下降，且无 `vocab://` 协议残留。
