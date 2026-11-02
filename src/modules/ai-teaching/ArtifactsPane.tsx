@@ -52,6 +52,11 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
   const allTabsMenu = useAnchoredMenu(allTabsBtnRef, allTabsMenuRef, 248)
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null)
 
+  /** 页签关完后按钮会消失：把还挂着的下拉一并收掉，避免留下空菜单 */
+  useEffect(() => {
+    if (tabs.length === 0) allTabsMenu.close()
+  }, [tabs.length, allTabsMenu.close])
+
   useEffect(() => {
     const el = stripRef.current
     if (!el) return
@@ -181,22 +186,24 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
           <StripEdges edges={strip.edges} />
         </div>
         {/* 全部页签下拉（F-3 P1）：被裁掉的页签不必靠横滚找；有溢出时按钮上直接显示未显示数量 */}
-        <button
-          ref={allTabsBtnRef}
-          type="button"
-          onClick={allTabsMenu.toggle}
-          aria-expanded={allTabsMenu.open}
-          title={`全部页签（共 ${tabs.length} 个${hiddenTabs > 0 ? `，${hiddenTabs} 个未显示` : ''}）`}
-          className={`shrink-0 flex h-[22px] items-center gap-1 rounded-md px-1.5 text-[10.5px] tabular-nums transition-colors ${
-            allTabsMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
-          }`}
-        >
-          <Layers size={11} />
-          <span>{tabs.length}</span>
-          {hiddenTabs > 0 && (
-            <span className="rounded-full bg-[var(--accent)] px-1 text-[9px] leading-[13px] text-white">+{hiddenTabs}</span>
-          )}
-        </button>
+        {tabs.length > 0 && (
+          <button
+            ref={allTabsBtnRef}
+            type="button"
+            onClick={allTabsMenu.toggle}
+            aria-expanded={allTabsMenu.open}
+            title={`全部页签（共 ${tabs.length} 个${hiddenTabs > 0 ? `，${hiddenTabs} 个未显示` : ''}）`}
+            className={`shrink-0 flex h-[22px] items-center gap-1 rounded-md px-1.5 text-[10.5px] tabular-nums transition-colors ${
+              allTabsMenu.open ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            <Layers size={11} />
+            <span>{tabs.length}</span>
+            {hiddenTabs > 0 && (
+              <span className="rounded-full bg-[var(--accent)] px-1 text-[9px] leading-[13px] text-white">+{hiddenTabs}</span>
+            )}
+          </button>
+        )}
         {/* 原位放大阅读切换（页签行右端，仿编辑器全屏）：占满内容区而非弹窗；Esc 同退出。
             F-3：按钮固定在滚动容器**外**，页签再多也始终可见。 */}
         {tab && !tab.generating && tab.rel && (
