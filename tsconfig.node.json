@@ -3,6 +3,9 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    // 允许相对导入写全 .ts 扩展：契约脚本（node --experimental-strip-types）要直接
+    // import 纯层文件（如 phoneCompanion/protocol.ts / server.ts），Node ESM 必须带扩展名
+    "allowImportingTsExtensions": true,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

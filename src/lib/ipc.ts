@@ -333,6 +333,14 @@ export const lanShareRemoveOutbox = (name: string) => a().lanShareRemoveOutbox(n
 export const lanShareAddToOutbox = (data: { path: string }) => a().lanShareAddToOutbox(data)
 export const lanShareClearOutbox = () => a().lanShareClearOutbox()
 
+// ===== 手机伴侣（工具箱）：局域网常驻同步服务 =====
+export const companionStart = (opts?: { port?: number }) => a().companionStart(opts)
+export const companionStop = () => a().companionStop()
+export const companionStatus = () => a().companionStatus()
+export const companionNewPairCode = () => a().companionNewPairCode()
+export const companionQr = (text: string) => a().companionQr(text)
+export const companionRevoke = (deviceId: string) => a().companionRevoke(deviceId)
+
 // ===== 编辑器工作区（Vault 仓库）文件服务 =====
 export const workspaceOpenDir = () => a().workspaceOpenDir()
 export const workspaceInitPendingVault = (accept: boolean) => a().workspaceInitPendingVault(accept)

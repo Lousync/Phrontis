@@ -802,6 +802,13 @@ const api = {
   lanShareRemoveOutbox: (name: string) => ipcRenderer.invoke('lanShare:removeOutbox', name),
   lanShareAddToOutbox: (data: { path: string }) => ipcRenderer.invoke('lanShare:addToOutbox', data),
   lanShareClearOutbox: () => ipcRenderer.invoke('lanShare:clearOutbox'),
+  // 手机伴侣（工具箱）：局域网常驻同步服务
+  companionStart: (opts?: { port?: number }) => ipcRenderer.invoke('companion:start', opts),
+  companionStop: () => ipcRenderer.invoke('companion:stop'),
+  companionStatus: () => ipcRenderer.invoke('companion:status'),
+  companionNewPairCode: () => ipcRenderer.invoke('companion:newPairCode'),
+  companionQr: (text: string) => ipcRenderer.invoke('companion:qr', text),
+  companionRevoke: (deviceId: string) => ipcRenderer.invoke('companion:revoke', deviceId),
   // 编辑器工作区（Vault 仓库）：文件服务
   workspaceOpenDir: () => ipcRenderer.invoke('ws:openDir'),
   workspaceInitPendingVault: (accept: boolean) => ipcRenderer.invoke('ws:initPendingVault', accept),

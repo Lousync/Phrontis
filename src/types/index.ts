@@ -1743,6 +1743,23 @@ export interface LanShareStatus {
   remainingMs: number
   startedAt: number
 }
+// 手机伴侣（phoneCompanion，工具箱）：局域网常驻同步服务，对端 Phrontis-mobile 仓库
+export interface CompanionDevice {
+  deviceId: string
+  name: string
+  pairedAt: number
+  lastSeenAt: number
+}
+export interface CompanionStatus {
+  running: boolean
+  port: number
+  /** 配对链接（含 #配对码），首个用于出二维码 */
+  urls: string[]
+  /** 8 位配对码，10 分钟有效、一次配对即作废；过期/未运行为空串 */
+  pairCode: string
+  pairCodeExpiresAt: number
+  devices: CompanionDevice[]
+}
 // Web 剪藏服务状态（工具箱「网页剪藏」面板）
 export interface ClipperStatus {
   running: boolean
@@ -2455,6 +2472,13 @@ export interface ElectronAPI {
   lanShareRemoveOutbox: (name: string) => Promise<{ ok: boolean }>
   lanShareAddToOutbox: (data: { path: string }) => Promise<{ ok: boolean; name: string }>
   lanShareClearOutbox: () => Promise<{ ok: boolean }>
+  // phone companion (手机伴侣, toolbox)
+  companionStart: (opts?: { port?: number }) => Promise<CompanionStatus>
+  companionStop: () => Promise<CompanionStatus>
+  companionStatus: () => Promise<CompanionStatus>
+  companionNewPairCode: () => Promise<CompanionStatus>
+  companionQr: (text: string) => Promise<string>
+  companionRevoke: (deviceId: string) => Promise<{ ok: boolean }>
   // 编辑器工作区（Vault 仓库）：文件服务
   // D7：选中目录顶层无 .knowbase 时返回 notVault（待确认初始化），不静默建仓库
   workspaceOpenDir: () => Promise<VaultOpenResult | null>

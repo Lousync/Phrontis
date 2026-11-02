@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react'
 import {
   Shield, Globe, Archive, Wifi, Scissors, Timer, CalendarCheck2, BellRing, FileText,
-  ArrowLeft,
+  ArrowLeft, Smartphone,
 } from 'lucide-react'
 import { PluginIcon } from '../shared/ModuleIcons'
 import { PasswordVault } from '../../modules/toolbox/components/PasswordVault'
@@ -10,6 +10,7 @@ import { BookmarkNav } from '../../modules/toolbox/components/bookmark-nav'
 import { RemoteSupervise } from '../../modules/toolbox/components/remote-supervise'
 import { ExportTool } from '../../modules/toolbox/components/export/ExportTool'
 import { LanShare } from '../../modules/toolbox/components/lan-share'
+import { PhoneCompanion } from '../../modules/toolbox/components/phone-companion'
 import { WebClipper } from '../../modules/toolbox/components/web-clipper'
 import { PluginFrame } from '../shared/PluginFrame'
 import { showToast } from '../../lib/toast'
@@ -44,6 +45,7 @@ export const BUILTIN_TOOLS: ToolMeta[] = [
   { id: 'bookmark-nav', name: '网址导航', group: 'data', color: '#4f6ef2', Icon: Globe },
   { id: 'data-export', name: '数据导出', group: 'data', color: '#3fae6a', Icon: Archive },
   { id: 'lan-share', name: '设备传输', group: 'data', color: '#e8842c', Icon: Wifi },
+  { id: 'phone-companion', name: '手机伴侣', group: 'data', color: '#3794ff', Icon: Smartphone },
   { id: 'web-clipper', name: '网页剪藏', group: 'data', color: '#a06be0', Icon: Scissors },
   { id: 'pomodoro', name: '番茄钟', group: 'prod', color: '#4f6ef2', Icon: Timer },
   { id: 'habit-tracker', name: '习惯打卡', group: 'prod', color: '#3fae6a', Icon: CalendarCheck2 },
@@ -122,6 +124,8 @@ export function ToolHost({ toolId, onBack, sidebarEl, sidebarHosted }: { toolId:
       return <ExportTool onBack={onBack} sidebarEl={sidebarEl} sidebarHosted={sidebarHosted} />
     case 'lan-share':
       return <LanShare onBack={onBack} />
+    case 'phone-companion':
+      return <PhoneCompanion onBack={onBack} />
     case 'web-clipper':
       return <WebClipper onBack={onBack} />
     default:

@@ -153,6 +153,7 @@ npm run pack     # build + electron-builder 打包 → 产物落 packs/<版本�
 | v3.4.0 正式版体验反馈 | `docs/v3.4.0-feedback.md`（`F-n` 缺陷/落差 · `N-n` 新需求，编号各从 1 起；beta 前身已归档 DP `Phrontis/过程记录/v3.4.0-beta-feedback.md`） |
 | AI 教学互动性改造计划（3.5.0） | `docs/ai-teaching-interactivity-plan.md` |
 | 设计文档 / 原型去哪了 | `docs/DESIGN-ARCHIVE.md` —— 已落码或已搁置的方案与原型统一归档在独立库 **DesignProcess** |
+| 手机端（Phrontis Mobile） | 独立仓库 `E:\Projects\Phrontis-mobile`（远端 `Lousync/Phrontis-mobile`，私有）—— 方案在其 `docs/design.md`，可交互原型在其 `prototype/index.html`；桌面侧待办是「手机伴侣」服务（lanShare 演化，见其方案 §2.2/§8） |
 
 **已评估暂缓、勿重复调研**：语音输入 ASR（方案已论证到落码级；设计稿与同类搁置项在 DP `Phrontis/搁置功能与想法/`）。
 
