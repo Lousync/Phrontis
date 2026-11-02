@@ -96,7 +96,7 @@ ok(new Set(ids).size === ids.length, 'A2 APP_MODULES 内 id 无重复')
 // 2026-10-08 v3.5.0：19 项（+terminal +accounting）。两者都是「工作台内模块」——
 // bar:false（入口在左栏书签）/ tile:true / palette:true，同笔记/日程形态，快照同样不受影响。
 // 2026-10-15 v3.9.0：20 项（+aiAssistant）。工作台内模块，bar:false / tile:true / palette:false。
-ok(ids.length === 21, 'A2b APP_MODULES 覆盖 21 个 TabName（v3.4.0：-desktop -user +bookshelf +aiChat +graph；aaff952 再 -editor；2026-09-22 +bookMarket；2026-09-27 +dashboard；2026-10-08 +terminal +accounting；2026-10-15 +aiAssistant；2026-10-16 +usage）', `实际 ${ids.length}`)
+ok(ids.length === 23, 'A2b APP_MODULES 覆盖 23 个 TabName（v3.4.0：-desktop -user +bookshelf +aiChat +graph；aaff952 再 -editor；2026-09-22 +bookMarket；2026-09-27 +dashboard；2026-10-08 +terminal +accounting；2026-10-15 +aiAssistant；2026-10-16 +usage；2026-10-25 +intel；2026-11-02 v3.17.0 +vocab）', `实际 ${ids.length}`)
 ok(!ids.includes('desktop') && !ids.includes('user'), 'A2c 已删除的 desktop/user 不再出现在清单')
 ok(BAR_MODULE_IDS.every((id) => ids.includes(id)), 'A3 BAR_MODULE_IDS ⊆ APP_MODULES')
 ok(!APP_MODULES.some((m) => 'startable' in m),
@@ -187,7 +187,7 @@ console.log('\n=== G. v3.4.0 口径快照（锁定新顺序，防后续误动）
 // 2026-10-15 v3.9.0：+aiAssistant（紧随 aiTeaching，工作台内模块，tile:true）。
 // 2026-10-16 v3.9.0：+usage（追加在 bookMarket 后，整窗独占模块，tile:true）。
 const V340_TILE_ORDER = ['knowledge', 'blog', 'schedule', 'moments', 'aiTeaching', 'aiAssistant', 'toolbox',
-  'terminal', 'accounting', 'plugins', 'bookMarket', 'usage', 'recycle', 'help', 'releaseNotes', 'settings']
+  'terminal', 'accounting', 'vocab', 'intel', 'plugins', 'bookMarket', 'usage', 'recycle', 'help', 'releaseNotes', 'settings']
 ok(TILE_MODULE_IDS.join(',') === V340_TILE_ORDER.join(','),
   'G1 磁贴模块清单与 v3.4.0 口径一致', `\n     期望 ${V340_TILE_ORDER.join(',')}\n     实际 ${TILE_MODULE_IDS.join(',')}`)
 
@@ -198,7 +198,7 @@ ok(TILE_MODULE_IDS.join(',') === V340_TILE_ORDER.join(','),
 // 2026-10-08 v3.5.0：+terminal +accounting（同上面 G1）。
 // 2026-10-16 v3.9.0：+usage（整窗独占模块但 palette:true，可在命令面板直达）。
 const V340_PALETTE = ['knowledge', 'blog', 'schedule', 'moments', 'aiTeaching', 'toolbox',
-  'terminal', 'accounting', 'plugins', 'bookMarket', 'usage', 'recycle', 'help', 'settings']
+  'terminal', 'accounting', 'vocab', 'intel', 'plugins', 'bookMarket', 'usage', 'recycle', 'help', 'settings']
 const newPalette = PALETTE_MODULES.map((m) => m.id)
 ok(newPalette.join(',') === V340_PALETTE.join(','),
   'G3 命令面板清单与 v3.4.0 口径一致（desktop/user 已移除，三个新 Tab 不进面板）',

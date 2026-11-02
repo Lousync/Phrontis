@@ -49,7 +49,7 @@ if (process.platform === 'linux') {
 // 改名会让存量 API Key / 密码本全部「无法解密」。正确做法是让 .desktop 的
 // StartupWMClass 去匹配窗口实际 WM_CLASS（package.json name = knowbase，故写 knowbase），
 // 匹配成功后 GNOME 显示的是 .desktop 的 Name=Phrontis 与 Icon=phrontis。
-import { join, basename, resolve, sep } from 'path'
+import { join, basename, resolve, sep, extname } from 'path'
 import { readFileSync, writeFileSync, existsSync, createReadStream, cpSync, mkdirSync, statSync, readdirSync, appendFileSync, renameSync, unlinkSync } from 'fs'
 import { Readable } from 'stream'
 import { assertSecretBoxRoundTrip, registerSecretBoxHandlers, secretStorageBackend } from '../lib/secretBox'
@@ -76,6 +76,7 @@ import { registerShareCardHandlers } from '../database/repositories/shareCardRep
 import { registerBookmarkHandlers } from '../database/repositories/bookmarkRepo'
 import { registerPetHandlers } from '../database/repositories/petRepo'
 import { registerAccountingHandlers } from '../database/repositories/accountingRepo'
+import { registerVocabHandlers } from '../database/repositories/vocabRepo'
 import { registerSuperviseHandlers } from '../database/repositories/superviseRepo'
 import { registerSummaryHandlers } from '../database/repositories/summaryRepo'
 import { registerBlogTemplateHandlers } from '../database/repositories/blogTemplateRepo'
@@ -140,6 +141,9 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'attachment', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
   { scheme: 'plugin', privileges: { standard: true, secure: true, supportFetchAPI: true } },
   { scheme: 'kbview', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  // 背单词（v3.17.0）：qwerty-learner 静态构建产物。standard + secure 才有独立 origin，
+  // 其 IndexedDB / localStorage 才能持久化（iframe 加 allow-same-origin，但仍是跨源，碰不到宿主）。
+  { scheme: 'vocab', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
 ])
 
 // ===== 数据隔离：开发版（npm run dev）使用独立 userData 目录 =====
@@ -1115,6 +1119,63 @@ app.whenReady().then(async () => {
     }
   })
 
+  // 背单词页面协议：vocab://app/{file}（v3.17.0）
+  // 服务 qwerty-learner 静态构建产物；与 plugin:// 不同，这里是**内置第一方内容**，
+  // 因此 iframe 侧允许 allow-same-origin 以获得独立 origin 的 IndexedDB/localStorage。
+  // 安全：路径逐段校验不越出 vocab 根；CSP 只放行自身资源（嵌入模式默认不联网，
+  // 发音 / 按键音已关闭）；禁 frame / object / 表单提交；不继承宿主页面的 CSP。
+  protocol.handle('vocab', async (request) => {
+    try {
+      const url = new URL(request.url)
+      const rel = decodeURIComponent(url.pathname).replace(/^\//, '') || 'index.html'
+      const root = app.isPackaged
+        ? join(process.resourcesPath, 'vocab')
+        : join(app.getAppPath(), 'resources', 'vocab')
+      const rootWithSep = root.endsWith(sep) ? root : root + sep
+      let file = resolve(root, rel)
+      if (!file.startsWith(rootWithSep)) return new Response('Forbidden', { status: 403 })
+      if (!existsSync(file) || !statSync(file).isFile()) {
+        // SPA 兜底：无扩展名的路径回 index.html（HashRouter 下通常用不到）
+        if (!extname(rel)) {
+          file = join(root, 'index.html')
+          if (!existsSync(file)) return new Response('Not Found', { status: 404 })
+        } else {
+          return new Response('Not Found', { status: 404 })
+        }
+      }
+      const ext = extname(file).slice(1).toLowerCase()
+      const mimeMap: Record<string, string> = {
+        html: 'text/html', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css',
+        json: 'application/json', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg',
+        jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', ico: 'image/x-icon',
+        woff2: 'font/woff2', woff: 'font/woff', ttf: 'font/ttf', mp3: 'audio/mpeg',
+        wav: 'audio/wav', ogg: 'audio/ogg', txt: 'text/plain',
+      }
+      return new Response(Readable.toWeb(createReadStream(file)) as unknown as BodyInit, {
+        headers: {
+          'Content-Type': mimeMap[ext] || 'application/octet-stream',
+          'Cache-Control': app.isPackaged ? 'public, max-age=3600' : 'no-cache',
+          'Content-Security-Policy': [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data: blob:",
+            "media-src 'self' data:",
+            "connect-src 'self'",
+            "font-src 'self' data:",
+            "frame-src 'none'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'none'",
+          ].join('; '),
+        },
+      })
+    } catch (e) {
+      console.error('[vocab://] handler error:', request.url, e)
+      return new Response('Bad Request', { status: 400 })
+    }
+  })
+
   // AI 教学示意图渲染协议 kbview://vault/<rel>.html（工件栏沙箱 iframe；白名单/CSP 见 kbVisualProtocol.ts 头注释）
   registerKbVisualProtocol((key) => settingsCache[key])
 
@@ -1280,6 +1341,7 @@ app.whenReady().then(async () => {
   registerBookmarkHandlers()
   registerPetHandlers()
   registerAccountingHandlers()
+  registerVocabHandlers()
   // 情报模块（v3.12.0，docs/intel-module-plan.md）：6 通道，业务在 lib/intel/intelStore
   registerIntelHandlers({ getSettingValue: (key) => settingsCache[key] })
   registerSuperviseHandlers()

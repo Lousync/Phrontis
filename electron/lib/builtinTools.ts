@@ -48,6 +48,7 @@ import { intelItemsAll, intelSetAiRec, intelSetAiFilter } from './intel/intelSto
 import { INTEL_QUERY_SCHEMA, INTEL_SET_REC_SCHEMA, INTEL_SET_FILTER_SCHEMA } from './intel/toolSchemas'
 import type { ScheduleWorkflow, ScheduleWorkflowStageInput } from '../../src/types'
 import { vaultAccountingImport, vaultAccountingQuery, vaultAccountingBalances } from 'phrontis-core/kbStore/accountingVaultRepo'
+import { vaultVocabReviewWords } from 'phrontis-core/kbStore/vocabVaultRepo'
 // 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
 // 依赖方向已核：pluginEvents 的依赖树不反向 import 本模块，无循环。
 import { emitPluginEvent } from './pluginEvents'
@@ -1756,6 +1757,57 @@ export function registerBuiltinTools(): void {
     module: 'accounting',
   }, () => vaultAccountingBalances())
 
+  // 12e. builtin.vocab.words —— 背单词：今天 + 近 N 天错词（读）
+  // 造句复习的默认数据源；description 里明确「先出题、后批改」，避免模型一次性把答案说完。
+  registerTool({
+    name: 'builtin.vocab.words',
+    title: '查询背单词记录',
+    description: '读取今天和近 N 天背过的单词（释义/错次/词库/章节），用于造句、复习、总结。出造句题时先只给题目，等用户作答后再批改，不要直接给答案。默认今天 + 近 7 天错词。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: '基准日期 YYYY-MM-DD，省略=今天' },
+        wrongDays: { type: 'number', description: '近 N 天错词也纳入，默认 7；0=只看当天' },
+        onlyWrong: { type: 'boolean', description: '只返回错过的词' },
+        limit: { type: 'number', description: '最多返回词数，默认 50，最大 200' },
+      },
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    tier: 'ondemand',
+    module: 'vocab',
+  }, args => {
+    const res = vaultVocabReviewWords({
+      date: /^\d{4}-\d{2}-\d{2}$/.test(str(args.date)) ? str(args.date) : undefined,
+      wrongDays: num(args.wrongDays, 7),
+      onlyWrong: args.onlyWrong === true,
+      limit: num(args.limit, 50),
+    })
+    return {
+      date: res.date,
+      range: res.range,
+      count: res.count,
+      words: res.words.map(w => ({
+        word: w.word,
+        trans: w.trans,
+        phonetic: w.phonetic,
+        dict: w.dict,
+        chapter: w.chapter,
+        correctCount: w.correctCount,
+        wrongCount: w.wrongCount,
+        sources: w.sources,
+      })),
+      sessions: res.sessions.map(s => ({
+        dict: s.dict,
+        chapter: s.chapter,
+        wordCount: s.wordCount,
+        correctCount: s.correctCount,
+        wrongCount: s.wrongCount,
+      })),
+    }
+  })
+
   // 13. builtin.web.search —— 联网搜索（跨模块通用能力，不设 module：不受 aiModulePermissions 限制）
   registerTool({
     name: 'builtin.web.search',
@@ -1902,7 +1954,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / vocab.words / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {

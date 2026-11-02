@@ -2,6 +2,7 @@ import type { ElectronAPI, Entry, EntryFilter, CreateEntryDTO, UpdateEntryDTO, T
 import type { SettingsKey, SettingsValue, AppSettings } from './settings'
 import { SETTINGS_DEFAULTS } from './settings'
 import type { AccountingTransaction, AccountingCategory, AccountingAccount, AccountingRecurring, AccountingParseOutcome, AccountingImportOutcome, CreateAccountingInput, CreateAccountingRecurringInput, AccountingRecurringSettleResult } from '../types'
+import type { VocabDayRecord, VocabReviewOptions, VocabReviewResult, VocabSessionInput } from '../types'
 import type { ProviderQuotaView } from '../types'
 import type { UsageWindow, UsageDashboardView } from '../types'
 import type { CreateScheduleWorkflowDTO, ScheduleWorkflowCheckpointInput, ScheduleWorkflowStageInput, UpdateScheduleWorkflowDTO } from '../types'
@@ -534,6 +535,11 @@ export interface PeriodStats {
   habitDetails: HabitPeriodStat[]
 }
 export const getBlogPeriodStats = (start: string, end: string): Promise<PeriodStats> => a().getBlogPeriodStats(start, end)
+
+// ===== 背单词（vocab，v3.17.0） =====
+export const vocabGetDay = (date: string): Promise<VocabDayRecord | null> => a().vocabGetDay(date)
+export const vocabRecordSession = (input: VocabSessionInput): Promise<VocabDayRecord> => a().vocabRecordSession(input)
+export const vocabReviewWords = (opts?: VocabReviewOptions): Promise<VocabReviewResult> => a().vocabReviewWords(opts)
 
 // ===== 记账（accounting） =====
 export const accountingGetAll = (): Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[]; recurring: AccountingRecurring[] }> => a().accountingGetAll()

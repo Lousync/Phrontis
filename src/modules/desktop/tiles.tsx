@@ -14,7 +14,7 @@ import {
   ListTodo, CalendarCheck, FileClock, PieChart, FolderTree, MessageSquare,
   BookOpen, Trash2, LifeBuoy, History, FlaskConical, LayoutGrid,
   Clock, CalendarDays, Activity, ChevronLeft, ChevronRight,
-  SquareTerminal, Wallet,
+  SquareTerminal, Wallet, Languages, Radar,
 } from 'lucide-react'
 import {
   EditorIcon, BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon,
@@ -673,6 +673,10 @@ const TILE_META: Record<string, { desc: string; icon: (size: number) => ReactNod
   // v3.5.0 终端 / 记账（工作台内模块，同笔记/日程形态；图标与左栏书签同一对 lucide 图标）
   terminal: { desc: '内置终端 · 多会话', icon: (s) => <SquareTerminal size={s} /> },
   accounting: { desc: '流水 / 统计 / 复盘', icon: (s) => <Wallet size={s} /> },
+  // v3.17.0 背单词：打字记忆 + AI 造句复习
+  vocab: { desc: '打字背单词 · AI 造句复习', icon: (s) => <Languages size={s} /> },
+  // v3.12.0 情报：源过滤 + AI 推荐
+  intel: { desc: '情报源 / AI 推荐', icon: (s) => <Radar size={s} /> },
   // v3.9.0 AI助手：圈定范围让 AI 整理仓库（读 + 改，改动先预览）
   aiAssistant: { desc: 'AI 整理仓库', icon: (s) => <AiAssistantIcon size={s} /> },
   plugins: { desc: '已装插件管理', icon: (s) => <PluginIcon size={s} /> },

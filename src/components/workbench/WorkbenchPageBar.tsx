@@ -1,5 +1,5 @@
 import { Fragment, useRef, useState } from 'react'
-import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical, FileQuestion, Radar } from 'lucide-react'
+import { X, BookText, Calendar, BookOpen, BookMarked, NotebookPen, HelpCircle, History, Settings, Trash2, Wrench, MessageCircle, GraduationCap, PenLine, Bot, Network, FlaskConical, FileQuestion, Radar, Languages } from 'lucide-react'
 import { PluginIcon, BookMarketIcon, UsageIcon } from '../shared/ModuleIcons'
 import type { TabName } from '../../types'
 import { labelOf } from '../../lib/appModules'
@@ -45,6 +45,8 @@ const TAB_ICONS: Record<string, React.ReactNode> = {
   quiz: <FileQuestion size={14} />,
   // 情报（v3.12.0）：feed 主页签与文章页签共用雷达图标（文章页签走动态 id，见下方 tabLabel/tabIcon 分支）
   intel: <Radar size={14} />,
+  // 背单词（v3.17.0）
+  vocab: <Languages size={14} />,
 }
 
 /** 未收录模块的兜底图标（新增 Tab 忘配图标时不出空白） */

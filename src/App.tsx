@@ -45,6 +45,7 @@ import type { SummaryKind } from './lib/summary'
 import { ScheduleModule } from './modules/schedule'
 import { ScheduleUiProvider } from './modules/schedule/ScheduleUiContext'
 import { AccountingModule } from './modules/accounting'
+import { VocabModule } from './modules/vocab'
 import { ACCOUNTING_EDIT_EVENT, ACCOUNTING_NEW_EVENT, ACCOUNTING_RECUR_NEW_EVENT, ACCOUNTING_RECUR_EDIT_EVENT } from './modules/accounting/shared'
 // 情报（v3.12.0）：工作台内 Tab + 动态文章页签（intel-a:<itemId>）
 import { IntelModule } from './modules/intel'
@@ -1725,6 +1726,8 @@ export default function App() {
         : <ModuleLoadingFallback />
       // 记账：工作台内 Tab，中央三视图 + 左栏模块侧栏 portal；录入/导入在右栏「记账」面板
       case 'accounting': return <AccountingModule isActive={on} sidebarEl={on && railModule === 'accounting' ? wbModSlotEl : null} sidebarHosted={on} />
+      // 背单词（v3.17.0）：iframe 保活挂载，切走不卸载当前章节；左栏模块态展示今日词表
+      case 'vocab': return <VocabModule isActive={on} sidebarEl={on && railModule === 'vocab' ? wbModSlotEl : null} />
       // 情报（v3.12.0）：工作台内 Tab，feed 主页 + 左栏源过滤侧栏 portal；文章页签走动态 id（§6.2）
       case 'intel': return <IntelModule isActive={on} sidebarEl={on && railModule === 'intel' ? wbModSlotEl : null} sidebarHosted={on} onOpenArticle={handleOpenIntelArticle} onOpenSettings={() => handleTabChange('settings')} onExpandAssistant={handleExpandIntelAssistant} />
       case 'settings': return <SettingsModule />

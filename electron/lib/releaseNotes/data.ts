@@ -4,11 +4,49 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：66
+ * 版本数：67
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.17.0",
+    "date": "2026-11-02",
+    "summary": "本版一句话：新增「背单词」模块，内置 qwerty-learner 的打字背单词体验；每章记录写入 Vault，全局 AI 助手可以用「今天 + 近 7 天错词」造句复习。",
+    "groups": [
+      {
+        "title": "背单词",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "内置 qwerty-learner",
+            "rest": "左侧书签 / 桌面磁贴 / 命令面板三处入口；完整保留词库、跟打、默写、错题本与统计。",
+            "sub": []
+          },
+          {
+            "lead": "本地离线",
+            "rest": "静态产物随安装包分发，不依赖 qwerty-learner 官网；已移除 mixpanel / Vercel Analytics 上报，隐藏捐赠与推广。",
+            "sub": []
+          },
+          {
+            "lead": "Vault 记录",
+            "rest": "每章结束把词、释义、错次、词库/章节写入 `.knowbase/modules/vocab/days/YYYY-MM-DD.json`；同一章重复完成不会重复计数。",
+            "sub": []
+          },
+          {
+            "lead": "AI 造句复习",
+            "rest": "新增 `builtin.vocab.words` 只读工具，默认取今天 + 近 7 天错词；在全局 AI 助手里说「用今天背的单词造句复习」即可出题、作答后批改。",
+            "sub": []
+          },
+          {
+            "lead": "主题跟随",
+            "rest": "嵌入页跟随 Phrontis 深浅色；嵌入模式默认关闭发音播放与按键音（避免无音频设备环境崩溃），词库 / 跟打 / 记录不受影响。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.16.0",
     "date": "2026-10-29",
