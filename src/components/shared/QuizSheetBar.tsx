@@ -1,7 +1,10 @@
 import { useMemo } from 'react'
-import { ListChecks, RotateCcw } from 'lucide-react'
+import { ClipboardCopy, ListChecks, RotateCcw } from 'lucide-react'
 import type { QuizItem } from './QuizParser'
 import { useQuizRecords, type QuizRecordStore } from './QuizRecordStore'
+import { copyText } from '../../lib/ipc'
+import { showToast } from '../../lib/toast'
+import { buildAnswerExport } from './quizAnswerExportPure'
 
 /**
  * 题单状态条：阅读态标题下的一条紧凑栏。
@@ -22,9 +25,28 @@ export function QuizSheetBar({ quizzes, store, onReview }: {
     const r = byNo.get(q.no)
     return r?.lastResult == null && !!(r?.draft?.text ?? '')
   }).length
+  const answerExport = useMemo(
+    () => buildAnswerExport({ title: store.pageTitle, quizzes, records }),
+    [quizzes, records, store],
+  )
+
+  const copyAnswers = async (): Promise<void> => {
+    const latest = buildAnswerExport({ title: store.pageTitle, quizzes, records: store.getRecords() })
+    if (latest.answered === 0) return
+    const ok = await copyText(latest.text)
+    if (!ok) {
+      showToast({ type: 'error', message: '复制失败' })
+      return
+    }
+    showToast({
+      type: 'success',
+      message: `已复制 ${latest.answered} 题作答（选择 ${latest.choiceAnswered} · 简答 ${latest.shortAnswered}）`,
+      detail: '粘贴给 AI 即可判题',
+    })
+  }
 
   return (
-    <div className="mb-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 flex items-center gap-3 kb-view-in">
+    <div className="mb-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 flex flex-wrap items-center gap-3 kb-view-in">
       <span className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md bg-[var(--accent)]/10 text-[var(--accent)]">
         <ListChecks size={14} />
       </span>
@@ -35,6 +57,15 @@ export function QuizSheetBar({ quizzes, store, onReview }: {
         {drafts > 0 && <span className="text-[var(--text-muted)]">草稿 {drafts}</span>}
       </div>
       <div className="flex-1" />
+      <button
+        onClick={() => { void copyAnswers() }}
+        disabled={answerExport.answered === 0}
+        className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-default transition-colors"
+        title={answerExport.answered === 0 ? '当前还没有作答' : '把当前题单的作答复制成文本，粘贴给 AI 即可判题'}
+      >
+        <ClipboardCopy size={12} />
+        提取答案
+      </button>
       <button
         onClick={onReview}
         disabled={wrong === 0}
