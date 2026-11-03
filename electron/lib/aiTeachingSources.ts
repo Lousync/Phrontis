@@ -196,7 +196,7 @@ function layout(sessionId: string, getSetting: (key: string) => unknown, create:
 /**
  * 知识点级素材夹 / 登记文件的仓库相对路径（**零依赖纯函数**，`层 → 路径` 的唯一拼法）。
  *
- * v3.16.0：课程内容改为 `{工作区}/第N章 章名/{NN} 知识点`，但 `SOURCES` **本期仍平铺**
+ * chapter-segment-v1：课程内容改为 `{工作区}/第N章 章名/知识点/{NN} 知识点`，但 `SOURCES` **仍平铺**
  * （用户可见度低，且 sources.json 存的是仓库相对路径，迁移面太大）。因此这里把新目录
  * 反解回旧的 `{章号}·{知识点}` 素材夹名，保证存量素材与新建知识点素材都不丢。
  *

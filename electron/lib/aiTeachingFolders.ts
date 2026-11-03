@@ -23,7 +23,7 @@ import { ensureQuizDocFrontmatter, sameQuizDocBody } from './quizDocPure'
 const ANCHOR_FILE = '.session.json'
 
 /** L1：课时文件夹解析器（由 `aiTeachingCourse` 注册，避免 folders↔course 循环 import）。
- *  返回 `{工作区}/第N章 章名/{NN} 知识点/段N` 或 null（非课时）。注册后，本文件的通用建夹入口
+ *  返回 `{工作区}/第N章 章名/段N` 或 null（非课时）。注册后，本文件的通用建夹入口
  *  （ensureSessionFolder / organizeDoc）对课时自动落到分层路径。 */
 let lessonFolderResolver: ((sessionId: string, getSetting: (key: string) => unknown) => string | null) | null = null
 export function setLessonFolderResolver(fn: (sessionId: string, getSetting: (key: string) => unknown) => string | null): void {
@@ -41,12 +41,14 @@ export function setAssistantFolderResolver(fn: (sessionId: string, getSetting: (
 function isCourseAssistant(sessionId: string, getSetting: (key: string) => unknown): boolean {
   return !!assistantFolderResolver?.(sessionId, getSetting)
 }
+/** 导出给工具层：课程助手可以自由指定归档目录（如教材/），段会话只能写本段目录 */
+export function isCourseAssistantSession(sessionId: string, getSetting: (key: string) => unknown): boolean {
+  return isCourseAssistant(sessionId, getSetting)
+}
 const DEFAULT_ROOT_DIR = 'AI教学'
 /** 会话约束文件（P2 §2.3）：AI 注入的唯一真相源，用户可在编辑器直接改。
  *  2026-10-17 导出：分层要求（`aiTeachingScope`）与本文件共用同一文件名常量，避免两处硬编码漂移。 */
 export const CONSTRAINTS_FILE = 'CONSTRAINTS.md'
-/** 约束模板（P2 先行落产物根层；P5 工作区两层落地后改读工作区目录，层级语义不变） */
-const CONSTRAINTS_TEMPLATE_REL_SEGMENTS = ['_templates', CONSTRAINTS_FILE]
 
 export interface SessionFolderAnchor {
   sessionId: string
@@ -119,7 +121,7 @@ function anchorMatches(abs: string, sessionId: string): boolean {
 }
 
 /** 有界递归定位会话文件夹（兼容多种布局，深度 ≤4）：
- *  `{root}/{会话}` · `{root}/{工作区}/{会话}` · `{root}/{工作区}/第N章 章名/{NN} 知识点/段N`（L1 物理分层） */
+ *  `{root}/{会话}` · `{root}/{工作区}/{会话}` · `{root}/{工作区}/第N章 章名/段N`（L1 物理分层） */
 function findSessionFolderRel(rootPath: string, rootDir: string, sessionId: string): string | null {
   const rootAbs = join(rootPath, rootDir)
   if (!existsSync(rootAbs)) return null
@@ -130,7 +132,7 @@ function findSessionFolderRel(rootPath: string, rootDir: string, sessionId: stri
     try { entries = readdirSync(abs, { withFileTypes: true }) } catch { return null }
     for (const e of entries) {
       if (!e.isDirectory()) continue
-      if (e.name.startsWith('.') || e.name === '_templates' || e.name === 'SOURCES' || e.name === 'node_modules' || e.name === '_extracts') continue
+      if (e.name.startsWith('.') || e.name === '_templates' || e.name === 'SOURCES' || e.name === '知识点' || e.name === 'node_modules' || e.name === '_extracts') continue
       const hit = walk(join(abs, e.name), rel ? `${rel}/${e.name}` : e.name, depth + 1)
       if (hit) return hit
     }
@@ -151,7 +153,7 @@ export function ensureSessionFolder(sessionId: string, getSetting: (key: string)
     const rootDir = rootDirName(getSetting)
     const existing = findSessionFolderRel(vault.rootPath, rootDir, sessionId)
     if (existing) return { ok: true, relPath: existing }
-    // L1：课时 → 落分层路径（第N章 章名/{NN} 知识点/段N）
+    // L1：课时 → 落分层路径（第N章 章名/段N）
     const lessonRel = lessonFolderResolver?.(sessionId, getSetting)
     if (lessonRel) return ensureSessionFolderAt(sessionId, lessonRel, getSetting)
     // 课程助手 → 固定夹名「课程助手」（无日期），一个工作区一个
@@ -166,8 +168,8 @@ export function ensureSessionFolder(sessionId: string, getSetting: (key: string)
     mkdirSync(folderAbs)
     const anchor: SessionFolderAnchor = { sessionId, title: session.title, createdAt: session.created_at, v: 1, ...(wsId ? { workspaceId: wsId } : {}) }
     writeFileSync(join(folderAbs, ANCHOR_FILE), JSON.stringify(anchor, null, 2), 'utf-8')
-    // P2（§2.3）建夹即播种会话专属 CONSTRAINTS.md；P5 起优先工作区层模板，回退产物根层
-    seedConstraintsFromTemplate(folderAbs, wsId && join(vault.rootPath, baseRel, ...CONSTRAINTS_TEMPLATE_REL_SEGMENTS), join(vault.rootPath, rootDir, ...CONSTRAINTS_TEMPLATE_REL_SEGMENTS))
+    // 2026-11-03：不再播种会话 / 段级 CONSTRAINTS.md —— 要求文件只在用户/AI 明确创建时存在；
+    // 已有文件仍按分层要求注入（见 aiTeachingScope）。
     // v3.1.1 素材库上移工作区层：**不再**为新对话预建 `SOURCES/{夹名}/SOURCE.md`（旧版会制造
     // 对话私有素材层，新对话看不到工作区已有素材，还得手工搬）。登记入口收敛到工作区主库
     // `{父层}/SOURCES/SOURCE.md`，由 readSources 懒建；本函数不再触碰素材目录。
@@ -178,8 +180,8 @@ export function ensureSessionFolder(sessionId: string, getSetting: (key: string)
   }
 }
 
-/** L1：在**指定相对路径**建会话文件夹（课时物理分层用）：`{工作区}/第N章 章名/{NN} 知识点/段N`。
- *  与 ensureSessionFolder 同样幂等（已存在则返回）；锚点 + CONSTRAINTS 播种逻辑一致。 */
+/** L1：在**指定相对路径**建会话文件夹（课时物理分层用）：`{工作区}/第N章 章名/段N`。
+ *  与 ensureSessionFolder 同样幂等（已存在则返回）；只写锚点，不播种要求文件。 */
 export function ensureSessionFolderAt(sessionId: string, rel: string, getSetting: (key: string) => unknown): FolderResult {
   try {
     if (typeof sessionId !== 'string' || !sessionId) return { ok: false, error: '会话 id 非法' }
@@ -206,32 +208,12 @@ export function ensureSessionFolderAt(sessionId: string, rel: string, getSetting
     const wsId = getWorkspaceOfSession(sessionId)
     const anchor: SessionFolderAnchor = { sessionId, title: session.title, createdAt: session.created_at, v: 1, ...(wsId ? { workspaceId: wsId } : {}) }
     writeFileSync(join(folderAbs, ANCHOR_FILE), JSON.stringify(anchor, null, 2), 'utf-8')
-    const wsFolder = wsId ? workspaceFolderRel(wsId, getSetting) : null
-    seedConstraintsFromTemplate(
-      folderAbs,
-      wsFolder && join(vault.rootPath, wsFolder, ...CONSTRAINTS_TEMPLATE_REL_SEGMENTS),
-      join(vault.rootPath, rootDir, ...CONSTRAINTS_TEMPLATE_REL_SEGMENTS),
-    )
     const parentRel = finalRel.includes('/') ? finalRel.slice(0, finalRel.lastIndexOf('/')) : rootDir
     broadcastTreeRefresh(parentRel)
     return { ok: true, relPath: finalRel }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
-}
-
-/** 模板播种：按优先级取第一个存在的模板复制进会话文件夹（目标已存在不覆盖；全无模板则跳过） */
-function seedConstraintsFromTemplate(folderAbs: string, ...templateAbsCandidates: Array<string | false | null | undefined>): void {
-  try {
-    const dest = join(folderAbs, CONSTRAINTS_FILE)
-    if (existsSync(dest)) return
-    for (const t of templateAbsCandidates) {
-      if (t && existsSync(t)) {
-        writeFileSync(dest, readFileSync(t, 'utf-8'), 'utf-8')
-        return
-      }
-    }
-  } catch { /* 播种失败不阻断建夹 */ }
 }
 
 /**
@@ -378,7 +360,7 @@ export function ensureWorkspaceConstraints(wsId: string, getSetting: (key: strin
 /**
  * 知识点级 CONSTRAINTS.md 的仓库相对路径 —— 「层 → 文件」的唯一拼法（2026-10-17 学习流 v2 §三-2）。
  *
- * 入参是 `unitFolderRel(wsId, unitId, getSetting)` 的结果（`{工作区}/第N章 章名/{NN} 知识点`，不含本文件名）。
+ * 入参是 `unitFolderRel(wsId, unitId, getSetting)` 的结果（`{工作区}/第N章 章名/知识点/{NN} 知识点`，不含本文件名）。
  * 放在本文件而不是填空处：本文件是 `CONSTRAINTS.md` 文件名与相对路径口径的既有归属地
  * （全局层 / 工作区层 / 会话层三处都在这里拼）；`aiTeachingScope` 复用本函数，不另拼一份。
  * null / 空串 → null（调用方据此报「知识点不存在」，不落盘）。
@@ -424,8 +406,10 @@ export function renameSessionFolder(sessionId: string, newTitle: string, getSett
     const lastSlash = rel.lastIndexOf('/')
     const parentRel = lastSlash > 0 ? rel.slice(0, lastSlash) : rootDir
     const oldName = lastSlash > 0 ? rel.slice(lastSlash + 1) : rel
-    // L1：课时夹名由结构（课时N·类型）决定，不随会话标题改名
-    if (/^课时\d/.test(oldName)) return { ok: true, relPath: rel }
+    // 结构性夹名（`段N` / 旧 `课时N·类型` / `章末复习` / `课程助手`）不随会话标题改名
+    if (/^段\d+$/.test(oldName) || /^课时\d/.test(oldName) || oldName === '章末复习' || oldName === '课程助手') {
+      return { ok: true, relPath: rel }
+    }
     const session = getAgentSession(sessionId)
     const created = session?.created_at ?? ''
     const m = /^(\d{2}-\d{2})\s/.exec(oldName)
@@ -464,7 +448,7 @@ export function renameSessionFolder(sessionId: string, newTitle: string, getSett
  * 用途：存量会话的「来源」回填（2026-09-10）。老数据里 AgentSessionRow 没有 source 字段，
  * 仅靠「是否归属工作区」判不全（未分配工作区的教学会话会被漏掉）——而**有会话文件夹**
  * 是教学会话的可靠特征（新建对话即建夹，见本文件顶注）。
- * 深度 ≤4：产物根 → 工作区 → 第N章 → 知识点 → 段（`章末复习` 在第 3 层）。
+ * 深度 ≤4：产物根 → 工作区 → 第N章 → 段（`章末复习` 在第 3 层）。
  */
 export function listSessionFolderIds(getSetting: (key: string) => unknown): Set<string> {
   const out = new Set<string>()

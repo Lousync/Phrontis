@@ -87,7 +87,7 @@ import type { AgentSessionInfo, AgentSideLaneInfo, AgentStoredMessage, AgentTrac
  * （类型/存放/页码·行号区间仅 pdf·pptx·docx·code 拆起止，3-28 程序解析写入；区间类型清单收敛为 RANGE_TYPES 常量，v3.2.0 条目 ⑯）、pdf/pptx/docx 一键区间提取为同级可编辑提取稿（3-20/3-26；docx 经 soffice 转 PDF，v3.1.2 条目5），
  * SOURCE.md 与提取稿经 AgentRunner 素材目录注入供 AI 编号引用（3-29，每轮重读）——新对话因此能看到工作区已有素材。
   * 3-21 视觉转写（手动档）：pdf/pptx/docx 条目「转写」按钮→主进程转 PDF（pptx/docx 经 soffice）→渲染层 pdf.js 区间栅格化→视觉模型逐页转写→并入提取稿。
- * P8 用户画像（§3.14）：全局（仓库内 {aiTeachRoot}/PROFILE.md）+ 工作区 + 会话 PROFILE.md 三层每轮注入；
+ * P8 用户画像（§3.14）：全局（仓库内 {aiTeachRoot}/PROFILE.md）+ 工作区 + 本段（`第N章/段N/PROFILE.md`）每轮注入；
  * 更新走 Plan B——AI 输出 ```profile 建议块 → 输入框上方建议卡片，接受才写文件（3-33）；
  * v3.2.0 第 20 项起：围栏内容是**相对本主题画像的变化条目**（`[{field,op,text}]`），卡片升级为
  * 可勾选 / 可编辑的 diff 列表 —— 本主题层可整段替换字段，工作区 / 全局只允许追加（只接受 add）；
@@ -1686,7 +1686,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   const profQuiet = profPending && profThrottle.active && !profExpanded
   /** 卡片可选层级：工作区层在无工作区时不可用 */
   const profLayers = useMemo(() => ([
-    { id: 'session' as ProfileLayer, label: '本主题', enabled: !!activeId, title: '写入当前会话 PROFILE.md —— 最细颗粒，可整段替换字段' },
+    { id: 'session' as ProfileLayer, label: '本主题', enabled: !!activeId, title: '写入当前会话 PROFILE.md（课程段会话落 第N章/段N）—— 最细颗粒，可整段替换字段' },
     { id: 'workspace' as ProfileLayer, label: '工作区', enabled: !!wsActive, title: wsActive ? `写入工作区「${wsActive.name}」画像 —— 只做追加，不改写已有内容` : '会话未归属工作区，无工作区画像层' },
     { id: 'global' as ProfileLayer, label: '全局', enabled: true, title: '写入仓库内全局画像（跨工作区 / 跨仓库共享）—— 只做追加，不改写已有内容' },
   ]), [activeId, wsActive])
@@ -2336,7 +2336,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
               非当前会话不需要的入口不渲染；工件分栏 chip 只有存在工件页签时才出现 */}
           <button
             onClick={() => { if (activeId) void openProfile('session'); else showToast({ type: 'warning', message: '本主题画像随对话存放：先选择或新建一个对话' }) }}
-            title="本主题画像（当前对话的 PROFILE.md · 对话内唯一编辑入口）。全局画像在「工作区选择页 → 学习者画像」卡片，工作区画像在各工作区卡片 hover「画像」；AI 每轮自动注入，冲突时以更细颗粒层为准"
+            title="本段/本主题画像（课程段会话落 第N章/段N 的 PROFILE.md；自由对话落会话夹）。全局画像在「工作区选择页 → 学习者画像」卡片，工作区画像在各工作区卡片 hover「画像」；AI 每轮自动注入，冲突时以更细颗粒层为准"
             className="relative p-1 rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
             <User size={14} />
             {profPending && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-[var(--accent)]" title="AI 有画像更新建议待确认" />}

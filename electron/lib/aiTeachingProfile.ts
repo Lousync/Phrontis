@@ -4,7 +4,7 @@ import { app, ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { broadcastTreeRefresh, rootDirName, ensureSessionFolder } from './aiTeachingFolders'
 import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
-import { getSessionUnitFolderRel } from './aiTeachingCourse'
+import { getSessionUnitFolderRels } from './aiTeachingCourse'
 import { applyProfileEntries } from './profilePatch'
 import type { ProfileApplyOutcome, ProfileApplySkipped, ProfileEntry } from './profilePatch'
 
@@ -14,10 +14,11 @@ import type { ProfileApplyOutcome, ProfileApplySkipped, ProfileEntry } from './p
  * 三层画像，完全复用「md 文件即真相源」哲学——**三层全部是仓库内文件**，编辑=跳编辑区打开对应 md：
  * - 全局 PROFILE.md：{仓库}/{aiTeachRootDir}/PROFILE.md（原 userData 位置已迁移入仓库，见 readGlobalProfile 迁移逻辑）；
  * - 工作区 PROFILE.md：{仓库}/{aiTeachRootDir}/{工作区文件夹}/PROFILE.md；
- * - 会话 PROFILE.md：{仓库}/{aiTeachRootDir}/{会话文件夹}/PROFILE.md。
- * 注入规则：全局 + 工作区 + 会话三层进 system，冲突时以更细颗粒为准；画像=「我是谁/我会什么」，约束=「你要怎么做」。
+ * - 本段 PROFILE.md：{仓库}/{aiTeachRootDir}/{工作区}/{章}/段N/PROFILE.md；
+ * - 可选知识点 PROFILE.md：{工作区}/{章}/知识点/{NN} 知识点/PROFILE.md（只在用户/AI 手动创建时存在）。
+ * 注入规则：全局 + 工作区 + 可选知识点 + 本段进 system，冲突时以更细颗粒为准；画像=「我是谁/我会什么」，约束=「你要怎么做」。
  * 维护策略 Plan B（3-33）：AI 在回答里给 ```profile 围栏建议块 → 用户逐条勾选后写文件（渲染层做卡片）。
- * v3.2.0 第 20 项起，围栏内容是**相对本知识点画像的变化条目**（`[{field,op,text}]`）而不是整篇全文，
+ * v3.2.0 第 20 项起，围栏内容是**相对本段画像的变化条目**（`[{field,op,text}]`）而不是整篇全文，
  * 落盘走 `applyProfilePatch`（合并语义；上层 `mergeOnly` 只接受追加）——`writeXxxProfile` 保留给
  * 「编辑画像」这类用户直存场景（整篇写入）。
  */
@@ -47,11 +48,11 @@ export const SESSION_PROFILE_SKELETON = [
   '',
 ].join('\n')
 
-/** 知识点画像骨架（L5：画像第三层由「会话」上移到「知识点」——一个学习单元一份） */
+/** 知识点画像骨架（可选层：只在用户/AI 手动创建时使用；不再自动落盘） */
 export const UNIT_PROFILE_SKELETON = [
   '# 学习者画像 · 本知识点',
   '',
-  '（本知识点＝一个学习单元：记录我在这个知识点上的水平 / 薄弱点 / 进度 / 目标 / 偏好。叠加在「全局」「课程」之上，冲突时以本层为准；AI 建议须经你确认后才写入。）',
+  '（可选层：记录我在这个知识点上的水平 / 薄弱点 / 进度 / 目标 / 偏好。叠加在「全局」「课程」之上，低于「本段」；AI 建议须经你确认后才写入。）',
   '',
   '## 当前水平',
   '- ',
@@ -70,12 +71,10 @@ export const UNIT_PROFILE_SKELETON = [
   '',
 ].join('\n')
 
-/** 画像第三层落点：优先「本知识点」文件夹（L5），无（自由对话）则回退会话文件夹（旧） */
-function thirdProfileDir(sessionId: string, getSetting: (key: string) => unknown): { rel: string; abs: string; scope: 'unit' | 'session' } | null {
+/** 画像第三层落点：当前会话文件夹（段会话 = `第N章/段N`；自由对话 = 日期夹）。 */
+function thirdProfileDir(sessionId: string, getSetting: (key: string) => unknown): { rel: string; abs: string; scope: 'session' } | null {
   const vault = getCurrentVault()
   if (!vault) return null
-  const unitRel = getSessionUnitFolderRel(sessionId, getSetting)
-  if (unitRel) return { rel: unitRel, abs: join(vault.rootPath, unitRel), scope: 'unit' }
   const ensured = ensureSessionFolder(sessionId, getSetting)
   if (!ensured.ok || !ensured.relPath) return null
   return { rel: ensured.relPath, abs: join(vault.rootPath, ensured.relPath), scope: 'session' }
@@ -247,7 +246,7 @@ export function readSessionProfile(sessionId: string, getSetting: (key: string) 
     const dir = thirdProfileDir(sessionId, getSetting)
     if (!dir) return { ok: false, error: '会话/知识点文件夹不可用' }
     const p = join(dir.abs, PROFILE_FILE)
-    return { ok: true, text: existsSync(p) ? readFileSync(p, 'utf-8') : '', relPath: `${dir.rel}/${PROFILE_FILE}`, skeleton: dir.scope === 'unit' ? UNIT_PROFILE_SKELETON : SESSION_PROFILE_SKELETON }
+    return { ok: true, text: existsSync(p) ? readFileSync(p, 'utf-8') : '', relPath: `${dir.rel}/${PROFILE_FILE}`, skeleton: SESSION_PROFILE_SKELETON }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -268,10 +267,26 @@ export function writeSessionProfile(sessionId: string, text: string, getSetting:
   }
 }
 
+/** 可选知识点画像：只读；不存在 = 零段；一段覆盖多个知识点时按顺序带标签。 */
+export function readUnitProfilesForSession(sessionId: string, getSetting: (key: string) => unknown): Array<{ name: string; text: string; relPath: string }> {
+  const vault = getCurrentVault()
+  if (!vault) return []
+  const out: Array<{ name: string; text: string; relPath: string }> = []
+  for (const d of getSessionUnitFolderRels(sessionId, getSetting)) {
+    const p = join(vault.rootPath, d.rel, PROFILE_FILE)
+    if (!existsSync(p)) continue
+    try {
+      const text = readFileSync(p, 'utf-8').trim()
+      if (text) out.push({ name: d.name, text, relPath: `${d.rel}/${PROFILE_FILE}` })
+    } catch { /* 单文件读失败不阻断 */ }
+  }
+  return out
+}
+
 /**
- * AgentRunner 注入（§3.14 注入规则）：全局 + 工作区 + 会话三层画像合成一个提示块；
- * 每轮重读（与 CONSTRAINTS/SOURCE 同哲学）；三层皆空 → 零注入。
- * 同时携带「更新建议协议」（v3.2.0 第 20 项改口径）：AI 只输出**相对本知识点画像的变化条目**
+ * AgentRunner 注入（§3.14 注入规则）：全局 + 工作区 + 可选知识点 + 本段画像合成一个提示块；
+ * 每轮重读（与 CONSTRAINTS/SOURCE 同哲学）；全部为空 → 零注入。
+ * 同时携带「更新建议协议」（v3.2.0 第 20 项改口径）：AI 只输出**相对本段画像的变化条目**
  * （`[{field,op,text}]`，不是整篇全文），且**没有新信息就不要输出**；
  * 用户在卡片上逐条勾选后才由 `applyProfilePatch` 落文件 —— AI 不得直接写画像文件。
  */
@@ -281,16 +296,19 @@ export function resolveProfilesForInjection(sessionId: string, getSetting: (key:
     const wsId = getWorkspaceOfSession(sessionId)
     const w = wsId ? readWorkspaceProfile(wsId, getSetting) : null
     const s = readSessionProfile(sessionId, getSetting)
+    const unitProfiles = readUnitProfilesForSession(sessionId, getSetting)
     const gt = g.ok && g.text ? g.text.trim() : ''
     const wt = w && w.ok && w.text ? w.text.trim() : ''
+    const ut = unitProfiles.map((u) => `【${u.name}】\n${u.text}`).join('\n\n')
     const st = s.ok && s.text ? s.text.trim() : ''
-    if (!gt && !wt && !st) return ''
+    if (!gt && !wt && !ut && !st) return ''
     const cut = (t: string, n: number) => (t.length > n ? t.slice(0, n) + '\n…（画像过长已截断）' : t)
-    const parts = ['【学习者画像】以下是关于当前用户的学习者画像（“我是谁/我会什么”），讲解深浅、例子与节奏须适配画像；同字段冲突时**以更细颗粒层为准**（会话 > 工作区 > 全局）；与用户当下消息冲突时以用户消息为准。']
+    const parts = ['【学习者画像】以下是关于当前用户的学习者画像（“我是谁/我会什么”），讲解深浅、例子与节奏须适配画像；同字段冲突时**以更细颗粒层为准**（本段 > 知识点 > 工作区 > 全局）；与用户当下消息冲突时以用户消息为准。']
     if (gt) parts.push(`■ 全局画像（跨工作区稳定）：\n${cut(gt, 2000)}`)
     if (wt) parts.push(`■ 工作区画像（本课程目标/进度/薄弱点，覆盖全局）：\n${cut(wt, 2000)}`)
-    if (st) parts.push(`■ 本知识点画像（画像第三层＝本知识点；覆盖以上两层）：\n${cut(st, 2000)}`)
-    parts.push('当对话出现**明确的新信息**（新掌握的知识点 / 新暴露的薄弱点 / 进度推进）时，不要直接改画像文件——在回答末尾追加一个 ```profile 围栏，内容是**相对本知识点画像的变化条目**（严格 JSON 数组，不要注释与多余文字）：[{"field":"薄弱点","op":"add","text":"…"},{"field":"学习进度","op":"update","from":"被替换的原文","text":"新写法"},{"field":"偏好","op":"remove","text":"要删掉的原文"}]。field 取本知识点画像里已有的二级标题名，op 取 add / update / remove。**没有新信息就不要输出这个块**，不要为了更新而更新；同一件事不要重复登记；上面「全局 / 课程」两层已经写过的内容不要在本层再写一遍。客户端会渲染成可逐条勾选的卡片，用户确认后才落文件。')
+    if (ut) parts.push(`■ 知识点画像（可选，覆盖工作区；低于本段）：\n${cut(ut, 2000)}`)
+    if (st) parts.push(`■ 本段画像（最细一层，覆盖以上全部）：\n${cut(st, 2000)}`)
+    parts.push('当对话出现**明确的新信息**（新掌握的知识点 / 新暴露的薄弱点 / 进度推进）时，不要直接改画像文件——在回答末尾追加一个 ```profile 围栏，内容是**相对本段画像的变化条目**（严格 JSON 数组，不要注释与多余文字）：[{"field":"薄弱点","op":"add","text":"…"},{"field":"学习进度","op":"update","from":"被替换的原文","text":"新写法"},{"field":"偏好","op":"remove","text":"要删掉的原文"}]。field 取本段画像里已有的二级标题名，op 取 add / update / remove。**没有新信息就不要输出这个块**，不要为了更新而更新；同一件事不要重复登记；上面「全局 / 课程 / 知识点」几层已经写过的内容不要在本层再写一遍。客户端会渲染成可逐条勾选的卡片，用户确认后才落文件。')
     return '\n\n' + parts.join('\n\n')
   } catch {
     return ''

@@ -22,7 +22,7 @@ interface Props {
 const LAYERS: Array<{ key: ReqLayer; label: string }> = [
   { key: 'global', label: '全局' },
   { key: 'workspace', label: '本课程' },
-  { key: 'unit', label: '本知识点' },
+  { key: 'unit', label: '知识点（可选）' },
   { key: 'segment', label: '本段' },
 ]
 
@@ -83,6 +83,7 @@ export function RequirementsDrawer(props: Props) {
       <div className="shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-color)]">
         {LAYERS.map((l) => (
           <button key={l.key} onClick={() => onLayer(l.key)} disabled={!canUse(l.key)}
+            title={l.key === 'unit' ? '可选层：不会自动创建；保存后才落盘，存在时自动注入' : l.key === 'segment' ? '本段要求：只在保存后落盘，存在时自动注入' : undefined}
             className={`px-2 py-0.5 rounded text-[10.5px] transition-colors ${layer === l.key ? 'bg-[var(--bg-selected)] text-[var(--accent)] font-medium' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'} disabled:opacity-30`}>
             {l.label}
           </button>
