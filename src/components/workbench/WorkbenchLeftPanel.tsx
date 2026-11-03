@@ -26,6 +26,7 @@ import { WorkbenchFileTree } from './WorkbenchFileTree'
 import { FolderFocusButton } from '../shared/FolderFocusButton'
 import { SIDEBAR_HEADER_ICON } from '../shared/sidebarHeaderIcon'
 import { BOOKMARK_COLORS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_ENTRY_ENABLED, RAIL_FOLLOW_MAP, WORKBENCH_BOOKMARKS, type RailModule } from '../../lib/workbenchLayout'
+import { VOCAB_ENTRY_ENABLED } from '../../lib/featureFlags'
 import type { TabName } from '../../types'
 
 /**
@@ -426,8 +427,8 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
                 style={{ left: bmMenuPos.left, top: bmMenuPos.top }}
               >
                 <div className="px-2 pb-1 pt-1.5 text-[10.5px] text-[var(--text-muted)]">显示的书签</div>
-                {/* 错题本书签暂收（QUIZ_ENTRY_ENABLED，v3.5.0 随交互重做放出）——书签数据仍在唯一真相源 */}
-                {WORKBENCH_BOOKMARKS.filter((b) => QUIZ_ENTRY_ENABLED || b.key !== 'quiz').map((b) => {
+                {/* 错题本 / 背单词书签暂收（QUIZ_ENTRY_ENABLED / VOCAB_ENTRY_ENABLED）——书签数据仍在唯一真相源 */}
+                {WORKBENCH_BOOKMARKS.filter((b) => (QUIZ_ENTRY_ENABLED || b.key !== 'quiz') && (VOCAB_ENTRY_ENABLED || b.key !== 'vocab')).map((b) => {
                   const shown = !bookmarksHidden.includes(b.key)
                   return (
                     <button
@@ -471,7 +472,7 @@ export function WorkbenchLeftPanel({ activeTab, railModule, railTool = null, loc
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             <div data-wb="bookmarks" className="flex flex-col gap-0.5 p-1.5">
-              {WORKBENCH_BOOKMARKS.filter((b) => (QUIZ_ENTRY_ENABLED || b.key !== 'quiz') && !bookmarksHidden.includes(b.key)).map((b) => {
+              {WORKBENCH_BOOKMARKS.filter((b) => (QUIZ_ENTRY_ENABLED || b.key !== 'quiz') && (VOCAB_ENTRY_ENABLED || b.key !== 'vocab') && !bookmarksHidden.includes(b.key)).map((b) => {
                 const isActive = railModule === b.key || (railModule === null && !!activeTab && RAIL_FOLLOW_MAP[activeTab] === b.key && activeTab === b.tab)
                 const c = BOOKMARK_COLORS[b.key]
                 return (

@@ -1,5 +1,6 @@
-# 背单词模块（v3.17.0）实施方案
+# 背单词模块（v3.18.0）实施方案
 
+> 状态（2026-11-03）：代码 / IPC / AI 工具 / `resources/vocab` 静态资源已随 v3.17.0 合入，但**用户入口关闭**——总闸在 `src/lib/featureFlags.ts` 的 `VOCAB_ENTRY_ENABLED = false`；计划 v3.18.0 完成适配后开启。
 > 目标：把 qwerty-learner 的打字背单词体验集成进 Phrontis，并让全局 AI 助手能读取「今天 + 近 7 天错词」进行造句复习。
 > 决策：内置模块 + 独立 `vocab://` 协议 + 静态构建 iframe；Vault JSON 主账本 + IndexedDB 明细缓存。
 > 本文是落地前的唯一方案文档；实现完成后再补验收记录。
@@ -240,7 +241,7 @@ builtin.vocab.words
 - 改 `src/modules/desktop/tiles.tsx`
 - 改 `src/App.tsx`
 - 改 `electron/lib/builtinTools.ts`
-- 改 `package.json`：版本 3.17.0、`build:vocab`、`extraResources`
+- 改 `package.json`：`build:vocab`、`extraResources`（v3.17.0 已合入；版本号随 3.18.0 发布再抬）
 - 改 `CHANGELOG.md` + 重跑 release-notes
 - 改契约脚本：`ai-perms` / `workbench-shell` / `startup-tab` / `pdf-reader` 计数
 
@@ -269,7 +270,7 @@ builtin.vocab.words
 
 ## 10. 原生模块化路线（暂缓，下一阶段）
 
-> 决策：v3.17.0 先用 iframe 快速落地；原生模块作为下一阶段，**不急于实施**。
+> 决策：v3.17.0 先把 iframe 实现合入但关闭入口，v3.18.0 开放；原生模块作为下一阶段，**不急于实施**。
 > 目标不是「把 qwerty-learner 源码搬进来」，而是把「打字背单词」重写成 Phrontis 的一等模块。
 
 ### 10.1 目标

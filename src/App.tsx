@@ -5,6 +5,7 @@ import type { TabName, KnowledgePage, KnowledgeCategory, KnowledgeTag, BookKind,
 
 import { labelOf as tabLabel, isTabName } from './lib/appModules'
 import { WORKBENCH_TABBAR_EXCLUDED, AI_ASSISTANT_SHORTCUT_DISABLED } from './lib/workbenchLayout'
+import { VOCAB_ENTRY_ENABLED } from './lib/featureFlags'
 import { WorkbenchShell } from './components/workbench/WorkbenchShell'
 import { WorkbenchPageBar, PAGE_OWNED } from './components/workbench/WorkbenchPageBar'
 import { WorkbenchRightPanel } from './components/workbench/WorkbenchRightPanel'
@@ -117,6 +118,10 @@ export default function App() {
   // 初始 null = settings 恢复前的空窗（占位改 null 而非 'blog'：'blog' 会被 openTabs 登记
   // 成假标签——settings 在 mount 前往往已 ready，ready 判定拦不住；null 由 !activeTab 守卫天然拦住）。
   const [activeTab, setActiveTab] = useState<TabName | null>(null)
+  // v3.17.0 背单词暂不开放：入口全部收起；万一旧深链 / 小窗指令把它设进来，立即落回工作台
+  useEffect(() => {
+    if (activeTab === 'vocab' && !VOCAB_ENTRY_ENABLED) setActiveTab(null)
+  }, [activeTab])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   // B-38：toggleLeftSidebar 的稳定读数（回调不挂 sidebarOpen 依赖，keydown 监听器不必重挂）
   const sidebarOpenRef = useRef(sidebarOpen)
@@ -380,6 +385,8 @@ export default function App() {
    *  会得到一个**空白页**（退役模块 id 可能来自旧持久化设置 / 插件命令 / 深链）。
    *  非清单值一律不打开任何模块（落回工作台空态），既不硬撑一个兜底模块、也不静默吞掉。 */
   const openTab = useCallback((tab: TabName) => {
+    // 暂不开放的功能：即使从命令面板 / 事件 / 插件命令进来，也不打开
+    if (tab === 'vocab' && !VOCAB_ENTRY_ENABLED) return
     setActiveTab(isTabName(tab) ? tab : null)
     setNoteJumpFrom(null)   // 命令面板等手动切换同样清返回 chip（与 handleTabChange 同口径）
     setSidebarOpen(true)
@@ -1267,6 +1274,8 @@ export default function App() {
 
   const lastWorkbenchTabRef = useRef<TabName | null>(null)
   const handleTabChange = (tab: TabName) => {
+    // 暂不开放的功能：书签 / 标签条 / 图标条任何路径都不进入
+    if (tab === 'vocab' && !VOCAB_ENTRY_ENABLED) return
     setActiveToolTab(null)  // 切回模块标签时退出工具标签（工具标签关闭走 ✕ / 落点分流）
     setActiveIntelTab(null) // 同口径：模块标签互斥退出情报文章页签（v3.12.0）
     setNoteJumpFrom(null)   // 手动切 Tab 清返回 chip（条目6 口径；chip 自身的返回点击也走这里，消费即清）
