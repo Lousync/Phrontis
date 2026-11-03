@@ -639,6 +639,11 @@ const api = {
   petRename: (name: string) => ipcRenderer.invoke('pet:rename', { name }),
   petReset: (species: string) => ipcRenderer.invoke('pet:reset', { species }),
   petSwitchSpecies: (species: string) => ipcRenderer.invoke('pet:switchSpecies', { species }),
+  // 背单词（vocab，v3.17.0）
+  vocabGetDay: (date: string) => ipcRenderer.invoke('vocab:getDay', date),
+  vocabRecordSession: (input: unknown) => ipcRenderer.invoke('vocab:recordSession', input),
+  vocabReviewWords: (opts?: unknown) => ipcRenderer.invoke('vocab:reviewWords', opts),
+
   // 记账（accounting）
   accountingGetAll: () => ipcRenderer.invoke('accounting:getAll'),
   accountingParseJson: (text: string) => ipcRenderer.invoke('accounting:parseJson', text),

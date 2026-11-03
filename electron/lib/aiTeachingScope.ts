@@ -4,7 +4,7 @@ import { ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { CONSTRAINTS_FILE, broadcastTreeRefresh, ensureGlobalConstraints, ensureWorkspaceConstraints, readGlobalConstraints, rootDirName, unitConstraintsRel } from './aiTeachingFolders'
 import { workspaceFolderRel } from './aiTeachingWorkspaces'
-import { getSessionUnitFolderRel, readCourseOutline, unitFolderRel } from './aiTeachingCourse'
+import { getSessionUnitFolderRels, readCourseOutline, unitFolderRel } from './aiTeachingCourse'
 import { parseSourceMd, unitSourceFileRel } from './aiTeachingSources'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 
@@ -14,7 +14,7 @@ import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
  * 三层可编辑（**章层本层不做** —— 方案 §三-3「明确不做」）：
  * - `global`     → `{仓库}/{aiTeachRootDir}/CONSTRAINTS.md`（**复用** `aiTeachingFolders` 既有读点/ensure，不新造文件）
  * - `workspace`  → `{工作区文件夹}/CONSTRAINTS.md`（同上）
- * - `unit`       → `{工作区}/第N章 章名/{NN} 知识点/CONSTRAINTS.md`（本次新增层；骨架由本文件落）
+ * - `unit`       → `{工作区}/第N章 章名/知识点/{NN} 知识点/CONSTRAINTS.md`（可选层；只在用户保存时落）
  *
  * 铁律 1：写盘后**只复用既有广播** —— `aiTeach:tree-refresh`（文件树/资源管理器）+
  *   `aiTeach:course-refresh`（课程页/画布重拉），**不新增广播通道**。
@@ -57,7 +57,7 @@ export interface AiTeachScopeCountsResult {
 export const UNIT_CONSTRAINTS_SKELETON = [
   '# 知识点 · 要求',
   '',
-  '（本文件是本知识点的「要求」：只对本知识点下的课时生效，叠加在「工作区要求」与「全局要求」之上，冲突时以本层为准。一行一条，以「- 」开头；AI 每轮自动按此检查。）',
+  '（本文件是本知识点的「要求」：本段覆盖到该知识点时生效，叠加在「工作区要求」与「全局要求」之上，冲突时以本层为准。可选层，不会自动创建；一行一条，以「- 」开头，AI 每轮自动按此检查。）',
   '',
 ].join('\n')
 
@@ -240,15 +240,22 @@ export function scopeCounts(wsId: string, getSetting: (key: string) => unknown):
   }
 }
 
-/** AgentRunner 注入用：本会话所属**知识点**层要求正文（非课时会话/无文件 → 空串，注入零段） */
+/** AgentRunner 注入用：本段覆盖的**可选知识点**要求正文（非课时会话/无文件 → 空串，注入零段）。
+ *  知识点级文件不再自动创建；存在才读。一段覆盖多个知识点时按顺序带标签拼接，沿用 scopePrompt 的层上限。 */
 export function readUnitConstraintsForSession(sessionId: string, getSetting: (key: string) => unknown): string {
   try {
     const vault = getCurrentVault()
     if (!vault) return ''
-    const rel = unitConstraintsRel(getSessionUnitFolderRel(String(sessionId ?? ''), getSetting))
-    if (!rel) return ''
-    const abs = join(vault.rootPath, rel)
-    return existsSync(abs) ? readFileSync(abs, 'utf-8').trim() : ''
+    const blocks: string[] = []
+    for (const u of getSessionUnitFolderRels(String(sessionId ?? ''), getSetting)) {
+      const rel = unitConstraintsRel(u.rel)
+      if (!rel) continue
+      const abs = join(vault.rootPath, rel)
+      if (!existsSync(abs)) continue
+      const text = readFileSync(abs, 'utf-8').trim()
+      if (text) blocks.push(`【${u.name}】\n${text}`)
+    }
+    return blocks.join('\n\n')
   } catch {
     return ''
   }

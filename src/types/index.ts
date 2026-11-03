@@ -5,8 +5,10 @@ import type { GraphIndexData, GraphViewConfig } from '../lib/graphTypes'
 import type { SummaryKind } from '../lib/summary'
 import type { ScheduleRecurring, ScheduleStageStatus, ScheduleWorkflow, ScheduleWorkflowStage, ScheduleWorkflowCheckpoint, ScheduleWorkflowCheckpointInput, ScheduleWorkflowStageInput, CreateScheduleWorkflowDTO, UpdateScheduleWorkflowDTO } from 'phrontis-core/types/schedule'
 import type { AccountingAccount, AccountingRecurring, AccountingType, AccountingRecurringMode, AccountingTransaction, AccountingTxType } from 'phrontis-core/types/accounting'
+import type { VocabDayRecord, VocabReviewOptions, VocabReviewResult, VocabSessionInput } from 'phrontis-core/kbStore/vocabVaultRepo'
 export type { ScheduleRecurring, ScheduleStageStatus, ScheduleWorkflow, ScheduleWorkflowStage, ScheduleWorkflowCheckpoint, ScheduleWorkflowCheckpointInput, ScheduleWorkflowStageInput, CreateScheduleWorkflowDTO, UpdateScheduleWorkflowDTO } from 'phrontis-core/types/schedule'
 export type { AccountingAccount, AccountingRecurring, AccountingType, AccountingRecurringMode, AccountingTransaction, AccountingTxType } from 'phrontis-core/types/accounting'
+export type { VocabDayRecord, VocabReviewOptions, VocabReviewResult, VocabSessionInput } from 'phrontis-core/kbStore/vocabVaultRepo'
 
 
 export type { DictLookupResult, DictStatus, DictWordEntry, DictExchange, TranslateMode, TranslateInvokeRequest, TranslateInvokeResult }
@@ -38,7 +40,7 @@ export interface EntryFilter { date?: string; tagId?: string; pinnedOnly?: boole
 export interface CreateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date: string; tags?: string[]; states?: string }
 export interface UpdateEntryDTO { title?: string; contentMd?: string; contentHtml?: string; date?: string; isPinned?: boolean; isStarred?: boolean; tags?: string[]; states?: string }
 export interface Tag { id: string; name: string; color: string }
-export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'aiAssistant' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal' | 'accounting' | 'usage' | 'intel'
+export type TabName = 'blog' | 'schedule' | 'knowledge' | 'moments' | 'recycle' | 'settings' | 'help' | 'toolbox' | 'plugins' | 'devtools' | 'aiTeaching' | 'aiAssistant' | 'releaseNotes' | 'bookshelf' | 'aiChat' | 'graph' | 'bookMarket' | 'dashboard' | 'terminal' | 'accounting' | 'usage' | 'intel' | 'vocab'
 
 export interface AccountingCategory {
   id: string
@@ -2633,6 +2635,10 @@ export interface ElectronAPI {
   petRename: (name: string) => Promise<PetSnapshot>
   petReset: (species: PetSpecies) => Promise<PetSnapshot>
   petSwitchSpecies: (species: PetSpecies) => Promise<PetSnapshot>
+  // 背单词（vocab，v3.17.0）
+  vocabGetDay: (date: string) => Promise<VocabDayRecord | null>
+  vocabRecordSession: (input: VocabSessionInput) => Promise<VocabDayRecord>
+  vocabReviewWords: (opts?: VocabReviewOptions) => Promise<VocabReviewResult>
   // 记账（accounting）
   accountingGetAll: () => Promise<{ transactions: AccountingTransaction[]; categories: AccountingCategory[]; accounts: AccountingAccount[]; recurring: AccountingRecurring[] }>
   accountingParseJson: (text: string) => Promise<AccountingParseOutcome>

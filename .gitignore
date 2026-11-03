@@ -52,3 +52,7 @@ tmp/
 
 # 本机自用安装目标（scripts/install-local.mjs；路径因机器而异，不进版本控制）
 scripts/local-install.json
+
+# 背单词（v3.17.0）：qwerty-learner 上游检出与静态构建产物（npm run build:vocab 生成）
+vendor/qwerty-learner/
+resources/vocab/

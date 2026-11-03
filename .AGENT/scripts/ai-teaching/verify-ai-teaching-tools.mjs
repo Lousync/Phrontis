@@ -28,7 +28,7 @@ check('清点仅支持 dir 素材（单个 pdf/pptx 提示先转写）', course.
 check('大纲写入支持 append 增补', course.includes("mode: 'append'") && course.includes('applyOutlineAdditions'))
 check('删除已学知识点 → needOrganize 拒绝', course.includes("status !== 'todo'") && course.includes('needOrganize: true'))
 check('归档返回绝对路径 absPath', course.includes('absPath: join(dirAbs, fname)'))
-check('归档默认落会话 write-owner（助手 output/）', course.includes('resolveWriteOwnerRel(String(sessionId'))
+check('归档默认落会话 write-owner（助手 output/）', /resolveWriteOwnerRel\(sid, getSetting\)/.test(course) && course.includes('本段产物只能写入本段目录'))
 check('归档拒绝写入隐藏/点目录', course.includes("s.startsWith('.')"))
 check('归档标题命中交接 → 硬闸拒绝', course.includes('isHandoffTitle(title)') && course.includes('交接由「收尾本段」统一生成'))
 check('归档工具描述禁止创建交接', tools.includes('不要用它创建交接文档'))

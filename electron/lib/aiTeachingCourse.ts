@@ -1,12 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, copyFileSync, rmdirSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, copyFileSync, rmdirSync, statSync } from 'fs'
 import { dirname, isAbsolute, join } from 'path'
 import { ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { readJson, writeJson } from 'phrontis-core/kbStore/jsonStore'
 import { getWorkspaceOfSession, workspaceFolderRel, assignSession } from './aiTeachingWorkspaces'
-import { ensureSessionFolder, ensureSessionFolderAt, sessionFolder, setLessonFolderResolver, setAssistantFolderResolver, resolveWriteOwnerRel, sanitizeTitle } from './aiTeachingFolders'
+import { ensureSessionFolder, ensureSessionFolderAt, sessionFolder, setLessonFolderResolver, setAssistantFolderResolver, resolveWriteOwnerRel, sanitizeTitle, isCourseAssistantSession } from './aiTeachingFolders'
 import { writeInventoryIndex, todayLocal } from './aiTeachingInventory'
-import { renameWorkspacePath, uniqueFileName } from './workspaceManager'
+import { renameWorkspacePath, trashWorkspacePath, uniqueFileName } from './workspaceManager'
 import { createAgentSession, getAgentMessages, getAgentSession, sessionExists } from './agentSessionRepo'
 import { invokeLlmInternal, firstEnabledModelSpec } from './llmService'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
@@ -43,15 +43,15 @@ import { rewriteFavoritePrefixes } from './aiTeachingFavorites'
 import {
   buildCourseLayoutPlan,
   chapterFolderName,
+  chapterFolderNameV316,
   unitFolderName,
-  legacyChapterFolderName,
-  legacyUnitFolderName,
+  segmentFolderName,
   REVIEW_FOLDER_NAME,
+  UNIT_META_FOLDER_NAME,
   LAYOUT_VERSION,
   rewriteRelPrefix,
-  type LayoutChapter,
-  type LayoutUnit,
 } from './aiTeachingLayoutPure'
+import { planCourseLayoutMigration, type LayoutMigrationEntry, type LayoutMigrationAnchor, type LayoutMigrationPlan } from './aiTeachingLayoutMigrationPure'
 import {
   chapterSegments,
   lessonUnitIds,
@@ -215,11 +215,13 @@ export function writeCourseOutline(wsId: string, outline: CourseOutline, getSett
   const loc = outlineRel(wsId, getSetting)
   if (!vault || !loc) return { ok: false, error: '尚未打开仓库或工作区不存在' }
   try {
+    // 先确保旧布局已迁到「章 → 段」，否则下面的旧/新大纲路径对不上
+    ensureCourseLayout(wsId, getSetting)
     const old = readCourseOutline(wsId, getSetting)
     const abs = join(vault.rootPath, loc.rel)
     mkdirSync(dirname(abs), { recursive: true })
     writeFileSync(abs, rewriteCourseMd(outline), 'utf-8')
-    // v3.16.0：章名 / 章号 / 知识点名变化时先搬目录（旧 reviews 键还在，按 chapterId 能定位旧复习夹）
+    // 章名 / 章号 / 知识点名变化时先搬目录（旧 reviews 键还在，按 chapterId 能定位旧复习夹）
     migrateCourseLayoutTo(wsId, old, outline, getSetting)
     remapReviewKeys(wsId, old, outline)
     remapChapterAssignments(wsId, old, outline, getSetting)
@@ -234,7 +236,7 @@ export function writeCourseOutline(wsId: string, outline: CourseOutline, getSett
 // ===== 课程状态 API =====
 
 export function getCourseState(wsId: string, getSetting: (key: string) => unknown): CourseState {
-  // v3.16.0：打开工作区时静默把旧扁平目录整理成「第N章 / NN 知识点 / 段N」。
+  // 打开工作区时静默把旧布局整理成「第N章 / 段N」。
   // 先迁移再读 progress，保证本次返回的 handoffRel / reviews.rel 已是新路径。
   ensureCourseLayout(wsId, getSetting)
   const f = readProgressFile()
@@ -250,7 +252,7 @@ export function getCourseState(wsId: string, getSetting: (key: string) => unknow
   }
 }
 
-// ===== v3.16.0：课程文件夹布局（章容器 / 知识点 / 章末复习）=====
+// ===== 课程文件夹布局：章 → 段（chapter-segment-v1）=====
 
 const LAYOUT_KEY = 'layout.json'
 
@@ -289,7 +291,7 @@ function markLayoutMigrated(wsId: string, warnings: string[]): void {
   writeJson(MODULE, LAYOUT_KEY, store)
 }
 
-/** 迁移前只备份元数据（progress / favorites），不复制用户大文件 */
+/** 迁移前只备份元数据（progress / favorites / sources），不复制用户大文件 */
 function backupLayoutMeta(): void {
   try {
     const vault = getCurrentVault()
@@ -312,245 +314,340 @@ function rewriteByPairs(value: string | null | undefined, pairs: Array<{ from: s
   return null
 }
 
-/** 找知识点夹当前实际位置：新路径 → 旧扁平路径 → 会话锚点反推（兼容用户手工改名） */
-function resolveExistingUnitRel(wsId: string, unit: LayoutUnit, getSetting: (key: string) => unknown): string | null {
+/** 收集工作区文件树快照（深度 ≤4）与会话锚点；不碰 SOURCES / 教材 / 隐藏目录。 */
+function collectLayoutSnapshot(wsRel: string): { entries: LayoutMigrationEntry[]; anchors: LayoutMigrationAnchor[] } {
   const vault = getCurrentVault()
-  if (!vault) return null
-  for (const rel of [unit.unitRel, unit.legacyUnitRel]) {
-    if (rel && existsSync(join(vault.rootPath, rel))) return rel
+  const entries: LayoutMigrationEntry[] = []
+  const anchors: LayoutMigrationAnchor[] = []
+  if (!vault) return { entries, anchors }
+  const rootAbs = join(vault.rootPath, wsRel)
+  if (!existsSync(rootAbs)) return { entries, anchors }
+
+  const walk = (abs: string, rel: string, depth: number): void => {
+    if (depth > 4) return
+    // 当前目录里的 .session.json = 一个会话夹的锚点
+    try {
+      const anchorAbs = join(abs, '.session.json')
+      if (existsSync(anchorAbs)) {
+        const data = JSON.parse(readFileSync(anchorAbs, 'utf-8')) as { sessionId?: unknown }
+        if (data && typeof data.sessionId === 'string' && data.sessionId) anchors.push({ rel, sessionId: data.sessionId })
+      }
+    } catch { /* 锚点损坏跳过 */ }
+
+    let dirents: import('fs').Dirent[]
+    try { dirents = readdirSync(abs, { withFileTypes: true }) } catch { return }
+    for (const e of dirents) {
+      const childRel = rel ? `${rel}/${e.name}` : e.name
+      entries.push({ rel: childRel, name: e.name, isDir: e.isDirectory() })
+      if (!e.isDirectory()) continue
+      if (e.name.startsWith('.') || e.name === 'SOURCES' || e.name === '教材' || e.name === 'node_modules' || e.name === '_extracts' || e.name === '_templates') continue
+      walk(join(abs, e.name), childRel, depth + 1)
+    }
   }
-  const f = readProgressFile()
-  const s = wsState(f, wsId)
-  for (const [sid, l] of Object.entries(s.lessons ?? {})) {
-    if (!l.unitIds?.includes(unit.unitId)) continue
-    // 段产物夹只挂在**段内第一个知识点**下；第二个知识点没有独立夹时不能反推成第一个的夹
-    if (lessonUnitIds(l)[0] !== unit.unitId) continue
-    const sf = sessionFolder(sid, getSetting)
-    const rel = sf?.relPath
-    if (!rel) continue
-    const parent = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : ''
-    if (parent && parent !== unit.unitRel && parent !== unit.legacyUnitRel) return parent
-  }
-  return null
+  walk(rootAbs, wsRel, 0)
+  return { entries, anchors }
 }
 
-/** 找章末复习夹当前实际位置：新路径 → 旧扁平路径 → 复习会话锚点反推 */
-function resolveExistingReviewRel(wsId: string, chapter: LayoutChapter, getSetting: (key: string) => unknown): string | null {
+/** 目标已存在时的递归合并：文件不覆盖，同名冲突加 (n)；目录递归后收空。 */
+function mergeWorkspacePath(rootId: string, fromRel: string, toRel: string, warnings: string[]): void {
   const vault = getCurrentVault()
-  if (!vault) return null
-  for (const rel of [chapter.reviewRel, chapter.legacyReviewRel]) {
-    if (rel && existsSync(join(vault.rootPath, rel))) return rel
+  if (!vault) return
+  const fromAbs = join(vault.rootPath, fromRel)
+  const toAbs = join(vault.rootPath, toRel)
+  if (!existsSync(fromAbs)) return
+  if (!existsSync(toAbs)) {
+    renameWorkspacePath(rootId, fromRel, toRel)
+    return
   }
-  const f = readProgressFile()
-  const s = wsState(f, wsId)
-  const review = s.reviews?.[chapter.chapterId]
-  const sid = review?.sessionId
-  if (!sid) return null
-  const sf = sessionFolder(sid, getSetting)
-  return sf?.relPath ?? null
+  let fromDir = false
+  let toDir = false
+  try { fromDir = statSync(fromAbs).isDirectory() } catch { return }
+  try { toDir = statSync(toAbs).isDirectory() } catch { /* ignore */ }
+  if (fromDir && toDir) {
+    let children: string[] = []
+    try { children = readdirSync(fromAbs) } catch { return }
+    for (const child of children) mergeWorkspacePath(rootId, `${fromRel}/${child}`, `${toRel}/${child}`, warnings)
+    try { rmdirSync(fromAbs) } catch { /* 非空保留 */ }
+    return
+  }
+  // 文件撞名 / 文件与目录撞名：保留两份，不覆盖
+  const slash = toRel.lastIndexOf('/')
+  const parentRel = slash >= 0 ? toRel.slice(0, slash) : ''
+  const parentAbs = join(vault.rootPath, parentRel)
+  const name = uniqueFileName(parentAbs, toRel.slice(slash + 1))
+  const nextRel = parentRel ? `${parentRel}/${name}` : name
+  renameWorkspacePath(rootId, fromRel, nextRel)
+  warnings.push(`同名文件已保留两份：${nextRel}`)
 }
 
-/**
- * 把旧布局 / 旧章号 / 旧知识点名迁移到当前大纲对应的新路径。
- * - 初次迁移：oldOutline === newOutline；
- * - 大纲改名 / 调序：oldOutline 是保存前大纲，newOutline 是保存后大纲；
- * - 只移动已知的课程目录，不碰用户自建的其他文件夹。
- */
-function migrateCourseLayoutTo(
+/** 执行迁移计划：非 merge 移动遇到目标占用时先暂存，等源让位后再落位。 */
+function executeLayoutPlan(wsRel: string, plan: LayoutMigrationPlan): { moved: number; warnings: string[]; trashRel: string | null } {
+  const vault = getCurrentVault()
+  if (!vault) return { moved: 0, warnings: ['仓库未打开'], trashRel: null }
+  const warnings = [...plan.warnings]
+  const trashRel = `${wsRel}/.aiTeach-trash-${Date.now().toString(36)}`
+  let trashUsed = false
+  let moved = 0
+  const stagingRel = `${wsRel}/.aiTeach-layout-${Date.now().toString(36)}`
+  const staged: Array<{ move: LayoutMigrationPlan['moves'][number]; tempRel: string }> = []
+  let stagingIndex = 0
+
+  const move = (fromRel: string, toRel: string, merge: boolean): void => {
+    if (!fromRel || !toRel || fromRel === toRel) return
+    if (!existsSync(join(vault.rootPath, fromRel))) return
+    if (merge) {
+      mergeWorkspacePath(vault.rootId, fromRel, toRel, warnings)
+      moved++
+      return
+    }
+    if (!existsSync(join(vault.rootPath, toRel))) {
+      renameWorkspacePath(vault.rootId, fromRel, toRel)
+      moved++
+      return
+    }
+    // 目标占用：暂存，稍后重试（处理章调序 A↔B）
+    try {
+      mkdirSync(join(vault.rootPath, stagingRel), { recursive: true })
+      const tempRel = `${stagingRel}/${stagingIndex++}-${fromRel.split('/').pop() || 'item'}`
+      renameWorkspacePath(vault.rootId, fromRel, tempRel)
+      staged.push({ move: { from: fromRel, to: toRel, kind: 'unit', label: '' }, tempRel })
+    } catch (e) {
+      warnings.push(`移动失败（${(e as Error).message}）：${fromRel}`)
+    }
+  }
+
+  for (const m of plan.moves) {
+    if (!existsSync(join(vault.rootPath, m.from))) continue
+    if (m.kind === 'trash') {
+      try {
+        mkdirSync(join(vault.rootPath, trashRel), { recursive: true })
+        const name = uniqueFileName(join(vault.rootPath, trashRel), m.from.split('/').pop() || 'item')
+        renameWorkspacePath(vault.rootId, m.from, `${trashRel}/${name}`)
+        trashUsed = true
+        moved++
+      } catch (e) {
+        warnings.push(`${m.label}：回收失败（${(e as Error).message}）`)
+      }
+      continue
+    }
+    move(m.from, m.to, !!m.merge)
+  }
+
+  for (const s of staged) {
+    const tempRel = s.tempRel
+    if (!existsSync(join(vault.rootPath, tempRel))) continue
+    if (!existsSync(join(vault.rootPath, s.move.to))) {
+      try {
+        renameWorkspacePath(vault.rootId, tempRel, s.move.to)
+        moved++
+      } catch (e) {
+        warnings.push(`落位失败（${(e as Error).message}）：${s.move.to}`)
+      }
+    } else {
+      try {
+        renameWorkspacePath(vault.rootId, tempRel, s.move.from)
+        warnings.push(`目标已存在，已放回原处：${s.move.from}`)
+      } catch (e) {
+        warnings.push(`回退失败（${(e as Error).message}）：${tempRel}`)
+      }
+    }
+  }
+  try { rmdirSync(join(vault.rootPath, stagingRel)) } catch { /* 非空保留 */ }
+  for (const rel of plan.removeEmpty) {
+    try { rmdirSync(join(vault.rootPath, rel)) } catch { /* 非空保留 */ }
+  }
+  return { moved, warnings, trashRel: trashUsed ? trashRel : null }
+}
+
+/** v3.16 → 章 → 段：初次布局迁移（只针对当前仓库，不再保留 v3.15 兼容分支） */
+function migrateLayoutToChapterSegment(
   wsId: string,
-  oldOutline: CourseOutline | null,
-  newOutline: CourseOutline,
+  outline: CourseOutline,
   getSetting: (key: string) => unknown,
   opts: { backup?: boolean } = {},
 ): LayoutMigrationResult {
   const vault = getCurrentVault()
   const wsRel = workspaceFolderRel(wsId, getSetting)
   if (!vault || !wsRel) return { moved: 0, warnings: ['工作区不存在或仓库未打开'] }
-  if (!oldOutline) return { moved: 0, warnings: [] }
 
-  const warnings: string[] = []
-  const unitPairs: Array<{ from: string; to: string }> = []
-  const reviewPairs: Array<{ from: string; to: string }> = []
-  const sourcePairs: Array<{ from: string; to: string }> = []
-  let moved = 0
-
-  const oldPlan = buildCourseLayoutPlan(oldOutline, wsRel)
-  const newPlan = buildCourseLayoutPlan(newOutline, wsRel)
-  const oldUnits = new Map(oldPlan.units.map((u) => [u.unitId, u]))
-  const oldChapters = new Map(oldPlan.chapters.map((c) => [c.chapterId, c]))
-
-  type PlannedMove = { from: string; to: string; label: string; kind: 'unit' | 'review' | 'source' }
-  const planned: PlannedMove[] = []
-  const seenMoves = new Set<string>()
-  const addMove = (m: PlannedMove): void => {
-    if (!m.from || m.from === m.to) return
-    const key = `${m.from}\0${m.to}`
-    if (seenMoves.has(key)) return
-    seenMoves.add(key)
-    planned.push(m)
-  }
-
-  // 1) 知识点目录：章容器 + 本章序号
-  for (const next of newPlan.units) {
-    const prev = oldUnits.get(next.unitId)
-    if (!prev) continue
-    const from = resolveExistingUnitRel(wsId, prev, getSetting)
-    if (from) addMove({ from, to: next.unitRel, label: `知识点「${next.unitName}」`, kind: 'unit' })
-    // 2) SOURCES 仍平铺，但章号/知识点名变化时同步旧素材夹名，避免下次登记写丢
-    const sourceOldCandidates = [
-      `${wsRel}/SOURCES/${prev.legacySourceKey}`,
-      `${wsRel}/SOURCES/${prev.sourceKey}`,
-    ]
-    const sourceFrom = sourceOldCandidates.find((rel) => existsSync(join(vault.rootPath, rel))) ?? null
-    if (sourceFrom) addMove({
-      from: sourceFrom,
-      to: `${wsRel}/SOURCES/${next.sourceKey}`,
-      label: `素材夹「${next.unitName}」`,
-      kind: 'source',
+  const f = readProgressFile()
+  const s = wsState(f, wsId)
+  const lessons = Object.entries(s.lessons ?? {})
+    .map(([sid, l]) => {
+      const ch = chapterOfUnit(outline, lessonUnitIds(l)[0])
+      return ch ? { sessionId: sid, order: l.order, chapterId: ch.chapter.id } : null
     })
-  }
+    .filter((x): x is { sessionId: string; order: number; chapterId: string } => !!x)
+  const keepSessionIds = [
+    s.assistantSessionId,
+    ...Object.keys(s.lessons ?? {}),
+    ...Object.values(s.reviews ?? {}).map((r) => r?.sessionId),
+  ].filter((x): x is string => typeof x === 'string' && !!x)
 
-  // 3) 章末复习目录：章容器下的「章末复习」
-  for (const next of newPlan.chapters) {
-    const prev = oldChapters.get(next.chapterId)
-    if (!prev) continue
-    const from = resolveExistingReviewRel(wsId, prev, getSetting)
-    if (from) addMove({ from, to: next.reviewRel, label: `章末复习「${next.chapterName}」`, kind: 'review' })
-  }
+  const snapshot = collectLayoutSnapshot(wsRel)
+  const plan = planCourseLayoutMigration({
+    wsRel,
+    outline,
+    lessons,
+    entries: snapshot.entries,
+    anchors: snapshot.anchors,
+    keepSessionIds,
+  })
+  if (opts.backup && plan.moves.length > 0) backupLayoutMeta()
+  const ex = executeLayoutPlan(wsRel, plan)
 
-  // 4) 执行移动。章调序时目标可能正被另一个旧夹占用，先搬到隐藏暂存区，
-  //    等所有源夹让位后再落目标；避免「第1章 ↔ 第2章」互换时互相报目标已存在。
-  if (opts.backup && planned.length > 0) backupLayoutMeta()
-  const stagingRel = `${wsRel}/.aiTeach-layout-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
-  const stagingAbs = join(vault.rootPath, stagingRel)
-  const staged: Array<{ move: PlannedMove; tempRel: string }> = []
-  const done: PlannedMove[] = []
-  let stagingIndex = 0
-
-  for (const m of planned) {
-    const fromAbs = join(vault.rootPath, m.from)
-    const toAbs = join(vault.rootPath, m.to)
-    if (!existsSync(fromAbs)) continue
-    if (!existsSync(toAbs)) {
-      try {
-        renameWorkspacePath(vault.rootId, m.from, m.to)
-        moved++
-        done.push(m)
-      } catch (e) {
-        warnings.push(`${m.label}：移动失败（${(e as Error).message}）`)
-      }
-      continue
-    }
-    // 目标被占用：暂存，稍后重试
-    try {
-      mkdirSync(stagingAbs, { recursive: true })
-      const tempRel = `${stagingRel}/${stagingIndex++}-${m.from.split('/').pop() || 'item'}`
-      renameWorkspacePath(vault.rootId, m.from, tempRel)
-      staged.push({ move: m, tempRel })
-    } catch (e) {
-      warnings.push(`${m.label}：暂存失败（${(e as Error).message}）`)
-    }
-  }
-
-  for (const s of staged) {
-    const tempAbs = join(vault.rootPath, s.tempRel)
-    const toAbs = join(vault.rootPath, s.move.to)
-    if (existsSync(toAbs)) {
-      // 目标仍被用户自建夹/未迁移夹占用：尽量放回原位，绝不覆盖
-      try {
-        const fromAbs = join(vault.rootPath, s.move.from)
-        if (!existsSync(fromAbs)) renameWorkspacePath(vault.rootId, s.tempRel, s.move.from)
-        else warnings.push(`${s.move.label}：目标与暂存原路径都已被占用，保留在 ${s.tempRel}`)
-      } catch (e) {
-        warnings.push(`${s.move.label}：回退失败（${(e as Error).message}）`)
-      }
-      warnings.push(`${s.move.label}：目标已存在，已保留原目录（${s.move.to}）`)
-      continue
-    }
-    try {
-      renameWorkspacePath(vault.rootId, s.tempRel, s.move.to)
-      moved++
-      done.push(s.move)
-    } catch (e) {
-      warnings.push(`${s.move.label}：落位失败（${(e as Error).message}）`)
-    }
-  }
-  try { rmdirSync(stagingAbs) } catch { /* 非空/已删都不影响 */ }
-
-  // 章调序 / 改名后，旧章容器若已空则收掉；非空（用户文件/未迁移会话）保留
-  const newChapterRels = new Set(newPlan.chapters.map((c) => c.chapterRel))
-  for (const oldChapter of oldPlan.chapters) {
-    if (!oldChapter.chapterRel || newChapterRels.has(oldChapter.chapterRel)) continue
-    try { rmdirSync(join(vault.rootPath, oldChapter.chapterRel)) } catch { /* 非空保留 */ }
-  }
-
-  for (const m of done) {
-    if (m.kind === 'unit') unitPairs.push({ from: m.from, to: m.to })
-    else if (m.kind === 'review') reviewPairs.push({ from: m.from, to: m.to })
-    else sourcePairs.push({ from: m.from, to: m.to })
-  }
-
-  // 4b) 幂等修复：目录已经在新位置、旧位置已不存在，但元数据还停在旧路径（上次迁移中途失败 / 手工搬过）时，
-  //     仍然把 prefix 对补上；目标与旧路径同时存在（冲突）则不动，避免把有效路径改成未迁移的目录。
-  const addPair = (pairs: Array<{ from: string; to: string }>, from: string, to: string): void => {
-    if (!from || from === to) return
-    if (!existsSync(join(vault.rootPath, to))) return
-    if (existsSync(join(vault.rootPath, from))) return
-    if (!pairs.some((p) => p.from === from && p.to === to)) pairs.push({ from, to })
-  }
-  for (const next of newPlan.units) {
-    const prev = oldUnits.get(next.unitId)
-    if (!prev) continue
-    addPair(unitPairs, prev.legacyUnitRel, next.unitRel)
-    addPair(unitPairs, prev.unitRel, next.unitRel)
-    addPair(sourcePairs, `${wsRel}/SOURCES/${prev.legacySourceKey}`, `${wsRel}/SOURCES/${next.sourceKey}`)
-    addPair(sourcePairs, `${wsRel}/SOURCES/${prev.sourceKey}`, `${wsRel}/SOURCES/${next.sourceKey}`)
-  }
-  for (const next of newPlan.chapters) {
-    const prev = oldChapters.get(next.chapterId)
-    if (!prev) continue
-    addPair(reviewPairs, prev.legacyReviewRel, next.reviewRel)
-    addPair(reviewPairs, prev.reviewRel, next.reviewRel)
-  }
-
-  // 4) 元数据跟随目录一起改，避免「文件搬了、继续/复习入口还指旧路径」
-  const allPairs = [...unitPairs, ...reviewPairs]
-  if (allPairs.length > 0 || sourcePairs.length > 0) {
-    const f = readProgressFile()
-    const s = wsState(f, wsId)
+  // 元数据跟随目录：handoff 看段/章，summary 看知识点，reviews 看复习夹
+  const handoffPairs = [...plan.segmentPairs, ...plan.chapterPairs]
+  const summaryPairs = [...plan.unitPairs, ...plan.chapterPairs]
+  const reviewPairs = [...plan.reviewPairs, ...plan.chapterPairs]
+  const allPairs = [...plan.segmentPairs, ...plan.unitPairs, ...plan.reviewPairs, ...plan.chapterPairs]
+  if (allPairs.length > 0) {
+    const f2 = readProgressFile()
+    const s2 = wsState(f2, wsId)
     let changed = false
-    for (const lesson of Object.values(s.lessons ?? {})) {
-      const next = rewriteByPairs(lesson.handoffRel, unitPairs)
+    for (const lesson of Object.values(s2.lessons ?? {})) {
+      const next = rewriteByPairs(lesson.handoffRel, handoffPairs)
       if (next && next !== lesson.handoffRel) {
         lesson.handoffRel = next
         changed = true
       }
     }
-    for (const unit of Object.values(s.units ?? {})) {
-      const next = rewriteByPairs(unit.summaryRel, unitPairs)
+    for (const unit of Object.values(s2.units ?? {})) {
+      const next = rewriteByPairs(unit.summaryRel, summaryPairs)
       if (next && next !== unit.summaryRel) {
         unit.summaryRel = next
         changed = true
       }
     }
-    for (const review of Object.values(s.reviews ?? {})) {
+    for (const review of Object.values(s2.reviews ?? {})) {
       const next = rewriteByPairs(review.rel, reviewPairs)
       if (next && next !== review.rel) {
         review.rel = next
         changed = true
       }
     }
-    if (changed) persist(f)
-    const pathPairs = [...allPairs, ...sourcePairs]
-    rewriteFavoritePrefixes(wsId, pathPairs)
-    rewriteSourcePathPrefixes(wsId, pathPairs)
+    if (changed) persist(f2)
+    rewriteFavoritePrefixes(wsId, allPairs)
+    rewriteSourcePathPrefixes(wsId, allPairs)
   }
 
-  if (moved > 0) {
+  // 回收站是异步的：先把东西放进隐藏暂存夹，再交给系统回收站（绝不 rm）
+  if (ex.trashRel) {
+    void trashWorkspacePath(vault.rootId, ex.trashRel).catch((e) => {
+      console.warn('[aiTeaching] 布局整理回收站失败，暂存夹保留：', ex.trashRel, e)
+    })
+  }
+  if (ex.moved > 0 || ex.trashRel) {
     broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: wsRel })
     broadcastCourse(wsId)
   }
-  return { moved, warnings }
+  return { moved: ex.moved, warnings: ex.warnings }
+}
+
+/**
+ * 大纲改名 / 调序后的迁移（布局已经是章 → 段）：
+ * - 章改名/调序 → 整章文件夹搬家（段随章走）；
+ * - 知识点改名 → 只搬 `知识点/{NN}` 元数据夹；
+ * - 段文件夹名 `段N` 不受知识点改名影响。
+ */
+function migrateCourseLayoutTo(
+  wsId: string,
+  oldOutline: CourseOutline | null,
+  newOutline: CourseOutline,
+  getSetting: (key: string) => unknown,
+): LayoutMigrationResult {
+  const vault = getCurrentVault()
+  const wsRel = workspaceFolderRel(wsId, getSetting)
+  if (!vault || !wsRel) return { moved: 0, warnings: ['工作区不存在或仓库未打开'] }
+  if (!oldOutline) return { moved: 0, warnings: [] }
+
+  const oldPlan = buildCourseLayoutPlan(oldOutline, wsRel)
+  const newPlan = buildCourseLayoutPlan(newOutline, wsRel)
+  const oldChapters = new Map(oldPlan.chapters.map((c) => [c.chapterId, c]))
+  const oldUnits = new Map(oldPlan.units.map((u) => [u.unitId, u]))
+  const newChapters = new Map(newPlan.chapters.map((c) => [c.chapterId, c]))
+
+  const chapterPairs: Array<{ from: string; to: string }> = []
+  const unitPairs: Array<{ from: string; to: string }> = []
+  const reviewPairs: Array<{ from: string; to: string }> = []
+  const moves: LayoutMigrationPlan['moves'] = []
+  const removeEmpty: string[] = []
+
+  for (const next of newPlan.chapters) {
+    const prev = oldChapters.get(next.chapterId)
+    if (!prev) continue
+    if (prev.chapterRel !== next.chapterRel && existsSync(join(vault.rootPath, prev.chapterRel))) {
+      moves.push({ from: prev.chapterRel, to: next.chapterRel, kind: 'chapter', label: `章目录「${next.chapterName}」` })
+      chapterPairs.push({ from: prev.chapterRel, to: next.chapterRel })
+    }
+    if (prev.reviewRel !== next.reviewRel) reviewPairs.push({ from: prev.reviewRel, to: next.reviewRel })
+  }
+
+  for (const next of newPlan.units) {
+    const prev = oldUnits.get(next.unitId)
+    if (!prev) continue
+    const prevChapter = oldChapters.get(prev.chapterId)
+    const nextChapter = newChapters.get(next.chapterId)
+    const chapterMoved = !!prevChapter && !!nextChapter && prevChapter.chapterRel !== nextChapter.chapterRel
+    const oldAfterChapter = chapterMoved && prevChapter && nextChapter
+      ? `${nextChapter.chapterRel}${prev.unitRel.slice(prevChapter.chapterRel.length)}`
+      : prev.unitRel
+    if (oldAfterChapter === next.unitRel) continue
+    moves.push({ from: oldAfterChapter, to: next.unitRel, kind: 'unit', label: `知识点「${next.unitName}」` })
+    unitPairs.push({ from: prev.unitRel, to: next.unitRel })
+    removeEmpty.push(oldAfterChapter)
+  }
+
+  const plan: LayoutMigrationPlan = {
+    moves,
+    removeEmpty,
+    warnings: [],
+    chapterPairs,
+    unitPairs,
+    segmentPairs: [],
+    reviewPairs,
+  }
+  const ex = executeLayoutPlan(wsRel, plan)
+
+  const handoffPairs = [...chapterPairs]
+  const summaryPairs = [...unitPairs, ...chapterPairs]
+  const allReviewPairs = [...reviewPairs, ...chapterPairs]
+  const allPairs = [...unitPairs, ...reviewPairs, ...chapterPairs]
+  if (allPairs.length > 0) {
+    const f = readProgressFile()
+    const s = wsState(f, wsId)
+    let changed = false
+    for (const lesson of Object.values(s.lessons ?? {})) {
+      const next = rewriteByPairs(lesson.handoffRel, handoffPairs)
+      if (next && next !== lesson.handoffRel) {
+        lesson.handoffRel = next
+        changed = true
+      }
+    }
+    for (const unit of Object.values(s.units ?? {})) {
+      const next = rewriteByPairs(unit.summaryRel, summaryPairs)
+      if (next && next !== unit.summaryRel) {
+        unit.summaryRel = next
+        changed = true
+      }
+    }
+    for (const review of Object.values(s.reviews ?? {})) {
+      const next = rewriteByPairs(review.rel, allReviewPairs)
+      if (next && next !== review.rel) {
+        review.rel = next
+        changed = true
+      }
+    }
+    if (changed) persist(f)
+    rewriteFavoritePrefixes(wsId, allPairs)
+    rewriteSourcePathPrefixes(wsId, allPairs)
+  }
+
+  if (ex.moved > 0) {
+    broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: wsRel })
+    broadcastCourse(wsId)
+  }
+  return { moved: ex.moved, warnings: ex.warnings }
 }
 
 /**
@@ -570,14 +667,13 @@ export function ensureCourseLayout(wsId: string, getSetting: (key: string) => un
     if (isLayoutMigrated(id)) return
     const outline = readCourseOutline(id, getSetting)
     if (!outline) return
-    const r = migrateCourseLayoutTo(id, outline, outline, getSetting, { backup: true })
+    const r = migrateLayoutToChapterSegment(id, outline, getSetting, { backup: true })
     markLayoutMigrated(id, r.warnings)
     if (r.warnings.length > 0) console.warn('[aiTeaching] 课程文件夹自动整理有未完成项：', r.warnings)
   } catch (e) {
     console.warn('[aiTeaching] 课程文件夹自动整理失败，下次打开工作区会重试：', e)
   }
 }
-
 
 /** 3.13 兼容：3.14 课程 = 有 `课程.md` 即课程；开关不再生效。 */
 export function setCourseEnabled(_wsId: string, _enabled: boolean): { ok: boolean; error?: string } {
@@ -802,7 +898,7 @@ export function openChapterReview(wsId: string, chapterId: string, getSetting: (
   return { ok: true, sessionId: row.id }
 }
 
-/** 章容器相对路径：`{工作区}/第N章 章名`（知识点与章末复习都挂在这里） */
+/** 章容器相对路径：`{工作区}/第N章 章名`（段、章末复习、可选知识点元数据都挂在这里） */
 export function chapterFolderRel(wsId: string, chapterId: string, getSetting: (key: string) => unknown): string | null {
   const wsFolder = workspaceFolderRel(wsId, getSetting)
   if (!wsFolder) return null
@@ -812,7 +908,7 @@ export function chapterFolderRel(wsId: string, chapterId: string, getSetting: (k
   return `${wsFolder}/${chapterFolderName(found >= 0 ? found : 0, chapter?.name ?? '复习')}`
 }
 
-/** 章末复习夹：`{工作区}/第N章 章名/章末复习`（迁移前回退旧 `{章号}·{章名}`） */
+/** 章末复习夹：`{工作区}/第N章 章名/章末复习`（迁移前回退 v3.16 旧章名） */
 export function reviewFolderRel(wsId: string, chapterId: string, getSetting: (key: string) => unknown): string | null {
   const vault = getCurrentVault()
   const wsFolder = workspaceFolderRel(wsId, getSetting)
@@ -821,10 +917,11 @@ export function reviewFolderRel(wsId: string, chapterId: string, getSetting: (ke
   const found = (outline?.chapters ?? []).findIndex((c) => c.id === chapterId)
   const idx = found >= 0 ? found : 0
   const chapter = found >= 0 ? outline?.chapters[found] : null
-  const next = `${wsFolder}/${chapterFolderName(idx, chapter?.name ?? '复习')}/${REVIEW_FOLDER_NAME}`
-  const legacy = `${wsFolder}/${legacyChapterFolderName(idx, chapter?.name ?? '复习')}`
+  const name = chapter?.name ?? '复习'
+  const next = `${wsFolder}/${chapterFolderName(idx, name)}/${REVIEW_FOLDER_NAME}`
+  const v316 = `${wsFolder}/${chapterFolderNameV316(idx, name)}/${REVIEW_FOLDER_NAME}`
   if (existsSync(join(vault.rootPath, next))) return next
-  if (existsSync(join(vault.rootPath, legacy))) return legacy
+  if (existsSync(join(vault.rootPath, v316))) return v316
   // 章名改过 / 用户手工改过目录时，按复习会话锚点找回实际夹（迁移或回退都能落到正确位置）
   const f = readProgressFile()
   const s = wsState(f, wsId)
@@ -892,8 +989,8 @@ function defaultModel(): { providerId?: string; modelId?: string } {
   return resolveOutlineModel({})
 }
 
-/** L1：段的物理文件夹相对路径 `{工作区}/第N章 章名/{NN} 知识点/段N`；非段返回 null。
- *  旧 `课时N·类型` 夹若已存在则继续用它（不搬用户文件）。 */
+/** L1：段的物理文件夹相对路径 `{工作区}/第N章 章名/段N`；非段返回 null。
+ *  迁移完成前，旧 v3.16 `知识点/段N` 或旧 `课时N·类型` 夹若仍存在则先用它，避免迁移中断时课程失联。 */
 function lessonFolderRel(sessionId: string, getSetting: (key: string) => unknown): string | null {
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return null
@@ -904,20 +1001,37 @@ function lessonFolderRel(sessionId: string, getSetting: (key: string) => unknown
   if (revChapter) return reviewFolderRel(wsId, revChapter, getSetting)
   const l = st.lessons[sessionId]
   if (!l) return null
+  const outline = readCourseOutline(wsId, getSetting)
   const firstUnitId = lessonUnitIds(l)[0]
-  const unitDirRel = unitFolderRel(wsId, firstUnitId, getSetting)
-  if (!unitDirRel) return null
-  // 旧课时夹兼容：{unit}/课时{order}·{kind}
-  try {
-    const vault = getCurrentVault()
-    if (vault) {
-      const dirAbs = join(vault.rootPath, unitDirRel)
+  const hit = chapterOfUnit(outline, firstUnitId)
+  const vault = getCurrentVault()
+  if (!vault || !hit) return null
+  const wsFolder = workspaceFolderRel(wsId, getSetting)
+  if (!wsFolder) return null
+  const next = `${wsFolder}/${chapterFolderName(hit.index, hit.chapter.name)}/${segmentFolderName(l.order)}`
+  if (existsSync(join(vault.rootPath, next))) return next
+
+  // 迁移中断兜底：旧 v3.16 知识点夹下的段 / 课时夹，或旧章根上的错位段
+  const ui = hit.chapter.units.findIndex((u) => u.id === firstUnitId)
+  const oldUnit = ui >= 0
+    ? `${wsFolder}/${chapterFolderNameV316(hit.index, hit.chapter.name)}/${unitFolderName(ui, hit.chapter.units[ui].name)}`
+    : null
+  const candidates = [
+    oldUnit ? `${oldUnit}/${segmentFolderName(l.order)}` : null,
+    `${wsFolder}/${chapterFolderNameV316(hit.index, hit.chapter.name)}/${segmentFolderName(l.order)}`,
+  ].filter((x): x is string => !!x)
+  for (const rel of candidates) {
+    if (existsSync(join(vault.rootPath, rel))) return rel
+  }
+  if (oldUnit) {
+    try {
+      const dirAbs = join(vault.rootPath, oldUnit)
       const prefix = `课时${l.order}·`
       const old = readdirSync(dirAbs, { withFileTypes: true }).find((d) => d.isDirectory() && d.name.startsWith(prefix))
-      if (old) return `${unitDirRel}/${old.name}`
-    }
-  } catch { /* 目录不存在 → 新段夹 */ }
-  return `${unitDirRel}/段${l.order}`
+      if (old) return `${oldUnit}/${old.name}`
+    } catch { /* 目录不存在 → 新段夹 */ }
+  }
+  return next
 }
 
 // L1：注册课时文件夹解析器给 aiTeachingFolders（避免 folders↔course 循环 import）
@@ -938,15 +1052,41 @@ function assistantFolderRel(sessionId: string, getSetting: (key: string) => unkn
 }
 setAssistantFolderResolver(assistantFolderRel)
 
-/** L5：会话所属知识点的文件夹相对路径 `{工作区}/第N章.../{NN} 知识点`（画像第三层落点）；非课时返回 null */
+/** L5：会话所属**第一个知识点**的可选元数据目录 `{工作区}/第N章 章名/知识点/{NN} 知识点`；非课时返回 null。
+ *  目录只在用户/AI 手动创建 `PROFILE.md` / `CONSTRAINTS.md` 时存在，不再由开段流程自动创建。 */
 export function getSessionUnitFolderRel(sessionId: string, getSetting: (key: string) => unknown): string | null {
   if (findReviewBySession(sessionId)) return null // 复习课无「所属知识点」层
-  const rel = lessonFolderRel(sessionId, getSetting)
-  return rel ? rel.slice(0, rel.lastIndexOf('/')) : null
+  const wsId = getWorkspaceOfSession(sessionId)
+  if (!wsId) return null
+  const f = readProgressFile()
+  const s = wsState(f, wsId)
+  const l = s.lessons?.[sessionId]
+  if (!l) return null
+  const firstUnitId = lessonUnitIds(l)[0]
+  return firstUnitId ? unitFolderRel(wsId, firstUnitId, getSetting) : null
 }
 
-/** L1/L3：知识点文件夹相对路径 `{工作区}/第N章 章名/{NN} 知识点`（总结篇 / 三层要求落点）。
- *  迁移完成前若旧扁平目录仍存在，回退旧路径——保证脚本/迁移中断时课程不会失联。 */
+/** 本段覆盖的**全部**知识点元数据目录（用于可选要求 / 画像注入）。 */
+export function getSessionUnitFolderRels(sessionId: string, getSetting: (key: string) => unknown): Array<{ unitId: string; name: string; rel: string }> {
+  const wsId = getWorkspaceOfSession(sessionId)
+  if (!wsId || findReviewBySession(sessionId)) return []
+  const f = readProgressFile()
+  const s = wsState(f, wsId)
+  const l = s.lessons?.[sessionId]
+  if (!l) return []
+  const outline = readCourseOutline(wsId, getSetting)
+  const units = new Map<string, string>()
+  for (const c of outline?.chapters ?? []) for (const u of c.units) units.set(u.id, u.name)
+  const out: Array<{ unitId: string; name: string; rel: string }> = []
+  for (const uid of lessonUnitIds(l)) {
+    const rel = unitFolderRel(wsId, uid, getSetting)
+    if (rel) out.push({ unitId: uid, name: units.get(uid) ?? uid, rel })
+  }
+  return out
+}
+
+/** L1/L3：知识点**可选元数据**目录 `{工作区}/第N章 章名/知识点/{NN} 知识点`。
+ *  不要求目录已存在；迁移完成前若旧 v3.16 知识点夹仍在，回退旧路径保证要求/画像不丢。 */
 export function unitFolderRel(wsId: string, unitId: string, getSetting: (key: string) => unknown): string | null {
   const vault = getCurrentVault()
   const wsFolder = workspaceFolderRel(wsId, getSetting)
@@ -966,22 +1106,11 @@ export function unitFolderRel(wsId: string, unitId: string, getSetting: (key: st
     }
   })
   if (chapterIndex < 0 || unitIndex < 0) return null
-  const next = `${wsFolder}/${chapterFolderName(chapterIndex, chapterName)}/${unitFolderName(unitIndex, unitName)}`
-  const legacy = `${wsFolder}/${legacyUnitFolderName(chapterIndex, unitName)}`
+  const chapterNew = `${wsFolder}/${chapterFolderName(chapterIndex, chapterName)}`
+  const next = `${chapterNew}/${UNIT_META_FOLDER_NAME}/${unitFolderName(unitIndex, unitName)}`
+  const v316 = `${wsFolder}/${chapterFolderNameV316(chapterIndex, chapterName)}/${unitFolderName(unitIndex, unitName)}`
   if (existsSync(join(vault.rootPath, next))) return next
-  if (existsSync(join(vault.rootPath, legacy))) return legacy
-  // 用户手工改过知识点夹 / 迁移中断：按本知识点的段会话锚点反推实际父目录
-  const f = readProgressFile()
-  const s = wsState(f, wsId)
-  for (const [sid, l] of Object.entries(s.lessons ?? {})) {
-    if (!l.unitIds?.includes(unitId)) continue
-    // 段产物夹只挂第一个知识点；其他知识点没有夹时不能借用第一个的父目录
-    if (lessonUnitIds(l)[0] !== unitId) continue
-    const sf = sessionFolder(sid, getSetting)
-    if (!sf?.relPath) continue
-    const parent = sf.relPath.includes('/') ? sf.relPath.slice(0, sf.relPath.lastIndexOf('/')) : ''
-    if (parent && parent !== wsFolder) return parent
-  }
+  if (existsSync(join(vault.rootPath, v316))) return v316
   return next
 }
 
@@ -1409,14 +1538,23 @@ export function moveCourseUnit(wsId: string, unitId: string, targetChapterId: st
   return { ok: true }
 }
 
-/** 整理页归档：写入 target（仓库相对目录）或默认会话 output/；返回相对路径与**绝对路径**。 */
+/** 整理页归档：写入 target（仓库相对目录）或默认本会话目录；返回相对路径与**绝对路径**。
+ *  段会话只允许写本段目录（防止模型猜路径，把产物写到章根 / 错误知识点下）；
+ *  课程助手保留自由 target，以便维护 `教材/` 等课程级资料。 */
 export function archiveOrganizedPage(sessionId: string, title: unknown, content: unknown, target: unknown, getSetting: (key: string) => unknown): { ok: boolean; relPath?: string; absPath?: string; error?: string } {
   const vault = getCurrentVault()
   if (!vault) return { ok: false, error: '尚未打开仓库' }
   if (isHandoffTitle(title)) return { ok: false, error: '交接由「收尾本段」统一生成，不能用整理归档创建。' }
+  const sid = String(sessionId ?? '')
+  const owner = resolveWriteOwnerRel(sid, getSetting)
+  if (!owner) return { ok: false, error: '无法确定归档目录' }
   let rel = String(target ?? '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
-  if (!rel) { const owner = resolveWriteOwnerRel(String(sessionId ?? ''), getSetting); if (!owner) return { ok: false, error: '无法确定归档目录' }; rel = owner }
+  if (!rel) rel = owner
   if (rel.split('/').some((s) => s.startsWith('.'))) return { ok: false, error: '归档目录非法（不能写入隐藏/点目录）' }
+  const inOwner = rel === owner || rel.startsWith(`${owner}/`)
+  if (!inOwner && !isCourseAssistantSession(sid, getSetting)) {
+    return { ok: false, error: `本段产物只能写入本段目录（${owner}/），不要指定其他 target` }
+  }
   try {
     const dirAbs = join(vault.rootPath, rel)
     mkdirSync(dirAbs, { recursive: true })

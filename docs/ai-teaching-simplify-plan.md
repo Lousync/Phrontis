@@ -332,6 +332,8 @@ interface SegmentSource {
 
 ### 3.4 文件夹落点
 
+> **2026-11-03 已由 `chapter-segment-v1` 取代**：文件树改为 `章 → 段`（`第N章 章名/段N`），知识点不再作为段的父目录；`知识点/{NN} 知识点/` 只保留可选的画像/要求。以下 v3.16 结构是历史方案，路径口径以 `electron/lib/aiTeachingLayoutPure.ts` 为准。
+
 v3.16.0 起自动把旧扁平目录整理成章容器（打开工作区时静默迁移，旧目录可回退读取）：
 
 ```
@@ -353,10 +355,11 @@ v3.16.0 起自动把旧扁平目录整理成章容器（打开工作区时静默
       CONSTRAINTS.md
 ```
 
-- 段文件夹 = **段内第一个知识点目录**下的 `段N`；这样多知识点段不会把文件拆到多个知识点夹，也不需要搬旧 `课时N` 夹。
+- 段文件夹 = **`第N章 章名/段N`**（chapter-segment-v1；不再挂知识点，多知识点段不会拆文件）。
 - 旧 `课时N·类型` 夹原样保留；旧段按 `lessonFolderRel` 兼容读取。
+- 可选知识点元数据 = `第N章 章名/知识点/{NN} 知识点/`；只有用户/AI 手动创建时才存在。
 - 课程助手仍是 `{工作区}/课程助手`；复习改为 `{工作区}/第N章 章名/章末复习/`。
-- `SOURCES/` 本期保持平铺（用户可见度低，且 `sources.json` 存仓库相对路径），知识点素材夹仍按 `{章号}·{知识点}` 命名。
+- `SOURCES/` 仍保持平铺（用户可见度低，且 `sources.json` 存仓库相对路径），知识点素材夹仍按 `{章号}·{知识点}` 命名。
 
 ### 3.5 纯函数（先写、先测）
 
@@ -533,7 +536,7 @@ interface PreflightCandidate {
   - 复习：章级分配 + 交接路径；最多 3000 字；
   - 旧会话（无 `unitIds` 的旧课时）：P1~P3 回退旧合并素材，保证旧 UI/旧会话可用；P4 删除旧路径后为空。新段永远只读快照。
 - `scopeRuleHint` 改口径：素材范围 = 本段确认 + 本章已分配；不要扫 `SOURCES/` 未确认文件；用户明确点名才扩大。
-- `writeScopeHint`：段落点 = 第一个知识点下的 `段N/`；复习 = 章目录；助手 = `课程助手/`。
+- `writeScopeHint`：段落点 = `第N章 章名/段N/`；复习 = 章目录；助手 = `课程助手/`。
 - 删除 `resolveSourcesForInjection` import。
 - `courseHint` 调用 `buildCourseInjection`，逻辑见 §5.1。
 - 其余注入顺序不变（要求、画像、收藏、标题规则、quiz、outline、ask 等）。
@@ -583,7 +586,7 @@ interface PreflightCandidate {
 
 ### 5.8 文件夹 / 要求
 
-- `aiTeachingFolders.ts`：新增 `segmentFolderRel(sessionId)`（第一个 unit + `段N`）；`resolveWriteOwnerRel` / `ensureWriteOwnerFolder` 对段返回新路径；旧 `lessonFolderRel` 保留兼容。
+- `aiTeachingFolders.ts`：段夹 = `第N章 章名/段N`；`resolveWriteOwnerRel` / `ensureWriteOwnerFolder` 对段返回新路径；旧 `课时N` 夹保留兼容。
 - `scopePrompt.ts`：`lesson` 层标题由「课时要求」改为「本段要求」；四层顺序与上限不变；`CONSTRAINTS.md` 位置不变。
 - 删除右栏「层级」页签后，提供 `RequirementsDrawer`：
   - 入口：课程助手顶部 `要求`、开段预检底部 `本段要求`、右栏进度章头 `要求`；

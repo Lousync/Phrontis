@@ -17,6 +17,12 @@
 
 ---
 
+## 当前进行中的工作
+
+- **背单词功能的软件适配与优化**（延后到 v3.18.0）：v3.17.0 已合入代码 / IPC / AI 工具 / 静态资源，但用户入口由 `src/lib/featureFlags.ts` 的 `VOCAB_ENTRY_ENABLED = false` 关闭；适配 / 优化与遗留问题见 `docs/vocab-module-plan.md` §9，其中「读单词功能疑似有问题」登记为 `docs/pending-fixes.md` **B-48**。
+- **背单词原生模块化**（暂缓）：目标与分阶段计划见 `docs/vocab-module-plan.md` §10；当前仍用 iframe，不急于实施。
+- 用户问「还有什么工作」时，默认先回答：**背单词功能的软件适配与优化（v3.18.0）**；再按需展开 §9 / B-48。
+
 ## 技术栈
 
 | 层 | 选型 |

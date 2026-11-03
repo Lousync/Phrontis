@@ -4,11 +4,60 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：67
+ * 版本数：68
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.17.0",
+    "date": "2026-11-03",
+    "summary": "本版一句话：AI 教学课程文件夹改为「章 → 段」，旧课程打开即迁移；题单新增「提取答案」，可把作答复制给 AI 判题。",
+    "groups": [
+      {
+        "title": "AI 教学",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "课程文件夹改为「章 → 段」",
+            "rest": "段直接落在 `第N章 章名/段N`，知识点不再作为段的父目录；章目录名不再重复「第N章」。",
+            "sub": []
+          },
+          {
+            "lead": "旧课程自动迁移",
+            "rest": "打开旧工作区时静默整理 v3.16 布局——段归位、错位段合并；孤儿旧段夹 / 单元级 PROFILE 进回收站，可恢复。",
+            "sub": []
+          },
+          {
+            "lead": "画像与要求",
+            "rest": "段画像写到 `段N/PROFILE.md`；单元级 PROFILE / CONSTRAINTS 不再自动创建，已存在时仍会注入。",
+            "sub": []
+          },
+          {
+            "lead": "写入范围",
+            "rest": "段会话归档强制写本段目录；课程助手仍可写教材 / 课程级落点。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "题单",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "提取答案",
+            "rest": "题单顶部新增「提取答案」，按题号导出选择题 / 简答题作答（未作答也列出）；复制后直接粘贴给 AI 判题。",
+            "sub": []
+          },
+          {
+            "lead": "判分更干净",
+            "rest": "不导出正确答案、解析与自评，避免先入为主；无作答时按钮禁用，复制结果走 Toast 反馈。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.16.1",
     "date": "2026-11-02",

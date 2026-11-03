@@ -8,6 +8,7 @@ import { SectionHead } from './SectionHead'
 // 模块清单、档位语义、解析都在纯模块里（零依赖）—— 契约脚本要真跑那几条规则
 import { MODULES, PERM_LABEL, parsePerms, presetModulePerms } from '../../../lib/aiPermPresets'
 import type { Perm, PermPreset } from '../../../lib/aiPermPresets'
+import { VOCAB_ENTRY_ENABLED } from '../../../lib/featureFlags'
 
 /**
  * 三态分段控件（2026-10-13 按原型：下拉 → 分段控件）。
@@ -67,6 +68,8 @@ function PermRow({ icon, label, hint, ctl, active }: {
 export function AiPermissionsTab() {
   const { s, update } = useSettings()
   const perms = parsePerms(s.aiModulePermissions ?? '{}')
+  // v3.17.0 背单词暂不开放：权限行一并收起；MODULES 仍保留，3.18.0 由总闸恢复
+  const visibleModules = VOCAB_ENTRY_ENABLED ? MODULES : MODULES.filter(m => m.id !== 'vocab')
   const anyWrite = MODULES.some(m => perms[m.id] === 'write') || s.aiVaultFilePerm === 'write'
   const vaultPerm: Perm = s.aiVaultFilePerm === 'off' || s.aiVaultFilePerm === 'read' || s.aiVaultFilePerm === 'write' ? s.aiVaultFilePerm : 'read'
   const terminalAiExec = s.terminalAiExec === true
@@ -151,7 +154,7 @@ export function AiPermissionsTab() {
             hint="列目录与阅读仓库内文本类文件；设为读写后可新建、覆写、局部编辑、重命名与移动（删除走回收站）。"
             ctl={<PermCtl cur={vaultPerm} onChange={setVaultPerm} />}
           />
-          {MODULES.map(m => {
+          {visibleModules.map(m => {
             const cur: Perm = perms[m.id] ?? 'read'
             return (
               <PermRow

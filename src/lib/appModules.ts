@@ -63,6 +63,10 @@ export const APP_MODULES = [
   { id: 'terminal', label: '终端', bar: false, tile: true, palette: true },
   // 记账：工作台内模块（左栏书签进，同笔记/日程形态）
   { id: 'accounting', label: '记账', bar: false, tile: true, palette: true },
+  // v3.17.0 背单词：工作台内模块（左栏书签进），嵌入 qwerty-learner。
+  // 本版入口由 `featureFlags.ts` 的 VOCAB_ENTRY_ENABLED 关闭（书签 / 磁贴 / 权限行在消费处过滤）；
+  // 这里保留 tile/palette 标记，3.18.0 置 true 后自动恢复。
+  { id: 'vocab', label: '背单词', bar: false, tile: true, palette: true },
   // v3.12.0 情报：工作台内模块（左栏书签进，同笔记/日程形态；docs/intel-module-plan.md §6.1）
   { id: 'intel', label: '情报', bar: false, tile: true, palette: true },
   { id: 'plugins', label: '插件', bar: true, tile: true, palette: true },

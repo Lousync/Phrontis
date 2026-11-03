@@ -90,7 +90,7 @@ export default defineConfig({
         // → EBUSY 未捕获异常直接杀死 dev 进程（本机 dev 实测崩溃）。
         // 一并忽略非源码目录：tmp/（基线与冒烟产物，写入不再触发无谓 full-reload）、
         // .AGENT/（worktree 嵌套副本）、out_prev_*/（历史构建 dumps）。
-        ignored: ['**/.*.tmp', '**/.*.tmpdir', '**/.*.tmpdir/**', '**/tmp/**', '**/.AGENT/**', '**/out_prev_*/**']
+        ignored: ['**/.*.tmp', '**/.*.tmpdir', '**/.*.tmpdir/**', '**/tmp/**', '**/.AGENT/**', '**/out_prev_*/**', '**/vendor/**', '**/resources/vocab/**']
       },
       fs: {
         allow: [resolve(__dirname), mainProjectRoot]

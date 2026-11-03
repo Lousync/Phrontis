@@ -14,7 +14,7 @@ import {
   ListTodo, CalendarCheck, FileClock, PieChart, FolderTree, MessageSquare,
   BookOpen, Trash2, LifeBuoy, History, FlaskConical, LayoutGrid,
   Clock, CalendarDays, Activity, ChevronLeft, ChevronRight,
-  SquareTerminal, Wallet,
+  SquareTerminal, Wallet, Languages, Radar,
 } from 'lucide-react'
 import {
   EditorIcon, BlogIcon, ScheduleIcon, KnowledgeIcon, MomentsIcon,
@@ -25,6 +25,7 @@ import type { DesktopData, DerivedStats } from './useDesktopData'
 import { hasCheckOn, shiftDays } from './useDesktopData'
 import { isoWeekNo, weekRangeOf, monthRangeOf, yearRangeOf, summaryWindowsAt } from '../../lib/summary'
 import { TILE_MODULE_IDS, labelOf } from '../../lib/appModules'
+import { VOCAB_ENTRY_ENABLED } from '../../lib/featureFlags'
 import { Collapsible } from '../../components/shared/Collapsible'
 
 export interface TileCtx {
@@ -673,6 +674,10 @@ const TILE_META: Record<string, { desc: string; icon: (size: number) => ReactNod
   // v3.5.0 终端 / 记账（工作台内模块，同笔记/日程形态；图标与左栏书签同一对 lucide 图标）
   terminal: { desc: '内置终端 · 多会话', icon: (s) => <SquareTerminal size={s} /> },
   accounting: { desc: '流水 / 统计 / 复盘', icon: (s) => <Wallet size={s} /> },
+  // v3.17.0 背单词：打字记忆 + AI 造句复习
+  vocab: { desc: '打字背单词 · AI 造句复习', icon: (s) => <Languages size={s} /> },
+  // v3.12.0 情报：源过滤 + AI 推荐
+  intel: { desc: '情报源 / AI 推荐', icon: (s) => <Radar size={s} /> },
   // v3.9.0 AI助手：圈定范围让 AI 整理仓库（读 + 改，改动先预览）
   aiAssistant: { desc: 'AI 整理仓库', icon: (s) => <AiAssistantIcon size={s} /> },
   plugins: { desc: '已装插件管理', icon: (s) => <PluginIcon size={s} /> },
@@ -694,11 +699,14 @@ const TILE_META: Record<string, { desc: string; icon: (size: number) => ReactNod
  * `lib/appModules` 的唯一真相源（`tile` 标记）。★ 新增模块：真相源里标 `tile: true` **之外**，
  * 还得在此补一条「图标 + 说明」—— 否则 `DESK_MODULES` 会展开出 undefined（C3 契约断言覆盖）。
  */
-export const DESK_MODULES: ModuleDef[] = TILE_MODULE_IDS.map((tab) => ({
-  tab,
-  label: labelOf(tab),
-  ...TILE_META[tab],
-}))
+export const DESK_MODULES: ModuleDef[] = TILE_MODULE_IDS
+  // v3.17.0 背单词暂不开放：磁贴定义保留，只是不进桌面入口 / 添加面板；3.18.0 由总闸恢复
+  .filter((tab) => VOCAB_ENTRY_ENABLED || tab !== 'vocab')
+  .map((tab) => ({
+    tab,
+    label: labelOf(tab),
+    ...TILE_META[tab],
+  }))
 
 /** 模块磁贴右侧小字：只给「有真实数字可说」的几个模块，其余留白（不编造占位） */
 function moduleTail(tab: TabName, stats: DerivedStats, data: DesktopData): string {

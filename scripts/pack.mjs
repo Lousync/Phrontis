@@ -139,6 +139,14 @@ function main() {
   const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
   const version = String(pkg.version ?? '').trim()
   const exists = (rel) => existsSync(join(repoRoot, rel))
+  // 背单词（v3.17.0）：静态产物不进 git，打包前必须先生成，否则 extraResources 静默缺目录
+  if (!exists('resources/vocab/index.html')) {
+    console.error(
+      '[pack] 中止：缺少 resources/vocab/index.html。\n' +
+      '      背单词模块的 qwerty-learner 静态产物需要先构建：npm run build:vocab',
+    )
+    process.exit(5)
+  }
   const outRel = nextPackDirName(version, exists)
   console.log(`[pack] 版本 ${version} -> 产物目录 ${outRel}（目标 ${flag}${explicit ? '，显式指定' : '，按宿主平台'}）`)
   run('electron-vite build')

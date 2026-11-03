@@ -191,7 +191,7 @@ export const AI_ASSISTANT_SHORTCUT_DISABLED: readonly TabName[] = ['aiTeaching']
  * 2026-09-27 看板：唯一一个「书签 key 与 tab 同名」的成员 —— 点它开的不是某个模块的标签页，
  * 而是整窗看板（见 WORKBENCH_TABBAR_EXCLUDED）。
  */
-export type RailModule = 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat' | 'dashboard' | 'terminal' | 'accounting' | 'aiAssistant' | 'intel'
+export type RailModule = 'knowledge' | 'schedule' | 'bookshelf' | 'blog' | 'quiz' | 'aiChat' | 'dashboard' | 'terminal' | 'accounting' | 'vocab' | 'aiAssistant' | 'intel'
 
 export interface WorkbenchBookmark {
   key: RailModule
@@ -217,6 +217,8 @@ export const WORKBENCH_BOOKMARKS: readonly WorkbenchBookmark[] = [
   { key: 'bookshelf', label: '书架', tab: 'bookshelf' },
   { key: 'blog', label: '博客总结', tab: 'blog' },
   { key: 'accounting', label: '记账', tab: 'accounting' },
+  // v3.17.0 背单词：工作台内模块，侧栏 = 今日词表
+  { key: 'vocab', label: '背单词', tab: 'vocab' },
   { key: 'quiz', label: '错题本', tab: 'knowledge' },
   // v3.5.0 终端：工作台内模块（docs/terminal-module-design.md），模块侧栏 = 会话列表 + AI 执行记录入口
   { key: 'terminal', label: '终端', tab: 'terminal' },
@@ -238,6 +240,8 @@ export const BOOKMARK_COLORS: Readonly<Record<RailModule, BookmarkColor>> = {
   blog: { fg: '#9157d6', bg: 'rgba(160,107,224,.15)' },
   // 记账：金棕（钱袋色），与日程橙、书架绿区分
   accounting: { fg: '#c9922e', bg: 'rgba(201,146,46,.15)' },
+  // 背单词：青绿（打字练习 / 记忆曲线），与书架绿、终端石板青区分
+  vocab: { fg: '#2f9e8f', bg: 'rgba(47,158,143,.15)' },
   quiz: { fg: '#c94f4f', bg: 'rgba(217,91,91,.14)' },
   // 2026-09-27 看板：用主题强调色系（青蓝），与其余五项区分开
   dashboard: { fg: '#2b8fbd', bg: 'rgba(43,143,189,.15)' },
@@ -262,6 +266,8 @@ export const RAIL_FOLLOW_MAP: Readonly<Partial<Record<TabName, RailModule>>> = {
   bookshelf: 'bookshelf',
   blog: 'blog',
   accounting: 'accounting',
+  // v3.17.0 背单词：标签激活 → 左栏切今日词表
+  vocab: 'vocab',
   // aiChat 标签激活 → 左栏切 AI 会话侧栏（批次5 反馈轮：会话列表/会话大纲 + 文件改动）
   aiChat: 'aiChat',
   // v3.5.0 终端：终端标签激活 → 左栏切会话列表侧栏。缺这条时经页面条切回终端不会

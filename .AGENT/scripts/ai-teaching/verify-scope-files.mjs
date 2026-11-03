@@ -222,7 +222,7 @@ check('ensure 返回知识点层相对路径', ensured.ok && ensured.relPath ===
 check('ensure 落盘（真实临时目录里文件存在）', fs.existsSync(abs(UNIT_CONSTRAINTS_REL)), UNIT_CONSTRAINTS_REL)
 const skeleton = ensured.text ?? ''
 check('骨架首行 = `# 知识点 · 要求`', skeleton.startsWith('# 知识点 · 要求'), JSON.stringify(skeleton.slice(0, 20)))
-check('骨架含一句说明（分层语义）', skeleton.includes('只对本知识点下的课时生效'), '')
+check('骨架含一句说明（分层语义 + 可选）', skeleton.includes('本段覆盖到该知识点时生效') && skeleton.includes('可选层，不会自动创建'), '')
 check('骨架**不**含列表项（条目由用户加，负向）', !/^-\s/m.test(skeleton), JSON.stringify(skeleton))
 check('骨架 = 模块常量（唯一真源）', skeleton === UNIT_CONSTRAINTS_SKELETON, '')
 const ensured2 = ensureScopeText(UNIT_A, getSetting)
