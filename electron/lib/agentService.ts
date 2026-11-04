@@ -1183,6 +1183,11 @@ async function runAgentLoop(
   // 课程模式（docs/ai-teaching-course-mode-plan.md）：工作区开启课程模式时注入「课程目标 + 当前知识点 + 掌握度 + 待复习」，
   // 让模型从「答完这一问」转为「上好这门课」。未开启/无大纲 → 空串（零成本）。
   const courseHint = source === 'aiTeaching' ? buildCourseInjection(sessionId, getSettingReader()) : ''
+  // 2026-11-04：AI 教学讲课口径 —— 基础人设的「简洁直接」会诱导模型把讲课写成总结；
+  // 这里只覆盖教学面，不改其他助手。细则由课程级《教学运行手册.md》承载，避免 system 膨胀。
+  const teachStyleHint = source === 'aiTeaching'
+    ? '\n\n【讲课口径（AI教学）】基础规则里的「简洁直接」只适用于事务性回答，不适用于讲课 / 教材。讲知识点必须展开：问题/场景 → 前置桥接 → 定义 → 直觉 → 推导（每步为什么）→ 例题 → 反例/易错 → 检查 → 最后才总结；禁止用要点列表代替推导，禁止把素材的总结句改写一遍就交差。素材只有标题/摘要时明确说“素材不足”，用通用知识补讲要标“AI 补充”。'
+    : ''
   // 收藏（v3.6.0）：让 AI 感知到当前工作区钉在左栏「收藏」的文档（只读注入，无工具；用户自己挑出来常看的）
   const favoritesHint = source === 'aiTeaching' ? (() => {
     const wsId = getWorkspaceOfSession(sessionId)
@@ -1296,13 +1301,13 @@ async function runAgentLoop(
         constraintChars: scopeLayers.global.length + scopeLayers.workspace.length + scopeLayers.unit.length + scopeLayers.lesson.length,
         profileChars: profileHint.length,
         sourcesChars: sourcesHint.length,
-        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + outlineRuleHint.length + visualHint.length + mindmapHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
+        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + outlineRuleHint.length + teachStyleHint.length + visualHint.length + mindmapHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
       }
     : undefined
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + intelPersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
+    : baseSystem + schedulePersona + intelPersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，
