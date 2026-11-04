@@ -4,11 +4,82 @@
  * 重新生成：node .AGENT/scripts/release-notes/build-release-notes.mjs
  * 手写亮点（页面上部的「本版亮点」，不在此文件）：electron/lib/releaseNotes/highlights.ts
  *
- * 版本数：68
+ * 版本数：69
  */
 import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
+  {
+    "version": "3.18.0",
+    "date": "2026-11-04",
+    "summary": "本版一句话：题单「提取答案」进入 AI 教学工件栏；修复渲染态大纲不跳与 Markdown 波浪号范围被误判删除线；AI 教学讲课口径与理工科绘图 Skill 上线。",
+    "groups": [
+      {
+        "title": "题单",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "提取答案覆盖 AI 教学",
+            "rest": "右侧工件栏的 md 题单页签顶部也出现题单状态条与「提取答案」，与知识库阅读态共用同一份答题记录；工件栏没有题单内重做视图，故只保留计数与提取，不显示「错题重做」。",
+            "sub": []
+          },
+          {
+            "lead": "同一份作答",
+            "rest": "在工作台答过的选择题 / 简答题，切到 AI 教学工件栏打开同一题单即可直接提取，不再需要回知识库操作。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "阅读与编辑",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "大纲跳转修复",
+            "rest": "工作台渲染态点左栏大纲不再「没反应」。根因是全局 `document.getElementById` 会命中 `display:none` 保活模块里的同名标题；预览态改为只在当前实例的预览容器内定位，并给标题挂源行号锚兜底（标题含链接 / 图片 / 公式时 id 可能分叉）。博客预览同步修复。",
+            "sub": []
+          },
+          {
+            "lead": "Markdown 范围写法",
+            "rest": "关闭 GFM 单波浪号删除线，`PC7~PC4`、`PC3~PC0` 这类范围写法不再被渲染成删除线并吞掉波浪号；`~~删除线~~` 仍正常生效。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "AI 教学",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "讲课口径",
+            "rest": "仅对 AI 教学注入展开式讲课规则（问题/场景 → 前置桥接 → 定义 → 直觉 → 推导 → 例题 → 反例/易错 → 检查 → 总结），覆盖基础人设的「简洁直接」；素材不足要明说，用通用知识补讲要标「AI 补充」。",
+            "sub": []
+          },
+          {
+            "lead": "理工科绘图 Skill",
+            "rest": "新增 `stem-diagram` 与 `math-plot`，示意图 / 函数图统一走 `visual.html`，禁止自由摆坐标或手画。",
+            "sub": []
+          }
+        ]
+      },
+      {
+        "title": "文档",
+        "kind": "other",
+        "items": [
+          {
+            "lead": "",
+            "rest": "补充 AI 教学段节点分组方案、2026-10-28 UX 反馈、背单词原生模块化反馈。",
+            "sub": []
+          },
+          {
+            "lead": "",
+            "rest": "题单提取答案方案同步记录 AI 教学工件栏宿主与验收项。",
+            "sub": []
+          }
+        ]
+      }
+    ]
+  },
   {
     "version": "3.17.0",
     "date": "2026-11-03",
