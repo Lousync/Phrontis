@@ -2098,17 +2098,25 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
    *
    * 非沉浸态那条链是 `outline:go-to-heading` → **PageEditor（Monaco）**消费；沉浸态正文是
    * `MarkdownPreview`，**没有 Monaco**，故无人消费该事件 ⇒ 必须自带一个消费者。
-   * `MarkdownPreview` 已给每个标题渲染 `id={headingId(text)}`（与 OutlinePanel 的 `parseHeadings`
-   * 同一份生成规则），所以直接按 id `scrollIntoView` 即可，**不需要新增锚点**。
-   * 找不到 id（正文与大纲瞬时不同步，如刚切换页面）时静默忽略 —— 不弹错，避免噪音。
+   * `MarkdownPreview` 给每个标题渲染了 `id={headingId(text)}`（与 OutlinePanel 的 `parseHeadings`
+   * 同一份生成规则）和源行号锚 `data-md-line`。先按 id 定位，id 分叉时用行号兜底；
+   * 两者都找不到（正文与大纲瞬时不同步，如刚切换页面）时静默忽略 —— 不弹错，避免噪音。
    */
   useEffect(() => {
     if (!readingMode) return
     const on = (e: Event) => {
-      const id = (e as CustomEvent).detail?.id as string | undefined
-      if (!id || !readingScrollRef.current) return
-      const el = readingScrollRef.current.querySelector<HTMLElement>(`#${CSS.escape(id)}`)
-      el?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      const detail = (e as CustomEvent).detail as { line?: number; id?: string } | undefined
+      const root = readingScrollRef.current
+      if (!root) return
+      // 先按 id，再按源行号锚（data-md-line）兜底：标题含链接 / 图片 / 公式时，
+      // 渲染文本推出的 id 与大纲解析原始 Markdown 得到的 id 可能不一致。
+      const line = detail?.line
+      const id = detail?.id
+      const byId = id ? root.querySelector<HTMLElement>(`#${CSS.escape(id)}`) : null
+      const target = byId ?? (typeof line === 'number' && Number.isInteger(line) && line > 0
+        ? root.querySelector<HTMLElement>(`[data-md-line="${line}"]`)
+        : null)
+      target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
     }
     window.addEventListener('outline:go-to-heading', on)
     return () => window.removeEventListener('outline:go-to-heading', on)

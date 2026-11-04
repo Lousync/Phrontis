@@ -540,6 +540,18 @@ ok(/readingScrollRef/.test(srcKnowledge) && /outline:go-to-heading/.test(srcKnow
   'F16f 沉浸态自带 outline:go-to-heading 消费者（非沉浸态由 PageEditor/Monaco 消费，沉浸态没有它）')
 ok(/setImmersiveTabOverride\(\(cur\) => \(cur === null \? cur : ft === 'md' \? 'outline' : null\)\)/.test(srcKnowledge),
   'F16g 沉浸中经双链换页也跟着换（新页非 md ⇒ 收起，防大纲与正文错配）')
+/* F16h/F16i（2026-11-04 用户反馈：工作台渲染态点大纲不跳、源码态正常）：
+   非激活模块 display:none 保活，隐藏的其它 MarkdownPreview 会渲染同名标题 id。
+   预览态若用 document.getElementById 会命中隐藏 DOM（scrollIntoView 滚了个看不见的元素），
+   必须在本实例的 previewRef 内查；源码态走本实例写作面句柄，天然不受影响。 */
+const srcPageEditorNav = stripComments(read('src/modules/knowledge/components/PageEditor.tsx'))
+ok(!/document\.getElementById\(id\)/.test(srcPageEditorNav) && /previewRef\.current[\s\S]{0,300}querySelector/.test(srcPageEditorNav),
+  'F16h 笔记预览态大纲跳转只在 previewRef 内查 id（不能全局 getElementById）')
+const srcBlogEditorNav = stripComments(read('src/modules/blog/components/MarkdownEditor.tsx'))
+ok(!/document\.getElementById\(id\)/.test(srcBlogEditorNav) && /previewRef\.current[\s\S]{0,300}querySelector/.test(srcBlogEditorNav),
+  'F16i 博客预览态同上（工作台保活下同样会被隐藏标题截胡）')
+ok(/data-md-line=\{headingLine\(node\)\}/.test(stripComments(read('src/components/shared/MarkdownPreview.tsx'))),
+  'F16j MarkdownPreview 给标题挂源行号锚（标题含链接/图片/公式时 id 会分叉，行号恒稳定）')
 
 // ===== G. 分屏整轮下线（2026-09-18 晚 · 从 v3.4.0 撤下，改排 v3.5.0）=====
 // 背景：工作台分区精细化（分屏 + 准入收窄 + 跨栏保活）整轮撤下 v3.4.0，重做排期到 v3.5.0。

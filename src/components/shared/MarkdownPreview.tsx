@@ -33,6 +33,19 @@ function headingId(text: string): string {
 }
 
 /**
+ * 大纲定位锚：源文档行号（1-based，来自 mdast position）。
+ *
+ * 为什么不能只靠 id：`headingId` 吃的是**渲染后的文本**（MarkdownPreview），而大纲吃的是
+ * **原始 Markdown 文本**（parseHeadings）。两者对普通标题一致，但标题里含链接 / 图片 / 公式时
+ * 会分叉（如 `[甲](url)` 渲染后只剩「甲」，id 少掉 url）。line 来自源文件，恒稳定，
+ * 故作为 id 定位失败后的兜底锚。
+ */
+function headingLine(node: unknown): number | undefined {
+  const line = (node as { position?: { start?: { line?: number } } } | undefined)?.position?.start?.line
+  return typeof line === 'number' && line > 0 ? line : undefined
+}
+
+/**
  * Allow the app's local schemes (attachment://, data:, file:, blob:) alongside
  * react-markdown's default safe protocols. The default urlTransform would strip
  * `attachment://id/` to an empty string, breaking inline images.
@@ -110,8 +123,15 @@ function SpoilerBlock({ content }: { content: string }) {
   )
 }
 
-/** remark/rehype 插件链：提为模块级常量。原先每次渲染新建数组，react-markdown 会视为新配置 */
-const REMARK_PLUGINS: any = [remarkGfm, remarkMath]
+/**
+ * remark/rehype 插件链：提为模块级常量。原先每次渲染新建数组，react-markdown 会视为新配置。
+ *
+ * ★ remarkGfm 必须关掉 `singleTilde`：GFM 默认把**单个 `~`** 也当删除线定界符，
+ *   而中文技术文本常用 `A~B` 表示范围（如 `PC7~PC4`、`PC3~PC0`）。一行里出现两处范围，
+ *   渲染器就会把中间整段吞成 `<del>`：波浪号消失、文字被划掉（2026-11-04 用户截图反馈）。
+ *   项目文档与工具栏的删除线语法统一是 `~~...~~`，关掉单波浪号不影响正常删除线。
+ */
+const REMARK_PLUGINS: any = [[remarkGfm, { singleTilde: false }], remarkMath]
 const REHYPE_PLUGINS: any = [rehypeHighlight, [rehypeKatex, { throwOnError: false, strict: false }]]
 type MdComponents = NonNullable<React.ComponentProps<typeof ReactMarkdown>['components']>
 
@@ -429,29 +449,29 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
     li({ children }) {
       return <li>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</li>
     },
-    h1({ children }) {
+    h1({ children, node }) {
       const text = extractText(children)
-      return <h1 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h1>
+      return <h1 id={headingId(text)} data-md-line={headingLine(node)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h1>
     },
-    h2({ children }) {
+    h2({ children, node }) {
       const text = extractText(children)
-      return <h2 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h2>
+      return <h2 id={headingId(text)} data-md-line={headingLine(node)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h2>
     },
-    h3({ children }) {
+    h3({ children, node }) {
       const text = extractText(children)
-      return <h3 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h3>
+      return <h3 id={headingId(text)} data-md-line={headingLine(node)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h3>
     },
-    h4({ children }) {
+    h4({ children, node }) {
       const text = extractText(children)
-      return <h4 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h4>
+      return <h4 id={headingId(text)} data-md-line={headingLine(node)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h4>
     },
-    h5({ children }) {
+    h5({ children, node }) {
       const text = extractText(children)
-      return <h5 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h5>
+      return <h5 id={headingId(text)} data-md-line={headingLine(node)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h5>
     },
-    h6({ children }) {
+    h6({ children, node }) {
       const text = extractText(children)
-      return <h6 id={headingId(text)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h6>
+      return <h6 id={headingId(text)} data-md-line={headingLine(node)}>{renderInlineExtras(children, onWikiLink, knownWikiTitles, highlightWiki)}</h6>
     },
   }), [handleLinkClick, onWikiLink, knownWikiTitles, pageId, pageTitle, fenceRenderers, onQuizRetry, highlightWiki, codeBlockChrome, streaming])
 

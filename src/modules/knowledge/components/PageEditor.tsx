@@ -1210,9 +1210,22 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
     const handler = (e: Event) => {
       const { line, id } = (e as CustomEvent).detail as { line: number; id: string }
       if (preview) {
-        // Reading mode: scroll DOM element
-        const el = document.getElementById(id)
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        // Reading mode: **必须在本实例的 previewRef 内查**，不能用 document.getElementById。
+        // 工作台把非激活模块 display:none 保活（App 的模块容器序列），隐藏的博客 / 其他
+        // MarkdownPreview 也会渲染同名标题 id；全局查会命中隐藏 DOM，scrollIntoView 等于
+        // 滚一个看不见的元素 —— 表象就是「渲染态点大纲没反应，源码态正常」（源码态走本实例
+        // 的写作面句柄，天然不受影响）。同一坑见 blog/MarkdownEditor.tsx。
+        //
+        // 定位：先按 id，再按源行号 `data-md-line` 兜底。标题含链接 / 图片 / 公式时，
+        // 渲染文本推出来的 id 与大纲解析原始 Markdown 得到的 id 会分叉，只靠 id 仍会
+        // 「点了没反应」；行号来自源文档，是第二条锚。
+        const root = previewRef.current
+        if (!root) return
+        const byId = id ? root.querySelector<HTMLElement>(`#${CSS.escape(id)}`) : null
+        const target = byId ?? (Number.isInteger(line) && line > 0
+          ? root.querySelector<HTMLElement>(`[data-md-line="${line}"]`)
+          : null)
+        target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       } else {
         // Editing mode: 经写作面契约滚动定位（两档同签名）
         const pane = paneRef.current

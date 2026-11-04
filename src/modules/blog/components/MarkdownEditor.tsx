@@ -46,6 +46,8 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
   const [unsavedAction, setUnsavedAction] = useState<(() => void) | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const paneRef = useRef<MonacoPaneHandle | null>(null)
+  /** 预览滚动容器：大纲跳转必须在本实例内查 id，不能用 document.getElementById（同 PageEditor 的坑） */
+  const previewRef = useRef<HTMLDivElement | null>(null)
   const entryIdRef = useRef(entryId)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const contentRef = useRef(contentMd)
@@ -227,9 +229,17 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
     const handler = (e: Event) => {
       const { line, id } = (e as CustomEvent).detail as { line: number; id: string }
       if (showPreview) {
-        // Preview mode: scroll DOM element
-        const el = document.getElementById(id)
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        // Preview mode: 只在**本实例的预览容器**里查。工作台把非激活模块 display:none 保活，
+        // 隐藏的笔记 / 其他 MarkdownPreview 可能有同名标题 id；全局 getElementById 会命中
+        // 隐藏 DOM，导致「预览态点大纲没反应、源码态正常」。
+        // 先按 id，再按源行号锚 `data-md-line` 兜底（标题含链接 / 图片 / 公式时 id 可能分叉）。
+        const root = previewRef.current
+        if (!root) return
+        const byId = id ? root.querySelector<HTMLElement>(`#${CSS.escape(id)}`) : null
+        const target = byId ?? (Number.isInteger(line) && line > 0
+          ? root.querySelector<HTMLElement>(`[data-md-line="${line}"]`)
+          : null)
+        target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       } else {
         // Editing mode: use Monaco editor API
         paneRef.current?.revealLine(line)
@@ -364,7 +374,7 @@ export function MarkdownEditor({ entryId, showLineNumbers, onSave, onCancel, onC
       {/* content */}
       <div className="flex-1 min-h-0 overflow-hidden bg-[var(--bg-primary)]">
         {showPreview ? (
-          <div className="h-full overflow-y-auto">
+          <div ref={previewRef} className="h-full overflow-y-auto">
             <div className="max-w-3xl mx-auto px-10 py-6">
               <MarkdownPreview content={contentMd} onLinkClick={handlePreviewLinkClick} />
               {date && <SummaryPanel date={date} />}
