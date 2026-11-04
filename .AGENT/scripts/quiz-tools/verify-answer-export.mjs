@@ -85,6 +85,13 @@ check('无作答禁用', bar.includes('disabled={answerExport.answered === 0}'))
 check('按钮文案「提取答案」', bar.includes('提取答案'))
 check('按钮在「错题重做」左边', bar.indexOf('提取答案') < bar.indexOf('错题重做'), '')
 
+/* 宿主接线（2026-11-04 用户反馈：AI 教学区的分页/页签查看模式也要能提取答案）：
+   工件栏 md 页签解析题单并渲染同一条 QuizSheetBar；没有题单内重做视图，故不传 onReview。 */
+const artPane = fs.readFileSync(path.join(ROOT, 'src/modules/ai-teaching/ArtifactsPane.tsx'), 'utf8')
+check('工件栏 md 页签解析 quizzes', artPane.includes('extractQuizzes(tab.content'), '')
+check('工件栏渲染 QuizSheetBar', artPane.includes('<QuizSheetBar quizzes={quizzes} store={quizStore} />'), '')
+check('工件栏不传 onReview（无题单内重做视图，不能留死按钮）', !/<QuizSheetBar[^>]*onReview=/.test(artPane), '')
+
 const help = fs.readFileSync(path.join(ROOT, 'resources/help/AI 教学 · 课程模式.md'), 'utf8')
 check('帮助文档提到「提取答案」', help.includes('提取答案'), '')
 

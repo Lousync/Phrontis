@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { X, FileText, Image as ImageIcon, Presentation, ExternalLink, Maximize2, Minimize2, ZoomIn, ZoomOut, Frame, Network, Layers, Check } from 'lucide-react'
 import { MarkdownPreview } from '../../components/shared/MarkdownPreview'
 import { QuizRecordContext, useQuizRecordStore } from '../../components/shared/QuizRecordStore'
+import { QuizSheetBar } from '../../components/shared/QuizSheetBar'
+import { extractQuizzes } from '../../components/shared/QuizParser'
 import { MindMapView } from '../../components/shared/MindMapView'
 import { ImmersiveImageView } from '../../components/shared/image/ImmersiveImageView'
 import { ArtHtmlView } from './ArtHtmlView'
@@ -113,6 +115,11 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
     relPath: tab?.kind === 'md' ? (tab.rel ?? '') : '',
     pageTitle: tab?.name ?? '',
   })
+  /** md 页签里的题单：与工作台共用同一份答题痕迹；有题才在正文上方出状态条（提取答案） */
+  const quizzes = useMemo(
+    () => (tab?.kind === 'md' ? extractQuizzes(tab.content ?? '') : []),
+    [tab?.kind, tab?.content],
+  )
   const mdScrollRef = useRef<HTMLDivElement>(null)
   const mdScrollPos = useRef<Record<string, number>>({})
   const [outline, setOutline] = useState<Array<{ id: string; text: string; lv: number }>>([])
@@ -320,6 +327,9 @@ function ArtifactsPaneImpl({ tabs, activeId, widthPx, htmlSeq, expanded, onToggl
               className="kb-art-in flex-1 overflow-y-auto min-h-0">
               <div className="max-w-[820px] mx-auto py-5 px-5">
                 <QuizRecordContext.Provider value={quizStore}>
+                  {/* 题单状态条（提取答案）：与知识库阅读态同一条组件 —— 工件栏没有
+                      题单内「错题重做」视图，故不传 onReview，只保留计数与提取答案。 */}
+                  {quizzes.length > 0 && <QuizSheetBar quizzes={quizzes} store={quizStore} />}
                   <MarkdownPreview content={tab.content ?? ''} />
                 </QuizRecordContext.Provider>
               </div>

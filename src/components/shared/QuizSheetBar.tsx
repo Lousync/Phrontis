@@ -13,7 +13,8 @@ import { buildAnswerExport } from './quizAnswerExportPure'
 export function QuizSheetBar({ quizzes, store, onReview }: {
   quizzes: QuizItem[]
   store: QuizRecordStore
-  onReview: () => void
+  /** 提供时才出重做入口；工件栏等没有题单内重做视图的宿主只取出答案 */
+  onReview?: () => void
 }) {
   const records = useQuizRecords(store)
   const byNo = useMemo(() => new Map(records.map(r => [r.quizNo, r])), [records])
@@ -66,15 +67,17 @@ export function QuizSheetBar({ quizzes, store, onReview }: {
         <ClipboardCopy size={12} />
         提取答案
       </button>
-      <button
-        onClick={onReview}
-        disabled={wrong === 0}
-        className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-default transition-colors"
-        title={wrong === 0 ? '当前没有判错的题' : '只重做当前题单判错的题，带着上次答案'}
-      >
-        <RotateCcw size={12} />
-        错题重做 ({wrong})
-      </button>
+      {onReview && (
+        <button
+          onClick={onReview}
+          disabled={wrong === 0}
+          className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[var(--border-color)] text-[11.5px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-40 disabled:cursor-default transition-colors"
+          title={wrong === 0 ? '当前没有判错的题' : '只重做当前题单判错的题，带着上次答案'}
+        >
+          <RotateCcw size={12} />
+          错题重做 ({wrong})
+        </button>
+      )}
     </div>
   )
 }
