@@ -814,6 +814,8 @@ const api = {
   companionNewPairCode: () => ipcRenderer.invoke('companion:newPairCode'),
   companionQr: (text: string) => ipcRenderer.invoke('companion:qr', text),
   companionRevoke: (deviceId: string) => ipcRenderer.invoke('companion:revoke', deviceId),
+  companionApprovePair: (requestId: string) => ipcRenderer.invoke('companion:approvePair', requestId),
+  companionRejectPair: (requestId: string) => ipcRenderer.invoke('companion:rejectPair', requestId),
   // 编辑器工作区（Vault 仓库）：文件服务
   workspaceOpenDir: () => ipcRenderer.invoke('ws:openDir'),
   workspaceInitPendingVault: (accept: boolean) => ipcRenderer.invoke('ws:initPendingVault', accept),

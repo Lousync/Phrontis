@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 /**
- * 契约验证：手机伴侣同步协议 v1（phoneCompanion）。
+ * 契约验证：手机伴侣同步协议 v1.1（phoneCompanion）。
  *
  * 为什么需要它：这一层的失败模式全是「两端各自认为对、连起来才发现错」——
- * 配对码一次性语义、LWW 合并方向、CORS 预检、拉取游标，任何一环错了
- * 表象都只是「手机上点同步没反应」，桌面上没有任何报错。
+ * 配对码一次性语义、LWW 合并方向、CORS 预检、拉取游标、分域路由、墓碑删除，
+ * 任何一环错了表象都只是「手机上点同步没反应」，桌面上没有任何报错。
  *
  * 验证方式：不启 Electron，直接以内存依赖驱动 createCompanionServer（与生产同一份代码），
  * 打真 HTTP 请求过完整链路：
- *   §1 协议纯函数（校验 / 规范化 / LWW 裁决）
+ *   §1 协议纯函数（校验 / 规范化 / LWW 裁决 / schedule 负载 / 墓碑判定）
  *   §2 配对（配对码一次性 / 过期 / 设备落库 / 限频外语义）
  *   §3 鉴权（无令牌 / 错令牌 / 对令牌）
  *   §4 同步（新条目并入 / 旧更新冲突 / 新更新覆盖 / 非法负载 / 未支持域 / 拉取与游标）
+ *   §4b schedule 域（合法并入 / 非法负载 / LWW / 拉取）
+ *   §4c 墓碑（上行删除 / 幂等 / 旧删除拒收回 conflict / pull 按时间过滤）
  *   §5 CORS（预检 204 + 放行 authorization）
  *   §6 协议文档契约（design.md §2.1 与端点常量一致）
  *
@@ -27,7 +29,8 @@ import { fileURLToPath } from 'node:url'
 import { createCompanionServer } from '../../../electron/lib/phoneCompanion/server.ts'
 import {
   SYNC_DOMAINS, PROTOCOL_VERSION, DEFAULT_PORT,
-  normalizeLedgerData, shouldApplyIncoming, buildPairUrl, parsePairInput,
+  normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData,
+  shouldApplyIncoming, buildPairUrl, parsePairInput,
 } from '../../../electron/lib/phoneCompanion/protocol.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -43,24 +46,61 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
 const CODE = '12345678'
 
-/** 内存依赖 + 起一只真服务器；返回 { port, url, setCode, store } */
-async function boot({ code = CODE, expiresAt = Date.now() + 60_000 } = {}) {
+/** 内存依赖 + 起一只真服务器；返回 { port, url, setCode, store, scheduleStore, tombstones } */
+async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest = true } = {}) {
   let devices = []
-  const store = new Map() // id -> { id, updatedAt, data }
+  const pairRequests = [] // v1.5：{ view, approve, reject }（模拟渲染层确认框留下的手柄）
+  const store = new Map() // id -> { id, updatedAt, data }（ledger）
+  const scheduleStore = new Map() // id -> { id, updatedAt, data }（schedule）
+  const notesStore = new Map() // id -> { id, updatedAt, data }（notes）
+  const noteTree = [
+    { id: 'p-1', title: 'AI教学模块笔记', path: '学习/AI教学模块笔记.md', categoryId: 'c1', mtimeMs: 1730419200000, sizeBytes: 100 },
+  ]
+  const tombstones = [] // { domain, id, deletedAt }
   let pairCode = code ? { code, expiresAt } : null
+  const upsert = (dom, map, item) => {
+    // 与生产 repo 同规则：已墓碑的 id 收到不早于墓碑的 upsert → 拒绝复活（vaultScheduleSyncUpsert / vaultAccountingSyncUpsert 内同款）
+    const ts = tombstones.find(t => t.domain === dom && t.id === item.id)
+    if (ts && !(item.updatedAt > ts.deletedAt)) return { applied: false, reason: 'tombstoned' }
+    const cur = map.get(item.id)
+    if (cur && !(item.updatedAt > cur.updatedAt)) return { applied: false, conflict: true, reason: 'server-newer' }
+    map.set(item.id, item)
+    return { applied: true }
+  }
   const server = createCompanionServer({
     loadDevices: () => devices,
     saveDevices: (l) => { devices = l.slice() },
     getPairCode: () => pairCode,
     consumePairCode: () => { pairCode = null },
-    applyLedger: (item) => {
-      const cur = store.get(item.id)
-      if (cur && !(item.updatedAt > cur.updatedAt)) return { applied: false, conflict: true }
-      store.set(item.id, item)
+    applyLedger: (item) => upsert('ledger', store, item),
+    applySchedule: (item) => upsert('schedule', scheduleStore, item),
+    applyNote: (item) => { notesStore.set(item.id, item); return { applied: true } },
+    applyDelete: (domain, id, deletedAt) => {
+      if (domain === 'notes') return { applied: false, reason: 'unsupported-domain' } // v1.2：notes 无删除语义
+      const map = domain === 'schedule' ? scheduleStore : store
+      const cur = map.get(id)
+      if (cur && !(deletedAt > cur.updatedAt)) return { applied: false, conflict: true, reason: 'server-newer' }
+      map.delete(id)
+      const i = tombstones.findIndex(t => t.domain === domain && t.id === id)
+      if (i >= 0) tombstones.splice(i, 1)
+      tombstones.push({ domain, id, deletedAt })
       return { applied: true }
     },
     listLedgerSince: (sinceMs) => [...store.values()].filter(x => Date.parse(x.updatedAt) > sinceMs),
+    listScheduleSince: (sinceMs) => [...scheduleStore.values()].filter(x => Date.parse(x.updatedAt) > sinceMs),
+    listTombstonesSince: (sinceMs) => tombstones.filter(t => Date.parse(t.deletedAt) > sinceMs),
+    listNoteTree: () => noteTree,
+    readNoteContent: (id) => id === 'p-1'
+      ? { title: 'AI教学模块笔记', updatedAt: '2026-11-01T00:00:00.000Z', body: '# AI教学模块笔记\n\n正文', truncated: undefined }
+      : null,
+    aiChat: async (req) => ({
+      ok: true,
+      reply: '桌面回复：' + req.message,
+      sessionId: req.sessionId || 'new-desktop-session',
+      changes: req.message.includes('记') ? [{ tool: 'builtin.ledger.create', action: '新建流水', target: '午饭' }] : [],
+    }),
     pcName: () => 'TEST-PC',
+    ...(pairRequest ? { onPairRequest: (view, handlers) => pairRequests.push({ view, approve: handlers.approve, reject: handlers.reject }) } : {}),
   })
   await new Promise((res, rej) => { server.once('error', rej); server.listen(0, '127.0.0.1', res) })
   const port = server.address().port
@@ -68,7 +108,11 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000 } = {}) {
     port,
     base: 'http://127.0.0.1:' + port,
     store,
+    scheduleStore,
+    notesStore,
+    tombstones,
     devices: () => devices,
+    pairRequests,
     setCode: (c) => { pairCode = c },
     post: (path, body, headers) => fetch('http://127.0.0.1:' + port + path, {
       method: 'POST', headers: { 'content-type': 'application/json', ...(headers || {}) },
@@ -104,6 +148,25 @@ check('手机解析：https 头与路径可带', eq(parsePairInput('https://192.
 check('手机解析：无端口拒绝', parsePairInput('192.168.1.5', '12345678') === null)
 check('手机解析：两处都没有码拒绝', parsePairInput('192.168.1.5:8770', '') === null)
 
+const sched = { date: '2026-11-01', title: '写周报', type: 'deadline', time: '09:30', done: false, parentId: null, schedStart: 570, schedEnd: 610 }
+const goodSched = normalizeScheduleData(sched)
+check('schedule 合法负载通过校验', !!goodSched && goodSched.title === '写周报' && goodSched.schedStart === 570)
+check('schedule 缺标题拒绝', normalizeScheduleData({ ...sched, title: '  ' }) === null)
+check('schedule 坏 type 拒绝', normalizeScheduleData({ ...sched, type: 'habit' }) === null)
+check('schedule 缺日期拒绝', normalizeScheduleData({ ...sched, date: '11-01' }) === null)
+check('schedule 排期越界回落 null', normalizeScheduleData({ ...sched, schedStart: 9999 })?.schedStart === null)
+check('schedule 空串排期视为未排期', normalizeScheduleData({ ...sched, schedStart: '', schedEnd: null })?.schedStart === null)
+check('schedule parentId 规范化', normalizeScheduleData({ ...sched, parentId: '  ' })?.parentId === null)
+
+check('墓碑判定：{deleted:true} 是删除', isTombstoneData({ deleted: true }) === true)
+check('墓碑判定：普通负载不是删除', isTombstoneData({ date: '2026-11-01' }) === false)
+check('墓碑判定：null / 数组不是删除', isTombstoneData(null) === false && isTombstoneData([1]) === false)
+
+check('notes 合法负载（仅正文无标题）通过', eq(normalizeNoteData({ title: '', body: '想到什么记什么' }), { title: '', body: '想到什么记什么' }))
+check('notes 标题截 120、正文截 10 万', normalizeNoteData({ title: 'x'.repeat(200), body: 'y'.repeat(200000) }).body.length === 100000)
+check('notes 标题与正文都空拒绝', normalizeNoteData({ title: '  ', body: '  ' }) === null)
+check('notes 非对象拒绝', normalizeNoteData('md') === null)
+
 /* ------------------------------------------------------------------ §2 */
 console.log('\n§2 配对（配对码一次性 / 过期 / 设备落库）')
 {
@@ -130,6 +193,56 @@ console.log('\n§2 配对（配对码一次性 / 过期 / 设备落库）')
   const nc = await noCode.post('/api/pair', { code: CODE, deviceName: '测试机' })
   check('未出示配对码 401', nc.status === 401)
   await s.close(); await noCode.close()
+}
+
+/* ------------------------------------------------------------------ §2b */
+console.log('\n§2b 配对握手 v1.5（发现 / 请求 / 双屏 4 位码 / 桌面确认 / 拒绝）')
+
+{
+  const s = await boot()
+  try {
+    const d = await (await s.get('/api/discover')).json()
+    check('发现端点回电脑名与协议版本', d.ok === true && d.pc.name === 'TEST-PC' && d.protocol === 1)
+    check('发现端点声明支持请求式配对', Array.isArray(d.pairing) && d.pairing.includes('request'))
+
+    const r1 = await (await s.post('/api/pair/request', { deviceName: '志岩的手机' })).json()
+    check('发起请求回 requestId 与 4 位码', r1.ok === true && typeof r1.requestId === 'string' && /^\d{4}$/.test(r1.code))
+    check('请求进入待确认列表（确认框数据源）', s.pairRequests.length === 1 && s.pairRequests[0].view.deviceName === '志岩的手机')
+    check('请求记录来源 IP', s.pairRequests[0].view.ip === '127.0.0.1')
+
+    const st1 = await (await s.get('/api/pair/status?id=' + r1.requestId)).json()
+    check('未确认前 pending 且不发令牌', st1.status === 'pending' && !st1.deviceToken)
+
+    const ap = s.pairRequests[0].approve()
+    check('桌面点允许 → 发令牌成功', ap.ok === true)
+    const st2 = await (await s.get('/api/pair/status?id=' + r1.requestId)).json()
+    check('确认后 approved 并回令牌与电脑名',
+      st2.status === 'approved' && typeof st2.deviceToken === 'string' && st2.deviceToken.length > 20 && st2.pc.name === 'TEST-PC')
+    check('设备落库且名字来自请求', s.devices().length === 1 && s.devices()[0].name === '志岩的手机')
+
+    const ping = await s.get('/api/ping', { authorization: 'Bearer ' + st2.deviceToken })
+    check('新令牌可直接打 ping', ping.status === 200)
+
+    const r2 = await (await s.post('/api/pair/request', { deviceName: '同网陌生人' })).json()
+    s.pairRequests[1].reject()
+    const st3 = await (await s.get('/api/pair/status?id=' + r2.requestId)).json()
+    check('拒绝后 rejected 且不发令牌', st3.status === 'rejected' && !st3.deviceToken)
+    check('被拒设备不落库', s.devices().length === 1)
+    check('同一请求二次处理被拒', s.pairRequests[1].approve().ok === false)
+
+    const st404 = await s.get('/api/pair/status?id=nope')
+    check('未知请求 id → 404', st404.status === 404)
+  } finally { await s.close() }
+}
+
+{
+  const s = await boot({ pairRequest: false })
+  try {
+    const r = await s.post('/api/pair/request', { deviceName: 'x' })
+    check('电脑未接确认框 → 501（旧客户端继续走配对码）', r.status === 501)
+    const d = await (await s.get('/api/discover')).json()
+    check('未接确认框时 discover 只声明 code', Array.isArray(d.pairing) && d.pairing.length === 1 && d.pairing[0] === 'code')
+  } finally { await s.close() }
 }
 
 /* ------------------------------------------------------------------ §3 */
@@ -170,7 +283,7 @@ console.log('\n§4 同步（并入 / 冲突 / 覆盖 / 非法 / 未支持域 / �
   const r4 = await (await push([{ domain: 'ledger', id: 'tx-b', updatedAt: iso(t0), data: { date: '2026-10-31', type: 'expense', amount: -3 } }])).json()
   check('非法负载 invalid-data', r4.results[0].applied === false && r4.results[0].reason === 'invalid-data' && !s.store.has('tx-b'))
 
-  const r5 = await (await push([{ domain: 'schedule', id: 't-1', updatedAt: iso(t0), data: {} }])).json()
+  const r5 = await (await push([{ domain: 'habits', id: 'h-1', updatedAt: iso(t0), data: { name: 'x' } }])).json()
   check('未支持域 unsupported-domain（留在队列的依据）', r5.results[0].applied === false && r5.results[0].reason === 'unsupported-domain')
 
   const r6 = await (await push([{ domain: 'ledger', updatedAt: iso(t0), data: { date: '2026-10-31', type: 'expense', amount: 5 } }])).json()
@@ -181,6 +294,130 @@ console.log('\n§4 同步（并入 / 冲突 / 覆盖 / 非法 / 未支持域 / �
   check('游标返回（push 后 phone 据此推进）', typeof pull1.cursor.ledger === 'number')
   const pull2 = await (await s.post('/api/sync/pull', { since: { ledger: Date.now() + 5000 } }, auth)).json()
   check('since 之后无新增 → 空增量', pull2.changes.ledger.length === 0)
+  await s.close()
+}
+
+/* ------------------------------------------------------------------ §4b */
+console.log('\n§4b schedule 域（合法并入 / 非法负载 / LWW / 拉取）')
+{
+  const s = await boot()
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: '测试机' })).json()).deviceToken
+  const auth = { authorization: 'Bearer ' + token }
+  const push = (changes) => s.post('/api/sync/push', { deviceId: 'd1', changes }, auth)
+
+  const schedData = { date: '2026-11-02', title: '写周报', type: 'deadline', time: '09:30', done: false, parentId: null, schedStart: 570, schedEnd: 610 }
+  const s1 = await (await push([{ domain: 'schedule', id: 'td-a', updatedAt: iso(t0), data: schedData }])).json()
+  check('schedule 新条目 applied', s1.results[0].applied === true && s.scheduleStore.has('td-a'))
+  check('schedule 负载原样入存储', s.scheduleStore.get('td-a').data.title === '写周报' && s.scheduleStore.get('td-a').data.schedStart === 570)
+
+  const s2 = await (await push([{ domain: 'schedule', id: 'td-a', updatedAt: iso(t0 - 5000), data: { ...schedData, title: '旧更新' } }])).json()
+  check('schedule 旧更新 conflict 不应用', s2.results[0].applied === false && s2.results[0].conflict === true && s2.results[0].reason === 'server-newer')
+  check('schedule 数据未被旧更新覆盖', s.scheduleStore.get('td-a').data.title === '写周报')
+
+  const s3 = await (await push([{ domain: 'schedule', id: 'td-a', updatedAt: iso(t0 + 5000), data: { ...schedData, done: true } }])).json()
+  check('schedule 新更新覆盖 applied', s3.results[0].applied === true && s.scheduleStore.get('td-a').data.done === true)
+
+  const s4 = await (await push([{ domain: 'schedule', id: 'td-b', updatedAt: iso(t0), data: { date: '2026-11-02', type: 'plan' } }])).json()
+  check('schedule 非法负载 invalid-data', s4.results[0].applied === false && s4.results[0].reason === 'invalid-data' && !s.scheduleStore.has('td-b'))
+
+  // 子任务行与顶层行同机制（parentId 只是负载字段）
+  const s5 = await (await push([{ domain: 'schedule', id: 'td-a-1', updatedAt: iso(t0), data: { ...schedData, title: '列提纲', parentId: 'td-a', schedStart: null, schedEnd: null } }])).json()
+  check('schedule 子任务行按条目并入', s5.results[0].applied === true && s.scheduleStore.get('td-a-1').data.parentId === 'td-a')
+
+  const sp = await (await s.post('/api/sync/pull', { since: { schedule: 0, ledger: Date.now() + 99999 } }, auth)).json()
+  check('pull 分域：schedule 有增量、ledger 过滤后为空', sp.changes.schedule.length === 2 && sp.changes.ledger.length === 0)
+  check('pull 游标双域返回', typeof sp.cursor.schedule === 'number' && typeof sp.cursor.ledger === 'number')
+  await s.close()
+}
+
+/* ------------------------------------------------------------------ §4c */
+console.log('\n§4c 墓碑（上行删除 / 幂等 / 旧删除拒收 / pull 过滤）')
+{
+  const s = await boot()
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: '测试机' })).json()).deviceToken
+  const auth = { authorization: 'Bearer ' + token }
+  const push = (changes) => s.post('/api/sync/push', { deviceId: 'd1', changes }, auth)
+
+  // 预置：ledger tx-del@t0、schedule td-del@t0
+  await push([
+    { domain: 'ledger', id: 'tx-del', updatedAt: iso(t0), data: { date: '2026-11-01', time: '10:00', type: 'expense', amount: 10, category: '日用', payment: '', merchant: '纸巾', note: '' } },
+    { domain: 'schedule', id: 'td-del', updatedAt: iso(t0), data: { date: '2026-11-01', title: '要删的待办', type: 'daily', time: '', done: false, parentId: null, schedStart: null, schedEnd: null } },
+  ])
+
+  const d1 = await (await push([{ domain: 'ledger', id: 'tx-del', updatedAt: iso(t0 + 1000), data: { deleted: true } }])).json()
+  check('ledger 上行删除 applied 且条目移除', d1.results[0].applied === true && !s.store.has('tx-del'))
+  check('墓碑落库', s.tombstones.some(t => t.domain === 'ledger' && t.id === 'tx-del' && t.deletedAt === iso(t0 + 1000)))
+
+  const d2 = await (await push([{ domain: 'ledger', id: 'tx-del', updatedAt: iso(t0 + 1000), data: { deleted: true } }])).json()
+  check('重复删除幂等 applied', d2.results[0].applied === true)
+
+  const d3 = await (await push([{ domain: 'schedule', id: 'td-del', updatedAt: iso(t0 - 9999), data: { deleted: true } }])).json()
+  check('比行内 updatedAt 旧的删除 → 拒收回 conflict', d3.results[0].applied === false && d3.results[0].conflict === true && d3.results[0].reason === 'server-newer')
+  check('拒删后条目仍在', s.scheduleStore.has('td-del'))
+
+  // 墓碑阻挡复活：已删除 id 收到更旧的 upsert → tombstoned（不标 conflict——手机端直接出队即可）
+  const z1 = await (await push([{ domain: 'ledger', id: 'tx-del', updatedAt: iso(t0), data: { date: '2026-11-01', time: '10:00', type: 'expense', amount: 10, category: '日用', payment: '', merchant: '幽灵复活', note: '' } }])).json()
+  check('墓碑阻挡更旧的 upsert', z1.results[0].applied === false && z1.results[0].reason === 'tombstoned' && z1.results[0].conflict === undefined)
+  check('墓碑阻挡后条目未复活', !s.store.has('tx-del'))
+
+  const p1 = await (await s.post('/api/sync/pull', { since: { ledger: 0, schedule: 0 } }, auth)).json()
+  check('pull 返回墓碑列表', Array.isArray(p1.tombstones) && p1.tombstones.some(t => t.domain === 'ledger' && t.id === 'tx-del'))
+  const p2 = await (await s.post('/api/sync/pull', { since: { ledger: Date.now() + 99999, schedule: 0 } }, auth)).json()
+  check('pull 墓碑按 min(各域游标) 过滤：任一域未看过仍返回', p2.tombstones.length === 1)
+  const p3 = await (await s.post('/api/sync/pull', { since: { ledger: Date.now() + 99999, schedule: Date.now() + 99999 } }, auth)).json()
+  check('双域游标都越过 → 墓碑不再重复下发', p3.tombstones.length === 0)
+  await s.close()
+}
+
+/* ------------------------------------------------------------------ §4d */
+console.log('\n§4d notes 域与内容 API（v1.2：上行 + tree/content）')
+{
+  const s = await boot()
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: '测试机' })).json()).deviceToken
+  const auth = { authorization: 'Bearer ' + token }
+  const push = (changes) => s.post('/api/sync/push', { deviceId: 'd1', changes }, auth)
+
+  const n1 = await (await push([{ domain: 'notes', id: 'nt-1', updatedAt: iso(t0), data: { title: '咖啡馆随想', body: '想到什么记什么' } }])).json()
+  check('notes 上行 applied', n1.results[0].applied === true && s.notesStore.has('nt-1'))
+  const n2 = await (await push([{ domain: 'notes', id: 'nt-2', updatedAt: iso(t0), data: { title: '  ', body: '' } }])).json()
+  check('notes 空负载 invalid-data', n2.results[0].applied === false && n2.results[0].reason === 'invalid-data')
+  const n3 = await (await push([{ domain: 'notes', id: 'nt-3', updatedAt: iso(t0), data: { deleted: true } }])).json()
+  check('notes 域不支持墓碑删除（手机不应为笔记排删除操作）', n3.results[0].applied === false && n3.results[0].reason === 'unsupported-domain')
+
+  // tree / content（需令牌）
+  const bareTree = await s.get('/api/notes/tree')
+  check('tree 无令牌 401', bareTree.status === 401)
+  const tree = await (await s.get('/api/notes/tree', auth)).json()
+  check('tree 返回平表', tree.ok === true && Array.isArray(tree.pages) && tree.pages[0].id === 'p-1' && typeof tree.pages[0].mtimeMs === 'number')
+  const bareContent = await s.get('/api/notes/content?id=p-1')
+  check('content 无令牌 401', bareContent.status === 401)
+  const content = await (await s.get('/api/notes/content?id=p-1', auth)).json()
+  check('content 按 id 返回正文', content.ok === true && content.id === 'p-1' && content.body.includes('正文'))
+  const missing = await s.get('/api/notes/content?id=nope', auth)
+  check('content 未知 id 404', missing.status === 404)
+  const noId = await s.get('/api/notes/content', auth)
+  check('content 缺 id 404', noId.status === 404)
+  await s.close()
+}
+
+/* ------------------------------------------------------------------ §4e */
+console.log('\n§4e 电脑档 AI 中继（v1.3 /api/ai/chat）')
+{
+  const s = await boot()
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: '测试机' })).json()).deviceToken
+  const auth = { authorization: 'Bearer ' + token }
+  const chat = (body) => s.post('/api/ai/chat', body, auth)
+
+  const bare = await s.post('/api/ai/chat', { message: 'hi' })
+  check('无令牌 401', bare.status === 401)
+  check('空消息 400', (await chat({ message: '  ' })).status === 400)
+  check('缺消息字段 400', (await chat({})).status === 400)
+
+  const r1 = await (await chat({ message: '看看今天日程' })).json()
+  check('首轮返回桌面新会话 id', r1.ok === true && r1.sessionId === 'new-desktop-session' && String(r1.reply).includes('桌面回复'))
+  const r2 = await (await chat({ sessionId: 'sess-1', message: '记一笔午饭' })).json()
+  check('续聊沿用传入 sessionId', r2.sessionId === 'sess-1')
+  check('changes 瘦身投影（tool/action/target）', Array.isArray(r2.changes) && r2.changes[0].action === '新建流水' && r2.changes[0].target === '午饭')
   await s.close()
 }
 
@@ -207,6 +444,20 @@ console.log('\n§6 协议文档契约（design.md §2.1 与实现一致）')
   check('§2.1 记录默认端口 8770', design.includes('8770'))
   check('DEFAULT_PORT=8770 与文档一致', DEFAULT_PORT === 8770)
   check('协议域清单非空', SYNC_DOMAINS.length >= 1)
+  // v1.1 契约
+  check('§2.1 v1.1 域范围含 schedule', design.includes('`ledger` + `schedule`（日程）'))
+  check('SYNC_DOMAINS = [ledger, schedule, notes]', eq([...SYNC_DOMAINS], ['ledger', 'schedule', 'notes']))
+  check('§2.1 记录墓碑上行负载 { deleted: true }', design.includes('{ deleted: true }'))
+  check('§2.1 记录墓碑存储路径', design.includes('phoneCompanion/tombstones.json'))
+  check('§2.1 记录游标只在 pull 后推进', design.includes('只在 pull 完成后推进'))
+  check('§2.1 记录 tombstoned 防复活', design.includes("reason: 'tombstoned'"))
+  // v1.2 契约
+  check('§2.1 v1.2 记录 notes 上行域与无条件应用', design.includes('v1.2 笔记') && design.includes('无条件应用'))
+  check('§2.1 记录内容 API 端点', design.includes('/api/notes/tree') && design.includes('/api/notes/content'))
+  check('§2.1 记录按 id 服务端解析路径', design.includes('按 id 服务端解析路径'))
+  // v1.3 契约
+  check('§2.1 记录 AI 中继端点', design.includes('/api/ai/chat'))
+  check('§2.1 记录电脑档语义（真相源直执行）', design.includes('直接在桌面真相源执行'))
 }
 
 console.log('\n' + (failures === 0 ? 'PASS (' + checks + ' checks)' : 'FAIL (' + failures + '/' + checks + ')'))

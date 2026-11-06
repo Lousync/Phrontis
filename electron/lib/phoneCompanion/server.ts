@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http'
-import { randomUUID } from 'crypto'
+import { randomUUID, randomInt } from 'crypto'
 import {
   MAX_BODY_BYTES, PAIR_ATTEMPTS_PER_MIN, PAIR_CODE_TTL_MS, PROTOCOL_VERSION, SYNC_DOMAINS,
-  normalizeLedgerData,
-  type LedgerItemData,
+  normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData,
+  type LedgerItemData, type ScheduleItemData, type NoteItemData, type SyncDomain,
 } from './protocol.ts'
 import { isPrivateAddress, generateToken, tokenMatches } from '../lanShare/auth.ts'
 
@@ -14,13 +14,16 @@ import { isPrivateAddress, generateToken, tokenMatches } from '../lanShare/auth.
  *
  * 路由：
  *   OPTIONS *            CORS 预检（手机 WebView 与本服务不同源）
- *   POST /api/pair       配对：配对码换长期设备令牌（无需令牌）
+ *   GET  /api/discover   发现：本机电脑名 + 协议版本（无令牌，供手机扫段识别）
+ *   POST /api/pair       配对（旧路）：配对码换长期设备令牌（无需令牌）
+ *   POST /api/pair/request 配对（新路 v1.5）：手机发起 → 桌面确认框 → 双屏 4 位码核对
+ *   GET  /api/pair/status  新路查询：pending / approved（回令牌）/ rejected / expired
  *   GET  /api/ping       存活探测（带令牌）
  *   POST /api/sync/push  手机上行变更（域级 LWW 合并）
  *   POST /api/sync/pull  手机拉取服务端变更
  *
  * 安全：来源 IP 限私有网段（127.0.0.1 供本机测试）+ 设备令牌 Bearer + 配对码限频。
- * 与 lanShare 的差异：令牌长期有效（配对即存）、服务常驻（无自动关闭计时）。
+ * 新路的安全边界是「桌面确认框」——服务常驻时陌生人扫到也无令牌可拿，必须本人在电脑上点允许。
  */
 
 export interface CompanionDevice {
@@ -37,6 +40,19 @@ export interface CompanionPairCode {
   expiresAt: number
 }
 
+/** v1.5 配对握手：一条待确认请求（桌面确认框据此渲染；令牌只在 approved 后回给手机） */
+export interface CompanionPairRequestView {
+  requestId: string
+  /** 4 位数字：手机与电脑同屏核对，防「同网陌生人趁乱点允许」 */
+  code: string
+  deviceName: string
+  ip: string
+  createdAt: number
+  expiresAt: number
+}
+
+export type PairRequestStatus = 'pending' | 'approved' | 'rejected' | 'expired'
+
 export interface CompanionServerDeps {
   /** 已配对设备持久层（生产 = userData JSON；契约脚本 = 内存） */
   loadDevices(): CompanionDevice[]
@@ -44,10 +60,43 @@ export interface CompanionServerDeps {
   /** 当前配对码（null = 未出示）；服务端只读，作废走 consumePairCode */
   getPairCode(): CompanionPairCode | null
   consumePairCode(): void
+  /**
+   * v1.5 配对握手：手机发起请求时回调（生产 = 推给渲染层弹确认框并留出手柄；契约脚本 = 内存记录）。
+   * approve / reject 由 UI 侧调用；设备创建与令牌发放留在服务内部（tokenIndex 是闭包状态，外部改不到）。
+   */
+  onPairRequest?(view: CompanionPairRequestView, handlers: {
+    approve(): { ok: boolean; error?: string }
+    reject(): { ok: boolean; error?: string }
+  }): void
   /** ledger 域写入（生产 = vaultAccountingSyncUpsert；已含 LWW，返回 conflict 即服务端更新） */
-  applyLedger(item: { id: string; updatedAt: string; data: LedgerItemData }): { applied: boolean; conflict?: boolean }
+  applyLedger(item: { id: string; updatedAt: string; data: LedgerItemData }): { applied: boolean; conflict?: boolean; reason?: string }
+  /** schedule 域写入（生产 = vaultScheduleSyncUpsert；同一条 LWW 时线） */
+  applySchedule(item: { id: string; updatedAt: string; data: ScheduleItemData }): { applied: boolean; conflict?: boolean; reason?: string }
+  /** notes 域写入（v1.2，生产 = vaultUpsertPhoneNote；手机是闪念真相源，无条件应用） */
+  applyNote(item: { id: string; updatedAt: string; data: NoteItemData }): { applied: boolean; reason?: string }
+  /** 删除同步（v1.1 墓碑）：手机上行 `data:{deleted:true}` 的变更。
+   * 生产 = 查现行行做 LWW（删除比行 updatedAt 旧 → conflict 拒删）→ 删行（repo 内部 emit 墓碑）
+   * → 无行时直接记墓碑（幂等）。
+   */
+  applyDelete(domain: SyncDomain, id: string, deletedAt: string): { applied: boolean; conflict?: boolean; reason?: string }
   /** ledger 域读取：updatedAt > sinceMs 的条目 */
   listLedgerSince(sinceMs: number): Array<{ id: string; updatedAt: string; data: LedgerItemData }>
+  /** schedule 域读取：updatedAt > sinceMs 的条目（含子任务行） */
+  listScheduleSince(sinceMs: number): Array<{ id: string; updatedAt: string; data: ScheduleItemData }>
+  /** 全域墓碑：deletedAt > sinceMs（手机按 domain 分派 + 幂等应用） */
+  listTombstonesSince(sinceMs: number): Array<{ domain: string; id: string; deletedAt: string }>
+  /** v1.2 内容 API：doc 类页面平表（排除欢迎页与 file 条目；手机按 path 自行建目录树） */
+  listNoteTree(): Array<{ id: string; title: string; path: string; categoryId: string | null; mtimeMs: number; sizeBytes: number }>
+  /** v1.2 内容 API：按 id 读正文（服务端解析路径；找不到/不可读返回 null → 404） */
+  readNoteContent(id: string): { title: string; updatedAt: string; body: string; truncated?: boolean } | null
+  /**
+   * v1.3 电脑档：对话中继到桌面完整 agentService（生产 = agentChatViaCompanion 的瘦身投影）。
+   * sessionId 空 → 桌面新建会话并在响应回传；业务失败 ok:false 携带 error/code（HTTP 仍 200）。
+   */
+  aiChat(req: { sessionId: string; message: string }): Promise<{
+    ok: boolean; reply?: string; sessionId: string; error?: string; code?: string
+    changes?: Array<{ tool: string; action: string; target: string }>
+  }>
   /** 配对响应里的电脑名 */
   pcName(): string
 }
@@ -122,6 +171,48 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
     return null
   }
 
+  /* ---------- v1.5 配对握手：待确认请求（进程内，3 分钟过期） ---------- */
+  const PAIR_REQUEST_TTL_MS = 3 * 60_000
+  interface PendingPair extends CompanionPairRequestView {
+    status: 'pending' | 'approved' | 'rejected'
+    deviceToken?: string
+  }
+  const pendingPairs = new Map<string, PendingPair>()
+
+  function purgePending(): void {
+    const now = Date.now()
+    for (const [id, p] of pendingPairs) if (now > p.expiresAt + 60_000) pendingPairs.delete(id)
+  }
+
+  /** 配对限频：10 次/分钟/IP（旧路 /api/pair 与新路 /api/pair/request 共用同一桶） */
+  function allowPairAttempt(ip: string): boolean {
+    const now = Date.now()
+    const bucket = pairAttempts.get(ip)
+    if (!bucket || now - bucket.windowStart > 60_000) {
+      pairAttempts.set(ip, { windowStart: now, count: 1 })
+      return true
+    }
+    bucket.count++
+    return bucket.count <= PAIR_ATTEMPTS_PER_MIN
+  }
+
+  /** 发一张新令牌并落库（旧路 /api/pair 与新路 approve 共用，tokenIndex 必须同步） */
+  function issueDevice(name: string): CompanionDevice {
+    const now = Date.now()
+    const device: CompanionDevice = {
+      deviceId: randomUUID(),
+      name,
+      token: generateToken(),
+      pairedAt: now,
+      lastSeenAt: now,
+    }
+    const list = deps.loadDevices()
+    list.push(device)
+    deps.saveDevices(list)
+    tokenIndex.set(device.token, device)
+    return device
+  }
+
   const server = createServer((req, res) => {
     const method = (req.method || 'GET').toUpperCase()
     const url = req.url || '/'
@@ -146,20 +237,93 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
     }
 
     try {
+      // ----- 发现（无需令牌；供手机扫段识别本机，只回电脑名）-----
+      if (method === 'GET' && pathname === '/api/discover') {
+        sendJson(res, 200, {
+          ok: true,
+          protocol: PROTOCOL_VERSION,
+          pc: { name: deps.pcName() },
+          pairing: deps.onPairRequest ? ['request', 'code'] : ['code'],
+        })
+        return
+      }
+
+      // ----- 配对握手 v1.5（无需令牌）-----
+      if (method === 'POST' && pathname === '/api/pair/request') {
+        const onPairRequest = deps.onPairRequest
+        if (!onPairRequest) {
+          deny(res, 501, '电脑端未开启配对确认，请走配对码')
+          return
+        }
+        if (!allowPairAttempt(ip)) {
+          deny(res, 429, '配对尝试过于频繁，稍后再试')
+          return
+        }
+        void (async () => {
+          const body = await readJsonBody(req) as { deviceName?: unknown }
+          purgePending()
+          const now = Date.now()
+          const view: CompanionPairRequestView = {
+            requestId: randomUUID(),
+            code: String(randomInt(0, 10000)).padStart(4, '0'),
+            deviceName: String(body.deviceName ?? '').trim().slice(0, 40) || '手机',
+            ip,
+            createdAt: now,
+            expiresAt: now + PAIR_REQUEST_TTL_MS,
+          }
+          const pending: PendingPair = { ...view, status: 'pending' }
+          pendingPairs.set(view.requestId, pending)
+          onPairRequest(view, {
+            approve: () => {
+              if (pending.status !== 'pending') return { ok: false, error: '请求已处理' }
+              if (Date.now() > pending.expiresAt) return { ok: false, error: '请求已过期' }
+              const device = issueDevice(pending.deviceName)
+              pending.status = 'approved'
+              pending.deviceToken = device.token
+              return { ok: true }
+            },
+            reject: () => {
+              if (pending.status !== 'pending') return { ok: false, error: '请求已处理' }
+              pending.status = 'rejected'
+              return { ok: true }
+            },
+          })
+          sendJson(res, 200, { ok: true, requestId: view.requestId, code: view.code, expiresAt: view.expiresAt })
+        })().catch(() => deny(res, 400, '请求体解析失败'))
+        return
+      }
+
+      if (method === 'GET' && pathname === '/api/pair/status') {
+        purgePending()
+        const q = new URLSearchParams(url.includes('?') ? url.slice(url.indexOf('?') + 1) : '')
+        const pending = pendingPairs.get(q.get('id') || '')
+        if (!pending) {
+          deny(res, 404, '配对请求不存在或已过期')
+          return
+        }
+        const expired = pending.status === 'pending' && Date.now() > pending.expiresAt
+        sendJson(res, 200, {
+          ok: true,
+          status: expired ? 'expired' : pending.status,
+          ...(pending.status === 'approved' && pending.deviceToken
+            ? {
+                deviceToken: pending.deviceToken,
+                protocol: PROTOCOL_VERSION,
+                pc: { name: deps.pcName() },
+                domains: SYNC_DOMAINS,
+              }
+            : {}),
+        })
+        return
+      }
+
       // ----- 配对（无需令牌）-----
       if (method === 'POST' && pathname === '/api/pair') {
-        // 限频：10 次/分钟/IP
-        const now = Date.now()
-        const bucket = pairAttempts.get(ip)
-        if (!bucket || now - bucket.windowStart > 60_000) {
-          pairAttempts.set(ip, { windowStart: now, count: 1 })
-        } else {
-          bucket.count++
-          if (bucket.count > PAIR_ATTEMPTS_PER_MIN) {
-            deny(res, 429, '配对尝试过于频繁，稍后再试')
-            return
-          }
+        if (!allowPairAttempt(ip)) {
+          deny(res, 429, '配对尝试过于频繁，稍后再试')
+          return
         }
+        const now = Date.now()
 
         void (async () => {
           const body = await readJsonBody(req) as { code?: unknown; deviceName?: unknown }
@@ -173,17 +337,7 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
             return
           }
           const name = String(body.deviceName ?? '').trim().slice(0, 40) || '手机'
-          const device: CompanionDevice = {
-            deviceId: randomUUID(),
-            name,
-            token: generateToken(),
-            pairedAt: now,
-            lastSeenAt: now,
-          }
-          const list = deps.loadDevices()
-          list.push(device)
-          deps.saveDevices(list)
-          tokenIndex.set(device.token, device)
+          const device = issueDevice(name)
           deps.consumePairCode() // 一次配对即作废
           sendJson(res, 200, {
             ok: true,
@@ -212,6 +366,23 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
         return
       }
 
+      // ----- v1.2 内容 API（电脑笔记 → 手机只读缓存）-----
+      if (method === 'GET' && pathname === '/api/notes/tree') {
+        sendJson(res, 200, { ok: true, generatedAt: Date.now(), pages: deps.listNoteTree() })
+        return
+      }
+      if (method === 'GET' && pathname === '/api/notes/content') {
+        // 按 id 服务端解析路径：客户端永不传路径，无目录穿越面
+        const qId = new URL(url, 'http://local').searchParams.get('id') || ''
+        const hit = qId ? deps.readNoteContent(qId) : null
+        if (!hit) {
+          deny(res, 404, '笔记不存在或不可读')
+          return
+        }
+        sendJson(res, 200, { ok: true, id: qId, ...hit })
+        return
+      }
+
       if (method === 'POST' && pathname === '/api/sync/push') {
         void (async () => {
           const body = await readJsonBody(req) as { changes?: unknown }
@@ -219,21 +390,40 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
           const results = changes.map(raw => {
             const c = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
             const id = String(c.id ?? '')
-            const domain = String(c.domain ?? '')
+            const domain = String(c.domain ?? '') as SyncDomain
             const updatedAt = String(c.updatedAt ?? '')
             if (!id || !updatedAt) return { id, applied: false, reason: 'invalid-change' }
             if (!(SYNC_DOMAINS as readonly string[]).includes(domain)) {
               return { id, applied: false, reason: 'unsupported-domain' }
             }
-            const data = normalizeLedgerData(c.data)
-            if (!data) return { id, applied: false, reason: 'invalid-data' }
-            try {
-              const r = deps.applyLedger({ id, updatedAt, data })
-              return r.applied
+            /** applied→ok；conflict→手机以服务端版本回写收敛；其余 reason 原样带回 */
+            const toResult = (r: { applied: boolean; conflict?: boolean; reason?: string }) =>
+              r.applied
                 ? { id, applied: true }
-                : { id, applied: false, conflict: true, reason: r.conflict ? 'server-newer' : 'skipped' }
+                : { id, applied: false, ...(r.conflict ? { conflict: true } : {}), ...(r.reason ? { reason: r.reason } : {}) }
+            try {
+              // 墓碑（删除）优先判定：data = { deleted: true }
+              if (isTombstoneData(c.data)) {
+                return toResult(deps.applyDelete(domain, id, updatedAt))
+              }
+              if (domain === 'ledger') {
+                const data = normalizeLedgerData(c.data)
+                if (!data) return { id, applied: false, reason: 'invalid-data' }
+                return toResult(deps.applyLedger({ id, updatedAt, data }))
+              }
+              if (domain === 'schedule') {
+                const data = normalizeScheduleData(c.data)
+                if (!data) return { id, applied: false, reason: 'invalid-data' }
+                return toResult(deps.applySchedule({ id, updatedAt, data }))
+              }
+              if (domain === 'notes') {
+                const data = normalizeNoteData(c.data)
+                if (!data) return { id, applied: false, reason: 'invalid-data' }
+                return toResult(deps.applyNote({ id, updatedAt, data }))
+              }
+              return { id, applied: false, reason: 'unsupported-domain' }
             } catch (e) {
-              console.error('[companion] applyLedger failed', e)
+              console.error('[companion] apply change failed', e)
               return { id, applied: false, reason: 'apply-error' }
             }
           })
@@ -250,11 +440,44 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
           const body = await readJsonBody(req) as { since?: Record<string, unknown> }
           const since = body.since && typeof body.since === 'object' ? body.since : {}
           const sinceLedger = Number(since.ledger ?? 0)
+          const sinceSchedule = Number(since.schedule ?? 0)
+          const valid = (n: number): boolean => Number.isFinite(n)
+          // 墓碑游标 = 各域游标取最小（手机对收到的墓碑按 id 幂等应用，多收无害、少收有害）
+          const sinceTs = Math.min(
+            valid(sinceLedger) ? sinceLedger : 0,
+            valid(sinceSchedule) ? sinceSchedule : 0,
+          )
+          const now = Date.now()
           const changes: Record<string, unknown> = {
-            ledger: Number.isFinite(sinceLedger) ? deps.listLedgerSince(sinceLedger) : [],
+            ledger: valid(sinceLedger) ? deps.listLedgerSince(sinceLedger) : [],
+            schedule: valid(sinceSchedule) ? deps.listScheduleSince(sinceSchedule) : [],
           }
-          sendJson(res, 200, { ok: true, changes, cursor: { ledger: Date.now() } })
+          sendJson(res, 200, {
+            ok: true,
+            changes,
+            tombstones: deps.listTombstonesSince(sinceTs),
+            cursor: { ledger: now, schedule: now },
+          })
         })().catch(() => deny(res, 400, '请求体解析失败'))
+        return
+      }
+
+      // ----- v1.3 电脑档：对话中继到桌面 agentService -----
+      if (method === 'POST' && pathname === '/api/ai/chat') {
+        void (async () => {
+          const body = await readJsonBody(req) as { sessionId?: unknown; message?: unknown }
+          const message = String(body.message ?? '').trim()
+          if (!message) {
+            deny(res, 400, '消息不能为空')
+            return
+          }
+          // 业务失败（无供应商/中断等）以 ok:false + error 返回，HTTP 仍 200 —— 传输失败才 5xx
+          const r = await deps.aiChat({ sessionId: String(body.sessionId ?? ''), message })
+          sendJson(res, 200, r)
+        })().catch(e => {
+          console.error('[companion] ai chat failed', e)
+          deny(res, e instanceof Error && e.message === 'bad json' ? 400 : 500, 'AI 中继失败')
+        })
         return
       }
 
