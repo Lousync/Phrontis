@@ -4,6 +4,7 @@ import { showToast } from '../../../../lib/toast'
 import {
   getSetting, setSetting,
   companionStart, companionStop, companionStatus, companionNewPairCode, companionQr, companionRevoke,
+  companionApprovePair, companionRejectPair,
 } from '../../../../lib/ipc'
 import type { CompanionStatus } from '../../../../types'
 
@@ -109,6 +110,23 @@ export function PhoneCompanion({ onBack }: { onBack: () => void }) {
     }
   }
 
+  /** v1.5 配对确认：允许 = 服务内发令牌；拒绝 = 手机轮询拿到 rejected */
+  const handleResolve = async (requestId: string, approve: boolean) => {
+    setBusy(true)
+    try {
+      const r = approve ? await companionApprovePair(requestId) : await companionRejectPair(requestId)
+      if (r.status) setStatus(r.status)
+      showToast(r.ok
+        ? { type: 'success', message: approve ? '已允许配对' : '已拒绝配对' }
+        : { type: 'error', message: r.error || '操作失败' })
+      void refresh()
+    } catch {
+      showToast({ type: 'error', message: '操作失败' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const running = !!status?.running
   const codeValid = running && !!status?.pairCode
 
@@ -149,6 +167,27 @@ export function PhoneCompanion({ onBack }: { onBack: () => void }) {
             </div>
           ) : (
             <>
+              {/* v1.5 手机发起的配对请求：4 位码与手机同屏核对后再点允许（防同网陌生人趁乱配对） */}
+              {(status?.pendingPairs ?? []).map(pr => (
+                <div key={pr.requestId} className="rounded-lg border border-[var(--accent)] bg-[var(--bg-secondary)] p-4">
+                  <p className="text-[13px] font-medium text-[var(--text-primary)]">「{pr.deviceName}」请求配对</p>
+                  <p className="text-[11.5px] text-[var(--text-muted)] mt-1">来自 {pr.ip} · 核对手机屏幕上显示的验证码是否与此一致</p>
+                  <div className="mt-2 flex items-center gap-3">
+                    <span className="font-mono text-[24px] font-semibold tracking-[0.22em] text-[var(--accent)]">{pr.code}</span>
+                    <button
+                      onClick={() => void handleResolve(pr.requestId, true)}
+                      disabled={busy}
+                      className="px-3 py-1 rounded-md bg-[var(--accent)] text-[var(--bg-primary)] text-[12px] hover:opacity-90 transition-opacity disabled:opacity-60"
+                    >允许</button>
+                    <button
+                      onClick={() => void handleResolve(pr.requestId, false)}
+                      disabled={busy}
+                      className="px-3 py-1 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] text-[12px] hover:border-[var(--danger)] hover:text-[var(--danger)] transition-colors disabled:opacity-60"
+                    >拒绝</button>
+                  </div>
+                </div>
+              ))}
+
               {/* 配对码 + 二维码 */}
               <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-5 flex items-center gap-5">
                 {qr && (

@@ -1894,6 +1894,18 @@ export interface CompanionStatus {
   pairCode: string
   pairCodeExpiresAt: number
   devices: CompanionDevice[]
+  /** v1.5：手机发起的待确认配对请求（确认框数据源；轮询 status 取） */
+  pendingPairs: CompanionPairRequestInfo[]
+}
+
+/** v1.5 配对握手：一条待确认请求（4 位码双屏核对，防同网陌生人趁乱点允许） */
+export interface CompanionPairRequestInfo {
+  requestId: string
+  code: string
+  deviceName: string
+  ip: string
+  createdAt: number
+  expiresAt: number
 }
 // Web 剪藏服务状态（工具箱「网页剪藏」面板）
 export interface ClipperStatus {
@@ -2614,6 +2626,9 @@ export interface ElectronAPI {
   companionNewPairCode: () => Promise<CompanionStatus>
   companionQr: (text: string) => Promise<string>
   companionRevoke: (deviceId: string) => Promise<{ ok: boolean }>
+  /** v1.5 配对确认框：允许配对（服务内发令牌并落库），返回最新状态 */
+  companionApprovePair: (requestId: string) => Promise<{ ok: boolean; error?: string; status: CompanionStatus }>
+  companionRejectPair: (requestId: string) => Promise<{ ok: boolean; error?: string; status: CompanionStatus }>
   // 编辑器工作区（Vault 仓库）：文件服务
   // D7：选中目录顶层无 .knowbase 时返回 notVault（待确认初始化），不静默建仓库
   workspaceOpenDir: () => Promise<VaultOpenResult | null>

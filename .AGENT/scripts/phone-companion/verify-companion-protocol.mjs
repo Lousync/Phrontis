@@ -47,8 +47,9 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const CODE = '12345678'
 
 /** 内存依赖 + 起一只真服务器；返回 { port, url, setCode, store, scheduleStore, tombstones } */
-async function boot({ code = CODE, expiresAt = Date.now() + 60_000 } = {}) {
+async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest = true } = {}) {
   let devices = []
+  const pairRequests = [] // v1.5：{ view, approve, reject }（模拟渲染层确认框留下的手柄）
   const store = new Map() // id -> { id, updatedAt, data }（ledger）
   const scheduleStore = new Map() // id -> { id, updatedAt, data }（schedule）
   const notesStore = new Map() // id -> { id, updatedAt, data }（notes）
@@ -99,6 +100,7 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000 } = {}) {
       changes: req.message.includes('记') ? [{ tool: 'builtin.ledger.create', action: '新建流水', target: '午饭' }] : [],
     }),
     pcName: () => 'TEST-PC',
+    ...(pairRequest ? { onPairRequest: (view, handlers) => pairRequests.push({ view, approve: handlers.approve, reject: handlers.reject }) } : {}),
   })
   await new Promise((res, rej) => { server.once('error', rej); server.listen(0, '127.0.0.1', res) })
   const port = server.address().port
@@ -110,6 +112,7 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000 } = {}) {
     notesStore,
     tombstones,
     devices: () => devices,
+    pairRequests,
     setCode: (c) => { pairCode = c },
     post: (path, body, headers) => fetch('http://127.0.0.1:' + port + path, {
       method: 'POST', headers: { 'content-type': 'application/json', ...(headers || {}) },
@@ -190,6 +193,56 @@ console.log('\n§2 配对（配对码一次性 / 过期 / 设备落库）')
   const nc = await noCode.post('/api/pair', { code: CODE, deviceName: '测试机' })
   check('未出示配对码 401', nc.status === 401)
   await s.close(); await noCode.close()
+}
+
+/* ------------------------------------------------------------------ §2b */
+console.log('\n§2b 配对握手 v1.5（发现 / 请求 / 双屏 4 位码 / 桌面确认 / 拒绝）')
+
+{
+  const s = await boot()
+  try {
+    const d = await (await s.get('/api/discover')).json()
+    check('发现端点回电脑名与协议版本', d.ok === true && d.pc.name === 'TEST-PC' && d.protocol === 1)
+    check('发现端点声明支持请求式配对', Array.isArray(d.pairing) && d.pairing.includes('request'))
+
+    const r1 = await (await s.post('/api/pair/request', { deviceName: '志岩的手机' })).json()
+    check('发起请求回 requestId 与 4 位码', r1.ok === true && typeof r1.requestId === 'string' && /^\d{4}$/.test(r1.code))
+    check('请求进入待确认列表（确认框数据源）', s.pairRequests.length === 1 && s.pairRequests[0].view.deviceName === '志岩的手机')
+    check('请求记录来源 IP', s.pairRequests[0].view.ip === '127.0.0.1')
+
+    const st1 = await (await s.get('/api/pair/status?id=' + r1.requestId)).json()
+    check('未确认前 pending 且不发令牌', st1.status === 'pending' && !st1.deviceToken)
+
+    const ap = s.pairRequests[0].approve()
+    check('桌面点允许 → 发令牌成功', ap.ok === true)
+    const st2 = await (await s.get('/api/pair/status?id=' + r1.requestId)).json()
+    check('确认后 approved 并回令牌与电脑名',
+      st2.status === 'approved' && typeof st2.deviceToken === 'string' && st2.deviceToken.length > 20 && st2.pc.name === 'TEST-PC')
+    check('设备落库且名字来自请求', s.devices().length === 1 && s.devices()[0].name === '志岩的手机')
+
+    const ping = await s.get('/api/ping', { authorization: 'Bearer ' + st2.deviceToken })
+    check('新令牌可直接打 ping', ping.status === 200)
+
+    const r2 = await (await s.post('/api/pair/request', { deviceName: '同网陌生人' })).json()
+    s.pairRequests[1].reject()
+    const st3 = await (await s.get('/api/pair/status?id=' + r2.requestId)).json()
+    check('拒绝后 rejected 且不发令牌', st3.status === 'rejected' && !st3.deviceToken)
+    check('被拒设备不落库', s.devices().length === 1)
+    check('同一请求二次处理被拒', s.pairRequests[1].approve().ok === false)
+
+    const st404 = await s.get('/api/pair/status?id=nope')
+    check('未知请求 id → 404', st404.status === 404)
+  } finally { await s.close() }
+}
+
+{
+  const s = await boot({ pairRequest: false })
+  try {
+    const r = await s.post('/api/pair/request', { deviceName: 'x' })
+    check('电脑未接确认框 → 501（旧客户端继续走配对码）', r.status === 501)
+    const d = await (await s.get('/api/discover')).json()
+    check('未接确认框时 discover 只声明 code', Array.isArray(d.pairing) && d.pairing.length === 1 && d.pairing[0] === 'code')
+  } finally { await s.close() }
 }
 
 /* ------------------------------------------------------------------ §3 */

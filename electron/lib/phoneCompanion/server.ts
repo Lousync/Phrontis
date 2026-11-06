@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http'
-import { randomUUID } from 'crypto'
+import { randomUUID, randomInt } from 'crypto'
 import {
   MAX_BODY_BYTES, PAIR_ATTEMPTS_PER_MIN, PAIR_CODE_TTL_MS, PROTOCOL_VERSION, SYNC_DOMAINS,
   normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData,
@@ -14,13 +14,16 @@ import { isPrivateAddress, generateToken, tokenMatches } from '../lanShare/auth.
  *
  * 路由：
  *   OPTIONS *            CORS 预检（手机 WebView 与本服务不同源）
- *   POST /api/pair       配对：配对码换长期设备令牌（无需令牌）
+ *   GET  /api/discover   发现：本机电脑名 + 协议版本（无令牌，供手机扫段识别）
+ *   POST /api/pair       配对（旧路）：配对码换长期设备令牌（无需令牌）
+ *   POST /api/pair/request 配对（新路 v1.5）：手机发起 → 桌面确认框 → 双屏 4 位码核对
+ *   GET  /api/pair/status  新路查询：pending / approved（回令牌）/ rejected / expired
  *   GET  /api/ping       存活探测（带令牌）
  *   POST /api/sync/push  手机上行变更（域级 LWW 合并）
  *   POST /api/sync/pull  手机拉取服务端变更
  *
  * 安全：来源 IP 限私有网段（127.0.0.1 供本机测试）+ 设备令牌 Bearer + 配对码限频。
- * 与 lanShare 的差异：令牌长期有效（配对即存）、服务常驻（无自动关闭计时）。
+ * 新路的安全边界是「桌面确认框」——服务常驻时陌生人扫到也无令牌可拿，必须本人在电脑上点允许。
  */
 
 export interface CompanionDevice {
@@ -37,6 +40,19 @@ export interface CompanionPairCode {
   expiresAt: number
 }
 
+/** v1.5 配对握手：一条待确认请求（桌面确认框据此渲染；令牌只在 approved 后回给手机） */
+export interface CompanionPairRequestView {
+  requestId: string
+  /** 4 位数字：手机与电脑同屏核对，防「同网陌生人趁乱点允许」 */
+  code: string
+  deviceName: string
+  ip: string
+  createdAt: number
+  expiresAt: number
+}
+
+export type PairRequestStatus = 'pending' | 'approved' | 'rejected' | 'expired'
+
 export interface CompanionServerDeps {
   /** 已配对设备持久层（生产 = userData JSON；契约脚本 = 内存） */
   loadDevices(): CompanionDevice[]
@@ -44,6 +60,14 @@ export interface CompanionServerDeps {
   /** 当前配对码（null = 未出示）；服务端只读，作废走 consumePairCode */
   getPairCode(): CompanionPairCode | null
   consumePairCode(): void
+  /**
+   * v1.5 配对握手：手机发起请求时回调（生产 = 推给渲染层弹确认框并留出手柄；契约脚本 = 内存记录）。
+   * approve / reject 由 UI 侧调用；设备创建与令牌发放留在服务内部（tokenIndex 是闭包状态，外部改不到）。
+   */
+  onPairRequest?(view: CompanionPairRequestView, handlers: {
+    approve(): { ok: boolean; error?: string }
+    reject(): { ok: boolean; error?: string }
+  }): void
   /** ledger 域写入（生产 = vaultAccountingSyncUpsert；已含 LWW，返回 conflict 即服务端更新） */
   applyLedger(item: { id: string; updatedAt: string; data: LedgerItemData }): { applied: boolean; conflict?: boolean; reason?: string }
   /** schedule 域写入（生产 = vaultScheduleSyncUpsert；同一条 LWW 时线） */
@@ -147,6 +171,48 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
     return null
   }
 
+  /* ---------- v1.5 配对握手：待确认请求（进程内，3 分钟过期） ---------- */
+  const PAIR_REQUEST_TTL_MS = 3 * 60_000
+  interface PendingPair extends CompanionPairRequestView {
+    status: 'pending' | 'approved' | 'rejected'
+    deviceToken?: string
+  }
+  const pendingPairs = new Map<string, PendingPair>()
+
+  function purgePending(): void {
+    const now = Date.now()
+    for (const [id, p] of pendingPairs) if (now > p.expiresAt + 60_000) pendingPairs.delete(id)
+  }
+
+  /** 配对限频：10 次/分钟/IP（旧路 /api/pair 与新路 /api/pair/request 共用同一桶） */
+  function allowPairAttempt(ip: string): boolean {
+    const now = Date.now()
+    const bucket = pairAttempts.get(ip)
+    if (!bucket || now - bucket.windowStart > 60_000) {
+      pairAttempts.set(ip, { windowStart: now, count: 1 })
+      return true
+    }
+    bucket.count++
+    return bucket.count <= PAIR_ATTEMPTS_PER_MIN
+  }
+
+  /** 发一张新令牌并落库（旧路 /api/pair 与新路 approve 共用，tokenIndex 必须同步） */
+  function issueDevice(name: string): CompanionDevice {
+    const now = Date.now()
+    const device: CompanionDevice = {
+      deviceId: randomUUID(),
+      name,
+      token: generateToken(),
+      pairedAt: now,
+      lastSeenAt: now,
+    }
+    const list = deps.loadDevices()
+    list.push(device)
+    deps.saveDevices(list)
+    tokenIndex.set(device.token, device)
+    return device
+  }
+
   const server = createServer((req, res) => {
     const method = (req.method || 'GET').toUpperCase()
     const url = req.url || '/'
@@ -171,20 +237,93 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
     }
 
     try {
+      // ----- 发现（无需令牌；供手机扫段识别本机，只回电脑名）-----
+      if (method === 'GET' && pathname === '/api/discover') {
+        sendJson(res, 200, {
+          ok: true,
+          protocol: PROTOCOL_VERSION,
+          pc: { name: deps.pcName() },
+          pairing: deps.onPairRequest ? ['request', 'code'] : ['code'],
+        })
+        return
+      }
+
+      // ----- 配对握手 v1.5（无需令牌）-----
+      if (method === 'POST' && pathname === '/api/pair/request') {
+        const onPairRequest = deps.onPairRequest
+        if (!onPairRequest) {
+          deny(res, 501, '电脑端未开启配对确认，请走配对码')
+          return
+        }
+        if (!allowPairAttempt(ip)) {
+          deny(res, 429, '配对尝试过于频繁，稍后再试')
+          return
+        }
+        void (async () => {
+          const body = await readJsonBody(req) as { deviceName?: unknown }
+          purgePending()
+          const now = Date.now()
+          const view: CompanionPairRequestView = {
+            requestId: randomUUID(),
+            code: String(randomInt(0, 10000)).padStart(4, '0'),
+            deviceName: String(body.deviceName ?? '').trim().slice(0, 40) || '手机',
+            ip,
+            createdAt: now,
+            expiresAt: now + PAIR_REQUEST_TTL_MS,
+          }
+          const pending: PendingPair = { ...view, status: 'pending' }
+          pendingPairs.set(view.requestId, pending)
+          onPairRequest(view, {
+            approve: () => {
+              if (pending.status !== 'pending') return { ok: false, error: '请求已处理' }
+              if (Date.now() > pending.expiresAt) return { ok: false, error: '请求已过期' }
+              const device = issueDevice(pending.deviceName)
+              pending.status = 'approved'
+              pending.deviceToken = device.token
+              return { ok: true }
+            },
+            reject: () => {
+              if (pending.status !== 'pending') return { ok: false, error: '请求已处理' }
+              pending.status = 'rejected'
+              return { ok: true }
+            },
+          })
+          sendJson(res, 200, { ok: true, requestId: view.requestId, code: view.code, expiresAt: view.expiresAt })
+        })().catch(() => deny(res, 400, '请求体解析失败'))
+        return
+      }
+
+      if (method === 'GET' && pathname === '/api/pair/status') {
+        purgePending()
+        const q = new URLSearchParams(url.includes('?') ? url.slice(url.indexOf('?') + 1) : '')
+        const pending = pendingPairs.get(q.get('id') || '')
+        if (!pending) {
+          deny(res, 404, '配对请求不存在或已过期')
+          return
+        }
+        const expired = pending.status === 'pending' && Date.now() > pending.expiresAt
+        sendJson(res, 200, {
+          ok: true,
+          status: expired ? 'expired' : pending.status,
+          ...(pending.status === 'approved' && pending.deviceToken
+            ? {
+                deviceToken: pending.deviceToken,
+                protocol: PROTOCOL_VERSION,
+                pc: { name: deps.pcName() },
+                domains: SYNC_DOMAINS,
+              }
+            : {}),
+        })
+        return
+      }
+
       // ----- 配对（无需令牌）-----
       if (method === 'POST' && pathname === '/api/pair') {
-        // 限频：10 次/分钟/IP
-        const now = Date.now()
-        const bucket = pairAttempts.get(ip)
-        if (!bucket || now - bucket.windowStart > 60_000) {
-          pairAttempts.set(ip, { windowStart: now, count: 1 })
-        } else {
-          bucket.count++
-          if (bucket.count > PAIR_ATTEMPTS_PER_MIN) {
-            deny(res, 429, '配对尝试过于频繁，稍后再试')
-            return
-          }
+        if (!allowPairAttempt(ip)) {
+          deny(res, 429, '配对尝试过于频繁，稍后再试')
+          return
         }
+        const now = Date.now()
 
         void (async () => {
           const body = await readJsonBody(req) as { code?: unknown; deviceName?: unknown }
@@ -198,17 +337,7 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
             return
           }
           const name = String(body.deviceName ?? '').trim().slice(0, 40) || '手机'
-          const device: CompanionDevice = {
-            deviceId: randomUUID(),
-            name,
-            token: generateToken(),
-            pairedAt: now,
-            lastSeenAt: now,
-          }
-          const list = deps.loadDevices()
-          list.push(device)
-          deps.saveDevices(list)
-          tokenIndex.set(device.token, device)
+          const device = issueDevice(name)
           deps.consumePairCode() // 一次配对即作废
           sendJson(res, 200, {
             ok: true,

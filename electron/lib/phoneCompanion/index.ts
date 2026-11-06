@@ -1,7 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { randomInt } from 'crypto'
 import { hostname } from 'os'
-import { createCompanionServer, type CompanionPairCode } from './server'
+import { createCompanionServer, type CompanionPairCode, type CompanionPairRequestView } from './server'
 import { DEFAULT_PORT, PAIR_CODE_TTL_MS, buildPairUrl, shouldApplyIncoming, type ScheduleItemData } from './protocol'
 import { generateToken } from '../lanShare/auth'
 import { getLanAddresses } from '../lanShare/server'
@@ -24,7 +24,7 @@ import { getKnowledgeIndex, findKnowledgePage } from '../kbStore/knowledgeIndex'
 import { getCurrentVault } from '../kbStore/vaultContext'
 import { parseMarkdown } from '../kbStore/mdStore'
 import { agentChatViaCompanion } from '../agentService'
-import { broadcastDataChanged } from '../../main/windowBus'
+import { broadcastDataChanged, broadcast } from '../../main/windowBus'
 
 /**
  * 手机伴侣（工具箱）：局域网常驻同步服务，lanShare 的演化线。
@@ -38,13 +38,21 @@ import { broadcastDataChanged } from '../../main/windowBus'
 
 const MAX_PORT_TRIES = 20
 
+interface PendingPairEntry {
+  view: CompanionPairRequestView
+  approve(): { ok: boolean; error?: string }
+  reject(): { ok: boolean; error?: string }
+}
+
 interface ServiceState {
   server: ReturnType<typeof createCompanionServer> | null
   port: number
   pairCode: CompanionPairCode | null
+  /** v1.5 待确认配对请求（渲染层轮询 status 时渲染确认框） */
+  pendingPairs: PendingPairEntry[]
 }
 
-let state: ServiceState = { server: null, port: 0, pairCode: null }
+let state: ServiceState = { server: null, port: 0, pairCode: null, pendingPairs: [] }
 
 export interface CompanionStatus {
   running: boolean
@@ -53,6 +61,8 @@ export interface CompanionStatus {
   pairCode: string
   pairCodeExpiresAt: number
   devices: Array<{ deviceId: string; name: string; pairedAt: number; lastSeenAt: number }>
+  /** v1.5：手机发起的待确认配对请求（确认框数据源） */
+  pendingPairs: CompanionPairRequestView[]
 }
 
 function newPairCode(): CompanionPairCode {
@@ -71,7 +81,26 @@ function status(): CompanionStatus {
     pairCode: code && code.expiresAt > Date.now() ? code.code : '',
     pairCodeExpiresAt: code?.expiresAt ?? 0,
     devices: loadPairedDevices().map(({ deviceId, name, pairedAt, lastSeenAt }) => ({ deviceId, name, pairedAt, lastSeenAt })),
+    pendingPairs: state.pendingPairs.map(p => p.view),
   }
+}
+
+/**
+ * v1.5 配对确认：渲染层点「允许 / 拒绝」→ 这里执行服务内闭包（设备创建与令牌发放都在服务内部）。
+ * 处理完从待确认列表移除并广播，渲染层下一次轮询即消失。
+ */
+function resolvePairRequest(
+  requestId: string,
+  action: 'approve' | 'reject',
+): { ok: boolean; error?: string; status: CompanionStatus } {
+  const i = state.pendingPairs.findIndex(p => p.view.requestId === requestId)
+  if (i < 0) return { ok: false, error: '请求不存在或已过期', status: status() }
+  const entry = state.pendingPairs[i]
+  const r = action === 'approve' ? entry.approve() : entry.reject()
+  if (!r.ok) return { ok: false, error: r.error, status: status() }
+  state.pendingPairs.splice(i, 1)
+  broadcast('companion:pairChanged', { requestId, approved: action === 'approve' })
+  return { ok: true, status: status() }
 }
 
 export async function start(opts?: { port?: number }): Promise<CompanionStatus> {
@@ -83,6 +112,11 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
     saveDevices: savePairedDevices,
     getPairCode: () => state.pairCode,
     consumePairCode: () => { state.pairCode = null },
+    /* v1.5 配对握手：手机发请求 → 留出手柄并推给渲染层确认框（渲染层轮询 status 取 pendingPairs） */
+    onPairRequest: (view, handlers) => {
+      state.pendingPairs.push({ view, approve: handlers.approve, reject: handlers.reject })
+      broadcast('companion:pairRequest', view)
+    },
     applyLedger: item => {
       const r = vaultAccountingSyncUpsert({
         id: item.id, updatedAt: item.updatedAt,
@@ -201,7 +235,7 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
     }
   }
 
-  state = { server, port: boundPort, pairCode: newPairCode() }
+  state = { server, port: boundPort, pairCode: newPairCode(), pendingPairs: [] }
   return status()
 }
 
@@ -253,6 +287,7 @@ function rowToScheduleItem(row: TodoRow): { id: string; updatedAt: string; data:
 
 export async function stop(): Promise<CompanionStatus> {
   state.pairCode = null
+  state.pendingPairs = []
   if (state.server) {
     const s = state.server
     state.server = null
@@ -285,6 +320,9 @@ export function registerCompanionHandlers(): void {
     savePairedDevices(loadPairedDevices().filter(d => d.deviceId !== id))
     return { ok: true }
   })
+  /* v1.5 配对确认框：允许 → 服务内发令牌；拒绝 → 手机侧轮询到 rejected */
+  ipcMain.handle('companion:approvePair', (_e, requestId: unknown) => resolvePairRequest(String(requestId ?? ''), 'approve'))
+  ipcMain.handle('companion:rejectPair', (_e, requestId: unknown) => resolvePairRequest(String(requestId ?? ''), 'reject'))
 
   app.on('before-quit', () => {
     if (state.server) {
