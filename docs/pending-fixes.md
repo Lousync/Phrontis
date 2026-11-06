@@ -2037,3 +2037,51 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 **契约缺口**：`verify-tree-drag-handle.mjs` 只做了静态结构断言（`draggable` 在图标上），没有验证真实 `dragstart` / `drop`，所以本轮契约全绿但真机拖不动。修复时补一条运行期探针或 devbridge 动作。
 
 **临时替代**：右键文件 →「将文件移动到…」仍可用。
+
+## [ ] B-50 笔记区题单展开 / 收起参考答案时页面乱跳（2026-11-06，P1；用户实机反馈 + 运行期探针复现，**只记录不修复**）
+
+**现象**：在笔记区（知识库阅读态）打开含简答题的题单，点「显示参考答案」或「收起参考答案」时，正文会突然向上跳一段（严重时直接跳回顶部），不是平滑展开 / 收起；如果先在作答框里打了字再点按钮，跳得更明显，作答框还会失去焦点。用户原话：「展开和关闭参考答案会导致乱跳转」。
+
+**复现（2026-11-06，临时 CDP 探针，3.18.0 `out/` 构建 + 临时仓库）**：
+1. 打开一份含 2 道简答题的题单，进入阅读态；
+2. 把正文滚到中部（实测 `scrollTop=500`），在简答题作答框里输入文字（保持焦点）；
+3. 点「显示参考答案」→ `scrollTop` 从 `500` 掉到 `124.5`，`document.activeElement` 从 `TEXTAREA` 变成 `BODY`，卡片节点被替换；
+4. 只输入文字、不点按钮，等 500ms 防抖保存 → 作答框节点被替换、焦点丢失、值有一帧为空，`scrollTop` 从 `296` 掉到 `0`。
+
+**定位**：
+- `src/components/shared/ShortAnswerCard.tsx:124-129`（`toggleReveal`：先 `flush()`，再 `store.saveDraft(no, { revealed })`）
+- `src/components/shared/QuizRecordStore.tsx:272-297`（`saveDraft` 同步 `setRecord` → `rebuild` → `emit`）
+- `src/components/shared/QuizRecordStore.tsx:145-159`（`rebuild()` **每次都新建** `summarySnapshot` 对象，即使 `answered / wrong / drafts` 数字没变）
+- `src/modules/knowledge/components/PageEditor.tsx:356-366`（页面级 `useQuizSummary(quizStore)`；`currentWrongCount` 只在顶栏用，却让整个 PageEditor 订阅了整份答题记录）
+- `src/modules/knowledge/components/PageEditor.tsx:2256-2292`（传给 `MarkdownPreview` 的 `onWikiLink` / `onLinkClick` 是内联箭头函数，每次渲染都是新引用）
+- `src/components/shared/MarkdownPreview.tsx:304-306`（注释已经写明「components 对象被重建 → React 会卸载重建整棵节点树」）、`:306-476`（`components` 里的 `p` / `pre` / `h1…h6` 都是内联函数）、`:492-493`（`React.memo` 包装）
+- `src/components/shared/ShortAnswerCard.tsx:38`（`revealed` 初始值恒为 `false`）、`:58-72`（挂载后才从 `record.draft.revealed` 回填）
+- `src/components/shared/Collapsible.tsx:25-41` + `src/styles/index.css:777-792`（`.kb-collapse` 的 `0fr↔1fr` 动画）
+
+**根因（运行期探针实锤，链条如下）**：
+1. `toggleReveal` 调用 `saveDraft`，`saveDraft` 同步更新记录并 `rebuild()`；`rebuild()` 无条件生成新的 `summarySnapshot` 对象。
+2. `PageEditor` 通过 `useQuizSummary` 订阅了整份 summary，`useSyncExternalStore` 看到对象引用变化 → **整个 PageEditor 重渲染**，即使这次只是 `revealed` 变化、统计数字完全没变。
+3. PageEditor 传给 `MarkdownPreview` 的两个回调是内联箭头函数，`React.memo` 的浅比较必然失败；`MarkdownPreviewInner` 的 `components` useMemo 依赖这两个回调 → 每次重渲染都重建 `components` 对象，而对象里的 `p` / `pre` / `h*` 都是新函数。
+4. `react-markdown` 把这些函数直接当作 React 元素类型；类型引用一变，React 就**卸载整棵 Markdown 子树再重新挂载**。探针实测每次展开 / 收起触发 72~92 条 childList mutation，`[data-quiz-card]` 与 `textarea` 节点身份都变了（`cardSame:false` / `taSame:false`）。
+5. `ShortAnswerCard` 重新挂载时 `revealed` 先回到 `false`，effect 再从记录回填 `true`：
+   - 展开：视觉上是「先收起一帧，再重新展开」，`scrollHeight` 实测 `1951 → 1932 → 2090`；
+   - 收起：新卡片直接以 `revealed=false` 挂载，`scrollHeight` 从 `2090` **瞬间**掉到 `1951`，220ms 收起动画被整段吞掉；
+   - 整棵子树被替换时滚动锚点丢失，滚动容器会出现内容短暂为空的一帧：打字场景实测 `scrollTop 296 → 0`，打字后点展开实测 `500 → 124.5`；作答框被替换同时导致焦点丢失、值在一帧内为空。
+6. **不只是点按钮**：输入框的 500ms 防抖 `saveDraft` 走的是同一条链路，所以「打着字停一下」也会触发整页重挂、焦点丢失和滚动跳回顶部 —— 这是同一根因下更严重的隐藏症状。
+7. **也不只题单**：PageEditor 的任何 state 变化（⋮ 菜单开合、`flashWiki` 高亮等）都会让内联回调换引用 → 整棵正文重挂；题单作答只是把这条链路高频触发出来。修的时候应按「MarkdownPreview 的 props 必须稳定」这个通用口径收口，而不是只给题单打补丁。
+
+**修复方向**：
+1. **切断页面级重渲染**（首选）：把 `useQuizSummary` 从 PageEditor 里挪到真正需要 `currentWrongCount` 的顶栏小组件；或让 `QuizRecordStore.rebuild()` 做结构共享 —— 数字没变时复用上一份 `summarySnapshot`，避免 `useSyncExternalStore` 因新对象引用而强制整页渲染。store 原本的设计目标就是「只有变更的那张卡重渲染」（见 `QuizRecordStore.tsx:90-97`），页面级 summary 订阅正好把它抵消了。
+2. **让 `MarkdownPreview` 的 memo 真正生效**：PageEditor 侧用 `useCallback` 稳定 `onWikiLink` / `onLinkClick`（`resolveInternalLink` 也要一起稳定），或把 `components` 的函数提到模块级 / 用 ref 读取最新 props，确保 `React.memo` 在正文未变时直接 bail。
+3. **消除首帧折叠闪烁**：`ShortAnswerCard` 用 `useState(() => !!record?.draft?.revealed)` 同步初始化 `revealed`（或在记录已知时跳过 `false` 首帧）；即使根因修好，这条也能防止未来其他重挂场景再次闪一下。
+4. **可选兜底**（不能替代 1/2）：在 Markdown 子树重挂前后保存 / 恢复 `previewRef.scrollTop`，或在操作期间临时 `overflow-anchor: none`；但若仍整树重挂，焦点与输入光标依然会丢，不建议只做这一层。
+5. **契约缺口**：现有 `verify-quiz-record.mjs` 只覆盖数据层（草稿 / 判题 / 迁移），没有 DOM 身份与滚动断言。修复时补一条运行期探针：展开 / 收起各一次 + 等待一次 500ms 防抖保存，断言 `[data-quiz-card]` 与 `textarea` 节点身份不变、`scrollTop` 不变、`document.activeElement` 仍是作答框。
+
+**验证**：
+- 题单滚到中部，作答框里打字后点「显示参考答案」：正文不跳、作答框焦点不丢、参考答案只平滑展开一次（不出现先收起再展开的闪烁）。
+- 展开后点「收起参考答案」：只播一次 220ms 收起动画，不发生瞬间塌陷或滚动上移。
+- 在作答框里打字后停顿 > 500ms：焦点、光标位置、滚动位置都不变；`scrollTop` 探针前后一致。
+- 40+ 题的长题单里只改一道简答题：仅该题卡重渲染（React Profiler / DOM 节点身份检查），其余题卡与标题节点保持同一引用。
+- `prefers-reduced-motion` 下同样不跳。
+
+**当前处理**：按用户明确要求**只登记、不修复**；本轮未改任何源码，临时探针仓库已删除。下次开修前先按上面「复现」步骤再跑一遍确认基线。
