@@ -79,8 +79,6 @@ interface Props {
   sort?: TreeSortMode
 }
 
-const DRAG_MIME = 'text/x-kb-rel'
-
 /** 父目录相对路径（根层条目 → ''）。选中目录（B-7）与聚焦判定共用同一口径 */
 const parentDirOf = (rel: string) => rel.split('/').slice(0, -1).join('/')
 
@@ -161,22 +159,75 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
     })
   }
 
-  const startDrag = (e: React.DragEvent, relPath: string) => {
-    e.dataTransfer.setData(DRAG_MIME, relPath)
-    e.dataTransfer.effectAllowed = 'move'
-    setDragPath(relPath)
-  }
+  // ===== B-49：树拖拽 = pointer 自实现（铁律 9 同款手法，日程看板已验证）=====
+  // HTML5 拖拽（draggable 属性 + dragstart/drop）在真实手势下会**静默失败**——
+  // 用户实机（Windows）按住行首图标拖动毫无反应（v3.16.1 F-4 引入后），且 CDP 合成
+  // 鼠标也无法启动原生拖拽会话（行级 draggable 对照同样不触发），手势启动层无法
+  // 本地复现。pointer 路径不经过 HTML5 拖拽系统：图标 pointerdown 捕获 → 位移过阈值
+  // 进入拖拽 → elementFromPoint 找落点目录行 → pointerup 落盘 onMove。
+  // CDP 真鼠标事件可以端到端驱动整条链路（probe-tree-drag.mjs）。
+  const pointerDragRef = useRef<{
+    pointerId: number
+    relPath: string
+    startX: number
+    startY: number
+    active: boolean
+  } | null>(null)
+  /** 刚结束一次真拖拽的时间戳：pointerup 后浏览器会补发 click，行 onClick 会顺手打开文件 / 切换目录 */
+  const dragEndAtRef = useRef(0)
 
-  const endDrag = () => setDragPath(null)
-
-  const dropToDir = (e: React.DragEvent, dirRel: string) => {
-    e.preventDefault()
-    e.stopPropagation()
+  const pointerDragEnd = () => {
+    pointerDragRef.current = null
+    setDragPath(null)
     setDragOver(null)
-    const src = e.dataTransfer.getData(DRAG_MIME)
-    if (src && src !== dirRel) onMove(src, dirRel)
   }
 
+  /** 落点解析：指针坐标 → 目标目录（树内空白 = '' 根；树外 = null 取消；文件行 = 其父目录）。
+   *  与旧 HTML5 版语义对齐并补齐：旧行为只有目录行可 drop，根容器空白 = 移到根。 */
+  const dirAtPoint = (x: number, y: number): string | null => {
+    const el = document.elementFromPoint(x, y)
+    if (!(el instanceof Element)) return null
+    const root = rootRef?.current
+    if (root && !root.contains(el)) return null
+    const nodeRow = el.closest('[data-wb-tree-node]')
+    if (nodeRow) {
+      const path = nodeRow.getAttribute('data-wb-tree-path') ?? ''
+      return nodeRow.getAttribute('data-wb-tree-dir') === '1' ? path : parentDirOf(path)
+    }
+    return ''
+  }
+
+  const handlePointerDown = (e: React.PointerEvent, relPath: string) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    pointerDragRef.current = { pointerId: e.pointerId, relPath, startX: e.clientX, startY: e.clientY, active: false }
+  }
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const d = pointerDragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    if (!d.active) {
+      // 阈值内 = 还是点击，不动状态；过阈值才进入拖拽（F-4 的「手一抖就移动」守卫保持）
+      if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < 6) return
+      d.active = true
+      setDragPath(d.relPath)
+    }
+    const dirRel = dirAtPoint(e.clientX, e.clientY)
+    setDragOver(dirRel !== null && dirRel !== d.relPath ? dirRel : null)
+  }
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    const d = pointerDragRef.current
+    if (!d || d.pointerId !== e.pointerId) return
+    if (!d.active) { pointerDragRef.current = null; return }
+    dragEndAtRef.current = Date.now()
+    const dirRel = dirAtPoint(e.clientX, e.clientY)
+    pointerDragEnd()
+    if (dirRel !== null && dirRel !== d.relPath && dirRel !== parentDirOf(d.relPath)) {
+      onMove(d.relPath, dirRel)
+    }
+  }
   const renderFileRow = (e: TreeNode, depth: number): React.ReactNode => {
     if (focusActive && e.relPath !== focusPath && !isSiblingItem(e.relPath)) {
       if (focusHide) return null
@@ -208,18 +259,18 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
         title={e.relPath}
       >
         <span className="w-[13px] shrink-0" />
-        {/* 拖拽源收窄到行首图标（F-4）：整行可拖会让「点一下打开」变成「手一抖就移动文件」。
-            图标仍冒泡到行的 onClick（点图标 = 打开），只有从图标按下并拖动才进入拖拽。 */}
+        {/* 拖拽源收窄到行首图标（F-4 定位；B-49 起 pointer 实现，见组件内说明）：
+            整行可拖会让「点一下打开」变成「手一抖就移动文件」。图标仍冒泡到行的
+            onClick（点图标 = 打开）；真拖拽结束后 250ms 时间窗内拦掉补发 click，
+            防止松手顺手打开文件。touch-none 让指针手势不被浏览器手势接管。 */}
         <span
-          draggable
-          className="kb-draggable inline-flex shrink-0 cursor-grab"
+          className="inline-flex shrink-0 cursor-grab touch-none"
           title="拖动移动"
-          onDragStart={(ev) => {
-            startDrag(ev, e.relPath)
-            const row = (ev.currentTarget as HTMLElement).parentElement
-            if (row) ev.dataTransfer.setDragImage(row, 12, 14)
-          }}
-          onDragEnd={endDrag}
+          onPointerDown={(ev) => handlePointerDown(ev, e.relPath)}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={pointerDragEnd}
+          onClick={(ev) => { if (Date.now() - dragEndAtRef.current < 250) ev.stopPropagation() }}
         >
           <FileIcon name={e.name} />
         </span>
@@ -271,9 +322,6 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
             data-wb-tree-node
             data-wb-tree-dir="1"
             data-wb-tree-path={relPath}
-            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOver(relPath) }}
-            onDragLeave={() => setDragOver((p) => (p === relPath ? null : p))}
-            onDrop={(e) => dropToDir(e, relPath)}
             className={`kb-cv-row group relative flex items-center gap-1 rounded-md px-1.5 min-h-[28px] cursor-pointer select-none hover:bg-[var(--bg-hover)] ${
               dragOver === relPath ? 'bg-[var(--accent)]/15 ring-1 ring-inset ring-[var(--accent)]/40' : ''
             }${dragPath === relPath ? ' opacity-40' : ''}${delClass(relPath)}`}
@@ -295,18 +343,16 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
               size={13}
               className={`kb-chevron shrink-0 text-[var(--text-muted)] ${isOpen ? 'rotate-90' : ''}`}
             />
-            {/* 拖拽源收窄到文件夹图标（F-4）：点行仍是展开 / 收起，只有从图标拖动才移动 */}
+            {/* 拖拽源收窄到文件夹图标（F-4 定位；B-49 起 pointer 实现，见组件内说明）：
+                点行仍是展开 / 收起，只有从图标拖动才移动 */}
             <span
-              draggable
-              className="kb-draggable inline-flex shrink-0 cursor-grab"
+              className="inline-flex shrink-0 cursor-grab touch-none"
               title="拖动移动"
-              onDragStart={(e) => {
-                e.stopPropagation()
-                startDrag(e, relPath)
-                const row = (e.currentTarget as HTMLElement).parentElement
-                if (row) e.dataTransfer.setDragImage(row, 12, 14)
-              }}
-              onDragEnd={endDrag}
+              onPointerDown={(e) => handlePointerDown(e, relPath)}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={pointerDragEnd}
+              onClick={(e) => { if (Date.now() - dragEndAtRef.current < 250) e.stopPropagation() }}
             >
               {isOpen ? <FolderOpen size={15} className="text-[var(--text-muted)]" /> : <Folder size={15} className="text-[var(--text-muted)]" />}
             </span>
@@ -403,9 +449,6 @@ export function VaultTree({ dirCache, expanded, activePath, onToggleDir, onOpenF
          （表象：想在空白处右键新建文件，点不动）。min-h-full 让树根至少铺满可视区，
          条目变多时照常由内容撑高（不裁切，滚动仍由外层容器负责）。 */
       className={`flex min-h-full flex-1 flex-col overflow-y-auto px-1.5 py-1 outline-none focus:ring-1 focus:ring-inset focus:ring-[var(--accent)]/25 ${dragOver === '' ? 'bg-[var(--accent)]/10' : ''}`}
-      onDragOver={(e) => { e.preventDefault(); setDragOver('') }}
-      onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(null) }}
-      onDrop={(e) => dropToDir(e, '')}
       onContextMenu={(e) => {
         // 空白区右键 → 以工作区根目录打开右键菜单（新建文件/文件夹/知识页）——节点行上的右键已各自处理并阻止冒泡
         if (e.target === e.currentTarget) {
