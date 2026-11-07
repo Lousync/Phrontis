@@ -1221,6 +1221,27 @@ export async function finishUnit(wsId: string, unitId: string, getSetting: (key:
 
 // ===== 注入上下文（agentService 每轮调用）=====
 
+/** B-47：本段之后同章的下一个 open 段（收尾引导里告诉学生去开哪段；无则 null）。 */
+function nextOpenSegmentBrief(
+  s: ReturnType<typeof wsState>,
+  units: Array<{ id: string; name: string; chapter: string }>,
+  curLesson: { order: number },
+  ids: string[],
+): { order: number; cover: string } | null {
+  const chapterName = units.find((u) => u.id === ids[0])?.chapter
+  if (!chapterName) return null
+  const chapterUnitIds = units.filter((u) => u.chapter === chapterName).map((u) => u.id)
+  const segs = chapterSegments(s.lessons, chapterUnitIds)
+  const next = segs.find(
+    (x) => x.lesson.status === 'open' && (Number(x.lesson.order) || 0) > (Number(curLesson.order) || 0),
+  )
+  if (!next) return null
+  const cover = lessonUnitIds(next.lesson)
+    .map((uid) => units.find((u) => u.id === uid)?.name ?? uid)
+    .join('、')
+  return { order: Number(next.lesson.order) || 0, cover }
+}
+
 export function buildCourseInjection(sessionId: string, getSetting: (key: string) => unknown): string {
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return ''
@@ -1308,6 +1329,9 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     const mark = u.id === active?.id ? '【当前聚焦】' : ''
     lines.push(`- ${mark}[${u.id}] ${u.name}（出自「${u.chapter}」，来源：${u.source || '未标注'}）${u.goal ? ` · 目标：${u.goal}` : ''}`)
   }
+  // B-47 ①本段进度：当前聚焦第几个（可得的真状态，无 per-unit 讲授状态可注入）
+  const activeIdx = active ? ids.indexOf(active.id) + 1 : 0
+  lines.push(`本段进度：当前聚焦第 ${activeIdx}/${ids.length} 个知识点${active ? `（${active.name}）` : ''}。已讲到哪、还有哪些没讲，结合本段对话自行判断。`)
   const handoff = readPrevHandoff(sessionId, getSetting)
   if (handoff) lines.push(`\n【上一段交接（同章）】\n${handoff}`)
   lines.push(`课程进度：已学完 ${done}/${total}`)
@@ -1316,8 +1340,17 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     lines.push(`\n【已完成知识点（可被引用/跳转）】\n` + finishedUnits.map((u) => `- ${u.name}`).join('\n'))
     lines.push('当学生想「回顾/回看」某个已完成知识点，或你判断学生对某已完成知识点完全没有掌握/印象时，**另起一行**输出：`跳转：<知识点名>`；系统会把它渲染成可点击的跳转按钮（一句最多一个）。')
   }
-  lines.push('交接纪律：交接文档只由用户点右上角「收尾本段」时由系统生成。你不要在对话中提供「生成交接文档 / 写交接 / 整理交接 / 输出交接」这类选项，也不要自行创建 `交接.md` 或任何交接文件；本段讲完只需在正文里建议用户点「收尾本段」。')
-  lines.push('教学纪律：本段只讲上面列出的知识点，按用户节奏推进；当前聚焦哪个就先讲哪个，讲完可问用户是否继续下一个或换焦点；不要跳到本章其他段，也不要一次把整门课讲完。讲完一个新概念可就地出一道快检（走 quiz 协议，一条回答最多一张）。本段素材范围见下一段【本段确认素材】，不要扫描 SOURCES 下未确认的文件。')
+  if (curLesson.status === 'ended') {
+    // B-47 ④：段收尾后同会话的去向引导——不要把已收尾段继续当作可讲课的 open 段
+    const next = nextOpenSegmentBrief(s, units, curLesson, ids)
+    lines.push('本段收尾协议：本段已收尾（只读）。不要继续讲课、不要引入新知识点、不要再建议「收尾本段」；提醒学生：交接文档已生成（本段夹《交接.md》），请看交接并到左栏开下一段'
+      + (next ? `（下一段：第${next.order}段，覆盖 ${next.cover}）` : '；本章的段已全部收尾，可到左栏看是否要章末复习') + '。')
+  } else {
+    lines.push('交接纪律：交接文档只由用户点右上角「收尾本段」时由系统生成。你不要在对话中提供「生成交接文档 / 写交接 / 整理交接 / 输出交接」这类选项，也不要自行创建 `交接.md` 或任何交接文件；本段讲完只需在正文里建议用户点「收尾本段」。')
+    lines.push('教学纪律：本段只讲上面列出的知识点，按用户节奏推进；当前聚焦哪个就先讲哪个，讲完可问用户是否继续下一个或换焦点；不要跳到本章其他段，也不要一次把整门课讲完。讲完一个新概念可就地出一道快检（走 quiz 协议，一条回答最多一张）。本段素材范围见下一段【本段确认素材】，不要扫描 SOURCES 下未确认的文件。')
+    // B-47 ②③段内收尾协议：不自动收尾；知识点讲完先问去向；最后一个讲完且学生确认后主动建议收尾路径
+    lines.push('段内收尾协议：收尾只由学生点右上角「收尾本段」触发，你在任何情况下都**不得自动收尾**，也不要替学生调用任何收尾 / finalize 动作。当前知识点讲完、学生没有追问时，先问「继续本段下一个知识点，还是先收尾本段」；本段最后一个知识点也讲完、学生确认没有问题后，再主动建议：点「收尾本段」→ 系统会在本段夹生成《交接.md》→ 到左栏开下一段。')
+  }
   return '\n\n' + lines.join('\n')
 }
 
