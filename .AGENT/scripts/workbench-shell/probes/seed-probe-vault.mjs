@@ -167,6 +167,63 @@ for (let i = 1; i <= 6; i++) {
     'utf8',
   )
 }
+// 1a-quater 题单渲染稳定性探针（probe-quiz-preview-stability.mjs，B-50）：一道选择 + 两道简答。
+//   两道简答夹在长正文之间，把页面撑出足够的滚动量 —— 探针要把正文滚到中部、在作答框打字、
+//   再点「显示参考答案」，断言滚动与 DOM 身份都不跳。
+writeFileSync(
+  join(fixture, '题单探针.md'),
+  [
+    '---',
+    'id: probe-quiz-preview',
+    'title: 题单探针',
+    'tags: [探针]',
+    '---',
+    '',
+    '# 题单探针',
+    '',
+    '开头段落。探针要先把正文滚到中部再操作题卡，这里放几段占位正文把页面撑长。',
+    '',
+    ...Array.from({ length: 8 }, (_, i) => `占位段落 ${i + 1}：这是撑高页面用的正文段落，避免题卡挤在首屏导致滚动断言失真。`),
+    '',
+    '```quiz',
+    '{"no":1,"question":"下列哪一项是探针专用选择题目？","options":["A. 甲","B. 乙","C. 丙","D. 丁"],"answer":"A","explanation":"A 为正确项。"}',
+    '```',
+    '',
+    ...Array.from({ length: 8 }, (_, i) => `占位段落 ${i + 9}：继续撑高页面，保证简答题卡出现在需要滚动的位置。`),
+    '',
+    '```quiz',
+    '{"type":"short","no":2,"question":"第一道简答题：请写出这道题的用途。","referenceAnswer":"验证题单展开/收起参考答案时正文不跳动。","explanation":"简答题不自动判分，由用户自评。"}',
+    '```',
+    '',
+    ...Array.from({ length: 8 }, (_, i) => `占位段落 ${i + 17}：继续撑高页面，保证第二道简答题卡与第一道隔开。`),
+    '',
+    '```quiz',
+    '{"type":"short","no":3,"question":"第二道简答题：请随便写点什么。","referenceAnswer":"参考答案正文。","explanation":""}',
+    '```',
+    '',
+    '结尾段落。',
+    '',
+  ].join('\n'),
+  'utf8',
+)
+
+// 题单探针的幂等闸门：答题痕迹（草稿 / 自评 / 判题）与知识索引缓存清零 ——
+//   seed 在 electron 启动前执行（app 尚未载入 jsonStore），此处清空即真清空；
+//   与上面 --add-books 里的 reader 模块清理同理由（残留态会让断言从污染世界线出发）。
+{
+  const quizDir = join(fixture, '.knowbase', 'modules', 'quiz')
+  try { for (const f of readdirSync(quizDir)) unlinkSync(join(quizDir, f)) } catch { /* 目录不存在即无需清 */ }
+  for (const f of ['knowledge-index.json', 'knowledge-text.json']) {
+    try { unlinkSync(join(fixture, '.knowbase', 'cache', f)) } catch { /* 不存在即无需清 */ }
+  }
+}
+
+// 拖拽探针（probe-tree-drag.mjs，B-49）的 fixture：根下一个待拖文件 + 一个落点目录。
+//   每次种子都恢复初始位置（上轮拖进落点目录的残留删掉），拖拽断言永远从同一世界线出发。
+writeFileSync(join(fixture, '拖拽样例.md'), '# 拖拽样例\n\nprobe-tree-drag fixture。\n', 'utf8')
+mkdirSync(join(fixture, '拖拽目标'), { recursive: true })
+try { unlinkSync(join(fixture, '拖拽目标', '拖拽样例.md')) } catch { /* 无残留 */ }
+
 // 1c. 全格式阅读器一期（2026-09-20）：--add-books → .books/ 落一本 TXT 样书
 //     （几十段中文、空行分段），probe-reading-panel.mjs 断言链的 fixture
 if (process.argv.includes('--add-books')) {

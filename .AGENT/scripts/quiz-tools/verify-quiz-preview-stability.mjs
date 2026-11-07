@@ -76,5 +76,16 @@ check('store.rebuild 结构共享：数字不变复用旧 summary 对象',
 check('ShortAnswerCard revealed 同步初始化（重挂场景不闪「先收起一帧」）',
   shortCard.includes('useState(() => (redo ? false : !!record?.draft?.revealed))'))
 
+// React #310 防回归（2026-11-07 实测）：PageEditor 在 `if (!page) return` 早退之后不得再调任何
+// hooks —— 首帧走早退、加载完成那一帧 hooks 数变多，直接崩掉页面渲染。
+{
+  const early = pageEditor.indexOf('if (!page) return (')
+  check('PageEditor 早退分支存在', early > -1)
+  const hooksAfter = (pageEditor.slice(early).match(
+    /\buse(?:Callback|Memo|State|Effect|Ref|SyncExternalStore|QuizSummary|QuizRecordStore|Settings|DataChanged)\(/g,
+  ) ?? []).length
+  check('PageEditor 早退分支之后没有任何 hooks 调用', early > -1 && hooksAfter === 0, `after=${hooksAfter}`)
+}
+
 console.log(`\n${pass ? 'PASS' : 'FAIL'}: quiz preview stability contract`)
 process.exit(pass ? 0 : 1)

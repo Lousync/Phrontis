@@ -1568,31 +1568,12 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
     return false
   }, [])
 
-  if (!page) return (
-    <div className="flex-1 flex items-center justify-center">
-      <div className="border-2 border-[var(--border-color)] border-t-[var(--accent)] rounded-full w-5 h-5 animate-spin" />
-    </div>
-  )
-
-  // Build a breadcrumb path for a page from its category chain
-  const getCategoryChain = (p: KnowledgePage): string | null => {
-    if (!p.categoryId) return null
-    const chain: string[] = []
-    let currentId: string | null = p.categoryId
-    const visited = new Set<string>()
-    while (currentId) {
-      if (visited.has(currentId)) break; visited.add(currentId)
-      const cat = categories.find(c => c.id === currentId)
-      if (cat) { chain.unshift(cat.name); currentId = cat.parentId }
-      else break
-    }
-    return chain.length > 0 ? chain.join(' / ') : null
-  }
-
   // Resolve a title to knowledge base pages. If >1 match, show picker.
   // If 0 → offer to create the page (P1 空链接建页闭环).
   // ★ B-50：必须 useCallback —— 引用不稳定会让 MarkdownPreview 的 memo 失效，
   //   每次整页重渲染都把正文子树卸载重挂（滚动跳动 / 焦点丢失的根因之一）。
+  // ★★ 这三枚 hooks 必须住在 `if (!page) return` 早退**之前**：hooks 不能落在
+  //   条件 return 后面（首帧 page 未加载走早退、加载完成那一帧 hooks 多 3 个 → React #310）。
   const resolveInternalLink = useCallback((title: string): boolean => {
     const matches = allPages.filter(p => p.title === title)
     if (matches.length === 1) {
@@ -1647,6 +1628,27 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
       showToast({ type: 'info', message: '找不到这个链接指向的页面', detail: href })
     }
   }, [allPages, onNavigate, pagePath])
+
+  if (!page) return (
+    <div className="flex-1 flex items-center justify-center">
+      <div className="border-2 border-[var(--border-color)] border-t-[var(--accent)] rounded-full w-5 h-5 animate-spin" />
+    </div>
+  )
+
+  // Build a breadcrumb path for a page from its category chain
+  const getCategoryChain = (p: KnowledgePage): string | null => {
+    if (!p.categoryId) return null
+    const chain: string[] = []
+    let currentId: string | null = p.categoryId
+    const visited = new Set<string>()
+    while (currentId) {
+      if (visited.has(currentId)) break; visited.add(currentId)
+      const cat = categories.find(c => c.id === currentId)
+      if (cat) { chain.unshift(cat.name); currentId = cat.parentId }
+      else break
+    }
+    return chain.length > 0 ? chain.join(' / ') : null
+  }
 
   const createPageFromWikiLink = (title: string) => {
     setWikiCreateTitle(null)

@@ -31,9 +31,15 @@ if (!probePath || !existsSync(probePath)) {
   process.exit(2)
 }
 
-const ELECTRON_EXE = resolve('node_modules/electron/dist/electron.exe')
+// Electron 可执行文件按平台取（electron 安装包的 dist 布局：win=electron.exe / linux=electron / dar=Electron.app）
+const ELECTRON_REL = process.platform === 'win32'
+  ? 'node_modules/electron/dist/electron.exe'
+  : process.platform === 'darwin'
+    ? 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'
+    : 'node_modules/electron/dist/electron'
+const ELECTRON_EXE = resolve(ELECTRON_REL)
 if (!existsSync(ELECTRON_EXE)) {
-  console.error('electron.exe 不存在:', ELECTRON_EXE)
+  console.error('electron 可执行文件不存在:', ELECTRON_EXE)
   process.exit(2)
 }
 
@@ -44,8 +50,9 @@ for (const sub of ['out', 'node_modules', 'build']) {
   const link = join(APP_DIR, sub)
   if (!existsSync(link)) {
     try {
-      symlinkSync(resolve(sub), link, 'junction')
-      console.log(`[宿主] junction: ${sub} → ${resolve(sub)}`)
+      // junction 仅 Windows；POSIX 目标是目录，用 dir 符号链接
+      symlinkSync(resolve(sub), link, process.platform === 'win32' ? 'junction' : 'dir')
+      console.log(`[宿主] link: ${sub} → ${resolve(sub)}`)
     } catch (e) {
       console.error(`建 junction 失败（${sub}）：`, e.message)
       process.exit(2)
@@ -62,11 +69,15 @@ const env = { ...process.env }
 delete env.ELECTRON_RUN_AS_NODE // 否则 electron 退化成裸 Node（ipcMain undefined）
 const PROBE_PORT = process.env.KNOWBASE_PROBE_PORT ?? '9333'
 
-// 沙箱硬约束：--no-sandbox 必带（否则 GPU 进程连环崩、渲染进程被 kill）
-const electronProc = spawn(ELECTRON_EXE, ['.', `--remote-debugging-port=${PROBE_PORT}`, '--no-sandbox', '--disable-gpu'], {
+// 沙箱硬约束：--no-sandbox 必带（否则 GPU 进程连环崩、渲染进程被 kill）；
+// Linux 下部分桌面环境还需 --disable-gpu 或 ozone 平台参数（linux-port-plan 阶段 2 实测口径）
+const extraArgs = process.platform === 'linux' ? ['--ozone-platform=x11'] : []
+const electronProc = spawn(ELECTRON_EXE, ['.', `--remote-debugging-port=${PROBE_PORT}`, '--no-sandbox', '--disable-gpu', ...extraArgs], {
   cwd: APP_DIR,
   env,
   stdio: ['ignore', 'inherit', 'inherit'],
+  // POSIX：独立进程组，收尾时整组 kill（GPU / renderer 不留孤儿）
+  detached: process.platform !== 'win32',
 })
 console.log(`[宿主] electron pid=${electronProc.pid} port=${PROBE_PORT} appDir=${APP_DIR}`)
 
@@ -77,8 +88,12 @@ const probeProc = spawn(process.execPath, [probePath], {
   stdio: ['ignore', 'inherit', 'inherit'],
 })
 probeProc.on('exit', (code) => {
-  // Windows 上 kill() 不保证整树退出，taskkill /T 兜底
-  try { spawn('taskkill', ['/F', '/T', '/PID', String(electronProc.pid)], { stdio: 'ignore' }) } catch { /* 尽力收尾 */ }
+  if (process.platform === 'win32') {
+    // Windows 上 kill() 不保证整树退出，taskkill /T 兜底
+    try { spawn('taskkill', ['/F', '/T', '/PID', String(electronProc.pid)], { stdio: 'ignore' }) } catch { /* 尽力收尾 */ }
+  } else {
+    try { process.kill(-electronProc.pid, 'SIGKILL') } catch { /* 已退出即忽略 */ }
+  }
   console.log(`[宿主] 探针退出码=${code}，electron 已收尾`)
   process.exit(code ?? 0)
 })
