@@ -1175,6 +1175,11 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
 
   useEffect(() => {
     if (!page) return
+    // ★ B-43 代次门卫：page 必须是**当前 pageId 的装载产物**才允许武装脏判定。
+    //   切页/重装的两段式 setState 之间，本 effect 可能以旧 page 或中间态跑一轮
+    //   （2026-10-25 分屏探针实测假脏：开页即 cDiffer:true → 自动保存白写一轮）。
+    //   B-50 渲染收敛后探针已测不到假保存，这条门卫把语义钉死为防线。
+    if (page.id !== pageId) return
     // Mark dirty when content/title diverges from saved version
     if (content !== savedContentRef.current || title !== savedTitleRef.current) {
       isDirtyRef.current = true
@@ -1184,7 +1189,7 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
       saveTimer.current = setTimeout(() => doSave(title, content), s.autoSaveDebounceMs)
     }
     return () => clearTimeout(saveTimer.current)
-  }, [title, content, page, doSave])
+  }, [title, content, page, doSave, pageId])
 
   // Keyboard shortcuts: Ctrl+S, Ctrl+/, Escape
   useEffect(() => {
