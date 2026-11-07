@@ -10,7 +10,7 @@ import type { ReleaseNote } from './types'
 
 export const RELEASE_NOTES = [
   {
-    "version": "3.20.0",
+    "version": "3.19.1",
     "date": "2026-11-07",
     "summary": "本版一句话：工作现场留存——重启 / 切会话不再反复重开文件；上次所在模块、打开的页签、分屏副栏、AI 教学工件栏、正在看的对话，回来时都在。",
     "groups": [
