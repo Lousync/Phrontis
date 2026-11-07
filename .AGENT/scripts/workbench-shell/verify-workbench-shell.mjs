@@ -234,10 +234,12 @@ const srcTb = stripComments(read('src/components/workbench/WorkbenchPageBar.tsx'
 const srcToolbox = stripComments(read('src/modules/toolbox/index.tsx'))
 const srcDayPanel = stripComments(read('src/daypanel/DayPanel.tsx'))
 
-// D1 工具注册表 = 唯一真相源：9 内置工具；toolbox 画廊与右栏入口区共同消费
-const EXPECTED_TOOLS = ['password-vault', 'bookmark-nav', 'data-export', 'lan-share', 'web-clipper', 'pomodoro', 'habit-tracker', 'remote-supervise', 'pdf-toolkit']
+// D1 工具注册表 = 唯一真相源：8 内置工具；toolbox 画廊与右栏入口区共同消费
+// （2026-11-07：data-export「数据导出」退役移除，9 → 8）
+const EXPECTED_TOOLS = ['password-vault', 'bookmark-nav', 'lan-share', 'web-clipper', 'pomodoro', 'habit-tracker', 'remote-supervise', 'pdf-toolkit']
 const builtinToolIds = [...srcRegistry.matchAll(/id:\s*'([a-z][a-z-]*)'/g)].map((x) => x[1]).filter((id) => EXPECTED_TOOLS.includes(id))
-ok(new Set(builtinToolIds).size === 9, 'D1 BUILTIN_TOOLS 固定 9 个内置工具（方案 §10.4-①「所有工具」）', `实际 ${new Set(builtinToolIds).size}`)
+ok(new Set(builtinToolIds).size === 8, 'D1 BUILTIN_TOOLS 固定 8 个内置工具（方案 §10.4-①「所有工具」；2026-11-07 -data-export）', `实际 ${new Set(builtinToolIds).size}`)
+ok(!/data-export/.test(srcRegistry), 'D1d 已退役的 data-export 不再出现在注册表（入口/case/侧栏集全清）')
 ok(/BUILTIN_TOOLS/.test(srcToolbox) && /ToolHost/.test(srcToolbox) && /PluginToolHost/.test(srcToolbox),
   'D1b 工具箱画廊消费共享注册表（BUILTIN_TOOLS / ToolHost / PluginToolHost）')
 ok(!/const DATA_TOOLS: ToolDefinition\[\] = \[/.test(srcToolbox) && !/renderTool = \(\) => \{\s*switch/.test(srcToolbox),
@@ -296,21 +298,19 @@ ok(/absorbSurplus \? 20 : 6/.test(srcRight) && /min-h-0 flex-1 overflow-y-auto p
 ok(!/if \(recent\.length === 0\) return null/.test(srcRight) && /近 7 天没有编辑记录/.test(srcRight),
   'E1d 最近编辑常驻卡片（无记录显示空态文案，不再整卡消失——2026-09-17 反馈）')
 
-// E2 工具侧栏真相源 + ToolHost 透传
-ok(/TOOLS_WITH_SIDEBAR[^]*?\['habit-tracker', 'data-export', 'bookmark-nav', 'pdf-toolkit'\]/.test(srcRegistry.replace(/\n/g, ' ')),
-  'E2 TOOLS_WITH_SIDEBAR 固定 4 工具（习惯打卡/数据导出/网址导航/PDF 工具箱，toolRegistry 唯一真相源）')
+// E2 工具侧栏真相源 + ToolHost 透传（2026-11-07：data-export 退役，4 → 3）
+ok(/TOOLS_WITH_SIDEBAR[^]*?\['habit-tracker', 'bookmark-nav', 'pdf-toolkit'\]/.test(srcRegistry.replace(/\n/g, ' ')),
+  'E2 TOOLS_WITH_SIDEBAR 固定 3 工具（习惯打卡/网址导航/PDF 工具箱，toolRegistry 唯一真相源）')
 ok(/case 'habit-tracker':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' '))
   && /case 'pdf-toolkit':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' '))
-  && /case 'bookmark-nav':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' '))
-  && /case 'data-export':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' ')),
-  'E2b ToolHost 向 4 个有侧栏工具透传 sidebarEl/sidebarHosted')
+  && /case 'bookmark-nav':[^]*?sidebarEl=\{sidebarEl\}/.test(srcRegistry.replace(/\n/g, ' ')),
+  'E2b ToolHost 向 3 个有侧栏工具透传 sidebarEl/sidebarHosted')
 
 // E3 工具组件侧栏三态（portal / 槽未就绪 null / 原地内嵌）
 const srcHabit = stripComments(read('src/modules/toolbox/components/habit-tracker/index.tsx'))
-const srcExport = stripComments(read('src/modules/toolbox/components/export/ExportTool.tsx'))
 const srcBookmark = stripComments(read('src/modules/toolbox/components/bookmark-nav/index.tsx'))
 const srcPdf = stripComments(read('src/modules/toolbox/components/pdf-toolkit/index.tsx'))
-for (const [name, src] of [['habit-tracker', srcHabit], ['data-export', srcExport], ['bookmark-nav', srcBookmark], ['pdf-toolkit', srcPdf]]) {
+for (const [name, src] of [['habit-tracker', srcHabit], ['bookmark-nav', srcBookmark], ['pdf-toolkit', srcPdf]]) {
   ok(/createPortal/.test(src) && /sidebarHosted\s*\?\s*null/.test(src) && /sidebarEl\s*\?/.test(src),
     `E3 ${name} 侧栏三态（portal → hosted-null → 原地内嵌，knowledge 同款挂载点迁移）`)
 }

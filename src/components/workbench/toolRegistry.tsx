@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react'
 import {
-  Shield, Globe, Archive, Wifi, Scissors, Timer, CalendarCheck2, BellRing, FileText,
+  Shield, Globe, Wifi, Scissors, Timer, CalendarCheck2, BellRing, FileText,
   ArrowLeft, Smartphone,
 } from 'lucide-react'
 import { PluginIcon } from '../shared/ModuleIcons'
@@ -8,7 +8,6 @@ import { PasswordVault } from '../../modules/toolbox/components/PasswordVault'
 import { HabitTracker } from '../../modules/toolbox/components/habit-tracker'
 import { BookmarkNav } from '../../modules/toolbox/components/bookmark-nav'
 import { RemoteSupervise } from '../../modules/toolbox/components/remote-supervise'
-import { ExportTool } from '../../modules/toolbox/components/export/ExportTool'
 import { LanShare } from '../../modules/toolbox/components/lan-share'
 import { PhoneCompanion } from '../../modules/toolbox/components/phone-companion'
 import { WebClipper } from '../../modules/toolbox/components/web-clipper'
@@ -43,7 +42,8 @@ export interface ToolMeta {
 export const BUILTIN_TOOLS: ToolMeta[] = [
   { id: 'password-vault', name: '密码本', group: 'data', color: '#e0524f', Icon: Shield },
   { id: 'bookmark-nav', name: '网址导航', group: 'data', color: '#4f6ef2', Icon: Globe },
-  { id: 'data-export', name: '数据导出', group: 'data', color: '#3fae6a', Icon: Archive },
+  // data-export（数据导出）已随 2026-11-07 拍板退役：功能废弃，入口与组件一并移除
+  //（设置 → 数据与仓库的备份恢复/导出走 exportRepo 通道，与本工具无关，不受影响）
   { id: 'lan-share', name: '设备传输', group: 'data', color: '#e8842c', Icon: Wifi },
   { id: 'phone-companion', name: '手机伴侣', group: 'data', color: '#3794ff', Icon: Smartphone },
   { id: 'web-clipper', name: '网页剪藏', group: 'data', color: '#a06be0', Icon: Scissors },
@@ -58,12 +58,13 @@ export const DEEPLINKABLE_TOOL_IDS = new Set(BUILTIN_TOOLS.map((t) => t.id))
 
 /**
  * 自带左侧栏的内置工具（2026-09-17 右栏优化轮新增）：
- * 习惯打卡（习惯列表）/ 数据导出（导出配置）/ 网址导航（分类）/ PDF 工具箱（文件列表）。
- * 这 4 个工具以**中间标签页**语境打开时，左栏 portal 进工作台左栏模块态 slot
+ * 习惯打卡（习惯列表）/ 网址导航（分类）/ PDF 工具箱（文件列表）。
+ * （原第 4 个成员「数据导出（导出配置）」已随工具退役移除，2026-11-07。）
+ * 这 3 个工具以**中间标签页**语境打开时，左栏 portal 进工作台左栏模块态 slot
  * （knowledge/schedule 同款挂载点迁移机制；工具箱画廊语境打开时保持内嵌不变）。
  * 密码本 = 列表/详情双视图，无常驻侧栏，不入列。
  */
-export const TOOLS_WITH_SIDEBAR: ReadonlySet<string> = new Set(['habit-tracker', 'data-export', 'bookmark-nav', 'pdf-toolkit'])
+export const TOOLS_WITH_SIDEBAR: ReadonlySet<string> = new Set(['habit-tracker', 'bookmark-nav', 'pdf-toolkit'])
 
 /** 工具组件的左栏适配 props（sidebarEl = portal 目标；sidebarHosted = 已托管但槽未就绪） */
 export interface ToolSidebarProps {
@@ -101,7 +102,7 @@ export function toolIdOfTab(tabId: string): string {
  * 工具箱模块（画廊内进入）与右栏入口区开的工具标签页共用——
  * onBack 由宿主语境决定：工具箱 = 回画廊，标签页 = 关闭标签。
  * 番茄钟不走本宿主（点击 = pomodoro:activate 全屏面板，沿用既有语义）。
- * sidebarEl/sidebarHosted：仅标签页语境由 App 传入（TOOLS_WITH_SIDEBAR 的 4 个工具
+ * sidebarEl/sidebarHosted：仅标签页语境由 App 传入（TOOLS_WITH_SIDEBAR 的 3 个工具
  * 侧栏 portal 进工作台左栏）；画廊语境不传 → 工具侧栏保持内嵌原位。
  */
 export function ToolHost({ toolId, onBack, sidebarEl, sidebarHosted }: { toolId: string; onBack: () => void } & ToolSidebarProps) {
@@ -120,8 +121,6 @@ export function ToolHost({ toolId, onBack, sidebarEl, sidebarHosted }: { toolId:
       )
     case 'bookmark-nav':
       return <BookmarkNav onBack={onBack} sidebarEl={sidebarEl} sidebarHosted={sidebarHosted} />
-    case 'data-export':
-      return <ExportTool onBack={onBack} sidebarEl={sidebarEl} sidebarHosted={sidebarHosted} />
     case 'lan-share':
       return <LanShare onBack={onBack} />
     case 'phone-companion':
