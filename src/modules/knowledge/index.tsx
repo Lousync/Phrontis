@@ -80,6 +80,10 @@ interface PageInfo {
   fileType: string
 }
 
+/** 打开页签内容指针的 localStorage 键（2026-11-07 分屏留存轮）：页 id 是仓库内容身份，
+    键必须带 rootId —— 换库（整窗 reload）后各存各的，互不串。 */
+const kbPagesKey = (rootId: string) => `kb.knowledge.pages.${rootId}`
+
 export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Record<string, number>, onSnapCloseSidebar, onSnapOpenSidebar, isActive = true, sidebarEl = null, sidebarHosted = false, sidebarVariant = 'knowledge', pageBarEl = null, pageBarHosted = false, onImmersiveChange, modActionsEl = null, onStripVisibleChange, onPageTabActivate, pendingRelPath = null, onPendingRelConsumed, secondaryPageIds = [], secondaryActiveId = null, secondaryBarEl = null, secondaryContentEl = null, splitDisabled = false, onSplitPage, onSecondaryActivate, onMergeSplit, onRemoveSecondary, onMovePageToPane, onBackToWorkbench, onMigratePageTab }: { sidebarOpen?: boolean; sidebarWidths?: Record<string, number>; onSnapCloseSidebar?: () => void; onSnapOpenSidebar?: () => void; isActive?: boolean; sidebarEl?: HTMLElement | null; sidebarHosted?: boolean; sidebarVariant?: 'knowledge' | 'quiz'; pageBarEl?: HTMLElement | null; pageBarHosted?: boolean; onImmersiveChange?: (v: boolean) => void; modActionsEl?: HTMLElement | null; onStripVisibleChange?: (v: boolean) => void; onPageTabActivate?: () => void; pendingRelPath?: { relPath: string; seq: number; startEdit?: boolean } | null; onPendingRelConsumed?: () => void; secondaryPageIds?: string[]; secondaryActiveId?: string | null; secondaryBarEl?: HTMLElement | null; secondaryContentEl?: HTMLElement | null; splitDisabled?: boolean; onSplitPage?: (pageId: string, orientation: 'row' | 'column') => void; onSecondaryActivate?: (pageId: string) => void; onMergeSplit?: () => void; onRemoveSecondary?: (pageId: string) => void; onMovePageToPane?: (pageId: string) => void; onBackToWorkbench?: () => void; onMigratePageTab?: (oldId: string, newId: string) => void }) {
   const [categories, setCategories] = useState<KnowledgeCategory[]>([])
   const [allPages, setAllPages] = useState<KnowledgePage[]>([])
@@ -345,6 +349,37 @@ export function KnowledgeModule({ sidebarOpen = true, sidebarWidths = {} as Reco
       .finally(() => setLoading(false))
     console.log('[Knowledge] module mounted · net-v2（手动关联/注解/沉浸阅读已启用）')
   }, [])
+
+  // ---- 打开页签内容指针持久化（2026-11-07 分屏留存轮）----
+  // 冷重启后页签全丢，是因为只有外壳（分屏比例/副栏页 id）落了盘而主栏这半边是内存态。
+  // 恢复前过存在性校验（页被改名/删除/进 ignore → 静默剔除；auto:<relPath> 伪身份同规则覆盖）；
+  // 直接 setState 而不走 handleOpenPage —— 不污染导航历史、不触发预览槽替换。
+  // 等 loading 结束再消费守卫：否则首拉未完成时 allPages 为空，会把存档误判为「全部失效」。
+  const [kbRootId, setKbRootId] = useState<string | null>(null)
+  useEffect(() => { void workspaceGetCurrent().then((cur) => setKbRootId(cur?.rootId ?? null)).catch(() => null) }, [])
+  const pagesRestoredRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!kbRootId || loading || pagesRestoredRef.current === kbRootId) return
+    pagesRestoredRef.current = kbRootId
+    let saved: { ids?: unknown; active?: unknown } = {}
+    try { saved = JSON.parse(String(localStorage.getItem(kbPagesKey(kbRootId)) || '{}')) as { ids?: unknown; active?: unknown } } catch { /* 坏 JSON 走空 */ }
+    const known = new Map(allPages.map((p) => [p.id, p]))
+    // 副栏页同样过校验：缺失的走既有 onRemoveSecondary 剔除（兑现 PageSplitLayout「恢复时由模块二次净化」的注释承诺）
+    for (const sid of secondaryPageIds) if (!known.has(sid)) onRemoveSecondary?.(sid)
+    const ids = Array.isArray(saved.ids) ? saved.ids.filter((x): x is string => typeof x === 'string' && known.has(x)) : []
+    if (!ids.length) return
+    const infos: Record<string, PageInfo> = {}
+    for (const id of ids) { const p = known.get(id)!; infos[id] = { title: p.title, fileType: p.fileType || '' } }
+    setOpenPageIds(ids)
+    setOpenPageInfos((prev) => ({ ...prev, ...infos }))
+    // 激活页若正被挪在副栏，主栏让位交给上方既有 effect（secondaryPageIds 协调），这里照存档直设
+    setActivePageId(typeof saved.active === 'string' && ids.includes(saved.active) ? saved.active : ids[0])
+  }, [kbRootId, loading, allPages, secondaryPageIds, onRemoveSecondary])
+  // 写回：恢复完成后页签增删/激活变化即落 localStorage。守 pagesRestoredRef —— 加载期空数组不得清掉存档
+  useEffect(() => {
+    if (!kbRootId || loading || pagesRestoredRef.current !== kbRootId) return
+    try { localStorage.setItem(kbPagesKey(kbRootId), JSON.stringify({ ids: openPageIds, active: activePageId })) } catch { /* 隐私模式忽略 */ }
+  }, [kbRootId, loading, openPageIds, activePageId])
 
   // 读写分工（P0 约定）：Tab 保活，编辑器保存后索引已失效 → 每次激活重读
   const activatedOnceRef = useRef(false)

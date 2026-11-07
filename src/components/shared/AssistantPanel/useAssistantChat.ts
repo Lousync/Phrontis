@@ -736,6 +736,28 @@ export function useAssistantChat(options: AssistantChatOptions): AssistantChatCo
     return () => { cancelled = true }
   }, [active, autoResumeToday, refreshSessions, loadSession, newSession])
 
+  // 分屏留存轮（2026-11-07）：恢复上次选中会话。会话数据真相源在 vault `.knowbase/agent/`，
+  // 这里落的只是「正在看哪一条」的指针（localStorage 按来源分键）；存档 id 不在列表内
+  //（已删 / 换库）静默放弃。日程助手走上方「一天一个会话」，不参与本恢复。
+  useEffect(() => {
+    if (!active || autoResumeToday) return
+    let cancelled = false
+    void (async () => {
+      const list = await refreshSessions()
+      if (cancelled || activeIdRef.current) return
+      let saved: string | null = null
+      try { saved = String(localStorage.getItem(`assistant.lastSid.${draftSource}`) || '') || null } catch { /* 隐私模式忽略 */ }
+      if (saved && list.some(s => s.id === saved)) selectSession(saved)
+    })()
+    return () => { cancelled = true }
+    // 只认首次激活的那次恢复;selectSession/refreshSessions 引用随渲染重建,不进 deps（守卫已防重入）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active])
+  useEffect(() => {
+    if (!activeId) return
+    try { localStorage.setItem(`assistant.lastSid.${draftSource}`, activeId) } catch { /* 隐私模式忽略 */ }
+  }, [activeId, draftSource])
+
   const removeSession = useCallback(async (id: string) => {
     if (deletingId !== id) {
       setDeletingId(id)

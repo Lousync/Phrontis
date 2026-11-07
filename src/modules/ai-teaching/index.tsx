@@ -221,6 +221,14 @@ const CHARS_PER_TOKEN = 2.6
 type AiTeachNav = {
   docRel?: string | null; readerRel?: string | null; readerPage?: number
   /**
+   * 2026-11-07 分屏留存轮：工件页签**整组指针**（只存 rel/kind/name，内容靠 openArtFile 重读；
+   * 生成中占位与空 rel 不入档）。切会话清空 artTabs 后，回到该会话即整组恢复 ——
+   * 旧字段 docRel/readerRel 保留写盘作向后兼容（老会话存档只有单工件指针）。
+   */
+  arts?: Array<{ rel: string; kind: ArtTab['kind']; name?: string }>
+  /** 恢复页签组后的激活页签 rel */
+  artActiveRel?: string | null
+  /**
    * v3.1.2 条目7（会话准备态）：创建对话 → 首条消息之间的中间态快照。
    * - `started` 缺省/false = 仍停准备态；true = 已开讲（此后不再进准备态）
    * - `draft` 首条消息（用户编辑后的值；缺省回落场景 startPrompt）
@@ -456,13 +464,14 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     setArtTabs(nextTabs)
     setArtActive(cur => (cur === id ? next?.id ?? null : cur))
   }, [])
-  /** 统一打开入口：pptx→逐页页签；html→沙箱预览页签；其余按 md 阅读页签 */
-  const openArtFile = useCallback(async (rel: string, opts?: { name?: string; title?: string; lines?: number; cur?: number }) => {
+  /** 统一打开入口：pptx→逐页页签；html→沙箱预览页签；其余按 md 阅读页签。
+   *  silent = 会话恢复路径专用：文件已被删/读失败静默跳过，不弹错误 Toast（批量恢复时不可接受） */
+  const openArtFile = useCallback(async (rel: string, opts?: { name?: string; title?: string; lines?: number; cur?: number; silent?: boolean }) => {
     if (/\.pptx$/i.test(rel)) {
       const pr = await docsPptxPages(rel).catch(() => null)
       if (pr?.ok && pr.pages?.length) {
         openArtTab({ id: rel, kind: 'pptx', rel, name: opts?.name ?? rel.split('/').pop() ?? rel, pages: pr.pages, cur: Math.min(Math.max(0, opts?.cur ?? 0), pr.pages.length - 1) })
-      } else {
+      } else if (!opts?.silent) {
         showToast({ type: 'error', message: (pr as { error?: string } | null)?.error || '读取失败（暂仅支持 .pptx）' })
       }
       return
@@ -480,9 +489,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     }
     const cur = await workspaceGetCurrent().catch(() => null)
     const rootId = (cur as { rootId?: string } | null)?.rootId
-    if (!rootId) { showToast({ type: 'error', message: '尚未打开仓库' }); return }
+    if (!rootId) { if (!opts?.silent) showToast({ type: 'error', message: '尚未打开仓库' }); return }
     const r = await workspaceReadFile(rootId, rel).catch(() => null)
-    if (!r || typeof r.content !== 'string') { showToast({ type: 'error', message: '读取文档失败' }); return }
+    if (!r || typeof r.content !== 'string') { if (!opts?.silent) showToast({ type: 'error', message: '读取文档失败' }); return }
     // 思维导图 JSON：按内容识别（kind:"mindmap"）→ 导图页签；其余按 md 阅读页签
     if (looksLikeMindMap(r.content)) {
       openArtTab({ id: rel, kind: 'mindmap', rel, name: opts?.title || opts?.name || rel.split('/').pop() || rel, title: opts?.title })
@@ -771,6 +780,9 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       docRel: t && !t.generating && (t.kind === 'md' || t.kind === 'html' || t.kind === 'image') ? t.rel : null,
       readerRel: t && !t.generating && t.kind === 'pptx' ? t.rel : null,
       readerPage: t && t.kind === 'pptx' ? t.cur ?? 0 : 0,
+      // 分屏留存轮：页签整组指针（只存 rel/kind/name）+ 激活 rel；gen: 占位不入档
+      arts: artTabs.filter(x => !x.generating && x.rel).map(x => ({ rel: x.rel, kind: x.kind, name: x.name })),
+      artActiveRel: artActive && !artActive.startsWith('gen:') ? artActive : null,
     })
   }, [activeId, artTabs, artActive])
   const activeIdRef = useRef<string | null>(null)
@@ -1012,8 +1024,16 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
     void loadConstraints(sid, row?.instructions ?? '')
     await refreshMessages(sid)
     const nav = readNav(sid)
-    // UI 优化条目6B：恢复该会话「上次离开时的工件」（页签在则栏在——内容驱动，无手动开合）
-    if (nav.docRel) void openArtFile(nav.docRel)
+    // UI 优化条目6B + 分屏留存轮：恢复该会话「上次离开时的工件」（页签在则栏在——内容驱动，无手动开合）。
+    // 优先整组 arts 指针逐个重放（silent：文件已删静默跳过）；老会话存档没有 arts 时回落旧单工件字段。
+    // 恢复期间切走了会话就不再回落激活页 —— setArtActive 的结果属于发起恢复的那个会话。
+    if (nav.arts?.length) {
+      void Promise.all(nav.arts.map(a => openArtFile(a.rel, { silent: true, name: a.name, cur: a.rel === nav.readerRel ? nav.readerPage ?? 0 : 0 })))
+        .then(() => {
+          if (activeIdRef.current !== sid) return
+          setArtActive(cur => cur ?? (nav.artActiveRel && nav.arts!.some(a => a.rel === nav.artActiveRel) ? nav.artActiveRel : null))
+        })
+    } else if (nav.docRel) void openArtFile(nav.docRel)
     else if (nav.readerRel && /\.pptx$/i.test(nav.readerRel)) void openArtFile(nav.readerRel, { cur: nav.readerPage ?? 0 })
   }, [refreshMessages, sessions, loadConstraints, openArtFile])
 
