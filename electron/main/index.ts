@@ -5,8 +5,10 @@ import { configureCore } from 'phrontis-core/kbStore/vaultContext'
 
 // phrontis-core 宿主注入（kbcore 抽取后）：数据层共享包需要 userData 目录
 // （settings.json 的 currentVaultId / recentVaults 与 globalJsonStore 全局域都从这走）。
-// 必须在模块顶层完成——所有 vault/全局域读取都发生在 app ready 之后，此刻注入一定先于它们。
-configureCore({ userDataDir: app.getPath('userData'), appVersion: app.getVersion() })
+// ★ 调用点必须在下方「开发版数据隔离」分支**之后**：kbcore 的 data/vaults.json /
+//   globalJsonStore 都从注入的 userDataDir 解析——若在隔离 setPath 之前注入，
+//   dev 实例会读到全局目录的 vault 注册表（2026-11-07 探针实测：dev 实例打开了
+//   全局注册的真实仓库）。core 的读取全部发生在 app ready 之后，此处注入仍先于它们。
 // 无 GPU/无头环境（AI 驱动真机测试）显式 KNOWBASE_DISABLE_GPU=1 时禁用 GPU 加速，防渲染进程连带崩溃
 // ⚠️ Linux 平台化（2026-10-19 实测）：这里的 appendSwitch('no-sandbox') 在 Linux 上**无效** ——
 //    sandbox 在 JS 主脚本执行前就已定下来，设了照样 `FATAL:setuid_sandbox_host.cc` + core dump。
@@ -186,6 +188,11 @@ if (!app.isPackaged && process.env.KNOWBASE_SHARED_DATA !== '1') {
   }
   app.setPath('userData', devDir)
 }
+
+// phrontis-core 宿主注入（kbcore 抽取后）：数据层共享包需要 userData 目录
+// （settings.json 的 currentVaultId / recentVaults 与 globalJsonStore 全局域都从这走）。
+// ★ 必须在隔离 setPath 之后注入 —— 理由见文件顶部注释（2026-11-07 探针实测踩坑）。
+configureCore({ userDataDir: app.getPath('userData'), appVersion: app.getVersion() })
 
 // ===== 崩溃/异常留痕（黑匣子）：写入 userData/crash-log.txt，供事后定位 =====
 // 轮转：超过 2MB 就把旧文件改名为 crash-log.txt.1（只留一代）。此前无轮转，
