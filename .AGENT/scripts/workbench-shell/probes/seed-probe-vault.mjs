@@ -16,7 +16,15 @@ const proj = join(dirname(fileURLToPath(import.meta.url)), '../../../..')
 // 否则与用户正在跑的 dev 共用 userData：单实例锁互斥秒退 + 状态互相污染（2026-09-20 实测）。
 const udFlagIdx = process.argv.indexOf('--ud')
 const userDataName = udFlagIdx > -1 ? process.argv[udFlagIdx + 1] : `knowbase (dev ${basename(proj)})`
-const userData = join(process.env.APPDATA ?? '', userDataName)
+// userData 基目录按平台取（Electron app.getPath('userData') 的默认值约定，与 electron/main/index.ts
+// 的 dev 命名 `<默认 userData> (dev <appPath 基名>)` 配套）：
+//   win32 → %APPDATA%/<name>；linux → $XDG_CONFIG_HOME|~/.config/<name>；darwin → ~/Library/Application Support/<name>
+const home = process.env.HOME ?? ''
+const dataBase = process.env.APPDATA
+  ?? (process.platform === 'darwin'
+    ? join(home, 'Library', 'Application Support')
+    : (process.env.XDG_CONFIG_HOME ?? join(home, '.config')))
+const userData = join(dataBase, userDataName)
 
 // 防覆盖：隔离 userData 若尚无首启迁移 marker，先替 app 写上——
 // 否则 app 首启的「从正式版快照」会覆盖本 seed 写入的 settings/vaults（2026-09-20 实测踩坑）。

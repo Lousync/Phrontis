@@ -4,8 +4,8 @@ import { MarkdownPreview } from '../../../components/shared/MarkdownPreview'
 import { MindMapView } from '../../../components/shared/MindMapView'
 import { looksLikeMindMap } from '../../../lib/mindmap'
 import { QuizMode } from '../../../components/shared/QuizMode'
-import { extractQuizzes, duplicateQuizNos } from '../../../components/shared/QuizParser'
-import { QuizRecordContext, useQuizRecordStore, useQuizSummary } from '../../../components/shared/QuizRecordStore'
+import { extractQuizzes, duplicateQuizNos, type QuizItem } from '../../../components/shared/QuizParser'
+import { QuizRecordContext, useQuizRecordStore, useQuizSummary, type QuizRecordStore } from '../../../components/shared/QuizRecordStore'
 import { QuizSheetBar } from '../../../components/shared/QuizSheetBar'
 import { QuizReviewPane } from '../../../components/shared/QuizReviewPane'
 import type { KnowledgePage, KnowledgeCategory, KnowledgeTag, KnowledgeBacklinkItem } from '../../../types'
@@ -234,6 +234,33 @@ interface Props {
   onExportPdfRequest?: () => void
 }
 
+/**
+ * ⋮「错题重做」项（B-50）：错题数的 summary 订阅**收在这枚小组件里**，不让 PageEditor 整页
+ * `useQuizSummary` —— 否则每次草稿保存 / 展开收起参考答案都会让整页重渲染，连带打穿
+ * MarkdownPreview 的 memo（正文子树整棵重挂 → 滚动跳动 / 作答框焦点丢失）。
+ * 组件本身只有一枚按钮，随 summary 随便重渲染不伤正文。
+ */
+function WrongRedoMenuItem({ quizzes, store, onReview }: {
+  quizzes: QuizItem[]
+  store: QuizRecordStore
+  onReview: () => void
+}) {
+  const summary = useQuizSummary(store)
+  /** 当前文档里仍存在的错题（防止旧记录把入口数字撑大） */
+  const currentWrongCount = useMemo(() => {
+    const nos = new Set(quizzes.map(q => q.no))
+    return store.getRecords().filter(r => nos.has(r.quizNo) && r.lastResult === 0).length
+  }, [quizzes, summary.wrong, store])
+  if (currentWrongCount <= 0) return null
+  return (
+    <button onClick={onReview}
+      className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
+      <RotateCcw size={13} />错题重做
+      <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{currentWrongCount} 题</span>
+    </button>
+  )
+}
+
 export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, onNavigate, onUpdate, onTitleChange, onFileTypeChange, onContentChange, onTagsChange, onMarkDirty, onClearDirty, onRequestReading, vaultMode = false, draftRelPath, startInEdit = false, initialFileType = '', canNavBack = false, canNavForward = false, onNavBack, onNavForward, onRenameRequest, onMoveRequest, onDuplicateRequest, onLocateRequest, onDeleteRequest, onSplitRequest, splitDisabled = false, onExportPdfRequest }: Props) {
   const { s, update } = useSettings()
   const [page, setPage] = useState<KnowledgePage | null>(null)
@@ -358,12 +385,8 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
     relPath: quizzes.length > 0 ? (page?.path ?? '') : '',
     pageTitle: title,
   })
-  const quizSummary = useQuizSummary(quizStore)
-  /** 当前文档里仍存在的错题（防止旧记录把入口数字撑大） */
-  const currentWrongCount = useMemo(() => {
-    const nos = new Set(quizzes.map(q => q.no))
-    return quizStore.getRecords().filter(r => nos.has(r.quizNo) && r.lastResult === 0).length
-  }, [quizzes, quizSummary.wrong, quizStore])
+  // ★ B-50：不要在这里 `useQuizSummary(quizStore)` —— summary 一变整页重渲染会把
+  //   MarkdownPreview 的 memo 打穿（正文子树重挂）。错题数订阅已收进 WrongRedoMenuItem。
   const [quizReview, setQuizReview] = useState(false)
   const [reviewNos, setReviewNos] = useState<Set<number>>(new Set())
   const reviewQuizzes = useMemo(
@@ -1568,7 +1591,9 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
 
   // Resolve a title to knowledge base pages. If >1 match, show picker.
   // If 0 → offer to create the page (P1 空链接建页闭环).
-  const resolveInternalLink = (title: string): boolean => {
+  // ★ B-50：必须 useCallback —— 引用不稳定会让 MarkdownPreview 的 memo 失效，
+  //   每次整页重渲染都把正文子树卸载重挂（滚动跳动 / 焦点丢失的根因之一）。
+  const resolveInternalLink = useCallback((title: string): boolean => {
     const matches = allPages.filter(p => p.title === title)
     if (matches.length === 1) {
       onNavigate(matches[0].id)
@@ -1586,7 +1611,42 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
     }
     setWikiCreateTitle(title)
     return true
-  }
+  }, [allPages, onNavigate, vaultMode])
+
+  /** [[wiki 链接]]点击（B-50：引用稳定化，见 resolveInternalLink 注释） */
+  const handleWikiLink = useCallback((title: string) => {
+    resolveInternalLink(title)
+  }, [resolveInternalLink])
+
+  /** 阅读态正文普通 <a> 点击的落点解析（B-50：引用稳定化，dep 用原始字符串而非 page 对象） */
+  const pagePath = page?.path ?? ''
+  const handlePreviewLinkClick = useCallback((href: string) => {
+    // 外链 → 系统浏览器
+    if (/^https?:\/\//i.test(href)) { openExternal(href); return }
+    // 纯锚点 → 同页滚动，不导航
+    if (href.trim().startsWith('#')) return
+    // ① 相对路径 → 相对**当前页所在目录**归一，按 path 精确命中（2026-10-19 修）
+    const rel = resolveVaultRel(pagePath, href)
+    if (rel) {
+      const byPath = allPages.find(p => (p.path ?? '').replace(/\\/g, '/') === rel)
+      if (byPath) { onNavigate(byPath.id); return }
+    }
+    // ② 退回按标题匹配（跨笔记「标题链接」的既有语义，保持不变）
+    const basename = href.replace(/^.*[/\\]/, '')
+    const titleFromPath = basename.replace(/\.[^.]+$/, '')
+    let matches = allPages.filter(p => p.title === href)
+    if (matches.length === 0) matches = allPages.filter(p => p.title === basename)
+    if (matches.length === 0) matches = allPages.filter(p => p.title === titleFromPath)
+    if (matches.length === 1) {
+      onNavigate(matches[0].id)
+    } else if (matches.length > 1) {
+      setWikiPicker({ title: titleFromPath || basename, candidates: matches })
+    } else {
+      // ③ 都没命中：**不再交给 openExternal** —— 相对路径会被当外部文件并被安全拦截，
+      //    用户只看到「点了没反应」。这里明确告诉他找不到。
+      showToast({ type: 'info', message: '找不到这个链接指向的页面', detail: href })
+    }
+  }, [allPages, onNavigate, pagePath])
 
   const createPageFromWikiLink = (title: string) => {
     setWikiCreateTitle(null)
@@ -1729,13 +1789,7 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
                     <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{choiceQuizzes.length} 题</span>
                   </button>
                 )}
-                {currentWrongCount > 0 && (
-                  <button onClick={openQuizReview}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] transition-colors">
-                    <RotateCcw size={13} />错题重做
-                    <span className="ml-auto text-[10px] text-[var(--text-secondary)]">{currentWrongCount} 题</span>
-                  </button>
-                )}
+                <WrongRedoMenuItem quizzes={quizzes} store={quizStore} onReview={openQuizReview} />
                 {/* 查看源码 / 看渲染（2026-10-13）：**本页临时**切档，不改全局设置 `editorWritingMode`。
                     ★ 阅读态下也出现（md 默认就是阅读态打开）：点它顺带退出阅读态，否则在默认状态下
                       「查看源码」点了看不见任何变化 —— 那正是「点了没反应」的假按钮。
@@ -2259,36 +2313,8 @@ export function PageEditor({ pageId, categories, allPages, onBack, onDeleted, on
               pageTitle={title}
               knownWikiTitles={knownWikiTitles}
               highlightWiki={flashWiki ?? undefined}
-              onWikiLink={title => {
-                resolveInternalLink(title)
-              }}
-              onLinkClick={href => {
-                // 外链 → 系统浏览器
-                if (/^https?:\/\//i.test(href)) { openExternal(href); return }
-                // 纯锚点 → 同页滚动，不导航
-                if (href.trim().startsWith('#')) return
-                // ① 相对路径 → 相对**当前页所在目录**归一，按 path 精确命中（2026-10-19 修）
-                const rel = resolveVaultRel(page?.path ?? '', href)
-                if (rel) {
-                  const byPath = allPages.find(p => (p.path ?? '').replace(/\\/g, '/') === rel)
-                  if (byPath) { onNavigate(byPath.id); return }
-                }
-                // ② 退回按标题匹配（跨笔记「标题链接」的既有语义，保持不变）
-                const basename = href.replace(/^.*[/\\]/, '')
-                const titleFromPath = basename.replace(/\.[^.]+$/, '')
-                let matches = allPages.filter(p => p.title === href)
-                if (matches.length === 0) matches = allPages.filter(p => p.title === basename)
-                if (matches.length === 0) matches = allPages.filter(p => p.title === titleFromPath)
-                if (matches.length === 1) {
-                  onNavigate(matches[0].id)
-                } else if (matches.length > 1) {
-                  setWikiPicker({ title: titleFromPath || basename, candidates: matches })
-                } else {
-                  // ③ 都没命中：**不再交给 openExternal** —— 相对路径会被当外部文件并被安全拦截，
-                  //    用户只看到「点了没反应」。这里明确告诉他找不到。
-                  showToast({ type: 'info', message: '找不到这个链接指向的页面', detail: href })
-                }
-              }}
+              onWikiLink={handleWikiLink}
+              onLinkClick={handlePreviewLinkClick}
             />
               </>
             )}
