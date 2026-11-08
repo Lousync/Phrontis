@@ -17,6 +17,8 @@ import {
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { useDataChanged } from '../../lib/dataChanged'
+import { computeQuizSummary, quizSummaryEqual } from './quizSummaryPure'
+import type { QuizSummary } from './quizSummaryPure'
 
 export interface QuizStoreOptions {
   /** 知识页 id；auto:/draft: 时 store 会尝试用 relPath 解析真 id */
@@ -33,11 +35,8 @@ export interface QuizDraftPatch {
   assessedText?: string | null
 }
 
-export interface QuizStoreSummary {
-  answered: number
-  wrong: number
-  drafts: number
-}
+/** summary 统计与比较的口径在 quizSummaryPure（零依赖，契约脚本可直测）；这里保留别名兼容 */
+export type QuizStoreSummary = QuizSummary
 
 const EMPTY_RECORDS: QuizRecordDto[] = []
 const EMPTY_SUMMARY: QuizStoreSummary = { answered: 0, wrong: 0, drafts: 0 }
@@ -144,16 +143,15 @@ class QuizRecordStore {
 
   private rebuild(): void {
     this.allSnapshot = Array.from(this.records.values()).sort((a, b) => a.quizNo - b.quizNo)
-    let answered = 0
-    let wrong = 0
-    let drafts = 0
+    // 结构共享（B-50）：summary 数字没变时复用上一份快照对象。rebuild 每次草稿/展开收起都会跑，
+    // 若无条件换新对象，useSyncExternalStore 的页面级订阅者（PageEditor 等）会因引用变化整页
+    // 重渲染 → MarkdownPreview 的 memo 被打穿 → 正文子树整棵重挂（滚动跳动 / 焦点丢失）。
+    const summary = computeQuizSummary(this.allSnapshot)
+    if (!quizSummaryEqual(summary, this.summarySnapshot)) this.summarySnapshot = summary
     const wrongNos = new Set<number>()
     for (const r of this.allSnapshot) {
-      if (r.lastResult != null) answered++
-      if (r.lastResult === 0) { wrong++; wrongNos.add(r.quizNo) }
-      if (r.lastResult == null && (r.draft?.text ?? '')) drafts++
+      if (r.lastResult === 0) wrongNos.add(r.quizNo)
     }
-    this.summarySnapshot = { answered, wrong, drafts }
     this.wrongSnapshot = wrongNos
     this.emit()
   }

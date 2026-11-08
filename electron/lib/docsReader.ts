@@ -18,7 +18,7 @@ export interface DocTextOutput {
   totalChars: number
 }
 
-const MAX_DOC_SIZE = 80 * 1024 * 1024 // pptx/pdf 上限 80MB
+export const MAX_DOC_SIZE = 80 * 1024 * 1024 // pptx/pdf 上限 80MB（vault.read 文档分派也按此预检，§2.2 G8）
 const MAX_PDF_PAGES = 200
 
 // ===== pdfjs（Node 主进程）=====
@@ -81,6 +81,36 @@ export async function extractPdfRange(absPath: string, from: number, to: number)
   const r = await extractPdfPages(absPath, from, to)
   const start = Math.max(1, from)
   return { pages: r.pageTexts.map((text, i) => ({ n: start + i, text })), total: r.total }
+}
+
+/**
+ * 全本提取：循环切 200 页一块直到最后一页（长资料方案 §5.3）。
+ * MAX_PDF_PAGES 只约束**单次**调用；整本不再被静默截断在前 200 页。
+ * 每块重新打开文档（200 页一块重新 parse 的开销可接受，600 页 ≈ 3 次）。
+ */
+export async function extractPdfWhole(absPath: string): Promise<{ pages: { n: number; text: string }[]; total: number }> {
+  const first = await extractPdfRange(absPath, 1, Number.MAX_SAFE_INTEGER)
+  const pages = [...first.pages]
+  const total = first.total
+  for (let start = MAX_PDF_PAGES + 1; start <= total; start += MAX_PDF_PAGES) {
+    const r = await extractPdfRange(absPath, start, Math.min(start + MAX_PDF_PAGES - 1, total))
+    pages.push(...r.pages)
+  }
+  return { pages, total }
+}
+
+/** 按页码区间的分块提取（长资料方案 §5.6）：章区间可超 200 页，自动循环补齐，不把单次上限当区间末尾。 */
+export async function extractPdfRangeChunked(absPath: string, from: number, to: number): Promise<{ pages: { n: number; text: string }[]; total: number }> {
+  const start = Math.max(1, Math.floor(from))
+  const probe = await extractPdfRange(absPath, start, start) // 顺便拿总页数
+  const total = probe.total
+  const end = Math.min(Math.floor(to), total)
+  const pages = [...probe.pages]
+  for (let s = start + 1; s <= end; s += MAX_PDF_PAGES) {
+    const r = await extractPdfRange(absPath, s, Math.min(s + MAX_PDF_PAGES - 1, end))
+    pages.push(...r.pages)
+  }
+  return { pages, total }
 }
 
 // ===== pptx（zip + XML）=====

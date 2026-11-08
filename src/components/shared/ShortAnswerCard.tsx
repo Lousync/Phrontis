@@ -35,7 +35,9 @@ export function ShortAnswerCard({ quiz, redo = false }: Props) {
   })
 
   const [text, setText] = useState('')
-  const [revealed, setRevealed] = useState(false)
+  // B-50：revealed 首帧就取记录里的真值（store 已有记录时）—— 任何未预期的重挂场景下
+  // 卡片不再「先收起一帧、effect 再回填」，避免展开态闪烁；store 异步拉到记录仍走下方 hydration。
+  const [revealed, setRevealed] = useState(() => (redo ? false : !!record?.draft?.revealed))
   const [assessedText, setAssessedText] = useState('')
   const [fallbackCorrect, setFallbackCorrect] = useState<boolean | null>(null)
   const [redoLocal, setRedoLocal] = useState(false)

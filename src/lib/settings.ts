@@ -8,6 +8,7 @@
 export const THEME_OPTIONS = [
   { id: 'dark',  label: '深色' },
   { id: 'light', label: '浅色' },
+  { id: 'daycycle', label: '昼夜动态' },
 ] as const
 
 /**
@@ -111,7 +112,9 @@ export const KNOWLEDGE_SIDEBAR_ITEM_VARS: Record<string, Record<string, string>>
 // ===== 设置定义 =====
 
 export const SETTINGS = {
-  theme: { default: 'dark', type: 'select', label: '应用主题', group: '主题', desc: '深色 / 浅色配色，以及插件提供的主题包', keywords: ['主题', 'theme', '深色', '浅色', 'dark', 'light', '夜间', '配色'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.theme' },
+  // 昼夜动态主题（2026-11-07，docs/daycycle-theme-plan.md）：默认值 dark → daycycle（用户拍板「默认开启」；
+  // settings.json 无显式 theme 的存量用户会随升级切到昼夜主题）。引擎接线在 App.tsx 主题 effect。
+  theme: { default: 'daycycle', type: 'select', label: '应用主题', group: '主题', desc: '深色 / 浅色配色，以及插件提供的主题包；昼夜动态 = 整窗配色与顶栏天空随一天时间变化', keywords: ['主题', 'theme', '深色', '浅色', 'dark', 'light', '夜间', '配色', '昼夜', '动态', '天空', 'daycycle'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.theme' },
   // 主题氛围特效（2026-09-27）：只在激活主题声明了 --theme-fx 时由 AppearanceView 条件渲染（ui:false = 不进搜索/通用渲染，见 docs/theme-fx-design.md §4.3）
   themeFxEnabled: { default: true, type: 'toggle', label: '主题特效', group: '主题', desc: '四季主题的氛围粒子特效（工作台 / 看板）：樱瓣 / 光束 / 落叶 / 雪', keywords: ['特效', '主题特效', '粒子', '氛围', 'theme fx'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   themeFxDensity: { default: 'mid', type: 'select', label: '粒子密度', group: '主题', desc: '氛围特效的粒子密度：疏 / 中 / 密（需主题特效开启）', keywords: ['密度', '粒子', '特效', 'density'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
@@ -227,7 +230,7 @@ export const SETTINGS = {
   defaultChatModel: { default: '', type: 'text', label: '默认对话模型', group: '模型', desc: '默认对话模型（格式 providerId:modelId）', keywords: ['模型', '默认', 'chat', 'model'], section: 'aiTools', ui: false, scope: 'global', level: 'normal', affects: 'live', aiTab: 'models' },
   aiStreamEnabled: { default: true, type: 'toggle', label: '流式输出', group: '对话输出', desc: 'AI 回复逐字输出并实时显示工具调用过程；关闭后改为一次性返回（供应商不支持流式时同样自动回退）', keywords: ['流式', '逐字', '打字机', 'stream', '输出', '过程', '时间线'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.stream', aiTab: 'chat' },
   agentMaxRounds: { default: 16, type: 'number', label: '最大推理轮数', group: 'Agent 循环', desc: '单次任务里 AI 最多决策几轮，用满后自动做一次总结收场（不会丢弃已获取的信息）；复杂任务可调大', keywords: ['轮数', '推理', 'agent', '上限', '循环', '迭代', '最多思考几轮', '单次任务最多思考几轮', '最大推理轮数'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 2, max: 64, step: 1 },
-  agentMaxSessionWrites: { default: 20, type: 'number', label: '单条消息写入上限', group: 'Agent 循环', desc: '一条消息触发的运行里，写入类工具（建/改笔记、任务等）最多执行几次，超出后 AI 会改为只读并总结；复杂任务可调大', keywords: ['写入', '上限', '写操作', '次数', '工具调用', 'agent', '写入上限', '一条消息最多写几次', '单条消息写入上限'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 1, max: 99, step: 1 },
+  agentMaxSessionWrites: { default: 20, type: 'number', label: '单条消息写入上限', group: 'Agent 循环', desc: '一条消息触发的运行里，写入类工具（建/改笔记、任务等）最多执行几次，超出后 AI 会改为只读并总结；复杂任务可调大（长资料整理最多用到 300）', keywords: ['写入', '上限', '写操作', '次数', '工具调用', 'agent', '写入上限', '一条消息最多写几次', '单条消息写入上限'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 1, max: 300, step: 1 },
   agentRunTokenBudget: { default: 500000, type: 'number', label: '单次 token 预算', group: 'Agent 循环', desc: '单次任务累计消耗的 token 达到此值即总结收场（防止循环失控产生过高费用），0 表示不限制', keywords: ['token', '预算', '费用', '上限', '失控', '花费上限', '单次任务花费上限', '单次 token 预算'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 0, max: 10000000, step: 50000 },
   agentContextBudgetTokens: { default: 24000, type: 'number', label: '历史上下文预算', group: 'Agent 循环', desc: '发给模型的历史对话按 token 预算裁剪（保留首尾、中间轮次丢弃），0 表示不裁剪', keywords: ['上下文', '历史', '裁剪', 'token', '预算', '带多少历史', '带多少历史对话', '历史上下文预算'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat', min: 0, max: 200000, step: 2000 },
   agentCompressionEnabled: { default: true, type: 'toggle', label: '历史自动压缩', group: 'Agent 循环', desc: '历史对话占用到触发线时，先将较早的对话压缩为持久化纪要再发送（而非直接丢弃），也可随时输入 /compress 手动触发；关闭后退回裁剪', keywords: ['压缩', '纪要', 'compact', 'compress', '上下文', '历史', '长对话先总结', '历史自动压缩'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.agentLoop', aiTab: 'chat' },
@@ -301,7 +304,7 @@ export const SETTINGS = {
   // F-12 遗留收口（2026-10-07）：控件从「AI教学」设置页迁入「AI 工具 → AI 助手」小节并进设置搜索
   // （键的语义、消费方与 desc 早已通用化，入口滞留教学页属半成品状态）。
   ctxUsageDetail: { default: 'compact', type: 'select', label: '上下文占用指示档位', group: 'AI 助手', desc: 'off=隐藏 / compact=上下文占用圆环（点击看详情）/ detailed=圆环+文字摘要；AI 教学与 AI 对话共用', keywords: ['用量', 'token', '上下文', '圆环', '预算', 'context', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxUsageDetail', aiTab: 'chat' },
-  ctxWindow: { default: 0, type: 'number', label: '模型上下文窗口（token）', group: 'AI 助手', desc: '0 = 未设置（占用指示仅显示数字）；设置后圆环按占用比例分档着色；AI 教学与 AI 对话共用', keywords: ['上下文', '窗口', 'context', '128k', '圆环', '占用'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxWindow', aiTab: 'chat', min: 0, max: 4000000, step: 1000 },
+  ctxWindow: { default: 1000000, type: 'number', label: '模型上下文窗口（token）', group: 'AI 助手', desc: '0 = 未设置（长资料按 128k 保守档运行）；≥200k 时长资料自动切 1M 档；设置后圆环按占用比例分档着色；AI 教学与 AI 对话共用', keywords: ['上下文', '窗口', 'context', '128k', '1m', '圆环', '占用', '长资料'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTools.ctxWindow', aiTab: 'chat', min: 0, max: 4000000, step: 1000 },
   // R6 D9：storageKnowledge / storageData / storageBlog 三键已随去库化收官全部退役
   // （知识库/博客/结构化模块恒 vault 文件，无读源分支残留）。
   uiWorkbench: { default: false, type: 'toggle', label: 'Workbench 布局', group: '外壳', desc: '实验性 VS Code 外壳；开启后编辑器文件树移到全局侧栏', keywords: ['workbench', '外壳', '布局', '侧栏', '编辑器组', '状态栏', 'vscode', '活动栏', 'shell', 'layout'], section: 'general', ui: true, scope: 'global', level: 'experimental', affects: 'live', anchor: 'advanced.workbench' },

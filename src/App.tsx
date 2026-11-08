@@ -603,6 +603,33 @@ export default function App() {
     update('workbenchLayout', JSON.stringify({ ...wbLayout, pageSplit: next }))
   }, [settingsReady, pageSplit, wbLayout, update])
 
+  // 模块标签内容指针持久化（2026-11-07 分屏留存轮）：冷启动不再落工作台空态。
+  // 恢复一次 + 此后变化写回（结构对齐上面 pageSplit 两个 effect）。只收合法模块标签：
+  // isTabName 校验 + 排除整窗/图标条面板（它们不进标签条）+ vocab 入口关闭时剔除；
+  // 工具（tool:）/ 情报文章（intel-a:）页签是瞬态设计，不恢复。
+  const tabsRestoredRef = useRef(false)
+  // 工具/情报页签激活时 activeTab=null（互斥共现），但用户上次所在的仍是那个模块标签——
+  // 用 ref 记住最后一个非空模块标签，落盘时兜底，恢复才不会落空态
+  const lastModuleTabRef = useRef<TabName | null>(null)
+  useEffect(() => { if (activeTab) lastModuleTabRef.current = activeTab }, [activeTab])
+  useEffect(() => {
+    if (!settingsReady || tabsRestoredRef.current) return
+    tabsRestoredRef.current = true
+    const tabs = wbLayout.lastOpenTabs.filter((t) => isTabName(t)
+      && !WORKBENCH_TABBAR_EXCLUDED.includes(t)
+      && (t !== 'vocab' || VOCAB_ENTRY_ENABLED))
+    const active = wbLayout.lastActiveTab && isTabName(wbLayout.lastActiveTab) ? wbLayout.lastActiveTab : null
+    if (tabs.length) setOpenTabs(tabs)
+    if (active) setActiveTab(active)
+  }, [settingsReady, wbLayout])
+  useEffect(() => {
+    if (!settingsReady || !tabsRestoredRef.current) return
+    const nextTabs = openTabs.filter((t) => isTabName(t) && !WORKBENCH_TABBAR_EXCLUDED.includes(t))
+    const nextActive = activeTab ?? (lastModuleTabRef.current && openTabs.includes(lastModuleTabRef.current) ? lastModuleTabRef.current : null)
+    if (JSON.stringify(wbLayout.lastOpenTabs) === JSON.stringify(nextTabs) && (wbLayout.lastActiveTab ?? null) === (nextActive ?? null)) return
+    update('workbenchLayout', JSON.stringify({ ...wbLayout, lastOpenTabs: nextTabs, lastActiveTab: nextActive }))
+  }, [settingsReady, openTabs, activeTab, wbLayout, update])
+
   // 启动检测当前仓库：无 → 仓库选择页（VaultPicker，新老用户统一）；有且开启「每次启动选择仓库」→ 启动形态选择页
   // sessionStorage 一次性标记：应用内切库会整窗 reload（数据激活重读约定），热重载不再打扰；冷启动才重新出页
   useEffect(() => {

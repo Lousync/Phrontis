@@ -35,6 +35,14 @@ export interface WorkbenchLayout {
   splitRatio: number | null
   /** 页面级分屏（只搬页面标签）：null = 单栏。见 App pageSplit 状态。 */
   pageSplit: PageSplitLayout | null
+  /**
+   * 上次激活的模块标签（2026-11-07 分屏留存轮）：启动恢复用，null = 无记忆/全关过。
+   * 工具/情报页签激活时 activeTab=null（互斥），落盘取「最后一个模块标签」——恢复落回模块而非空态。
+   * 本文件保持零 value import，这里只做 string 类型钝检查；是否合法 TabName 由 App 消费侧 isTabName 校验。
+   */
+  lastActiveTab: string | null
+  /** 上次打开的模块标签序列（只存模块标签；tool: / intel-a: 瞬态不落盘）。合法性同样由 App 消费侧校验。 */
+  lastOpenTabs: string[]
 }
 
 /** 页面级分屏状态（App 的持久化形态）。secondaryPageIds 存页面 id，恢复时由模块二次净化。 */
@@ -97,6 +105,8 @@ export const DEFAULT_WORKBENCH_LAYOUT: WorkbenchLayout = {
   bookmarksHidden: [],
   splitRatio: null,
   pageSplit: null,
+  lastActiveTab: null,
+  lastOpenTabs: [],
 }
 
 export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchLayout {
@@ -144,6 +154,10 @@ export function parseWorkbenchLayout(raw: string | undefined | null): WorkbenchL
           : []
         const active = typeof ps.secondaryActiveId === 'string' ? ps.secondaryActiveId : null
         if (ori && ids.length > 0) base.pageSplit = { orientation: ori, ratio, secondaryPageIds: ids, secondaryActiveId: active }
+      }
+      if (typeof o.lastActiveTab === 'string' && o.lastActiveTab.length > 0) base.lastActiveTab = o.lastActiveTab
+      if (Array.isArray(o.lastOpenTabs)) {
+        base.lastOpenTabs = o.lastOpenTabs.filter((x): x is string => typeof x === 'string' && x.length > 0)
       }
     }
   } catch { /* 坏 JSON 走默认 */ }

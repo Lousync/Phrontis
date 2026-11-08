@@ -19,7 +19,7 @@ const MODULES: { icon: ModuleIconComp; name: string; desc: string }[] = [
   { icon: Network, name: '知识图谱', desc: '双链关系可视化 · 从笔记模块进入' },
   { icon: MessageCircle, name: '动态', desc: '轻量动态与相册记录' },
   { icon: GraduationCap, name: 'AI 教学', desc: '对话驱动建课、上课与检验' },
-  { icon: Wrench, name: '工具箱', desc: '番茄钟、习惯打卡、数据导出等工具' },
+  { icon: Wrench, name: '工具箱', desc: '番茄钟、习惯打卡、网址导航等工具' },
   { icon: Bot, name: 'AI 助手', desc: '本地模型驱动，边看边问（Ctrl+J）' },
   { icon: PluginIcon, name: '插件', desc: '主题 / 预设 / 知识包官方市场' },
 ]

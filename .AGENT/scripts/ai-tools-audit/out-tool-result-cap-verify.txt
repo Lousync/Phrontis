@@ -1,29 +1,42 @@
-源文件: E:\Projects\KnowledgeRecorder\electron\lib\agentService.ts
+源文件: /home/lousync/Projects/Phrontis/electron/lib/agentService.ts
 
-PASS  构造的样本确实超过硬上限
+PASS  三档 profile 齐全
+PASS  normal 单条 48k / 窗口 120k / 6 条
+PASS  long-1m 单条 120k / 窗口 400k / 12 条
+PASS  long-128k 介于两档之间
+PASS  构造的样本确实超过 normal 硬上限
 PASS  截断结果是合法 JSON
-PASS  截断结果标记 truncated
-PASS  截断结果带原始长度 totalChars
-PASS  截断结果保留预览
+PASS  截断结果标记 _truncated
+PASS  截断结果带原始长度 _originalChars
 PASS  截断结果给出收窄指引
 PASS  截断后体积显著小于原体积
+PASS  标量 total 保留
+PASS  大数组保留前 maxItems 项 + 省略说明
+PASS  vault.read 截断后 nextOffset/hasMore 保留
+PASS  vault.read 截断提示带 offset 续读指令
+PASS  vault.read 截断提示带未读字符数
+PASS  pdf 截断提示带 pages 续读指令
+PASS  CAP_KEEP_KEYS 字段不被截断
+PASS  普通长字符串被截到 maxStringChars
 PASS  切在 \u 转义中间仍是合法 JSON
+PASS  非 JSON 回退 preview 且标注 totalChars
 PASS  构造的大结果确实超压缩阈值
-PASS  老的大结果被压缩
-PASS  老的小结果保持原样
-PASS  最近窗口内的结果保持完整
+PASS  G5：4 条并行结果全部完整保留（不再保留 3 压 1）
+PASS  窗外的大结果被压缩
+PASS  窗口内（最新 maxItems 条）保持完整
 PASS  非 tool 消息未被改动
 PASS  tool_call_id 被保留
 PASS  压缩后保留标量 total
-PASS  压缩后保留标量 returned
 PASS  大数组降级为占位说明
 PASS  小数组 tags 保留
-PASS  短字符串 source 保留
 PASS  压缩结果体积大幅下降
+PASS  窗外的小结果保持原样（不值得动）
 PASS  纯函数：同一输入两次调用逐字节相同
+PASS  profile 放大窗口：long-1m 下 8 条全保留
+PASS  profile 放大不改变 normal 的结论
 PASS  轮次推进后旧消息的压缩结果不变（前缀稳定）
-PASS  轮次推进后窗口内消息仍完整
 PASS  轮次推进后新消息未被误压
 PASS  压缩结果再次压缩不再变化
+PASS  窗口：minItems 兜底（单条超预算也至少留 2 条完整）
 
-结论: PASS —— 25 项断言
+结论: PASS —— 38 项断言

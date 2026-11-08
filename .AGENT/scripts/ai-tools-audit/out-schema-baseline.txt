@@ -2,14 +2,14 @@
 工具总数: 67
 
 【core —— 每轮常驻注入】16 个
+  builtin.vault.read                  5804 字符  ~1709 tok  schema  472  [read/-]
   builtin.tool.request                3482 字符  ~1177 tok  schema  157  [read/-]
   builtin.quiz.list                   3290 字符  ~1036 tok  schema  556  [read/quiz]
-  builtin.vault.read                  2914 字符  ~ 926 tok  schema  308  [read/-]
   builtin.habits.stats                2438 字符  ~ 684 tok  schema  241  [read/checkin]
   builtin.quiz.stats                  2280 字符  ~ 693 tok  schema   96  [read/quiz]
+  builtin.vault.list                  2218 字符  ~ 677 tok  schema  237  [read/-]
+  builtin.vault.search                2162 字符  ~ 627 tok  schema  245  [read/-]
   builtin.schedule.list-todos         1897 字符  ~ 593 tok  schema  164  [read/schedule]
-  builtin.vault.list                  1790 字符  ~ 538 tok  schema   97  [read/-]
-  builtin.vault.search                1631 字符  ~ 466 tok  schema  161  [read/-]
   builtin.pomodoro.summary            1499 字符  ~ 397 tok  schema   83  [read/pomodoro]
   builtin.vault.resolve-ref           1464 字符  ~ 475 tok  schema  114  [read/-]
   builtin.help.search                 1263 字符  ~ 491 tok  schema  274  [read/-]
@@ -18,7 +18,7 @@
   builtin.web.read                     932 字符  ~ 308 tok  schema  174  [read/-]
   builtin.web.search                   722 字符  ~ 245 tok  schema  173  [read/-]
   builtin.schedule.list-recurring      570 字符  ~ 167 tok  schema   34  [read/schedule]
-  小计: 28292 字符  ~8892 tok
+  小计: 32141 字符  ~9975 tok
 
 【ondemand —— 默认折叠，tool.request 后才注入】51 个
   builtin.quiz.gen-paper              4961 字符  ~1631 tok  schema  713  [write/quiz]
@@ -35,6 +35,7 @@
   builtin.schedule.update-todo        2432 字符  ~ 858 tok  schema  788  [write/schedule]
   builtin.vault.write                 2324 字符  ~ 772 tok  schema  285  [write/-]
   builtin.schedule.mutate-checkpoint  2067 字符  ~ 563 tok  schema  565  [write/schedule]
+  builtin.accounting.balances         2049 字符  ~ 674 tok  schema   34  [read/accounting]
   builtin.schedule.mutate-stage       2014 字符  ~ 552 tok  schema  551  [write/schedule]
   builtin.knowledge.create-page       1999 字符  ~ 690 tok  schema  324  [write/knowledge]
   inventory                           1779 字符  ~ 683 tok  schema  109  [write/-]
@@ -53,13 +54,12 @@
   builtin.blog.create-entry           1186 字符  ~ 369 tok  schema  227  [write/blog]
   builtin.checkin.check-habit         1177 字符  ~ 351 tok  schema  103  [write/checkin]
   builtin.blog.search                 1162 字符  ~ 421 tok  schema  170  [read/blog]
-  builtin.accounting.balances         1157 字符  ~ 404 tok  schema   34  [read/accounting]
   course.outline.write                1153 字符  ~ 440 tok  schema  348  [write/-]
   course.sources.register             1098 字符  ~ 332 tok  schema  325  [write/-]
   builtin.terminal.exec               1049 字符  ~ 354 tok  schema  240  [write/terminal]
   builtin.schedule.delete-todo         964 字符  ~ 323 tok  schema  109  [write/schedule]
-  course.organize.archive              963 字符  ~ 348 tok  schema  236  [write/-]
   builtin.schedule.reorder-stages      944 字符  ~ 279 tok  schema  212  [write/schedule]
+  course.organize.archive              939 字符  ~ 337 tok  schema  236  [write/-]
   builtin.quiz.remove                  936 字符  ~ 311 tok  schema  118  [write/quiz]
   builtin.booksource.list              904 字符  ~ 295 tok  schema   34  [read/bookMarket]
   builtin.intel.set-recommendations    870 字符  ~ 271 tok  schema  472  [write/intel]
@@ -72,10 +72,10 @@
   course.outline.remove-unit           619 字符  ~ 211 tok  schema  106  [write/-]
   builtin.schedule.delete-workflow     601 字符  ~ 174 tok  schema   96  [write/schedule]
   builtin.schedule.get-workflow        594 字符  ~ 173 tok  schema   96  [read/schedule]
-  小计: 86960 字符  ~28048 tok
+  小计: 87828 字符  ~28307 tok
 
-合计若全部装载: ~36940 tok
-实际常驻(默认权限 read 态): ~8892 tok / 轮
+合计若全部装载: ~38282 tok
+实际常驻(默认权限 read 态): ~9975 tok / 轮
 
 【单工具 schema 红线（≤800 字符，AGENTS.md#16 铁律）】
   ⚠️ 超线 3 个：builtin.schedule.create-recurring 985；builtin.intel.query 974；builtin.schedule.update-recurring 847

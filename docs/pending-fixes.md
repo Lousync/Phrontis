@@ -1880,7 +1880,9 @@ v1 实机踩中的连带事故：副本在场时，编辑器里「打开主文�
 **修复记录（2026-10-25，fix/v3.12.12）**：探针 A2 分屏全流程 —— 主栏页签/顶栏恒显主栏页自己的题名，副栏装载不再串写。
 **验证**：分屏两页题名一长一短 → 反复切换/装载 → 两栏页签与顶栏各自恒定。
 
-## [ ] B-43 打开页面即出现一次假脏（content 分歧），自动保存白写一轮（2026-10-25，P3；B-40 探针顺带实测，**存量问题**）
+## [x] B-43 打开页面即出现一次假脏（content 分歧），自动保存白写一轮（2026-10-25，P3；B-40 探针顺带实测，**存量问题**；**2026-11-07 收口，见落码轮**）
+
+> **落码轮（2026-11-07，v3.19.1 `d0a50217`）**：无侵入观测探针（页面文件 mtime + frontmatter `updated` 前后对比、4.5s 轮询窗）实测当前代码三种打开路径——阅读态打开 / keep-alive 切页 / 进编辑态静置——**均无假保存**。B-50 的渲染收敛（整页 summary 订阅移除 + MarkdownPreview 回调 useCallback 稳定化）大幅压低整页重渲染频次，本条目怀疑的「两段式 setState 之间以中间态跑 effect」窗口已被顺带关闭。按预设方向补 **pageId 代次门卫**（divergence effect 只在 `page.id === pageId` 时武装），语义钉死为防线。探针 `.AGENT/scripts/notes-merge/probe-fake-dirty.mjs` 6 项 PASS 入库作回归契约。
 
 **现象**：探针实测每次打开页面后 `isDirtyRef` 变 true（`[dirty-mark] cDiffer:true, tDiffer:false`，title 与 savedTitle 一致、content 与 savedContent 不一致），随后一次自动保存把**同样内容**写回磁盘（frontmatter `updated` 被顶掉、mtime 变化）。用户无感，但「刚保存 2s 内不打断」重读闸被白白消耗，且每次开页多一次写盘。
 **定位**：`src/modules/knowledge/components/PageEditor.tsx` 「Mark dirty when content/title diverges」effect（deps 含 `page`）与 loadPage `.then` 的 setState/写 ref 交错。
@@ -1985,7 +1987,9 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 - `src/modules/ai-teaching/index.tsx`：大纲落盘卡新增「去左栏开段」（只定位、不自动开讲）；课程助手 `ask` 增加客户端兜底，过滤坏选项并补左栏入口。
 - 契约 `verify-course-mode.mjs` 62/62；双 tsc / build 通过。
 
-## [ ] B-47 段 / 知识点讲完后 AI 不主动建议收尾生成交接并跳下一段（2026-10-27，P2；用户反馈）
+## [x] B-47 段 / 知识点讲完后 AI 不主动建议收尾生成交接并跳下一段（2026-10-27，P2；用户反馈；**2026-11-07 落码，见落码轮**）
+
+> **落码轮（2026-11-07，v3.19.1 `f44f6ce9`）**：教师分支注入（`buildCourseInjection`）补三条——① 本段进度「当前聚焦第 X/N 个知识点」（可得的真状态；progress.json 无 per-unit 讲授状态，「已讲到哪」由模型结合对话史判断，不虚构）；② 段内收尾协议：任何情况下**不得自动收尾**、不替学生调 finalize（负向断言），知识点讲完且无追问 → 先问「继续下一个还是先收尾本段」，最后一个知识点也讲完且学生确认 → 主动建议「点收尾本段 → 本段夹生成《交接.md》→ 左栏开下一段」；③ 已收尾段（ended）同会话：不续讲、不再建议收尾，提醒看本段夹《交接.md》并开下一段（注入下一段序号与覆盖面，`nextOpenSegmentBrief` 取同章 order 更大的 open 段；无下一段时指向章末复习）。契约 `.AGENT/scripts/ai-teaching/verify-segment-wrapup.mjs` 17 项 PASS；course-mode 82 项 / ai-teaching-tools 45 项无回归。**注入侧已闭环；真机讲一轮的实际引导效果待观察。**
 
 **现象**：一段 / 一个知识点讲完、用户没有追问后，AI 往往继续往下讲或停住，不主动建议「收尾本段 → 生成交接 → 去左栏开下一段」。用户需要自己找到「收尾本段」按钮，交接文档与下一段的衔接容易被遗忘。
 
@@ -2003,6 +2007,8 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 
 ## [ ] B-48 背单词：读单词功能疑似有问题（2026-11-02，P2；用户反馈，**只记录不解决**）
 
+> **调查结论（2026-11-07，代码路径定位，未复现）**：嵌入版发音走 qwerty-learner 上游 bundle，其词典音频是**云端 URL**；`vocab://` 协议的 CSP（`connect-src 'self'`、`media-src 'self' data:`，见 `electron/main/index.ts` 协议 handler 注释「嵌入模式默认不联网，发音 / 按键音已关闭」）把云端音频**结构性断网**，上游发音主路径必败——这与「读单词疑似有问题」高度吻合。本地 `resources/vocab/assets/` 只有键盘音 wav，**没有词典发音音频产物**；Web Speech（speechSynthesis）是唯一免网路径但上游是否启用待核。修复 = 发音本地化方案（本地 TTS 或预置词典音频库），属 **vocab 适配批次的设计决策（需拍板）**；且 `VOCAB_ENTRY_ENABLED` 仍为 false、用户入口未开。维持「只记录」；与 `docs/vocab-module-plan.md` §9 一起排。
+
 **现象**：用户反馈「读单词功能似乎有些问题」；具体表现、复现步骤、影响范围待下次补充。
 
 **范围**：背单词模块（qwerty-learner 嵌入版）的发音 / 朗读相关。v3.17.0 已合入代码但关闭用户入口，计划 v3.18.0 开放后再复现。
@@ -2011,7 +2017,13 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 
 **关联工作**：背单词功能的软件适配与优化（见 `docs/vocab-module-plan.md` §9）。
 
-## [ ] B-49 文件树从行首图标拖拽无效（2026-11-02，P1；用户实测，v3.16.1 引入）
+## [x] B-49 文件树从行首图标拖拽无效（2026-11-02，P1；用户实测，v3.16.1 引入；**2026-11-07 改 pointer 实现收口，见落码轮**）
+
+> **落码轮（2026-11-07，v3.19.1 `a4ac3865`）**：运行期探针先定位后修——
+> **定位实锤两条**：① 合成 dragstart 管线全通（handler 执行 / dataTransfer 载荷 / drop → onMove 落盘），坏的**不是 handler**；② CDP 合成鼠标无法启动原生 HTML5 拖拽会话——**行级 draggable 对照同样不触发**，即手势启动层在本机不可复现也不可验证，Windows 实机的失败无法本地证伪。定位候选 2（`setDragPath` 重渲染换节点）与 3（setDragImage 抛错）被排除：管线层证明无碍。
+> **修法**：按铁律 9 既有结论（日程拖拽已验证「HTML5 拖放会静默失败」）把树拖拽换成 **pointer 自实现**，不再依赖 HTML5 拖拽系统：图标 pointerdown 捕获 → 位移 >6px 进入拖拽（F-4 防误拖保持）→ elementFromPoint 解析落点（目录行=目录 / 文件行=父目录 / 树内空白=根 / 树外=取消）→ pointerup 落盘 onMove；落点后 250ms 时间窗拦补发 click。视觉反馈保持 F-4 口径（源行 opacity-40 / 落点 ring 高亮 / 根空白底色）。
+> **验证**：`probe-tree-drag.mjs`（CDP 真鼠标端到端）13 项 PASS——目录落盘 / 文件行=父目录 / 阈值内不拖不误开 / 点图标=打开 / 树外取消 / 补发 click 守卫；`verify-tree-drag-handle.mjs` 重写为 pointer 模式契约 29 项 PASS。双 tsc 绿。
+> **待办**：Windows 实机回归一次（拖文件/文件夹进目录）；排障副产品 `Onboarding` 首启引导全屏遮罩会拦掉 CDP 真鼠标输入，seed 已显式 `onboardingDone=true`。
 
 **现象**：3.16.1 里文件树的拖拽把手（行首文件 / 文件夹图标）**看得见、大小也够**，但按住图标拖动没有反应，文件不会被移动。由于 F-4 已把整行 `draggable` 收窄到图标，行本身也不再能拖 —— 实际效果等于「拖拽移动不可用」。
 
@@ -2037,3 +2049,56 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 **契约缺口**：`verify-tree-drag-handle.mjs` 只做了静态结构断言（`draggable` 在图标上），没有验证真实 `dragstart` / `drop`，所以本轮契约全绿但真机拖不动。修复时补一条运行期探针或 devbridge 动作。
 
 **临时替代**：右键文件 →「将文件移动到…」仍可用。
+
+## [x] B-50 笔记区题单展开 / 收起参考答案时页面乱跳（2026-11-06，P1；用户实机反馈 + 运行期探针复现；**2026-11-07 已修，见落码轮**）
+
+> **落码轮（2026-11-07，v3.19.1 `60703b6a` + `9b895d10`）**：按上方修复方向 1+2+3 落地——
+> ① **切断页面级重渲染**：`QuizRecordStore.rebuild()` 结构共享（summary 数字不变复用旧对象，口径与比较抽到零依赖 `quizSummaryPure.ts`）；PageEditor 整页 `useQuizSummary` 订阅移进 ⋮ 的 `WrongRedoMenuItem` 小组件。② **MarkdownPreview 的 memo 真正生效**：`resolveInternalLink` / `onWikiLink` / `onLinkClick` 全部 useCallback 稳定化。③ `ShortAnswerCard` 的 `revealed` 按记录同步初始化（未预期重挂不再闪「先收起一帧」）。
+> **过程中抓到并修掉一个新雷（React #310）**：三枚 useCallback 原落在 `if (!page) return` 早退**之后**——普通函数可以、hooks 不行，首帧走早退、加载完成那一帧 hooks 多 3 个 → 整页崩。已整体搬到早退之前，契约补「早退分支之后不得再调任何 hooks」防回归。
+> **验证**：契约 `verify-quiz-preview-stability.mjs` 20 项 PASS；运行期探针 `probe-quiz-preview-stability.mjs`（CDP）：修复前基线 15 项 fail（cardSame/taSame=false、scrollTop 503→0、焦点掉 body、aria 卡 false——与上面复现实录逐条吻合），修复后 **21/21 PASS**（展开/收起/防抖保存三路径 DOM 身份、scrollTop、焦点、高度全部稳定）。双 tsc 绿。
+
+**现象**：在笔记区（知识库阅读态）打开含简答题的题单，点「显示参考答案」或「收起参考答案」时，正文会突然向上跳一段（严重时直接跳回顶部），不是平滑展开 / 收起；如果先在作答框里打了字再点按钮，跳得更明显，作答框还会失去焦点。用户原话：「展开和关闭参考答案会导致乱跳转」。
+
+**复现（2026-11-06，临时 CDP 探针，3.18.0 `out/` 构建 + 临时仓库）**：
+1. 打开一份含 2 道简答题的题单，进入阅读态；
+2. 把正文滚到中部（实测 `scrollTop=500`），在简答题作答框里输入文字（保持焦点）；
+3. 点「显示参考答案」→ `scrollTop` 从 `500` 掉到 `124.5`，`document.activeElement` 从 `TEXTAREA` 变成 `BODY`，卡片节点被替换；
+4. 只输入文字、不点按钮，等 500ms 防抖保存 → 作答框节点被替换、焦点丢失、值有一帧为空，`scrollTop` 从 `296` 掉到 `0`。
+
+**定位**：
+- `src/components/shared/ShortAnswerCard.tsx:124-129`（`toggleReveal`：先 `flush()`，再 `store.saveDraft(no, { revealed })`）
+- `src/components/shared/QuizRecordStore.tsx:272-297`（`saveDraft` 同步 `setRecord` → `rebuild` → `emit`）
+- `src/components/shared/QuizRecordStore.tsx:145-159`（`rebuild()` **每次都新建** `summarySnapshot` 对象，即使 `answered / wrong / drafts` 数字没变）
+- `src/modules/knowledge/components/PageEditor.tsx:356-366`（页面级 `useQuizSummary(quizStore)`；`currentWrongCount` 只在顶栏用，却让整个 PageEditor 订阅了整份答题记录）
+- `src/modules/knowledge/components/PageEditor.tsx:2256-2292`（传给 `MarkdownPreview` 的 `onWikiLink` / `onLinkClick` 是内联箭头函数，每次渲染都是新引用）
+- `src/components/shared/MarkdownPreview.tsx:304-306`（注释已经写明「components 对象被重建 → React 会卸载重建整棵节点树」）、`:306-476`（`components` 里的 `p` / `pre` / `h1…h6` 都是内联函数）、`:492-493`（`React.memo` 包装）
+- `src/components/shared/ShortAnswerCard.tsx:38`（`revealed` 初始值恒为 `false`）、`:58-72`（挂载后才从 `record.draft.revealed` 回填）
+- `src/components/shared/Collapsible.tsx:25-41` + `src/styles/index.css:777-792`（`.kb-collapse` 的 `0fr↔1fr` 动画）
+
+**根因（运行期探针实锤，链条如下）**：
+1. `toggleReveal` 调用 `saveDraft`，`saveDraft` 同步更新记录并 `rebuild()`；`rebuild()` 无条件生成新的 `summarySnapshot` 对象。
+2. `PageEditor` 通过 `useQuizSummary` 订阅了整份 summary，`useSyncExternalStore` 看到对象引用变化 → **整个 PageEditor 重渲染**，即使这次只是 `revealed` 变化、统计数字完全没变。
+3. PageEditor 传给 `MarkdownPreview` 的两个回调是内联箭头函数，`React.memo` 的浅比较必然失败；`MarkdownPreviewInner` 的 `components` useMemo 依赖这两个回调 → 每次重渲染都重建 `components` 对象，而对象里的 `p` / `pre` / `h*` 都是新函数。
+4. `react-markdown` 把这些函数直接当作 React 元素类型；类型引用一变，React 就**卸载整棵 Markdown 子树再重新挂载**。探针实测每次展开 / 收起触发 72~92 条 childList mutation，`[data-quiz-card]` 与 `textarea` 节点身份都变了（`cardSame:false` / `taSame:false`）。
+5. `ShortAnswerCard` 重新挂载时 `revealed` 先回到 `false`，effect 再从记录回填 `true`：
+   - 展开：视觉上是「先收起一帧，再重新展开」，`scrollHeight` 实测 `1951 → 1932 → 2090`；
+   - 收起：新卡片直接以 `revealed=false` 挂载，`scrollHeight` 从 `2090` **瞬间**掉到 `1951`，220ms 收起动画被整段吞掉；
+   - 整棵子树被替换时滚动锚点丢失，滚动容器会出现内容短暂为空的一帧：打字场景实测 `scrollTop 296 → 0`，打字后点展开实测 `500 → 124.5`；作答框被替换同时导致焦点丢失、值在一帧内为空。
+6. **不只是点按钮**：输入框的 500ms 防抖 `saveDraft` 走的是同一条链路，所以「打着字停一下」也会触发整页重挂、焦点丢失和滚动跳回顶部 —— 这是同一根因下更严重的隐藏症状。
+7. **也不只题单**：PageEditor 的任何 state 变化（⋮ 菜单开合、`flashWiki` 高亮等）都会让内联回调换引用 → 整棵正文重挂；题单作答只是把这条链路高频触发出来。修的时候应按「MarkdownPreview 的 props 必须稳定」这个通用口径收口，而不是只给题单打补丁。
+
+**修复方向**：
+1. **切断页面级重渲染**（首选）：把 `useQuizSummary` 从 PageEditor 里挪到真正需要 `currentWrongCount` 的顶栏小组件；或让 `QuizRecordStore.rebuild()` 做结构共享 —— 数字没变时复用上一份 `summarySnapshot`，避免 `useSyncExternalStore` 因新对象引用而强制整页渲染。store 原本的设计目标就是「只有变更的那张卡重渲染」（见 `QuizRecordStore.tsx:90-97`），页面级 summary 订阅正好把它抵消了。
+2. **让 `MarkdownPreview` 的 memo 真正生效**：PageEditor 侧用 `useCallback` 稳定 `onWikiLink` / `onLinkClick`（`resolveInternalLink` 也要一起稳定），或把 `components` 的函数提到模块级 / 用 ref 读取最新 props，确保 `React.memo` 在正文未变时直接 bail。
+3. **消除首帧折叠闪烁**：`ShortAnswerCard` 用 `useState(() => !!record?.draft?.revealed)` 同步初始化 `revealed`（或在记录已知时跳过 `false` 首帧）；即使根因修好，这条也能防止未来其他重挂场景再次闪一下。
+4. **可选兜底**（不能替代 1/2）：在 Markdown 子树重挂前后保存 / 恢复 `previewRef.scrollTop`，或在操作期间临时 `overflow-anchor: none`；但若仍整树重挂，焦点与输入光标依然会丢，不建议只做这一层。
+5. **契约缺口**：现有 `verify-quiz-record.mjs` 只覆盖数据层（草稿 / 判题 / 迁移），没有 DOM 身份与滚动断言。修复时补一条运行期探针：展开 / 收起各一次 + 等待一次 500ms 防抖保存，断言 `[data-quiz-card]` 与 `textarea` 节点身份不变、`scrollTop` 不变、`document.activeElement` 仍是作答框。
+
+**验证**：
+- 题单滚到中部，作答框里打字后点「显示参考答案」：正文不跳、作答框焦点不丢、参考答案只平滑展开一次（不出现先收起再展开的闪烁）。
+- 展开后点「收起参考答案」：只播一次 220ms 收起动画，不发生瞬间塌陷或滚动上移。
+- 在作答框里打字后停顿 > 500ms：焦点、光标位置、滚动位置都不变；`scrollTop` 探针前后一致。
+- 40+ 题的长题单里只改一道简答题：仅该题卡重渲染（React Profiler / DOM 节点身份检查），其余题卡与标题节点保持同一引用。
+- `prefers-reduced-motion` 下同样不跳。
+
+**当前处理**：按用户明确要求**只登记、不修复**；本轮未改任何源码，临时探针仓库已删除。下次开修前先按上面「复现」步骤再跑一遍确认基线。
