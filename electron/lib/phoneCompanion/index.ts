@@ -1,8 +1,9 @@
 import { app, ipcMain } from 'electron'
 import { randomInt } from 'crypto'
 import { hostname } from 'os'
-import { createCompanionServer, type CompanionPairCode, type CompanionPairRequestView, type CompanionServer } from './server'
-import { DEFAULT_PORT, PAIR_CODE_TTL_MS, buildPairUrl, shouldApplyIncoming, type ScheduleItemData } from './protocol'
+import { createCompanionServer, type CompanionPairCode, type CompanionPairRequestView, type CompanionServer, type CompanionServerDeps } from './server'
+import { DEFAULT_PORT, PAIR_CODE_TTL_MS, buildPairUrl, shouldApplyIncoming, pairingCapabilities, type ScheduleItemData } from './protocol'
+import { startDiscoverResponder, stopDiscoverResponder } from './discover'
 import { generateToken } from '../lanShare/auth'
 import { getLanAddresses } from '../lanShare/server'
 import { toQrDataUrl } from '../lanShare/qr'
@@ -109,7 +110,7 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
   if (state.server) return status()
   const port = opts?.port && opts.port > 0 && opts.port < 65536 ? opts.port : DEFAULT_PORT
 
-  const server = createCompanionServer({
+  const deps: CompanionServerDeps = {
     loadDevices: loadPairedDevices,
     saveDevices: savePairedDevices,
     getPairCode: () => state.pairCode,
@@ -213,7 +214,8 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
       .filter((x): x is { id: string; updatedAt: string; data: ScheduleItemData } => !!x && Date.parse(x.updatedAt) > sinceMs),
     listTombstonesSince: sinceMs => vaultTombstonesSince(sinceMs),
     pcName: () => hostname(),
-  })
+  }
+  const server = createCompanionServer(deps)
 
   let boundPort = 0
   for (let i = 0; i < MAX_PORT_TRIES; i++) {
@@ -233,6 +235,12 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
   }
 
   state = { server, port: boundPort, pairCode: newPairCode(), pendingPairs: [], unsubDataChanged: null }
+
+  /* 组播发现应答器（Phrontis-mobile 仓 handoff-multicast-discovery-desktop.md）：手机往组播组喊
+   * "PHRONDIS v1" → 向来源单播回发现负载（与 /api/discover 同构 + port），不猜网段任意子网秒回。
+   * 电脑名与配对能力取同一份 deps（与 HTTP /api/discover 同源推导），端口为实际绑定值——
+   * 电脑改端口时组播路径自动跟随，扫段路径做不到。组播不可用（AP 隔离等）时静默降级，不影响服务。 */
+  startDiscoverResponder(boundPort, deps.pcName, pairingCapabilities(!!deps.onPairRequest))
 
   /* v1.7 唤醒接线（方案 §3.2）：一处订阅覆盖全部信号源——
    * ① 手机 push 应用成功：三域 applied 路径各自 broadcastDataChanged（accounting/schedule/knowledge）；
@@ -294,6 +302,7 @@ function rowToScheduleItem(row: TodoRow): { id: string; updatedAt: string; data:
 }
 
 export async function stop(): Promise<CompanionStatus> {
+  stopDiscoverResponder()
   state.pairCode = null
   state.pendingPairs = []
   state.unsubDataChanged?.()
@@ -335,6 +344,7 @@ export function registerCompanionHandlers(): void {
   ipcMain.handle('companion:rejectPair', (_e, requestId: unknown) => resolvePairRequest(String(requestId ?? ''), 'reject'))
 
   app.on('before-quit', () => {
+    stopDiscoverResponder()
     if (state.server) {
       try {
         state.server.close()

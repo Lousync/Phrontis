@@ -19,6 +19,7 @@
  *   §8 实时长轮询（v1.7 wait / waitSupported / pokeSync / 顶掉 / 断连清理）
  *   §5 CORS（预检 204 + 放行 authorization）
  *   §6 协议文档契约（design.md §2.1 与端点常量一致）
+ *   §9 组播发现应答器（UDP 发现：与手机端 Java 常量对表 / ping 应答构型 / 非 ping 不应答 / stop 生效 / 入参跟随）
  *
  * 运行（主仓根目录）：
  *   node --experimental-strip-types --no-warnings .AGENT/scripts/phone-companion/verify-companion-protocol.mjs
@@ -33,18 +34,25 @@ import { createCompanionServer } from '../../../electron/lib/phoneCompanion/serv
 import {
   SYNC_DOMAINS, PROTOCOL_VERSION, DEFAULT_PORT, PULL_WAIT_CAP_MS,
   normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData,
-  shouldApplyIncoming, buildPairUrl, parsePairInput,
+  shouldApplyIncoming, buildPairUrl, parsePairInput, pairingCapabilities,
 } from '../../../electron/lib/phoneCompanion/protocol.ts'
 import {
   sanitizeNoteStem, deviceFolderName, pickNoteFileName, parseNoteFrontmatter,
   bumpNoteFrontmatterUpdated, notePushDecision, isMobileNotesRel,
 } from '../../../electron/lib/phoneCompanion/notesUsb.ts'
+import {
+  startDiscoverResponder, stopDiscoverResponder, DISCOVER_GROUP, DISCOVER_PORT, DISCOVER_PING,
+} from '../../../electron/lib/phoneCompanion/discover.ts'
+import dgram from 'node:dgram'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..', '..')
 // 手机仓目录名大小写跨机不一致（Windows 不敏感 / Linux 敏感）：双拼写探测
 const DESIGN_CANDIDATES = ['Phrontis-mobile', 'phrontis-mobile'].map((d) => join(ROOT, '..', d, 'docs', 'design.md'))
 const DESIGN_FILE = DESIGN_CANDIDATES.find((p) => { try { return statSync(p).isFile() } catch { return false } }) ?? DESIGN_CANDIDATES[0]
+const JAVA_CANDIDATES = ['Phrontis-mobile', 'phrontis-mobile'].map((d) =>
+  join(ROOT, '..', d, 'android', 'app', 'src', 'main', 'java', 'com', 'lousync', 'phrontis', 'PhrontisDiscover.java'))
+const JAVA_FILE = JAVA_CANDIDATES.find((p) => { try { return statSync(p).isFile() } catch { return false } }) ?? JAVA_CANDIDATES[0]
 
 let failures = 0
 let checks = 0
@@ -603,6 +611,89 @@ console.log('\n§6 协议文档契约（design.md §2.1 与实现一致）')
   check('§2.1 v1.7 记录 wait / waitSupported', design.includes('waitSupported') && design.includes('`wait`'))
   check('§2.1 v1.7 记录服务端 25s 封顶', design.includes('25'))
   check('§2.1 v1.7 记录同设备顶掉语义', design.includes('顶掉'))
+}
+
+/* ------------------------------------------------------------------ §9 */
+console.log('\n§9 组播发现应答器（UDP 发现：手机喊 PHRONDIS v1 → 桌面单播回发现负载）')
+{
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+  /** 发一条 UDP 并等应答；超时无应答 resolve null */
+  const sendRecv = ({ host = '127.0.0.1', port, payload, waitMs = 900 }) => new Promise((resolve) => {
+    const sock = dgram.createSocket('udp4')
+    let timer = null
+    const done = (msg, rinfo) => {
+      clearTimeout(timer)
+      try { sock.close() } catch { /* 忽略 */ }
+      resolve(msg ? { text: msg.toString('utf8'), from: rinfo.address + ':' + rinfo.port } : null)
+    }
+    sock.on('message', (msg, rinfo) => done(msg, rinfo))
+    sock.bind(() => {
+      sock.send(Buffer.from(payload, 'utf8'), port, host, () => { timer = setTimeout(() => done(null), waitMs) })
+    })
+  })
+
+  const PC_NAME = '契约测试电脑'
+  const HTTP_PORT = DEFAULT_PORT
+  const PAIRING_FULL = pairingCapabilities(true)
+
+  // 配对能力清单单一推导（HTTP /api/discover 与组播应答共用，勿各自写死）
+  check('§9 pairingCapabilities(true) = [request, code]', eq(PAIRING_FULL, ['request', 'code']))
+  check('§9 pairingCapabilities(false) = [code]', eq(pairingCapabilities(false), ['code']))
+
+  // 线路常量与手机端 Java 插件对表——两端各写一份，「两端各自认为对、连起来才发现错」的典型面
+  let java = ''
+  try { java = readFileSync(JAVA_FILE, 'utf-8') } catch { /* 读不到在下面报 */ }
+  check('§9 手机端 PhrontisDiscover.java 存在', java.length > 0, JAVA_FILE)
+  const javaStr = (name) => { const m = java.match(new RegExp(name + ' = "([^"]*)"')); return m ? m[1].replace(/\\n/g, '\n') : null }
+  const javaNum = (name) => { const m = java.match(new RegExp(name + ' = (\\d+)')); return m ? Number(m[1]) : null }
+  check('§9 ping 文本两端一致（PHRONDIS v1）', javaStr('PING') !== null && javaStr('PING').trim() === DISCOVER_PING.trim(),
+    '桌面="' + DISCOVER_PING.trim() + '" 手机=' + String(javaStr('PING')))
+  check('§9 组播组两端一致（239.255.42.42）', javaStr('GROUP') === DISCOVER_GROUP, '桌面=' + DISCOVER_GROUP + ' 手机=' + String(javaStr('GROUP')))
+  check('§9 组播端口两端一致（8771）', javaNum('PORT') === DISCOVER_PORT, '桌面=' + DISCOVER_PORT + ' 手机=' + String(javaNum('PORT')))
+
+  startDiscoverResponder(HTTP_PORT, () => PC_NAME, PAIRING_FULL)
+  await sleep(200) // 等 bind + addMembership
+
+  // 组播回环：向组地址发包、加入组的本端应收到并单播应答。环境依赖（容器 / 某些网络禁组播），
+  // 收不到只警告不判 FAIL——应答逻辑本身由下面的单播路径硬断言覆盖。
+  const mcast = await sendRecv({ host: DISCOVER_GROUP, port: DISCOVER_PORT, payload: DISCOVER_PING, waitMs: 700 })
+  if (mcast) {
+    check('§9 组播 ping 收到单播应答', JSON.parse(mcast.text).port === HTTP_PORT, mcast.text)
+  } else {
+    console.log('  [WARN] 组播回环无应答（本机网络禁组播则属正常），该路径跳过——单播路径已覆盖应答构型')
+  }
+
+  // 单播到绑定端口（确定性路径）：ping → 应答构型（与 GET /api/discover 同构 + port）
+  const reply = await sendRecv({ port: DISCOVER_PORT, payload: DISCOVER_PING })
+  check('§9 ping 收到单播应答', !!reply)
+  const body = reply ? JSON.parse(reply.text) : null
+  check('§9 应答构型 ok/protocol/pc.name/port/pairing',
+    !!body && body.ok === true && body.protocol === PROTOCOL_VERSION && body.pc?.name === PC_NAME
+      && body.port === HTTP_PORT && eq(body.pairing, PAIRING_FULL), reply && reply.text)
+  check('§9 应答来自服务端口 8771', !!reply && reply.from.endsWith(':' + DISCOVER_PORT), reply && reply.from)
+
+  const noise = await sendRecv({ port: DISCOVER_PORT, payload: 'HELLO WORLD\n', waitMs: 400 })
+  check('§9 非 ping 文本不应答', noise === null, noise && noise.text)
+
+  stopDiscoverResponder()
+  await sleep(50)
+  const afterStop = await sendRecv({ port: DISCOVER_PORT, payload: DISCOVER_PING, waitMs: 400 })
+  check('§9 stop 后不再应答（跟随伴侣服务生命周期）', afterStop === null, afterStop && afterStop.text)
+
+  // 勿写死：pcName / httpPort / pairing 全部来自入参（重启一次用另一组入参验证）
+  startDiscoverResponder(9999, () => '另起的电脑名', pairingCapabilities(false))
+  await sleep(200)
+  const reply2 = await sendRecv({ port: DISCOVER_PORT, payload: DISCOVER_PING })
+  const body2 = reply2 ? JSON.parse(reply2.text) : null
+  check('§9 重启后入参跟随（port/pc.name/pairing）',
+    !!body2 && body2.port === 9999 && body2.pc?.name === '另起的电脑名' && eq(body2.pairing, ['code']), reply2 && reply2.text)
+  stopDiscoverResponder()
+
+  // 协议文档契约：手机仓 design.md 决策记录了组播发现与交接文档
+  let design = ''
+  try { design = readFileSync(DESIGN_FILE, 'utf-8') } catch { /* 读不到在下面报 */ }
+  check('§9 design.md 记录组播发现（239.255.42.42:8771）', design.includes('239.255.42.42:8771'))
+  check('§9 design.md 记录桌面应答端交接文档', design.includes('handoff-multicast-discovery-desktop.md'))
 }
 
 console.log('\n' + (failures === 0 ? 'PASS (' + checks + ' checks)' : 'FAIL (' + failures + '/' + checks + ')'))

@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID, randomInt } from 'crypto'
 import {
   MAX_BODY_BYTES, PAIR_ATTEMPTS_PER_MIN, PAIR_CODE_TTL_MS, PROTOCOL_VERSION, PULL_WAIT_CAP_MS, SYNC_DOMAINS,
-  normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData,
+  normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData, pairingCapabilities,
   type LedgerItemData, type ScheduleItemData, type NoteItemData, type SyncDomain,
 } from './protocol.ts'
 import { isPrivateAddress, generateToken, tokenMatches } from '../lanShare/auth.ts'
@@ -257,7 +257,7 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
           ok: true,
           protocol: PROTOCOL_VERSION,
           pc: { name: deps.pcName() },
-          pairing: deps.onPairRequest ? ['request', 'code'] : ['code'],
+          pairing: pairingCapabilities(!!deps.onPairRequest),
         })
         return
       }

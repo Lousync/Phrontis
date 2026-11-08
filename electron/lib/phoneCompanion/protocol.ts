@@ -163,6 +163,14 @@ export function buildPairUrl(ip: string, port: number, code: string): string {
 }
 
 /**
+ * 发现响应里的配对能力清单（HTTP /api/discover 与组播发现应答共用同一推导，勿各自写死）：
+ * 电脑端接线了 v1.5 配对确认框才含 request（手机据此显示「请求配对」入口）。
+ */
+export function pairingCapabilities(hasPairRequest: boolean): string[] {
+  return hasPairRequest ? ['request', 'code'] : ['code']
+}
+
+/**
  * 手机端解析配对输入（纯函数，手机仓 scripts/verify-sync.mjs 同测）。
  * 接受两种形态：
  *   ① 粘贴桌面端完整配对链接  http://192.168.1.5:8770/pair#12345678
