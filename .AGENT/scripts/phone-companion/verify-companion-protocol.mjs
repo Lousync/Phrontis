@@ -14,6 +14,9 @@
  *   §4 同步（新条目并入 / 旧更新冲突 / 新更新覆盖 / 非法负载 / 未支持域 / 拉取与游标）
  *   §4b schedule 域（合法并入 / 非法负载 / LWW / 拉取）
  *   §4c 墓碑（上行删除 / 幂等 / 旧删除拒收回 conflict / pull 按时间过滤）
+ *   §4d notes 域与内容 API（v1.2 上行 + tree/content）
+ *   §4e 笔记 U 盘模式（v1.6 纯函数 + push LWW + pull 三域 + 兼容矩阵）
+ *   §8 实时长轮询（v1.7 wait / waitSupported / pokeSync / 顶掉 / 断连清理）
  *   §5 CORS（预检 204 + 放行 authorization）
  *   §6 协议文档契约（design.md §2.1 与端点常量一致）
  *
@@ -22,20 +25,26 @@
  * 期望：末尾 PASS 且 exit=0
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { createCompanionServer } from '../../../electron/lib/phoneCompanion/server.ts'
 import {
-  SYNC_DOMAINS, PROTOCOL_VERSION, DEFAULT_PORT,
+  SYNC_DOMAINS, PROTOCOL_VERSION, DEFAULT_PORT, PULL_WAIT_CAP_MS,
   normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData,
   shouldApplyIncoming, buildPairUrl, parsePairInput,
 } from '../../../electron/lib/phoneCompanion/protocol.ts'
+import {
+  sanitizeNoteStem, deviceFolderName, pickNoteFileName, parseNoteFrontmatter,
+  bumpNoteFrontmatterUpdated, notePushDecision, isMobileNotesRel,
+} from '../../../electron/lib/phoneCompanion/notesUsb.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(HERE, '..', '..', '..')
-const DESIGN_FILE = join(ROOT, '..', 'Phrontis-mobile', 'docs', 'design.md')
+// 手机仓目录名大小写跨机不一致（Windows 不敏感 / Linux 敏感）：双拼写探测
+const DESIGN_CANDIDATES = ['Phrontis-mobile', 'phrontis-mobile'].map((d) => join(ROOT, '..', d, 'docs', 'design.md'))
+const DESIGN_FILE = DESIGN_CANDIDATES.find((p) => { try { return statSync(p).isFile() } catch { return false } }) ?? DESIGN_CANDIDATES[0]
 
 let failures = 0
 let checks = 0
@@ -53,6 +62,8 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
   const store = new Map() // id -> { id, updatedAt, data }（ledger）
   const scheduleStore = new Map() // id -> { id, updatedAt, data }（schedule）
   const notesStore = new Map() // id -> { id, updatedAt, data }（notes）
+  const notesPulls = [] // v1.6：listNotesSince 调用记录 { device, sinceMs }
+  let notesPullChanges = [] // v1.6：下一次 pull 的 changes.notes 注入值
   const noteTree = [
     { id: 'p-1', title: 'AI教学模块笔记', path: '学习/AI教学模块笔记.md', categoryId: 'c1', mtimeMs: 1730419200000, sizeBytes: 100 },
   ]
@@ -74,10 +85,11 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
     consumePairCode: () => { pairCode = null },
     applyLedger: (item) => upsert('ledger', store, item),
     applySchedule: (item) => upsert('schedule', scheduleStore, item),
-    applyNote: (item) => { notesStore.set(item.id, item); return { applied: true } },
+    // v1.6：mock 与生产同规则做 LWW（同刻桌面赢 → conflict，手机以服务端版本收敛）
+    applyNote: (item) => upsert('notes', notesStore, item),
     applyDelete: (domain, id, deletedAt) => {
-      if (domain === 'notes') return { applied: false, reason: 'unsupported-domain' } // v1.2：notes 无删除语义
-      const map = domain === 'schedule' ? scheduleStore : store
+      // v1.6：notes 墓碑同样合法（手机清空标题保存 = 删除）——三分域统一走本 mock
+      const map = domain === 'schedule' ? scheduleStore : domain === 'notes' ? notesStore : store
       const cur = map.get(id)
       if (cur && !(deletedAt > cur.updatedAt)) return { applied: false, conflict: true, reason: 'server-newer' }
       map.delete(id)
@@ -88,6 +100,10 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
     },
     listLedgerSince: (sinceMs) => [...store.values()].filter(x => Date.parse(x.updatedAt) > sinceMs),
     listScheduleSince: (sinceMs) => [...scheduleStore.values()].filter(x => Date.parse(x.updatedAt) > sinceMs),
+    listNotesSince: (device, sinceMs) => {
+      notesPulls.push({ device, sinceMs })
+      return notesPullChanges
+    },
     listTombstonesSince: (sinceMs) => tombstones.filter(t => Date.parse(t.deletedAt) > sinceMs),
     listNoteTree: () => noteTree,
     readNoteContent: (id) => id === 'p-1'
@@ -100,10 +116,13 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
   const port = server.address().port
   return {
     port,
+    server,
     base: 'http://127.0.0.1:' + port,
     store,
     scheduleStore,
     notesStore,
+    notesPulls,
+    setNotesPullChanges: (v) => { notesPullChanges = v },
     tombstones,
     devices: () => devices,
     pairRequests,
@@ -358,8 +377,8 @@ console.log('\n§4c 墓碑（上行删除 / 幂等 / 旧删除拒收 / pull 过�
   check('pull 返回墓碑列表', Array.isArray(p1.tombstones) && p1.tombstones.some(t => t.domain === 'ledger' && t.id === 'tx-del'))
   const p2 = await (await s.post('/api/sync/pull', { since: { ledger: Date.now() + 99999, schedule: 0 } }, auth)).json()
   check('pull 墓碑按 min(各域游标) 过滤：任一域未看过仍返回', p2.tombstones.length === 1)
-  const p3 = await (await s.post('/api/sync/pull', { since: { ledger: Date.now() + 99999, schedule: Date.now() + 99999 } }, auth)).json()
-  check('双域游标都越过 → 墓碑不再重复下发', p3.tombstones.length === 0)
+  const p3 = await (await s.post('/api/sync/pull', { since: { ledger: Date.now() + 99999, schedule: Date.now() + 99999, notes: Date.now() + 99999 } }, auth)).json()
+  check('三域游标都越过 → 墓碑不再重复下发', p3.tombstones.length === 0)
   await s.close()
 }
 
@@ -376,7 +395,8 @@ console.log('\n§4d notes 域与内容 API（v1.2：上行 + tree/content）')
   const n2 = await (await push([{ domain: 'notes', id: 'nt-2', updatedAt: iso(t0), data: { title: '  ', body: '' } }])).json()
   check('notes 空负载 invalid-data', n2.results[0].applied === false && n2.results[0].reason === 'invalid-data')
   const n3 = await (await push([{ domain: 'notes', id: 'nt-3', updatedAt: iso(t0), data: { deleted: true } }])).json()
-  check('notes 域不支持墓碑删除（手机不应为笔记排删除操作）', n3.results[0].applied === false && n3.results[0].reason === 'unsupported-domain')
+  // v1.6：手机清空标题保存 = 墓碑删除（取代 v1.2「notes 无删除语义」）
+  check('notes 墓碑 applied 且记墓碑（v1.6 删除语义）', n3.results[0].applied === true && s.tombstones.some(t => t.domain === 'notes' && t.id === 'nt-3'))
 
   // tree / content（需令牌）
   const bareTree = await s.get('/api/notes/tree')
@@ -394,7 +414,156 @@ console.log('\n§4d notes 域与内容 API（v1.2：上行 + tree/content）')
   await s.close()
 }
 
-/* ------------------------------------------------------------------ §5 */
+/* ------------------------------------------------------------------ §4e */
+console.log('\n§4e 笔记 U 盘模式 v1.6（纯函数 + push LWW + pull 三域 + 兼容矩阵）')
+{
+  // ---- 纯函数（notesUsb.ts）----
+  check('文件名 sanitize：非法字符换全角', sanitizeNoteStem('a/b\\c:d*e?f"g<h>i|j') === 'a／b＼c：d＊e？f＂ghij', sanitizeNoteStem('a/b\\c:d*e?f"g<h>i|j'))
+  check('文件名 sanitize：空标题兜底「无标题」', sanitizeNoteStem('   ') === '无标题')
+  check('文件名 sanitize：尾部点去除', sanitizeNoteStem('购物清单.') === '购物清单')
+  check('设备文件夹：不重名用原名', deviceFolderName('Phrontis 手机', 'uuid-aaaa-bbbb', ['Phrontis 手机']) === 'Phrontis 手机')
+  check('设备文件夹：重名加 deviceId 前 4 位', deviceFolderName('手机', 'a1b2c3d4-5678', ['手机', '手机']) === '手机-a1b2')
+  check('重名文件 (2) 后缀', pickNoteFileName(new Set(['购物清单.md']), '购物清单') === '购物清单(2).md')
+  check('重名文件跳过已有后缀', pickNoteFileName(new Set(['清单.md', '清单(2).md', '清单(3).md']), '清单') === '清单(4).md')
+  const fmOk = '---\nid: n-1\nupdated: 2026-11-08T00:00:00.000Z\ntags: [手机]\n---\n正文'
+  check('frontmatter 轻解析：id + updated', eq(parseNoteFrontmatter(fmOk), { id: 'n-1', updated: '2026-11-08T00:00:00.000Z' }))
+  check('frontmatter 缺 updated → null', parseNoteFrontmatter('---\nid: n-1\n---\n正文') === null)
+  check('非 frontmatter 文件 → null', parseNoteFrontmatter('# 普通笔记\n正文') === null)
+  const bumped = bumpNoteFrontmatterUpdated(fmOk, '2026-11-09T00:00:00.000Z')
+  check('写钩子：updated 被替换、id/tags 不动', bumped.includes('updated: 2026-11-09T00:00:00.000Z') && bumped.includes('id: n-1') && bumped.includes('tags: [手机]'))
+  check('写钩子：无 updated 行则插入', bumpNoteFrontmatterUpdated('---\nid: n-1\ntags: [手机]\n---\n正文', 'X').includes('updated: X'))
+  check('写钩子：无 id 的普通 md 不被碰', bumpNoteFrontmatterUpdated('---\ntitle: 日常\n---\n正文', 'X') === '---\ntitle: 日常\n---\n正文')
+  check('push LWW：桌面没见过 → apply', notePushDecision(undefined, iso(t0)) === 'apply')
+  check('push LWW：incoming 更新 → apply', notePushDecision(iso(t0), iso(t0 + 1)) === 'apply')
+  check('push LWW：相同 → conflict（同刻桌面赢）', notePushDecision(iso(t0), iso(t0)) === 'conflict')
+  check('push LWW：更旧 → conflict', notePushDecision(iso(t0), iso(t0 - 1)) === 'conflict')
+  check('移动端前缀判定', isMobileNotesRel('移动端/手机/购物清单.md') === true && isMobileNotesRel('移动端') === true && isMobileNotesRel('学习/笔记.md') === false)
+
+  // ---- push 语义（走真服务器 + mock deps）----
+  const s = await boot()
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: '测试机' })).json()).deviceToken
+  const auth = { authorization: 'Bearer ' + token }
+  const push = (changes) => s.post('/api/sync/push', { changes }, auth)
+
+  const c1 = await (await push([{ domain: 'notes', id: 'nt-9', updatedAt: iso(t0), data: { title: '新笔记', body: '内容' } }])).json()
+  check('push upsert 应用并带设备身份', c1.results[0].applied === true && !!s.notesStore.get('nt-9')?.deviceId && s.notesStore.get('nt-9')?.deviceName === '测试机')
+  const c2 = await (await push([{ domain: 'notes', id: 'nt-9', updatedAt: iso(t0), data: { title: '同刻冲突', body: '' } }])).json()
+  check('push 同刻 → conflict（桌面赢，手机以服务端版本收敛）', c2.results[0].applied === false && c2.results[0].conflict === true && s.notesStore.get('nt-9').data.title === '新笔记')
+  const c3 = await (await push([{ domain: 'notes', id: 'nt-8', updatedAt: iso(t0 + 9), data: { deleted: true } }])).json()
+  check('push 墓碑路由 applyDelete(notes) 且 applied', c3.results[0].applied === true && s.tombstones.some(t => t.domain === 'notes' && t.id === 'nt-8' && t.deletedAt === iso(t0 + 9)))
+
+  // ---- pull：changes.notes + since/cursor 三域 + 兼容矩阵 ----
+  s.setNotesPullChanges([{ id: 'nt-7', updatedAt: iso(t0), data: { title: '桌面改的', body: '正文' } }])
+  const p1 = await (await s.post('/api/sync/pull', { since: { ledger: 0, schedule: 0, notes: 0 } }, auth)).json()
+  check('pull changes.notes 透传', Array.isArray(p1.changes.notes) && p1.changes.notes[0].id === 'nt-7')
+  check('pull cursor 三域', typeof p1.cursor.ledger === 'number' && typeof p1.cursor.schedule === 'number' && typeof p1.cursor.notes === 'number')
+  check('listNotesSince 收到设备身份', s.notesPulls.at(-1)?.device?.deviceId === s.devices()[0]?.deviceId && s.notesPulls.at(-1)?.device?.deviceName === '测试机')
+  const p2 = await (await s.post('/api/sync/pull', { since: { ledger: 0, schedule: 0 } }, auth)).json()
+  check('兼容矩阵：旧手机不传 since.notes → 缺省 0（全量）', s.notesPulls.at(-1)?.sinceMs === 0 && Array.isArray(p2.changes.notes))
+  const p3 = await (await s.post('/api/sync/pull', { since: { ledger: 0, schedule: 0, notes: 1731045600000 } }, auth)).json()
+  check('since.notes 增量透传', s.notesPulls.at(-1)?.sinceMs === 1731045600000)
+  s.tombstones.push({ domain: 'notes', id: 'nt-6', deletedAt: iso(t0 + 5) })
+  const p4 = await (await s.post('/api/sync/pull', { since: { ledger: Date.now() + 99999, schedule: Date.now() + 99999, notes: 0 } }, auth)).json()
+  check('墓碑过滤含 notes 游标：min(三域) 未越过仍返回 notes 墓碑', p4.tombstones.some(t => t.domain === 'notes' && t.id === 'nt-6'))
+  const p5 = await (await s.post('/api/sync/pull', { since: { ledger: Date.now() + 99999, schedule: Date.now() + 99999, notes: Date.now() + 99999 } }, auth)).json()
+  check('三域游标都越过 → 墓碑不再下发', p5.tombstones.length === 0)
+  await s.close()
+}
+/* ------------------------------------------------------------------ §8 */
+console.log('\n§8 实时长轮询 v1.7（wait / waitSupported / pokeSync / 顶掉 / 断连清理）')
+{
+  // ---- 纯逻辑：封顶常量（真等 25s 太久，封顶行为由常量与 Math.min 路径锁定，方案 §5-5）----
+  check('PULL_WAIT_CAP_MS = 25000（方案 §2.3-3）', PULL_WAIT_CAP_MS === 25000)
+
+  const s = await boot()
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: '测试机' })).json()).deviceToken
+  s.setCode({ code: '87654321', expiresAt: Date.now() + 60_000 })
+  const token2 = (await (await s.post('/api/pair', { code: '87654321', deviceName: '第二台' })).json()).deviceToken
+  const pullWith = (tk, body) => s.post('/api/sync/pull', body, { authorization: 'Bearer ' + tk })
+  const wait600 = Date.now() + 99999
+
+  // 1. 旧客户端兼容：不传 wait → 立即返回且不带 waitSupported（手机据此探测旧桌面）
+  const t0s = Date.now()
+  const p0 = await (await pullWith(token, { since: { ledger: 0 } })).json()
+  check('不传 wait 立即返回且无 waitSupported（旧客户端兼容）', Date.now() - t0s < 500 && p0.waitSupported === undefined)
+
+  // 2. wait 非法值（0 / 负数 / 非数字）→ 同旧行为
+  for (const badWait of [0, -5, 'abc']) {
+    const tb = Date.now()
+    const pb = await (await pullWith(token, { since: { ledger: 0 }, wait: badWait })).json()
+    check('wait 非法值(' + JSON.stringify(badWait) + ')立即返回', Date.now() - tb < 500 && pb.waitSupported === undefined)
+  }
+
+  // 3. 挂满超时 → waitSupported: true + 空变更（信号没来，醒来现扫就是空）
+  const t1 = Date.now()
+  const p1 = await (await pullWith(token, { since: { ledger: wait600 }, wait: 300 })).json()
+  const took1 = Date.now() - t1
+  check('挂满超时返回且带 waitSupported', p1.waitSupported === true && took1 >= 280, 'took=' + took1)
+  check('超时空返回 changes 为空数组', Array.isArray(p1.changes.ledger) && p1.changes.ledger.length === 0)
+
+  // 4. pokeSync 唤醒：请求 <1s 内返回，注册表清空
+  const pending1 = pullWith(token, { since: { ledger: wait600 }, wait: 5000 })
+  await new Promise(r => setTimeout(r, 200))
+  check('挂起期间注册表 1 个', s.server.pendingPullDeviceIds().length === 1)
+  const tPoke = Date.now()
+  s.server.pokeSync()
+  const p2 = await (await pending1).json()
+  const took2 = Date.now() - tPoke
+  check('pokeSync 唤醒挂起请求（<1s）', p2.waitSupported === true && took2 < 1000, 'took=' + took2)
+  check('唤醒后注册表清空', eq(s.server.pendingPullDeviceIds(), []))
+
+  // 5. 信号是通知不是数据：唤醒后现扫，返回挂起前已存在的数据
+  await (await s.post('/api/sync/push', { changes: [{ domain: 'ledger', id: 'tx-wait', updatedAt: iso(t0), data: { date: '2026-11-08', time: '09:00', type: 'expense', amount: 5, category: '日用', payment: '', merchant: '长轮询验证', note: '' } }] }, { authorization: 'Bearer ' + token })).json()
+  const p3req = pullWith(token, { since: { ledger: 0 }, wait: 5000 })
+  await new Promise(r => setTimeout(r, 200))
+  s.server.pokeSync()
+  const p3 = await (await p3req).json()
+  check('唤醒后现扫：数据照常按 since 过滤返回', p3.changes.ledger.some(x => x.id === 'tx-wait'))
+
+  // 6. 同设备第二个 pull 顶掉第一个（第一个提前返回，第二个继续挂）
+  const first = pullWith(token, { since: { ledger: wait600 }, wait: 5000 })
+  await new Promise(r => setTimeout(r, 200))
+  const tPre = Date.now()
+  const second = pullWith(token, { since: { ledger: wait600 }, wait: 5000 })
+  const firstBody = await (await first).json()
+  const tookPre = Date.now() - tPre
+  check('第一个被顶掉提前返回（waitSupported）', firstBody.waitSupported === true && tookPre < 2000, 'took=' + tookPre)
+  check('第二个仍在挂（注册表 1 个）', s.server.pendingPullDeviceIds().length === 1)
+  s.server.pokeSync()
+  const secondBody = await (await second).json()
+  check('第二个可被唤醒且带 waitSupported', secondBody.waitSupported === true && eq(s.server.pendingPullDeviceIds(), []))
+
+  // 7. poke 放行全部挂起（多设备同时醒）
+  const pa = pullWith(token, { since: { ledger: wait600 }, wait: 5000 })
+  const pb = pullWith(token2, { since: { ledger: wait600 }, wait: 5000 })
+  await new Promise(r => setTimeout(r, 200))
+  check('两台设备同时挂起', s.server.pendingPullDeviceIds().length === 2)
+  s.server.pokeSync()
+  const [ra, rb] = await Promise.all([pa, pb])
+  const ja = await ra.json()
+  const jb = await rb.json()
+  check('poke 放行全部挂起', ja.waitSupported === true && jb.waitSupported === true && eq(s.server.pendingPullDeviceIds(), []))
+
+  // 8. 挂起中客户端断连 → 注册表清理，服务端不受影响（下一个 pull 正常）
+  const ac = new AbortController()
+  const dying = fetch(s.base + '/api/sync/pull', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+    body: JSON.stringify({ since: { ledger: wait600 }, wait: 5000 }),
+    signal: ac.signal,
+  })
+  await new Promise(r => setTimeout(r, 200))
+  check('断连前注册表 1 个', s.server.pendingPullDeviceIds().length === 1)
+  ac.abort()
+  await dying.catch(() => { /* abort 的 fetch 必然 reject，吞掉即可 */ })
+  await new Promise(r => setTimeout(r, 100))
+  check('断连后注册表清理（不留死等）', eq(s.server.pendingPullDeviceIds(), []))
+  const after = await (await pullWith(token, { since: { ledger: 0 } })).json()
+  check('断连后下一个 pull 正常', after.ok === true && after.waitSupported === undefined)
+
+  await s.close()
+}
+
 console.log('\n§5 CORS（手机 WebView 与本服务不同源）')
 {
   const s = await boot()
@@ -423,14 +592,17 @@ console.log('\n§6 协议文档契约（design.md §2.1 与实现一致）')
   check('§2.1 记录墓碑上行负载 { deleted: true }', design.includes('{ deleted: true }'))
   check('§2.1 记录墓碑存储路径', design.includes('phoneCompanion/tombstones.json'))
   check('§2.1 记录游标只在 pull 后推进', design.includes('只在 pull 完成后推进'))
-  check('§2.1 记录 tombstoned 防复活', design.includes("reason: 'tombstoned'"))
-  // v1.2 契约
+  check('§2.1 记录 tombstoned 防复活', design.includes("reason: 'tombstoned'"))  // v1.2 契约
   check('§2.1 v1.2 记录 notes 上行域与无条件应用', design.includes('v1.2 笔记') && design.includes('无条件应用'))
   check('§2.1 记录内容 API 端点', design.includes('/api/notes/tree') && design.includes('/api/notes/content'))
   check('§2.1 记录按 id 服务端解析路径', design.includes('按 id 服务端解析路径'))
   // v1.3 契约
   check('§2.1 端点表已移除 AI 中继（电脑档 2026-11-06 下线）', !design.includes('| `POST /api/ai/chat`'))
   check('§6 决策记录标注电脑档已移除', design.includes('电脑档已于 2026-11-06 整体移除'))
+  // v1.7 契约（实时同步 · 长轮询）
+  check('§2.1 v1.7 记录 wait / waitSupported', design.includes('waitSupported') && design.includes('`wait`'))
+  check('§2.1 v1.7 记录服务端 25s 封顶', design.includes('25'))
+  check('§2.1 v1.7 记录同设备顶掉语义', design.includes('顶掉'))
 }
 
 console.log('\n' + (failures === 0 ? 'PASS (' + checks + ' checks)' : 'FAIL (' + failures + '/' + checks + ')'))

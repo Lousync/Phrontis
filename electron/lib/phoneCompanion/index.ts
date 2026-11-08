@@ -1,7 +1,7 @@
 import { app, ipcMain } from 'electron'
 import { randomInt } from 'crypto'
 import { hostname } from 'os'
-import { createCompanionServer, type CompanionPairCode, type CompanionPairRequestView } from './server'
+import { createCompanionServer, type CompanionPairCode, type CompanionPairRequestView, type CompanionServer } from './server'
 import { DEFAULT_PORT, PAIR_CODE_TTL_MS, buildPairUrl, shouldApplyIncoming, type ScheduleItemData } from './protocol'
 import { generateToken } from '../lanShare/auth'
 import { getLanAddresses } from '../lanShare/server'
@@ -19,11 +19,12 @@ import {
 } from 'phrontis-core/kbStore/scheduleVaultRepo'
 import { vaultRecordTombstones, vaultTombstonesSince } from 'phrontis-core/kbStore/tombstoneVaultRepo'
 import { setVaultDeleteSink } from 'phrontis-core/kbStore/deleteSink'
-import { vaultUpsertPhoneNote } from 'phrontis-core/kbStore/knowledgeVaultRepo'
 import { getKnowledgeIndex, findKnowledgePage } from 'phrontis-core/kbStore/knowledgeIndex'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { parseMarkdown } from 'phrontis-core/kbStore/mdStore'
-import { broadcastDataChanged, broadcast } from '../../main/windowBus'
+import { broadcastDataChanged, broadcast, subscribeDataChanged } from '../../main/windowBus'
+import { applyNoteUsb, applyDeleteNoteUsb, listNotesSinceUsb } from './notesVault'
+import { isMobileNotesRel } from './notesUsb'
 
 /**
  * 手机伴侣（工具箱）：局域网常驻同步服务，lanShare 的演化线。
@@ -44,14 +45,16 @@ interface PendingPairEntry {
 }
 
 interface ServiceState {
-  server: ReturnType<typeof createCompanionServer> | null
+  server: CompanionServer | null
   port: number
   pairCode: CompanionPairCode | null
   /** v1.5 待确认配对请求（渲染层轮询 status 时渲染确认框） */
   pendingPairs: PendingPairEntry[]
+  /** v1.7 数据变更订阅退订手柄（stop 时退订，避免悬挂闭包） */
+  unsubDataChanged: (() => void) | null
 }
 
-let state: ServiceState = { server: null, port: 0, pairCode: null, pendingPairs: [] }
+let state: ServiceState = { server: null, port: 0, pairCode: null, pendingPairs: [], unsubDataChanged: null }
 
 export interface CompanionStatus {
   running: boolean
@@ -137,6 +140,8 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
       return r
     },
     applyDelete: (domain, id, deletedAt) => {
+      // v1.6 笔记 U 盘模式：手机清空标题保存 = 墓碑删除 → 删设备文件夹内文件 + 记墓碑
+      if (domain === 'notes') return applyDeleteNoteUsb(id, deletedAt)
       if (domain === 'schedule') {
         const row = vaultFindTodo(id)
         if (!row) {
@@ -167,18 +172,23 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
       return { applied: false, reason: 'unsupported-domain' }
     },
     applyNote: item => {
-      // v1.2：手机是闪念真相源，无条件应用（口径见 design.md §2.1 v1.2 节）
-      const r = vaultUpsertPhoneNote(item.id, item.data.title, item.data.body)
-      broadcastDataChanged('knowledge')
-      return { applied: true, reason: r.action }
+      // v1.6 笔记 U 盘模式：LWW 裁决 + 落设备文件夹（取代 v1.2 收件箱无条件应用）
+      return applyNoteUsb(item)
+    },
+    listNotesSince: (device, sinceMs) => {
+      const items = listNotesSinceUsb(device, sinceMs)
+      // v1.7：扫描发现桌面侧变更 → 其他设备的挂起 pull 也要醒（本请求已在响应中，自己收不到自己的 poke）
+      if (items.length > 0) state.server?.pokeSync()
+      return items
     },
     listNoteTree: () => getKnowledgeIndex().pages
-      // 只给 doc（md）；欢迎页是合成条目且 HTML 手机渲染不了；file 条目（导图/归档）同样排除
-      .filter(p => p.entryKind !== 'file' && p.id !== 'kb-welcome-doc')
+      // 只给 doc（md）；欢迎页是合成条目且 HTML 手机渲染不了；file 条目（导图/归档）同样排除；
+      // v1.6：移动端/** 是手机笔记 U 盘子树，不进「电脑笔记只读」域（两棵树互不掺和，§4.4）
+      .filter(p => p.entryKind !== 'file' && p.id !== 'kb-welcome-doc' && !isMobileNotesRel(p.path))
       .map(p => ({ id: p.id, title: p.title, path: p.path, categoryId: p.categoryId, mtimeMs: p.mtimeMs, sizeBytes: p.sizeBytes ?? 0 })),
     readNoteContent: id => {
       const entry = findKnowledgePage(id)
-      if (!entry || entry.entryKind === 'file') return null
+      if (!entry || entry.entryKind === 'file' || isMobileNotesRel(entry.path)) return null
       const root = getCurrentVault()?.rootPath
       if (!root) return null
       try {
@@ -222,7 +232,18 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
     }
   }
 
-  state = { server, port: boundPort, pairCode: newPairCode(), pendingPairs: [] }
+  state = { server, port: boundPort, pairCode: newPairCode(), pendingPairs: [], unsubDataChanged: null }
+
+  /* v1.7 唤醒接线（方案 §3.2）：一处订阅覆盖全部信号源——
+   * ① 手机 push 应用成功：三域 applied 路径各自 broadcastDataChanged（accounting/schedule/knowledge）；
+   * ② 桌面自身改动（编辑器 / AI 工具 / 渲染层 data:notify）：同一广播通道；
+   * ③ pull 扫描发现变更：listNotesSince deps 内非空 poke。
+   * 信号粗粒度（任何域动一下都算），醒来后各自重扫，不做分域过滤。 */
+  state.unsubDataChanged = subscribeDataChanged(scope => {
+    if (scope === 'accounting' || scope === 'schedule' || scope === 'knowledge') {
+      state.server?.pokeSync()
+    }
+  })
   return status()
 }
 
@@ -275,6 +296,8 @@ function rowToScheduleItem(row: TodoRow): { id: string; updatedAt: string; data:
 export async function stop(): Promise<CompanionStatus> {
   state.pairCode = null
   state.pendingPairs = []
+  state.unsubDataChanged?.()
+  state.unsubDataChanged = null
   if (state.server) {
     const s = state.server
     state.server = null
