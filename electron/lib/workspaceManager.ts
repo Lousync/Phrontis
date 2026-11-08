@@ -9,6 +9,9 @@ import { invalidateKnowledgeIndex, getKnowledgeIndex } from 'phrontis-core/kbSto
 import { invalidateGraphIndex } from 'phrontis-core/kbStore/graphIndex'
 import { emitPluginEvent } from './pluginEvents'
 import { IGNORE_FILE_NAME } from 'phrontis-core/kbStore/ignoreFile'
+import { bumpNoteFrontmatterUpdated } from './phoneCompanion/notesUsb'
+import { isMobileNoteAbsPath, onlineDeviceFolderNames } from './phoneCompanion/presence'
+import { MOBILE_NOTES_ROOT } from './phoneCompanion/notesUsb'
 import { parseMarkdown, serializeMarkdown } from 'phrontis-core/kbStore/mdStore'
 import { dedupeVaultRows, upsertVaultRow } from '../../src/lib/vaultRegistryPure'
 import { broadcastDataChanged } from '../main/windowBus'
@@ -362,13 +365,20 @@ export function detectConflict(absPath: string, expectedMtimeMs: number | null |
 
 /** 原子写：临时文件 + rename 覆盖（对标数据库写盘策略，防半写损坏） */
 export function writeWorkspaceFile(absPath: string, content: string): void {
-  // v3.2.0 条目 ④：落盘前登记「这条路径的变更出自我自己」——fsWatcher 命中即跳过，
+  // v3.2.0 条目 ④：落盘前登记「这条路径的变更出我自己」——fsWatcher 命中即跳过，
   // 否则应用内保存会被监听器当成外部修改，弹「文件已被外部修改」冲突三选（自打自脸）
   markSelfWrite(absPath)
+  // v1.6 笔记 U 盘模式写钩子（handoff §3）：移动端/** 内的任何一次桌面改动
+  // （编辑器 / AI 工具 / 插件统一走本函数）都必须同步 bump frontmatter `updated`
+  // —— 这是下一轮 LWW 的裁决时钟，漏更会导致手机旧版「自愈」覆盖桌面改动
+  let finalContent = content
+  if (isMobileNoteAbsPath(absPath)) {
+    finalContent = bumpNoteFrontmatterUpdated(content, new Date().toISOString())
+  }
   const real = absPath
   const tmp = join(real, `..`, `.kb-tmp-${randomUUID()}`)
   try {
-    writeFileSync(tmp, content, 'utf-8')
+    writeFileSync(tmp, finalContent, 'utf-8')
     try {
       renameSync(tmp, real)
     } catch {
@@ -866,7 +876,19 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
   ipcMain.handle('ws:listDir', (_e, rootId: string, relPath: string) => {
     try {
       const abs = requireInside(rootId, relPath ?? '')
-      const entries = listDirEntries(abs)
+      let entries = listDirEntries(abs)
+      // v1.6 笔记 U 盘模式可见性（design.md §2.1 v1.6，用户拍板形态）：设备文件夹仅在
+      // 该设备在线时显示；没有任何设备在线时「移动端」顶层也隐藏。磁盘文件保留不动
+      //（离线隐藏 ≠ 删除，重连后树重现、期间两端改动照常对账）。
+      const onlineFolders = new Set(onlineDeviceFolderNames().map((n) => n.toLowerCase()))
+      const relNorm = (relPath ?? '').replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '')
+      if (relNorm === MOBILE_NOTES_ROOT) {
+        // 设备层：只露在线设备的文件夹（文件条目不受影响）
+        entries = entries.filter((e) => e.type === 'dir' ? onlineFolders.has(e.name.toLowerCase()) : true)
+      } else if (!relNorm) {
+        // 仓库根层：全部设备离线 → 「移动端」整体隐藏
+        if (onlineFolders.size === 0) entries = entries.filter((e) => e.name !== MOBILE_NOTES_ROOT)
+      }
       // 软件生成项名单（2026-09-08）：仅仓库根层返回——SOFT_ENTRY_NAMES 固定项（.ignore 等，
       // 新增软件生成文件登记此集合）+ AI教学 产物根（aiTeachRootDir 设置动态）。渲染层据
       // softNames 在文件树底部渲染「软件文件」折叠节（默认收起）；子目录不受影响

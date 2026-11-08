@@ -15,7 +15,7 @@ export const PAIR_ATTEMPTS_PER_MIN = 10
 /** 请求体上限（push 批量 + 余量） */
 export const MAX_BODY_BYTES = 2 * 1024 * 1024
 
-/** 同步域清单（v1.2 起 ledger + schedule + notes；notes 只上行不 pull，语义见 design.md §2.1 v1.2 节） */
+/** 同步域清单（v1.2 起 ledger + schedule + notes；v1.6 起 notes 双向——设备文件夹 U 盘语义，见 design.md §2.1 v1.6 节） */
 export const SYNC_DOMAINS = ['ledger', 'schedule', 'notes'] as const
 export type SyncDomain = (typeof SYNC_DOMAINS)[number]
 

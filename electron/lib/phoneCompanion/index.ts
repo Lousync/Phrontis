@@ -19,11 +19,12 @@ import {
 } from 'phrontis-core/kbStore/scheduleVaultRepo'
 import { vaultRecordTombstones, vaultTombstonesSince } from 'phrontis-core/kbStore/tombstoneVaultRepo'
 import { setVaultDeleteSink } from 'phrontis-core/kbStore/deleteSink'
-import { vaultUpsertPhoneNote } from 'phrontis-core/kbStore/knowledgeVaultRepo'
 import { getKnowledgeIndex, findKnowledgePage } from 'phrontis-core/kbStore/knowledgeIndex'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { parseMarkdown } from 'phrontis-core/kbStore/mdStore'
 import { broadcastDataChanged, broadcast } from '../../main/windowBus'
+import { applyNoteUsb, applyDeleteNoteUsb, listNotesSinceUsb } from './notesVault'
+import { isMobileNotesRel } from './notesUsb'
 
 /**
  * 手机伴侣（工具箱）：局域网常驻同步服务，lanShare 的演化线。
@@ -137,6 +138,8 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
       return r
     },
     applyDelete: (domain, id, deletedAt) => {
+      // v1.6 笔记 U 盘模式：手机清空标题保存 = 墓碑删除 → 删设备文件夹内文件 + 记墓碑
+      if (domain === 'notes') return applyDeleteNoteUsb(id, deletedAt)
       if (domain === 'schedule') {
         const row = vaultFindTodo(id)
         if (!row) {
@@ -167,18 +170,18 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
       return { applied: false, reason: 'unsupported-domain' }
     },
     applyNote: item => {
-      // v1.2：手机是闪念真相源，无条件应用（口径见 design.md §2.1 v1.2 节）
-      const r = vaultUpsertPhoneNote(item.id, item.data.title, item.data.body)
-      broadcastDataChanged('knowledge')
-      return { applied: true, reason: r.action }
+      // v1.6 笔记 U 盘模式：LWW 裁决 + 落设备文件夹（取代 v1.2 收件箱无条件应用）
+      return applyNoteUsb(item)
     },
+    listNotesSince: (device, sinceMs) => listNotesSinceUsb(device, sinceMs),
     listNoteTree: () => getKnowledgeIndex().pages
-      // 只给 doc（md）；欢迎页是合成条目且 HTML 手机渲染不了；file 条目（导图/归档）同样排除
-      .filter(p => p.entryKind !== 'file' && p.id !== 'kb-welcome-doc')
+      // 只给 doc（md）；欢迎页是合成条目且 HTML 手机渲染不了；file 条目（导图/归档）同样排除；
+      // v1.6：移动端/** 是手机笔记 U 盘子树，不进「电脑笔记只读」域（两棵树互不掺和，§4.4）
+      .filter(p => p.entryKind !== 'file' && p.id !== 'kb-welcome-doc' && !isMobileNotesRel(p.path))
       .map(p => ({ id: p.id, title: p.title, path: p.path, categoryId: p.categoryId, mtimeMs: p.mtimeMs, sizeBytes: p.sizeBytes ?? 0 })),
     readNoteContent: id => {
       const entry = findKnowledgePage(id)
-      if (!entry || entry.entryKind === 'file') return null
+      if (!entry || entry.entryKind === 'file' || isMobileNotesRel(entry.path)) return null
       const root = getCurrentVault()?.rootPath
       if (!root) return null
       try {
