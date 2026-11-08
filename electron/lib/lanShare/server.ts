@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http'
-import { networkInterfaces } from 'os'
 import { createReadStream, statSync } from 'fs'
 import { isPrivateAddress, tokenMatches, extractToken } from './auth'
+import { getLanAddressCandidates, orderLanAddresses } from './addresses'
 import { listOutboxFiles, markOutboxDownloaded, resolveOutboxPath } from './files'
 import { parseUpload, HttpError } from './upload'
 import { renderPage } from './page'
@@ -28,25 +28,10 @@ export interface LanShareServerOptions {
   remainingMs: () => number
 }
 
-/** 虚拟网卡特征：VMware/VirtualBox/WSL/Hyper-V/VPN 等（平板无法直连，必须排后） */
-const VIRTUAL_IFACE_RE = /vmware|virtualbox|vmnet|ve?thernet|wsl|hyper[- ]?v|radmin|tailscale|zerotier|wireguard|tun|tap|docker|loopback|virtual/i
-
-/** 本机局域网 IPv4 列表（真实网卡优先、虚拟网卡靠后，去重），用于展示地址与生成二维码 */
+/** 本机局域网 IPv4 列表（推荐序：真实网卡优先、docker 网桥等虚拟网卡靠后，去重），用于展示地址与生成二维码。
+ *  排序规格 2026-11-08 起收敛到 ./addresses.ts（orderLanAddresses），此处只保留 string[] 兼容出口。 */
 export function getLanAddresses(): string[] {
-  const candidates: Array<{ name: string; addr: string }> = []
-  for (const [name, infos] of Object.entries(networkInterfaces())) {
-    for (const info of infos ?? []) {
-      if (info.family !== 'IPv4' || info.internal) continue
-      if (!isPrivateAddress(info.address)) continue
-      candidates.push({ name, addr: info.address })
-    }
-  }
-  const score = (c: { name: string }): number => (VIRTUAL_IFACE_RE.test(c.name) ? 1 : 0)
-  const seen = new Set<string>()
-  return candidates
-    .sort((a, b) => score(a) - score(b) || a.name.localeCompare(b.name))
-    .map(c => c.addr)
-    .filter(addr => (seen.has(addr) ? false : (seen.add(addr), true)))
+  return orderLanAddresses(getLanAddressCandidates()).map(c => c.addr)
 }
 
 export function createLanShareServer(opts: LanShareServerOptions): ReturnType<typeof createServer> {

@@ -816,6 +816,12 @@ const api = {
   companionRevoke: (deviceId: string) => ipcRenderer.invoke('companion:revoke', deviceId),
   companionApprovePair: (requestId: string) => ipcRenderer.invoke('companion:approvePair', requestId),
   companionRejectPair: (requestId: string) => ipcRenderer.invoke('companion:rejectPair', requestId),
+  /** 手机发起配对请求（主进程 companion:pairRequest 广播）——全局壳层 toast 用，面板不在前台也能看到 */
+  onCompanionPairRequest: (cb: (view: { requestId: string; code: string; deviceName: string; ip: string; createdAt: number; expiresAt: number }) => void) => {
+    const handler = (_e: unknown, view: { requestId: string; code: string; deviceName: string; ip: string; createdAt: number; expiresAt: number }) => cb(view)
+    ipcRenderer.on('companion:pairRequest', handler)
+    return () => { ipcRenderer.removeListener('companion:pairRequest', handler) }
+  },
   // 编辑器工作区（Vault 仓库）：文件服务
   workspaceOpenDir: () => ipcRenderer.invoke('ws:openDir'),
   workspaceInitPendingVault: (accept: boolean) => ipcRenderer.invoke('ws:initPendingVault', accept),

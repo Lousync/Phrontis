@@ -1103,6 +1103,28 @@ export default function App() {
     return () => { off?.() }
   }, [])
 
+  // 手机伴侣：手机发起配对请求 → 全局 toast（WP7 10.4——此前确认框只在「工具箱 → 手机伴侣」
+  // 面板打开时才渲染，用户在别的页面时手机端只会一直等确认）。点「去确认」跳手机伴侣面板。
+  useEffect(() => {
+    const off = window.api?.onCompanionPairRequest?.((view) => {
+      showToast({
+        type: 'info',
+        message: `「${view?.deviceName || '手机'}」请求配对`,
+        detail: `验证码 ${view?.code || '----'}，请到 工具箱 → 手机伴侣 与手机屏幕核对后允许`,
+        duration: 10000,
+        action: {
+          label: '去确认',
+          onClick: () => {
+            setActiveTab('toolbox')
+            setSidebarOpen(true)
+            window.dispatchEvent(new CustomEvent('toolbox:open-tool', { detail: { tool: 'phone-companion' } }))
+          },
+        },
+      })
+    })
+    return () => { off?.() }
+  }, [])
+
   // 日程打卡侧边栏：脱离态变化推送（独立窗口打开/销毁）。
   // v3.4.0 批次4：内嵌态由右栏小工具接管，detached=false 不再需要「恢复内嵌显示」。
   useEffect(() => {

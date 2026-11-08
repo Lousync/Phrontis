@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Smartphone, ArrowLeft, RefreshCw, Trash2, X, Clock } from 'lucide-react'
 import { showToast } from '../../../../lib/toast'
 import {
@@ -12,6 +12,12 @@ import type { CompanionStatus } from '../../../../types'
  * 手机伴侣：局域网常驻同步服务（对端 = Phrontis Mobile 手机端）。
  * 开服务 → 出配对码 + 二维码 → 手机在 设置 → 同步 输入地址与配对码（或粘贴配对链接）→ 长期互信。
  * 协议冻结口径：E:\Projects\Phrontis-mobile\docs\design.md §2.1。
+ *
+ * 2026-11-08 配对链路修复（handoff-pairing-hotspot-repair.md WP1/WP7）：
+ *  - 二维码不再固定取 urls[0]（docker 网桥可能排前）——「手机可访问的地址」列表点选切换，
+ *    默认用推荐位（手机最近来源同 /24 > 默认路由出口 > 真实网卡 > 虚拟网卡）；
+ *  - 配对码过期/用掉后：二维码隐藏（旧码绝不显示）、两个分支都有「换一个配对码」；
+ *  - 过期的待确认请求由主进程 status 就地过滤，不再永久挂卡片。
  */
 
 function formatTime(ts: number): string {
@@ -31,20 +37,12 @@ export function PhoneCompanion({ onBack }: { onBack: () => void }) {
   const [busy, setBusy] = useState(false)
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null)
   const [remaining, setRemaining] = useState(0)
-  const qrUrlRef = useRef('')
+  /** 用户点选的二维码目标地址（'' = 跟随推荐位）；地址列表刷新后若不在了自动回落推荐 */
+  const [selectedIp, setSelectedIp] = useState('')
 
   const refresh = useCallback(async () => {
     try {
-      const s = await companionStatus()
-      setStatus(s)
-      const url = s.running ? s.urls[0] || '' : ''
-      if (url && url !== qrUrlRef.current) {
-        qrUrlRef.current = url
-        setQr(await companionQr(url))
-      } else if (!url) {
-        qrUrlRef.current = ''
-        setQr('')
-      }
+      setStatus(await companionStatus())
     } catch { /* 主进程未就绪时静默 */ }
   }, [])
 
@@ -67,15 +65,33 @@ export function PhoneCompanion({ onBack }: { onBack: () => void }) {
     return () => clearInterval(t)
   }, [status?.running, status?.pairCodeExpiresAt])
 
+  const running = !!status?.running
+  const codeValid = running && !!status?.pairCode
+  // 二维码目标（WP1）：有效配对码 + 地址（用户点选优先，失效回落推荐位）。
+  // 无有效码 / 无地址 → 空串 = 不出二维码（旧码绝不显示，WP7 10.2）
+  const activeIp = selectedIp && status?.addresses.some(a => a.ip === selectedIp)
+    ? selectedIp
+    : (status?.addresses.find(a => a.recommended)?.ip ?? '')
+  const qrTarget = running && codeValid && activeIp
+    ? `http://${activeIp}:${status!.port}/pair#${status!.pairCode}`
+    : ''
+
+  useEffect(() => {
+    let dead = false
+    if (!qrTarget) {
+      setQr('')
+      return
+    }
+    void companionQr(qrTarget).then(d => { if (!dead) setQr(d) }).catch(() => { /* 忽略 */ })
+    return () => { dead = true }
+  }, [qrTarget])
+
   const handleStart = async () => {
     setBusy(true)
     try {
       const s = await companionStart({})
       setStatus(s)
-      if (s.urls[0]) {
-        qrUrlRef.current = s.urls[0]
-        setQr(await companionQr(s.urls[0]))
-      }
+      setSelectedIp('')
       showToast({ type: 'info', message: `手机伴侣已开启（端口 ${s.port}），手机端输入地址与配对码即可连接` })
     } catch {
       showToast({ type: 'error', message: '开启失败，请检查端口是否被占用' })
@@ -88,13 +104,21 @@ export function PhoneCompanion({ onBack }: { onBack: () => void }) {
     setBusy(true)
     try {
       setStatus(await companionStop())
-      qrUrlRef.current = ''
-      setQr('')
+      setSelectedIp('')
       showToast({ type: 'info', message: '手机伴侣已关闭，已配对设备保留' })
     } catch {
       showToast({ type: 'error', message: '关闭失败' })
     } finally {
       setBusy(false)
+    }
+  }
+
+  /** WP7 10.1：两个分支共用的换码入口（旧实现只在有效分支有按钮，过期分支只能关服务重开） */
+  const handleNewPairCode = async () => {
+    try {
+      setStatus(await companionNewPairCode())
+    } catch {
+      showToast({ type: 'error', message: '生成新配对码失败' })
     }
   }
 
@@ -126,9 +150,6 @@ export function PhoneCompanion({ onBack }: { onBack: () => void }) {
       setBusy(false)
     }
   }
-
-  const running = !!status?.running
-  const codeValid = running && !!status?.pairCode
 
   return (
     <div className="kb-theme-surface flex flex-col h-full">
@@ -169,7 +190,7 @@ export function PhoneCompanion({ onBack }: { onBack: () => void }) {
             <>
               {/* v1.5 手机发起的配对请求：4 位码与手机同屏核对后再点允许（防同网陌生人趁乱配对） */}
               {(status?.pendingPairs ?? []).map(pr => (
-                <div key={pr.requestId} className="rounded-lg border border-[var(--accent)] bg-[var(--bg-secondary)] p-4">
+                <div key={pr.requestId} className="kb-item-in rounded-lg border border-[var(--accent)] bg-[var(--bg-secondary)] p-4">
                   <p className="text-[13px] font-medium text-[var(--text-primary)]">「{pr.deviceName}」请求配对</p>
                   <p className="text-[11.5px] text-[var(--text-muted)] mt-1">来自 {pr.ip} · 核对手机屏幕上显示的验证码是否与此一致</p>
                   <div className="mt-2 flex items-center gap-3">
@@ -191,7 +212,7 @@ export function PhoneCompanion({ onBack }: { onBack: () => void }) {
               {/* 配对码 + 二维码 */}
               <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-5 flex items-center gap-5">
                 {qr && (
-                  <div className="shrink-0 rounded-md bg-white p-2">
+                  <div className="kb-pop shrink-0 rounded-md bg-white p-2">
                     <img src={qr} alt="配对二维码" className="w-[130px] h-[130px]" />
                   </div>
                 )}
@@ -208,23 +229,24 @@ export function PhoneCompanion({ onBack }: { onBack: () => void }) {
                         </span>
                       </div>
                       <p className="text-[11.5px] text-[var(--text-muted)] mt-1.5 break-all leading-relaxed">
-                        配对链接：{status?.urls[0] || '未获取到局域网地址'}
+                        配对链接：{qrTarget || status?.recommendedUrl || '未获取到局域网地址'}
                       </p>
                       <p className="text-[11px] text-[var(--text-muted)] mt-1">
                         手机输入上方地址与配对码，或直接粘贴整条配对链接；配对成功后两端长期互信，配对码随即作废
                       </p>
-                      <button
-                        onClick={() => void companionNewPairCode().then(s => { setStatus(s); if (s.urls[0]) { qrUrlRef.current = ''; void refresh() } })}
-                        className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11.5px] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors"
-                      >
-                        <RefreshCw size={11} /> 换一个配对码
-                      </button>
                     </>
                   ) : (
                     <p className="text-[12px] text-[var(--text-muted)] mt-2">
-                      当前没有有效配对码（可能已被使用或过期），点击「换一个配对码」重新出示
+                      配对码已过期或已被使用，点击下方「换一个配对码」重新出示；二维码将在新码生成后更新
                     </p>
                   )}
+                  {/* 换码按钮两分支共用（WP7 10.1：过期分支此前没有任何刷新入口） */}
+                  <button
+                    onClick={() => void handleNewPairCode()}
+                    className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11.5px] text-[var(--text-secondary)] hover:text-[var(--accent)] hover:bg-[var(--bg-hover)] transition-colors"
+                  >
+                    <RefreshCw size={11} /> 换一个配对码
+                  </button>
                   <p className="text-[11px] leading-relaxed mt-2" style={{ color: 'var(--warning)' }}>
                     连不上？① 手机与电脑需在同一 Wi-Fi / 热点；② 首次开启时允许 Windows 防火墙访问；③ 路由器开了「AP 隔离」需关闭
                   </p>
@@ -236,6 +258,40 @@ export function PhoneCompanion({ onBack }: { onBack: () => void }) {
                   </button>
                 </div>
               </div>
+
+              {/* WP1：手机可访问的地址——推荐项出二维码；虚拟网卡（docker 等）通常不可达；点击行切换二维码目标 */}
+              {running && (status?.addresses.length ?? 0) > 0 && (
+                <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[13px] font-medium text-[var(--text-primary)]">手机可访问的地址</h3>
+                    <span className="text-[11px] text-[var(--text-muted)]">点选切换二维码</span>
+                  </div>
+                  <div className="mt-2.5 space-y-1.5">
+                    {status!.addresses.map(a => {
+                      const active = a.ip === activeIp
+                      return (
+                        <button
+                          key={`${a.iface}-${a.ip}`}
+                          onClick={() => setSelectedIp(a.ip)}
+                          className={`kb-item-in w-full flex items-center gap-2 px-3 py-2 rounded-md text-left bg-[var(--bg-tertiary)] border transition-colors ${active ? 'border-[var(--accent)]' : 'border-transparent hover:bg-[var(--bg-hover)]'}`}
+                        >
+                          <span className="font-mono text-[12.5px] text-[var(--text-primary)] shrink-0">{a.ip}:{status!.port}</span>
+                          {a.recommended && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--accent)] text-[var(--bg-primary)] shrink-0">推荐</span>
+                          )}
+                          {a.virtual && (
+                            <span className="text-[10.5px] text-[var(--text-muted)] shrink-0">虚拟网卡 · 手机通常不可达</span>
+                          )}
+                          <span className="ml-auto text-[11px] text-[var(--text-muted)] truncate">{a.iface}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-2">
+                    二维码与「配对链接」使用选中项；手机连的是哪个 Wi-Fi / 热点，就选与它同网段的地址（不确定就用带「推荐」的行）
+                  </p>
+                </div>
+              )}
 
               {/* 已配对设备 */}
               <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4">

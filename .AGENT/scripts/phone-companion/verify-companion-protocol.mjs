@@ -20,6 +20,8 @@
  *   §5 CORS（预检 204 + 放行 authorization）
  *   §6 协议文档契约（design.md §2.1 与端点常量一致）
  *   §9 组播发现应答器（UDP 发现：与手机端 Java 常量对表 / ping 应答构型 / 非 ping 不应答 / stop 生效 / 入参跟随）
+ *   §10 地址推荐与状态视图（WP1/WP7：orderLanAddresses 排序 / urls 不嵌过期码 / 过期请求过滤 /
+ *        /api/unpair 双向解除 / revokeDevice 运行中失效 / onClientSeen 来源上报）
  *
  * 运行（主仓根目录）：
  *   node --experimental-strip-types --no-warnings .AGENT/scripts/phone-companion/verify-companion-protocol.mjs
@@ -43,6 +45,8 @@ import {
 import {
   startDiscoverResponder, stopDiscoverResponder, DISCOVER_GROUPS, DISCOVER_PORT, DISCOVER_PING,
 } from '../../../electron/lib/phoneCompanion/discover.ts'
+import { orderLanAddresses, isVirtualIface, ipv4Prefix24 } from '../../../electron/lib/lanShare/addresses.ts'
+import { buildStatusView } from '../../../electron/lib/phoneCompanion/statusView.ts'
 import dgram from 'node:dgram'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -76,6 +80,7 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
     { id: 'p-1', title: 'AI教学模块笔记', path: '学习/AI教学模块笔记.md', categoryId: 'c1', mtimeMs: 1730419200000, sizeBytes: 100 },
   ]
   const tombstones = [] // { domain, id, deletedAt }
+  const clientSeens = [] // §10：onClientSeen 来源 IP 上报记录（discover / pair/request / ping）
   let pairCode = code ? { code, expiresAt } : null
   const upsert = (dom, map, item) => {
     // 与生产 repo 同规则：已墓碑的 id 收到不早于墓碑的 upsert → 拒绝复活（vaultScheduleSyncUpsert / vaultAccountingSyncUpsert 内同款）
@@ -118,6 +123,7 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
       ? { title: 'AI教学模块笔记', updatedAt: '2026-11-01T00:00:00.000Z', body: '# AI教学模块笔记\n\n正文', truncated: undefined }
       : null,
     pcName: () => 'TEST-PC',
+    onClientSeen: (ip) => { clientSeens.push(ip) },
     ...(pairRequest ? { onPairRequest: (view, handlers) => pairRequests.push({ view, approve: handlers.approve, reject: handlers.reject }) } : {}),
   })
   await new Promise((res, rej) => { server.once('error', rej); server.listen(0, '127.0.0.1', res) })
@@ -130,6 +136,7 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
     scheduleStore,
     notesStore,
     notesPulls,
+    clientSeens,
     setNotesPullChanges: (v) => { notesPullChanges = v },
     tombstones,
     devices: () => devices,
@@ -611,6 +618,8 @@ console.log('\n§6 协议文档契约（design.md §2.1 与实现一致）')
   check('§2.1 v1.7 记录 wait / waitSupported', design.includes('waitSupported') && design.includes('`wait`'))
   check('§2.1 v1.7 记录服务端 25s 封顶', design.includes('25'))
   check('§2.1 v1.7 记录同设备顶掉语义', design.includes('顶掉'))
+  // 双向解除契约（2026-11-08 配对链路修复）
+  check('§2.2 记录 /api/unpair 双向解除端点', design.includes('/api/unpair'))
 }
 
 /* ------------------------------------------------------------------ §9 */
@@ -715,6 +724,105 @@ console.log('\n§9 组播发现应答器（UDP 发现：手机喊 PHRONDIS v1 �
   try { design = readFileSync(DESIGN_FILE, 'utf-8') } catch { /* 读不到在下面报 */ }
   check('§9 design.md 记录组播发现（239.255.42.42:8771）', design.includes('239.255.42.42:8771'))
   check('§9 design.md 记录桌面应答端交接文档', design.includes('handoff-multicast-discovery-desktop.md'))
+}
+
+/* ------------------------------------------------------------------ §10 */
+console.log('\n§10 地址推荐与状态视图（WP1/WP7：docker 网桥不推荐 / urls 不嵌过期码 / 过期请求过滤 / 双向解除）')
+{
+  const c = (iface, addr) => ({ iface, addr })
+
+  // ---- orderLanAddresses 纯函数（排序规格：clientIp 同 /24 → defaultIp → 真实网卡 → 虚拟 → link-local）----
+  const base = [
+    c('br-e105861832a4', '172.18.0.1'),
+    c('docker0', '172.17.0.1'),
+    c('veth9c2e1a0', '172.18.0.2'),
+    c('tailscale0', '100.101.0.3'),
+    c('wlp4s0', '192.168.43.10'),
+    c('eth0', '10.116.216.100'),
+    c('wlp4s0', '169.254.3.4'),
+  ]
+  const plain = orderLanAddresses(base, {})
+  check('§10 真实网卡排最前且无线优先', plain[0].addr === '192.168.43.10' && plain[1].addr === '10.116.216.100',
+    JSON.stringify(plain.map(x => x.iface + '/' + x.addr)))
+  check('§10 docker 网桥 / veth / tailscale 排真实网卡之后',
+    plain.findIndex(x => x.addr === '172.18.0.1') > 1 && plain.findIndex(x => x.addr === '172.18.0.2') > 1
+      && plain.findIndex(x => x.addr === '100.101.0.3') > 1)
+  check('§10 link-local 最末（比虚拟网卡还没用）', plain[plain.length - 1].addr === '169.254.3.4')
+  const withDefault = orderLanAddresses(base, { defaultIp: '10.116.216.100' })
+  check('§10 defaultIp（默认路由出口）排第二优先级', withDefault[0].addr === '10.116.216.100' && withDefault[1].addr === '192.168.43.10')
+  const withClient = orderLanAddresses(base, { defaultIp: '10.116.216.100', clientIp: '192.168.43.77' })
+  check('§10 clientIp 同 /24 排第一（手机刚来过，几乎必然可达）',
+    withClient[0].addr === '192.168.43.10' && withClient[1].addr === '10.116.216.100')
+  check('§10 重复地址去重（保留排名最高）',
+    orderLanAddresses([c('br-xyz', '192.168.1.5'), c('wlp4s0', '192.168.1.5'), c('eth0', '10.0.0.1')], {}).length === 2)
+  check('§10 isVirtualIface 识别 br-/veth/docker/utun，不误伤 wlp/eth',
+    isVirtualIface('br-e105861832a4') === true && isVirtualIface('veth9c2e1a0') === true
+      && isVirtualIface('docker0') === true && isVirtualIface('utun3') === true
+      && isVirtualIface('wlp4s0') === false && isVirtualIface('eth0') === false)
+  check('§10 ipv4Prefix24 取前三段', ipv4Prefix24('192.168.43.10') === '192.168.43' && ipv4Prefix24('bad') === '')
+
+  // ---- buildStatusView 纯函数（urls 绝不嵌过期码是硬约束）----
+  const NOW = 1_700_000_000_000
+  const candidates = [c('br-e105861832a4', '172.18.0.1'), c('wlp4s0', '192.168.43.10'), c('eth0', '10.116.216.100')]
+  const pending = (requestId, expiresAt) => ({ requestId, code: '0000', deviceName: 'x', ip: '192.168.43.1', createdAt: NOW, expiresAt })
+
+  const vOk = buildStatusView({
+    running: true, port: 8770, candidates,
+    pairCode: { code: '12345678', expiresAt: NOW + 1000 },
+    pendingPairs: [pending('r1', NOW + 1000)],
+    clientIp: '192.168.43.1', now: NOW,
+  })
+  check('§10 推荐位 = 手机来源同 /24 的地址（热点场景不再推 docker 网桥）',
+    vOk.recommendedUrl === 'http://192.168.43.10:8770/pair#12345678', vOk.recommendedUrl)
+  check('§10 urls 全量输出且带有效码', vOk.urls.length === 3 && vOk.urls.every(u => u.endsWith('#12345678')))
+  check('§10 addresses 推荐标记首位、虚拟标记正确',
+    vOk.addresses[0].recommended === true && vOk.addresses[0].virtual === false
+      && vOk.addresses.find(a => a.ip === '172.18.0.1')?.virtual === true)
+  check('§10 有效码时 pairCode / pairCodeExpiresAt 原样透出', vOk.pairCode === '12345678' && vOk.pairCodeExpiresAt === NOW + 1000)
+  check('§10 未过期 pending 保留', vOk.pendingPairs.length === 1 && vOk.pendingPairs[0].requestId === 'r1')
+
+  const vExpired = buildStatusView({
+    running: true, port: 8770, candidates,
+    pairCode: { code: '12345678', expiresAt: NOW - 1 },
+    pendingPairs: [pending('r2', NOW - 1)], now: NOW,
+  })
+  check('§10 过期码 → urls 不嵌码（hash 为空，WP7 10.2 硬约束）',
+    vExpired.urls.length === 3 && vExpired.urls.every(u => u.endsWith('/pair#')), JSON.stringify(vExpired.urls))
+  check('§10 过期码 → pairCode 空串、recommendedUrl 不含旧码', vExpired.pairCode === '' && !vExpired.recommendedUrl.includes('12345678'))
+  check('§10 过期 pair request 不出现在 pendingPairs（WP7 10.3）', vExpired.pendingPairs.length === 0)
+
+  const vStop = buildStatusView({ running: false, port: 0, candidates, pairCode: null, pendingPairs: [], now: NOW })
+  check('§10 未运行 → urls / addresses / recommendedUrl 全空', vStop.urls.length === 0 && vStop.addresses.length === 0 && vStop.recommendedUrl === '')
+
+  // ---- /api/unpair + revokeDevice + onClientSeen（真 HTTP 走完整链路）----
+  const s = await boot()
+  try {
+    await s.get('/api/discover')
+    check('§10b discover 上报来源 IP（onClientSeen）', s.clientSeens.includes('127.0.0.1'))
+
+    const p1 = await (await s.post('/api/pair', { code: CODE, deviceName: '手机A' })).json()
+    const auth1 = { authorization: 'Bearer ' + p1.deviceToken }
+    check('§10b 配对后 ping 200', (await s.get('/api/ping', auth1)).status === 200)
+
+    // 面板运行中删除设备：内存令牌立即失效（此前只删文件，tokenIndex 还认旧 token，手机等不来 401）
+    check('§10b revokeDevice 命中', s.server.revokeDevice(s.devices()[0].deviceId) === true)
+    check('§10b revoke 后旧令牌 ping 401（不等重启）', (await s.get('/api/ping', auth1)).status === 401)
+
+    // 双向解除：手机侧解除配对 best-effort 调用（design.md §2.2）
+    s.setCode({ code: '87654321', expiresAt: Date.now() + 60_000 })
+    const p2 = await (await s.post('/api/pair', { code: '87654321', deviceName: '手机B' })).json()
+    const auth2 = { authorization: 'Bearer ' + p2.deviceToken }
+    check('§10b 第二台配对后 ping 200', (await s.get('/api/ping', auth2)).status === 200)
+    const up = await s.post('/api/unpair', {}, auth2)
+    check('§10b unpair 200', up.status === 200 && (await up.json()).ok === true)
+    check('§10b unpair 后该设备移出设备表（另一台不受牵连）',
+      s.devices().length === 1 && s.devices()[0].name === '手机A')
+    check('§10b unpair 后 ping 401', (await s.get('/api/ping', auth2)).status === 401)
+    const upBad = await s.post('/api/unpair', {}, { authorization: 'Bearer garbage' })
+    check('§10b 无效令牌 unpair 401', upBad.status === 401)
+    // 上报点 = discover / pair/request / 成功 ping（401 在鉴权层就被拒，到不了上报）
+    check('§10b ping 也上报来源（持续修正推荐）', s.clientSeens.filter(x => x === '127.0.0.1').length >= 3)
+  } finally { await s.close() }
 }
 
 console.log('\n' + (failures === 0 ? 'PASS (' + checks + ' checks)' : 'FAIL (' + failures + '/' + checks + ')'))

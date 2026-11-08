@@ -1774,14 +1774,28 @@ export interface CompanionDevice {
 export interface CompanionStatus {
   running: boolean
   port: number
-  /** 配对链接（含 #配对码），首个用于出二维码 */
+  /** 配对链接（含 #配对码），按推荐顺序；无有效配对码时 hash 为空——绝不嵌过期码 */
   urls: string[]
+  /** 推荐地址的配对链接（= urls[0]，二维码 / 默认选中用） */
+  recommendedUrl: string
+  /** 地址明细（接口名 / 虚拟网卡标记 / 推荐标记），「手机可访问的地址」列表数据源 */
+  addresses: CompanionAddressInfo[]
   /** 8 位配对码，10 分钟有效、一次配对即作废；过期/未运行为空串 */
   pairCode: string
   pairCodeExpiresAt: number
   devices: CompanionDevice[]
-  /** v1.5：手机发起的待确认配对请求（确认框数据源；轮询 status 取） */
+  /** v1.5：手机发起的待确认配对请求（确认框数据源；轮询 status 取，过期项已被过滤） */
   pendingPairs: CompanionPairRequestInfo[]
+}
+
+/** 地址明细（手机可访问的地址列表行） */
+export interface CompanionAddressInfo {
+  ip: string
+  iface: string
+  /** 虚拟网卡（docker / br- / veth / vmnet / tun …），手机通常不可达 */
+  virtual: boolean
+  /** 推荐位（排序第一名且服务运行中） */
+  recommended: boolean
 }
 
 /** v1.5 配对握手：一条待确认请求（4 位码双屏核对，防同网陌生人趁乱点允许） */
@@ -2515,6 +2529,8 @@ export interface ElectronAPI {
   /** v1.5 配对确认框：允许配对（服务内发令牌并落库），返回最新状态 */
   companionApprovePair: (requestId: string) => Promise<{ ok: boolean; error?: string; status: CompanionStatus }>
   companionRejectPair: (requestId: string) => Promise<{ ok: boolean; error?: string; status: CompanionStatus }>
+  /** 手机发起配对请求（主进程 companion:pairRequest 广播）——全局壳层弹 toast，面板不在前台也能看到 */
+  onCompanionPairRequest: (cb: (view: CompanionPairRequestInfo) => void) => () => void
   // 编辑器工作区（Vault 仓库）：文件服务
   // D7：选中目录顶层无 .knowbase 时返回 notVault（待确认初始化），不静默建仓库
   workspaceOpenDir: () => Promise<VaultOpenResult | null>

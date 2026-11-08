@@ -19,6 +19,7 @@ import { isPrivateAddress, generateToken, tokenMatches } from '../lanShare/auth.
  *   POST /api/pair/request 配对（新路 v1.5）：手机发起 → 桌面确认框 → 双屏 4 位码核对
  *   GET  /api/pair/status  新路查询：pending / approved（回令牌）/ rejected / expired
  *   GET  /api/ping       存活探测（带令牌）
+ *   POST /api/unpair     双向解除（带令牌；手机侧解除配对 best-effort 调用，design.md §2.2）
  *   POST /api/sync/push  手机上行变更（域级 LWW 合并）
  *   POST /api/sync/pull  手机拉取服务端变更
  *
@@ -97,6 +98,8 @@ export interface CompanionServerDeps {
   readNoteContent(id: string): { title: string; updatedAt: string; body: string; truncated?: boolean } | null
   /** 配对响应里的电脑名 */
   pcName(): string
+  /** 配对链路修复 WP1：手机请求来源 IP 上报（生产 = 更新 lastClientIp 供地址推荐同 /24 优先；discover/pair/request/ping 三处） */
+  onClientSeen?(ip: string): void
 }
 
 interface RateBucket {
@@ -150,6 +153,8 @@ export type CompanionServer = Server & {
   pokeSync(): void
   /** 当前有挂起 pull 的 deviceId 列表（状态展示用） */
   pendingPullDeviceIds(): string[]
+  /** 配对链路修复：面板删除设备时立即失效内存令牌（否则运行中 revoke 只删了文件，tokenIndex 还认旧 token，手机永远等不来 401） */
+  revokeDevice(deviceId: string): boolean
 }
 
 export function createCompanionServer(deps: CompanionServerDeps): CompanionServer {
@@ -253,6 +258,7 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
     try {
       // ----- 发现（无需令牌；供手机扫段识别本机，只回电脑名）-----
       if (method === 'GET' && pathname === '/api/discover') {
+        deps.onClientSeen?.(ip)
         sendJson(res, 200, {
           ok: true,
           protocol: PROTOCOL_VERSION,
@@ -264,6 +270,7 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
 
       // ----- 配对握手 v1.5（无需令牌）-----
       if (method === 'POST' && pathname === '/api/pair/request') {
+        deps.onClientSeen?.(ip)
         const onPairRequest = deps.onPairRequest
         if (!onPairRequest) {
           deny(res, 501, '电脑端未开启配对确认，请走配对码')
@@ -376,7 +383,20 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
       }
 
       if (method === 'GET' && pathname === '/api/ping') {
+        deps.onClientSeen?.(ip)
         sendJson(res, 200, { ok: true, protocol: PROTOCOL_VERSION, pc: { name: deps.pcName() } })
+        return
+      }
+
+      // ----- 双向解除（2026-11-08，design.md §2.2）：手机侧解除配对时 best-effort 调用，
+      // 桌面即时注销令牌 + 移除设备表；notesStates 保留（重配对新 deviceId 重建）。 -----
+      if (method === 'POST' && pathname === '/api/unpair') {
+        const list = deps.loadDevices().filter(d => d.deviceId !== device.deviceId)
+        deps.saveDevices(list)
+        for (const [tok, d] of tokenIndex) {
+          if (d.deviceId === device.deviceId) tokenIndex.delete(tok)
+        }
+        sendJson(res, 200, { ok: true })
         return
       }
 
@@ -521,5 +541,15 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
   const companion = server as CompanionServer
   companion.pokeSync = pokeSync
   companion.pendingPullDeviceIds = () => [...pendingPulls.keys()]
+  companion.revokeDevice = (deviceId: string): boolean => {
+    let hit = false
+    for (const [tok, d] of tokenIndex) {
+      if (d.deviceId === deviceId) {
+        tokenIndex.delete(tok)
+        hit = true
+      }
+    }
+    return hit
+  }
   return companion
 }

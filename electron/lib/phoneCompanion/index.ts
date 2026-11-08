@@ -2,10 +2,11 @@ import { app, ipcMain } from 'electron'
 import { randomInt } from 'crypto'
 import { hostname } from 'os'
 import { createCompanionServer, type CompanionPairCode, type CompanionPairRequestView, type CompanionServer, type CompanionServerDeps } from './server'
-import { DEFAULT_PORT, PAIR_CODE_TTL_MS, buildPairUrl, shouldApplyIncoming, pairingCapabilities, type ScheduleItemData } from './protocol'
+import { DEFAULT_PORT, PAIR_CODE_TTL_MS, shouldApplyIncoming, pairingCapabilities, type ScheduleItemData } from './protocol'
 import { startDiscoverResponder, stopDiscoverResponder } from './discover'
 import { generateToken } from '../lanShare/auth'
-import { getLanAddresses } from '../lanShare/server'
+import { getLanAddressCandidates, defaultRouteIp } from '../lanShare/addresses'
+import { buildStatusView, type CompanionAddressInfo } from './statusView'
 import { toQrDataUrl } from '../lanShare/qr'
 import { loadPairedDevices, savePairedDevices } from './devices'
 import { readFileSync } from 'fs'
@@ -62,14 +63,49 @@ interface ServiceState {
 
 let state: ServiceState = { server: null, port: 0, pairCode: null, pendingPairs: [], unsubDataChanged: null }
 
+/** WP1 地址推荐：最近一次手机请求来源 IP（discover / pair/request / ping 上报）——
+ *  与本机某地址同 /24 ⇒ 手机几乎必然可达该地址，推荐位排第一（热点场景手机来源是 192.168.43.1）。 */
+let lastClientIp: string | undefined
+/** WP1：默认路由出口 IP 缓存——UDP connect 异步取得，status() 是同步函数只能读缓存；
+ *  start 时起 30s 自愈轮询（Wi-Fi 漫游 / 热点重连换网后跟着更新），stop 时清。 */
+let defaultIpCache: string | undefined
+let defaultIpTimer: ReturnType<typeof setInterval> | null = null
+
+async function refreshDefaultIp(): Promise<void> {
+  try {
+    defaultIpCache = await defaultRouteIp()
+  } catch { /* 保持旧值：默认路由只是第二优先级，拿不到不致命 */ }
+}
+
+function startDefaultIpPolling(): void {
+  void refreshDefaultIp()
+  if (!defaultIpTimer) {
+    defaultIpTimer = setInterval(() => void refreshDefaultIp(), 30_000)
+    defaultIpTimer.unref?.()
+  }
+}
+
+function stopDefaultIpPolling(): void {
+  if (defaultIpTimer) {
+    clearInterval(defaultIpTimer)
+    defaultIpTimer = null
+  }
+}
+
 export interface CompanionStatus {
   running: boolean
   port: number
+  /** 配对链接（含 #配对码），按推荐顺序；无有效配对码时 hash 为空——绝不嵌过期码（WP7） */
   urls: string[]
+  /** WP1：推荐地址的配对链接（= urls[0]，二维码 / 默认选中用；语义显式化避免调用方各猜 urls[0]） */
+  recommendedUrl: string
+  /** WP1：地址明细（接口名 / 虚拟网卡标记 / 推荐标记），面板「手机可访问的地址」列表数据源 */
+  addresses: CompanionAddressInfo[]
+  /** 8 位配对码，10 分钟有效、一次配对即作废；过期/未运行为空串 */
   pairCode: string
   pairCodeExpiresAt: number
   devices: Array<{ deviceId: string; name: string; pairedAt: number; lastSeenAt: number }>
-  /** v1.5：手机发起的待确认配对请求（确认框数据源） */
+  /** v1.5：手机发起的待确认配对请求（确认框数据源；过期项被 status 就地过滤） */
   pendingPairs: CompanionPairRequestView[]
 }
 
@@ -79,17 +115,29 @@ function newPairCode(): CompanionPairCode {
 
 function status(): CompanionStatus {
   const running = !!state.server
-  const code = running ? state.pairCode : null
+  const now = Date.now()
+  // WP7 10.3：过期待确认请求就地清理——服务端 purgePending 只清自己的 Map，这份 state 不清会永久挂面板
+  state.pendingPairs = state.pendingPairs.filter(p => p.view.expiresAt > now)
+  const view = buildStatusView({
+    running,
+    port: state.port,
+    candidates: getLanAddressCandidates(),
+    pairCode: running ? state.pairCode : null,
+    pendingPairs: state.pendingPairs.map(p => p.view),
+    defaultIp: defaultIpCache,
+    clientIp: lastClientIp,
+    now,
+  })
   return {
     running,
     port: running ? state.port : 0,
-    urls: running
-      ? getLanAddresses().map(ip => buildPairUrl(ip, state.port, code?.code ?? ''))
-      : [],
-    pairCode: code && code.expiresAt > Date.now() ? code.code : '',
-    pairCodeExpiresAt: code?.expiresAt ?? 0,
+    urls: view.urls,
+    recommendedUrl: view.recommendedUrl,
+    addresses: view.addresses,
+    pairCode: view.pairCode,
+    pairCodeExpiresAt: view.pairCodeExpiresAt,
     devices: loadPairedDevices().map(({ deviceId, name, pairedAt, lastSeenAt }) => ({ deviceId, name, pairedAt, lastSeenAt })),
-    pendingPairs: state.pendingPairs.map(p => p.view),
+    pendingPairs: view.pendingPairs,
   }
 }
 
@@ -105,7 +153,11 @@ function resolvePairRequest(
   if (i < 0) return { ok: false, error: '请求不存在或已过期', status: status() }
   const entry = state.pendingPairs[i]
   const r = action === 'approve' ? entry.approve() : entry.reject()
-  if (!r.ok) return { ok: false, error: r.error, status: status() }
+  if (!r.ok) {
+    // WP7 10.3：处理失败（已过期 / 已处理）的请求同样是死请求，一并移除——别让它永久挂在面板
+    state.pendingPairs.splice(i, 1)
+    return { ok: false, error: r.error, status: status() }
+  }
   state.pendingPairs.splice(i, 1)
   broadcast('companion:pairChanged', { requestId, approved: action === 'approve' })
   return { ok: true, status: status() }
@@ -125,6 +177,8 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
       state.pendingPairs.push({ view, approve: handlers.approve, reject: handlers.reject })
       broadcast('companion:pairRequest', view)
     },
+    /* WP1：手机来源 IP 上报（discover / pair/request / ping 三处），地址推荐同 /24 优先用 */
+    onClientSeen: ip => { lastClientIp = ip },
     applyLedger: item => {
       const r = vaultAccountingSyncUpsert({
         id: item.id, updatedAt: item.updatedAt,
@@ -256,6 +310,7 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
   }
 
   state = { server, port: boundPort, pairCode: newPairCode(), pendingPairs: [], unsubDataChanged: null }
+  startDefaultIpPolling()
 
   /* 组播发现应答器（Phrontis-mobile 仓 handoff-multicast-discovery-desktop.md）：手机往组播组喊
    * "PHRONDIS v1" → 向来源单播回发现负载（与 /api/discover 同构 + port），不猜网段任意子网秒回。
@@ -324,6 +379,9 @@ function rowToScheduleItem(row: TodoRow): { id: string; updatedAt: string; data:
 
 export async function stop(): Promise<CompanionStatus> {
   stopDiscoverResponder()
+  stopDefaultIpPolling()
+  defaultIpCache = undefined
+  lastClientIp = undefined
   state.pairCode = null
   state.pendingPairs = []
   state.unsubDataChanged?.()
@@ -357,6 +415,9 @@ export function registerCompanionHandlers(): void {
     typeof text === 'string' && text ? toQrDataUrl(text) : '')
   ipcMain.handle('companion:revoke', (_e, deviceId: unknown) => {
     const id = String(deviceId ?? '')
+    // WP5：运行中必须同时失效内存令牌——只删设备文件的话 tokenIndex 还认旧 token，
+    // 手机下次 ping 仍 200，「电脑已移除设备 → 手机显示重新配对」永远走不通
+    state.server?.revokeDevice(id)
     savePairedDevices(loadPairedDevices().filter(d => d.deviceId !== id))
     return { ok: true }
   })
