@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http'
 import { randomUUID, randomInt } from 'crypto'
 import {
-  MAX_BODY_BYTES, PAIR_ATTEMPTS_PER_MIN, PAIR_CODE_TTL_MS, PROTOCOL_VERSION, SYNC_DOMAINS,
+  MAX_BODY_BYTES, PAIR_ATTEMPTS_PER_MIN, PAIR_CODE_TTL_MS, PROTOCOL_VERSION, PULL_WAIT_CAP_MS, SYNC_DOMAINS,
   normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData,
   type LedgerItemData, type ScheduleItemData, type NoteItemData, type SyncDomain,
 } from './protocol.ts'
@@ -144,8 +144,24 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
   })
 }
 
-export function createCompanionServer(deps: CompanionServerDeps): Server {
+/** v1.7：返回值在裸 Server 上挂两个唤醒入口（侵入最小——契约脚本与 stop() 的 close 语义不变） */
+export type CompanionServer = Server & {
+  /** 唤醒全部挂起 pull（粗粒度信号：任何同步域动了都调它，醒来后各自重扫，不做分域过滤） */
+  pokeSync(): void
+  /** 当前有挂起 pull 的 deviceId 列表（状态展示用） */
+  pendingPullDeviceIds(): string[]
+}
+
+export function createCompanionServer(deps: CompanionServerDeps): CompanionServer {
   const pairAttempts = new Map<string, RateBucket>()
+
+  /* ---------- v1.7 长轮询：挂起 pull 注册表（per-device 顶掉语义） ---------- */
+  /** deviceId → resolver；调用即放行对应挂起请求（响应在其后现扫当前状态） */
+  const pendingPulls = new Map<string, () => void>()
+  const pokeSync = (): void => {
+    // 拷贝后再放行：done() 会从表里摘自己，直接迭代会在中途遇变更
+    for (const release of [...pendingPulls.values()]) release()
+  }
 
   /** 已配对设备查令牌（内存缓存 + lastSeen 节流回写，避免每请求写盘） */
   const tokenIndex = new Map<string, CompanionDevice>()
@@ -435,7 +451,7 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
 
       if (method === 'POST' && pathname === '/api/sync/pull') {
         void (async () => {
-          const body = await readJsonBody(req) as { since?: Record<string, unknown> }
+          const body = await readJsonBody(req) as { since?: Record<string, unknown>; wait?: unknown }
           const since = body.since && typeof body.since === 'object' ? body.since : {}
           const sinceLedger = Number(since.ledger ?? 0)
           const sinceSchedule = Number(since.schedule ?? 0)
@@ -449,6 +465,34 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
             valid(sinceSchedule) ? sinceSchedule : 0,
             valid(sinceNotes) ? sinceNotes : 0,
           )
+
+          // v1.7 长轮询：wait 缺省/0/非法 = 旧行为立即返回（响应不带 waitSupported，手机据此探测旧桌面）
+          const waitRaw = Number(body.wait)
+          const waitMs = Number.isFinite(waitRaw) && waitRaw > 0 ? Math.min(Math.round(waitRaw), PULL_WAIT_CAP_MS) : 0
+          if (waitMs > 0) {
+            const preempted = pendingPulls.get(device.deviceId)
+            if (preempted) preempted() // 同设备第二个 pull 顶掉第一个：旧请求立即以当前状态返回
+            const disconnected = await new Promise<boolean>(resolve => {
+              let settled = false
+              const finish = (wasDisconnected: boolean): void => {
+                if (settled) return
+                settled = true
+                clearTimeout(timer)
+                res.removeListener('close', onClose)
+                if (pendingPulls.get(device.deviceId) === release) pendingPulls.delete(device.deviceId)
+                resolve(wasDisconnected)
+              }
+              const release = (): void => finish(false)
+              // 客户端断连（手机切后台 / 网络切换）：清理注册表，响应放弃
+              const onClose = (): void => finish(true)
+              const timer = setTimeout(() => finish(false), waitMs)
+              res.on('close', onClose)
+              pendingPulls.set(device.deviceId, release)
+            })
+            if (disconnected) return // 连接已死，不再写响应
+          }
+
+          // 挂起醒来后现扫（信号是通知不是数据）：返回什么由 since 过滤决定，可能为空数组
           const now = Date.now()
           const changes: Record<string, unknown> = {
             ledger: valid(sinceLedger) ? deps.listLedgerSince(sinceLedger) : [],
@@ -460,6 +504,7 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
             changes,
             tombstones: deps.listTombstonesSince(sinceTs),
             cursor: { ledger: now, schedule: now, notes: now },
+            ...(waitMs > 0 ? { waitSupported: true } : {}),
           })
         })().catch(() => deny(res, 400, '请求体解析失败'))
         return
@@ -472,5 +517,9 @@ export function createCompanionServer(deps: CompanionServerDeps): Server {
     }
   })
 
-  return server
+  // v1.7：唤醒入口挂在 Server 对象上（侵入最小，close/closeAllConnections 语义不变）
+  const companion = server as CompanionServer
+  companion.pokeSync = pokeSync
+  companion.pendingPullDeviceIds = () => [...pendingPulls.keys()]
+  return companion
 }

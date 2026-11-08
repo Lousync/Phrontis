@@ -14,6 +14,9 @@
  *   §4 同步（新条目并入 / 旧更新冲突 / 新更新覆盖 / 非法负载 / 未支持域 / 拉取与游标）
  *   §4b schedule 域（合法并入 / 非法负载 / LWW / 拉取）
  *   §4c 墓碑（上行删除 / 幂等 / 旧删除拒收回 conflict / pull 按时间过滤）
+ *   §4d notes 域与内容 API（v1.2 上行 + tree/content）
+ *   §4e 笔记 U 盘模式（v1.6 纯函数 + push LWW + pull 三域 + 兼容矩阵）
+ *   §8 实时长轮询（v1.7 wait / waitSupported / pokeSync / 顶掉 / 断连清理）
  *   §5 CORS（预检 204 + 放行 authorization）
  *   §6 协议文档契约（design.md §2.1 与端点常量一致）
  *
@@ -28,7 +31,7 @@ import { fileURLToPath } from 'node:url'
 
 import { createCompanionServer } from '../../../electron/lib/phoneCompanion/server.ts'
 import {
-  SYNC_DOMAINS, PROTOCOL_VERSION, DEFAULT_PORT,
+  SYNC_DOMAINS, PROTOCOL_VERSION, DEFAULT_PORT, PULL_WAIT_CAP_MS,
   normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData,
   shouldApplyIncoming, buildPairUrl, parsePairInput,
 } from '../../../electron/lib/phoneCompanion/protocol.ts'
@@ -113,6 +116,7 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
   const port = server.address().port
   return {
     port,
+    server,
     base: 'http://127.0.0.1:' + port,
     store,
     scheduleStore,
@@ -465,6 +469,101 @@ console.log('\n§4e 笔记 U 盘模式 v1.6（纯函数 + push LWW + pull 三域
   check('三域游标都越过 → 墓碑不再下发', p5.tombstones.length === 0)
   await s.close()
 }
+/* ------------------------------------------------------------------ §8 */
+console.log('\n§8 实时长轮询 v1.7（wait / waitSupported / pokeSync / 顶掉 / 断连清理）')
+{
+  // ---- 纯逻辑：封顶常量（真等 25s 太久，封顶行为由常量与 Math.min 路径锁定，方案 §5-5）----
+  check('PULL_WAIT_CAP_MS = 25000（方案 §2.3-3）', PULL_WAIT_CAP_MS === 25000)
+
+  const s = await boot()
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: '测试机' })).json()).deviceToken
+  s.setCode({ code: '87654321', expiresAt: Date.now() + 60_000 })
+  const token2 = (await (await s.post('/api/pair', { code: '87654321', deviceName: '第二台' })).json()).deviceToken
+  const pullWith = (tk, body) => s.post('/api/sync/pull', body, { authorization: 'Bearer ' + tk })
+  const wait600 = Date.now() + 99999
+
+  // 1. 旧客户端兼容：不传 wait → 立即返回且不带 waitSupported（手机据此探测旧桌面）
+  const t0s = Date.now()
+  const p0 = await (await pullWith(token, { since: { ledger: 0 } })).json()
+  check('不传 wait 立即返回且无 waitSupported（旧客户端兼容）', Date.now() - t0s < 500 && p0.waitSupported === undefined)
+
+  // 2. wait 非法值（0 / 负数 / 非数字）→ 同旧行为
+  for (const badWait of [0, -5, 'abc']) {
+    const tb = Date.now()
+    const pb = await (await pullWith(token, { since: { ledger: 0 }, wait: badWait })).json()
+    check('wait 非法值(' + JSON.stringify(badWait) + ')立即返回', Date.now() - tb < 500 && pb.waitSupported === undefined)
+  }
+
+  // 3. 挂满超时 → waitSupported: true + 空变更（信号没来，醒来现扫就是空）
+  const t1 = Date.now()
+  const p1 = await (await pullWith(token, { since: { ledger: wait600 }, wait: 300 })).json()
+  const took1 = Date.now() - t1
+  check('挂满超时返回且带 waitSupported', p1.waitSupported === true && took1 >= 280, 'took=' + took1)
+  check('超时空返回 changes 为空数组', Array.isArray(p1.changes.ledger) && p1.changes.ledger.length === 0)
+
+  // 4. pokeSync 唤醒：请求 <1s 内返回，注册表清空
+  const pending1 = pullWith(token, { since: { ledger: wait600 }, wait: 5000 })
+  await new Promise(r => setTimeout(r, 200))
+  check('挂起期间注册表 1 个', s.server.pendingPullDeviceIds().length === 1)
+  const tPoke = Date.now()
+  s.server.pokeSync()
+  const p2 = await (await pending1).json()
+  const took2 = Date.now() - tPoke
+  check('pokeSync 唤醒挂起请求（<1s）', p2.waitSupported === true && took2 < 1000, 'took=' + took2)
+  check('唤醒后注册表清空', eq(s.server.pendingPullDeviceIds(), []))
+
+  // 5. 信号是通知不是数据：唤醒后现扫，返回挂起前已存在的数据
+  await (await s.post('/api/sync/push', { changes: [{ domain: 'ledger', id: 'tx-wait', updatedAt: iso(t0), data: { date: '2026-11-08', time: '09:00', type: 'expense', amount: 5, category: '日用', payment: '', merchant: '长轮询验证', note: '' } }] }, { authorization: 'Bearer ' + token })).json()
+  const p3req = pullWith(token, { since: { ledger: 0 }, wait: 5000 })
+  await new Promise(r => setTimeout(r, 200))
+  s.server.pokeSync()
+  const p3 = await (await p3req).json()
+  check('唤醒后现扫：数据照常按 since 过滤返回', p3.changes.ledger.some(x => x.id === 'tx-wait'))
+
+  // 6. 同设备第二个 pull 顶掉第一个（第一个提前返回，第二个继续挂）
+  const first = pullWith(token, { since: { ledger: wait600 }, wait: 5000 })
+  await new Promise(r => setTimeout(r, 200))
+  const tPre = Date.now()
+  const second = pullWith(token, { since: { ledger: wait600 }, wait: 5000 })
+  const firstBody = await (await first).json()
+  const tookPre = Date.now() - tPre
+  check('第一个被顶掉提前返回（waitSupported）', firstBody.waitSupported === true && tookPre < 2000, 'took=' + tookPre)
+  check('第二个仍在挂（注册表 1 个）', s.server.pendingPullDeviceIds().length === 1)
+  s.server.pokeSync()
+  const secondBody = await (await second).json()
+  check('第二个可被唤醒且带 waitSupported', secondBody.waitSupported === true && eq(s.server.pendingPullDeviceIds(), []))
+
+  // 7. poke 放行全部挂起（多设备同时醒）
+  const pa = pullWith(token, { since: { ledger: wait600 }, wait: 5000 })
+  const pb = pullWith(token2, { since: { ledger: wait600 }, wait: 5000 })
+  await new Promise(r => setTimeout(r, 200))
+  check('两台设备同时挂起', s.server.pendingPullDeviceIds().length === 2)
+  s.server.pokeSync()
+  const [ra, rb] = await Promise.all([pa, pb])
+  const ja = await ra.json()
+  const jb = await rb.json()
+  check('poke 放行全部挂起', ja.waitSupported === true && jb.waitSupported === true && eq(s.server.pendingPullDeviceIds(), []))
+
+  // 8. 挂起中客户端断连 → 注册表清理，服务端不受影响（下一个 pull 正常）
+  const ac = new AbortController()
+  const dying = fetch(s.base + '/api/sync/pull', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
+    body: JSON.stringify({ since: { ledger: wait600 }, wait: 5000 }),
+    signal: ac.signal,
+  })
+  await new Promise(r => setTimeout(r, 200))
+  check('断连前注册表 1 个', s.server.pendingPullDeviceIds().length === 1)
+  ac.abort()
+  await dying.catch(() => { /* abort 的 fetch 必然 reject，吞掉即可 */ })
+  await new Promise(r => setTimeout(r, 100))
+  check('断连后注册表清理（不留死等）', eq(s.server.pendingPullDeviceIds(), []))
+  const after = await (await pullWith(token, { since: { ledger: 0 } })).json()
+  check('断连后下一个 pull 正常', after.ok === true && after.waitSupported === undefined)
+
+  await s.close()
+}
+
 console.log('\n§5 CORS（手机 WebView 与本服务不同源）')
 {
   const s = await boot()
@@ -493,14 +592,17 @@ console.log('\n§6 协议文档契约（design.md §2.1 与实现一致）')
   check('§2.1 记录墓碑上行负载 { deleted: true }', design.includes('{ deleted: true }'))
   check('§2.1 记录墓碑存储路径', design.includes('phoneCompanion/tombstones.json'))
   check('§2.1 记录游标只在 pull 后推进', design.includes('只在 pull 完成后推进'))
-  check('§2.1 记录 tombstoned 防复活', design.includes("reason: 'tombstoned'"))
-  // v1.2 契约
+  check('§2.1 记录 tombstoned 防复活', design.includes("reason: 'tombstoned'"))  // v1.2 契约
   check('§2.1 v1.2 记录 notes 上行域与无条件应用', design.includes('v1.2 笔记') && design.includes('无条件应用'))
   check('§2.1 记录内容 API 端点', design.includes('/api/notes/tree') && design.includes('/api/notes/content'))
   check('§2.1 记录按 id 服务端解析路径', design.includes('按 id 服务端解析路径'))
   // v1.3 契约
   check('§2.1 端点表已移除 AI 中继（电脑档 2026-11-06 下线）', !design.includes('| `POST /api/ai/chat`'))
   check('§6 决策记录标注电脑档已移除', design.includes('电脑档已于 2026-11-06 整体移除'))
+  // v1.7 契约（实时同步 · 长轮询）
+  check('§2.1 v1.7 记录 wait / waitSupported', design.includes('waitSupported') && design.includes('`wait`'))
+  check('§2.1 v1.7 记录服务端 25s 封顶', design.includes('25'))
+  check('§2.1 v1.7 记录同设备顶掉语义', design.includes('顶掉'))
 }
 
 console.log('\n' + (failures === 0 ? 'PASS (' + checks + ' checks)' : 'FAIL (' + failures + '/' + checks + ')'))
