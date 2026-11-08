@@ -68,6 +68,7 @@ export function startDiscoverResponder(httpPort: number, pcName: () => string, p
   socket = s
   s.on('message', (msg, rinfo) => {
     if (msg.toString('utf8').trim() !== DISCOVER_PING.trim()) return
+    console.log('[companion] discover ping from', `${rinfo.address}:${rinfo.port}`, '→ 单播回 port', httpPort)
     const reply = Buffer.from(JSON.stringify({
       ok: true,
       protocol: PROTOCOL_VERSION,
@@ -78,9 +79,10 @@ export function startDiscoverResponder(httpPort: number, pcName: () => string, p
     s.send(reply, rinfo.port, rinfo.address)
   })
   s.on('error', () => {
-    /* 组播不可用的网络（AP 隔离、端口被占等）：发现降级为扫段/手动，服务不受影响 */
+    /* 组播不可用的网络（AP 隔离等）：发现降级为扫段/手动，服务不受影响 */
   })
   s.bind(DISCOVER_PORT, () => {
+    console.log('[companion] discover responder on UDP', DISCOVER_PORT, '接口:', ipv4Addresses().join(', ') || '(无 IPv4 接口)')
     joinGroup(s)
     rejoinTimer = setInterval(() => joinGroup(s), REJOIN_MS)
   })
