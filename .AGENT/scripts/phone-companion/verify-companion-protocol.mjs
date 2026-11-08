@@ -41,7 +41,7 @@ import {
   bumpNoteFrontmatterUpdated, notePushDecision, isMobileNotesRel,
 } from '../../../electron/lib/phoneCompanion/notesUsb.ts'
 import {
-  startDiscoverResponder, stopDiscoverResponder, DISCOVER_GROUP, DISCOVER_PORT, DISCOVER_PING,
+  startDiscoverResponder, stopDiscoverResponder, DISCOVER_GROUPS, DISCOVER_PORT, DISCOVER_PING,
 } from '../../../electron/lib/phoneCompanion/discover.ts'
 import dgram from 'node:dgram'
 
@@ -648,7 +648,15 @@ console.log('\n§9 组播发现应答器（UDP 发现：手机喊 PHRONDIS v1 �
   const javaNum = (name) => { const m = java.match(new RegExp(name + ' = (\\d+)')); return m ? Number(m[1]) : null }
   check('§9 ping 文本两端一致（PHRONDIS v1）', javaStr('PING') !== null && javaStr('PING').trim() === DISCOVER_PING.trim(),
     '桌面="' + DISCOVER_PING.trim() + '" 手机=' + String(javaStr('PING')))
-  check('§9 组播组两端一致（239.255.42.42）', javaStr('GROUP') === DISCOVER_GROUP, '桌面=' + DISCOVER_GROUP + ' 手机=' + String(javaStr('GROUP')))
+  // 组播组对表：Java GROUPS 数组 ↔ 桌面 DISCOVER_GROUPS（224 = LocalSend 同款主组，239 = 旧手机过渡兼容）
+  const javaGroups = (() => {
+    const m = java.match(/GROUPS\s*=\s*\{([^}]*)\}/)
+    return m ? [...m[1].matchAll(/"([^"]+)"/g)].map(x => x[1]) : null
+  })()
+  check('§9 组播组两端一致（224 主组 + 239 过渡组）',
+    Array.isArray(javaGroups) && eq([...DISCOVER_GROUPS], javaGroups),
+    '桌面=' + JSON.stringify([...DISCOVER_GROUPS]) + ' 手机=' + JSON.stringify(javaGroups))
+  check('§9 手机自知 IP（selfIpv4）存在——扫自己网段是组播被 AP 整类丢弃后的唯一兜底', /selfIpv4\(\)/.test(java))
   check('§9 组播端口两端一致（8771）', javaNum('PORT') === DISCOVER_PORT, '桌面=' + DISCOVER_PORT + ' 手机=' + String(javaNum('PORT')))
 
   // 环境隔离预探：真 app 的伴侣服务在跑时，其应答器也绑 UDP 8771（SO_REUSEADDR 双绑共存），
@@ -667,7 +675,7 @@ console.log('\n§9 组播发现应答器（UDP 发现：手机喊 PHRONDIS v1 �
   // 组播回环：向组地址发包、加入组的本端应收到并单播应答。环境依赖（容器 / 某些网络禁组播，
   // 外部应答器抢答同理），只在干净环境跑，收不到/串台只警告不判 FAIL——应答逻辑由下面的单播路径硬断言覆盖。
   if (!foreign) {
-    const mcast = await sendRecv({ host: DISCOVER_GROUP, port: DISCOVER_PORT, payload: DISCOVER_PING, waitMs: 700 })
+    const mcast = await sendRecv({ host: DISCOVER_GROUPS[0], port: DISCOVER_PORT, payload: DISCOVER_PING, waitMs: 700 })
     if (mcast) {
       check('§9 组播 ping 收到单播应答', JSON.parse(mcast.text).port === HTTP_PORT, mcast.text)
     } else {

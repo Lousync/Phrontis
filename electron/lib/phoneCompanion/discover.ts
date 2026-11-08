@@ -9,10 +9,15 @@ import { PROTOCOL_VERSION } from './protocol.ts'
  * Phrontis-mobile 仓 docs/handoff-multicast-discovery-desktop.md）。
  *
  * 为什么：手机 WebView 拿不到本机 IP，扫段只能按经验清单枚举网段，电脑活在清单外
- * （实测 10.116.216.x）就永远搜不到。组播发现不猜网段：手机往组播组喊一声（3 声
+ * （实测 10.116.216.x）就永远搜不到。组播发现不猜网段：手机往组播组喊一声（每组 3 声
  * "PHRONDIS v1"，间隔 250ms 抗丢包），本端加入组收 ping 后**向来源地址单播**回发现
  * 负载（与 GET /api/discover 同构 + port 字段），任意子网 <1s 命中。port 为伴侣 HTTP
  * 实际端口——电脑改端口时组播路径自动跟随，扫段路径做不到。
+ *
+ * 双组收包（2026-11-08 修订）：224.0.0.167 是 LocalSend 同款链路本地组（RFC 4541 要求 AP
+ * 无条件泛洪，最被善待）；239.255.42.42 为初版组地址，保留是对旧手机 APK 的过渡兼容。
+ * 组播只是加速器——实测本网络 AP 整类丢弃客户端组播（224/239 双组零到达），手机侧真正的
+ * 兜底是「自知 IP 扫自己网段」（PhrontisDiscover.java selfIpv4），组播通不通它都工作。
  *
  * 加组按接口 IP 逐个来（LocalSend 同款）：不带接口的 addMembership 走内核默认选择，
  * 实测 Linux 上会 EINVAL（多网卡机器不可靠），按接口 IP 加组稳；每个接口独立 try，
@@ -21,7 +26,8 @@ import { PROTOCOL_VERSION } from './protocol.ts'
  * 失败语义：组播不可用的网络（AP 隔离等）静默降级为扫段/手动，伴侣服务本身不受影响。
  */
 
-export const DISCOVER_GROUP = '239.255.42.42'
+/** 收包组清单：[0] = LocalSend 同款 224 组（新手机主发），[1] = 初版 239 组（旧手机过渡兼容） */
+export const DISCOVER_GROUPS = ['224.0.0.167', '239.255.42.42'] as const
 export const DISCOVER_PORT = 8771
 /** 手机侧 ping 文本（PhrontisDiscover.java PING 常量，带换行；应答端按 trim 后比对） */
 export const DISCOVER_PING = 'PHRONDIS v1\n'
@@ -46,15 +52,19 @@ function joinGroup(s: dgram.Socket): void {
   const ips = ipv4Addresses()
   let joined = false
   for (const ip of ips) {
-    try {
-      s.addMembership(DISCOVER_GROUP, ip)
-      joined = true
-    } catch { /* 接口恰在切换 / 不支持组播：跳过，其余接口照试 */ }
+    for (const group of DISCOVER_GROUPS) {
+      try {
+        s.addMembership(group, ip)
+        joined = true
+      } catch { /* 接口恰在切换 / 不支持组播：跳过，其余接口照试 */ }
+    }
   }
   if (!joined) {
-    try {
-      s.addMembership(DISCOVER_GROUP)
-    } catch { /* 全部失败：发现降级为扫段/手动，服务不受影响 */ }
+    for (const group of DISCOVER_GROUPS) {
+      try {
+        s.addMembership(group)
+      } catch { /* 全部失败：发现降级为扫段/手动，服务不受影响 */ }
+    }
   }
 }
 
