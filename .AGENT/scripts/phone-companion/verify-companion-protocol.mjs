@@ -678,7 +678,10 @@ console.log('\n§9 组播发现应答器（UDP 发现：手机喊 PHRONDIS v1 �
   stopDiscoverResponder()
   await sleep(50)
   const afterStop = await sendRecv({ port: DISCOVER_PORT, payload: DISCOVER_PING, waitMs: 400 })
-  check('§9 stop 后不再应答（跟随伴侣服务生命周期）', afterStop === null, afterStop && afterStop.text)
+  // 本机可能同时跑着真 Phrontis 的应答器（同监听 8771）：应答无法区分来源，按 pc.name 判「自己的」是否还在答
+  const stray = afterStop ? (() => { try { return JSON.parse(afterStop.text) } catch { return null } })() : null
+  if (stray && stray.pc?.name !== PC_NAME) console.log('  [NOTE] 检测到本机另一实例应答器在跑（pc.name=' + stray.pc?.name + ' port=' + stray.port + '），stop 断言按 pc.name 区分')
+  check('§9 stop 后不再应答（跟随伴侣服务生命周期）', !stray || stray.pc?.name !== PC_NAME, afterStop && afterStop.text)
 
   // 勿写死：pcName / httpPort / pairing 全部来自入参（重启一次用另一组入参验证）
   startDiscoverResponder(9999, () => '另起的电脑名', pairingCapabilities(false))
