@@ -651,42 +651,52 @@ console.log('\n§9 组播发现应答器（UDP 发现：手机喊 PHRONDIS v1 �
   check('§9 组播组两端一致（239.255.42.42）', javaStr('GROUP') === DISCOVER_GROUP, '桌面=' + DISCOVER_GROUP + ' 手机=' + String(javaStr('GROUP')))
   check('§9 组播端口两端一致（8771）', javaNum('PORT') === DISCOVER_PORT, '桌面=' + DISCOVER_PORT + ' 手机=' + String(javaNum('PORT')))
 
-  startDiscoverResponder(HTTP_PORT, () => PC_NAME, PAIRING_FULL)
-  await sleep(200) // 等 bind + addMembership
-
-  // 组播回环：向组地址发包、加入组的本端应收到并单播应答。环境依赖（容器 / 某些网络禁组播），
-  // 收不到只警告不判 FAIL——应答逻辑本身由下面的单播路径硬断言覆盖。
-  const mcast = await sendRecv({ host: DISCOVER_GROUP, port: DISCOVER_PORT, payload: DISCOVER_PING, waitMs: 700 })
-  if (mcast) {
-    check('§9 组播 ping 收到单播应答', JSON.parse(mcast.text).port === HTTP_PORT, mcast.text)
-  } else {
-    console.log('  [WARN] 组播回环无应答（本机网络禁组播则属正常），该路径跳过——单播路径已覆盖应答构型')
+  // 环境隔离预探：真 app 的伴侣服务在跑时，其应答器也绑 UDP 8771（SO_REUSEADDR 双绑共存），
+  // 应答会串台——组播回环按首包断言、stop 断言全被外部应答污染（2026-11-08 实测 2 项假 FAIL）。
+  // 预探有应答 = 外部应答器存在 → 本节改绑私有端口执行（断言语义不变），组播回环退化为 WARN。
+  const preProbe = await sendRecv({ port: DISCOVER_PORT, payload: DISCOVER_PING, waitMs: 500 })
+  const foreign = !!preProbe
+  const udpPort = foreign ? 50000 + (process.pid % 10000) : DISCOVER_PORT
+  if (foreign) {
+    console.log('  [WARN] 检测到外部应答器（真 app 的伴侣服务在跑），UDP 断言改用私有端口 ' + udpPort + ' 隔离执行')
   }
 
-  // 单播到绑定端口（确定性路径）：ping → 应答构型（与 GET /api/discover 同构 + port）
-  const reply = await sendRecv({ port: DISCOVER_PORT, payload: DISCOVER_PING })
+  startDiscoverResponder(HTTP_PORT, () => PC_NAME, PAIRING_FULL, udpPort)
+  await sleep(200) // 等 bind + addMembership
+
+  // 组播回环：向组地址发包、加入组的本端应收到并单播应答。环境依赖（容器 / 某些网络禁组播，
+  // 外部应答器抢答同理），只在干净环境跑，收不到/串台只警告不判 FAIL——应答逻辑由下面的单播路径硬断言覆盖。
+  if (!foreign) {
+    const mcast = await sendRecv({ host: DISCOVER_GROUP, port: DISCOVER_PORT, payload: DISCOVER_PING, waitMs: 700 })
+    if (mcast) {
+      check('§9 组播 ping 收到单播应答', JSON.parse(mcast.text).port === HTTP_PORT, mcast.text)
+    } else {
+      console.log('  [WARN] 组播回环无应答（本机网络禁组播则属正常），该路径跳过——单播路径已覆盖应答构型')
+    }
+  }
+
+  // 单播到绑定端口（确定性路径）：ping → 应答构型（与 GET /api/discover 同构 + port）。
+  // 私有端口上只有本测试的应答器，外部实例无法串台。
+  const reply = await sendRecv({ port: udpPort, payload: DISCOVER_PING })
   check('§9 ping 收到单播应答', !!reply)
   const body = reply ? JSON.parse(reply.text) : null
   check('§9 应答构型 ok/protocol/pc.name/port/pairing',
     !!body && body.ok === true && body.protocol === PROTOCOL_VERSION && body.pc?.name === PC_NAME
       && body.port === HTTP_PORT && eq(body.pairing, PAIRING_FULL), reply && reply.text)
-  check('§9 应答来自服务端口 8771', !!reply && reply.from.endsWith(':' + DISCOVER_PORT), reply && reply.from)
+  check('§9 应答来自绑定端口 ' + udpPort, !!reply && reply.from.endsWith(':' + udpPort), reply && reply.from)
 
-  const noise = await sendRecv({ port: DISCOVER_PORT, payload: 'HELLO WORLD\n', waitMs: 400 })
+  const noise = await sendRecv({ port: udpPort, payload: 'HELLO WORLD\n', waitMs: 400 })
   check('§9 非 ping 文本不应答', noise === null, noise && noise.text)
 
   stopDiscoverResponder()
   await sleep(50)
-  const afterStop = await sendRecv({ port: DISCOVER_PORT, payload: DISCOVER_PING, waitMs: 400 })
-  // 本机可能同时跑着真 Phrontis 的应答器（同监听 8771）：应答无法区分来源，按 pc.name 判「自己的」是否还在答
-  const stray = afterStop ? (() => { try { return JSON.parse(afterStop.text) } catch { return null } })() : null
-  if (stray && stray.pc?.name !== PC_NAME) console.log('  [NOTE] 检测到本机另一实例应答器在跑（pc.name=' + stray.pc?.name + ' port=' + stray.port + '），stop 断言按 pc.name 区分')
-  check('§9 stop 后不再应答（跟随伴侣服务生命周期）', !stray || stray.pc?.name !== PC_NAME, afterStop && afterStop.text)
+  const afterStop = await sendRecv({ port: udpPort, payload: DISCOVER_PING, waitMs: 400 })
+  check('§9 stop 后不再应答（跟随伴侣服务生命周期）', afterStop === null, afterStop && afterStop.text)
 
   // 勿写死：pcName / httpPort / pairing 全部来自入参（重启一次用另一组入参验证）
-  startDiscoverResponder(9999, () => '另起的电脑名', pairingCapabilities(false))
+  startDiscoverResponder(9999, () => '另起的电脑名', pairingCapabilities(false), udpPort)
   await sleep(200)
-  const reply2 = await sendRecv({ port: DISCOVER_PORT, payload: DISCOVER_PING })
+  const reply2 = await sendRecv({ port: udpPort, payload: DISCOVER_PING })
   const body2 = reply2 ? JSON.parse(reply2.text) : null
   check('§9 重启后入参跟随（port/pc.name/pairing）',
     !!body2 && body2.port === 9999 && body2.pc?.name === '另起的电脑名' && eq(body2.pairing, ['code']), reply2 && reply2.text)

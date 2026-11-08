@@ -61,8 +61,10 @@ function joinGroup(s: dgram.Socket): void {
 /**
  * 启动应答器（跟随伴侣服务生命周期：start 时调，stop / before-quit 配 stopDiscoverResponder）。
  * pcName 与 pairing 取现有 deps.pcName() / 配对能力传入，勿在此写死。
+ * udpPort 仅契约脚本注入私有端口做隔离测试用（真 app 在跑时 UDP 8771 被占，应答会串台）；
+ * 生产一律缺省绑定冻结口 8771。
  */
-export function startDiscoverResponder(httpPort: number, pcName: () => string, pairing: readonly string[]): void {
+export function startDiscoverResponder(httpPort: number, pcName: () => string, pairing: readonly string[], udpPort: number = DISCOVER_PORT): void {
   stopDiscoverResponder()
   const s = dgram.createSocket({ type: 'udp4', reuseAddr: true })
   socket = s
@@ -81,8 +83,8 @@ export function startDiscoverResponder(httpPort: number, pcName: () => string, p
   s.on('error', () => {
     /* 组播不可用的网络（AP 隔离等）：发现降级为扫段/手动，服务不受影响 */
   })
-  s.bind(DISCOVER_PORT, () => {
-    console.log('[companion] discover responder on UDP', DISCOVER_PORT, '接口:', ipv4Addresses().join(', ') || '(无 IPv4 接口)')
+  s.bind(udpPort, () => {
+    console.log('[companion] discover responder on UDP', udpPort, '接口:', ipv4Addresses().join(', ') || '(无 IPv4 接口)')
     joinGroup(s)
     rejoinTimer = setInterval(() => joinGroup(s), REJOIN_MS)
   })

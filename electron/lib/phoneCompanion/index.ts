@@ -38,6 +38,11 @@ import { isMobileNotesRel } from './notesUsb'
  */
 
 const MAX_PORT_TRIES = 20
+/** 首选端口 8770 被占时的延迟重试：dev HMR 重启竞态下旧实例退净需要一两秒——立即回退会让服务
+ *  永久漂离冻结默认端口，占用者退出后也不回搬；手机扫段只探 8770/8771、防火墙放行规则都跟着失配
+ *  （2026-11-08 实测：伴侣静默漂到 8771，手机配对失联，是「多轮改代码仍配不上」的根源之一）。 */
+const PREFERRED_PORT_RETRIES = 8
+const PREFERRED_RETRY_GAP_MS = 500
 
 interface PendingPairEntry {
   view: CompanionPairRequestView
@@ -218,20 +223,36 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
   const server = createCompanionServer(deps)
 
   let boundPort = 0
-  for (let i = 0; i < MAX_PORT_TRIES; i++) {
-    try {
-      await new Promise<void>((resolve, reject) => {
-        server.once('error', reject)
-        server.listen(port + i, '0.0.0.0', () => {
-          server.removeListener('error', reject)
-          resolve()
-        })
+  const tryListen = (p: number): Promise<void> =>
+    new Promise((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(p, '0.0.0.0', () => {
+        server.removeListener('error', reject)
+        resolve()
       })
-      boundPort = port + i
-      break
+    })
+  // 先赖在首选端口上重试（ride out HMR 竞态），实在被别的程序占死才回退
+  for (let i = 0; i < PREFERRED_PORT_RETRIES && !boundPort; i++) {
+    try {
+      await tryListen(port)
+      boundPort = port
     } catch {
-      if (i === MAX_PORT_TRIES - 1) throw new Error('手机伴侣端口全部被占用（8770 起 20 个）')
+      if (i < PREFERRED_PORT_RETRIES - 1) await new Promise(r => setTimeout(r, PREFERRED_RETRY_GAP_MS))
     }
+  }
+  if (!boundPort) {
+    for (let i = 1; i < MAX_PORT_TRIES; i++) {
+      try {
+        await tryListen(port + i)
+        boundPort = port + i
+        break
+      } catch {
+        if (i === MAX_PORT_TRIES - 1) throw new Error('手机伴侣端口全部被占用（8770 起 20 个）')
+      }
+    }
+  }
+  if (boundPort !== port) {
+    console.warn('[companion] 首选端口', port, '被占，已回退到', boundPort, '——手机扫段只探 8770/8771，请检查占用者')
   }
 
   state = { server, port: boundPort, pairCode: newPairCode(), pendingPairs: [], unsubDataChanged: null }
