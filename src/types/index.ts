@@ -1367,6 +1367,8 @@ export interface AiTeachCourseState {
   reviews: Record<string, AiTeachChapterReview>
   assistantSessionId?: string | null
   sourceCounts: AiTeachSourceCounts
+  /** 长资料模式（自动检测，不持久化）：badge 展示用 */
+  longMaterial?: { active: boolean; pages: number; chars: number; profile: 'normal' | 'long-128k' | 'long-1m' }
 }
 
 /** 3.14 素材注册表：区间 / 条目 / 章级分配 / 段快照（与 src/lib/aiTeachingSourcesPure.ts 同构） */
@@ -1378,6 +1380,18 @@ export type AiTeachSourceAnchor =
   | { kind: 'lines'; from: number; to: number }
 export interface AiTeachSourceIndexEntry { label: string; anchor: AiTeachSourceAnchor; level?: number }
 export type AiTeachSourceType = 'md' | 'dir' | 'pdf' | 'pptx' | 'docx' | 'image' | 'url' | 'code' | 'other'
+export type AiTeachSourceTextLayer = 'text' | 'empty' | 'partial'
+export interface AiTeachSourceExtract {
+  rel: string
+  anchor: AiTeachSourceAnchor
+  pages?: number
+  chars?: number
+  textLayer: AiTeachSourceTextLayer
+  emptyPages?: number[]
+  createdAt: string
+  sourceMtimeMs?: number
+  sourceSize?: number
+}
 export interface AiTeachSource {
   id: string
   title: string
@@ -1385,8 +1399,13 @@ export interface AiTeachSource {
   rel?: string
   url?: string
   extractRel?: string | null
+  extracts?: AiTeachSourceExtract[]
+  pages?: number
+  chars?: number
+  size?: number
+  textLayer?: AiTeachSourceTextLayer
   anchor: AiTeachSourceAnchor
-  status: 'ready' | 'needs-extract' | 'error'
+  status: 'ready' | 'needs-extract' | 'needs-vision' | 'error'
   index?: AiTeachSourceIndexEntry[]
   indexUpdatedAt?: string
   note?: string
@@ -2919,7 +2938,21 @@ export interface ElectronAPI {
   aiTeachCourseAssignSources: (wsId: string, chapterId: string, items: Array<{ sourceId?: string; source?: string; label?: string; anchor?: AiTeachSourceAnchor }>) => Promise<{ ok: boolean; assigned: number; errors: string[]; error?: string }>
   aiTeachCourseRemoveSource: (wsId: string, sourceId: string) => Promise<{ ok: boolean; error?: string }>
   aiTeachCourseRemoveAssignment: (wsId: string, chapterId: string, sourceId: string) => Promise<{ ok: boolean; error?: string }>
-  aiTeachCourseExtractSource: (wsId: string, sourceId: string, anchor: AiTeachSourceAnchor) => Promise<{ ok: boolean; relPath?: string; error?: string; skipped?: boolean }>
+  aiTeachCourseExtractSource: (wsId: string, sourceId: string, anchor: AiTeachSourceAnchor) => Promise<{
+    ok: boolean
+    relPath?: string
+    pages?: number
+    chars?: number
+    total?: number
+    textLayer?: 'text' | 'empty' | 'partial'
+    emptyPages?: number[]
+    needsVision?: boolean
+    estimatedVisionBatches?: number
+    needsSoffice?: boolean
+    hint?: string
+    error?: string
+    skipped?: boolean
+  }>
   // L2 课时生命周期（3.13 兼容）
   aiTeachCourseOpenUnit: (wsId: string, unitId: string, kind?: string) => Promise<{ ok: boolean; sessionId?: string; order?: number; kind?: string; status?: 'open' | 'ended'; readonly?: boolean; error?: string }>
   aiTeachCourseEndLesson: (sessionId: string) => Promise<{ ok: boolean; wsId?: string; unitId?: string; error?: string }>

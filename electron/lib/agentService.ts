@@ -19,7 +19,11 @@ import { estimateTokens, trimHistoryByBudget } from './agentContextBudget'
 import { compressAtTokens, composeContextWithDigest, rowsAfterDigest } from './agentCompressCore'
 import { compressSession } from './agentCompress'
 import type { SessionDigest, AgentMessageRow, AgentSessionRow } from './agentSessionRepo'
-import { clampMaxRounds, clampMaxSessionWrites, clampRunTokenBudget, isParallelSafe, partitionToolBatches, PARALLEL_CHUNK, PARALLEL_HINT, FINAL_ROUND_NOTICE, FORCED_SUMMARY_NOTICE } from './agentLoopPolicy'
+import { clampMaxRounds, clampMaxSessionWrites, clampRunTokenBudget, isParallelSafe, partitionToolBatches, PARALLEL_HINT, FINAL_ROUND_NOTICE, FORCED_SUMMARY_NOTICE } from './agentLoopPolicy'
+import { detectLongMaterial } from '../../src/lib/aiTeachingSourcesPure'
+import { ensureSources } from './aiTeachingSourceRegistry'
+import { SETTINGS } from '../../src/lib/settings'
+import { setVaultToolProfile } from './builtinTools'
 import {
   createAgentSession, listAgentSessions, renameAgentSession, deleteAgentSession,
   sessionExists, appendAgentMessage, ensureSessionTitle, getAgentMessages, getAgentMessagesAll,
@@ -125,39 +129,120 @@ interface AgentMessage {
   tool_call_id?: string
 }
 
-// ===== 工具结果的体积治理（2026-09-12，prompt cache 之后的第二轮） =====
+// ===== 工具结果的体积治理（2026-09-12，prompt cache 之后的第二轮；长资料方案 §6.5/§6.6 profile 化） =====
 //
 // 为什么需要：prompt cache 只能覆盖**每轮逐字不变**的前缀（tools schema + system）。
 // 而工具返回是 convo.push({role:'tool', content: JSON.stringify(exec.data)})，会随轮次
 // 累积并被反复重发 —— 实测 quiz.list(limit=50) 一次约 16.7k 字符，在 8 轮任务里平均
 // 被重发 4.5 次。这类开销 cache 帮不上忙，只能从「拿得少」与「丢得早」两个方向治。
 
-/** 单条工具结果的字符硬上限（≈8k tok）。正常调用不会触及，兜住"拉全量"的极端情况 */
-const MAX_TOOL_RESULT_CHARS = 24000
-/** 触发硬上限时保留的预览字符数（让模型看清数据结构，但不足以占满上下文） */
-const TOOL_RESULT_PREVIEW_CHARS = 4000
-/** 发送前压缩：最近 N 条工具结果保持完整 */
-const KEEP_RECENT_TOOL_RESULTS = 3
-/** 更早的工具结果超过该字符数才压缩（小的不值得动） */
-const COMPRESS_TOOL_RESULT_CHARS = 1200
-
-/**
- * 单条工具结果的硬上限（保险丝）。超限时不返回半截 JSON —— 半截 JSON 既解析不了、
- * 又白占上下文 —— 而是换成合法摘要 + 预览 + 明确的收窄指引。
- * 预览取自**序列化后的文本**、再交给 JSON.stringify 重新转义，因此即使切在
- * `\uXXXX` 转义序列中间，产出的仍是合法 JSON。
- */
-function capToolResult(raw: string, toolName: string): string {
-  return JSON.stringify({
-    ok: true,
-    truncated: true,
-    totalChars: raw.length,
-    preview: raw.slice(0, TOOL_RESULT_PREVIEW_CHARS),
-    hint: `工具 ${toolName} 的返回过大（${raw.length} 字符）已被系统截断。请缩小范围后重试：quiz.list 降低 limit 或加 tagNames 收窄；vault.read 降低 maxChars；vault.search 收窄关键词。`,
-  })
+/** 长资料档位（§7.2 预算表）：run 开始取一次、整轮不变，函数纯参数传入，不读全局（防 prompt cache 打散）。 */
+export interface ToolResultProfile {
+  /** 单条工具结果字符硬上限 */
+  resultChars: number
+  /** 结构化截断：单字符串保留上限 */
+  maxStringChars: number
+  /** 结构化截断：数组保留项数 */
+  maxItems: number
+  /** 非结构化回退预览字符数 */
+  previewChars: number
+  /** 最近结果窗口：字符预算 */
+  recentBudgetChars: number
+  /** 最近结果窗口：条数上限 */
+  recentMaxItems: number
+  /** 最近结果窗口：至少保留条数 */
+  recentMinItems: number
+  /** 更早的结果超过该字符数才压缩（小的不值得动） */
+  compressThreshold: number
 }
 
-/** 递归降级：标量与短文本原样保留，长文本/大数组降为占位说明 */
+export type ToolResultProfileId = 'normal' | 'long-128k' | 'long-1m'
+
+export const TOOL_RESULT_PROFILES: Record<ToolResultProfileId, ToolResultProfile> = {
+  normal: { resultChars: 48_000, maxStringChars: 8_000, maxItems: 50, previewChars: 8_000, recentBudgetChars: 120_000, recentMaxItems: 6, recentMinItems: 2, compressThreshold: 4_000 },
+  'long-128k': { resultChars: 64_000, maxStringChars: 10_000, maxItems: 80, previewChars: 10_000, recentBudgetChars: 200_000, recentMaxItems: 8, recentMinItems: 2, compressThreshold: 4_000 },
+  'long-1m': { resultChars: 120_000, maxStringChars: 20_000, maxItems: 120, previewChars: 20_000, recentBudgetChars: 400_000, recentMaxItems: 12, recentMinItems: 2, compressThreshold: 10_000 },
+}
+
+/** 长资料循环预算（§7.2 表）：轮数 / token 预算 / 写入上限 / 历史上下文 / 并行批。
+ *  normal 的历史上下文取当前默认 24k（与既有行为一致，方案表中 32k 未落地过，不借机改行为）。 */
+export const LOOP_BUDGET_PROFILES: Record<ToolResultProfileId, { maxRounds: number; runTokenBudget: number; maxSessionWrites: number; contextBudgetTokens: number; parallelChunk: number }> = {
+  normal: { maxRounds: 16, runTokenBudget: 500_000, maxSessionWrites: 20, contextBudgetTokens: 24_000, parallelChunk: 4 },
+  'long-128k': { maxRounds: 32, runTokenBudget: 3_000_000, maxSessionWrites: 80, contextBudgetTokens: 64_000, parallelChunk: 4 },
+  'long-1m': { maxRounds: 48, runTokenBudget: 10_000_000, maxSessionWrites: 300, contextBudgetTokens: 200_000, parallelChunk: 6 },
+}
+
+/** 续读坐标字段（§6.5）：结构化截断时原样保留，不给截断。 */
+const CAP_KEEP_KEYS = new Set(['path', 'id', 'relPath', 'title', 'totalChars', 'nextOffset', 'hasMore', 'offset', 'pageCount', 'nextPage', 'pagesRead', 'total', 'mtimeMs', 'truncated', 'query', 'textLayer', 'kind', 'pages'])
+
+function isRecordObj(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v)
+}
+
+/** 递归结构化截断：标量与续读坐标原样，长字符串截到 maxStringChars，大数组保留前 maxItems 项。 */
+function capStructuredValue(v: unknown, p: ToolResultProfile, depth: number, key?: string): unknown {
+  if (v === null || typeof v === 'number' || typeof v === 'boolean') return v
+  if (typeof v === 'string') {
+    if (v.length <= p.maxStringChars || (key && CAP_KEEP_KEYS.has(key))) return v
+    return `${v.slice(0, p.maxStringChars)}…（${v.length - p.maxStringChars} 字符已省略）`
+  }
+  if (Array.isArray(v)) {
+    if (v.length <= p.maxItems) return v.map((x) => capStructuredValue(x, p, depth + 1))
+    const kept = v.slice(0, p.maxItems).map((x) => capStructuredValue(x, p, depth + 1))
+    kept.push(`…（其余 ${v.length - p.maxItems} 项已省略）`)
+    return kept
+  }
+  if (isRecordObj(v)) {
+    const o: Record<string, unknown> = {}
+    for (const [k, val] of Object.entries(v)) o[k] = capStructuredValue(val, p, depth + 1, k)
+    return o
+  }
+  return null
+}
+
+/** 截断提示按工具的续读坐标生成（§6.5），不再统一「降低 maxChars」。 */
+function capHint(toolName: string, parsed: unknown): string {
+  const base = `工具 ${toolName} 的返回过大已截断。`
+  const d = (isRecordObj(parsed) && isRecordObj(parsed.data) ? parsed.data : parsed) as Record<string, unknown>
+  if (typeof d?.nextOffset === 'number') {
+    const rest = typeof d.totalChars === 'number' ? `还有 ${d.totalChars - d.nextOffset} 字符未读，` : ''
+    return `${base}${rest}用 offset=${d.nextOffset} 继续读。`
+  }
+  if (typeof d?.nextPage === 'number' && typeof d?.pageCount === 'number') {
+    return `${base}还有第 ${d.nextPage}-${d.pageCount} 页未读，用 pages="${d.nextPage}-${d.pageCount}" 继续。`
+  }
+  if (typeof d?.offset === 'number' && d?.hasMore === true) return `${base}用 offset=${d.offset} 继续取。`
+  return `${base}请缩小范围后重试（降低 maxChars/limit 或收窄关键词）。`
+}
+
+/**
+ * 单条工具结果的硬上限（保险丝，§6.5）。超限时优先解析 JSON 做**结构化截断**：
+ * 标量与续读坐标（nextOffset / pageCount / hasMore…）原样保留，长字符串与大数组降级，
+ * 并按工具生成「怎么续读」的提示 —— 模型拿到的是可续读的现场，不是一句「缩小范围」。
+ * 解析失败才回退到纯文本预览（预览取自序列化后的文本、再重新转义，保证产出合法 JSON）。
+ */
+function capToolResult(raw: string, toolName: string, p: ToolResultProfile): string {
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    const capped = capStructuredValue(parsed, p, 0)
+    return JSON.stringify({
+      ...(isRecordObj(capped) ? capped : { value: capped }),
+      _truncated: true,
+      _originalChars: raw.length,
+      _hint: capHint(toolName, parsed),
+    })
+  } catch {
+    return JSON.stringify({
+      ok: true,
+      truncated: true,
+      totalChars: raw.length,
+      preview: raw.slice(0, p.previewChars),
+      hint: `工具 ${toolName} 的返回过大（${raw.length} 字符）且非结构化，已截断为预览。请缩小范围后重试。`,
+    })
+  }
+}
+
+/** 递归降级：标量与短文本原样保留，长文本/大数组降为占位说明（续读坐标是标量，天然保留） */
 function shrinkValue(v: unknown, depth: number): unknown {
   if (v === null || typeof v === 'number' || typeof v === 'boolean') return v
   if (typeof v === 'string') return v.length <= 160 ? v : `…（${v.length} 字符已省略）`
@@ -185,7 +270,7 @@ function compressOneToolResult(raw: string): string {
       ...(shrinkValue(parsed, 0) as Record<string, unknown>),
       _compressed: true,
       _originalChars: raw.length,
-      _hint: '此工具结果已压缩以节省上下文。如需明细请重新调用该工具并缩小范围。',
+      _hint: '此工具结果已压缩以节省上下文。如需明细请重新调用该工具并缩小范围（vault.read 续读用 offset / pages）。',
     })
   } catch {
     return JSON.stringify({
@@ -197,20 +282,31 @@ function compressOneToolResult(raw: string): string {
 }
 
 /**
- * 历史工具结果的渐进压缩（发送前调用）。**必须是纯函数** —— 同一输入恒得同一输出，
- * 这样已被压缩的老消息在后续轮次逐字不变，prompt cache 的前缀才不会被反复打散。
- * 只压缩「较老的、且确实很大」的结果，并留下重新调用的指引。
+ * 历史工具结果的渐进压缩（发送前调用，§6.6 最近结果预算）。
+ * **必须是纯函数** —— 同一输入恒得同一输出，已被压缩的老消息在后续轮次逐字不变。
+ * 从最新往前按字符预算 + 条数上限开窗（至少 minItems 条）；窗外且超压缩阈值的结果才压缩。
  */
-function compressStaleToolResults(convo: AgentMessage[]): AgentMessage[] {
+function compressStaleToolResults(convo: AgentMessage[], p: ToolResultProfile): AgentMessage[] {
   const toolIdx: number[] = []
   convo.forEach((m, i) => { if (m.role === 'tool') toolIdx.push(i) })
-  const cutoff = toolIdx.length - KEEP_RECENT_TOOL_RESULTS
-  if (cutoff <= 0) return convo
-  const stale = new Set(toolIdx.slice(0, cutoff))
-  return convo.map((m, i) => {
-    if (!stale.has(i)) return m
+  if (toolIdx.length <= p.recentMinItems) return convo
+  let kept = 0
+  let chars = 0
+  let i = toolIdx.length - 1
+  while (i >= 0) {
+    const c = String(convo[toolIdx[i]]?.content ?? '').length
+    // minItems 兜底：预算再紧也至少保留 recentMinItems 条完整结果
+    if (kept >= p.recentMinItems && (chars + c > p.recentBudgetChars || kept >= p.recentMaxItems)) break
+    chars += c
+    kept++
+    i--
+  }
+  const cutoff = toolIdx.length - kept
+  const stale = new Set(toolIdx.slice(0, Math.max(0, cutoff)))
+  return convo.map((m, i2) => {
+    if (!stale.has(i2)) return m
     const c = String(m.content ?? '')
-    if (c.length <= COMPRESS_TOOL_RESULT_CHARS) return m
+    if (c.length <= p.compressThreshold) return m
     return { ...m, content: compressOneToolResult(c) }
   })
 }
@@ -803,7 +899,7 @@ function notifyAssistant(sessionId: string, message: string): void {
  * 检查点之前的旧轮已被纪要替代、不再进上下文；无 digest / 检查点失效时与原行为一致
  * （裁剪兜底语义不变：压缩失败/关闭时行为逐字节同改造前）。
  */
-function assembleAgentHistory(sessionId: string): {
+function assembleAgentHistory(sessionId: string, budgetOverride?: number): {
   digest: SessionDigest | null
   history: { role: 'user' | 'assistant'; content: string }[]
   budget: { totalTurns: number; keptTurns: number; estimatedHistoryTokens: number }
@@ -814,7 +910,7 @@ function assembleAgentHistory(sessionId: string): {
   const historyAll = baseRows
     .slice(-40)
     .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
-  const budgetTokens = Math.floor(Number(getSettingReader()('agentContextBudgetTokens')) || 24000)
+  const budgetTokens = Math.floor(Number(budgetOverride ?? getSettingReader()('agentContextBudgetTokens')) || 24000)
   const budget = trimHistoryByBudget(historyAll, budgetTokens)
   return {
     digest,
@@ -991,26 +1087,50 @@ async function runAgentLoop(
    * 所以守卫要放行「末条不是 user」；注入文本作为**一条不落库的合成 user 轮**追加在 convo 末尾
    * （不进 requestInjection 槽：续跑指令必须是「最近一条指令」才有牵引力）。
    */
-  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string }
+  opts?: { allowEmptyHistory?: boolean; resumeInjection?: string; profile?: ToolResultProfileId }
 ): Promise<AgentChatResult> {
-  // ---- 从会话库重建对话历史（仅 user/assistant 文本轮） ----
-  // 会话压缩：检查点之前的旧轮已被纪要替代（assembleAgentHistory）；其后再做
-  // 条数硬上限（-40）与 token 轮级裁剪——压缩失败/关闭时兜底，长会话不再全量进模型
   const runStarted = Date.now() // 归因 P0：中断卡的「耗时」与诊断块用它
   const resumeInjection = String(opts?.resumeInjection ?? '')
-  let asm = assembleAgentHistory(sessionId)
-  let history = asm.history
-  const virtualKickoff = opts?.allowEmptyHistory === true && history.length === 0
-  if (!virtualKickoff && (history.length === 0 || (history[history.length - 1].role !== 'user' && !resumeInjection))) {
-    return { ok: false, sessionId, error: '没有可重新生成的用户消息', trace }
-  }
-
   // N-1 手册通道：仅 assistant 来源、且会话已分类为 manual 时启用（AI 教学恒走通用通道）
   // 来源：显式传入优先；缺省按会话记录回推（regenerate / edit 等不带 source 的路径）——
   // 否则日程助手会话在这些路径会退化成通用助手（人设/工具面/摘要全丢）。
   if (!source && sessionId) source = getAgentSession(sessionId)?.source
   const runModeRow = getAgentSession(sessionId)
   const manual = source !== 'aiTeaching' && source !== 'schedule' && source !== 'intel' && runModeRow?.mode === 'manual'
+  // ---- 长资料自动检测（长资料方案 §7.1）：仅 AI 教学链路（D2）；run 开始取一次，整轮不变（§6.7） ----
+  let profileId: ToolResultProfileId = opts?.profile ?? 'normal'
+  if (source === 'aiTeaching' && !opts?.profile) {
+    const wsId = getWorkspaceOfSession(sessionId)
+    const sources = wsId ? ensureSources(wsId, getSettingReader())?.sources ?? [] : []
+    const lm = detectLongMaterial(sources, Number(getSettingReader()('ctxWindow')) || 0)
+    if (lm.active && lm.profile !== 'normal') profileId = lm.profile
+  }
+  setVaultToolProfile(profileId)
+  const toolProfile = () => TOOL_RESULT_PROFILES[profileId]
+  const loopBudget = LOOP_BUDGET_PROFILES[profileId]
+  /** §7.3：profile 只在设置仍是默认值时覆盖（long 档才覆盖）；用户显式改过的值优先；normal 恒用用户设置 */
+  const budgetOf = (key: 'agentMaxRounds' | 'agentRunTokenBudget' | 'agentMaxSessionWrites' | 'agentContextBudgetTokens', profileValue: number): number => {
+    const cur = Number(getSettingReader()(key))
+    if (profileId === 'normal' || !Number.isFinite(cur)) return cur
+    const def = Number((SETTINGS as Record<string, { default?: unknown }>)[key]?.default)
+    return cur === def ? profileValue : cur
+  }
+  /** §7.1 运行时兜底：vault.read 读到 >100k 字符 / >100 页当场升档（只升不降；轮数等一次性预算不回补） */
+  const escalateProfile = () => {
+    if (profileId === 'long-1m') return
+    profileId = profileId === 'normal' ? 'long-128k' : 'long-1m'
+    setVaultToolProfile(profileId)
+  }
+  // ---- 从会话库重建对话历史（仅 user/assistant 文本轮） ----
+  // 会话压缩：检查点之前的旧轮已被纪要替代（assembleAgentHistory）；其后再做
+  // 条数硬上限（-40）与 token 轮级裁剪——压缩失败/关闭时兜底，长会话不再全量进模型
+  // 历史预算随长资料档位走（§7.2：long-128k 64k / long-1m 200k；normal 恒用用户设置）
+  let asm = assembleAgentHistory(sessionId, budgetOf('agentContextBudgetTokens', loopBudget.contextBudgetTokens))
+  let history = asm.history
+  const virtualKickoff = opts?.allowEmptyHistory === true && history.length === 0
+  if (!virtualKickoff && (history.length === 0 || (history[history.length - 1].role !== 'user' && !resumeInjection))) {
+    return { ok: false, sessionId, error: '没有可重新生成的用户消息', trace }
+  }
   // ---- 统一 AI 助手（v3.11.0）：文件作用域 + 写入策略 ----
   // 旧 aiAssistant 来源只作为兼容入口；新会话一律 source='assistant'。
   // 缺省 source 也按通用助手处理（老会话 / 某些内部入口不带来源）；AI 教学与日程上面已回推
@@ -1364,7 +1484,7 @@ async function runAgentLoop(
   // 估算面 = 实际发送串（system + 纪要 + 历史）+ tools payload。压缩后重装配
   // （检查点推进 → base 变小）；无可压段时 skipped 不调 LLM；失败静默回退现有裁剪。
   let compressed: { covered: number; digestChars: number } | undefined
-  const budgetSetting = Math.floor(Number(getSettingReader()('agentContextBudgetTokens')) || 24000)
+  const budgetSetting = budgetOf('agentContextBudgetTokens', loopBudget.contextBudgetTokens)
   // v3.1.2 条目11：支线不参与压缩——上下文 = 自己的历史 + 固化快照，压成纪要会打乱快照语义
   if (!virtualKickoff && !isSideLane && !manual && budgetSetting > 0 && getSettingReader()('agentCompressionEnabled') !== false) {
     const est = estimateTokens(convo.map(m => m.content ?? '').join('\n')) + estimateTokens(JSON.stringify(toolPayload))
@@ -1423,11 +1543,12 @@ async function runAgentLoop(
   const batcher = new DeltaBatcher((e) => emitStream?.(e))
 
   // ---- 循环预算（Agent 第 0+2 层）：轮数可配 + 累计 token 预算，耗尽优雅收场而非报错 ----
-  const maxRounds = manual ? MANUAL_MAX_ROUNDS : clampMaxRounds(getSettingReader()('agentMaxRounds'))
-  const runTokenBudget = clampRunTokenBudget(getSettingReader()('agentRunTokenBudget'))
+  // 长资料档位（§7.2/§7.3）：预算走 LOOP_BUDGET_PROFILES，设置仍为默认值时才被覆盖
+  const maxRounds = manual ? MANUAL_MAX_ROUNDS : clampMaxRounds(budgetOf('agentMaxRounds', loopBudget.maxRounds))
+  const runTokenBudget = clampRunTokenBudget(budgetOf('agentRunTokenBudget', loopBudget.runTokenBudget))
   // 写次数上限（v3.13.0 反馈 N-1）：作用域 = 本条消息触发的这次运行（非会话级配额，
   // 下一条消息重计）；7 次硬上限对「建任务+排期+工作流」式复杂任务不够用 → 设置化，默认 20
-  const maxSessionWrites = clampMaxSessionWrites(getSettingReader()('agentMaxSessionWrites'))
+  const maxSessionWrites = clampMaxSessionWrites(budgetOf('agentMaxSessionWrites', loopBudget.maxSessionWrites))
   let runTokens = 0
   let softLanded = false
   /** token 预算触顶（或已到最后一轮）：本轮执行完后立即断出循环 → 强制总结轮 */
@@ -1457,7 +1578,7 @@ async function runAgentLoop(
     let thinkFrom = 0
     let thinkTo = 0
     const r = await invokeLlmStreamInternal(
-      { messages: compressStaleToolResults(convo), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort, sessionId, accounting: 'caller' },
+      { messages: compressStaleToolResults(convo, toolProfile()), tools: toolPayload, signal, providerId, modelId: modelOverride, effort: manual ? 'off' : llmOpts?.effort, sessionId, accounting: 'caller' },
       (e) => {
         if (e.type === 'text') batcher.push('text', e.delta)
         else if (e.type === 'reasoning') {
@@ -1655,9 +1776,14 @@ async function runAgentLoop(
           }
         }
       }
-      // 单条结果超上限时截断为合法摘要（见 capToolResult 说明）
+      // §7.1 运行时兜底：vault.read 读到 >100k 字符 / >100 页当场升档（只升不降；轮数等一次性预算不回补）
+      if (realName === 'builtin.vault.read' && exec.ok) {
+        const rd = (typeof exec.data === 'object' && exec.data !== null) ? exec.data as Record<string, unknown> : {}
+        if ((Number(rd.totalChars) || 0) > 100_000 || (Number(rd.pageCount) || 0) > 100) escalateProfile()
+      }
+      // 单条结果超上限时结构化截断（续读坐标保留 + 按工具给续读提示，见 capToolResult 说明）
       const toolResultText = JSON.stringify(exec.ok ? { ok: true, data: exec.data } : { ok: false, error: exec.message })
-      const toolContent = toolResultText.length > MAX_TOOL_RESULT_CHARS ? capToolResult(toolResultText, realName) : toolResultText
+      const toolContent = toolResultText.length > toolProfile().resultChars ? capToolResult(toolResultText, realName, toolProfile()) : toolResultText
       convo.push({
         role: 'tool',
         tool_call_id: tc.id,
@@ -1784,8 +1910,8 @@ async function runAgentLoop(
         })
       }
       const execs: Array<{ exec: AiToolInvokeResult; durationMs: number }> = []
-      for (let s = 0; s < batch.items.length; s += PARALLEL_CHUNK) {
-        const chunk = batch.items.slice(s, s + PARALLEL_CHUNK)
+      for (let s = 0; s < batch.items.length; s += loopBudget.parallelChunk) {
+        const chunk = batch.items.slice(s, s + loopBudget.parallelChunk)
         execs.push(...await Promise.all(chunk.map(async c => {
           const t1 = Date.now()
           const exec = await invokeToolInternal(c.realName, c.args, '', {

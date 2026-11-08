@@ -4,9 +4,9 @@ import type { AiTeachCourseOutline, AiTeachLessonInfo, AiTeachSource, AiTeachSou
 import {
   aiTeachCourseAssignSources, aiTeachCourseExtractSource, aiTeachCourseGetSources,
   aiTeachCourseRegisterSources, aiTeachCourseRemoveAssignment, aiTeachCourseRemoveSource,
-  aiTeachSrcPick, aiTeachSrcPickDir, onAiTeachCourseRefresh,
+  aiTeachSrcPick, aiTeachSrcPickDir, onAiTeachCourseRefresh, getSettingRaw,
 } from '../../lib/ipc'
-import { anchorLabel } from '../../lib/aiTeachingSourcesPure'
+import { anchorLabel, detectLongMaterial } from '../../lib/aiTeachingSourcesPure'
 import { showToast } from '../../lib/toast'
 
 /**
@@ -27,7 +27,7 @@ interface Props {
 const MODE_LABEL: Record<string, string> = { exact: '精确', narrow: '缩窄', fallback: '整章' }
 
 function statusText(s: AiTeachSource['status']): string {
-  return s === 'ready' ? '可读' : s === 'needs-extract' ? '待提取' : '异常'
+  return s === 'ready' ? '可读' : s === 'needs-extract' ? '待提取' : s === 'needs-vision' ? '需转写' : '异常'
 }
 
 export function CourseSources(props: Props) {
@@ -75,6 +75,13 @@ export function CourseSources(props: Props) {
   ), [assignments, validChapterIds])
   const unassigned = sources.filter((s) => !assignedIds.has(s.id))
   const byId = useMemo(() => new Map(sources.map((s) => [s.id, s] as const)), [sources])
+  // 长资料 badge（长资料方案 §7.5）：纯函数按素材算，不持久化；ctxWindow 拿一次
+  const [ctxWindow, setCtxWindow] = useState(0)
+  useEffect(() => { void getSettingRaw('ctxWindow').then((v) => setCtxWindow(Number(v) || 0)).catch(() => null) }, [])
+  const longMat = useMemo(() => detectLongMaterial(sources, ctxWindow), [sources, ctxWindow])
+  const longMatLabel = longMat.active && longMat.profile !== 'normal'
+    ? `长资料 · ${longMat.pages > 0 ? `${longMat.pages} 页` : `${Math.round(longMat.chars / 10000)} 万字`}`
+    : ''
 
   const segmentItems = (activeSegment?.sources ?? []).map((seg) => {
     const src = byId.get(seg.sourceId)
@@ -147,8 +154,18 @@ export function CourseSources(props: Props) {
     setBusyId(src.id)
     const r = await aiTeachCourseExtractSource(wsId, src.id, anchor).catch(() => null)
     setBusyId(null)
-    if (!r?.ok) { showToast({ type: 'error', message: r?.error ?? '提取失败' }); return }
-    showToast({ type: 'success', message: r.skipped ? '该素材不需要提取' : '提取完成' })
+    if (!r?.ok) {
+      if (r?.needsSoffice) showToast({ type: 'error', message: r.error ?? 'Word 提取需要 LibreOffice', detail: r.hint })
+      else if (r?.needsVision) showToast({ type: 'warning', message: `${src.title}：${r.error ?? '全部页面均无可提取文本（扫描件）'}`, detail: r.total ? `共 ${r.total} 页，视觉转写约 ${r.estimatedVisionBatches ?? 1} 批；在 AI 对话里让 AI 发起转写确认` : undefined })
+      else showToast({ type: 'error', message: r?.error ?? '提取失败' })
+      await reload(); onReloadCourse()
+      return
+    }
+    showToast({
+      type: r.needsVision ? 'warning' : 'success',
+      message: r.skipped ? '该素材不需要提取' : r.needsVision ? `提取完成，但 ${(r.emptyPages ?? []).length} 页无文本（部分扫描件）` : '提取完成',
+      detail: r.needsVision ? '空页需视觉转写后才能被 AI 完整阅读' : undefined,
+    })
     setExtractFor(null)
     await reload(); onReloadCourse()
     if (r.relPath) onOpenFile(r.relPath)
@@ -192,12 +209,14 @@ export function CourseSources(props: Props) {
             className={`min-w-0 flex-1 truncate text-left text-[11px] ${openable ? 'text-[var(--text-primary)] hover:underline' : 'text-[var(--text-muted)]'}`}>
             {src.title}
           </button>
-          <span className={`shrink-0 rounded px-1 text-[9px] ${src.status === 'ready' ? 'bg-[var(--success)]/10 text-[var(--success)]' : src.status === 'needs-extract' ? 'bg-[var(--warning)]/10 text-[var(--warning)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}>
+          <span className={`shrink-0 rounded px-1 text-[9px] ${src.status === 'ready' ? 'bg-[var(--success)]/10 text-[var(--success)]' : src.status === 'needs-extract' || src.status === 'needs-vision' ? 'bg-[var(--warning)]/10 text-[var(--warning)]' : 'bg-[var(--danger)]/10 text-[var(--danger)]'}`}>
             {statusText(src.status)}
           </span>
         </div>
         <div className="mt-0.5 pl-4 text-[9.5px] text-[var(--text-muted)]">
           {src.type} · {opts.seg ? `${anchorLabel(opts.seg.anchor as never)} · ${MODE_LABEL[opts.seg.mode] ?? opts.seg.mode}` : anchorLabel(src.anchor)}
+          {src.pages ? ` · ${src.pages} 页` : ''}{src.chars ? ` · ${src.chars > 10000 ? `${Math.round(src.chars / 10000)} 万字` : `${src.chars} 字`}` : ''}
+          {src.textLayer === 'empty' ? ' · 扫描件（文本层为空）' : src.textLayer === 'partial' ? ` · 部分扫描（${(src.extracts ?? []).flatMap((e) => e.emptyPages ?? []).length} 页无文本）` : ''}
         </div>
         <div className="mt-1 pl-4 flex items-center gap-1.5 text-[10px]">
           {opts.seg ? (
@@ -240,6 +259,12 @@ export function CourseSources(props: Props) {
       <div className="flex items-center gap-1.5">
         <span className="text-[11px] font-semibold text-[var(--text-secondary)]">素材</span>
         <span className="text-[9.5px] text-[var(--text-muted)]">{sources.length} 条 · 未分配 {unassigned.length}</span>
+        {longMatLabel && (
+          <span className="kb-micro-pop shrink-0 rounded bg-[var(--accent)]/10 px-1 py-px text-[9px] text-[var(--accent)]"
+            title={`${longMat.reason}；已自动切 ${longMat.profile} 档（更大读取窗口与预算），任务费用可能较高`}>
+            {longMatLabel}
+          </span>
+        )}
         <div className="flex-1" />
         <button onClick={() => void reload()} title="刷新素材" className="p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors">
           <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />

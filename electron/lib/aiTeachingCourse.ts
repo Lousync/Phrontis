@@ -37,8 +37,10 @@ import {
   remapChapterAssignments,
   renderSourcesHint,
   rewriteSourcePathPrefixes,
+  ensureSources,
   type SourceSummary,
 } from './aiTeachingSourceRegistry'
+import { detectLongMaterial } from '../../src/lib/aiTeachingSourcesPure'
 import { rewriteFavoritePrefixes } from './aiTeachingFavorites'
 import {
   buildCourseLayoutPlan,
@@ -1245,6 +1247,14 @@ function nextOpenSegmentBrief(
 export function buildCourseInjection(sessionId: string, getSetting: (key: string) => unknown): string {
   const wsId = getWorkspaceOfSession(sessionId)
   if (!wsId) return ''
+  /** 长资料读取纪律（长资料方案 §8.2）：素材过线时追加；非长资料返回空串，注入逐字不变。 */
+  const longMaterialHint = (): string => {
+    const reg = ensureSources(wsId, getSetting)
+    if (!reg) return ''
+    const lm = detectLongMaterial(reg.sources, Number(getSetting('ctxWindow')) || 0)
+    if (!lm.active || lm.profile === 'normal') return ''
+    return `\n\n【长资料模式】本课程素材共 ${lm.pages} 页 / ${lm.chars} 字符（自动切 ${lm.profile} 档）。按章提取、按章阅读、一章一笔记；每章读完立即落盘，再读下一章；扫描页必须先经用户确认后视觉转写；笔记落点由用户指定，不要默认写入课程目录或知识库。`
+  }
   const f = readProgressFile()
   const s = wsState(f, wsId)
   // 课程助手会话（整门课一个）走「顾问」分支：无大纲也可用
@@ -1279,7 +1289,7 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     lines.push(assistantSourcesSummary(wsId, getSetting))
     lines.push('【建课流程与工具】① 素材先登记：用户给出文件/目录/URL 时用 course.sources.register 批量登记（外部文件会复制进本课 SOURCES；仓库内文件只引用）；② pdf/pptx 需要时用 course.sources.extract 提取页码区间；③ 用 inventory 清点目录素材（先清点再分章，别把整目录硬读进上下文）；④ 与用户定好目标、素材就绪后，生成**全量**大纲草稿（章 → 知识点；不要"先只给第一章"）；用户确认后调 course.outline.write 落盘；⑤ 用 course.sources.assign 把素材按章分配（能判断区间就带 anchor；判断不了就整章 whole）；⑥ 不主动开讲；只提醒用户去左栏点知识点开段，开段前会做素材预检；⑦ 删知识点用 course.outline.remove-unit（已学过的会被拒绝，需先用 course.organize.archive 整理归档）；⑧ 落盘只走这些工具，不要另造文件；改大纲前先与用户确认。')
     lines.push('【大纲落盘后的终止规则】课程大纲写入 / 更新成功后，建课流程即结束：不要讲授知识点，不要问用户是否「开讲第 N 章」，也不要邀请用户继续在课程助手会话里听讲。只输出下一步引导：去左栏点知识点开段（会先做素材预检）、继续改大纲、查看 / 分配素材；用户主动问课程内容时可以答疑，但仍不进入逐知识点开讲。')
-    return '\n\n' + lines.join('\n')
+    return '\n\n' + lines.join('\n') + longMaterialHint()
   }
   // 复习课分支：章末复习（本章知识点串讲 + 查漏补缺，不引入新知识点）
   if (reviewHit && reviewHit.wsId === wsId) {
@@ -1311,7 +1321,7 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     }
     lines.push('复习方式**由你和学生讨论决定**：可按学生要求逐块回顾、出题检验、或把零散点串成体系。**先问学生想怎么过**，别自顾自开讲。')
     lines.push('当复习讨论到一定阶段、结论成型时，**主动提议**「把本次复习整理成《复习讲义》落盘」，学生同意后调用 course.review.write 写入本章目录；写好后把落盘路径告诉学生。')
-    return '\n\n' + lines.join('\n')
+    return '\n\n' + lines.join('\n') + longMaterialHint()
   }
   // 教师分支：必须有段；旧零散会话不再注入教学推进规则
   const curLesson = s.lessons[sessionId]
@@ -1351,7 +1361,7 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     // B-47 ②③段内收尾协议：不自动收尾；知识点讲完先问去向；最后一个讲完且学生确认后主动建议收尾路径
     lines.push('段内收尾协议：收尾只由学生点右上角「收尾本段」触发，你在任何情况下都**不得自动收尾**，也不要替学生调用任何收尾 / finalize 动作。当前知识点讲完、学生没有追问时，先问「继续本段下一个知识点，还是先收尾本段」；本段最后一个知识点也讲完、学生确认没有问题后，再主动建议：点「收尾本段」→ 系统会在本段夹生成《交接.md》→ 到左栏开下一段。')
   }
-  return '\n\n' + lines.join('\n')
+  return '\n\n' + lines.join('\n') + longMaterialHint()
 }
 
 // ===== 素材注入（agentService 每轮调用）=====

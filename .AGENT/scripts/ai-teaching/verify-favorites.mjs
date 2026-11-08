@@ -46,7 +46,7 @@ console.log('\n[AI 感知] agentService 注入收藏清单（只读，无工具�
 const as = read('electron/lib/agentService.ts')
 check('引入 listFavorites', as.includes("from './aiTeachingFavorites'") && as.includes('listFavorites(wsId)'))
 check('favoritesHint 仅 aiTeaching 注入', as.includes("const favoritesHint = source === 'aiTeaching'") && as.includes('【收藏的文档（AI教学）】'))
-check('favoritesHint 进 system 注入链', as.includes('+ courseHint + favoritesHint +'))
+check('favoritesHint 进 system 注入链', as.includes('+ favoritesHint +'))
 
 console.log(`\n断言: ${pass} PASS, ${fail} FAIL`)
 process.exit(fail > 0 ? 1 : 0)

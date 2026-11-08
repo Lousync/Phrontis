@@ -55,7 +55,7 @@ import { VOCAB_ENTRY_ENABLED } from '../../src/lib/featureFlags'
 // 日程「标记完成」要触发与 UI 完全相同的副作用：插件事件。
 // 依赖方向已核：pluginEvents 的依赖树不反向 import 本模块，无循环。
 import { emitPluginEvent } from './pluginEvents'
-import { extractDocText } from './docsReader'
+import { extractDocText, extractPdfRange, extractPptxPages, MAX_DOC_SIZE } from './docsReader'
 import {
   quizRecordList,
   quizRecordSetNote, quizRecordSetFavorite, quizRecordRemoveById,
@@ -206,10 +206,41 @@ function ruleSummary(ruleType: string, ruleDays: number[], weeklyTarget: number)
 
 const VAULT_DOT_DIR = '.knowbase'
 const VAULT_MODULES_DIR = 'modules'
-export const MAX_VAULT_FILE = 10 * 1024 * 1024 // read >10MB 拒
-const MAX_VAULT_SEARCH_FILE = 1024 * 1024 // search 只扫 ≤1MB 文本
-const MAX_VAULT_SEARCH_FILES = 400
+export const MAX_VAULT_FILE = 10 * 1024 * 1024 // read 文本 >10MB 拒（文档走 MAX_DOC_SIZE=80MB）
 export const MAX_VAULT_LIST_ENTRIES = 200
+
+// ===== vault 工具限额 profile（长资料方案 §7.2）：run 开始 setVaultToolProfile 一次，整轮不变 =====
+
+export type VaultProfileId = 'normal' | 'long-128k' | 'long-1m'
+
+export interface VaultToolLimits {
+  /** vault.read 文本/文档 默认 / 上限字符 */
+  readDefault: number
+  readMax: number
+  /** vault.list 单页上限 */
+  listEntries: number
+  /** vault.search 命中上限 / 扫描文件数 / 单文件大小 */
+  searchHits: number
+  searchFiles: number
+  searchFileMax: number
+}
+
+export const VAULT_TOOL_LIMITS: Record<VaultProfileId, VaultToolLimits> = {
+  normal: { readDefault: 16_000, readMax: 60_000, listEntries: 500, searchHits: 50, searchFiles: 400, searchFileMax: 1_000_000 },
+  'long-128k': { readDefault: 32_000, readMax: 80_000, listEntries: 800, searchHits: 80, searchFiles: 800, searchFileMax: 2_000_000 },
+  'long-1m': { readDefault: 40_000, readMax: 100_000, listEntries: 1000, searchHits: 100, searchFiles: 1200, searchFileMax: 2_000_000 },
+}
+
+let vaultProfileId: VaultProfileId = 'normal'
+
+/** 长资料 run 开始调用（§7.1 运行时兜底也会调用）；不持久化。 */
+export function setVaultToolProfile(id: VaultProfileId): void {
+  vaultProfileId = VAULT_TOOL_LIMITS[id] ? id : 'normal'
+}
+
+export function vaultToolLimits(): VaultToolLimits {
+  return VAULT_TOOL_LIMITS[vaultProfileId]
+}
 
 export function vaultRootPath(): string {
   const cur = getCurrentVault()
@@ -281,12 +312,27 @@ export function isAiReadableFile(root: string, abs: string): boolean {
 const SEARCH_IGNORE_DIRS = new Set(['node_modules', 'dist', 'out', 'build'])
 
 /** 递归收集可搜索文本文件（.knowbase 只深入 modules；隐藏区跳过；依赖/产物目录忽略；数量预算封顶） */
-function walkAiFiles(root: string, dirAbs: string, out: string[], budget: { count: number }): void {
-  if (budget.count >= MAX_VAULT_SEARCH_FILES) return
+interface SearchBudget {
+  count: number
+  /** 撞到文件数预算被截断（vault.search 的 scanTruncated 依据，§6.4） */
+  truncated: boolean
+  /** 因超过单文件大小预算被跳过的文件数 */
+  skippedLarge: number
+}
+
+function walkAiFiles(root: string, dirAbs: string, out: string[], budget: SearchBudget): void {
+  const limits = vaultToolLimits()
+  if (budget.count >= limits.searchFiles) {
+    budget.truncated = true
+    return
+  }
   let names: string[] = []
   try { names = readdirSync(dirAbs) } catch { return }
   for (const name of names) {
-    if (budget.count >= MAX_VAULT_SEARCH_FILES) return
+    if (budget.count >= limits.searchFiles) {
+      budget.truncated = true
+      return
+    }
     const full = join(dirAbs, name)
     if (!childAiAllowed(root, full)) continue
     let st: ReturnType<typeof lstatSync>
@@ -297,7 +343,10 @@ function walkAiFiles(root: string, dirAbs: string, out: string[], budget: { coun
       continue
     }
     if (!st.isFile()) continue
-    if (st.size > MAX_VAULT_SEARCH_FILE) continue
+    if (st.size > limits.searchFileMax) {
+      budget.skippedLarge++
+      continue
+    }
     if (!isAiReadableFile(root, full)) continue
     budget.count++
     out.push(full)
@@ -2032,6 +2081,8 @@ export function registerBuiltinTools(): void {
       type: 'object',
       properties: {
         path: { type: 'string', description: '仓库内相对目录路径，省略或空串 = 仓库根目录' },
+        offset: { type: 'number', description: '起始条目偏移，默认 0；hasMore=true 时用返回的 offset 续取' },
+        limit: { type: 'number', description: '本页条目上限，默认 200' },
       },
     },
     source: 'builtin',
@@ -2048,35 +2099,41 @@ export function registerBuiltinTools(): void {
     let isDir = false
     try { isDir = statSync(abs).isDirectory() } catch { throw new Error(`路径不存在: ${rel || '.'}`) }
     if (!isDir) throw new Error('vault.list 只接受目录路径（读文件请用 vault.read）')
-    const entries: Array<{ name: string; type: 'dir' | 'file'; size?: number }> = []
+    const limits = vaultToolLimits()
+    const offset = clamp(Math.floor(num(args.offset, 0)), 0, 1_000_000)
+    const limit = clamp(Math.floor(num(args.limit, 200)), 1, limits.listEntries)
+    const all: Array<{ name: string; type: 'dir' | 'file'; size?: number }> = []
     let names: string[] = []
     try { names = readdirSync(abs) } catch { throw new Error('目录读取失败') }
     for (const name of names) {
-      if (entries.length >= MAX_VAULT_LIST_ENTRIES) break
       const full = join(abs, name)
       if (!childAiAllowed(root, full)) continue
       let st: ReturnType<typeof lstatSync>
       try { st = lstatSync(full) } catch { continue }
       if (st.isSymbolicLink()) continue
-      if (st.isDirectory()) entries.push({ name, type: 'dir' })
+      if (st.isDirectory()) all.push({ name, type: 'dir' })
       // P1：文档文件（pdf/pptx）一并可见（vault.read 已收编其读取），否则 AI 无法发现它们
-      else if (st.isFile() && (isAiReadableFile(root, full) || isAiDocFile(root, full))) entries.push({ name, type: 'file', size: st.size })
+      else if (st.isFile() && (isAiReadableFile(root, full) || isAiDocFile(root, full))) all.push({ name, type: 'file', size: st.size })
     }
-    entries.sort((a, b) => a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name, 'zh-Hans-CN'))
-    return { path: rel || '.', total: entries.length, entries }
+    all.sort((a, b) => a.type !== b.type ? (a.type === 'dir' ? -1 : 1) : a.name.localeCompare(b.name, 'zh-Hans-CN'))
+    // §6.3：total 是目录真实条目数（不再是返回数）；超页用 offset 续取
+    const entries = all.slice(offset, offset + limit)
+    return { path: rel || '.', total: all.length, offset, hasMore: offset + entries.length < all.length, entries }
   })
 
   // 15. builtin.vault.read —— 读仓库内文本文件与文档（P1 收编原 docs.read-text，按扩展名分派）
   registerTool({
     name: 'builtin.vault.read',
     title: '读仓库文件',
-    description: '读取仓库内文件：.md/.txt 与文本类代码文件（.html/.js/.py 等）全文（.knowbase/modules/*.json 结构化数据只读）与 .pdf/.pptx 文本提取（扫描版提取为空属预期）。path 与 id 二选一：传 id（knowledge.search 返回的知识页 frontmatter id）可直接读知识页全文。返回 mtimeMs 供后续写回冲突校验。图片/>10MB/保护区文件拒绝',
+    description: '读取仓库内文件：.md/.txt 与文本类代码文件全文（.knowbase/modules/*.json 只读）与 .pdf/.pptx 文本提取。path 与 id 二选一。超长文件分页续读：文本用 offset+hasMore/nextOffset；pdf/pptx 用 pages="12-41" 区间。返回 mtimeMs 供写回冲突校验。图片/保护区拒绝；文本 >10MB、pdf/pptx >80MB 拒绝',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: '仓库内相对文件路径（如 笔记/内存管理.md 或 资料/课件.pptx）；与 id 二选一' },
         id: { type: 'string', description: '知识页 frontmatter id（与 path 二选一，knowledge.search 返回的即此 id）' },
-        maxChars: { type: 'number', description: '最多返回字符，文本默认 8000，pdf/pptx 默认 12000' },
+        maxChars: { type: 'number', description: '本次最多返回字符，默认 16000' },
+        offset: { type: 'number', description: '文本字符偏移（续读）：hasMore=true 时用返回的 nextOffset 继续读' },
+        pages: { type: 'string', description: 'pdf/pptx 页码区间（续读）：如 "12-41" 或 "12"；返回 nextPage 供续读' },
       },
       required: [],
     },
@@ -2102,10 +2159,57 @@ export function registerBuiltinTools(): void {
     let st: ReturnType<typeof statSync>
     try { st = statSync(abs) } catch { throw new Error(`文件不存在: ${rel}`) }
     if (!st.isFile()) throw new Error('vault.read 只接受文件路径（列目录请用 vault.list）')
-    if (st.size > MAX_VAULT_FILE) throw new Error(`文件过大（${st.size} 字节 > 10MB），拒绝读取: ${rel}`)
-    // 文档分派（P1）：pdf/pptx 走异步文本提取，输出字段与文本路径对齐（content/truncated/totalChars + kind/pages）
-    if (isAiDocFile(root, abs)) {
-      const maxChars = clamp(Math.floor(num(args.maxChars, 12000)), 200, 50000)
+    const limits = vaultToolLimits()
+    const isDoc = isAiDocFile(root, abs)
+    // §2.2 G8：10MB 预检只挡文本；pdf/pptx 走 docsReader 的 80MB 上限
+    if (st.size > (isDoc ? MAX_DOC_SIZE : MAX_VAULT_FILE)) {
+      throw new Error(`文件过大（${st.size} 字节 > ${Math.round((isDoc ? MAX_DOC_SIZE : MAX_VAULT_FILE) / 1024 / 1024)}MB），拒绝读取: ${rel}`)
+    }
+    // 文档分派（P1）：pdf/pptx 走异步文本提取；pages 区间续读（§6.2）
+    if (isDoc) {
+      const maxChars = clamp(Math.floor(num(args.maxChars, limits.readDefault)), 200, limits.readMax)
+      const pagesArg = str(args.pages).trim()
+      if (pagesArg) {
+        const m = /^(\d+)(?:\s*-\s*(\d+))?$/.exec(pagesArg)
+        if (!m) throw new Error('pages 格式非法：用 "12-41"（闭区间）或 "12"')
+        const from = parseInt(m[1], 10)
+        const to = m[2] ? parseInt(m[2], 10) : from
+        if (from < 1 || to < from) throw new Error('pages 区间非法（from ≥ 1 且 to ≥ from）')
+        const ext = extname(abs).slice(1).toLowerCase()
+        let pageList: { n: number; text: string }[]
+        let pageCount: number
+        if (ext === 'pdf') {
+          const r = await extractPdfRange(abs, from, to)
+          pageList = r.pages
+          pageCount = r.total
+        } else if (ext === 'pptx') {
+          const all = extractPptxPages(abs)
+          pageCount = all.length
+          pageList = all.filter((p) => p.n >= from && p.n <= to)
+        } else {
+          throw new Error('pages 仅支持 pdf / pptx')
+        }
+        const base = { path: rel, kind: ext as 'pdf' | 'pptx', pageCount, size: st.size, mtimeMs: st.mtimeMs }
+        if (!pageList.length) {
+          return { ...base, content: '', truncated: false, totalChars: 0, pagesRead: 0, nextPage: Math.min(from, pageCount) || undefined, textLayer: 'empty', needsVision: true, hint: '区间内没有可提取文本（扫描件），需视觉转写，不要当作已读' }
+        }
+        const text = pageList.map((p) => `## p${p.n}\n${p.text}`).join('\n\n')
+        const content = text.slice(0, maxChars)
+        const lastN = pageList[pageList.length - 1]?.n ?? 0
+        const emptyIn = pageList.filter((p) => !p.text.trim()).length
+        const textLayer = emptyIn === pageList.length ? 'empty' : emptyIn > 0 ? 'partial' : 'text'
+        return {
+          ...base,
+          content,
+          truncated: text.length > content.length,
+          totalChars: text.length,
+          pagesRead: pageList.length,
+          nextPage: lastN < pageCount ? lastN + 1 : undefined,
+          textLayer,
+          needsVision: textLayer !== 'text' || undefined,
+          emptyPages: emptyIn > 0 ? pageList.filter((p) => !p.text.trim()).map((p) => p.n) : undefined,
+        }
+      }
       let out: { kind: 'pdf' | 'pptx'; text: string; pages: number; totalChars: number }
       try {
         out = await extractDocText(abs)
@@ -2117,25 +2221,33 @@ export function registerBuiltinTools(): void {
         path: rel,
         kind: out.kind,
         pages: out.pages,
+        pageCount: out.pages,
         size: st.size,
         mtimeMs: st.mtimeMs,
         content: truncated ? out.text.slice(0, maxChars) : out.text,
         truncated,
         totalChars: out.totalChars,
+        hint: truncated ? `文档共 ${out.pages} 页，只返回了开头 ${maxChars} 字符；用 pages="1-${out.pages}" 分页续读` : undefined,
       }
     }
     if (!isAiReadableFile(root, abs)) {
       throw new Error(`文件不可读：仅支持 .md/.txt 与文本类代码文件（仓库内）与 .knowbase/modules/*.json（只读）；图片、配置与保护区拒绝: ${rel}`)
     }
-    const maxChars = clamp(Math.floor(num(args.maxChars, 8000)), 200, 50000)
+    const maxChars = clamp(Math.floor(num(args.maxChars, limits.readDefault)), 200, limits.readMax)
+    const offset = clamp(Math.floor(num(args.offset, 0)), 0, Number.MAX_SAFE_INTEGER)
     const text = readFileSync(abs, 'utf-8')
-    const truncated = text.length > maxChars
+    // §6.1 字符分页：hasMore/nextOffset 让模型自己续读
+    const content = text.slice(offset, offset + maxChars)
+    const nextOffset = offset + content.length
     return {
       path: rel,
       size: st.size,
       mtimeMs: st.mtimeMs,
-      content: truncated ? text.slice(0, maxChars) : text,
-      truncated,
+      content,
+      offset,
+      nextOffset,
+      hasMore: nextOffset < text.length,
+      truncated: offset > 0 || text.length > maxChars,
       totalChars: text.length,
     }
   })
@@ -2144,12 +2256,13 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.search',
     title: '搜索仓库内容',
-    description: '在当前知识仓库内按关键词搜索可读文本文件（.md/.txt/文本类代码文件与 .knowbase/modules/*.json）内容，返回命中文件与上下文摘录。用于在仓库内定位内容',
+    description: '在当前知识仓库内按关键词搜索可读文本文件内容，返回命中文件与上下文摘录。结果带 hasMore（offset 续取）与 scanTruncated（因文件数/大小预算没扫完，不代表没有更多命中）',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: '关键词，空格分隔为 AND' },
         limit: { type: 'number', description: '命中上限, 默认20' },
+        offset: { type: 'number', description: '命中偏移（续取）：hasMore=true 时用 offset+limit 续取' },
       },
       required: ['query'],
     },
@@ -2160,15 +2273,18 @@ export function registerBuiltinTools(): void {
     vaultFile: 'read',
   }, (args, ctx) => {
     const q = str(args.query).trim()
-    const limit = clamp(Math.floor(num(args.limit, 20)), 1, 50)
+    const limits = vaultToolLimits()
+    const limit = clamp(Math.floor(num(args.limit, 20)), 1, limits.searchHits)
+    const offset = clamp(Math.floor(num(args.offset, 0)), 0, 1_000_000)
     const inScope = readPredicate(ctx)
     const terms = q.split(/\s+/).filter(Boolean)
     if (terms.length === 0) throw new Error('缺少关键词 query')
     const root = vaultRootPath()
     const files: string[] = []
-    const budget = { count: 0 }
+    const budget: SearchBudget = { count: 0, truncated: false, skippedLarge: 0 }
     walkAiFiles(root, root, files, budget)
-    const hits: Array<{ relPath: string; excerpt: string; size: number }> = []
+    // §6.4：命中都是小对象，全量收集后切片才能给出真实 hasMore
+    const allHits: Array<{ relPath: string; excerpt: string; size: number }> = []
     for (const f of files) {
       let text = ''
       try { text = readFileSync(f, 'utf-8') } catch { continue }
@@ -2176,14 +2292,23 @@ export function registerBuiltinTools(): void {
       if (!terms.every(t => lower.includes(t.toLowerCase()))) continue
       const relPath = vaultRelParts(root, f).join('/')
       if (!inScope(relPath)) continue
-      hits.push({
+      allHits.push({
         relPath,
         excerpt: buildExcerpt(text.replace(/\s+/g, ' '), terms) || text.replace(/\s+/g, ' ').slice(0, 100),
         size: text.length,
       })
-      if (hits.length >= limit) break
     }
-    return { query: q, total: hits.length, scannedFiles: budget.count, hits }
+    const hits = allHits.slice(offset, offset + limit)
+    return {
+      query: q,
+      total: allHits.length,
+      offset,
+      hasMore: offset + hits.length < allHits.length,
+      scannedFiles: budget.count,
+      scanTruncated: budget.truncated,
+      skippedLarge: budget.skippedLarge || undefined,
+      hits,
+    }
   })
 
   // ===== vault.* 写工具（B2/F2）：受 vaultFile=write 权限 + AgentRunner 会话写上限控制 =====
@@ -2839,7 +2964,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'course.sources.extract',
     title: '提取素材区间',
-    description: '把已登记素材的页码区间（PDF/PPTX/Word）或行号区间（代码）提取成可读 md 提取稿。source = 素材 id 或标题；from/to 从 1 起。提取稿会写回 sources.json，后续 AI 直接读。',
+    description: '把已登记素材的页码区间（PDF/PPTX/Word，区间可超 200 页）或行号区间（代码）提取成可读 md 提取稿。source = 素材 id 或标题；from/to 从 1 起。返回 pages/totalChars/textLayer/emptyPages；needsVision=true 表示存在扫描页（勿当已读，须经用户确认后视觉转写）。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2859,7 +2984,7 @@ export function registerBuiltinTools(): void {
     const to = Math.max(from, Math.floor(Number(args.to) || from))
     const anchor: SourceAnchor = src.type === 'code' ? { kind: 'lines', from, to } : { kind: 'pages', from, to }
     const r = await extractSource(wsId, src.id, anchor, getSettingReader())
-    if (!r.ok) throw new Error(r.error ?? '提取失败')
+    // 失败也不 throw：needsVision / needsSoffice / emptyPages 是结构化现场，AI 必须能看到（§5.8）
     return r
   })
 

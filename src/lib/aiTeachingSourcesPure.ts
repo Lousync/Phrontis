@@ -34,6 +34,29 @@ export interface SourceIndexEntry {
   level?: number
 }
 
+/** 原件文本层状态：text=完整 / empty=全空（扫描件） / partial=部分空。 */
+export type SourceTextLayer = 'text' | 'empty' | 'partial'
+
+/** 按区间记录的一条提取稿（长资料方案 §4.1；旧字段 extractRel 兼容保留）。 */
+export interface SourceExtract {
+  /** 提取稿仓库相对路径 */
+  rel: string
+  /** 对应原件区间；whole 表示整本 */
+  anchor: SourceAnchor
+  /** 实际提取页数（PDF/PPTX/Word） */
+  pages?: number
+  /** 提取稿字符数 */
+  chars?: number
+  /** 文本层状态 */
+  textLayer: SourceTextLayer
+  /** 文本层为空的页号（1-based） */
+  emptyPages?: number[]
+  createdAt: string
+  /** 原件指纹；用于判断提取稿是否过期 */
+  sourceMtimeMs?: number
+  sourceSize?: number
+}
+
 export interface SourceEntry {
   id: string
   title: string
@@ -41,12 +64,22 @@ export interface SourceEntry {
   /** 仓库相对路径；URL 素材用 url。禁止绝对路径。 */
   rel?: string
   url?: string
-  /** 提取稿仓库相对路径（PDF/PPTX/图片/网页） */
+  /** 提取稿仓库相对路径（PDF/PPTX/图片/网页）。兼容旧字段：最近一次提取稿，新代码优先读 extracts。 */
   extractRel?: string | null
+  /** 按区间记录的提取稿（长资料方案 §4.1） */
+  extracts?: SourceExtract[]
+  /** 原件总页数（能拿到时） */
+  pages?: number
+  /** 原件/提取稿字符数 */
+  chars?: number
+  /** 原件字节数（能拿到时；未提取的大文件兜底判定用） */
+  size?: number
+  /** 文本层状态（汇总） */
+  textLayer?: SourceTextLayer
   /** 整份素材的默认区间 */
   anchor: SourceAnchor
-  status: 'ready' | 'needs-extract' | 'error'
-  /** 轻量索引；最多 200 条，不存正文 */
+  status: 'ready' | 'needs-extract' | 'needs-vision' | 'error'
+  /** 轻量索引；最多 1000 条，不存正文 */
   index?: SourceIndexEntry[]
   indexUpdatedAt?: string
   note?: string
@@ -311,4 +344,98 @@ export function isValidAnchor(a: unknown): a is SourceAnchor {
     default:
       return false
   }
+}
+
+// ===== 长资料：区间键 / 提取稿匹配 / 自动切档（docs/ai-teaching-long-material-plan.md §4） =====
+
+/** 区间的稳定键：whole / pages:12-41 / headings:第1章→第2章 / files:a.md,b.md（排序后）/ lines:100-250。 */
+export function anchorKey(a: SourceAnchor | null | undefined): string {
+  if (!a) return 'whole'
+  switch (a.kind) {
+    case 'pages':
+      return `pages:${a.from}-${a.to}`
+    case 'headings':
+      return a.to && a.to !== a.from ? `headings:${a.from}→${a.to}` : `headings:${a.from}`
+    case 'files':
+      return `files:${[...a.paths].sort().join(',')}`
+    case 'lines':
+      return `lines:${a.from}-${a.to}`
+    default:
+      return 'whole'
+  }
+}
+
+/**
+ * 取指定区间的提取稿：
+ *   exact    —— extracts 中 anchorKey 完全一致；
+ *   fallback —— 无精确匹配但旧字段 extractRel 存在（兼容旧数据）；
+ *   missing  —— 没有任何可用提取稿。
+ */
+export function pickExtract(
+  source: Pick<SourceEntry, 'extractRel' | 'extracts'>,
+  anchor: SourceAnchor,
+): { extract: SourceExtract | null; match: 'exact' | 'fallback' | 'missing' } {
+  const key = anchorKey(anchor)
+  const hit = (source.extracts ?? []).find((e) => anchorKey(e.anchor) === key)
+  if (hit) return { extract: hit, match: 'exact' }
+  const rel = source.extractRel
+  if (rel) {
+    return {
+      extract: { rel, anchor, textLayer: 'text', createdAt: '' },
+      match: 'fallback',
+    }
+  }
+  return { extract: null, match: 'missing' }
+}
+
+/** 长资料档位：normal / long-128k / long-1m（按模型上下文窗口切）。 */
+export type LongMaterialProfile = 'normal' | 'long-128k' | 'long-1m'
+
+export interface LongMaterialState {
+  active: boolean
+  /** 素材总页数（各条 pages 之和；未提取时可能为 0） */
+  pages: number
+  /** 素材总字符数（各条 chars 之和） */
+  chars: number
+  reason: string
+  profile: LongMaterialProfile
+}
+
+/** 长资料档位的预算表键；与 agentLoopPolicy / agentService 的 profile 预算对应（§7.2）。 */
+export type LongMaterialProfileId = LongMaterialProfile
+
+/**
+ * 长资料自动检测（纯函数，run 开始时调用；不持久化，避免源文件变化后状态过期）。
+ *
+ * 判定：pages ≥ 100 或 chars ≥ 100_000 或 含未提取的 >3MB 文档 → active。
+ * profile：ctxWindow ≥ 200k → long-1m；≥ 64k → long-128k；0=未设置 → long-128k 保守档；
+ * 其余（<64k）→ normal。
+ */
+export function detectLongMaterial(sources: ReadonlyArray<SourceEntry>, ctxWindow: number): LongMaterialState {
+  let pages = 0
+  let chars = 0
+  let bigUnextracted = false
+  for (const s of sources) {
+    pages += Number(s.pages) || 0
+    chars += Number(s.chars) || 0
+    if (!bigUnextracted && (s.type === 'pdf' || s.type === 'pptx' || s.type === 'docx')) {
+      const extracted = s.status !== 'needs-extract'
+      if (!extracted && (Number(s.size) || 0) > 3_000_000) bigUnextracted = true
+    }
+  }
+  const active = pages >= 100 || chars >= 100_000 || bigUnextracted
+  const windowed = ctxWindow > 0
+  const profile: LongMaterialProfile = !windowed
+    ? 'long-128k'
+    : ctxWindow >= 200_000
+      ? 'long-1m'
+      : ctxWindow >= 64_000
+        ? 'long-128k'
+        : 'normal'
+  let reason = ''
+  if (bigUnextracted) reason = '含未提取的大文档（>3MB），待提取后精确判定'
+  else if (pages >= 100) reason = `素材共 ${pages} 页`
+  else if (chars >= 100_000) reason = `素材共 ${chars} 字符`
+  if (active && !windowed && profile === 'long-128k') reason += reason ? '；未设置模型上下文窗口，按 128k 保守档运行' : '未设置模型上下文窗口，按 128k 保守档运行'
+  return { active, pages, chars, reason, profile }
 }

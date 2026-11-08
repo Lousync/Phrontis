@@ -23,19 +23,23 @@ import { workspaceFolderRel } from './aiTeachingWorkspaces'
 import { parseSourceMd, type SourceEntry as LegacySourceEntry } from './aiTeachingSources'
 import { parseCourseMd, type CourseOutline } from './aiTeachingCoursePure'
 import { rewriteRelPrefix } from './aiTeachingLayoutPure'
-import { extractPdfRange, extractPptxPages } from './docsReader'
-import { convertToPdf } from './sofficeConvert'
+import { extractPdfRangeChunked, extractPdfWhole, extractPptxPages } from './docsReader'
+import { convertToPdf, findSoffice } from './sofficeConvert'
 import { uniqueFileName } from './workspaceManager'
 import { sanitizeTitle } from './aiTeachingFolders'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { AI_TEXT_CODE_EXTS } from '../../src/lib/aiTextExts'
 import {
   anchorLabel,
+  anchorKey,
   isValidAnchor,
+  pickExtract,
   type ChapterAssignment,
   type SourceAnchor,
   type SourceEntry,
+  type SourceExtract,
   type SourceIndexEntry,
+  type SourceTextLayer,
   type SourceType,
   type SourcesFile,
   type WorkspaceSources,
@@ -44,7 +48,7 @@ import {
 const MODULE = 'modules/aiTeaching'
 const KEY = 'sources.json'
 const SOURCE_FILE = 'SOURCE.md'
-const MAX_INDEX = 200
+const MAX_INDEX = 1000 // 长资料方案 §5.7：按页索引要够 600 页教材
 const MAX_TEXT_BYTES = 2 * 1024 * 1024
 
 type GetSetting = (key: string) => unknown
@@ -305,17 +309,20 @@ export function buildSourceIndex(source: SourceEntry): SourceIndexEntry[] {
       }
     }
     if (source.extractRel && /\.(md|markdown)$/i.test(source.extractRel)) {
-      const abs = join(vault.rootPath, source.extractRel)
-      if (existsSync(abs)) {
+      // 按区间记录的多份提取稿都进索引（长资料方案 §5.7）；页码标记优先，>1000 页只索引前 1000 条
+      const extractRels = Array.from(new Set([...(source.extracts ?? []).map((e) => e.rel), source.extractRel].filter(Boolean) as string[]))
+      for (const rel of extractRels) {
+        const abs = join(vault.rootPath, rel)
+        if (!existsSync(abs)) continue
         const text = readTextSmart(abs)
         const pages = [...text.matchAll(/^#{2,3}\s*p(\d+)\s*$/gm)]
         for (const m of pages) {
           const n = parseInt(m[1], 10)
           if (Number.isFinite(n)) out.push({ label: `p${n}`, anchor: { kind: 'pages', from: n, to: n } })
-          if (out.length >= MAX_INDEX) break
+          if (out.length >= MAX_INDEX) return out
         }
-        if (out.length) return out
       }
+      if (out.length) return out
     }
   } catch { /* 索引失败不阻断登记 */ }
   return out
@@ -651,9 +658,26 @@ export function removeSource(wsId: string, sourceId: string, getSetting: GetSett
 
 // ===== 提取 =====
 
+/** 提取结果（长资料方案 §5.8：结构化字段，AI 不得把空文本页当已读）。 */
 export interface ExtractResult {
   ok: boolean
   relPath?: string
+  /** 实际提取页数（PDF/PPTX/Word） */
+  pages?: number
+  /** 提取稿字符数 */
+  chars?: number
+  /** 原件文档总页数（能拿到时） */
+  total?: number
+  textLayer?: SourceTextLayer
+  /** 文本层为空的页号（1-based） */
+  emptyPages?: number[]
+  /** 存在需要视觉转写的页（全空或部分空） */
+  needsVision?: boolean
+  /** 视觉转写批数估算（12 页/批） */
+  estimatedVisionBatches?: number
+  /** Word 提取缺 LibreOffice */
+  needsSoffice?: boolean
+  hint?: string
   error?: string
   skipped?: boolean
 }
@@ -662,6 +686,19 @@ function sourceAbs(source: SourceEntry): string | null {
   const vault = getCurrentVault()
   if (!vault || !source.rel) return null
   return join(vault.rootPath, source.rel)
+}
+
+/** 空文本页收集与文本层汇总（长资料方案 §5.2：扫描件不静默）。 */
+function textLayerOf(pageTexts: Array<{ n: number; text: string }>): { emptyPages: number[]; textLayer: SourceTextLayer } {
+  const emptyPages = pageTexts.filter((p) => !p.text.trim()).map((p) => p.n)
+  const ratio = pageTexts.length ? emptyPages.length / pageTexts.length : 1
+  const textLayer: SourceTextLayer = ratio === 1 ? 'empty' : ratio > 0 ? 'partial' : 'text'
+  return { emptyPages, textLayer }
+}
+
+/** 视觉转写批数估算（12 页/批，沿用现有转写批次）。 */
+function visionBatches(pages: number): number {
+  return Math.max(1, Math.ceil(pages / 12))
 }
 
 function sourceDirRel(source: SourceEntry): string | null {
@@ -710,31 +747,77 @@ export async function extractSource(wsId: string, sourceId: string, anchor: Sour
         '',
       ].join('\n')
       writeFileSync(join(dirAbs, name), body, 'utf-8')
-      src.extractRel = `${dir}/${name}`
+      const codeRel = `${dir}/${name}`
+      const codeAnchor: SourceAnchor = { kind: 'lines', from, to: takeEnd }
+      src.extractRel = codeRel
+      src.extracts = [...(src.extracts ?? []).filter((e) => anchorKey(e.anchor) !== anchorKey(codeAnchor)), { rel: codeRel, anchor: codeAnchor, textLayer: 'text', chars: body.length, createdAt: nowIso() }]
+      src.chars = body.length
       src.status = 'ready'
       src.index = buildSourceIndex(src)
       src.indexUpdatedAt = nowIso()
       writeFile(f)
       broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: dir })
       broadcastSources(wsId)
-      return { ok: true, relPath: src.extractRel }
+      return { ok: true, relPath: codeRel, chars: body.length, textLayer: 'text' }
+    }
+    if (src.type === 'image') {
+      src.status = 'needs-vision'
+      writeFile(f)
+      broadcastSources(wsId)
+      return { ok: false, needsVision: true, estimatedVisionBatches: 1, error: '图片素材需要视觉转写（不自动提取）' }
     }
     if (src.type !== 'pdf' && src.type !== 'pptx' && src.type !== 'docx') {
       return { ok: false, error: '仅 pdf / pptx / docx / code 支持自动提取' }
     }
-    const rg = anchor.kind === 'pages' ? anchor : { from: 1, to: 9999 }
+    const rg = anchor.kind === 'pages' ? anchor : null
     let docAbs = abs
     if (src.type === 'docx') {
+      if (!findSoffice(getSetting('sofficePath'))) {
+        return { ok: false, needsSoffice: true, hint: '未配置 LibreOffice 路径，或 soffice 不可用', error: 'Word 提取需要 LibreOffice（设置 → AI → 工具）' }
+      }
       const conv = await convertToPdf(abs, getSetting('sofficePath'))
       if (!conv.ok || !conv.pdfPath) return { ok: false, error: conv.error ?? 'Word 文档转 PDF 失败' }
       docAbs = conv.pdfPath
     }
-    const pages = src.type === 'pptx'
-      ? extractPptxPages(abs).filter((p) => p.n >= rg.from && p.n <= rg.to)
-      : (await extractPdfRange(docAbs, rg.from, rg.to)).pages
-    if (!pages.length) return { ok: false, error: '区间内没有可提取的页（扫描件请走视觉转写）' }
-    const realFrom = Math.min(...pages.map((p) => p.n))
-    const realTo = Math.max(...pages.map((p) => p.n))
+    // 整本不再被 200 页单次上限截断（长资料方案 §5.3）；pages 区间按页码取
+    let pageList: { n: number; text: string }[]
+    let total: number
+    if (src.type === 'pptx') {
+      const all = extractPptxPages(abs)
+      total = all.length
+      pageList = rg ? all.filter((p) => p.n >= rg.from && p.n <= rg.to) : all
+    } else if (rg) {
+      // 章区间可能超 200 页：分块循环，不把单次上限当区间末尾（§5.6）
+      const r = await extractPdfRangeChunked(docAbs, rg.from, rg.to)
+      pageList = r.pages
+      total = r.total
+    } else {
+      const r = await extractPdfWhole(docAbs)
+      pageList = r.pages
+      total = r.total
+    }
+    if (!pageList.length) return { ok: false, error: '区间内没有可提取的页', total }
+    const { emptyPages, textLayer } = textLayerOf(pageList)
+    if (textLayer === 'empty') {
+      // 全空 = 扫描件：不写 ready 提取稿（§5.2），登记元数据后交回视觉转写确认
+      src.pages = total
+      src.textLayer = 'empty'
+      src.status = 'needs-vision'
+      writeFile(f)
+      broadcastSources(wsId)
+      return {
+        ok: false,
+        needsVision: true,
+        pages: 0,
+        total,
+        emptyPages,
+        textLayer,
+        estimatedVisionBatches: visionBatches(total),
+        error: '全部页面均无可提取文本（扫描件），需要视觉转写',
+      }
+    }
+    const realFrom = Math.min(...pageList.map((p) => p.n))
+    const realTo = Math.max(...pageList.map((p) => p.n))
     const name = uniqueFileName(dirAbs, `${sanitizeTitle(src.title)}-p${realFrom}-${realTo}.md`)
     const body = [
       `# ${src.title} · 第 ${realFrom}-${realTo} 页提取稿`,
@@ -742,17 +825,43 @@ export async function extractSource(wsId: string, sourceId: string, anchor: Sour
       `> 来源：${src.rel} · 提取于 ${today()} · 由文本层自动抽取（页码为 PDF/幻灯片物理页序）`,
       '> 本页可直接编辑修正。',
       '',
-      ...pages.flatMap((p) => [`## p${p.n}`, '', p.text || '（本页无可提取文本）', '']),
+      ...pageList.flatMap((p) => [`## p${p.n}`, '', p.text || '（本页无可提取文本）', '']),
     ].join('\n')
     writeFileSync(join(dirAbs, name), body, 'utf-8')
-    src.extractRel = `${dir}/${name}`
-    src.status = 'ready'
+    const relPath = `${dir}/${name}`
+    const recAnchor: SourceAnchor = anchor.kind === 'whole' ? { kind: 'whole' } : { kind: 'pages', from: realFrom, to: realTo }
+    const record: SourceExtract = {
+      rel: relPath,
+      anchor: recAnchor,
+      pages: pageList.length,
+      chars: body.length,
+      textLayer,
+      emptyPages: emptyPages.length ? emptyPages : undefined,
+      createdAt: nowIso(),
+    }
+    src.extractRel = relPath
+    // 同 anchorKey 重复提取：覆盖旧记录，不堆积重复提取稿（§5.6）
+    src.extracts = [...(src.extracts ?? []).filter((e) => anchorKey(e.anchor) !== anchorKey(recAnchor)), record]
+    src.pages = total
+    src.chars = body.length
+    src.textLayer = textLayer
+    src.status = textLayer === 'partial' ? 'needs-vision' : 'ready'
     src.index = buildSourceIndex(src)
     src.indexUpdatedAt = nowIso()
     writeFile(f)
     broadcast(BROADCAST_CHANNEL.aiTeachTreeRefresh, { dirRel: dir })
     broadcastSources(wsId)
-    return { ok: true, relPath: src.extractRel }
+    return {
+      ok: true,
+      relPath,
+      pages: pageList.length,
+      chars: body.length,
+      total,
+      textLayer,
+      emptyPages: emptyPages.length ? emptyPages : undefined,
+      needsVision: textLayer === 'partial' || undefined,
+      estimatedVisionBatches: textLayer === 'partial' ? visionBatches(emptyPages.length) : undefined,
+    }
   } catch (e) {
     return { ok: false, error: (e as Error).message }
   }
@@ -792,6 +901,12 @@ export interface HintSourceItem {
   anchor: string
   mode?: string
   extractPath?: string
+  /** 提取稿与本段区间的匹配度（长资料方案 §8.1） */
+  extractMatch?: 'exact' | 'fallback' | 'missing'
+  pages?: number
+  chars?: number
+  textLayer?: SourceTextLayer
+  emptyPages?: number[]
 }
 
 export interface SourcesHintInput {
@@ -824,9 +939,15 @@ export function renderSourcesHint(input: SourcesHintInput): string {
     if (!items.length) lines.push('（本段没有确认素材，按大纲讲；需要素材请先让用户在本章分配并开段确认）')
     for (const it of items) {
       const bits = [`- ${it.title}`, `类型 ${it.type}`, `区间 ${it.anchor}`]
+      if (it.pages) bits.push(`共 ${it.pages} 页`)
+      if (it.chars) bits.push(`${it.chars} 字符`)
+      if (it.textLayer === 'empty') bits.push('扫描件（文本层为空，需视觉转写）')
+      else if (it.textLayer === 'partial') bits.push(`部分扫描（${(it.emptyPages ?? []).length} 页无文本，需转写空页）`)
       if (it.mode) bits.push(it.mode === 'exact' ? '逐知识点匹配' : it.mode === 'narrow' ? '按标题/文件名缩窄' : '回退本章分配')
       bits.push(`路径 ${it.path}`)
-      if (it.extractPath) bits.push(`提取稿 ${it.extractPath}`)
+      if (it.extractMatch === 'exact' && it.extractPath) bits.push(`本章提取稿 ${it.extractPath}`)
+      else if (it.extractMatch === 'fallback' && it.extractPath) bits.push(`提取稿 ${it.extractPath}（非本章区间，请先提取本章）`)
+      else bits.push('未提取（先 course.sources.extract 本段区间）')
       lines.push(bits.join(' · '))
     }
   }
@@ -846,13 +967,19 @@ export function resolveSegmentSources(wsId: string, segmentSources: Array<{ sour
       out.push({ title: seg.label, type: 'other', path: '（素材已移除）', anchor: anchorLabel(seg.anchor), mode: seg.mode })
       continue
     }
+    const pick = pickExtract(src, seg.anchor)
     out.push({
       title: src.title,
       type: src.type,
       path: src.rel || src.url || '（无路径）',
       anchor: anchorLabel(seg.anchor),
       mode: seg.mode,
-      extractPath: src.extractRel || undefined,
+      extractPath: pick.extract?.rel,
+      extractMatch: pick.match,
+      pages: src.pages,
+      chars: src.chars,
+      textLayer: src.textLayer,
+      emptyPages: src.extracts?.flatMap((e) => e.emptyPages ?? []),
     })
   }
   return out
