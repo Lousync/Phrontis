@@ -14,10 +14,12 @@
  *   2. counts 缺文件时全 0 且**不创建任何文件**（负向）
  *   3. 知识点级 CONSTRAINTS 骨架（无列表项）→ 写入 → 读回往返（CRLF 归一 / 相对路径格式）
  *   4. 写盘后复用**既有**两条广播、无新通道（铁律 1）
- *   5. `addSource` 缺省 target 仍写工作区主库（负向：不落知识点夹）；显式 unit target / addScopedSource 分层
- *   6. `readScopedSources` 分组正确（组内重编号、互不串层）
- *   7. counts 覆盖大纲全部知识点 + `{ req, src }` 实数
- *   8. IPC 六通道接线 + 注册可达性（静态）
+ *   5. 工作区层 / 全局层复用既有 ensure 与骨架
+ *   6. `addSource` 缺省 target 仍写工作区主库（负向：不落知识点夹）；显式 unit target / addScopedSource 分层
+ *   7. `readScopedSources` 分组正确（组内重编号、互不串层）
+ *   8. counts 覆盖大纲全部知识点 + `{ req, src }` 实数
+ *   9. `course.constraints.write`：四层 / append / replace / unit 解析 / 段层拒绝课程助手 / 注入截断警告
+ *  10. IPC 六通道接线 + 注册可达性（静态）
  *
  * 运行（项目根目录）：node .AGENT/scripts/ai-teaching/verify-scope-files.mjs [仓库路径]
  * 输出纯 ASCII（禁 emoji，AGENTS.md）；期望全部 PASS 且 exit=0。
@@ -42,6 +44,7 @@ const WS_FOLDER = `${ROOT_DIR}/工作区A`
 const SCOPE_REL = 'electron/lib/aiTeachingScope.ts'
 const SOURCES_REL = 'electron/lib/aiTeachingSources.ts'
 const FOLDERS_REL = 'electron/lib/aiTeachingFolders.ts'
+const SCOPE_PROMPT_REL = 'electron/lib/scopePrompt.ts'
 
 // 常量从真源取（不在脚本里手抄 `CONSTRAINTS.md`，避免两处漂移）
 const foldersSrc = read(FOLDERS_REL)
@@ -63,6 +66,9 @@ export const state = {
   broadcasts: [],
   outline: null,
   unitFolders: {},
+  sessions: {},
+  lessonBriefs: {},
+  sessionUnits: {},
 }
 
 const real = {}
@@ -88,6 +94,8 @@ const overrides = {
   './aiTeachingCourse': {
     unitFolderRel: (_wsId, unitId) => state.unitFolders[String(unitId)] || null,
     getSessionUnitFolderRel: () => null,
+    getSessionUnitFolderRels: (sid) => state.sessionUnits[String(sid)] || [],
+    getSessionLessonBrief: (sid) => state.lessonBriefs[String(sid)] ?? null,
     readCourseOutline: () => state.outline,
   },
   './workspaceManager': {
@@ -96,7 +104,7 @@ const overrides = {
     renameWorkspacePath: () => {},
     trashWorkspacePath: async () => {},
   },
-  './agentSessionRepo': { getAgentSession: () => null, createAgentSession: () => ({ id: 's1' }), getAgentMessages: () => [] },
+  './agentSessionRepo': { getAgentSession: (sid) => state.sessions[String(sid)] ?? null, createAgentSession: () => ({ id: 's1' }), getAgentMessages: () => [] },
   '../../src/lib/aiTextExts': { AI_TEXT_CODE_EXTS: ['ts', 'js', 'tsx', 'py', 'c'] },
   '../lib/mindmap': { parseMindmap: () => null, countNodes: () => 0 },
 }
@@ -110,6 +118,9 @@ export function __mod(spec) {
     get(t, name) {
       if (typeof name !== 'string') return undefined
       if (Object.prototype.hasOwnProperty.call(t, name)) return t[name]
+      const mod = real[spec]
+      // 常量（非函数）在真实模块注册后直接取值；函数仍延迟转发，兼容循环 import。
+      if (mod && Object.prototype.hasOwnProperty.call(mod, name) && typeof mod[name] !== 'function') return mod[name]
       return (...args) => {
         const ns = real[spec]
         const fn = ns ? ns[name] : undefined
@@ -148,8 +159,9 @@ const leftovers = [
   ...rewriteModule(FOLDERS_REL, 'aiTeachingFolders.mjs'),
   ...rewriteModule(SOURCES_REL, 'aiTeachingSources.mjs'),
   ...rewriteModule(SCOPE_REL, 'aiTeachingScope.mjs'),
+  ...rewriteModule(SCOPE_PROMPT_REL, 'scopePrompt.mjs'),
 ]
-check('三个模块的 import 全部可机械改写（无多行 import 残留）', leftovers.length === 0, leftovers.join(' | '))
+check('四个模块的 import 全部可机械改写（无多行 import 残留）', leftovers.length === 0, leftovers.join(' | '))
 
 const stubs = await import(pathToFileURL(path.join(tmpDir, 'stubs.mjs')).href)
 stubs.state.rootPath = vaultPath
@@ -161,15 +173,26 @@ stubs.state.outline = {
     { id: 'u2', name: '知识点B', goal: '', source: '' },
   ] }],
 }
+stubs.state.sessions = {
+  'sid-seg': { id: 'sid-seg', title: '段1', created_at: '2026-11-09 10:00:00' },
+}
+stubs.state.lessonBriefs = {
+  'sid-seg': { unitIds: ['u1'], activeUnitId: 'u1' },
+}
+stubs.state.sessionUnits = {
+  'sid-seg': [{ unitId: 'u1', name: '知识点A', rel: `${WS_FOLDER}/1·知识点A` }],
+}
 
 const foldersMod = await import(pathToFileURL(path.join(tmpDir, 'aiTeachingFolders.mjs')).href)
 const sourcesMod = await import(pathToFileURL(path.join(tmpDir, 'aiTeachingSources.mjs')).href)
-const scopeMod = await import(pathToFileURL(path.join(tmpDir, 'aiTeachingScope.mjs')).href)
+const scopePromptMod = await import(pathToFileURL(path.join(tmpDir, 'scopePrompt.mjs')).href)
 stubs.__register('./aiTeachingFolders', foldersMod)
 stubs.__register('./aiTeachingSources', sourcesMod)
+stubs.__register('./scopePrompt', scopePromptMod)
+const scopeMod = await import(pathToFileURL(path.join(tmpDir, 'aiTeachingScope.mjs')).href)
 stubs.__register('./aiTeachingScope', scopeMod)
 
-const { readScopeText, writeScopeText, ensureScopeText, scopeCounts, normalizeSourceTarget, countConstraintItems, UNIT_CONSTRAINTS_SKELETON } = scopeMod
+const { readScopeText, writeScopeText, ensureScopeText, scopeCounts, normalizeSourceTarget, countConstraintItems, UNIT_CONSTRAINTS_SKELETON, writeConstraintsForAiTeaching, readConstraintsForAiTeaching } = scopeMod
 const { addSource, addScopedSource, readScopedSources } = sourcesMod
 
 const getSetting = (key) => (key === 'aiTeachRootDir' ? ROOT_DIR : undefined)
@@ -319,8 +342,107 @@ check('counts 再次调用仍不改文件树（负向）', listEntries(vaultPath
 check('条目计数口径 = `- ` 行（允许缩进；空条目与标题不算）', countConstraintItems('- a\n  - 缩进也算\n- \n# 标题\n- b') === 3, String(countConstraintItems('- a\n  - 缩进也算\n- \n# 标题\n- b')))
 check('骨架不计条目（新层 counts 为 0）', countConstraintItems(UNIT_CONSTRAINTS_SKELETON) === 0, String(countConstraintItems(UNIT_CONSTRAINTS_SKELETON)))
 
+console.log('\n=== 10. course.constraints.write 业务函数（四层 / append / replace / 截断）===')
+const SEG_REL = `${WS_FOLDER}/段1`
+const SEG_CONSTRAINTS_REL = `${SEG_REL}/${constraintsFile}`
+fs.mkdirSync(abs(SEG_REL), { recursive: true })
+fs.writeFileSync(abs(`${SEG_REL}/.session.json`), JSON.stringify({ sessionId: 'sid-seg', title: '段1', createdAt: '2026-11-09 10:00:00', v: 1 }), 'utf8')
+const GLOBAL_CONSTRAINTS_REL = `${ROOT_DIR}/${constraintsFile}`
+const WS_CONSTRAINTS_REL = `${WS_FOLDER}/${constraintsFile}`
+fs.rmSync(abs(GLOBAL_CONSTRAINTS_REL), { force: true })
+fs.rmSync(abs(WS_CONSTRAINTS_REL), { force: true })
+fs.rmSync(abs(UNIT_CONSTRAINTS_REL), { force: true })
+fs.rmSync(abs(SEG_CONSTRAINTS_REL), { force: true })
+
+const cw = (level, text, extra = {}) => writeConstraintsForAiTeaching('sid-seg', { level, text, ...extra }, getSetting)
+const readRel = (rel) => fs.readFileSync(abs(rel), 'utf8')
+
+const cg = cw('global', '- 全局甲')
+check('global append 新建 → OK + 相对路径', cg.ok && cg.level === 'global' && cg.relPath === GLOBAL_CONSTRAINTS_REL, JSON.stringify(cg))
+check('global append 新建 → 内容正确', readRel(GLOBAL_CONSTRAINTS_REL) === '- 全局甲\n', JSON.stringify(readRel(GLOBAL_CONSTRAINTS_REL)))
+
+const cw1 = cw('workspace', '- 课程甲')
+check('workspace append 新建 → OK', cw1.ok && cw1.relPath === WS_CONSTRAINTS_REL, JSON.stringify(cw1))
+const cw2 = cw('workspace', '- 课程乙')
+check('workspace append 保留原内容 + 空行追加', readRel(WS_CONSTRAINTS_REL) === '- 课程甲\n\n- 课程乙\n', JSON.stringify(readRel(WS_CONSTRAINTS_REL)))
+check('workspace append 条目数 = 2', cw2.ok && cw2.items === 2, JSON.stringify(cw2))
+
+const cu1 = cw('unit', '- 知识点甲', { unit: 'u1' })
+check('unit 按 id 写入知识点层', cu1.ok && cu1.relPath === UNIT_CONSTRAINTS_REL && cu1.level === 'unit', JSON.stringify(cu1))
+check('unit 内容正确', readRel(UNIT_CONSTRAINTS_REL) === '- 知识点甲\n', JSON.stringify(readRel(UNIT_CONSTRAINTS_REL)))
+const cu2 = cw('unit', '- 知识点乙', { unit: '知识点A' })
+check('unit 按名称追加', cu2.ok && readRel(UNIT_CONSTRAINTS_REL) === '- 知识点甲\n\n- 知识点乙\n', JSON.stringify(cu2))
+const cu3 = cw('unit', '- 当前聚焦', {})
+check('unit 缺省 = 当前聚焦知识点', cu3.ok && cu3.relPath === UNIT_CONSTRAINTS_REL, JSON.stringify(cu3))
+
+const cuBad = cw('unit', '- 越界', { unit: 'u2' })
+check('unit 不在本段 → 拒绝（负向）', cuBad.ok === false && String(cuBad.error).includes('不在本段'), JSON.stringify(cuBad))
+check('unit 越界不落盘（负向）', !fs.existsSync(abs(`${WS_FOLDER}/1·知识点B/${constraintsFile}`)), `${WS_FOLDER}/1·知识点B/${constraintsFile}`)
+
+const cs1 = cw('segment', '- 本段甲')
+check('segment 写入段夹 CONSTRAINTS.md', cs1.ok && cs1.relPath === SEG_CONSTRAINTS_REL, JSON.stringify(cs1))
+check('segment 内容正确', readRel(SEG_CONSTRAINTS_REL) === '- 本段甲\n', JSON.stringify(readRel(SEG_CONSTRAINTS_REL)))
+const csAssistant = writeConstraintsForAiTeaching('sid-assistant', { level: 'segment', text: '- 不应写入' }, getSetting)
+check('课程助手写 segment → 拒绝（负向）', csAssistant.ok === false && String(csAssistant.error).includes('不是段会话'), JSON.stringify(csAssistant))
+const csBadUnit = writeConstraintsForAiTeaching('sid-assistant', { level: 'unit', text: '- 不应写入' }, getSetting)
+check('课程助手写 unit → 拒绝（负向）', csBadUnit.ok === false, JSON.stringify(csBadUnit))
+
+const cr = cw('workspace', '- 只保留这条', { mode: 'replace' })
+check('replace 覆盖本层', cr.ok && readRel(WS_CONSTRAINTS_REL) === '- 只保留这条\n', JSON.stringify(cr))
+check('replace 覆盖已有内容 → warning', cr.ok && String(cr.warning).includes('已覆盖'), JSON.stringify(cr.warning))
+
+const many = Array.from({ length: 20 }, (_, i) => `- 要求${i + 1}`).join('\n')
+const cLong = cw('workspace', many, { mode: 'replace' })
+check('超过注入上限 → truncated + hint', cLong.ok && cLong.truncated === true && String(cLong.hint).includes('1200'), JSON.stringify(cLong))
+const cAppendLong = cw('workspace', '- 追加一条')
+check('原有内容已截断 → append 返回 warning（负向保护）', cAppendLong.ok && cAppendLong.truncated === true && String(cAppendLong.warning).includes('原有内容已超过注入上限'), JSON.stringify(cAppendLong.warning))
+
+const cBadLevel = writeConstraintsForAiTeaching('sid-seg', { level: 'chapter', text: '- x' }, getSetting)
+check('非法层级 chapter → 拒绝（负向）', cBadLevel.ok === false && String(cBadLevel.error).includes('未知要求层'), JSON.stringify(cBadLevel))
+const cEmpty = cw('workspace', '   ')
+check('空 text → 拒绝（负向）', cEmpty.ok === false && String(cEmpty.error).includes('不能为空'), JSON.stringify(cEmpty))
+const cTooLong = cw('workspace', `- ${'x'.repeat(20001)}`)
+check('text 超长 → 拒绝（负向）', cTooLong.ok === false && String(cTooLong.error).includes('过长'), JSON.stringify(cTooLong))
+const cNul = cw('workspace', '- x\u0000y')
+check('NUL 字符 → 拒绝（负向）', cNul.ok === false && String(cNul.error).includes('NUL'), JSON.stringify(cNul))
+const cCrlf = cw('workspace', '- a\r\n- b\r\n', { mode: 'replace' })
+check('CRLF 归一为 LF', cCrlf.ok && readRel(WS_CONSTRAINTS_REL) === '- a\n- b\n', JSON.stringify(readRel(WS_CONSTRAINTS_REL)))
+
+stubs.state.broadcasts.length = 0
+const csBroadcast = cw('segment', '- 广播检查', { mode: 'replace' })
+const sChans = stubs.state.broadcasts.map((b) => b.channel)
+check('segment 写入发 tree-refresh + course-refresh', sChans.includes('aiTeach:tree-refresh') && sChans.includes('aiTeach:course-refresh'), sChans.join(','))
+check('segment 写入 relPath 非绝对路径', csBroadcast.ok && !String(csBroadcast.relPath).startsWith('/') && !String(csBroadcast.relPath).includes('\\'), String(csBroadcast.relPath))
+
+console.log('\n=== 10b. course.constraints.read 全文读取（不受注入上限影响）===')
+const cread = (level, extra = {}) => readConstraintsForAiTeaching('sid-seg', { level, ...extra }, getSetting)
+const crGlobal = cread('global')
+check('read global 返回全文 + 相对路径', crGlobal.ok && crGlobal.text.includes('- 全局甲') && crGlobal.relPath === GLOBAL_CONSTRAINTS_REL, JSON.stringify(crGlobal))
+const crWs = cread('workspace')
+check('read workspace 返回全文', crWs.ok && crWs.text.includes('- a') && crWs.text.includes('- b'), JSON.stringify(crWs))
+const crUnit = cread('unit')
+check('read unit 缺省 = 当前聚焦知识点', crUnit.ok && crUnit.relPath === UNIT_CONSTRAINTS_REL && crUnit.text.includes('- 当前聚焦'), JSON.stringify(crUnit))
+const crSeg = cread('segment')
+check('read segment 返回段夹全文', crSeg.ok && crSeg.relPath === SEG_CONSTRAINTS_REL && crSeg.text.includes('- 广播检查'), JSON.stringify(crSeg))
+
+const longWs = `- ${'长'.repeat(1600)}`
+writeScopeText(WS_A, longWs, getSetting)
+const crLong = cread('workspace')
+check('read 超过 1200 字符仍返回全文（负向：不截断正文）', crLong.ok && crLong.text.length === longWs.length && crLong.text === longWs, `${crLong.text?.length} vs ${longWs.length}`)
+check('read 超过注入上限时标 truncated + hint（提示注入侧仍会截）', crLong.ok && crLong.truncated === true && String(crLong.hint).includes('全文'), JSON.stringify({ truncated: crLong.truncated, hint: crLong.hint }))
+const beforeRead = listEntries(vaultPath).join(',')
+const crMissing = cread('unit', { unit: 'u2' })
+check('read 不在本段的知识点 → 拒绝（负向）', crMissing.ok === false && String(crMissing.error).includes('不在本段'), JSON.stringify(crMissing))
+check('read 被拒不落盘（负向：文件树未变）', listEntries(vaultPath).join(',') === beforeRead, '')
+const crAssistant = readConstraintsForAiTeaching('sid-assistant', { level: 'segment' }, getSetting)
+check('课程助手 read segment → 拒绝（负向）', crAssistant.ok === false && String(crAssistant.error).includes('不是段会话'), JSON.stringify(crAssistant))
+const crBadLevel = cread('chapter')
+check('read 非法层级 → 拒绝（负向）', crBadLevel.ok === false && String(crBadLevel.error).includes('未知要求层'), JSON.stringify(crBadLevel))
+const crNoVault = (() => { stubs.state.vaultOpen = false; const r = cread('global'); stubs.state.vaultOpen = true; return r })()
+check('read 无仓库 → 报错不炸', crNoVault.ok === false && String(crNoVault.error).includes('尚未打开仓库'), JSON.stringify(crNoVault))
+
 // ---------------------------------------------------------------- 静态接线
-console.log('\n=== 10. IPC 六通道 + 注册可达性（剥注释后静态断言）===')
+console.log('\n=== 11. IPC 六通道 + 注册可达性（剥注释后静态断言）===')
 const scopeSrc = stripComments(read(SCOPE_REL))
 const sourcesSrc = stripComments(read(SOURCES_REL))
 const mainIndex = stripComments(read('electron/main/index.ts'))

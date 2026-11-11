@@ -12,6 +12,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 const course = read('electron/lib/aiTeachingCourse.ts')
 const tools = read('electron/lib/builtinTools.ts')
+const agent = read('electron/lib/agentService.ts')
 
 let pass = 0, fail = 0
 const check = (name, ok, detail = '') => {
@@ -38,9 +39,51 @@ check('注册 inventory', tools.includes("name: 'inventory'"))
 check('注册 course.outline.write', tools.includes("name: 'course.outline.write'"))
 check('注册 course.outline.remove-unit', tools.includes("name: 'course.outline.remove-unit'"))
 check('注册 course.organize.archive', tools.includes("name: 'course.organize.archive'"))
+check('注册 course.constraints.write', tools.includes("name: 'course.constraints.write'"))
+check('course.constraints.write requires:write + tier:ondemand', /name: 'course\.constraints\.write'[\s\S]{0,1500}requires: 'write', tier: 'ondemand'/.test(tools))
+check('course.constraints.write 走业务函数 + 仅教学面', tools.includes('writeConstraintsForAiTeaching(sid') && tools.includes("ctx?.source !== 'aiTeaching'"))
+const constraintSchemaChars = (() => {
+  const at = tools.indexOf("name: 'course.constraints.write'")
+  const schemaAt = tools.indexOf('inputSchema:', at)
+  const start = tools.indexOf('{', schemaAt)
+  let depth = 0
+  for (let i = start; i < tools.length; i++) {
+    if (tools[i] === '{') depth++
+    else if (tools[i] === '}') { depth--; if (depth === 0) return tools.slice(start, i + 1).split(/\r?\n/).map((l) => l.trim()).join('').length }
+  }
+  return 0
+})()
+check('course.constraints.write schema ≤ 800 字符', constraintSchemaChars > 0 && constraintSchemaChars <= 800, String(constraintSchemaChars))
 check('四工具 requires:write + tier:ondemand', (tools.match(/requires: 'write', tier: 'ondemand'/g) || []).length >= 4)
 check('工作区解析走 getWorkspaceOfSession', tools.includes('requireAiTeachWs') && tools.includes('getWorkspaceOfSession(sid)'))
 check('builtin.tool.request 清单含新工具', tools.includes('course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive'))
+check('builtin.tool.request 清单含 course.constraints.write / read', tools.includes('course.organize.archive / course.constraints.write / course.constraints.read / course.review.write'))
+check('agentService 注入要求文档协议', agent.includes('【要求文档（AI教学）】') && agent.includes('course.constraints.write'))
+check('agentService 产物落点纪律声明用户要求优先', agent.includes('用户要求指定了落点时，以用户要求为准'))
+check('agentService 产物落点纪律含系统硬边界', agent.includes('系统硬边界（任何用户要求都不能覆盖）'))
+check('agentService 要求文档提示含全文读取工具', agent.includes('course.constraints.read'))
+check('course 助手提示含要求工具', course.includes('course.constraints.write'))
+check('course 助手提示含教材 vault.write + ensureId', course.includes('vault.write') && course.includes('ensureId:true'))
+check('vault.write / vault.edit 拦 CONSTRAINTS.md', (tools.match(/要求文档请用 course\.constraints\.write/g) || []).length >= 2)
+check('归档工具拦 CONSTRAINTS 标题', course.includes('要求文档请用 course.constraints.write 写入，不要用整理归档创建 CONSTRAINTS.md'))
+check('归档工具拦 课程.md 标题', course.includes('课程大纲请用 course.outline.write 写入'))
+check('归档拒绝 SOURCES 目录（用户要求也不能覆盖）', course.includes("s.toUpperCase() === 'SOURCES'"))
+check('分段归档拒绝时指向 vault.write', course.includes('教材 / 知识库正文请用 vault.write'))
+
+console.log('\n[输出落点优先级 / 要求全文读取] aiTeachingScope + builtinTools')
+check('导出 readConstraintsForAiTeaching', read('electron/lib/aiTeachingScope.ts').includes('export function readConstraintsForAiTeaching'))
+check('注册 course.constraints.read', tools.includes("name: 'course.constraints.read'"))
+check('course.constraints.read readOnly:read + tier:ondemand', /name: 'course\.constraints\.read'[\s\S]{0,900}readOnly: true[\s\S]{0,100}requires: 'read'[\s\S]{0,100}tier: 'ondemand'/.test(tools))
+check('course.constraints.read 走业务函数 + 仅教学面', tools.includes('readConstraintsForAiTeaching(sid') && tools.includes("ctx?.source !== 'aiTeaching'"))
+check('builtin.tool.request 清单含 course.constraints.read', tools.includes('course.constraints.write / course.constraints.read / course.review.write'))
+check('vault.write schema 含 ensureId', tools.includes('ensureId: { type: \'boolean\''))
+check('vault.write 落盘调用 ensureKnowledgeDocFrontmatter', tools.includes('ensureKnowledgeDocFrontmatter'))
+check('vault.write 回传稳定 id', tools.includes('readFrontmatterId(content)'))
+check('vault.write / vault.edit 硬边界拦 SOURCES', tools.includes("s.toUpperCase() === 'SOURCES'"))
+check('vault.write / vault.edit 硬边界拦交接 / 课程', tools.includes('交接文档只由「收尾本段」生成') && tools.includes('课程大纲请用 course.outline.write'))
+check('显式多段路径不再被归一化改写', /if \(segs\.length > 1\) return rel/.test(tools))
+const drawer = read('src/modules/ai-teaching/RequirementsDrawer.tsx')
+check('要求抽屉超限给一行内联轻提示', drawer.includes('exceedsConstraintInjectLimit(text)') && drawer.includes('超出注入上限') && drawer.includes('truncate'))
 
 console.log('\n[权限放行] 课程助手注入')
 check('不再有「只读约束」', !course.includes('【只读约束】'))

@@ -2250,7 +2250,7 @@ export interface ElectronAPI {
    */
   platform: string
   getPathForFile: (file: File) => string
-  /** 读系统剪贴板里的文件/目录绝对路径（空数组 = 不是文件剪贴板） */
+  /** 读系统剪贴板里的文件/目录绝对路径（应用内文件剪贴板优先；空数组 = 不是文件剪贴板） */
   readClipboardFilePaths: () => Promise<string[]>
   pasteFromClipboard: () => Promise<{ ok: boolean }>
   copyImage: (src: { path?: string; dataUrl?: string }) => Promise<boolean>
@@ -2593,6 +2593,8 @@ export interface ElectronAPI {
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   /** 创建副本：按字节复制仓库内文件（文本/二进制通吃）；重名主进程自动加后缀 */
   workspaceCopyFile: (rootId: string, srcRel: string, dstRel: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
+  /** 复制仓库内文件/目录到系统 + 应用内文件剪贴板（B-51）；渲染层只传相对路径 */
+  workspaceCopyPathsToClipboard: (rootId: string, relPaths: string[]) => Promise<{ ok: boolean; error?: string; count?: number }>
   workspaceMkdir: (rootId: string, relPath: string) => Promise<{ ok: boolean; error?: string; relPath?: string; renamed?: boolean }>
   /** 粘贴系统剪贴板里的外部文件/目录到 relDir；srcPaths 由主进程 clipboard:readFilePaths 读取（见 WorkspacePasteResult） */
   workspacePasteExternal: (rootId: string, relDir: string, srcPaths: string[]) => Promise<WorkspacePasteResult>

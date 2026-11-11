@@ -32,7 +32,7 @@ const src = fs.readFileSync(path.join(ROOT, REL), 'utf8')
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'constraints-parse-'))
 const tmpFile = path.join(tmpDir, 'constraintsParse.mjs')
 fs.writeFileSync(tmpFile, stripTypeScriptTypes(src, { mode: 'strip' }))
-const { parseConstraintItems, serializeConstraintItems, applyConstraintEdits } = await import(pathToFileURL(tmpFile).href)
+const { parseConstraintItems, serializeConstraintItems, applyConstraintEdits, exceedsConstraintInjectLimit, CONSTRAINT_INJECT_MAX_ITEMS, CONSTRAINT_INJECT_MAX_CHARS } = await import(pathToFileURL(tmpFile).href)
 
 /** 非条目行（标题 / 说明段 / 空行）逐字对比用：把条目行整行剔掉再比 */
 const ITEM_RE = /^(\s*)-\s+(.*\S)\s*$/
@@ -116,6 +116,18 @@ check('CRLF 下非条目行逐字保留（按归一后比）', nonItemLines(crlf
 const noTrailing = DOC.replace(/\n$/, '')
 check('无尾换行：编辑后仍无尾换行（不凭空补 \\n）', !applyConstraintEdits(noTrailing, [{ op: 'update', index: 0, text: '甲' }]).endsWith('\n'), '')
 check('有尾换行：编辑后仍有尾换行', applyConstraintEdits(DOC, [{ op: 'update', index: 0, text: '甲' }]).endsWith('\n'), '')
+
+console.log('\n=== 7. 注入上限提示（与 scopePrompt 同口径）===')
+const scopeSrc = fs.readFileSync(path.join(ROOT, 'electron/lib/scopePrompt.ts'), 'utf8')
+check('常量 = 12 条 / 1200 字符', CONSTRAINT_INJECT_MAX_ITEMS === 12 && CONSTRAINT_INJECT_MAX_CHARS === 1200, `${CONSTRAINT_INJECT_MAX_ITEMS}/${CONSTRAINT_INJECT_MAX_CHARS}`)
+check('与 scopePrompt 常量同口径（负向：两处漂移会红）', scopeSrc.includes('SCOPE_LAYER_MAX_ITEMS = 12') && scopeSrc.includes('SCOPE_LAYER_MAX_CHARS = 1200'), '')
+check('12 条内不超限', exceedsConstraintInjectLimit(Array.from({ length: 12 }, (_, i) => `- 条目${i + 1}`).join('\n')) === false, '')
+check('13 条超限', exceedsConstraintInjectLimit(Array.from({ length: 13 }, (_, i) => `- 条目${i + 1}`).join('\n')) === true, '')
+check('1200 字符内不超限', exceedsConstraintInjectLimit('x'.repeat(1200)) === false, '')
+check('1201 字符超限', exceedsConstraintInjectLimit('x'.repeat(1201)) === true, '')
+check('空文本 / 纯空白不超限', exceedsConstraintInjectLimit('') === false && exceedsConstraintInjectLimit('  \n\n ') === false, '')
+check('空行不计条数（12 条 + 空行不超限）', exceedsConstraintInjectLimit(`${Array.from({ length: 12 }, (_, i) => `- 条目${i + 1}`).join('\n\n')}\n\n`) === false, '')
+check('CRLF 输入按同一口径判断', exceedsConstraintInjectLimit(Array.from({ length: 13 }, (_, i) => `- 条目${i + 1}`).join('\r\n')) === true, '')
 
 // ---------------------------------------------------------------- 报告
 const failed = checks.filter((c) => !c.pass)

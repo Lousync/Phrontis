@@ -27,6 +27,33 @@ export type ConstraintEdit =
 /** 条目行判据：允许前置缩进（用户可能写在列表里），但只认 `-` 这一种记号 */
 const ITEM_RE = /^(\s*)-\s+(.*\S)\s*$/
 
+/**
+ * 注入上限（与主进程 `electron/lib/scopePrompt.ts` 的 `SCOPE_LAYER_MAX_ITEMS/CHARS` 同口径）。
+ * 渲染层只用它给「要求」抽屉做一行超限提示；真正截断仍由主进程 `cutScopeLayer` 执行。
+ * 两处常量由契约脚本锁同步，改这里必须同步改 scopePrompt。
+ */
+export const CONSTRAINT_INJECT_MAX_ITEMS = 12
+export const CONSTRAINT_INJECT_MAX_CHARS = 1200
+
+/** 当前文本是否会被注入层截断（逐行复刻 `cutScopeLayer` 的条数 / 字符口径） */
+export function exceedsConstraintInjectLimit(text: string): boolean {
+  const norm = String(text ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  if (!norm.trim()) return false
+  const kept: string[] = []
+  let items = 0
+  for (const ln of norm.split('\n')) {
+    if (!ln.trim()) {
+      if (kept.length && items > 0 && items < CONSTRAINT_INJECT_MAX_ITEMS) kept.push(ln)
+      continue
+    }
+    if (items >= CONSTRAINT_INJECT_MAX_ITEMS) return true
+    kept.push(ln)
+    items++
+  }
+  const body = kept.join('\n').replace(/\s+$/, '')
+  return body.length > CONSTRAINT_INJECT_MAX_CHARS
+}
+
 /** 拆行但记住末尾是否带换行 —— 往返不许凭空多/少一个 \n */
 function splitLines(text: string): { lines: string[]; trailing: boolean } {
   const normalized = String(text ?? '').replace(/\r\n/g, '\n')

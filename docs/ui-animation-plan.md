@@ -404,3 +404,28 @@ wildcard 方案在 420ms 采样窗口内只渲染出 2 帧 = 界面明显冻结�
 - React.memo 组件新增动画类不影响 props 稳定性，但 key 重放方案注意不要破坏既有记忆化；
 - Tailwind v4 下 transitionend 属性名陷阱：凡需 JS 兜底的（Modal 退场卸载）沿用 AssistantPanel 的定时器兜底模式，不依赖 transitionend；
 - 不引入 framer-motion：现有 CSS 范式已够用，新增依赖与打包体积（铁律 12）不划算。
+
+---
+
+## 七、持续环境动画（昼夜动态主题，2026-11-07）
+
+> 与上面所有条目的本质区别：这些不是「交互触发的过渡」，而是**无交互、长循环的氛围动画**，
+> 消费者是 `DaycycleBackdrop`（整窗场景，`docs/daycycle-theme-plan.md`）。铁律 13 的
+> 「只动 transform / opacity / grid-rows」同样适用，全部带 reduced-motion 降级。
+
+| 类 / keyframes | 运动 | 消费点 |
+|---|---|---|
+| `.kb-dc-bd-celestial.is-moving` | `transform 60s linear` 过渡：每分钟一次的位置更新被拉成连续移动（太阳/月亮全窗弧线）；resize 时不挂过渡 | 整窗天体 |
+| `kb-dc-breathe` | `scale 1→1.07` 8s ease-in-out alternate infinite | 太阳 bloom 呼吸 |
+| `kb-dc-bd-cloud-drift` | `translateX(-14px→22px)` 46~80s alternate infinite（七朵云错相） | 全窗云漂移 |
+| `kb-dc-twinkle` | `opacity .3→1` 3.6~9s ease-in-out infinite（92 颗星错相） | 夜间星空闪烁 |
+| `kb-dc-aurora-drift` | `translate3d + scale + rotate` 18~27s alternate infinite | 夜间极光带 |
+| `kb-dc-bd-mote-float` | `translate3d + opacity` 12~26s linear infinite（22 粒错相） | 白天光尘 |
+| `kb-dc-bd-firefly-float` | `translate3d + scale + opacity` 10~22s alternate infinite | 夜间萤火 |
+| `kb-dc-bd-shoot` | `translate3d + opacity` 13s linear infinite（3 条错相） | 夜间流星 |
+| `.kb-dc-bd-clouds` / `.kb-dc-bd-stars` / `.kb-dc-bd-aurora` / `.kb-dc-bd-light` | `opacity .8~1.2s ease` 随令牌启停 | 昼夜切换 / 专注降特效 |
+
+降级（index.css 昼夜段尾）：`prefers-reduced-motion: reduce` 下天体过渡置 none、
+云 / 星 / 极光 / 光尘 / 萤火 / 流星全部停；颜色令牌仍随引擎每分钟更新。
+专注模式（`daycycleFocusDim`）通过 `--dc-fx-scale / --dc-light-scale` 降强度，不改运动定义。
+粒子类氛围特效（canvas，四季主题）不在本表，见 `docs/theme-fx-design.md`。

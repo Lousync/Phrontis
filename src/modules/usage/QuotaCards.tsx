@@ -105,6 +105,9 @@ export function QuotaCards({ providers, views, expanded, loading, onLoadAccounts
 
   const viewOf = (providerId: string, accountId: string): ProviderQuotaView | undefined =>
     views.find((v) => v.providerId === providerId && v.accountId === accountId)
+    // 兜底：一次调用里每个供应商只返回「当前激活账户」一条视图，账户列表刚变更时
+    // 卡片上的 accountId 可能还慢一拍 —— 按 providerId 兜底，先让额度可见而不是「未查询」
+    ?? views.find((v) => v.providerId === providerId)
 
   // 有接口的供应商 = 激活账户视图不是 unsupported；无接口的收进汇总
   const cards: LlmProviderInfo[] = []

@@ -54,6 +54,36 @@ export function ensureQuizDocFrontmatter(title: string, content: string, id: str
   return `---\nid: ${id}\ntitle: ${yamlQuote(title)}\ntype: quiz\n---\n\n${text}`
 }
 
+/** 读 frontmatter `id`（去引号）；无 frontmatter / 无 id → null */
+export function readFrontmatterId(raw: string): string | null {
+  const fm = splitFrontmatter(raw)
+  if (!fm) return null
+  const m = /^\s*id\s*:\s*(.*?)\s*$/m.exec(fm.yaml)
+  if (!m) return null
+  const value = m[1].replace(/^["']|["']$/g, '').trim()
+  return value || null
+}
+
+/**
+ * 保证知识文档有稳定 frontmatter id（不限 quiz；教材 / 知识库正文落盘用）。
+ * - 已有 id：原样返回（不重复注入）；
+ * - 已有 frontmatter 但无 id：把 id 插到 frontmatter 第一行；
+ * - 无 frontmatter：生成 `id/title` 头。
+ *
+ * 与 `ensureQuizDocFrontmatter` 的分工：后者只认 ```quiz 文档并额外写 `type: quiz`；
+ * 本函数用于普通知识页 / 教材章节，避免 AI 直写 .md 时先拿 `auto:<rel>` 临时身份。
+ */
+export function ensureKnowledgeDocFrontmatter(title: string, content: string, id: string = randomUUID()): string {
+  const text = String(content ?? '').replace(/\r\n/g, '\n')
+  const fm = splitFrontmatter(text)
+  if (fm) {
+    if (/^\s*id\s*:/m.test(fm.yaml)) return text
+    // 原位插到开头 `---` 之后：保留原有字段顺序、空行与正文格式
+    return text.replace(/^---\n/, `---\nid: ${id}\n`)
+  }
+  return `---\nid: ${id}\ntitle: ${yamlQuote(title)}\n---\n\n${text}`
+}
+
 /** organizeDoc 的幂等比较：两边都剥 frontmatter 再比正文 */
 export function sameQuizDocBody(a: string, b: string): boolean {
   return stripFrontmatter(a) === stripFrontmatter(b)

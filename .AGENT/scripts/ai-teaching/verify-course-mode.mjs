@@ -86,6 +86,7 @@ check('无大纲素材页提示可先登记', sources.includes('还没有课程�
 check('未分配只认当前大纲的有效章', sources.includes('validChapterIds') && sources.includes('.filter(([cid]) => validChapterIds.has(cid))'))
 check('右栏三页签 = 进度 / 素材 / 支线', /useState<'progress' \| 'sources' \| 'lanes'>/.test(idx) && idx.includes("setRailTab('progress')") && idx.includes("setRailTab('sources')") && idx.includes("setRailTab('lanes')"))
 check('要求抽屉四层（全局 / 本课程 / 本知识点 / 本段）', req.includes("'global'") && req.includes("'workspace'") && req.includes("'unit'") && req.includes("'segment'"))
+check('帮助文档说明可直接对助手写要求', help.includes('写一条要求') && help.includes('默认写到「本课程」层') && help.includes('下一轮对话生效'))
 
 console.log('\n=== 3. 段 / 复习接线 ===')
 check('主进程导出 openSegment / setActiveUnit / endSegment / finalizeSegment', ['openSegment', 'setActiveUnit', 'endSegment', 'finalizeSegment'].every((n) => new RegExp(`export (async )?function ${n}\\(`).test(course)))

@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { useAiActivity, useAiBusy } from '../../../lib/aiActivity'
 import { pluginListMascots, onPluginInstalledChanged } from '../../../lib/ipc'
@@ -23,6 +23,21 @@ export const AiMascotAnchor = memo(function AiMascotAnchor() {
   const activity = useAiActivity()
   const busy = useAiBusy()
   const [list, setList] = useState<PluginMascotInfo[]>([])
+  /** 窄输入卡（侧栏 / 支线窄面板）不画：宠物会溢出卡片被裁成半只，看起来像“多了个残影”。
+   *  420px 是“主聊天输入卡”和“侧栏输入卡”的粗略分界；主聊天卡远大于此，侧栏/支线多半小于此。 */
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const [tooNarrow, setTooNarrow] = useState(false)
+
+  useEffect(() => {
+    const el = anchorRef.current
+    const parent = el?.parentElement
+    if (!parent || typeof ResizeObserver === 'undefined') return
+    const check = (): void => setTooNarrow(parent.clientWidth < 420)
+    check()
+    const ro = new ResizeObserver(check)
+    ro.observe(parent)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -53,8 +68,8 @@ export const AiMascotAnchor = memo(function AiMascotAnchor() {
     : (sel === 'auto' ? (list[0] ?? null) : (list.find(m => m.id === sel) ?? list[0] ?? null))
 
   return (
-    <div className="kb-mascot-anchor" aria-hidden>
-      {mascot ? <MascotPlayer mascot={mascot} activity={activity} busy={busy} /> : <PlaceholderMascot activity={activity} />}
+    <div ref={anchorRef} className="kb-mascot-anchor" aria-hidden>
+      {!tooNarrow && (mascot ? <MascotPlayer mascot={mascot} activity={activity} busy={busy} /> : <PlaceholderMascot activity={activity} />)}
     </div>
   )
 })

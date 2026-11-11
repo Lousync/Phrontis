@@ -1,11 +1,13 @@
 import { ipcMain } from 'electron'
 import { randomUUID } from 'crypto'
+import { broadcastDataChanged } from '../../main/windowBus'
 import { toggleHabitChecked } from '../../lib/habitActions'
 import {
   vaultHabitsAll,
   vaultHabitsSave,
   vaultRecordsAll,
   vaultRecordsSave,
+  vaultHabitDeleteCascade,
   type HabitRow,
 } from 'phrontis-core/kbStore/habitVaultRepo'
 
@@ -95,6 +97,7 @@ export function registerCheckinHandlers(): void {
       updated_at: now,
     }
     vaultHabitsSave([...vaultHabitsAll(), row])
+    broadcastDataChanged('habit')
     return rowToHabit(row)
   })
 
@@ -120,21 +123,24 @@ export function registerCheckinHandlers(): void {
         updated_at: sqlNow(),
       }
       vaultHabitsSave(rows)
+      broadcastDataChanged('habit')
     }
     // 无此习惯 → UPDATE 0 行，回读为空（rowToHabit 抛出 → ipc 拒绝）
     return rowToHabit(vaultHabitsAll().find(r => r.id === id) as HabitRow)
   })
 
   ipcMain.handle('habit:delete', (_e, id: string) => {
-    // 删除习惯连带其打卡记录（links.json 的联动规则已随条目 14 整条拔线，不再维护）
-    vaultRecordsSave(vaultRecordsAll().filter(r => r.habit_id !== id))
-    vaultHabitsSave(vaultHabitsAll().filter(h => h.id !== id))
+    // 删除习惯连带其打卡记录（v1.8：级联 + 记 habit/记录墓碑，手机 pull 才能删掉）
+    vaultHabitDeleteCascade(id)
+    broadcastDataChanged('habit')
     return
   })
 
   ipcMain.handle('habit:toggleCheck', (_e, habitId: string, date: string) => {
     // 写入与「远程监督推送」统一走 lib/habitActions（桌面集成 CheckIn 共用同一实现）
-    return { checked: toggleHabitChecked(habitId, date) }
+    const checked = toggleHabitChecked(habitId, date)
+    broadcastDataChanged('habit')
+    return { checked }
   })
 
   ipcMain.handle('habit:reorder', (_e, orderedIds: string[]) => {

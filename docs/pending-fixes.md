@@ -2102,3 +2102,62 @@ AI 教学对话里出现整卷提问卡（截图：题干「老师说说『补�
 - `prefers-reduced-motion` 下同样不跳。
 
 **当前处理**：按用户明确要求**只登记、不修复**；本轮未改任何源码，临时探针仓库已删除。下次开修前先按上面「复现」步骤再跑一遍确认基线。
+
+## [x] B-51 AI 教学区「复制（到剪贴板）」只写组件内状态：转到工作台笔记区粘贴报「剪贴板里没有可粘贴的文件」；树内「粘贴」也不落到目标目录（2026-11-09，P1；用户实机反馈；**2026-11-09 已修，改动未提交**）
+
+> **落码轮（2026-11-09，改动未提交）**：按「系统剪贴板 + 应用内文件剪贴板」双保险落地——
+> ① 主进程新增 `ws:copyPathsToClipboard`：渲染层只传 `{ rootId, relPaths }`，主进程 `requireInside` 解析绝对路径、拒绝符号链接/越界/超上限（铁律 3）。`electron/lib/clipboardFiles.ts` 增加应用内文件剪贴板（主进程内存），复制时先记应用内那份、再尽力写系统剪贴板（优先 Electron 33 的 `clipboard._writeFilesForTesting` 写原生 CF_HDROP / NSFilenamesPboardType / text/uri-list；该内部 API 不可用时回落平台 `writeBuffer`：Linux `text/uri-list`、Windows `FileNameW`、macOS `public.file-url` / `NSFilenamesPboardType`）。
+> ② `clipboard:readFilePaths` 改为**应用内优先**：系统剪贴板仍是同组文件 / 仍有文件格式但本应用读不回（Windows CF_HDROP 形态）时用应用内那份；读到不同文件或已变成文本/图片则丢弃应用内那份并回退系统剪贴板，避免应用内旧数据压过用户后来在资源管理器复制的新文件。
+> ③ AI 教学树：复制改走 `workspaceCopyPathsToClipboard`；右键「粘贴系统剪贴板」改走共享 `pasteClipboardFiles`（**目录节点也提供入口，落点 = 右键目录**，不再 `doDuplicate` 源目录）；补 Ctrl+V（window keydown + 可见性/焦点守卫）；粘到 `.md` 后 `notifyDataChanged('knowledge')`（与知识库粘贴同口径）；删除组件内 `clip` state 与「（剪贴板为空）」伪粘贴。
+> **验证**：`.AGENT/scripts/editor/verify-paste-external.mjs` 扩到 **103 PASS / 0 FAIL**（新增写方向 builder 往返 / 复制 handler 路径校验 / AI 教学树接线断言）；双 tsc 0 错；`npm run build` 通过；Linux 真 Electron 剪贴板运行时 5/5（同组文件回读、外部复制新文件失效、复制文本失效、文件格式但读不回时应用内兜底、`_writeFilesForTesting` 删除后的 writeBuffer 回落）。**Windows 真机回归待做**（CF_HDROP 写入/读回、Explorer 反向粘贴）。
+
+**现象**：在 AI 教学区左侧资源管理器里对文件右键「复制（到剪贴板）」，按 toast 提示切到工作台笔记区，对目标目录右键「粘贴」或按 Ctrl+V，提示「剪贴板里没有可粘贴的文件」，文件没有出现。用户原话：「我在 AI 教学区复制了一个文件，然后我转到工作台的笔记区中我想粘贴这个文件，但是说的剪切板中没有文件」。
+
+**复现（用户实机反馈 + 代码路径确认）**：
+1. AI 教学 → 左栏资源管理器 → 右键任意文件 →「复制（到剪贴板）」，toast 显示已复制。
+2. 切到工作台 → 笔记区（知识库侧栏文件树）或文件树模式 → 右键目标目录 →「粘贴」/ Ctrl+V。
+3. 出现「剪贴板里没有可粘贴的文件」警告；目标目录无新文件。
+
+**定位（以下行号为修复前）**：
+- 复制端：`src/modules/ai-teaching/AiTeachFileTree.tsx:62`（`clip` 组件内 state）、`:234`（复制菜单只 `setClip(...)` + toast，不写系统剪贴板）
+- 粘贴端：`src/lib/externalFilePaste.ts:34-44`（只读系统剪贴板文件路径）、`electron/lib/clipboardFiles.ts:14-47`（只读 `text/uri-list` / `x-special/gnome-copied-files` / `FileNameW`）、`electron/main/index.ts:1347-1349`（`clipboard:readFilePaths`）
+- 提示点：`src/components/workbench/WorkbenchFileTree.tsx:291`、`src/modules/knowledge/index.tsx:1783-1785`（右键粘贴 `notifyEmpty=true` 才提示；Ctrl+V 为静默）
+- 落盘：`electron/lib/workspaceManager.ts:1121-1155`（`ws:pasteExternal`，只接收绝对路径列表）
+
+**根因**：
+1. **复制端没有写系统剪贴板**。AI 教学树的「复制（到剪贴板）」只把 `{ rel, name, isDir }` 存进 **组件本地 state** `clip`；系统剪贴板仍是上一次内容。主进程现有剪贴板写入通道只有 `clipboard:writeText` / `clipboard:copyImage`（`electron/main/index.ts:1324-1368`），**没有写文件列表的通道**；`readClipboardFilePaths` 是只读方向。所以复制动作在操作系统看来什么都没发生。
+2. **粘贴端只认系统剪贴板**。工作台笔记区/文件树的粘贴走 B-31 落的链路：`clipboard:readFilePaths` → `ws:pasteExternal`，它只查 OS 文件 URI 列表，既不知道也不查询 AI 教学组件里的 `clip`。读回 `[]` → `pasteClipboardFiles` 返回 null → 触发「剪贴板里没有可粘贴的文件」。
+3. **两个模块的「剪贴板」语义不同且无桥接**：AI 教学是**组件内复制/粘贴**，笔记区是**系统文件剪贴板**；组件 state 只在 AI 教学树这一棵实例内可见，跨模块/换树后不在同一作用域。
+
+**顺带发现的同族问题（同一条功能链，修时一并处理）**：
+1. **AI 教学树内「粘贴」也不按目标目录落盘**：`AiTeachFileTree.tsx:211` 的粘贴项调用 `doDuplicate(clip.rel, clip.isDir)`，而 `doDuplicate`（`:184-192`）走 `duplicateWorkspaceFile(rootId, base/clip.rel)`；`src/lib/fileDuplicate.ts:17-37` 固定生成「同目录 主名 副本.ext」，**完全不使用右键的目标目录**。即点「粘贴」后副本仍出现在源文件旁，不是粘贴到当前目录。
+2. **粘贴项只在树根/空白处出现**：`AiTeachFileTree.tsx:204-213` 的 paste 只挂在 `node.relPath === ''` 的根分支；目录分支（`:215-245`）没有 paste 项。复制时 toast 却让用户「到目标目录右键粘贴」——子目录里根本看不到这一项。
+3. **AI 教学树没有 Ctrl+C / Ctrl+V**：该组件只有右键复制/粘贴，没有键盘快捷键；而笔记区与工作台树的 Ctrl+V 走 `window.keydown` + `src/lib/externalFilePaste.ts`。三处宿主的粘贴能力不对称。
+4. **反向也不通**：从系统资源管理器复制的文件，在 AI 教学树里没有任何「粘贴外部文件」能力（paste 只认内部 `clip`）。往 AI 教学目录放外部文件只能拖拽或去编辑器树处理。
+5. 附带小口径：AI 教学树「复制路径」仍直连 `navigator.clipboard.writeText`（`AiTeachFileTree.tsx:236`），与批 1「渲染层不直连剪贴板」的口径不一致（不影响本 bug 主链路，可顺手统一到 `copyText`）。
+
+**修复方向（先拍板语义，再落码）**：
+1. **方案 A：打通系统剪贴板（推荐，跨模块 + 跨应用都成立）**：主进程新增 `clipboard:writeFilePaths` / preload / `src/lib/ipc.ts` 三层，按平台写入文件列表——Linux 写 `text/uri-list`（可选同步 `x-special/gnome-copied-files`），Windows 写 `FileNameW`（CF_HDROP；读端 `parseFileNameWBuffer` 已兼容两种形态），macOS 写 `public.file-url`。渲染层只传 `{ rootId, relPath }`，主进程用 `workspaceManager` + `pathGuard` 解析绝对路径（守住铁律 3，渲染层不接触绝对路径），写入前校验在仓库内。这样笔记区现有粘贴链路不用改，顺带能让用户把仓库文件复制到系统资源管理器。
+2. **方案 B：App 内文件剪贴板**：抽 `src/lib/fileClipboard.ts`（模块级 store，保存 `{ rootId, relPaths, action }`），三棵树共用；粘贴时「内部文件剪贴板优先，系统剪贴板兜底」。实现简单、天然支持目录与跨 vault 判断，但不能与系统资源管理器互通；可与方案 A 叠加（写内部 store 的同时写系统剪贴板）。
+3. **AI 教学树内粘贴语义必须单独修**：要么把目标目录传进去（新增「复制到指定目录」业务函数，或复用 `ws:pasteExternal`），要么删掉这个伪粘贴、只保留「创建副本」并改提示文案。目录节点也应获得粘贴项（与笔记区/工作台树同口径）。
+4. 若保留内部剪贴板：三处宿主应共用同一状态源，而不是各自 `useState`；否则「在 A 树复制、B 树粘贴」永远不成立。
+
+**验证**：
+- AI 教学树右键文件 → 复制 → 工作台笔记区/文件树右键任意目录 → 粘贴：文件出现在该目录（重名自动加后缀），toast 成功；Ctrl+V 同结果。
+- AI 教学树内：复制另一个目录里的文件 → 对目标目录右键粘贴 → 副本落在目标目录（不是源目录）；对子目录也能看到粘贴项。
+- 反向：系统资源管理器复制文件 → 在 AI 教学树目标目录粘贴 → 文件落盘（若做外部粘贴）。
+- 方案 A 额外验证：AI 教学树复制 → 系统资源管理器粘贴出文件；Linux / Windows 各验一次（剪贴板格式不同）。
+- 复制 → 切换仓库 / 换工作区后再粘贴：明确行为（拒绝跨 vault 静默落错盘，或按绝对路径允许），不能出现未定义结果。
+- 右键「粘贴」与 Ctrl+V 两条入口都要覆盖（B-31 的教训：两条入口容易只修一条）。
+
+**当前处理**：按用户要求**只登记、不修复**；本次未改任何源码。静态定位已完成，下一步先按上面复现步骤做一次真机确认（尤其确认用户走的是右键「粘贴」还是 Ctrl+V、在知识库树还是工作台树模式）。
+
+## [x] B-52 AI 教学答题自动跳题把右侧教材 / 工件栏滚走（2026-11-10，P2；用户实机反馈；已修，改动未提交）
+
+**现象**：AI 教学左侧聊天与右侧教材（Markdown 工件）同时打开且都含题卡时，在左侧答对一道选择题，右侧教材页面自动滚到下一道题。用户原话：「我做了对话中的选择题后，右边的对话的页面自动跳转到下一个题目去了」。
+
+**根因**：`src/components/shared/QuizCard.tsx` 的 `scrollToNext` 用全局 `document.querySelectorAll('[data-quiz-card]')` + 视口 `top` 排序选「下一题」，再 `scrollIntoView`。聊天栏与工件栏是两个独立滚动容器，右栏里视口位置更近的题卡会被选中，`scrollIntoView` 随即把右栏滚走。
+
+**修复**：新增 `src/components/shared/quizNavPure.ts` 的 `pickNextQuizCardIndex`（只在同一滚动容器 scope 内选下一张）；`QuizCard` 用 `closestScrollBox` 求当前卡所在栏的 scope，并在该容器内手算 `scrollTop` 居中（不再用会连带滚动祖先的 `scrollIntoView`）。右栏答题同理只在右栏内跳。
+
+**验证**：`.AGENT/scripts/quiz-tools/verify-quiz-nav.mjs` 11 项断言（跨栏更近题卡不选 / 同栏取最近 / 容差 / 无下一题 / 越界安全 / 组件接线静态检查）全过；`npx tsc --noEmit -p tsconfig.web.json` 0 错；`npm run build` 通过。

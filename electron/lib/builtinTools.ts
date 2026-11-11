@@ -5,6 +5,7 @@ import { listTools, registerTool, getSettingReader, checkModulePermission } from
 import { broadcastDataChanged, broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
 import { webSearch, webReadPage } from './webSearch'
 import { writeVisual, writeMindmap, writeImage } from './aiTeachingSources'
+import { readConstraintsForAiTeaching, writeConstraintsForAiTeaching, type AiTeachConstraintLevel } from './aiTeachingScope'
 import { broadcastTreeRefresh, ensureWriteOwnerFolder } from './aiTeachingFolders'
 import { getWorkspaceOfSession } from './aiTeachingWorkspaces'
 import {
@@ -67,6 +68,7 @@ import { bookSourceInfos } from 'phrontis-core/kbStore/bookSourceVaultRepo'
 import { sanitizeBookSourcePatch, isAllowedSourceUrl, type BookSourceMapping } from 'phrontis-core/kbStore/bookMarketSchema'
 import { quizDataStats } from './quizDataAdmin'
 import { AI_TEXT_CODE_EXT_SET } from '../../src/lib/aiTextExts'
+import { ensureKnowledgeDocFrontmatter, readFrontmatterId } from './quizDocPure'
 import type { ToolJsonSchema } from './aiTools'
 
 /**
@@ -419,11 +421,10 @@ function notifyVaultTreeChange(rel: string, prevRel?: string): void {
 /**
  * v3.1.2 条目10：AI 教学会话的产物落点归一化（工具层兜底，防模型不听话）。
  *
- * 判据（两条任一命中即改写为 `{本会话文件夹}/{basename}`）：
- *  ① 无目录前缀 —— 裸文件名会直接落仓库顶层（用户实际报障现象）；
- *  ② 首段为 `SOURCES` —— 那是给 AI 读的素材目录，不放产物。
- * 其余路径（含模型/AI 给出的工作区夹内路径）原样保留；**非教学会话或会话夹不可解析时不改写**
- * （侧边助手/轻问答没有会话夹概念，强加归一化只会制造怪路径）。
+ * 判据：**无目录前缀**（裸文件名）才改写为 `{本会话文件夹}/{basename}`。
+ * 显式多段路径原样保留 —— 用户四层要求可以指定教材 / 知识库正文写到章根等位置，
+ * 工具层不能把用户的显式落点“洗白”成会话产物。
+ * **非教学会话或会话夹不可解析时不改写**（侧边助手/轻问答没有会话夹概念）。
  * 语义是纯函数（同一 path 反复调用结果一致），不打乱 prompt cache 前缀；会话夹不存在 = 懒建。
  */
 function normalizeAiTeachingWritePath(rel: string, ctx?: ToolInvokeCtx): string {
@@ -433,14 +434,35 @@ function normalizeAiTeachingWritePath(rel: string, ctx?: ToolInvokeCtx): string 
   const norm = rel.replace(/\\/g, '/').replace(/^\/+/, '')
   const segs = norm.split('/').filter(Boolean)
   if (!segs.length) return rel
-  const hasDir = segs.length > 1
-  const hitsSources = (segs[0] ?? '').toUpperCase() === 'SOURCES'
-  if (hasDir && !hitsSources) return rel
+  if (segs.length > 1) return rel
   try {
     const probe = ensureWriteOwnerFolder(sid, getSettingReader())
     if (!probe.ok || !probe.relPath) return rel
     return `${probe.relPath}/${segs[segs.length - 1]}`
   } catch { return rel }
+}
+
+/**
+ * AI 教学落盘硬边界（2026-11-09）：用户四层要求可以改落点，但不能越过这些。
+ * 返回错误消息；非教学面不调用本函数。
+ */
+function aiTeachingWriteBoundaryError(rel: string, op: 'vault.write' | 'vault.edit' | 'vault.rename'): string | null {
+  const segs = String(rel ?? '').replace(/\\/g, '/').split('/').filter(Boolean)
+  if (segs.some((s) => s.toUpperCase() === 'SOURCES')) {
+    return 'SOURCES/ 是只读素材目录，禁止写入 / 移动进去（用户要求也不能覆盖）'
+  }
+  if (segs.some((s) => s.startsWith('.'))) {
+    return '禁止写入点目录 / 隐藏目录（.knowbase 等）'
+  }
+  const base = (segs[segs.length - 1] ?? '').toLowerCase()
+  if (base === 'constraints.md') {
+    if (op === 'vault.edit') return '要求文档请用 course.constraints.write 写入（level 指定层），不要用 vault.edit 改写 CONSTRAINTS.md'
+    if (op === 'vault.rename') return '要求文档请用 course.constraints.write 写入（level 指定层），不要用 vault.rename 移动 CONSTRAINTS.md'
+    return '要求文档请用 course.constraints.write 写入（level 指定层），不要用 vault.write 另建或覆盖 CONSTRAINTS.md'
+  }
+  if (base === '交接.md') return '交接文档只由「收尾本段」生成，不能用写工具创建、覆盖或移动'
+  if (base === '课程.md') return '课程大纲请用 course.outline.write 写入，不能用写工具创建、覆盖或移动'
+  return null
 }
 
 // ===== 六个内置工具 =====
@@ -2007,7 +2029,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.tool.request',
     title: '申请启用扩展工具',
-    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.move / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
+    description: "写入类工具与按需读取工具（vault.write / vault.edit / vault.rename / vault.move / vault.trash / knowledge.create-page / blog.search / blog.read / knowledge.graph-topology / blog.create-entry / schedule.create-todo / schedule.update-todo / schedule.delete-todo / schedule.list-workflows / schedule.get-workflow / schedule.create-workflow / schedule.update-workflow / schedule.delete-workflow / schedule.mutate-stage / schedule.reorder-stages / schedule.mutate-checkpoint / schedule.create-recurring / schedule.update-recurring / schedule.delete-recurring / checkin.check-habit / accounting.import-json / accounting.query / accounting.balances / quiz.set-note / quiz.tag / quiz.collect / quiz.favorite / quiz.remove / quiz.gen-paper / booksource.draft / terminal.exec / mindmap / image / inventory / course.outline.write / course.outline.remove-unit / course.sources.register / course.sources.assign / course.sources.extract / course.organize.archive / course.constraints.write / course.constraints.read / course.review.write / intel.query / intel.set-recommendations / intel.set-filter）默认不在工具列表中。需要执行写操作或检索/阅读博客时调用本工具申请（逗号分隔工具名），确认后本会话内持续可用。只申请确实需要的，不要一次全申请",
     inputSchema: {
       type: 'object',
       properties: {
@@ -2317,13 +2339,14 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'builtin.vault.write',
     title: '写入仓库文件',
-    description: '新建/覆写仓库内 .md/.txt（原子写；覆写需带 vault.read 的 expectedMtimeMs）。小改动优先 vault.edit。注意：要在知识库列表/图谱出现的知识页，内容必须以 frontmatter 开头且含稳定 id:（缺失则仅作为普通文件存在，不进库）——格式可先 vault.read 一个既有 .md 参考',
+    description: '新建/覆写仓库内 .md/.txt（原子写；覆写需带 vault.read 的 expectedMtimeMs）。小改动优先 vault.edit。教材 / 知识库正文建议传 ensureId:true，落盘时自动补稳定 frontmatter id（已有 id 原样保留）；内容格式可先 vault.read 一个既有 .md 参考',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: '仓库内相对文件路径（父目录须已存在或为已读目录）' },
         content: { type: 'string', description: '完整文件内容（Markdown）' },
         expectedMtimeMs: { type: 'number', description: '覆写已存在文件时的 mtime 基线（来自 vault.read），省略则不做冲突校验' },
+        ensureId: { type: 'boolean', description: 'true=若为 .md，落盘前自动补 frontmatter id（知识页稳定身份）；教材 / 知识库正文建议 true' },
       },
       required: ['path', 'content'],
     },
@@ -2334,10 +2357,20 @@ export function registerBuiltinTools(): void {
     tier: 'ondemand',
     vaultFile: 'write',
   }, async (args, ctx) => {
-    // v3.1.2 条目10：教学会话下产物落点归一化（裸文件名 / 仓库顶层 / SOURCES → 改写进本会话文件夹）
-    const rel = normalizeAiTeachingWritePath(str(args.path).trim(), ctx)
-    const content = str(args.content)
+    // v3.1.2 条目10：教学会话下产物落点归一化（裸文件名才改写进本会话文件夹）。
+    // 2026-11-09：SOURCES / 点目录 / 系统生成文件是硬边界，先于归一化拦截，用户要求也不能覆盖。
+    const rawPath = str(args.path).trim()
+    if (ctx?.source === 'aiTeaching') {
+      const boundary = aiTeachingWriteBoundaryError(rawPath, 'vault.write')
+      if (boundary) throw new Error(boundary)
+    }
+    const rel = normalizeAiTeachingWritePath(rawPath, ctx)
     if (!rel) throw new Error('缺少必填参数: path')
+    // ensureId：教材 / 知识库正文落盘时补稳定 frontmatter id（已有 id 原样保留）
+    const wantId = args.ensureId === true && rel.toLowerCase().endsWith('.md')
+    const content = wantId
+      ? ensureKnowledgeDocFrontmatter(baseNameOf(rel).replace(/\.md$/i, ''), str(args.content))
+      : str(args.content)
     if (content.length > 2_000_000) throw new Error('内容过大（>2MB），拒绝写入')
     assertCanWrite(rel, ctx)
     const root = vaultRootPath()
@@ -2360,7 +2393,14 @@ export function registerBuiltinTools(): void {
       const st = statSync(abs)
       broadcastExternalWrite(rel, st.mtimeMs)
       notifyVaultTreeChange(rel) // v3.1.2 条目9：编辑区树即时刷新（此前只发 external-change，新文件树上不出现）
-      return { ok: true, path: rel, created: !existing, size: st.size, mtimeMs: st.mtimeMs }
+      const out: { ok: boolean; path: string; created: boolean; size: number; mtimeMs: number; id?: string } = {
+        ok: true, path: rel, created: !existing, size: st.size, mtimeMs: st.mtimeMs,
+      }
+      if (wantId) {
+        const id = readFrontmatterId(content)
+        if (id) out.id = id
+      }
+      return out
     })
   })
 
@@ -2392,6 +2432,10 @@ export function registerBuiltinTools(): void {
     const newText = str(args.newText)
     const append = args.append === true
     if (!rel) throw new Error('缺少必填参数: path')
+    if (ctx?.source === 'aiTeaching') {
+      const boundary = aiTeachingWriteBoundaryError(rel, 'vault.edit')
+      if (boundary) throw new Error(boundary)
+    }
     assertCanWrite(rel, ctx)
     if (!append && !oldText) throw new Error('缺少必填参数: oldText（append=true 时可省略）')
     if (append && !newText.trim()) throw new Error('追加内容不能为空')
@@ -2499,6 +2543,10 @@ export function registerBuiltinTools(): void {
     const rel = str(args.path).trim()
     const newRel = str(args.newPath).trim()
     if (!rel || !newRel) throw new Error('缺少必填参数: path / newPath')
+    if (ctx?.source === 'aiTeaching') {
+      const boundary = aiTeachingWriteBoundaryError(rel, 'vault.rename') ?? aiTeachingWriteBoundaryError(newRel, 'vault.rename')
+      if (boundary) throw new Error(boundary)
+    }
     assertCanWrite(rel, ctx)
     const root = vaultRootPath()
     const oldAbs = resolveSafe(root, rel)
@@ -3005,7 +3053,7 @@ export function registerBuiltinTools(): void {
   registerTool({
     name: 'course.organize.archive',
     title: '整理对话并归档',
-    description: '把一段内容整理成 markdown 一页并归档。段会话不要填 target，缺省落本段目录；课程助手才可以用 target 指定课程级目录（如教材/）。返回相对路径与**绝对路径**（务必把绝对路径告诉用户，说明放到了哪里）。不要用它创建交接文档；交接只由「收尾本段」系统生成。',
+    description: '把一段内容整理成 markdown 一页并归档。段会话不要填 target，缺省落本段目录；课程助手才可以用 target 指定课程级产物目录。教材 / 知识库正文请用 vault.write（.md 传 ensureId:true），不要用本工具。返回相对路径与**绝对路径**（务必把绝对路径告诉用户，说明放到了哪里）。不要用它创建交接文档；交接只由「收尾本段」系统生成。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -3040,6 +3088,70 @@ export function registerBuiltinTools(): void {
     if (!sid) throw new Error('仅可在 AI 教学对话中使用')
     const r = writeChapterReviewDoc(sid, str(args.content), getSettingReader())
     if (!r.ok) throw new Error(r.error ?? '写入复习讲义失败')
+    return r
+  })
+
+  // 31. course.constraints.write —— 分层要求写入（CONSTRAINTS.md）
+  // 用户说「写一个规范 / 限制 / 要求 / 规则」时直接落四层要求文件，不再另造普通产物。
+  // 业务实现走 aiTeachingScope.writeConstraintsForAiTeaching（与要求抽屉同一条写盘链路）。
+  registerTool({
+    name: 'course.constraints.write',
+    title: '写入分层要求',
+    description: '把用户的规范 / 限制 / 约束 / 要求写入 AI 教学四层要求文件 CONSTRAINTS.md。level=global 全局、workspace 本课程、unit 本知识点、segment 本段；默认 append 追加条目，只有用户明确要求整篇重写才用 replace。返回落盘相对路径；写入后下一轮对话生效。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        level: { type: 'string', enum: ['global', 'workspace', 'unit', 'segment'], description: '要求层：global=所有课程；workspace=本课程；unit=本知识点；segment=本段/本对话' },
+        text: { type: 'string', description: 'markdown 正文；append 时建议一行一条，以「- 」开头' },
+        mode: { type: 'string', enum: ['append', 'replace'], description: 'append=追加（默认，推荐）；replace=整篇覆盖本层，仅用户明确要求重写时用' },
+        unit: { type: 'string', description: 'level=unit 时的知识点名称或 id；缺省=当前聚焦知识点' },
+      },
+      required: ['level', 'text'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: false,
+    requires: 'write', tier: 'ondemand',
+  }, (args, ctx) => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid || ctx?.source !== 'aiTeaching') throw new Error('仅可在 AI 教学对话中使用')
+    const r = writeConstraintsForAiTeaching(sid, {
+      level: str(args.level) as AiTeachConstraintLevel,
+      text: str(args.text),
+      mode: args.mode === 'replace' ? 'replace' : 'append',
+      unit: args.unit == null ? null : str(args.unit),
+    }, getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '写入要求失败')
+    return r
+  })
+
+  // 32. course.constraints.read —— 分层要求全文读取（注入有上限，读工具不受限）
+  // 用户说「把整篇要求读出来 / 按原要求重写」时，模型需要看到 12 条 / 1200 字符之外的内容。
+  registerTool({
+    name: 'course.constraints.read',
+    title: '读取分层要求',
+    description: '读取 AI 教学四层要求文件 CONSTRAINTS.md 的全文（注入时每层只取 12 条 / 1200 字符，本工具不受此限）。level=global 全局、workspace 本课程、unit 本知识点、segment 本段；unit 可指定知识点名称或 id，缺省=当前聚焦。返回相对路径与正文。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        level: { type: 'string', enum: ['global', 'workspace', 'unit', 'segment'], description: '要求层：global=所有课程；workspace=本课程；unit=本知识点；segment=本段/本对话' },
+        unit: { type: 'string', description: 'level=unit 时的知识点名称或 id；缺省=当前聚焦知识点' },
+      },
+      required: ['level'],
+    },
+    source: 'builtin',
+    enabled: true,
+    readOnly: true,
+    requires: 'read',
+    tier: 'ondemand',
+  }, (args, ctx) => {
+    const sid = String(ctx?.sessionId ?? '')
+    if (!sid || ctx?.source !== 'aiTeaching') throw new Error('仅可在 AI 教学对话中使用')
+    const r = readConstraintsForAiTeaching(sid, {
+      level: str(args.level) as AiTeachConstraintLevel,
+      unit: args.unit == null ? null : str(args.unit),
+    }, getSettingReader())
+    if (!r.ok) throw new Error(r.error ?? '读取要求失败')
     return r
   })
 

@@ -10,7 +10,7 @@
 // 期望：输出 PASS 且 exit=0
 
 import { extractQuizzes, parseQuizFence, preprocessContent, duplicateQuizNos } from '../../../src/components/shared/QuizParser.ts'
-import { ensureQuizDocFrontmatter, sameQuizDocBody } from '../../../electron/lib/quizDocPure.ts'
+import { ensureKnowledgeDocFrontmatter, ensureQuizDocFrontmatter, readFrontmatterId, sameQuizDocBody } from '../../../electron/lib/quizDocPure.ts'
 
 // 记录里的快照：no 是它在"原页面"的序号，组卷时必须重排
 const snapshot = {
@@ -156,6 +156,9 @@ const dup = duplicateQuizNos([
 ])
 const quizDoc = ensureQuizDocFrontmatter('练习·接口', mixedMd, 'id-fixed')
 const plainDoc = ensureQuizDocFrontmatter('讲义', '# 普通讲义', 'id-x')
+const knowledgeNew = ensureKnowledgeDocFrontmatter('编译程序的总体结构与各阶段任务', '# 正文', 'id-k1')
+const knowledgeFm = ensureKnowledgeDocFrontmatter('标题', '---\ntitle: 已有\n---\n\n正文', 'id-k2')
+const knowledgeKeep = ensureKnowledgeDocFrontmatter('标题', '---\nid: keep\ntitle: t\n---\n\n正文', 'id-k3')
 const shortChecks = [
   ['简答题解析出 type=short', shortItem?.type === 'short'],
   ['简答题 referenceAnswer 可取', shortItem?.referenceAnswer.includes('地址译码')],
@@ -170,7 +173,12 @@ const shortChecks = [
   ['重复题号可检出', dup.length === 1 && dup[0] === 1],
   ['题单落盘写 frontmatter id', /^---\nid: id-fixed\n/.test(quizDoc)],
   ['题单 frontmatter 幂等比较', sameQuizDocBody(quizDoc, mixedMd)],
-  ['非 quiz 文档不注入 frontmatter', plainDoc === '# 普通讲义'],
+  ['非 quiz 文档不注入 frontmatter（旧入口）', plainDoc === '# 普通讲义'],
+  ['知识文档无 frontmatter → 补 id/title', /^---\nid: id-k1\ntitle: "编译程序的总体结构与各阶段任务"\n---\n\n# 正文$/.test(knowledgeNew)],
+  ['知识文档已有 frontmatter 无 id → id 插到首行', /^---\nid: id-k2\ntitle: 已有\n---\n\n正文$/.test(knowledgeFm)],
+  ['知识文档已有 id → 原样返回（不重复注入）', knowledgeKeep === '---\nid: keep\ntitle: t\n---\n\n正文'],
+  ['readFrontmatterId 取稳定 id', readFrontmatterId(knowledgeNew) === 'id-k1' && readFrontmatterId(knowledgeKeep) === 'keep'],
+  ['readFrontmatterId 无 frontmatter → null', readFrontmatterId('# 正文') === null],
 ]
 for (const [name, ok] of shortChecks) {
   console.log(`${ok ? '  ok  ' : ' fail '} ${name}`)

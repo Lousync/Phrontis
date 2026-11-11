@@ -593,7 +593,7 @@ export function DashboardModule({ onBack, onOpenBook, onJumpSchedule }: {
   const hiddenTiles = layout.filter((it) => !shown.has(it.id) && it.id !== 'todos' && defOf(it.id) !== null)
 
   return (
-    <div className="relative h-full">
+    <div className="kb-theme-surface relative h-full">
       {/* 主题氛围特效：垫底画布（内容层 z-[1] 压在其上） */}
       <ThemeFxLayer />
       <div className="relative z-[1] h-full overflow-y-auto">

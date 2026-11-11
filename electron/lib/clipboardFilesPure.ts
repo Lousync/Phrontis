@@ -1,5 +1,5 @@
 import { isAbsolute } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /**
  * 系统剪贴板「文件列表」的纯解析层（无 electron 依赖，契约脚本可直接 import）。
@@ -76,4 +76,57 @@ export function parseFileNameWBuffer(buf: Buffer | Uint8Array | null | undefined
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && isAbsolute(s))
   return uniq(paths)
+}
+
+/**
+ * 写方向：生成 RFC 2483 `text/uri-list`（Linux 文件剪贴板格式）。
+ * 每行一个 `file://` URI，CRLF 结尾；非绝对路径直接丢弃（与读端同口径）。
+ */
+export function buildUriList(paths: string[]): string {
+  const uris = paths
+    .filter((p): p is string => typeof p === 'string' && isAbsolute(p))
+    .map((p) => pathToFileURL(p).href)
+  return uris.length > 0 ? `${uris.join('\r\n')}\r\n` : ''
+}
+
+/**
+ * 写方向：生成 Windows `FileNameW` 载荷（DROPFILES 头 + UTF-16LE 双空结尾列表）。
+ *
+ * 20 字节头与 `parseFileNameWBuffer` 的读端口径严格对齐：pFiles=20、fWide=TRUE。
+ * 这是 `clipboard._writeFilesForTesting` 不可用时的回落通道（该内部 API 写的是
+ * 真正的 CF_HDROP；这个回落格式保证本应用自己仍能读回，外部程序兼容性可能弱一些）。
+ */
+export function buildFileNameWBuffer(paths: string[]): Buffer {
+  const list = paths.filter((p): p is string => typeof p === 'string' && isAbsolute(p))
+  if (list.length === 0) return Buffer.alloc(0)
+  const header = Buffer.alloc(20)
+  header.writeUInt32LE(20, 0) // pFiles：路径列表相对 DROPFILES 起点的偏移
+  header.writeUInt32LE(0, 4) // pt.x
+  header.writeUInt32LE(0, 8) // pt.y
+  header.writeUInt32LE(0, 12) // fNC
+  header.writeUInt32LE(1, 16) // fWide = TRUE
+  const files = Buffer.from(`${list.join('\0')}\0\0`, 'utf16le')
+  return Buffer.concat([header, files])
+}
+
+/** XML 转义（macOS NSFilenamesPboardType 的 plist 单值） */
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+/**
+ * 写方向：生成 macOS `NSFilenamesPboardType` 的 XML plist（多文件回落通道）。
+ * 单文件在调用侧优先走 `public.file-url`；这里不依赖任何 macOS 专有模块。
+ */
+export function buildNSFilenamesPlist(paths: string[]): string {
+  const items = paths
+    .filter((p): p is string => typeof p === 'string' && isAbsolute(p))
+    .map((p) => `<string>${escapeXml(p)}</string>`)
+    .join('')
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><array>${items}</array></plist>`
 }

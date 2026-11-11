@@ -171,9 +171,15 @@ function refresh(rels: string[]): void {
 
 async function runAction(a: FsAction, rootPath: string, rootId: string): Promise<void> {
   switch (a.action) {
-    case 'write':
-      writeWorkspaceFile(absOf(rootPath, a.relPath), a.content ?? '')
+    case 'write': {
+      const abs = absOf(rootPath, a.relPath)
+      // 确认模式的应用 / 回滚都走这里：目标父目录可能尚未存在（典型：新建年份子目录下的首篇周记）。
+      // 直接执行路径 builtin.vault.write 会先 mkdir -p 再写，这里必须同口径；
+      // 否则 writeWorkspaceFile 在目标旁写临时文件时直接 ENOENT（2026-11-09 实机报障）。
+      mkdirSync(dirname(abs), { recursive: true })
+      writeWorkspaceFile(abs, a.content ?? '')
       return
+    }
     case 'rename':
       renameWorkspacePath(rootId, a.relPath, a.to ?? '')
       return

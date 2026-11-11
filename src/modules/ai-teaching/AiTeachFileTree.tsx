@@ -6,7 +6,10 @@ import { isRenderableImagePath } from '../../lib/imageFormats'
 import {
   workspaceGetCurrent, workspaceListDir, workspaceCreateFile,
   workspaceMkdir, workspaceRename, workspaceTrash, getSettingRaw, onAiTeachTreeRefresh,
+  workspaceCopyPathsToClipboard,
 } from '../../lib/ipc'
+import { describePasteResult, isElementVisible, isExternalPasteGesture, pasteClipboardFiles } from '../../lib/externalFilePaste'
+import { notifyDataChanged } from '../../lib/dataChanged'
 import { showToast } from '../../lib/toast'
 import { showGlobalConfirm } from '../../lib/globalConfirm'
 import { recordFileOp } from '../../lib/fileOpHistory'
@@ -50,6 +53,12 @@ interface CtxState { x: number; y: number; node: TreeNode | null }
  *  这里不再手抄一份扩展名清单：多一份就会与查看器漂移） */
 const isImageName = isRenderableImagePath
 
+/** 父目录（树内相对路径）：'' = 根。与知识库/工作台树同一口径，避免三处各写一份。 */
+const parentDirOf = (rel: string): string => {
+  const i = rel.lastIndexOf('/')
+  return i === -1 ? '' : rel.slice(0, i)
+}
+
 function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onOpenImage, onOpenExternal, refreshSeq, isPinned, onTogglePin }: Props) {
   const [rootId, setRootId] = useState<string | null>(null)
   const [rootDir, setRootDir] = useState('AI教学')
@@ -59,7 +68,10 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
   // B-14：新建 / 重命名改为树内联输入（与知识库同一机制），两个意图均受控由本组件持有
   const [creating, setCreating] = useState<CreateIntent | null>(null)
   const [renaming, setRenaming] = useState<RenameIntent | null>(null)
-  const [clip, setClip] = useState<{ rel: string; name: string; isDir: boolean } | null>(null)
+  /** 树根 DOM：Ctrl+V 的可见性 / 焦点守卫（与工作台文件树同款） */
+  const rootRef = useRef<HTMLDivElement>(null)
+  /** 最近一次右键/点选的落点目录（树内相对路径；Ctrl+V 与右键「粘贴」共用） */
+  const pasteTargetRef = useRef<string>('')
 
   // 仓库切换 / 挂载：取 rootId 与产物根设置并首扫
   useEffect(() => {
@@ -102,6 +114,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
     loadedDirsRef.current = new Set([''])
     setDirCache({})
     setExpanded(new Set(['']))
+    pasteTargetRef.current = ''
   }, [base])
 
   useEffect(() => { void loadDir('') }, [loadDir])
@@ -190,6 +203,48 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
     void loadDir(dir)
     showToast({ type: 'info', message: `已生成副本 ${r.relPath?.split('/').pop() ?? ''}` })
   }
+  /**
+   * B-51（2026-11-09）：复制到系统剪贴板 + 应用内文件剪贴板。
+   * 绝对路径由主进程用 `{ rootId, relPath }` 解析，渲染层不接触（铁律 3）。
+   * 这样工作台/笔记区的粘贴链路（读剪贴板 → ws:pasteExternal）无需改动即可识别。
+   */
+  const doCopy = async (n: TreeNode) => {
+    if (!rootId) return
+    const r = await workspaceCopyPathsToClipboard(rootId, [`${base}/${n.relPath}`])
+      .catch((e) => ({ ok: false as const, error: String((e as Error)?.message ?? e) }))
+    if (!r.ok) { showToast({ type: 'error', message: `复制失败：${r.error || '写入剪贴板失败'}` }); return }
+    showToast({ type: 'info', message: `已复制「${n.name}」，到目标目录右键粘贴或 Ctrl+V` })
+  }
+  /** 粘贴到树内目录（dirRel = 树内相对路径；'' = 产物根）。读应用内/系统剪贴板，落盘走 ws:pasteExternal。 */
+  const pasteInto = useCallback(async (dirRel: string) => {
+    if (!rootId) { showToast({ type: 'error', message: '尚未打开仓库' }); return }
+    const fullDir = dirRel ? `${base}/${dirRel}` : base
+    const r = await pasteClipboardFiles(rootId, fullDir)
+    if (!r) { showToast({ type: 'warning', message: '剪贴板里没有可粘贴的文件' }); return }
+    if (r.pasted.some((n) => n.toLowerCase().endsWith('.md'))) {
+      notifyDataChanged('knowledge') // 与知识库粘贴同口径：md 会影响列表/图谱/搜索
+    }
+    showToast(describePasteResult(r))
+    if (r.pasted.length > 0) void loadDir(dirRel)
+  }, [rootId, base, loadDir])
+
+  // Ctrl+V：与工作台文件树同款「window keydown + 主进程剪贴板」。
+  // 不用元素级 onPaste —— 非可编辑焦点下 Chromium 不派发 paste 事件（Linux 实测）。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isExternalPasteGesture(e)) return
+      const el = rootRef.current
+      if (!isElementVisible(el)) return
+      const active = document.activeElement
+      const focusedInTree = !!active && (active === el || el.contains(active))
+      const neutralFocus = !active || active === document.body || active === document.documentElement
+      if (!focusedInTree && !neutralFocus) return
+      e.preventDefault()
+      void pasteInto(pasteTargetRef.current)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pasteInto])
   const doDelete = async (n: TreeNode) => {
     if (!rootId) return
     if (n.relPath.split('/').some(seg => seg.startsWith('.'))) { showToast({ type: 'warning', message: '锚点/隐藏文件不可在此删除' }); return }
@@ -207,9 +262,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
       return [
         { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => doCreate('', 'file') },
         { key: 'newDir', label: '新建文件夹', icon: <FolderPlus size={15} />, onSelect: () => doCreate('', 'dir') },
-        clip
-          ? { key: 'paste', label: `粘贴「${clip.name}」`, icon: <ClipboardPaste size={15} />, disabled: clip.isDir, onSelect: () => void doDuplicate(clip.rel, clip.isDir) }
-          : { key: 'paste', label: '（剪贴板为空）', icon: <ClipboardPaste size={15} />, disabled: true, onSelect: () => {} },
+        { key: 'paste', label: '粘贴系统剪贴板', icon: <ClipboardPaste size={15} />, onSelect: () => { pasteTargetRef.current = ''; void pasteInto('') } },
       ]
     }
     const items: FileMenuEntry[] = []
@@ -217,6 +270,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
       items.push(
         { key: 'newFile', label: '新建文件', icon: <FilePlus size={15} />, onSelect: () => doCreate(node.relPath, 'file') },
         { key: 'newDir', label: '新建文件夹', icon: <FolderPlus size={15} />, onSelect: () => doCreate(node.relPath, 'dir') },
+        { key: 'paste', label: '粘贴系统剪贴板', icon: <ClipboardPaste size={15} />, onSelect: () => { pasteTargetRef.current = node.relPath; void pasteInto(node.relPath) } },
         { separator: true },
       )
     }
@@ -231,7 +285,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
       items.push({ key: 'viewImage', label: '查看图片', icon: <ImageIcon size={15} />, onSelect: () => onOpenImage(node.relPath) })
     }
     items.push({ key: 'rename', label: '重命名', icon: <Pencil size={15} />, onSelect: () => startRename(node) })
-    items.push({ key: 'copy', label: '复制（到剪贴板）', icon: <ClipboardPaste size={15} />, onSelect: () => { setClip({ rel: node.relPath, name: node.name, isDir: node.type === 'dir' }); showToast({ type: 'info', message: `已复制「${node.name}」，到目标目录右键粘贴（仅文件）` }) } })
+    items.push({ key: 'copy', label: '复制（到剪贴板）', icon: <ClipboardPaste size={15} />, onSelect: () => void doCopy(node) })
     items.push({ key: 'dup', label: '创建副本', icon: <CopyPlus size={15} />, onSelect: () => void doDuplicate(node.relPath, node.type === 'dir') })
     items.push({ key: 'copyPath', label: '复制路径', icon: <Link2 size={15} />, onSelect: () => { void navigator.clipboard.writeText(`${base}/${node.relPath}`).catch(() => null) } })
     // 收藏（v3.6.0）：文件可钉到左栏顶部「收藏」（rel 用仓库相对路径）
@@ -247,7 +301,12 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
   if (!rootId) return <div className="px-2 py-3 text-[11.5px] text-[var(--text-muted)]">尚未打开仓库</div>
 
   return (
-    <div className="flex flex-col h-full min-h-0" onContextMenu={(e) => { e.preventDefault(); setCtx({ x: e.clientX, y: e.clientY, node: null }) }}>
+    <div
+      ref={rootRef}
+      tabIndex={-1}
+      className="flex flex-col h-full min-h-0 outline-none"
+      onContextMenu={(e) => { e.preventDefault(); pasteTargetRef.current = ''; setCtx({ x: e.clientX, y: e.clientY, node: null }) }}
+    >
       <div className="flex-1 overflow-y-auto min-h-0 pr-0.5">
         {/* 空态：产物根还没内容时的引导文案。creating 非空时必须让位给树——内联输入行长在树里，
             空态把树替换掉的话「新建文件夹」点了会看不见输入框（B-14 之前这里是居中弹窗，不存在该问题）。 */}
@@ -257,7 +316,7 @@ function AiTeachFileTreeImpl({ activeRel, subRel = '', onOpenMd, onOpenHtml, onO
             <button onClick={() => doCreate('', 'dir')} className="mt-1.5 flex items-center gap-1 text-[var(--accent)] hover:underline"><Plus size={11} /> 新建文件夹</button>
           </div>
         ) : (
-          <VaultTree dirCache={dirCache} expanded={expanded} activePath={activeRel} onToggleDir={toggleDir} onOpenFile={openFile} onContextMenu={(e, n) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, node: n }) }} onMove={(src, dstDir) => {
+          <VaultTree dirCache={dirCache} expanded={expanded} activePath={activeRel} onToggleDir={(rel) => { pasteTargetRef.current = rel; toggleDir(rel) }} onOpenFile={(n) => { pasteTargetRef.current = parentDirOf(n.relPath); openFile(n) }} onContextMenu={(e, n) => { e.preventDefault(); e.stopPropagation(); pasteTargetRef.current = n.type === 'dir' ? n.relPath : parentDirOf(n.relPath); setCtx({ x: e.clientX, y: e.clientY, node: n }) }} onMove={(src, dstDir) => {
             void (async () => {
               if (!rootId) return
               const name = src.split('/').pop() ?? src

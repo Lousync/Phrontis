@@ -9,8 +9,13 @@ import { getLanAddressCandidates, defaultRouteIp } from '../lanShare/addresses'
 import { buildStatusView, type CompanionAddressInfo } from './statusView'
 import { toQrDataUrl } from '../lanShare/qr'
 import { loadPairedDevices, savePairedDevices } from './devices'
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { readFileSync, statSync } from 'fs'
+import { basename, join } from 'path'
+import { markSelfWrite } from '../fsWatcher'
+import { HttpError } from '../lanShare/multipart'
+import {
+  isHandoffPdfPage, listHandoffPdfs, resolvePdfAbs, saveAnnotatedPdfUpload,
+} from './fileTransfer'
 import {
   vaultAccountingSyncUpsert, vaultAccountingTransactionsAll, vaultAccountingDelete,
   type TransactionRow,
@@ -19,9 +24,13 @@ import {
   vaultScheduleSyncUpsert, vaultTodosAll, vaultFindTodo, vaultDeleteTodoCascade,
   type TodoRow,
 } from 'phrontis-core/kbStore/scheduleVaultRepo'
+import {
+  vaultHabitSyncUpsert, vaultHabitRecordSyncUpsert, vaultHabitRecordSyncDelete,
+  vaultHabitDeleteCascade, vaultHabitsSince, vaultHabitRecordsSince, parseHabitRecordId,
+} from 'phrontis-core/kbStore/habitVaultRepo'
 import { vaultRecordTombstones, vaultTombstonesSince } from 'phrontis-core/kbStore/tombstoneVaultRepo'
 import { setVaultDeleteSink } from 'phrontis-core/kbStore/deleteSink'
-import { getKnowledgeIndex, findKnowledgePage } from 'phrontis-core/kbStore/knowledgeIndex'
+import { getKnowledgeIndex, findKnowledgePage, invalidateKnowledgeIndex } from 'phrontis-core/kbStore/knowledgeIndex'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
 import { parseMarkdown } from 'phrontis-core/kbStore/mdStore'
 import { broadcastDataChanged, broadcast, subscribeDataChanged } from '../../main/windowBus'
@@ -229,11 +238,40 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
         broadcastDataChanged('accounting')
         return { applied: true }
       }
+      if (domain === 'habit') {
+        const rec = parseHabitRecordId(id)
+        if (rec) {
+          const r = vaultHabitRecordSyncDelete({ id, habitId: rec.habitId, date: rec.date, deletedAt })
+          if (r.applied) broadcastDataChanged('habit')
+          return r
+        }
+        // 习惯删除：级联记录 + 全部墓碑（手机 pull 按 id 幂等应用）
+        vaultHabitDeleteCascade(id, deletedAt)
+        broadcastDataChanged('habit')
+        return { applied: true }
+      }
       return { applied: false, reason: 'unsupported-domain' }
     },
     applyNote: item => {
       // v1.6 笔记 U 盘模式：LWW 裁决 + 落设备文件夹（取代 v1.2 收件箱无条件应用）
       return applyNoteUsb(item)
+    },
+    /* v1.8 打卡域：习惯定义与每日记录共用一条 LWW 时线 */
+    applyHabit: item => {
+      if (item.data.kind === 'habit') {
+        const r = vaultHabitSyncUpsert({
+          id: item.id, updatedAt: item.updatedAt,
+          name: item.data.name, color: item.data.color, target: item.data.target,
+          remind: item.data.remind, archived: item.data.archived,
+        })
+        if (r.applied) broadcastDataChanged('habit')
+        return r
+      }
+      const r = vaultHabitRecordSyncUpsert({
+        id: item.id, habitId: item.data.habitId, date: item.data.date, updatedAt: item.updatedAt,
+      })
+      if (r.applied) broadcastDataChanged('habit')
+      return r
     },
     listNotesSince: (device, sinceMs) => {
       const items = listNotesSinceUsb(device, sinceMs)
@@ -265,13 +303,50 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
         return null
       }
     },
+    /* v1.9 文件通道：PDF 不进 notes 域，另开只读清单（design.md §2.3） */
+    listPdfFiles: () => listHandoffPdfs(getKnowledgeIndex().pages),
+    openPdfFile: id => {
+      const entry = findKnowledgePage(id)
+      const root = getCurrentVault()?.rootPath
+      if (!root || !entry || !isHandoffPdfPage(entry)) return { ok: false, status: 404 }
+      const absPath = resolvePdfAbs(root, entry.path)
+      if (!absPath) return { ok: false, status: 403 } // 越界 / 符号链接逃逸
+      try {
+        const st = statSync(absPath)
+        if (!st.isFile()) return { ok: false, status: 404 }
+        return { ok: true, absPath, name: basename(entry.path), size: st.size }
+      } catch {
+        return { ok: false, status: 404 }
+      }
+    },
+    savePdfUpload: async req => {
+      const root = getCurrentVault()?.rootPath
+      if (!root) return { ok: false, status: 409, error: '电脑端尚未打开仓库' }
+      try {
+        const file = await saveAnnotatedPdfUpload(root, req)
+        // 铁律 1 + 施工图 §4.3：自写登记（不弹「外部修改」）+ 索引失效 + 广播（桌面树立刻出现）
+        markSelfWrite(join(root, file.path))
+        invalidateKnowledgeIndex()
+        broadcastDataChanged('knowledge')
+        return { ok: true, file }
+      } catch (e) {
+        if (e instanceof HttpError) return { ok: false, status: e.status, error: e.message }
+        console.error('[companion] file upload failed', e)
+        return { ok: false, status: 500, error: '上传处理失败' }
+      }
+    },
     listLedgerSince: sinceMs => vaultAccountingTransactionsAll()
       .map(rowToLedgerItem)
       .filter((x): x is NonNullable<ReturnType<typeof rowToLedgerItem>> => !!x && Date.parse(x.updatedAt) > sinceMs),
     listScheduleSince: sinceMs => vaultTodosAll()
       .map(rowToScheduleItem)
       .filter((x): x is { id: string; updatedAt: string; data: ScheduleItemData } => !!x && Date.parse(x.updatedAt) > sinceMs),
+    listHabitChangesSince: sinceMs => [
+      ...vaultHabitsSince(sinceMs),
+      ...vaultHabitRecordsSince(sinceMs),
+    ],
     listTombstonesSince: sinceMs => vaultTombstonesSince(sinceMs),
+    hasVault: () => !!getCurrentVault(),
     pcName: () => hostname(),
   }
   const server = createCompanionServer(deps)
@@ -324,7 +399,7 @@ export async function start(opts?: { port?: number }): Promise<CompanionStatus> 
    * ③ pull 扫描发现变更：listNotesSince deps 内非空 poke。
    * 信号粗粒度（任何域动一下都算），醒来后各自重扫，不做分域过滤。 */
   state.unsubDataChanged = subscribeDataChanged(scope => {
-    if (scope === 'accounting' || scope === 'schedule' || scope === 'knowledge') {
+    if (scope === 'accounting' || scope === 'schedule' || scope === 'knowledge' || scope === 'habit') {
       state.server?.pokeSync()
     }
   })

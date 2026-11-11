@@ -3,7 +3,7 @@ import { readClipboardFilePaths, workspacePasteExternal } from './ipc'
 import { isEditingInput } from './shortcuts'
 
 /**
- * 文件树「粘贴系统剪贴板里的文件」的共享入口（2026-10-20 修）。
+ * 文件树「粘贴系统剪贴板里的文件」的共享入口（2026-10-20 修；2026-11-09 B-51 扩应用内文件剪贴板）。
  *
  * 旧链路（v3.2.0）是「渲染层 paste 事件 + clipboardData.files + webUtils.getPathForFile」，
  * 在 Linux 上有两个断点（本机 X11 实测）：
@@ -28,7 +28,7 @@ export function isElementVisible(el: HTMLElement | null | undefined): el is HTML
 }
 
 /**
- * 读系统剪贴板里的文件并贴到 relDir。
+ * 读剪贴板里的文件（应用内文件剪贴板优先，系统剪贴板兜底/外部来源）并贴到 relDir。
  * 返回 null = 剪贴板里没有文件（调用方据此决定是否提示）；落盘结果原样返回。
  */
 export async function pasteClipboardFiles(rootId: string, relDir: string): Promise<WorkspacePasteResult | null> {

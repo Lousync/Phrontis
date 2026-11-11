@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { BarChart3, LineChart } from 'lucide-react'
 import type { LlmProviderInfo, ProviderQuotaView, UsageDashboardView, UsageWindow } from '../../types'
+import { useDataChanged } from '../../lib/dataChanged'
 import { llmGetQuota, llmListProviders, usageDashboard } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { fmtTokens, exactTokens, fmtUsd, WIN_LABEL, type Metric } from './usageModel'
@@ -61,11 +62,17 @@ export function UsageModule() {
   }, [win])
 
   // 供应商清单（额度卡要账户元信息：账户数 / 名字 / 激活账户）
-  const loadProviders = useCallback(async () => {
+  // 返回本次拉到的清单：刷新链路要拿它重新算「已展开账户」现在属于哪个新账户。
+  const loadProviders = useCallback(async (): Promise<LlmProviderInfo[]> => {
     try {
       const r = await llmListProviders()
-      setProviders((r.providers ?? []).filter((p) => p.enabled))
-    } catch { setProviders([]) }
+      const list = (r.providers ?? []).filter((p) => p.enabled)
+      setProviders(list)
+      return list
+    } catch {
+      setProviders([])
+      return []
+    }
   }, [])
 
   const loadActiveQuota = useCallback(async (force: boolean) => {
@@ -80,6 +87,16 @@ export function UsageModule() {
 
   useEffect(() => { void loadProviders() }, [loadProviders])
   useEffect(() => { void loadActiveQuota(false) }, [loadActiveQuota])
+
+  // 供应商 / 账号配置变更（设置页换 Key、加账号、切当前账号）由主进程广播 'settings'。
+  // 必须连账户清单一起重拉：额度视图按 accountId 匹配，只重拉视图而留着旧清单的话，
+  // 换 Key 后卡片会一直显示「未查询」，直到重启（2026-11-09 实锤）。
+  useDataChanged('settings', () => {
+    void (async () => {
+      await loadProviders()
+      await loadActiveQuota(true)
+    })()
+  })
 
   // 懒查非激活账户
   const onLoadAccounts = useCallback(async (providerId: string) => {
@@ -102,10 +119,12 @@ export function UsageModule() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
+      // 先重拉账户清单：刚换过 Key / 账号时，旧 accountId 在额度视图里是找不到的
+      const fresh = await loadProviders()
       await loadActiveQuota(true)
       const next: Record<string, ProviderQuotaView[]> = {}
       for (const pid of Object.keys(expanded)) {
-        const p = providers.find((x) => x.id === pid)
+        const p = fresh.find((x) => x.id === pid)
         if (!p) continue
         const activeId = p.activeAccountId || (p.accounts[0]?.id ?? '')
         const ids = p.accounts.filter((a) => a.id !== activeId).map((a) => a.id)
@@ -114,7 +133,7 @@ export function UsageModule() {
       if (Object.keys(next).length) setExpanded((e) => ({ ...e, ...next }))
     } catch { showToast({ type: 'error', message: '刷新额度失败' }) }
     finally { setRefreshing(false) }
-  }, [loadActiveQuota, expanded, providers])
+  }, [loadActiveQuota, expanded, loadProviders])
 
   const t = dash?.totals
   const hasData = !!dash && (dash.models.length > 0 || (t?.calls ?? 0) > 0)

@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { FolderTree, Trash2 } from 'lucide-react'
+import { FolderTree, GraduationCap, Trash2 } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { HelpHint } from '../../../components/shared/HelpHint'
 import { SectionHead } from './SectionHead'
@@ -63,6 +63,20 @@ export function AiTeachingView() {
               <option value="ask">每次询问</option>
               <option value="keep">保留文件夹</option>
               <option value="delete">一并删除（进回收站）</option>
+            </select>
+          </TRow>
+        </div>
+
+        <div data-setting-anchor="aiTeach.lectureStyle" className="border-t border-[var(--border-color)]">
+          <TRow icon={<GraduationCap size={14} />} label="讲课节奏"
+            hint="小步引导：每条回答只讲一个台阶，讲完给一个具体检查问题并停下，等学生回答后再继续；整段精讲：一个知识点一次讲完（旧行为）。">
+            <select
+              value={s.aiTeachLectureStyle}
+              onChange={e => update('aiTeachLectureStyle', e.target.value)}
+              className="px-2.5 py-1.5 rounded-md border border-[var(--border-color)] bg-[var(--input-bg)] text-[13px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+            >
+              <option value="stepwise">小步引导（推荐）</option>
+              <option value="expanded">整段精讲</option>
             </select>
           </TRow>
         </div>

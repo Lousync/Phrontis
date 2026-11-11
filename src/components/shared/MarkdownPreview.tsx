@@ -14,6 +14,7 @@ import { preprocessContent, parseQuizFence, parseQuizFenceLoose } from './QuizPa
 import { QuizCard } from './QuizCard'
 import { ShortAnswerCard } from './ShortAnswerCard'
 import { PluginFenceRenderer } from './PluginFenceRenderer'
+import rehypeControlKeywords from './rehypeControlKeywords'
 import { MermaidBlock } from './MermaidBlock'
 import { SchedulePreviewCard } from '../../modules/schedule/SchedulePreviewCard'
 import { parseSchedulePreviewFence } from '../../modules/schedule/previewPure'
@@ -84,7 +85,8 @@ interface Props {
   highlightWiki?: string
   /**
    * 代码块外框档位（docs/code-block-card-plan.md）。
-   * `'plain'`（默认）= 现状，19 处消费者零变化；`'card'` = 普通代码块出「形态 B 悬浮胶囊」卡片。
+   * `'plain'`（默认）= 知识库阅读 / 博客 / 帮助 / 工件栏的普通代码块（右上角语言芯片）；
+   * `'card'` = AI 三面的「形态 B 悬浮胶囊」卡片（语言标签 + 复制 + 换行）。
    * 只作用于 `pre` 覆写的**兜底分支** —— quiz / mermaid / plugin / spoiler / anim /
    * schedule-preview 在 `pre` 覆写里提前 return，永远到不了卡片。
    */
@@ -132,7 +134,8 @@ function SpoilerBlock({ content }: { content: string }) {
  *   项目文档与工具栏的删除线语法统一是 `~~...~~`，关掉单波浪号不影响正常删除线。
  */
 const REMARK_PLUGINS: any = [[remarkGfm, { singleTilde: false }], remarkMath]
-const REHYPE_PLUGINS: any = [rehypeHighlight, [rehypeKatex, { throwOnError: false, strict: false }]]
+// rehypeControlKeywords 必须排在 rehypeHighlight 之后：先有 hljs-keyword span，才能按文本补 hljs-control
+const REHYPE_PLUGINS: any = [rehypeHighlight, rehypeControlKeywords, [rehypeKatex, { throwOnError: false, strict: false }]]
 type MdComponents = NonNullable<React.ComponentProps<typeof ReactMarkdown>['components']>
 
 /** 插件围栏渲染（带回退）：加载失败 / 3 秒未就绪 → 回退普通代码块 */
@@ -334,7 +337,8 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
         if (card) return <SchedulePreviewCard data={card} />
       }
       // 插件渲染器（plugin-phase1-design C6）：命中 lang 且插件已启用 → 内容只读沙箱；失败回退普通代码块
-      const langMatch = cls.match(/language-([a-z0-9-]+)/i)
+      // 语言名放宽到 c++ / c# / objective-c / vb.net：它们也要能出芯片与走插件渲染器查找
+      const langMatch = cls.match(/language-([a-z0-9+#._-]+)/i)
       const fenceLang = langMatch?.[1]?.toLowerCase()
       // ```mermaid 围栏 → Mermaid 渲染（动态 chunk；失败回退普通代码块）
       if (fenceLang === 'mermaid') return <MermaidBlock code={extractText(children)} />
@@ -352,7 +356,14 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
           </CodeBlockCard>
         )
       }
-      return <pre>{children}</pre>
+      // 语言芯片挂在外层 pre 上（不在 code 里套 div），才能落进顶部 34px 留白带、不压首行。
+      // 无语言块不加 kb-code-plain，保持 16px 顶部内边距，不留空带。
+      return (
+        <pre className={fenceLang ? 'kb-code-plain kb-thin-scroll' : 'kb-thin-scroll'}>
+          {fenceLang && <span className="kb-code-lang-chip">{fenceLang}</span>}
+          {children}
+        </pre>
+      )
     },
     // Override ul/ol to restore list-style killed by Tailwind reset
     ul({ children }) {
@@ -417,29 +428,11 @@ function MarkdownPreviewInner({ content, onWikiLink, onLinkClick, knownWikiTitle
       // (rehype-highlight 会在 className 前加 "hljs ",故不用锚定匹配)
       const anim = /language-anim@([a-z0-9][a-z0-9._-]*):([A-Za-z0-9._-]+)/.exec(className || '')
       if (anim) return <AnimEmbed pluginId={anim[1]} animId={anim[2]} label={String(children).trim().split('\n')[0]} />
-      const match = /language-(\w+)/.exec(className || '')
-      const lang = match ? match[1] : ''
-      const isBlock = node?.tagName === 'code' && className?.includes('language-')
-      if (!isBlock) {
-        return <code className={className} {...props}>{children}</code>
-      }
-      // 卡片档：chrome（语言标签 + 操作）整条交给 CodeBlockCard，这里只出裸 <code>，
-      // 否则 <pre> 里会套一个 <div>（非法结构）并多出一个语言标签。
-      // ⚠️ 上面 spoiler / anim 两个分支**必须保留** —— pre 覆写对这两个 lang 返回的是
-      //    <>{children}</>（不包 <pre>），真正的渲染体就在下面这两行里。
-      if (codeBlockChrome === 'card') {
-        return <code className={className} {...props}>{children}</code>
-      }
-      return (
-        <div className="relative group">
-          {lang && (
-            <span className="absolute top-1 right-2 text-[10px] text-[var(--text-muted)] opacity-40 select-none">
-              {lang}
-            </span>
-          )}
-          <code className={className} {...props}>{children}</code>
-        </div>
-      )
+      // 裸 <code>：语言芯片由外层 pre 统一渲染（卡片档的 chrome 也由 CodeBlockCard 接管）。
+      // `node` 只解构不消费 —— react-markdown 会把它塞进 props，展开到 DOM 会报警。
+      // ⚠️ 上面 spoiler / anim 两个分支必须保留：pre 覆写对这两个 lang 返回的是
+      //    <>{children}</>（不包 <pre>），真正的渲染体就在下面这一行。
+      return <code className={className} {...props}>{children}</code>
     },
     // Convert [[wiki links]] + 脚注（word^[标注]） in paragraph text to interactive spans
     p({ children }) {

@@ -45,6 +45,7 @@ import { resolveConstraintsForInjection, readGlobalConstraints, readWorkspaceCon
 import { readAssistantGlobalConstraints, readAssistantSessionConstraints, readAssistantGlossary } from './assistantConstraints'
 import { readUnitConstraintsForSession } from './aiTeachingScope'
 import { buildScopePrompt } from './scopePrompt'
+import { buildTeachStyleHint, normalizeTeachStyleMode } from './teachStylePrompt'
 import { resolveProfilesForInjection } from './aiTeachingProfile'
 import { listWorkspaces, getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
 import { buildCourseInjection, buildAiTeachSourcesHint } from './aiTeachingCourse'
@@ -1303,10 +1304,11 @@ async function runAgentLoop(
   // 课程模式（docs/ai-teaching-course-mode-plan.md）：工作区开启课程模式时注入「课程目标 + 当前知识点 + 掌握度 + 待复习」，
   // 让模型从「答完这一问」转为「上好这门课」。未开启/无大纲 → 空串（零成本）。
   const courseHint = source === 'aiTeaching' ? buildCourseInjection(sessionId, getSettingReader()) : ''
-  // 2026-11-04：AI 教学讲课口径 —— 基础人设的「简洁直接」会诱导模型把讲课写成总结；
-  // 这里只覆盖教学面，不改其他助手。细则由课程级《教学运行手册.md》承载，避免 system 膨胀。
+  // 2026-11-10：AI 教学讲课口径 —— 默认「小步引导」（一条回答一个台阶 + 一个检查问题并停下），
+  // 设置 aiTeachLectureStyle 可切回「整段精讲」。文案在零依赖 pure 文件里，契约脚本可直接跑。
+  // 仍只覆盖教学面，不改其他助手；事务性回答由口径内部排除，保持基础人设的简洁直接。
   const teachStyleHint = source === 'aiTeaching'
-    ? '\n\n【讲课口径（AI教学）】基础规则里的「简洁直接」只适用于事务性回答，不适用于讲课 / 教材。讲知识点必须展开：问题/场景 → 前置桥接 → 定义 → 直觉 → 推导（每步为什么）→ 例题 → 反例/易错 → 检查 → 最后才总结；禁止用要点列表代替推导，禁止把素材的总结句改写一遍就交差。素材只有标题/摘要时明确说“素材不足”，用通用知识补讲要标“AI 补充”。'
+    ? buildTeachStyleHint(normalizeTeachStyleMode(getSettingReader()('aiTeachLectureStyle')))
     : ''
   // 收藏（v3.6.0）：让 AI 感知到当前工作区钉在左栏「收藏」的文档（只读注入，无工具；用户自己挑出来常看的）
   const favoritesHint = source === 'aiTeaching' ? (() => {
@@ -1334,22 +1336,45 @@ async function runAgentLoop(
       ? `② 本工作区文件夹 \`${wsRel}/\` 内的内容（含本会话产物${sessionRel ? `，本会话文件夹为 \`${sessionRel}/\`` : ''}）`
       : '② 本会话产物所在文件夹'
     return '\n\n【资料范围纪律（AI教学）】取材默认只限两处：' + scope1 + '；' + scope2 + '。'
-      + '除非用户在当前消息中明确要求扩大范围（如「在整个仓库找一下 X」「看看我仓库里有没有 Y」），'
+      + '除非用户在当前消息或四层要求中明确要求扩大范围（如「在整个仓库找一下 X」「看看我仓库里有没有 Y」），'
       + '否则不要用 vault.search / vault.read 扫描整个仓库，也不要读工作区文件夹之外的仓库内容。'
-      + '用户明确要求时按其指定范围放开；要引用范围内的其他内容时先说明意图，不要自行扩大检索面。'
+      + '用户明确要求时按其指定范围放开（当前消息优先于四层要求）；要引用范围内的其他内容时先说明意图，不要自行扩大检索面。'
   })() : ''
   // v3.1.2 条目10：产物落点纪律（与条目8 是同一枚硬币两面：一个管读哪、一个管写哪）。
-  // 实时给出本会话文件夹相对路径；工具层还有一道归一化兜底（builtinTools.normalizeAiTeachingWritePath）。
+  // 2026-11-09 修正：四层 CONSTRAINTS.md 都是**用户文件**，优先级高于系统默认落点；
+  // 旧文案把「统一写会话夹」写成绝对规则，导致用户在工作区要求里指定教材落点时被 AI 顶回去。
+  // 实时给出本会话文件夹相对路径；工具层还有一道归一化兜底（builtinTools.normalizeAiTeachingWritePath），
+  // 但 SOURCES / 点目录 / 系统生成文件由工具层硬边界拦截，用户要求也不能覆盖。
   const writeScopeHint = aiTeachScope ? (() => {
     const { wsRel, sessionRel } = aiTeachScope
     const dest = sessionRel
       ? `\`${sessionRel}/\``
       : (wsRel ? `\`${wsRel}/\` 下本会话的文件夹` : '本会话对应的文件夹')
-    return '\n\n【产物落点纪律（AI教学）】你创建或生成的一切文档（讲义、笔记、测验、总结等）统一写入本会话文件夹 ' + dest
-      + '（调用工具时 path 要带上该目录前缀，不要只给裸文件名）。'
-      + '禁止写入 `SOURCES/`（那是给你读的素材目录，不是放产物的）、禁止写仓库顶层、工作区文件夹根目录或章节根目录。'
-      + '段会话不要指定 `course.organize.archive` 的 target，也不要写 `知识点/` 元数据目录；课程助手在用户明确要求时可按指定路径归档课程级资料或维护知识点元数据。'
+    return '\n\n【产物落点与优先级（AI教学）】优先级（高→低）：系统硬边界 > 用户当前消息 > 用户本段要求 > 用户知识点要求 > 用户本课程要求 > 用户全局要求 > 系统默认落点 > 内置人设。'
+      + '四层要求都是用户写的 CONSTRAINTS.md；用户要求指定了落点时，以用户要求为准，不要拿默认落点去反驳用户。'
+      + '系统默认落点（没有用户要求覆盖时）：普通课程产物（讲义、笔记、测验、总结等）写入本会话文件夹 ' + dest
+      + '（调用工具时 path 要带上该目录前缀，不要只给裸文件名）；course.organize.archive 在段会话不要指定 target。'
+      + '用户要求或当前消息指定了别的落点时：按用户要求写；教材 / 知识库正文类文档用 vault.write 直接写用户指定的仓库相对路径'
+      + '（.md 传 ensureId:true 以带稳定 frontmatter id），普通课程产物仍可用 course.organize.archive。'
+      + '用户指定目录时 path 必须写完整相对路径（含目录），不要只给裸文件名——裸文件名按默认落本会话文件夹。'
+      + '系统硬边界（任何用户要求都不能覆盖）：① 权限与作用域；② `SOURCES/` 只读，禁止写入；③ `.knowbase` 与点目录禁写；'
+      + '④ 系统生成文件（`交接.md`、`课程.md`、`.session.json`、`CONSTRAINTS.md`）只能走各自专用入口，不能用 vault.write / course.organize.archive 创建或覆盖；'
+      + '⑤ 支线角色与 UI 协议（quiz/标题/ask/plan/outline）不变。'
   })() : ''
+  // 要求文档工具协议（docs/ai-teaching-constraints-write-plan.md）：用户说「写规范/限制/要求」= 写 CONSTRAINTS.md，
+  // 不是普通产物。B 方案：直接写，不新增确认卡；每轮稳定注入，避免模型不知道文件契约。
+  const constraintsToolHint = source === 'aiTeaching' && !isSideLane
+    ? '\n\n【要求文档（AI教学）】四层要求统一是 CONSTRAINTS.md：全局 / 本课程 / 本知识点 / 本段。'
+      + '四层都是用户写的文件，优先级高于系统默认落点；用户要求指定落点时按用户要求执行。'
+      + '用户说「写一个规范 / 限制 / 约束 / 要求 / 规则」时，指的是写这些要求文件，不是普通讲义或笔记。'
+      + '用 course.constraints.write 落盘（不在工具列表时先 builtin.tool.request 申请）：'
+      + 'level 选最匹配当前场景的一层；课程助手 / 复习课默认 workspace，段会话默认 segment；'
+      + '用户明确点名范围时按用户（所有课程→global，这门课→workspace，这个知识点→unit，这一段→segment）。'
+      + '默认 mode=append 追加条目；只有用户明确要求「重写 / 替换 / 清空」才用 replace；unit 层缺省用当前聚焦知识点。'
+      + '用户要查看 / 重写整篇要求时，用 course.constraints.read 读全文（不在工具列表时一并申请；注入每层只取前 12 条 / 1200 字符，读工具不受限）。'
+      + '不要用 vault.write / course.organize.archive 创建要求文档，也不要另起文件名。'
+      + '每层注入上限 12 条 / 1200 字符，内容保持精炼；超出部分不会进入 AI 上下文。'
+    : ''
   /**
    * 生图（v3.6.0 对话内生图 `/生图`，docs/ai-image-gen-plan.md §4.5）。
    *
@@ -1421,13 +1446,13 @@ async function runAgentLoop(
         constraintChars: scopeLayers.global.length + scopeLayers.workspace.length + scopeLayers.unit.length + scopeLayers.lesson.length,
         profileChars: profileHint.length,
         sourcesChars: sourcesHint.length,
-        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + outlineRuleHint.length + teachStyleHint.length + visualHint.length + mindmapHint.length + scopeRuleHint.length + writeScopeHint.length + sideLaneHint.length,
+        ruleChars: titleRuleHint.length + quizRuleHint.length + planRuleHint.length + askRuleHint.length + outlineRuleHint.length + teachStyleHint.length + visualHint.length + mindmapHint.length + scopeRuleHint.length + writeScopeHint.length + constraintsToolHint.length + sideLaneHint.length,
       }
     : undefined
   // N-1 手册通道：system 只用手册提示词（不注入教学/感知/出题/工件/权限等规则）
   const systemFull = manual
     ? buildManualSystemPrompt()
-    : baseSystem + schedulePersona + intelPersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
+    : baseSystem + schedulePersona + intelPersona + scopeInstHint + assistantConstraintHint + glossaryHint + profileHint + courseHint + teachStyleHint + favoritesHint + titleRuleHint + quizRuleHint + planRuleHint + askRuleHint + outlineRuleHint + visualHint + mindmapHint + imageHint + sourcesHint + scopeRuleHint + writeScopeHint + constraintsToolHint + sideLaneHint + toolsHint + executionHint + deniedHint + vaultFileHint + skillHint + explicitSkillHint + PARALLEL_HINT + aiAssistantHint
 
   // ---- 每轮变化的上下文注入段（B1 @ 引用骨架 + B2 感知素材）----
   // ★ 必须走**首条 user 消息层**、不能进 system：system + tools 是 prompt cache 前缀，

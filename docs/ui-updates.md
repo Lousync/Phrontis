@@ -2537,3 +2537,40 @@ C5 原样成立，本仓两条页签条同向而非两套规则（台账里记�
 **验收**：双 tsc 0 错；`npm run build` 通过；上述契约全绿；`verify-unified-assistant` 70、`verify-prompt-cache` PASS；`verify-help-retrieval` 171/171。
 
 **未做**：目录批量移动（P1）、逐文件取消（v1 整批接受/拒绝）、大小写-only 重命名（v1 拒绝）。
+
+## 2026-11-09 · 要求抽屉超限轻提示（v3.22.0）
+
+**现状 / 问题**：AI 教学四层要求每层注入上限 12 条 / 1200 字符，超出会静默截断；用户写长了只看得到「已保存」，不知道 AI 实际只读到前面一部分。
+
+**改动点**：`RequirementsDrawer.tsx` 在编辑框与底部工具条之间加一行内联轻提示——当前层内容一旦超过注入上限就显示「超出注入上限（12 条 / 1200 字符），超出部分不会注入」；`truncate` 保证单行，`title` 保留完整说明。判定走 `constraintsParse.ts` 的 `exceedsConstraintInjectLimit`，逐行复刻主进程 `cutScopeLayer` 的条数 / 字符口径，常量由契约脚本锁同步。
+
+**验收**：`verify-constraints-parse` 46/46（含 12/1200 边界与两处常量同口径）；`verify-ai-teaching-tools` 静态断言抽屉接入；双 tsc 0 错。
+
+## 2026-11-10 · AI 教学「小步引导」讲课节奏（设置页新增）
+
+**现状 / 用户反馈**：AI 教学一条回答把定义、推导、例题、总结一次倒完，像解题输出而不是老师带学生；学生还没回应上一个台阶，模型已经讲到下一步。
+
+**改动点**：
+- 新增 `electron/lib/teachStylePrompt.ts`：两套讲课口径（`stepwise` 小步引导 / `expanded` 整段精讲），默认小步；非法设置值回落小步。
+- `electron/lib/agentService.ts` 的 `teachStyleHint` 改为按设置 `aiTeachLectureStyle` 选择；仍只对 `source === 'aiTeaching'` 注入。
+- 设置 → AI → 教学新增「讲课节奏」一行：小步引导（推荐） / 整段精讲；anchor `aiTeach.lectureStyle`。
+- 小步口径：一条回答一个台阶（一个概念 / 一步推导 / 一个例子，约 300–500 字），讲完给一个具体检查问题并停下等回答；答错只纠正当前这一步；教材仍可一次性落盘但对话不贴全文；用户明确要求一次讲完时才展开。
+- 段会话纪律引用 system 口径；`quiz` 快检只在完整知识点后出，单个台阶检查用正文一句话。
+- 帮助手册：`AI 权限与工具边界` 补讲课节奏入口；`AI 教学 · 课程模式` 补小步说明与检索关键词。
+
+**验收**：`verify-teach-style` 51/51；`verify-help-retrieval` 171/171；双 tsc 0 错；`npm run build` 通过。真机观感待验：同一知识点连续多轮是否稳定停在一个台阶、学生答错后是否只纠正当前步。
+
+## 2026-11-11 · 昼夜动态主题升级「沉浸天空 + 通透」（v3.23.0）
+
+**现状 / 用户反馈**：v3.22.0 的昼夜动态主题只有顶栏 36px 有天空，内容区仍是实底令牌；用户希望把顶栏特效延伸到背景，并做得更炫酷。对比 v3 原型后拍板「沉浸天空 + 通透」，专注模式降低特效做成设置项。
+
+**改动点**：
+- 新增 `src/components/shared/DaycycleBackdrop.tsx`：整窗背景层（App 根部 fixed z=-1）——天空渐变、太阳 / 月亮全窗弧线、云、星空、地平线暖光、光柱、极光、光尘、萤火、流星；天体 `transform 60s linear`，粒子固定 seed 生成一次，`prefers-reduced-motion` 全停。
+- `src/components/shared/TitleBarDaycycle.tsx` 收窄为顶栏时间胶囊；顶栏透明，露出同一张背景。
+- 通透表面：`html.theme-daycycle` 覆盖 `.kb-theme-surface` / `.kb-dc-center` / `.kb-dc-side` / `.kb-activitybar` / `.kb-pagebar` / `.kb-statusbar` 的 alpha；正午 / 深夜中心内容约 69% 不透明，侧栏约 70%，主内容不加 backdrop-filter，侧栏 / 活动栏加 14~16px 轻模糊。
+- 晨昏阅读底（2026-11-11 反馈修复）：引擎新增 `--dc-glass-boost`，太阳越低面板越实（0%→40%）；黄昏 18:15 / 暮色 19:12 内容表面约 94~96% 不透明，暖光不再从面板后糊住正文；正午 / 深夜回到 0%。更新说明 / 看板补 `kb-theme-surface`，避免这两个无模块底色页面在晨昏时大面积透出天空。
+- 新增设置 `daycycleFocusDim`（设置 → 外观 → 昼夜背景，默认开）：禅模式（Z1 / Z2）或番茄钟专注阶段时 `--dc-fx-scale` 降到 0.3，天空与天体保留。
+- 引擎新增 `celestialAt().alt` / `daycycleAt().celAlt`，供全窗纵向弧线使用。
+- 契约 `verify-daycycle.mjs` 扩展到 C13，锁整窗层 / 通透表面 / 专注设置 / celAlt。
+
+**验收**：双 tsc 0 错；`verify-daycycle.mjs` 全绿；真机 devbridge 截图验收 05:30 / 12:30 / 18:15 / 21:00 四时段与专注开关。

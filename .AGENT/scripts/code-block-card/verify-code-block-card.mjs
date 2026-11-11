@@ -88,26 +88,25 @@ ok('pre 覆写里 schedule-preview 早退仍在', idxOf('language-schedule-previ
 ok('pre 覆写里 mermaid 早退仍在', idxOf("fenceLang === 'mermaid'") !== -1)
 ok('pre 覆写里插件渲染器早退仍在', idxOf('fenceRenderers.get(fenceLang)') !== -1)
 const iCard = idxOf("if (codeBlockChrome === 'card') {")
-const iPlain = idxOf('return <pre>{children}</pre>')
+const iPlain = idxOf("fenceLang ? 'kb-code-plain")
 ok('卡片分支存在', iCard !== -1)
-ok('卡片分支在兜底 <pre> 之前（且晚于全部特殊围栏）',
+ok('卡片分支在 plain 兜底之前（且晚于全部特殊围栏）',
   iCard !== -1 && iPlain !== -1 && iCard < iPlain
   && idxOf('language-schedule-preview') < iCard && idxOf('fenceRenderers.get(fenceLang)') < iCard)
 ok('卡片只由 pre 兜底分支产生', count(code.md, '<CodeBlockCard') === 1)
+ok('plain 兜底由 pre 出语言芯片（kb-code-plain + kb-code-lang-chip）',
+  preBody.includes("fenceLang ? 'kb-code-plain kb-thin-scroll'") && preBody.includes('kb-code-lang-chip'))
+ok('无语言块不挂 kb-code-plain（不会留 34px 空带）', preBody.includes(': \'kb-thin-scroll\''))
 
-// ── ③ code 覆写：卡片档只跳过最后那段；spoiler / anim / 行内分支必须保留 ───────────
+// ── ③ code 覆写：只保留 spoiler / anim；语言芯片上移到 pre，code 统一返回裸元素 ───────
 const codeStart = code.md.indexOf('code({ className, children, node, ...props })')
 const codeEnd = code.md.indexOf('// Convert [[wiki links]]')
 const codeBody = code.md.slice(codeStart, codeEnd)
 ok('code 覆写里 spoiler 分支仍在', codeBody.includes('language-spoiler'))
 ok('code 覆写里 anim 分支仍在', codeBody.includes('language-anim@'))
-ok('code 覆写里行内 !isBlock 分支仍在', codeBody.includes('if (!isBlock) {'))
-const iBare = codeBody.indexOf("if (codeBlockChrome === 'card') {")
-const iWrap = codeBody.indexOf('<div className="relative group">')
-ok('卡片档返回裸 <code>', iBare !== -1 && codeBody.slice(iBare, iBare + 140).includes('<code className={className} {...props}>{children}</code>'))
-ok('裸 <code> 分支在 relative 包裹之前（卡片档才不会多一个语言标签）', iBare !== -1 && iWrap !== -1 && iBare < iWrap)
-ok('非卡片档逐字保持现状（relative group + 语言标签）',
-  codeBody.includes('<span className="absolute top-1 right-2 text-[10px] text-[var(--text-muted)] opacity-40 select-none">'))
+ok('code 覆写统一返回裸 <code>', codeBody.includes('return <code className={className} {...props}>{children}</code>'))
+ok('code 覆写不再出现 relative group / isBlock / 旧 opacity-40 标签',
+  !codeBody.includes('relative group') && !codeBody.includes('isBlock') && !codeBody.includes('opacity-40'))
 
 // ── ④ 卡片组件：折叠阈值 / 复制 / 自动换行 都走既有真源 ────────────────────────────
 ok('折叠阈值常量 = 20 / 12', has('md', 'const FOLD_OVER_LINES = 20') && has('md', 'const FOLD_SHOWN_LINES = 12'))
@@ -220,7 +219,7 @@ ok('AI 教学侧车传 codeBlockChrome="card"', has('side', 'codeBlockChrome="ca
 ok('全局面板 MessageList 传 codeBlockChrome="card"', has('list', 'codeBlockChrome="card"'))
 ok('流式面传 card + streaming', has('stream', 'codeBlockChrome="card" streaming'))
 ok('工件栏不传（md 页签按文档渲染）', !has('artifacts', 'codeBlockChrome'))
-ok('知识库 / 阅读态等处不传（默认档零变化）',
+ok('知识库 / 阅读态等处不传（plain 档仍由默认分支渲染）',
   count(code.md, 'codeBlockChrome') > 0 && !has('css', '.prose-content .kb-code-card'))
 
 // ── ⑫ 去气泡（改后 B）：助手侧与 AI 教学统一，且四样防线一个都不能丢 ──────────────

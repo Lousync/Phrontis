@@ -1,4 +1,5 @@
 import type * as Monaco from 'monaco-editor'
+import { isLightRgb, parseCssRgb } from './themeTone'
 
 /**
  * 编辑器主题桥 —— 让 Monaco 跟随应用主题（含插件主题）。
@@ -38,13 +39,10 @@ function toHex(raw: string): string | null {
   return null
 }
 
-/** 相对亮度判断明暗基座 */
+/** 相对亮度判断明暗基座（与代码块色板共用同一阈值，见 themeTone.ts） */
 function isLightColor(hex: string): boolean {
-  const m = /^#([0-9a-f]{6})/i.exec(hex)
-  if (!m) return false
-  const n = parseInt(m[1], 16)
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
-  return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 140
+  const rgb = parseCssRgb(hex)
+  return rgb ? isLightRgb(rgb) : false
 }
 
 export function applyEditorTheme(): void {

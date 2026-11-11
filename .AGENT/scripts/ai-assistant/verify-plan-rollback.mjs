@@ -126,6 +126,14 @@ ok(/'builtin\.vault\.move'/.test(read('electron/lib/aiAssistantStageable.ts')),
   'D13 批量移动登记为 handler-staged（确认模式可见）')
 ok(/applyMoveBatch/.test(planSrc) && /for \(const back of \[\.\.\.done\]\.reverse\(\)\)/.test(planSrc),
   'D14 应用期单条失败逆序回滚')
+{
+  // 2026-11-09 实机：确认模式新建「父目录尚不存在」的文件（如 终生学习/2026/ 首篇周记）
+  // 应用必报 ENOENT（writeWorkspaceFile 的 .kb-tmp 临时文件写不进缺失目录）。
+  // 直接执行路径会 mkdir -p，runAction 的 write 分支必须同口径。
+  const runActionSrc = planSrc.slice(planSrc.indexOf('async function runAction'), planSrc.indexOf('function replaceTempIds'))
+  ok(/case 'write':[\s\S]*?mkdirSync\(dirname\([\s\S]*?writeWorkspaceFile\(/.test(runActionSrc),
+    'D15 write 执行前 mkdir -p 父目录（确认模式可新建子目录首篇，不再 ENOENT）')
+}
 
 console.log('\n=== E. IPC 三处同步 ===')
 const preload = read('electron/preload/index.ts')

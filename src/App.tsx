@@ -13,6 +13,7 @@ import { ToolHost, PluginToolHost, TOOLS_WITH_SIDEBAR, isToolTabId, toolIdOfTab,
 import { parseWorkbenchLayout, RAIL_FOLLOW_MAP, QUIZ_ENTRY_ENABLED, WORKBENCH_BOOKMARKS, LOCATE_QUIZ_VIEW_EVENT, QUIZ_VIEW_TOGGLED_EVENT, QUIZ_VIEW_CLOSE_REQUEST_EVENT, type RailModule } from './lib/workbenchLayout'
 
 import { TitleBar, ActivityBar, GlobalConfirm } from './components/shared'
+import { DaycycleBackdropHost } from './components/shared/DaycycleBackdrop'
 import { ZenHotZone } from './components/shared/ZenHotZone'
 import { WorkbenchStatusBar } from './components/shared/WorkbenchStatusBar'
 import { CommandPalette, type PaletteItem } from './components/shared/CommandPalette'
@@ -20,6 +21,7 @@ import { WorkbenchEmptyState, type WorkbenchHint } from './components/workbench/
 import { CodePluginHosts } from './components/shared/CodePluginHosts'
 import { Toast } from './components/shared/Toast'
 import { FONT_CSS_MAP, applyThemeClass } from './lib/settings'
+import { startDaycycleEngine, stopDaycycleEngine } from './lib/daycycleEngine'
 import { useSettings } from './lib/SettingsContext'
 import { isEditingInput, allowsWorkbenchShortcut } from './lib/shortcuts'
 import { registerSelectionAskHost, type SelectionAskHost } from './lib/assistantContext'
@@ -754,6 +756,18 @@ export default function App() {
       applyThemeClass(theme)
     }
   }, [s.theme, settingsReady, update])
+
+  // 昼夜动态主题引擎（docs/daycycle-theme-plan.md）：选中时每分钟把整套主题变量写到 <html>；
+  // 切走 / 卸载必须 stop —— 引擎写的是内联 style，不清除会污染之后的所有主题。
+  // settingsReady 门卫：避免默认值阶段误启动（真实设置加载完成前 s.theme 可能还是旧默认）。
+  useEffect(() => {
+    if (!settingsReady) return
+    if (s.theme === 'daycycle') {
+      startDaycycleEngine()
+      return () => stopDaycycleEngine()
+    }
+    stopDaycycleEngine()
+  }, [s.theme, settingsReady])
 
   // Apply persisted settings on first render — 必须等真实设置加载完成,否则会用默认值覆盖一次
   useEffect(() => {
@@ -1890,7 +1904,7 @@ export default function App() {
 
   return (
     <RootErrorBoundary>
-    <div className={`kb-theme-gradient-img flex flex-col h-screen bg-[var(--bg-primary)] overflow-hidden [transform:translateZ(0)] ${winRounded ? 'rounded-[var(--window-radius)]' : 'rounded-none'}`}>
+    <div className={`kb-app-root kb-theme-gradient-img flex flex-col h-screen bg-[var(--bg-primary)] overflow-hidden [transform:translateZ(0)] ${winRounded ? 'rounded-[var(--window-radius)]' : 'rounded-none'}`}>
       <CodePluginHosts />
       {zenLevel < 2 ? (
         <TitleBar />
@@ -1898,6 +1912,7 @@ export default function App() {
         <ZenHotZone zenLevel={zenLevel} onZenLevelChange={changeZen} />
       )}
       <PomodoroProvider>
+        <DaycycleBackdropHost zenLevel={zenLevel} />
         <div className="flex flex-1 flex-col overflow-hidden">
         <div className="flex flex-1 overflow-hidden">
           {/* 活动栏两个收起来源：禅模式 Z2（隐壳）与 activityBarVisible=false（用户经命令面板显式隐藏），取并集 */}
@@ -2048,7 +2063,7 @@ export default function App() {
                 溢出下移给内层卡片的 `overflow-hidden`，由模块自己的滚动容器接管 → 滚动恢复。
                 与 `docs/release-notes-design.md` §4「模块根节点必须 h-full」是同一类病（高度约束断了）。 */}
             <div className={`min-h-0 transition-all duration-300 ease-out ${zenLevel >= 2 || winMax ? 'flex min-w-0 flex-1' : 'm-1.5 flex min-w-0 flex-1'}`}>
-              <div className={`${centerEmpty ? '' : 'kb-theme-gradient-img'} relative flex min-h-0 flex-1 flex-col overflow-hidden transition-all duration-300 ease-out ${zenLevel >= 2 || winMax
+              <div className={`${centerEmpty ? '' : 'kb-theme-gradient-img'} kb-dc-center${centerEmpty ? ' kb-dc-empty' : ''} relative flex min-h-0 flex-1 flex-col overflow-hidden transition-all duration-300 ease-out ${zenLevel >= 2 || winMax
                 ? (centerEmpty ? 'bg-[color-mix(in_srgb,var(--bg-primary)_40%,transparent)]' : 'bg-[color-mix(in_srgb,var(--bg-primary)_92%,transparent)]')
                 : (centerEmpty
                   ? 'rounded-xl border border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-primary)_30%,transparent)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'

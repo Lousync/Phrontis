@@ -1,0 +1,225 @@
+{
+  "id": "whale-girl-mascot",
+  "name": "鲸鱼娘 · 大肥鱼",
+  "version": "0.1.1",
+  "engineVersion": ">=3.5.0",
+  "author": "local",
+  "description": "AI 输入区的鲸鱼娘（大肥鱼）吉祥物：16 帧透明动画，随 AI 活动切换待机 / 思考 / 工作 / 出错 / 提醒，支持点击反应与久闲入睡。非官方个人项目；角色「溟月」出自上善无形，动画素材整理自 PC2005-cloud/dsh-pet，仅限个人非商业使用。详见 NOTICE.md。",
+  "type": "ui",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "category": "外观",
+  "riskLevel": "S",
+  "capabilities": [],
+  "contributes": {
+    "mascot": [
+      {
+        "id": "whale-girl",
+        "name": "鲸鱼娘",
+        "frameMs": 100,
+        "grid": {
+          "cell": 1,
+          "w": 140,
+          "h": 168
+        },
+        "anchor": "composer",
+        "states": {
+          "idle": "idle",
+          "thinking": "thinking",
+          "working": "working",
+          "sweeping": "sweeping",
+          "notification": "notification",
+          "error": "error",
+          "attention": "attention"
+        },
+        "sheets": {
+          "idle": {
+            "body": "assets/whale-girl/idle.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "thinking": {
+            "body": "assets/whale-girl/thinking.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "working": {
+            "body": "assets/whale-girl/working.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "sweeping": {
+            "body": "assets/whale-girl/sweeping.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "notification": {
+            "body": "assets/whale-girl/notification.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "error": {
+            "body": "assets/whale-girl/error.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "attention": {
+            "body": "assets/whale-girl/attention.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "sleeping": {
+            "body": "assets/whale-girl/sleeping.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "waking": {
+            "body": "assets/whale-girl/waking.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "look": {
+            "body": "assets/whale-girl/look.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "stretch": {
+            "body": "assets/whale-girl/stretch.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "startle": {
+            "body": "assets/whale-girl/startle.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "work3": {
+            "body": "assets/whale-girl/work3.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "tap-left": {
+            "body": "assets/whale-girl/tap-left.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "tap-right": {
+            "body": "assets/whale-girl/tap-right.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          },
+          "tap-flail": {
+            "body": "assets/whale-girl/tap-flail.png",
+            "frames": 16,
+            "box": [
+              0,
+              0,
+              140,
+              168
+            ],
+            "still": 0
+          }
+        },
+        "idleExtras": [
+          "look",
+          "stretch",
+          "startle"
+        ],
+        "tapLeft": "tap-left",
+        "tapRight": "tap-right",
+        "tapFlail": "tap-flail",
+        "sleepAfterMs": 60000
+      }
+    ]
+  }
+}

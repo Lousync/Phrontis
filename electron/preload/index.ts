@@ -885,9 +885,11 @@ const api = {
   // 归档三条通道（ws:setMdStatus / ws:setArchiveStatus / ws:getArchiveEntries）已于 2026-09-20 随归档退役删除
   workspaceCreateFile: (rootId: string, relPath: string, content?: string) => ipcRenderer.invoke("ws:createFile", rootId, relPath, content),
   workspaceCopyFile: (rootId: string, srcRel: string, dstRel: string) => ipcRenderer.invoke("ws:copy", rootId, srcRel, dstRel),
+  // 复制仓库内文件/目录到系统 + 应用内文件剪贴板（B-51）：渲染层只传仓库相对路径
+  workspaceCopyPathsToClipboard: (rootId: string, relPaths: string[]) => ipcRenderer.invoke('ws:copyPathsToClipboard', rootId, relPaths),
   workspaceMkdir: (rootId: string, relPath: string) => ipcRenderer.invoke('ws:mkdir', rootId, relPath),
-  // 粘贴系统剪贴板里的外部文件/目录：srcPaths 由渲染层 paste 事件 + webUtils.getPathForFile 取得
-  // （主进程 clipboard.readBuffer('FileNameW') 实测只能拿到第一条，多选会丢文件——见 ws:pasteExternal 注释）
+  // 粘贴系统剪贴板里的外部文件/目录：srcPaths 由主进程 clipboard:readFilePaths 读取
+  // （渲染层不接触绝对路径；解析见 electron/lib/clipboardFiles.ts）
   workspacePasteExternal: (rootId: string, relDir: string, srcPaths: string[]) => ipcRenderer.invoke('ws:pasteExternal', rootId, relDir, srcPaths),
   workspaceRename: (rootId: string, oldRel: string, newRel: string) => ipcRenderer.invoke('ws:rename', rootId, oldRel, newRel),
   workspaceTrash: (rootId: string, relPath: string) => ipcRenderer.invoke('ws:trash', rootId, relPath),

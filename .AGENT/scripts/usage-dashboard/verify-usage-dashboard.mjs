@@ -180,6 +180,27 @@ ok(/costUsd\?:\s*number\s*\|\s*null/.test(types), 'F3 src/types AgentTraceStep.c
 // F4 MessageList 累加 costUsd 并渲染「估算」
 ok(/s\.costUsd/.test(ml) && /估算/.test(ml), 'F4 TokensOf 读 costUsd 且渲染「估算」小字')
 
+/* ================= G. 账户额度刷新链路（2026-11-09 换 Key 后「未查询」回归） ================= */
+console.log('\n=== G. 账户额度刷新链路 ===')
+const usageModule = stripComments(read('src/modules/usage/index.tsx'))
+
+// G1 主进程：供应商 / 账号变更后广播——换 Key 会生成新 accountId，卡片靠重拉清单才能重新对齐
+ok(/function notifyProviderConfigChanged\(\):\s*void/.test(llm), 'G1a notifyProviderConfigChanged 已定义')
+ok(count(llm, 'notifyProviderConfigChanged()') >= 8,
+  'G1b 保存 / 删除 / 启停供应商、增删改切账号后都广播',
+  `实际调用 ${count(llm, 'notifyProviderConfigChanged()')} 处`)
+
+// G2 渲染层：订阅 settings，且「广播」与「手动刷新」两条链路都连账户清单一起重拉
+//    （只重拉额度视图、留着旧清单的话，旧 accountId 匹配不到新视图 → 一直显示「未查询」）
+ok(/useDataChanged\('settings'/.test(usageModule), 'G2a 用量模块订阅 settings 变更')
+ok(/const fresh = await loadProviders\(\)/.test(usageModule), 'G2b 手动刷新先重拉账户清单')
+ok(count(usageModule, 'await loadProviders()') >= 2, 'G2c 广播与刷新两条链路都重拉清单')
+
+// G3 卡片兜底：accountId 短暂对不上时按 providerId 取唯一视图，不落成「未查询」
+const quotaCards = stripComments(read('src/modules/usage/QuotaCards.tsx'))
+ok(/views\.find\(\(v\) => v\.providerId === providerId\)/.test(quotaCards),
+  'G3 QuotaCards 按 providerId 兜底匹配视图')
+
 console.log(`\n断言: ${pass} PASS, ${fails.length} FAIL`)
 if (fails.length) { console.log('\n失败项：'); for (const f of fails) console.log('  ✗ ' + f) }
 process.exit(fails.length > 0 ? 1 : 0)

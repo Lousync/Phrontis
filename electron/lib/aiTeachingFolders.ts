@@ -257,7 +257,7 @@ export function writeConstraints(sessionId: string, text: string, getSetting: (k
 
 // ===== 全局约束层（.claude/plans/global-constraints.md）=====
 // {产物根}/CONSTRAINTS.md：跨工作区/跨会话共同要求，AgentRunner 每轮重读注入（与画像全局层同哲学）。
-// 优先级链在注入提示词中明示：用户当下消息 > 会话约束 > 全局约束 > 内置人设。
+// 优先级链在注入提示词中明示：系统硬边界 > 用户当前消息 > 本段 > 知识点 > 本课程 > 全局 > 系统默认策略。
 
 const GLOBAL_CONSTRAINTS_SKELETON = [
   '# 全局要求（所有 AI 会话每轮自动遵循）',
@@ -267,7 +267,7 @@ const GLOBAL_CONSTRAINTS_SKELETON = [
   '- 每次先给一句话结论，再展开',
   '- 不确定时明说不确定，不要编造',
   '',
-  '会话文件夹里的 CONSTRAINTS.md 可覆盖本文件的具体条目。',
+  '本段 / 知识点 / 工作区层的 CONSTRAINTS.md 可覆盖本文件的具体条目。',
   '',
 ].join('\n')
 
@@ -305,7 +305,7 @@ export function ensureGlobalConstraints(getSetting: (key: string) => unknown): C
 
 // ===== 工作区约束层（v3.1.2 条目6：三层约束补中间档）=====
 // {AI教学}/{工作区}/CONSTRAINTS.md：本工作区所有会话共同要求，AgentRunner 每轮重读注入。
-// 优先级链：用户当下消息 > 本会话要求 > 工作区要求 > 全局要求 > 内置人设。
+// 优先级链：系统硬边界 > 用户当前消息 > 本段 > 知识点 > 本课程 > 全局 > 系统默认策略。
 // 未归属工作区（sessionWs 无记录）的会话跳过本层（注入零段，不报错）。
 
 const WORKSPACE_CONSTRAINTS_SKELETON = [
@@ -316,7 +316,7 @@ const WORKSPACE_CONSTRAINTS_SKELETON = [
   '- 代码示例统一用 TypeScript',
   '- 每节课结尾附 3 道自测题',
   '',
-  '优先级：用户当下消息 > 本会话要求 > 工作区要求 > 全局要求。',
+  '优先级：用户当前消息 > 本段要求 > 知识点要求 > 本课程要求 > 全局要求。',
   '',
 ].join('\n')
 

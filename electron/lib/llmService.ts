@@ -19,6 +19,7 @@ import {
   interruptionOfStopReason, interruptionDetailOf, STOP_REASON_NO_TERMINATOR,
   type Interruption, type InterruptionDetail, type InterruptCode,
 } from './llmFailurePure'
+import { broadcastDataChanged } from '../main/windowBus'
 import { recordAiUsage, usageKeyOf } from 'phrontis-core/agentUsage'
 
 /**
@@ -1684,6 +1685,18 @@ function saveProviderDraft(draft: {
   return { ok: true, id: p.id }
 }
 
+/**
+ * 供应商 / 账号配置变更广播（2026-11-09）。
+ *
+ * 用量模块的账户额度卡按 `providerId + accountId` 匹配视图，而账户清单只在模块首挂载拉一次；
+ * 换 Key / 加账号 / 切当前账号都会产生新的 accountId，不广播的话卡片会一直显示「未查询」，
+ * 直到重启应用才恢复。scope 复用既有的 'settings'（DataChangeScope 已有值），
+ * 订阅方见 src/modules/usage/index.tsx 的 useDataChanged('settings', …)。
+ */
+function notifyProviderConfigChanged(): void {
+  broadcastDataChanged('settings')
+}
+
 export function registerLlmHandlers(deps: {
   getSettingValue: (key: string) => unknown
   setSettingValue: (key: string, value: unknown) => boolean
@@ -1701,13 +1714,19 @@ export function registerLlmHandlers(deps: {
     headers?: Record<string, string>
     modelFamilies?: Record<string, ModelFamily>
     embeddingModel?: string
-  }) => saveProviderDraft(draft))
+  }) => {
+    const r = saveProviderDraft(draft)
+    if (r.ok) notifyProviderConfigChanged()
+    return r
+  })
 
   ipcMain.handle('llm:ccswitch:list', () => scanCcSwitch())
 
-  ipcMain.handle('llm:ccswitch:import', (_e, ids: string[]) => {
+  ipcMain.handle('llm:ccswitch:import', async (_e, ids: string[]) => {
     if (!Array.isArray(ids)) return { imported: 0, skipped: 0, errors: ['参数非法'] }
-    return importCcSwitchIds(ids.map(String))
+    const r = await importCcSwitchIds(ids.map(String))
+    if (r.imported > 0) notifyProviderConfigChanged()
+    return r
   })
 
   ipcMain.handle('llm:removeProvider', (_e, id: string) => {
@@ -1715,6 +1734,7 @@ export function registerLlmHandlers(deps: {
     deps.setSettingValue('modelProviders', JSON.stringify(list))
     const def = String(deps.getSettingValue('defaultChatModel') ?? '')
     if (def.startsWith(`${id}:`)) deps.setSettingValue('defaultChatModel', '')
+    notifyProviderConfigChanged()
     return { ok: true }
   })
 
@@ -1724,6 +1744,7 @@ export function registerLlmHandlers(deps: {
     if (!p) return { ok: false, error: '供应商不存在' }
     p.enabled = Boolean(enabled)
     deps.setSettingValue('modelProviders', JSON.stringify(list))
+    notifyProviderConfigChanged()
     return { ok: true }
   })
 
@@ -1739,6 +1760,7 @@ export function registerLlmHandlers(deps: {
     const name = String(payload?.name ?? '').trim()
     const acct = appendAccount(p, { name, keyEncrypted: key ? encryptSecret(key) : '' }, randomUUID)
     saveProviders(list)
+    notifyProviderConfigChanged()
     return { ok: true, id: acct.id, accounts: (p.accounts ?? []).map(sanitizeAccount), activeAccountId: acct.id }
   })
 
@@ -1755,6 +1777,7 @@ export function registerLlmHandlers(deps: {
     p.activeAccountId = acct.id
     p.apiKeyEncrypted = acct.keyEncrypted // 兼容镜像
     saveProviders(list)
+    notifyProviderConfigChanged()
     return { ok: true, activeAccountId: acct.id }
   })
 
@@ -1772,6 +1795,7 @@ export function registerLlmHandlers(deps: {
     }
     if (acct.id === p.activeAccountId) p.apiKeyEncrypted = acct.keyEncrypted
     saveProviders(list)
+    notifyProviderConfigChanged()
     return { ok: true, accounts: (p.accounts ?? []).map(sanitizeAccount) }
   })
 
@@ -1782,6 +1806,7 @@ export function registerLlmHandlers(deps: {
     if (!p) return { ok: false, error: '供应商不存在' }
     if (!removeAccount(p, accountId)) return { ok: false, error: '账号不存在' }
     saveProviders(list)
+    notifyProviderConfigChanged()
     return { ok: true, accounts: (p.accounts ?? []).map(sanitizeAccount), activeAccountId: p.activeAccountId ?? '' }
   })
 

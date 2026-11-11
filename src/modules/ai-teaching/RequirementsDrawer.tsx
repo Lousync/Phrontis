@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 import {
   aiTeachReadConstraints, aiTeachScopeEnsure, aiTeachScopeRead, aiTeachScopeWriteText, aiTeachWriteConstraints,
 } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
+import { CONSTRAINT_INJECT_MAX_CHARS, CONSTRAINT_INJECT_MAX_ITEMS, exceedsConstraintInjectLimit } from './constraintsParse'
 
 /** 3.14 要求抽屉：全局 / 本课程 / 本知识点 / 本段（CONSTRAINTS.md，四层注入不变）。 */
 
@@ -14,6 +15,8 @@ interface Props {
   wsName: string
   unitId?: string | null
   segmentSessionId?: string | null
+  /** 外部写入（AI 工具 / 编辑器保存）后的重读信号；变化时重新拉当前层 */
+  reloadKey?: number
   layer: ReqLayer
   onLayer: (l: ReqLayer) => void
   onClose: () => void
@@ -27,15 +30,23 @@ const LAYERS: Array<{ key: ReqLayer; label: string }> = [
 ]
 
 export function RequirementsDrawer(props: Props) {
-  const { wsId, wsName, unitId, segmentSessionId, layer, onLayer, onClose } = props
+  const { wsId, wsName, unitId, segmentSessionId, reloadKey, layer, onLayer, onClose } = props
   const [text, setText] = useState('')
   const [relPath, setRelPath] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  /** 当前层 / 未保存草稿：外部写盘触发 reloadKey 时不覆盖正在编辑的内容 */
+  const lastContextRef = useRef('')
+  const dirtyRef = useRef(false)
 
   const canUse = (l: ReqLayer): boolean => (l !== 'unit' || !!unitId) && (l !== 'segment' || !!segmentSessionId)
 
   const load = useCallback(async () => {
+    const contextKey = `${wsId}|${unitId ?? ''}|${segmentSessionId ?? ''}|${layer}`
+    const contextChanged = lastContextRef.current !== contextKey
+    // 外部写盘触发重读时，用户有未保存草稿 → 不覆盖（切层 / 换会话仍照常载入）
+    if (!contextChanged && dirtyRef.current) { setLoading(false); return }
+    lastContextRef.current = contextKey
     setLoading(true); setText(''); setRelPath(null)
     try {
       if (layer === 'segment') {
@@ -49,10 +60,14 @@ export function RequirementsDrawer(props: Props) {
         setText(r?.ok ? (r.text ?? '') : '')
         setRelPath(r?.relPath ?? null)
       }
+      dirtyRef.current = false
     } finally { setLoading(false) }
-  }, [layer, wsId, unitId, segmentSessionId])
+  }, [layer, wsId, unitId, segmentSessionId, reloadKey])
 
   useEffect(() => { void load() }, [load])
+
+  // 一行内联轻提示：只在当前内容会被注入层截断时出现（与主进程 cutScopeLayer 同口径）
+  const overInjectLimit = !loading && exceedsConstraintInjectLimit(text)
 
   const save = async (): Promise<void> => {
     setSaving(true)
@@ -69,6 +84,7 @@ export function RequirementsDrawer(props: Props) {
         if (!r?.ok) { showToast({ type: 'error', message: r?.error ?? '保存失败' }); return }
         setRelPath(r.relPath ?? relPath)
       }
+      dirtyRef.current = false
       showToast({ type: 'success', message: '要求已保存' })
     } finally { setSaving(false) }
   }
@@ -95,11 +111,19 @@ export function RequirementsDrawer(props: Props) {
       ) : (
         <textarea
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => { dirtyRef.current = true; setText(e.target.value) }}
           spellCheck={false}
           placeholder={layer === 'unit' && !unitId ? '先选一个知识点' : '把这一层的要求写在这里，例如：\n· 只用中文回答\n· 先给结论再展开\n（留空保存 = 清除）'}
           className="flex-1 min-h-0 m-2 px-2.5 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[11.5px] leading-relaxed text-[var(--text-primary)] outline-none focus:border-[var(--accent)] resize-none"
         />
+      )}
+      {overInjectLimit && (
+        <div
+          title={`每层注入上限 ${CONSTRAINT_INJECT_MAX_ITEMS} 条 / ${CONSTRAINT_INJECT_MAX_CHARS} 字符；超出部分不会进入 AI 上下文`}
+          className="shrink-0 px-3 pb-1 text-[9.5px] leading-snug text-[var(--text-muted)] truncate"
+        >
+          超出注入上限（{CONSTRAINT_INJECT_MAX_ITEMS} 条 / {CONSTRAINT_INJECT_MAX_CHARS} 字符），超出部分不会注入
+        </div>
       )}
       <div className="shrink-0 flex items-center gap-1.5 px-3 py-2 border-t border-[var(--border-color)]">
         <span className="text-[9.5px] text-[var(--text-muted)]">分层注入：全局 → 本课程 → 本知识点 → 本段</span>

@@ -249,6 +249,9 @@ check('迁移前备份 progress/favorites/sources', /backupLayoutMeta/.test(cour
 check('迁移计划走纯函数', /planCourseLayoutMigration\(/.test(course) && /collectLayoutSnapshot\(/.test(course))
 check('段会话 archive target 限制', /inOwner && !isCourseAssistantSession\(sid, getSetting\)/.test(course) && /本段产物只能写入本段目录/.test(course))
 check('archive 工具描述说明段会话不要 target', /段会话不要填 target/.test(tools) && /课程助手才可以用 target/.test(tools))
+check('段会话 archive 拒绝时指向 vault.write（教材 / 知识库正文）', /教材 \/ 知识库正文请用 vault\.write/.test(course))
+check('archive 拒绝 SOURCES 目录（硬边界）', /toUpperCase\(\) === 'SOURCES'/.test(course))
+check('archive 拒绝 课程.md 标题', /titleBase === '课程'/.test(course))
 
 check('建夹不再播种 CONSTRAINTS 模板', !/seedConstraintsFromTemplate/.test(folders) && !/CONSTRAINTS_TEMPLATE_REL_SEGMENTS/.test(folders))
 check('会话扫描跳过 知识点 元数据夹', /e\.name === '知识点'/.test(folders))

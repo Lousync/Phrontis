@@ -22,22 +22,35 @@
  *   §9 组播发现应答器（UDP 发现：与手机端 Java 常量对表 / ping 应答构型 / 非 ping 不应答 / stop 生效 / 入参跟随）
  *   §10 地址推荐与状态视图（WP1/WP7：orderLanAddresses 排序 / urls 不嵌过期码 / 过期请求过滤 /
  *        /api/unpair 双向解除 / revokeDevice 运行中失效 / onClientSeen 来源上报）
+ *   §11 文件通道 v1（iPad 交接 / 批注回传：命名 / 过滤 / 魔数 / tree / content / upload /
+ *        重名不覆盖 / 413 / 415 / 中断清理 / 符号链接逃逸 / features 能力位）
+ *   §12 lanShare 公共 multipart 解析器回归（抽取核心后收件箱命名行为不变）
  *
  * 运行（主仓根目录）：
  *   node --experimental-strip-types --no-warnings .AGENT/scripts/phone-companion/verify-companion-protocol.mjs
  * 期望：末尾 PASS 且 exit=0
  */
 
-import { readFileSync, statSync } from 'node:fs'
+import { readFileSync, statSync, mkdtempSync, mkdirSync, writeFileSync, readdirSync, existsSync, rmSync, symlinkSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { tmpdir } from 'node:os'
+import { createHash } from 'node:crypto'
+import http from 'node:http'
 
 import { createCompanionServer } from '../../../electron/lib/phoneCompanion/server.ts'
 import {
-  SYNC_DOMAINS, PROTOCOL_VERSION, DEFAULT_PORT, PULL_WAIT_CAP_MS,
+  SYNC_DOMAINS, PROTOCOL_VERSION, DEFAULT_PORT, PULL_WAIT_CAP_MS, COMPANION_FEATURES,
   normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData,
+  normalizeHabitData, normalizeHabitRecordData, habitRecordId, parseHabitRecordId,
   shouldApplyIncoming, buildPairUrl, parsePairInput, pairingCapabilities,
 } from '../../../electron/lib/phoneCompanion/protocol.ts'
+import {
+  ANNOTATED_DIR, MAX_PDF_UPLOAD_BYTES,
+  annotatedPdfName, pickAnnotatedPdfName, isPdfMagic, isHandoffPdfPage, listHandoffPdfs,
+  resolvePdfAbs, saveAnnotatedPdfUpload,
+} from '../../../electron/lib/phoneCompanion/fileTransfer.ts'
+import { parseMultipartUpload } from '../../../electron/lib/lanShare/multipart.ts'
 import {
   sanitizeNoteStem, deviceFolderName, pickNoteFileName, parseNoteFrontmatter,
   bumpNoteFrontmatterUpdated, notePushDecision, isMobileNotesRel,
@@ -68,12 +81,14 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const CODE = '12345678'
 
 /** 内存依赖 + 起一只真服务器；返回 { port, url, setCode, store, scheduleStore, tombstones } */
-async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest = true } = {}) {
+async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest = true, filesRoot = null, pdfPages = [], pdfMaxBytes = 0 } = {}) {
   let devices = []
   const pairRequests = [] // v1.5：{ view, approve, reject }（模拟渲染层确认框留下的手柄）
   const store = new Map() // id -> { id, updatedAt, data }（ledger）
   const scheduleStore = new Map() // id -> { id, updatedAt, data }（schedule）
   const notesStore = new Map() // id -> { id, updatedAt, data }（notes）
+  const habitStore = new Map() // id -> { id, updatedAt, data }（habit 定义）
+  const habitRecordStore = new Map() // id -> { id, updatedAt, data }（habit 记录，id=hr:...）
   const notesPulls = [] // v1.6：listNotesSince 调用记录 { device, sinceMs }
   let notesPullChanges = [] // v1.6：下一次 pull 的 changes.notes 注入值
   const noteTree = [
@@ -82,6 +97,8 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
   const tombstones = [] // { domain, id, deletedAt }
   const clientSeens = [] // §10：onClientSeen 来源 IP 上报记录（discover / pair/request / ping）
   let pairCode = code ? { code, expiresAt } : null
+  /** 2026-11-09：无仓 fail-closed 契约开关（pull 409 / push reason:'no-vault'） */
+  let hasVault = true
   const upsert = (dom, map, item) => {
     // 与生产 repo 同规则：已墓碑的 id 收到不早于墓碑的 upsert → 拒绝复活（vaultScheduleSyncUpsert / vaultAccountingSyncUpsert 内同款）
     const ts = tombstones.find(t => t.domain === dom && t.id === item.id)
@@ -94,13 +111,32 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
   const server = createCompanionServer({
     loadDevices: () => devices,
     saveDevices: (l) => { devices = l.slice() },
+    hasVault: () => hasVault,
     getPairCode: () => pairCode,
     consumePairCode: () => { pairCode = null },
     applyLedger: (item) => upsert('ledger', store, item),
     applySchedule: (item) => upsert('schedule', scheduleStore, item),
     // v1.6：mock 与生产同规则做 LWW（同刻桌面赢 → conflict，手机以服务端版本收敛）
     applyNote: (item) => upsert('notes', notesStore, item),
+    applyHabit: (item) => item.data.kind === 'habit' ? upsert('habit', habitStore, item) : upsert('habit', habitRecordStore, item),
     applyDelete: (domain, id, deletedAt) => {
+      if (domain === 'habit') {
+        if (String(id).startsWith('hr:')) {
+          const cur = habitRecordStore.get(id)
+          if (cur && !(deletedAt > cur.updatedAt)) return { applied: false, conflict: true, reason: 'server-newer' }
+          habitRecordStore.delete(id)
+          tombstones.push({ domain, id, deletedAt })
+          return { applied: true }
+        }
+        const cur = habitStore.get(id)
+        if (cur && !(deletedAt > cur.updatedAt)) return { applied: false, conflict: true, reason: 'server-newer' }
+        habitStore.delete(id)
+        for (const [rid, r] of [...habitRecordStore]) {
+          if (r.data.habitId === id) { habitRecordStore.delete(rid); tombstones.push({ domain, id: rid, deletedAt }) }
+        }
+        tombstones.push({ domain, id, deletedAt })
+        return { applied: true }
+      }
       // v1.6：notes 墓碑同样合法（手机清空标题保存 = 删除）——三分域统一走本 mock
       const map = domain === 'schedule' ? scheduleStore : domain === 'notes' ? notesStore : store
       const cur = map.get(id)
@@ -113,6 +149,7 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
     },
     listLedgerSince: (sinceMs) => [...store.values()].filter(x => Date.parse(x.updatedAt) > sinceMs),
     listScheduleSince: (sinceMs) => [...scheduleStore.values()].filter(x => Date.parse(x.updatedAt) > sinceMs),
+    listHabitChangesSince: (sinceMs) => [...habitStore.values(), ...habitRecordStore.values()].filter(x => Date.parse(x.updatedAt) > sinceMs),
     listNotesSince: (device, sinceMs) => {
       notesPulls.push({ device, sinceMs })
       return notesPullChanges
@@ -122,6 +159,28 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
     readNoteContent: (id) => id === 'p-1'
       ? { title: 'AI教学模块笔记', updatedAt: '2026-11-01T00:00:00.000Z', body: '# AI教学模块笔记\n\n正文', truncated: undefined }
       : null,
+    // §11 文件通道：用真实 fs 触达层（临时 vault），路由与实现一起测
+    listPdfFiles: () => (filesRoot ? listHandoffPdfs(pdfPages) : []),
+    openPdfFile: (id) => {
+      const page = filesRoot ? pdfPages.find(p => p.id === id) : null
+      if (!page || !isHandoffPdfPage(page)) return { ok: false, status: 404 }
+      const absPath = resolvePdfAbs(filesRoot, page.path)
+      if (!absPath) return { ok: false, status: 403 }
+      try {
+        return { ok: true, absPath, name: page.path.split('/').pop(), size: statSync(absPath).size }
+      } catch {
+        return { ok: false, status: 404 }
+      }
+    },
+    savePdfUpload: async (req) => {
+      if (!filesRoot) return { ok: false, status: 409, error: '电脑端尚未打开仓库' }
+      try {
+        const file = await saveAnnotatedPdfUpload(filesRoot, req, pdfMaxBytes ? { maxBytes: pdfMaxBytes } : undefined)
+        return { ok: true, file }
+      } catch (e) {
+        return { ok: false, status: e?.status ?? 500, error: e?.message ?? '上传处理失败' }
+      }
+    },
     pcName: () => 'TEST-PC',
     onClientSeen: (ip) => { clientSeens.push(ip) },
     ...(pairRequest ? { onPairRequest: (view, handlers) => pairRequests.push({ view, approve: handlers.approve, reject: handlers.reject }) } : {}),
@@ -135,6 +194,8 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
     store,
     scheduleStore,
     notesStore,
+    habitStore,
+    habitRecordStore,
     notesPulls,
     clientSeens,
     setNotesPullChanges: (v) => { notesPullChanges = v },
@@ -142,6 +203,7 @@ async function boot({ code = CODE, expiresAt = Date.now() + 60_000, pairRequest 
     devices: () => devices,
     pairRequests,
     setCode: (c) => { pairCode = c },
+    setHasVault: (v) => { hasVault = !!v },
     post: (path, body, headers) => fetch('http://127.0.0.1:' + port + path, {
       method: 'POST', headers: { 'content-type': 'application/json', ...(headers || {}) },
       body: JSON.stringify(body),
@@ -355,6 +417,68 @@ console.log('\n§4b schedule 域（合法并入 / 非法负载 / LWW / 拉取）
   const sp = await (await s.post('/api/sync/pull', { since: { schedule: 0, ledger: Date.now() + 99999 } }, auth)).json()
   check('pull 分域：schedule 有增量、ledger 过滤后为空', sp.changes.schedule.length === 2 && sp.changes.ledger.length === 0)
   check('pull 游标双域返回', typeof sp.cursor.schedule === 'number' && typeof sp.cursor.ledger === 'number')
+  await s.close()
+}
+
+/* ------------------------------------------------------------------ §4f */
+console.log('\n§4b2 无仓 fail-closed（2026-11-09：pull 不返回 cursor / push reason:no-vault）')
+{
+  const s = await boot()
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: '测试机' })).json()).deviceToken
+  const auth = { authorization: 'Bearer ' + token }
+  const schedData = { date: '2026-11-02', title: '无仓测试', type: 'plan', time: '', done: false, parentId: null, schedStart: null, schedEnd: null }
+
+  s.setHasVault(false)
+  const pullRes = await s.post('/api/sync/pull', { since: { ledger: 0, schedule: 0, notes: 0 } }, auth)
+  check('无仓 pull 拒绝（409）', pullRes.status === 409)
+  const pullBody = await pullRes.json()
+  check('无仓 pull 不带 cursor（手机不推进游标）', !('cursor' in pullBody))
+
+  const pushBody = await (await s.post('/api/sync/push', { deviceId: 'd1', changes: [{ domain: 'schedule', id: 'td-nv', updatedAt: iso(t0), data: schedData }] }, auth)).json()
+  check('无仓 push 回 no-vault', pushBody.results[0].applied === false && pushBody.results[0].reason === 'no-vault')
+  check('无仓 push 不落库', !s.scheduleStore.has('td-nv'))
+
+  s.setHasVault(true)
+  const okPull = await (await s.post('/api/sync/pull', { since: { ledger: 0, schedule: 0, notes: 0 } }, auth)).json()
+  check('恢复仓库后 pull 正常返回 cursor', typeof okPull.cursor.schedule === 'number')
+  await s.close()
+}
+
+/* ------------------------------------------------------------------ §4c */
+console.log('\n§4b3 habit 域（定义 + 记录 + 墓碑 + 全量）')
+{
+  const s = await boot()
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: '测试机' })).json()).deviceToken
+  const auth = { authorization: 'Bearer ' + token }
+  const push = (changes) => s.post('/api/sync/push', { deviceId: 'd1', changes }, auth)
+
+  const hd = normalizeHabitData({ kind: 'habit', name: '背单词', color: '#f00', target: 9, remind: 480, archived: false })
+  check('habit 定义规范化（target 夹取 1..7 / remind 保留）', hd?.name === '背单词' && hd.target === 7 && hd.remind === 480)
+  check('habit 缺名称拒绝', normalizeHabitData({ kind: 'habit', name: ' ' }) === null)
+  check('habit remind 越界回落 null', normalizeHabitData({ kind: 'habit', name: 'x', remind: 9999 })?.remind === null)
+  const rd = normalizeHabitRecordData({ kind: 'record', habitId: 'h1', date: '2026-11-09' })
+  check('habit 记录规范化', rd?.habitId === 'h1' && rd.date === '2026-11-09')
+  check('habit 记录坏日期拒绝', normalizeHabitRecordData({ kind: 'record', habitId: 'h1', date: '11-09' }) === null)
+  check('habitRecordId / parseHabitRecordId 互逆', parseHabitRecordId(habitRecordId('h1', '2026-11-09'))?.habitId === 'h1')
+
+  const habitData = { kind: 'habit', name: '背单词', color: '#3B82F6', target: 3, remind: null, archived: false }
+  const r1 = await (await push([{ domain: 'habit', id: 'h1', updatedAt: iso(t0), data: habitData }])).json()
+  check('habit 定义上行 applied', r1.results[0].applied === true && s.habitStore.has('h1'))
+
+  const recId = habitRecordId('h1', '2026-11-09')
+  const r2 = await (await push([{ domain: 'habit', id: recId, updatedAt: iso(t0 + 1000), data: { kind: 'record', habitId: 'h1', date: '2026-11-09' } }])).json()
+  check('habit 记录上行 applied', r2.results[0].applied === true && s.habitRecordStore.has(recId))
+
+  const p1 = await (await s.post('/api/sync/pull', { since: { ledger: 0, schedule: 0, notes: 0, habit: 0 } }, auth)).json()
+  check('habit pull 全量含定义 + 记录、cursor.habit', p1.changes.habit.length === 2 && typeof p1.cursor.habit === 'number')
+
+  const r3 = await (await push([{ domain: 'habit', id: recId, updatedAt: iso(t0 + 2000), data: { deleted: true } }])).json()
+  check('habit 取消打卡 applied', r3.results[0].applied === true && !s.habitRecordStore.has(recId))
+  const p2 = await (await s.post('/api/sync/pull', { since: { ledger: 0, schedule: 0, notes: 0, habit: 0 } }, auth)).json()
+  check('habit 记录墓碑下行', p2.tombstones.some(t => t.domain === 'habit' && t.id === recId))
+
+  const r4 = await (await push([{ domain: 'habit', id: 'h1', updatedAt: iso(t0 + 3000), data: { deleted: true } }])).json()
+  check('habit 删除 applied', r4.results[0].applied === true && !s.habitStore.has('h1'))
   await s.close()
 }
 
@@ -603,7 +727,7 @@ console.log('\n§6 协议文档契约（design.md §2.1 与实现一致）')
   check('协议域清单非空', SYNC_DOMAINS.length >= 1)
   // v1.1 契约
   check('§2.1 v1.1 域范围含 schedule', design.includes('`ledger` + `schedule`（日程）'))
-  check('SYNC_DOMAINS = [ledger, schedule, notes]', eq([...SYNC_DOMAINS], ['ledger', 'schedule', 'notes']))
+  check('SYNC_DOMAINS = [ledger, schedule, notes, habit]', eq([...SYNC_DOMAINS], ['ledger', 'schedule', 'notes', 'habit']))
   check('§2.1 记录墓碑上行负载 { deleted: true }', design.includes('{ deleted: true }'))
   check('§2.1 记录墓碑存储路径', design.includes('phoneCompanion/tombstones.json'))
   check('§2.1 记录游标只在 pull 后推进', design.includes('只在 pull 完成后推进'))
@@ -620,6 +744,14 @@ console.log('\n§6 协议文档契约（design.md §2.1 与实现一致）')
   check('§2.1 v1.7 记录同设备顶掉语义', design.includes('顶掉'))
   // 双向解除契约（2026-11-08 配对链路修复）
   check('§2.2 记录 /api/unpair 双向解除端点', design.includes('/api/unpair'))
+  // v1.9 文件通道契约（design.md §2.3，2026-11-10）
+  check('§2.3 记录文件通道三端点', design.includes('/api/files/tree') && design.includes('/api/files/content') && design.includes('/api/files/upload'))
+  check('§2.3 记录回传目录 iPad 批注/', design.includes('iPad 批注'))
+  check('§2.3 记录只列 PDF + 副本不覆盖', design.includes('只列 `.pdf`') && design.includes('不覆盖'))
+  check('§2.3 记录 features 能力位', design.includes('features') && design.includes('files'))
+  check('COMPANION_FEATURES = [files]', eq([...COMPANION_FEATURES], ['files']))
+  check('文件通道上限 200MB', MAX_PDF_UPLOAD_BYTES === 200 * 1024 * 1024)
+  check('回传目录名与文档一致', ANNOTATED_DIR === 'iPad 批注')
 }
 
 /* ------------------------------------------------------------------ §9 */
@@ -823,6 +955,222 @@ console.log('\n§10 地址推荐与状态视图（WP1/WP7：docker 网桥不推�
     // 上报点 = discover / pair/request / 成功 ping（401 在鉴权层就被拒，到不了上报）
     check('§10b ping 也上报来源（持续修正推荐）', s.clientSeens.filter(x => x === '127.0.0.1').length >= 3)
   } finally { await s.close() }
+}
+
+/* ------------------------------------------------------------------ §11 */
+console.log('\n§11 文件通道 v1（iPad 交接 / 批注回传，design.md §2.3）')
+{
+  // ---- 纯函数：命名 / 魔数 / 过滤 ----
+  check('回传命名：追加（批注）', annotatedPdfName('讲义 03.pdf') === '讲义 03（批注）.pdf')
+  check('回传命名：已带全角（批注）不重复', annotatedPdfName('讲义 03（批注）.pdf') === '讲义 03（批注）.pdf')
+  check('回传命名：已带半角(批注)不重复且强制小写 .pdf', annotatedPdfName('讲义 03(批注).PDF') === '讲义 03(批注).pdf')
+  check('回传命名：非 pdf 扩展强转 .pdf', annotatedPdfName('笔记.docx') === '笔记（批注）.pdf')
+  check('回传命名：路径与 Windows 非法字符清理', (() => {
+    const n = annotatedPdfName('../../a:b*c?"<>|.pdf')
+    return !/[\\/:*?"<>|]/.test(n) && n.endsWith('（批注）.pdf')
+  })())
+  check('回传命名：空名兜底', annotatedPdfName('   ') === '未命名（批注）.pdf')
+  check('回传命名：Windows 保留名加前缀', annotatedPdfName('CON.pdf') === '_CON（批注）.pdf')
+  check('重名 (2) 后缀', pickAnnotatedPdfName(new Set(['讲义 03（批注）.pdf']), '讲义 03.pdf') === '讲义 03（批注） (2).pdf')
+  const crowded = new Set(['x（批注）.pdf'])
+  for (let i = 2; i <= 100; i++) crowded.add(`x（批注） (${i}).pdf`)
+  check('重名 100 次仍冲突 → null（调用方 409）', pickAnnotatedPdfName(crowded, 'x.pdf') === null)
+  check('PDF 魔数：%PDF- 通过', isPdfMagic(Buffer.from('%PDF-1.7')))
+  check('PDF 魔数：PNG / 过短拒绝', !isPdfMagic(Buffer.from('PNG\x00')) && !isPdfMagic(Buffer.from('%PD')))
+
+  const page = (over = {}) => ({
+    id: 'auto:x.pdf', title: 'x', path: 'x.pdf', categoryId: null, tags: [], starred: false,
+    sortOrder: 0, fileType: 'pdf', attachmentId: '', createdAt: '', updatedAt: '',
+    mtimeMs: 1, outgoingTitles: [], frontmatter: {}, entryKind: 'file', sizeBytes: 1, ...over,
+  })
+  check('过滤：pdf file 条目入选', isHandoffPdfPage(page()))
+  check('过滤：md doc 排除', !isHandoffPdfPage(page({ entryKind: 'doc', fileType: 'md', path: 'a.md' })))
+  check('过滤：非 pdf 文件排除', !isHandoffPdfPage(page({ fileType: 'txt', path: 'a.txt' })))
+  check('过滤：移动端子树排除', !isHandoffPdfPage(page({ path: '移动端/手机/x.pdf' })))
+  check('过滤：系统 / 隐藏段排除',
+    !isHandoffPdfPage(page({ path: '.knowbase/x.pdf' }))
+    && !isHandoffPdfPage(page({ path: '.attachments/x.pdf' }))
+    && !isHandoffPdfPage(page({ path: '_attachments/x.pdf' }))
+    && !isHandoffPdfPage(page({ path: '_inbox/x.pdf' })))
+  check('过滤：.. 段排除（路径穿越）', !isHandoffPdfPage(page({ path: '../x.pdf' })))
+
+  // ---- 临时 vault（真 fs 触达层）----
+  const root = mkdtempSync(join(tmpdir(), 'phrontis-handoff-'))
+  const pdfDir = join(root, '课程', '线性代数')
+  mkdirSync(pdfDir, { recursive: true })
+  const pdfBytes = Buffer.from('%PDF-1.7\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n' + 'a'.repeat(300))
+  const originalAbs = join(pdfDir, '讲义 03.pdf')
+  writeFileSync(originalAbs, pdfBytes)
+  writeFileSync(join(pdfDir, '讲义 03.txt'), 'plain text, not a pdf')
+  writeFileSync(join(pdfDir, '笔记.md'), '# md')
+  mkdirSync(join(root, '移动端', '手机'), { recursive: true })
+  writeFileSync(join(root, '移动端', '手机', '手机里的.pdf'), pdfBytes)
+  mkdirSync(join(root, '.knowbase'), { recursive: true })
+  writeFileSync(join(root, '.knowbase', '隐藏.pdf'), pdfBytes)
+
+  const originalStat = statSync(originalAbs)
+  const pdfPages = [
+    page({ id: 'auto:课程/线性代数/讲义 03.pdf', title: '讲义 03', path: '课程/线性代数/讲义 03.pdf', sizeBytes: pdfBytes.length, mtimeMs: originalStat.mtimeMs }),
+    page({ id: 'auto:课程/线性代数/笔记.md', title: '笔记', path: '课程/线性代数/笔记.md', fileType: 'md', entryKind: 'doc' }),
+    page({ id: 'auto:课程/线性代数/讲义 03.txt', title: '讲义 03.txt', path: '课程/线性代数/讲义 03.txt', fileType: 'txt' }),
+    page({ id: 'auto:移动端/手机/手机里的.pdf', title: '手机里的', path: '移动端/手机/手机里的.pdf', sizeBytes: pdfBytes.length }),
+    page({ id: 'auto:.knowbase/隐藏.pdf', title: '隐藏', path: '.knowbase/隐藏.pdf' }),
+    page({ id: 'auto:_attachments/旧.pdf', title: '旧', path: '_attachments/旧.pdf' }),
+    page({ id: 'auto:../逃逸.pdf', title: '逃逸', path: '../逃逸.pdf' }),
+  ]
+  const listed = listHandoffPdfs(pdfPages)
+  check('清单只含可交接 PDF（中文路径保留）',
+    listed.length === 1 && listed[0].path === '课程/线性代数/讲义 03.pdf' && listed[0].sizeBytes === pdfBytes.length,
+    JSON.stringify(listed.map(x => x.path)))
+
+  const sha = (buf) => createHash('sha256').update(buf).digest('hex')
+  const annotatedDir = join(root, ANNOTATED_DIR)
+  const tmpFiles = () => (existsSync(annotatedDir) ? readdirSync(annotatedDir).filter(n => n.startsWith('.kb-tmp-')) : [])
+  const form = (name, bytes) => {
+    const fd = new FormData()
+    fd.append('file', new Blob([bytes], { type: 'application/pdf' }), name)
+    return fd
+  }
+
+  const s = await boot({ filesRoot: root, pdfPages })
+  const token = (await (await s.post('/api/pair', { code: CODE, deviceName: 'iPad' })).json()).deviceToken
+  const auth = { authorization: 'Bearer ' + token }
+  const upload = (name, bytes) => fetch(s.base + '/api/files/upload', { method: 'POST', headers: auth, body: form(name, bytes) })
+  try {
+    check('files 端点无令牌 401', (await s.get('/api/files/tree')).status === 401)
+
+    const ping = await (await s.get('/api/ping', auth)).json()
+    check('ping 带 features: [files]', Array.isArray(ping.features) && ping.features.includes('files'))
+
+    const tree = await (await s.get('/api/files/tree', auth)).json()
+    check('files/tree 返回 generatedAt + 只有 PDF',
+      tree.ok === true && typeof tree.generatedAt === 'number'
+      && tree.files.length === 1 && tree.files[0].path === '课程/线性代数/讲义 03.pdf'
+      && tree.files[0].fileType === 'pdf' && typeof tree.files[0].mtimeMs === 'number')
+
+    const id = pdfPages[0].id
+    const dl = await s.get('/api/files/content?id=' + encodeURIComponent(id), auth)
+    const dlBytes = Buffer.from(await dl.arrayBuffer())
+    check('content 200 + application/pdf', dl.status === 200 && dl.headers.get('content-type') === 'application/pdf')
+    check('content 与磁盘 sha256 一致', sha(dlBytes) === sha(pdfBytes))
+    check('content-length 正确', Number(dl.headers.get('content-length')) === pdfBytes.length)
+    check('中文 Content-Disposition 正确',
+      dl.headers.get('content-disposition') === `attachment; filename*=UTF-8''${encodeURIComponent('讲义 03.pdf')}`)
+    check('content nosniff + no-store',
+      dl.headers.get('x-content-type-options') === 'nosniff' && dl.headers.get('cache-control') === 'no-store')
+    check('content 未知 id 404', (await s.get('/api/files/content?id=nope', auth)).status === 404)
+    check('content 非 PDF 404', (await s.get('/api/files/content?id=' + encodeURIComponent(pdfPages[2].id), auth)).status === 404)
+    check('content 缺 id 404', (await s.get('/api/files/content', auth)).status === 404)
+    check('content 路径穿越条目 404（.. 被过滤）', (await s.get('/api/files/content?id=' + encodeURIComponent(pdfPages[6].id), auth)).status === 404)
+
+    // 上传：中文名 → iPad 批注/<原名>（批注）.pdf；原文件不动
+    const up1 = await upload('讲义 03.pdf', pdfBytes)
+    const up1Body = await up1.json()
+    check('upload 200 且落到 iPad 批注/原名（批注）.pdf',
+      up1.status === 200 && up1Body.file.name === '讲义 03（批注）.pdf'
+      && up1Body.file.path === 'iPad 批注/讲义 03（批注）.pdf',
+      JSON.stringify(up1Body))
+    check('回传副本字节与原文件一致',
+      readFileSync(join(root, up1Body.file.path)).equals(pdfBytes) && up1Body.file.size === pdfBytes.length)
+    check('原文件内容与 mtime 未被改动',
+      readFileSync(originalAbs).equals(pdfBytes) && statSync(originalAbs).mtimeMs === originalStat.mtimeMs)
+
+    const up2 = await upload('讲义 03.pdf', pdfBytes)
+    const up2Body = await up2.json()
+    check('重名生成 (2) 且不覆盖', up2.status === 200 && up2Body.file.name === '讲义 03（批注） (2).pdf')
+    check('两份副本都在', readFileSync(join(root, 'iPad 批注/讲义 03（批注）.pdf')).equals(pdfBytes)
+      && readFileSync(join(root, 'iPad 批注/讲义 03（批注） (2).pdf')).equals(pdfBytes))
+
+    const up3 = await upload('设计心理学（批注）.pdf', pdfBytes)
+    const up3Body = await up3.json()
+    check('已带（批注）后缀不重复追加', up3.status === 200 && up3Body.file.name === '设计心理学（批注）.pdf')
+
+    const bad = await upload('伪装.pdf', Buffer.from('PNG\x00 definitely not a pdf'))
+    check('非 PDF（魔数不对）415', bad.status === 415)
+    check('415 后无 .kb-tmp 残留', tmpFiles().length === 0, JSON.stringify(tmpFiles()))
+
+    const empty = await upload('空.pdf', Buffer.alloc(0))
+    check('空文件 400', empty.status === 400)
+    check('空文件后无 .kb-tmp 残留', tmpFiles().length === 0)
+
+    const notMultipart = await s.post('/api/files/upload', { hello: 1 }, auth)
+    check('非 multipart 400', notMultipart.status === 400)
+
+    // 上传中断（真实半包 socket）：handler 必须结算并清掉临时文件
+    await new Promise((done) => {
+      const rq = http.request({
+        host: '127.0.0.1', port: s.port, path: '/api/files/upload', method: 'POST',
+        headers: {
+          authorization: 'Bearer ' + token,
+          'content-type': 'multipart/form-data; boundary=XBOUND',
+          'content-length': '1000000',
+        },
+      })
+      rq.on('error', () => done())
+      rq.write('--XBOUND\r\nContent-Disposition: form-data; name="file"; filename="中断.pdf"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.7\npartial')
+      setTimeout(() => { rq.destroy(); done() }, 120)
+    })
+    await new Promise(r => setTimeout(r, 400))
+    check('中断上传后无 .kb-tmp 残留', tmpFiles().length === 0, JSON.stringify(tmpFiles()))
+
+    // 符号链接逃逸（平台不支持建链时跳过）
+    const outsideDir = mkdtempSync(join(tmpdir(), 'phrontis-outside-'))
+    writeFileSync(join(outsideDir, 'secret.pdf'), Buffer.from('%PDF-1.7 secret'))
+    let linkMade = false
+    try { symlinkSync(join(outsideDir, 'secret.pdf'), join(pdfDir, '链接.pdf')); linkMade = true } catch { /* Windows 需要特权 */ }
+    if (linkMade) check('符号链接逃逸：resolvePdfAbs 拒绝', resolvePdfAbs(root, '课程/线性代数/链接.pdf') === null)
+    else ok('符号链接逃逸：平台不支持建链，跳过')
+    rmSync(outsideDir, { recursive: true, force: true })
+  } finally { await s.close() }
+
+  // 超限：按注入上限缩小（200MB 真文件不进契约脚本）
+  const sBig = await boot({ filesRoot: root, pdfPages, pdfMaxBytes: 1024 })
+  const tBig = (await (await sBig.post('/api/pair', { code: CODE, deviceName: 'iPad-大文件' })).json()).deviceToken
+  try {
+    const bigBytes = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(4096, 0x41)])
+    const big = await fetch(sBig.base + '/api/files/upload', {
+      method: 'POST', headers: { authorization: 'Bearer ' + tBig }, body: form('大文件.pdf', bigBytes),
+    })
+    check('超过单文件上限 413', big.status === 413)
+    check('413 后无 .kb-tmp 残留', tmpFiles().length === 0, JSON.stringify(tmpFiles()))
+  } finally { await sBig.close() }
+
+  rmSync(root, { recursive: true, force: true })
+}
+
+/* ------------------------------------------------------------------ §12 */
+console.log('\n§12 lanShare 公共解析器回归（抽取 multipart 核心后行为不变）')
+{
+  const dir = mkdtempSync(join(tmpdir(), 'phrontis-lanshare-'))
+  const srv = http.createServer((req, res) => {
+    void (async () => {
+      try {
+        const files = await parseMultipartUpload(req, { targetDir: dir })
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(files.map(f => ({ originalName: f.originalName, savedName: f.savedName, size: f.size }))))
+      } catch (e) {
+        res.writeHead(e?.status ?? 500, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ error: e?.message ?? 'failed' }))
+      }
+    })()
+  })
+  await new Promise((res, rej) => { srv.once('error', rej); srv.listen(0, '127.0.0.1', res) })
+  const base = 'http://127.0.0.1:' + srv.address().port
+  try {
+    const fd = new FormData()
+    fd.append('note', '非文件字段应被忽略')
+    fd.append('file', new Blob([Buffer.from('hello')], { type: 'text/plain' }), '购物清单.txt')
+    const r = await fetch(base, { method: 'POST', body: fd })
+    const files = await r.json()
+    check('lanShare：只收文件 part、忽略普通字段', r.status === 200 && files.length === 1 && files[0].originalName === '购物清单.txt')
+    const onDisk = readdirSync(dir)
+    check('lanShare：默认命名 <时间戳>-<净化名>（行为不回退）',
+      onDisk.length === 1 && /^\d+-购物清单\.txt$/.test(onDisk[0]) && files[0].size === 5, JSON.stringify(onDisk))
+    check('lanShare：落盘到目标目录', existsSync(join(dir, onDisk[0])))
+  } finally {
+    await new Promise(res => { srv.closeAllConnections?.(); srv.close(res) })
+    rmSync(dir, { recursive: true, force: true })
+  }
 }
 
 console.log('\n' + (failures === 0 ? 'PASS (' + checks + ' checks)' : 'FAIL (' + failures + '/' + checks + ')'))

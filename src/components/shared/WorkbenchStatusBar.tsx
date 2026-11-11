@@ -32,7 +32,7 @@ export function WorkbenchStatusBar() {
     : ''
 
   return (
-    <div className="flex h-6 shrink-0 items-center gap-3 border-t border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-tertiary)_72%,transparent)] px-3 text-[11px] text-[var(--text-secondary)] select-none">
+    <div className="kb-statusbar flex h-6 shrink-0 items-center gap-3 border-t border-[var(--border-color)] bg-[color-mix(in_srgb,var(--bg-tertiary)_72%,transparent)] px-3 text-[11px] text-[var(--text-secondary)] select-none">
       {repo && (
         <span className="flex min-w-0 items-center gap-1.5" title="当前仓库">
           <FolderGit2 size={11} className="shrink-0 text-[var(--accent)]" />

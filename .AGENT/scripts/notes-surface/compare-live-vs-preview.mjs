@@ -179,7 +179,7 @@ const snapFor = (mode) => `(() => {
     fnCount: (live ? q('.cm-content') : prose)?.querySelectorAll('[title="点击查看脚注"]').length ?? 0,
     relIndent0: relIndent(liEl0),
     relIndent1: relIndent(liEl1),
-    langTag: (live ? q('.kb-live-codecard-lang') : null)?.textContent ?? null,
+    langTag: (live ? q('.kb-code-lang-chip') : null)?.textContent ?? null,
     previewLangTag: (prose?.querySelector('pre')?.querySelector('span') ?? null)?.textContent ?? null,
     hljsColor: firstHljs ? getComputedStyle(firstHljs).color : null,
     hljsCount: (live ? q('.cm-content') : prose)?.querySelectorAll('[class*=hljs-]').length ?? 0,

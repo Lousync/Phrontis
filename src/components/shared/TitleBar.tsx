@@ -10,6 +10,7 @@ import {
   updateFailKind, updateFailMessage, updateStageText,
 } from '../../lib/updateStore'
 import { MarkdownPreview } from './MarkdownPreview'
+import { TitleBarDaycycle } from './TitleBarDaycycle'
 import { openExternal, edgeResizeStart, edgeResizeEnd } from '../../lib/ipc'
 import { showToast } from '../../lib/toast'
 import { IN_APP_UPDATE_SUPPORTED } from '../../lib/platform'
@@ -132,7 +133,7 @@ export function TitleBar() {
 
   return (
     <div
-      className="relative z-[75] flex items-center h-9 bg-[color-mix(in_srgb,var(--bg-tertiary)_72%,transparent)] backdrop-blur-md border-b border-[var(--border-color)] select-none shrink-0 drag-region"
+      className="kb-titlebar relative z-[75] flex items-center h-9 bg-[color-mix(in_srgb,var(--bg-tertiary)_72%,transparent)] backdrop-blur-md border-b border-[var(--border-color)] select-none shrink-0 drag-region"
     >
       {/* 左：macOS 红绿灯窗控 + 开发版角标 + 窗口级操作（锚定主内容区，不随抽屉外扩漂移） */}
       <div className="relative z-10 flex items-center h-full pl-3 no-drag group/traffic">
@@ -329,6 +330,10 @@ export function TitleBar() {
             <Pin size={14} strokeWidth={1.5} fill={isPinned ? 'var(--text-primary)' : 'transparent'} />
           </WinBtn>
         </div>
+
+      {/* 昼夜动态主题：右侧时间胶囊（天空已迁 App 根部的 DaycycleBackdrop）。
+          颜色全部来自引擎下发的 CSS 变量，组件自身零配色（docs/daycycle-theme-plan.md） */}
+      {settings.theme === 'daycycle' && <TitleBarDaycycle />}
 
       {/* UI 优化条目1.7：最大化态顶栏拖拽恢复 overlay（空白区接管，控件 z-10 保持可点；双击 toggle 还原） */}
       {isMaximized && (

@@ -171,7 +171,7 @@ export function WorkbenchPageBar({ tabs, active, onSelect, onClose, onReorder, e
       /* Edge Fluent（2026-09-19）：行底不用 border-b（滚动槽的 overflow 会裁掉负 margin 贴边），
          改为行内 hairline 子元素——激活条目（positioned、DOM 靠后）自然盖住它形成「与内容区同体」；
          items-end 让条目沉底，overflow-x-clip 只拦首尾条目内凹弧的水平外溢、不裁垂直融合。 */
-      className="relative flex h-9 min-w-0 select-none items-end overflow-x-clip bg-[var(--bg-secondary)] px-1.5"
+      className="kb-pagebar relative flex h-9 min-w-0 select-none items-end overflow-x-clip bg-[var(--bg-secondary)] px-1.5"
     >
       {/* 2026-10-11（拍板 A2）：页面条底部那道 hairline **已删**。
           原来它承担「页面条 vs 内容区」的分界，但顶栏改为无分隔线（与正文连成一整片）之后，

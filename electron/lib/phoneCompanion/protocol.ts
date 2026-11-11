@@ -18,9 +18,17 @@ export const MAX_BODY_BYTES = 2 * 1024 * 1024
 /** v1.7 长轮询：服务端挂起上限（客户端传再大也按此封顶，避开中间层空闲超时）。方案：主仓 docs/companion-realtime-sync-plan.md §2.3 */
 export const PULL_WAIT_CAP_MS = 25_000
 
-/** 同步域清单（v1.2 起 ledger + schedule + notes；v1.6 起 notes 双向——设备文件夹 U 盘语义，见 design.md §2.1 v1.6 节） */
-export const SYNC_DOMAINS = ['ledger', 'schedule', 'notes'] as const
+/** 同步域清单（v1.2 起 ledger + schedule + notes；v1.6 起 notes 双向；v1.8 起 habit——习惯定义 + 每日打卡记录） */
+export const SYNC_DOMAINS = ['ledger', 'schedule', 'notes', 'habit'] as const
 export type SyncDomain = (typeof SYNC_DOMAINS)[number]
+
+/**
+ * v1.9 能力位（`/api/ping` 的 `features`）：与同步域分开，端点级增量能力。
+ * 旧手机忽略该字段；新手机在旧桌面（无 features）时隐藏对应入口，零破坏。
+ *  - files = 文件通道 v1（iPad 交接 / 批注回传，design.md §2.3）
+ */
+export const COMPANION_FEATURES = ['files'] as const
+export type CompanionFeature = (typeof COMPANION_FEATURES)[number]
 
 /** 手机上行的一条变更（push changes[] 的元素） */
 export interface SyncChange {
@@ -113,6 +121,66 @@ export interface TombstoneData {
 
 export function isTombstoneData(data: unknown): data is TombstoneData {
   return !!data && typeof data === 'object' && !Array.isArray(data) && (data as Record<string, unknown>).deleted === true
+}
+
+/* ================= v1.8：habit 域（习惯定义 + 每日打卡记录） ================= */
+
+/** 习惯定义负载（桌面 checkin/habits.json 的同步子集；rule_type/rule_days/icon/sort_order 桌面独有，手机不覆盖） */
+export interface HabitItemData {
+  kind: 'habit'
+  name: string
+  color: string
+  /** 每周目标（1..7） ↔ 桌面 weekly_target */
+  target: number
+  /** 每日提醒时刻（0..1439 分钟）；桌面暂只保留不展示 */
+  remind: number | null
+  archived: boolean
+}
+
+/** 每日打卡记录负载：id = `hr:<habitId>:<YYYY-MM-DD>`，表示该日已打卡 */
+export interface HabitRecordItemData {
+  kind: 'record'
+  habitId: string
+  /** YYYY-MM-DD */
+  date: string
+}
+
+export type HabitSyncData = HabitItemData | HabitRecordItemData
+
+/** 打卡记录 id（两端唯一口径）：hr:<habitId>:<date> */
+export function habitRecordId(habitId: string, date: string): string {
+  return `hr:${habitId}:${date}`
+}
+
+/** 解析打卡记录 id；非法返回 null */
+export function parseHabitRecordId(id: string): { habitId: string; date: string } | null {
+  const m = /^hr:([^:]+):(\d{4}-\d{2}-\d{2})$/.exec(String(id || ''))
+  return m ? { habitId: m[1], date: m[2] } : null
+}
+
+/** 习惯定义校验与规范化：非法返回 null（响应 reason: invalid-data） */
+export function normalizeHabitData(raw: unknown): HabitItemData | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const name = typeof o.name === 'string' ? o.name.trim().slice(0, 60) : ''
+  if (!name) return null
+  const color = typeof o.color === 'string' && o.color.trim() ? o.color.trim().slice(0, 24) : '#3B82F6'
+  const target = Math.max(1, Math.min(7, Math.round(Number(o.target)) || 7))
+  const remindRaw = Number(o.remind)
+  const remind = o.remind === null || o.remind === undefined || o.remind === ''
+    ? null
+    : (Number.isFinite(remindRaw) && remindRaw >= 0 && remindRaw <= 1439 ? Math.round(remindRaw) : null)
+  return { kind: 'habit', name, color, target, remind, archived: o.archived === true }
+}
+
+/** 打卡记录校验与规范化：非法返回 null（响应 reason: invalid-data） */
+export function normalizeHabitRecordData(raw: unknown): HabitRecordItemData | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const habitId = typeof o.habitId === 'string' ? o.habitId.trim() : ''
+  const date = typeof o.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(o.date) ? o.date : ''
+  if (!habitId || !date) return null
+  return { kind: 'record', habitId, date }
 }
 
 /* ================= v1.2：notes 域（手机闪念上行） + 内容 API ================= */

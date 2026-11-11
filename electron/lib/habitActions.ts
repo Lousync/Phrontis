@@ -12,7 +12,11 @@ import { vaultHabitRecordAddIfAbsent, vaultHabitRecordRemove, vaultRecordsAll } 
  */
 export function setHabitChecked(habitId: string, date: string, checked: boolean): boolean {
   const has = vaultRecordsAll().some(r => r.habit_id === habitId && r.date === date)
-  if (checked === has) return false
+  if (checked === has) {
+    // v1.8：已是目标状态也把记录时间推新——否则手机上更新的「取消打卡」墓碑会把它删掉
+    if (checked) vaultHabitRecordAddIfAbsent(habitId, date, 'manual')
+    return false
+  }
   if (checked) {
     vaultHabitRecordAddIfAbsent(habitId, date, 'manual')
     // 远程监督：打卡成功后异步推送（静默失败，不影响打卡本身）

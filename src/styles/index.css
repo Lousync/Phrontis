@@ -35,6 +35,31 @@
   /* 树形缩进层级参考线（编辑器/知识库/AI教学 左栏多层树，treeGuides.ts 消费） */
   --tree-guide: color-mix(in srgb, var(--border-color) 60%, transparent);
 
+  /* ===== 代码块（编辑器表面）=====
+     代码块不跟 UI 语义色走：链接色/成功色/警告色是界面语言，不是代码语言。
+     这里用 Monaco vs-dark 的默认 token 色，另加两处提亮 —— 代码底面 #282828 比页面
+     #1e1e1e 亮一档，原色板里的 comment (#6a9955) / regexp (#d16969) 会掉到 4.5:1 以下。
+     亮/暗切换由 themeTone.ts 的 data-code-tone 决定；插件主题可覆写 --code-*。 */
+  --code-surface: #282828;
+  --code-border: #555555;
+  --code-fg: #d4d4d4;
+  --code-keyword: #569cd6;
+  --code-control: #c586c0;
+  --code-string: #ce9178;
+  --code-number: #b5cea8;
+  --code-comment: #7aa86a;
+  --code-function: #dcdcaa;
+  --code-type: #4ec9b0;
+  --code-tag: #569cd6;
+  --code-attr: #9cdcfe;
+  --code-var: #9cdcfe;
+  --code-regexp: #e07a7a;
+  --code-const: #4fc1ff;
+  --code-op: #d4d4d4;
+  --code-meta: #9cdcfe;
+  --code-addition: #4ec9b0;
+  --code-deletion: #f48771;
+
   /* 字体
      —— 跨平台回退链：macOS 原生 → Windows（Segoe UI / 中文 Microsoft YaHei）→ Linux
      （GNOME 默认 Cantarell / Ubuntu；中文 Noto Sans CJK / 思源黑体；等宽 DejaVu / Ubuntu Mono）。
@@ -104,6 +129,89 @@ html.theme-light {
   --drop-border: #0078d4;
 
   --glass-edge: rgba(255, 255, 255, 0.65);
+}
+
+/* ===== 昼夜动态主题（html.theme-daycycle，docs/daycycle-theme-plan.md）=====
+   静态兜底 = 定格正午：① 引擎首帧前（React 挂载前）不裸奔；② popout 独立窗口
+   （DayPanelWindowApp）引擎不跑，常年显示兜底。主窗口选中该主题后，
+   daycycleEngine 每分钟用同名变量在 <html> 内联 style 上覆盖这里（内联优先级更高）。
+   取值由 daycycleTheme.ts daycycleAt(750) 生成（--experimental-strip-types 直算），勿手改。 */
+html.theme-daycycle {
+  --bg-primary: rgba(247, 250, 245, 1.000);
+  --bg-secondary: rgba(238, 242, 234, 1.000);
+  --sidebar-bg: rgba(238, 242, 234, 1.000);
+  --bg-tertiary: rgba(228, 234, 223, 1.000);
+  --input-bg: rgba(228, 234, 223, 1.000);
+  --activitybar-bg: rgba(241, 245, 238, 1.000);
+  --card-bg: rgba(252, 254, 253, 1.000);
+  --bg-hover: rgba(226, 232, 220, 1.000);
+  --bg-selected: rgba(217, 229, 207, 1.000);
+  --text-primary: rgba(47, 53, 49, 1.000);
+  --text-secondary: rgba(88, 96, 90, 1.000);
+  --text-muted: rgba(101, 109, 102, 1.000);
+  --text-disabled: rgba(127, 134, 128, 1.000);
+  --accent: rgba(62, 125, 82, 1.000);
+  --accent-hover: rgba(93, 146, 110, 1.000);
+  --danger: rgba(192, 86, 63, 1.000);
+  --success: rgba(90, 138, 60, 1.000);
+  --warning: rgba(168, 132, 44, 1.000);
+  --warning-bg: rgba(233, 229, 209, 1.000);
+  --drop-bg: rgba(206, 223, 209, 1.000);
+  --drop-border: rgba(62, 125, 82, 1.000);
+  --border-color: rgba(51, 64, 46, 0.157);
+  --glass-edge: rgba(255, 255, 255, 0.549);
+  --shadow-card: 0 1px 2px rgba(58, 90, 58, 0.09), 0 12px 32px rgba(58, 90, 58, 0.036);
+  --sky-top: rgba(63, 169, 232, 1.000);
+  --sky-mid: rgba(143, 214, 245, 1.000);
+  --sky-melt: rgba(225, 246, 252, 1.000);
+  --sky-glow: rgba(255, 228, 92, 1.000);
+  --sky-glow-x: 50%;
+  --sun-bloom: radial-gradient(circle, rgba(255, 255, 255, .98) 0%, rgba(255, 253, 244, .9) 8%, rgba(255, 228, 92, 0.78) 16%, rgba(255, 228, 92, 0.5) 26%, rgba(255, 228, 92, 0.26) 40%, rgba(255, 228, 92, 0.11) 56%, rgba(255, 228, 92, 0.03) 76%, transparent 100%);
+  --tb-fg: #2d2922;
+  --cloud-o: 0.300;
+  --cloud-c: rgba(255, 255, 255, 1.000);
+  --star-o: 0.000;
+  /* 正午兜底：晨昏增益为 0（引擎在黄昏/黎明会把面板不透明度抬高，避免暖光透上来糊正文） */
+  --dc-glass-boost: 0.000%;
+  --dc-grain: 0.035;
+}
+
+/* ===== 代码块亮色表面 =====
+   `html.theme-light` / `html.theme-daycycle` 是首屏兜底（JS 还没写 data-code-tone 时）；
+   插件亮色主题由 themeTone.ts 写入的 `data-code-tone="light"` 接管。
+   色值 = Monaco vs 的默认 token 色，个别小字色加深，保证在 #f0f0f0 上 ≥ 4.5:1。 */
+html.theme-light,
+/* 昼夜主题要到夜间才切暗色板；attr 缺省（首屏/日间）仍走亮色兜底。
+   夜间由 themeTone.applyCodeTone 把 data-code-tone 写成 dark，这条亮色块随之失效。 */
+html.theme-daycycle:not([data-code-tone="dark"]),
+html[data-code-tone="light"] {
+  --code-surface: #f0f0f0;
+  --code-border: #c8c8c8;
+  --code-fg: #1f1f1f;
+  --code-keyword: #0000ff;
+  --code-control: #af00db;
+  --code-string: #a31515;
+  --code-number: #046b45;
+  --code-comment: #006b00;
+  --code-function: #795e26;
+  --code-type: #1f6f86;
+  --code-tag: #800000;
+  --code-attr: #c00000;
+  --code-var: #001080;
+  --code-regexp: #811f3f;
+  --code-const: #005a9e;
+  --code-op: #333333;
+  --code-meta: #6f5f00;
+  --code-addition: #107c10;
+  --code-deletion: #c01020;
+}
+
+/* 昼夜主题日间：代码表面与页面同调（浅绿灰），不额外引入一块中性灰。
+   夜间 data-code-tone=dark 时本块失效，回落到 :root 的 #282828 / 深色色板。 */
+html.theme-daycycle:not([data-code-tone="dark"]) {
+  --code-surface: #e9ede6;
+  --code-border: #aab8a6;
+  --code-fg: #1f2a22;
 }
 
 /* ===== 键帽 / 快捷键芯片 =====
@@ -296,6 +404,9 @@ input:focus, textarea:focus, select:focus {
   --md-code-radius: 3px;
   --md-code-pad: 0.125rem 0.375rem;
   --md-code-size: 0.875em;
+  /* 代码块专用字号：行内代码仍跟随正文 0.875em；块级给 12.5px 下限，
+     避免 AI 全局面板（正文 12px）把代码压到 10.5px。阅读态 15px → 13.125px。 */
+  --md-code-block-size: clamp(12.5px, 0.875em, 15px);
   --md-pre-pad: 1rem;
   --md-table-pad: 0.4rem 0.6rem;
   --md-quote-pad-left: 1rem;
@@ -341,11 +452,28 @@ input:focus, textarea:focus, select:focus {
 /* `.kb-md-atom` = 预览与即时渲染档**共用的原子块作用域**（写作面的表格/代码块 widget 直接产出同样的
    DOM 结构并挂这个类）—— 两边共用同一条规则，一致性由构造保证，不靠两处对齐数值。 */
 :is(.prose-content, .kb-md-atom) pre {
-  background: var(--bg-primary); border: 1px solid var(--border-color);
+  background: var(--code-surface); border: 1px solid var(--code-border);
+  color: var(--code-fg);
   padding: var(--md-pre-pad); border-radius: var(--radius-card); overflow-x: auto; margin: var(--md-atom-gap) 0;
   box-shadow: var(--shadow-card);
+  font-family: var(--font-mono); font-size: var(--md-code-block-size);
+  line-height: 1.6; tab-size: 4;
 }
-:is(.prose-content, .kb-md-atom) pre code { background: none; padding: 0; }
+:is(.prose-content, .kb-md-atom) pre code {
+  background: none; padding: 0;
+  font-size: inherit; font-family: inherit;
+}
+/* 带语言的 plain 代码块：顶部留出 34px 芯片带，语言标签不再压首行。
+   只有真的挂芯片的块才加 `.kb-code-plain`；无语言块保持 16px 顶部内边距，不留空带。 */
+:is(.prose-content, .kb-md-atom) pre.kb-code-plain { position: relative; padding-top: 34px; }
+.kb-code-lang-chip {
+  position: absolute; top: 8px; right: 10px; z-index: 1; max-width: 45%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 1px 6px; border: 1px solid var(--code-border); border-radius: 4px;
+  background: var(--bg-tertiary); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.4;
+  letter-spacing: .03em; user-select: none;
+}
 :is(.prose-content, .kb-md-atom) img { max-width: 100%; border-radius: var(--radius-btn); margin: 0.5rem 0; }
 .prose-content hr { border: none; border-top: var(--divider-style); margin: 1.2rem 0; }
 .prose-content a { color: var(--accent); text-decoration: none; }
@@ -368,30 +496,86 @@ input:focus, textarea:focus, select:focus {
   border: 1px solid var(--text-disabled); font-size: 0.85em; font-family: inherit;
 }
 
-/* ===== 代码语法高亮（highlight.js → 项目 CSS 变量）=====
-   作用域 `:is(.prose-content, .kb-md-atom)`：阅读态预览与即时渲染档的代码块 widget
-   **同一个 highlight.js + 同一套配色**（写作面的代码卡片因此与预览逐色一致）。 */
-:is(.prose-content, .kb-md-atom) .hljs-keyword  { color: var(--accent); }
-:is(.prose-content, .kb-md-atom) .hljs-string   { color: var(--success); }
-:is(.prose-content, .kb-md-atom) .hljs-comment  { color: var(--text-muted); font-style: italic; }
-:is(.prose-content, .kb-md-atom) .hljs-number   { color: var(--warning); }
-:is(.prose-content, .kb-md-atom) .hljs-title    { color: var(--accent); }
-:is(.prose-content, .kb-md-atom) .hljs-type     { color: var(--accent); }
-:is(.prose-content, .kb-md-atom) .hljs-meta     { color: var(--text-muted); }
-:is(.prose-content, .kb-md-atom) .hljs-built_in { color: var(--accent); }
-:is(.prose-content, .kb-md-atom) .hljs-attr     { color: var(--warning); }
-:is(.prose-content, .kb-md-atom) .hljs-params   { color: var(--text-primary); }
-:is(.prose-content, .kb-md-atom) .hljs-literal  { color: var(--accent); }
-:is(.prose-content, .kb-md-atom) .hljs-variable { color: var(--text-primary); }
-:is(.prose-content, .kb-md-atom) .hljs-selector-class { color: var(--warning); }
-:is(.prose-content, .kb-md-atom) .hljs-selector-tag   { color: var(--accent); }
-:is(.prose-content, .kb-md-atom) .hljs-symbol   { color: var(--success); }
-:is(.prose-content, .kb-md-atom) .hljs-function { color: var(--warning); }
-:is(.prose-content, .kb-md-atom) .hljs-property { color: var(--text-primary); }
-:is(.prose-content, .kb-md-atom) .hljs-name     { color: var(--accent); }
-:is(.prose-content, .kb-md-atom) .hljs-tag      { color: var(--accent); }
-:is(.prose-content, .kb-md-atom) .hljs-addition { color: var(--success); }
-:is(.prose-content, .kb-md-atom) .hljs-deletion { color: var(--danger); }
+/* ===== 代码语法高亮（highlight.js → 代码专用色板）=====
+   作用域统一加 `pre`：阅读态预览、即时渲染档代码 widget、AI 代码卡片共用同一套映射。
+   颜色只取 --code-*，不再复用 UI 的 accent / success / warning —— 代码语言与界面语义分开。
+   hljs 的分类见 highlight.js 的 CSS 主题；这里补齐 operator / punctuation / selector-* 等
+   旧色板漏掉的类，避免它们回落到正文色。 */
+:is(.prose-content, .kb-md-atom) pre .hljs-keyword,
+:is(.prose-content, .kb-md-atom) pre .hljs-selector-tag,
+:is(.prose-content, .kb-md-atom) pre .hljs-section,
+:is(.prose-content, .kb-md-atom) pre .hljs-function { color: var(--code-keyword); }
+
+/* 控制流关键字由 rehypeControlKeywords / LiveMarkdownPane 补类，highlight.js 本身不区分 */
+:is(.prose-content, .kb-md-atom) pre .hljs-control { color: var(--code-control); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-string,
+:is(.prose-content, .kb-md-atom) pre .hljs-char,
+:is(.prose-content, .kb-md-atom) pre .hljs-meta-string,
+:is(.prose-content, .kb-md-atom) pre .hljs-meta .hljs-string { color: var(--code-string); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-regexp { color: var(--code-regexp); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-number,
+:is(.prose-content, .kb-md-atom) pre .hljs-bullet { color: var(--code-number); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-comment,
+:is(.prose-content, .kb-md-atom) pre .hljs-quote { color: var(--code-comment); font-style: italic; }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-title,
+:is(.prose-content, .kb-md-atom) pre .hljs-title.class_,
+:is(.prose-content, .kb-md-atom) pre .hljs-title.inherited__,
+:is(.prose-content, .kb-md-atom) pre .hljs-type,
+:is(.prose-content, .kb-md-atom) pre .hljs-built_in,
+:is(.prose-content, .kb-md-atom) pre .hljs-builtin-name { color: var(--code-type); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-title.function_ { color: var(--code-function); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-tag,
+:is(.prose-content, .kb-md-atom) pre .hljs-name,
+:is(.prose-content, .kb-md-atom) pre .hljs-selector-id,
+:is(.prose-content, .kb-md-atom) pre .hljs-selector-class,
+:is(.prose-content, .kb-md-atom) pre .hljs-selector-pseudo { color: var(--code-tag); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-attr,
+:is(.prose-content, .kb-md-atom) pre .hljs-attribute,
+:is(.prose-content, .kb-md-atom) pre .hljs-selector-attr { color: var(--code-attr); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-variable,
+:is(.prose-content, .kb-md-atom) pre .hljs-template-variable,
+:is(.prose-content, .kb-md-atom) pre .hljs-property { color: var(--code-var); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-variable.language_ { color: var(--code-keyword); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-literal,
+:is(.prose-content, .kb-md-atom) pre .hljs-symbol { color: var(--code-const); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-meta,
+:is(.prose-content, .kb-md-atom) pre .hljs-meta-keyword,
+:is(.prose-content, .kb-md-atom) pre .hljs-doctag,
+:is(.prose-content, .kb-md-atom) pre .hljs-template-tag { color: var(--code-meta); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-operator,
+:is(.prose-content, .kb-md-atom) pre .hljs-punctuation { color: var(--code-op); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-params,
+:is(.prose-content, .kb-md-atom) pre .hljs-subst,
+:is(.prose-content, .kb-md-atom) pre .hljs-formula,
+:is(.prose-content, .kb-md-atom) pre .hljs-code { color: var(--code-fg); }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-link { color: var(--code-string); text-decoration: underline; }
+
+:is(.prose-content, .kb-md-atom) pre .hljs-addition {
+  color: var(--code-addition);
+  background: color-mix(in srgb, var(--code-addition) 10%, transparent);
+}
+:is(.prose-content, .kb-md-atom) pre .hljs-deletion {
+  color: var(--code-deletion);
+  background: color-mix(in srgb, var(--code-deletion) 10%, transparent);
+}
+
+:is(.prose-content, .kb-md-atom) pre .hljs-emphasis { font-style: italic; }
+:is(.prose-content, .kb-md-atom) pre .hljs-strong { font-weight: 700; }
 
 /* ===== 工具类 ===== */
 .drag-region { -webkit-app-region: drag; }
@@ -1857,11 +2041,8 @@ mark:not([data-ehc]), .kb-excerpt-hl:not([data-ehc]) {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   outline-offset: -2px;
 }
-.kb-live-codecard-inner { position: relative; }
-.kb-live-codecard-lang {
-  position: absolute; top: 0.25rem; right: 0.5rem;
-  font-size: 10px; color: var(--text-muted); opacity: 0.4; user-select: none;
-}
+/* 代码块 widget 的底色 / 字号 / 语言芯片统一走共享的 `.kb-md-atom pre` 与
+   `.kb-code-plain` / `.kb-code-lang-chip`（见上方共享 pre 区），这里不再保留第二套标签样式。 */
 
 /* ===== 编辑器右键菜单（两档共用；NoteContextMenu.tsx）===== */
 .kb-menu {
@@ -2401,3 +2582,479 @@ body.dragging, body.dragging * { user-select: none !important; -webkit-user-sele
   .kb-flow-dropbar, .kb-flow-lockbubble { animation: none; }
 }
 
+
+/* ===== 昼夜动态主题 · 整窗背景层（.kb-dc-bd-*，DaycycleBackdrop 消费）=====
+   2026-11-11 升级：原先 36px 顶栏天空延伸成整窗场景（用户拍板「沉浸天空 + 通透」）。
+   只动 transform / opacity / filter（铁律 13）；颜色全部来自引擎下发的 CSS 变量。
+   太阳 = 白热核心 + 单条连续 bloom（--sun-bloom），月亮 = 实体球——两者刻意异质：
+   白天太阳「融」在天空里，夜晚月亮「挂」在天空上。 */
+.kb-dc-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+  --dc-fx-scale: 1;
+  --dc-light-scale: 1;
+  --dc-ray-color: color-mix(in srgb, var(--sky-glow) 38%, transparent);
+  background:
+    radial-gradient(760px 560px at var(--dc-glow-x, 50%) var(--dc-glow-y, 30%),
+      color-mix(in srgb, var(--sky-glow) 26%, transparent) 0%,
+      color-mix(in srgb, var(--sky-glow) 8%, transparent) 34%,
+      transparent 64%),
+    linear-gradient(180deg,
+      var(--sky-top) 0%,
+      var(--sky-mid) 42%,
+      var(--sky-melt) 72%,
+      color-mix(in srgb, var(--sky-melt) 62%, var(--bg-primary)) 100%);
+}
+
+/* 专注模式（禅模式 Z2 / 番茄钟运行）：只压云 / 星 / 粒子，天空与天体保留 */
+.kb-dc-backdrop.is-focus {
+  --dc-fx-scale: .3;
+  --dc-light-scale: .55;
+}
+
+/* 地平线暖光：日出 / 日落时最强 */
+.kb-dc-bd-horizon {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(110% 58% at var(--dc-glow-x, 50%) 78%,
+      color-mix(in srgb, var(--sky-glow) 30%, transparent) 0%,
+      color-mix(in srgb, var(--sky-glow) 10%, transparent) 30%,
+      transparent 62%);
+  opacity: calc(var(--dc-horizon-o, 0) * .8);
+  mix-blend-mode: screen;
+}
+
+/* 夜空银河带：只在星星出现时显形 */
+.kb-dc-bd-milkyway {
+  position: absolute;
+  left: -20%;
+  top: 2%;
+  width: 150%;
+  height: 62%;
+  background: linear-gradient(116deg,
+    transparent 28%,
+    rgba(188, 204, 255, .05) 40%,
+    rgba(224, 233, 255, .14) 47%,
+    rgba(196, 212, 255, .19) 50%,
+    rgba(224, 233, 255, .12) 53%,
+    rgba(188, 204, 255, .04) 60%,
+    transparent 72%);
+  transform: rotate(-7deg);
+  filter: blur(10px);
+  opacity: calc(var(--star-o, 0) * .55 * var(--dc-fx-scale));
+}
+
+/* 极光：夜间出现，低饱和、慢速漂移 */
+.kb-dc-bd-aurora {
+  position: absolute;
+  inset: -18% -10% 20%;
+  opacity: calc(var(--star-o, 0) * .52 * var(--dc-fx-scale));
+  mix-blend-mode: screen;
+  filter: blur(42px);
+  transition: opacity 1.2s ease;
+}
+
+.kb-dc-bd-aurora-band {
+  position: absolute;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+  animation: kb-dc-aurora-drift 18s ease-in-out infinite alternate;
+}
+
+.kb-dc-bd-aurora-a {
+  left: 6%;
+  top: 2%;
+  width: 58%;
+  height: 34%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(94, 234, 212, .34), rgba(52, 211, 153, .12) 45%, transparent 72%);
+}
+
+.kb-dc-bd-aurora-b {
+  right: 2%;
+  top: 8%;
+  width: 52%;
+  height: 30%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(129, 140, 248, .28), rgba(99, 102, 241, .1) 46%, transparent 74%);
+  animation-duration: 23s;
+  animation-delay: -8s;
+}
+
+.kb-dc-bd-aurora-c {
+  left: 28%;
+  bottom: 8%;
+  width: 54%;
+  height: 24%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(45, 212, 191, .16), transparent 70%);
+  animation-duration: 27s;
+  animation-delay: -15s;
+}
+
+/* 全窗星空 */
+.kb-dc-bd-stars {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: calc(var(--star-o, 0) * var(--dc-fx-scale));
+  transition: opacity .8s ease;
+}
+
+.kb-dc-bd-star {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff9e8;
+  box-shadow: 0 0 4px rgba(255, 248, 225, .8);
+  animation: kb-dc-twinkle 4s ease-in-out infinite;
+}
+
+.kb-dc-bd-star.is-bright {
+  box-shadow: 0 0 5px rgba(255, 248, 225, .95), 0 0 14px rgba(214, 226, 255, .55);
+}
+
+/* 云：全窗多层，低对比 */
+.kb-dc-bd-clouds {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  opacity: calc(var(--cloud-o, 0) * var(--dc-fx-scale));
+  transition: opacity .8s ease;
+}
+
+.kb-dc-bd-cloud {
+  position: absolute;
+  border-radius: 999px;
+  background: var(--cloud-c, #fff);
+  animation: kb-dc-bd-cloud-drift 40s ease-in-out infinite alternate;
+}
+
+.kb-dc-bd-cloud::before,
+.kb-dc-bd-cloud::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  background: inherit;
+}
+
+.kb-dc-bd-cloud::before { left: 14%; top: -38%; width: 38%; height: 90%; }
+.kb-dc-bd-cloud::after { right: 12%; top: -26%; width: 30%; height: 72%; opacity: .8; }
+
+/* 太阳 / 月亮：全窗弧线 */
+.kb-dc-bd-celestial {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  width: 190px;
+  height: 190px;
+  margin-left: -95px;
+  margin-top: -95px;
+  will-change: transform;
+  transition: none;
+}
+
+/* 只有分钟 tick 的渲染才挂过渡（JS 加 is-moving）；resize 时立即到位。
+   reduced-motion 段尾会把 .is-moving 也压回 none。 */
+.kb-dc-bd-celestial.is-moving {
+  transition: transform 60s linear;
+}
+
+.kb-dc-bd-sun {
+  width: 190px;
+  height: 190px;
+  border-radius: 50%;
+  background: var(--sun-bloom);
+  animation: kb-dc-breathe 8s ease-in-out infinite alternate;
+}
+
+.kb-dc-bd-sun::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 250px;
+  height: 3px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent,
+    color-mix(in srgb, var(--sky-glow) 55%, transparent), transparent);
+  filter: blur(1.5px);
+}
+
+.kb-dc-bd-moon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fffdf2, #e8e4d2 60%, #cfcbbb 100%);
+  box-shadow:
+    0 0 26px 9px rgba(210, 222, 255, .45),
+    0 0 90px 32px rgba(180, 196, 255, .18),
+    inset -4px -3px 0 rgba(0, 0, 0, .14);
+}
+
+.kb-dc-bd-moon::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 6px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(120, 120, 105, .22);
+  box-shadow: -7px 9px 0 rgba(120, 120, 105, .15);
+}
+
+/* 太阳光柱：日出 / 日落时从太阳位置放射 */
+.kb-dc-bd-rays {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: conic-gradient(from 0deg at var(--dc-glow-x, 50%) var(--dc-glow-y, 30%),
+    transparent 0deg,
+    var(--dc-ray-color) 2.6deg, transparent 6deg,
+    transparent 19deg, var(--dc-ray-color) 21.6deg, transparent 25deg,
+    transparent 38deg, var(--dc-ray-color) 40deg, transparent 44deg,
+    transparent 58deg, var(--dc-ray-color) 60.5deg, transparent 64deg,
+    transparent 78deg, var(--dc-ray-color) 80deg, transparent 84deg,
+    transparent 99deg, var(--dc-ray-color) 101deg, transparent 105deg,
+    transparent 121deg, var(--dc-ray-color) 123deg, transparent 127deg,
+    transparent 143deg, var(--dc-ray-color) 145deg, transparent 149deg,
+    transparent 166deg, var(--dc-ray-color) 168deg, transparent 172deg,
+    transparent 191deg, var(--dc-ray-color) 193deg, transparent 197deg,
+    transparent 216deg, var(--dc-ray-color) 218deg, transparent 222deg,
+    transparent 244deg, var(--dc-ray-color) 246deg, transparent 250deg,
+    transparent 274deg, var(--dc-ray-color) 276deg, transparent 280deg,
+    transparent 306deg, var(--dc-ray-color) 308deg, transparent 312deg,
+    transparent 338deg, var(--dc-ray-color) 340deg, transparent 344deg,
+    transparent 360deg);
+  opacity: calc(var(--dc-ray-o, 0) * var(--dc-fx-scale));
+  mask-image: radial-gradient(circle at var(--dc-glow-x, 50%) var(--dc-glow-y, 30%),
+    transparent 0%, #000 14%, rgba(0, 0, 0, .55) 42%, transparent 74%);
+  -webkit-mask-image: radial-gradient(circle at var(--dc-glow-x, 50%) var(--dc-glow-y, 30%),
+    transparent 0%, #000 14%, rgba(0, 0, 0, .55) 42%, transparent 74%);
+  filter: blur(5px);
+  mix-blend-mode: screen;
+  transition: opacity .8s ease;
+}
+
+/* 白天光尘 / 夜晚萤火 / 流星：沉浸层 */
+.kb-dc-bd-motes,
+.kb-dc-bd-fireflies,
+.kb-dc-bd-shooting {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  transition: opacity 1s ease;
+}
+
+.kb-dc-bd-motes { opacity: calc(var(--dc-mote-o, 0) * var(--dc-fx-scale)); }
+.kb-dc-bd-fireflies { opacity: calc(var(--dc-firefly-o, 0) * var(--dc-fx-scale)); mix-blend-mode: screen; }
+.kb-dc-bd-shooting { opacity: calc(var(--dc-shooting-o, 0) * var(--dc-fx-scale)); }
+
+.kb-dc-bd-mote {
+  position: absolute;
+  border-radius: 50%;
+  background: #fff8e2;
+  box-shadow: 0 0 6px 2px rgba(255, 240, 200, .35);
+  opacity: 0;
+  animation: kb-dc-bd-mote-float 18s linear infinite;
+}
+
+.kb-dc-bd-firefly {
+  position: absolute;
+  border-radius: 50%;
+  background: #eaff9a;
+  box-shadow: 0 0 8px 2px rgba(220, 255, 150, .55), 0 0 22px 7px rgba(160, 255, 120, .18);
+  opacity: 0;
+  animation: kb-dc-bd-firefly-float 14s ease-in-out infinite alternate;
+}
+
+.kb-dc-bd-shoot {
+  position: absolute;
+  width: 130px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .95), transparent);
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, .75));
+  opacity: 0;
+  transform: rotate(24deg);
+  animation: kb-dc-bd-shoot 13s linear infinite;
+}
+
+/* 越过面板的一层光：让太阳 / 月亮的颜色洒到内容上（极低透明度） */
+.kb-dc-bd-light {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background:
+    radial-gradient(760px 560px at var(--dc-glow-x, 50%) var(--dc-glow-y, 30%),
+      color-mix(in srgb, var(--sky-glow) 36%, transparent) 0%,
+      color-mix(in srgb, var(--sky-glow) 12%, transparent) 38%,
+      transparent 70%),
+    radial-gradient(560px 420px at calc(100% - var(--dc-glow-x, 50%)) 8%,
+      color-mix(in srgb, var(--sky-top) 20%, transparent) 0%,
+      transparent 72%);
+  mix-blend-mode: screen;
+  opacity: calc(var(--dc-light-o, .5) * var(--dc-light-scale));
+  transition: opacity .8s ease;
+}
+
+.kb-dc-bd-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  background:
+    radial-gradient(130% 100% at 50% 26%, transparent 48%, rgba(0, 0, 0, .18) 100%),
+    linear-gradient(180deg, transparent 82%, color-mix(in srgb, var(--bg-primary) 58%, transparent) 100%);
+}
+
+/* 时间胶囊：半透明底 + 描边 + 前景色走 --tb-fg（天空亮度推导），任何时段可读 */
+.kb-dc-chip {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--tb-fg) 14%, transparent);
+  background: color-mix(in srgb, var(--tb-fg) 9%, transparent);
+  color: var(--tb-fg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, .08);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.kb-dc-chip-icon { display: inline-flex; opacity: .9; }
+.kb-dc-chip-time { font-size: 11.5px; font-weight: 650; letter-spacing: .04em; }
+.kb-dc-chip-phase { font-size: 9.5px; letter-spacing: .08em; opacity: .72; }
+
+/* 昼夜主题下的顶栏：整窗背景层接管天空，根容器退位；分隔线随前景色走 */
+html.theme-daycycle .kb-titlebar {
+  background: transparent;
+  border-bottom-color: color-mix(in srgb, var(--tb-fg) 14%, transparent);
+}
+
+/* ===== 昼夜动态主题 · 通透玻璃表面（2026-11-11，用户拍板「沉浸天空 + 通透」）=====
+   只覆盖带语义类名的外壳 / 模块根，不动 popover / 输入框等需要实底的可读面。
+   层级关系：整窗场景 z=-1 → 面板背景 alpha → 模块 kb-theme-surface alpha。
+   主内容区用 26% + 58% 叠出约 69% 不透明；侧栏用 44% + 46% 叠出约 70%，
+   保证正文对比度，同时让天空 / 月亮 / 星星能从后面透出来。 */
+html.theme-daycycle .kb-app-root {
+  background-color: transparent;
+}
+html.theme-daycycle .kb-theme-surface {
+  background-color: color-mix(in srgb, var(--bg-primary) calc(58% + var(--dc-glass-boost, 0%)), transparent);
+}
+html.theme-daycycle .kb-theme-surface-translucent {
+  background-color: color-mix(in srgb, var(--bg-primary) calc(46% + var(--dc-glass-boost, 0%) * .55), transparent);
+}
+html.theme-daycycle .kb-dc-center {
+  background-color: color-mix(in srgb, var(--bg-primary) calc(26% + var(--dc-glass-boost, 0%) * .45), transparent);
+}
+html.theme-daycycle .kb-dc-empty {
+  background-color: color-mix(in srgb, var(--bg-primary) calc(44% + var(--dc-glass-boost, 0%) * 1.2), transparent);
+}
+html.theme-daycycle .kb-dc-side {
+  background-color: color-mix(in srgb, var(--bg-primary) calc(44% + var(--dc-glass-boost, 0%) * .8), transparent);
+  backdrop-filter: blur(16px) saturate(1.06);
+  -webkit-backdrop-filter: blur(16px) saturate(1.06);
+}
+html.theme-daycycle .kb-activitybar {
+  background-color: color-mix(in srgb, var(--activitybar-bg) calc(48% + var(--dc-glass-boost, 0%) * .5), transparent);
+  backdrop-filter: blur(14px) saturate(1.06);
+  -webkit-backdrop-filter: blur(14px) saturate(1.06);
+}
+html.theme-daycycle .kb-pagebar {
+  background-color: color-mix(in srgb, var(--bg-secondary) calc(42% + var(--dc-glass-boost, 0%) * .5), transparent);
+}
+html.theme-daycycle .kb-statusbar {
+  background-color: color-mix(in srgb, var(--bg-tertiary) calc(52% + var(--dc-glass-boost, 0%) * .5), transparent);
+}
+
+/* 整窗噪点：feTurbulence 噪声叠加，消渐变色带 + 加质感（Stripe / Linear 手法）。
+   pointer-events:none 纯视觉；opacity 由引擎 --dc-grain 随时段调整 */
+html.theme-daycycle body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+  opacity: var(--dc-grain, .04);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+}
+
+@keyframes kb-dc-breathe {
+  from { scale: 1; }
+  to { scale: 1.07; }
+}
+
+@keyframes kb-dc-bd-cloud-drift {
+  from { transform: translateX(-14px); }
+  to { transform: translateX(22px); }
+}
+
+@keyframes kb-dc-twinkle {
+  0%, 100% { opacity: .3; }
+  50% { opacity: 1; }
+}
+
+@keyframes kb-dc-aurora-drift {
+  from { transform: translate3d(-3%, -2%, 0) scale(1) rotate(-2deg); }
+  to { transform: translate3d(4%, 3%, 0) scale(1.08) rotate(2deg); }
+}
+
+@keyframes kb-dc-bd-mote-float {
+  0% { opacity: 0; transform: translate3d(0, 0, 0); }
+  16% { opacity: .7; }
+  55% { opacity: .42; }
+  100% { opacity: 0; transform: translate3d(var(--dc-dx, 30px), var(--dc-dy, -80px), 0); }
+}
+
+@keyframes kb-dc-bd-firefly-float {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.7); }
+  25% { opacity: .85; }
+  55% { opacity: .2; }
+  80% { opacity: .75; }
+  100% { opacity: 0; transform: translate3d(var(--dc-dx, 24px), var(--dc-dy, -30px), 0) scale(1.15); }
+}
+
+@keyframes kb-dc-bd-shoot {
+  0%, 86% { opacity: 0; transform: translate3d(0, 0, 0) rotate(24deg); }
+  87% { opacity: .95; }
+  91% { opacity: .9; transform: translate3d(190px, 88px, 0) rotate(24deg); }
+  94%, 100% { opacity: 0; transform: translate3d(250px, 116px, 0) rotate(24deg); }
+}
+
+/* 昼夜主题 reduced-motion 降级：环境动效全停（漂移 / 闪烁 / 呼吸 / 天体平滑），
+   颜色令牌仍随分钟更新（docs/daycycle-theme-plan.md §5） */
+@media (prefers-reduced-motion: reduce) {
+  .kb-dc-bd-celestial { transition: none; }
+  .kb-dc-bd-celestial.is-moving { transition: none; }
+  .kb-dc-bd-sun,
+  .kb-dc-bd-cloud,
+  .kb-dc-bd-star,
+  .kb-dc-bd-aurora-band,
+  .kb-dc-bd-mote,
+  .kb-dc-bd-firefly,
+  .kb-dc-bd-shoot { animation: none; }
+  .kb-dc-bd-aurora,
+  .kb-dc-bd-clouds,
+  .kb-dc-bd-stars,
+  .kb-dc-bd-rays,
+  .kb-dc-bd-motes,
+  .kb-dc-bd-fireflies,
+  .kb-dc-bd-shooting,
+  .kb-dc-bd-light { transition: none; }
+}

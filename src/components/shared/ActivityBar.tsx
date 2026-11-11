@@ -213,7 +213,7 @@ export function ActivityBar({ active, onChange, onWorkbench, flush }: Props) {
   return (
     <div
       ref={railRef}
-      className={`w-11 flex flex-col items-center py-2 gap-0.5 shrink-0 select-none transition-all duration-300 ease-out bg-[color-mix(in_srgb,var(--activitybar-bg)_85%,transparent)] ${flush ? 'rounded-none' : 'mx-1.5 my-1.5 rounded-xl border border-[var(--border-color)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}
+      className={`kb-activitybar w-11 flex flex-col items-center py-2 gap-0.5 shrink-0 select-none transition-all duration-300 ease-out bg-[color-mix(in_srgb,var(--activitybar-bg)_85%,transparent)] ${flush ? 'rounded-none' : 'mx-1.5 my-1.5 rounded-xl border border-[var(--border-color)] shadow-[inset_0_1px_0_var(--glass-edge),0_6px_24px_rgba(0,0,0,0.16)]'}`}
       onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY }) }}
     >
       {/* 工作台 —— 顶部第一按钮（VS Code 惯例：主视图入口在最上）。

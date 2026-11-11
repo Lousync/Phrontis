@@ -2,11 +2,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { ipcMain } from 'electron'
 import { getCurrentVault } from 'phrontis-core/kbStore/vaultContext'
-import { CONSTRAINTS_FILE, broadcastTreeRefresh, ensureGlobalConstraints, ensureWorkspaceConstraints, readGlobalConstraints, rootDirName, unitConstraintsRel } from './aiTeachingFolders'
-import { workspaceFolderRel } from './aiTeachingWorkspaces'
-import { getSessionUnitFolderRels, readCourseOutline, unitFolderRel } from './aiTeachingCourse'
+import { CONSTRAINTS_FILE, broadcastTreeRefresh, ensureGlobalConstraints, ensureWorkspaceConstraints, readConstraints, readGlobalConstraints, rootDirName, unitConstraintsRel, writeConstraints } from './aiTeachingFolders'
+import { getWorkspaceOfSession, workspaceFolderRel } from './aiTeachingWorkspaces'
+import { getSessionLessonBrief, getSessionUnitFolderRels, readCourseOutline, unitFolderRel } from './aiTeachingCourse'
 import { parseSourceMd, unitSourceFileRel } from './aiTeachingSources'
 import { broadcast, BROADCAST_CHANNEL } from '../main/windowBus'
+import { cutScopeLayer, SCOPE_LAYER_MAX_CHARS, SCOPE_LAYER_MAX_ITEMS } from './scopePrompt'
 
 /**
  * AI教学 · **分层「要求」通用 scope 读写**（方案 `ai-teaching-flow-v2-impl.md` §三-2，2026-10-17）
@@ -258,6 +259,260 @@ export function readUnitConstraintsForSession(sessionId: string, getSetting: (ke
     return blocks.join('\n\n')
   } catch {
     return ''
+  }
+}
+
+// ===== AI 工具 course.constraints.write 的业务实现（docs/ai-teaching-constraints-write-plan.md）=====
+
+/** 工具层四层（与 UI「要求」抽屉一致；chapter 不开放） */
+export type AiTeachConstraintLevel = 'global' | 'workspace' | 'unit' | 'segment'
+
+export interface AiTeachConstraintWriteInput {
+  level: AiTeachConstraintLevel
+  text: string
+  mode?: 'append' | 'replace'
+  unit?: string | null
+}
+
+export interface AiTeachConstraintWriteResult {
+  ok: boolean
+  level?: AiTeachConstraintLevel
+  relPath?: string
+  mode?: 'append' | 'replace'
+  chars?: number
+  items?: number
+  truncated?: boolean
+  warning?: string
+  hint?: string
+  error?: string
+}
+
+export interface AiTeachConstraintReadInput {
+  level: AiTeachConstraintLevel
+  unit?: string | null
+}
+
+export interface AiTeachConstraintReadResult {
+  ok: boolean
+  level?: AiTeachConstraintLevel
+  relPath?: string | null
+  text?: string
+  chars?: number
+  items?: number
+  truncated?: boolean
+  hint?: string
+  error?: string
+}
+
+const AI_CONSTRAINT_TEXT_MAX = 20000
+const AI_CONSTRAINT_LEVELS = new Set<AiTeachConstraintLevel>(['global', 'workspace', 'unit', 'segment'])
+
+function normalizeConstraintText(value: unknown): string {
+  return String(value ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
+/** append 语义：保留原内容，空行 + 新内容，末尾一个换行；不制造三连空行。 */
+function appendConstraintText(existing: string, text: string): string {
+  const cur = normalizeConstraintText(existing).trimEnd()
+  const add = normalizeConstraintText(text).trim()
+  return cur ? `${cur}\n\n${add}\n` : `${add}\n`
+}
+
+/** replace 语义：整篇覆盖，末尾一个换行。 */
+function replaceConstraintText(text: string): string {
+  return `${normalizeConstraintText(text).trim()}\n`
+}
+
+/** unit 层解析：显式名称/id → 当前聚焦 → 本段第一个；只在本段知识点范围内匹配。 */
+function resolveConstraintUnit(
+  sessionId: string,
+  unitArg: unknown,
+  getSetting: (key: string) => unknown,
+): { unitId?: string; error?: string } {
+  const brief = getSessionLessonBrief(sessionId)
+  if (!brief) return { error: '当前会话不是段会话；课程助手 / 复习课请用 workspace 或 global' }
+  const units = getSessionUnitFolderRels(sessionId, getSetting)
+  if (units.length === 0) return { error: '本段没有可写的知识点；请用 workspace 或 global' }
+  const query = String(unitArg ?? '').trim()
+  let hit = query
+    ? (units.find((u) => u.unitId === query) ?? units.find((u) => u.name === query))
+    : undefined
+  if (!query) {
+    const active = String(brief.activeUnitId ?? '').trim()
+    hit = (active ? units.find((u) => u.unitId === active) : undefined) ?? units[0]
+  }
+  if (!hit) return { error: '该知识点不在本段；请到对应段或知识点层写入' }
+  return { unitId: hit.unitId }
+}
+
+interface ResolvedConstraintLayer {
+  level: AiTeachConstraintLevel
+  wsId: string
+  unitId: string | null
+}
+
+/**
+ * 四层要求解析（write / read 共用）：只做归属与层级校验，不读写盘。
+ * 课程助手 / 复习课没有段层 → segment / unit 明确拒绝，由调用方原样回报。
+ */
+function resolveConstraintLayer(
+  sessionId: string,
+  level: AiTeachConstraintLevel,
+  unitArg: unknown,
+  getSetting: (key: string) => unknown,
+): { ok: true; layer: ResolvedConstraintLayer } | { ok: false; error: string } {
+  const sid = String(sessionId ?? '').trim()
+  if (!sid) return { ok: false, error: '仅可在 AI 教学对话中使用' }
+  if (!AI_CONSTRAINT_LEVELS.has(level)) return { ok: false, error: `未知要求层：${String(level ?? '')}` }
+  if (!getCurrentVault()) return { ok: false, error: '尚未打开仓库' }
+  const wsId = String(getWorkspaceOfSession(sid) ?? '').trim()
+  if (level === 'global') return { ok: true, layer: { level, wsId, unitId: null } }
+  if (level === 'segment') {
+    const brief = getSessionLessonBrief(sid)
+    if (!brief) return { ok: false, error: '当前会话不是段会话；课程助手 / 复习课请用 workspace 或 global' }
+    return { ok: true, layer: { level, wsId, unitId: null } }
+  }
+  if (!wsId) return { ok: false, error: '当前对话未归属工作区' }
+  if (level === 'unit') {
+    const resolved = resolveConstraintUnit(sid, unitArg, getSetting)
+    if (!resolved.unitId) return { ok: false, error: resolved.error ?? '无法确定知识点' }
+    return { ok: true, layer: { level, wsId, unitId: resolved.unitId } }
+  }
+  return { ok: true, layer: { level: 'workspace', wsId, unitId: null } }
+}
+
+/** 非段层 → aiTeachScope 的层级引用（段层走 readConstraints/writeConstraints，不进这里） */
+function scopeRefOf(layer: ResolvedConstraintLayer): AiTeachScopeRef {
+  const level: 'global' | 'workspace' | 'unit' =
+    layer.level === 'global' ? 'global' : layer.level === 'unit' ? 'unit' : 'workspace'
+  return { wsId: layer.wsId, level, unitId: level === 'unit' ? layer.unitId : null }
+}
+
+/**
+ * `course.constraints.write` 的唯一业务实现。
+ * 写入后**下一轮用户消息**才重新注入（system 前缀在一轮 runAgentLoop 开始时已固定）。
+ */
+export function writeConstraintsForAiTeaching(
+  sessionId: string,
+  input: AiTeachConstraintWriteInput,
+  getSetting: (key: string) => unknown,
+): AiTeachConstraintWriteResult {
+  try {
+    const sid = String(sessionId ?? '').trim()
+    if (!sid) return { ok: false, error: '仅可在 AI 教学对话中使用' }
+    const level = String(input?.level ?? '') as AiTeachConstraintLevel
+    if (!AI_CONSTRAINT_LEVELS.has(level)) return { ok: false, error: `未知要求层：${String(input?.level ?? '')}` }
+    const text = normalizeConstraintText(input?.text).trim()
+    if (!text) return { ok: false, error: 'text 不能为空' }
+    if (text.length > AI_CONSTRAINT_TEXT_MAX) return { ok: false, error: `text 过长（上限 ${AI_CONSTRAINT_TEXT_MAX} 字符）` }
+    if (text.includes('\u0000')) return { ok: false, error: '内容含 NUL 字符，拒绝写入' }
+    const mode: 'append' | 'replace' = input?.mode === 'replace' ? 'replace' : 'append'
+    const resolved = resolveConstraintLayer(sid, level, input?.unit, getSetting)
+    if (!resolved.ok) return { ok: false, error: resolved.error }
+    const { layer } = resolved
+
+    let existing = ''
+    let body = ''
+    let relPath = ''
+
+    if (layer.level === 'segment') {
+      const cur = readConstraints(sid, getSetting)
+      if (!cur.ok) return { ok: false, error: cur.error ?? '读取本段要求失败' }
+      existing = cur.text ?? ''
+      body = mode === 'replace' ? replaceConstraintText(text) : appendConstraintText(existing, text)
+      const w = writeConstraints(sid, body, getSetting)
+      if (!w.ok) return { ok: false, error: w.error ?? '写入本段要求失败' }
+      relPath = String(w.relPath ?? cur.relPath ?? '')
+      // writeConstraints 只发 tree-refresh；段层写完补课程刷新，画布/右栏计数同步。
+      if (layer.wsId) broadcast(BROADCAST_CHANNEL.aiTeachCourseRefresh, { wsId: layer.wsId })
+    } else {
+      const ref = scopeRefOf(layer)
+      const cur = readScopeText(ref, getSetting)
+      if (!cur.ok) return { ok: false, error: cur.error ?? '读取要求失败' }
+      existing = cur.text ?? ''
+      body = mode === 'replace' ? replaceConstraintText(text) : appendConstraintText(existing, text)
+      const w = writeScopeText(ref, body, getSetting)
+      if (!w.ok) return { ok: false, error: w.error ?? '写入要求失败' }
+      relPath = String(w.relPath ?? cur.relPath ?? '')
+    }
+
+    // 注入侧上限是 12 条 / 1200 字符；写盘成功不等于进 AI 上下文。
+    const cut = cutScopeLayer(body)
+    const beforeCut = cutScopeLayer(existing)
+    let warning: string | undefined
+    if (mode === 'append' && beforeCut.truncated) {
+      warning = '原有内容已超过注入上限，追加内容可能不生效；建议用 replace 写一份精炼版'
+    } else if (mode === 'replace' && existing.trim()) {
+      warning = cut.truncated
+        ? '已覆盖本层原有内容；内容仍超过注入上限，超出部分不会注入'
+        : '已覆盖本层原有内容'
+    } else if (cut.truncated) {
+      warning = '内容超过注入上限，超出部分不会注入'
+    }
+
+    return {
+      ok: true,
+      level,
+      relPath,
+      mode,
+      chars: body.length,
+      items: countConstraintItems(body),
+      truncated: cut.truncated,
+      ...(warning ? { warning } : {}),
+      ...(cut.truncated
+        ? { hint: `本层注入上限 ${SCOPE_LAYER_MAX_ITEMS} 条 / ${SCOPE_LAYER_MAX_CHARS} 字符；超出部分不会进入 AI 上下文` }
+        : {}),
+    }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
+/**
+ * `course.constraints.read` 的唯一业务实现：返回某层 **全文**。
+ * 注入侧每层只取 12 条 / 1200 字符；读工具不受此限，但会用 `truncated` 提示注入侧仍会截断。
+ */
+export function readConstraintsForAiTeaching(
+  sessionId: string,
+  input: AiTeachConstraintReadInput,
+  getSetting: (key: string) => unknown,
+): AiTeachConstraintReadResult {
+  try {
+    const sid = String(sessionId ?? '').trim()
+    const level = String(input?.level ?? '') as AiTeachConstraintLevel
+    const resolved = resolveConstraintLayer(sid, level, input?.unit, getSetting)
+    if (!resolved.ok) return { ok: false, error: resolved.error }
+    const { layer } = resolved
+
+    let text = ''
+    let relPath: string | null = null
+    if (layer.level === 'segment') {
+      const cur = readConstraints(sid, getSetting)
+      if (!cur.ok) return { ok: false, error: cur.error ?? '读取本段要求失败' }
+      text = cur.text ?? ''
+      relPath = cur.relPath ?? null
+    } else {
+      const cur = readScopeText(scopeRefOf(layer), getSetting)
+      if (!cur.ok) return { ok: false, error: cur.error ?? '读取要求失败' }
+      text = cur.text ?? ''
+      relPath = cur.relPath ?? null
+    }
+
+    const cut = cutScopeLayer(text)
+    return {
+      ok: true,
+      level,
+      relPath,
+      text,
+      chars: text.length,
+      items: countConstraintItems(text),
+      truncated: cut.truncated,
+      ...(cut.truncated
+        ? { hint: `注入时每层只取前 ${SCOPE_LAYER_MAX_ITEMS} 条 / ${SCOPE_LAYER_MAX_CHARS} 字符；本工具返回的是全文` }
+        : {}),
+    }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
   }
 }
 

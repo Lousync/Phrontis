@@ -551,6 +551,8 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
   /** 要求抽屉 */
   const [reqOpen, setReqOpen] = useState(false)
   const [reqLayer, setReqLayer] = useState<ReqLayer>('workspace')
+  /** 要求抽屉重读信号（AI 工具 / 编辑器写盘后刷新当前层） */
+  const [reqTick, setReqTick] = useState(0)
   /** 上段交接内容（界面条） */
   const [prevHandoff, setPrevHandoff] = useState('')
   /** prevHandoff 归属的段会话：切段时旧文本不闪到新段 */
@@ -1531,9 +1533,10 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
       const base = rel.split(/[\\/]/).pop() ?? ''
       const artHit = !!rel && artTabsRef.current.some(t => !t.generating && t.rel === rel)
       if (base !== 'CONSTRAINTS.md' && !artHit) return
+      if (base === 'CONSTRAINTS.md') setReqTick(v => v + 1)
       syncSessionFiles({ constraints: base === 'CONSTRAINTS.md', doc: artHit ? rel : null })
     }
-    const onTree = () => { syncSessionFiles({ constraints: true }); void reloadCourse() }
+    const onTree = () => { syncSessionFiles({ constraints: true }); setReqTick(v => v + 1); void reloadCourse() }
     const onFocus = () => syncSessionFiles({ constraints: true })
     window.addEventListener('kb:file-saved', onSaved)
     window.addEventListener('focus', onFocus)
@@ -3635,6 +3638,7 @@ export function AiTeachingModule({ isActive, zenLevel = 0, onZenLevelChange, pen
           wsName={wsActive?.name ?? '课程'}
           unitId={activeUnitId}
           segmentSessionId={activeSegmentSid}
+          reloadKey={reqTick}
           layer={reqLayer}
           onLayer={setReqLayer}
           onClose={() => setReqOpen(false)}

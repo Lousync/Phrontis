@@ -89,7 +89,7 @@ src/
 15. 错题本 `source_space` 推导（`quizRepo.vaultResolveSource`）：上溯**必须走到 space 才 break**，notebook 只赋值不 break。演示数据工具 `.AGENT/scripts/demo-seed/`。
 
 ### AI 工具
-16. **工具 schema 就是每轮成本**（`.AGENT/scripts/ai-tools-audit/`）：core 16 个常驻 + ondemand 36 个默认折叠（2026-10-14 实数，枚举自 builtinTools.ts）。新增默认 `tier: 'ondemand'`，单工具 schema **≤800 字符**，**严禁在 description 里罗列返回字段**。（`builtin.time.now` 是唯一例外：核心只读、三 AI 面处处可用——让模型能定位"今天几号/现在几点"。）
+16. **工具 schema 就是每轮成本**（`.AGENT/scripts/ai-tools-audit/`）：core 16 个常驻 + ondemand 53 个默认折叠（2026-11-09 实数，枚举自 builtinTools.ts）。新增默认 `tier: 'ondemand'`，单工具 schema **≤800 字符**，**严禁在 description 里罗列返回字段**。（`builtin.time.now` 是唯一例外：核心只读、三 AI 面处处可用——让模型能定位"今天几号/现在几点"。）
 17. 结果侧只做两件事：**拿得少**（默认值 / 上限）、**丢得早**（`MAX_TOOL_RESULT_CHARS=24000` 摘要替代 + `KEEP_RECENT_TOOL_RESULTS=3`）。压缩必须是纯函数且幂等，否则打散 prompt cache。
 18. 新模块接入 AI 工具的接线清单：`DataChangeScope` 加该模块 scope + 对应面板挂 `useDataChanged`（否则表象是「AI 说改好了、界面没反应」）；提供 `*ResolveOrCreate(name)` 命名桥；查询工具**不得**有建标签这类副作用；新写工具同步补 `builtin.tool.request` 的 description 清单。
 19. 出题 → 答题闭环：组卷落成知识库 `.md`，页内每题一个 ` ```quiz ` 围栏；答错自动回流错题本，**题号必须重排 1..N**（`snapshot.no` 是原页序号，沿用会把错题记到别的题上）。契约 `.AGENT/scripts/quiz-tools/verify-quiz-fence.mjs`。
@@ -156,6 +156,7 @@ npm run pack     # build + electron-builder 打包 → 产物落 packs/<版本�
 | 交互确认与弹窗限制（行内化模式清单） | `docs/ui-interaction-patterns.md` |
 | 更新说明机制（触发规则 / 数据三层） | `docs/release-notes-design.md` |
 | 主题氛围特效（四季粒子 / 丁达尔，等看板） | `docs/theme-fx-design.md` |
+| 昼夜动态主题（daycycle：纯函数 / 引擎 / 契约） | `docs/daycycle-theme-plan.md` |
 | 待修 bug 清单 | `docs/pending-fixes.md`（旧验收记录 `verification-issues-*` 与真机验证记录 2026-09-23 已转入 DP `Phrontis/过程记录/`） |
 | v3.4.0 正式版体验反馈 | `docs/v3.4.0-feedback.md`（`F-n` 缺陷/落差 · `N-n` 新需求，编号各从 1 起；beta 前身已归档 DP `Phrontis/过程记录/v3.4.0-beta-feedback.md`） |
 | AI 教学互动性改造计划（3.5.0） | `docs/ai-teaching-interactivity-plan.md` |

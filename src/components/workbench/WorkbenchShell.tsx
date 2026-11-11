@@ -91,7 +91,7 @@ export function WorkbenchShell({ center, right, activeTab, railModule, railTool 
         onSnapClose={sidesGone ? undefined : () => patch({ leftCollapsed: true })}
         onSnapOpen={sidesGone ? undefined : () => patch({ leftCollapsed: false })}
         onHandleClick={sidesGone ? undefined : () => patch({ leftCollapsed: !layout.leftCollapsed })}
-        className={sidesGone || maximized ? 'rounded-none border-0' : 'm-1.5 rounded-xl border border-[var(--border-color)] shadow-sm'}
+        className={`kb-dc-side ${sidesGone || maximized ? 'rounded-none border-0' : 'm-1.5 rounded-xl border border-[var(--border-color)] shadow-sm'}`}
       >
         <WorkbenchLeftPanel
           activeTab={activeTab}
@@ -142,7 +142,7 @@ export function WorkbenchShell({ center, right, activeTab, railModule, railTool 
         onSnapClose={sidesGone ? undefined : () => patch({ rightCollapsed: true })}
         onSnapOpen={sidesGone ? undefined : () => patch({ rightCollapsed: false })}
         onHandleClick={sidesGone ? undefined : () => patch({ rightCollapsed: !layout.rightCollapsed })}
-        className={sidesGone || maximized ? 'rounded-none border-0' : 'm-1.5 rounded-xl border border-[var(--border-color)] shadow-sm'}
+        className={`kb-dc-side ${sidesGone || maximized ? 'rounded-none border-0' : 'm-1.5 rounded-xl border border-[var(--border-color)] shadow-sm'}`}
       >
         {right}
       </ResizablePanel>

@@ -3,6 +3,8 @@
  * 新增一个 setting 只需在这里加一行，前后端自动获得类型安全。
  */
 
+import { applyCodeTone } from './themeTone'
+
 // ===== 选项列表（供 UI 渲染） =====
 
 export const THEME_OPTIONS = [
@@ -31,6 +33,9 @@ export function applyThemeClass(themeId: string): void {
       .filter(c => !c.startsWith('theme-'))
       .join(' ')
     root.classList.add(`theme-${themeId}`)
+    // 代码块色板按主题实际亮度切亮/暗（插件主题无法靠类名枚举）。
+    // 必须在 class 写入后读 computed style，否则读到的是上一个主题的 --bg-primary。
+    applyCodeTone(root)
   }
 
   const hasTheme = /(^|\s)theme-/.test(root.className)
@@ -114,7 +119,10 @@ export const KNOWLEDGE_SIDEBAR_ITEM_VARS: Record<string, Record<string, string>>
 export const SETTINGS = {
   // 昼夜动态主题（2026-11-07，docs/daycycle-theme-plan.md）：默认值 dark → daycycle（用户拍板「默认开启」；
   // settings.json 无显式 theme 的存量用户会随升级切到昼夜主题）。引擎接线在 App.tsx 主题 effect。
-  theme: { default: 'daycycle', type: 'select', label: '应用主题', group: '主题', desc: '深色 / 浅色配色，以及插件提供的主题包；昼夜动态 = 整窗配色与顶栏天空随一天时间变化', keywords: ['主题', 'theme', '深色', '浅色', 'dark', 'light', '夜间', '配色', '昼夜', '动态', '天空', 'daycycle'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.theme' },
+  theme: { default: 'daycycle', type: 'select', label: '应用主题', group: '主题', desc: '深色 / 浅色配色，以及插件提供的主题包；昼夜动态 = 整窗天空与配色随一天时间变化', keywords: ['主题', 'theme', '深色', '浅色', 'dark', 'light', '夜间', '配色', '昼夜', '动态', '天空', 'daycycle'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.theme' },
+  // 昼夜动态 · 专注模式降特效（2026-11-11）：禅模式 Z1/Z2 或番茄钟专注阶段，降低云 / 星 / 粒子强度，
+  // 天空与天体保留。仅 daycycle 主题下在 AppearanceView 显示。
+  daycycleFocusDim: { default: true, type: 'toggle', label: '专注模式降低特效', group: '主题', desc: '进入禅模式（Z1 / Z2）或番茄钟专注阶段时，自动降低昼夜背景的云、星空与粒子强度（天空和太阳 / 月亮保留）', keywords: ['昼夜', '专注', '禅模式', '番茄钟', '特效', '强度', 'daycycle', 'focus', 'zen'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.daycycleFocusDim' },
   // 主题氛围特效（2026-09-27）：只在激活主题声明了 --theme-fx 时由 AppearanceView 条件渲染（ui:false = 不进搜索/通用渲染，见 docs/theme-fx-design.md §4.3）
   themeFxEnabled: { default: true, type: 'toggle', label: '主题特效', group: '主题', desc: '四季主题的氛围粒子特效（工作台 / 看板）：樱瓣 / 光束 / 落叶 / 雪', keywords: ['特效', '主题特效', '粒子', '氛围', 'theme fx'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   themeFxDensity: { default: 'mid', type: 'select', label: '粒子密度', group: '主题', desc: '氛围特效的粒子密度：疏 / 中 / 密（需主题特效开启）', keywords: ['密度', '粒子', '特效', 'density'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
@@ -280,6 +288,7 @@ export const SETTINGS = {
   // 放在模块设置里等于"AI 设置分散在两处"。同时补 anchor（此前 ui:true 无 anchor ⇒ 搜不到）。
   aiTeachRootDir: { default: 'AI教学', type: 'text', label: 'AI教学产物根目录', group: 'AI教学', desc: '会话文件夹所在仓库根目录名；重命名会一并迁移已有目录（目录被占用或权限不足时保留原目录）', keywords: ['AI教学', '教学', '目录', '根目录', '文件夹', '产物', 'aiteach'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTeach.rootDir', aiTab: 'teach' },
   aiTeachDeleteSessionFolder: { default: 'ask', type: 'select', label: '删除会话时文件夹处理', group: 'AI教学', desc: 'ask=每次询问 / keep=保留文件夹 / delete=会话文件夹一并移入系统回收站', keywords: ['AI教学', '删除', '会话', '文件夹', '回收站', '产物'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTeach.deleteSessionFolder', aiTab: 'teach' },
+  aiTeachLectureStyle: { default: 'stepwise', type: 'select', label: '讲课节奏', group: 'AI教学', desc: 'stepwise=小步引导（每条回答只讲一个台阶，讲完给一个检查问题并停下等学生回答）/ expanded=整段精讲（一个知识点一次讲完，旧行为）；学生在消息里明确说「一次讲完 / 直接说不用互动」时也会展开', keywords: ['AI教学', '讲课', '教学', '节奏', '小步', '引导', '检查', '提问', '精讲', '一次讲完', '直接说', '不用互动', 'stepwise', 'lecture'], section: 'aiTools', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'aiTeach.lectureStyle', aiTab: 'teach' },
   /**
    * 视觉转写模型（2026-10-13，决策 D）。
    * 此前只存在渲染层 localStorage 的 `aiTeach.visionModel`，是**隐藏设置**：既搜不到、

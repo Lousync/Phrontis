@@ -1087,6 +1087,28 @@ export function getSessionUnitFolderRels(sessionId: string, getSetting: (key: st
   return out
 }
 
+/** 段会话的轻量简报（工具层解析 unit 层默认值用；不做布局迁移、不读素材）。 */
+export interface SessionLessonBrief {
+  unitIds: string[]
+  activeUnitId?: string
+}
+
+/** 当前会话是否为段会话；不是（课程助手 / 复习课 / 零散对话）→ null。 */
+export function getSessionLessonBrief(sessionId: string): SessionLessonBrief | null {
+  try {
+    const sid = String(sessionId ?? '').trim()
+    if (!sid) return null
+    const wsId = getWorkspaceOfSession(sid)
+    if (!wsId) return null
+    const s = wsState(readProgressFile(), wsId)
+    const l = s.lessons?.[sid]
+    if (!l) return null
+    return { unitIds: lessonUnitIds(l), activeUnitId: l.activeUnitId }
+  } catch {
+    return null
+  }
+}
+
 /** L1/L3：知识点**可选元数据**目录 `{工作区}/第N章 章名/知识点/{NN} 知识点`。
  *  不要求目录已存在；迁移完成前若旧 v3.16 知识点夹仍在，回退旧路径保证要求/画像不丢。 */
 export function unitFolderRel(wsId: string, unitId: string, getSetting: (key: string) => unknown): string | null {
@@ -1253,7 +1275,7 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     if (!reg) return ''
     const lm = detectLongMaterial(reg.sources, Number(getSetting('ctxWindow')) || 0)
     if (!lm.active || lm.profile === 'normal') return ''
-    return `\n\n【长资料模式】本课程素材共 ${lm.pages} 页 / ${lm.chars} 字符（自动切 ${lm.profile} 档）。按章提取、按章阅读、一章一笔记；每章读完立即落盘，再读下一章；扫描页必须先经用户确认后视觉转写；笔记落点由用户指定，不要默认写入课程目录或知识库。`
+    return `\n\n【长资料模式】本课程素材共 ${lm.pages} 页 / ${lm.chars} 字符（自动切 ${lm.profile} 档）。按章提取、按章阅读、一章一笔记；每章读完立即落盘，再读下一章；扫描页必须先经用户确认后视觉转写；笔记落点按用户四层要求 / 当前消息执行，都没指定时先问用户一次（课程工作区 / 知识库 / 自定义目录），不要默认写入课程目录或知识库。`
   }
   const f = readProgressFile()
   const s = wsState(f, wsId)
@@ -1287,7 +1309,7 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
     }
     lines.push('【素材登记摘要】')
     lines.push(assistantSourcesSummary(wsId, getSetting))
-    lines.push('【建课流程与工具】① 素材先登记：用户给出文件/目录/URL 时用 course.sources.register 批量登记（外部文件会复制进本课 SOURCES；仓库内文件只引用）；② pdf/pptx 需要时用 course.sources.extract 提取页码区间；③ 用 inventory 清点目录素材（先清点再分章，别把整目录硬读进上下文）；④ 与用户定好目标、素材就绪后，生成**全量**大纲草稿（章 → 知识点；不要"先只给第一章"）；用户确认后调 course.outline.write 落盘；⑤ 用 course.sources.assign 把素材按章分配（能判断区间就带 anchor；判断不了就整章 whole）；⑥ 不主动开讲；只提醒用户去左栏点知识点开段，开段前会做素材预检；⑦ 删知识点用 course.outline.remove-unit（已学过的会被拒绝，需先用 course.organize.archive 整理归档）；⑧ 落盘只走这些工具，不要另造文件；改大纲前先与用户确认。')
+    lines.push('【建课流程与工具】① 素材先登记：用户给出文件/目录/URL 时用 course.sources.register 批量登记（外部文件会复制进本课 SOURCES；仓库内文件只引用）；② pdf/pptx 需要时用 course.sources.extract 提取页码区间；③ 用 inventory 清点目录素材（先清点再分章，别把整目录硬读进上下文）；④ 与用户定好目标、素材就绪后，生成**全量**大纲草稿（章 → 知识点；不要"先只给第一章"）；用户确认后调 course.outline.write 落盘；⑤ 用 course.sources.assign 把素材按章分配（能判断区间就带 anchor；判断不了就整章 whole）；⑥ 不主动开讲；只提醒用户去左栏点知识点开段，开段前会做素材预检；⑦ 删知识点用 course.outline.remove-unit（已学过的会被拒绝，需先用 course.organize.archive 整理归档）；⑧ 落盘只走这些工具，不要另造文件；改大纲前先与用户确认；⑨ 用户要写要求/规范/限制时用 course.constraints.write 写四层 CONSTRAINTS.md（默认本课程层），不要用 course.organize.archive 或 vault.write 造普通文档；⑩ 教材 / 知识库正文按用户要求用 vault.write 写指定路径（.md 传 ensureId:true 带稳定 id）；用户四层要求指定落点时以用户要求为准，不要默认收进 output/。')
     lines.push('【大纲落盘后的终止规则】课程大纲写入 / 更新成功后，建课流程即结束：不要讲授知识点，不要问用户是否「开讲第 N 章」，也不要邀请用户继续在课程助手会话里听讲。只输出下一步引导：去左栏点知识点开段（会先做素材预检）、继续改大纲、查看 / 分配素材；用户主动问课程内容时可以答疑，但仍不进入逐知识点开讲。')
     return '\n\n' + lines.join('\n') + longMaterialHint()
   }
@@ -1357,9 +1379,10 @@ export function buildCourseInjection(sessionId: string, getSetting: (key: string
       + (next ? `（下一段：第${next.order}段，覆盖 ${next.cover}）` : '；本章的段已全部收尾，可到左栏看是否要章末复习') + '。')
   } else {
     lines.push('交接纪律：交接文档只由用户点右上角「收尾本段」时由系统生成。你不要在对话中提供「生成交接文档 / 写交接 / 整理交接 / 输出交接」这类选项，也不要自行创建 `交接.md` 或任何交接文件；本段讲完只需在正文里建议用户点「收尾本段」。')
-    lines.push('教学纪律：本段只讲上面列出的知识点，按用户节奏推进；当前聚焦哪个就先讲哪个，讲完可问用户是否继续下一个或换焦点；不要跳到本章其他段，也不要一次把整门课讲完。讲完一个新概念可就地出一道快检（走 quiz 协议，一条回答最多一张）。本段素材范围见下一段【本段确认素材】，不要扫描 SOURCES 下未确认的文件。')
+    lines.push('教学纪律：本段只讲上面列出的知识点，按用户节奏推进；当前聚焦哪个就先讲哪个，一个知识点讲完后可问用户是否继续下一个或换焦点；不要跳到本章其他段，也不要一次把整门课讲完。讲课节奏以 system 的讲课口径为准：默认小步引导（一条回答一个台阶 + 一个检查问题并停下），用户明确要求一次讲完时才展开。单个台阶的检查用正文一句话；quiz 快检只在讲完一个完整知识点后出，一条回答最多一道。本段素材范围见下一段【本段确认素材】，不要扫描 SOURCES 下未确认的文件。')
     // B-47 ②③段内收尾协议：不自动收尾；知识点讲完先问去向；最后一个讲完且学生确认后主动建议收尾路径
     lines.push('段内收尾协议：收尾只由学生点右上角「收尾本段」触发，你在任何情况下都**不得自动收尾**，也不要替学生调用任何收尾 / finalize 动作。当前知识点讲完、学生没有追问时，先问「继续本段下一个知识点，还是先收尾本段」；本段最后一个知识点也讲完、学生确认没有问题后，再主动建议：点「收尾本段」→ 系统会在本段夹生成《交接.md》→ 到左栏开下一段。')
+    lines.push('要求文档：用户要写要求/规范/限制时用 course.constraints.write（本段用 segment＝默认；本课程用 workspace；本知识点用 unit；全局用 global），不要另建 `规范.md`。')
   }
   return '\n\n' + lines.join('\n') + longMaterialHint()
 }
@@ -1588,15 +1611,20 @@ export function archiveOrganizedPage(sessionId: string, title: unknown, content:
   const vault = getCurrentVault()
   if (!vault) return { ok: false, error: '尚未打开仓库' }
   if (isHandoffTitle(title)) return { ok: false, error: '交接由「收尾本段」统一生成，不能用整理归档创建。' }
+  const titleBase = String(title ?? '').replace(/\.md$/i, '').trim().toLowerCase()
+  if (titleBase === 'constraints') return { ok: false, error: '要求文档请用 course.constraints.write 写入，不要用整理归档创建 CONSTRAINTS.md' }
+  if (titleBase === '课程') return { ok: false, error: '课程大纲请用 course.outline.write 写入，不要用整理归档创建 课程.md' }
   const sid = String(sessionId ?? '')
   const owner = resolveWriteOwnerRel(sid, getSetting)
   if (!owner) return { ok: false, error: '无法确定归档目录' }
   let rel = String(target ?? '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
   if (!rel) rel = owner
-  if (rel.split('/').some((s) => s.startsWith('.'))) return { ok: false, error: '归档目录非法（不能写入隐藏/点目录）' }
+  const relSegs = rel.split('/').filter(Boolean)
+  if (relSegs.some((s) => s.startsWith('.'))) return { ok: false, error: '归档目录非法（不能写入隐藏/点目录）' }
+  if (relSegs.some((s) => s.toUpperCase() === 'SOURCES')) return { ok: false, error: 'SOURCES/ 是只读素材目录，禁止写入（用户要求也不能覆盖）' }
   const inOwner = rel === owner || rel.startsWith(`${owner}/`)
   if (!inOwner && !isCourseAssistantSession(sid, getSetting)) {
-    return { ok: false, error: `本段产物只能写入本段目录（${owner}/），不要指定其他 target` }
+    return { ok: false, error: `本段产物只能写入本段目录（${owner}/），不要指定其他 target；教材 / 知识库正文请用 vault.write 写到用户指定路径（.md 带 ensureId:true）` }
   }
   try {
     const dirAbs = join(vault.rootPath, rel)

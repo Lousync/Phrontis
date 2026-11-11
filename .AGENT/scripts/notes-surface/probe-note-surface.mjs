@@ -146,7 +146,7 @@ const JS_STATE = `(() => ({
   codeblock: document.querySelectorAll('.kb-live-codeblock').length,
   // 代码块渲染态 = 与预览同构的卡片（.kb-md-atom pre）+ highlight.js 着色 + 语言标签
   codeCard: document.querySelectorAll('.cm-content .kb-md-atom pre').length,
-  codeLang: document.querySelectorAll('.kb-live-codecard-lang').length,
+  codeLang: document.querySelectorAll('.kb-code-lang-chip').length,
   hljs: document.querySelectorAll('.cm-content [class*=hljs-]').length,
 }))()`
 

@@ -3,6 +3,7 @@ import { Check, X, Star, RotateCcw } from 'lucide-react'
 import { MarkdownPreview } from './MarkdownPreview'
 import type { QuizItem } from './QuizParser'
 import { useQuizRecord, useQuizStore, useQuizStoreActive } from './QuizRecordStore'
+import { pickNextQuizCardIndex } from './quizNavPure'
 
 interface Props {
   quiz: QuizItem
@@ -16,6 +17,30 @@ interface Props {
   pageTitle?: string
   /** 错题重做：带着上次选项重做，不自动展开解析 */
   redo?: boolean
+}
+
+/** 题卡所在滚动容器标识（同一容器共享同一 scope；聊天栏与右栏天然不同） */
+const scrollScopes = new WeakMap<Element, string>()
+let scrollScopeSeq = 0
+function scrollScopeOf(box: Element | null): string {
+  if (!box) return 'page'
+  let id = scrollScopes.get(box)
+  if (!id) {
+    id = `quiz-scroll-${++scrollScopeSeq}`
+    scrollScopes.set(box, id)
+  }
+  return id
+}
+
+/** 最近的纵向滚动容器（不要求当前已溢出：栏位高度固定，内容变长后才会滚） */
+function closestScrollBox(el: HTMLElement): HTMLElement | null {
+  let p = el.parentElement
+  while (p && p !== document.body) {
+    const oy = getComputedStyle(p).overflowY
+    if (oy === 'auto' || oy === 'scroll') return p
+    p = p.parentElement
+  }
+  return null
 }
 
 /**
@@ -77,11 +102,27 @@ export function QuizCard({ quiz, index, onAnswered, redo = false }: Props) {
   const scrollToNext = () => {
     const root = rootRef.current
     if (!root) return
-    const myTop = root.getBoundingClientRect().top
-    const next = Array.from(document.querySelectorAll<HTMLElement>('[data-quiz-card]'))
-      .filter(el => el !== root && el.getBoundingClientRect().top > myTop - 4)
-      .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top)[0]
-    if (next) next.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    // 只在当前题卡所在的滚动栏里找下一题：同一份题单可能同时渲染在左聊天栏 + 右工件/教材栏，
+    // 跨栏查找会把另一栏滚走（2026-11-10 用户反馈）。
+    const cards = Array.from(document.querySelectorAll<HTMLElement>('[data-quiz-card]'))
+    const spots = cards.map(el => ({
+      top: el.getBoundingClientRect().top,
+      scope: scrollScopeOf(closestScrollBox(el)),
+    }))
+    const nextIndex = pickNextQuizCardIndex(spots, cards.indexOf(root))
+    if (nextIndex < 0) return
+    const next = cards[nextIndex]
+
+    const box = closestScrollBox(root)
+    if (!box) {
+      next.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
+    // 容器内手算居中：scrollIntoView 会连带滚动所有祖先，仍可能牵动窗口级容器
+    const boxRect = box.getBoundingClientRect()
+    const nextRect = next.getBoundingClientRect()
+    const target = box.scrollTop + (nextRect.top - boxRect.top) - (box.clientHeight - nextRect.height) / 2
+    box.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
   }
 
   const pick = (key: string) => {

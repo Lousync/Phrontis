@@ -32,6 +32,7 @@ import katex from 'katex'
 // 于是「即时渲染档的代码卡片」与预览逐色一致。`lib/common` 是官方「常用语言」入口（约 37 种，
 // 远小于全量构建），且本文件本身是 lazy chunk，不进首屏静态闭包（铁律 20）。
 import hljs from 'highlight.js/lib/common'
+import { isControlKeyword } from '../../lib/controlKeywords'
 import { loadWikiTargets } from '../../lib/wikiLinkSuggest'
 import { getCachedVaultImage, loadVaultImage, normalizeVaultRel } from '../../lib/attachmentImage'
 import { runNoteAction, type NoteActionId } from '../../lib/noteActions'
@@ -528,24 +529,26 @@ class CodeBlockWidget extends WidgetType {
     const outer = document.createElement('div')
     outer.className = 'kb-md-atom'
     const pre = document.createElement('pre')
-    const inner = document.createElement('div')
-    inner.className = 'kb-live-codecard-inner'
+    pre.className = this.lang ? 'kb-code-plain kb-thin-scroll' : 'kb-thin-scroll'
     if (this.lang) {
       const tag = document.createElement('span')
-      tag.className = 'kb-live-codecard-lang'
+      tag.className = 'kb-code-lang-chip'
       tag.textContent = this.lang
-      inner.appendChild(tag)
+      pre.appendChild(tag)
     }
     const code = document.createElement('code')
     code.className = this.lang ? `hljs language-${this.lang}` : 'hljs'
     if (this.lang && hljs.getLanguage(this.lang)) {
       // highlight.js 输出的是**已转义**的 HTML（只含 <span class="hljs-*">），与预览侧同源同色
       code.innerHTML = hljs.highlight(this.code, { language: this.lang, ignoreIllegals: true }).value
+      // 与预览的 rehypeControlKeywords 同源：highlight.js 不区分控制流，这里按文本补类
+      code.querySelectorAll<HTMLElement>('.hljs-keyword').forEach(el => {
+        if (isControlKeyword(el.textContent || '')) el.classList.add('hljs-control')
+      })
     } else {
       code.textContent = this.code
     }
-    inner.appendChild(code)
-    pre.appendChild(inner)
+    pre.appendChild(code)
     outer.appendChild(pre)
     return outer
   }

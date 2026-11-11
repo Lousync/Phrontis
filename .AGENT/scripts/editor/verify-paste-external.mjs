@@ -18,6 +18,9 @@
  *      聚焦时 target 指向元素自身）—— 按 `e.target` 判定等于永不进分支，Ctrl+V **永久静默失效**
  *      且不报错。故断言钉的是「用 target 是 body + activeElement 不在编辑宿主」这对正确判据，
  *      以及「旧的错法不许回来」。
+ *   ⑤ **B-51（2026-11-09）扩写方向**：`buildUriList` / `buildFileNameWBuffer` /
+ *      `buildNSFilenamesPlist` 与 `ws:copyPathsToClipboard` 的路径校验也纳入本契约（写-读往返、
+ *      越界/符号链接/空列表拒绝、AI 教学树复制/粘贴接线），防止「复制动作只写组件 state」回归。
  *
  * 做法（与 verify-snooze-persist.mjs / verify-update-stall.mjs 一致）：从
  *   `electron/lib/workspaceManager.ts` 切出**真实实现**（stripTypeScriptTypes(mode:'transform')
@@ -58,6 +61,7 @@ const pasteHelper = readIfExists('src/lib/externalFilePaste.ts')
 const workbenchTree = readIfExists('src/components/workbench/WorkbenchFileTree.tsx')
 const clipboardFiles = readIfExists('electron/lib/clipboardFiles.ts')
 const clipboardPure = readIfExists('electron/lib/clipboardFilesPure.ts')
+const aiTeachTree = readIfExists('src/modules/ai-teaching/AiTeachFileTree.tsx')
 
 const checks = []
 const check = (name, pass, detail = '') => checks.push({ name, pass, detail })
@@ -83,6 +87,40 @@ check('ipc.ts 导出 readClipboardFilePaths', /export const readClipboardFilePat
 check('types 声明 readClipboardFilePaths', /readClipboardFilePaths:\s*\(\)/.test(typeDecl))
 check('共享粘贴 helper 用主进程剪贴板 + ws:pasteExternal',
   /readClipboardFilePaths\(\)/.test(pasteHelper) && /workspacePasteExternal\(rootId, relDir, paths\)/.test(pasteHelper))
+
+// ---- B-51（2026-11-09）：应用内文件剪贴板 + AI 教学树复制/粘贴 ----
+check('主进程注册 ws:copyPathsToClipboard（B-51 写方向）',
+  /ipcMain\.handle\('ws:copyPathsToClipboard'/.test(src))
+check('ws:copyPathsToClipboard 用 requireInside 解析并校验符号链接',
+  /ws:copyPathsToClipboard[\s\S]{0,900}?requireInside\(rootId, rel\)[\s\S]{0,400}?isSymbolicLink\(\)/.test(src))
+check('ws:copyPathsToClipboard 写 clipboardFiles.writeClipboardFilePaths',
+  /writeClipboardFilePaths\(absPaths\)/.test(src) &&
+  /export function writeClipboardFilePaths\b/.test(clipboardFiles))
+check('preload 暴露 workspaceCopyPathsToClipboard',
+  /workspaceCopyPathsToClipboard:\s*\(/.test(preload))
+check('ipc.ts 导出 workspaceCopyPathsToClipboard',
+  /export const workspaceCopyPathsToClipboard\b/.test(ipcLib))
+check('types 声明 workspaceCopyPathsToClipboard',
+  /workspaceCopyPathsToClipboard:\s*\(/.test(typeDecl))
+check('主进程持有应用内文件剪贴板（模块级 appFileClipboard）',
+  /let appFileClipboard: string\[\] \| null = null/.test(clipboardFiles))
+check('读路径应用内优先：同组文件 / 系统剪贴板仍有文件格式时用应用内那份',
+  /samePathSet\(osPaths, appFileClipboard\)[\s\S]{0,500}?hasOsFileFormat\(\) && !osText/.test(clipboardFiles))
+check('写系统剪贴板优先 _writeFilesForTesting（原生文件格式）',
+  /_writeFilesForTesting/.test(clipboardFiles))
+check('AI 教学树复制走 workspaceCopyPathsToClipboard（不再只写组件 state）',
+  /workspaceCopyPathsToClipboard\(rootId,\s*\[`\$\{base\}\/\$\{n\.relPath\}`\]\)/.test(aiTeachTree))
+check('AI 教学树粘贴走共享 pasteClipboardFiles（读应用内/系统剪贴板）',
+  /pasteClipboardFiles\(rootId, fullDir\)/.test(aiTeachTree))
+check('AI 教学树目录菜单也有「粘贴系统剪贴板」入口',
+  /key: 'paste', label: '粘贴系统剪贴板'[\s\S]{0,200}?pasteInto\(node\.relPath\)/.test(aiTeachTree))
+check('AI 教学树 Ctrl+V 走 keydown + 主进程剪贴板',
+  /isExternalPasteGesture/.test(aiTeachTree) &&
+  /pasteInto\(pasteTargetRef\.current\)/.test(aiTeachTree))
+check('AI 教学树旧的组件内 clip / 伪粘贴已删除',
+  !/setClip\(/.test(aiTeachTree) &&
+  !/剪贴板为空/.test(aiTeachTree))
+
 
 check('主进程注册 clipboard:paste（旧通道保留）', /ipcMain\.handle\('clipboard:paste'/.test(mainIndex))
 check('clipboard:paste 打在发起窗口（e.sender.paste）', /e\.sender\.paste\(\)/.test(mainIndex))
@@ -200,8 +238,11 @@ if (!Number.isFinite(realCap)) throw new Error('未能从源码解析 MAX_PASTE_
 
 // 真 handler 的箭头源：既用于装配 harness，也用于「它没有多写一条广播」这类断言
 const pasteArrowSrc = sliceHandlerArrow(src, 'ws:pasteExternal')
+const copyArrowSrc = sliceHandlerArrow(src, 'ws:copyPathsToClipboard')
 check('粘贴不写 broadcastDataChanged（与 createFile/mkdir 同口径，由渲染层自行刷新）',
   !/broadcastDataChanged/.test(pasteArrowSrc))
+check('复制不写 broadcastDataChanged（纯剪贴板动作）',
+  !/broadcastDataChanged/.test(copyArrowSrc))
 
 /** 组装只含粘贴链路的最小模块：真实 isInside / resolveSafe / vscodeCopyName / 真实 handler 箭头 */
 function buildHarness() {
@@ -232,12 +273,17 @@ let MAX_PASTE_ITEMS = ${realCap}
 export function __setCap(n) { MAX_PASTE_ITEMS = n }
 export function __maxPasteItems() { return MAX_PASTE_ITEMS }
 
+// —— 复制到剪贴板的唯一被替换依赖：记录传给主进程剪贴板层的绝对路径 ——
+export const __clip = { calls: [] }
+export function writeClipboardFilePaths(paths) { __clip.calls.push(paths); return true }
+
 // —— 以下全部为源码切片（真实实现）——
 ${sliceBraced(src, 'function isInside')}
 ${sliceBraced(src, 'function resolveSafe')}
 ${sliceBraced(src, 'function vscodeCopyName')}
 
 export const pasteExternal = ${pasteArrowSrc}
+export const copyToClipboard = ${copyArrowSrc}
 `
 }
 
@@ -313,13 +359,70 @@ const runClipboardParserCases = async () => {
   const p3 = path.join(tmpRoot, '中文 文件.md')
   check('U6 中文 / 空格路径按 UTF-8 百分号解码',
     eq(m.parseUriList(`${toUri(p3)}\r\n`), [p3]), JSON.stringify(m.parseUriList(`${toUri(p3)}\r\n`)))
+
+  // ---- 写方向（B-51）：builder 与既有 parser 必须能互相对上 ----
+  const builtUri = m.buildUriList([p1, p2])
+  check('U7 buildUriList → parseUriList 往返一致', eq(m.parseUriList(builtUri), [p1, p2]), JSON.stringify(builtUri))
+
+  const builtW = m.buildFileNameWBuffer([p1, p2])
+  check('U8 buildFileNameWBuffer → parseFileNameWBuffer 往返一致',
+    eq(m.parseFileNameWBuffer(builtW), [p1, p2]), JSON.stringify(m.parseFileNameWBuffer(builtW)))
+
+  const plist = m.buildNSFilenamesPlist([p1, p3])
+  check('U9 NSFilenamesPlist 含 XML plist 外壳且转义特殊字符',
+    /<plist version="1\.0"><array>/.test(plist) && plist.includes(escapeXmlForTest(p1)) && plist.includes(escapeXmlForTest(p3)))
+}
+
+function escapeXmlForTest(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 }
 
 const run = async () => {
   mod = await makeHarness()
-  const { pasteExternal, __setRoot, __invalidate, __setCap, __maxPasteItems } = mod
+  const { pasteExternal, copyToClipboard, __clip, __setRoot, __invalidate, __setCap, __maxPasteItems } = mod
 
   check('切片出的上限常量与源码一致', __maxPasteItems() === realCap, `切片=${__maxPasteItems()} 源码=${realCap}`)
+
+  // ---------- S 复制到剪贴板（B-51 写方向） ----------
+  step = 'S 复制到剪贴板'
+  let copyVault = makeVault('S')
+  __setRoot(copyVault)
+  fs.writeFileSync(path.join(copyVault, 'a.txt'), 'AAA', 'utf8')
+  fs.mkdirSync(path.join(copyVault, 'subdir'), { recursive: true })
+
+  __clip.calls.length = 0
+  let c = copyToClipboard(null, 'r1', ['a.txt'])
+  check('S1 复制单文件 → 记录绝对路径',
+    c.ok === true && __clip.calls.length === 1 && __clip.calls[0][0] === path.join(copyVault, 'a.txt'),
+    JSON.stringify({ res: c, calls: __clip.calls }))
+
+  c = copyToClipboard(null, 'r1', ['a.txt', 'subdir'])
+  check('S2 多文件 / 目录一并记录',
+    c.ok === true && __clip.calls.at(-1).length === 2 && __clip.calls.at(-1)[1] === path.join(copyVault, 'subdir'),
+    JSON.stringify(c))
+
+  const beforeBad = __clip.calls.length
+  c = copyToClipboard(null, 'r1', ['../escape.txt'])
+  check('S3 越界相对路径 → 拒绝且不写剪贴板',
+    c.ok === false && __clip.calls.length === beforeBad, JSON.stringify(c))
+  c = copyToClipboard(null, 'r1', ['nope.txt'])
+  check('S4 源不存在 → 拒绝且不写剪贴板',
+    c.ok === false && __clip.calls.length === beforeBad, JSON.stringify(c))
+  c = copyToClipboard(null, 'r1', [])
+  check('S5 空列表 → 拒绝且不写剪贴板',
+    c.ok === false && __clip.calls.length === beforeBad, JSON.stringify(c))
+
+  let copyLink = ''
+  try {
+    copyLink = path.join(copyVault, 'link-to-a')
+    fs.symlinkSync(path.join(copyVault, 'a.txt'), copyLink, 'file')
+  } catch { copyLink = '' }
+  if (copyLink && fs.lstatSync(copyLink).isSymbolicLink()) {
+    c = copyToClipboard(null, 'r1', ['link-to-a'])
+    check('S6 符号链接 → 拒绝且不写剪贴板', c.ok === false && __clip.calls.length === beforeBad, JSON.stringify(c))
+  } else {
+    check('S6 符号链接 → 拒绝且不写剪贴板', false, '环境无法创建符号链接，用例未执行')
+  }
 
   // ---------- A 无冲突粘贴文件 ----------
   step = 'A 无冲突粘贴'

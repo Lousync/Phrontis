@@ -99,6 +99,31 @@ export function AppearanceView() {
         />
       </div>
 
+      {/* 昼夜动态 · 专注模式降特效（2026-11-11）：只在 daycycle 主题下出现 */}
+      {s.theme === 'daycycle' && (
+        <div className="mb-8" data-setting-anchor="appearance.daycycleFocusDim">
+          <h3 className="text-[12px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-3">昼夜背景</h3>
+          <p className="text-[11px] text-[var(--text-muted)] mb-3">
+            进入禅模式（Z1 / Z2）或番茄钟专注阶段时，自动降低云、星空与粒子强度；天空和太阳 / 月亮保留。
+          </p>
+          <div className="flex items-center gap-1.5 max-w-xs">
+            {[{ id: true, label: '开' }, { id: false, label: '关' }].map((o) => (
+              <button
+                key={o.label}
+                onClick={() => update('daycycleFocusDim', o.id)}
+                className={`flex-1 px-2 py-2 rounded text-[12px] border transition-colors ${
+                  (s.daycycleFocusDim !== false) === o.id
+                    ? 'border-[var(--accent)] bg-[var(--bg-selected)] text-[var(--text-primary)]'
+                    : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 主题氛围特效：仅激活主题声明了 --theme-fx（四季主题）时出现 —— docs/theme-fx-design.md §4.3 */}
       {fxKind && (
         <div className="mb-8" data-setting-anchor="appearance.themeFx">

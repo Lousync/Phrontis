@@ -9,7 +9,7 @@ import type { CreateScheduleWorkflowDTO, ScheduleWorkflowCheckpointInput, Schedu
 const a = () => { if (!window.api) throw new Error('Electron API not available.'); return window.api }
 
 export const getPathForFile = (file: File): string => a().getPathForFile(file)
-/** 读系统剪贴板里的文件/目录绝对路径（文件树右键「粘贴」与 Ctrl+V 共用；空数组 = 不是文件） */
+/** 读剪贴板里的文件/目录绝对路径（应用内文件剪贴板优先；空数组 = 不是文件） */
 export const readClipboardFilePaths = (): Promise<string[]> => a().readClipboardFilePaths()
 /** 请主进程对本窗口补发一次真实 paste（旧通道；文件树自 2026-10-20 起改用 readClipboardFilePaths） */
 export const pasteFromClipboard = (): Promise<{ ok: boolean }> => a().pasteFromClipboard()
@@ -423,8 +423,10 @@ export const workspaceWriteFile = (rootId: string, relPath: string, content: str
 export const workspaceCreateFile = (rootId: string, relPath: string, content?: string) => a().workspaceCreateFile(rootId, relPath, content)
 /** 创建副本：按字节复制仓库内文件（文本/二进制通吃）；重名主进程自动加后缀 */
 export const workspaceCopyFile = (rootId: string, srcRel: string, dstRel: string): Promise<{ ok: boolean; relPath?: string; renamed?: boolean; error?: string }> => a().workspaceCopyFile(rootId, srcRel, dstRel)
+/** 复制仓库内文件/目录到系统 + 应用内文件剪贴板（B-51）；渲染层只传相对路径 */
+export const workspaceCopyPathsToClipboard = (rootId: string, relPaths: string[]): Promise<{ ok: boolean; error?: string; count?: number }> => a().workspaceCopyPathsToClipboard(rootId, relPaths)
 export const workspaceMkdir = (rootId: string, relPath: string) => a().workspaceMkdir(rootId, relPath)
-/** 粘贴系统剪贴板里的外部文件/目录到 relDir（srcPaths 由 paste 事件侧取得，见 types） */
+/** 粘贴剪贴板里的外部文件/目录到 relDir（srcPaths 由主进程 clipboard:readFilePaths 读取） */
 export const workspacePasteExternal = (rootId: string, relDir: string, srcPaths: string[]) => a().workspacePasteExternal(rootId, relDir, srcPaths)
 export const workspaceRename = (rootId: string, oldRel: string, newRel: string) => a().workspaceRename(rootId, oldRel, newRel)
 export const workspaceTrash = (rootId: string, relPath: string) => a().workspaceTrash(rootId, relPath)

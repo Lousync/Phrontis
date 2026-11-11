@@ -341,7 +341,7 @@ ok(read('src/lib/ipc.ts').includes('readClipboardText'), 'C9c ipc 封装 readCli
 ok(read('src/types/index.ts').includes('readClipboardText'), 'C9d ElectronAPI 类型补齐')
 
 // ---- C10 渲染层样式 ----
-for (const cls of ['.kb-live-h1', '.kb-live-strong', '.kb-live-code', '.kb-live-quote', '.kb-live-img', '.kb-live-task', '.kb-live-codecard-lang', '.kb-live-math-block']) {
+for (const cls of ['.kb-live-h1', '.kb-live-strong', '.kb-live-code', '.kb-live-quote', '.kb-live-img', '.kb-live-task', '.kb-code-lang-chip', '.kb-code-plain', '.kb-live-math-block']) {
   ok(SRC_CSS.includes(cls), `C10 样式含 ${cls}`)
 }
 
@@ -350,7 +350,7 @@ for (const cls of ['.kb-live-h1', '.kb-live-strong', '.kb-live-code', '.kb-live-
 // 治理 = 「共享排版令牌 `--md-*`」+「共用原子作用域 `.kb-md-atom`」；运行时由
 // `.AGENT/scripts/notes-surface/compare-live-vs-preview.mjs` 逐项断言，这里锁源码层不漂。
 ok(SRC_CSS.includes('--md-h1-size'), 'C11a 共享排版令牌块存在（--md-*）')
-for (const tok of ['--md-h1-size', '--md-h2-size', '--md-code-bg', '--md-code-pad', '--md-pre-pad', '--md-table-pad', '--md-quote-pad-left', '--md-strong-weight', '--md-heading-line-height']) {
+for (const tok of ['--md-h1-size', '--md-h2-size', '--md-code-bg', '--md-code-pad', '--md-code-block-size', '--md-pre-pad', '--md-table-pad', '--md-quote-pad-left', '--md-strong-weight', '--md-heading-line-height']) {
   ok(SRC_CSS.includes(`var(${tok})`), `C11b 有规则消费 ${tok}`)
 }
 ok(/\.prose-content h1 \{[^}]*var\(--md-h1-size\)/.test(SRC_CSS), 'C11c 预览 h1 字号取自令牌')
@@ -369,6 +369,11 @@ ok(SRC_LIVE.includes("'kb-live-table-wrap kb-md-atom'") && SRC_LIVE.includes("'k
 ok(SRC_LIVE.includes("outer.className = 'kb-md-atom'"), 'C11l 代码块 widget 挂共用原子作用域')
 ok(SRC_LIVE.includes("from 'highlight.js/lib/common'"), 'C11m 代码高亮与预览同一个库（highlight.js）')
 ok(SRC_LIVE.includes('new CodeBlockWidget'), 'C11n 围栏代码块走卡片 widget（与预览同构 DOM）')
+ok(SRC_LIVE.includes("pre.className = this.lang ? 'kb-code-plain kb-thin-scroll' : 'kb-thin-scroll'"),
+  'C11n2 代码 widget 复用共享 pre 类（有语言才挂 kb-code-plain）')
+ok(SRC_LIVE.includes("tag.className = 'kb-code-lang-chip'"),
+  'C11n3 代码 widget 复用共享语言芯片（不再维护第二套标签样式）')
+ok(SRC_LIVE.includes('isControlKeyword'), 'C11n4 代码 widget 与预览共用控制流关键字判定')
 ok(SRC_LIVE.includes("['•', '○', '▪']"), 'C11o 无序列表按层换标记（• / ○ / ▪）')
 ok(SRC_LIVE.includes('[-*+]\\s+\\[[ xX]\\]'), 'C11p 任务行不再画项目符号（双标记修复）')
 ok(SRC_LIVE.includes("from '@codemirror/search'") && SRC_LIVE.includes('searchKeymap') && SRC_LIVE.includes('search({ top: true })'),

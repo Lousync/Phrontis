@@ -1,10 +1,13 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'http'
+import { createReadStream } from 'fs'
 import { randomUUID, randomInt } from 'crypto'
 import {
   MAX_BODY_BYTES, PAIR_ATTEMPTS_PER_MIN, PAIR_CODE_TTL_MS, PROTOCOL_VERSION, PULL_WAIT_CAP_MS, SYNC_DOMAINS,
-  normalizeLedgerData, normalizeScheduleData, normalizeNoteData, isTombstoneData, pairingCapabilities,
-  type LedgerItemData, type ScheduleItemData, type NoteItemData, type SyncDomain,
+  COMPANION_FEATURES,
+  normalizeLedgerData, normalizeScheduleData, normalizeNoteData, normalizeHabitData, normalizeHabitRecordData, isTombstoneData, pairingCapabilities,
+  type LedgerItemData, type ScheduleItemData, type NoteItemData, type HabitSyncData, type SyncDomain,
 } from './protocol.ts'
+import type { HandoffPdfEntry, UploadedPdfInfo } from './fileTransfer.ts'
 import { isPrivateAddress, generateToken, tokenMatches } from '../lanShare/auth.ts'
 
 /* 相对导入显式带 .ts：契约脚本以 node --experimental-strip-types 直跑本文件（零 electron 依赖）。 */
@@ -22,6 +25,9 @@ import { isPrivateAddress, generateToken, tokenMatches } from '../lanShare/auth.
  *   POST /api/unpair     双向解除（带令牌；手机侧解除配对 best-effort 调用，design.md §2.2）
  *   POST /api/sync/push  手机上行变更（域级 LWW 合并）
  *   POST /api/sync/pull  手机拉取服务端变更
+ *   GET  /api/files/tree     文件通道 v1：vault 内可交接的 PDF（只读，design.md §2.3）
+ *   GET  /api/files/content  文件通道 v1：按知识索引 id 流式下载 PDF
+ *   POST /api/files/upload   文件通道 v1：iPad 批注回传（只落 iPad 批注/ 副本，永不覆盖）
  *
  * 安全：来源 IP 限私有网段（127.0.0.1 供本机测试）+ 设备令牌 Bearer + 配对码限频。
  * 新路的安全边界是「桌面确认框」——服务常驻时陌生人扫到也无令牌可拿，必须本人在电脑上点允许。
@@ -58,6 +64,12 @@ export interface CompanionServerDeps {
   /** 已配对设备持久层（生产 = userData JSON；契约脚本 = 内存） */
   loadDevices(): CompanionDevice[]
   saveDevices(list: CompanionDevice[]): void
+  /**
+   * 当前是否打开了仓库（2026-11-09 实锤：无仓时 pull 返回空数组 + cursor=now，
+   * 手机把游标推到现在后，之后开仓也永远拉不到更旧的条目；push 写盘失败还会被手机出队）。
+   * fail-closed：无仓时 pull 直接拒绝（不带 cursor）、push 逐条回 reason:'no-vault'。
+   */
+  hasVault(): boolean
   /** 当前配对码（null = 未出示）；服务端只读，作废走 consumePairCode */
   getPairCode(): CompanionPairCode | null
   consumePairCode(): void
@@ -75,6 +87,8 @@ export interface CompanionServerDeps {
   applySchedule(item: { id: string; updatedAt: string; data: ScheduleItemData }): { applied: boolean; conflict?: boolean; reason?: string }
   /** notes 域写入（v1.6 LWW 裁决：incoming 严格更新才 applied；否则 conflict，手机以服务端版本收敛） */
   applyNote(item: { deviceId: string; deviceName: string; id: string; updatedAt: string; data: NoteItemData }): { applied: boolean; conflict?: boolean; reason?: string }
+  /** v1.8 habit 域写入：习惯定义与打卡记录共用（按 data.kind 分派；已含 LWW） */
+  applyHabit(item: { id: string; updatedAt: string; data: HabitSyncData }): { applied: boolean; conflict?: boolean; reason?: string }
   /** 删除同步（v1.1 墓碑）：手机上行 `data:{deleted:true}` 的变更。
    * 生产 = 查现行行做 LWW（删除比行 updatedAt 旧 → conflict 拒删）→ 删行（repo 内部 emit 墓碑）
    * → 无行时直接记墓碑（幂等）。
@@ -84,6 +98,8 @@ export interface CompanionServerDeps {
   listLedgerSince(sinceMs: number): Array<{ id: string; updatedAt: string; data: LedgerItemData }>
   /** schedule 域读取：updatedAt > sinceMs 的条目（含子任务行） */
   listScheduleSince(sinceMs: number): Array<{ id: string; updatedAt: string; data: ScheduleItemData }>
+  /** v1.8 habit 域读取：习惯定义 + 打卡记录（updatedAt > sinceMs） */
+  listHabitChangesSince(sinceMs: number): Array<{ id: string; updatedAt: string; data: HabitSyncData }>
   /**
    * v1.6 笔记 U 盘模式下行：该设备文件夹内桌面侧的增改（§4.2/§4.3）。
    * sinceMs ≤ 0 = 全量（冲突后重对 / 旧手机）；实现在生产 = 扫描设备文件夹 + 更新 notesState。
@@ -96,6 +112,21 @@ export interface CompanionServerDeps {
   listNoteTree(): Array<{ id: string; title: string; path: string; categoryId: string | null; mtimeMs: number; sizeBytes: number }>
   /** v1.2 内容 API：按 id 读正文（服务端解析路径；找不到/不可读返回 null → 404） */
   readNoteContent(id: string): { title: string; updatedAt: string; body: string; truncated?: boolean } | null
+  /**
+   * v1.9 文件通道 v1：vault 内可交接的 PDF（知识索引过滤；无仓 / 空 vault 返回 []）。
+   * 与 notes 域分开：`entryKind:'file'` 的 PDF 不进「电脑笔记」树。
+   */
+  listPdfFiles(): HandoffPdfEntry[]
+  /**
+   * v1.9 文件通道 v1：按知识索引 id 解析 PDF。
+   * 不存在 / 不是 PDF → 404；路径越界 / 符号链接逃逸 → 403。
+   */
+  openPdfFile(id: string): { ok: true; absPath: string; name: string; size: number } | { ok: false; status: 403 | 404 }
+  /**
+   * v1.9 文件通道 v1：流式接收 multipart，只写 `<vault>/iPad 批注/`。
+   * 失败时临时文件已清理；状态码由实现给出（400 / 409 / 413 / 415 / 500）。
+   */
+  savePdfUpload(req: IncomingMessage): Promise<{ ok: true; file: UploadedPdfInfo } | { ok: false; status: number; error: string }>
   /** 配对响应里的电脑名 */
   pcName(): string
   /** 配对链路修复 WP1：手机请求来源 IP 上报（生产 = 更新 lastClientIp 供地址推荐同 /24 优先；discover/pair/request/ping 三处） */
@@ -384,7 +415,13 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
 
       if (method === 'GET' && pathname === '/api/ping') {
         deps.onClientSeen?.(ip)
-        sendJson(res, 200, { ok: true, protocol: PROTOCOL_VERSION, pc: { name: deps.pcName() } })
+        sendJson(res, 200, {
+          ok: true,
+          protocol: PROTOCOL_VERSION,
+          pc: { name: deps.pcName() },
+          // v1.9 能力位：旧手机忽略；新手机在旧桌面（无此字段）时隐藏文件区，零破坏
+          features: [...COMPANION_FEATURES],
+        })
         return
       }
 
@@ -417,6 +454,65 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
         return
       }
 
+      // ----- v1.9 文件通道 v1（iPad 交接 / 批注回传，design.md §2.3）-----
+      // 只读清单 + 按 id 下载；客户端永不传路径，服务端经知识索引解析后过 safePathInside。
+      if (method === 'GET' && pathname === '/api/files/tree') {
+        sendJson(res, 200, { ok: true, generatedAt: Date.now(), files: deps.listPdfFiles() })
+        return
+      }
+      if (method === 'GET' && pathname === '/api/files/content') {
+        const qId = new URL(url, 'http://local').searchParams.get('id') || ''
+        const hit = qId ? deps.openPdfFile(qId) : null
+        if (!hit) {
+          deny(res, 404, '文件不存在或不是 PDF')
+          return
+        }
+        if (!hit.ok) {
+          deny(res, hit.status, hit.status === 403 ? '路径越界' : '文件不存在或不是 PDF')
+          return
+        }
+        res.writeHead(200, {
+          'content-type': 'application/pdf',
+          'content-length': hit.size,
+          'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(hit.name)}`,
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+          'access-control-allow-origin': '*',
+        })
+        const stream = createReadStream(hit.absPath)
+        // 客户端断开（手机切后台 / 取消下载）：及时释放 fd，别把服务拖死
+        res.on('close', () => { if (!res.writableEnded) stream.destroy() })
+        stream.on('error', () => res.destroy())
+        stream.pipe(res)
+        return
+      }
+      if (method === 'POST' && pathname === '/api/files/upload') {
+        const ct = String(req.headers['content-type'] || '')
+        if (!/^multipart\/form-data/i.test(ct)) {
+          deny(res, 400, '需要 multipart/form-data')
+          return
+        }
+        // 无仓 fail-closed：回传必须落到具体 vault 的 iPad 批注/
+        if (!deps.hasVault()) {
+          deny(res, 409, '电脑端尚未打开仓库')
+          return
+        }
+        void deps.savePdfUpload(req)
+          .then(r => {
+            if (res.writableEnded || res.destroyed) return
+            if (!r.ok) {
+              deny(res, r.status, r.error)
+              return
+            }
+            sendJson(res, 200, { ok: true, file: r.file })
+          })
+          .catch(e => {
+            console.error('[companion] file upload failed', e)
+            if (!res.writableEnded && !res.destroyed) deny(res, 500, '上传处理失败')
+          })
+        return
+      }
+
       if (method === 'POST' && pathname === '/api/sync/push') {
         void (async () => {
           const body = await readJsonBody(req) as { changes?: unknown }
@@ -426,6 +522,8 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
             const id = String(c.id ?? '')
             const domain = String(c.domain ?? '') as SyncDomain
             const updatedAt = String(c.updatedAt ?? '')
+            // 无仓 fail-closed：不应用、不出队（手机 RETRYABLE_PUSH_REASONS 会保留这条）
+            if (!deps.hasVault()) return { id, applied: false, reason: 'no-vault' }
             if (!id || !updatedAt) return { id, applied: false, reason: 'invalid-change' }
             if (!(SYNC_DOMAINS as readonly string[]).includes(domain)) {
               return { id, applied: false, reason: 'unsupported-domain' }
@@ -450,6 +548,20 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
                 if (!data) return { id, applied: false, reason: 'invalid-data' }
                 return toResult(deps.applySchedule({ id, updatedAt, data }))
               }
+              if (domain === 'habit') {
+                const kind = c.data && typeof c.data === 'object' ? (c.data as Record<string, unknown>).kind : ''
+                if (kind === 'habit') {
+                  const data = normalizeHabitData(c.data)
+                  if (!data) return { id, applied: false, reason: 'invalid-data' }
+                  return toResult(deps.applyHabit({ id, updatedAt, data }))
+                }
+                if (kind === 'record') {
+                  const data = normalizeHabitRecordData(c.data)
+                  if (!data) return { id, applied: false, reason: 'invalid-data' }
+                  return toResult(deps.applyHabit({ id, updatedAt, data }))
+                }
+                return { id, applied: false, reason: 'invalid-data' }
+              }
               if (domain === 'notes') {
                 const data = normalizeNoteData(c.data)
                 if (!data) return { id, applied: false, reason: 'invalid-data' }
@@ -471,6 +583,8 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
 
       if (method === 'POST' && pathname === '/api/sync/pull') {
         void (async () => {
+          // 无仓 fail-closed：绝不能返回空 changes + cursor=now（手机推游标后旧数据永久拉不回）
+          if (!deps.hasVault()) { deny(res, 409, '电脑端尚未打开仓库'); return }
           const body = await readJsonBody(req) as { since?: Record<string, unknown>; wait?: unknown }
           const since = body.since && typeof body.since === 'object' ? body.since : {}
           const sinceLedger = Number(since.ledger ?? 0)
@@ -478,12 +592,17 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
           // v1.6：旧手机不传 since.notes → 缺省 0 = 全量 notes（兼容矩阵 §4.2）
           const sinceNotesRaw = since.notes
           const sinceNotes = sinceNotesRaw === undefined ? 0 : Number(sinceNotesRaw)
+          // v1.8：旧手机不传 since.habit → 不返回 habit 变更、也不让 habit 游标影响墓碑过滤（零影响）
+          const sinceHabitRaw = since.habit
+          const hasHabitSince = sinceHabitRaw !== undefined
+          const sinceHabit = hasHabitSince ? Number(sinceHabitRaw) : 0
           const valid = (n: number): boolean => Number.isFinite(n)
           // 墓碑游标 = 各域游标取最小（手机对收到的墓碑按 id 幂等应用，多收无害、少收有害）
           const sinceTs = Math.min(
             valid(sinceLedger) ? sinceLedger : 0,
             valid(sinceSchedule) ? sinceSchedule : 0,
             valid(sinceNotes) ? sinceNotes : 0,
+            hasHabitSince && valid(sinceHabit) ? sinceHabit : Number.POSITIVE_INFINITY,
           )
 
           // v1.7 长轮询：wait 缺省/0/非法 = 旧行为立即返回（响应不带 waitSupported，手机据此探测旧桌面）
@@ -518,12 +637,13 @@ export function createCompanionServer(deps: CompanionServerDeps): CompanionServe
             ledger: valid(sinceLedger) ? deps.listLedgerSince(sinceLedger) : [],
             schedule: valid(sinceSchedule) ? deps.listScheduleSince(sinceSchedule) : [],
             notes: valid(sinceNotes) ? deps.listNotesSince({ deviceId: device.deviceId, deviceName: device.name }, sinceNotes) : [],
+            habit: hasHabitSince && valid(sinceHabit) ? deps.listHabitChangesSince(sinceHabit) : [],
           }
           sendJson(res, 200, {
             ok: true,
             changes,
             tombstones: deps.listTombstonesSince(sinceTs),
-            cursor: { ledger: now, schedule: now, notes: now },
+            cursor: { ledger: now, schedule: now, notes: now, habit: now },
             ...(waitMs > 0 ? { waitSupported: true } : {}),
           })
         })().catch(() => deny(res, 400, '请求体解析失败'))

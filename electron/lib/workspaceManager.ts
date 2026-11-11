@@ -22,6 +22,7 @@ import { bookMetaPruneOrphans } from 'phrontis-core/kbStore/vaultBookMetaRepo'
 import { globalReadJson, globalWriteJson } from 'phrontis-core/globalJsonStore'
 import { isAllowedClearRoot, trashVaultFolder } from './vaultDelete'
 import { rootDirName } from './aiTeachingFolders'
+import { writeClipboardFilePaths } from './clipboardFiles'
 
 /**
  * 编辑器工作区（Vault 仓库）文件服务。
@@ -1099,6 +1100,36 @@ export function registerWorkspaceHandlers(getSetting?: (key: string) => unknown)
       const finalRel = finalName === requestedName ? dstRel : dstRel.replace(/[^\\/]+$/, finalName)
       broadcastDataChanged('knowledge')
       return { ok: true, relPath: finalRel, renamed: finalName !== requestedName }
+    } catch (e) {
+      return { ok: false, error: (e as Error).message }
+    }
+  })
+
+  /**
+   * 复制仓库内文件/目录到系统剪贴板 + 应用内文件剪贴板（B-51，2026-11-09）。
+   *
+   * 渲染层只传 `{ rootId, relPaths }`；绝对路径由主进程 `requireInside` 解析并校验
+   * （符号链接 / 越界一律拒绝，铁律 3：渲染层不接触绝对路径）。应用内那份存在主进程
+   * 内存里，保证「AI 教学复制 → 工作台笔记区粘贴」这条跨模块链路不依赖平台剪贴板格式。
+   */
+  ipcMain.handle('ws:copyPathsToClipboard', (_e, rootId: string, relPaths: unknown) => {
+    try {
+      const list = Array.isArray(relPaths)
+        ? relPaths.filter((p): p is string => typeof p === 'string' && p.length > 0)
+        : []
+      if (list.length === 0) return { ok: false, error: '没有可复制的文件' }
+      if (list.length > MAX_PASTE_ITEMS) return { ok: false, error: `单次最多复制 ${MAX_PASTE_ITEMS} 项` }
+
+      const absPaths: string[] = []
+      for (const rel of list) {
+        const abs = requireInside(rootId, rel)
+        const st = lstatSync(abs) // lstat：不跟随符号链接（与粘贴侧同口径）
+        if (st.isSymbolicLink()) return { ok: false, error: '符号链接不可复制' }
+        absPaths.push(abs)
+      }
+      return writeClipboardFilePaths(absPaths)
+        ? { ok: true, count: absPaths.length }
+        : { ok: false, error: '没有可复制的文件' }
     } catch (e) {
       return { ok: false, error: (e as Error).message }
     }
