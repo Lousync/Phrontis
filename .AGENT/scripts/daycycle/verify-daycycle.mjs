@@ -96,8 +96,8 @@ function mixRgb(c1, c2, t) {
       .map(f => `t=${k.t}:${f}`))
   assert(missing.length === 0, 'A5 每帧字段齐全（含 ink 极性）', missing.join(', '))
 
-  // 深浅 crossover 必须压缩在 ≤15 分钟：背景线性过带时中间灰对任何极性文字都不达标，
-  // crossover 越宽，全天不可读时间越长（曾经黎明段掉到 1.1:1 持续约 40 分钟）
+  // 深浅 crossover 限制在 ≤15 分钟：UI 色板虽已改为翻板，但天空仍逐帧插值；
+  // 过带越宽，天空在暖调与深色之间的过渡越拖（曾经黎明段掉到 1.1:1 持续约 40 分钟）
   const wideCross = DAYCYCLE_KEYS
     .filter((k, i) => i > 0 && k.ink !== DAYCYCLE_KEYS[i - 1].ink && k.t - DAYCYCLE_KEYS[i - 1].t > 15)
     .map(k => `t=${DAYCYCLE_KEYS[DAYCYCLE_KEYS.indexOf(k) - 1].t}→${k.t}`)
@@ -129,30 +129,21 @@ function mixRgb(c1, c2, t) {
     const miss = REQUIRED_VARS.filter(k => !snap.vars[k])
     if (miss.length && varMiss === null) varMiss = `t=${minute}: ${miss.join(',')}`
 
-    // 过带窗口（背景 WCAG 亮度 0.15~0.34，即深浅 crossover 的 ~2 分钟）放宽下限：
-    // 文字极性已阶梯切换、背景连续插值，中间灰对任何极性都必然低于 4.0——
-    // 这是物理上不可避免的窄带，对齐真实黎明的视觉适应，见 docs/daycycle-theme-plan.md §2
+    // 中间灰带（背景 WCAG 亮度 0.15~0.34）：跨极性段现在直接取整侧 UI，
+    // 面板底色不应再落进这个区间（曾导致 19:05 正文 2.84 / 弱文字 1.07）。
     const bgL = relLum(snap.vars['--bg-primary'])
-    const inBand = bgL > 0.15 && bgL < 0.34
-    if (inBand) bandMinutes += 10
+    if (bgL > 0.15 && bgL < 0.34) bandMinutes += 10
 
     // 通透表面 composite：主内容 26% + 模块 58% ≈ 69% 不透明，背后 31% 天空。
-    // 用 sky.mid 近似（最亮的一段）；过带窗口与正文一样放宽（物理上不可避免）。
-    if (!inBand) {
-      const glassBg = mixRgb(snap.vars['--bg-primary'], snap.vars['--sky-mid'], 0.31)
-      const cGlass = contrast(snap.vars['--text-primary'], glassBg)
-      if (cGlass < 3.5) glassBad.push(`t=${formatMinute(minute)} glass=${cGlass.toFixed(2)}`)
-    }
+    // 用 sky.mid 近似（最亮的一段）；翻板后全天按同一标准验。
+    const glassBg = mixRgb(snap.vars['--bg-primary'], snap.vars['--sky-mid'], 0.31)
+    const cGlass = contrast(snap.vars['--text-primary'], glassBg)
+    if (cGlass < 3.5) glassBad.push(`t=${formatMinute(minute)} glass=${cGlass.toFixed(2)}`)
 
     const cBody = contrast(snap.vars['--text-primary'], snap.vars['--bg-primary'])
     const cMuted = contrast(snap.vars['--text-muted'], snap.vars['--bg-primary'])
     const cTitle = contrast(snap.vars['--tb-fg'], snap.vars['--sky-mid'])
-    // 带内只验正文（弱文字灰阶在中间灰背景上物理上必然 <1.0，辅助信息靠正文承载层次）
-    if (inBand) {
-      if (cBody < 2.3 || cTitle < 2.2) {
-        contrastBad.push(`t=${formatMinute(minute)} band body=${cBody.toFixed(2)} title=${cTitle.toFixed(2)}`)
-      }
-    } else if (cBody < 4.0 || cMuted < 2.0 || cTitle < 2.2) {
+    if (cBody < 4.0 || cMuted < 2.0 || cTitle < 2.2) {
       contrastBad.push(`t=${formatMinute(minute)} body=${cBody.toFixed(2)} muted=${cMuted.toFixed(2)} title=${cTitle.toFixed(2)}`)
     }
 
@@ -164,12 +155,26 @@ function mixRgb(c1, c2, t) {
   }
 
   assert(varMiss === null, 'B1 全时段 36 支变量齐全非空', varMiss)
-  assert(contrastBad.length === 0, 'B2 全时段对比度达标（正文≥4.0 弱文字≥2.0 顶栏≥2.2；过带窗口放宽）',
+  assert(contrastBad.length === 0, 'B2 全时段对比度达标（正文≥4.0 弱文字≥2.0 顶栏≥2.2）',
     contrastBad.slice(0, 3).join(' | '))
-  assert(glassBad.length === 0, 'B2b 通透表面 composite 正文对比度 ≥3.5（69% 不透明 + sky.mid 近似；过带窗口除外）',
+  assert(glassBad.length === 0, 'B2b 通透表面 composite 正文对比度 ≥3.5（69% 不透明 + sky.mid 近似）',
     glassBad.slice(0, 3).join(' | '))
-  console.log(`[OK] B2-info 过带窗口累计 ${bandMinutes} 分钟/天（采样粒度 10 分钟）`)
+  assert(bandMinutes === 0, 'B2a UI 色板全天不落中间灰带（跨极性直接取一侧，19:05 不再灰褐）',
+    `band=${bandMinutes} 分钟/天`)
   assert(wrapBad === null || wrapBad === '', 'B3 插值闭合：24:00 变量与 0:00 一致', wrapBad)
+
+  const nightBg = daycycleAt(1152).vars['--bg-primary']
+  assert(daycycleAt(1141).vars['--bg-primary'] === nightBg
+    && daycycleAt(1151).vars['--bg-primary'] === nightBg,
+    'B10 黄昏跨极性段直接取夜晚侧 UI（19:01 起不再插值灰褐）')
+  const dayBg = daycycleAt(366).vars['--bg-primary']
+  assert(daycycleAt(360).vars['--bg-primary'] === dayBg
+    && daycycleAt(365).vars['--bg-primary'] === dayBg,
+    'B11 黎明跨极性段直接取白天侧 UI（06:00 起翻板）')
+  const report = daycycleAt(1145)
+  const reportContrast = contrast(report.vars['--text-primary'], report.vars['--bg-primary'])
+  assert(reportContrast >= 4.0, 'B12 19:05 正文对比度 ≥4.0（用户报灰雾的时间点）',
+    `19:05=${reportContrast.toFixed(2)}`)
 
   // phase 边界抽查：段名切换点与 celestialAt 昼夜界（360/1140）不冲突
   const phases = new Set(phaseSeq)
@@ -235,6 +240,16 @@ function mixRgb(c1, c2, t) {
     'C13 专注模式降特效设置项 + 外观页锚点')
   assert(backdrop.includes('zenLevel >= 1') && backdrop.includes("phase === 'work'"),
     'C14 专注判定 = 禅模式 Z1/Z2 或番茄钟 work 阶段（休息阶段不降特效）')
+  assert(settingsSrc.includes('daycycleTimeOverride')
+    && appearance.includes('appearance.daycycleTime')
+    && appearance.includes('type="range"')
+    && engine.includes('setDaycycleTimeOverride')
+    && app.includes('setDaycycleTimeOverride('),
+    'C15 预览时间：设置项 + 外观页进度条 + 引擎 override + App 接线')
+  assert(/daycycleTimeOverride:\s*\{[^}]*ui:\s*false/.test(settingsSrc)
+    && appearance.includes('{import.meta.env.DEV && (')
+    && /if \(!import\.meta\.env\.DEV\) \{\s*setDaycycleTimeOverride\(null\)/.test(app),
+    'C16 预览时间仅开发版：ui:false 不进搜索 + 外观页 DEV 门卫 + 正式版强制 null')
 }
 
 // ===== D. 设置断言 =====
@@ -243,6 +258,8 @@ function mixRgb(c1, c2, t) {
   const settingsSrc = readFileSync(join(ROOT, 'src', 'lib', 'settings.ts'), 'utf8')
   assert(/THEME_OPTIONS = \[[\s\S]*daycycle/.test(settingsSrc), 'D1 THEME_OPTIONS 含 daycycle')
   assert(/theme:\s*\{\s*default:\s*'daycycle'/.test(settingsSrc), 'D2 theme 默认值为 daycycle（2026-11-07 用户拍板默认开启）')
+  assert(/daycycleTimeOverride:\s*\{\s*default:\s*-1/.test(settingsSrc),
+    'D3 预览时间默认 -1 = 跟随本机时间（显式冻结才写 0..1439）')
 }
 
 console.log(failures === 0 ? '\nPASS all daycycle checks' : `\nFAIL ${failures} check(s)`)

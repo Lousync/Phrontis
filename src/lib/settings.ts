@@ -123,6 +123,11 @@ export const SETTINGS = {
   // 昼夜动态 · 专注模式降特效（2026-11-11）：禅模式 Z1/Z2 或番茄钟专注阶段，降低云 / 星 / 粒子强度，
   // 天空与天体保留。仅 daycycle 主题下在 AppearanceView 显示。
   daycycleFocusDim: { default: true, type: 'toggle', label: '专注模式降低特效', group: '主题', desc: '进入禅模式（Z1 / Z2）或番茄钟专注阶段时，自动降低昼夜背景的云、星空与粒子强度（天空和太阳 / 月亮保留）', keywords: ['昼夜', '专注', '禅模式', '番茄钟', '特效', '强度', 'daycycle', 'focus', 'zen'], section: 'appearance', ui: true, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.daycycleFocusDim' },
+  // 昼夜动态 · 预览时间（2026-11-13，★ 仅开发版）：把主题冻结在指定分钟，便于检查黄昏 / 黎明等任意时段。
+  // -1 = 跟随本机时间。引擎通过 setDaycycleTimeOverride() 立即应用，设置值只负责跨重启记忆。
+  // ui:false = 不进设置搜索；正式版 AppearanceView 用 import.meta.env.DEV 门卫不渲染，
+  // App.tsx 的 override effect 在正式版强制传 null（dev 的 settings.json 带过去也不会冻住主题）。
+  daycycleTimeOverride: { default: -1, type: 'number', label: '昼夜主题预览时间', group: '主题', desc: '把昼夜动态主题冻结在指定时刻（-1 = 跟随本机时间）；拖动滑块即可检查任意时段的天空、暖光与文字可读性', keywords: ['昼夜', '时间', '预览', '定格', '冻结', '黄昏', '黎明', 'daycycle', 'time', 'preview'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live', anchor: 'appearance.daycycleTime', min: -1, max: 1439, step: 1 },
   // 主题氛围特效（2026-09-27）：只在激活主题声明了 --theme-fx 时由 AppearanceView 条件渲染（ui:false = 不进搜索/通用渲染，见 docs/theme-fx-design.md §4.3）
   themeFxEnabled: { default: true, type: 'toggle', label: '主题特效', group: '主题', desc: '四季主题的氛围粒子特效（工作台 / 看板）：樱瓣 / 光束 / 落叶 / 雪', keywords: ['特效', '主题特效', '粒子', '氛围', 'theme fx'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },
   themeFxDensity: { default: 'mid', type: 'select', label: '粒子密度', group: '主题', desc: '氛围特效的粒子密度：疏 / 中 / 密（需主题特效开启）', keywords: ['密度', '粒子', '特效', 'density'], section: 'appearance', ui: false, scope: 'global', level: 'normal', affects: 'live' },

@@ -11,8 +11,9 @@
  *   （关键帧完整性 / 全时段对比度扫描），改本文件必须重跑该脚本。
  *
  * 设计要点（改前先读）：
- * - 黎明(330) / 暮色(1155) 是自成体系的中间主题（浅色文字）——深浅切换各经一次
- *   有设计感的交叉淡化，不路过「脏灰区」；不要把这两帧删掉改成硬翻。
+ * - 黎明(330) / 暮色(1155) 仍是天空的中间主题；但 UI 色板在跨极性段直接取一侧
+ *   （06:00 / 19:00 翻板），不再做奶油 ↔ 深紫黑的线性插值——那条路必然路过灰褐，
+ *   会让文字在 19:05 前后失去对比度（2026-11-13 修复）。
  * - 太阳 = 白热核心 + 连续 bloom 渐变（sunBloom，8 档非线性衰减），
  *   不要改回 box-shadow 圆环——那是贴纸感的来源（2026-11-07 用户两轮否掉）。
  */
@@ -56,16 +57,6 @@ function mixNum(a: number, b: number, t: number): number {
 function luminance(c: string): number {
   const p = parseColor(c)
   return 0.2126 * p.r + 0.7152 * p.g + 0.0722 * p.b
-}
-
-/** WCAG 相对亮度（0..1）——文字极性切换阈值用它，和对比度公式同尺度 */
-function wcagRelLum(c: string): number {
-  const p = parseColor(c)
-  const lin = (v: number): number => {
-    const s = v / 255
-    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
-  }
-  return 0.2126 * lin(p.r) + 0.7152 * lin(p.g) + 0.0722 * lin(p.b)
 }
 
 // ===== 关键帧 =====
@@ -245,8 +236,25 @@ export function daycycleAt(minute: number): DaycycleSnapshot {
 
   const sky = {} as Record<keyof DcSky, string>
   for (const k of Object.keys(a.sky) as (keyof DcSky)[]) sky[k] = mixColor(a.sky[k], b.sky[k], t)
+
+  // 文字极性（ink）与 UI 色板在跨极性段**不做线性插值**。
+  // 奶油色 ↔ 深紫黑之间做 12 分钟插值，必然路过灰褐：文字极性切换的那几分钟，
+  // 面板底色和文字一起落在中间灰（2026-11-13 用户报 19:05~19:07「蒙了一层雾」，
+  // 实测正文对比度 2.84、弱文字 1.07）。规则改为：跨极性段按太阳是否在地平线上
+  // 直接取**整侧** UI（白天侧 / 夜晚侧），面板在 06:00 / 19:00 翻板；
+  // 天空仍按关键帧插值，晨昏暖光渐变保留。同极性段照常逐分钟插值。
+  const crossover = a.ink !== b.ink
+  const sunUp = minute >= DAY_START && minute < DAY_END
+  const dayUi = a.ink === 'dark' ? a.ui : b.ui
+  const nightUi = a.ink === 'light' ? a.ui : b.ui
+  const poleUi = crossover ? (sunUp ? dayUi : nightUi) : null
+
   const ui = {} as Record<keyof DcUi, string | number>
   for (const k of Object.keys(a.ui) as (keyof DcUi)[]) {
+    if (poleUi) {
+      ui[k] = poleUi[k]
+      continue
+    }
     const va = a.ui[k]
     const vb = b.ui[k]
     // va/vb 同字段同型（number 或 hex 字符串）；先收窄再进对应混色函数
@@ -259,25 +267,17 @@ export function daycycleAt(minute: number): DaycycleSnapshot {
   const bg = ui.bg as string
   const bg2 = ui.bg2 as string
 
-  // 文字极性（ink）绝不线性插值：深浅 crossover 时背景会路过中间灰，
-  // 文字跟着插值 = 双双掉进灰区（对比度可低至 1.1，契约曾抓出）。
-  // 规则：同极性段正常插值；跨极性段按插值后背景的 WCAG 亮度选**当前可读的极性**
-  //（方向无关——黎明与黄昏两个方向共用同一条规则）。过带窗口 ~2 分钟内
-  // 弱文字对比短暂偏低，契约对带内放宽并如实统计。
   let t1: string
   let t2v: string
   let t3v: string
-  if (a.ink === b.ink) {
+  if (poleUi) {
+    t1 = poleUi.t1
+    t2v = poleUi.t2
+    t3v = poleUi.t3
+  } else {
     t1 = mixColor(a.ui.t1, b.ui.t1, t)
     t2v = mixColor(a.ui.t2, b.ui.t2, t)
     t3v = mixColor(a.ui.t3, b.ui.t3, t)
-  } else {
-    const darkPole = a.ink === 'dark' ? a.ui : b.ui
-    const lightPole = a.ink === 'light' ? a.ui : b.ui
-    const pole = wcagRelLum(bg) > 0.30 ? darkPole : lightPole
-    t1 = pole.t1
-    t2v = pole.t2
-    t3v = pole.t3
   }
   const t3 = t3v
   // 顶栏前景由天空亮度推导（黄昏 / 夜晚浅字，白天深字），不写死

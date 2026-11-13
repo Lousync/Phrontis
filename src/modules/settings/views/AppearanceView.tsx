@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Sun, Moon, Flame } from 'lucide-react'
 import { useSettings } from '../../../lib/SettingsContext'
 import { THEME_OPTIONS, BLOG_SIZE_OPTIONS, KNOWLEDGE_SIDEBAR_SIZE_OPTIONS, applyThemeClass } from '../../../lib/settings'
+import { formatMinute, phaseFor } from '../../../lib/daycycleTheme'
+import { setDaycycleTimeOverride } from '../../../lib/daycycleEngine'
 import { PluginIcon, IconPreview } from '../../../components/shared/ModuleIcons'
 import { ensurePluginThemeStyles, type PluginThemeWithVars } from '../../../lib/pluginService'
 import { readFxKind, type ThemeFxKind } from '../../../components/shared/ThemeFxLayer'
@@ -23,6 +25,9 @@ export function AppearanceView() {
   const { s, update } = useSettings()
   const [pluginThemes, setPluginThemes] = useState<PluginThemeWithVars[]>([])
   const [eggInput, setEggInput] = useState('')
+  // 昼夜主题预览时间：拖动时只更新引擎（立即看到效果），松手 / 失焦 / 按键结束才落盘，
+  // 避免 range 的每次 input 都走一次 settings IPC 写文件。
+  const [timeDraft, setTimeDraft] = useState<number | null>(null)
   // 彩蛋:输入正确口令激活角标;输入其他值确认则还原(隐式开关),界面无任何标注
   const applyEgg = () => { update('badgeEggActivated', eggInput === 'YHAz'); setEggInput('') }
   const pluginIconPacks = usePluginIconPacks()
@@ -78,6 +83,29 @@ export function AppearanceView() {
     { id: 'high', label: '密' },
   ] as const
 
+  // 昼夜主题预览时间：-1 = 跟随本机时间；拖动时用 draft 立即反馈，松手才写设置。
+  // 存量 settings.json 没有该键时按 -1（实时）处理，避免 range 的 value 变成 undefined。
+  const nowMinute = (): number => {
+    const d = new Date()
+    return d.getHours() * 60 + d.getMinutes()
+  }
+  const timeOverride = typeof s.daycycleTimeOverride === 'number' ? s.daycycleTimeOverride : -1
+  const timeLive = timeOverride < 0
+  const shownMinute = timeDraft ?? (timeLive ? nowMinute() : timeOverride)
+  const previewDaycycleTime = (minute: number): void => {
+    setTimeDraft(minute)
+    setDaycycleTimeOverride(minute)
+  }
+  const commitDaycycleTime = (minute: number): void => {
+    setTimeDraft(null)
+    update('daycycleTimeOverride', minute)
+  }
+  const followRealTime = (): void => {
+    setTimeDraft(null)
+    setDaycycleTimeOverride(null)
+    update('daycycleTimeOverride', -1)
+  }
+
   return (
     <div>
       <h2 className="text-[15px] font-medium text-[var(--text-primary)] mb-1">外观</h2>
@@ -121,6 +149,59 @@ export function AppearanceView() {
               </button>
             ))}
           </div>
+
+          {/* 预览时间仅开发版：正式版不渲染（连同下面的容器一起被 DEV 门卫包住） */}
+          {import.meta.env.DEV && (
+          <div
+            className="mt-5 pt-4 border-t border-[var(--border-color)]"
+            data-setting-anchor="appearance.daycycleTime"
+          >
+            <div className="flex items-baseline justify-between gap-3 max-w-md">
+              <p className="text-[12px] text-[var(--text-primary)]">预览时间</p>
+              <p className="text-[11px] text-[var(--text-muted)] tabular-nums">
+                {formatMinute(shownMinute)} · {phaseFor(shownMinute)}
+                {timeLive && timeDraft === null && (
+                  <span className="ml-1.5 text-[10px] text-[var(--accent)]">实时</span>
+                )}
+              </p>
+            </div>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1 mb-2.5">
+              拖动可把昼夜主题冻结在任意时刻，检查黄昏、黎明等时段的天空暖光与文字可读性；点「跟随实时」恢复。
+            </p>
+            <div className="flex items-center gap-3 max-w-md">
+              <input
+                type="range"
+                min={0}
+                max={1439}
+                step={1}
+                value={shownMinute}
+                onChange={(e) => previewDaycycleTime(Number(e.target.value))}
+                onPointerUp={(e) => commitDaycycleTime(Number(e.currentTarget.value))}
+                onKeyUp={(e) => {
+                  if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') {
+                    commitDaycycleTime(Number(e.currentTarget.value))
+                  }
+                }}
+                onBlur={(e) => {
+                  if (timeDraft !== null) commitDaycycleTime(Number(e.currentTarget.value))
+                }}
+                className="min-w-0 flex-1 accent-[var(--accent)] cursor-pointer"
+                aria-label="昼夜主题预览时间"
+              />
+              <button
+                onClick={followRealTime}
+                disabled={timeLive && timeDraft === null}
+                className={`px-2.5 py-1.5 rounded text-[11px] border transition-colors ${
+                  timeLive && timeDraft === null
+                    ? 'border-[var(--border-color)] text-[var(--text-muted)] cursor-default'
+                    : 'border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'
+                }`}
+              >
+                跟随实时
+              </button>
+            </div>
+          </div>
+          )}
         </div>
       )}
 

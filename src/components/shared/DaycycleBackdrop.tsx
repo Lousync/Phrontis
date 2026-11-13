@@ -224,7 +224,7 @@ const DaycycleBackdrop = memo(function DaycycleBackdrop({ focus }: BackdropProps
 
       {size.w > 0 && (
         <div
-          className={`kb-dc-bd-celestial${minuteChanged ? ' is-moving' : ''}`}
+          className={`kb-dc-bd-celestial${minuteChanged && !tick.instant ? ' is-moving' : ''}`}
           style={{ transform: `translate3d(${xPx.toFixed(2)}px, ${yPx.toFixed(2)}px, 0)` }}
         >
           {isNight ? <div className="kb-dc-bd-moon" /> : <div className="kb-dc-bd-sun" />}

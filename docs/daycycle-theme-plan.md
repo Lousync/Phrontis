@@ -1,6 +1,7 @@
 # 昼夜动态主题（原生）技术方案
 
-> **状态**：方案定稿 + 落码（2026-11-07）；**2026-11-11 升级为「沉浸天空 + 通透」**（用户拍板，已落码）。
+> **状态**：方案定稿 + 落码（2026-11-07）；**2026-11-11 升级为「沉浸天空 + 通透」**（用户拍板，已落码）；
+> **2026-11-13 修复黄昏灰褐带 + 增加预览时间设置（仅开发版）**（UI 色板 06:00 / 19:00 翻板，天空仍渐变）。
 > 来源：v3.19.0 反馈 N-2（顶栏昼夜主题）→ 用户体验 v2 原型后升级为**整窗动态主题**并拍板「作为原生动态主题」。
 > 原型（参数与质感基准，全部已定稿）：`tmp/titlebar-daycycle-proto/index.html`（v2）；
 > 全窗沉浸原型（2026-11-11 对比稿）：`tmp/daycycle-background-proto/index.html`（v3）。
@@ -24,6 +25,11 @@
 - **专注模式**：`daycycleFocusDim`（设置 → 外观 → 昼夜背景）。禅模式（Z1 / Z2）或番茄钟专注阶段时，
   `DaycycleBackdrop` 加 `is-focus`，`--dc-fx-scale` 压到 0.3、wash 压到 0.55；
   天空与太阳 / 月亮保留，只降云 / 星 / 粒子。设置关闭则始终全强度。
+- **预览时间（2026-11-13，仅开发版）**：设置 → 外观 → 昼夜背景新增 `daycycleTimeOverride`（默认 -1 = 跟随本机时间）。
+  拖动进度条把主题冻结在任意分钟，方便检查黄昏 / 黎明的暖光与文字可读性；引擎 `setDaycycleTimeOverride()`
+  立即重算并下发带 `instant` 的 tick，天体跳过 60s 慢移。滑块拖动过程只改引擎，松手 / 失焦才写设置。
+  **正式版不出现**：`AppearanceView` 用 `import.meta.env.DEV` 门卫，`SETTINGS` 里 `ui:false` 不进设置搜索，
+  `App.tsx` 在正式版强制传 `null`（dev 的 settings.json 被带过去也不会冻住主题）。
 - **动效边界**：天体仍只动 `transform`（60s linear 过渡）；云 / 星 / 极光 / 粒子 / 流星全部
   `transform` / `opacity`，`prefers-reduced-motion` 全停。持续动画已登记 `docs/ui-animation-plan.md` §七。
 - **性能取舍**：主内容面通透但不加 `backdrop-filter`（大窗口下开销高）；只有左右侧栏 / 活动栏
@@ -59,7 +65,10 @@
 | 1155 | 暮色 | **中间主题**（plum 暮调，浅色文字） |
 | 1260 | 夜晚 | dark |
 
-深浅切换不硬翻：黎明 / 暮色各为自成体系的中间主题（浅色文字），交叉淡化不路过脏灰区。
+深浅切换：**天空**保留 12 分钟渐变（黎明 / 暮色仍是自成体系的暖调），但 **UI 色板不做跨极性插值**。
+奶油色 ↔ 深紫黑线性插值必然路过灰褐；文字极性切换的那几分钟，面板与文字会一起落在中间灰
+（2026-11-13 用户报 19:05~19:07「蒙了一层雾」，实测正文对比度 2.84、弱文字 1.07）。
+现在跨极性段按太阳是否在地平线上直接取**整侧** UI（白天侧 / 夜晚侧），面板在 06:00 / 19:00 翻板。
 太阳 = 白热核心 + 单条连续 bloom 渐变（8 档非线性衰减，指数曲线，**不用 box-shadow 圆环**——那是贴纸感的来源，参考 Apple Weather / SF Symbols 画法）+ 极淡水平眩光；月亮 = 实体球 + 月面阴影。两弧线 06:00 / 19:00 交接位置连续。
 
 ## 3. 文件清单
@@ -116,9 +125,9 @@
 `node --experimental-strip-types` 直接 import 纯函数，跑四类断言：
 
 1. **关键帧完整性**：t 严格递增、首帧 t=0 末帧 t=1440、0:00 与 24:00 色板一致（闭合）、每帧必含全部令牌字段；
-2. **全时段扫描**（每 10 分钟采样 144 点）：`daycycleAt` 36 支变量齐全非空；WCAG 对比度——text-primary/bg-primary ≥ 4.0、text-muted/bg-primary ≥ 2.0、`--tb-fg`/sky.mid ≥ 2.2；通透表面 composite（69% 不透明 + sky.mid 近似）正文 ≥ 3.5；phase 边界单调；
+2. **全时段扫描**（每 10 分钟采样 144 点）：`daycycleAt` 36 支变量齐全非空；WCAG 对比度——text-primary/bg-primary ≥ 4.0、text-muted/bg-primary ≥ 2.0、`--tb-fg`/sky.mid ≥ 2.2；通透表面 composite（69% 不透明 + sky.mid 近似）正文 ≥ 3.5；**面板底色全天不落 0.15~0.34 中间灰带**；06:00 / 19:00 跨极性翻板与 19:05 正文对比度 ≥ 4.0；phase 边界单调；
 3. **接线断言**（grep）：TitleBar 含 `TitleBarDaycycle` 与 `no-drag` 胶囊；`DaycycleBackdrop` 含 `kb-dc-backdrop` 与 tick 监听；App.tsx 引擎 start/stop + `<DaycycleBackdropHost>` 接线；index.css 含 `html.theme-daycycle` 兜底块、整窗层 `pointer-events:none`、通透表面覆盖与 reduced-motion 降级；
-4. **设置断言**：THEME_OPTIONS 含 daycycle、默认值为 daycycle；`daycycleFocusDim` 与外观页锚点存在。
+4. **设置断言**：THEME_OPTIONS 含 daycycle、默认值为 daycycle；`daycycleFocusDim` 与外观页锚点存在；`daycycleTimeOverride` 默认 -1、外观页进度条、引擎 override 与 App 接线存在，且**仅开发版**（DEV 门卫 + `ui:false`）。
 
 ## 7. 验收清单（实机）
 

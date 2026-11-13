@@ -21,7 +21,7 @@ import { WorkbenchEmptyState, type WorkbenchHint } from './components/workbench/
 import { CodePluginHosts } from './components/shared/CodePluginHosts'
 import { Toast } from './components/shared/Toast'
 import { FONT_CSS_MAP, applyThemeClass } from './lib/settings'
-import { startDaycycleEngine, stopDaycycleEngine } from './lib/daycycleEngine'
+import { setDaycycleTimeOverride, startDaycycleEngine, stopDaycycleEngine } from './lib/daycycleEngine'
 import { useSettings } from './lib/SettingsContext'
 import { isEditingInput, allowsWorkbenchShortcut } from './lib/shortcuts'
 import { registerSelectionAskHost, type SelectionAskHost } from './lib/assistantContext'
@@ -768,6 +768,20 @@ export default function App() {
     }
     stopDaycycleEngine()
   }, [s.theme, settingsReady])
+
+  // 昼夜主题预览时间（设置 → 外观 → 昼夜背景）：-1 = 跟随本机时间，其余 = 冻结在指定分钟。
+  // 单独一条 effect：拖动进度条只调 setDaycycleTimeOverride 立即重算，不重启引擎定时器。
+  // ★ 仅开发版：正式版忽略持久化值（dev 的 settings.json 带到正式版也不会把主题冻住）。
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      setDaycycleTimeOverride(null)
+      return
+    }
+    if (!settingsReady || s.theme !== 'daycycle') return
+    // 存量用户 settings.json 里没有这个键（getAll 只回缓存、不补默认值），undefined 必须按实时处理
+    const override = s.daycycleTimeOverride
+    setDaycycleTimeOverride(typeof override === 'number' && override >= 0 ? override : null)
+  }, [s.theme, s.daycycleTimeOverride, settingsReady])
 
   // Apply persisted settings on first render — 必须等真实设置加载完成,否则会用默认值覆盖一次
   useEffect(() => {
